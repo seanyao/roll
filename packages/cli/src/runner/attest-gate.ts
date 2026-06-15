@@ -239,26 +239,51 @@ function parseScreenshotExemptEpics(yaml: string): string[] {
 }
 
 /**
- * FIX-305 / FIX-309 — the web page a card's attest should CAPTURE a real
- * screenshot of. An explicit override (e.g. a deployed product page set by the
- * Gate via `ROLL_ATTEST_WEB_URL`) wins; otherwise the card's rendered dossier
- * story page (`features/<epic>/<ID>/index.html`) is the always-present, real
- * rendered HTML to shoot through the FIX-291 ladder.
+ * FIX-321 — the DELIVERABLE web surface a card's attest should screenshot. The
+ * screenshot must prove the thing the card delivers (the Casting page, a rendered
+ * product view, …), NEVER the card's own dossier/report page — that is
+ * self-referential, identical for every card, and proves nothing (the "screenshot
+ * forgery" defect: every card's web.png was byte-identical, a shot of its own
+ * STORY DOSSIER page). The dossier fallback is DELETED.
  *
- * FIX-309 makes a screenshot the BASELINE for every story, so a web capture is
- * owed for EVERY non-exempt story — the rendered dossier page is the
- * always-present surface every card can shoot ("能截则截"). For a genuine CLI/TUI
- * card the terminal capture is the PRIMARY surface (driven separately via the
- * evidence captures / honest machine-skip lane); the dossier page here is the
- * always-available baseline visual on top of that. Returns null ONLY when the
- * story is EXPLICITLY exempted (`screenshot_exempt` / a non-visual epic) — then
- * no captured evidence is owed at all.
+ * Precedence: env override (`ROLL_ATTEST_WEB_URL` / a Gate-set deploy url) >
+ * the card's DECLARED `deliverable_url` (frontmatter; alias `screenshot_url`) >
+ * NULL. http(s) ⇒ a deployed surface; a relative path ⇒ a built artifact under
+ * the worktree (file://); the literal `dossier` is an explicit opt-in for the rare
+ * card whose deliverable genuinely IS its dossier page. When nothing is declared,
+ * returns null — the caller records an HONEST web-capture skip (taken:false) so
+ * the visual floor stays satisfiable (hasMachineCaptureSkip) without a hollow
+ * filler; the screenshot baseline is then owed via a declared target, never faked.
+ * Returns null too when the story is exempt (no captured evidence owed at all).
+ * NOTE: terminal/TUI deliverables ride the separate capture.fromMarker lane —
+ * deliverable_url is web-only; never force a web url onto a terminal card.
  */
+export function deliverableUrlForStory(worktreeCwd: string, storyId: string): string | null {
+  const spec = storySpecPath(worktreeCwd, storyId);
+  if (spec === null) return null;
+  let text: string;
+  try {
+    text = readFileSync(spec, "utf8");
+  } catch {
+    return null;
+  }
+  const fm = /^---\n([\s\S]*?)\n---/.exec(text);
+  if (fm === null) return null;
+  const m = /^(?:deliverable_url|screenshot_url):\s*(.+)$/m.exec(fm[1] ?? "");
+  if (m === null) return null;
+  const v = stripQuotes((m[1] ?? "").trim());
+  return v === "" ? null : v;
+}
+
 export function webCaptureTargetForStory(worktreeCwd: string, storyId: string, override?: string): string | null {
-  if (!storyRequiresScreenshot(worktreeCwd, storyId)) return null;
+  if (!storyRequiresScreenshot(worktreeCwd, storyId)) return null; // exempt → no web capture owed
   const trimmed = (override ?? "").trim();
-  if (trimmed !== "") return trimmed;
-  return pathToFileURL(join(cardArchiveDir(worktreeCwd, storyId), "index.html")).href;
+  if (trimmed !== "") return trimmed; // env / deploy override wins
+  const declared = deliverableUrlForStory(worktreeCwd, storyId);
+  if (declared === null) return null; // FIX-321: NO dossier fallback — caller records an honest skip
+  if (declared === "dossier") return pathToFileURL(join(cardArchiveDir(worktreeCwd, storyId), "index.html")).href;
+  if (/^(?:https?|file):\/\//i.test(declared)) return declared;
+  return pathToFileURL(join(worktreeCwd, declared)).href; // relative → built artifact under the worktree
 }
 
 interface AcMapEvidence {

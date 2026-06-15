@@ -119,7 +119,7 @@ import {
   realAgentSpawn,
 } from "./agent-spawn.js";
 import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, runPeerGate } from "./peer-gate.js";
-import { readAttestGateMode, runAttestGate, verificationReportPath, webCaptureTargetForStory } from "./attest-gate.js";
+import { readAttestGateMode, runAttestGate, storyRequiresScreenshot, verificationReportPath, webCaptureTargetForStory } from "./attest-gate.js";
 import { recoverCodexUsage, recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
 import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, autoAttachScreenshotToAcMap, buildAcMapRemediationPrompt, needsAcMapRemediation } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
@@ -2323,7 +2323,16 @@ export function nodePorts(opts: {
           // never pops a GUI browser — headless Chromium is the only web lane in
           // an unattended cycle.
           const webTarget = webCaptureTargetForStory(projectCwd, storyId, process.env["ROLL_ATTEST_WEB_URL"]);
-          const webArgs = webTarget !== null ? ["--capture-web", webTarget] : [];
+          // FIX-321: capture the DECLARED deliverable surface; if a required story
+          // declares none, record an HONEST web skip (no hollow dossier shot) so
+          // the visual floor stays satisfiable without faking evidence. Exempt
+          // stories owe no web capture at all.
+          const webArgs =
+            webTarget !== null
+              ? ["--capture-web", webTarget]
+              : storyRequiresScreenshot(projectCwd, storyId)
+                ? ["--capture-web-skip", "no deliverable_url declared (set deliverable_url in the spec frontmatter or ROLL_ATTEST_WEB_URL)"]
+                : [];
           return await attestCommand([storyId, "--run-dir", runDir, ...webArgs], {
             capture: { env: { ...process.env, ROLL_ATTEST_HEADLESS: "1" } },
           });

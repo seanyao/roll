@@ -385,30 +385,36 @@ describe("FIX-305 — webCaptureTargetForStory: drive a real screenshot for UI/d
     return wt;
   }
 
-  it("UI/web card → the rendered dossier index.html (file://) is the page to shoot", () => {
+  it("FIX-321: no override + no declared deliverable_url → null (NEVER the dossier — the hollow fallback is deleted)", () => {
+    // The defect: every card's web.png was a shot of its OWN story-dossier page
+    // (self-referential, identical, proves nothing). The dossier fallback is gone.
     const wt = withSpec("FIX-WEB", "# FIX-WEB\n\n**AC:**\n- [ ] the web casting page renders\n");
-    const target = webCaptureTargetForStory(wt, "FIX-WEB");
-    expect(target).not.toBeNull();
-    expect(target).toMatch(/^file:\/\//);
-    expect(target).toContain("FIX-WEB/index.html");
+    expect(webCaptureTargetForStory(wt, "FIX-WEB")).toBeNull();
   });
 
-  it("an explicit deployed-url override wins over the dossier page", () => {
-    const wt = withSpec("FIX-WEB", "# FIX-WEB\n\n**AC:**\n- [ ] the web casting page renders\n");
+  it("FIX-321: an env/deploy override wins; a blank override does NOT fall back to the dossier", () => {
+    const wt = withSpec("FIX-WEB", "# FIX-WEB\n\n**AC:**\n- [ ] renders\n");
     expect(webCaptureTargetForStory(wt, "FIX-WEB", "https://app.test/casting")).toBe("https://app.test/casting");
-    // a blank/whitespace override is ignored — falls back to the dossier page
-    expect(webCaptureTargetForStory(wt, "FIX-WEB", "   ")).toContain("FIX-WEB/index.html");
+    expect(webCaptureTargetForStory(wt, "FIX-WEB", "   ")).toBeNull();
   });
 
-  it("FIX-309: a non-UI card still owes a baseline web capture (能截则截) — the dossier page", () => {
-    // FIX-309 makes a screenshot the baseline for EVERY story: a "no-keyword"
-    // card (the FIX-284 leak shape) now still gets the always-present dossier
-    // page to shoot, instead of being silently exempted by keyword absence.
-    const wt = withSpec("FIX-CORE", "# FIX-CORE\n\n**AC:**\n- [ ] the parser handles empty input\n");
-    expect(webCaptureTargetForStory(wt, "FIX-CORE")).toContain("FIX-CORE/index.html");
+  it("FIX-321: a declared deliverable_url is the target — http(s) as-is, relative → file:// under the worktree, `dossier` explicit opt-in", () => {
+    const http = withSpec("FIX-A", "---\nid: FIX-A\ndeliverable_url: https://app.test/casting\n---\n# FIX-A\n\n**AC:**\n- [ ] x\n");
+    expect(webCaptureTargetForStory(http, "FIX-A")).toBe("https://app.test/casting");
+    const rel = withSpec("FIX-B", "---\nid: FIX-B\ndeliverable_url: web/casting.html\n---\n# FIX-B\n\n**AC:**\n- [ ] x\n");
+    const t = webCaptureTargetForStory(rel, "FIX-B");
+    expect(t).toMatch(/^file:\/\//);
+    expect(t).toContain("web/casting.html");
+    const dossier = withSpec("FIX-C", "---\nid: FIX-C\ndeliverable_url: dossier\n---\n# FIX-C\n\n**AC:**\n- [ ] x\n");
+    expect(webCaptureTargetForStory(dossier, "FIX-C")).toContain("FIX-C/index.html"); // dossier only by explicit opt-in
   });
 
-  it("FIX-309: an EXPLICITLY-exempted card owes no web capture → null", () => {
+  it("FIX-321: the screenshot_url alias also works", () => {
+    const wt = withSpec("FIX-AL", "---\nid: FIX-AL\nscreenshot_url: https://app.test/x\n---\n# FIX-AL\n\n**AC:**\n- [ ] x\n");
+    expect(webCaptureTargetForStory(wt, "FIX-AL")).toBe("https://app.test/x");
+  });
+
+  it("FIX-309/321: an EXPLICITLY-exempted card owes no web capture → null", () => {
     const wt = withSpec(
       "FIX-MIGRATE",
       "---\nid: FIX-MIGRATE\nscreenshot_exempt: pure data migration, no visible surface\n---\n# FIX-MIGRATE\n\n**AC:**\n- [ ] rows migrate\n",

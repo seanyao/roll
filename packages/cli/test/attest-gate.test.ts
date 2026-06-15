@@ -479,6 +479,12 @@ describe("FIX-309 — screenshot baseline: default REQUIRED, rules only EXEMPT",
     expect(storyRequiresScreenshot(wt, "FIX-FALSY")).toBe(true);
   });
 
+  it("AC2: a bare boolean `screenshot_exempt: true` is not a recorded reason — still required", () => {
+    const wt = withSpec("FIX-BARE-TRUE", "---\nid: FIX-BARE-TRUE\nscreenshot_exempt: true\n---\n# FIX-BARE-TRUE\n\n## Acceptance Criteria\n\n- [ ] x\n");
+    expect(storyRequiresScreenshot(wt, "FIX-BARE-TRUE")).toBe(true);
+    expect(screenshotExemption(wt, "FIX-BARE-TRUE").reason).toBeUndefined();
+  });
+
   it("AC2: a deny-listed non-visual epic exempts → required=false WITH the recorded reason; keyword/rule only EXEMPTS", () => {
     const wt = tmp("fix309-deny");
     mkdirSync(join(wt, ".roll"), { recursive: true });

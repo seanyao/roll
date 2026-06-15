@@ -4,6 +4,9 @@
 
 ### 修复
 
+- **截图豁免必须写清理由**:只写 true 不再跳过截图要求。(FIX-309) `[loop]`
+  <!-- evidence: .roll/features/acceptance-evidence/FIX-309/latest/FIX-309-report.html -->
+
 - **项目档案不再把已合并故事显示成未交付**:本地 main 落后远端时,`roll index` 现在按远端主线判断交付状态。(FIX-308) `[dossier]`
   <!-- evidence: .roll/features/acceptance-evidence/FIX-308/latest/FIX-308-report.html -->
 

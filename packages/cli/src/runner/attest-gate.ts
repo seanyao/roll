@@ -138,7 +138,7 @@ export function screenshotExemption(worktreeCwd: string, storyId: string): { rea
     const m = /^screenshot_exempt:\s*(.+)$/m.exec(fm[1] ?? "");
     if (m !== null) {
       const reason = stripQuotes((m[1] ?? "").trim());
-      if (reason !== "" && !/^(false|no|0)$/i.test(reason)) {
+      if (reason !== "" && !/^(false|no|0|true|yes|on|1)$/i.test(reason)) {
         return { reason: `screenshot_exempt (spec): ${reason}` };
       }
     }

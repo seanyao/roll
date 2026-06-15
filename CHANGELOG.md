@@ -4,6 +4,9 @@
 
 ### 修复
 
+- **项目档案不再把已合并故事显示成未交付**:本地 main 落后远端时,`roll index` 现在按远端主线判断交付状态。(FIX-308) `[dossier]`
+  <!-- evidence: .roll/features/acceptance-evidence/FIX-308/latest/FIX-308-report.html -->
+
 - **项目档案不再把所有项目都叫成 roll**:项目页头和项目切换器会按当前项目派生真实名称;未设置品牌名时优先取 git remote 仓名,再取项目目录名,APE-PR 等项目会显示自己的名字而不是统一显示为 roll。(FIX-307) `[dossier]`
   <!-- evidence: .roll/features/delivery-dossier/FIX-307/latest/FIX-307-report.html -->
 

@@ -121,7 +121,7 @@ import {
 import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, runPeerGate } from "./peer-gate.js";
 import { readAttestGateMode, runAttestGate, verificationReportPath, webCaptureTargetForStory } from "./attest-gate.js";
 import { recoverCodexUsage, recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
-import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, buildAcMapRemediationPrompt, needsAcMapRemediation } from "./attest-remediation.js";
+import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, autoAttachScreenshotToAcMap, buildAcMapRemediationPrompt, needsAcMapRemediation } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
 import { buildPairScorePrompt, enabledPairingStages, parsePairScoreOutput, retryPeerConsult, runPairing, runScorePairing, type PairEvent, type PairReview } from "./pairing-gate.js";
 import { realAgentEnv } from "../commands/agent-list.js";
@@ -1036,7 +1036,28 @@ export async function executeCommand(
             ts: ports.clock(),
           });
         }
-        const rc = await ports.attest.render(ports.paths.worktreePath, storyId, ctx.evidenceRunDir);
+        // render#1 captures the screenshot + writes evidence.json + builds the
+        // per-AC report from the ac-map. FIX-317: the agent wires text-only
+        // evidence, so the visual floor (passAcVisualFloor) rejects pass ACs that
+        // lack a per-AC screenshot ref even though a REAL screenshot was captured.
+        // Bridge it in the harness — attach the captured screenshot to the pass
+        // ACs (honest: only a screenshot that exists this cycle), then re-render so
+        // the per-AC <figure> appears. Best-effort; never fails the cycle.
+        let rc = await ports.attest.render(ports.paths.worktreePath, storyId, ctx.evidenceRunDir);
+        if (rc === 0) {
+          const attached = autoAttachScreenshotToAcMap(ports.paths.worktreePath, storyId, ctx.evidenceRunDir);
+          if (attached !== null) {
+            ports.events.appendEvent(ports.paths.eventsPath, {
+              type: "attest:auto-attach",
+              cycleId: ctx.cycleId ?? "",
+              storyId,
+              href: attached.href,
+              attachedCount: attached.count,
+              ts: ports.clock(),
+            });
+            rc = await ports.attest.render(ports.paths.worktreePath, storyId, ctx.evidenceRunDir);
+          }
+        }
         if (rc !== 0) {
           ports.events.appendAlert(
             ports.paths.alertsPath,

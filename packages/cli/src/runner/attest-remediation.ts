@@ -16,10 +16,10 @@
  * fabricated passes (US-ATTEST-010). One retry, structurally — the capture
  * step runs once per cycle.
  */
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cardArchiveDir } from "../lib/archive.js";
-import { storyHasAcBlock } from "./attest-gate.js";
+import { storyHasAcBlock, storyRequiresScreenshot } from "./attest-gate.js";
 
 /** Hard wall-clock cap for the remediation spawn — writing one JSON file from
  *  already-done work is minutes, not a full cycle. */
@@ -74,4 +74,118 @@ export function buildAcMapRemediationPrompt(
     `- 诚实红线:没有真实证据的 AC 必须标 "claimed",绝不伪造 pass。Honesty red line: an AC without real evidence MUST be "claimed" — never fabricate a pass; the render layer downgrades and exposes fabrications anyway.`,
     `5. Do NOT change product code, do NOT commit, do not open a PR. Write the file, verify it parses (\`node -e 'JSON.parse(require("fs").readFileSync("${target}","utf8"))'\`), then exit.`,
   ].join("\n");
+}
+
+/**
+ * FIX-317 — the harness↔attest screenshot bridge.
+ *
+ * Root cause (verified on FIX-284 cycles): a cycle produces a REAL screenshot
+ * (`<runDir>/screenshots/web.png`) and a report, but the agent's ac-map marks
+ * pass ACs with TEXT-only evidence, never wiring the screenshot in. The
+ * agent-agnostic visual floor (`passAcVisualFloor`) then requires a per-AC
+ * screenshot ref and judges the report an empty shell → every cycle fails.
+ *
+ * The fix lives in the harness (roll's normalization thesis: bridge the common
+ * gap once; downstream stays agent-agnostic, no per-agent special-casing). The
+ * executor calls {@link autoAttachScreenshotToAcMap} after the screenshot is
+ * captured: for every `pass` AC lacking visual evidence, it attaches the
+ * captured screenshot as a clearly-labelled "visual baseline" ref.
+ *
+ * Honesty red line (Codex/PI review): only a screenshot that ACTUALLY exists on
+ * disk this cycle AND was recorded `taken === true` in evidence.json is ever
+ * attached — a recorded machine-skip / absent / malformed manifest attaches
+ * nothing and lets the existing skip+exemption paths resolve the cycle. The
+ * label discloses it is a delivery-level baseline, NOT AC-specific proof, and
+ * the `attest:auto-attach` event records href+count so audits can separate
+ * harness-added baselines from agent-supplied evidence.
+ */
+const SCREENSHOT_BASELINE_LABEL = "cycle visual baseline (auto-attached; not AC-specific proof)";
+
+interface AcMapEvidence {
+  kind?: string;
+  label?: string;
+  href?: string;
+  textFile?: string;
+}
+interface AcMapEntry {
+  ac?: string;
+  status?: string;
+  note?: string;
+  evidence?: AcMapEvidence[];
+}
+
+/**
+ * Pick the captured screenshot href to attach this cycle, or null.
+ *
+ * Honesty + path safety: a basename is accepted ONLY when (a) evidence.json
+ * records a capture for it with `taken === true`, and (b) the PNG exists under
+ * `<runDir>/screenshots/`. Matching is by BASENAME (absolute / `..` / escaping
+ * paths in the manifest are rejected), and the returned ref is RELATIVE to the
+ * run dir so the shared card-level ac-map resolves to THIS cycle's screenshot
+ * (toRef resolves run-dir-first, FIX-315). web.png (the dossier baseline,
+ * FIX-309) wins over terminal.png when both were genuinely captured.
+ */
+export function capturedScreenshotRef(runDir: string): string | null {
+  if (runDir === "") return null;
+  const taken = new Set<string>();
+  try {
+    const ev = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
+      captures?: Array<{ out?: string; taken?: boolean }>;
+    };
+    for (const c of ev.captures ?? []) {
+      if (c.taken !== true || typeof c.out !== "string" || c.out === "") continue;
+      const base = c.out.split(/[\\/]/).pop() ?? "";
+      if (base !== "" && !base.includes("..")) taken.add(base);
+    }
+  } catch {
+    return null; // absent / malformed manifest ⇒ no honest signal
+  }
+  for (const name of ["web.png", "terminal.png"]) {
+    if (taken.has(name) && existsSync(join(runDir, "screenshots", name))) return `screenshots/${name}`;
+  }
+  return null;
+}
+
+/**
+ * Auto-attach the captured screenshot into every `pass` AC that lacks visual
+ * evidence. Idempotent, honest, best-effort (never throws → never fails the
+ * cycle). Returns `{ href, count }` when it wrote, else null.
+ */
+export function autoAttachScreenshotToAcMap(
+  worktreeCwd: string,
+  storyId: string,
+  runDir: string,
+): { href: string; count: number } | null {
+  try {
+    if (storyId === "" || runDir === "") return null;
+    if (storyHasAcBlock(worktreeCwd, storyId) !== true) return null;
+    if (!storyRequiresScreenshot(worktreeCwd, storyId)) return null; // exempt ⇒ leave it alone
+    const ref = capturedScreenshotRef(runDir);
+    if (ref === null) return null; // no honest screenshot ⇒ skip/exemption path handles it
+    const p = acMapPath(worktreeCwd, storyId);
+    if (!existsSync(p)) return null;
+    let entries: AcMapEntry[];
+    try {
+      const parsed = JSON.parse(readFileSync(p, "utf8")) as unknown;
+      if (!Array.isArray(parsed)) return null;
+      entries = parsed as AcMapEntry[];
+    } catch {
+      return null; // malformed ⇒ do not clobber the agent's file
+    }
+    let count = 0;
+    for (const e of entries) {
+      if (e.status !== "pass") continue; // pass ACs only — never partial/readonly/claimed/fail
+      const hasShot = (e.evidence ?? []).some(
+        (ev) => ev.kind === "screenshot" && typeof ev.href === "string" && ev.href !== "",
+      );
+      if (hasShot) continue; // idempotent: agent (or a prior run) already wired one
+      (e.evidence ??= []).push({ kind: "screenshot", label: SCREENSHOT_BASELINE_LABEL, href: ref });
+      count += 1;
+    }
+    if (count === 0) return null;
+    writeFileSync(p, JSON.stringify(entries, null, 2) + "\n");
+    return { href: ref, count };
+  } catch {
+    return null; // never fail the cycle on a best-effort normalization
+  }
 }

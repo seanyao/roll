@@ -6,6 +6,7 @@
  * US-META-003 flat table). Deterministic + idempotent.
  */
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
 import { parseEventLine } from "@roll/spec";
@@ -300,6 +301,7 @@ function backlogViewModel(epics: ReturnType<typeof collectDossier>): BacklogVM {
 export function generateDossierPages(cwd: string, rebuild: boolean): number {
   const featuresDir = join(cwd, ".roll", "features");
   if (!existsSync(featuresDir)) return 0;
+  refreshDossierMergeBaseline(cwd);
   // FIX-275: ONE shared facts build for the whole run — git log snapshot,
   // project-wide self-score trend, spec refs + depends-on map (each was
   // previously recomputed per card). FIX-278: built BEFORE collectDossier so the
@@ -568,6 +570,20 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
     }
   }
   return pages;
+}
+
+function refreshDossierMergeBaseline(cwd: string): void {
+  try {
+    execFileSync("git", ["rev-parse", "--is-inside-work-tree"], { cwd, stdio: ["ignore", "ignore", "ignore"], timeout: 10_000 });
+    execFileSync("git", ["config", "--get", "remote.origin.url"], { cwd, stdio: ["ignore", "ignore", "ignore"], timeout: 10_000 });
+  } catch {
+    return;
+  }
+  try {
+    execFileSync("git", ["fetch", "--quiet", "origin", "+main:refs/remotes/origin/main"], { cwd, stdio: ["ignore", "ignore", "pipe"], timeout: 20_000 });
+  } catch (e) {
+    process.stderr.write(`[roll] WARN dossier git fetch failed; falling back to local HEAD: ${String(e)}\n`);
+  }
 }
 
 /**

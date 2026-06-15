@@ -2007,7 +2007,8 @@ export interface GitDossierFacts {
 export function collectGitDossierFacts(projectPath: string): GitDossierFacts | null {
   let raw: string;
   try {
-    raw = execGit(projectPath, ["log", "--name-only", "--pretty=format:%x01%s%x02%B%x03"]);
+    const ref = gitDossierLogRef(projectPath);
+    raw = execGit(projectPath, ["log", ref, "--name-only", "--pretty=format:%x01%s%x02%B%x03"]);
   } catch {
     return null;
   }
@@ -2027,6 +2028,15 @@ export function collectGitDossierFacts(projectPath: string): GitDossierFacts | n
     commits.push({ subject, message, files });
   }
   return { commits, slug: githubSlug(projectPath) };
+}
+
+function gitDossierLogRef(projectPath: string): string {
+  try {
+    execGit(projectPath, ["rev-parse", "--verify", "--quiet", "origin/main^{commit}"]);
+    return "origin/main";
+  } catch {
+    return "HEAD";
+  }
 }
 
 /**

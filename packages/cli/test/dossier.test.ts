@@ -16,6 +16,7 @@ import {
   acDisplayState,
   acHasVisualEvidence,
   classifyAc,
+  collectGitDossierFacts,
   collectStoryDossierInput,
   parseAcEvidence,
   rebaseEvidenceHrefToStoryRoot,
@@ -160,6 +161,31 @@ describe("collectDossier — US-DOSSIER-001a data model", () => {
     expect(storyHasMergeEvidence(facts, "US-EVID-001")).toBe(true); // tcr subject names it → own work landed
     expect(storyHasMergeEvidence(facts, "FIX-999")).toBe(false); // no commit references it
     expect(storyHasMergeEvidence(null, "FIX-208")).toBe(false); // not a git repo
+  });
+
+  it("FIX-308: git dossier facts read origin/main when local HEAD is stale", () => {
+    const remote = realpathSync(mkdtempSync(join(tmpdir(), "roll-dossier-remote-")));
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-dossier-origin-main-")));
+    dirs.push(remote, repo);
+
+    execFileSync("git", ["init", "--bare", "--initial-branch=main"], { cwd: remote });
+    execFileSync("git", ["init", "--initial-branch=main"], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: repo });
+    execFileSync("git", ["config", "user.name", "Roll Test"], { cwd: repo });
+    execFileSync("git", ["remote", "add", "origin", remote], { cwd: repo });
+    writeFileSync(join(repo, "README.md"), "base\n");
+    execFileSync("git", ["add", "README.md"], { cwd: repo });
+    execFileSync("git", ["commit", "-m", "base"], { cwd: repo });
+    execFileSync("git", ["push", "-u", "origin", "main"], { cwd: repo });
+    execFileSync("git", ["checkout", "-b", "stale-local-main"], { cwd: repo });
+    execFileSync("git", ["checkout", "main"], { cwd: repo });
+    writeFileSync(join(repo, "README.md"), "base\nFIX-308 landed\n");
+    execFileSync("git", ["commit", "-am", "loop cycle cycle-20260614 (#700)\n\nStory FIX-308 delivered"], { cwd: repo });
+    execFileSync("git", ["push", "origin", "main"], { cwd: repo });
+    execFileSync("git", ["checkout", "stale-local-main"], { cwd: repo });
+
+    const facts = collectGitDossierFacts(repo);
+    expect(storyHasMergeEvidence(facts, "FIX-308")).toBe(true);
   });
 
   it("US-DOSSIER-008: pre-v3 done card (no latest/, no ac-map) is legacy; latest/ or ac-map cancels it", () => {

@@ -147,6 +147,7 @@ function activeSiteFiles(projectDir: string): TextFile[] {
     "site/roll-site.css",
     "site/tweaks-panel.jsx",
     "site/diagrams/roll-build-skill.html",
+    "site/diagrams/roll-design-skill.html",
   ]);
 }
 

@@ -208,8 +208,8 @@
       <div class="no"><span class="lang-en">PHASE 5 · core</span><span class="lang-zh">PHASE 5 · 核心</span></div>
       <div class="ttl">♻ <span class="lang-en">TCR implementation loop</span><span class="lang-zh">TCR 实现循环</span> <span class="chip solid">Test &amp;&amp; Commit ‖ Revert</span></div>
       <p class="desc">
-        <span class="lang-en">Micro-steps: write the test (confirm <b>RED</b>) → minimal code → run. 3–5 micro-commits accumulate, each a guaranteed working state.</span>
-        <span class="lang-zh">微步推进：先写测试（确认 <b>红</b>）→ 最小实现 → 跑测试。每步累积 3–5 个微提交，每个都是有保障的工作态。</span>
+        <span class="lang-en">Micro-steps: write the test (confirm <b>RED</b>) → minimal code → run. 3–5 micro-commits accumulate, each a guaranteed working state. The per-commit gate runs <b>affected tests</b> (<code>roll test</code> → <code>vitest --changed</code>, heavy integration/e2e excluded) and writes a fresh proof the pre-commit hook checks — the full suite runs at CI / pre-push.</span>
+        <span class="lang-zh">微步推进：先写测试（确认 <b>红</b>）→ 最小实现 → 跑测试。每步累积 3–5 个微提交，每个都是有保障的工作态。逐提交闸只跑<b>受影响测试</b>（<code>roll test</code> → <code>vitest --changed</code>，排除重型 integration/e2e），并写新鲜证明给 pre-commit 校验——全套留到 CI / 推前跑。</span>
       </p>
       <div class="tcrflow">
         <span class="n"><span class="lang-en">write/edit test</span><span class="lang-zh">写/改测试</span></span><span class="ar">→</span>
@@ -235,8 +235,8 @@
       <div class="no">PHASE 6</div>
       <div class="ttl"><span class="lang-en">Pre-push CI gate</span><span class="lang-zh">推前 CI 本地闸</span> <span class="chip solid">⛩ GATE</span></div>
       <p class="desc">
-        <span class="lang-en">Run the full CI locally before pushing (format + lint + build + test). Red → fix to green; never push red.</span>
-        <span class="lang-zh">推送前本地跑全套 CI（format + lint + build + test）。红则修到绿，绝不带红推送。</span>
+        <span class="lang-en">Run the <b>FULL</b> suite locally before pushing (format + lint + build + test) — the heavy integration/e2e suites excluded from the per-commit affected gate run here, same scope as CI. Red → fix to green; never push red.</span>
+        <span class="lang-zh">推送前本地跑<b>全套</b>（format + lint + build + test）——逐提交闸排除的重型 integration/e2e 在此跑，与 CI 同范围。红则修到绿，绝不带红推送。</span>
       </p>
     </div></div>
 
@@ -253,8 +253,8 @@
       <div class="no">PHASE 8 · 9</div>
       <div class="ttl"><span class="lang-en">Commit & push → watch CI → deploy</span><span class="lang-zh">提交推送 → 盯 CI → 部署</span></div>
       <p class="desc">
-        <span class="lang-en">Worktree-first branch, PR, merge to main when green (<b>never push main directly</b>). CI red → diagnose → new TCR micro-step → re-push.</span>
-        <span class="lang-zh">worktree-first 开分支、PR、绿了合主干（<b>绝不直推 main</b>）。CI 红则诊断 → 新 TCR 微步修 → 重推。</span>
+        <span class="lang-en">Worktree-first branch, PR, merge to main when green (<b>never push main directly</b>). CI red → diagnose → new TCR micro-step → re-push. <b>Done ≡ merged</b>: a pushed branch / open PR is <code>published_pending_merge</code>, not delivered — the row flips to Done only after the merge (picker skips already-merged cards; preflight flips a merged PR to Done).</span>
+        <span class="lang-zh">worktree-first 开分支、PR、绿了合主干（<b>绝不直推 main</b>）。CI 红则诊断 → 新 TCR 微步修 → 重推。<b>Done ≡ 已合并</b>：推了分支 / PR 还开着只是 <code>published_pending_merge</code>，未算交付——合并后行才翻 Done（picker 跳过已合卡，preflight 把已合 PR 翻 Done）。</span>
       </p>
     </div></div>
 
@@ -282,8 +282,8 @@
       <div class="no">PHASE 10.6</div>
       <div class="ttl"><span class="lang-en">Acceptance evidence</span><span class="lang-zh">验收证据落地</span> <span class="chip">ac-map · report · <span class="lang-en">screenshots</span><span class="lang-zh">截屏</span></span></div>
       <p class="desc">
-        <span class="lang-en">Mark each AC pass/partial/… with real evidence → render the report → refresh the dossier. A before/after <b>screenshot pair</b> is the strongest proof.</span>
-        <span class="lang-zh">每条 AC 标 pass/partial/… + 引真实证据 → 渲染报告 → 刷新档案。改前/改后<b>成对截屏</b>是最强证据。</span>
+        <span class="lang-en">Mark each AC pass/partial/… with real evidence → render the report → refresh the dossier. A before/after <b>screenshot pair</b> is the strongest proof. The web shot captures the card's declared <code>deliverable_url</code> via headless Playwright — <b>never</b> the dossier page; no <code>deliverable_url</code> → honest skip. Attest is <b>earned during delivery, never backfilled</b> (the loop's HARD attest gate renders it in-cycle).</span>
+        <span class="lang-zh">每条 AC 标 pass/partial/… + 引真实证据 → 渲染报告 → 刷新档案。改前/改后<b>成对截屏</b>是最强证据。Web 截图用无头 Playwright 抓卡片声明的 <code>deliverable_url</code>——<b>绝不</b>截档案页；未声明则诚实跳过。Attest <b>在交付过程中产生，绝不事后补</b>（loop 的硬 attest 闸在 cycle 内渲染）。</span>
       </p>
     </div></div>
 

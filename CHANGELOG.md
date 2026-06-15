@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### 修复
+
+- 故事档案页页脚不再显示两个 spec 链接。(FIX-286) `[dossier]`
+  <!-- evidence: .roll/features/delivery-dossier/FIX-286/latest/FIX-286-report.html -->
+
 ## v3.615.1 — 2026-06-15
 
 ### 修复

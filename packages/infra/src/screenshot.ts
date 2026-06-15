@@ -530,10 +530,22 @@ export async function captureScreenshot(
         const reason = await captureWebViaBrowser(req, run);
         if (reason !== null) return skip(`GUI browser capture: ${reason}`);
       } else {
-        const r = await run("npx", ["-y", "playwright@latest", "screenshot", req.url, req.out]);
+        let r = await run("npx", ["-y", "playwright@latest", "screenshot", req.url, req.out]);
+        // FIX-314: `playwright@latest` may resolve to a version whose headless
+        // browser isn't installed yet ("Executable doesn't exist … run: npx
+        // playwright install"). Self-heal: install the headless shell once and
+        // retry, so an unattended loop captures a REAL screenshot instead of an
+        // honest skip. (Validated: installing chromium-headless-shell unblocked it.)
+        if (r.code !== 0 && /Executable doesn't exist|playwright install/i.test(`${r.stderr}\n${r.stdout}`)) {
+          await run("npx", ["-y", "playwright@latest", "install", "chromium-headless-shell"]);
+          r = await run("npx", ["-y", "playwright@latest", "screenshot", req.url, req.out]);
+        }
         if (r.code !== 0) {
           const why = forceHeadless ? "ROLL_ATTEST_HEADLESS=1 (headless-only mode)" : platform === "darwin" ? "no GUI session" : "non-macOS host";
-          return skip(`headless Chromium unavailable or capture failed (${why}; screencapture fallback not applicable)`);
+          // Surface the actual failure (last stderr/stdout line) — the old skip
+          // hid WHY (e.g. the missing-browser hint), masking the real cause.
+          const detail = (r.stderr || r.stdout || "").trim().split("\n").pop()?.slice(0, 160) ?? "";
+          return skip(`headless Chromium unavailable or capture failed (${why}${detail ? `: ${detail}` : ""}; screencapture fallback not applicable)`);
         }
       }
     } else if (req.kind === "mobile-ios") {

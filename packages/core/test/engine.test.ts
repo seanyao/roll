@@ -231,6 +231,12 @@ describe("latestDeliveringCycle — map a 🔨 story to the cycle that delivered
   it("returns undefined for a story with no runs row (dead claim, no PR)", () => {
     expect(latestDeliveringCycle(rows, "US-404")).toBeUndefined();
   });
+
+  it("FIX-322: a `published` cycle (PR open, merge pending) IS a delivering cycle (not a dead claim)", () => {
+    // Before FIX-322 this returned undefined → preflight flipped 🔨→Todo → the
+    // card was re-picked and re-delivered (duplicate) before merge-backfill.
+    expect(latestDeliveringCycle([{ story_id: "US-7", cycle_id: "c-pub", status: "published" }], "US-7")).toBe("c-pub");
+  });
 });
 
 describe("resumeCandidateBranches — map a card to its un-merged cycle branches", () => {

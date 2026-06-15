@@ -31,6 +31,7 @@ export function cycleNo(cycleId: string): string {
 
 const VERDICT_COLOR: Record<string, string> = {
   delivered: "green",
+  pending_merge: "yellow", // FIX-322: opened a PR, merge pending — in-flight, NOT delivered (amber)
   reverted: "yellow",
   failed: "red",
   blocked: "purple",
@@ -103,7 +104,7 @@ export function renderCyclesLedger(rows: CycleLedgerRow[], sinceLabel: string, l
     lines.push(
       [
         pad(`#${cycleNo(r.cycleId)}`, 7),
-        pad(c(color, r.verdict), 11),
+        pad(c(color, r.verdict), 13), // FIX-322: fits "pending_merge" (13)
         pad(r.storyId === "" ? "—" : r.storyId, 16),
         pad(r.model, 19),
         pad(tokensTotal(r.tokens), 6),

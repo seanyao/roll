@@ -123,6 +123,19 @@ interface ProgressState {
   skippedCards: Set<string>;
   /** Consecutive whole-goal no-progress cycles (no card delivered). */
   noProgressCycles: number;
+  /**
+   * FIX-333: cards THIS go session already delivered (a `published_pending_merge`
+   * — PR open, merge handed to the PR lane, or a `delivered`/merged terminal).
+   * SESSION-LOCAL and NOT persisted onto the goal: it exists only to stop the
+   * SAME session from re-picking a card it just shipped. With worktree isolation
+   * a cycle's `✅ Done` lives on the cycle branch, not main, so the main-checkout
+   * backlog still reads `📋 Todo` for a just-published card — without this set
+   * `allowedCardsForScope` would hand the card straight back to run-once and the
+   * worker would open a SECOND PR for the same work (FIX-308 → #759 + #760). The
+   * PR lane merges the open PR; once main proves the merge the backlog flips Done
+   * and a future session's truth/picker excludes it on its own.
+   */
+  deliveredCards: Set<string>;
 }
 
 /** Hydrate the in-memory progress accounting from the persisted goal. */
@@ -132,6 +145,8 @@ function progressFromGoal(goal: RollGoal): ProgressState {
     zeroStreaks: new Map(Object.entries(p?.zeroStreaks ?? {})),
     skippedCards: new Set(p?.skippedCards ?? []),
     noProgressCycles: p?.noProgressCycles ?? 0,
+    // Session-local: deliveries by THIS session only — never hydrated/persisted.
+    deliveredCards: new Set(),
   };
 }
 
@@ -665,12 +680,29 @@ function rowsForScope(projectPath: string, scope: GoalScope): ScopeRow[] {
 function allowedCardsForScope(projectPath: string, goal: RollGoal, progress: ProgressState): string[] {
   return rowsForScope(projectPath, goal.scope)
     .map((row) => row.id)
-    .filter((id) => !progress.skippedCards.has(id));
+    // FIX-333: never hand back a card this session already skipped OR already
+    // delivered (published_pending_merge / merged). A delivered card whose Done
+    // has not yet reached main must not be re-picked — that is the double-PR bug.
+    .filter((id) => !progress.skippedCards.has(id) && !progress.deliveredCards.has(id));
 }
 
 function allScopeCardsSkipped(projectPath: string, goal: RollGoal, progress: ProgressState): boolean {
   const rows = rowsForScope(projectPath, goal.scope);
   return rows.length > 0 && rows.every((row) => progress.skippedCards.has(row.id));
+}
+
+/**
+ * FIX-333: every scope card is now SETTLED for this session — each is either
+ * skipped (no-progress) or already delivered in-flight (published_pending_merge,
+ * PR open and handed to the PR lane). There is nothing left for THIS session to
+ * pick, so it ends cleanly (the PR lane merges the open PRs) rather than spinning
+ * on a card it already shipped or pausing as a false no-progress. Distinct from
+ * {@link allScopeCardsSkipped}: at least one card here was DELIVERED, not stuck.
+ */
+function allScopeCardsSettled(projectPath: string, goal: RollGoal, progress: ProgressState): boolean {
+  const rows = rowsForScope(projectPath, goal.scope);
+  if (rows.length === 0) return false;
+  return rows.every((row) => progress.skippedCards.has(row.id) || progress.deliveredCards.has(row.id));
 }
 
 function alertPath(projectPath: string, slug: string): string {
@@ -740,6 +772,12 @@ function updateProgressFromRows(
     if (attempt === undefined || !attempt.known) continue;
     if (!attempt.zeroDelivery) {
       progress.zeroStreaks.delete(attempt.storyId);
+      // FIX-333: a delivery (incl. published_pending_merge — PR open, not yet
+      // merged) marks the card in-flight for THIS session so the next cycle's
+      // allowed-cards excludes it. Re-picking a card the main backlog still
+      // shows as Todo (worktree-isolated Done not yet on main) is what opened a
+      // duplicate PR for the same work.
+      progress.deliveredCards.add(attempt.storyId);
       delivered = true;
       continue;
     }
@@ -1181,6 +1219,18 @@ function runSummaryFromGoal(goal: RollGoal): RunSummary {
   };
 }
 
+/** Are two goal scopes the same identity? (FIX-333 — scope-change detection.) */
+function scopesEqual(a: GoalScope, b: GoalScope): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === "epic" && b.kind === "epic") return a.epic === b.epic;
+  if (a.kind === "cards" && b.kind === "cards") {
+    if (a.cards.length !== b.cards.length) return false;
+    const bSet = new Set(b.cards);
+    return a.cards.every((card) => bSet.has(card));
+  }
+  return true; // both "all"
+}
+
 function applyRunOptions(goal: RollGoal, opts: GoOptions, at: string): RollGoal {
   // FIX-279: run limits are EXPLICIT per `roll loop go` — they come only from
   // THIS invocation's flags, never silently inherited from a prior session's
@@ -1189,10 +1239,19 @@ function applyRunOptions(goal: RollGoal, opts: GoOptions, at: string): RollGoal 
   // limit set days ago. (Scope and review still persist when unspecified — those
   // are the goal's identity, not a per-run safety knob.) Strip the persisted
   // limits, then re-apply only what was passed now.
-  const { limits: _staleLimits, ...rest } = goal;
+  const nextScope = opts.scopeSpecified ? opts.scope : goal.scope;
+  // FIX-333: when this invocation CHANGES the scope (--cards/--epic differs from
+  // the persisted goal), the carried-over progress counters (noProgressCycles /
+  // zeroStreaks / skippedCards) belong to the OLD scope. Inheriting them would
+  // let a fresh scope inherit the previous scope's stalled count and trip the
+  // no_progress_breaker the instant it starts. Drop the whole progress block so
+  // the new scope begins with clean accounting.
+  const scopeChanged = !scopesEqual(goal.scope, nextScope);
+  const { limits: _staleLimits, progress: _staleProgress, ...rest } = goal;
   return {
     ...rest,
-    scope: opts.scopeSpecified ? opts.scope : goal.scope,
+    ...(scopeChanged ? {} : goal.progress !== undefined ? { progress: goal.progress } : {}),
+    scope: nextScope,
     review: opts.reviewModeSpecified ? { mode: opts.reviewMode } : goal.review,
     limits: {
       ...(opts.maxCycles !== undefined ? { maxCycles: opts.maxCycles } : {}),
@@ -1420,7 +1479,7 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
   let goal: RollGoal;
   // Hook 2: hydrate the no-progress accounting from the persisted goal once it
   // is loaded (below) so the dead-loop breaker counts ACROSS sessions.
-  let progress: ProgressState = { zeroStreaks: new Map(), skippedCards: new Set(), noProgressCycles: 0 };
+  let progress: ProgressState = { zeroStreaks: new Map(), skippedCards: new Set(), noProgressCycles: 0, deliveredCards: new Set() };
   let stopReason: string | undefined;
   let stopRequested = false;
   let workerAgents: string[] = [];
@@ -1488,6 +1547,15 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
         goal = pauseGoal(id.path, bus, stopReason, deps.nowIso(), deps.nowSec()) ?? goal;
         break;
       }
+      // FIX-333: every scope card is settled for this session (each is either
+      // skipped or already delivered in-flight). Nothing left to pick — end
+      // CLEANLY and let the PR lane merge the open PRs. Without this guard the
+      // session would call run-once with an empty allow-list and either spin
+      // (idle/no-cycle-terminal) or re-pick the just-delivered card → double PR.
+      if (allScopeCardsSettled(id.path, goal, progress)) {
+        stopReason = "scope_in_flight";
+        break;
+      }
       // FIX-269: a scheduled cycle may already hold the inner lock when the
       // goal session starts — run-once would skip without producing a cycle
       // terminal, and the session would pause (`no_cycle_terminal`, cycles=0)
@@ -1533,6 +1601,15 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
       }
       if (adjudication.reviewBlocked) {
         stopReason = adjudication.reason;
+        break;
+      }
+      // FIX-333: the truth adjudicator did not complete (the just-delivered
+      // card's `✅ Done` lives on the cycle branch, not yet on main), but every
+      // scope card is now settled for this session (delivered in-flight and/or
+      // skipped). End CLEANLY rather than loop back and re-pick a card we already
+      // shipped — re-delivering it would open a SECOND PR for the same work.
+      if (allScopeCardsSettled(id.path, goal, progress)) {
+        stopReason = "scope_in_flight";
         break;
       }
       const timeboxGate = applyTimeboxGate(id.path, bus, sid, goal, deps, deadlineSec);

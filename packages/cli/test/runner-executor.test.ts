@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { CycleCommand, CycleContext, RollEvent } from "@roll/core";
+import { agentWritableRoots } from "../src/runner/executor.js";
 import {
   AGENT_ARGV_TODO,
   AUTORUN_DIRECTIVE,
@@ -2005,5 +2006,20 @@ describe("FIX-302 — worktree submodule (skills/) populate before agent spawn",
     await expect(bootstrapWorktreeSkills(wt, join(wt, "alerts.md"), events as never, init)).resolves.toBe(false);
     expect(alerts).toHaveLength(1);
     expect(alerts[0]).toContain("still empty");
+  });
+});
+
+describe("agentWritableRoots — FIX-326: a sandboxed agent can write the git-internal dir", () => {
+  it("includes the repo's git-common-dir (else git write-tree/commit fail in the sandbox → gave_up)", () => {
+    const repo = realpathSync(execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim());
+    const common = realpathSync(
+      execFileSync("git", ["-C", repo, "rev-parse", "--path-format=absolute", "--git-common-dir"], {
+        encoding: "utf8",
+      }).trim(),
+    );
+    const roots = agentWritableRoots(repo, join(repo, ".roll", "loop", "alerts", "x.md"));
+    // The git-common-dir is the FIX-326 grant; it always exists in any git repo
+    // (incl. CI's fresh clone, where .roll/ is absent — so don't assert on .roll).
+    expect(roots).toContain(common);
   });
 });

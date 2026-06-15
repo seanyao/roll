@@ -110,7 +110,7 @@ theme-aware, printable):
                                          groups (merged / in a cycle / in backlog)
 .roll/features/<epic>/<id>/index.html  ← story dossier: five stations — Definition,
                                          Design, Execution, Delivery (attest banner
-                                         + AC table), Retrospective
+                                         + per-AC evidence blocks), Retrospective
 ```
 
 Every figure is computed from the truth model — anchors -> selectors -> adapter
@@ -123,6 +123,11 @@ The front-page truth board keeps unknown visible. `?` means the fact is absent
 or outside the known schema; `0` means a known zero. A premature backlog
 `✅ Done` row is treated as a claim that conflicts with truth and is rendered as
 drift, not as delivered work.
+
+On story dossier pages, screenshot evidence remains a thumbnail linked to the
+full image. Text evidence such as Vitest output is read from the referenced
+evidence file and shown inline under the AC in a folded, scrollable block; if
+the file is missing or unreadable, the page shows an explicit unavailable state.
 
 **Freshness model (FIX-231):** the board keeps itself fresh — every
 truth-changing node (`roll story new`, `roll attest`, `roll backlog

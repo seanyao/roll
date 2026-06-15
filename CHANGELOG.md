@@ -4,6 +4,9 @@
 
 ### 修复
 
+- **故事档案页的文本证据又能直接看了**:AC 下的 Vitest/test 输出等文本证据改回内联折叠展示,不用点开新页面;截图证据仍是缩略图点开看大图,文件缺失时显示明确空态。(FIX-285) `[dossier]`
+  <!-- evidence: .roll/features/delivery-dossier/FIX-285/latest/FIX-285-report.html -->
+
 - **项目页的选角和钩子信息按正确稿显示了**:Casting 区恢复 3+1 阶梯卡、ramp 竖条和场景角色三列布局;Loop 的 Hooks 区改为列本仓真实 git 钩子,不再把调度 lane 当成 hooks。(FIX-284) `[loop]`
   <!-- evidence: .roll/features/delivery-dossier/FIX-284/latest/FIX-284-report.html -->
 

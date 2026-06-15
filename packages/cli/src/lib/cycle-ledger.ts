@@ -61,7 +61,14 @@ export function ledgerVerdict(status: string, outcome: string): CycleLedgerVerdi
     outcome === "aborted_with_delivery" ||
     outcome === "orphan_timeout" ||
     status === "failed" ||
-    status === "aborted"
+    status === "aborted" ||
+    // FIX-324: `gave_up` is the productivity-floor terminal — an agent that ran
+    // but left no commit / no delivery (orchestrator.classifyCaptured). It is a
+    // failure-to-deliver, so it belongs in the failed cluster; before this it
+    // fell through to "unknown" and `roll cycles` showed a dirty/illegible
+    // status for every gave_up cycle. The precise mode stays in runs.jsonl.
+    status === "gave_up" ||
+    outcome === "gave_up"
   ) {
     return "failed";
   }

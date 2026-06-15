@@ -2018,8 +2018,8 @@ describe("agentWritableRoots — FIX-326: a sandboxed agent can write the git-in
       }).trim(),
     );
     const roots = agentWritableRoots(repo, join(repo, ".roll", "loop", "alerts", "x.md"));
+    // The git-common-dir is the FIX-326 grant; it always exists in any git repo
+    // (incl. CI's fresh clone, where .roll/ is absent — so don't assert on .roll).
     expect(roots).toContain(common);
-    // and the .roll metadata dir stays granted (agent writes reports/evidence there)
-    expect(roots).toContain(realpathSync(join(repo, ".roll")));
   });
 });

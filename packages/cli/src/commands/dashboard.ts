@@ -909,7 +909,7 @@ interface SessionUsage {
 }
 
 function loadStreamJsonSessionUsage(label: string, slug: string, agent: string): SessionUsage | null {
-  if (getAgentSpec(agent)?.usage.stdoutExtractor !== "claude-stream") return null;
+  if (getAgentSpec(agent)?.usage.sessionBackfill !== "claude-projects") return null;
   const user = process.env["USER"] ?? "seanyao";
   const worktreePath = `/Users/${user}/.shared/roll/worktrees/${slug}-cycle-${label}`;
   const projName =

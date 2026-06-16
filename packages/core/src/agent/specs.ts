@@ -1,10 +1,12 @@
 export type AgentNormalizerKind = "claude" | "codex" | "generic";
 export type UsageExtractorKind = "claude-stream" | "openai" | "gemini" | "kimi" | "qwen" | "pi" | "generic";
 export type SessionRecoveryKind = "pi" | "kimi" | "codex";
+export type SessionBackfillKind = "claude-projects";
 
 export interface AgentUsageSpec {
   stdoutExtractor?: UsageExtractorKind;
   sessionRecovery?: SessionRecoveryKind;
+  sessionBackfill?: SessionBackfillKind;
 }
 
 export interface AgentSpec {
@@ -25,7 +27,7 @@ const BASE_AGENT_SPECS: readonly AgentSpec[] = [
     displayName: "claude",
     defaultModel: "claude-sonnet-4",
     normalizer: "claude",
-    usage: { stdoutExtractor: "claude-stream" },
+    usage: { stdoutExtractor: "claude-stream", sessionBackfill: "claude-projects" },
     smokeCommand: 'claude -p "Reply with a single word: hello"',
   },
   {

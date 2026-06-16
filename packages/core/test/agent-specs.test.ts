@@ -10,6 +10,7 @@ import {
 describe("AgentSpec registry — FIX-313", () => {
   it("declares per-agent defaults in one registry", () => {
     expect(agentDefaultModel("claude")).toBe("claude-sonnet-4");
+    expect(getAgentSpec("claude")?.usage.sessionBackfill).toBe("claude-projects");
     expect(agentDefaultModel("pi")).toBe("deepseek-v4-pro");
     expect(agentNormalizerKind("codex")).toBe("codex");
     expect(agentSmokeCommand("kimi")).toContain("kimi");

@@ -143,6 +143,13 @@ const shimAgentTcr: AgentSpawn = async (_agent, opts): Promise<AgentSpawnResult>
   const storyId = opts.storyId ?? "US-RUN-001";
   const notesDir = join(wt, ".roll", "features", "uncategorized", storyId, "notes");
   mkdirSync(notesDir, { recursive: true });
+  // FIX-343 (step ③, B-decision): the attest gate honors ONLY an INDEPENDENT
+  // fresh-session PEER score (`scoring: pair` + a `scored-by` + a `session-id`
+  // that is NOT the builder's session id). The shim simulates the score stage's
+  // peer note landing in the persistent .roll (the worktree's .roll is symlinked
+  // to the repo's). Its session-id is a fixed fresh-session token that can NEVER
+  // equal the builder's minted `<cycleId>:build:claude:<clock>` id, so the note
+  // qualifies as an independent fresh session and the delivery reaches PASS.
   writeFileSync(
     join(notesDir, `2026-06-08-roll-build-${storyId}-shim.md`),
     [
@@ -152,9 +159,12 @@ const shimAgentTcr: AgentSpawn = async (_agent, opts): Promise<AgentSpawnResult>
       "score: 8",
       "verdict: good",
       "ts: 2026-06-08T00:00:00Z",
+      "scoring: pair",
+      "scored-by: pi",
+      "session-id: integration-fresh-score-session-001",
       "---",
       "",
-      "Shim delivery wrote the required self-score note.",
+      "Shim delivery wrote the required peer review score note.",
     ].join("\n"),
     "utf8",
   );
@@ -272,6 +282,24 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
     // time; the worktree is cleaned by the `done` terminal path afterward).
     expect(tcrLogAtExecute).toContain("tcr: deliver US-RUN-001");
     expect(existsSync(p.worktreePath)).toBe(false);
+
+    // FIX-343 (step ③): the cycle:terminal twin resolves report/ac-map from the
+    // PERSISTENT .roll (repoCwd) — never the worktree, which is torn down before
+    // the terminal `append_run`. With the worktree gone, a worktree-rooted lookup
+    // would false-negative `acmap_missing`; the repoCwd lookup still finds the
+    // committed ac-map on disk (hasMap=true). The report freshness/`latest`
+    // pointer lifecycle is exercised by the focused buildTerminalRecord unit
+    // tests; here we lock that the terminal no longer false-negatives the ac-map
+    // after teardown.
+    const terminal = events.find((e) => (e as { type: string }).type === "cycle:terminal") as unknown as
+      | { attest?: { present: boolean; value?: { acMap?: boolean; reportPath?: string }; reason?: string } }
+      | undefined;
+    expect(terminal).toBeDefined();
+    // The committed ac-map lives in the persistent .roll, so reading repoCwd
+    // finds it after the worktree is removed: present (report+map) or, if the
+    // report `latest` pointer is absent, `not_rendered` — but NEVER the
+    // worktree-rooted `acmap_missing` false-negative the fix eliminates.
+    expect(terminal?.attest?.reason).not.toBe("acmap_missing");
   });
 
   it("US-EVID-001: opens the evidence frame before agent spawn and keeps agent-deposited evidence after cleanup", async () => {

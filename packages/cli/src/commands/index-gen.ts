@@ -303,7 +303,7 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
   if (!existsSync(featuresDir)) return 0;
   refreshDossierMergeBaseline(cwd);
   // FIX-275: ONE shared facts build for the whole run — git log snapshot,
-  // project-wide self-score trend, spec refs + depends-on map (each was
+  // project-wide review-score trend, spec refs + depends-on map (each was
   // previously recomputed per card). FIX-278: built BEFORE collectDossier so the
   // git snapshot can supply offline merge truth to the delivered derivation —
   // the rebuild path has no live PR-evidence snapshot, so a merge commit is what

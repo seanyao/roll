@@ -270,7 +270,7 @@ describe("enabledPairingStages — executor stage iteration seam (US-PAIR-004)",
 
 // ── US-PAIR-009: score stage — heterogeneous peer scores the cycle ───────────
 import { parsePairScoreOutput, runScorePairing, type RunScorePairingDeps } from "../src/runner/pairing-gate.js";
-import { readStorySelfScores } from "../src/lib/self-score.js";
+import { readStoryReviewScores } from "../src/lib/review-score.js";
 
 const SCORE_CFG = `enabled: true\nstages: [code, score]\ncapability:\n  claude: [code, score]\n  codex: [code, score]\n  kimi: [code, score]\n`;
 
@@ -288,27 +288,33 @@ function scoreDeps(over: Partial<RunScorePairingDeps> = {}): { d: RunScorePairin
 }
 
 describe("runScorePairing — US-PAIR-009", () => {
-  it("file absent / stage not enabled = off", async () => {
+  it("FIX-343: MANDATORY — scores even with NO pairing.yaml / stage not enabled", async () => {
+    // The score stage is no longer gated on pairing.yaml: a repo with no config
+    // (and one with only `code` enabled) still produces a peer Review Score.
     const off = project(null);
     const { d } = scoreDeps();
-    expect((await runScorePairing(off.dir, off.rt, "c1", "claude", "US-X-001", "roll-build", "summary", d)).status).toBe("off");
-    const noScore = project(ENABLED); // stages: [code] only
-    expect((await runScorePairing(noScore.dir, noScore.rt, "c1", "claude", "US-X-001", "roll-build", "summary", scoreDeps().d)).status).toBe("off");
+    expect((await runScorePairing(off.dir, off.rt, "c1", "claude", "US-X-001", "roll-build", "summary", d)).status).toBe("scored");
+    const noScore = project(ENABLED); // stages: [code] only — score stage still fires
+    expect((await runScorePairing(noScore.dir, noScore.rt, "c1", "claude", "US-X-002", "roll-build", "summary", scoreDeps().d)).status).toBe("scored");
   });
 
-  it("scores via a heterogeneous peer: note + evidence + pair:score event", async () => {
+  it("scores via a fresh-session peer: note + evidence + pair:score event + session id", async () => {
     const { dir, rt } = project(SCORE_CFG);
     const { d, events } = scoreDeps();
     const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "delivery summary", d);
     expect(r.status).toBe("scored");
-    expect(r.peer).not.toBe("claude");
+    // FIX-343: the reviewer's fresh session/cast id is recorded + returned.
+    expect(r.sessionId).toBeDefined();
+    expect(r.sessionId).toContain("score");
     // note: written with pair provenance, readable by existing readers
-    const notes = readStorySelfScores(dir, "US-X-001");
+    const notes = readStoryReviewScores(dir, "US-X-001");
     expect(notes).toHaveLength(1);
     expect(notes[0]?.score).toBe(8);
+    expect(notes[0]?.sessionId).toBe(r.sessionId);
     const noteText = readFileSync(notes[0]?.sourcePath ?? "", "utf8");
     expect(noteText).toContain("scoring: pair");
     expect(noteText).toContain(`scored-by: ${r.peer}`);
+    expect(noteText).toContain(`session-id: ${r.sessionId}`);
     // evidence file in the stage namespace
     const ev = JSON.parse(readFileSync(join(rt, "peer", "cycle-c1.score.pair.json"), "utf8"));
     expect(ev.score).toBe(8);
@@ -324,11 +330,11 @@ describe("runScorePairing — US-PAIR-009", () => {
     expect(scoreEvents[0]?.cost).toBe(0.05);
   });
 
-  it("FIX-335: one scorer flakes (null), the other scores → uses the real peer score (not self-score)", async () => {
+  it("FIX-335: one scorer flakes (null), the other scores → uses the real peer score (not a self-grade)", async () => {
     const { dir, rt } = project(SCORE_CFG);
     const tried: string[] = [];
     // Both hetero scorers fire in parallel: "codex" flakes (null), "kimi" returns a
-    // real score → take-first must use the non-null peer, NOT fall back to self-score.
+    // real score → take-first must use the non-null peer, NOT degrade to a self-grade.
     const { d, events } = scoreDeps({
       installed: ["claude", "codex", "kimi"],
       scorePeer: async (peer: string) => {
@@ -337,30 +343,49 @@ describe("runScorePairing — US-PAIR-009", () => {
       },
     });
     const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
-    expect(r.status).toBe("scored"); // a real peer score, NOT the self-score fallback
+    expect(r.status).toBe("scored"); // a real peer score, NOT a self-grade
     expect(tried.length).toBeGreaterThanOrEqual(2); // both candidates were fired (parallel)
     expect(r.peer).toBe("kimi"); // the non-null scorer won
     expect(events.filter((e) => e.type === "pair:selected").length).toBeGreaterThanOrEqual(2);
     expect(events.some((e) => e.type === "pair:score")).toBe(true);
-    expect(readStorySelfScores(dir, "US-X-001")[0]?.score).toBe(7); // recorded as a pair score
+    expect(readStoryReviewScores(dir, "US-X-001")[0]?.score).toBe(7); // recorded as a pair score
   });
 
-  it("no heterogeneous candidate → none-available event, never blocks", async () => {
+  it("FIX-343: single-agent env → scores via a fresh SAME-TYPE session (independence = fresh session, not vendor)", async () => {
     const { dir, rt } = project(SCORE_CFG);
-    const { d, events } = scoreDeps({ installed: ["claude"] });
+    const { d } = scoreDeps({ installed: ["claude"] }); // only the builder's own type
+    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
+    expect(r.status).toBe("scored");
+    expect(r.peer).toBe("claude"); // a fresh instance of the builder's own type
+    expect(r.sessionId).toBeDefined();
+    const notes = readStoryReviewScores(dir, "US-X-001");
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.scoring).toBe("pair");
+    expect(notes[0]?.scoredBy).toBe("claude");
+  });
+
+  it("FIX-343: no scorer at all (empty pool) → fail-loud none-available, BLOCKS (no note)", async () => {
+    const { dir, rt } = project(SCORE_CFG);
+    const { d, events } = scoreDeps({ installed: [] });
     const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
     expect(r.status).toBe("none-available");
     expect(events.map((e) => e.type)).toEqual(["pair:none-available"]);
-    expect(readStorySelfScores(dir, "US-X-001")).toHaveLength(0); // fallback note is the caller's self path
+    expect(readStoryReviewScores(dir, "US-X-001")).toHaveLength(0); // NO fallback note — the cycle honestly fails
   });
 
-  it("peer timeout → status timeout, no note, no partial evidence", async () => {
+  it("FIX-343: peer flakes across the bounded retry → status timeout, BLOCKS, no note/evidence", async () => {
     const { dir, rt } = project(SCORE_CFG);
-    const { d } = scoreDeps({ scorePeer: async () => null });
+    let calls = 0;
+    const { d } = scoreDeps({ scorePeer: async () => (calls++, null) });
     const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
     expect(r.status).toBe("timeout");
+    // FIX-343 (C4): two bounded rounds run — hetero {codex,kimi} FIRST (2
+    // candidates × up to 2 attempts), then the same-vendor fallback {claude} (1
+    // candidate × up to 2 attempts). All flake → both rounds exhaust their
+    // bounded budget → timeout, with >3 total scorePeer calls.
+    expect(calls).toBeGreaterThan(3);
     expect(existsSync(join(rt, "peer", "cycle-c1.score.pair.json"))).toBe(false);
-    expect(readStorySelfScores(dir, "US-X-001")).toHaveLength(0);
+    expect(readStoryReviewScores(dir, "US-X-001")).toHaveLength(0);
   });
 
   it("out-of-range / malformed peer score → error status, nothing written", async () => {
@@ -368,7 +393,70 @@ describe("runScorePairing — US-PAIR-009", () => {
     const { d } = scoreDeps({ scorePeer: async () => ({ score: 99, verdict: "good", rationale: "x", cost: 0 }) });
     const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
     expect(r.status).toBe("error");
-    expect(readStorySelfScores(dir, "US-X-001")).toHaveLength(0);
+    expect(readStoryReviewScores(dir, "US-X-001")).toHaveLength(0);
+  });
+
+  // ── FIX-343 (② BOUNDED hetero preference) ──────────────────────────────────
+  it("FIX-343 (②): a hetero peer present+responsive WINS over a faster same-vendor scorer", async () => {
+    // builder=claude; pool = claude (same-vendor) + codex,kimi (hetero). The
+    // same-vendor 'claude' would reply INSTANTLY, the hetero peers a tick later.
+    // The OLD runtime (fire-all + take-first) let claude win; the bounded
+    // preference runs the HETERO round FIRST, so a hetero peer wins.
+    const { dir, rt } = project(SCORE_CFG);
+    const tried: string[] = [];
+    const { d } = scoreDeps({
+      installed: ["claude", "codex", "kimi"],
+      scorePeer: async (peer: string) => {
+        tried.push(peer);
+        if (peer === "claude") return { score: 9, verdict: "good" as const, rationale: "instant same-vendor", cost: 0 };
+        await new Promise((r) => setTimeout(r, 5)); // hetero replies slightly later
+        return { score: 7, verdict: "ok" as const, rationale: "hetero peer scored", cost: 0.03 };
+      },
+    });
+    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
+    expect(r.status).toBe("scored");
+    expect(["codex", "kimi"]).toContain(r.peer); // a HETERO peer won, NOT same-vendor claude
+    expect(tried).not.toContain("claude"); // the same-vendor round never ran (hetero succeeded first)
+    expect(readStoryReviewScores(dir, "US-X-001")[0]?.scoredBy).not.toBe("claude");
+  });
+
+  it("FIX-343 (②): hetero pool ALL-FAILS within budget → FALLS BACK to same-vendor-fresh", async () => {
+    // builder=claude; hetero = codex,kimi (both flake null across the bounded
+    // retry); same-vendor = claude (scores). The gate must still produce a Review
+    // Score via the same-vendor-fresh fallback — never block on a dead hetero pool.
+    const { dir, rt } = project(SCORE_CFG);
+    const tried: string[] = [];
+    const { d } = scoreDeps({
+      installed: ["claude", "codex", "kimi"],
+      scorePeer: async (peer: string) => {
+        tried.push(peer);
+        return peer === "claude" ? { score: 8, verdict: "good" as const, rationale: "same-vendor fresh session scored", cost: 0.01 } : null;
+      },
+    });
+    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
+    expect(r.status).toBe("scored");
+    expect(r.peer).toBe("claude"); // same-vendor fallback won after hetero failed
+    expect(tried).toContain("codex"); // hetero round was attempted first
+    expect(tried).toContain("kimi");
+    expect(readStoryReviewScores(dir, "US-X-001")[0]?.scoredBy).toBe("claude");
+  });
+
+  it("FIX-343 (②): SINGLE-VENDOR install → same-vendor immediately, no hetero wait/hang", async () => {
+    // Only the builder's own vendor is installed → the hetero pool is EMPTY, so
+    // we go straight to the same-vendor round (no wasted hetero spawn/wait).
+    const { dir, rt } = project(SCORE_CFG);
+    const tried: string[] = [];
+    const { d } = scoreDeps({
+      installed: ["claude"],
+      scorePeer: async (peer: string) => {
+        tried.push(peer);
+        return { score: 8, verdict: "good" as const, rationale: "single-vendor fresh session", cost: 0 };
+      },
+    });
+    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
+    expect(r.status).toBe("scored");
+    expect(r.peer).toBe("claude");
+    expect(tried).toEqual(["claude"]); // exactly one spawn — no empty hetero round burned a probe
   });
 });
 
@@ -538,7 +626,7 @@ describe("retryPeerConsult — FIX-293 follow-up: same-type SEPARATE-SESSION fal
   // spawns a DISTINCT process — even when the peer type equals the working type,
   // it is a separate session, never the builder scoring its own work in-session.
   // Here reviewPeer asserts it received a peer name to spawn (a separate session);
-  // an in-session self-score path would never invoke reviewPeer at all.
+  // an in-session self-grade path would never invoke reviewPeer at all.
   it("RED LINE — same-type peer is reached via reviewPeer (separate spawn), never in-session self-review", async () => {
     const { rt } = project(null);
     let reviewPeerInvoked = false;

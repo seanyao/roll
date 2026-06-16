@@ -93,13 +93,16 @@ roll pair status
 `design`、`test`、`cycle` 把同一套机制扩到其它检查点；想要更早或更广的第二双
 眼睛时在 `stages` 里开启。
 
-## 评分 —— 配对打分，不让作者给自己打分
+## Review Score —— 同行打分，绝不让作者给自己打分
 
-agent 给自己的交付打分是利益冲突，所以质量评分本身就是一个结对场景（`score` 阶段）：
+agent 给自己的交付打分是利益冲突，所以质量评分（**Review Score**）一律由
+**全新独立会话**里的 Reviewer 产出，绝不由工作 agent 自评：
 
-- **loop 内**：验收闸通过后，runner 让异构配对 agent 给交付打分。note 落在卡片
-  `notes/` 目录，带溯源——`scoring: pair` 与 `scored-by: <agent>`。
-- **手动**：`roll pair score <story-id> --summary "<交付摘要>"` 在会话里走同一适配器。
-- **回落，绝不阻塞**：无异构候选、超时或协议不符时退回经典自评——
-  `roll self-score <skill> <story> <score> <verdict> "<理由>" --fallback-reason "<原因>"`
-  ——缺席通过 `pair:none-available` 事件留痕。两条命令都幂等。
+- **loop 内**：验收闸通过后，runner 拉起一个全新会话的 Reviewer 给交付打分。
+  note 落在卡片 `notes/` 目录，带溯源——`scoring: pair`、`scored-by: <agent>`
+  以及全新会话 id（独立性可核验）。
+- **手动**：`roll pair score <story-id> --summary "<交付摘要>"` 在一个全新会话里走同一适配器。
+- **独立性看会话，不看厂商**：同厂全新会话是最低可接受档；不同 agent+model+会话
+  （非子 agent）更鼓励。任何与 builder 共享会话的打分——包括其子 agent——都被判为自评而拒收。
+  无异构候选、超时或协议不符时**不会**回落成自评；缺席通过 `pair:none-available`
+  事件留痕，该 story 仍欠一份全新会话的 Review Score 才能 attest（`review_score_missing`）。

@@ -398,9 +398,9 @@ token**——分数完全从 loop 已有的 facts 算出（是否 merge、CI 结
   "scope_fidelity": 1.0, "quality": 1.0, "efficiency": 0.6, "cleanliness": 1.0 } }
 ```
 
-> **结果评分不是 skill 自评。** skill 自评是 agent 对单次 skill 运行的**主观**复盘，
-> 写在 `.roll/notes/*.md`；结果评分是这套从 facts 算出的**客观**每轮结果分。两者是
-> 不同信号，在 dashboard 上分两行各自显示，绝不混为一谈。
+> **结果评分不是 Review Score。** Review Score 是全新独立会话的同行 Reviewer 对
+> 交付质量的复盘（绝非作者自评），写在 `.roll/notes/*.md`；结果评分是这套从 facts
+> 算出的**客观**每轮结果分。两者是不同信号，在 dashboard 上分两行各自显示，绝不混为一谈。
 
 ### Rubric（六个维度）
 
@@ -449,7 +449,7 @@ Loop result-eval — last 14 cycles
     cleanliness      100%
 ```
 
-`roll loop status` dashboard 上也有一行结果评分小结，**与 skill 自评那行分开**显示，
+`roll loop status` dashboard 上也有一行结果评分小结，**与 Review Score 那行分开**显示，
 两者绝不混淆：
 
 ```

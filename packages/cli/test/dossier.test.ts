@@ -881,10 +881,10 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
     expect(mounted.match(/data-phase="delivery"/g)!.length).toBe(1);
   });
 
-  it("US-EVID-013: retrospective renders structured self-score summary, note link, dimensions, and trend", () => {
+  it("US-EVID-013: retrospective renders the structured Review Score summary, note link, dimensions, and trend", () => {
     const html = renderStoryDossier({
       story,
-      selfScore: {
+      reviewScore: {
         skill: "roll-build",
         score: 9,
         verdict: "good",
@@ -892,28 +892,28 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
         note: "证据链完整，门禁干净。",
         href: "notes/2026-06-08-roll-build-US-A-1.md",
         dimensions: { "test-quality": 8 },
+        scoring: "pair",
+        scoredBy: "kimi",
+        sessionId: "c-a1:score:kimi:a1:1700000000",
       },
-      selfScoreTrend: "self-score: mean 8.0 / min 7 / redo 0 (last 14)",
+      reviewScoreTrend: "review-score: mean 8.0 / min 7 / redo 0 (last 14)",
     });
-    // US-DOSSIER-019: with no pair provenance this score renders as the
-    // self-score FALLBACK card (the `selfscore-good` verdict class is preserved).
-    expect(html).toContain("selfscore-good");
-    expect(html).toContain('data-scoring="self"');
+    expect(html).toContain("reviewscore-good");
     expect(html).toContain("<b>9</b>/10");
     expect(html).toContain("good");
     expect(html).toContain("证据链完整，门禁干净。");
     expect(html).toContain('href="notes/2026-06-08-roll-build-US-A-1.md"');
     expect(html).toContain("<code>test-quality</code>: <b>8</b>");
-    expect(html).toContain("self-score: mean 8.0 / min 7 / redo 0 (last 14)");
-    expect(storySpine({ story, selfScore: { skill: "roll-build", score: 9, verdict: "good", ts: "", note: "" } })).toContain(
+    expect(html).toContain("review-score: mean 8.0 / min 7 / redo 0 (last 14)");
+    expect(storySpine({ story, reviewScore: { skill: "roll-build", score: 9, verdict: "good", ts: "", note: "" } })).toContain(
       "Retrospective",
     );
   });
 
-  it("US-DOSSIER-019: a pair score is shown FIRST and prominent (peer verdict, score, rationale, scorer, note link)", () => {
+  it("FIX-343 (AC6): the SINGLE peer Review Score block shows score/verdict/rationale, the Reviewer, AND the session id (independence visible); no SELF badge", () => {
     const html = renderStoryDossier({
       story,
-      selfScore: {
+      reviewScore: {
         skill: "roll-build",
         score: 8,
         verdict: "good",
@@ -923,69 +923,77 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
         dimensions: { "test-quality": 8 },
         scoring: "pair",
         scoredBy: "kimi",
+        sessionId: "c-a1:score:kimi:a1:1700000099",
       },
     });
-    // The PAIR badge + scorer agent lead the block; it carries the pair data-attr.
-    expect(html).toContain('data-scoring="pair"');
-    expect(html).toContain("score-kind-pairscore");
-    expect(html).toContain("kimi"); // who graded it (AC3)
-    expect(html).toContain("Pair score — graded by peer kimi");
-    expect(html).toContain("结对打分 —— 由评委 kimi 评判");
+    // ONE peer-review badge — never the old self/pair binary.
+    expect(html).toContain('data-scoring="peer"');
+    expect(html).toContain("score-kind-peerscore");
+    expect(html).toContain("kimi"); // who graded it
+    expect(html).toContain("Review Score — by peer Reviewer kimi");
+    expect(html).toContain("评审分 —— 由评审 kimi 评判");
+    // AC9: the Reviewer's fresh session id is rendered (independence is visible).
+    expect(html).toContain("Reviewer session: c-a1:score:kimi:a1:1700000099");
     expect(html).toContain("<b>8</b>/10");
     expect(html).toContain("结对评委确认证据链完整。"); // rationale
     expect(html).toContain('href="notes/2026-06-13-roll-build-US-A-1-pair.md"'); // note link
-    // A pair score must NOT be labelled a self-score fallback.
-    expect(html).not.toContain("Self-score (fallback");
+    // No SELF / 自评 badge, no data-scoring="self", no selfscore-* class.
+    expect(html).not.toContain('data-scoring="self"');
+    expect(html).not.toContain("score-kind-selfscore");
+    expect(html).not.toMatch(/class="[^"]*\bselfscore-/);
+    expect(html).not.toContain(">SELF<");
+    expect(html).not.toContain(">自评<");
   });
 
-  it("US-DOSSIER-019: a self-score is the LABELLED fallback and surfaces its fallback-reason (AC2)", () => {
+  it("FIX-343 (AC6): a LEGACY self note renders in a muted not-gating style, never the live peer block", () => {
     const html = renderStoryDossier({
       story,
-      selfScore: {
+      reviewScore: {
         skill: "roll-build",
         score: 7,
         verdict: "ok",
         ts: "2026-06-13T12:00:00Z",
-        note: "无可用结对评委，自评留痕。",
+        note: "历史自评留痕。",
         scoring: "self",
-        fallbackReason: "no qualified heterogeneous scorer",
+        fallbackReason: "pairing off (legacy note)",
       },
     });
     expect(html).toContain('data-scoring="self"');
-    expect(html).toContain("score-kind-selfscore");
-    expect(html).toContain("Self-score (fallback — no pair score)");
-    expect(html).toContain("自评（回落 —— 无结对打分）");
-    // The fallback reason comes from the SAME execution-layer field (not invented).
-    expect(html).toContain("Fallback reason: no qualified heterogeneous scorer");
-    expect(html).toContain("回落原因：no qualified heterogeneous scorer");
-    expect(html).not.toContain("Pair score");
+    expect(html).toContain("score-kind-legacy");
+    expect(html).toContain("Legacy self-grade (not gating)");
+    expect(html).toContain("历史自评（不计入门禁）");
+    expect(html).toContain("Recorded reason: pairing off (legacy note)");
+    // A legacy self note is NOT the live peer block.
+    expect(html).not.toContain('data-scoring="peer"');
+    expect(html).not.toContain("Review Score — by peer Reviewer");
   });
 
-  it("US-DOSSIER-019: no score at all renders an honest empty retrospective, never throwing (AC4)", () => {
+  it("FIX-343 (AC6): no score at all renders an honest empty retrospective, never throwing", () => {
     const html = renderStoryDossier({ story });
     expect(html).toContain('data-phase="retrospective"');
     expect(html).toContain("Not yet written");
     // No score card is rendered (the `score-kind-*` strings still appear in the
     // always-emitted CSS rules, so assert on the rendered card markup instead).
-    expect(html).not.toContain('data-scoring="pair"');
+    expect(html).not.toContain('data-scoring="peer"');
     expect(html).not.toContain('data-scoring="self"');
     expect(html).not.toContain('<span class="score-kind-badge');
   });
 
-  it("US-DOSSIER-019: collected input lifts pair provenance from the score note's frontmatter", () => {
+  it("FIX-343 (AC6): collected input lifts peer provenance (scoredBy + sessionId) from the score note's frontmatter", () => {
     const p = project();
     const card = join(p, ".roll", "features", "alpha", "US-A-1");
     mkdirSync(join(card, "notes"), { recursive: true });
     writeFileSync(
       join(card, "notes", "2026-06-13-roll-build-US-A-1-1.md"),
-      "---\nskill: roll-build\nstory: US-A-1\nscore: 8\nverdict: good\nts: 2026-06-13T12:00:00Z\nscoring: pair\nscored-by: kimi\n---\n\n结对评委确认。\n",
+      "---\nskill: roll-build\nstory: US-A-1\nscore: 8\nverdict: good\nts: 2026-06-13T12:00:00Z\nscoring: pair\nscored-by: kimi\nsession-id: c1:score:kimi:a1:42\n---\n\n结对评委确认。\n",
     );
     const input = collectStoryDossierInput(p, { id: "US-A-1", epic: "alpha", type: "US", delivered: true });
-    expect(input.selfScore?.scoring).toBe("pair");
-    expect(input.selfScore?.scoredBy).toBe("kimi");
+    expect(input.reviewScore?.scoring).toBe("pair");
+    expect(input.reviewScore?.scoredBy).toBe("kimi");
+    expect(input.reviewScore?.sessionId).toBe("c1:score:kimi:a1:42");
   });
 
-  it("US-DOSSIER-019: a self-score note's fallback-reason flows through to collected input", () => {
+  it("FIX-343 (AC6): a legacy self note's provenance flows through to collected input (tolerated on read)", () => {
     const p = project();
     const card = join(p, ".roll", "features", "alpha", "US-A-1");
     mkdirSync(join(card, "notes"), { recursive: true });
@@ -994,8 +1002,8 @@ describe("renderStoryDossier — US-DOSSIER-001c", () => {
       "---\nskill: roll-build\nstory: US-A-1\nscore: 7\nverdict: ok\nts: 2026-06-13T12:00:00Z\nscoring: self\nfallback-reason: pairing off\n---\n\n自评留痕。\n",
     );
     const input = collectStoryDossierInput(p, { id: "US-A-1", epic: "alpha", type: "US", delivered: true });
-    expect(input.selfScore?.scoring).toBe("self");
-    expect(input.selfScore?.fallbackReason).toBe("pairing off");
+    expect(input.reviewScore?.scoring).toBe("self");
+    expect(input.reviewScore?.fallbackReason).toBe("pairing off");
   });
 
   it("US-EVID-007: execution station can be filled by merged PR evidence when squash removed tcr commits", () => {
@@ -1546,14 +1554,14 @@ describe("roll index — US-DOSSIER-001d three-layer integration", () => {
   });
 });
 
-describe("US-META-008 — self-score notes live in the card folder", () => {
+describe("US-META-008 — Review Score notes live in the card folder", () => {
   it("retro reads the card's notes/ first (card-local beats .roll/notes)", () => {
     const p = project();
     const card = join(p, ".roll", "features", "alpha", "US-A-1");
     mkdirSync(join(card, "notes"), { recursive: true });
     writeFileSync(
       join(card, "notes", "2026-06-08-roll-build-US-A-1-1.md"),
-      "---\nscore: 9\nverdict: good\n---\n\nscore: 9\nverdict: good\n\n卡内自评正文。\n",
+      "---\nscore: 9\nverdict: good\n---\n\nscore: 9\nverdict: good\n\n卡内评审正文。\n",
     );
     // A stale copy in the legacy flat dir must NOT win.
     mkdirSync(join(p, ".roll", "notes"), { recursive: true });
@@ -1565,9 +1573,9 @@ describe("US-META-008 — self-score notes live in the card folder", () => {
       id: "US-A-1", epic: "alpha", type: "US", delivered: true,
     });
     expect(input.retro).toContain("9");
-    expect(input.retro).toContain("卡内自评正文");
-    expect(input.selfScore?.score).toBe(9);
-    expect(input.selfScore?.href).toContain("notes/2026-06-08-roll-build-US-A-1-1.md");
+    expect(input.retro).toContain("卡内评审正文");
+    expect(input.reviewScore?.score).toBe(9);
+    expect(input.reviewScore?.href).toContain("notes/2026-06-08-roll-build-US-A-1-1.md");
   });
 
   it("legacy .roll/notes still serves cards that have no local notes/", () => {
@@ -1579,10 +1587,10 @@ describe("US-META-008 — self-score notes live in the card folder", () => {
     );
     const input = collectStoryDossierInput(p, { id: "FIX-2", epic: "alpha", type: "FIX", delivered: false });
     expect(input.retro).toContain("旧档兼容");
-    expect(input.selfScore?.score).toBe(8);
+    expect(input.reviewScore?.score).toBe(8);
   });
 
-  it("US-EVID-013: collected self-score carries dimensions and trend context", () => {
+  it("US-EVID-013: collected Review Score carries dimensions and trend context", () => {
     const p = project();
     const card = join(p, ".roll", "features", "alpha", "US-A-1");
     mkdirSync(join(card, "notes"), { recursive: true });
@@ -1602,8 +1610,8 @@ describe("US-META-008 — self-score notes live in the card folder", () => {
     const input = collectStoryDossierInput(p, {
       id: "US-A-1", epic: "alpha", type: "US", delivered: true,
     });
-    expect(input.selfScore?.dimensions).toEqual({ "test-quality": 6 });
-    expect(input.selfScoreTrend).toBe("self-score: mean 7.0 / min 5 / redo 1 (last 14)");
+    expect(input.reviewScore?.dimensions).toEqual({ "test-quality": 6 });
+    expect(input.reviewScoreTrend).toBe("review-score: mean 7.0 / min 5 / redo 1 (last 14)");
   });
 });
 

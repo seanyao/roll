@@ -194,7 +194,10 @@ describe("defaultPairingConfig + renderPairingConfig (roll pair init scaffold)",
     expect(d.stages).toEqual(["code", "score"]);
     expect(d.capability["claude"]).toEqual(["code", "score"]);
   });
-  it("US-PAIR-009: selector qualifies heterogeneous peers for the score stage", () => {
+  it("FIX-343: the score stage is same-vendor-friendly — a fresh instance of the BUILDER'S OWN type qualifies", () => {
+    // Independence = another assigned fresh session, NOT vendor heterogeneity:
+    // the score stage drops the isHeterogeneous filter and INCLUDES the builder's
+    // own canonical type (spawned as a fresh subprocess).
     const picked = selectPairingCandidates({
       installed: ["claude", "codex", "kimi"],
       isAvailable: () => true,
@@ -203,8 +206,24 @@ describe("defaultPairingConfig + renderPairingConfig (roll pair init scaffold)",
       cfg: cfg({ stages: ["score"], capability: { codex: ["score"], kimi: ["score"] } }),
       cycleId: "c1",
     });
-    expect(picked.length).toBe(2);
-    expect(picked).not.toContain("claude");
+    expect(picked.length).toBe(3);
+    expect(picked).toContain("claude"); // builder's own type — a fresh session is independent
+    expect(picked).toContain("codex");
+    expect(picked).toContain("kimi");
+  });
+
+  it("FIX-343: the score stage is MANDATORY — qualifies even when pairing is disabled / no score stage / no capability", () => {
+    // A repo with NO pairing.yaml (cfg.enabled=false, empty stages/capability)
+    // still owes a Review Score: the selector must yield the installed agents.
+    const picked = selectPairingCandidates({
+      installed: ["claude"],
+      isAvailable: () => true,
+      workingAgent: "claude",
+      stage: "score",
+      cfg: cfg({ enabled: false, stages: [], capability: {} }),
+      cycleId: "c1",
+    });
+    expect(picked).toEqual(["claude"]); // single-agent env: a fresh same-type session
   });
   it("renders explicit, re-parseable yaml (round-trip)", () => {
     const c = defaultPairingConfig(["claude", "codex", "kimi"]);

@@ -41,19 +41,19 @@ describe("US-EVID-014 correction actuator decisions", () => {
     expect(decision.attribution.evidence).toContain("ac-map.json");
   });
 
-  it("auto mode returns regression self-score stories to Todo/Hold", () => {
+  it("auto mode returns regression review-score stories to Todo/Hold", () => {
     const decision = decideCorrectionAction({
       storyId: "US-EVID-014",
       cycleId: "cycle-1",
-      reasons: ["self-score regression 3/10 blocks Done"],
+      reasons: ["review-score regression 3/10 blocks Done"],
       mode: "auto",
       events: [],
     });
 
     expect(decision).toMatchObject({
       action: "return_story",
-      signal: "self_score_regression",
-      source: "self-score",
+      signal: "review_score_regression",
+      source: "review-score",
     });
   });
 

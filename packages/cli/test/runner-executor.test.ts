@@ -436,6 +436,45 @@ describe("buildTerminalRecord — the cycle:terminal twin (US-TRUTH-001 + FIX-29
     expect(ev.model).toBe("deepseek-v4-pro");
     expect(ev.usage).toEqual({ present: true, value: { model: "deepseek-v4-pro", tokensIn: 1200, tokensOut: 400 } });
   });
+
+  // FIX-343 (step ③): the attest fact is resolved from the cwd PASSED IN (the
+  // executor now passes the PERSISTENT repoCwd, not the worktree). These prove
+  // the resolution follows that cwd, so a torn-down worktree no longer
+  // false-negatives `acmap_missing`/`not_rendered`.
+  it("FIX-343: resolves report+ac-map from the passed (persistent) cwd → attest present", () => {
+    const persistent = realpathSync(mkdtempSync(join(tmpdir(), "roll-343-term-")));
+    execDirs.push(persistent);
+    const storyDir = join(persistent, ".roll", "features", "uncategorized", "US-RUN-001");
+    const latest = join(storyDir, "latest");
+    mkdirSync(latest, { recursive: true });
+    writeFileSync(join(storyDir, "ac-map.json"), "[]\n");
+    writeFileSync(join(latest, "US-RUN-001-report.html"), "<html></html>\n");
+    const ev = buildTerminalRecord(
+      { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
+      { ...CTX, storyId: "US-RUN-001" },
+      persistent, // the persistent .roll root — what the executor now passes
+      1780688082,
+    );
+    expect(ev.attest.present).toBe(true);
+    if (ev.attest.present) {
+      expect(ev.attest.value.acMap).toBe(true);
+      expect(ev.attest.value.reportPath).toContain(persistent);
+    }
+  });
+
+  it("FIX-343: a GONE worktree cwd false-negatives — the executor avoids it by passing repoCwd", () => {
+    // The worktree path no longer exists at terminal time; resolving from it
+    // reports the false-negative the fix eliminates (acmap_missing). The
+    // executor never passes this path now — it passes the persistent repoCwd.
+    const ev = buildTerminalRecord(
+      { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
+      { ...CTX, storyId: "US-RUN-001" },
+      join(tmpdir(), "roll-343-gone-worktree-does-not-exist"),
+      1780688082,
+    );
+    expect(ev.attest.present).toBe(false);
+    if (!ev.attest.present) expect(ev.attest.reason).toBe("acmap_missing");
+  });
 });
 
 describe("dryRunPlan", () => {
@@ -470,6 +509,10 @@ function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<str
     },
     skillBody: "work",
     clock: () => 42,
+    // FIX-343: default to NO installed agents so the now-mandatory score stage is
+    // hermetic (no real-env scorer spawns). Tests that exercise the peer gate /
+    // scorer pool pin their own installedAgents.
+    installedAgents: () => [],
     agentSpawn: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0, timedOut: false })),
     evidence: {
       openFrame: vi.fn(() => "/repo/.roll/features/demo/US-RUN-001/20260605-000000-1"),
@@ -1329,7 +1372,7 @@ describe("executeCommand — command → executor mapping", () => {
   });
 
   // FIX-293 — the peer gate now has teeth (was: verdict discarded, cycle
-  // self-scored anyway). A high-complexity delivery with no peer review BLOCKS
+  // self-graded anyway). A high-complexity delivery with no peer review BLOCKS
   // (agentExit 1, so Done is withheld) and the executor re-attempts the consult
   // ONCE. The complexity check keys on a real cycle diff, so these tests build a
   // real git worktree whose branch is N files ahead of origin/main.
@@ -1436,7 +1479,7 @@ describe("executeCommand — command → executor mapping", () => {
     // a self-review VIOLATION. The gate blocks, re-attempts the consult once, and
     // when that still yields no evidence the cycle ends NOT-Done with an
     // escalation alert. (Reproduces the FIX-284 root cause: multi-vendor configured
-    // yet self-scored.)
+    // yet self-graded.)
     const wt = highComplexityWorktree();
     const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-312-violation-")));
     execDirs.push(rt);
@@ -1477,8 +1520,11 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 0 } });
     const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
     expect(events.some((e) => e.type === "peer:gate" && e.verdict === "skipped")).toBe(true);
-    // soft → never invokes the retry spawn.
-    expect(ports.agentSpawn).not.toHaveBeenCalled();
+    // soft → never invokes the peer-gate RETRY spawn. (FIX-343: the mandatory
+    // score stage DOES spawn scorers via the same agentSpawn, so assert on the
+    // peer-gate REVIEW prompt specifically, not the total call count.)
+    const spawnPrompts = (ports.agentSpawn as ReturnType<typeof vi.fn>).mock.calls.map((c) => (c[1] as { skillBody?: string }).skillBody ?? "");
+    expect(spawnPrompts.some((p) => p.includes("PAIRING reviewer"))).toBe(false);
   });
 
   it("FIX-293: prior peer evidence present → consulted, no retry, not blocked", async () => {

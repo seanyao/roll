@@ -64,10 +64,12 @@ An AC with **zero evidence** can never claim `pass`: the renderer forces it
 down to 🟧 Claimed and lists it under **Discrepancies**. Verbal completion
 ("I confirmed it works") is exactly what this rules out.
 
-## Self-Score fold
+## Review Score fold
 
-When `.roll/notes/` carries same-story self-score entries, the report ends
-with a collapsed *Self-Score · 自评* section. No entries → no section.
+When `.roll/notes/` carries the story's Review Score entry, the report ends
+with a collapsed *Review Score · 评审分* section. No entry → no section. The
+Review Score is produced by a fresh-session peer Reviewer, never by the
+building agent.
 
 ## Where cards come from — `roll idea`
 

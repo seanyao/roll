@@ -5,7 +5,7 @@
  * One story, five stations: Definition (the wish, quoted from spec.md) →
  * Design (spec bullets) → Execution (TCR commits, when the caller supplies
  * them) → Delivery (attest banner + AC table from ac-map.json) →
- * Retrospective (self-score note). Every figure on the page is computed from
+ * Retrospective (Review Score note). Every figure on the page is computed from
  * the real card folder — spec.md / ac-map.json / latest/ — never typed in.
  *
  * Coexistence with story-page.ts: renderStoryPage() mints the INITIAL
@@ -23,7 +23,7 @@ import { type DossierStory } from "./archive.js";
 import { rowDelivered } from "./truth-adapter.js";
 import { DOSSIER_CSS } from "./dossier-css.js";
 import { SPINE_STAGES, deriveDeliveryLadder } from "./dossier-index.js";
-import { readLatestStorySelfScore, readSelfScoreTrend, type SelfScoreView } from "./self-score.js";
+import { readLatestStoryReviewScore, readReviewScoreTrend, type ReviewScoreView } from "./review-score.js";
 import { phaseSectionTag } from "./story-page.js";
 
 const esc = (s: string): string =>
@@ -174,12 +174,12 @@ export interface StoryDossierInput {
   storyGraph?: StoryGraph;
   /** US-EVID-014: traceable automatic correction decisions for this story. */
   correctionActions?: CorrectionTraceEntry[];
-  /** Retrospective text (self-score note body). */
+  /** Retrospective text (Review Score note body). */
   retro?: string;
-  /** Structured latest self-score note for the retrospective station. */
-  selfScore?: SelfScoreView;
+  /** Structured latest Review Score note for the retrospective station. */
+  reviewScore?: ReviewScoreView;
   /** US-SKILL-014 trend line, merged from card-local and legacy notes. */
-  selfScoreTrend?: string;
+  reviewScoreTrend?: string;
   /** US-DOSSIER-023: the claimed→merged→attested rung this story reached, derived
    *  from the SAME signals `deriveDeliveryLadder` folds (backlog ✅ Done claim +
    *  FIX-278 merge truth via `story.delivered` + ac-map/report/screenshot evidence).
@@ -224,7 +224,7 @@ export function stationsDone(d: StoryDossierInput): Set<string> {
   if ((d.design?.length ?? 0) > 0 || d.peerReview !== undefined) done.add("design");
   if ((d.commits?.length ?? 0) > 0 || (d.executionRefs?.length ?? 0) > 0) done.add("execution");
   if (d.story.delivered) done.add("delivery");
-  if (d.selfScore !== undefined || (d.retro !== undefined && d.retro !== "")) done.add("retrospective");
+  if (d.reviewScore !== undefined || (d.retro !== undefined && d.retro !== "")) done.add("retrospective");
   return done;
 }
 
@@ -554,69 +554,85 @@ function peerReviewHtml(review: PeerReviewEvidence | undefined): string {
   );
 }
 
-function selfScoreClass(verdict: string): string {
+function reviewScoreClass(verdict: string): string {
   const v = verdict.toLowerCase();
   if (v === "good" || v === "ok" || v === "regression") return v;
   return "unknown";
 }
 
-function selfScoreDimsHtml(score: SelfScoreView): string {
+function reviewScoreDimsHtml(score: ReviewScoreView): string {
   const dims = Object.entries(score.dimensions ?? {})
     .filter(([, v]) => Number.isFinite(v))
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   if (dims.length === 0) return "";
-  return `<div class="selfscore-dims">${dims.map(([k, v]) => `<span><code>${esc(k)}</code>: <b>${esc(String(v))}</b></span>`).join(" ")}</div>`;
+  return `<div class="reviewscore-dims">${dims.map(([k, v]) => `<span><code>${esc(k)}</code>: <b>${esc(String(v))}</b></span>`).join(" ")}</div>`;
 }
 
 /**
- * US-DOSSIER-019 — the retrospective score block, pair-score-first.
+ * FIX-343 (AC6) — the retrospective Review Score block: a SINGLE peer-review
+ * block. Owner ruling (2026-06-16): the working agent NEVER grades its own work; the
+ * cycle's Review Score is produced solely by a fresh-session peer Reviewer
+ * (runScorePairing). So there is ONE peer-review badge, never a self/pair
+ * binary. The block shows the score N/10, verdict, rationale, the Reviewer
+ * (`scoredBy`) AND the Reviewer's fresh `sessionId` — so the independence of the
+ * scoring session is VISIBLE (verifiable, not asserted), with the
+ * `.roll/peer/*.json`-backed full note linked.
  *
- * Owner ruling (2026-06-13): pair scoring (a heterogeneous peer grades the
- * delivery) is the main path now and is more reliable; an agent grading its
- * own work is a conflict of interest. So when the score note carries pair
- * provenance (`scoring: pair`, written by `runScorePairing` / `roll pair
- * score`), it is shown FIRST and PROMINENT — the peer verdict, score, rationale
- * and scorer agent lead the block, with the `.roll/peer/*.json`-backed full
- * note linked. A self-score is shown only as a clearly LABELLED FALLBACK, with
- * its `fallback-reason` (pairing off / no candidate / timeout) surfaced from the
- * SAME execution-layer field so the page never silently passes a self-grade off
- * as a peer grade.
+ * A LEGACY self note (`scoring: self` — historical, written before FIX-343) is
+ * tolerated on READ and rendered in a clearly muted "legacy self-grade (not
+ * gating)" style so its presence is honest, but it is NEVER the live peer block.
  *
  * Dimensions render first/prominent; the project trend stays secondary prose.
  */
-function scoreBlockHtml(score: SelfScoreView | undefined, trend: string | undefined, retro: string | undefined): string {
+function scoreBlockHtml(score: ReviewScoreView | undefined, trend: string | undefined, retro: string | undefined): string {
   if (score === undefined) return retro !== undefined && retro !== "" ? `<p>${esc(retro)}</p>` : "";
-  const isPair = score.scoring === "pair";
+  // FIX-343: a `scoring: self` note is a LEGACY artifact (the working agent no
+  // longer grades its own work). It is the ONLY non-peer case; everything else is the
+  // live peer Review Score.
+  const isLegacySelf = score.scoring === "self";
   const href =
     score.href !== undefined && score.href !== "" ? `<a href="${esc(score.href)}">${bi("Full note", "全文 note")}</a>` : "";
-  // The line of record: who graded this delivery, and (for a fallback) why it
-  // is not a pair score. EN and 中 on separate lines per the bilingual rule.
-  const provenance = isPair
-    ? bi(
-        `Pair score — graded by peer ${score.scoredBy ?? "(peer)"}`,
-        `结对打分 —— 由评委 ${score.scoredBy ?? "（评委）"} 评判`,
-      )
-    : bi("Self-score (fallback — no pair score)", "自评（回落 —— 无结对打分）");
-  // AC2: the fallback reason, sourced from the SAME execution-layer field
-  // (`fallback-reason:` in the note), so a self-grade never masquerades as paired.
-  const fallbackLine =
-    !isPair && score.fallbackReason !== undefined && score.fallbackReason !== ""
-      ? `<p class="score-fallback-reason">${bi(
-          `Fallback reason: ${score.fallbackReason}`,
-          `回落原因：${score.fallbackReason}`,
-        )}</p>`
+  const trendLine = trend !== undefined && trend !== "" ? `<p class="reviewscore-trend">${esc(trend)}</p>` : "";
+  if (isLegacySelf) {
+    // Legacy self note — muted, explicitly NOT gating. Kept visible for history.
+    const reason =
+      score.fallbackReason !== undefined && score.fallbackReason !== ""
+        ? `<p class="score-legacy-reason">${bi(`Recorded reason: ${score.fallbackReason}`, `留痕原因：${score.fallbackReason}`)}</p>`
+        : "";
+    return (
+      `<div class="reviewscore-card score-card legacy-selfnote reviewscore-${reviewScoreClass(score.verdict)}" data-scoring="self">` +
+      `<p class="score-provenance"><span class="score-kind-badge score-kind-legacy">${bi("LEGACY", "历史")}</span> ` +
+      `${bi("Legacy self-grade (not gating)", "历史自评（不计入门禁）")}</p>` +
+      reason +
+      `<p><span class="reviewscore-badge">${esc(score.verdict)}</span> <b>${esc(String(score.score))}</b>/10 · ${esc(score.verdict)} · <code>${esc(score.skill)}</code>${href !== "" ? ` · ${href}` : ""}</p>` +
+      (score.note !== "" ? `<p class="note">${esc(score.note)}</p>` : "") +
+      reviewScoreDimsHtml(score) +
+      trendLine +
+      `</div>`
+    );
+  }
+  // The live PEER Review Score block. The line of record: who graded this
+  // delivery AND the Reviewer's fresh session id (independence is visible). EN
+  // and 中 on separate lines per the bilingual rule.
+  const reviewer = score.scoredBy ?? "(reviewer)";
+  const provenance = bi(
+    `Review Score — by peer Reviewer ${reviewer}`,
+    `评审分 —— 由评审 ${score.scoredBy ?? "（评审）"} 评判`,
+  );
+  // FIX-343 (AC9): surface the Reviewer's fresh session id so "an independent
+  // fresh session scored this" is verifiable on the page, not just asserted.
+  const sessionLine =
+    score.sessionId !== undefined && score.sessionId !== ""
+      ? `<p class="score-session">${bi(`Reviewer session: ${score.sessionId}`, `评审 session：${score.sessionId}`)}</p>`
       : "";
-  const kindCls = isPair ? "pairscore" : "selfscore";
-  const badgeLabel = isPair ? bi("PAIR", "结对") : bi("SELF", "自评");
-  const trendLine = trend !== undefined && trend !== "" ? `<p class="selfscore-trend">${esc(trend)}</p>` : "";
-  // Dimensions first/prominent (AC3 — score/verdict/理由 齐备); trend secondary.
+  // Dimensions first/prominent (score/verdict/理由 齐备); trend secondary.
   return (
-    `<div class="selfscore-card score-card ${kindCls} selfscore-${selfScoreClass(score.verdict)}" data-scoring="${isPair ? "pair" : "self"}">` +
-    `<p class="score-provenance"><span class="score-kind-badge score-kind-${kindCls}">${badgeLabel}</span> ${provenance}</p>` +
-    fallbackLine +
-    `<p><span class="selfscore-badge">${esc(score.verdict)}</span> <b>${esc(String(score.score))}</b>/10 · ${esc(score.verdict)} · <code>${esc(score.skill)}</code>${href !== "" ? ` · ${href}` : ""}</p>` +
+    `<div class="reviewscore-card score-card peerscore reviewscore-${reviewScoreClass(score.verdict)}" data-scoring="peer">` +
+    `<p class="score-provenance"><span class="score-kind-badge score-kind-peerscore">${bi("PEER REVIEW", "同行评审")}</span> ${provenance}</p>` +
+    sessionLine +
+    `<p><span class="reviewscore-badge">${esc(score.verdict)}</span> <b>${esc(String(score.score))}</b>/10 · ${esc(score.verdict)} · <code>${esc(score.skill)}</code>${href !== "" ? ` · ${href}` : ""}</p>` +
     (score.note !== "" ? `<p class="note">${esc(score.note)}</p>` : "") +
-    selfScoreDimsHtml(score) +
+    reviewScoreDimsHtml(score) +
     trendLine +
     `</div>`
   );
@@ -879,7 +895,7 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     ? banner + deliveryEvidenceHtml(d.deliveryEvidence) + dynamicEvidenceHtml(d.dynamicEvidence) + acBlocks
     : `<p class="empty">${bi("Not yet delivered", "尚未交付")}</p>`;
   const corrections = correctionTraceHtml(d.correctionActions);
-  const retroContent = scoreBlockHtml(d.selfScore, d.selfScoreTrend, d.retro);
+  const retroContent = scoreBlockHtml(d.reviewScore, d.reviewScoreTrend, d.retro);
   const retro = retroContent !== "" ? retroContent : `<p class="empty">${bi("Not yet written", "尚未撰写")}</p>`;
 
   return (
@@ -973,19 +989,21 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     `.peer-review li { margin:7px 0; } .peer-review ul { margin:4px 0 0; padding-left:18px; color:var(--muted); }\n` +
     `.peer-verdict { display:inline-block; border:1px solid var(--line); border-radius:999px; padding:1px 8px; font-size:12px; font-weight:600; }\n` +
     `.peer-agree { color:var(--pass); } .peer-refine { color:var(--warn); } .peer-object, .peer-escalate { color:var(--fail); }\n` +
-    `.selfscore-card { border:1px solid var(--line); border-radius:8px; padding:10px 12px; background:var(--bg-raise); }\n` +
-    `.selfscore-card p { margin:0 0 6px; } .selfscore-card p:last-child { margin-bottom:0; }\n` +
-    `.selfscore-badge { display:inline-block; border:1px solid var(--line); border-radius:999px; padding:1px 8px; font-size:12px; font-weight:600; }\n` +
-    `.selfscore-good .selfscore-badge { color:var(--pass); } .selfscore-ok .selfscore-badge { color:var(--warn); } .selfscore-regression .selfscore-badge { color:var(--fail); }\n` +
-    `.selfscore-dims, .selfscore-trend { color:var(--muted); font-size:12.5px; margin-top:4px; }\n` +
-    // US-DOSSIER-019: pair-score-first retrospective. A pair score leads with a
-    // truth-green PAIR badge + prominent left accent; a self-score is the muted,
-    // dashed FALLBACK with its reason called out in amber.
+    `.reviewscore-card { border:1px solid var(--line); border-radius:8px; padding:10px 12px; background:var(--bg-raise); }\n` +
+    `.reviewscore-card p { margin:0 0 6px; } .reviewscore-card p:last-child { margin-bottom:0; }\n` +
+    `.reviewscore-badge { display:inline-block; border:1px solid var(--line); border-radius:999px; padding:1px 8px; font-size:12px; font-weight:600; }\n` +
+    `.reviewscore-good .reviewscore-badge { color:var(--pass); } .reviewscore-ok .reviewscore-badge { color:var(--warn); } .reviewscore-regression .reviewscore-badge { color:var(--fail); }\n` +
+    `.reviewscore-dims, .reviewscore-trend { color:var(--muted); font-size:12.5px; margin-top:4px; }\n` +
+    // FIX-343 (AC6): single peer Review Score block. The live peer score leads
+    // with a truth-green PEER REVIEW badge + prominent left accent and shows the
+    // Reviewer's session id. A legacy self note (historical, not gating) renders
+    // muted/dashed — never a live pair/self binary.
     `.score-provenance { font:600 13px/1.5 var(--sans); display:flex; align-items:center; gap:8px; flex-wrap:wrap; }\n` +
     `.score-kind-badge { display:inline-block; border-radius:4px; padding:2px 7px; font:700 10px/1 var(--mono); letter-spacing:.08em; }\n` +
-    `.score-card.pairscore { border-left:4px solid #178a52; } .score-kind-pairscore { color:#178a52; border:1px solid #178a5255; background:#178a521a; }\n` +
-    `.score-card.selfscore { border-left:4px solid #c77d12; border-left-style:dashed; } .score-kind-selfscore { color:#c77d12; border:1px solid #c77d1255; background:#c77d121a; }\n` +
-    `.score-fallback-reason { color:#c77d12; font-size:12.5px; }\n` +
+    `.score-card.peerscore { border-left:4px solid #178a52; } .score-kind-peerscore { color:#178a52; border:1px solid #178a5255; background:#178a521a; }\n` +
+    `.score-card.legacy-selfnote { border-left:4px solid var(--muted); border-left-style:dashed; opacity:.75; } .score-kind-legacy { color:var(--muted); border:1px solid var(--line); background:transparent; }\n` +
+    `.score-session { color:var(--muted); font-size:12px; font-family:var(--mono); word-break:break-all; }\n` +
+    `.score-legacy-reason { color:var(--muted); font-size:12.5px; }\n` +
     `@media (max-width:680px) { .delivery-evidence dl, .story-graph dl { grid-template-columns:1fr; } }\n` +
     `</style>\n${CHROME_SCRIPT}\n</head>\n<body>\n${CHROME_CONTROLS}\n` +
     `<div class="masthead">\n` +
@@ -1007,7 +1025,7 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     `</div>\n</div>\n` +
     (s.legacy
       ? `<div class="legacy-banner">${bi(
-          "Legacy delivery — completed before v3; honored as done, but without the v3 evidence trail (attest report / AC map / self-score). Not re-instrumented.",
+          "Legacy delivery — completed before v3; honored as done, but without the v3 evidence trail (attest report / AC map / Review Score). Not re-instrumented.",
           "历史交付 —— v3 之前已完成；按完成对待，但没有 v3 的证据链（验收报告 / AC 映射 / 自评），也不会回头补做。",
         )}</div>\n`
       : "") +
@@ -1022,7 +1040,7 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     section("execution", "Execution", "执行", execution, (d.commits?.length ?? 0) === 0 && (d.executionRefs?.length ?? 0) === 0) +
     section("delivery", "Delivery", "交付", delivery, !hasDeliveryBody) +
     (corrections !== "" ? section("corrections", "Correction trace", "纠正留痕", corrections, false) : "") +
-    section("retrospective", "Retrospective", "复盘", retro, d.selfScore === undefined && (d.retro === undefined || d.retro === "")) +
+    section("retrospective", "Retrospective", "复盘", retro, d.reviewScore === undefined && (d.retro === undefined || d.retro === "")) +
     // FIX-286: footer keeps a SINGLE spec link (the readable rendered spec.html);
     // the redundant `spec.md (raw)` link was dropped (owner: 两个链接指向几乎同一份东西,留一个).
     `<footer>Roll · <a href="spec.html">spec</a></footer>\n` +
@@ -1037,7 +1055,7 @@ export function renderStoryDossier(d: StoryDossierInput): string {
 /**
  * Read everything renderStoryDossier needs from the card folder + repo:
  * spec.md (wish = first blockquote; design = bullets under a 方案/Solution/
- * Design heading), ac-map.json, the latest/ report, the newest self-score
+ * Design heading), ac-map.json, the latest/ report, the newest Review Score
  * note, and the story's `tcr:` commits from git history. Every read is
  * best-effort — a missing source renders as an honest empty state.
  */
@@ -1219,12 +1237,12 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
     /* no report */
   }
 
-  // newest self-score note → retrospective line. Card-local notes/ is the
+  // newest Review Score note → retrospective line. Card-local notes/ is the
   // home (US-META-008); the flat .roll/notes serves pre-migration history.
   try {
-    const latest = readLatestStorySelfScore(projectPath, story.id, dir);
+    const latest = readLatestStoryReviewScore(projectPath, story.id, dir);
     if (latest !== undefined) {
-      out.selfScore = {
+      out.reviewScore = {
         skill: latest.skill,
         score: latest.score,
         verdict: latest.verdict,
@@ -1232,10 +1250,12 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
         note: latest.note,
         ...(latest.href !== undefined ? { href: latest.href } : {}),
         ...(Object.keys(latest.dimensions).length > 0 ? { dimensions: latest.dimensions } : {}),
-        // US-DOSSIER-019: carry pair/self provenance so the retrospective can
-        // show the pair score first and label a self-score as the fallback.
+        // FIX-343 (AC6/AC9): carry provenance so the retrospective renders the
+        // single peer Review Score block with the Reviewer + fresh session id;
+        // a legacy `scoring: self` note renders in the muted not-gating style.
         ...(latest.scoring !== undefined ? { scoring: latest.scoring } : {}),
         ...(latest.scoredBy !== undefined ? { scoredBy: latest.scoredBy } : {}),
+        ...(latest.sessionId !== undefined ? { sessionId: latest.sessionId } : {}),
         ...(latest.fallbackReason !== undefined ? { fallbackReason: latest.fallbackReason } : {}),
       };
       out.retro = [`score ${latest.score}`, `· ${latest.verdict}`, latest.note !== "" ? `— ${latest.note.slice(0, 240)}` : ""]
@@ -1243,8 +1263,8 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
         .trim();
       searchableCardText += `\n${readFile(latest.sourcePath)}`;
     }
-    const trend = cache !== undefined ? cache.selfScoreTrend : readSelfScoreTrend(projectPath);
-    if (trend !== undefined) out.selfScoreTrend = trend;
+    const trend = cache !== undefined ? cache.reviewScoreTrend : readReviewScoreTrend(projectPath);
+    if (trend !== undefined) out.reviewScoreTrend = trend;
   } catch {
     /* no notes */
   }
@@ -2109,13 +2129,13 @@ function gitDossierLogRef(projectPath: string): string {
 /**
  * FIX-275 — run-scoped shared facts for a whole dossier regeneration. Profiling
  * showed three per-card O(all-cards) reads: ~3 git spawns, a full notes-tree
- * scan for the project-wide self-score trend, and a full spec read for reverse
+ * scan for the project-wide review-score trend, and a full spec read for reverse
  * dependencies. Build once per run; per-card collection becomes lookups. The
  * single-card path (attest) simply omits the cache and keeps live reads.
  */
 export interface DossierRunCache {
   git: GitDossierFacts | null;
-  selfScoreTrend: string | undefined;
+  reviewScoreTrend: string | undefined;
   specRefs: StorySpecRef[];
   /** id → the ids its spec declares under depends-on. */
   dependsOnById: Map<string, string[]>;
@@ -2135,7 +2155,7 @@ export function buildDossierRunCache(projectPath: string): DossierRunCache {
   }
   return {
     git: collectGitDossierFacts(projectPath),
-    selfScoreTrend: readSelfScoreTrend(projectPath),
+    reviewScoreTrend: readReviewScoreTrend(projectPath),
     specRefs,
     dependsOnById,
   };

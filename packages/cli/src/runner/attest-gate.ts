@@ -4,7 +4,7 @@
  * Skill 10.6 ("write the verification report") was a TEXT instruction: a cycle
  * could ship a high-quality delivery and silently skip the acceptance report
  * (observed 2026-06-06, cycle 20260606-033442 — FIX-199 merged with no ac-map,
- * no report, no self-score). Same failure mode FIX-150b fixed for peer review:
+ * no report, no review-score). Same failure mode FIX-150b fixed for peer review:
  * text has no teeth. This turns the requirement into a RUNTIME MECHANISM that
  * runs in every cycle's capture step, agent-agnostic:
  *
@@ -36,7 +36,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
-import { evaluateSelfScoreGate } from "../lib/self-score.js";
+import { evaluateReviewScoreGate } from "../lib/review-score.js";
 
 export type AttestMode = "soft" | "hard";
 
@@ -881,7 +881,21 @@ export function runAttestGate(
   mode: AttestMode,
   sinceSec: number | undefined,
   sinks: AttestGateSinks,
+  // FIX-343 (step ②): the quality score is read from the PERSISTENT .roll
+  // (repoCwd-rooted), NOT the ephemeral worktree — the fresh-session peer score
+  // note (runScorePairing) lands there. Defaults to worktreeCwd so callers that
+  // pre-date the split (and tests staging the note under the worktree) are
+  // unaffected. `builderSessionId` (step ①, ctx.builderSessionId) is threaded so
+  // the gate honors ONLY an independent fresh-session score whose recorded
+  // `sessionId` is NOT the builder's own session — never the vendor name.
+  scoreRepoCwd: string = worktreeCwd,
+  builderSessionId = "",
 ): AttestGateResult {
+  // FIX-343 (step ②): a missing PEER score must surface as a blocking
+  // skipped/blocked verdict — the bottom blanket catch below must NOT soft-fail
+  // it to `produced`. The peer-score check is therefore evaluated here, where a
+  // thrown error in the score read is fail-closed (blocked in hard mode), and
+  // its result is reused inside the main path below.
   try {
     // FIX-339 (复核 #1) — a deliverable_cmd outside the roll read-only allowlist
     // is rejected BEFORE anything else: the spec asked the attest lane to run a
@@ -948,7 +962,16 @@ export function runAttestGate(
     // US-ATTEST-012: freshness alone is "存在性" — a fresh empty shell (zero AC /
     // no ac-map, the FIX-214 case) does NOT count as a produced report.
     if (fresh && verificationReportHasContent(worktreeCwd, storyId)) {
-      const score = evaluateSelfScoreGate(worktreeCwd, storyId);
+      // FIX-343 (step ③): honor ONLY an INDEPENDENT fresh-session peer score from
+      // the PERSISTENT .roll (scoreRepoCwd) — its recorded `sessionId` must be
+      // present AND ≠ the builder's session id. A self / legacy / no-sessionId /
+      // sessionId===builderSessionId / absent note → status "missing" with
+      // "missing peer review score" → block (fail loud, no synthesized pass).
+      // FIX-343 (① STRICT cycle-scope): thread THIS cycle's id so only a score
+      // minted by this cycle's scorer (`${cycleId}:score:...`) is honored — a
+      // prior cycle's peer note on a RESUME (re-picked un-merged same-story
+      // branch) no longer soft-passes this cycle's gate.
+      const score = evaluateReviewScoreGate(scoreRepoCwd, storyId, builderSessionId, cycleId);
       if (score.status === "pass") {
         const visual = passAcVisualFloor(worktreeCwd, storyId);
         const reasons = ["fresh acceptance report present", score.reason, ...(visual.reason !== undefined ? [visual.reason] : [])];
@@ -958,7 +981,7 @@ export function runAttestGate(
       const reasons = [score.reason];
       const blocked = mode === "hard";
       sinks.alert(
-        `attest gate (${mode}): self-score gate failed (${storyId}) — ${score.reason} — cycle ${cycleId}` +
+        `attest gate (${mode}): review-score gate failed (${storyId}) — ${score.reason} — cycle ${cycleId}` +
           (blocked ? " — BLOCKED (hard mode); story not marked Done" : ""),
       );
       sinks.event({ cycleId, verdict: "skipped", reasons });
@@ -980,7 +1003,29 @@ export function runAttestGate(
     sinks.event({ cycleId, verdict: "skipped", reasons });
     return { verdict: "skipped", mode, reasons, blocked };
   } catch {
-    // gate must never fail the cycle by surprise — soft-fail to produced/silent.
-    return { verdict: "produced", mode, reasons: [], blocked: false };
+    // FIX-343 (step ②): the blanket catch must NOT soft-fail to `produced` — an
+    // exception while resolving the peer score (or any other gate check) would
+    // otherwise launder a missing-peer-score delivery into a pass. Fail CLOSED:
+    // surface a blocking skipped/blocked verdict in hard mode (the cycle owes a
+    // real peer score), non-blocking skipped in soft (migration window). A
+    // missing peer score is never synthesized into a pass.
+    const reasons = ["attest gate error — failing closed (no peer review score honored)"];
+    const blocked = mode === "hard";
+    // FIX-343 (③ observability): EVERY other block path emits an ALERT + an
+    // `attest:gate` event, but this fail-closed catch returned the skipped verdict
+    // SILENTLY — the most safety-critical case (the gate itself errored) was
+    // INVISIBLE in the audit ndjson. Emit before returning so a failed-closed
+    // delivery is auditable like any other skip. Sink calls are wrapped so a
+    // throwing sink can't break this path's "never throws" contract.
+    try {
+      sinks.alert(
+        `attest gate (${mode}): gate error — failing closed (${storyId}) — ${reasons[0]} — cycle ${cycleId}` +
+          (blocked ? " — BLOCKED (hard mode); story not marked Done" : ""),
+      );
+      sinks.event({ cycleId, verdict: "skipped", reasons });
+    } catch {
+      /* sinks are best-effort here — the fail-closed verdict still returns */
+    }
+    return { verdict: "skipped", mode, reasons, blocked };
   }
 }

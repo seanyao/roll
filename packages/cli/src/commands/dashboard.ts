@@ -1081,10 +1081,10 @@ function rollupForDay(dayCycles: Cycle[]): DayRollup {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// self-score / result-eval / agent summary lines
+// review-score / result-eval / agent summary lines
 // ════════════════════════════════════════════════════════════════════════════
-function selfScoreSummaryLine(notesDir = ".roll/notes", windowN = 14, featuresDir = ".roll/features"): string {
-  // US-META-008: self-score notes live in each card's notes/; the flat
+function reviewScoreSummaryLine(notesDir = ".roll/notes", windowN = 14, featuresDir = ".roll/features"): string {
+  // US-META-008: review-score notes live in each card's notes/; the flat
   // .roll/notes carries the diary + pre-migration history. The trend window
   // merges both sources, ordered by the date-prefixed basename.
   const entries: Array<{ name: string; path: string }> = [];
@@ -1141,9 +1141,9 @@ function selfScoreSummaryLine(notesDir = ".roll/notes", windowN = 14, featuresDi
     if (verdict === "regression") redo += 1;
     else if (verdict === "ok" && score < 6) redo += 1;
   }
-  if (count < 3) return `self-score: (n/a) — ${count} sample(s), need 3 (last ${windowN})`;
+  if (count < 3) return `review-score: (n/a) — ${count} sample(s), need 3 (last ${windowN})`;
   const mean = total / count;
-  return `self-score: mean ${mean.toFixed(1)} / min ${minv} / redo ${redo} (last ${windowN})`;
+  return `review-score: mean ${mean.toFixed(1)} / min ${minv} / redo ${redo} (last ${windowN})`;
 }
 
 const EVAL_DIM_NAMES = [
@@ -1922,7 +1922,7 @@ function render(
     );
   }
 
-  // agent / self-score / result-eval lines
+  // agent / review-score / result-eval lines
   let agentLine = "";
   try {
     const runsRecords = Object.values(runs);
@@ -1939,7 +1939,7 @@ function render(
 
   let skillLine = "";
   try {
-    skillLine = selfScoreSummaryLine(process.env["ROLL_NOTES_DIR"], 14, process.env["ROLL_FEATURES_DIR"]);
+    skillLine = reviewScoreSummaryLine(process.env["ROLL_NOTES_DIR"], 14, process.env["ROLL_FEATURES_DIR"]);
 
   } catch {
     skillLine = "";

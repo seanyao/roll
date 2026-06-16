@@ -114,7 +114,11 @@ export const TRUTH_FIELD_REGISTRY: readonly RegisteredField[] = [
 ];
 
 /** Pre-guardrail history, listed not judged (AC: grandfather with a clear list):
- *  v2-era runs columns nothing new writes. */
+ *  v2-era runs columns nothing new writes.
+ *  FIX-343: `self_score` is FROZEN here — it is a historical runs column / policy
+ *  key (`self_score.low_threshold`), NOT the renamed quality-score concept. The
+ *  live term is "Review Score" (lib/review-score.ts); this literal stays to keep
+ *  the grandfathered allowlist matching legacy on-disk data. */
 export const GRANDFATHERED_FIELDS: readonly string[] = ["project", "result_eval", "self_score", "merged"];
 
 /**

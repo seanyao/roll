@@ -11,10 +11,10 @@
  *
  * FIX-293 — the gate now has TEETH. It used to be SOFT (record, don't block) and
  * its verdict was DISCARDED by the executor, so a high-complexity cycle with NO
- * peer review still silently fell back to self-score and flipped the card Done —
+ * peer review still silently fell back to a self-grade and flipped the card Done —
  * degrading the standard exactly when peer review matters most (FIX-284). The
  * owner decision: a high-complexity delivery with no peer evidence MUST NOT
- * self-score. The gate is now HARD by default — it BLOCKS the delivery and the
+ * self-grade. The gate is now HARD by default — it BLOCKS the delivery and the
  * executor RE-ATTEMPTS the peer consultation ONCE (bounded; the existing peer
  * 30s hard timeout is respected so a flaky peer like pi can't death-spiral the
  * cycle). If the retry produces evidence → proceed; if it still yields none →

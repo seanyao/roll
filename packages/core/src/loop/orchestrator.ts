@@ -436,6 +436,14 @@ export interface CycleContext {
    *  worktree is alive (capture_facts). Threaded into the runs row so the
    *  可回溯链 stops reporting a hardcoded 0. Absent ⇒ not yet captured. */
   tcrCount?: number;
+  /** FIX-343 (step ①): the BUILDER's unique session id, minted ONCE at the
+   *  working-agent spawn (`<cycleId>:build:<agent>:<clock>`) and reused across
+   *  retries. The attest gate compares the SCORER's session id against this so
+   *  "an independent fresh session (not a sub-agent sharing the builder's
+   *  context) scored this delivery" is a CHECKED invariant, not asserted. Absent
+   *  ⇒ the builder has not spawned yet (the gate then treats every score as a
+   *  potential self-grade and demands a session-id present + distinct). */
+  builderSessionId?: string;
   /** FIX-208: the real per-cycle cost folded from the agent's parsed usage
    *  (cost/tracker.ts), set by the executor after spawn_agent. Threaded into
    *  BOTH the cycle:end event and the runs row so they agree. Absent ⇒ no

@@ -30,7 +30,7 @@ function project(): string {
         "quality: 4",
         "---",
         "",
-        "self-score note",
+        "review-score note",
         "",
       ].join("\n"),
     );

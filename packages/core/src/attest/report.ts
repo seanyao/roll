@@ -128,9 +128,9 @@ export interface ProcessArchive {
   missing?: string[];
 }
 
-export const SELF_SCORE_LOW_THRESHOLD = 5;
+export const REVIEW_SCORE_LOW_THRESHOLD = 5;
 
-export interface SelfScoreReportEntry {
+export interface ReviewScoreReportEntry {
   skill: string;
   score: number;
   verdict: string;
@@ -158,11 +158,11 @@ export interface ReportInput {
   beforeAfter?: BeforeAfterPair[];
   /** Summary facts row (counts come from evidence.json). */
   facts?: { tcrCount: number; ciConclusion: string; testPassAge: string };
-  /** US-ATTEST-009 — same-story Self-Score entries from .roll/notes/; the
+  /** US-ATTEST-009 — same-story Review Score entries from .roll/notes/; the
    *  whole collapsed block is SKIPPED when none exist (no placeholder). */
-  selfScores?: SelfScoreReportEntry[];
+  reviewScores?: ReviewScoreReportEntry[];
   /** US-EVID-013 — US-SKILL-014 trend line, computed by the CLI reader. */
-  selfScoreTrend?: string;
+  reviewScoreTrend?: string;
   /** US-ATTEST-014 — the cycle process archive (timeline + signal layer +
    *  folded transcript). Absent ⇒ section trimmed; `manual` delivery degrades. */
   process?: ProcessArchive;
@@ -441,48 +441,48 @@ function processTraceBlock(p: ProcessArchive | undefined): string {
   return `<section class="process-trace"><h2>${bi("Process trace", "过程档案")}</h2>\n${rows.join("\n")}\n</section>`;
 }
 
-function selfScoreClass(verdict: string): string {
+function reviewScoreClass(verdict: string): string {
   const v = verdict.toLowerCase();
   if (v === "good" || v === "ok" || v === "regression") return v;
   return "unknown";
 }
 
-function selfScoreDimensions(e: SelfScoreReportEntry): string {
+function reviewScoreDimensions(e: ReviewScoreReportEntry): string {
   const dims = Object.entries(e.dimensions ?? {})
     .filter(([, v]) => Number.isFinite(v))
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   if (dims.length === 0) return "";
-  return `<div class="selfscore-dims">${dims.map(([k, v]) => `<span><code>${esc(k)}</code>: <b>${esc(String(v))}</b></span>`).join(" ")}</div>`;
+  return `<div class="reviewscore-dims">${dims.map(([k, v]) => `<span><code>${esc(k)}</code>: <b>${esc(String(v))}</b></span>`).join(" ")}</div>`;
 }
 
-function selfScoreIssues(entries: ReportInput["selfScores"]): string[] {
+function reviewScoreIssues(entries: ReportInput["reviewScores"]): string[] {
   if (entries === undefined) return [];
   const out: string[] = [];
   for (const e of entries) {
     const verdict = e.verdict.toLowerCase();
-    if (verdict === "regression") out.push(`self-score regression: ${e.score}/10`);
-    else if (verdict === "ok" && e.score <= SELF_SCORE_LOW_THRESHOLD) out.push(`low self-score: ok ${e.score}/10`);
+    if (verdict === "regression") out.push(`review-score regression: ${e.score}/10`);
+    else if (verdict === "ok" && e.score <= REVIEW_SCORE_LOW_THRESHOLD) out.push(`low review-score: ok ${e.score}/10`);
   }
   return out;
 }
 
-function selfScoreBlock(entries: ReportInput["selfScores"], trend: string | undefined): string {
+function reviewScoreBlock(entries: ReportInput["reviewScores"], trend: string | undefined): string {
   if (entries === undefined || entries.length === 0) return "";
   const li = entries
     .map((e) => {
-      const cls = selfScoreClass(e.verdict);
+      const cls = reviewScoreClass(e.verdict);
       const href = e.href !== undefined && e.href !== "" ? ` · <a href="${esc(e.href)}">${bi("Full note", "全文 note")}</a>` : "";
       return (
-        `<li><span class="selfscore-badge selfscore-${cls}">${esc(e.verdict)}</span> ` +
+        `<li><span class="reviewscore-badge reviewscore-${cls}">${esc(e.verdict)}</span> ` +
         `<b>${esc(String(e.score))}</b>/10 · ${esc(e.verdict)} · <code>${esc(e.skill)}</code> · <span class="meta">${esc(e.ts)}</span>${href}` +
         `${e.note !== "" ? `<br><span class="note">${esc(e.note)}</span>` : ""}` +
-        selfScoreDimensions(e) +
+        reviewScoreDimensions(e) +
         `</li>`
       );
     })
     .join("\n");
-  const trendLine = trend !== undefined && trend !== "" ? `<p class="selfscore-trend">${esc(trend)}</p>\n` : "";
-  return `<details class="selfscore"><summary>${bi("Self-Score", "自评")}（${entries.length}）</summary>\n${trendLine}<ul>\n${li}\n</ul>\n</details>`;
+  const trendLine = trend !== undefined && trend !== "" ? `<p class="reviewscore-trend">${esc(trend)}</p>\n` : "";
+  return `<details class="reviewscore"><summary>${bi("Review Score", "评审分")}（${entries.length}）</summary>\n${trendLine}<ul>\n${li}\n</ul>\n</details>`;
 }
 
 /** Render the single-file report. Pure: same input → same bytes. */
@@ -490,7 +490,7 @@ export function renderReport(input: ReportInput): string {
   const enforced = input.items.map(enforceRedLine);
   const items = enforced.map((e) => e.item);
   const discrepancies = enforced.filter((e) => e.downgraded).map((e) => e.item);
-  const scoreIssues = selfScoreIssues(input.selfScores);
+  const scoreIssues = reviewScoreIssues(input.reviewScores);
   const counts = new Map<AcStatus, number>();
   for (const it of items) counts.set(it.status, (counts.get(it.status) ?? 0) + 1);
 
@@ -514,18 +514,18 @@ ${discrepancies.length > 0 ? `
         )}</p>
 <ul>${discrepancies.map((d) => `<li><a href="#${esc(d.id)}"><code>${esc(d.id)}</code></a> ${esc(d.text)}</li>`).join("\n")}</ul>
 ` : ""}
-${scoreIssues.length > 0 ? `<p><strong>Self-score discrepancy</strong></p><ul>${scoreIssues.map((i) => `<li>${esc(i)}</li>`).join("\n")}</ul>` : ""}
+${scoreIssues.length > 0 ? `<p><strong>Review-score discrepancy</strong></p><ul>${scoreIssues.map((i) => `<li>${esc(i)}</li>`).join("\n")}</ul>` : ""}
 </section>`
       : "";
 
   // US-ATTEST-013 + US-META-010 — 收口 (closing): quality gate → shadow doc-gap
-  // → discrepancies → evidence index → self-score. Assembled then wrapped only
+  // → discrepancies → evidence index → review-score. Assembled then wrapped only
   // when non-empty (trim, no hollow section).
   const gate = facts !== "" ? `<h2>${bi("Quality gate", "质量门禁")}</h2>\n${facts}` : "";
   const docGap = docGapBlock(input.docGap);
   const evIndex = evidenceIndexBlock(items, input.beforeAfter, input.selfCaptures);
-  const selfScore = selfScoreBlock(input.selfScores, input.selfScoreTrend);
-  const closingInner = [gate, docGap, disc, evIndex, selfScore].filter((s) => s !== "").join("\n");
+  const reviewScore = reviewScoreBlock(input.reviewScores, input.reviewScoreTrend);
+  const closingInner = [gate, docGap, disc, evIndex, reviewScore].filter((s) => s !== "").join("\n");
   const closing = closingInner !== "" ? `<section class="closing">\n${closingInner}\n</section>` : "";
 
   return `<!doctype html>
@@ -559,12 +559,12 @@ figure.shot figcaption { color:var(--muted); font-size:12.5px; }
 .doc-gap { border:1px dashed var(--warn); border-radius:8px; padding:8px 16px; margin-top:28px; }
 .doc-gap h2 { color:var(--warn); }
 .discrepancies { border:1px dashed var(--claim); border-radius:8px; padding:8px 16px; margin-top:28px; }
-details.selfscore { margin-top:28px; border:1px solid var(--line); border-radius:8px; padding:8px 16px; background:var(--bg-raise); }
-details.selfscore summary { cursor:pointer; font-weight:600; }
-details.selfscore ul { margin:8px 0 4px; padding-left:18px; }
-.selfscore-badge { display:inline-block; border:1px solid var(--line); border-radius:999px; padding:1px 8px; font-size:12px; font-weight:600; }
-.selfscore-good { color:var(--pass); } .selfscore-ok { color:var(--warn); } .selfscore-regression { color:var(--fail); }
-.selfscore-dims, .selfscore-trend { color:var(--muted); font-size:12.5px; margin-top:4px; }
+details.reviewscore { margin-top:28px; border:1px solid var(--line); border-radius:8px; padding:8px 16px; background:var(--bg-raise); }
+details.reviewscore summary { cursor:pointer; font-weight:600; }
+details.reviewscore ul { margin:8px 0 4px; padding-left:18px; }
+.reviewscore-badge { display:inline-block; border:1px solid var(--line); border-radius:999px; padding:1px 8px; font-size:12px; font-weight:600; }
+.reviewscore-good { color:var(--pass); } .reviewscore-ok { color:var(--warn); } .reviewscore-regression { color:var(--fail); }
+.reviewscore-dims, .reviewscore-trend { color:var(--muted); font-size:12.5px; margin-top:4px; }
 .capture-skip { margin:8px 0; border:1px solid var(--line); border-radius:6px; padding:6px 12px; background:color-mix(in srgb, var(--fg) 3%, transparent); }
 .capture-skip summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
 .capture-skip pre { white-space:pre-wrap; font-size:12px; }

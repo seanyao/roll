@@ -830,7 +830,7 @@ describe("executeCommand — command → executor mapping", () => {
       expect(alertText(calls)).toContain("screenshot_exempt");
     });
 
-    it("RED LINE: a CLI/terminal card (visual AC, NO deliverable_url) is NOT flagged (terminal-capture lane) — verdict ok", async () => {
+    it("RED LINE: a CLI/terminal card (visual AC, NO deliverable_url) is NOT blocked for a web url — verdict ok; FIX-339 adds a supplementary no-surface-declared WARN", async () => {
       const { ports, calls } = portsWithSpec(
         "FIX-CLI-1",
         `## FIX-CLI-1 New roll status line 📋\n\n**AC:**\n- [ ] Terminal screenshot of \`roll status\` shows the new summary line\n`,
@@ -838,9 +838,26 @@ describe("executeCommand — command → executor mapping", () => {
       const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
       expect(r.event).toEqual({ type: "story_picked", storyId: "FIX-CLI-1" });
       const ve = visualEvents(calls);
+      // The surface-aware validator still passes the terminal card (no web url owed)…
       expect(ve[0]).toMatchObject({ verdict: "ok", surface: "terminal" });
-      // NO flag alert for a terminal card (the WARN line is absent).
-      expect(alertText(calls)).not.toContain("visual-evidence preflight");
+      // …but FIX-339 (AC6) adds a supplementary structural WARN: it declares no
+      // deliverable_cmd / url / exempt, so the future hard闸 would catch it. It is
+      // a WARN only — the cycle still proceeds (story_picked above).
+      expect(ve[1]).toMatchObject({ verdict: "flagged", code: "no-surface-declared" });
+      expect(alertText(calls)).toContain("no-surface-declared");
+      expect(alertText(calls)).toContain("NOT blocked");
+    });
+
+    it("RED LINE: a terminal card that DECLARES a deliverable_cmd is fully ok — NO no-surface-declared WARN", async () => {
+      const { ports, calls } = portsWithSpec(
+        "FIX-CLI-2",
+        `---\ndeliverable_cmd: roll status\n---\n## FIX-CLI-2 New roll status line 📋\n\n**AC:**\n- [ ] Terminal screenshot of \`roll status\` shows the new summary line\n`,
+      );
+      await executeCommand({ kind: "pick_story" }, ports, CTX);
+      const ve = visualEvents(calls);
+      expect(ve).toHaveLength(1);
+      expect(ve[0]).toMatchObject({ verdict: "ok", surface: "terminal" });
+      expect(alertText(calls)).not.toContain("no-surface-declared");
     });
 
     it("RED LINE: a pure back-end card with a recorded screenshot_exempt is NOT flagged — verdict ok", async () => {
@@ -855,7 +872,7 @@ describe("executeCommand — command → executor mapping", () => {
       expect(alertText(calls)).not.toContain("visual-evidence preflight");
     });
 
-    it("RED LINE: an ambiguous-surface visual card (no web cue, no url) is NOT flagged — verdict ok", async () => {
+    it("RED LINE: an ambiguous-surface visual card (no web cue, no url) is NOT blocked for a web url — verdict ok; FIX-339 adds a supplementary no-surface-declared WARN", async () => {
       const { ports, calls } = portsWithSpec(
         "FIX-AMB-1",
         `## FIX-AMB-1 Some visible change 📋\n\n**AC:**\n- [ ] A screenshot proves the new behavior\n`,
@@ -863,7 +880,8 @@ describe("executeCommand — command → executor mapping", () => {
       await executeCommand({ kind: "pick_story" }, ports, CTX);
       const ve = visualEvents(calls);
       expect(ve[0]).toMatchObject({ verdict: "ok", surface: "ambiguous" });
-      expect(alertText(calls)).not.toContain("visual-evidence preflight");
+      expect(ve[1]).toMatchObject({ verdict: "flagged", code: "no-surface-declared" });
+      expect(alertText(calls)).toContain("no-surface-declared");
     });
 
     it("a WEB card that DECLARES a deliverable_url is NOT flagged — verdict ok", async () => {

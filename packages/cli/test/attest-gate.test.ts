@@ -12,6 +12,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
+  declaresAnySurface,
+  deliverableCmdsForStory,
+  deliverableUrlsForStory,
   readAttestGateMode,
   runAttestGate,
   screenshotExemption,
@@ -20,6 +23,7 @@ import {
   verificationReportFresh,
   verificationReportHasContent,
   webCaptureTargetForStory,
+  webCaptureTargetsForStory,
 } from "../src/runner/attest-gate.js";
 
 const dirs: string[] = [];
@@ -739,5 +743,167 @@ describe("FIX-309 — declared deliverable_url demands a REAL capture (堵 284 �
     expect(r.verdict).toBe("produced");
     expect(alerts).toHaveLength(0);
     expect(events[0]?.verdict).toBe("produced");
+  });
+});
+
+describe("FIX-339 — multi-surface deliverables (web list + deliverable_cmd) + per-surface enforcement", () => {
+  function withSpec(storyId: string, specText: string): string {
+    const wt = tmp("fix339");
+    const dir = join(wt, ".roll", "features", "uncategorized", storyId);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "spec.md"), specText);
+    return wt;
+  }
+  function addSpec(wt: string, storyId: string, specText: string): void {
+    const dir = join(wt, ".roll", "features", "uncategorized", storyId);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "spec.md"), specText);
+  }
+
+  // ── AC1: deliverable_url parsing in all shapes (single back-compat) ──────────
+  it("AC1: single scalar deliverable_url → one-element list (back-compat)", () => {
+    const wt = withSpec("FIX-S1", "---\nid: FIX-S1\ndeliverable_url: https://app.test/x\n---\n# x\n\n**AC:**\n- [ ] x\n");
+    expect(deliverableUrlsForStory(wt, "FIX-S1")).toEqual(["https://app.test/x"]);
+    expect(webCaptureTargetForStory(wt, "FIX-S1")).toBe("https://app.test/x");
+  });
+
+  it("AC1: inline list `[a, b]` → two targets", () => {
+    const wt = withSpec("FIX-S2", "---\nid: FIX-S2\ndeliverable_url: [https://app.test/a, https://app.test/b]\n---\n# x\n\n**AC:**\n- [ ] x\n");
+    expect(deliverableUrlsForStory(wt, "FIX-S2")).toEqual(["https://app.test/a", "https://app.test/b"]);
+    expect(webCaptureTargetsForStory(wt, "FIX-S2")).toEqual(["https://app.test/a", "https://app.test/b"]);
+  });
+
+  it("AC1: comma-separated scalar and YAML block list both yield two targets", () => {
+    const wtComma = withSpec("FIX-S3", "---\nid: FIX-S3\ndeliverable_url: https://app.test/a, https://app.test/b\n---\n# x\n\n**AC:**\n- [ ] x\n");
+    expect(deliverableUrlsForStory(wtComma, "FIX-S3")).toEqual(["https://app.test/a", "https://app.test/b"]);
+    const wtBlock = withSpec("FIX-S4", "---\nid: FIX-S4\ndeliverable_url:\n  - https://app.test/a\n  - https://app.test/b\n---\n# x\n\n**AC:**\n- [ ] x\n");
+    expect(deliverableUrlsForStory(wtBlock, "FIX-S4")).toEqual(["https://app.test/a", "https://app.test/b"]);
+  });
+
+  // ── AC1: two urls — both captured ⇒ PASS; one missing ⇒ FAIL ────────────────
+  it("AC1: TWO declared urls — BOTH really captured ⇒ PASS", () => {
+    const wt = withReport("FIX-S5", 2000, '<figure class="shot"><img src="screenshots/web.png"></figure>');
+    addSpec(wt, "FIX-S5", "---\nid: FIX-S5\ndeliverable_url: [https://app.test/a, https://app.test/b]\n---\n# x\n\n## Acceptance Criteria\n\n- [ ] renders\n");
+    withSelfScore(wt, "FIX-S5", 8, "good");
+    writeEvidenceJson(wt, "FIX-S5", {
+      captures: [
+        { kind: "web", out: "screenshots/web.png", taken: true },
+        { kind: "web", out: "screenshots/web-1.png", taken: true },
+      ],
+    });
+    expect(verificationReportHasContent(wt, "FIX-S5")).toBe(true);
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-S5", "c-s5", "hard", 1000, s);
+    expect(r.verdict).toBe("produced");
+    expect(alerts).toHaveLength(0);
+    expect(events[0]?.verdict).toBe("produced");
+  });
+
+  it("AC1: TWO declared urls but only ONE captured ⇒ FAIL (hard-blocked)", () => {
+    const wt = withReport("FIX-S6", 2000, '<figure class="shot"><img src="screenshots/web.png"></figure>');
+    addSpec(wt, "FIX-S6", "---\nid: FIX-S6\ndeliverable_url: [https://app.test/a, https://app.test/b]\n---\n# x\n\n## Acceptance Criteria\n\n- [ ] renders\n");
+    withSelfScore(wt, "FIX-S6", 8, "good");
+    writeEvidenceJson(wt, "FIX-S6", {
+      captures: [{ kind: "web", out: "screenshots/web.png", taken: true }],
+    });
+    expect(verificationReportHasContent(wt, "FIX-S6")).toBe(false);
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-S6", "c-s6", "hard", 1000, s);
+    expect(r.verdict).toBe("skipped");
+    expect(r.blocked).toBe(true);
+    expect(alerts[0]).toContain("BLOCKED");
+    expect(events[0]?.verdict).toBe("skipped");
+  });
+
+  // ── AC2: deliverable_cmd needs a real terminal capture ──────────────────────
+  it("AC2: deliverable_cmd parsing (single + list)", () => {
+    const wt1 = withSpec("FIX-S7", "---\nid: FIX-S7\ndeliverable_cmd: roll status\n---\n# x\n\n**AC:**\n- [ ] x\n");
+    expect(deliverableCmdsForStory(wt1, "FIX-S7")).toEqual(["roll status"]);
+    const wt2 = withSpec("FIX-S8", "---\nid: FIX-S8\ndeliverable_cmd:\n  - roll status\n  - roll doctor\n---\n# x\n\n**AC:**\n- [ ] x\n");
+    expect(deliverableCmdsForStory(wt2, "FIX-S8")).toEqual(["roll status", "roll doctor"]);
+  });
+
+  it("AC2: declared deliverable_cmd WITH a real terminal capture ⇒ PASS; honest-skip ⇒ FAIL", () => {
+    const wtReal = withReport("FIX-S9", 2000, '<figure class="shot"><img src="screenshots/terminal.png"></figure>');
+    addSpec(wtReal, "FIX-S9", "---\nid: FIX-S9\ndeliverable_cmd: roll status\n---\n# x\n\n## Acceptance Criteria\n\n- [ ] cli works\n");
+    withSelfScore(wtReal, "FIX-S9", 8, "good");
+    writeEvidenceJson(wtReal, "FIX-S9", { captures: [{ kind: "terminal", out: "screenshots/terminal.png", taken: true }] });
+    expect(verificationReportHasContent(wtReal, "FIX-S9")).toBe(true);
+
+    const wtSkip = withReport("FIX-S10", 2000, '<figure class="shot"><img src="screenshots/terminal.png"></figure>');
+    addSpec(wtSkip, "FIX-S10", "---\nid: FIX-S10\ndeliverable_cmd: roll status\n---\n# x\n\n## Acceptance Criteria\n\n- [ ] cli works\n");
+    withSelfScore(wtSkip, "FIX-S10", 8, "good");
+    writeEvidenceJson(wtSkip, "FIX-S10", { captures: [{ kind: "terminal", out: "screenshots/terminal.png", taken: false, skipped: "no GUI session" }] });
+    expect(verificationReportHasContent(wtSkip, "FIX-S10")).toBe(false);
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wtSkip, "FIX-S10", "c-s10", "hard", 1000, s);
+    expect(r.verdict).toBe("skipped");
+    expect(r.blocked).toBe(true);
+    expect(events[0]?.verdict).toBe("skipped");
+  });
+
+  it("AC2: TWO declared cmds but only ONE captured ⇒ FAIL", () => {
+    const wt = withReport("FIX-S11", 2000, '<figure class="shot"><img src="screenshots/terminal.png"></figure>');
+    addSpec(wt, "FIX-S11", "---\nid: FIX-S11\ndeliverable_cmd:\n  - roll status\n  - roll doctor\n---\n# x\n\n## Acceptance Criteria\n\n- [ ] cli works\n");
+    withSelfScore(wt, "FIX-S11", 8, "good");
+    writeEvidenceJson(wt, "FIX-S11", { captures: [{ kind: "terminal", out: "screenshots/terminal.png", taken: true }] });
+    expect(verificationReportHasContent(wt, "FIX-S11")).toBe(false);
+  });
+
+  // ── AC3: mixed web+cmd card — BOTH lanes must be satisfied ──────────────────
+  it("AC3: mixed (web + cmd) — both captured ⇒ PASS; one lane missing ⇒ FAIL", () => {
+    const both = "---\nid: ID\ndeliverable_url: https://app.test/a\ndeliverable_cmd: roll status\n---\n# x\n\n## Acceptance Criteria\n\n- [ ] mixed\n";
+    const wtOk = withReport("FIX-S12", 2000, '<figure class="shot"><img src="screenshots/web.png"></figure>');
+    addSpec(wtOk, "FIX-S12", both.replace("ID", "FIX-S12"));
+    withSelfScore(wtOk, "FIX-S12", 8, "good");
+    writeEvidenceJson(wtOk, "FIX-S12", {
+      captures: [
+        { kind: "web", out: "screenshots/web.png", taken: true },
+        { kind: "terminal", out: "screenshots/terminal.png", taken: true },
+      ],
+    });
+    expect(verificationReportHasContent(wtOk, "FIX-S12")).toBe(true);
+
+    const wtBad = withReport("FIX-S13", 2000, '<figure class="shot"><img src="screenshots/web.png"></figure>');
+    addSpec(wtBad, "FIX-S13", both.replace("ID", "FIX-S13"));
+    withSelfScore(wtBad, "FIX-S13", 8, "good");
+    writeEvidenceJson(wtBad, "FIX-S13", {
+      captures: [
+        { kind: "web", out: "screenshots/web.png", taken: true },
+        { kind: "terminal", out: "screenshots/terminal.png", taken: false, skipped: "no GUI" },
+      ],
+    });
+    expect(verificationReportHasContent(wtBad, "FIX-S13")).toBe(false);
+  });
+
+  // ── back-compat: single-url card + exempt card unchanged ────────────────────
+  it("back-compat: a single-url card still passes with one real web shot (no regression)", () => {
+    const wt = withReport("FIX-S14", 2000, '<figure class="shot"><img src="screenshots/web.png"></figure>');
+    addSpec(wt, "FIX-S14", "---\nid: FIX-S14\ndeliverable_url: https://app.test/x\n---\n# x\n\n## Acceptance Criteria\n\n- [ ] renders\n");
+    withSelfScore(wt, "FIX-S14", 8, "good");
+    writeEvidenceJson(wt, "FIX-S14", { captures: [{ kind: "web", out: "screenshots/web.png", taken: true }] });
+    expect(verificationReportHasContent(wt, "FIX-S14")).toBe(true);
+  });
+
+  it("back-compat: an exempt card owes no capture and declaresAnySurface=true via the exemption", () => {
+    const wt = withReport("FIX-S15", 2000, '<div class="ev ev-text">text proof</div>');
+    const spec = "---\nid: FIX-S15\nscreenshot_exempt: pure data migration; no rendered surface\n---\n# x\n\n## Acceptance Criteria\n\n- [ ] rows migrate\n";
+    addSpec(wt, "FIX-S15", spec);
+    withSelfScore(wt, "FIX-S15", 8, "good");
+    expect(storyRequiresScreenshot(wt, "FIX-S15")).toBe(false);
+    expect(webCaptureTargetsForStory(wt, "FIX-S15")).toEqual([]);
+    expect(declaresAnySurface(spec)).toBe(true);
+    expect(verificationReportHasContent(wt, "FIX-S15")).toBe(true);
+  });
+
+  // ── AC6: declaresAnySurface pure function ───────────────────────────────────
+  it("AC6: declaresAnySurface — true for url / cmd / exempt-with-reason; false otherwise", () => {
+    expect(declaresAnySurface("---\nid: A\ndeliverable_url: https://x\n---\n# A\n")).toBe(true);
+    expect(declaresAnySurface("---\nid: A\nscreenshot_url: https://x\n---\n# A\n")).toBe(true);
+    expect(declaresAnySurface("---\nid: A\ndeliverable_cmd: roll status\n---\n# A\n")).toBe(true);
+    expect(declaresAnySurface("---\nid: A\nscreenshot_exempt: pure data migration\n---\n# A\n")).toBe(true);
+    expect(declaresAnySurface("---\nid: A\nscreenshot_exempt: true\n---\n# A\n")).toBe(false);
+    expect(declaresAnySurface("# A — redesign\n\n## Acceptance Criteria\n\n- [ ] x\n")).toBe(false);
+    expect(declaresAnySurface("---\nid: A\nepic: foo\n---\n# A\n")).toBe(false);
   });
 });

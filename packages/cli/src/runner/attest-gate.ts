@@ -259,28 +259,130 @@ function parseScreenshotExemptEpics(yaml: string): string[] {
  * deliverable_url is web-only; never force a web url onto a terminal card.
  */
 export function deliverableUrlForStory(worktreeCwd: string, storyId: string): string | null {
+  const all = deliverableUrlsForStory(worktreeCwd, storyId);
+  return all.length === 0 ? null : (all[0] as string);
+}
+
+/**
+ * FIX-339 (AC1) — the FULL list of DECLARED deliverable web surfaces. A card may
+ * legitimately ship more than one user-visible web view (e.g. a Casting tab AND
+ * a Review tab), and the attest must capture EACH. Parses the frontmatter
+ * `deliverable_url:` / `screenshot_url:` in three shapes, all backward-compatible:
+ *   - single scalar           `deliverable_url: https://app/x`        → ["https://app/x"]
+ *   - inline list             `deliverable_url: [a, b]`               → ["a", "b"]
+ *   - comma-separated scalar  `deliverable_url: a, b`                 → ["a", "b"]
+ *   - YAML block list         `deliverable_url:\n  - a\n  - b`        → ["a", "b"]
+ * A single value is returned as a one-element list, so every legacy single-url
+ * card behaves EXACTLY as before. Empty / absent ⇒ []. Order is preserved and
+ * duplicates are de-duped (stable).
+ */
+export function deliverableUrlsForStory(worktreeCwd: string, storyId: string): string[] {
   const spec = storySpecPath(worktreeCwd, storyId);
-  if (spec === null) return null;
+  if (spec === null) return [];
   let text: string;
   try {
     text = readFileSync(spec, "utf8");
   } catch {
-    return null;
+    return [];
   }
   const fm = /^---\n([\s\S]*?)\n---/.exec(text);
-  if (fm === null) return null;
-  const m = /^(?:deliverable_url|screenshot_url):\s*(.+)$/m.exec(fm[1] ?? "");
-  if (m === null) return null;
-  const v = stripQuotes((m[1] ?? "").trim());
-  return v === "" ? null : v;
+  if (fm === null) return [];
+  return parseFrontmatterListField(fm[1] ?? "", /^(?:deliverable_url|screenshot_url):/);
 }
 
-export function webCaptureTargetForStory(worktreeCwd: string, storyId: string, override?: string): string | null {
-  if (!storyRequiresScreenshot(worktreeCwd, storyId)) return null; // exempt → no web capture owed
+/**
+ * FIX-339 (AC2) — the DECLARED deliverable CLI commands. A card whose
+ * deliverable is a command's terminal output (a CLI surface) declares
+ * `deliverable_cmd:` in the frontmatter; the attest runs EACH command in the
+ * worktree and captures its terminal output. Same three parse shapes as
+ * {@link deliverableUrlsForStory}. Empty / absent ⇒ []. SECURITY: only the
+ * commands the spec itself declares are ever run, and only inside the worktree
+ * (the terminal capture lane wraps every command in `cd <worktree> && …`); no
+ * external / runtime input reaches this list.
+ */
+export function deliverableCmdsForStory(worktreeCwd: string, storyId: string): string[] {
+  const spec = storySpecPath(worktreeCwd, storyId);
+  if (spec === null) return [];
+  let text: string;
+  try {
+    text = readFileSync(spec, "utf8");
+  } catch {
+    return [];
+  }
+  const fm = /^---\n([\s\S]*?)\n---/.exec(text);
+  if (fm === null) return [];
+  return parseFrontmatterListField(fm[1] ?? "", /^deliverable_cmd:/);
+}
+
+/**
+ * Parse a frontmatter field that may be a scalar, an inline `[a, b]` list, a
+ * comma-separated scalar, or a YAML block list. `keyRe` matches the `key:`
+ * prefix on a frontmatter line (anchored at column 0). De-dupes while keeping
+ * first-seen order. Shared by deliverable_url + deliverable_cmd so both fields
+ * accept the same shapes and the single-value back-compat path is identical.
+ *
+ * NOTE: commas split URLs/commands, so a command that legitimately contains a
+ * comma must use the inline `[ "a,b" ]` or YAML block-list form instead of the
+ * comma-separated scalar — the same caveat applies to URLs (rare in practice).
+ */
+function parseFrontmatterListField(fmBody: string, keyRe: RegExp): string[] {
+  const lines = fmBody.split(/\r?\n/);
+  const out: string[] = [];
+  const push = (raw: string): void => {
+    const v = stripQuotes(raw.trim());
+    if (v !== "" && !out.includes(v)) out.push(v);
+  };
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? "";
+    const head = keyRe.exec(line);
+    if (head === null) continue;
+    const rest = line.slice(head[0].length).trim();
+    // inline list: key: [a, b]
+    const inline = /^\[(.*)\]$/.exec(rest);
+    if (inline !== null) {
+      for (const tok of (inline[1] ?? "").split(",")) push(tok);
+      continue;
+    }
+    if (rest !== "") {
+      // scalar (possibly comma-separated)
+      for (const tok of rest.split(",")) push(tok);
+      continue;
+    }
+    // block list: key:\n  - a\n  - b  (consume following `-` item lines)
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const item = /^(\s+)-\s*(.+?)\s*$/.exec(lines[j] ?? "");
+      if (item === null) {
+        // a non-list line ends the block (unless it is blank)
+        if ((lines[j] ?? "").trim() === "") continue;
+        break;
+      }
+      push(item[2] ?? "");
+    }
+  }
+  return out;
+}
+
+/**
+ * FIX-339 (AC1) — one web capture target per DECLARED deliverable_url. An env
+ * override (a single deploy url) collapses to one target (it points at the live
+ * deploy, which is the one surface the deploy proves). With no override, every
+ * declared url is resolved through the same FIX-321 rules (http(s)/file as-is,
+ * `dossier` opt-in, relative → file:// with #fragment deep-link). Exempt ⇒ [].
+ */
+export function webCaptureTargetsForStory(worktreeCwd: string, storyId: string, override?: string): string[] {
+  if (!storyRequiresScreenshot(worktreeCwd, storyId)) return []; // exempt → no web capture owed
   const trimmed = (override ?? "").trim();
-  if (trimmed !== "") return trimmed; // env / deploy override wins
-  const declared = deliverableUrlForStory(worktreeCwd, storyId);
-  if (declared === null) return null; // FIX-321: NO dossier fallback — caller records an honest skip
+  if (trimmed !== "") return [trimmed]; // env / deploy override wins (single live surface)
+  return deliverableUrlsForStory(worktreeCwd, storyId).map((u) => resolveWebTarget(worktreeCwd, storyId, u));
+}
+
+/** Back-compat single-target resolver — first declared surface, or null. */
+export function webCaptureTargetForStory(worktreeCwd: string, storyId: string, override?: string): string | null {
+  const all = webCaptureTargetsForStory(worktreeCwd, storyId, override);
+  return all.length === 0 ? null : (all[0] as string);
+}
+
+function resolveWebTarget(worktreeCwd: string, storyId: string, declared: string): string {
   if (declared === "dossier") return pathToFileURL(join(cardArchiveDir(worktreeCwd, storyId), "index.html")).href;
   if (/^(?:https?|file):\/\//i.test(declared)) return declared;
   // relative → a built artifact under the worktree. FIX-321b: split a trailing
@@ -292,6 +394,27 @@ export function webCaptureTargetForStory(worktreeCwd: string, storyId: string, o
   const relPath = hashIdx >= 0 ? declared.slice(0, hashIdx) : declared;
   const fragment = hashIdx >= 0 ? declared.slice(hashIdx) : "";
   return pathToFileURL(join(worktreeCwd, relPath)).href + fragment;
+}
+
+/**
+ * FIX-339 (AC6) — does the spec DECLARE ANY visual surface? True iff it has a
+ * `deliverable_url`/`screenshot_url`, a `deliverable_cmd`, OR a recorded
+ * `screenshot_exempt: <reason>`. PURE (takes spec text), agent-agnostic, used by
+ * the build preflight to WARN (this round only — no hard block) when a non-exempt
+ * card declares none of the three. Mirrors the runtime gate's frontmatter reads.
+ */
+export function declaresAnySurface(specText: string): boolean {
+  const fm = /^---\n([\s\S]*?)\n---/.exec(specText);
+  if (fm === null) return false;
+  const body = fm[1] ?? "";
+  if (parseFrontmatterListField(body, /^(?:deliverable_url|screenshot_url):/).length > 0) return true;
+  if (parseFrontmatterListField(body, /^deliverable_cmd:/).length > 0) return true;
+  const ex = /^screenshot_exempt:\s*(.+)$/m.exec(body);
+  if (ex !== null) {
+    const reason = stripQuotes((ex[1] ?? "").trim());
+    if (reason !== "" && !/^(false|no|0|true|yes|on|1)$/i.test(reason)) return true;
+  }
+  return false;
 }
 
 interface AcMapEvidence {
@@ -360,22 +483,50 @@ function hasMachineCaptureSkip(worktreeCwd: string, storyId: string): boolean {
  * riding the separate terminal-capture lane).
  */
 function owesRealWebCapture(worktreeCwd: string, storyId: string): boolean {
-  return storyRequiresScreenshot(worktreeCwd, storyId) && deliverableUrlForStory(worktreeCwd, storyId) !== null;
+  return storyRequiresScreenshot(worktreeCwd, storyId) && deliverableUrlsForStory(worktreeCwd, storyId).length > 0;
 }
 
 /**
- * FIX-309 — a REAL, taken web capture is present in the evidence manifest
- * (`{kind:"web",taken:true}`). This is the ONLY thing that discharges a card
- * that {@link owesRealWebCapture}; a `taken:false` web skip never counts.
+ * FIX-339 (AC2/AC3) — whether this delivery OWES a REAL terminal capture: a
+ * non-exempt card that DECLARED ≥1 `deliverable_cmd`. Each declared command is a
+ * concrete CLI surface that must be really run + captured; an honest terminal
+ * skip no longer discharges a declared command.
  */
-function hasRealWebCapture(worktreeCwd: string, storyId: string): boolean {
+function owesTerminalCapture(worktreeCwd: string, storyId: string): boolean {
+  return storyRequiresScreenshot(worktreeCwd, storyId) && deliverableCmdsForStory(worktreeCwd, storyId).length > 0;
+}
+
+/** Count the REAL, taken captures of a given kind in the evidence manifest. */
+function takenCaptureCount(worktreeCwd: string, storyId: string, kind: string): number {
   const manifest = evidenceManifest(worktreeCwd, storyId);
-  if (manifest === null || !Array.isArray(manifest.captures)) return false;
-  return manifest.captures.some((raw) => {
+  if (manifest === null || !Array.isArray(manifest.captures)) return 0;
+  return manifest.captures.filter((raw) => {
     if (typeof raw !== "object" || raw === null) return false;
     const row = raw as Record<string, unknown>;
-    return row["kind"] === "web" && row["taken"] === true;
-  });
+    return row["kind"] === kind && row["taken"] === true;
+  }).length;
+}
+
+/**
+ * FIX-309 + FIX-339 (AC1) — EVERY declared web surface is REALLY captured.
+ * A card that declares N deliverable_urls must carry ≥N taken:true web captures
+ * (one per surface); a single real shot no longer discharges a multi-surface
+ * card. With a single declared url this is exactly the old "≥1 taken web shot".
+ */
+function hasRealWebCapture(worktreeCwd: string, storyId: string): boolean {
+  const declared = deliverableUrlsForStory(worktreeCwd, storyId).length;
+  const need = declared === 0 ? 1 : declared; // owesRealWebCapture guarantees ≥1 when called
+  return takenCaptureCount(worktreeCwd, storyId, "web") >= need;
+}
+
+/**
+ * FIX-339 (AC2) — EVERY declared deliverable_cmd is REALLY captured: ≥N
+ * taken:true terminal captures for N declared commands.
+ */
+function hasRealTerminalCapture(worktreeCwd: string, storyId: string): boolean {
+  const need = deliverableCmdsForStory(worktreeCwd, storyId).length;
+  if (need === 0) return false;
+  return takenCaptureCount(worktreeCwd, storyId, "terminal") >= need;
 }
 
 function passAcVisualFloor(worktreeCwd: string, storyId: string): { ok: boolean; reason?: string } {
@@ -385,12 +536,22 @@ function passAcVisualFloor(worktreeCwd: string, storyId: string): { ok: boolean;
   if (pass.length === 0) return { ok: true };
   const missing = pass.filter((e) => !(e.evidence ?? []).some((ev) => ev.kind === "screenshot" && typeof ev.href === "string" && ev.href !== ""));
   if (missing.length === 0) return { ok: true };
-  // FIX-309 (堵 284 洞①): a declared-deliverable card may NOT excuse a missing
-  // screenshot via an honest-skip — it must carry a REAL web capture.
-  if (owesRealWebCapture(worktreeCwd, storyId)) {
-    if (hasRealWebCapture(worktreeCwd, storyId)) return { ok: true, reason: "real web capture present" };
+  // FIX-339 (AC3): per-surface enforcement. A card may declare web surfaces, CLI
+  // commands, or both; EACH declared surface owes a REAL capture and an
+  // honest-skip no longer discharges a DECLARED surface.
+  const owesWeb = owesRealWebCapture(worktreeCwd, storyId);
+  const owesTerm = owesTerminalCapture(worktreeCwd, storyId);
+  if (owesWeb || owesTerm) {
+    const gaps: string[] = [];
+    if (owesWeb && !hasRealWebCapture(worktreeCwd, storyId)) {
+      gaps.push(`declared deliverable_url(s) not all really captured (need ${deliverableUrlsForStory(worktreeCwd, storyId).length} taken web shots)`);
+    }
+    if (owesTerm && !hasRealTerminalCapture(worktreeCwd, storyId)) {
+      gaps.push(`declared deliverable_cmd(s) not all really captured (need ${deliverableCmdsForStory(worktreeCwd, storyId).length} taken terminal shots)`);
+    }
+    if (gaps.length === 0) return { ok: true, reason: "all declared surfaces really captured" };
     const ids = missing.map((e) => e.ac ?? "?").join(", ");
-    return { ok: false, reason: `pass AC(s) lack screenshot evidence and the declared deliverable_url was never really captured (honest-skip does not satisfy a declared surface): ${ids}` };
+    return { ok: false, reason: `pass AC(s) lack screenshot evidence and a declared surface was never really captured (honest-skip does not satisfy a declared surface): ${gaps.join("; ")} [${ids}]` };
   }
   if (hasMachineCaptureSkip(worktreeCwd, storyId)) return { ok: true, reason: "machine capture skip present" };
   const ids = missing.map((e) => e.ac ?? "?").join(", ");
@@ -489,13 +650,21 @@ export function verificationReportHasContent(worktreeCwd: string, storyId: strin
     if (positiveWithEvidence === 0) return false;
     if (!passAcVisualFloor(worktreeCwd, storyId).ok) return false;
     if (storyRequiresScreenshot(worktreeCwd, storyId)) {
-      // FIX-309 (堵 284 洞①+②): a card that DECLARED a deliverable_url owes a
-      // REAL web capture — neither an honest-skip nor a bare `<figure class=shot>`
-      // in the HTML (which could be a self-referential dossier self-shot, the
-      // FIX-321 forgery shape) discharges it; only a recorded `taken:true` web
-      // capture does. A required card with NO declared surface (TUI / terminal
-      // lane) keeps the prior floor: a captured figure ref OR an honest skip.
-      if (owesRealWebCapture(worktreeCwd, storyId)) return hasRealWebCapture(worktreeCwd, storyId);
+      // FIX-309 (堵 284 洞①+②) + FIX-339 (AC3 逐面强制): a card that DECLARED any
+      // surface (deliverable_url and/or deliverable_cmd) owes a REAL capture of
+      // EACH — neither an honest-skip nor a bare `<figure class=shot>` in the HTML
+      // (which could be a self-referential dossier self-shot, the FIX-321 forgery
+      // shape) discharges it; only recorded `taken:true` captures (one per
+      // declared surface) do. A mixed web+cmd card must satisfy BOTH. A required
+      // card with NO declared surface keeps the prior floor: a captured figure
+      // ref OR an honest skip.
+      const owesWeb = owesRealWebCapture(worktreeCwd, storyId);
+      const owesTerm = owesTerminalCapture(worktreeCwd, storyId);
+      if (owesWeb || owesTerm) {
+        if (owesWeb && !hasRealWebCapture(worktreeCwd, storyId)) return false;
+        if (owesTerm && !hasRealTerminalCapture(worktreeCwd, storyId)) return false;
+        return true;
+      }
       return /<figure class="shot\b|href="screenshots\/|src="screenshots\//i.test(html) || hasMachineCaptureSkip(worktreeCwd, storyId);
     }
     return true;

@@ -774,6 +774,126 @@ describe("executeCommand — command → executor mapping", () => {
     });
   });
 
+  // ── FIX-311b: the build-preflight visual-evidence gate (wired into pick_story) ──
+  //
+  // The gate is CONSERVATIVE: it never changes control flow (story_picked always
+  // returns), it ALERTs only when CONFIDENT (web-surface-without-url / no-AC-no-
+  // exemption), and it NEVER flags a terminal/CLI/back-end or ambiguous card.
+  // These tests drive it through executeCommand({kind:"pick_story"}) against a
+  // real spec on disk under <repoCwd>/.roll/features/uncategorized/<id>/spec.md.
+  describe("FIX-311b — build-preflight visual-evidence gate", () => {
+    /** Build fakePorts whose repoCwd is a real temp dir holding a spec for `id`. */
+    function portsWithSpec(id: string, specText: string): ReturnType<typeof fakePorts> {
+      const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-311b-")));
+      execDirs.push(repo);
+      const specDir = join(repo, ".roll", "features", "uncategorized", id);
+      mkdirSync(specDir, { recursive: true });
+      writeFileSync(join(specDir, "spec.md"), specText);
+      const base = fakePorts();
+      return fakePorts({
+        repoCwd: repo,
+        paths: { ...base.ports.paths, alertsPath: join(repo, "alerts.log") },
+        backlog: { read: () => [{ id, desc: "est_min:5", status: "📋 Todo" }] },
+        evidence: { openFrame: vi.fn(() => join(specDir, "run")) },
+      });
+    }
+    const visualEvents = (calls: Record<string, unknown[]>): RollEvent[] =>
+      (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent).filter((e) => e.type === "visual:gate");
+    const alertText = (calls: Record<string, unknown[]>): string =>
+      (calls["alert"] ?? []).map((a) => String((a as unknown[])[1])).join("\n");
+
+    it("BLOCK-WORTHY: a WEB-surface card with NO deliverable_url is FLAGGED (alert + visual:gate flagged) — but the cycle still proceeds (story_picked)", async () => {
+      const { ports, calls } = portsWithSpec(
+        "US-WEB-1",
+        `## US-WEB-1 Web dashboard redesign 📋\n\n**AC:**\n- [ ] Screenshot of the rendered web page (browser tab) is captured\n`,
+      );
+      const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
+      // Control flow is UNTOUCHED — the gate never blocks.
+      expect(r.event).toEqual({ type: "story_picked", storyId: "US-WEB-1" });
+      const ve = visualEvents(calls);
+      expect(ve).toHaveLength(1);
+      expect(ve[0]).toMatchObject({ verdict: "flagged", code: "web-surface-without-deliverable-url", surface: "web", storyId: "US-WEB-1" });
+      expect(alertText(calls)).toContain("web-surface-without-deliverable-url");
+      expect(alertText(calls)).toContain("deliverable_url");
+      expect(alertText(calls)).toContain("NOT blocked");
+    });
+
+    it("BLOCK-WORTHY: a card with NO visual-evidence AC and NO exemption is FLAGGED (missing-visual-evidence-ac) — still proceeds", async () => {
+      const { ports, calls } = portsWithSpec(
+        "US-NOAC-1",
+        `## US-NOAC-1 Dashboard tweaks 📋\n\n**AC:**\n- [ ] Cards are grouped by epic\n- [ ] Sort persists across reloads\n`,
+      );
+      const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
+      expect(r.event).toEqual({ type: "story_picked", storyId: "US-NOAC-1" });
+      const ve = visualEvents(calls);
+      expect(ve[0]).toMatchObject({ verdict: "flagged", code: "missing-visual-evidence-ac" });
+      expect(alertText(calls)).toContain("screenshot_exempt");
+    });
+
+    it("RED LINE: a CLI/terminal card (visual AC, NO deliverable_url) is NOT flagged (terminal-capture lane) — verdict ok", async () => {
+      const { ports, calls } = portsWithSpec(
+        "FIX-CLI-1",
+        `## FIX-CLI-1 New roll status line 📋\n\n**AC:**\n- [ ] Terminal screenshot of \`roll status\` shows the new summary line\n`,
+      );
+      const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
+      expect(r.event).toEqual({ type: "story_picked", storyId: "FIX-CLI-1" });
+      const ve = visualEvents(calls);
+      expect(ve[0]).toMatchObject({ verdict: "ok", surface: "terminal" });
+      // NO flag alert for a terminal card (the WARN line is absent).
+      expect(alertText(calls)).not.toContain("visual-evidence preflight");
+    });
+
+    it("RED LINE: a pure back-end card with a recorded screenshot_exempt is NOT flagged — verdict ok", async () => {
+      const { ports, calls } = portsWithSpec(
+        "FIX-BE-1",
+        `---\nscreenshot_exempt: backend-only data migration, no user-visible surface\n---\n## FIX-BE-1 Migrate ledger 📋\n\n**AC:**\n- [ ] Rows migrate with checksums intact\n- [ ] Telemetry data is captured from the API\n`,
+      );
+      const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
+      expect(r.event).toEqual({ type: "story_picked", storyId: "FIX-BE-1" });
+      const ve = visualEvents(calls);
+      expect(ve[0]).toMatchObject({ verdict: "ok" });
+      expect(alertText(calls)).not.toContain("visual-evidence preflight");
+    });
+
+    it("RED LINE: an ambiguous-surface visual card (no web cue, no url) is NOT flagged — verdict ok", async () => {
+      const { ports, calls } = portsWithSpec(
+        "FIX-AMB-1",
+        `## FIX-AMB-1 Some visible change 📋\n\n**AC:**\n- [ ] A screenshot proves the new behavior\n`,
+      );
+      await executeCommand({ kind: "pick_story" }, ports, CTX);
+      const ve = visualEvents(calls);
+      expect(ve[0]).toMatchObject({ verdict: "ok", surface: "ambiguous" });
+      expect(alertText(calls)).not.toContain("visual-evidence preflight");
+    });
+
+    it("a WEB card that DECLARES a deliverable_url is NOT flagged — verdict ok", async () => {
+      const { ports, calls } = portsWithSpec(
+        "US-WEB-2",
+        `---\ndeliverable_url: .roll/features/index.html#x\n---\n## US-WEB-2 Web polish 📋\n\n**AC:**\n- [ ] Screenshot of the rendered web page is captured\n`,
+      );
+      await executeCommand({ kind: "pick_story" }, ports, CTX);
+      const ve = visualEvents(calls);
+      expect(ve[0]).toMatchObject({ verdict: "ok", surface: "web" });
+      expect(alertText(calls)).not.toContain("visual-evidence preflight");
+    });
+
+    it("a story with NO spec on disk is left alone (no visual:gate event, no alert) — FIX-309 backstops", async () => {
+      const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-311b-nospec-")));
+      execDirs.push(repo);
+      const base = fakePorts();
+      const { ports, calls } = fakePorts({
+        repoCwd: repo,
+        paths: { ...base.ports.paths, alertsPath: join(repo, "alerts.log") },
+        backlog: { read: () => [{ id: "US-NOSPEC-1", desc: "est_min:5", status: "📋 Todo" }] },
+        evidence: { openFrame: vi.fn(() => join(repo, "run")) },
+      });
+      const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
+      expect(r.event).toEqual({ type: "story_picked", storyId: "US-NOSPEC-1" });
+      expect(visualEvents(calls)).toHaveLength(0);
+      expect(alertText(calls)).not.toContain("visual-evidence preflight");
+    });
+  });
+
   it("spawn_agent → agent_exited with the agent exit code", async () => {
     const { ports } = fakePorts();
     const r = await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);

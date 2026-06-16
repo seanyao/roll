@@ -3,7 +3,7 @@
  *
  * The three screenshot gates must agree or they fight each other:
  *   - DESIGN (this file / FIX-311): the spec is BORN honest — every non-exempt
- *     story carries an AC that captures its user-visible surface, and a web
+ *     story carries an AC that captures its user-visible surface, and a WEB
  *     surface DECLARES the real product page it will screenshot
  *     (`deliverable_url:`, alias `screenshot_url:`).
  *   - ENFORCE (FIX-309 / runner/attest-gate.ts): a captured screenshot is the
@@ -15,12 +15,24 @@
  * spec with no visual-evidence AC at design time than to let the runtime gate
  * discover, mid-delivery, that the card can never satisfy the screenshot floor.
  *
- * It plugs the two FIX-284 holes at their SOURCE (the spec), the same two holes
- * FIX-321 plugged at capture time:
- *   ① a card that DECLARES a deliverable surface but never wires an AC to
- *      capture it (→ runtime honest-skip / empty shell forever); and
- *   ② a card with NO visual-evidence AC at all that slipped the iron rule
- *      because it lacked the literal keywords (the keyword-as-enabler leak).
+ * FIX-311b — two refinements that make this safe to WIRE INTO the build
+ * preflight (it now actually fails-loud, so over-enforce / false-positives
+ * would block the loop):
+ *   (a) SURFACE-AWARE. `deliverable_url` is WEB-ONLY: a card whose visual AC
+ *       captures a TERMINAL surface (CLI / TUI / `roll` command / a screen
+ *       recording cast) rides the separate terminal-capture lane and must NOT
+ *       be forced to declare a web url. Only a WEB-surface visual AC (a page /
+ *       console / browser tab / index.html) owes a `deliverable_url`. A visual
+ *       AC of an AMBIGUOUS surface (a bare "screenshot" with no web/terminal
+ *       cue) is treated conservatively as terminal-or-unknown — it is NOT
+ *       blocked for a missing url (the runtime FIX-309 gate is the backstop).
+ *   (b) DUAL-USE TOKEN FIX. The words `captured` / `capture of` /
+ *       `deliverable_url` / `screenshot_url` are dual-use: "telemetry data is
+ *       captured from the API" or "writes deliverable_url into the manifest" are
+ *       NOT visual-evidence ACs. These tokens now count ONLY inside an explicit
+ *       visual-evidence context (a `[visual-evidence]` marker, "截图证明", or
+ *       paired with a web/terminal screenshot cue). The unambiguous nouns
+ *       (`screenshot` / `截图` / `录屏` / `终端截图` …) still count on their own.
  *
  * RED LINE — a GENERIC mechanism, never a per-card patch. It NEVER names a
  * specific card's url and NEVER uses keywords to ENABLE the requirement
@@ -32,11 +44,22 @@
  */
 import { parseAcBlocks } from "@roll/core";
 
+/** The user-visible surface a story's visual-evidence AC captures. */
+export type VisualSurface =
+  /** A web page / console / browser tab — owes a declared `deliverable_url`. */
+  | "web"
+  /** A terminal / CLI / TUI / screen-recording cast — rides the terminal-capture lane (no url). */
+  | "terminal"
+  /** A visual AC with no web/terminal cue — conservatively NOT forced to declare a url. */
+  | "ambiguous"
+  /** No visual-evidence AC at all. */
+  | "none";
+
 export interface VisualEvidenceVerdict {
   /** true ⇒ the spec satisfies the design-phase visual-evidence contract. */
   ok: boolean;
   /** Machine-readable failure code; undefined when ok. */
-  code?: "missing-visual-evidence-ac" | "declared-surface-without-deliverable-url";
+  code?: "missing-visual-evidence-ac" | "web-surface-without-deliverable-url";
   /** Human-readable reason (EN) — undefined when ok. */
   reason?: string;
   /** When exempt, the recorded exemption reason (the contract was waived, not met). */
@@ -45,28 +68,27 @@ export interface VisualEvidenceVerdict {
   declaresDeliverableUrl: boolean;
   /** Whether some AC captures a user-visible surface (web / CLI / TUI). */
   hasVisualEvidenceAc: boolean;
+  /** The surface the visual-evidence AC captures (drives the url requirement). */
+  surface: VisualSurface;
 }
 
 /**
- * Words that, appearing in an AC item, mark it as one that CAPTURES a
- * user-visible surface. This list ONLY RECOGNISES an existing visual-evidence
- * AC — it is never used to decide whether a card needs one (that is always
- * yes, by default). Bilingual + the canonical evidence nouns so the recogniser
- * is not locale-fragile.
+ * UNAMBIGUOUS visual-evidence nouns — these mark an AC as a visual-evidence AC
+ * on their own (no surrounding context required). They are never used as
+ * non-visual jargon in the corpus. Bilingual + the canonical evidence nouns so
+ * the recogniser is not locale-fragile. This list ONLY RECOGNISES an existing
+ * visual-evidence AC — it is never used to decide whether a card needs one
+ * (that is always yes, by default).
  */
-const VISUAL_EVIDENCE_TOKENS = [
+const UNAMBIGUOUS_VISUAL_TOKENS = [
   "screenshot",
   "screen shot",
   "screen-capture",
   "screencapture",
   "screen capture",
-  "captured",
-  "capture of",
   "visual evidence",
   "visual proof",
   "rendered view",
-  "deliverable_url",
-  "screenshot_url",
   "截图",
   "截屏",
   "可视证据",
@@ -76,6 +98,105 @@ const VISUAL_EVIDENCE_TOKENS = [
   "tui 截",
   "cli 截",
 ];
+
+/**
+ * DUAL-USE tokens — words that appear in BOTH visual-evidence ACs AND ordinary
+ * non-visual prose (FIX-311b hole b: "telemetry captured", "write deliverable_url
+ * into the manifest"). They count as a visual-evidence AC ONLY when the AC item
+ * ALSO carries an explicit visual-evidence context cue (see below) — never on
+ * their own.
+ */
+const DUAL_USE_VISUAL_TOKENS = [
+  "captured",
+  "capture of",
+  "deliverable_url",
+  "screenshot_url",
+];
+
+/**
+ * Explicit visual-evidence CONTEXT cues — when present in the same AC item, they
+ * promote an otherwise dual-use token into a real visual-evidence AC. An explicit
+ * `[visual-evidence]` marker, the Chinese "截图证明 / 截图佐证", or any of the
+ * unambiguous nouns above (so "deliverable_url screenshot" still counts).
+ */
+const VISUAL_CONTEXT_CUES = [
+  "[visual-evidence]",
+  "visual-evidence",
+  "visual evidence",
+  "截图证明",
+  "截图佐证",
+  "截屏证明",
+  ...UNAMBIGUOUS_VISUAL_TOKENS,
+];
+
+/**
+ * WEB-surface cues. A visual-evidence AC carrying any of these captures a WEB
+ * surface and so owes a declared `deliverable_url` (the runtime web gate needs a
+ * real product page). Bilingual + the canonical web nouns. Deliberately
+ * CONSERVATIVE: genuinely cross-surface words (e.g. "dashboard", which can be a
+ * TUI dashboard) are NOT here — they leave the surface ambiguous so the gate
+ * never forces a web url onto a terminal deliverable (FIX-311b red line).
+ */
+const WEB_SURFACE_CUES = [
+  "web page",
+  "webpage",
+  "web ui",
+  "web 页",
+  "网页",
+  "页面",
+  "browser",
+  "浏览器",
+  "console",
+  "控制台",
+  "index.html",
+  ".html",
+  "deliverable_url",
+  "screenshot_url",
+  "tab", // word-boundary matched below → never matches "table"/"establish"
+  "标签页",
+  "标签",
+];
+
+/**
+ * TERMINAL-surface cues. A visual-evidence AC carrying any of these captures a
+ * TERMINAL surface — it rides the separate terminal-capture lane and must NOT be
+ * forced to declare a web url (FIX-311b hole a). CLI / TUI / a `roll …` command /
+ * a terminal screenshot / a screen-recording cast. Alphanumeric cues are
+ * word-boundary matched (so "cast" never matches "Casting", "cli" never matches
+ * "click", "roll" never matches "rollback").
+ */
+const TERMINAL_SURFACE_CUES = [
+  "terminal",
+  "终端",
+  "cli",
+  "command line",
+  "命令行",
+  "tui",
+  "录屏",
+  "cast",
+  "终端截图",
+  "终端截屏",
+  "tui 截",
+  "cli 截",
+  "stdout",
+  "roll", // a `roll <subcommand>` invocation — a CLI deliverable
+];
+
+/**
+ * Word-boundary-aware cue match. A cue made of ASCII word chars (with optional
+ * spaces) must match on whole-word boundaries — so "cast" does NOT fire on
+ * "Casting", "cli" not on "click", "roll" not on "rollback". A cue carrying
+ * non-word characters (`.html`, `[visual-evidence]`) or CJK (no word boundaries
+ * in JS regex) falls back to a plain substring test. `text` is already lower-cased.
+ */
+function cueMatches(text: string, cue: string): boolean {
+  const lower = cue.toLowerCase();
+  if (/^[a-z0-9 ]+$/.test(lower)) {
+    const escaped = lower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`\\b${escaped}\\b`).test(text);
+  }
+  return text.includes(lower);
+}
 
 function frontmatter(specText: string): string | null {
   const m = /^---\n([\s\S]*?)\n---/.exec(specText);
@@ -114,15 +235,79 @@ export function declaresDeliverableUrl(specText: string): boolean {
   return stripQuotes((m[1] ?? "").trim()) !== "";
 }
 
+/**
+ * Whether a single AC item's text is a visual-evidence AC.
+ *
+ * FIX-311b dual-use fix: an UNAMBIGUOUS noun (`screenshot`, `截图`, `录屏`, …)
+ * counts on its own; a DUAL-USE token (`captured`, `deliverable_url`, …) counts
+ * ONLY when the same item ALSO carries an explicit visual-evidence context cue.
+ * So "telemetry data is captured from the API" and "writes deliverable_url into
+ * the manifest" are NOT visual-evidence ACs.
+ */
+function itemIsVisualEvidence(itemText: string): boolean {
+  const text = itemText.toLowerCase();
+  if (UNAMBIGUOUS_VISUAL_TOKENS.some((tok) => cueMatches(text, tok))) return true;
+  const hasDualUse = DUAL_USE_VISUAL_TOKENS.some((tok) => cueMatches(text, tok));
+  if (!hasDualUse) return false;
+  // A dual-use token only counts inside an explicit visual-evidence context.
+  return VISUAL_CONTEXT_CUES.some((cue) => cueMatches(text, cue));
+}
+
+/** Classify the surface a visual-evidence AC item captures (web/terminal/ambiguous). */
+function itemSurface(itemText: string): "web" | "terminal" | "ambiguous" {
+  const text = itemText.toLowerCase();
+  const isWeb = WEB_SURFACE_CUES.some((cue) => cueMatches(text, cue));
+  const isTerminal = TERMINAL_SURFACE_CUES.some((cue) => cueMatches(text, cue));
+  // A genuinely mixed item (both cues) is treated as ambiguous — we never block
+  // an ambiguous surface for a missing url (FIX-311b conservatism: FIX-309 backstops).
+  if (isWeb && !isTerminal) return "web";
+  if (isTerminal && !isWeb) return "terminal";
+  return "ambiguous";
+}
+
 /** Whether ANY AC item in the spec captures a user-visible surface. */
 export function hasVisualEvidenceAc(specText: string): boolean {
   for (const section of parseAcBlocks(specText)) {
     for (const item of section.items) {
-      const text = item.text.toLowerCase();
-      if (VISUAL_EVIDENCE_TOKENS.some((tok) => text.includes(tok))) return true;
+      if (itemIsVisualEvidence(item.text)) return true;
     }
   }
   return false;
+}
+
+/**
+ * Classify the visual surface of the spec's visual-evidence AC(s).
+ *   - `none`      — no visual-evidence AC at all.
+ *   - `web`       — at least one visual-evidence AC captures a WEB surface (and
+ *                   none is a clear terminal-only deliverable). Owes a url.
+ *   - `terminal`  — every visual-evidence AC captures a terminal surface (CLI /
+ *                   TUI / cast). Rides the terminal-capture lane; no url owed.
+ *   - `ambiguous` — a visual-evidence AC exists but no clear web/terminal cue,
+ *                   OR a mix that does not cleanly resolve. Conservatively NOT
+ *                   forced to declare a url (FIX-309 backstops at capture time).
+ *
+ * WEB wins when present and unambiguous: a card that screenshots a web page
+ * genuinely owes a real product url even if it also captures a terminal step.
+ */
+export function visualSurface(specText: string): VisualSurface {
+  let sawVisual = false;
+  let sawWeb = false;
+  let sawTerminal = false;
+  let sawAmbiguous = false;
+  for (const section of parseAcBlocks(specText)) {
+    for (const item of section.items) {
+      if (!itemIsVisualEvidence(item.text)) continue;
+      sawVisual = true;
+      const s = itemSurface(item.text);
+      if (s === "web") sawWeb = true;
+      else if (s === "terminal") sawTerminal = true;
+      else sawAmbiguous = true;
+    }
+  }
+  if (!sawVisual) return "none";
+  if (sawWeb) return "web"; // a real web surface always owes its url
+  if (sawTerminal && !sawAmbiguous) return "terminal";
+  return "ambiguous";
 }
 
 /**
@@ -136,19 +321,23 @@ export function hasVisualEvidenceAc(specText: string): boolean {
  *      the reason carried through). This is the ONLY honest skip.
  *   2. Otherwise the spec MUST carry a visual-evidence AC. None ⇒ fail
  *      (`missing-visual-evidence-ac`) — hole ②, the keyword-as-enabler leak.
- *   3. If the spec DECLARES it has a visual surface (a visual-evidence AC) but
- *      does NOT declare `deliverable_url`/`screenshot_url`, the runtime web
- *      gate would have no real product page to capture and the card would
- *      honest-skip forever ⇒ fail (`declared-surface-without-deliverable-url`)
- *      — hole ①, declared-but-never-captured.
+ *   3. SURFACE-AWARE (FIX-311b hole a). A visual-evidence AC that captures a
+ *      WEB surface but declares no `deliverable_url`/`screenshot_url` ⇒ fail
+ *      (`web-surface-without-deliverable-url`) — the runtime web gate would
+ *      have no real product page and the card would honest-skip forever
+ *      (hole ①). A TERMINAL or AMBIGUOUS surface is NOT required to declare a
+ *      url — it rides the terminal-capture lane (terminal) or is left to the
+ *      runtime FIX-309 gate (ambiguous), so a CLI/TUI/back-end card is never
+ *      blocked here for a missing web url.
  */
 export function validateStoryVisualEvidence(specText: string): VisualEvidenceVerdict {
   const exemptReason = visualExemptionReason(specText);
   const declares = declaresDeliverableUrl(specText);
-  const hasAc = hasVisualEvidenceAc(specText);
+  const surface = visualSurface(specText);
+  const hasAc = surface !== "none";
 
   if (exemptReason !== undefined) {
-    return { ok: true, exemptReason, declaresDeliverableUrl: declares, hasVisualEvidenceAc: hasAc };
+    return { ok: true, exemptReason, declaresDeliverableUrl: declares, hasVisualEvidenceAc: hasAc, surface };
   }
 
   if (!hasAc) {
@@ -159,19 +348,21 @@ export function validateStoryVisualEvidence(specText: string): VisualEvidenceVer
         "no AC captures a user-visible surface (web/CLI/TUI) and no recorded `screenshot_exempt: <reason>` — every story owes a visual-evidence AC by default; only a recorded exemption opts out",
       declaresDeliverableUrl: declares,
       hasVisualEvidenceAc: hasAc,
+      surface,
     };
   }
 
-  if (!declares) {
+  if (surface === "web" && !declares) {
     return {
       ok: false,
-      code: "declared-surface-without-deliverable-url",
+      code: "web-surface-without-deliverable-url",
       reason:
-        "a visual-evidence AC is present but the spec frontmatter declares no `deliverable_url:` (alias `screenshot_url:`) pointing at the real product surface — the runtime web gate would have no target to capture and the card would honest-skip forever",
+        "a WEB-surface visual-evidence AC is present but the spec frontmatter declares no `deliverable_url:` (alias `screenshot_url:`) pointing at the real product page — the runtime web gate would have no target to capture and the card would honest-skip forever; a terminal/CLI deliverable does not need a url (it rides the terminal-capture lane)",
       declaresDeliverableUrl: declares,
       hasVisualEvidenceAc: hasAc,
+      surface,
     };
   }
 
-  return { ok: true, declaresDeliverableUrl: declares, hasVisualEvidenceAc: hasAc };
+  return { ok: true, declaresDeliverableUrl: declares, hasVisualEvidenceAc: hasAc, surface };
 }

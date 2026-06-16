@@ -58,8 +58,10 @@ describe("heteroAvailable (FIX-312 — the review-routing switch)", () => {
     // builder is kimi (not installed locally) but a claude peer is available.
     expect(heteroAvailable(["claude"], "kimi")).toBe(true);
   });
-  it("no per-agent hardcoding — an unknown vendor pairs with any known one", () => {
-    expect(heteroAvailable(["claude", "made-up-agent"], "claude")).toBe(true);
+  it("FIX-328: IDE-only or unknown installed targets do NOT count as runnable heterogeneous peers", () => {
+    expect(heteroAvailable(["claude", "cursor"], "claude")).toBe(false);
+    expect(heteroAvailable(["claude", "trae"], "claude")).toBe(false);
+    expect(heteroAvailable(["claude", "made-up-agent"], "claude")).toBe(false);
   });
 });
 
@@ -111,6 +113,18 @@ describe("selectPairingCandidates — rational hard filter", () => {
       cycleId: "c1",
     });
     expect(got).toEqual(["claude"]); // heterogeneous only
+  });
+
+  it("FIX-328: excludes installed IDE-only agents even if pairing.yaml declares them capable", () => {
+    const got = selectPairingCandidates({
+      installed: ["claude", "cursor", "trae", "kimi"],
+      isAvailable: always,
+      workingAgent: "claude",
+      stage: "code",
+      cfg: cfg({ capability: { cursor: ["code"], trae: ["code"], kimi: ["code"] } }),
+      cycleId: "c1",
+    });
+    expect(got).toEqual(["kimi"]);
   });
 });
 
@@ -194,6 +208,13 @@ describe("defaultPairingConfig + renderPairingConfig (roll pair init scaffold)",
     expect(d.stages).toEqual(["code", "score"]);
     expect(d.capability["claude"]).toEqual(["code", "score"]);
   });
+  it("FIX-328: default scaffold excludes IDE-only agents with no headless reviewer spawn", () => {
+    const c = defaultPairingConfig(["claude", "cursor", "trae"]);
+    expect(c.enabled).toBe(false);
+    expect(c.capability).toEqual({ claude: ["code", "score"] });
+    expect(renderPairingConfig(c)).not.toContain("cursor:");
+    expect(renderPairingConfig(c)).not.toContain("trae:");
+  });
   it("FIX-343: the score stage is same-vendor-friendly — a fresh instance of the BUILDER'S OWN type qualifies", () => {
     // Independence = another assigned fresh session, NOT vendor heterogeneity:
     // the score stage drops the isHeterogeneous filter and INCLUDES the builder's
@@ -224,6 +245,17 @@ describe("defaultPairingConfig + renderPairingConfig (roll pair init scaffold)",
       cycleId: "c1",
     });
     expect(picked).toEqual(["claude"]); // single-agent env: a fresh same-type session
+  });
+  it("FIX-328: the mandatory score selector also excludes IDE-only agents", () => {
+    const picked = selectPairingCandidates({
+      installed: ["cursor", "trae", "claude"],
+      isAvailable: () => true,
+      workingAgent: "claude",
+      stage: "score",
+      cfg: cfg({ enabled: false, stages: [], capability: {} }),
+      cycleId: "c1",
+    });
+    expect(picked).toEqual(["claude"]);
   });
   it("renders explicit, re-parseable yaml (round-trip)", () => {
     const c = defaultPairingConfig(["claude", "codex", "kimi"]);

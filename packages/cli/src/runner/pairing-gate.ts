@@ -18,7 +18,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { canonicalAgentName, isHeterogeneous, parsePairingConfig, selectPairingCandidates, type PairingHistory, type PairingStage } from "@roll/core";
+import { canReviewHeadless, canonicalAgentName, isHeterogeneous, parsePairingConfig, selectPairingCandidates, type PairingHistory, type PairingStage } from "@roll/core";
 import { writeReviewScoreNote } from "../lib/review-score.js";
 import { assessComplexity } from "./peer-gate.js";
 
@@ -549,6 +549,7 @@ export async function retryPeerConsult(
     const working = canonicalAgentName(deps.workingAgent);
     const distinct = deps.installed
       .map(canonicalAgentName)
+      .filter(canReviewHeadless)
       .filter((a, i, arr) => arr.indexOf(a) === i);
     // FIX-331 (+ codex peer-review): rotate through EVERY heterogeneous peer so one
     // peer's transient unavailability (claude 5h limit / kimi cold-start timeout)

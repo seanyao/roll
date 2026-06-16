@@ -1474,6 +1474,24 @@ describe("executeCommand — command → executor mapping", () => {
     expect(alerts.some((m) => m.includes("self-review fallback"))).toBe(true);
   });
 
+  it("FIX-328: IDE-only cursor does NOT count as a runnable heterogeneous peer, so cycle is not blocked", async () => {
+    const wt = highComplexityWorktree();
+    const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-328-cursor-")));
+    execDirs.push(rt);
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      paths: { ...base.ports.paths, worktreePath: wt, eventsPath: join(rt, "events.ndjson"), alertsPath: join(rt, "alerts.log") },
+      installedAgents: () => ["claude", "cursor"],
+      agentSpawn: vi.fn(async () => ({ stdout: "SCORE: 8\nVERDICT: good\nRATIONALE: cursor was not spawned\n", stderr: "", exitCode: 0, timedOut: false })),
+    });
+    const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
+    expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 0 } });
+    expect((ports.agentSpawn as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0])).not.toContain("cursor");
+    const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
+    const gate = events.find((e) => e.type === "peer:gate");
+    expect(gate).toBeDefined();
+  });
+
   it("FIX-312: multi-vendor env + self-reviewed (no peer evidence) → VIOLATION, BLOCKED (agentExit 1)", async () => {
     // The mirror of the case above: when a heterogeneous peer WAS available
     // (heteroAvailable=true) but the cycle shipped with no peer evidence, that is

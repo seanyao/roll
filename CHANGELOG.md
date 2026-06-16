@@ -7,6 +7,8 @@
 - **各类 agent 的展示、用量和 smoke 行为改走统一注册表**:模型名、实时观察窗、usage recovery、dashboard 回填、pairing 成本和 loop smoke 不再散落写 claude/pi/kimi/codex 特判;新增 agent 只需补 AgentSpec,非 claude 不再显示成 `?` 或被 mock smoke 降级。(FIX-313) `[loop]`
   <!-- evidence: .roll/features/loop-engine/FIX-313/latest/FIX-313-report.html -->
 
+- **评审候选池不再选到 IDE 配置类 agent**:`roll pair init`、pairing selector、peer gate retry 和 score selector 现在只把可 headless spawn 的 agent 放进评审池;cursor/trae 这类配置目标不会再被当作评审者拖垮 cycle。(FIX-328) `[pairing]`
+
 ## v3.617.1 — 2026-06-17
 
 ### 质量与可信

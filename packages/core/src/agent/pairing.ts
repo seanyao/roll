@@ -59,6 +59,17 @@ export function isHeterogeneous(a: string, b: string): boolean {
 }
 
 /**
+ * FIX-328 — reviewer/scorer pools must only include agents the loop runner can
+ * spawn as a headless reviewer. IDE/config targets can be "installed" for setup
+ * purposes but are not valid peer-review processes.
+ */
+const HEADLESS_REVIEW_AGENTS = new Set(["claude", "codex", "kimi", "qwen", "agy", "pi"]);
+
+export function canReviewHeadless(name: string): boolean {
+  return HEADLESS_REVIEW_AGENTS.has(canonicalAgentName(name));
+}
+
+/**
  * FIX-312 — is a heterogeneous peer GENUINELY available for `workingAgent`?
  *
  * The owner-calibrated line for review routing: "hetero available → must use it;
@@ -77,12 +88,12 @@ export function heteroAvailable(installed: readonly string[], workingAgent: stri
   if (working === "" || canonicalAgentName(workingAgent) === "") {
     // No builder identity → can't reason about heterogeneity; conservatively
     // treat any second distinct vendor in the pool as a heterogeneous option.
-    const vendors = new Set(installed.map(agentVendor).filter((v) => v !== ""));
+    const vendors = new Set(installed.filter(canReviewHeadless).map(agentVendor).filter((v) => v !== ""));
     return vendors.size >= 2;
   }
   return installed.some((a) => {
     const c = canonicalAgentName(a);
-    return c !== "" && agentVendor(c) !== working;
+    return c !== "" && canReviewHeadless(c) && agentVendor(c) !== working;
   });
 }
 
@@ -184,7 +195,10 @@ export function parsePairingConfig(yaml: string): PairingConfig {
  * `code` (the proven, lowest-integration path).
  */
 export function defaultPairingConfig(installed: string[]): PairingConfig {
-  const agents = installed.map(canonicalAgentName).filter((a, i, arr) => arr.indexOf(a) === i);
+  const agents = installed
+    .map(canonicalAgentName)
+    .filter(canReviewHeadless)
+    .filter((a, i, arr) => arr.indexOf(a) === i);
   const vendors = new Set(agents.map(agentVendor));
   const capability: Record<string, PairingStage[]> = {};
   // US-PAIR-009: every installed agent is declared score-capable too — scoring a
@@ -227,7 +241,8 @@ export function pairingPoolView(installed: string[], cfg: PairingConfig): Pairin
     const vendor = agentVendor(agent);
     const capability = cfg.capability[agent] ?? [];
     let reason = "";
-    if (capability.length === 0) reason = "no capability declared in pairing.yaml";
+    if (!canReviewHeadless(agent)) reason = "agent has no headless reviewer spawn";
+    else if (capability.length === 0) reason = "no capability declared in pairing.yaml";
     // codex pair-review: capable for SOME stage isn't enough — it must overlap an
     // ENABLED stage, else it's never actually eligible (e.g. design-only while only
     // code is on).
@@ -457,6 +472,7 @@ export function selectPairingCandidates(input: SelectInput): string[] {
     const scorers = installed
       .map(canonicalAgentName)
       .filter((a, i, arr) => arr.indexOf(a) === i) // de-dupe
+      .filter(canReviewHeadless)
       .filter((a) => isAvailable(a))
       .sort((x, y) => (order.get(x) ?? 999) - (order.get(y) ?? 999));
     if (scorers.length === 0) return [];
@@ -485,6 +501,7 @@ export function selectPairingCandidates(input: SelectInput): string[] {
   const qualified = installed
     .map(canonicalAgentName)
     .filter((a, i, arr) => arr.indexOf(a) === i) // de-dupe
+    .filter(canReviewHeadless)
     .filter((a) => a !== working)
     .filter((a) => isAvailable(a))
     .filter((a) => (cfg.capability[a] ?? []).includes(stage))

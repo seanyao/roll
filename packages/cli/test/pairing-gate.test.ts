@@ -441,6 +441,25 @@ describe("runScorePairing — US-PAIR-009", () => {
     expect(readStoryReviewScores(dir, "US-X-001")[0]?.scoredBy).toBe("claude");
   });
 
+  it("FIX-328: one scorer spawn throws, next candidate scores → cycle still gets a Review Score", async () => {
+    const { dir, rt } = project(SCORE_CFG);
+    const tried: string[] = [];
+    const { d } = scoreDeps({
+      installed: ["claude", "codex", "kimi"],
+      scorePeer: async (peer: string) => {
+        tried.push(peer);
+        if (peer === "codex") throw new Error("unsupported reviewer spawn");
+        return { score: 8, verdict: "good" as const, rationale: "next reviewer scored after one spawn failed", cost: 0.01 };
+      },
+    });
+    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
+    expect(r.status).toBe("scored");
+    expect(r.peer).toBe("kimi");
+    expect(tried).toContain("codex");
+    expect(tried).toContain("kimi");
+    expect(readStoryReviewScores(dir, "US-X-001")[0]?.scoredBy).toBe("kimi");
+  });
+
   it("FIX-343 (②): SINGLE-VENDOR install → same-vendor immediately, no hetero wait/hang", async () => {
     // Only the builder's own vendor is installed → the hetero pool is EMPTY, so
     // we go straight to the same-vendor round (no wasted hetero spawn/wait).

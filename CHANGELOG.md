@@ -9,6 +9,9 @@
 
 ### 修复
 
+- **`roll story validate` 不再误报可视证据卡**:显式 `[visual-evidence]` 和已声明网页交付面的卡会按真实端面通过校验。(FIX-341) `[loop]`
+  <!-- evidence: .roll/features/acceptance-evidence/FIX-341/latest/FIX-341-report.html -->
+
 - **截图豁免必须写清理由**:只写 true 不再跳过截图要求。(FIX-309) `[loop]`
   <!-- evidence: .roll/features/acceptance-evidence/FIX-309/latest/FIX-309-report.html -->
 

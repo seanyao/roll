@@ -695,6 +695,20 @@ function passAcVisualFloor(worktreeCwd: string, storyId: string): { ok: boolean;
   if (violatesMustDeclareSurface(worktreeCwd, storyId)) {
     return { ok: false, reason: MUST_DECLARE_FAIL_REASON };
   }
+  // FIX-345 — a `screenshot_exempt` card owes NO captured visual evidence by
+  // definition (per-card frontmatter or the policy non-visual epic deny-list),
+  // so its pass ACs legitimately discharge with text-only evidence. The
+  // screenshot floor below MUST NOT apply to it. Without this short-circuit a
+  // validator/back-end exempt card (e.g. the FIX-341 e2e case: 4 pass ACs each
+  // backed by test-log text, no deliverable_url/_cmd, no machine-capture skip)
+  // is false-empty-shelled — its complete report reads as content-less only
+  // because the visual floor demanded a per-AC screenshot it never owed. This
+  // mirrors the storyRequiresScreenshot guard the report-content check (line ~817)
+  // already applies; here it must guard the pass-AC screenshot floor too. The
+  // empty-shell FLOOR is untouched: a no-AC / no-ac-map report is still caught
+  // upstream in verificationReportHasContent (zero sections / no ac-map), and a
+  // NON-exempt card still owes its captured evidence (the branches below).
+  if (!storyRequiresScreenshot(worktreeCwd, storyId)) return { ok: true, reason: "screenshot-exempt: pass ACs owe no captured visual evidence" };
   const entries = readAcMapEntries(worktreeCwd, storyId);
   if (entries === null) return { ok: true };
   const pass = entries.filter((e) => e.status === "pass");

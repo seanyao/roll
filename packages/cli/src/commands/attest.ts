@@ -41,7 +41,7 @@ import {
   type EvidenceRef,
   type ProcessArchive,
   type RunRow,
-  type SelfScoreReportEntry,
+  type ReviewScoreReportEntry,
 } from "@roll/core";
 import { classifyStatus, type RollEvent } from "@roll/spec";
 import {
@@ -73,7 +73,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { basename, join, relative } from "node:path";
 import { promisify } from "node:util";
 import { cardArchiveDir, epicFromFeaturePath, findFeatureFile, findFeatureFiles, generateIndex, reportFileName } from "../lib/archive.js";
-import { readSelfScoreTrend, readStorySelfScores } from "../lib/self-score.js";
+import { readReviewScoreTrend, readStoryReviewScores } from "../lib/review-score.js";
 import { markPhaseDone } from "../lib/story-page.js";
 import { refreshAggregates } from "./index-gen.js";
 
@@ -493,17 +493,17 @@ function relativeFromPhysical(fromDir: string, toPath: string): string {
 }
 
 /**
- * US-ATTEST-009 — same-story Self-Score entries from `.roll/notes/`:
+ * US-ATTEST-009 — same-story Review Score entries from `.roll/notes/`:
  * `YYYY-MM-DD-<skill>-<STORY>-<ts>.md` with YAML frontmatter
  * {skill, story, score, verdict, ts} + a prose body. Tolerant reader: files
  * that fail to parse are skipped; no notes ⇒ empty list ⇒ block skipped.
  */
-export function readSelfScores(
+export function readReviewScores(
   projectPath: string,
   storyId: string,
   hrefFromDir?: string,
-): SelfScoreReportEntry[] {
-  return readStorySelfScores(projectPath, storyId, hrefFromDir).map((e) => ({
+): ReviewScoreReportEntry[] {
+  return readStoryReviewScores(projectPath, storyId, hrefFromDir).map((e) => ({
     skill: e.skill,
     score: e.score,
     verdict: e.verdict,
@@ -982,8 +982,8 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
       ? `${manifest.test_pass.age_seconds}s ago`
       : "present"
     : "absent";
-  const selfScores = readSelfScores(projectPath, storyId, runDir);
-  const selfScoreTrend = readSelfScoreTrend(projectPath);
+  const reviewScores = readReviewScores(projectPath, storyId, runDir);
+  const reviewScoreTrend = readReviewScoreTrend(projectPath);
   // US-ATTEST-013 — self-contained card context + before/after comparison.
   const context = buildCardContext(projectPath, featureFile, storyId, process.env);
   const beforeAfter = detectBeforeAfter(runDir);
@@ -1010,8 +1010,8 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     ...(beforeAfter.length > 0 ? { beforeAfter } : {}),
     ...(processArchive !== undefined ? { process: processArchive } : {}),
     ...(docGap !== undefined ? { docGap } : {}),
-    ...(selfScores.length > 0 ? { selfScores } : {}),
-    ...(selfScoreTrend !== undefined ? { selfScoreTrend } : {}),
+    ...(reviewScores.length > 0 ? { reviewScores } : {}),
+    ...(reviewScoreTrend !== undefined ? { reviewScoreTrend } : {}),
     ...(selfCaptures.length > 0 ? { selfCaptures } : {}),
     ...(captureFacts.some((x) => !x.taken && x.skipped !== undefined)
       ? { captureSkips: captureFacts.filter((x) => !x.taken && x.skipped !== undefined).map((x) => ({ kind: x.kind, out: x.out, skipped: x.skipped ?? "" })) }

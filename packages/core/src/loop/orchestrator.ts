@@ -442,7 +442,7 @@ export interface CycleContext {
    *  "an independent fresh session (not a sub-agent sharing the builder's
    *  context) scored this delivery" is a CHECKED invariant, not asserted. Absent
    *  ⇒ the builder has not spawned yet (the gate then treats every score as a
-   *  potential self-score and demands a session-id present + distinct). */
+   *  potential self-grade and demands a session-id present + distinct). */
   builderSessionId?: string;
   /** FIX-208: the real per-cycle cost folded from the agent's parsed usage
    *  (cost/tracker.ts), set by the executor after spawn_agent. Threaded into

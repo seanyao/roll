@@ -938,7 +938,7 @@ describe("FIX-305 — UI/dossier web self-capture lane (real screenshot, not a s
   });
 });
 
-describe("US-ATTEST-009 — self-score notes feed the report", () => {
+describe("US-ATTEST-009 — review-score notes feed the report", () => {
   it("same-story notes render in the fold; unrelated stories don't", async () => {
     const proj = project();
     mkdirSync(join(proj, ".roll", "notes"), { recursive: true });
@@ -957,7 +957,7 @@ describe("US-ATTEST-009 — self-score notes feed the report", () => {
       join(proj, ".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03", "FIX-300-report.html"),
       "utf8",
     );
-    expect(html).toContain(`${bi("Self-Score", "自评")}（1）`);
+    expect(html).toContain(`${bi("Review Score", "评审分")}（1）`);
     expect(html).toContain("<b>8</b>/10 · good");
     expect(html).toContain("干净的一刀。");
     expect(html).not.toContain("无关条目");
@@ -1000,9 +1000,9 @@ describe("US-ATTEST-009 — self-score notes feed the report", () => {
       "utf8",
     );
     expect(html).toContain("<code>test-quality</code>: <b>6</b>");
-    expect(html).toContain("self-score: mean 6.3 / min 5 / redo 2 (last 14)");
+    expect(html).toContain("review-score: mean 6.3 / min 5 / redo 2 (last 14)");
     expect(html).toContain('href="../notes/2026-06-08-roll-fix-FIX-300-1780000002.md"');
-    expect(html).toContain("low self-score: ok 5/10");
+    expect(html).toContain("low review-score: ok 5/10");
   });
 });
 

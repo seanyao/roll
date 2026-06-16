@@ -73,7 +73,6 @@ import {
 import { offboardCommand } from "./offboard.js";
 import { pricesCommand } from "./prices.js";
 import { releaseCommand } from "./release.js";
-import { SELF_SCORE_USAGE, selfScoreCommand } from "./self-score.js";
 import { setupCommand } from "./setup.js";
 import { SHOWCASE_USAGE, showcaseCommand } from "./showcase.js";
 import { skillsCommand } from "./skills.js";
@@ -141,9 +140,10 @@ export function registerAll(): void {
   registerPorted("cycles", cyclesCommand, { help: CYCLES_USAGE });
   // `cycle`: one cycle's trace tape (US-CLI-013) — the `roll cycles` tail hint target.
   registerPorted("cycle", cycleCommand, { help: CYCLE_USAGE });
-  // `self-score`: TS-native skill self-score note writer (FIX-274). Hidden,
-  // agent-facing — replaces the dead `source "$(command -v roll)"` bash path.
-  registerPorted("self-score", selfScoreCommand, { hidden: true, help: SELF_SCORE_USAGE });
+  // FIX-343 (AC1): the agent-facing self-grade command is REMOVED. The working
+  // agent never grades its own delivery; the cycle's Review Score is produced
+  // solely by a fresh-session peer Reviewer (runScorePairing). The only writer of
+  // a score note is that Reviewer path, which always sets `scoring: 'pair'`.
   // `index`: regenerate the backlog-derived ID→epic map (US-META-001). v3-native.
   registerPorted("index", indexCommand, { hidden: true });
   // `ls`: the cross-project registry listing (US-DOSSIER-028) — name·tag·verdict·path
@@ -306,12 +306,12 @@ export function registerAll(): void {
   // silent host fallback (US-ISO-003). No sub-paths on bash.
   registerPorted("test", testCommand);
   // `tune`: v3-native US-EVID-015 second-order control loop, READ-ONLY. Aggregates
-  // four trend signals (self-score notes / runs.jsonl pass rate / events.ndjson
+  // four trend signals (review-score notes / runs.jsonl pass rate / events.ndjson
   // misjudgments / runs result_eval.dims rubric relevance) into the pure
   // buildSelfTuningPlan, which emits suggest-only proposals with evidence +
   // rollback. NEVER writes policy/agents/rubric config; `tune reset` prints the
   // default rollback values without touching disk. No bash fallback (v2 had none).
-  registerPorted("tune", tuneCommand, { help: "Usage: roll tune\n  Self-tuning report from self-score samples.\n自调参报告。" });
+  registerPorted("tune", tuneCommand, { help: "Usage: roll tune\n  Self-tuning report from review-score samples.\n自调参报告。" });
   // `update`: full surface TS (npm + curl upgrade paths, cache invalidation, the
   // post-update `roll setup` chain, changelog). The real install is driven via
   // spawned npm/curl/tar; the curl atomic dir-swap is the one whitelisted gap.

@@ -76,9 +76,10 @@ function writeEvidenceJson(wt: string, storyId: string, body: unknown): void {
 /**
  * FIX-343 (step ③, OWNER B-decision): the gate now honors ONLY an INDEPENDENT
  * fresh-session PEER score (`scoring: pair` + a `scored-by` + a `session-id`
- * that is NOT the builder's session id). Self / legacy notes are exercised
- * separately by {@link withSelfScoreOnly}; the builder's own session is
- * exercised by the session-collision guard test.
+ * that is NOT the builder's session id). Legacy notes are exercised separately
+ * by {@link withLegacySelfNote} (a legacy `scoring: self` note, tolerated on
+ * read but never gating); the builder's own session is exercised by the
+ * session-collision guard test.
  *
  * FIX-343 (① STRICT cycle-scope): the gate now ALSO requires the honored note's
  * `session-id` to start with `${cycleId}:` — the production scorer mints
@@ -117,8 +118,9 @@ function withPeerScore(
   );
 }
 
-/** A LEGACY self-score note (no scoring/scored-by) — the gate must NOT honor it. */
-function withSelfScoreOnly(wt: string, storyId: string, score: number, verdict: "good" | "ok" | "regression"): void {
+/** A LEGACY self note (`scoring: self`, no scored-by) — tolerated on read, but
+ *  the gate must NEVER honor it (peer-only). */
+function withLegacySelfNote(wt: string, storyId: string, score: number, verdict: "good" | "ok" | "regression"): void {
   const dir = join(wt, ".roll", "features", "uncategorized", storyId, "notes");
   mkdirSync(dir, { recursive: true });
   writeFileSync(
@@ -299,7 +301,7 @@ describe("runAttestGate (three paths: produced / skipped-soft / skipped-hard)", 
   // FIX-343 (step ②): the gate honors ONLY a fresh-session peer score.
   it("FIX-343: a self/legacy note (no scoring/scored-by) is NOT honored → missing peer review score, hard-blocked", () => {
     const wt = withReport("FIX-SCORE-SELF", 2000);
-    withSelfScoreOnly(wt, "FIX-SCORE-SELF", 8, "good"); // legacy self note
+    withLegacySelfNote(wt, "FIX-SCORE-SELF", 8, "good"); // legacy self note
     const { alerts, events, s } = sinks();
     const r = runAttestGate(wt, "FIX-SCORE-SELF", "c-score-self", "hard", 1000, s);
     expect(r.verdict).toBe("skipped");
@@ -309,7 +311,7 @@ describe("runAttestGate (three paths: produced / skipped-soft / skipped-hard)", 
     expect(events[0]?.verdict).toBe("skipped");
   });
 
-  it("FIX-343 (B-decision): a pair note whose session-id === the BUILDER'S session is NOT honored (in-session/sub-agent self-score)", () => {
+  it("FIX-343 (B-decision): a pair note whose session-id === the BUILDER'S session is NOT honored (in-session/sub-agent self-grade)", () => {
     const wt = withReport("FIX-SCORE-OWN", 2000);
     const builderSession = "c-score-own:build:claude:1700000000";
     // Same agent+model is FINE — what's rejected is the SAME SESSION (a sub-agent
@@ -408,7 +410,7 @@ describe("runAttestGate (three paths: produced / skipped-soft / skipped-hard)", 
     expect(events[0]?.verdict).toBe("produced");
   });
 
-  it("US-EVID-013: regression self-score is a hard gate failure", () => {
+  it("US-EVID-013: regression review-score is a hard gate failure", () => {
     const wt = withReport("FIX-SCORE-REG", 2000);
     withPeerScore(wt, "FIX-SCORE-REG", 3, "regression", "c-score-reg");
     const { alerts, events, s } = sinks();
@@ -416,19 +418,19 @@ describe("runAttestGate (three paths: produced / skipped-soft / skipped-hard)", 
     expect(r.verdict).toBe("skipped");
     expect(r.blocked).toBe(true);
     expect(r.reasons[0]).toContain("regression");
-    expect(alerts[0]).toContain("self-score");
+    expect(alerts[0]).toContain("review-score");
     expect(events[0]?.verdict).toBe("skipped");
   });
 
-  it("US-EVID-013: low ok self-score is skipped with a discrepancy reason", () => {
+  it("US-EVID-013: low ok review-score is skipped with a discrepancy reason", () => {
     const wt = withReport("FIX-SCORE-LOW", 2000);
     withPeerScore(wt, "FIX-SCORE-LOW", 5, "ok", "c-score-low");
     const { alerts, s } = sinks();
     const r = runAttestGate(wt, "FIX-SCORE-LOW", "c-score-low", "soft", 1000, s);
     expect(r.verdict).toBe("skipped");
     expect(r.blocked).toBe(false);
-    expect(r.reasons[0]).toMatch(/low self-score.*partial.*Discrepancy/i);
-    expect(alerts[0]).toContain("self-score");
+    expect(r.reasons[0]).toMatch(/low review-score.*partial.*Discrepancy/i);
+    expect(alerts[0]).toContain("review-score");
   });
 
   // ── FIX-343 (③ observability): the fail-closed catch must EMIT ──────────────
@@ -438,13 +440,13 @@ describe("runAttestGate (three paths: produced / skipped-soft / skipped-hard)", 
     // a blocked `skipped` verdict SILENTLY → the most safety-critical case (the
     // gate itself errored) was invisible in the audit ndjson. vi.doMock +
     // dynamic import scopes the throwing mock to THIS test only (the rest of the
-    // suite uses the real evaluateSelfScoreGate).
+    // suite uses the real evaluateReviewScoreGate).
     vi.resetModules();
-    vi.doMock("../src/lib/self-score.js", async (importOriginal) => {
-      const actual = await importOriginal<typeof import("../src/lib/self-score.js")>();
+    vi.doMock("../src/lib/review-score.js", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("../src/lib/review-score.js")>();
       return {
         ...actual,
-        evaluateSelfScoreGate: () => {
+        evaluateReviewScoreGate: () => {
           throw new Error("synthetic gate error to exercise the fail-closed catch");
         },
       };
@@ -454,7 +456,7 @@ describe("runAttestGate (three paths: produced / skipped-soft / skipped-hard)", 
     withPeerScore(wt, "FIX-CATCH", 8, "good", "c-catch");
     const { alerts, events, s } = sinks();
     const r = gateWithThrow(wt, "FIX-CATCH", "c-catch", "hard", 1000, s);
-    vi.doUnmock("../src/lib/self-score.js");
+    vi.doUnmock("../src/lib/review-score.js");
     vi.resetModules();
     expect(r.verdict).toBe("skipped");
     expect(r.blocked).toBe(true); // fail CLOSED in hard mode
@@ -984,7 +986,7 @@ describe("FIX-309 — declared deliverable_url demands a REAL capture (堵 284 �
     // The hardened must-declare floor: a non-exempt card with an AC block but no
     // deliverable_url / deliverable_cmd / screenshot_exempt can never produce a
     // real capture → hard FAIL with the canonical must-declare reason, even with
-    // a fresh content report + a good self-score.
+    // a fresh content report + a good review-score.
     const wt = withReport("FIX-309NODECL", 2000, '<figure class="shot"><img src="screenshots/web.png"></figure>');
     addSpec(wt, "FIX-309NODECL", "# FIX-309NODECL — Casting redesign\n\n## Acceptance Criteria\n\n- [ ] the casting layout renders\n");
     withPeerScore(wt, "FIX-309NODECL", 8, "good", "c-309nodecl");

@@ -174,7 +174,7 @@ function skillRow(r: SkillPanelRow): string {
     `<div style="font-size:13px;color:${C.sub};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(r.description)}</div>` +
     `<div style="${MONO}font-size:10.5px;color:${C.faint};margin-top:2px;">${r.hubLines} ${bi("hub lines", "hub 行")}</div></div>` +
     usageBar +
-    `<span style="${MONO}font-size:12px;font-weight:600;color:${r.usage > 0 ? C.blue : C.faint};text-align:right;" title="invocations (self-score notes) · 调用次数">${r.usage > 0 ? `×${r.usage}` : "—"}</span>` +
+    `<span style="${MONO}font-size:12px;font-weight:600;color:${r.usage > 0 ? C.blue : C.faint};text-align:right;" title="invocations (review-score notes) · 调用次数">${r.usage > 0 ? `×${r.usage}` : "—"}</span>` +
     verdict +
     `</summary>` +
     `<div style="background:#fbfcfe;border-top:1px solid #f1f4f8;padding:12px 18px 14px 43px;">` +

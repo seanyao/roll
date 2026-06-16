@@ -30,12 +30,13 @@ const HELP = `Usage: roll pair <init|status|score>
                    File present = pairing on; delete it = off. --force overwrites.
   status           Show the pairing pool: who pairs, vendor, capability, why excluded.
   score <story-id> [--summary <text>|--file <path>] [--skill <name>] [--worker <agent>] [--timeout-ms <ms>]
-                   Ask the paired heterogeneous agent to score a finished cycle
-                   (US-PAIR-009/010); falls back to self-score with a hint.
+                   Ask a fresh-session peer Reviewer to score a finished cycle
+                   (US-PAIR-009/010). No peer ⇒ no Review Score (fail loud); the
+                   working agent never grades its own work.
 
   init   从已安装的 agent 物化 .roll/pairing.yaml；文件在=开，删掉=关；--force 覆盖。
   status 显示结对池：谁能结对、厂商、能力、谁因何被排除。
-  score  让异构配对 agent 给完成的 cycle 打分；无候选/超时回落自评并给出提示。
+  score  让独立新 session 的评审 agent 给完成的 cycle 打分；无可用评审则无评审分（诚实失败），工作 agent 永不自评。
 `;
 
 export function pairCommand(args: string[]): number | Promise<number> {
@@ -334,20 +335,20 @@ export async function pairScore(rest: string[], deps: PairScoreCmdDeps = default
     );
     return 0;
   }
-  // Enhancement, never a blocker: every non-scored outcome degrades to the
-  // documented self-score fallback with the reason in hand (exit 0). FIX-343
-  // (step ④): the score stage is mandatory, so there is no "off" — a non-scored
-  // outcome is now only none-available / timeout / error.
+  // FIX-343 (AC1 + step ④): the score stage is mandatory and the working agent
+  // NEVER grades its own work — there is no self-grade escape. A non-scored outcome
+  // (none-available / timeout / error) means NO Review Score was produced; the
+  // cycle's attest gate then fails loud on "missing peer review score". This
+  // command reports the honest reason and exits non-zero (no synthesized pass).
   const reason =
     r.status === "none-available"
       ? "no scorer available to spawn a fresh review session"
       : r.status === "timeout"
         ? `peer ${r.peer ?? ""} timed out or broke protocol`.trim()
         : "score pairing errored";
-  process.stdout.write(
-    `Pair scoring fallback (${reason}) — write the self-score instead:\n` +
-      `配对评分回落（${reason}）——请改用自评：\n` +
-      `  roll self-score ${skill} ${storyId} <score 1..10> <good|ok|regression> "<rationale>" --fallback-reason "${reason}"\n`,
+  process.stderr.write(
+    `No Review Score produced (${reason}) — a fresh-session peer Reviewer must score this cycle; retry once a scorer is available.\n` +
+      `未产出评审分（${reason}）——必须由独立新 session 的评审 agent 打分；待有可用评审后重试。\n`,
   );
-  return 0;
+  return 1;
 }

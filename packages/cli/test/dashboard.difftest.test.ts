@@ -557,7 +557,7 @@ describe("frozen: roll loop status (live)", () => {
     `);
   });
 
-  it("paused state + CNY cost + populated eval/self-score render", () => {
+  it("paused state + CNY cost + populated eval/review-score render", () => {
     const env = sandboxEnv({ ROLL_RENDER_NOW: LIVE_NOW });
     const rt = env["ROLL_PROJECT_RUNTIME_DIR"] as string;
     const slug = env["ROLL_MAIN_SLUG"] as string;

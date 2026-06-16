@@ -19,7 +19,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { canonicalAgentName, isHeterogeneous, parsePairingConfig, selectPairingCandidates, type PairingHistory, type PairingStage } from "@roll/core";
-import { writeSelfScoreNote } from "../lib/self-score.js";
+import { writeReviewScoreNote } from "../lib/review-score.js";
 import { assessComplexity } from "./peer-gate.js";
 
 /**
@@ -256,7 +256,7 @@ export async function runPairing(
 
 // ── US-PAIR-009: score stage — the paired heterogeneous agent scores the cycle ─
 
-/** A peer's structured score for a finished cycle (the self-score note shape). */
+/** A peer Reviewer's structured score for a finished cycle (the Review Score note shape). */
 export interface PairScore {
   score: number;
   verdict: "good" | "ok" | "regression";
@@ -277,8 +277,8 @@ export interface RunScorePairingDeps {
   timeoutMs?: number;
   history?: PairingHistory;
   epsilon?: number;
-  /** Note-writer seam (tests); defaults to {@link writeSelfScoreNote}. */
-  writeNote?: typeof writeSelfScoreNote;
+  /** Note-writer seam (tests); defaults to {@link writeReviewScoreNote}. */
+  writeNote?: typeof writeReviewScoreNote;
 }
 
 export interface RunScorePairingResult {
@@ -303,7 +303,7 @@ const SCORE_MAX_ATTEMPTS = 2; // 1 initial + 1 bounded retry
 /**
  * FIX-343 (step ④) — the score stage is the SOLE, MANDATORY producer of the
  * cycle's Review Score: a fresh-session peer reads the delivery summary and
- * writes the `scoring: pair` note. The working agent NEVER self-scores.
+ * writes the `scoring: pair` Review Score note. The working agent NEVER grades its own work.
  *
  *   • MANDATORY: NOT gated on `.roll/pairing.yaml` (enabled / stages⊇score). A
  *     delivery always owes a Review Score; the executor calls this every cycle.
@@ -371,17 +371,31 @@ export async function runScorePairing(
     // timeout + the 1-retry cap). Same-vendor-fresh still PASSES the gate (owner
     // minimum). A single-vendor install has an EMPTY hetero subset → it goes
     // straight to the same-vendor round (no wasted hetero wait).
-    const heteroPool = candidates.filter((c) => isHeterogeneous(c as string, workingAgent));
-    const sameVendorPool = candidates.filter((c) => !isHeterogeneous(c as string, workingAgent));
+    // C2 (FIX-343): guard the empty workingAgent label split so the bucketing
+    // matches core/agent/pairing.ts selectPairingCandidates (which buckets ALL
+    // candidates as same-vendor when `working === ""` — heterogeneity is
+    // undefined without a known builder). `isHeterogeneous(c, "")` would
+    // otherwise mark every real-vendor candidate "hetero", mislabeling the
+    // telemetry round. Empty builder ⇒ everything is the same-vendor round.
+    const builder = workingAgent.trim();
+    const heteroPool = builder === "" ? [] : candidates.filter((c) => isHeterogeneous(c as string, builder));
+    const sameVendorPool = builder === "" ? candidates : candidates.filter((c) => !isHeterogeneous(c as string, builder));
 
     // 1 bounded retry PER ROUND. Each attempt fires the round's pool in PARALLEL
     // (FIX-335 take-first) and uses the FIRST non-null score; the rest are
     // discarded. A wholly-flaking round retries ONCE (no death-spiral). The
     // reviewer's fresh session/cast id is minted per attempt so independence is
-    // recorded on the note, not asserted. A throwing probe propagates (firstValid
-    // re-throws) → the outer catch maps it to status "error".
+    // recorded on the note, not asserted.
+    //
+    // C1 (FIX-343): `coerceThrowToNull` makes a round's all-throw degrade to a
+    // null (no winner) INSTEAD of propagating. The HETERO round is run with
+    // coercion ON so a throwing hetero scorePeer falls THROUGH to the same-vendor
+    // round (matching the comment "hetero EMPTY or wholly fails (all-null/throw) →
+    // FALL BACK to same-vendor"). The TERMINAL (same-vendor) round keeps coercion
+    // OFF: there is nothing left to fall back to, so a broken probe stays a defect
+    // (firstValid re-throws → outer catch → status "error"), per FIX-335.
     type ScoreWinner = { peer: string; scored: PairScore; sessionId: string };
-    const runRound = async (pool: string[]): Promise<ScoreWinner | null> => {
+    const runRound = async (pool: string[], coerceThrowToNull: boolean): Promise<ScoreWinner | null> => {
       if (pool.length === 0) return null; // empty pool → no winner (no spawn, no wait)
       let w: ScoreWinner | null = null;
       for (let attempt = 1; attempt <= SCORE_MAX_ATTEMPTS && w === null; attempt++) {
@@ -392,14 +406,23 @@ export async function runScorePairing(
           const scored = await deps.scorePeer(peer, summary, timeoutMs);
           return scored === null ? null : { peer, scored, sessionId };
         });
-        w = await firstValid(probes);
+        if (coerceThrowToNull) {
+          try {
+            w = await firstValid(probes);
+          } catch {
+            w = null; // a wholly-throwing hetero round → fall through to same-vendor
+          }
+        } else {
+          w = await firstValid(probes);
+        }
       }
       return w;
     };
 
-    // Hetero FIRST; fall back to same-vendor only when hetero is absent or fails.
-    let winner = await runRound(heteroPool);
-    if (winner === null) winner = await runRound(sameVendorPool);
+    // Hetero FIRST (throws coerced → fall through); fall back to same-vendor only
+    // when hetero is absent or wholly fails.
+    let winner = await runRound(heteroPool, true);
+    if (winner === null) winner = await runRound(sameVendorPool, false);
     if (winner === null) {
       // Both rounds' scorer pools flaked across all attempts → honest timeout, BLOCK.
       return { status: "timeout" };
@@ -408,7 +431,7 @@ export async function runScorePairing(
 
     // Note first (the writer is the validator): a bad peer payload throws here
     // and leaves NOTHING on disk — no evidence, no event, status "error".
-    const note = (deps.writeNote ?? writeSelfScoreNote)(projectDir, {
+    const note = (deps.writeNote ?? writeReviewScoreNote)(projectDir, {
       skill,
       story: storyId,
       score: scored.score,
@@ -440,8 +463,8 @@ export async function runScorePairing(
 /**
  * Parse a peer's score reply (the executor/manual command's stdout contract):
  * one `SCORE: <1..10>` line, one `VERDICT: good|ok|regression` line, one
- * `RATIONALE: <text>` line — anything missing/malformed → null (caller falls
- * back to self-score; a peer that can't follow the protocol never writes a note).
+ * `RATIONALE: <text>` line — anything missing/malformed → null (the round
+ * treats it as no-score; a peer that can't follow the protocol never writes a note).
  */
 export function parsePairScoreOutput(stdout: string): Omit<PairScore, "cost"> | null {
   const sm = /^\s*SCORE:\s*(\d{1,2})\s*$/im.exec(stdout);

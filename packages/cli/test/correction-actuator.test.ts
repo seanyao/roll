@@ -92,7 +92,7 @@ describe("US-EVID-014 correction actuator runner adapter", () => {
     expect(readFileSync(spec, "utf8")).toContain("[roll:manual-merge]");
   });
 
-  it("auto mode returns a regression self-score story to Todo", () => {
+  it("auto mode returns a regression review-score story to Todo", () => {
     const p = project();
     writeFileSync(join(p.root, ".roll", "policy.yaml"), "loop_safety:\n  correction_actuator: auto\n");
     const result = applyCorrectionAction({
@@ -101,7 +101,7 @@ describe("US-EVID-014 correction actuator runner adapter", () => {
       alertsPath: p.alerts,
       storyId: "US-EVID-014",
       cycleId: "cycle-1",
-      reasons: ["self-score regression 3/10 blocks Done"],
+      reasons: ["review-score regression 3/10 blocks Done"],
       nowSec: 100,
     });
 
@@ -123,7 +123,7 @@ describe("US-EVID-014 correction actuator runner adapter", () => {
       alertsPath: p.alerts,
       storyId: "US-EVID-014",
       cycleId: "cycle-1",
-      reasons: ["self-score regression 3/10 blocks Done"],
+      reasons: ["review-score regression 3/10 blocks Done"],
       nowSec: 100,
     });
 

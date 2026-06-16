@@ -13,7 +13,7 @@ describe("US-EVID-016 morning report model", () => {
         cost: { cycleId: "c1", agent: "claude", model: "sonnet", tokensIn: 10, tokensOut: 5, estimatedCost: 0.2, revertCount: 0, effectiveCost: 0.2 },
         ts: 20,
       },
-      { type: "correction:action", storyId: "US-B", action: "return_story", signal: "regression", reason: "self-score", ts: 30 },
+      { type: "correction:action", storyId: "US-B", action: "return_story", signal: "regression", reason: "review-score", ts: 30 },
       { type: "correction:circuit_breaker", storyId: "US-B", signal: "regression", count: 3, threshold: 3, reason: "oscillation", ts: 40 },
       { type: "policy:safety_pause", loop: "ci", reason: "oscillation", ts: 41 },
       { type: "alert:notify", channel: "correction-circuit", message: "oscillation", ts: 42 },

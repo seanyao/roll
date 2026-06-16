@@ -165,7 +165,7 @@ const GROUP_LABEL: Record<SkillGroup, { en: string; zh: string }> = {
   lifecycle: { en: "lifecycle", zh: "生命周期" },
 };
 
-/** The project root the skills panel reads (skills/ on disk + self-score notes). */
+/** The project root the skills panel reads (skills/ on disk + review-score notes). */
 function projectRoot(): string {
   // ROLL_PKG_DIR (the source repo) carries the skills/ catalog; fall back to the
   // bridge repoRoot. The skills panel reads `<root>/skills` + `<root>/.roll`.

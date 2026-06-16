@@ -178,8 +178,8 @@ export const TRUTH_ANCHORS: readonly TruthAnchor[] = [
   {
     field: "attest_evidence",
     aggregate: "story",
-    description: "A delivered story's acceptance report + intent map (ac-map) + self-score.",
-    authoritativeSource: ".roll/features/<epic>/<ID>/ (card archive: latest/<ID>-report.html + ac-map.json + notes self-score)",
+    description: "A delivered story's acceptance report + intent map (ac-map) + Review Score (fresh-session peer Reviewer).",
+    authoritativeSource: ".roll/features/<epic>/<ID>/ (card archive: latest/<ID>-report.html + ac-map.json + notes Review Score)",
     writer: "roll attest render layer (the only component allowed to mint verdict markup — evidence red line US-ATTEST-010)",
     derivedViews: ["dossier evidence phase", "consistency check cards lane", "release gate attest requirement"],
     conflictPolicy:

@@ -1372,7 +1372,7 @@ describe("executeCommand — command → executor mapping", () => {
   });
 
   // FIX-293 — the peer gate now has teeth (was: verdict discarded, cycle
-  // self-scored anyway). A high-complexity delivery with no peer review BLOCKS
+  // self-graded anyway). A high-complexity delivery with no peer review BLOCKS
   // (agentExit 1, so Done is withheld) and the executor re-attempts the consult
   // ONCE. The complexity check keys on a real cycle diff, so these tests build a
   // real git worktree whose branch is N files ahead of origin/main.
@@ -1479,7 +1479,7 @@ describe("executeCommand — command → executor mapping", () => {
     // a self-review VIOLATION. The gate blocks, re-attempts the consult once, and
     // when that still yields no evidence the cycle ends NOT-Done with an
     // escalation alert. (Reproduces the FIX-284 root cause: multi-vendor configured
-    // yet self-scored.)
+    // yet self-graded.)
     const wt = highComplexityWorktree();
     const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-312-violation-")));
     execDirs.push(rt);

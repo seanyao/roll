@@ -4,7 +4,7 @@ export type CorrectionActuatorMode = "conservative" | "auto";
 export type CorrectionAction = "alert_only" | "open_fix" | "return_story" | "route_adjust";
 
 export interface CorrectionAttribution {
-  source: "attest:gate" | "acceptance-report" | "self-score" | "ci" | "unknown";
+  source: "attest:gate" | "acceptance-report" | "review-score" | "ci" | "unknown";
   layer: "acceptance" | "retrospective" | "ci" | "unknown";
   summary: string;
   evidence: string[];
@@ -47,12 +47,12 @@ function classifyAttribution(storyId: string, reasons: readonly string[]): {
 } {
   const text = reasonText(reasons);
   const lower = text.toLowerCase();
-  if (/self[-\s]?score.*regression|regression.*self[-\s]?score/.test(lower)) {
+  if (/review[-\s]?score.*regression|regression.*review[-\s]?score/.test(lower)) {
     return {
-      signal: "self_score_regression",
+      signal: "review_score_regression",
       plannedAction: "return_story",
       attribution: {
-        source: "self-score",
+        source: "review-score",
         layer: "retrospective",
         summary: text,
         evidence: ["events.ndjson", "attest:gate skipped", `.roll/features/<epic>/${storyId}/notes/`],

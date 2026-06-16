@@ -4,7 +4,7 @@
  * Skill 10.6 ("write the verification report") was a TEXT instruction: a cycle
  * could ship a high-quality delivery and silently skip the acceptance report
  * (observed 2026-06-06, cycle 20260606-033442 — FIX-199 merged with no ac-map,
- * no report, no self-score). Same failure mode FIX-150b fixed for peer review:
+ * no report, no review-score). Same failure mode FIX-150b fixed for peer review:
  * text has no teeth. This turns the requirement into a RUNTIME MECHANISM that
  * runs in every cycle's capture step, agent-agnostic:
  *
@@ -36,7 +36,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
-import { evaluateSelfScoreGate } from "../lib/self-score.js";
+import { evaluateReviewScoreGate } from "../lib/review-score.js";
 
 export type AttestMode = "soft" | "hard";
 
@@ -971,7 +971,7 @@ export function runAttestGate(
       // minted by this cycle's scorer (`${cycleId}:score:...`) is honored — a
       // prior cycle's peer note on a RESUME (re-picked un-merged same-story
       // branch) no longer soft-passes this cycle's gate.
-      const score = evaluateSelfScoreGate(scoreRepoCwd, storyId, builderSessionId, cycleId);
+      const score = evaluateReviewScoreGate(scoreRepoCwd, storyId, builderSessionId, cycleId);
       if (score.status === "pass") {
         const visual = passAcVisualFloor(worktreeCwd, storyId);
         const reasons = ["fresh acceptance report present", score.reason, ...(visual.reason !== undefined ? [visual.reason] : [])];
@@ -981,7 +981,7 @@ export function runAttestGate(
       const reasons = [score.reason];
       const blocked = mode === "hard";
       sinks.alert(
-        `attest gate (${mode}): self-score gate failed (${storyId}) — ${score.reason} — cycle ${cycleId}` +
+        `attest gate (${mode}): review-score gate failed (${storyId}) — ${score.reason} — cycle ${cycleId}` +
           (blocked ? " — BLOCKED (hard mode); story not marked Done" : ""),
       );
       sinks.event({ cycleId, verdict: "skipped", reasons });

@@ -11,7 +11,7 @@ export type MisjudgmentKind = "false_block" | "leak";
 export type SelfTuningMode = "suggest";
 export type SelfTuningProposalKind = "threshold" | "route_preference" | "rubric_weight";
 
-export interface SelfScoreTrendSample {
+export interface ReviewScoreTrendSample {
   score: number;
   verdict: string;
   at?: string;
@@ -46,7 +46,7 @@ export interface SelfTuningCurrentConfig {
 export interface SelfTuningInput {
   now: string;
   current: SelfTuningCurrentConfig;
-  selfScores: readonly SelfScoreTrendSample[];
+  reviewScores: readonly ReviewScoreTrendSample[];
   agentSlots: readonly AgentSlotTrend[];
   misjudgments: readonly MisjudgmentTrend[];
   rubricSignals: readonly RubricSignalTrend[];
@@ -156,7 +156,7 @@ function reset(target: string, value: string | number): SelfTuningRollback {
 
 function thresholdProposal(input: SelfTuningInput, damping: number): SelfTuningProposal | undefined {
   const current = input.current.lowScoreThreshold;
-  const scores = input.selfScores.map((s) => s.score).filter(finite);
+  const scores = input.reviewScores.map((s) => s.score).filter(finite);
   const p25 = percentile(scores, 0.25);
   const falseBlock = misjudgmentCount(input.misjudgments, "false_block");
   const leak = misjudgmentCount(input.misjudgments, "leak");
@@ -173,8 +173,8 @@ function thresholdProposal(input: SelfTuningInput, damping: number): SelfTuningP
       action: "tighten",
       from: current,
       to: next,
-      rationale: "漏放高于误拦，低分门限收紧一档；分布目标来自 self-score P25。",
-      evidence: [`self-score samples=${scores.length}`, `p25=${p25?.toFixed(2) ?? "n/a"}`, `false_block=${falseBlock}`, `leak=${leak}`],
+      rationale: "漏放高于误拦，低分门限收紧一档；分布目标来自 review-score P25。",
+      evidence: [`review-score samples=${scores.length}`, `p25=${p25?.toFixed(2) ?? "n/a"}`, `false_block=${falseBlock}`, `leak=${leak}`],
       rollback: reset("self_score.low_threshold", DEFAULT_LOW_SCORE_THRESHOLD),
     };
   }
@@ -188,8 +188,8 @@ function thresholdProposal(input: SelfTuningInput, damping: number): SelfTuningP
       action: "relax",
       from: current,
       to: next,
-      rationale: "误拦高于漏放，低分门限放宽一档；分布目标来自 self-score P25。",
-      evidence: [`self-score samples=${scores.length}`, `p25=${p25?.toFixed(2) ?? "n/a"}`, `false_block=${falseBlock}`, `leak=${leak}`],
+      rationale: "误拦高于漏放，低分门限放宽一档；分布目标来自 review-score P25。",
+      evidence: [`review-score samples=${scores.length}`, `p25=${p25?.toFixed(2) ?? "n/a"}`, `false_block=${falseBlock}`, `leak=${leak}`],
       rollback: reset("self_score.low_threshold", DEFAULT_LOW_SCORE_THRESHOLD),
     };
   }
@@ -290,7 +290,7 @@ export function buildSelfTuningPlan(input: SelfTuningInput): SelfTuningPlan {
   const minSamples = Math.max(1, Math.trunc(input.minSamples ?? DEFAULT_MIN_SAMPLES));
   const cooldownHours = Math.max(0, input.cooldownHours ?? DEFAULT_COOLDOWN_HOURS);
   const damping = Math.max(0.1, input.damping ?? DEFAULT_DAMPING);
-  const sampleCount = input.selfScores.length;
+  const sampleCount = input.reviewScores.length;
   const sampleGate = sampleCount >= minSamples ? "ok" : "insufficient";
   const isCooling = cooldownActive(input.now, input.lastTunedAt, cooldownHours);
   const stability: SelfTuningStability = {
@@ -307,7 +307,7 @@ export function buildSelfTuningPlan(input: SelfTuningInput): SelfTuningPlan {
       generatedAt: input.now,
       applied: false,
       stability,
-      summary: `self-tuning held: ${sampleCount}/${minSamples} self-score samples`,
+      summary: `self-tuning held: ${sampleCount}/${minSamples} review-score samples`,
       proposals: [],
     };
   }

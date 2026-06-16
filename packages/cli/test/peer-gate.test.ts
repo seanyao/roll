@@ -110,7 +110,7 @@ describe("runPeerGate (end-to-end against a real git worktree)", () => {
     const { alerts, events, s } = sinks();
     const r = await runPeerGate(wt, rt, "c-1", "hard", s);
     expect(r.verdict).toBe("skipped");
-    expect(r.blocked).toBe(true); // FIX-293 AC-H2: the cycle is blocked, not self-scored
+    expect(r.blocked).toBe(true); // FIX-293 AC-H2: the cycle is blocked, not self-graded
     expect(alerts).toHaveLength(1);
     expect(alerts[0]).toContain("peer gate (hard)");
     expect(alerts[0]).toContain("retrying");

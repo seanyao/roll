@@ -372,17 +372,17 @@ describe("US-ATTEST-012 — fail / blocked status口径", () => {
   });
 });
 
-describe("US-ATTEST-009 — Self-Score fold", () => {
+describe("US-ATTEST-009 — Review Score fold", () => {
   it("renders a collapsed details block with entries", () => {
     const html = renderReport({
       ...BASE,
       items: [item({ evidence: [{ kind: "commit", label: "c" }] })],
-      selfScores: [
+      reviewScores: [
         { skill: "roll-fix", score: 6, verdict: "ok", ts: "2026-06-03T18:32:04Z", note: "Empty flaky CI card" },
         { skill: "roll-build", score: 9, verdict: "good", ts: "2026-06-04T01:00:00Z", note: "" },
       ],
     });
-    expect(html).toContain(`${bi("Self-Score", "自评")}（2）`);
+    expect(html).toContain(`${bi("Review Score", "评审分")}（2）`);
     expect(html).toContain("<details");
     expect(html).toContain("<b>6</b>/10 · ok");
     expect(html).toContain("Empty flaky CI card");
@@ -391,15 +391,15 @@ describe("US-ATTEST-009 — Self-Score fold", () => {
   it("no entries ⇒ whole block skipped (no placeholder)", () => {
     const html = renderReport({ ...BASE, items: [item({ evidence: [{ kind: "commit", label: "c" }] })] });
     expect(html).not.toContain("<details"); // the CSS rules may ship; the BLOCK must not
-    expect(html).not.toContain("Self-Score");
+    expect(html).not.toContain("Review Score");
   });
 
   it("US-EVID-013: renders badge, dimensions, trend, full-note link, and discrepancy", () => {
     const html = renderReport({
       ...BASE,
       items: [item({ evidence: [{ kind: "commit", label: "c" }] })],
-      selfScoreTrend: "self-score: mean 7.0 / min 5 / redo 1 (last 14)",
-      selfScores: [
+      reviewScoreTrend: "review-score: mean 7.0 / min 5 / redo 1 (last 14)",
+      reviewScores: [
         {
           skill: "roll-build",
           score: 5,
@@ -411,13 +411,13 @@ describe("US-ATTEST-009 — Self-Score fold", () => {
         },
       ],
     });
-    expect(html).toContain('class="selfscore-badge selfscore-ok"');
+    expect(html).toContain('class="reviewscore-badge reviewscore-ok"');
     expect(html).toContain("<b>5</b>/10 · ok");
     expect(html).toContain("<code>test-quality</code>: <b>7</b>");
-    expect(html).toContain("self-score: mean 7.0 / min 5 / redo 1 (last 14)");
+    expect(html).toContain("review-score: mean 7.0 / min 5 / redo 1 (last 14)");
     expect(html).toContain('href="notes/2026-06-08-roll-build-US-EVID-013.md"');
-    expect(html).toContain("Self-score discrepancy");
-    expect(html).toContain("low self-score: ok 5/10");
+    expect(html).toContain("Review-score discrepancy");
+    expect(html).toContain("low review-score: ok 5/10");
   });
 });
 

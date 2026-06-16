@@ -3,7 +3,7 @@
  * work should be done; the strict audit + real invocations say how it actually
  * is. One row per skill READ FROM THE REPO DIRECTORY (no drifting hand-kept
  * catalog), grouped delivery / quality / observe / lifecycle, with usage counts
- * from self-score notes and an expandable anatomy (real file tree + audit
+ * from review-score notes and an expandable anatomy (real file tree + audit
  * essentials + the SKILL.md hub inline; references stay pointers, never embedded).
  *
  * US-DOSSIER-032: the audit yardstick is the in-process TS port
@@ -17,7 +17,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { auditSkills, type SkillAuditEntry, type SkillAuditReport } from "./skills-audit.js";
-import { readAllSelfScores } from "./self-score.js";
+import { readAllReviewScores } from "./review-score.js";
 
 export type SkillGroup = "delivery" | "quality" | "observe" | "lifecycle";
 
@@ -73,7 +73,7 @@ export function defaultSkillsPanelDeps(projectPath: string): SkillsPanelDeps {
     usageCounts: () => {
       const counts: Record<string, number> = {};
       try {
-        for (const e of readAllSelfScores(projectPath)) {
+        for (const e of readAllReviewScores(projectPath)) {
           if (e.skill !== "") counts[e.skill] = (counts[e.skill] ?? 0) + 1;
         }
       } catch {

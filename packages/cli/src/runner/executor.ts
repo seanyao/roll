@@ -1089,10 +1089,10 @@ export async function executeCommand(
       // FIX-343 (step ③) pipeline order: peer-score → report render → attest gate
       // → terminal → teardown. The score stage runs BEFORE the report render so
       // the report embeds the FRESHLY-written peer score (never a stale one). A
-      // fresh-session peer (runScorePairing) is the SOLE producer of the cycle's
-      // quality score — the working agent NEVER self-scores (owner ruling
-      // 2026-06-16: an agent grading its own delivery is a conflict of interest).
-      // When no peer can score (no candidate / timeout / error) NO note is
+      // fresh-session peer Reviewer (runScorePairing) is the SOLE producer of the
+      // cycle's Review Score — the working agent NEVER grades its own delivery
+      // (owner ruling 2026-06-16: an agent grading its own work is a conflict of
+      // interest). When no peer can score (no candidate / timeout / error) NO note is
       // written: the attest gate then fails loud (`missing peer review score`)
       // and the cycle honestly fails — there is no runner-derived fallback.
       if (commitsAhead > 0 && storyId !== "") {
@@ -1228,7 +1228,7 @@ export async function executeCommand(
           // where runScorePairing wrote it — not the ephemeral worktree; thread
           // the BUILDER SESSION ID (step ①) so the gate verifies the scorer's
           // session ≠ the builder's session (an independent fresh session scored
-          // this, never the builder's own in-session/sub-agent self-score). The
+          // this, never the builder's own in-session/sub-agent grading). The
           // vendor-name comparison is gone — a same-vendor fresh session is valid.
           ports.repoCwd,
           ctx.builderSessionId ?? "",
@@ -1268,7 +1268,7 @@ export async function executeCommand(
         // accept-path reaches capture at exit 0; a HARD attest OR peer block fails
         // the capture (classifyCaptured: exit ≠ 0 → failed) so Done is withheld.
         // FIX-293: a high-complexity delivery with no peer review (even after the
-        // one retry) is peerBlocked → it MUST NOT self-score / flip Done. The
+        // one retry) is peerBlocked → it MUST NOT self-grade / flip Done. The
         // FIX-244 PR-state "published" reclassification stays scoped to the attest
         // block (a peer-blocked cycle still owes peer review; Done≡merged anyway).
         agentExit: attestBlocked || peerBlocked ? 1 : 0,

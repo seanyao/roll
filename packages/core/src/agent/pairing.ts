@@ -17,8 +17,8 @@ import type { RollEvent } from "@roll/spec";
 import { extractUsage, sumClaudeStream, toCycleCost } from "../cost/tracker.js";
 import { AGENT_REGISTRY_NAMES, agentIsKnown, canonicalAgentName } from "./registry.js";
 
-// US-PAIR-009: `score` — the finished cycle's quality score is produced by the
-// heterogeneous paired agent (self-score is the fallback, never the default).
+// US-PAIR-009 / FIX-343: `score` — the finished cycle's Review Score is produced
+// by a fresh-session peer Reviewer; the working agent never grades its own work.
 export type PairingStage = "design" | "test" | "code" | "cycle" | "score";
 export const PAIRING_STAGES: readonly PairingStage[] = ["design", "test", "code", "cycle", "score"];
 

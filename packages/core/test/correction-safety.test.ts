@@ -7,9 +7,9 @@ const safety = parsePolicy("").loopSafety;
 describe("US-EVID-016 correction circuit breaker", () => {
   it("pauses on three consecutive same-story correction returns", () => {
     const events: RollEvent[] = [
-      { type: "correction:action", storyId: "US-A", action: "return_story", signal: "self-score regression", reason: "r1", ts: 10 },
-      { type: "correction:action", storyId: "US-A", action: "route_adjust", signal: "self-score regression", reason: "r2", ts: 20 },
-      { type: "correction:action", storyId: "US-A", action: "return_story", signal: "self-score regression", reason: "r3", ts: 30 },
+      { type: "correction:action", storyId: "US-A", action: "return_story", signal: "review-score regression", reason: "r1", ts: 10 },
+      { type: "correction:action", storyId: "US-A", action: "route_adjust", signal: "review-score regression", reason: "r2", ts: 20 },
+      { type: "correction:action", storyId: "US-A", action: "return_story", signal: "review-score regression", reason: "r3", ts: 30 },
     ];
     expect(correctionCircuitVerdict(events, safety)).toMatchObject({
       action: "pause_and_notify",

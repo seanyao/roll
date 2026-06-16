@@ -14,6 +14,7 @@
  *   - heal dir   : ${ROLL_LOOP_DIR:-<shared>/loop}/heal  (HEAD-CI heal counters).
  */
 import { rollConfigPath, yamlReadNested } from "@roll/infra";
+import { agentSmokeCommand } from "@roll/core";
 import { resolveLang, t, v2Catalog, type Lang } from "@roll/spec";
 import { spawnSync } from "node:child_process";
 import {
@@ -383,9 +384,7 @@ function realTestDeps(): LoopTestDeps {
 
 /** The default smoke command for an agent (mirrors `_loop_test`). */
 export function defaultSmokeCmd(agent: string): string {
-  return agent === "claude"
-    ? 'claude -p "Reply with a single word: hello"; sleep 10'
-    : `echo 'mock ${agent} output line 1'; echo 'mock ${agent} output line 2'`;
+  return `${agentSmokeCommand(agent)}; sleep 10`;
 }
 
 /**

@@ -59,7 +59,7 @@ import {
   resolveRoute,
   resolveFallback,
   extractUsage,
-  sumClaudeStream,
+  getAgentSpec,
   toCycleCost,
   pairingHistory,
   peerReviewCost,
@@ -825,8 +825,9 @@ export async function executeCommand(
       try {
         const agentName = ctx.agent ?? cmd.agent;
         const lines = res.stdout.split("\n");
-        let usage = sumClaudeStream(lines);
-        if (usage === null && agentName === "pi") {
+        const usageSpec = getAgentSpec(agentName)?.usage;
+        let usage = usageSpec?.stdoutExtractor === "claude-stream" ? extractUsage(agentName, lines) : null;
+        if (usage === null && usageSpec?.sessionRecovery === "pi") {
           const rootOverride = (process.env["ROLL_PI_SESSIONS_ROOT"] ?? "").trim();
           usage = recoverPiUsage(
             ports.paths.worktreePath,
@@ -834,7 +835,7 @@ export async function executeCommand(
             ...(rootOverride !== "" ? [rootOverride] : []),
           );
         }
-        if (usage === null && agentName === "kimi") {
+        if (usage === null && usageSpec?.sessionRecovery === "kimi") {
           const rootOverride = (process.env["ROLL_KIMI_SESSIONS_DIR"] ?? "").trim();
           usage = recoverKimiUsage(
             ports.paths.worktreePath,
@@ -842,7 +843,7 @@ export async function executeCommand(
             ...(rootOverride !== "" ? [rootOverride] : []),
           );
         }
-        if (usage === null && (agentName === "codex" || agentName === "openai")) {
+        if (usage === null && usageSpec?.sessionRecovery === "codex") {
           const rootOverride = (process.env["ROLL_CODEX_SESSIONS_DIR"] ?? "").trim();
           usage = recoverCodexUsage(
             ports.paths.worktreePath,
@@ -850,7 +851,7 @@ export async function executeCommand(
             ...(rootOverride !== "" ? [rootOverride] : []),
           );
         }
-        // Legacy stdout-scrape fallback (LAST): only when no authoritative
+        // Stdout-scrape fallback (LAST): only when no authoritative stream or
         // session usage was found, so a 2-component footer never overrides a
         // recovered 4-component split.
         if (usage === null) usage = extractUsage(agentName, lines);

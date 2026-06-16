@@ -1,4 +1,5 @@
 export * from "./agent/registry.js";
+export * from "./agent/specs.js";
 export * from "./agent/router.js";
 export * from "./agent/pairing.js";
 export * from "./agent/peer-review.js";

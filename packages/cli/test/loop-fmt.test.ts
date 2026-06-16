@@ -12,8 +12,9 @@ import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { renderState } from "../src/render.js";
+import { cycleRow, fmtModel, renderState } from "../src/render.js";
 import { formatStream, renderSignal, tierVisible } from "../src/commands/loop-fmt.js";
+import { defaultSmokeCmd } from "../src/commands/loop-maint.js";
 
 const CLI_BIN = join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "roll.js");
 
@@ -44,6 +45,32 @@ describe("renderSignal", () => {
     const s = renderSignal({ ts: 0, cycleId: "c", seg: "ci", kind: "heartbeat", tier: "A", summary: "…still in ci · 50s · last: roll ci" });
     expect(s).toContain("still in ci");
     expect(s).toContain("last: roll ci");
+  });
+});
+
+describe("FIX-313 — downstream agent presentation uses AgentSpec", () => {
+  it("fmtModel keeps non-claude model names instead of degrading to ?", () => {
+    expect(fmtModel("gpt-5.5")).toBe("gpt-5.5");
+    expect(fmtModel("deepseek-v4-pro")).toBe("deepseek-v4-pro");
+  });
+
+  it("cycle rows fall back to the registered agent default model", () => {
+    const row = cycleRow({
+      outcome: "done",
+      start_hhmm: "10:00",
+      duration_s: 60,
+      input_tokens: 0,
+      output_tokens: 0,
+      model: null,
+      story: "FIX-313",
+      agent: "qwen",
+    });
+    expect(row.join("\n")).toContain("qwen-coder-plus");
+  });
+
+  it("loop smoke commands come from the registry, not non-claude mocks", () => {
+    expect(defaultSmokeCmd("kimi")).toContain("kimi");
+    expect(defaultSmokeCmd("kimi")).not.toContain("mock kimi");
   });
 });
 

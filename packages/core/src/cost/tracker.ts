@@ -32,6 +32,7 @@
  * port), exactly as the bash invokes pi_emit / kimi_emit after the agent phase.
  */
 import type { CycleCost } from "@roll/spec";
+import { getAgentSpec, type UsageExtractorKind } from "../agent/specs.js";
 import { type ListCostTokens, computeListCost, currencyFor } from "./prices.js";
 
 // ── Parsed-usage shape (the adapter contract return) ─────────────────────────
@@ -168,11 +169,13 @@ export const piExtract: Extractor = (): AgentUsage | null => null;
 
 /** The stdout-scrape registry (pi maps to its always-null stub). */
 export const REGISTRY: Record<string, Extractor> = {
+  "claude-stream": sumClaudeStream,
   pi: piExtract,
   openai: openaiExtract,
   gemini: geminiExtract,
   kimi: kimiExtract,
   qwen: qwenExtract,
+  generic: makeStdoutExtractor({ defaultModel: "generic", totalKind: "generic" }),
 };
 
 /** Required fields the python validator enforces (extract_usage). */
@@ -190,7 +193,8 @@ const REQUIRED_FIELDS: readonly (keyof AgentUsage)[] = [
  * fallback). A thrown extractor is swallowed to null.
  */
 export function extractUsage(agent: string, lines: readonly string[]): AgentUsage | null {
-  const fn = REGISTRY[agent];
+  const key = getAgentSpec(agent)?.usage.stdoutExtractor ?? (agent as UsageExtractorKind);
+  const fn = REGISTRY[key];
   if (fn === undefined) return null;
   let result: AgentUsage | null;
   try {
@@ -199,8 +203,10 @@ export function extractUsage(agent: string, lines: readonly string[]): AgentUsag
     return null;
   }
   if (result === null) return null;
-  for (const key of REQUIRED_FIELDS) {
-    if (result[key] === undefined || result[key] === null) return null;
+  const required =
+    key === "claude-stream" ? REQUIRED_FIELDS.filter((field) => field !== "cost_list_usd") : REQUIRED_FIELDS;
+  for (const field of required) {
+    if (result[field] === undefined || result[field] === null) return null;
   }
   return result;
 }

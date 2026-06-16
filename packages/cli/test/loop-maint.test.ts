@@ -301,13 +301,14 @@ describe("loop test — US-PORT-022", () => {
     expect(r.out).toContain("Smoke test passed (3s, agent: claude)");
   });
 
-  it("--agent injects a mock command, no real claude", () => {
+  it("--agent injects that agent's registered smoke command, no real claude", () => {
     const { shared, slug, deps } = testSandbox();
     const r = capture(() => loopTestCommand(["--agent", "pi"], deps));
     expect(r.status).toBe(0);
     const body = readFileSync(join(shared, "loop", `run-${slug}-test.sh`), "utf8");
-    expect(body).toContain("mock pi output line 1");
+    expect(body).toContain('pi -p "Reply with a single word: hello"');
     expect(body).not.toContain("claude -p");
+    expect(body).not.toContain("mock pi output");
   });
 
   it("--cmd overrides the agent default verbatim", () => {
@@ -327,6 +328,7 @@ describe("loop test — US-PORT-022", () => {
 
   it("defaultSmokeCmd: claude vs non-claude", () => {
     expect(defaultSmokeCmd("claude")).toContain("claude -p");
-    expect(defaultSmokeCmd("kimi")).toContain("mock kimi output");
+    expect(defaultSmokeCmd("kimi")).toContain("kimi-code -p");
+    expect(defaultSmokeCmd("kimi")).not.toContain("mock kimi output");
   });
 });

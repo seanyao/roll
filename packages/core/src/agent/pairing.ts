@@ -14,7 +14,7 @@
  * round-robin (hit-rate bias deferred to US-PAIR-006); fail-loud when no peer.
  */
 import type { RollEvent } from "@roll/spec";
-import { extractUsage, sumClaudeStream, toCycleCost } from "../cost/tracker.js";
+import { extractUsage, toCycleCost } from "../cost/tracker.js";
 import { AGENT_REGISTRY_NAMES, agentIsKnown, canonicalAgentName } from "./registry.js";
 
 // US-PAIR-009 / FIX-343: `score` — the finished cycle's Review Score is produced
@@ -281,7 +281,7 @@ export function peerReviewCost(peer: string, stdout: string): number {
   try {
     const canon = canonicalAgentName(peer);
     const lines = stdout.split("\n");
-    const usage = canon === "claude" ? sumClaudeStream(lines) : extractUsage(canon, lines);
+    const usage = extractUsage(canon, lines);
     if (usage === null) return 0;
     // pi pair-review: a parsed-but-empty usage (0 in / 0 out) has no cost to
     // compute — short-circuit so the price table never sees a zero-token split.

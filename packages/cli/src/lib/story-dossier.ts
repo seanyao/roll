@@ -2344,5 +2344,18 @@ function execGit(cwd: string, args: string[]): string {
   // to stderr. The caller already treats a throw as "no facts" (returns null),
   // but the leaked stderr polluted captured test output that agents attach as
   // inline AC evidence — a passing dossier run showed 52 scary "fatal:" lines.
-  return execFileSync("git", args, { cwd, encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "ignore"] });
+  //
+  // FIX-349: raise maxBuffer well above execFileSync's 1MB default. The full
+  // `git log origin/main --name-only --pretty=...%B` scan exceeds 1MB once a
+  // repo accrues enough history (this repo's own output is ~1.18MB), which made
+  // execFileSync throw ENOBUFS → collectGitDossierFacts caught it and returned
+  // null → every git-facts-dependent feature (the #loop merge-truth reconcile)
+  // silently no-op'd. Test fixtures had <1MB logs so the gap stayed invisible.
+  return execFileSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    timeout: 10_000,
+    stdio: ["ignore", "pipe", "ignore"],
+    maxBuffer: 256 * 1024 * 1024,
+  });
 }

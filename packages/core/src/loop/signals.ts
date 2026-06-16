@@ -40,7 +40,7 @@ export function signalKindForMarker(marker: string): SignalKind | null {
   if (marker === "skill" || marker === "story") return "skill";
   if (marker.startsWith("ci:")) return "ci";
   if (marker === "peer:gate" || marker === "peer") return "peer";
-  if (marker === "attest:gate" || marker === "evidence:frame-opened" || marker === "attest") return "attest";
+  if (marker === "attest:gate" || marker === "visual:gate" || marker === "evidence:frame-opened" || marker === "attest") return "attest";
   if (marker.startsWith("pr:")) return "pr";
   if (marker === "alert" || marker === "error") return "alert";
   return null;

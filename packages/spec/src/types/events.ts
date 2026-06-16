@@ -106,6 +106,15 @@ export type RollEvent =
   // Attest gate (FIX-207) — every actual delivery records whether a fresh
   // acceptance report was produced ("produced") or silently skipped ("skipped").
   | { type: "attest:gate"; cycleId: string; verdict: "produced" | "skipped"; reasons: string[]; ts: number }
+  // Visual-evidence build-preflight gate (FIX-311b) — the shift-left of the
+  // attest gate. BEFORE the agent spawns, the picked card's spec is checked
+  // against the design-phase visual-evidence contract. `ok` ⇒ the spec can
+  // satisfy the screenshot floor; `flagged` ⇒ a CONFIDENT problem (a web-surface
+  // card with no declared deliverable_url, or no visual-evidence AC and no
+  // exemption) — recorded loud so it is caught at the cheapest moment. NEVER
+  // blocks the cycle (FIX-309 is the hard backstop at delivery); ambiguous /
+  // terminal surfaces are never flagged here.
+  | { type: "visual:gate"; cycleId: string; storyId: string; verdict: "ok" | "flagged"; code?: string; surface?: string; reasons: string[]; ts: number }
   // ac-map remediation (FIX-246) — a real delivery that skipped skill step 10.6
   // (no ac-map.json) gets ONE surgical same-agent second pass before attest
   // renders. The outcome is auditable; honest statuses only — never a bypass.

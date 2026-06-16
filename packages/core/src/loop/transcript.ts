@@ -96,6 +96,8 @@ function toEntry(ev: RollEvent): Omit<TimelineEntry, "offsetSec" | "layer"> | nu
       return { ts: ev.ts, marker: "peer:gate", label: `Peer gate · ${ev.verdict}` };
     case "attest:gate":
       return { ts: ev.ts, marker: "attest:gate", label: `Attest gate · ${ev.verdict}` };
+    case "visual:gate":
+      return { ts: ev.ts, marker: "visual:gate", label: `Visual gate · ${ev.verdict}${ev.code !== undefined ? ` · ${ev.code}` : ""}` };
     case "evidence:frame-opened":
       return { ts: ev.ts, marker: "evidence:frame-opened", label: `Evidence frame opened · ${clip(ev.runDir)}` };
     case "pr:open":

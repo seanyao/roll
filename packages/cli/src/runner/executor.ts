@@ -122,6 +122,7 @@ import {
 import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, runPeerGate } from "./peer-gate.js";
 import { readAttestGateMode, runAttestGate, storyRequiresScreenshot, verificationReportPath, webCaptureTargetForStory } from "./attest-gate.js";
 import { recoverCodexUsage, recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
+import { validateStoryVisualEvidence } from "../lib/design-visual-evidence.js";
 import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, autoAttachScreenshotToAcMap, buildAcMapRemediationPrompt, needsAcMapRemediation } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
 import { buildPairScorePrompt, enabledPairingStages, parsePairScoreOutput, retryPeerConsult, runPairing, runScorePairing, type PairEvent, type PairReview } from "./pairing-gate.js";
@@ -613,6 +614,20 @@ export async function executeCommand(
       // clean spec the re-run can deliver. A genuinely merged Done card is never
       // picked here (its row is ✅ Done), so this never touches a real Done spec.
       resetStaleSpecTruth(ports, story.id);
+      // FIX-311b — the BUILD-PREFLIGHT visual-evidence gate (the shift-left of
+      // the FIX-309 attest gate). Runs HERE, after the spec-truth reset and
+      // BEFORE the agent spawns (pick_story → resume → resolve_route →
+      // spawn_agent), so a spec that can NEVER satisfy the runtime screenshot
+      // floor is flagged loud at the cheapest possible moment instead of after a
+      // full build cycle honest-skips. CONSERVATIVE BY DESIGN (owner red line:
+      //误杀 CLI/后端卡 = 阻断 loop, 绝不可): it ALERTs only when CONFIDENT —
+      // a clear WEB-surface card that declared no `deliverable_url`, or a card
+      // with NO visual-evidence AC and NO recorded exemption. A terminal/CLI/TUI
+      // deliverable, an ambiguous surface, or an unreadable spec is LEFT ALONE
+      // (FIX-309 backstops at delivery). It NEVER changes the cycle's control
+      // flow — story_picked still returns — so a false positive cannot topple a
+      // CLI/back-end card; it only raises a visible signal.
+      runVisualEvidencePreflight(ports, story.id, ctx.cycleId);
       // FIX-304: capture the story's PRE-cycle status BEFORE we claim it 🔨.
       // The terminal (append_run) uses it to UNDO a premature ✅ Done the agent
       // wrote into the symlinked .roll backlog (FIX-204C) when the cycle does
@@ -1813,6 +1828,74 @@ export function resetStaleSpecTruth(ports: Ports, storyId: string): void {
     );
   } catch {
     /* best-effort: a spec read/write blip must never fail the cycle terminal */
+  }
+}
+
+/**
+ * FIX-311b — the BUILD-PREFLIGHT visual-evidence gate, run inside `pick_story`
+ * AFTER the spec-truth reset and BEFORE the agent spawns. It is the shift-left
+ * of the FIX-309 attest gate: catch a spec that can NEVER satisfy the runtime
+ * screenshot floor at the cheapest possible moment (before a whole build cycle
+ * honest-skips) rather than at delivery.
+ *
+ * CONSERVATIVE BY CONTRACT (owner red line: 误杀 CLI/后端卡 = 阻断 loop, 绝不可):
+ *   - It NEVER alters control flow — the caller's `story_picked` still returns
+ *     regardless. A false positive can therefore NOT topple a CLI/back-end card;
+ *     it only raises a visible, auditable signal (an ALERT + a `visual:gate`
+ *     event).
+ *   - It fails-loud ONLY when CONFIDENT (the verdict's `ok` is false): a clear
+ *     WEB-surface card with no declared `deliverable_url`
+ *     (`web-surface-without-deliverable-url`), or a card with NO visual-evidence
+ *     AC and NO recorded `screenshot_exempt` (`missing-visual-evidence-ac`). A
+ *     TERMINAL deliverable, an AMBIGUOUS surface, an exempt card, or an
+ *     unreadable/absent spec is LEFT ALONE — the surface-aware validator never
+ *     forces a web url onto those, and FIX-309 remains the hard backstop at
+ *     delivery for anything that slips.
+ * Best-effort throughout: any read/parse blip is swallowed (a preflight signal
+ * must never fail the cycle).
+ */
+export function runVisualEvidencePreflight(ports: Ports, storyId: string, cycleId: string): void {
+  try {
+    const specPath = join(cardArchiveDir(ports.repoCwd, storyId), "spec.md");
+    if (!existsSync(specPath)) return; // no spec to judge → leave alone (FIX-309 backstops)
+    const specText = readFileSync(specPath, "utf8");
+    const v = validateStoryVisualEvidence(specText);
+    if (v.ok) {
+      // Record the pass too (audit: the card was checked and can satisfy the floor).
+      ports.events.appendEvent(ports.paths.eventsPath, {
+        type: "visual:gate",
+        cycleId,
+        storyId,
+        verdict: "ok",
+        surface: v.surface,
+        reasons: v.exemptReason !== undefined ? [`exempt: ${v.exemptReason}`] : [],
+        ts: ports.clock(),
+      });
+      return;
+    }
+    // CONFIDENT problem → fail loud (ALERT + event), but DO NOT block the cycle.
+    const reason = v.reason ?? "visual-evidence contract not satisfied";
+    ports.events.appendEvent(ports.paths.eventsPath, {
+      type: "visual:gate",
+      cycleId,
+      storyId,
+      verdict: "flagged",
+      ...(v.code !== undefined ? { code: v.code } : {}),
+      surface: v.surface,
+      reasons: [reason],
+      ts: ports.clock(),
+    });
+    ports.events.appendAlert(
+      ports.paths.alertsPath,
+      `[WARN] visual-evidence preflight (${storyId}): ${v.code ?? "flagged"} — ${reason} — cycle ${cycleId}. ` +
+        `Add a visual-evidence AC` +
+        (v.code === "web-surface-without-deliverable-url"
+          ? ` AND declare \`deliverable_url:\` (alias \`screenshot_url:\`) for the web surface`
+          : ` or a recorded \`screenshot_exempt: <reason>\``) +
+        `. NOT blocked — FIX-309 enforces at delivery; this is the cheap early warning.`,
+    );
+  } catch {
+    /* best-effort: a spec read/parse blip must never fail the cycle */
   }
 }
 

@@ -171,6 +171,26 @@ loop_safety:
 `).loopSafety.proxyEnableCmd).toBeUndefined();
   });
 
+  it("parses loop_safety.prebuild_dist (FIX-338); DEFAULT-OFF unless explicit true", () => {
+    // absent ⇒ undefined (the reader treats it as OFF — deploy no-op, 稳字纪律).
+    expect(parsePolicy("").loopSafety.prebuildDist).toBeUndefined();
+    // an explicit `true` is the ONLY thing that turns it on.
+    expect(parsePolicy(`
+loop_safety:
+  prebuild_dist: true
+`).loopSafety.prebuildDist).toBe(true);
+    // explicit false ⇒ undefined (stays OFF).
+    expect(parsePolicy(`
+loop_safety:
+  prebuild_dist: false
+`).loopSafety.prebuildDist).toBeUndefined();
+    // garbage ⇒ undefined (fail-safe OFF; never accidentally enabled).
+    expect(parsePolicy(`
+loop_safety:
+  prebuild_dist: maybe
+`).loopSafety.prebuildDist).toBeUndefined();
+  });
+
   it("ignores comments and unknown keys (forward-compatible)", () => {
     const p = parsePolicy(`
 # leading comment

@@ -16,6 +16,7 @@ import {
   AUTORUN_DIRECTIVE,
   type Ports,
   bootstrapWorktreeDeps,
+  bootstrapWorktreePrebuild,
   bootstrapWorktreeSkills,
   buildClaudeArgv,
   buildRunRow,
@@ -2137,6 +2138,79 @@ describe("FIX-268 — worktree deps bootstrap before agent spawn", () => {
     expect(alerts).toHaveLength(1);
     expect(alerts[0]).toContain("[FAIL] worktree deps bootstrap failed");
     expect(alerts[0]).toContain("ENOTFOUND");
+  });
+});
+
+describe("FIX-338 — worktree dist prebuild (Phase B 杠杆1, DEFAULT-OFF)", () => {
+  function tmpWorktree(): string {
+    const d = realpathSync(mkdtempSync(join(tmpdir(), "roll-prebuild-")));
+    execDirs.push(d);
+    return d;
+  }
+  function alertSink(): { events: { appendAlert: ReturnType<typeof vi.fn> }; alerts: string[] } {
+    const alerts: string[] = [];
+    return { events: { appendAlert: vi.fn((_p: string, msg: string) => alerts.push(msg)) }, alerts };
+  }
+
+  it("DEFAULT-OFF: when disabled it is a NO-OP — no exec, no alert", async () => {
+    const wt = tmpWorktree();
+    writeFileSync(join(wt, "package.json"), "{}\n");
+    writeFileSync(join(wt, "pnpm-lock.yaml"), "lockfileVersion: 9\n");
+    const exec = vi.fn(async () => ({}));
+    const { events, alerts } = alertSink();
+    await bootstrapWorktreePrebuild(wt, join(wt, "alerts.md"), events as never, false, exec);
+    expect(exec).not.toHaveBeenCalled();
+    expect(alerts).toEqual([]);
+  });
+
+  it("when ON, runs `pnpm -r build` in the worktree", async () => {
+    const wt = tmpWorktree();
+    writeFileSync(join(wt, "package.json"), "{}\n");
+    writeFileSync(join(wt, "pnpm-lock.yaml"), "lockfileVersion: 9\n");
+    const exec = vi.fn(async () => ({}));
+    const { events, alerts } = alertSink();
+    await bootstrapWorktreePrebuild(wt, join(wt, "alerts.md"), events as never, true, exec);
+    expect(exec).toHaveBeenCalledTimes(1);
+    expect(exec.mock.calls[0]?.[0]).toBe("pnpm");
+    expect(exec.mock.calls[0]?.[1]).toEqual(["-r", "build"]);
+    expect(exec.mock.calls[0]?.[2]).toMatchObject({ cwd: wt });
+    expect(alerts).toEqual([]);
+  });
+
+  it("when ON, skips a non-Node worktree (no package.json)", async () => {
+    const wt = tmpWorktree();
+    const exec = vi.fn(async () => ({}));
+    const { events, alerts } = alertSink();
+    await bootstrapWorktreePrebuild(wt, join(wt, "alerts.md"), events as never, true, exec);
+    expect(exec).not.toHaveBeenCalled();
+    expect(alerts).toEqual([]);
+  });
+
+  it("when ON, skips a non-pnpm worktree (no pnpm-lock.yaml)", async () => {
+    const wt = tmpWorktree();
+    writeFileSync(join(wt, "package.json"), "{}\n");
+    writeFileSync(join(wt, "package-lock.json"), "{}\n");
+    const exec = vi.fn(async () => ({}));
+    const { events } = alertSink();
+    await bootstrapWorktreePrebuild(wt, join(wt, "alerts.md"), events as never, true, exec);
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("BEST-EFFORT: a build failure is NON-FATAL — WARN alert, no throw", async () => {
+    const wt = tmpWorktree();
+    writeFileSync(join(wt, "package.json"), "{}\n");
+    writeFileSync(join(wt, "pnpm-lock.yaml"), "lockfileVersion: 9\n");
+    const exec = vi.fn(async () => {
+      throw new Error("tsc error TS2304: cannot find name");
+    });
+    const { events, alerts } = alertSink();
+    // resolves (does NOT reject) — the cycle must never topple on a prebuild slip.
+    await expect(
+      bootstrapWorktreePrebuild(wt, join(wt, "alerts.md"), events as never, true, exec),
+    ).resolves.toBeUndefined();
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toContain("[WARN] worktree dist prebuild failed");
+    expect(alerts[0]).toContain("continuing");
   });
 });
 

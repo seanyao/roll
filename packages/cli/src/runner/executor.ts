@@ -126,6 +126,7 @@ import { validateStoryVisualEvidence } from "../lib/design-visual-evidence.js";
 import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, autoAttachScreenshotToAcMap, buildAcMapRemediationPrompt, needsAcMapRemediation } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
 import { buildPairScorePrompt, enabledPairingStages, parsePairScoreOutput, retryPeerConsult, runPairing, runScorePairing, type PairEvent, type PairReview } from "./pairing-gate.js";
+import { deriveSelfScoreFallback } from "./self-score-fallback.js";
 import { realAgentEnv } from "../commands/agent-list.js";
 import { attestCommand } from "../commands/attest.js";
 import { refreshAggregates } from "../commands/index-gen.js";
@@ -1128,6 +1129,77 @@ export async function executeCommand(
           );
         }
       }
+      // US-PAIR-009 / FIX-342 score stage: produce the cycle's self-score note
+      // BEFORE the attest gate (which REQUIRES that note — evaluateSelfScoreGate).
+      // Ordering history: the score stage used to run AFTER the gate, gated on
+      // `!attestBlocked`. That deadlocked — a working agent that skipped its own
+      // `roll self-score` step (observed cycle 20260616-130452-42254, codex/
+      // gpt-5.5: build + hetero peer code-review ✓ but the card's notes/ dir was
+      // empty) failed the attest gate on "missing self-score note", and the
+      // gate-gated score stage that would have written the note never ran. Same
+      // failure mode FIX-246 fixed for ac-map (surgical pre-gate backfill of a
+      // skill step agents skip). The score stage is the runner's RELIABLE
+      // producer: a hetero peer scores the delivery (preferred); when none is
+      // available (pairing off / no hetero peer / timeout) and the agent wrote
+      // none, `deriveSelfScoreFallback` writes a conservative runner-side note —
+      // ONLY for a genuine evidenced delivery, never weakening the requirement.
+      if (commitsAhead > 0 && storyId !== "") {
+        const scorePeer = async (peer: string, summary: string, timeoutMs: number): Promise<import("./pairing-gate.js").PairScore | null> => {
+          const prompt = buildPairScorePrompt(summary);
+          let res;
+          try {
+            res = await Promise.race([
+              ports.agentSpawn(peer, {
+                cwd: ports.paths.worktreePath,
+                skillBody: prompt,
+                timeoutMs,
+                ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
+              }),
+              new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs).unref()),
+            ]);
+          } catch {
+            return null;
+          }
+          if (res === null || res.timedOut || res.exitCode !== 0) return null;
+          const parsed = parsePairScoreOutput(res.stdout);
+          if (parsed === null) return null;
+          return { ...parsed, cost: peerReviewCost(peer, res.stdout) };
+        };
+        let diffStat = "";
+        try {
+          const { stdout } = await execFileAsync("git", ["diff", "--stat", "origin/main...HEAD"], { cwd: ports.paths.worktreePath, encoding: "utf8" });
+          diffStat = stdout.slice(0, 4_000);
+        } catch {
+          /* summary degrades gracefully */
+        }
+        const summary = `Story: ${storyId}\nDelivery: peer-reviewed cycle, scoring stage\nDiff stat:\n${diffStat}`;
+        const skill = storyId.startsWith("FIX-") || storyId.startsWith("BUG-") ? "roll-fix" : "roll-build";
+        const scoreResult = await runScorePairing(ports.repoCwd, dirname(ports.paths.eventsPath), ctx.cycleId ?? "", ctx.agent ?? "", storyId, skill, summary, {
+          installed: agentsInstalled(realAgentEnv()),
+          isAvailable: () => true,
+          scorePeer,
+          event: (e: PairEvent) => ports.events.appendEvent(ports.paths.eventsPath, e as RollEvent),
+          now: () => ports.clock(),
+        });
+        // FIX-342 fallback: a hetero peer score is preferred, but pairing-off /
+        // none-available / timeout / error must NOT leave a genuine delivery
+        // without a note when the working agent also skipped its own. Derive a
+        // conservative runner-side self-score from the evidence already on disk;
+        // the helper itself refuses to overwrite a real note or to score an
+        // empty shell.
+        if (scoreResult.status !== "scored") {
+          const fb = deriveSelfScoreFallback(ports.paths.worktreePath, dirname(ports.paths.eventsPath), storyId, ctx.cycleId ?? "", skill);
+          if (fb.written) {
+            ports.events.appendEvent(ports.paths.eventsPath, {
+              type: "attest:self-score-fallback",
+              cycleId: ctx.cycleId ?? "",
+              storyId,
+              reason: scoreResult.status,
+              ts: ports.clock(),
+            });
+          }
+        }
+      }
       // FIX-207 attest gate: a delivery (commits ahead + a real story) that ships
       // with no FRESH acceptance report leaves an auditable ALERT + `attest:gate`
       // event. HARD by default; `loop_safety.attest_gate: soft` in policy.yaml
@@ -1168,50 +1240,6 @@ export async function executeCommand(
           });
         }
         attestBlocked = res.blocked;
-      }
-      // US-PAIR-009 score stage: AFTER the attest gate passes (a real, evidenced
-      // delivery), the heterogeneous paired agent produces the cycle's score
-      // note — the agent's own self-score note stays as the fallback (any
-      // non-"scored" outcome leaves it the effective score). Same invariants as
-      // every pairing: never throws, never blocks, absences audited.
-      if (!attestBlocked && commitsAhead > 0 && storyId !== "") {
-        const scorePeer = async (peer: string, summary: string, timeoutMs: number): Promise<import("./pairing-gate.js").PairScore | null> => {
-          const prompt = buildPairScorePrompt(summary);
-          let res;
-          try {
-            res = await Promise.race([
-              ports.agentSpawn(peer, {
-                cwd: ports.paths.worktreePath,
-                skillBody: prompt,
-                timeoutMs,
-                ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
-              }),
-              new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs).unref()),
-            ]);
-          } catch {
-            return null;
-          }
-          if (res === null || res.timedOut || res.exitCode !== 0) return null;
-          const parsed = parsePairScoreOutput(res.stdout);
-          if (parsed === null) return null;
-          return { ...parsed, cost: peerReviewCost(peer, res.stdout) };
-        };
-        let diffStat = "";
-        try {
-          const { stdout } = await execFileAsync("git", ["diff", "--stat", "origin/main...HEAD"], { cwd: ports.paths.worktreePath, encoding: "utf8" });
-          diffStat = stdout.slice(0, 4_000);
-        } catch {
-          /* summary degrades gracefully */
-        }
-        const summary = `Story: ${storyId}\nAttest gate: pass\nDiff stat:\n${diffStat}`;
-        const skill = storyId.startsWith("FIX-") || storyId.startsWith("BUG-") ? "roll-fix" : "roll-build";
-        await runScorePairing(ports.repoCwd, dirname(ports.paths.eventsPath), ctx.cycleId ?? "", ctx.agent ?? "", storyId, skill, summary, {
-          installed: agentsInstalled(realAgentEnv()),
-          isAvailable: () => true,
-          scorePeer,
-          event: (e: PairEvent) => ports.events.appendEvent(ports.paths.eventsPath, e as RollEvent),
-          now: () => ports.clock(),
-        });
       }
       // FIX-244: phantom-failure probe. A hard-blocked delivery whose work is
       // ALREADY out as a PR (agent self-published, observed 2026-06-10: cycles

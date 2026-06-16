@@ -125,6 +125,13 @@ export type RollEvent =
   // harness-added visual baselines from agent-supplied evidence. Honest — only a
   // screenshot that exists on disk this cycle is ever attached.
   | { type: "attest:auto-attach"; cycleId: string; storyId: string; href: string; attachedCount: number; ts: number }
+  // FIX-342 — the runner derived a conservative self-score note for a genuine
+  // evidenced delivery because neither the working agent nor a heterogeneous peer
+  // produced one (the score-stage pairing returned a non-"scored" status). The
+  // self-score requirement is upheld, not weakened; `reason` records why the
+  // preferred producer was unavailable so audits never mistake this for an
+  // agent's considered self-assessment.
+  | { type: "attest:self-score-fallback"; cycleId: string; storyId: string; reason: string; ts: number }
   // Correction loop (US-EVID-014/016) — story-level negative feedback and the
   // safety brake that stops oscillation before the loop burns cycles.
   | {

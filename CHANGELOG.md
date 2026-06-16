@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### 修复
+
+- **各类 agent 的展示、用量和 smoke 行为改走统一注册表**:模型名、实时观察窗、usage recovery、dashboard 回填、pairing 成本和 loop smoke 不再散落写 claude/pi/kimi/codex 特判;新增 agent 只需补 AgentSpec,非 claude 不再显示成 `?` 或被 mock smoke 降级。(FIX-313) `[loop]`
+  <!-- evidence: .roll/features/loop-engine/FIX-313/latest/FIX-313-report.html -->
+
 ## v3.617.1 — 2026-06-17
 
 ### 质量与可信

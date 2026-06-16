@@ -1011,6 +1011,21 @@ export function runAttestGate(
     // missing peer score is never synthesized into a pass.
     const reasons = ["attest gate error — failing closed (no peer review score honored)"];
     const blocked = mode === "hard";
+    // FIX-343 (③ observability): EVERY other block path emits an ALERT + an
+    // `attest:gate` event, but this fail-closed catch returned the skipped verdict
+    // SILENTLY — the most safety-critical case (the gate itself errored) was
+    // INVISIBLE in the audit ndjson. Emit before returning so a failed-closed
+    // delivery is auditable like any other skip. Sink calls are wrapped so a
+    // throwing sink can't break this path's "never throws" contract.
+    try {
+      sinks.alert(
+        `attest gate (${mode}): gate error — failing closed (${storyId}) — ${reasons[0]} — cycle ${cycleId}` +
+          (blocked ? " — BLOCKED (hard mode); story not marked Done" : ""),
+      );
+      sinks.event({ cycleId, verdict: "skipped", reasons });
+    } catch {
+      /* sinks are best-effort here — the fail-closed verdict still returns */
+    }
     return { verdict: "skipped", mode, reasons, blocked };
   }
 }

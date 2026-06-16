@@ -10,7 +10,7 @@ import { execSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import {
   MUST_DECLARE_FAIL_REASON,
   allowedDeliverableCmd,
@@ -429,6 +429,44 @@ describe("runAttestGate (three paths: produced / skipped-soft / skipped-hard)", 
     expect(r.blocked).toBe(false);
     expect(r.reasons[0]).toMatch(/low self-score.*partial.*Discrepancy/i);
     expect(alerts[0]).toContain("self-score");
+  });
+
+  // ── FIX-343 (③ observability): the fail-closed catch must EMIT ──────────────
+  it("FIX-343 (③): the fail-closed catch emits an ALERT + an attest:gate event (not silent)", async () => {
+    // Force the gate's score read to THROW so the bottom blanket catch runs. Every
+    // other block path emits an ALERT + event; before this fix the catch returned
+    // a blocked `skipped` verdict SILENTLY → the most safety-critical case (the
+    // gate itself errored) was invisible in the audit ndjson. vi.doMock +
+    // dynamic import scopes the throwing mock to THIS test only (the rest of the
+    // suite uses the real evaluateSelfScoreGate).
+    vi.resetModules();
+    vi.doMock("../src/lib/self-score.js", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("../src/lib/self-score.js")>();
+      return {
+        ...actual,
+        evaluateSelfScoreGate: () => {
+          throw new Error("synthetic gate error to exercise the fail-closed catch");
+        },
+      };
+    });
+    const { runAttestGate: gateWithThrow } = await import("../src/runner/attest-gate.js");
+    const wt = withReport("FIX-CATCH", 2000); // fresh report + content → reaches the score read
+    withPeerScore(wt, "FIX-CATCH", 8, "good", "c-catch");
+    const { alerts, events, s } = sinks();
+    const r = gateWithThrow(wt, "FIX-CATCH", "c-catch", "hard", 1000, s);
+    vi.doUnmock("../src/lib/self-score.js");
+    vi.resetModules();
+    expect(r.verdict).toBe("skipped");
+    expect(r.blocked).toBe(true); // fail CLOSED in hard mode
+    expect(r.reasons[0]).toMatch(/failing closed/i);
+    // ③: the catch is no longer silent — it emits like every other block path.
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toContain("failing closed");
+    expect(alerts[0]).toContain("BLOCKED");
+    expect(events).toHaveLength(1);
+    expect(events[0]?.cycleId).toBe("c-catch");
+    expect(events[0]?.verdict).toBe("skipped");
+    expect(events[0]?.reasons[0]).toMatch(/failing closed/i);
   });
 
   it("no AC block → exempt, even in hard mode", () => {

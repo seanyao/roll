@@ -58,10 +58,11 @@ soft 模式会记录缺口并发出同一类审计信号，但不阻塞本轮交
 **Discrepancies（证据缺口）**附录。"我确认它能跑"这类口头完成，正是被这条
 红线挡住的东西。
 
-## Self-Score 折叠区
+## Review Score 折叠区
 
-`.roll/notes/` 里存在同 story 自评条目时，报告底部出现折叠的
-*Self-Score · 自评* 区；没有自评则整块不出现。
+`.roll/notes/` 里存在该 story 的评审分条目时，报告底部出现折叠的
+*Review Score · 评审分* 区；没有则整块不出现。评审分由全新独立会话的
+同行 Reviewer 产出，绝不由工作 agent 自评。
 
 ## 卡片从哪来 —— `roll idea`
 

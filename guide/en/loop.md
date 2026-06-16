@@ -508,7 +508,7 @@ Loop result-eval — last 14 cycles
 ```
 
 The `roll loop status` dashboard also carries a one-line result-eval summary,
-shown **separately** from the skill self-score line so the two are never
+shown **separately** from the Review Score line so the two are never
 confused:
 
 ```

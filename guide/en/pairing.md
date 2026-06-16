@@ -111,18 +111,23 @@ delivered diff, and another scores the finished cycle. `design`, `test`, and
 `cycle` extend the same mechanism to other checkpoints; enable them in
 `stages` when you want earlier or broader second eyes.
 
-## Scoring — the pair grades the cycle, not the author
+## Review Score — a peer grades the cycle, never the author
 
 An agent grading its own delivery is a conflict of interest, so the cycle's
-quality score is itself a pairing scenario (`score` stage):
+quality score — the **Review Score** — is always produced by a Reviewer in a
+**fresh, separate session**, never by the building agent (the agent does NOT
+self-score):
 
-- **In the loop**: after the acceptance gate passes, the runner asks the
-  paired heterogeneous agent to score the delivery. The note lands in the
-  card's `notes/` with provenance — `scoring: pair` and `scored-by: <agent>`.
+- **In the loop**: after the acceptance gate passes, the runner casts a
+  fresh-session Reviewer to score the delivery. The note lands in the card's
+  `notes/` with provenance — `scoring: pair`, `scored-by: <agent>`, and the
+  fresh-session id (so independence is verifiable).
 - **Manually**: `roll pair score <story-id> --summary "<delivery summary>"`
-  runs the same adapter from a session.
-- **Fallback, never a blocker**: no heterogeneous candidate, a timeout, or a
-  protocol miss degrades to the classic self-score —
-  `roll self-score <skill> <story> <score> <verdict> "<rationale>"
-  --fallback-reason "<why>"` — and the absence is audited via a
-  `pair:none-available` event. Both commands are idempotent.
+  runs the same adapter from a fresh session.
+- **Independence, not vendor**: a fresh same-vendor session is the minimum
+  acceptable; a different agent+model+session (non-sub-agent) is encouraged.
+  A score sharing the builder's session — including any sub-agent of it — is
+  rejected as a self-score. No heterogeneous candidate, a timeout, or a
+  protocol miss does **not** fall back to a self-score; the absence is audited
+  via a `pair:none-available` event and the story owes a fresh-session Review
+  Score before it can attest (`review_score_missing`).

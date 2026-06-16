@@ -84,11 +84,14 @@ User Input
   Manual judgment
 ```
 
-## Self-scoring (US-SKILL-010..014)
+## Review Score (US-SKILL-010..014, FIX-343)
 
-`roll-build`, `roll-fix`, and `roll-design` each write one structured
-self-score note into the story's card folder whenever they complete
-(US-META-008 — the card folder is the story's single home; the flat
+Skills do **not** self-score. The working agent never grades its own story;
+the **Review Score** is a runner-side peer outcome, produced by a Reviewer in
+a fresh, separate session (never a sub-agent of the builder). After a
+`roll-build` or `roll-fix` cycle delivers, the runner casts a fresh-session
+Reviewer and writes one structured Review Score note into the story's card
+folder (US-META-008 — the card folder is the story's single home; the flat
 `.roll/notes/` keeps the project diary and pre-migration history, and both
 the dashboard trend and the story dossier merge the two sources):
 
@@ -115,7 +118,7 @@ Story shipped cleanly; AC fully met. One TCR retry on the auth-cookie test
 `roll loop status` rolls up the trend at the bottom of the ROLLUP block:
 
 ```
-self-score: mean 7.8 / min 4 / redo 2 (last 14)
+review-score: mean 7.8 / min 4 / redo 2 (last 14)
 ```
 
 `redo` counts entries whose `verdict` is `regression`, or whose `verdict`
@@ -127,9 +130,10 @@ The notes are part of `.roll/` and therefore commit-tracked, so the
 quality trail is reproducible across machines and visible to anyone
 reading the project history.
 
-`roll loop status` 状态盘底部会汇总自评趋势:`self-score: mean 7.8 /
+`roll loop status` 状态盘底部会汇总评审分趋势:`review-score: mean 7.8 /
 min 4 / redo 2 (last 14)`,`redo` 包含 `regression` 判定和 `ok` 但分
-数 < 6 的低置信交付,共同标记需要回看的 cycle 数量。
+数 < 6 的低置信交付,共同标记需要回看的 cycle 数量。评审分由全新独立会话
+的同行 Reviewer 产出,工作 agent 绝不自评。
 
 ## Adding a New Skill
 

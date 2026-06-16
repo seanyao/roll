@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
+  MUST_DECLARE_FAIL_REASON,
   allowedDeliverableCmd,
   declaresAnySurface,
   deliverableCmdsForStory,
@@ -24,6 +25,7 @@ import {
   storyRequiresScreenshot,
   verificationReportFresh,
   verificationReportHasContent,
+  violatesMustDeclareSurface,
   webCaptureTargetForStory,
   webCaptureTargetsForStory,
 } from "../src/runner/attest-gate.js";
@@ -155,12 +157,23 @@ describe("verificationReportHasContent (US-ATTEST-012 content floor)", () => {
     writeFileSync(join(noShot, ".roll", "features", "uncategorized", "FIX-CLI", "spec.md"), "**AC:**\n- [ ] CLI shows output\n");
     expect(verificationReportHasContent(noShot, "FIX-CLI")).toBe(false);
 
+    // FIX-339 (AC6): a non-exempt card must DECLARE its surface. A web card with a
+    // declared deliverable_url + a real web capture passes.
     const withShot = withReport("FIX-WEB", 2000, '<figure class="shot"><img src="screenshots/home.png"></figure>');
-    writeFileSync(join(withShot, ".roll", "features", "uncategorized", "FIX-WEB", "spec.md"), "**AC:**\n- [ ] web screen renders\n");
+    writeFileSync(
+      join(withShot, ".roll", "features", "uncategorized", "FIX-WEB", "spec.md"),
+      "---\nid: FIX-WEB\ndeliverable_url: https://app.test/home\n---\n**AC:**\n- [ ] web screen renders\n",
+    );
+    writeEvidenceJson(withShot, "FIX-WEB", { captures: [{ kind: "web", out: "screenshots/home.png", taken: true }] });
     expect(verificationReportHasContent(withShot, "FIX-WEB")).toBe(true);
 
+    // A genuinely non-capturable TUI in headless CI takes the recorded exemption
+    // path (the honest machine-skip lane); an exempt card owes no real capture.
     const withSkip = withReport("FIX-TUI", 2000, '<div class="ev ev-text">{"taken":false,"skipped":"no GUI session"}</div>');
-    writeFileSync(join(withSkip, ".roll", "features", "uncategorized", "FIX-TUI", "spec.md"), "**AC:**\n- [ ] TUI can be inspected\n");
+    writeFileSync(
+      join(withSkip, ".roll", "features", "uncategorized", "FIX-TUI", "spec.md"),
+      "---\nid: FIX-TUI\nscreenshot_exempt: headless CI — no GUI session to capture the TUI\n---\n**AC:**\n- [ ] TUI can be inspected\n",
+    );
     writeEvidenceJson(withSkip, "FIX-TUI", {
       captures: [{ kind: "terminal", out: "screenshots/terminal.png", taken: false, skipped: "no GUI session" }],
     });
@@ -535,9 +548,16 @@ describe("FIX-309 — screenshot baseline: default REQUIRED, rules only EXEMPT",
   });
 
   it("AC4: the gate PASSES a REQUIRED story that HAS a real capture", () => {
+    // FIX-339 (AC6): a real-capture card must also DECLARE its surface (the
+    // must-declare floor); a declared deliverable_url + a real web capture passes.
     const wt = withReport("FIX-CAP", 2000, '<figure class="shot"><img src="screenshots/casting.png"></figure>');
-    addSpec(wt, "FIX-CAP", "# FIX-CAP — Casting redesign\n\n## Acceptance Criteria\n\n- [ ] the casting layout is reworked\n");
+    addSpec(
+      wt,
+      "FIX-CAP",
+      "---\nid: FIX-CAP\ndeliverable_url: .roll/features/index.html#casting\n---\n# FIX-CAP — Casting redesign\n\n## Acceptance Criteria\n\n- [ ] the casting layout is reworked\n",
+    );
     withSelfScore(wt, "FIX-CAP", 8, "good");
+    writeEvidenceJson(wt, "FIX-CAP", { captures: [{ kind: "web", out: "screenshots/casting.png", taken: true }] });
     expect(storyRequiresScreenshot(wt, "FIX-CAP")).toBe(true);
     expect(verificationReportHasContent(wt, "FIX-CAP")).toBe(true);
     const { alerts, events, s } = sinks();
@@ -567,13 +587,23 @@ describe("FIX-309 — screenshot baseline: default REQUIRED, rules only EXEMPT",
   });
 
   it("AC3: a required story with an HONEST recorded machine-skip PASSES (deletion-not-placeholder, not silent)", () => {
+    // FIX-339 (AC6): the honest machine-skip lane is reserved for cards that owe
+    // no REAL capture — i.e. a card with a declared deliverable_cmd whose terminal
+    // capture honestly skipped is NOT enough (a declared surface owes a real shot),
+    // so the honest-skip-passes case is a card with NO declared web/cmd surface but
+    // an explicit screenshot_exempt reason (the recorded "no capturable surface"
+    // path). A card that declares nothing at all is now must-declare-blocked.
     const wt = withReport("FIX-SKIP309", 2000, '<div class="ev ev-text">{"taken":false,"skipped":"no GUI session"}</div>');
-    addSpec(wt, "FIX-SKIP309", "# FIX-SKIP309 — TUI redesign\n\n## Acceptance Criteria\n\n- [ ] the TUI renders\n");
+    addSpec(
+      wt,
+      "FIX-SKIP309",
+      "---\nid: FIX-SKIP309\nscreenshot_exempt: headless CI — no GUI session to capture the TUI\n---\n# FIX-SKIP309 — TUI redesign\n\n## Acceptance Criteria\n\n- [ ] the TUI renders\n",
+    );
     withSelfScore(wt, "FIX-SKIP309", 8, "good");
     writeEvidenceJson(wt, "FIX-SKIP309", {
       captures: [{ kind: "terminal", out: "screenshots/terminal.png", taken: false, skipped: "no GUI session" }],
     });
-    expect(storyRequiresScreenshot(wt, "FIX-SKIP309")).toBe(true);
+    expect(storyRequiresScreenshot(wt, "FIX-SKIP309")).toBe(false); // exempt → no capture owed
     expect(verificationReportHasContent(wt, "FIX-SKIP309")).toBe(true);
     const { alerts, s } = sinks();
     const r = runAttestGate(wt, "FIX-SKIP309", "c-skip309", "hard", 1000, s);
@@ -729,22 +759,49 @@ describe("FIX-309 — declared deliverable_url demands a REAL capture (堵 284 �
     expect(verificationReportHasContent(wtReal, "FIX-309G")).toBe(true);
   });
 
-  it("(regression) a required TUI card with NO declared surface + honest terminal-skip STILL passes (no over-enforce)", () => {
-    // The over-enforce guard: tightening must NOT kill genuinely-non-web cards.
-    const wt = withReport("FIX-309H", 2000, '<div class="ev ev-text">{"taken":false}</div>');
-    addSpec(wt, "FIX-309H", "# FIX-309H — TUI redesign\n\n## Acceptance Criteria\n\n- [ ] the TUI renders\n");
+  it("(no over-enforce) a genuinely-non-web TUI card that DECLARES a deliverable_cmd + a real terminal capture passes", () => {
+    // The over-enforce guard, updated for FIX-339 (AC6): tightening must NOT kill
+    // genuinely-non-web cards — BUT a non-exempt card must now DECLARE its surface.
+    // A TUI card declares its `deliverable_cmd` (the CLI lane, no web url) and
+    // provides a REAL terminal capture; it passes the must-declare floor + the
+    // per-surface floor without ever being forced to declare a web url.
+    const wt = withReport("FIX-309H", 2000, '<figure class="shot"><img src="screenshots/terminal.png"></figure>');
+    addSpec(
+      wt,
+      "FIX-309H",
+      "---\nid: FIX-309H\ndeliverable_cmd: roll backlog\n---\n# FIX-309H — TUI redesign\n\n## Acceptance Criteria\n\n- [ ] the TUI renders\n",
+    );
     withSelfScore(wt, "FIX-309H", 8, "good");
     writeEvidenceJson(wt, "FIX-309H", {
-      captures: [{ kind: "terminal", out: "screenshots/terminal.png", taken: false, skipped: "no GUI session" }],
+      captures: [{ kind: "terminal", out: "screenshots/terminal.png", taken: true }],
     });
     expect(storyRequiresScreenshot(wt, "FIX-309H")).toBe(true);
-    expect(webCaptureTargetForStory(wt, "FIX-309H")).toBeNull(); // no declared surface
+    expect(webCaptureTargetForStory(wt, "FIX-309H")).toBeNull(); // CLI deliverable → no web url
     expect(verificationReportHasContent(wt, "FIX-309H")).toBe(true);
     const { alerts, events, s } = sinks();
     const r = runAttestGate(wt, "FIX-309H", "c-309h", "hard", 1000, s);
     expect(r.verdict).toBe("produced");
     expect(alerts).toHaveLength(0);
     expect(events[0]?.verdict).toBe("produced");
+  });
+
+  it("(FIX-339 AC6) a required card that declares NO surface at all is MUST-DECLARE blocked (hard)", () => {
+    // The hardened must-declare floor: a non-exempt card with an AC block but no
+    // deliverable_url / deliverable_cmd / screenshot_exempt can never produce a
+    // real capture → hard FAIL with the canonical must-declare reason, even with
+    // a fresh content report + a good self-score.
+    const wt = withReport("FIX-309NODECL", 2000, '<figure class="shot"><img src="screenshots/web.png"></figure>');
+    addSpec(wt, "FIX-309NODECL", "# FIX-309NODECL — Casting redesign\n\n## Acceptance Criteria\n\n- [ ] the casting layout renders\n");
+    withSelfScore(wt, "FIX-309NODECL", 8, "good");
+    expect(storyRequiresScreenshot(wt, "FIX-309NODECL")).toBe(true);
+    expect(verificationReportHasContent(wt, "FIX-309NODECL")).toBe(false);
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-309NODECL", "c-309nodecl", "hard", 1000, s);
+    expect(r.verdict).toBe("skipped");
+    expect(r.blocked).toBe(true);
+    expect(alerts[0]).toContain("no deliverable surface declared");
+    expect(alerts[0]).toContain("BLOCKED");
+    expect(events[0]?.verdict).toBe("skipped");
   });
 });
 
@@ -907,6 +964,74 @@ describe("FIX-339 — multi-surface deliverables (web list + deliverable_cmd) + 
     expect(declaresAnySurface("---\nid: A\nscreenshot_exempt: true\n---\n# A\n")).toBe(false);
     expect(declaresAnySurface("# A — redesign\n\n## Acceptance Criteria\n\n- [ ] x\n")).toBe(false);
     expect(declaresAnySurface("---\nid: A\nepic: foo\n---\n# A\n")).toBe(false);
+  });
+
+  // ── AC6: must-declare HARD floor (violatesMustDeclareSurface + the gate FAIL) ─
+  describe("AC6: must-declare hard floor", () => {
+    it("violatesMustDeclareSurface — non-exempt + declares nothing ⇒ true; declared/exempt ⇒ false", () => {
+      const noDecl = withSpec("FIX-MD1", "# FIX-MD1 — redesign\n\n## Acceptance Criteria\n\n- [ ] casting renders\n");
+      expect(violatesMustDeclareSurface(noDecl, "FIX-MD1")).toBe(true);
+
+      const url = withSpec("FIX-MD2", "---\nid: FIX-MD2\ndeliverable_url: https://app.test/x\n---\n# x\n\n**AC:**\n- [ ] x\n");
+      expect(violatesMustDeclareSurface(url, "FIX-MD2")).toBe(false);
+
+      const cmd = withSpec("FIX-MD3", "---\nid: FIX-MD3\ndeliverable_cmd: roll backlog\n---\n# x\n\n**AC:**\n- [ ] x\n");
+      expect(violatesMustDeclareSurface(cmd, "FIX-MD3")).toBe(false);
+
+      const exempt = withSpec("FIX-MD4", "---\nid: FIX-MD4\nscreenshot_exempt: pure data migration; no surface\n---\n# x\n\n**AC:**\n- [ ] x\n");
+      expect(violatesMustDeclareSurface(exempt, "FIX-MD4")).toBe(false);
+
+      // missing spec → false (fail open; the gate is the single failure surface).
+      expect(violatesMustDeclareSurface(tmp("md-none"), "FIX-MDX")).toBe(false);
+    });
+
+    it("epic-exempt card (policy deny-list) declares no surface yet is NOT a violation (no 误杀 back-end)", () => {
+      const wt = withSpec("FIX-MD5", "# FIX-MD5 — pure data migration\n\n## Acceptance Criteria\n\n- [ ] rows migrate\n");
+      // move the spec under a denied epic + record the policy deny-list.
+      const denied = join(wt, ".roll", "features", "data-migration", "FIX-MD5");
+      mkdirSync(denied, { recursive: true });
+      writeFileSync(join(denied, "spec.md"), "# FIX-MD5 — pure data migration\n\n## Acceptance Criteria\n\n- [ ] rows migrate\n");
+      // remove the uncategorized copy so the epic-aware path resolves the denied one
+      execSync(`rm -rf '${join(wt, ".roll", "features", "uncategorized", "FIX-MD5")}'`);
+      writeFileSync(join(wt, ".roll", "policy.yaml"), "acceptance:\n  screenshot_exempt_epics:\n    - data-migration\n");
+      expect(screenshotExemption(wt, "FIX-MD5").reason).toBeDefined();
+      expect(violatesMustDeclareSurface(wt, "FIX-MD5")).toBe(false);
+    });
+
+    it("runAttestGate hard-blocks a no-surface non-exempt card with the canonical reason", () => {
+      const wt = withReport("FIX-MD6", 2000, '<figure class="shot"><img src="screenshots/web.png"></figure>');
+      addSpec(wt, "FIX-MD6", "# FIX-MD6 — Casting redesign\n\n## Acceptance Criteria\n\n- [ ] casting renders\n");
+      withSelfScore(wt, "FIX-MD6", 8, "good");
+      const { alerts, events, s } = sinks();
+      const r = runAttestGate(wt, "FIX-MD6", "c-md6", "hard", 1000, s);
+      expect(r.verdict).toBe("skipped");
+      expect(r.blocked).toBe(true);
+      expect(r.reasons[0]).toBe(MUST_DECLARE_FAIL_REASON);
+      expect(alerts[0]).toContain("no deliverable surface declared");
+      expect(events[0]?.verdict).toBe("skipped");
+    });
+
+    it("soft mode warns but does NOT block a no-surface card", () => {
+      const wt = withReport("FIX-MD7", 2000, '<figure class="shot"><img src="screenshots/web.png"></figure>');
+      addSpec(wt, "FIX-MD7", "# FIX-MD7 — redesign\n\n## Acceptance Criteria\n\n- [ ] renders\n");
+      withSelfScore(wt, "FIX-MD7", 8, "good");
+      const { alerts, s } = sinks();
+      const r = runAttestGate(wt, "FIX-MD7", "c-md7", "soft", 1000, s);
+      expect(r.verdict).toBe("skipped");
+      expect(r.blocked).toBe(false);
+      expect(alerts[0]).not.toContain("BLOCKED");
+    });
+
+    it("a no-AC card is NEVER subjected to must-declare (storyHasAcBlock early return)", () => {
+      const wt = withSpec("IDEA-MD8", "# IDEA-MD8 — an idea note, no AC block\n\nsome prose, no checklist\n");
+      expect(storyHasAcBlock(wt, "IDEA-MD8")).toBe(false);
+      const { alerts, events, s } = sinks();
+      const r = runAttestGate(wt, "IDEA-MD8", "c-md8", "hard", 1000, s);
+      expect(r.verdict).toBe("produced"); // no AC block → no report required, must-declare never engages
+      expect(r.blocked).toBe(false);
+      expect(alerts).toHaveLength(0);
+      expect(events[0]?.verdict).toBe("produced");
+    });
   });
 
   // ── 复核 #1: deliverable_cmd roll-only allowlist + state-changing denylist ────

@@ -50,6 +50,7 @@ import {
   latestDeliveringCycle,
   parseClaimedIdsFromBacklog,
   parseBacklog,
+  parsePolicy,
   pickStory,
   planPublishDocPr,
   planPublishPr,
@@ -586,6 +587,19 @@ export async function executeCommand(
         ports.depsExec,
       );
       if (!depsOk) return { event: { type: "worktree_failed" } };
+      // FIX-338 (Phase B 杠杆1): with deps now present, PREBUILD the workspace
+      // dist so the agent finds dist/roll.mjs already built (saving the cold
+      // find/build round-trips). DEFAULT-OFF (稳字纪律) — a no-op until
+      // `loop_safety.prebuild_dist: true`. Agent-agnostic + best-effort: a build
+      // failure never topples the cycle, so it runs AFTER the strict deps/skills
+      // gates and its outcome is intentionally ignored.
+      await bootstrapWorktreePrebuild(
+        ports.paths.worktreePath,
+        ports.paths.alertsPath,
+        ports.events,
+        readPrebuildDistEnabled(ports.repoCwd),
+        ports.depsExec,
+      );
       return { event: { type: "worktree_created" } };
     }
 
@@ -2236,6 +2250,72 @@ export async function bootstrapWorktreeDeps(
       `[FAIL] worktree deps bootstrap failed (${plan.cmd} ${plan.args.join(" ")}): ${msg} — stopping before agent spawn`,
     );
     return false;
+  }
+}
+
+/** Incremental `pnpm -r build` is ~2.8s warm; give it generous head-room for a
+ *  cold worktree (no prior tsc output) before it is treated as a non-fatal slip. */
+export const PREBUILD_TIMEOUT_MS = 600_000;
+
+/**
+ * Read the FIX-338 `loop_safety.prebuild_dist` flag from
+ * `<repoCwd>/.roll/policy.yaml`. DEFAULT-OFF (稳字纪律): an absent / unreadable /
+ * `false` policy ⇒ `false`, so deploy is a NO-OP until `prebuild_dist: true` is
+ * explicitly flipped on. Mirrors {@link readAttestGateMode} / readPeerGateMode.
+ */
+export function readPrebuildDistEnabled(repoCwd: string): boolean {
+  try {
+    const p = join(repoCwd, ".roll", "policy.yaml");
+    if (!existsSync(p)) return false;
+    return parsePolicy(readFileSync(p, "utf8")).loopSafety.prebuildDist === true;
+  } catch {
+    return false; // unreadable / unparseable policy → default OFF (no-op)
+  }
+}
+
+/**
+ * FIX-338 (Phase B 杠杆1) — PREBUILD the workspace `dist/` into a fresh cycle
+ * worktree, right after deps install and BEFORE the agent spawns, so the working
+ * agent already finds `dist/roll.mjs` instead of burning cold round-trips to
+ * locate and build the entry point.
+ *
+ * Agent-AGNOSTIC: a plain `pnpm -r build` benefits any engine (codex/pi/kimi) —
+ * NO per-agent hardcode. Does NOT break cycle isolation: the worktree is still
+ * based on fresh origin/main (create_worktree) and `dist/` is a gitignored
+ * artifact, not tracked content.
+ *
+ * BEST-EFFORT (red line): a build failure must NEVER topple the cycle — it logs a
+ * WARN alert and returns, so the agent still spawns (and can build itself the old
+ * way). Gated by {@link readPrebuildDistEnabled}; DEFAULT-OFF ⇒ this is a no-op
+ * until explicitly enabled. Skips non-Node projects (no package.json) and
+ * projects with no pnpm lockfile (the build command is pnpm-specific).
+ */
+export async function bootstrapWorktreePrebuild(
+  worktreePath: string,
+  alertsPath: string,
+  events: EventsPort,
+  enabled: boolean,
+  exec: DepsExec = execFileAsync as unknown as DepsExec,
+): Promise<void> {
+  if (!enabled) return; // DEFAULT-OFF: deploy no-op until flipped on.
+  if (!existsSync(join(worktreePath, "package.json"))) return;
+  // The build command is `pnpm -r build`; without a pnpm lockfile this is not a
+  // pnpm workspace, so there is nothing to prebuild here.
+  if (!existsSync(join(worktreePath, "pnpm-lock.yaml"))) return;
+  try {
+    await exec("pnpm", ["-r", "build"], {
+      cwd: worktreePath,
+      timeout: PREBUILD_TIMEOUT_MS,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message.split("\n")[0] : String(e);
+    // BEST-EFFORT: a prebuild slip is NON-FATAL — log + continue so the cycle
+    // proceeds and the agent can still build the entry point itself.
+    events.appendAlert(
+      alertsPath,
+      `[WARN] worktree dist prebuild failed (pnpm -r build): ${msg} — continuing; agent will build on demand`,
+    );
   }
 }
 

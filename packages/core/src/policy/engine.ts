@@ -87,6 +87,14 @@ export interface LoopSafetyConfig {
    *  no proxy tool is hardcoded — the user sets their own command here; absent ⇒
    *  no auto-enable (the guard halts-and-tells). Absent ⇒ undefined. */
   proxyEnableCmd?: string;
+  /** FIX-338 (Phase B 杠杆1) execute-speed lever: PREBUILD the workspace dist into
+   *  a fresh cycle worktree right after deps install, so the working agent finds
+   *  `dist/roll.mjs` already built (saving the cold round-trips to locate + build
+   *  the entry point). Agent-AGNOSTIC (any engine benefits) and does NOT break
+   *  cycle isolation (each cycle still bases on fresh origin/main; dist is just a
+   *  prebuilt, gitignored artifact). DEFAULT-OFF (`稳字纪律`): absent ⇒ false, so
+   *  deploy is a NO-OP until `prebuild_dist: true` is explicitly flipped on. */
+  prebuildDist?: boolean;
 }
 
 /** The whole parsed policy.yaml. */
@@ -336,6 +344,10 @@ function parseLoopSafety(lines: PreLine[], start: number): [number, LoopSafetyCo
     ...(flat["proxy_enable_cmd"] !== undefined && flat["proxy_enable_cmd"] !== ""
       ? { proxyEnableCmd: flat["proxy_enable_cmd"] }
       : {}),
+    // FIX-338: the prebuild-dist execute-speed lever. DEFAULT-OFF — only an
+    // explicit `prebuild_dist: true` turns it on; anything else (absent / false /
+    // garbage) leaves it false so deploy stays a NO-OP (稳字纪律).
+    ...(flat["prebuild_dist"] === "true" ? { prebuildDist: true } : {}),
   };
   return [i, cfg];
 }

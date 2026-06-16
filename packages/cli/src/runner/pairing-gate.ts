@@ -282,29 +282,46 @@ export interface RunScorePairingDeps {
 }
 
 export interface RunScorePairingResult {
-  status: "off" | "none-available" | "scored" | "timeout" | "error";
+  // FIX-343 (step ④): the score stage is MANDATORY — there is no "off". A
+  // non-"scored" status (none-available / timeout / error) is fail-loud and
+  // BLOCKS the cycle (the attest gate then has no peer score to honor).
+  status: "none-available" | "scored" | "timeout" | "error";
   peer?: string;
   score?: number;
   notePath?: string;
+  /** The reviewer's fresh session/cast id recorded on the note (independence
+   *  is verifiable, not asserted). Present on a "scored" result. */
+  sessionId?: string;
 }
 
+/** FIX-343 (step ④): the per-attempt score timeout (120s) and the bounded retry
+ *  budget (1 retry ⇒ 2 attempts max). A score-stage flake is an HONEST failure,
+ *  not a fallback — the retry only reduces flake-driven false negatives. */
+const SCORE_TIMEOUT_MS = 120_000;
+const SCORE_MAX_ATTEMPTS = 2; // 1 initial + 1 bounded retry
+
 /**
- * Run the score stage for a delivered cycle: a heterogeneous peer (US-PAIR-001
- * selector, stage "score") reads the delivery summary and produces the cycle's
- * score note — self-score is the FALLBACK, not the default (owner ruling
- * 2026-06-13: an agent grading its own delivery is a conflict of interest).
+ * FIX-343 (step ④) — the score stage is the SOLE, MANDATORY producer of the
+ * cycle's Review Score: a fresh-session peer reads the delivery summary and
+ * writes the `scoring: pair` note. The working agent NEVER self-scores.
  *
- * All PAIR-003 invariants hold: never throws, never blocks the cycle, hard
- * timeout in scorePeer, absences are audited (`pair:none-available`). On any
- * non-"scored" status the caller's self-score path proceeds as before — the
- * note the working agent already wrote stays the effective score.
+ *   • MANDATORY: NOT gated on `.roll/pairing.yaml` (enabled / stages⊇score). A
+ *     delivery always owes a Review Score; the executor calls this every cycle.
+ *   • SAME-VENDOR fresh session qualifies (selectPairingCandidates stage="score"
+ *     drops the heterogeneity filter) — independence = a separately spawned
+ *     fresh session (ports.agentSpawn forks a distinct subprocess), incl. a
+ *     fresh instance of the builder's own type. NOT vendor heterogeneity.
+ *   • FAIL-LOUD: no-winner / timeout / error → a non-"scored" status that
+ *     BLOCKS (no synthesized fallback note). The attest gate then fails on
+ *     "missing peer review score" and the cycle honestly fails.
+ *   • The note records `scoring: pair` + `scored-by` + a unique `session-id`
+ *     (the reviewer's fresh session/cast id) so independence is VERIFIABLE.
+ *   • 1 bounded retry @ 120s/attempt to shave flake-driven honest failures.
  *
  * Validation is delegated to the FIX-274 writer (score 1..10 integer, verdict
  * whitelist): the note is written BEFORE the evidence file, so a malformed peer
  * score aborts with nothing on disk (status "error"). Once the note IS written
- * the pairing counts as scored — the evidence file + event are best-effort
- * auxiliaries (kimi pair-review: a post-note evidence failure must not report
- * "error" with a live note on disk).
+ * the pairing counts as scored — the evidence file + event are best-effort.
  */
 export async function runScorePairing(
   projectDir: string,
@@ -317,10 +334,14 @@ export async function runScorePairing(
   deps: RunScorePairingDeps,
 ): Promise<RunScorePairingResult> {
   try {
+    // FIX-343 (step ④): MANDATORY — read pairing.yaml only for history/epsilon
+    // nuance; its enabled/stages flags NO LONGER gate scoring. The "score"
+    // selector ignores cfg gating anyway (it is stage-aware), so a synthesized
+    // minimal cfg is sufficient when no config exists.
     const cfgPath = join(projectDir, ".roll", "pairing.yaml");
-    if (!existsSync(cfgPath)) return { status: "off" }; // file absent = pairing off
-    const cfg = parsePairingConfig(readFileSync(cfgPath, "utf8"));
-    if (!cfg.enabled || !cfg.stages.includes("score")) return { status: "off" };
+    const cfg = existsSync(cfgPath)
+      ? parsePairingConfig(readFileSync(cfgPath, "utf8"))
+      : { enabled: true, stages: ["score"] as PairingStage[], capability: {} };
 
     const candidates = selectPairingCandidates({
       installed: deps.installed,
@@ -333,29 +354,36 @@ export async function runScorePairing(
       ...(deps.epsilon !== undefined ? { epsilon: deps.epsilon } : {}),
     });
     if (candidates.length === 0) {
-      deps.event({ type: "pair:none-available", cycleId, stage: "score", reason: "no qualified heterogeneous scorer", ts: deps.now() });
+      // Fail-loud: no scorer to spawn a fresh session of → BLOCK (no fallback).
+      deps.event({ type: "pair:none-available", cycleId, stage: "score", reason: "no scorer available to spawn a fresh review session", ts: deps.now() });
       return { status: "none-available" };
     }
 
-    // FIX-335 AC3 (score stage): PARALLEL take-first over the ranked hetero
-    // scorers — fire every scorePeer at once and use the FIRST non-null score;
-    // the rest are discarded. Self-score remains the FALLBACK (US-PAIR-009) ONLY
-    // when the WHOLE pool flakes (timeout). FIX-293's hard gate is unchanged —
-    // an empty hetero pool already returned none-available above, so reaching
-    // here with a winner is always a real heterogeneous score.
-    const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    const probes = candidates.map(async (candidate) => {
-      const peer = candidate as string;
-      deps.event({ type: "pair:selected", cycleId, workingAgent, peer, stage: "score", ts: deps.now() });
-      const scored = await deps.scorePeer(peer, summary, timeoutMs);
-      return scored === null ? null : { peer, scored };
-    });
-    const winner = await firstValid(probes);
+    const timeoutMs = deps.timeoutMs ?? SCORE_TIMEOUT_MS;
+    // FIX-343 (step ④): 1 bounded retry. Each attempt fires every candidate's
+    // fresh-session scorePeer in PARALLEL (FIX-335 take-first) and uses the FIRST
+    // non-null score; the rest are discarded. A wholly-flaking attempt retries
+    // ONCE (no death-spiral), then a still-empty result is an HONEST timeout (no
+    // fallback). The reviewer's fresh session/cast id is minted per attempt so
+    // independence is recorded on the note, not asserted.
+    let winner: { peer: string; scored: PairScore; sessionId: string } | null = null;
+    for (let attempt = 1; attempt <= SCORE_MAX_ATTEMPTS && winner === null; attempt++) {
+      const probes = candidates.map(async (candidate) => {
+        const peer = candidate as string;
+        // A unique id for THIS reviewer's fresh session/cast — distinct per
+        // peer + attempt + cycle, so the note proves an independent session ran.
+        const sessionId = `${cycleId}:score:${peer}:a${attempt}:${deps.now()}`;
+        deps.event({ type: "pair:selected", cycleId, workingAgent, peer, stage: "score", ts: deps.now() });
+        const scored = await deps.scorePeer(peer, summary, timeoutMs);
+        return scored === null ? null : { peer, scored, sessionId };
+      });
+      winner = await firstValid(probes);
+    }
     if (winner === null) {
-      // Whole scorer pool flaked (timeout/error) → self-score stands (US-PAIR-009 fallback).
+      // Whole scorer pool flaked across all attempts → honest timeout, BLOCK.
       return { status: "timeout" };
     }
-    const { peer, scored } = winner;
+    const { peer, scored, sessionId } = winner;
 
     // Note first (the writer is the validator): a bad peer payload throws here
     // and leaves NOTHING on disk — no evidence, no event, status "error".
@@ -367,6 +395,7 @@ export async function runScorePairing(
       rationale: scored.rationale,
       scoredBy: peer,
       scoring: "pair",
+      sessionId,
     });
 
     try {
@@ -374,14 +403,14 @@ export async function runScorePairing(
       mkdirSync(join(runtimeDir, "peer"), { recursive: true });
       writeFileSync(
         path,
-        JSON.stringify({ cycleId, workingAgent, peer, stage: "score", score: scored.score, verdict: scored.verdict, rationale: scored.rationale, cost: scored.cost }, null, 2),
+        JSON.stringify({ cycleId, workingAgent, peer, stage: "score", score: scored.score, verdict: scored.verdict, rationale: scored.rationale, cost: scored.cost, sessionId }, null, 2),
         "utf8",
       );
       deps.event({ type: "pair:score", cycleId, peer, score: scored.score, verdict: scored.verdict, cost: scored.cost, stage: "score", ts: deps.now() });
     } catch {
       /* evidence/event are auxiliaries — the note is the product */
     }
-    return { status: "scored", peer, score: scored.score, notePath: note.path };
+    return { status: "scored", peer, score: scored.score, notePath: note.path, sessionId };
   } catch {
     return { status: "error" }; // never throw — scoring must not fail the cycle
   }

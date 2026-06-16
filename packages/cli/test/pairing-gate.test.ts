@@ -288,27 +288,33 @@ function scoreDeps(over: Partial<RunScorePairingDeps> = {}): { d: RunScorePairin
 }
 
 describe("runScorePairing — US-PAIR-009", () => {
-  it("file absent / stage not enabled = off", async () => {
+  it("FIX-343: MANDATORY — scores even with NO pairing.yaml / stage not enabled", async () => {
+    // The score stage is no longer gated on pairing.yaml: a repo with no config
+    // (and one with only `code` enabled) still produces a peer Review Score.
     const off = project(null);
     const { d } = scoreDeps();
-    expect((await runScorePairing(off.dir, off.rt, "c1", "claude", "US-X-001", "roll-build", "summary", d)).status).toBe("off");
-    const noScore = project(ENABLED); // stages: [code] only
-    expect((await runScorePairing(noScore.dir, noScore.rt, "c1", "claude", "US-X-001", "roll-build", "summary", scoreDeps().d)).status).toBe("off");
+    expect((await runScorePairing(off.dir, off.rt, "c1", "claude", "US-X-001", "roll-build", "summary", d)).status).toBe("scored");
+    const noScore = project(ENABLED); // stages: [code] only — score stage still fires
+    expect((await runScorePairing(noScore.dir, noScore.rt, "c1", "claude", "US-X-002", "roll-build", "summary", scoreDeps().d)).status).toBe("scored");
   });
 
-  it("scores via a heterogeneous peer: note + evidence + pair:score event", async () => {
+  it("scores via a fresh-session peer: note + evidence + pair:score event + session id", async () => {
     const { dir, rt } = project(SCORE_CFG);
     const { d, events } = scoreDeps();
     const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "delivery summary", d);
     expect(r.status).toBe("scored");
-    expect(r.peer).not.toBe("claude");
+    // FIX-343: the reviewer's fresh session/cast id is recorded + returned.
+    expect(r.sessionId).toBeDefined();
+    expect(r.sessionId).toContain("score");
     // note: written with pair provenance, readable by existing readers
     const notes = readStorySelfScores(dir, "US-X-001");
     expect(notes).toHaveLength(1);
     expect(notes[0]?.score).toBe(8);
+    expect(notes[0]?.sessionId).toBe(r.sessionId);
     const noteText = readFileSync(notes[0]?.sourcePath ?? "", "utf8");
     expect(noteText).toContain("scoring: pair");
     expect(noteText).toContain(`scored-by: ${r.peer}`);
+    expect(noteText).toContain(`session-id: ${r.sessionId}`);
     // evidence file in the stage namespace
     const ev = JSON.parse(readFileSync(join(rt, "peer", "cycle-c1.score.pair.json"), "utf8"));
     expect(ev.score).toBe(8);
@@ -345,20 +351,35 @@ describe("runScorePairing — US-PAIR-009", () => {
     expect(readStorySelfScores(dir, "US-X-001")[0]?.score).toBe(7); // recorded as a pair score
   });
 
-  it("no heterogeneous candidate → none-available event, never blocks", async () => {
+  it("FIX-343: single-agent env → scores via a fresh SAME-TYPE session (independence = fresh session, not vendor)", async () => {
     const { dir, rt } = project(SCORE_CFG);
-    const { d, events } = scoreDeps({ installed: ["claude"] });
+    const { d } = scoreDeps({ installed: ["claude"] }); // only the builder's own type
+    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
+    expect(r.status).toBe("scored");
+    expect(r.peer).toBe("claude"); // a fresh instance of the builder's own type
+    expect(r.sessionId).toBeDefined();
+    const notes = readStorySelfScores(dir, "US-X-001");
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.scoring).toBe("pair");
+    expect(notes[0]?.scoredBy).toBe("claude");
+  });
+
+  it("FIX-343: no scorer at all (empty pool) → fail-loud none-available, BLOCKS (no note)", async () => {
+    const { dir, rt } = project(SCORE_CFG);
+    const { d, events } = scoreDeps({ installed: [] });
     const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
     expect(r.status).toBe("none-available");
     expect(events.map((e) => e.type)).toEqual(["pair:none-available"]);
-    expect(readStorySelfScores(dir, "US-X-001")).toHaveLength(0); // fallback note is the caller's self path
+    expect(readStorySelfScores(dir, "US-X-001")).toHaveLength(0); // NO fallback note — the cycle honestly fails
   });
 
-  it("peer timeout → status timeout, no note, no partial evidence", async () => {
+  it("FIX-343: peer flakes across the bounded retry → status timeout, BLOCKS, no note/evidence", async () => {
     const { dir, rt } = project(SCORE_CFG);
-    const { d } = scoreDeps({ scorePeer: async () => null });
+    let calls = 0;
+    const { d } = scoreDeps({ scorePeer: async () => (calls++, null) });
     const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
     expect(r.status).toBe("timeout");
+    expect(calls).toBeGreaterThan(3); // 3 candidates × ≥2 attempts (1 bounded retry)
     expect(existsSync(join(rt, "peer", "cycle-c1.score.pair.json"))).toBe(false);
     expect(readStorySelfScores(dir, "US-X-001")).toHaveLength(0);
   });

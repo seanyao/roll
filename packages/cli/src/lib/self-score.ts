@@ -19,6 +19,9 @@ export interface SelfScoreView {
   scoring?: "pair" | "self";
   /** The agent that produced a pair score (US-PAIR-009 `scored-by:`). */
   scoredBy?: string;
+  /** FIX-343 (step ④) — the reviewer's fresh session/cast id (`session-id:`),
+   *  so "an independent fresh session scored this" is VERIFIABLE, not asserted. */
+  sessionId?: string;
   /** Why a pair score fell back to self (US-PAIR-010 `fallback-reason:`); only
    *  present on a self-score note that recorded the fallback explicitly. */
   fallbackReason?: string;
@@ -109,6 +112,7 @@ export function parseSelfScoreNote(
   const scoringRaw = (field(fields, "scoring") ?? "").toLowerCase();
   const scoring = scoringRaw === "pair" ? "pair" : scoringRaw === "self" ? "self" : undefined;
   const scoredBy = field(fields, "scored-by");
+  const sessionId = field(fields, "session-id");
   const fallbackReason = field(fields, "fallback-reason");
   return {
     skill: field(fields, "skill") ?? basename(sourcePath),
@@ -122,6 +126,7 @@ export function parseSelfScoreNote(
     ...(href !== undefined ? { href } : {}),
     ...(scoring !== undefined ? { scoring } : {}),
     ...(scoredBy !== undefined && scoredBy !== "" ? { scoredBy } : {}),
+    ...(sessionId !== undefined && sessionId !== "" ? { sessionId } : {}),
     ...(fallbackReason !== undefined && fallbackReason !== "" ? { fallbackReason } : {}),
   };
 }
@@ -245,6 +250,9 @@ export interface SelfScoreWriteInput {
   ts?: string;
   /** US-PAIR-009 provenance: the agent that produced the score (pair scoring). */
   scoredBy?: string;
+  /** FIX-343 (step ④): the reviewer's fresh session/cast id, recorded as
+   *  `session-id:` so the independence of the scoring session is verifiable. */
+  sessionId?: string;
   /** "pair" when a heterogeneous peer scored; defaults to "self". */
   scoring?: "pair" | "self";
   /** Why pair scoring fell back to self (recorded in the note for audit).
@@ -342,6 +350,9 @@ export function writeSelfScoreNote(projectPath: string, input: SelfScoreWriteInp
     // Readers tolerate the extra string fields (non-numeric → not a dimension).
     `scoring: ${scoring}`,
     ...(input.scoredBy !== undefined ? [`scored-by: ${input.scoredBy.trim()}`] : []),
+    // FIX-343 (step ④): the reviewer's fresh session/cast id — independence is
+    // recorded, not just asserted.
+    ...(input.sessionId !== undefined && input.sessionId.trim() !== "" ? [`session-id: ${input.sessionId.trim()}`] : []),
     ...(input.fallbackReason !== undefined ? [`fallback-reason: ${input.fallbackReason.trim()}`] : []),
     "---",
     "",

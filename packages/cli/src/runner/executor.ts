@@ -1110,9 +1110,11 @@ export async function executeCommand(
         const summary = `Story: ${storyId}\nDelivery: peer-reviewed cycle, scoring stage\nDiff stat:\n${diffStat}`;
         const skill = storyId.startsWith("FIX-") || storyId.startsWith("BUG-") ? "roll-fix" : "roll-build";
         // Write to the PERSISTENT .roll (repoCwd) so the peer score note survives
-        // worktree teardown and the gate (reading repoCwd) finds it.
+        // worktree teardown and the gate (reading repoCwd) finds it. FIX-343: use
+        // the SAME injectable installed-agents seam as the peer gate so the
+        // mandatory score stage is hermetic under test (no real-env spawns).
         await runScorePairing(ports.repoCwd, dirname(ports.paths.eventsPath), ctx.cycleId ?? "", ctx.agent ?? "", storyId, skill, summary, {
-          installed: agentsInstalled(realAgentEnv()),
+          installed: ports.installedAgents?.() ?? agentsInstalled(realAgentEnv()),
           isAvailable: () => true,
           scorePeer,
           event: (e: PairEvent) => ports.events.appendEvent(ports.paths.eventsPath, e as RollEvent),

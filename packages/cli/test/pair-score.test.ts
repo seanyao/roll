@@ -54,34 +54,40 @@ async function run(p: string, args: string[], deps?: Partial<PairScoreCmdDeps>):
 }
 
 describe("roll pair score — US-PAIR-010", () => {
-  it("scores via the paired hetero agent and prints reviewer, score, note path", async () => {
+  it("scores via a fresh-session peer and prints reviewer, score, note path", async () => {
     const p = project(SCORE_CFG);
     const r = await run(p, ["US-T-001", "--summary", "delivered the thing"]);
     expect(r.code).toBe(0);
-    expect(r.out).toContain("kimi");
+    // FIX-343: any installed agent is a valid fresh-session scorer (claude OR
+    // kimi) — the round-robin head varies by cycle id, so assert membership.
+    expect(r.out).toMatch(/claude|kimi/);
     expect(r.out).toContain("8");
     expect(r.out).toContain(join(".roll", "notes"));
     const notes = readStorySelfScores(p, "US-T-001");
     expect(notes).toHaveLength(1);
     const text = readFileSync(notes[0]?.sourcePath ?? "", "utf8");
     expect(text).toContain("scoring: pair");
-    expect(text).toContain("scored-by: kimi");
+    expect(text).toMatch(/scored-by: (claude|kimi)/);
   });
 
-  it("pairing off → fallback hint, exit 0, no note", async () => {
+  it("FIX-343: MANDATORY — no pairing.yaml still scores via a fresh-session peer, exit 0", async () => {
+    // The score stage is no longer gated on pairing.yaml: with installed agents
+    // present, a fresh-session peer scores even without a config.
     const p = project(null);
     const r = await run(p, ["US-T-001", "--summary", "s"]);
     expect(r.code).toBe(0);
-    expect(r.out.toLowerCase()).toContain("fallback");
-    expect(r.out).toContain("roll self-score");
-    expect(readStorySelfScores(p, "US-T-001")).toHaveLength(0);
+    const notes = readStorySelfScores(p, "US-T-001");
+    expect(notes).toHaveLength(1);
+    expect(readFileSync(notes[0]?.sourcePath ?? "", "utf8")).toContain("scoring: pair");
   });
 
-  it("no heterogeneous candidate → fallback hint, exit 0", async () => {
+  it("FIX-343: single-agent env scores via a fresh SAME-TYPE session, exit 0", async () => {
     const p = project(SCORE_CFG);
     const r = await run(p, ["US-T-001", "--summary", "s"], { installed: ["claude"] });
     expect(r.code).toBe(0);
-    expect(r.out).toContain("roll self-score");
+    const notes = readStorySelfScores(p, "US-T-001");
+    expect(notes).toHaveLength(1);
+    expect(readFileSync(notes[0]?.sourcePath ?? "", "utf8")).toContain("scored-by: claude");
   });
 
   it("reviewer timeout / protocol miss → fallback hint, exit 0", async () => {
@@ -136,13 +142,16 @@ describe("codex pair-review fixes — US-PAIR-010", () => {
     expect(text).toContain("skill: roll-design");
   });
 
-  it("--worker pins heterogeneity to the real author", async () => {
+  it("FIX-343: --worker no longer restricts scoring to a heterogeneous peer (same-vendor fresh is valid)", async () => {
     const p = project(SCORE_CFG);
-    // worker kimi → only hetero candidate is claude
+    // worker kimi: the score stage allows ANY installed agent as a fresh-session
+    // scorer (claude OR a fresh kimi) — independence is the fresh session, not
+    // vendor heterogeneity. A pair score is produced regardless.
     const r = await run(p, ["US-T-001", "--summary", "s", "--worker", "kimi"]);
     expect(r.code).toBe(0);
     const text = readFileSync(readStorySelfScores(p, "US-T-001")[0]?.sourcePath ?? "", "utf8");
-    expect(text).toContain("scored-by: claude");
+    expect(text).toContain("scoring: pair");
+    expect(text).toMatch(/scored-by: (claude|kimi)/);
   });
 
   it("backlog row fallback never matches a longer id (US-X-1 vs US-X-10)", async () => {

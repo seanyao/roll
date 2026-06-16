@@ -509,6 +509,10 @@ function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<str
     },
     skillBody: "work",
     clock: () => 42,
+    // FIX-343: default to NO installed agents so the now-mandatory score stage is
+    // hermetic (no real-env scorer spawns). Tests that exercise the peer gate /
+    // scorer pool pin their own installedAgents.
+    installedAgents: () => [],
     agentSpawn: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0, timedOut: false })),
     evidence: {
       openFrame: vi.fn(() => "/repo/.roll/features/demo/US-RUN-001/20260605-000000-1"),
@@ -1516,8 +1520,11 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 0 } });
     const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
     expect(events.some((e) => e.type === "peer:gate" && e.verdict === "skipped")).toBe(true);
-    // soft → never invokes the retry spawn.
-    expect(ports.agentSpawn).not.toHaveBeenCalled();
+    // soft → never invokes the peer-gate RETRY spawn. (FIX-343: the mandatory
+    // score stage DOES spawn scorers via the same agentSpawn, so assert on the
+    // peer-gate REVIEW prompt specifically, not the total call count.)
+    const spawnPrompts = (ports.agentSpawn as ReturnType<typeof vi.fn>).mock.calls.map((c) => (c[1] as { skillBody?: string }).skillBody ?? "");
+    expect(spawnPrompts.some((p) => p.includes("PAIRING reviewer"))).toBe(false);
   });
 
   it("FIX-293: prior peer evidence present → consulted, no retry, not blocked", async () => {

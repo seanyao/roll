@@ -335,15 +335,15 @@ export async function pairScore(rest: string[], deps: PairScoreCmdDeps = default
     return 0;
   }
   // Enhancement, never a blocker: every non-scored outcome degrades to the
-  // documented self-score fallback with the reason in hand (exit 0).
+  // documented self-score fallback with the reason in hand (exit 0). FIX-343
+  // (step ④): the score stage is mandatory, so there is no "off" — a non-scored
+  // outcome is now only none-available / timeout / error.
   const reason =
-    r.status === "off"
-      ? "pairing off (no .roll/pairing.yaml score stage)"
-      : r.status === "none-available"
-        ? "no heterogeneous candidate"
-        : r.status === "timeout"
-          ? `peer ${r.peer ?? ""} timed out or broke protocol`.trim()
-          : "score pairing errored";
+    r.status === "none-available"
+      ? "no scorer available to spawn a fresh review session"
+      : r.status === "timeout"
+        ? `peer ${r.peer ?? ""} timed out or broke protocol`.trim()
+        : "score pairing errored";
   process.stdout.write(
     `Pair scoring fallback (${reason}) — write the self-score instead:\n` +
       `配对评分回落（${reason}）——请改用自评：\n` +

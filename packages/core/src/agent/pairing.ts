@@ -432,14 +432,41 @@ function seedOf(s: string): number {
  */
 export function selectPairingCandidates(input: SelectInput): string[] {
   const { installed, isAvailable, workingAgent, stage, cfg, cycleId, history } = input;
+  const working = canonicalAgentName(workingAgent);
+  const order = new Map(AGENT_REGISTRY_NAMES.map((n, i) => [n as string, i]));
+
+  // FIX-343 (step ④): the "score" stage is MANDATORY and stage-aware.
+  //   • NOT gated on cfg.enabled / cfg.stages — a Review Score is owed by every
+  //     delivery whether or not pairing.yaml opts in (the executor calls this
+  //     unconditionally; an absent config must still yield a scorer).
+  //   • SAME-VENDOR fresh session is allowed — DROP the isHeterogeneous filter
+  //     AND allow a fresh instance of the BUILDER'S OWN type. Independence comes
+  //     from "another assigned fresh session" (ports.agentSpawn forks a distinct
+  //     subprocess), NOT from vendor heterogeneity. Capability is not required
+  //     for scoring (no special tooling — every installed agent can score).
+  // Code review (and every other stage) KEEPS the heterogeneous hard filter and
+  // the enabled/stage/capability gating unchanged.
+  if (stage === "score") {
+    const scorers = installed
+      .map(canonicalAgentName)
+      .filter((a, i, arr) => arr.indexOf(a) === i) // de-dupe
+      .filter((a) => isAvailable(a))
+      .sort((x, y) => (order.get(x) ?? 999) - (order.get(y) ?? 999));
+    if (scorers.length === 0) return [];
+    // Round-robin baseline so the builder's own type is not always head when a
+    // heterogeneous peer is also installed (a fresh other-vendor session is a
+    // marginally stronger independent signal, but same-vendor fresh is valid).
+    const seed = seedOf(cycleId);
+    const start = seed % scorers.length;
+    return [...scorers.slice(start), ...scorers.slice(0, start)];
+  }
+
   if (!cfg.enabled) return [];
   if (!cfg.stages.includes(stage)) return [];
-  const working = canonicalAgentName(workingAgent);
 
   // Rational hard filter: installed + available + capable-for-stage +
   // heterogeneous from the worker. Order by the registry so the seed maps to a
   // stable index.
-  const order = new Map(AGENT_REGISTRY_NAMES.map((n, i) => [n as string, i]));
   const qualified = installed
     .map(canonicalAgentName)
     .filter((a, i, arr) => arr.indexOf(a) === i) // de-dupe

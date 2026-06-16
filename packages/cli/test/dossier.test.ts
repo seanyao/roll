@@ -189,6 +189,38 @@ describe("collectDossier — US-DOSSIER-001a data model", () => {
     expect(storyHasMergeEvidence(facts, "FIX-308")).toBe(true);
   });
 
+  it("FIX-349: collectGitDossierFacts returns fully-populated facts when git log output exceeds the 1MB execFileSync default", () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-dossier-bigfacts-")));
+    dirs.push(repo);
+
+    execFileSync("git", ["init", "--initial-branch=main"], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: repo });
+    execFileSync("git", ["config", "user.name", "Roll Test"], { cwd: repo });
+    execFileSync("git", ["config", "commit.gpgsign", "false"], { cwd: repo });
+
+    // Build a history whose `git log ... %B` output blows past the 1MB default
+    // maxBuffer: 40 commits, each with a ~40KB body → ~1.6MB > 1MB. Against the
+    // OLD code this makes execFileSync throw ENOBUFS → collectGitDossierFacts
+    // returns null; the fix raises maxBuffer so all commits come back.
+    const NUM_COMMITS = 40;
+    const bigBody = "x".repeat(40 * 1024);
+    for (let i = 0; i < NUM_COMMITS; i++) {
+      writeFileSync(join(repo, `file-${i}.txt`), `content ${i}\n`);
+      execFileSync("git", ["add", "."], { cwd: repo });
+      execFileSync("git", ["commit", "-m", `BIG-${i} large commit\n\n${bigBody}`], { cwd: repo });
+    }
+
+    const facts = collectGitDossierFacts(repo);
+    expect(facts).not.toBeNull();
+    // Every fixture commit must be present — proves the full output was read,
+    // not silently truncated. (collectGitDossierFacts catches ENOBUFS → null;
+    // with default maxBuffer this whole assertion block fails on `not.toBeNull`.)
+    expect(facts!.commits.length).toBe(NUM_COMMITS);
+    for (let i = 0; i < NUM_COMMITS; i++) {
+      expect(storyHasMergeEvidence(facts, `BIG-${i}`)).toBe(true);
+    }
+  });
+
   it("FIX-308: dossier generation fetches origin/main before classifying merged stories", () => {
     const remote = realpathSync(mkdtempSync(join(tmpdir(), "roll-dossier-fetch-remote-")));
     const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-dossier-fetch-repo-")));

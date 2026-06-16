@@ -2223,18 +2223,29 @@ export function gitHasPrMergeCommit(facts: GitDossierFacts | null, prNumber: num
 }
 
 /**
- * FIX-348 — the merge-truth probe the cycle ledger reconcile injects: a story is
- * delivered when EITHER a commit names its id (FIX-347, `storyHasMergeEvidence`)
- * OR main carries a `(#N)` PR-merge commit for the row's recorded PR number
- * (`gitHasPrMergeCommit`). An empty story-id is NOT passed to
- * `storyHasMergeEvidence` (`"".includes` matches every commit) — only the PR
- * number decides for a story-less row.
+ * FIX-350 — the merge-truth probe the cycle ledger reconcile injects, made
+ * CYCLE-ACCURATE: a pending_merge cycle is delivered IFF its OWN recorded PR
+ * merged, NOT if the story merely landed via some OTHER PR.
+ *
+ * FIX-348 combined the two probes with an OR, so `storyHasMergeEvidence(storyId)`
+ * flipped a cycle to delivered whenever ANY commit on main named the story-id —
+ * even when THIS cycle's own PR never merged. Verified regressions: FIX-311's
+ * cycle (PR #763, NOT merged — story landed via later #766/#767) and FIX-284's
+ * cycle (PR #743, NOT merged — story landed via #728/#734) both wrongly flipped
+ * because the OTHER PRs' commits name them.
+ *
+ * The fix: when the row HAS a recorded PR number, decide SOLELY by
+ * `gitHasPrMergeCommit(that PR)` — the row's OWN PR must carry a `(#N)` merge
+ * commit on main. Fall back to `storyHasMergeEvidence(storyId)` ONLY when no PR
+ * number was recorded (old cycles predating the terminal PR event). An empty
+ * story-id is never passed to `storyHasMergeEvidence` (`"".includes` matches
+ * every commit), so a story-less PR-less row stays pending.
  */
 export function cycleMergeTruth(facts: GitDossierFacts | null): (storyId: string, prNumber: number | undefined) => boolean {
-  return (storyId, prNumber) => {
-    if (storyId !== "" && storyHasMergeEvidence(facts, storyId)) return true;
-    return prNumber !== undefined && gitHasPrMergeCommit(facts, prNumber);
-  };
+  return (storyId, prNumber) =>
+    prNumber !== undefined && prNumber !== null
+      ? gitHasPrMergeCommit(facts, prNumber)
+      : storyId !== "" && storyHasMergeEvidence(facts, storyId);
 }
 
 function factsPrNumbers(facts: GitDossierFacts, storyId: string): number[] {
@@ -2344,5 +2355,18 @@ function execGit(cwd: string, args: string[]): string {
   // to stderr. The caller already treats a throw as "no facts" (returns null),
   // but the leaked stderr polluted captured test output that agents attach as
   // inline AC evidence — a passing dossier run showed 52 scary "fatal:" lines.
-  return execFileSync("git", args, { cwd, encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "ignore"] });
+  //
+  // FIX-349: raise maxBuffer well above execFileSync's 1MB default. The full
+  // `git log origin/main --name-only --pretty=...%B` scan exceeds 1MB once a
+  // repo accrues enough history (this repo's own output is ~1.18MB), which made
+  // execFileSync throw ENOBUFS → collectGitDossierFacts caught it and returned
+  // null → every git-facts-dependent feature (the #loop merge-truth reconcile)
+  // silently no-op'd. Test fixtures had <1MB logs so the gap stayed invisible.
+  return execFileSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    timeout: 10_000,
+    stdio: ["ignore", "pipe", "ignore"],
+    maxBuffer: 256 * 1024 * 1024,
+  });
 }

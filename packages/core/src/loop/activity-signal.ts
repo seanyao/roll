@@ -1,3 +1,5 @@
+import { agentNormalizerKind } from "../agent/specs.js";
+
 /**
  * US-LOOP-077 — the observability CORE: a standard {@link ActivitySignal} model
  * + a per-agent normalization layer.
@@ -674,8 +676,8 @@ export const genericNormalizer: AgentActivityNormalizer = {
  * This is the ONLY place a name maps to a parser — downstream stays agnostic.
  */
 export function normalizerFor(agent: string): AgentActivityNormalizer {
-  const a = (agent ?? "").trim().toLowerCase();
-  if (a === "claude") return claudeNormalizer;
-  if (a === "codex") return codexNormalizer;
+  const kind = agentNormalizerKind(agent);
+  if (kind === "claude") return claudeNormalizer;
+  if (kind === "codex") return codexNormalizer;
   return genericNormalizer;
 }

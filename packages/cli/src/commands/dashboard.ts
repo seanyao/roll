@@ -37,6 +37,7 @@ import {
   systemPidAlive,
   type PidAlive,
 } from "@roll/infra";
+import { getAgentSpec } from "@roll/core";
 import { computeListCost, currencyFor } from "./prices-cost.js";
 import { TRUTH_SCHEMA_EPOCH_SEC, cycleTruthFromRow, outcomeToPanel } from "../lib/truth-adapter.js";
 
@@ -895,7 +896,7 @@ function repairOrphanCyclesFromGit(
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// claude session backfill
+// Agent session backfill
 // ════════════════════════════════════════════════════════════════════════════
 interface SessionUsage {
   model: string | null;
@@ -907,7 +908,8 @@ interface SessionUsage {
   duration_ms: number | null;
 }
 
-function loadClaudeSessionUsage(label: string, slug: string): SessionUsage | null {
+function loadStreamJsonSessionUsage(label: string, slug: string, agent: string): SessionUsage | null {
+  if (getAgentSpec(agent)?.usage.stdoutExtractor !== "claude-stream") return null;
   const user = process.env["USER"] ?? "seanyao";
   const worktreePath = `/Users/${user}/.shared/roll/worktrees/${slug}-cycle-${label}`;
   const projName =
@@ -968,7 +970,7 @@ function loadClaudeSessionUsage(label: string, slug: string): SessionUsage | nul
   return { model, ...sums, cost_reported_usd: cost, duration_ms: durationMs };
 }
 
-function backfillUsageFromClaudeSessions(cycles: Cycle[], slug: string): void {
+function backfillUsageFromAgentSessions(cycles: Cycle[], slug: string): void {
   for (const cy of cycles) {
     const ue = cy.usage_event;
     if (
@@ -1000,7 +1002,7 @@ function backfillUsageFromClaudeSessions(cycles: Cycle[], slug: string): void {
       continue;
     }
     if (cy.input_tokens || cy.output_tokens) continue;
-    const u = loadClaudeSessionUsage(cy.label, slug);
+    const u = loadStreamJsonSessionUsage(cy.label, slug, cy.agent ?? "");
     if (!u) continue;
     cy.input_tokens = toInt(u.input_tokens);
     cy.output_tokens = toInt(u.output_tokens);
@@ -1664,7 +1666,7 @@ interface RenderArgs {
   lang: "both" | "en" | "zh";
   runs: Record<string, RunRecord>;
   gitMerges: Record<string, GitMerge>;
-  claudeSlug: string | null;
+  projectSlug: string | null;
   now: Date;
   /** Loop runtime dir for live-cycle detection (null in fixture mode). */
   rtDir: string | null;
@@ -1678,7 +1680,7 @@ function render(
   backlog: Record<string, string>,
   args: RenderArgs,
 ): void {
-  const { days, lang, runs, gitMerges, claudeSlug, now } = args;
+  const { days, lang, runs, gitMerges, projectSlug, now } = args;
   const cycles = aggregate(events, cron);
   const matchedRunIds = Object.keys(runs).length > 0 ? mergeRunsIntoCycles(cycles, runs) : new Set<string>();
   // US-TRUTH-004 AC4: a COMPLETED post-epoch cycle with no runs row has no
@@ -1692,7 +1694,7 @@ function render(
     cy.outcome = "unknown";
   }
   if (Object.keys(gitMerges).length > 0) repairOrphanCyclesFromGit(cycles, gitMerges);
-  backfillUsageFromClaudeSessions(cycles, claudeSlug ?? "");
+  backfillUsageFromAgentSessions(cycles, projectSlug ?? "");
   const byDay = bucketByDay(cycles);
   const daysKeys = [...byDay.keys()].sort().reverse().slice(0, days);
 
@@ -2116,7 +2118,7 @@ function collectCycles(slug: string, days: number): Cycle[] {
   const cycles = aggregate(events, cron);
   if (Object.keys(runs).length > 0) mergeRunsIntoCycles(cycles, runs);
   if (Object.keys(gitMerges).length > 0) repairOrphanCyclesFromGit(cycles, gitMerges);
-  backfillUsageFromClaudeSessions(cycles, slug);
+  backfillUsageFromAgentSessions(cycles, slug);
   return cycles;
 }
 
@@ -2471,7 +2473,7 @@ export function dashboardCommand(argv: string[]): number {
     lang,
     runs,
     gitMerges,
-    claudeSlug: slug,
+    projectSlug: slug,
     now,
     rtDir: useFixture || slug === null ? null : loopRuntimeDir(slug),
   });

@@ -1,3 +1,5 @@
+import { agentDefaultModel } from "@roll/core";
+
 /**
  * Terminal rendering primitives — TS port of lib/roll_render.py (the shared
  * layout engine for status/prices/backlog/dashboard views). Byte-aligned with
@@ -133,19 +135,16 @@ export function fmtDur(s: number): string {
   return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
 }
 
-const AGENT_PRIMARY_MODEL: Record<string, string> = {
-  pi: "deepseek-v4-pro",
-  deepseek: "deepseek-v4-pro",
-  kimi: "kimi-k2-0905",
-};
-
 /** Mirror roll_render.fmt_model. */
 export function fmtModel(model: string | null | undefined): string {
   if (model === null || model === undefined || model === "") return "—";
-  if (!model.startsWith("claude-")) return "?";
-  let s = model.slice("claude-".length);
+  const prefixed = /^([a-z][a-z0-9_]*)-(.+)$/i.exec(model);
+  if (prefixed === null) return model;
+  const vendor = prefixed[1] ?? "";
+  let s = prefixed[2] ?? "";
+  if (vendor !== "claude") return model;
   s = s.replace(/-\d{6,8}$/, "");
-  return s !== "" ? s : "?";
+  return s !== "" ? s : model;
 }
 
 /**
@@ -528,8 +527,8 @@ export function cycleRow(cy: CycleView): string[] {
   const sidC = outcome === "fail" ? "red" : "blue";
 
   let modelLabel = fmtModel(cy.model);
-  if ((modelLabel === "—" || modelLabel === "?") && cy.agent) {
-    modelLabel = AGENT_PRIMARY_MODEL[cy.agent] ?? cy.agent;
+  if (modelLabel === "—" && cy.agent) {
+    modelLabel = agentDefaultModel(cy.agent);
   }
   const showModel = COLS >= 100;
   const modelSeg = showModel ? c("muted", pad(modelLabel, 11)) + " " : "";

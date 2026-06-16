@@ -47,6 +47,7 @@ import { gcCommand } from "./gc.js";
 import { ideaCommand } from "./idea.js";
 import { indexCommand } from "./index-gen.js";
 import { storyNewCommand } from "./story-new.js";
+import { storyValidateCommand } from "./story-validate.js";
 import { initCommand } from "./init.js";
 // REFACTOR-049: `roll lang` retired → use `roll config lang <zh|en|--reset>`.
 // The lang module's write/clear/read surfaces are consumed by config.ts.
@@ -154,7 +155,13 @@ export function registerAll(): void {
   // `story new` is retained for agents/skills that need explicit ID+epic control.
   registerPorted("story", (args) => {
     if (args[0] === "new") return storyNewCommand(args.slice(1));
-    process.stdout.write("Usage: roll story new <ID> --title <text> [--epic <epic>] [--note <text>]\n");
+    // FIX-339 (AC7): `story validate <ID>` — must-declare + visual-evidence-AC
+    // self-check, the command-side of the AC6 hard闸 (roll-design prefills it).
+    if (args[0] === "validate") return storyValidateCommand(args.slice(1));
+    process.stdout.write(
+      "Usage: roll story new <ID> --title <text> [--epic <epic>] [--note <text>]\n" +
+        "       roll story validate <ID>\n",
+    );
     return args[0] === undefined || args[0] === "--help" || args[0] === "-h" ? 0 : 1;
   });
   // `gc`: age out old surplus attest runs across the archive layout (US-META-001).

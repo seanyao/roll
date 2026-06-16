@@ -126,7 +126,6 @@ import { validateStoryVisualEvidence } from "../lib/design-visual-evidence.js";
 import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, autoAttachScreenshotToAcMap, buildAcMapRemediationPrompt, needsAcMapRemediation } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
 import { buildPairScorePrompt, enabledPairingStages, parsePairScoreOutput, retryPeerConsult, runPairing, runScorePairing, type PairEvent, type PairReview } from "./pairing-gate.js";
-import { deriveSelfScoreFallback } from "./self-score-fallback.js";
 import { realAgentEnv } from "../commands/agent-list.js";
 import { attestCommand } from "../commands/attest.js";
 import { refreshAggregates } from "../commands/index-gen.js";
@@ -1129,20 +1128,14 @@ export async function executeCommand(
           );
         }
       }
-      // US-PAIR-009 / FIX-342 score stage: produce the cycle's self-score note
-      // BEFORE the attest gate (which REQUIRES that note — evaluateSelfScoreGate).
-      // Ordering history: the score stage used to run AFTER the gate, gated on
-      // `!attestBlocked`. That deadlocked — a working agent that skipped its own
-      // `roll self-score` step (observed cycle 20260616-130452-42254, codex/
-      // gpt-5.5: build + hetero peer code-review ✓ but the card's notes/ dir was
-      // empty) failed the attest gate on "missing self-score note", and the
-      // gate-gated score stage that would have written the note never ran. Same
-      // failure mode FIX-246 fixed for ac-map (surgical pre-gate backfill of a
-      // skill step agents skip). The score stage is the runner's RELIABLE
-      // producer: a hetero peer scores the delivery (preferred); when none is
-      // available (pairing off / no hetero peer / timeout) and the agent wrote
-      // none, `deriveSelfScoreFallback` writes a conservative runner-side note —
-      // ONLY for a genuine evidenced delivery, never weakening the requirement.
+      // FIX-343 score stage: a fresh-session peer (runScorePairing) is the SOLE
+      // producer of the cycle's quality score note — the working agent NEVER
+      // self-scores (owner ruling 2026-06-16: an agent grading its own delivery
+      // is a weak, conflict-of-interest signal). The score stage runs BEFORE the
+      // attest gate (which REQUIRES a peer score — evaluateSelfScoreGate). When no
+      // peer can score (pairing off / no candidate / timeout / error) NO note is
+      // written: the attest gate then fails loud (`missing peer review score`)
+      // and the cycle honestly fails — there is no runner-derived fallback note.
       if (commitsAhead > 0 && storyId !== "") {
         const scorePeer = async (peer: string, summary: string, timeoutMs: number): Promise<import("./pairing-gate.js").PairScore | null> => {
           const prompt = buildPairScorePrompt(summary);
@@ -1174,31 +1167,18 @@ export async function executeCommand(
         }
         const summary = `Story: ${storyId}\nDelivery: peer-reviewed cycle, scoring stage\nDiff stat:\n${diffStat}`;
         const skill = storyId.startsWith("FIX-") || storyId.startsWith("BUG-") ? "roll-fix" : "roll-build";
-        const scoreResult = await runScorePairing(ports.repoCwd, dirname(ports.paths.eventsPath), ctx.cycleId ?? "", ctx.agent ?? "", storyId, skill, summary, {
+        await runScorePairing(ports.repoCwd, dirname(ports.paths.eventsPath), ctx.cycleId ?? "", ctx.agent ?? "", storyId, skill, summary, {
           installed: agentsInstalled(realAgentEnv()),
           isAvailable: () => true,
           scorePeer,
           event: (e: PairEvent) => ports.events.appendEvent(ports.paths.eventsPath, e as RollEvent),
           now: () => ports.clock(),
         });
-        // FIX-342 fallback: a hetero peer score is preferred, but pairing-off /
-        // none-available / timeout / error must NOT leave a genuine delivery
-        // without a note when the working agent also skipped its own. Derive a
-        // conservative runner-side self-score from the evidence already on disk;
-        // the helper itself refuses to overwrite a real note or to score an
-        // empty shell.
-        if (scoreResult.status !== "scored") {
-          const fb = deriveSelfScoreFallback(ports.paths.worktreePath, dirname(ports.paths.eventsPath), storyId, ctx.cycleId ?? "", skill);
-          if (fb.written) {
-            ports.events.appendEvent(ports.paths.eventsPath, {
-              type: "attest:self-score-fallback",
-              cycleId: ctx.cycleId ?? "",
-              storyId,
-              reason: scoreResult.status,
-              ts: ports.clock(),
-            });
-          }
-        }
+        // FIX-343 step ①: a non-`scored` score-stage result writes NO fallback
+        // note. The peer score is the SOLE source of a quality score (owner
+        // ruling: a peer scores or the cycle honestly fails); the attest gate
+        // handles a missing peer score by blocking fail-loud — there is no
+        // runner-derived self-score note any more.
       }
       // FIX-207 attest gate: a delivery (commits ahead + a real story) that ships
       // with no FRESH acceptance report leaves an auditable ALERT + `attest:gate`

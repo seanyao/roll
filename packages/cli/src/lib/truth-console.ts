@@ -241,17 +241,38 @@ function heartbeatRow(lane: TruthSnapshotLoopLane): string {
   const cell = (label: string, value: string, mono = false): string =>
     `<div><div style="${MONO}font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:${C.faint};">${label}</div>` +
     `<div style="${mono ? MONO : ""}font-size:12.5px;color:${C.body};margin-top:3px;">${value}</div></div>`;
+  const stateLine = [
+    on ? bi("running", "运行中") : bi("off", "未启用"),
+    lane.status !== undefined ? esc(lane.status) : "",
+    lane.scope !== undefined ? esc(lane.scope) : "",
+  ].filter((s) => s !== "").join(" · ");
   return (
     `<div style="display:grid;grid-template-columns:230px repeat(4,1fr);align-items:center;gap:14px;padding:13px 18px;border-top:1px solid #f4f6f9;">` +
     `<div style="display:flex;align-items:center;gap:11px;min-width:0;"><span style="${dot}"></span>` +
     `<div style="min-width:0;"><div style="font-size:13.5px;font-weight:600;color:${C.ink};white-space:nowrap;">${esc(lane.name)}</div>` +
-    `<div style="${MONO}font-size:10.5px;color:${on ? C.green : C.faint};margin-top:1px;white-space:nowrap;">${on ? bi("running", "运行中") : bi("off", "未启用")}</div></div></div>` +
+    `<div style="${MONO}font-size:10.5px;color:${on ? C.green : C.faint};margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${stateLine}</div></div></div>` +
     cell(bi("mode", "模式"), esc(lane.mode ?? "—")) +
     cell(bi("every", "周期"), mins(lane.everyMin)) +
     cell(bi("last", "上次"), shortTs(lane.lastAt), true) +
     `<div><div style="${MONO}font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:${C.faint};">${bi("next", "下次")}</div>` +
     `<div class="hb-next" data-next="${esc(lane.nextAt ?? "")}" style="${MONO}font-size:12.5px;color:${C.body};margin-top:3px;">${shortTs(lane.nextAt)}</div></div>` +
     `</div>`
+  );
+}
+
+function repoLoopsPanel(input: TruthConsoleInput): string {
+  const lanes = input.snapshot.loop?.lanes ?? [];
+  return (
+    `<div style="display:flex;align-items:baseline;gap:12px;margin:24px 0 12px;flex-wrap:wrap;">` +
+    `<span style="${MONO}font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${C.sub};font-weight:600;">${bi("Loops on this repo", "本仓 Loops")}</span>` +
+    `<span style="${MONO}font-size:11.5px;color:${C.faint};">${bi("backlog · PR · dream · go sessions", "backlog · PR · dream · go 会话")}</span>` +
+    `<span style="flex:1;height:1px;background:#dfe4ec;min-width:16px;"></span>` +
+    `<span style="${MONO}font-size:11.5px;color:${C.dim};white-space:nowrap;">${lanes.filter((l) => l.running).length}/${lanes.length} ${bi("running", "运行中")}</span></div>` +
+    `<section style="border:1px solid ${C.line};border-radius:14px;background:${C.card};overflow:hidden;margin:0 0 8px;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
+    (lanes.length > 0
+      ? lanes.map(heartbeatRow).join("")
+      : `<div style="padding:16px 18px;font-size:12.5px;color:${C.faint};font-style:italic;">${bi("no loop lanes found for this repo", "未发现本仓 loop lane")}</div>`) +
+    `</section>`
   );
 }
 
@@ -711,6 +732,7 @@ function loopTab(input: TruthConsoleInput): string {
     // project-scoped commit-hooks panel + the Cycle ledger. The inline agents
     // panel (now the machine Agents page) and the inline casting ladder (now its
     // own Casting tab) are NOT rendered here.
+    repoLoopsPanel(input) +
     hooksPanel(input) +
     `<div style="display:flex;align-items:center;gap:12px;margin:24px 0 12px;flex-wrap:wrap;">` +
     `<span style="${MONO}font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${C.sub};font-weight:600;">${bi("Cycle ledger", "周期账本")}</span>` +

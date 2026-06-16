@@ -78,9 +78,15 @@ export interface TruthSnapshotRelease {
 /** One scheduled lane on this machine (US-DOSSIER-011 loop heartbeat). */
 export interface TruthSnapshotLoopLane {
   name: string;
+  /** Where this lane came from; additive for older snapshots. */
+  source?: "launchd" | "goal";
   /** Installed and scheduled (the launchd plist exists). */
   running: boolean;
   mode?: string;
+  /** Human-readable status for non-launchd lanes such as `roll loop go`. */
+  status?: string;
+  /** Human-readable goal scope when this lane represents a go session. */
+  scope?: string;
   /** Schedule period in minutes. */
   everyMin?: number;
   lastAt?: string;

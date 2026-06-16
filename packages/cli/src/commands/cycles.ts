@@ -9,8 +9,20 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveLang, type Lang, type RollEvent, parseEventLine } from "@roll/spec";
 import { extractCycleSignals, signalKindForMarker, type TimelineEntry } from "@roll/core";
-import { collectCycleLedger, ledgerFailedCount, type CycleLedgerRow } from "../lib/cycle-ledger.js";
+import { collectCycleLedger, ledgerFailedCount, reconcilePendingMergeVerdicts, type CycleLedgerRow } from "../lib/cycle-ledger.js";
+import { collectGitDossierFacts, storyHasMergeEvidence } from "../lib/story-dossier.js";
 import { findCycle } from "./cycle.js";
+
+/**
+ * FIX-347 — collect the ledger and reconcile `pending_merge` cycles against git
+ * merge-truth, so a `published_pending_merge` cycle whose PR the async PR loop
+ * already merged shows `delivered`, not a stale yellow. Same offline `git log`
+ * check the web dashboard uses (storyHasMergeEvidence — no gh call).
+ */
+function reconciledLedger(cwd: string): CycleLedgerRow[] {
+  const git = collectGitDossierFacts(cwd);
+  return reconcilePendingMergeVerdicts(collectCycleLedger(cwd), (id) => storyHasMergeEvidence(git, id));
+}
 import { c, renderState, stripAnsi } from "../render.js";
 
 export const CYCLES_USAGE =
@@ -287,7 +299,7 @@ export function cyclesCommand(args: string[]): number {
     process.stderr.write(`[roll] unknown flag: ${unknown[0]}\n${CYCLES_USAGE}\n`);
     return 1;
   }
-  const rows = collectCycleLedger(process.cwd());
+  const rows = reconciledLedger(process.cwd());
   const nowSec = Math.floor(Date.now() / 1000);
   if (json) {
     process.stdout.write(JSON.stringify(cyclesLedgerJson(rows, since, nowSec), null, 2) + "\n");

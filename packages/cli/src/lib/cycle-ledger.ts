@@ -81,6 +81,57 @@ export function ledgerFailedCount(rows: readonly CycleLedgerRow[]): number {
 }
 
 /**
+ * FIX-347 — reconcile `pending_merge` cycles against git merge-truth at RENDER
+ * time. A cycle that ended `published_pending_merge` recorded its PR as OPEN at
+ * cycle-end; the async PR loop merges it minutes later but never rewrites the
+ * runs row, so the ledger keeps showing it yellow/not-green long after it is
+ * actually Done (≡ merged). The next `loop run-once` gh-backfill eventually
+ * flips the row, but until then the dashboard lies.
+ *
+ * This closes the gap by re-deriving the verdict on every render: for each
+ * `pending_merge` row we ask `isMerged(storyId)` — a GIT check (the FIX-323/278
+ * `storyHasMergeEvidence`: a commit subject / PR-merge `(#N)` for the story is
+ * reachable from main), NOT a `gh` API call. Merged → `delivered` (green), tape
+ * end/pr segments promoted to pass; still open → left `pending_merge` (yellow).
+ *
+ * AC3 boundary: ONLY `pending_merge` rows are reconciled — a real `failed`
+ * cycle stays red, `idle` stays idle, `delivered`/`reverted` are already
+ * terminal. A PR that closed UNMERGED leaves no merge commit, so `isMerged`
+ * stays false and the row stays `pending_merge` until the cycle-terminal /
+ * backfill credits the abandon (we never invent a `failed` from absence of a
+ * merge — that would conflate "merge pending" with "failed").
+ *
+ * Pure: rows in (the git probe is injected), reconciled rows out. The caller
+ * supplies `isMerged` wired to whatever offline git facts it already built
+ * (the dashboard reuses the dossier run-cache; `roll cycles` builds it once).
+ */
+export function reconcilePendingMergeVerdicts(
+  rows: readonly CycleLedgerRow[],
+  isMerged: (storyId: string) => boolean,
+): CycleLedgerRow[] {
+  return rows.map((r) => {
+    if (r.verdict !== "pending_merge") return r;
+    if (r.storyId === "" || !isMerged(r.storyId)) return r;
+    return {
+      ...r,
+      verdict: "delivered",
+      tape: r.tape.map((seg) => {
+        if (seg.key === "end") return { ...seg, detail: "delivered", state: "pass" };
+        // The pr segment showed "#N open" (idle) at cycle-end; merge-truth now
+        // proves the delivery landed — promote it to a pass without claiming a
+        // PR number we did not observe (the open number, if any, stays in the
+        // detail; otherwise a plain "merged").
+        if (seg.key === "pr") {
+          const merged = /#(\d+)\s+open/.exec(seg.detail);
+          return { ...seg, detail: merged !== null ? `#${merged[1]} merged` : "merged", state: "pass" };
+        }
+        return seg;
+      }),
+    };
+  });
+}
+
+/**
  * FIX-297: idle heartbeats are NOT cycles. The scheduled loop lane wakes on its
  * interval, finds no eligible Todo, writes an idle row (no story picked, no work
  * attempted) and sleeps. Those rows stay in runs.jsonl as loop-liveness data,

@@ -170,6 +170,28 @@ export function readLatestStorySelfScore(projectPath: string, storyId: string, h
   return entries[entries.length - 1];
 }
 
+/**
+ * FIX-343 (step ②) — the peer-only selector the gate honors. FILTER to a
+ * peer-sourced note (`scoring === "pair"` with a `scoredBy` that is NOT the
+ * building agent) THEN pick the latest — never pick-latest-then-inspect, so a
+ * self / legacy / stale note can NEVER shadow the real peer note. A
+ * `scoredBy === buildingAgent` note is rejected here too (a building agent that
+ * scored under the peer protocol is still self-scoring). Returns undefined when
+ * no qualifying fresh-session peer note exists ⇒ the gate fails loud.
+ */
+export function readLatestStoryPeerScore(
+  projectPath: string,
+  storyId: string,
+  buildingAgent: string,
+  hrefFromDir?: string,
+): SelfScoreEntry | undefined {
+  const builder = buildingAgent.trim();
+  const peers = readStorySelfScores(projectPath, storyId, hrefFromDir).filter(
+    (e) => e.scoring === "pair" && e.scoredBy !== undefined && e.scoredBy.trim() !== "" && e.scoredBy.trim() !== builder,
+  );
+  return peers[peers.length - 1];
+}
+
 function allSelfScoreCandidates(projectPath: string): NoteCandidate[] {
   const out = noteCandidates(join(projectPath, ".roll", "notes"));
   const featuresDir = join(projectPath, ".roll", "features");
@@ -336,9 +358,18 @@ export function writeSelfScoreNote(projectPath: string, input: SelfScoreWriteInp
   return { path, written: true };
 }
 
-export function evaluateSelfScoreGate(projectPath: string, storyId: string): SelfScoreGateCheck {
-  const latest = readLatestStorySelfScore(projectPath, storyId);
-  if (latest === undefined) return { status: "missing", reason: `missing self-score note for ${storyId}` };
+/**
+ * FIX-343 (step ②) — the attest gate's quality-score check. The gate honors
+ * ONLY a fresh-session PEER score: `readLatestStoryPeerScore` filters to a
+ * `scoring === "pair"` note whose `scoredBy` is present and is NOT the building
+ * agent, THEN picks the latest. A self / legacy `scoring:self` / absent /
+ * `scoredBy === buildingAgent` note is NEVER honored — it yields `missing` with
+ * the fail-loud reason "missing peer review score" so the cycle blocks (no
+ * synthesized pass). `buildingAgent` is injected by the runner (ctx.agent).
+ */
+export function evaluateSelfScoreGate(projectPath: string, storyId: string, buildingAgent: string): SelfScoreGateCheck {
+  const latest = readLatestStoryPeerScore(projectPath, storyId, buildingAgent);
+  if (latest === undefined) return { status: "missing", reason: `missing peer review score for ${storyId}` };
   const verdict = latest.verdict.toLowerCase();
   if (verdict === "regression") {
     return { status: "regression", reason: `self-score regression ${latest.score}/10 blocks Done`, entry: latest };

@@ -1207,6 +1207,11 @@ export async function executeCommand(
                 ts: ports.clock(),
               }),
           },
+          // FIX-343 (step ②): read the peer score from the PERSISTENT .roll
+          // (repoCwd) — where runScorePairing wrote it — not the ephemeral
+          // worktree; thread the building agent so a self-source note is ignored.
+          ports.repoCwd,
+          ctx.agent ?? "",
         );
         if (res.verdict === "skipped") {
           applyCorrectionAction({

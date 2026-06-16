@@ -881,7 +881,20 @@ export function runAttestGate(
   mode: AttestMode,
   sinceSec: number | undefined,
   sinks: AttestGateSinks,
+  // FIX-343 (step ②): the quality score is read from the PERSISTENT .roll
+  // (repoCwd-rooted), NOT the ephemeral worktree — the fresh-session peer score
+  // note (runScorePairing) lands there. Defaults to worktreeCwd so callers that
+  // pre-date the split (and tests staging the note under the worktree) are
+  // unaffected. `buildingAgent` (ctx.agent) is threaded so the gate honors ONLY
+  // a peer-sourced score whose `scoredBy` is NOT the building agent.
+  scoreRepoCwd: string = worktreeCwd,
+  buildingAgent = "",
 ): AttestGateResult {
+  // FIX-343 (step ②): a missing PEER score must surface as a blocking
+  // skipped/blocked verdict — the bottom blanket catch below must NOT soft-fail
+  // it to `produced`. The peer-score check is therefore evaluated here, where a
+  // thrown error in the score read is fail-closed (blocked in hard mode), and
+  // its result is reused inside the main path below.
   try {
     // FIX-339 (复核 #1) — a deliverable_cmd outside the roll read-only allowlist
     // is rejected BEFORE anything else: the spec asked the attest lane to run a
@@ -948,7 +961,10 @@ export function runAttestGate(
     // US-ATTEST-012: freshness alone is "存在性" — a fresh empty shell (zero AC /
     // no ac-map, the FIX-214 case) does NOT count as a produced report.
     if (fresh && verificationReportHasContent(worktreeCwd, storyId)) {
-      const score = evaluateSelfScoreGate(worktreeCwd, storyId);
+      // FIX-343 (step ②): honor ONLY a fresh-session peer score from the
+      // PERSISTENT .roll (scoreRepoCwd). A self / legacy / scoredBy===builder /
+      // absent note → status "missing" with "missing peer review score" → block.
+      const score = evaluateSelfScoreGate(scoreRepoCwd, storyId, buildingAgent);
       if (score.status === "pass") {
         const visual = passAcVisualFloor(worktreeCwd, storyId);
         const reasons = ["fresh acceptance report present", score.reason, ...(visual.reason !== undefined ? [visual.reason] : [])];
@@ -980,7 +996,14 @@ export function runAttestGate(
     sinks.event({ cycleId, verdict: "skipped", reasons });
     return { verdict: "skipped", mode, reasons, blocked };
   } catch {
-    // gate must never fail the cycle by surprise — soft-fail to produced/silent.
-    return { verdict: "produced", mode, reasons: [], blocked: false };
+    // FIX-343 (step ②): the blanket catch must NOT soft-fail to `produced` — an
+    // exception while resolving the peer score (or any other gate check) would
+    // otherwise launder a missing-peer-score delivery into a pass. Fail CLOSED:
+    // surface a blocking skipped/blocked verdict in hard mode (the cycle owes a
+    // real peer score), non-blocking skipped in soft (migration window). A
+    // missing peer score is never synthesized into a pass.
+    const reasons = ["attest gate error — failing closed (no peer review score honored)"];
+    const blocked = mode === "hard";
+    return { verdict: "skipped", mode, reasons, blocked };
   }
 }

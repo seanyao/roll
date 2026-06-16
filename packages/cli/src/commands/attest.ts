@@ -47,6 +47,7 @@ import { classifyStatus, type RollEvent } from "@roll/spec";
 import {
   captureScreenshot,
   collectEvidence,
+  containsSecret,
   openEvidenceFrame,
   redactSecrets,
   screenshotEvidenceRef,
@@ -244,6 +245,15 @@ function tail(text: string, max = 4000): string {
 }
 
 async function runShell(line: string, deps: ScreenshotDeps | undefined): Promise<RunOut> {
+  // RED LINE (US-ATTEST-012 / FIX-339 复核 #2): the GUI screen-capture lane already
+  // refuses a command whose body carries a secret (screenshot.ts) — a token baked
+  // into pixels can't be un-baked. The HEADLESS command lane (this sink) runs the
+  // command and persists its output, so it needs the SAME guard: a command body
+  // carrying a secret must NOT run (it could echo/leak the token into the captured
+  // stdout). Refuse it before any spawn; the caller records an honest skip.
+  if (containsSecret(line)) {
+    return { code: 1, stdout: "", stderr: "«REDACTED» secret in capture command — refused (redact & retry)" };
+  }
   const injected = deps?.run;
   if (injected !== undefined) return injected("sh", ["-lc", line]);
   try {
@@ -261,13 +271,33 @@ async function runShell(line: string, deps: ScreenshotDeps | undefined): Promise
 
 async function captureCommandFact(projectPath: string, command: string, deps: ScreenshotDeps | undefined): Promise<CaptureCommandFact> {
   const wrappedCommand = commandInProject(projectPath, command);
+  // FIX-339 (复核 #2): a secret in the command body ⇒ refuse, never run (runShell
+  // guards). Surface a non-zero exit so the caller records a taken:false skip.
+  if (containsSecret(wrappedCommand)) {
+    return {
+      command,
+      wrappedCommand,
+      exitCode: 1,
+      stdoutTail: "",
+      stderrTail: "«REDACTED» secret in capture command — refused (redact & retry)",
+    };
+  }
   const r = await runShell(wrappedCommand, deps);
+  // FIX-339 (复核 #2): scrub the PERSISTED stdout/stderr tails with the same
+  // redaction pipeline used for inlined evidence — a token printed BY the command
+  // (env dump, debug log) must never land in the archived evidence fact. A hit is
+  // WARNed (留痕), never silent.
+  const outR = redactSecrets(tail(r.stdout));
+  const errR = redactSecrets(tail(r.stderr));
+  if (outR.hits.length > 0 || errR.hits.length > 0) {
+    warn(`redacted secret(s) in capture command output (${command}): ${[...outR.hits, ...errR.hits].join(", ")}`);
+  }
   return {
     command,
     wrappedCommand,
     exitCode: r.code,
-    stdoutTail: tail(r.stdout),
-    stderrTail: tail(r.stderr),
+    stdoutTail: outR.redacted,
+    stderrTail: errR.redacted,
   };
 }
 
@@ -657,9 +687,10 @@ const USAGE = [
   "                   [--capture-terminal | --capture-tmux <session> | --capture-command <cmd>]",
   "                   [--capture-web <url|file>] [--capture-browser <app>] [--capture-region <x,y,w,h>]",
   "  --capture-tmux <session>   self-capture a terminal attached to a tmux session (unattended Gate)",
-  "  --capture-command <cmd>    self-capture a terminal running <cmd>",
-  "  --capture-web <url|file>   self-capture a REAL screenshot of a rendered page (FIX-305) —",
-  "                             the FIX-291 ladder: macOS GUI browser, else headless Chromium (no GUI needed)",
+  "  --capture-command <cmd>    self-capture a terminal running <cmd> (repeatable — one per deliverable_cmd; FIX-339)",
+  "  --capture-command-skip <r> record an honest terminal skip for a refused deliverable_cmd (allowlist; repeatable)",
+  "  --capture-web <url|file>   self-capture a REAL screenshot of a rendered page (FIX-305; repeatable — one per",
+  "                             deliverable_url, FIX-339) — the FIX-291 ladder: macOS GUI browser, else headless Chromium",
   "  --capture-browser <app>    GUI lane browser app to drive (default Google Chrome)",
   "  --capture-region <rect>    screencapture -R rectangle (default 0,0,1280,800)",
   "  (terminal lane honestly skips off-GUI / without screen-recording permission)",
@@ -704,7 +735,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     );
     return 1;
   }
-  const flagsWithValue = new Set(["--deploy-url", "--run-dir", "--capture-tmux", "--capture-command", "--capture-region", "--capture-web", "--capture-web-skip", "--capture-browser"]);
+  const flagsWithValue = new Set(["--deploy-url", "--run-dir", "--capture-tmux", "--capture-command", "--capture-command-skip", "--capture-region", "--capture-web", "--capture-web-skip", "--capture-browser"]);
   let storyId: string | undefined;
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -726,6 +757,18 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     const i = args.indexOf(name);
     return i >= 0 ? args[i + 1] : undefined;
   };
+  // FIX-339 — a flag may REPEAT (multi-surface: several --capture-web / several
+  // --capture-command). Collect every value in order.
+  const flagVals = (name: string): string[] => {
+    const out: string[] = [];
+    for (let i = 0; i < args.length; i += 1) {
+      if (args[i] === name) {
+        const v = args[i + 1];
+        if (v !== undefined) out.push(v);
+      }
+    }
+    return out;
+  };
   const deployUrl = flagVal("--deploy-url");
   const explicitRunDir = flagVal("--run-dir");
   const envRunDir = (process.env["ROLL_RUN_DIR"] ?? "").trim();
@@ -735,16 +778,25 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   // session in a headless cycle; on a non-GUI / no-permission host the lane
   // honestly skips and the report drops the self-capture block (no placeholder).
   const captureTmux = flagVal("--capture-tmux");
-  const captureCommand = flagVal("--capture-command");
+  // FIX-339 (AC2/AC3): --capture-command may REPEAT — one declared deliverable_cmd
+  // per flag. Each is run in the worktree and its terminal output captured; a
+  // multi-command card produces terminal.png, terminal-1.png, … (no name clash).
+  const captureCommands = flagVals("--capture-command");
+  // FIX-339 (复核 #1): a deliverable_cmd the runner's allowlist REJECTED. It is
+  // NEVER run — we only record an honest terminal skip fact (taken:false) so the
+  // report discloses the refusal and the attest gate can fail on it.
+  const captureCommandSkips = flagVals("--capture-command-skip");
   const captureRegion = flagVal("--capture-region");
-  const captureTerminal = args.includes("--capture-terminal") || captureTmux !== undefined || captureCommand !== undefined;
+  const captureTerminal = args.includes("--capture-terminal") || captureTmux !== undefined || captureCommands.length > 0;
   // FIX-305 — UI/dossier self-capture lane. A UI/dossier card's acceptance is a
   // RENDERED page, so its evidence must be a REAL pixel screenshot, not a
   // machine-skip. `--capture-web <url|file>` drives the FIX-291 web ladder
   // (macOS GUI browser → headless Chromium → honest skip); the headless rung
   // needs NO GUI, so a network-only loop runner self-produces a real PNG of the
   // dossier/story page instead of leaving the screenshots dir empty.
-  const captureWeb = flagVal("--capture-web");
+  // FIX-339 (AC1): --capture-web may REPEAT — one declared deliverable_url per
+  // flag. Each url is captured into web.png, web-1.png, … (no name clash).
+  const captureWebs = flagVals("--capture-web");
   // FIX-321: when no deliverable web target is declared, the runner passes
   // --capture-web-skip <reason> instead of --capture-web. We record an HONEST web
   // skip (taken:false) — no browser, no hollow dossier shot — which satisfies the
@@ -788,32 +840,60 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   let commandFact: CaptureCommandFact | null = null;
   if (captureTerminal) {
     mkdirSync(join(runDir, "screenshots"), { recursive: true });
-    const out = join(runDir, "screenshots", "terminal.png");
-    if (captureCommand !== undefined) {
-      commandFact = await captureCommandFact(projectPath, captureCommand, deps.capture);
+    // FIX-339 (AC2/AC3): capture EACH declared command (--capture-command may
+    // repeat) plus, when no command is given, a tmux/bare terminal shot. Each
+    // gets a distinct stem terminal.png / terminal-1.png / … so a multi-command
+    // card never overwrites its own evidence. SECURITY: every command is one the
+    // spec DECLARED, wrapped in `cd <worktree> && …` (commandInProject) — only the
+    // worktree's own declared commands ever run; no external input reaches here.
+    const lanes: Array<{ command?: string }> =
+      captureCommands.length > 0 ? captureCommands.map((c) => ({ command: c })) : [{}];
+    for (let li = 0; li < lanes.length; li += 1) {
+      const lane = lanes[li] ?? {};
+      const stem = li === 0 ? "terminal.png" : `terminal-${li}.png`;
+      const out = join(runDir, "screenshots", stem);
+      let fact: CaptureCommandFact | null = null;
+      if (lane.command !== undefined) {
+        fact = await captureCommandFact(projectPath, lane.command, deps.capture);
+        if (commandFact === null) commandFact = fact; // first command is the representative capture_command (back-compat)
+      }
+      const shot =
+        fact !== null && fact.exitCode !== 0
+          ? { kind: "terminal" as const, out, taken: false, skipped: `capture command exited ${fact.exitCode}` }
+          : await captureScreenshot(
+              {
+                kind: "terminal",
+                out,
+                ...(lane.command === undefined && captureTmux !== undefined ? { tmux: captureTmux } : {}),
+                ...(lane.command !== undefined ? { command: commandInProject(projectPath, lane.command) } : {}),
+                ...(captureRegion !== undefined ? { region: captureRegion } : {}),
+              },
+              deps.capture ?? {},
+            );
+      captureFacts.push({
+        kind: shot.kind,
+        out: shot.out,
+        taken: shot.taken,
+        ...(shot.skipped !== undefined ? { skipped: shot.skipped } : {}),
+      });
+      const ref = screenshotEvidenceRef(shot, `screenshots/${stem}`);
+      if (ref !== null) selfCaptures.push(ref);
+      else warn(`terminal self-capture skipped (${stem}): ${shot.skipped ?? "unknown"}`);
     }
-    const shot =
-      commandFact !== null && commandFact.exitCode !== 0
-        ? { kind: "terminal" as const, out, taken: false, skipped: `capture command exited ${commandFact.exitCode}` }
-        : await captureScreenshot(
-            {
-              kind: "terminal",
-              out,
-              ...(captureTmux !== undefined ? { tmux: captureTmux } : {}),
-              ...(captureCommand !== undefined ? { command: commandInProject(projectPath, captureCommand) } : {}),
-              ...(captureRegion !== undefined ? { region: captureRegion } : {}),
-            },
-            deps.capture ?? {},
-          );
+  }
+  // FIX-339 (复核 #1): record a terminal skip fact for each REJECTED deliverable_cmd
+  // (allowlist refusal). The command is never run — this only留痕 the refusal so
+  // the report discloses it and the gate fails loud.
+  for (let si = 0; si < captureCommandSkips.length; si += 1) {
+    const reason = captureCommandSkips[si] ?? "";
+    if (reason === "") continue;
     captureFacts.push({
-      kind: shot.kind,
-      out: shot.out,
-      taken: shot.taken,
-      ...(shot.skipped !== undefined ? { skipped: shot.skipped } : {}),
+      kind: "terminal",
+      out: join(runDir, "screenshots", si === 0 ? "terminal-rejected.png" : `terminal-rejected-${si}.png`),
+      taken: false,
+      skipped: reason,
     });
-    const ref = screenshotEvidenceRef(shot, "screenshots/terminal.png");
-    if (ref !== null) selfCaptures.push(ref);
-    else warn(`terminal self-capture skipped: ${shot.skipped ?? "unknown"}`);
+    warn(`deliverable_cmd refused (allowlist): ${reason}`);
   }
 
   // FIX-305 — UI/dossier web self-capture lane. For a card whose acceptance is a
@@ -824,28 +904,34 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   // Chromium — NO GUI required — producing an unforgeable PNG. Only an honest
   // failure (ROLL_ATTEST_NO_BROWSER, no url, npx/network down) yields a recorded
   // skip; for a reachable web/dossier page the capture succeeds.
-  if (captureWeb !== undefined && captureWeb !== "") {
+  const realWebs = captureWebs.filter((u) => u !== "");
+  if (realWebs.length > 0) {
     mkdirSync(join(runDir, "screenshots"), { recursive: true });
-    const out = join(runDir, "screenshots", "web.png");
-    const shot = await captureScreenshot(
-      {
-        kind: "web",
-        out,
-        url: captureWeb,
-        ...(captureBrowser !== undefined && captureBrowser !== "" ? { browser: captureBrowser } : {}),
-        ...(captureRegion !== undefined ? { region: captureRegion } : {}),
-      },
-      deps.capture ?? {},
-    );
-    captureFacts.push({
-      kind: shot.kind,
-      out: shot.out,
-      taken: shot.taken,
-      ...(shot.skipped !== undefined ? { skipped: shot.skipped } : {}),
-    });
-    const ref = screenshotEvidenceRef(shot, "screenshots/web.png");
-    if (ref !== null) selfCaptures.push(ref);
-    else warn(`web self-capture skipped: ${shot.skipped ?? "unknown"}`);
+    // FIX-339 (AC1): capture EACH declared deliverable_url. Distinct stems
+    // web.png / web-1.png / … so a multi-surface card never overwrites a shot.
+    for (let wi = 0; wi < realWebs.length; wi += 1) {
+      const stem = wi === 0 ? "web.png" : `web-${wi}.png`;
+      const out = join(runDir, "screenshots", stem);
+      const shot = await captureScreenshot(
+        {
+          kind: "web",
+          out,
+          url: realWebs[wi] as string,
+          ...(captureBrowser !== undefined && captureBrowser !== "" ? { browser: captureBrowser } : {}),
+          ...(captureRegion !== undefined ? { region: captureRegion } : {}),
+        },
+        deps.capture ?? {},
+      );
+      captureFacts.push({
+        kind: shot.kind,
+        out: shot.out,
+        taken: shot.taken,
+        ...(shot.skipped !== undefined ? { skipped: shot.skipped } : {}),
+      });
+      const ref = screenshotEvidenceRef(shot, `screenshots/${stem}`);
+      if (ref !== null) selfCaptures.push(ref);
+      else warn(`web self-capture skipped (${stem}): ${shot.skipped ?? "unknown"}`);
+    }
   } else if (captureWebSkip !== undefined && captureWebSkip !== "") {
     // FIX-321: honest recorded web skip — no deliverable target declared. NO
     // browser, NO hollow dossier shot. taken:false + a reason makes the visual

@@ -120,7 +120,7 @@ import {
   realAgentSpawn,
 } from "./agent-spawn.js";
 import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, runPeerGate } from "./peer-gate.js";
-import { readAttestGateMode, runAttestGate, storyRequiresScreenshot, verificationReportPath, webCaptureTargetForStory } from "./attest-gate.js";
+import { declaresAnySurface, deliverableCmdsForStory, readAttestGateMode, rejectedDeliverableCmdsForStory, runAttestGate, screenshotExemption, storyRequiresScreenshot, verificationReportPath, webCaptureTargetsForStory } from "./attest-gate.js";
 import { recoverCodexUsage, recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
 import { validateStoryVisualEvidence } from "../lib/design-visual-evidence.js";
 import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, autoAttachScreenshotToAcMap, buildAcMapRemediationPrompt, needsAcMapRemediation } from "./attest-remediation.js";
@@ -1871,6 +1871,40 @@ export function runVisualEvidencePreflight(ports: Ports, storyId: string, cycleI
         reasons: v.exemptReason !== undefined ? [`exempt: ${v.exemptReason}`] : [],
         ts: ports.clock(),
       });
+      // FIX-339 (AC6) — must-declare STRUCTURAL check (WARN-only this round).
+      // Fires ONLY on a card that the surface-aware validator already passed
+      // (`ok`) yet declares NONE of {deliverable_url, deliverable_cmd,
+      // screenshot_exempt} — i.e. a previously-SILENT card (a terminal/ambiguous
+      // visual AC with no concrete capturable surface) that will honest-skip
+      // forever and the future hard闸 will catch. It is a SUPPLEMENTARY signal,
+      // never a duplicate of an existing validate flag, and NEVER blocks the
+      // cycle (the structural hard闸 is held for a separate round post-backfill).
+      // FIX-339 (复核 #5) — declaresAnySurface is PURE (specText only): it sees a
+      // per-card `screenshot_exempt:` but NOT the policy epic deny-list
+      // (acceptance.screenshot_exempt_epics). A card whose EPIC is recorded as
+      // non-visual is legitimately exempt and declares no surface ON PURPOSE —
+      // flagging it no-surface-declared误杀 a back-end card (owner red line). So
+      // treat an epic-exempt card as already declaring a (null) surface here.
+      const epicExempt = screenshotExemption(ports.repoCwd, storyId).reason !== undefined;
+      if (!epicExempt && !declaresAnySurface(specText)) {
+        ports.events.appendEvent(ports.paths.eventsPath, {
+          type: "visual:gate",
+          cycleId,
+          storyId,
+          verdict: "flagged",
+          code: "no-surface-declared",
+          surface: v.surface,
+          reasons: ["spec declares no deliverable_url, deliverable_cmd, or screenshot_exempt — no surface to capture"],
+          ts: ports.clock(),
+        });
+        ports.events.appendAlert(
+          ports.paths.alertsPath,
+          `[WARN] visual-evidence preflight (${storyId}): no-surface-declared — the spec declares none of ` +
+            `\`deliverable_url:\` / \`deliverable_cmd:\` / \`screenshot_exempt: <reason>\` — cycle ${cycleId}. ` +
+            `Declare a deliverable surface (web url or CLI command) or a recorded exemption. ` +
+            `NOT blocked this round — structural闸 will harden after backfill; FIX-309 still enforces declared surfaces at delivery.`,
+        );
+      }
       return;
     }
     // CONFIDENT problem → fail loud (ALERT + event), but DO NOT block the cycle.
@@ -2451,18 +2485,32 @@ export function nodePorts(opts: {
           // FIX-314: pass ROLL_ATTEST_HEADLESS=1 so the web capture in attest
           // never pops a GUI browser — headless Chromium is the only web lane in
           // an unattended cycle.
-          const webTarget = webCaptureTargetForStory(projectCwd, storyId, process.env["ROLL_ATTEST_WEB_URL"]);
-          // FIX-321: capture the DECLARED deliverable surface; if a required story
+          // FIX-339 (AC1): capture EVERY declared deliverable_url (a card may ship
+          // more than one user-visible web view). FIX-321: if a required story
           // declares none, record an HONEST web skip (no hollow dossier shot) so
           // the visual floor stays satisfiable without faking evidence. Exempt
           // stories owe no web capture at all.
+          const webTargets = webCaptureTargetsForStory(projectCwd, storyId, process.env["ROLL_ATTEST_WEB_URL"]);
           const webArgs =
-            webTarget !== null
-              ? ["--capture-web", webTarget]
-              : storyRequiresScreenshot(projectCwd, storyId)
+            webTargets.length > 0
+              ? webTargets.flatMap((t) => ["--capture-web", t])
+              : storyRequiresScreenshot(projectCwd, storyId) && deliverableCmdsForStory(projectCwd, storyId).length === 0
                 ? ["--capture-web-skip", "no deliverable_url declared (set deliverable_url in the spec frontmatter or ROLL_ATTEST_WEB_URL)"]
                 : [];
-          return await attestCommand([storyId, "--run-dir", runDir, ...webArgs], {
+          // FIX-339 (AC2/AC3): run + capture EVERY declared deliverable_cmd (a CLI
+          // deliverable's terminal output). deliverableCmdsForStory returns only
+          // ALLOWLISTED commands (roll read-only) — run inside the worktree via
+          // attest's `cd <worktree> && …` wrapper.
+          const cmdArgs = deliverableCmdsForStory(projectCwd, storyId).flatMap((c) => ["--capture-command", c]);
+          // FIX-339 (复核 #1): any deliverable_cmd the allowlist REJECTED (non-roll
+          // command or a state-changing roll subcommand) is NEVER run. Record a
+          // loud terminal skip fact so the report discloses the refusal and the
+          // attest gate fails on it (rejectedDeliverableCmdsForStory).
+          const cmdSkipArgs = rejectedDeliverableCmdsForStory(projectCwd, storyId).flatMap((c) => [
+            "--capture-command-skip",
+            `deliverable_cmd 非白名单(仅限 roll 只读子命令): ${c}`,
+          ]);
+          return await attestCommand([storyId, "--run-dir", runDir, ...webArgs, ...cmdArgs, ...cmdSkipArgs], {
             capture: { env: { ...process.env, ROLL_ATTEST_HEADLESS: "1" } },
           });
         } finally {

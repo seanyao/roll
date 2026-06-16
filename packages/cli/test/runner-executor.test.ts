@@ -830,7 +830,7 @@ describe("executeCommand — command → executor mapping", () => {
       expect(alertText(calls)).toContain("screenshot_exempt");
     });
 
-    it("RED LINE: a CLI/terminal card (visual AC, NO deliverable_url) is NOT flagged (terminal-capture lane) — verdict ok", async () => {
+    it("RED LINE: a CLI/terminal card (visual AC, NO deliverable_url) is NOT blocked for a web url — verdict ok; FIX-339 adds a supplementary no-surface-declared WARN", async () => {
       const { ports, calls } = portsWithSpec(
         "FIX-CLI-1",
         `## FIX-CLI-1 New roll status line 📋\n\n**AC:**\n- [ ] Terminal screenshot of \`roll status\` shows the new summary line\n`,
@@ -838,9 +838,26 @@ describe("executeCommand — command → executor mapping", () => {
       const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
       expect(r.event).toEqual({ type: "story_picked", storyId: "FIX-CLI-1" });
       const ve = visualEvents(calls);
+      // The surface-aware validator still passes the terminal card (no web url owed)…
       expect(ve[0]).toMatchObject({ verdict: "ok", surface: "terminal" });
-      // NO flag alert for a terminal card (the WARN line is absent).
-      expect(alertText(calls)).not.toContain("visual-evidence preflight");
+      // …but FIX-339 (AC6) adds a supplementary structural WARN: it declares no
+      // deliverable_cmd / url / exempt, so the future hard闸 would catch it. It is
+      // a WARN only — the cycle still proceeds (story_picked above).
+      expect(ve[1]).toMatchObject({ verdict: "flagged", code: "no-surface-declared" });
+      expect(alertText(calls)).toContain("no-surface-declared");
+      expect(alertText(calls)).toContain("NOT blocked");
+    });
+
+    it("RED LINE: a terminal card that DECLARES a deliverable_cmd is fully ok — NO no-surface-declared WARN", async () => {
+      const { ports, calls } = portsWithSpec(
+        "FIX-CLI-2",
+        `---\ndeliverable_cmd: roll status\n---\n## FIX-CLI-2 New roll status line 📋\n\n**AC:**\n- [ ] Terminal screenshot of \`roll status\` shows the new summary line\n`,
+      );
+      await executeCommand({ kind: "pick_story" }, ports, CTX);
+      const ve = visualEvents(calls);
+      expect(ve).toHaveLength(1);
+      expect(ve[0]).toMatchObject({ verdict: "ok", surface: "terminal" });
+      expect(alertText(calls)).not.toContain("no-surface-declared");
     });
 
     it("RED LINE: a pure back-end card with a recorded screenshot_exempt is NOT flagged — verdict ok", async () => {
@@ -855,7 +872,7 @@ describe("executeCommand — command → executor mapping", () => {
       expect(alertText(calls)).not.toContain("visual-evidence preflight");
     });
 
-    it("RED LINE: an ambiguous-surface visual card (no web cue, no url) is NOT flagged — verdict ok", async () => {
+    it("RED LINE: an ambiguous-surface visual card (no web cue, no url) is NOT blocked for a web url — verdict ok; FIX-339 adds a supplementary no-surface-declared WARN", async () => {
       const { ports, calls } = portsWithSpec(
         "FIX-AMB-1",
         `## FIX-AMB-1 Some visible change 📋\n\n**AC:**\n- [ ] A screenshot proves the new behavior\n`,
@@ -863,7 +880,8 @@ describe("executeCommand — command → executor mapping", () => {
       await executeCommand({ kind: "pick_story" }, ports, CTX);
       const ve = visualEvents(calls);
       expect(ve[0]).toMatchObject({ verdict: "ok", surface: "ambiguous" });
-      expect(alertText(calls)).not.toContain("visual-evidence preflight");
+      expect(ve[1]).toMatchObject({ verdict: "flagged", code: "no-surface-declared" });
+      expect(alertText(calls)).toContain("no-surface-declared");
     });
 
     it("a WEB card that DECLARES a deliverable_url is NOT flagged — verdict ok", async () => {
@@ -875,6 +893,36 @@ describe("executeCommand — command → executor mapping", () => {
       const ve = visualEvents(calls);
       expect(ve[0]).toMatchObject({ verdict: "ok", surface: "web" });
       expect(alertText(calls)).not.toContain("visual-evidence preflight");
+    });
+
+    it("复核 #5: an EPIC-deny-list-exempt back-end card declaring NO surface is NOT flagged no-surface-declared (red line: no误杀)", async () => {
+      // The blind spot: declaresAnySurface is pure (specText only) and never sees
+      // the policy epic deny-list. A card whose epic is recorded non-visual is
+      // legitimately surface-less; flagging it would误杀 a back-end card. The
+      // preflight call-site now consults screenshotExemption (epic-aware).
+      const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-311b-epicexempt-")));
+      execDirs.push(repo);
+      // policy: the `data-migration` epic is a recorded non-visual epic.
+      mkdirSync(join(repo, ".roll", "features"), { recursive: true });
+      writeFileSync(join(repo, ".roll", "policy.yaml"), "acceptance:\n  screenshot_exempt_epics:\n    - data-migration\n");
+      // index maps the story → that epic so cardArchiveDir resolves it there.
+      writeFileSync(join(repo, ".roll", "index.json"), JSON.stringify({ stories: { "FIX-MIG-1": "data-migration" } }));
+      const specDir = join(repo, ".roll", "features", "data-migration", "FIX-MIG-1");
+      mkdirSync(specDir, { recursive: true });
+      writeFileSync(join(specDir, "spec.md"), "# FIX-MIG-1 Migrate ledger\n\n## Acceptance Criteria\n\n- [ ] Rows migrate with checksums intact\n");
+      const base = fakePorts();
+      const { ports, calls } = fakePorts({
+        repoCwd: repo,
+        paths: { ...base.ports.paths, alertsPath: join(repo, "alerts.log") },
+        backlog: { read: () => [{ id: "FIX-MIG-1", desc: "est_min:5", status: "📋 Todo" }] },
+        evidence: { openFrame: vi.fn(() => join(specDir, "run")) },
+      });
+      const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
+      expect(r.event).toEqual({ type: "story_picked", storyId: "FIX-MIG-1" });
+      // verdict ok (validator), and NO supplementary no-surface-declared WARN
+      // because the epic exemption is recognised.
+      expect(visualEvents(calls).every((e) => (e as { code?: string }).code !== "no-surface-declared")).toBe(true);
+      expect(alertText(calls)).not.toContain("no-surface-declared");
     });
 
     it("a story with NO spec on disk is left alone (no visual:gate event, no alert) — FIX-309 backstops", async () => {

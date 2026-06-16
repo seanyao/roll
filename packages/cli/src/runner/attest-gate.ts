@@ -259,28 +259,227 @@ function parseScreenshotExemptEpics(yaml: string): string[] {
  * deliverable_url is web-only; never force a web url onto a terminal card.
  */
 export function deliverableUrlForStory(worktreeCwd: string, storyId: string): string | null {
+  const all = deliverableUrlsForStory(worktreeCwd, storyId);
+  return all.length === 0 ? null : (all[0] as string);
+}
+
+/**
+ * FIX-339 (AC1) — the FULL list of DECLARED deliverable web surfaces. A card may
+ * legitimately ship more than one user-visible web view (e.g. a Casting tab AND
+ * a Review tab), and the attest must capture EACH. Parses the frontmatter
+ * `deliverable_url:` / `screenshot_url:` in three shapes, all backward-compatible:
+ *   - single scalar           `deliverable_url: https://app/x`        → ["https://app/x"]
+ *   - inline list             `deliverable_url: [a, b]`               → ["a", "b"]
+ *   - comma-separated scalar  `deliverable_url: a, b`                 → ["a", "b"]
+ *   - YAML block list         `deliverable_url:\n  - a\n  - b`        → ["a", "b"]
+ * A single value is returned as a one-element list, so every legacy single-url
+ * card behaves EXACTLY as before. Empty / absent ⇒ []. Order is preserved and
+ * duplicates are de-duped (stable).
+ */
+export function deliverableUrlsForStory(worktreeCwd: string, storyId: string): string[] {
   const spec = storySpecPath(worktreeCwd, storyId);
-  if (spec === null) return null;
+  if (spec === null) return [];
   let text: string;
   try {
     text = readFileSync(spec, "utf8");
   } catch {
-    return null;
+    return [];
   }
   const fm = /^---\n([\s\S]*?)\n---/.exec(text);
-  if (fm === null) return null;
-  const m = /^(?:deliverable_url|screenshot_url):\s*(.+)$/m.exec(fm[1] ?? "");
-  if (m === null) return null;
-  const v = stripQuotes((m[1] ?? "").trim());
-  return v === "" ? null : v;
+  if (fm === null) return [];
+  // deliverable_url keeps comma-splitting: a url never contains a comma, so a
+  // comma-separated scalar (`a, b`) is an unambiguous two-url list.
+  return parseFrontmatterListField(fm[1] ?? "", /^(?:deliverable_url|screenshot_url):/, { commaSplit: true });
 }
 
-export function webCaptureTargetForStory(worktreeCwd: string, storyId: string, override?: string): string | null {
-  if (!storyRequiresScreenshot(worktreeCwd, storyId)) return null; // exempt → no web capture owed
+/**
+ * FIX-339 (AC2) — the DECLARED deliverable CLI commands, after the
+ * roll-only allowlist filter (see {@link allowedDeliverableCmd}). A card whose
+ * deliverable is a command's terminal output (a CLI surface) declares
+ * `deliverable_cmd:` in the frontmatter; the attest runs EACH command in the
+ * worktree and captures its terminal output. Two parse shapes (NO comma split):
+ *   - single scalar     `deliverable_cmd: roll status --fmt a,b`  → one command
+ *   - YAML block list    `deliverable_cmd:\n  - roll status\n  - roll cycles`
+ * A scalar is the WHOLE line (one command) — never comma-split, because a
+ * command line legitimately carries commas (flag lists / JSON args, e.g.
+ * `roll status --fmt a,b`). Empty / absent ⇒ [].
+ *
+ * SECURITY (FIX-339 复核): a spec is written by the autonomous loop's own cycle
+ * agent, so an unfiltered `deliverable_cmd` would be agent-controlled ARBITRARY
+ * command execution (the whole line runs verbatim under `sh -lc`). This getter
+ * therefore returns ONLY commands that pass {@link allowedDeliverableCmd} — the
+ * roll read-only allowlist. A rejected command is DROPPED here (it never runs)
+ * and surfaced separately by {@link rejectedDeliverableCmdsForStory} so the gate
+ * can FAIL loudly rather than silently honest-skip.
+ */
+export function deliverableCmdsForStory(worktreeCwd: string, storyId: string): string[] {
+  return rawDeliverableCmdsForStory(worktreeCwd, storyId).filter(allowedDeliverableCmd);
+}
+
+/**
+ * FIX-339 (AC2 复核) — the DECLARED deliverable_cmd entries that the roll-only
+ * allowlist REJECTS (a non-roll command, or a state-changing/release roll
+ * subcommand). Non-empty ⇒ the spec asked the attest to run something it must
+ * not; the gate fails loud (these are never silently skipped).
+ */
+export function rejectedDeliverableCmdsForStory(worktreeCwd: string, storyId: string): string[] {
+  return rawDeliverableCmdsForStory(worktreeCwd, storyId).filter((c) => !allowedDeliverableCmd(c));
+}
+
+/** Unfiltered deliverable_cmd parse (scalar = whole line, block list = per item; NO comma split). */
+function rawDeliverableCmdsForStory(worktreeCwd: string, storyId: string): string[] {
+  const spec = storySpecPath(worktreeCwd, storyId);
+  if (spec === null) return [];
+  let text: string;
+  try {
+    text = readFileSync(spec, "utf8");
+  } catch {
+    return [];
+  }
+  const fm = /^---\n([\s\S]*?)\n---/.exec(text);
+  if (fm === null) return [];
+  return parseFrontmatterListField(fm[1] ?? "", /^deliverable_cmd:/, { commaSplit: false });
+}
+
+/**
+ * FIX-339 (复核 #1) — the deliverable_cmd security policy. A spec is authored by
+ * the autonomous loop's own cycle agent, so `deliverable_cmd` is AGENT-CONTROLLED
+ * input that the attest lane runs verbatim under `sh -lc`. Without a gate this is
+ * arbitrary command execution. Two rules, both must pass:
+ *
+ *   (1) ALLOWLIST — the command's first token MUST invoke THIS project's own
+ *       `roll` CLI: bare `roll`, `./bin/roll.js`, `bin/roll.js`, or a
+ *       `node …/roll(.js)` / `node …/bin/roll.js` form. ANY other command
+ *       (`rm`, `curl`, `git push`, a bare script, a pipeline, …) is rejected —
+ *       deliverable_cmd is for read-only roll demos only, never arbitrary shell.
+ *   (2) DENYLIST — even a roll command must be READ-ONLY: the mutating /
+ *       releasing subcommands below are rejected (they change state, publish, or
+ *       reconfigure the loop, and have no place in an acceptance demo).
+ *
+ * The allowlist/denylist are deliberately CONSTANTS here; a later card can lift
+ * them into `.roll/policy.yaml` (see {@link DELIVERABLE_CMD_DENY_SUBCOMMANDS}).
+ * Exported for direct unit testing.
+ */
+export function allowedDeliverableCmd(command: string): boolean {
+  const tokens = command.trim().split(/\s+/).filter((t) => t !== "");
+  if (tokens.length === 0) return false;
+  // No shell metacharacters that could chain/echo a second command — a single
+  // `roll …` invocation only. (`,` is allowed: it appears in flag values.)
+  if (/[;&|`$<>(){}]|\|\||&&/.test(command)) return false;
+  const first = tokens[0] ?? "";
+  // (1) allowlist — the first token must be the roll CLI itself.
+  let subIdx: number;
+  if (first === "roll" || /^(?:\.\/)?(?:.*\/)?bin\/roll\.js$/.test(first) || /^(?:.*\/)?roll(?:\.js)?$/.test(first)) {
+    subIdx = 1;
+  } else if (first === "node") {
+    // node <…/roll.js | …/bin/roll.js> <subcommand> …
+    const target = tokens[1] ?? "";
+    if (!/^(?:.*\/)?(?:bin\/)?roll\.js$/.test(target) && !/^(?:.*\/)?roll(?:\.js)?$/.test(target)) return false;
+    subIdx = 2;
+  } else {
+    return false;
+  }
+  // (2) denylist — reject state-changing / releasing roll subcommands.
+  const sub = (tokens[subIdx] ?? "").toLowerCase();
+  if (sub === "") return true; // bare `roll` (prints help) — harmless read-only.
+  if (DELIVERABLE_CMD_DENY_SUBCOMMANDS.has(sub)) return false;
+  return true;
+}
+
+/**
+ * FIX-339 (复核 #1) — roll subcommands a deliverable_cmd may NOT invoke. These
+ * change state / publish / reconfigure the loop, so they have no place in an
+ * acceptance demo (which should be read-only, e.g. `roll pulse` / `roll status`
+ * / `roll cycles`). 后续可挪 policy.yaml.
+ */
+const DELIVERABLE_CMD_DENY_SUBCOMMANDS: ReadonlySet<string> = new Set([
+  "release",
+  "loop", // on/off/go/… — operate the loop
+  "story",
+  "idea",
+  "agent", // `roll agent use` re-points the shared runner
+  "pair",
+  "attest", // re-render evidence — never from within an attest demo
+  "fix",
+  "build",
+  "design",
+  "propose",
+]);
+
+/**
+ * Parse a frontmatter field that may be a scalar, an inline `[a, b]` list, or a
+ * YAML block list. `keyRe` matches the `key:` prefix on a frontmatter line
+ * (anchored at column 0). De-dupes while keeping first-seen order.
+ *
+ * `commaSplit` controls how a bare scalar is interpreted:
+ *   - `true`  (deliverable_url): a scalar may be comma-separated (`a, b` → two
+ *             values). Safe for URLs — a url never contains a comma.
+ *   - `false` (deliverable_cmd): a scalar is the WHOLE line (one command). A
+ *             command line legitimately carries commas (flag lists / JSON args,
+ *             e.g. `roll status --fmt a,b`), so splitting on commas would shred
+ *             a single command into bogus fragments. Multiple commands use the
+ *             YAML block-list form (one `-` per line).
+ * The inline `[a, b]` form always splits on commas (it is an explicit list).
+ */
+function parseFrontmatterListField(fmBody: string, keyRe: RegExp, opts: { commaSplit: boolean }): string[] {
+  const lines = fmBody.split(/\r?\n/);
+  const out: string[] = [];
+  const push = (raw: string): void => {
+    const v = stripQuotes(raw.trim());
+    if (v !== "" && !out.includes(v)) out.push(v);
+  };
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? "";
+    const head = keyRe.exec(line);
+    if (head === null) continue;
+    const rest = line.slice(head[0].length).trim();
+    // inline list: key: [a, b] — an explicit list always splits on commas.
+    const inline = /^\[(.*)\]$/.exec(rest);
+    if (inline !== null) {
+      for (const tok of (inline[1] ?? "").split(",")) push(tok);
+      continue;
+    }
+    if (rest !== "") {
+      // scalar — comma-split only when the caller opts in (url), else whole line (cmd).
+      if (opts.commaSplit) for (const tok of rest.split(",")) push(tok);
+      else push(rest);
+      continue;
+    }
+    // block list: key:\n  - a\n  - b  (consume following `-` item lines)
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const item = /^(\s+)-\s*(.+?)\s*$/.exec(lines[j] ?? "");
+      if (item === null) {
+        // a non-list line ends the block (unless it is blank)
+        if ((lines[j] ?? "").trim() === "") continue;
+        break;
+      }
+      push(item[2] ?? "");
+    }
+  }
+  return out;
+}
+
+/**
+ * FIX-339 (AC1) — one web capture target per DECLARED deliverable_url. An env
+ * override (a single deploy url) collapses to one target (it points at the live
+ * deploy, which is the one surface the deploy proves). With no override, every
+ * declared url is resolved through the same FIX-321 rules (http(s)/file as-is,
+ * `dossier` opt-in, relative → file:// with #fragment deep-link). Exempt ⇒ [].
+ */
+export function webCaptureTargetsForStory(worktreeCwd: string, storyId: string, override?: string): string[] {
+  if (!storyRequiresScreenshot(worktreeCwd, storyId)) return []; // exempt → no web capture owed
   const trimmed = (override ?? "").trim();
-  if (trimmed !== "") return trimmed; // env / deploy override wins
-  const declared = deliverableUrlForStory(worktreeCwd, storyId);
-  if (declared === null) return null; // FIX-321: NO dossier fallback — caller records an honest skip
+  if (trimmed !== "") return [trimmed]; // env / deploy override wins (single live surface)
+  return deliverableUrlsForStory(worktreeCwd, storyId).map((u) => resolveWebTarget(worktreeCwd, storyId, u));
+}
+
+/** Back-compat single-target resolver — first declared surface, or null. */
+export function webCaptureTargetForStory(worktreeCwd: string, storyId: string, override?: string): string | null {
+  const all = webCaptureTargetsForStory(worktreeCwd, storyId, override);
+  return all.length === 0 ? null : (all[0] as string);
+}
+
+function resolveWebTarget(worktreeCwd: string, storyId: string, declared: string): string {
   if (declared === "dossier") return pathToFileURL(join(cardArchiveDir(worktreeCwd, storyId), "index.html")).href;
   if (/^(?:https?|file):\/\//i.test(declared)) return declared;
   // relative → a built artifact under the worktree. FIX-321b: split a trailing
@@ -292,6 +491,30 @@ export function webCaptureTargetForStory(worktreeCwd: string, storyId: string, o
   const relPath = hashIdx >= 0 ? declared.slice(0, hashIdx) : declared;
   const fragment = hashIdx >= 0 ? declared.slice(hashIdx) : "";
   return pathToFileURL(join(worktreeCwd, relPath)).href + fragment;
+}
+
+/**
+ * FIX-339 (AC6) — does the spec DECLARE ANY visual surface? True iff it has a
+ * `deliverable_url`/`screenshot_url`, a `deliverable_cmd`, OR a recorded
+ * `screenshot_exempt: <reason>`. PURE (takes spec text), agent-agnostic, used by
+ * the build preflight to WARN (this round only — no hard block) when a non-exempt
+ * card declares none of the three. Mirrors the runtime gate's frontmatter reads.
+ */
+export function declaresAnySurface(specText: string): boolean {
+  const fm = /^---\n([\s\S]*?)\n---/.exec(specText);
+  if (fm === null) return false;
+  const body = fm[1] ?? "";
+  if (parseFrontmatterListField(body, /^(?:deliverable_url|screenshot_url):/, { commaSplit: true }).length > 0) return true;
+  // A declared deliverable_cmd counts as a surface even if the allowlist would
+  // later reject it — the card DID declare an intent to demo a CLI surface; the
+  // reject path fails loud at the gate, not here.
+  if (parseFrontmatterListField(body, /^deliverable_cmd:/, { commaSplit: false }).length > 0) return true;
+  const ex = /^screenshot_exempt:\s*(.+)$/m.exec(body);
+  if (ex !== null) {
+    const reason = stripQuotes((ex[1] ?? "").trim());
+    if (reason !== "" && !/^(false|no|0|true|yes|on|1)$/i.test(reason)) return true;
+  }
+  return false;
 }
 
 interface AcMapEvidence {
@@ -360,22 +583,64 @@ function hasMachineCaptureSkip(worktreeCwd: string, storyId: string): boolean {
  * riding the separate terminal-capture lane).
  */
 function owesRealWebCapture(worktreeCwd: string, storyId: string): boolean {
-  return storyRequiresScreenshot(worktreeCwd, storyId) && deliverableUrlForStory(worktreeCwd, storyId) !== null;
+  return storyRequiresScreenshot(worktreeCwd, storyId) && deliverableUrlsForStory(worktreeCwd, storyId).length > 0;
 }
 
 /**
- * FIX-309 — a REAL, taken web capture is present in the evidence manifest
- * (`{kind:"web",taken:true}`). This is the ONLY thing that discharges a card
- * that {@link owesRealWebCapture}; a `taken:false` web skip never counts.
+ * FIX-339 (AC2/AC3) — whether this delivery OWES a REAL terminal capture: a
+ * non-exempt card that DECLARED ≥1 `deliverable_cmd`. Each declared command is a
+ * concrete CLI surface that must be really run + captured; an honest terminal
+ * skip no longer discharges a declared command.
  */
-function hasRealWebCapture(worktreeCwd: string, storyId: string): boolean {
+function owesTerminalCapture(worktreeCwd: string, storyId: string): boolean {
+  return storyRequiresScreenshot(worktreeCwd, storyId) && deliverableCmdsForStory(worktreeCwd, storyId).length > 0;
+}
+
+/** Count the REAL, taken captures of a given kind in the evidence manifest. */
+function takenCaptureCount(worktreeCwd: string, storyId: string, kind: string): number {
   const manifest = evidenceManifest(worktreeCwd, storyId);
-  if (manifest === null || !Array.isArray(manifest.captures)) return false;
-  return manifest.captures.some((raw) => {
+  if (manifest === null || !Array.isArray(manifest.captures)) return 0;
+  return manifest.captures.filter((raw) => {
     if (typeof raw !== "object" || raw === null) return false;
     const row = raw as Record<string, unknown>;
-    return row["kind"] === "web" && row["taken"] === true;
-  });
+    return row["kind"] === kind && row["taken"] === true;
+  }).length;
+}
+
+/**
+ * FIX-339 (复核 #3) — when a deploy/env override (`ROLL_ATTEST_WEB_URL` or a
+ * Gate-set deploy url) is in effect, the web capture lane collapses to ONE
+ * target (the single live deploy proves one active surface — see
+ * {@link webCaptureTargetsForStory}). So the gate must require only ONE taken
+ * web shot, not N. Without this a multi-url card under an override would demand
+ * N shots while the lane only ever produced 1 → permanent false FAIL.
+ */
+function webCaptureNeed(worktreeCwd: string, storyId: string): number {
+  const override = (process.env["ROLL_ATTEST_WEB_URL"] ?? "").trim();
+  if (override !== "") return 1; // override collapses to a single live-deploy shot
+  const declared = deliverableUrlsForStory(worktreeCwd, storyId).length;
+  return declared === 0 ? 1 : declared; // owesRealWebCapture guarantees ≥1 when called
+}
+
+/**
+ * FIX-309 + FIX-339 (AC1) — EVERY declared web surface is REALLY captured.
+ * A card that declares N deliverable_urls must carry ≥N taken:true web captures
+ * (one per surface); a single real shot no longer discharges a multi-surface
+ * card. With a single declared url this is exactly the old "≥1 taken web shot".
+ * Under a deploy/env override the need folds to 1 ({@link webCaptureNeed}).
+ */
+function hasRealWebCapture(worktreeCwd: string, storyId: string): boolean {
+  return takenCaptureCount(worktreeCwd, storyId, "web") >= webCaptureNeed(worktreeCwd, storyId);
+}
+
+/**
+ * FIX-339 (AC2) — EVERY declared deliverable_cmd is REALLY captured: ≥N
+ * taken:true terminal captures for N declared commands.
+ */
+function hasRealTerminalCapture(worktreeCwd: string, storyId: string): boolean {
+  const need = deliverableCmdsForStory(worktreeCwd, storyId).length;
+  if (need === 0) return false;
+  return takenCaptureCount(worktreeCwd, storyId, "terminal") >= need;
 }
 
 function passAcVisualFloor(worktreeCwd: string, storyId: string): { ok: boolean; reason?: string } {
@@ -385,12 +650,22 @@ function passAcVisualFloor(worktreeCwd: string, storyId: string): { ok: boolean;
   if (pass.length === 0) return { ok: true };
   const missing = pass.filter((e) => !(e.evidence ?? []).some((ev) => ev.kind === "screenshot" && typeof ev.href === "string" && ev.href !== ""));
   if (missing.length === 0) return { ok: true };
-  // FIX-309 (堵 284 洞①): a declared-deliverable card may NOT excuse a missing
-  // screenshot via an honest-skip — it must carry a REAL web capture.
-  if (owesRealWebCapture(worktreeCwd, storyId)) {
-    if (hasRealWebCapture(worktreeCwd, storyId)) return { ok: true, reason: "real web capture present" };
+  // FIX-339 (AC3): per-surface enforcement. A card may declare web surfaces, CLI
+  // commands, or both; EACH declared surface owes a REAL capture and an
+  // honest-skip no longer discharges a DECLARED surface.
+  const owesWeb = owesRealWebCapture(worktreeCwd, storyId);
+  const owesTerm = owesTerminalCapture(worktreeCwd, storyId);
+  if (owesWeb || owesTerm) {
+    const gaps: string[] = [];
+    if (owesWeb && !hasRealWebCapture(worktreeCwd, storyId)) {
+      gaps.push(`declared deliverable_url(s) not all really captured (need ${webCaptureNeed(worktreeCwd, storyId)} taken web shots)`);
+    }
+    if (owesTerm && !hasRealTerminalCapture(worktreeCwd, storyId)) {
+      gaps.push(`declared deliverable_cmd(s) not all really captured (need ${deliverableCmdsForStory(worktreeCwd, storyId).length} taken terminal shots)`);
+    }
+    if (gaps.length === 0) return { ok: true, reason: "all declared surfaces really captured" };
     const ids = missing.map((e) => e.ac ?? "?").join(", ");
-    return { ok: false, reason: `pass AC(s) lack screenshot evidence and the declared deliverable_url was never really captured (honest-skip does not satisfy a declared surface): ${ids}` };
+    return { ok: false, reason: `pass AC(s) lack screenshot evidence and a declared surface was never really captured (honest-skip does not satisfy a declared surface): ${gaps.join("; ")} [${ids}]` };
   }
   if (hasMachineCaptureSkip(worktreeCwd, storyId)) return { ok: true, reason: "machine capture skip present" };
   const ids = missing.map((e) => e.ac ?? "?").join(", ");
@@ -489,13 +764,21 @@ export function verificationReportHasContent(worktreeCwd: string, storyId: strin
     if (positiveWithEvidence === 0) return false;
     if (!passAcVisualFloor(worktreeCwd, storyId).ok) return false;
     if (storyRequiresScreenshot(worktreeCwd, storyId)) {
-      // FIX-309 (堵 284 洞①+②): a card that DECLARED a deliverable_url owes a
-      // REAL web capture — neither an honest-skip nor a bare `<figure class=shot>`
-      // in the HTML (which could be a self-referential dossier self-shot, the
-      // FIX-321 forgery shape) discharges it; only a recorded `taken:true` web
-      // capture does. A required card with NO declared surface (TUI / terminal
-      // lane) keeps the prior floor: a captured figure ref OR an honest skip.
-      if (owesRealWebCapture(worktreeCwd, storyId)) return hasRealWebCapture(worktreeCwd, storyId);
+      // FIX-309 (堵 284 洞①+②) + FIX-339 (AC3 逐面强制): a card that DECLARED any
+      // surface (deliverable_url and/or deliverable_cmd) owes a REAL capture of
+      // EACH — neither an honest-skip nor a bare `<figure class=shot>` in the HTML
+      // (which could be a self-referential dossier self-shot, the FIX-321 forgery
+      // shape) discharges it; only recorded `taken:true` captures (one per
+      // declared surface) do. A mixed web+cmd card must satisfy BOTH. A required
+      // card with NO declared surface keeps the prior floor: a captured figure
+      // ref OR an honest skip.
+      const owesWeb = owesRealWebCapture(worktreeCwd, storyId);
+      const owesTerm = owesTerminalCapture(worktreeCwd, storyId);
+      if (owesWeb || owesTerm) {
+        if (owesWeb && !hasRealWebCapture(worktreeCwd, storyId)) return false;
+        if (owesTerm && !hasRealTerminalCapture(worktreeCwd, storyId)) return false;
+        return true;
+      }
       return /<figure class="shot\b|href="screenshots\/|src="screenshots\//i.test(html) || hasMachineCaptureSkip(worktreeCwd, storyId);
     }
     return true;
@@ -549,6 +832,25 @@ export function runAttestGate(
   sinks: AttestGateSinks,
 ): AttestGateResult {
   try {
+    // FIX-339 (复核 #1) — a deliverable_cmd outside the roll read-only allowlist
+    // is rejected BEFORE anything else: the spec asked the attest lane to run a
+    // non-roll command or a state-changing roll subcommand (agent-controlled
+    // arbitrary execution). The command never ran; the gate FAILS LOUD here (it
+    // is never silently honest-skipped). Reported even ahead of the AC-block
+    // exemption, since the security problem stands regardless of AC shape.
+    const rejectedCmds = rejectedDeliverableCmdsForStory(worktreeCwd, storyId);
+    if (rejectedCmds.length > 0) {
+      const reasons = [
+        `deliverable_cmd 非白名单(仅限 roll 只读子命令): ${rejectedCmds.join(", ")} — refused (no arbitrary command execution; no state-changing roll subcommand)`,
+      ];
+      const blocked = mode === "hard";
+      sinks.alert(
+        `attest gate (${mode}): deliverable_cmd outside the roll read-only allowlist (${storyId}) — refused: ${rejectedCmds.join(", ")} — cycle ${cycleId}` +
+          (blocked ? " — BLOCKED (hard mode); story not marked Done" : ""),
+      );
+      sinks.event({ cycleId, verdict: "skipped", reasons });
+      return { verdict: "skipped", mode, reasons, blocked };
+    }
     if (storyHasAcBlock(worktreeCwd, storyId) === false) {
       const reasons = ["story has no AC block; acceptance report not required"];
       sinks.event({ cycleId, verdict: "produced", reasons });

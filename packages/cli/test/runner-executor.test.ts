@@ -436,6 +436,45 @@ describe("buildTerminalRecord — the cycle:terminal twin (US-TRUTH-001 + FIX-29
     expect(ev.model).toBe("deepseek-v4-pro");
     expect(ev.usage).toEqual({ present: true, value: { model: "deepseek-v4-pro", tokensIn: 1200, tokensOut: 400 } });
   });
+
+  // FIX-343 (step ③): the attest fact is resolved from the cwd PASSED IN (the
+  // executor now passes the PERSISTENT repoCwd, not the worktree). These prove
+  // the resolution follows that cwd, so a torn-down worktree no longer
+  // false-negatives `acmap_missing`/`not_rendered`.
+  it("FIX-343: resolves report+ac-map from the passed (persistent) cwd → attest present", () => {
+    const persistent = realpathSync(mkdtempSync(join(tmpdir(), "roll-343-term-")));
+    execDirs.push(persistent);
+    const storyDir = join(persistent, ".roll", "features", "uncategorized", "US-RUN-001");
+    const latest = join(storyDir, "latest");
+    mkdirSync(latest, { recursive: true });
+    writeFileSync(join(storyDir, "ac-map.json"), "[]\n");
+    writeFileSync(join(latest, "US-RUN-001-report.html"), "<html></html>\n");
+    const ev = buildTerminalRecord(
+      { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
+      { ...CTX, storyId: "US-RUN-001" },
+      persistent, // the persistent .roll root — what the executor now passes
+      1780688082,
+    );
+    expect(ev.attest.present).toBe(true);
+    if (ev.attest.present) {
+      expect(ev.attest.value.acMap).toBe(true);
+      expect(ev.attest.value.reportPath).toContain(persistent);
+    }
+  });
+
+  it("FIX-343: a GONE worktree cwd false-negatives — the executor avoids it by passing repoCwd", () => {
+    // The worktree path no longer exists at terminal time; resolving from it
+    // reports the false-negative the fix eliminates (acmap_missing). The
+    // executor never passes this path now — it passes the persistent repoCwd.
+    const ev = buildTerminalRecord(
+      { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
+      { ...CTX, storyId: "US-RUN-001" },
+      join(tmpdir(), "roll-343-gone-worktree-does-not-exist"),
+      1780688082,
+    );
+    expect(ev.attest.present).toBe(false);
+    if (!ev.attest.present) expect(ev.attest.reason).toBe("acmap_missing");
+  });
 });
 
 describe("dryRunPlan", () => {

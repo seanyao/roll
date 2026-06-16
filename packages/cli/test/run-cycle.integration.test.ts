@@ -279,6 +279,24 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
     // time; the worktree is cleaned by the `done` terminal path afterward).
     expect(tcrLogAtExecute).toContain("tcr: deliver US-RUN-001");
     expect(existsSync(p.worktreePath)).toBe(false);
+
+    // FIX-343 (step ③): the cycle:terminal twin resolves report/ac-map from the
+    // PERSISTENT .roll (repoCwd) — never the worktree, which is torn down before
+    // the terminal `append_run`. With the worktree gone, a worktree-rooted lookup
+    // would false-negative `acmap_missing`; the repoCwd lookup still finds the
+    // committed ac-map on disk (hasMap=true). The report freshness/`latest`
+    // pointer lifecycle is exercised by the focused buildTerminalRecord unit
+    // tests; here we lock that the terminal no longer false-negatives the ac-map
+    // after teardown.
+    const terminal = events.find((e) => (e as { type: string }).type === "cycle:terminal") as unknown as
+      | { attest?: { present: boolean; value?: { acMap?: boolean; reportPath?: string }; reason?: string } }
+      | undefined;
+    expect(terminal).toBeDefined();
+    // The committed ac-map lives in the persistent .roll, so reading repoCwd
+    // finds it after the worktree is removed: present (report+map) or, if the
+    // report `latest` pointer is absent, `not_rendered` — but NEVER the
+    // worktree-rooted `acmap_missing` false-negative the fix eliminates.
+    expect(terminal?.attest?.reason).not.toBe("acmap_missing");
   });
 
   it("US-EVID-001: opens the evidence frame before agent spawn and keeps agent-deposited evidence after cleanup", async () => {

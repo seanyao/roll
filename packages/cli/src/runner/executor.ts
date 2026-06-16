@@ -1069,6 +1069,56 @@ export async function executeCommand(
         }
       }
       const storyId = ctx.storyId ?? "";
+      // FIX-343 (step ③) pipeline order: peer-score → report render → attest gate
+      // → terminal → teardown. The score stage runs BEFORE the report render so
+      // the report embeds the FRESHLY-written peer score (never a stale one). A
+      // fresh-session peer (runScorePairing) is the SOLE producer of the cycle's
+      // quality score — the working agent NEVER self-scores (owner ruling
+      // 2026-06-16: an agent grading its own delivery is a conflict of interest).
+      // When no peer can score (no candidate / timeout / error) NO note is
+      // written: the attest gate then fails loud (`missing peer review score`)
+      // and the cycle honestly fails — there is no runner-derived fallback.
+      if (commitsAhead > 0 && storyId !== "") {
+        const scorePeer = async (peer: string, summary: string, timeoutMs: number): Promise<import("./pairing-gate.js").PairScore | null> => {
+          const prompt = buildPairScorePrompt(summary);
+          let res;
+          try {
+            res = await Promise.race([
+              ports.agentSpawn(peer, {
+                cwd: ports.paths.worktreePath,
+                skillBody: prompt,
+                timeoutMs,
+                ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
+              }),
+              new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs).unref()),
+            ]);
+          } catch {
+            return null;
+          }
+          if (res === null || res.timedOut || res.exitCode !== 0) return null;
+          const parsed = parsePairScoreOutput(res.stdout);
+          if (parsed === null) return null;
+          return { ...parsed, cost: peerReviewCost(peer, res.stdout) };
+        };
+        let diffStat = "";
+        try {
+          const { stdout } = await execFileAsync("git", ["diff", "--stat", "origin/main...HEAD"], { cwd: ports.paths.worktreePath, encoding: "utf8" });
+          diffStat = stdout.slice(0, 4_000);
+        } catch {
+          /* summary degrades gracefully */
+        }
+        const summary = `Story: ${storyId}\nDelivery: peer-reviewed cycle, scoring stage\nDiff stat:\n${diffStat}`;
+        const skill = storyId.startsWith("FIX-") || storyId.startsWith("BUG-") ? "roll-fix" : "roll-build";
+        // Write to the PERSISTENT .roll (repoCwd) so the peer score note survives
+        // worktree teardown and the gate (reading repoCwd) finds it.
+        await runScorePairing(ports.repoCwd, dirname(ports.paths.eventsPath), ctx.cycleId ?? "", ctx.agent ?? "", storyId, skill, summary, {
+          installed: agentsInstalled(realAgentEnv()),
+          isAvailable: () => true,
+          scorePeer,
+          event: (e: PairEvent) => ports.events.appendEvent(ports.paths.eventsPath, e as RollEvent),
+          now: () => ports.clock(),
+        });
+      }
       if (commitsAhead > 0 && storyId !== "" && ctx.evidenceRunDir !== undefined && ctx.evidenceRunDir !== "") {
         // FIX-246: ac-map omission remediation. Agents deliver real work yet
         // consistently skip skill step 10.6 (write ac-map.json) — the hard gate
@@ -1127,58 +1177,6 @@ export async function executeCommand(
             `attest render failed for ${storyId} in cycle ${ctx.cycleId ?? ""} (exit ${rc})`,
           );
         }
-      }
-      // FIX-343 score stage: a fresh-session peer (runScorePairing) is the SOLE
-      // producer of the cycle's quality score note — the working agent NEVER
-      // self-scores (owner ruling 2026-06-16: an agent grading its own delivery
-      // is a weak, conflict-of-interest signal). The score stage runs BEFORE the
-      // attest gate (which REQUIRES a peer score — evaluateSelfScoreGate). When no
-      // peer can score (pairing off / no candidate / timeout / error) NO note is
-      // written: the attest gate then fails loud (`missing peer review score`)
-      // and the cycle honestly fails — there is no runner-derived fallback note.
-      if (commitsAhead > 0 && storyId !== "") {
-        const scorePeer = async (peer: string, summary: string, timeoutMs: number): Promise<import("./pairing-gate.js").PairScore | null> => {
-          const prompt = buildPairScorePrompt(summary);
-          let res;
-          try {
-            res = await Promise.race([
-              ports.agentSpawn(peer, {
-                cwd: ports.paths.worktreePath,
-                skillBody: prompt,
-                timeoutMs,
-                ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
-              }),
-              new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs).unref()),
-            ]);
-          } catch {
-            return null;
-          }
-          if (res === null || res.timedOut || res.exitCode !== 0) return null;
-          const parsed = parsePairScoreOutput(res.stdout);
-          if (parsed === null) return null;
-          return { ...parsed, cost: peerReviewCost(peer, res.stdout) };
-        };
-        let diffStat = "";
-        try {
-          const { stdout } = await execFileAsync("git", ["diff", "--stat", "origin/main...HEAD"], { cwd: ports.paths.worktreePath, encoding: "utf8" });
-          diffStat = stdout.slice(0, 4_000);
-        } catch {
-          /* summary degrades gracefully */
-        }
-        const summary = `Story: ${storyId}\nDelivery: peer-reviewed cycle, scoring stage\nDiff stat:\n${diffStat}`;
-        const skill = storyId.startsWith("FIX-") || storyId.startsWith("BUG-") ? "roll-fix" : "roll-build";
-        await runScorePairing(ports.repoCwd, dirname(ports.paths.eventsPath), ctx.cycleId ?? "", ctx.agent ?? "", storyId, skill, summary, {
-          installed: agentsInstalled(realAgentEnv()),
-          isAvailable: () => true,
-          scorePeer,
-          event: (e: PairEvent) => ports.events.appendEvent(ports.paths.eventsPath, e as RollEvent),
-          now: () => ports.clock(),
-        });
-        // FIX-343 step ①: a non-`scored` score-stage result writes NO fallback
-        // note. The peer score is the SOLE source of a quality score (owner
-        // ruling: a peer scores or the cycle honestly fails); the attest gate
-        // handles a missing peer score by blocking fail-loud — there is no
-        // runner-derived self-score note any more.
       }
       // FIX-207 attest gate: a delivery (commits ahead + a real story) that ships
       // with no FRESH acceptance report leaves an auditable ALERT + `attest:gate`
@@ -1372,7 +1370,12 @@ export async function executeCommand(
       try {
         ports.events.appendEvent(
           ports.paths.eventsPath,
-          buildTerminalRecord(cmd, ctx, ports.paths.worktreePath, ports.clock()),
+          // FIX-343 (step ③): resolve report/ac-map from the PERSISTENT .roll
+          // (repoCwd), NOT the worktree — `append_run` runs at the terminal,
+          // after the worktree may be torn down, so a worktree-rooted lookup
+          // false-negatives `acmap_missing`/`not_rendered` even though the
+          // evidence is on disk in the shared .roll.
+          buildTerminalRecord(cmd, ctx, ports.repoCwd, ports.clock()),
         );
       } catch {
         /* the runs row above already landed; audit flags the missing twin */
@@ -1583,7 +1586,10 @@ export function buildRunRow(
 export function buildTerminalRecord(
   cmd: Extract<CycleCommand, { kind: "append_run" }>,
   ctx: CycleContext,
-  worktreePath: string,
+  // FIX-343 (step ③): the PERSISTENT-.roll root (repoCwd) the report/ac-map are
+  // resolved from — NOT the worktree, which may already be torn down at the
+  // terminal (otherwise `acmap_missing`/`not_rendered` false-negatives).
+  attestCwd: string,
   nowSec: number,
 ): TerminalEvent {
   const storyId = ctx.storyId ?? "";
@@ -1604,9 +1610,9 @@ export function buildTerminalRecord(
   if (storyId === "") {
     attest = absent("not_applicable");
   } else {
-    const report = verificationReportPath(worktreePath, storyId);
+    const report = verificationReportPath(attestCwd, storyId);
     const hasReport = existsSync(report);
-    const hasMap = existsSync(acMapPath(worktreePath, storyId));
+    const hasMap = existsSync(acMapPath(attestCwd, storyId));
     if (hasReport) attest = present({ reportPath: report, acMap: hasMap });
     else attest = absent(hasMap ? "not_rendered" : "acmap_missing");
   }

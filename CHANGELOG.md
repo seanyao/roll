@@ -2,10 +2,18 @@
 
 ## Unreleased
 
+### 质量与可信
+
+- **代码质量评分改由独立评审给出,做事的 agent 不再给自己打分**:每次交付的质量分,现在由另起一个**全新独立会话**的评审 agent 来打——哪怕是同一种 agent,也必须是独立的新会话(不是当前会话、也不是它派生的子代理)。做事的 agent 不再自评,评分更可信、防自我美化;评分阶段也不再偶发漏分而把成功交付误判为失败。(FIX-343, FIX-342) `[acceptance-evidence]`
+
 ### 可见性
 
 - **Loop 页能看见本仓所有活循环了**:backlog、PR、Dream 和 go 会话都在同一区里。(US-DOSSIER-042) `[dossier]`
   <!-- evidence: .roll/features/delivery-dossier/US-DOSSIER-042/latest/US-DOSSIER-042-report.html -->
+
+- **四个机器信息页字体统一**:agents、skills、conventions、about 四个页面的字体字号向控制台看齐,整套界面视觉一致。(FIX-287) `[delivery-dossier]`
+
+- **Loop 页:已合并的交付显示为已完成(绿色)**:PR 被合并后,Loop 页的循环状态会按真实合并结果显示为已交付,不再停在"待合并"的黄色。(FIX-347) `[loop-observability]`
 
 ### 修复
 
@@ -17,6 +25,8 @@
 
 - **项目档案不再把所有项目都叫成 roll**:项目页头和项目切换器会按当前项目派生真实名称;未设置品牌名时优先取 git remote 仓名,再取项目目录名,APE-PR 等项目会显示自己的名字而不是统一显示为 roll。(FIX-307) `[dossier]`
   <!-- evidence: .roll/features/delivery-dossier/FIX-307/latest/FIX-307-report.html -->
+
+- **纯后端/校验类的卡不再被误判为"空交付"**:没有可视界面、按规则豁免截图的卡,只要有文本证据(如测试输出)就正常通过验收,不再因"缺截图"被误杀。(FIX-345) `[acceptance-evidence]`
 
 ## v3.615.1 — 2026-06-15
 

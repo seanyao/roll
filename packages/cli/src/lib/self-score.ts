@@ -185,10 +185,27 @@ export function readLatestStorySelfScore(projectPath: string, storyId: string, h
  * FILTER to a peer-sourced note that is provably an INDEPENDENT fresh session:
  *   - `scoring === "pair"` (peer protocol, not a self note),
  *   - a non-empty `scoredBy` (the scorer is recorded),
- *   - a non-empty `sessionId` (the scorer's fresh session id is recorded), AND
- *   - `sessionId !== builderSessionId` (NOT the builder's own session/sub-agent).
+ *   - a non-empty `sessionId` (the scorer's fresh session id is recorded),
+ *   - `sessionId !== builderSessionId` (NOT the builder's own session/sub-agent), AND
+ *   - FIX-343 (① STRICT cycle-scope): when a non-empty `currentCycleId` is
+ *     supplied, `sessionId.startsWith(`${currentCycleId}:`)` — the scorer minted
+ *     its session as `${cycleId}:score:${peer}:a${attempt}:${now}`
+ *     (pairing-gate.ts runScorePairing), so a note that does NOT start with THIS
+ *     cycle's id was produced by a PRIOR cycle. On a RESUME (re-pick of an
+ *     un-merged same-story branch) a prior cycle's peer score would otherwise
+ *     satisfy this cycle's gate even though THIS cycle's scorer wrote nothing —
+ *     a soft-pass-by-staleness. Cycle-scoping closes that hole: each delivery
+ *     owes a FRESH independent score minted in its OWN cycle.
  * THEN pick the latest — filter-then-latest so a self / legacy / stale note can
  * NEVER shadow the real independent peer note.
+ *
+ * EMPTY currentCycleId (non-loop / edge callers that don't know the cycle id):
+ * the cycle-scope CANNOT be enforced, so it is SKIPPED — but we do NOT use
+ * `startsWith("")` (which is vacuously true and would silently re-open the
+ * staleness hole by "accepting" any prior-cycle note). The other independence
+ * checks (pair + scoredBy + sessionId ≠ builderSessionId) still apply. Limitation:
+ * with no cycle id we cannot distinguish a prior cycle's note from this cycle's;
+ * the loop ALWAYS supplies the cycle id (ctx.cycleId), so this gap is edge-only.
  *
  * The vendor-name `scoredBy !== buildingAgent` comparison is DROPPED entirely:
  * it deadlocked single-vendor installs (builder=claude, scorer=claude under a
@@ -202,9 +219,17 @@ export function readLatestStoryPeerScore(
   projectPath: string,
   storyId: string,
   builderSessionId: string,
+  currentCycleId = "",
   hrefFromDir?: string,
 ): SelfScoreEntry | undefined {
   const builderSession = builderSessionId.trim();
+  const cycleId = currentCycleId.trim();
+  // Cycle-scope prefix (① STRICT). Empty cycle id ⇒ enforcement is impossible
+  // here, so we leave the prefix unset rather than `startsWith("")` (vacuously
+  // true ⇒ would re-open the staleness hole). NOT a vacuous pass: the other
+  // checks below still run; we just cannot reject a prior-cycle note when we
+  // don't know which cycle is "current".
+  const cyclePrefix = cycleId === "" ? undefined : `${cycleId}:`;
   const peers = readStorySelfScores(projectPath, storyId, hrefFromDir).filter(
     (e) =>
       e.scoring === "pair" &&
@@ -217,7 +242,14 @@ export function readLatestStoryPeerScore(
       // empty builderSession (builder not yet recorded) never EQUALS a non-empty
       // recorded session, so a real recorded peer note still qualifies; a note
       // whose session id matches the builder's is rejected as self-scoring.
-      e.sessionId.trim() !== builderSession,
+      e.sessionId.trim() !== builderSession &&
+      // FIX-343 (① STRICT cycle-scope): when the cycle id is known, the honored
+      // note MUST have been minted by THIS cycle's scorer. A prior cycle's note
+      // (`${oldCycleId}:score:...`) does not satisfy `startsWith(`${cycleId}:`)`
+      // → rejected, so a RESUME can't soft-pass on a stale score. THIS cycle's
+      // own scorer note IS `${cycleId}:score:...` ⇒ it DOES satisfy the prefix,
+      // so the legitimate fresh score still passes (no over-rejection deadlock).
+      (cyclePrefix === undefined || e.sessionId.trim().startsWith(cyclePrefix)),
   );
   return peers[peers.length - 1];
 }
@@ -412,9 +444,19 @@ export function writeSelfScoreNote(projectPath: string, input: SelfScoreWriteInp
  * A SAME-VENDOR note (e.g. claude scoring claude) with a DISTINCT fresh session
  * id PASSES — single-vendor installs are no longer deadlocked. `builderSessionId`
  * is the builder's minted session id, injected by the runner (ctx.builderSessionId).
+ *
+ * FIX-343 (① STRICT cycle-scope): `currentCycleId` (ctx.cycleId, threaded by the
+ * runner) confines the honored note to THIS cycle's own scorer — a prior cycle's
+ * peer score (the RESUME staleness hole) is rejected. Empty ⇒ scope unenforced
+ * but never vacuously accepting (see {@link readLatestStoryPeerScore}).
  */
-export function evaluateSelfScoreGate(projectPath: string, storyId: string, builderSessionId: string): SelfScoreGateCheck {
-  const latest = readLatestStoryPeerScore(projectPath, storyId, builderSessionId);
+export function evaluateSelfScoreGate(
+  projectPath: string,
+  storyId: string,
+  builderSessionId: string,
+  currentCycleId = "",
+): SelfScoreGateCheck {
+  const latest = readLatestStoryPeerScore(projectPath, storyId, builderSessionId, currentCycleId);
   if (latest === undefined) return { status: "missing", reason: `missing peer review score for ${storyId}` };
   const verdict = latest.verdict.toLowerCase();
   if (verdict === "regression") {

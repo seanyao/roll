@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { writeSelfScoreNote } from "../src/lib/self-score.js";
-import { readLatestStorySelfScore, readStorySelfScores } from "../src/lib/self-score.js";
+import { evaluateSelfScoreGate, readLatestStorySelfScore, readStorySelfScores } from "../src/lib/self-score.js";
 import { selfScoreCommand } from "../src/commands/self-score.js";
 
 const dirs: string[] = [];
@@ -173,6 +173,44 @@ describe("writeSelfScoreNote", () => {
     expect(a.path).not.toBe(b.path);
     expect(readStorySelfScores(p, "FIX-900")).toHaveLength(1);
     expect(readStorySelfScores(p, "FIX-901")).toHaveLength(1);
+  });
+});
+
+describe("FIX-343 (①): evaluateSelfScoreGate — STRICT cycle-scoped freshness", () => {
+  /** Write a `scoring: pair` note with an explicit session-id for the story. */
+  function withPairNote(p: string, story: string, sessionId: string, scoredBy = "pi"): void {
+    withCard(p, "goal-mode", story);
+    writeSelfScoreNote(p, { skill: "roll-build", story, score: 8, verdict: "good", rationale: "peer reviewed clean", scoring: "pair", scoredBy, sessionId });
+  }
+
+  it("a PRIOR-cycle peer note does NOT satisfy THIS cycle's gate (RESUME staleness rejected)", () => {
+    const p = project();
+    withPairNote(p, "FIX-RESUME", "c-old:score:pi:a1:1700000000");
+    // THIS cycle = c-new; the only note on disk is c-old's → not honored.
+    const gate = evaluateSelfScoreGate(p, "FIX-RESUME", "", "c-new");
+    expect(gate.status).toBe("missing");
+    expect(gate.reason).toMatch(/missing peer review score/i);
+  });
+
+  it("THIS cycle's own peer note (`${cycleId}:score:...`) PASSES (no over-rejection deadlock)", () => {
+    const p = project();
+    withPairNote(p, "FIX-FRESH", "c-cur:score:pi:a1:1700000099");
+    const gate = evaluateSelfScoreGate(p, "FIX-FRESH", "", "c-cur");
+    expect(gate.status).toBe("pass");
+    expect(gate.entry?.sessionId).toBe("c-cur:score:pi:a1:1700000099");
+  });
+
+  it("EMPTY cycleId does NOT vacuously accept a stale note via startsWith(\"\") — other checks still apply", () => {
+    const p = project();
+    // With NO cycle id the scope can't be enforced, but the pair+session checks
+    // still run: a valid pair note still passes (we don't reject everything), and
+    // a builder-session note is still rejected (we don't accept everything).
+    withPairNote(p, "FIX-NOCYCLE", "c-any:score:pi:a1:1700000000");
+    expect(evaluateSelfScoreGate(p, "FIX-NOCYCLE", "", "").status).toBe("pass");
+    const p2 = project();
+    withPairNote(p2, "FIX-NOCYCLE2", "builder-sess-123", "claude");
+    // builderSessionId === the note's session → rejected even with empty cycle id.
+    expect(evaluateSelfScoreGate(p2, "FIX-NOCYCLE2", "builder-sess-123", "").status).toBe("missing");
   });
 });
 

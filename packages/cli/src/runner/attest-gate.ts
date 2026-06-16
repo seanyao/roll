@@ -967,7 +967,11 @@ export function runAttestGate(
       // present AND ≠ the builder's session id. A self / legacy / no-sessionId /
       // sessionId===builderSessionId / absent note → status "missing" with
       // "missing peer review score" → block (fail loud, no synthesized pass).
-      const score = evaluateSelfScoreGate(scoreRepoCwd, storyId, builderSessionId);
+      // FIX-343 (① STRICT cycle-scope): thread THIS cycle's id so only a score
+      // minted by this cycle's scorer (`${cycleId}:score:...`) is honored — a
+      // prior cycle's peer note on a RESUME (re-picked un-merged same-story
+      // branch) no longer soft-passes this cycle's gate.
+      const score = evaluateSelfScoreGate(scoreRepoCwd, storyId, builderSessionId, cycleId);
       if (score.status === "pass") {
         const visual = passAcVisualFloor(worktreeCwd, storyId);
         const reasons = ["fresh acceptance report present", score.reason, ...(visual.reason !== undefined ? [visual.reason] : [])];

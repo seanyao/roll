@@ -709,6 +709,17 @@ export async function executeCommand(
     // execute: spawn the agent (TCR commits happen inside the worktree). The
     // exit code + timeout feed back as agent_exited; usage is captured for cost.
     case "spawn_agent": {
+      // FIX-343 (step ①): mint the BUILDER's unique session id ONCE, here at the
+      // working-agent spawn, and reuse it across retries (a non-empty
+      // ctx.builderSessionId means a prior attempt already minted it). The attest
+      // gate later compares the SCORER's session id against this so "an
+      // independent fresh session (NOT a sub-agent sharing the builder's context)
+      // scored this delivery" is a CHECKED invariant. Recorded on the cycle
+      // context (ctxPatch below) and in the agent log header for audit.
+      const builderSessionId =
+        ctx.builderSessionId !== undefined && ctx.builderSessionId !== ""
+          ? ctx.builderSessionId
+          : `${ctx.cycleId ?? "cycle"}:build:${cmd.agent}:${ports.clock()}`;
       // US-PORT-011: the live observation file — one stable path per project,
       // truncated at each agent start, fed every chunk in real time. The popup
       // (runner template) and any `tail -f` watcher read THIS, not buffers.
@@ -716,7 +727,7 @@ export async function executeCommand(
       try {
         writeFileSync(
           livePath,
-          `── cycle ${ctx.cycleId ?? "?"} · ${ctx.storyId ?? "?"} · agent ${cmd.agent} ──\n`,
+          `── cycle ${ctx.cycleId ?? "?"} · ${ctx.storyId ?? "?"} · agent ${cmd.agent} · build-session ${builderSessionId} ──\n`,
         );
       } catch {
         /* observation is best-effort */
@@ -773,7 +784,10 @@ export async function executeCommand(
         mkdirSync(logDir, { recursive: true });
         writeFileSync(
           join(logDir, `${ctx.cycleId ?? "cycle"}.agent.log`),
-          `# exit=${res.exitCode} timedOut=${res.timedOut}\n--- stdout ---\n${res.stdout}\n--- stderr ---\n${res.stderr}\n`,
+          // FIX-343 (step ①): the builder session id is part of the auditable
+          // header — the attest gate's scorer≠builder-session invariant is then
+          // traceable to a recorded build-session id, not asserted.
+          `# exit=${res.exitCode} timedOut=${res.timedOut} build-session=${builderSessionId}\n--- stdout ---\n${res.stdout}\n--- stderr ---\n${res.stderr}\n`,
         );
       } catch {
         /* logging must never fail the cycle */
@@ -839,7 +853,10 @@ export async function executeCommand(
       }
       return {
         event: { type: "agent_exited", exit: res.exitCode, timedOut: res.timedOut },
-        ...(costPatch !== undefined ? { ctxPatch: { cost: costPatch } } : {}),
+        // FIX-343 (step ①): persist the builder session id on the cycle context so
+        // it survives to the attest gate (the scorer≠builder-session check). Minted
+        // once; reused across retries (the spawn reads ctx.builderSessionId first).
+        ctxPatch: { builderSessionId, ...(costPatch !== undefined ? { cost: costPatch } : {}) },
       };
     }
 
@@ -1207,11 +1224,14 @@ export async function executeCommand(
                 ts: ports.clock(),
               }),
           },
-          // FIX-343 (step ②): read the peer score from the PERSISTENT .roll
-          // (repoCwd) — where runScorePairing wrote it — not the ephemeral
-          // worktree; thread the building agent so a self-source note is ignored.
+          // FIX-343: read the peer score from the PERSISTENT .roll (repoCwd) —
+          // where runScorePairing wrote it — not the ephemeral worktree; thread
+          // the BUILDER SESSION ID (step ①) so the gate verifies the scorer's
+          // session ≠ the builder's session (an independent fresh session scored
+          // this, never the builder's own in-session/sub-agent self-score). The
+          // vendor-name comparison is gone — a same-vendor fresh session is valid.
           ports.repoCwd,
-          ctx.agent ?? "",
+          ctx.builderSessionId ?? "",
         );
         if (res.verdict === "skipped") {
           applyCorrectionAction({

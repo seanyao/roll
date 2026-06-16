@@ -143,11 +143,13 @@ const shimAgentTcr: AgentSpawn = async (_agent, opts): Promise<AgentSpawnResult>
   const storyId = opts.storyId ?? "US-RUN-001";
   const notesDir = join(wt, ".roll", "features", "uncategorized", storyId, "notes");
   mkdirSync(notesDir, { recursive: true });
-  // FIX-343 (step ②): the attest gate honors ONLY a fresh-session PEER score
-  // (`scoring: pair` + a `scored-by` that is NOT the building agent "claude").
-  // The shim simulates the score stage's peer note landing in the persistent
-  // .roll (the worktree's .roll is symlinked to the repo's), so a real delivery
-  // reaches the gate with a peer-sourced score.
+  // FIX-343 (step ③, B-decision): the attest gate honors ONLY an INDEPENDENT
+  // fresh-session PEER score (`scoring: pair` + a `scored-by` + a `session-id`
+  // that is NOT the builder's session id). The shim simulates the score stage's
+  // peer note landing in the persistent .roll (the worktree's .roll is symlinked
+  // to the repo's). Its session-id is a fixed fresh-session token that can NEVER
+  // equal the builder's minted `<cycleId>:build:claude:<clock>` id, so the note
+  // qualifies as an independent fresh session and the delivery reaches PASS.
   writeFileSync(
     join(notesDir, `2026-06-08-roll-build-${storyId}-shim.md`),
     [
@@ -159,6 +161,7 @@ const shimAgentTcr: AgentSpawn = async (_agent, opts): Promise<AgentSpawnResult>
       "ts: 2026-06-08T00:00:00Z",
       "scoring: pair",
       "scored-by: pi",
+      "session-id: integration-fresh-score-session-001",
       "---",
       "",
       "Shim delivery wrote the required peer review score note.",

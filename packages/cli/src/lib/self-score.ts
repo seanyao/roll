@@ -176,23 +176,48 @@ export function readLatestStorySelfScore(projectPath: string, storyId: string, h
 }
 
 /**
- * FIX-343 (step ②) — the peer-only selector the gate honors. FILTER to a
- * peer-sourced note (`scoring === "pair"` with a `scoredBy` that is NOT the
- * building agent) THEN pick the latest — never pick-latest-then-inspect, so a
- * self / legacy / stale note can NEVER shadow the real peer note. A
- * `scoredBy === buildingAgent` note is rejected here too (a building agent that
- * scored under the peer protocol is still self-scoring). Returns undefined when
- * no qualifying fresh-session peer note exists ⇒ the gate fails loud.
+ * FIX-343 (step ③, OWNER B-decision) — the independent-peer selector the gate
+ * honors. Independence is verified by SESSION ID, never by vendor name: the
+ * boundary is "a FRESH session that does NOT share the builder's session/context"
+ * (a sub-agent spawned inside the builder's session shares its context and is NOT
+ * independent; a separately-spawned fresh process — even same agent+model — IS).
+ *
+ * FILTER to a peer-sourced note that is provably an INDEPENDENT fresh session:
+ *   - `scoring === "pair"` (peer protocol, not a self note),
+ *   - a non-empty `scoredBy` (the scorer is recorded),
+ *   - a non-empty `sessionId` (the scorer's fresh session id is recorded), AND
+ *   - `sessionId !== builderSessionId` (NOT the builder's own session/sub-agent).
+ * THEN pick the latest — filter-then-latest so a self / legacy / stale note can
+ * NEVER shadow the real independent peer note.
+ *
+ * The vendor-name `scoredBy !== buildingAgent` comparison is DROPPED entirely:
+ * it deadlocked single-vendor installs (builder=claude, scorer=claude under a
+ * fresh session was a valid same-vendor independent score, yet the old gate
+ * rejected its own valid peer score → every claude-route delivery hard-failed).
+ *
+ * Returns undefined when no qualifying independent fresh-session peer note
+ * exists ⇒ the gate fails loud ("missing peer review score").
  */
 export function readLatestStoryPeerScore(
   projectPath: string,
   storyId: string,
-  buildingAgent: string,
+  builderSessionId: string,
   hrefFromDir?: string,
 ): SelfScoreEntry | undefined {
-  const builder = buildingAgent.trim();
+  const builderSession = builderSessionId.trim();
   const peers = readStorySelfScores(projectPath, storyId, hrefFromDir).filter(
-    (e) => e.scoring === "pair" && e.scoredBy !== undefined && e.scoredBy.trim() !== "" && e.scoredBy.trim() !== builder,
+    (e) =>
+      e.scoring === "pair" &&
+      e.scoredBy !== undefined &&
+      e.scoredBy.trim() !== "" &&
+      e.sessionId !== undefined &&
+      e.sessionId.trim() !== "" &&
+      // INDEPENDENCE INVARIANT: the scorer's fresh session is NOT the builder's
+      // own session (and so not a sub-agent sharing the builder's context). An
+      // empty builderSession (builder not yet recorded) never EQUALS a non-empty
+      // recorded session, so a real recorded peer note still qualifies; a note
+      // whose session id matches the builder's is rejected as self-scoring.
+      e.sessionId.trim() !== builderSession,
   );
   return peers[peers.length - 1];
 }
@@ -370,16 +395,26 @@ export function writeSelfScoreNote(projectPath: string, input: SelfScoreWriteInp
 }
 
 /**
- * FIX-343 (step ②) — the attest gate's quality-score check. The gate honors
- * ONLY a fresh-session PEER score: `readLatestStoryPeerScore` filters to a
- * `scoring === "pair"` note whose `scoredBy` is present and is NOT the building
- * agent, THEN picks the latest. A self / legacy `scoring:self` / absent /
- * `scoredBy === buildingAgent` note is NEVER honored — it yields `missing` with
- * the fail-loud reason "missing peer review score" so the cycle blocks (no
- * synthesized pass). `buildingAgent` is injected by the runner (ctx.agent).
+ * FIX-343 (step ③, OWNER B-decision) — the attest gate's quality-score check.
+ * The gate honors ONLY an INDEPENDENT fresh-session PEER score:
+ * `readLatestStoryPeerScore` filters to a `scoring === "pair"` note that records
+ * a `scoredBy` AND a `sessionId`, with `sessionId !== builderSessionId` (the
+ * scorer ran in a separate fresh session, NOT the builder's own session / a
+ * sub-agent sharing its context), THEN picks the latest. Rejected → `missing`
+ * with the fail-loud reason "missing peer review score" so the cycle blocks (no
+ * synthesized pass):
+ *   - a self note (`scoring:self` / no `scoring`),
+ *   - a pair note with no `sessionId` (independence unverifiable — incl. a bare
+ *     builder self-score, which has neither pair scoring nor a session id),
+ *   - a pair note whose `sessionId === builderSessionId` (the builder scored its
+ *     own work in its own session / via a sub-agent), or
+ *   - an absent note.
+ * A SAME-VENDOR note (e.g. claude scoring claude) with a DISTINCT fresh session
+ * id PASSES — single-vendor installs are no longer deadlocked. `builderSessionId`
+ * is the builder's minted session id, injected by the runner (ctx.builderSessionId).
  */
-export function evaluateSelfScoreGate(projectPath: string, storyId: string, buildingAgent: string): SelfScoreGateCheck {
-  const latest = readLatestStoryPeerScore(projectPath, storyId, buildingAgent);
+export function evaluateSelfScoreGate(projectPath: string, storyId: string, builderSessionId: string): SelfScoreGateCheck {
+  const latest = readLatestStoryPeerScore(projectPath, storyId, builderSessionId);
   if (latest === undefined) return { status: "missing", reason: `missing peer review score for ${storyId}` };
   const verdict = latest.verdict.toLowerCase();
   if (verdict === "regression") {

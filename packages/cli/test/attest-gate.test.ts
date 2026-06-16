@@ -74,13 +74,22 @@ function writeEvidenceJson(wt: string, storyId: string, body: unknown): void {
 }
 
 /**
- * FIX-343 (step ②): the gate now honors ONLY a fresh-session PEER score
- * (`scoring: pair` + a `scored-by` that is NOT the building agent). The runs
- * here pass `buildingAgent=""` (the default), so any non-empty `scored-by`
- * qualifies as a peer. Self / legacy notes are exercised separately by
- * {@link withSelfScoreOnly}.
+ * FIX-343 (step ③, OWNER B-decision): the gate now honors ONLY an INDEPENDENT
+ * fresh-session PEER score (`scoring: pair` + a `scored-by` + a `session-id`
+ * that is NOT the builder's session id). The runs here pass `builderSessionId=""`
+ * (the default) so any recorded, non-empty `session-id` qualifies as independent
+ * (an empty builder session never equals a real recorded session). Self / legacy
+ * notes are exercised separately by {@link withSelfScoreOnly}; the builder's own
+ * session is exercised by the session-collision guard test.
  */
-function withPeerScore(wt: string, storyId: string, score: number, verdict: "good" | "ok" | "regression", scoredBy = "pi"): void {
+function withPeerScore(
+  wt: string,
+  storyId: string,
+  score: number,
+  verdict: "good" | "ok" | "regression",
+  scoredBy = "pi",
+  sessionId = `${storyId}:score:${scoredBy}:a1:1700000000`,
+): void {
   const dir = join(wt, ".roll", "features", "uncategorized", storyId, "notes");
   mkdirSync(dir, { recursive: true });
   writeFileSync(
@@ -94,6 +103,7 @@ function withPeerScore(wt: string, storyId: string, score: number, verdict: "goo
       "ts: 2026-06-08T12:00:00Z",
       "scoring: pair",
       `scored-by: ${scoredBy}`,
+      `session-id: ${sessionId}`,
       "---",
       "",
       "peer review rationale 首句。",
@@ -293,16 +303,53 @@ describe("runAttestGate (three paths: produced / skipped-soft / skipped-hard)", 
     expect(events[0]?.verdict).toBe("skipped");
   });
 
-  it("FIX-343: a pair note scored BY the building agent is NOT honored (self-scoring under the peer protocol)", () => {
+  it("FIX-343 (B-decision): a pair note whose session-id === the BUILDER'S session is NOT honored (in-session/sub-agent self-score)", () => {
     const wt = withReport("FIX-SCORE-OWN", 2000);
-    withPeerScore(wt, "FIX-SCORE-OWN", 8, "good", "codex"); // scored-by: codex
+    const builderSession = "c-score-own:build:claude:1700000000";
+    // Same agent+model is FINE — what's rejected is the SAME SESSION (a sub-agent
+    // spawned inside the builder's session shares its context). The note records
+    // a session-id IDENTICAL to the builder's → rejected as self-scoring.
+    withPeerScore(wt, "FIX-SCORE-OWN", 8, "good", "claude", builderSession);
     const { events, s } = sinks();
-    // buildingAgent === "codex" ⇒ the note is the builder's own → rejected.
-    const r = runAttestGate(wt, "FIX-SCORE-OWN", "c-score-own", "hard", 1000, s, wt, "codex");
+    const r = runAttestGate(wt, "FIX-SCORE-OWN", "c-score-own", "hard", 1000, s, wt, builderSession);
     expect(r.verdict).toBe("skipped");
     expect(r.blocked).toBe(true);
     expect(r.reasons[0]).toMatch(/missing peer review score/i);
     expect(events[0]?.verdict).toBe("skipped");
+  });
+
+  it("FIX-343 (B-decision): a pair note with NO session-id is NOT honored (independence unverifiable)", () => {
+    const wt = withReport("FIX-SCORE-NOSESS", 2000);
+    // A pair note that omits session-id cannot prove an independent fresh session.
+    const dir = join(wt, ".roll", "features", "uncategorized", "FIX-SCORE-NOSESS", "notes");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "2026-06-08-roll-build-FIX-SCORE-NOSESS-8.md"),
+      ["---", "skill: roll-build", "story: FIX-SCORE-NOSESS", "score: 8", "verdict: good", "ts: 2026-06-08T12:00:00Z", "scoring: pair", "scored-by: pi", "---", "", "no session id"].join("\n"),
+    );
+    const { s } = sinks();
+    const r = runAttestGate(wt, "FIX-SCORE-NOSESS", "c-score-nosess", "hard", 1000, s, wt, "c-score-nosess:build:claude:1700000000");
+    expect(r.verdict).toBe("skipped");
+    expect(r.blocked).toBe(true);
+    expect(r.reasons[0]).toMatch(/missing peer review score/i);
+  });
+
+  it("FIX-343 (B-decision): SINGLE-VENDOR install no longer deadlocks — claude builder + a claude FRESH-session score → PASS", () => {
+    // The exact deadlock case: builder=claude (session A), the score stage spawns
+    // a FRESH claude session (session B, same vendor) that writes a scoring:pair
+    // note. The OLD vendor-name gate rejected scored-by:claude as "the builder's
+    // own" → every default-route delivery hard-failed. The B-decision gate keys
+    // on session-id != builderSessionId, so a distinct fresh same-vendor session
+    // PASSES.
+    const wt = withReport("FIX-SV", 2000);
+    const builderSession = "c-sv:build:claude:1700000000";
+    withPeerScore(wt, "FIX-SV", 8, "good", "claude", "c-sv:score:claude:a1:1700000099"); // fresh claude session B
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-SV", "c-sv", "hard", 1000, s, wt, builderSession);
+    expect(r.verdict).toBe("produced");
+    expect(r.blocked).toBe(false);
+    expect(alerts).toHaveLength(0);
+    expect(events[0]?.verdict).toBe("produced");
   });
 
   it("FIX-343: a self/legacy note can NOT shadow a real peer note (filter-peer-then-latest)", () => {

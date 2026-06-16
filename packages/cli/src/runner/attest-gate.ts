@@ -885,10 +885,11 @@ export function runAttestGate(
   // (repoCwd-rooted), NOT the ephemeral worktree — the fresh-session peer score
   // note (runScorePairing) lands there. Defaults to worktreeCwd so callers that
   // pre-date the split (and tests staging the note under the worktree) are
-  // unaffected. `buildingAgent` (ctx.agent) is threaded so the gate honors ONLY
-  // a peer-sourced score whose `scoredBy` is NOT the building agent.
+  // unaffected. `builderSessionId` (step ①, ctx.builderSessionId) is threaded so
+  // the gate honors ONLY an independent fresh-session score whose recorded
+  // `sessionId` is NOT the builder's own session — never the vendor name.
   scoreRepoCwd: string = worktreeCwd,
-  buildingAgent = "",
+  builderSessionId = "",
 ): AttestGateResult {
   // FIX-343 (step ②): a missing PEER score must surface as a blocking
   // skipped/blocked verdict — the bottom blanket catch below must NOT soft-fail
@@ -961,10 +962,12 @@ export function runAttestGate(
     // US-ATTEST-012: freshness alone is "存在性" — a fresh empty shell (zero AC /
     // no ac-map, the FIX-214 case) does NOT count as a produced report.
     if (fresh && verificationReportHasContent(worktreeCwd, storyId)) {
-      // FIX-343 (step ②): honor ONLY a fresh-session peer score from the
-      // PERSISTENT .roll (scoreRepoCwd). A self / legacy / scoredBy===builder /
-      // absent note → status "missing" with "missing peer review score" → block.
-      const score = evaluateSelfScoreGate(scoreRepoCwd, storyId, buildingAgent);
+      // FIX-343 (step ③): honor ONLY an INDEPENDENT fresh-session peer score from
+      // the PERSISTENT .roll (scoreRepoCwd) — its recorded `sessionId` must be
+      // present AND ≠ the builder's session id. A self / legacy / no-sessionId /
+      // sessionId===builderSessionId / absent note → status "missing" with
+      // "missing peer review score" → block (fail loud, no synthesized pass).
+      const score = evaluateSelfScoreGate(scoreRepoCwd, storyId, builderSessionId);
       if (score.status === "pass") {
         const visual = passAcVisualFloor(worktreeCwd, storyId);
         const reasons = ["fresh acceptance report present", score.reason, ...(visual.reason !== undefined ? [visual.reason] : [])];

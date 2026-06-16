@@ -435,17 +435,24 @@ export function selectPairingCandidates(input: SelectInput): string[] {
   const working = canonicalAgentName(workingAgent);
   const order = new Map(AGENT_REGISTRY_NAMES.map((n, i) => [n as string, i]));
 
-  // FIX-343 (step ④): the "score" stage is MANDATORY and stage-aware.
+  // FIX-343 (step ⑤, OWNER B-decision): the "score" stage is MANDATORY,
+  // stage-aware, and RANKS heterogeneity as a PREFERENCE (not a hard filter):
   //   • NOT gated on cfg.enabled / cfg.stages — a Review Score is owed by every
   //     delivery whether or not pairing.yaml opts in (the executor calls this
   //     unconditionally; an absent config must still yield a scorer).
-  //   • SAME-VENDOR fresh session is allowed — DROP the isHeterogeneous filter
-  //     AND allow a fresh instance of the BUILDER'S OWN type. Independence comes
-  //     from "another assigned fresh session" (ports.agentSpawn forks a distinct
-  //     subprocess), NOT from vendor heterogeneity. Capability is not required
-  //     for scoring (no special tooling — every installed agent can score).
-  // Code review (and every other stage) KEEPS the heterogeneous hard filter and
-  // the enabled/stage/capability gating unchanged.
+  //   • PREFER heterogeneous candidates (different vendor = absolute
+  //     heterogeneity, the encouraged/best independent signal) FIRST, then FALL
+  //     BACK to a SAME-VENDOR fresh session (a fresh instance of the builder's
+  //     own type) — NOT "drop the hetero filter". The same-vendor fresh session
+  //     is the MINIMUM acceptable independence (a separately-spawned distinct
+  //     subprocess via ports.agentSpawn, never a sub-agent sharing the builder's
+  //     context); it is the fallback so a single-vendor install is never
+  //     deadlocked, while a richer install still reaches for an other-vendor
+  //     fresh session first. Capability is not required for scoring (no special
+  //     tooling — every installed agent can score).
+  // Code review (and every other stage) KEEPS the heterogeneous HARD filter and
+  // the enabled/stage/capability gating unchanged (independence by vendor is a
+  // HARD requirement there, not merely preferred).
   if (stage === "score") {
     const scorers = installed
       .map(canonicalAgentName)
@@ -453,12 +460,20 @@ export function selectPairingCandidates(input: SelectInput): string[] {
       .filter((a) => isAvailable(a))
       .sort((x, y) => (order.get(x) ?? 999) - (order.get(y) ?? 999));
     if (scorers.length === 0) return [];
-    // Round-robin baseline so the builder's own type is not always head when a
-    // heterogeneous peer is also installed (a fresh other-vendor session is a
-    // marginally stronger independent signal, but same-vendor fresh is valid).
-    const seed = seedOf(cycleId);
-    const start = seed % scorers.length;
-    return [...scorers.slice(start), ...scorers.slice(0, start)];
+    // Split into heterogeneous (different vendor than the builder) and
+    // same-vendor (incl. the builder's own type) pools. A round-robin seed
+    // rotates WITHIN each pool so we don't fixate on one peer over time, yet stay
+    // replayable. Then concatenate hetero-first, same-vendor-fallback: the set is
+    // never trimmed (reachability preserved — a failed hetero scorer still falls
+    // back to a same-vendor fresh session), only the head order is ranked.
+    const hetero = scorers.filter((a) => working !== "" && isHeterogeneous(a, working));
+    const sameVendor = scorers.filter((a) => working === "" || !isHeterogeneous(a, working));
+    const rotate = (pool: string[]): string[] => {
+      if (pool.length === 0) return pool;
+      const start = seedOf(cycleId) % pool.length;
+      return [...pool.slice(start), ...pool.slice(0, start)];
+    };
+    return [...rotate(hetero), ...rotate(sameVendor)];
   }
 
   if (!cfg.enabled) return [];

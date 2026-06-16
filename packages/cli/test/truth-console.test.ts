@@ -302,18 +302,106 @@ describe("collectLoopHeartbeat — US-DOSSIER-011", () => {
         svc === "loop" ? "<key>StartInterval</key>\n<integer>3600</integer>" : null,
       lastRunAt: () => "2026-06-12T23:30:00Z",
     });
-    expect(hb.lanes).toHaveLength(2);
+    expect(hb.lanes).toHaveLength(3);
     const loop = hb.lanes[0];
     expect(loop?.running).toBe(true);
     expect(loop?.everyMin).toBe(60);
     expect(loop?.lastAt).toBe("2026-06-12T23:30:00Z");
     expect(loop?.nextAt).toBe("2026-06-13T00:30:00Z");
     expect(hb.lanes[1]?.running).toBe(false);
+    expect(hb.lanes[2]?.running).toBe(false);
   });
 
   it("never throws on a machine with nothing scheduled", () => {
     const hb = collectLoopHeartbeat({ plistText: () => null, lastRunAt: () => null });
     expect(hb.lanes.every((l) => !l.running)).toBe(true);
+  });
+
+  it("US-DOSSIER-042: collects backlog, PR, dream launchd lanes and an active go session", () => {
+    const hb = collectLoopHeartbeat({
+      plistText: (svc) =>
+        svc === "loop"
+          ? "<key>StartInterval</key>\n<integer>1800</integer>"
+          : svc === "pr"
+            ? "<key>StartInterval</key>\n<integer>300</integer>"
+            : svc === "dream"
+              ? "<key>StartInterval</key>\n<integer>86400</integer>"
+              : null,
+      lastRunAt: (svc) =>
+        svc === "loop"
+          ? "2026-06-12T23:30:00Z"
+          : svc === "pr"
+            ? "2026-06-12T23:35:00Z"
+            : svc === "dream"
+              ? "2026-06-12T03:00:00Z"
+              : null,
+      goalText: () =>
+        [
+          "schema: goal.v1",
+          "scope:",
+          "  kind: cards",
+          "  cards: [US-A-1, FIX-9]",
+          "review: auto",
+          "limits:",
+          "status: active",
+          "usage:",
+          "  cycles: 2",
+          "  costUsd: 0.5",
+          "createdAt: 2026-06-12T23:00:00Z",
+          "updatedAt: 2026-06-12T23:20:00Z",
+          "",
+        ].join("\n"),
+      eventsText: () =>
+        [
+          JSON.stringify({ type: "goal:session_start", sessionId: "go-1", scope: { kind: "cards", cards: ["US-A-1", "FIX-9"] }, ts: 1781306400 }),
+          "",
+        ].join("\n"),
+    });
+
+    expect(hb.lanes.map((l) => l.name)).toEqual(["backlog loop", "PR loop", "Dream loop", "go session"]);
+    expect(hb.lanes.map((l) => l.source)).toEqual(["launchd", "launchd", "launchd", "goal"]);
+    expect(hb.lanes.find((l) => l.name === "PR loop")).toMatchObject({
+      running: true,
+      mode: "pr",
+      everyMin: 5,
+      lastAt: "2026-06-12T23:35:00Z",
+      nextAt: "2026-06-12T23:40:00Z",
+    });
+    expect(hb.lanes.find((l) => l.name === "go session")).toMatchObject({
+      running: true,
+      mode: "go",
+      status: "active",
+      scope: "cards: US-A-1, FIX-9",
+      lastAt: "2026-06-12T23:20:00Z",
+    });
+  });
+});
+
+describe("loop tab active loops — US-DOSSIER-042", () => {
+  it("renders a dedicated repo loops section separate from the overview summary", () => {
+    const html = render({
+      ...SNAP,
+      loop: {
+        lanes: [
+          { name: "backlog loop", source: "launchd", running: true, mode: "backlog", everyMin: 30, lastAt: "2026-06-12T23:30:00Z", nextAt: "2026-06-13T00:00:00Z" },
+          { name: "PR loop", source: "launchd", running: true, mode: "pr", everyMin: 5, lastAt: "2026-06-12T23:35:00Z", nextAt: "2026-06-12T23:40:00Z" },
+          { name: "Dream loop", source: "launchd", running: false, mode: "dream", everyMin: 1440 },
+          { name: "go session", source: "goal", running: true, mode: "go", status: "active", scope: "cards: US-A-1, FIX-9", lastAt: "2026-06-12T15:20:00Z" },
+        ],
+      },
+    });
+
+    expect(html).toContain("Loops on this repo");
+    expect(html).toContain("本仓 Loops");
+    expect(html).toContain("backlog loop");
+    expect(html).toContain("PR loop");
+    expect(html).toContain("Dream loop");
+    expect(html).toContain("go session");
+    expect(html).toContain("cards: US-A-1, FIX-9");
+    expect(html).toContain("mode");
+    expect(html).toContain("周期");
+    expect(html).toContain("上次");
+    expect(html).toContain("下次");
   });
 });
 

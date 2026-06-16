@@ -1,7 +1,7 @@
 /**
  * US-DOSSIER-011 — loop heartbeat collection for the Truth Console overview.
  *
- * Best-effort, injected-fs: for each roll lane on this machine (loop / dream),
+ * Best-effort, injected-fs: for each roll lane on this machine (loop / pr / dream),
  * report whether it is scheduled (launchd plist present), its period, the last
  * cycle stamp from runs.jsonl, and the derived next fire. A collection miss
  * yields an honest empty/partial lane — never a throw (the console must render
@@ -9,18 +9,51 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { TruthSnapshotLoop, TruthSnapshotLoopLane } from "@roll/spec";
+import { parseEventLine, parseGoalYaml, type GoalScope, type GoalStatus, type TruthSnapshotLoop, type TruthSnapshotLoopLane } from "@roll/spec";
 
 export interface HeartbeatDeps {
   /** plist text for a lane, or null when not installed. */
   plistText: (svc: string) => string | null;
-  /** latest runs.jsonl row ts (ISO) or null. */
-  lastRunAt: () => string | null;
+  /** latest run stamp for a lane (ISO) or null. */
+  lastRunAt: (svc: string) => string | null;
+  /** current .roll/loop/goal.yaml text, or null when no go goal exists. */
+  goalText?: () => string | null;
+  /** .roll/loop/events.ndjson text for goal session reconstruction. */
+  eventsText?: () => string | null;
 }
 
-const LANES = ["loop", "dream"] as const;
+const LAUNCHD_LANES: Array<{ svc: "loop" | "pr" | "dream"; name: string; mode: string }> = [
+  { svc: "loop", name: "backlog loop", mode: "backlog" },
+  { svc: "pr", name: "PR loop", mode: "pr" },
+  { svc: "dream", name: "Dream loop", mode: "dream" },
+];
 
 export function defaultHeartbeatDeps(projectPath: string, slug: string, launchAgentsDir: string): HeartbeatDeps {
+  const lastRunAt = (svc: string): string | null => {
+    const file = svc === "pr" ? "pr.log" : svc === "dream" ? "dream.log" : "runs.jsonl";
+    const path = join(projectPath, ".roll", "loop", file);
+    try {
+      const lines = readFileSync(path, "utf8").trim().split("\n");
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const line = lines[i] ?? "";
+        if (line.trim() === "") continue;
+        if (svc === "loop") {
+          const row = JSON.parse(line) as { ts?: string };
+          if (typeof row.ts === "string" && row.ts !== "") return row.ts;
+        } else {
+          const m = /\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})([+-]\d{4})\]/.exec(line);
+          if (m?.[1] !== undefined && m[2] !== undefined) {
+            const tz = `${m[2].slice(0, 3)}:${m[2].slice(3)}`;
+            const iso = new Date(`${m[1]}${tz}`).toISOString().replace(/\.\d{3}Z$/, "Z");
+            return iso;
+          }
+        }
+      }
+    } catch {
+      /* no lane run yet */
+    }
+    return null;
+  };
   return {
     plistText: (svc) => {
       const p = join(launchAgentsDir, `com.roll.${svc}.${slug}.plist`);
@@ -30,19 +63,20 @@ export function defaultHeartbeatDeps(projectPath: string, slug: string, launchAg
         return null;
       }
     },
-    lastRunAt: () => {
+    lastRunAt,
+    goalText: () => {
       try {
-        const lines = readFileSync(join(projectPath, ".roll", "loop", "runs.jsonl"), "utf8").trim().split("\n");
-        for (let i = lines.length - 1; i >= 0; i--) {
-          const line = lines[i] ?? "";
-          if (line.trim() === "") continue;
-          const row = JSON.parse(line) as { ts?: string };
-          if (typeof row.ts === "string" && row.ts !== "") return row.ts;
-        }
+        return readFileSync(join(projectPath, ".roll", "loop", "goal.yaml"), "utf8");
       } catch {
-        /* no runs yet */
+        return null;
       }
-      return null;
+    },
+    eventsText: () => {
+      try {
+        return readFileSync(join(projectPath, ".roll", "loop", "events.ndjson"), "utf8");
+      } catch {
+        return null;
+      }
     },
   };
 }
@@ -60,21 +94,76 @@ function addMinutes(iso: string, min: number): string | undefined {
   return new Date(ms + min * 60_000).toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
+function isoFromSec(sec: number): string {
+  return new Date(sec * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+function scopeLabel(scope: GoalScope): string {
+  if (scope.kind === "all") return "all";
+  if (scope.kind === "epic") return `epic: ${scope.epic}`;
+  return `cards: ${scope.cards.join(", ")}`;
+}
+
+function activeGoalSession(eventsText: string | null): { open: boolean; lastAt?: string } {
+  if (eventsText === null) return { open: false };
+  let openSession: string | undefined;
+  let lastAt: string | undefined;
+  for (const line of eventsText.split("\n")) {
+    const ev = parseEventLine(line);
+    if (ev === null) continue;
+    if (ev.type === "goal:session_start") {
+      openSession = ev.sessionId;
+      lastAt = isoFromSec(ev.ts);
+    } else if (ev.type === "goal:session_end" && ev.sessionId === openSession) {
+      openSession = undefined;
+      lastAt = isoFromSec(ev.ts);
+    }
+  }
+  return openSession !== undefined ? { open: true, ...(lastAt !== undefined ? { lastAt } : {}) } : { open: false, ...(lastAt !== undefined ? { lastAt } : {}) };
+}
+
+function goalLane(deps: HeartbeatDeps): TruthSnapshotLoopLane | undefined {
+  const text = deps.goalText?.() ?? null;
+  const session = activeGoalSession(deps.eventsText?.() ?? null);
+  if (text === null && !session.open) return undefined;
+  let status: GoalStatus | "unknown" = "unknown";
+  let scope = "unknown";
+  if (text !== null) {
+    try {
+      const goal = parseGoalYaml(text);
+      status = goal.status;
+      scope = scopeLabel(goal.scope);
+    } catch {
+      status = "unknown";
+    }
+  }
+  return {
+    name: "go session",
+    source: "goal",
+    running: session.open && status === "active",
+    mode: "go",
+    status,
+    scope,
+    ...(session.lastAt !== undefined ? { lastAt: session.lastAt } : {}),
+  };
+}
+
 /** Collect the heartbeat lanes; lanes that are off still appear (state off). */
 export function collectLoopHeartbeat(deps: HeartbeatDeps): TruthSnapshotLoop {
   const lanes: TruthSnapshotLoopLane[] = [];
-  const last = deps.lastRunAt();
-  for (const svc of LANES) {
+  for (const { svc, name, mode } of LAUNCHD_LANES) {
     const plist = deps.plistText(svc);
     const running = plist !== null;
     const everyMin = plist !== null ? periodMinutes(plist) : undefined;
+    const last = deps.lastRunAt(svc);
     const lane: TruthSnapshotLoopLane = {
-      name: svc,
+      name,
+      source: "launchd",
       running,
-      mode: svc === "loop" ? "cron" : "nightly",
+      mode,
       ...(everyMin !== undefined ? { everyMin } : {}),
     };
-    if (svc === "loop" && last !== null) {
+    if (last !== null) {
       lane.lastAt = last;
       if (everyMin !== undefined) {
         const next = addMinutes(last, everyMin);
@@ -83,5 +172,7 @@ export function collectLoopHeartbeat(deps: HeartbeatDeps): TruthSnapshotLoop {
     }
     lanes.push(lane);
   }
+  const go = goalLane(deps);
+  if (go !== undefined) lanes.push(go);
   return { lanes };
 }

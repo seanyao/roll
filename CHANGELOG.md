@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### 可见性
+
+- **Loop 页能看见本仓所有活循环了**:backlog、PR、Dream 和 go 会话都在同一区里。(US-DOSSIER-042) `[dossier]`
+  <!-- evidence: .roll/features/delivery-dossier/US-DOSSIER-042/latest/US-DOSSIER-042-report.html -->
+
 ### 修复
 
 - **截图豁免必须写清理由**:只写 true 不再跳过截图要求。(FIX-309) `[loop]`

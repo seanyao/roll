@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { resolveLang, type Lang, type RollEvent, parseEventLine } from "@roll/spec";
 import { extractCycleSignals, signalKindForMarker, type TimelineEntry } from "@roll/core";
 import { collectCycleLedger, ledgerFailedCount, reconcilePendingMergeVerdicts, type CycleLedgerRow } from "../lib/cycle-ledger.js";
-import { collectGitDossierFacts, storyHasMergeEvidence } from "../lib/story-dossier.js";
+import { collectGitDossierFacts, cycleMergeTruth } from "../lib/story-dossier.js";
 import { findCycle } from "./cycle.js";
 
 /**
@@ -18,10 +18,15 @@ import { findCycle } from "./cycle.js";
  * merge-truth, so a `published_pending_merge` cycle whose PR the async PR loop
  * already merged shows `delivered`, not a stale yellow. Same offline `git log`
  * check the web dashboard uses (storyHasMergeEvidence — no gh call).
+ *
+ * FIX-348 — also reconcile when the merge commit does NOT name the story-id: if
+ * main's git log carries a `(#N)` PR-merge commit for the row's recorded PR
+ * number, the delivery landed. Only an actually-merged `(#N)` commit counts (an
+ * open PR leaves none), so an open PR stays pending.
  */
 function reconciledLedger(cwd: string): CycleLedgerRow[] {
   const git = collectGitDossierFacts(cwd);
-  return reconcilePendingMergeVerdicts(collectCycleLedger(cwd), (id) => storyHasMergeEvidence(git, id));
+  return reconcilePendingMergeVerdicts(collectCycleLedger(cwd), cycleMergeTruth(git));
 }
 import { c, renderState, stripAnsi } from "../render.js";
 

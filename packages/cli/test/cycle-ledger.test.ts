@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { collectCycleLedger, ledgerFailedCount, ledgerVerdict, reconcilePendingMergeVerdicts } from "../src/lib/cycle-ledger.js";
+import { cycleMergeTruth, gitHasPrMergeCommit } from "../src/lib/story-dossier.js";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -264,6 +265,115 @@ describe("FIX-347 — reconcilePendingMergeVerdicts: render-time merge-truth", (
     rows[0]!.storyId = "";
     const out = reconcilePendingMergeVerdicts(rows, () => true);
     expect(out[0]!.verdict).toBe("pending_merge");
+  });
+});
+
+describe("FIX-348 — reconcile by recorded PR number when the merge commit does NOT name the story", () => {
+  // FIX-287's reproduced case: cycle 20260616-234303-21843 ended
+  // published_pending_merge and recorded PR #773 on its cycle:terminal twin
+  // (pr.value.url = .../pull/773). PR #773 then merged to main as
+  // `tcr: align machine page typography (#773)` — a `(#773)` squash that does
+  // NOT name FIX-287. The story-id grep finds nothing; the PR-number match must.
+  function fix287Ledger() {
+    const p = project(
+      [
+        {
+          cycle_id: "20260616-234303-21843",
+          status: "published",
+          outcome: "published_pending_merge",
+          story_id: "FIX-287",
+          agent: "codex",
+          ts: "2026-06-16T23:43:03Z",
+          duration_sec: 1140,
+          tcr_count: 1,
+        },
+      ],
+      [
+        {
+          type: "cycle:terminal",
+          schema: 1,
+          cycleId: "20260616-234303-21843",
+          storyId: "FIX-287",
+          agent: "codex",
+          model: "gpt-5.5",
+          startedAt: 1781624584,
+          endedAt: 1781625724,
+          outcome: "published_pending_merge",
+          pr: { present: true, value: { url: "https://github.com/seanyao/roll/pull/773", state: "OPEN" } },
+          branch: { present: true, value: "loop/cycle-20260616-234303-21843" },
+          commit: { present: false, reason: "not_recorded" },
+          tcr: { present: true, value: 1 },
+          attest: { present: false, reason: "not_applicable" },
+          usage: { present: false, reason: "no_parseable_usage" },
+          cost: { present: false, reason: "no_parseable_usage" },
+          ts: 1781625724,
+        },
+      ],
+    );
+    const rows = collectCycleLedger(p);
+    expect(rows[0]!.verdict).toBe("pending_merge");
+    expect(rows[0]!.prNumber).toBe(773); // PR number threaded from cycle:terminal
+    return rows;
+  }
+
+  // A merge-truth probe over a single `(#773)` squash that does NOT name FIX-287
+  // — exactly what main carries (`tcr: align machine page typography (#773)`).
+  const fakeGit = {
+    commits: [{ subject: "tcr: align machine page typography (#773)", message: "tcr: align machine page typography (#773)\n", files: [] }],
+    slug: "seanyao/roll",
+  };
+
+  it("AC: PR #773 merged via a `(#773)` commit that does NOT name FIX-287 → delivered", () => {
+    const rows = fix287Ledger();
+    const out = reconcilePendingMergeVerdicts(rows, cycleMergeTruth(fakeGit));
+    expect(out[0]!.verdict).toBe("delivered");
+    expect(out[0]!.tape.find((s) => s.key === "end")?.state).toBe("pass");
+  });
+
+  it("RED LINE: an OPEN PR (no `(#N)` merge commit on main) stays pending_merge", () => {
+    const rows = fix287Ledger();
+    // main has no commit referencing #773 → the PR is still open/unmerged.
+    const openGit = { commits: [{ subject: "Fix: something unrelated (#999)", message: "", files: [] }], slug: "seanyao/roll" };
+    const out = reconcilePendingMergeVerdicts(rows, cycleMergeTruth(openGit));
+    expect(out[0]!.verdict).toBe("pending_merge");
+  });
+
+  it("does NOT confuse PR #773 with PR #77 or #7730 (exact number match)", () => {
+    const rows = fix287Ledger();
+    const nearGit = {
+      commits: [
+        { subject: "tcr: a (#77)", message: "", files: [] },
+        { subject: "tcr: b (#7730)", message: "", files: [] },
+      ],
+      slug: "seanyao/roll",
+    };
+    const out = reconcilePendingMergeVerdicts(rows, cycleMergeTruth(nearGit));
+    expect(out[0]!.verdict).toBe("pending_merge");
+  });
+
+  it("falls back to the story-id grep (FIX-347) when the commit DOES name the story", () => {
+    const rows = fix287Ledger();
+    const namedGit = { commits: [{ subject: "Fix: FIX-287 — typography (#773)", message: "", files: [] }], slug: "seanyao/roll" };
+    const out = reconcilePendingMergeVerdicts(rows, cycleMergeTruth(namedGit));
+    expect(out[0]!.verdict).toBe("delivered");
+  });
+
+  it("gitHasPrMergeCommit: matches `(#N)` and `PR #N`, rejects open/near misses", () => {
+    const g = { commits: [{ subject: "tcr: x (#773)", message: "", files: [] }], slug: undefined };
+    expect(gitHasPrMergeCommit(g, 773)).toBe(true);
+    expect(gitHasPrMergeCommit(g, 77)).toBe(false);
+    expect(gitHasPrMergeCommit(g, 7730)).toBe(false);
+    expect(gitHasPrMergeCommit({ commits: [{ subject: "Merge PR #42", message: "", files: [] }], slug: undefined }, 42)).toBe(true);
+    expect(gitHasPrMergeCommit(null, 773)).toBe(false);
+    expect(gitHasPrMergeCommit(g, 0)).toBe(false);
+  });
+
+  it("cycleMergeTruth: an empty story-id never matches every commit (only the PR number decides)", () => {
+    // "".includes("") is always true — the probe must NOT pass "" to the grep.
+    const truth = cycleMergeTruth(fakeGit);
+    expect(truth("", undefined)).toBe(false);
+    expect(truth("", 773)).toBe(true);
+    expect(truth("", 999)).toBe(false);
   });
 });
 

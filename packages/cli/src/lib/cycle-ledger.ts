@@ -34,6 +34,12 @@ export interface CycleLedgerRow {
   tape: CycleTapeSegment[];
   /** Evidence links (label → href), relative to features/index.html. */
   evidence: Array<{ label: string; href: string }>;
+  /** FIX-348: the PR number this cycle opened, recorded on its `cycle:terminal`
+   *  twin (`pr.value.url` / `pr.value.number`). The render-time merge-truth
+   *  reconcile uses it to detect a merged delivery whose squash commit carries
+   *  `(#N)` but does NOT name the story-id (e.g. FIX-287 / PR #773). undefined
+   *  when the cycle never opened a PR or predates the terminal-event twin. */
+  prNumber?: number;
 }
 
 /** The CLI's verdict vocabulary (AC4): delivered / reverted / failed / blocked. */
@@ -89,10 +95,18 @@ export function ledgerFailedCount(rows: readonly CycleLedgerRow[]): number {
  * flips the row, but until then the dashboard lies.
  *
  * This closes the gap by re-deriving the verdict on every render: for each
- * `pending_merge` row we ask `isMerged(storyId)` — a GIT check (the FIX-323/278
- * `storyHasMergeEvidence`: a commit subject / PR-merge `(#N)` for the story is
- * reachable from main), NOT a `gh` API call. Merged → `delivered` (green), tape
- * end/pr segments promoted to pass; still open → left `pending_merge` (yellow).
+ * `pending_merge` row we ask `isMerged(storyId, prNumber)` — a GIT check (the
+ * FIX-323/278 `storyHasMergeEvidence`: a commit subject / PR-merge `(#N)` for
+ * the story is reachable from main), NOT a `gh` API call. Merged → `delivered`
+ * (green), tape end/pr segments promoted to pass; still open → left
+ * `pending_merge` (yellow).
+ *
+ * FIX-348: the check ALSO receives the row's recorded PR number, so a merged
+ * delivery whose squash commit carries `(#N)` but does NOT name the story-id
+ * still reconciles (e.g. FIX-287 / PR #773 landed as `tcr: align machine page
+ * typography (#773)`). The caller's probe combines storyHasMergeEvidence(id)
+ * OR gitHasPrMergeCommit(prNumber); a row with no story AND no PR number has
+ * nothing to match on and stays pending.
  *
  * AC3 boundary: ONLY `pending_merge` rows are reconciled — a real `failed`
  * cycle stays red, `idle` stays idle, `delivered`/`reverted` are already
@@ -107,11 +121,13 @@ export function ledgerFailedCount(rows: readonly CycleLedgerRow[]): number {
  */
 export function reconcilePendingMergeVerdicts(
   rows: readonly CycleLedgerRow[],
-  isMerged: (storyId: string) => boolean,
+  isMerged: (storyId: string, prNumber: number | undefined) => boolean,
 ): CycleLedgerRow[] {
   return rows.map((r) => {
     if (r.verdict !== "pending_merge") return r;
-    if (r.storyId === "" || !isMerged(r.storyId)) return r;
+    // Nothing to match on (no story AND no recorded PR) → cannot reconcile.
+    if (r.storyId === "" && r.prNumber === undefined) return r;
+    if (!isMerged(r.storyId, r.prNumber)) return r;
     return {
       ...r,
       verdict: "delivered",
@@ -177,17 +193,21 @@ interface CycleEventFacts {
   attest?: string;
 }
 
-function readEventFacts(projectPath: string): { byCycle: Map<string, CycleEventFacts>; prMergedBy: Map<string, number>; prOpenBy: Map<string, number> } {
+function readEventFacts(projectPath: string): { byCycle: Map<string, CycleEventFacts>; prMergedBy: Map<string, number>; prOpenBy: Map<string, number>; prByCycle: Map<string, number> } {
   const byCycle = new Map<string, CycleEventFacts>();
   const prMergedBy = new Map<string, number>();
   const prOpenBy = new Map<string, number>();
+  // FIX-348: cycleId → the PR number the cycle opened (from its cycle:terminal
+  // twin), so the merge-truth reconcile can match by PR number when the merge
+  // commit does NOT name the story-id.
+  const prByCycle = new Map<string, number>();
   const path = join(projectPath, ".roll", "loop", "events.ndjson");
-  if (!existsSync(path)) return { byCycle, prMergedBy, prOpenBy };
+  if (!existsSync(path)) return { byCycle, prMergedBy, prOpenBy, prByCycle };
   let content = "";
   try {
     content = readFileSync(path, "utf8");
   } catch {
-    return { byCycle, prMergedBy, prOpenBy };
+    return { byCycle, prMergedBy, prOpenBy, prByCycle };
   }
   const facts = (id: string): CycleEventFacts => {
     let f = byCycle.get(id);
@@ -205,8 +225,22 @@ function readEventFacts(projectPath: string): { byCycle: Map<string, CycleEventF
     else if (e.type === "attest:gate") facts(e.cycleId).attest = e.verdict;
     else if (e.type === "pr:merge") prMergedBy.set(e.storyId, e.prNumber);
     else if (e.type === "pr:open") prOpenBy.set(e.storyId, e.prNumber);
+    else if (e.type === "cycle:terminal" && e.pr.present) {
+      const n = terminalPrNumber(e.pr.value);
+      if (n !== undefined) prByCycle.set(e.cycleId, n);
+    }
   }
-  return { byCycle, prMergedBy, prOpenBy };
+  return { byCycle, prMergedBy, prOpenBy, prByCycle };
+}
+
+/** FIX-348: the PR number from a `cycle:terminal` pr fact — the explicit
+ *  `number` when present, otherwise parsed from the recorded `.../pull/<n>` url. */
+function terminalPrNumber(pr: { url: string; state: string; number?: number }): number | undefined {
+  if (typeof pr.number === "number" && Number.isInteger(pr.number) && pr.number > 0) return pr.number;
+  const m = /\/pull\/(\d+)/.exec(pr.url);
+  if (m === null) return undefined;
+  const n = Number(m[1]);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
 }
 
 function rowTape(row: Record<string, unknown>, verdict: CycleLedgerVerdict, ev: CycleEventFacts | undefined, prNumber: number | undefined, prOpen: number | undefined): CycleTapeSegment[] {
@@ -248,7 +282,7 @@ export function collectCycleLedger(projectPath: string): CycleLedgerRow[] {
   } catch {
     return [];
   }
-  const { byCycle, prMergedBy, prOpenBy } = readEventFacts(projectPath);
+  const { byCycle, prMergedBy, prOpenBy, prByCycle } = readEventFacts(projectPath);
   const rows: CycleLedgerRow[] = [];
   for (const line of content.split("\n")) {
     if (line.trim() === "") continue;
@@ -291,6 +325,9 @@ export function collectCycleLedger(projectPath: string): CycleLedgerRow[] {
       duration: fmtDuration(row["duration_sec"]),
       tape: rowTape(row, verdict, ev, prNumber, prOpen),
       evidence,
+      // FIX-348: the cycle's own PR number (cycle:terminal twin), falling back to
+      // the merged/open PR event keyed by story when the terminal twin is absent.
+      prNumber: prByCycle.get(cycleId) ?? prNumber ?? prOpen,
     });
   }
   // De-dupe duplicate cycle ids (kimi pair-review): the LAST row wins — runs.jsonl

@@ -34,7 +34,7 @@ import { launchAgentsDir } from "./loop-sched.js";
 import { projectSlug } from "./dashboard.js";
 import { morningReportHref } from "../lib/morning-report.js";
 import { renderEpicPage } from "../lib/epic-page.js";
-import { buildDossierRunCache, collectStoryDossierInput, renderStoryDossier, stationsDone, storyEvidenceFlags, storyHasMergeEvidence, type StoryDossierInput } from "../lib/story-dossier.js";
+import { buildDossierRunCache, collectStoryDossierInput, cycleMergeTruth, renderStoryDossier, stationsDone, storyEvidenceFlags, storyHasMergeEvidence, type StoryDossierInput } from "../lib/story-dossier.js";
 import { renderMarkdown } from "../lib/markdown.js";
 import { cycleTruthFromRow, outcomeToPanel } from "../lib/truth-adapter.js";
 
@@ -435,7 +435,10 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
         // rewrites its runs row. Reuses the SAME offline git facts the dossier
         // already built (storyHasMergeEvidence — a `git log` check, no gh call;
         // refreshDossierMergeBaseline fetched origin/main just above).
-        cycles: reconcilePendingMergeVerdicts(collectCycleLedger(cwd), (id) => storyHasMergeEvidence(runCache.git, id)),
+        // FIX-348: cycleMergeTruth ALSO matches the row's recorded PR number, so
+        // a merged delivery whose squash commit carries `(#N)` but does NOT name
+        // the story-id (e.g. FIX-287 / PR #773) still reconciles to delivered.
+        cycles: reconcilePendingMergeVerdicts(collectCycleLedger(cwd), cycleMergeTruth(runCache.git)),
         agents: agentRows,
         releasePanel: collectReleasePanel(cwd),
         skills: collectSkillsPanel(cwd),

@@ -2194,6 +2194,49 @@ export function storyHasMergeEvidence(facts: GitDossierFacts | null, storyId: st
   return factsPrNumbers(facts, storyId).length > 0;
 }
 
+/**
+ * FIX-348: merge truth BY PR NUMBER, independent of the story-id. The FIX-347
+ * reconcile only matched commits that NAME the story (`storyHasMergeEvidence`),
+ * so a merged delivery whose squash subject carries `(#N)` but NOT the id stayed
+ * yellow forever — e.g. FIX-287 / PR #773 landed as `tcr: align machine page
+ * typography (#773)`, which names neither FIX-287 nor any story. The cycle's
+ * recorded PR number (from its `cycle:terminal` twin) is the missing key: if
+ * main's git log (origin/main, every commit already merged) carries a `(#N)`
+ * PR-merge commit for that exact number, the delivery landed — regardless of
+ * whether the subject names the story.
+ *
+ * RED LINE: only an actually-merged `(#N)` commit on main counts. An OPEN or
+ * closed-unmerged PR leaves no such commit in the merged history, so this stays
+ * false and the row stays pending — the open PR number alone never promotes.
+ */
+export function gitHasPrMergeCommit(facts: GitDossierFacts | null, prNumber: number): boolean {
+  if (facts === null || !Number.isInteger(prNumber) || prNumber <= 0) return false;
+  // Reuse the proven `(#N)` / `PR #N` extraction (factsPrNumbers' regex), then
+  // match the exact captured number — no fragile digit-boundary regex (e.g.
+  // `(#773)` must NOT match the row's PR #77 or PR #7730).
+  for (const c of facts.commits) {
+    for (const m of c.subject.matchAll(/(?:\(#|PR\s*#?)(\d+)\)?/gi)) {
+      if (numberFromString(m[1]) === prNumber) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * FIX-348 — the merge-truth probe the cycle ledger reconcile injects: a story is
+ * delivered when EITHER a commit names its id (FIX-347, `storyHasMergeEvidence`)
+ * OR main carries a `(#N)` PR-merge commit for the row's recorded PR number
+ * (`gitHasPrMergeCommit`). An empty story-id is NOT passed to
+ * `storyHasMergeEvidence` (`"".includes` matches every commit) — only the PR
+ * number decides for a story-less row.
+ */
+export function cycleMergeTruth(facts: GitDossierFacts | null): (storyId: string, prNumber: number | undefined) => boolean {
+  return (storyId, prNumber) => {
+    if (storyId !== "" && storyHasMergeEvidence(facts, storyId)) return true;
+    return prNumber !== undefined && gitHasPrMergeCommit(facts, prNumber);
+  };
+}
+
 function factsPrNumbers(facts: GitDossierFacts, storyId: string): number[] {
   const nums = new Set<number>();
   for (const subject of factsSubjects(facts, storyId)) {

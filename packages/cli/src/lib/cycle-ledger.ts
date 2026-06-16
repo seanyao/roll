@@ -104,8 +104,16 @@ export function ledgerFailedCount(rows: readonly CycleLedgerRow[]): number {
  * FIX-348: the check ALSO receives the row's recorded PR number, so a merged
  * delivery whose squash commit carries `(#N)` but does NOT name the story-id
  * still reconciles (e.g. FIX-287 / PR #773 landed as `tcr: align machine page
- * typography (#773)`). The caller's probe combines storyHasMergeEvidence(id)
- * OR gitHasPrMergeCommit(prNumber); a row with no story AND no PR number has
+ * typography (#773)`).
+ *
+ * FIX-350: the reconcile is now CYCLE-ACCURATE — a cycle is delivered IFF its
+ * OWN recorded PR merged, NOT if the story merely landed via some OTHER PR.
+ * When a row HAS a recorded PR number, the caller's probe decides SOLELY by
+ * gitHasPrMergeCommit(that PR); it falls back to storyHasMergeEvidence(id) ONLY
+ * for old cycles with no recorded PR number. (The earlier OR-branch wrongly
+ * flipped a pending cycle to delivered whenever any commit named the story-id —
+ * e.g. FIX-311 / PR #763 and FIX-284 / PR #743, whose OWN PRs never merged but
+ * whose stories landed via later PRs.) A row with no story AND no PR number has
  * nothing to match on and stays pending.
  *
  * AC3 boundary: ONLY `pending_merge` rows are reconciled — a real `failed`

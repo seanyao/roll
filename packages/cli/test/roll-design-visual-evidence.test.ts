@@ -147,6 +147,49 @@ deliverable_url: https://app.test/x
       expect(hasVisualEvidenceAc(spec)).toBe(true);
       expect(validateStoryVisualEvidence(spec).ok).toBe(true);
     });
+
+    it("FIX-341 AC1: an explicit [visual-evidence] marker is conclusive even without screenshot wording", () => {
+      const spec = `---
+deliverable_url: .roll/features/index.html#now
+---
+## US-DOSSIER-043 Now tab evidence 📋
+
+**AC:**
+- [ ] [visual-evidence] headless 截 Now 及各 tab 真实渲染页
+`;
+      const v = validateStoryVisualEvidence(spec);
+      expect(hasVisualEvidenceAc(spec)).toBe(true);
+      expect(v.ok).toBe(true);
+      expect(v.surface).toBe("web");
+    });
+
+    it("FIX-341 AC2: declared deliverable_url wins surface classification over terminal words in the AC", () => {
+      const spec = `---
+deliverable_url: .roll/features/index.html#loop
+---
+## US-DOSSIER-042 Loop page dogfood 📋
+
+**AC:**
+- [ ] [visual-evidence] roll story validate evidence covers the loop page
+`;
+      const v = validateStoryVisualEvidence(spec);
+      expect(v.ok).toBe(true);
+      expect(v.surface).toBe("web");
+    });
+
+    it("FIX-341 AC2: declared deliverable_cmd wins terminal classification when no web url is declared", () => {
+      const spec = `---
+deliverable_cmd: roll story validate FIX-341
+---
+## FIX-341 CLI validator 📋
+
+**AC:**
+- [ ] [visual-evidence] command validation output is recorded
+`;
+      const v = validateStoryVisualEvidence(spec);
+      expect(v.ok).toBe(true);
+      expect(v.surface).toBe("terminal");
+    });
   });
 
   describe("fail paths", () => {

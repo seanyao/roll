@@ -129,6 +129,11 @@ const VISUAL_CONTEXT_CUES = [
   ...UNAMBIGUOUS_VISUAL_TOKENS,
 ];
 
+const EXPLICIT_VISUAL_MARKER_CUES = [
+  "[visual-evidence]",
+  "visual-evidence",
+];
+
 /**
  * WEB-surface cues. A visual-evidence AC carrying any of these captures a WEB
  * surface and so owes a declared `deliverable_url` (the runtime web gate needs a
@@ -228,11 +233,30 @@ export function visualExemptionReason(specText: string): string | undefined {
 
 /** Whether the spec frontmatter declares a real deliverable surface URL. */
 export function declaresDeliverableUrl(specText: string): boolean {
+  return frontmatterDeclares(specText, ["deliverable_url", "screenshot_url"]);
+}
+
+function frontmatterDeclares(specText: string, keys: readonly string[]): boolean {
   const fm = frontmatter(specText);
   if (fm === null) return false;
-  const m = /^(?:deliverable_url|screenshot_url):\s*(.+)$/m.exec(fm);
-  if (m === null) return false;
-  return stripQuotes((m[1] ?? "").trim()) !== "";
+  const lines = fm.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? "";
+    const m = /^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$/.exec(line);
+    if (m === null || !keys.includes(m[1] ?? "")) continue;
+    const scalar = stripQuotes((m[2] ?? "").trim());
+    if (scalar !== "") return true;
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const next = lines[j] ?? "";
+      if (/^[A-Za-z_][A-Za-z0-9_-]*:/.test(next)) break;
+      if (/^\s*-\s*\S+/.test(next)) return true;
+    }
+  }
+  return false;
+}
+
+function declaresDeliverableCmd(specText: string): boolean {
+  return frontmatterDeclares(specText, ["deliverable_cmd"]);
 }
 
 /**
@@ -246,6 +270,7 @@ export function declaresDeliverableUrl(specText: string): boolean {
  */
 function itemIsVisualEvidence(itemText: string): boolean {
   const text = itemText.toLowerCase();
+  if (EXPLICIT_VISUAL_MARKER_CUES.some((cue) => cueMatches(text, cue))) return true;
   if (UNAMBIGUOUS_VISUAL_TOKENS.some((tok) => cueMatches(text, tok))) return true;
   const hasDualUse = DUAL_USE_VISUAL_TOKENS.some((tok) => cueMatches(text, tok));
   if (!hasDualUse) return false;
@@ -290,6 +315,8 @@ export function hasVisualEvidenceAc(specText: string): boolean {
  * genuinely owes a real product url even if it also captures a terminal step.
  */
 export function visualSurface(specText: string): VisualSurface {
+  const declaredUrl = declaresDeliverableUrl(specText);
+  const declaredCmd = declaresDeliverableCmd(specText);
   let sawVisual = false;
   let sawWeb = false;
   let sawTerminal = false;
@@ -305,6 +332,8 @@ export function visualSurface(specText: string): VisualSurface {
     }
   }
   if (!sawVisual) return "none";
+  if (declaredUrl) return "web";
+  if (declaredCmd) return "terminal";
   if (sawWeb) return "web"; // a real web surface always owes its url
   if (sawTerminal && !sawAmbiguous) return "terminal";
   return "ambiguous";

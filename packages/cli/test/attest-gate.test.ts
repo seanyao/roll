@@ -263,6 +263,91 @@ describe("verificationReportHasContent (US-ATTEST-012 content floor)", () => {
     });
     expect(verificationReportHasContent(wt, "FIX-SKIP")).toBe(true);
   });
+
+  // FIX-345 — a `screenshot_exempt` validator/back-end card discharges its pass
+  // ACs with TEXT-ONLY evidence (test logs), no deliverable_url/_cmd and no
+  // machine-capture skip recorded. The real FIX-341 e2e cycle was false-
+  // empty-shelled here: a COMPLETE report (4 pass AC sections + ev refs + a
+  // real ac-map) read as content-less ONLY because the visual floor demanded a
+  // per-AC screenshot the exempt card never owed. The fix short-circuits the
+  // pass-AC screenshot floor for an exempt card (it already owes no captured
+  // evidence). The empty-shell FLOOR is NOT weakened — see the two follow-ons.
+  it("FIX-345: an EXEMPT card with text-only PASS ac-map entries (the FIX-341 shape) → has content", () => {
+    const wt = withReport("FIX-341X", 2000, '<div class="ev ev-text">focused validator tests</div>');
+    writeFileSync(
+      join(wt, ".roll", "features", "uncategorized", "FIX-341X", "spec.md"),
+      "---\nid: FIX-341X\nscreenshot_exempt: validator card, no user-visible surface; verified by unit tests\n---\n# FIX-341X\n\n## Acceptance Criteria\n\n- [ ] recognizes path A\n- [ ] recognizes path B\n",
+    );
+    writeAcMap(wt, "FIX-341X", [
+      { ac: "FIX-341X:AC1", status: "pass", evidence: [{ kind: "text", label: "focused tests", textFile: "evidence/vitest.txt" }] },
+      { ac: "FIX-341X:AC2", status: "pass", evidence: [{ kind: "text", label: "validate scan", textFile: "evidence/scan.txt" }] },
+    ]);
+    expect(storyRequiresScreenshot(wt, "FIX-341X")).toBe(false);
+    expect(verificationReportHasContent(wt, "FIX-341X")).toBe(true);
+  });
+
+  it("FIX-345: an EXEMPT card with fixture-card siblings present is still not false-empty-shelled (validator card does not corrupt its OWN attest read)", () => {
+    // The FIX-341 validator card's build created fixture cards (FIX-300/902/WEB)
+    // and ran `roll story validate` on many cards, leaving fixture-card REPORTS
+    // siblings inside the SAME latest/ dir. The main card's own attest read must
+    // be robust to that pollution — its own complete report + ac-map still count.
+    const wt = withReport("FIX-341Y", 2000, '<div class="ev ev-text">validator passes</div>');
+    const latest = join(wt, ".roll", "features", "uncategorized", "FIX-341Y", "latest");
+    // fixture-card report siblings dropped into the main card's latest/ dir
+    writeFileSync(join(latest, "FIX-FIXTURE-A-report.html"), "<html><body><h1>fixture A</h1></body></html>\n");
+    writeFileSync(join(latest, "FIX-FIXTURE-B-report.html"), "<html><body><h1>fixture B</h1></body></html>\n");
+    writeFileSync(
+      join(wt, ".roll", "features", "uncategorized", "FIX-341Y", "spec.md"),
+      "---\nid: FIX-341Y\nscreenshot_exempt: validator card; recognition logic, no visible surface\n---\n# FIX-341Y\n\n## Acceptance Criteria\n\n- [ ] x\n",
+    );
+    writeAcMap(wt, "FIX-341Y", [
+      { ac: "FIX-341Y:AC1", status: "pass", evidence: [{ kind: "text", label: "tests", textFile: "evidence/proof.txt" }] },
+    ]);
+    expect(verificationReportHasContent(wt, "FIX-341Y")).toBe(true);
+  });
+
+  it("FIX-345 (RED LINE): a GENUINELY empty EXEMPT report is STILL blocked — the empty-shell floor is not weakened", () => {
+    // exempt, but the report HTML carries zero AC sections (a real empty shell)
+    const wt = tmp("ex-empty");
+    const cardDir = join(wt, ".roll", "features", "uncategorized", "FIX-341Z");
+    mkdirSync(join(cardDir, "latest"), { recursive: true });
+    writeFileSync(
+      join(cardDir, "spec.md"),
+      "---\nid: FIX-341Z\nscreenshot_exempt: validator card, no visible surface\n---\n# FIX-341Z\n\n## Acceptance Criteria\n\n- [ ] x\n",
+    );
+    writeFileSync(join(cardDir, "latest", "FIX-341Z-report.html"), "<html><body><h1>no ACs here</h1></body></html>\n");
+    writeFileSync(join(cardDir, "ac-map.json"), "[]\n");
+    expect(storyRequiresScreenshot(wt, "FIX-341Z")).toBe(false);
+    expect(verificationReportHasContent(wt, "FIX-341Z")).toBe(false); // zero AC sections → still empty shell
+
+    // exempt + content-bearing report but NO ac-map → still blocked (no AI intent layer)
+    const wt2 = tmp("ex-noacmap");
+    const cardDir2 = join(wt2, ".roll", "features", "uncategorized", "FIX-341W");
+    mkdirSync(join(cardDir2, "latest"), { recursive: true });
+    writeFileSync(
+      join(cardDir2, "spec.md"),
+      "---\nid: FIX-341W\nscreenshot_exempt: validator card, no visible surface\n---\n# FIX-341W\n\n## Acceptance Criteria\n\n- [ ] x\n",
+    );
+    writeFileSync(
+      join(cardDir2, "latest", "FIX-341W-report.html"),
+      '<html><body><section class="ac s-pass" id="FIX-341W:AC1"><div class="ev ev-text">proof</div></section></body></html>\n',
+    );
+    // deliberately no ac-map.json written
+    expect(verificationReportHasContent(wt2, "FIX-341W")).toBe(false); // no ac-map → still empty shell
+  });
+
+  it("FIX-345 (RED LINE): a NON-exempt card with text-only PASS ACs still fails the screenshot floor", () => {
+    const wt = withReport("FIX-341N", 2000, '<div class="ev ev-text">text proof only</div>');
+    writeFileSync(
+      join(wt, ".roll", "features", "uncategorized", "FIX-341N", "spec.md"),
+      "# FIX-341N\n\n## Acceptance Criteria\n\n- [ ] CLI output can be inspected\n",
+    );
+    writeAcMap(wt, "FIX-341N", [
+      { ac: "FIX-341N:AC1", status: "pass", evidence: [{ kind: "text", label: "log", textFile: "evidence/proof.txt" }] },
+    ]);
+    expect(storyRequiresScreenshot(wt, "FIX-341N")).toBe(true); // not exempt → still owes capture
+    expect(verificationReportHasContent(wt, "FIX-341N")).toBe(false);
+  });
 });
 
 describe("readAttestGateMode", () => {

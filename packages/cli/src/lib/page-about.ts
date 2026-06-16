@@ -23,7 +23,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { bi } from "@roll/core";
-import { machineKicker, machinePalette, renderMachineShell, type ProjectRegistryEntry, type TruthConsoleBrand } from "./truth-console.js";
+import { machineMasthead, machinePalette, renderMachineShell, type ProjectRegistryEntry, type TruthConsoleBrand } from "./truth-console.js";
 
 /** One bilingual string. */
 export interface Bilingual {
@@ -320,9 +320,10 @@ export function renderAboutPage(input: RenderAboutInput): string {
       : "";
 
   const body =
-    `<div style="padding:30px 0 6px;">` +
-    machineKicker(bi("The harness · global · shared by every roll project", "框架 · 全局 · 每个 roll 项目共享")) +
-    `<h1 style="margin:10px 0 0;font-size:30px;line-height:1.15;font-weight:700;letter-spacing:-.02em;color:${C.ink};">${bi("How roll works", "roll 怎么运转")}</h1></div>` +
+    machineMasthead({
+      kicker: bi("The harness · global · shared by every roll project", "框架 · 全局 · 每个 roll 项目共享"),
+      title: bi("How roll works", "roll 怎么运转"),
+    }) +
     creed +
     sectionLabel("roll harness · the feedback loop", "roll 框架 · 反馈闭环") +
     loopSection +
@@ -340,7 +341,6 @@ export function renderAboutPage(input: RenderAboutInput): string {
     brand,
     bodyHtml: body,
     snapshot: input.snapshot,
-    selfContained: true,
     ...(input.projects !== undefined ? { projects: input.projects } : {}),
     ...(input.currentSlug !== undefined ? { currentSlug: input.currentSlug } : {}),
   });

@@ -30,7 +30,7 @@ import {
   CONSOLE_TOKENS,
   biSpan as bi,
   escHtml as esc,
-  machineKicker as kicker,
+  machineMasthead,
   renderMachineShell,
   type ProjectRegistryEntry,
   type TruthConsoleBrand,
@@ -238,13 +238,14 @@ const SKILLS_PAGE_CSS = `
 export function renderSkillsPage(input: SkillsPageInput): string {
   const vm = input.skills;
   const body =
-    `<div style="padding:30px 0 4px;">` +
-    kicker(bi("Harness rulebook", "执行契约")) +
-    `<h1 style="margin:10px 0 0;font-size:28px;line-height:1.1;font-weight:700;letter-spacing:-.02em;color:${C.ink};">${bi("Skills on this machine", "本机技能")}</h1>` +
-    `<p style="margin:10px 0 0;max-width:660px;font-size:14.5px;line-height:1.55;color:${C.sub};">${bi(
-      "Markdown playbooks agents load and follow — machine-side contracts that govern every project on this box. A contract is a claim; the strict audit and real invocations are its truth. The catalog is read from the skills/ directory: a skill that is not on disk does not exist here.",
-      "agent 加载并遵循的 markdown 工作手册——机器侧契约，治理本机上的每个项目。契约是声明；严格审计与真实调用，才是它的真相。清单从 skills/ 目录实读：磁盘上不存在的技能这里也不存在。",
-    )}</p></div>` +
+    machineMasthead({
+      kicker: bi("Harness rulebook", "执行契约"),
+      title: bi("Skills on this machine", "本机技能"),
+      lede: bi(
+        "Markdown playbooks agents load and follow — machine-side contracts that govern every project on this box. A contract is a claim; the strict audit and real invocations are its truth. The catalog is read from the skills/ directory: a skill that is not on disk does not exist here.",
+        "agent 加载并遵循的 markdown 工作手册——机器侧契约，治理本机上的每个项目。契约是声明；严格审计与真实调用，才是它的真相。清单从 skills/ 目录实读：磁盘上不存在的技能这里也不存在。",
+      ),
+    }) +
     auditStrip(vm) +
     vm.groups.map(group).join("") +
     `<footer style="margin-top:42px;padding-top:18px;border-top:1px solid #dfe4ec;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;${MONO}font-size:11.5px;color:${C.faint};">` +

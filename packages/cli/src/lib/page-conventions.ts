@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { yamlReadFlat } from "@roll/infra";
 import { bi, canonicalAgentName } from "@roll/core";
 import type { AgentPanelRow } from "./agent-panel.js";
-import { machineKicker, machinePalette, renderMdMachineShell, type ProjectRegistryEntry, type TruthConsoleBrand } from "./truth-console.js";
+import { machineMasthead, machinePalette, renderMdMachineShell, type ProjectRegistryEntry, type TruthConsoleBrand } from "./truth-console.js";
 
 /** One sync target row (config key → agent → freshness). */
 export interface ConventionsTarget {
@@ -173,13 +173,14 @@ export function renderConventionsPage(input: RenderConventionsInput): string {
     `<div style="display:flex;align-items:baseline;gap:12px;margin:26px 0 4px;"><span style="${MONO}font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${C.sub};font-weight:600;">${bi(en, zh)}</span><span style="flex:1;height:1px;background:#dfe4ec;"></span></div>`;
 
   const body =
-    `<div style="padding:34px 0 4px;">` +
-    machineKicker(bi("Machine layer · conventions", "机器层 · 约定")) +
-    `<h1 style="margin:10px 0 0;font-size:33px;line-height:1.1;font-weight:700;letter-spacing:-.02em;color:${C.ink};">${bi("Conventions", "约定")}</h1>` +
-    `<p style="margin:12px 0 0;max-width:680px;font-size:15.5px;line-height:1.6;color:${C.sub};">${bi(
-      "The rulebook roll syncs into every AI agent on this machine, and whether each target is in sync — rendered read-only from conventions/ + AGENTS.md.",
-      "roll 同步进本机每个 AI agent 的规则书，以及每个目标是否已同步——从 conventions/ + AGENTS.md 只读渲染。",
-    )}</p></div>` +
+    machineMasthead({
+      kicker: bi("Machine layer · conventions", "机器层 · 约定"),
+      title: bi("Conventions", "约定"),
+      lede: bi(
+        "The rulebook roll syncs into every AI agent on this machine, and whether each target is in sync — rendered read-only from conventions/ + AGENTS.md.",
+        "roll 同步进本机每个 AI agent 的规则书，以及每个目标是否已同步——从 conventions/ + AGENTS.md 只读渲染。",
+      ),
+    }) +
     sectionLabel("Sync targets", "同步目标") +
     syncSection +
     sectionLabel("Rulebook", "规则书") +

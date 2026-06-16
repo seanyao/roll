@@ -262,15 +262,18 @@ describe("About machine page — US-DOSSIER-041 (structured charter)", () => {
     expect(html).toContain('data-set-lang="zh"'); // lang toggle rides along
   });
 
-  it("AC3: cool design, bilingual EN/中 (separate lines), self-contained — NO external <link>", () => {
+  it("AC3: cool design, bilingual EN/中 (separate lines), shared IBM Plex font links", () => {
     // the injected brand rides the top bar (never hardcoded)
     expect(html).toContain(">roll<");
     expect(html).toContain("It just works.");
     // bilingual masthead — EN and 中 each present (rendered on separate lines via bi())
     expect(html).toContain("How roll works");
     expect(html).toContain("roll 怎么运转");
-    // self-contained single file — no external font/style link
-    expect(html).not.toContain("<link");
+    // FIX-287: About shares the same IBM Plex FONT_LINKS path as the console
+    // and the other machine pages.
+    expect(html).toContain("fonts.googleapis.com");
+    expect(html).toContain("IBM+Plex+Sans");
+    expect(html).toContain("IBM+Plex+Mono");
     expect(html).not.toContain("fetch(");
     expect(html).not.toContain("undefined");
   });

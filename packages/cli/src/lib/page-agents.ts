@@ -32,7 +32,7 @@ import {
   esc,
   FONT_LINKS,
   htmlHead,
-  kicker,
+  machineMasthead,
   MONO,
   rollScope,
   SHELL_CSS,
@@ -119,16 +119,14 @@ export function renderAgentsMachinePage(input: AgentsPageInput): string {
     `${CONSOLE_SCRIPT}\n</head>\n<body>\n` +
     header +
     `<main style="max-width:1100px;margin:0 auto;padding:0 22px 64px;">` +
-    `<div style="padding:34px 0 8px;">` +
-    kicker(bi("Machine layer", "机器层")) +
-    `<h1 style="margin:10px 0 0;font-size:33px;line-height:1.1;font-weight:700;letter-spacing:-.02em;color:${C.ink};">${bi(
-      "Agents",
-      "Agents",
-    )}</h1>` +
-    `<p style="margin:12px 0 0;max-width:680px;font-size:15.5px;line-height:1.6;color:${C.sub};">${bi(
-      "What this machine knows how to run, and whether it is healthy — every installed agent the loop dispatches to, with its runner, recent cycles & spend, and convention-file sync truth. Machine-global, not one project's usage.",
-      "这台机器会跑什么、它是否健康——循环派活的每个已安装 agent，连同运行器、近期周期与花费、约定文件同步真相。机器级，不是单个项目的使用记录。",
-    )}</p></div>` +
+    machineMasthead({
+      kicker: bi("Machine layer", "机器层"),
+      title: bi("Agents", "Agents"),
+      lede: bi(
+        "What this machine knows how to run, and whether it is healthy — every installed agent the loop dispatches to, with its runner, recent cycles & spend, and convention-file sync truth. Machine-global, not one project's usage.",
+        "这台机器会跑什么、它是否健康——循环派活的每个已安装 agent，连同运行器、近期周期与花费、约定文件同步真相。机器级，不是单个项目的使用记录。",
+      ),
+    }) +
     sectionHeader +
     section +
     `</main>\n</body>\n</html>\n`

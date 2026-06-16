@@ -1821,6 +1821,17 @@ export { bi as biSpan };
 export function machineKicker(text: string): string {
   return kicker(text);
 }
+export function machineMasthead(input: { kicker: string; title: string; lede?: string }): string {
+  return (
+    `<div style="padding:30px 0 4px;">` +
+    machineKicker(input.kicker) +
+    `<h1 style="margin:10px 0 0;font-size:28px;line-height:1.1;font-weight:700;letter-spacing:-.02em;color:${C.ink};">${input.title}</h1>` +
+    (input.lede !== undefined && input.lede !== ""
+      ? `<p style="margin:10px 0 0;max-width:660px;font-size:14.5px;line-height:1.55;color:${C.sub};">${input.lede}</p>`
+      : "") +
+    `</div>`
+  );
+}
 export function escHtml(s: string): string {
   return esc(s);
 }

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { collectCycleLedger, ledgerFailedCount, ledgerVerdict } from "../src/lib/cycle-ledger.js";
+import { collectCycleLedger, ledgerFailedCount, ledgerVerdict, reconcilePendingMergeVerdicts } from "../src/lib/cycle-ledger.js";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -181,6 +181,89 @@ describe("FIX-297 — idle heartbeats are not cycles", () => {
     ]);
     const rows = collectCycleLedger(p);
     expect(rows.map((r) => r.cycleId).sort()).toEqual(["with-built", "with-story", "with-work"]);
+  });
+});
+
+describe("FIX-347 — reconcilePendingMergeVerdicts: render-time merge-truth", () => {
+  // Build a ledger from a published_pending_merge cycle (PR open at cycle-end):
+  // its row says outcome=published_pending_merge → verdict pending_merge, and the
+  // pr-open event makes the pr tape segment read "#N open".
+  function pendingLedger(storyId = "FIX-287") {
+    const p = project(
+      [
+        {
+          cycle_id: "20260616-234303-21843",
+          status: "published",
+          outcome: "published_pending_merge",
+          story_id: storyId,
+          agent: "claude",
+          ts: "2026-06-16T23:43:03Z",
+          duration_sec: 600,
+          tcr_count: 4,
+        },
+      ],
+      [{ type: "pr:open", prNumber: 773, storyId, ts: 1 }],
+    );
+    const rows = collectCycleLedger(p);
+    expect(rows[0]!.verdict).toBe("pending_merge"); // un-reconciled snapshot is yellow
+    expect(rows[0]!.tape.find((s) => s.key === "pr")?.detail).toBe("#773 open");
+    return rows;
+  }
+
+  it("AC1/AC4: PR merged (git merge-truth true) → delivered/green, tape promoted", () => {
+    // This is FIX-287's exact case: cycle 20260616-234303-21843 ended
+    // published_pending_merge, PR #773 then merged by the PR loop.
+    const rows = pendingLedger();
+    const out = reconcilePendingMergeVerdicts(rows, () => true);
+    expect(out[0]!.verdict).toBe("delivered");
+    expect(out[0]!.tape.find((s) => s.key === "end")?.state).toBe("pass");
+    expect(out[0]!.tape.find((s) => s.key === "pr")?.detail).toBe("#773 merged");
+    expect(out[0]!.tape.find((s) => s.key === "pr")?.state).toBe("pass");
+  });
+
+  it("AC4: PR still open (no merge evidence) → stays pending_merge/yellow", () => {
+    const rows = pendingLedger();
+    const out = reconcilePendingMergeVerdicts(rows, () => false);
+    expect(out[0]!.verdict).toBe("pending_merge");
+    expect(out[0]!.tape.find((s) => s.key === "pr")?.detail).toBe("#773 open");
+  });
+
+  it("AC3/AC4: PR closed-unmerged (no merge evidence) is NOT conflated with failed", () => {
+    // A closed-unmerged PR leaves no merge commit, so the git check is false —
+    // the row stays pending_merge (the cycle-terminal / backfill owns the
+    // failed/abandon credit). Reconcile must never invent a `failed` from the
+    // mere absence of a merge.
+    const rows = pendingLedger();
+    const out = reconcilePendingMergeVerdicts(rows, () => false);
+    expect(out[0]!.verdict).not.toBe("failed");
+    expect(out[0]!.verdict).toBe("pending_merge");
+  });
+
+  it("AC3: real failed / idle / delivered cycles are left untouched (only pending_merge reconciles)", () => {
+    const p = project([
+      { cycle_id: "f", status: "failed", outcome: "failed", story_id: "US-F", ts: "2026-06-16T05:00:00Z" },
+      { cycle_id: "d", status: "merged", outcome: "delivered", story_id: "US-D", ts: "2026-06-16T04:00:00Z" },
+      { cycle_id: "pm", status: "published", outcome: "published_pending_merge", story_id: "US-PM", ts: "2026-06-16T03:00:00Z" },
+    ]);
+    // isMerged returns true for EVERY story — proving non-pending rows are not
+    // re-derived (a failed cycle must stay red even if its story later merged
+    // elsewhere; only the pending_merge row flips).
+    const out = reconcilePendingMergeVerdicts(collectCycleLedger(p), () => true);
+    const byId = new Map(out.map((r) => [r.cycleId, r.verdict]));
+    expect(byId.get("f")).toBe("failed"); // red stays red
+    expect(byId.get("d")).toBe("delivered");
+    expect(byId.get("pm")).toBe("delivered"); // the pending one flips
+  });
+
+  it("AC4: a pending_merge row with no story_id is never flipped (nothing to match on)", () => {
+    const p = project([
+      { cycle_id: "ns", status: "published", outcome: "published_pending_merge", story_id: "US-S", ts: "2026-06-16T03:00:00Z" },
+    ]);
+    const rows = collectCycleLedger(p);
+    // simulate a missing story id on the row
+    rows[0]!.storyId = "";
+    const out = reconcilePendingMergeVerdicts(rows, () => true);
+    expect(out[0]!.verdict).toBe("pending_merge");
   });
 });
 

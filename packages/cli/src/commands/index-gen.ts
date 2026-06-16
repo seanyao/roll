@@ -21,7 +21,7 @@ import { collectCharter, defaultCharterDeps } from "../lib/page-charter.js";
 import { collectAbout, defaultAboutDeps, renderAboutPage } from "../lib/page-about.js";
 import { collectConventions, defaultConventionsDeps, renderConventionsPage } from "../lib/page-conventions.js";
 import { collectProjectsRegistry, reachableProjects, resolveProjectName, shouldSelfRegister, writeProjectRow } from "../lib/projects-registry.js";
-import { collectCycleLedger } from "../lib/cycle-ledger.js";
+import { collectCycleLedger, reconcilePendingMergeVerdicts } from "../lib/cycle-ledger.js";
 import { collectAgentPanel } from "../lib/agent-panel.js";
 import { collectReleasePanel } from "../lib/release-panel.js";
 import { collectReleaseScope } from "../lib/release-scope.js";
@@ -429,7 +429,13 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
         },
         backlog: backlogViewModel(epics),
         spineKeys: SPINE_STAGES.map((s) => s.key),
-        cycles: collectCycleLedger(cwd),
+        // FIX-347: reconcile `pending_merge` cycles against git merge-truth at
+        // render time — a `published_pending_merge` cycle whose PR the async PR
+        // loop merged is Done (green), even before the next cycle's gh-backfill
+        // rewrites its runs row. Reuses the SAME offline git facts the dossier
+        // already built (storyHasMergeEvidence — a `git log` check, no gh call;
+        // refreshDossierMergeBaseline fetched origin/main just above).
+        cycles: reconcilePendingMergeVerdicts(collectCycleLedger(cwd), (id) => storyHasMergeEvidence(runCache.git, id)),
         agents: agentRows,
         releasePanel: collectReleasePanel(cwd),
         skills: collectSkillsPanel(cwd),

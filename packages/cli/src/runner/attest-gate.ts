@@ -287,20 +287,47 @@ export function deliverableUrlsForStory(worktreeCwd: string, storyId: string): s
   }
   const fm = /^---\n([\s\S]*?)\n---/.exec(text);
   if (fm === null) return [];
-  return parseFrontmatterListField(fm[1] ?? "", /^(?:deliverable_url|screenshot_url):/);
+  // deliverable_url keeps comma-splitting: a url never contains a comma, so a
+  // comma-separated scalar (`a, b`) is an unambiguous two-url list.
+  return parseFrontmatterListField(fm[1] ?? "", /^(?:deliverable_url|screenshot_url):/, { commaSplit: true });
 }
 
 /**
- * FIX-339 (AC2) — the DECLARED deliverable CLI commands. A card whose
+ * FIX-339 (AC2) — the DECLARED deliverable CLI commands, after the
+ * roll-only allowlist filter (see {@link allowedDeliverableCmd}). A card whose
  * deliverable is a command's terminal output (a CLI surface) declares
  * `deliverable_cmd:` in the frontmatter; the attest runs EACH command in the
- * worktree and captures its terminal output. Same three parse shapes as
- * {@link deliverableUrlsForStory}. Empty / absent ⇒ []. SECURITY: only the
- * commands the spec itself declares are ever run, and only inside the worktree
- * (the terminal capture lane wraps every command in `cd <worktree> && …`); no
- * external / runtime input reaches this list.
+ * worktree and captures its terminal output. Two parse shapes (NO comma split):
+ *   - single scalar     `deliverable_cmd: roll status --fmt a,b`  → one command
+ *   - YAML block list    `deliverable_cmd:\n  - roll status\n  - roll cycles`
+ * A scalar is the WHOLE line (one command) — never comma-split, because a
+ * command line legitimately carries commas (flag lists / JSON args, e.g.
+ * `roll status --fmt a,b`). Empty / absent ⇒ [].
+ *
+ * SECURITY (FIX-339 复核): a spec is written by the autonomous loop's own cycle
+ * agent, so an unfiltered `deliverable_cmd` would be agent-controlled ARBITRARY
+ * command execution (the whole line runs verbatim under `sh -lc`). This getter
+ * therefore returns ONLY commands that pass {@link allowedDeliverableCmd} — the
+ * roll read-only allowlist. A rejected command is DROPPED here (it never runs)
+ * and surfaced separately by {@link rejectedDeliverableCmdsForStory} so the gate
+ * can FAIL loudly rather than silently honest-skip.
  */
 export function deliverableCmdsForStory(worktreeCwd: string, storyId: string): string[] {
+  return rawDeliverableCmdsForStory(worktreeCwd, storyId).filter(allowedDeliverableCmd);
+}
+
+/**
+ * FIX-339 (AC2 复核) — the DECLARED deliverable_cmd entries that the roll-only
+ * allowlist REJECTS (a non-roll command, or a state-changing/release roll
+ * subcommand). Non-empty ⇒ the spec asked the attest to run something it must
+ * not; the gate fails loud (these are never silently skipped).
+ */
+export function rejectedDeliverableCmdsForStory(worktreeCwd: string, storyId: string): string[] {
+  return rawDeliverableCmdsForStory(worktreeCwd, storyId).filter((c) => !allowedDeliverableCmd(c));
+}
+
+/** Unfiltered deliverable_cmd parse (scalar = whole line, block list = per item; NO comma split). */
+function rawDeliverableCmdsForStory(worktreeCwd: string, storyId: string): string[] {
   const spec = storySpecPath(worktreeCwd, storyId);
   if (spec === null) return [];
   let text: string;
@@ -311,21 +338,90 @@ export function deliverableCmdsForStory(worktreeCwd: string, storyId: string): s
   }
   const fm = /^---\n([\s\S]*?)\n---/.exec(text);
   if (fm === null) return [];
-  return parseFrontmatterListField(fm[1] ?? "", /^deliverable_cmd:/);
+  return parseFrontmatterListField(fm[1] ?? "", /^deliverable_cmd:/, { commaSplit: false });
 }
 
 /**
- * Parse a frontmatter field that may be a scalar, an inline `[a, b]` list, a
- * comma-separated scalar, or a YAML block list. `keyRe` matches the `key:`
- * prefix on a frontmatter line (anchored at column 0). De-dupes while keeping
- * first-seen order. Shared by deliverable_url + deliverable_cmd so both fields
- * accept the same shapes and the single-value back-compat path is identical.
+ * FIX-339 (复核 #1) — the deliverable_cmd security policy. A spec is authored by
+ * the autonomous loop's own cycle agent, so `deliverable_cmd` is AGENT-CONTROLLED
+ * input that the attest lane runs verbatim under `sh -lc`. Without a gate this is
+ * arbitrary command execution. Two rules, both must pass:
  *
- * NOTE: commas split URLs/commands, so a command that legitimately contains a
- * comma must use the inline `[ "a,b" ]` or YAML block-list form instead of the
- * comma-separated scalar — the same caveat applies to URLs (rare in practice).
+ *   (1) ALLOWLIST — the command's first token MUST invoke THIS project's own
+ *       `roll` CLI: bare `roll`, `./bin/roll.js`, `bin/roll.js`, or a
+ *       `node …/roll(.js)` / `node …/bin/roll.js` form. ANY other command
+ *       (`rm`, `curl`, `git push`, a bare script, a pipeline, …) is rejected —
+ *       deliverable_cmd is for read-only roll demos only, never arbitrary shell.
+ *   (2) DENYLIST — even a roll command must be READ-ONLY: the mutating /
+ *       releasing subcommands below are rejected (they change state, publish, or
+ *       reconfigure the loop, and have no place in an acceptance demo).
+ *
+ * The allowlist/denylist are deliberately CONSTANTS here; a later card can lift
+ * them into `.roll/policy.yaml` (see {@link DELIVERABLE_CMD_DENY_SUBCOMMANDS}).
+ * Exported for direct unit testing.
  */
-function parseFrontmatterListField(fmBody: string, keyRe: RegExp): string[] {
+export function allowedDeliverableCmd(command: string): boolean {
+  const tokens = command.trim().split(/\s+/).filter((t) => t !== "");
+  if (tokens.length === 0) return false;
+  // No shell metacharacters that could chain/echo a second command — a single
+  // `roll …` invocation only. (`,` is allowed: it appears in flag values.)
+  if (/[;&|`$<>(){}]|\|\||&&/.test(command)) return false;
+  const first = tokens[0] ?? "";
+  // (1) allowlist — the first token must be the roll CLI itself.
+  let subIdx: number;
+  if (first === "roll" || /^(?:\.\/)?(?:.*\/)?bin\/roll\.js$/.test(first) || /^(?:.*\/)?roll(?:\.js)?$/.test(first)) {
+    subIdx = 1;
+  } else if (first === "node") {
+    // node <…/roll.js | …/bin/roll.js> <subcommand> …
+    const target = tokens[1] ?? "";
+    if (!/^(?:.*\/)?(?:bin\/)?roll\.js$/.test(target) && !/^(?:.*\/)?roll(?:\.js)?$/.test(target)) return false;
+    subIdx = 2;
+  } else {
+    return false;
+  }
+  // (2) denylist — reject state-changing / releasing roll subcommands.
+  const sub = (tokens[subIdx] ?? "").toLowerCase();
+  if (sub === "") return true; // bare `roll` (prints help) — harmless read-only.
+  if (DELIVERABLE_CMD_DENY_SUBCOMMANDS.has(sub)) return false;
+  return true;
+}
+
+/**
+ * FIX-339 (复核 #1) — roll subcommands a deliverable_cmd may NOT invoke. These
+ * change state / publish / reconfigure the loop, so they have no place in an
+ * acceptance demo (which should be read-only, e.g. `roll pulse` / `roll status`
+ * / `roll cycles`). 后续可挪 policy.yaml.
+ */
+const DELIVERABLE_CMD_DENY_SUBCOMMANDS: ReadonlySet<string> = new Set([
+  "release",
+  "loop", // on/off/go/… — operate the loop
+  "story",
+  "idea",
+  "agent", // `roll agent use` re-points the shared runner
+  "pair",
+  "attest", // re-render evidence — never from within an attest demo
+  "fix",
+  "build",
+  "design",
+  "propose",
+]);
+
+/**
+ * Parse a frontmatter field that may be a scalar, an inline `[a, b]` list, or a
+ * YAML block list. `keyRe` matches the `key:` prefix on a frontmatter line
+ * (anchored at column 0). De-dupes while keeping first-seen order.
+ *
+ * `commaSplit` controls how a bare scalar is interpreted:
+ *   - `true`  (deliverable_url): a scalar may be comma-separated (`a, b` → two
+ *             values). Safe for URLs — a url never contains a comma.
+ *   - `false` (deliverable_cmd): a scalar is the WHOLE line (one command). A
+ *             command line legitimately carries commas (flag lists / JSON args,
+ *             e.g. `roll status --fmt a,b`), so splitting on commas would shred
+ *             a single command into bogus fragments. Multiple commands use the
+ *             YAML block-list form (one `-` per line).
+ * The inline `[a, b]` form always splits on commas (it is an explicit list).
+ */
+function parseFrontmatterListField(fmBody: string, keyRe: RegExp, opts: { commaSplit: boolean }): string[] {
   const lines = fmBody.split(/\r?\n/);
   const out: string[] = [];
   const push = (raw: string): void => {
@@ -337,15 +433,16 @@ function parseFrontmatterListField(fmBody: string, keyRe: RegExp): string[] {
     const head = keyRe.exec(line);
     if (head === null) continue;
     const rest = line.slice(head[0].length).trim();
-    // inline list: key: [a, b]
+    // inline list: key: [a, b] — an explicit list always splits on commas.
     const inline = /^\[(.*)\]$/.exec(rest);
     if (inline !== null) {
       for (const tok of (inline[1] ?? "").split(",")) push(tok);
       continue;
     }
     if (rest !== "") {
-      // scalar (possibly comma-separated)
-      for (const tok of rest.split(",")) push(tok);
+      // scalar — comma-split only when the caller opts in (url), else whole line (cmd).
+      if (opts.commaSplit) for (const tok of rest.split(",")) push(tok);
+      else push(rest);
       continue;
     }
     // block list: key:\n  - a\n  - b  (consume following `-` item lines)
@@ -407,8 +504,11 @@ export function declaresAnySurface(specText: string): boolean {
   const fm = /^---\n([\s\S]*?)\n---/.exec(specText);
   if (fm === null) return false;
   const body = fm[1] ?? "";
-  if (parseFrontmatterListField(body, /^(?:deliverable_url|screenshot_url):/).length > 0) return true;
-  if (parseFrontmatterListField(body, /^deliverable_cmd:/).length > 0) return true;
+  if (parseFrontmatterListField(body, /^(?:deliverable_url|screenshot_url):/, { commaSplit: true }).length > 0) return true;
+  // A declared deliverable_cmd counts as a surface even if the allowlist would
+  // later reject it — the card DID declare an intent to demo a CLI surface; the
+  // reject path fails loud at the gate, not here.
+  if (parseFrontmatterListField(body, /^deliverable_cmd:/, { commaSplit: false }).length > 0) return true;
   const ex = /^screenshot_exempt:\s*(.+)$/m.exec(body);
   if (ex !== null) {
     const reason = stripQuotes((ex[1] ?? "").trim());
@@ -508,15 +608,29 @@ function takenCaptureCount(worktreeCwd: string, storyId: string, kind: string): 
 }
 
 /**
+ * FIX-339 (复核 #3) — when a deploy/env override (`ROLL_ATTEST_WEB_URL` or a
+ * Gate-set deploy url) is in effect, the web capture lane collapses to ONE
+ * target (the single live deploy proves one active surface — see
+ * {@link webCaptureTargetsForStory}). So the gate must require only ONE taken
+ * web shot, not N. Without this a multi-url card under an override would demand
+ * N shots while the lane only ever produced 1 → permanent false FAIL.
+ */
+function webCaptureNeed(worktreeCwd: string, storyId: string): number {
+  const override = (process.env["ROLL_ATTEST_WEB_URL"] ?? "").trim();
+  if (override !== "") return 1; // override collapses to a single live-deploy shot
+  const declared = deliverableUrlsForStory(worktreeCwd, storyId).length;
+  return declared === 0 ? 1 : declared; // owesRealWebCapture guarantees ≥1 when called
+}
+
+/**
  * FIX-309 + FIX-339 (AC1) — EVERY declared web surface is REALLY captured.
  * A card that declares N deliverable_urls must carry ≥N taken:true web captures
  * (one per surface); a single real shot no longer discharges a multi-surface
  * card. With a single declared url this is exactly the old "≥1 taken web shot".
+ * Under a deploy/env override the need folds to 1 ({@link webCaptureNeed}).
  */
 function hasRealWebCapture(worktreeCwd: string, storyId: string): boolean {
-  const declared = deliverableUrlsForStory(worktreeCwd, storyId).length;
-  const need = declared === 0 ? 1 : declared; // owesRealWebCapture guarantees ≥1 when called
-  return takenCaptureCount(worktreeCwd, storyId, "web") >= need;
+  return takenCaptureCount(worktreeCwd, storyId, "web") >= webCaptureNeed(worktreeCwd, storyId);
 }
 
 /**
@@ -544,7 +658,7 @@ function passAcVisualFloor(worktreeCwd: string, storyId: string): { ok: boolean;
   if (owesWeb || owesTerm) {
     const gaps: string[] = [];
     if (owesWeb && !hasRealWebCapture(worktreeCwd, storyId)) {
-      gaps.push(`declared deliverable_url(s) not all really captured (need ${deliverableUrlsForStory(worktreeCwd, storyId).length} taken web shots)`);
+      gaps.push(`declared deliverable_url(s) not all really captured (need ${webCaptureNeed(worktreeCwd, storyId)} taken web shots)`);
     }
     if (owesTerm && !hasRealTerminalCapture(worktreeCwd, storyId)) {
       gaps.push(`declared deliverable_cmd(s) not all really captured (need ${deliverableCmdsForStory(worktreeCwd, storyId).length} taken terminal shots)`);
@@ -718,6 +832,25 @@ export function runAttestGate(
   sinks: AttestGateSinks,
 ): AttestGateResult {
   try {
+    // FIX-339 (复核 #1) — a deliverable_cmd outside the roll read-only allowlist
+    // is rejected BEFORE anything else: the spec asked the attest lane to run a
+    // non-roll command or a state-changing roll subcommand (agent-controlled
+    // arbitrary execution). The command never ran; the gate FAILS LOUD here (it
+    // is never silently honest-skipped). Reported even ahead of the AC-block
+    // exemption, since the security problem stands regardless of AC shape.
+    const rejectedCmds = rejectedDeliverableCmdsForStory(worktreeCwd, storyId);
+    if (rejectedCmds.length > 0) {
+      const reasons = [
+        `deliverable_cmd 非白名单(仅限 roll 只读子命令): ${rejectedCmds.join(", ")} — refused (no arbitrary command execution; no state-changing roll subcommand)`,
+      ];
+      const blocked = mode === "hard";
+      sinks.alert(
+        `attest gate (${mode}): deliverable_cmd outside the roll read-only allowlist (${storyId}) — refused: ${rejectedCmds.join(", ")} — cycle ${cycleId}` +
+          (blocked ? " — BLOCKED (hard mode); story not marked Done" : ""),
+      );
+      sinks.event({ cycleId, verdict: "skipped", reasons });
+      return { verdict: "skipped", mode, reasons, blocked };
+    }
     if (storyHasAcBlock(worktreeCwd, storyId) === false) {
       const reasons = ["story has no AC block; acceptance report not required"];
       sinks.event({ cycleId, verdict: "produced", reasons });

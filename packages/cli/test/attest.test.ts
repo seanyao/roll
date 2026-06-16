@@ -779,6 +779,62 @@ describe("US-ATTEST-011 — Gate terminal self-capture lane", () => {
     expect(evidence.captures?.[0]?.taken).toBe(false);
     expect(evidence.captures?.[0]?.skipped).toContain("capture command exited 2");
   });
+
+  // ── FIX-339 复核 #2: secret protection on the headless command lane ──────────
+  it("复核 #2: a deliverable_cmd whose BODY carries a secret is REFUSED, never run (taken:false skip)", async () => {
+    const proj = project();
+    const calls: string[] = [];
+    const shotRun: ShotRun = (cmd, argv) => {
+      calls.push(`${cmd} ${argv.join(" ")}`);
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+    const code = await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["FIX-300", "--capture-command", "roll status --token ghp_ABCDEFGHIJKLMNOPQRST12345"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          capture: { run: shotRun, platform: "linux", env: {} },
+        }),
+      ),
+    );
+    const runDir = join(proj, ".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03");
+    const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
+      capture_command?: { exitCode?: number; stderrTail?: string };
+      captures?: Array<{ taken?: boolean; skipped?: string }>;
+    };
+    // The command never reached the shell sink (refused before spawn).
+    expect(calls.some((x) => x.startsWith("sh -lc "))).toBe(false);
+    expect(evidence.capture_command?.exitCode).not.toBe(0);
+    expect(evidence.capture_command?.stderrTail).toContain("REDACTED");
+    expect(evidence.captures?.[0]?.taken).toBe(false);
+    expect(code).toBe(3); // capture command failed → non-zero exit
+  });
+
+  it("复核 #2: a secret PRINTED by the command is redacted in the persisted stdout tail", async () => {
+    const proj = project();
+    const shotRun: ShotRun = (cmd) => {
+      if (cmd === "sh") return Promise.resolve({ code: 0, stdout: "token=ghp_ABCDEFGHIJKLMNOPQRST12345 done\n", stderr: "" });
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+    await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["FIX-300", "--capture-command", "roll status"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          capture: { run: shotRun, platform: "linux", env: {} },
+        }),
+      ),
+    );
+    const runDir = join(proj, ".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03");
+    const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
+      capture_command?: { stdoutTail?: string };
+    };
+    expect(evidence.capture_command?.stdoutTail).not.toContain("ghp_ABCDEFGHIJKLMNOPQRST12345");
+    expect(evidence.capture_command?.stdoutTail).toContain("REDACTED");
+    expect(evidence.capture_command?.stdoutTail).toContain("done"); // non-secret text preserved
+  });
 });
 
 describe("FIX-305 — UI/dossier web self-capture lane (real screenshot, not a skip)", () => {

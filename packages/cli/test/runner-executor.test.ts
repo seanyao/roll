@@ -895,6 +895,36 @@ describe("executeCommand — command → executor mapping", () => {
       expect(alertText(calls)).not.toContain("visual-evidence preflight");
     });
 
+    it("复核 #5: an EPIC-deny-list-exempt back-end card declaring NO surface is NOT flagged no-surface-declared (red line: no误杀)", async () => {
+      // The blind spot: declaresAnySurface is pure (specText only) and never sees
+      // the policy epic deny-list. A card whose epic is recorded non-visual is
+      // legitimately surface-less; flagging it would误杀 a back-end card. The
+      // preflight call-site now consults screenshotExemption (epic-aware).
+      const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-311b-epicexempt-")));
+      execDirs.push(repo);
+      // policy: the `data-migration` epic is a recorded non-visual epic.
+      mkdirSync(join(repo, ".roll", "features"), { recursive: true });
+      writeFileSync(join(repo, ".roll", "policy.yaml"), "acceptance:\n  screenshot_exempt_epics:\n    - data-migration\n");
+      // index maps the story → that epic so cardArchiveDir resolves it there.
+      writeFileSync(join(repo, ".roll", "index.json"), JSON.stringify({ stories: { "FIX-MIG-1": "data-migration" } }));
+      const specDir = join(repo, ".roll", "features", "data-migration", "FIX-MIG-1");
+      mkdirSync(specDir, { recursive: true });
+      writeFileSync(join(specDir, "spec.md"), "# FIX-MIG-1 Migrate ledger\n\n## Acceptance Criteria\n\n- [ ] Rows migrate with checksums intact\n");
+      const base = fakePorts();
+      const { ports, calls } = fakePorts({
+        repoCwd: repo,
+        paths: { ...base.ports.paths, alertsPath: join(repo, "alerts.log") },
+        backlog: { read: () => [{ id: "FIX-MIG-1", desc: "est_min:5", status: "📋 Todo" }] },
+        evidence: { openFrame: vi.fn(() => join(specDir, "run")) },
+      });
+      const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
+      expect(r.event).toEqual({ type: "story_picked", storyId: "FIX-MIG-1" });
+      // verdict ok (validator), and NO supplementary no-surface-declared WARN
+      // because the epic exemption is recognised.
+      expect(visualEvents(calls).every((e) => (e as { code?: string }).code !== "no-surface-declared")).toBe(true);
+      expect(alertText(calls)).not.toContain("no-surface-declared");
+    });
+
     it("a story with NO spec on disk is left alone (no visual:gate event, no alert) — FIX-309 backstops", async () => {
       const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-311b-nospec-")));
       execDirs.push(repo);

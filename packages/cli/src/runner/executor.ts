@@ -120,7 +120,7 @@ import {
   realAgentSpawn,
 } from "./agent-spawn.js";
 import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, runPeerGate } from "./peer-gate.js";
-import { declaresAnySurface, deliverableCmdsForStory, readAttestGateMode, runAttestGate, storyRequiresScreenshot, verificationReportPath, webCaptureTargetsForStory } from "./attest-gate.js";
+import { declaresAnySurface, deliverableCmdsForStory, readAttestGateMode, rejectedDeliverableCmdsForStory, runAttestGate, screenshotExemption, storyRequiresScreenshot, verificationReportPath, webCaptureTargetsForStory } from "./attest-gate.js";
 import { recoverCodexUsage, recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
 import { validateStoryVisualEvidence } from "../lib/design-visual-evidence.js";
 import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, autoAttachScreenshotToAcMap, buildAcMapRemediationPrompt, needsAcMapRemediation } from "./attest-remediation.js";
@@ -1879,7 +1879,14 @@ export function runVisualEvidencePreflight(ports: Ports, storyId: string, cycleI
       // forever and the future hard闸 will catch. It is a SUPPLEMENTARY signal,
       // never a duplicate of an existing validate flag, and NEVER blocks the
       // cycle (the structural hard闸 is held for a separate round post-backfill).
-      if (!declaresAnySurface(specText)) {
+      // FIX-339 (复核 #5) — declaresAnySurface is PURE (specText only): it sees a
+      // per-card `screenshot_exempt:` but NOT the policy epic deny-list
+      // (acceptance.screenshot_exempt_epics). A card whose EPIC is recorded as
+      // non-visual is legitimately exempt and declares no surface ON PURPOSE —
+      // flagging it no-surface-declared误杀 a back-end card (owner red line). So
+      // treat an epic-exempt card as already declaring a (null) surface here.
+      const epicExempt = screenshotExemption(ports.repoCwd, storyId).reason !== undefined;
+      if (!epicExempt && !declaresAnySurface(specText)) {
         ports.events.appendEvent(ports.paths.eventsPath, {
           type: "visual:gate",
           cycleId,
@@ -2491,10 +2498,19 @@ export function nodePorts(opts: {
                 ? ["--capture-web-skip", "no deliverable_url declared (set deliverable_url in the spec frontmatter or ROLL_ATTEST_WEB_URL)"]
                 : [];
           // FIX-339 (AC2/AC3): run + capture EVERY declared deliverable_cmd (a CLI
-          // deliverable's terminal output). These are spec-declared commands only,
-          // run inside the worktree via attest's `cd <worktree> && …` wrapper.
+          // deliverable's terminal output). deliverableCmdsForStory returns only
+          // ALLOWLISTED commands (roll read-only) — run inside the worktree via
+          // attest's `cd <worktree> && …` wrapper.
           const cmdArgs = deliverableCmdsForStory(projectCwd, storyId).flatMap((c) => ["--capture-command", c]);
-          return await attestCommand([storyId, "--run-dir", runDir, ...webArgs, ...cmdArgs], {
+          // FIX-339 (复核 #1): any deliverable_cmd the allowlist REJECTED (non-roll
+          // command or a state-changing roll subcommand) is NEVER run. Record a
+          // loud terminal skip fact so the report discloses the refusal and the
+          // attest gate fails on it (rejectedDeliverableCmdsForStory).
+          const cmdSkipArgs = rejectedDeliverableCmdsForStory(projectCwd, storyId).flatMap((c) => [
+            "--capture-command-skip",
+            `deliverable_cmd 非白名单(仅限 roll 只读子命令): ${c}`,
+          ]);
+          return await attestCommand([storyId, "--run-dir", runDir, ...webArgs, ...cmdArgs, ...cmdSkipArgs], {
             capture: { env: { ...process.env, ROLL_ATTEST_HEADLESS: "1" } },
           });
         } finally {

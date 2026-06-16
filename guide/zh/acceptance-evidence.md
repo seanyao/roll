@@ -52,6 +52,14 @@ loop_safety:
 soft 模式会记录缺口并发出同一类审计信号，但不阻塞本轮交付。它是临时兼容口，
 不是默认行为。
 
+## 设计期自检
+
+卡片声明可视证据时，交付前运行 `roll story validate <ID>`。校验器把显式
+`[visual-evidence]` AC marker 当作可视证据意图的定论；同一条 AC 不再必须额外
+写出截图关键词。端面分类先看 frontmatter 声明：`deliverable_url` /
+`screenshot_url` 表示 web，`deliverable_cmd` 表示 terminal，然后才退回到 AC
+文本启发。
+
 ## 红线
 
 **零证据**的 AC 永远不能是 `pass`：渲染层强制降级为 🟧 仅声明，并列入

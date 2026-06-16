@@ -58,6 +58,15 @@ loop_safety:
 Soft mode records the gap and raises the same audit signal, but it does not
 block the delivery cycle. Treat it as temporary compatibility, not the default.
 
+## Design-time self-check
+
+Run `roll story validate <ID>` before delivery when a card declares visual
+evidence. The validator treats an explicit `[visual-evidence]` AC marker as
+conclusive visual-evidence intent; it does not require extra screenshot
+keywords in that same AC. Surface classification first follows declared
+frontmatter: `deliverable_url` / `screenshot_url` means web, `deliverable_cmd`
+means terminal, and only then does the validator fall back to AC wording.
+
 ## The red line
 
 An AC with **zero evidence** can never claim `pass`: the renderer forces it

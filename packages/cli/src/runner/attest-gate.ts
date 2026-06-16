@@ -32,7 +32,7 @@
  * waivable as before.
  */
 import { acForStory, parsePolicy } from "@roll/core";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { type Dirent, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
@@ -55,24 +55,146 @@ function acMapCandidates(worktreeCwd: string, storyId: string): string[] {
   return [join(cardArchiveDir(worktreeCwd, storyId), "ac-map.json")];
 }
 
+/**
+ * FIX-340 — collect EVERY epic that defines this story id, one resolved spec
+ * path per epic. Within a single epic the new card layout
+ * (`features/<epic>/<ID>/spec.md`) deterministically supersedes the legacy flat
+ * file (`features/<epic>/<ID>.md`) — that is a migration shadow, not a conflict,
+ * so it counts as ONE home. A story id that lands in TWO DIFFERENT epics is a
+ * genuine collision (the US-AGENT-001 case: legacy autonomous-evolution vs the
+ * active loop-engine card) — every such home is returned so the caller can
+ * fail-loud instead of silently picking the alphabetical-first.
+ */
+export function storySpecMatches(worktreeCwd: string, storyId: string): string[] {
+  const featuresDir = join(worktreeCwd, ".roll", "features");
+  const matches: string[] = [];
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(featuresDir, { withFileTypes: true });
+  } catch {
+    return matches;
+  }
+  for (const epic of entries) {
+    if (!epic.isDirectory()) continue;
+    const spec = join(featuresDir, epic.name, storyId, "spec.md");
+    if (existsSync(spec)) {
+      matches.push(spec); // card layout wins over its own legacy sibling
+      continue;
+    }
+    const legacy = join(featuresDir, epic.name, `${storyId}.md`);
+    if (existsSync(legacy)) matches.push(legacy);
+  }
+  return matches;
+}
+
+/**
+ * FIX-340 — a story id thrown when one id resolves to MORE THAN ONE epic. roll's
+ * own iron rule is "一个概念一个名": a story id must resolve to exactly ONE spec.
+ * Surfacing every colliding home (not the silent alphabetical-first) is the
+ * fail-loud the spec demands — the wrong-spec attest misfire becomes a clear,
+ * actionable error instead of a latent data bug.
+ */
+export class DuplicateStoryIdError extends Error {
+  constructor(
+    readonly storyId: string,
+    readonly matches: string[],
+  ) {
+    super(
+      `duplicate story id ${storyId}: resolves to ${matches.length} specs — a story id MUST resolve uniquely (一个 ID 一份 spec). Disambiguate (rename/archive) one of:\n` +
+        matches.map((m) => `  - ${m}`).join("\n"),
+    );
+    this.name = "DuplicateStoryIdError";
+  }
+}
+
 /** Resolve a story's defining spec markdown — the new card layout
  *  `features/<epic>/<ID>/spec.md` first, then the legacy `features/<epic>/<ID>.md`.
  *  Exported so `roll story validate` (FIX-339 AC7) shares the EXACT spec the
- *  runtime gate reads — design self-check and the闸 then never disagree. */
+ *  runtime gate reads — design self-check and the闸 then never disagree.
+ *
+ *  FIX-340 — FAIL-LOUD on a DUPLICATE id: when an id resolves to two different
+ *  epics this THROWS {@link DuplicateStoryIdError} rather than silently returning
+ *  the alphabetical-first epic's spec (the US-AGENT-001 collision that misfired
+ *  the active card's attest gate). No-duplicate behavior is unchanged: a single
+ *  match is returned, no match returns null. */
 export function storySpecPath(worktreeCwd: string, storyId: string): string | null {
+  const matches = storySpecMatches(worktreeCwd, storyId);
+  if (matches.length === 0) return null;
+  if (matches.length > 1) throw new DuplicateStoryIdError(storyId, matches);
+  return matches[0] ?? null;
+}
+
+/** A story id that owns more than one spec home across `.roll/features`. */
+export interface DuplicateStoryId {
+  id: string;
+  specs: string[];
+}
+
+/** Story id syntax: US-/FIX-/REFACTOR-/IDEA-/BUG- prefix (matches STORY_ID_RE
+ *  in lib/story-page, kept local so this module has no command-layer dep). */
+const STORY_ID_DIR_RE = /^(US-[A-Z]+-\d+[a-z]?|FIX-\d+[a-z]?|REFACTOR-\d+[a-z]?|IDEA-\d+[a-z]?|BUG-\d+[a-z]?)$/;
+
+/**
+ * FIX-340 — the CORPUS lint: scan all of `.roll/features/**` and report every
+ * story id that resolves to MORE THAN ONE spec home (the same condition
+ * {@link storySpecPath} throws on, but for the WHOLE tree at once). The CI
+ * check script (`scripts/lint-story-ids.mjs`) reds on a non-empty result, the
+ * same drift-guard discipline as README-vs-registry / truth-field-registry.
+ *
+ * A story id is a card directory `features/<epic>/<ID>/` containing `spec.md`,
+ * OR a legacy flat `features/<epic>/<ID>.md` whose name is a story id. The
+ * card layout supersedes its OWN legacy sibling in the same epic (a migration
+ * shadow, not a duplicate); only DISTINCT epic homes count as a collision.
+ */
+export function findDuplicateStoryIds(worktreeCwd: string): DuplicateStoryId[] {
   const featuresDir = join(worktreeCwd, ".roll", "features");
+  const homes = new Map<string, string[]>(); // id -> distinct epic spec homes
+  let epics: Dirent[];
   try {
-    for (const epic of readdirSync(featuresDir, { withFileTypes: true })) {
-      if (!epic.isDirectory()) continue;
-      const spec = join(featuresDir, epic.name, storyId, "spec.md");
-      if (existsSync(spec)) return spec;
-      const legacy = join(featuresDir, epic.name, `${storyId}.md`);
-      if (existsSync(legacy)) return legacy;
-    }
+    epics = readdirSync(featuresDir, { withFileTypes: true });
   } catch {
-    return null;
+    return [];
   }
-  return null;
+  for (const epic of epics) {
+    if (!epic.isDirectory()) continue;
+    const epicDir = join(featuresDir, epic.name);
+    let inner: Dirent[];
+    try {
+      inner = readdirSync(epicDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of inner) {
+      let id: string | null = null;
+      let spec: string | null = null;
+      if (entry.isDirectory() && STORY_ID_DIR_RE.test(entry.name)) {
+        const card = join(epicDir, entry.name, "spec.md");
+        if (existsSync(card)) {
+          id = entry.name;
+          spec = card;
+        }
+      } else if (entry.isFile() && entry.name.endsWith(".md")) {
+        const base = entry.name.slice(0, -3);
+        if (STORY_ID_DIR_RE.test(base)) {
+          // a legacy flat file only counts if its card sibling does NOT exist
+          // (the card supersedes it in the same epic — not a collision).
+          if (!existsSync(join(epicDir, base, "spec.md"))) {
+            id = base;
+            spec = join(epicDir, entry.name);
+          }
+        }
+      }
+      if (id === null || spec === null) continue;
+      const list = homes.get(id) ?? [];
+      list.push(spec);
+      homes.set(id, list);
+    }
+  }
+  const dups: DuplicateStoryId[] = [];
+  for (const [id, specs] of homes) {
+    if (specs.length > 1) dups.push({ id, specs: specs.sort() });
+  }
+  return dups.sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** Whether the story's spec carries an `**AC:**` checklist; null = spec not

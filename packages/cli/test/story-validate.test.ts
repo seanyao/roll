@@ -134,4 +134,17 @@ describe("roll story validate — FIX-339 AC7", () => {
     expect(r.code).toBe(0);
     expect(r.out).toContain("roll story validate");
   });
+
+  it("FIX-340 — a DUPLICATE id ⇒ exit 2 with a clean error (no stack trace, no silent wrong-spec)", () => {
+    const p = project("US-DUP-001", "autonomous-evolution", "# legacy\n");
+    // second home for the same id in a different epic ⇒ ambiguous resolution.
+    const dir = join(p, ".roll", "features", "loop-engine", "US-DUP-001");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "spec.md"), "# active\n");
+    const r = run(p, ["US-DUP-001"]);
+    expect(r.code).toBe(2);
+    expect(r.err).toContain("duplicate story id");
+    expect(r.err).toContain("US-DUP-001");
+    expect(r.err).toContain("解析到多份 spec");
+  });
 });

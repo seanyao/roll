@@ -12,17 +12,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import {
+  DuplicateStoryIdError,
   MUST_DECLARE_FAIL_REASON,
   allowedDeliverableCmd,
   declaresAnySurface,
   deliverableCmdsForStory,
   deliverableUrlsForStory,
+  findDuplicateStoryIds,
   readAttestGateMode,
   rejectedDeliverableCmdsForStory,
   runAttestGate,
   screenshotExemption,
   storyHasAcBlock,
   storyRequiresScreenshot,
+  storySpecMatches,
+  storySpecPath,
   verificationReportFresh,
   verificationReportHasContent,
   violatesMustDeclareSurface,
@@ -1430,5 +1434,108 @@ describe("FIX-339 — multi-surface deliverables (web list + deliverable_cmd) + 
     }
     // WITHOUT the override the same single shot is insufficient (2 urls → 2 shots).
     expect(verificationReportHasContent(wt, "FIX-S27")).toBe(false);
+  });
+});
+
+/**
+ * FIX-340 — story id uniqueness. `storySpecPath` must FAIL LOUD on a DUPLICATE
+ * id (one id resolving to two epics) rather than silently returning the
+ * alphabetical-first epic's spec — the US-AGENT-001 collision that misfired the
+ * active card's attest gate. No-duplicate behavior is unchanged. `findDuplicateStoryIds`
+ * is the corpus lint the CI check script runs.
+ */
+describe("FIX-340 — story id uniqueness (storySpecPath fail-loud + corpus lint)", () => {
+  function writeSpec(wt: string, epic: string, id: string, body = "# spec\n"): string {
+    const dir = join(wt, ".roll", "features", epic, id);
+    mkdirSync(dir, { recursive: true });
+    const p = join(dir, "spec.md");
+    writeFileSync(p, body);
+    return p;
+  }
+  function writeLegacy(wt: string, epic: string, id: string): string {
+    const dir = join(wt, ".roll", "features", epic);
+    mkdirSync(dir, { recursive: true });
+    const p = join(dir, `${id}.md`);
+    writeFileSync(p, "# legacy\n");
+    return p;
+  }
+
+  it("AC4 unchanged — a UNIQUE id resolves to its single spec", () => {
+    const wt = tmp("uniq");
+    const p = writeSpec(wt, "loop-engine", "US-AGENT-001");
+    expect(storySpecPath(wt, "US-AGENT-001")).toBe(p);
+    expect(storySpecMatches(wt, "US-AGENT-001")).toEqual([p]);
+    expect(findDuplicateStoryIds(wt)).toEqual([]);
+  });
+
+  it("AC4 unchanged — a MISSING id returns null (no throw)", () => {
+    const wt = tmp("missing");
+    writeSpec(wt, "loop-engine", "US-AGENT-002");
+    expect(storySpecPath(wt, "US-AGENT-999")).toBeNull();
+    expect(storySpecMatches(wt, "US-AGENT-999")).toEqual([]);
+  });
+
+  it("AC1 fail-loud — a DUPLICATE id (two epics) THROWS, never silently alphabetical-first", () => {
+    const wt = tmp("dup");
+    // alphabetically autonomous-evolution < loop-engine — the old code returned this.
+    const legacyHome = writeSpec(wt, "autonomous-evolution", "US-AGENT-001");
+    const activeHome = writeSpec(wt, "loop-engine", "US-AGENT-001");
+    expect(() => storySpecPath(wt, "US-AGENT-001")).toThrow(DuplicateStoryIdError);
+    try {
+      storySpecPath(wt, "US-AGENT-001");
+    } catch (e) {
+      expect(e).toBeInstanceOf(DuplicateStoryIdError);
+      const err = e as DuplicateStoryIdError;
+      expect(err.storyId).toBe("US-AGENT-001");
+      // both homes surfaced — not the alphabetical-first silently chosen.
+      expect(err.matches).toContain(legacyHome);
+      expect(err.matches).toContain(activeHome);
+      expect(err.message).toContain("US-AGENT-001");
+      expect(err.message).toContain("一个 ID 一份 spec");
+    }
+  });
+
+  it("same-epic card layout SUPERSEDES its legacy sibling — NOT a duplicate", () => {
+    const wt = tmp("supersede");
+    const card = writeSpec(wt, "release-management", "FIX-229");
+    writeLegacy(wt, "release-management", "FIX-229"); // dead migration shadow
+    // one home (the card wins), so no throw and no lint hit.
+    expect(storySpecPath(wt, "FIX-229")).toBe(card);
+    expect(storySpecMatches(wt, "FIX-229")).toEqual([card]);
+    expect(findDuplicateStoryIds(wt)).toEqual([]);
+  });
+
+  it("legacy flat file alone resolves (back-compat) and is not a duplicate", () => {
+    const wt = tmp("legacy-only");
+    const p = writeLegacy(wt, "release-management", "FIX-300");
+    expect(storySpecPath(wt, "FIX-300")).toBe(p);
+    expect(findDuplicateStoryIds(wt)).toEqual([]);
+  });
+
+  it("AC3 corpus lint — reports EVERY id owning >1 spec home, sorted, with both paths", () => {
+    const wt = tmp("lint");
+    writeSpec(wt, "delivery-dossier", "IDEA-002");
+    writeSpec(wt, "uncategorized", "IDEA-002");
+    writeSpec(wt, "loop-engine", "IDEA-003");
+    writeSpec(wt, "uncategorized", "IDEA-003");
+    writeSpec(wt, "loop-engine", "US-CLEAN-001"); // unique → must NOT appear
+    const dups = findDuplicateStoryIds(wt);
+    expect(dups.map((d) => d.id)).toEqual(["IDEA-002", "IDEA-003"]);
+    expect(dups[0]?.specs).toHaveLength(2);
+    expect(dups[0]?.specs).toEqual([...(dups[0]?.specs ?? [])].sort()); // deterministic order
+  });
+
+  it("corpus lint ignores non-story directories/files", () => {
+    const wt = tmp("noise");
+    writeSpec(wt, "loop-engine", "US-X-001");
+    // a non-id markdown file + a non-id dir must not be mistaken for a story.
+    mkdirSync(join(wt, ".roll", "features", "loop-engine", "notes"), { recursive: true });
+    writeFileSync(join(wt, ".roll", "features", "loop-engine", "README.md"), "# notes\n");
+    expect(findDuplicateStoryIds(wt)).toEqual([]);
+  });
+
+  it("corpus lint on an absent features tree returns [] (nothing to scan)", () => {
+    const wt = tmp("absent");
+    expect(findDuplicateStoryIds(wt)).toEqual([]);
   });
 });

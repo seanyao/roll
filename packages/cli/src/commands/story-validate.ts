@@ -21,7 +21,7 @@
 import { readFileSync } from "node:fs";
 import { c, renderState } from "../render.js";
 import { STORY_ID_RE } from "../lib/story-page.js";
-import { declaresAnySurface, screenshotExemption, storySpecPath } from "../runner/attest-gate.js";
+import { DuplicateStoryIdError, declaresAnySurface, screenshotExemption, storySpecPath } from "../runner/attest-gate.js";
 import { validateStoryVisualEvidence } from "../lib/design-visual-evidence.js";
 
 const green = (s: string): string => c("green", s);
@@ -52,7 +52,22 @@ export function storyValidateCommand(args: string[]): number {
     return 2;
   }
   const cwd = process.cwd();
-  const spec = storySpecPath(cwd, id);
+  let spec: string | null;
+  try {
+    spec = storySpecPath(cwd, id);
+  } catch (e) {
+    // FIX-340 — a duplicate id can't be self-checked: which spec? Fail loud
+    // (the runtime attest gate fails the same way) so the data bug is fixed,
+    // not silently resolved to the wrong card.
+    if (e instanceof DuplicateStoryIdError) {
+      process.stderr.write(
+        `story validate: ${e.message}\n` +
+          `story validate: ${id} 解析到多份 spec — 必须唯一(消除重复 ID 后重试)\n`,
+      );
+      return 2;
+    }
+    throw e;
+  }
   if (spec === null) {
     process.stderr.write(
       `story validate: no spec found for ${id} (looked for features/<epic>/${id}/spec.md and features/<epic>/${id}.md)\n` +

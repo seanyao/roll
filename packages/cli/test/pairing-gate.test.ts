@@ -391,6 +391,69 @@ describe("runScorePairing — US-PAIR-009", () => {
     expect(r.status).toBe("error");
     expect(readStorySelfScores(dir, "US-X-001")).toHaveLength(0);
   });
+
+  // ── FIX-343 (② BOUNDED hetero preference) ──────────────────────────────────
+  it("FIX-343 (②): a hetero peer present+responsive WINS over a faster same-vendor scorer", async () => {
+    // builder=claude; pool = claude (same-vendor) + codex,kimi (hetero). The
+    // same-vendor 'claude' would reply INSTANTLY, the hetero peers a tick later.
+    // The OLD runtime (fire-all + take-first) let claude win; the bounded
+    // preference runs the HETERO round FIRST, so a hetero peer wins.
+    const { dir, rt } = project(SCORE_CFG);
+    const tried: string[] = [];
+    const { d } = scoreDeps({
+      installed: ["claude", "codex", "kimi"],
+      scorePeer: async (peer: string) => {
+        tried.push(peer);
+        if (peer === "claude") return { score: 9, verdict: "good" as const, rationale: "instant same-vendor", cost: 0 };
+        await new Promise((r) => setTimeout(r, 5)); // hetero replies slightly later
+        return { score: 7, verdict: "ok" as const, rationale: "hetero peer scored", cost: 0.03 };
+      },
+    });
+    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
+    expect(r.status).toBe("scored");
+    expect(["codex", "kimi"]).toContain(r.peer); // a HETERO peer won, NOT same-vendor claude
+    expect(tried).not.toContain("claude"); // the same-vendor round never ran (hetero succeeded first)
+    expect(readStorySelfScores(dir, "US-X-001")[0]?.scoredBy).not.toBe("claude");
+  });
+
+  it("FIX-343 (②): hetero pool ALL-FAILS within budget → FALLS BACK to same-vendor-fresh", async () => {
+    // builder=claude; hetero = codex,kimi (both flake null across the bounded
+    // retry); same-vendor = claude (scores). The gate must still produce a Review
+    // Score via the same-vendor-fresh fallback — never block on a dead hetero pool.
+    const { dir, rt } = project(SCORE_CFG);
+    const tried: string[] = [];
+    const { d } = scoreDeps({
+      installed: ["claude", "codex", "kimi"],
+      scorePeer: async (peer: string) => {
+        tried.push(peer);
+        return peer === "claude" ? { score: 8, verdict: "good" as const, rationale: "same-vendor fresh session scored", cost: 0.01 } : null;
+      },
+    });
+    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
+    expect(r.status).toBe("scored");
+    expect(r.peer).toBe("claude"); // same-vendor fallback won after hetero failed
+    expect(tried).toContain("codex"); // hetero round was attempted first
+    expect(tried).toContain("kimi");
+    expect(readStorySelfScores(dir, "US-X-001")[0]?.scoredBy).toBe("claude");
+  });
+
+  it("FIX-343 (②): SINGLE-VENDOR install → same-vendor immediately, no hetero wait/hang", async () => {
+    // Only the builder's own vendor is installed → the hetero pool is EMPTY, so
+    // we go straight to the same-vendor round (no wasted hetero spawn/wait).
+    const { dir, rt } = project(SCORE_CFG);
+    const tried: string[] = [];
+    const { d } = scoreDeps({
+      installed: ["claude"],
+      scorePeer: async (peer: string) => {
+        tried.push(peer);
+        return { score: 8, verdict: "good" as const, rationale: "single-vendor fresh session", cost: 0 };
+      },
+    });
+    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
+    expect(r.status).toBe("scored");
+    expect(r.peer).toBe("claude");
+    expect(tried).toEqual(["claude"]); // exactly one spawn — no empty hetero round burned a probe
+  });
 });
 
 describe("parsePairScoreOutput — US-PAIR-009", () => {

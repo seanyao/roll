@@ -360,27 +360,48 @@ export async function runScorePairing(
     }
 
     const timeoutMs = deps.timeoutMs ?? SCORE_TIMEOUT_MS;
-    // FIX-343 (step ④): 1 bounded retry. Each attempt fires every candidate's
-    // fresh-session scorePeer in PARALLEL (FIX-335 take-first) and uses the FIRST
-    // non-null score; the rest are discarded. A wholly-flaking attempt retries
-    // ONCE (no death-spiral), then a still-empty result is an HONEST timeout (no
-    // fallback). The reviewer's fresh session/cast id is minted per attempt so
-    // independence is recorded on the note, not asserted.
-    let winner: { peer: string; scored: PairScore; sessionId: string } | null = null;
-    for (let attempt = 1; attempt <= SCORE_MAX_ATTEMPTS && winner === null; attempt++) {
-      const probes = candidates.map(async (candidate) => {
-        const peer = candidate as string;
-        // A unique id for THIS reviewer's fresh session/cast — distinct per
-        // peer + attempt + cycle, so the note proves an independent session ran.
-        const sessionId = `${cycleId}:score:${peer}:a${attempt}:${deps.now()}`;
-        deps.event({ type: "pair:selected", cycleId, workingAgent, peer, stage: "score", ts: deps.now() });
-        const scored = await deps.scorePeer(peer, summary, timeoutMs);
-        return scored === null ? null : { peer, scored, sessionId };
-      });
-      winner = await firstValid(probes);
-    }
+    // FIX-343 (② BOUNDED hetero preference): selectPairingCandidates already
+    // ranks hetero-first, but at RUNTIME firstValid takes the FIRST responder, so
+    // a same-vendor scorer that replies before a live hetero peer would win — the
+    // hetero-first ordering was decorative. Make the preference REAL: split the
+    // pool by vendor and run firstValid over the HETERO subset FIRST; only when
+    // hetero is EMPTY or wholly fails (all-null/throw) within the SAME bounded
+    // budget do we FALL BACK to the same-vendor subset. Prefer hetero → fall back
+    // to same-vendor-fresh → NEVER hang (each round is bounded by the per-attempt
+    // timeout + the 1-retry cap). Same-vendor-fresh still PASSES the gate (owner
+    // minimum). A single-vendor install has an EMPTY hetero subset → it goes
+    // straight to the same-vendor round (no wasted hetero wait).
+    const heteroPool = candidates.filter((c) => isHeterogeneous(c as string, workingAgent));
+    const sameVendorPool = candidates.filter((c) => !isHeterogeneous(c as string, workingAgent));
+
+    // 1 bounded retry PER ROUND. Each attempt fires the round's pool in PARALLEL
+    // (FIX-335 take-first) and uses the FIRST non-null score; the rest are
+    // discarded. A wholly-flaking round retries ONCE (no death-spiral). The
+    // reviewer's fresh session/cast id is minted per attempt so independence is
+    // recorded on the note, not asserted. A throwing probe propagates (firstValid
+    // re-throws) → the outer catch maps it to status "error".
+    type ScoreWinner = { peer: string; scored: PairScore; sessionId: string };
+    const runRound = async (pool: string[]): Promise<ScoreWinner | null> => {
+      if (pool.length === 0) return null; // empty pool → no winner (no spawn, no wait)
+      let w: ScoreWinner | null = null;
+      for (let attempt = 1; attempt <= SCORE_MAX_ATTEMPTS && w === null; attempt++) {
+        const probes = pool.map(async (candidate) => {
+          const peer = candidate;
+          const sessionId = `${cycleId}:score:${peer}:a${attempt}:${deps.now()}`;
+          deps.event({ type: "pair:selected", cycleId, workingAgent, peer, stage: "score", ts: deps.now() });
+          const scored = await deps.scorePeer(peer, summary, timeoutMs);
+          return scored === null ? null : { peer, scored, sessionId };
+        });
+        w = await firstValid(probes);
+      }
+      return w;
+    };
+
+    // Hetero FIRST; fall back to same-vendor only when hetero is absent or fails.
+    let winner = await runRound(heteroPool);
+    if (winner === null) winner = await runRound(sameVendorPool);
     if (winner === null) {
-      // Whole scorer pool flaked across all attempts → honest timeout, BLOCK.
+      // Both rounds' scorer pools flaked across all attempts → honest timeout, BLOCK.
       return { status: "timeout" };
     }
     const { peer, scored, sessionId } = winner;

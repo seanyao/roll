@@ -236,6 +236,59 @@ export function recoverCodexUsage(
   return best;
 }
 
+/** Parse the codex session id from a `rollout-<ts>-<id>.jsonl` path. codex names
+ *  each rollout `rollout-YYYY-MM-DDTHH-MM-SS-<uuid>.jsonl`; the session id is the
+ *  trailing RFC-4122 UUID. Returns null when the basename doesn't carry one (so a
+ *  malformed / non-rollout name never yields a bogus resume id). */
+export function parseCodexSessionId(rolloutPath: string): string | null {
+  const name = basename(rolloutPath);
+  // Anchor on a trailing UUID before `.jsonl` — robust to the dashes inside both
+  // the timestamp prefix and the UUID itself (a naive split on `-` would shatter
+  // both). 8-4-4-4-12 hex, case-insensitive.
+  const m = name.match(/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$/);
+  return m?.[1] ?? null;
+}
+
+/**
+ * lever-4 (cross-card warm-context) — recover the codex SESSION ID of the work
+ * just done in `worktreeCwd`, so the NEXT codex-routed card can resume it via
+ * `codex exec resume <id>`. Reuses the exact discovery + scoping + selection of
+ * `recoverCodexUsage` (collectCodexRollouts + sessionCwdMatches + highest-token
+ * pick): the winning rollout is the cycle's authoritative session, and its id is
+ * parsed from the `rollout-<ts>-<id>.jsonl` filename. `sinceSec` scopes to files
+ * touched this cycle (mtime ≥ cycle start). Returns null when nothing is
+ * attributable (no root / no matching rollout / no token total / unparseable id)
+ * — the caller treats null as a capture-miss and stays cold (fail-safe).
+ */
+export function recoverCodexSessionId(
+  worktreeCwd: string,
+  sinceSec?: number,
+  sessionsRoot: string = defaultCodexSessionsRoot(),
+): string | null {
+  const wantBasename = basename(worktreeCwd.replace(/\/+$/, ""));
+  const files = collectCodexRollouts(sessionsRoot);
+  let bestPath: string | null = null;
+  let bestTokens = -1;
+  for (const p of files) {
+    let raw: string;
+    try {
+      if (sinceSec !== undefined && statSync(p).mtimeMs / 1000 < sinceSec) continue;
+      raw = readFileSync(p, "utf8");
+    } catch {
+      continue;
+    }
+    if (!sessionCwdMatches(raw, worktreeCwd, wantBasename)) continue;
+    const agg = sumCodexSession(raw.split("\n"));
+    if (agg === null) continue;
+    const tokens = agg.input_tokens + agg.output_tokens + agg.cache_read_tokens + agg.cache_creation_tokens;
+    if (tokens > bestTokens) {
+      bestTokens = tokens;
+      bestPath = p;
+    }
+  }
+  return bestPath === null ? null : parseCodexSessionId(bestPath);
+}
+
 /** True iff a codex rollout's `session_meta.payload.cwd` is the cycle worktree.
  *  Matches the full path first, then falls back to the basename so a realpath /
  *  symlink difference between the spawn cwd and the recorded cwd never drops a

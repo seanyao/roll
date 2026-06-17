@@ -14,7 +14,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterAll, describe, expect, it } from "vitest";
 import {
+  parseCodexSessionId,
   piSessionsDirFor,
+  recoverCodexSessionId,
   recoverCodexUsage,
   recoverKimiUsage,
   recoverPiUsage,
@@ -198,5 +200,65 @@ describe("recoverCodexUsage", () => {
 
   it("no sessions root → null", () => {
     expect(recoverCodexUsage("/w/x", undefined, join(tmpdir(), "roll-303-no-codex-root-xyz"))).toBeNull();
+  });
+});
+
+// ── lever-4: codex session-id capture (cross-card warm-context) ───────────────
+
+describe("parseCodexSessionId", () => {
+  it("extracts the trailing UUID from a real rollout filename (dashes notwithstanding)", () => {
+    expect(
+      parseCodexSessionId("/c/2026/05/27/rollout-2026-05-27T16-10-52-019e687c-89fd-7833-af9f-fb182f36a46a.jsonl"),
+    ).toBe("019e687c-89fd-7833-af9f-fb182f36a46a");
+  });
+
+  it("returns null when the name carries no UUID (never a bogus resume id)", () => {
+    expect(parseCodexSessionId("/c/rollout-old.jsonl")).toBeNull();
+    expect(parseCodexSessionId("/c/rollout-2026-06-14T20-00-00-abc.jsonl")).toBeNull();
+  });
+});
+
+describe("recoverCodexSessionId (lever-4)", () => {
+  it("returns the session id of the cwd-matched, highest-token rollout", () => {
+    const root = tmp("codex-sid");
+    const cwd = "/w/roll-cycle-warm";
+    const day = join(root, "2026", "06", "14");
+    mkdirSync(day, { recursive: true });
+    // two rollouts for THIS cwd — the higher-token one wins, and we get ITS id.
+    writeFileSync(
+      join(day, "rollout-2026-06-14T20-00-00-019e687c-89fd-7833-af9f-fb182f36a46a.jsonl"),
+      [codexMeta("gpt-5.5", cwd), codexTokenCount(100, 0, 10)].join("\n") + "\n",
+    );
+    writeFileSync(
+      join(day, "rollout-2026-06-14T21-00-00-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl"),
+      [codexMeta("gpt-5.5", cwd), codexTokenCount(9000, 0, 900)].join("\n") + "\n",
+    );
+    expect(recoverCodexSessionId(cwd, undefined, root)).toBe("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+  });
+
+  it("does not capture a rollout for a different worktree cwd → null (cold)", () => {
+    const root = tmp("codex-sid-other");
+    const day = join(root, "2026", "06", "14");
+    mkdirSync(day, { recursive: true });
+    writeFileSync(
+      join(day, "rollout-2026-06-14T20-00-00-019e687c-89fd-7833-af9f-fb182f36a46a.jsonl"),
+      [codexMeta("gpt-5.5", "/w/some-OTHER-cycle"), codexTokenCount(9, 0, 9)].join("\n") + "\n",
+    );
+    expect(recoverCodexSessionId("/w/roll-cycle-warm", undefined, root)).toBeNull();
+  });
+
+  it("ignores rollouts older than the cycle start → null", () => {
+    const root = tmp("codex-sid-stale");
+    const cwd = "/w/roll-cycle-old";
+    const day = join(root, "2026", "06", "14");
+    mkdirSync(day, { recursive: true });
+    const f = join(day, "rollout-2026-06-14T20-00-00-019e687c-89fd-7833-af9f-fb182f36a46a.jsonl");
+    writeFileSync(f, [codexMeta("gpt-5.5", cwd), codexTokenCount(99, 0, 99)].join("\n") + "\n");
+    utimesSync(f, 1000, 1000);
+    expect(recoverCodexSessionId(cwd, Math.floor(Date.now() / 1000) - 3600, root)).toBeNull();
+  });
+
+  it("no sessions root → null (capture-miss, caller stays cold)", () => {
+    expect(recoverCodexSessionId("/w/x", undefined, join(tmpdir(), "roll-lever4-no-codex-root"))).toBeNull();
   });
 });

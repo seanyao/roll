@@ -271,10 +271,6 @@
   "en": "  loop <on|off|now|status|monitor|resume|reset>  [Autonomous] Manage scheduled BACKLOG executor",
   "zh": "管理自主执行循环"
  },
- "backlog.brief_digest_show_latest_owner_brief": {
-  "en": "  brief                  [Digest] Show latest owner brief (regenerate if stale)",
-  "zh": "展示最新简报"
- },
  "backlog.backlog_view_show_pending_tasks_todo": {
   "en": "  backlog                [View] Show pending tasks (Todo/Blocked/Deferred/Unknown)",
   "zh": "显示任务清单"
@@ -331,10 +327,6 @@
   "en": "  roll loop on                  # Enable autonomous loop (cron)",
   "zh": "启用自主执行循环"
  },
- "backlog.roll_brief_show_latest_brief": {
-  "en": "  roll brief                    # Show latest brief",
-  "zh": "查看最新简报"
- },
  "backlog.roll_backlog_show_pending_blocked_deferred": {
   "en": "  roll backlog                  # Show pending/blocked/deferred items",
   "zh": "查看待处理任务"
@@ -354,14 +346,6 @@
  "backlog.usage_roll_command_options": {
   "en": "Usage:  roll <command> [options]",
   "zh": "用法:  roll <command> [options]"
- },
- "brief.no_brief_yet_generating": {
-  "en": "No brief yet — generating...",
-  "zh": "暂无简报，正在生成..."
- },
- "brief.brief_is_age_3600_h_old": {
-  "en": "Brief is %sh old — regenerating...",
-  "zh": "简报已 %s 小时未更新，重新生成..."
  },
  "changelog.unknown_subcommand": {
   "en": "Unknown subcommand: %s",
@@ -1518,82 +1502,6 @@
  "update.re_syncing_to_ai_tools": {
   "en": "Re-syncing to AI tools...",
   "zh": "正在重新同步到 AI 工具..."
- },
- "brief.title": {
-  "en": "Roll Brief — %s",
-  "zh": "Roll 简报 — %s"
- },
- "brief.summary": {
-  "en": "Summary",
-  "zh": "摘要"
- },
- "brief.completed": {
-  "en": "Completed: %s",
-  "zh": "已完成: %s"
- },
- "brief.in_progress": {
-  "en": "In Progress: %s",
-  "zh": "进行中: %s"
- },
- "brief.backlog_queue": {
-  "en": "Backlog Queue: %s pending",
-  "zh": "Backlog 队列: %s 个待办"
- },
- "brief.requires_attention": {
-  "en": "Requires Attention",
-  "zh": "需要关注"
- },
- "brief.release_readiness": {
-  "en": "Release Readiness",
-  "zh": "发版就绪"
- },
- "brief.ready": {
-  "en": "Ready to release",
-  "zh": "可以发版"
- },
- "brief.not_ready": {
-  "en": "Not ready — %s blockers",
-  "zh": "暂不可发版 — %s 个阻塞项"
- },
- "brief.section_completed": {
-  "en": "Completed (%s items)",
-  "zh": "已完成（%s 项）"
- },
- "brief.section_in_progress": {
-  "en": "In Progress",
-  "zh": "进行中"
- },
- "brief.section_queue": {
-  "en": "Pending Queue (%s items)",
-  "zh": "待处理队列（%s 项）"
- },
- "brief.section_insights": {
-  "en": "Insights from Dream",
-  "zh": "悟见"
- },
- "brief.section_escalations": {
-  "en": "Requires Human Attention",
-  "zh": "需人工介入"
- },
- "brief.section_doc_coverage": {
-  "en": "Documentation Coverage",
-  "zh": "文档覆盖度"
- },
- "brief.section_release": {
-  "en": "Release Readiness",
-  "zh": "发版就绪"
- },
- "brief.generated": {
-  "en": "Brief generated: %s",
-  "zh": "简报已生成：%s"
- },
- "brief.release_ready_status": {
-  "en": "Ready to release",
-  "zh": "可发版"
- },
- "brief.release_hold_status": {
-  "en": "Hold — %s",
-  "zh": "暂缓 — %s"
  },
  "build.clarified_goal": {
   "en": "Clarified Goal",

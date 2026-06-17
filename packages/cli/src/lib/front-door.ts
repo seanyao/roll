@@ -54,7 +54,7 @@ function verdictLine(snapshot: TruthSnapshot | undefined, stale: boolean, lang: 
 /** The three-row command map — same verbs the design frame 0 lists. */
 function commandMap(lang: Lang): string {
   const rows: Array<[string, string]> = [
-    ["daily", "status · cycles · brief · backlog · release"],
+    ["daily", "status · cycles · backlog · release"],
     ["cards", 'idea "<one sentence>" · story new <ID> --title <t>'],
     ["machine", "loop · agent · doctor · skills · config · setup · update"],
   ];

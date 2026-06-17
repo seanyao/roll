@@ -10,7 +10,6 @@ export * from "./backlog/idea.js";
 export * from "./backlog/infra-default.js";
 export * from "./backlog/picker.js";
 export * from "./backlog/store.js";
-export * from "./brief/compose.js";
 export * from "./cost/prices.js";
 export * from "./cost/tracker.js";
 export * from "./delivery/infra-default.js";

@@ -34,7 +34,7 @@ describe("roll front door — US-DOSSIER-035", () => {
     expect(out).toContain("main reconciled vs backlog");
     expect(out).toContain("→ roll status");
     // line 3..5: the command map rows
-    expect(out).toMatch(/daily\s+status · cycles · brief · backlog · release/);
+    expect(out).toMatch(/daily\s+status · cycles · backlog · release/);
     expect(out).toMatch(/cards\s+idea/);
     expect(out).toMatch(/machine\s+loop · agent · doctor · skills · config · setup · update/);
   });

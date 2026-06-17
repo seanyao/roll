@@ -24,7 +24,6 @@ import {
   loopTestQualityCheckRetired,
   loopUnknownSubcommand,
 } from "./loop-cycle-gates.js";
-import { briefCommand } from "./brief.js";
 // US-DOSSIER-037: `roll cast` (routing view) + `roll doc --lang` (Charter/guide viewer).
 import { CAST_USAGE, castCommand } from "./cast.js";
 import { DOC_USAGE, docCommand } from "./doc.js";
@@ -197,13 +196,9 @@ export function registerAll(): void {
     if (sub === "sync") return backlogSyncCommand(args.slice(1));
     return backlogCommand(args);
   }, { help: "Usage: roll backlog\n  Render the backlog board.\n渲染任务板。" });
-  // `brief`: v3-native live owner digest (US-PORT-002). Composes the three-block
-  // one-screen digest from the backlog reader (+ active ALERT file) instead of
-  // rendering a cached, agent-authored .roll/briefs/*.md — no agent is shelled,
-  // so no reasoning can leak (the "agent 绝不漏思考过程" AC, strongest form).
-  // Output follows the resolved locale single-language. `--full` expands lists.
-  // No bash fallback: the digest is data-derived and always fresh.
-  registerPorted("brief", briefCommand, { help: "Usage: roll brief\n  Morning brief from the backlog + runs.\n晨报。" });
+  // FIX-356a: `roll brief` retired — US-PORT-002 was an immature owner digest.
+  // The absent-command convention (standard unknown-command error from the bridge)
+  // is the chosen retired-surface behaviour.
   // US-DOSSIER-037: `roll cast` — the same complexity-ladder → role Casting table
   // the web console renders (US-DOSSIER-030 Casting grid). ONE computation, two
   // surfaces: it calls the shared `collectCasting()` view-model (no re-read of the

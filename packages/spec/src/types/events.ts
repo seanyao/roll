@@ -22,6 +22,7 @@ export type RollEvent =
   | { type: "cycle:phase"; cycleId: string; phase: CyclePhase; ts: number }
   | { type: "cycle:stdout"; cycleId: string; data: string; ts: number }
   | { type: "cycle:tcr"; cycleId: string; commitHash: string; message: string; ts: number }
+  | { type: "cycle:first_edit"; cycleId: string; commitHash: string; ts: number }
   | { type: "cycle:end"; cycleId: string; outcome: TerminalOutcome; cost: CycleCost; ts: number }
   // Routing (BC3) — auditable, reproducible (I10)
   | { type: "route:resolve"; storyId: string; level: TaskLevel; agent: AgentId; model: string; rule: string; ts: number }

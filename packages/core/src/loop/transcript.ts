@@ -78,6 +78,8 @@ function toEntry(ev: RollEvent): Omit<TimelineEntry, "offsetSec" | "layer"> | nu
       return { ts: ev.ts, marker: "cycle:end", label: `周期结束 · cycle end · ${ev.outcome}` };
     case "cycle:tcr":
       return { ts: ev.ts, marker: "tcr", label: `TCR ${ev.commitHash.slice(0, 9)} · ${clip(ev.message)}` };
+    case "cycle:first_edit":
+      return { ts: ev.ts, marker: "first-edit", label: `首次落笔 · first edit · ${ev.commitHash.slice(0, 9)}` };
     case "cycle:stdout":
       // US-LOOP-076: the runner-observed build heartbeat lands as a tagged stdout
       // line; surface it on the outline spine so a long quiet build phase shows

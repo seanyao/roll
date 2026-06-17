@@ -45,6 +45,9 @@ export interface CycleObserverState {
   seen: Set<string>;
   /** Whether the build-phase enter signal (cycle:phase execute) was emitted. */
   phaseEmitted: boolean;
+  /** Whether the first-edit marker (cycle:first_edit, the agent's first observed
+   *  TCR commit) was emitted — latched so only the FIRST commit triggers it. */
+  firstEditEmitted: boolean;
   /** Epoch ms of the last heartbeat we emitted (0 = none yet). */
   lastHeartbeatMs: number;
   /** Count of build heartbeats emitted so far (shown in the beat detail). */
@@ -60,6 +63,7 @@ export function newCycleObserverState(cycleId: string): CycleObserverState {
     cycleId,
     seen: new Set<string>(),
     phaseEmitted: false,
+    firstEditEmitted: false,
     lastHeartbeatMs: 0,
     heartbeatCount: 0,
   };
@@ -102,6 +106,16 @@ export function observeCommits(
     if (c.hash === "" || st.seen.has(c.hash)) continue;
     st.seen.add(c.hash);
     const tsSec = c.tsSec > 0 ? c.tsSec : Math.floor(nowMs / 1000);
+    // FIX-357: the FIRST observed TCR commit is the earliest signal the agent
+    // produced a tracked change — emit cycle:first_edit ONCE (latched), ordered
+    // BEFORE its cycle:tcr. ts in SECONDS (the same tsSec the tcr carries), NOT
+    // observeBuildStart's nowMs(ms) — else execute→first_edit math is off 1000x
+    // (FIX-352 unit trap). This makes the cold-orientation prefix that
+    // prebuild_dist/project_map target measurable; it was buried in the 180s beat.
+    if (!st.firstEditEmitted) {
+      st.firstEditEmitted = true;
+      out.push({ type: "cycle:first_edit", cycleId: st.cycleId, commitHash: c.hash, ts: tsSec });
+    }
     out.push({
       type: "cycle:tcr",
       cycleId: st.cycleId,

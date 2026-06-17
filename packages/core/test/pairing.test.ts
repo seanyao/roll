@@ -197,6 +197,28 @@ describe("defaultPairingConfig + renderPairingConfig (roll pair init scaffold)",
     expect(d.stages).toEqual(["code", "score"]);
     expect(d.capability["claude"]).toEqual(["code", "score"]);
   });
+  it("FIX-360: default config excludes agy (non-headless reviewer) from the pool", () => {
+    // agy's headless review triggers an interactive Google OAuth popup, so it is
+    // not a headless reviewer (canReviewHeadless=false) and must never land in a
+    // reviewer pool — even when installed alongside heterogeneous peers.
+    const d = defaultPairingConfig(["claude", "agy", "codex"]);
+    expect(d.enabled).toBe(true); // claude + codex are still ≥2 vendors
+    expect(d.capability).toEqual({ claude: ["code", "score"], codex: ["code", "score"] });
+    expect(d.capability["agy"]).toBeUndefined();
+    expect(renderPairingConfig(d)).not.toContain("agy:");
+    // aliases collapse to agy and are likewise absent
+    expect(defaultPairingConfig(["claude", "gemini", "codex"]).capability["agy"]).toBeUndefined();
+    // and the live score-stage selector never picks agy even when installed
+    const picked = selectPairingCandidates({
+      installed: ["claude", "agy", "codex"],
+      isAvailable: () => true,
+      workingAgent: "claude",
+      stage: "score",
+      cfg: cfg({ enabled: false, stages: [], capability: {} }),
+      cycleId: "c1",
+    });
+    expect(picked).not.toContain("agy");
+  });
   it("FIX-328: default config excludes IDE/config-only agents from review pools", () => {
     const d = defaultPairingConfig(["claude", "cursor", "trae", "codex"]);
     expect(d.enabled).toBe(true);

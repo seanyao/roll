@@ -1109,6 +1109,24 @@ describe("executeCommand — command → executor mapping", () => {
     return { repo, wt };
   }
 
+  // FIX-354: write a codex rollout (cwd-matched, with usage) under a fake sessions
+  // root so the post-agent-exit capture finds a real session id to record.
+  const codexMetaLine = (cwd: string): string =>
+    JSON.stringify({ type: "session_meta", payload: { model: "gpt-5.5", cwd } });
+  const codexTokenLine = (): string =>
+    JSON.stringify({
+      type: "event_msg",
+      payload: { type: "token_count", info: { total_token_usage: { input_tokens: 900, cached_input_tokens: 0, output_tokens: 90, total_tokens: 990 } } },
+    });
+  function writeCodexRollout(root: string, cwd: string, sessionId: string): void {
+    const day = join(root, "2026", "06", "14");
+    mkdirSync(day, { recursive: true });
+    writeFileSync(
+      join(day, `rollout-2026-06-14T20-00-00-${sessionId}.jsonl`),
+      [codexMetaLine(cwd), codexTokenLine()].join("\n") + "\n",
+    );
+  }
+
   it("lever-4 DEFAULT-OFF: codex spawn carries NO codexSessionId even if the ledger has one", async () => {
     const { repo, wt } = lever4Repo(); // NO policy ⇒ flag OFF
     // a stale ledger entry exists — it must be IGNORED while the flag is off.
@@ -1177,20 +1195,51 @@ describe("executeCommand — command → executor mapping", () => {
     expect(opts.codexSessionId).toBeUndefined();
   });
 
-  it("lever-4 DEFAULT-OFF: cleanup_worktree captures NOTHING (no ledger write)", async () => {
+  it("lever-4 DEFAULT-OFF: spawn_agent captures NOTHING (no ledger write)", async () => {
     const { repo, wt } = lever4Repo(); // flag OFF
+    const sessionsRoot = join(repo, "codex-sessions");
+    writeCodexRollout(sessionsRoot, wt, "deadbeef-0000-0000-0000-000000000000");
     const base = fakePorts();
     const { ports } = fakePorts({
       repoCwd: repo,
       paths: { ...base.ports.paths, worktreePath: wt, alertsPath: join(repo, ".roll", "loop", "ALERT.md") },
     });
-    await executeCommand({ kind: "cleanup_worktree", branch: "loop/x" }, ports, { ...CTX, agent: "codex" });
-    // no capture attempted ⇒ no ledger file written (deploy no-op).
-    expect(readWarmSessions(repo)).toEqual([]);
+    const prev = process.env["ROLL_CODEX_SESSIONS_DIR"];
+    process.env["ROLL_CODEX_SESSIONS_DIR"] = sessionsRoot;
+    try {
+      // even with a perfectly capturable rollout on disk, the flag OFF means NO capture.
+      await executeCommand({ kind: "spawn_agent", agent: "codex", attempt: 1 }, ports, { ...CTX, agent: "codex" });
+    } finally {
+      if (prev === undefined) delete process.env["ROLL_CODEX_SESSIONS_DIR"];
+      else process.env["ROLL_CODEX_SESSIONS_DIR"] = prev;
+    }
+    expect(readWarmSessions(repo)).toEqual([]); // default-OFF: nothing captured
+  });
+
+  it("FIX-354: cleanup_worktree captures NOTHING — capture moved out, it is pure teardown now", async () => {
+    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n"); // flag ON
+    const sessionsRoot = join(repo, "codex-sessions");
+    writeCodexRollout(sessionsRoot, wt, "deadbeef-1111-1111-1111-111111111111");
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      paths: { ...base.ports.paths, worktreePath: wt, alertsPath: join(repo, ".roll", "loop", "ALERT.md") },
+    });
+    const prev = process.env["ROLL_CODEX_SESSIONS_DIR"];
+    process.env["ROLL_CODEX_SESSIONS_DIR"] = sessionsRoot;
+    try {
+      // cleanup_worktree no longer captures — even with the flag ON and a real
+      // rollout present, the ledger stays empty; the capture happens in spawn_agent.
+      await executeCommand({ kind: "cleanup_worktree", branch: "loop/x" }, ports, { ...CTX, agent: "codex" });
+    } finally {
+      if (prev === undefined) delete process.env["ROLL_CODEX_SESSIONS_DIR"];
+      else process.env["ROLL_CODEX_SESSIONS_DIR"] = prev;
+    }
+    expect(readWarmSessions(repo)).toEqual([]); // teardown does NOT capture
     expect(ports.git.worktreeRemove).toHaveBeenCalled(); // teardown still happens
   });
 
-  it("lever-4 ON: cleanup_worktree capture-miss ALERTs (observability) and stays cold", async () => {
+  it("lever-4 ON: spawn_agent capture-miss ALERTs (observability) and stays cold", async () => {
     const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n");
     const base = fakePorts();
     const { ports, calls } = fakePorts({
@@ -1201,7 +1250,7 @@ describe("executeCommand — command → executor mapping", () => {
     const prev = process.env["ROLL_CODEX_SESSIONS_DIR"];
     process.env["ROLL_CODEX_SESSIONS_DIR"] = join(repo, "no-codex-sessions");
     try {
-      await executeCommand({ kind: "cleanup_worktree", branch: "loop/x" }, ports, { ...CTX, agent: "codex" });
+      await executeCommand({ kind: "spawn_agent", agent: "codex", attempt: 1 }, ports, { ...CTX, agent: "codex" });
     } finally {
       if (prev === undefined) delete process.env["ROLL_CODEX_SESSIONS_DIR"];
       else process.env["ROLL_CODEX_SESSIONS_DIR"] = prev;
@@ -1209,6 +1258,58 @@ describe("executeCommand — command → executor mapping", () => {
     expect(readWarmSessions(repo)).toEqual([]); // nothing captured
     const alerts = (calls["alert"] ?? []).map((a) => String((a as unknown[])[1]));
     expect(alerts.join("\n")).toContain("lever-4 warm-context: no codex session id captured");
+  });
+
+  it("FIX-354: a PRESERVED-worktree cycle STILL captures the codex session (capture is post-agent-exit, NOT in cleanup_worktree)", async () => {
+    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n"); // flag ON
+    const sessionsRoot = join(repo, "codex-sessions");
+    // the agent ran and wrote a cwd-matched rollout — exactly what publish-fail
+    // (FIX-351 `unpublished`) leaves on disk when it PRESERVES the worktree.
+    writeCodexRollout(sessionsRoot, wt, "cafe1234-2222-2222-2222-222222222222");
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      paths: { ...base.ports.paths, worktreePath: wt, alertsPath: join(repo, ".roll", "loop", "ALERT.md") },
+    });
+    const prev = process.env["ROLL_CODEX_SESSIONS_DIR"];
+    process.env["ROLL_CODEX_SESSIONS_DIR"] = sessionsRoot;
+    try {
+      // ONLY spawn_agent runs — NO cleanup_worktree (the worktree is preserved).
+      await executeCommand({ kind: "spawn_agent", agent: "codex", attempt: 1 }, ports, { ...CTX, agent: "codex" });
+    } finally {
+      if (prev === undefined) delete process.env["ROLL_CODEX_SESSIONS_DIR"];
+      else process.env["ROLL_CODEX_SESSIONS_DIR"] = prev;
+    }
+    // the session is captured into the ledger DESPITE no teardown ever happening,
+    // so the NEXT codex card has something to resume (warm-context engages).
+    const ledger = readWarmSessions(repo);
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]).toMatchObject({
+      storyId: "US-RUN-001",
+      sessionId: "cafe1234-2222-2222-2222-222222222222",
+    });
+    expect(ports.git.worktreeRemove).not.toHaveBeenCalled(); // worktree preserved
+  });
+
+  it("FIX-354: lever-4 ON but NON-codex agent: post-agent-exit capture is a no-op (agent-agnostic)", async () => {
+    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n"); // flag ON
+    const sessionsRoot = join(repo, "codex-sessions");
+    writeCodexRollout(sessionsRoot, wt, "deadbeef-3333-3333-3333-333333333333");
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      paths: { ...base.ports.paths, worktreePath: wt, alertsPath: join(repo, ".roll", "loop", "ALERT.md") },
+    });
+    const prev = process.env["ROLL_CODEX_SESSIONS_DIR"];
+    process.env["ROLL_CODEX_SESSIONS_DIR"] = sessionsRoot;
+    try {
+      // claude has no sessionReuse capability ⇒ no capture even with the flag ON.
+      await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, { ...CTX, agent: "claude" });
+    } finally {
+      if (prev === undefined) delete process.env["ROLL_CODEX_SESSIONS_DIR"];
+      else process.env["ROLL_CODEX_SESSIONS_DIR"] = prev;
+    }
+    expect(readWarmSessions(repo)).toEqual([]); // agnostic: only codex captures
   });
 
   it("FIX-253: spawn_agent persists worktree-local ALERT files before cleanup can delete them", async () => {

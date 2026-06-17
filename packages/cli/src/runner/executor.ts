@@ -839,6 +839,45 @@ export async function executeCommand(
       }
       await captureSink?.flush();
       persistWorktreeAlerts(ports.paths.worktreePath, ports.paths.alertsPath, ports.events);
+      // lever-4 (default-OFF) — FIX-354: CAPTURE this card's resumable session id
+      // HERE, immediately after the agent exits, NOT at worktree teardown. The
+      // codex rollout exists (the agent just ran) and the worktree still exists on
+      // disk (the cwd-match the recovery needs), so the capture works REGARDLESS of
+      // the later publish/preserve outcome. The old home (`cleanup_worktree`) is
+      // SKIPPED whenever the worktree is preserved (publish-fail / `unpublished`),
+      // so a failed cycle never captured → the ledger stayed empty → the next codex
+      // card ran cold. Post-agent-exit fires unconditionally and fixes that.
+      // Agent-AGNOSTIC: the spec capability decides — only codex's adapter supports
+      // reuse; every other engine is a cold no-op here. Persisted to the PERSISTENT
+      // .roll/loop ledger (repoCwd), so it survives a later teardown + a .roll reset,
+      // like runs.jsonl. Best-effort: a capture miss/slip ALERTs for observability
+      // and leaves the next card cold (fail-safe) — it NEVER topples the cycle.
+      if (readSessionReuseEnabled(ports.repoCwd)) {
+        try {
+          const agentName = ctx.agent ?? cmd.agent;
+          const reuse = sessionReuseFor(agentName, getAgentSpec(agentName)?.usage);
+          const storyId = ctx.storyId ?? "";
+          if (reuse.supportsReuse() && storyId !== "") {
+            const rootOverride = (process.env["ROLL_CODEX_SESSIONS_DIR"] ?? "").trim();
+            const sessionId = recoverCodexSessionId(
+              ports.paths.worktreePath,
+              ctx.startSec,
+              ...(rootOverride !== "" ? [rootOverride] : []),
+            );
+            if (sessionId !== null) {
+              appendWarmSession(ports.repoCwd, { storyId, sessionId, ts: ports.clock() });
+            } else {
+              ports.events.appendAlert(
+                ports.paths.alertsPath,
+                `[WARN] lever-4 warm-context: no codex session id captured for ${storyId} ` +
+                  `(cwd ${ports.paths.worktreePath}) — next codex card stays cold`,
+              );
+            }
+          }
+        } catch {
+          /* warm-context capture is strictly best-effort: never topple the cycle */
+        }
+      }
       // F4 lesson (信号成对/可观测不归零): persist the agent's full output as a
       // per-cycle log next to events/runs — v2 keeps cycle logs; without this
       // an agent that "ran but delivered nothing" is undiagnosable.
@@ -1421,40 +1460,12 @@ export async function executeCommand(
       return { event: { type: "reconciled" } };
 
     // _worktree_cleanup (tolerant). Side effect; no feedback (terminal path).
+    // NOTE (FIX-354): the lever-4 warm-session CAPTURE used to live here, but
+    // `cleanup_worktree` is SKIPPED when the worktree is preserved (publish-fail /
+    // `unpublished`), so a failed cycle never captured. The capture now fires at
+    // post-agent-exit in `spawn_agent` (above), unconditionally. This branch is
+    // pure worktree teardown again.
     case "cleanup_worktree":
-      // lever-4 (default-OFF): CAPTURE this card's resumable session id BEFORE the
-      // worktree is removed (the rollout cwd-match needs the worktree to still
-      // exist on disk). Agent-AGNOSTIC: the spec capability decides — only codex's
-      // adapter supports reuse; every other engine is a cold no-op here. Persisted
-      // to the PERSISTENT .roll/loop ledger (repoCwd), so it survives the teardown
-      // + a later .roll reset, like runs.jsonl. Best-effort: a capture miss/slip
-      // ALERTs for observability and leaves the next card cold (fail-safe).
-      if (readSessionReuseEnabled(ports.repoCwd)) {
-        try {
-          const agentName = ctx.agent ?? "";
-          const reuse = sessionReuseFor(agentName, getAgentSpec(agentName)?.usage);
-          const storyId = ctx.storyId ?? "";
-          if (reuse.supportsReuse() && storyId !== "") {
-            const rootOverride = (process.env["ROLL_CODEX_SESSIONS_DIR"] ?? "").trim();
-            const sessionId = recoverCodexSessionId(
-              ports.paths.worktreePath,
-              ctx.startSec,
-              ...(rootOverride !== "" ? [rootOverride] : []),
-            );
-            if (sessionId !== null) {
-              appendWarmSession(ports.repoCwd, { storyId, sessionId, ts: ports.clock() });
-            } else {
-              ports.events.appendAlert(
-                ports.paths.alertsPath,
-                `[WARN] lever-4 warm-context: no codex session id captured for ${storyId} ` +
-                  `(cwd ${ports.paths.worktreePath}) — next codex card stays cold`,
-              );
-            }
-          }
-        } catch {
-          /* warm-context capture is strictly best-effort: never topple teardown */
-        }
-      }
       // FIX-204C: drop OUR .roll symlink first — `git worktree remove` refuses
       // untracked entries in repos that don't gitignore .roll, and removing the
       // LINK explicitly (never the target) keeps the main .roll untouchable.

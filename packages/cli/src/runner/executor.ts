@@ -122,6 +122,7 @@ import { promisify } from "node:util";
 import {
   type AgentSpawn,
   realAgentSpawn,
+  reasonixEnv,
 } from "./agent-spawn.js";
 import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, runPeerGate } from "./peer-gate.js";
 import { declaresAnySurface, deliverableCmdsForStory, readAttestGateMode, rejectedDeliverableCmdsForStory, runAttestGate, screenshotExemption, storyRequiresScreenshot, verificationReportPath, webCaptureTargetsForStory } from "./attest-gate.js";
@@ -828,6 +829,11 @@ export async function executeCommand(
           env: {
             ...process.env,
             ROLL_LOOP_ALERT: ports.paths.alertsPath,
+            // FIX-359: reasonix reads DEEPSEEK_API_KEY from env but does not
+            // auto-load ~/.reasonix/.env — inject it best-effort ONLY for the
+            // reasonix worker. The value flows solely into this spawn env; it is
+            // never logged, alerted, or emitted as an event.
+            ...(cmd.agent === "reasonix" ? reasonixEnv() : {}),
           },
           // FIX-204B: pin the executor-picked story into the agent prompt — the
           // claim (pick_story → 🔨) and the work must be the same story.

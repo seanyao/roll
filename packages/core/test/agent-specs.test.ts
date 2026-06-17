@@ -17,6 +17,13 @@ describe("AgentSpec registry — FIX-313", () => {
     expect(agentSmokeCommand("kimi")).toContain("kimi");
   });
 
+  it("FIX-359: kimi smoke uses the real `kimi` binary (not the non-existent `kimi-code`)", () => {
+    // The loop spawns `kimi -p` (agent-spawn.ts) but the smoke command was stale
+    // (`kimi-code`, which does not exist) — smoke and spawn must use one binary.
+    expect(agentSmokeCommand("kimi")).toBe('kimi -p "Reply with a single word: hello"');
+    expect(agentSmokeCommand("kimi")).not.toContain("kimi-code");
+  });
+
   it("declares sessionReuse as an agnostic capability — only codex resumes (lever-4)", () => {
     // codex is the ONLY engine with warm-context (exec resume).
     expect(getAgentSpec("codex")?.usage.sessionReuse).toBe("codex-exec-resume");

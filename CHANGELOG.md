@@ -4,6 +4,8 @@
 
 ### 修复
 
+- **`roll brief` 已退役**:这个 owner 简报能力面尚未成熟,直接移除避免误导。查看项目状态请用 `roll backlog` 或 `roll status`。(FIX-356a) `[loop]`
+
 - **结对评审池只收能 headless 运行的 reviewer**:`roll pair init`、pairing selector、Review Score 和 peer-gate retry 现在共用 agent profile 的 `canReviewHeadless` 能力;Cursor/Trae 这类 IDE 配置目标不再进入评审/评分候选池,避免选中后 spawn 不出 verdict 拖垮 cycle。(FIX-328) `[pairing]`
 
 - **"接着上一张卡的思路开干"加了防越积越多的保险**:这个提速功能(默认关闭)原本每个循环都会把工作记忆传给下一张卡,一张接一张连环传下去,会让后面的卡背着越来越多前面卡的旧思路、越跑越偏。现在只有"从零开始"的循环才会留记忆,最多隔一张卡传一次,不会再连环累积——把这个开关做成了"开了也不会越用越糟"。(FIX-355) `[loop-engine]`

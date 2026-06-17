@@ -2,11 +2,20 @@ export type AgentNormalizerKind = "claude" | "codex" | "generic";
 export type UsageExtractorKind = "claude-stream" | "openai" | "gemini" | "kimi" | "qwen" | "pi" | "generic";
 export type SessionRecoveryKind = "pi" | "kimi" | "codex";
 export type SessionBackfillKind = "claude-projects";
+/** lever-4: how (if at all) an agent's prior session is REUSED across the next
+ *  same-agent card (cross-card warm-context). Agent-AGNOSTIC capability — every
+ *  engine declares its kind so the cycle path can resolve one adapter port and
+ *  never branch per-agent. `'codex-exec-resume'` = resume via `codex exec resume
+ *  <id>`; `'none'` (or absent) = cold no-op (the universal default). */
+export type SessionReuseKind = "codex-exec-resume" | "none";
 
 export interface AgentUsageSpec {
   stdoutExtractor?: UsageExtractorKind;
   sessionRecovery?: SessionRecoveryKind;
   sessionBackfill?: SessionBackfillKind;
+  /** lever-4 warm-context capability. Absent ⇒ cold no-op (every engine except
+   *  codex). Only codex declares `'codex-exec-resume'`. */
+  sessionReuse?: SessionReuseKind;
 }
 
 export interface AgentSpec {
@@ -36,7 +45,7 @@ const BASE_AGENT_SPECS: readonly AgentSpec[] = [
     displayName: "codex",
     defaultModel: "gpt-5.5",
     normalizer: "codex",
-    usage: { stdoutExtractor: "openai", sessionRecovery: "codex" },
+    usage: { stdoutExtractor: "openai", sessionRecovery: "codex", sessionReuse: "codex-exec-resume" },
     smokeCommand: 'codex exec "Reply with a single word: hello"',
   },
   {

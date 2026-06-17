@@ -211,6 +211,26 @@ loop_safety:
 `).loopSafety.projectMap).toBeUndefined();
   });
 
+  it("parses loop_safety.session_reuse (lever-4 warm-context); DEFAULT-OFF unless explicit true", () => {
+    // absent ⇒ undefined (the reader treats it as OFF — deploy no-op, 稳字纪律).
+    expect(parsePolicy("").loopSafety.sessionReuse).toBeUndefined();
+    // an explicit `true` is the ONLY thing that turns it on.
+    expect(parsePolicy(`
+loop_safety:
+  session_reuse: true
+`).loopSafety.sessionReuse).toBe(true);
+    // explicit false ⇒ undefined (stays OFF).
+    expect(parsePolicy(`
+loop_safety:
+  session_reuse: false
+`).loopSafety.sessionReuse).toBeUndefined();
+    // garbage ⇒ undefined (fail-safe OFF; never accidentally enabled).
+    expect(parsePolicy(`
+loop_safety:
+  session_reuse: maybe
+`).loopSafety.sessionReuse).toBeUndefined();
+  });
+
   it("ignores comments and unknown keys (forward-compatible)", () => {
     const p = parsePolicy(`
 # leading comment

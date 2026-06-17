@@ -7,7 +7,7 @@
 import { execFileSync, execSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { CycleCommand, CycleContext, RollEvent } from "@roll/core";
 import { agentWritableRoots } from "../src/runner/executor.js";
@@ -21,6 +21,9 @@ import {
   buildProjectMap,
   maybeInjectProjectMap,
   readProjectMapEnabled,
+  readSessionReuseEnabled,
+  readWarmSessions,
+  warmSessionsLedgerPath,
   PROJECT_MAP_MAX_CHARS,
   buildClaudeArgv,
   buildRunRow,
@@ -30,6 +33,8 @@ import {
   executeCommand,
   parseEstMin,
   realAgentSpawn,
+  resetDirective,
+  storyPinDirective,
   RESUME_DISABLED_ENV,
   resolveResumeBase,
   revertPrematureDone,
@@ -166,6 +171,66 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
       "/repo/.roll-real/loop",
       prompt,
     ]);
+  });
+
+  it("lever-4: codex with NO codexSessionId is the unchanged cold spawn (default)", () => {
+    // The default — no resume id — must produce the byte-identical cold argv.
+    const { bin, args } = buildSpawnCommand("codex", { cwd: "/wt", skillBody: "DO WORK" });
+    expect(bin).toBe("codex");
+    expect(args).toEqual(["exec", prompt]);
+    expect(args).not.toContain("resume");
+  });
+
+  it("lever-4: codex WITH codexSessionId resumes (--all) + prepends the RESET directive", () => {
+    // No writableRoots → no sandbox -c overrides; bare resume by id.
+    const { bin, args } = buildSpawnCommand("codex", {
+      cwd: "/wt",
+      skillBody: "DO WORK",
+      storyId: "FIX-777",
+      codexSessionId: "uuid-abc",
+    });
+    expect(bin).toBe("codex");
+    const resumePrompt = `${resetDirective("FIX-777")}${AUTORUN_DIRECTIVE}${storyPinDirective("FIX-777")}DO WORK`;
+    // Exact shape: exec resume --all <id> <reset+prompt> — id positional before
+    // the prompt positional, options ahead of both, no sandbox flags.
+    expect(args).toEqual(["exec", "resume", "--all", "uuid-abc", resumePrompt]);
+    expect(args[args.length - 1]).toContain("NEW CARD FIX-777");
+    // `codex exec resume` REJECTS the cold-path flags — they must NOT appear.
+    expect(args).not.toContain("--cd");
+    expect(args).not.toContain("-C");
+    expect(args).not.toContain("--sandbox");
+    expect(args).not.toContain("-s");
+    expect(args).not.toContain("--add-dir");
+    // No `--` terminator — each -c binds one value, positionals parse cleanly.
+    expect(args).not.toContain("--");
+  });
+
+  it("lever-4: resume argv expresses the sandbox via -c config overrides (not --sandbox/--add-dir)", () => {
+    const { args } = buildSpawnCommand("codex", {
+      cwd: "/wt",
+      skillBody: "DO WORK",
+      storyId: "FIX-777",
+      codexSessionId: "uuid-abc",
+      writableRoots: ["/repo/.roll-real"],
+    });
+    const resumePrompt = `${resetDirective("FIX-777")}${AUTORUN_DIRECTIVE}${storyPinDirective("FIX-777")}DO WORK`;
+    // Sandbox is re-expressed as `-c` config overrides (codex 0.139 schema keys),
+    // placed BEFORE the positional SESSION_ID then PROMPT.
+    expect(args).toEqual([
+      "exec",
+      "resume",
+      "--all",
+      "-c",
+      'sandbox_mode="workspace-write"',
+      "-c",
+      'sandbox_workspace_write.writable_roots=["/repo/.roll-real"]',
+      "uuid-abc",
+      resumePrompt,
+    ]);
+    // The rejected exec-only flags must NOT leak onto the resume argv.
+    expect(args).not.toContain("--cd");
+    expect(args).not.toContain("--sandbox");
+    expect(args).not.toContain("--add-dir");
   });
 
   it("deepseek: deepseek <prompt> (positional)", () => {
@@ -1031,6 +1096,119 @@ describe("executeCommand — command → executor mapping", () => {
         writableRoots: [join(repo, ".roll"), join(repo, ".roll", "loop")],
       }),
     );
+  });
+
+  // ── lever-4: warm-context spawn/capture wiring (default-OFF) ───────────────
+  function lever4Repo(policyBody?: string): { repo: string; wt: string } {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-lever4-spawn-")));
+    execDirs.push(repo);
+    mkdirSync(join(repo, ".roll", "loop"), { recursive: true });
+    const wt = join(repo, "wt");
+    mkdirSync(wt, { recursive: true });
+    if (policyBody !== undefined) writeFileSync(join(repo, ".roll", "policy.yaml"), policyBody);
+    return { repo, wt };
+  }
+
+  it("lever-4 DEFAULT-OFF: codex spawn carries NO codexSessionId even if the ledger has one", async () => {
+    const { repo, wt } = lever4Repo(); // NO policy ⇒ flag OFF
+    // a stale ledger entry exists — it must be IGNORED while the flag is off.
+    writeFileSync(
+      join(repo, ".roll", "loop", "warm-sessions.json"),
+      JSON.stringify([{ storyId: "US-RUN-001", sessionId: "uuid-prior", ts: 1 }]),
+    );
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      paths: { ...base.ports.paths, worktreePath: wt, alertsPath: join(repo, ".roll", "loop", "ALERT.md") },
+    });
+    await executeCommand({ kind: "spawn_agent", agent: "codex", attempt: 1 }, ports, { ...CTX, agent: "codex" });
+    // the spawn opts must NOT carry codexSessionId (no-op).
+    const opts = (ports.agentSpawn as ReturnType<typeof vi.fn>).mock.calls[0][1] as Record<string, unknown>;
+    expect(opts.codexSessionId).toBeUndefined();
+    // the ledger is UNTOUCHED (not consumed) while OFF.
+    expect(readWarmSessions(repo)).toEqual([{ storyId: "US-RUN-001", sessionId: "uuid-prior", ts: 1 }]);
+  });
+
+  it("lever-4 ON: codex spawn resumes the prior ledger session AND consumes it (single-use)", async () => {
+    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n");
+    writeFileSync(
+      join(repo, ".roll", "loop", "warm-sessions.json"),
+      JSON.stringify([{ storyId: "FIX-PRIOR", sessionId: "uuid-prior", ts: 1 }]),
+    );
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      paths: { ...base.ports.paths, worktreePath: wt, alertsPath: join(repo, ".roll", "loop", "ALERT.md") },
+    });
+    await executeCommand({ kind: "spawn_agent", agent: "codex", attempt: 1 }, ports, { ...CTX, agent: "codex" });
+    const opts = (ports.agentSpawn as ReturnType<typeof vi.fn>).mock.calls[0][1] as Record<string, unknown>;
+    expect(opts.codexSessionId).toBe("uuid-prior");
+    // single-use: the entry is consumed (ledger now empty).
+    expect(readWarmSessions(repo)).toEqual([]);
+  });
+
+  it("lever-4 ON but NON-codex agent: cold no-op (no resume, ledger untouched)", async () => {
+    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n");
+    writeFileSync(
+      join(repo, ".roll", "loop", "warm-sessions.json"),
+      JSON.stringify([{ storyId: "FIX-PRIOR", sessionId: "uuid-prior", ts: 1 }]),
+    );
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      paths: { ...base.ports.paths, worktreePath: wt, alertsPath: join(repo, ".roll", "loop", "ALERT.md") },
+    });
+    // claude has no sessionReuse capability ⇒ cold no-op even with the flag ON.
+    await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, { ...CTX, agent: "claude" });
+    const opts = (ports.agentSpawn as ReturnType<typeof vi.fn>).mock.calls[0][1] as Record<string, unknown>;
+    expect(opts.codexSessionId).toBeUndefined();
+    expect(readWarmSessions(repo)).toEqual([{ storyId: "FIX-PRIOR", sessionId: "uuid-prior", ts: 1 }]);
+  });
+
+  it("lever-4 ON, empty ledger: codex spawn stays cold (no codexSessionId)", async () => {
+    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n");
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      paths: { ...base.ports.paths, worktreePath: wt, alertsPath: join(repo, ".roll", "loop", "ALERT.md") },
+    });
+    await executeCommand({ kind: "spawn_agent", agent: "codex", attempt: 1 }, ports, { ...CTX, agent: "codex" });
+    const opts = (ports.agentSpawn as ReturnType<typeof vi.fn>).mock.calls[0][1] as Record<string, unknown>;
+    expect(opts.codexSessionId).toBeUndefined();
+  });
+
+  it("lever-4 DEFAULT-OFF: cleanup_worktree captures NOTHING (no ledger write)", async () => {
+    const { repo, wt } = lever4Repo(); // flag OFF
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      paths: { ...base.ports.paths, worktreePath: wt, alertsPath: join(repo, ".roll", "loop", "ALERT.md") },
+    });
+    await executeCommand({ kind: "cleanup_worktree", branch: "loop/x" }, ports, { ...CTX, agent: "codex" });
+    // no capture attempted ⇒ no ledger file written (deploy no-op).
+    expect(readWarmSessions(repo)).toEqual([]);
+    expect(ports.git.worktreeRemove).toHaveBeenCalled(); // teardown still happens
+  });
+
+  it("lever-4 ON: cleanup_worktree capture-miss ALERTs (observability) and stays cold", async () => {
+    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n");
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      paths: { ...base.ports.paths, worktreePath: wt, alertsPath: join(repo, ".roll", "loop", "ALERT.md") },
+    });
+    // point codex session recovery at an empty root ⇒ no id captured ⇒ ALERT.
+    const prev = process.env["ROLL_CODEX_SESSIONS_DIR"];
+    process.env["ROLL_CODEX_SESSIONS_DIR"] = join(repo, "no-codex-sessions");
+    try {
+      await executeCommand({ kind: "cleanup_worktree", branch: "loop/x" }, ports, { ...CTX, agent: "codex" });
+    } finally {
+      if (prev === undefined) delete process.env["ROLL_CODEX_SESSIONS_DIR"];
+      else process.env["ROLL_CODEX_SESSIONS_DIR"] = prev;
+    }
+    expect(readWarmSessions(repo)).toEqual([]); // nothing captured
+    const alerts = (calls["alert"] ?? []).map((a) => String((a as unknown[])[1]));
+    expect(alerts.join("\n")).toContain("lever-4 warm-context: no codex session id captured");
   });
 
   it("FIX-253: spawn_agent persists worktree-local ALERT files before cleanup can delete them", async () => {
@@ -2340,6 +2518,72 @@ describe("FIX-338 — project-map injection (Phase B 杠杆2, DEFAULT-OFF)", () 
     const missing = join(tmpdir(), "roll-projmap-does-not-exist-xyz");
     expect(buildProjectMap(missing, "FIX-1")).toBe("");
     expect(maybeInjectProjectMap("BODY", missing, true, "FIX-1")).toBe("BODY");
+  });
+});
+
+describe("lever-4 — warm-context (session-reuse) wiring helpers (default-OFF)", () => {
+  const ledgerDirs: string[] = [];
+  afterAll(() => {
+    for (const d of ledgerDirs) execSync(`rm -rf '${d}'`);
+  });
+  function tmpRepo(): string {
+    const r = realpathSync(mkdtempSync(join(tmpdir(), "roll-lever4-repo-")));
+    ledgerDirs.push(r);
+    mkdirSync(join(r, ".roll"), { recursive: true });
+    return r;
+  }
+
+  // (a) DEFAULT-OFF strict — the flag-reader is the deploy no-op gate. Absent /
+  // false / garbage ⇒ false; ONLY a literal `true` enables. This is the single
+  // assertion that "deploy = no-op until explicitly flipped on".
+  it("DEFAULT-OFF: readSessionReuseEnabled is false unless `session_reuse: true`", () => {
+    const repo = tmpRepo();
+    const policy = join(repo, ".roll", "policy.yaml");
+    // absent policy ⇒ OFF.
+    expect(readSessionReuseEnabled(repo)).toBe(false);
+    // explicit false ⇒ OFF.
+    writeFileSync(policy, "loop_safety:\n  session_reuse: false\n");
+    expect(readSessionReuseEnabled(repo)).toBe(false);
+    // garbage ⇒ OFF (fail-safe; never accidentally enabled).
+    writeFileSync(policy, "loop_safety:\n  session_reuse: maybe\n");
+    expect(readSessionReuseEnabled(repo)).toBe(false);
+    // unrelated policy keys present, flag absent ⇒ still OFF.
+    writeFileSync(policy, "loop_safety:\n  attest_gate: soft\n");
+    expect(readSessionReuseEnabled(repo)).toBe(false);
+    // ONLY a literal `true` flips it on.
+    writeFileSync(policy, "loop_safety:\n  session_reuse: true\n");
+    expect(readSessionReuseEnabled(repo)).toBe(true);
+  });
+
+  // (b) The ledger lives under the PERSISTENT .roll/loop (repoCwd), NOT a worktree
+  // — it must survive teardown + .roll reset like runs.jsonl.
+  it("warmSessionsLedgerPath is under .roll/loop in the repo (survives worktree teardown)", () => {
+    expect(warmSessionsLedgerPath("/r")).toBe(join("/r", ".roll", "loop", "warm-sessions.json"));
+  });
+
+  // (c) The ledger reader is tolerant — a missing / malformed ledger reads as []
+  // (a capture-store miss never resumes; cold fallback, never a cycle failure).
+  it("readWarmSessions tolerates a missing / malformed ledger ⇒ []", () => {
+    const repo = tmpRepo();
+    // missing file ⇒ [].
+    expect(readWarmSessions(repo)).toEqual([]);
+    // malformed JSON ⇒ [].
+    const p = warmSessionsLedgerPath(repo);
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, "{ not json");
+    expect(readWarmSessions(repo)).toEqual([]);
+    // non-array JSON ⇒ [].
+    writeFileSync(p, '{"x":1}');
+    expect(readWarmSessions(repo)).toEqual([]);
+    // a well-formed ledger round-trips (only entries with string story+session).
+    writeFileSync(
+      p,
+      JSON.stringify([
+        { storyId: "FIX-1", sessionId: "uuid-1", ts: 5 },
+        { storyId: 42, sessionId: "bad" }, // dropped (storyId not a string)
+      ]),
+    );
+    expect(readWarmSessions(repo)).toEqual([{ storyId: "FIX-1", sessionId: "uuid-1", ts: 5 }]);
   });
 });
 

@@ -110,6 +110,20 @@ export function storyPinDirective(storyId: string): string {
   );
 }
 
+/**
+ * lever-4 — the warm-context RESET directive. When a codex session is RESUMED on
+ * the NEXT card, the model still carries the prior card's context; this bounded
+ * preface tells it to drop those specifics and re-orient onto the fresh card +
+ * fresh worktree (origin/main) BEFORE any edit. Prepended to the prompt; kept
+ * short so it never bloats the already-lean prompt.
+ */
+export function resetDirective(storyId: string): string {
+  return (
+    `NEW CARD ${storyId}. Ignore the prior card's specifics/files/branch/decisions; ` +
+    `this is a fresh worktree on origin/main — re-read the backlog + the new card spec before any edit.\n\n`
+  );
+}
+
 /** Inputs for {@link buildClaudeArgv}: the worktree dir + the prompt body. */
 export interface ClaudeArgvInput {
   /** The agent's cwd / `--add-dir` target — the cycle worktree (`WT`). */
@@ -206,6 +220,12 @@ export interface AgentSpawnOptions {
   /** FIX-319: bare spawn — send `skillBody` verbatim (no autorun directive / no
    *  story pin). Used for the heterogeneous peer reviewer (review-only framing). */
   bare?: boolean;
+  /** lever-4 (cross-card warm-context): when set, the codex branch RESUMES this
+   *  prior session id (`codex exec resume <id>`) instead of a cold `codex exec`,
+   *  and PREPENDS the RESET_DIRECTIVE so the resumed context re-orients onto the
+   *  new card. Absent (the universal default) ⇒ unchanged cold spawn. Only the
+   *  codex branch reads it — it is isolated there, never a cross-agent branch. */
+  codexSessionId?: string;
 }
 
 /** Result of an agent spawn — the orchestrator feeds `exitCode` back as
@@ -263,10 +283,50 @@ export function buildSpawnCommand(agent: string, opts: AgentSpawnOptions): { bin
   }
   if (agent === "codex") {
     const roots = [...new Set(opts.writableRoots ?? [])].filter((p) => p.trim() !== "");
+    // COLD `codex exec`: the workspace sandbox is set with the exec-only flags
+    // (--cd / --sandbox / --add-dir). These do NOT exist on `codex exec resume`.
     const sandboxArgs =
       roots.length > 0
         ? ["--cd", opts.cwd, "--sandbox", "workspace-write", ...roots.flatMap((p) => ["--add-dir", p])]
         : [];
+    // lever-4 (default-OFF; only reached when the flag-guarded wiring set
+    // codexSessionId): RESUME the prior session and prepend the RESET directive
+    // so the warm context re-orients onto the new card / fresh worktree. The
+    // resume argv is isolated to THIS codex branch — no cross-agent branching.
+    if (opts.codexSessionId !== undefined && opts.codexSessionId !== "") {
+      const resumePrompt = `${resetDirective(opts.storyId ?? "")}${prompt}`;
+      // `codex exec resume` REJECTS --cd / --sandbox / --add-dir (those are
+      // plain-`codex exec` flags) — passing them would error → cold fallback.
+      // Empirically (codex-cli 0.139.0) resume binds its workdir to the SPAWN's
+      // PROCESS cwd (the runner already spawns with cwd = the fresh worktree),
+      // so warm reasoning lands in the fresh tree without --cd. The sandbox is
+      // re-expressed as `-c` config overrides (keys verified against codex
+      // 0.139.0's config schema — `sandbox_mode` is a top-level key and
+      // `sandbox_workspace_write` is a table whose `writable_roots` field is the
+      // resume-side equivalent of cold's --add-dir):
+      //   --sandbox workspace-write          → -c sandbox_mode="workspace-write"
+      //                                         (auto-grants [cwd, /tmp, $TMPDIR])
+      //   --add-dir <root>…                  → -c sandbox_workspace_write.writable_roots=[…]
+      // `--all` disables resume's cwd-based session filtering (we resume by an
+      // explicit id from a DIFFERENT cwd than the capture). No `--` terminator is
+      // needed: each `-c` binds exactly one `key=value`, so the two bare
+      // positionals (SESSION_ID then PROMPT) parse cleanly after the options
+      // (verified against codex 0.139.0 clap parsing); the RESET_DIRECTIVE always
+      // leads the prompt so it never begins with a `-`.
+      const resumeConfigArgs =
+        roots.length > 0
+          ? [
+              "-c",
+              'sandbox_mode="workspace-write"',
+              "-c",
+              `sandbox_workspace_write.writable_roots=${JSON.stringify(roots)}`,
+            ]
+          : [];
+      return {
+        bin: opts.bin ?? "codex",
+        args: ["exec", "resume", "--all", ...resumeConfigArgs, opts.codexSessionId, resumePrompt],
+      };
+    }
     return { bin: opts.bin ?? "codex", args: ["exec", ...sandboxArgs, prompt] };
   }
   if (agent === "deepseek") {

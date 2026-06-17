@@ -206,6 +206,72 @@ function Features() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Skills — specialized workflow diagrams
+// ─────────────────────────────────────────────────────────────────────────────
+function Skills() {
+  const t = useT();
+  const head = t.SKILLS_HEADING;
+  const groups = t.SKILL_GROUPS;
+  const [active, setActive] = useState(groups[0].id);
+  const onJump = (id) => {
+    setActive(id);
+    const el = document.getElementById(`sg-${id}`);
+    if (el) {
+      const offset = 92;
+      window.scrollTo({ top: el.getBoundingClientRect().top + window.pageYOffset - offset, behavior: "smooth" });
+    }
+  };
+  return (
+    <section className="r-section r-section-tinted" id="skills">
+      <div className="r-container">
+        <SectionLabel n="04">{head.label}</SectionLabel>
+        <div className="r-section-title-row">
+          <div>
+            <h2 className="r-h2">{head.title}</h2>
+            <p className="r-section-lede">{head.sub}</p>
+          </div>
+          <a className="r-btn r-btn-primary r-section-action" href={head.overviewHref} target="_blank" rel="noreferrer">
+            <span>{head.overviewLabel}</span>
+            <Icon name="ext" size={13} />
+          </a>
+        </div>
+
+        <nav className="r-fg-nav" aria-label={t.UI.skillGroupsLabel}>
+          {groups.map((g) => (
+            <button
+              key={g.id}
+              type="button"
+              className={`r-fg-tab${active === g.id ? " is-active" : ""}`}
+              onClick={() => onJump(g.id)}
+            >
+              {g.title}
+              <span className="r-fg-count">{g.features.length}</span>
+            </button>
+          ))}
+        </nav>
+
+        <div className="r-fg-list">
+          {groups.map((g) => (
+            <div key={g.id} id={`sg-${g.id}`} className="r-fg">
+              <div className="r-fg-head">
+                <h3 className="r-fg-title">{g.title}</h3>
+                <span className="r-fg-rule" />
+                <span className="r-fg-blurb">{g.blurb}</span>
+              </div>
+              <div className="r-fg-grid">
+                {g.features.map((f) => (
+                  <FeatureCard key={f.name} feature={f} domain={g.title} />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Journey — six-step timeline
 // ─────────────────────────────────────────────────────────────────────────────
 function Journey() {
@@ -214,7 +280,7 @@ function Journey() {
   return (
     <section className="r-section r-section-tinted" id="journey">
       <div className="r-container">
-        <SectionLabel n="04">{j.label}</SectionLabel>
+        <SectionLabel n="05">{j.label}</SectionLabel>
         <h2 className="r-h2">{j.title}</h2>
         <p className="r-section-lede">{j.sub}</p>
         <ol className="r-journey">
@@ -249,7 +315,7 @@ function Numbers() {
   return (
     <section className="r-section r-section-numbers">
       <div className="r-container">
-        <SectionLabel n="05">{n.label}</SectionLabel>
+        <SectionLabel n="06">{n.label}</SectionLabel>
         <div className="r-numbers">
           {n.stats.map((s) => (
             <div key={s.label} className="r-stat">
@@ -273,7 +339,7 @@ function Guides() {
   return (
     <section className="r-section" id="guides">
       <div className="r-container">
-        <SectionLabel n="06">{g.label}</SectionLabel>
+        <SectionLabel n="07">{g.label}</SectionLabel>
         <h2 className="r-h2">{g.title}</h2>
         <p className="r-section-lede">{g.sub}</p>
         <div className="r-guides">
@@ -323,4 +389,4 @@ function Footer() {
   );
 }
 
-Object.assign(window, { Header, Hero, Why, How, Features, Journey, Numbers, Guides, Footer });
+Object.assign(window, { Header, Hero, Why, How, Features, Skills, Journey, Numbers, Guides, Footer });

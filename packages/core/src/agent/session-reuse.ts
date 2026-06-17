@@ -100,3 +100,20 @@ export function sessionReuseFor(_agent: string, spec: AgentUsageSpec | undefined
       return COLD_ADAPTER;
   }
 }
+
+/**
+ * lever-4 DEPTH-1 CAP (harness-safety, FIX-355). A warm-session may be captured
+ * into the ledger ONLY when the cycle that just ran spawned COLD. A cycle that
+ * itself RESUMED a prior session must NOT re-seed: otherwise warm context chains
+ * UNBOUNDEDLY across cards (cold A → B resumes A → B re-seeds → C resumes A+B →
+ * …), so every later card inherits an ever-growing, anchoring context and
+ * eventually ALL cards degrade — the systemic failure mode (a single mis-built
+ * harness sinks every future card, not just one). Capturing on COLD origin only
+ * bounds every chain to a SINGLE hop: cold seeds → next card resumes once → does
+ * NOT re-seed → the following card runs cold again (pattern: cold→warm→cold→warm).
+ * `spawnedWarm` = "this cycle injected a resume id". Pure; the CLI passes the
+ * fact in. Orthogonal to single-use consume (which only stops re-using ONE entry
+ * twice; it does NOT stop the chain from extending — this cap does). */
+export function shouldCaptureWarmSession(spawnedWarm: boolean): boolean {
+  return !spawnedWarm;
+}

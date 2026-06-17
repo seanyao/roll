@@ -41,6 +41,7 @@ describe("identity helpers", () => {
     expect(agentBinNames("openai")).toEqual(["codex"]);
     expect(agentBinNames("gemini")).toEqual(["agy", "gemini"]);
     expect(agentBinNames("kimi")).toEqual(["kimi-code", "kimi-cli", "kimi"]);
+    expect(agentBinNames("reasonix")).toEqual(["reasonix"]);
     expect(agentBinNames("nope")).toBeNull();
   });
 
@@ -50,6 +51,7 @@ describe("identity helpers", () => {
     expect(agentIsKnown("cursor")).toBe(true);
     expect(agentIsKnown("gemini")).toBe(true); // canonicalises to agy
     expect(agentIsKnown("claude")).toBe(true);
+    expect(agentIsKnown("reasonix")).toBe(true);
     expect(agentIsKnown("totally-made-up")).toBe(false);
   });
 });

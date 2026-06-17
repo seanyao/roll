@@ -69,6 +69,8 @@ export function agentBinNames(agent: string): string[] | null {
       return ["qwen"];
     case "pi":
       return ["pi"];
+    case "reasonix":
+      return ["reasonix"];
     default:
       return null;
   }

@@ -91,16 +91,21 @@ export function cyclesLedgerJson(rows: CycleLedgerRow[], sinceLabel: string, now
   const within = windowRows(rows, sinceLabel, nowSec);
   const delivered = within.filter((r) => r.verdict === "delivered").length;
   const failed = ledgerFailedCount(within);
-  const cost = within.reduce((a, r) => {
-    const n = r.cost.startsWith("$") ? Number(r.cost.slice(1)) : 0;
-    return a + (Number.isFinite(n) ? n : 0);
-  }, 0);
+  // FIX-361: cost may be "$X.XX" or "¥X.XX". Parse each row and aggregate
+  // per-currency in the JSON output so consumers never blindly sum across currencies.
+  const costByCur: Record<string, number> = {};
+  for (const r of within) {
+    const { value, currency } = parseCostCell(r.cost);
+    if (value !== null && currency !== null) {
+      costByCur[currency] = (costByCur[currency] ?? 0) + value;
+    }
+  }
   return {
     since: sinceLabel,
     cycles: within.length,
     delivered,
     failed,
-    costUsd: Number(cost.toFixed(2)),
+    costByCurrency: costByCur,
     rows: within.map((r) => ({
       no: cycleNo(r.cycleId),
       cycleId: r.cycleId,
@@ -112,6 +117,43 @@ export function cyclesLedgerJson(rows: CycleLedgerRow[], sinceLabel: string, now
       duration: r.duration,
     })),
   };
+}
+
+/** FIX-361: parse the formatted cost string ("$0.74" / "¥0.74" / "?" / "—")
+ *  into { value: number | null, currency: string | null }. A null value means
+ *  the cost is unknown; a null currency means not presentable. */
+function parseCostCell(cell: string): { value: number | null; currency: string | null } {
+  if (cell === "?" || cell === "—") return { value: null, currency: null };
+  const sym = cell[0] ?? "";
+  const currency = sym === "\u00A5" ? "CNY" : sym === "$" ? "USD" : null;
+  const n = Number(cell.slice(1));
+  return { value: Number.isFinite(n) ? n : null, currency };
+}
+
+/** FIX-361: build the cost summary string, with per-currency breakdown when
+ *  the window mixes ¥ and $. */
+function costSummary(within: readonly CycleLedgerRow[], lang: Lang): string {
+  const byCur: Record<string, number> = {};
+  for (const r of within) {
+    const { value, currency } = parseCostCell(r.cost);
+    if (value !== null && currency !== null) {
+      byCur[currency] = (byCur[currency] ?? 0) + value;
+    }
+  }
+  const entries = Object.entries(byCur);
+  if (entries.length === 0) return lang === "zh" ? "花费 —" : "cost —";
+  // Single currency: simple "$X.XX" or "¥X.XX".
+  if (entries.length === 1) {
+    const [cur, val] = entries[0] as [string, number];
+    const sym = cur === "CNY" ? "\u00A5" : "$";
+    return `${sym}${val.toFixed(2)}`;
+  }
+  // Mixed currencies: show each separately so they are never blindly summed.
+  const parts = entries.map(([cur, val]) => {
+    const sym = cur === "CNY" ? "\u00A5" : "$";
+    return `${sym}${val.toFixed(2)}`;
+  });
+  return parts.join(" + ");
 }
 
 export function renderCyclesLedger(rows: CycleLedgerRow[], sinceLabel: string, lang: Lang, nowSec: number): string {
@@ -133,15 +175,11 @@ export function renderCyclesLedger(rows: CycleLedgerRow[], sinceLabel: string, l
   }
   const delivered = within.filter((r) => r.verdict === "delivered").length;
   const failed = ledgerFailedCount(within);
-  const cost = within.reduce((a, r) => {
-    // kimi pair-review: a malformed cost cell must not turn the summary into $NaN.
-    const n = r.cost.startsWith("$") ? Number(r.cost.slice(1)) : 0;
-    return a + (Number.isFinite(n) ? n : 0);
-  }, 0);
+  const costStr = costSummary(within, lang);
   const summary =
     lang === "zh"
-      ? `${within.length} 个周期 · ${delivered} 已交付 · ${c(failed > 0 ? "red" : "green", String(failed))} 失败/回滚/阻塞 · $${cost.toFixed(2)}`
-      : `${within.length} cycles · ${delivered} delivered · ${c(failed > 0 ? "red" : "green", String(failed))} failed/reverted/blocked · $${cost.toFixed(2)}`;
+      ? `${within.length} 个周期 · ${delivered} 已交付 · ${c(failed > 0 ? "red" : "green", String(failed))} 失败/回滚/阻塞 · ${costStr}`
+      : `${within.length} cycles · ${delivered} delivered · ${c(failed > 0 ? "red" : "green", String(failed))} failed/reverted/blocked · ${costStr}`;
   const latest = within[0];
   // `roll cycle <handle>` is the spec'd companion (US-CLI-013, next card) —
   // the hint is the contract between the two surfaces, not a dead end.

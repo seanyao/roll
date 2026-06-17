@@ -21,6 +21,23 @@ import { resolveLang, type Lang } from "@roll/spec";
 import type { TruthSnapshot } from "@roll/spec";
 import { c, COLS, hr, pad, renderState, row, sectionHead } from "../render.js";
 import { attestCoverage, isSnapshotStale, loadTruthSnapshot, renderNowMs, snapshotVerdict } from "../lib/truth-read.js";
+import type { TruthSnapshotCycle } from "@roll/spec";
+
+/** FIX-361: format a cycle snapshot's cost with correct currency symbols,
+ *  separating by currency so ¥ and $ are never blindly summed. */
+function cycleSnapshotCostStr(cyc: TruthSnapshotCycle): string {
+  const byCur = cyc.costByCurrency3d;
+  if (byCur !== undefined && Object.keys(byCur).length > 0) {
+    return Object.entries(byCur)
+      .map(([cur, val]) => {
+        const sym = cur === "CNY" ? "\u00A5" : "$";
+        return `${sym}${val.toFixed(2)}`;
+      })
+      .join(" + ");
+  }
+  // Old snapshot without per-currency breakdown: use the legacy field.
+  return `$${cyc.costUsd3d.toFixed(2)}`;
+}
 
 // ── Paths ────────────────────────────────────────────────────────────────────
 function rollHome(): string {
@@ -435,11 +452,13 @@ export function renderTruthSummary(
 
   // CYCLE — cycles/3d + failed + cost (the web Cycle tile).
   const cyc = snapshot.cycle;
+  // FIX-361: per-currency cost display so ¥ and $ never blindly summed.
+  const cycCostStr = cyc !== undefined ? cycleSnapshotCostStr(cyc) : null;
   const cycleRight =
     cyc !== undefined
       ? (lang === "zh" ? `${cyc.cycles3d} / 3天   ` : `${cyc.cycles3d} / 3d   `) +
         c(cyc.failed3d > 0 ? "red" : "green", lang === "zh" ? `${cyc.failed3d} 失败` : `${cyc.failed3d} failed`) +
-        ` · $${cyc.costUsd3d.toFixed(2)}`
+        (cycCostStr !== null ? ` · ${cycCostStr}` : "")
       : c("muted", lang === "zh" ? "无周期数据" : "no cycle data");
   out.push("  " + statusLabel("CYCLE") + cycleRight);
 

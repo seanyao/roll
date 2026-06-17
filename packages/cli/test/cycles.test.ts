@@ -67,14 +67,15 @@ describe("roll cycles — US-CLI-012", () => {
     const rows = collectCycleLedger(p);
     const human = stripAnsi(renderCyclesLedger(rows, "3d", "en", NOW));
     const json = cyclesLedgerJson(rows, "3d", NOW) as {
-      cycles: number; delivered: number; failed: number; costUsd: number;
+      cycles: number; delivered: number; failed: number; costByCurrency: Record<string, number>;
       rows: Array<{ no: string; verdict: string }>;
     };
     // Same summary numbers the human line prints (4 cycles · 1 delivered · 3 …).
     expect(json.cycles).toBe(4);
     expect(json.delivered).toBe(1);
     expect(json.failed).toBe(3);
-    expect(json.costUsd).toBe(0.11);
+    // FIX-361: cost is now per-currency.
+    expect(json.costByCurrency["USD"] ?? 0).toBeCloseTo(0.11);
     // Every JSON row's handle appears in the human render, in the same order.
     const humanHandles = [...human.matchAll(/#(\d+)/g)].map((m) => m[1]);
     expect(json.rows.map((r) => r.no)).toEqual(humanHandles);

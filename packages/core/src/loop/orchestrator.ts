@@ -102,6 +102,7 @@
  * existing ports/plans so the adapter dispatches them 1:1.
  */
 import type { AgentId, CycleCost, CyclePhase, ModelId, TerminalOutcome } from "@roll/spec";
+import { cycleCurrency } from "../cost/tracker.js";
 import type { RollEvent } from "@roll/spec";
 import { nextWaitAction, type WaitAction } from "../delivery/pr.js";
 
@@ -593,6 +594,8 @@ function zeroCost(ctx: TerminalContext): CycleCost {
     estimatedCost: 0,
     revertCount: 0,
     effectiveCost: 0,
+    // FIX-361: currency from model's price config; falls back to USD for unknown/empty.
+    currency: ctx.model !== "" ? cycleCurrency(ctx.model) : "USD",
   };
 }
 

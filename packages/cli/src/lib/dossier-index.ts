@@ -116,6 +116,8 @@ export interface TruthBoardCycle {
   cycles3d: number;
   failed3d: number;
   costUsd3d: number;
+  /** FIX-361: cost separated by native currency so display never blindly sums ¥+$. */
+  costByCurrency3d?: Record<string, number>;
   collectedAt?: string;
 }
 
@@ -231,8 +233,23 @@ function dataOrQ(v: string | number | undefined): string {
   return v === undefined ? "?" : esc(String(v));
 }
 
-function moneyOrQ(v: number | undefined): string {
-  return v === undefined ? "?" : `$${v.toFixed(2)}`;
+/** FIX-361: format a cost value with the correct currency symbol. */
+function moneyOrQ(v: number | undefined, currency = "USD"): string {
+  if (v === undefined) return "?";
+  const sym = currency === "CNY" ? "\u00A5" : "$";
+  return `${sym}${v.toFixed(2)}`;
+}
+
+/** FIX-361: format cycle cost, preferring per-currency breakdown when available. */
+function cycleCostHtml(c: TruthBoardCycle | undefined): string {
+  if (c === undefined) return "?";
+  const byCur = c.costByCurrency3d;
+  if (byCur !== undefined && Object.keys(byCur).length > 0) {
+    return Object.entries(byCur)
+      .map(([cur, val]) => moneyOrQ(val, cur))
+      .join(" + ");
+  }
+  return moneyOrQ(c.costUsd3d);
 }
 
 function truthBoardVerdict(epics: DossierEpic[], truth: TruthBoardInput | undefined): TruthBoardVerdict {
@@ -274,7 +291,7 @@ function cycleTruthTile(truth: TruthBoardInput | undefined): string {
     `<h2>Cycle</h2>` +
     `<div class="truth-metric"><b>${dataOrQ(c?.cycles3d)}</b><span>${bi("cycles / 3d", "近 3 天周期")}</span></div>` +
     `<dl><dt>${bi("failed", "失败")}</dt><dd>${dataOrQ(c?.failed3d)}</dd>` +
-    `<dt>${bi("cost", "花费")}</dt><dd>${moneyOrQ(c?.costUsd3d)}</dd></dl>` +
+    `<dt>${bi("cost", "花费")}</dt><dd>${cycleCostHtml(c)}</dd></dl>` +
     `</section>`
   );
 }

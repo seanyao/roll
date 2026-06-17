@@ -332,6 +332,10 @@ export function collectCycleLedger(projectPath: string): CycleLedgerRow[] {
     const rawTs = row["ts"];
     const ts = typeof rawTs === "string" ? Date.parse(rawTs) : typeof rawTs === "number" ? (rawTs > 10_000_000_000 ? rawTs : rawTs * 1000) : Number.NaN;
     const cost = typeof row["cost_effective_usd"] === "number" ? (row["cost_effective_usd"] as number) : typeof row["cost_usd"] === "number" ? (row["cost_usd"] as number) : undefined;
+    // FIX-361: native currency from the runs row (v3 heart writes it). v2 rows
+    // lack it — fall back to USD (the only currency they ever recorded).
+    const currency = typeof row["cost_currency"] === "string" ? (row["cost_currency"] as string) : "USD";
+    const curSymbol = currency === "CNY" ? "\u00A5" : "$";
     // FIX-290 AC3: a cycle whose usage was unreadable (usage_credentials_missing)
     // carries `usage_unknown:true` — its tokens/cost are UNKNOWN ("?"), not 0/—.
     const usageUnknown = row["usage_unknown"] === true;
@@ -348,7 +352,7 @@ export function collectCycleLedger(projectPath: string): CycleLedgerRow[] {
       agent: String(row["agent"] ?? ""),
       model: typeof row["model"] === "string" && row["model"] !== "" ? (row["model"] as string) : String(row["agent"] ?? "—") || "—",
       tokens: fmtTokens(row["tokens_in"], row["tokens_out"], usageUnknown),
-      cost: cost !== undefined ? `$${cost.toFixed(2)}` : usageUnknown ? "?" : "—",
+      cost: cost !== undefined ? `${curSymbol}${cost.toFixed(2)}` : usageUnknown ? "?" : "—",
       duration: fmtDuration(row["duration_sec"]),
       tape: rowTape(row, verdict, ev, prNumber, prOpen),
       evidence,

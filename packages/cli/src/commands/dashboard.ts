@@ -745,6 +745,8 @@ function applyRunRow(cy: Cycle, r: RunRecord, ts: Date | null): void {
   // heart emits no `usage` events — without this the cost columns stay blank
   // for real deliveries.
   if (typeof r["cost_usd"] === "number" && cy.cost_list == null) cy.cost_list = r["cost_usd"];
+  // FIX-361: surface native currency from the v3 row so display shows ¥ vs $.
+  if (typeof r["cost_currency"] === "string" && cy.cost_currency == null) cy.cost_currency = r["cost_currency"];
   if (typeof r["tokens_in"] === "number" && !cy.input_tokens) cy.input_tokens = r["tokens_in"];
   if (typeof r["tokens_out"] === "number" && !cy.output_tokens) cy.output_tokens = r["tokens_out"];
   // FIX-249 AC3: the v3 row's cache split + model feed the same columns the
@@ -1965,7 +1967,7 @@ function render(
     sectionHeadLine(
       "RECENT",
       `最近 ${cycles.length} 个 cycle`,
-      "t · time   Δ · duration   tok · tokens   $ · cost   id · backlog",
+      "t · time   Δ · duration   tok · tokens   $/¥ · cost   id · backlog",
     ),
   );
   out.push("");
@@ -2138,7 +2140,10 @@ export interface StoryRollup {
   span_start: Date | null;
   span_end: Date | null;
   duration_s: number;
+  /** FIX-361: total cost (all currencies, raw sum — for backward compat). */
   cost: number;
+  /** FIX-361: cost separated by native currency so display never blindly sums ¥+$. */
+  cost_by_cur: Record<string, number>;
   input_tokens: number;
   output_tokens: number;
   cache_creation_tokens: number;
@@ -2163,6 +2168,7 @@ export function rollupForStory(cycles: Cycle[], storyId: string): StoryRollup {
     span_end: null,
     duration_s: 0,
     cost: 0,
+    cost_by_cur: {},
     input_tokens: 0,
     output_tokens: 0,
     cache_creation_tokens: 0,
@@ -2186,8 +2192,16 @@ export function rollupForStory(cycles: Cycle[], storyId: string): StoryRollup {
     r.output_tokens += cy.output_tokens ?? 0;
     r.cache_creation_tokens += cy.cache_creation_tokens ?? 0;
     r.cache_read_tokens += cy.cache_read_tokens ?? 0;
-    if (cy.cost_list !== null && cy.cost_list !== undefined) r.cost += cy.cost_list;
-    else if (cy.cron) r.cost += cy.cron.cost;
+    if (cy.cost_list !== null && cy.cost_list !== undefined) {
+      r.cost += cy.cost_list;
+      // FIX-361: separate by native currency so display never blindly sums ¥+$.
+      const cur = cy.cost_currency ?? "USD";
+      r.cost_by_cur[cur] = (r.cost_by_cur[cur] ?? 0) + cy.cost_list;
+    } else if (cy.cron) {
+      r.cost += cy.cron.cost;
+      // cron log entries are historical and always USD.
+      r.cost_by_cur["USD"] = (r.cost_by_cur["USD"] ?? 0) + cy.cron.cost;
+    }
     if (cy.pr_num) r.prs.push({ num: cy.pr_num, outcome: cy.pr_outcome ?? "open" });
     if (cy.model && !r.model) r.model = cy.model;
   }
@@ -2251,7 +2265,13 @@ export function renderStoryPanel(r: StoryRollup, description = ""): string {
     `  cache w ${storyFmtTokens(r.cache_creation_tokens)}` +
     `  r ${storyFmtTokens(r.cache_read_tokens)}`;
   const model = r.model || "—";
-  const lineCost = `  cost      $${r.cost.toFixed(2)}    model  ${model}`;
+  // FIX-361: per-currency cost — show each currency separately so ¥ and $ are never blindly summed.
+  const costParts = Object.entries(r.cost_by_cur).map(([cur, val]) => {
+    const sym = cur === "CNY" ? "\u00A5" : "$";
+    return `${sym}${val.toFixed(2)}`;
+  });
+  const costStr = costParts.length > 0 ? costParts.join(" + ") : `$${r.cost.toFixed(2)}`;
+  const lineCost = `  cost      ${costStr}    model  ${model}`;
   const prs = r.prs;
   const linePrs = "  PRs       " + (prs.length ? prs.slice(0, 8).map(storyFmtPr).join(" ") : "—");
 
@@ -2264,7 +2284,9 @@ export function renderStoryPanel(r: StoryRollup, description = ""): string {
     const label = cy.label || "—";
     const glyph = storyOutcomeGlyph(cy.outcome ?? "");
     const cost = cy.cost_list;
-    const costS = cost !== null && cost !== undefined ? `$${cost.toFixed(2)}` : "—";
+    // FIX-361: use the cycle's native currency symbol.
+    const curSym = (cy.cost_currency ?? "USD") === "CNY" ? "\u00A5" : "$";
+    const costS = cost !== null && cost !== undefined ? `${curSym}${cost.toFixed(2)}` : "—";
     const prefix = i === 0 ? "  recent   " : "           ";
     recentLines.push(`${prefix} ${label}  ${glyph}  ${costS}`);
   });
@@ -2286,6 +2308,7 @@ export function storyJson(r: StoryRollup): string {
     span_end: isoUtc(r.span_end),
     duration_s: r.duration_s,
     cost: r.cost,
+    cost_by_cur: r.cost_by_cur,
     input_tokens: r.input_tokens,
     output_tokens: r.output_tokens,
     cache_creation_tokens: r.cache_creation_tokens,

@@ -305,3 +305,40 @@ describe("FIX-303: cost computed in each agent's native currency", () => {
     expect(c.estimatedCost).toBeCloseTo(0.5, 4);
   });
 });
+
+describe("FIX-361: currency threaded through CycleCost", () => {
+  it("a CNY-billed model (deepseek) carries currency=CNY", () => {
+    const usage: AgentUsage = {
+      model: "deepseek-v4-pro",
+      input_tokens: 246_000,
+      output_tokens: 0,
+    };
+    const c = toCycleCost(usage, { cycleId: "cny-test", agent: "pi", revertCount: 0 });
+    expect(c.currency).toBe("CNY");
+    // estimatedCost ≈ 246000/1e6 * 3 = 0.738 (¥)
+    expect(c.estimatedCost).toBeCloseTo(0.738, 3);
+  });
+
+  it("a USD-billed model (claude) carries currency=USD", () => {
+    const usage: AgentUsage = {
+      model: "claude-sonnet-4-20250514",
+      input_tokens: 100_000,
+      output_tokens: 0,
+    };
+    const c = toCycleCost(usage, { cycleId: "usd-test", agent: "claude", revertCount: 0 });
+    expect(c.currency).toBe("USD");
+  });
+
+  it("effectiveCost includes revert multiplier and same currency", () => {
+    const usage: AgentUsage = {
+      model: "kimi-k2.6",
+      input_tokens: 1_000_000,
+      output_tokens: 0,
+    };
+    const c = toCycleCost(usage, { cycleId: "revert-test", agent: "kimi", revertCount: 2 });
+    expect(c.currency).toBe("CNY");
+    expect(c.revertCount).toBe(2);
+    // estimated × (reverts + 1) = 6.5 × 3 = 19.5
+    expect(c.effectiveCost).toBeCloseTo(19.5, 4);
+  });
+});

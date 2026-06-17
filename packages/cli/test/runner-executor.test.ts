@@ -18,6 +18,10 @@ import {
   bootstrapWorktreeDeps,
   bootstrapWorktreePrebuild,
   bootstrapWorktreeSkills,
+  buildProjectMap,
+  maybeInjectProjectMap,
+  readProjectMapEnabled,
+  PROJECT_MAP_MAX_CHARS,
   buildClaudeArgv,
   buildRunRow,
   buildSpawnCommand,
@@ -2211,6 +2215,109 @@ describe("FIX-338 — worktree dist prebuild (Phase B 杠杆1, DEFAULT-OFF)", ()
     expect(alerts).toHaveLength(1);
     expect(alerts[0]).toContain("[WARN] worktree dist prebuild failed");
     expect(alerts[0]).toContain("continuing");
+  });
+});
+
+describe("FIX-338 — project-map injection (Phase B 杠杆2, DEFAULT-OFF)", () => {
+  /** Build a small fixture worktree with a realistic shallow structure + a couple
+   *  of card-named files, so the map builder has something to map. */
+  function fixtureWorktree(storyId = "FIX-999"): string {
+    const wt = realpathSync(mkdtempSync(join(tmpdir(), "roll-projmap-")));
+    execDirs.push(wt);
+    mkdirSync(join(wt, "packages", "core"), { recursive: true });
+    mkdirSync(join(wt, "packages", "cli"), { recursive: true });
+    mkdirSync(join(wt, "scripts"), { recursive: true });
+    mkdirSync(join(wt, ".roll", "features", "loop-engine", storyId), { recursive: true });
+    mkdirSync(join(wt, "node_modules", "left-pad"), { recursive: true }); // noise
+    writeFileSync(join(wt, "package.json"), "{}\n");
+    writeFileSync(join(wt, ".roll", "features", "loop-engine", storyId, "spec.md"), `# ${storyId}\n`);
+    return wt;
+  }
+
+  // (a) DEFAULT-OFF strict — flag absent/false/garbage ⇒ NO injection. We exercise
+  // the reader against a real policy.yaml (mirrors lever-1's parser test), and the
+  // injector's `enabled === false` short-circuit.
+  it("DEFAULT-OFF: readProjectMapEnabled is false unless `project_map: true`", () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-projmap-repo-")));
+    execDirs.push(repo);
+    mkdirSync(join(repo, ".roll"), { recursive: true });
+    const policy = join(repo, ".roll", "policy.yaml");
+    // absent policy ⇒ OFF.
+    expect(readProjectMapEnabled(repo)).toBe(false);
+    // explicit false ⇒ OFF.
+    writeFileSync(policy, "loop_safety:\n  project_map: false\n");
+    expect(readProjectMapEnabled(repo)).toBe(false);
+    // garbage ⇒ OFF (fail-safe).
+    writeFileSync(policy, "loop_safety:\n  project_map: maybe\n");
+    expect(readProjectMapEnabled(repo)).toBe(false);
+    // ONLY an explicit `true` flips it on.
+    writeFileSync(policy, "loop_safety:\n  project_map: true\n");
+    expect(readProjectMapEnabled(repo)).toBe(true);
+  });
+
+  it("DEFAULT-OFF: when disabled, the skill body is returned UNCHANGED (no map)", () => {
+    const wt = fixtureWorktree();
+    const body = "DO THE WORK";
+    expect(maybeInjectProjectMap(body, wt, false, "FIX-999")).toBe(body);
+  });
+
+  // (b) Flag ON — a bounded project map is injected into the spawn context (the
+  // skill body), prepended ahead of the original body.
+  it("when ON, PREPENDS a project map containing the repo structure + the body", () => {
+    const wt = fixtureWorktree();
+    const body = "DO THE WORK";
+    const out = maybeInjectProjectMap(body, wt, true, "FIX-999");
+    expect(out).not.toBe(body);
+    expect(out).toContain("[项目地图 / project map]");
+    // the shallow top-level structure is mapped (key dirs), one level into packages/.
+    expect(out).toContain("packages/");
+    expect(out).toContain("scripts/");
+    expect(out).toContain("core/"); // descended one level into packages/
+    // the ORIGINAL body still rides at the END (prepend, not replace).
+    expect(out.endsWith(body)).toBe(true);
+    // noise dirs are never mapped.
+    expect(out).not.toContain("node_modules");
+  });
+
+  it("when ON, lists the card's relevant files (heuristic on the story id)", () => {
+    const wt = fixtureWorktree("FIX-777");
+    const out = buildProjectMap(wt, "FIX-777");
+    expect(out).toContain("FIX-777");
+    // the spec.md under the card's `<epic>/FIX-777/` dir matched the story-id token
+    // (path-based heuristic — the card's own files are surfaced, not just basenames).
+    expect(out).toContain("spec.md");
+  });
+
+  // (c) Agent-agnostic + bounded — the map is plain text (no codex/claude-specific
+  // shape) and is hard-capped so it can never bloat the lean prompt.
+  it("is agent-AGNOSTIC: pure text, no per-agent (codex/claude) tokens", () => {
+    const wt = fixtureWorktree();
+    const out = buildProjectMap(wt, "FIX-999");
+    expect(out).not.toMatch(/codex|claude|--add-dir|--sandbox|exec /i);
+  });
+
+  it("is BOUNDED: the map never exceeds the hard char cap (no context bloat)", () => {
+    // A pathological worktree: hundreds of card-matching files in many dirs.
+    const wt = realpathSync(mkdtempSync(join(tmpdir(), "roll-projmap-big-")));
+    execDirs.push(wt);
+    for (let d = 0; d < 40; d++) {
+      const dir = join(wt, "packages", `pkg-FIX-999-${d}`);
+      mkdirSync(dir, { recursive: true });
+      for (let f = 0; f < 40; f++) {
+        writeFileSync(join(dir, `module-FIX-999-${d}-${f}-very-long-name.ts`), "x\n");
+      }
+    }
+    const out = buildProjectMap(wt, "FIX-999");
+    expect(out.length).toBeLessThanOrEqual(PROJECT_MAP_MAX_CHARS);
+    // and the injected body respects the same cap (map + a tiny body).
+    const injected = maybeInjectProjectMap("B", wt, true, "FIX-999");
+    expect(injected.length).toBeLessThanOrEqual(PROJECT_MAP_MAX_CHARS + "\n\nB".length);
+  });
+
+  it("unreadable worktree ⇒ empty map ⇒ body unchanged (never fails the spawn)", () => {
+    const missing = join(tmpdir(), "roll-projmap-does-not-exist-xyz");
+    expect(buildProjectMap(missing, "FIX-1")).toBe("");
+    expect(maybeInjectProjectMap("BODY", missing, true, "FIX-1")).toBe("BODY");
   });
 });
 

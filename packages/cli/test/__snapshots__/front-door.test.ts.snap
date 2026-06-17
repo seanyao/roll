@@ -5,7 +5,7 @@ exports[`roll front door — US-DOSSIER-035 > AC6: EN/中 snapshots (single-lang
 
 WARN    main reconciled vs backlog  → roll status
 
-daily     status · cycles · brief · backlog · release
+daily     status · cycles · backlog · release
 cards     idea "<one sentence>" · story new <ID> --title <t>
 machine   loop · agent · doctor · skills · config · setup · update
 
@@ -18,7 +18,7 @@ exports[`roll front door — US-DOSSIER-035 > AC6: EN/中 snapshots (single-lang
 
 WARN    主干对账待处理  → roll status
 
-daily     status · cycles · brief · backlog · release
+daily     status · cycles · backlog · release
 cards     idea "<one sentence>" · story new <ID> --title <t>
 machine   loop · agent · doctor · skills · config · setup · update
 

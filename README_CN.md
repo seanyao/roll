@@ -48,7 +48,6 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 | `roll loop watch [-n <行数>] [--verbose\|--raw] [--attach]` | 只读、精炼、实时地查看本项目 loop——自动接入 `.roll/loop/live.log`，按 cycle / story / 结果 / ALERT / 成本 / 心跳渲染。绝不写入或干预运行中的 cycle；Ctrl-C 只结束视图，不停 loop。`--attach` 以只读方式加入 loop 的 tmux 观测窗 |
 | `roll loop go [--epic <e>\|--cards <ids>] [--budget <usd>] [--for <duration>] [--review <auto\|hetero\|self\|off>]` | 手动运行 goal mode，直到范围内工作完成、暂停或触发预算/用量/时间盒护栏；scheduler off 时也可运行，loop paused 时先 `roll loop resume`；终审默认 `auto` |
 | `roll loop goal` | 显示持久化 goal 的范围、终审模式、用量、限制、安全闸和最近裁定 |
-| `roll brief` | 查看最新 owner 简报 |
 | `roll backlog [sync\|block\|defer\|lint\|…]` | 查看、管理、从 GitHub Issues 同步待处理任务 |
 | `roll loop alert [list\|ack\|resolve\|log]` | 查看 / 清除 loop 告警 |
 | `roll status` | 判定优先的真相摘要，读自同一份快照——LOOP · CYCLE · RELEASE · STORY，STORY 行带 attest 验收覆盖率(`done ≡ 已合并 ∧ 已验收`)——其后是约定/AI 客户端同步健康 |

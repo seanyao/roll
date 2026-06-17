@@ -1,7 +1,7 @@
 /**
  * US-DOSSIER-010 — TruthSnapshot: the ONE machine-readable truth aggregate.
  *
- * Every surface (web dossier, CLI status, brief, downstream tools) consumes
+ * Every surface (web dossier, CLI status, downstream tools) consumes
  * the SAME aggregation: `roll index` computes one snapshot, embeds it in
  * index.html and writes it as truth.json next to it — the same object, the
  * same serialization, so a number can never differ between surfaces (the

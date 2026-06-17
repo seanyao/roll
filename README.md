@@ -48,7 +48,6 @@ First time through? Start with [Getting started](guide/en/getting-started.md).
 | `roll loop watch [-n <lines>] [--verbose\|--raw] [--attach]` | Read-only, concise, real-time view of THIS project's loop — auto-tails `.roll/loop/live.log` through the renderer (cycle / story / results / ALERT / cost / heartbeat). It never writes to or signals a running cycle; Ctrl-C ends the view, not the loop. `--attach` joins the loop's tmux observe window read-only |
 | `roll loop go [--epic <e>\|--cards <ids>] [--budget <usd>] [--for <duration>] [--review <auto\|hetero\|self\|off>]` | Run goal mode manually until the scoped work completes, pauses, or hits a budget/usage/timebox guardrail; it can run while the scheduler is off, and a paused loop should be resumed first; final review defaults to `auto` |
 | `roll loop goal` | Show persisted goal scope, review mode, usage, limits, safety gate, and last decision |
-| `roll brief` | Show latest owner brief |
 | `roll backlog [sync\|block\|defer\|lint\|…]` | View, manage, and sync (from GitHub Issues) pending tasks |
 | `roll loop alert [list\|ack\|resolve\|log]` | View / clear loop alerts |
 | `roll status` | Verdict-first truth summary read from the ONE snapshot — LOOP · CYCLE · RELEASE · STORY, with the STORY line's attest-coverage % (`done ≡ merged ∧ attested`) — then convention/AI-client sync health |

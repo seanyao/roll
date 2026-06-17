@@ -191,6 +191,26 @@ loop_safety:
 `).loopSafety.prebuildDist).toBeUndefined();
   });
 
+  it("parses loop_safety.project_map (FIX-338 杠杆2); DEFAULT-OFF unless explicit true", () => {
+    // absent ⇒ undefined (the reader treats it as OFF — deploy no-op, 稳字纪律).
+    expect(parsePolicy("").loopSafety.projectMap).toBeUndefined();
+    // an explicit `true` is the ONLY thing that turns it on.
+    expect(parsePolicy(`
+loop_safety:
+  project_map: true
+`).loopSafety.projectMap).toBe(true);
+    // explicit false ⇒ undefined (stays OFF).
+    expect(parsePolicy(`
+loop_safety:
+  project_map: false
+`).loopSafety.projectMap).toBeUndefined();
+    // garbage ⇒ undefined (fail-safe OFF; never accidentally enabled).
+    expect(parsePolicy(`
+loop_safety:
+  project_map: maybe
+`).loopSafety.projectMap).toBeUndefined();
+  });
+
   it("ignores comments and unknown keys (forward-compatible)", () => {
     const p = parsePolicy(`
 # leading comment

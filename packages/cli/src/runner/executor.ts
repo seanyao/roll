@@ -760,11 +760,22 @@ export async function executeCommand(
       // cycle:tcr / cycle:phase / build-heartbeat events into events.ndjson. It
       // never parses the agent's stdout, so a single path serves EVERY agent.
       const observer = startCycleObserver(ports, ctx.cycleId ?? "");
+      // FIX-338 (Phase B 杠杆2): when `loop_safety.project_map: true`, PREPEND a
+      // concise, bounded project map into the working agent's initial context so it
+      // doesn't burn execute time on sed/rg exploration. Agent-agnostic (one prompt
+      // body all shapes consume) + bounded (hard char cap). DEFAULT-OFF — a no-op
+      // until flipped on, in which case `ports.skillBody` is sent unchanged.
+      const skillBodyForSpawn = maybeInjectProjectMap(
+        ports.skillBody,
+        ports.paths.worktreePath,
+        readProjectMapEnabled(ports.repoCwd),
+        ctx.storyId,
+      );
       let res: Awaited<ReturnType<typeof ports.agentSpawn>>;
       try {
         res = await ports.agentSpawn(cmd.agent, {
           cwd: ports.paths.worktreePath,
-          skillBody: ports.skillBody,
+          skillBody: skillBodyForSpawn,
           ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
           writableRoots: agentWritableRoots(ports.repoCwd, ports.paths.alertsPath),
           env: {
@@ -2318,6 +2329,169 @@ export async function bootstrapWorktreePrebuild(
       `[WARN] worktree dist prebuild failed (pnpm -r build): ${msg} — continuing; agent will build on demand`,
     );
   }
+}
+
+/**
+ * Read the FIX-338 `loop_safety.project_map` flag from `<repoCwd>/.roll/policy.yaml`.
+ * DEFAULT-OFF (稳字纪律): an absent / unreadable / `false` policy ⇒ `false`, so
+ * deploy is a NO-OP until `project_map: true` is explicitly flipped on. Mirrors
+ * {@link readPrebuildDistEnabled} exactly.
+ */
+export function readProjectMapEnabled(repoCwd: string): boolean {
+  try {
+    const p = join(repoCwd, ".roll", "policy.yaml");
+    if (!existsSync(p)) return false;
+    return parsePolicy(readFileSync(p, "utf8")).loopSafety.projectMap === true;
+  } catch {
+    return false; // unreadable / unparseable policy → default OFF (no-op)
+  }
+}
+
+/** Hard char cap on the injected project map — the FIX-338 prompt is already lean
+ *  (~2.3KB hub); the map must stay a CONCISE orientation aid, never context bloat.
+ *  Anything over this is truncated with an explicit elision marker. */
+export const PROJECT_MAP_MAX_CHARS = 1800;
+
+/** How many top-level entries to list (shallow), and how deep into a key container
+ *  dir (`packages/`) to descend — one level, so it stays a map not a file dump. */
+const PROJECT_MAP_MAX_TOPLEVEL = 24;
+const PROJECT_MAP_MAX_RELEVANT = 12;
+
+/** Top-level names never worth mapping (noise: deps, VCS, build caches). */
+const PROJECT_MAP_SKIP = new Set([
+  ".git",
+  "node_modules",
+  ".vite",
+  "dist",
+  "coverage",
+  ".turbo",
+  ".cache",
+  ".DS_Store",
+]);
+
+/** Container dirs we descend ONE level into (the workspace's real structure). */
+const PROJECT_MAP_CONTAINERS = new Set(["packages", "apps", "skills"]);
+
+/** Read a dir's immediate Dirent children (string-named overload, never throws
+ *  the Buffer variant). A thin wrapper so callers get a precise element type. */
+function shallowDirents(dir: string): import("node:fs").Dirent<string>[] {
+  return readdirSync(dir, { withFileTypes: true });
+}
+
+/** Read a dir's immediate child names (dirs suffixed `/`), sorted, bounded; `[]`
+ *  on any error. Pure-ish: read-only inspection of the worktree. */
+function shallowList(dir: string, limit: number): string[] {
+  try {
+    const out: string[] = [];
+    for (const ent of shallowDirents(dir)) {
+      if (PROJECT_MAP_SKIP.has(ent.name)) continue;
+      out.push(ent.isDirectory() ? `${ent.name}/` : ent.name);
+    }
+    out.sort((a, b) => a.localeCompare(b));
+    return out.slice(0, limit);
+  } catch {
+    return [];
+  }
+}
+
+/** Recursively collect (bounded) file paths whose relative PATH contains `token`
+ *  (case-insensitive) — so both a card-named file AND any file under the card's
+ *  `<epic>/<id>/` dir count as relevant. Skips noise dirs. Read-only; stops at
+ *  `limit` hits or `maxScan` entries so a huge tree can never stall the spawn. */
+function findRelevantFiles(root: string, token: string, limit: number): string[] {
+  const needle = token.toLowerCase();
+  const hits: string[] = [];
+  let scanned = 0;
+  const maxScan = 4000;
+  const walk = (dir: string, rel: string): void => {
+    if (hits.length >= limit || scanned >= maxScan) return;
+    let ents: ReturnType<typeof shallowDirents>;
+    try {
+      ents = shallowDirents(dir);
+    } catch {
+      return;
+    }
+    for (const ent of ents) {
+      if (hits.length >= limit || scanned >= maxScan) return;
+      if (PROJECT_MAP_SKIP.has(ent.name)) continue;
+      scanned += 1;
+      const childRel = rel === "" ? ent.name : `${rel}/${ent.name}`;
+      if (ent.isDirectory()) {
+        walk(join(dir, ent.name), childRel);
+      } else if (childRel.toLowerCase().includes(needle)) {
+        hits.push(childRel);
+      }
+    }
+  };
+  walk(root, "");
+  hits.sort((a, b) => a.localeCompare(b));
+  return hits.slice(0, limit);
+}
+
+/**
+ * FIX-338 (Phase B 杠杆2) — build a CONCISE, BOUNDED project map for the working
+ * agent's initial context: (a) the repo's shallow top-level structure (key dirs
+ * one level deep) so the agent grasps the layout without `ls`/`rg` round-trips,
+ * and (b) the card's relevant files (a heuristic: files whose basename matches the
+ * story-id token, plus its epic), so it lands near the work instead of grepping.
+ *
+ * Agent-AGNOSTIC: pure text, no per-agent shape — the caller prepends it into the
+ * SAME prompt body every agent consumes ({@link buildSpawnCommand}). BOUNDED: the
+ * whole map is hard-capped at {@link PROJECT_MAP_MAX_CHARS} (truncated with an
+ * explicit marker) so it can never bloat the already-lean prompt. Read-only
+ * inspection of the cycle worktree ⇒ does NOT break isolation.
+ *
+ * Returns "" when the worktree is unreadable (a missing map is harmless — the
+ * agent simply explores the old way), so the spawn never fails on this aid.
+ */
+export function buildProjectMap(worktreePath: string, storyId?: string): string {
+  const top = shallowList(worktreePath, PROJECT_MAP_MAX_TOPLEVEL);
+  if (top.length === 0) return ""; // unreadable worktree → no map (harmless).
+  const lines: string[] = ["[项目地图 / project map]", "结构 / structure:"];
+  for (const name of top) {
+    lines.push(`  ${name}`);
+    const bare = name.replace(/\/$/, "");
+    if (name.endsWith("/") && PROJECT_MAP_CONTAINERS.has(bare)) {
+      for (const child of shallowList(join(worktreePath, bare), PROJECT_MAP_MAX_TOPLEVEL)) {
+        lines.push(`    ${child}`);
+      }
+    }
+  }
+  // (b) Card-relevant files — heuristic on the story-id token (e.g. FIX-338),
+  // bounded. A blank/short token is skipped (too noisy to be useful).
+  const token = (storyId ?? "").trim();
+  if (token.length >= 3) {
+    const relevant = findRelevantFiles(worktreePath, token, PROJECT_MAP_MAX_RELEVANT);
+    if (relevant.length > 0) {
+      lines.push(`本卡相关文件 / files matching ${token}:`);
+      for (const f of relevant) lines.push(`  ${f}`);
+    }
+  }
+  let map = lines.join("\n");
+  if (map.length > PROJECT_MAP_MAX_CHARS) {
+    map = `${map.slice(0, PROJECT_MAP_MAX_CHARS - 3)}...`;
+  }
+  return map;
+}
+
+/**
+ * FIX-338 (Phase B 杠杆2) — when ON, PREPEND the bounded project map ahead of the
+ * skill body so it rides into the agent's initial context (the prompt is built as
+ * autorun-directive + story-pin + skillBody, so a prefix here orients the agent
+ * before it reads the workflow). DEFAULT-OFF: `enabled === false` ⇒ returns the
+ * body unchanged (deploy no-op). Best-effort: an empty/unreadable map also returns
+ * the body unchanged, so the aid can never fail the spawn.
+ */
+export function maybeInjectProjectMap(
+  skillBody: string,
+  worktreePath: string,
+  enabled: boolean,
+  storyId?: string,
+): string {
+  if (!enabled) return skillBody; // DEFAULT-OFF: deploy no-op until flipped on.
+  const map = buildProjectMap(worktreePath, storyId);
+  if (map === "") return skillBody;
+  return `${map}\n\n${skillBody}`;
 }
 
 /** Submodule update can clone over the network (cold) — give it the same room. */

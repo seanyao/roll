@@ -95,6 +95,18 @@ export interface LoopSafetyConfig {
    *  prebuilt, gitignored artifact). DEFAULT-OFF (`稳字纪律`): absent ⇒ false, so
    *  deploy is a NO-OP until `prebuild_dist: true` is explicitly flipped on. */
   prebuildDist?: boolean;
+  /** FIX-338 (Phase B 杠杆2) execute-speed lever: INJECT a concise PROJECT MAP into
+   *  the working agent's initial context at spawn (the repo's shallow top-level
+   *  structure + the card's relevant files), so the agent does NOT burn execute
+   *  time on sed/rg exploration just to build its mental model (FIX-338 analysis:
+   *  codex spends ~minutes on cold structure-discovery; target省 2-4min). The map
+   *  is CONCISE and BOUNDED (hard char cap — never bloat the already-lean prompt).
+   *  Agent-AGNOSTIC (a structure map benefits any engine; prepended into the same
+   *  prompt body every agent shape consumes — no per-agent code) and does NOT break
+   *  cycle isolation (read-only inspection of the cycle worktree). DEFAULT-OFF
+   *  (`稳字纪律`): absent ⇒ false, so deploy is a NO-OP until `project_map: true` is
+   *  explicitly flipped on. */
+  projectMap?: boolean;
 }
 
 /** The whole parsed policy.yaml. */
@@ -348,6 +360,10 @@ function parseLoopSafety(lines: PreLine[], start: number): [number, LoopSafetyCo
     // explicit `prebuild_dist: true` turns it on; anything else (absent / false /
     // garbage) leaves it false so deploy stays a NO-OP (稳字纪律).
     ...(flat["prebuild_dist"] === "true" ? { prebuildDist: true } : {}),
+    // FIX-338 (杠杆2): the project-map injection execute-speed lever. DEFAULT-OFF —
+    // only an explicit `project_map: true` turns it on; anything else (absent /
+    // false / garbage) leaves it false so deploy stays a NO-OP (稳字纪律).
+    ...(flat["project_map"] === "true" ? { projectMap: true } : {}),
   };
   return [i, cfg];
 }

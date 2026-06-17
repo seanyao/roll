@@ -63,6 +63,8 @@ import {
   toCycleCost,
   pairingHistory,
   peerReviewCost,
+  sessionReuseFor,
+  type WarmSessionEntry,
   type CycleObserverState,
   type ObservedCommit,
   newCycleObserverState,
@@ -122,7 +124,7 @@ import {
 } from "./agent-spawn.js";
 import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, runPeerGate } from "./peer-gate.js";
 import { declaresAnySurface, deliverableCmdsForStory, readAttestGateMode, rejectedDeliverableCmdsForStory, runAttestGate, screenshotExemption, storyRequiresScreenshot, verificationReportPath, webCaptureTargetsForStory } from "./attest-gate.js";
-import { recoverCodexUsage, recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
+import { recoverCodexSessionId, recoverCodexUsage, recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
 import { validateStoryVisualEvidence } from "../lib/design-visual-evidence.js";
 import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, autoAttachScreenshotToAcMap, buildAcMapRemediationPrompt, needsAcMapRemediation } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
@@ -771,6 +773,38 @@ export async function executeCommand(
         readProjectMapEnabled(ports.repoCwd),
         ctx.storyId,
       );
+      // lever-4 (default-OFF): when warm-context is enabled AND this agent's spec
+      // supports reuse (only codex) AND a PRIOR session is in the ledger, resume
+      // it on THIS card (codex `exec resume <id>`). NEXT-CARD-ONLY + SINGLE-USE:
+      // resolve the immediately-prior codex entry, inject its id, and CONSUME it
+      // so a session is reused at most once. Any miss / error ⇒ SILENT cold
+      // fallback (the universal default) + an ALERT for observability. The
+      // builderSessionId minting above (FIX-343) is ORTHOGONAL — codex's exec
+      // session is a separate identity; we never reuse the builder id here.
+      let codexResumeId: string | undefined;
+      if (readSessionReuseEnabled(ports.repoCwd)) {
+        try {
+          const reuse = sessionReuseFor(cmd.agent, getAgentSpec(cmd.agent)?.usage);
+          if (reuse.supportsReuse()) {
+            const ledger = readWarmSessions(ports.repoCwd);
+            // the immediately-prior codex card's entry (newest in the ledger).
+            const prior = ledger.length > 0 ? ledger[ledger.length - 1] : undefined;
+            const priorId =
+              prior !== undefined ? reuse.resolvePriorSessionId(ledger, prior.storyId) : null;
+            if (prior !== undefined && priorId !== null) {
+              codexResumeId = priorId;
+              consumeWarmSession(ports.repoCwd, prior.storyId); // single-use
+            }
+          }
+        } catch {
+          // SILENT cold fallback on any resume-resolution error (fail-safe).
+          codexResumeId = undefined;
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `[WARN] lever-4 warm-context: resume resolution failed for ${ctx.storyId ?? "?"} — cold fallback`,
+          );
+        }
+      }
       let res: Awaited<ReturnType<typeof ports.agentSpawn>>;
       try {
         res = await ports.agentSpawn(cmd.agent, {
@@ -778,6 +812,10 @@ export async function executeCommand(
           skillBody: skillBodyForSpawn,
           ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
           writableRoots: agentWritableRoots(ports.repoCwd, ports.paths.alertsPath),
+          // lever-4: only set when a prior codex session resolved (default-OFF ⇒
+          // always undefined ⇒ unchanged cold spawn). Isolated to the codex argv
+          // branch in agent-spawn.ts.
+          ...(codexResumeId !== undefined ? { codexSessionId: codexResumeId } : {}),
           env: {
             ...process.env,
             ROLL_LOOP_ALERT: ports.paths.alertsPath,
@@ -1384,6 +1422,39 @@ export async function executeCommand(
 
     // _worktree_cleanup (tolerant). Side effect; no feedback (terminal path).
     case "cleanup_worktree":
+      // lever-4 (default-OFF): CAPTURE this card's resumable session id BEFORE the
+      // worktree is removed (the rollout cwd-match needs the worktree to still
+      // exist on disk). Agent-AGNOSTIC: the spec capability decides — only codex's
+      // adapter supports reuse; every other engine is a cold no-op here. Persisted
+      // to the PERSISTENT .roll/loop ledger (repoCwd), so it survives the teardown
+      // + a later .roll reset, like runs.jsonl. Best-effort: a capture miss/slip
+      // ALERTs for observability and leaves the next card cold (fail-safe).
+      if (readSessionReuseEnabled(ports.repoCwd)) {
+        try {
+          const agentName = ctx.agent ?? "";
+          const reuse = sessionReuseFor(agentName, getAgentSpec(agentName)?.usage);
+          const storyId = ctx.storyId ?? "";
+          if (reuse.supportsReuse() && storyId !== "") {
+            const rootOverride = (process.env["ROLL_CODEX_SESSIONS_DIR"] ?? "").trim();
+            const sessionId = recoverCodexSessionId(
+              ports.paths.worktreePath,
+              ctx.startSec,
+              ...(rootOverride !== "" ? [rootOverride] : []),
+            );
+            if (sessionId !== null) {
+              appendWarmSession(ports.repoCwd, { storyId, sessionId, ts: ports.clock() });
+            } else {
+              ports.events.appendAlert(
+                ports.paths.alertsPath,
+                `[WARN] lever-4 warm-context: no codex session id captured for ${storyId} ` +
+                  `(cwd ${ports.paths.worktreePath}) — next codex card stays cold`,
+              );
+            }
+          }
+        } catch {
+          /* warm-context capture is strictly best-effort: never topple teardown */
+        }
+      }
       // FIX-204C: drop OUR .roll symlink first — `git worktree remove` refuses
       // untracked entries in repos that don't gitignore .roll, and removing the
       // LINK explicitly (never the target) keeps the main .roll untouchable.
@@ -2348,6 +2419,68 @@ export function readProjectMapEnabled(repoCwd: string): boolean {
   } catch {
     return false; // unreadable / unparseable policy → default OFF (no-op)
   }
+}
+
+/**
+ * Read the lever-4 `loop_safety.session_reuse` flag from
+ * `<repoCwd>/.roll/policy.yaml`. DEFAULT-OFF (稳字纪律): an absent / unreadable /
+ * `false` policy ⇒ `false`, so deploy is a NO-OP until `session_reuse: true` is
+ * explicitly flipped on. Mirrors {@link readProjectMapEnabled} exactly.
+ */
+export function readSessionReuseEnabled(repoCwd: string): boolean {
+  try {
+    const p = join(repoCwd, ".roll", "policy.yaml");
+    if (!existsSync(p)) return false;
+    return parsePolicy(readFileSync(p, "utf8")).loopSafety.sessionReuse === true;
+  } catch {
+    return false; // unreadable / unparseable policy → default OFF (no-op)
+  }
+}
+
+/** The warm-session ledger path — under the PERSISTENT `.roll/loop` (repoCwd), NOT
+ *  the cycle worktree, so a captured session survives `.roll reset` and the
+ *  worktree teardown (same durability as runs.jsonl). */
+export function warmSessionsLedgerPath(repoCwd: string): string {
+  return join(repoCwd, ".roll", "loop", "warm-sessions.json");
+}
+
+/** Read the warm-session ledger (the captured `{storyId, sessionId, ts}` entries).
+ *  Tolerant: a missing / unreadable / malformed ledger reads as `[]` — a capture
+ *  store miss never resumes (cold fallback) and never fails the cycle. */
+export function readWarmSessions(repoCwd: string): WarmSessionEntry[] {
+  try {
+    const raw = readFileSync(warmSessionsLedgerPath(repoCwd), "utf8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (e): e is WarmSessionEntry =>
+        typeof e === "object" &&
+        e !== null &&
+        typeof (e as WarmSessionEntry).storyId === "string" &&
+        typeof (e as WarmSessionEntry).sessionId === "string",
+    );
+  } catch {
+    return [];
+  }
+}
+
+/** Append a captured warm-session entry to the ledger (best-effort; a write slip
+ *  is logged-and-tolerated, never fatal — the worst case is a cold next card). */
+function appendWarmSession(repoCwd: string, entry: WarmSessionEntry): void {
+  const ledger = readWarmSessions(repoCwd);
+  ledger.push(entry);
+  const p = warmSessionsLedgerPath(repoCwd);
+  mkdirSync(dirname(p), { recursive: true });
+  writeFileSync(p, JSON.stringify(ledger, null, 2) + "\n");
+}
+
+/** Consume (single-use) every ledger entry keyed by `storyId` — remove them so a
+ *  resumed session is used AT MOST once. Best-effort write. */
+function consumeWarmSession(repoCwd: string, storyId: string): void {
+  const ledger = readWarmSessions(repoCwd).filter((e) => e.storyId !== storyId);
+  const p = warmSessionsLedgerPath(repoCwd);
+  mkdirSync(dirname(p), { recursive: true });
+  writeFileSync(p, JSON.stringify(ledger, null, 2) + "\n");
 }
 
 /** Hard char cap on the injected project map — the FIX-338 prompt is already lean

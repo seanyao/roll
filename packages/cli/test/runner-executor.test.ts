@@ -32,6 +32,7 @@ import {
   dryRunPlan,
   executeCommand,
   parseEstMin,
+  reasonixEnv,
   realAgentSpawn,
   resetDirective,
   storyPinDirective,
@@ -263,6 +264,15 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
     expect(args).toEqual(["--dangerously-skip-permissions", "-p", prompt]);
   });
 
+  it("FIX-359 reasonix: reasonix run --dir <cwd> <prompt> (one autonomous task)", () => {
+    const { bin, args } = buildSpawnCommand("reasonix", { cwd: "/wt", skillBody: "DO WORK" });
+    expect(bin).toBe("reasonix");
+    expect(args).toEqual(["run", "--dir", "/wt", prompt]);
+    // the DeepSeek key is NEVER an argv flag — it rides the spawn env only.
+    expect(args.some((a) => a.includes("DEEPSEEK_API_KEY"))).toBe(false);
+    expect(args.some((a) => a.startsWith("--api-key") || a.startsWith("--key"))).toBe(false);
+  });
+
   it("throws a loud, documented error for an un-ported agent (fail-loud, not silent)", () => {
     expect(() => buildSpawnCommand("opencode", { cwd: "/wt", skillBody: "x" })).toThrow(
       /agent 'opencode' argv not yet ported/,
@@ -292,6 +302,31 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
       const { args } = buildSpawnCommand("claude", { cwd: "/wt", skillBody: "DO WORK" });
       expect(args[1]).toBe(`${AUTORUN_DIRECTIVE}DO WORK`);
     });
+  });
+});
+
+describe("FIX-359 reasonixEnv — best-effort DeepSeek key read from ~/.reasonix/.env", () => {
+  it("parses DEEPSEEK_API_KEY from a KEY=VALUE dotfile (no real key — a fake)", () => {
+    const home = mkdtempSync(join(tmpdir(), "reasonix-home-"));
+    execDirs.push(home);
+    mkdirSync(join(home, ".reasonix"), { recursive: true });
+    // Fake key — never a real secret in tests.
+    writeFileSync(join(home, ".reasonix", ".env"), "# comment\nDEEPSEEK_API_KEY=test-xyz\nOTHER=ignored\n");
+    expect(reasonixEnv(home)).toEqual({ DEEPSEEK_API_KEY: "test-xyz" });
+  });
+
+  it("returns {} (never throws) when the dotfile is missing", () => {
+    const home = mkdtempSync(join(tmpdir(), "reasonix-home-empty-"));
+    execDirs.push(home);
+    expect(reasonixEnv(home)).toEqual({});
+  });
+
+  it("returns {} when the dotfile has no DEEPSEEK_API_KEY line", () => {
+    const home = mkdtempSync(join(tmpdir(), "reasonix-home-nokey-"));
+    execDirs.push(home);
+    mkdirSync(join(home, ".reasonix"), { recursive: true });
+    writeFileSync(join(home, ".reasonix", ".env"), "FOO=bar\n");
+    expect(reasonixEnv(home)).toEqual({});
   });
 });
 

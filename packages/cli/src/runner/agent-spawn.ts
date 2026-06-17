@@ -27,14 +27,16 @@
  *     cost/usage parse (cost/tracker.ts).
  *
  * {@link buildClaudeArgv} reproduces that argv construction for the `claude`
- * agent. Other agents (kimi/pi/codex/gemini/qwen/opencode/deepseek) have their
- * own `_agent_argv` shapes (bin/roll:4531-4581) and loop enhancements that DIFFER
+ * agent. Other agents (kimi/pi/codex/gemini/qwen/reasonix/opencode/deepseek) have
+ * their own `_agent_argv` shapes (bin/roll:4531-4581) and loop enhancements that DIFFER
  * (only claude gets the stream-json / --add-dir splice); porting each is deferred
  * — see {@link AGENT_ARGV_TODO}. The integration tests use a SHIM `claude` on
  * PATH (a fake binary that makes a `tcr:` commit in the worktree), so no real
  * agent ever runs in tests.
  */
 import { type ChildProcess, spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 /**
@@ -338,6 +340,15 @@ export function buildSpawnCommand(agent: string, opts: AgentSpawnOptions): { bin
   if (agent === "agy" || agent === "gemini" || agent === "antigravity") {
     return { bin: opts.bin ?? "agy", args: ["--dangerously-skip-permissions", "-p", prompt] };
   }
+  if (agent === "reasonix") {
+    // FIX-359: `reasonix run [--dir PATH] "<task>"` runs ONE task autonomously
+    // (it drives write_file/bash tools itself) and exits — so the loop hands it
+    // the worktree via --dir and the full autorun+pin prompt as the single
+    // positional task. The DeepSeek key is injected into the spawn ENV by the
+    // executor ({@link reasonixEnv}); it is NEVER an argv flag (no key on the
+    // command line). reasonix bills in RMB (¥), not USD.
+    return { bin: opts.bin ?? "reasonix", args: ["run", "--dir", opts.cwd, prompt] };
+  }
   const hint = AGENT_ARGV_TODO[agent] ?? "unknown agent";
   throw new Error(
     `runner: agent '${agent}' argv not yet ported. v2 shape: ${hint}`,
@@ -361,6 +372,38 @@ export function withPtyWrap(
 ): { bin: string; args: string[]; pty: boolean } {
   if (agent === "claude" || platform !== "darwin") return { ...cmd, pty: false };
   return { bin: "script", args: ["-q", "/dev/null", cmd.bin, ...cmd.args], pty: true };
+}
+
+/**
+ * FIX-359 — best-effort DeepSeek key injection for the `reasonix` worker.
+ * reasonix reads its API key from the env var `DEEPSEEK_API_KEY` but does NOT
+ * auto-load any dotfile; the owner keeps the key at `~/.reasonix/.env` (a
+ * `KEY=VALUE` file, chmod 600). This helper reads that file at RUNTIME and
+ * returns `{ DEEPSEEK_API_KEY }` ONLY if present (else `{}`), so the executor
+ * can merge it into the reasonix spawn's env.
+ *
+ * SECURITY: the value flows ONLY into the returned env object. It is NEVER
+ * logged, echoed, printed, or written anywhere — do not add diagnostics that
+ * surface this value. Any read/parse error degrades silently to `{}` (a
+ * missing file is the common case and must never throw).
+ */
+export function reasonixEnv(home: string = homedir()): Record<string, string> {
+  try {
+    const raw = readFileSync(join(home, ".reasonix", ".env"), "utf8");
+    for (const line of raw.split("\n")) {
+      const trimmed = line.trim();
+      if (trimmed === "" || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq <= 0) continue;
+      const key = trimmed.slice(0, eq).trim();
+      if (key !== "DEEPSEEK_API_KEY") continue;
+      const value = trimmed.slice(eq + 1).trim();
+      if (value !== "") return { DEEPSEEK_API_KEY: value };
+    }
+  } catch {
+    /* missing / unreadable ~/.reasonix/.env → no injection (best-effort) */
+  }
+  return {};
 }
 
 function evidenceFrameEnv(runDir: string): NodeJS.ProcessEnv {

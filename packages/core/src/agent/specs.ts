@@ -59,7 +59,7 @@ const BASE_AGENT_SPECS: readonly AgentSpec[] = [
     canReviewHeadless: true,
     normalizer: "generic",
     usage: { stdoutExtractor: "kimi", sessionRecovery: "kimi" },
-    smokeCommand: 'kimi-code -p "Reply with a single word: hello"',
+    smokeCommand: 'kimi -p "Reply with a single word: hello"',
   },
   {
     name: "qwen",

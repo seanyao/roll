@@ -328,7 +328,9 @@ describe("loop test — US-PORT-022", () => {
 
   it("defaultSmokeCmd: claude vs non-claude", () => {
     expect(defaultSmokeCmd("claude")).toContain("claude -p");
-    expect(defaultSmokeCmd("kimi")).toContain("kimi-code -p");
+    // FIX-359: kimi smoke uses the real `kimi` binary (`kimi-code` never existed).
+    expect(defaultSmokeCmd("kimi")).toContain("kimi -p");
+    expect(defaultSmokeCmd("kimi")).not.toContain("kimi-code");
     expect(defaultSmokeCmd("kimi")).not.toContain("mock kimi output");
   });
 });

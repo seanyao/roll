@@ -7,7 +7,14 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ReleaseStep } from "@roll/core";
-import { commitPushWithGate, releaseCommand, runReleaseFlow, type ReleaseFlowDeps } from "../src/commands/release.js";
+import {
+  commitPushWithGate,
+  enableAutoMergeResilient,
+  openPrResilient,
+  releaseCommand,
+  runReleaseFlow,
+  type ReleaseFlowDeps,
+} from "../src/commands/release.js";
 
 /** De-dupe a step trace to its first-seen order — the wait-merge poll feedback
  *  re-emits its own step name once per poll, so the trace can repeat it. */
@@ -349,5 +356,105 @@ describe("FIX-277 review fixes — gate-aware commitPush helper and step marks",
       expect(res.step).toBe(expectedStep);
       expect(res.reason).toContain("exploded");
     }
+  });
+});
+
+// ─── FIX-353: open-pr / arm-auto-merge resilient to the transient GraphQL EOF ─
+//
+// v3.617.1 / v3.617.2 BOTH aborted at open-pr on `Post ".../graphql": EOF` and
+// had to be finished by hand via the REST API. These cover the retry+REST path.
+
+/** A fake `gh` runner scripted by argv shape, recording every call. */
+function fakeGh(
+  script: (args: string[], n: number) => { code: number; stdout: string; stderr: string },
+): { gh: (args: string[]) => { code: number; stdout: string; stderr: string }; calls: string[][] } {
+  const calls: string[][] = [];
+  return {
+    calls,
+    gh: (args) => {
+      calls.push(args);
+      return script(args, calls.length);
+    },
+  };
+}
+
+describe("openPrResilient — FIX-353 transient EOF → retry → REST POST fallback", () => {
+  const EOF = `Post "https://api.github.com/graphql": EOF`;
+
+  it("gh pr create succeeds first try → returns the PR url (no REST)", () => {
+    const { gh, calls } = fakeGh((args) =>
+      args.includes("create")
+        ? { code: 0, stdout: "https://github.com/o/r/pull/10\n", stderr: "" }
+        : { code: 1, stdout: "", stderr: "unexpected" },
+    );
+    const url = openPrResilient({ cwd: "/repo", branch: "release/v1", title: "Release: v1", body: "b", gh, slug: () => "o/r" });
+    expect(url).toBe("https://github.com/o/r/pull/10");
+    expect(calls.length).toBe(1); // no retry, no REST
+  });
+
+  it("gh pr create EOFs every attempt → REST POST creates the PR", () => {
+    const { gh, calls } = fakeGh((args) => {
+      if (args.includes("create") && !args.includes("api")) return { code: 1, stdout: "", stderr: EOF };
+      if (args[0] === "api") return { code: 0, stdout: "https://github.com/o/r/pull/20\n", stderr: "" };
+      return { code: 1, stdout: "", stderr: "?" };
+    });
+    const url = openPrResilient({ cwd: "/repo", branch: "release/v1", title: "Release: v1", body: "b", gh, slug: () => "o/r" });
+    expect(url).toBe("https://github.com/o/r/pull/20");
+    // 3 gh-create attempts (first + 2 retries) + 1 REST POST.
+    expect(calls.filter((c) => c.includes("create") && c[0] !== "api").length).toBe(3);
+    const rest = calls.find((c) => c[0] === "api");
+    expect(rest).toEqual([
+      "api", "--method", "POST", "repos/o/r/pulls",
+      "-f", "title=Release: v1", "-f", "head=release/v1", "-f", "base=main", "-f", "body=b",
+      "--jq", ".html_url",
+    ]);
+  });
+
+  it("a REAL 4xx create error → throws, NO retry, NO REST fallback", () => {
+    const { gh, calls } = fakeGh(() => ({ code: 1, stdout: "", stderr: "HTTP 422: Validation Failed" }));
+    expect(() => openPrResilient({ cwd: "/repo", branch: "b", title: "t", body: "x", gh, slug: () => "o/r" })).toThrow(/gh pr create failed/);
+    expect(calls.length).toBe(1); // surfaced immediately
+    expect(calls.find((c) => c[0] === "api")).toBeUndefined();
+  });
+});
+
+describe("enableAutoMergeResilient — FIX-353 transient EOF → retry → REST PUT merge", () => {
+  const EOF = `Post "https://api.github.com/graphql": EOF`;
+
+  it("gh pr merge --auto succeeds first try → no REST", () => {
+    const { gh, calls } = fakeGh(() => ({ code: 0, stdout: "", stderr: "" }));
+    expect(() => enableAutoMergeResilient({ cwd: "/repo", prRef: "https://github.com/o/r/pull/5", gh, slug: () => "o/r" })).not.toThrow();
+    expect(calls.length).toBe(1);
+  });
+
+  it("gh pr merge EOFs → REST PUT …/pulls/N/merge fallback (sha not pinned here)", () => {
+    const { gh, calls } = fakeGh((args) => {
+      if (args.includes("merge") && args[0] !== "api") return { code: 1, stdout: "", stderr: EOF };
+      if (args[0] === "api") return { code: 0, stdout: "true\n", stderr: "" };
+      return { code: 1, stdout: "", stderr: "?" };
+    });
+    expect(() => enableAutoMergeResilient({ cwd: "/repo", prRef: "https://github.com/o/r/pull/42", gh, slug: () => "o/r" })).not.toThrow();
+    expect(calls.filter((c) => c.includes("merge") && c[0] !== "api").length).toBe(3);
+    expect(calls.find((c) => c[0] === "api")).toEqual([
+      "api", "--method", "PUT", "repos/o/r/pulls/42/merge",
+      "-f", "merge_method=squash", "--jq", ".merged",
+    ]);
+  });
+
+  it("REST 405 (checks not green) → does NOT throw (wait loop + GitHub finish it)", () => {
+    const { gh } = fakeGh((args) => {
+      if (args.includes("merge") && args[0] !== "api") return { code: 1, stdout: "", stderr: EOF };
+      if (args[0] === "api") return { code: 1, stdout: "", stderr: "HTTP 405: Method Not Allowed (required status checks pending)" };
+      return { code: 1, stdout: "", stderr: "?" };
+    });
+    // Branch protection still gates: REST returns 405 until green; we leave the PR
+    // for the wait loop instead of force-merging or hanging.
+    expect(() => enableAutoMergeResilient({ cwd: "/repo", prRef: "https://github.com/o/r/pull/9", gh, slug: () => "o/r" })).not.toThrow();
+  });
+
+  it("auto-merge genuinely disabled (non-transient) → actionable throw", () => {
+    const { gh, calls } = fakeGh(() => ({ code: 1, stdout: "", stderr: "auto-merge is not allowed for this repository" }));
+    expect(() => enableAutoMergeResilient({ cwd: "/repo", prRef: "https://github.com/o/r/pull/3", gh, slug: () => "o/r" })).toThrow(/Allow auto-?merge/i);
+    expect(calls.length).toBe(1); // not transient → no retry
   });
 });

@@ -33,6 +33,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { foldUnreleased, planRelease, type ReleaseDate, type ReleaseStep } from "@roll/core";
+import { isTransientGhError } from "@roll/infra";
 import { type Lang, resolveLang, t, v2Catalog, v3Catalog } from "@roll/spec";
 import { c, renderState } from "../render.js";
 import { runConsistencyCheck } from "../lib/release-consistency.js";
@@ -102,6 +103,131 @@ export interface ReleaseFlowDeps {
 
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+}
+
+/** Run `gh <args>` synchronously, returning {code, stdout, stderr} — never
+ *  throws on a non-zero exit (mirrors the infra `gh` wrapper, sync flavour for
+ *  the release deps). */
+function ghSync(cwd: string, args: string[]): { code: number; stdout: string; stderr: string } {
+  try {
+    const stdout = execFileSync("gh", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    return { code: 0, stdout: String(stdout), stderr: "" };
+  } catch (e) {
+    const err = e as { status?: number; stdout?: unknown; stderr?: unknown };
+    return {
+      code: typeof err.status === "number" ? err.status : 1,
+      stdout: err.stdout != null ? String(err.stdout) : "",
+      stderr: err.stderr != null ? String(err.stderr) : "",
+    };
+  }
+}
+
+/** The `owner/repo` slug from the cwd's git remote (gh resolves it the same way;
+ *  we ask gh so the REST fallback uses the exact repo gh would). */
+function repoSlugSync(cwd: string): string | undefined {
+  const r = ghSync(cwd, ["repo", "view", "--json", "owner,name", "--jq", '.owner.login + "/" + .name']);
+  const v = r.code === 0 ? r.stdout.trim() : "";
+  return v === "" ? undefined : v;
+}
+
+/**
+ * FIX-353 — `gh pr create` resilient to the transient GraphQL EOF: retry a few
+ * times, then fall back to the REST `gh api POST …/pulls` (which keeps working
+ * when GraphQL EOFs). v3.617.1 / v3.617.2 BOTH aborted at open-pr on this EOF
+ * and had to be finished by hand; this removes that abort. Returns the new PR
+ * url; throws only on a genuine (non-transient) failure or an exhausted retry
+ * with no usable REST fallback.
+ */
+export function openPrResilient(opts: {
+  cwd: string;
+  branch: string;
+  title: string;
+  body: string;
+  base?: string;
+  retries?: number;
+  gh: (args: string[]) => { code: number; stdout: string; stderr: string };
+  slug?: () => string | undefined;
+}): string {
+  const { cwd, branch, title, body } = opts;
+  const base = opts.base ?? "main";
+  const retries = opts.retries ?? 2;
+  const createArgs = ["pr", "create", "--base", base, "--head", branch, "--title", title, "--body", body];
+  let last = { code: 1, stdout: "", stderr: "" };
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    last = opts.gh(createArgs);
+    if (last.code === 0) return last.stdout.trim().split("\n").at(-1) ?? branch;
+    if (!isTransientGhError(last.stderr)) break; // real error → stop retrying
+  }
+  // Transient-exhausted (or first transient): try the REST fallback.
+  if (isTransientGhError(last.stderr)) {
+    const slug = (opts.slug ?? (() => repoSlugSync(cwd)))();
+    if (slug !== undefined) {
+      const rest = opts.gh([
+        "api", "--method", "POST", `repos/${slug}/pulls`,
+        "-f", `title=${title}`, "-f", `head=${branch}`, "-f", `base=${base}`, "-f", `body=${body}`,
+        "--jq", ".html_url",
+      ]);
+      if (rest.code === 0) return rest.stdout.trim().split("\n").at(-1) ?? branch;
+      last = rest;
+    }
+  }
+  throw new Error(`gh pr create failed: ${(last.stderr || last.stdout).split("\n").find((l) => l.trim() !== "")?.trim() ?? "unknown"}`);
+}
+
+/**
+ * FIX-353 — arm auto-merge resilient to the transient GraphQL EOF. Retry
+ * `gh pr merge --auto --squash`; on a persistent EOF fall back to an immediate
+ * REST squash merge (`gh api PUT …/pulls/N/merge`). The REST merge STILL honours
+ * required checks (GitHub returns 405 until the PR is green), so a non-green
+ * release PR is never force-merged — identical branch-protection semantics to
+ * auto-merge. A real "auto-merge not allowed" error surfaces the actionable
+ * hint exactly as before.
+ */
+export function enableAutoMergeResilient(opts: {
+  cwd: string;
+  prRef: string;
+  retries?: number;
+  gh: (args: string[]) => { code: number; stdout: string; stderr: string };
+  slug?: () => string | undefined;
+}): void {
+  const { cwd, prRef } = opts;
+  const retries = opts.retries ?? 2;
+  let last = { code: 1, stdout: "", stderr: "" };
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    last = opts.gh(["pr", "merge", prRef, "--auto", "--squash"]);
+    if (last.code === 0) return;
+    if (!isTransientGhError(last.stderr)) break;
+  }
+  if (isTransientGhError(last.stderr)) {
+    // REST fallback: immediate squash merge by PR number. Branch protection still
+    // gates it (405 until green) — so this never bypasses required checks.
+    const num = /\/pull\/(\d+)/.exec(prRef)?.[1] ?? (/^\d+$/.test(prRef.trim()) ? prRef.trim() : undefined);
+    const slug = (opts.slug ?? (() => repoSlugSync(cwd)))();
+    if (num !== undefined && slug !== undefined) {
+      const rest = opts.gh([
+        "api", "--method", "PUT", `repos/${slug}/pulls/${num}/merge`,
+        "-f", "merge_method=squash", "--jq", ".merged",
+      ]);
+      // A 405 (checks not green yet) is EXPECTED for a fresh PR — the wait loop
+      // then watches GitHub finish the merge once checks pass. Only a hard,
+      // non-transient REST error is worth surfacing.
+      if (rest.code === 0) return;
+      if (!isTransientGhError(rest.stderr) && /not allowed|disabled|method not allowed|405/i.test(rest.stderr)) {
+        // checks-not-green / auto-merge-disabled → leave the PR for the wait loop
+        // (the wait loop + GitHub finish it; never a silent hang here).
+        return;
+      }
+      last = rest;
+    }
+  }
+  const out = last.stderr || last.stdout;
+  const enabledHint = /auto.?merge.*(not allowed|disabled|enabled)|allow auto-?merge/i.test(out);
+  const detail = out.split("\n").find((l) => l.trim() !== "")?.trim() ?? "unknown";
+  throw new Error(
+    enabledHint
+      ? `auto-merge is not enabled on this repo. Enable "Allow auto-merge" in Settings → General → Pull Requests, or merge PR ${prRef} manually. (${detail})`
+      : `could not arm auto-merge on PR ${prRef}: ${detail}`,
+  );
 }
 
 
@@ -198,37 +324,25 @@ export function realReleaseDeps(): ReleaseFlowDeps {
           execFileSync(cmd, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 600_000 }),
       });
     },
-    openPr: (cwd, branch, title) => {
-      const out = execFileSync(
-        "gh",
-        ["pr", "create", "--title", title, "--body", "Release PR — generated by `roll release` (US-REL-007).", "--head", branch],
-        { cwd, encoding: "utf8" },
-      ).trim();
-      return out.split("\n").at(-1) ?? branch;
-    },
+    // FIX-353: resilient to the transient GraphQL EOF — retry, then REST POST
+    // …/pulls fallback. v3.617.1 / v3.617.2 both aborted at open-pr on this EOF.
+    openPr: (cwd, branch, title) =>
+      openPrResilient({
+        cwd,
+        branch,
+        title,
+        body: "Release PR — generated by `roll release` (US-REL-007).",
+        gh: (args) => ghSync(cwd, args),
+      }),
     // FIX-288 AC1: arm GitHub-native auto-merge so the release drives its own
     // merge (no dependency on the com.roll.pr.<slug> lane) and finishes even if
     // this process is interrupted. AC5: a repo without "Allow auto-merge" makes
     // `gh pr merge --auto` fail — surface that as an honest, actionable error
-    // instead of silently waiting forever.
-    enableAutoMerge: (cwd, prRef) => {
-      try {
-        execFileSync("gh", ["pr", "merge", prRef, "--auto", "--squash"], {
-          cwd,
-          encoding: "utf8",
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-      } catch (e) {
-        const out = e instanceof Error && "stderr" in e ? String((e as { stderr?: unknown }).stderr ?? "") : "";
-        const enabledHint = /auto.?merge.*(not allowed|disabled|enabled)|allow auto-?merge/i.test(out);
-        const detail = out.split("\n").find((l) => l.trim() !== "")?.trim() ?? (e instanceof Error ? e.message : String(e));
-        throw new Error(
-          enabledHint
-            ? `auto-merge is not enabled on this repo. Enable "Allow auto-merge" in Settings → General → Pull Requests, or merge PR ${prRef} manually. (${detail})`
-            : `could not arm auto-merge on PR ${prRef}: ${detail}`,
-        );
-      }
-    },
+    // instead of silently waiting forever. FIX-353: now resilient to the
+    // transient GraphQL EOF — retry, then REST PUT …/pulls/N/merge fallback
+    // (branch protection still gates it; a non-green PR is never force-merged).
+    enableAutoMerge: (cwd, prRef) =>
+      enableAutoMergeResilient({ cwd, prRef, gh: (args) => ghSync(cwd, args) }),
     // FIX-288 AC3: an empty commit pushed to the release branch fires a
     // `synchronize` event so a fresh PR's pull_request CI gets scheduled. The
     // empty commit is harmless: it squash-merges away into the single release

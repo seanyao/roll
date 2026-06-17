@@ -112,6 +112,142 @@ export async function gh(args: readonly string[]): Promise<GhResult> {
   }
 }
 
+// ─── FIX-353: transient gh GraphQL EOF resilience ────────────────────────────
+//
+// On this machine `gh pr create` / `gh pr merge` (both GitHub GraphQL calls)
+// intermittently fail with `Post "https://api.github.com/graphql": EOF` — a
+// known local network hiccup, NOT a real error. Observed repeatedly: releases
+// v3.617.1 / v3.617.2 aborted at open-pr and had to be finished by hand; loop
+// cycles FIX-313 / FIX-328 failed-to-publish for the same reason. The proven
+// workaround is to (1) retry a couple of times, then (2) fall back to the REST
+// API, which keeps working when GraphQL EOFs. REST honours branch protection
+// exactly like the GraphQL merge (required checks still gate a merge), and we
+// keep sha-pinning, so a non-green PR still won't merge.
+
+/**
+ * True iff a `gh` failure looks TRANSIENT (worth a retry / REST fallback) rather
+ * than a real, terminal error. Matches the observed GraphQL EOF, generic
+ * connection resets / timeouts, and 5xx server errors. A 4xx (validation /
+ * permission / "already exists") is NOT transient — the caller must surface it.
+ */
+export function isTransientGhError(stderr: string): boolean {
+  const s = stderr.toLowerCase();
+  // GraphQL/HTTP EOF — the headline FIX-353 symptom.
+  if (/\beof\b/.test(s)) return true;
+  // Connection-level hiccups.
+  if (/connection reset|connection refused|broken pipe|i\/o timeout|\btimeout\b|timed out|tls handshake|temporary failure|network is unreachable|no such host|unexpected eof/.test(s)) {
+    return true;
+  }
+  // 5xx server errors (502/503/504 …). A 4xx is a real client error.
+  if (/\bhttp 5\d\d\b/.test(s) || /\b5\d\d\b.*(bad gateway|service unavailable|gateway timeout|server error)/.test(s)) {
+    return true;
+  }
+  if (/bad gateway|service unavailable|gateway timeout|internal server error/.test(s)) return true;
+  return false;
+}
+
+/**
+ * Run a `gh` invocation with bounded retries on a transient error. Returns the
+ * final {@link GhResult} (success, or the last failure — transient or not). The
+ * sleep is injected so tests run instantly; production backs off briefly.
+ *
+ * @param run        the runner (defaults to {@link gh}; injectable for tests).
+ * @param retries    extra attempts after the first (default 2 → 3 tries total).
+ * @param sleepMs    backoff between attempts (injected; default real setTimeout).
+ */
+export async function ghWithRetry(
+  args: readonly string[],
+  opts: {
+    run?: (a: readonly string[]) => Promise<GhResult>;
+    retries?: number;
+    sleep?: (ms: number) => Promise<void>;
+  } = {},
+): Promise<GhResult> {
+  const run = opts.run ?? gh;
+  const retries = opts.retries ?? 2;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  let last: GhResult = { code: 1, stdout: "", stderr: "" };
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    last = await run(args);
+    if (last.code === 0) return last;
+    if (!isTransientGhError(last.stderr)) return last; // real error → surface now
+    if (attempt < retries) await sleep(250 * (attempt + 1)); // 250ms, 500ms …
+  }
+  return last; // exhausted retries on a still-transient failure
+}
+
+/**
+ * Translate a `gh pr create` argv into the equivalent `gh api` REST POST that
+ * creates the same PR — the proven fallback when GraphQL EOFs. Returns undefined
+ * if the argv is not a recognisable `pr create` (defensive — caller keeps the
+ * gh error). Mirrors:
+ *   gh api --method POST /repos/OWNER/REPO/pulls
+ *     -f title=.. -f head=.. -f base=.. -f body=..
+ */
+export function ghPrCreateRestArgv(argv: readonly string[]): string[] | undefined {
+  if (!(argv.includes("pr") && argv.includes("create"))) return undefined;
+  const flag = (name: string): string | undefined => {
+    const i = argv.indexOf(name);
+    return i >= 0 && i + 1 < argv.length ? argv[i + 1] : undefined;
+  };
+  const slug = flag("-R");
+  const head = flag("--head");
+  const base = flag("--base") ?? "main";
+  const title = flag("--title");
+  const body = flag("--body") ?? "";
+  if (slug === undefined || head === undefined || title === undefined) return undefined;
+  // `--jq .html_url` so the REST response yields the same PR url shape the gh
+  // CLI prints (and runPublishPlan parses).
+  return [
+    "api", "--method", "POST", `repos/${slug}/pulls`,
+    "-f", `title=${title}`,
+    "-f", `head=${head}`,
+    "-f", `base=${base}`,
+    "-f", `body=${body}`,
+    "--jq", ".html_url",
+  ];
+}
+
+/**
+ * Translate a `gh pr merge <ref> [--auto|--admin] --squash [--delete-branch]`
+ * argv into the equivalent `gh api` REST PUT that merges the PR — the proven
+ * fallback when GraphQL EOFs. Requires the PR NUMBER (REST merges by number, not
+ * branch ref) and OPTIONALLY a tip sha to PIN (so a moved head is not merged).
+ *
+ * Branch-protection semantics are preserved: the REST merge endpoint STILL
+ * enforces required status checks, so a non-green PR returns 405 and is not
+ * merged — exactly like `gh pr merge`. `--auto` cannot be expressed over this
+ * REST endpoint (it is a GraphQL mutation), so the fallback performs an
+ * IMMEDIATE squash merge; GitHub rejects it (405) until checks are green, which
+ * is the same end state the auto-merge would have reached.
+ *
+ * Returns undefined when the argv is not a recognisable `pr merge` OR no PR
+ * number is supplied (caller then keeps the gh error rather than guessing).
+ */
+export function ghPrMergeRestArgv(
+  argv: readonly string[],
+  prNumber: string | undefined,
+  sha?: string,
+): string[] | undefined {
+  if (!(argv.includes("pr") && argv.includes("merge"))) return undefined;
+  if (prNumber === undefined || prNumber === "") return undefined;
+  const rIdx = argv.indexOf("-R");
+  const slug = rIdx >= 0 && rIdx + 1 < argv.length ? argv[rIdx + 1] : undefined;
+  if (slug === undefined) return undefined;
+  const method = argv.includes("--squash")
+    ? "squash"
+    : argv.includes("--rebase")
+      ? "rebase"
+      : "merge";
+  const rest = [
+    "api", "--method", "PUT", `repos/${slug}/pulls/${prNumber}/merge`,
+    "-f", `merge_method=${method}`,
+  ];
+  if (sha !== undefined && sha !== "") rest.push("-f", `sha=${sha}`);
+  rest.push("--jq", ".merged");
+  return rest;
+}
+
 /**
  * Mirror `_gh_available` (bin/roll 10987): `command -v gh`. True iff a `gh`
  * binary is on PATH and runnable. Uses `gh --version` (exit 0) as the probe.
@@ -582,12 +718,40 @@ export const defaultRunStep: RunStep = async (tool, argv) => {
   }
 };
 
+/** Extract the PR number from a PR url (`…/pull/<N>`), or undefined. */
+export function prNumberFromUrl(prUrl: string): string | undefined {
+  const m = /\/pull\/(\d+)/.exec(prUrl);
+  return m?.[1];
+}
+
 export async function runPublishPlan(
   plan: readonly PublishStepLike[],
-  opts: { ghAvailable?: () => Promise<boolean>; run?: RunStep } = {},
+  opts: {
+    ghAvailable?: () => Promise<boolean>;
+    run?: RunStep;
+    /** FIX-353: injected backoff between retry attempts (instant in tests). */
+    sleep?: (ms: number) => Promise<void>;
+    /** FIX-353: retries before the REST fallback (default 2 → 3 gh tries). */
+    retries?: number;
+  } = {},
 ): Promise<RunPublishResult> {
   const isAvailable = opts.ghAvailable ?? ghAvailable;
   const run = opts.run ?? defaultRunStep;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const retries = opts.retries ?? 2;
+
+  // FIX-353: run a `gh` step through bounded retries on a transient EOF/5xx
+  // hiccup. Routes through the injected `run` so tests mock the same layer.
+  const runGhResilient = async (argv: readonly string[]): Promise<GhResult> => {
+    let last: GhResult = { code: 1, stdout: "", stderr: "" };
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      last = await run("gh", argv);
+      if (last.code === 0) return last;
+      if (!isTransientGhError(last.stderr)) return last;
+      if (attempt < retries) await sleep(250 * (attempt + 1));
+    }
+    return last;
+  };
 
   if (!(await isAvailable())) {
     return { prUrl: "", ok: false, status: 2 }; // gh missing → fallback trigger
@@ -609,7 +773,16 @@ export async function runPublishPlan(
     if (r.code === 0) prUrl = r.stdout.trim();
   }
   if (prUrl === "" && create !== undefined) {
-    const r = await run(create.tool, create.argv);
+    // FIX-353: retry the GraphQL `gh pr create` on a transient EOF, then fall
+    // back to the REST `gh api POST …/pulls` (which works when GraphQL EOFs).
+    let r = await runGhResilient(create.argv);
+    if (r.code !== 0 && isTransientGhError(r.stderr)) {
+      const restArgv = ghPrCreateRestArgv(create.argv);
+      if (restArgv !== undefined) {
+        const rest = await run("gh", restArgv);
+        if (rest.code === 0) r = rest; // REST html_url == the PR url shape
+      }
+    }
     prUrl = r.code === 0 ? r.stdout.trim() : "";
     // FIX-214: a non-zero `create` is NOT proof the publish failed — a PR may
     // already exist for this branch (the first `view` probe can miss it under
@@ -625,7 +798,16 @@ export async function runPublishPlan(
   }
 
   if (merge !== undefined) {
-    const r = await run(merge.tool, merge.argv);
+    // FIX-353: retry `gh pr merge` on a transient EOF, then fall back to the
+    // REST `gh api PUT …/pulls/N/merge` — sha-pinned, branch-protection-honoured.
+    let r = await runGhResilient(merge.argv);
+    if (r.code !== 0 && isTransientGhError(r.stderr)) {
+      const restArgv = ghPrMergeRestArgv(merge.argv, prNumberFromUrl(prUrl));
+      if (restArgv !== undefined) {
+        const rest = await run("gh", restArgv);
+        if (rest.code === 0) r = rest;
+      }
+    }
     // admin-merge failure is fatal (doc-pr); auto-merge failure is not.
     if (merge.kind === "gh-pr-merge-admin" && r.code !== 0) {
       return { prUrl, ok: false, status: 1 };

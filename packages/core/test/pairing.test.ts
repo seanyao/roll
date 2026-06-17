@@ -58,8 +58,8 @@ describe("heteroAvailable (FIX-312 — the review-routing switch)", () => {
     // builder is kimi (not installed locally) but a claude peer is available.
     expect(heteroAvailable(["claude"], "kimi")).toBe(true);
   });
-  it("no per-agent hardcoding — an unknown vendor pairs with any known one", () => {
-    expect(heteroAvailable(["claude", "made-up-agent"], "claude")).toBe(true);
+  it("unknown agents are not treated as headless reviewers without a profile", () => {
+    expect(heteroAvailable(["claude", "made-up-agent"], "claude")).toBe(false);
   });
 });
 
@@ -159,6 +159,9 @@ describe("parsePairingConfig", () => {
   it("fail-loud on capability for an unknown agent (registry cross-check)", () => {
     expect(() => parsePairingConfig(`enabled: true\ncapability:\n  notanagent: [code]\n`)).toThrow(PairingConfigError);
   });
+  it("FIX-328: fail-loud on capability for a non-headless reviewer", () => {
+    expect(() => parsePairingConfig(`enabled: true\ncapability:\n  cursor: [code]\n`)).toThrow(PairingConfigError);
+  });
   it("absent/empty config is disabled (file-absent = off)", () => {
     expect(parsePairingConfig("").enabled).toBe(false);
   });
@@ -193,6 +196,31 @@ describe("defaultPairingConfig + renderPairingConfig (roll pair init scaffold)",
     const d = defaultPairingConfig(["claude", "codex"]);
     expect(d.stages).toEqual(["code", "score"]);
     expect(d.capability["claude"]).toEqual(["code", "score"]);
+  });
+  it("FIX-328: default config excludes IDE/config-only agents from review pools", () => {
+    const d = defaultPairingConfig(["claude", "cursor", "trae", "codex"]);
+    expect(d.enabled).toBe(true);
+    expect(d.capability).toEqual({ claude: ["code", "score"], codex: ["code", "score"] });
+    expect(renderPairingConfig(d)).not.toContain("cursor:");
+    expect(renderPairingConfig(d)).not.toContain("trae:");
+  });
+  it("FIX-328: score candidates exclude installed IDE/config-only agents", () => {
+    const picked = selectPairingCandidates({
+      installed: ["claude", "cursor", "trae", "codex"],
+      isAvailable: () => true,
+      workingAgent: "claude",
+      stage: "score",
+      cfg: cfg({ enabled: false, stages: [], capability: {} }),
+      cycleId: "c1",
+    });
+    expect(picked).toContain("claude");
+    expect(picked).toContain("codex");
+    expect(picked).not.toContain("cursor");
+    expect(picked).not.toContain("trae");
+  });
+  it("FIX-328: heteroAvailable ignores IDE/config-only agents", () => {
+    expect(heteroAvailable(["claude", "cursor", "trae"], "claude")).toBe(false);
+    expect(heteroAvailable(["claude", "cursor", "codex"], "claude")).toBe(true);
   });
   it("FIX-343: the score stage is same-vendor-friendly — a fresh instance of the BUILDER'S OWN type qualifies", () => {
     // Independence = another assigned fresh session, NOT vendor heterogeneity:

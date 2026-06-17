@@ -585,6 +585,24 @@ describe("retryPeerConsult — FIX-293 follow-up: same-type SEPARATE-SESSION fal
     expect(r.sameTypeFallback).toBe(false);
   });
 
+  it("FIX-328: IDE/config-only installed agents are not retried as peer reviewers", async () => {
+    const { rt } = project(null);
+    const spawned: string[] = [];
+    const { d } = retryDeps({
+      installed: ["claude", "cursor", "trae"], // cursor/trae are installed config targets, not spawnable reviewers
+      workingAgent: "claude",
+      reviewPeer: async (peer) => {
+        spawned.push(peer);
+        return { verdict: "agree", findings: [], cost: 0 };
+      },
+    });
+    const r = await retryPeerConsult(rt, rt, "c-ide-filter", d);
+    expect(r.status).toBe("reviewed");
+    expect(r.peer).toBe("claude");
+    expect(r.sameTypeFallback).toBe(true);
+    expect(spawned).toEqual(["claude"]);
+  });
+
   // (c) The cycle STILL BLOCKS when the separate-session consult yields no
   // evidence (timeout/failure) — even via the same-type fallback. Block now means
   // "the separate-session review produced no evidence", not "no other agent".

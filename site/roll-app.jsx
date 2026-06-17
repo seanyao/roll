@@ -1,4 +1,4 @@
-/* global React, ReactDOM, RollI18n, Header, Hero, Why, How, Features, Journey, Numbers, Guides, Footer,
+/* global React, ReactDOM, RollI18n, Header, Hero, Why, How, Features, Skills, Journey, Numbers, Guides, Footer,
           useTweaks, TweaksPanel, TweakSection, TweakRadio, TweakSelect */
 const { useEffect } = React;
 
@@ -73,6 +73,7 @@ function App() {
           <Why />
           <How />
           <Features />
+          <Skills />
           <Journey />
           <Numbers />
           <Guides />

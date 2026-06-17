@@ -220,6 +220,20 @@ button { font-family: inherit; }
   align-items: center;
   gap: 8px;
 }
+.r-section-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 4px;
+}
+.r-section-title-row .r-section-lede {
+  margin-bottom: 28px;
+}
+.r-section-action {
+  margin-top: 22px;
+  flex-shrink: 0;
+}
 .r-body {
   margin: 0;
   color: var(--fg-muted);
@@ -1147,6 +1161,12 @@ button { font-family: inherit; }
   :root { --pad-x: 20px; }
   .r-section { padding: 64px 0; }
   .r-hero { padding: 56px 0 72px; }
+  .r-section-title-row { display: block; }
+  .r-section-action {
+    width: 100%;
+    justify-content: center;
+    margin: 0 0 30px;
+  }
   .r-fg-grid, .r-guides, .r-layers, .r-why-grid { grid-template-columns: 1fr; }
   .r-nav { display: none; }
   .r-journey-step { grid-template-columns: 80px 24px 1fr; gap: 14px; }

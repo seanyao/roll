@@ -20,6 +20,7 @@ window.RollData = (function () {
       nav: [
         { id: "how",      label: "How it works" },
         { id: "features", label: "Features" },
+        { id: "skills",   label: "Skills" },
         { id: "journey",  label: "Journey" },
         { id: "guides",   label: "Docs" },
       ],
@@ -31,6 +32,7 @@ window.RollData = (function () {
       cycleStatus: "loop running · cycle #047",
       terminalLive: "live",
       featureGroupsLabel: "Feature groups",
+      skillGroupsLabel: "Skill groups",
       footerTag: "Agents, roll out.",
     },
     HERO: {
@@ -101,13 +103,13 @@ window.RollData = (function () {
     },
     FEATURES_HEADING: {
       label: "Features",
-      title: "Everything roll can do, grouped by scenario.",
-      sub: "Sourced from the project's overview guide.",
+      title: "Product capabilities, separate from the skill catalog.",
+      sub: "These are Roll's user-facing capabilities and command surfaces. Specialized $roll skills are listed in the next section.",
     },
     FEATURE_GROUPS: [
       { id: "adoption", title: "Adoption Paths", blurb: "Three ways to bring roll on board.", features: [
         { name: "roll init",     mono: true, desc: "Fresh project bootstrap — creates AGENTS.md, .roll/backlog.md, .roll/features/, and .roll/pairing.yaml (cross-agent pairing).", badges: ["core"] },
-        { name: "$roll-onboard", mono: true, desc: "Existing codebase: 3-minute survey, then roll init --apply lays down the .roll/ structure without surprise edits.", badges: ["new", "highlight"] },
+        { name: "Legacy onboarding plan", desc: "Existing codebase adoption remains plan-first: survey, review, then roll init --apply lays down the .roll/ structure without surprise edits.", badges: ["new", "highlight"] },
       ]},
       { id: "autonomous", title: "Autonomous Execution", blurb: "Run while you sleep.", features: [
         { name: "roll loop on",        mono: true, desc: "AI picks stories from Backlog and executes hourly in an isolated worktree.", badges: ["core"] },
@@ -129,10 +131,10 @@ window.RollData = (function () {
         { name: "REFACTOR Queue",   desc: "Writes REFACTOR-NNN entries to Backlog so loop picks them up next morning.", badges: [] },
       ]},
       { id: "lifecycle", title: "Story Lifecycle", blurb: "Idea to merged PR, in one flow.", features: [
-        { name: "$roll-idea",   mono: true, desc: "One-liner capture — instant FIX or IDEA backlog entry.", badges: ["core"] },
-        { name: "$roll-design", mono: true, desc: "DDD-backed planning: clarify → design → split into INVEST stories.", badges: ["core"], href: "diagrams/roll-design-skill.html", external: true },
-        { name: "$roll-build",  mono: true, desc: "TCR story execution → worktree → PR → auto-merge.", badges: ["core"], href: "diagrams/roll-build-skill.html", external: true },
-        { name: "$roll-fix",    mono: true, desc: "Fast-path bug fix — same CI gate, lighter ceremony.", badges: [] },
+        { name: "Backlog capture", desc: "One-liners become IDEA or FIX entries without starting a full planning session.", badges: ["core"] },
+        { name: "Design-to-story pipeline", desc: "Vague goals become designed, accepted INVEST stories before implementation starts.", badges: ["core"] },
+        { name: "TCR delivery pipeline", desc: "Stories execute in isolated worktrees with tests, PRs, CI and evidence.", badges: ["core"] },
+        { name: "Focused repair lane", desc: "Bug fixes keep the same gates with lighter ceremony and a regression signal first.", badges: [] },
       ]},
       { id: "observability", title: "Observability", blurb: "Always know what it's doing.", features: [
         { name: "roll status",     mono: true, desc: "Verdict-first truth summary — LOOP · CYCLE · RELEASE · STORY with attest coverage — then convention sync health.", badges: ["core"] },
@@ -140,20 +142,43 @@ window.RollData = (function () {
         { name: "roll loop runs",  mono: true, desc: "Per-cycle TerminalOutcome history with TCR count and duration.", badges: [] },
         { name: "roll loop story", mono: true, desc: "Per-story rollup: cycles, span, duration, tokens, cost, PRs.", badges: [] },
         { name: "roll loop alert", mono: true, desc: "View, acknowledge and clear loop alerts from one place.", badges: [] },
-        { name: "roll brief",      mono: true, desc: "Daily digest: what shipped, what's in-progress, what's next.", badges: ["highlight"] },
-      ]},
-      { id: "skills", title: "On-Demand Skills", blurb: "Specialized agents you can summon.", features: [
-        { name: "$roll-debug",    mono: true, desc: "Mount a diagnostic probe, trace root cause, auto-fix if source-traceable.", badges: [] },
-        { name: "$roll-doc",      mono: true, desc: "Scan any project for doc gaps and generate the missing documentation.", badges: [] },
-        { name: "$roll-sentinel", mono: true, desc: "Spot-check production against Backlog acceptance criteria on a schedule.", badges: [] },
-        { name: "$roll-doctor",   mono: true, desc: "Diagnose the dev toolchain — node, npm, git, AI CLI installs.", badges: [] },
+        { name: "Owner brief", desc: "Daily digest: what shipped, what's in-progress, what's next.", badges: ["highlight"] },
       ]},
       { id: "multi-agent", title: "Multi-Agent", blurb: "One vendor doesn't own the keys.", features: [
         { name: "Fallback Routing", desc: "Four complexity slots (easy/default/hard/fallback) each map to a locally-installed agent; when the slot agent is down or rate-limited, work fails over to the fallback-slot agent.", badges: ["highlight"] },
-        { name: "roll peer", mono: true, desc: "Structured negotiation: propose → challenge → refine, up to 3 rounds.", badges: ["core"] },
+        { name: "Peer negotiation", desc: "Structured negotiation: propose → challenge → refine, up to 3 rounds.", badges: ["core"] },
         { name: "Cross-Agent Pairing", desc: "A different-vendor agent auto-reviews each delivery for perspective diversity — rational heterogeneous selection, 30s-timeout non-blocking, cost shown in roll pair status. Scaffolded at roll init.", badges: ["new", "highlight"] },
         { name: "PR Inbox",  desc: "External PRs get AI review before merge; stale PRs auto-rebase onto main.", badges: ["new"] },
-        { name: "roll review-pr", mono: true, desc: "On-demand AI review for any PR, any agent, any git host.", badges: ["new"] },
+        { name: "PR review skill", desc: "On-demand AI review for any PR, any agent, any git host.", badges: ["new"] },
+      ]},
+    ],
+    SKILLS_HEADING: {
+      label: "Skills",
+      title: "Specialized workflows, now with visual maps.",
+      sub: "Each skill has a standalone page. The full system map combines them into one large visual.",
+      overviewLabel: "Open the full skills map",
+      overviewHref: "diagrams/roll-skills-map.html",
+    },
+    SKILL_GROUPS: [
+      { id: "intake", title: "Intake & Planning", blurb: "Turn raw intent into structured work.", features: [
+        { name: "$roll-onboard", mono: true, desc: "Existing codebase adoption: survey, infer domains, write .roll/onboard-plan.yaml only.", badges: ["new", "highlight"], href: "diagrams/roll-onboard-skill.html", external: true },
+        { name: "$roll-idea", mono: true, desc: "One-liner capture — instant FIX or IDEA backlog entry.", badges: ["core"], href: "diagrams/roll-idea-skill.html", external: true },
+        { name: "$roll-design", mono: true, desc: "DDD-backed planning: clarify → model → design → split into INVEST stories.", badges: ["core"], href: "diagrams/roll-design-skill.html", external: true },
+      ]},
+      { id: "delivery", title: "Delivery & Repair", blurb: "Move scoped work to verified change.", features: [
+        { name: "$roll-build", mono: true, desc: "Universal delivery: story/fly mode → TCR → PR → fresh evidence.", badges: ["core", "highlight"], href: "diagrams/roll-build-skill.html", external: true },
+        { name: "$roll-fix", mono: true, desc: "Focused repair: reproduce → regression signal → TCR patch → evidence.", badges: [], href: "diagrams/roll-fix-skill.html", external: true },
+        { name: "$roll-review-pr", mono: true, desc: "Diff-grounded PR review with APPROVE / REQUEST_CHANGES / UNCERTAIN verdict.", badges: ["new"], href: "diagrams/roll-review-pr-skill.html", external: true },
+      ]},
+      { id: "operations", title: "Diagnostics & Operations", blurb: "Observe, diagnose, document, patrol.", features: [
+        { name: "$roll-debug", mono: true, desc: "Mount a browser probe, capture runtime signals, fix project-owned root causes.", badges: [], href: "diagrams/roll-debug-skill.html", external: true },
+        { name: "$roll-doc", mono: true, desc: "Scan docs, update docs/INDEX.md, detect gaps and draft from code evidence.", badges: [], href: "diagrams/roll-doc-skill.html", external: true },
+        { name: "$roll-sentinel", mono: true, desc: "Cost-controlled production patrol against backlog acceptance criteria.", badges: [], href: "diagrams/roll-sentinel-skill.html", external: true },
+        { name: "$roll-doctor", mono: true, desc: "Diagnose Roll install, skills, conventions, symlinks, templates and config.", badges: [], href: "diagrams/roll-doctor-skill.html", external: true },
+      ]},
+      { id: "governance", title: "Coordination", blurb: "Keep humans and agents aligned.", features: [
+        { name: "$roll-peer", mono: true, desc: "Cross-agent negotiation for explicit peer review or documented high-risk gates.", badges: ["core"], href: "diagrams/roll-peer-skill.html", external: true },
+        { name: "$roll-brief", mono: true, desc: "Owner-facing activity, escalation and release-readiness brief.", badges: ["highlight"], href: "diagrams/roll-brief-skill.html", external: true },
       ]},
     ],
     JOURNEY: {
@@ -201,6 +226,7 @@ window.RollData = (function () {
       nav: [
         { id: "how",      label: "工作原理" },
         { id: "features", label: "功能" },
+        { id: "skills",   label: "技能" },
         { id: "journey",  label: "一天的故事" },
         { id: "guides",   label: "文档" },
       ],
@@ -212,6 +238,7 @@ window.RollData = (function () {
       cycleStatus: "loop 运行中 · 第 #047 轮",
       terminalLive: "实时",
       featureGroupsLabel: "功能分组",
+      skillGroupsLabel: "Skill 分组",
       footerTag: "Agents, roll out.",
     },
     HERO: {
@@ -283,13 +310,13 @@ window.RollData = (function () {
     },
     FEATURES_HEADING: {
       label: "功能",
-      title: "Roll 能做的一切,按场景分组。",
-      sub: "内容来自项目的 Overview 指南。",
+      title: "产品能力与技能目录分开呈现。",
+      sub: "这里是 Roll 的用户可见能力与命令面。专项 $roll skills 放在下一节。",
     },
     FEATURE_GROUPS: [
       { id: "adoption", title: "接入路径", blurb: "三种方式把 roll 接进项目。", features: [
         { name: "roll init",     mono: true, desc: "新项目脚手架——创建 AGENTS.md、.roll/backlog.md、.roll/features/、以及 .roll/pairing.yaml（跨 agent 结对）。", badges: ["core"] },
-        { name: "$roll-onboard", mono: true, desc: "现有代码库:3 分钟问询,roll init --apply 落地 .roll/ 结构,不偷改任何源文件。", badges: ["new", "highlight"] },
+        { name: "老项目接入计划", desc: "现有代码库仍然先出计划:问询、review,再由 roll init --apply 落地 .roll/ 结构,不偷改源文件。", badges: ["new", "highlight"] },
       ]},
       { id: "autonomous", title: "自主执行", blurb: "你睡觉时它在跑。", features: [
         { name: "roll loop on",        mono: true, desc: "AI 从 Backlog 领取故事,每小时在隔离 worktree 里执行。", badges: ["core"] },
@@ -311,10 +338,10 @@ window.RollData = (function () {
         { name: "REFACTOR 队列", desc: "把 REFACTOR-NNN 写进 Backlog,次日 loop 自己拣。", badges: [] },
       ]},
       { id: "lifecycle", title: "故事生命周期", blurb: "从想法到合入,同一条流。", features: [
-        { name: "$roll-idea",   mono: true, desc: "一行捕获——即时生成 FIX 或 IDEA 条目。", badges: ["core"] },
-        { name: "$roll-design", mono: true, desc: "DDD 驱动规划:澄清 → 设计 → 拆成 INVEST 故事。", badges: ["core"], href: "diagrams/roll-design-skill.html", external: true },
-        { name: "$roll-build",  mono: true, desc: "TCR 故事执行 → worktree → PR → 自动合入。", badges: ["core"], href: "diagrams/roll-build-skill.html", external: true },
-        { name: "$roll-fix",    mono: true, desc: "Bug 修复快车道——同样的 CI 门禁,流程更轻。", badges: [] },
+        { name: "Backlog 捕获", desc: "一句话进入 IDEA 或 FIX,不强行开启完整规划会。", badges: ["core"] },
+        { name: "设计到故事流水线", desc: "模糊目标在实现前先变成已设计、已接受的 INVEST stories。", badges: ["core"] },
+        { name: "TCR 交付流水线", desc: "故事在隔离 worktree 里执行,带测试、PR、CI 与证据。", badges: ["core"] },
+        { name: "聚焦修复通道", desc: "Bug 修复保留相同门禁,流程更轻,回归信号优先。", badges: [] },
       ]},
       { id: "observability", title: "可观测性", blurb: "永远知道它在干什么。", features: [
         { name: "roll status",     mono: true, desc: "判定优先的真相摘要——LOOP · CYCLE · RELEASE · STORY，含 attest 验收覆盖率——其后是约定同步健康。", badges: ["core"] },
@@ -322,20 +349,43 @@ window.RollData = (function () {
         { name: "roll loop runs",  mono: true, desc: "每轮 TerminalOutcome 历史,含 TCR 次数和耗时。", badges: [] },
         { name: "roll loop story", mono: true, desc: "按故事汇总:cycle 数、跨度、耗时、token、成本、PR 列表。", badges: [] },
         { name: "roll loop alert", mono: true, desc: "在一处查看、确认、清除 loop 告警。", badges: [] },
-        { name: "roll brief",      mono: true, desc: "每日摘要:已发布、进行中、下一优先级。", badges: ["highlight"] },
-      ]},
-      { id: "skills", title: "按需技能", blurb: "可召唤的专项 agent。", features: [
-        { name: "$roll-debug",    mono: true, desc: "挂载诊断探针,追根因,可溯源则直接修。", badges: [] },
-        { name: "$roll-doc",      mono: true, desc: "扫描任意项目的文档缺口,补齐缺失文档。", badges: [] },
-        { name: "$roll-sentinel", mono: true, desc: "按计划对照 Backlog 验收标准点检生产环境。", badges: [] },
-        { name: "$roll-doctor",   mono: true, desc: "诊断开发工具链——node、npm、git、AI CLI。", badges: [] },
+        { name: "Owner 简报", desc: "每日摘要:已发布、进行中、下一优先级。", badges: ["highlight"] },
       ]},
       { id: "multi-agent", title: "多 Agent", blurb: "钥匙不归一家供应商。", features: [
         { name: "故障转移", desc: "四个复杂度槽位（easy/default/hard/fallback）各自映射到本机已装 agent；槽位 agent 宕机或限流时，工作转移到 fallback 槽位 agent。", badges: ["highlight"] },
-        { name: "roll peer", mono: true, desc: "结构化协商:提案 → 挑战 → 精炼,最多三轮。", badges: ["core"] },
+        { name: "Peer 协商", desc: "结构化协商:提案 → 挑战 → 精炼,最多三轮。", badges: ["core"] },
         { name: "跨 Agent 结对", desc: "每次交付由一个不同厂商的 agent 自动复检换视角——理性异构选择、30秒超时不阻塞、成本在 roll pair status 可见。roll init 时即生成配置。", badges: ["new", "highlight"] },
         { name: "PR 收件箱",  desc: "外部 PR 先经 AI 评审再合入;过时 PR 自动 rebase。", badges: ["new"] },
-        { name: "roll review-pr", mono: true, desc: "对任意 PR 按需发起 AI 评审,任意 agent、任意 git 平台。", badges: ["new"] },
+        { name: "PR 评审 skill", desc: "对任意 PR 按需发起 AI 评审,任意 agent、任意 git 平台。", badges: ["new"] },
+      ]},
+    ],
+    SKILLS_HEADING: {
+      label: "技能",
+      title: "专项工作流,现在都有可视化图。",
+      sub: "每个 skill 都有独立页面。完整系统图把它们组合成一张大图。",
+      overviewLabel: "打开完整技能全景图",
+      overviewHref: "diagrams/roll-skills-map.html",
+    },
+    SKILL_GROUPS: [
+      { id: "intake", title: "捕获与规划", blurb: "把原始意图变成结构化工作。", features: [
+        { name: "$roll-onboard", mono: true, desc: "老项目接入:问询、推断领域,只写 .roll/onboard-plan.yaml。", badges: ["new", "highlight"], href: "diagrams/roll-onboard-skill.html", external: true },
+        { name: "$roll-idea", mono: true, desc: "一行捕获——即时生成 FIX 或 IDEA backlog 条目。", badges: ["core"], href: "diagrams/roll-idea-skill.html", external: true },
+        { name: "$roll-design", mono: true, desc: "DDD 驱动规划:澄清 → 建模 → 设计 → 拆成 INVEST stories。", badges: ["core"], href: "diagrams/roll-design-skill.html", external: true },
+      ]},
+      { id: "delivery", title: "交付与修复", blurb: "把已收敛工作推进到已验证变更。", features: [
+        { name: "$roll-build", mono: true, desc: "通用交付:story/fly mode → TCR → PR → 新鲜证据。", badges: ["core", "highlight"], href: "diagrams/roll-build-skill.html", external: true },
+        { name: "$roll-fix", mono: true, desc: "聚焦修复:复现 → 回归信号 → TCR patch → 证据。", badges: [], href: "diagrams/roll-fix-skill.html", external: true },
+        { name: "$roll-review-pr", mono: true, desc: "基于 diff 的 PR 评审,输出 APPROVE / REQUEST_CHANGES / UNCERTAIN。", badges: ["new"], href: "diagrams/roll-review-pr-skill.html", external: true },
+      ]},
+      { id: "operations", title: "诊断与运营", blurb: "观测、诊断、文档、巡检。", features: [
+        { name: "$roll-debug", mono: true, desc: "挂载浏览器探针,采集运行时信号,修项目自有根因。", badges: [], href: "diagrams/roll-debug-skill.html", external: true },
+        { name: "$roll-doc", mono: true, desc: "扫描文档、更新 docs/INDEX.md、识别缺口并基于代码证据起草。", badges: [], href: "diagrams/roll-doc-skill.html", external: true },
+        { name: "$roll-sentinel", mono: true, desc: "按 backlog 验收标准做成本受控的生产巡检。", badges: [], href: "diagrams/roll-sentinel-skill.html", external: true },
+        { name: "$roll-doctor", mono: true, desc: "诊断 Roll 安装、skills、约定、symlink、模板与配置。", badges: [], href: "diagrams/roll-doctor-skill.html", external: true },
+      ]},
+      { id: "governance", title: "协同", blurb: "让人和 agent 保持对齐。", features: [
+        { name: "$roll-peer", mono: true, desc: "在明确 peer 请求或高风险门禁下做跨 agent 协商。", badges: ["core"], href: "diagrams/roll-peer-skill.html", external: true },
+        { name: "$roll-brief", mono: true, desc: "面向 owner 的活动、升级事项与发布就绪度简报。", badges: ["highlight"], href: "diagrams/roll-brief-skill.html", external: true },
       ]},
     ],
     JOURNEY: {

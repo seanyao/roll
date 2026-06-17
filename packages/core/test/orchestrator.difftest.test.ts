@@ -48,11 +48,18 @@ describe("frozen: capture cascade == classifyCaptured (bin/roll:9127-9157)", () 
 
 describe("frozen: publish ladder == classifyPublish (bin/roll:9239-9356)", () => {
   // (status × mergedBack × orphanPushed) in nested-loop order.
+  // FIX-351: the publish ladder is only reached from a `built` (gates-passed)
+  // capture, so a publish that can't complete and pushed NO orphan branch is now
+  // `local` (unpublished) — a neutral terminal, NOT `failed`. The bash oracle
+  // (retired) returned `failed` for these cells; the frozen verdicts below update
+  // the publish-fail-without-orphan cells from `failed` → `local`. Cells that
+  // pushed an orphan branch stay `orphan`; status-0 stays `published`; status-2
+  // with a ff merge-back stays `done`.
   const FROZEN: V2CycleStatus[] = [
     "published", "published", "published", "published",
-    "failed", "orphan", "failed", "orphan",
-    "failed", "orphan", "done", "done",
-    "failed", "orphan", "failed", "orphan",
+    "local", "orphan", "local", "orphan",
+    "local", "orphan", "done", "done",
+    "local", "orphan", "local", "orphan",
   ];
   let i = 0;
   for (const status of [0, 1, 2, 127]) {

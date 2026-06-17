@@ -116,13 +116,19 @@ import { nextWaitAction, type WaitAction } from "../delivery/pr.js";
  *   - done    : published / ff-merged — the only success the dashboard credits
  *               (bin/roll:9261/9275; reconcile later promotes built→merged).
  *   - orphan  : publish failed but branch+tag pushed for audit (bin/roll:9293/9308/9331/9346).
- *   - failed  : agent non-zero after retry, guard/test-gate fail, all-publish-fail
- *               (bin/roll:9133/9209/9219/9298/9313/9336/9351/9360).
+ *   - failed  : agent non-zero after retry, guard/test-gate fail (a GATE failed)
+ *               (bin/roll:9133/9209/9219).
+ *   - local   : FIX-351 — gates PASSED (a `built` capture: exit 0, ≥1 commit, no
+ *               attest/peer block) but the publish could NOT complete and no
+ *               orphan branch was pushed. The work is sound + locally committed,
+ *               it just never left the machine. A neutral non-failure terminal,
+ *               distinct from `failed` (a gate genuinely failed) and `orphan`
+ *               (publish failed but the branch WAS pushed for audit).
  *   - aborted : EXIT-trap catch-all — SIGKILL / set -e fire, no explicit terminal
  *               (bin/roll:8756).
  *   - blocked : hard-timeout breach (bin/roll:8679).
  */
-export type V2CycleStatus = "idle" | "gave_up" | "built" | "done" | "published" | "orphan" | "failed" | "aborted" | "blocked";
+export type V2CycleStatus = "idle" | "gave_up" | "built" | "done" | "published" | "orphan" | "local" | "failed" | "aborted" | "blocked";
 
 /**
  * Bridge v2's runs.jsonl status onto the closed {@link TerminalOutcome}
@@ -132,6 +138,8 @@ export type V2CycleStatus = "idle" | "gave_up" | "built" | "done" | "published" 
  *   - done    → "delivered"                : confirmed merged / locally ff-merged.
  *   - published → "published_pending_merge": PR open, merge pending.
  *   - orphan  → "aborted_with_delivery"    : pushed for audit but not delivered.
+ *   - local   → "unpublished"   : FIX-351 — gates passed, work committed locally,
+ *               publish could not complete (no orphan push). A neutral terminal.
  *   - failed  → "failed".
  *   - aborted → "aborted_no_delivery".
  *   - blocked → "blocked"   : hard-timeout breach.
@@ -152,6 +160,12 @@ export function mapV2Status(status: V2CycleStatus): TerminalOutcome {
       return "gave_up";
     case "orphan":
       return "aborted_with_delivery";
+    case "local":
+      // FIX-351: gates passed + work committed locally, but the publish could not
+      // complete (push / PR-create failed before any orphan branch was pushed).
+      // A NEUTRAL non-failure terminal — the dashboard renders it as "ran
+      // locally, not published", never red.
+      return "unpublished";
     case "failed":
       return "failed";
     case "aborted":
@@ -247,9 +261,20 @@ export interface PublishResult {
  *   - status 0                         → done   (PR published; merge → PR Loop).
  *   - status 2 + mergedBack            → done   (gh missing; ff merge_back, 9275).
  *   - status 2 + orphanPushed          → orphan (gh missing; orphan push, 9293).
- *   - status 2 + neither               → failed (all paths failed, 9298).
+ *   - status 2 + neither               → local  (FIX-351: gates passed, no publish).
  *   - status other + orphanPushed      → orphan (PR-fail; orphan push, 9331/9346).
- *   - status other + not pushed        → failed (worktree preserved, 9336/9351).
+ *   - status other + not pushed        → local  (FIX-351: gates passed, no publish).
+ *
+ * FIX-351 — the publish ladder is only ever reached from a `built` capture, i.e.
+ * a cycle whose GATES ALREADY PASSED (exit 0, ≥1 commit, no attest/peer block).
+ * If its publish cannot complete and no orphan branch was pushed, the WORK is
+ * sound and locally committed — it just never left the machine. That is NOT a
+ * gate failure; it is `local` (→ TerminalOutcome `unpublished`), rendered
+ * neutrally. A genuine GATE failure is classified `failed` BEFORE this ladder
+ * (classifyCaptured: timed-out/worktree-fail/agent-exit≠0/gave_up), so reusing
+ * `local` here never masks a real failure. (Pre-FIX-351 these branches returned
+ * `failed`, which painted sound gate-passed cycles red — FIX-313's case.)
+ *
  * Only call on a `built` capture; idle/failed/blocked never reach the ladder.
  */
 export function classifyPublish(pub: PublishResult): V2CycleStatus {
@@ -257,14 +282,22 @@ export function classifyPublish(pub: PublishResult): V2CycleStatus {
   // "done" (done ≡ merged to main, I4). Backfill flips it on merge evidence.
   if (pub.status === 0) return "published";
   if (pub.status === 2) {
-    if (pub.manualMerge === true) return "failed";
+    // A manual-merge story must NEVER count a local ff merge-back as `done`
+    // (done ≡ a human-confirmed merge). With manualMerge the merge-back is
+    // ignored: the work is committed locally but unpublished → `local` (FIX-351,
+    // formerly `failed`). An orphan push still pre-empts as `orphan` (audit branch).
+    if (pub.manualMerge === true) {
+      return pub.orphanPushed === true ? "orphan" : "local";
+    }
     if (pub.mergedBack === true) return "done";
     if (pub.orphanPushed === true) return "orphan";
-    return "failed";
+    // gh missing, no merge-back, no orphan push — work committed locally but
+    // unpublished (FIX-351, formerly `failed`).
+    return "local";
   }
   // PR-fail tier.
   if (pub.orphanPushed === true) return "orphan";
-  return "failed";
+  return "local";
 }
 
 /** Map a captured terminal straight to the closed terminal outcome vocabulary. */
@@ -797,9 +830,13 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
           { kind: "append_alert", message: `cycle ${state.ctx.cycleId}: publish failed; orphan branch+tag pushed; worktree cleaned` },
         ]);
       }
-      // failed → worktree PRESERVED (bin/roll:9337) for audit.
-      return terminate({ ...state, phase: "publish" }, "failed", [
-        { kind: "append_alert", message: `cycle ${state.ctx.cycleId}: publish failed; worktree preserved at branch ${state.ctx.branch}` },
+      // FIX-351: a `built` (gates-passed) cycle whose publish could not complete
+      // and whose orphan branch was not pushed is `local` (→ unpublished), NOT
+      // failed — the work is sound and committed; only the publish step did not
+      // land. Worktree PRESERVED (bin/roll:9337) so the local commits are
+      // recoverable; the dashboard renders this neutrally, not red.
+      return terminate({ ...state, phase: "publish" }, "local", [
+        { kind: "append_alert", message: `cycle ${state.ctx.cycleId}: gates passed but publish did not complete — work committed locally, worktree preserved at branch ${state.ctx.branch} (unpublished, not a failure)` },
       ]);
     }
 

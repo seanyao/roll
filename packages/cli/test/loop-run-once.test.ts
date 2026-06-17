@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { dispatch, isPorted, registerAll } from "../src/index.js";
-import { buildLoopRouteDeps, readSkillBody, shouldSuppressGoalChildFailureCounter } from "../src/commands/loop-run-once.js";
+import { RUN_ONCE_USAGE, buildLoopRouteDeps, loopRunOnceCommand, readSkillBody, shouldSuppressGoalChildFailureCounter } from "../src/commands/loop-run-once.js";
 import { resolveRoute } from "@roll/core";
 import { realAgentSpawn } from "../src/runner/index.js";
 
@@ -51,6 +51,49 @@ describe("loop run-once CLI wiring", () => {
     expect(out).toContain("command plan (orchestrator → executor)");
     expect(out).toContain("spawn_agent");
     expect(out).toContain("nothing executed");
+  });
+
+  it("FIX-351: --help prints usage and exits 0 WITHOUT running a cycle (no side effects)", async () => {
+    const write = process.stdout.write.bind(process.stdout);
+    let out = "";
+    process.stdout.write = ((s: string) => {
+      out += s;
+      return true;
+    }) as typeof process.stdout.write;
+    let r: number;
+    try {
+      // Called directly (not via dispatch): the --help guard is the FIRST thing
+      // in loopRunOnceCommand, BEFORE projectIdentity / lock / network probe /
+      // agent spawn. If it ran a cycle it would touch git/gh and hang or throw
+      // in this hermetic test env — returning fast with usage proves it short-circuits.
+      r = await loopRunOnceCommand(["--help"]);
+    } finally {
+      process.stdout.write = write;
+    }
+    expect(r).toBe(0);
+    // Output is EXACTLY the usage text — proving no cycle ran (a real cycle
+    // prints "loop run-once: cycle <id> → <terminal>" and other progress lines).
+    expect(out).toBe(`${RUN_ONCE_USAGE}\n`);
+    expect(out).toContain("Usage: roll loop run-once");
+    expect(out).not.toContain("loop run-once: cycle");
+    expect(out).not.toContain("→ unknown");
+  });
+
+  it("FIX-351: -h is also a help flag (prints usage, no cycle)", async () => {
+    const write = process.stdout.write.bind(process.stdout);
+    let out = "";
+    process.stdout.write = ((s: string) => {
+      out += s;
+      return true;
+    }) as typeof process.stdout.write;
+    let r: number;
+    try {
+      r = await loopRunOnceCommand(["-h"]);
+    } finally {
+      process.stdout.write = write;
+    }
+    expect(r).toBe(0);
+    expect(out).toContain("Usage: roll loop run-once");
   });
 
   it("does not count goal-child zero-delivery failures as consecutive failures", () => {

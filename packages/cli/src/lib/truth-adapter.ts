@@ -109,6 +109,11 @@ export function outcomeToPanel(outcome: CycleTruth["outcome"], state: TruthState
       return "done";
     case "idle_no_work":
       return "idle";
+    // FIX-351: gates passed but publish did not land (work committed locally) —
+    // a NEUTRAL state, NOT a failure. Classified `idle`-side so the panel/tally
+    // never counts a sound-but-unpublished cycle as a fail (it is not red).
+    case "unpublished":
+      return "idle";
     case "failed":
     case "blocked":
     case "aborted_no_delivery":

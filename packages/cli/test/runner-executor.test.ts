@@ -1616,6 +1616,28 @@ describe("executeCommand — command → executor mapping", () => {
     });
   });
 
+  it("FIX-351: a `local` status terminal records outcome `unpublished` (neutral), keeps the tcr work, NOT `failed`", async () => {
+    const { ports, calls } = fakePorts();
+    await executeCommand(
+      // The runner's terminal for a gates-passed cycle whose publish couldn't
+      // complete: status `local`. The terminal twin derives outcome `unpublished`.
+      { kind: "append_run", status: "local", outcome: "unpublished", cycleId: CTX.cycleId },
+      ports,
+      { ...CTX, startSec: 100, tcrCount: 3 },
+    );
+    const t = (calls["event"] ?? [])
+      .map((a) => (a as unknown[])[1] as RollEvent)
+      .find((e) => e.type === "cycle:terminal");
+    expect(t).toBeDefined();
+    expect((t as { outcome: string }).outcome).toBe("unpublished");
+    expect((t as { outcome: string }).outcome).not.toBe("failed");
+    // the work is intact — 3 tcr commits recorded, branch present, no publish.
+    expect(t).toMatchObject({
+      tcr: { present: true, value: 3 },
+      pr: { present: false, reason: "no_publish_attempted" },
+    });
+  });
+
   it("FIX-253: idle terminal releases the claimed story back to Todo", async () => {
     const markStatus = vi.fn();
     const { ports } = fakePorts({ backlog: { read: vi.fn(() => []), markStatus } });

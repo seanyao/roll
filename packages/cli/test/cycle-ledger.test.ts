@@ -50,6 +50,22 @@ describe("ledgerVerdict — AC4: the CLI's vocabulary", () => {
     expect(ledgerVerdict("published", "published_pending_merge")).toBe("pending_merge");
     expect(ledgerVerdict("merged", "delivered")).toBe("delivered");
   });
+
+  it("FIX-351: a gates-passed-but-unpublished cycle is `unpublished` (neutral), NOT `failed`", () => {
+    // The runner writes status `local` / outcome `unpublished` for a `built`
+    // (gates-passed) cycle whose publish couldn't complete. Either side maps to
+    // the neutral verdict — never the failed cluster.
+    expect(ledgerVerdict("local", "unpublished")).toBe("unpublished");
+    expect(ledgerVerdict("local", "")).toBe("unpublished"); // status-only
+    expect(ledgerVerdict("", "unpublished")).toBe("unpublished"); // outcome-only
+    expect(ledgerVerdict("local", "unpublished")).not.toBe("failed");
+  });
+
+  it("FIX-351: a genuinely-failed cycle stays `failed` (the distinction is preserved)", () => {
+    // FIX-328's shape: a hard attest gate block → status/outcome `failed`. The
+    // FIX-351 reclassification must NOT touch a real gate failure.
+    expect(ledgerVerdict("failed", "failed")).toBe("failed");
+  });
 });
 
 describe("collectCycleLedger", () => {
@@ -182,6 +198,70 @@ describe("FIX-297 — idle heartbeats are not cycles", () => {
     ]);
     const rows = collectCycleLedger(p);
     expect(rows.map((r) => r.cycleId).sort()).toEqual(["with-built", "with-story", "with-work"]);
+  });
+});
+
+describe("FIX-351 — gates-passed-but-unpublished renders neutral, not failed", () => {
+  it("reproduces FIX-313's cycle: gates passed (attest produced, peer consulted, 3 tcr commits) + publish couldn't complete → `unpublished`, NEUTRAL end, NOT in failed count", () => {
+    // FIX-313's actual runs row + events (cycle 20260617-031926-76145): a sound,
+    // gate-passed cycle whose publish couldn't complete. Pre-FIX-351 the runner
+    // wrote status/outcome `failed`; FIX-351 writes `local`/`unpublished`.
+    const p = project(
+      [
+        {
+          cycle_id: "20260617-031926-76145",
+          status: "local",
+          outcome: "unpublished",
+          story_id: "FIX-313",
+          agent: "codex",
+          ts: "2026-06-16T19:40:53Z",
+          duration_sec: 1287,
+          tcr_count: 3,
+        },
+      ],
+      [
+        { type: "peer:gate", cycleId: "20260617-031926-76145", verdict: "consulted", reasons: [], ts: 1 },
+        { type: "attest:gate", cycleId: "20260617-031926-76145", verdict: "produced", reasons: [], ts: 2 },
+      ],
+    );
+    const rows = collectCycleLedger(p);
+    expect(rows).toHaveLength(1);
+    const r = rows[0]!;
+    expect(r.verdict).toBe("unpublished");
+    expect(r.verdict).not.toBe("failed");
+    // the end segment is NEUTRAL (idle-class grey), never red (fail).
+    expect(r.tape.find((s) => s.key === "end")?.state).toBe("idle");
+    expect(r.tape.find((s) => s.key === "end")?.detail).toBe("unpublished");
+    // the build/ci segments still show the sound work (green): 3 commits + attest ✓.
+    expect(r.tape.find((s) => s.key === "build")?.state).toBe("pass");
+    expect(r.tape.find((s) => s.key === "ci")?.state).toBe("pass");
+    // it does NOT count as a failure.
+    expect(ledgerFailedCount(rows)).toBe(0);
+  });
+
+  it("a genuinely-failed cycle (FIX-328's empty-shell attest block) is STILL `failed` and red", () => {
+    // FIX-328's shape: a hard attest gate block stamps status/outcome `failed`.
+    // FIX-351 must not flip this to neutral — a real gate failure stays red.
+    const p = project(
+      [
+        {
+          cycle_id: "20260617-074515-4067",
+          status: "failed",
+          outcome: "failed",
+          story_id: "FIX-328",
+          agent: "codex",
+          ts: "2026-06-17T07:45:15Z",
+          duration_sec: 1150,
+          tcr_count: 1,
+        },
+      ],
+      [{ type: "attest:gate", cycleId: "20260617-074515-4067", verdict: "skipped", reasons: ["empty shell"], ts: 1 }],
+    );
+    const rows = collectCycleLedger(p);
+    const r = rows[0]!;
+    expect(r.verdict).toBe("failed");
+    expect(r.tape.find((s) => s.key === "end")?.state).toBe("fail");
+    expect(ledgerFailedCount(rows)).toBe(1);
   });
 });
 

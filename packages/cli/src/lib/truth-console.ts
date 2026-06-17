@@ -438,6 +438,11 @@ function overviewTab(input: TruthConsoleInput): string {
 
 const VERDICT_COLORS: Record<string, string> = {
   delivered: C.green,
+  pending_merge: C.amber, // PR open, merge pending — in-flight (amber), not red
+  // FIX-351: gates passed but publish did not land (work committed locally) —
+  // a NEUTRAL blue, clearly distinct from `failed` (red). The dashboard reads
+  // it as "ran locally, not published", never as a failure.
+  unpublished: C.blue,
   reverted: C.amber,
   failed: C.red,
   blocked: C.purple,
@@ -446,6 +451,8 @@ const VERDICT_COLORS: Record<string, string> = {
 };
 const VERDICT_ZH: Record<string, string> = {
   delivered: "已交付",
+  pending_merge: "待合并",
+  unpublished: "未发布", // FIX-351: 闸通过但未发布(本地已提交)——中性,非失败
   reverted: "已回滚",
   failed: "失败",
   blocked: "被阻塞",

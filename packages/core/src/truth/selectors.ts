@@ -158,6 +158,9 @@ const ROW_TO_TERMINAL: Record<string, TerminalOutcome> = {
   // silently swallowed from every failed count (the FIX-248 class).
   reverted: "failed",
   orphan: "aborted_with_delivery",
+  // FIX-351: gates passed but publish did not land (work committed locally) — a
+  // neutral non-failure terminal, NOT mapped into the failed cluster.
+  local: "unpublished",
 };
 
 export function deriveCycleTruth(input: CycleTruthInput): CycleTruth {

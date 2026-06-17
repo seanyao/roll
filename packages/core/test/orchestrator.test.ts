@@ -154,19 +154,40 @@ describe("classifyPublish — publish ladder refines built (bin/roll:9239-9356)"
     expect(classifyPublish({ status: 2, mergedBack: true })).toBe("done");
   });
   it("manual merge + gh missing never counts merge_back as done", () => {
-    expect(classifyPublish({ status: 2, manualMerge: true, mergedBack: true })).toBe("failed");
+    // gh missing + manualMerge + a ff merge_back: not `done` (manual merge owes a
+    // human). FIX-351: the WORK passed its gates and is committed locally, so this
+    // is `local` (unpublished), NOT `failed` — only a GATE failure is `failed`.
+    expect(classifyPublish({ status: 2, manualMerge: true, mergedBack: true })).toBe("local");
   });
   it("status 2 + orphanPushed → orphan", () => {
     expect(classifyPublish({ status: 2, orphanPushed: true })).toBe("orphan");
   });
-  it("status 2 + neither → failed", () => {
-    expect(classifyPublish({ status: 2 })).toBe("failed");
+  it("FIX-351: status 2 + neither (no merge-back, no orphan) → local (gates passed, unpublished)", () => {
+    expect(classifyPublish({ status: 2 })).toBe("local");
   });
   it("PR-fail + orphanPushed → orphan", () => {
     expect(classifyPublish({ status: 1, orphanPushed: true })).toBe("orphan");
   });
-  it("PR-fail + not pushed → failed", () => {
-    expect(classifyPublish({ status: 1 })).toBe("failed");
+  it("FIX-351: PR-fail + not pushed → local, NOT failed (work passed gates, only publish couldn't complete)", () => {
+    expect(classifyPublish({ status: 1 })).toBe("local");
+  });
+});
+
+describe("FIX-351 — gates-passed-but-unpublished is a neutral terminal, not a failure", () => {
+  it("a `built` capture (gates passed: exit 0, commits>0) is the ONLY entry to the publish ladder", () => {
+    // The publish ladder (classifyPublish) is only ever reached from a `built`
+    // capture — i.e. a cycle whose gates already PASSED. So a publish that can't
+    // complete is a sound cycle that didn't publish, not a gate failure.
+    expect(classifyCaptured({ usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 2 })).toBe("built");
+  });
+  it("a genuine GATE failure (attest/peer block → agentExit≠0) classifies `failed` BEFORE the ladder, stays failed", () => {
+    // FIX-328's shape: empty-shell attest → attestBlocked → agentExit 1. It never
+    // reaches classifyPublish — it is `failed` at capture and STAYS failed.
+    expect(classifyCaptured({ usedWorktree: true, agentExit: 1, timedOut: false, commitsAhead: 1 })).toBe("failed");
+  });
+  it("`local` v2 status maps to the neutral `unpublished` TerminalOutcome (never `failed`)", () => {
+    expect(mapV2Status("local")).toBe("unpublished");
+    expect(mapV2Status("local")).not.toBe("failed");
   });
 });
 
@@ -322,7 +343,7 @@ describe("failure branches", () => {
     expect(state.terminal).toBe("done");
   });
 
-  it("publish PR-fail + orphan pushed → orphan; not pushed → failed (worktree preserved)", () => {
+  it("publish PR-fail + orphan pushed → orphan; not pushed → local (FIX-351, worktree preserved)", () => {
     const orphan = walk([
       { type: "start", ctx: CTX },
       { type: "preflight_done" },
@@ -336,7 +357,12 @@ describe("failure branches", () => {
     expect(orphan.state.terminal).toBe("orphan");
     expect(orphan.kinds).toContain("cleanup_worktree");
 
-    const failed = walk([
+    // FIX-351: a gates-passed (`built`) cycle whose publish couldn't complete and
+    // whose orphan branch wasn't pushed is `local` (unpublished), NOT `failed` —
+    // the work is sound and committed; only the publish step didn't land. This is
+    // FIX-313's exact shape (3 TCR commits, attest produced, peer consulted, then
+    // a publish that couldn't complete) — it must no longer paint the cycle red.
+    const local = walk([
       { type: "start", ctx: CTX },
       { type: "preflight_done" },
       { type: "worktree_created" },
@@ -346,9 +372,29 @@ describe("failure branches", () => {
       { type: "facts_captured", facts: { usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 1 } },
       { type: "published", result: { status: 1 } },
     ]);
+    expect(local.state.terminal).toBe("local");
+    expect(local.state.terminal).not.toBe("failed");
+    // worktree PRESERVED on publish-fail (bin/roll:9337) — no cleanup command,
+    // so the local commits stay recoverable on the branch.
+    expect(local.kinds).not.toContain("cleanup_worktree");
+  });
+
+  it("FIX-351: a genuine GATE failure (agent exit ≠ 0 with commits) stays `failed`, never reaches the ladder", () => {
+    // FIX-328's shape: a hard attest/peer block stamps agentExit=1 at capture, so
+    // classifyCaptured → `failed` and the publish ladder is never entered. The
+    // FIX-351 `local` reclassification must not touch this — a real failure stays red.
+    const failed = walk([
+      { type: "start", ctx: CTX },
+      { type: "preflight_done" },
+      { type: "worktree_created" },
+      { type: "story_picked", storyId: "US-1" },
+      { type: "route_resolved", agent: "claude", model: "sonnet" },
+      { type: "agent_exited", exit: 0, timedOut: false },
+      { type: "facts_captured", facts: { usedWorktree: true, agentExit: 1, timedOut: false, commitsAhead: 1 } },
+    ]);
     expect(failed.state.terminal).toBe("failed");
-    // worktree PRESERVED on publish-fail (bin/roll:9337) — no cleanup command.
-    expect(failed.kinds).not.toContain("cleanup_worktree");
+    // no publish was attempted — it never reached the ladder.
+    expect(failed.kinds).not.toContain("publish_pr");
   });
 
   it("route_resolved spawns the agent directly (budget gate removed)", () => {

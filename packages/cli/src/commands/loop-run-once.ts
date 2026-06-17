@@ -382,10 +382,26 @@ function readField(path: string, re: RegExp): string | undefined {
   return undefined;
 }
 
+/** `roll loop run-once --help` usage. Bilingual on separate lines (EN then ZH). */
+export const RUN_ONCE_USAGE =
+  "Usage: roll loop run-once [--dry-run]\n" +
+  "  Run ONE loop cycle now: pick a Todo card, build it through TCR, run the\n" +
+  "  gates (attest + peer), and publish a PR. Exits when the cycle terminates.\n" +
+  "  --dry-run   Print the command plan only — no git / gh / agent side effects.\n" +
+  "立即跑一个 loop 周期:选一张 Todo 卡,经 TCR 建造,过闸(验收+同行评审),发 PR。\n" +
+  "  --dry-run   只打印命令计划——不动 git / gh / agent。";
+
 /**
  * The `loop run-once` entry. Returns a process exit code (0 ok).
  */
 export async function loopRunOnceCommand(args: string[]): Promise<number> {
+  // FIX-351: `--help`/`-h` must PRINT usage and exit — never start a cycle. This
+  // guard runs BEFORE any side effect (project identity, lock, network probe,
+  // agent spawn), so a help flag can never burn a cycle.
+  if (args.includes("--help") || args.includes("-h")) {
+    process.stdout.write(`${RUN_ONCE_USAGE}\n`);
+    return 0;
+  }
   const dryRun = args.includes("--dry-run");
   const id = await projectIdentity();
   const cycleId = makeCycleId();
@@ -555,6 +571,20 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     process.stdout.write(
       "loop run-once: delivery published — PR open, merge pending (PR loop merges; backfill credits on merge evidence)\n" +
         "loop run-once: 交付已发布——PR 已开,等待合并(PR loop 负责合并;合并证据落地后由回填记账)\n",
+    );
+  }
+  // FIX-351: a `local` cycle PASSED its gates (attest produced + peer ok, real
+  // TCR commits) but its publish could not complete — the work is sound and
+  // committed locally, it just never published. This is NOT a failure: surface
+  // the acceptance report, reset the failure streak (sound work must clear a
+  // prior streak and never accrue toward an auto-PAUSE), and exit 0.
+  if (result.terminal === "local") {
+    const storyId = (result.state?.ctx?.storyId ?? "").trim();
+    announceReport(id.path, id.slug, storyId);
+    resetConsecutiveFails(id.path);
+    process.stdout.write(
+      "loop run-once: gates passed but publish did not complete — work committed locally on the branch, not published (unpublished, not a failure)\n" +
+        "loop run-once: 闸已通过但未完成发布——工作已在分支上本地提交,尚未发布(未发布,非失败)\n",
     );
   }
 

@@ -1712,6 +1712,8 @@ export function buildRunRow(
     // the ledger can be rebuilt from rows; plus model + the cache split for
     // dashboard truth (tokens were "—", cost $0, guardrail blind).
     row["cost_effective_usd"] = ctx.cost.effectiveCost;
+    // FIX-361: native currency so display/reports show ¥ vs $ correctly.
+    row["cost_currency"] = ctx.cost.currency;
     // The parsed usage carries the authoritative model — prefer it over the
     // routed fallback when present.
     if (ctx.cost.model !== "") row["model"] = ctx.cost.model;

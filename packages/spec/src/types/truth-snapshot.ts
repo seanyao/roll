@@ -63,6 +63,8 @@ export interface TruthSnapshotCycle {
   /** Failures are first-class: failed + blocked + reverted/aborted — never swallowed. */
   failed3d: number;
   costUsd3d: number;
+  /** FIX-361: cost separated by native currency so display never blindly sums ¥+$. */
+  costByCurrency3d?: Record<string, number>;
   collectedAt?: string;
 }
 

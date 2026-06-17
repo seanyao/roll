@@ -156,7 +156,7 @@ describe("frozen: roll loop status (fixture)", () => {
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 
-        RECENT  ·  最近 12 个 cycle       t · time   Δ · duration   tok · tokens   $ · cost   id · backlog
+        RECENT  ·  最近 12 个 cycle     t · time   Δ · duration   tok · tokens   $/¥ · cost   id · backlog
 
         ─ Today · 今日 · 2026-06-07 · Sun · 周日 ────────────────────  1 cycles · 0 failed  ·  in progress
         ✓  04:48    17m  —/—                         —                 —   FIX-040 #61 …
@@ -205,7 +205,7 @@ describe("frozen: roll loop status (fixture)", () => {
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 
-        RECENT  ·  最近 12 个 cycle       t · time   Δ · duration   tok · tokens   $ · cost   id · backlog
+        RECENT  ·  最近 12 个 cycle     t · time   Δ · duration   tok · tokens   $/¥ · cost   id · backlog
 
         ─ Today · 今日 · 2026-06-07 · Sun · 周日 ────────────────────  1 cycles · 0 failed  ·  in progress
         ✓  04:48    17m  —/—                         —                 —   FIX-040 #61 …
@@ -255,7 +255,7 @@ describe("frozen: roll loop status (fixture)", () => {
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 
-        RECENT  ·  最近 12 个 cycle       t · time   Δ · duration   tok · tokens   $ · cost   id · backlog
+        RECENT  ·  最近 12 个 cycle     t · time   Δ · duration   tok · tokens   $/¥ · cost   id · backlog
 
         ─ Today · 今日 · 2026-06-07 · Sun · 周日 ────────────────────  1 cycles · 0 failed  ·  in progress
         ✓  04:48    17m  —/—                         —                 —   FIX-040 #61 …
@@ -306,7 +306,7 @@ describe("frozen: roll loop status (fixture)", () => {
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 
-        RECENT  ·  最近 12 个 cycle       t · time   Δ · duration   tok · tokens   $ · cost   id · backlog
+        RECENT  ·  最近 12 个 cycle     t · time   Δ · duration   tok · tokens   $/¥ · cost   id · backlog
 
         ─ Today · 今日 · 2026-06-07 · Sun · 周日 ────────────────────  1 cycles · 0 failed  ·  in progress
         ✓  04:48    17m  —/—                         —                 —   FIX-040 #61 …
@@ -543,7 +543,7 @@ describe("frozen: roll loop status (live)", () => {
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 
-        RECENT  ·  最近 2 个 cycle        t · time   Δ · duration   tok · tokens   $ · cost   id · backlog
+        RECENT  ·  最近 2 个 cycle      t · time   Δ · duration   tok · tokens   $/¥ · cost   id · backlog
 
         ─ Today · 今日 · 2026-06-07 · Sun · 周日 ────────────────────────────────────  2 cycles · 1 failed
         ✗  09:48     8m  —/—                         —                 —   FIX-200
@@ -650,7 +650,7 @@ describe("frozen: roll loop status (live)", () => {
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 
-        RECENT  ·  最近 1 个 cycle        t · time   Δ · duration   tok · tokens   $ · cost   id · backlog
+        RECENT  ·  最近 1 个 cycle      t · time   Δ · duration   tok · tokens   $/¥ · cost   id · backlog
 
         ─ Today · 今日 · 2026-06-07 · Sun · 周日 ────────────────────────────────────  1 cycles · 0 failed
         ✓  10:38     7m  9K/2K                       deepseek-v4-pro   ¥0.42   FIX-300

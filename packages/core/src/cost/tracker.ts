@@ -524,6 +524,8 @@ export function toCycleCost(usage: AgentUsage, facts: CycleFacts): CycleCost {
     usage.cost_list_usd ?? computeListCost(usage.model, tokens);
   const reverts = Math.max(0, Math.trunc(facts.revertCount));
   const effectiveCost = estimatedCost * (reverts + 1);
+  // FIX-361: currency from model's price config (¥ for domestic models, $ for USD-billed).
+  const cur = cycleCurrency(usage.model);
   return {
     cycleId: facts.cycleId,
     agent: facts.agent,
@@ -536,6 +538,7 @@ export function toCycleCost(usage: AgentUsage, facts: CycleFacts): CycleCost {
     estimatedCost,
     revertCount: reverts,
     effectiveCost,
+    currency: cur,
   };
 }
 

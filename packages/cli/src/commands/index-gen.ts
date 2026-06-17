@@ -124,18 +124,24 @@ function cycleTruthBoard(projectPath: string, nowSec: number): TruthBoardInput["
   });
   let failed = 0;
   let cost = 0;
+  // FIX-361: separate by native currency so display never blindly sums ¥+$.
+  const costByCur: Record<string, number> = {};
   let latestTs = 0;
   for (const row of rows) {
     const ts = tsSec(row["ts"]) ?? 0;
     latestTs = Math.max(latestTs, ts);
     const truth = cycleTruthFromRow(row, { nowSec });
     if (outcomeToPanel(truth.outcome, truth.state) === "fail") failed += 1;
-    cost += num(row["cost_effective_usd"]) ?? num(row["cost_usd"]) ?? 0;
+    const rowCost = num(row["cost_effective_usd"]) ?? num(row["cost_usd"]) ?? 0;
+    cost += rowCost;
+    const cur = typeof row["cost_currency"] === "string" ? (row["cost_currency"] as string) : "USD";
+    costByCur[cur] = (costByCur[cur] ?? 0) + rowCost;
   }
   return {
     cycles3d: rows.length,
     failed3d: failed,
     costUsd3d: Number(cost.toFixed(4)),
+    costByCurrency3d: Object.keys(costByCur).length > 0 ? costByCur : undefined,
     ...(latestTs > 0 ? { collectedAt: iso(latestTs) } : {}),
   };
 }

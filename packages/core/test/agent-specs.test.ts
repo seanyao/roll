@@ -30,10 +30,13 @@ describe("AgentSpec registry — FIX-313", () => {
   });
 
   it("declares headless-review capability only for agents the runner can spawn", () => {
-    for (const agent of ["claude", "codex", "openai", "kimi", "qwen", "agy", "gemini", "pi"]) {
+    for (const agent of ["claude", "codex", "openai", "kimi", "qwen", "pi"]) {
       expect(agentCanReviewHeadless(agent)).toBe(true);
     }
-    for (const agent of ["cursor", "trae", "opencode", "openclaw"]) {
+    // FIX-360: agy (antigravity/gemini) is NOT a headless reviewer — its headless
+    // review triggers an interactive Google OAuth popup, so it is excluded from
+    // every reviewer pool (it stays in the registry for manual use only).
+    for (const agent of ["cursor", "trae", "opencode", "openclaw", "agy", "gemini", "antigravity"]) {
       expect(agentCanReviewHeadless(agent)).toBe(false);
     }
   });

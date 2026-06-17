@@ -24,7 +24,9 @@ import {
 const cfg = (over: Partial<PairingConfig> = {}): PairingConfig => ({
   enabled: true,
   stages: ["code"],
-  capability: { claude: ["code"], codex: ["code"], kimi: ["code"], qwen: ["code"], agy: ["code"] },
+  // FIX-360: agy is no longer a headless reviewer, so it is filtered out of every
+  // pool regardless of any capability declaration — it stays out of these cfgs.
+  capability: { claude: ["code"], codex: ["code"], kimi: ["code"], qwen: ["code"] },
   ...over,
 });
 const always = (): boolean => true;
@@ -142,7 +144,10 @@ describe("selectPairingCandidates — ε-greedy hit-rate preference (US-PAIR-006
   it("returns the same qualified SET regardless of ordering (no peer lost)", () => {
     const history = { codex: { count: 10, hits: 9 } };
     const got = selectPairingCandidates({ ...base, cycleId: "c1", history, epsilon: 0.2 });
-    expect(got.slice().sort()).toEqual(["agy", "codex", "kimi", "qwen"].sort());
+    // FIX-360: agy is installed (see base.installed) but is NOT a headless reviewer,
+    // so it is filtered out of the qualified pool — codex/kimi/qwen remain.
+    expect(got.slice().sort()).toEqual(["codex", "kimi", "qwen"].sort());
+    expect(got).not.toContain("agy");
   });
 
   it("exploit cycles put the highest-hit-rate peer first", () => {

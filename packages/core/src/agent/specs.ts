@@ -75,7 +75,14 @@ const BASE_AGENT_SPECS: readonly AgentSpec[] = [
     aliases: ["antigravity", "gemini"],
     displayName: "antigravity (agy)",
     defaultModel: "gemini-2.5-pro",
-    canReviewHeadless: true,
+    // FIX-360: agy (antigravity/gemini) can NOT be a headless peer reviewer — its
+    // headless review keeps triggering an interactive Google OAuth login popup the
+    // owner has to clear by hand (agy needs a browser Google login it can't do
+    // headlessly). canReviewHeadless=false removes it from every reviewer pool path
+    // (defaultPairingConfig / selectPairingCandidates / parsePairingConfig), so the
+    // loop never spawns agy → no more OAuth popups. agy stays in the registry so it
+    // can still be used manually.
+    canReviewHeadless: false,
     normalizer: "generic",
     usage: { stdoutExtractor: "gemini" },
     smokeCommand: 'agy -p "Reply with a single word: hello"',

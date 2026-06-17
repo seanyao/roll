@@ -88,6 +88,23 @@ describe("US-TRUTH-001 AC3 — every fact field is present-or-reasoned, never si
 });
 
 describe("FIX-294 — the terminal event carries the routed model even when usage is unknown", () => {
+  it("FIX-352: normalizes terminal startedAt/endedAt/ts to epoch milliseconds", () => {
+    const e = buildTerminalEvent({
+      ...BASE,
+      outcome: "failed",
+      pr: absent("no_publish_attempted"),
+      branch: present("loop/cycle-x"),
+      commit: absent("no_commits"),
+      tcr: present(0),
+      attest: absent("not_rendered"),
+      usage: absent("no_parseable_usage"),
+      cost: absent("no_parseable_usage"),
+    });
+    expect(e.startedAt).toBe(1_781_000_000_000);
+    expect(e.endedAt).toBe(1_781_000_600_000);
+    expect(e.ts).toBe(1_781_000_600_000);
+  });
+
   it("a failed cycle with unreadable usage still records WHICH model ran", () => {
     const e = buildTerminalEvent({
       ...BASE,

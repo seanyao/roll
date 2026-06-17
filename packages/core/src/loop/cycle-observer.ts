@@ -58,6 +58,10 @@ export interface CycleObserverState {
  *  events.ndjson, short enough that a 37-minute silent phase shows ~12 beats. */
 export const BUILD_HEARTBEAT_GAP_MS = 180_000;
 
+function secToMs(tsSec: number): number {
+  return tsSec * 1000;
+}
+
 export function newCycleObserverState(cycleId: string): CycleObserverState {
   return {
     cycleId,
@@ -105,23 +109,23 @@ export function observeCommits(
   for (const c of commits) {
     if (c.hash === "" || st.seen.has(c.hash)) continue;
     st.seen.add(c.hash);
-    const tsSec = c.tsSec > 0 ? c.tsSec : Math.floor(nowMs / 1000);
+    const tsMs = c.tsSec > 0 ? secToMs(c.tsSec) : nowMs;
     // FIX-357: the FIRST observed TCR commit is the earliest signal the agent
     // produced a tracked change — emit cycle:first_edit ONCE (latched), ordered
-    // BEFORE its cycle:tcr. ts in SECONDS (the same tsSec the tcr carries), NOT
-    // observeBuildStart's nowMs(ms) — else execute→first_edit math is off 1000x
-    // (FIX-352 unit trap). This makes the cold-orientation prefix that
+    // BEFORE its cycle:tcr. ts is epoch milliseconds, matching cycle:phase and
+    // every other events.ndjson timestamp so execute→first_edit math stays
+    // unit-safe (FIX-352). This makes the cold-orientation prefix that
     // prebuild_dist/project_map target measurable; it was buried in the 180s beat.
     if (!st.firstEditEmitted) {
       st.firstEditEmitted = true;
-      out.push({ type: "cycle:first_edit", cycleId: st.cycleId, commitHash: c.hash, ts: tsSec });
+      out.push({ type: "cycle:first_edit", cycleId: st.cycleId, commitHash: c.hash, ts: tsMs });
     }
     out.push({
       type: "cycle:tcr",
       cycleId: st.cycleId,
       commitHash: c.hash,
       message: c.message,
-      ts: tsSec,
+      ts: tsMs,
     });
     // A commit IS activity — reset the heartbeat baseline so we don't beat right
     // after one lands (the commit is itself the liveness signal).
@@ -155,7 +159,7 @@ export function maybeBuildHeartbeat(
       type: "cycle:stdout",
       cycleId: st.cycleId,
       data: `heartbeat: building · still working (${st.heartbeatCount}) · ${elapsedMin}m quiet · ${st.seen.size} tcr so far`,
-      ts: Math.floor(nowMs / 1000),
+      ts: nowMs,
     },
   ];
 }

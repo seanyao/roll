@@ -117,7 +117,7 @@ export interface TerminalEvent {
    *  cycle's signal-teardown twin). FIX-290 fixed the runs row's model; this
    *  closes the same hole on the terminal-event twin. */
   model: string;
-  /** Epoch seconds. */
+  /** Epoch milliseconds. */
   startedAt: number;
   endedAt: number;
   outcome: TerminalOutcome;
@@ -128,7 +128,7 @@ export interface TerminalEvent {
   attest: FactOr<TerminalAttestFact>;
   usage: FactOr<TerminalUsageFact>;
   cost: FactOr<TerminalCostFact>;
-  /** RollEvent stream timestamp (epoch seconds) — equals endedAt by default. */
+  /** RollEvent stream timestamp (epoch milliseconds) — equals endedAt by default. */
   ts: number;
 }
 
@@ -154,9 +154,14 @@ export interface TerminalEventInput {
   ts?: number;
 }
 
+function epochMs(ts: number): number {
+  return ts >= 1_000_000_000_000 ? ts : ts * 1000;
+}
+
 /** The one constructor — stamps type/schema so a hand-rolled object can't ship
  *  a missing field or a stale version. */
 export function buildTerminalEvent(input: TerminalEventInput): TerminalEvent {
+  const endedAt = epochMs(input.endedAt);
   return {
     type: "cycle:terminal",
     schema: TERMINAL_EVENT_SCHEMA_VERSION,
@@ -164,8 +169,8 @@ export function buildTerminalEvent(input: TerminalEventInput): TerminalEvent {
     storyId: input.storyId,
     agent: input.agent,
     model: input.model ?? "",
-    startedAt: input.startedAt,
-    endedAt: input.endedAt,
+    startedAt: epochMs(input.startedAt),
+    endedAt,
     outcome: input.outcome,
     pr: input.pr,
     branch: input.branch,
@@ -174,7 +179,7 @@ export function buildTerminalEvent(input: TerminalEventInput): TerminalEvent {
     attest: input.attest,
     usage: input.usage,
     cost: input.cost,
-    ts: input.ts ?? input.endedAt,
+    ts: input.ts !== undefined ? epochMs(input.ts) : endedAt,
   };
 }
 

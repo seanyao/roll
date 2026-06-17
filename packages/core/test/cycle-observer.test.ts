@@ -47,9 +47,9 @@ describe("cycle-observer — runner-derived standard signals (agent-agnostic)", 
     );
     expect(out).toEqual<RollEvent[]>([
       // FIX-357: cycle:first_edit precedes the FIRST commit's cycle:tcr (emitted once).
-      { type: "cycle:first_edit", cycleId: CYCLE, commitHash: "aaa111", ts: 1700000010 },
-      { type: "cycle:tcr", cycleId: CYCLE, commitHash: "aaa111", message: "tcr: red", ts: 1700000010 },
-      { type: "cycle:tcr", cycleId: CYCLE, commitHash: "bbb222", message: "tcr: green", ts: 1700000040 },
+      { type: "cycle:first_edit", cycleId: CYCLE, commitHash: "aaa111", ts: 1700000010000 },
+      { type: "cycle:tcr", cycleId: CYCLE, commitHash: "aaa111", message: "tcr: red", ts: 1700000010000 },
+      { type: "cycle:tcr", cycleId: CYCLE, commitHash: "bbb222", message: "tcr: green", ts: 1700000040000 },
     ]);
   });
 
@@ -62,12 +62,12 @@ describe("cycle-observer — runner-derived standard signals (agent-agnostic)", 
     expect(later.map((e) => e.type)).toEqual(["cycle:tcr"]);
   });
 
-  it("cycle:first_edit ts is the commit's SECONDS, not ms (FIX-352 unit guard)", () => {
+  it("cycle:first_edit ts is epoch milliseconds, matching cycle:phase (FIX-352 unit guard)", () => {
     const st = newCycleObserverState(CYCLE);
     const out = observeCommits([commit("aaa111", "tcr: red", 1700000010)], st, 5_000);
     const fe = out.find((e) => e.type === "cycle:first_edit") as { ts: number };
-    expect(fe.ts).toBe(1700000010);
-    expect(fe.ts).toBeLessThan(1e12); // seconds, not ms — execute→first_edit math depends on it
+    expect(fe.ts).toBe(1700000010000);
+    expect(fe.ts).toBeGreaterThanOrEqual(1e12);
   });
 
   it("a zero-commit / empty-hash poll emits no cycle:first_edit", () => {
@@ -91,7 +91,7 @@ describe("cycle-observer — runner-derived standard signals (agent-agnostic)", 
   it("falls back to nowMs when a commit ts is missing/zero", () => {
     const st = newCycleObserverState(CYCLE);
     const out = observeCommits([commit("ddd444", "tcr: no-ts", 0)], st, 9_000);
-    expect((out[0] as { ts: number }).ts).toBe(9); // floor(9000ms / 1000)
+    expect((out[0] as { ts: number }).ts).toBe(9_000);
   });
 
   it("ignores empty-hash rows defensively", () => {

@@ -161,9 +161,10 @@ export async function runCycleOnce(opts: RunCycleOptions): Promise<RunCycleResul
         model: liveCtx.model ?? "",
       };
       try {
+        const terminalSec = ports.clock();
         ports.events.appendEvent(
           ports.paths.eventsPath,
-          { ...cycleEndEvent(tctx, status), ts: ports.clock() },
+          { ...cycleEndEvent(tctx, status), ts: terminalSec * 1000 },
         );
         const fakeAppend: Extract<CycleCommand, { kind: "append_run" }> = {
           kind: "append_run",
@@ -174,7 +175,7 @@ export async function runCycleOnce(opts: RunCycleOptions): Promise<RunCycleResul
         ports.events.upsertRun(
           ports.paths.runsPath,
           { storyId: liveCtx.storyId ?? "", cycleId: liveCtx.cycleId },
-          buildRunRow(fakeAppend, liveCtx),
+          buildRunRow(fakeAppend, liveCtx, terminalSec),
         );
         // FIX-304: this aborted fallback never reached the executor's append_run,
         // so undo a premature ✅ Done HERE too. An aborted cycle did NOT merge —

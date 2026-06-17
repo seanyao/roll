@@ -883,7 +883,7 @@ describe("executeCommand — command → executor mapping", () => {
       cycleId: CTX.cycleId,
       storyId: "US-RUN-001",
       runDir: "/repo/.roll/features/demo/US-RUN-001/20260605-000000-1",
-      ts: 42,
+      ts: 42000,
     });
   });
 
@@ -1752,6 +1752,7 @@ describe("executeCommand — command → executor mapping", () => {
     const gate = events.find((e) => e.type === "peer:gate");
     expect(gate).toBeDefined();
     expect((gate as { verdict: string }).verdict).toBe("self-review-allowed");
+    expect((gate as { ts: number }).ts).toBe(42000);
     // The fallback is RECORDED (auditable alert), not silent.
     const alerts = (calls["alert"] ?? []).map((a) => (a as unknown[])[1] as string);
     expect(alerts.some((m) => m.includes("self-review fallback"))).toBe(true);
@@ -2040,13 +2041,13 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r.event).toEqual({ type: "merge_polled", state: "MERGED", elapsedSec: 30 });
   });
 
-  it("emit_event stamps the clock ts and appends", async () => {
+  it("emit_event stamps an epoch-ms event ts and appends", async () => {
     const { ports, calls } = fakePorts();
     const ev: RollEvent = { type: "cycle:end", cycleId: CTX.cycleId, outcome: "delivered", cost: zeroCost(), ts: 0 };
     await executeCommand({ kind: "emit_event", event: ev }, ports, CTX);
     expect(calls["event"]?.[0]).toBeDefined();
     const appended = (calls["event"]?.[0] as unknown[])[1] as RollEvent;
-    expect(appended.ts).toBe(42);
+    expect(appended.ts).toBe(42000);
   });
 
   it("append_run upserts a v2-shaped row keyed by story+cycle", async () => {
@@ -2059,6 +2060,24 @@ describe("executeCommand — command → executor mapping", () => {
     const args = calls["run"]?.[0] as unknown[];
     expect(args[1]).toEqual({ storyId: "US-RUN-001", cycleId: CTX.cycleId });
     expect((args[2] as Record<string, unknown>)["status"]).toBe("done");
+  });
+
+  it("FIX-352: terminal event timestamps are epoch ms while the runs row keeps second-based duration", async () => {
+    const { ports, calls } = fakePorts({ clock: () => 1_780_688_082 });
+    await executeCommand(
+      { kind: "append_run", status: "published", outcome: "published_pending_merge", cycleId: CTX.cycleId },
+      ports,
+      { ...CTX, startSec: 1_780_687_982 },
+    );
+
+    const run = (calls["run"]?.[0] as unknown[])[2] as Record<string, unknown>;
+    expect(run["ts"]).toBe("2026-06-05T19:34:42Z");
+    expect(run["duration_sec"]).toBe(100);
+
+    const terminal = ((calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent).find((e) => e.type === "cycle:terminal")) as Extract<RollEvent, { type: "cycle:terminal" }>;
+    expect(terminal.ts).toBe(1_780_688_082_000);
+    expect(terminal.startedAt).toBe(1_780_687_982_000);
+    expect(terminal.endedAt).toBe(1_780_688_082_000);
   });
 
   // ── FIX-295 AC-FIX1: done ≡ merged — a `done`/`published` terminal flips the

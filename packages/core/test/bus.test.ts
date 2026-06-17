@@ -5,6 +5,7 @@
  * and the rotation-awareness helpers.
  */
 import type { RollEvent } from "@roll/spec";
+import { absent, present } from "@roll/spec";
 import { describe, expect, it } from "vitest";
 import {
   EVENTS_FILE,
@@ -55,7 +56,7 @@ describe("appendEvent", () => {
     const ev: RollEvent = { type: "loop:fire", loop: "main", ts: 1000 };
     const line = bus.appendEvent(EVENTS, ev);
     expect(store.appendCalls).toBe(1);
-    expect(line).toBe(`${JSON.stringify(ev)}\n`);
+    expect(line).toBe('{"type":"loop:fire","loop":"main","ts":1000000}\n');
     expect(store.readText(EVENTS)).toBe(line);
   });
 
@@ -68,6 +69,36 @@ describe("appendEvent", () => {
     bus.appendEvent(EVENTS, { type: "loop:idle", loop: "main", nextFire: 5, ts: 2 });
     const evs = bus.readEvents(EVENTS);
     expect(evs.map((e) => e.type)).toEqual(["loop:fire", "loop:idle"]);
+  });
+
+  it("FIX-352: normalizes terminal timestamp fields at the write boundary", () => {
+    const store = fakeStore();
+    const bus = new EventBus(store);
+    const ev: RollEvent = {
+      type: "cycle:terminal",
+      schema: 1,
+      cycleId: "c1",
+      storyId: "FIX-352",
+      agent: "codex",
+      model: "gpt",
+      startedAt: 1_780_000_000,
+      endedAt: 1_780_000_100,
+      outcome: "failed",
+      pr: absent("no_publish_attempted"),
+      branch: present("loop/c"),
+      commit: absent("not_recorded"),
+      tcr: present(1),
+      attest: absent("not_rendered"),
+      usage: absent("no_parseable_usage"),
+      cost: absent("no_parseable_usage"),
+      ts: 1_780_000_100,
+    };
+    const line = bus.appendEvent(EVENTS, ev);
+    expect(JSON.parse(line)).toMatchObject({
+      startedAt: 1_780_000_000_000,
+      endedAt: 1_780_000_100_000,
+      ts: 1_780_000_100_000,
+    });
   });
 });
 
@@ -146,7 +177,7 @@ describe("rotation awareness", () => {
 
   it("serializeEvent + file-name constants", () => {
     expect(serializeEvent({ type: "loop:fire", loop: "main", ts: 1 })).toBe(
-      '{"type":"loop:fire","loop":"main","ts":1}\n',
+      '{"type":"loop:fire","loop":"main","ts":1000}\n',
     );
     expect(EVENTS_FILE).toBe("events.ndjson");
     expect(RUNS_FILE).toBe("runs.jsonl");

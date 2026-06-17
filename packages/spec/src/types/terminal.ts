@@ -38,6 +38,14 @@ export const TERMINAL_OUTCOMES = [
   "orphan_timeout",
   "idle_no_work",
   "gave_up",
+  // FIX-351 — a cycle that reached the end with its gates PASSED (attest
+  // produced + peer ok/consulted, real TCR commits, exit 0 → a `built` capture)
+  // but whose publish could NOT complete (push / `gh pr create` failed before
+  // any orphan branch was pushed). The WORK is sound and locally committed —
+  // this is NOT a gate failure. A neutral "ran locally, never published" state,
+  // distinct from `failed` (a gate genuinely failed / errored) and from
+  // `aborted_with_delivery` (publish failed but the branch WAS pushed for audit).
+  "unpublished",
   "unknown",
 ] as const;
 export type TerminalOutcome = (typeof TERMINAL_OUTCOMES)[number];

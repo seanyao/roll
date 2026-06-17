@@ -49,6 +49,7 @@ export function cycleNo(cycleId: string): string {
 const VERDICT_COLOR: Record<string, string> = {
   delivered: "green",
   pending_merge: "yellow", // FIX-322: opened a PR, merge pending — in-flight, NOT delivered (amber)
+  unpublished: "blue", // FIX-351: gates passed, work local, publish didn't land — neutral, NOT red
   reverted: "yellow",
   failed: "red",
   blocked: "purple",

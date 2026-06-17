@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseEventLine, type RollEvent } from "@roll/spec";
 
-export type CycleLedgerVerdict = "delivered" | "pending_merge" | "reverted" | "failed" | "blocked" | "idle" | "unknown";
+export type CycleLedgerVerdict = "delivered" | "pending_merge" | "unpublished" | "reverted" | "failed" | "blocked" | "idle" | "unknown";
 
 export interface CycleTapeSegment {
   key: "cycle" | "story" | "build" | "peer" | "ci" | "pr" | "end";
@@ -59,6 +59,14 @@ export function ledgerVerdict(status: string, outcome: string): CycleLedgerVerdi
   ) {
     return "pending_merge";
   }
+  // FIX-351: a `built` (gates-passed) cycle whose publish could not complete and
+  // whose work stayed local is `unpublished` — a NEUTRAL verdict, NOT a failure.
+  // It is distinct from `failed` (a gate genuinely failed / errored) and from
+  // `pending_merge` (a PR is open, merge pending). Mapped BEFORE the failed
+  // cluster so it never lands in red. Genuine gate-failures classify `failed`
+  // upstream (orchestrator.classifyCaptured), never `local`, so this can never
+  // hide a real failure.
+  if (outcome === "unpublished" || status === "local") return "unpublished";
   if (outcome === "blocked" || status === "blocked") return "blocked";
   if (outcome === "idle_no_work" || status === "idle") return "idle";
   if (
@@ -259,7 +267,18 @@ function rowTape(row: Record<string, unknown>, verdict: CycleLedgerVerdict, ev: 
   // a story was picked) — they stay green even on a failed row; the failure
   // shows where it actually bit (build/peer/ci/pr/end). kimi pair-review noted
   // the ambiguity; this is the intended reading of the trace tape.
-  const endState = verdict === "delivered" ? "pass" : verdict === "idle" ? "idle" : verdict === "unknown" ? "unknown" : "fail";
+  // FIX-351: `unpublished` (gates passed, work local, publish didn't land) is a
+  // NEUTRAL end — never red. It renders as an `idle`-class (grey) end segment,
+  // the same neutral color the verdict dot/badge use, so a sound-but-unpublished
+  // cycle is visually distinct from a real `failed` (red).
+  const endState =
+    verdict === "delivered"
+      ? "pass"
+      : verdict === "idle" || verdict === "unpublished"
+        ? "idle"
+        : verdict === "unknown"
+          ? "unknown"
+          : "fail";
   return [
     seg("cycle", typeof row["ts"] === "string" ? (row["ts"] as string).replace("T", " ").replace(/:\d{2}Z$/, "Z") : "—", "pass"),
     seg("story", storyId !== "" ? storyId : "—", storyId !== "" ? "pass" : "idle"),

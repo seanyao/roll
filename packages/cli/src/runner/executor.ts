@@ -1653,6 +1653,9 @@ export function buildTerminalRecord(
     blocked: "blocked",
     aborted: "aborted_no_delivery",
     orphan: "aborted_with_delivery",
+    // FIX-351: gates passed but publish could not complete (work committed
+    // locally, never published) — a neutral terminal, NOT a failure.
+    local: "unpublished",
   };
   let attest: FactOr<TerminalAttestFact>;
   if (storyId === "") {

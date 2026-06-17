@@ -16,6 +16,18 @@ describe("AgentSpec registry — FIX-313", () => {
     expect(agentSmokeCommand("kimi")).toContain("kimi");
   });
 
+  it("declares sessionReuse as an agnostic capability — only codex resumes (lever-4)", () => {
+    // codex is the ONLY engine with warm-context (exec resume).
+    expect(getAgentSpec("codex")?.usage.sessionReuse).toBe("codex-exec-resume");
+    // openai is a codex alias — same capability resolves through it.
+    expect(getAgentSpec("openai")?.usage.sessionReuse).toBe("codex-exec-resume");
+    // EVERY other engine is a cold no-op: the field is absent (not 'none' — the
+    // adapter treats absent as cold, so we never accidentally widen reuse).
+    for (const agent of ["claude", "kimi", "qwen", "agy", "pi", "cursor", "opencode", "trae", "openclaw"]) {
+      expect(getAgentSpec(agent)?.usage.sessionReuse).toBeUndefined();
+    }
+  });
+
   it("lets downstream support a new agent by registry-only extension", () => {
     const specs = withAgentSpecs([
       {

@@ -110,6 +110,20 @@ export function storyPinDirective(storyId: string): string {
   );
 }
 
+/**
+ * lever-4 — the warm-context RESET directive. When a codex session is RESUMED on
+ * the NEXT card, the model still carries the prior card's context; this bounded
+ * preface tells it to drop those specifics and re-orient onto the fresh card +
+ * fresh worktree (origin/main) BEFORE any edit. Prepended to the prompt; kept
+ * short so it never bloats the already-lean prompt.
+ */
+export function resetDirective(storyId: string): string {
+  return (
+    `NEW CARD ${storyId}. Ignore the prior card's specifics/files/branch/decisions; ` +
+    `this is a fresh worktree on origin/main — re-read the backlog + the new card spec before any edit.\n\n`
+  );
+}
+
 /** Inputs for {@link buildClaudeArgv}: the worktree dir + the prompt body. */
 export interface ClaudeArgvInput {
   /** The agent's cwd / `--add-dir` target — the cycle worktree (`WT`). */
@@ -206,6 +220,12 @@ export interface AgentSpawnOptions {
   /** FIX-319: bare spawn — send `skillBody` verbatim (no autorun directive / no
    *  story pin). Used for the heterogeneous peer reviewer (review-only framing). */
   bare?: boolean;
+  /** lever-4 (cross-card warm-context): when set, the codex branch RESUMES this
+   *  prior session id (`codex exec resume <id>`) instead of a cold `codex exec`,
+   *  and PREPENDS the RESET_DIRECTIVE so the resumed context re-orients onto the
+   *  new card. Absent (the universal default) ⇒ unchanged cold spawn. Only the
+   *  codex branch reads it — it is isolated there, never a cross-agent branch. */
+  codexSessionId?: string;
 }
 
 /** Result of an agent spawn — the orchestrator feeds `exitCode` back as
@@ -267,6 +287,17 @@ export function buildSpawnCommand(agent: string, opts: AgentSpawnOptions): { bin
       roots.length > 0
         ? ["--cd", opts.cwd, "--sandbox", "workspace-write", ...roots.flatMap((p) => ["--add-dir", p])]
         : [];
+    // lever-4 (default-OFF; only reached when the flag-guarded wiring set
+    // codexSessionId): RESUME the prior session and prepend the RESET directive
+    // so the warm context re-orients onto the new card / fresh worktree. The
+    // resume argv is isolated to THIS codex branch — no cross-agent branching.
+    if (opts.codexSessionId !== undefined && opts.codexSessionId !== "") {
+      const resumePrompt = `${resetDirective(opts.storyId ?? "")}${prompt}`;
+      return {
+        bin: opts.bin ?? "codex",
+        args: ["exec", "resume", opts.codexSessionId, ...sandboxArgs, resumePrompt],
+      };
+    }
     return { bin: opts.bin ?? "codex", args: ["exec", ...sandboxArgs, prompt] };
   }
   if (agent === "deepseek") {

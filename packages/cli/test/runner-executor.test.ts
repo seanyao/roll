@@ -30,6 +30,8 @@ import {
   executeCommand,
   parseEstMin,
   realAgentSpawn,
+  resetDirective,
+  storyPinDirective,
   RESUME_DISABLED_ENV,
   resolveResumeBase,
   revertPrematureDone,
@@ -165,6 +167,54 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
       "--add-dir",
       "/repo/.roll-real/loop",
       prompt,
+    ]);
+  });
+
+  it("lever-4: codex with NO codexSessionId is the unchanged cold spawn (default)", () => {
+    // The default — no resume id — must produce the byte-identical cold argv.
+    const { bin, args } = buildSpawnCommand("codex", { cwd: "/wt", skillBody: "DO WORK" });
+    expect(bin).toBe("codex");
+    expect(args).toEqual(["exec", prompt]);
+    expect(args).not.toContain("resume");
+  });
+
+  it("lever-4: codex WITH codexSessionId resumes + prepends the RESET directive", () => {
+    const { bin, args } = buildSpawnCommand("codex", {
+      cwd: "/wt",
+      skillBody: "DO WORK",
+      storyId: "FIX-777",
+      codexSessionId: "uuid-abc",
+    });
+    expect(bin).toBe("codex");
+    expect(args[0]).toBe("exec");
+    expect(args[1]).toBe("resume");
+    expect(args[2]).toBe("uuid-abc"); // positional session id (smoke-checked argv)
+    // last positional is the RESET-prefixed prompt
+    const resumePrompt = `${resetDirective("FIX-777")}${AUTORUN_DIRECTIVE}${storyPinDirective("FIX-777")}DO WORK`;
+    expect(args[args.length - 1]).toBe(resumePrompt);
+    expect(args[args.length - 1]).toContain("NEW CARD FIX-777");
+  });
+
+  it("lever-4: resume argv keeps the codex sandbox roots BEFORE the positional id-then-prompt", () => {
+    const { args } = buildSpawnCommand("codex", {
+      cwd: "/wt",
+      skillBody: "DO WORK",
+      storyId: "FIX-777",
+      codexSessionId: "uuid-abc",
+      writableRoots: ["/repo/.roll-real"],
+    });
+    const resumePrompt = `${resetDirective("FIX-777")}${AUTORUN_DIRECTIVE}${storyPinDirective("FIX-777")}DO WORK`;
+    expect(args).toEqual([
+      "exec",
+      "resume",
+      "uuid-abc",
+      "--cd",
+      "/wt",
+      "--sandbox",
+      "workspace-write",
+      "--add-dir",
+      "/repo/.roll-real",
+      resumePrompt,
     ]);
   });
 

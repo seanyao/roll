@@ -65,7 +65,8 @@ export function canonicalAgentName(name: string): string {
 }
 
 function agentDisplayName(a: string): string {
-  return canonicalAgentName(a) === "agy" ? "antigravity (agy)" : a;
+  if (canonicalAgentName(a) === "agy") return "antigravity (agy)";
+  return a;
 }
 
 function agentBinNames(agent: string): string[] | null {
@@ -86,6 +87,8 @@ function agentBinNames(agent: string): string[] | null {
       return ["qwen"];
     case "pi":
       return ["pi"];
+    case "reasonix":
+      return ["reasonix"];
     default:
       return null;
   }
@@ -177,7 +180,7 @@ export function projectAgent(): string {
 }
 
 // ── Entry ────────────────────────────────────────────────────────────────────
-const AGENT_ORDER = ["claude", "kimi", "deepseek", "opencode", "codex", "openai", "pi", "qwen", "agy"];
+const AGENT_ORDER = ["claude", "kimi", "deepseek", "opencode", "codex", "openai", "pi", "qwen", "agy", "reasonix"];
 
 export function agentListCommand(_args: string[]): number {
   const noColor = (process.env["NO_COLOR"] ?? "") !== "";

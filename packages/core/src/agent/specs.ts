@@ -81,6 +81,15 @@ const BASE_AGENT_SPECS: readonly AgentSpec[] = [
     smokeCommand: 'agy -p "Reply with a single word: hello"',
   },
   {
+    name: "reasonix",
+    displayName: "reasonix",
+    defaultModel: "deepseek-flash",
+    canReviewHeadless: true,
+    normalizer: "generic",
+    usage: { stdoutExtractor: "generic" },
+    smokeCommand: 'reasonix run --max-steps 1 "Reply with a single word: hello"',
+  },
+  {
     name: "pi",
     aliases: ["deepseek"],
     displayName: "pi",

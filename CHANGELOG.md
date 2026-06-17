@@ -7,6 +7,16 @@
 - **各类 agent 的展示、用量和 smoke 行为改走统一注册表**:模型名、实时观察窗、usage recovery、dashboard 回填、pairing 成本和 loop smoke 不再散落写 claude/pi/kimi/codex 特判;新增 agent 只需补 AgentSpec,非 claude 不再显示成 `?` 或被 mock smoke 降级。(FIX-313) `[loop]`
   <!-- evidence: .roll/features/loop-engine/FIX-313/latest/FIX-313-report.html -->
 
+- **Loop 页的"已合并显示"这次真生效了**:上一版加的"PR 合了 → 显示绿色"其实是哑的——一个缓冲区上限太小的 bug 让它读不到 git 记录、静默失效;现在已合并的交付会正确显示为已交付(绿),且只按这个循环自己开的 PR 判定,不会被别的 PR 误判成绿。(FIX-349, FIX-348, FIX-350) `[loop-observability]`
+
+- **重复的故事编号当场拦住**:同一个编号被两个地方使用时,不再静默读到错的卡;新增一个 CI 检查,扫到重复编号就报错。(FIX-340) `[loop-engine]`
+
+- **发布没成功的循环不再误标"失败"**:循环把活干完、过了质量闸,但因为临时的 GitHub 故障没能开 PR 时,现在显示"未发布"(中性灰),不再误显示成"失败"(红);`roll loop run-once --help` 也改为显示帮助,不再误跑一个循环。(FIX-351) `[loop-engine]`
+
+### 性能(可选,默认关闭)
+
+- **两个 execute 提速开关(默认关,需手动开启)**:`prebuild_dist`(循环工作区一建好就预构建,省 agent 找入口的往返)和 `project_map`(spawn 时给 agent 注入精简的仓库结构 + 本卡相关文件,省它摸索)。对所有 agent 通用、不破循环隔离;不开就完全没影响。(FIX-338) `[loop-engine]`
+
 ## v3.617.1 — 2026-06-17
 
 ### 质量与可信

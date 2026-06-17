@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### 修复
+
+- **结对评审池只收能 headless 运行的 reviewer**:`roll pair init`、pairing selector、Review Score 和 peer-gate retry 现在共用 agent profile 的 `canReviewHeadless` 能力;Cursor/Trae 这类 IDE 配置目标不再进入评审/评分候选池,避免选中后 spawn 不出 verdict 拖垮 cycle。(FIX-328) `[pairing]`
+
 ## v3.617.2 — 2026-06-17
 
 ### 修复

@@ -29,19 +29,19 @@ roll pair init        # 从已安装的 agent 物化 .roll/pairing.yaml
 ```yaml
 # .roll/pairing.yaml —— 自动生成，可自由编辑
 enabled: true
-stages: [code]
+stages: [code, score]
 capability:
-  claude: [code]
-  codex: [code]
-  kimi: [code]
+  claude: [code, score]
+  codex: [code, score]
+  kimi: [code, score]
 ```
 
 - `enabled` —— 总开关。只有装了至少两个**不同厂商**时 `roll pair init` 才置 `true`
-  （否则没有异构搭档可配）。
-- `stages` —— 哪些生命周期阶段触发结对：`design`、`test`、`code`、`cycle`，
-  每个可独立关闭，默认仅 `code`。
+  （否则没有异构搭档可配）。Cursor、Trae 这类 IDE/配置目标不会被脚手架成 reviewer。
+- `stages` —— 哪些生命周期阶段触发结对：`design`、`test`、`code`、`cycle`、`score`，
+  每个可独立关闭，默认是 `code` 和 `score`。
 - `capability` —— 每个 agent 被声明能复检的阶段。声明会与 registry 交叉校验，
-  乱写的名字会被拒绝。
+  乱写的名字或不能 headless spawn 的 reviewer 会被拒绝。
 
 ## 看它做了什么 —— 可观测性
 
@@ -69,10 +69,11 @@ roll pair status
 
 ## 选择逻辑
 
-某阶段触发时，选择器**只**保留：已安装、可用、被声明能做该阶段、且与干活 agent
-**不同厂商**的——然后在其中轮换（以 cycle id 为种子，可复现）。有战绩的搭档会被
-温和偏好（ε-greedy，ε≈0.2），但始终保留探索，任何一对都不会垄断。若没有合格的
-异构搭档，这个"没有"本身也会被记录（`pair:none-available`）——绝不静默跳过。
+某阶段触发时，选择器**只**保留：已安装、可用、被声明能做该阶段、能作为 headless
+reviewer 运行，且与干活 agent **不同厂商**的——然后在其中轮换（以 cycle id 为种子，
+可复现）。有战绩的搭档会被温和偏好（ε-greedy，ε≈0.2），但始终保留探索，任何一对都
+不会垄断。若没有合格的异构搭档，这个"没有"本身也会被记录（`pair:none-available`）——
+绝不静默跳过。
 
 ## 安全 —— 结对绝不阻塞 cycle
 

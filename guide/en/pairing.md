@@ -37,21 +37,22 @@ it = off. Pairing never fires silently.
 ```yaml
 # .roll/pairing.yaml — generated, edit freely
 enabled: true
-stages: [code]
+stages: [code, score]
 capability:
-  claude: [code]
-  codex: [code]
-  kimi: [code]
+  claude: [code, score]
+  codex: [code, score]
+  kimi: [code, score]
 ```
 
 - `enabled` — master switch. `roll pair init` sets it `true` only when at least
-  two **distinct vendors** are installed (otherwise there is no heterogeneous
-  peer to pair with).
+  two **distinct vendors** with headless review capability are installed
+  (otherwise there is no heterogeneous peer to pair with). IDE/config-only
+  targets such as Cursor or Trae are not scaffolded as reviewers.
 - `stages` — which lifecycle stages trigger pairing: `design`, `test`, `code`,
-  `cycle`. Each is independently opt-out. Default is `code`.
+  `cycle`, `score`. Each is independently opt-out. Default is `code` and `score`.
 - `capability` — per agent, the stages it is declared competent to review.
-  Declarations are cross-checked against the registry, so a bogus name is
-  rejected.
+  Declarations are cross-checked against the registry and the headless-review
+  profile, so a bogus or non-spawnable reviewer name is rejected.
 
 ## Seeing what it does — observability
 
@@ -80,12 +81,12 @@ second pair of eyes is spending, even without budget-adaptive throttling.
 ## How selection works
 
 When a stage fires, the selector keeps **only** agents that are installed,
-available, declared capable for that stage, and a **different vendor** from the
-working agent — then rotates among them (seeded by the cycle id, so it is
-replayable). Agents with a track record are gently preferred (ε-greedy, ε≈0.2),
-but exploration is always preserved so no single pair monopolizes. If no
-qualified heterogeneous peer exists, that absence is itself recorded
-(`pair:none-available`) — never a silent skip.
+available, declared capable for that stage, able to run as a headless reviewer,
+and a **different vendor** from the working agent — then rotates among them
+(seeded by the cycle id, so it is replayable). Agents with a track record are
+gently preferred (ε-greedy, ε≈0.2), but exploration is always preserved so no
+single pair monopolizes. If no qualified heterogeneous peer exists, that absence
+is itself recorded (`pair:none-available`) — never a silent skip.
 
 ## Safety — pairing never blocks a cycle
 

@@ -23,6 +23,8 @@ export interface AgentSpec {
   aliases?: readonly string[];
   displayName: string;
   defaultModel: string;
+  /** True iff the runner can spawn this agent as a headless peer reviewer. */
+  canReviewHeadless?: boolean;
   normalizer: AgentNormalizerKind;
   usage: AgentUsageSpec;
   smokeCommand: string;
@@ -35,6 +37,7 @@ const BASE_AGENT_SPECS: readonly AgentSpec[] = [
     name: "claude",
     displayName: "claude",
     defaultModel: "claude-sonnet-4",
+    canReviewHeadless: true,
     normalizer: "claude",
     usage: { stdoutExtractor: "claude-stream", sessionBackfill: "claude-projects" },
     smokeCommand: 'claude -p "Reply with a single word: hello"',
@@ -44,6 +47,7 @@ const BASE_AGENT_SPECS: readonly AgentSpec[] = [
     aliases: ["openai"],
     displayName: "codex",
     defaultModel: "gpt-5.5",
+    canReviewHeadless: true,
     normalizer: "codex",
     usage: { stdoutExtractor: "openai", sessionRecovery: "codex", sessionReuse: "codex-exec-resume" },
     smokeCommand: 'codex exec "Reply with a single word: hello"',
@@ -52,6 +56,7 @@ const BASE_AGENT_SPECS: readonly AgentSpec[] = [
     name: "kimi",
     displayName: "kimi",
     defaultModel: "kimi-k2",
+    canReviewHeadless: true,
     normalizer: "generic",
     usage: { stdoutExtractor: "kimi", sessionRecovery: "kimi" },
     smokeCommand: 'kimi-code -p "Reply with a single word: hello"',
@@ -60,6 +65,7 @@ const BASE_AGENT_SPECS: readonly AgentSpec[] = [
     name: "qwen",
     displayName: "qwen",
     defaultModel: "qwen-coder-plus",
+    canReviewHeadless: true,
     normalizer: "generic",
     usage: { stdoutExtractor: "qwen" },
     smokeCommand: 'qwen -p "Reply with a single word: hello"',
@@ -69,6 +75,7 @@ const BASE_AGENT_SPECS: readonly AgentSpec[] = [
     aliases: ["antigravity", "gemini"],
     displayName: "antigravity (agy)",
     defaultModel: "gemini-2.5-pro",
+    canReviewHeadless: true,
     normalizer: "generic",
     usage: { stdoutExtractor: "gemini" },
     smokeCommand: 'agy -p "Reply with a single word: hello"',
@@ -78,6 +85,7 @@ const BASE_AGENT_SPECS: readonly AgentSpec[] = [
     aliases: ["deepseek"],
     displayName: "pi",
     defaultModel: "deepseek-v4-pro",
+    canReviewHeadless: true,
     normalizer: "generic",
     usage: { stdoutExtractor: "pi", sessionRecovery: "pi" },
     smokeCommand: 'pi -p "Reply with a single word: hello"',
@@ -149,4 +157,8 @@ export function agentNormalizerKind(name: string, registry: AgentSpecRegistry = 
 
 export function agentSmokeCommand(name: string, registry: AgentSpecRegistry = AGENT_SPECS): string {
   return getAgentSpec(name, registry)?.smokeCommand ?? `${name} --version`;
+}
+
+export function agentCanReviewHeadless(name: string, registry: AgentSpecRegistry = AGENT_SPECS): boolean {
+  return getAgentSpec(name, registry)?.canReviewHeadless === true;
 }

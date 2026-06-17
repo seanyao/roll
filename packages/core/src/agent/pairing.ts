@@ -16,6 +16,7 @@
 import type { RollEvent } from "@roll/spec";
 import { extractUsage, toCycleCost } from "../cost/tracker.js";
 import { AGENT_REGISTRY_NAMES, agentIsKnown, canonicalAgentName } from "./registry.js";
+import { agentCanReviewHeadless } from "./specs.js";
 
 // US-PAIR-009 / FIX-343: `score` — the finished cycle's Review Score is produced
 // by a fresh-session peer Reviewer; the working agent never grades its own work.
@@ -74,13 +75,14 @@ export function isHeterogeneous(a: string, b: string): boolean {
  */
 export function heteroAvailable(installed: readonly string[], workingAgent: string): boolean {
   const working = agentVendor(workingAgent);
+  const reviewable = installed.map(canonicalAgentName).filter((a) => agentCanReviewHeadless(a));
   if (working === "" || canonicalAgentName(workingAgent) === "") {
     // No builder identity → can't reason about heterogeneity; conservatively
     // treat any second distinct vendor in the pool as a heterogeneous option.
-    const vendors = new Set(installed.map(agentVendor).filter((v) => v !== ""));
+    const vendors = new Set(reviewable.map(agentVendor).filter((v) => v !== ""));
     return vendors.size >= 2;
   }
-  return installed.some((a) => {
+  return reviewable.some((a) => {
     const c = canonicalAgentName(a);
     return c !== "" && agentVendor(c) !== working;
   });
@@ -166,6 +168,9 @@ export function parsePairingConfig(yaml: string): PairingConfig {
       if (!agentIsKnown(canon)) {
         throw new PairingConfigError(`capability declared for unknown agent "${agent}" (registry cross-check failed)`);
       }
+      if (!agentCanReviewHeadless(canon)) {
+        throw new PairingConfigError(`capability declared for non-headless reviewer "${agent}" (headless review profile failed)`);
+      }
       cfg.capability[canon] = parseStageList(val ?? "", `capability.${agent}`);
     } else {
       // indented line outside the only nesting block (capability) — a mis-indent
@@ -184,7 +189,10 @@ export function parsePairingConfig(yaml: string): PairingConfig {
  * `code` (the proven, lowest-integration path).
  */
 export function defaultPairingConfig(installed: string[]): PairingConfig {
-  const agents = installed.map(canonicalAgentName).filter((a, i, arr) => arr.indexOf(a) === i);
+  const agents = installed
+    .map(canonicalAgentName)
+    .filter((a, i, arr) => arr.indexOf(a) === i)
+    .filter((a) => agentCanReviewHeadless(a));
   const vendors = new Set(agents.map(agentVendor));
   const capability: Record<string, PairingStage[]> = {};
   // US-PAIR-009: every installed agent is declared score-capable too — scoring a
@@ -457,6 +465,7 @@ export function selectPairingCandidates(input: SelectInput): string[] {
     const scorers = installed
       .map(canonicalAgentName)
       .filter((a, i, arr) => arr.indexOf(a) === i) // de-dupe
+      .filter((a) => agentCanReviewHeadless(a))
       .filter((a) => isAvailable(a))
       .sort((x, y) => (order.get(x) ?? 999) - (order.get(y) ?? 999));
     if (scorers.length === 0) return [];
@@ -485,6 +494,7 @@ export function selectPairingCandidates(input: SelectInput): string[] {
   const qualified = installed
     .map(canonicalAgentName)
     .filter((a, i, arr) => arr.indexOf(a) === i) // de-dupe
+    .filter((a) => agentCanReviewHeadless(a))
     .filter((a) => a !== working)
     .filter((a) => isAvailable(a))
     .filter((a) => (cfg.capability[a] ?? []).includes(stage))

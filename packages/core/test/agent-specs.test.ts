@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   agentDefaultModel,
+  agentCanReviewHeadless,
   agentNormalizerKind,
   agentSmokeCommand,
   getAgentSpec,
@@ -28,6 +29,15 @@ describe("AgentSpec registry — FIX-313", () => {
     }
   });
 
+  it("declares headless-review capability only for agents the runner can spawn", () => {
+    for (const agent of ["claude", "codex", "openai", "kimi", "qwen", "agy", "gemini", "pi"]) {
+      expect(agentCanReviewHeadless(agent)).toBe(true);
+    }
+    for (const agent of ["cursor", "trae", "opencode", "openclaw"]) {
+      expect(agentCanReviewHeadless(agent)).toBe(false);
+    }
+  });
+
   it("lets downstream support a new agent by registry-only extension", () => {
     const specs = withAgentSpecs([
       {
@@ -35,6 +45,7 @@ describe("AgentSpec registry — FIX-313", () => {
         displayName: "Fixture Agent",
         defaultModel: "fixture-model-1",
         normalizer: "generic",
+        canReviewHeadless: true,
         usage: { stdoutExtractor: "generic" },
         smokeCommand: "fixture-agent --smoke",
       },
@@ -44,5 +55,6 @@ describe("AgentSpec registry — FIX-313", () => {
     expect(agentDefaultModel("fixture-agent", specs)).toBe("fixture-model-1");
     expect(agentNormalizerKind("fixture-agent", specs)).toBe("generic");
     expect(agentSmokeCommand("fixture-agent", specs)).toBe("fixture-agent --smoke");
+    expect(agentCanReviewHeadless("fixture-agent", specs)).toBe(true);
   });
 });

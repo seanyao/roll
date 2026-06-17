@@ -140,6 +140,14 @@ const execFileAsync = promisify(execFile);
 /** The injectable wall clock (epoch seconds) — infra's {@link Clock}. */
 export type ProcessClock = Clock;
 
+function epochMs(ts: number): number {
+  return ts >= 1_000_000_000_000 ? ts : ts * 1000;
+}
+
+function eventTs(ports: Ports): number {
+  return epochMs(ports.clock());
+}
+
 // ── Ports bundle (the injectable execution surface) ───────────────────────────
 
 /**
@@ -664,7 +672,7 @@ export async function executeCommand(
         cycleId: ctx.cycleId,
         storyId: story.id,
         runDir: evidenceRunDir,
-        ts: ports.clock(),
+        ts: eventTs(ports),
       });
       return {
         event: { type: "story_picked", storyId: story.id },
@@ -1029,7 +1037,7 @@ export async function executeCommand(
             peer,
             durationMs: Date.now() - t0,
             outcome,
-            ts: ports.clock(),
+            ts: eventTs(ports),
           });
         let res;
         try {
@@ -1111,7 +1119,7 @@ export async function executeCommand(
             cycleId: p.cycleId,
             verdict: p.verdict as "consulted" | "skipped" | "self-review-allowed",
             reasons: p.reasons,
-            ts: ports.clock(),
+            ts: eventTs(ports),
           }),
       };
       const peerGateOpts = { heteroAvailable: peerHeteroAvailable };
@@ -1125,7 +1133,7 @@ export async function executeCommand(
           reviewPeer,
           diff: cycleDiff,
           event: (e: PairEvent) => ports.events.appendEvent(ports.paths.eventsPath, e as RollEvent),
-          now: () => ports.clock(),
+          now: () => eventTs(ports),
         });
         if (retry.status === "reviewed" && peerEvidencePresent(runtimeDir, cycleIdStr)) {
           // Retry produced evidence → re-run the gate; it now sees `consulted`.
@@ -1187,7 +1195,7 @@ export async function executeCommand(
           changedFiles: cycleChangedFiles,
           diff: cycleDiff,
           event: (e: PairEvent) => ports.events.appendEvent(ports.paths.eventsPath, e as RollEvent),
-          now: () => ports.clock(),
+          now: () => eventTs(ports),
         };
         // Iterate the enabled stages (config order). file-absent/disabled → [] →
         // the loop body never runs, so a repo without pairing.yaml is untouched.
@@ -1245,7 +1253,7 @@ export async function executeCommand(
           isAvailable: () => true,
           scorePeer,
           event: (e: PairEvent) => ports.events.appendEvent(ports.paths.eventsPath, e as RollEvent),
-          now: () => ports.clock(),
+          now: () => eventTs(ports),
         });
       }
       if (commitsAhead > 0 && storyId !== "" && ctx.evidenceRunDir !== undefined && ctx.evidenceRunDir !== "") {
@@ -1275,7 +1283,7 @@ export async function executeCommand(
             storyId,
             agent: ctx.agent ?? "",
             outcome,
-            ts: ports.clock(),
+            ts: eventTs(ports),
           });
         }
         // render#1 captures the screenshot + writes evidence.json + builds the
@@ -1295,7 +1303,7 @@ export async function executeCommand(
               storyId,
               href: attached.href,
               attachedCount: attached.count,
-              ts: ports.clock(),
+              ts: eventTs(ports),
             });
             rc = await ports.attest.render(ports.paths.worktreePath, storyId, ctx.evidenceRunDir);
           }
@@ -1331,7 +1339,7 @@ export async function executeCommand(
                 cycleId: p.cycleId,
                 verdict: p.verdict,
                 reasons: p.reasons,
-                ts: ports.clock(),
+                ts: eventTs(ports),
               }),
           },
           // FIX-343: read the peer score from the PERSISTENT .roll (repoCwd) —
@@ -1493,7 +1501,7 @@ export async function executeCommand(
       // row report the SAME cost. Other events pass through untouched.
       ports.events.appendEvent(
         ports.paths.eventsPath,
-        stampTs(withRealCost(cmd.event, ctx), ports.clock()),
+        stampTs(withRealCost(cmd.event, ctx), eventTs(ports)),
       );
       return {};
 
@@ -1784,8 +1792,8 @@ export function buildTerminalRecord(
     storyId,
     agent: ctx.agent ?? "",
     model,
-    startedAt: ctx.startSec ?? nowSec,
-    endedAt: nowSec,
+    startedAt: epochMs(ctx.startSec ?? nowSec),
+    endedAt: epochMs(nowSec),
     outcome: OUTCOME[cmd.status] ?? "unknown",
     pr:
       ctx.prUrl !== undefined && ctx.prUrl !== ""
@@ -2028,7 +2036,7 @@ export function runVisualEvidencePreflight(ports: Ports, storyId: string, cycleI
         verdict: "ok",
         surface: v.surface,
         reasons: v.exemptReason !== undefined ? [`exempt: ${v.exemptReason}`] : [],
-        ts: ports.clock(),
+        ts: eventTs(ports),
       });
       // FIX-339 (AC6) — must-declare STRUCTURAL check (WARN-only this round).
       // Fires ONLY on a card that the surface-aware validator already passed
@@ -2054,7 +2062,7 @@ export function runVisualEvidencePreflight(ports: Ports, storyId: string, cycleI
           code: "no-surface-declared",
           surface: v.surface,
           reasons: ["spec declares no deliverable_url, deliverable_cmd, or screenshot_exempt — no surface to capture"],
-          ts: ports.clock(),
+          ts: eventTs(ports),
         });
         ports.events.appendAlert(
           ports.paths.alertsPath,
@@ -2076,7 +2084,7 @@ export function runVisualEvidencePreflight(ports: Ports, storyId: string, cycleI
       ...(v.code !== undefined ? { code: v.code } : {}),
       surface: v.surface,
       reasons: [reason],
-      ts: ports.clock(),
+      ts: eventTs(ports),
     });
     ports.events.appendAlert(
       ports.paths.alertsPath,

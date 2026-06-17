@@ -124,8 +124,9 @@ export function cycleSignalTeardown(
   if (owned) {
     const bus = new EventBus();
     const tctx = { cycleId, branch, agent: "", model: "" };
+    const terminalSec = now();
     try {
-      bus.appendEvent(paths.eventsPath, { ...cycleEndEvent(tctx, "aborted"), ts: now() });
+      bus.appendEvent(paths.eventsPath, { ...cycleEndEvent(tctx, "aborted"), ts: terminalSec * 1000 });
     } catch {
       /* best-effort: the exit below still happens */
     }
@@ -136,6 +137,7 @@ export function cycleSignalTeardown(
         buildRunRow(
           { kind: "append_run", status: "aborted", outcome: mapV2Status("aborted"), cycleId },
           { cycleId, branch, loop: "ci" as never },
+          terminalSec,
         ),
       );
     } catch {
@@ -164,8 +166,8 @@ export function cycleSignalTeardown(
           cycleId,
           storyId: "",
           agent: "",
-          startedAt: now(),
-          endedAt: now(),
+          startedAt: terminalSec * 1000,
+          endedAt: terminalSec * 1000,
           outcome: verdict,
           pr: absent("killed_before_publish"),
           branch: present(branch),
@@ -271,7 +273,7 @@ function incrementConsecutiveFails(
   try {
     writeFileSync(pauseMarker, alertMsg, "utf8");
     appendFileSync(alertsPath, `${alertMsg}\n`, "utf8");
-    const ts = Math.floor(Date.now() / 1000);
+    const ts = Date.now();
     const bus = new EventBus();
     bus.appendEvent(eventsPath, {
       type: "policy:safety_pause",

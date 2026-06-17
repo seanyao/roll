@@ -50,7 +50,23 @@ export const RUNS_FILE = "runs.jsonl";
 
 /** Serialize one {@link RollEvent} to its ndjson line (newline-terminated). */
 export function serializeEvent(event: RollEvent): string {
-  return `${JSON.stringify(event)}\n`;
+  return `${JSON.stringify(normalizeEventTs(event))}\n`;
+}
+
+function epochMs(ts: number): number {
+  return ts >= 1_000_000_000_000 ? ts : ts * 1000;
+}
+
+function normalizeEventTs(event: RollEvent): RollEvent {
+  if (event.type === "cycle:terminal") {
+    return {
+      ...event,
+      startedAt: epochMs(event.startedAt),
+      endedAt: epochMs(event.endedAt),
+      ts: epochMs(event.ts),
+    };
+  }
+  return { ...event, ts: epochMs(event.ts) } as RollEvent;
 }
 
 /** Is `f` over the rotation threshold? (size injected — pure). */

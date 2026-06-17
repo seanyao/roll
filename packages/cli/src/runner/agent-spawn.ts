@@ -283,6 +283,8 @@ export function buildSpawnCommand(agent: string, opts: AgentSpawnOptions): { bin
   }
   if (agent === "codex") {
     const roots = [...new Set(opts.writableRoots ?? [])].filter((p) => p.trim() !== "");
+    // COLD `codex exec`: the workspace sandbox is set with the exec-only flags
+    // (--cd / --sandbox / --add-dir). These do NOT exist on `codex exec resume`.
     const sandboxArgs =
       roots.length > 0
         ? ["--cd", opts.cwd, "--sandbox", "workspace-write", ...roots.flatMap((p) => ["--add-dir", p])]
@@ -293,9 +295,36 @@ export function buildSpawnCommand(agent: string, opts: AgentSpawnOptions): { bin
     // resume argv is isolated to THIS codex branch — no cross-agent branching.
     if (opts.codexSessionId !== undefined && opts.codexSessionId !== "") {
       const resumePrompt = `${resetDirective(opts.storyId ?? "")}${prompt}`;
+      // `codex exec resume` REJECTS --cd / --sandbox / --add-dir (those are
+      // plain-`codex exec` flags) — passing them would error → cold fallback.
+      // Empirically (codex-cli 0.139.0) resume binds its workdir to the SPAWN's
+      // PROCESS cwd (the runner already spawns with cwd = the fresh worktree),
+      // so warm reasoning lands in the fresh tree without --cd. The sandbox is
+      // re-expressed as `-c` config overrides (keys verified against codex
+      // 0.139.0's config schema — `sandbox_mode` is a top-level key and
+      // `sandbox_workspace_write` is a table whose `writable_roots` field is the
+      // resume-side equivalent of cold's --add-dir):
+      //   --sandbox workspace-write          → -c sandbox_mode="workspace-write"
+      //                                         (auto-grants [cwd, /tmp, $TMPDIR])
+      //   --add-dir <root>…                  → -c sandbox_workspace_write.writable_roots=[…]
+      // `--all` disables resume's cwd-based session filtering (we resume by an
+      // explicit id from a DIFFERENT cwd than the capture). No `--` terminator is
+      // needed: each `-c` binds exactly one `key=value`, so the two bare
+      // positionals (SESSION_ID then PROMPT) parse cleanly after the options
+      // (verified against codex 0.139.0 clap parsing); the RESET_DIRECTIVE always
+      // leads the prompt so it never begins with a `-`.
+      const resumeConfigArgs =
+        roots.length > 0
+          ? [
+              "-c",
+              'sandbox_mode="workspace-write"',
+              "-c",
+              `sandbox_workspace_write.writable_roots=${JSON.stringify(roots)}`,
+            ]
+          : [];
       return {
         bin: opts.bin ?? "codex",
-        args: ["exec", "resume", opts.codexSessionId, ...sandboxArgs, resumePrompt],
+        args: ["exec", "resume", "--all", ...resumeConfigArgs, opts.codexSessionId, resumePrompt],
       };
     }
     return { bin: opts.bin ?? "codex", args: ["exec", ...sandboxArgs, prompt] };

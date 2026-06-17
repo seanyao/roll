@@ -181,7 +181,8 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
     expect(args).not.toContain("resume");
   });
 
-  it("lever-4: codex WITH codexSessionId resumes + prepends the RESET directive", () => {
+  it("lever-4: codex WITH codexSessionId resumes (--all) + prepends the RESET directive", () => {
+    // No writableRoots → no sandbox -c overrides; bare resume by id.
     const { bin, args } = buildSpawnCommand("codex", {
       cwd: "/wt",
       skillBody: "DO WORK",
@@ -189,16 +190,22 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
       codexSessionId: "uuid-abc",
     });
     expect(bin).toBe("codex");
-    expect(args[0]).toBe("exec");
-    expect(args[1]).toBe("resume");
-    expect(args[2]).toBe("uuid-abc"); // positional session id (smoke-checked argv)
-    // last positional is the RESET-prefixed prompt
     const resumePrompt = `${resetDirective("FIX-777")}${AUTORUN_DIRECTIVE}${storyPinDirective("FIX-777")}DO WORK`;
-    expect(args[args.length - 1]).toBe(resumePrompt);
+    // Exact shape: exec resume --all <id> <reset+prompt> — id positional before
+    // the prompt positional, options ahead of both, no sandbox flags.
+    expect(args).toEqual(["exec", "resume", "--all", "uuid-abc", resumePrompt]);
     expect(args[args.length - 1]).toContain("NEW CARD FIX-777");
+    // `codex exec resume` REJECTS the cold-path flags — they must NOT appear.
+    expect(args).not.toContain("--cd");
+    expect(args).not.toContain("-C");
+    expect(args).not.toContain("--sandbox");
+    expect(args).not.toContain("-s");
+    expect(args).not.toContain("--add-dir");
+    // No `--` terminator — each -c binds one value, positionals parse cleanly.
+    expect(args).not.toContain("--");
   });
 
-  it("lever-4: resume argv keeps the codex sandbox roots BEFORE the positional id-then-prompt", () => {
+  it("lever-4: resume argv expresses the sandbox via -c config overrides (not --sandbox/--add-dir)", () => {
     const { args } = buildSpawnCommand("codex", {
       cwd: "/wt",
       skillBody: "DO WORK",
@@ -207,18 +214,23 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
       writableRoots: ["/repo/.roll-real"],
     });
     const resumePrompt = `${resetDirective("FIX-777")}${AUTORUN_DIRECTIVE}${storyPinDirective("FIX-777")}DO WORK`;
+    // Sandbox is re-expressed as `-c` config overrides (codex 0.139 schema keys),
+    // placed BEFORE the positional SESSION_ID then PROMPT.
     expect(args).toEqual([
       "exec",
       "resume",
+      "--all",
+      "-c",
+      'sandbox_mode="workspace-write"',
+      "-c",
+      'sandbox_workspace_write.writable_roots=["/repo/.roll-real"]',
       "uuid-abc",
-      "--cd",
-      "/wt",
-      "--sandbox",
-      "workspace-write",
-      "--add-dir",
-      "/repo/.roll-real",
       resumePrompt,
     ]);
+    // The rejected exec-only flags must NOT leak onto the resume argv.
+    expect(args).not.toContain("--cd");
+    expect(args).not.toContain("--sandbox");
+    expect(args).not.toContain("--add-dir");
   });
 
   it("deepseek: deepseek <prompt> (positional)", () => {

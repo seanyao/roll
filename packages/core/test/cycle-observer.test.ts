@@ -46,9 +46,34 @@ describe("cycle-observer — runner-derived standard signals (agent-agnostic)", 
       5_000,
     );
     expect(out).toEqual<RollEvent[]>([
+      // FIX-357: cycle:first_edit precedes the FIRST commit's cycle:tcr (emitted once).
+      { type: "cycle:first_edit", cycleId: CYCLE, commitHash: "aaa111", ts: 1700000010 },
       { type: "cycle:tcr", cycleId: CYCLE, commitHash: "aaa111", message: "tcr: red", ts: 1700000010 },
       { type: "cycle:tcr", cycleId: CYCLE, commitHash: "bbb222", message: "tcr: green", ts: 1700000040 },
     ]);
+  });
+
+  it("cycle:first_edit fires ONCE on the first commit, never on later polls (latched)", () => {
+    const st = newCycleObserverState(CYCLE);
+    const first = observeCommits([commit("aaa111", "tcr: red", 1700000010)], st, 5_000);
+    expect(first.filter((e) => e.type === "cycle:first_edit")).toHaveLength(1);
+    const later = observeCommits([commit("bbb222", "tcr: green", 1700000040)], st, 8_000);
+    expect(later.filter((e) => e.type === "cycle:first_edit")).toHaveLength(0);
+    expect(later.map((e) => e.type)).toEqual(["cycle:tcr"]);
+  });
+
+  it("cycle:first_edit ts is the commit's SECONDS, not ms (FIX-352 unit guard)", () => {
+    const st = newCycleObserverState(CYCLE);
+    const out = observeCommits([commit("aaa111", "tcr: red", 1700000010)], st, 5_000);
+    const fe = out.find((e) => e.type === "cycle:first_edit") as { ts: number };
+    expect(fe.ts).toBe(1700000010);
+    expect(fe.ts).toBeLessThan(1e12); // seconds, not ms — execute→first_edit math depends on it
+  });
+
+  it("a zero-commit / empty-hash poll emits no cycle:first_edit", () => {
+    const st = newCycleObserverState(CYCLE);
+    expect(observeCommits([], st, 5_000).filter((e) => e.type === "cycle:first_edit")).toHaveLength(0);
+    expect(observeCommits([commit("", "x", 1)], st, 5_000)).toEqual([]);
   });
 
   it("dedupes already-seen commits across snapshots (no double emit)", () => {

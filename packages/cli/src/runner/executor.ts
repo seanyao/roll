@@ -64,6 +64,7 @@ import {
   pairingHistory,
   peerReviewCost,
   sessionReuseFor,
+  shouldCaptureWarmSession,
   type WarmSessionEntry,
   type CycleObserverState,
   type ObservedCommit,
@@ -852,7 +853,13 @@ export async function executeCommand(
       // .roll/loop ledger (repoCwd), so it survives a later teardown + a .roll reset,
       // like runs.jsonl. Best-effort: a capture miss/slip ALERTs for observability
       // and leaves the next card cold (fail-safe) — it NEVER topples the cycle.
-      if (readSessionReuseEnabled(ports.repoCwd)) {
+      // FIX-355 DEPTH-1 CAP: capture ONLY when THIS cycle spawned COLD. A set
+      // `codexResumeId` means this cycle itself RESUMED a prior session; re-seeding
+      // from it would chain warm context unboundedly (A→B→C…) so every later card
+      // inherits an ever-growing, anchoring context → systemic degradation. Cold-
+      // origin-only capture bounds each chain to a single hop (cold→warm→cold→warm).
+      const spawnedWarm = codexResumeId !== undefined;
+      if (readSessionReuseEnabled(ports.repoCwd) && shouldCaptureWarmSession(spawnedWarm)) {
         try {
           const agentName = ctx.agent ?? cmd.agent;
           const reuse = sessionReuseFor(agentName, getAgentSpec(agentName)?.usage);

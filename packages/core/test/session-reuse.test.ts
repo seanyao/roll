@@ -5,12 +5,27 @@
  */
 import { describe, expect, it } from "vitest";
 import { getAgentSpec } from "../src/agent/specs.js";
-import { sessionReuseFor, type WarmSessionEntry } from "../src/agent/session-reuse.js";
+import {
+  sessionReuseFor,
+  shouldCaptureWarmSession,
+  type WarmSessionEntry,
+} from "../src/agent/session-reuse.js";
 
 const ledger: WarmSessionEntry[] = [
   { storyId: "FIX-100", sessionId: "uuid-100", ts: 1 },
   { storyId: "FIX-200", sessionId: "uuid-200", ts: 2 },
 ];
+
+describe("shouldCaptureWarmSession (lever-4 depth-1 cap, FIX-355)", () => {
+  it("a COLD-spawned cycle seeds the ledger (capture)", () => {
+    expect(shouldCaptureWarmSession(false)).toBe(true);
+  });
+  it("a WARM (resumed) cycle does NOT re-seed — bounds the chain to depth-1", () => {
+    // The systemic guarantee: a resumed cycle never re-captures, so warm context
+    // can never chain A→B→C… and degrade every later card.
+    expect(shouldCaptureWarmSession(true)).toBe(false);
+  });
+});
 
 describe("sessionReuseFor (lever-4 adapter)", () => {
   it("codex ⇒ warm adapter (supportsReuse)", () => {

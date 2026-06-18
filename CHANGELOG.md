@@ -8,6 +8,10 @@
 
 - **showcase 默认选角全部国产化**:builder/reviewer/scorer 默认改为 kimi/reasonix/pi，不再混用国外 agent；reasonix 补入 agent vendor 注册表。`[showcase]`
 
+### 修复
+
+- **showcase 在全局安装下 agent probe 崩溃**:`rollBin()` 定位到全局包的 `conventions/` 而找不到本地 `roll.js`，子进程直接崩掉判所有 agent 不可用；现加回退：本地不存在时走 PATH 的 `roll`。`[showcase]`
+
 ## v3.618.1 — 2026-06-18
 
 ### 新功能

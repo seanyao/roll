@@ -131,10 +131,17 @@ function priorCorrectionCount(events: readonly RollEvent[], storyId: string, sig
 export function decideCorrectionAction(input: CorrectionDecisionInput): CorrectionDecision {
   const classified = classifyAttribution(input.storyId, input.reasons);
   const priorCorrections = priorCorrectionCount(input.events ?? [], input.storyId, classified.signal);
-  const plannedAction =
+  let plannedAction =
     priorCorrections > 0 && classified.plannedAction !== "alert_only"
       ? "route_adjust"
       : classified.plannedAction;
+  // FIX-332: a repeated empty-shell acceptance report for the same story means the
+  // resume-evidence bridge (or the agent) failed to produce content twice. Stop
+  // minting endless autofix cards and return the story to Todo so the loop's
+  // cross-session dead-loop breaker can pause the goal instead of burning cycles.
+  if (priorCorrections > 0 && classified.signal === "empty_acceptance_report") {
+    plannedAction = "return_story";
+  }
   const action = input.mode === "conservative" ? "alert_only" : plannedAction;
   return {
     mode: input.mode,

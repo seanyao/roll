@@ -70,7 +70,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { execFile, execFileSync } from "node:child_process";
-import { basename, join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
 import { cardArchiveDir, epicFromFeaturePath, findFeatureFile, findFeatureFiles, generateIndex, reportFileName } from "../lib/archive.js";
 import { readReviewScoreTrend, readStoryReviewScores } from "../lib/review-score.js";
@@ -412,26 +412,88 @@ function maxBytes(kind: "cast" | "video"): number {
   return kind === "cast" ? DEFAULT_MAX_CAST_BYTES : DEFAULT_MAX_VIDEO_BYTES;
 }
 
-/** FIX-315: resolve a relative evidence ref against BOTH the run/era dir
- *  (era-specific artifacts: screenshots, casts) and the card/story archive dir
- *  (shared story-level evidence: dom probes, test logs). The ac-map routinely
- *  references story-level evidence as `evidence/x.txt`; resolving against both
- *  known-safe homes makes the render surface it regardless of which dir the agent
- *  wrote it to. Without this a fully-evidenced delivery is silently downgraded to
- *  `claimed` (enforceRedLine) and the attest gate rejects it as an empty shell.
- *  Returns the first existing path, or null — the honesty red line is preserved:
- *  the file must actually exist in one of the two bases. Agent-agnostic. */
-function resolveEvidenceFile(runDir: string, cardDir: string, ref: string): string | null {
-  for (const base of [runDir, cardDir]) {
+/** FIX-332: a cycle that RESUMES an un-merged branch lands in a fresh run dir.
+ *  If the agent replays the old commit and deposits no new evidence, the current
+ *  run dir is empty — but the card archive still holds the prior cycle's evidence
+ *  in sibling run dirs. We bridge ONLY when the current run dir has no evidence of
+ *  its own, and we prefer newer siblings first. This keeps the honesty red line
+ *  for normal cycles (a populated run dir never silently inherits stale files)
+ *  while preventing the resume-empty-shell death spiral.
+ *
+ *  A run dir is considered "evidenced" when it carries any real artifact file
+ *  (text logs under `evidence/`, screenshots under `screenshots/`, cast/video at
+ *  the run root, …). The `evidence.json` manifest alone does NOT count — it is
+ *  written for every cycle, even when no capture succeeded. */
+function runDirHasEvidence(runDir: string): boolean {
+  let entries: import("node:fs").Dirent[] = [];
+  try {
+    entries = readdirSync(runDir, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  for (const e of entries) {
+    if (e.name === "evidence.json") continue;
+    if (e.isDirectory()) {
+      try {
+        if (readdirSync(join(runDir, e.name)).some((f) => f !== "")) return true;
+      } catch {
+        /* unreadable subdir: ignore */
+      }
+    } else {
+      return true;
+    }
+  }
+  return false;
+}
+
+const RUN_DIR_NAME_RE = /^(\d{4}-\d{2}-\d{2}T|cycle-)/;
+
+/** Sorted candidate sibling run dirs under the card archive, newest first.
+ *  Excludes the current run dir and non-run subdirs (notes, latest, etc). */
+function siblingRunDirs(cardDir: string, currentRunDir: string): string[] {
+  let entries: import("node:fs").Dirent[] = [];
+  try {
+    entries = readdirSync(cardDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const currentBase = basename(currentRunDir);
+  const dirs = entries
+    .filter((e) => e.isDirectory() && RUN_DIR_NAME_RE.test(e.name) && e.name !== currentBase)
+    .map((e) => join(cardDir, e.name));
+  try {
+    dirs.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
+  } catch {
+    /* mtime unreadable: keep directory order */
+  }
+  return dirs;
+}
+
+/** FIX-315 + FIX-332: resolve a relative evidence ref against the run/era dir,
+ *  the card/story archive dir, and (only for an empty current run dir) prior
+ *  sibling run dirs from resumed work. Returns the first existing path, or null
+ *  — the file must actually exist; the red line is preserved by construction. */
+function resolveEvidenceFile(
+  runDir: string,
+  cardDir: string,
+  ref: string,
+  siblingBases: readonly string[] = [],
+): string | null {
+  for (const base of [runDir, cardDir, ...siblingBases]) {
     const p = join(base, ref);
     if (existsSync(p)) return p;
   }
   return null;
 }
 
-function localEvidencePath(runDir: string, cardDir: string, href: string): string | null {
+function localEvidencePath(
+  runDir: string,
+  cardDir: string,
+  href: string,
+  siblingBases: readonly string[] = [],
+): string | null {
   if (href === "" || href.startsWith("/") || href.includes("..") || /^[a-z]+:/i.test(href)) return null;
-  return resolveEvidenceFile(runDir, cardDir, href);
+  return resolveEvidenceFile(runDir, cardDir, href, siblingBases);
 }
 
 /** Read + validate the optional AI intent map; null when absent/malformed. */
@@ -450,11 +512,16 @@ function readAcMap(storyDir: string): Map<string, AcMapEntry> | null {
   }
 }
 
-function toRef(runDir: string, cardDir: string, e: NonNullable<AcMapEntry["evidence"]>[number]): EvidenceRef | null {
+function toRef(
+  runDir: string,
+  cardDir: string,
+  e: NonNullable<AcMapEntry["evidence"]>[number],
+  siblingBases: readonly string[] = [],
+): EvidenceRef | null {
   const kind = (e.kind ?? "") as EvidenceRef["kind"];
   const label = e.label ?? kind;
   if (kind === "text" && e.textFile !== undefined) {
-    const p = resolveEvidenceFile(runDir, cardDir, e.textFile);
+    const p = resolveEvidenceFile(runDir, cardDir, e.textFile, siblingBases);
     if (p === null) return null;
     try {
       // RED LINE (US-ATTEST-012): scrub secrets/PII BEFORE the text is inlined
@@ -468,7 +535,7 @@ function toRef(runDir: string, cardDir: string, e: NonNullable<AcMapEntry["evide
     }
   }
   if ((kind === "cast" || kind === "video") && e.href !== undefined) {
-    const p = localEvidencePath(runDir, cardDir, e.href);
+    const p = localEvidencePath(runDir, cardDir, e.href, siblingBases);
     if (p === null || !existsSync(p)) return null;
     try {
       const size = statSync(p).size;
@@ -837,7 +904,16 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   // (epic via the backlog-generated index, uncategorized fallback). Runs never
   // overwrite history; `latest` symlinks the newest.
   const storyDir = cardArchiveDir(projectPath, storyId);
-  const runDir = providedRunDir ?? join(storyDir, generatedRunId);
+  // FIX-332 hygiene: an ambient ROLL_RUN_DIR from a parent loop can point at a
+  // different story's run frame (e.g. the loop runner's own evidence dir). Using
+  // it would leak the current story's report into another card's archive. Only
+  // honor a provided run dir whose parent directory matches this story id.
+  const safeProvidedRunDir =
+    providedRunDir !== undefined && basename(dirname(providedRunDir)) === storyId ? providedRunDir : undefined;
+  if (providedRunDir !== undefined && safeProvidedRunDir === undefined) {
+    warn(`ignoring mismatched run dir ${providedRunDir} for story ${storyId}`);
+  }
+  const runDir = safeProvidedRunDir ?? join(storyDir, generatedRunId);
   openEvidenceFrame({ runDir });
 
   // terminal self-capture (US-ATTEST-011): drive the dispatcher's terminal lane
@@ -968,6 +1044,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   // `verification/<ID>/` dir so a card whose Gate still writes there is honoured
   // until US-META-002 migrates the write side of the skill.
   const acMap = readAcMap(storyDir) ?? readAcMap(join(projectPath, ".roll", "verification", storyId));
+  const siblingBases = runDirHasEvidence(runDir) ? [] : siblingRunDirs(storyDir, runDir);
   const items: AcReportItem[] = acItems.map((ac) => {
     const mapped = acMap?.get(ac.id);
     const status: AcStatus =
@@ -975,7 +1052,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
         ? (mapped.status as AcStatus)
         : "claimed";
     const evidence = (mapped?.evidence ?? [])
-      .map((e) => toRef(runDir, storyDir, e))
+      .map((e) => toRef(runDir, storyDir, e, siblingBases))
       .filter((x): x is EvidenceRef => x !== null);
     return {
       id: ac.id,

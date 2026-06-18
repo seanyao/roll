@@ -21,7 +21,7 @@ Roll runs on three autonomous layers:
 
 - **Loop** — on a configurable schedule, picks the top story from BACKLOG and executes it via `$roll-build` in an isolated worktree. CI must pass before anything lands on `main`.
 - **Dream** — at 3am, scans the codebase for dead code, doc gaps, and architectural drift. Queues `REFACTOR-NNN` entries for loop to pick up.
-- **Peer** — before any risky build, a second AI agent reviews the plan or diff and must agree before execution continues.
+- **Observability & Maintenance** — the Delivery Dossier, `roll status`, `roll loop watch`, `roll debug`, `roll doc`, `roll doctor`, and truth signals keep the delivery state visible and the codebase healthy.
 
 You set goals, review PRs, and run releases. Everything in between is Roll.
 
@@ -59,9 +59,11 @@ You set goals, review PRs, and run releases. Everything in between is Roll.
 
 - `roll status` — verdict-first truth summary (LOOP · CYCLE · RELEASE · STORY with attest coverage), then convention/AI-client sync health `[core]`
 - Delivery Dossier — the web console: a verdict strip, the loop heartbeat, three aggregates, and the six-state Story spectrum, all from the ONE truth snapshot
+- `roll loop watch` — read-only, concise, real-time view of this project's loop
 - `roll loop runs` — per-cycle TerminalOutcome history with TCR count and duration
 - `roll loop alert` — view, acknowledge, and clear loop alerts
-- `roll brief` — daily digest: what shipped, what's in-progress, next priorities `[highlight]`
+- `roll debug` / `roll doc` / `roll doctor` — diagnose pages, fill doc gaps, and audit install health
+- Truth signals — repeated low-score patterns surface as improvement candidates for human review `[highlight]`
 
 ### Delivery Dossier — the web console
 
@@ -102,7 +104,6 @@ anything short of that renders as drift or unknown, never a silent green.
 
 - `$roll-debug` — mount a diagnostic probe, trace root cause, auto-fix if source-traceable
 - `$roll-doc` — scan any project for doc gaps and generate missing documentation
-- `$roll-sentinel` — spot-check production against BACKLOG acceptance criteria
 - `$roll-doctor` — diagnose the dev toolchain: node, npm, git, AI tools
 - `$roll-notes` — capture a development moment in narrative form
 
@@ -127,7 +128,7 @@ my-project/
     ├── backlog.md       # Story / Fix / Refactor index
     ├── features/        # per-Story AC + plan docs
     ├── domain/          # DDD models, context map
-    ├── briefs/  dream/  # autonomous-layer output
+    ├── dream/            # autonomous-layer output
     └── decisions/       # ADRs
 ```
 

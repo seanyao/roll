@@ -357,10 +357,10 @@ EOF
 
 ## Automated Safeguards
 
-### Sentinel Patrol Rules
+### Truth-Signal Guard Rules
 ```yaml
-# .github/roll-sentinel-config.yml
-checks:
+# .github/roll-truth-signals.yml
+signals:
   idempotency:
     - pattern: "ingest|import|sync"
       require_test: "idempotency"

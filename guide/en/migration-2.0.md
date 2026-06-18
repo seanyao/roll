@@ -20,7 +20,6 @@ This is a one-time, breaking change. Your existing files keep their git history 
 | `PROPOSALS.md` (root) | `.roll/proposals.md` | Pending proposals |
 | `docs/features.md` | `.roll/features.md` | Feature index |
 | `docs/features/` | `.roll/features/` | Per-feature specs |
-| `docs/briefs/` | `.roll/briefs/` | `roll-brief` output (auto-generated) |
 | `docs/dream/` | `.roll/dream/` | `roll-.dream` output (auto-generated) |
 | `docs/design/` | `.roll/design/` | Design exploration docs |
 | `docs/domain/` | `.roll/domain/` | DDD models |
@@ -132,7 +131,7 @@ Your file history is preserved either way (`git mv` doesn't lose blame).
 
 After migration:
 
-- `roll status`, `roll backlog`, `roll loop`, `roll brief` — all automatically use the new paths
+- `roll status`, `roll backlog`, `roll loop` — all automatically use the new paths
 - `$roll-build`, `$roll-fix`, `$roll-design` skills — all updated; just re-run `roll setup` to refresh
 - Any external scripts referencing `BACKLOG.md` etc. — **you need to update those manually**
 

@@ -21,7 +21,7 @@ Roll 运行在三个自主层上：
 
 - **Loop** — 按可配置频次从 BACKLOG 摘取最高优先级故事，在隔离的 worktree 里通过 `$roll-build` 执行。CI 通过后才会落到 `main`。
 - **Dream** — 凌晨 3 点扫描代码库，发现死代码、文档缺口和架构漂移，将 `REFACTOR-NNN` 条目排队交给 loop 领取。
-- **Peer** — 高风险构建前，第二个 AI agent 评审方案或 diff，同意后才继续执行。
+- **可观测性与维护** —— 交付档案、`roll status`、`roll loop watch`、`roll debug`、`roll doc`、`roll doctor` 与真相信号让交付状态可见、代码库保持健康。
 
 你负责提需求、审 PR、执行发布。中间的一切交给 Roll。
 
@@ -59,9 +59,11 @@ Roll 运行在三个自主层上：
 
 - `roll status` — 判定优先的真相摘要（LOOP · CYCLE · RELEASE · STORY，含 attest 验收覆盖率），其后是约定/AI 客户端同步健康 `[core]`
 - 交付档案 — web 控制台：判定条、loop 心跳、三聚合、六态 Story 光谱，全部读自同一份真相快照
+- `roll loop watch` — 只读、精炼、实时地查看本项目 loop
 - `roll loop runs` — 每轮 TerminalOutcome 历史，含 TCR 次数和耗时
 - `roll loop alert` — 查看、确认、清除 loop 告警
-- `roll brief` — 每日摘要：已发布、进行中、下一优先级 `[highlight]`
+- `roll debug` / `roll doc` / `roll doctor` — 诊断页面、补文档缺口、体检安装健康
+- 真相信号 —— 反复低分模式暴露为待人确认的改进候选 `[highlight]`
 
 ### 交付档案 —— web 控制台
 
@@ -95,7 +97,6 @@ backlog 行写了 Done 只是 `claimed`；交付 PR 合入 `main` 后变 `merged
 
 - `$roll-debug` — 挂载诊断探针，追踪根因，如果可溯源则自动修复
 - `$roll-doc` — 扫描任意项目的文档缺口，生成缺失文档
-- `$roll-sentinel` — 将生产环境与 BACKLOG 验收标准进行点检
 - `$roll-doctor` — 诊断开发工具链：node、npm、git、AI 工具
 - `$roll-notes` — 以叙述形式记录一个开发时刻
 
@@ -119,7 +120,7 @@ my-project/
     ├── backlog.md       # Story / Fix / Refactor 索引
     ├── features/        # 每个 Story 的 AC + plan 文档
     ├── domain/          # DDD 模型、context map
-    ├── briefs/  dream/  # 自主层产出
+    ├── dream/            # 自主层产出
     └── decisions/       # ADR
 ```
 

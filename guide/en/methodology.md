@@ -40,15 +40,16 @@ graph TB
     end
 
     subgraph "Loop C: Observability & Maintenance"
-        C1["$roll-sentinel<br/>Randomized Patrol"] --> C2{"Anomaly?"}
-        C2 -->|Yes| C3["$roll-debug<br/>Live Forensics + Root Cause Analysis"]
+        C1["Truth signals<br/>Dossier · Status · Watch"] --> C2{"Drift or alert?"}
+        C2 -->|Yes| C3["$roll-debug · $roll-doc · $roll-doctor<br/>Forensics + Docs + Health"]
         C3 --> C5["$roll-fix<br/>Regression Fix"]
         C5 --> C1
         C2 -->|No| C1
+        C6["$roll-.dream<br/>Code-health scan"] --> C1
     end
 
     A4 -->|"Story handoff"| B2
-    B6 -->|"Delivery complete"| C1
+    B6 -->|"Delivery recorded"| C1
     C5 -->|"Issue escalation"| A2
 
     style A2 fill:#e8f4fd,stroke:#2196F3
@@ -62,10 +63,10 @@ graph TB
 How the three loops interact:
 
 - **Loop A → Loop B**: User Stories produced by the design loop flow into the implementation loop as execution units.
-- **Loop B → Loop C**: Each deployment automatically brings new deliverables under the patrol loop's monitoring scope.
-- **Loop C → Loop A**: Issues found during patrol that exceed the scope of a quick fix escalate back to the design loop for reassessment.
+- **Loop B → Loop C**: Each completed delivery feeds the truth snapshot, so the dossier, status, and watch surfaces reflect the latest state.
+- **Loop C → Loop A**: Drift or repeated alerts that exceed the scope of a quick fix escalate back to the design loop for reassessment.
 
-**Optional autonomous layer** (enabled via `roll loop on`): `roll-loop` executes pending BACKLOG items on a configurable schedule; `roll-.dream` scans code health nightly and produces `REFACTOR` entries; `roll-brief` briefs the human each morning. The human retains sole authority over `roll-release`. See §9 for details.
+**Optional autonomous layer** (enabled via `roll loop on`): `roll-loop` executes pending BACKLOG items on a configurable schedule and `roll-.dream` scans code health nightly and produces `REFACTOR` entries. The human retains sole authority over `roll-release`. See §9 for details.
 
 ---
 
@@ -347,22 +348,18 @@ micro-commit (2–5 min granularity)
 
 The micro-step granularity constraint (2–5 min/Action) delivers a second benefit here: when CI fails, the amount of code to triage is minimal, and the root cause is almost always immediately obvious.
 
-**4.4.3 Two Independent Workflow Pipelines**
+**4.4.3 CI as the Single Pipeline**
 
-A Roll project's CI configuration typically contains two independent pipelines corresponding to different trigger scenarios:
+A Roll project's CI configuration contains one primary pipeline that acts as the objective arbitration layer:
 
 ```
 .github/workflows/
 ├── ci.yml          # Triggered on every push / PR
 │                   # Runs the complete quality gate sequence
 │                   # GREEN → unlocks CD deployment permission
-│
-└── sentinel.yml    # Triggered by cron schedule (unattended)
-                    # Runs $roll-sentinel patrol tasks
-                    # Provides the observability infrastructure for Loop C
 ```
 
-`sentinel.yml` is a foundational dependency for Loop C — Loop C's continuous patrol capability runs on top of the CI platform, illustrating the infrastructure-level unity across all three loops.
+Loop C observability is served by the Delivery Dossier, `roll status`, `roll loop watch`, and truth signals — all reading from the same event stream and git state rather than from a separate live-system sampling workflow.
 
 **4.4.4 The CD and Verification Gate Dependency Chain**
 
@@ -422,36 +419,25 @@ After each successful deployment, two mechanisms ensure deliverables remain trac
 
 | Classical Methodology | Roll Implementation |
 |----------------------|--------------------|
-| SRE (Site Reliability Engineering) | `$roll-sentinel`: Sampling-based automated patrol |
-| Chaos Engineering | Randomized patrol strategy simulating unpredictable check patterns |
+| SRE (Site Reliability Engineering) | Truth signals: continuous, cost-controlled observability over the delivery pipeline |
+| DevOps Observability | Delivery Dossier + `roll status` + `roll loop watch`: one truth snapshot, multiple faces |
 | Digital Forensics + RCA | `$roll-debug`: Automated on-scene evidence collection and root cause analysis |
 
-### 5.2 Randomized Patrol: `$roll-sentinel`
+### 5.2 Truth Signals and the Delivery Dossier
 
-`$roll-sentinel` provides continuous health monitoring for delivered features. Its core design philosophy is **probabilistic sampling over exhaustive regression**, striking a balance between cost and coverage.
+Loop C's observability is built on a single truth snapshot that reconciles backlog claims with git merge evidence and acceptance evidence. The surfaces are:
 
-**Patrol strategy matrix:**
+- **Delivery Dossier** (`roll index`) — a web console with a verdict strip, loop heartbeat, three aggregate tiles, and the claimed → merged → attested Story spectrum.
+- **`roll status`** — a verdict-first CLI summary of LOOP · CYCLE · RELEASE · STORY, plus convention/AI-client sync health.
+- **`roll loop watch`** — read-only, concise, real-time tail of the loop stream.
+- **`roll loop runs` / `roll loop story`** — per-cycle and per-story history with TCR count, duration, tokens, cost, and PR pointers.
+- **Truth signals** — when objective cycle scoring shows a dimension stuck low for several cycles, Roll writes a candidate `IDEA` or `FIX` to `.roll/signals/candidates.md` for human review. Signals are advisory only; they never auto-activate or edit the backlog.
 
-| Strategy | Sampling Rate | When to Use |
-|----------|--------------|-------------|
-| Light | 5 times/day | Day-to-day monitoring during stable periods |
-| Normal | 10 times/6 hours | Routine iteration cycles |
-| Intensive | 20 times/hour | Post-major-release monitoring |
-| Full | Full suite/week | Periodic comprehensive regression |
-
-**Uncertainty handling** — avoiding false positives: a single failure does not trigger an alert; three consecutive failures are required to flag an anomaly.
-
-**Hot-spot detection** — adaptive weighting: Stories that fail repeatedly automatically receive increased sampling weight. Issues discovered by patrol automatically create `FIX-XXX` Backlog entries for `$roll-fix` to handle.
-
-Patrol runs via GitHub Actions `cron` scheduling, providing unattended continuous monitoring.
-
-> **Scenario**: Following the TaskFlow v1.3 release, `$roll-sentinel` runs on the Intensive strategy. On the second sample, the patrol case for US-007 (audit write) fails — audit events exist but the `timestamp` field is empty. A single failure does not trigger an alert.
->
-> On the fourth sample, the same case fails for the third consecutive time, crossing the threshold. `FIX-012: audit event timestamp is null` is automatically created and written to the Backlog, and US-007's sampling weight is automatically promoted to the next tier.
+This model replaces live-system sampling with delivery-truth observability: instead of sampling a live system, Roll observes whether the delivery pipeline itself is healthy and whether claims of "done" match evidence on `main`.
 
 ### 5.3 Automated Forensics and Root Cause Diagnosis: `$roll-debug`
 
-A Playwright-based end-to-end debugger supporting two operating modes:
+`$roll-debug` is a Playwright-based end-to-end debugger supporting two operating modes:
 
 - **Native mode**: The target page has integrated the Black Box (BB) SDK; diagnostic data is collected directly via the SDK interface.
 - **Universal mode**: No integration required on the target page; Playwright injects a collection script, enabling forensics on any web page.
@@ -480,9 +466,7 @@ Executes a fix for a single issue — lighter-weight than `$roll-build`, but hel
 - **Scope constraint**: One Fix handles one issue. If the fix reveals a scope wider than expected, it escalates to a User Story and re-enters Loop A.
 - **Same quality gates**: Verification Gate, CI Pass, and production verification all apply equally.
 
-> **Scenario (cont.)**: `$roll-fix` executes FIX-012, with scope strictly limited to the serialization layer field mapping. A regression test is added (asserting `timestamp` is non-null and conforms to ISO 8601 format).
->
-> 1 commit, CI GREEN, post-deployment Verification Gate confirms the audit list timestamps have recovered, FIX-012 closed. On the next `$roll-sentinel` sample cycle, the check passes and US-007's sampling weight returns to baseline.
+> **Scenario (cont.)**: `$roll-fix` executes FIX-012, with scope strictly limited to the serialization layer field mapping. A regression test is added (asserting `timestamp` is non-null and conforms to ISO 8601 format). 1 commit, CI GREEN, post-deployment Verification Gate confirms the audit list timestamps have recovered, FIX-012 closed.
 
 ---
 
@@ -536,14 +520,14 @@ graph LR
         T["TDD<br/>RED-GREEN-Refactor"]
         TCR["TCR<br/>Test && Commit ∥ Revert"]
         SRE["SRE<br/>SLI / SLO / Error Budget"]
-        CE["Chaos Engineering<br/>Random Fault Injection"]
+        O11Y["Observability<br/>Signals & Dashboards"]
     end
 
     subgraph "Roll Implementation"
         D["$roll-design<br/>INVEST Stories"]
         SB["$roll-build<br/>TCR Micro-steps"]
         SP["$roll-spar<br/>Adversarial TDD"]
-        SE["$roll-sentinel<br/>Randomized Patrol"]
+        TS["Truth signals<br/>Dossier · Status · Watch"]
         BB["$roll-debug<br/>Auto Forensics"]
     end
 
@@ -552,8 +536,8 @@ graph LR
     T -->|"Test first"| SB
     TCR -->|"Atomic commits"| SB
     T -->|"Attack-defense split"| SP
-    SRE -->|"Sampling patrol"| SE
-    CE -->|"Random strategy"| SE
+    SRE -->|"Delivery health"| TS
+    O11Y -->|"Truth projection"| TS
     SRE -->|"Live forensics"| BB
 ```
 
@@ -565,7 +549,7 @@ The key distinction lies in the shift of execution subject: these methodologies 
 
 ### 9.1 Design Principle
 
-The three-loop architecture (Loop A → B → C) describes how a human developer works *with* Roll. The autonomous evolution layer is a **separate, optional overlay** that lets the agent continue working without the human present — picking up pending BACKLOG items, reflecting on code health nightly, and briefing the human each morning.
+The three-loop architecture (Loop A → B → C) describes how a human developer works *with* Roll. The autonomous evolution layer is a **separate, optional overlay** that lets the agent continue working without the human present — picking up pending BACKLOG items and reflecting on code health nightly.
 
 It is off by default. Enabling it requires an explicit `roll loop on`.
 
@@ -578,33 +562,29 @@ It is off by default. Enabling it requires an explicit `roll loop on`.
 │  Autonomous layer (opt-in: roll loop on)                │
 │  roll-loop   — BACKLOG executor (configurable schedule)  │
 │  roll-.dream — nightly code health scan                 │
-│  roll-brief  — morning digest + release readiness       │
-│  Human reviews briefs; retains release authority        │
+│  Human reviews the dossier; retains release authority   │
 └─────────────────────────────────────────────────────────┘
 ```
 
 ### 9.2 Components
 
-**`roll-loop`** — Runs on a configurable schedule via macOS launchd (Linux: crontab). Scans BACKLOG for `📋 Todo` items and routes them: `US-XXX → $roll-build`, `FIX-XXX → $roll-fix`, `REFACTOR-XXX → $roll-build`. Caps items per run to limit blast radius. Triggers `roll-brief` when a Feature completes. Built-in TCR enforcement: after a story completes, checks for `tcr:` micro-commits — if zero are found, reverts the story to Todo with an ALERT, preventing agents from skipping the TCR rhythm.
+**`roll-loop`** — Runs on a configurable schedule via macOS launchd (Linux: crontab). Scans BACKLOG for `📋 Todo` items and routes them: `US-XXX → $roll-build`, `FIX-XXX → $roll-fix`, `REFACTOR-XXX → $roll-build`. Caps items per run to limit blast radius. Built-in TCR enforcement: after a story completes, checks for `tcr:` micro-commits — if zero are found, reverts the story to Todo with an ALERT, preventing agents from skipping the TCR rhythm.
 
 **`roll-.dream`** — Runs nightly (03:00 local) via macOS launchd (Linux: crontab). Scans the codebase for dead code, architectural drift against `.roll/domain/`, pruning candidates, and emerging patterns. Outputs `REFACTOR-XXX` entries to BACKLOG and a log to `.roll/dream/YYYY-MM-DD.md`.
-
-**`roll-brief`** — Three trigger modes: Feature completion (via roll-loop), daily morning (09:00, via launchd), or on-demand (`roll brief`). Produces an owner-facing digest: what's done, what's pending, escalations, and a release-readiness verdict. Distinct from `roll-.changelog` (user-facing changelog).
 
 ### 9.3 Why Local Scheduling, Not GitHub Actions
 
 GitHub Actions runs on remote servers with no access to the local codebase, local test runner, or local agent CLI. The TCR loop — which is the core of `$roll-build` — requires local execution. Using GitHub Actions would mean the agent could only read the repo as a snapshot, not run tests, not observe the dev environment.
 
-On macOS, Roll uses **launchd** (plists installed to `~/Library/LaunchAgents/`); on Linux, crontab. `roll loop on` automatically installs scheduling for all three services (loop/dream/brief); `roll loop off` removes them.
+On macOS, Roll uses **launchd** (plists installed to `~/Library/LaunchAgents/`); on Linux, crontab. `roll loop on` automatically installs scheduling for the loop and dream services; `roll loop off` removes them.
 
 ```bash
 # macOS launchd plists (auto-generated, no manual editing needed)
 ~/Library/LaunchAgents/com.roll.loop.<project-slug>.plist
 ~/Library/LaunchAgents/com.roll.dream.<project-slug>.plist
-~/Library/LaunchAgents/com.roll.brief.<project-slug>.plist
 ```
 
-`roll loop status` provides the scheduler snapshot: launchd status, current execution state, pending queue, alerts, and recent run history. For the live terminal, attach directly with `tmux attach -t roll-loop-<project-slug>`.
+`roll loop status` provides the scheduler snapshot: launchd status, current execution state, pending queue, alerts, and recent run history. For the live terminal, attach directly with `tmux attach -t roll-loop-<project-slug>` or use `roll loop watch` for a read-only view.
 
 If the agent supports native scheduling (Claude Code hooks, opencode scheduled tasks), that is preferred over raw launchd/cron for cleaner lifecycle management.
 
@@ -631,9 +611,9 @@ project field never collapses the complexity tiers onto a single agent.
 
 ### 9.5 Human Authority
 
-The autonomous layer **never** invokes `roll-release`. Production deployment is always a human decision, made after reviewing the morning brief and optionally inspecting the diff. The brief provides:
+The autonomous layer **never** invokes `roll-release`. Production deployment is always a human decision, made after reviewing the Delivery Dossier and truth signals and optionally inspecting the diff. The dossier provides:
 
-- What the agent completed since the last brief
+- What the agent completed since the last check
 - Any escalations that require human input
 - A release-readiness signal (heuristic, not a gate)
 
@@ -645,10 +625,9 @@ This keeps the human informed without requiring them to be present for every ste
 roll loop on|off          # enable / disable scheduled execution for this project
 roll loop now             # trigger one cycle immediately
 roll loop status          # show scheduler state + any ALERT
-roll brief                # show latest brief (regenerate if >24h stale)
 roll agent use <name>     # switch this project's agent
 roll agent list           # show installed agents
-roll                      # project dashboard (in project dir): loop status + brief summary
+roll                      # project dashboard (in project dir): loop status + truth snapshot summary
 ```
 
 ---
@@ -667,7 +646,7 @@ roll                      # project dashboard (in project dir): loop status + br
 
 - **Multi-Agent coordination overhead**: `$roll-build` evaluates Action dependencies to determine whether to launch parallel sub-Agents, but cross-Agent state synchronization and conflict resolution currently depend on conventions rather than enforced protocols, incurring coordination overhead in high-concurrency scenarios.
 - **Framework coupling**: Skill definitions are written in Markdown and rely on AI clients' ability to interpret natural language instructions — execution precision varies across different models. Each Skill now pins a model in its frontmatter (`model:` — e.g. Opus for `roll-design`, Haiku for `roll-idea`) and declares a tool allowlist (`allowed-tools:`), mitigating precision drift and accidental tool misuse, though both fields still depend on the client honoring them.
-- **Patrol coverage**: `$roll-sentinel`'s sampling strategy effectively controls cost, but it does not provide the same coverage guarantee as exhaustive regression testing.
+- **Truth-signal coverage**: truth signals surface patterns from the delivery pipeline, but they depend on the cycle scoring dimensions already being captured; gaps in those dimensions become gaps in the signals.
 
 ---
 
@@ -681,11 +660,10 @@ roll                      # project dashboard (in project dir): loop status + br
 | `$roll-fix` | Bug fix | Fix ID | Fix code + regression test |
 | `$roll-release` | Release | — | Version + tag + npm publish + GitHub Release |
 | `$roll-peer` | Code review | Change diff | APPROVE / REFINE / OBJECT verdict |
-| `$roll-sentinel` | Patrol | Patrol strategy | Health report / FIX entries |
 | `$roll-debug` | Debugging & Diagnosis | URL | Diagnostic JSON + screenshots + root cause analysis |
+| `$roll-doc` | Documentation | Project path | Indexed docs + gap report + drafts |
 | `$roll-loop` | Autonomous execution | BACKLOG todos | Completed Story / Fix / Refactor |
 | `$roll-.dream` | Autonomous scan | Codebase | REFACTOR entries + scan log |
-| `$roll-brief` | Briefing | Project state | Owner-facing digest + release readiness verdict |
 
 ## Appendix B: CLI Command Quick Reference
 
@@ -699,8 +677,7 @@ Commands fall into two categories: bash commands run pure shell logic; agent com
 | `roll status` | Display current sync status, skill links, and detected AI tools |
 | `roll backlog` | Show all pending tasks from `.roll/backlog.md` |
 | `roll agent [use <name>\|list]` | Per-project agent selection — affects all 🤖 commands |
-| `roll loop <on\|off\|now\|status\|runs\|log\|story\|events\|eval\|signals\|pause\|resume\|reset\|gc>` | 🤖 Manage the autonomous BACKLOG executor (three lanes: loop/dream/pr) |
-| `roll brief` | 🤖 Show latest owner brief (regenerate if stale >24h) |
-| `roll pair [init\|status]` | 🤖 Cross-agent pairing: heterogeneous peer re-checks during builds |
+| `roll loop <on\|off\|now\|status\|watch\|runs\|log\|story\|events\|eval\|signals\|pause\|resume\|reset\|gc>` | 🤖 Manage the autonomous BACKLOG executor (loop + dream + pr lanes) |
+| `roll pair [init\|status\|score]` | 🤖 Cross-agent pairing: heterogeneous peer re-checks and scores deliveries |
 | `roll release [ship\|waiver]` | Release guidance · gated tag push · recorded drift waiver — npm publish stays human |
-| `roll` (no args, in project dir) | Dashboard: loop status, pending count, latest brief summary |
+| `roll` (no args, in project dir) | Dashboard: loop status, pending count, and truth snapshot summary |

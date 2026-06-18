@@ -12,7 +12,6 @@ Quickly select the right skill or tool.
 | **"Fix a bug"** / **"Change some copy"** | `roll-fix` | Quick fix, no full workflow |
 | **"Plan requirements"** / **"Split into stories"** | `roll-design` | Plan only, no implementation, outputs BACKLOG.md |
 | **"Run several Actions in parallel"** | `roll-build` | Auto-determines parallelism after splitting Actions |
-| **"Check production status"** | `roll-sentinel` | Production patrol, regression testing |
 | **"Debug this page"** | `roll-debug` | Deep diagnosis, collect logs/network/DOM |
 
 ## Support Skills
@@ -202,5 +201,4 @@ description: ...
 | `roll-build` | "help me build", "add a feature", "change this", "refactor", "implement US-", "do this story", "complete Action", "parallel", "develop simultaneously" |
 | `roll-fix` | "fix bug", "change copy", "adjust color", "error", "FIX-", "BUG-" |
 | `roll-spar` | "adversarial", "attack-defense", "high-risk", "critical logic", "payment", "permissions", "security" |
-| `roll-sentinel` | "patrol", "check production", "regression test" |
 | `roll-debug` | "debug", "diagnose", "page has issues", "black-box analysis" |

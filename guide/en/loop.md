@@ -45,14 +45,12 @@ immediately by `roll loop status` — no manual reload step.
 | `roll config loop-window <start>-<end>` | loop active window hours (`loop_active_start` + `loop_active_end`) |
 | `roll config loop-schedule <period>[/<offset>]` | fire interval (`loop_schedule.period_minutes` + `offset_minute`) |
 | `roll config dream-time <HH:MM>` | dream daily fire time (`loop_dream_hour` + `loop_dream_minute`) |
-| `roll config brief-time <HH:MM>` | brief daily fire time (`loop_brief_hour` + `loop_brief_minute`) |
 
 ```bash
 roll config loop-window 9-18        # active 9am – 6pm; start < end, both in [0,24]
 roll config loop-schedule 30        # fire every 30 minutes (period in [1,1440])
 roll config loop-schedule 30/7      # every 30 minutes, offset :07 (offset in [0, period-1])
 roll config dream-time 03:20        # dream fires at exactly 03:20; HH in [0,23], MM in [0,59]
-roll config brief-time 09:15        # brief fires at exactly 09:15
 ```
 
 **Reading the current value.** Run any facade with no value to print the
@@ -520,8 +518,8 @@ result-eval: mean 6.8↓ / min 4 / out 75% ci 67% scope 75% qual 75% eff 50% cle
 When a dimension stays low (`0.0`) for `N` cycles in a row (default 3,
 `--streak` to change), the loop surfaces it as an **improvement signal**: it
 appends a *candidate* backlog draft — an `IDEA` or `FIX`, marked `📋 待人确认`
-— to `.roll/signals/candidates.md`, and the `roll-brief` improvement-signal
-section reports it. Signals are deduped per pattern, so a standing issue is
+— to `.roll/signals/candidates.md`, and the `roll loop signals`
+surface reports it. Signals are deduped per pattern, so a standing issue is
 raised once, not every cycle.
 
 A signal is advisory only. It never edits the real backlog, never activates a
@@ -709,7 +707,7 @@ Loop sees the `🔨 In Progress` marker and skips it.
 | TCR: 0 commits | Revert story to 📋 Todo, write ALERT.md |
 | HEAD CI red | Hot-fix attempt (see below), or ALERT if exhausted |
 
-ALERT entries surface in `roll loop status`, `roll loop alert`, and `roll-brief` output.
+ALERT entries surface in `roll loop status`, `roll loop alert`, and `roll loop signals` output.
 
 ## CI Self-Healing (US-LOOP-046..050)
 
@@ -1128,7 +1126,7 @@ Roll owns exactly three launchd jobs per project slug: `com.roll.loop.<slug>`
 (the cycle scheduler), `com.roll.dream.<slug>` (nightly scan) and
 `com.roll.pr.<slug>` (PR inbox). `roll loop on` installs them; `roll loop off`
 uninstalls them AND sweeps any other `com.roll.*.<slug>` plist it finds —
-retired shapes from older versions (ci/alert/brief) once survived for weeks as
+retired shapes from older versions once survived for weeks as
 zombies pointing at deleted engines. `roll doctor` lists every `com.roll.*`
 job on the machine with its target directory and load state; a lane whose
 WorkingDirectory no longer exists is marked STALE in red.

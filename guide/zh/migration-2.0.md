@@ -20,7 +20,6 @@ Roll 2.0 把所有"过程"产物（BACKLOG、PROPOSALS、feature 规格、briefs
 | `PROPOSALS.md`（根级） | `.roll/proposals.md` | 待审批提案 |
 | `docs/features.md` | `.roll/features.md` | 功能索引 |
 | `docs/features/` | `.roll/features/` | 各 feature 详细规格 |
-| `docs/briefs/` | `.roll/briefs/` | `roll-brief` 自动产出 |
 | `docs/dream/` | `.roll/dream/` | `roll-.dream` 自动产出 |
 | `docs/design/` | `.roll/design/` | 设计探索文档 |
 | `docs/domain/` | `.roll/domain/` | DDD 模型 |
@@ -132,7 +131,7 @@ npm install -g @seanyao/roll@1           # 重装老版本
 
 迁移后：
 
-- `roll status`、`roll backlog`、`roll loop`、`roll brief` —— 自动用新路径
+- `roll status`、`roll backlog`、`roll loop` —— 自动用新路径
 - `$roll-build`、`$roll-fix`、`$roll-design` 等 skill —— 已更新，重跑 `roll setup` 刷新
 - 外部脚本引用了 `BACKLOG.md` 等 —— **需要你手动改**
 

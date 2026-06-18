@@ -16,8 +16,8 @@ After TCR micro-steps pass, `$roll-build` Phase 5.5 deposits an E2E test:
 3. Runs it — fixes via TCR if red.
 4. Commits: `tcr: e2e deposit for <story-id>`.
 
-The deposited test becomes a durable regression guard that CI and `$roll-sentinel`
-can replay against production.
+The deposited test becomes a durable regression guard that the CI E2E gate /
+Verification can replay on every push.
 
 ## Pre-commit Hook (proof-of-pass)
 

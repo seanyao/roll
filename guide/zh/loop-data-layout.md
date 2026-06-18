@@ -40,27 +40,24 @@ project-local directory.
 
 ---
 
-## Dream 与 Brief 的 cron 日志
+## Dream 的 cron 日志
 
-`roll-.dream` 和 `roll-brief` 的 cron stdout 捕获日志也改为项目本地：
+`roll-.dream` 的 cron stdout 捕获日志也改为项目本地：
 
 | 服务 | 路径 |
 |------|------|
 | dream | `<project>/.roll/dream/cron.log` |
-| brief | `<project>/.roll/brief/cron.log` |
 
-以前放在 `~/.shared/roll/{dream,brief}/cron-<slug>.log`。项目本地后，删项目即
+以前放在 `~/.shared/roll/dream/cron-<slug>.log`。项目本地后，删项目即
 清日志，并发项目也不会互相穿插。
 
-`roll-.dream` and `roll-brief` also write their cron stdout capture
-project-local:
+`roll-.dream` also writes its cron stdout capture project-local:
 
 | Service | Path |
 |---------|------|
 | dream | `<project>/.roll/dream/cron.log` |
-| brief | `<project>/.roll/brief/cron.log` |
 
-Previously these lived in `~/.shared/roll/{dream,brief}/cron-<slug>.log`.
+Previously these lived in `~/.shared/roll/dream/cron-<slug>.log`.
 Moving them project-local means they are naturally garbage-collected when
 the project is deleted, and concurrent projects never interleave.
 

@@ -356,10 +356,10 @@ EOF
 
 ## 自动化防护
 
-### Sentinel 巡检规则
+### 真相信号守护规则
 ```yaml
-# .github/roll-sentinel-config.yml
-checks:
+# .github/roll-truth-signals.yml
+signals:
   idempotency:
     - pattern: "ingest|import|sync"
       require_test: "idempotency"

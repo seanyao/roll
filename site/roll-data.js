@@ -142,7 +142,7 @@ window.RollData = (function () {
         { name: "roll loop runs",  mono: true, desc: "Per-cycle TerminalOutcome history with TCR count and duration.", badges: [] },
         { name: "roll loop story", mono: true, desc: "Per-story rollup: cycles, span, duration, tokens, cost, PRs.", badges: [] },
         { name: "roll loop alert", mono: true, desc: "View, acknowledge and clear loop alerts from one place.", badges: [] },
-        { name: "Owner brief", desc: "Daily digest: what shipped, what's in-progress, what's next.", badges: ["highlight"] },
+        { name: "Status digest", desc: "Daily digest: what shipped, what's in-progress, what's next.", badges: ["highlight"] },
       ]},
       { id: "multi-agent", title: "Multi-Agent", blurb: "One vendor doesn't own the keys.", features: [
         { name: "Fallback Routing", desc: "Four complexity slots (easy/default/hard/fallback) each map to a locally-installed agent; when the slot agent is down or rate-limited, work fails over to the fallback-slot agent.", badges: ["highlight"] },
@@ -170,7 +170,7 @@ window.RollData = (function () {
         { name: "$roll-fix", mono: true, desc: "Focused repair: reproduce → regression signal → TCR patch → evidence.", badges: [], href: "diagrams/roll-fix-skill.html", external: true },
         { name: "$roll-review-pr", mono: true, desc: "Diff-grounded PR review with APPROVE / REQUEST_CHANGES / UNCERTAIN verdict.", badges: ["new"], href: "diagrams/roll-review-pr-skill.html", external: true },
       ]},
-      { id: "operations", title: "Diagnostics & Operations", blurb: "Observe, diagnose, document, patrol.", features: [
+      { id: "operations", title: "Diagnostics & Operations", blurb: "Observe, diagnose, document, maintain.", features: [
         { name: "$roll-debug", mono: true, desc: "Mount a browser probe, capture runtime signals, fix project-owned root causes.", badges: [], href: "diagrams/roll-debug-skill.html", external: true },
         { name: "$roll-doc", mono: true, desc: "Scan docs, update docs/INDEX.md, detect gaps and draft from code evidence.", badges: [], href: "diagrams/roll-doc-skill.html", external: true },
         { name: "$roll-doctor", mono: true, desc: "Diagnose Roll install, skills, conventions, symlinks, templates and config.", badges: [], href: "diagrams/roll-doctor-skill.html", external: true },
@@ -347,7 +347,7 @@ window.RollData = (function () {
         { name: "roll loop runs",  mono: true, desc: "每轮 TerminalOutcome 历史,含 TCR 次数和耗时。", badges: [] },
         { name: "roll loop story", mono: true, desc: "按故事汇总:cycle 数、跨度、耗时、token、成本、PR 列表。", badges: [] },
         { name: "roll loop alert", mono: true, desc: "在一处查看、确认、清除 loop 告警。", badges: [] },
-        { name: "Owner 简报", desc: "每日摘要:已发布、进行中、下一优先级。", badges: ["highlight"] },
+        { name: "状态摘要", desc: "每日摘要:已发布、进行中、下一优先级。", badges: ["highlight"] },
       ]},
       { id: "multi-agent", title: "多 Agent", blurb: "钥匙不归一家供应商。", features: [
         { name: "故障转移", desc: "四个复杂度槽位（easy/default/hard/fallback）各自映射到本机已装 agent；槽位 agent 宕机或限流时，工作转移到 fallback 槽位 agent。", badges: ["highlight"] },
@@ -375,7 +375,7 @@ window.RollData = (function () {
         { name: "$roll-fix", mono: true, desc: "聚焦修复:复现 → 回归信号 → TCR patch → 证据。", badges: [], href: "diagrams/roll-fix-skill.html", external: true },
         { name: "$roll-review-pr", mono: true, desc: "基于 diff 的 PR 评审,输出 APPROVE / REQUEST_CHANGES / UNCERTAIN。", badges: ["new"], href: "diagrams/roll-review-pr-skill.html", external: true },
       ]},
-      { id: "operations", title: "诊断与运营", blurb: "观测、诊断、文档、巡检。", features: [
+      { id: "operations", title: "诊断与运营", blurb: "观测、诊断、文档、维护。", features: [
         { name: "$roll-debug", mono: true, desc: "挂载浏览器探针,采集运行时信号,修项目自有根因。", badges: [], href: "diagrams/roll-debug-skill.html", external: true },
         { name: "$roll-doc", mono: true, desc: "扫描文档、更新 docs/INDEX.md、识别缺口并基于代码证据起草。", badges: [], href: "diagrams/roll-doc-skill.html", external: true },
         { name: "$roll-doctor", mono: true, desc: "诊断 Roll 安装、skills、约定、symlink、模板与配置。", badges: [], href: "diagrams/roll-doctor-skill.html", external: true },
@@ -387,7 +387,7 @@ window.RollData = (function () {
     JOURNEY: {
       label: "一个功能的旅程",
       title: "从早上到上线,午饭之前。",
-      sub: "一轮真实循环:「用户需要密码重置」。从想法到生产巡检,不到两小时。",
+      sub: "一轮真实循环:「用户需要密码重置」。从想法到上线,不到两小时。",
       steps: [
         { time: "09:00", title: "想法提交",          body: "一行捕获。AI 调研、设计、按 INVEST 拆故事,附验收标准。", tag: "idea" },
         { time: "09:30", title: "开始构建",          body: "Loop 摘取最高优先级故事。$roll-build 在隔离 worktree 里跑,TCR 微提交。", tag: "build" },

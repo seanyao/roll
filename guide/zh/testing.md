@@ -16,7 +16,7 @@ TCR 微步骤通过后，`$roll-build` Phase 5.5 自动 Deposit E2E 测试：
 3. 运行它——若红则通过 TCR 修复。
 4. 提交：`tcr: e2e deposit for <story-id>`。
 
-Deposit 的测试成为持久的回归守门，CI 和 `$roll-sentinel` 可重放以对抗生产环境。
+Deposit 的测试成为持久的回归守门，CI E2E 闸口与 Verification 会在每次推送时重放它。
 
 ## Pre-commit Hook（proof-of-pass）
 

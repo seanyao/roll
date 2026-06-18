@@ -337,4 +337,4 @@ the backlog), and tags each entry with the matching marker:
 | REFACTOR-XXX | docs: <one-line description> [test-quality:❶] — flagged by dream YYYY-MM-DD | 📋 Todo |
 ```
 
-The maintainer triages the REFACTOR queue in the morning brief.
+The maintainer triages the REFACTOR queue in the daily status review.

@@ -14,7 +14,7 @@ in your journey with Roll:
 > **Roll has two surfaces.** Keep them straight as you read this FAQ:
 >
 > - **CLI commands** — run in your terminal: `roll init`, `roll loop on`,
->   `roll status`, `roll brief`, etc. These manage state, scheduling, and
+>   `roll status`, `roll loop watch`, etc. These manage state, scheduling, and
 >   observability. They do not write code themselves.
 > - **Skills** — invoked inside your AI agent (Claude Code, Cursor, Codex,
 >   Pi, etc.): `$roll-build`, `$roll-design`, `$roll-fix`, `$roll-onboard`,
@@ -499,7 +499,7 @@ are multiple surfaces depending on what you need.
 
 **Under the hood:** Each cycle appends a JSONL record to
 `<project>/.roll/loop/runs.jsonl` with story ID, model, TCR commit count,
-duration, outcome, and cost (public pricing). `roll-brief` aggregates this
+duration, outcome, and cost (public pricing). `roll loop status` aggregates this
 into a human-readable digest. The tmux session retains the full agent
 conversation until the next cycle overwrites it.
 
@@ -513,7 +513,7 @@ conversation until the next cycle overwrites it.
 | Phase breakdown for one cycle | `roll loop runs --detail <cycle_id>` |
 | Snapshot dashboard with cost column | `roll loop status --days 7` |
 | Watch the agent in real time | `tmux attach -t roll-loop-<project-slug>` |
-| Human-readable daily summary | `roll brief` |
+| Human-readable status summary | `roll loop status` |
 | Alerts that need attention | `roll loop alert` |
 | Full cycle agent output (plain text) | `roll loop log` |
 | Full agent transcript | `tmux attach -t roll-loop-<project-slug>`, scroll up |

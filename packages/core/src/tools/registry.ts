@@ -215,7 +215,9 @@ export class ToolRegistry {
     for (let attempt = 1; attempt <= attempts; attempt++) {
       const attemptStartedAt = this.options.deps.now();
       try {
-        return (await tool.execute(invocation, this.options.deps)) as ToolResult<O>;
+        const result = (await tool.execute(invocation, this.options.deps)) as ToolResult<O>;
+        if (result.ok || !result.error.retryable || attempt === attempts) return result;
+        await delay(backoffMs);
       } catch (cause) {
         lastError = cause;
         if (attempt < attempts) await delay(backoffMs);

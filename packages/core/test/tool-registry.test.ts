@@ -231,6 +231,41 @@ describe("US-TOOL-002 ToolRegistry", () => {
     ]);
   });
 
+  it("retries retryable failed ToolResult values", async () => {
+    let calls = 0;
+    const registry = new ToolRegistry({
+      deps: deps(),
+      policyEngine: policyEngine({ retry: { attempts: 2, backoffMs: 0 } }),
+    });
+    registry.register(
+      tool({
+        async execute(invocation) {
+          calls += 1;
+          if (calls === 1) {
+            return {
+              ok: false,
+              error: { code: "timeout", message: "try again", retryable: true },
+              meta: {
+                invocationId: invocation.invocationId,
+                toolId: invocation.toolId,
+                caller: invocation.caller,
+                startedAt: 100,
+                endedAt: 101,
+                durationMs: 1,
+              },
+            };
+          }
+          return okResult(invocation, "ok");
+        },
+      }),
+    );
+
+    const result = await registry.invoke(TOOL_ID, request("x"));
+
+    expect(result).toMatchObject({ ok: true, output: "ok" });
+    expect(calls).toBe(2);
+  });
+
   it("shutdown disposes initialized tools once and is idempotent", async () => {
     const t = tool();
     const registry = new ToolRegistry({ deps: deps(), policyEngine: policyEngine() });

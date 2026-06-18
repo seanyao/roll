@@ -65,7 +65,7 @@ describe("US-TOOL-001 tool type contracts", () => {
     const error: ToolError = { code, message: "denied", retryable: false };
     const ok: ToolResult<{ stdout: string }> = { ok: true, output: { stdout: "x" }, meta };
     const failed: ToolResult<never> = { ok: false, error, meta };
-    const cost: ToolCost = { toolId: id, invocations: 1, estimatedCost: 0, currency: "USD" };
+    const cost: ToolCost = { toolId: id, invocations: 1, durationMs: 12, failures: 0, estimatedCost: 0, currency: "USD" };
     const cycleCost: CycleCost = {
       cycleId: "cycle-1",
       agent: "codex",

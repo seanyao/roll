@@ -110,6 +110,8 @@ export type ToolResult<O = unknown> =
 export type ToolCost = {
   toolId: ToolId;
   invocations: number;
+  durationMs?: number;
+  failures?: number;
   estimatedCost: number;
   currency: string;
   inputBytes?: number;

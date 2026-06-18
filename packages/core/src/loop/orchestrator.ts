@@ -524,6 +524,7 @@ export interface TerminalContext {
   branch: string;
   agent: AgentId;
   model: ModelId;
+  toolCosts?: CycleCost["toolCosts"];
 }
 
 /**
@@ -618,6 +619,7 @@ function zeroCost(ctx: TerminalContext): CycleCost {
     effectiveCost: 0,
     // FIX-361: currency from model's price config; falls back to USD for unknown/empty.
     currency: ctx.model !== "" ? cycleCurrency(ctx.model) : "USD",
+    ...(ctx.toolCosts !== undefined ? { toolCosts: ctx.toolCosts } : {}),
   };
 }
 

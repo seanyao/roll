@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v3.618.3 — 2026-06-18
+
 ### 修复
 
 - **showcase 在全局安装下 agent probe 崩溃**:`rollBin()` 定位到全局包的 `conventions/` 而找不到本地 `roll.js`，子进程直接崩掉判所有 agent 不可用；现加回退：本地不存在时走 PATH 的 `roll`。`[showcase]`

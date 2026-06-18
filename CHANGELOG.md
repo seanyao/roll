@@ -2,8 +2,6 @@
 
 ## Unreleased
 
-## v3.617.3 — 2026-06-18
-
 ### 新功能
 
 - **Reasonix agent 支持**:新增 DeepSeek 原生编程 agent 接入,`roll loop` 可选用 reasonix 跑 worker,与 pi/kimi 同等待遇;agent 注册表、展示名、smoke 检查和 loop spawn 全部贯通。(US-AGENT-002, FIX-359) `[agents]`

@@ -14,6 +14,8 @@
 
 - **Browser 工具适配器落地**:新增 infra BrowserTool,同一 adapter family 提供 `browser.screenshot`、`browser.console`、`browser.dom-query`,支持 allowedOrigins/headlessOnly sandbox、headless/GUI lane、honest skip 和共享队列。(US-TOOL-005) `[tools-layer]`
 
+- **Git 工具适配器落地**:新增 infra GitTool,同一 adapter family 提供 `git.commit`、`git.status`、`git.push`、`git.merge`,复用现有 git wrapper 保持命令语义不变,并让 `git.status` 支持成功静默事件。(US-TOOL-006) `[tools-layer]`
+
 ## v3.618.3 — 2026-06-18
 
 ### 修复

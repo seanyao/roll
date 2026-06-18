@@ -44,6 +44,7 @@ export type ToolDeclaration = {
   kind: ToolKind;
   title: string;
   description?: string;
+  emitsEvents?: boolean;
   defaults?: ToolDefaults;
   requirements?: readonly ToolRequirement[];
   inputSchema?: unknown;

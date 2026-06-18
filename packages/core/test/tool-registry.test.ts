@@ -127,6 +127,21 @@ describe("US-TOOL-002 ToolRegistry", () => {
     expect(events.types).toEqual(["tool:invoke", "tool:result"]);
   });
 
+  it("does not emit success events when the tool declaration sets emitsEvents:false", async () => {
+    const events = sink();
+    const t = tool({ declaration: { ...declaration, emitsEvents: false } });
+    const registry = new ToolRegistry({ deps: deps(), policyEngine: policyEngine(), events });
+
+    registry.register(t);
+    const result = await registry.invoke(TOOL_ID, request("quiet"));
+
+    expect(result).toMatchObject({ ok: true, output: "quiet" });
+    expect(events.types).toEqual([]);
+    expect(registry.snapshotCosts()).toEqual([
+      expect.objectContaining({ toolId: TOOL_ID, invocations: 1, currency: "USD" }),
+    ]);
+  });
+
   it("denies disabled policy before execution", async () => {
     const t = tool();
     const registry = new ToolRegistry({ deps: deps(), policyEngine: policyEngine({ enabled: false }) });

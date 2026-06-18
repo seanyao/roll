@@ -132,23 +132,28 @@ export class ToolRegistry {
       ts: startedAt,
     };
 
-    await this.emit({
-      type: "tool:invoke",
-      cycleId: request.caller.cycleId,
-      invocation,
-      declaration: state.tool.declaration,
-      ts: startedAt,
-    });
+    const emitEvents = state.tool.declaration.emitsEvents !== false;
+    if (emitEvents) {
+      await this.emit({
+        type: "tool:invoke",
+        cycleId: request.caller.cycleId,
+        invocation,
+        declaration: state.tool.declaration,
+        ts: startedAt,
+      });
+    }
 
     const result = await this.executeWithRetry<I, O>(state.tool, invocation, request, policy);
-    await this.emit({
-      type: "tool:result",
-      cycleId: request.caller.cycleId,
-      invocationId: request.invocationId,
-      toolId,
-      result,
-      ts: this.options.deps.now(),
-    });
+    if (emitEvents) {
+      await this.emit({
+        type: "tool:result",
+        cycleId: request.caller.cycleId,
+        invocationId: request.invocationId,
+        toolId,
+        result,
+        ts: this.options.deps.now(),
+      });
+    }
     this.accumulateCost(toolId, request.input, result);
     return result;
   }

@@ -125,6 +125,7 @@ import {
   reasonixEnv,
 } from "./agent-spawn.js";
 import { classifyBlockSignature, probeAgentReachable, type ReachResult } from "./agent-liveness.js";
+import { readSkipCards } from "./skip-cards.js";
 import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, runPeerGate } from "./peer-gate.js";
 import { declaresAnySurface, deliverableCmdsForStory, readAttestGateMode, rejectedDeliverableCmdsForStory, runAttestGate, screenshotExemption, storyRequiresScreenshot, verificationReportPath, webCaptureTargetsForStory } from "./attest-gate.js";
 import { recoverCodexSessionId, recoverCodexUsage, recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
@@ -635,8 +636,14 @@ export async function executeCommand(
       // no commit → gave_up → status reset → re-pick → burn). The picker reads
       // only backlog text, so without this it re-picks the merged zombie forever.
       const pickRunRows = readRunsRows(ports.paths.runsPath);
+      // FIX-363 (loop resilience): skip poison-pill cards (failed K times) so a
+      // single un-deliverable card no longer halts the WHOLE loop — it keeps
+      // delivering the rest. Runtime overlay (.roll/loop/skip-cards.json); backlog
+      // truth is untouched.
+      const skipCards = readSkipCards(dirname(ports.paths.eventsPath));
       const story = pickStory(items as never, {
         hasMergedDelivery: (id) => hasMergedDelivery(pickRunRows, id),
+        shouldSkip: (id) => skipCards.has(id),
       });
       if (story === undefined) return { event: { type: "no_story" } };
       // Hook 3 (pre-spawn spec-truth check): the picker only returns a card whose

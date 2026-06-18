@@ -97,8 +97,6 @@ const GROUP_OF: Record<string, SkillGroup> = {
   "roll-peer": "quality",
   "roll-review-pr": "quality",
   "roll-notes": "observe",
-  "roll-brief": "observe",
-  "roll-sentinel": "observe",
   "roll-doctor": "observe",
   "roll-.dream": "observe",
   "roll-.echo": "observe",

@@ -20,6 +20,8 @@
 
 - **Filesystem 工具适配器落地**:新增 infra FsTool,同一 adapter family 提供 `filesystem.stat`、`filesystem.read`、`filesystem.write`,按 allowedPaths 管控路径,支持相对路径按项目根解析、读截断和写入前 redaction。(US-TOOL-008) `[tools-layer]`
 
+- **Network 工具适配器落地**:新增 infra NetworkTool,提供 `network.fetch`,支持 timeout、policy retry、allowedOrigins、network blocked、redirect follow 和 HTTP proxy 环境变量,让 HTTP 探测走统一工具治理路径。(US-TOOL-009) `[tools-layer]`
+
 ## v3.618.3 — 2026-06-18
 
 ### 修复

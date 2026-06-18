@@ -642,6 +642,16 @@ export function buildPairScorePrompt(summary: string): string {
   return (
     `You are a heterogeneous PAIRING scorer. A different agent delivered the cycle below; ` +
     `grade the delivery quality honestly (root-cause depth, test coverage, scope discipline, evidence). ` +
+    // FIX-363: grade against the STATED GOAL (the "Goal:" line). Removal / retire /
+    // refactor cards are deletion-heavy BY DESIGN — a large deletion is NOT itself a
+    // regression or poor scope discipline. A scorer that didn't know the goal was a
+    // removal scored a clean `roll-sentinel` deletion 3/10 "regression" and blocked a
+    // correct delivery (the loop then jammed on it).
+    `Grade against the delivery's STATED GOAL shown on the "Goal:" line. ` +
+    `If that goal is to REMOVE / RETIRE / DELETE / DROP / REFACTOR something, deletions ARE the intended ` +
+    `deliverable: score whether the removal is CLEAN and COMPLETE (no dangling references, tests and docs follow, ` +
+    `build stays green) — do NOT treat the deletion volume, or the absence of "replacement" code the goal never ` +
+    `asked for, as a regression. ` +
     `Reply with exactly one "SCORE: <integer 1..10>" line, one "VERDICT: good|ok|regression" line, ` +
     `and one "RATIONALE: <one sentence>" line.\n\nDELIVERY:\n` +
     summary

@@ -42,6 +42,22 @@ describe("pickStory — status skip rules", () => {
   it("returns undefined when nothing is Todo", () => {
     expect(pickStory([item("US-1", DONE), item("FIX-1", "🚫 Hold")])).toBeUndefined();
   });
+
+  it("FIX-363: skips a poison-pill card on the runtime skip-list, takes the next Todo", () => {
+    const items = [item("FIX-1", TODO), item("FIX-2", TODO)];
+    // FIX-1 failed K times → skip-listed; the loop must keep delivering FIX-2
+    // rather than re-picking the poison pill (which previously halted the loop).
+    const skip = new Set(["FIX-1"]);
+    expect(pickStory(items, { shouldSkip: (id) => skip.has(id) })?.id).toBe("FIX-2");
+    // the skipped card stays a valid Todo — only the runtime overlay hides it,
+    // so clearing the skip-list re-arms it (backlog truth never changed).
+    expect(pickStory(items)?.id).toBe("FIX-1");
+  });
+
+  it("FIX-363: when the ONLY Todo is skip-listed, the loop idles (no_story) rather than re-burning it", () => {
+    const items = [item("FIX-1", TODO), item("US-1", DONE)];
+    expect(pickStory(items, { shouldSkip: (id) => id === "FIX-1" })).toBeUndefined();
+  });
 });
 
 describe("pickStory — type priority and file order", () => {

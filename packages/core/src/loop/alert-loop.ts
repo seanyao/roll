@@ -29,7 +29,7 @@
  *       `notified` is the ●/○ glyph driver: ● = pushed via the notify channel,
  *       ○ = throttled/deduped. The DISPATCHER that writes these rows (and runs
  *       `_notify`) lives in the PRIVATE roll-meta ops layer — NOT in this bash
- *       checkout — so, exactly like sentinel.ts's push script, the record-WRITE
+ *       checkout — so, like the push-script transport, the record-WRITE
  *       transport is out of scope; what IS here, and what this module ports, is
  *       the DECISION layer: the dedup key, the notify-vs-throttle verdict, the
  *       record shape, and the `_notify` gate ladder.

@@ -18,6 +18,7 @@ import { parseLock, projectIdentity, releaseLock } from "@roll/infra";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type RunnerPaths, buildRunRow, dryRunPlan, killLiveAgents, nodePorts, realAgentSpawn, runCycleOnce } from "../runner/index.js";
+import { clearCardFailure, recordCardFailure } from "../runner/skip-cards.js";
 import { applyCorrectionCircuitBreaker } from "../runner/correction-circuit.js";
 import { readSkillBody as readSkillBodyGeneric } from "../runner/skill-body.js";
 import { realAgentEnv } from "./agent-list.js";
@@ -230,6 +231,53 @@ function runtimeDir(projectPath: string): string {
 // ── FIX-216b: consecutive-failure auto-PAUSE ──────────────────────────────────
 
 const PAUSE_THRESHOLD = 3;
+
+// FIX-363 (loop resilience): after this many failures of the SAME card, skip-list
+// the poison pill (the picker skips it) + reset the global counter so the loop
+// keeps delivering OTHER cards instead of auto-PAUSING the whole loop on one bad
+// card. Matched to PAUSE_THRESHOLD so a single repeatedly-failing card is isolated
+// at the same point the whole loop would otherwise have paused.
+const CARD_SKIP_THRESHOLD = 3;
+
+/**
+ * FIX-363: a card was just skip-listed (failed K times). Write an ACTIONABLE
+ * alert so the owner knows WHICH card was parked and that the loop kept going —
+ * instead of the loop silently auto-pausing on it. The card stays Todo; an owner
+ * fixes it (or clears `.roll/loop/skip-cards.json`) to re-arm it.
+ */
+function writeCardSkipAlert(
+  alertsPath: string,
+  eventsPath: string,
+  cycleId: string,
+  storyId: string,
+  count: number,
+): void {
+  const msg =
+    `# ALERT — poison-pill card parked (loop kept running)\n\n` +
+    `**Cycle**: ${cycleId}\n` +
+    `**Card**: ${storyId}\n` +
+    `**Reason**: failed ${count}× — skip-listed so the loop keeps delivering OTHER cards instead of pausing.\n` +
+    `**Action**: investigate ${storyId} (it likely needs a smaller split, a spec fix, or manual delivery). ` +
+    `Once addressed, remove it from \`.roll/loop/skip-cards.json\` (or just fix the card) to re-arm it.\n`;
+  try {
+    appendFileSync(alertsPath, `${msg}\n`, "utf8");
+  } catch {
+    /* best-effort */
+  }
+  try {
+    new EventBus().appendEvent(eventsPath, {
+      type: "alert:notify",
+      channel: "loop-safety",
+      message: `poison-pill card ${storyId} parked after ${count} failures — loop kept running`,
+      ts: Date.now(),
+    });
+  } catch {
+    /* best-effort */
+  }
+  process.stderr.write(
+    `loop run-once: card ${storyId} failed ${count}× — skip-listed (loop keeps delivering other cards, not paused)\n`,
+  );
+}
 
 /**
  * Increment the consecutive-failure counter for a project. If threshold is
@@ -665,6 +713,7 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     const storyId = (result.state?.ctx?.storyId ?? "").trim();
     announceReport(id.path, id.slug, storyId);
     resetConsecutiveFails(id.path);
+    clearCardFailure(runtimeDir(id.path), storyId); // FIX-363: a delivered card clears its poison-pill tally
   }
   if (result.terminal === "published") {
     process.stdout.write(
@@ -681,6 +730,7 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     const storyId = (result.state?.ctx?.storyId ?? "").trim();
     announceReport(id.path, id.slug, storyId);
     resetConsecutiveFails(id.path);
+    clearCardFailure(runtimeDir(id.path), storyId); // FIX-363: sound local work clears the card's poison-pill tally
     process.stdout.write(
       "loop run-once: gates passed but publish did not complete — work committed locally on the branch, not published (unpublished, not a failure)\n" +
         "loop run-once: 闸已通过但未完成发布——工作已在分支上本地提交,尚未发布(未发布,非失败)\n",
@@ -718,7 +768,18 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
       });
       if (!suppressGoalZeroDelivery) {
         const storyId = (result.state?.ctx?.storyId ?? "").trim();
-        incrementConsecutiveFails(id.path, id.slug, alertsPath, paths.eventsPath, cycleId, storyId, result.terminal ?? "unknown");
+        // FIX-363 (loop resilience): isolate a poison pill. After K failures of
+        // the SAME card, skip-list it (the picker skips it next cycle) + alert +
+        // RESET the global counter, so the loop keeps delivering OTHER cards
+        // instead of auto-PAUSING the whole loop. The global PAUSE is now reserved
+        // for genuinely SYSTEMIC failure (different cards failing in a row).
+        const card = recordCardFailure(runtimeDir(id.path), storyId, CARD_SKIP_THRESHOLD);
+        if (card.nowSkipped) {
+          writeCardSkipAlert(alertsPath, paths.eventsPath, cycleId, storyId, card.count);
+          resetConsecutiveFails(id.path);
+        } else {
+          incrementConsecutiveFails(id.path, id.slug, alertsPath, paths.eventsPath, cycleId, storyId, result.terminal ?? "unknown");
+        }
       }
     }
   }

@@ -18,6 +18,13 @@ export interface PeerReviewerInput {
   requestedReviewer?: string;
 }
 
+export type PeerReviewerUnavailableReason =
+  | "no_installed_reviewer"
+  | "no_external_reviewer"
+  | "no_heterogeneous_reviewer"
+  | "requested_reviewer_is_auxiliary"
+  | "requested_reviewer_unavailable";
+
 export type PeerReviewerSelection =
   | {
       status: "selected";
@@ -29,13 +36,21 @@ export type PeerReviewerSelection =
     }
   | {
       status: "unavailable";
-      reason:
-        | "no_installed_reviewer"
-        | "no_external_reviewer"
-        | "no_heterogeneous_reviewer"
-        | "requested_reviewer_is_auxiliary"
-        | "requested_reviewer_unavailable";
+      reason: PeerReviewerUnavailableReason;
     };
+
+/** One ranked peer reviewer candidate returned by {@link selectPeerReviewers}. */
+export interface PeerReviewerCandidate {
+  effectiveMode: "hetero" | "self";
+  reviewer: string;
+  provider: string;
+  degraded: boolean;
+  reason?: string;
+}
+
+export type PeerReviewersSelection =
+  | { status: "selected"; reviewers: PeerReviewerCandidate[] }
+  | { status: "unavailable"; reason: PeerReviewerUnavailableReason };
 
 export interface PeerReviewFacts {
   agent: string;
@@ -79,53 +94,126 @@ function firstSelfReviewer(candidates: readonly string[], workers: readonly stri
   return canonicalWorkers.find((agent) => installed.includes(agent)) ?? installed[0];
 }
 
-export function selectPeerReviewer(input: PeerReviewerInput): PeerReviewerSelection {
+function selfReviewers(candidates: readonly string[], workers: readonly string[]): string[] {
+  const canonicalWorkers = uniqueCanonical(workers);
+  const out: string[] = [];
+  // Prefer the current worker(s) when they are installed reviewers.
+  for (const worker of canonicalWorkers) {
+    if (candidates.includes(worker) && !out.includes(worker)) out.push(worker);
+  }
+  // Then any other installed external reviewer as rotation fallback.
+  for (const agent of candidates) {
+    if (!out.includes(agent)) out.push(agent);
+  }
+  return out;
+}
+
+function isHeterogeneousFromWorkers(agent: string, workers: readonly string[]): boolean {
+  return workers.length === 0 || workers.every((worker) => isHeterogeneous(worker, agent));
+}
+
+function candidateRecord(agent: string, mode: "hetero" | "self", degraded: boolean, reason?: string): PeerReviewerCandidate {
+  return { effectiveMode: mode, reviewer: agent, provider: agentVendor(agent), degraded, reason };
+}
+
+/**
+ * FIX-336 — return a ranked list of peer reviewer candidates so consumers can
+ * rotate through heterogeneous peers before falling back to self-review. Empty
+ * list semantics are preserved as `unavailable`; `selectPeerReviewer` remains a
+ * thin wrapper that returns the first (or unavailable) for backward compatibility.
+ */
+export function selectPeerReviewers(input: PeerReviewerInput): PeerReviewersSelection {
   const candidates = externalReviewers(input.candidates);
+  const workers = uniqueCanonical(input.workerAgents);
+
   if (input.requestedReviewer !== undefined) {
     const requested = canonicalAgentName(input.requestedReviewer.trim());
     if (reviewerKind(requested) === "auxiliary") return { status: "unavailable", reason: "requested_reviewer_is_auxiliary" };
     if (!candidates.includes(requested)) return { status: "unavailable", reason: "requested_reviewer_unavailable" };
-    return {
-      status: "selected",
-      effectiveMode: uniqueCanonical(input.workerAgents).some((worker) => !isHeterogeneous(worker, requested)) ? "self" : "hetero",
-      reviewer: requested,
-      provider: agentVendor(requested),
-      degraded: false,
-    };
+    const effectiveMode = workers.some((worker) => !isHeterogeneous(worker, requested)) ? "self" : "hetero";
+    return { status: "selected", reviewers: [candidateRecord(requested, effectiveMode, false)] };
   }
 
   if (input.candidates.length === 0) return { status: "unavailable", reason: "no_installed_reviewer" };
   if (candidates.length === 0) return { status: "unavailable", reason: "no_external_reviewer" };
 
   if (input.mode === "self") {
-    const reviewer = firstSelfReviewer(candidates, input.workerAgents);
-    if (reviewer === undefined) return { status: "unavailable", reason: "no_external_reviewer" };
-    return { status: "selected", effectiveMode: "self", reviewer, provider: agentVendor(reviewer), degraded: false };
+    const reviewers = selfReviewers(candidates, input.workerAgents);
+    if (reviewers.length === 0) return { status: "unavailable", reason: "no_external_reviewer" };
+    return { status: "selected", reviewers: reviewers.map((agent) => candidateRecord(agent, "self", false)) };
   }
 
-  // FIX-312 — `auto` is hetero-FIRST. Both `auto` and `hetero` resolve a
-  // different-vendor reviewer here BEFORE any self path is even considered, so a
-  // configured heterogeneous peer is ALWAYS used when one exists; `auto` never
-  // falls back to self while a hetero peer is available. The self fallback below
-  // is reachable only when NO heterogeneous candidate exists (single-vendor env).
-  const workers = uniqueCanonical(input.workerAgents);
-  const hetero = candidates.find((agent) => workers.length === 0 || workers.every((worker) => isHeterogeneous(worker, agent)));
-  if (hetero !== undefined) {
-    return { status: "selected", effectiveMode: "hetero", reviewer: hetero, provider: agentVendor(hetero), degraded: false };
+  // FIX-312 — `auto` is hetero-FIRST. Rank all heterogeneous candidates before any
+  // self path, and include a same-vendor fallback only when auto mode permits it.
+  const hetero = candidates.filter((agent) => isHeterogeneousFromWorkers(agent, workers));
+
+  if (input.mode === "hetero") {
+    if (hetero.length === 0) return { status: "unavailable", reason: "no_heterogeneous_reviewer" };
+    return { status: "selected", reviewers: hetero.map((agent) => candidateRecord(agent, "hetero", false)) };
   }
 
-  if (input.mode === "hetero") return { status: "unavailable", reason: "no_heterogeneous_reviewer" };
+  const selfPool = selfReviewers(
+    candidates.filter((agent) => !isHeterogeneousFromWorkers(agent, workers)),
+    workers,
+  );
 
-  const reviewer = firstSelfReviewer(candidates, workers);
-  if (reviewer === undefined) return { status: "unavailable", reason: "no_external_reviewer" };
+  if (hetero.length === 0) {
+    if (selfPool.length === 0) return { status: "unavailable", reason: "no_external_reviewer" };
+    return { status: "selected", reviewers: selfPool.map((agent) => candidateRecord(agent, "self", true, "single_provider_available")) };
+  }
+
   return {
     status: "selected",
-    effectiveMode: "self",
-    reviewer,
-    provider: agentVendor(reviewer),
-    degraded: true,
-    reason: "single_provider_available",
+    reviewers: [
+      ...hetero.map((agent) => candidateRecord(agent, "hetero", false)),
+      ...selfPool.map((agent) => candidateRecord(agent, "self", true, "all_heterogeneous_peers_failed")),
+    ],
   };
+}
+
+/** Backward-compatible single-reviewer selector: returns the head of the ranked list. */
+export function selectPeerReviewer(input: PeerReviewerInput): PeerReviewerSelection {
+  const selected = selectPeerReviewers(input);
+  if (selected.status === "unavailable") return selected;
+  const first = selected.reviewers[0];
+  if (first === undefined) return { status: "unavailable", reason: "no_external_reviewer" };
+  return { status: "selected", ...first };
+}
+
+/** Spawn result for one candidate inside {@link runPeerReviewerRotation}. */
+export interface PeerReviewerSpawnResult {
+  status: "ok" | "timeout" | "error";
+  stdout: string;
+  reason?: string;
+}
+
+/** Spawn callback for {@link runPeerReviewerRotation}; receives one ranked candidate. */
+export type PeerReviewerSpawnFn = (candidate: PeerReviewerCandidate) => Promise<PeerReviewerSpawnResult>;
+
+export interface PeerReviewerRotationResult {
+  candidate: PeerReviewerCandidate;
+  result: PeerReviewerSpawnResult;
+  attempts: Array<{ candidate: PeerReviewerCandidate; result: PeerReviewerSpawnResult }>;
+}
+
+/**
+ * FIX-336 shared primitive: iterate the ranked heterogeneous candidate list,
+ * stopping on the first successful spawn. Returns the ok candidate+result, or the
+ * last failure if every candidate failed (timeout/error). Undefined only when the
+ * input list is empty.
+ */
+export async function runPeerReviewerRotation(
+  candidates: PeerReviewerCandidate[],
+  spawnFn: PeerReviewerSpawnFn,
+): Promise<PeerReviewerRotationResult | undefined> {
+  const attempts: Array<{ candidate: PeerReviewerCandidate; result: PeerReviewerSpawnResult }> = [];
+  for (const candidate of candidates) {
+    const result = await spawnFn(candidate);
+    attempts.push({ candidate, result });
+    if (result.status === "ok") return { candidate, result, attempts };
+  }
+  const last = attempts[attempts.length - 1];
+  return last === undefined ? undefined : { candidate: last.candidate, result: last.result, attempts };
 }
 
 export function parsePeerReviewTranscript(stdout: string): ParsedPeerReview {

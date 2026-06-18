@@ -23,7 +23,7 @@ roll peer --timeout-ms 300000 --reviewer pi --file /tmp/review.md
 |------|------|
 | `--reviewer <agent>` | 直接指定 reviewer。 |
 | `--worker <agent>` | 用于异构选择的工作 agent；默认取当前项目配置的 agent。 |
-| `--mode auto` | 优先不同 provider，必要时降级为同 provider self review。 |
+| `--mode auto` | 按排序依次尝试异构 reviewer；全部异构候选失败后才降级为同 provider self review。 |
 | `--mode hetero` | 必须不同 provider；不可用时写 `ERROR` fact。 |
 | `--mode self` | 允许同 provider review。 |
 | `--prompt <text>` | 内联 prompt 文本。 |

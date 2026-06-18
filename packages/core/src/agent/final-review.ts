@@ -1,5 +1,5 @@
 import type { GoalReviewMode } from "@roll/spec";
-import { selectPeerReviewer } from "./peer-review.js";
+import { selectPeerReviewers } from "./peer-review.js";
 
 export type EffectiveGoalReviewMode = "hetero" | "self";
 
@@ -20,13 +20,22 @@ export interface GoalFinalReviewerInput {
   workerAgents: readonly string[];
 }
 
+/**
+ * FIX-336 — goal final review now routes through the same ranked primitive as
+ * `roll peer`. This wrapper preserves the old single-reviewer return shape for
+ * callers that only need the head candidate; rotation itself happens at spawn time.
+ */
 export function selectGoalFinalReviewer(input: GoalFinalReviewerInput): GoalFinalReviewerSelection {
-  const selected = selectPeerReviewer({
+  const selected = selectPeerReviewers({
     mode: input.mode,
     candidates: input.installedAgents,
     workerAgents: input.workerAgents,
   });
-  if (selected.status === "selected") return selected;
-  if (selected.reason === "no_heterogeneous_reviewer") return { status: "unavailable", reason: "no_heterogeneous_reviewer" };
-  return { status: "unavailable", reason: "no_installed_reviewer" };
+  if (selected.status === "unavailable") {
+    if (selected.reason === "no_heterogeneous_reviewer") return { status: "unavailable", reason: "no_heterogeneous_reviewer" };
+    return { status: "unavailable", reason: "no_installed_reviewer" };
+  }
+  const first = selected.reviewers[0];
+  if (first === undefined) return { status: "unavailable", reason: "no_installed_reviewer" };
+  return { status: "selected", ...first };
 }

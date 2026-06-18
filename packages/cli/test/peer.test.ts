@@ -84,4 +84,67 @@ describe("FIX-255 roll peer", () => {
     expect(facts.transcriptPath).toBeDefined();
     expect(existsSync(facts.transcriptPath ?? "")).toBe(true);
   });
+
+  it("FIX-336: rotates to the next heterogeneous candidate when the first fails", async () => {
+    const p = project();
+    const calls: string[] = [];
+    const facts = await runPeerReview(
+      { projectPath: p, prompt: "review", mode: "auto", workerAgents: ["claude"], timeoutMs: 1_000 },
+      deps({
+        installedReviewers: () => ["claude", "codex", "kimi"],
+        currentWorker: () => "claude",
+        spawnReviewer: async ({ agent }) => {
+          calls.push(agent);
+          if (agent === "codex") return { status: "error", reason: "spawn_failed", stdout: "FINDING: flake\n" };
+          return { status: "ok", stdout: "VERDICT: APPROVE\nREASON: good\n" };
+        },
+      }),
+    );
+
+    expect(calls).toEqual(["codex", "kimi"]);
+    expect(facts.verdict).toBe("APPROVE");
+    expect(facts.agent).toBe("kimi");
+    const runs = readFileSync(join(p, ".roll", "peer", "runs.jsonl"), "utf8").trim().split("\n");
+    expect(runs).toHaveLength(2);
+    expect(runs[0]).toContain('"verdict":"ERROR"');
+    expect(runs[0]).toContain('"agent":"codex"');
+    expect(runs[1]).toContain('"verdict":"APPROVE"');
+    expect(runs[1]).toContain('"agent":"kimi"');
+  });
+
+  it("FIX-336: returns the last failure when every candidate fails", async () => {
+    const p = project();
+    const facts = await runPeerReview(
+      { projectPath: p, prompt: "review", mode: "auto", workerAgents: ["claude"], timeoutMs: 1_000 },
+      deps({
+        installedReviewers: () => ["claude", "codex", "kimi"],
+        currentWorker: () => "claude",
+        spawnReviewer: async () => ({ status: "error", reason: "all_down", stdout: "" }),
+      }),
+    );
+
+    expect(facts.verdict).toBe("ERROR");
+    expect(facts.agent).toBe("claude");
+    const runs = readFileSync(join(p, ".roll", "peer", "runs.jsonl"), "utf8").trim().split("\n");
+    expect(runs).toHaveLength(3);
+  });
+
+  it("FIX-336: auto degradation is recorded only after hetero peers fail", async () => {
+    const p = project();
+    const facts = await runPeerReview(
+      { projectPath: p, prompt: "review", mode: "auto", workerAgents: ["claude"], timeoutMs: 1_000 },
+      deps({
+        installedReviewers: () => ["claude", "codex", "kimi"],
+        currentWorker: () => "claude",
+        spawnReviewer: async ({ agent }) => {
+          if (agent === "claude") return { status: "ok", stdout: "VERDICT: APPROVE\nREASON: self\n" };
+          return { status: "error", reason: "down", stdout: "" };
+        },
+      }),
+    );
+
+    expect(facts.agent).toBe("claude");
+    expect(facts.effectiveMode).toBe("self");
+    expect(facts.degradedReason).toBe("all_heterogeneous_peers_failed");
+  });
 });

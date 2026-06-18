@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { agentsInstalled, parsePeerReviewTranscript, selectPeerReviewer, type PeerReviewFacts, type PeerReviewMode } from "@roll/core";
+import { agentsInstalled, parsePeerReviewTranscript, selectPeerReviewers, type PeerReviewFacts, type PeerReviewMode } from "@roll/core";
 import { agentInstalledByName, projectAgent, realAgentEnv } from "./agent-list.js";
 import { textAgentArgv, textAgentCommandFamily } from "../lib/text-agent-argv.js";
 
@@ -197,7 +197,7 @@ function unavailableFacts(reason: string, durationMs: number): PeerReviewFacts {
 export async function runPeerReview(input: PeerReviewRunInput, deps: PeerReviewDeps = realDeps()): Promise<PeerReviewFacts> {
   const started = deps.nowMs();
   const candidates = deps.installedReviewers();
-  const selection = selectPeerReviewer({
+  const selection = selectPeerReviewers({
     mode: input.mode,
     candidates,
     workerAgents: input.workerAgents.length > 0 ? input.workerAgents : [deps.currentWorker()],
@@ -207,45 +207,54 @@ export async function runPeerReview(input: PeerReviewRunInput, deps: PeerReviewD
     return writePeerFacts(input.projectPath, unavailableFacts(selection.reason, deps.nowMs() - started), undefined);
   }
 
-  const commandFamily = textAgentCommandFamily(selection.reviewer) ?? selection.reviewer;
-  const ran = await deps.spawnReviewer({
-    agent: selection.reviewer,
-    projectPath: input.projectPath,
-    prompt: input.prompt,
-    timeoutMs: input.timeoutMs,
-  });
-  const durationMs = deps.nowMs() - started;
-  const base = {
-    agent: selection.reviewer,
-    provider: selection.provider,
-    commandFamily,
-    effectiveMode: selection.effectiveMode,
-    findings: [],
-    durationMs,
-    ...(selection.degraded ? { degradedReason: selection.reason ?? "single_provider_available" } : {}),
-  };
-  const path = transcriptPath(input.projectPath, deps.nowIso(), selection.reviewer);
+  let lastFacts: PeerReviewFacts | undefined;
+  for (const reviewer of selection.reviewers) {
+    const commandFamily = textAgentCommandFamily(reviewer.reviewer) ?? reviewer.reviewer;
+    const ran = await deps.spawnReviewer({
+      agent: reviewer.reviewer,
+      projectPath: input.projectPath,
+      prompt: input.prompt,
+      timeoutMs: input.timeoutMs,
+    });
+    const durationMs = deps.nowMs() - started;
+    const base = {
+      agent: reviewer.reviewer,
+      provider: reviewer.provider,
+      commandFamily,
+      effectiveMode: reviewer.effectiveMode,
+      findings: [],
+      durationMs,
+      ...(reviewer.degraded ? { degradedReason: reviewer.reason ?? "single_provider_available" } : {}),
+    };
+    const path = transcriptPath(input.projectPath, deps.nowIso(), reviewer.reviewer);
 
-  if (ran.status === "timeout") {
-    return writePeerFacts(
-      input.projectPath,
-      { ...base, verdict: "TIMEOUT", reason: "peer_review_timeout", findings: parsePeerReviewTranscript(ran.stdout).findings, transcriptPath: path },
-      ran.stdout,
-    );
+    let facts: PeerReviewFacts;
+    if (ran.status === "timeout") {
+      facts = {
+        ...base,
+        verdict: "TIMEOUT",
+        reason: "peer_review_timeout",
+        findings: parsePeerReviewTranscript(ran.stdout).findings,
+        transcriptPath: path,
+      };
+    } else if (ran.status === "error") {
+      facts = {
+        ...base,
+        verdict: "ERROR",
+        reason: ran.reason,
+        findings: parsePeerReviewTranscript(ran.stdout).findings,
+        transcriptPath: path,
+        error: ran.reason,
+      };
+    } else {
+      const parsed = parsePeerReviewTranscript(ran.stdout);
+      facts = { ...base, verdict: parsed.verdict, reason: parsed.reason, findings: parsed.findings, transcriptPath: path };
+    }
+    writePeerFacts(input.projectPath, facts, ran.stdout);
+    lastFacts = facts;
+    if (ran.status === "ok") return facts;
   }
-  if (ran.status === "error") {
-    return writePeerFacts(
-      input.projectPath,
-      { ...base, verdict: "ERROR", reason: ran.reason, findings: parsePeerReviewTranscript(ran.stdout).findings, transcriptPath: path, error: ran.reason },
-      ran.stdout,
-    );
-  }
-  const parsed = parsePeerReviewTranscript(ran.stdout);
-  return writePeerFacts(
-    input.projectPath,
-    { ...base, verdict: parsed.verdict, reason: parsed.reason, findings: parsed.findings, transcriptPath: path },
-    ran.stdout,
-  );
+  return lastFacts ?? writePeerFacts(input.projectPath, unavailableFacts("no_peer_succeeded", deps.nowMs() - started), undefined);
 }
 
 interface PeerOptions {

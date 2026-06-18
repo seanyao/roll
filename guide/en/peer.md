@@ -24,7 +24,7 @@ Options:
 |--------|---------|
 | `--reviewer <agent>` | Use one reviewer directly. |
 | `--worker <agent>` | Working agent used for heterogeneous selection. Defaults to this project's configured agent. |
-| `--mode auto` | Prefer a different provider, fall back to self-provider when necessary. |
+| `--mode auto` | Try heterogeneous reviewers in ranked order; fall back to self-provider only after all heterogeneous candidates fail. |
 | `--mode hetero` | Require a different provider; unavailable reviewers produce an `ERROR` fact. |
 | `--mode self` | Allow same-provider review. |
 | `--prompt <text>` | Inline prompt text. |

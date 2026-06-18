@@ -1,0 +1,222 @@
+import type { ExecOpts, ExecResult, MinimalFs, ToolDeps, ToolInvocation, ToolPolicy } from "@roll/spec";
+import { describe, expect, it } from "vitest";
+import {
+  BrowserTool,
+  browserTools,
+  type BrowserConsoleOutput,
+  type BrowserDomQueryOutput,
+  type BrowserScreenshotOutput,
+  type BrowserToolId,
+} from "../src/index.js";
+
+const policy = (sandbox: ToolPolicy["sandbox"] = {}): ToolPolicy => ({
+  enabled: true,
+  timeoutMs: 1000,
+  sandbox,
+});
+
+function invocation<I>(toolId: BrowserToolId, input: I, sandbox: ToolPolicy["sandbox"] = {}): ToolInvocation<I> {
+  return {
+    invocationId: `inv-${toolId}`,
+    toolId: toolId as ToolInvocation<I>["toolId"],
+    input,
+    caller: { cycleId: "cycle-1", storyId: "US-TOOL-005", agent: "codex" },
+    policy: policy(sandbox),
+    ts: 100,
+  };
+}
+
+type Call = { command: string; args: readonly string[]; opts?: ExecOpts };
+
+function fakeDeps(handler: (command: string, args: readonly string[], opts?: ExecOpts) => ExecResult | Promise<ExecResult>): ToolDeps & {
+  calls: Call[];
+  files: Map<string, string>;
+} {
+  const files = new Map<string, string>();
+  const calls: Call[] = [];
+  const fs: MinimalFs = {
+    readFile: async (path) => files.get(path) ?? "",
+    writeFile: async (path, data) => {
+      files.set(path, data);
+    },
+    mkdir: async (path) => {
+      files.set(`${path}/`, "");
+    },
+  };
+  return {
+    calls,
+    files,
+    fs,
+    now: () => 100,
+    execFile: async (command, args, opts) => {
+      calls.push({ command, args, opts });
+      return handler(command, args, opts);
+    },
+    redact: (value) => value.replaceAll("SECRET", "[REDACTED]"),
+  };
+}
+
+describe("US-TOOL-005 BrowserTool", () => {
+  it("exposes three browser tool declarations from one adapter family", () => {
+    expect(browserTools().map((tool) => tool.declaration.id)).toEqual([
+      "browser.screenshot",
+      "browser.console",
+      "browser.dom-query",
+    ]);
+    expect(browserTools().every((tool) => tool.declaration.kind === "browser")).toBe(true);
+  });
+
+  it("takes a headless screenshot and writes non-empty output", async () => {
+    const deps = fakeDeps((command, args) => {
+      if (command === "npx" && args.includes("screenshot")) {
+        return { exitCode: 0, stdout: JSON.stringify({ finalUrl: "https://example.com/app", statusCode: 200, png: "PNGDATA" }), stderr: "", timedOut: false };
+      }
+      return { exitCode: 1, stdout: "", stderr: "unexpected", timedOut: false };
+    });
+    const result = await new BrowserTool("browser.screenshot").execute(
+      invocation(
+        "browser.screenshot",
+        { url: "https://example.com/app", screenshotPath: "/tmp/out.png", viewport: { width: 800, height: 600 }, waitFor: "#app" },
+        { headlessOnly: true },
+      ),
+      deps,
+    );
+
+    expect(result).toMatchObject({ ok: true, output: { screenshotPath: "/tmp/out.png", finalUrl: "https://example.com/app", statusCode: 200 } });
+    expect(deps.files.get("/tmp/out.png")).toBe("PNGDATA");
+    expect(deps.calls[0]).toMatchObject({ command: "npx" });
+    if (result.ok) expect((result.output as BrowserScreenshotOutput).screenshotPath).toBe("/tmp/out.png");
+  });
+
+  it("captures console logs through the headless lane", async () => {
+    const deps = fakeDeps(() => ({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        finalUrl: "https://example.com/app",
+        statusCode: 200,
+        consoleLogs: [{ level: "log", text: "ready", ts: 123 }],
+      }),
+      stderr: "",
+      timedOut: false,
+    }));
+
+    const result = await new BrowserTool("browser.console").execute(
+      invocation("browser.console", { url: "https://example.com/app", waitFor: "#app" }, { headlessOnly: true }),
+      deps,
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect((result.output as BrowserConsoleOutput).consoleLogs).toEqual([{ level: "log", text: "ready", ts: 123 }]);
+  });
+
+  it("returns DOM query matches through the headless lane", async () => {
+    const deps = fakeDeps(() => ({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        finalUrl: "https://example.com/app",
+        statusCode: 200,
+        domResults: ["Hello", "World"],
+      }),
+      stderr: "",
+      timedOut: false,
+    }));
+
+    const result = await new BrowserTool("browser.dom-query").execute(
+      invocation("browser.dom-query", { url: "https://example.com/app", selector: "h1" }, { headlessOnly: true }),
+      deps,
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect((result.output as BrowserDomQueryOutput).domResults).toEqual(["Hello", "World"]);
+  });
+
+  it("rejects URLs outside allowedOrigins before browser execution", async () => {
+    const deps = fakeDeps(() => ({ exitCode: 0, stdout: "", stderr: "", timedOut: false }));
+    const result = await new BrowserTool("browser.console").execute(
+      invocation("browser.console", { url: "https://evil.test/app" }, { allowedOrigins: ["https://example.com"] }),
+      deps,
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("sandbox_denied");
+    expect(deps.calls).toHaveLength(0);
+  });
+
+  it("honestly skips when the headless lane is unavailable", async () => {
+    const deps = fakeDeps(() => ({ exitCode: 127, stdout: "", stderr: "npx missing", timedOut: false }));
+    const result = await new BrowserTool("browser.console").execute(
+      invocation("browser.console", { url: "https://example.com/app" }, { headlessOnly: true }),
+      deps,
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("adapter_error");
+      expect(result.error.message).toContain("headless browser unavailable");
+    }
+  });
+
+  it("uses the macOS GUI screenshot lane when Aqua is available and headlessOnly is false", async () => {
+    const deps = fakeDeps((command) => {
+      if (command === "launchctl") return { exitCode: 0, stdout: "Aqua\n", stderr: "", timedOut: false };
+      if (command === "osascript") return { exitCode: 0, stdout: "", stderr: "", timedOut: false };
+      if (command === "screencapture") return { exitCode: 0, stdout: "PNGDATA", stderr: "", timedOut: false };
+      return { exitCode: 1, stdout: "", stderr: "unexpected", timedOut: false };
+    });
+
+    const result = await new BrowserTool("browser.screenshot").execute(
+      invocation("browser.screenshot", { url: "https://example.com/app", screenshotPath: "/tmp/gui.png" }, { headlessOnly: false }),
+      deps,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(deps.calls.map((call) => call.command)).toEqual(["launchctl", "osascript", "screencapture"]);
+    expect(deps.files.get("/tmp/gui.png")).toBe("PNGDATA");
+  });
+
+  it("uses the headless lane when Aqua is unavailable and honestly skips if headless is also unavailable", async () => {
+    const deps = fakeDeps((command) => {
+      if (command === "launchctl") return { exitCode: 0, stdout: "Background\n", stderr: "", timedOut: false };
+      if (command === "npx") return { exitCode: 127, stdout: "", stderr: "npx missing", timedOut: false };
+      return { exitCode: 1, stdout: "", stderr: "unexpected", timedOut: false };
+    });
+    const result = await new BrowserTool("browser.screenshot").execute(
+      invocation("browser.screenshot", { url: "https://example.com/app", screenshotPath: "/tmp/gui.png" }, { headlessOnly: false }),
+      deps,
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toContain("headless browser unavailable");
+    expect(deps.calls.map((call) => call.command)).toEqual(["launchctl", "npx"]);
+  });
+
+  it("queues concurrent invocations through one shared browser state", async () => {
+    const observed: string[] = [];
+    let releaseFirst: (() => void) | undefined;
+    const firstBlocked = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const deps = fakeDeps(async (_command, args) => {
+      const url = args.at(-1) ?? "";
+      observed.push(`start:${url}`);
+      if (url.includes("first")) await firstBlocked;
+      observed.push(`end:${url}`);
+      return { exitCode: 0, stdout: JSON.stringify({ finalUrl: url, statusCode: 200, consoleLogs: [] }), stderr: "", timedOut: false };
+    });
+    const shared = browserTools();
+
+    const first = shared[1]!.execute(invocation("browser.console", { url: "https://example.com/first" }, { headlessOnly: true }), deps);
+    const second = shared[1]!.execute(invocation("browser.console", { url: "https://example.com/second" }, { headlessOnly: true }), deps);
+
+    await Promise.resolve();
+    releaseFirst?.();
+    await Promise.all([first, second]);
+
+    expect(observed).toEqual([
+      "start:https://example.com/first",
+      "end:https://example.com/first",
+      "start:https://example.com/second",
+      "end:https://example.com/second",
+    ]);
+  });
+});

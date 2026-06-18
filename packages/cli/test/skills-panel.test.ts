@@ -125,7 +125,7 @@ describe("skillGroupOf", () => {
   it("maps the four groups with a lifecycle fallback", () => {
     expect(skillGroupOf("roll-build")).toBe("delivery");
     expect(skillGroupOf("roll-.review")).toBe("quality");
-    expect(skillGroupOf("roll-brief")).toBe("observe");
+    expect(skillGroupOf("roll-notes")).toBe("observe");
     expect(skillGroupOf("roll-loop")).toBe("lifecycle");
     expect(skillGroupOf("roll-future-unknown")).toBe("lifecycle");
   });

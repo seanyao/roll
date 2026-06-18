@@ -14,6 +14,8 @@
 
 - **showcase 在全局安装下 agent probe 崩溃**:`rollBin()` 定位到全局包的 `conventions/` 而找不到本地 `roll.js`，子进程直接崩掉判所有 agent 不可用；现加回退：本地不存在时走 PATH 的 `roll`。`[showcase]`
 
+- **退役未成熟的生产巡检与 owner 简报**:从活跃 skill 目录、skill 面板、站点 skill 地图和核心 patrol 代码中移除 `roll-sentinel` 和 `roll-brief`，停止将其作为当前核心能力呈现；通用 sentinel 概念(截屏/PAUSE/默认值)原样保留。(FIX-356b) `[skills]`
+
 ## v3.618.2 — 2026-06-18
 
 ### 改进

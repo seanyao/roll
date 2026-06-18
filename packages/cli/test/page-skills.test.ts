@@ -26,7 +26,7 @@ const HUB = (name: string): string =>
 function box(): string {
   const p = mkdtempSync(join(tmpdir(), "roll-pgsk-"));
   dirs.push(p);
-  const names = ["roll-build", "roll-peer", "roll-brief", "roll-loop", "roll-.echo"];
+  const names = ["roll-build", "roll-peer", "roll-notes", "roll-loop", "roll-.echo"];
   const routes: Record<string, { positive: string[]; negative: string[] }> = {};
   for (const n of names) {
     mkdirSync(join(p, "skills", n, "references"), { recursive: true });
@@ -109,7 +109,7 @@ describe("renderSkillsPage — structural fidelity", () => {
   it("groups every skill on disk under its group (real data, zero hardcoded arrays)", () => {
     expect(html).toContain(">roll-build<");
     expect(html).toContain(">roll-peer<");
-    expect(html).toContain(">roll-brief<");
+    expect(html).toContain(">roll-notes<");
     expect(html).toContain(">roll-loop<");
     expect(html).toContain(">roll-.echo<");
   });

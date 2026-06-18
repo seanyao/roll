@@ -50,6 +50,15 @@ export interface PickOptions {
    * burning cost on a zombie. Optional; defaults to "no merged delivery".
    */
   hasMergedDelivery?: (id: string) => boolean;
+  /**
+   * FIX-363 (loop resilience): true iff this story is on the runtime skip-list —
+   * it failed K times (a poison pill that, before this, halted the WHOLE loop
+   * after 3 consecutive fails via the cron auto-PAUSE). The loop now SKIPS it and
+   * keeps delivering OTHER cards, flagging the poison pill for owner attention
+   * instead of stopping. Optional; defaults to "skip nothing". Runtime-only
+   * (`.roll/loop/skip-cards.json`, gitignored) — it never mutates backlog truth.
+   */
+  shouldSkip?: (id: string) => boolean;
 }
 
 /** First occurrence of a depends-on tag, mirroring the bash regex. */
@@ -87,6 +96,7 @@ export function parseDependsOn(desc: string): string[] {
 export function pickStory(items: BacklogItem[], opts: PickOptions = {}): BacklogItem | undefined {
   const hasOpenPr = opts.hasOpenPr ?? (() => false);
   const hasMergedDelivery = opts.hasMergedDelivery ?? (() => false);
+  const shouldSkip = opts.shouldSkip ?? (() => false);
 
   // Done-ness index over the parsed items (bash re-greps the file per dep; here
   // we read the same parsed model). A dep is satisfied iff a row with that id
@@ -109,6 +119,11 @@ export function pickStory(items: BacklogItem[], opts: PickOptions = {}): Backlog
     // even if its backlog status was (wrongly) reset to 📋 Todo. The picker is
     // blind to delivery truth, so this guard is injected from runs.jsonl.
     if (hasMergedDelivery(it.id)) return false;
+    // FIX-363: a poison-pill card (failed K times) is on the runtime skip-list —
+    // skip it so the loop keeps delivering OTHER cards instead of halting. The
+    // card stays Todo in the backlog (truth unchanged); an owner clears the
+    // skip-list (or fixes the card) to re-arm it.
+    if (shouldSkip(it.id)) return false;
     return true;
   };
 

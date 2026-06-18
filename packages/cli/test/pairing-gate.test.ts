@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { enabledPairingStages, reviewTimeoutMs, runPairing, type PairEvent, type RunPairingDeps } from "../src/runner/pairing-gate.js";
+import { buildPairScorePrompt, enabledPairingStages, reviewTimeoutMs, runPairing, type PairEvent, type RunPairingDeps } from "../src/runner/pairing-gate.js";
 
 function project(yaml: string | null): { dir: string; rt: string } {
   const dir = mkdtempSync(join(tmpdir(), "roll-pair-"));
@@ -734,5 +734,21 @@ describe("retryPeerConsult — FIX-293 follow-up: same-type SEPARATE-SESSION fal
     const none = events.find((e) => e.type === "pair:none-available") as Extract<PairEvent, { type: "pair:none-available" }>;
     expect(none.reason).toContain("no peer could be consulted");
     expect(existsSync(join(rt, "peer", "cycle-c-none.pair.json"))).toBe(false);
+  });
+});
+
+describe("buildPairScorePrompt — FIX-363 intent-aware scoring (don't misjudge removals)", () => {
+  it("instructs the scorer to grade against the stated goal and not treat intended deletions as regressions", () => {
+    const prompt = buildPairScorePrompt("Story: FIX-356b\nGoal: Remove roll-sentinel from active skills and patrol code\nDiff stat:\n14 files, 14 insertions(+), 501 deletions(-)");
+    // grades against the goal, not raw deletion volume
+    expect(prompt).toMatch(/STATED GOAL/i);
+    expect(prompt).toMatch(/REMOVE|RETIRE|DELETE|REFACTOR/);
+    expect(prompt).toMatch(/deletions ARE the intended/i);
+    expect(prompt).toMatch(/do NOT treat the deletion volume/i);
+    // still emits the structured score contract
+    expect(prompt).toContain("SCORE:");
+    expect(prompt).toContain("VERDICT: good|ok|regression");
+    // the delivery summary (with its Goal line) is embedded
+    expect(prompt).toContain("Goal: Remove roll-sentinel");
   });
 });

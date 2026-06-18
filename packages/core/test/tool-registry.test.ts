@@ -219,6 +219,20 @@ describe("US-TOOL-002 ToolRegistry", () => {
     expect(registry.snapshotCosts()).toEqual([]);
   });
 
+  it("still emits tool events for CLI invocations without a cycleId", async () => {
+    const events = sink();
+    const registry = new ToolRegistry({ deps: deps(), policyEngine: policyEngine(), events });
+    registry.register(tool());
+
+    const result = await registry.invoke(TOOL_ID, cliRequest("cli"));
+
+    expect(result).toMatchObject({ ok: true, output: "cli" });
+    expect(events.types).toEqual(["tool:invoke", "tool:result"]);
+    expect(events.events[0]).toMatchObject({ type: "tool:invoke", invocation: expect.objectContaining({ invocationId: "inv-cli" }) });
+    expect(events.events[1]).toMatchObject({ type: "tool:result", invocationId: "inv-cli", result: { ok: true, meta: expect.any(Object) } });
+    expect(registry.snapshotCosts()).toEqual([]);
+  });
+
   it("preserves the registry currency on tool cost rows", async () => {
     const registry = new ToolRegistry({ deps: deps(), policyEngine: policyEngine(), currency: "CNY" });
     registry.register(tool());

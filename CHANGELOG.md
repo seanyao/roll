@@ -18,6 +18,8 @@
 
 - **GitHub 工具适配器落地**:新增 infra GitHubTool,同一 adapter family 提供 `github.pr`、`github.ci`,复用现有 gh CLI wrapper 处理 PR 创建/状态/合并与 CI 状态/重跑,保持 GitHub 调用语义不变。(US-TOOL-007) `[tools-layer]`
 
+- **Filesystem 工具适配器落地**:新增 infra FsTool,同一 adapter family 提供 `filesystem.stat`、`filesystem.read`、`filesystem.write`,按 allowedPaths 管控路径,支持相对路径按项目根解析、读截断和写入前 redaction。(US-TOOL-008) `[tools-layer]`
+
 ## v3.618.3 — 2026-06-18
 
 ### 修复

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### 新功能
+
+- **工具层类型契约落进 spec**:新增 ToolId/ToolDeclaration/ToolInvocation/ToolResult/ToolPolicy/ToolCost 等共享类型,并让 CycleCost 可挂载 toolCosts,为后续 registry、policy 和 adapter 层提供同一套类型词汇。(US-TOOL-001) `[tools-layer]`
+
 ## v3.618.3 — 2026-06-18
 
 ### 修复

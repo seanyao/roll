@@ -2,19 +2,39 @@
 
 ## Unreleased
 
-### 修复
+## v3.617.3 — 2026-06-18
 
-- **国内模型的成本不再被当美元记账**:deepseek/pi/kimi 等按人民币(¥)结算的模型,`roll cycles`、`#loop` 看板、`roll status` 等所有成本展示面现在显示正确币种符号(¥),不再硬编码 `$`;`runs.jsonl` 新增 `cost_currency` 字段记录币种;混币种视图(¥+$)按币种分别汇总,不盲目相加。(FIX-361) `[cost]`
+### 新功能
+
+- **Reasonix agent 支持**:新增 DeepSeek 原生编程 agent 接入,`roll loop` 可选用 reasonix 跑 worker,与 pi/kimi 同等待遇;agent 注册表、展示名、smoke 检查和 loop spawn 全部贯通。(US-AGENT-002, FIX-359) `[agents]`
+
+- **跨卡暖上下文(默认关闭,lever-4)**:codex 会话在相邻 cycle 之间复用,省去每轮冷启动重读近千万 token 的仪式开销——实测 execute 阶段大头就在冷上下文。默认 OFF,需手动开启;关闭时零影响。(lever-4) `[loop-engine]`
+
+### 修复
 
 - **评审闸不再误杀合理的大改动**:之前评审闸在异构评审真正跑完、写出证据之前就检查,导致任何跨多个模块或超过 3 个文件的合理改动(哪怕真做了不同厂的异构评审)都被判"没评审"而让整轮失败——loop 因此交付不了任何实质性大改。现在改成"评审先跑、闸后查":异构评审写出证据后闸才检查,真评审过的大改正常通过;没有异构评审者的单 agent 场景仍走原有的自评兜底。(FIX-362) `[loop-engine]`
 
-- **`roll brief` 已退役**:这个 owner 简报能力面尚未成熟,直接移除避免误导。查看项目状态请用 `roll backlog` 或 `roll status`。(FIX-356a) `[loop]`
+- **国内模型的成本不再被当美元记账**:deepseek/pi/kimi 等按人民币(¥)结算的模型,`roll cycles`、`#loop` 看板、`roll status` 等所有成本展示面现在显示正确币种符号(¥),不再硬编码 `$`;`runs.jsonl` 新增 `cost_currency` 字段记录币种;混币种视图(¥+$)按币种分别汇总,不盲目相加。(FIX-361) `[cost]`
+
+- **不再误拉 IDE 配置目标当评审者**:agy 在 headless 环境反复弹 Google OAuth 登录框——已禁用它当评审者(`canReviewHeadless=false`),止住弹窗拖垮 cycle;agy 仍留注册表可手动使用。(FIX-360) `[pairing]`
 
 - **结对评审池只收能 headless 运行的 reviewer**:`roll pair init`、pairing selector、Review Score 和 peer-gate retry 现在共用 agent profile 的 `canReviewHeadless` 能力;Cursor/Trae 这类 IDE 配置目标不再进入评审/评分候选池,避免选中后 spawn 不出 verdict 拖垮 cycle。(FIX-328) `[pairing]`
 
 - **"接着上一张卡的思路开干"加了防越积越多的保险**:这个提速功能(默认关闭)原本每个循环都会把工作记忆传给下一张卡,一张接一张连环传下去,会让后面的卡背着越来越多前面卡的旧思路、越跑越偏。现在只有"从零开始"的循环才会留记忆,最多隔一张卡传一次,不会再连环累积——把这个开关做成了"开了也不会越用越糟"。(FIX-355) `[loop-engine]`
 
+- **暖会话捕获不再因发布失败而丢失**:以前 cycle 没干净交付保留工作树时暖会话捕获被跳过;现在挪到 agent 退出后立即执行,无论 publish/preserve 结果都记录。(FIX-354) `[loop-engine]`
+
 - **循环现在能看出"花多久才动第一笔"**:以前一个循环从开工到产出第一处改动之间是一段黑箱(只有固定心跳),看不出 agent 摸索仓库用了多久,也就没法判断"预构建/项目地图"这类提速开关到底有没有用。现在加了一个"首次落笔"标记,把开工→第一处改动的耗时单独标出来,让提速效果可量、可证伪。(FIX-357) `[loop-engine]`
+
+- **发版与发布扛 GitHub API 瞬时抖动**:`roll release` 和 runner publish 遇 gh GraphQL EOF 不再直接崩溃——先重试再回落 REST,网络抖动可自愈,不需人工收尾。(FIX-353) `[release]`
+
+- **事件流时间戳统一为毫秒**:阶段事件用毫秒而结对闸与周期终态用秒的静默不一致已修复——所有时长计算现在归一,不再暗中打坏。(FIX-352) `[loop-engine]`
+
+- **`roll brief` 已退役**:这个 owner 简报能力面尚未成熟,直接移除避免误导。查看项目状态请用 `roll backlog` 或 `roll status`。(FIX-356a) `[loop]`
+
+### 改进
+
+- **技能可视化图谱页面**:站点新增技能关系图浏览页,展示技能之间的依赖与调用关系。(#795) `[site]`
 
 ## v3.617.2 — 2026-06-17
 

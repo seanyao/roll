@@ -6,6 +6,8 @@
 
 - **工具层类型契约落进 spec**:新增 ToolId/ToolDeclaration/ToolInvocation/ToolResult/ToolPolicy/ToolCost 等共享类型,并让 CycleCost 可挂载 toolCosts,为后续 registry、policy 和 adapter 层提供同一套类型词汇。(US-TOOL-001) `[tools-layer]`
 
+- **工具注册表核心落地**:新增 core/tools ToolRegistry 与 Tool 接口,统一 register/invoke/shutdown/snapshotCosts 路径,把 policy、预算、事件、retry 和成本累计都收进可测试的核心层。(US-TOOL-002) `[tools-layer]`
+
 ## v3.618.3 — 2026-06-18
 
 ### 修复

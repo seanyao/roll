@@ -8,6 +8,8 @@
 
 - **工具注册表核心落地**:新增 core/tools ToolRegistry 与 Tool 接口,统一 register/invoke/shutdown/snapshotCosts 路径,把 policy、预算、事件、retry 和成本累计都收进可测试的核心层。(US-TOOL-002) `[tools-layer]`
 
+- **工具策略从 policy.yaml 解析**:新增 ToolPolicyEngine,从 `.roll/policy.yaml` 的 `tools:` section 解析 enabled、timeout、retry、预算和 sandbox 字段,未知字段只告警不拒绝。(US-TOOL-003) `[tools-layer]`
+
 ## v3.618.3 — 2026-06-18
 
 ### 修复

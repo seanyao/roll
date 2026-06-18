@@ -4,6 +4,8 @@
 
 ### 修复
 
+- **`roll release` 可反复执行并自愈中断**：release 分支或 PR 已存在时不再失败，而是复用已有分支/PR 并跳过已完成步骤；auto-merge 已开启或 PR 已合并时幂等跳过；配合已有的 GraphQL EOF 重试 + REST 回退，一次网络抖动不再毁掉发版。(FIX-330) `[release]`
+
 - **多智能体评审更扛抖动**：`roll peer` 和 `roll loop go --review auto` 现在会按排序依次尝试多个异构 reviewer，单个 agent 超时或崩溃时自动换下一个，不再因为一次失败就误判为无可用 reviewer 或终止终审。(FIX-336) `[pairing]`
 
 - **审计并清理 v2→v3 "假 Done" 死 bash 引用**:系统扫描技能合约与文档中已退役的 `source "$(command -v roll)"` 和 `_loop_*` bash 调用,确认 US-AGENT-008/009 的 self-downgrade 能力在 v3 缺失并退回状态;技能审计新增 `dead-bash-ref` 回归闸,`roll skills audit --strict` 不再允许新的死 bash 引用进入 skill 合约。(FIX-364) `[feedback-truth-alignment]`

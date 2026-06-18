@@ -149,6 +149,18 @@ describe("resolveStoryAcItems — FIX-226 stub-owner AC fallback", () => {
 describe("attestCommand", () => {
   it("writes evidence.json + report.html under a run dir and points latest at it", async () => {
     const proj = project();
+    mkdirSync(join(proj, ".roll", "loop"), { recursive: true });
+    writeFileSync(
+      join(proj, ".roll", "loop", "runs.jsonl"),
+      JSON.stringify({ cycle_id: "C-TOOL", story_id: "FIX-300", run_id: "C-TOOL", status: "merged", outcome: "delivered", agent: "codex" }) + "\n",
+    );
+    writeFileSync(
+      join(proj, ".roll", "loop", "events.ndjson"),
+      [
+        JSON.stringify({ type: "cycle:start", cycleId: "C-TOOL", storyId: "FIX-300", agent: "codex", ts: 1 }),
+        JSON.stringify({ type: "cycle:end", cycleId: "C-TOOL", outcome: "delivered", cost: { cycleId: "C-TOOL", agent: "codex", model: "gpt-5", tokensIn: 1, tokensOut: 1, estimatedCost: 0.01, revertCount: 0, effectiveCost: 0.01, currency: "USD", toolCosts: [{ toolId: "bash", invocations: 2, durationMs: 21000, failures: 0, estimatedCost: 0, currency: "USD" }] }, ts: 2 }),
+      ].join("\n") + "\n",
+    );
     const code = await silenced(() =>
       inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
     );
@@ -158,6 +170,8 @@ describe("attestCommand", () => {
     expect(existsSync(join(runDir, "evidence.json"))).toBe(true);
     const html = readFileSync(join(runDir, "FIX-300-report.html"), "utf8");
     expect(html).toContain("FIX-300 — Acceptance Evidence");
+    expect(html).toContain("Tool cost");
+    expect(html).toContain("bash×2(21s)");
     expect(lstatSync(join(storyDir, "latest")).isSymbolicLink()).toBe(true);
     expect(readlinkSync(join(storyDir, "latest"))).toBe("2026-06-06T01-02-03");
     // FIX-231: a fresh report changes the dossier's truth — the front page is

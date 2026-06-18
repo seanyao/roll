@@ -454,6 +454,7 @@ export interface CycleView {
   cost_currency?: string;
   cost_list?: number | null;
   cron_cost?: number | null;
+  tool_summary?: string;
   story?: string | null;
   built?: string[];
   model?: string | null;
@@ -545,6 +546,7 @@ export function cycleRow(cy: CycleView): string[] {
     prMarker = " " + c(markC, `#${prNum} ${markSym}`);
   }
   const legacyMarker = cy.cost_list_legacy ? " " + c("muted", "[legacy]") : "";
+  const tools = cy.tool_summary && cy.tool_summary !== "" ? c("muted", pad(cy.tool_summary, 22)) + " " : "";
   const inner =
     "  " +
     c(glyphC, glyph, { bold: true }) +
@@ -558,6 +560,7 @@ export function cycleRow(cy: CycleView): string[] {
     modelSeg +
     c("muted", pad(cost, 7, "r")) +
     "   " +
+    tools +
     c(sidC, idsStr, { bold: true }) +
     prMarker +
     legacyMarker;

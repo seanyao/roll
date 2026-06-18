@@ -328,7 +328,8 @@ describe("FIX-277 review fixes — gate-aware commitPush helper and step marks",
     const calls = [];
     const exec = (cmd, args) => {
       calls.push([cmd, ...args].join(" "));
-      if (cmd === "git" && args[0] === "rev-parse") return "main\n";
+      if (cmd === "git" && args[0] === "rev-parse" && args[1] === "--abbrev-ref") return "main\n";
+      if (cmd === "git" && args[0] === "rev-parse") throw new Error("fatal: Needed a single revision");
       if (cmd === "git" && args[0] === "commit") throw new Error("✗ Commit blocked by hook");
       return "";
     };
@@ -383,17 +384,33 @@ describe("openPrResilient — FIX-353 transient EOF → retry → REST POST fall
 
   it("gh pr create succeeds first try → returns the PR url (no REST)", () => {
     const { gh, calls } = fakeGh((args) =>
-      args.includes("create")
-        ? { code: 0, stdout: "https://github.com/o/r/pull/10\n", stderr: "" }
-        : { code: 1, stdout: "", stderr: "unexpected" },
+      args.includes("view")
+        ? { code: 0, stdout: "", stderr: "" } // no existing PR
+        : args.includes("create")
+          ? { code: 0, stdout: "https://github.com/o/r/pull/10\n", stderr: "" }
+          : { code: 1, stdout: "", stderr: "unexpected" },
     );
     const url = openPrResilient({ cwd: "/repo", branch: "release/v1", title: "Release: v1", body: "b", gh, slug: () => "o/r" });
     expect(url).toBe("https://github.com/o/r/pull/10");
-    expect(calls.length).toBe(1); // no retry, no REST
+    expect(calls.filter((c) => c.includes("view")).length).toBe(1);
+    expect(calls.filter((c) => c.includes("create")).length).toBe(1);
+    expect(calls.find((c) => c[0] === "api")).toBeUndefined();
+  });
+
+  it("FIX-330 AC1: an existing open PR is reused instead of creating a duplicate", () => {
+    const { gh, calls } = fakeGh((args) =>
+      args.includes("view")
+        ? { code: 0, stdout: "https://github.com/o/r/pull/7\n", stderr: "" }
+        : { code: 0, stdout: "https://github.com/o/r/pull/99\n", stderr: "" },
+    );
+    const url = openPrResilient({ cwd: "/repo", branch: "release/v1", title: "Release: v1", body: "b", gh, slug: () => "o/r" });
+    expect(url).toBe("https://github.com/o/r/pull/7");
+    expect(calls.some((c) => c.includes("create"))).toBe(false);
   });
 
   it("gh pr create EOFs every attempt → REST POST creates the PR", () => {
     const { gh, calls } = fakeGh((args) => {
+      if (args.includes("view")) return { code: 0, stdout: "", stderr: "" };
       if (args.includes("create") && !args.includes("api")) return { code: 1, stdout: "", stderr: EOF };
       if (args[0] === "api") return { code: 0, stdout: "https://github.com/o/r/pull/20\n", stderr: "" };
       return { code: 1, stdout: "", stderr: "?" };
@@ -411,9 +428,14 @@ describe("openPrResilient — FIX-353 transient EOF → retry → REST POST fall
   });
 
   it("a REAL 4xx create error → throws, NO retry, NO REST fallback", () => {
-    const { gh, calls } = fakeGh(() => ({ code: 1, stdout: "", stderr: "HTTP 422: Validation Failed" }));
+    const { gh, calls } = fakeGh((args) =>
+      args.includes("view")
+        ? { code: 0, stdout: "", stderr: "" }
+        : { code: 1, stdout: "", stderr: "HTTP 422: Validation Failed" },
+    );
     expect(() => openPrResilient({ cwd: "/repo", branch: "b", title: "t", body: "x", gh, slug: () => "o/r" })).toThrow(/gh pr create failed/);
-    expect(calls.length).toBe(1); // surfaced immediately
+    expect(calls.filter((c) => c.includes("view")).length).toBe(1);
+    expect(calls.filter((c) => c.includes("create")).length).toBe(1);
     expect(calls.find((c) => c[0] === "api")).toBeUndefined();
   });
 });
@@ -422,13 +444,29 @@ describe("enableAutoMergeResilient — FIX-353 transient EOF → retry → REST 
   const EOF = `Post "https://api.github.com/graphql": EOF`;
 
   it("gh pr merge --auto succeeds first try → no REST", () => {
-    const { gh, calls } = fakeGh(() => ({ code: 0, stdout: "", stderr: "" }));
+    const { gh, calls } = fakeGh((args) =>
+      args.includes("autoMergeRequest")
+        ? { code: 0, stdout: "null\n", stderr: "" } // not yet armed
+        : { code: 0, stdout: "", stderr: "" },
+    );
     expect(() => enableAutoMergeResilient({ cwd: "/repo", prRef: "https://github.com/o/r/pull/5", gh, slug: () => "o/r" })).not.toThrow();
-    expect(calls.length).toBe(1);
+    expect(calls.filter((c) => c.includes("autoMergeRequest")).length).toBe(1);
+    expect(calls.filter((c) => c.includes("merge") && c[0] !== "api").length).toBe(1);
+  });
+
+  it("FIX-330 AC2: already armed → no merge call (idempotent)", () => {
+    const { gh, calls } = fakeGh((args) =>
+      args.includes("autoMergeRequest")
+        ? { code: 0, stdout: "SCHEDULED\n", stderr: "" }
+        : { code: 0, stdout: "", stderr: "" },
+    );
+    expect(() => enableAutoMergeResilient({ cwd: "/repo", prRef: "https://github.com/o/r/pull/5", gh, slug: () => "o/r" })).not.toThrow();
+    expect(calls.some((c) => c.includes("merge"))).toBe(false);
   });
 
   it("gh pr merge EOFs → REST PUT …/pulls/N/merge fallback (sha not pinned here)", () => {
     const { gh, calls } = fakeGh((args) => {
+      if (args.includes("autoMergeRequest")) return { code: 0, stdout: "null\n", stderr: "" };
       if (args.includes("merge") && args[0] !== "api") return { code: 1, stdout: "", stderr: EOF };
       if (args[0] === "api") return { code: 0, stdout: "true\n", stderr: "" };
       return { code: 1, stdout: "", stderr: "?" };
@@ -443,6 +481,7 @@ describe("enableAutoMergeResilient — FIX-353 transient EOF → retry → REST 
 
   it("REST 405 (checks not green) → does NOT throw (wait loop + GitHub finish it)", () => {
     const { gh } = fakeGh((args) => {
+      if (args.includes("autoMergeRequest")) return { code: 0, stdout: "null\n", stderr: "" };
       if (args.includes("merge") && args[0] !== "api") return { code: 1, stdout: "", stderr: EOF };
       if (args[0] === "api") return { code: 1, stdout: "", stderr: "HTTP 405: Method Not Allowed (required status checks pending)" };
       return { code: 1, stdout: "", stderr: "?" };
@@ -453,8 +492,95 @@ describe("enableAutoMergeResilient — FIX-353 transient EOF → retry → REST 
   });
 
   it("auto-merge genuinely disabled (non-transient) → actionable throw", () => {
-    const { gh, calls } = fakeGh(() => ({ code: 1, stdout: "", stderr: "auto-merge is not allowed for this repository" }));
+    const { gh, calls } = fakeGh((args) =>
+      args.includes("autoMergeRequest")
+        ? { code: 0, stdout: "null\n", stderr: "" }
+        : { code: 1, stdout: "", stderr: "auto-merge is not allowed for this repository" },
+    );
     expect(() => enableAutoMergeResilient({ cwd: "/repo", prRef: "https://github.com/o/r/pull/3", gh, slug: () => "o/r" })).toThrow(/Allow auto-?merge/i);
-    expect(calls.length).toBe(1); // not transient → no retry
+    expect(calls.filter((c) => c.includes("autoMergeRequest")).length).toBe(1);
+    expect(calls.filter((c) => c.includes("merge")).length).toBe(1); // not transient → no retry
+  });
+});
+
+describe("FIX-330 — release transaction is re-runnable and self-healing", () => {
+  /** A scriptable synchronous exec for testing commitPushWithGate. */
+  function scriptExec(responses: Record<string, { stdout?: string; throw?: string }>) {
+    const calls: string[][] = [];
+    const exec = (cmd: string, args: string[]): string => {
+      calls.push([cmd, ...args]);
+      const key = [cmd, ...args].join(" ");
+      const r = responses[key];
+      if (r?.throw !== undefined) throw new Error(r.throw);
+      return r?.stdout ?? "";
+    };
+    return { calls, exec };
+  }
+
+  it("commitPushWithGate reuses an existing local release branch", () => {
+    const { calls, exec } = scriptExec({
+      "git rev-parse --abbrev-ref HEAD": { stdout: "main\n" },
+      "git rev-parse --verify refs/heads/release/v1": { stdout: "abc123\n" },
+      "git checkout release/v1": { stdout: "" },
+      "git add package.json CHANGELOG.md": { stdout: "" },
+      "git log release/v1 --grep Release: v1 --oneline -n 1": { stdout: "" },
+      "roll test": { stdout: "" },
+      "git commit -m Release: v1": { stdout: "" },
+      "git push -u origin release/v1": { stdout: "" },
+    });
+    commitPushWithGate({ branch: "release/v1", message: "Release: v1", rollManaged: true, exec });
+    expect(calls.some((c) => c.join(" ") === "git checkout -b release/v1")).toBe(false);
+    expect(calls.some((c) => c.join(" ") === "git checkout release/v1")).toBe(true);
+  });
+
+  it("commitPushWithGate skips commit when the release commit already exists", () => {
+    const { calls, exec } = scriptExec({
+      "git rev-parse --abbrev-ref HEAD": { stdout: "main\n" },
+      "git rev-parse --verify refs/heads/release/v1": { stdout: "abc123\n" },
+      "git checkout release/v1": { stdout: "" },
+      "git add package.json CHANGELOG.md": { stdout: "" },
+      "git log release/v1 --grep Release: v1 --oneline -n 1": { stdout: "abc123 Release: v1\n" },
+      "git push -u origin release/v1": { stdout: "" },
+    });
+    commitPushWithGate({ branch: "release/v1", message: "Release: v1", rollManaged: true, exec });
+    expect(calls.some((c) => c[0] === "roll" && c[1] === "test")).toBe(false);
+    expect(calls.some((c) => c[0] === "git" && c[1] === "commit")).toBe(false);
+    expect(calls.some((c) => c.join(" ") === "git push -u origin release/v1")).toBe(true);
+  });
+
+  it("commitPushWithGate fetches and reuses an existing remote release branch", () => {
+    const { calls, exec } = scriptExec({
+      "git rev-parse --abbrev-ref HEAD": { stdout: "main\n" },
+      "git rev-parse --verify refs/heads/release/v1": { throw: "fatal: Needed a single revision" },
+      "git ls-remote --heads origin release/v1": { stdout: "abc123\trefs/heads/release/v1\n" },
+      "git fetch origin release/v1:release/v1": { stdout: "" },
+      "git checkout release/v1": { stdout: "" },
+      "git add package.json CHANGELOG.md": { stdout: "" },
+      "git log release/v1 --grep Release: v1 --oneline -n 1": { stdout: "" },
+      "roll test": { stdout: "" },
+      "git commit -m Release: v1": { stdout: "" },
+      "git push -u origin release/v1": { stdout: "" },
+    });
+    commitPushWithGate({ branch: "release/v1", message: "Release: v1", rollManaged: true, exec });
+    expect(calls.some((c) => c.join(" ") === "git checkout -b release/v1")).toBe(false);
+    expect(calls.some((c) => c.join(" ") === "git fetch origin release/v1:release/v1")).toBe(true);
+  });
+
+  it("runReleaseFlow reaches released even when the branch/PR are reused leftovers", async () => {
+    // Simulate a resumed transaction: the bump+changelog are already committed
+    // and pushed, the PR is already open and armed, and GitHub has merged it.
+    const { deps, steps } = fakeDeps({
+      commitPush: (_c, b) => {
+        // no-op idempotent reuse
+      },
+      openPr: () => "https://github.com/x/y/pull/1",
+      enableAutoMerge: (_c, pr) => {
+        // no-op: already armed / merged while resuming
+      },
+      waitMerged: () => true,
+    });
+    const res = await runReleaseFlow("/repo", deps, { dryRun: false, yes: true });
+    expect(res.status).toBe("released");
+    expect(steps.at(-1)).toBe("tag-push");
   });
 });

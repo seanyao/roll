@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { auditSkills, formatHumanReport, parseFrontmatter } from "../src/lib/skills-audit.js";
+import { auditSkills, findDeadBashRefs, formatHumanReport, parseFrontmatter } from "../src/lib/skills-audit.js";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -99,6 +99,24 @@ describe("auditSkills", () => {
     expect(text).toContain("Violations: 0");
     expect(text).toContain("- roll-build: ok (");
     expect(text.endsWith("\n")).toBe(true);
+  });
+
+  it("flags dead bash references in SKILL.md and referenced spokes", () => {
+    const dir = skillsTree({
+      "roll-loop": {
+        md:
+          "---\nname: roll-loop\ndescription: Load when operating the loop.\n---\n# Roll Loop\n\n" +
+          "Run `bash -c 'source \"$(command -v roll)\"; _loop_mark_in_progress US-XXX'`.\n\n## Gotchas\n- g\n",
+        refs: {
+          "references/full-contract.md":
+            "Call `_loop_pr_inbox` after CI passes.\n",
+        },
+      },
+    });
+    const v = auditSkills({ skillsDir: dir }).skills[0]!.violations;
+    expect(v).toContain("dead-bash-ref:source-roll");
+    expect(v).toContain("dead-bash-ref:_loop_mark_in_progress");
+    expect(v).toContain("dead-bash-ref:_loop_pr_inbox");
   });
 });
 

@@ -135,7 +135,7 @@ expose the behavior intentionally.
 
 ### Real example
 
-Tests asserting `grep -q '_loop_check_depends_on' <output>` would break
+Tests asserting `grep -q 'some_internal_helper' <output>` would break
 the moment the helper is renamed, even though the gating logic is
 unchanged. The right assertion is "story X is skipped because dep Y
 is unsatisfied," verified through the public side effect (story stays

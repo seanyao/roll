@@ -729,7 +729,7 @@ immediately writes an ALERT and stops. Instead it tries to fix CI autonomously.
 
 **Loop's own PRs (`loop/*`) that turn red after a cycle exits** are detected
 (US-LOOP-049) and **background-healed** (US-LOOP-062a): classified as
-`loop_self_ci_red`, the PR Loop routes them to `_loop_pr_heal_self`, which checks
+`loop_self_ci_red`, the PR Loop routes them to `roll loop pr-heal-run`, which checks
 out the PR branch and hands the failing-CI context to the project's agent
 (`_project_agent`) — bounded by a per-PR heal budget (`ROLL_LOOP_HEAL_MAX`,
 default 2) and a per-PR lock that prevents duplicate concurrent heals. The heal
@@ -748,15 +748,12 @@ runs in the background so the PR tick continues. When heal is disabled
 
 Each loop cycle processes open PRs before picking new stories.
 
-**Review command:**
+**Review skill:**
 
-```bash
-roll review-pr <number>   # AI review using the project's configured agent
-```
-
-The command fetches the PR title, body, and diff via `gh`, renders a review
-prompt, and routes it to whatever agent `_project_agent()` returns (Claude,
-Kimi, DeepSeek, etc.). The agent outputs a structured verdict:
+PR review is dispatched through the `roll-review-pr` skill. It fetches the PR
+title, body, and diff via `gh`, renders a review prompt, and routes it to the
+project's configured agent (Claude, Kimi, DeepSeek, etc.). The agent outputs a
+structured verdict:
 
 | Verdict | Action |
 |---------|--------|
@@ -767,29 +764,29 @@ Kimi, DeepSeek, etc.). The agent outputs a structured verdict:
 **Escape hatch:** Add `[skip-ai-review]` anywhere in the PR body to
 auto-approve without invoking the agent.
 
-**How the loop uses it:** `_loop_pr_inbox` classifies each open PR and routes
-`eligible` PRs to `_loop_pr_review_external`, which calls `roll review-pr`.
-Loop's own PRs (`loop/*` branches) are skipped to avoid same-source bias.
+**How the loop uses it:** `roll loop pr-inbox` classifies each open PR and routes
+`eligible` PRs to the `roll-review-pr` skill. Loop's own PRs (`loop/*` branches)
+are skipped to avoid same-source bias.
 
 **Stale PR rebase:** PRs classified as `stale` (CI failed or branch behind/conflicting)
-are automatically rebased onto `origin/main` via `_loop_pr_rebase_stale`. A circuit
+are automatically rebased onto `origin/main` by the runner's stale-PR rebase. A circuit
 breaker limits rebase attempts to 3 within 24 hours — after that, an ALERT is raised.
 Fork PRs are skipped (no write access) with an ALERT.
 
 **Bot review detection:** If a GitHub Actions bot has already reviewed the PR
-(e.g. via the optional GHA workflow), `_loop_pr_inbox` defers:
+(e.g. via the optional GHA workflow), `roll loop pr-inbox` defers:
 - Bot `APPROVED` → skip, let auto-merge proceed
 - Bot `CHANGES_REQUESTED` → write ALERT (loop PR rejected by GHA reviewer)
 
 **Active merge of approved PRs (US-LOOP-062b):** when a PR is human-approved,
 CI-green, and mergeable, the PR Loop merges it directly (`gh pr merge --squash`)
-via `_loop_pr_merge_approved` rather than waiting for repo-level auto-merge
+through the runner's approved-PR merge rather than waiting for repo-level auto-merge
 (which may be disabled). Merge failure is non-fatal — the PR is left open and
 retried on the next tick.
 
 ### Optional: Event-driven PR review (GHA)
 
-Without extra setup, `_loop_pr_inbox` reviews eligible PRs each loop cycle
+Without extra setup, `roll loop pr-inbox` reviews eligible PRs each loop cycle
 (up to ~1 hour delay). For seconds-fast feedback on GitHub-hosted repos,
 install the event-driven workflow:
 
@@ -797,12 +794,12 @@ install the event-driven workflow:
 cp templates/workflows/pr-review-event.yml .github/workflows/
 ```
 
-This triggers `roll review-pr` on every PR open/update. Fork PRs and PRs
+This triggers the `roll-review-pr` skill on every PR open/update. Fork PRs and PRs
 with `[skip-ai-review]` in the body are automatically skipped. The template
 requires only one API key secret — the one matching your configured agent.
 
 The two modes coexist: the GHA workflow provides instant feedback, and
-`_loop_pr_inbox` acts as a safety net if the workflow is not installed.
+`roll loop pr-inbox` acts as a safety net if the workflow is not installed.
 
 ## Session Cleanup
 

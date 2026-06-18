@@ -1,5 +1,5 @@
 import type { GitResult } from "../git.js";
-import { commit as gitCommit, git, push as gitPush } from "../git.js";
+import { rawGit } from "../git.js";
 import type { ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
 
 export type GitToolId = "git.commit" | "git.status" | "git.push" | "git.merge";
@@ -79,11 +79,13 @@ export class GitTool {
     try {
       if (this.id === "git.commit") {
         const input = invocation.input as GitCommitInput;
-        return ok(invocation, startedAt, deps.now(), await gitCommit(input.cwd, deps.redact(input.message), { allowEmpty: input.allowEmpty }));
+        const args = ["commit", "-m", deps.redact(input.message)];
+        if (input.allowEmpty === true) args.splice(1, 0, "--allow-empty");
+        return ok(invocation, startedAt, deps.now(), await rawGit(args, input.cwd));
       }
       if (this.id === "git.status") {
         const input = invocation.input as GitStatusInput;
-        const result = await git(["status", "--short"], input.cwd);
+        const result = await rawGit(["status", "--short"], input.cwd);
         return {
           ok: true,
           output: { ...toOutput(result), clean: result.code === 0 && result.stdout.trim() === "" },
@@ -92,11 +94,13 @@ export class GitTool {
       }
       if (this.id === "git.push") {
         const input = invocation.input as GitPushInput;
-        return ok(invocation, startedAt, deps.now(), await gitPush(input.cwd, input.branch, { remote: input.remote, setUpstream: input.setUpstream }));
+        const remote = input.remote ?? "origin";
+        const args = input.setUpstream === true ? ["push", "-u", remote, input.branch] : ["push", remote, input.branch];
+        return ok(invocation, startedAt, deps.now(), await rawGit(args, input.cwd));
       }
       const input = invocation.input as GitMergeInput;
       const args = ["merge", ...(input.ffOnly === true ? ["--ff-only"] : []), ...(input.noCommit === true ? ["--no-commit"] : []), input.ref];
-      return ok(invocation, startedAt, deps.now(), await git(args, input.cwd));
+      return ok(invocation, startedAt, deps.now(), await rawGit(args, input.cwd));
     } catch (cause) {
       return {
         ok: false,

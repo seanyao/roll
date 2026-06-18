@@ -49,7 +49,11 @@ import { promisify } from "node:util";
 import {
   type ProjectIdentityInputs,
   projectSlug,
+  type ToolDeclaration,
+  type ToolInvocation,
+  type ToolResult,
 } from "@roll/spec";
+import { invokeInfraTool } from "./tools/delegation.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -66,7 +70,7 @@ export interface GitResult {
  * + captured streams so callers can mirror bash's explicit exit-code handling
  * (`if git ...; then` / `|| true`). Throws only on spawn failure (git missing).
  */
-export async function git(args: readonly string[], cwd?: string): Promise<GitResult> {
+export async function rawGit(args: readonly string[], cwd?: string): Promise<GitResult> {
   try {
     const { stdout, stderr } = await execFileAsync("git", [...args], {
       cwd,
@@ -86,6 +90,50 @@ export async function git(args: readonly string[], cwd?: string): Promise<GitRes
     }
     throw e; // git binary not found / unspawnable
   }
+}
+
+const GIT_RAW_DECLARATION: ToolDeclaration = {
+  id: "git.raw" as ToolDeclaration["id"],
+  kind: "git",
+  title: "Git Raw",
+  description: "Run arbitrary git argv through the infra tool delegation seam.",
+  defaults: { enabled: true, timeoutMs: 60_000 },
+  requirements: [{ kind: "executable", name: "git", optional: false }],
+};
+
+const GIT_COMMIT_DECLARATION: ToolDeclaration = {
+  id: "git.commit" as ToolDeclaration["id"],
+  kind: "git",
+  title: "Git Commit",
+  description: "Commit staged changes through the infra tool delegation seam.",
+  emitsEvents: true,
+  defaults: { enabled: true, timeoutMs: 60_000 },
+  requirements: [{ kind: "executable", name: "git", optional: false }],
+};
+
+const GIT_PUSH_DECLARATION: ToolDeclaration = {
+  id: "git.push" as ToolDeclaration["id"],
+  kind: "git",
+  title: "Git Push",
+  description: "Push a branch through the infra tool delegation seam.",
+  emitsEvents: true,
+  defaults: { enabled: true, timeoutMs: 60_000 },
+  requirements: [{ kind: "executable", name: "git", optional: false }],
+};
+
+/**
+ * Run `git <args>` through the infra tool delegation seam. This preserves the
+ * old return shape while adding tool events for callers that set
+ * ROLL_TOOL_EVENTS_PATH or ROLL_PROJECT_RUNTIME_DIR.
+ */
+export async function git(args: readonly string[], cwd?: string): Promise<GitResult> {
+  const result = await invokeInfraTool<GitRawInput, GitResult>({
+    declaration: GIT_RAW_DECLARATION,
+    input: { args: [...args], cwd },
+    run: async (invocation) => ok(invocation, await rawGit(invocation.input.args, invocation.input.cwd)),
+  });
+  if (result.ok) return result.output;
+  throw new Error(result.error.message);
 }
 
 // ─── worktree lifecycle ──────────────────────────────────────────────────────
@@ -282,9 +330,17 @@ export async function commit(
   message: string,
   opts: { allowEmpty?: boolean } = {},
 ): Promise<GitResult> {
-  const args = ["commit", "-m", message];
-  if (opts.allowEmpty === true) args.splice(1, 0, "--allow-empty");
-  return git(args, repoCwd);
+  const result = await invokeInfraTool<GitCommitInput, GitResult>({
+    declaration: GIT_COMMIT_DECLARATION,
+    input: { cwd: repoCwd, message, allowEmpty: opts.allowEmpty },
+    run: async (invocation) => {
+      const args = ["commit", "-m", invocation.input.message];
+      if (invocation.input.allowEmpty === true) args.splice(1, 0, "--allow-empty");
+      return ok(invocation, await rawGit(args, invocation.input.cwd));
+    },
+  });
+  if (result.ok) return result.output;
+  return { code: 1, stdout: "", stderr: result.error.message };
 }
 
 /**
@@ -296,9 +352,19 @@ export async function push(
   branch: string,
   opts: { setUpstream?: boolean; remote?: string } = {},
 ): Promise<GitResult> {
-  const remote = opts.remote ?? "origin";
-  const args = opts.setUpstream === true ? ["push", "-u", remote, branch] : ["push", remote, branch];
-  return git(args, repoCwd);
+  const result = await invokeInfraTool<GitPushInput, GitResult>({
+    declaration: GIT_PUSH_DECLARATION,
+    input: { cwd: repoCwd, branch, remote: opts.remote, setUpstream: opts.setUpstream },
+    run: async (invocation) => {
+      const remote = invocation.input.remote ?? "origin";
+      const args = invocation.input.setUpstream === true
+        ? ["push", "-u", remote, invocation.input.branch]
+        : ["push", remote, invocation.input.branch];
+      return ok(invocation, await rawGit(args, invocation.input.cwd));
+    },
+  });
+  if (result.ok) return result.output;
+  return { code: 1, stdout: "", stderr: result.error.message };
 }
 
 /**
@@ -474,4 +540,38 @@ async function realpathQuiet(p: string): Promise<string | undefined> {
   } catch {
     return undefined;
   }
+}
+
+interface GitRawInput {
+  args: string[];
+  cwd?: string;
+}
+
+interface GitCommitInput {
+  cwd: string;
+  message: string;
+  allowEmpty?: boolean;
+}
+
+interface GitPushInput {
+  cwd: string;
+  branch: string;
+  remote?: string;
+  setUpstream?: boolean;
+}
+
+function ok<I>(invocation: ToolInvocation<I>, output: GitResult): ToolResult<GitResult> {
+  const now = Date.now();
+  return {
+    ok: true,
+    output,
+    meta: {
+      invocationId: invocation.invocationId,
+      toolId: invocation.toolId,
+      caller: invocation.caller,
+      startedAt: invocation.ts,
+      endedAt: now,
+      durationMs: Math.max(0, now - invocation.ts),
+    },
+  };
 }

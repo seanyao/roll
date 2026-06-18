@@ -76,6 +76,8 @@
  */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import type { ToolDeclaration, ToolInvocation, ToolResult } from "@roll/spec";
+import { invokeInfraTool } from "./tools/delegation.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -93,7 +95,7 @@ export interface GhResult {
  * spawn failure (gh binary missing), which callers gate with {@link ghAvailable}
  * exactly as the oracle's `_gh_available` precondition does.
  */
-export async function gh(args: readonly string[]): Promise<GhResult> {
+export async function rawGh(args: readonly string[]): Promise<GhResult> {
   try {
     const { stdout, stderr } = await execFileAsync("gh", [...args], {
       encoding: "utf8",
@@ -110,6 +112,45 @@ export async function gh(args: readonly string[]): Promise<GhResult> {
     }
     throw e; // gh binary not found / unspawnable
   }
+}
+
+const GH_RAW_DECLARATION: ToolDeclaration = {
+  id: "github.raw" as ToolDeclaration["id"],
+  kind: "github",
+  title: "GitHub Raw",
+  description: "Run arbitrary gh argv through the infra tool delegation seam.",
+  defaults: { enabled: true, timeoutMs: 60_000 },
+  requirements: [{ kind: "executable", name: "gh", optional: false }],
+};
+
+const GITHUB_PR_DECLARATION: ToolDeclaration = {
+  id: "github.pr" as ToolDeclaration["id"],
+  kind: "github",
+  title: "GitHub PR",
+  description: "Run governed GitHub PR operations through the infra tool delegation seam.",
+  emitsEvents: true,
+  defaults: { enabled: true, timeoutMs: 60_000 },
+  requirements: [{ kind: "executable", name: "gh", optional: false }],
+};
+
+const GITHUB_CI_DECLARATION: ToolDeclaration = {
+  id: "github.ci" as ToolDeclaration["id"],
+  kind: "github",
+  title: "GitHub CI",
+  description: "Run governed GitHub CI operations through the infra tool delegation seam.",
+  emitsEvents: true,
+  defaults: { enabled: true, timeoutMs: 60_000 },
+  requirements: [{ kind: "executable", name: "gh", optional: false }],
+};
+
+export async function gh(args: readonly string[]): Promise<GhResult> {
+  const result = await invokeInfraTool<GhRawInput, GhResult>({
+    declaration: GH_RAW_DECLARATION,
+    input: { args: [...args] },
+    run: async (invocation) => ok(invocation, await rawGh(invocation.input.args)),
+  });
+  if (result.ok) return result.output;
+  throw new Error(result.error.message);
 }
 
 // ─── FIX-353: transient gh GraphQL EOF resilience ────────────────────────────
@@ -379,12 +420,18 @@ export interface PrCreateInput {
  */
 export async function prCreate(input: PrCreateInput): Promise<string> {
   const base = input.base ?? "main";
-  const r = await gh([
-    "-R", input.slug, "pr", "create",
-    "--base", base, "--head", input.head,
-    "--title", input.title, "--body", input.body,
-  ]);
-  return r.code === 0 ? r.stdout.trim() : "";
+  const r = await invokeInfraTool<GitHubPrCreateToolInput, GhResult>({
+    declaration: GITHUB_PR_DECLARATION,
+    input: { action: "create", ...input, base },
+    run: async (invocation) => ok(invocation, await rawGh([
+      "-R", invocation.input.slug, "pr", "create",
+      "--base", invocation.input.base, "--head", invocation.input.head,
+      "--title", invocation.input.title, "--body", invocation.input.body,
+    ])),
+  });
+  if (!r.ok) return "";
+  const result = r.output;
+  return result.code === 0 ? result.stdout.trim() : "";
 }
 
 /** Merge mode the oracle arms a PR with. */
@@ -401,7 +448,15 @@ export type PrMergeMode = "auto" | "admin" | "plain";
  */
 export async function prMerge(slug: string, ref: string, mode: PrMergeMode): Promise<GhResult> {
   const flags = mode === "auto" ? ["--auto"] : mode === "admin" ? ["--admin"] : [];
-  return gh(["-R", slug, "pr", "merge", ref, ...flags, "--squash", "--delete-branch"]);
+  const result = await invokeInfraTool<GitHubPrMergeToolInput, GhResult>({
+    declaration: GITHUB_PR_DECLARATION,
+    input: { action: "merge", slug, ref, mode },
+    run: async (invocation) => ok(invocation, await rawGh([
+      "-R", invocation.input.slug, "pr", "merge", invocation.input.ref, ...flags, "--squash", "--delete-branch",
+    ])),
+  });
+  if (result.ok) return result.output;
+  return { code: 1, stdout: "", stderr: result.error.message };
 }
 
 /**
@@ -566,10 +621,21 @@ export async function runList(
   if (opts.branch !== undefined) args.push("--branch", opts.branch);
   args.push("--json", fields);
   if (opts.limit !== undefined) args.push("-L", String(opts.limit));
-  const r = await gh(args);
-  if (r.code !== 0 || r.stdout.trim() === "") return [];
+  const r = await invokeInfraTool<GitHubCiStatusToolInput, GhResult>({
+    declaration: GITHUB_CI_DECLARATION,
+    input: { action: "status", slug, fields, commit: opts.commit, branch: opts.branch, limit: opts.limit },
+    run: async (invocation) => {
+      const argv = ["-R", invocation.input.slug, "run", "list"];
+      if (invocation.input.commit !== undefined) argv.push("--commit", invocation.input.commit);
+      if (invocation.input.branch !== undefined) argv.push("--branch", invocation.input.branch);
+      argv.push("--json", invocation.input.fields);
+      if (invocation.input.limit !== undefined) argv.push("-L", String(invocation.input.limit));
+      return ok(invocation, await rawGh(argv));
+    },
+  });
+  if (!r.ok || r.output.code !== 0 || r.output.stdout.trim() === "") return [];
   try {
-    const j = JSON.parse(r.stdout) as RunRow[];
+    const j = JSON.parse(r.output.stdout) as RunRow[];
     return Array.isArray(j) ? j : [];
   } catch {
     return [];
@@ -815,4 +881,45 @@ export async function runPublishPlan(
   }
 
   return { prUrl, ok: prUrl !== "", status: 0 };
+}
+
+interface GhRawInput {
+  args: string[];
+}
+
+interface GitHubPrCreateToolInput extends PrCreateInput {
+  action: "create";
+  base: string;
+}
+
+interface GitHubPrMergeToolInput {
+  action: "merge";
+  slug: string;
+  ref: string;
+  mode: PrMergeMode;
+}
+
+interface GitHubCiStatusToolInput {
+  action: "status";
+  slug: string;
+  fields: string;
+  commit?: string;
+  branch?: string;
+  limit?: number;
+}
+
+function ok<I>(invocation: ToolInvocation<I>, output: GhResult): ToolResult<GhResult> {
+  const now = Date.now();
+  return {
+    ok: true,
+    output,
+    meta: {
+      invocationId: invocation.invocationId,
+      toolId: invocation.toolId,
+      caller: invocation.caller,
+      startedAt: invocation.ts,
+      endedAt: now,
+      durationMs: Math.max(0, now - invocation.ts),
+    },
+  };
 }

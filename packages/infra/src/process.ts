@@ -49,6 +49,9 @@
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import type { ExecOpts, ExecResult, ToolInvocation, ToolResult } from "@roll/spec";
+import { BashTool, type BashInput, type BashOutput } from "./tools/bash.js";
+import { infraToolExecFile, infraToolFs, invokeInfraTool, redactInfraToolValue } from "./tools/delegation.js";
 
 /** v2 default: outer PR-loop lock staleness (bin/roll 8326). */
 export const OUTER_LOCK_STALE_SEC = 900;
@@ -64,6 +67,43 @@ export type Clock = () => number;
 
 /** Default clock: `Math.floor(Date.now()/1000)` == `date -u +%s`. */
 export const systemClock: Clock = () => Math.floor(Date.now() / 1000);
+
+/**
+ * argv-only process execution through the governed bash tool. Existing lock and
+ * heartbeat code stays file-based; new process call sites can use this seam to
+ * emit tool events without depending on the core ToolRegistry package.
+ */
+export async function execFile(command: string, args: readonly string[], opts: ExecOpts = {}): Promise<ExecResult> {
+  const tool = new BashTool();
+  const result = await invokeInfraTool<BashInput, BashOutput>({
+    declaration: tool.declaration,
+    input: {
+      command,
+      args: [...args],
+      ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
+      ...(opts.env !== undefined ? { env: { ...opts.env } } : {}),
+    },
+    policy: {
+      timeoutMs: opts.timeoutMs,
+      sandbox: {
+        maxOutputBytes: opts.maxOutputBytes,
+      },
+    },
+    run: (invocation: ToolInvocation<BashInput>): Promise<ToolResult<BashOutput>> => tool.execute(invocation, {
+      fs: infraToolFs,
+      now: () => Date.now(),
+      execFile: infraToolExecFile,
+      redact: redactInfraToolValue,
+    }),
+  });
+  if (result.ok) return { ...result.output };
+  return {
+    exitCode: result.error.code === "timeout" ? 124 : 1,
+    stdout: "",
+    stderr: result.error.message,
+    timedOut: result.error.code === "timeout",
+  };
+}
 
 /**
  * Injectable PID-liveness probe — mirrors `kill -0 <pid>` (true = process

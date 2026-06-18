@@ -34,6 +34,8 @@
 
 - **网页 Loop 账本展示工具调用轨迹**:Truth Console 的 Loop cycle 行现在在成本列旁露出工具摘要,展开后展示每次工具调用、失败 errorCode 和按原生币种标注的工具成本,截图证据可直接证明 USD 与 CNY/RMB 不会混标。(US-TOOL-013) `[tools-layer]`
 
+- **既有 infra 调用迁移到工具治理路径**:process exec、git/gh wrapper 和默认 web screenshot 现在会经 infra tool delegation seam 执行,保留原命令语义的同时向 events.ndjson 追加脱敏 tool invoke/result 事件。(US-TOOL-014) `[tools-layer]`
+
 ## v3.618.3 — 2026-06-18
 
 ### 修复

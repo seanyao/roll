@@ -32,6 +32,12 @@ describe("US-TOOL-001 tool type contracts", () => {
     expect(exports).toMatchSnapshot();
   });
 
+  it("re-exports tool contracts from the types barrel", () => {
+    const source = readFileSync(resolve(import.meta.dirname, "../src/types/index.ts"), "utf8");
+
+    expect(source).toContain('export * from "./tool.js";');
+  });
+
   it("types declarations, invocation, result, policy, deps, events, and costs", () => {
     const id: ToolId = "bash.exec";
     const kind: ToolKind = "bash";

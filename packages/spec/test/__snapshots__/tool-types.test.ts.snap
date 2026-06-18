@@ -1,0 +1,26 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`US-TOOL-001 tool type contracts > exports the complete tool type surface 1`] = `
+[
+  "ExecOpts",
+  "ExecResult",
+  "MinimalFs",
+  "ToolCaller",
+  "ToolCost",
+  "ToolDeclaration",
+  "ToolDefaults",
+  "ToolDeps",
+  "ToolError",
+  "ToolErrorCode",
+  "ToolEvent",
+  "ToolId",
+  "ToolInvocation",
+  "ToolKind",
+  "ToolMeta",
+  "ToolPolicy",
+  "ToolRequirement",
+  "ToolResult",
+  "ToolRetry",
+  "ToolSandbox",
+]
+`;

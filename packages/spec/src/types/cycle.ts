@@ -1,4 +1,6 @@
 /** Cycle contracts (BC2/BC8, I11/I12). */
+import type { ToolCost } from "./tool.js";
+
 export type CyclePhase =
   | "pick"
   | "route"
@@ -32,4 +34,6 @@ export interface CycleCost {
   effectiveCost: number;
   /** FIX-361: native currency code (USD/CNY/etc) from the model's price config. */
   currency: string;
+  /** US-TOOL-001: per-tool cost rows accumulated during this cycle. */
+  toolCosts?: ToolCost[];
 }

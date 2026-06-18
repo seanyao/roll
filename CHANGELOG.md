@@ -12,6 +12,8 @@
 
 - **Bash 工具适配器落地**:新增 infra BashTool,通过 argv-only exec seam 执行命令,支持 cwd allowlist、timeout、输出截断、advisory blockedCommands、secret redaction 和 `.roll/tool-dumps/` dump。(US-TOOL-004) `[tools-layer]`
 
+- **Browser 工具适配器落地**:新增 infra BrowserTool,同一 adapter family 提供 `browser.screenshot`、`browser.console`、`browser.dom-query`,支持 allowedOrigins/headlessOnly sandbox、headless/GUI lane、honest skip 和共享队列。(US-TOOL-005) `[tools-layer]`
+
 ## v3.618.3 — 2026-06-18
 
 ### 修复

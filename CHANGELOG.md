@@ -16,6 +16,8 @@
 
 - **Git 工具适配器落地**:新增 infra GitTool,同一 adapter family 提供 `git.commit`、`git.status`、`git.push`、`git.merge`,复用现有 git wrapper 保持命令语义不变,并让 `git.status` 支持成功静默事件。(US-TOOL-006) `[tools-layer]`
 
+- **GitHub 工具适配器落地**:新增 infra GitHubTool,同一 adapter family 提供 `github.pr`、`github.ci`,复用现有 gh CLI wrapper 处理 PR 创建/状态/合并与 CI 状态/重跑,保持 GitHub 调用语义不变。(US-TOOL-007) `[tools-layer]`
+
 ## v3.618.3 — 2026-06-18
 
 ### 修复

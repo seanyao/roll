@@ -22,6 +22,8 @@
 
 - **Network 工具适配器落地**:新增 infra NetworkTool,提供 `network.fetch`,支持 timeout、policy retry、allowedOrigins、network blocked、redirect follow 和 HTTP proxy 环境变量,让 HTTP 探测走统一工具治理路径。(US-TOOL-009) `[tools-layer]`
 
+- **MCP 工具适配器落地**:新增 infra McpTool,提供 `mcp.call`,支持 `.roll/mcp-servers.json` 与 `policy.yaml tools.mcp.servers` 配置、lazy connection reuse、dispose 断开、policy disabled 拒绝和 server unavailable 诚实错误分类。(US-TOOL-010) `[tools-layer]`
+
 ## v3.618.3 — 2026-06-18
 
 ### 修复

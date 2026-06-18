@@ -1,5 +1,5 @@
 import type { ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
-import { gh, prCreate, prMerge, type PrMergeMode, runList } from "../github.js";
+import { rawGh, type PrMergeMode } from "../github.js";
 
 export type GitHubToolId = "github.pr" | "github.ci";
 
@@ -104,37 +104,40 @@ export class GitHubTool {
   private async executePr(invocation: ToolInvocation<GitHubPrInput>, deps: ToolDeps, startedAt: number): Promise<ToolResult<GitHubOutput>> {
     const input = invocation.input;
     if (input.action === "create") {
-      const prUrl = await prCreate({
-        slug: input.slug,
-        head: input.head,
-        base: input.base,
-        title: deps.redact(input.title),
-        body: deps.redact(input.body),
-      });
+      const result = await rawGh([
+        "-R", input.slug, "pr", "create",
+        "--base", input.base ?? "main", "--head", input.head,
+        "--title", deps.redact(input.title), "--body", deps.redact(input.body),
+      ]);
+      if (result.code !== 0) return ghFailure(invocation, startedAt, deps.now(), result);
+      const prUrl = result.stdout.trim();
       if (prUrl === "") return failure(invocation, startedAt, deps.now(), "github pr create failed", true);
       const prNumber = prUrl.split("/").filter(Boolean).at(-1) ?? "";
       return ok(invocation, startedAt, deps.now(), { prUrl, prNumber });
     }
 
     if (input.action === "status") {
-      const result = await gh(["-R", input.slug, "pr", "view", input.ref, "--json", "state", "-q", ".state"]);
+      const result = await rawGh(["-R", input.slug, "pr", "view", input.ref, "--json", "state", "-q", ".state"]);
       if (result.code !== 0) return ghFailure(invocation, startedAt, deps.now(), result);
       const state = result.stdout.trim() === "" ? "UNKNOWN" : result.stdout.trim();
       return ok(invocation, startedAt, deps.now(), { state });
     }
 
-    const result = await prMerge(input.slug, input.ref, input.mode ?? "plain");
+    const mode = input.mode ?? "plain";
+    const flags = mode === "auto" ? ["--auto"] : mode === "admin" ? ["--admin"] : [];
+    const result = await rawGh(["-R", input.slug, "pr", "merge", input.ref, ...flags, "--squash", "--delete-branch"]);
     return ok(invocation, startedAt, deps.now(), toOutput(result));
   }
 
   private async executeCi(invocation: ToolInvocation<GitHubCiInput>, deps: ToolDeps, startedAt: number): Promise<ToolResult<GitHubOutput>> {
     const input = invocation.input;
     if (input.action === "status") {
-      const runs = await runList(input.slug, "status,conclusion", { commit: input.commit });
+      const result = await rawGh(["-R", input.slug, "run", "list", "--commit", input.commit, "--json", "status,conclusion"]);
+      const runs = result.code === 0 ? parseRunRows(result.stdout) : [];
       return ok(invocation, startedAt, deps.now(), { state: ciState(runs), runs });
     }
 
-    const result = await gh(["-R", input.slug, "run", "rerun", input.runId]);
+    const result = await rawGh(["-R", input.slug, "run", "rerun", input.runId]);
     if (result.code !== 0) return ghFailure(invocation, startedAt, deps.now(), result);
     return ok(invocation, startedAt, deps.now(), toOutput(result));
   }
@@ -148,6 +151,21 @@ function ciState(runs: Array<{ status?: string; conclusion?: string | null }>): 
   if (runs.some((run) => run.status === "completed" && run.conclusion === "success")) return "pass";
   if (runs.some((run) => run.status === "completed" && run.conclusion !== "success")) return "fail";
   return "pending";
+}
+
+function parseRunRows(stdout: string): Array<{ status?: string; conclusion?: string | null }> {
+  try {
+    const parsed = JSON.parse(stdout) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((row): row is { status?: unknown; conclusion?: unknown } => typeof row === "object" && row !== null)
+      .map((row) => ({
+        ...(typeof row.status === "string" ? { status: row.status } : {}),
+        ...(typeof row.conclusion === "string" || row.conclusion === null ? { conclusion: row.conclusion } : {}),
+      }));
+  } catch {
+    return [];
+  }
 }
 
 function ok(invocation: ToolInvocation<GitHubInput>, startedAt: number, endedAt: number, output: GitHubOutput): ToolResult<GitHubOutput> {

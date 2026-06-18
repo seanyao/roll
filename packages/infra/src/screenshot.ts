@@ -41,8 +41,11 @@ import { existsSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join, resolve } from "node:path";
+import type { ToolInvocation, ToolResult } from "@roll/spec";
 import type { RunOut } from "./evidence.js";
 import { containsSecret } from "./redact.js";
+import { BrowserTool, type BrowserScreenshotInput, type BrowserScreenshotOutput } from "./tools/browser.js";
+import { infraToolExecFile, infraToolFs, invokeInfraTool, redactInfraToolValue } from "./tools/delegation.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -521,6 +524,10 @@ export async function captureScreenshot(
       // ("无法访问你的文件"), so the capture grabs an error page. Headless Chromium
       // can load file:// with no GUI and no popups.
       const forceHeadless = (env["ROLL_ATTEST_HEADLESS"] ?? "") === "1";
+      if (deps.run === undefined) {
+        const result = await captureWebViaBrowserTool(req, forceHeadless || platform !== "darwin");
+        if (result !== null) return result;
+      }
       // FIX-291 fallback ladder — NEVER silently downgrade to DOM:
       //   (1) macOS GUI (Aqua + screen-recording, not forced headless) → real-browser
       //       screencapture,
@@ -643,6 +650,33 @@ export async function captureScreenshot(
   return fileNonEmpty(req.out)
     ? { kind: req.kind, out: req.out, taken: true }
     : skip("empty capture (tool exit code lied)");
+}
+
+async function captureWebViaBrowserTool(req: ScreenshotRequest, headlessOnly: boolean): Promise<ScreenshotResult | null> {
+  if (req.url === undefined || req.url === "") return null;
+  const tool = new BrowserTool("browser.screenshot");
+  const result = await invokeInfraTool<BrowserScreenshotInput, BrowserScreenshotOutput>({
+    declaration: tool.declaration,
+    input: { url: req.url, screenshotPath: req.out },
+    policy: { sandbox: { headlessOnly, maxOutputBytes: 2 * 1024 * 1024 } },
+    run: (invocation: ToolInvocation<BrowserScreenshotInput>): Promise<ToolResult<BrowserScreenshotOutput>> => tool.execute(invocation, {
+      fs: infraToolFs,
+      now: () => Date.now(),
+      execFile: infraToolExecFile,
+      redact: redactInfraToolValue,
+    }) as Promise<ToolResult<BrowserScreenshotOutput>>,
+  });
+  if (!result.ok) {
+    return {
+      kind: req.kind,
+      out: req.out,
+      taken: false,
+      skipped: `browser.screenshot failed: ${result.error.message}`,
+    };
+  }
+  return fileNonEmpty(req.out)
+    ? { kind: req.kind, out: req.out, taken: true }
+    : { kind: req.kind, out: req.out, taken: false, skipped: "empty capture (browser.screenshot output missing)" };
 }
 
 /**

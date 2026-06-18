@@ -576,7 +576,7 @@ roll loop status                  # 确认新触发时间
 **原因：** `period_minutes` 必须在 1–1440 范围。
 超出范围的值会被拒绝。
 
-**底层：** `_loop_schedule_valid` 在每次读取时校验这组值。不合法时写 ALERT 到
+**底层：** `调度校验器` 在每次读取时校验这组值。不合法时写 ALERT 到
 `~/.shared/roll/loop/ALERT-<slug>.md` 并回退到默认值（period=60，项目路径推导的偏移）。
 
 **解决：**
@@ -762,7 +762,7 @@ gh issue create --title "Safari 上登录失败" --body "复现步骤: ..."
 Where did my loop state / ALERT go after upgrading? Into your project, under
 `<project>/.roll/loop/`.
 
-**需要手动迁移吗？不需要。** 下一个 cycle 自动迁移：`_loop_migrate_legacy_paths`
+**需要手动迁移吗？不需要。** 下一个 cycle 自动迁移：`旧路径迁移`
 把 state / ALERT / PAUSE / mute 复制进项目并把旧文件标记 `.migrated-<时间戳>`；
 `runs.jsonl` 按项目拆分。7 天窗口内，新路径缺失时读取会回退旧家目录路径，升级中
 途不会出问题。

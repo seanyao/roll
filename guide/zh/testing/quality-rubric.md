@@ -110,7 +110,7 @@ afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
 ### 真实代码反例
 
-断言 `grep -q '_loop_check_depends_on' <output>` 的测试，函数一改名就红，但 gating
+断言 `grep -q 'some_internal_helper' <output>` 的测试，函数一改名就红，但 gating
 逻辑没动。正确的断言是"故事 X 因依赖 Y 没满足被跳过"，从公共副作用（故事仍是 📋 Todo、
 日志行被打出来）来观察。
 

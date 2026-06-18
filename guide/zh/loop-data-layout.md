@@ -126,26 +126,26 @@ If you upgrade an existing project you do not need to do anything.
 
 **工作原理：**
 
-1. Before reading control state, `_loop_migrate_legacy_paths <slug>` copies
+1. Before reading control state, `旧路径迁移 helper <slug>` copies
    `state` / `ALERT` / `PAUSE` / `mute` from home into the project, then renames
    each legacy file `<name>.migrated-<timestamp>`.
-2. `_loop_migrate_legacy_runs` splits the machine-wide `runs.jsonl` by each
+2. `旧运行记录迁移 helper` splits the machine-wide `runs.jsonl` by each
    row's `project` slug into each project's file, then renames the legacy file.
    Unresolvable rows are left behind so no history is lost.
 3. Migration is idempotent and never overwrites a newer target.
 
-1. 读控制状态之前，`_loop_migrate_legacy_paths <slug>` 把 `state` / `ALERT` /
+1. 读控制状态之前，`旧路径迁移 helper <slug>` 把 `state` / `ALERT` /
    `PAUSE` / `mute` 从家目录复制进项目，再把每个老文件改名为
    `<name>.migrated-<时间戳>`。
-2. `_loop_migrate_legacy_runs` 把机器级 `runs.jsonl` 按每行的 `project` slug 拆
+2. `旧运行记录迁移 helper` 把机器级 `runs.jsonl` 按每行的 `project` slug 拆
    分进各项目文件，再把老文件改名。无法解析的行留在原处，不丢历史。
 3. 迁移幂等，已存在的更新目标永不被覆盖。
 
 **During the 7-day window**, control-plane reads use dual-path lookup
-(`_loop_control_state_path`): project-local first, legacy home as fallback. A
+(`控制状态路径解析器`): project-local first, legacy home as fallback. A
 separate FIX removes the fallback afterward.
 
-**在 7 天窗口期内**，控制平面文件的读取走双路查找（`_loop_control_state_path`）：
+**在 7 天窗口期内**，控制平面文件的读取走双路查找（`控制状态路径解析器`）：
 优先项目本地路径，回退到家目录老路径。窗口结束后由单独的 FIX 移除回退。
 
 The `.migrated-*` artifacts are reaped by `roll loop gc` after they age out.

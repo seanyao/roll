@@ -39,6 +39,7 @@ export interface SkillAuditEntry {
   referencedSpokes: string[];
   missingSpokeRefs: string[];
   unreferencedSpokes: string[];
+  deadBashRefs: string[];
   routeCoverage: SkillAuditRouteCoverage;
   violations: string[];
 }
@@ -135,6 +136,43 @@ function collectSpokeFiles(skillDir: string): string[] {
   );
 }
 
+/** Detect retired v2 bash invocation patterns that cannot work in v3.
+ *  - `source "$(command -v roll)"` — v3 `roll` is a TS binary, not sourceable.
+ *  - `_loop_*` function names — the bash loop engine is retired; any skill
+ *    contract still instructing agents to call them is a "Done-but-broken"
+ *    reference (FIX-364).
+ */
+export function findDeadBashRefs(text: string): string[] {
+  const refs: string[] = [];
+  if (/source\s+"?\$\(command -v roll\)"?/.test(text)) {
+    refs.push("source-roll");
+  }
+  // Lines that explicitly mention a "retired" helper are documentation notes
+  // telling agents *not* to call them; skip those matches.
+  for (const line of text.split(/\r?\n/)) {
+    if (/retired/i.test(line)) continue;
+    for (const match of line.matchAll(/_loop_[A-Za-z0-9_]+/g)) {
+      const name = match[0];
+      if (name !== undefined && !refs.includes(name)) refs.push(name);
+    }
+  }
+  return refs.sort();
+}
+
+/** Scan every markdown file under a skill directory for dead bash references. */
+function collectDeadBashRefs(skillDir: string): string[] {
+  const all = new Set<string>();
+  for (const file of walkFiles(skillDir).filter((f) => f.endsWith(".md"))) {
+    try {
+      const text = readFileSync(file, "utf8");
+      for (const ref of findDeadBashRefs(text)) all.add(ref);
+    } catch {
+      /* ignore unreadable */
+    }
+  }
+  return [...all].sort();
+}
+
 function collectReferencedSpokes(body: string): string[] {
   const refs = new Set<string>();
   const patterns = [
@@ -156,6 +194,7 @@ export function parseSkillFile(file: string): Omit<SkillAuditEntry, "routeCovera
   const description = fields["description"] ?? "";
   const spokeFiles = collectSpokeFiles(skillDir);
   const referencedSpokes = collectReferencedSpokes(body);
+  const deadBashRefs = collectDeadBashRefs(skillDir);
   return {
     name: fields["name"] ?? skillDir.split(sep).pop() ?? file,
     file,
@@ -172,6 +211,7 @@ export function parseSkillFile(file: string): Omit<SkillAuditEntry, "routeCovera
     referencedSpokes,
     missingSpokeRefs: referencedSpokes.filter((ref) => !spokeFiles.includes(ref)),
     unreferencedSpokes: spokeFiles.filter((filePath) => !referencedSpokes.includes(filePath)),
+    deadBashRefs,
   };
 }
 
@@ -217,6 +257,7 @@ function violationsFor(
   if (skill.lines > 250 && !skill.hasReviewedWaiver) violations.push("hub-over-250-lines");
   for (const missing of skill.missingSpokeRefs) violations.push(`missing-spoke-ref:${missing}`);
   for (const extra of skill.unreferencedSpokes) violations.push(`unreferenced-spoke:${extra}`);
+  for (const ref of skill.deadBashRefs) violations.push(`dead-bash-ref:${ref}`);
   return violations;
 }
 

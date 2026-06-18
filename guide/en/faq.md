@@ -639,7 +639,7 @@ a scheduling ALERT.
 **Why this happens:** `period_minutes` must be 1–1440.
 Values outside this range are rejected.
 
-**Under the hood:** `_loop_schedule_valid` validates the pair on every read.
+**Under the hood:** `the schedule validator` validates the pair on every read.
 An invalid pair triggers an ALERT to `~/.shared/roll/loop/ALERT-<slug>.md`
 and falls back to the default (period=60, project-derived offset).
 
@@ -843,7 +843,7 @@ ALERT is now `<project>/.roll/loop/ALERT-<slug>.md`, state is
 运行时数据放在 `<project>/.roll/loop/`，不再在 `~/.shared/roll/loop/`。
 
 **Do I need to migrate manually?** No. The next cycle migrates legacy files
-automatically: `_loop_migrate_legacy_paths` copies state / ALERT / PAUSE / mute
+automatically: `the legacy-path migration` copies state / ALERT / PAUSE / mute
 into the project and marks each old file `.migrated-<timestamp>`; `runs.jsonl`
 is split per project. During a 7-day window, reads fall back to the old home
 path if the new one is missing — so nothing breaks mid-upgrade.

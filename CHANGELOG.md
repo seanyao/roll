@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### 修复
+
+- **审计并清理 v2→v3 "假 Done" 死 bash 引用**:系统扫描技能合约与文档中已退役的 `source "$(command -v roll)"` 和 `_loop_*` bash 调用,确认 US-AGENT-008/009 的 self-downgrade 能力在 v3 缺失并退回状态;技能审计新增 `dead-bash-ref` 回归闸,`roll skills audit --strict` 不再允许新的死 bash 引用进入 skill 合约。(FIX-364) `[feedback-truth-alignment]`
+
 ### 新功能
 
 - **工具层类型契约落进 spec**:新增 ToolId/ToolDeclaration/ToolInvocation/ToolResult/ToolPolicy/ToolCost 等共享类型,并让 CycleCost 可挂载 toolCosts,为后续 registry、policy 和 adapter 层提供同一套类型词汇。(US-TOOL-001) `[tools-layer]`

@@ -134,31 +134,31 @@ outer runner migrates legacy files automatically on the next cycle.
 **工作原理：**
 
 1. Before reading any control state, the runner calls
-   `_loop_migrate_legacy_paths <slug>`. It copies `state-<slug>.yaml`,
+   `the legacy-path migration helper <slug>`. It copies `state-<slug>.yaml`,
    `ALERT-<slug>.md`, `PAUSE-<slug>`, and `mute-<slug>` from
    `~/.shared/roll/loop/` into `<project>/.roll/loop/`, then renames each legacy
    file to `<name>.migrated-<timestamp>`.
-2. `runs.jsonl` is migrated by `_loop_migrate_legacy_runs`: the machine-wide
+2. `runs.jsonl` is migrated by `the legacy-runs migration helper`: the machine-wide
    file is split by each row's `project` slug into the matching project's
    `.roll/loop/runs.jsonl`, then renamed `runs.jsonl.migrated-<timestamp>`. Rows
    whose slug cannot be resolved are left behind so no history is lost.
 3. Migration is **idempotent** — the `.migrated-*` rename makes a re-run a
    no-op, and an existing newer target is never overwritten.
 
-1. 读任何控制状态之前，runner 调用 `_loop_migrate_legacy_paths <slug>`，把
+1. 读任何控制状态之前，runner 调用 `the legacy-path migration helper <slug>`，把
    `state-<slug>.yaml`、`ALERT-<slug>.md`、`PAUSE-<slug>`、`mute-<slug>` 从
    `~/.shared/roll/loop/` 复制进 `<project>/.roll/loop/`，再把每个老文件改名为
    `<name>.migrated-<时间戳>`。
-2. `runs.jsonl` 由 `_loop_migrate_legacy_runs` 迁移：机器级文件按每行的 `project`
+2. `runs.jsonl` 由 `the legacy-runs migration helper` 迁移：机器级文件按每行的 `project`
    slug 拆分进对应项目的 `.roll/loop/runs.jsonl`，再改名
    `runs.jsonl.migrated-<时间戳>`。无法解析 slug 的行会留在原处，不丢历史。
 3. 迁移**幂等** —— `.migrated-*` 改名让重跑变成 no-op，已存在的更新目标永不被覆盖。
 
 **During the 7-day window**, reads of control-plane files use dual-path lookup
-(`_loop_control_state_path`): the project-local path is preferred, falling back
+(`the control-state path resolver`): the project-local path is preferred, falling back
 to the legacy home path. After the window, a separate FIX removes the fallback.
 
-**在 7 天窗口期内**，控制平面文件的读取走双路查找（`_loop_control_state_path`）：
+**在 7 天窗口期内**，控制平面文件的读取走双路查找（`the control-state path resolver`）：
 优先项目本地路径，回退到家目录老路径。窗口结束后由单独的 FIX 移除回退。
 
 The `.migrated-*` and `runs.jsonl.migrated-*` artifacts are reaped by

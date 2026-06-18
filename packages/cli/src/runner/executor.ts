@@ -1129,38 +1129,14 @@ export async function executeCommand(
           }),
       };
       const peerGateOpts = { heteroAvailable: peerHeteroAvailable };
-      let peerGate = await runPeerGate(ports.paths.worktreePath, runtimeDir, cycleIdStr, peerGateMode, peerGateSinks, peerGateOpts);
-      let peerBlocked = peerGate.blocked;
-      if (peerGate.blocked) {
-        // AC-H3: bounded retry — exactly one re-attempt via the existing consult.
-        const retry = await retryPeerConsult(ports.paths.worktreePath, runtimeDir, cycleIdStr, {
-          installed: peerGateInstalled,
-          workingAgent: peerGateWorker,
-          reviewPeer,
-          diff: cycleDiff,
-          event: (e: PairEvent) => ports.events.appendEvent(ports.paths.eventsPath, e as RollEvent),
-          now: () => eventTs(ports),
-        });
-        if (retry.status === "reviewed" && peerEvidencePresent(runtimeDir, cycleIdStr)) {
-          // Retry produced evidence → re-run the gate; it now sees `consulted`.
-          peerGate = await runPeerGate(ports.paths.worktreePath, runtimeDir, cycleIdStr, peerGateMode, peerGateSinks, peerGateOpts);
-          peerBlocked = peerGate.blocked;
-        }
-        if (peerBlocked) {
-          // Still no peer evidence after the retry → escalate; cycle ends NOT-Done.
-          // The retry already prefers a different-type agent and, when none is
-          // installed, falls back to a fresh SEPARATE-SESSION instance of the
-          // working agent's own type — so a block here means the separate-session
-          // review itself produced no evidence (it timed out / errored), NOT that
-          // no other agent was installed.
-          const how = retry.sameTypeFallback === true ? "same-type separate-session review" : "peer review";
-          ports.events.appendAlert(
-            ports.paths.alertsPath,
-            `peer gate (hard): high-complexity work still without peer evidence after one retry — the ${how} produced no evidence (${retry.status}) — cycle ${cycleIdStr} BLOCKED; story not marked Done`,
-          );
-        }
-      }
-      // US-PAIR-003 cross-agent pairing: after the peer gate, a heterogeneous
+      // FIX-362: the peer-gate EXECUTION moved to AFTER the pairing loop below. The
+      // hetero pairing review (runPairing) is what WRITES the peer-evidence file the
+      // gate reads (peerEvidencePresent), so the gate MUST run after it. Running it
+      // here (before pairing) always saw no evidence yet → it wrongly blocked EVERY
+      // high-complexity / cross-module delivery (e.g. a legit 16-file currency fix)
+      // as `hetero_available_self_review_violation`, even though a genuine hetero
+      // review ran moments later. The peerGate* setup vars above are consumed there.
+      // US-PAIR-003 cross-agent pairing: a heterogeneous
       // peer ONE-WAY reviews the diff. file-absent (.roll/pairing.yaml) = OFF, so
       // this is inert until the owner opts in via `roll pair init` — no behavior
       // change for repos without the config. NEVER blocks the cycle (30s hard
@@ -1207,6 +1183,41 @@ export async function executeCommand(
         // the loop body never runs, so a repo without pairing.yaml is untouched.
         for (const stage of enabledPairingStages(ports.repoCwd)) {
           await runPairing(ports.repoCwd, ports.paths.worktreePath, dirname(ports.paths.eventsPath), ctx.cycleId ?? "", ctx.agent ?? "", stage, pairingDeps);
+        }
+      }
+      // FIX-362: peer-gate runs HERE — AFTER the pairing review wrote its evidence
+      // (.pair.json), so a genuinely hetero-reviewed delivery reads as `consulted`
+      // and is NOT blocked. When pairing is OFF (no pairing.yaml) no evidence exists,
+      // so the gate's own retryPeerConsult fallback runs (single-agent path, unchanged).
+      let peerGate = await runPeerGate(ports.paths.worktreePath, runtimeDir, cycleIdStr, peerGateMode, peerGateSinks, peerGateOpts);
+      let peerBlocked = peerGate.blocked;
+      if (peerGate.blocked) {
+        // AC-H3: bounded retry — exactly one re-attempt via the existing consult.
+        const retry = await retryPeerConsult(ports.paths.worktreePath, runtimeDir, cycleIdStr, {
+          installed: peerGateInstalled,
+          workingAgent: peerGateWorker,
+          reviewPeer,
+          diff: cycleDiff,
+          event: (e: PairEvent) => ports.events.appendEvent(ports.paths.eventsPath, e as RollEvent),
+          now: () => eventTs(ports),
+        });
+        if (retry.status === "reviewed" && peerEvidencePresent(runtimeDir, cycleIdStr)) {
+          // Retry produced evidence → re-run the gate; it now sees `consulted`.
+          peerGate = await runPeerGate(ports.paths.worktreePath, runtimeDir, cycleIdStr, peerGateMode, peerGateSinks, peerGateOpts);
+          peerBlocked = peerGate.blocked;
+        }
+        if (peerBlocked) {
+          // Still no peer evidence after the retry → escalate; cycle ends NOT-Done.
+          // The retry already prefers a different-type agent and, when none is
+          // installed, falls back to a fresh SEPARATE-SESSION instance of the
+          // working agent's own type — so a block here means the separate-session
+          // review itself produced no evidence (it timed out / errored), NOT that
+          // no other agent was installed.
+          const how = retry.sameTypeFallback === true ? "same-type separate-session review" : "peer review";
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `peer gate (hard): high-complexity work still without peer evidence after one retry — the ${how} produced no evidence (${retry.status}) — cycle ${cycleIdStr} BLOCKED; story not marked Done`,
+          );
         }
       }
       const storyId = ctx.storyId ?? "";

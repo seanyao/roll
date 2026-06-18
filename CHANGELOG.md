@@ -6,6 +6,8 @@
 
 - **国内模型的成本不再被当美元记账**:deepseek/pi/kimi 等按人民币(¥)结算的模型,`roll cycles`、`#loop` 看板、`roll status` 等所有成本展示面现在显示正确币种符号(¥),不再硬编码 `$`;`runs.jsonl` 新增 `cost_currency` 字段记录币种;混币种视图(¥+$)按币种分别汇总,不盲目相加。(FIX-361) `[cost]`
 
+- **评审闸不再误杀合理的大改动**:之前评审闸在异构评审真正跑完、写出证据之前就检查,导致任何跨多个模块或超过 3 个文件的合理改动(哪怕真做了不同厂的异构评审)都被判"没评审"而让整轮失败——loop 因此交付不了任何实质性大改。现在改成"评审先跑、闸后查":异构评审写出证据后闸才检查,真评审过的大改正常通过;没有异构评审者的单 agent 场景仍走原有的自评兜底。(FIX-362) `[loop-engine]`
+
 - **`roll brief` 已退役**:这个 owner 简报能力面尚未成熟,直接移除避免误导。查看项目状态请用 `roll backlog` 或 `roll status`。(FIX-356a) `[loop]`
 
 - **结对评审池只收能 headless 运行的 reviewer**:`roll pair init`、pairing selector、Review Score 和 peer-gate retry 现在共用 agent profile 的 `canReviewHeadless` 能力;Cursor/Trae 这类 IDE 配置目标不再进入评审/评分候选池,避免选中后 spawn 不出 verdict 拖垮 cycle。(FIX-328) `[pairing]`

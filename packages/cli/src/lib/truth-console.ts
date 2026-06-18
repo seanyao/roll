@@ -473,6 +473,63 @@ function tapeSegment(seg: CycleTapeSegment, last: boolean): string {
   );
 }
 
+function toolDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "0s";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return ms < 10_000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms / 1000)}s`;
+}
+
+function toolCostAmount(row: CycleLedgerRow["toolCosts"][number]): string {
+  const currency = row.currency.trim().toUpperCase();
+  const amount = Number.isFinite(row.estimatedCost) ? row.estimatedCost.toFixed(2) : "0.00";
+  if (currency === "USD") return `$${amount} USD`;
+  if (currency === "CNY" || currency === "RMB") return `¥${amount} ${currency}`;
+  return `${amount} ${row.currency}`;
+}
+
+function toolCostBreakdown(costs: readonly CycleLedgerRow["toolCosts"][number][]): string {
+  if (costs.length === 0) return "";
+  return costs.map((row) => `${String(row.toolId)} ${toolCostAmount(row)}`).join(" · ");
+}
+
+function cycleToolRows(cy: CycleLedgerRow): string {
+  if (cy.toolSummary === "" && cy.toolTimeline.length === 0) return "";
+  const costs = toolCostBreakdown(cy.toolCosts);
+  const rows = cy.toolTimeline
+    .map((tool) => {
+      const accent = tool.ok ? C.green : C.red;
+      const mark = tool.ok ? "✓" : "✗";
+      const status = tool.ok ? "ok" : (tool.errorCode ?? "unknown");
+      const dur = toolDuration(tool.durationMs);
+      return (
+        `<details class="tool-row" style="border:1px solid ${C.line};border-left:3px solid ${accent};border-radius:8px;background:${C.card};overflow:hidden;">` +
+        `<summary style="display:grid;grid-template-columns:18px 1fr auto auto;align-items:center;gap:10px;padding:8px 10px;cursor:pointer;list-style:none;">` +
+        `<span style="${MONO}font-size:12px;color:${accent};font-weight:700;">${mark}</span>` +
+        `<span style="${MONO}font-size:12px;color:${C.ink};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(tool.label)}</span>` +
+        `<span style="${MONO}font-size:11px;color:${C.dim};">${esc(dur)}</span>` +
+        `<span style="${MONO}font-size:10px;color:${accent};border:1px solid ${accent}44;border-radius:999px;padding:2px 7px;">${esc(status)}</span>` +
+        `</summary>` +
+        `<dl style="display:grid;grid-template-columns:86px 1fr;gap:6px 10px;margin:0;padding:8px 12px 10px;border-top:1px solid ${C.hair};${MONO}font-size:11px;color:${C.dim};">` +
+        `<dt style="color:${C.faint};">${bi("tool", "工具")}</dt><dd style="margin:0;color:${C.ink};">${esc(tool.toolId)}</dd>` +
+        `<dt style="color:${C.faint};">${bi("label", "标签")}</dt><dd style="margin:0;color:${C.ink};">${esc(tool.label)}</dd>` +
+        `<dt style="color:${C.faint};">${bi("duration", "耗时")}</dt><dd style="margin:0;color:${C.ink};">${esc(dur)}</dd>` +
+        (!tool.ok ? `<dt style="color:${C.faint};">${bi("error", "错误")}</dt><dd style="margin:0;color:${accent};">${esc(tool.errorCode ?? "unknown")}</dd>` : "") +
+        `</dl></details>`
+      );
+    })
+    .join("");
+  return (
+    `<section class="cy-tools" style="margin-top:12px;border:1px solid ${C.hair};border-radius:10px;background:#fff;padding:10px 12px;">` +
+    `<div style="display:flex;align-items:center;gap:8px;margin-bottom:${rows === "" ? "0" : "8px"};">` +
+    `<span style="${MONO}font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:${C.faint};font-weight:600;">${bi("Tools", "工具")}</span>` +
+    (cy.toolSummary !== "" ? `<span style="${MONO}font-size:11.5px;color:${C.dim};">${esc(cy.toolSummary)}</span>` : `<span style="${MONO}font-size:11.5px;color:${C.faint};">${bi("timeline only", "仅时间线")}</span>`) +
+    (costs !== "" ? `<span style="${MONO}font-size:11px;color:${C.dim};margin-left:auto;">${esc(costs)}</span>` : "") +
+    `</div>` +
+    (rows !== "" ? `<div style="display:grid;gap:7px;">${rows}</div>` : "") +
+    `</section>`
+  );
+}
+
 /** The trailing digit run — the SAME handle `roll cycle` resolves (US-CLI-012/013). */
 function cycleHandle(cycleId: string): string {
   const m = /(\d+)$/.exec(cycleId);
@@ -502,12 +559,14 @@ function cycleRow(cy: CycleLedgerRow): string {
     `<span style="color:#5b6478;">${esc(cy.model)}</span>` +
     `<span title="tokens in/out">${esc(cy.tokens)}</span>` +
     `<span style="color:#5b6478;">${esc(cy.cost)}</span>` +
+    (cy.toolSummary !== "" ? `<span title="tool cost summary · 工具成本摘要" style="color:${C.dim};">${esc(cy.toolSummary)}</span>` : "") +
     `<span>${esc(cy.duration)}</span>` +
     `<span class="bl-caret" style="color:${C.faint};transition:transform .18s;font-size:10px;">▶</span></div></summary>` +
     `<div style="padding:6px 18px 18px 60px;background:#fbfcfe;border-top:1px solid #f1f4f8;">` +
     `<div style="display:flex;flex-wrap:nowrap;overflow-x:auto;gap:0;margin:12px 0 4px;padding-bottom:4px;">` +
     cy.tape.map((s, i) => tapeSegment(s, i === cy.tape.length - 1)).join("") +
     `</div>` +
+    cycleToolRows(cy) +
     `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;">` +
     cy.evidence
       .map((e) => `<a href="${esc(e.href)}" style="${MONO}font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid ${C.line};color:${C.blue};text-decoration:none;background:${C.card};">${esc(e.label)}</a>`)

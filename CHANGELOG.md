@@ -28,6 +28,8 @@
 
 - **CLI 展示工具调用时间线与成本摘要**:`roll loop status`、`roll cycle` 和 attest report 现在会从事件流/CycleCost 展示工具调用摘要、失败 errorCode 与工具成本 breakdown,并保留原生币种显示,避免把人民币成本误标成美元。(US-TOOL-012) `[tools-layer]`
 
+- **网页 Loop 账本展示工具调用轨迹**:Truth Console 的 Loop cycle 行现在在成本列旁露出工具摘要,展开后展示每次工具调用、失败 errorCode 和按原生币种标注的工具成本,截图证据可直接证明 USD 与 CNY/RMB 不会混标。(US-TOOL-013) `[tools-layer]`
+
 ## v3.618.3 — 2026-06-18
 
 ### 修复

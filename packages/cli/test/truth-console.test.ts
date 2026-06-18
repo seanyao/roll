@@ -158,6 +158,15 @@ const CYCLES = [
   {
     cycleId: "20260612-x-1234", tsSec: 1781230000, verdict: "delivered" as const, storyId: "US-A-1", agent: "claude",
     model: "claude", tokens: "1k/400", cost: "$0.42", duration: "1m35s",
+    toolSummary: "bash×3(21s)·browser×1(3.0s)",
+    toolCosts: [
+      { toolId: "bash", invocations: 3, durationMs: 21_000, failures: 0, estimatedCost: 0.02, currency: "USD" },
+      { toolId: "browser", invocations: 1, durationMs: 3_000, failures: 1, estimatedCost: 1.25, currency: "CNY" },
+    ],
+    toolTimeline: [
+      { toolId: "bash", label: 'bash "pnpm test"', durationMs: 12_400, ok: true, ts: 1781230001 },
+      { toolId: "browser", label: 'browser "https://app.test"', durationMs: 3_000, ok: false, errorCode: "timeout", ts: 1781230002 },
+    ],
     tape: [
       { key: "cycle" as const, detail: "2026-06-12 01:00Z", state: "pass" as const },
       { key: "story" as const, detail: "US-A-1", state: "pass" as const },
@@ -172,6 +181,9 @@ const CYCLES = [
   {
     cycleId: "20260612-x-9999", tsSec: 1781230100, verdict: "reverted" as const, storyId: "", agent: "pi",
     model: "pi", tokens: "—", cost: "—", duration: "—",
+    toolSummary: "",
+    toolCosts: [],
+    toolTimeline: [],
     tape: [], evidence: [],
   },
 ];
@@ -469,6 +481,18 @@ describe("loop tab cycle ledger — US-DOSSIER-013", () => {
     expect(html).toContain('href="#backlog"');
   });
 
+  it("US-TOOL-013: expanded row renders tool summary, timeline rows, errors, and native-currency costs", () => {
+    const fragment = /<section class="cy-tools"[\s\S]*?<\/section>/.exec(html)?.[0] ?? "";
+    expect(fragment).toMatchSnapshot();
+    expect(fragment).toContain("bash×3(21s)·browser×1(3.0s)");
+    expect(fragment).toContain("bash &quot;pnpm test&quot;");
+    expect(fragment).toContain("browser &quot;https://app.test&quot;");
+    expect(fragment).toContain("timeout");
+    expect(fragment).toContain("$0.02 USD");
+    expect(fragment).toContain("¥1.25 CNY");
+    expect(fragment).not.toContain("$1.25");
+  });
+
   it("failed counter script counts failed+reverted+blocked (never swallowed)", () => {
     expect(html).toContain('v === "failed" || v === "reverted" || v === "blocked"');
   });
@@ -489,6 +513,9 @@ describe("loop tab cycle ledger — FIX-297", () => {
       {
         cycleId: REAL_ID, tsSec: 1781230000, verdict: "delivered" as const, storyId: "US-A-1", agent: "claude",
         model: "claude", tokens: "1k/400", cost: "$0.42", duration: "1m35s",
+        toolSummary: "",
+        toolCosts: [],
+        toolTimeline: [],
         tape: [], evidence: [],
       },
     ],

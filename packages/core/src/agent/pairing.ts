@@ -42,6 +42,7 @@ const AGENT_VENDOR: Readonly<Record<string, string>> = {
   kimi: "moonshot",
   qwen: "alibaba",
   deepseek: "deepseek",
+  reasonix: "reasonix",
   pi: "pi",
   cursor: "cursor",
   opencode: "opencode",

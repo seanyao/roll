@@ -2,7 +2,7 @@
  * US-SHOW-001 — the golden-path STANDARD E2E (real models).
  *
  * This is a first-class test in the suite, but it needs REAL agents
- * (builder=kimi / reviewer=claude / scorer=pi) and a real loop run, so it is
+ * (builder=kimi / reviewer=reasonix / scorer=pi) and a real loop run, so it is
  * GATED behind `ROLL_SHOWCASE=1`. The normal `roll test` / per-commit suite
  * SKIPS it (determinism); the operator runs it with the flag to validate the
  * live golden path (and to refresh the investor-demo evidence each release).

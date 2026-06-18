@@ -39,7 +39,7 @@ function goldenRun(): ShowcaseRunResult {
     ],
     branch: "story/US-DEMO-001",
     pr: { number: 42, url: "https://github.com/seanyao/roll/pull/42" },
-    reviewRecord: { reviewer: "claude", scorer: "pi", recorded: true },
+    reviewRecord: { reviewer: "reasonix", scorer: "pi", recorded: true },
     screenshots: [
       { surface: "cli", path: "/tmp/pulse-cli.png", present: true },
       { surface: "web", path: "/tmp/overview.png", present: true },
@@ -57,7 +57,7 @@ function goldenRun(): ShowcaseRunResult {
 }
 
 describe("validateCasting — heterogeneity", () => {
-  it("accepts the default kimi/claude/pi trio (three distinct vendors)", () => {
+  it("accepts the default kimi/reasonix/pi trio (three distinct vendors)", () => {
     const r = validateCasting(DEFAULT_SHOWCASE_CASTING);
     expect(r.ok).toBe(true);
     expect(r.violations).toEqual([]);
@@ -91,13 +91,13 @@ describe("validateCasting — heterogeneity", () => {
 
 describe("castingAgentsYaml — builder routing override", () => {
   it("pins all three executor slots to the builder so the loop routes to it", () => {
-    const yaml = castingAgentsYaml({ builder: "kimi", reviewer: "claude", scorer: "pi" });
+    const yaml = castingAgentsYaml({ builder: "kimi", reviewer: "reasonix", scorer: "pi" });
     expect(yaml).toContain("schema: v3");
     expect(yaml).toContain("easy: { agent: kimi }");
     expect(yaml).toContain("default: { agent: kimi }");
     expect(yaml).toContain("hard: { agent: kimi }");
     // The reviewer/scorer are recorded in a comment, not as executor slots.
-    expect(yaml).toContain("reviewer=claude scorer=pi");
+    expect(yaml).toContain("reviewer=reasonix scorer=pi");
   });
 });
 
@@ -199,7 +199,7 @@ describe("showcaseVerdict", () => {
 });
 
 describe("probeMissingAgents — queries the REAL env, not the sandbox (FIX-292)", () => {
-  const casting = { ...DEFAULT_SHOWCASE_CASTING }; // kimi / claude / pi
+  const casting = { ...DEFAULT_SHOWCASE_CASTING }; // kimi / reasonix / pi
 
   /** A runner that records the options it was invoked with and returns a canned `agent list`. */
   function recordingRunner(stdout: string, code = 0): {
@@ -215,7 +215,7 @@ describe("probeMissingAgents — queries the REAL env, not the sandbox (FIX-292)
   }
 
   it("probes `roll agent list` with {realHome:true} — NOT the throwaway sandbox home", () => {
-    const { runner, calls } = recordingRunner("claude\nkimi\npi\n");
+    const { runner, calls } = recordingRunner("reasonix\nkimi\npi\n");
     probeMissingAgents("/sandbox", "/throwaway-home", casting, runner);
     expect(calls.length).toBe(1);
     expect(calls[0]?.args).toEqual(["agent", "list"]);
@@ -230,9 +230,9 @@ describe("probeMissingAgents — queries the REAL env, not the sandbox (FIX-292)
   const NC = "\x1b[0m";
 
   it("when the cast trio IS available in the real env, nothing is missing (no false abort)", () => {
-    // The real `roll agent list` lists claude / kimi / pi with a ✓ marker.
+    // The real `roll agent list` lists reasonix / kimi / pi with a ✓ marker.
     const { runner } = recordingRunner(
-      `  Available agents\n\n    ${G}✓ claude${NC}\n    ${G}✓ kimi${NC}\n    ${G}✓ pi${NC}\n`,
+      `  Available agents\n\n    ${G}✓ reasonix${NC}\n    ${G}✓ kimi${NC}\n    ${G}✓ pi${NC}\n`,
     );
     expect(probeMissingAgents("/sandbox", "/throwaway-home", casting, runner)).toEqual([]);
   });
@@ -240,7 +240,7 @@ describe("probeMissingAgents — queries the REAL env, not the sandbox (FIX-292)
   it("a GENUINELY-missing cast agent fails loud (reported as missing)", () => {
     // pi is NOT installed (✗ … not installed) in the real env → only pi is reported missing.
     const { runner } = recordingRunner(
-      `  Available agents\n\n    ${G}✓ claude${NC}\n    ${G}✓ kimi${NC}\n    ${Y}✗ pi${NC}  (not installed)\n`,
+      `  Available agents\n\n    ${G}✓ reasonix${NC}\n    ${G}✓ kimi${NC}\n    ${Y}✗ pi${NC}  (not installed)\n`,
     );
     expect(probeMissingAgents("/sandbox", "/throwaway-home", casting, runner)).toEqual(["pi"]);
   });
@@ -252,7 +252,7 @@ describe("probeMissingAgents — queries the REAL env, not the sandbox (FIX-292)
     const { runner } = recordingRunner("", 1);
     expect(probeMissingAgents("/sandbox", "/throwaway-home", casting, runner)).toEqual([
       "kimi",
-      "claude",
+      "reasonix",
       "pi",
     ]);
   });
@@ -265,6 +265,7 @@ describe("probeMissingAgents — queries the REAL env, not the sandbox (FIX-292)
     // localized header (here zh, as on the reporter's box).
     const realOutput =
       `\n  可用 agent\n\n` +
+      `    ${G}✓ reasonix${NC}\n` +
       `    ${G}✓ claude${NC}  (current)\n` +
       `    ${G}✓ kimi${NC}\n` +
       `    ${Y}✗ deepseek${NC}  (not installed)\n` +
@@ -275,7 +276,7 @@ describe("probeMissingAgents — queries the REAL env, not the sandbox (FIX-292)
       `    ${Y}✗ qwen${NC}  (not installed)\n` +
       `    ${G}✓ antigravity (agy)${NC}\n\n`;
     const { runner } = recordingRunner(realOutput);
-    // kimi / claude / pi are ALL ✓ available → none reported missing (the bug).
+    // kimi / reasonix / pi are ALL ✓ available → none reported missing (the bug).
     expect(probeMissingAgents("/sandbox", "/throwaway-home", casting, runner)).toEqual([]);
 
     // A genuinely ✗ (not installed) cast agent IS reported missing.

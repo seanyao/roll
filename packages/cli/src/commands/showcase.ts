@@ -7,7 +7,7 @@
  *   (a) Sandbox + reset — copy the project into a throwaway dir, point ROLL_HOME
  *       at a throwaway home, reset US-DEMO-001 to Todo, remove the pulse surface.
  *   (b) Casting — route the BUILDER to kimi (the executor slots in the sandbox
- *       agents.yaml), record reviewer=claude / scorer=pi, and HARD-FAIL if the
+ *       agents.yaml), record reviewer=reasonix / scorer=pi, and HARD-FAIL if the
  *       trio collapses (reviewer==builder / scorer==builder / vendor clash).
  *   (c) Run — `roll loop go --cards US-DEMO-001` against the sandbox (the only
  *       non-deterministic step; real models, standard TCR).
@@ -64,7 +64,7 @@ export const SHOWCASE_USAGE =
   "  evidence chain, and emit a pass/fail verdict. Repeatable; never touches the\n" +
   "  main repo or the real ~/.roll.\n" +
   "  --card           Target card to re-deliver (default US-DEMO-001).\n" +
-  "  --builder/--reviewer/--scorer  Override the casting (default kimi/claude/pi).\n" +
+  "  --builder/--reviewer/--scorer  Override the casting (default kimi/reasonix/pi).\n" +
   "  --json           Emit the structured showcase report instead of the human view.\n" +
   "  --keep-sandbox   Keep the throwaway sandbox + ROLL_HOME for inspection.\n" +
   "在隔离沙箱里跑黄金路径标准 E2E（重置目标卡→异构选角→go 交付→新鲜截屏→证据链→判定）；绝不污染主仓与真实 ~/.roll。";

@@ -31,10 +31,10 @@ export interface ShowcaseCasting {
   scorer: string;
 }
 
-/** The default golden-path casting from the spec: kimi / claude / pi. */
+/** The default golden-path casting from the spec: all domestic agents. */
 export const DEFAULT_SHOWCASE_CASTING: ShowcaseCasting = {
   builder: "kimi",
-  reviewer: "claude",
+  reviewer: "reasonix",
   scorer: "pi",
 };
 

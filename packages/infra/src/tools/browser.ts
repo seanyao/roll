@@ -1,0 +1,371 @@
+import { join } from "node:path";
+import type { ExecResult, ToolDeclaration, ToolDeps, ToolErrorCode, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
+
+export type BrowserToolId = "browser.screenshot" | "browser.console" | "browser.dom-query";
+
+export interface BrowserViewport {
+  width: number;
+  height: number;
+}
+
+export interface BrowserScreenshotInput {
+  url: string;
+  viewport?: BrowserViewport;
+  waitFor?: string;
+  screenshotPath?: string;
+}
+
+export interface BrowserConsoleInput {
+  url: string;
+  waitFor?: string;
+}
+
+export interface BrowserDomQueryInput {
+  url: string;
+  selector: string;
+  waitFor?: string;
+}
+
+export interface BrowserScreenshotOutput {
+  screenshotPath: string;
+  finalUrl: string;
+  statusCode: number | null;
+}
+
+export interface BrowserConsoleLog {
+  level: string;
+  text: string;
+  ts: number;
+}
+
+export interface BrowserConsoleOutput {
+  consoleLogs: BrowserConsoleLog[];
+  finalUrl: string;
+  statusCode: number | null;
+}
+
+export interface BrowserDomQueryOutput {
+  domResults: string[];
+  finalUrl: string;
+  statusCode: number | null;
+}
+
+type BrowserInput = BrowserScreenshotInput | BrowserConsoleInput | BrowserDomQueryInput;
+type BrowserOutput = BrowserScreenshotOutput | BrowserConsoleOutput | BrowserDomQueryOutput;
+
+class BrowserToolState {
+  queue: Promise<unknown> = Promise.resolve();
+  initialized = false;
+
+  async enqueue<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(fn, fn);
+    this.queue = run.catch(() => undefined);
+    return run;
+  }
+}
+
+const TOOL_TITLES: Record<BrowserToolId, string> = {
+  "browser.screenshot": "Browser Screenshot",
+  "browser.console": "Browser Console",
+  "browser.dom-query": "Browser DOM Query",
+};
+
+export class BrowserTool {
+  readonly declaration: ToolDeclaration;
+
+  constructor(
+    private readonly id: BrowserToolId,
+    private readonly state = new BrowserToolState(),
+  ) {
+    this.declaration = {
+      id: id as ToolDeclaration["id"],
+      kind: "browser",
+      title: TOOL_TITLES[id],
+      description: "Open URLs through the governed browser adapter.",
+      defaults: {
+        enabled: true,
+        timeoutMs: 60_000,
+        sandbox: {
+          headlessOnly: true,
+          maxOutputBytes: 2 * 1024 * 1024,
+        },
+      },
+      requirements: [{ kind: "executable", name: "playwright-or-chrome", optional: true }],
+    };
+  }
+
+  async init(_deps: ToolDeps): Promise<void> {
+    this.state.initialized = true;
+  }
+
+  async dispose(_deps: ToolDeps): Promise<void> {
+    await this.state.queue.catch(() => undefined);
+    this.state.initialized = false;
+  }
+
+  async execute(invocation: ToolInvocation<BrowserInput>, deps: ToolDeps): Promise<ToolResult<BrowserOutput>> {
+    return this.state.enqueue(() => this.executeQueued(invocation, deps));
+  }
+
+  private async executeQueued(invocation: ToolInvocation<BrowserInput>, deps: ToolDeps): Promise<ToolResult<BrowserOutput>> {
+    const startedAt = deps.now();
+    const input = invocation.input;
+    const origin = originOf(input.url);
+    if (origin === undefined) return fail(invocation, startedAt, deps.now(), "invalid_input", `invalid URL: ${deps.redact(input.url)}`, false);
+    if (!originAllowed(origin, invocation.policy.sandbox?.allowedOrigins)) {
+      return fail(invocation, startedAt, deps.now(), "sandbox_denied", `origin is outside allowedOrigins: ${origin}`, false);
+    }
+
+    if (this.id === "browser.screenshot") {
+      const result = await this.executeScreenshot(invocation as ToolInvocation<BrowserScreenshotInput>, deps, startedAt);
+      return result as ToolResult<BrowserOutput>;
+    }
+    if (this.id === "browser.console") {
+      const result = await this.executeHeadlessJson<BrowserConsoleInput, BrowserConsoleOutput>(invocation as ToolInvocation<BrowserConsoleInput>, deps, "console", startedAt);
+      return result as ToolResult<BrowserOutput>;
+    }
+    const result = await this.executeHeadlessJson<BrowserDomQueryInput, BrowserDomQueryOutput>(invocation as ToolInvocation<BrowserDomQueryInput>, deps, "dom-query", startedAt);
+    return result as ToolResult<BrowserOutput>;
+  }
+
+  private async executeScreenshot(
+    invocation: ToolInvocation<BrowserScreenshotInput>,
+    deps: ToolDeps,
+    startedAt: number,
+  ): Promise<ToolResult<BrowserScreenshotOutput>> {
+    const input = invocation.input;
+    const screenshotPath = input.screenshotPath ?? join(process.cwd(), ".roll", "tool-dumps", `${invocation.invocationId}.png`);
+    if (shouldUseHeadless(invocation)) return this.executeHeadlessScreenshot(invocation, deps, screenshotPath, startedAt);
+
+    const aqua = await hasAquaSession(deps, invocation.policy.timeoutMs);
+    if (aqua) {
+      return this.executeGuiScreenshot(invocation, deps, screenshotPath, startedAt);
+    }
+    return this.executeHeadlessScreenshot(invocation, deps, screenshotPath, startedAt);
+  }
+
+  private async executeHeadlessScreenshot(
+    invocation: ToolInvocation<BrowserScreenshotInput>,
+    deps: ToolDeps,
+    screenshotPath: string,
+    startedAt: number,
+  ): Promise<ToolResult<BrowserScreenshotOutput>> {
+    const input = invocation.input;
+    const args = [
+      "-y",
+      "playwright@latest",
+      "screenshot",
+      ...(input.viewport === undefined ? [] : [`--viewport-size=${input.viewport.width},${input.viewport.height}`]),
+      ...(input.waitFor === undefined ? [] : [`--wait-for-selector=${deps.redact(input.waitFor)}`]),
+      deps.redact(input.url),
+    ];
+    const result = await runBrowserCommand(deps, "npx", args, invocation.policy.timeoutMs, invocation.policy.sandbox?.maxOutputBytes);
+    if (!result.ok) return fail(invocation, startedAt, deps.now(), "adapter_error", `headless browser unavailable: ${result.reason}`, true);
+
+    const parsed = parseObject(result.result.stdout);
+    const png = stringValue(parsed.png) ?? result.result.stdout;
+    if (png.length === 0) return fail(invocation, startedAt, deps.now(), "adapter_error", "headless browser produced an empty screenshot", true);
+    await deps.fs.mkdir(dirname(screenshotPath), { recursive: true });
+    await deps.fs.writeFile(screenshotPath, deps.redact(png), "utf8");
+    return {
+      ok: true,
+      output: {
+        screenshotPath,
+        finalUrl: stringValue(parsed.finalUrl) ?? input.url,
+        statusCode: statusValue(parsed.statusCode),
+      },
+      meta: meta(invocation, startedAt, deps.now()),
+    };
+  }
+
+  private async executeGuiScreenshot(
+    invocation: ToolInvocation<BrowserScreenshotInput>,
+    deps: ToolDeps,
+    screenshotPath: string,
+    startedAt: number,
+  ): Promise<ToolResult<BrowserScreenshotOutput>> {
+    const input = invocation.input;
+    const open = await runBrowserCommand(deps, "osascript", ["-e", guiOpenScript(deps.redact(input.url))], invocation.policy.timeoutMs, invocation.policy.sandbox?.maxOutputBytes);
+    if (!open.ok) return fail(invocation, startedAt, deps.now(), "adapter_error", `GUI browser unavailable: ${open.reason}`, true);
+    const shot = await runBrowserCommand(deps, "screencapture", ["-x", screenshotPath], invocation.policy.timeoutMs, invocation.policy.sandbox?.maxOutputBytes);
+    if (!shot.ok) return fail(invocation, startedAt, deps.now(), "adapter_error", `GUI browser unavailable: ${shot.reason}`, true);
+    if (shot.result.stdout.length === 0) return fail(invocation, startedAt, deps.now(), "adapter_error", "GUI browser unavailable: empty screenshot", true);
+    await deps.fs.mkdir(dirname(screenshotPath), { recursive: true });
+    await deps.fs.writeFile(screenshotPath, deps.redact(shot.result.stdout), "utf8");
+    return {
+      ok: true,
+      output: { screenshotPath, finalUrl: input.url, statusCode: null },
+      meta: meta(invocation, startedAt, deps.now()),
+    };
+  }
+
+  private async executeHeadlessJson<I extends BrowserInput, O extends BrowserOutput>(
+    invocation: ToolInvocation<I>,
+    deps: ToolDeps,
+    action: "console" | "dom-query",
+    startedAt: number,
+  ): Promise<ToolResult<O>> {
+    const input = invocation.input;
+    const args = [
+      "-y",
+      "playwright@latest",
+      action,
+      ...(hasSelector(input) ? [`--selector=${deps.redact(input.selector)}`] : []),
+      ...(input.waitFor === undefined ? [] : [`--wait-for-selector=${deps.redact(input.waitFor)}`]),
+      deps.redact(input.url),
+    ];
+    const result = await runBrowserCommand(deps, "npx", args, invocation.policy.timeoutMs, invocation.policy.sandbox?.maxOutputBytes);
+    if (!result.ok) return fail(invocation, startedAt, deps.now(), "adapter_error", `headless browser unavailable: ${result.reason}`, true) as ToolResult<O>;
+    const parsed = parseObject(result.result.stdout);
+    if (action === "console") {
+      return {
+        ok: true,
+        output: {
+          consoleLogs: consoleLogsValue(parsed.consoleLogs),
+          finalUrl: stringValue(parsed.finalUrl) ?? input.url,
+          statusCode: statusValue(parsed.statusCode),
+        } as O,
+        meta: meta(invocation, startedAt, deps.now()),
+      };
+    }
+    return {
+      ok: true,
+      output: {
+        domResults: stringArrayValue(parsed.domResults),
+        finalUrl: stringValue(parsed.finalUrl) ?? input.url,
+        statusCode: statusValue(parsed.statusCode),
+      } as O,
+      meta: meta(invocation, startedAt, deps.now()),
+    };
+  }
+}
+
+export function browserTools(): BrowserTool[] {
+  const state = new BrowserToolState();
+  return [
+    new BrowserTool("browser.screenshot", state),
+    new BrowserTool("browser.console", state),
+    new BrowserTool("browser.dom-query", state),
+  ];
+}
+
+function shouldUseHeadless(invocation: ToolInvocation<BrowserInput>): boolean {
+  return invocation.policy.sandbox?.headlessOnly === true || process.env.CI === "true" || process.env.CI === "1";
+}
+
+async function hasAquaSession(deps: ToolDeps, timeoutMs: number | undefined): Promise<boolean> {
+  const result = await runBrowserCommand(deps, "launchctl", ["managername"], timeoutMs, 1024);
+  return result.ok && result.result.stdout.includes("Aqua");
+}
+
+async function runBrowserCommand(
+  deps: ToolDeps,
+  command: string,
+  args: readonly string[],
+  timeoutMs: number | undefined,
+  maxOutputBytes: number | undefined,
+): Promise<{ ok: true; result: ExecResult } | { ok: false; reason: string }> {
+  try {
+    const result = await deps.execFile(command, args, { timeoutMs, maxOutputBytes });
+    if (result.timedOut) return { ok: false, reason: "timed out" };
+    if (result.exitCode !== 0) return { ok: false, reason: deps.redact(result.stderr || `exit ${result.exitCode}`) };
+    return { ok: true, result };
+  } catch (cause) {
+    return { ok: false, reason: cause instanceof Error ? deps.redact(cause.message) : "execution failed" };
+  }
+}
+
+function originOf(url: string): string | undefined {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return undefined;
+  }
+}
+
+function originAllowed(origin: string, allowedOrigins: readonly string[] | undefined): boolean {
+  return allowedOrigins === undefined || allowedOrigins.length === 0 || allowedOrigins.includes(origin);
+}
+
+function parseObject(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function statusValue(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function stringArrayValue(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function consoleLogsValue(value: unknown): BrowserConsoleLog[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (item === null || typeof item !== "object" || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    const level = stringValue(record.level);
+    const text = stringValue(record.text);
+    const ts = statusValue(record.ts);
+    return level === undefined || text === undefined || ts === null ? [] : [{ level, text, ts }];
+  });
+}
+
+function hasSelector(input: BrowserInput): input is BrowserDomQueryInput {
+  return "selector" in input && typeof input.selector === "string";
+}
+
+function fail(
+  invocation: ToolInvocation<BrowserInput>,
+  startedAt: number,
+  endedAt: number,
+  code: ToolErrorCode,
+  message: string,
+  retryable: boolean,
+): ToolResult<never> {
+  return {
+    ok: false,
+    error: { code, message, retryable },
+    meta: meta(invocation, startedAt, endedAt),
+  };
+}
+
+function meta(invocation: ToolInvocation<BrowserInput>, startedAt: number, endedAt: number): ToolMeta {
+  return {
+    invocationId: invocation.invocationId,
+    toolId: invocation.toolId,
+    caller: invocation.caller,
+    startedAt,
+    endedAt,
+    durationMs: Math.max(0, endedAt - startedAt),
+  };
+}
+
+function dirname(path: string): string {
+  const index = path.lastIndexOf("/");
+  return index <= 0 ? "." : path.slice(0, index);
+}
+
+function guiOpenScript(url: string): string {
+  return [
+    'tell application "Google Chrome"',
+    "  activate",
+    "  if not (exists window 1) then make new window",
+    `  set URL of active tab of front window to "${appleScriptString(url)}"`,
+    "  delay 1",
+    "end tell",
+  ].join("\n");
+}
+
+function appleScriptString(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+}

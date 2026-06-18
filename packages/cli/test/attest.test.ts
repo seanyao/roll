@@ -210,6 +210,71 @@ describe("attestCommand", () => {
     expect(html).not.toMatch(/<section class="ac s-claimed"/);
   });
 
+  it("FIX-332: resume with an empty run dir reuses evidence from a prior run frame", async () => {
+    const proj = project();
+    const storyDir = join(proj, ".roll", "features", "demo", "FIX-300");
+    const oldRunDir = join(storyDir, "2026-06-05T00-00-00");
+    const newRunDir = join(storyDir, "2026-06-06T01-02-04");
+    mkdirSync(join(oldRunDir, "evidence"), { recursive: true });
+    mkdirSync(newRunDir, { recursive: true });
+    writeFileSync(join(oldRunDir, "evidence", "vitest.txt"), "RESUME EVIDENCE FROM PRIOR RUN\n");
+    writeFileSync(
+      join(storyDir, "ac-map.json"),
+      JSON.stringify([
+        {
+          ac: "FIX-300:AC1",
+          status: "pass",
+          evidence: [{ kind: "text", label: "vitest", textFile: "evidence/vitest.txt" }],
+        },
+      ]),
+    );
+
+    const code = await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["FIX-300", "--run-dir", newRunDir], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) }),
+      ),
+    );
+
+    expect(code).toBe(0);
+    const html = readFileSync(join(newRunDir, "FIX-300-report.html"), "utf8");
+    expect(html).toContain("RESUME EVIDENCE FROM PRIOR RUN");
+    expect(html).toMatch(/<section class="ac s-pass" id="FIX-300:AC1"/);
+    // AC2 has no ac-map entry and remains honestly claimed — that is NOT a bug.
+    expect(html).not.toMatch(/<section class="ac s-claimed" id="FIX-300:AC1"/);
+  });
+
+  it("FIX-332: a populated run dir uses its own evidence, not a stale sibling's", async () => {
+    const proj = project();
+    const storyDir = join(proj, ".roll", "features", "demo", "FIX-300");
+    const oldRunDir = join(storyDir, "2026-06-05T00-00-00");
+    const newRunDir = join(storyDir, "2026-06-06T01-02-04");
+    mkdirSync(join(oldRunDir, "evidence"), { recursive: true });
+    mkdirSync(join(newRunDir, "evidence"), { recursive: true });
+    writeFileSync(join(oldRunDir, "evidence", "vitest.txt"), "STALE OLD EVIDENCE\n");
+    writeFileSync(join(newRunDir, "evidence", "vitest.txt"), "FRESH NEW EVIDENCE\n");
+    writeFileSync(
+      join(storyDir, "ac-map.json"),
+      JSON.stringify([
+        {
+          ac: "FIX-300:AC1",
+          status: "pass",
+          evidence: [{ kind: "text", label: "vitest", textFile: "evidence/vitest.txt" }],
+        },
+      ]),
+    );
+
+    const code = await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["FIX-300", "--run-dir", newRunDir], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) }),
+      ),
+    );
+
+    expect(code).toBe(0);
+    const html = readFileSync(join(newRunDir, "FIX-300-report.html"), "utf8");
+    expect(html).toContain("FRESH NEW EVIDENCE");
+    expect(html).not.toContain("STALE OLD EVIDENCE");
+  });
+
   it("FIX-329: `attest backfill` is removed — it errors and fabricates NO after-the-fact report", async () => {
     const proj = realpathSync(mkdtempSync(join(tmpdir(), "roll-attest-nobackfill-")));
     dirs.push(proj);

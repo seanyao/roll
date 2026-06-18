@@ -57,6 +57,32 @@ describe("US-EVID-014 correction actuator decisions", () => {
     });
   });
 
+  it("FIX-332: repeated empty-shell signal returns the story to Todo instead of duplicating autofix work", () => {
+    const events: RollEvent[] = [
+      {
+        type: "correction:action",
+        cycleId: "cycle-old",
+        storyId: "US-EVID-014",
+        action: "open_fix",
+        signal: "empty_acceptance_report",
+        reason: "first empty shell",
+        ts: 10,
+      },
+    ];
+    const decision = decideCorrectionAction({
+      storyId: "US-EVID-014",
+      cycleId: "cycle-2",
+      reasons: ["acceptance report at .roll/features/<epic>/US-EVID-014/latest/US-EVID-014-report.html is an empty shell (no AC content / no ac-map)"],
+      mode: "auto",
+      events,
+    });
+    expect(decision).toMatchObject({
+      action: "return_story",
+      plannedAction: "return_story",
+      signal: "empty_acceptance_report",
+    });
+  });
+
   it("repeated same-story signals route-adjust instead of duplicating work", () => {
     const events: RollEvent[] = [
       {

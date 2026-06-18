@@ -10,6 +10,8 @@
 
 - **工具策略从 policy.yaml 解析**:新增 ToolPolicyEngine,从 `.roll/policy.yaml` 的 `tools:` section 解析 enabled、timeout、retry、预算和 sandbox 字段,未知字段只告警不拒绝。(US-TOOL-003) `[tools-layer]`
 
+- **Bash 工具适配器落地**:新增 infra BashTool,通过 argv-only exec seam 执行命令,支持 cwd allowlist、timeout、输出截断、advisory blockedCommands、secret redaction 和 `.roll/tool-dumps/` dump。(US-TOOL-004) `[tools-layer]`
+
 ## v3.618.3 — 2026-06-18
 
 ### 修复

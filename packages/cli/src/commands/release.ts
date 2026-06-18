@@ -151,6 +151,15 @@ export function openPrResilient(opts: {
   const { cwd, branch, title, body } = opts;
   const base = opts.base ?? "main";
   const retries = opts.retries ?? 2;
+
+  // FIX-330 AC1: if a PR already exists for this release branch (left over from
+  // a previous interrupted run), reuse it instead of failing on "already exists".
+  const viewArgs = ["pr", "view", branch, "--json", "url", "-q", ".url"];
+  const existing = opts.gh(viewArgs);
+  if (existing.code === 0 && existing.stdout.trim() !== "") {
+    return existing.stdout.trim().split("\n").at(-1) ?? branch;
+  }
+
   const createArgs = ["pr", "create", "--base", base, "--head", branch, "--title", title, "--body", body];
   let last = { code: 1, stdout: "", stderr: "" };
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -169,6 +178,14 @@ export function openPrResilient(opts: {
       ]);
       if (rest.code === 0) return rest.stdout.trim().split("\n").at(-1) ?? branch;
       last = rest;
+    }
+  }
+  // FIX-330 AC1: a concurrent or eventual-consistency "already exists" is not a
+  // real failure — re-probe for the PR and return it.
+  if (/already exists|a pull request already exists/i.test(last.stderr)) {
+    const reprobe = opts.gh(viewArgs);
+    if (reprobe.code === 0 && reprobe.stdout.trim() !== "") {
+      return reprobe.stdout.trim().split("\n").at(-1) ?? branch;
     }
   }
   throw new Error(`gh pr create failed: ${(last.stderr || last.stdout).split("\n").find((l) => l.trim() !== "")?.trim() ?? "unknown"}`);
@@ -192,6 +209,15 @@ export function enableAutoMergeResilient(opts: {
 }): void {
   const { cwd, prRef } = opts;
   const retries = opts.retries ?? 2;
+
+  // FIX-330 AC2: if auto-merge is already armed (or the PR already merged),
+  // there is nothing to do — the release can resume from the next step.
+  const armed = opts.gh(["pr", "view", prRef, "--json", "autoMergeRequest", "-q", ".autoMergeRequest"]);
+  if (armed.code === 0) {
+    const am = armed.stdout.trim();
+    if (am !== "" && am !== "null") return;
+  }
+
   let last = { code: 1, stdout: "", stderr: "" };
   for (let attempt = 0; attempt <= retries; attempt++) {
     last = opts.gh(["pr", "merge", prRef, "--auto", "--squash"]);
@@ -220,6 +246,8 @@ export function enableAutoMergeResilient(opts: {
       last = rest;
     }
   }
+  // FIX-330 AC2: a PR that merged while we were retrying is not a failure.
+  if (/already merged|pull request is already merged/i.test(last.stderr)) return;
   const out = last.stderr || last.stdout;
   const enabledHint = /auto.?merge.*(not allowed|disabled|enabled)|allow auto-?merge/i.test(out);
   const detail = out.split("\n").find((l) => l.trim() !== "")?.trim() ?? "unknown";
@@ -235,6 +263,11 @@ export function enableAutoMergeResilient(opts: {
 // whose proof is stale. In a roll-managed repo the proof is refreshed up front
 // — no error-message sniffing. Any failure rolls the release branch back so an
 // orderly abort leaves no stray branch behind.
+//
+// FIX-330: the release transaction must be re-runnable. If the release branch
+// already exists (locally or on origin from a previous interrupted run), reuse
+// it instead of failing with `git checkout -b`. If the release commit already
+// exists on the branch, skip the commit/push (push is a noop when up to date).
 export function commitPushWithGate(opts: {
   branch: string;
   message: string;
@@ -243,16 +276,59 @@ export function commitPushWithGate(opts: {
 }): void {
   const { branch, message, rollManaged, exec } = opts;
   const original = exec("git", ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
-  exec("git", ["checkout", "-b", branch]);
+
+  let createdLocal = false;
+  const checkoutBranch = (): void => {
+    // Local branch already present → reuse.
+    try {
+      const localSha = exec("git", ["rev-parse", "--verify", `refs/heads/${branch}`]).trim();
+      if (localSha !== "") {
+        exec("git", ["checkout", branch]);
+        return;
+      }
+    } catch {
+      // fall through to remote / create-new path
+    }
+    // Remote branch exists (e.g., previous run pushed it) → fetch and reuse.
+    try {
+      const remote = exec("git", ["ls-remote", "--heads", "origin", branch]).trim();
+      if (remote !== "") {
+        exec("git", ["fetch", "origin", `${branch}:${branch}`]);
+        exec("git", ["checkout", branch]);
+        return;
+      }
+    } catch {
+      // fall through to create-new path
+    }
+    createdLocal = true;
+    exec("git", ["checkout", "-b", branch]);
+  };
+  checkoutBranch();
+
   try {
     exec("git", ["add", "package.json", "CHANGELOG.md"]);
-    if (rollManaged) exec("roll", ["test"]);
-    exec("git", ["commit", "-m", message]);
-    exec("git", ["push", "-u", "origin", branch]);
+
+    // Has this release commit already landed on the branch? Then the staged
+    // changes are empty and we only need to ensure the branch is pushed.
+    let alreadyCommitted = false;
+    try {
+      const log = exec("git", ["log", branch, "--grep", message, "--oneline", "-n", "1"]).trim();
+      alreadyCommitted = log !== "";
+    } catch {
+      alreadyCommitted = false;
+    }
+
+    if (alreadyCommitted) {
+      exec("git", ["push", "-u", "origin", branch]);
+    } else {
+      if (rollManaged) exec("roll", ["test"]);
+      exec("git", ["commit", "-m", message]);
+      exec("git", ["push", "-u", "origin", branch]);
+    }
   } catch (e) {
     try {
       exec("git", ["checkout", original]);
-      exec("git", ["branch", "-D", branch]);
+      if (createdLocal) exec("git", ["branch", "-D", branch]);
     } catch {
       // best-effort rollback; the original failure is the one worth reporting
     }

@@ -24,6 +24,8 @@
 
 - **MCP 工具适配器落地**:新增 infra McpTool,提供 `mcp.call`,支持 `.roll/mcp-servers.json` 与 `policy.yaml tools.mcp.servers` 配置、lazy connection reuse、dispose 断开、policy disabled 拒绝和 server unavailable 诚实错误分类。(US-TOOL-010) `[tools-layer]`
 
+- **工具调用事件与成本观测收紧**:ToolRegistry 的 `tool:result` 事件改为只发布脱敏结果事实,失败结果即使 `emitsEvents:false` 也会留痕;CLI 无 cycleId 的工具调用不计入 per-cycle ToolCost,cycle:end 可携带工具成本快照。(US-TOOL-011) `[tools-layer]`
+
 ## v3.618.3 — 2026-06-18
 
 ### 修复

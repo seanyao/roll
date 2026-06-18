@@ -2,6 +2,7 @@ import type {
   MinimalFs,
   ToolDeclaration,
   ToolDeps,
+  ToolEvent,
   ToolId,
   ToolInvocation,
   ToolPolicy,
@@ -50,11 +51,13 @@ function policyEngine(policy: Partial<ToolPolicy> = {}): ToolRegistryPolicyEngin
   };
 }
 
-function sink(): ToolRegistryEventSink & { types: string[] } {
+function sink(): ToolRegistryEventSink & { types: string[]; events: ToolEvent[] } {
   return {
     types: [],
+    events: [],
     emit(event) {
       this.types.push(event.type);
+      this.events.push(event);
     },
   };
 }
@@ -64,6 +67,14 @@ function request(input: unknown = "ok") {
     invocationId: "inv-1",
     input,
     caller: { cycleId: "cycle-1", storyId: "US-TOOL-002", agent: "codex" },
+  };
+}
+
+function cliRequest(input: unknown = "ok") {
+  return {
+    invocationId: "inv-cli",
+    input,
+    caller: { storyId: "US-TOOL-011", agent: "codex" },
   };
 }
 
@@ -138,7 +149,84 @@ describe("US-TOOL-002 ToolRegistry", () => {
     expect(result).toMatchObject({ ok: true, output: "quiet" });
     expect(events.types).toEqual([]);
     expect(registry.snapshotCosts()).toEqual([
-      expect.objectContaining({ toolId: TOOL_ID, invocations: 1, currency: "USD" }),
+      expect.objectContaining({ toolId: TOOL_ID, invocations: 1, durationMs: 1, failures: 0, currency: "USD" }),
+    ]);
+  });
+
+  it("emits sanitized result events without adapter output payloads", async () => {
+    const events = sink();
+    const registry = new ToolRegistry({ deps: deps(), policyEngine: policyEngine(), events });
+    registry.register(tool());
+
+    const result = await registry.invoke(TOOL_ID, request({ secret: "stdout should not leak" }));
+
+    expect(result).toMatchObject({ ok: true, output: { secret: "stdout should not leak" } });
+    const emitted = events.events.find((event) => event.type === "tool:result");
+    expect(emitted).toBeDefined();
+    expect(JSON.stringify(emitted)).not.toContain("stdout should not leak");
+    expect(JSON.stringify(emitted)).not.toContain("output");
+  });
+
+  it("emits a sanitized failure result even when emitsEvents:false suppresses success events", async () => {
+    const events = sink();
+    const registry = new ToolRegistry({ deps: deps(), policyEngine: policyEngine(), events });
+    registry.register(
+      tool({
+        declaration: { ...declaration, emitsEvents: false },
+        async execute(invocation) {
+          this.executes += 1;
+          return {
+            ok: false,
+            error: {
+              code: "adapter_error",
+              message: "stderr should not leak",
+              retryable: false,
+              detail: { stderr: "hidden" },
+            },
+            meta: {
+              invocationId: invocation.invocationId,
+              toolId: invocation.toolId,
+              caller: invocation.caller,
+              startedAt: 100,
+              endedAt: 101,
+              durationMs: 1,
+            },
+          };
+        },
+      }),
+    );
+
+    const result = await registry.invoke(TOOL_ID, request("x"));
+
+    expect(result.ok).toBe(false);
+    expect(events.types).toEqual(["tool:result"]);
+    const emitted = events.events[0];
+    expect(emitted).toMatchObject({
+      type: "tool:result",
+      result: { ok: false, errorCode: "adapter_error" },
+    });
+    expect(JSON.stringify(emitted)).not.toContain("stderr should not leak");
+    expect(JSON.stringify(emitted)).not.toContain("hidden");
+  });
+
+  it("does not track costs for CLI invocations without a cycleId", async () => {
+    const registry = new ToolRegistry({ deps: deps(), policyEngine: policyEngine() });
+    registry.register(tool());
+
+    const result = await registry.invoke(TOOL_ID, cliRequest("cli"));
+
+    expect(result).toMatchObject({ ok: true, output: "cli" });
+    expect(registry.snapshotCosts()).toEqual([]);
+  });
+
+  it("preserves the registry currency on tool cost rows", async () => {
+    const registry = new ToolRegistry({ deps: deps(), policyEngine: policyEngine(), currency: "CNY" });
+    registry.register(tool());
+
+    await registry.invoke(TOOL_ID, request("人民币成本不应标成美元"));
+
+    expect(registry.snapshotCosts()).toEqual([
+      expect.objectContaining({ toolId: TOOL_ID, invocations: 1, currency: "CNY" }),
     ]);
   });
 
@@ -242,7 +330,7 @@ describe("US-TOOL-002 ToolRegistry", () => {
     expect(result).toMatchObject({ ok: true, output: "recovered" });
     expect(calls).toBe(2);
     expect(registry.snapshotCosts()).toEqual([
-      expect.objectContaining({ toolId: TOOL_ID, invocations: 1, currency: "USD" }),
+      expect.objectContaining({ toolId: TOOL_ID, invocations: 1, durationMs: 1, failures: 0, currency: "USD" }),
     ]);
   });
 

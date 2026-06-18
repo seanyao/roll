@@ -21,6 +21,7 @@ import {
   backoffSchedule,
   classifyCaptured,
   classifyPublish,
+  cycleEndEvent,
   cycleStep,
   foldCycle,
   initialCycleState,
@@ -221,6 +222,52 @@ describe("mapV2Status — v2 rows → TerminalOutcome bridge", () => {
     expect(mapV2Status("blocked")).toBe("blocked");
     expect(mapV2Status("failed")).toBe("failed");
     expect(mapV2Status("aborted")).toBe("aborted_no_delivery");
+  });
+});
+
+describe("US-TOOL-011 — tool costs in cycle:end", () => {
+  it("threads ToolRegistry snapshot costs into the CycleCost payload", () => {
+    const event = cycleEndEvent(
+      {
+        cycleId: "cycle-tools",
+        branch: "loop/cycle-tools",
+        agent: "codex",
+        model: "gpt-5",
+        toolCosts: [
+          {
+            toolId: "bash.exec" as never,
+            invocations: 2,
+            durationMs: 46,
+            failures: 1,
+            estimatedCost: 0,
+            currency: "USD",
+            inputBytes: 12,
+            outputBytes: 34,
+          },
+        ],
+      },
+      "done",
+      123,
+    );
+
+    expect(event).toMatchObject({
+      type: "cycle:end",
+      cycleId: "cycle-tools",
+      outcome: "delivered",
+      cost: {
+        cycleId: "cycle-tools",
+        toolCosts: [
+          expect.objectContaining({
+            toolId: "bash.exec",
+            invocations: 2,
+            durationMs: 46,
+            failures: 1,
+            inputBytes: 12,
+            outputBytes: 34,
+          }),
+        ],
+      },
+    });
   });
 });
 

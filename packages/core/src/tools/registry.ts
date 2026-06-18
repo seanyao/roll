@@ -29,7 +29,7 @@ export interface ToolRegistryEventSink {
 export interface ToolInvokeRequest<I = unknown> {
   invocationId: string;
   input: I;
-  caller: ToolInvocation<I>["caller"];
+  caller: Omit<ToolInvocation<I>["caller"], "cycleId"> & { cycleId?: string };
 }
 
 export interface ToolRegistryOptions {
@@ -46,6 +46,10 @@ type ToolState = {
   disposed: boolean;
 };
 
+type SanitizedToolResult =
+  | { ok: true; meta: ToolMeta }
+  | { ok: false; errorCode: ToolError["code"]; meta: ToolMeta };
+
 function error(code: ToolError["code"], message: string, retryable = false, detail?: unknown): ToolError {
   return { code, message, retryable, detail };
 }
@@ -54,7 +58,7 @@ function meta(toolId: ToolId, request: ToolInvokeRequest, startedAt: number, end
   return {
     invocationId: request.invocationId,
     toolId,
-    caller: request.caller,
+    caller: request.caller as ToolMeta["caller"],
     startedAt,
     endedAt,
     durationMs: Math.max(0, endedAt - startedAt),
@@ -127,7 +131,7 @@ export class ToolRegistry {
       invocationId: request.invocationId,
       toolId,
       input: request.input,
-      caller: request.caller,
+      caller: request.caller as ToolInvocation<I>["caller"],
       policy,
       ts: startedAt,
     };
@@ -140,19 +144,19 @@ export class ToolRegistry {
         invocation,
         declaration: state.tool.declaration,
         ts: startedAt,
-      });
+      } as ToolEvent);
     }
 
     const result = await this.executeWithRetry<I, O>(state.tool, invocation, request, policy);
-    if (emitEvents) {
+    if (emitEvents || !result.ok) {
       await this.emit({
         type: "tool:result",
         cycleId: request.caller.cycleId,
         invocationId: request.invocationId,
         toolId,
-        result,
+        result: sanitizeResult(result),
         ts: this.options.deps.now(),
-      });
+      } as ToolEvent);
     }
     this.accumulateCost(toolId, request.input, result);
     return result;
@@ -249,9 +253,12 @@ export class ToolRegistry {
   }
 
   private accumulateCost(toolId: ToolId, input: unknown, result: ToolResult<unknown>): void {
+    if (result.meta.caller.cycleId === undefined || result.meta.caller.cycleId === "") return;
     const current = this.costs.get(toolId) ?? {
       toolId,
       invocations: 0,
+      durationMs: 0,
+      failures: 0,
       estimatedCost: 0,
       currency: this.options.currency ?? "USD",
       inputBytes: 0,
@@ -261,8 +268,15 @@ export class ToolRegistry {
     this.costs.set(toolId, {
       ...current,
       invocations: current.invocations + 1,
+      durationMs: (current.durationMs ?? 0) + result.meta.durationMs,
+      failures: (current.failures ?? 0) + (result.ok ? 0 : 1),
       inputBytes: (current.inputBytes ?? 0) + jsonBytes(input),
       outputBytes: (current.outputBytes ?? 0) + jsonBytes(output),
     });
   }
+}
+
+function sanitizeResult(result: ToolResult<unknown>): SanitizedToolResult {
+  if (result.ok) return { ok: true, meta: result.meta };
+  return { ok: false, errorCode: result.error.code, meta: result.meta };
 }

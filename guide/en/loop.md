@@ -245,16 +245,17 @@ cannot complete, `Last decision` carries the unmet truth or review reason.
 
 `roll loop go` persists its goal state in `.roll/loop/goal.yaml` and runs a
 final review gate before a goal can become `complete`. The default policy is
-`--review auto`: Roll prefers a reviewer from a different provider family than
-the worker agents, and records `goal:review_degraded` when it must fall back to
-self review because only one provider is available.
+`--review auto`: Roll tries heterogeneous reviewers in ranked order, and records
+`goal:review_degraded` when it must fall back to self review because every
+heterogeneous candidate failed or because only one provider is installed.
 
 Final review uses the same structured adapter as `roll peer`. The
 `goal:final_review` event records reviewer agent, provider, command family,
 verdict, findings, timeout/error state, duration, and transcript/evidence
-paths when available. A transient review crash is retried once; if it still
-fails Roll records the real error reason on the `ERROR` verdict and raises an
-ALERT, instead of collapsing into a reasonless generic error.
+paths when available. A transient review crash rotates to the next ranked
+candidate; if every candidate fails Roll records the real error reason on the
+`ERROR` verdict and raises an ALERT, instead of collapsing into a reasonless
+generic error.
 
 Use `--review hetero` when completion must fail closed unless a heterogeneous
 reviewer is installed. Use `--review self` to allow same-provider review. Use

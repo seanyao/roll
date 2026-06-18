@@ -386,7 +386,7 @@ function loopGoHelp(): string {
     "  timebox             Stops only at a cycle boundary and records a goal:gate_tripped event.",
     "",
     "Review modes:",
-    "  auto    Default. Prefer a heterogeneous reviewer; degrade to self review only when no other provider is available.",
+    "  auto    Default. Try heterogeneous reviewers in ranked order; degrade to self review only after every heterogeneous candidate fails or when no other provider is installed.",
     "  hetero  Require a reviewer from a different provider than the worker agents; unavailable reviewers block completion.",
     "  self    Allow final review by the same provider family.",
     "  off     Skip final review and record a goal:final_review SKIPPED event.",

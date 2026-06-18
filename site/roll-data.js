@@ -173,12 +173,10 @@ window.RollData = (function () {
       { id: "operations", title: "Diagnostics & Operations", blurb: "Observe, diagnose, document, patrol.", features: [
         { name: "$roll-debug", mono: true, desc: "Mount a browser probe, capture runtime signals, fix project-owned root causes.", badges: [], href: "diagrams/roll-debug-skill.html", external: true },
         { name: "$roll-doc", mono: true, desc: "Scan docs, update docs/INDEX.md, detect gaps and draft from code evidence.", badges: [], href: "diagrams/roll-doc-skill.html", external: true },
-        { name: "$roll-sentinel", mono: true, desc: "Cost-controlled production patrol against backlog acceptance criteria.", badges: [], href: "diagrams/roll-sentinel-skill.html", external: true },
         { name: "$roll-doctor", mono: true, desc: "Diagnose Roll install, skills, conventions, symlinks, templates and config.", badges: [], href: "diagrams/roll-doctor-skill.html", external: true },
       ]},
       { id: "governance", title: "Coordination", blurb: "Keep humans and agents aligned.", features: [
         { name: "$roll-peer", mono: true, desc: "Cross-agent negotiation for explicit peer review or documented high-risk gates.", badges: ["core"], href: "diagrams/roll-peer-skill.html", external: true },
-        { name: "$roll-brief", mono: true, desc: "Owner-facing activity, escalation and release-readiness brief.", badges: ["highlight"], href: "diagrams/roll-brief-skill.html", external: true },
       ]},
     ],
     JOURNEY: {
@@ -190,7 +188,7 @@ window.RollData = (function () {
         { time: "09:30", title: "Building begins",      body: "Loop picks the top story. $roll-build executes in an isolated worktree, committing in TCR micro-steps.", tag: "build" },
         { time: "10:00", title: "Security peer review", body: "Risky build triggers peer. claude → kimi negotiate the plan over up to three rounds. AGREE.", tag: "peer" },
         { time: "10:30", title: "Verified",             body: "Acceptance Check confirms ACs are met. Screenshots and test output collected as proof of life.", tag: "verify" },
-        { time: "10:45", title: "Live",                 body: "Human approves the PR. Auto-merge to main. Sentinel begins spot-checking production every cycle.", tag: "ship" },
+        { time: "10:45", title: "Live",                 body: "Human approves the PR. Auto-merge to main. The dossier reflects the new delivery state.", tag: "ship" },
         { time: "03:00", title: "Nightly scan queues improvements", body: "Dream finds a small refactor opportunity in the new code. Files REFACTOR-013 for tomorrow.", tag: "dream" },
       ],
     },
@@ -380,12 +378,10 @@ window.RollData = (function () {
       { id: "operations", title: "诊断与运营", blurb: "观测、诊断、文档、巡检。", features: [
         { name: "$roll-debug", mono: true, desc: "挂载浏览器探针,采集运行时信号,修项目自有根因。", badges: [], href: "diagrams/roll-debug-skill.html", external: true },
         { name: "$roll-doc", mono: true, desc: "扫描文档、更新 docs/INDEX.md、识别缺口并基于代码证据起草。", badges: [], href: "diagrams/roll-doc-skill.html", external: true },
-        { name: "$roll-sentinel", mono: true, desc: "按 backlog 验收标准做成本受控的生产巡检。", badges: [], href: "diagrams/roll-sentinel-skill.html", external: true },
         { name: "$roll-doctor", mono: true, desc: "诊断 Roll 安装、skills、约定、symlink、模板与配置。", badges: [], href: "diagrams/roll-doctor-skill.html", external: true },
       ]},
       { id: "governance", title: "协同", blurb: "让人和 agent 保持对齐。", features: [
         { name: "$roll-peer", mono: true, desc: "在明确 peer 请求或高风险门禁下做跨 agent 协商。", badges: ["core"], href: "diagrams/roll-peer-skill.html", external: true },
-        { name: "$roll-brief", mono: true, desc: "面向 owner 的活动、升级事项与发布就绪度简报。", badges: ["highlight"], href: "diagrams/roll-brief-skill.html", external: true },
       ]},
     ],
     JOURNEY: {
@@ -397,7 +393,7 @@ window.RollData = (function () {
         { time: "09:30", title: "开始构建",          body: "Loop 摘取最高优先级故事。$roll-build 在隔离 worktree 里跑,TCR 微提交。", tag: "build" },
         { time: "10:00", title: "安全 Peer 评审",     body: "高风险构建触发 peer。claude → kimi 至多三轮协商方案。AGREE。", tag: "peer" },
         { time: "10:30", title: "验证通过",          body: "验收检查确认 AC 全部满足。截图、测试输出作为「活体证据」入档。", tag: "verify" },
-        { time: "10:45", title: "上线",              body: "人审批 PR。自动合入 main。Sentinel 开始每轮点检生产环境。", tag: "ship" },
+        { time: "10:45", title: "上线",              body: "人审批 PR。自动合入 main。档案交付状态更新。", tag: "ship" },
         { time: "03:00", title: "夜检排上改进项",      body: "Dream 在新代码里发现一处小重构机会,写入 REFACTOR-013,明天再做。", tag: "dream" },
       ],
     },

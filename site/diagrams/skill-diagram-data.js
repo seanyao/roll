@@ -226,36 +226,6 @@ window.RollSkillDiagrams = {
       ]
     },
     {
-      id: "roll-sentinel",
-      name: "$roll-sentinel",
-      title: { en: "Production Patrol", zh: "生产巡检" },
-      sub: { en: "Sample deployed behavior against backlog truth.", zh: "按 backlog 真相抽样检查部署行为。" },
-      lede: {
-        en: "Cost-controlled randomized patrol of deployed behavior. Sentinel samples production against backlog requirements, records evidence, and escalates anomalies without becoming exhaustive monitoring.",
-        zh: "成本受控的随机生产巡检。Sentinel 按 backlog 需求抽样检查部署行为，记录证据并升级异常，但不变成全量监控。"
-      },
-      modes: [
-        { tag: "RUN", title: { en: "Scheduled patrol", zh: "计划巡检" }, body: { en: "Sample requirements and runtime targets on a cadence.", zh: "按节奏抽样需求与运行时目标。" } },
-        { tag: "NOW", title: { en: "Manual spot check", zh: "手动点检" }, body: { en: "Run focused checks for deployed behavior when risk or doubt appears.", zh: "风险或疑问出现时，对部署行为做聚焦检查。" } }
-      ],
-      merge: { en: "▼ sampling protects budget while still finding drift ▼", zh: "▼ 抽样控制成本，同时发现漂移 ▼" },
-      bands: [
-        { key: "plan", label: { en: "Select", zh: "选择" }, steps: [
-          { no: "STEP 1", title: { en: "Select backlog-backed targets", zh: "选择有 backlog 背书的目标" }, desc: { en: "Patrol starts from acceptance criteria and requirements, not random curiosity.", zh: "巡检从验收标准与需求开始，不是随机好奇。" } }
-        ] },
-        { key: "build", label: { en: "Sample", zh: "抽样" }, steps: [
-          { no: "STEP 2", title: { en: "Run randomized budgeted checks", zh: "运行随机且有预算的检查" }, desc: { en: "The sampling budget stays explicit; checks should not expand into exhaustive monitoring.", zh: "抽样预算保持显式；检查不能膨胀为穷尽式监控。" }, gate: true },
-          { no: "STEP 3", title: { en: "Validate observed behavior", zh: "验证观察到的行为" }, desc: { en: "Compare runtime observations to the backlog contract and current deployment state.", zh: "把运行时观察与 backlog 契约及当前部署状态对账。" } }
-        ] },
-        { key: "ship", label: { en: "Record", zh: "记录" }, steps: [
-          { no: "STEP 4", title: { en: "Record patrol evidence", zh: "记录巡检证据" }, desc: { en: "Store what was sampled, what passed, what failed and what was skipped by budget.", zh: "记录抽样对象、通过项、失败项以及因预算跳过的项。" } }
-        ] },
-        { key: "verify", label: { en: "Escalate", zh: "升级" }, steps: [
-          { no: "ALERT", title: { en: "Escalate anomalies", zh: "升级异常" }, desc: { en: "Unexpected production behavior becomes an alert or backlog repair candidate.", zh: "异常生产行为转为告警或 backlog 修复候选。" } }
-        ] }
-      ]
-    },
-    {
       id: "roll-doctor",
       name: "$roll-doctor",
       title: { en: "Roll Toolchain Health", zh: "Roll 工具链体检" },
@@ -283,35 +253,6 @@ window.RollSkillDiagrams = {
         ] },
         { key: "verify", label: { en: "Verdict", zh: "结论" }, steps: [
           { no: "REPORT", title: { en: "Fail loud with exact evidence", zh: "带精确证据响亮失败" }, desc: { en: "Broken contracts should be visible with commands, paths and remediation hints.", zh: "破损契约应带命令、路径与修复提示清楚可见。" } }
-        ] }
-      ]
-    },
-    {
-      id: "roll-brief",
-      name: "$roll-brief",
-      title: { en: "Owner Briefing", zh: "Owner 简报" },
-      sub: { en: "Summarize activity, risk and release readiness.", zh: "汇总活动、风险与发布就绪度。" },
-      lede: {
-        en: "Produce an internal owner-facing digest of completed work, in-progress items, queue, escalations, doc coverage and release readiness. It is candid operational context, not public changelog copy.",
-        zh: "生成面向 owner 的内部简报，汇总已完成、进行中、队列、升级事项、文档覆盖与发布就绪度。它是坦诚的运行上下文，不是公开 changelog 文案。"
-      },
-      modes: [
-        { tag: "AUTO", title: { en: "Feature completion", zh: "Feature 完成" }, body: { en: "Loop triggers when related stories under one feature are all Done.", zh: "同一 feature 下相关故事全部 Done 后由 loop 触发。" } },
-        { tag: "DAY", title: { en: "Daily or on-demand", zh: "每日或按需" }, body: { en: "Scheduled morning brief or scoped command such as <code>--since</code> / <code>--feature</code>.", zh: "晨间定时简报，或通过 <code>--since</code> / <code>--feature</code> 按需限定范围。" } }
-      ],
-      merge: { en: "▼ all modes produce one owner-ready operational picture ▼", zh: "▼ 所有模式都产出一份 owner 可决策的运行图 ▼" },
-      bands: [
-        { key: "plan", label: { en: "Scope", zh: "定范围" }, steps: [
-          { no: "STEP 1", title: { en: "Determine time or feature scope", zh: "确定时间或 feature 范围" }, desc: { en: "Find the previous brief, read backlog status changes and git commits since that timestamp.", zh: "找到上一份简报，读取其后 backlog 状态变化与 git commit。" } }
-        ] },
-        { key: "build", label: { en: "Collect", zh: "收集" }, steps: [
-          { no: "STEP 2", title: { en: "Classify activity", zh: "分类活动" }, desc: { en: "Group completed, in-progress, queued, Dream findings, escalations and documentation coverage.", zh: "分组已完成、进行中、队列、Dream 发现、升级事项与文档覆盖。" } }
-        ] },
-        { key: "ship", label: { en: "Assess", zh: "评估" }, steps: [
-          { no: "STEP 3", title: { en: "Release readiness signal", zh: "发布就绪信号" }, desc: { en: "Signal release candidate or hold based on in-progress work, escalations, CI and critical refactors.", zh: "根据进行中工作、升级事项、CI 与关键重构给出可发布或暂缓信号。" }, gate: true }
-        ] },
-        { key: "verify", label: { en: "Write", zh: "写入" }, steps: [
-          { no: "STEP 4", title: { en: "Write numbered brief", zh: "写入编号简报" }, desc: { en: "Create <code>.roll/briefs/YYYY-MM-DD-NN.md</code> with explicit escalations and release readiness.", zh: "创建 <code>.roll/briefs/YYYY-MM-DD-NN.md</code>，明确写出升级事项与发布就绪度。" } }
         ] }
       ]
     },

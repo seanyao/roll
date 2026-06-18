@@ -157,6 +157,8 @@ describe("US-TOOL-005 BrowserTool", () => {
   });
 
   it("uses the macOS GUI screenshot lane when Aqua is available and headlessOnly is false", async () => {
+    const originalCi = process.env.CI;
+    delete process.env.CI;
     const deps = fakeDeps((command) => {
       if (command === "launchctl") return { exitCode: 0, stdout: "Aqua\n", stderr: "", timedOut: false };
       if (command === "osascript") return { exitCode: 0, stdout: "", stderr: "", timedOut: false };
@@ -172,9 +174,13 @@ describe("US-TOOL-005 BrowserTool", () => {
     expect(result.ok).toBe(true);
     expect(deps.calls.map((call) => call.command)).toEqual(["launchctl", "osascript", "screencapture"]);
     expect(deps.files.get("/tmp/gui.png")).toBe("PNGDATA");
+    if (originalCi === undefined) delete process.env.CI;
+    else process.env.CI = originalCi;
   });
 
   it("uses the headless lane when Aqua is unavailable and honestly skips if headless is also unavailable", async () => {
+    const originalCi = process.env.CI;
+    delete process.env.CI;
     const deps = fakeDeps((command) => {
       if (command === "launchctl") return { exitCode: 0, stdout: "Background\n", stderr: "", timedOut: false };
       if (command === "npx") return { exitCode: 127, stdout: "", stderr: "npx missing", timedOut: false };
@@ -188,6 +194,8 @@ describe("US-TOOL-005 BrowserTool", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.message).toContain("headless browser unavailable");
     expect(deps.calls.map((call) => call.command)).toEqual(["launchctl", "npx"]);
+    if (originalCi === undefined) delete process.env.CI;
+    else process.env.CI = originalCi;
   });
 
   it("queues concurrent invocations through one shared browser state", async () => {

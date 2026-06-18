@@ -321,6 +321,103 @@ export function shouldSuppressGoalChildFailureCounter(input: {
 }
 
 /**
+ * FIX-363: scan THIS cycle's events for an external reviewer block (`agent:blocked`
+ * auth/network, emitted by the executor's review/score failure path). A failed
+ * cycle caused by such a block is an EXTERNAL failure — not logged in / network
+ * down — not slow or buggy code, so it must NOT feed the consecutive-CODE-failure
+ * auto-PAUSE (which tells the owner to hunt a phantom bug). AUTH wins over NETWORK
+ * (the more actionable, non-self-healing cause).
+ */
+export function readExternalBlock(
+  eventsPath: string,
+  cycleId: string,
+): { cause: "auth" | "network"; agents: string[] } | null {
+  const auth: string[] = [];
+  const network: string[] = [];
+  try {
+    if (!existsSync(eventsPath)) return null;
+    for (const line of readFileSync(eventsPath, "utf8").split("\n")) {
+      if (line.trim() === "" || !line.includes("agent:blocked")) continue;
+      let e: { type?: string; cycleId?: string; agent?: string; cause?: string };
+      try {
+        e = JSON.parse(line) as typeof e;
+      } catch {
+        continue;
+      }
+      if (e.type !== "agent:blocked" || e.cycleId !== cycleId || e.agent === undefined) continue;
+      if (e.cause === "auth") auth.push(e.agent);
+      else if (e.cause === "network") network.push(e.agent);
+    }
+  } catch {
+    return null;
+  }
+  const uniq = (xs: string[]): string[] => [...new Set(xs)];
+  if (auth.length > 0) return { cause: "auth", agents: uniq(auth) };
+  if (network.length > 0) return { cause: "network", agents: uniq(network) };
+  return null;
+}
+
+/**
+ * FIX-363: act on a reviewer external block by CAUSE (the owner's "decide what to
+ * do by the cause, don't just keep burning"):
+ *   • AUTH    → PAUSE with an actionable "re-login" — it will NOT self-heal, so
+ *               continuing to spin only burns cycles on a doomed review.
+ *   • NETWORK → alert only, keep breathing — it self-heals when the VPN/proxy
+ *               returns (mirrors the IDEA-001 offline degrade).
+ * Either way the consecutive-CODE-failure counter is NOT ticked.
+ */
+function writeReviewerBlockedAlert(
+  projectPath: string,
+  slug: string,
+  alertsPath: string,
+  eventsPath: string,
+  cycleId: string,
+  block: { cause: "auth" | "network"; agents: string[] },
+): void {
+  const agents = block.agents.join(", ");
+  const fix =
+    block.cause === "auth"
+      ? `Re-login the blocked agent(s): ${agents} (run each agent once interactively to re-authenticate), then: \`roll loop resume\``
+      : `Check network / VPN / proxy (HTTP(S)_PROXY) — agent(s) ${agents} could not reach their API. The loop keeps breathing and recovers automatically once connectivity returns.`;
+  const title =
+    block.cause === "auth"
+      ? "loop paused — reviewer NOT logged in (auth block, not a code bug)"
+      : "reviewer network-blocked (not a code bug) — loop still breathing";
+  const msg =
+    `# ALERT — ${title}\n\n` +
+    `**Cycle**: ${cycleId}\n` +
+    `**Cause**: ${block.cause}\n` +
+    `**Agent(s)**: ${agents}\n` +
+    `**Action**: ${fix}\n`;
+  try {
+    appendFileSync(alertsPath, `${msg}\n`, "utf8");
+  } catch {
+    /* best-effort */
+  }
+  const bus = new EventBus();
+  const ts = Date.now();
+  try {
+    bus.appendEvent(eventsPath, { type: "alert:notify", channel: "loop-safety", message: title, ts });
+  } catch {
+    /* best-effort */
+  }
+  if (block.cause === "auth") {
+    const pauseMarker = join(projectPath, ".roll", "loop", `PAUSE-${slug}`);
+    if (!existsSync(pauseMarker)) {
+      try {
+        writeFileSync(pauseMarker, msg, "utf8");
+        bus.appendEvent(eventsPath, { type: "policy:safety_pause", loop: "ci", reason: `reviewer auth block: ${agents}`, ts });
+      } catch {
+        /* best-effort */
+      }
+    }
+  }
+  process.stderr.write(
+    `loop run-once: reviewer ${block.cause} block (${agents}) — ${block.cause === "auth" ? "PAUSED (re-login then resume)" : "breathing (self-heals on reconnect)"}\n`,
+  );
+}
+
+/**
  * Resolve + read the loop SKILL.md body the agent runs, frontmatter stripped.
  * Thin wrapper over the shared {@link readSkillBodyGeneric} pinned to the
  * `roll-loop` skill + the `ROLL_LOOP_SKILL` env override (FIX-204A lineage —
@@ -605,14 +702,24 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
       );
       return 0;
     }
-    const suppressGoalZeroDelivery = shouldSuppressGoalChildFailureCounter({
-      isGoalChild: (process.env["ROLL_LOOP_GO_CHILD"] ?? "") === "1",
-      terminal: result.terminal,
-      tcrCount: result.state?.ctx?.tcrCount,
-    });
-    if (!suppressGoalZeroDelivery) {
-      const storyId = (result.state?.ctx?.storyId ?? "").trim();
-      incrementConsecutiveFails(id.path, id.slug, alertsPath, paths.eventsPath, cycleId, storyId, result.terminal ?? "unknown");
+    // FIX-363: a cycle that failed because a reviewer was BLOCKED by an external
+    // cause (not logged in / network down) is NOT a code failure — attribute it
+    // and act on the cause, never tick the consecutive-CODE-failure counter (a
+    // misleading "3 failures → resolve the code" pause sent the owner hunting a
+    // phantom bug while the real fix was "re-login" / "reconnect the VPN").
+    const externalBlock = readExternalBlock(paths.eventsPath, cycleId);
+    if (externalBlock !== null) {
+      writeReviewerBlockedAlert(id.path, id.slug, alertsPath, paths.eventsPath, cycleId, externalBlock);
+    } else {
+      const suppressGoalZeroDelivery = shouldSuppressGoalChildFailureCounter({
+        isGoalChild: (process.env["ROLL_LOOP_GO_CHILD"] ?? "") === "1",
+        terminal: result.terminal,
+        tcrCount: result.state?.ctx?.tcrCount,
+      });
+      if (!suppressGoalZeroDelivery) {
+        const storyId = (result.state?.ctx?.storyId ?? "").trim();
+        incrementConsecutiveFails(id.path, id.slug, alertsPath, paths.eventsPath, cycleId, storyId, result.terminal ?? "unknown");
+      }
     }
   }
 

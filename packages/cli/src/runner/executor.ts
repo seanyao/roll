@@ -124,6 +124,7 @@ import {
   realAgentSpawn,
   reasonixEnv,
 } from "./agent-spawn.js";
+import { classifyBlockSignature, probeAgentReachable, type ReachResult } from "./agent-liveness.js";
 import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, runPeerGate } from "./peer-gate.js";
 import { declaresAnySurface, deliverableCmdsForStory, readAttestGateMode, rejectedDeliverableCmdsForStory, runAttestGate, screenshotExemption, storyRequiresScreenshot, verificationReportPath, webCaptureTargetsForStory } from "./attest-gate.js";
 import { recoverCodexSessionId, recoverCodexUsage, recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
@@ -316,6 +317,13 @@ export interface Ports {
   capture: CapturePort;
   attest: AttestPort;
   agentSpawn: AgentSpawn;
+  /** FIX-363: connectivity/auth probe for a reviewer agent. Used ONLY on the
+   *  review-failure path (a silent timeout with no block signature) to tell a
+   *  BLOCKED agent (not logged in / network down) from a SLOW one, so the loop
+   *  acts on the real cause instead of burning the budget on a doomed call.
+   *  Optional + injectable: unset (the test default) → no probe, no spawn, the
+   *  pre-FIX-363 behaviour; {@link nodePorts} wires the real {@link probeAgentReachable}. */
+  agentReachable?: (agent: string) => Promise<ReachResult>;
   /** Canonical installed agents — the heterogeneous-peer pool for the peer-gate
    *  retry (FIX-293) and the opt-in pairing stages. Injectable so tests can pin
    *  a deterministic peer pool; defaults to {@link agentsInstalled} over the real
@@ -1017,6 +1025,42 @@ export async function executeCommand(
       } catch {
         /* count is best-effort; a git miss must not fail the cycle */
       }
+      // FIX-363: attribute a reviewer/scorer failure to its CAUSE. Signature-match
+      // the output we ALREADY have (zero cost); only a SILENT timeout (no output,
+      // no signature) spends ONE cheap reachability probe to tell a blocked agent
+      // from a slow one. On a definite external block (auth/network) emit
+      // `agent:blocked` so loop-run-once isolates it from the code-failure counter
+      // and raises an actionable "re-login / check VPN" pause instead of a phantom
+      // code-bug hint. Heuristic by design — it only nudges a counter + an alert,
+      // never drops a real delivery, so a false positive is at worst a wrong hint.
+      const attributeBlockCause = async (
+        peer: string,
+        outcome: "timeout" | "error",
+        rawOutput: string,
+        stage: "review" | "score",
+      ): Promise<"auth" | "network" | null> => {
+        let cause = classifyBlockSignature(rawOutput);
+        if (cause === null && outcome === "timeout" && ports.agentReachable !== undefined) {
+          try {
+            const reach = await ports.agentReachable(peer);
+            if (!reach.reachable && (reach.cause === "auth" || reach.cause === "network")) cause = reach.cause;
+          } catch {
+            /* the probe is best-effort — it must never topple the cycle */
+          }
+        }
+        if (cause === "auth" || cause === "network") {
+          ports.events.appendEvent(ports.paths.eventsPath, {
+            type: "agent:blocked",
+            cycleId: ctx.cycleId ?? "",
+            agent: peer,
+            cause,
+            stage,
+            detail: (rawOutput.split("\n").find((l) => l.trim() !== "") ?? "").slice(0, 200),
+            ts: eventTs(ports),
+          });
+        }
+        return cause;
+      };
       // The one-way peer-consult closure, shared by the peer gate's retry
       // (FIX-293) and the opt-in pairing stages (US-PAIR-003). A different agent
       // reads the cycle diff and returns a terse verdict; 30s hard timeout
@@ -1036,13 +1080,14 @@ export async function executeCommand(
         // FIX-319: record EVERY consult's real wall-clock + outcome (pair:consult)
         // so the 120s hard timeout can be tuned from data, not guessed.
         const t0 = Date.now();
-        const emitConsult = (outcome: "reviewed" | "timeout" | "error"): void =>
+        const emitConsult = (outcome: "reviewed" | "timeout" | "error", cause?: "auth" | "network"): void =>
           ports.events.appendEvent(ports.paths.eventsPath, {
             type: "pair:consult",
             cycleId: ctx.cycleId ?? "",
             peer,
             durationMs: Date.now() - t0,
             outcome,
+            ...(cause !== undefined ? { cause } : {}),
             ts: eventTs(ports),
           });
         let res;
@@ -1060,16 +1105,23 @@ export async function executeCommand(
             }),
             new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs).unref()),
           ]);
-        } catch {
-          emitConsult("error");
+        } catch (e) {
+          const cause = await attributeBlockCause(peer, "error", e instanceof Error ? e.message : String(e), "review");
+          emitConsult("error", cause ?? undefined);
           return null;
         }
         if (res === null || res.timedOut) {
-          emitConsult("timeout");
+          // FIX-363: a "timeout" is not always slowness. Attribute it — a silent
+          // hang with no output spends ONE cheap reachability probe to tell a
+          // blocked agent (re-login / VPN) from a genuinely slow one.
+          const raw = res !== null ? `${res.stdout}\n${res.stderr}` : "";
+          const cause = await attributeBlockCause(peer, "timeout", raw, "review");
+          emitConsult("timeout", cause ?? undefined);
           return null;
         }
         if (res.exitCode !== 0) {
-          emitConsult("error");
+          const cause = await attributeBlockCause(peer, "error", `${res.stdout}\n${res.stderr}`, "review");
+          emitConsult("error", cause ?? undefined);
           return null;
         }
         const vm = /VERDICT:\s*(agree|refine|object)/i.exec(res.stdout);
@@ -1244,10 +1296,20 @@ export async function executeCommand(
               }),
               new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs).unref()),
             ]);
-          } catch {
+          } catch (e) {
+            // FIX-363: attribute the score-stage failure too (the "missing peer
+            // review score" block originates here) so an external block surfaces.
+            await attributeBlockCause(peer, "error", e instanceof Error ? e.message : String(e), "score");
             return null;
           }
-          if (res === null || res.timedOut || res.exitCode !== 0) return null;
+          if (res === null || res.timedOut) {
+            await attributeBlockCause(peer, "timeout", res !== null ? `${res.stdout}\n${res.stderr}` : "", "score");
+            return null;
+          }
+          if (res.exitCode !== 0) {
+            await attributeBlockCause(peer, "error", `${res.stdout}\n${res.stderr}`, "score");
+            return null;
+          }
           const parsed = parsePairScoreOutput(res.stdout);
           if (parsed === null) return null;
           return { ...parsed, cost: peerReviewCost(peer, res.stdout) };
@@ -2767,12 +2829,15 @@ export function nodePorts(opts: {
 }): Ports {
   const bus = new EventBus();
   const clock = opts.clock ?? systemClock;
+  const spawn = opts.agentSpawn ?? realAgentSpawn;
   return {
     repoCwd: opts.repoCwd,
     paths: opts.paths,
     skillBody: opts.skillBody,
     clock,
-    agentSpawn: opts.agentSpawn ?? realAgentSpawn,
+    agentSpawn: spawn,
+    // FIX-363: the real connectivity probe reuses the same spawn the reviews use.
+    agentReachable: (agent) => probeAgentReachable(agent, spawn, { cwd: opts.repoCwd }),
     git: {
       async fetchOrigin(repoCwd, branch) {
         const r = await worktreeFetchOrigin(repoCwd, branch);

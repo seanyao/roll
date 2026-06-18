@@ -65,7 +65,7 @@ export interface PairReview {
 }
 
 export type PairEvent =
-  | { type: "pair:selected"; cycleId: string; workingAgent: string; peer: string; stage: string; ts: number }
+  | { type: "pair:selected"; cycleId: string; workingAgent: string; peer: string; stage: string; timeoutMs?: number; ts: number }
   | { type: "pair:verdict"; cycleId: string; peer: string; verdict: PairReview["verdict"]; findings: number; cost: number; stage: string; ts: number }
   | { type: "pair:score"; cycleId: string; peer: string; score: number; verdict: PairScore["verdict"]; cost: number; stage: "score"; ts: number }
   | { type: "pair:none-available"; cycleId: string; stage: string; reason: string; ts: number };
@@ -102,12 +102,32 @@ export interface RunPairingResult {
   verdict?: PairReview["verdict"];
 }
 
-// FIX-319: 30s was too short for a real heterogeneous review (a cold claude/kimi
-// spawn that reads a diff + reasons + answers needs longer) — every hetero
-// consult timed out → no peer evidence → the peer gate blocked delivery. Raised
-// to 2min (owner's ≤3min peer-review policy). NOT final: pair:consult records
-// each consult's real duration so this is tuned from data, not guessed.
-const DEFAULT_TIMEOUT_MS = 120_000;
+// FIX-363: the review timeout is now data-tuned (the comment's "tuned from data,
+// not guessed" promise, kept). The `pair:consult` history shows successful hetero
+// reviews tail out to ~116s while ALL 55 timeouts landed EXACTLY at the 120s cap —
+// i.e. 120s was CLIPPING the duration distribution, not catching genuine hangs. A
+// 14-file/60K-char cross-module diff (FIX-356b) timed out all three reviewers at
+// ~120004ms twice, blocking a delivery the builder had gotten right. So the budget
+// scales with diff size, within the owner's ≤3min default / ≤5min complex policy:
+//   • small/normal diff → 180s (3min) — the policy floor; was 120s, below policy.
+//   • large/cross-module diff (≥20K chars) → 300s (5min) — the policy ceiling.
+// Fail-loud is unchanged: a whole pool that still flakes within the (now adequate)
+// budget BLOCKS — the gate is never weakened, reviewers are just given honest time.
+const REVIEW_TIMEOUT_BASE_MS = 180_000;
+const REVIEW_TIMEOUT_LARGE_MS = 300_000;
+const REVIEW_LARGE_DIFF_CHARS = 20_000;
+
+/**
+ * FIX-363 — the peer-review wall-clock budget for a diff of `diffChars` length.
+ * Two tiers (not three: the cycle diff is capped at 60K upstream, so finer
+ * bucketing buys nothing): normal diffs get the 3min policy floor, large/
+ * cross-module diffs (≥20K chars) get the 5min policy ceiling. The SCORE stage
+ * does NOT use this — it scores a tiny `--stat` summary, never the full diff,
+ * so it keeps its own flat budget ({@link SCORE_TIMEOUT_MS}).
+ */
+export function reviewTimeoutMs(diffChars: number): number {
+  return diffChars >= REVIEW_LARGE_DIFF_CHARS ? REVIEW_TIMEOUT_LARGE_MS : REVIEW_TIMEOUT_BASE_MS;
+}
 
 /**
  * FIX-335 AC3 — parallel take-first: resolve with the FIRST promise that yields
@@ -224,13 +244,15 @@ export async function runPairing(
     // discarded. Upholds FIX-293/FIX-331 semantics (still a real hetero verdict;
     // the WHOLE pool failing still blocks) — only the dispatch is now concurrent
     // instead of serial, so claude+pi+kimi reviews overlap rather than stack.
-    const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    // FIX-363: budget scales with the diff the peer must actually read.
+    const timeoutMs = deps.timeoutMs ?? reviewTimeoutMs(diff.length);
     const probes = candidates.map(async (candidate) => {
       const peer = candidate as string;
       // Each candidate still emits a selected event (now possibly several in
       // flight — acceptable per FIX-335: one selected per consult, one verdict
       // for the winner). Tag the result with its peer so the winner is known.
-      deps.event({ type: "pair:selected", cycleId, workingAgent, peer, stage, ts: deps.now() });
+      // FIX-363: record the budget this consult was given so it stays data-tunable.
+      deps.event({ type: "pair:selected", cycleId, workingAgent, peer, stage, timeoutMs, ts: deps.now() });
       const review = await deps.reviewPeer(peer, diff, timeoutMs);
       return review === null ? null : { peer, review };
     });
@@ -294,10 +316,14 @@ export interface RunScorePairingResult {
   sessionId?: string;
 }
 
-/** FIX-343 (step ④): the per-attempt score timeout (120s) and the bounded retry
- *  budget (1 retry ⇒ 2 attempts max). A score-stage flake is an HONEST failure,
- *  not a fallback — the retry only reduces flake-driven false negatives. */
-const SCORE_TIMEOUT_MS = 120_000;
+/** FIX-343 (step ④): the per-attempt score timeout and the bounded retry budget
+ *  (1 retry ⇒ 2 attempts max). A score-stage flake is an HONEST failure, not a
+ *  fallback — the retry only reduces flake-driven false negatives.
+ *  FIX-363: raised 120s → 180s to match the owner's ≤3min peer-review policy floor
+ *  (the FIX-356b incident timed out the score reviewers too). This is a FLAT bump,
+ *  NOT diff-scaled: the scorer reads a tiny `--stat` summary (≤4K), never the full
+ *  diff, so it needs headroom for cold-spawn + reasoning, not for diff length. */
+const SCORE_TIMEOUT_MS = 180_000;
 const SCORE_MAX_ATTEMPTS = 2; // 1 initial + 1 bounded retry
 
 /**
@@ -402,7 +428,7 @@ export async function runScorePairing(
         const probes = pool.map(async (candidate) => {
           const peer = candidate;
           const sessionId = `${cycleId}:score:${peer}:a${attempt}:${deps.now()}`;
-          deps.event({ type: "pair:selected", cycleId, workingAgent, peer, stage: "score", ts: deps.now() });
+          deps.event({ type: "pair:selected", cycleId, workingAgent, peer, stage: "score", timeoutMs, ts: deps.now() });
           const scored = await deps.scorePeer(peer, summary, timeoutMs);
           return scored === null ? null : { peer, scored, sessionId };
         });
@@ -586,10 +612,12 @@ export async function retryPeerConsult(
     // never silently degrades to a same-type review. Only the dispatch is now
     // concurrent. `sameTypeFallback` is uniform across the pool, so the all-fail
     // status can carry it directly.
-    const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    // FIX-363: the peer-gate retry reads the SAME full diff as the pairing review,
+    // so it gets the SAME diff-scaled budget (the FIX-356b block fired here too).
+    const timeoutMs = deps.timeoutMs ?? reviewTimeoutMs(diff.length);
     const poolSameType = tryOrder.every((c) => c.sameTypeFallback);
     const probes = tryOrder.map(async ({ peer, sameTypeFallback }) => {
-      deps.event({ type: "pair:selected", cycleId, workingAgent: working, peer, stage: "code", ts: deps.now() });
+      deps.event({ type: "pair:selected", cycleId, workingAgent: working, peer, stage: "code", timeoutMs, ts: deps.now() });
       const review = await deps.reviewPeer(peer, diff, timeoutMs);
       return review === null ? null : { peer, sameTypeFallback, review };
     });

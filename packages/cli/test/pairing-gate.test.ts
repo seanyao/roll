@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { enabledPairingStages, runPairing, type PairEvent, type RunPairingDeps } from "../src/runner/pairing-gate.js";
+import { enabledPairingStages, reviewTimeoutMs, runPairing, type PairEvent, type RunPairingDeps } from "../src/runner/pairing-gate.js";
 
 function project(yaml: string | null): { dir: string; rt: string } {
   const dir = mkdtempSync(join(tmpdir(), "roll-pair-"));
@@ -169,6 +169,67 @@ describe("runPairing — US-PAIR-003", () => {
       },
     });
     await expect(runPairing(dir, dir, rt, "c1", "claude", "code", d)).resolves.toEqual({ status: "error" });
+  });
+});
+
+describe("reviewTimeoutMs — FIX-363 adaptive peer-review budget", () => {
+  it("normal diff → 180s (3min, the owner's peer-review policy floor)", () => {
+    expect(reviewTimeoutMs(0)).toBe(180_000);
+    expect(reviewTimeoutMs(5_000)).toBe(180_000);
+    expect(reviewTimeoutMs(19_999)).toBe(180_000);
+  });
+  it("large/cross-module diff (≥20K chars) → 300s (5min, the policy ceiling)", () => {
+    expect(reviewTimeoutMs(20_000)).toBe(300_000);
+    expect(reviewTimeoutMs(60_000)).toBe(300_000);
+  });
+});
+
+describe("runPairing — FIX-363 wires the adaptive budget to the reviewer", () => {
+  it("a large diff gives the reviewer the 5min budget, not the legacy 120s", async () => {
+    const { dir, rt } = project(ENABLED);
+    let seen = -1;
+    const bigDiff = `diff --git a/x b/x\n${"+".repeat(25_000)}`;
+    const { d, events } = deps({
+      diff: async () => bigDiff,
+      reviewPeer: async (_p, _diff, t) => {
+        seen = t;
+        return { verdict: "agree", findings: [], cost: 0 };
+      },
+    });
+    const res = await runPairing(dir, dir, rt, "c1", "claude", "code", d);
+    expect(res.status).toBe("reviewed");
+    expect(seen).toBe(300_000);
+    const selected = events.find((e) => e.type === "pair:selected") as Extract<PairEvent, { type: "pair:selected" }>;
+    expect(selected?.timeoutMs).toBe(300_000); // recorded for data-driven tuning
+  });
+
+  it("a small diff gives the 3min floor (was 120s — that clipped the duration tail)", async () => {
+    const { dir, rt } = project(ENABLED);
+    let seen = -1;
+    const { d } = deps({
+      diff: async () => "diff --git a/x b/x\n+small",
+      reviewPeer: async (_p, _diff, t) => {
+        seen = t;
+        return { verdict: "agree", findings: [], cost: 0 };
+      },
+    });
+    await runPairing(dir, dir, rt, "c1", "claude", "code", d);
+    expect(seen).toBe(180_000);
+  });
+
+  it("an explicit deps.timeoutMs still overrides the adaptive default (test seam intact)", async () => {
+    const { dir, rt } = project(ENABLED);
+    let seen = -1;
+    const { d } = deps({
+      timeoutMs: 12345,
+      diff: async () => `+${"+".repeat(25_000)}`,
+      reviewPeer: async (_p, _diff, t) => {
+        seen = t;
+        return { verdict: "agree", findings: [], cost: 0 };
+      },
+    });
+    await runPairing(dir, dir, rt, "c1", "claude", "code", d);
+    expect(seen).toBe(12345);
   });
 });
 

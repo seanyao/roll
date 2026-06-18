@@ -28,6 +28,12 @@ function project(): string {
     join(p, ".roll", "loop", "events.ndjson"),
     [
       JSON.stringify({ type: "peer:gate", cycleId: "20260612-x-0311", verdict: "consulted", reasons: [], ts: 1 }),
+      JSON.stringify({ type: "tool:invoke", cycleId: "20260612-x-0311", invocation: { invocationId: "inv-bash", toolId: "bash", input: { command: "pnpm test" }, caller: { cycleId: "20260612-x-0311" }, policy: { enabled: true }, ts: 1.2 }, declaration: { id: "bash", kind: "bash", title: "Bash" }, ts: 1.2 }),
+      JSON.stringify({ type: "tool:result", cycleId: "20260612-x-0311", invocationId: "inv-bash", toolId: "bash", result: { ok: true, meta: { invocationId: "inv-bash", toolId: "bash", caller: { cycleId: "20260612-x-0311" }, startedAt: 1200, endedAt: 13600, durationMs: 12400 } }, ts: 1.3 }),
+      JSON.stringify({ type: "tool:invoke", cycleId: "20260612-x-0311", invocation: { invocationId: "inv-browser", toolId: "browser", input: { url: "https://app.test" }, caller: { cycleId: "20260612-x-0311" }, policy: { enabled: true }, ts: 1.4 }, declaration: { id: "browser", kind: "browser", title: "Browser" }, ts: 1.4 }),
+      JSON.stringify({ type: "tool:result", cycleId: "20260612-x-0311", invocationId: "inv-browser", toolId: "browser", result: { ok: false, errorCode: "timeout", meta: { invocationId: "inv-browser", toolId: "browser", caller: { cycleId: "20260612-x-0311" }, startedAt: 1400, endedAt: 4400, durationMs: 3000 } }, ts: 1.5 }),
+      JSON.stringify({ type: "tool:invoke", cycleId: "", invocation: { invocationId: "inv-doctor", toolId: "bash", input: { command: "roll doctor" }, caller: { cycleId: "" }, policy: { enabled: true }, ts: 1.6 }, declaration: { id: "bash", kind: "bash", title: "Bash" }, ts: 1.6 }),
+      JSON.stringify({ type: "cycle:end", cycleId: "20260612-x-0311", outcome: "delivered", cost: { cycleId: "20260612-x-0311", agent: "claude", model: "claude-sonnet", tokensIn: 120000, tokensOut: 22000, estimatedCost: 0.05, revertCount: 0, effectiveCost: 0.05, currency: "USD", toolCosts: [{ toolId: "bash", invocations: 3, durationMs: 21000, failures: 0, estimatedCost: 0, currency: "USD" }, { toolId: "browser", invocations: 1, durationMs: 3000, failures: 1, estimatedCost: 0, currency: "USD" }] }, ts: 1.7 }),
       JSON.stringify({ type: "attest:gate", cycleId: "20260612-x-0311", verdict: "produced", reasons: [], ts: 2 }),
       JSON.stringify({ type: "pr:merge", prNumber: 461, storyId: "FIX-241", ts: 3 }),
     ].join("\n") + "\n",
@@ -55,6 +61,10 @@ describe("renderCycleTrace", () => {
     for (const k of ["cycle", "story", "build", "peer", "ci", "pr", "end"]) expect(out).toContain(k);
     expect(out).toContain("3 commits");
     expect(out).toContain("#461 merged");
+    expect(out).toContain('bash "pnpm test" 12s');
+    expect(out).toContain('✗ browser "https://app.test" 3.0s timeout');
+    expect(out).toContain("tools bash×3(21s) browser×1(3.0s)");
+    expect(out).not.toContain("roll doctor");
     expect(out).toContain("PR https://github.com/seanyao/roll/pull/461");
     expect(out).toContain("diff https://github.com/seanyao/roll/pull/461/files");
     expect((out.match(/●/g) ?? []).length).toBe(7);

@@ -115,6 +115,8 @@ export interface ProcessArchive {
   agent?: string;
   /** Chronological timeline (outline spine + signal turning points). */
   timeline?: ProcessTimelineEntry[];
+  /** Human-readable per-tool breakdown, e.g. bash×3(21s) · browser×1(3s). */
+  toolCostSummary?: string;
   /** Bounded raw transcript, pre-rendered to inline HTML (ANSI→HTML). */
   transcript?: {
     inlineHtml: string;
@@ -418,6 +420,10 @@ function processTraceBlock(p: ProcessArchive | undefined): string {
       )
       .join("\n");
     rows.push(`<ol class="timeline">\n${li}\n</ol>`);
+  }
+
+  if (p.toolCostSummary !== undefined && p.toolCostSummary !== "") {
+    rows.push(`<p class="trace-cost"><strong>${bi("Tool cost", "工具成本")}</strong> ${esc(p.toolCostSummary)}</p>`);
   }
 
   if (p.missing !== undefined && p.missing.length > 0) {

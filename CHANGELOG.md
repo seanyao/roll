@@ -26,6 +26,8 @@
 
 - **工具调用事件与成本观测收紧**:ToolRegistry 的 `tool:result` 事件改为只发布脱敏结果事实,失败结果即使 `emitsEvents:false` 也会留痕;CLI 无 cycleId 的工具调用不计入 per-cycle ToolCost,cycle:end 可携带工具成本快照。(US-TOOL-011) `[tools-layer]`
 
+- **CLI 展示工具调用时间线与成本摘要**:`roll loop status`、`roll cycle` 和 attest report 现在会从事件流/CycleCost 展示工具调用摘要、失败 errorCode 与工具成本 breakdown,并保留原生币种显示,避免把人民币成本误标成美元。(US-TOOL-012) `[tools-layer]`
+
 ## v3.618.3 — 2026-06-18
 
 ### 修复

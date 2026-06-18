@@ -75,6 +75,7 @@ import { promisify } from "node:util";
 import { cardArchiveDir, epicFromFeaturePath, findFeatureFile, findFeatureFiles, generateIndex, reportFileName } from "../lib/archive.js";
 import { readReviewScoreTrend, readStoryReviewScores } from "../lib/review-score.js";
 import { markPhaseDone } from "../lib/story-page.js";
+import { collectToolEvidenceFromEventsPath, formatToolCostSummary } from "../lib/tool-display.js";
 import { refreshAggregates } from "./index-gen.js";
 
 // Re-export so existing importers (tests, callers) keep their entry point.
@@ -102,6 +103,8 @@ export interface ProcessReaders {
   transcript(cycleId: string): string | null;
   /** Project-relative path to the machine original (indexed, not embedded). */
   transcriptPath(cycleId: string): string;
+  /** Tool cost summary for a cycle, sourced from cycle:end cost.toolCosts. */
+  toolCostSummary?(cycleId: string): string;
 }
 
 /** Default readers over `<runtimeDir>/{runs.jsonl,events.ndjson,cycle-logs/}`. */
@@ -111,6 +114,7 @@ function defaultProcessReaders(projectPath: string, env: Record<string, string |
   // and returns [] for a missing file (readText → "" on absence), no throw.
   const bus = new EventBus();
   const logPath = (cid: string): string => join(rt, "cycle-logs", `${cid}.agent.log`);
+  const toolEvidence = () => collectToolEvidenceFromEventsPath(join(rt, "events.ndjson"));
   return {
     runs: () => bus.readRuns(join(rt, "runs.jsonl")),
     events: () => bus.readEvents(join(rt, "events.ndjson")),
@@ -124,6 +128,7 @@ function defaultProcessReaders(projectPath: string, env: Record<string, string |
       }
     },
     transcriptPath: (cid) => relative(projectPath, logPath(cid)),
+    toolCostSummary: (cid) => formatToolCostSummary(toolEvidence().costsByCycle.get(cid), " · "),
   };
 }
 
@@ -198,6 +203,10 @@ export function buildProcessArchive(storyId: string, readers: ProcessReaders): P
   if (agent !== undefined) archive.agent = agent;
   if (timeline.length > 0) archive.timeline = timeline;
   else missing.push("timeline");
+  if (cycleId !== undefined && readers.toolCostSummary !== undefined) {
+    const tools = readers.toolCostSummary(cycleId);
+    if (tools !== "") archive.toolCostSummary = tools;
+  }
   if (delivery === "manual") missing.push("cycle");
 
   // transcript — only loop cycles have an agent log; redact → bound → ANSI.

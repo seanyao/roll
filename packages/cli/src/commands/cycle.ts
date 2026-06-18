@@ -10,6 +10,7 @@ import { collectCycleLedger, type CycleLedgerRow, type CycleTapeSegment } from "
 import { collectGitDossierFacts } from "../lib/story-dossier.js";
 import { cycleNo } from "./cycles.js";
 import { c, renderState } from "../render.js";
+import { formatToolCostSummary, formatToolTimelineRow } from "../lib/tool-display.js";
 
 export const CYCLE_USAGE =
   "Usage: roll cycle <id>\n" +
@@ -43,6 +44,7 @@ export function renderCycleTrace(row: CycleLedgerRow, lang: "en" | "zh", slug?: 
     `#${cycleNo(row.cycleId)} · ${c(row.verdict === "delivered" ? "green" : row.verdict === "idle" || row.verdict === "unpublished" ? "muted" : "red", row.verdict)} · ${row.model} · ${row.tokens} · ${row.cost} · ${row.duration}`,
   );
   lines.push(lang === "zh" ? `story ${row.storyId === "" ? "—（无故事）" : row.storyId}` : `story ${row.storyId === "" ? "— (no story)" : row.storyId}`);
+  if (row.toolSummary !== "") lines.push(`cost ${row.cost} · tools ${formatToolCostSummary(row.toolCosts, " ")}`);
   lines.push("");
   const reached = new Set(row.tape.filter((s) => s.detail !== "—" || s.state !== "unknown").map((s) => s.key));
   for (let i = 0; i < row.tape.length; i++) {
@@ -51,6 +53,11 @@ export function renderCycleTrace(row: CycleLedgerRow, lang: "en" | "zh", slug?: 
     const dot = c(dead ? "muted" : SEG_COLOR[seg.state], "●");
     const detail = dead ? (lang === "zh" ? "未达" : "not reached") : seg.detail;
     lines.push(`${dot} ${seg.key.padEnd(7)} ${detail}`);
+    if (seg.key === "build" && row.toolTimeline.length > 0) {
+      for (const tool of row.toolTimeline) {
+        lines.push(`  ↳ ${formatToolTimelineRow(tool)}`);
+      }
+    }
     if (i < row.tape.length - 1) lines.push("│");
   }
   lines.push("");
@@ -86,6 +93,8 @@ export function cycleTraceJson(row: CycleLedgerRow, slug: string | undefined): u
     model: row.model,
     tokens: row.tokens,
     cost: row.cost,
+    toolSummary: row.toolSummary,
+    toolTimeline: row.toolTimeline.map((t) => ({ toolId: t.toolId, label: t.label, durationMs: t.durationMs, ok: t.ok, errorCode: t.errorCode })),
     duration: row.duration,
     tape: row.tape.map((s) => ({ key: s.key, detail: s.detail, state: s.state })),
     evidence: ev,

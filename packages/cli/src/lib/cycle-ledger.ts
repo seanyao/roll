@@ -8,7 +8,9 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { ToolCost } from "@roll/spec";
 import { parseEventLine, type RollEvent } from "@roll/spec";
+import { collectToolEvidence, formatToolCostSummary, type ToolTimelineRow } from "./tool-display.js";
 
 export type CycleLedgerVerdict = "delivered" | "pending_merge" | "unpublished" | "reverted" | "failed" | "blocked" | "idle" | "unknown";
 
@@ -30,6 +32,9 @@ export interface CycleLedgerRow {
   model: string;
   tokens: string;
   cost: string;
+  toolSummary: string;
+  toolCosts: ToolCost[];
+  toolTimeline: ToolTimelineRow[];
   duration: string;
   tape: CycleTapeSegment[];
   /** Evidence links (label → href), relative to features/index.html. */
@@ -310,6 +315,7 @@ export function collectCycleLedger(projectPath: string): CycleLedgerRow[] {
     return [];
   }
   const { byCycle, prMergedBy, prOpenBy, prByCycle } = readEventFacts(projectPath);
+  const toolEvidence = collectToolEvidence(projectPath);
   const rows: CycleLedgerRow[] = [];
   for (const line of content.split("\n")) {
     if (line.trim() === "") continue;
@@ -340,6 +346,7 @@ export function collectCycleLedger(projectPath: string): CycleLedgerRow[] {
     // carries `usage_unknown:true` — its tokens/cost are UNKNOWN ("?"), not 0/—.
     const usageUnknown = row["usage_unknown"] === true;
     const ev = byCycle.get(cycleId);
+    const toolCosts = toolEvidence.costsByCycle.get(cycleId) ?? [];
     const prNumber = storyId !== "" ? prMergedBy.get(storyId) : undefined;
     const prOpen = storyId !== "" ? prOpenBy.get(storyId) : undefined;
     const evidence: CycleLedgerRow["evidence"] = [];
@@ -353,6 +360,9 @@ export function collectCycleLedger(projectPath: string): CycleLedgerRow[] {
       model: typeof row["model"] === "string" && row["model"] !== "" ? (row["model"] as string) : String(row["agent"] ?? "—") || "—",
       tokens: fmtTokens(row["tokens_in"], row["tokens_out"], usageUnknown),
       cost: cost !== undefined ? `${curSymbol}${cost.toFixed(2)}` : usageUnknown ? "?" : "—",
+      toolSummary: formatToolCostSummary(toolCosts),
+      toolCosts,
+      toolTimeline: toolEvidence.timelineByCycle.get(cycleId) ?? [],
       duration: fmtDuration(row["duration_sec"]),
       tape: rowTape(row, verdict, ev, prNumber, prOpen),
       evidence,

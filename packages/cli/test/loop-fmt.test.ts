@@ -68,6 +68,25 @@ describe("FIX-313 — downstream agent presentation uses AgentSpec", () => {
     expect(row.join("\n")).toContain("qwen-coder-plus");
   });
 
+  it("cycle rows surface the tool summary without changing the native cost currency", () => {
+    const row = cycleRow({
+      outcome: "done",
+      start_hhmm: "10:00",
+      duration_s: 60,
+      input_tokens: 0,
+      output_tokens: 0,
+      cost_currency: "CNY",
+      cost_list: 1.25,
+      story: "US-TOOL-012",
+      agent: "qwen",
+      tool_summary: "bash×3(21s)·browser×1(3.0s)",
+    });
+    const out = row.join("\n");
+    expect(out).toContain("¥1.25");
+    expect(out).toContain("bash×3(21s)·browser×1(3.0s)");
+    expect(out).not.toContain("$1.25");
+  });
+
   it("loop smoke commands come from the registry, not non-claude mocks", () => {
     expect(defaultSmokeCmd("kimi")).toContain("kimi");
     expect(defaultSmokeCmd("kimi")).not.toContain("mock kimi");

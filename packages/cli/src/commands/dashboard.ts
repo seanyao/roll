@@ -40,6 +40,7 @@ import {
 import { getAgentSpec } from "@roll/core";
 import { computeListCost, currencyFor } from "./prices-cost.js";
 import { TRUTH_SCHEMA_EPOCH_SEC, cycleTruthFromRow, outcomeToPanel } from "../lib/truth-adapter.js";
+import { collectToolEvidenceFromEventsPath, formatToolCostSummary } from "../lib/tool-display.js";
 
 // ════════════════════════════════════════════════════════════════════════════
 // Display-time helpers — fixed UTC+8, no DST.
@@ -478,6 +479,7 @@ export interface Cycle {
   cost_list?: number | null;
   cost_currency?: string;
   cost_list_legacy?: boolean;
+  tool_summary?: string;
   tcr_count?: number;
   built?: string[];
 }
@@ -756,6 +758,16 @@ function applyRunRow(cy: Cycle, r: RunRecord, ts: Date | null): void {
   if (typeof r["model"] === "string" && r["model"] !== "" && !cy.model) cy.model = r["model"];
   if (!cy.story && cy.built.length > 0) cy.story = cy.built[0] ?? null;
   if (!cy.story && typeof r["story_id"] === "string" && r["story_id"] !== "") cy.story = r["story_id"];
+}
+
+function attachToolEvidence(cycles: Cycle[], rtDir: string | null): void {
+  if (rtDir === null) return;
+  const evidence = collectToolEvidenceFromEventsPath(join(rtDir, "events.ndjson"));
+  for (const cy of cycles) {
+    const costs = evidence.costsByCycle.get(cy.label);
+    if (costs === undefined || costs.length === 0) continue;
+    cy.tool_summary = formatToolCostSummary(costs);
+  }
 }
 
 /** @returns the run_ids that matched a rendered cycle (id- or ts-window-match)
@@ -1682,7 +1694,7 @@ function render(
   backlog: Record<string, string>,
   args: RenderArgs,
 ): void {
-  const { days, lang, runs, gitMerges, projectSlug, now } = args;
+  const { days, lang, runs, gitMerges, projectSlug, now, rtDir } = args;
   const cycles = aggregate(events, cron);
   const matchedRunIds = Object.keys(runs).length > 0 ? mergeRunsIntoCycles(cycles, runs) : new Set<string>();
   // US-TRUTH-004 AC4: a COMPLETED post-epoch cycle with no runs row has no
@@ -1697,6 +1709,7 @@ function render(
   }
   if (Object.keys(gitMerges).length > 0) repairOrphanCyclesFromGit(cycles, gitMerges);
   backfillUsageFromAgentSessions(cycles, projectSlug ?? "");
+  attachToolEvidence(cycles, rtDir);
   const byDay = bucketByDay(cycles);
   const daysKeys = [...byDay.keys()].sort().reverse().slice(0, days);
 
@@ -2041,6 +2054,7 @@ function renderCycle(cy: Cycle, now: Date): string[] {
     agent: cy.agent ?? null,
     pr_num: cy.pr_num ?? null,
     cost_list_legacy: cy.cost_list_legacy ?? false,
+    tool_summary: cy.tool_summary ?? "",
     fail_detail: cy.fail_detail ?? null,
     label: cy.label,
   };
@@ -2121,6 +2135,7 @@ function collectCycles(slug: string, days: number): Cycle[] {
   if (Object.keys(runs).length > 0) mergeRunsIntoCycles(cycles, runs);
   if (Object.keys(gitMerges).length > 0) repairOrphanCyclesFromGit(cycles, gitMerges);
   backfillUsageFromAgentSessions(cycles, slug);
+  attachToolEvidence(cycles, loopRuntimeDir(slug));
   return cycles;
 }
 

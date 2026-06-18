@@ -113,9 +113,18 @@ function packageRoot(): string {
   return dir;
 }
 
-/** The CLI bin path of THIS checkout — the showcase drives its own roll, never the installed one. */
+/**
+ * The CLI bin path for the showcase subprocess.
+ *
+ * Prefers the dev checkout's `packages/cli/bin/roll.js` (so the showcase tests
+ * the CURRENT source, not the published version). When that file does not exist
+ * — running from a global npm install whose `conventions/` dir shadows the dev
+ * checkout — falls back to the `roll` command on PATH.
+ */
 function rollBin(): string {
-  return join(packageRoot(), "packages", "cli", "bin", "roll.js");
+  const devPath = join(packageRoot(), "packages", "cli", "bin", "roll.js");
+  if (existsSync(devPath)) return devPath;
+  return "roll";
 }
 
 export interface SubResult {
@@ -159,7 +168,14 @@ function runRoll(sandbox: string, rollHome: string, args: string[], opts: RunRol
   } else {
     env.ROLL_HOME = rollHome;
   }
-  const r = spawnSync(process.execPath, [rollBin(), ...args], {
+  const bin = rollBin();
+  // When running from the dev checkout, spawn `node <bin>`. When falling back
+  // to the globally-installed `roll` command, spawn it directly (it is an
+  // executable mjs bundle with its own shebang, not a plain .js script).
+  const [cmd, cmdArgs] = bin === "roll"
+    ? [bin, args]
+    : [process.execPath, [bin, ...args]];
+  const r = spawnSync(cmd, cmdArgs, {
     cwd: sandbox,
     env,
     encoding: "utf8",

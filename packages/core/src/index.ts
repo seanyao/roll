@@ -47,3 +47,4 @@ export * from "./html/chrome.js";
 export * from "./consistency/audit.js";
 export * from "./consistency/gate.js";
 export * from "./truth/selectors.js";
+export * from "./tools/index.js";

@@ -103,7 +103,18 @@ export type RollEvent =
   // (`reviewed`), the timeout fired (`timeout`), or a spawn/non-zero-exit
   // (`error`). durationMs is the real spawn wall-clock (capped near the timeout
   // when it fires).
-  | { type: "pair:consult"; cycleId: string; peer: string; durationMs: number; outcome: "reviewed" | "timeout" | "error"; ts: number }
+  // FIX-363: `cause` attributes a non-`reviewed` consult to its ROOT — an
+  // external block (`auth` = not logged in / 403, `network` = VPN/proxy/DNS down)
+  // vs genuine slowness (absent). It lets the loop act on the real problem
+  // (re-login / reconnect) instead of treating every timeout as "slow → wait
+  // longer → burn → pause with a misleading code-bug hint".
+  | { type: "pair:consult"; cycleId: string; peer: string; durationMs: number; outcome: "reviewed" | "timeout" | "error"; cause?: "auth" | "network"; ts: number }
+  // FIX-363 — a reviewer/scorer agent was found BLOCKED by an external cause
+  // (not slow): `auth` (not logged in / 403) or `network` (VPN/proxy/DNS down).
+  // Emitted from the review/score failure path; loop-run-once reads it to ISOLATE
+  // the failure from the consecutive-code-failure counter and raise an ACTIONABLE
+  // pause ("re-login <agent>" / "check the VPN") instead of "3 failures → code bug".
+  | { type: "agent:blocked"; cycleId: string; agent: string; cause: "auth" | "network"; stage: "review" | "score"; detail: string; ts: number }
   // Attest gate (FIX-207) — every actual delivery records whether a fresh
   // acceptance report was produced ("produced") or silently skipped ("skipped").
   | { type: "attest:gate"; cycleId: string; verdict: "produced" | "skipped"; reasons: string[]; ts: number }

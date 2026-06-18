@@ -3,12 +3,12 @@
  * path (driven against a PATH shim 'claude', never a real agent).
  */
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { dispatch, isPorted, registerAll } from "../src/index.js";
-import { RUN_ONCE_USAGE, buildLoopRouteDeps, loopRunOnceCommand, readSkillBody, shouldSuppressGoalChildFailureCounter } from "../src/commands/loop-run-once.js";
+import { RUN_ONCE_USAGE, buildLoopRouteDeps, loopRunOnceCommand, readExternalBlock, readSkillBody, shouldSuppressGoalChildFailureCounter } from "../src/commands/loop-run-once.js";
 import { resolveRoute } from "@roll/core";
 import { realAgentSpawn } from "../src/runner/index.js";
 
@@ -101,6 +101,27 @@ describe("loop run-once CLI wiring", () => {
     expect(shouldSuppressGoalChildFailureCounter({ isGoalChild: true, terminal: "blocked", tcrCount: 0 })).toBe(true);
     expect(shouldSuppressGoalChildFailureCounter({ isGoalChild: true, terminal: "failed", tcrCount: 1 })).toBe(false);
     expect(shouldSuppressGoalChildFailureCounter({ isGoalChild: false, terminal: "failed", tcrCount: 0 })).toBe(false);
+  });
+
+  it("readExternalBlock — FIX-363: attributes a failed cycle to a reviewer auth/network block", () => {
+    const dir = mkdtempSync(join(tmpdir(), "roll-extblock-"));
+    const ev = join(dir, "events.ndjson");
+    const w = (o: object): void => appendFileSync(ev, `${JSON.stringify(o)}\n`, "utf8");
+    writeFileSync(ev, "", "utf8");
+    // unrelated events + a block for a DIFFERENT cycle must be ignored
+    w({ type: "pair:consult", cycleId: "c1", peer: "kimi", outcome: "timeout", ts: 1 });
+    w({ type: "agent:blocked", cycleId: "other", agent: "claude", cause: "auth", stage: "review", detail: "403", ts: 2 });
+    expect(readExternalBlock(ev, "c1")).toBeNull();
+
+    // auth block for c1 → attributed auth (auth wins over network)
+    w({ type: "agent:blocked", cycleId: "c1", agent: "codex", cause: "network", stage: "review", detail: "ENOTFOUND", ts: 3 });
+    w({ type: "agent:blocked", cycleId: "c1", agent: "claude", cause: "auth", stage: "score", detail: "Please run /login", ts: 4 });
+    const got = readExternalBlock(ev, "c1");
+    expect(got?.cause).toBe("auth");
+    expect(got?.agents).toContain("claude");
+
+    // a missing events file is a safe null (never throws)
+    expect(readExternalBlock(join(dir, "nope.ndjson"), "c1")).toBeNull();
   });
 });
 

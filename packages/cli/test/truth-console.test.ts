@@ -158,14 +158,16 @@ const CYCLES = [
   {
     cycleId: "20260612-x-1234", tsSec: 1781230000, verdict: "delivered" as const, storyId: "US-A-1", agent: "claude",
     model: "claude", tokens: "1k/400", cost: "$0.42", duration: "1m35s",
-    toolSummary: "bash×3(21s)·browser×1(3.0s)",
+    toolSummary: "bash×3(21s)·browser×1(3.0s)·browser.screenshot×1(2.0s)",
     toolCosts: [
       { toolId: "bash", invocations: 3, durationMs: 21_000, failures: 0, estimatedCost: 0.02, currency: "USD" },
       { toolId: "browser", invocations: 1, durationMs: 3_000, failures: 1, estimatedCost: 1.25, currency: "CNY" },
+      { toolId: "browser.screenshot", invocations: 1, durationMs: 2_000, failures: 0, estimatedCost: 0, currency: "USD" },
     ],
     toolTimeline: [
-      { toolId: "bash", label: 'bash "pnpm test"', durationMs: 12_400, ok: true, ts: 1781230001 },
+      { toolId: "bash", label: 'bash "pnpm test"', durationMs: 12_400, ok: true, exitCode: 0, retryCount: 1, stdout: "tests passed", stderr: "warning: cached", dumpPath: ".roll/tool-dumps/inv-bash.log", ts: 1781230001 },
       { toolId: "browser", label: 'browser "https://app.test"', durationMs: 3_000, ok: false, errorCode: "timeout", ts: 1781230002 },
+      { toolId: "browser.screenshot", label: 'browser.screenshot "https://app.test"', durationMs: 2_000, ok: true, screenshotPath: ".roll/tool-dumps/inv-shot.png", ts: 1781230003 },
     ],
     tape: [
       { key: "cycle" as const, detail: "2026-06-12 01:00Z", state: "pass" as const },
@@ -484,9 +486,13 @@ describe("loop tab cycle ledger — US-DOSSIER-013", () => {
   it("US-TOOL-013: expanded row renders tool summary, timeline rows, errors, and native-currency costs", () => {
     const fragment = /<section class="cy-tools"[\s\S]*?<\/section>/.exec(html)?.[0] ?? "";
     expect(fragment).toMatchSnapshot();
-    expect(fragment).toContain("bash×3(21s)·browser×1(3.0s)");
+    expect(fragment).toContain("bash×3(21s)·browser×1(3.0s)·browser.screenshot×1(2.0s)");
     expect(fragment).toContain("bash &quot;pnpm test&quot;");
     expect(fragment).toContain("browser &quot;https://app.test&quot;");
+    expect(fragment).toContain("tests passed");
+    expect(fragment).toContain("warning: cached");
+    expect(fragment).toContain("退出码");
+    expect(fragment).toContain("../tool-dumps/inv-shot.png");
     expect(fragment).toContain("timeout");
     expect(fragment).toContain("$0.02 USD");
     expect(fragment).toContain("¥1.25 CNY");

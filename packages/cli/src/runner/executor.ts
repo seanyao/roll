@@ -1321,7 +1321,21 @@ export async function executeCommand(
         } catch {
           /* summary degrades gracefully */
         }
-        const summary = `Story: ${storyId}\nDelivery: peer-reviewed cycle, scoring stage\nDiff stat:\n${diffStat}`;
+        // FIX-363: give the scorer the story's GOAL so it grades against intent —
+        // a removal card's deletions are the deliverable, not a regression (a scorer
+        // blind to the goal scored a clean roll-sentinel deletion 3/10 and jammed the
+        // loop). Best-effort: a missing/unreadable spec degrades to the id-only line.
+        let goalLine = "";
+        try {
+          const specPath = join(cardArchiveDir(ports.repoCwd, storyId), "spec.md");
+          if (existsSync(specPath)) {
+            const title = (/^title:\s*(.+)$/m.exec(readFileSync(specPath, "utf8"))?.[1] ?? "").trim();
+            if (title !== "") goalLine = `Goal: ${title}\n`;
+          }
+        } catch {
+          /* best-effort — the scorer still gets the diff stat */
+        }
+        const summary = `Story: ${storyId}\n${goalLine}Delivery: peer-reviewed cycle, scoring stage\nDiff stat:\n${diffStat}`;
         const skill = storyId.startsWith("FIX-") || storyId.startsWith("BUG-") ? "roll-fix" : "roll-build";
         // Write to the PERSISTENT .roll (repoCwd) so the peer score note survives
         // worktree teardown and the gate (reading repoCwd) finds it. FIX-343: use

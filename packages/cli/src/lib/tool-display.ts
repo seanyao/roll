@@ -1,5 +1,5 @@
 import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { ToolCost } from "@roll/spec";
 
 export interface ToolTimelineRow {
@@ -8,6 +8,12 @@ export interface ToolTimelineRow {
   durationMs: number;
   ok: boolean;
   errorCode?: string;
+  exitCode?: number;
+  retryCount?: number;
+  stdout?: string;
+  stderr?: string;
+  dumpPath?: string;
+  screenshotPath?: string;
   ts: number;
 }
 
@@ -28,6 +34,10 @@ function toolIdFrom(value: unknown): string | undefined {
 function clip(value: string, max = 72): string {
   const flat = value.replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+function clipBlock(value: string, max = 600): string {
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
 }
 
 function inputLabel(toolId: string, input: unknown): string {
@@ -116,6 +126,7 @@ export function collectToolEvidenceFromEventsPath(path: string): { timelineByCyc
   const timelineByCycle = new Map<string, ToolTimelineRow[]>();
   const costsByCycle = new Map<string, ToolCost[]>();
   const invokes = new Map<string, ToolInvokeRecord>();
+  const rollDir = dirname(dirname(path));
   if (!existsSync(path)) return { timelineByCycle, costsByCycle };
   let content = "";
   try {
@@ -153,6 +164,8 @@ export function collectToolEvidenceFromEventsPath(path: string): { timelineByCyc
       const resultObj = result as Record<string, unknown>;
       const meta = resultObj["meta"];
       const metaObj = meta !== null && typeof meta === "object" && !Array.isArray(meta) ? (meta as Record<string, unknown>) : {};
+      const output = resultObj["output"];
+      const outputObj = output !== null && typeof output === "object" && !Array.isArray(output) ? (output as Record<string, unknown>) : {};
       const toolId = toolIdFrom(event["toolId"]) ?? toolIdFrom(metaObj["toolId"]) ?? invokes.get(invocationId)?.toolId;
       if (toolId === undefined) continue;
       const ok = resultObj["ok"] === true;
@@ -161,12 +174,22 @@ export function collectToolEvidenceFromEventsPath(path: string): { timelineByCyc
       const errorCode = typeof resultObj["errorCode"] === "string" ? resultObj["errorCode"] : typeof nestedCode === "string" ? nestedCode : undefined;
       const start = finiteNumber(metaObj["startedAt"]);
       const end = finiteNumber(metaObj["endedAt"]);
+      const attempt = finiteNumber(metaObj["attempt"]);
+      const stdout = typeof outputObj["stdout"] === "string" ? clipBlock(outputObj["stdout"]) : undefined;
+      const stderr = typeof outputObj["stderr"] === "string" ? clipBlock(outputObj["stderr"]) : undefined;
+      const screenshotPath = typeof outputObj["screenshotPath"] === "string" && outputObj["screenshotPath"] !== "" ? outputObj["screenshotPath"] : undefined;
       const row: ToolTimelineRow = {
         toolId,
         label: inputLabel(toolId, invokes.get(invocationId)?.input),
         durationMs: finiteNumber(metaObj["durationMs"]) ?? (start !== undefined && end !== undefined ? Math.max(0, end - start) : 0),
         ok,
         ...(errorCode !== undefined ? { errorCode } : {}),
+        ...(finiteNumber(outputObj["exitCode"]) !== undefined ? { exitCode: finiteNumber(outputObj["exitCode"]) } : {}),
+        ...(attempt !== undefined && attempt > 1 ? { retryCount: attempt - 1 } : {}),
+        ...(stdout !== undefined ? { stdout } : {}),
+        ...(stderr !== undefined ? { stderr } : {}),
+        ...(toolId === "bash" ? { dumpPath: join(rollDir, "tool-dumps", `${invocationId}.log`) } : {}),
+        ...(screenshotPath !== undefined ? { screenshotPath } : {}),
         ts: finiteNumber(event["ts"]) ?? finiteNumber(metaObj["endedAt"]) ?? invokes.get(invocationId)?.ts ?? 0,
       };
       const list = timelineByCycle.get(cycleId) ?? [];

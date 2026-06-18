@@ -492,6 +492,22 @@ function toolCostBreakdown(costs: readonly CycleLedgerRow["toolCosts"][number][]
   return costs.map((row) => `${String(row.toolId)} ${toolCostAmount(row)}`).join(" · ");
 }
 
+function toolAssetHref(path: string): string {
+  const marker = "/.roll/";
+  const idx = path.indexOf(marker);
+  if (idx >= 0) return `../${path.slice(idx + marker.length)}`;
+  if (path.startsWith(".roll/")) return `../${path.slice(".roll/".length)}`;
+  return path;
+}
+
+function toolPre(labelEn: string, labelZh: string, value: string | undefined): string {
+  if (value === undefined || value === "") return "";
+  return (
+    `<dt style="color:${C.faint};">${bi(labelEn, labelZh)}</dt>` +
+    `<dd style="margin:0;"><pre style="margin:0;max-height:120px;overflow:auto;white-space:pre-wrap;border:1px solid ${C.hair};border-radius:6px;background:#f8fafc;padding:7px 8px;color:${C.ink};">${esc(value)}</pre></dd>`
+  );
+}
+
 function cycleToolRows(cy: CycleLedgerRow): string {
   if (cy.toolSummary === "" && cy.toolTimeline.length === 0) return "";
   const costs = toolCostBreakdown(cy.toolCosts);
@@ -501,6 +517,8 @@ function cycleToolRows(cy: CycleLedgerRow): string {
       const mark = tool.ok ? "✓" : "✗";
       const status = tool.ok ? "ok" : (tool.errorCode ?? "unknown");
       const dur = toolDuration(tool.durationMs);
+      const shotHref = tool.screenshotPath !== undefined ? toolAssetHref(tool.screenshotPath) : undefined;
+      const dumpHref = tool.dumpPath !== undefined ? toolAssetHref(tool.dumpPath) : undefined;
       return (
         `<details class="tool-row" style="border:1px solid ${C.line};border-left:3px solid ${accent};border-radius:8px;background:${C.card};overflow:hidden;">` +
         `<summary style="display:grid;grid-template-columns:18px 1fr auto auto;align-items:center;gap:10px;padding:8px 10px;cursor:pointer;list-style:none;">` +
@@ -513,6 +531,14 @@ function cycleToolRows(cy: CycleLedgerRow): string {
         `<dt style="color:${C.faint};">${bi("tool", "工具")}</dt><dd style="margin:0;color:${C.ink};">${esc(tool.toolId)}</dd>` +
         `<dt style="color:${C.faint};">${bi("label", "标签")}</dt><dd style="margin:0;color:${C.ink};">${esc(tool.label)}</dd>` +
         `<dt style="color:${C.faint};">${bi("duration", "耗时")}</dt><dd style="margin:0;color:${C.ink};">${esc(dur)}</dd>` +
+        (tool.exitCode !== undefined ? `<dt style="color:${C.faint};">${bi("exit", "退出码")}</dt><dd style="margin:0;color:${C.ink};">${tool.exitCode}</dd>` : "") +
+        (tool.retryCount !== undefined ? `<dt style="color:${C.faint};">${bi("retries", "重试")}</dt><dd style="margin:0;color:${C.ink};">${tool.retryCount}</dd>` : "") +
+        (dumpHref !== undefined ? `<dt style="color:${C.faint};">${bi("dump", "转储")}</dt><dd style="margin:0;"><a href="${esc(dumpHref)}" style="color:${C.blue};text-decoration:none;">${esc(tool.dumpPath ?? "")}</a></dd>` : "") +
+        (shotHref !== undefined
+          ? `<dt style="color:${C.faint};">${bi("thumbnail", "缩略图")}</dt><dd style="margin:0;"><a href="${esc(shotHref)}" style="display:inline-block;border:1px solid ${C.line};border-radius:7px;overflow:hidden;background:#f8fafc;"><img src="${esc(shotHref)}" alt="${esc(tool.label)}" style="display:block;width:180px;max-width:100%;height:104px;object-fit:cover;"></a></dd>`
+          : "") +
+        toolPre("stdout", "标准输出", tool.stdout) +
+        toolPre("stderr", "标准错误", tool.stderr) +
         (!tool.ok ? `<dt style="color:${C.faint};">${bi("error", "错误")}</dt><dd style="margin:0;color:${accent};">${esc(tool.errorCode ?? "unknown")}</dd>` : "") +
         `</dl></details>`
       );

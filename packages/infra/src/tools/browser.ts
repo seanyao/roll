@@ -151,22 +151,22 @@ export class BrowserTool {
     startedAt: number,
   ): Promise<ToolResult<BrowserScreenshotOutput>> {
     const input = invocation.input;
-    const args = [
-      "-y",
-      "playwright@latest",
-      "screenshot",
-      ...(input.viewport === undefined ? [] : [`--viewport-size=${input.viewport.width},${input.viewport.height}`]),
-      ...(input.waitFor === undefined ? [] : [`--wait-for-selector=${deps.redact(input.waitFor)}`]),
-      deps.redact(input.url),
-    ];
+    const args = headlessArgs("screenshot", {
+      url: deps.redact(input.url),
+      screenshotPath,
+      waitFor: input.waitFor === undefined ? undefined : deps.redact(input.waitFor),
+      viewport: input.viewport,
+    });
     const result = await runBrowserCommand(deps, "npx", args, invocation.policy.timeoutMs, invocation.policy.sandbox?.maxOutputBytes);
     if (!result.ok) return fail(invocation, startedAt, deps.now(), "adapter_error", `headless browser unavailable: ${result.reason}`, true);
 
     const parsed = parseObject(result.result.stdout);
-    const png = stringValue(parsed.png) ?? result.result.stdout;
-    if (png.length === 0) return fail(invocation, startedAt, deps.now(), "adapter_error", "headless browser produced an empty screenshot", true);
-    await deps.fs.mkdir(dirname(screenshotPath), { recursive: true });
-    await deps.fs.writeFile(screenshotPath, deps.redact(png), "utf8");
+    const png = stringValue(parsed.png);
+    if (png !== undefined) {
+      if (png.length === 0) return fail(invocation, startedAt, deps.now(), "adapter_error", "headless browser produced an empty screenshot", true);
+      await deps.fs.mkdir(dirname(screenshotPath), { recursive: true });
+      await deps.fs.writeFile(screenshotPath, deps.redact(png), "utf8");
+    }
     return {
       ok: true,
       output: {
@@ -189,9 +189,10 @@ export class BrowserTool {
     if (!open.ok) return fail(invocation, startedAt, deps.now(), "adapter_error", `GUI browser unavailable: ${open.reason}`, true);
     const shot = await runBrowserCommand(deps, "screencapture", ["-x", screenshotPath], invocation.policy.timeoutMs, invocation.policy.sandbox?.maxOutputBytes);
     if (!shot.ok) return fail(invocation, startedAt, deps.now(), "adapter_error", `GUI browser unavailable: ${shot.reason}`, true);
-    if (shot.result.stdout.length === 0) return fail(invocation, startedAt, deps.now(), "adapter_error", "GUI browser unavailable: empty screenshot", true);
-    await deps.fs.mkdir(dirname(screenshotPath), { recursive: true });
-    await deps.fs.writeFile(screenshotPath, deps.redact(shot.result.stdout), "utf8");
+    if (shot.result.stdout.length > 0) {
+      await deps.fs.mkdir(dirname(screenshotPath), { recursive: true });
+      await deps.fs.writeFile(screenshotPath, deps.redact(shot.result.stdout), "utf8");
+    }
     return {
       ok: true,
       output: { screenshotPath, finalUrl: input.url, statusCode: null },
@@ -206,14 +207,11 @@ export class BrowserTool {
     startedAt: number,
   ): Promise<ToolResult<O>> {
     const input = invocation.input;
-    const args = [
-      "-y",
-      "playwright@latest",
-      action,
-      ...(hasSelector(input) ? [`--selector=${deps.redact(input.selector)}`] : []),
-      ...(input.waitFor === undefined ? [] : [`--wait-for-selector=${deps.redact(input.waitFor)}`]),
-      deps.redact(input.url),
-    ];
+    const args = headlessArgs(action, {
+      url: deps.redact(input.url),
+      waitFor: input.waitFor === undefined ? undefined : deps.redact(input.waitFor),
+      selector: hasSelector(input) ? deps.redact(input.selector) : undefined,
+    });
     const result = await runBrowserCommand(deps, "npx", args, invocation.policy.timeoutMs, invocation.policy.sandbox?.maxOutputBytes);
     if (!result.ok) return fail(invocation, startedAt, deps.now(), "adapter_error", `headless browser unavailable: ${result.reason}`, true) as ToolResult<O>;
     const parsed = parseObject(result.result.stdout);
@@ -251,6 +249,71 @@ export function browserTools(): BrowserTool[] {
 
 function shouldUseHeadless(invocation: ToolInvocation<BrowserInput>): boolean {
   return invocation.policy.sandbox?.headlessOnly === true || process.env.CI === "true" || process.env.CI === "1";
+}
+
+function headlessArgs(
+  action: "screenshot" | "console" | "dom-query",
+  payload: { url: string; screenshotPath?: string; waitFor?: string; selector?: string; viewport?: BrowserViewport },
+): string[] {
+  return [
+    "-y",
+    "-p",
+    "playwright@latest",
+    "node",
+    "-e",
+    headlessScript(action),
+    "--",
+    JSON.stringify(payload),
+    action,
+    payload.url,
+  ];
+}
+
+function headlessScript(action: "screenshot" | "console" | "dom-query"): string {
+  const body =
+    action === "screenshot"
+      ? [
+          "const { chromium } = require('playwright');",
+          "const input = JSON.parse(process.argv[1]);",
+          "(async () => {",
+          "  const browser = await chromium.launch({ headless: true });",
+          "  const page = await browser.newPage({ viewport: input.viewport || undefined });",
+          "  const response = await page.goto(input.url, { waitUntil: 'networkidle' });",
+          "  if (input.waitFor) await page.waitForSelector(input.waitFor);",
+          "  await page.screenshot({ path: input.screenshotPath, fullPage: true });",
+          "  console.log(JSON.stringify({ finalUrl: page.url(), statusCode: response ? response.status() : null }));",
+          "  await browser.close();",
+          "})().catch((error) => { console.error(error && error.stack ? error.stack : String(error)); process.exit(1); });",
+        ]
+      : action === "console"
+        ? [
+            "const { chromium } = require('playwright');",
+            "const input = JSON.parse(process.argv[1]);",
+            "(async () => {",
+            "  const logs = [];",
+            "  const browser = await chromium.launch({ headless: true });",
+            "  const page = await browser.newPage();",
+            "  page.on('console', (msg) => logs.push({ level: msg.type(), text: msg.text(), ts: Date.now() }));",
+            "  const response = await page.goto(input.url, { waitUntil: 'networkidle' });",
+            "  if (input.waitFor) await page.waitForSelector(input.waitFor);",
+            "  console.log(JSON.stringify({ consoleLogs: logs, finalUrl: page.url(), statusCode: response ? response.status() : null }));",
+            "  await browser.close();",
+            "})().catch((error) => { console.error(error && error.stack ? error.stack : String(error)); process.exit(1); });",
+          ]
+        : [
+            "const { chromium } = require('playwright');",
+            "const input = JSON.parse(process.argv[1]);",
+            "(async () => {",
+            "  const browser = await chromium.launch({ headless: true });",
+            "  const page = await browser.newPage();",
+            "  const response = await page.goto(input.url, { waitUntil: 'networkidle' });",
+            "  if (input.waitFor) await page.waitForSelector(input.waitFor);",
+            "  const domResults = await page.$$eval(input.selector, (nodes) => nodes.map((node) => node.textContent || ''));",
+            "  console.log(JSON.stringify({ domResults, finalUrl: page.url(), statusCode: response ? response.status() : null }));",
+            "  await browser.close();",
+            "})().catch((error) => { console.error(error && error.stack ? error.stack : String(error)); process.exit(1); });",
+          ];
+  return body.join("\n");
 }
 
 async function hasAquaSession(deps: ToolDeps, timeoutMs: number | undefined): Promise<boolean> {

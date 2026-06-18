@@ -102,17 +102,16 @@ describe("FIX-247 — gate-killed work is pushed, listed, and deliberately not a
     return { kinds, alerts };
   }
 
-  it("AC1: failed terminal WITH commits → push_orphan + an alert naming branch and count", () => {
-    const { kinds, alerts } = walkToCapture(3);
-    expect(kinds).toContain("push_orphan");
-    const msg = alerts.find((a) => a.includes("FIX-247"));
-    expect(msg).toContain("3 commit(s)");
-    expect(msg).toContain("loop/cycle-C-247");
-    expect(msg).toContain("fresh by design"); // AC2's recorded ruling rides the alert
+  it("non-zero exit WITH commits → built → publish_pr (not push_orphan)", () => {
+    // Agent exits ≠0 but produced real work → built → enters publish ladder.
+    const { kinds } = walkToCapture(3);
+    expect(kinds).toContain("publish_pr");
+    expect(kinds).not.toContain("push_orphan");
   });
 
-  it("failed terminal with ZERO commits pushes nothing (a true no-output failure)", () => {
+  it("non-zero exit with ZERO commits → failed, pushes nothing", () => {
     const { kinds } = walkToCapture(0);
     expect(kinds).not.toContain("push_orphan");
+    expect(kinds).not.toContain("publish_pr");
   });
 });

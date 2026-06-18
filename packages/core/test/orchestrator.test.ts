@@ -65,8 +65,11 @@ describe("classifyCaptured — pre-publish six-state (bin/roll:9127-9157)", () =
   it("worktree-setup failed → failed (bin/roll:9000)", () => {
     expect(classifyCaptured({ usedWorktree: false, agentExit: 0, timedOut: false, commitsAhead: 0 })).toBe("failed");
   });
-  it("agent exit ≠ 0 → failed (bin/roll:9133)", () => {
+  it("agent exit ≠ 0 + 0 commits → failed (bin/roll:9133)", () => {
     expect(classifyCaptured({ usedWorktree: true, agentExit: 1, timedOut: false, commitsAhead: 0 })).toBe("failed");
+  });
+  it("agent exit ≠ 0 + commits → built (non-zero exit with real work)", () => {
+    expect(classifyCaptured({ usedWorktree: true, agentExit: 1, timedOut: false, commitsAhead: 3 })).toBe("built");
   });
   it("exit 0 + 0 commits + no agent executed → idle (genuine no-op, bin/roll:9180)", () => {
     expect(classifyCaptured({ usedWorktree: true, agentExecuted: false, agentExit: 0, timedOut: false, commitsAhead: 0 })).toBe("idle");
@@ -128,13 +131,28 @@ describe("FIX-244 — phantom-failure classification (published terminal)", () =
       classifyCaptured({ usedWorktree: true, agentExit: 1, timedOut: false, commitsAhead: 3, prState: "MERGED" }),
     ).toBe("published");
   });
-  it("non-zero exit with no PR → failed (unchanged: a real no-output failure)", () => {
+  it("non-zero exit + commits + no PR → built (agent did real work; publish ladder opens PR)", () => {
     expect(
       classifyCaptured({ usedWorktree: true, agentExit: 1, timedOut: false, commitsAhead: 3 }),
-    ).toBe("failed");
+    ).toBe("built");
     expect(
       classifyCaptured({ usedWorktree: true, agentExit: 1, timedOut: false, commitsAhead: 3, prState: "UNKNOWN" }),
+    ).toBe("built");
+  });
+  it("non-zero exit + 0 commits → failed (agent crashed without producing work)", () => {
+    expect(
+      classifyCaptured({ usedWorktree: true, agentExit: 1, timedOut: false, commitsAhead: 0 }),
     ).toBe("failed");
+  });
+  it("gateBlocked + commits → failed (policy rejection, not code defect)", () => {
+    expect(
+      classifyCaptured({ usedWorktree: true, agentExit: 0, gateBlocked: true, timedOut: false, commitsAhead: 3 }),
+    ).toBe("failed");
+  });
+  it("gateBlocked + commits + existing PR → published (FIX-244 re-run)", () => {
+    expect(
+      classifyCaptured({ usedWorktree: true, agentExit: 0, gateBlocked: true, timedOut: false, commitsAhead: 3, prState: "OPEN" }),
+    ).toBe("published");
   });
   it("OPEN PR but zero commits ahead → not published (nothing of this cycle is in it)", () => {
     expect(
@@ -180,10 +198,11 @@ describe("FIX-351 — gates-passed-but-unpublished is a neutral terminal, not a 
     // complete is a sound cycle that didn't publish, not a gate failure.
     expect(classifyCaptured({ usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 2 })).toBe("built");
   });
-  it("a genuine GATE failure (attest/peer block → agentExit≠0) classifies `failed` BEFORE the ladder, stays failed", () => {
-    // FIX-328's shape: empty-shell attest → attestBlocked → agentExit 1. It never
-    // reaches classifyPublish — it is `failed` at capture and STAYS failed.
-    expect(classifyCaptured({ usedWorktree: true, agentExit: 1, timedOut: false, commitsAhead: 1 })).toBe("failed");
+  it("agent exit ≠ 0 with commits now reaches the publish ladder (built, not failed)", () => {
+    // Non-zero exit from an agent that produced commits (e.g. pi exiting ≠0 after
+    // a successful build) is now "built", giving the publish ladder a chance to
+    // open a PR. CI + peer review catch real quality issues.
+    expect(classifyCaptured({ usedWorktree: true, agentExit: 1, timedOut: false, commitsAhead: 1 })).toBe("built");
   });
   it("`local` v2 status maps to the neutral `unpublished` TerminalOutcome (never `failed`)", () => {
     expect(mapV2Status("local")).toBe("unpublished");
@@ -379,11 +398,10 @@ describe("failure branches", () => {
     expect(local.kinds).not.toContain("cleanup_worktree");
   });
 
-  it("FIX-351: a genuine GATE failure (agent exit ≠ 0 with commits) stays `failed`, never reaches the ladder", () => {
-    // FIX-328's shape: a hard attest/peer block stamps agentExit=1 at capture, so
-    // classifyCaptured → `failed` and the publish ladder is never entered. The
-    // FIX-351 `local` reclassification must not touch this — a real failure stays red.
-    const failed = walk([
+  it("agent exit ≠ 0 with commits → built → enters publish ladder (not failed)", () => {
+    // Non-zero exit + commits = agent did real work. It now classifies as "built"
+    // and enters the publish ladder to open a PR. CI + peer review catch issues.
+    const built = walk([
       { type: "start", ctx: CTX },
       { type: "preflight_done" },
       { type: "worktree_created" },
@@ -392,9 +410,9 @@ describe("failure branches", () => {
       { type: "agent_exited", exit: 0, timedOut: false },
       { type: "facts_captured", facts: { usedWorktree: true, agentExit: 1, timedOut: false, commitsAhead: 1 } },
     ]);
-    expect(failed.state.terminal).toBe("failed");
-    // no publish was attempted — it never reached the ladder.
-    expect(failed.kinds).not.toContain("publish_pr");
+    // built → enters publish phase
+    expect(built.state.phase).toBe("publish");
+    expect(built.kinds).toContain("publish_pr");
   });
 
   it("route_resolved spawns the agent directly (budget gate removed)", () => {

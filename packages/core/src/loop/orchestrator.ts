@@ -193,6 +193,9 @@ export interface CapturedFacts {
   agentExecuted?: boolean;
   /** Agent process exit code (0 = clean). bin/roll:9063 `_exit`. */
   agentExit: number;
+  /** True when a hard attest or peer gate blocked the cycle — the agent
+   *  produced work but it was withheld by policy, not by a code defect. */
+  gateBlocked?: boolean;
   /** Watchdog fired this cycle (`_CYCLE_TIMED_OUT=1`). bin/roll:9074. */
   timedOut: boolean;
   /** Commits ahead of origin/main in the worktree (bin/roll:9139). */
@@ -224,13 +227,29 @@ export interface CapturedFacts {
 export function classifyCaptured(facts: CapturedFacts): V2CycleStatus {
   if (facts.timedOut) return "blocked";
   if (!facts.usedWorktree) return "failed";
-  if (facts.agentExit !== 0) {
-    // FIX-244: a non-zero capture whose work is ALREADY out as a PR (observed
+  // Gate-blocked cycles (attest/peer policy rejection) are always failures —
+  // the agent's work was withheld by policy, not by a code defect. They MUST
+  // NOT enter the publish ladder.
+  if (facts.gateBlocked) {
+    // FIX-244: gate-blocked work that is ALREADY out as a PR (observed
     // 2026-06-10: attest-blocked cycles whose PR merged minutes later) is not a
     // no-output failure — classify "published"; the merge-evidence backfill
     // (FIX-243) arbitrates the final credit.
     if (facts.commitsAhead > 0 && (facts.prState === "OPEN" || facts.prState === "MERGED"))
       return "published";
+    return "failed";
+  }
+  if (facts.agentExit !== 0) {
+    // FIX-244: a non-zero exit with an already-existing PR (from a prior
+    // cycle attempt) is "published", not failed.
+    if (facts.commitsAhead > 0 && (facts.prState === "OPEN" || facts.prState === "MERGED"))
+      return "published";
+    // Agent exits non-zero BUT produced commits → it did real work (e.g. pi
+    // often exits ≠0 after a successful build). Classify as "built" so the
+    // publish ladder opens a PR; CI + peer review catch any real quality issues.
+    if (facts.commitsAhead > 0) return "built";
+    // Zero commits + non-zero exit = the agent crashed without producing
+    // anything — a genuine failure.
     return "failed";
   }
   if (facts.commitsAhead === 0 && (facts.mainAhead ?? 0) > 0) return "failed";
@@ -463,6 +482,9 @@ export interface CycleContext {
   storyId?: string;
   agent?: AgentId;
   model?: ModelId;
+  /** The last agent process exit code (set when agent_exited is accepted,
+   *  so the executor can read it back in capture_facts). */
+  agentExitCode?: number;
   /** Cycle start (epoch seconds) — set by the driver; used by the attest gate
    *  (FIX-207) to decide whether an acceptance report was produced THIS cycle. */
   startSec?: number;
@@ -759,9 +781,14 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
           { kind: "append_alert", message: `cycle ${state.ctx.cycleId}: agent exited ${event.exit} after retries; worktree preserved` },
         ]);
       }
-      // accept → capture facts before publish.
+      // accept → capture facts before publish. Store the exit code in ctx
+      // so the executor can read it back when building CapturedFacts.
       return {
-        state: { ...state, phase: "reconcile" },
+        state: {
+          ...state,
+          phase: "reconcile",
+          ctx: { ...state.ctx, agentExitCode: event.exit },
+        },
         commands: [{ kind: "capture_facts" }],
       };
     }

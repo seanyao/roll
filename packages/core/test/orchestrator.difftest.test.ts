@@ -25,8 +25,8 @@ describe("frozen: capture cascade == classifyCaptured (bin/roll:9127-9157)", () 
   // silent idle. A genuine no-op (agentExecuted:false) still classifies idle.
   const FROZEN: V2CycleStatus[] = [
     "gave_up", "built", "built", "blocked", "blocked", "blocked",
-    "failed", "failed", "failed", "blocked", "blocked", "blocked",
-    "failed", "failed", "failed", "blocked", "blocked", "blocked",
+    "failed", "built", "built", "blocked", "blocked", "blocked",
+    "failed", "built", "built", "blocked", "blocked", "blocked",
     "failed", "failed", "failed", "blocked", "blocked", "blocked",
     "failed", "failed", "failed", "blocked", "blocked", "blocked",
     "failed", "failed", "failed", "blocked", "blocked", "blocked",

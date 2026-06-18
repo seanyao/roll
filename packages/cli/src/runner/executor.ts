@@ -1397,18 +1397,19 @@ export async function executeCommand(
       // an agent slot is set, and the spawn ran (its spend/duration are recorded
       // on the runs row). A defensively-empty agent slot stays idle.
       const agentExecuted = (ctx.agent ?? "").trim() !== "";
+      const gateBlocked = attestBlocked || peerBlocked;
       const facts: CapturedFacts = {
         usedWorktree: true,
         agentExecuted,
-        // accept-path reaches capture at exit 0; a HARD attest OR peer block fails
-        // the capture (classifyCaptured: exit ≠ 0 → failed) so Done is withheld.
-        // FIX-293: a high-complexity delivery with no peer review (even after the
-        // one retry) is peerBlocked → it MUST NOT self-grade / flip Done. The
-        // FIX-244 PR-state "published" reclassification stays scoped to the attest
-        // block (a peer-blocked cycle still owes peer review; Done≡merged anyway).
-        agentExit: attestBlocked || peerBlocked ? 1 : 0,
+        // The real agent process exit code (from agent_exited), NOT the
+        // gate-block signal. `gateBlocked` is the separate hard-attest/peer
+        // rejection channel. Non-zero agent exit + commits with no gate block
+        // is now "built" (agent did real work despite a non-zero exit — e.g. pi
+        // often exits ≠0 after a successful build).
+        agentExit: ctx.agentExitCode ?? 0,
         timedOut: false,
         commitsAhead,
+        ...(gateBlocked ? { gateBlocked: true } : {}),
         ...(mainAhead > 0 ? { mainAhead } : {}),
         ...(prState !== undefined ? { prState } : {}),
       };

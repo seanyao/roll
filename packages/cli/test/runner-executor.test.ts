@@ -1554,10 +1554,10 @@ describe("executeCommand — command → executor mapping", () => {
     expect((calls["alert"] ?? []).length).toBeGreaterThan(0);
   });
 
-  it("capture_facts default-hard attest gate: missing report → captured as failed (agentExit 1)", async () => {
+  it("capture_facts default-hard attest gate: missing report → captured as failed (gateBlocked)", async () => {
     const { ports } = fakePorts();
     const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
-    expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 1 } });
+    expect(r.event).toMatchObject({ type: "facts_captured", facts: { gateBlocked: true, agentExit: 0 } });
   });
 
   // FIX-246 — ac-map omission remediation. Agents consistently skip skill step
@@ -1665,7 +1665,7 @@ describe("executeCommand — command → executor mapping", () => {
     const { ports } = fakePorts();
     const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
     expect(ports.github.prState).toHaveBeenCalledWith("/repo", CTX.branch);
-    expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 1, prState: "MERGED" } });
+    expect(r.event).toMatchObject({ type: "facts_captured", facts: { gateBlocked: true, agentExit: 0, prState: "MERGED" } });
   });
 
   it("FIX-244: probe failure (gh down) degrades to plain failed facts — no crash, no prState", async () => {
@@ -1674,7 +1674,7 @@ describe("executeCommand — command → executor mapping", () => {
       github: { ...base.ports.github, prState: vi.fn(async () => { throw new Error("gh down"); }) },
     });
     const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
-    expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 1 } });
+    expect(r.event).toMatchObject({ type: "facts_captured", facts: { gateBlocked: true, agentExit: 0 } });
     const facts = (r.event as { facts: Record<string, unknown> }).facts;
     expect(facts["prState"]).toBeUndefined();
   });
@@ -1733,7 +1733,7 @@ describe("executeCommand — command → executor mapping", () => {
       agentSpawn: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 1, timedOut: false })),
     });
     const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
-    expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 1 } });
+    expect(r.event).toMatchObject({ type: "facts_captured", facts: { gateBlocked: true, agentExit: 0 } });
     expect(ports.agentSpawn).toHaveBeenCalled(); // the retry fired exactly once
     const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
     expect(events.some((e) => e.type === "peer:gate" && e.verdict === "skipped")).toBe(true);
@@ -1810,7 +1810,7 @@ describe("executeCommand — command → executor mapping", () => {
       agentSpawn: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 1, timedOut: false })), // retry spawn fails → no evidence
     });
     const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
-    expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 1 } });
+    expect(r.event).toMatchObject({ type: "facts_captured", facts: { gateBlocked: true, agentExit: 0 } });
     expect(ports.agentSpawn).toHaveBeenCalled(); // the bounded retry DID fire
     const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
     expect(events.some((e) => e.type === "peer:gate" && e.verdict === "skipped")).toBe(true);

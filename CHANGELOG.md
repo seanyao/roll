@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### 改进
+
+- **showcase 默认选角全部国产化**:builder/reviewer/scorer 默认改为 kimi/reasonix/pi，不再混用国外 agent；reasonix 补入 agent vendor 注册表。`[showcase]`
+
 ## v3.618.1 — 2026-06-18
 
 ### 新功能

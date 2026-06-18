@@ -170,20 +170,12 @@
         buildPeer: "risky cycle plans can ask for a fresh external perspective",
         buildReview: "delivery PRs receive diff-grounded review",
         fixReview: "repair PRs receive diff-grounded review",
-        buildBrief: "merged + attested delivery becomes owner-facing truth",
-        fixBrief: "merged + attested repair becomes owner-facing truth",
-        sentinelIdea: "patrol anomaly becomes IDEA/FIX backlog work",
-        sentinelDebug: "runtime anomaly can need black-box diagnostics",
         debugFix: "source-traced owned root cause enters focused repair",
         docDesign: "documentation gaps restore design context and ubiquitous language",
         doctorBuild: "skill and convention health protects cycle execution",
         peerDesign: "REFINE / OBJECT returns to design",
         peerBuild: "REFINE / OBJECT can return to delivery planning",
-        briefDesign: "release readiness and escalations return to human-on-the-loop",
-        doctorOnboard: "broken install/convention state can block onboarding",
-        docBrief: "doc coverage and gaps are briefing inputs",
-        reviewBrief: "review verdicts and unresolved questions feed owner context",
-        sentinelBrief: "production patrol evidence feeds operational briefing"
+        doctorOnboard: "broken install/convention state can block onboarding"
       },
       zh: {
         onboardIdea: ".roll 脚手架建立 backlog 与 feature card 的落点",
@@ -194,20 +186,12 @@
         buildPeer: "高风险 cycle 方案可请求外部新视角",
         buildReview: "交付 PR 进入基于 diff 的 review",
         fixReview: "修复 PR 进入基于 diff 的 review",
-        buildBrief: "已合并 + 已验收的交付成为 owner-facing truth",
-        fixBrief: "已合并 + 已验收的修复成为 owner-facing truth",
-        sentinelIdea: "巡检异常成为 IDEA/FIX backlog 工作",
-        sentinelDebug: "运行时异常可能需要黑盒诊断",
         debugFix: "可追溯到源码的项目自有根因进入聚焦修复",
         docDesign: "文档缺口补回设计上下文和统一语言",
         doctorBuild: "skill 与 convention 健康守住 cycle 执行面",
         peerDesign: "REFINE / OBJECT 回到设计",
         peerBuild: "REFINE / OBJECT 可回到交付规划",
-        briefDesign: "发版就绪与告警交还 human-on-the-loop",
-        doctorOnboard: "安装 / 约定异常可能阻断接入",
-        docBrief: "文档覆盖率和缺口进入 owner brief",
-        reviewBrief: "review verdict 与未解问题进入 owner context",
-        sentinelBrief: "生产巡检证据进入运营 briefing"
+        doctorOnboard: "安装 / 约定异常可能阻断接入"
       }
     }[l];
     return [
@@ -219,20 +203,12 @@
       ["roll-build", "roll-peer", "gate", text.buildPeer],
       ["roll-build", "roll-review-pr", "gate", text.buildReview],
       ["roll-fix", "roll-review-pr", "gate", text.fixReview],
-      ["roll-build", "roll-brief", "truth", text.buildBrief],
-      ["roll-fix", "roll-brief", "truth", text.fixBrief],
-      ["roll-sentinel", "roll-idea", "control", text.sentinelIdea],
-      ["roll-sentinel", "roll-debug", "control", text.sentinelDebug],
       ["roll-debug", "roll-fix", "control", text.debugFix],
       ["roll-doc", "roll-design", "control", text.docDesign],
       ["roll-doctor", "roll-build", "control", text.doctorBuild],
       ["roll-doctor", "roll-onboard", "control", text.doctorOnboard],
       ["roll-peer", "roll-design", "control", text.peerDesign],
-      ["roll-peer", "roll-build", "control", text.peerBuild],
-      ["roll-brief", "roll-design", "control", text.briefDesign],
-      ["roll-doc", "roll-brief", "truth", text.docBrief],
-      ["roll-review-pr", "roll-brief", "truth", text.reviewBrief],
-      ["roll-sentinel", "roll-brief", "truth", text.sentinelBrief]
+      ["roll-peer", "roll-build", "control", text.peerBuild]
     ];
   }
 
@@ -286,13 +262,11 @@
         flow: { en: "Truth + signals -> Backlog", zh: "真相 + 信号 → Backlog" },
         body: { en: "Production, docs, tool health, and owner context feed anomalies and drift back to the backlog.", zh: "生产、文档、工具链健康和 owner context 把异常与漂移送回 backlog。" },
         context: "SRE / Patrol / Docs",
-        anchors: ["Sentinel signal", "Doc gaps", "Tool health", "Brief"],
+        anchors: ["Doc gaps", "Tool health"],
         nodes: [
           ["roll-debug", "operate", l === "zh" ? "diagnostics -> FIX / source patch" : "diagnostics -> FIX / source patch"],
           ["roll-doc", "operate", l === "zh" ? "doc gaps -> docs / design context" : "doc gaps -> docs / design context"],
-          ["roll-sentinel", "operate", l === "zh" ? "patrol anomaly -> IDEA/FIX" : "patrol anomaly -> IDEA/FIX"],
-          ["roll-doctor", "operate", l === "zh" ? "convention/skill health -> roll setup" : "convention/skill health -> roll setup"],
-          ["roll-brief", "operate", l === "zh" ? "release readiness -> human-on-the-loop" : "release readiness -> human-on-the-loop"]
+          ["roll-doctor", "operate", l === "zh" ? "convention/skill health -> roll setup" : "convention/skill health -> roll setup"]
         ]
       }
     ];

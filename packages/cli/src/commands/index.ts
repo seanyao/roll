@@ -77,6 +77,7 @@ import { SHOWCASE_USAGE, showcaseCommand } from "./showcase.js";
 import { skillsCommand } from "./skills.js";
 import { statusCommand } from "./status.js";
 import { testCommand } from "./test.js";
+import { TOOL_USAGE, toolCommand } from "./tool.js";
 import { tuneCommand } from "./tune.js";
 import { updateCommand } from "./update.js";
 import { versionCommand } from "./version.js";
@@ -300,6 +301,7 @@ export function registerAll(): void {
   // (incl. a stale `tart` — lane removed by REFACTOR-046) errors non-zero WITHOUT a
   // silent host fallback (US-ISO-003). No sub-paths on bash.
   registerPorted("test", testCommand);
+  registerPorted("tool", toolCommand, { help: TOOL_USAGE });
   // `tune`: v3-native US-EVID-015 second-order control loop, READ-ONLY. Aggregates
   // four trend signals (review-score notes / runs.jsonl pass rate / events.ndjson
   // misjudgments / runs result_eval.dims rubric relevance) into the pure

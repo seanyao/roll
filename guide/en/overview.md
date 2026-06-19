@@ -152,6 +152,7 @@ point — see [patterns/](patterns/README.md) for the decision tree:
 |-------|----------|
 | First working project | [getting-started.md](getting-started.md) |
 | Scheduling, subcommands, tmux visibility | [loop.md](loop.md) |
+| Governed tool registry and policy | [tools.md](tools.md) |
 | Nightly code health and REFACTOR generation | [dream.md](dream.md) |
 | Cross-agent review protocol | [peer.md](peer.md) |
 | Complete skill catalog | [skills.md](skills.md) |

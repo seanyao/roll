@@ -75,6 +75,7 @@ First time through? Start with [Getting started](guide/en/getting-started.md).
 | `roll doctor skills [--strict] [--json]` | Strict skills audit (skills · violations · hub lines + the four invocation groups — the SAME yardstick the web Skills page reads) |
 | `roll setup skills` | Sync the `guide/skills.md` skill catalog |
 | `roll doc [--lang en\|zh] [name]` | View the Charter / language guide markdown in the terminal (`--lang` falls back to the configured language) |
+| `roll tool status` | Show registered tools and their effective `.roll/policy.yaml` state |
 | `roll prices [refresh]` | Model price table (cost accounting source) |
 | `roll setup [skills\|-f]` | First-time install, skill catalog generation, or re-sync conventions to all AI clients |
 | `roll update` | Upgrade to latest + re-sync |
@@ -114,7 +115,7 @@ Published as a single npm package `@seanyao/roll`: `dist/` (the CLI bundled to o
 | | |
 |---|---|
 | **Start here** | [Getting started](guide/en/getting-started.md) · [Overview & architecture](guide/en/overview.md) · [Engineering methodology](guide/en/methodology.md) |
-| **Daily driving** | [The loop (autonomous executor)](guide/en/loop.md) · [Configuration](guide/en/configuration.md) · [Pricing & cost](guide/en/pricing.md) · [FAQ](guide/en/faq.md) |
+| **Daily driving** | [The loop (autonomous executor)](guide/en/loop.md) · [Tools & policy](guide/en/tools.md) · [Configuration](guide/en/configuration.md) · [Pricing & cost](guide/en/pricing.md) · [FAQ](guide/en/faq.md) |
 | **Quality machinery** | [Acceptance evidence (`roll attest`)](guide/en/acceptance-evidence.md) · [Evidence lifecycle](guide/en/acceptance-evidence.md#lifecycle-in-three-stages) · [Consistency & release gate](guide/en/consistency.md) · [Cross-agent pairing](guide/en/pairing.md) · [Peer review](guide/en/peer.md) · [Test isolation](guide/en/test-isolation.md) |
 | **Under the hood** | [Architecture: layers · domain · invariants](docs/architecture.md) · [Verification system](docs/verification.md) · [Manifesto](docs/manifesto.md) |
 

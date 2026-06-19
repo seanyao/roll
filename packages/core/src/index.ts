@@ -30,6 +30,7 @@ export * from "./loop/pr-loop.js";
 export * from "./loop/quality-gate.js";
 export * from "./loop/orchestrator.js";
 export * from "./loop/recovery.js";
+export * from "./loop/review-resize.js";
 export * from "./loop/self-downgrade.js";
 export * from "./loop/signals.js";
 export * from "./loop/transcript.js";

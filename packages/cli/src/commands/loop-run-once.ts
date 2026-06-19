@@ -12,7 +12,7 @@
  * The handler stays thin: it resolves the project identity + runtime paths and
  * delegates the entire walk to the runner adapter (packages/cli/src/runner).
  */
-import { EventBus, cycleEndEvent, firstInstalledAgent, mapV2Status, parsePolicy, readSlotFromText, type AgentSlot, type RouteDeps } from "@roll/core";
+import { EventBus, cycleEndEvent, firstInstalledAgent, mapV2Status, parsePolicy, readSlotFromText, shouldResize, type AgentSlot, type RouteDeps } from "@roll/core";
 import { absent, buildTerminalEvent, deriveOrphanVerdict, present } from "@roll/spec";
 import { projectIdentity, readLockOwner, releaseLock } from "@roll/infra";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -26,6 +26,8 @@ import { applyCorrectionCircuitBreaker } from "../runner/correction-circuit.js";
 import { readSkillBody as readSkillBodyGeneric } from "../runner/skill-body.js";
 import { realAgentEnv } from "./agent-list.js";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
+import { readLatestResizeSignal } from "../lib/review-score.js";
+import { loopReviewResizeCommand } from "./loop-review-resize.js";
 import { filterByAllowedCards, parseAllowedCardsEnv } from "../lib/goal-progress.js";
 import { writeLatestMorningReport } from "../lib/morning-report.js";
 import { backfillMergedRuns } from "../lib/runs-backfill.js";
@@ -724,6 +726,31 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     return 0;
   }
   process.stdout.write(`loop run-once: cycle ${cycleId} → ${result.terminal ?? "unknown"}\n`);
+
+  // US-AGENT-041: reviewer-triggered re-split. If THIS cycle's independent
+  // reviewer flagged the SCOPE as too large (a resize signal on a low score),
+  // re-split the story via heterogeneous consensus instead of leaving it as a
+  // low-confidence "done"/blocked. Fully ISOLATED: it fires ONLY when a resize
+  // signal is present (a cheap note read; the common no-resize path is unchanged
+  // and falls straight through), and when it fires it OWNS the post-cycle — it
+  // parks the parent at 🚫 Hold + appends sub-stories (consensus agree) or
+  // pauses + alerts (disagree), then returns. The chain-depth cap (US-AGENT-009)
+  // and PR/branch close (I3) live in the reused `roll loop self-downgrade`.
+  {
+    const resizeStory = (result.state?.ctx?.storyId ?? "").trim();
+    if (resizeStory !== "") {
+      const sig = readLatestResizeSignal(id.path, resizeStory);
+      if (sig !== null && shouldResize(sig.score, sig.resize)) {
+        process.stdout.write(
+          `loop run-once: reviewer flagged ${resizeStory} scope-too-large (score ${sig.score}) → review-resize\n` +
+            `loop run-once: 评审判定 ${resizeStory} 范围过大(评分 ${sig.score})→ 触发再拆\n`,
+        );
+        await loopReviewResizeCommand([resizeStory]);
+        return 0;
+      }
+    }
+  }
+
   // US-PORT-011: delivered? surface the acceptance report (print + auto-open
   // unless muted) — the owner's "做完想看 attest html" loop closure.
   // FIX-244: "published" (PR open, merge pending) is a successful delivery for

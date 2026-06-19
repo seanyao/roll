@@ -18,7 +18,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { agentCanReviewHeadless, canonicalAgentName, isHeterogeneous, parsePairingConfig, selectPairingCandidates, type PairingHistory, type PairingStage } from "@roll/core";
+import { agentCanReviewHeadless, canonicalAgentName, isHeterogeneous, parsePairingConfig, parseResizeSignal, selectPairingCandidates, type PairingHistory, type PairingStage, type ResizeSignal } from "@roll/core";
 import { writeReviewScoreNote } from "../lib/review-score.js";
 import { assessComplexity } from "./peer-gate.js";
 
@@ -284,6 +284,11 @@ export interface PairScore {
   verdict: "good" | "ok" | "regression";
   rationale: string;
   cost: number;
+  /** US-AGENT-041: the reviewer's optional "scope too large" signal — present
+   *  only when the delivery is incomplete because the SCOPE exceeds one cycle
+   *  (uncovered AC/coverage gaps), not a pure quality problem. Drives the
+   *  post-cycle review-triggered self-downgrade. */
+  resize?: ResizeSignal;
 }
 
 export interface RunScorePairingDeps {
@@ -489,6 +494,9 @@ export async function runScorePairing(
       scoredBy: peer,
       scoring: "pair",
       sessionId,
+      // US-AGENT-041: persist the reviewer's scope-resize signal (if any) so the
+      // post-cycle review-resize trigger can act on it.
+      ...(scored.resize !== undefined ? { resize: scored.resize } : {}),
     });
 
     try {
@@ -522,7 +530,15 @@ export function parsePairScoreOutput(stdout: string): Omit<PairScore, "cost"> | 
   if (sm?.[1] === undefined || vm?.[1] === undefined || rm?.[1] === undefined) return null;
   const score = Number(sm[1]);
   if (!Number.isInteger(score) || score < 1 || score > 10) return null;
-  return { score, verdict: vm[1].toLowerCase() as PairScore["verdict"], rationale: rm[1].trim() };
+  // US-AGENT-041: capture an optional RESIZE/GAPS signal (scope-too-large). The
+  // low-score floor is applied later by `shouldResize`; here we just carry it.
+  const resize = parseResizeSignal(stdout);
+  return {
+    score,
+    verdict: vm[1].toLowerCase() as PairScore["verdict"],
+    rationale: rm[1].trim(),
+    ...(resize !== null ? { resize } : {}),
+  };
 }
 
 // ── FIX-293: the peer-gate retry consult ─────────────────────────────────────
@@ -676,7 +692,16 @@ export function buildPairScorePrompt(summary: string): string {
     `build stays green) — do NOT treat the deletion volume, or the absence of "replacement" code the goal never ` +
     `asked for, as a regression. ` +
     `Reply with exactly one "SCORE: <integer 1..10>" line, one "VERDICT: good|ok|regression" line, ` +
-    `and one "RATIONALE: <one sentence>" line.\n\nDELIVERY:\n` +
+    `and one "RATIONALE: <one sentence>" line. ` +
+    // US-AGENT-041: distinguish a SCOPE problem from a quality one. When the
+    // delivery is incomplete because the story was simply too big for one cycle
+    // (whole ACs / surfaces left uncovered, not bugs), ALSO add a "RESIZE: <why>"
+    // line and a "GAPS: <gap one; gap two; ...>" line enumerating the uncovered
+    // scope. The loop uses this to re-split the story (heterogeneous-consensus
+    // gated), NOT to fail it. Omit RESIZE/GAPS for a pure quality problem.\n` +
+    `If — and ONLY if — the low score is because the SCOPE is too large for one cycle (entire ACs or ` +
+    `surfaces left uncovered, not defects), add a "RESIZE: <one line why>" line and a ` +
+    `"GAPS: <gap one; gap two; ...>" line listing the uncovered scope. Do NOT add them for a quality problem.\n\nDELIVERY:\n` +
     summary
   );
 }

@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { basename, join, relative } from "node:path";
+import type { ResizeSignal } from "@roll/core";
 import { cardArchiveDir, epicForStory } from "./archive.js";
 
 export type ReviewScoreVerdict = "good" | "ok" | "regression" | string;
@@ -27,6 +28,11 @@ export interface ReviewScoreView {
   /** Why a Review Score fell back to self (US-PAIR-010 `fallback-reason:`); only
    *  present on a legacy self note that recorded the fallback explicitly. */
   fallbackReason?: string;
+  /** US-AGENT-041: the reviewer's "scope too large" signal (`resize-reason:` +
+   *  `resize-gaps:`). Present only when the reviewer judged the delivery
+   *  incomplete because the SCOPE exceeds one cycle — drives the review-triggered
+   *  self-downgrade. Absent for clean or pure-quality-problem deliveries. */
+  resize?: ResizeSignal;
 }
 
 export interface ReviewScoreEntry extends ReviewScoreView {
@@ -46,7 +52,7 @@ interface NoteCandidate {
   path: string;
 }
 
-const BASE_KEYS = new Set(["skill", "story", "score", "verdict", "ts", "timestamp"]);
+const BASE_KEYS = new Set(["skill", "story", "score", "verdict", "ts", "timestamp", "resize-reason", "resize-gaps"]);
 
 function hrefFrom(fromDir: string | undefined, path: string): string | undefined {
   if (fromDir === undefined || fromDir === "") return undefined;
@@ -118,6 +124,19 @@ export function parseReviewScoreNote(
   const scoredBy = field(fields, "scored-by");
   const sessionId = field(fields, "session-id");
   const fallbackReason = field(fields, "fallback-reason");
+  // US-AGENT-041: the reviewer's resize signal. `resize-reason` present ⇒ scope
+  // too large; `resize-gaps` is a `; `-joined gap list (empty list tolerated).
+  const resizeReason = field(fields, "resize-reason");
+  const resize =
+    resizeReason !== undefined && resizeReason !== ""
+      ? {
+          reason: resizeReason,
+          gaps: (field(fields, "resize-gaps") ?? "")
+            .split(/\s*;\s*/)
+            .map((g) => g.trim())
+            .filter((g) => g !== ""),
+        }
+      : undefined;
   return {
     skill: field(fields, "skill") ?? basename(sourcePath),
     story: story === "" ? expectedStory ?? "" : story,
@@ -132,6 +151,7 @@ export function parseReviewScoreNote(
     ...(scoredBy !== undefined && scoredBy !== "" ? { scoredBy } : {}),
     ...(sessionId !== undefined && sessionId !== "" ? { sessionId } : {}),
     ...(fallbackReason !== undefined && fallbackReason !== "" ? { fallbackReason } : {}),
+    ...(resize !== undefined ? { resize } : {}),
   };
 }
 
@@ -177,6 +197,21 @@ export function readAllReviewScores(projectPath: string): ReviewScoreEntry[] {
 export function readLatestStoryReviewScore(projectPath: string, storyId: string, hrefFromDir?: string): ReviewScoreEntry | undefined {
   const entries = readStoryReviewScores(projectPath, storyId, hrefFromDir);
   return entries[entries.length - 1];
+}
+
+/**
+ * US-AGENT-041 — the latest peer score for a story plus any resize signal, for
+ * the post-cycle review-resize trigger. Returns the score (so `shouldResize` can
+ * apply the low-score floor) and the resize signal (null when the reviewer did
+ * not flag the scope). `null` when there is no score note at all.
+ */
+export function readLatestResizeSignal(
+  projectPath: string,
+  storyId: string,
+): { score: number; resize: ResizeSignal | null } | null {
+  const latest = readLatestStoryReviewScore(projectPath, storyId);
+  if (latest === undefined) return null;
+  return { score: latest.score, resize: latest.resize ?? null };
 }
 
 /**
@@ -326,6 +361,10 @@ export interface ReviewScoreWriteInput {
   /** Why a Review Score fell back to self (recorded in the note for audit).
    *  Legacy: the manual `roll pair score` fallback path (US-PAIR-010). */
   fallbackReason?: string;
+  /** US-AGENT-041: the reviewer's "scope too large" signal, recorded so the
+   *  post-cycle review-resize trigger can read it. Only set when the LOW score is
+   *  a scope problem (uncovered AC/coverage), never a pure quality problem. */
+  resize?: ResizeSignal;
 }
 
 export interface ReviewScoreWriteResult {
@@ -420,6 +459,11 @@ export function writeReviewScoreNote(projectPath: string, input: ReviewScoreWrit
     // recorded, not just asserted.
     ...(input.sessionId !== undefined && input.sessionId.trim() !== "" ? [`session-id: ${input.sessionId.trim()}`] : []),
     ...(input.fallbackReason !== undefined ? [`fallback-reason: ${input.fallbackReason.trim()}`] : []),
+    // US-AGENT-041: persist the reviewer's resize signal so the post-cycle
+    // review-resize trigger can act on it. `resize-gaps` is `; `-joined.
+    ...(input.resize !== undefined && input.resize.reason.trim() !== ""
+      ? [`resize-reason: ${input.resize.reason.trim()}`, `resize-gaps: ${input.resize.gaps.join("; ")}`]
+      : []),
     "---",
     "",
     rationale,

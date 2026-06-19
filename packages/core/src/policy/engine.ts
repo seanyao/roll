@@ -36,6 +36,8 @@
  * compliance verdict are pure. Filesystem probes for compliance are injected as
  * boolean facts ({@link RepoMarkers}); core reads no files itself.
  */
+import type { ResumeScope } from "../agent/session-reuse.js";
+
 // ── policy.yaml shape (architecture §5.1 + §6.1) ─────────────────────────────
 
 /** A routing rule's match clause — level and/or a type glob. */
@@ -107,15 +109,11 @@ export interface LoopSafetyConfig {
    *  (`稳字纪律`): absent ⇒ false, so deploy is a NO-OP until `project_map: true` is
    *  explicitly flipped on. */
   projectMap?: boolean;
-  /** lever-4 (cross-card WARM-CONTEXT) execute-speed lever: REUSE a routed agent's
-   *  prior session across the NEXT same-agent card (codex `exec resume`), so the
-   *  agent skips cold project re-orientation while the cycle worktree stays a fresh
-   *  origin/main checkout (code isolation intact). Agent-AGNOSTIC: warm-context is a
-   *  standard capability — the cycle path calls one adapter port and never branches
-   *  per-agent; only codex's adapter resumes, every other engine is a cold no-op.
-   *  DEFAULT-OFF (`稳字纪律`): absent ⇒ false, so deploy is a NO-OP until
-   *  `session_reuse: true` is explicitly flipped on. */
+  /** lever-4 warm-context intent. Kept for compatibility, but it is not enough
+   *  to resume by itself; {@link resumeScope} must also be explicitly same-story. */
   sessionReuse?: boolean;
+  /** FIX-370: explicit warm-resume boundary. Absent / invalid ⇒ off. */
+  resumeScope?: ResumeScope;
 }
 
 /** The whole parsed policy.yaml. */
@@ -378,6 +376,7 @@ function parseLoopSafety(lines: PreLine[], start: number): [number, LoopSafetyCo
     // else (absent / false / garbage) leaves it false so deploy stays a NO-OP
     // (稳字纪律) and every engine keeps its cold-spawn behavior.
     ...(flat["session_reuse"] === "true" ? { sessionReuse: true } : {}),
+    ...(flat["resume_scope"] === "same-story" ? { resumeScope: "same-story" as const } : {}),
   };
   return [i, cfg];
 }

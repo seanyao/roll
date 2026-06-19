@@ -265,14 +265,31 @@ export function recoverCodexSessionId(
   sinceSec?: number,
   sessionsRoot: string = defaultCodexSessionsRoot(),
 ): string | null {
+  return recoverCodexSessionCapture(worktreeCwd, sinceSec, sessionsRoot)?.sessionId ?? null;
+}
+
+export interface RecoveredCodexSession {
+  sessionId: string;
+  rolloutPath: string;
+  rolloutMtimeSec: number;
+}
+
+export function recoverCodexSessionCapture(
+  worktreeCwd: string,
+  sinceSec?: number,
+  sessionsRoot: string = defaultCodexSessionsRoot(),
+): RecoveredCodexSession | null {
   const wantBasename = basename(worktreeCwd.replace(/\/+$/, ""));
   const files = collectCodexRollouts(sessionsRoot);
   let bestPath: string | null = null;
+  let bestMtimeSec = 0;
   let bestTokens = -1;
   for (const p of files) {
     let raw: string;
+    let mtimeSec: number;
     try {
-      if (sinceSec !== undefined && statSync(p).mtimeMs / 1000 < sinceSec) continue;
+      mtimeSec = statSync(p).mtimeMs / 1000;
+      if (sinceSec !== undefined && mtimeSec < sinceSec) continue;
       raw = readFileSync(p, "utf8");
     } catch {
       continue;
@@ -284,9 +301,13 @@ export function recoverCodexSessionId(
     if (tokens > bestTokens) {
       bestTokens = tokens;
       bestPath = p;
+      bestMtimeSec = mtimeSec;
     }
   }
-  return bestPath === null ? null : parseCodexSessionId(bestPath);
+  if (bestPath === null) return null;
+  const sessionId = parseCodexSessionId(bestPath);
+  if (sessionId === null) return null;
+  return { sessionId, rolloutPath: bestPath, rolloutMtimeSec: bestMtimeSec };
 }
 
 /** True iff a codex rollout's `session_meta.payload.cwd` is the cycle worktree.

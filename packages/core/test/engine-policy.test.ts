@@ -231,6 +231,24 @@ loop_safety:
 `).loopSafety.sessionReuse).toBeUndefined();
   });
 
+  it("parses loop_safety.resume_scope; absent or invalid behaves as off", () => {
+    expect(parsePolicy("").loopSafety.resumeScope).toBeUndefined();
+    expect(parsePolicy(`
+loop_safety:
+  session_reuse: true
+`).loopSafety.resumeScope).toBeUndefined();
+    expect(parsePolicy(`
+loop_safety:
+  session_reuse: true
+  resume_scope: same-story
+`).loopSafety.resumeScope).toBe("same-story");
+    expect(parsePolicy(`
+loop_safety:
+  session_reuse: true
+  resume_scope: cross-card
+`).loopSafety.resumeScope).toBeUndefined();
+  });
+
   it("ignores comments and unknown keys (forward-compatible)", () => {
     const p = parsePolicy(`
 # leading comment

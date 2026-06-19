@@ -66,9 +66,12 @@ import {
   peerAuthStates,
   canonicalAgentName,
   peerReviewCost,
+  captureWarmSession,
+  decideWarmResume,
+  isWarmSessionEntry,
   sessionReuseFor,
-  shouldCaptureWarmSession,
   type WarmSessionEntry,
+  type ResumeScope,
   type CycleObserverState,
   type ObservedCommit,
   baselineCommits,
@@ -132,7 +135,7 @@ import { classifyBlockSignature, probeAgentReachable, type ReachResult } from ".
 import { readSkipCards } from "./skip-cards.js";
 import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, runPeerGate } from "./peer-gate.js";
 import { declaresAnySurface, deliverableCmdsForStory, readAttestGateMode, rejectedDeliverableCmdsForStory, runAttestGate, screenshotExemption, storyRequiresScreenshot, verificationReportPath, webCaptureTargetsForStory } from "./attest-gate.js";
-import { recoverCodexSessionId, recoverCodexUsage, recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
+import { recoverCodexSessionCapture, recoverCodexUsage, recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
 import { validateStoryVisualEvidence } from "../lib/design-visual-evidence.js";
 import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, autoAttachScreenshotToAcMap, buildAcMapRemediationPrompt, needsAcMapRemediation } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
@@ -819,19 +822,43 @@ export async function executeCommand(
       // builderSessionId minting above (FIX-343) is ORTHOGONAL — codex's exec
       // session is a separate identity; we never reuse the builder id here.
       let codexResumeId: string | undefined;
-      if (readSessionReuseEnabled(ports.repoCwd)) {
+      const resumeScope = readSessionReuseEnabled(ports.repoCwd) ? readResumeScope(ports.repoCwd) : "off";
+      if (resumeScope !== "off") {
         try {
           const reuse = sessionReuseFor(cmd.agent, getAgentSpec(cmd.agent)?.usage);
-          if (reuse.supportsReuse()) {
-            const ledger = readWarmSessions(ports.repoCwd);
-            // the immediately-prior codex card's entry (newest in the ledger).
-            const prior = ledger.length > 0 ? ledger[ledger.length - 1] : undefined;
-            const priorId =
-              prior !== undefined ? reuse.resolvePriorSessionId(ledger, prior.storyId) : null;
-            if (prior !== undefined && priorId !== null) {
-              codexResumeId = priorId;
-              consumeWarmSession(ports.repoCwd, prior.storyId); // single-use
-            }
+          const ledger = readWarmSessions(ports.repoCwd);
+          const decision = decideWarmResume({
+            agent: cmd.agent,
+            storyId: ctx.storyId ?? "",
+            resumeScope,
+            ledger,
+            nowSec: ports.clock(),
+          });
+          if (decision.mode === "resume" && decision.sessionId !== undefined && reuse.supportsReuse()) {
+            codexResumeId = decision.sessionId;
+            consumeWarmSession(ports.repoCwd, decision.sourceStoryId ?? ctx.storyId ?? ""); // single-use
+            ports.events.appendEvent(ports.paths.eventsPath, {
+              type: "warm-session:resume-selected",
+              cycleId: ctx.cycleId ?? "",
+              storyId: ctx.storyId ?? "",
+              agent: cmd.agent,
+              sessionId: decision.sessionId,
+              sourceCycleId: decision.sourceCycleId ?? "",
+              sourceStoryId: decision.sourceStoryId ?? "",
+              reason: "selected",
+              ts: eventTs(ports),
+            });
+          } else {
+            ports.events.appendEvent(ports.paths.eventsPath, {
+              type: "warm-session:resume-skipped",
+              cycleId: ctx.cycleId ?? "",
+              storyId: ctx.storyId ?? "",
+              agent: cmd.agent,
+              reason: decision.reason === "selected" ? "agent_unsupported" : decision.reason,
+              ...(decision.sourceCycleId !== undefined ? { sourceCycleId: decision.sourceCycleId } : {}),
+              ...(decision.sourceStoryId !== undefined ? { sourceStoryId: decision.sourceStoryId } : {}),
+              ts: eventTs(ports),
+            });
           }
         } catch {
           // SILENT cold fallback on any resume-resolution error (fail-safe).
@@ -923,20 +950,45 @@ export async function executeCommand(
       // inherits an ever-growing, anchoring context → systemic degradation. Cold-
       // origin-only capture bounds each chain to a single hop (cold→warm→cold→warm).
       const spawnedWarm = codexResumeId !== undefined;
-      if (readSessionReuseEnabled(ports.repoCwd) && shouldCaptureWarmSession(spawnedWarm)) {
+      if (resumeScope !== "off") {
         try {
           const agentName = ctx.agent ?? cmd.agent;
           const reuse = sessionReuseFor(agentName, getAgentSpec(agentName)?.usage);
           const storyId = ctx.storyId ?? "";
           if (reuse.supportsReuse() && storyId !== "") {
             const rootOverride = (process.env["ROLL_CODEX_SESSIONS_DIR"] ?? "").trim();
-            const sessionId = recoverCodexSessionId(
+            const recovered = recoverCodexSessionCapture(
               ports.paths.worktreePath,
               ctx.startSec,
               ...(rootOverride !== "" ? [rootOverride] : []),
             );
-            if (sessionId !== null) {
-              appendWarmSession(ports.repoCwd, { storyId, sessionId, ts: ports.clock() });
+            const entry =
+              recovered === null
+                ? null
+                : captureWarmSession({
+                    storyId,
+                    cycleId: ctx.cycleId ?? "",
+                    agent: agentName,
+                    sessionId: recovered.sessionId,
+                    worktreePath: ports.paths.worktreePath,
+                    rolloutPath: recovered.rolloutPath,
+                    rolloutMtimeSec: recovered.rolloutMtimeSec,
+                    cycleStartSec: ctx.startSec ?? ports.clock(),
+                    capturedAtSec: ports.clock(),
+                    spawnedWarm,
+                  });
+            if (entry !== null) {
+              appendWarmSession(ports.repoCwd, entry);
+              ports.events.appendEvent(ports.paths.eventsPath, {
+                type: "warm-session:capture",
+                cycleId: entry.cycleId,
+                storyId: entry.storyId,
+                agent: entry.agent,
+                sessionId: entry.sessionId,
+                ...(entry.rolloutPath !== undefined ? { rolloutPath: entry.rolloutPath } : {}),
+                spawnedWarm: entry.spawnedWarm,
+                ts: eventTs(ports),
+              });
             } else {
               ports.events.appendAlert(
                 ports.paths.alertsPath,
@@ -2741,6 +2793,16 @@ export function readSessionReuseEnabled(repoCwd: string): boolean {
   }
 }
 
+export function readResumeScope(repoCwd: string): ResumeScope {
+  try {
+    const p = join(repoCwd, ".roll", "policy.yaml");
+    if (!existsSync(p)) return "off";
+    return parsePolicy(readFileSync(p, "utf8")).loopSafety.resumeScope ?? "off";
+  } catch {
+    return "off";
+  }
+}
+
 /** The warm-session ledger path — under the PERSISTENT `.roll/loop` (repoCwd), NOT
  *  the cycle worktree, so a captured session survives `.roll reset` and the
  *  worktree teardown (same durability as runs.jsonl). */
@@ -2756,13 +2818,7 @@ export function readWarmSessions(repoCwd: string): WarmSessionEntry[] {
     const raw = readFileSync(warmSessionsLedgerPath(repoCwd), "utf8");
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (e): e is WarmSessionEntry =>
-        typeof e === "object" &&
-        e !== null &&
-        typeof (e as WarmSessionEntry).storyId === "string" &&
-        typeof (e as WarmSessionEntry).sessionId === "string",
-    );
+    return parsed.filter(isWarmSessionEntry);
   } catch {
     return [];
   }

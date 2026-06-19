@@ -8,6 +8,8 @@
 
 - **文件夹形式的卡片跑验收报告不再被「别的卡号」抢走清单**：就算卡里的小标题里提到了其他卡号，验收报告也只认这张卡自己的全部验收项，正常完整显示。(FIX-374) `[acceptance-evidence]`
 
+- **发版前自动拦住「漏写发版说明 / 文档对不上」**：`roll release` 的一致性闸新增三道确定性检查——① 自上一个发布以来合入的每张卡，必须有 ✅ Done 行并带合并号（这一维原来形同虚设，绿了也没在验）；② 每张卡要么在 CHANGELOG 里有条目、要么在卡里显式写明「不入发版说明」的理由，否则拦住发版（防止用户可见的改动无声上线）；③ 站点不能再链向不存在的指南页。判断更重的「文档是否还和实现一致」审计，同步沉淀进 `$roll-doc-audit` 技能（先审一致性、再补文档），闸守底线、技能查细节。(FIX-375) `[release-management]`
+
 ### 新功能
 
 - **loop 观察窗看长周期更省心**：默认的 `roll loop watch` 窗口现在直接显示当前阶段、静默时长、TCR 次数和最近一次有意义的进展，长周期一眼就能看懂；新增 `--events` 和 `--raw-events` 两档，可直接跟踪事件流，不用再自己 tail 原始日志；`roll loop go` 和定时 loop 的 tmux 监视窗也和手动观察走同一个统一入口；TCR 提交按当前周期的观测时间排序，不再把开工前的旧提交错当成本周期的新进展；帮助文字与中英文档都说明了默认、紧凑事件、原始事件三档查看层级以及只读与 Ctrl-C 退出。(US-LOOP-043 / US-LOOP-045 / US-LOOP-046 / US-LOOP-047 / US-LOOP-048) `[loop-engine]`
@@ -26,7 +28,7 @@
 
 - **Dream 代码结构扫描改走确定性 TS/AST pre-scan**：`roll dream run-once` 现在会在 agent 前生成 `.roll/dream/structure-scan.json`，用 TypeScript 引用图、AST fingerprint 和 AST env 解析给死代码、不可达分支、重复结构、单实现抽象和 env 文档缺口提供机器证据；agent 消费该 artifact，不再靠 grep 式临场判断兜底，文档类扫描保持原流程。(US-LOOP-080) `[loop-engine]`
 
-- **web 控制台新增机器级 Tools 页**：一处看全所有内置工具（bash / browser / git / github / network / fs / mcp）、各自的能力与默认护栏（超时 / 沙箱 / 重试 / 每周期上限），和 Agents、Skills 同级，挂在 `MACHINE › …` 面包屑上。中英文 Overview 指南与 Tools & policy 指南都已指向这个新页面。(US-TOOL-016 / 017 / 018) `[tools-layer]`
+- **web 控制台新增机器级 Tools 页**：一处看全所有内置工具（bash / browser / git / github / network / fs / mcp）、各自的能力与默认护栏（超时 / 沙箱 / 重试 / 每周期上限），和 Agents、Skills 同级，挂在 `MACHINE › …` 面包屑上。中英文 Overview 指南与 Tools & policy 指南都已指向这个新页面。(US-TOOL-016 / US-TOOL-017 / US-TOOL-018) `[tools-layer]`
 
 - **web 控制台改版：新的 Now 默认页 + 实时 loop 观察窗**：控制台打开后默认进「Now」运营视图（取代旧的 Overview），项目标签重排成 Now·Backlog·Loop·Release·Casting·Charter；Now 仪表盘重做后能正确反映当前是否有周期在跑（没有就明说「当前没有周期在跑」，不再把已完成的旧卡误标为进行中），并实时显示 loop 正在跑哪张卡、流到哪一步，On-Deck 与 Needs-you 列表的卡可直接点进各自卡页、Needs-you 显示真实总数并按失败/挂起分色，Live Stream 与 Loop Heartbeat 区域更大更易读；#loop 观察窗能实时看到每个周期的七段进度带、段内活动与闸门事件，报告与账本都按同一份活动流展示，处处口径一致。(US-DOSSIER-043 / US-DOSSIER-044 / FIX-373 / US-LOOP-078) `[delivery-dossier]`
 

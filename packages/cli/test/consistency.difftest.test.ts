@@ -175,7 +175,7 @@ describe("frozen: roll consistency", () => {
       ✅ code-backlog: pass
       ✅ cards: pass
       ✅ docs: pass
-         ℹ retired top-level command scan active; broader docs coverage remains US-CONSIST-002
+         ℹ retired-command scan + release-delta changelog coverage active
       ✅ tests: pass
       ✅ bilingual: pass
       ✅ site: pass
@@ -205,7 +205,7 @@ describe("frozen: roll consistency", () => {
           "docs": {
             "status": "pass",
             "gaps": [],
-            "note": "retired top-level command scan active; broader docs coverage remains US-CONSIST-002"
+            "note": "retired-command scan + release-delta changelog coverage active"
           },
           "tests": {
             "status": "pass",
@@ -238,7 +238,7 @@ describe("frozen: roll consistency", () => {
          • Feature 'orphan' has Done stories but is missing from features.md catalog
       ✅ cards: pass
       ✅ docs: pass
-         ℹ retired top-level command scan active; broader docs coverage remains US-CONSIST-002
+         ℹ retired-command scan + release-delta changelog coverage active
       ✅ tests: pass
       ✅ bilingual: pass
       ✅ site: pass
@@ -270,7 +270,7 @@ describe("frozen: roll consistency", () => {
           "docs": {
             "status": "pass",
             "gaps": [],
-            "note": "retired top-level command scan active; broader docs coverage remains US-CONSIST-002"
+            "note": "retired-command scan + release-delta changelog coverage active"
           },
           "tests": {
             "status": "pass",
@@ -302,7 +302,7 @@ describe("frozen: roll consistency", () => {
       ✅ code-backlog: pass
       ✅ cards: pass
       ✅ docs: pass
-         ℹ retired top-level command scan active; broader docs coverage remains US-CONSIST-002
+         ℹ retired-command scan + release-delta changelog coverage active
       ✅ tests: pass
       ❌ bilingual: fail
          • guide/en/extra.md has no corresponding guide/zh/extra.md
@@ -335,7 +335,7 @@ describe("frozen: roll consistency", () => {
           "docs": {
             "status": "pass",
             "gaps": [],
-            "note": "retired top-level command scan active; broader docs coverage remains US-CONSIST-002"
+            "note": "retired-command scan + release-delta changelog coverage active"
           },
           "tests": {
             "status": "pass",
@@ -371,7 +371,7 @@ describe("frozen: roll consistency", () => {
       ✅ code-backlog: pass
       ✅ cards: pass
       ✅ docs: pass
-         ℹ retired top-level command scan active; broader docs coverage remains US-CONSIST-002
+         ℹ retired-command scan + release-delta changelog coverage active
       ❌ tests: fail
          • Feature 'authentication' has Done stories but no test file appears to cover it (heuristic: no test file name matches keywords ['authentication'])
          • Test file 'stalefeature.bats' appears to reference feature 'stalefeature' which does not exist in backlog — may be stale
@@ -403,7 +403,7 @@ describe("frozen: roll consistency", () => {
           "docs": {
             "status": "pass",
             "gaps": [],
-            "note": "retired top-level command scan active; broader docs coverage remains US-CONSIST-002"
+            "note": "retired-command scan + release-delta changelog coverage active"
           },
           "tests": {
             "status": "fail",
@@ -438,7 +438,7 @@ describe("frozen: roll consistency", () => {
       ✅ code-backlog: pass
       ✅ cards: pass
       ✅ docs: pass
-         ℹ retired top-level command scan active; broader docs coverage remains US-CONSIST-002
+         ℹ retired-command scan + release-delta changelog coverage active
       ✅ tests: pass
       ✅ bilingual: pass
       ❌ site: fail
@@ -469,7 +469,7 @@ describe("frozen: roll consistency", () => {
           "docs": {
             "status": "pass",
             "gaps": [],
-            "note": "retired top-level command scan active; broader docs coverage remains US-CONSIST-002"
+            "note": "retired-command scan + release-delta changelog coverage active"
           },
           "tests": {
             "status": "pass",
@@ -534,7 +534,7 @@ describe("frozen: roll consistency", () => {
           "docs": {
             "status": "pass",
             "gaps": [],
-            "note": "retired top-level command scan active; broader docs coverage remains US-CONSIST-002"
+            "note": "retired-command scan + release-delta changelog coverage active"
           },
           "tests": {
             "status": "pass",
@@ -568,7 +568,7 @@ describe("frozen: roll consistency", () => {
       ✅ code-backlog: pass
       ✅ cards: pass
       ✅ docs: pass
-         ℹ retired top-level command scan active; broader docs coverage remains US-CONSIST-002
+         ℹ retired-command scan + release-delta changelog coverage active
       ✅ tests: pass
       ✅ bilingual: pass
       ✅ site: pass

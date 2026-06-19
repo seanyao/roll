@@ -685,6 +685,30 @@ function cycleToolRows(cy: CycleLedgerRow): string {
   );
 }
 
+function cycleSignalRows(cy: CycleLedgerRow): string {
+  if (cy.signals === undefined || cy.signals.length === 0) return "";
+  const rows = cy.signals
+    .map((sig) => {
+      const kind = sig.signalKind ?? sig.kind;
+      const result = sig.result !== undefined ? ` · ${sig.result}` : "";
+      const ref = sig.ref !== undefined ? ` · ${sig.ref}` : "";
+      return (
+        `<div style="display:grid;grid-template-columns:68px 86px 1fr;gap:10px;align-items:start;padding:6px 0;border-top:1px solid ${C.hair};">` +
+        `<span style="${MONO}font-size:10.5px;color:${C.faint};text-transform:uppercase;">${esc(sig.seg)}</span>` +
+        `<span style="${MONO}font-size:10.5px;color:${sig.signalKind !== undefined ? C.blue : C.dim};">${esc(kind)}${esc(result)}${esc(ref)}</span>` +
+        `<span style="${MONO}font-size:11.5px;color:${C.sub};line-height:1.4;">${esc(sig.summary)}</span>` +
+        `</div>`
+      );
+    })
+    .join("");
+  return (
+    `<section class="cy-signals" style="margin-top:12px;border:1px solid ${C.hair};border-radius:10px;background:#fff;padding:10px 12px;">` +
+    `<div style="${MONO}font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:${C.faint};font-weight:600;margin-bottom:4px;">ActivitySignal stream</div>` +
+    rows +
+    `</section>`
+  );
+}
+
 /** The trailing digit run — the SAME handle `roll cycle` resolves (US-CLI-012/013). */
 function cycleHandle(cycleId: string): string {
   const m = /(\d+)$/.exec(cycleId);
@@ -721,6 +745,7 @@ function cycleRow(cy: CycleLedgerRow): string {
     `<div style="display:flex;flex-wrap:nowrap;overflow-x:auto;gap:0;margin:12px 0 4px;padding-bottom:4px;">` +
     cy.tape.map((s, i) => tapeSegment(s, i === cy.tape.length - 1)).join("") +
     `</div>` +
+    cycleSignalRows(cy) +
     cycleToolRows(cy) +
     `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;">` +
     cy.evidence

@@ -57,12 +57,21 @@ function project(root: string = tmpdir()): string {
   }
   // Cycle rows inside the 72h window: one delivered + failed/reverted/blocked.
   const rows = [
-    { cycle_id: "c1", status: "done", outcome: "delivered", merge_commit: "abc", cost_usd: 0.5, ts: "2026-06-12T20:00:00Z" },
+    { cycle_id: "c1", status: "done", outcome: "delivered", story_id: "US-T-1", merge_commit: "abc", cost_usd: 0.5, ts: "2026-06-12T20:00:00Z" },
     { cycle_id: "c2", status: "failed", ts: "2026-06-12T21:00:00Z", cost_usd: 0.1 },
     { cycle_id: "c3", status: "reverted", ts: "2026-06-12T22:00:00Z", cost_usd: 0.1 },
     { cycle_id: "c4", status: "blocked", ts: "2026-06-12T23:00:00Z", cost_usd: 0.1 },
   ];
   writeFileSync(join(p, ".roll", "loop", "runs.jsonl"), rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  writeFileSync(
+    join(p, ".roll", "loop", "events.ndjson"),
+    [
+      { type: "cycle:start", cycleId: "c1", storyId: "US-T-1", agent: "codex", ts: 1_000 },
+      { type: "cycle:phase", cycleId: "c1", phase: "execute", ts: 2_000 },
+      { type: "cycle:tcr", cycleId: "c1", commitHash: "abcdef123", message: "tcr: one", ts: 3_000 },
+      { type: "pr:merge", prNumber: 91, storyId: "US-T-1", ts: 4_000 },
+    ].map((e) => JSON.stringify(e)).join("\n") + "\n",
+  );
   return p;
 }
 
@@ -112,6 +121,20 @@ describe("US-DOSSIER-010 — truth.json next to index.html", () => {
     await runIndex(p);
     const snap = JSON.parse(readFileSync(join(p, ".roll", "features", "truth.json"), "utf8"));
     expect(snap.cycle.failed3d).toBe(3); // c2 failed + c3 reverted + c4 blocked; c1 delivered not counted
+  });
+
+  it("US-LOOP-078: roll index materializes per-cycle ActivitySignal jsonl for replay", async () => {
+    const p = project();
+    await runIndex(p);
+    const path = join(p, ".roll", "loop", "cycle-c1.signals.jsonl");
+    expect(existsSync(path)).toBe(true);
+    const lines = readFileSync(path, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    expect(lines.map((s) => [s.seg, s.kind, s.signalKind, s.summary])).toEqual([
+      ["cycle", "lifecycle", undefined, "周期开始 · cycle start · US-T-1"],
+      ["build", "lifecycle", undefined, "阶段 · phase · execute"],
+      ["build", "tcr", "tcr", "TCR abcdef123 · tcr: one"],
+      ["pr", "pr", "pr", "PR #91 合并 · merged"],
+    ]);
   });
 
   // FIX-337 (AC1): the truth.json `cycle` aggregate is derived from the SAME

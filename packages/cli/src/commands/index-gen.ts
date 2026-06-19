@@ -45,6 +45,20 @@ function iso(sec: number): string {
   return new Date(sec * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
+function writeCycleSignalFiles(cwd: string, rows: readonly CycleLedgerRow[]): void {
+  const loopDir = join(cwd, ".roll", "loop");
+  if (!existsSync(loopDir)) return;
+  for (const row of rows) {
+    const signals = row.signals ?? [];
+    if (signals.length === 0) continue;
+    writeFileSync(
+      join(loopDir, `cycle-${row.cycleId}.signals.jsonl`),
+      signals.map((sig) => JSON.stringify(sig)).join("\n") + "\n",
+      "utf8",
+    );
+  }
+}
+
 function renderNowSec(): number {
   const v = process.env["ROLL_RENDER_NOW"] ?? "";
   if (v.trim() !== "") {
@@ -414,6 +428,7 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
     // cycle panel read from these exact rows, so `roll cycles`, the dossier panel,
     // and `roll status` (truth.json) can never show divergent counts/cost.
     const cycleRows = reconciledLedger(cwd);
+    writeCycleSignalFiles(cwd, cycleRows);
     // US-DOSSIER-010: ONE aggregation per run — the snapshot is serialized once,
     // written to truth.json AND embedded verbatim in index.html, so every
     // surface reads the same numbers from the same computation.

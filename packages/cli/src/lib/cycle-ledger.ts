@@ -8,6 +8,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { cycleActivitySignalsFromEvents, type ActivitySignal } from "@roll/core";
 import type { ToolCost } from "@roll/spec";
 import { parseEventLine, type RollEvent } from "@roll/spec";
 import { collectToolEvidence, formatToolCostSummary, type ToolTimelineRow } from "./tool-display.js";
@@ -61,6 +62,8 @@ export interface CycleLedgerRow {
   toolTimeline: ToolTimelineRow[];
   duration: string;
   tape: CycleTapeSegment[];
+  /** Standard ActivitySignal stream for this cycle, shared by web/report/ledger surfaces. */
+  signals?: ActivitySignal[];
   /** Evidence links (label → href), relative to features/index.html. */
   evidence: Array<{ label: string; href: string }>;
   /** FIX-348: the PR number this cycle opened, recorded on its `cycle:terminal`
@@ -291,7 +294,8 @@ interface CycleEventFacts {
   attest?: string;
 }
 
-function readEventFacts(projectPath: string): { byCycle: Map<string, CycleEventFacts>; prMergedBy: Map<string, number>; prOpenBy: Map<string, number>; prByCycle: Map<string, number> } {
+function readEventFacts(projectPath: string): { events: RollEvent[]; byCycle: Map<string, CycleEventFacts>; prMergedBy: Map<string, number>; prOpenBy: Map<string, number>; prByCycle: Map<string, number> } {
+  const events: RollEvent[] = [];
   const byCycle = new Map<string, CycleEventFacts>();
   const prMergedBy = new Map<string, number>();
   const prOpenBy = new Map<string, number>();
@@ -300,12 +304,12 @@ function readEventFacts(projectPath: string): { byCycle: Map<string, CycleEventF
   // commit does NOT name the story-id.
   const prByCycle = new Map<string, number>();
   const path = join(projectPath, ".roll", "loop", "events.ndjson");
-  if (!existsSync(path)) return { byCycle, prMergedBy, prOpenBy, prByCycle };
+  if (!existsSync(path)) return { events, byCycle, prMergedBy, prOpenBy, prByCycle };
   let content = "";
   try {
     content = readFileSync(path, "utf8");
   } catch {
-    return { byCycle, prMergedBy, prOpenBy, prByCycle };
+    return { events, byCycle, prMergedBy, prOpenBy, prByCycle };
   }
   const facts = (id: string): CycleEventFacts => {
     let f = byCycle.get(id);
@@ -318,6 +322,7 @@ function readEventFacts(projectPath: string): { byCycle: Map<string, CycleEventF
   for (const line of content.split("\n")) {
     const e: RollEvent | null = parseEventLine(line);
     if (e === null) continue;
+    events.push(e);
     if (e.type === "peer:gate") facts(e.cycleId).peer = e.verdict;
     else if (e.type === "pair:verdict") facts(e.cycleId).pairVerdicts.push(e.verdict);
     else if (e.type === "attest:gate") facts(e.cycleId).attest = e.verdict;
@@ -328,7 +333,27 @@ function readEventFacts(projectPath: string): { byCycle: Map<string, CycleEventF
       if (n !== undefined) prByCycle.set(e.cycleId, n);
     }
   }
-  return { byCycle, prMergedBy, prOpenBy, prByCycle };
+  return { events, byCycle, prMergedBy, prOpenBy, prByCycle };
+}
+
+function scopedCycleEvents(events: readonly RollEvent[], cycleId: string, storyId: string, prNumber: number | undefined): RollEvent[] {
+  const prSet = new Set<number>();
+  if (prNumber !== undefined) prSet.add(prNumber);
+  if (storyId !== "") {
+    for (const ev of events) {
+      if ((ev.type === "pr:open" || ev.type === "pr:merge") && ev.storyId === storyId) prSet.add(ev.prNumber);
+    }
+  }
+  return events.filter((ev) => {
+    if ("cycleId" in ev && typeof (ev as { cycleId?: unknown }).cycleId === "string") {
+      return (ev as { cycleId: string }).cycleId === cycleId;
+    }
+    if (ev.type === "pr:open" || ev.type === "pr:merge") return storyId !== "" && ev.storyId === storyId;
+    if (ev.type === "pr:rebase" || ev.type === "pr:close" || ev.type === "ci:pass" || ev.type === "ci:fail" || ev.type === "ci:rerun") {
+      return prSet.has(ev.prNumber);
+    }
+    return false;
+  });
 }
 
 /** FIX-348: the PR number from a `cycle:terminal` pr fact — the explicit
@@ -391,7 +416,7 @@ export function collectCycleLedger(projectPath: string): CycleLedgerRow[] {
   } catch {
     return [];
   }
-  const { byCycle, prMergedBy, prOpenBy, prByCycle } = readEventFacts(projectPath);
+  const { events, byCycle, prMergedBy, prOpenBy, prByCycle } = readEventFacts(projectPath);
   const toolEvidence = collectToolEvidence(projectPath);
   const rows: CycleLedgerRow[] = [];
   for (const line of content.split("\n")) {
@@ -426,6 +451,8 @@ export function collectCycleLedger(projectPath: string): CycleLedgerRow[] {
     const toolCosts = toolEvidence.costsByCycle.get(cycleId) ?? [];
     const prNumber = storyId !== "" ? prMergedBy.get(storyId) : undefined;
     const prOpen = storyId !== "" ? prOpenBy.get(storyId) : undefined;
+    const ownPrNumber = prByCycle.get(cycleId) ?? prNumber ?? prOpen;
+    const signals = cycleActivitySignalsFromEvents(scopedCycleEvents(events, cycleId, storyId, ownPrNumber), cycleId);
     const evidence: CycleLedgerRow["evidence"] = [];
     if (storyId !== "") evidence.push({ label: storyId, href: `#backlog` });
     rows.push({
@@ -442,10 +469,11 @@ export function collectCycleLedger(projectPath: string): CycleLedgerRow[] {
       toolTimeline: toolEvidence.timelineByCycle.get(cycleId) ?? [],
       duration: fmtDuration(row["duration_sec"]),
       tape: rowTape(row, verdict, ev, prNumber, prOpen),
+      signals,
       evidence,
       // FIX-348: the cycle's own PR number (cycle:terminal twin), falling back to
       // the merged/open PR event keyed by story when the terminal twin is absent.
-      prNumber: prByCycle.get(cycleId) ?? prNumber ?? prOpen,
+      prNumber: ownPrNumber,
     });
   }
   // De-dupe duplicate cycle ids (kimi pair-review): the LAST row wins — runs.jsonl

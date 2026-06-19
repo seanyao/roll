@@ -94,9 +94,16 @@ function latestConsistencyAudit(projectPath: string): TruthBoardInput["audit"] |
  * cluster identically to the CLI, so `roll status` (which reads truth.json) and
  * `roll cycles --since 3d` always print the same cycles/failed/cost. The caller
  * passes the rows it already built once (so git facts are collected a single
- * time); an empty/absent ledger yields `cycles3d: 0`.
+ * time).
+ *
+ * US-TRUTH-011 boundary preserved: when there is NO cycle source at all (no
+ * `.roll/loop/runs.jsonl`) the aggregate stays UNDEFINED → the board renders
+ * "unknown", never a misleading `0`. A runs file that simply has no rows in the
+ * 3d window still yields a concrete `cycles3d: 0` (an answered "zero this week",
+ * not "unknown").
  */
-function cycleTruthBoard(cycleRows: readonly CycleLedgerRow[], nowSec: number): TruthBoardInput["cycle"] | undefined {
+function cycleTruthBoard(projectPath: string, cycleRows: readonly CycleLedgerRow[], nowSec: number): TruthBoardInput["cycle"] | undefined {
+  if (!existsSync(join(projectPath, ".roll", "loop", "runs.jsonl"))) return undefined;
   const board = cyclesCycleBoard([...cycleRows], nowSec);
   return {
     cycles3d: board.cycles3d,
@@ -169,7 +176,7 @@ export function collectTruthBoardInput(projectPath: string, nowSec = renderNowSe
   // FIX-337 (AC1): the cycle aggregate uses the SAME canonical reconciled ledger
   // the page panel + `roll cycles` use. The caller (generateDossierPages) passes
   // the rows it already built; standalone callers fall back to building it here.
-  const cycle = cycleTruthBoard(cycleRows ?? reconciledLedger(projectPath), nowSec);
+  const cycle = cycleTruthBoard(projectPath, cycleRows ?? reconciledLedger(projectPath), nowSec);
   const release = releaseTruthBoard(projectPath, nowSec);
   const collectedAt = maxCollectedAt([audit?.collectedAt, cycle?.collectedAt, release?.collectedAt]);
   return {

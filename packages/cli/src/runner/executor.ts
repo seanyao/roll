@@ -219,7 +219,10 @@ export interface GithubPort {
 
 /** Process facet — lock + heartbeat (infra/process.ts). */
 export interface ProcessPort {
-  acquireLock(lockPath: string, opts?: { staleSec?: number }): { acquired: boolean; heldByPid: number | undefined };
+  acquireLock(
+    lockPath: string,
+    opts?: { staleSec?: number; cycleId?: string },
+  ): { acquired: boolean; heldByPid: number | undefined };
   releaseLock(lockPath: string): void;
   writeHeartbeat(path: string): void;
 }
@@ -2956,7 +2959,7 @@ export function nodePorts(opts: {
     },
     process: {
       acquireLock(lockPath, o) {
-        return acquireLock(lockPath, process.pid, { staleSec: o?.staleSec, now: clock });
+        return acquireLock(lockPath, process.pid, { staleSec: o?.staleSec, now: clock, cycleId: o?.cycleId });
       },
       releaseLock(lockPath) {
         releaseLock(lockPath);

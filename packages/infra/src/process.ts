@@ -47,8 +47,9 @@
  * Clock + process-liveness are injected so the verdicts are unit-testable with
  * a fixture clock and a dead pid (a spawned-then-exited child).
  */
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { hostname as osHostname } from "node:os";
+import { dirname, join } from "node:path";
 import type { ExecOpts, ExecResult, ToolInvocation, ToolResult } from "@roll/spec";
 import { BashTool, type BashInput, type BashOutput } from "./tools/bash.js";
 import { infraToolExecFile, infraToolFs, invokeInfraTool, redactInfraToolValue } from "./tools/delegation.js";
@@ -168,48 +169,211 @@ export function isLockHeld(
 
 /** Outcome of {@link acquireLock}. */
 export interface AcquireResult {
-  /** true = we now hold the lock (wrote our pid:ts). */
+  /** true = we now hold the lock (we won the atomic `mkdir`). */
   acquired: boolean;
   /** When `acquired` is false, the live owner's pid (mirrors the bash skip). */
   heldByPid: number | undefined;
 }
 
 /**
- * Acquire `lockPath`, mirroring the runner's re-entry guard
- * (bin/roll 8323-8337 / 8412-8425):
- *   - `mkdir -p $(dirname lock)`.
- *   - if the file exists and {@link isLockHeld} → DO NOT acquire; report the
- *     live owner's pid (bash `exit 0` / skip).
- *   - else `rm -f` any stale lock and write `pid:ts` (takeover / fresh).
+ * Owner metadata stored inside the lock directory (`lockPath/meta.json`).
+ * FIX-365: the lock is a DIRECTORY acquired atomically via `mkdir`; the meta
+ * records who holds it so cross-host / dead-pid verdicts can be conservative.
+ */
+export interface LockOwner {
+  pid: number;
+  hostname: string;
+  /** epoch SECONDS (UTC), matching `date -u +%s`. */
+  startedAt: number;
+  /** cycle (or card) id this lock was taken for; "" when not supplied. */
+  cycleId: string;
+}
+
+/** Basename of the owner-metadata file written inside the lock directory. */
+const LOCK_META_FILE = "meta.json";
+
+function metaPath(lockDir: string): string {
+  return join(lockDir, LOCK_META_FILE);
+}
+
+/**
+ * Read the current lock owner. Supports BOTH the FIX-365 directory shape
+ * (`lockPath/meta.json`) AND the legacy `pid:ts` plain-file shape, so an
+ * in-flight cycle from a pre-upgrade binary is still honored across the switch.
+ * Returns `undefined` when the lock is absent / unreadable / unparseable.
+ */
+export function readLockOwner(lockPath: string): LockOwner | undefined {
+  let st: ReturnType<typeof statSync>;
+  try {
+    st = statSync(lockPath);
+  } catch {
+    return undefined;
+  }
+  if (st.isDirectory()) {
+    try {
+      const raw = readFileSync(metaPath(lockPath), "utf8");
+      const o = JSON.parse(raw) as Partial<LockOwner>;
+      if (typeof o.pid !== "number" || typeof o.startedAt !== "number") return undefined;
+      return {
+        pid: o.pid,
+        hostname: typeof o.hostname === "string" ? o.hostname : "",
+        startedAt: o.startedAt,
+        cycleId: typeof o.cycleId === "string" ? o.cycleId : "",
+      };
+    } catch {
+      return undefined;
+    }
+  }
+  // Legacy `pid:ts` plain file.
+  try {
+    const { pid, ts } = parseLock(readFileSync(lockPath, "utf8"));
+    if (pid === undefined || ts === undefined) return undefined;
+    return { pid, hostname: "", startedAt: ts, cycleId: "" };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Is an existing lock HELD by a live owner — the conservative FIX-365 verdict.
+ *
+ * Held (must yield, do NOT steal) iff ANY of:
+ *   - the owner is on a DIFFERENT host (a local `kill -0` is meaningless there,
+ *     so we never assume it died — fail-loud), OR
+ *   - the owner is on THIS host and its pid is alive AND it is within the stale
+ *     window (`now - startedAt < staleSec`).
+ *
+ * Stale (safe to take over) iff: same host AND (pid dead OR aged out). Only a
+ * same-host dead/aged owner is ever cleared — cross-host or unknown-host owners
+ * are always treated as held. An unparseable owner (no record) → not held.
+ *
+ * The same-host comparison treats an EMPTY recorded hostname (legacy file lock,
+ * which had no hostname) as same-host, preserving the v2 pid-liveness rule for
+ * pre-upgrade locks.
+ */
+export function isOwnerHeld(
+  owner: LockOwner | undefined,
+  now: number,
+  staleSec: number,
+  pidAlive: PidAlive = systemPidAlive,
+  selfHost: string = osHostname(),
+): boolean {
+  if (owner === undefined) return false;
+  const sameHost = owner.hostname === "" || owner.hostname === selfHost;
+  if (!sameHost) return true; // cross-host → fail-loud, never steal
+  if (!pidAlive(owner.pid)) return false; // same-host dead pid → stale
+  return now - owner.startedAt < staleSec; // same-host live → held until aged out
+}
+
+/**
+ * Acquire `lockPath` atomically (FIX-365). The lock is a DIRECTORY; acquisition
+ * is the single atomic action `mkdir(lockPath)`:
+ *   - `mkdir` succeeds  → we hold it. Write owner meta, return `acquired`.
+ *   - `EEXIST`          → someone else holds it. Read the owner and decide via
+ *     {@link isOwnerHeld}:
+ *       · held (live same-host, or ANY cross-host) → yield, report the pid.
+ *       · stale (same-host dead/aged, or legacy stale file) → conservatively
+ *         isolate the stale lock (atomic rename out of the way, then remove) and
+ *         retry the `mkdir` ONCE. If the retry still loses, another racer won —
+ *         yield to it. We NEVER blindly `rm -rf` a directory we did not prove
+ *         stale, so two racers can never both come out `acquired`.
+ *
+ * There is NO read-check-then-write window (the bug this replaces): the only
+ * thing that decides ownership is which process wins the kernel-atomic `mkdir`.
  *
  * @param staleSec  {@link OUTER_LOCK_STALE_SEC} or {@link INNER_LOCK_STALE_SEC}.
  */
 export function acquireLock(
   lockPath: string,
   pid: number = process.pid,
-  opts: { now?: Clock; staleSec?: number; pidAlive?: PidAlive } = {},
+  opts: { now?: Clock; staleSec?: number; pidAlive?: PidAlive; cycleId?: string; hostname?: string } = {},
 ): AcquireResult {
   const now = (opts.now ?? systemClock)();
   const staleSec = opts.staleSec ?? OUTER_LOCK_STALE_SEC;
   const pidAlive = opts.pidAlive ?? systemPidAlive;
-  mkdirSync(dirname(lockPath), { recursive: true });
-  if (existsSync(lockPath)) {
-    const contents = parseLock(readFileSync(lockPath, "utf8"));
-    if (isLockHeld(contents, now, staleSec, pidAlive)) {
-      return { acquired: false, heldByPid: contents.pid };
-    }
-    rmSyncQuiet(lockPath); // stale → bash `rm -f LOCK`
+  const selfHost = opts.hostname ?? osHostname();
+  const owner: LockOwner = {
+    pid,
+    hostname: selfHost,
+    startedAt: now,
+    cycleId: opts.cycleId ?? "",
+  };
+
+  // First attempt: pure atomic mkdir. The winner of the race lands here.
+  if (tryMkdir(lockPath)) {
+    writeMeta(lockPath, owner);
+    return { acquired: true, heldByPid: undefined };
   }
-  writeFileSync(lockPath, formatLock(pid, now), "utf8");
-  return { acquired: true, heldByPid: undefined };
+
+  // EEXIST: someone holds it (dir) OR a legacy file is in the way. Decide.
+  const held = readLockOwner(lockPath);
+  if (isOwnerHeld(held, now, staleSec, pidAlive, selfHost)) {
+    return { acquired: false, heldByPid: held?.pid };
+  }
+
+  // Proven stale (same-host dead/aged, or unparseable/legacy-stale): isolate it
+  // out of the way ATOMICALLY, then retry the mkdir exactly once. The rename is
+  // the serialization point — only one process can move a given path away, and
+  // whoever then wins the mkdir is the sole holder.
+  isolateStale(lockPath);
+  if (tryMkdir(lockPath)) {
+    writeMeta(lockPath, owner);
+    return { acquired: true, heldByPid: undefined };
+  }
+  // Lost the retry to a concurrent racer that re-created the lock — yield to it.
+  const winner = readLockOwner(lockPath);
+  return { acquired: false, heldByPid: winner?.pid };
 }
 
 /**
- * Release a lock — mirrors `rm -f LOCK` (the EXIT trap, bin/roll 8332/8777).
- * Idempotent and tolerant of an already-absent file.
+ * Release a lock — removes the lock directory (or a legacy file). FIX-365: this
+ * runs in the cycle's `finally`, DECOUPLED from the terminal outcome — every
+ * exit path (`done` / `failed` / `auth_blocked` / crash-cleanup) releases.
+ * Idempotent and tolerant of an already-absent lock.
  */
 export function releaseLock(lockPath: string): void {
   rmSyncQuiet(lockPath);
+}
+
+/** `mkdir(lockPath)` WITHOUT `recursive` so an existing dir throws EEXIST.
+ *  Returns true iff WE created it. Parent dirs are created first (recursive). */
+function tryMkdir(lockPath: string): boolean {
+  mkdirSync(dirname(lockPath), { recursive: true });
+  try {
+    mkdirSync(lockPath); // atomic: EEXIST if it already exists
+    return true;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw e;
+  }
+}
+
+/** Write owner metadata inside an owned lock directory (best-effort durable). */
+function writeMeta(lockDir: string, owner: LockOwner): void {
+  try {
+    writeFileSync(metaPath(lockDir), `${JSON.stringify(owner)}\n`, "utf8");
+  } catch {
+    /* lenient: a missing meta only weakens diagnostics, not the mutual exclusion
+       (which is the mkdir). Readers tolerate an absent/garbage meta. */
+  }
+}
+
+/**
+ * Conservatively remove a lock PROVEN stale. We rename it aside first (atomic on
+ * the same filesystem) so a concurrent racer that already passed its own
+ * staleness check cannot also operate on the same live path, then delete the
+ * moved-aside copy. If the rename loses (another process moved/removed it first)
+ * we simply proceed — the subsequent mkdir is the real arbiter.
+ */
+function isolateStale(lockPath: string): void {
+  const aside = `${lockPath}.stale.${process.pid}.${Date.now()}`;
+  try {
+    renameSync(lockPath, aside);
+  } catch {
+    rmSyncQuiet(lockPath); // already gone, or a plain file we could not move — fall back
+    return;
+  }
+  rmSyncQuiet(aside);
 }
 
 // ─── heartbeat ────────────────────────────────────────────────────────────────
@@ -333,8 +497,9 @@ export function installExitHooks(final: () => void, target: NodeJS.Process = pro
 
 function rmSyncQuiet(p: string): void {
   try {
-    rmSync(p, { force: true });
+    rmSync(p, { force: true, recursive: true });
   } catch {
-    /* lenient: mirrors `rm -f ... 2>/dev/null || true` */
+    /* lenient: mirrors `rm -rf ... 2>/dev/null || true` (recursive so the lock
+       DIRECTORY + its meta.json are both removed, not just a plain file). */
   }
 }

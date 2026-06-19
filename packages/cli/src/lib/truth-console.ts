@@ -257,6 +257,25 @@ function heartbeatStale(lane: TruthSnapshotLoopLane, generatedAt: string | undef
   return now - last > 60_000;
 }
 
+// FIX-373: ONE shared track template so the column header and every row align
+// pixel-for-pixel (Lane · 模式 · 周期 · 上次 · 下次).
+const HB_COLS = "grid-template-columns:1.6fr .8fr .7fr 1fr 1fr;";
+
+/** FIX-373: aligned column headers above the heartbeat rows. */
+function heartbeatHeader(): string {
+  const h = (en: string, zh: string): string =>
+    `<span style="${MONO}font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:${C.faint};">${bi(en, zh)}</span>`;
+  return (
+    `<div data-now-section="heartbeat-head" style="display:grid;${HB_COLS}align-items:center;gap:14px;padding:9px 18px;border-top:1px solid ${C.hair};background:#fafbfe;">` +
+    `<span style="${MONO}font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:${C.faint};">Lane</span>` +
+    h("mode", "模式") +
+    h("every", "周期") +
+    h("last", "上次") +
+    h("next", "下次") +
+    `</div>`
+  );
+}
+
 function heartbeatRow(lane: TruthSnapshotLoopLane, generatedAt?: string): string {
   const on = lane.running;
   const stale = heartbeatStale(lane, generatedAt);
@@ -264,24 +283,22 @@ function heartbeatRow(lane: TruthSnapshotLoopLane, generatedAt?: string): string
   const dot = on
     ? `width:9px;height:9px;border-radius:50%;background:${dotColor};box-shadow:0 0 0 3px ${stale ? "rgba(210,59,59,.18)" : "rgba(23,138,82,.18)"};animation:beat 2.4s infinite;flex:none;`
     : `width:9px;height:9px;border-radius:50%;background:${dotColor};flex:none;`;
-  const cell = (label: string, value: string, mono = false): string =>
-    `<div><div style="${MONO}font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:${C.faint};">${label}</div>` +
-    `<div style="${mono ? MONO : ""}font-size:12.5px;color:${C.body};margin-top:3px;">${value}</div></div>`;
+  const cell = (value: string, mono = false): string =>
+    `<div style="${mono ? MONO : ""}font-size:12.5px;color:${C.body};min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${value}</div>`;
   const stateLine = [
     stale ? bi("zombie", "僵尸") : on ? bi("running", "运行中") : bi("off", "未启用"),
     lane.status !== undefined ? esc(lane.status) : "",
     lane.scope !== undefined ? esc(lane.scope) : "",
   ].filter((s) => s !== "").join(" · ");
   return (
-    `<div style="display:grid;grid-template-columns:230px repeat(4,1fr);align-items:center;gap:14px;padding:13px 18px;border-top:1px solid #f4f6f9;">` +
+    `<div style="display:grid;${HB_COLS}align-items:center;gap:14px;padding:13px 18px;border-top:1px solid #f4f6f9;">` +
     `<div style="display:flex;align-items:center;gap:11px;min-width:0;"><span style="${dot}"></span>` +
-    `<div style="min-width:0;"><div style="font-size:13.5px;font-weight:600;color:${C.ink};white-space:nowrap;">${esc(lane.name)}</div>` +
+    `<div style="min-width:0;"><div style="font-size:13.5px;font-weight:600;color:${C.ink};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(lane.name)}</div>` +
     `<div style="${MONO}font-size:10.5px;color:${stale ? C.red : on ? C.green : C.faint};margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${stateLine}</div></div></div>` +
-    cell(bi("mode", "模式"), esc(lane.mode ?? "—")) +
-    cell(bi("every", "周期"), mins(lane.everyMin)) +
-    cell(bi("last", "上次"), shortTs(lane.lastAt), true) +
-    `<div><div style="${MONO}font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:${C.faint};">${bi("next", "下次")}</div>` +
-    `<div class="hb-next" data-next="${esc(lane.nextAt ?? "")}" style="${MONO}font-size:12.5px;color:${C.body};margin-top:3px;">${shortTs(lane.nextAt)}</div></div>` +
+    cell(esc(lane.mode ?? "—")) +
+    cell(mins(lane.everyMin)) +
+    cell(shortTs(lane.lastAt), true) +
+    `<div class="hb-next" data-next="${esc(lane.nextAt ?? "")}" style="${MONO}font-size:12.5px;color:${C.body};min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${shortTs(lane.nextAt)}</div>` +
     `</div>`
   );
 }
@@ -296,7 +313,7 @@ function repoLoopsPanel(input: TruthConsoleInput): string {
     `<span style="${MONO}font-size:11.5px;color:${C.dim};white-space:nowrap;">${lanes.filter((l) => l.running).length}/${lanes.length} ${bi("running", "运行中")}</span></div>` +
     `<section style="border:1px solid ${C.line};border-radius:14px;background:${C.card};overflow:hidden;margin:0 0 8px;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
     (lanes.length > 0
-      ? lanes.map((lane) => heartbeatRow(lane, input.snapshot.generatedAt)).join("")
+      ? heartbeatHeader() + lanes.map((lane) => heartbeatRow(lane, input.snapshot.generatedAt)).join("")
       : `<div style="padding:16px 18px;font-size:12.5px;color:${C.faint};font-style:italic;">${bi("no loop lanes found for this repo", "未发现本仓 loop lane")}</div>`) +
     `</section>`
   );
@@ -343,7 +360,9 @@ function loopLiveFeedPanel(input: TruthConsoleInput): string {
   };
   const color = feed.status === "live" ? C.green : feed.status === "paused" ? C.amber : C.slate;
   const status = feed.status === "live" ? bi("live", "实时") : feed.status === "paused" ? bi("paused", "暂停") : bi("idle", "空闲");
-  const lines = feed.renderedLines.slice(-16);
+  // FIX-373: readable Live Stream — keep a larger recent window (was 16) and
+  // render it taller with mono word-wrap (see the enlarged <ol> below).
+  const lines = feed.renderedLines.slice(-40);
   const empty = feed.note ?? (feed.status === "idle" ? "idle — no active loop stream" : "paused — live stream unavailable");
   return (
     `<section data-now-section="live-stream" data-live-feed="true" data-live-src="${esc(feed.relativeHref)}" data-live-readonly="true" data-live-agent="${esc(feed.agent)}" style="border:1px solid ${C.line};border-radius:12px;background:${C.card};overflow:hidden;margin:14px 0 14px;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
@@ -353,76 +372,157 @@ function loopLiveFeedPanel(input: TruthConsoleInput): string {
     `<span style="${MONO}font-size:11.5px;color:${C.dim};">${bi("same source as roll loop watch", "与 roll loop watch 同源")}</span>` +
     `<span style="flex:1;"></span>` +
     `<a href="#loop" data-tab-link="loop" style="${MONO}font-size:11.5px;color:${C.blue};text-decoration:none;">${bi("open loop", "打开循环页")} →</a></div>` +
-    `<div style="padding:14px 18px 15px;background:#0f1722;color:#d8dee9;">` +
-    `<div style="display:flex;gap:12px;align-items:center;margin-bottom:10px;${MONO}font-size:10.5px;color:#93a0b8;">` +
+    `<div style="padding:16px 18px 18px;background:#0f1722;color:#d8dee9;">` +
+    `<div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;${MONO}font-size:10.5px;color:#93a0b8;">` +
     `<span>${bi("agent", "agent")} ${esc(feed.agent)}</span><span>${bi("raw lines", "原始行")} ${feed.rawLineCount}</span><span>${bi("updated", "更新")} ${shortTs(feed.updatedAt ?? feed.generatedAt)}</span></div>` +
     (lines.length > 0
-      ? `<ol data-live-lines="true" style="list-style:none;margin:0;padding:0;display:grid;gap:6px;max-height:260px;overflow:auto;">${lines
-          .map((line) => `<li style="${MONO}font-size:11.5px;line-height:1.45;white-space:pre-wrap;color:#d8dee9;">${esc(line)}</li>`)
+      ? `<ol data-live-lines="true" style="list-style:none;margin:0;padding:0;display:grid;gap:4px;max-height:420px;overflow:auto;">${lines
+          .map((line) => `<li style="${MONO}font-size:12.5px;line-height:1.7;white-space:pre-wrap;word-break:break-word;color:#d8dee9;">${esc(line)}</li>`)
           .join("")}</ol>`
-      : `<div data-live-lines="true" style="${MONO}font-size:12px;color:#93a0b8;font-style:italic;">${esc(empty)}</div>`) +
-    `<div style="margin-top:10px;${MONO}font-size:10px;color:#748196;">${esc(feed.sourcePath)} · ${bi("read-only polling, no loop writes", "只读轮询，不写 loop")}</div>` +
+      : `<div data-live-lines="true" style="${MONO}font-size:12.5px;line-height:1.7;color:#93a0b8;font-style:italic;">${esc(empty)}</div>`) +
+    `<div style="margin-top:12px;${MONO}font-size:10px;color:#748196;">${esc(feed.sourcePath)} · ${bi("read-only polling, no loop writes", "只读轮询，不写 loop")}</div>` +
     `</div></section>`
   );
 }
 
+/**
+ * FIX-373 — the deep-link target for a backlog story: its OWN card page,
+ * `features/<epic>/<id>/index.html`, expressed relative to `features/index.html`
+ * (so `<epic>/<id>/index.html`). Replaces the old `#backlog/<state>` hrefs that
+ * only re-filtered the Backlog tab instead of opening the card.
+ */
+function storyCardHref(story: BacklogStoryVM): string {
+  return `${encodeURIComponent(story.epic)}/${encodeURIComponent(story.id)}/index.html`;
+}
+
+const NEEDS_CTA_EN =
+  "Held / failed — the loop will not touch these. Your call: keep going, scope down, or archive.";
+const NEEDS_CTA_ZH = "挂起/失败,循环不会自动碰——待你裁决：继续/改小/归档。";
+const ONDECK_CTA_EN = "When idle the loop pulls cards from here in order; click any to open its card page.";
+const ONDECK_CTA_ZH = "循环空闲时会从这里按序取卡;点任意一张直接进它的卡页。";
+
 function nowOpsPanel(input: TruthConsoleInput): string {
+  const lanes = input.snapshot.loop?.lanes ?? [];
+  // FIX-373: a cycle is "running" ONLY when a heartbeat lane is genuinely live
+  // (running and not stale/zombie). The latest runs.jsonl row is NOT evidence of
+  // a live cycle — a `failed`/`done` last row was wrongly badged "active" before.
+  const live = lanes.some((lane) => lane.running && !heartbeatStale(lane, input.snapshot.generatedAt));
   const latest = input.cycles[0];
-  const active =
-    latest !== undefined && latest.verdict !== "delivered" && latest.verdict !== "reverted" && latest.verdict !== "failed" && latest.verdict !== "blocked";
-  const liveTape =
-    latest !== undefined && latest.tape.length > 0
-      ? `<div style="display:flex;flex-wrap:nowrap;overflow-x:auto;gap:0;margin-top:11px;padding-bottom:4px;">${latest.tape
+
+  // History line for the most-recent recorded cycle, shown honestly as the LAST
+  // run (never as the current one). Deep-links to that story's own card page.
+  const histStory = latest !== undefined && latest.storyId !== "" ? flattenStories(input.backlog).find((s) => s.id === latest.storyId) : undefined;
+  const histHref = histStory !== undefined ? storyCardHref(histStory) : undefined;
+  const histVerdict = latest !== undefined ? (VERDICT_ZH[latest.verdict] ?? latest.verdict) : "";
+  const histColor = latest !== undefined ? (VERDICT_COLORS[latest.verdict] ?? C.slate) : C.slate;
+  const histTime = latest !== undefined && latest.tsSec > 0 ? new Date(latest.tsSec * 1000).toISOString().replace(/^\d{4}-/, "").replace("T", " ").replace(/:\d{2}\.?\d*Z$/, "Z") : "";
+  const histId = latest !== undefined && latest.storyId !== "" ? latest.storyId : (latest?.cycleId ?? "—");
+  const historyLine =
+    latest === undefined
+      ? `<div style="${MONO}font-size:12px;color:${C.faint};margin-top:10px;">${bi("no recorded cycle yet", "尚无历史周期")}</div>`
+      : `<div data-now-section="live-cycle-history" style="${MONO}font-size:12px;color:${C.dim};margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">` +
+        `<span>${bi("last run", "最近一次")} ·</span>` +
+        (histHref !== undefined
+          ? `<a href="${histHref}" style="color:${C.blue};font-weight:600;text-decoration:none;">${esc(histId)}</a>`
+          : `<span style="color:${C.sub};font-weight:600;">${esc(histId)}</span>`) +
+        `<span style="${MONO}font-size:10px;padding:1px 8px;border-radius:999px;border:1px solid ${histColor}44;color:${histColor};">${histVerdict}</span>` +
+        (histTime !== "" ? `<span>${esc(histTime)}</span>` : "") +
+        `</div>`;
+
+  // When live, show the running cycle's tape; when idle, no tape (idle state line).
+  const runningTape =
+    live && latest !== undefined && latest.tape.length > 0
+      ? `<div style="display:flex;flex-wrap:nowrap;overflow-x:auto;gap:0;margin-top:14px;padding-bottom:4px;">${latest.tape
           .map((seg, i) => tapeSegment(seg, i === latest.tape.length - 1))
           .join("")}</div>`
-      : `<div style="${MONO}font-size:12px;color:${C.faint};font-style:italic;margin-top:9px;">${bi("idle — no active cycle", "空闲——当前无活动 cycle")}</div>`;
-  const live =
+      : "";
+  const liveDot = live
+    ? `width:10px;height:10px;border-radius:50%;flex:none;background:${C.green};box-shadow:0 0 0 4px rgba(23,138,82,.18);animation:beat 2.4s infinite;`
+    : `width:10px;height:10px;border-radius:50%;flex:none;background:${C.slate};`;
+  const liveState = live
+    ? `<span style="${MONO}font-weight:600;color:${C.green};">${bi("a cycle is running", "正在跑一个周期")}${latest?.storyId ? ` · ${esc(latest.storyId)}` : ""}</span>`
+    : `<span style="${MONO}font-weight:600;color:${C.slate};">${bi("no cycle is running", "当前没有周期在跑")}</span>`;
+  const liveCard =
     `<section data-now-section="live-cycle" style="border:1px solid ${C.line};border-radius:12px;background:${C.card};padding:14px 18px;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
     `<div style="display:flex;align-items:center;gap:10px;">${sectionLabel(bi("Live cycle", "实时周期"))}` +
-    `<span style="${MONO}font-size:10px;padding:2px 8px;border-radius:999px;border:1px solid ${(active ? C.amber : C.slate)}44;color:${active ? C.amber : C.slate};">${active ? bi("active", "活跃") : bi("idle", "空闲")}</span>` +
-    `<span style="flex:1;"></span><span style="${MONO}font-size:11.5px;color:${C.blue};">${esc(latest?.storyId || "—")}</span></div>` +
-    liveTape +
-    `</section>`;
-
-  const lanes = input.snapshot.loop?.lanes ?? [];
-  const running = lanes.filter((lane) => lane.running);
-  const processes =
-    `<section data-now-section="processes" style="border:1px solid ${C.line};border-radius:12px;background:${C.card};padding:14px 18px;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
-    `<div style="display:flex;align-items:center;gap:10px;">${sectionLabel(bi("Processes", "进程"))}<span style="${MONO}font-size:12px;color:${C.ink};font-weight:600;">${running.length}/${lanes.length}</span></div>` +
-    (running.length > 0
-      ? `<div style="display:grid;gap:7px;margin-top:11px;">${running
-          .map(
-            (lane) =>
-              `<div style="display:flex;justify-content:space-between;gap:12px;${MONO}font-size:11.5px;color:${C.sub};"><span>${esc(lane.name)}</span><span>${esc(lane.mode ?? "—")} · ${shortTs(lane.nextAt)}</span></div>`,
-          )
-          .join("")}</div>`
-      : `<div style="${MONO}font-size:12px;color:${C.faint};font-style:italic;margin-top:10px;">${bi("no runner process is active", "当前无 runner 进程")}</div>`) +
+    `<span style="${MONO}font-size:10px;padding:2px 8px;border-radius:999px;border:1px solid ${(live ? C.green : C.slate)}44;color:${live ? C.green : C.slate};">${live ? bi("running", "运行中") : bi("idle", "空闲")}</span>` +
+    `<span style="flex:1;"></span><a href="#loop" data-tab-link="loop" style="${MONO}font-size:11.5px;color:${C.blue};text-decoration:none;">${bi("open loop", "打开循环页")} →</a></div>` +
+    `<div style="display:flex;align-items:center;gap:12px;margin-top:13px;"><span style="${liveDot}"></span>${liveState}</div>` +
+    // History is always shown idle; suppressed while a cycle is genuinely live.
+    (live ? "" : historyLine) +
+    runningTape +
     `</section>`;
 
   const stories = flattenStories(input.backlog);
-  const onDeckRows = stories.filter((s) => s.state === "todo").slice(0, 4);
+
+  // FIX-373: On-Deck — deep-link each pick to its own card page.
+  const onDeckAll = stories.filter((s) => s.state === "todo");
+  const onDeckRows = onDeckAll.slice(0, 6);
   const onDeck =
-    `<section data-now-section="on-deck" style="border:1px solid ${C.line};border-radius:12px;background:${C.card};padding:14px 18px;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
-    `<div style="display:flex;align-items:center;gap:10px;">${sectionLabel(bi("On deck", "下批候选"))}<span style="${MONO}font-size:12px;color:${C.ink};font-weight:600;">${onDeckRows.length}</span></div>` +
+    `<section data-now-section="on-deck" style="border:1px solid ${C.line};border-radius:12px;background:${C.card};padding:14px 18px 0;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
+    `<div style="display:flex;align-items:center;gap:10px;">${sectionLabel(bi("On deck", "下一步要做"))}` +
+    `<span style="${MONO}font-size:10px;padding:2px 9px;border-radius:999px;color:${onDeckAll.length > 0 ? C.green : C.slate};background:${onDeckAll.length > 0 ? "#e6f6ef" : "#eef1f7"};font-weight:600;">${onDeckAll.length}</span></div>` +
     (onDeckRows.length > 0
-      ? `<div style="display:grid;gap:7px;margin-top:11px;">${onDeckRows
-          .map((story) => `<a href="#backlog/todo" data-tab-link="backlog" data-prefilter="todo" style="${MONO}font-size:11.5px;color:${C.blue};text-decoration:none;">${esc(story.id)} · ${esc(story.title)}</a>`)
+      ? `<div style="display:grid;gap:4px;margin-top:11px;">${onDeckRows
+          .map(
+            (story) =>
+              `<a href="${storyCardHref(story)}" style="display:block;text-decoration:none;padding:9px 0;border-top:1px solid ${C.hair};">` +
+              `<span style="${MONO}font-size:12px;color:${C.blue};font-weight:600;">${esc(story.id)}</span>` +
+              `<span style="display:block;color:${C.sub};font-size:12.5px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(story.title)}</span></a>`,
+          )
           .join("")}</div>`
       : `<div style="${MONO}font-size:12px;color:${C.faint};font-style:italic;margin-top:10px;">${bi("no queued picks found", "没有待选队列")}</div>`) +
+    `<div style="font-size:12px;color:${C.dim};padding:11px 0 12px;border-top:1px solid ${C.hair};margin-top:4px;">${bi(ONDECK_CTA_EN, ONDECK_CTA_ZH)}</div>` +
     `</section>`;
 
-  const needsRows = stories.filter((s) => s.state === "fail" || s.state === "hold").slice(0, 4);
+  // FIX-373: Needs-you — real total, fail(red)/hold(amber) split, one-line CTA,
+  // each row deep-linked to its own card page.
+  const failRows = stories.filter((s) => s.state === "fail");
+  const holdRows = stories.filter((s) => s.state === "hold");
+  const needsAll = [...failRows, ...holdRows];
+  const SHOW = 6;
+  const needsRows = needsAll.slice(0, SHOW);
+  const truncated = needsAll.length - needsRows.length;
+  const needsBadge = needsAll.length > 0 ? (failRows.length > 0 ? C.red : C.amber) : C.green;
+  const needsBadgeBg = needsAll.length > 0 ? (failRows.length > 0 ? "#fbe9e7" : "#fbf1df") : "#e6f6ef";
+  const tag = (state: "fail" | "hold"): string =>
+    state === "fail"
+      ? `<span style="${MONO}font-size:10px;padding:1px 7px;border-radius:999px;color:${C.red};background:#fbe9e7;float:right;">${bi("fail", "失败")}</span>`
+      : `<span style="${MONO}font-size:10px;padding:1px 7px;border-radius:999px;color:${C.amber};background:#fbf1df;float:right;">${bi("hold", "挂起")}</span>`;
+  const needsCta =
+    needsAll.length > 0
+      ? `<div style="font-size:12px;color:${C.dim};padding:11px 0 12px;border-top:1px solid ${C.hair};margin-top:4px;">${bi(NEEDS_CTA_EN, NEEDS_CTA_ZH)} ` +
+        bi(
+          `${needsAll.length} total${truncated > 0 ? `, ${needsRows.length} shown` : ", none truncated"}.`,
+          `共 ${needsAll.length} 项${truncated > 0 ? `,显示 ${needsRows.length} 项` : ",无截断"}。`,
+        ) +
+        `</div>`
+      : "";
   const needs =
-    `<section data-now-section="needs-you" style="border:1px solid ${C.line};border-radius:12px;background:${C.card};padding:14px 18px;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
-    `<div style="display:flex;align-items:center;gap:10px;">${sectionLabel(bi("Needs you", "需要你"))}<span style="${MONO}font-size:12px;color:${needsRows.length > 0 ? C.red : C.green};font-weight:600;">${needsRows.length}</span></div>` +
+    `<section data-now-section="needs-you" style="border:1px solid ${C.line};border-radius:12px;background:${C.card};padding:14px 18px ${needsAll.length > 0 ? "0" : "14px"};box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
+    `<div style="display:flex;align-items:center;gap:10px;">${sectionLabel(bi("Needs you", "需要你处理"))}` +
+    `<span data-needs-total="${needsAll.length}" style="${MONO}font-size:10px;padding:2px 9px;border-radius:999px;color:${needsBadge};background:${needsBadgeBg};font-weight:600;">${needsAll.length}</span>` +
+    (failRows.length > 0 ? `<span style="${MONO}font-size:10.5px;color:${C.red};">${failRows.length} ${bi("fail", "失败")}</span>` : "") +
+    (holdRows.length > 0 ? `<span style="${MONO}font-size:10.5px;color:${C.amber};">${holdRows.length} ${bi("hold", "挂起")}</span>` : "") +
+    `</div>` +
     (needsRows.length > 0
-      ? `<div style="display:grid;gap:7px;margin-top:11px;">${needsRows
-          .map((story) => `<a href="#backlog/${esc(story.state)}" data-tab-link="backlog" data-prefilter="${esc(story.state)}" style="${MONO}font-size:11.5px;color:${story.state === "fail" ? C.red : C.purple};text-decoration:none;">${esc(story.id)} · ${esc(story.title)}</a>`)
+      ? `<div style="display:grid;gap:4px;margin-top:11px;">${needsRows
+          .map(
+            (story) =>
+              `<a href="${storyCardHref(story)}" style="display:block;text-decoration:none;padding:9px 0;border-top:1px solid ${C.hair};">` +
+              tag(story.state as "fail" | "hold") +
+              `<span style="${MONO}font-size:12px;color:${story.state === "fail" ? C.red : C.amber};font-weight:600;">${esc(story.id)}</span>` +
+              `<span style="display:block;color:${C.sub};font-size:12.5px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(story.title)}</span></a>`,
+          )
           .join("")}</div>`
       : `<div style="${MONO}font-size:12px;color:${C.green};font-style:italic;margin-top:10px;">${bi("nothing is blocked or failed", "没有阻塞或失败项")}</div>`) +
+    needsCta +
     `</section>`;
 
-  return `<section data-now-section="operations" style="display:grid;grid-template-columns:1.5fr 1fr;gap:14px;margin:20px 0 14px;">${live}${processes}${onDeck}${needs}</section>`;
+  return (
+    `<section data-now-section="live-cycle-wrap" style="margin:20px 0 14px;">${liveCard}</section>` +
+    `<section data-now-section="operations" style="display:grid;grid-template-columns:1.5fr 1fr;gap:14px;margin:14px 0;align-items:start;">${onDeck}${needs}</section>`
+  );
 }
 
 function nowTab(input: TruthConsoleInput): string {
@@ -434,15 +534,18 @@ function nowTab(input: TruthConsoleInput): string {
   const total = s.story.total || 1;
   const mergedPct = Math.round((spectrum.done / total) * 100);
 
+  const runningCount = lanes.filter((l) => l.running).length;
+  const hbPillColor = runningCount > 0 ? C.amber : C.slate;
+  const hbPillBg = runningCount > 0 ? "#fbf1df" : "#eef1f7";
   const heartbeat =
     `<section style="border:1px solid ${C.line};border-radius:12px;background:${C.card};overflow:hidden;margin:20px 0 14px;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
-    `<div style="display:flex;align-items:center;gap:11px;padding:12px 18px;border-bottom:1px solid ${C.hair};">` +
+    `<div style="display:flex;align-items:center;gap:11px;padding:13px 18px;border-bottom:1px solid ${C.hair};">` +
     sectionLabel(bi("Loop heartbeat", "循环心跳")) +
-    `<span style="${MONO}font-size:12.5px;color:${C.ink};font-weight:600;white-space:nowrap;">${lanes.filter((l) => l.running).length}/${lanes.length} ${bi("running", "运行中")}</span>` +
+    `<span style="${MONO}font-size:11px;padding:2px 9px;border-radius:999px;color:${hbPillColor};background:${hbPillBg};font-weight:600;white-space:nowrap;">${runningCount}/${lanes.length} ${bi("running", "运行中")}</span>` +
     `<span style="flex:1;"></span>` +
     `<a href="#loop" data-tab-link="loop" style="${MONO}font-size:11.5px;color:${C.blue};cursor:pointer;text-decoration:none;">${bi("open loop", "打开循环页")} →</a></div>` +
     (lanes.length > 0
-      ? lanes.map((lane) => heartbeatRow(lane, s.generatedAt)).join("")
+      ? heartbeatHeader() + lanes.map((lane) => heartbeatRow(lane, s.generatedAt)).join("")
       : `<div style="padding:14px 18px;font-size:12.5px;color:${C.faint};font-style:italic;">${bi("no scheduled lanes on this machine", "本机没有已调度的 lane")}</div>`) +
     `</section>`;
 

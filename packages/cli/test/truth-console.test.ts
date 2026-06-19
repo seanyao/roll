@@ -216,11 +216,8 @@ const LIVE_FEED = {
   ],
 };
 
-function render(
-  snapshot: TruthSnapshot = SNAP,
-  extra: { projects?: ProjectRegistryEntry[]; currentSlug?: string } = {},
-): string {
-  return renderTruthConsole({
+function baseInput(snapshot: TruthSnapshot = SNAP) {
+  return {
     snapshot,
     snapshotJson: serializeTruthSnapshot(snapshot),
     brand: { name: "roll", slogan: "It just works." },
@@ -236,8 +233,14 @@ function render(
     gitHooks: GIT_HOOKS,
     charter: CHARTER,
     liveFeed: LIVE_FEED,
-    ...extra,
-  });
+  };
+}
+
+function render(
+  snapshot: TruthSnapshot = SNAP,
+  extra: { projects?: ProjectRegistryEntry[]; currentSlug?: string } = {},
+): string {
+  return renderTruthConsole({ ...baseInput(snapshot), ...extra });
 }
 
 describe("renderTruthConsole — US-DOSSIER-011", () => {
@@ -305,11 +308,12 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
 
   it("AC3: Now carries live operations, heartbeat, where-things-stand, three tiles and the spectrum", () => {
     expect(html).toContain(">Now<");
-    for (const section of ["live-cycle", "live-stream", "processes", "on-deck", "needs-you", "where-things-stand"]) {
+    // FIX-373: the redesigned Now carries Live cycle, On-deck, Needs-you and the
+    // live stream; Processes was folded into the heartbeat (its running dots).
+    for (const section of ["live-cycle", "live-stream", "on-deck", "needs-you", "where-things-stand"]) {
       expect(html).toContain(`data-now-section="${section}"`);
     }
     expect(html).toContain("Live cycle");
-    expect(html).toContain("Processes");
     expect(html).toContain("On deck");
     expect(html).toContain("Needs you");
     expect(html).toContain('data-truth="verdict"');
@@ -324,6 +328,72 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
     expect(html).toContain('data-tab-link="release"');
     for (const k of ["done", "fail", "unknown", "wip", "todo", "hold"]) expect(html).toContain(`data-truth="spectrum-${k}"`);
     expect(html).toContain('data-prefilter="done"'); // spectrum click pre-sets the backlog filter
+  });
+
+  it("FIX-373: Live cycle reflects TRUE current state — idle when no lane is live, last cycle as history", () => {
+    // SNAP has one running, non-stale lane → live cycle reads "running".
+    expect(html).toMatch(/data-now-section="live-cycle"[\s\S]*?运行中/);
+    // CYCLES[0] is `delivered` — it must NEVER be badged "active".
+    expect(html).not.toMatch(/data-now-section="live-cycle"[\s\S]*?>活跃</);
+
+    // With NO running lane the cycle goes idle + the last cycle is shown as history.
+    const idleSnap: TruthSnapshot = { ...SNAP, loop: { lanes: [{ name: "loop", running: false, mode: "cron", everyMin: 60, lastAt: "2026-06-12T23:30:00Z", nextAt: "2026-06-13T00:30:00Z" }] } };
+    const idle = render(idleSnap);
+    expect(idle).toMatch(/data-now-section="live-cycle"[\s\S]*?(idle|空闲)/);
+    expect(idle).toContain('data-now-section="live-cycle-history"');
+    expect(idle).toContain("最近一次");
+    expect(idle).toContain("no cycle is running");
+    // delivered last cycle is rendered honestly with its verdict word, not "active".
+    expect(idle).toContain("已交付");
+    expect(idle).not.toMatch(/data-now-section="live-cycle"[\s\S]*?>活跃</);
+  });
+
+  it("FIX-373: On-deck and Needs-you deep-link to the card's own page, not a backlog filter", () => {
+    // On-deck: FIX-9 is a todo in epic `alpha` → alpha/FIX-9/index.html
+    expect(html).toContain('href="alpha/FIX-9/index.html"');
+    // The On-deck section itself carries the card-page link, not a #backlog filter
+    // (the spectrum tally cards still legitimately use #backlog/<state>).
+    const onDeck = /data-now-section="on-deck"[\s\S]*?<\/section>/.exec(html)?.[0] ?? "";
+    expect(onDeck).toContain('href="alpha/FIX-9/index.html"');
+    expect(onDeck).not.toContain('href="#backlog');
+    expect(onDeck).not.toContain('data-prefilter');
+  });
+
+  it("FIX-373: Needs-you shows real total, fail/hold split and a one-line CTA", () => {
+    // Build a snapshot/backlog with 1 fail + 1 hold so the split shows both.
+    const needsBacklog = {
+      shipping: [
+        {
+          name: "alpha", done: 0, total: 2,
+          stories: [
+            { id: "FIX-50", epic: "alpha", type: "FIX", title: "broken", state: "fail" as const, legacy: false, stages: [] },
+            { id: "FIX-51", epic: "alpha", type: "FIX", title: "parked", state: "hold" as const, legacy: false, stages: [] },
+          ],
+        },
+      ],
+      settled: [],
+    };
+    const out = renderTruthConsole({ ...baseInput(), backlog: needsBacklog });
+    expect(out).toContain('data-needs-total="2"');
+    expect(out).toContain('href="alpha/FIX-50/index.html"');
+    expect(out).toContain('href="alpha/FIX-51/index.html"');
+    // fail row red token + hold row amber token both present.
+    expect(out).toContain("失败");
+    expect(out).toContain("挂起");
+    // one-line CTA (zh) appears.
+    expect(out).toContain("待你裁决");
+  });
+
+  it("FIX-373: Live stream is enlarged (taller, more lines, mono wrap)", () => {
+    expect(html).toContain("max-height:420px"); // was 260px
+    expect(html).toContain("word-break:break-word"); // mono wrap
+  });
+
+  it("FIX-373: Loop heartbeat has aligned column headers", () => {
+    expect(html).toContain('data-now-section="heartbeat-head"');
+    expect(html).toContain(">Lane<");
+    // the header and rows share ONE grid track template so they align.
+    expect(html).toContain("grid-template-columns:1.6fr .8fr .7fr 1fr 1fr;");
   });
 
   it("US-DOSSIER-044: Now embeds a read-only loop watch live stream with polling continuity", () => {

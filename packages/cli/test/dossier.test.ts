@@ -164,6 +164,48 @@ describe("collectDossier — US-DOSSIER-001a data model", () => {
     expect(storyHasMergeEvidence(null, "FIX-208")).toBe(false); // not a git repo
   });
 
+  it("FIX-366: dossier rebuild uses spec PR links as offline merge evidence when the squash subject omits the story id", () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-dossier-spec-pr-")));
+    dirs.push(repo);
+    execFileSync("git", ["init", "--initial-branch=main"], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: repo });
+    execFileSync("git", ["config", "user.name", "Roll Test"], { cwd: repo });
+    execFileSync("git", ["config", "commit.gpgsign", "false"], { cwd: repo });
+
+    const card = join(repo, ".roll", "features", "tools-layer", "US-TOOL-015");
+    const run = join(card, "2026-06-19T12-22-17");
+    mkdirSync(join(run, "screenshots"), { recursive: true });
+    writeFileSync(
+      join(card, "spec.md"),
+      [
+        "# US-TOOL-015 Docs: guide README help changelog for tools layer ✅",
+        "",
+        "**Delivery:**",
+        "- PR: https://github.com/seanyao/roll/pull/829",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(join(run, "US-TOOL-015-report.html"), "<html>attested</html>\n");
+    writeFileSync(join(run, "screenshots", "tools-guide-en.png"), "png\n");
+    writeFileSync(join(card, "ac-map.json"), "[]\n");
+    symlinkSync(run, join(card, "latest"));
+    writeFileSync(
+      join(repo, ".roll", "backlog.md"),
+      "| Story | Desc | Status |\n|---|---|---|\n| [US-TOOL-015](x) | docs | ✅ Done |\n",
+    );
+    writeFileSync(join(repo, "README.md"), "base\n");
+    execFileSync("git", ["add", "."], { cwd: repo });
+    execFileSync("git", ["commit", "-m", "docs: add tools docs (#829)"], { cwd: repo });
+
+    generateDossierPages(repo, true);
+
+    const truth = JSON.parse(readFileSync(join(repo, ".roll", "features", "truth.json"), "utf8")) as { stories: Array<{ id: string; ladder: string }> };
+    expect(truth.stories.find((s) => s.id === "US-TOOL-015")?.ladder).toBe("attested");
+    const page = readFileSync(join(card, "index.html"), "utf8");
+    expect(page).toContain('data-rung="attested"');
+    expect(page).not.toContain("Claim recorded — merge evidence unavailable");
+  });
+
   it("FIX-308: git dossier facts read origin/main when local HEAD is stale", () => {
     const remote = realpathSync(mkdtempSync(join(tmpdir(), "roll-dossier-remote-")));
     const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-dossier-origin-main-")));

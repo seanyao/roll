@@ -45,7 +45,7 @@ First time through? Start with [Getting started](guide/en/getting-started.md).
 |---------|-------------|
 | **Autonomy · daily use** | |
 | `roll loop <on\|off\|now\|status\|watch\|runs\|log\|story\|events\|eval\|signals\|alert\|fmt\|pr-inbox\|mute\|unmute\|pause\|resume\|reset\|gc>` | Manage the autonomous BACKLOG executor (incl. per-cycle result scoring) |
-| `roll loop watch [-n <lines>] [--verbose\|--raw] [--attach]` | Read-only, concise, real-time view of THIS project's loop — auto-tails `.roll/loop/live.log` through the renderer (cycle / story / results / ALERT / cost / heartbeat). It never writes to or signals a running cycle; Ctrl-C ends the view, not the loop. `--attach` joins the loop's tmux observe window read-only |
+| `roll loop watch [-n <lines>] [--events\|--raw-events] [--verbose\|--raw] [--attach]` | Read-only live observation. Use default first for owner-facing status (phase / quiet / TCR / last signal), `--events` for compact event debugging, and `--raw-events` only for audit/debug JSON. Ctrl-C ends the view, not the loop; `--attach` joins the tmux observe window read-only |
 | `roll loop go [--epic <e>\|--cards <ids>] [--budget <usd>] [--for <duration>] [--review <auto\|hetero\|self\|off>]` | Run goal mode manually until the scoped work completes, pauses, or hits a budget/usage/timebox guardrail; it can run while the scheduler is off, and a paused loop should be resumed first; final review defaults to `auto` |
 | `roll loop goal` | Show persisted goal scope, review mode, usage, limits, safety gate, and last decision |
 | `roll backlog [sync\|block\|defer\|lint\|…]` | View, manage, and sync (from GitHub Issues) pending tasks |

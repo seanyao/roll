@@ -403,7 +403,7 @@ agent 团队（`$ralplan`、`$ralph`、`$ultragoal`）、`.omx/` 持久状态、
 
 ```bash
 roll loop status        # 看 LOCK + 持有它的 PID
-tmux attach -t roll-loop-<project-slug>  # 看 agent 在 tmux 里干什么
+roll loop watch         # 只读实时视图；Ctrl-C 只停止视图
 roll loop runs          # 上一个周期的结果和告警
 roll loop alert         # 有没有 CI 或 TCR 告警
 roll loop reset         # 实在卡死了清状态 + LOCK
@@ -448,7 +448,8 @@ git push --force-with-lease
 **原理：** 每个周期向 `<project>/.roll/loop/runs.jsonl` 追加一条 JSONL，
 包含 story ID、模型、TCR commit 数、耗时、结果、成本（按公开单价）。
 `roll status` 与交付档案（`roll dossier`）把这些——连同真相账本的其余部分——
-聚合成单一的人类可读界面。tmux 会话保留完整 agent 对话，直到下一个周期覆盖。
+聚合成单一的人类可读界面。实时 watch 是只读视图，会把 live 活动和结构化事件事实合并展示；
+tmux 观测 pane 使用同一个 watch 入口。
 
 **观测入口：**
 
@@ -459,11 +460,13 @@ git push --force-with-lease
 | 每周期 JSONL 记录 | `roll loop runs` |
 | 单个 cycle 各阶段耗时 | `roll loop runs --detail <cycle_id>` |
 | 带成本列的快照 dashboard | `roll loop status --days 7` |
-| 实时看 agent 在做什么 | `tmux attach -t roll-loop-<project-slug>` |
+| 实时看 agent 在做什么 | `roll loop watch` |
+| 调试 compact 事件事实 | `roll loop watch --events` |
+| 原始审计 JSON 事件 | `roll loop watch --raw-events` |
 | 一眼看清已发布 / 进行中 / 队列 / 发布就绪 | `roll dossier` |
 | 需要关注的告警 | `roll loop alert` |
 | 完整 cycle agent 输出（纯文本） | `roll loop log` |
-| 完整 agent 对话记录 | `tmux attach -t roll-loop-<project-slug>` 后上翻 |
+| 完整 agent 对话记录 | `roll loop watch --verbose` 或 `roll loop log` |
 
 `status` 是滚动窗口（默认 3 天）。当一个 story 拖了一周、跑过好几轮，你想看它**总共**花了多少
 ——总耗时、总 token、总成本、所有 PR——用 `roll loop story <ID>`：它会读完整事件流（含轮转归档

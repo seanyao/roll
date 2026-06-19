@@ -452,7 +452,7 @@ cycles.
 
 ```bash
 roll loop status        # check LOCK + PID
-tmux attach -t roll-loop-<project-slug>  # see what the agent is doing in tmux
+roll loop watch         # read-only live view; Ctrl-C stops only the view
 roll loop runs          # last cycle outcomes and alerts
 roll loop alert         # any CI or TCR alerts?
 roll loop reset         # clear state + LOCK if truly stuck
@@ -501,8 +501,9 @@ are multiple surfaces depending on what you need.
 `<project>/.roll/loop/runs.jsonl` with story ID, model, TCR commit count,
 duration, outcome, and cost (public pricing). `roll status` and the Delivery
 Dossier (`roll dossier`) read this — and the rest of the truth ledger — into a
-single human-readable surface. The tmux session retains the full agent
-conversation until the next cycle overwrites it.
+single human-readable surface. The live watch view is read-only and combines
+live activity with structured event facts; the tmux observe pane uses the same
+watch entrypoint.
 
 **The observability stack:**
 
@@ -513,11 +514,13 @@ conversation until the next cycle overwrites it.
 | Per-cycle JSONL records | `roll loop runs` |
 | Phase breakdown for one cycle | `roll loop runs --detail <cycle_id>` |
 | Snapshot dashboard with cost column | `roll loop status --days 7` |
-| Watch the agent in real time | `tmux attach -t roll-loop-<project-slug>` |
+| Watch the agent in real time | `roll loop watch` |
+| Debug compact event facts | `roll loop watch --events` |
+| Raw audit event JSON | `roll loop watch --raw-events` |
 | Shipped / in-progress / queue / release readiness at a glance | `roll dossier` |
 | Alerts that need attention | `roll loop alert` |
 | Full cycle agent output (plain text) | `roll loop log` |
-| Full agent transcript | `tmux attach -t roll-loop-<project-slug>`, scroll up |
+| Full agent transcript | `roll loop watch --verbose` or `roll loop log` |
 
 `status` rolls the dashboard forward (default 3-day window). When a story took
 several cycles spread over a week and you want the total — duration, tokens,

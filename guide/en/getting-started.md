@@ -48,11 +48,15 @@ roll loop status
 ```
 
 `roll loop status` is the normal snapshot view. If a cycle is running and you
-want the live terminal, attach to the tmux session that status reports:
+want the live view, start with the read-only watch command:
 
 ```bash
-tmux attach -t roll-loop-<project-slug>
+roll loop watch
 ```
+
+Use `roll loop watch --events` for compact event debugging and
+`roll loop watch --raw-events` only when you need raw audit JSON. All watch
+modes are read-only; Ctrl-C stops only the view.
 
 For an immediate local cycle instead of waiting for the schedule:
 

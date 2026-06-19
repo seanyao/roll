@@ -45,12 +45,15 @@ roll loop on
 roll loop status
 ```
 
-`roll loop status` 是常用快照视图。若当前有 cycle 在跑，并且你想看实时终端，
-按 status 里显示的 session 名附加 tmux：
+`roll loop status` 是常用快照视图。若当前有 cycle 在跑，并且你想看实时视图，
+先用只读 watch 命令：
 
 ```bash
-tmux attach -t roll-loop-<project-slug>
+roll loop watch
 ```
+
+排查事件用 `roll loop watch --events`，只有需要原始审计 JSON 时才用
+`roll loop watch --raw-events`。所有 watch 模式都是只读；Ctrl-C 只停止视图。
 
 如果不想等调度触发，可以手动跑一轮：
 

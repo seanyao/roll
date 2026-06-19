@@ -144,6 +144,36 @@ describe("resolveStoryAcItems — FIX-226 stub-owner AC fallback", () => {
     const items = resolveStoryAcItems(proj, "US-OWN-1");
     expect(items.map((i) => i.text)).toEqual(["自有验收"]);
   });
+
+  // FIX-374: a card-folder `<id>/spec.md` whose `##` heading mentions a SIBLING
+  // card id used to re-attribute the trailing `## Acceptance Criteria` block to
+  // the sibling, so the report rendered zero ACs (the FIX-214 hijack class, via
+  // the directory layout). The folder owns the whole file → its ACs must resolve.
+  it("FIX-374: a sibling-id heading in a card-folder spec.md does not hijack the ACs", () => {
+    const proj = realpathSync(mkdtempSync(join(tmpdir(), "roll-attest-fix374-")));
+    dirs.push(proj);
+    mkdirSync(join(proj, ".roll", "features", "release-management", "FIX-372"), { recursive: true });
+    writeFileSync(
+      join(proj, ".roll", "features", "release-management", "FIX-372", "spec.md"),
+      [
+        "---",
+        "id: FIX-372",
+        "---",
+        "",
+        "# FIX-372 — Release page",
+        "",
+        "## Root cause (traced — FIX-368 sibling)", // foreign id in the heading
+        "Some prose.",
+        "",
+        "## Acceptance Criteria",
+        "- [ ] pending = post-tag delta",
+        "- [ ] gate self-explaining",
+        "",
+      ].join("\n"),
+    );
+    const items = resolveStoryAcItems(proj, "FIX-372");
+    expect(items.map((i) => i.id)).toEqual(["FIX-372:AC1", "FIX-372:AC2"]);
+  });
 });
 
 describe("attestCommand", () => {

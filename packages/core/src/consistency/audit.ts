@@ -276,6 +276,12 @@ export const CONSISTENCY_DIMENSIONS: readonly ConsistencyDimension[] = [
  * label (rendered side-by-side in HTML via bi(), on separate lines in the CLI
  * plaintext report — never inline-mixed). `whatEn`/`whatZh` is the one-line
  * "what this dimension reconciles" caption the web panel shows.
+ *
+ * FIX-372: the panel must EXPLAIN ITSELF — so each dimension also carries
+ * `failMeansEn`/`failMeansZh` ("what a failure here means") and `actionEn`/
+ * `actionZh` ("the single command/step to clear it"). The web Release widget
+ * surfaces these on a failing dimension; an all-pass panel collapses to one
+ * calm line. The gate ENFORCEMENT is unchanged — this is display copy only.
  */
 export interface ConsistencyDimensionLabel {
   no: string;
@@ -283,14 +289,80 @@ export interface ConsistencyDimensionLabel {
   zh: string;
   whatEn: string;
   whatZh: string;
+  /** What a failure in this dimension means, in plain language. */
+  failMeansEn: string;
+  failMeansZh: string;
+  /** The single action to clear a failure in this dimension. */
+  actionEn: string;
+  actionZh: string;
 }
 export const CONSISTENCY_DIMENSION_LABELS: Record<ConsistencyDimension, ConsistencyDimensionLabel> = {
-  "code-backlog": { no: "①", en: "code ↔ backlog", zh: "代码↔待办", whatEn: "Done claims vs merge & cycle facts", whatZh: "Done 声明对合并与周期事实" },
-  cards: { no: "②", en: "cards / evidence", zh: "卡片/证据", whatEn: "every row owns its card; evidence never dangles", whatZh: "每行有卡，证据链接不悬空" },
-  docs: { no: "③", en: "docs", zh: "文档", whatEn: "changelog / guide / README / --help", whatZh: "changelog/guide/README/--help" },
-  tests: { no: "④", en: "tests", zh: "测试", whatEn: "suites green, coverage honest", whatZh: "套件全绿，覆盖诚实" },
-  bilingual: { no: "⑤", en: "bilingual", zh: "双语", whatEn: "guide en↔zh + i18n keys in parity", whatZh: "指南中英与 i18n key 对齐" },
-  site: { no: "⑥", en: "site", zh: "站点", whatEn: "published site matches the repo", whatZh: "站点与仓库一致" },
+  "code-backlog": {
+    no: "①",
+    en: "code ↔ backlog",
+    zh: "代码↔待办",
+    whatEn: "Done claims vs merge & cycle facts",
+    whatZh: "Done 声明对合并与周期事实",
+    failMeansEn: "a card says Done but git/cycle facts don't back it (premature Done)",
+    failMeansZh: "卡片声明 Done，但 git/周期事实不支持（提前翻牌）",
+    actionEn: "open the named card; either land the merge or revert its Done status",
+    actionZh: "打开标注的卡片；要么合并交付，要么撤回 Done 状态",
+  },
+  cards: {
+    no: "②",
+    en: "cards / evidence",
+    zh: "卡片/证据",
+    whatEn: "every row owns its card; evidence never dangles",
+    whatZh: "每行有卡，证据链接不悬空",
+    failMeansEn: "a Done row is missing its card, attest, or screenshot evidence",
+    failMeansZh: "Done 行缺卡片、attest 或截图证据",
+    actionEn: "run `roll attest backfill` to attach the missing evidence, then re-audit",
+    actionZh: "运行 `roll attest backfill` 补齐证据，再重审",
+  },
+  docs: {
+    no: "③",
+    en: "docs",
+    zh: "文档",
+    whatEn: "changelog / guide / README / --help",
+    whatZh: "changelog/guide/README/--help",
+    failMeansEn: "shipped behavior isn't reflected in changelog / guide / README / --help",
+    failMeansZh: "已交付行为没体现在 changelog/指南/README/--help",
+    actionEn: "update the doc the finding names (a closing doc-update card), then re-audit",
+    actionZh: "更新所标注的文档（收尾的文档更新卡），再重审",
+  },
+  tests: {
+    no: "④",
+    en: "tests",
+    zh: "测试",
+    whatEn: "suites green, coverage honest",
+    whatZh: "套件全绿，覆盖诚实",
+    failMeansEn: "a suite is red or new behavior shipped without a test",
+    failMeansZh: "有套件未通过，或新行为没有测试",
+    actionEn: "run `roll test` locally; fix the red suite or add the missing test",
+    actionZh: "本地跑 `roll test`；修复红套件或补上缺失测试",
+  },
+  bilingual: {
+    no: "⑤",
+    en: "bilingual",
+    zh: "双语",
+    whatEn: "guide en↔zh + i18n keys in parity",
+    whatZh: "指南中英与 i18n key 对齐",
+    failMeansEn: "the English and Chinese guide / i18n keys have drifted out of parity",
+    failMeansZh: "英文与中文指南 / i18n key 不对齐",
+    actionEn: "add the missing en or zh counterpart so both languages match",
+    actionZh: "补上缺失的中英对照，使两种语言对齐",
+  },
+  site: {
+    no: "⑥",
+    en: "site",
+    zh: "站点",
+    whatEn: "published site matches the repo",
+    whatZh: "站点与仓库一致",
+    failMeansEn: "the published site is stale — it doesn't match the repo",
+    failMeansZh: "已发布站点过期——与仓库不一致",
+    actionEn: "regenerate and republish the site so it matches the repo",
+    actionZh: "重新生成并发布站点，使其与仓库一致",
+  },
 };
 
 /**

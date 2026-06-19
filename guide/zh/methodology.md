@@ -39,9 +39,10 @@ graph TB
     end
 
     subgraph "Loop C: Observability & Maintenance"
-        C1["$roll-sentinel<br/>随机巡检"] --> C2{"异常?"}
-        C2 -->|Yes| C3["$roll-debug<br/>现场取证 + 根因分析"]
-        C3 --> C5["$roll-fix<br/>热修复"]
+        C1["roll status / roll dossier<br/>交付真相面"] --> C2{"漂移或健康问题?"}
+        C2 -->|Yes| C3["$roll-debug / $roll-doc / $roll-doctor<br/>诊断 + 根因分析"]
+        C3 --> C5["$roll-fix / REFACTOR<br/>修正写回 backlog"]
+        C6["$roll-.dream<br/>每晚代码健康扫描"] --> C2
         C5 --> C1
         C2 -->|No| C1
     end
@@ -55,15 +56,17 @@ graph TB
     style B7 fill:#fff3e0,stroke:#FF9800
     style C1 fill:#fce4ec,stroke:#F44336
     style C3 fill:#fce4ec,stroke:#F44336
+    style C5 fill:#fce4ec,stroke:#F44336
+    style C6 fill:#fce4ec,stroke:#F44336
 ```
 
 三个闭环的协同关系：
 
 - **Loop A → Loop B**：设计闭环产出的 User Story 流入实现闭环作为执行单元。
-- **Loop B → Loop C**：每次部署完成后，巡检闭环自动纳入新交付物进行监控。
-- **Loop C → Loop A**：巡检发现的问题若超出修复范围，升级回设计闭环重新评估。
+- **Loop B → Loop C**：每次交付都喂入真相账本，维护闭环因此把已交付 / 进行中 / 队列 / 真相漂移 / 发布就绪当作事实读取。
+- **Loop C → Loop A**：可观测面浮现的漂移或代码健康问题转为 `FIX-XXX` / `REFACTOR-XXX` 条目；超出快速修复范围的，升级回设计闭环重新评估。
 
-**可选自主层**（通过 `roll loop on` 启用）：`roll-loop` 按可配置频次执行 BACKLOG 待办；`roll-.dream` 每晚扫描代码健康并产出 `REFACTOR` 条目；`roll-brief` 每天早晨向人类简报。人类保留 `roll-release` 的唯一权力。详见 §9。
+**可选自主层**（通过 `roll loop on` 启用）：`roll-loop` 按可配置频次执行 BACKLOG 待办；`roll-.dream` 每晚扫描代码健康并产出 `REFACTOR` 条目。人类自行查阅 `roll status`、交付档案（Delivery Dossier）、外部 console 与真相信号（loop 还会从 events/runs 重建一个生成式的晨间报告页）。人类保留 `roll-release` 的唯一权力。详见 §9。
 
 ---
 
@@ -339,22 +342,19 @@ micro-commit（2-5分钟粒度）
 
 微步提交的粒度约束（2–5 分钟/Action）在这里发挥了第二个价值：当 CI 失败时，需要回溯的代码量极小，问题根因几乎总是显而易见的。
 
-**4.4.3 两条 Workflow 管线**
+**4.4.3 CI 管线与真相账本**
 
-Roll 项目的 CI 配置通常包含两条相互独立的管线，对应不同的触发场景：
+Roll 项目的 CI 管线在每次 push/PR 时触发：
 
 ```
 .github/workflows/
-├── ci.yml          # 每次 push/PR 触发
-│                   # 承担完整的质量门禁序列
-│                   # GREEN → 解锁 CD 部署权限
-│
-└── sentinel.yml    # cron 调度触发（无人值守）
-                    # 承担 $roll-sentinel 的巡检任务
-                    # 支撑 Loop C 的可观测性能力
+└── ci.yml          # 每次 push/PR 触发
+                    # 承担完整的质量门禁序列
+                    # GREEN → 解锁 CD 部署权限
+                    # 把本次运行记入真相账本
 ```
 
-`sentinel.yml` 是 Loop C 的基础设施依赖——Loop C 的持续巡检能力本质上运行在 CI 平台之上，这体现了三个闭环在基础设施层面的统一性。
+每一次 CI 运行都记入 Loop C 所读取的同一个真相账本。这正是三个闭环在基础设施层面的统一性：Loop C 的可观测面（`roll status`、交付档案、真相信号）是 CI 产出的同一批交付事实的投影——而非另起一套监控系统外挂其上。
 
 **4.4.4 CD 与 Verification Gate 的依赖链**
 
@@ -408,38 +408,39 @@ CI PASS
 
 ---
 
-## 5. Loop C：可观测性与韧性维护
+## 5. Loop C：可观测与维护
+
+Loop C 是可观测与维护：status、dossier、debug/doc/doctor、dream 代码健康扫描与真相信号把修正反馈回 backlog。
 
 ### 5.1 方法论继承
 
 | 经典方法论 | Roll 中的实现 |
 |-----------|------------|
-| SRE (站点可靠性工程) | `$roll-sentinel`：基于采样的自动化巡检 |
-| 混沌工程 | 随机化巡检策略，模拟不可预测的检查模式 |
-| 数字取证 + 根因分析 (RCA) | `$roll-debug`：自动化现场取证与结构化根因诊断 |
+| SRE (站点可靠性工程) | `roll status` / `roll dossier`：基于单一账本的交付真相面 |
+| 可观测性 | 外部 console + 真相信号（truth.json / 发布就绪 / `roll loop status`） |
+| 持续维护 | `$roll-.dream`：每晚代码健康扫描，产出 `REFACTOR-XXX` 条目 |
+| 数字取证 + 根因分析 (RCA) | `$roll-debug` / `$roll-doc` / `$roll-doctor`：项目自有的诊断、文档与工具链健康 |
 
-### 5.2 随机巡检：`$roll-sentinel`
+### 5.2 交付真相面：`roll status` / `roll dossier`
 
-`$roll-sentinel` 实现对已交付功能的持续性健康检查，核心设计思路是**用概率采样代替全量回归**，在成本与覆盖率之间取得平衡。
+Loop C 不是生产巡检，而是成熟的交付控制面：它从单一真相账本读取，把已交付 / 进行中 / 队列 / 真相漂移 / 发布就绪呈现为**事实**，而非自述。
 
-**巡检策略矩阵：**
+**可观测面：**
 
-| 策略 | 采样频率 | 适用场景 |
-|------|---------|---------|
-| Light | 5 次/天 | 稳定期日常监控 |
-| Normal | 10 次/6 小时 | 常规迭代期 |
-| Intensive | 20 次/小时 | 重大发布后 |
-| Full | 全量/周 | 定期全面回归 |
+| 面 | 展示什么 |
+|------|---------|
+| `roll status` | 同步状态、技能软链、检测到的 AI 工具，以及实时交付状态 |
+| `roll dossier` | 交付档案——已交付 / 进行中 / 队列 / 真相漂移 / 发布就绪一处汇总 |
+| 外部 console | 同一批事实渲染成非工程角色也能浏览的页面 |
+| 真相信号 | `truth.json`、发布就绪、`roll loop status`——底层的机器可读账本 |
 
-**不确定性处理**——避免误报：单次失败不触发告警，连续 3 次失败才标记为异常。
+**真相漂移**——这些面把规划记录（`.roll/backlog.md`、`.roll/features/`）与 git 历史、验收证据对账。当某个 Story 标记为 Done 却缺少 `main` 上的 merge 证据或 Verification Gate 证据时，这种不一致会作为漂移显现在交付档案上，而非静默放行。
 
-**热点检测**——自适应权重：频繁失败的 Story 自动提升采样权重。巡检发现的问题自动创建 `FIX-XXX` Backlog 条目，交由 `$roll-fix` 处理。
+**修正反馈回 backlog**——这些面揭示的任何问题都会变成 `FIX-XXX` 或 `REFACTOR-XXX` 条目重新进入闭环。Loop C → Loop A：超出快速修复范围的，升级到设计。
 
-巡检通过 GitHub Actions 的 `cron` 调度运行，实现无人值守的持续监控。
-
-> **场景**：TaskFlow v1.3 上线后，`$roll-sentinel` 以 Intensive 策略运行。第 2 次采样时，US-007（审计写入）对应的巡检用例失败——审计事件存在但 `timestamp` 字段为空。单次失败未触发告警。
+> **场景**：TaskFlow v1.3 上线后，owner 打开 `roll dossier`。交付档案显示 US-007（审计写入）为 Done，但同时抛出一个真相漂移标记：最新的验收证据捕获到 `GET /api/audit` 返回的审计事件 `timestamp` 字段为空，这与 US-007 的 AC（"事件包含时间戳"）矛盾。与此同时，最近一次 `$roll-.dream` 晚间扫描把序列化层标记为 v1.3 ORM 升级后的代码健康热点。
 >
-> 第 4 次采样同一用例连续第 3 次失败，阈值触发，自动创建 `FIX-012: 审计事件时间戳为空` 并写入 Backlog，US-007 的采样权重自动提升至下一级。
+> 漂移属实，于是 `FIX-012: 审计事件时间戳为空` 被写入 Backlog。下一个 loop 周期它被路由到 `$roll-fix`，在修复落地前，交付档案的发布就绪信号一直保持红色。
 
 ### 5.3 现场取证与根因分析：`$roll-debug`
 
@@ -474,13 +475,13 @@ CI PASS
 
 > **场景（接上）**：`$roll-fix` 执行 FIX-012，修复范围严格限定为序列化层字段映射，同时添加回归测试（断言 `timestamp` 非空且为 ISO 8601 格式）。
 >
-> 1 个 commit，CI GREEN，部署后 Verification Gate 确认审计列表时间戳恢复正常，FIX-012 关闭。`$roll-sentinel` 下轮采样通过，US-007 采样权重回落。
+> 1 个 commit，CI GREEN，部署后 Verification Gate 确认审计列表时间戳恢复正常，FIX-012 关闭。新的验收证据与 US-007 的 AC 对账一致，下一次 `roll dossier` 刷新时真相漂移标记消除，发布就绪信号回到绿色。
 
 ---
 
 ## 6. 工程基线：Engineering Common Sense
 
-Roll 定义了 8 条贯穿所有闭环的非协商工程基线。这些不是"最佳实践建议"，而是每个 Story 在 Test Design Review 阶段的强制检查项：
+Roll 定义了 9 条贯穿所有闭环的非协商工程基线。这些不是"最佳实践建议"，而是每个 Story 在 Test Design Review 阶段的强制检查项：
 
 | # | 基线 | 定义 | 反模式 |
 |---|------|------|--------|
@@ -527,15 +528,14 @@ graph LR
         S["Scrum<br/>Sprint / Backlog"]
         T["TDD<br/>RED-GREEN-Refactor"]
         TCR["TCR<br/>Test && Commit ∥ Revert"]
-        SRE["SRE<br/>SLI / SLO / Error Budget"]
-        CE["混沌工程<br/>随机故障注入"]
+        SRE["SRE<br/>可观测性 / Error Budget"]
     end
 
     subgraph "Roll 实现"
         D["$roll-design<br/>INVEST Stories"]
         SB["$roll-build<br/>TCR Micro-steps"]
         SP["$roll-spar<br/>对抗式 TDD"]
-        SE["$roll-sentinel<br/>随机巡检"]
+        ST["roll status / dossier<br/>交付真相面"]
         BB["$roll-debug<br/>现场取证 + 根因分析"]
     end
 
@@ -544,8 +544,7 @@ graph LR
     T -->|"测试先行"| SB
     TCR -->|"原子提交"| SB
     T -->|"攻防分离"| SP
-    SRE -->|"采样监控"| SE
-    CE -->|"随机策略"| SE
+    SRE -->|"可观测面"| ST
     SRE -->|"现场取证"| BB
 ```
 
@@ -557,7 +556,7 @@ graph LR
 
 ### 9.1 设计原则
 
-三环架构（Loop A → B → C）描述的是人类开发者*与* Roll 协作的方式。自主演化层是一个**独立的可选叠加层**，让 agent 在无人值守的情况下继续工作——自动执行 BACKLOG 待办、每晚反思代码健康状态、每天早晨向人类简报。
+三环架构（Loop A → B → C）描述的是人类开发者*与* Roll 协作的方式。自主演化层是一个**独立的可选叠加层**，让 agent 在无人值守的情况下继续工作——自动执行 BACKLOG 待办、每晚反思代码健康状态，并持续刷新交付真相面供人类按自己的节奏查阅。
 
 默认关闭，需显式执行 `roll loop on` 启用。
 
@@ -570,33 +569,31 @@ graph LR
 │  自主层（可选：roll loop on）                            │
 │  roll-loop   — 可配置频次的 BACKLOG 执行器              │
 │  roll-.dream — 每晚代码健康巡检                          │
-│  roll-brief  — 每日晨报 + 发布就绪建议                   │
-│  人类审阅简报；保留发布权                                 │
+│  人类查阅 status / dossier / console；发布权留给人类     │
 └─────────────────────────────────────────────────────────┘
 ```
 
 ### 9.2 各组件
 
-**`roll-loop`** — 通过 macOS launchd（Linux: crontab）按可配置频次运行。扫描 BACKLOG 中 `📋 Todo` 条目并按类型路由：`US-XXX → $roll-build`、`FIX-XXX → $roll-fix`、`REFACTOR-XXX → $roll-build`。每次执行有条目上限，控制影响范围。Feature 全部完成时自动触发 `roll-brief`。内置 TCR 硬校验：Story 完成后检查 `tcr:` 微提交数量，为 0 时将 Story 回退为 📋 Todo 并写 ALERT，防止 agent 跳过 TCR 节奏。
+**`roll-loop`** — 通过 macOS launchd（Linux: crontab）按可配置频次运行。扫描 BACKLOG 中 `📋 Todo` 条目并按类型路由：`US-XXX → $roll-build`、`FIX-XXX → $roll-fix`、`REFACTOR-XXX → $roll-build`。每次执行有条目上限，控制影响范围。运行过程中从 events/runs 重建生成式的晨间报告页。内置 TCR 硬校验：Story 完成后检查 `tcr:` 微提交数量，为 0 时将 Story 回退为 📋 Todo 并写 ALERT，防止 agent 跳过 TCR 节奏。
 
 **`roll-.dream`** — 通过 macOS launchd（Linux: crontab）每晚 03:00 运行。扫描代码库中的死代码、对照 `.roll/domain/` 检测架构漂移、识别可修剪的抽象和可提炼的模式。产出 `REFACTOR-XXX` 条目写入 BACKLOG，巡检日志写入 `.roll/dream/YYYY-MM-DD.md`。
 
-**`roll-brief`** — 三种触发模式：Feature 完成时（由 roll-loop 触发）、每日早晨（09:00，通过 launchd 调度）、按需（`roll brief`）。产出 owner 面简报：已完成内容、待处理队列、需升级的事项、发布就绪建议。有别于 `roll-.changelog`（用户面 changelog）。
+**查阅交付状态** — 不存在 owner 简报技能。人类按自己的节奏查阅 `roll status`、交付档案（`roll dossier`）、外部 console 与真相信号（`roll loop status`）；loop 还会重建一个生成式的晨间报告页——从 events/runs 重构出的一个固定页面，而非个性化简报。这有别于 `roll-.changelog`（用户面 changelog）。
 
 ### 9.3 为什么用本地调度，而非 GitHub Actions
 
 GitHub Actions 在远程服务器上运行，无法访问本地代码库、本地测试运行器或本地 agent CLI。`$roll-build` 的核心是 TCR 循环，必须在本地执行。使用 GitHub Actions 意味着 agent 只能以快照方式读取仓库，无法运行测试，无法感知开发环境。
 
-macOS 上使用 **launchd**（plist 安装到 `~/Library/LaunchAgents/`），Linux 上使用 crontab。`roll loop on` 自动安装三个服务（loop/dream/brief）的调度配置，`roll loop off` 卸载。
+macOS 上使用 **launchd**（plist 安装到 `~/Library/LaunchAgents/`），Linux 上使用 crontab。`roll loop on` 自动安装两个服务（loop/dream）的调度配置，`roll loop off` 卸载。
 
 ```bash
 # macOS launchd plist 示例（自动生成，无需手动编写）
 ~/Library/LaunchAgents/com.roll.loop.<project-slug>.plist
 ~/Library/LaunchAgents/com.roll.dream.<project-slug>.plist
-~/Library/LaunchAgents/com.roll.brief.<project-slug>.plist
 ```
 
-`roll loop status` 提供调度快照，显示三服务 launchd 状态、当前执行状态、待办队列、告警和最近运行历史。实时终端请直接用 `tmux attach -t roll-loop-<project-slug>`。
+`roll loop status` 提供调度快照，显示 launchd 状态、当前执行状态、待办队列、告警和最近运行历史。实时终端请直接用 `tmux attach -t roll-loop-<project-slug>`。
 
 如果使用的 agent 支持原生调度（如 Claude Code hooks、opencode 定时任务），优先使用原生调度，生命周期管理更干净。
 
@@ -617,9 +614,9 @@ fallback: { agent: kimi }
 
 ### 9.5 人类保留的权力
 
-自主层**永远不会**调用 `roll-release`。生产环境发布始终由人类决定——在查阅晨报、按需检查 diff 之后。简报提供：
+自主层**永远不会**调用 `roll-release`。生产环境发布始终由人类决定——在查阅交付真相面、按需检查 diff 之后。交付档案（`roll dossier`）提供：
 
-- 上次简报以来 agent 完成的内容
+- 人类上次查看以来 agent 完成的内容
 - 需要人类介入的升级事项
 - 发布就绪信号（启发式判断，非强制门禁）
 
@@ -631,10 +628,10 @@ fallback: { agent: kimi }
 roll loop on|off          # 启用 / 停用当前项目的定时执行
 roll loop now             # 立即触发一个周期
 roll loop status          # 查看调度状态 + 任何 ALERT
-roll brief                # 展示最新简报（超过 24h 自动重新生成）
+roll dossier              # 展示交付档案（已交付 / 队列 / 漂移 / 发布就绪）
 roll agent use <name>     # 切换当前项目的 agent
 roll agent list           # 列出已安装的 agent
-roll                      # 项目 dashboard（在项目目录）：loop 状态 + 简报摘要
+roll                      # 项目 dashboard（在项目目录）：loop 状态 + 交付档案摘要
 ```
 
 ---
@@ -644,7 +641,7 @@ roll                      # 项目 dashboard（在项目目录）：loop 状态 
 **已验证**：
 
 - 反馈驱动的持续交付闭环（Design → Build → Check → Fix）
-- 19 个 Skill 的标准化技能集（11 个主动 + 8 个被动支撑）
+- 横跨三个闭环的标准化技能集（主动交付技能 + 被动支撑技能）
 - 跨 AI 客户端的配置一致性管理（`roll` CLI）
 - TCR 微步提交 + 验证门禁的质量保障机制
 - `Co-Authored-By` trailer 实现的多 Agent 审计追踪（由各 AI 工具原生写入）
@@ -653,7 +650,7 @@ roll                      # 项目 dashboard（在项目目录）：loop 状态 
 
 - **多 Agent 协调成本**：`$roll-build` 会根据 Action 的依赖关系判断是否启动并行子 Agent，但跨 Agent 的状态同步与冲突处理目前依赖约定而非强制协议，在高并发场景下仍有协调开销。
 - **框架耦合**：技能定义以 Markdown 格式编写，依赖 AI 客户端对自然语言指令的理解能力——不同模型的执行精度存在差异。每个 Skill 在 frontmatter 中按需 pin 模型（如 `roll-design` 用 Opus、`roll-idea` 用 Haiku），并以 `allowed-tools` 声明工具白名单，缓解了精度漂移与工具误用，但仍依赖客户端尊重这两个字段。
-- **巡检覆盖率**：`$roll-sentinel` 的采样策略有效降低了成本，但不等同于全量回归测试的覆盖保障。
+- **可观测是被动的**：Loop C 的真相面（`roll status` / `roll dossier`）与 `$roll-.dream` 扫描从交付事实和晚间分析中浮现漂移与代码健康问题，但不会像实时回归套件那样持续重跑已交付功能——一个不产生新证据、也不触发失败测试的回归，可能要等到下一次验收运行或扫描触及它时才被发现。
 
 ---
 
@@ -667,11 +664,11 @@ roll                      # 项目 dashboard（在项目目录）：loop 状态 
 | `$roll-fix` | 修复 | Fix ID | 修复代码 + 回归测试 |
 | `$roll-release` | 发布 | — | 版本号 + tag + npm publish + GitHub Release |
 | `$roll-peer` | 评审 | 变更 diff | APPROVE / REFINE / OBJECT 决议 |
-| `$roll-sentinel` | 巡检 | 巡检策略 | 健康报告 / FIX 条目 |
 | `$roll-debug` | 调试 + 诊断 | URL | 诊断 JSON + 截图 + 根因分析 |
+| `$roll-doc` | 文档 | 代码库 | 文档清单 + INDEX + 草稿填充 |
+| `$roll-doctor` | 工具链健康 | 安装状态 | 约定同步 / 技能健康 / 配置有效性报告 |
 | `$roll-loop` | 自主执行 | BACKLOG 待办 | 已完成的 Story / Fix / Refactor |
 | `$roll-.dream` | 自主巡检 | 代码库 | REFACTOR 条目 + 巡检日志 |
-| `$roll-brief` | 简报 | 项目状态 | Owner 面简报 + 发布就绪建议 |
 
 ## 附录 B：CLI 命令速查
 
@@ -686,7 +683,7 @@ roll                      # 项目 dashboard（在项目目录）：loop 状态 
 | `roll backlog` | 显示 `.roll/backlog.md` 中所有待处理任务 |
 | `roll agent [use <name>\|list]` | 切换项目 agent——影响所有 🤖 命令 |
 | `roll loop <on\|off\|now\|status\|runs\|log\|story\|events\|eval\|signals\|pause\|resume\|reset\|gc>` | 🤖 管理自主 BACKLOG 执行器(三通道:loop/dream/pr) |
-| `roll brief` | 🤖 展示最新简报（超过 24h 自动重新生成） |
+| `roll dossier` | 展示交付档案：已交付 / 进行中 / 队列 / 真相漂移 / 发布就绪 |
 | `roll pair [init\|status]` | 🤖 跨 Agent 配对:建造期异构同行复检 |
 | `roll release [ship\|waiver]` | 发版指引 · 过闸打 tag · 记录化漂移豁免——npm publish 永远人工 |
-| `roll`（无参数，在项目目录） | Dashboard：loop 状态、待办数量、最新简报摘要 |
+| `roll`（无参数，在项目目录） | Dashboard：loop 状态、待办数量、最新交付档案摘要 |

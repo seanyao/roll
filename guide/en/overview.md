@@ -61,7 +61,7 @@ You set goals, review PRs, and run releases. Everything in between is Roll.
 - Delivery Dossier — the web console: a verdict strip, the loop heartbeat, three aggregates, and the six-state Story spectrum, all from the ONE truth snapshot
 - `roll loop runs` — per-cycle TerminalOutcome history with TCR count and duration
 - `roll loop alert` — view, acknowledge, and clear loop alerts
-- `roll brief` — daily digest: what shipped, what's in-progress, next priorities `[highlight]`
+- `roll dossier` — the Delivery Dossier: shipped / in-progress / queue / truth drift / release readiness, all from one truth ledger `[highlight]`
 
 ### Delivery Dossier — the web console
 
@@ -102,7 +102,6 @@ anything short of that renders as drift or unknown, never a silent green.
 
 - `$roll-debug` — mount a diagnostic probe, trace root cause, auto-fix if source-traceable
 - `$roll-doc` — scan any project for doc gaps and generate missing documentation
-- `$roll-sentinel` — spot-check production against BACKLOG acceptance criteria
 - `$roll-doctor` — diagnose the dev toolchain: node, npm, git, AI tools
 - `$roll-notes` — capture a development moment in narrative form
 

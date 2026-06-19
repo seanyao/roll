@@ -61,7 +61,7 @@ Roll 运行在三个自主层上：
 - 交付档案 — web 控制台：判定条、loop 心跳、三聚合、六态 Story 光谱，全部读自同一份真相快照
 - `roll loop runs` — 每轮 TerminalOutcome 历史，含 TCR 次数和耗时
 - `roll loop alert` — 查看、确认、清除 loop 告警
-- `roll brief` — 每日摘要：已发布、进行中、下一优先级 `[highlight]`
+- `roll dossier` — 交付档案：已发布、进行中、队列、真相漂移、发布就绪，全部读自同一份真相账本 `[highlight]`
 
 ### 交付档案 —— web 控制台
 
@@ -95,7 +95,6 @@ backlog 行写了 Done 只是 `claimed`；交付 PR 合入 `main` 后变 `merged
 
 - `$roll-debug` — 挂载诊断探针，追踪根因，如果可溯源则自动修复
 - `$roll-doc` — 扫描任意项目的文档缺口，生成缺失文档
-- `$roll-sentinel` — 将生产环境与 BACKLOG 验收标准进行点检
 - `$roll-doctor` — 诊断开发工具链：node、npm、git、AI 工具
 - `$roll-notes` — 以叙述形式记录一个开发时刻
 

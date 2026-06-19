@@ -13,7 +13,13 @@
  * project-local machine log (.roll/dream/cron.log, mirroring loop's FIX-139).
  */
 import { projectIdentity } from "@roll/infra";
-import { appendFileSync, mkdirSync } from "node:fs";
+import {
+  buildStaticProjectGraph,
+  renderDreamStructureLog,
+  scanDreamStructure,
+  type DreamScanResult,
+} from "@roll/core";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type AgentSpawn, realAgentSpawn } from "../runner/agent-spawn.js";
 import { readSkillBody } from "../runner/skill-body.js";
@@ -28,6 +34,7 @@ export interface DreamRunOnceDeps {
   skillBody: (projectPath: string) => string | null;
   spawn: AgentSpawn;
   now: () => Date;
+  structureScan: (projectPath: string, generatedAt: string) => { json: DreamScanResult; log: string };
 }
 
 function realDeps(): DreamRunOnceDeps {
@@ -42,6 +49,11 @@ function realDeps(): DreamRunOnceDeps {
       }),
     spawn: realAgentSpawn,
     now: () => new Date(),
+    structureScan: (projectPath, generatedAt) => {
+      const graph = buildStaticProjectGraph({ root: projectPath });
+      const result = { ...scanDreamStructure(graph), generatedAt };
+      return { json: result, log: renderDreamStructureLog(result) };
+    },
   };
 }
 
@@ -79,6 +91,15 @@ export async function dreamRunOnceCommand(
 
   const agent = deps.agent();
   append(`[${stamp()}] dream scan start (v3 run-once, agent=${agent})\n`);
+  try {
+    append(`[${stamp()}] dream structure pre-scan start\n`);
+    const preScan = deps.structureScan(id.path, deps.now().toISOString());
+    writeFileSync(join(dreamDir, "structure-scan.json"), `${JSON.stringify(preScan.json, null, 2)}\n`, "utf8");
+    append(preScan.log);
+    append(`[${stamp()}] dream structure pre-scan end findings=${preScan.json.findings.length}\n`);
+  } catch (e) {
+    append(`[${stamp()}] dream structure pre-scan error: ${String(e)}\n`);
+  }
   let exitCode = 1;
   try {
     const result = await deps.spawn(agent, {

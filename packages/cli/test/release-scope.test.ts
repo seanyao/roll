@@ -11,10 +11,58 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   collectHistory,
   collectReleaseScope,
+  parseGitMergeLog,
   selectReleaseDelta,
   type ReleaseDeltaFacts,
   type ScopeStoryInput,
 } from "../src/lib/release-scope.js";
+
+describe("parseGitMergeLog (pure) — FIX-372 git-since-tag source", () => {
+  it("extracts card id + commit ts + PR# from post-tag squash-merge subjects", () => {
+    const log = [
+      "1781870000\tStory: US-AGENT-042 — rebuild self-downgrade (#843)",
+      "1781860000\tFix: FIX-356c — rewrite public docs (#847)",
+      "1781850000\tStory: US-TOOL-016 — built-in tool catalog data source (#856)",
+      "1781840000\tchore: no card id here",
+    ].join("\n");
+    const m = parseGitMergeLog(log);
+    expect([...m.keys()].sort()).toEqual(["FIX-356c", "US-AGENT-042", "US-TOOL-016"]);
+    expect(m.get("US-AGENT-042")).toEqual({ ts: 1781870000, prNumber: 843 });
+    expect(m.get("FIX-356c")).toEqual({ ts: 1781860000, prNumber: 847 });
+  });
+  it("keeps the newest commit when an id appears twice (reverse-chron)", () => {
+    const m = parseGitMergeLog("1781870000\tFix: FIX-368 — newest (#858)\n1781000000\tFix: FIX-368 — older");
+    expect(m.get("FIX-368")?.ts).toBe(1781870000);
+  });
+  it("empty/garbage log → empty map", () => {
+    expect(parseGitMergeLog("").size).toBe(0);
+    expect(parseGitMergeLog("notanumber\tStory: FIX-1").size).toBe(0);
+  });
+});
+
+describe("collectReleaseScope — git-sourced delta lands as pending (FIX-372)", () => {
+  it("a Done story merged after the tag (per git facts) is pending, not the whole backlog", () => {
+    const stories: ScopeStoryInput[] = [
+      { id: "US-TOOL-016", epic: "tools-layer", title: "catalog", state: "done" },
+      { id: "FIX-100", epic: "old", title: "shipped long ago", state: "done" },
+      { id: "US-TODO-1", epic: "x", title: "open", state: "todo" },
+    ];
+    // inject facts as if from git: US-TOOL-016 merged after the tag, FIX-100 before.
+    const facts: ReleaseDeltaFacts = {
+      merges: new Map([
+        ["US-TOOL-016", { ts: 2000, prNumber: 856 }],
+        ["FIX-100", { ts: 500 }],
+      ]),
+      latestTagTime: 1000,
+      latestTag: "v3.619.1",
+    };
+    const { pending, shipped } = selectReleaseDelta(stories, facts);
+    expect(pending.map((s) => s.id)).toEqual(["US-TOOL-016"]); // only the post-tag merge
+    expect(shipped.map((s) => s.id)).toEqual(["FIX-100"]); // pre-tag = already shipped
+    // the open todo is NOT release scope at all
+    expect([...pending, ...shipped].map((s) => s.id)).not.toContain("US-TODO-1");
+  });
+});
 
 const dirs: string[] = [];
 afterEach(() => {

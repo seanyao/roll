@@ -126,6 +126,57 @@ function mergesFromEvents(projectPath: string): Map<string, MergeRecord> {
 }
 
 /**
+ * PURE — parse `git log <tag>..HEAD --format=%ct%x09%s` output into merge truth
+ * per card. Each post-tag commit's subject carries the card id (e.g.
+ * `Story: US-AGENT-042 — … (#843)`, `Fix: FIX-356c — …`); we map id → {ts (the
+ * commit's epoch seconds), prNumber (from `(#N)`)}. The newest commit for an id
+ * wins (git log is reverse-chronological, so the first occurrence is newest).
+ * Id forms covered: `FIX-356`, `FIX-356c`, `US-AGENT-042`, `US-TOOL-016`,
+ * `REFACTOR-049`.
+ */
+export function parseGitMergeLog(logText: string): Map<string, MergeRecord> {
+  const out = new Map<string, MergeRecord>();
+  const ID_RE = /\b(?:US|FIX|REFACTOR)-(?:[A-Z]+-)?\d+[a-z]?\b/g;
+  for (const line of logText.split("\n")) {
+    const tab = line.indexOf("\t");
+    if (tab < 0) continue;
+    const ts = Number(line.slice(0, tab));
+    if (!Number.isFinite(ts) || ts <= 0) continue;
+    const subject = line.slice(tab + 1);
+    const prNum = /\(#(\d+)\)/.exec(subject)?.[1];
+    for (const id of subject.match(ID_RE) ?? []) {
+      const prev = out.get(id);
+      if (prev === undefined || ts >= prev.ts) {
+        out.set(id, { ts, ...(prNum !== undefined ? { prNumber: Number(prNum) } : {}) });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Merge truth from GIT — cards whose squash-merge commit landed on `main` AFTER
+ * the latest release tag. This is the AUTHORITATIVE "to-be-released" source
+ * (FIX-372): `pr:merge` events exist only for loop-merged PRs, so a
+ * manually-merged (`gh pr merge`) PR emits none — relying on events alone leaves
+ * "pending" empty even when real work shipped since the tag. `git log <tag>..HEAD`
+ * returns exactly the post-tag commits. Best-effort: no tag / not a repo → empty.
+ */
+function mergesFromGit(projectPath: string, latestTag: string | undefined): Map<string, MergeRecord> {
+  if (latestTag === undefined || latestTag === "") return new Map();
+  try {
+    const log = execFileSync("git", ["-C", projectPath, "log", `${latestTag}..HEAD`, "--format=%ct%x09%s"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    return parseGitMergeLog(log);
+  } catch {
+    return new Map();
+  }
+}
+
+/**
  * The latest release tag's commit time (epoch seconds). The tag NAME is
  * reconciled from reality via the FIX-368 reconciler (newest `v*` tag of the
  * running major / CHANGELOG top / package version), then its commit time is a
@@ -189,8 +240,16 @@ export function collectReleaseScope(
   facts?: ReleaseDeltaFacts,
 ): ReleaseScopeVM {
   const resolved: ReleaseDeltaFacts = facts ?? (() => {
-    const merges = mergesFromEvents(projectPath);
     const { latestTag, latestTagTime } = latestTagCommitTime(projectPath);
+    // GIT is the authoritative post-tag delta source (covers manual `gh` merges
+    // that emit no `pr:merge` event); `pr:merge` events supplement it for any
+    // loop-merged story git didn't attribute.
+    const merges = mergesFromGit(projectPath, latestTag);
+    for (const [id, rec] of mergesFromEvents(projectPath)) {
+      // event ts is epoch-ms; the tag time is epoch-seconds — normalize so the
+      // `merge.ts > latestTagTime` comparison in selectReleaseDelta is unit-correct.
+      if (!merges.has(id)) merges.set(id, { ...rec, ts: rec.ts >= 1_000_000_000_000 ? Math.floor(rec.ts / 1000) : rec.ts });
+    }
     return {
       merges,
       ...(latestTagTime !== undefined ? { latestTagTime } : {}),

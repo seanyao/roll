@@ -19,6 +19,9 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { dirname, join } from "node:path";
 import { type RunnerPaths, buildRunRow, dryRunPlan, killLiveAgents, nodePorts, realAgentSpawn, runCycleOnce } from "../runner/index.js";
 import { clearCardFailure, recordCardFailure } from "../runner/skip-cards.js";
+import { warnIfBinaryStale } from "../runner/binary-staleness.js";
+import { rollVersion } from "./version.js";
+import { rollHome } from "./setup-shared.js";
 import { applyCorrectionCircuitBreaker } from "../runner/correction-circuit.js";
 import { readSkillBody as readSkillBodyGeneric } from "../runner/skill-body.js";
 import { realAgentEnv } from "./agent-list.js";
@@ -688,6 +691,23 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   // sessions). Reset it with this cycle's header before anything streams.
   resetLiveLog(rt, cycleId);
 
+  // FIX-366 (part 2, optional/low-cost): if the global `roll` running the loop has
+  // fallen behind the published release, emit ONE soft ALERT (the owner's shipped
+  // fixes never reach an unattended-but-stale loop). Daily-cached remote check —
+  // at most one network call per machine per day, fully best-effort, NEVER blocks
+  // the cycle. A miss (offline / curl absent) is a silent no-op.
+  try {
+    await warnIfBinaryStale(rollHome(), rollVersion(), (msg) => {
+      try {
+        appendFileSync(alertsPath, `${msg}\n`, "utf8");
+      } catch {
+        /* best-effort */
+      }
+    });
+  } catch {
+    /* the staleness nudge must never topple or delay the cycle */
+  }
+
   // FIX-204D: between here and the walk's own finally, signals get a clean
   // teardown instead of a half-state corpse.
   const disposeSignals = installCycleSignalTeardown(paths, cycleId, branch);
@@ -737,7 +757,33 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     );
   }
 
+  // FIX-363/FIX-366: a cycle blocked by an EXTERNAL cause (an agent not logged in
+  // / network down) is NOT a code failure — attribute it by CAUSE and act on it,
+  // never tick the consecutive-CODE-failure counter (a misleading "3 failures →
+  // resolve the code" pause sent the owner hunting a phantom bug when the real fix
+  // is "re-login" / "reconnect the VPN"). Checked BEFORE the failure branch and
+  // INDEPENDENT of the precise terminal, because an unauthenticated BUILDER (FIX-366,
+  // `agent:blocked stage:build`) often exits 0 with zero commits → `gave_up`/idle,
+  // NOT `failed` — yet auth MUST still PAUSE the loop (otherwise the bad login
+  // re-triggers every cycle, "failed 换名继续烧"). One block taxonomy:
+  // builder/reviewer/scorer auth signatures all land here. AUTH pauses; NETWORK
+  // breathes (self-heals on reconnect). When present, this fully OWNS the cycle's
+  // post-processing — the failure-counter path below is skipped.
+  const externalBlock = readExternalBlock(paths.eventsPath, cycleId);
   const isFail = result.terminal === "failed" || result.terminal === "blocked";
+  if (externalBlock !== null) {
+    // FIX-366: surface an explicit auth_blocked / network_blocked outcome — a
+    // RECOVERABLE block, distinct from a code `failed`.
+    process.stdout.write(
+      `loop run-once: cycle ${cycleId} → ${externalBlock.cause}_blocked (recoverable; ${externalBlock.cause === "auth" ? "re-login then resume" : "self-heals on reconnect"})\n` +
+        `loop run-once: cycle ${cycleId} → ${externalBlock.cause}_blocked(可恢复阻塞;${externalBlock.cause === "auth" ? "重登录后 resume" : "联网后自愈"})\n`,
+    );
+    writeReviewerBlockedAlert(id.path, id.slug, alertsPath, paths.eventsPath, cycleId, externalBlock);
+    // An auth block PAUSES (re-login needed); a network block breathes. Neither is
+    // a consecutive-CODE-failure, and an auth PAUSE is the actionable terminal —
+    // exit 0 so the schedule stops handing out new cards until `roll loop resume`.
+    return externalBlock.cause === "auth" ? 0 : isFail ? 1 : 0;
+  }
   if (isFail) {
     // IDEA-001: a cycle that failed while the network is unreachable is NOT a
     // delivery failure — the local work (TCR commits, green tests) is intact;
@@ -752,34 +798,24 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
       );
       return 0;
     }
-    // FIX-363: a cycle that failed because a reviewer was BLOCKED by an external
-    // cause (not logged in / network down) is NOT a code failure — attribute it
-    // and act on the cause, never tick the consecutive-CODE-failure counter (a
-    // misleading "3 failures → resolve the code" pause sent the owner hunting a
-    // phantom bug while the real fix was "re-login" / "reconnect the VPN").
-    const externalBlock = readExternalBlock(paths.eventsPath, cycleId);
-    if (externalBlock !== null) {
-      writeReviewerBlockedAlert(id.path, id.slug, alertsPath, paths.eventsPath, cycleId, externalBlock);
-    } else {
-      const suppressGoalZeroDelivery = shouldSuppressGoalChildFailureCounter({
-        isGoalChild: (process.env["ROLL_LOOP_GO_CHILD"] ?? "") === "1",
-        terminal: result.terminal,
-        tcrCount: result.state?.ctx?.tcrCount,
-      });
-      if (!suppressGoalZeroDelivery) {
-        const storyId = (result.state?.ctx?.storyId ?? "").trim();
-        // FIX-363 (loop resilience): isolate a poison pill. After K failures of
-        // the SAME card, skip-list it (the picker skips it next cycle) + alert +
-        // RESET the global counter, so the loop keeps delivering OTHER cards
-        // instead of auto-PAUSING the whole loop. The global PAUSE is now reserved
-        // for genuinely SYSTEMIC failure (different cards failing in a row).
-        const card = recordCardFailure(runtimeDir(id.path), storyId, CARD_SKIP_THRESHOLD);
-        if (card.nowSkipped) {
-          writeCardSkipAlert(alertsPath, paths.eventsPath, cycleId, storyId, card.count);
-          resetConsecutiveFails(id.path);
-        } else {
-          incrementConsecutiveFails(id.path, id.slug, alertsPath, paths.eventsPath, cycleId, storyId, result.terminal ?? "unknown");
-        }
+    const suppressGoalZeroDelivery = shouldSuppressGoalChildFailureCounter({
+      isGoalChild: (process.env["ROLL_LOOP_GO_CHILD"] ?? "") === "1",
+      terminal: result.terminal,
+      tcrCount: result.state?.ctx?.tcrCount,
+    });
+    if (!suppressGoalZeroDelivery) {
+      const storyId = (result.state?.ctx?.storyId ?? "").trim();
+      // FIX-363 (loop resilience): isolate a poison pill. After K failures of
+      // the SAME card, skip-list it (the picker skips it next cycle) + alert +
+      // RESET the global counter, so the loop keeps delivering OTHER cards
+      // instead of auto-PAUSING the whole loop. The global PAUSE is now reserved
+      // for genuinely SYSTEMIC failure (different cards failing in a row).
+      const card = recordCardFailure(runtimeDir(id.path), storyId, CARD_SKIP_THRESHOLD);
+      if (card.nowSkipped) {
+        writeCardSkipAlert(alertsPath, paths.eventsPath, cycleId, storyId, card.count);
+        resetConsecutiveFails(id.path);
+      } else {
+        incrementConsecutiveFails(id.path, id.slug, alertsPath, paths.eventsPath, cycleId, storyId, result.terminal ?? "unknown");
       }
     }
   }

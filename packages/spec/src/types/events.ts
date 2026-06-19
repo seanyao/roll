@@ -124,7 +124,12 @@ export type RollEvent =
   // Emitted from the review/score failure path; loop-run-once reads it to ISOLATE
   // the failure from the consecutive-code-failure counter and raise an ACTIONABLE
   // pause ("re-login <agent>" / "check the VPN") instead of "3 failures → code bug".
-  | { type: "agent:blocked"; cycleId: string; agent: string; cause: "auth" | "network"; stage: "review" | "score"; detail: string; ts: number }
+  // FIX-366 — `stage: "build"` extends the SAME taxonomy to the main BUILDER spawn:
+  // an unauthenticated builder prints a 403 / "Please run /login" in its first
+  // seconds, so the spawn output is signature-matched the same way and folds into
+  // the same isolate-from-counter + PAUSE(auth)/breathe(network) path — one block
+  // taxonomy for builder/reviewer/scorer (no new precheck, no probe, no cache).
+  | { type: "agent:blocked"; cycleId: string; agent: string; cause: "auth" | "network"; stage: "build" | "review" | "score"; detail: string; ts: number }
   // Attest gate (FIX-207) — every actual delivery records whether a fresh
   // acceptance report was produced ("produced") or silently skipped ("skipped").
   | { type: "attest:gate"; cycleId: string; verdict: "produced" | "skipped"; reasons: string[]; ts: number }

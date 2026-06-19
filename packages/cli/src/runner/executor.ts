@@ -2413,11 +2413,57 @@ export async function commitRollMetadataRepo(
     return { committed: false, pushed: false, nothingToCommit: false, error: `git commit failed: ${committed.stderr.trim()}` };
   }
   const branch = (await gitRun(["rev-parse", "--abbrev-ref", "HEAD"], rollDir)).stdout.trim() || "main";
+  // FIX-367: rebase-safe push. A cycle's metadata commit is built on the local
+  // `.roll` HEAD captured at pick time — which is STALE the moment another actor
+  // (the PR-lane's merge-time Done flip, a prior cycle's reconcile, a manual
+  // rescue) pushes a backlog status change to the roll-meta remote between this
+  // cycle's start and finalize. Pushing this stale commit straight to `origin
+  // main` either (a) fails non-fast-forward — surfaced as an ALERT, the Done
+  // landing lost from this cycle — or (b), after the loop wrapper re-syncs the
+  // local `.roll`, CLOBBERS the concurrently-pushed `✅ Done` back to the pick-time
+  // `📋 Todo`, re-arming the picker → the re-pick storm FIX-367 closes (FIX-364
+  // re-done 3 cycles). Integrate the remote FIRST (fetch + rebase --autostash),
+  // so a concurrent Done flip is preserved on top of and merged with this cycle's
+  // metadata, and the subsequent push fast-forwards instead of overwriting.
+  await rebaseRollMetaOntoUpstream(rollDir, branch);
   const pushed = await gitPush(rollDir, branch);
   if (pushed.code !== 0) {
     return { committed: true, pushed: false, nothingToCommit: false, error: `git push failed: ${pushed.stderr.trim()}` };
   }
   return { committed: true, pushed: true, nothingToCommit: false };
+}
+
+/**
+ * FIX-367 — integrate the roll-meta remote into the local `.roll` BEFORE pushing
+ * the cycle's metadata commit, so a concurrent backlog status flip (the PR-lane's
+ * merge-time Done, a reconcile, a manual rescue) is never clobbered by this
+ * cycle's stale pick-time snapshot.
+ *
+ * Best-effort + non-fatal by design: the caller already created the local commit
+ * and will push next. We fetch the branch's upstream and `rebase --autostash`
+ * the local commit on top of it. On a fetch failure (offline / no remote
+ * tracking) or a rebase conflict we ABORT the rebase and leave the local commit
+ * untouched — the push then either fast-forwards (nothing concurrent landed) or
+ * fails non-fast-forward (surfaced as the existing committed-not-pushed ALERT).
+ * The rebase never throws out of here: a rebase blip must not topple the cycle.
+ */
+async function rebaseRollMetaOntoUpstream(rollDir: string, branch: string): Promise<void> {
+  try {
+    const fetched = await gitRun(["fetch", "origin", branch], rollDir);
+    if (fetched.code !== 0) return; // offline / no remote → push decides fast-forward.
+    const upstream = `origin/${branch}`;
+    // Nothing to integrate when the remote has not advanced past our local base.
+    const behind = await gitRun(["rev-list", "--count", `HEAD..${upstream}`], rollDir);
+    if (behind.code === 0 && behind.stdout.trim() === "0") return;
+    const rebased = await gitRun(["rebase", "--autostash", upstream], rollDir);
+    if (rebased.code !== 0) {
+      // A conflict (e.g. the SAME backlog row edited both sides) — abort cleanly
+      // and leave the local commit as-is; the push surfaces the non-fast-forward.
+      await gitRun(["rebase", "--abort"], rollDir);
+    }
+  } catch {
+    /* rebase is a safety integration — never topple the cycle on a git blip */
+  }
 }
 
 /** Ceiling for the worktree dependency install (cold pnpm store on first run). */

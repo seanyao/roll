@@ -7,11 +7,45 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { existsSync as fsExistsSync, readFileSync as fsReadFileSync } from "node:fs";
 import { resolveLang, type Lang, type RollEvent, parseEventLine } from "@roll/spec";
-import { extractCycleSignals, signalKindForMarker, type TimelineEntry } from "@roll/core";
-import { collectCycleLedger, ledgerFailedCount, reconcilePendingMergeVerdicts, type CycleLedgerRow } from "../lib/cycle-ledger.js";
-import { collectGitDossierFacts, cycleMergeTruth } from "../lib/story-dossier.js";
+import { extractCycleSignals, parseBacklog, signalKindForMarker, type TimelineEntry } from "@roll/core";
+import {
+  bucketCounts,
+  collectCycleLedger,
+  CYCLE_VERDICTS,
+  ledgerFailedCount,
+  reconcilePendingMergeVerdicts,
+  reconcileSupersededVerdicts,
+  type CycleLedgerRow,
+  type CycleLedgerVerdict,
+} from "../lib/cycle-ledger.js";
+import { collectGitDossierFacts, cycleMergeTruth, storyHasMergeEvidence, type GitDossierFacts } from "../lib/story-dossier.js";
 import { findCycle } from "./cycle.js";
+
+/**
+ * FIX-337 (AC3) — a story is SUPERSEDED (delivered elsewhere, so this cycle's old
+ * failure must not inflate the failed count) when EITHER:
+ *   (a) its `.roll/backlog.md` status cell is Done (carries ✅ or "Done"), OR
+ *   (b) main carries merge evidence for it (a commit subject/`(#N)` names the id).
+ * Built once per render from the backlog text + the SAME offline git facts the
+ * pending-merge reconcile already uses (no gh call). Returns a pure predicate so
+ * {@link reconcileSupersededVerdicts} stays injectable/testable.
+ */
+function buildIsStorySuperseded(cwd: string, git: GitDossierFacts | null): (storyId: string) => boolean {
+  const done = new Set<string>();
+  const backlogPath = `${cwd}/.roll/backlog.md`;
+  if (fsExistsSync(backlogPath)) {
+    try {
+      for (const item of parseBacklog(fsReadFileSync(backlogPath, "utf8"))) {
+        if (item.status.includes("✅") || /\bDone\b/i.test(item.status)) done.add(item.id);
+      }
+    } catch {
+      /* unreadable backlog → backlog signal empty; merge-evidence still applies */
+    }
+  }
+  return (storyId) => storyId !== "" && (done.has(storyId) || storyHasMergeEvidence(git, storyId));
+}
 
 /**
  * FIX-347 — collect the ledger and reconcile `pending_merge` cycles against git
@@ -23,10 +57,19 @@ import { findCycle } from "./cycle.js";
  * main's git log carries a `(#N)` PR-merge commit for the row's recorded PR
  * number, the delivery landed. Only an actually-merged `(#N)` commit counts (an
  * open PR leaves none), so an open PR stays pending.
+ *
+ * FIX-337 (AC1/AC3) — THE single canonical ledger pipeline:
+ *   collectCycleLedger → reconcilePendingMergeVerdicts → reconcileSupersededVerdicts.
+ * Exported so `roll index` (the truth.json cycle panel) reuses the EXACT same
+ * derivation, so `roll cycles` and `roll status` (which reads truth.json) can
+ * never diverge. The superseded reconcile re-labels a failed/pending cycle whose
+ * card landed elsewhere (backlog Done or merge evidence) so it stops inflating
+ * the failed count.
  */
-function reconciledLedger(cwd: string): CycleLedgerRow[] {
+export function reconciledLedger(cwd: string): CycleLedgerRow[] {
   const git = collectGitDossierFacts(cwd);
-  return reconcilePendingMergeVerdicts(collectCycleLedger(cwd), cycleMergeTruth(git));
+  const merged = reconcilePendingMergeVerdicts(collectCycleLedger(cwd), cycleMergeTruth(git));
+  return reconcileSupersededVerdicts(merged, buildIsStorySuperseded(cwd, git));
 }
 import { c, renderState, stripAnsi } from "../render.js";
 
@@ -50,12 +93,56 @@ const VERDICT_COLOR: Record<string, string> = {
   delivered: "green",
   pending_merge: "yellow", // FIX-322: opened a PR, merge pending — in-flight, NOT delivered (amber)
   unpublished: "blue", // FIX-351: gates passed, work local, publish didn't land — neutral, NOT red
+  superseded: "blue", // FIX-337: card landed elsewhere (backlog Done / merge evidence) — neutral, NOT red
   reverted: "yellow",
   failed: "red",
   blocked: "purple",
   idle: "muted",
   unknown: "muted",
 };
+
+// FIX-337 (AC2): the summary buckets, in display order, with their bilingual
+// labels. `failed/reverted/blocked` are GROUPED into one "failed/reverted/blocked"
+// figure (the FIX-248 vocabulary), but every other non-zero bucket is shown so
+// the displayed total === the sum of all buckets.
+const FAILED_CLUSTER: ReadonlySet<CycleLedgerVerdict> = new Set(["failed", "reverted", "blocked"]);
+const BUCKET_LABEL: Record<CycleLedgerVerdict, { en: string; zh: string }> = {
+  delivered: { en: "delivered", zh: "已交付" },
+  pending_merge: { en: "pending_merge", zh: "待合并" },
+  unpublished: { en: "unpublished", zh: "未发布" },
+  superseded: { en: "superseded", zh: "已被取代" },
+  failed: { en: "failed/reverted/blocked", zh: "失败/回滚/阻塞" },
+  blocked: { en: "blocked", zh: "阻塞" },
+  reverted: { en: "reverted", zh: "回滚" },
+  idle: { en: "idle", zh: "空转" },
+  unknown: { en: "unknown", zh: "未知" },
+};
+
+/**
+ * FIX-337 (AC2) — the summary buckets line: ALL non-zero buckets, with
+ * `failed+reverted+blocked` folded into one `failed/reverted/blocked` figure
+ * (FIX-248 vocabulary). The returned `total` is GUARANTEED to equal the sum of
+ * the displayed bucket counts (the failed cluster contributes its full sum), so
+ * the old `5 delivered · 20 failed → 25 ≠ 28` divergence is impossible. Pure:
+ * windowed rows + lang → { total, parts (label+count+verdict), failedTotal }.
+ */
+export function summaryBuckets(rows: readonly CycleLedgerRow[]): {
+  total: number;
+  failedTotal: number;
+  parts: Array<{ verdict: CycleLedgerVerdict; count: number }>;
+} {
+  const counts = bucketCounts(rows);
+  const failedTotal = counts.failed + counts.reverted + counts.blocked;
+  const parts: Array<{ verdict: CycleLedgerVerdict; count: number }> = [];
+  // Render order = CYCLE_VERDICTS, but the failed cluster collapses onto `failed`.
+  for (const v of CYCLE_VERDICTS) {
+    if (v === "reverted" || v === "blocked") continue; // folded into the failed figure
+    const count = v === "failed" ? failedTotal : counts[v];
+    if (count > 0) parts.push({ verdict: v, count });
+  }
+  const total = rows.length;
+  return { total, failedTotal, parts };
+}
 
 function pad(s: string, w: number): string {
   const len = stripAnsi(s).length;
@@ -91,6 +178,9 @@ export function cyclesLedgerJson(rows: CycleLedgerRow[], sinceLabel: string, now
   const within = windowRows(rows, sinceLabel, nowSec);
   const delivered = within.filter((r) => r.verdict === "delivered").length;
   const failed = ledgerFailedCount(within);
+  // FIX-337 (AC2): expose EVERY bucket so the machine view can verify
+  // total === sum(buckets) just like the human summary line.
+  const buckets = bucketCounts(within);
   // FIX-361: cost may be "$X.XX" or "¥X.XX". Parse each row and aggregate
   // per-currency in the JSON output so consumers never blindly sum across currencies.
   const costByCur: Record<string, number> = {};
@@ -105,6 +195,7 @@ export function cyclesLedgerJson(rows: CycleLedgerRow[], sinceLabel: string, now
     cycles: within.length,
     delivered,
     failed,
+    buckets,
     costByCurrency: costByCur,
     rows: within.map((r) => ({
       no: cycleNo(r.cycleId),

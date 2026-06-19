@@ -12,7 +12,31 @@ import type { ToolCost } from "@roll/spec";
 import { parseEventLine, type RollEvent } from "@roll/spec";
 import { collectToolEvidence, formatToolCostSummary, type ToolTimelineRow } from "./tool-display.js";
 
-export type CycleLedgerVerdict = "delivered" | "pending_merge" | "unpublished" | "reverted" | "failed" | "blocked" | "idle" | "unknown";
+export type CycleLedgerVerdict =
+  | "delivered"
+  | "pending_merge"
+  | "unpublished"
+  | "superseded"
+  | "reverted"
+  | "failed"
+  | "blocked"
+  | "idle"
+  | "unknown";
+
+/** The full bucket order (AC2): every verdict the ledger can carry, in a stable
+ *  display order. `bucketCounts` keys on this so a summary line can enumerate
+ *  ALL non-zero buckets and GUARANTEE total === sum(buckets). */
+export const CYCLE_VERDICTS: readonly CycleLedgerVerdict[] = [
+  "delivered",
+  "pending_merge",
+  "unpublished",
+  "superseded",
+  "failed",
+  "blocked",
+  "reverted",
+  "idle",
+  "unknown",
+];
 
 export interface CycleTapeSegment {
   key: "cycle" | "story" | "build" | "peer" | "ci" | "pr" | "end";
@@ -166,6 +190,59 @@ export function reconcilePendingMergeVerdicts(
       }),
     };
   });
+}
+
+/**
+ * FIX-337 (AC3) — reconcile cycles whose story was delivered ELSEWHERE (manually,
+ * or by another PR/cycle) against the canonical ledger at RENDER time. A
+ * `failed`/`blocked`/`reverted`/`pending_merge` cycle whose story is ALREADY
+ * backlog-Done OR carries merge evidence is NOT a live failure — the card landed,
+ * just not via THIS cycle. Re-labeling it `superseded` stops a manually-delivered
+ * card's old failed cycles from inflating the failed count (the FIX-286 lesson:
+ * the cycle ledger is loop-cycle-centric and didn't reflect loop-external
+ * delivery, so a Done card looked like an all-failure pile).
+ *
+ * Mirrors {@link reconcilePendingMergeVerdicts}: a PURE function (rows in, rows
+ * out) with the story-superseded probe INJECTED by the caller (which wires it to
+ * backlog-Done + offline git merge-truth). The end-segment is rewritten to the
+ * neutral `superseded` state (idle-class grey) so a superseded cycle is visually
+ * distinct from a live `failed` (red) and a real `delivered` (green).
+ *
+ * Boundary: a real `delivered` row is already terminal and is never touched; an
+ * `idle`/`unpublished`/`unknown` row is not a failure-to-count, so it is left
+ * alone too. ONLY the failure cluster + pending_merge are eligible, and only when
+ * the story has a non-empty id (an empty id has nothing to match on).
+ */
+export function reconcileSupersededVerdicts(
+  rows: readonly CycleLedgerRow[],
+  isStorySuperseded: (storyId: string) => boolean,
+): CycleLedgerRow[] {
+  const ELIGIBLE = new Set<CycleLedgerVerdict>(["failed", "blocked", "reverted", "pending_merge"]);
+  return rows.map((r) => {
+    if (!ELIGIBLE.has(r.verdict)) return r;
+    if (r.storyId === "" || !isStorySuperseded(r.storyId)) return r;
+    return {
+      ...r,
+      verdict: "superseded",
+      tape: r.tape.map((seg) => (seg.key === "end" ? { ...seg, detail: "superseded", state: "idle" } : seg)),
+    };
+  });
+}
+
+/**
+ * FIX-337 (AC2) — count every verdict bucket so a summary line can enumerate ALL
+ * non-zero buckets and GUARANTEE total === sum(buckets). Keyed on the full
+ * {@link CYCLE_VERDICTS} order; an unseen verdict is 0 (never absent), and an
+ * unrecognized verdict is folded into `unknown` so the sum can never under-count
+ * the rows. Pure: rows in, a count-per-bucket record out.
+ */
+export function bucketCounts(rows: readonly CycleLedgerRow[]): Record<CycleLedgerVerdict, number> {
+  const out = Object.fromEntries(CYCLE_VERDICTS.map((v) => [v, 0])) as Record<CycleLedgerVerdict, number>;
+  for (const r of rows) {
+    if (r.verdict in out) out[r.verdict] += 1;
+    else out.unknown += 1;
+  }
+  return out;
 }
 
 /**

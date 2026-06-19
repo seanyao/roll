@@ -8,6 +8,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { statSync } from "node:fs";
 import {
   acquireLock,
   formatLock,
@@ -17,6 +18,7 @@ import {
   livenessVerdict,
   OUTER_LOCK_STALE_SEC,
   parseLock,
+  readLockOwner,
   releaseLock,
   writeHeartbeat,
 } from "../src/index.js";
@@ -65,39 +67,42 @@ describe("isLockHeld", () => {
   });
 });
 
-describe("acquireLock", () => {
-  it("acquires a fresh lock and writes pid:ts", () => {
+describe("acquireLock (FIX-365: atomic directory lock)", () => {
+  it("acquires a fresh lock as a directory and records owner meta (pid/startedAt)", () => {
     const d = tmp();
     const lock = join(d, "loop", ".lock");
     const r = acquireLock(lock, 4242, { now: () => 1000 });
     expect(r.acquired).toBe(true);
-    expect(readFileSync(lock, "utf8")).toBe("4242:1000\n");
+    expect(statSync(lock).isDirectory()).toBe(true);
+    const owner = readLockOwner(lock);
+    expect(owner?.pid).toBe(4242);
+    expect(owner?.startedAt).toBe(1000);
   });
 
   it("conflict: a live, fresh lock is NOT taken over", () => {
     const d = tmp();
     const lock = join(d, ".lock");
-    writeFileSync(lock, formatLock(process.pid, 1000), "utf8"); // our own pid = alive
+    acquireLock(lock, process.pid, { now: () => 1000 }); // our own pid = alive
     const r = acquireLock(lock, 7777, { now: () => 1100, staleSec: OUTER_LOCK_STALE_SEC });
     expect(r.acquired).toBe(false);
     expect(r.heldByPid).toBe(process.pid);
     // untouched
-    expect(readFileSync(lock, "utf8")).toBe(formatLock(process.pid, 1000));
+    expect(readLockOwner(lock)?.pid).toBe(process.pid);
   });
 
   it("stale-takeover: a dead pid's lock is removed and re-acquired", () => {
     const d = tmp();
     const lock = join(d, ".lock");
-    writeFileSync(lock, formatLock(deadPid(), 1000), "utf8");
-    const r = acquireLock(lock, 5555, { now: () => 1050 });
+    acquireLock(lock, deadPid(), { now: () => 1000, pidAlive: () => false });
+    const r = acquireLock(lock, 5555, { now: () => 1050, pidAlive: () => false });
     expect(r.acquired).toBe(true);
-    expect(readFileSync(lock, "utf8")).toBe("5555:1050\n");
+    expect(readLockOwner(lock)?.pid).toBe(5555);
   });
 
   it("stale-takeover: an aged lock (>= threshold) is taken over even if pid alive", () => {
     const d = tmp();
     const lock = join(d, ".lock");
-    writeFileSync(lock, formatLock(process.pid, 0), "utf8");
+    acquireLock(lock, process.pid, { now: () => 0 });
     const r = acquireLock(lock, 6666, { now: () => OUTER_LOCK_STALE_SEC, staleSec: OUTER_LOCK_STALE_SEC });
     expect(r.acquired).toBe(true);
   });
@@ -106,16 +111,16 @@ describe("acquireLock", () => {
     expect(INNER_LOCK_STALE_SEC).toBe(14400);
     const d = tmp();
     const lock = join(d, ".lock");
-    writeFileSync(lock, formatLock(process.pid, 0), "utf8");
+    acquireLock(lock, process.pid, { now: () => 0 });
     // age 14399 < 14400 → still held
     const held = acquireLock(lock, 1, { now: () => 14399, staleSec: INNER_LOCK_STALE_SEC });
     expect(held.acquired).toBe(false);
   });
 
-  it("releaseLock removes the file idempotently", () => {
+  it("releaseLock removes the lock directory idempotently", () => {
     const d = tmp();
     const lock = join(d, ".lock");
-    acquireLock(lock, 1, { now: () => 1 });
+    acquireLock(lock, process.pid, { now: () => 1 });
     expect(existsSync(lock)).toBe(true);
     releaseLock(lock);
     expect(existsSync(lock)).toBe(false);

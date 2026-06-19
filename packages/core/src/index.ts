@@ -15,6 +15,7 @@ export * from "./cost/tracker.js";
 export * from "./delivery/infra-default.js";
 export * from "./delivery/pr.js";
 export * from "./delivery/tcr.js";
+export * from "./dream/structure-scan.js";
 export * from "./evals/candidates.js";
 export * from "./evals/score.js";
 export * from "./events/bus.js";

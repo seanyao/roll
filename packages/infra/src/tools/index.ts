@@ -1,5 +1,6 @@
 export * from "./bash.js";
 export * from "./browser.js";
+export * from "./builtins.js";
 export * from "./delegation.js";
 export * from "./filesystem.js";
 export * from "./git.js";

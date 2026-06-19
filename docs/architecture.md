@@ -128,6 +128,7 @@ web          控制台（React，WebSocket 订阅 daemon）
 - 安全限幅：连续失败 N 次 → 暂停并告警
 - 路由规则：覆盖默认 agent-模型映射
 - 网络首检：任何需要网络的命令（`loop go/run`、agent 拉起、showcase、release 开 PR、update）把连通性（含代理）作为第一道检查。不通时跑配置的恢复钩子 `loop_safety.proxy_enable_cmd` 再复检：通了继续，仍不通就立刻停手并给出可操作的中英文原因——绝不带病前进、绝不空转、绝不静默降级。该钩子是用户自填的命令（roll 不内置任何代理工具）；未配置即停手并告知。
+- Warm session 复用：`loop_safety.session_reuse: true` 只表达复用意图；必须同时设置 `loop_safety.resume_scope: same-story` 才会在同一 story 重试时复用 codex session。缺省、非法值或未设置 `resume_scope` 都按 `off` 处理，跨卡复用保持禁用。
 
 策略是规则源——它不直接执行动作，而是被其他上下文读取并遵循。
 
@@ -142,7 +143,7 @@ web          控制台（React，WebSocket 订阅 daemon）
 | `runs.jsonl` | 运行摘要（按 story+cycle_id 去重） |
 | `heartbeat` | 活性心跳（idle 也写） |
 
-**事件类型**：`cycle:start/phase/tcr/end`、`pr:open/merge`、`route:resolve`、`loop:heartbeat/fire/paused`、`policy:safety_pause`、`alert`。
+**事件类型**：`cycle:start/phase/tcr/end`、`warm-session:capture/resume-selected/resume-skipped`、`pr:open/merge`、`route:resolve`、`loop:heartbeat/fire/paused`、`policy:safety_pause`、`alert`。
 
 **daemon**：独立进程，fs.watch 监控事件文件，通过 WebSocket 广播。它是只读观察者——挂了不影响任何 loop。loop 只写文件，不依赖 daemon。
 

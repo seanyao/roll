@@ -1325,8 +1325,9 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
  *   - `report`         — a `latest/<ID>-report.html` attest report exists.
  *   - `acMap`          — an `ac-map.json` exists for the story.
  *   - `visualEvidence` — at least one file under `latest/screenshots/`, OR a
- *     screenshot-kind row in ac-map (a `kind: "screenshot"` entry). Best-effort:
- *     a missing/unreadable source reads as the honest `false`.
+ *     legacy screenshot-kind row in ac-map, OR a screenshot/cast/video evidence
+ *     href in ac-map that resolves to a real artifact. Best-effort: a
+ *     missing/unreadable source reads as the honest `false`.
  */
 export function storyEvidenceFlags(projectPath: string, story: DossierStory): StoryEvidenceFlags {
   const dir = joinPath(projectPath, ".roll", "features", story.epic, story.id);
@@ -1348,15 +1349,26 @@ export function storyEvidenceFlags(projectPath: string, story: DossierStory): St
     try {
       const rows = JSON.parse(readFile(joinPath(dir, "ac-map.json"))) as unknown;
       if (Array.isArray(rows)) {
-        visualEvidence = rows.some(
-          (r) => r != null && typeof r === "object" && (r as { kind?: unknown }).kind === "screenshot",
-        );
+        visualEvidence = rows.some((r) => acMapRowHasVisualEvidence(dir, r));
       }
     } catch {
       /* unreadable ac-map → no screenshot-kind signal */
     }
   }
   return { report, acMap, visualEvidence };
+}
+
+function acMapRowHasVisualEvidence(storyDir: string, row: unknown): boolean {
+  if (row == null || typeof row !== "object") return false;
+  const record = row as { kind?: unknown; evidence?: unknown };
+  if (record.kind === "screenshot") return true; // historical compact shape
+  return parseAcEvidence(record.evidence).some((e) => {
+    if (e.kind !== "screenshot" && e.kind !== "cast" && e.kind !== "video") return false;
+    if (e.href === undefined || e.href.trim() === "") return false;
+    const href = rebaseEvidenceHrefToStoryRoot(e.href);
+    if (/^[a-z]+:/i.test(href) || href.startsWith("/") || href.startsWith("#")) return false;
+    return existsSync(joinPath(storyDir, href));
+  });
 }
 
 function collectExecutionRefs(projectPath: string, storyId: string, text: string, gitFacts?: GitDossierFacts | null): ExecutionRef[] {

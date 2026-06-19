@@ -1830,12 +1830,26 @@ describe("US-DOSSIER-021 — storyEvidenceFlags probes the card folder", () => {
     writeFileSync(join(run2, "US-E-2-report.html"), "<html></html>");
     symlinkSync(run2, join(f, "evid", "US-E-2", "latest"));
     writeFileSync(join(f, "evid", "US-E-2", "ac-map.json"), JSON.stringify([{ ac: "AC1", status: "pass", kind: "screenshot" }]));
-    // US-E-3: nothing on disk.
-    mkdirSync(join(f, "evid", "US-E-3"), { recursive: true });
+    // US-E-3: modern ac-map evidence[] points at a real story-level screenshot.
+    const run3 = join(f, "evid", "US-E-3", "2026-06-03T00-00-00");
+    mkdirSync(run3, { recursive: true });
+    mkdirSync(join(f, "evid", "US-E-3", "screenshots"), { recursive: true });
+    writeFileSync(join(run3, "US-E-3-report.html"), "<html></html>");
+    writeFileSync(join(f, "evid", "US-E-3", "screenshots", "guide.png"), "png");
+    symlinkSync(run3, join(f, "evid", "US-E-3", "latest"));
+    writeFileSync(join(f, "evid", "US-E-3", "ac-map.json"), JSON.stringify([{ ac: "AC1", status: "pass", evidence: [{ kind: "screenshot", href: "../screenshots/guide.png" }] }]));
+    // US-E-4: evidence[] declares a screenshot href, but the artifact is absent.
+    const run4 = join(f, "evid", "US-E-4", "2026-06-04T00-00-00");
+    mkdirSync(run4, { recursive: true });
+    writeFileSync(join(run4, "US-E-4-report.html"), "<html></html>");
+    symlinkSync(run4, join(f, "evid", "US-E-4", "latest"));
+    writeFileSync(join(f, "evid", "US-E-4", "ac-map.json"), JSON.stringify([{ ac: "AC1", status: "pass", evidence: [{ kind: "screenshot", href: "../screenshots/missing.png" }] }]));
+    // US-E-5: nothing on disk.
+    mkdirSync(join(f, "evid", "US-E-5"), { recursive: true });
     return p;
   }
 
-  it("sets each flag from a real artifact; a screenshot-kind ac-map row counts as visual", () => {
+  it("sets each flag from a real artifact; screenshot ac-map rows and existing evidence hrefs count as visual", () => {
     const p = evidenceProject();
     const e1 = storyEvidenceFlags(p, { id: "US-E-1", epic: "evid", type: "US", delivered: true, legacy: false });
     expect(e1).toEqual({ report: true, acMap: true, visualEvidence: true });
@@ -1843,7 +1857,11 @@ describe("US-DOSSIER-021 — storyEvidenceFlags probes the card folder", () => {
     // no screenshot file, but ac-map carries a kind:"screenshot" row → visual true.
     expect(e2).toEqual({ report: true, acMap: true, visualEvidence: true });
     const e3 = storyEvidenceFlags(p, { id: "US-E-3", epic: "evid", type: "US", delivered: false, legacy: false });
-    expect(e3).toEqual({ report: false, acMap: false, visualEvidence: false });
+    expect(e3).toEqual({ report: true, acMap: true, visualEvidence: true });
+    const e4 = storyEvidenceFlags(p, { id: "US-E-4", epic: "evid", type: "US", delivered: true, legacy: false });
+    expect(e4).toEqual({ report: true, acMap: true, visualEvidence: false });
+    const e5 = storyEvidenceFlags(p, { id: "US-E-5", epic: "evid", type: "US", delivered: false, legacy: false });
+    expect(e5).toEqual({ report: false, acMap: false, visualEvidence: false });
   });
 });
 

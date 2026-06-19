@@ -314,6 +314,9 @@ export interface PairingCostSummary {
   totalFindings: number;
   /** pair:none-available events (fail-loud absences — a pairing that did not happen). */
   noneAvailable: number;
+  /** FIX-346: peers dropped from the pool after repeated headless auth failures
+   *  (canonical agent → most-recent recorded consecutive-failure count). */
+  excludedPeers: Record<string, number>;
 }
 
 /**
@@ -329,7 +332,7 @@ export interface PairingCostSummary {
  * backfilled — the spend becomes visible from the first PAIR-006 cycle on.
  */
 export function aggregatePairingCost(events: readonly RollEvent[]): PairingCostSummary {
-  const summary: PairingCostSummary = { pairings: 0, byPeer: {}, totalCost: 0, totalFindings: 0, noneAvailable: 0 };
+  const summary: PairingCostSummary = { pairings: 0, byPeer: {}, totalCost: 0, totalFindings: 0, noneAvailable: 0, excludedPeers: {} };
   for (const e of events) {
     if (e.type === "pair:verdict") {
       summary.pairings += 1;
@@ -345,9 +348,88 @@ export function aggregatePairingCost(events: readonly RollEvent[]): PairingCostS
       summary.totalCost += Number.isFinite(e.cost) ? e.cost : 0;
     } else if (e.type === "pair:none-available") {
       summary.noneAvailable += 1;
+    } else if (e.type === "pair:excluded") {
+      // FIX-346: the LAST exclusion event per peer wins (a peer can be excluded,
+      // re-logged-in, and excluded again — the latest failure count is current).
+      summary.excludedPeers[canonicalAgentName(e.agent)] = Number.isFinite(e.failures) && e.failures > 0 ? e.failures : 1;
     }
   }
   return summary;
+}
+
+// ── FIX-346: auth-failure pool exclusion ─────────────────────────────────────
+
+/**
+ * Default consecutive-auth-failure threshold before a peer is dropped from the
+ * candidate pool. ONE blip can be transient (a keychain cooldown that clears, a
+ * daemon restart), so a single failure must NOT bench a peer — but a peer that
+ * has failed auth this many times IN A ROW (with no successful review/score in
+ * between) cannot refresh its creds non-interactively in this unattended loop, so
+ * re-spawning it every cycle only wastes a review slot and floods the data with
+ * `cause:auth` noise (the claude-keychain symptom in FIX-346). Two strikes.
+ */
+export const DEFAULT_AUTH_EXCLUDE_THRESHOLD = 2;
+
+/** One peer's current auth-failure standing, folded from the event stream. */
+export interface PeerAuthState {
+  /** Consecutive trailing `agent:blocked cause:auth` events (reset by any success). */
+  consecutiveAuthFailures: number;
+  /** True once the streak has reached the exclusion threshold. */
+  excluded: boolean;
+}
+
+/**
+ * FIX-346 — fold the event stream into each peer's auth-failure standing.
+ *
+ * A peer's streak counts its consecutive trailing `agent:blocked cause:auth`
+ * events; ANY later success (`pair:verdict` / `pair:score` for that peer) RESETS
+ * it to 0 — so a peer that auth-failed, was re-logged-in by the owner offline, and
+ * then reviewed cleanly is no longer benched. `network` blocks NEVER count: they
+ * are transient connectivity, not an unrefreshable credential, so a VPN blip must
+ * not permanently exclude a peer. Pure (events → state) and agent-agnostic — the
+ * signal is the standard `agent:blocked cause:auth`, with NO per-agent hardcoding,
+ * so agy's OAuth and claude's keychain are handled by the same rule.
+ */
+export function peerAuthStates(
+  events: readonly RollEvent[],
+  threshold: number = DEFAULT_AUTH_EXCLUDE_THRESHOLD,
+): Record<string, PeerAuthState> {
+  const streak: Record<string, number> = {};
+  for (const e of events) {
+    if (e.type === "agent:blocked" && e.cause === "auth") {
+      const peer = canonicalAgentName(e.agent);
+      streak[peer] = (streak[peer] ?? 0) + 1;
+    } else if (e.type === "pair:verdict" || e.type === "pair:score") {
+      // A real verdict/score proves this peer authenticated → reset its streak.
+      streak[canonicalAgentName(e.peer)] = 0;
+    }
+  }
+  const out: Record<string, PeerAuthState> = {};
+  const bar = threshold < 1 ? 1 : threshold;
+  for (const peer of Object.keys(streak)) {
+    const n = streak[peer] ?? 0;
+    out[peer] = { consecutiveAuthFailures: n, excluded: n >= bar };
+  }
+  return out;
+}
+
+/**
+ * FIX-346 — the set of canonical peers to DROP from the candidate pool because
+ * they have failed headless auth `threshold` times in a row (see
+ * {@link peerAuthStates}). The executor feeds this into the `isAvailable` seam so
+ * {@link selectPairingCandidates} stops re-selecting them and swaps to the next
+ * heterogeneous peer; scoring still fail-loud only when the WHOLE pool is empty.
+ */
+export function excludedPeers(
+  events: readonly RollEvent[],
+  threshold: number = DEFAULT_AUTH_EXCLUDE_THRESHOLD,
+): Set<string> {
+  const states = peerAuthStates(events, threshold);
+  const out = new Set<string>();
+  for (const peer of Object.keys(states)) {
+    if (states[peer]?.excluded === true) out.add(peer);
+  }
+  return out;
 }
 
 // ── US-PAIR-006: hit-rate-driven rotation ────────────────────────────────────

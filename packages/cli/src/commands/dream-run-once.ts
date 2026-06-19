@@ -91,12 +91,25 @@ export async function dreamRunOnceCommand(
 
   const agent = deps.agent();
   append(`[${stamp()}] dream scan start (v3 run-once, agent=${agent})\n`);
+  let skillBody = body;
   try {
     append(`[${stamp()}] dream structure pre-scan start\n`);
     const preScan = deps.structureScan(id.path, deps.now().toISOString());
     writeFileSync(join(dreamDir, "structure-scan.json"), `${JSON.stringify(preScan.json, null, 2)}\n`, "utf8");
     append(preScan.log);
     append(`[${stamp()}] dream structure pre-scan end findings=${preScan.json.findings.length}\n`);
+    skillBody = [
+      "# Dream deterministic structure pre-scan",
+      "",
+      "A deterministic TypeScript/AST structure scan has already run before this agent step.",
+      "Use `.roll/dream/structure-scan.json` as the source of truth for code-structure findings.",
+      "Do not re-run grep-style dead-code, duplicate-pattern, pruning, or env-var scans.",
+      "Keep the existing document coverage, document freshness, and existence-drift scans unchanged.",
+      "",
+      preScan.log.trim(),
+      "",
+      body,
+    ].join("\n");
   } catch (e) {
     append(`[${stamp()}] dream structure pre-scan error: ${String(e)}\n`);
   }
@@ -104,7 +117,7 @@ export async function dreamRunOnceCommand(
   try {
     const result = await deps.spawn(agent, {
       cwd: id.path,
-      skillBody: body,
+      skillBody,
       onChunk: (chunk) => append(chunk.toString("utf8")),
     });
     exitCode = result.exitCode;

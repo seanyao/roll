@@ -50,7 +50,16 @@ function fixture(): string {
   );
   writeFileSync(
     join(root, "src", "unused.ts"),
-    "export function unusedHelper(value: string): string { return value.toLowerCase(); }\n",
+    [
+      "export function unusedHelper(value: string): string { return value.toLowerCase(); }",
+      "export function impossible(): string {",
+      "  if (false) {",
+      "    return 'never';",
+      "  }",
+      "  return 'ok';",
+      "}",
+      "",
+    ].join("\n"),
     "utf8",
   );
   writeFileSync(
@@ -117,6 +126,7 @@ describe("Dream structure scan", () => {
     expect(result.findings.map((finding) => finding.kind)).toEqual(
       expect.arrayContaining([
         "dead_export",
+        "unreachable_branch",
         "undocumented_env",
         "duplicate_ast",
         "single_implementation_abstraction",
@@ -129,6 +139,7 @@ describe("Dream structure scan", () => {
         .join("\n"),
     ).toContain("unusedHelper");
     expect(result.findings.find((finding) => finding.kind === "undocumented_env")?.title).toContain("ROLL_DREAM_AGENT");
+    expect(result.findings.find((finding) => finding.kind === "unreachable_branch")?.rationale).toContain("literal false");
     expect(result.findings.every((finding) => finding.stableKey.startsWith("dream-structure:"))).toBe(true);
 
     const ranked = rankDreamFindings(result.findings, 2);

@@ -90,7 +90,9 @@ describe("roll dream run-once", () => {
     expect(spy.calls).toHaveLength(1);
     expect(spy.calls[0]?.agent).toBe("claude");
     expect(spy.calls[0]?.opts.cwd).toBe(proj); // in place — NOT a worktree
-    expect(spy.calls[0]?.opts.skillBody).toBe("# Dream\n\nScan the code.");
+    expect(spy.calls[0]?.opts.skillBody).toContain("# Dream\n\nScan the code.");
+    expect(spy.calls[0]?.opts.skillBody).toContain("Dream deterministic structure pre-scan");
+    expect(spy.calls[0]?.opts.skillBody).toContain(".roll/dream/structure-scan.json");
     const log = readFileSync(join(proj, ".roll", "dream", "cron.log"), "utf8");
     expect(log).toContain("dream scan start (v3 run-once, agent=claude)");
     expect(log).toContain("dream structure pre-scan start");

@@ -14,6 +14,7 @@ import {
   type DimensionTally,
 } from "@roll/core";
 import { parseEventLine } from "@roll/spec";
+import { reconcileReleaseForProject, type ReleaseFactsReader } from "./release-truth.js";
 
 export interface ReleasePanelDim {
   key: ConsistencyDimension;
@@ -32,7 +33,7 @@ export interface ReleasePanelVM {
   prevTag?: string;
 }
 
-export function collectReleasePanel(projectPath: string): ReleasePanelVM {
+export function collectReleasePanel(projectPath: string, releaseReader?: ReleaseFactsReader): ReleasePanelVM {
   const dimsEmpty = CONSISTENCY_DIMENSIONS.map((key) => ({
     key,
     tally: { fail: 0, warn: 0, unknown: 0, subjects: [] as string[] },
@@ -66,21 +67,29 @@ export function collectReleasePanel(projectPath: string): ReleasePanelVM {
     /* no report → empty panel, honest zeros */
   }
 
-  // Previous gated tag from the release:gate event stream.
-  try {
-    const path = join(projectPath, ".roll", "loop", "events.ndjson");
-    if (existsSync(path)) {
-      const tags: string[] = [];
-      for (const line of readFileSync(path, "utf8").split("\n")) {
-        const e = parseEventLine(line);
-        if (e !== null && e.type === "release:gate" && typeof e.tag === "string" && e.tag !== "" && tags.at(-1) !== e.tag) {
-          tags.push(e.tag);
+  // FIX-368: the previous released tag is RECONCILED from reality (the
+  // second-newest v* git tag / CHANGELOG section), not read from the
+  // `release:gate` event stream that the current release flow no longer
+  // refreshes. The event stream is a last-resort fallback.
+  const reconciled = releaseReader !== undefined ? reconcileReleaseForProject(projectPath, releaseReader) : reconcileReleaseForProject(projectPath);
+  if (reconciled.prevTag !== undefined) {
+    out.prevTag = reconciled.prevTag;
+  } else {
+    try {
+      const path = join(projectPath, ".roll", "loop", "events.ndjson");
+      if (existsSync(path)) {
+        const tags: string[] = [];
+        for (const line of readFileSync(path, "utf8").split("\n")) {
+          const e = parseEventLine(line);
+          if (e !== null && e.type === "release:gate" && typeof e.tag === "string" && e.tag !== "" && tags.at(-1) !== e.tag) {
+            tags.push(e.tag);
+          }
         }
+        if (tags.length >= 2) out.prevTag = tags.at(-2);
       }
-      if (tags.length >= 2) out.prevTag = tags.at(-2);
+    } catch {
+      /* best-effort */
     }
-  } catch {
-    /* best-effort */
   }
   return out;
 }

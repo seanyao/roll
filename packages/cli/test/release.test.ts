@@ -176,6 +176,45 @@ describe("runReleaseFlow — the one transaction", () => {
     expect(writes.some((w) => w.startsWith("pushTag:"))).toBe(false);
   });
 
+  // FIX-368 — Part 2: the release records itself as a fact AFTER the irreversible
+  // tag-push, append-only + best-effort, never blocking/altering the release.
+  it("FIX-368: records a release fact strictly AFTER pushing the tag", async () => {
+    const order: string[] = [];
+    const { deps } = fakeDeps({
+      pushTag: (_c, t2) => void order.push(`pushTag:${t2}`),
+      recordReleaseFact: (_c, t2) => void order.push(`recordReleaseFact:${t2}`),
+    });
+    const res = await runReleaseFlow("/repo", deps, { dryRun: false, yes: true });
+    expect(res.status).toBe("released");
+    // The fact is recorded only after the tag is pushed, and for the same tag.
+    expect(order).toEqual(["pushTag:v3.613.1", "recordReleaseFact:v3.613.1"]);
+  });
+
+  it("FIX-368: a throwing release-fact recorder NEVER turns a completed release into an abort", async () => {
+    let recorded = false;
+    const { deps } = fakeDeps({
+      recordReleaseFact: () => {
+        recorded = true;
+        throw new Error("disk full — events.ndjson append failed");
+      },
+    });
+    const res = await runReleaseFlow("/repo", deps, { dryRun: false, yes: true });
+    expect(recorded).toBe(true); // it was attempted
+    expect(res.status).toBe("released"); // …and the release still completed
+    expect(res.tag).toBe("v3.613.1");
+  });
+
+  it("FIX-368: the release-fact recorder is NOT called when the flow aborts before tag-push", async () => {
+    let called = false;
+    const { deps } = fakeDeps({
+      consistencyGate: () => false,
+      recordReleaseFact: () => void (called = true),
+    });
+    const res = await runReleaseFlow("/repo", deps, { dryRun: false, yes: true });
+    expect(res.status).toBe("aborted");
+    expect(called).toBe(false);
+  });
+
   it("dry-run computes the plan and mutates NOTHING", async () => {
     const { deps, writes } = fakeDeps();
     const res = await runReleaseFlow("/repo", deps, { dryRun: true, yes: true });

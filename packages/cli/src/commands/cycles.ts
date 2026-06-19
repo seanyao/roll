@@ -179,15 +179,9 @@ export function cyclesLedgerJson(rows: CycleLedgerRow[], sinceLabel: string, now
   // FIX-337 (AC2): expose EVERY bucket so the machine view can verify
   // total === sum(buckets) just like the human summary line.
   const buckets = bucketCounts(within);
-  // FIX-361: cost may be "$X.XX" or "¥X.XX". Parse each row and aggregate
-  // per-currency in the JSON output so consumers never blindly sum across currencies.
-  const costByCur: Record<string, number> = {};
-  for (const r of within) {
-    const { value, currency } = parseCostCell(r.cost);
-    if (value !== null && currency !== null) {
-      costByCur[currency] = (costByCur[currency] ?? 0) + value;
-    }
-  }
+  // FIX-361: cost may be "$X.XX" or "¥X.XX". Aggregate per-currency (the shared
+  // FIX-337 口径) so consumers never blindly sum across currencies.
+  const costByCur = cyclesCostByCurrency(within);
   return {
     since: sinceLabel,
     cycles: within.length,
@@ -208,6 +202,50 @@ export function cyclesLedgerJson(rows: CycleLedgerRow[], sinceLabel: string, now
   };
 }
 
+/** Per-currency cost total over a set of ledger rows — the SINGLE cost口径 the
+ *  --json view, the human summary, AND the truth.json cycle aggregate all reuse
+ *  (FIX-337 AC1), so no surface re-derives cost from raw runs rows. Only rows
+ *  with a real presentable cost contribute ("?"/"—" carry no money). */
+export function cyclesCostByCurrency(rows: readonly CycleLedgerRow[]): Record<string, number> {
+  const byCur: Record<string, number> = {};
+  for (const r of rows) {
+    const { value, currency } = parseCostCell(r.cost);
+    if (value !== null && currency !== null) byCur[currency] = (byCur[currency] ?? 0) + value;
+  }
+  return byCur;
+}
+
+/**
+ * FIX-337 (AC1) — the truth.json `cycle` aggregate, derived from the SAME
+ * canonical reconciled ledger `roll cycles` renders (not a second pass over raw
+ * runs rows). Windowed to the default 3d horizon and summarized via
+ * {@link summaryBuckets}, so `roll status` (which reads truth.json) and `roll
+ * cycles --since 3d` can never show two different `cycles`/`failed`/`cost`
+ * numbers. `failed3d` is the failed CLUSTER (failed+reverted+blocked), never
+ * swallowed (FIX-248); cost is per-currency via {@link cyclesCostByCurrency}.
+ */
+export function cyclesCycleBoard(
+  rows: CycleLedgerRow[],
+  nowSec: number,
+): { cycles3d: number; failed3d: number; costUsd3d: number; costByCurrency3d?: Record<string, number>; latestTsSec: number } {
+  const within = windowRows(rows, "3d", nowSec);
+  const { total, failedTotal } = summaryBuckets(within);
+  const byCur = cyclesCostByCurrency(within);
+  // costUsd3d historically named the single scalar the status line shows; keep it
+  // as USD when present, else the sole currency present, else 0 (no money known).
+  const usd = byCur["USD"];
+  const sole = Object.values(byCur);
+  const costUsd3d = usd ?? (sole.length === 1 ? (sole[0] as number) : 0);
+  const latestTsSec = within.reduce((m, r) => Math.max(m, r.tsSec), 0);
+  return {
+    cycles3d: total,
+    failed3d: failedTotal,
+    costUsd3d: Number(costUsd3d.toFixed(4)),
+    ...(Object.keys(byCur).length > 0 ? { costByCurrency3d: byCur } : {}),
+    latestTsSec,
+  };
+}
+
 /** FIX-361: parse the formatted cost string ("$0.74" / "¥0.74" / "?" / "—")
  *  into { value: number | null, currency: string | null }. A null value means
  *  the cost is unknown; a null currency means not presentable. */
@@ -222,13 +260,7 @@ function parseCostCell(cell: string): { value: number | null; currency: string |
 /** FIX-361: build the cost summary string, with per-currency breakdown when
  *  the window mixes ¥ and $. */
 function costSummary(within: readonly CycleLedgerRow[], lang: Lang): string {
-  const byCur: Record<string, number> = {};
-  for (const r of within) {
-    const { value, currency } = parseCostCell(r.cost);
-    if (value !== null && currency !== null) {
-      byCur[currency] = (byCur[currency] ?? 0) + value;
-    }
-  }
+  const byCur = cyclesCostByCurrency(within);
   const entries = Object.entries(byCur);
   if (entries.length === 0) return lang === "zh" ? "花费 —" : "cost —";
   // Single currency: simple "$X.XX" or "¥X.XX".

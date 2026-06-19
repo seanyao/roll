@@ -21,7 +21,8 @@ import { collectCharter, defaultCharterDeps } from "../lib/page-charter.js";
 import { collectAbout, defaultAboutDeps, renderAboutPage } from "../lib/page-about.js";
 import { collectConventions, defaultConventionsDeps, renderConventionsPage } from "../lib/page-conventions.js";
 import { collectProjectsRegistry, reachableProjects, resolveProjectName, shouldSelfRegister, writeProjectRow } from "../lib/projects-registry.js";
-import { collectCycleLedger, reconcilePendingMergeVerdicts } from "../lib/cycle-ledger.js";
+import type { CycleLedgerRow } from "../lib/cycle-ledger.js";
+import { reconciledLedger, cyclesCycleBoard } from "./cycles.js";
 import { collectAgentPanel } from "../lib/agent-panel.js";
 import { collectReleasePanel } from "../lib/release-panel.js";
 import { collectReleaseScope } from "../lib/release-scope.js";
@@ -34,9 +35,8 @@ import { launchAgentsDir } from "./loop-sched.js";
 import { projectSlug } from "./dashboard.js";
 import { morningReportHref } from "../lib/morning-report.js";
 import { renderEpicPage } from "../lib/epic-page.js";
-import { buildDossierRunCache, collectStoryDossierInput, cycleMergeTruth, renderStoryDossier, stationsDone, storyEvidenceFlags, storyHasMergeEvidence, type StoryDossierInput } from "../lib/story-dossier.js";
+import { buildDossierRunCache, collectStoryDossierInput, renderStoryDossier, stationsDone, storyEvidenceFlags, storyHasMergeEvidence, type StoryDossierInput } from "../lib/story-dossier.js";
 import { renderMarkdown } from "../lib/markdown.js";
-import { cycleTruthFromRow, outcomeToPanel } from "../lib/truth-adapter.js";
 
 function iso(sec: number): string {
   return new Date(sec * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -51,39 +51,12 @@ function renderNowSec(): number {
   return Math.floor(Date.now() / 1000);
 }
 
-function readJsonl(path: string): Array<Record<string, unknown>> | undefined {
-  let content: string;
-  try {
-    content = readFileSync(path, "utf8");
-  } catch {
-    return undefined;
-  }
-  const out: Array<Record<string, unknown>> = [];
-  for (const line of content.split("\n")) {
-    if (line.trim() === "") continue;
-    try {
-      const v = JSON.parse(line) as unknown;
-      if (typeof v === "object" && v !== null && !Array.isArray(v)) out.push(v as Record<string, unknown>);
-    } catch {
-      /* lenient snapshot reader */
-    }
-  }
-  return out;
-}
-
 function num(v: unknown): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
 }
 
 function str(v: unknown): string | undefined {
   return typeof v === "string" && v !== "" ? v : undefined;
-}
-
-function tsSec(v: unknown): number | undefined {
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (typeof v !== "string" || v === "") return undefined;
-  const ms = Date.parse(v);
-  return Number.isFinite(ms) ? Math.floor(ms / 1000) : undefined;
 }
 
 function latestConsistencyAudit(projectPath: string): TruthBoardInput["audit"] | undefined {
@@ -113,36 +86,24 @@ function latestConsistencyAudit(projectPath: string): TruthBoardInput["audit"] |
   }
 }
 
-function cycleTruthBoard(projectPath: string, nowSec: number): TruthBoardInput["cycle"] | undefined {
-  const path = join(projectPath, ".roll", "loop", "runs.jsonl");
-  const cutoff = nowSec - 72 * 3600;
-  const facts = readJsonl(path);
-  if (facts === undefined) return undefined;
-  const rows = facts.filter((r) => {
-    const ts = tsSec(r["ts"]);
-    return ts !== undefined && ts >= cutoff && ts <= nowSec;
-  });
-  let failed = 0;
-  let cost = 0;
-  // FIX-361: separate by native currency so display never blindly sums ¥+$.
-  const costByCur: Record<string, number> = {};
-  let latestTs = 0;
-  for (const row of rows) {
-    const ts = tsSec(row["ts"]) ?? 0;
-    latestTs = Math.max(latestTs, ts);
-    const truth = cycleTruthFromRow(row, { nowSec });
-    if (outcomeToPanel(truth.outcome, truth.state) === "fail") failed += 1;
-    const rowCost = num(row["cost_effective_usd"]) ?? num(row["cost_usd"]) ?? 0;
-    cost += rowCost;
-    const cur = typeof row["cost_currency"] === "string" ? (row["cost_currency"] as string) : "USD";
-    costByCur[cur] = (costByCur[cur] ?? 0) + rowCost;
-  }
+/**
+ * FIX-337 (AC1) — the truth.json `cycle` aggregate is now derived from the SAME
+ * canonical reconciled ledger `roll cycles` renders (collectCycleLedger →
+ * pending-merge reconcile → superseded reconcile), NOT a second independent pass
+ * over raw runs rows. `cyclesCycleBoard` windows to 3d and folds the failed
+ * cluster identically to the CLI, so `roll status` (which reads truth.json) and
+ * `roll cycles --since 3d` always print the same cycles/failed/cost. The caller
+ * passes the rows it already built once (so git facts are collected a single
+ * time); an empty/absent ledger yields `cycles3d: 0`.
+ */
+function cycleTruthBoard(cycleRows: readonly CycleLedgerRow[], nowSec: number): TruthBoardInput["cycle"] | undefined {
+  const board = cyclesCycleBoard([...cycleRows], nowSec);
   return {
-    cycles3d: rows.length,
-    failed3d: failed,
-    costUsd3d: Number(cost.toFixed(4)),
-    costByCurrency3d: Object.keys(costByCur).length > 0 ? costByCur : undefined,
-    ...(latestTs > 0 ? { collectedAt: iso(latestTs) } : {}),
+    cycles3d: board.cycles3d,
+    failed3d: board.failed3d,
+    costUsd3d: board.costUsd3d,
+    ...(board.costByCurrency3d !== undefined ? { costByCurrency3d: board.costByCurrency3d } : {}),
+    ...(board.latestTsSec > 0 ? { collectedAt: iso(board.latestTsSec) } : {}),
   };
 }
 
@@ -203,9 +164,12 @@ function maxCollectedAt(parts: Array<string | undefined>): string | undefined {
   return best === "" ? undefined : best;
 }
 
-export function collectTruthBoardInput(projectPath: string, nowSec = renderNowSec()): TruthBoardInput {
+export function collectTruthBoardInput(projectPath: string, nowSec = renderNowSec(), cycleRows?: readonly CycleLedgerRow[]): TruthBoardInput {
   const audit = latestConsistencyAudit(projectPath);
-  const cycle = cycleTruthBoard(projectPath, nowSec);
+  // FIX-337 (AC1): the cycle aggregate uses the SAME canonical reconciled ledger
+  // the page panel + `roll cycles` use. The caller (generateDossierPages) passes
+  // the rows it already built; standalone callers fall back to building it here.
+  const cycle = cycleTruthBoard(cycleRows ?? reconciledLedger(projectPath), nowSec);
   const release = releaseTruthBoard(projectPath, nowSec);
   const collectedAt = maxCollectedAt([audit?.collectedAt, cycle?.collectedAt, release?.collectedAt]);
   return {
@@ -370,10 +334,16 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
   );
   let pages = 0;
   try {
+    // FIX-337 (AC1): build THE canonical reconciled ledger ONCE — the same
+    // pipeline `roll cycles` runs (collectCycleLedger → pending-merge reconcile →
+    // superseded reconcile). Both the truth.json `cycle` aggregate AND the page's
+    // cycle panel read from these exact rows, so `roll cycles`, the dossier panel,
+    // and `roll status` (truth.json) can never show divergent counts/cost.
+    const cycleRows = reconciledLedger(cwd);
     // US-DOSSIER-010: ONE aggregation per run — the snapshot is serialized once,
     // written to truth.json AND embedded verbatim in index.html, so every
     // surface reads the same numbers from the same computation.
-    const truth = collectTruthBoardInput(cwd);
+    const truth = collectTruthBoardInput(cwd, renderNowSec(), cycleRows);
     const snapshot = buildTruthSnapshot({
       generatedAt: truth.generatedAt ?? new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
       ...(truth.collectedAt !== undefined ? { collectedAt: truth.collectedAt } : {}),
@@ -444,7 +414,10 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
         // FIX-348: cycleMergeTruth ALSO matches the row's recorded PR number, so
         // a merged delivery whose squash commit carries `(#N)` but does NOT name
         // the story-id (e.g. FIX-287 / PR #773) still reconciles to delivered.
-        cycles: reconcilePendingMergeVerdicts(collectCycleLedger(cwd), cycleMergeTruth(runCache.git)),
+        // FIX-337 (AC1): the panel reads the SAME canonical reconciled ledger the
+        // truth.json `cycle` aggregate + `roll cycles` use (pending-merge AND
+        // superseded reconciled) — built once above, never re-derived per surface.
+        cycles: cycleRows,
         agents: agentRows,
         releasePanel: collectReleasePanel(cwd),
         skills: collectSkillsPanel(cwd),

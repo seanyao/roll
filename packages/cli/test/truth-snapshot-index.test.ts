@@ -9,6 +9,7 @@ import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { indexCommand } from "../src/commands/index-gen.js";
+import { reconciledLedger, cyclesLedgerJson } from "../src/commands/cycles.js";
 
 // FIX-283: a project root OUTSIDE the OS temp dir — the unconditional tmp-skip
 // (AC3) means a cwd under tmpdir() is NEVER self-registered, even with ROLL_HOME
@@ -111,6 +112,63 @@ describe("US-DOSSIER-010 — truth.json next to index.html", () => {
     await runIndex(p);
     const snap = JSON.parse(readFileSync(join(p, ".roll", "features", "truth.json"), "utf8"));
     expect(snap.cycle.failed3d).toBe(3); // c2 failed + c3 reverted + c4 blocked; c1 delivered not counted
+  });
+
+  // FIX-337 (AC1): the truth.json `cycle` aggregate is derived from the SAME
+  // canonical reconciled ledger `roll cycles` renders — so `roll status` (reads
+  // truth.json) and `roll cycles --since 3d` can never show divergent numbers.
+  it("FIX-337 (AC1): truth.json cycle counts/cost == `roll cycles` (reconciledLedger), byte-identical口径", async () => {
+    const p = project();
+    process.env["ROLL_RENDER_NOW"] = "2026-06-13T00:00:00Z";
+    const nowSec = Math.floor(Date.parse("2026-06-13T00:00:00Z") / 1000);
+    await runIndex(p);
+    const snap = JSON.parse(readFileSync(join(p, ".roll", "features", "truth.json"), "utf8"));
+    // What `roll cycles --since 3d` (the canonical CLI source) would compute:
+    const cli = cyclesLedgerJson(reconciledLedger(p), "3d", nowSec) as {
+      cycles: number; failed: number; costByCurrency: Record<string, number>;
+    };
+    expect(snap.cycle.cycles3d).toBe(cli.cycles); // same total
+    expect(snap.cycle.failed3d).toBe(cli.failed); // same failed cluster
+    // same cost口径 (USD scalar mirrors the per-currency USD total).
+    expect(snap.cycle.costUsd3d).toBeCloseTo(cli.costByCurrency["USD"] ?? 0, 4);
+  });
+
+  // FIX-337 (AC1+AC3): a FAILED cycle whose story is backlog-Done is reconciled to
+  // `superseded` (the card landed elsewhere), so it must NOT inflate failed3d —
+  // and the SAME reconcile shows on `roll cycles`, proving the single source.
+  it("FIX-337 (AC1/AC3): a failed cycle for a Done card is `superseded` on BOTH surfaces (not counted failed)", async () => {
+    const p = mkdtempSync(join(tmpdir(), "roll-truthsnap-sup-"));
+    dirs.push(p);
+    mkdirSync(join(p, ".roll", "loop"), { recursive: true });
+    writeFileSync(
+      join(p, ".roll", "backlog.md"),
+      ["| Story | Description | Status |", "|---|---|---|", "| FIX-900 | landed manually | ✅ Done |"].join("\n") + "\n",
+    );
+    mkdirSync(join(p, ".roll", "features", "alpha", "FIX-900"), { recursive: true });
+    writeFileSync(join(p, ".roll", "features", "alpha", "FIX-900", "spec.md"), `---\nid: FIX-900\ntitle: t\n---\n# FIX-900\n`);
+    // One delivered + one FAILED cycle, both inside 3d. The failed cycle's story
+    // FIX-900 is backlog-Done → it is SUPERSEDED, not a live failure.
+    const rows = [
+      { cycle_id: "d1", status: "merged", outcome: "delivered", story_id: "US-OK", merge_commit: "abc", cost_usd: 0.5, ts: "2026-06-12T20:00:00Z" },
+      { cycle_id: "f1", status: "failed", outcome: "failed", story_id: "FIX-900", cost_usd: 0.1, ts: "2026-06-12T21:00:00Z" },
+    ];
+    writeFileSync(join(p, ".roll", "loop", "runs.jsonl"), rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+
+    process.env["ROLL_RENDER_NOW"] = "2026-06-13T00:00:00Z";
+    const nowSec = Math.floor(Date.parse("2026-06-13T00:00:00Z") / 1000);
+    await runIndex(p);
+
+    // CLI source: the failed cycle reconciles to `superseded`, so failed === 0.
+    const rec = reconciledLedger(p);
+    expect(rec.find((r) => r.cycleId === "f1")?.verdict).toBe("superseded");
+    const cli = cyclesLedgerJson(rec, "3d", nowSec) as { failed: number; buckets: Record<string, number> };
+    expect(cli.failed).toBe(0);
+    expect(cli.buckets["superseded"]).toBe(1);
+
+    // truth.json (what `roll status` reads) agrees — failed3d is 0, not 1.
+    const snap = JSON.parse(readFileSync(join(p, ".roll", "features", "truth.json"), "utf8"));
+    expect(snap.cycle.failed3d).toBe(0);
+    expect(snap.cycle.cycles3d).toBe(2);
   });
 
   // US-DOSSIER-021 — the per-story ladder + evidence registry rides the ONE snapshot.

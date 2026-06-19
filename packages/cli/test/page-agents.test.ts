@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { AgentPanelRow } from "../src/lib/agent-panel.js";
+import type { ExternalToolState } from "../src/lib/external-tools.js";
 import { renderAgentsMachinePage } from "../src/lib/page-agents.js";
 
 const AGENTS: AgentPanelRow[] = [
@@ -45,6 +46,32 @@ const AGENTS: AgentPanelRow[] = [
     costUsd72h: 0,
     files: [],
     syncStale: false,
+  },
+];
+
+const EXTERNAL_TOOLS: ExternalToolState[] = [
+  {
+    id: "screencapture",
+    label: "macOS screencapture",
+    purpose: "Terminal and GUI screenshot evidence on macOS.",
+    required: false,
+    install: "Built into macOS.",
+    authorize: "System Settings",
+    impact: "Terminal/GUI screenshots are skipped.",
+    status: "permission-missing",
+    detail: "Screen Recording permission is likely missing.",
+    repairCommand: "open x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+  },
+  {
+    id: "playwright-chromium",
+    label: "Playwright Chromium",
+    purpose: "Headless web screenshots for attest and dossier visual evidence.",
+    required: false,
+    install: "npx playwright install chromium",
+    authorize: "No OS permission needed.",
+    impact: "Web screenshot evidence is skipped.",
+    status: "ok",
+    detail: "Chromium browser files found.",
   },
 ];
 
@@ -185,5 +212,27 @@ describe("Agents machine page — acceptance criteria (US-DOSSIER-031)", () => {
     expect(none).toContain("本机未检测到 agent");
     expect(none).not.toContain("undefined");
     expect([...none.matchAll(/class="ag-row"/g)]).toHaveLength(0);
+  });
+
+  it("US-EVID-018: external tool availability renders as machine-level evidence readiness", () => {
+    const withTools = renderAgentsMachinePage({
+      brand: { name: "roll", slogan: "It just works." },
+      snapshot: { release: { latestTag: "v3.612.2" } },
+      agents: AGENTS,
+      externalTools: EXTERNAL_TOOLS,
+      projects: [],
+      currentSlug: "roll",
+    });
+
+    expect(withTools).toContain("External tools");
+    expect(withTools).toContain("外部工具");
+    expect(withTools).toContain("machine dependencies for screenshot and web evidence");
+    expect(withTools).toContain("截图与网页证据的机器依赖");
+    expect(withTools).toContain("macOS screencapture");
+    expect(withTools).toContain("permission-missing");
+    expect(withTools).toContain("Terminal/GUI screenshots are skipped.");
+    expect(withTools).toContain('class="copy-chip" data-copy="open x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"');
+    expect(withTools).toContain("Playwright Chromium");
+    expect(withTools).toContain("1/2");
   });
 });

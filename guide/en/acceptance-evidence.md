@@ -91,6 +91,29 @@ Two rules decide what the validator recognises:
   So a card that declares `deliverable_url: .roll/features/agents.html` is judged
   a **web** surface even when its AC prose mentions a `roll` command.
 
+## External tool readiness
+
+Visual evidence uses machine-level tools that are declared explicitly and probed
+at startup:
+
+- `macOS screencapture` — optional terminal/GUI screenshot capture. It is built
+  into macOS, but the terminal running `roll` must have Screen Recording
+  permission. Missing permission downgrades terminal/GUI screenshots; web
+  evidence can still use headless Chromium.
+- `Playwright Chromium` — optional headless web capture for `roll attest` and
+  dossier screenshots. Install with `npx playwright install chromium`.
+
+`roll doctor` always prints the current availability, permission state, impact,
+and repair command for these tools. `roll init` and `roll loop go` run the same
+probe at startup; in an interactive terminal they ask whether to install/open
+the missing setup steps, and in automation they stay silent unless
+`ROLL_EXTERNAL_TOOLS=yes` or `ROLL_EXTERNAL_TOOLS=no` is set. Choosing `no`
+prints the evidence impact and continues without changing the machine.
+
+The machine Agents page (`.roll/features/agents.html`) includes the same tool
+status block so a dossier reviewer can see whether evidence capture depends on
+machine setup rather than story code.
+
 ## Review Score fold
 
 When `.roll/notes/` carries the story's Review Score entry, the report ends

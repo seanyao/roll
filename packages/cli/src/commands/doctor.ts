@@ -19,6 +19,7 @@ import { delimiter, join } from "node:path";
 import { resolveLang, t, v2Catalog, v3Catalog, type Lang } from "@roll/spec";
 import { repoRoot } from "../bridge.js";
 import { generateCatalog } from "./skills.js";
+import { collectExternalTools, renderExternalToolDoctorSection } from "../lib/external-tools.js";
 
 interface Palette {
   GREEN: string;
@@ -515,6 +516,7 @@ export function doctorCommand(_args: string[]): number {
   lanesSection(lang, realLaneProbe());
   launchdStaleSection(lang);
   launchdProxySection(lang);
+  for (const l of renderExternalToolDoctorSection(collectExternalTools())) emit(l);
   process.stdout.write(out.lines.join("\n") + "\n");
   return 0;
 }

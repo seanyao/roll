@@ -14,6 +14,8 @@ import { agentWritableRoots } from "../src/runner/executor.js";
 import {
   AGENT_ARGV_TODO,
   AUTORUN_DIRECTIVE,
+  agentProfile,
+  agentSpawnEnvironment,
   type Ports,
   bootstrapWorktreeDeps,
   bootstrapWorktreePrebuild,
@@ -302,6 +304,40 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
       const { args } = buildSpawnCommand("claude", { cwd: "/wt", skillBody: "DO WORK" });
       expect(args[1]).toBe(`${AUTORUN_DIRECTIVE}DO WORK`);
     });
+  });
+});
+
+describe("US-AGENT-001 AgentProfile factory", () => {
+  it("returns one profile surface for spawn, sandbox, acceptance, and env", () => {
+    const claude = agentProfile("claude");
+    expect(claude.buildSpawnCommand({ cwd: "/wt", skillBody: "DO WORK" }).args).toContain("--add-dir");
+    expect(claude.usesWorkspaceSandbox).toBe(false);
+    expect(claude.ptyWhenPiped).toBe(false);
+    expect(claude.acceptance.canReviewHeadless).toBe(true);
+
+    const codex = agentProfile("codex");
+    expect(codex.usesWorkspaceSandbox).toBe(true);
+    expect(codex.buildSpawnCommand({ cwd: "/wt", skillBody: "DO WORK", writableRoots: ["/repo/.roll"] }).args).toContain("--add-dir");
+
+    const reasonix = agentProfile("reasonix");
+    expect(reasonix.acceptance.canReviewHeadless).toBe(true);
+    expect(reasonix.buildSpawnCommand({ cwd: "/wt", skillBody: "DO WORK" }).args.slice(0, 3)).toEqual(["run", "--dir", "/wt"]);
+  });
+
+  it("keeps CLI argv aliases in the profile layer, not downstream executor branches", () => {
+    expect(agentProfile("gemini").buildSpawnCommand({ cwd: "/wt", skillBody: "DO WORK" }).bin).toBe("agy");
+    expect(agentProfile("antigravity").buildSpawnCommand({ cwd: "/wt", skillBody: "DO WORK" }).bin).toBe("agy");
+    expect(agentProfile("deepseek").buildSpawnCommand({ cwd: "/wt", skillBody: "DO WORK" }).bin).toBe("deepseek");
+  });
+
+  it("profiles own agent-specific child env hooks", () => {
+    const home = mkdtempSync(join(tmpdir(), "reasonix-profile-home-"));
+    execDirs.push(home);
+    mkdirSync(join(home, ".reasonix"), { recursive: true });
+    writeFileSync(join(home, ".reasonix", ".env"), "DEEPSEEK_API_KEY=test-profile\n");
+
+    expect(agentSpawnEnvironment("reasonix", home)).toEqual({ DEEPSEEK_API_KEY: "test-profile" });
+    expect(agentSpawnEnvironment("claude", home)).toEqual({});
   });
 });
 

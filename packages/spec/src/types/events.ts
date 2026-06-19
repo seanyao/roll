@@ -95,7 +95,12 @@ export type RollEvent =
   // logs; multi-stage pairing stamps it so verdicts are distinguishable per stage.
   | { type: "pair:verdict"; cycleId: string; peer: string; verdict: "agree" | "refine" | "object"; findings: number; cost: number; stage?: string; ts: number }
   // US-PAIR-009: the score stage's outcome — a heterogeneous peer scored the cycle.
-  | { type: "pair:score"; cycleId: string; peer: string; score: number; verdict: "good" | "ok" | "regression"; cost: number; stage: "score"; ts: number }
+  // FIX-344: `stage` widens to `"design"` for the roll-design peer Review Score
+  // path. roll-design has NO loop cycle (no commitsAhead/worktree), so its
+  // independent peer score is triggered at skill wrap-up via `roll pair score
+  // --design` and stamped `stage: "design"` so the design score is distinguishable
+  // from a build/fix cycle's `stage: "score"` in the same event stream.
+  | { type: "pair:score"; cycleId: string; peer: string; score: number; verdict: "good" | "ok" | "regression"; cost: number; stage: "score" | "design"; ts: number }
   | { type: "pair:none-available"; cycleId: string; stage: string; reason: string; ts: number }
   // FIX-346 — a peer was REMOVED from the candidate pool after repeated headless
   // AUTH failures (expired/unavailable creds it cannot refresh non-interactively:

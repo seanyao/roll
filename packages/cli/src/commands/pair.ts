@@ -20,7 +20,7 @@ import {
 } from "@roll/core";
 import { parseEventLine, type RollEvent } from "@roll/spec";
 import { peerReviewCost } from "@roll/core";
-import { buildPairScorePrompt, parsePairScoreOutput, runScorePairing, type PairEvent } from "../runner/pairing-gate.js";
+import { buildDesignScorePrompt, buildPairScorePrompt, parsePairScoreOutput, runScorePairing, type PairEvent } from "../runner/pairing-gate.js";
 import { projectAgent, realAgentEnv } from "./agent-list.js";
 import { spawnPeerReviewAgent, type SpawnPeerReviewInput, type SpawnPeerReviewResult } from "./peer.js";
 import { loopRuntimeDir, projectSlug, sharedRoot } from "./dashboard.js";
@@ -29,14 +29,20 @@ const HELP = `Usage: roll pair <init|status|score>
   init [--force]   Scaffold .roll/pairing.yaml from installed agents.
                    File present = pairing on; delete it = off. --force overwrites.
   status           Show the pairing pool: who pairs, vendor, capability, why excluded.
-  score <story-id> [--summary <text>|--file <path>] [--skill <name>] [--worker <agent>] [--timeout-ms <ms>]
+  score <story-id> [--design] [--summary <text>|--file <path>] [--skill <name>] [--worker <agent>] [--timeout-ms <ms>]
                    Ask a fresh-session peer Reviewer to score a finished cycle
                    (US-PAIR-009/010). No peer ⇒ no Review Score (fail loud); the
                    working agent never grades its own work.
+                   --design  grade roll-design OUTPUT (INVEST split, visual-AC
+                             completeness, deliverables, domain consistency) — NOT
+                             code; stamps the score as stage=design (FIX-344).
+                             Defaults --skill to roll-design.
 
   init   从已安装的 agent 物化 .roll/pairing.yaml；文件在=开，删掉=关；--force 覆盖。
   status 显示结对池：谁能结对、厂商、能力、谁因何被排除。
   score  让独立新 session 的评审 agent 给完成的 cycle 打分；无可用评审则无评审分（诚实失败），工作 agent 永不自评。
+         --design 评 roll-design 的设计产出（INVEST 拆分、可视 AC 完整、deliverable 声明、领域一致），
+                  非代码；记为 stage=design（FIX-344）；--skill 默认 roll-design。
 `;
 
 export function pairCommand(args: string[]): number | Promise<number> {
@@ -275,11 +281,16 @@ function resolveSummary(storyId: string, summaryFlag?: string, fileFlag?: string
 
 export async function pairScore(rest: string[], deps: PairScoreCmdDeps = defaultPairScoreDeps()): Promise<number> {
   const flagsWithValue = new Set(["--summary", "--file", "--timeout-ms", "--skill", "--worker"]);
+  // FIX-344: --design is a boolean flag (grade roll-design OUTPUT, not a code cycle).
+  const boolFlags = new Set(["--design"]);
   let storyId: string | undefined;
+  let design = false;
   const flags = new Map<string, string>();
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i] as string;
-    if (flagsWithValue.has(a)) {
+    if (boolFlags.has(a)) {
+      design = true;
+    } else if (flagsWithValue.has(a)) {
       const v = rest[i + 1];
       if (v === undefined) {
         process.stderr.write(`[roll] ${a} requires a value\n${HELP}`);
@@ -315,12 +326,23 @@ export async function pairScore(rest: string[], deps: PairScoreCmdDeps = default
   }
 
   // --skill overrides the prefix heuristic (codex pair-review: a design session
-  // scoring a US id must not be labelled roll-build).
+  // scoring a US id must not be labelled roll-build). FIX-344: --design defaults
+  // the skill to roll-design (the design path's note must read scoring as a
+  // roll-design Review Score, not roll-build).
   const skill =
-    flags.get("--skill") ?? (storyId.startsWith("FIX-") || storyId.startsWith("BUG-") ? "roll-fix" : "roll-build");
-  const cycleId = `manual-${storyId}-${Math.floor(Date.now() / 1000)}`;
+    flags.get("--skill") ??
+    (design ? "roll-design" : storyId.startsWith("FIX-") || storyId.startsWith("BUG-") ? "roll-fix" : "roll-build");
+  // FIX-344: the cycle-id namespace carries the score stage so a design score's
+  // session id reads `manual-design-<id>:design:...` (the runScorePairing prefix
+  // adds the stage; the cycle id keeps the surfaces distinguishable on disk too).
+  const cycleId = `manual-${design ? "design-" : ""}${storyId}-${Math.floor(Date.now() / 1000)}`;
+  const scoreStage: "score" | "design" = design ? "design" : "score";
+  // FIX-344: roll-design produces specs/backlog, not a diff — grade DESIGN quality
+  // with the design prompt. The reply contract + parser are shared, so the note
+  // shape is identical; only the rubric and the stage label differ.
+  const buildPrompt = design ? buildDesignScorePrompt : buildPairScorePrompt;
   const scorePeer = async (peer: string, s: string, t: number) => {
-    const res = await deps.spawnReviewer({ agent: peer, projectPath: process.cwd(), prompt: buildPairScorePrompt(s), timeoutMs: t });
+    const res = await deps.spawnReviewer({ agent: peer, projectPath: process.cwd(), prompt: buildPrompt(s), timeoutMs: t });
     if (res.status !== "ok") return null;
     const parsed = parsePairScoreOutput(res.stdout);
     return parsed === null ? null : { ...parsed, cost: peerReviewCost(peer, res.stdout) };
@@ -328,7 +350,9 @@ export async function pairScore(rest: string[], deps: PairScoreCmdDeps = default
 
   // --worker pins the agent that actually delivered the cycle (codex
   // pair-review: a tier-routed cycle may not match the project default, and
-  // heterogeneity must be computed against the real author).
+  // heterogeneity must be computed against the real author). For --design this
+  // is the DESIGN agent: it triggers the score but NEVER scores its own output
+  // (the reviewer is a fresh separate session, never the worker's session).
   const worker = flags.get("--worker") ?? deps.workingAgent();
   const r = await runScorePairing(process.cwd(), join(process.cwd(), ".roll"), cycleId, worker, storyId, skill, summary, {
     installed: deps.installed,
@@ -337,6 +361,7 @@ export async function pairScore(rest: string[], deps: PairScoreCmdDeps = default
     event: appendPairEvent,
     now: () => Date.now(),
     timeoutMs,
+    scoreStage,
   });
 
   if (r.status === "scored") {
@@ -344,7 +369,7 @@ export async function pairScore(rest: string[], deps: PairScoreCmdDeps = default
     process.stdout.write(
       `Pair score written by ${r.peer}: ${r.score}/10\n` +
         `配对评分已由 ${r.peer} 写入：${r.score}/10\n` +
-        `  ${rel}\n  evidence: ${relative(process.cwd(), join(process.cwd(), ".roll", "peer", `cycle-${cycleId}.score.pair.json`))}\n`,
+        `  ${rel}\n  evidence: ${relative(process.cwd(), join(process.cwd(), ".roll", "peer", `cycle-${cycleId}.${scoreStage}.pair.json`))}\n`,
     );
     return 0;
   }

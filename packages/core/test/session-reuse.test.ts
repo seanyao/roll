@@ -170,6 +170,31 @@ describe("warm-session provenance decision contract", () => {
     });
   });
 
+  it("same-story scope selects the current story even when another card has a newer row", () => {
+    const otherNewer = {
+      ...base,
+      storyId: "FIX-999",
+      cycleId: "newer-other",
+      sessionId: "other",
+      capturedAtSec: base.capturedAtSec + 10,
+    };
+    expect(
+      decideWarmResume({
+        agent: "codex",
+        storyId: "FIX-352",
+        resumeScope: "same-story",
+        ledger: [base, otherNewer],
+        nowSec: 1781760100,
+      }),
+    ).toEqual({
+      mode: "resume",
+      reason: "selected",
+      sessionId: base.sessionId,
+      sourceCycleId: base.cycleId,
+      sourceStoryId: base.storyId,
+    });
+  });
+
   it("cross-card rows cold-fall back with scope_mismatch and source provenance", () => {
     expect(
       decideWarmResume({

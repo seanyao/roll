@@ -3,7 +3,7 @@
  * reads (US-DOSSIER-010/021). `roll index` writes `.roll/features/truth.json`
  * and embeds the SAME object in index.html; the CLI front door + `roll status`
  * consume *that* file rather than recomputing, so a number can never differ
- * between the CLI and the web Overview (the spec's one-number-everywhere rule).
+ * between the CLI and the web Now tab (the spec's one-number-everywhere rule).
  *
  * Pure derivations only — read the snapshot, then select. No git/GitHub/clock
  * access in the selectors (the render path stays byte-stable for snapshots);
@@ -46,7 +46,7 @@ export function isSnapshotStale(s: TruthSnapshot, nowMs: number): boolean {
 
 /**
  * The verdict word, derived from the snapshot with the SAME table the web
- * Overview uses (`consoleVerdict` in truth-console.ts): fail > 0 → fail,
+ * Now tab uses (`consoleVerdict` in truth-console.ts): fail > 0 → fail,
  * warn > 0 → warn, no audit → unknown, else pass. Returns the lowercase
  * vocabulary that maps to exit codes 0/1/2 (pass/warn|unknown/fail).
  */
@@ -61,7 +61,7 @@ export function snapshotVerdict(s: TruthSnapshot): TruthSnapshotVerdict {
 /**
  * Attest coverage from the per-story ladder (US-DOSSIER-021): the share of
  * stories that reached the `attested` rung. This is the SAME registry the web
- * Skills/Overview surfaces read — no independently recomputed figure (AC4).
+ * Skills/Now surfaces read — no independently recomputed figure (AC4).
  * Returns 0 when the snapshot predates the `stories[]` registry.
  */
 export function attestCoverage(s: TruthSnapshot): { pct: number; attested: number; total: number } {

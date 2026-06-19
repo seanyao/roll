@@ -13,7 +13,7 @@
  *   ① casting     — `roll cast` table   vs  the web Casting grid
  *   ② skills      — `roll skills audit`  vs  the web Skills page audit strip
  *   ③ consistency — `roll release consistency` summary vs the web 6-dim panel
- *   ④ status      — `roll status` spectrum/attest vs the web Overview tiles
+ *   ④ status      — `roll status` spectrum/attest vs the web Now tiles
  *
  * This is the ⑦ data dimension's intent: web and CLI read ONE computation. The
  * test compares each surface's RENDERED aggregate (parsed from the table / the
@@ -323,8 +323,8 @@ describe("US-DOSSIER-038 — web ↔ CLI: one number on every surface / 同一�
     expect(cliSummary.fail).toBeGreaterThanOrEqual(2);
   });
 
-  // ── ④ STATUS — `roll status` spectrum/attest vs the web Overview tiles ──────
-  it("④ status: story spectrum + attest coverage match between roll status and the web Overview", () => {
+  // ── ④ STATUS — `roll status` spectrum/attest vs the web Now tiles ───────────
+  it("④ status: story spectrum + attest coverage match between roll status and the web Now tab", () => {
     // CLI: the verdict-first summary + the machine JSON both read the SAME
     // snapshot via the SAME selectors (spectrum + attestCoverage).
     const cliText = stripAnsi(renderTruthSummary(SNAP, false, "en", 0));
@@ -332,7 +332,7 @@ describe("US-DOSSIER-038 — web ↔ CLI: one number on every surface / 同一�
       story: { attestCoveragePct: number; fail: number; done: number; unknown: number; todo: number };
     };
 
-    // WEB Overview: each spectrum count is `data-truth="spectrum-<k>"`; the total
+    // WEB Now: each spectrum count is `data-truth="spectrum-<k>"`; the total
     // is `data-truth="total"`; merged% is `data-truth="merged-pct"`.
     const web = renderConsole();
     const spectrumWeb: Record<string, number> = {};
@@ -359,7 +359,7 @@ describe("US-DOSSIER-038 — web ↔ CLI: one number on every surface / 同一�
     expect(cliJson.story.todo).toBe(spectrumWeb["todo"]);
 
     // Attest coverage (the ladder): the CLI % reads attestCoverage(SNAP); the web
-    // Overview shows merged% off the same snapshot. Pin BOTH against the snapshot
+    // Now shows merged% off the same snapshot. Pin BOTH against the snapshot
     // so a drift in either projection trips the test.
     const cov = attestCoverage(SNAP); // 2 attested of 4 stories[] = 50%
     expect(cov.attested).toBe(2);

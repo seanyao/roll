@@ -11,7 +11,7 @@
  *       trio collapses (reviewer==builder / scorer==builder / vendor clash).
  *   (c) Run — `roll loop go --cards US-DEMO-001` against the sandbox (the only
  *       non-deterministic step; real models, standard TCR).
- *   (d) Capture — fresh per-AC CLI (`roll pulse` terminal) + web (Overview pulse
+ *   (d) Capture — fresh per-AC CLI (`roll pulse` terminal) + web (Now pulse
  *       badge) screenshots via the existing capture subsystem (US-ATTEST-010);
  *       honest machine-skip when there is no GUI / no browser.
  *   (e) Assemble — TCR commits, branch/PR, heterogeneous review record, CLI+web
@@ -346,14 +346,14 @@ async function captureScreenshots(sandbox: string, card: string): Promise<Showca
     ...(cli.skipped !== undefined ? { skipped: cli.skipped } : {}),
   });
 
-  // WEB: a headless Chrome/playwright screenshot of the sandbox Overview page.
-  // `roll index` writes the Overview (index.html) into the sandbox features dir.
-  const overview = join(sandbox, ".roll", "features", "index.html");
-  const webOut = join(shotDir, "overview-pulse-badge.png");
+  // WEB: a headless Chrome/playwright screenshot of the sandbox Now page.
+  // `roll index` writes the Now console (index.html) into the sandbox features dir.
+  const nowPage = join(sandbox, ".roll", "features", "index.html");
+  const webOut = join(shotDir, "now-pulse-badge.png");
   const web = await infra.captureScreenshot({
     kind: "web",
     out: webOut,
-    url: existsSync(overview) ? `file://${overview}` : "about:blank",
+    url: existsSync(nowPage) ? `file://${nowPage}#now` : "about:blank",
   });
   shots.push({
     surface: "web",
@@ -495,12 +495,12 @@ export async function showcaseCommand(args: string[]): Promise<number> {
     const go = runRoll(sandbox, rollHome, ["loop", "go", "--cards", card, "--no-tmux"]);
     emit("loop-go", go.code === 0, go.code === 0 ? "loop cycle completed" : `loop go exited ${go.code}: ${tail(go.stderr || go.stdout)}`);
 
-    // Regenerate the dossier/truth.json so the Overview + truth ladder reflect the run.
+    // Regenerate the dossier/truth.json so the Now console + truth ladder reflect the run.
     runRoll(sandbox, rollHome, ["index", "--rebuild"]);
     // Run the attest report for the card (Gate verdict + per-AC report).
     const attest = runRoll(sandbox, rollHome, ["attest", card]);
 
-    // (d) Capture fresh per-AC screenshots (CLI terminal + web overview badge).
+    // (d) Capture fresh per-AC screenshots (CLI terminal + web Now badge).
     const screenshots = await captureScreenshots(sandbox, card);
     const cliShot = screenshots.find((s) => s.surface === "cli");
     const webShot = screenshots.find((s) => s.surface === "web");

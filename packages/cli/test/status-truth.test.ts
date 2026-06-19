@@ -2,7 +2,7 @@
  * US-DOSSIER-035 — `roll status` verdict-first truth summary (design frame 1).
  *
  * Leads with a verdict line + four tab-aligned lines (LOOP/CYCLE/RELEASE/STORY)
- * in the web Overview's name/order; the STORY line's attest coverage + counts
+ * in the web Now tab's name/order; the STORY line's attest coverage + counts
  * are read from the SAME snapshot the web reads (no recompute). EN/中 snapshots.
  */
 import { describe, expect, it } from "vitest";
@@ -47,7 +47,7 @@ describe("roll status truth summary — US-DOSSIER-035", () => {
     expect(first).toContain("exit 1");
   });
 
-  it("AC3: four tab-aligned lines in the web Overview order LOOP→CYCLE→RELEASE→STORY", () => {
+  it("AC3: four tab-aligned lines in the web Now order LOOP→CYCLE→RELEASE→STORY", () => {
     const out = sum(snap(), "en");
     const iLoop = out.indexOf("LOOP");
     const iCycle = out.indexOf("CYCLE");

@@ -400,8 +400,8 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
     // the Conventions page derives its in-sync/stale freshness from the SAME rows
     // (one口径 with the agents-on-machine panel, never a second probe).
     const agentRows = collectAgentPanel(cwd);
-    // US-DOSSIER-011: index.html IS the Truth Console now — five sticky tabs,
-    // overview first; the legacy ledger lives on under the Backlog tab.
+    // US-DOSSIER-011/043: index.html IS the Truth Console — Now-first project
+    // tabs; the legacy ledger lives on under the Backlog tab.
     writeFileSync(
       join(featuresDir, "index.html"),
       renderTruthConsole({

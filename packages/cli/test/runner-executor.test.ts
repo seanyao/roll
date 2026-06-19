@@ -2839,3 +2839,101 @@ describe("agentWritableRoots — FIX-326: a sandboxed agent can write the git-in
     expect(roots).toContain(common);
   });
 });
+
+// ── FIX-346: headless peer auth-failure exclusion + swap ─────────────────────
+describe("FIX-346 — auth-failing peer is excluded from the pool and swapped out", () => {
+  // A worktree with a story spec (no AC block → attest gate inert) so the score
+  // stage runs (commitsAhead from the git mock is 3 + a real storyId).
+  function scoreWorktree(): string {
+    const wt = realpathSync(mkdtempSync(join(tmpdir(), "roll-346-wt-")));
+    execDirs.push(wt);
+    const dir = join(wt, ".roll", "features", "uncategorized", "US-RUN-001");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "spec.md"), "---\ntitle: a story\n---\n# US-RUN-001\n\nprose only, no AC block\n");
+    return wt;
+  }
+
+  it("a peer over its consecutive auth-failure budget is NOT spawned to score; a healthy peer is swapped in + pair:excluded recorded", async () => {
+    const wt = scoreWorktree();
+    const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-346-rt-")));
+    execDirs.push(rt);
+    const eventsPath = join(rt, "events.ndjson");
+    // Pre-seed: codex already failed headless auth twice in a row → excluded.
+    const seed =
+      JSON.stringify({ type: "agent:blocked", cycleId: "c0", agent: "codex", cause: "auth", stage: "score", detail: "Please run /login", ts: 1 }) +
+      "\n" +
+      JSON.stringify({ type: "agent:blocked", cycleId: "c0", agent: "codex", cause: "auth", stage: "score", detail: "403", ts: 2 }) +
+      "\n";
+    writeFileSync(eventsPath, seed, "utf8");
+
+    const spawned: string[] = [];
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      repoCwd: rt,
+      paths: { ...base.ports.paths, worktreePath: wt, eventsPath, alertsPath: join(rt, "alerts.log") },
+      installedAgents: () => ["claude", "codex", "kimi"], // claude=builder; codex(excluded) + kimi are hetero
+      agentSpawn: vi.fn(async (agent: string) => {
+        spawned.push(agent);
+        // A valid score reply so the swapped-in peer (kimi) completes the stage.
+        return { stdout: "SCORE: 8\nVERDICT: good\nRATIONALE: clean\n", stderr: "", exitCode: 0, timedOut: false };
+      }),
+      // appendEvent writes to disk so computeExcludedPeers re-reads emitted events.
+      events: {
+        ...base.ports.events,
+        appendEvent: vi.fn((_path: string, event: RollEvent) => {
+          writeFileSync(eventsPath, `${JSON.stringify(event)}\n`, { flag: "a" });
+        }),
+      },
+    });
+
+    await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, agent: "claude", startSec: 1 });
+
+    // AC2: the auth-excluded peer (codex) was never spawned again this cycle.
+    expect(spawned).not.toContain("codex");
+    // AC2 swap: the healthy heterogeneous peer (kimi) was consulted instead.
+    expect(spawned).toContain("kimi");
+
+    // AC3: the exclusion is observable — a pair:excluded event for codex landed.
+    const events = readFileSync(eventsPath, "utf8")
+      .split("\n")
+      .filter((l) => l.trim() !== "")
+      .map((l) => JSON.parse(l) as RollEvent);
+    const excl = events.filter((e) => e.type === "pair:excluded");
+    expect(excl.length).toBe(1);
+    expect(excl[0]).toMatchObject({ type: "pair:excluded", agent: "codex", cause: "auth", failures: 2 });
+  });
+
+  it("a single prior auth failure does NOT exclude the peer (transient blip → still consulted)", async () => {
+    const wt = scoreWorktree();
+    const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-346-rt2-")));
+    execDirs.push(rt);
+    const eventsPath = join(rt, "events.ndjson");
+    writeFileSync(
+      eventsPath,
+      JSON.stringify({ type: "agent:blocked", cycleId: "c0", agent: "codex", cause: "auth", stage: "score", detail: "403", ts: 1 }) + "\n",
+      "utf8",
+    );
+    const spawned: string[] = [];
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      repoCwd: rt,
+      paths: { ...base.ports.paths, worktreePath: wt, eventsPath, alertsPath: join(rt, "alerts.log") },
+      installedAgents: () => ["claude", "codex"], // codex is the only hetero peer
+      agentSpawn: vi.fn(async (agent: string) => {
+        spawned.push(agent);
+        return { stdout: "SCORE: 7\nVERDICT: ok\nRATIONALE: fine\n", stderr: "", exitCode: 0, timedOut: false };
+      }),
+      events: {
+        ...base.ports.events,
+        appendEvent: vi.fn((_path: string, event: RollEvent) => {
+          writeFileSync(eventsPath, `${JSON.stringify(event)}\n`, { flag: "a" });
+        }),
+      },
+    });
+    await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, agent: "claude", startSec: 1 });
+    // One strike is tolerated → codex is still consulted, never excluded.
+    expect(spawned).toContain("codex");
+    const events = readFileSync(eventsPath, "utf8").split("\n").filter((l) => l.trim() !== "").map((l) => JSON.parse(l) as RollEvent);
+    expect(events.some((e) => e.type === "pair:excluded")).toBe(false);
+  });
+});

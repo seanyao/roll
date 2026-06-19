@@ -62,6 +62,9 @@ import {
   getAgentSpec,
   toCycleCost,
   pairingHistory,
+  excludedPeers,
+  peerAuthStates,
+  canonicalAgentName,
   peerReviewCost,
   sessionReuseFor,
   shouldCaptureWarmSession,
@@ -1068,6 +1071,60 @@ export async function executeCommand(
         }
         return cause;
       };
+      // FIX-346 — read the persisted event stream and fold it into the set of
+      // peers to DROP from selection because they have failed headless auth too
+      // many times in a row (agy's Google OAuth / claude's keychain cooldown —
+      // creds the unattended loop CANNOT refresh interactively). The first time a
+      // peer crosses the threshold we also emit one `pair:excluded` event so the
+      // exclusion is OBSERVABLE (AC3) — the owner sees WHY an agent stopped being
+      // consulted and can re-login it offline. Best-effort: an unreadable stream
+      // yields an empty exclusion set (no peer is wrongly benched). Re-reading the
+      // file (rather than threading the parsed list) keeps this self-contained and
+      // picks up the `agent:blocked` events `attributeBlockCause` just appended.
+      const computeExcludedPeers = (): Set<string> => {
+        try {
+          if (!existsSync(ports.paths.eventsPath)) return new Set();
+          const events = readFileSync(ports.paths.eventsPath, "utf8")
+            .split("\n")
+            .map(parseEventLine)
+            .filter((e): e is RollEvent => e !== null);
+          const states = peerAuthStates(events);
+          const excluded = excludedPeers(events);
+          // Emit `pair:excluded` only when a peer crosses the threshold for a NEW
+          // streak — i.e. it is excluded now AND the stream does not already carry a
+          // `pair:excluded` for this peer since its last success (verdict/score/
+          // reset). This keeps the announcement once-per-streak: a persistently
+          // excluded peer does NOT re-emit every cycle (the whole point of FIX-346
+          // is to KILL the per-cycle auth noise, not relocate it).
+          const announced = new Set<string>();
+          for (const e of events) {
+            if (e.type === "pair:verdict" || e.type === "pair:score") announced.delete(canonicalAgentName(e.peer));
+            else if (e.type === "pair:excluded") announced.add(canonicalAgentName(e.agent));
+          }
+          for (const peer of excluded) {
+            if (announced.has(peer)) continue; // already announced this streak
+            ports.events.appendEvent(ports.paths.eventsPath, {
+              type: "pair:excluded",
+              cycleId: ctx.cycleId ?? "",
+              agent: peer,
+              cause: "auth",
+              failures: states[peer]?.consecutiveAuthFailures ?? 0,
+              ts: eventTs(ports),
+            });
+          }
+          return excluded;
+        } catch {
+          return new Set(); // best-effort — a read miss never benches a peer
+        }
+      };
+      // `isAvailable` for selection: a peer over its consecutive-auth-failure
+      // budget is treated as UNAVAILABLE so selectPairingCandidates drops it and
+      // swaps to the next heterogeneous peer (AC2). Computed up front from the
+      // stream so far; this cycle's fresh failures bench the peer on the NEXT cycle.
+      const peerAvailable = (() => {
+        const excluded = computeExcludedPeers();
+        return (agent: string): boolean => !excluded.has(canonicalAgentName(agent));
+      })();
       // The one-way peer-consult closure, shared by the peer gate's retry
       // (FIX-293) and the opt-in pairing stages (US-PAIR-003). A different agent
       // reads the cycle diff and returns a terse verdict; 30s hard timeout
@@ -1230,7 +1287,9 @@ export async function executeCommand(
         // US-PAIR-004: build the deps once, then run each enabled stage.
         const pairingDeps = {
           installed: ports.installedAgents?.() ?? agentsInstalled(realAgentEnv()),
-          isAvailable: () => true, // MVP: `installed` is the hard gate; a dead peer → reviewPeer null (non-blocking). Real probe is a refinement.
+          // FIX-346: drop a peer that has repeatedly failed headless auth so the
+          // selector swaps to the next heterogeneous peer (no re-spawn-and-refail).
+          isAvailable: peerAvailable,
           reviewPeer,
           ...(pairHistory !== undefined ? { history: pairHistory } : {}),
           changedFiles: cycleChangedFiles,
@@ -1252,8 +1311,13 @@ export async function executeCommand(
       let peerBlocked = peerGate.blocked;
       if (peerGate.blocked) {
         // AC-H3: bounded retry — exactly one re-attempt via the existing consult.
+        // FIX-346: drop auth-excluded peers from the retry pool too — re-spawning a
+        // peer that keeps failing headless auth only re-fails (and re-pops nothing,
+        // since the spawn is headless). The next non-excluded hetero peer is tried;
+        // if none remain the retry blocks fail-loud (unchanged), never self-reviews.
+        const retryInstalled = peerGateInstalled.filter((a) => peerAvailable(a));
         const retry = await retryPeerConsult(ports.paths.worktreePath, runtimeDir, cycleIdStr, {
-          installed: peerGateInstalled,
+          installed: retryInstalled.length > 0 ? retryInstalled : peerGateInstalled,
           workingAgent: peerGateWorker,
           reviewPeer,
           diff: cycleDiff,
@@ -1350,7 +1414,10 @@ export async function executeCommand(
         // mandatory score stage is hermetic under test (no real-env spawns).
         await runScorePairing(ports.repoCwd, dirname(ports.paths.eventsPath), ctx.cycleId ?? "", ctx.agent ?? "", storyId, skill, summary, {
           installed: ports.installedAgents?.() ?? agentsInstalled(realAgentEnv()),
-          isAvailable: () => true,
+          // FIX-346: an auth-excluded peer is unavailable to score too. The score
+          // stage stays fail-loud only when the WHOLE pool is excluded (one
+          // expired agent must not fail the cycle — AC2).
+          isAvailable: peerAvailable,
           scorePeer,
           event: (e: PairEvent) => ports.events.appendEvent(ports.paths.eventsPath, e as RollEvent),
           now: () => eventTs(ports),

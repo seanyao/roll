@@ -9,7 +9,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathS
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import type { CycleCommand, CycleContext, RollEvent } from "@roll/core";
+import type { CycleCommand, CycleContext, RollEvent, WarmSessionEntry } from "@roll/core";
 import { agentWritableRoots } from "../src/runner/executor.js";
 import {
   AGENT_ARGV_TODO,
@@ -23,6 +23,7 @@ import {
   buildProjectMap,
   maybeInjectProjectMap,
   readProjectMapEnabled,
+  readResumeScope,
   readSessionReuseEnabled,
   readWarmSessions,
   warmSessionsLedgerPath,
@@ -1281,16 +1282,29 @@ describe("executeCommand — command → executor mapping", () => {
       [codexMetaLine(cwd), codexTokenLine()].join("\n") + "\n",
     );
   }
+  function warmEntry(storyId = "US-RUN-001", sessionId = "uuid-prior"): WarmSessionEntry {
+    return {
+      storyId,
+      cycleId: `cycle-${storyId}`,
+      agent: "codex",
+      sessionId,
+      worktreePath: `/tmp/${storyId}`,
+      capturedAtSec: 10,
+      cycleStartSec: 1,
+      rolloutPath: `/codex/${sessionId}.jsonl`,
+      spawnedWarm: false,
+    };
+  }
 
   it("lever-4 DEFAULT-OFF: codex spawn carries NO codexSessionId even if the ledger has one", async () => {
     const { repo, wt } = lever4Repo(); // NO policy ⇒ flag OFF
     // a stale ledger entry exists — it must be IGNORED while the flag is off.
     writeFileSync(
       join(repo, ".roll", "loop", "warm-sessions.json"),
-      JSON.stringify([{ storyId: "US-RUN-001", sessionId: "uuid-prior", ts: 1 }]),
+      JSON.stringify([warmEntry()]),
     );
     const base = fakePorts();
-    const { ports } = fakePorts({
+    const { ports, calls } = fakePorts({
       repoCwd: repo,
       paths: { ...base.ports.paths, worktreePath: wt, alertsPath: join(repo, ".roll", "loop", "ALERT.md") },
     });
@@ -1299,17 +1313,17 @@ describe("executeCommand — command → executor mapping", () => {
     const opts = (ports.agentSpawn as ReturnType<typeof vi.fn>).mock.calls[0][1] as Record<string, unknown>;
     expect(opts.codexSessionId).toBeUndefined();
     // the ledger is UNTOUCHED (not consumed) while OFF.
-    expect(readWarmSessions(repo)).toEqual([{ storyId: "US-RUN-001", sessionId: "uuid-prior", ts: 1 }]);
+    expect(readWarmSessions(repo)).toEqual([warmEntry()]);
   });
 
-  it("lever-4 ON: codex spawn resumes the prior ledger session AND consumes it (single-use)", async () => {
-    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n");
+  it("lever-4 same-story scope: codex spawn resumes a same-story ledger session AND consumes it (single-use)", async () => {
+    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n  resume_scope: same-story\n");
     writeFileSync(
       join(repo, ".roll", "loop", "warm-sessions.json"),
-      JSON.stringify([{ storyId: "FIX-PRIOR", sessionId: "uuid-prior", ts: 1 }]),
+      JSON.stringify([warmEntry("US-RUN-001", "uuid-prior")]),
     );
     const base = fakePorts();
-    const { ports } = fakePorts({
+    const { ports, calls } = fakePorts({
       repoCwd: repo,
       paths: { ...base.ports.paths, worktreePath: wt, alertsPath: join(repo, ".roll", "loop", "ALERT.md") },
     });
@@ -1318,16 +1332,68 @@ describe("executeCommand — command → executor mapping", () => {
     expect(opts.codexSessionId).toBe("uuid-prior");
     // single-use: the entry is consumed (ledger now empty).
     expect(readWarmSessions(repo)).toEqual([]);
+    const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "warm-session:resume-selected",
+        storyId: "US-RUN-001",
+        sessionId: "uuid-prior",
+        sourceCycleId: "cycle-US-RUN-001",
+        sourceStoryId: "US-RUN-001",
+      }),
+    );
+  });
+
+  it("FIX-370: session_reuse true without resume_scope does not resume", async () => {
+    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n");
+    writeFileSync(join(repo, ".roll", "loop", "warm-sessions.json"), JSON.stringify([warmEntry("US-RUN-001", "uuid-prior")]));
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      paths: { ...base.ports.paths, worktreePath: wt, alertsPath: join(repo, ".roll", "loop", "ALERT.md") },
+    });
+
+    await executeCommand({ kind: "spawn_agent", agent: "codex", attempt: 1 }, ports, { ...CTX, agent: "codex" });
+
+    const opts = (ports.agentSpawn as ReturnType<typeof vi.fn>).mock.calls[0][1] as Record<string, unknown>;
+    expect(opts.codexSessionId).toBeUndefined();
+    expect(readWarmSessions(repo)).toEqual([warmEntry("US-RUN-001", "uuid-prior")]);
+  });
+
+  it("FIX-370/FIX-371: same-story scope skips cross-card sessions with scope_mismatch", async () => {
+    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n  resume_scope: same-story\n");
+    writeFileSync(join(repo, ".roll", "loop", "warm-sessions.json"), JSON.stringify([warmEntry("FIX-OTHER", "uuid-other")]));
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      paths: { ...base.ports.paths, worktreePath: wt, alertsPath: join(repo, ".roll", "loop", "ALERT.md") },
+    });
+
+    await executeCommand({ kind: "spawn_agent", agent: "codex", attempt: 1 }, ports, { ...CTX, agent: "codex" });
+
+    const opts = (ports.agentSpawn as ReturnType<typeof vi.fn>).mock.calls[0][1] as Record<string, unknown>;
+    expect(opts.codexSessionId).toBeUndefined();
+    expect(readWarmSessions(repo)).toEqual([warmEntry("FIX-OTHER", "uuid-other")]);
+    const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "warm-session:resume-skipped",
+        storyId: "US-RUN-001",
+        reason: "scope_mismatch",
+        sourceCycleId: "cycle-FIX-OTHER",
+        sourceStoryId: "FIX-OTHER",
+      }),
+    );
   });
 
   it("lever-4 ON but NON-codex agent: cold no-op (no resume, ledger untouched)", async () => {
-    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n");
+    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n  resume_scope: same-story\n");
     writeFileSync(
       join(repo, ".roll", "loop", "warm-sessions.json"),
-      JSON.stringify([{ storyId: "FIX-PRIOR", sessionId: "uuid-prior", ts: 1 }]),
+      JSON.stringify([warmEntry("FIX-PRIOR", "uuid-prior")]),
     );
     const base = fakePorts();
-    const { ports } = fakePorts({
+    const { ports, calls } = fakePorts({
       repoCwd: repo,
       paths: { ...base.ports.paths, worktreePath: wt, alertsPath: join(repo, ".roll", "loop", "ALERT.md") },
     });
@@ -1335,11 +1401,11 @@ describe("executeCommand — command → executor mapping", () => {
     await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, { ...CTX, agent: "claude" });
     const opts = (ports.agentSpawn as ReturnType<typeof vi.fn>).mock.calls[0][1] as Record<string, unknown>;
     expect(opts.codexSessionId).toBeUndefined();
-    expect(readWarmSessions(repo)).toEqual([{ storyId: "FIX-PRIOR", sessionId: "uuid-prior", ts: 1 }]);
+    expect(readWarmSessions(repo)).toEqual([warmEntry("FIX-PRIOR", "uuid-prior")]);
   });
 
   it("lever-4 ON, empty ledger: codex spawn stays cold (no codexSessionId)", async () => {
-    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n");
+    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n  resume_scope: same-story\n");
     const base = fakePorts();
     const { ports } = fakePorts({
       repoCwd: repo,
@@ -1372,7 +1438,7 @@ describe("executeCommand — command → executor mapping", () => {
   });
 
   it("FIX-354: cleanup_worktree captures NOTHING — capture moved out, it is pure teardown now", async () => {
-    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n"); // flag ON
+    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n  resume_scope: same-story\n"); // flag ON
     const sessionsRoot = join(repo, "codex-sessions");
     writeCodexRollout(sessionsRoot, wt, "deadbeef-1111-1111-1111-111111111111");
     const base = fakePorts();
@@ -1395,7 +1461,7 @@ describe("executeCommand — command → executor mapping", () => {
   });
 
   it("lever-4 ON: spawn_agent capture-miss ALERTs (observability) and stays cold", async () => {
-    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n");
+    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n  resume_scope: same-story\n");
     const base = fakePorts();
     const { ports, calls } = fakePorts({
       repoCwd: repo,
@@ -1416,13 +1482,13 @@ describe("executeCommand — command → executor mapping", () => {
   });
 
   it("FIX-354: a PRESERVED-worktree cycle STILL captures the codex session (capture is post-agent-exit, NOT in cleanup_worktree)", async () => {
-    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n"); // flag ON
+    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n  resume_scope: same-story\n"); // flag ON
     const sessionsRoot = join(repo, "codex-sessions");
     // the agent ran and wrote a cwd-matched rollout — exactly what publish-fail
     // (FIX-351 `unpublished`) leaves on disk when it PRESERVES the worktree.
     writeCodexRollout(sessionsRoot, wt, "cafe1234-2222-2222-2222-222222222222");
     const base = fakePorts();
-    const { ports } = fakePorts({
+    const { ports, calls } = fakePorts({
       repoCwd: repo,
       paths: { ...base.ports.paths, worktreePath: wt, alertsPath: join(repo, ".roll", "loop", "ALERT.md") },
     });
@@ -1441,13 +1507,29 @@ describe("executeCommand — command → executor mapping", () => {
     expect(ledger).toHaveLength(1);
     expect(ledger[0]).toMatchObject({
       storyId: "US-RUN-001",
+      cycleId: "20260605-000000-1",
+      agent: "codex",
       sessionId: "cafe1234-2222-2222-2222-222222222222",
+      worktreePath: wt,
+      cycleStartSec: 42,
+      capturedAtSec: 42,
+      spawnedWarm: false,
     });
+    expect(ledger[0]?.rolloutPath).toContain("rollout-2026-06-14T20-00-00-cafe1234-2222-2222-2222-222222222222.jsonl");
+    const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "warm-session:capture",
+        storyId: "US-RUN-001",
+        sessionId: "cafe1234-2222-2222-2222-222222222222",
+        spawnedWarm: false,
+      }),
+    );
     expect(ports.git.worktreeRemove).not.toHaveBeenCalled(); // worktree preserved
   });
 
   it("FIX-354: lever-4 ON but NON-codex agent: post-agent-exit capture is a no-op (agent-agnostic)", async () => {
-    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n"); // flag ON
+    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n  resume_scope: same-story\n"); // flag ON
     const sessionsRoot = join(repo, "codex-sessions");
     writeCodexRollout(sessionsRoot, wt, "deadbeef-3333-3333-3333-333333333333");
     const base = fakePorts();
@@ -2873,6 +2955,18 @@ describe("lever-4 — warm-context (session-reuse) wiring helpers (default-OFF)"
     expect(readSessionReuseEnabled(repo)).toBe(true);
   });
 
+  it("FIX-370: readResumeScope is off unless explicitly same-story", () => {
+    const repo = tmpRepo();
+    const policy = join(repo, ".roll", "policy.yaml");
+    expect(readResumeScope(repo)).toBe("off");
+    writeFileSync(policy, "loop_safety:\n  session_reuse: true\n");
+    expect(readResumeScope(repo)).toBe("off");
+    writeFileSync(policy, "loop_safety:\n  session_reuse: true\n  resume_scope: same-story\n");
+    expect(readResumeScope(repo)).toBe("same-story");
+    writeFileSync(policy, "loop_safety:\n  session_reuse: true\n  resume_scope: cross-card\n");
+    expect(readResumeScope(repo)).toBe("off");
+  });
+
   // (b) The ledger lives under the PERSISTENT .roll/loop (repoCwd), NOT a worktree
   // — it must survive teardown + .roll reset like runs.jsonl.
   it("warmSessionsLedgerPath is under .roll/loop in the repo (survives worktree teardown)", () => {
@@ -2893,15 +2987,27 @@ describe("lever-4 — warm-context (session-reuse) wiring helpers (default-OFF)"
     // non-array JSON ⇒ [].
     writeFileSync(p, '{"x":1}');
     expect(readWarmSessions(repo)).toEqual([]);
-    // a well-formed ledger round-trips (only entries with string story+session).
+    // a well-formed ledger round-trips (only provenance-rich entries).
+    const entry: WarmSessionEntry = {
+      storyId: "FIX-1",
+      cycleId: "cycle-1",
+      agent: "codex",
+      sessionId: "uuid-1",
+      worktreePath: "/tmp/wt",
+      capturedAtSec: 5,
+      cycleStartSec: 4,
+      rolloutPath: "/codex/uuid-1.jsonl",
+      spawnedWarm: false,
+    };
     writeFileSync(
       p,
       JSON.stringify([
-        { storyId: "FIX-1", sessionId: "uuid-1", ts: 5 },
+        entry,
         { storyId: 42, sessionId: "bad" }, // dropped (storyId not a string)
+        { storyId: "FIX-legacy", sessionId: "legacy", ts: 1 }, // legacy shape ignored
       ]),
     );
-    expect(readWarmSessions(repo)).toEqual([{ storyId: "FIX-1", sessionId: "uuid-1", ts: 5 }]);
+    expect(readWarmSessions(repo)).toEqual([entry]);
   });
 });
 

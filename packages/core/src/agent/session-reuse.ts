@@ -8,24 +8,53 @@
  * `sessionReuse: 'codex-exec-resume'` (codex) gets the warm adapter; every other
  * engine gets the COLD no-op adapter, the universal default.
  *
- * This module is PURE + zero-IO: the ledger is passed IN (the CLI does the file
- * read/write/consume around it), so the matching policy is unit-testable in
- * isolation. Matching is NEXT-CARD-ONLY, SINGLE-USE — keyed by the prior card's
- * storyId, consumed on resume by the caller. The adapter only resolves; it never
- * widens to same-epic / retry.
+ * This module is PURE + zero-IO: rollout evidence and the ledger are passed IN
+ * (the CLI does the file read/write/consume around it), so capture and matching
+ * policy are unit-testable in isolation.
  */
 import type { AgentUsageSpec } from "./specs.js";
 
 /** One captured warm-session, persisted by the CLI to the loop ledger. The
  *  adapter reads these but never writes — it is pure. */
 export interface WarmSessionEntry {
-  /** The storyId of the card whose session this is — the resume key. */
   storyId: string;
-  /** The agent's resumable session id (codex: the `exec resume <id>` UUID). */
+  cycleId: string;
+  agent: string;
   sessionId: string;
-  /** Capture timestamp (epoch seconds) — for ledger audit / staleness, not used
-   *  by the next-card matcher. */
-  ts: number;
+  worktreePath: string;
+  capturedAtSec: number;
+  cycleStartSec: number;
+  rolloutPath?: string;
+  spawnedWarm: boolean;
+}
+
+export type ResumeScope = "off" | "same-story" | "cross-card-experimental";
+
+export interface ResumeDecision {
+  mode: "cold" | "resume";
+  reason:
+    | "policy_off"
+    | "agent_unsupported"
+    | "no_prior_session"
+    | "scope_mismatch"
+    | "stale_session"
+    | "selected";
+  sessionId?: string;
+  sourceCycleId?: string;
+  sourceStoryId?: string;
+}
+
+export interface CaptureWarmSessionInput {
+  storyId: string;
+  cycleId: string;
+  agent: string;
+  sessionId: string;
+  worktreePath: string;
+  rolloutPath?: string;
+  rolloutMtimeSec: number;
+  cycleStartSec: number;
+  capturedAtSec: number;
+  spawnedWarm: boolean;
 }
 
 /**
@@ -72,11 +101,9 @@ const CODEX_RESUME_ADAPTER: SessionReuseAdapter = {
   supportsReuse: () => true,
   resolvePriorSessionId: (ledger, priorStoryId) => {
     if (!priorStoryId) return null;
-    // NEXT-CARD-ONLY: the most recent entry keyed by this exact storyId. Scan
-    // from the end so a re-capture of the same card supersedes an older one.
     for (let i = ledger.length - 1; i >= 0; i--) {
       const e = ledger[i];
-      if (e && e.storyId === priorStoryId && typeof e.sessionId === "string" && e.sessionId !== "") {
+      if (isWarmSessionEntry(e) && e.storyId === priorStoryId && e.agent === "codex") {
         return e.sessionId;
       }
     }
@@ -116,4 +143,97 @@ export function sessionReuseFor(_agent: string, spec: AgentUsageSpec | undefined
  * twice; it does NOT stop the chain from extending — this cap does). */
 export function shouldCaptureWarmSession(spawnedWarm: boolean): boolean {
   return !spawnedWarm;
+}
+
+export function captureWarmSession(input: CaptureWarmSessionInput): WarmSessionEntry | null {
+  if (!shouldCaptureWarmSession(input.spawnedWarm)) return null;
+  if (input.rolloutMtimeSec < input.cycleStartSec) return null;
+  if (input.storyId.trim() === "" || input.cycleId.trim() === "") return null;
+  if (input.agent.trim() === "" || input.sessionId.trim() === "") return null;
+  if (input.worktreePath.trim() === "") return null;
+  return {
+    storyId: input.storyId,
+    cycleId: input.cycleId,
+    agent: input.agent,
+    sessionId: input.sessionId,
+    worktreePath: input.worktreePath,
+    capturedAtSec: input.capturedAtSec,
+    cycleStartSec: input.cycleStartSec,
+    ...(input.rolloutPath !== undefined && input.rolloutPath !== "" ? { rolloutPath: input.rolloutPath } : {}),
+    spawnedWarm: input.spawnedWarm,
+  };
+}
+
+export function decideWarmResume(input: {
+  agent: string;
+  storyId: string;
+  resumeScope: ResumeScope;
+  ledger: readonly WarmSessionEntry[];
+  nowSec: number;
+}): ResumeDecision {
+  if (input.resumeScope === "off") return { mode: "cold", reason: "policy_off" };
+  if (input.agent !== "codex") return { mode: "cold", reason: "agent_unsupported" };
+
+  const newest = newestValidEntry(input.ledger, input.agent);
+  if (newest === null) return { mode: "cold", reason: "no_prior_session" };
+
+  if (input.resumeScope === "same-story" && newest.storyId !== input.storyId) {
+    return {
+      mode: "cold",
+      reason: "scope_mismatch",
+      sourceCycleId: newest.cycleId,
+      sourceStoryId: newest.storyId,
+    };
+  }
+
+  if (input.resumeScope === "cross-card-experimental") {
+    return {
+      mode: "cold",
+      reason: "scope_mismatch",
+      sourceCycleId: newest.cycleId,
+      sourceStoryId: newest.storyId,
+    };
+  }
+
+  return {
+    mode: "resume",
+    reason: "selected",
+    sessionId: newest.sessionId,
+    sourceCycleId: newest.cycleId,
+    sourceStoryId: newest.storyId,
+  };
+}
+
+function newestValidEntry(ledger: readonly WarmSessionEntry[], agent: string): WarmSessionEntry | null {
+  let newest: WarmSessionEntry | null = null;
+  for (const entry of ledger) {
+    if (!isWarmSessionEntry(entry)) continue;
+    if (entry.agent !== agent) continue;
+    if (entry.spawnedWarm) continue;
+    if (newest === null || entry.capturedAtSec >= newest.capturedAtSec) newest = entry;
+  }
+  return newest;
+}
+
+export function isWarmSessionEntry(value: unknown): value is WarmSessionEntry {
+  if (typeof value !== "object" || value === null) return false;
+  const rec = value as Record<string, unknown>;
+  return (
+    typeof rec["storyId"] === "string" &&
+    rec["storyId"] !== "" &&
+    typeof rec["cycleId"] === "string" &&
+    rec["cycleId"] !== "" &&
+    typeof rec["agent"] === "string" &&
+    rec["agent"] !== "" &&
+    typeof rec["sessionId"] === "string" &&
+    rec["sessionId"] !== "" &&
+    typeof rec["worktreePath"] === "string" &&
+    rec["worktreePath"] !== "" &&
+    typeof rec["capturedAtSec"] === "number" &&
+    Number.isFinite(rec["capturedAtSec"]) &&
+    typeof rec["cycleStartSec"] === "number" &&
+    Number.isFinite(rec["cycleStartSec"]) &&
+    typeof rec["spawnedWarm"] === "boolean" &&
+    (rec["rolloutPath"] === undefined || typeof rec["rolloutPath"] === "string")
+  );
 }

@@ -24,6 +24,37 @@ export type RollEvent =
   | { type: "cycle:tcr"; cycleId: string; commitHash: string; message: string; ts: number; commitTs?: number }
   | { type: "cycle:first_edit"; cycleId: string; commitHash: string; ts: number }
   | { type: "cycle:end"; cycleId: string; outcome: TerminalOutcome; cost: CycleCost; ts: number }
+  | {
+      type: "warm-session:resume-selected";
+      cycleId: string;
+      storyId: string;
+      agent: AgentId;
+      sessionId: string;
+      sourceCycleId: string;
+      sourceStoryId: string;
+      reason: "selected";
+      ts: number;
+    }
+  | {
+      type: "warm-session:resume-skipped";
+      cycleId: string;
+      storyId: string;
+      agent: AgentId;
+      reason: "policy_off" | "agent_unsupported" | "no_prior_session" | "scope_mismatch" | "stale_session";
+      sourceCycleId?: string;
+      sourceStoryId?: string;
+      ts: number;
+    }
+  | {
+      type: "warm-session:capture";
+      cycleId: string;
+      storyId: string;
+      agent: AgentId;
+      sessionId: string;
+      rolloutPath?: string;
+      spawnedWarm: boolean;
+      ts: number;
+    }
   // Routing (BC3) — auditable, reproducible (I10)
   | { type: "route:resolve"; storyId: string; level: TaskLevel; agent: AgentId; model: string; rule: string; ts: number }
   // Delivery (BC4)

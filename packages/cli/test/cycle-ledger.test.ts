@@ -3,7 +3,16 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { collectCycleLedger, ledgerFailedCount, ledgerVerdict, reconcilePendingMergeVerdicts } from "../src/lib/cycle-ledger.js";
+import {
+  bucketCounts,
+  collectCycleLedger,
+  CYCLE_VERDICTS,
+  ledgerFailedCount,
+  ledgerVerdict,
+  reconcilePendingMergeVerdicts,
+  reconcileSupersededVerdicts,
+  type CycleLedgerRow,
+} from "../src/lib/cycle-ledger.js";
 import { cycleMergeTruth, gitHasPrMergeCommit } from "../src/lib/story-dossier.js";
 
 const dirs: string[] = [];
@@ -575,5 +584,139 @@ describe("kimi pair-review regressions", () => {
     const peer = collectCycleLedger(p)[0]?.tape.find((s) => s.key === "peer");
     expect(peer?.state).toBe("idle");
     expect(peer?.detail).toBe("skipped");
+  });
+});
+
+describe("FIX-337 (AC3) — reconcileSupersededVerdicts: a card delivered elsewhere stops inflating failed", () => {
+  function row(verdict: ReturnType<typeof ledgerVerdict>, storyId: string): CycleLedgerRow {
+    return {
+      cycleId: `c-${storyId}-${verdict}`,
+      tsSec: 1781230000,
+      verdict,
+      storyId,
+      agent: "claude",
+      model: "claude",
+      tokens: "—",
+      cost: "—",
+      toolSummary: "",
+      toolCosts: [],
+      toolTimeline: [],
+      duration: "—",
+      tape: [
+        { key: "end", detail: verdict, state: verdict === "delivered" ? "pass" : "fail" },
+      ],
+      evidence: [],
+    };
+  }
+
+  it("a FAILED cycle whose story is superseded → `superseded` (neutral grey end), no longer failed", () => {
+    const rows = [row("failed", "FIX-900"), row("delivered", "US-OK")];
+    const out = reconcileSupersededVerdicts(rows, (id) => id === "FIX-900");
+    const f = out.find((r) => r.storyId === "FIX-900")!;
+    expect(f.verdict).toBe("superseded");
+    expect(f.tape.find((s) => s.key === "end")?.state).toBe("idle"); // neutral, not red
+    expect(f.tape.find((s) => s.key === "end")?.detail).toBe("superseded");
+    expect(ledgerFailedCount(out)).toBe(0); // the failure no longer counts
+  });
+
+  it("blocked/reverted/pending_merge are eligible; delivered/idle/unpublished/unknown are not", () => {
+    const rows = [
+      row("blocked", "B"),
+      row("reverted", "R"),
+      row("pending_merge", "P"),
+      row("delivered", "D"),
+      row("idle", "I"),
+      row("unpublished", "U"),
+      row("unknown", "K"),
+    ];
+    const out = reconcileSupersededVerdicts(rows, () => true); // every story superseded
+    const byStory = new Map(out.map((r) => [r.storyId, r.verdict]));
+    expect(byStory.get("B")).toBe("superseded");
+    expect(byStory.get("R")).toBe("superseded");
+    expect(byStory.get("P")).toBe("superseded");
+    // terminal / non-failure verdicts are never touched.
+    expect(byStory.get("D")).toBe("delivered");
+    expect(byStory.get("I")).toBe("idle");
+    expect(byStory.get("U")).toBe("unpublished");
+    expect(byStory.get("K")).toBe("unknown");
+  });
+
+  it("a failed cycle whose story is NOT superseded stays failed (red)", () => {
+    const out = reconcileSupersededVerdicts([row("failed", "FIX-LIVE")], () => false);
+    expect(out[0]!.verdict).toBe("failed");
+    expect(ledgerFailedCount(out)).toBe(1);
+  });
+
+  it("an empty story-id has nothing to match on → left untouched even if the probe says true", () => {
+    const out = reconcileSupersededVerdicts([row("failed", "")], () => true);
+    expect(out[0]!.verdict).toBe("failed");
+  });
+});
+
+describe("FIX-337 (AC2) — bucketCounts: every verdict bucket, sum === rows.length", () => {
+  function r(verdict: ReturnType<typeof ledgerVerdict>): CycleLedgerRow {
+    return {
+      cycleId: `c-${verdict}-${Math.random()}`,
+      tsSec: 1781230000,
+      verdict,
+      storyId: "",
+      agent: "",
+      model: "—",
+      tokens: "—",
+      cost: "—",
+      toolSummary: "",
+      toolCosts: [],
+      toolTimeline: [],
+      duration: "—",
+      tape: [],
+      evidence: [],
+    };
+  }
+
+  it("keys on the full CYCLE_VERDICTS order; unseen buckets are 0, never absent", () => {
+    const counts = bucketCounts([r("delivered"), r("failed"), r("superseded")]);
+    for (const v of CYCLE_VERDICTS) expect(counts).toHaveProperty(v); // every key present
+    expect(counts.delivered).toBe(1);
+    expect(counts.failed).toBe(1);
+    expect(counts.superseded).toBe(1);
+    expect(counts.idle).toBe(0); // unseen → 0
+  });
+
+  it("the sum of all buckets equals the row count (the AC invariant)", () => {
+    const rows = [
+      r("delivered"), r("delivered"),
+      r("pending_merge"), r("unpublished"), r("superseded"),
+      r("failed"), r("reverted"), r("blocked"),
+      r("idle"), r("unknown"),
+    ];
+    const counts = bucketCounts(rows);
+    const summed = CYCLE_VERDICTS.reduce((a, v) => a + counts[v], 0);
+    expect(summed).toBe(rows.length); // 10
+  });
+});
+
+describe("FIX-290/FIX-337 (AC4) — failed AND idle real cycles keep model + duration", () => {
+  it("an idle-verdict cycle that picked a story keeps model + duration; tokens honest", () => {
+    // a real idle cycle (story picked) — NOT a heartbeat, so it is kept. Its
+    // model + duration must still render; tokens are an honest "—" (true-0).
+    const p = project([
+      { cycle_id: "idle-real", status: "idle", story_id: "US-9", agent: "kimi", model: "kimi-k2", ts: "2026-06-12T05:00:00Z", duration_sec: 300 },
+    ]);
+    const r = collectCycleLedger(p)[0]!;
+    expect(r.verdict).toBe("idle");
+    expect(r.model).toBe("kimi-k2"); // present, not dropped
+    expect(r.duration).toBe("5m00s"); // present
+    expect(r.tokens).toBe("—"); // true-0 (no usage_unknown flag) — never "?"
+  });
+
+  it("a failed cycle with readable 0 tokens shows '—', model + duration intact", () => {
+    const p = project([
+      { cycle_id: "f0", status: "failed", outcome: "failed", story_id: "US-F", agent: "pi", model: "gpt-5", ts: "2026-06-12T05:00:00Z", duration_sec: 90, tokens_in: 0, tokens_out: 0 },
+    ]);
+    const r = collectCycleLedger(p)[0]!;
+    expect(r.verdict).toBe("failed");
+    expect(r.model).toBe("gpt-5");
+    expect(r.duration).toBe("1m30s");
+    expect(r.tokens).toBe("—");
   });
 });

@@ -12,6 +12,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { join } from "node:path";
 import { t, v2Catalog } from "@roll/spec";
 import { agentListCommand, currentLang, realAgentEnv } from "./agent-list.js";
+import { refreshAggregates } from "./index-gen.js";
 
 const VALID_SLOTS: AgentSlot[] = ["easy", "default", "hard", "fallback"];
 
@@ -25,6 +26,7 @@ export interface AgentCommandDeps {
   removeFile?: (path: string) => void;
   readLine?: () => string | undefined;
   listCommand?: (args: string[]) => number;
+  refreshAggregates?: (cwd: string) => void;
 }
 
 function pal(): { RED: string; GREEN: string; YELLOW: string; NC: string } {
@@ -51,7 +53,7 @@ function m(key: string, ...args: string[]): string {
   return t(v2Catalog, currentLang(), key, ...args);
 }
 
-function depsWithDefaults(deps: AgentCommandDeps): Required<Omit<AgentCommandDeps, "readLine">> &
+function depsWithDefaults(deps: AgentCommandDeps): Required<Omit<AgentCommandDeps, "readLine" | "refreshAggregates">> &
   Pick<AgentCommandDeps, "readLine"> {
   return {
     env: deps.env ?? realAgentEnv(),
@@ -141,6 +143,12 @@ function useCommand(args: string[], deps: AgentCommandDeps): number {
   }
   syncLocalAgent(name, d);
   ok(m("agent.use_locked", agentDisplayName(name)));
+  // FIX-378: refresh dossier aggregates so #agents panel reflects the new slots
+  try {
+    (deps.refreshAggregates ?? refreshAggregates)(process.cwd());
+  } catch {
+    // best-effort: slot write already committed; WARN already emitted by refreshAggregates
+  }
   return 0;
 }
 
@@ -197,6 +205,12 @@ function setCommand(args: string[], deps: AgentCommandDeps): number {
     return 1;
   }
   ok(m("agent.set_saved", slot, agentDisplayName(agent)));
+  // FIX-378: refresh dossier aggregates so #agents panel reflects the new slot
+  try {
+    (deps.refreshAggregates ?? refreshAggregates)(process.cwd());
+  } catch {
+    // best-effort: slot write already committed; WARN already emitted by refreshAggregates
+  }
   return 0;
 }
 

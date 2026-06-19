@@ -325,3 +325,88 @@ describe("pairingPoolView — capability must overlap an enabled stage (codex pa
     expect(codex.reason).toContain("enabled stage");
   });
 });
+
+// ── FIX-346: auth-failure pool exclusion ─────────────────────────────────────
+import {
+  excludedPeers,
+  peerAuthStates,
+  DEFAULT_AUTH_EXCLUDE_THRESHOLD,
+  aggregatePairingCost,
+} from "../src/index.js";
+
+const blocked = (agent: string, cause: "auth" | "network" = "auth"): any => ({
+  type: "agent:blocked",
+  cycleId: "c",
+  agent,
+  cause,
+  stage: "review",
+  detail: "",
+  ts: 1,
+});
+const verdict = (peer: string): any => ({
+  type: "pair:verdict",
+  cycleId: "c",
+  peer,
+  verdict: "agree",
+  findings: 0,
+  cost: 0,
+  stage: "code",
+  ts: 1,
+});
+
+describe("peerAuthStates / excludedPeers (FIX-346)", () => {
+  it("default threshold is two strikes", () => {
+    expect(DEFAULT_AUTH_EXCLUDE_THRESHOLD).toBe(2);
+  });
+
+  it("a single auth failure does NOT exclude (transient blip tolerated)", () => {
+    const ex = excludedPeers([blocked("claude")]);
+    expect(ex.has("claude")).toBe(false);
+    expect(peerAuthStates([blocked("claude")]).claude).toEqual({
+      consecutiveAuthFailures: 1,
+      excluded: false,
+    });
+  });
+
+  it("two consecutive auth failures exclude the peer", () => {
+    const ex = excludedPeers([blocked("claude"), blocked("claude")]);
+    expect(ex.has("claude")).toBe(true);
+    expect(peerAuthStates([blocked("claude"), blocked("claude")]).claude.excluded).toBe(true);
+  });
+
+  it("a successful verdict RESETS the streak (re-login recovers the peer)", () => {
+    const ex = excludedPeers([blocked("claude"), verdict("claude"), blocked("claude")]);
+    expect(ex.has("claude")).toBe(false);
+    expect(peerAuthStates([blocked("claude"), verdict("claude"), blocked("claude")]).claude.consecutiveAuthFailures).toBe(1);
+  });
+
+  it("network blocks NEVER exclude (transient connectivity, not bad creds)", () => {
+    const ex = excludedPeers([blocked("kimi", "network"), blocked("kimi", "network"), blocked("kimi", "network")]);
+    expect(ex.has("kimi")).toBe(false);
+  });
+
+  it("excludes one auth-failing peer while leaving a healthy peer in the pool (swap)", () => {
+    const ex = excludedPeers([blocked("claude"), blocked("claude"), verdict("codex")]);
+    expect(ex.has("claude")).toBe(true);
+    expect(ex.has("codex")).toBe(false);
+  });
+
+  it("canonicalises the agent name (alias collapses to the canonical peer)", () => {
+    const ex = excludedPeers([blocked("gemini"), blocked("gemini")]);
+    expect(ex.has("agy")).toBe(true); // gemini → agy
+  });
+});
+
+describe("aggregatePairingCost — pair:excluded (FIX-346)", () => {
+  it("surfaces the most-recent exclusion failure count per peer", () => {
+    const s = aggregatePairingCost([
+      { type: "pair:excluded", cycleId: "c1", agent: "claude", cause: "auth", failures: 2, ts: 1 },
+      { type: "pair:excluded", cycleId: "c2", agent: "claude", cause: "auth", failures: 5, ts: 2 },
+    ] as any[]);
+    expect(s.excludedPeers).toEqual({ claude: 5 });
+  });
+
+  it("empty stream → no excluded peers", () => {
+    expect(aggregatePairingCost([]).excludedPeers).toEqual({});
+  });
+});

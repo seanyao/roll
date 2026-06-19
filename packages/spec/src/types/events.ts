@@ -97,6 +97,16 @@ export type RollEvent =
   // US-PAIR-009: the score stage's outcome — a heterogeneous peer scored the cycle.
   | { type: "pair:score"; cycleId: string; peer: string; score: number; verdict: "good" | "ok" | "regression"; cost: number; stage: "score"; ts: number }
   | { type: "pair:none-available"; cycleId: string; stage: string; reason: string; ts: number }
+  // FIX-346 — a peer was REMOVED from the candidate pool after repeated headless
+  // AUTH failures (expired/unavailable creds it cannot refresh non-interactively:
+  // agy's Google OAuth, claude's macOS keychain/auth-daemon cooldown, …). The loop
+  // must NEVER pop an interactive login or pull the owner into auth for an
+  // unattended cycle, so once an agent has failed auth `failures` times in a row it
+  // is dropped from selection (the next heterogeneous peer is swapped in) instead of
+  // being re-spawned — and re-failing — every cycle. `cause` is always "auth"
+  // today (network blocks are transient and not pool-excluded). Observable so the
+  // owner sees WHY an agent stopped being consulted (and can re-login it offline).
+  | { type: "pair:excluded"; cycleId: string; agent: string; cause: "auth"; failures: number; ts: number }
   // FIX-319 — wall-clock timing of EVERY heterogeneous peer consult (the
   // reviewPeer spawn), success or not, so the 120s hard timeout can be tuned
   // empirically from real data instead of guessed. outcome: a parsed verdict

@@ -57,7 +57,7 @@ and the navigation table is the single map agents need.
 Any agent entering the project can navigate to authoritative sources without
 scanning the whole tree.
 
-## Legacy Projects: `$roll-onboard` and `$roll-doc`
+## Legacy Projects: `$roll-onboard` and `$roll-doc-audit`
 
 For an existing codebase with no `.roll/` yet, the entry point is
 `$roll-onboard` (the **graft** adoption pattern). It scans the code, asks a
@@ -67,15 +67,17 @@ turns that plan into the on-disk structure — see
 [legacy-onboarding.md](legacy-onboarding.md) and
 [patterns/](patterns/README.md).
 
-For projects that already have `AGENTS.md` but scattered docs:
+For projects that already have `AGENTS.md` but scattered or stale docs:
 
 ```bash
-$roll-doc
+$roll-doc-audit
 ```
 
-`roll-doc` infers the domain structure from existing code, refreshes the
-`Where to Look` navigation table, and flags documentation gaps (missing
-architecture docs, undocumented public APIs) for `$roll-build` to fill.
+`roll-doc-audit` checks README, guides, site pages, CLI help, and docs against
+implemented behavior. When inventory is requested, it infers domain structure
+from existing code, refreshes the `Where to Look` navigation table, and flags
+documentation gaps (missing architecture docs, undocumented public APIs) for
+`$roll-build` to fill.
 
 ## Global Conventions
 

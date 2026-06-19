@@ -21,7 +21,7 @@ window.RollSkillDiagrams = {
         ] },
         { key: "build", label: { en: "Analyze", zh: "分析" }, steps: [
           { no: "STEP 1b", title: { en: "Domain, tech and test assessment", zh: "领域、技术与测试评估" }, desc: { en: "Produce bounded contexts, stack/dependency risks and test evidence from real filesystem scans. Test claims carry <code>detected</code> or <code>inferred</code> evidence tags.", zh: "产出 bounded context、技术栈/依赖风险，以及来自真实文件扫描的测试证据。测试结论必须带 <code>detected</code> 或 <code>inferred</code> 标签。" }, chips: ["evidence"] },
-          { no: "STEP 2", title: { en: "Read-only doc gap report", zh: "只读文档缺口报告" }, desc: { en: "Run <code>roll-doc --dry-run</code> to find missing Roll artifacts and docs that can be included rather than regenerated.", zh: "运行 <code>roll-doc --dry-run</code> 找出缺失的 Roll 产物，以及可复用而非重写的现有文档。" } }
+          { no: "STEP 2", title: { en: "Read-only doc gap report", zh: "只读文档缺口报告" }, desc: { en: "Run <code>roll-doc-audit --dry-run</code> to find missing Roll artifacts and docs that can be included rather than regenerated.", zh: "运行 <code>roll-doc-audit --dry-run</code> 找出缺失的 Roll 产物，以及可复用而非重写的现有文档。" } }
         ] },
         { key: "ship", label: { en: "Plan", zh: "计划" }, steps: [
           { no: "STEP 3", title: { en: "Nine questions across three groups", zh: "三组九问" }, desc: { en: "Ask about scope/privacy, workflow and conventions. User answers become hard constraints, not suggestions.", zh: "围绕范围/隐私、工作流与约定提问。用户答案成为硬约束，不是建议。" } },
@@ -196,29 +196,31 @@ window.RollSkillDiagrams = {
       ]
     },
     {
-      id: "roll-doc",
-      name: "$roll-doc",
-      title: { en: "Documentation Inventory and Drafting", zh: "文档盘点与补齐" },
-      sub: { en: "Scan. Index. Detect gaps. Draft from code.", zh: "扫描、建索引、找缺口、基于代码补文档。" },
+      id: "roll-doc-audit",
+      name: "$roll-doc-audit",
+      title: { en: "Documentation/Product Consistency Audit", zh: "文档/产品一致性审计" },
+      sub: { en: "Compare surfaces. Index gaps. Draft from evidence.", zh: "核对表面、索引缺口、基于证据起草。" },
       lede: {
-        en: "Inventory documentation, generate <code>docs/INDEX.md</code>, detect undocumented modules, and draft fills from source evidence. It is a documentation tool, not a presentation generator.",
-        zh: "盘点文档、生成 <code>docs/INDEX.md</code>、识别未文档化模块，并从源码证据起草补全文档。它是文档工具，不是演示稿生成器。"
+        en: "Check README, guides, site pages, CLI help, and docs against implemented behavior. When inventory is requested, generate <code>docs/INDEX.md</code>, detect undocumented modules, and draft fills from source evidence.",
+        zh: "核对 README、指南、网站页面、CLI help 与文档是否匹配真实实现。需要盘点时，生成 <code>docs/INDEX.md</code>、识别未文档化模块，并从源码证据起草补全文档。"
       },
       modes: [
+        { tag: "AUD", title: { en: "Audit", zh: "审计" }, body: { en: "Compare user-facing docs and site copy with real code behavior.", zh: "把用户可见文档和网站文案对照真实代码行为。" } },
         { tag: "INV", title: { en: "Inventory", zh: "盘点" }, body: { en: "Map docs and code surfaces into an indexable structure.", zh: "把文档与代码表面整理为可索引结构。" } },
         { tag: "FILL", title: { en: "Draft fills", zh: "起草补齐" }, body: { en: "Write missing docs only from current code evidence.", zh: "只基于当前代码证据补齐缺失文档。" } }
       ],
       merge: { en: "▼ docs stay linked to real source behavior ▼", zh: "▼ 文档始终锚定真实源码行为 ▼" },
       bands: [
-        { key: "plan", label: { en: "Scan", zh: "扫描" }, steps: [
-          { no: "STEP 1", title: { en: "Scan docs and code surfaces", zh: "扫描文档与代码表面" }, desc: { en: "Find existing docs, modules, public entry points and README-level promises.", zh: "找出现有文档、模块、公共入口与 README 层承诺。" } }
+        { key: "plan", label: { en: "Compare", zh: "核对" }, steps: [
+          { no: "STEP 1", title: { en: "Scan user and code surfaces", zh: "扫描用户与代码表面" }, desc: { en: "Read README, guides, site pages, CLI help, tests and source before making a drift claim.", zh: "先读 README、指南、网站页面、CLI help、测试与源码，再判断是否漂移。" } },
+          { no: "STEP 2", title: { en: "Report drift first", zh: "先报告漂移" }, desc: { en: "Name mismatches, stale promises and missing docs are findings before they become draft edits.", zh: "命名不一致、过期承诺、缺文档先作为发现报告，再进入草稿修改。" }, gate: true }
         ] },
         { key: "build", label: { en: "Index", zh: "建索引" }, steps: [
-          { no: "STEP 2", title: { en: "Generate or update docs/INDEX.md", zh: "生成或更新 docs/INDEX.md" }, desc: { en: "Keep docs navigable and linked so future agents can find the right source quickly.", zh: "让文档可导航、可链接，后续 agent 能快速找到正确来源。" } },
-          { no: "STEP 3", title: { en: "Identify undocumented modules", zh: "识别未文档化模块" }, desc: { en: "Gap detection is evidence-based; filenames alone are not behavior.", zh: "缺口识别基于证据；文件名本身不等于行为。" }, gate: true }
+          { no: "STEP 3", title: { en: "Generate or update docs/INDEX.md", zh: "生成或更新 docs/INDEX.md" }, desc: { en: "Keep docs navigable and linked so future agents can find the right source quickly.", zh: "让文档可导航、可链接，后续 agent 能快速找到正确来源。" } },
+          { no: "STEP 4", title: { en: "Identify undocumented modules", zh: "识别未文档化模块" }, desc: { en: "Gap detection is evidence-based; filenames alone are not behavior.", zh: "缺口识别基于证据；文件名本身不等于行为。" }, gate: true }
         ] },
         { key: "ship", label: { en: "Draft", zh: "起草" }, steps: [
-          { no: "STEP 4", title: { en: "Draft from source evidence", zh: "基于源码证据起草" }, desc: { en: "Summaries, usage notes and module docs must trace to current code, tests or existing docs.", zh: "摘要、用法说明与模块文档必须能追溯到当前代码、测试或现有文档。" } }
+          { no: "STEP 5", title: { en: "Draft from source evidence", zh: "基于源码证据起草" }, desc: { en: "Summaries, usage notes and module docs must trace to current code, tests or existing docs.", zh: "摘要、用法说明与模块文档必须能追溯到当前代码、测试或现有文档。" } }
         ] },
         { key: "verify", label: { en: "Keep Honest", zh: "保持真实" }, steps: [
           { no: "GATE", title: { en: "No invented behavior", zh: "不编造行为" }, desc: { en: "If behavior cannot be evidenced, leave it out or mark it as unknown.", zh: "无法从证据确认的行为，宁可不写或标未知。" }, gate: true }

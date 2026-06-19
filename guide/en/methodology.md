@@ -41,7 +41,7 @@ graph TB
 
     subgraph "Loop C: Observability & Maintenance"
         C1["roll status / roll dossier<br/>Delivery Truth Surface"] --> C2{"Drift or health issue?"}
-        C2 -->|Yes| C3["$roll-debug / $roll-doc / $roll-doctor<br/>Diagnostics + Root Cause Analysis"]
+        C2 -->|Yes| C3["$roll-debug / $roll-doc-audit / $roll-doctor<br/>Diagnostics + Root Cause Analysis"]
         C3 --> C5["$roll-fix / REFACTOR<br/>Correction filed to backlog"]
         C6["$roll-.dream<br/>Nightly Code-Health Scan"] --> C2
         C5 --> C1
@@ -426,7 +426,7 @@ Loop C is observability and maintenance: status, dossier, debug/doc/doctor, drea
 | SRE (Site Reliability Engineering) | `roll status` / `roll dossier`: delivery truth surface from a single ledger |
 | Observability | The external console + truth signals (truth.json / release readiness / `roll loop status`) |
 | Continuous maintenance | `$roll-.dream`: nightly code-health scans that file `REFACTOR-XXX` entries |
-| Digital Forensics + RCA | `$roll-debug` / `$roll-doc` / `$roll-doctor`: project-owned diagnostics, documentation, and toolchain health |
+| Digital Forensics + RCA | `$roll-debug` / `$roll-doc-audit` / `$roll-doctor`: project-owned diagnostics, documentation, and toolchain health |
 
 ### 5.2 Delivery Truth Surface: `roll status` / `roll dossier`
 
@@ -678,7 +678,7 @@ roll                      # project dashboard (in project dir): loop status + do
 | `$roll-release` | Release | — | Version + tag + npm publish + GitHub Release |
 | `$roll-peer` | Code review | Change diff | APPROVE / REFINE / OBJECT verdict |
 | `$roll-debug` | Debugging & Diagnosis | URL | Diagnostic JSON + screenshots + root cause analysis |
-| `$roll-doc` | Documentation | Codebase | Docs inventory + INDEX + draft fills |
+| `$roll-doc-audit` | Docs/product audit | Codebase + docs/site/help | Drift findings + docs inventory + draft fills |
 | `$roll-doctor` | Toolchain health | Install state | Conventions sync / skill health / config validity report |
 | `$roll-loop` | Autonomous execution | BACKLOG todos | Completed Story / Fix / Refactor |
 | `$roll-.dream` | Autonomous scan | Codebase | REFACTOR entries + scan log |

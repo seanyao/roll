@@ -17,7 +17,7 @@
 | `roll-build` | Universal delivery skill. Handles any input: a US-XXX ID executes from BACKLOG via TCR; a FIX-XXX redirects to roll-fix; any other text auto-clarifies, designs, and ships as a new Story. |
 | `roll-debug` | Universal web debugger. Mounts a Black Box (BB) diagnostic probe on any page, collects rich diagnostics, analyzes root causes, and auto-fixes when the root cause is in project source. Cleans up after itself. |
 | `roll-design` | Unified entry for discussion, design and planning. Explores options when uncertain, designs solutions with DDD modeling, splits into INVEST-compliant user stories, and writes to .roll/backlog.md. Use when user wants to discuss approaches, design solutions, plan features, or create stories. |
-| `roll-doc` | Legacy project documentation automation. Scans all docs, builds/updates docs/INDEX.md, identifies undocumented modules, and generates draft fills for gaps. Works on any project. |
+| `roll-doc-audit` | Documentation/product consistency audit. Checks README, guides, site pages, CLI help and docs against implemented behavior; can also index docs and draft fills from code evidence. |
 | `roll-doctor` | Diagnose Roll toolchain health. Checks skill files, YAML frontmatter, symlinks, conventions sync, template integrity, and config validity. |
 | `roll-fix` | Execute bugfix/hotfix from backlog. Reads FIX/BUG from .roll/backlog.md, delivers via TCR workflow. Lighter than roll-build, focused on single-issue fixes. |
 | `roll-idea` | Fast backlog capture. Analyzes a short description, classifies it as bug or idea, and appends it to .roll/backlog.md with an auto-incremented ID. |

@@ -29,6 +29,8 @@ import { collectReleasePanel } from "../lib/release-panel.js";
 import { collectReleaseScope } from "../lib/release-scope.js";
 import { collectSkillsPanel } from "../lib/skills-panel.js";
 import { renderSkillsPage } from "../lib/page-skills.js"; // US-DOSSIER-032
+import { renderToolsPage } from "../lib/page-tools.js"; // US-TOOL-017
+import { collectToolPanel } from "../lib/tool-panel.js"; // US-TOOL-016
 import { collectLoopHeartbeat, defaultHeartbeatDeps } from "../lib/loop-heartbeat.js";
 import { collectCasting, defaultCastingDeps } from "../lib/casting.js";
 import { collectGitHooks, defaultGitHooksDeps } from "../lib/git-hooks.js";
@@ -574,6 +576,15 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
       } catch {
         /* best-effort */
       }
+    }
+    // US-TOOL-017: the machine-global Tools page — the built-in tool catalog
+    // (collectToolPanel over builtinToolDeclarations) promoted to a first-class
+    // breadcrumb page, peer to Agents/Skills. Best-effort like the Agents write.
+    try {
+      writeFileSync(join(featuresDir, "tools.html"), renderToolsPage({ ...machineBar, tools: collectToolPanel() }), "utf8");
+      pages += 1;
+    } catch {
+      /* best-effort */
     }
     // US-DOSSIER-033: the About + Conventions machine pages are now REAL — About
     // from docs/manifesto.md + docs/architecture.md + guide/INDEX.md + identity;

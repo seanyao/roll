@@ -56,7 +56,7 @@ function deps(proj: string, spawn: AgentSpawn, body: string | null): DreamRunOnc
     skillBody: () => body,
     spawn,
     now: () => new Date("2026-06-06T03:12:00Z"),
-    structureScan: () => ({
+    structureScan: () => Promise.resolve({
       json: {
         schema: "dream-structure.v1",
         generatedAt: "2026-06-06T03:12:00.000Z",

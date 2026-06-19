@@ -33,6 +33,16 @@ await build({
   platform: "node",
   format: "esm",
   target: "node22",
+  banner: {
+    js: [
+      "import { createRequire as __rollCreateRequire } from 'node:module';",
+      "import { fileURLToPath as __rollFileURLToPath } from 'node:url';",
+      "import { dirname as __rollDirname } from 'node:path';",
+      "const require = __rollCreateRequire(import.meta.url);",
+      "const __filename = __rollFileURLToPath(import.meta.url);",
+      "const __dirname = __rollDirname(__filename);",
+    ].join("\n"),
+  },
   outfile: join(repoRoot, "dist", "roll.mjs"),
 });
 

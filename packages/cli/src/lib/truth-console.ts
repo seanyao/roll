@@ -91,6 +91,22 @@ export interface BacklogVM {
   settled: BacklogEpicVM[];
 }
 
+export interface LoopLiveFeedVM {
+  /** Absolute live.log path, shown as provenance only. */
+  sourcePath: string;
+  /** Browser-side read-only polling target from .roll/features/index.html. */
+  relativeHref: string;
+  /** Agent normalizer used by the generated snapshot. */
+  agent: string;
+  /** live = concise signals present; idle = no activity; paused = unreadable. */
+  status: "live" | "idle" | "paused";
+  generatedAt: string;
+  updatedAt?: string;
+  rawLineCount: number;
+  renderedLines: string[];
+  note?: string;
+}
+
 export interface TruthConsoleInput {
   snapshot: TruthSnapshot;
   /** The EXACT serialized snapshot written to truth.json (US-DOSSIER-010). */
@@ -121,6 +137,8 @@ export interface TruthConsoleInput {
   casting: CastingVM;
   /** FIX-284 — project-scoped git hooks, sourced from core.hooksPath/.git hooks. */
   gitHooks?: GitHooksVM;
+  /** US-DOSSIER-044 — read-only live loop feed for the Now tab. */
+  liveFeed?: LoopLiveFeedVM;
   /**
    * US-DOSSIER-033 — the Charter PROJECT TAB: a markdown browser over the
    * project's own charter docs (docs/*.md, the per-epic plan .md files, and the
@@ -312,6 +330,42 @@ function flattenStories(backlog: BacklogVM): BacklogStoryVM[] {
   return [...backlog.shipping, ...backlog.settled].flatMap((epic) => epic.stories);
 }
 
+function loopLiveFeedPanel(input: TruthConsoleInput): string {
+  const feed: LoopLiveFeedVM = input.liveFeed ?? {
+    sourcePath: ".roll/loop/live.log",
+    relativeHref: "../loop/live.log",
+    agent: "claude",
+    status: "idle",
+    generatedAt: input.snapshot.generatedAt,
+    rawLineCount: 0,
+    renderedLines: [],
+    note: "live feed not collected during this index run",
+  };
+  const color = feed.status === "live" ? C.green : feed.status === "paused" ? C.amber : C.slate;
+  const status = feed.status === "live" ? bi("live", "实时") : feed.status === "paused" ? bi("paused", "暂停") : bi("idle", "空闲");
+  const lines = feed.renderedLines.slice(-16);
+  const empty = feed.note ?? (feed.status === "idle" ? "idle — no active loop stream" : "paused — live stream unavailable");
+  return (
+    `<section data-now-section="live-stream" data-live-feed="true" data-live-src="${esc(feed.relativeHref)}" data-live-readonly="true" data-live-agent="${esc(feed.agent)}" style="border:1px solid ${C.line};border-radius:12px;background:${C.card};overflow:hidden;margin:14px 0 14px;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
+    `<div style="display:flex;align-items:center;gap:10px;padding:13px 18px;border-bottom:1px solid ${C.hair};">` +
+    sectionLabel(bi("Loop live stream", "Loop 实时流")) +
+    `<span data-live-status="true" style="${MONO}font-size:10px;padding:2px 8px;border-radius:999px;border:1px solid ${color}44;color:${color};">${status}</span>` +
+    `<span style="${MONO}font-size:11.5px;color:${C.dim};">${bi("same source as roll loop watch", "与 roll loop watch 同源")}</span>` +
+    `<span style="flex:1;"></span>` +
+    `<a href="#loop" data-tab-link="loop" style="${MONO}font-size:11.5px;color:${C.blue};text-decoration:none;">${bi("open loop", "打开循环页")} →</a></div>` +
+    `<div style="padding:14px 18px 15px;background:#0f1722;color:#d8dee9;">` +
+    `<div style="display:flex;gap:12px;align-items:center;margin-bottom:10px;${MONO}font-size:10.5px;color:#93a0b8;">` +
+    `<span>${bi("agent", "agent")} ${esc(feed.agent)}</span><span>${bi("raw lines", "原始行")} ${feed.rawLineCount}</span><span>${bi("updated", "更新")} ${shortTs(feed.updatedAt ?? feed.generatedAt)}</span></div>` +
+    (lines.length > 0
+      ? `<ol data-live-lines="true" style="list-style:none;margin:0;padding:0;display:grid;gap:6px;max-height:260px;overflow:auto;">${lines
+          .map((line) => `<li style="${MONO}font-size:11.5px;line-height:1.45;white-space:pre-wrap;color:#d8dee9;">${esc(line)}</li>`)
+          .join("")}</ol>`
+      : `<div data-live-lines="true" style="${MONO}font-size:12px;color:#93a0b8;font-style:italic;">${esc(empty)}</div>`) +
+    `<div style="margin-top:10px;${MONO}font-size:10px;color:#748196;">${esc(feed.sourcePath)} · ${bi("read-only polling, no loop writes", "只读轮询，不写 loop")}</div>` +
+    `</div></section>`
+  );
+}
+
 function nowOpsPanel(input: TruthConsoleInput): string {
   const latest = input.cycles[0];
   const active =
@@ -501,6 +555,7 @@ function nowTab(input: TruthConsoleInput): string {
     bi("What is happening right now: live cycle, heartbeat, next picks, items needing you, and where things stand.", "现在发生什么：实时周期、心跳、下批候选、需要你处理的项，以及当前总体站位。") +
     `</p></div>` +
     nowOpsPanel(input) +
+    loopLiveFeedPanel(input) +
     heartbeat +
     `<div data-now-section="where-things-stand">` +
     verdictStrip +
@@ -1589,6 +1644,104 @@ export const CONSOLE_SCRIPT = `<script>
       els[i].textContent = ms <= 0 ? "due" : "in " + Math.max(1, Math.round(ms / 60000)) + "m";
     }
   }
+  // US-DOSSIER-044: browser-side live feed is READ-ONLY. The generated page
+  // already contains a server-folded snapshot from loop-fmt; this poller only
+  // attempts to read ../loop/live.log and summarize newly visible lines. It never
+  // writes loop state, opens tmux, signals a process, or depends on the network.
+  function summarizeLiveLine(line) {
+    if (!line) return "";
+    if (/^── cycle /.test(line) || /cycle done|cycle failed|cycle aborted/i.test(line)) return line;
+    try {
+      var obj = JSON.parse(line);
+      var typ = obj && obj.type;
+      if (typ === "result") return "cycle done" + (obj.total_cost_usd ? " — $" + obj.total_cost_usd + " USD" : "");
+      var content = obj && obj.message && obj.message.content;
+      if (Array.isArray(content)) {
+        for (var i = 0; i < content.length; i++) {
+          var part = content[i] || {};
+          if (part.type === "tool_use") {
+            var name = String(part.name || "tool");
+            var input = part.input || {};
+            var file = String(input.file_path || input.path || "");
+            var cmd = String(input.command || "");
+            if (file) return "› edit " + file;
+            if (/\\b(test|vitest|pnpm|npm|ci)\\b/i.test(cmd)) return "→ test " + cmd;
+            if (/\\b(pr|pull request|gh pr)\\b/i.test(cmd)) return "→ pr " + cmd;
+            return "› " + name + (cmd ? " " + cmd : "");
+          }
+          if (part.type === "tool_result") {
+            var txt = String(part.content || "");
+            var commit = /\\b[0-9a-f]{7,40}\\b/.exec(txt);
+            if (commit) return "→ tcr commit " + commit[0];
+            if (/fail|error/i.test(txt)) return "→ alert " + txt.slice(0, 140);
+          }
+        }
+      }
+    } catch (e) {
+      /* plain text fallback below */
+    }
+    if (/\\b(US-|FIX-|REFACTOR-|BUG-|PR #|#\\d+|test|vitest|attest|ci|merge|merged|fail|error|blocked)\\b/i.test(line)) return line;
+    return "";
+  }
+  function setupLiveFeeds() {
+    var feeds = document.querySelectorAll("[data-live-feed]");
+    var fetcher = window.fetch;
+    if (!feeds.length || typeof fetcher !== "function") return;
+    for (var i = 0; i < feeds.length; i++) {
+      (function (feed) {
+        var src = feed.getAttribute("data-live-src") || "";
+        var status = feed.querySelector("[data-live-status]");
+        var linesEl = feed.querySelector("[data-live-lines]");
+        if (!src || !linesEl) return;
+        var lastText = "";
+        function setStatus(text, color) {
+          if (!status) return;
+          status.textContent = text;
+          status.style.color = color;
+          status.style.borderColor = color + "44";
+        }
+        function render(text) {
+          if (text === lastText) return;
+          lastText = text;
+          var raw = text.split(/\\r?\\n/).filter(Boolean).slice(-200);
+          var rows = [];
+          for (var j = 0; j < raw.length; j++) {
+            var s = summarizeLiveLine(raw[j]);
+            if (s) rows.push(s);
+          }
+          rows = rows.slice(-24);
+          if (!rows.length) {
+            setStatus("idle", "${C.slate}");
+            return;
+          }
+          linesEl.innerHTML = "";
+          if (linesEl.tagName !== "OL") {
+            var ol = document.createElement("ol");
+            ol.setAttribute("data-live-lines", "true");
+            ol.style.cssText = "list-style:none;margin:0;padding:0;display:grid;gap:6px;max-height:260px;overflow:auto;";
+            linesEl.parentNode.replaceChild(ol, linesEl);
+            linesEl = ol;
+          }
+          for (var k = 0; k < rows.length; k++) {
+            var li = document.createElement("li");
+            li.style.cssText = "font-family:'IBM Plex Mono',monospace;font-size:11.5px;line-height:1.45;white-space:pre-wrap;color:#d8dee9;";
+            li.textContent = rows[k];
+            linesEl.appendChild(li);
+          }
+          setStatus("live", "${C.green}");
+          linesEl.scrollTop = linesEl.scrollHeight;
+        }
+        function refresh() {
+          fetcher.call(window, src, { cache: "no-store" })
+            .then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.text(); })
+            .then(render)
+            .catch(function () { setStatus("snapshot", "${C.amber}"); });
+        }
+        refresh();
+        setInterval(refresh, 5000);
+      })(feeds[i]);
+    }
+  }
   // US-DOSSIER-027: the project switcher dropdown — pure client interaction
   // (no data fetch). Opens "roll · this machine", closes on outside click / Esc.
   function setupSwitcher() {
@@ -1656,6 +1809,7 @@ export const CONSOLE_SCRIPT = `<script>
     applyFreshness();
     tickCountdown();
     setInterval(tickCountdown, 30000);
+    setupLiveFeeds();
     var bs = document.querySelectorAll("[data-set-lang]");
     for (var i = 0; i < bs.length; i++) {
       bs[i].addEventListener("click", function () {

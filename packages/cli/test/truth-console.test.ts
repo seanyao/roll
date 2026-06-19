@@ -3,9 +3,13 @@
  * ONE TruthSnapshot; tabs are hash-routed; brand is injected; copy is fully
  * bilingual (single-language presentation via roll-lang).
  */
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { serializeTruthSnapshot, type TruthSnapshot } from "@roll/spec";
 import { renderTruthConsole, renderMachineStubPage, rollScope, type ProjectRegistryEntry } from "../src/lib/truth-console.js";
+import { collectLoopLiveFeed } from "../src/commands/index-gen.js";
 import { renderAgentsMachinePage } from "../src/lib/page-agents.js";
 import { renderSkillsPage } from "../src/lib/page-skills.js";
 import { collectLoopHeartbeat } from "../src/lib/loop-heartbeat.js";
@@ -190,6 +194,22 @@ const CYCLES = [
   },
 ];
 
+const LIVE_FEED = {
+  sourcePath: "/repo/.roll/loop/live.log",
+  relativeHref: "../loop/live.log",
+  agent: "claude",
+  status: "live" as const,
+  generatedAt: "2026-06-13T00:00:00Z",
+  updatedAt: "2026-06-12T23:59:00Z",
+  rawLineCount: 6,
+  renderedLines: [
+    "── cycle 20260612-x-1234 · US-A-1 · agent claude ──",
+    "› edit packages/cli/src/lib/truth-console.ts",
+    "→  tcr     commit         def4567",
+    "cycle done — cost $0.03",
+  ],
+};
+
 function render(
   snapshot: TruthSnapshot = SNAP,
   extra: { projects?: ProjectRegistryEntry[]; currentSlug?: string } = {},
@@ -209,6 +229,7 @@ function render(
     casting: CASTING,
     gitHooks: GIT_HOOKS,
     charter: CHARTER,
+    liveFeed: LIVE_FEED,
     ...extra,
   });
 }
@@ -278,7 +299,7 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
 
   it("AC3: Now carries live operations, heartbeat, where-things-stand, three tiles and the spectrum", () => {
     expect(html).toContain(">Now<");
-    for (const section of ["live-cycle", "processes", "on-deck", "needs-you", "where-things-stand"]) {
+    for (const section of ["live-cycle", "live-stream", "processes", "on-deck", "needs-you", "where-things-stand"]) {
       expect(html).toContain(`data-now-section="${section}"`);
     }
     expect(html).toContain("Live cycle");
@@ -297,6 +318,20 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
     expect(html).toContain('data-tab-link="release"');
     for (const k of ["done", "fail", "unknown", "wip", "todo", "hold"]) expect(html).toContain(`data-truth="spectrum-${k}"`);
     expect(html).toContain('data-prefilter="done"'); // spectrum click pre-sets the backlog filter
+  });
+
+  it("US-DOSSIER-044: Now embeds a read-only loop watch live stream with polling continuity", () => {
+    expect(html).toContain('data-now-section="live-stream"');
+    expect(html).toContain('data-live-feed="true"');
+    expect(html).toContain('data-live-readonly="true"');
+    expect(html).toContain('data-live-src="../loop/live.log"');
+    expect(html).toContain("same source as roll loop watch");
+    expect(html).toContain("只读轮询，不写 loop");
+    expect(html).toContain("US-A-1");
+    expect(html).toContain("truth-console.ts");
+    expect(html).toContain("setupLiveFeeds");
+    expect(html).toContain('fetcher.call(window, src, { cache: "no-store" })');
+    expect(html).toContain("never\n  // writes loop state");
   });
 
   it("AC4: bilingual spans everywhere new copy appears; telemetry is monospace", () => {
@@ -320,6 +355,45 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
     expect(new RegExp('data-truth="total"[^>]*>10 ').test(html)).toBe(true);
     const pct = /data-truth="merged-pct"[^>]*>(\d+)%/.exec(html);
     expect(Number(pct?.[1])).toBe(50);
+  });
+});
+
+describe("collectLoopLiveFeed — US-DOSSIER-044", () => {
+  it("folds the real live.log source through the loop watch ActivitySignal renderer", () => {
+    const dir = mkdtempSync(join(tmpdir(), "roll-live-feed-"));
+    mkdirSync(join(dir, ".roll", "loop"), { recursive: true });
+    writeFileSync(
+      join(dir, ".roll", "loop", "live.log"),
+      [
+        "── cycle 20260619-1 · US-DOSSIER-044 · agent claude ──",
+        JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Edit", input: { file_path: "packages/cli/src/lib/truth-console.ts" } }] } }),
+        JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "hidden tier C prose" }] } }),
+        JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "pnpm test" } }] } }),
+        JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", is_error: false, content: "[story/x def4567] tcr: add live stream" }] } }),
+        JSON.stringify({ type: "result", subtype: "success", duration_ms: 8000, total_cost_usd: 0.03 }),
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const feed = collectLoopLiveFeed(dir, 1_781_230_000);
+    const out = feed.renderedLines.join("\n");
+    expect(feed.status).toBe("live");
+    expect(feed.relativeHref).toBe("../loop/live.log");
+    expect(feed.rawLineCount).toBe(6);
+    expect(out).toContain("US-DOSSIER-044");
+    expect(out).toContain("truth-console.ts");
+    expect(out).toContain("pnpm test");
+    expect(out).toContain("cycle done");
+    expect(out).not.toContain("hidden tier C prose");
+  });
+
+  it("renders idle explicitly when no live.log exists", () => {
+    const dir = mkdtempSync(join(tmpdir(), "roll-live-feed-idle-"));
+    const feed = collectLoopLiveFeed(dir, 1_781_230_000);
+    expect(feed.status).toBe("idle");
+    expect(feed.renderedLines).toEqual([]);
+    expect(feed.note).toMatch(/no live\.log/i);
   });
 });
 

@@ -149,7 +149,7 @@ export interface ShowcaseRunResult {
   pr?: { number: number; url: string };
   /** Heterogeneous review record: who reviewed, who scored. */
   reviewRecord?: { reviewer: string; scorer: string; recorded: boolean };
-  /** Fresh per-AC screenshots (CLI terminal + web overview badge). */
+  /** Fresh per-AC screenshots (CLI terminal + web Now badge). */
   screenshots: ShowcaseScreenshot[];
   /** The attest gate verdict for the target card after the run. */
   attest?: { gate: "PASS" | "SKIP" | "FAIL"; reportPath?: string };
@@ -234,7 +234,7 @@ export function assembleEvidenceChain(run: ShowcaseRunResult): EvidenceChain {
   const web = run.screenshots.find((s) => s.surface === "web");
   links.push({
     key: "web-screenshot",
-    label: "Fresh web screenshot (Overview pulse badge)",
+    label: "Fresh web screenshot (Now pulse badge)",
     present: web?.present === true,
     detail:
       web?.present === true ? web.path : web?.skipped !== undefined ? `skipped: ${web.skipped}` : "no web screenshot captured",

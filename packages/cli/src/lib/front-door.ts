@@ -15,7 +15,7 @@ import type { TruthSnapshot, TruthSnapshotVerdict } from "@roll/spec";
 import { c, pad } from "../render.js";
 import { snapshotVerdict } from "./truth-read.js";
 
-/** Verdict → display word + reason, the SAME vocabulary the web Overview uses. */
+/** Verdict → display word + reason, the SAME vocabulary the web Now tab uses. */
 const VERDICT_WORD: Record<TruthSnapshotVerdict, string> = {
   pass: "PASS",
   warn: "WARN",

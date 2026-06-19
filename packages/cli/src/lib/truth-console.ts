@@ -1,22 +1,20 @@
 /**
- * US-DOSSIER-011 — the Truth Console: index.html becomes a single-page,
- * five-tab control board (Overview · Loop · Release · Backlog · Skills,
- * ordered "now → just ran → about to → wishes → machine layer").
+ * US-DOSSIER-011/043 — the Truth Console: index.html is a single-page
+ * project control board (Now · Backlog · Loop · Release · Casting · Charter).
  *
  * Faithful to the owner-approved high-fidelity prototype
  * (.roll/features/delivery-dossier/truth-console-design/Delivery Dossier.dc.html):
  * light theme, IBM Plex Sans/Mono, dark sticky header with the project name +
- * EN/中 toggle, sticky tabs, and an Overview a reader digests in thirty
- * seconds — verdict strip, loop heartbeat, three aggregate tiles, six-state
- * spectrum. Every number is read from the ONE TruthSnapshot (US-DOSSIER-010),
- * so the page can never disagree with truth.json.
+ * EN/中 toggle, sticky tabs, and a Now page a reader digests in thirty seconds
+ * — live cycle, loop heartbeat, next picks, needs-you rows, verdict strip, three
+ * aggregate tiles, and six-state spectrum. Every number is read from the ONE
+ * TruthSnapshot / ledger inputs, so the page can never disagree with truth.json.
  *
- * Tab state survives drill-downs via the URL hash (#overview/#loop/#release/
- * #backlog/#skills): browser Back restores it without any storage.
+ * Tab state survives drill-downs via the URL hash (#now/#backlog/#loop/
+ * #release/#casting/#charter): browser Back restores it without any storage.
  *
- * This card lands the shell + Overview; Loop/Release/Skills carry placeholders
- * (US-DOSSIER-013/015/017 fill them) and Backlog embeds the existing ledger
- * (US-DOSSIER-012 redesigns it).
+ * Now carries current operations + the truth rollup; Backlog/Loop/Release/
+ * Casting/Charter render their project-specific surfaces below it.
  */
 import { bi, CONSISTENCY_DIMENSION_LABELS, FONT_LINKS as CORE_FONT_LINKS } from "@roll/core";
 import type { TruthSnapshot, TruthSnapshotLoopLane } from "@roll/spec";
@@ -233,16 +231,26 @@ function shortTs(iso: string | undefined): string {
   return iso.replace(/^\d{4}-/, "").replace("T", " ").replace(/:\d{2}Z$/, "Z");
 }
 
-function heartbeatRow(lane: TruthSnapshotLoopLane): string {
+function heartbeatStale(lane: TruthSnapshotLoopLane, generatedAt: string | undefined): boolean {
+  if (lane.lastAt === undefined || generatedAt === undefined) return false;
+  const last = Date.parse(lane.lastAt);
+  const now = Date.parse(generatedAt);
+  if (!Number.isFinite(last) || !Number.isFinite(now)) return false;
+  return now - last > 60_000;
+}
+
+function heartbeatRow(lane: TruthSnapshotLoopLane, generatedAt?: string): string {
   const on = lane.running;
+  const stale = heartbeatStale(lane, generatedAt);
+  const dotColor = stale ? C.red : on ? C.green : "#cbd2dc";
   const dot = on
-    ? `width:9px;height:9px;border-radius:50%;background:${C.green};box-shadow:0 0 0 3px rgba(23,138,82,.18);animation:beat 2.4s infinite;flex:none;`
-    : `width:9px;height:9px;border-radius:50%;background:#cbd2dc;flex:none;`;
+    ? `width:9px;height:9px;border-radius:50%;background:${dotColor};box-shadow:0 0 0 3px ${stale ? "rgba(210,59,59,.18)" : "rgba(23,138,82,.18)"};animation:beat 2.4s infinite;flex:none;`
+    : `width:9px;height:9px;border-radius:50%;background:${dotColor};flex:none;`;
   const cell = (label: string, value: string, mono = false): string =>
     `<div><div style="${MONO}font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:${C.faint};">${label}</div>` +
     `<div style="${mono ? MONO : ""}font-size:12.5px;color:${C.body};margin-top:3px;">${value}</div></div>`;
   const stateLine = [
-    on ? bi("running", "运行中") : bi("off", "未启用"),
+    stale ? bi("zombie", "僵尸") : on ? bi("running", "运行中") : bi("off", "未启用"),
     lane.status !== undefined ? esc(lane.status) : "",
     lane.scope !== undefined ? esc(lane.scope) : "",
   ].filter((s) => s !== "").join(" · ");
@@ -250,7 +258,7 @@ function heartbeatRow(lane: TruthSnapshotLoopLane): string {
     `<div style="display:grid;grid-template-columns:230px repeat(4,1fr);align-items:center;gap:14px;padding:13px 18px;border-top:1px solid #f4f6f9;">` +
     `<div style="display:flex;align-items:center;gap:11px;min-width:0;"><span style="${dot}"></span>` +
     `<div style="min-width:0;"><div style="font-size:13.5px;font-weight:600;color:${C.ink};white-space:nowrap;">${esc(lane.name)}</div>` +
-    `<div style="${MONO}font-size:10.5px;color:${on ? C.green : C.faint};margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${stateLine}</div></div></div>` +
+    `<div style="${MONO}font-size:10.5px;color:${stale ? C.red : on ? C.green : C.faint};margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${stateLine}</div></div></div>` +
     cell(bi("mode", "模式"), esc(lane.mode ?? "—")) +
     cell(bi("every", "周期"), mins(lane.everyMin)) +
     cell(bi("last", "上次"), shortTs(lane.lastAt), true) +
@@ -270,7 +278,7 @@ function repoLoopsPanel(input: TruthConsoleInput): string {
     `<span style="${MONO}font-size:11.5px;color:${C.dim};white-space:nowrap;">${lanes.filter((l) => l.running).length}/${lanes.length} ${bi("running", "运行中")}</span></div>` +
     `<section style="border:1px solid ${C.line};border-radius:14px;background:${C.card};overflow:hidden;margin:0 0 8px;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
     (lanes.length > 0
-      ? lanes.map(heartbeatRow).join("")
+      ? lanes.map((lane) => heartbeatRow(lane, input.snapshot.generatedAt)).join("")
       : `<div style="padding:16px 18px;font-size:12.5px;color:${C.faint};font-style:italic;">${bi("no loop lanes found for this repo", "未发现本仓 loop lane")}</div>`) +
     `</section>`
   );
@@ -300,7 +308,70 @@ function tile(opts: {
   );
 }
 
-function overviewTab(input: TruthConsoleInput): string {
+function flattenStories(backlog: BacklogVM): BacklogStoryVM[] {
+  return [...backlog.shipping, ...backlog.settled].flatMap((epic) => epic.stories);
+}
+
+function nowOpsPanel(input: TruthConsoleInput): string {
+  const latest = input.cycles[0];
+  const active =
+    latest !== undefined && latest.verdict !== "delivered" && latest.verdict !== "reverted" && latest.verdict !== "failed" && latest.verdict !== "blocked";
+  const liveTape =
+    latest !== undefined && latest.tape.length > 0
+      ? `<div style="display:flex;flex-wrap:nowrap;overflow-x:auto;gap:0;margin-top:11px;padding-bottom:4px;">${latest.tape
+          .map((seg, i) => tapeSegment(seg, i === latest.tape.length - 1))
+          .join("")}</div>`
+      : `<div style="${MONO}font-size:12px;color:${C.faint};font-style:italic;margin-top:9px;">${bi("idle — no active cycle", "空闲——当前无活动 cycle")}</div>`;
+  const live =
+    `<section data-now-section="live-cycle" style="border:1px solid ${C.line};border-radius:12px;background:${C.card};padding:14px 18px;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
+    `<div style="display:flex;align-items:center;gap:10px;">${sectionLabel(bi("Live cycle", "实时周期"))}` +
+    `<span style="${MONO}font-size:10px;padding:2px 8px;border-radius:999px;border:1px solid ${(active ? C.amber : C.slate)}44;color:${active ? C.amber : C.slate};">${active ? bi("active", "活跃") : bi("idle", "空闲")}</span>` +
+    `<span style="flex:1;"></span><span style="${MONO}font-size:11.5px;color:${C.blue};">${esc(latest?.storyId || "—")}</span></div>` +
+    liveTape +
+    `</section>`;
+
+  const lanes = input.snapshot.loop?.lanes ?? [];
+  const running = lanes.filter((lane) => lane.running);
+  const processes =
+    `<section data-now-section="processes" style="border:1px solid ${C.line};border-radius:12px;background:${C.card};padding:14px 18px;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
+    `<div style="display:flex;align-items:center;gap:10px;">${sectionLabel(bi("Processes", "进程"))}<span style="${MONO}font-size:12px;color:${C.ink};font-weight:600;">${running.length}/${lanes.length}</span></div>` +
+    (running.length > 0
+      ? `<div style="display:grid;gap:7px;margin-top:11px;">${running
+          .map(
+            (lane) =>
+              `<div style="display:flex;justify-content:space-between;gap:12px;${MONO}font-size:11.5px;color:${C.sub};"><span>${esc(lane.name)}</span><span>${esc(lane.mode ?? "—")} · ${shortTs(lane.nextAt)}</span></div>`,
+          )
+          .join("")}</div>`
+      : `<div style="${MONO}font-size:12px;color:${C.faint};font-style:italic;margin-top:10px;">${bi("no runner process is active", "当前无 runner 进程")}</div>`) +
+    `</section>`;
+
+  const stories = flattenStories(input.backlog);
+  const onDeckRows = stories.filter((s) => s.state === "todo").slice(0, 4);
+  const onDeck =
+    `<section data-now-section="on-deck" style="border:1px solid ${C.line};border-radius:12px;background:${C.card};padding:14px 18px;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
+    `<div style="display:flex;align-items:center;gap:10px;">${sectionLabel(bi("On deck", "下批候选"))}<span style="${MONO}font-size:12px;color:${C.ink};font-weight:600;">${onDeckRows.length}</span></div>` +
+    (onDeckRows.length > 0
+      ? `<div style="display:grid;gap:7px;margin-top:11px;">${onDeckRows
+          .map((story) => `<a href="#backlog/todo" data-tab-link="backlog" data-prefilter="todo" style="${MONO}font-size:11.5px;color:${C.blue};text-decoration:none;">${esc(story.id)} · ${esc(story.title)}</a>`)
+          .join("")}</div>`
+      : `<div style="${MONO}font-size:12px;color:${C.faint};font-style:italic;margin-top:10px;">${bi("no queued picks found", "没有待选队列")}</div>`) +
+    `</section>`;
+
+  const needsRows = stories.filter((s) => s.state === "fail" || s.state === "hold").slice(0, 4);
+  const needs =
+    `<section data-now-section="needs-you" style="border:1px solid ${C.line};border-radius:12px;background:${C.card};padding:14px 18px;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
+    `<div style="display:flex;align-items:center;gap:10px;">${sectionLabel(bi("Needs you", "需要你"))}<span style="${MONO}font-size:12px;color:${needsRows.length > 0 ? C.red : C.green};font-weight:600;">${needsRows.length}</span></div>` +
+    (needsRows.length > 0
+      ? `<div style="display:grid;gap:7px;margin-top:11px;">${needsRows
+          .map((story) => `<a href="#backlog/${esc(story.state)}" data-tab-link="backlog" data-prefilter="${esc(story.state)}" style="${MONO}font-size:11.5px;color:${story.state === "fail" ? C.red : C.purple};text-decoration:none;">${esc(story.id)} · ${esc(story.title)}</a>`)
+          .join("")}</div>`
+      : `<div style="${MONO}font-size:12px;color:${C.green};font-style:italic;margin-top:10px;">${bi("nothing is blocked or failed", "没有阻塞或失败项")}</div>`) +
+    `</section>`;
+
+  return `<section data-now-section="operations" style="display:grid;grid-template-columns:1.5fr 1fr;gap:14px;margin:20px 0 14px;">${live}${processes}${onDeck}${needs}</section>`;
+}
+
+function nowTab(input: TruthConsoleInput): string {
   const s = input.snapshot;
   const v = consoleVerdict(s);
   const a = s.audit;
@@ -317,7 +388,7 @@ function overviewTab(input: TruthConsoleInput): string {
     `<span style="flex:1;"></span>` +
     `<a href="#loop" data-tab-link="loop" style="${MONO}font-size:11.5px;color:${C.blue};cursor:pointer;text-decoration:none;">${bi("open loop", "打开循环页")} →</a></div>` +
     (lanes.length > 0
-      ? lanes.map(heartbeatRow).join("")
+      ? lanes.map((lane) => heartbeatRow(lane, s.generatedAt)).join("")
       : `<div style="padding:14px 18px;font-size:12.5px;color:${C.faint};font-style:italic;">${bi("no scheduled lanes on this machine", "本机没有已调度的 lane")}</div>`) +
     `</section>`;
 
@@ -425,14 +496,17 @@ function overviewTab(input: TruthConsoleInput): string {
     `</div>` +
     `<div style="padding:34px 0 8px;">` +
     kicker(`${esc(input.brand.name)} · ${bi("Truth Console", "真相控制台")}`) +
-    `<h1 style="margin:10px 0 0;font-size:33px;line-height:1.1;font-weight:700;letter-spacing:-.02em;color:${C.ink};">${bi("Overview", "总览")}</h1>` +
+    `<h1 style="margin:10px 0 0;font-size:33px;line-height:1.1;font-weight:700;letter-spacing:0;color:${C.ink};">${bi("Now", "现在")}</h1>` +
     `<p style="margin:12px 0 0;max-width:660px;font-size:15.5px;line-height:1.6;color:${C.sub};">` +
-    bi("Am I safe? Thirty seconds, top to bottom: the verdict, the heartbeat, three aggregates, the spectrum.", "我安全吗？三十秒自上而下读完：判定、心跳、三聚合、状态光谱。") +
+    bi("What is happening right now: live cycle, heartbeat, next picks, items needing you, and where things stand.", "现在发生什么：实时周期、心跳、下批候选、需要你处理的项，以及当前总体站位。") +
     `</p></div>` +
+    nowOpsPanel(input) +
     heartbeat +
+    `<div data-now-section="where-things-stand">` +
     verdictStrip +
     tiles +
-    statusBoard
+    statusBoard +
+    `</div>`
   );
 }
 
@@ -1280,10 +1354,8 @@ export function machinePalette(): typeof C & { mono: string } {
 }
 
 /**
- * US-DOSSIER-040 — the ONE project tab set, in the order the CORRECT design
- * reference's nav markup fixes (Overview → Charter → Backlog → Loop → Release →
- * Casting, see `Delivery Dossier.dc.html` `<!-- tabs -->`, lines 91–98:
- * tabIndex/tabContext/tabEpics/tabLoop/tabRelease/tabCasting). Both the rendered
+ * US-DOSSIER-043 — the ONE project tab set, ordered by daily operating use:
+ * Now → Backlog → Loop → Release → Casting → Charter. Both the rendered
  * tab bar (which reads the bilingual `{ en, zh }` labels) and the
  * `CONSOLE_SCRIPT` hash router (which only needs the `key` list, serialized in
  * below) derive from this single source, so the visible bar and the runtime
@@ -1291,16 +1363,16 @@ export function machinePalette(): typeof C & { mono: string } {
  * (reached via the MACHINE breadcrumb), never project tabs.
  */
 const TABS = [
-  { key: "overview", en: "Overview", zh: "总览" },
-  // US-DOSSIER-033 — the Charter project tab: a read-only markdown browser over
-  // the project's own charter docs (manifesto/architecture/plans/guide).
-  { key: "charter", en: "Charter", zh: "章程" },
+  { key: "now", en: "Now", zh: "现在" },
   { key: "backlog", en: "Backlog", zh: "待办" },
   { key: "loop", en: "Loop", zh: "循环" },
   { key: "release", en: "Release", zh: "发版" },
   // US-DOSSIER-040 — Casting is its OWN top-level project tab (executor
   // complexity ladder + scenario roles), no longer nested inside Loop.
   { key: "casting", en: "Casting", zh: "选角" },
+  // US-DOSSIER-033 — the Charter project tab: a read-only markdown browser over
+  // the project's own charter docs (manifesto/architecture/plans/guide).
+  { key: "charter", en: "Charter", zh: "章程" },
 ] as const;
 
 /** The router needs only the keys; serialized once, deterministic order. */
@@ -1380,12 +1452,12 @@ export const CONSOLE_SCRIPT = `<script>
   function currentTab() {
     var h = hashParts()[0];
     if (TABS.indexOf(h) >= 0) return h;
-    // US-DOSSIER-034: no tab in the hash (a bare reload, or arriving back from a
-    // drilldown that dropped the hash) → restore the last tab from storage so a
-    // reader lands where they left off, not always on Overview.
+    // US-DOSSIER-034/043: no tab in the hash (a bare reload, or arriving back
+    // from a drilldown that dropped the hash) → restore the last tab from
+    // storage; first visit lands on Now.
     var saved = get(tabKey());
     if (TABS.indexOf(saved) >= 0) return saved;
-    return "overview";
+    return "now";
   }
   function applyTab() {
     var cur = currentTab();
@@ -1650,12 +1722,10 @@ export function topBar(input: TopBarInput): string {
   const currentSlug = input.currentSlug ?? entries[0]?.slug ?? input.brand.name;
   const multi = entries.length > 1;
 
-  // FIX-283 (AC1): the current project's "home" target depends on the surface.
-  // On the console (index.html, `machinePage` undefined) `#overview` selects the
-  // overview tab in place. On a MACHINE page (agents/skills/conventions/about),
-  // `#overview` is a dead hash (no such tab there) — the link must hop to the
-  // console, a sibling file: `index.html#overview`.
-  const homeHref = input.machinePage !== undefined ? "index.html#overview" : "#overview";
+  // FIX-283/US-DOSSIER-043: the current project's "home" target depends on the
+  // surface. On the console, `#now` selects the default Now tab in place. On a
+  // MACHINE page, the link hops to the console sibling file.
+  const homeHref = input.machinePage !== undefined ? "index.html#now" : "#now";
 
   const dot = `<span style="width:9px;height:9px;border-radius:50%;background:${C.green};box-shadow:0 0 0 3px rgba(23,138,82,.22);flex:none;"></span>`;
   const projName = `<span style="${MONO}font-weight:600;font-size:15px;letter-spacing:.02em;color:#fff;white-space:nowrap;">${esc(input.brand.name)}</span>`;
@@ -1664,8 +1734,8 @@ export function topBar(input: TopBarInput): string {
     .map((p) => {
       const on = p.slug === currentSlug;
       // Other projects live at their own .roll/features/index.html on disk; the
-      // current project's row routes home to the console overview (FIX-283: to
-      // `index.html#overview` when this is a machine page, `#overview` on console).
+      // current project's row routes home to the console Now tab (FIX-283:
+      // `index.html#now` when this is a machine page, `#now` on console).
       const href = on ? homeHref : `${esc(p.path)}/.roll/features/index.html`;
       const tag = p.releaseTag !== undefined && p.releaseTag !== "" ? esc(p.releaseTag) : "";
       return (
@@ -1772,19 +1842,20 @@ a{color:${C.blue};}
 .sk-row summary::-webkit-details-marker{display:none;}
 .sk-row[open] .bl-caret{transform:rotate(90deg);}
 .sk-row summary:hover{background:#fbfcfe;}
+@media(max-width:760px){[data-now-section="operations"]{grid-template-columns:1fr!important;}}
 @media (max-width:720px){.charter-browser{grid-template-columns:1fr !important;}.charter-tree{position:static !important;max-height:none !important;}}
 ` + MD_BODY_CSS;
 
-  // US-DOSSIER-040: pane order == tab order (Overview · Charter · Backlog · Loop
-  // · Release · Casting). Skills is NOT a project tab — it is a machine-global
+  // US-DOSSIER-043: pane order == tab order (Now · Backlog · Loop · Release ·
+  // Casting · Charter). Skills is NOT a project tab — it is a machine-global
   // page (skills.html) reached via the MACHINE breadcrumb.
   const panes =
-    `<div id="tab-overview">${overviewTab(input)}</div>` +
-    `<div id="tab-charter" style="display:none;">${charterTab(input)}</div>` +
+    `<div id="tab-now">${nowTab(input)}</div>` +
     `<div id="tab-backlog" style="display:none;">${backlogTab(input)}</div>` +
     `<div id="tab-loop" style="display:none;">${loopTab(input)}</div>` +
     `<div id="tab-release" style="display:none;">${releaseTab(input)}</div>` +
-    `<div id="tab-casting" style="display:none;">${castingTab(input)}</div>`;
+    `<div id="tab-casting" style="display:none;">${castingTab(input)}</div>` +
+    `<div id="tab-charter" style="display:none;">${charterTab(input)}</div>`;
 
   return (
     htmlHead(rollScope(input)) +

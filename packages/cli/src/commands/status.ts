@@ -383,10 +383,10 @@ function liveData(): StatusData {
 }
 
 // ── US-DOSSIER-035: verdict-first truth summary (design frame 1) ─────────────
-// Reads the ONE TruthSnapshot the web Overview reads (.roll/features/truth.json)
+// Reads the ONE TruthSnapshot the web Now tab reads (.roll/features/truth.json)
 // and leads `roll status` with a verdict line + four tab-aligned lines —
 // LOOP · CYCLE · RELEASE · STORY — same names/order/口径 as the web tabs. No
-// number is recomputed here: a divergence from the web Overview is a 口径 bug.
+// number is recomputed here: a divergence from the web Now tab is a 口径 bug.
 
 const VERDICT_WORD: Record<string, string> = { pass: "PASS", warn: "WARN", fail: "FAIL", unknown: "UNKNOWN" };
 const VERDICT_COLOR: Record<string, string> = { pass: "green", warn: "amber", fail: "red", unknown: "muted" };
@@ -440,7 +440,7 @@ export function renderTruthSummary(
   out.push("  " + verdictWord + "  " + reason + "   " + c("muted", `exit ${exit}`));
   out.push("");
 
-  // LOOP — loop lanes + running count (the web Overview's loop heartbeat).
+  // LOOP — loop lanes + running count (the web Now tab's loop heartbeat).
   const lanes = snapshot.loop?.lanes ?? [];
   const running = lanes.filter((l) => l.running).length;
   const nextLane = lanes.find((l) => l.running && l.nextAt !== undefined);
@@ -570,7 +570,7 @@ export function statusCommand(args: string[]): number {
   const json = args.includes("--json");
   const d = (process.env["ROLL_RENDER_FIXTURE"] ?? "") !== "" ? fixtureData() : liveData();
   // US-DOSSIER-035: lead with the verdict-first truth summary read from the ONE
-  // snapshot the web Overview reads, then the existing sync-health body. Status
+  // snapshot the web Now tab reads, then the existing sync-health body. Status
   // stays read-only and exits 0; the verdict line carries the exit-code intent
   // a script consumes, but `roll status` itself never fails the shell.
   const fixtureMode = (process.env["ROLL_RENDER_FIXTURE"] ?? "") !== "";

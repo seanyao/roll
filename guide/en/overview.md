@@ -78,9 +78,10 @@ The console's information architecture:
   (the same registry `roll ls` prints) and jumps between their consoles.
 - **EN / 中 language toggle** — single-language presentation; the toggle flips the
   whole console between English and Chinese.
-- **Project tabs** — Overview · Loop · Release · Backlog · Skills · Charter. The
-  Overview leads with the verdict, the loop heartbeat, three aggregate tiles, and
-  the six-state Story spectrum.
+- **Project tabs** — Now · Backlog · Loop · Release · Casting · Charter. Now is
+  the default landing view: live cycle, loop heartbeat, running processes, next
+  picks, needs-you rows, and the truth rollup with verdict, aggregates, and the
+  six-state Story spectrum.
 - **Machine-global breadcrumb (`MACHINE › …`)** — Agents · Skills · Conventions ·
   About. These pages describe the machine, not one project: the agents installed
   on this box, the `skills/<name>/SKILL.md` contracts that govern every project

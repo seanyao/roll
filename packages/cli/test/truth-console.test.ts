@@ -1,5 +1,5 @@
 /**
- * US-DOSSIER-011 — the Truth Console shell + Overview. Numbers come from the
+ * US-DOSSIER-011/043 — the Truth Console shell + Now. Numbers come from the
  * ONE TruthSnapshot; tabs are hash-routed; brand is injected; copy is fully
  * bilingual (single-language presentation via roll-lang).
  */
@@ -216,16 +216,13 @@ function render(
 describe("renderTruthConsole — US-DOSSIER-011", () => {
   const html = render();
 
-  // US-DOSSIER-040: the canonical PROJECT tab order is fixed by the CORRECT
-  // design reference's nav markup (Delivery Dossier.dc.html `<!-- tabs -->`,
-  // tabIndex/tabContext/tabEpics/tabLoop/tabRelease/tabCasting): Overview →
-  // Charter → Backlog → Loop → Release → Casting. Skills/Agents/Conventions/
-  // About are MACHINE-GLOBAL (the MACHINE breadcrumb), never project tabs. The
-  // rendered bar, the panes, and the CONSOLE_SCRIPT router all read ONE shared
-  // TABS constant, anchoring all three.
-  const DC_TAB_ORDER = ["overview", "charter", "backlog", "loop", "release", "casting"] as const;
+  // US-DOSSIER-043: the PROJECT tab order is Now → Backlog → Loop → Release →
+  // Casting → Charter. Skills/Agents/Conventions/About are MACHINE-GLOBAL (the
+  // MACHINE breadcrumb), never project tabs. The rendered bar, panes, and router
+  // all read ONE shared TABS constant.
+  const DC_TAB_ORDER = ["now", "backlog", "loop", "release", "casting", "charter"] as const;
 
-  it("AC1: hash-routed tabs in the design-reference order, overview first, Skills not a project tab", () => {
+  it("AC1: hash-routed tabs in the Now-first order, with no Overview/Summary project tab", () => {
     for (const k of DC_TAB_ORDER) {
       expect(html).toContain(`data-tab="${k}"`);
       expect(html).toContain(`id="tab-${k}"`);
@@ -240,6 +237,12 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
     const scriptTabs = /var TABS = (\[[^\]]*\]);/.exec(html);
     expect(JSON.parse(scriptTabs?.[1] ?? "[]")).toEqual([...DC_TAB_ORDER]);
     expect(html).toContain("hashchange"); // tab state survives drill-down via hash
+    expect(html).toContain('data-tab="now"');
+    expect(html).toContain('id="tab-now"');
+    expect(html).not.toContain('data-tab="overview"');
+    expect(html).not.toContain('id="tab-overview"');
+    expect(html).not.toContain(">Overview<");
+    expect(html).not.toContain(">Summary<");
     // US-DOSSIER-040: Casting is its OWN project tab; Skills is NOT a project tab
     // (it stays machine-global, reached via the MACHINE breadcrumb → skills.html).
     expect(barOrder).toContain("casting");
@@ -273,10 +276,21 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
     expect(custom).not.toContain("It just works.");
   });
 
-  it("AC3: overview carries verdict, heartbeat, three tiles and the spectrum", () => {
+  it("AC3: Now carries live operations, heartbeat, where-things-stand, three tiles and the spectrum", () => {
+    expect(html).toContain(">Now<");
+    for (const section of ["live-cycle", "processes", "on-deck", "needs-you", "where-things-stand"]) {
+      expect(html).toContain(`data-now-section="${section}"`);
+    }
+    expect(html).toContain("Live cycle");
+    expect(html).toContain("Processes");
+    expect(html).toContain("On deck");
+    expect(html).toContain("Needs you");
     expect(html).toContain('data-truth="verdict"');
     expect(html).toMatch(/data-truth="verdict"[^>]*>WARN</); // warn=2 → WARN
     expect(html).toContain("循环心跳");
+    expect(html).toContain("zombie");
+    expect(html).toContain("僵尸");
+    expect(html).toContain("#d23b3b");
     expect(html).toContain("1/1"); // running lanes
     expect(html).toContain('data-tab-link="backlog"');
     expect(html).toContain('data-tab-link="loop"');
@@ -392,7 +406,7 @@ describe("collectLoopHeartbeat — US-DOSSIER-011", () => {
 });
 
 describe("loop tab active loops — US-DOSSIER-042", () => {
-  it("renders a dedicated repo loops section separate from the overview summary", () => {
+  it("renders a dedicated repo loops section separate from the Now rollup", () => {
     const html = render({
       ...SNAP,
       loop: {
@@ -931,7 +945,7 @@ describe("top-bar shell — US-DOSSIER-027", () => {
     expect(none).not.toContain('id="proj-menu"');
     expect(none).not.toContain('id="proj-switch-btn"');
     // still renders the project name as a home anchor
-    expect(none).toMatch(/href="#overview"[^>]*class="proj-switch-btn"/);
+    expect(none).toMatch(/href="#now"[^>]*class="proj-switch-btn"/);
     expect(none).toContain(">roll<");
     // omitting projects entirely behaves identically (graceful)
     const omitted = render();
@@ -999,10 +1013,10 @@ describe("top-bar shell — US-DOSSIER-027", () => {
     expect(page).not.toContain("undefined");
   });
 
-  // FIX-283 (AC1): the current-project "home" link must hop to the console
-  // (index.html#overview) on a MACHINE page, where a bare #overview is a dead
-  // hash — but stay #overview on the console itself.
-  it("AC1 (FIX-283): machine page → current project links to index.html#overview; console keeps #overview", () => {
+  // FIX-283 + US-DOSSIER-043: the current-project "home" link must hop to the
+  // console Now tab (index.html#now) on a MACHINE page, where a bare #now is a
+  // dead hash — but stay #now on the console itself.
+  it("AC1 (FIX-283): machine page → current project links to index.html#now; console keeps #now", () => {
     // Single-project (no dropdown): the switcher button is a plain home anchor.
     const machineSolo = renderMachineStubPage({
       brand: { name: "roll", slogan: "It just works." },
@@ -1011,11 +1025,11 @@ describe("top-bar shell — US-DOSSIER-027", () => {
       currentSlug: "roll",
       page: "about",
     });
-    expect(machineSolo).toMatch(/href="index\.html#overview"[^>]*class="proj-switch-btn"/);
-    expect(machineSolo).not.toMatch(/href="#overview"[^>]*class="proj-switch-btn"/);
+    expect(machineSolo).toMatch(/href="index\.html#now"[^>]*class="proj-switch-btn"/);
+    expect(machineSolo).not.toMatch(/href="#now"[^>]*class="proj-switch-btn"/);
 
     // Multi-project dropdown on a machine page: the CURRENT row routes to the
-    // console, not a dead #overview.
+    // console, not a dead #now.
     const machineMulti = renderMachineStubPage({
       brand: { name: "roll", slogan: "It just works." },
       snapshot: SNAP,
@@ -1023,17 +1037,17 @@ describe("top-bar shell — US-DOSSIER-027", () => {
       currentSlug: "roll",
       page: "conventions",
     });
-    expect(machineMulti).toMatch(/class="proj-item on"[^>]*href="index\.html#overview"/);
+    expect(machineMulti).toMatch(/class="proj-item on"[^>]*href="index\.html#now"/);
     // a NON-current project still links to its own dossier (unchanged)
     expect(machineMulti).toContain('href="/Users/me/acme/.roll/features/index.html"');
 
-    // The console (no machinePage) keeps the in-page #overview hash.
+    // The console (no machinePage) keeps the in-page #now hash.
     const consoleSolo = render(SNAP, { projects: [REGISTRY[0]!], currentSlug: "roll" });
-    expect(consoleSolo).toMatch(/href="#overview"[^>]*class="proj-switch-btn"/);
-    expect(consoleSolo).not.toContain('href="index.html#overview"');
+    expect(consoleSolo).toMatch(/href="#now"[^>]*class="proj-switch-btn"/);
+    expect(consoleSolo).not.toContain('href="index.html#now"');
     const consoleMulti = render(SNAP, { projects: REGISTRY, currentSlug: "roll" });
-    expect(consoleMulti).toMatch(/class="proj-item on"[^>]*href="#overview"/);
-    expect(consoleMulti).not.toContain('href="index.html#overview"');
+    expect(consoleMulti).toMatch(/class="proj-item on"[^>]*href="#now"/);
+    expect(consoleMulti).not.toContain('href="index.html#now"');
   });
 });
 

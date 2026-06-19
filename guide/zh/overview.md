@@ -76,8 +76,9 @@ Roll 运行在三个自主层上：
   `~/.roll/projects.json` 里的每个项目（与 `roll ls` 打印的同一份注册表），可在各项目
   的控制台之间跳转。
 - **EN / 中 语言切换** —— 单语呈现；切换会把整个控制台在中英之间整体翻面。
-- **项目页签** —— Overview · Loop · Release · Backlog · Skills · Charter。Overview
-  以判定开头，随后是 loop 心跳、三块聚合卡片、六态 Story 光谱。
+- **项目页签** —— Now · Backlog · Loop · Release · Casting · Charter。Now 是默认
+  落地视图：实时 cycle、loop 心跳、运行进程、下批候选、需要你处理的行，以及带判定、
+  聚合块和六态 Story 光谱的真相汇总。
 - **机器全局面包屑（`MACHINE › …`）** —— Agents · Skills · Conventions · About。
   这些页面描述的是机器而非单个项目：本机安装的 agents、治理本机每个项目的
   `skills/<name>/SKILL.md` 契约、以及同步进各 AI 客户端的约定。

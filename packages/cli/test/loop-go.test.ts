@@ -1171,7 +1171,8 @@ describe("FIX-289 — go startup feedback + reliable watch window", () => {
     // First creates the session with a named `watch` window holding the live feed.
     expect(plan[0]?.[0]).toBe("new-session");
     expect(plan[0]).toContain("watch");
-    expect(plan[0]?.[plan[0].length - 1]).toContain("loop fmt");
+    expect(plan[0]?.[plan[0].length - 1]).toContain("loop watch");
+    expect(plan[0]?.[plan[0].length - 1]).not.toContain("loop fmt");
     // Then the detached worker `go` window.
     expect(plan[1]?.[0]).toBe("new-window");
     expect(plan[1]).toContain("go");
@@ -1186,7 +1187,8 @@ describe("FIX-289 — go startup feedback + reliable watch window", () => {
     // The missing watch window is recreated via new-window (NOT new-session).
     expect(plan[0]?.[0]).toBe("new-window");
     expect(plan[0]).toContain("watch");
-    expect(plan[0]?.[plan[0].length - 1]).toContain("loop fmt");
+    expect(plan[0]?.[plan[0].length - 1]).toContain("loop watch");
+    expect(plan[0]?.[plan[0].length - 1]).not.toContain("loop fmt");
     // Then the worker `go` window.
     expect(plan[1]?.[0]).toBe("new-window");
     expect(plan[1]).toContain("go");

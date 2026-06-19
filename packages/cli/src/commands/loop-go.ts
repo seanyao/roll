@@ -457,8 +457,7 @@ function goSessionName(slug: string): string {
 
 /** Shell snippet for the read-only watch window / foreground follow. */
 function watchCommand(projectPath: string, slug: string, rollBin: string): string {
-  const live = shellQuote(join(runtimeDir(projectPath), "live.log"));
-  return `printf 'roll goal · ${slug}\\n'; tail -n +1 -F ${live} | ${shellQuote(rollBin)} loop fmt`;
+  return `cd ${shellQuote(projectPath)} && printf 'roll goal · ${slug}\\n' && ROLL_BIN=${shellQuote(rollBin)} ${shellQuote(rollBin)} loop watch --since all`;
 }
 
 /**
@@ -530,18 +529,12 @@ function startGoTmux(input: StartTmuxInput): boolean {
  */
 function followGoLiveFeed(projectPath: string, rollBin: string): Promise<void> {
   return new Promise((resolve) => {
-    const live = join(runtimeDir(projectPath), "live.log");
-    const tail = spawn("tail", ["-n", "+1", "-F", live], { stdio: ["ignore", "pipe", "inherit"] });
-    const fmt = spawn(rollBin.endsWith(".js") || rollBin.endsWith(".mjs") ? process.execPath : rollBin, rollBin.endsWith(".js") || rollBin.endsWith(".mjs") ? [rollBin, "loop", "fmt"] : ["loop", "fmt"], { stdio: ["pipe", "inherit", "inherit"] });
-    if (tail.stdout !== null && fmt.stdin !== null) tail.stdout.pipe(fmt.stdin);
+    const cmd = rollBin.endsWith(".js") || rollBin.endsWith(".mjs") ? process.execPath : rollBin;
+    const args = rollBin.endsWith(".js") || rollBin.endsWith(".mjs") ? [rollBin, "loop", "watch", "--since", "all"] : ["loop", "watch", "--since", "all"];
+    const watch = spawn(cmd, args, { cwd: projectPath, stdio: ["ignore", "inherit", "inherit"] });
     const finish = (): void => {
       try {
-        tail.kill("SIGTERM");
-      } catch {
-        /* gone */
-      }
-      try {
-        fmt.kill("SIGTERM");
+        watch.kill("SIGTERM");
       } catch {
         /* gone */
       }
@@ -549,9 +542,8 @@ function followGoLiveFeed(projectPath: string, rollBin: string): Promise<void> {
       resolve();
     };
     process.on("SIGINT", finish);
-    fmt.on("exit", finish);
-    tail.on("exit", finish);
-    tail.on("error", finish);
+    watch.on("exit", finish);
+    watch.on("error", finish);
   });
 }
 

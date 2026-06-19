@@ -23,6 +23,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   buildLoopRunnerScript,
+  buildLoopTestRunnerScript,
   buildPrRunnerScript,
   buildDreamRunnerScript,
   deriveMinute,
@@ -661,15 +662,17 @@ describe("FIX-204E — tmux observation window in the runner template", () => {
     expect(s).toContain('"$TMUX_BIN" has-session');
     expect(s).toContain('"$TMUX_BIN" new-session -d -s');
     expect(s).toContain("-x 200 -y 50"); // v2 oracle geometry
-    expect(s).toContain("tail -n +1 -F '$RT/live.log'");
+    expect(s).toContain("'$ROLL_BIN' loop watch");
+    expect(s).not.toContain("tail -n +1 -F '$RT/live.log' | '$ROLL_BIN' loop fmt");
     expect(s).toContain('"$TMUX_BIN" new-window -d');
     expect(s).toContain("ROLL_TMUX_WRAPPED=1");
   });
 
-  it("US-PORT-012: pipes the live.log tail through `roll loop fmt` (three-tier window)", () => {
-    // the raw stream still lands in live.log upstream (AC3); the WATCH window
-    // tails it through the formatter so the pane shows key nodes, not raw JSON.
-    expect(s).toMatch(/tail -n \+1 -F '\$RT\/live\.log' \| '\$ROLL_BIN' loop fmt/);
+  it("US-LOOP-047: routes the watch window through `roll loop watch`", () => {
+    // The unified watch entrypoint owns default status, event modes, and
+    // live.log following; the scheduler should not hand-roll tail|fmt.
+    expect(s).toMatch(/'\$ROLL_BIN' loop watch/);
+    expect(s).not.toMatch(/tail -n \+1 -F '\$RT\/live\.log' \| '\$ROLL_BIN' loop fmt/);
   });
 
   it("the wrap precedes caffeinate AND the cycle invocation; guards allow opt-out + re-entry", () => {
@@ -685,6 +688,12 @@ describe("FIX-204E — tmux observation window in the runner template", () => {
   it("generation-time rollBin override is baked verbatim", () => {
     const o = buildLoopRunnerScript({ projectPath: "/p", slug: "s9", activeStart: 0, activeEnd: 24, rollBin: "/dev/roll-cli.js" });
     expect(o).toContain('ROLL_BIN="${ROLL_BIN:-/dev/roll-cli.js}"');
+  });
+
+  it("US-LOOP-047: the smoke runner tmux watch window also uses `roll loop watch`", () => {
+    const smoke = buildLoopTestRunnerScript({ projectPath: "/p", slug: "s9", cmd: "echo ok" });
+    expect(smoke).toContain("'$ROLL_BIN' loop watch --since all");
+    expect(smoke).not.toContain("tail -n +1 -F '$RT/live.log' | '$ROLL_BIN' loop fmt");
   });
 });
 

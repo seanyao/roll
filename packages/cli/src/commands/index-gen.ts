@@ -217,6 +217,11 @@ function tailNonEmptyLines(text: string, limit: number): string[] {
   return limit > 0 ? lines.slice(-limit) : lines;
 }
 
+/** A live.log not written within this many seconds is "idle", not "live" — the
+ *  loop is not currently streaming a cycle (FIX-373). A running cycle writes the
+ *  log continuously, so 5 minutes of silence means it is not live. */
+const LIVE_FEED_FRESH_SEC = 300;
+
 export function collectLoopLiveFeed(projectPath: string, nowSec = renderNowSec()): LoopLiveFeedVM {
   const livePath = join(runtimeDir(projectPath), "live.log");
   const agent = (process.env["ROLL_LOOP_AGENT"] ?? "claude").trim() || "claude";
@@ -238,9 +243,12 @@ export function collectLoopLiveFeed(projectPath: string, nowSec = renderNowSec()
   }
   let raw = "";
   let updatedAt = generatedAt;
+  let mtimeMs = nowSec * 1000;
   try {
     raw = readFileSync(livePath, "utf8");
-    updatedAt = statSync(livePath).mtime.toISOString().replace(/\.\d{3}Z$/, "Z");
+    const st = statSync(livePath);
+    updatedAt = st.mtime.toISOString().replace(/\.\d{3}Z$/, "Z");
+    mtimeMs = st.mtimeMs;
   } catch {
     return {
       ...base,
@@ -258,13 +266,25 @@ export function collectLoopLiveFeed(projectPath: string, nowSec = renderNowSec()
       .map(stripAnsi)
       .filter((line) => line.trim() !== "")
       .slice(-80);
+    // FIX-373: "live" requires the log to be ACTIVELY streaming — written within
+    // the freshness window. A log full of old lines from a cycle that ended hours
+    // ago is NOT live (that left the Now panel badging a long-finished cycle as
+    // "running"); it reads idle, and the last cycle shows under "last run".
+    const ageSec = nowSec - Math.floor(mtimeMs / 1000);
+    // A future/just-written mtime (ageSec ≤ 0, incl. clock skew) is fresh; only a
+    // log untouched for longer than the window is stale.
+    const fresh = ageSec <= LIVE_FEED_FRESH_SEC;
     return {
       ...base,
-      status: renderedLines.length > 0 ? "live" : "idle",
+      status: renderedLines.length > 0 && fresh ? "live" : "idle",
       rawLineCount: rawLines.length,
       renderedLines,
       updatedAt,
-      ...(renderedLines.length === 0 ? { note: "live.log has no concise activity signals yet" } : {}),
+      ...(renderedLines.length === 0
+        ? { note: "live.log has no concise activity signals yet" }
+        : !fresh
+          ? { note: `last activity ${Math.floor(ageSec / 60)}m ago — loop not currently streaming` }
+          : {}),
     };
   } finally {
     renderState.useColor = prevColor;

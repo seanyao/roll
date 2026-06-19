@@ -815,9 +815,46 @@ function updateProgressFromRows(
   else if (rows.length > 0) progress.noProgressCycles += 1;
 }
 
-function goalEvaluationFromTruth(truths: StoryTruth[], scope: GoalScope, opts: { allowEmptyAllComplete: boolean }): GoalEvaluation {
+/**
+ * FIX-337 (AC5): a card is IN-FLIGHT when its PR is open but not yet merged —
+ * the cycle-ledger `pending_merge` / `published_pending_merge` analog at the
+ * story level. Detected from the PR evidence the gatherer resolved (state OPEN)
+ * OR a `PR#N` annotation on the backlog status cell (a PR was opened) for a card
+ * the merge truth does NOT yet confirm delivered. A MERGED PR is delivery, not
+ * in-flight, so it is excluded here (it counts via `truth.delivered`).
+ */
+export function isCardInFlight(backlogStatus: string, prEvidence: AuditPrEvidence | undefined): boolean {
+  if (prEvidence !== undefined) {
+    const state = prEvidence.state.toUpperCase();
+    if (state === "MERGED") return false; // a merge is delivery, not in-flight
+    if (state === "OPEN") return true;
+  }
+  // No (or non-OPEN) PR evidence: a `PR#N` annotation still means a PR was opened
+  // for this card — in-flight pending its merge.
+  return /PR#\d+/.test(backlogStatus);
+}
+
+/**
+ * FIX-337 (AC5) — the goal evaluation. `delivered` now counts MERGED cards AND
+ * open-PR IN-FLIGHT cards (the cycle-ledger `delivered + pending_merge` figure),
+ * so the loop's progress reading credits a card whose PR is open and handed to
+ * the PR lane — it is no longer falsely shown as "0 delivered" while real work is
+ * mid-merge. `completion` is UNCHANGED: it still requires EVERY scoped card to be
+ * really merged (blockers are merge-gated on `truth.delivered`), so an in-flight
+ * card keeps the goal open until its merge lands. The display number and the
+ * completion gate are deliberately distinct (in-flight ≠ done).
+ */
+export function goalEvaluationFromTruth(
+  truths: StoryTruth[],
+  scope: GoalScope,
+  opts: { allowEmptyAllComplete: boolean; inFlightIds?: ReadonlySet<string> },
+): GoalEvaluation {
   const total = truths.length;
-  const delivered = truths.filter((truth) => truth.delivered).length;
+  const inFlight = opts.inFlightIds ?? new Set<string>();
+  // delivered-or-in-flight: merged cards plus open-PR cards not yet merged.
+  const delivered = truths.filter((truth) => truth.delivered || (!truth.delivered && inFlight.has(truth.storyId))).length;
+  // completion stays merge-gated: an in-flight (not-yet-merged) card is STILL a
+  // blocker, so the goal does not complete until every PR actually merges.
   const blockers = truths
     .filter((truth) => !truth.delivered || truth.state === "fail" || truth.state === "unknown")
     .map((truth) => `${truth.storyId}:${truth.state}:${truth.reason}`);
@@ -1083,11 +1120,16 @@ async function evaluateGoal(
 ): Promise<{ goal: RollGoal; complete: boolean; reason: string; reviewBlocked: boolean }> {
   const rows = rowsForScope(projectPath, goal.scope);
   const truths: StoryTruth[] = [];
+  // FIX-337 (AC5): track which scoped cards are IN-FLIGHT (PR open, not merged),
+  // so the `delivered` reading credits them like the cycle-ledger pending_merge
+  // figure. Completion stays merge-gated (these remain blockers).
+  const inFlightIds = new Set<string>();
   for (const row of rows) {
     const prEvidence = deps.prEvidence !== undefined ? await deps.prEvidence(projectPath, row.id, row.status) : undefined;
+    if (isCardInFlight(row.status, prEvidence)) inFlightIds.add(row.id);
     truths.push(storyTruthFromBacklog(row.id, row.status, { ...(prEvidence !== undefined ? { prEvidence } : {}), nowSec: deps.nowSec() }));
   }
-  const verdict = goalEvaluationFromTruth(truths, goal.scope, { allowEmptyAllComplete: backlogExists(projectPath) });
+  const verdict = goalEvaluationFromTruth(truths, goal.scope, { allowEmptyAllComplete: backlogExists(projectPath), inFlightIds });
   bus.appendEvent(eventsPath(projectPath), {
     type: "goal:evaluated",
     sessionId: session,

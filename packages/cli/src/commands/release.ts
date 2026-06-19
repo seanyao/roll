@@ -32,7 +32,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { foldUnreleased, planRelease, type ReleaseDate, type ReleaseStep } from "@roll/core";
+import { EventBus, EVENTS_FILE, foldUnreleased, planRelease, type ReleaseDate, type ReleaseStep } from "@roll/core";
 import { isTransientGhError } from "@roll/infra";
 import { type Lang, resolveLang, t, v2Catalog, v3Catalog } from "@roll/spec";
 import { c, renderState } from "../render.js";
@@ -95,6 +95,17 @@ export interface ReleaseFlowDeps {
   consistencyGate: (cwd: string) => Promise<boolean> | boolean;
   tag: (cwd: string, tag: string, version: string) => void;
   pushTag: (cwd: string, tag: string) => void;
+  /**
+   * FIX-368: record the just-pushed release as a `release:gate` FACT in the
+   * event stream so the dossier's prevTag/history + waiver audit stay current
+   * automatically (no manual `roll index`). CRITICAL CONTRACT: this runs AFTER
+   * the irreversible tag-push, is APPEND-ONLY + BEST-EFFORT, and must NEVER
+   * throw or block — a `v*` tag push triggers a real publish (release.yml), so
+   * the release transaction is already complete and must not be destabilised by
+   * a bookkeeping append. The default impl swallows every error. Optional so a
+   * test can omit it; the flow guards the call regardless.
+   */
+  recordReleaseFact?: (cwd: string, tag: string) => void;
   confirm: (tag: string) => boolean;
   now: () => Date;
   /** Step progress sink (stdout in production; recorded in tests). */
@@ -489,6 +500,27 @@ export function realReleaseDeps(): ReleaseFlowDeps {
     pushTag: (cwd, tagName) => {
       git(cwd, ["push", "origin", tagName]);
     },
+    recordReleaseFact: (cwd, tagName) => {
+      // FIX-368: append a `release:gate` fact for the freshly-pushed tag so the
+      // dossier reconciles prevTag/history without a manual step. BEST-EFFORT
+      // by contract — wrapped so a bookkeeping failure NEVER affects the
+      // already-completed (irreversible) release. verdict=pass: the release
+      // transaction only reaches tag-push after every gate passed.
+      try {
+        const runtimeDir = (process.env["ROLL_PROJECT_RUNTIME_DIR"] ?? "").trim();
+        const eventsPath = runtimeDir !== "" ? join(runtimeDir, EVENTS_FILE) : join(cwd, ".roll", "loop", EVENTS_FILE);
+        new EventBus().appendEvent(eventsPath, {
+          type: "release:gate",
+          tag: tagName,
+          verdict: "pass",
+          failCount: 0,
+          waivedRules: [],
+          ts: Math.floor(Date.now() / 1000),
+        });
+      } catch {
+        /* append-only + best-effort: never destabilise the release */
+      }
+    },
     confirm: (tagName) => {
       process.stdout.write(`release ${tagName}? [y/N] `);
       const line = readConfirmLine();
@@ -616,6 +648,15 @@ async function runReleaseFlowInner(
   deps.tag(cwd, plan.tag, plan.nextVersion);
   deps.pushTag(cwd, plan.tag);
   step("tag-push", plan.tag);
+  // FIX-368: the release is now IRREVERSIBLE (the v* tag is pushed → publish).
+  // Record it as a fact for the dossier — strictly AFTER the push, APPEND-ONLY,
+  // and guarded so a bookkeeping failure can never turn a completed release into
+  // an abort. (The default dep already swallows; this double-guards a custom dep.)
+  try {
+    deps.recordReleaseFact?.(cwd, plan.tag);
+  } catch {
+    /* never let release-fact bookkeeping affect the completed release */
+  }
   return { status: "released", tag: plan.tag };
 }
 

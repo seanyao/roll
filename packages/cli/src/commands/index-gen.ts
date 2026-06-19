@@ -27,6 +27,7 @@ import { collectAgentPanel } from "../lib/agent-panel.js";
 import { collectExternalTools } from "../lib/external-tools.js";
 import { collectReleasePanel } from "../lib/release-panel.js";
 import { collectReleaseScope } from "../lib/release-scope.js";
+import { reconcileReleaseForProject } from "../lib/release-truth.js";
 import { collectSkillsPanel } from "../lib/skills-panel.js";
 import { renderSkillsPage } from "../lib/page-skills.js"; // US-DOSSIER-032
 import { renderToolsPage } from "../lib/page-tools.js"; // US-TOOL-017
@@ -127,12 +128,17 @@ function releaseVerdict(v: string | undefined): TruthBoardVerdict {
 }
 
 function releaseTruthBoard(projectPath: string, nowSec: number): TruthBoardInput["release"] | undefined {
+  // FIX-368: the headline "latest released version" is RECONCILED from reality
+  // (newest v* git tag / package version / CHANGELOG top), NOT read from the
+  // `release:gate` event cache that the current release flow no longer refreshes.
+  const reconciled = reconcileReleaseForProject(projectPath);
+
   const path = join(projectPath, ".roll", "loop", "events.ndjson");
-  let content: string;
+  let content = "";
   try {
     content = readFileSync(path, "utf8");
   } catch {
-    return undefined;
+    /* no event stream — the gate verdict is unknown, but a tag may still exist */
   }
   let latestGate: { tag?: string; verdict?: string; waivedRules: string[]; ts: number } | undefined;
   const activeWaivers: string[] = [];
@@ -150,13 +156,24 @@ function releaseTruthBoard(projectPath: string, nowSec: number): TruthBoardInput
       activeWaivers.push(ev.scope);
     }
   }
-  if (latestGate === undefined) return undefined;
-  const waiver = [...latestGate.waivedRules, ...activeWaivers].filter((x) => x.trim() !== "").join(", ");
+
+  // The latest tag is the reconciled truth; fall back to the gate tag only when
+  // reconciliation found nothing (e.g. a project with no tags/changelog/version).
+  const latestTag = reconciled.latestTag ?? latestGate?.tag;
+  if (latestTag === undefined && latestGate === undefined) return undefined;
+
+  // The verdict/waiver apply to the gate event ONLY when it gated the tag we are
+  // showing. If the newest tag moved past the last gated tag, the verdict is
+  // unknown (we have a fresh release with no recorded gate fact), never stale.
+  const matchingGate = latestGate !== undefined && latestGate.tag === latestTag ? latestGate : undefined;
+  const waiver = (matchingGate !== undefined ? [...matchingGate.waivedRules, ...activeWaivers] : activeWaivers)
+    .filter((x) => x.trim() !== "")
+    .join(", ");
   return {
-    ...(latestGate.tag !== undefined ? { latestTag: latestGate.tag } : {}),
-    verdict: releaseVerdict(latestGate.verdict),
+    ...(latestTag !== undefined ? { latestTag } : {}),
+    verdict: matchingGate !== undefined ? releaseVerdict(matchingGate.verdict) : "unknown",
     ...(waiver !== "" ? { waiver } : {}),
-    collectedAt: iso(latestGate.ts),
+    ...(matchingGate !== undefined ? { collectedAt: iso(matchingGate.ts) } : {}),
   };
 }
 

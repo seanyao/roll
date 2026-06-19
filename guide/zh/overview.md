@@ -12,7 +12,7 @@ roll setup && roll init
 
 roll loop on        # AI 按可配置频次执行 BACKLOG
 roll loop status    # 查看调度状态和最近 cycle
-tmux attach -t roll-loop-<project-slug>   # 可选：实时旁观当前 cycle
+roll loop watch     # 可选：只读实时旁观当前 cycle
 ```
 
 ## 工作原理
@@ -31,7 +31,7 @@ Roll 运行在三个自主层上：
 
 - `roll loop on` — AI 从 BACKLOG 领取故事，按可配置频次在隔离 worktree 里执行 `[core]`
 - `roll loop status` — 查看调度、最近 cycle、队列、告警和成本 `[core]`
-- `tmux attach -t roll-loop-<project-slug>` — 附加到实时 tmux 会话，观看 AI 工作过程 `[highlight]`
+- `roll loop watch` — 默认只读实时状态；排查事件用 `--events`，审计/底层排障才用 `--raw-events` `[highlight]`
 - `roll loop pause / resume` — 手动编码时暂停，完成后让 AI 继续
 
 ### 质量门禁

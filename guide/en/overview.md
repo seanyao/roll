@@ -12,7 +12,7 @@ roll setup && roll init
 
 roll loop on        # AI starts executing BACKLOG on a configurable schedule
 roll loop status    # check scheduler state and recent cycles
-tmux attach -t roll-loop-<project-slug>   # optional: watch the live cycle
+roll loop watch     # optional: read-only live view of the current cycle
 ```
 
 ## How It Works
@@ -31,7 +31,7 @@ You set goals, review PRs, and run releases. Everything in between is Roll.
 
 - `roll loop on` — AI picks stories from BACKLOG and executes on a configurable schedule in an isolated worktree `[core]`
 - `roll loop status` — scheduler snapshot, recent cycles, queue, alerts, and cost `[core]`
-- `tmux attach -t roll-loop-<project-slug>` — attach to the live tmux session and watch AI work in real time `[highlight]`
+- `roll loop watch` — default read-only live status; use `--events` for compact events and `--raw-events` only for audit/debug `[highlight]`
 - `roll loop pause / resume` — hand-code yourself; let AI resume when you're done
 
 ### Quality Gates

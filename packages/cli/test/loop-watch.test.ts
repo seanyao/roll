@@ -419,6 +419,12 @@ describe("roll loop watch --help (AC6)", () => {
     expect(help).toContain("--since");
     expect(help).toContain("--events");
     expect(help).toContain("--raw-events");
+    expect(help).toContain("Watch layers:");
+    expect(help).toContain("Owner-facing status");
+    expect(help).toContain("Developer compact stream");
+    expect(help).toContain("Audit/debug escape hatch");
+    expect(help).toContain("All modes are local and read-only");
+    expect(help).toContain("Ctrl-C ends the view, not the loop");
   });
 });
 

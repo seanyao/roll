@@ -133,8 +133,10 @@ roll loop now         # Run one cycle immediately (same as launchd fires)
 roll loop test        # Quick smoke test: verify tmux/popup/stream chain works
 
 roll loop status      # Show scheduler state and current loop state
-roll loop watch       # Read-only, concise, real-time view of this project's loop (tails live.log through the renderer)
+roll loop watch       # Default owner view: phase, quiet time, TCR count, last signal, plus live activity
 roll loop watch -n 50 # Look back 50 lines before following (default 200; 'all' = whole log)
+roll loop watch --events      # Compact developer event stream from .roll/loop/events.ndjson
+roll loop watch --raw-events  # Raw JSON event stream for audit/debug only
 roll loop watch --verbose  # Also show the raw agent transcript (default folds it away)
 roll loop watch --attach   # Read-only attach to the loop's tmux observe window (tmux attach -r)
 roll loop go          # Run goal mode manually for all backlog until complete/pause/guardrail
@@ -161,7 +163,8 @@ roll loop eval 30    # Widen the window to the last 30 scored cycles
 roll loop signals    # Surface repeated low-score patterns as improvement signals
 roll loop signals --streak 4  # Require 4 consecutive low cycles before firing
 
-tmux attach -t roll-loop-<project-slug>  # Attach to the live loop tmux session
+roll loop watch       # Recommended daily live view
+tmux attach -t roll-loop-<project-slug>  # Read-only tmux observe window; use when you want the pane
 roll loop mute        # Suppress auto-attach popup (loop still runs in tmux)
 roll loop unmute      # Re-enable auto-attach popup
 
@@ -555,8 +558,17 @@ or summaries.
 Every loop run lives in a detached tmux session.
 When you're not muted, a terminal window opens automatically.
 
+Use `roll loop watch` first for daily observation. It combines the live agent
+feed with the structured event stream into a concise status layer. Use
+`roll loop watch --events` when debugging event ordering or phase/TCR facts.
+Use `roll loop watch --raw-events` only when you need the unchanged audit JSON.
+All watch modes are read-only; Ctrl-C stops only the view.
+
 ```bash
-tmux attach -t roll-loop-<project-slug>  # join the running session at any time
+roll loop watch                          # default status layer
+roll loop watch --events                 # compact events
+roll loop watch --raw-events             # raw audit stream
+tmux attach -t roll-loop-<project-slug>  # join the running observe pane at any time
 # Ctrl-B D            # detach (loop continues)
 
 roll loop mute        # 🔇 stop popup (mute file: ~/.shared/roll/mute)

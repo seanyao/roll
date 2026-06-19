@@ -132,6 +132,35 @@ describe("parseEventLine (I8: readers skip bad lines, never crash)", () => {
     expect(degraded.to).toBe("self");
   });
 
+  it("parses + types story:split events (US-AGENT-042 self-downgrade)", () => {
+    const e = parseEventLine(
+      '{"type":"story:split","parentStoryId":"FIX-356","childStoryIds":["FIX-356a","FIX-356b"],"reason":"too big","chainDepth":0,"capped":false,"ts":5}',
+    );
+    expect(e).not.toBeNull();
+    expect(e?.type).toBe("story:split");
+    const split: RollEvent = {
+      type: "story:split",
+      parentStoryId: "FIX-356",
+      childStoryIds: ["FIX-356a", "FIX-356b"],
+      reason: "too big: 4 cuts",
+      chainDepth: 0,
+      capped: false,
+      ts: 1,
+    };
+    const capped: RollEvent = {
+      type: "story:split",
+      parentStoryId: "US-X-a-1",
+      childStoryIds: [],
+      reason: "chain cap",
+      chainDepth: 2,
+      capped: true,
+      ts: 2,
+    };
+    expect(split.childStoryIds).toHaveLength(2);
+    expect(capped.capped).toBe(true);
+    expect(capped.childStoryIds).toHaveLength(0);
+  });
+
   it("types goal safety gate trip events (US-GOAL-005; progress + timebox gates)", () => {
     const progress: RollEvent = {
       type: "goal:gate_tripped",

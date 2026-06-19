@@ -132,13 +132,25 @@ export function parseBacklog(content: string): BacklogItem[] {
  * no rows yet, after the last table row in the file. Returns the new content
  * and whether a row was appended (an existing row for the id is a no-op so the
  * command is idempotent).
+ *
+ * US-AGENT-042 — optional `dependsOn` / `chainDepth` are appended to the
+ * Description cell as the same `depends-on:a,b` / `chain_depth:N` tags the
+ * picker and self-downgrade cap read back (consistent with `est_min:`). Omitting
+ * them yields the original bare-title row byte-for-byte (existing callers
+ * unchanged). A self-downgrade child carries the parent's ORIGINAL inbound deps
+ * here — never the parked parent — so the picker can take it next cycle.
  */
 export function appendBacklogRow(
   content: string,
-  row: { id: string; title: string; epic: string },
+  row: { id: string; title: string; epic: string; dependsOn?: string[]; chainDepth?: number },
 ): { content: string; appended: boolean } {
   if (content.includes(`| [${row.id}]`)) return { content, appended: false };
-  const line = `| [${row.id}](.roll/features/${row.epic}/${row.id}/spec.md) | ${row.title} | ${STATUS_MARKER.todo} |`;
+  const tags = [
+    row.chainDepth !== undefined && row.chainDepth > 0 ? `chain_depth:${row.chainDepth}` : "",
+    row.dependsOn !== undefined && row.dependsOn.length > 0 ? `depends-on:${row.dependsOn.join(",")}` : "",
+  ].filter((t) => t !== "");
+  const desc = tags.length > 0 ? `${row.title} ${tags.join(" ")}` : row.title;
+  const line = `| [${row.id}](.roll/features/${row.epic}/${row.id}/spec.md) | ${desc} | ${STATUS_MARKER.todo} |`;
   const lines = content.split("\n");
   let anchor = -1;
   let lastTableRow = -1;

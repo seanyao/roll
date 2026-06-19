@@ -10,6 +10,8 @@
 
 - **暖会话复用收窄到同一卡重试**：默认仍关闭；即使开启，也只会在同一张卡重试时恢复先前会话，跨卡继续冷启动，避免把上一张卡的旧上下文带偏当前交付。(FIX-369 / FIX-370 / FIX-371) `[loop-engine]`
 
+- **Dream 代码结构扫描改走确定性 TS/AST pre-scan**：`roll dream run-once` 现在会在 agent 前生成 `.roll/dream/structure-scan.json`，用 TypeScript 引用图、AST fingerprint 和 AST env 解析给死代码、不可达分支、重复结构、单实现抽象和 env 文档缺口提供机器证据；agent 消费该 artifact，不再靠 grep 式临场判断兜底，文档类扫描保持原流程。(US-LOOP-080) `[loop-engine]`
+
 - **web 控制台新增机器级 Tools 页**：一处看全所有内置工具（bash / browser / git / github / network / fs / mcp）、各自的能力与默认护栏（超时 / 沙箱 / 重试 / 每周期上限），和 Agents、Skills 同级，挂在 `MACHINE › …` 面包屑上。中英文 Overview 指南与 Tools & policy 指南都已指向这个新页面。(US-TOOL-016 / 017 / 018) `[tools-layer]`
 
 ## v3.619.1 — 2026-06-19

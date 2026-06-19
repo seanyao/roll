@@ -79,9 +79,10 @@ Roll 运行在三个自主层上：
 - **项目页签** —— Now · Backlog · Loop · Release · Casting · Charter。Now 是默认
   落地视图：实时 cycle、loop 心跳、运行进程、下批候选、需要你处理的行，以及带判定、
   聚合块和六态 Story 光谱的真相汇总。
-- **机器全局面包屑（`MACHINE › …`）** —— Agents · Skills · Conventions · About。
-  这些页面描述的是机器而非单个项目：本机安装的 agents、治理本机每个项目的
-  `skills/<name>/SKILL.md` 契约、以及同步进各 AI 客户端的约定。
+- **机器全局面包屑（`MACHINE › …`）** —— Agents · Skills · Tools · Conventions ·
+  About。这些页面描述的是机器而非单个项目：本机安装的 agents、治理本机每个项目的
+  `skills/<name>/SKILL.md` 契约、**Tools** 页（`tools.html`）上的内置工具清单与每个
+  工具的默认护栏（超时 / 沙箱 / 重试 / 每周期上限）、以及同步进各 AI 客户端的约定。
 - **Charter** —— 一个 markdown 浏览器，内联渲染项目的 charter 文档、语言指南
   （`guide/en` ↔ `guide/zh`）与史诗规划。
 - **Casting** —— 谁演什么：四个复杂度槽位（easy / default / hard / fallback）加上

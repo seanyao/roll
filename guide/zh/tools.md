@@ -28,6 +28,8 @@ tools layer 不是 AI 客户端自己的工具白名单替代品。客户端的 
 | MCP | `mcp.call` |
 | Network | `network.fetch` |
 
+完整的内置工具清单——每个工具的能力与默认护栏——可在机器全局 **Tools** 页（`tools.html`）浏览，它是 `MACHINE › …` 面包屑里与 Agents、Skills 同级的页面之一。
+
 ## 项目策略
 
 工具策略写在 `.roll/policy.yaml` 的 `tools:` 段里。

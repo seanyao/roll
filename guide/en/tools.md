@@ -28,6 +28,8 @@ Registered tool families today:
 | MCP | `mcp.call` |
 | Network | `network.fetch` |
 
+Browse the full built-in tool catalog — every tool with its capability and default guardrails — on the machine-global **Tools** page (`tools.html`), one of the `MACHINE › …` breadcrumb pages alongside Agents and Skills.
+
 ## Project Policy
 
 Tool policy lives under the `tools:` section of `.roll/policy.yaml`.

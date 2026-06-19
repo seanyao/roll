@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v3.619.1 — 2026-06-19
+
 ### 修复
 
 - **`roll release` 可反复执行并自愈中断**：release 分支或 PR 已存在时不再失败，而是复用已有分支/PR 并跳过已完成步骤；auto-merge 已开启或 PR 已合并时幂等跳过；配合已有的 GraphQL EOF 重试 + REST 回退，一次网络抖动不再毁掉发版。(FIX-330) `[release]`

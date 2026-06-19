@@ -10,18 +10,25 @@ the same shape as the loop runner, with no bash-engine dependency.
 
 ## What Dream Does
 
-Dream runs one full scan per night and produces two outputs:
+Dream runs one full scan per night and produces these outputs:
 
 1. **`.roll/dream/YYYY-MM-DD.md`** — detailed report in Chinese (one file per night)
 2. **BACKLOG.md entries** — actionable `REFACTOR-NNN` items appended to the `## ♻️ Refactor` table
+3. **`.roll/dream/structure-scan.json`** — deterministic TypeScript/AST evidence for code-structure findings
 
 The report covers:
 
-- Dead code and unused functions
-- Duplicated logic across modules
+- Dead code and unused functions, seeded by TypeScript Language Service references
+- Duplicated logic across modules, seeded by normalized AST fingerprints
 - Module boundary violations (one concern leaking into another)
 - Missing tests for shipped behavior
 - Documentation coverage gaps (missing EN/ZH guides, stale references)
+
+Code-structure findings now come from the deterministic pre-scan first: dead exports,
+unreachable branches, duplicate AST shapes, single-implementation abstractions, and
+undocumented env variables are written to `structure-scan.json` before the agent runs.
+The agent consumes that artifact instead of re-running grep-style heuristics. Document
+coverage, freshness, and existence-drift checks stay in the existing Dream flow.
 
 ## How to Read Dream Logs
 
@@ -110,3 +117,5 @@ $roll-.dream
 
 Dream always writes to today's date file and always appends to BACKLOG.md —
 running it twice in one day appends a second pass (safe but redundant).
+Each run also refreshes `.roll/dream/structure-scan.json`; inspect that file when you
+need machine-readable evidence behind code-structure REFACTOR rows.

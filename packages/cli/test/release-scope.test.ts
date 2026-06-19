@@ -1,9 +1,20 @@
-/** US-DOSSIER-016 — pending/shipped scope from merge truth + version history. */
+/**
+ * US-DOSSIER-016 / FIX-372 — pending = the NEXT release's content (stories
+ * merged to main SINCE the latest release tag), shipped = already inside a tag,
+ * plus version history. The huge "all non-done" backlog count no longer appears
+ * on Release — it belongs on the Backlog tab.
+ */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { collectHistory, collectReleaseScope } from "../src/lib/release-scope.js";
+import {
+  collectHistory,
+  collectReleaseScope,
+  selectReleaseDelta,
+  type ReleaseDeltaFacts,
+  type ScopeStoryInput,
+} from "../src/lib/release-scope.js";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -19,34 +30,124 @@ function project(opts: { changelog?: string; events?: object[] } = {}): string {
   return p;
 }
 
-describe("collectReleaseScope", () => {
-  it("splits pending (not done) vs shipped (done) and counts match the head arithmetic", () => {
+const TAG_TIME = 1_000_000;
+function facts(over: Partial<ReleaseDeltaFacts> = {}): ReleaseDeltaFacts {
+  return { merges: new Map(), latestTagTime: TAG_TIME, latestTag: "v3.619.1", ...over };
+}
+
+describe("selectReleaseDelta (pure) — FIX-372", () => {
+  it("pending = Done stories merged AFTER the latest tag; already-tagged Done = shipped", () => {
+    const stories: ScopeStoryInput[] = [
+      { id: "FIX-NEW", epic: "rel", title: "merged after the tag", state: "done" },
+      { id: "FIX-OLD", epic: "rel", title: "merged before the tag", state: "done" },
+      { id: "FIX-NOTS", epic: "rel", title: "done, no merge ts known", state: "done" },
+    ];
+    const { pending, shipped } = selectReleaseDelta(
+      stories,
+      facts({
+        merges: new Map([
+          ["FIX-NEW", { prNumber: 900, ts: TAG_TIME + 50 }], // after the tag → pending
+          ["FIX-OLD", { prNumber: 800, ts: TAG_TIME - 50 }], // before the tag → shipped
+        ]),
+      }),
+    );
+    expect(pending.map((s) => s.id)).toEqual(["FIX-NEW"]);
+    expect(pending[0]?.prNumber).toBe(900);
+    expect(shipped.map((s) => s.id).sort()).toEqual(["FIX-NOTS", "FIX-OLD"]);
+  });
+
+  it("non-Done stories are NOT release scope — the open backlog is dropped entirely", () => {
+    const stories: ScopeStoryInput[] = [
+      { id: "US-WIP", epic: "a", title: "wip", state: "wip" },
+      { id: "US-TODO", epic: "a", title: "todo", state: "todo" },
+      { id: "US-HOLD", epic: "a", title: "hold", state: "hold" },
+      { id: "US-UNK", epic: "a", title: "claimed but unproven", state: "unknown" },
+    ];
+    const { pending, shipped } = selectReleaseDelta(stories, facts());
+    expect(pending).toEqual([]);
+    expect(shipped).toEqual([]);
+  });
+
+  it("when the latest-tag time is unknown, nothing is 'after' it → empty pending, not the whole backlog", () => {
+    const stories: ScopeStoryInput[] = [{ id: "FIX-X", epic: "a", title: "t", state: "done" }];
+    const { pending, shipped } = selectReleaseDelta(
+      stories,
+      facts({ latestTagTime: undefined, merges: new Map([["FIX-X", { prNumber: 1, ts: 9_999_999 }]]) }),
+    );
+    expect(pending).toEqual([]);
+    expect(shipped.map((s) => s.id)).toEqual(["FIX-X"]);
+  });
+
+  it("a merge ts exactly AT the tag time counts as shipped (boundary), not pending", () => {
+    const stories: ScopeStoryInput[] = [{ id: "FIX-B", epic: "a", title: "t", state: "done" }];
+    const { pending, shipped } = selectReleaseDelta(stories, facts({ merges: new Map([["FIX-B", { prNumber: 2, ts: TAG_TIME }]]) }));
+    expect(pending).toEqual([]);
+    expect(shipped.map((s) => s.id)).toEqual(["FIX-B"]);
+  });
+});
+
+describe("collectReleaseScope — FIX-372", () => {
+  it("groups pending by epic (biggest first) and counts only the post-tag delta", () => {
     const p = project();
-    const vm = collectReleaseScope(p, [
-      { id: "US-A-1", epic: "alpha", title: "done one", state: "done", claim: "✅ Done (PR#638)" },
-      { id: "US-A-2", epic: "alpha", title: "wip", state: "wip" },
-      { id: "US-B-1", epic: "beta", title: "todo", state: "todo" },
-      { id: "US-B-2", epic: "beta", title: "claimed done no truth", state: "unknown" },
-    ]);
+    const vm = collectReleaseScope(
+      p,
+      [
+        { id: "FIX-1", epic: "big", title: "t", state: "done" },
+        { id: "FIX-2", epic: "big", title: "t", state: "done" },
+        { id: "FIX-3", epic: "small", title: "t", state: "done" },
+        { id: "US-OPEN", epic: "small", title: "still open", state: "todo" }, // dropped — not scope
+      ],
+      facts({
+        merges: new Map([
+          ["FIX-1", { prNumber: 1, ts: TAG_TIME + 1 }],
+          ["FIX-2", { prNumber: 2, ts: TAG_TIME + 2 }],
+          ["FIX-3", { prNumber: 3, ts: TAG_TIME + 3 }],
+        ]),
+      }),
+    );
+    expect(vm.pendingCount).toBe(3);
+    expect(vm.pending[0]?.epic).toBe("big"); // biggest group first
+    expect(vm.latestTag).toBe("v3.619.1");
+  });
+
+  it("regression (spec AC5): with a tag set and a FIX merged after it, pending = that FIX only, not the whole backlog", () => {
+    // 240 open backlog cards + 1 already-shipped Done + 1 Done merged after the tag.
+    const open: ScopeStoryInput[] = Array.from({ length: 240 }, (_, i) => ({
+      id: `US-OPEN-${i}`,
+      epic: "legacy",
+      title: "open wish",
+      state: "todo",
+    }));
+    const stories: ScopeStoryInput[] = [
+      ...open,
+      { id: "FIX-SHIPPED", epic: "rel", title: "already in v3.619.1", state: "done" },
+      { id: "FIX-372", epic: "release-management", title: "the next cut", state: "done" },
+    ];
+    const vm = collectReleaseScope(
+      project(),
+      stories,
+      facts({
+        merges: new Map([
+          ["FIX-SHIPPED", { prNumber: 700, ts: TAG_TIME - 100 }],
+          ["FIX-372", { prNumber: 841, ts: TAG_TIME + 100 }],
+        ]),
+      }),
+    );
+    expect(vm.pendingCount).toBe(1); // NOT ~241
+    expect(vm.pending[0]?.items[0]?.id).toBe("FIX-372");
     expect(vm.shippedCount).toBe(1);
-    expect(vm.pendingCount).toBe(3); // total - done: wip + todo + unknown
-    expect(vm.shipped[0]?.items[0]?.prNumber).toBe(638); // merge truth from the PR# annotation
+    expect(vm.shipped[0]?.items[0]?.id).toBe("FIX-SHIPPED");
   });
 
-  it("pr:merge events beat the claim annotation", () => {
-    const p = project({ events: [{ type: "pr:merge", prNumber: 999, storyId: "US-A-1", ts: 1 }] });
-    const vm = collectReleaseScope(p, [{ id: "US-A-1", epic: "a", title: "t", state: "done", claim: "✅ Done (PR#1)" }]);
+  it("reads merge facts from pr:merge events when no facts are injected (impure seam)", () => {
+    // No latest-tag time resolvable on a fresh temp repo → everything Done is
+    // shipped, pending is empty (the honest fresh-repo / no-git-tag case).
+    const p = project({ events: [{ type: "pr:merge", prNumber: 999, storyId: "FIX-A", ts: 5 }] });
+    const vm = collectReleaseScope(p, [{ id: "FIX-A", epic: "a", title: "t", state: "done", claim: "✅ Done (PR#1)" }]);
+    expect(vm.pendingCount).toBe(0);
+    expect(vm.shippedCount).toBe(1);
+    // merge truth: the pr:merge event's PR number wins over the claim annotation.
     expect(vm.shipped[0]?.items[0]?.prNumber).toBe(999);
-  });
-
-  it("groups by epic, biggest groups first", () => {
-    const p = project();
-    const vm = collectReleaseScope(p, [
-      { id: "1", epic: "small", title: "t", state: "todo" },
-      { id: "2", epic: "big", title: "t", state: "todo" },
-      { id: "3", epic: "big", title: "t", state: "wip" },
-    ]);
-    expect(vm.pending[0]?.epic).toBe("big");
   });
 });
 

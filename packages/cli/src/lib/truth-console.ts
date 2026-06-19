@@ -16,11 +16,11 @@
  * Now carries current operations + the truth rollup; Backlog/Loop/Release/
  * Casting/Charter render their project-specific surfaces below it.
  */
-import { bi, CONSISTENCY_DIMENSION_LABELS, FONT_LINKS as CORE_FONT_LINKS } from "@roll/core";
+import { bi, CONSISTENCY_DIMENSION_LABELS, type ConsistencyDimensionLabel, FONT_LINKS as CORE_FONT_LINKS } from "@roll/core";
 import type { TruthSnapshot, TruthSnapshotLoopLane } from "@roll/spec";
 import type { CycleLedgerRow, CycleTapeSegment } from "./cycle-ledger.js";
 import type { AgentPanelRow } from "./agent-panel.js";
-import type { ReleasePanelVM } from "./release-panel.js";
+import type { ReleasePanelDim, ReleasePanelVM } from "./release-panel.js";
 import type { ReleaseScopeVM, ScopeEpicGroup } from "./release-scope.js";
 import type { SkillsPanelVM } from "./skills-panel.js";
 import type { CastingExecSlot, CastingVM, CastingRow } from "./casting.js";
@@ -1103,8 +1103,21 @@ function backlogTab(input: TruthConsoleInput): string {
 // US-DOSSIER-022: the labels now live in @roll/core beside CONSISTENCY_DIMENSIONS,
 // so the web panel and the `roll release` gate report read ONE table and can
 // never re-diverge on a dimension name or order (Delivery Dossier ruling #3).
-const DIM_META: Record<string, { no: string; en: string; zh: string; whatEn: string; whatZh: string }> =
-  CONSISTENCY_DIMENSION_LABELS;
+const DIM_META: Record<string, ConsistencyDimensionLabel> = CONSISTENCY_DIMENSION_LABELS;
+
+/** A future/unknown dimension still renders honestly (kimi pair-review) — never
+ *  crashes the page. Empty self-explaining copy collapses to nothing. */
+const DIM_META_FALLBACK: ConsistencyDimensionLabel = {
+  no: "·",
+  en: "",
+  zh: "",
+  whatEn: "",
+  whatZh: "",
+  failMeansEn: "",
+  failMeansZh: "",
+  actionEn: "",
+  actionZh: "",
+};
 
 function fwu(f: number, w: number, u: number): string {
   return (
@@ -1118,14 +1131,19 @@ function fwu(f: number, w: number, u: number): string {
 function releaseTab(input: TruthConsoleInput): string {
   const s = input.snapshot;
   const rp = input.releasePanel;
+  const sc = input.releaseScope;
   const rel = s.release;
   const relColor = rel?.verdict === "pass" ? C.green : rel?.verdict === "fail" ? C.red : rel?.verdict === "warn" ? C.amber : C.slate;
-  const spectrum = s.story.spectrum;
-  // AC4 (US-DOSSIER-016): the head's merged/pending = the scope sections' counts
-  // by the same arithmetic — pending is EVERY not-yet-done story.
-  const merged = spectrum.done;
-  const pending = s.story.total - spectrum.done;
-  const mergedPct = s.story.total > 0 ? Math.round((merged / s.story.total) * 100) : 0;
+  // FIX-372: the head's merged/pending = the RELEASE DELTA, not "all non-done".
+  // `pending` is the next cut's content (Done stories merged since the latest
+  // tag — releaseScope.pendingCount), NOT every open backlog card (that lived on
+  // Release as a meaningless ~241 and now belongs on the Backlog tab). `merged`
+  // is what's already inside a tagged release (shippedCount). The bar reads
+  // "this cut's readiness": shipped of (shipped + pending).
+  const merged = sc.shippedCount;
+  const pending = sc.pendingCount;
+  const deltaTotal = merged + pending;
+  const mergedPct = deltaTotal > 0 ? Math.round((merged / deltaTotal) * 100) : 100;
   const head = (label: string, value: string, mono = true): string =>
     `<div><div style="${MONO}font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:${C.faint};">${label}</div>` +
     `<div style="${mono ? MONO : ""}font-size:13px;color:${C.body};margin-top:8px;white-space:nowrap;">${value}</div></div>`;
@@ -1145,26 +1163,75 @@ function releaseTab(input: TruthConsoleInput): string {
     `<div style="padding:0 20px 16px;"><div style="display:flex;height:11px;border-radius:999px;overflow:hidden;border:1px solid #e4e8ef;">` +
     `<span style="width:${mergedPct}%;background:${C.green};"></span><span style="flex:1;background:#eef1f5;"></span></div></div></section>`;
 
-  const dimRows = rp.dims
-    .map((d) => {
-      // runtime fallback (kimi pair-review): a future dimension renders honestly
-      // instead of crashing the whole page.
-      const meta = DIM_META[d.key] ?? { no: "·", en: d.key, zh: d.key, whatEn: "", whatZh: "" };
-      const dotColor = d.tally.fail > 0 ? C.red : d.tally.warn > 0 ? C.amber : d.tally.unknown > 0 ? C.slate : C.green;
-      const chips = d.tally.subjects
-        .map((sub) => `<a href="#backlog/q:${encodeURIComponent(sub)}" style="${MONO}font-size:10.5px;color:${C.blue};border:1px solid ${C.blue}55;border-radius:5px;padding:2px 7px;text-decoration:none;white-space:nowrap;">${esc(sub)}</a>`)
-        .join("");
-      return (
-        `<div class="rel-dim" data-dim="${d.key}" style="display:grid;grid-template-columns:215px 1fr 200px;gap:14px;align-items:center;padding:11px 18px;border-top:1px solid ${C.hair};">` +
-        `<span style="display:flex;align-items:center;gap:9px;min-width:0;">` +
-        `<span style="width:8px;height:8px;border-radius:50%;background:${dotColor};flex:none;"></span>` +
-        `<span style="${MONO}font-size:12.5px;font-weight:600;color:${C.ink};white-space:nowrap;">${meta.no} ${bi(meta.en, meta.zh)}</span></span>` +
-        `<span style="min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span style="font-size:12.5px;color:#6b7488;">${bi(meta.whatEn, meta.whatZh)}</span>${chips}</span>` +
-        fwu(d.tally.fail, d.tally.warn, d.tally.unknown) +
+  // FIX-372: the panel explains ITSELF. A clear top line says whether it can
+  // ship; a passing dimension stays a calm one-liner; a failing/warning one
+  // EXPANDS to "what it checks · what a fail means · the one action to clear it".
+  // The gate ENFORCEMENT is unchanged — this is presentation only.
+  const anyDrift = rp.total.fail > 0 || rp.total.warn > 0 || rp.total.unknown > 0;
+  const verdictColor = rp.blocking ? C.red : anyDrift ? C.amber : C.green;
+  const verdictMark = rp.blocking ? "❌" : anyDrift ? "⚠️" : "✅";
+  const failDims = rp.dims.filter((d) => d.tally.fail > 0).length;
+  const verdictEn = rp.blocking
+    ? `Blocked — cannot release: ${failDims} dimension${failDims === 1 ? "" : "s"} failing`
+    : anyDrift
+      ? "Releasable — no failing dimension (warnings/unknowns noted below)"
+      : "Ready to release — all six dimensions reconciled";
+  const verdictZh = rp.blocking
+    ? `不能发版 — ${failDims} 个维度未通过`
+    : anyDrift
+      ? "可发版 — 无失败维度（下方提示警告/未知）"
+      : "可以发版 — 六维全部对齐";
+  const verdictLine =
+    `<div data-truth="gate-verdict" data-blocking="${rp.blocking ? "1" : "0"}" style="display:flex;align-items:center;gap:12px;padding:14px 18px;background:${verdictColor}0d;border-bottom:1px solid ${C.hair};">` +
+    `<span style="font-size:17px;line-height:1;flex:none;">${verdictMark}</span>` +
+    `<span style="font-size:13.5px;font-weight:600;color:${verdictColor};">${bi(verdictEn, verdictZh)}</span>` +
+    `<span style="flex:1;"></span>` +
+    `<span data-truth="gate-total-inline">${fwu(rp.total.fail, rp.total.warn, rp.total.unknown)}</span></div>`;
+
+  const dimRow = (d: ReleasePanelDim): string => {
+    // runtime fallback (kimi pair-review): a future dimension renders honestly
+    // instead of crashing the whole page.
+    const meta = DIM_META[d.key] ?? DIM_META_FALLBACK;
+    const failing = d.tally.fail > 0;
+    const drift = failing || d.tally.warn > 0 || d.tally.unknown > 0;
+    const dotColor = failing ? C.red : d.tally.warn > 0 ? C.amber : d.tally.unknown > 0 ? C.slate : C.green;
+    const chips = d.tally.subjects
+      .map((sub) => `<a href="#backlog/q:${encodeURIComponent(sub)}" style="${MONO}font-size:10.5px;color:${C.blue};border:1px solid ${C.blue}55;border-radius:5px;padding:2px 7px;text-decoration:none;white-space:nowrap;">${esc(sub)}</a>`)
+      .join("");
+    // A passing dimension is one calm line (name · what it checks · all clear).
+    // A drifting one EXPANDS: what a fail means + the single action + the cards.
+    const explain = drift
+      ? `<div style="grid-column:2/4;margin-top:6px;padding:10px 12px;border-radius:8px;background:${(failing ? C.red : C.amber)}0d;border:1px solid ${(failing ? C.red : C.amber)}33;">` +
+        `<div style="font-size:12px;color:${C.body};line-height:1.5;"><b style="color:${failing ? C.red : C.amber};">${bi("Means", "含义")}:</b> ${bi(meta.failMeansEn, meta.failMeansZh)}</div>` +
+        `<div style="font-size:12px;color:${C.body};line-height:1.5;margin-top:4px;"><b style="color:${C.blue};">${bi("Do", "处理")}:</b> ${bi(meta.actionEn, meta.actionZh)}</div>` +
+        (chips !== "" ? `<div style="margin-top:7px;display:flex;gap:8px;flex-wrap:wrap;">${chips}</div>` : "") +
         `</div>`
-      );
-    })
-    .join("");
+      : "";
+    return (
+      `<div class="rel-dim${drift ? " rel-dim-drift" : ""}" data-dim="${d.key}" data-fail="${failing ? "1" : "0"}" style="display:grid;grid-template-columns:215px 1fr 200px;gap:14px 14px;align-items:center;padding:11px 18px;border-top:1px solid ${C.hair};">` +
+      `<span style="display:flex;align-items:center;gap:9px;min-width:0;">` +
+      `<span style="width:8px;height:8px;border-radius:50%;background:${dotColor};flex:none;"></span>` +
+      `<span style="${MONO}font-size:12.5px;font-weight:600;color:${C.ink};white-space:nowrap;">${meta.no} ${bi(meta.en, meta.zh)}</span></span>` +
+      `<span style="min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span style="font-size:12.5px;color:#6b7488;">${bi(meta.whatEn, meta.whatZh)}</span>` +
+      (drift ? "" : `<span style="${MONO}font-size:10.5px;color:${C.green};">${bi("all clear", "全清")}</span>`) +
+      `</span>` +
+      fwu(d.tally.fail, d.tally.warn, d.tally.unknown) +
+      explain +
+      `</div>`
+    );
+  };
+
+  // All-pass collapses to one calm line; any drift shows the rows (offending
+  // dimensions expanded). The six names always stay enumerated when there's
+  // anything to act on, so a fail is never hidden.
+  const dimRows = anyDrift
+    ? rp.dims.map(dimRow).join("")
+    : `<div data-truth="gate-collapsed" style="display:flex;align-items:center;gap:10px;padding:13px 18px;border-top:1px solid ${C.hair};color:${C.sub};font-size:12.5px;">` +
+      `<span style="width:8px;height:8px;border-radius:50%;background:${C.green};flex:none;"></span>` +
+      `${bi(
+        "All six dimensions — code↔backlog · cards · docs · tests · bilingual · site — reconcile. Nothing to fix.",
+        "六个维度——代码↔待办 · 卡片 · 文档 · 测试 · 双语 · 站点——全部对齐，无需处理。",
+      )}</div>`;
 
   const proposedRow =
     `<div class="rel-dim rel-dim-proposed" data-dim="data" style="display:grid;grid-template-columns:215px 1fr 200px;gap:14px;align-items:center;padding:11px 18px;border-top:1px dashed #c8ced6;opacity:.78;">` +
@@ -1198,9 +1265,12 @@ function releaseTab(input: TruthConsoleInput): string {
     `<span style="flex:1;height:1px;background:#dfe4ec;min-width:16px;"></span>` +
     `<code class="copy-chip" data-copy="roll release --gate-check" style="${MONO}font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid ${C.line};color:${C.blue};background:${C.card};cursor:pointer;">roll release --gate-check</code></div>` +
     `<section style="border:1px solid ${C.line};border-radius:12px;background:${C.card};overflow:hidden;margin:0 0 8px;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
+    verdictLine +
     dimRows +
-    proposedRow +
-    totalRow +
+    // The proposed ⑦ row + the strict-equality total row are detail; they ride
+    // along only when there is something to act on, so an all-pass panel stays
+    // the calm verdict + one collapsed line (FIX-372).
+    (anyDrift ? proposedRow + totalRow : "") +
     `</section>` +
     releaseScopeSections(input)
   );
@@ -1265,9 +1335,14 @@ function releaseScopeSections(input: TruthConsoleInput): string {
         `</details>`,
     )
     .join("");
+  // FIX-372: "pending" = the NEXT cut's content — stories merged to main SINCE
+  // the latest tag — not every open backlog card. The subtitle names the tag the
+  // delta is measured against so the meaning is unambiguous.
+  const pendingSubEn = sc.latestTag !== undefined ? `merged to main since ${sc.latestTag} — the next release` : "merged to main since the latest tag — the next release";
+  const pendingSubZh = sc.latestTag !== undefined ? `自 ${sc.latestTag} 起合入 main——下个版本的内容` : "自最近 tag 起合入 main——下个版本的内容";
   return (
-    sectionHead(bi("Pending delivery", "待交付"), sc.pendingCount, C.amber, bi("wishes still open this cut", "本版仍开着的愿望")) +
-    (sc.pending.length > 0 ? sc.pending.map((g) => scopeGroup(g, input, false)).join("") : `<section style="border:1px dashed ${C.line};border-radius:12px;background:${C.card};padding:16px 20px;color:${C.faint};font-size:12.5px;font-style:italic;">${bi("nothing pending — ship it", "没有待交付——可以发了")}</section>`) +
+    sectionHead(bi("Pending delivery", "待交付"), sc.pendingCount, C.amber, bi(pendingSubEn, pendingSubZh)) +
+    (sc.pending.length > 0 ? sc.pending.map((g) => scopeGroup(g, input, false)).join("") : `<section style="border:1px dashed ${C.line};border-radius:12px;background:${C.card};padding:16px 20px;color:${C.faint};font-size:12.5px;font-style:italic;">${bi("nothing merged since the latest tag — already shipped", "自最近 tag 起没有新合并——都已发布")}</section>`) +
     sectionHead(bi("Changelog (merged truth)", "变更日志（合并真相）"), sc.shippedCount, C.green, bi("generated from merged PRs, not claims", "从 merged PR 生成，不读声明")) +
     sc.shipped.slice(0, 12).map((g) => scopeGroup(g, input, true)).join("") +
     `<div style="display:flex;align-items:baseline;gap:12px;margin:28px 0 12px;">` +

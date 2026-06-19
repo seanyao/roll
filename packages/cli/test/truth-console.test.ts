@@ -128,15 +128,18 @@ const CHARTER = {
   ],
 };
 
+// FIX-372: pending = the NEXT cut's content (merged since the latest tag), NOT
+// the whole open backlog. The counts are the release delta, not total-minus-done.
 const RELEASE_SCOPE = {
   pending: [
-    { epic: "alpha", items: [{ id: "FIX-9", epic: "alpha", title: "fix it", state: "todo" }] },
+    { epic: "alpha", items: [{ id: "FIX-9", epic: "alpha", title: "fix it", state: "done", prNumber: 901 }] },
   ],
   shipped: [
     { epic: "alpha", items: [{ id: "US-A-1", epic: "alpha", title: "first", state: "done", prNumber: 638 }] },
   ],
-  pendingCount: 5,
-  shippedCount: 5,
+  pendingCount: 1,
+  shippedCount: 7,
+  latestTag: "v3.612.2",
   history: [
     { tag: "v3.612.2", date: "2026-06-12", waived: false, items: ["item one"] },
     { tag: "v3.611.2", date: "2026-06-11", waived: true, items: ["older"] },
@@ -239,6 +242,35 @@ function render(
     ...extra,
   });
 }
+
+/** FIX-372: render with an arbitrary override of the full console input (used to
+ *  drive the consistency-gate widget into its all-pass collapsed state). */
+function renderWith(over: Record<string, unknown>): string {
+  return renderTruthConsole({
+    snapshot: SNAP,
+    snapshotJson: serializeTruthSnapshot(SNAP),
+    brand: { name: "roll", slogan: "It just works." },
+    backlog: BACKLOG,
+    spineKeys: SPINE,
+    cycles: CYCLES,
+    agents: AGENTS,
+    releasePanel: RELEASE_PANEL,
+    releaseScope: RELEASE_SCOPE,
+    githubSlug: "seanyao/roll",
+    skills: SKILLS,
+    casting: CASTING,
+    gitHooks: GIT_HOOKS,
+    charter: CHARTER,
+    liveFeed: LIVE_FEED,
+    ...over,
+  } as Parameters<typeof renderTruthConsole>[0]);
+}
+
+/** All six dimensions clean — the all-pass fixture for the collapsed gate line. */
+const PASS_DIMS = (["code-backlog", "cards", "docs", "tests", "bilingual", "site"] as const).map((key) => ({
+  key,
+  tally: { fail: 0, warn: 0, unknown: 0, subjects: [] as string[] },
+}));
 
 describe("renderTruthConsole — US-DOSSIER-011", () => {
   const html = render();
@@ -908,6 +940,62 @@ describe("release tab — US-DOSSIER-015", () => {
   });
 });
 
+describe("consistency-gate widget self-explains — FIX-372", () => {
+  // RELEASE_PANEL is blocking (fail:1) → the widget must show the blocked
+  // verdict line and EXPAND the offending dimension(s) with means + action.
+  const blockedHtml = render();
+
+  it("a blocked panel shows a clear ❌ top verdict line naming the failing-dimension count", () => {
+    expect(blockedHtml).toContain('data-truth="gate-verdict"');
+    expect(blockedHtml).toContain('data-blocking="1"');
+    expect(blockedHtml).toContain("❌");
+    expect(blockedHtml).toContain("Blocked — cannot release");
+    expect(blockedHtml).toContain("不能发版");
+  });
+
+  it("a failing dimension EXPANDS with what-a-fail-means + the single action + the drift cards", () => {
+    // code-backlog is failing in the fixture (fail:1) → expanded.
+    expect(blockedHtml).toContain('data-dim="code-backlog"');
+    expect(blockedHtml).toContain('data-fail="1"');
+    expect(blockedHtml).toContain("Means"); // what a fail means
+    expect(blockedHtml).toContain("含义");
+    expect(blockedHtml).toContain("Do"); // the single action
+    expect(blockedHtml).toContain("处理");
+    expect(blockedHtml).toContain("premature Done"); // code-backlog fail copy
+    expect(blockedHtml).toContain('href="#backlog/q:US-X-1"'); // drift card chip inside the expansion
+  });
+
+  it("keeps the hard, non-waivable blocking banner (gate enforcement is unchanged)", () => {
+    expect(blockedHtml).toContain("blocks the release");
+    expect(blockedHtml).toContain("挡发版");
+    expect(blockedHtml).toContain('data-truth="gate-total"'); // strict-equality total row stays
+    // No "waive the gate" action is offered on the widget — the only gate command
+    // surfaced is the read-only re-check (the version-history "waived" mark is a
+    // historical record, not a waiver path, so it's allowed to appear elsewhere).
+    expect(blockedHtml).not.toContain("waive the gate");
+    expect(blockedHtml).not.toContain("--waive");
+    expect(blockedHtml).toContain('data-copy="roll release --gate-check"');
+  });
+
+  it("an all-pass panel collapses to ONE calm ready line (no per-dimension noise)", () => {
+    const passing = renderWith({
+      releasePanel: {
+        dims: PASS_DIMS,
+        total: { fail: 0, warn: 0, unknown: 0 },
+        blocking: false,
+        generatedAt: "2026-06-12T00:00:00Z",
+        prevTag: "v3.612.1",
+      },
+    });
+    expect(passing).toContain('data-blocking="0"');
+    expect(passing).toContain("✅");
+    expect(passing).toContain("Ready to release");
+    expect(passing).toContain("可以发版");
+    expect(passing).toContain('data-truth="gate-collapsed"'); // one calm collapsed line
+    expect(passing).not.toContain("Means"); // no per-dimension fail expansion when all pass
+  });
+});
+
 describe("release scope sections — US-DOSSIER-016", () => {
   const html = render();
 
@@ -929,11 +1017,18 @@ describe("release scope sections — US-DOSSIER-016", () => {
     expect(html).toContain(">waived<");
   });
 
-  it("AC4: head merged/pending equals the scope arithmetic (total - done)", () => {
-    // SNAP: total 10, done 5 → pending 5 in the gate head, equal to scope count anchors
-    expect(html).toMatch(/>5<\/b> <span class="lang-en">pending/);
+  it("AC4 (FIX-372): head merged/pending = the release DELTA (scope counts), not total-minus-done", () => {
+    // RELEASE_SCOPE: pendingCount 1 (merged since the tag), shippedCount 7 (already tagged).
+    // The old "all non-done" arithmetic (SNAP total 10 - done 5 = 5) must NOT drive the head.
+    expect(html).toMatch(/>1<\/b> <span class="lang-en">pending/);
+    expect(html).toMatch(/>7<\/b> <span class="lang-en">merged/);
     expect(html).toContain('data-truth="pending-count"');
     expect(html).toContain('data-truth="shipped-count"');
+  });
+
+  it("AC1 (FIX-372): pending section names the tag the delta is measured against", () => {
+    expect(html).toContain("merged to main since v3.612.2");
+    expect(html).toContain("自 v3.612.2 起合入 main");
   });
 });
 

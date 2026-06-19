@@ -66,6 +66,7 @@ First time through? Start with [Getting started](guide/en/getting-started.md).
 | `roll pair [init\|status\|score]` | Cross-agent pairing: heterogeneous peer re-checks and scores deliveries |
 | `roll cycles [--since 1d\|3d\|7d\|all]` | The cycle ledger — one line per cycle, failures never swallowed |
 | `roll cycle <id>` | One cycle's full trace tape (cycle→story→build→peer→ci→pr→end) |
+| web `#loop` cycle rows | The same ledger expands to the shared ActivitySignal stream and writes `.roll/loop/cycle-<id>.signals.jsonl` for replay |
 | `roll peer [--reviewer <agent>] (--prompt <text>\|--file <path>)` | One-shot structured external-provider review; records `.roll/peer/runs.jsonl` |
 | **Config & machine** | |
 | `roll ls [--json] [--stale-days <n>]` | List the cross-project registry (`~/.roll/projects.json`): name · tag · verdict · path; missing/stale rows flagged, never dropped |

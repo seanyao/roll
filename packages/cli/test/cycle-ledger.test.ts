@@ -106,6 +106,36 @@ describe("collectCycleLedger", () => {
     expect(c1.tape[6]?.detail).toBe("delivered");
   });
 
+  it("US-LOOP-078: carries the standard ActivitySignal stream beside the ledger row", () => {
+    const p = project(
+      [
+        { cycle_id: "c1", status: "merged", outcome: "delivered", story_id: "US-X-1", agent: "claude", ts: "2026-06-12T01:00:00Z", tcr_count: 1, merge_commit: "abc" },
+      ],
+      [
+        { type: "cycle:start", cycleId: "c1", storyId: "US-X-1", agent: "claude", ts: 1_000 },
+        { type: "cycle:phase", cycleId: "c1", phase: "execute", ts: 2_000 },
+        { type: "cycle:tcr", cycleId: "c1", commitHash: "abcdef123456", message: "tcr: ship it", ts: 3_000 },
+        { type: "peer:gate", cycleId: "c1", verdict: "consulted", reasons: [], ts: 4_000 },
+        { type: "pr:open", prNumber: 77, storyId: "US-X-1", ts: 5_000 },
+        { type: "ci:pass", prNumber: 77, workflow: "test-ts", runId: 1, url: "https://ci.example", ts: 6_000 },
+        { type: "pr:merge", prNumber: 77, storyId: "US-X-1", ts: 7_000 },
+        { type: "cycle:end", cycleId: "c1", status: "merged", outcome: "delivered", ts: 8_000 },
+      ],
+    );
+
+    const row = collectCycleLedger(p)[0]!;
+    expect(row.signals?.map((s) => [s.seg, s.kind, s.signalKind, s.summary])).toEqual([
+      ["cycle", "lifecycle", undefined, "周期开始 · cycle start · US-X-1"],
+      ["build", "lifecycle", undefined, "阶段 · phase · execute"],
+      ["build", "tcr", "tcr", "TCR abcdef123 · tcr: ship it"],
+      ["peer", "gate", "peer", "Peer gate · consulted"],
+      ["pr", "pr", "pr", "PR #77 开启 · opened"],
+      ["ci", "gate", "ci", "Gate CI 通过 · PR #77"],
+      ["pr", "pr", "pr", "PR #77 合并 · merged"],
+      ["end", "lifecycle", undefined, "周期结束 · cycle end · delivered"],
+    ]);
+  });
+
   it("AC2 regression: failed count = failed + reverted + blocked", () => {
     const p = project([
       { cycle_id: "a", status: "failed", ts: "2026-06-12T01:00:00Z" },

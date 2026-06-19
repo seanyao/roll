@@ -182,6 +182,12 @@ const CYCLES = [
       { key: "pr" as const, detail: "#123 merged", state: "pass" as const },
       { key: "end" as const, detail: "delivered", state: "pass" as const },
     ],
+    signals: [
+      { ts: 1781230000000, cycleId: "20260612-x-1234", seg: "cycle" as const, kind: "lifecycle" as const, tier: "A" as const, summary: "周期开始 · cycle start · US-A-1" },
+      { ts: 1781230010000, cycleId: "20260612-x-1234", seg: "build" as const, kind: "tcr" as const, tier: "A" as const, summary: "TCR def4567 · tcr: build", ref: "def4567", signalKind: "tcr" as const },
+      { ts: 1781230020000, cycleId: "20260612-x-1234", seg: "ci" as const, kind: "gate" as const, tier: "A" as const, summary: "Gate CI 通过 · PR #123", result: "pass" as const, ref: "#123", signalKind: "ci" as const },
+      { ts: 1781230030000, cycleId: "20260612-x-1234", seg: "pr" as const, kind: "pr" as const, tier: "A" as const, summary: "PR #123 合并 · merged", result: "pass" as const, ref: "#123", signalKind: "pr" as const },
+    ],
     evidence: [{ label: "US-A-1", href: "#backlog" }],
   },
   {
@@ -569,6 +575,13 @@ describe("loop tab cycle ledger — US-DOSSIER-013", () => {
     expect(html).toContain("#123 merged");
     expect(html).toContain("attest ✓");
     expect(html).toContain('href="#backlog"');
+  });
+
+  it("US-LOOP-078: expanded row renders the shared ActivitySignal stream", () => {
+    expect(html).toContain("ActivitySignal stream");
+    expect(html).toContain("TCR def4567 · tcr: build");
+    expect(html).toContain("Gate CI 通过 · PR #123");
+    expect(html).toContain("PR #123 合并 · merged");
   });
 
   it("US-TOOL-013: expanded row renders tool summary, timeline rows, errors, and native-currency costs", () => {

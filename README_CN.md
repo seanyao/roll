@@ -66,6 +66,7 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 | `roll pair [init\|status\|score]` | 跨 Agent 配对:异构同行复检与交付打分 |
 | `roll cycles [--since 1d\|3d\|7d\|all]` | 周期账本——每行一个 cycle,失败不被吞 |
 | `roll cycle <id>` | 单个 cycle 的完整轨迹带(cycle→story→build→peer→ci→pr→end) |
+| web `#loop` cycle 行 | 同一账本展开为共享 ActivitySignal 流，并写 `.roll/loop/cycle-<id>.signals.jsonl` 供回放 |
 | `roll peer [--reviewer <agent>] (--prompt <text>\|--file <path>)` | 一次性结构化外部 provider 评审；记录 `.roll/peer/runs.jsonl` |
 | **配置 · 本机** | |
 | `roll ls [--json] [--stale-days <n>]` | 列出跨项目注册表(`~/.roll/projects.json`):名称 · 版本 · 判定 · 路径;缺失/过期行会被标注,绝不丢弃 |

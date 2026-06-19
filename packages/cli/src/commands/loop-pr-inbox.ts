@@ -55,6 +55,7 @@ import { gh, ghAvailable, ghRepoSlug, prMerge, remoteUrl } from "@roll/infra";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { prHealSelf, prRebaseStale } from "./loop-pr-heal.js";
+import { backfillMergedRuns } from "../lib/runs-backfill.js";
 
 // ─── reduced per-PR facts (the bash jq at bin/roll 11996-12007) ──────────────
 
@@ -110,6 +111,17 @@ export interface PrInboxDeps {
   viewPr: (slug: string, num: string) => Promise<PrViewFacts | undefined>;
   /** `gh -R <slug> pr merge <num> --squash --delete-branch` → true on success. */
   merge: (slug: string, num: string) => Promise<boolean>;
+  /**
+   * FIX-367 — durably record merge truth the instant the PR-lane merges. The
+   * PR-lane merges a cycle PR asynchronously (5-min cadence); before this, NOTHING
+   * flipped the card Done at merge time, so a delivered card sat 📋 Todo/🔨 in the
+   * window between publish and the NEXT `loop run-once` — long enough to be
+   * re-picked (the FIX-364 re-pick storm). Credit the merged cycle's runs row to
+   * `merged`/`delivered` NOW so the picker's `hasMergedDelivery` guard excludes the
+   * card immediately and durably (the runs ledger survives any backlog.md
+   * clobber). Best-effort: a failure must never break the merge or the tick.
+   */
+  onMerged?: (slug: string, num: string, headRef: string) => Promise<void>;
   /** ci_red → hand to the (bash) heal helper; background, best-effort. */
   heal: (num: string, headRef: string, slug: string) => Promise<void>;
   /** 24h rebase circuit (pure verdict + state persistence + trip ALERT). */
@@ -167,7 +179,7 @@ export async function runPrInbox(deps: PrInboxDeps): Promise<PrTick> {
     const action = selectPrAction(facts);
     switch (action.kind) {
       case "merge":
-        await doMerge(deps, slug, num);
+        await doMerge(deps, slug, num, headRef);
         break;
       case "alert":
         deps.alert(`PR #${num}: bot review CHANGES_REQUESTED — loop PR rejected by GHA reviewer`);
@@ -180,7 +192,7 @@ export async function runPrInbox(deps: PrInboxDeps): Promise<PrTick> {
         const rechecked = await deps.rebaseStale(num, headRef, slug);
         if (rechecked !== undefined) {
           const re = rebaseRecheckAction(rechecked.ciState, rechecked.mergeable, rechecked.manualMerge === true);
-          if (re.kind === "merge") await doMerge(deps, slug, num);
+          if (re.kind === "merge") await doMerge(deps, slug, num, headRef);
         }
         break;
       }
@@ -196,9 +208,19 @@ function emit(deps: PrInboxDeps, tick: PrTick): PrTick {
   return tick;
 }
 
-async function doMerge(deps: PrInboxDeps, slug: string, num: string): Promise<void> {
-  if (await deps.merge(slug, num)) deps.info(`PR #${num}: CI green — merged`);
-  else deps.warn(`PR #${num}: merge failed — left open`);
+async function doMerge(deps: PrInboxDeps, slug: string, num: string, headRef: string): Promise<void> {
+  if (await deps.merge(slug, num)) {
+    deps.info(`PR #${num}: CI green — merged`);
+    // FIX-367: durably record the merge so the just-delivered card cannot be
+    // re-picked in the window before the next `loop run-once` backfill runs.
+    if (deps.onMerged !== undefined) {
+      try {
+        await deps.onMerged(slug, num, headRef);
+      } catch {
+        /* recording merge truth is best-effort — never break a successful merge */
+      }
+    }
+  } else deps.warn(`PR #${num}: merge failed — left open`);
 }
 
 // ─── real deps (the production wiring) ────────────────────────────────────────
@@ -428,6 +450,15 @@ function realDeps(): PrInboxDeps {
       }
     },
     merge: async (slug, num) => (await prMerge(slug, num, "plain")).code === 0,
+    onMerged: async () => {
+      // FIX-367: credit the just-merged cycle's runs row → merged/delivered so the
+      // picker's hasMergedDelivery guard durably excludes the card the instant the
+      // PR-lane merges — not only after the next `loop run-once` backfill. Bounded
+      // (≤20 gh probes) and evidence-only (nothing flips without gh-confirmed
+      // MERGED); the runs ledger is the clobber-proof signal (survives any stale
+      // backlog.md metadata commit). Best-effort by contract (doMerge swallows).
+      await backfillMergedRuns(process.cwd(), join(runtimeDir(), "runs.jsonl"));
+    },
     heal: async (num, headRef, slug) => {
       // US-PORT-021: native TS gate; dispatches the heal detached, never blocks.
       prHealSelf(num, headRef, slug);

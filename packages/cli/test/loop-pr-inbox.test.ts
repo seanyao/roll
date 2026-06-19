@@ -23,10 +23,12 @@ interface Recorder {
   healed: string[];
   rebased: string[];
   circuitCalls: string[];
+  /** FIX-367: (num, headRef) pairs the durable merge-record hook saw. */
+  mergedRecorded: Array<{ num: string; headRef: string }>;
 }
 
 function harness(overrides: Partial<PrInboxDeps> = {}): { deps: PrInboxDeps; rec: Recorder } {
-  const rec: Recorder = { ticks: [], alerts: [], merged: [], healed: [], rebased: [], circuitCalls: [] };
+  const rec: Recorder = { ticks: [], alerts: [], merged: [], healed: [], rebased: [], circuitCalls: [], mergedRecorded: [] };
   const deps: PrInboxDeps = {
     ghAvailable: async () => true,
     resolveSlug: async () => "owner/repo",
@@ -35,6 +37,9 @@ function harness(overrides: Partial<PrInboxDeps> = {}): { deps: PrInboxDeps; rec
     merge: async (_slug, num) => {
       rec.merged.push(num);
       return true;
+    },
+    onMerged: async (_slug, num, headRef) => {
+      rec.mergedRecorded.push({ num, headRef });
     },
     heal: async (num) => {
       rec.healed.push(num);
@@ -204,6 +209,31 @@ describe("runPrInbox — per-PR action dispatch", () => {
     await runPrInbox(deps);
     expect(rec.merged).toEqual(["2"]);
   });
+
+  // ── FIX-367: durably record merge truth the instant the PR-lane merges ───────
+  it("FIX-367: an eager merge fires onMerged with the cycle headRef", async () => {
+    const { deps, rec } = harness({
+      listOpenPrs: listOf([{ number: 7, headRefName: "loop/cycle-20260619-022646" }]),
+      viewPr: async () => ({ bot: "", ciState: "success", mergeable: "CLEAN" }),
+    });
+    await runPrInbox(deps);
+    expect(rec.merged).toEqual(["7"]);
+    // The card's merge is recorded NOW (→ runs row credited → picker excludes it),
+    // not only after the next `loop run-once` backfill — closes the re-pick window.
+    expect(rec.mergedRecorded).toEqual([{ num: "7", headRef: "loop/cycle-20260619-022646" }]);
+  });
+  it("FIX-367: a FAILED merge does NOT record merge truth (no premature Done)", async () => {
+    const { deps, rec } = harness({
+      listOpenPrs: listOf([{ number: 9, headRefName: "loop/cycle-x" }]),
+      viewPr: async () => ({ bot: "", ciState: "success", mergeable: "CLEAN" }),
+      merge: async (_slug, num) => {
+        rec.merged.push(num);
+        return false; // merge attempt failed → PR left open, nothing merged
+      },
+    });
+    await runPrInbox(deps);
+    expect(rec.mergedRecorded).toEqual([]);
+  });
 });
 
 describe("runPrInbox — stale → rebase circuit → recheck → merge", () => {
@@ -222,6 +252,8 @@ describe("runPrInbox — stale → rebase circuit → recheck → merge", () => 
     expect(rec.circuitCalls).toEqual(["20"]);
     expect(rec.rebased).toEqual(["20"]);
     expect(rec.merged).toEqual(["20"]);
+    // FIX-367: the post-rebase merge path also records merge truth durably.
+    expect(rec.mergedRecorded).toEqual([{ num: "20", headRef: "loop/r" }]);
   });
 
   it("circuit TRIPPED → no rebase, no merge (honors the verdict)", async () => {

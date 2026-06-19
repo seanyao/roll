@@ -177,12 +177,22 @@ export function decideWarmResume(input: {
   const newest = newestValidEntry(input.ledger, input.agent);
   if (newest === null) return { mode: "cold", reason: "no_prior_session" };
 
-  if (input.resumeScope === "same-story" && newest.storyId !== input.storyId) {
+  if (input.resumeScope === "same-story") {
+    const sameStory = newestValidEntry(input.ledger.filter((entry) => isWarmSessionEntry(entry) && entry.storyId === input.storyId), input.agent);
+    if (sameStory === null) {
+      return {
+        mode: "cold",
+        reason: "scope_mismatch",
+        sourceCycleId: newest.cycleId,
+        sourceStoryId: newest.storyId,
+      };
+    }
     return {
-      mode: "cold",
-      reason: "scope_mismatch",
-      sourceCycleId: newest.cycleId,
-      sourceStoryId: newest.storyId,
+      mode: "resume",
+      reason: "selected",
+      sessionId: sameStory.sessionId,
+      sourceCycleId: sameStory.cycleId,
+      sourceStoryId: sameStory.storyId,
     };
   }
 

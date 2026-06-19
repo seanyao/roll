@@ -58,6 +58,29 @@ soft 模式会记录缺口并发出同一类审计信号，但不阻塞本轮交
 **Discrepancies（证据缺口）**附录。"我确认它能跑"这类口头完成，正是被这条
 红线挡住的东西。
 
+## 设计期声明可视证据
+
+`roll story validate` 在设计期就检查一张卡是否**生而诚实**——带可视证据 AC，
+且 web 面要声明可截的产品页。校验器靠两条规则识别：
+
+- **`[visual-evidence]` 标记即定论。** 以字面 `[visual-evidence]` 标记开头的 AC
+  条目**本身**就是可视证据 AC，无论后面写什么词——不必再额外写"截图 / screenshot"：
+  标记就是你的显式声明。（没标记时，校验器仍认 `screenshot` / `截图` / `录屏`
+  这类无歧义名词。）
+
+  ```markdown
+  - [ ] [visual-evidence] headless 截 Now 落地页及各 tab 真实渲染
+  ```
+
+- **声明的交付面优先于 AC 文本。** 一旦卡有了可视证据 AC，其 surface 先看 frontmatter：
+  - 声明了 `deliverable_url:`（别名 `screenshot_url:`）⇒ **web**——卡已承诺一个真实
+    产品页,就该截 web 图；
+  - 否则声明了 `deliverable_cmd:` ⇒ **terminal**——走终端截屏通道的 CLI 交付；
+  - 否则由 AC 文本判定（web / terminal / 含糊）。
+
+  所以声明了 `deliverable_url: .roll/features/agents.html` 的卡判为 **web** 面，
+  即便其 AC 文案里提到 `roll` 命令。
+
 ## Review Score 折叠区
 
 `.roll/notes/` 里存在该 story 的评审分条目时，报告底部出现折叠的

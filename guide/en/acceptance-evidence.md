@@ -64,6 +64,33 @@ An AC with **zero evidence** can never claim `pass`: the renderer forces it
 down to 🟧 Claimed and lists it under **Discrepancies**. Verbal completion
 ("I confirmed it works") is exactly what this rules out.
 
+## Declaring visual evidence at design time
+
+`roll story validate` checks, at design time, that a spec is *born* with a
+visual-evidence AC (and, for a web surface, a declared product page to capture).
+Two rules decide what the validator recognises:
+
+- **The `[visual-evidence]` marker is authoritative.** An AC item that opens with
+  a literal `[visual-evidence]` marker *is* a visual-evidence AC — on its own, no
+  matter what words follow. You do not need to also write "screenshot" / "截图":
+  the marker is your explicit declaration. (Without the marker, the validator
+  still recognises unambiguous nouns like `screenshot` / `截图` / `录屏`.)
+
+  ```markdown
+  - [ ] [visual-evidence] headless capture of the Now landing and each tab
+  ```
+
+- **The declared surface wins over AC text.** Once a spec has a visual-evidence
+  AC, its surface is read from the frontmatter first:
+  - a declared `deliverable_url:` (alias `screenshot_url:`) ⇒ **web** — the card
+    has committed to a real product page, so it owes a web screenshot;
+  - else a declared `deliverable_cmd:` ⇒ **terminal** — a CLI deliverable that
+    rides the terminal-capture lane;
+  - else the AC text decides (web / terminal / ambiguous).
+
+  So a card that declares `deliverable_url: .roll/features/agents.html` is judged
+  a **web** surface even when its AC prose mentions a `roll` command.
+
 ## Review Score fold
 
 When `.roll/notes/` carries the story's Review Score entry, the report ends

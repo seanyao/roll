@@ -82,10 +82,12 @@ The console's information architecture:
   the default landing view: live cycle, loop heartbeat, running processes, next
   picks, needs-you rows, and the truth rollup with verdict, aggregates, and the
   six-state Story spectrum.
-- **Machine-global breadcrumb (`MACHINE › …`)** — Agents · Skills · Conventions ·
-  About. These pages describe the machine, not one project: the agents installed
-  on this box, the `skills/<name>/SKILL.md` contracts that govern every project
-  here, and the conventions synced into each AI client.
+- **Machine-global breadcrumb (`MACHINE › …`)** — Agents · Skills · Tools ·
+  Conventions · About. These pages describe the machine, not one project: the
+  agents installed on this box, the `skills/<name>/SKILL.md` contracts that govern
+  every project here, the built-in tool catalog with each tool's default
+  guardrails (timeout / sandbox / retry / per-cycle cap) on the **Tools** page
+  (`tools.html`), and the conventions synced into each AI client.
 - **Charter** — a markdown browser over the project's charter docs, language
   guides (`guide/en` ↔ `guide/zh`), and epic plans, rendered inline.
 - **Casting** — who plays which role: the four complexity slots

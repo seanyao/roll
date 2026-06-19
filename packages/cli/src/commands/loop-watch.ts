@@ -27,6 +27,8 @@ import type { Readable } from "node:stream";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
+import { renderCompactWatchEvent, watchRenderEventFromLine } from "@roll/core";
 import { projectIdentity } from "@roll/infra";
 import { renderState } from "../render.js";
 import { streamThroughRenderer } from "./loop-fmt.js";
@@ -53,6 +55,8 @@ interface WatchOptions {
   verbose: boolean;
   raw: boolean;
   attach: boolean;
+  events: boolean;
+  rawEvents: boolean;
   /** Look-back: number of trailing lines to seed from (tail -n). */
   sinceLines: number;
 }
@@ -75,6 +79,8 @@ function parseOptions(args: string[]): WatchOptions {
   let verbose = false;
   let raw = false;
   let attach = false;
+  let events = false;
+  let rawEvents = false;
   let sinceLines = DEFAULT_SINCE_LINES;
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i]!;
@@ -85,6 +91,14 @@ function parseOptions(args: string[]): WatchOptions {
     if (arg === "--raw") {
       raw = true;
       verbose = true; // raw implies showing everything (tier C too).
+      continue;
+    }
+    if (arg === "--events") {
+      events = true;
+      continue;
+    }
+    if (arg === "--raw-events") {
+      rawEvents = true;
       continue;
     }
     if (arg === "--attach" || arg === "--follow") {
@@ -111,12 +125,14 @@ function parseOptions(args: string[]): WatchOptions {
       continue;
     }
   }
-  return { verbose, raw, attach, sinceLines };
+  if (events && rawEvents) throw new Error("roll loop watch: choose only one of --events or --raw-events");
+  if (attach && (events || rawEvents)) throw new Error("roll loop watch: --attach cannot be combined with --events or --raw-events");
+  return { verbose, raw, attach, events, rawEvents, sinceLines };
 }
 
 function watchHelp(): string {
   return [
-    "Usage: roll loop watch [-n <lines>|--since <lines>] [--verbose|--raw] [--attach]",
+    "Usage: roll loop watch [-n <lines>|--since <lines>] [--verbose|--raw] [--events|--raw-events] [--attach]",
     "  Read-only, concise, real-time view of THIS project's loop (tails .roll/loop/live.log through the renderer).",
     "  只读、精炼、实时地查看本项目的 loop（把 .roll/loop/live.log 接入渲染器）。",
     "",
@@ -127,7 +143,10 @@ function watchHelp(): string {
     "  -n, --since <lines>  Look back this many trailing lines before following (default 200; 'all' = whole log).",
     "  --verbose            Also show the raw agent transcript (tier-C prose / passthrough).",
     "  --raw                Alias of --verbose (show everything).",
+    "  --events             Follow .roll/loop/events.ndjson and render compact event lines.",
+    "  --raw-events         Follow .roll/loop/events.ndjson and print raw JSON lines unchanged.",
     "  --attach             Read-only attach to the loop's tmux observe window (tmux attach -r); recreates the window if missing.",
+    "  Note: --verbose/--raw apply to the default live transcript; event modes read events.ndjson.",
     "",
   ].join("\n");
 }
@@ -143,6 +162,8 @@ export interface LoopWatchDeps {
   follow: (livePath: string, sinceLines: number) => { stream: Readable; stop: () => void };
   /** Run the renderer over a stream (default {@link streamThroughRenderer}). */
   render: (input: Readable, opts: { agent: string; verbose: boolean }) => Promise<void>;
+  /** Render event-log modes over a stream. */
+  renderEvents: (input: Readable, opts: { raw: boolean }) => Promise<void>;
   /** Probe the tmux session/window state for a slug. */
   tmuxState: (slug: string) => GoTmuxState;
   /** Run a tmux argv (returns true on exit 0). Used to (re)create the watch window. */
@@ -170,6 +191,22 @@ function realFollow(livePath: string, sinceLines: number): { stream: Readable; s
   return { stream: child.stdout as Readable, stop };
 }
 
+async function streamEvents(input: Readable, opts: { raw: boolean }): Promise<void> {
+  const rl = createInterface({ input, crlfDelay: Infinity });
+  try {
+    for await (const rawLine of rl) {
+      if (opts.raw) {
+        process.stdout.write(`${rawLine}\n`);
+        continue;
+      }
+      const ev = watchRenderEventFromLine(rawLine, "events");
+      if (ev !== null) process.stdout.write(`${renderCompactWatchEvent(ev)}\n`);
+    }
+  } finally {
+    rl.close();
+  }
+}
+
 function realDeps(): LoopWatchDeps {
   return {
     identity: async () => {
@@ -179,6 +216,7 @@ function realDeps(): LoopWatchDeps {
     exists: (p) => existsSync(p),
     follow: realFollow,
     render: (input, opts) => streamThroughRenderer(input, process.stdout, opts),
+    renderEvents: streamEvents,
     tmuxState: probeWatchTmuxState,
     tmuxRun: (argv) => spawnSync("tmux", argv, { stdio: "ignore" }).status === 0,
     tmuxAttach: (session) => {
@@ -256,22 +294,29 @@ export async function loopWatchCommand(args: string[], deps: LoopWatchDeps = rea
 
   if (opts.attach) return attachToWatchWindow(id.path, id.slug, deps);
 
-  const livePath = join(runtimeDir(id.path), "live.log");
-  if (!deps.exists(livePath)) {
-    deps.emit(`roll loop watch: no live feed at ${livePath} yet — the loop has not run a cycle in this project.`);
-    deps.emit(`此项目还没有实时输出（${livePath} 不存在）——loop 尚未在本项目跑过 cycle。`);
-    deps.emit("Start it with `roll loop go` (or `roll loop on`), then watch.");
-    deps.emit("先用 `roll loop go`（或 `roll loop on`）启动，再观察。");
+  const rt = runtimeDir(id.path);
+  const watchPath = join(rt, opts.events || opts.rawEvents ? "events.ndjson" : "live.log");
+  if (!deps.exists(watchPath)) {
+    if (opts.events || opts.rawEvents) {
+      deps.emit(`roll loop watch: no event stream at ${watchPath} yet — the loop has not written events in this project.`);
+      deps.emit(`此项目还没有事件流（${watchPath} 不存在）——loop 尚未在本项目写入 events。`);
+    } else {
+      deps.emit(`roll loop watch: no live feed at ${watchPath} yet — the loop has not run a cycle in this project.`);
+      deps.emit(`此项目还没有实时输出（${watchPath} 不存在）——loop 尚未在本项目跑过 cycle。`);
+      deps.emit("Start it with `roll loop go` (or `roll loop on`), then watch.");
+      deps.emit("先用 `roll loop go`（或 `roll loop on`）启动，再观察。");
+    }
     return 1;
   }
 
   const agent = (process.env["ROLL_LOOP_AGENT"] ?? "claude").trim() || "claude";
-  const { stream, stop } = deps.follow(livePath, opts.sinceLines);
+  const { stream, stop } = deps.follow(watchPath, opts.sinceLines);
   // Ctrl-C ends the VIEW only (read-only): stop the follow, never the loop.
   const onSigint = (): void => stop();
   process.on("SIGINT", onSigint);
   try {
-    await deps.render(stream, { agent, verbose: opts.verbose });
+    if (opts.events || opts.rawEvents) await deps.renderEvents(stream, { raw: opts.rawEvents });
+    else await deps.render(stream, { agent, verbose: opts.verbose });
   } finally {
     process.removeListener("SIGINT", onSigint);
     stop();

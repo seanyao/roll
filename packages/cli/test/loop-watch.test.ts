@@ -41,6 +41,7 @@ interface Recorder {
   deps: LoopWatchDeps;
   emitted: string[];
   rendered: string[];
+  renderedEvents: string[];
   followedPath: string | null;
   followStopped: boolean;
   tmuxRuns: string[][];
@@ -54,6 +55,7 @@ function makeDeps(overrides: Partial<LoopWatchDeps> & { state?: GoTmuxState } = 
     deps: {} as LoopWatchDeps,
     emitted: [],
     rendered: [],
+    renderedEvents: [],
     followedPath: null,
     followStopped: false,
     tmuxRuns: [],
@@ -77,6 +79,16 @@ function makeDeps(overrides: Partial<LoopWatchDeps> & { state?: GoTmuxState } = 
       for await (const chunk of input) lines.push(...String(chunk).split("\n").filter((l) => l !== ""));
       rec.rendered.push(...formatStream(lines, opts.agent, { verbose: opts.verbose }));
     }),
+    renderEvents: overrides.renderEvents ?? (async (input, opts) => {
+      for await (const chunk of input) {
+        const lines = String(chunk).split("\n").filter((l) => l !== "");
+        if (opts.raw) rec.renderedEvents.push(...lines);
+        else {
+          const { renderCompactWatchLines } = await import("@roll/core");
+          rec.renderedEvents.push(...renderCompactWatchLines(lines));
+        }
+      }
+    }),
     tmuxState: overrides.tmuxState ?? (() => state),
     tmuxRun: overrides.tmuxRun ?? ((argv) => {
       rec.tmuxRuns.push(argv);
@@ -99,6 +111,50 @@ describe("roll loop watch — data sourcing (AC1)", () => {
     expect(rec.followedPath).toBe("/proj/.roll/loop/live.log");
   });
 
+  it("--events follows the resolved project's .roll/loop/events.ndjson", async () => {
+    const rec = makeDeps({
+      follow: (path) => {
+        rec.followedPath = path;
+        return {
+          stream: Readable.from([
+            JSON.stringify({ type: "cycle:start", cycleId: "c1", storyId: "US-LOOP-045", agent: "codex", model: "gpt-5", ts: 0 }) + "\n",
+            JSON.stringify({ type: "cycle:tcr", cycleId: "c1", commitHash: "abcdef123456", message: "tcr: event mode", ts: 1 }) + "\n",
+          ]),
+          stop: () => {
+            rec.followStopped = true;
+          },
+        };
+      },
+    });
+    const code = await loopWatchCommand(["--events"], rec.deps);
+    expect(code).toBe(0);
+    expect(rec.followedPath).toBe("/proj/.roll/loop/events.ndjson");
+    expect(rec.renderedEvents).toEqual([
+      "00:00:00  cycle:start            c1 · US-LOOP-045 · codex",
+      "00:00:01  tcr                    abcdef123 · tcr: event mode",
+    ]);
+    expect(rec.followStopped).toBe(true);
+  });
+
+  it("--raw-events follows events.ndjson and preserves raw lines", async () => {
+    const raw = JSON.stringify({ type: "cycle:tcr", cycleId: "c1", commitHash: "abcdef123456", message: "\u001b[31mtcr: raw\u001b[0m", ts: 1 });
+    const rec = makeDeps({
+      follow: (path) => {
+        rec.followedPath = path;
+        return {
+          stream: Readable.from([raw + "\n"]),
+          stop: () => {
+            rec.followStopped = true;
+          },
+        };
+      },
+    });
+    const code = await loopWatchCommand(["--raw-events"], rec.deps);
+    expect(code).toBe(0);
+    expect(rec.followedPath).toBe("/proj/.roll/loop/events.ndjson");
+    expect(rec.renderedEvents).toEqual([raw]);
+  });
+
   it("honors ROLL_PROJECT_RUNTIME_DIR for the live.log location", async () => {
     const prev = process.env["ROLL_PROJECT_RUNTIME_DIR"];
     process.env["ROLL_PROJECT_RUNTIME_DIR"] = "/custom/rt";
@@ -119,6 +175,21 @@ describe("roll loop watch — data sourcing (AC1)", () => {
     expect(rec.followedPath).toBeNull(); // never opened a follow
     expect(rec.emitted.join("\n")).toMatch(/no live feed/i);
   });
+
+  it("explains itself when events.ndjson is missing and does not create or follow it", async () => {
+    const checked: string[] = [];
+    const rec = makeDeps({
+      exists: (path) => {
+        checked.push(path);
+        return false;
+      },
+    });
+    const code = await loopWatchCommand(["--events"], rec.deps);
+    expect(code).toBe(1);
+    expect(checked).toEqual(["/proj/.roll/loop/events.ndjson"]);
+    expect(rec.followedPath).toBeNull();
+    expect(rec.emitted.join("\n")).toMatch(/no event stream/i);
+  });
 });
 
 describe("roll loop watch — read-only (AC2)", () => {
@@ -130,6 +201,21 @@ describe("roll loop watch — read-only (AC2)", () => {
     expect(rec.followedPath).toBe("/proj/.roll/loop/live.log");
     expect(rec.followStopped).toBe(true); // the follow is torn down cleanly
     expect(Object.keys(rec.deps)).not.toContain("write"); // no mutation seam
+  });
+
+  it("event modes have the same read-only shape: follow + renderEvents + stop only", async () => {
+    const rec = makeDeps({
+      follow: (path) => {
+        rec.followedPath = path;
+        return { stream: Readable.from([]), stop: () => { rec.followStopped = true; } };
+      },
+    });
+    const code = await loopWatchCommand(["--events"], rec.deps);
+    expect(code).toBe(0);
+    expect(rec.followedPath).toBe("/proj/.roll/loop/events.ndjson");
+    expect(rec.followStopped).toBe(true);
+    expect(Object.keys(rec.deps)).not.toContain("signal");
+    expect(Object.keys(rec.deps)).not.toContain("write");
   });
 });
 
@@ -189,6 +275,28 @@ describe("roll loop watch — look-back (-n/--since, AC3)", () => {
     expect(code).toBe(1);
     expect(rec.emitted.join("\n")).toMatch(/-n.*must be/i);
   });
+
+  it("passes --since/-n through to event modes", async () => {
+    let seen = -1;
+    const rec = makeDeps({
+      follow: (_path, sinceLines) => {
+        seen = sinceLines;
+        return { stream: Readable.from([]), stop: () => {} };
+      },
+    });
+    await loopWatchCommand(["--events", "--since", "25"], rec.deps);
+    expect(seen).toBe(25);
+  });
+
+  it("rejects incompatible event mode options", async () => {
+    const both = makeDeps();
+    expect(await loopWatchCommand(["--events", "--raw-events"], both.deps)).toBe(1);
+    expect(both.emitted.join("\n")).toMatch(/choose only one/i);
+
+    const attach = makeDeps();
+    expect(await loopWatchCommand(["--events", "--attach"], attach.deps)).toBe(1);
+    expect(attach.emitted.join("\n")).toMatch(/cannot be combined/i);
+  });
 });
 
 describe("roll loop watch --attach (AC5) — read-only tmux observe window", () => {
@@ -239,6 +347,8 @@ describe("roll loop watch --help (AC6)", () => {
     expect(help).toMatch(/read-only/i);
     expect(help).toContain("--attach");
     expect(help).toContain("--since");
+    expect(help).toContain("--events");
+    expect(help).toContain("--raw-events");
   });
 });
 

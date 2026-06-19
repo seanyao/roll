@@ -4,7 +4,7 @@
  * agent is spawned in the PROJECT dir with the roll-.dream body, the machine log
  * captures start/end + streamed output, and the agent exit code propagates.
  */
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -56,6 +56,18 @@ function deps(proj: string, spawn: AgentSpawn, body: string | null): DreamRunOnc
     skillBody: () => body,
     spawn,
     now: () => new Date("2026-06-06T03:12:00Z"),
+    structureScan: () => ({
+      json: {
+        schema: "dream-structure.v1",
+        generatedAt: "2026-06-06T03:12:00.000Z",
+        projectRoot: proj,
+        graphStats: { files: 1, symbols: 1, imports: 0, references: 0 },
+        findings: [],
+        suppressed: [],
+        errors: [],
+      },
+      log: "## Code structure static analysis\n\nschema: dream-structure.v1\nfindings: 0\n",
+    }),
   };
 }
 
@@ -81,8 +93,14 @@ describe("roll dream run-once", () => {
     expect(spy.calls[0]?.opts.skillBody).toBe("# Dream\n\nScan the code.");
     const log = readFileSync(join(proj, ".roll", "dream", "cron.log"), "utf8");
     expect(log).toContain("dream scan start (v3 run-once, agent=claude)");
+    expect(log).toContain("dream structure pre-scan start");
+    expect(log).toContain("schema: dream-structure.v1");
     expect(log).toContain("scanning...");
     expect(log).toContain("dream scan end rc=0");
+    const artifact = JSON.parse(readFileSync(join(proj, ".roll", "dream", "structure-scan.json"), "utf8")) as {
+      schema: string;
+    };
+    expect(artifact.schema).toBe("dream-structure.v1");
   });
 
   it("propagates the agent's non-zero exit code", async () => {
@@ -102,5 +120,14 @@ describe("roll dream run-once", () => {
     const { code, err } = await captureErr(() => dreamRunOnceCommand([], deps(proj, throwing, "body")));
     expect(code).toBe(1);
     expect(err).toContain("not yet ported");
+  });
+
+  it("does not run the structure pre-scan when the skill body is missing", async () => {
+    const proj = tmp();
+    const spy = spySpawn(0);
+    const { code } = await captureErr(() => dreamRunOnceCommand([], deps(proj, spy.spawn, null)));
+
+    expect(code).toBe(1);
+    expect(existsSync(join(proj, ".roll", "dream", "structure-scan.json"))).toBe(false);
   });
 });

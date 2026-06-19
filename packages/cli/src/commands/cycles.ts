@@ -8,10 +8,43 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveLang, type Lang, type RollEvent, parseEventLine } from "@roll/spec";
-import { extractCycleSignals, signalKindForMarker, type TimelineEntry } from "@roll/core";
-import { collectCycleLedger, ledgerFailedCount, reconcilePendingMergeVerdicts, type CycleLedgerRow } from "../lib/cycle-ledger.js";
-import { collectGitDossierFacts, cycleMergeTruth } from "../lib/story-dossier.js";
+import { extractCycleSignals, parseBacklog, signalKindForMarker, type TimelineEntry } from "@roll/core";
+import {
+  bucketCounts,
+  collectCycleLedger,
+  CYCLE_VERDICTS,
+  ledgerFailedCount,
+  reconcilePendingMergeVerdicts,
+  reconcileSupersededVerdicts,
+  type CycleLedgerRow,
+  type CycleLedgerVerdict,
+} from "../lib/cycle-ledger.js";
+import { collectGitDossierFacts, cycleMergeTruth, storyHasMergeEvidence, type GitDossierFacts } from "../lib/story-dossier.js";
 import { findCycle } from "./cycle.js";
+
+/**
+ * FIX-337 (AC3) — a story is SUPERSEDED (delivered elsewhere, so this cycle's old
+ * failure must not inflate the failed count) when EITHER:
+ *   (a) its `.roll/backlog.md` status cell is Done (carries ✅ or "Done"), OR
+ *   (b) main carries merge evidence for it (a commit subject/`(#N)` names the id).
+ * Built once per render from the backlog text + the SAME offline git facts the
+ * pending-merge reconcile already uses (no gh call). Returns a pure predicate so
+ * {@link reconcileSupersededVerdicts} stays injectable/testable.
+ */
+function buildIsStorySuperseded(cwd: string, git: GitDossierFacts | null): (storyId: string) => boolean {
+  const done = new Set<string>();
+  const backlogPath = `${cwd}/.roll/backlog.md`;
+  if (existsSync(backlogPath)) {
+    try {
+      for (const item of parseBacklog(readFileSync(backlogPath, "utf8"))) {
+        if (item.status.includes("✅") || /\bDone\b/i.test(item.status)) done.add(item.id);
+      }
+    } catch {
+      /* unreadable backlog → backlog signal empty; merge-evidence still applies */
+    }
+  }
+  return (storyId) => storyId !== "" && (done.has(storyId) || storyHasMergeEvidence(git, storyId));
+}
 
 /**
  * FIX-347 — collect the ledger and reconcile `pending_merge` cycles against git
@@ -23,10 +56,19 @@ import { findCycle } from "./cycle.js";
  * main's git log carries a `(#N)` PR-merge commit for the row's recorded PR
  * number, the delivery landed. Only an actually-merged `(#N)` commit counts (an
  * open PR leaves none), so an open PR stays pending.
+ *
+ * FIX-337 (AC1/AC3) — THE single canonical ledger pipeline:
+ *   collectCycleLedger → reconcilePendingMergeVerdicts → reconcileSupersededVerdicts.
+ * Exported so `roll index` (the truth.json cycle panel) reuses the EXACT same
+ * derivation, so `roll cycles` and `roll status` (which reads truth.json) can
+ * never diverge. The superseded reconcile re-labels a failed/pending cycle whose
+ * card landed elsewhere (backlog Done or merge evidence) so it stops inflating
+ * the failed count.
  */
-function reconciledLedger(cwd: string): CycleLedgerRow[] {
+export function reconciledLedger(cwd: string): CycleLedgerRow[] {
   const git = collectGitDossierFacts(cwd);
-  return reconcilePendingMergeVerdicts(collectCycleLedger(cwd), cycleMergeTruth(git));
+  const merged = reconcilePendingMergeVerdicts(collectCycleLedger(cwd), cycleMergeTruth(git));
+  return reconcileSupersededVerdicts(merged, buildIsStorySuperseded(cwd, git));
 }
 import { c, renderState, stripAnsi } from "../render.js";
 
@@ -50,12 +92,55 @@ const VERDICT_COLOR: Record<string, string> = {
   delivered: "green",
   pending_merge: "yellow", // FIX-322: opened a PR, merge pending — in-flight, NOT delivered (amber)
   unpublished: "blue", // FIX-351: gates passed, work local, publish didn't land — neutral, NOT red
+  superseded: "blue", // FIX-337: card landed elsewhere (backlog Done / merge evidence) — neutral, NOT red
   reverted: "yellow",
   failed: "red",
   blocked: "purple",
   idle: "muted",
   unknown: "muted",
 };
+
+// FIX-337 (AC2): the summary buckets, in display order, with their bilingual
+// labels. `failed/reverted/blocked` are GROUPED into one "failed/reverted/blocked"
+// figure (the FIX-248 vocabulary), but every other non-zero bucket is shown so
+// the displayed total === the sum of all buckets.
+const BUCKET_LABEL: Record<CycleLedgerVerdict, { en: string; zh: string }> = {
+  delivered: { en: "delivered", zh: "已交付" },
+  pending_merge: { en: "pending_merge", zh: "待合并" },
+  unpublished: { en: "unpublished", zh: "未发布" },
+  superseded: { en: "superseded", zh: "已被取代" },
+  failed: { en: "failed/reverted/blocked", zh: "失败/回滚/阻塞" },
+  blocked: { en: "blocked", zh: "阻塞" },
+  reverted: { en: "reverted", zh: "回滚" },
+  idle: { en: "idle", zh: "空转" },
+  unknown: { en: "unknown", zh: "未知" },
+};
+
+/**
+ * FIX-337 (AC2) — the summary buckets line: ALL non-zero buckets, with
+ * `failed+reverted+blocked` folded into one `failed/reverted/blocked` figure
+ * (FIX-248 vocabulary). The returned `total` is GUARANTEED to equal the sum of
+ * the displayed bucket counts (the failed cluster contributes its full sum), so
+ * the old `5 delivered · 20 failed → 25 ≠ 28` divergence is impossible. Pure:
+ * windowed rows + lang → { total, parts (label+count+verdict), failedTotal }.
+ */
+export function summaryBuckets(rows: readonly CycleLedgerRow[]): {
+  total: number;
+  failedTotal: number;
+  parts: Array<{ verdict: CycleLedgerVerdict; count: number }>;
+} {
+  const counts = bucketCounts(rows);
+  const failedTotal = counts.failed + counts.reverted + counts.blocked;
+  const parts: Array<{ verdict: CycleLedgerVerdict; count: number }> = [];
+  // Render order = CYCLE_VERDICTS, but the failed cluster collapses onto `failed`.
+  for (const v of CYCLE_VERDICTS) {
+    if (v === "reverted" || v === "blocked") continue; // folded into the failed figure
+    const count = v === "failed" ? failedTotal : counts[v];
+    if (count > 0) parts.push({ verdict: v, count });
+  }
+  const total = rows.length;
+  return { total, failedTotal, parts };
+}
 
 function pad(s: string, w: number): string {
   const len = stripAnsi(s).length;
@@ -91,20 +176,18 @@ export function cyclesLedgerJson(rows: CycleLedgerRow[], sinceLabel: string, now
   const within = windowRows(rows, sinceLabel, nowSec);
   const delivered = within.filter((r) => r.verdict === "delivered").length;
   const failed = ledgerFailedCount(within);
-  // FIX-361: cost may be "$X.XX" or "¥X.XX". Parse each row and aggregate
-  // per-currency in the JSON output so consumers never blindly sum across currencies.
-  const costByCur: Record<string, number> = {};
-  for (const r of within) {
-    const { value, currency } = parseCostCell(r.cost);
-    if (value !== null && currency !== null) {
-      costByCur[currency] = (costByCur[currency] ?? 0) + value;
-    }
-  }
+  // FIX-337 (AC2): expose EVERY bucket so the machine view can verify
+  // total === sum(buckets) just like the human summary line.
+  const buckets = bucketCounts(within);
+  // FIX-361: cost may be "$X.XX" or "¥X.XX". Aggregate per-currency (the shared
+  // FIX-337 口径) so consumers never blindly sum across currencies.
+  const costByCur = cyclesCostByCurrency(within);
   return {
     since: sinceLabel,
     cycles: within.length,
     delivered,
     failed,
+    buckets,
     costByCurrency: costByCur,
     rows: within.map((r) => ({
       no: cycleNo(r.cycleId),
@@ -116,6 +199,50 @@ export function cyclesLedgerJson(rows: CycleLedgerRow[], sinceLabel: string, now
       cost: r.cost,
       duration: r.duration,
     })),
+  };
+}
+
+/** Per-currency cost total over a set of ledger rows — the SINGLE cost口径 the
+ *  --json view, the human summary, AND the truth.json cycle aggregate all reuse
+ *  (FIX-337 AC1), so no surface re-derives cost from raw runs rows. Only rows
+ *  with a real presentable cost contribute ("?"/"—" carry no money). */
+export function cyclesCostByCurrency(rows: readonly CycleLedgerRow[]): Record<string, number> {
+  const byCur: Record<string, number> = {};
+  for (const r of rows) {
+    const { value, currency } = parseCostCell(r.cost);
+    if (value !== null && currency !== null) byCur[currency] = (byCur[currency] ?? 0) + value;
+  }
+  return byCur;
+}
+
+/**
+ * FIX-337 (AC1) — the truth.json `cycle` aggregate, derived from the SAME
+ * canonical reconciled ledger `roll cycles` renders (not a second pass over raw
+ * runs rows). Windowed to the default 3d horizon and summarized via
+ * {@link summaryBuckets}, so `roll status` (which reads truth.json) and `roll
+ * cycles --since 3d` can never show two different `cycles`/`failed`/`cost`
+ * numbers. `failed3d` is the failed CLUSTER (failed+reverted+blocked), never
+ * swallowed (FIX-248); cost is per-currency via {@link cyclesCostByCurrency}.
+ */
+export function cyclesCycleBoard(
+  rows: CycleLedgerRow[],
+  nowSec: number,
+): { cycles3d: number; failed3d: number; costUsd3d: number; costByCurrency3d?: Record<string, number>; latestTsSec: number } {
+  const within = windowRows(rows, "3d", nowSec);
+  const { total, failedTotal } = summaryBuckets(within);
+  const byCur = cyclesCostByCurrency(within);
+  // costUsd3d historically named the single scalar the status line shows; keep it
+  // as USD when present, else the sole currency present, else 0 (no money known).
+  const usd = byCur["USD"];
+  const sole = Object.values(byCur);
+  const costUsd3d = usd ?? (sole.length === 1 ? (sole[0] as number) : 0);
+  const latestTsSec = within.reduce((m, r) => Math.max(m, r.tsSec), 0);
+  return {
+    cycles3d: total,
+    failed3d: failedTotal,
+    costUsd3d: Number(costUsd3d.toFixed(4)),
+    ...(Object.keys(byCur).length > 0 ? { costByCurrency3d: byCur } : {}),
+    latestTsSec,
   };
 }
 
@@ -133,13 +260,7 @@ function parseCostCell(cell: string): { value: number | null; currency: string |
 /** FIX-361: build the cost summary string, with per-currency breakdown when
  *  the window mixes ¥ and $. */
 function costSummary(within: readonly CycleLedgerRow[], lang: Lang): string {
-  const byCur: Record<string, number> = {};
-  for (const r of within) {
-    const { value, currency } = parseCostCell(r.cost);
-    if (value !== null && currency !== null) {
-      byCur[currency] = (byCur[currency] ?? 0) + value;
-    }
-  }
+  const byCur = cyclesCostByCurrency(within);
   const entries = Object.entries(byCur);
   if (entries.length === 0) return lang === "zh" ? "花费 —" : "cost —";
   // Single currency: simple "$X.XX" or "¥X.XX".
@@ -173,13 +294,22 @@ export function renderCyclesLedger(rows: CycleLedgerRow[], sinceLabel: string, l
       ].join(" "),
     );
   }
-  const delivered = within.filter((r) => r.verdict === "delivered").length;
-  const failed = ledgerFailedCount(within);
+  // FIX-337 (AC2): the summary enumerates ALL non-zero buckets so the displayed
+  // total === sum(buckets). `summaryBuckets` folds failed+reverted+blocked into
+  // one `failed/reverted/blocked` figure (FIX-248 vocabulary) and guarantees the
+  // total equals the sum of the parts — the old `5 delivered · 20 failed → 25 ≠
+  // 28` divergence (an unpublished/superseded cycle hiding in neither figure) is
+  // impossible. Each part wears its verdict color (the failed cluster is red
+  // when non-zero, every other bucket its own VERDICT_COLOR).
+  const { total, parts } = summaryBuckets(within);
   const costStr = costSummary(within, lang);
-  const summary =
-    lang === "zh"
-      ? `${within.length} 个周期 · ${delivered} 已交付 · ${c(failed > 0 ? "red" : "green", String(failed))} 失败/回滚/阻塞 · ${costStr}`
-      : `${within.length} cycles · ${delivered} delivered · ${c(failed > 0 ? "red" : "green", String(failed))} failed/reverted/blocked · ${costStr}`;
+  const cycleWord = lang === "zh" ? `${total} 个周期` : `${total} cycles`;
+  const partStrs = parts.map((part) => {
+    const label = BUCKET_LABEL[part.verdict][lang === "zh" ? "zh" : "en"];
+    const color = part.verdict === "failed" ? "red" : VERDICT_COLOR[part.verdict] ?? "muted";
+    return `${c(color, String(part.count))} ${label}`;
+  });
+  const summary = [cycleWord, ...partStrs, costStr].join(" · ");
   const latest = within[0];
   // `roll cycle <handle>` is the spec'd companion (US-CLI-013, next card) —
   // the hint is the contract between the two surfaces, not a dead end.

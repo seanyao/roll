@@ -133,6 +133,76 @@ describe("FIX-306 commitRollMetadataRepo — runner owns the .roll commit", () =
     })();
   });
 
+  // ── FIX-367: the metadata commit must not clobber a concurrent Done flip ──────
+  //
+  // The re-pick storm (FIX-364 re-done 3 cycles): a published_pending_merge card
+  // rests 📋 Todo while the PR-lane merges its PR async and pushes a `✅ Done` flip
+  // to the roll-meta remote. The NEXT cycle's metadata commit — built on the STALE
+  // pick-time `.roll` snapshot (card still 📋 Todo) — must integrate that remote
+  // Done (rebase-safe) and never overwrite it back to 📋 Todo. These tests drive
+  // the REAL commitRollMetadataRepo against a remote that advanced concurrently.
+
+  it("FIX-367: integrates a concurrently-pushed Done — never clobbers it back to Todo", () => {
+    return (async () => {
+      const { project, roll, remote } = makeRollRepo("fix367-noclobber");
+      // The seed backlog the cycle picked at pick time: FIX-364 is 📋 Todo.
+      writeFileSync(
+        join(roll, "backlog.md"),
+        "| ID | Description | Status |\n|----|----|----|\n| FIX-364 | bug | 📋 Todo |\n",
+        "utf8",
+      );
+      git(roll, [...GIT_ID, "add", "-A"]);
+      git(roll, [...GIT_ID, "commit", "-q", "-m", "pick-time snapshot: FIX-364 Todo"]);
+      git(roll, ["push", "-q", "origin", "main"]);
+
+      // Concurrent actor (the PR-lane's merge-time Done flip / a reconcile / a
+      // manual rescue) pushes `✅ Done` to the REMOTE from a SEPARATE clone — the
+      // cycle's local .roll never saw it.
+      const other = tmp("fix367-noclobber-other");
+      git(other, ["clone", "-q", remote, "."]);
+      git(other, ["config", "user.email", "t@t"]);
+      git(other, ["config", "user.name", "t"]);
+      writeFileSync(
+        join(other, "backlog.md"),
+        "| ID | Description | Status |\n|----|----|----|\n| FIX-364 | bug | ✅ Done |\n",
+        "utf8",
+      );
+      git(other, [...GIT_ID, "add", "-A"]);
+      git(other, [...GIT_ID, "commit", "-q", "-m", "PR-lane merged FIX-364 → Done"]);
+      git(other, ["push", "-q", "origin", "main"]);
+
+      // The cycle's agent wrote its evidence into the STALE local .roll (the
+      // backlog row on disk is still 📋 Todo — the metadata commit must NOT push
+      // that stale row over the remote Done).
+      mkdirSync(join(roll, "features", "loop-engine", "FIX-364", "latest"), { recursive: true });
+      writeFileSync(join(roll, "features", "loop-engine", "FIX-364", "latest", "report.html"), "<html>ok</html>", "utf8");
+
+      const res = await commitRollMetadataRepo(project, "chore: loop cycle 20260619-022646 FIX-364 metadata");
+
+      expect(res.committed).toBe(true);
+      expect(res.pushed).toBe(true);
+      // The remote backlog must still read ✅ Done — the concurrent flip survived.
+      const remoteBacklog = git(remote, ["show", "main:backlog.md"]);
+      expect(remoteBacklog).toContain("✅ Done");
+      expect(remoteBacklog).not.toContain("📋 Todo");
+      // …and the cycle's evidence ALSO landed (rebase put it on top of the Done).
+      const ls = git(remote, ["ls-tree", "-r", "--name-only", "main"]);
+      expect(ls).toContain("features/loop-engine/FIX-364/latest/report.html");
+    })();
+  });
+
+  it("FIX-367: a fast-forward push (no concurrent change) still lands cleanly", () => {
+    return (async () => {
+      const { project, roll, remote } = makeRollRepo("fix367-ff");
+      writeFileSync(join(roll, "note.txt"), "agent wrote this", "utf8");
+
+      const res = await commitRollMetadataRepo(project, "chore: loop cycle X metadata");
+
+      expect(res).toEqual({ committed: true, pushed: true, nothingToCommit: false });
+      expect(git(roll, ["rev-parse", "HEAD"]).trim()).toBe(git(remote, ["rev-parse", "main"]).trim());
+    })();
+  });
+
   it("a push failure reports committed-but-not-pushed (no silent false-success)", () => {
     return (async () => {
       const { project, roll } = makeRollRepo("badpush");

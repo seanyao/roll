@@ -3,7 +3,7 @@
  * ONE TruthSnapshot; tabs are hash-routed; brand is injected; copy is fully
  * bilingual (single-language presentation via roll-lang).
  */
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -504,6 +504,24 @@ describe("collectLoopLiveFeed — US-DOSSIER-044", () => {
     expect(feed.status).toBe("idle");
     expect(feed.renderedLines).toEqual([]);
     expect(feed.note).toMatch(/no live\.log/i);
+  });
+
+  it("FIX-373: a STALE live.log (untouched > 5 min) reads idle, not live — even with content", () => {
+    const dir = mkdtempSync(join(tmpdir(), "roll-live-feed-stale-"));
+    mkdirSync(join(dir, ".roll", "loop"), { recursive: true });
+    const log = join(dir, ".roll", "loop", "live.log");
+    writeFileSync(
+      log,
+      ["── cycle 20260619-1 · FIX-339 · agent claude ──", JSON.stringify({ type: "result", subtype: "success", duration_ms: 8000 }), ""].join("\n"),
+      "utf8",
+    );
+    const nowSec = 1_781_900_000;
+    // mtime ~3 hours before now → well past the 5-minute freshness window.
+    utimesSync(log, nowSec - 10_800, nowSec - 10_800);
+    const feed = collectLoopLiveFeed(dir, nowSec);
+    expect(feed.status).toBe("idle");
+    expect(feed.renderedLines.length).toBeGreaterThan(0); // it still HAS content
+    expect(feed.note).toMatch(/not currently streaming/i);
   });
 });
 

@@ -266,13 +266,23 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
     expect(args).toEqual(["--dangerously-skip-permissions", "-p", prompt]);
   });
 
-  it("FIX-359 reasonix: reasonix run --dir <cwd> <prompt> (one autonomous task)", () => {
+  it("US-AGENT-002 reasonix: reasonix run --max-steps <N> --model <model> --dir <cwd> <prompt>", () => {
     const { bin, args } = buildSpawnCommand("reasonix", { cwd: "/wt", skillBody: "DO WORK" });
     expect(bin).toBe("reasonix");
-    expect(args).toEqual(["run", "--dir", "/wt", prompt]);
+    expect(args).toEqual(["run", "--max-steps", "1000", "--model", "deepseek-flash", "--dir", "/wt", prompt]);
     // the DeepSeek key is NEVER an argv flag — it rides the spawn env only.
     expect(args.some((a) => a.includes("DEEPSEEK_API_KEY"))).toBe(false);
     expect(args.some((a) => a.startsWith("--api-key") || a.startsWith("--key"))).toBe(false);
+  });
+
+  it("US-AGENT-002 reasonix: routed model and maxSteps override the profile defaults", () => {
+    const { args } = buildSpawnCommand("reasonix", {
+      cwd: "/wt",
+      skillBody: "DO WORK",
+      model: "deepseek-reasoner",
+      maxSteps: 12,
+    });
+    expect(args).toEqual(["run", "--max-steps", "12", "--model", "deepseek-reasoner", "--dir", "/wt", prompt]);
   });
 
   it("throws a loud, documented error for an un-ported agent (fail-loud, not silent)", () => {
@@ -321,7 +331,15 @@ describe("US-AGENT-001 AgentProfile factory", () => {
 
     const reasonix = agentProfile("reasonix");
     expect(reasonix.acceptance.canReviewHeadless).toBe(true);
-    expect(reasonix.buildSpawnCommand({ cwd: "/wt", skillBody: "DO WORK" }).args.slice(0, 3)).toEqual(["run", "--dir", "/wt"]);
+    expect(reasonix.buildSpawnCommand({ cwd: "/wt", skillBody: "DO WORK" }).args.slice(0, 7)).toEqual([
+      "run",
+      "--max-steps",
+      "1000",
+      "--model",
+      "deepseek-flash",
+      "--dir",
+      "/wt",
+    ]);
   });
 
   it("keeps CLI argv aliases in the profile layer, not downstream executor branches", () => {
@@ -1194,6 +1212,19 @@ describe("executeCommand — command → executor mapping", () => {
     expect(ports.agentSpawn).toHaveBeenCalledWith(
       "claude",
       expect.objectContaining({ runDir: "/frame" }),
+    );
+  });
+
+  it("US-AGENT-002: spawn_agent passes the routed model to agent profiles", async () => {
+    const { ports } = fakePorts();
+    await executeCommand(
+      { kind: "spawn_agent", agent: "reasonix", attempt: 1 },
+      ports,
+      { ...CTX, agent: "reasonix", model: "deepseek-reasoner" },
+    );
+    expect(ports.agentSpawn).toHaveBeenCalledWith(
+      "reasonix",
+      expect.objectContaining({ model: "deepseek-reasoner" }),
     );
   });
 

@@ -843,6 +843,7 @@ export async function executeCommand(
           skillBody: skillBodyForSpawn,
           ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
           writableRoots: agentWritableRoots(ports.repoCwd, ports.paths.alertsPath),
+          ...(ctx.model !== undefined && ctx.model !== "" ? { model: ctx.model } : {}),
           // lever-4: only set when a prior codex session resolved (default-OFF ⇒
           // always undefined ⇒ unchanged cold spawn). Isolated to the codex argv
           // branch in agent-spawn.ts.

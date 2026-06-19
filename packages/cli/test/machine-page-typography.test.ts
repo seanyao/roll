@@ -5,6 +5,8 @@ import { collectAbout, renderAboutPage } from "../src/lib/page-about.js";
 import { renderAgentsMachinePage } from "../src/lib/page-agents.js";
 import { collectConventions, renderConventionsPage } from "../src/lib/page-conventions.js";
 import { renderSkillsPage } from "../src/lib/page-skills.js";
+import { renderToolsPage } from "../src/lib/page-tools.js";
+import { collectToolPanel } from "../src/lib/tool-panel.js";
 import type { SkillsPanelVM } from "../src/lib/skills-panel.js";
 
 const BRAND = { name: "roll", slogan: "It just works." };
@@ -38,11 +40,12 @@ function pages(): Record<string, string> {
       }),
     }),
     about: renderAboutPage({ brand: BRAND, snapshot: SNAP, vm: collectAbout({ docExists: () => true }) }),
+    tools: renderToolsPage({ brand: BRAND, snapshot: SNAP, tools: collectToolPanel() }),
   };
 }
 
 describe("machine pages — FIX-287 typography baseline", () => {
-  it("uses the console Charter masthead scale on all four machine pages", () => {
+  it("uses the console Charter masthead scale on all machine pages", () => {
     for (const [name, html] of Object.entries(pages())) {
       expect(html, name).toContain("font-size:28px;line-height:1.1");
       expect(html, name).not.toContain("font-size:33px;line-height:1.1");
@@ -51,7 +54,7 @@ describe("machine pages — FIX-287 typography baseline", () => {
     }
   });
 
-  it("loads the same IBM Plex font links as the console on all four machine pages", () => {
+  it("loads the same IBM Plex font links as the console on all machine pages", () => {
     for (const [name, html] of Object.entries(pages())) {
       expect(html, name).toContain("fonts.googleapis.com");
       expect(html, name).toContain("IBM+Plex+Sans");

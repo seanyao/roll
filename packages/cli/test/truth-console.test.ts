@@ -1029,20 +1029,27 @@ describe("top-bar shell — US-DOSSIER-027", () => {
     expect(solo).not.toContain('id="proj-menu"');
   });
 
-  it("AC3: machine-global breadcrumb wires Agents · Skills · Conventions · About, bilingual, with stable routes", () => {
+  it("AC3: machine-global breadcrumb wires Agents · Skills · Tools · Conventions · About, bilingual, with stable routes", () => {
     const html = render();
     expect(html).toContain('aria-label="machine layer · 机器层"'); // nav has a localized aria-label
     expect(html).toContain('data-machine="agents"');
     expect(html).toContain('data-machine="skills"');
+    expect(html).toContain('data-machine="tools"'); // US-TOOL-017
     expect(html).toContain('data-machine="conventions"');
     expect(html).toContain('data-machine="about"');
     expect(html).toContain('href="agents.html"');
+    expect(html).toContain('href="tools.html"'); // US-TOOL-017
     expect(html).toContain('href="conventions.html"');
     expect(html).toContain('href="about.html"');
+    // US-TOOL-017: the Tools crumb sits between Skills and Conventions
+    expect(html.indexOf('data-machine="skills"')).toBeLessThan(html.indexOf('data-machine="tools"'));
+    expect(html.indexOf('data-machine="tools"')).toBeLessThan(html.indexOf('data-machine="conventions"'));
     // bilingual machine kicker + an English/中 label pair
     expect(html).toContain(">Machine<");
     expect(html).toContain(">机器<");
     expect(html).toContain(">Agents<");
+    expect(html).toContain(">Tools<"); // Tools en
+    expect(html).toContain(">工具<"); // Tools zh
     expect(html).toContain(">约定<"); // Conventions zh
     // on the console no machine page is current (project name is the home anchor)
     expect(html).not.toContain('aria-current="page"');

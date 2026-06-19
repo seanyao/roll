@@ -57,7 +57,7 @@ export interface ProjectRegistryEntry {
  * page when one of those pages renders this header; on the console it is unset.
  */
 export interface MachineNavLink {
-  key: "agents" | "skills" | "conventions" | "about";
+  key: "agents" | "skills" | "tools" | "conventions" | "about";
   en: string;
   zh: string;
   href: string;
@@ -1434,15 +1434,17 @@ const TABS = [
 const TAB_KEYS = TABS.map((t) => t.key);
 
 /**
- * US-DOSSIER-027 — the machine-global breadcrumb. These four are the
- * machine-layer (above-project) entry points the design reference's top bar
- * promises. Their pages are built by later stories; the routing contract here
- * is stable: each is a sibling HTML file of `features/index.html`. Order is
- * fixed (Agents → Skills → Conventions → About) so the bar never reshuffles.
+ * US-DOSSIER-027 — the machine-global breadcrumb. These are the machine-layer
+ * (above-project) entry points the design reference's top bar promises. Their
+ * pages are built by later stories; the routing contract here is stable: each
+ * is a sibling HTML file of `features/index.html`. Order is fixed
+ * (Agents → Skills → Tools → Conventions → About) so the bar never reshuffles.
+ * US-TOOL-017 inserts Tools at the same machine level as Agents/Skills.
  */
 export const MACHINE_NAV: readonly MachineNavLink[] = [
   { key: "agents", en: "Agents", zh: "Agents", href: "agents.html" },
   { key: "skills", en: "Skills", zh: "技能", href: "skills.html" },
+  { key: "tools", en: "Tools", zh: "工具", href: "tools.html" },
   { key: "conventions", en: "Conventions", zh: "约定", href: "conventions.html" },
   { key: "about", en: "About", zh: "关于", href: "about.html" },
 ] as const;
@@ -2047,6 +2049,7 @@ export function renderMachineStubPage(input: MachineStubInput): string {
   const COMING: Record<MachineNavLink["key"], { en: string; zh: string }> = {
     agents: { en: "The machine-wide agent roster lands here.", zh: "机器级 agent 名册将落在这里。" },
     skills: { en: "The machine-wide skills catalog lands here.", zh: "机器级技能清单将落在这里。" },
+    tools: { en: "The machine-wide built-in tool catalog lands here.", zh: "机器级内置工具清单将落在这里。" },
     conventions: { en: "The shared conventions live here.", zh: "共享约定将住在这里。" },
     about: { en: "About roll on this machine.", zh: "关于本机上的 roll。" },
   };

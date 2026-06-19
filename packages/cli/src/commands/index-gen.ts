@@ -5,7 +5,7 @@
  * as the Delivery Dossier front page (US-DOSSIER-001a; supersedes the
  * US-META-003 flat table). Deterministic + idempotent.
  */
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
@@ -15,7 +15,7 @@ import { serializeTruthSnapshot } from "@roll/spec";
 import { collectDossier, generateIndex } from "../lib/archive.js";
 import { SPINE_STAGES, countLegacyStories, deriveDeliveryLadder, storySpectrumState, type TruthBoardInput, type TruthBoardVerdict } from "../lib/dossier-index.js";
 import type { TruthSnapshotStoryEntry } from "@roll/spec";
-import { renderTruthConsole, renderMachineStubPage, type BacklogEpicVM, type BacklogVM } from "../lib/truth-console.js";
+import { renderTruthConsole, renderMachineStubPage, type BacklogEpicVM, type BacklogVM, type LoopLiveFeedVM } from "../lib/truth-console.js";
 import { renderAgentsMachinePage } from "../lib/page-agents.js";
 import { collectCharter, defaultCharterDeps } from "../lib/page-charter.js";
 import { collectAbout, defaultAboutDeps, renderAboutPage } from "../lib/page-about.js";
@@ -34,10 +34,12 @@ import { collectCasting, defaultCastingDeps } from "../lib/casting.js";
 import { collectGitHooks, defaultGitHooksDeps } from "../lib/git-hooks.js";
 import { launchAgentsDir } from "./loop-sched.js";
 import { projectSlug } from "./dashboard.js";
+import { formatStream } from "./loop-fmt.js";
 import { morningReportHref } from "../lib/morning-report.js";
 import { renderEpicPage } from "../lib/epic-page.js";
 import { buildDossierRunCache, collectStoryDossierInput, renderStoryDossier, stationsDone, storyEvidenceFlags, storyHasMergeEvidence, storyHasSpecPrMergeEvidence, type StoryDossierInput } from "../lib/story-dossier.js";
 import { renderMarkdown } from "../lib/markdown.js";
+import { renderState, stripAnsi } from "../render.js";
 
 function iso(sec: number): string {
   return new Date(sec * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -170,6 +172,70 @@ function maxCollectedAt(parts: Array<string | undefined>): string | undefined {
     }
   }
   return best === "" ? undefined : best;
+}
+
+function runtimeDir(projectPath: string): string {
+  const env = (process.env["ROLL_PROJECT_RUNTIME_DIR"] ?? "").trim();
+  return env !== "" ? env : join(projectPath, ".roll", "loop");
+}
+
+function tailNonEmptyLines(text: string, limit: number): string[] {
+  const lines = text.split(/\r?\n/).filter((line) => line.trim() !== "");
+  return limit > 0 ? lines.slice(-limit) : lines;
+}
+
+export function collectLoopLiveFeed(projectPath: string, nowSec = renderNowSec()): LoopLiveFeedVM {
+  const livePath = join(runtimeDir(projectPath), "live.log");
+  const agent = (process.env["ROLL_LOOP_AGENT"] ?? "claude").trim() || "claude";
+  const generatedAt = iso(nowSec);
+  const base = {
+    sourcePath: livePath,
+    relativeHref: "../loop/live.log",
+    agent,
+    generatedAt,
+  };
+  if (!existsSync(livePath)) {
+    return {
+      ...base,
+      status: "idle",
+      rawLineCount: 0,
+      renderedLines: [],
+      note: "no live.log yet — loop has not emitted a live feed for this project",
+    };
+  }
+  let raw = "";
+  let updatedAt = generatedAt;
+  try {
+    raw = readFileSync(livePath, "utf8");
+    updatedAt = statSync(livePath).mtime.toISOString().replace(/\.\d{3}Z$/, "Z");
+  } catch {
+    return {
+      ...base,
+      status: "paused",
+      rawLineCount: 0,
+      renderedLines: [],
+      note: "live.log exists but could not be read",
+    };
+  }
+  const rawLines = tailNonEmptyLines(raw, 200);
+  const prevColor = renderState.useColor;
+  renderState.useColor = false;
+  try {
+    const renderedLines = formatStream(rawLines, agent, { verbose: false, nowMs: nowSec * 1000 })
+      .map(stripAnsi)
+      .filter((line) => line.trim() !== "")
+      .slice(-80);
+    return {
+      ...base,
+      status: renderedLines.length > 0 ? "live" : "idle",
+      rawLineCount: rawLines.length,
+      renderedLines,
+      updatedAt,
+      ...(renderedLines.length === 0 ? { note: "live.log has no concise activity signals yet" } : {}),
+    };
+  } finally {
+    renderState.useColor = prevColor;
+  }
 }
 
 export function collectTruthBoardInput(projectPath: string, nowSec = renderNowSec(), cycleRows?: readonly CycleLedgerRow[]): TruthBoardInput {
@@ -437,6 +503,10 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
         // configured git hooks path, not loop heartbeat lanes.
         casting: collectCasting(defaultCastingDeps(cwd)),
         gitHooks: collectGitHooks(defaultGitHooksDeps(cwd)),
+        // US-DOSSIER-044: Now embeds the same read-only live feed source that
+        // `roll loop watch` follows. The generated snapshot is folded through
+        // loop-fmt's ActivitySignal renderer; browser polling reads only.
+        liveFeed: collectLoopLiveFeed(cwd, renderNowSec()),
         // US-DOSSIER-027: the top-bar project switcher reads the cross-project
         // registry (US-DOSSIER-028 writes it). Absent today → [] → the console
         // degrades to current-project-only via currentSlug, never erroring.

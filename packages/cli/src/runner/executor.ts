@@ -875,6 +875,32 @@ export async function executeCommand(
       }
       await captureSink?.flush();
       persistWorktreeAlerts(ports.paths.worktreePath, ports.paths.alertsPath, ports.events);
+      // FIX-366 — BUILDER auth/network fast-fail (extends FIX-363's taxonomy from
+      // reviewer/scorer to the main working agent). An UNAUTHENTICATED builder does
+      // not silently burn the whole cycle: it prints a 403 / "Please run /login" in
+      // its first seconds and exits. We signature-match the output we ALREADY have
+      // (zero cost — NO precheck layer, NO per-tick probe, NO TTL cache) with the
+      // SAME `classifyBlockSignature`, and on auth/network emit the SAME
+      // `agent:blocked` event with `stage: "build"`. loop-run-once's existing
+      // `readExternalBlock`/`writeReviewerBlockedAlert` then ISOLATES it from the
+      // consecutive-CODE-failure counter and acts on the cause — auth PAUSES the
+      // loop (re-login then `roll loop resume`), network breathes (self-heals on
+      // reconnect). One block taxonomy for builder/reviewer/scorer; a healthy
+      // logged-in builder never matches, so the normal cycle is unchanged.
+      // Heuristic by design (it only nudges a counter + raises an alert, never
+      // drops a real delivery) so a false positive is at worst a slightly-wrong hint.
+      const builderBlock = classifyBlockSignature(`${res.stdout}\n${res.stderr}`);
+      if (builderBlock === "auth" || builderBlock === "network") {
+        ports.events.appendEvent(ports.paths.eventsPath, {
+          type: "agent:blocked",
+          cycleId: ctx.cycleId ?? "",
+          agent: cmd.agent,
+          cause: builderBlock,
+          stage: "build",
+          detail: (`${res.stdout}\n${res.stderr}`.split("\n").find((l) => l.trim() !== "") ?? "").slice(0, 200),
+          ts: eventTs(ports),
+        });
+      }
       // lever-4 (default-OFF) — FIX-354: CAPTURE this card's resumable session id
       // HERE, immediately after the agent exits, NOT at worktree teardown. The
       // codex rollout exists (the agent just ran) and the worktree still exists on

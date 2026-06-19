@@ -1096,6 +1096,58 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r.event).toEqual({ type: "agent_exited", exit: 0, timedOut: false });
   });
 
+  it("FIX-366: an UNAUTHENTICATED builder spawn (403/login) emits agent:blocked stage:build cause:auth", async () => {
+    const { ports, calls } = fakePorts({
+      // The builder ran but is not logged in — it printed a 403 / login prompt
+      // and exited (here non-zero, the common shape) WITHOUT producing commits.
+      agentSpawn: vi.fn(async () => ({
+        stdout: "API Error: 403 Request not allowed / Please run /login",
+        stderr: "",
+        exitCode: 1,
+        timedOut: false,
+      })),
+    });
+    const r = await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);
+    // The spawn still resolves to a normal agent_exited (the auth verdict rides
+    // the event stream, not the command result) — fast-fail, no whole-cycle burn.
+    expect(r.event).toEqual({ type: "agent_exited", exit: 1, timedOut: false });
+    const blocked = (calls["event"] ?? [])
+      .map((a) => (a as unknown[])[1] as { type?: string; stage?: string; cause?: string; agent?: string; cycleId?: string })
+      .find((e) => e.type === "agent:blocked");
+    expect(blocked).toBeDefined();
+    expect(blocked?.stage).toBe("build"); // unified with FIX-363's review/score taxonomy
+    expect(blocked?.cause).toBe("auth");
+    expect(blocked?.agent).toBe("claude");
+    expect(blocked?.cycleId).toBe(CTX.cycleId);
+  });
+
+  it("FIX-366: a builder spawn hitting a NETWORK signature emits agent:blocked cause:network (not auth)", async () => {
+    const { ports, calls } = fakePorts({
+      agentSpawn: vi.fn(async () => ({
+        stdout: "",
+        stderr: "getaddrinfo ENOTFOUND api.anthropic.com",
+        exitCode: 1,
+        timedOut: false,
+      })),
+    });
+    await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);
+    const blocked = (calls["event"] ?? [])
+      .map((a) => (a as unknown[])[1] as { type?: string; cause?: string })
+      .find((e) => e.type === "agent:blocked");
+    expect(blocked?.cause).toBe("network");
+  });
+
+  it("FIX-366: a healthy logged-in builder (no auth/network signature) emits NO agent:blocked event", async () => {
+    const { ports, calls } = fakePorts({
+      agentSpawn: vi.fn(async () => ({ stdout: "did the work, committed", stderr: "", exitCode: 0, timedOut: false })),
+    });
+    await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);
+    const blocked = (calls["event"] ?? [])
+      .map((a) => (a as unknown[])[1] as { type?: string })
+      .filter((e) => e.type === "agent:blocked");
+    expect(blocked).toHaveLength(0);
+  });
+
   it("US-EVID-001: spawn_agent passes the opened run dir explicitly to the child", async () => {
     const { ports } = fakePorts();
     await executeCommand(

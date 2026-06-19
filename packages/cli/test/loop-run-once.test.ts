@@ -123,6 +123,25 @@ describe("loop run-once CLI wiring", () => {
     // a missing events file is a safe null (never throws)
     expect(readExternalBlock(join(dir, "nope.ndjson"), "c1")).toBeNull();
   });
+
+  it("readExternalBlock — FIX-366: a BUILDER block (stage:build) lands in the SAME taxonomy as review/score", () => {
+    const dir = mkdtempSync(join(tmpdir(), "roll-extblock-build-"));
+    const ev = join(dir, "events.ndjson");
+    const w = (o: object): void => appendFileSync(ev, `${JSON.stringify(o)}\n`, "utf8");
+    writeFileSync(ev, "", "utf8");
+    // The unauthenticated BUILDER (FIX-366) emits agent:blocked stage:build — it
+    // must be attributed exactly like a reviewer/scorer block (unified taxonomy).
+    w({ type: "agent:blocked", cycleId: "b1", agent: "claude", cause: "auth", stage: "build", detail: "Please run /login", ts: 1 });
+    const got = readExternalBlock(ev, "b1");
+    expect(got?.cause).toBe("auth");
+    expect(got?.agents).toEqual(["claude"]);
+
+    // a builder NETWORK block is attributed network (not auth → it self-heals)
+    const ev2 = join(dir, "events2.ndjson");
+    writeFileSync(ev2, "", "utf8");
+    appendFileSync(ev2, `${JSON.stringify({ type: "agent:blocked", cycleId: "b2", agent: "codex", cause: "network", stage: "build", detail: "ENOTFOUND", ts: 1 })}\n`, "utf8");
+    expect(readExternalBlock(ev2, "b2")?.cause).toBe("network");
+  });
 });
 
 describe("realAgentSpawn child-process path (PATH shim, no real claude)", () => {

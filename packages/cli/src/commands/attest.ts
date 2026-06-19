@@ -780,12 +780,24 @@ const USAGE = [
  * (ID-owned first) and return the FIRST non-empty AC set — so a stub that DOES
  * carry its own ACs still wins first (FIX-225 preserved), and an empty stub
  * falls through to the epic file instead of yielding a zero-AC report.
+ *
+ * FIX-374: an ID-owned card is EITHER the flat `<storyId>.md` OR the card-folder
+ * `<storyId>/spec.md` (the same `idOwned` predicate `findFeatureFiles` uses).
+ * Both forms own the WHOLE file, so `fileOwned` must hold for either — otherwise
+ * a `## Root cause (… FIX-368 sibling)` heading inside a `spec.md` re-attributes
+ * the trailing AC block to the mentioned sibling and the report renders zero ACs
+ * (the FIX-214 hijack class, here via the directory layout). This keeps the
+ * report path aligned with the gate path, which already passes `fileOwned: true`.
  */
+function isIdOwnedCard(cand: string, storyId: string): boolean {
+  return basename(cand) === `${storyId}.md` || (basename(cand) === "spec.md" && basename(dirname(cand)) === storyId);
+}
+
 export function resolveStoryAcItems(projectPath: string, storyId: string): ReturnType<typeof acForStory> {
   for (const cand of findFeatureFiles(projectPath, storyId)) {
     try {
       const items = acForStory(readFileSync(cand, "utf8"), storyId, {
-        fileOwned: basename(cand) === `${storyId}.md`,
+        fileOwned: isIdOwnedCard(cand, storyId),
       });
       if (items.length > 0) return items;
     } catch {

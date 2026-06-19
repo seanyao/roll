@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### 修复
+
+- **发版页和档案页都改成只看「下一版」的真相**：档案页的发版栏现在自动显示真实的最新版本号、每次发版同步刷新，不再卡在旧版本；发布页的「待发布」也只列上一个发布版本之后新合入的卡（就是下次要带的内容），而不是几百张全量未完成卡；配套的一致性检查面板改成自解释，一行告诉你能不能发版、每项查什么、怎么修。(FIX-368 / FIX-372) `[release-management]`
+
+- **文件夹形式的卡片跑验收报告不再被「别的卡号」抢走清单**：就算卡里的小标题里提到了其他卡号，验收报告也只认这张卡自己的全部验收项，正常完整显示。(FIX-374) `[acceptance-evidence]`
+
+### 新功能
+
+- **loop 观察窗看长周期更省心**：默认的 `roll loop watch` 窗口现在直接显示当前阶段、静默时长、TCR 次数和最近一次有意义的进展，长周期一眼就能看懂；新增 `--events` 和 `--raw-events` 两档，可直接跟踪事件流，不用再自己 tail 原始日志；`roll loop go` 和定时 loop 的 tmux 监视窗也和手动观察走同一个统一入口；TCR 提交按当前周期的观测时间排序，不再把开工前的旧提交错当成本周期的新进展；帮助文字与中英文档都说明了默认、紧凑事件、原始事件三档查看层级以及只读与 Ctrl-C 退出。(US-LOOP-043 / US-LOOP-045 / US-LOOP-046 / US-LOOP-047 / US-LOOP-048) `[loop-engine]`
+
+- **主动询问外部工具权限，并在档案页标清可用性**：roll 现在会在 `roll init` 或启动时主动问你要不要授予截图权限、安装 Chromium 这类外部工具依赖，拒绝会说明具体影响，并在 Agents 档案页上逐项显示每个工具能不能用。(US-EVID-018) `[acceptance-evidence]`
+
 ### 变更
 
 - **下架未成熟的"生产巡检"和"每日简报"两块能力面**：`$roll-sentinel`（随机抽样巡检）和 `$roll-brief` / `roll brief`（owner 每日简报）不再作为 Roll 的核心能力宣传——它们成熟度不够，且和外部控制台 / Delivery Dossier / `roll status` / 真相信号这条已经成熟的可观测链路重复。现在第三个闭环（Loop C）讲的是"可观测与维护"：用 `roll status`、`roll dossier`、`$roll-debug`/`$roll-doc`/`$roll-doctor`、`$roll-.dream` 代码健康扫描和真相信号来发现问题、把修正写回 backlog。代码、技能目录、命令面、站点与中英文档已同步；新增一道回归闸，防止这两块能力面悄悄回流到活跃文档/站点/帮助/技能目录里（历史归档、迁移文档、旧版幻灯片不受影响）。(FIX-356 / 356a-d) `[skill-ecosystem]`
@@ -13,6 +25,8 @@
 - **Dream 代码结构扫描改走确定性 TS/AST pre-scan**：`roll dream run-once` 现在会在 agent 前生成 `.roll/dream/structure-scan.json`，用 TypeScript 引用图、AST fingerprint 和 AST env 解析给死代码、不可达分支、重复结构、单实现抽象和 env 文档缺口提供机器证据；agent 消费该 artifact，不再靠 grep 式临场判断兜底，文档类扫描保持原流程。(US-LOOP-080) `[loop-engine]`
 
 - **web 控制台新增机器级 Tools 页**：一处看全所有内置工具（bash / browser / git / github / network / fs / mcp）、各自的能力与默认护栏（超时 / 沙箱 / 重试 / 每周期上限），和 Agents、Skills 同级，挂在 `MACHINE › …` 面包屑上。中英文 Overview 指南与 Tools & policy 指南都已指向这个新页面。(US-TOOL-016 / 017 / 018) `[tools-layer]`
+
+- **web 控制台改版：新的 Now 默认页 + 实时 loop 观察窗**：控制台打开后默认进「Now」运营视图（取代旧的 Overview），项目标签重排成 Now·Backlog·Loop·Release·Casting·Charter；Now 仪表盘重做后能正确反映当前是否有周期在跑（没有就明说「当前没有周期在跑」，不再把已完成的旧卡误标为进行中），并实时显示 loop 正在跑哪张卡、流到哪一步，On-Deck 与 Needs-you 列表的卡可直接点进各自卡页、Needs-you 显示真实总数并按失败/挂起分色，Live Stream 与 Loop Heartbeat 区域更大更易读；#loop 观察窗能实时看到每个周期的七段进度带、段内活动与闸门事件，报告与账本都按同一份活动流展示，处处口径一致。(US-DOSSIER-043 / US-DOSSIER-044 / FIX-373 / US-LOOP-078) `[delivery-dossier]`
 
 ## v3.619.1 — 2026-06-19
 

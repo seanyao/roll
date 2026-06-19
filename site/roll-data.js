@@ -138,7 +138,7 @@ window.RollData = (function () {
       ]},
       { id: "observability", title: "Observability", blurb: "Always know what it's doing.", features: [
         { name: "roll status",     mono: true, desc: "Verdict-first truth summary — LOOP · CYCLE · RELEASE · STORY with attest coverage — then convention sync health.", badges: ["core"] },
-        { name: "Delivery Dossier", desc: "The web console: dark top-bar + green-dot project switcher, machine-global breadcrumb (Agents · Skills · Conventions · About), a Charter markdown browser, the Casting page, and the claimed→merged→attested ladder (done ≡ merged ∧ attested). Web and CLI read one snapshot, so every number matches.", badges: ["new"] },
+        { name: "Delivery Dossier", desc: "The web console: dark top-bar + green-dot project switcher, machine-global breadcrumb (Agents · Skills · Tools · Conventions · About), a Charter markdown browser, the Casting page, and the claimed→merged→attested ladder (done ≡ merged ∧ attested). Web and CLI read one snapshot, so every number matches.", badges: ["new"] },
         { name: "roll loop runs",  mono: true, desc: "Per-cycle TerminalOutcome history with TCR count and duration.", badges: [] },
         { name: "roll loop story", mono: true, desc: "Per-story rollup: cycles, span, duration, tokens, cost, PRs.", badges: [] },
         { name: "roll loop alert", mono: true, desc: "View, acknowledge and clear loop alerts from one place.", badges: [] },
@@ -212,6 +212,7 @@ window.RollData = (function () {
         { name: "Dream",            path: "guide/en/dream.md",             desc: "Nightly code health scan and REFACTOR generation." },
         { name: "Peer",             path: "guide/en/peer.md",              desc: "Cross-agent review protocol — AGREE / REFINE / OBJECT / ESCALATE." },
         { name: "Skills",           path: "guide/en/skills.md",            desc: "Skill catalog and the decision tree for picking the right one." },
+        { name: "Tools & Policy",   path: "guide/en/tools.md",             desc: "Built-in tools (bash / browser / git / github / network / fs / mcp), their per-cycle policy guardrails, and roll tool status." },
         { name: "Migration 2.0",    path: "guide/en/migration-2.0.md",     desc: "Upgrade an existing 1.x project by pinning the old v2 toolchain for the one-time layout move." },
         { name: "Legacy Onboarding",path: "guide/en/legacy-onboarding.md", desc: "Bring roll into an existing codebase via $roll-onboard — 3-minute survey, no surprise edits." },
       ],
@@ -343,7 +344,7 @@ window.RollData = (function () {
       ]},
       { id: "observability", title: "可观测性", blurb: "永远知道它在干什么。", features: [
         { name: "roll status",     mono: true, desc: "判定优先的真相摘要——LOOP · CYCLE · RELEASE · STORY，含 attest 验收覆盖率——其后是约定同步健康。", badges: ["core"] },
-        { name: "交付档案",          desc: "web 控制台:深色顶栏 + 绿点项目切换器、机器全局面包屑(Agents · Skills · Conventions · About)、Charter markdown 浏览器、Casting 页,以及 claimed→merged→attested 阶梯(done ≡ 已合并 ∧ 已验收)。web 与 CLI 读同一份快照,每个数字都对得上。", badges: ["new"] },
+        { name: "交付档案",          desc: "web 控制台:深色顶栏 + 绿点项目切换器、机器全局面包屑(Agents · Skills · Tools · Conventions · About)、Charter markdown 浏览器、Casting 页,以及 claimed→merged→attested 阶梯(done ≡ 已合并 ∧ 已验收)。web 与 CLI 读同一份快照,每个数字都对得上。", badges: ["new"] },
         { name: "roll loop runs",  mono: true, desc: "每轮 TerminalOutcome 历史,含 TCR 次数和耗时。", badges: [] },
         { name: "roll loop story", mono: true, desc: "按故事汇总:cycle 数、跨度、耗时、token、成本、PR 列表。", badges: [] },
         { name: "roll loop alert", mono: true, desc: "在一处查看、确认、清除 loop 告警。", badges: [] },
@@ -417,6 +418,7 @@ window.RollData = (function () {
         { name: "Dream",      path: "guide/zh/dream.md",             desc: "夜间代码健康巡检与 REFACTOR 生成。" },
         { name: "Peer",       path: "guide/zh/peer.md",              desc: "跨 Agent 评审协议 — AGREE / REFINE / OBJECT / ESCALATE。" },
         { name: "技能",        path: "guide/zh/skills.md",            desc: "技能目录与选用决策树。" },
+        { name: "工具与策略",   path: "guide/zh/tools.md",             desc: "内置工具(bash / browser / git / github / network / fs / mcp)、各自的每周期策略护栏，以及 roll tool status。" },
         { name: "Migration 2.0", path: "guide/zh/migration-2.0.md",  desc: "升级 1.x 老项目：pin 旧版 v2 工具链执行一次性布局迁移。" },
         { name: "老项目接入",    path: "guide/zh/legacy-onboarding.md", desc: "通过 $roll-onboard 把 roll 带进现有代码库——3 分钟问询，不偷改文件。" },
       ],

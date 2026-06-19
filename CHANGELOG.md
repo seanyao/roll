@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### 可见性
+- `roll agent use|set` 之后档案的 #agents 面板自动刷新，不用再手动重建看板 `[loop]`
+  <!-- evidence: .roll/features/delivery-dossier/FIX-378/latest/FIX-378-report.html -->
+
 ## v3.620.1 — 2026-06-20
 
 ### 修复

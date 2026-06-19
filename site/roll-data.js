@@ -142,7 +142,7 @@ window.RollData = (function () {
         { name: "roll loop runs",  mono: true, desc: "Per-cycle TerminalOutcome history with TCR count and duration.", badges: [] },
         { name: "roll loop story", mono: true, desc: "Per-story rollup: cycles, span, duration, tokens, cost, PRs.", badges: [] },
         { name: "roll loop alert", mono: true, desc: "View, acknowledge and clear loop alerts from one place.", badges: [] },
-        { name: "Owner brief", desc: "Daily digest: what shipped, what's in-progress, what's next.", badges: ["highlight"] },
+        { name: "Truth & dossier", desc: "Single truth ledger: shipped, in-progress, queue, drift, release readiness — via roll status, roll dossier, and the external console.", badges: ["highlight"] },
       ]},
       { id: "multi-agent", title: "Multi-Agent", blurb: "One vendor doesn't own the keys.", features: [
         { name: "Fallback Routing", desc: "Four complexity slots (easy/default/hard/fallback) each map to a locally-installed agent; when the slot agent is down or rate-limited, work fails over to the fallback-slot agent.", badges: ["highlight"] },

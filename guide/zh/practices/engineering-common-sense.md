@@ -356,9 +356,9 @@ EOF
 
 ## 自动化防护
 
-### Sentinel 巡检规则
+### CI 闸门规则
 ```yaml
-# .github/roll-sentinel-config.yml
+# .github/roll-checks.yml —— 作为 CI 闸门在每个 PR 上强制执行
 checks:
   idempotency:
     - pattern: "ingest|import|sync"
@@ -371,6 +371,9 @@ checks:
   data_flow:
     - require_integration_test: true
 ```
+
+这些作为 CI 闸门在每个 PR 上运行。慢性问题 —— 死代码、文档过期、结构漂移 ——
+由 `roll-.dream`（每晚代码健康扫描）捕获，并把 `REFACTOR-XXX` 条目写回 backlog。
 
 ### Pre-Commit 钩子
 ```bash

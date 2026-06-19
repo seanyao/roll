@@ -357,21 +357,25 @@ EOF
 
 ## Automated Safeguards
 
-### Sentinel Patrol Rules
+### CI Gate Rules
 ```yaml
-# .github/roll-sentinel-config.yml
+# .github/roll-checks.yml — enforced as a CI gate on every PR
 checks:
   idempotency:
     - pattern: "ingest|import|sync"
       require_test: "idempotency"
-  
+
   cross_module_contract:
     - files: ["src/*/index.ts"]
       check: "shared_id_generation"
-  
+
   data_flow:
     - require_integration_test: true
 ```
+
+These run as CI gates on every PR. Slower-burn issues — dead code, doc staleness,
+structural drift — are caught by `roll-.dream`, the nightly code-health scan that
+files `REFACTOR-XXX` entries back into the backlog.
 
 ### Pre-Commit Hook
 ```bash

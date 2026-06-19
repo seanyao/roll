@@ -31,7 +31,7 @@ my-legacy-project/                    ← 砧木：现有项目，零侵入
 └── .roll/                            ← 接穗：Roll 工具栖息地
     ├── backlog.md                      项目管理增量（新故事走这里）
     ├── features/                       Story 详情
-    ├── briefs/  dream/                 Roll 自动产出
+    ├── dream/                          Roll 自动产出（代码健康扫描）
     ├── specs/                          可选：增量沉淀的规格文档
     └── (可选 .gitignore)               团队决定是否公开
 ```
@@ -44,7 +44,7 @@ my-legacy-project/                    ← 砧木：现有项目，零侵入
                               .roll/（接穗）嫁接进来
                                   ↓
                               Roll 工具链接管新故事的管理与自治执行
-                              （loop / brief / dream / peer review）
+                              （loop / dream / peer review / status·dossier 可观测）
 ```
 
 ## 砧木与接穗的边界
@@ -58,7 +58,7 @@ my-legacy-project/                    ← 砧木：现有项目，零侵入
 | 新故事的实现 | — | ✓ Loop 增量执行 |
 | 文档新鲜度巡检 | — | ✓ `$roll-.dream` 自动巡 |
 | 跨 agent 评审 | — | ✓ Peer review 入循环 |
-| 项目简报 | — | ✓ `$roll-brief` 每日生成 |
+| 交付可观测 | — | ✓ `roll status` / `roll dossier` + 外部 console 呈现 |
 
 **`.roll/` 完全可以被 `rm -rf` 整体移除，项目回到嫁接前的状态。**
 这是 graft-pattern 与 replant-pattern 的根本区别——嫁接是**可逆**的。
@@ -81,7 +81,7 @@ graft 不是一次性事件，可以分阶段加深采用：
 |------|---------|-------------|
 | L1: 工具链 | 装 Roll CLI，`AGENTS.md` 同步 AI 工具约定 | 零（仅追加文件） |
 | L2: 项目管理 | `.roll/backlog.md` 接管新故事 | 零（新故事走新流，老故事不动） |
-| L3: 自动巡检 | 启用 `roll-.dream`、`roll-brief` | 零（仅读、产出独立文件） |
+| L3: 自动巡检 | 启用 `roll-.dream` 代码健康扫描 | 零（仅读、产出独立文件） |
 | L4: Loop 自治 | 启用 `roll loop` 自动执行 Todo | 低（loop 会改源码，但走 PR 流程） |
 | L5: Peer review | 跨 agent 评审入流 | 低（评审是 gating，非自动 merge） |
 

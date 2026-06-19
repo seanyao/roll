@@ -13,7 +13,7 @@
 > **Roll 有两套界面。** 读这份 FAQ 时请分清：
 >
 > - **CLI 命令** —— 在终端里跑：`roll init`、`roll loop on`、`roll status`、
->   `roll brief` 等。负责状态管理、调度、观测。**它们本身不写代码**。
+>   `roll dossier` 等。负责状态管理、调度、观测。**它们本身不写代码**。
 > - **Skill** —— 在你的 AI agent 里调用（Claude Code、Cursor、Codex、Pi
 >   等）：`$roll-build`、`$roll-design`、`$roll-fix`、`$roll-onboard` 等。
 >   在 Claude Code 里输入形式是 `/roll-build`；`$` 前缀是文档里跨工具的
@@ -447,8 +447,8 @@ git push --force-with-lease
 
 **原理：** 每个周期向 `<project>/.roll/loop/runs.jsonl` 追加一条 JSONL，
 包含 story ID、模型、TCR commit 数、耗时、结果、成本（按公开单价）。
-`roll-brief` 把这些聚合成人类可读摘要。tmux 会话保留完整 agent 对话，
-直到下一个周期覆盖。
+`roll status` 与交付档案（`roll dossier`）把这些——连同真相账本的其余部分——
+聚合成单一的人类可读界面。tmux 会话保留完整 agent 对话，直到下一个周期覆盖。
 
 **观测入口：**
 
@@ -460,7 +460,7 @@ git push --force-with-lease
 | 单个 cycle 各阶段耗时 | `roll loop runs --detail <cycle_id>` |
 | 带成本列的快照 dashboard | `roll loop status --days 7` |
 | 实时看 agent 在做什么 | `tmux attach -t roll-loop-<project-slug>` |
-| 人类可读的每日摘要 | `roll brief` |
+| 一眼看清已发布 / 进行中 / 队列 / 发布就绪 | `roll dossier` |
 | 需要关注的告警 | `roll loop alert` |
 | 完整 cycle agent 输出（纯文本） | `roll loop log` |
 | 完整 agent 对话记录 | `tmux attach -t roll-loop-<project-slug>` 后上翻 |

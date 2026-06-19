@@ -103,6 +103,10 @@ agent 给自己的交付打分是利益冲突，所以质量评分（**Review Sc
   note 落在卡片 `notes/` 目录，带溯源——`scoring: pair`、`scored-by: <agent>`
   以及全新会话 id（独立性可核验）。
 - **手动**：`roll pair score <story-id> --summary "<交付摘要>"` 在一个全新会话里走同一适配器。
+- **设计产出**（`roll-design`，无 loop cycle）：`roll pair score --design <story-id> --file <设计摘要>`
+  触发同一个全新会话的 Reviewer 评**设计**质量（INVEST 拆分、可视 AC 完整、`deliverable_url`
+  正确、领域/spec 一致），而非代码；记为 `stage=design`。设计 agent 只触发、绝不给自己打分；
+  无可用评审则诚实标记未评审（fail-loud），绝不合成自评。
 - **独立性看会话，不看厂商**：同厂全新会话是最低可接受档；不同 agent+model+会话
   （非子 agent）更鼓励。任何与 builder 共享会话的打分——包括其子 agent——都被判为自评而拒收。
   无异构候选、超时或协议不符时**不会**回落成自评；缺席通过 `pair:none-available`

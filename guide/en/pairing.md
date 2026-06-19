@@ -125,6 +125,12 @@ self-score):
   fresh-session id (so independence is verifiable).
 - **Manually**: `roll pair score <story-id> --summary "<delivery summary>"`
   runs the same adapter from a fresh session.
+- **Design output** (`roll-design`, no loop cycle): `roll pair score --design
+  <story-id> --file <design-summary>` triggers the same fresh-session Reviewer to
+  grade the **design** (INVEST split, visual-AC completeness, `deliverable_url`
+  correctness, domain/spec consistency) — not code. It stamps the score
+  `stage=design`. The designing agent triggers but never grades its own work;
+  no peer available → honest unscored (fail-loud), never a self-grade.
 - **Independence, not vendor**: a fresh same-vendor session is the minimum
   acceptable; a different agent+model+session (non-sub-agent) is encouraged.
   A score sharing the builder's session — including any sub-agent of it — is

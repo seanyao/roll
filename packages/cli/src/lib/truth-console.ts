@@ -1848,7 +1848,7 @@ export const CONSOLE_SCRIPT = `<script>
           if (linesEl.tagName !== "OL") {
             var ol = document.createElement("ol");
             ol.setAttribute("data-live-lines", "true");
-            ol.style.cssText = "list-style:none;margin:0;padding:0;display:grid;gap:6px;max-height:260px;overflow:auto;";
+            ol.style.cssText = "list-style:none;margin:0;padding:0;display:grid;gap:4px;max-height:420px;overflow:auto;";
             linesEl.parentNode.replaceChild(ol, linesEl);
             linesEl = ol;
           }

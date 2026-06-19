@@ -76,7 +76,7 @@ export async function runCycleOnce(opts: RunCycleOptions): Promise<RunCycleResul
   const maxSteps = opts.maxSteps ?? 1000;
 
   // Lock: single-flight re-entry guard. Skip if another live cycle holds it.
-  const acq = ports.process.acquireLock(ports.paths.lockPath, { staleSec: opts.lockStaleSec });
+  const acq = ports.process.acquireLock(ports.paths.lockPath, { staleSec: opts.lockStaleSec, cycleId: ctx.cycleId });
   if (!acq.acquired) {
     return { ran: false, terminal: undefined, heldByPid: acq.heldByPid };
   }

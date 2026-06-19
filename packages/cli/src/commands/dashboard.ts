@@ -31,9 +31,9 @@ import {
 } from "../render.js";
 import {
   INNER_LOCK_STALE_SEC,
-  isLockHeld,
+  isOwnerHeld,
   livenessVerdict,
-  parseLock,
+  readLockOwner,
   systemPidAlive,
   type PidAlive,
 } from "@roll/infra";
@@ -611,7 +611,7 @@ export interface LiveCycle {
  * Decide whether a v3 cycle is live RIGHT NOW, reading the signals the v3 heart
  * actually emits (FIX-203). The v2 `state.yaml` `status:` line the old eyebrow
  * trusted is never written by the TS runner, so liveness must come from:
- *   - a held `inner.lock` — pid alive AND fresh (`isLockHeld`, 4h staleness), and
+ *   - a held `inner.lock` — pid alive AND fresh (`isOwnerHeld`, 4h staleness), and
  *   - a fresh `heartbeat` (`livenessVerdict`, 30-min default), and
  *   - a most-recent `cycle_start` with no matching `cycle_end` (an open cycle).
  *
@@ -631,13 +631,8 @@ export function detectLiveCycle(
   const lockPath = join(rtDir, "inner.lock");
   if (!existsSync(lockPath)) return dead;
   const nowSec = Math.floor(now.getTime() / 1000);
-  let lockRaw: string;
-  try {
-    lockRaw = readFileSync(lockPath, "utf8");
-  } catch {
-    return dead;
-  }
-  if (!isLockHeld(parseLock(lockRaw), nowSec, INNER_LOCK_STALE_SEC, pidAlive)) return dead;
+  const owner = readLockOwner(lockPath);
+  if (!isOwnerHeld(owner, nowSec, INNER_LOCK_STALE_SEC, pidAlive)) return dead;
   const hb = livenessVerdict(join(rtDir, "heartbeat"), { now: () => nowSec });
   if (!hb.alive) return dead;
   // cycles are sorted newest-first; the MOST RECENT open cycle (no end) is the

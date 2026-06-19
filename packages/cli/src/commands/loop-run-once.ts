@@ -14,7 +14,7 @@
  */
 import { EventBus, cycleEndEvent, firstInstalledAgent, mapV2Status, parsePolicy, readSlotFromText, type AgentSlot, type RouteDeps } from "@roll/core";
 import { absent, buildTerminalEvent, deriveOrphanVerdict, present } from "@roll/spec";
-import { parseLock, projectIdentity, releaseLock } from "@roll/infra";
+import { projectIdentity, readLockOwner, releaseLock } from "@roll/infra";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type RunnerPaths, buildRunRow, dryRunPlan, killLiveAgents, nodePorts, realAgentSpawn, runCycleOnce } from "../runner/index.js";
@@ -118,7 +118,7 @@ export function cycleSignalTeardown(
 
   let owned = false;
   try {
-    owned = existsSync(paths.lockPath) && parseLock(readFileSync(paths.lockPath, "utf8")).pid === pid;
+    owned = existsSync(paths.lockPath) && readLockOwner(paths.lockPath)?.pid === pid;
   } catch {
     owned = false;
   }

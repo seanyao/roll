@@ -14,7 +14,7 @@ import {
   type GoalStatus,
   type RollGoal,
 } from "@roll/spec";
-import { acquireLock, ghRepoSlug, INNER_LOCK_STALE_SEC, isLockHeld, parseLock, prViewMergeInfo, projectIdentity, releaseLock, remoteUrl } from "@roll/infra";
+import { acquireLock, ghRepoSlug, INNER_LOCK_STALE_SEC, isOwnerHeld, prViewMergeInfo, projectIdentity, readLockOwner, releaseLock, remoteUrl } from "@roll/infra";
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -1329,8 +1329,8 @@ function innerLockHolder(projectPath: string, nowSec: number): number | undefine
   const path = join(runtimeDir(projectPath), "inner.lock");
   try {
     if (!existsSync(path)) return undefined;
-    const contents = parseLock(readFileSync(path, "utf8"));
-    return isLockHeld(contents, nowSec, INNER_LOCK_STALE_SEC) ? contents.pid : undefined;
+    const owner = readLockOwner(path);
+    return isOwnerHeld(owner, nowSec, INNER_LOCK_STALE_SEC) ? owner?.pid : undefined;
   } catch {
     return undefined;
   }

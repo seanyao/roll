@@ -204,7 +204,7 @@
       ["roll-build", "roll-review-pr", "gate", text.buildReview],
       ["roll-fix", "roll-review-pr", "gate", text.fixReview],
       ["roll-debug", "roll-fix", "control", text.debugFix],
-      ["roll-doc", "roll-design", "control", text.docDesign],
+      ["roll-doc-audit", "roll-design", "control", text.docDesign],
       ["roll-doctor", "roll-build", "control", text.doctorBuild],
       ["roll-doctor", "roll-onboard", "control", text.doctorOnboard],
       ["roll-peer", "roll-design", "control", text.peerDesign],
@@ -265,7 +265,7 @@
         anchors: ["Doc gaps", "Tool health"],
         nodes: [
           ["roll-debug", "operate", l === "zh" ? "diagnostics -> FIX / source patch" : "diagnostics -> FIX / source patch"],
-          ["roll-doc", "operate", l === "zh" ? "doc gaps -> docs / design context" : "doc gaps -> docs / design context"],
+          ["roll-doc-audit", "operate", l === "zh" ? "docs/product drift -> docs / design context" : "docs/product drift -> docs / design context"],
           ["roll-doctor", "operate", l === "zh" ? "convention/skill health -> roll setup" : "convention/skill health -> roll setup"]
         ]
       }

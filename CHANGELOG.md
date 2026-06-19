@@ -16,7 +16,9 @@
 
 ### 变更
 
-- **下架未成熟的"生产巡检"和"每日简报"两块能力面**：`$roll-sentinel`（随机抽样巡检）和 `$roll-brief` / `roll brief`（owner 每日简报）不再作为 Roll 的核心能力宣传——它们成熟度不够，且和外部控制台 / Delivery Dossier / `roll status` / 真相信号这条已经成熟的可观测链路重复。现在第三个闭环（Loop C）讲的是"可观测与维护"：用 `roll status`、`roll dossier`、`$roll-debug`/`$roll-doc`/`$roll-doctor`、`$roll-.dream` 代码健康扫描和真相信号来发现问题、把修正写回 backlog。代码、技能目录、命令面、站点与中英文档已同步；新增一道回归闸，防止这两块能力面悄悄回流到活跃文档/站点/帮助/技能目录里（历史归档、迁移文档、旧版幻灯片不受影响）。(FIX-356 / 356a-d) `[skill-ecosystem]`
+- **下架未成熟的"生产巡检"和"每日简报"两块能力面**：`$roll-sentinel`（随机抽样巡检）和 `$roll-brief` / `roll brief`（owner 每日简报）不再作为 Roll 的核心能力宣传——它们成熟度不够，且和外部控制台 / Delivery Dossier / `roll status` / 真相信号这条已经成熟的可观测链路重复。现在第三个闭环（Loop C）讲的是"可观测与维护"：用 `roll status`、`roll dossier`、`$roll-debug`/`$roll-doc-audit`/`$roll-doctor`、`$roll-.dream` 代码健康扫描和真相信号来发现问题、把修正写回 backlog。代码、技能目录、命令面、站点与中英文档已同步；新增一道回归闸，防止这两块能力面悄悄回流到活跃文档/站点/帮助/技能目录里（历史归档、迁移文档、旧版幻灯片不受影响）。(FIX-356 / 356a-d) `[skill-ecosystem]`
+
+- **`$roll-doc` 更名为 `$roll-doc-audit` 并同步用户表面**：站点 Skills、技能图谱、`roll-doc-skill.html` 公共旧链接、guide/README 风格说明和 CLI skills panel 都改成"文档/产品一致性审计"心智；旧 diagram URL 保留跳转到 `roll-doc-audit-skill.html`，避免已分享链接断掉。`[skill-ecosystem]`
 
 - **loop 能在卡做大时自己再拆**：交付前的自检判定"太大"、或独立评审判定"范围过大"时，loop 会调 `roll loop self-downgrade` 把原卡挂起（🚫 Hold）、按缺口拆出子卡并接着干，子卡只继承原卡的入边依赖、不指向被挂起的伞卡（避免死锁）；同一条拆分链最多自动拆两次，第三次拒绝并告警等人处理。评审触发的再拆还要先过"异构共识"——拉 2+ 不同厂商的 agent 复核拆分方案，全同意才落，有异议就暂停告警（人在环上，不在环里）。(US-AGENT-042 / US-AGENT-041) `[autonomous-evolution]`
 

@@ -626,9 +626,9 @@ gitlab.com / 自建 → 检查 SSH key
 # 只是暂时看不到其他机器的 cycle，等连接恢复即自动同步。
 ```
 
-### C10. 我跑了 roll-doc——怎么知道它做了 Phase 3a 还是 Phase 3b？
+### C10. 我跑了 roll-doc-audit——怎么知道它做了 Phase 3a 还是 Phase 3b？
 
-**症状:** 你跑了 `$roll-doc`,想知道它是停在目录级填充(Phase 3a),还是继续做了
+**症状:** 你跑了 `$roll-doc-audit`,想知道它是停在目录级填充(Phase 3a),还是继续做了
 深度的跨目录读取(Phase 3b)。
 
 **为什么会这样:** Phase 3a(即"Fill"填充阶段)孤立地读取每个缺口目录——每个目录
@@ -653,7 +653,7 @@ Phase 3b — Deep Read
 ——所以没有任何 `docs/data-flows.md` / `docs/state-machines.md` /
 `docs/integrations.md` / `docs/deployment.md` 输出,就是只跑了 Phase 3a 的标志。
 在 `--dry-run` 下,同样的 Phase 3b 行会标 `(plan)` 且不写文件。完整拆解见
-[roll-doc.md](roll-doc.md)。
+[roll-doc-audit.md](roll-doc-audit.md)。
 
 
 ---

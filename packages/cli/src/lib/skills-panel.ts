@@ -102,7 +102,7 @@ const GROUP_OF: Record<string, SkillGroup> = {
   "roll-.echo": "observe",
   "roll-loop": "lifecycle",
   "roll-onboard": "lifecycle",
-  "roll-doc": "lifecycle",
+  "roll-doc-audit": "observe",
   "roll-propose": "lifecycle",
 };
 

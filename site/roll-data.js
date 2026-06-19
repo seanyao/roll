@@ -172,7 +172,7 @@ window.RollData = (function () {
       ]},
       { id: "operations", title: "Diagnostics & Operations", blurb: "Observe, diagnose, document, patrol.", features: [
         { name: "$roll-debug", mono: true, desc: "Mount a browser probe, capture runtime signals, fix project-owned root causes.", badges: [], href: "diagrams/roll-debug-skill.html", external: true },
-        { name: "$roll-doc", mono: true, desc: "Scan docs, update docs/INDEX.md, detect gaps and draft from code evidence.", badges: [], href: "diagrams/roll-doc-skill.html", external: true },
+        { name: "$roll-doc-audit", mono: true, desc: "Check README, guides, site, CLI help and docs against implemented behavior; index gaps and draft from code evidence.", badges: [], href: "diagrams/roll-doc-audit-skill.html", external: true },
         { name: "$roll-doctor", mono: true, desc: "Diagnose Roll install, skills, conventions, symlinks, templates and config.", badges: [], href: "diagrams/roll-doctor-skill.html", external: true },
       ]},
       { id: "governance", title: "Coordination", blurb: "Keep humans and agents aligned.", features: [
@@ -378,7 +378,7 @@ window.RollData = (function () {
       ]},
       { id: "operations", title: "诊断与运营", blurb: "观测、诊断、文档、巡检。", features: [
         { name: "$roll-debug", mono: true, desc: "挂载浏览器探针,采集运行时信号,修项目自有根因。", badges: [], href: "diagrams/roll-debug-skill.html", external: true },
-        { name: "$roll-doc", mono: true, desc: "扫描文档、更新 docs/INDEX.md、识别缺口并基于代码证据起草。", badges: [], href: "diagrams/roll-doc-skill.html", external: true },
+        { name: "$roll-doc-audit", mono: true, desc: "核对 README、指南、网站、CLI help、文档与真实实现；索引缺口并基于代码证据起草。", badges: [], href: "diagrams/roll-doc-audit-skill.html", external: true },
         { name: "$roll-doctor", mono: true, desc: "诊断 Roll 安装、skills、约定、symlink、模板与配置。", badges: [], href: "diagrams/roll-doctor-skill.html", external: true },
       ]},
       { id: "governance", title: "协同", blurb: "让人和 agent 保持对齐。", features: [

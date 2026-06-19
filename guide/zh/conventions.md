@@ -50,7 +50,7 @@ Success Criteria: <可衡量的完成标准>
 
 `$roll-design` 在新增文档和目录时维护此表。任何进入项目的 Agent 无需扫描整棵树就能导航到权威来源。
 
-## 存量项目：`$roll-onboard` 与 `$roll-doc`
+## 存量项目：`$roll-onboard` 与 `$roll-doc-audit`
 
 对于尚无 `.roll/` 的已有代码库，入口是 `$roll-onboard`（**graft（嫁接）**
 接入模式）：扫描代码、问一组聚焦的认知 / 范围 / 隐私问题、产出
@@ -59,13 +59,14 @@ Success Criteria: <可衡量的完成标准>
 [legacy-onboarding.md](legacy-onboarding.md) 和
 [patterns/](patterns/README.md)。
 
-对于已有 `AGENTS.md` 但文档散落的项目：
+对于已有 `AGENTS.md` 但文档散落或过期的项目：
 
 ```bash
-$roll-doc
+$roll-doc-audit
 ```
 
-`roll-doc` 从已有代码推断领域结构，刷新 `Where to Look` 导航表，并标记
+`roll-doc-audit` 会核对 README、指南、网站页面、CLI help 与文档是否匹配真实实现。
+需要文档盘点时，它从已有代码推断领域结构，刷新 `Where to Look` 导航表，并标记
 文档缺口（缺少架构文档、未记录的公开 API）供 `$roll-build` 补全。
 
 ## 全局约定

@@ -96,7 +96,7 @@ backlog 行写了 Done 只是 `claimed`；交付 PR 合入 `main` 后变 `merged
 ### 按需技能
 
 - `$roll-debug` — 挂载诊断探针，追踪根因，如果可溯源则自动修复
-- `$roll-doc` — 扫描任意项目的文档缺口，生成缺失文档
+- `$roll-doc-audit` — 核对文档/网站/help 与实现；索引缺口并起草缺失文档
 - `$roll-doctor` — 诊断开发工具链：node、npm、git、AI 工具
 - `$roll-notes` — 以叙述形式记录一个开发时刻
 

@@ -104,7 +104,7 @@ anything short of that renders as drift or unknown, never a silent green.
 ### On-Demand Skills
 
 - `$roll-debug` — mount a diagnostic probe, trace root cause, auto-fix if source-traceable
-- `$roll-doc` — scan any project for doc gaps and generate missing documentation
+- `$roll-doc-audit` — check docs/site/help against implementation; index gaps and draft missing docs
 - `$roll-doctor` — diagnose the dev toolchain: node, npm, git, AI tools
 - `$roll-notes` — capture a development moment in narrative form
 

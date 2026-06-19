@@ -693,9 +693,9 @@ gitlab.com / self-hosted → check your SSH key
 # until connectivity is restored.
 ```
 
-### C10. I ran roll-doc — how do I know whether it did Phase 3a or Phase 3b?
+### C10. I ran roll-doc-audit — how do I know whether it did Phase 3a or Phase 3b?
 
-**Symptoms:** You run `$roll-doc` and want to know whether it stopped at the
+**Symptoms:** You run `$roll-doc-audit` and want to know whether it stopped at the
 directory-level fill (Phase 3a) or went on to the deep cross-directory read
 (Phase 3b).
 
@@ -725,7 +725,7 @@ If Phase 3b found nothing it prints exactly one line —
 `docs/data-flows.md` / `docs/state-machines.md` / `docs/integrations.md` /
 `docs/deployment.md` output is the tell that only Phase 3a ran. Under
 `--dry-run`, the same Phase 3b lines appear tagged `(plan)` and nothing is
-written. Full breakdown: [roll-doc.md](roll-doc.md).
+written. Full breakdown: [roll-doc-audit.md](roll-doc-audit.md).
 
 
 ---

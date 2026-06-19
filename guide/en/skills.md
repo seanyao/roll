@@ -23,15 +23,16 @@ Quickly select the right skill or tool.
 | Generate Changelog | `roll-.changelog` | Auto-triggered after successful Deploy |
 | QA test reference | `roll-.qa` | Referenced when writing tests |
 | Intent clarification | `roll-.echo` | Auto-activates when user input is vague or unclear |
-| Legacy doc automation | `roll-doc` | Scan a project, index docs, fill gaps, deep-read cross-directory topics |
+| Documentation/product audit | `roll-doc-audit` | Check README, guides, site pages, CLI help and docs against implemented behavior; optionally index docs and fill gaps |
 
-## roll-doc — Legacy Documentation Automation
+## roll-doc-audit — Documentation/Product Consistency Audit
 
-`roll-doc` runs four phases — scan/index → gap analysis → fill → report — plus
-a deep-read **Phase 3b**. Phase 3 fills directory-level gaps (each gap directory
-read in isolation, up to 20 files); Phase 3b builds a full project symbol table
-(every source file read in full, no truncation) and detects **6 cross-directory
-topics** that directory-level filling alone cannot find:
+`roll-doc-audit` first checks user-facing documentation surfaces against real
+behavior: README, guides, site pages, CLI help, tests, and source. For inventory
+work it still runs the four-phase docs pipeline — scan/index → gap analysis →
+fill → report — plus a deep-read **Phase 3b**. Phase 3 fills directory-level
+gaps; Phase 3b builds a full project symbol table and detects **6
+cross-directory topics** that directory-level filling alone cannot find:
 
 | Topic | Triggers when | Output |
 |-------|---------------|--------|
@@ -42,9 +43,9 @@ topics** that directory-level filling alone cannot find:
 | Agent entrypoint | No `AGENTS.md` and the source root has ≥ 3 subdirs | `AGENTS.md` |
 | High fan-in directory | A directory is imported by ≥ 5 source files | `<dir>/README.md` |
 
-`$roll-doc --dry-run` runs Phases 1–2 and prints the Phase 3 / 3b plan without
-writing; `$roll-doc --force` regenerates drafts even when targets already exist.
-Full guide: [roll-doc.md](roll-doc.md).
+`$roll-doc-audit --dry-run` runs Phases 1–2 and prints the Phase 3 / 3b plan without
+writing; `$roll-doc-audit --force` regenerates drafts even when targets already exist.
+Full guide: [roll-doc-audit.md](roll-doc-audit.md).
 
 ## Quick Decision Tree
 

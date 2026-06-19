@@ -13,17 +13,32 @@
  * project-local machine log (.roll/dream/cron.log, mirroring loop's FIX-139).
  */
 import { projectIdentity } from "@roll/infra";
-import {
-  buildStaticProjectGraph,
-  renderDreamStructureLog,
-  scanDreamStructure,
-  type DreamScanResult,
-} from "@roll/core";
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type AgentSpawn, realAgentSpawn } from "../runner/agent-spawn.js";
 import { readSkillBody } from "../runner/skill-body.js";
 import { gcCommand } from "./gc.js";
+
+interface DreamStructureScanArtifact {
+  schema: "dream-structure.v1";
+  generatedAt: string;
+  projectRoot: string;
+  graphStats: {
+    files: number;
+    symbols: number;
+    imports: number;
+    references: number;
+  };
+  findings: Array<unknown>;
+  suppressed: Array<unknown>;
+  errors: Array<unknown>;
+}
+
+interface DreamStructureScanModule {
+  buildStaticProjectGraph: (input: { root: string }) => unknown;
+  scanDreamStructure: (graph: unknown) => DreamStructureScanArtifact;
+  renderDreamStructureLog: (result: DreamStructureScanArtifact) => string;
+}
 
 /** Injectable seams — tests fake identity + agent spawn (no real agent runs). */
 export interface DreamRunOnceDeps {
@@ -34,7 +49,7 @@ export interface DreamRunOnceDeps {
   skillBody: (projectPath: string) => string | null;
   spawn: AgentSpawn;
   now: () => Date;
-  structureScan: (projectPath: string, generatedAt: string) => { json: DreamScanResult; log: string };
+  structureScan: (projectPath: string, generatedAt: string) => Promise<{ json: DreamStructureScanArtifact; log: string }>;
 }
 
 function realDeps(): DreamRunOnceDeps {
@@ -49,7 +64,9 @@ function realDeps(): DreamRunOnceDeps {
       }),
     spawn: realAgentSpawn,
     now: () => new Date(),
-    structureScan: (projectPath, generatedAt) => {
+    structureScan: async (projectPath, generatedAt) => {
+      const { buildStaticProjectGraph, renderDreamStructureLog, scanDreamStructure } =
+        (await import("@roll/core/dist/dream/structure-scan.js")) as DreamStructureScanModule;
       const graph = buildStaticProjectGraph({ root: projectPath });
       const result = { ...scanDreamStructure(graph), generatedAt };
       return { json: result, log: renderDreamStructureLog(result) };
@@ -94,7 +111,7 @@ export async function dreamRunOnceCommand(
   let skillBody = body;
   try {
     append(`[${stamp()}] dream structure pre-scan start\n`);
-    const preScan = deps.structureScan(id.path, deps.now().toISOString());
+    const preScan = await deps.structureScan(id.path, deps.now().toISOString());
     writeFileSync(join(dreamDir, "structure-scan.json"), `${JSON.stringify(preScan.json, null, 2)}\n`, "utf8");
     append(preScan.log);
     append(`[${stamp()}] dream structure pre-scan end findings=${preScan.json.findings.length}\n`);

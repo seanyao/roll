@@ -362,15 +362,17 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
     expect(html).toContain('data-prefilter="done"'); // spectrum click pre-sets the backlog filter
   });
 
-  it("FIX-373: Live cycle reflects TRUE current state — idle when no lane is live, last cycle as history", () => {
-    // SNAP has one running, non-stale lane → live cycle reads "running".
+  it("FIX-373: Live cycle reflects TRUE current state — running ONLY when the live stream is flowing, last cycle as history", () => {
+    // The base fixture's live feed status is "live" → a cycle is running.
     expect(html).toMatch(/data-now-section="live-cycle"[\s\S]*?运行中/);
     // CYCLES[0] is `delivered` — it must NEVER be badged "active".
     expect(html).not.toMatch(/data-now-section="live-cycle"[\s\S]*?>活跃</);
 
-    // With NO running lane the cycle goes idle + the last cycle is shown as history.
-    const idleSnap: TruthSnapshot = { ...SNAP, loop: { lanes: [{ name: "loop", running: false, mode: "cron", everyMin: 60, lastAt: "2026-06-12T23:30:00Z", nextAt: "2026-06-13T00:30:00Z" }] } };
-    const idle = render(idleSnap);
+    // The live signal is the FEED, not a scheduled lane: with lanes still
+    // "running" (plist loaded) but the live feed idle, NO cycle is running and
+    // the last cycle is shown as history (a delivered/failed last cycle, possibly
+    // hours old, must read idle — the FIX-339 bug).
+    const idle = renderWith({ liveFeed: { ...LIVE_FEED, status: "idle" } });
     expect(idle).toMatch(/data-now-section="live-cycle"[\s\S]*?(idle|空闲)/);
     expect(idle).toContain('data-now-section="live-cycle-history"');
     expect(idle).toContain("最近一次");

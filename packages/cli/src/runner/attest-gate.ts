@@ -197,6 +197,51 @@ export function findDuplicateStoryIds(worktreeCwd: string): DuplicateStoryId[] {
   return dups.sort((a, b) => a.id.localeCompare(b.id));
 }
 
+/** A story id that appears on MORE THAN ONE backlog table row. */
+export interface DuplicateBacklogStoryId {
+  id: string;
+  /** 1-based line numbers of every backlog row that carries this id. */
+  lines: number[];
+}
+
+/** The leading-cell story-id link of a backlog table row:
+ *  `| [US-FOO-1](path) | … |`. Anchored at the row start; the id must match the
+ *  same syntax {@link STORY_ID_DIR_RE} accepts (US-/FIX-/REFACTOR-/IDEA-/BUG-). */
+const BACKLOG_ROW_ID_RE =
+  /^\|\s*\[(US-[A-Z]+-\d+[a-z]?|FIX-\d+[a-z]?|REFACTOR-\d+[a-z]?|IDEA-\d+[a-z]?|BUG-\d+[a-z]?)\]/;
+
+/**
+ * FIX-340 — the BACKLOG half of the corpus lint (the spec's "…and the backlog").
+ * `.roll/backlog.md` is the single queue of record: every card is ONE row keyed
+ * by its story id (`| [ID](spec) | … | status |`). Two rows sharing an id is the
+ * same "一个 ID 一份卡" violation {@link findDuplicateStoryIds} guards in the
+ * features tree — a stale row left beside a re-filed one, or two cards racing the
+ * same id — and it makes `roll`'s "single queue, one row per id" promise a lie.
+ *
+ * Returns every id that owns >1 row, each with the 1-based line numbers, so the
+ * CI lint (`scripts/lint-story-ids.mjs`) can red and point at the exact rows to
+ * reconcile. PURE (takes the backlog text), so it is trivially unit-testable
+ * without a real backlog on disk. An id is counted at most ONCE per row line
+ * (a row only has one leading id cell).
+ */
+export function findDuplicateBacklogStoryIds(backlogText: string): DuplicateBacklogStoryId[] {
+  const rows = new Map<string, number[]>(); // id -> 1-based row line numbers
+  const lines = backlogText.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i += 1) {
+    const m = BACKLOG_ROW_ID_RE.exec(lines[i] ?? "");
+    if (m === null) continue;
+    const id = m[1] as string;
+    const seen = rows.get(id) ?? [];
+    seen.push(i + 1);
+    rows.set(id, seen);
+  }
+  const dups: DuplicateBacklogStoryId[] = [];
+  for (const [id, lineNos] of rows) {
+    if (lineNos.length > 1) dups.push({ id, lines: lineNos });
+  }
+  return dups.sort((a, b) => a.id.localeCompare(b.id));
+}
+
 /** Whether the story's spec carries an `**AC:**` checklist; null = spec not
  *  found / unreadable. Exported for the FIX-246 remediation trigger, which must
  *  share the gate's exact notion of "this delivery owes an ac-map". */

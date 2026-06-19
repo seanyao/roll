@@ -10,6 +10,7 @@
  * report (format_human) or JSON. Exit 0 when all dimensions pass, 1 when any
  * dimension has gaps — mirroring main()'s `return 0 if overall == "pass" else 1`.
  */
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import type { Dirent } from "node:fs";
 import { join } from "node:path";
@@ -204,23 +205,116 @@ function readDoneFeatures(backlogText: string): Map<string, string[]> {
   return out;
 }
 
-// ─── code dimension: check_features_catalog ──────────────────────────────────
-function checkFeaturesCatalog(projectDir: string): DimResult {
+// ─── release-delta helpers (FIX-375: validate what the release actually ships) ─
+//
+// The release delta = card ids merged to HEAD since the latest `v*` release tag
+// — exactly the content the next `roll release` will tag. The code/docs/site
+// dimensions key their delta-scoped checks off this so they validate the THING
+// BEING RELEASED, not the whole historical backlog (which would false-fail on
+// pre-card-era rows). Empty when there is no tag / git is unavailable (shallow
+// clone, fresh repo) → the delta checks no-op rather than block a release.
+const CARD_ID_RE = /\b(?:US|FIX|REFACTOR)-(?:[A-Z][A-Z0-9]*-)?\d+[a-z]?\b/g;
+
+function gitCapture(projectDir: string, args: string[]): string | null {
+  try {
+    return execFileSync("git", ["-C", projectDir, ...args], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return null;
+  }
+}
+
+function releaseDeltaCardIds(projectDir: string): Set<string> {
+  const tag = gitCapture(projectDir, ["describe", "--tags", "--abbrev=0", "--match", "v*"])?.trim();
+  if (tag === undefined || tag === "") return new Set();
+  const log = gitCapture(projectDir, ["log", `${tag}..HEAD`, "--format=%s"]);
+  if (log === null) return new Set();
+  const ids = new Set<string>();
+  for (const m of log.matchAll(CARD_ID_RE)) ids.add(m[0]);
+  return ids;
+}
+
+/** Per-id backlog facts: is the row ✅ Done, and does it carry a `#NNN` merge ref. */
+function backlogRowFacts(backlogText: string): Map<string, { done: boolean; mergeRef: boolean }> {
+  const facts = new Map<string, { done: boolean; mergeRef: boolean }>();
+  for (const line of backlogText.split("\n")) {
+    const row = /^\|\s*\[?((?:US|FIX|REFACTOR|IDEA)-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*)\]?/.exec(line);
+    if (row === null) continue;
+    const id = row[1] ?? "";
+    if (id === "") continue;
+    facts.set(id, { done: line.includes(STATUS_MARKER.done), mergeRef: /#\d+|pull\/\d+/.test(line) });
+  }
+  return facts;
+}
+
+/** The card-folder spec path for an id (`features/<epic>/<id>/spec.md`), or null. */
+function findCardSpec(projectDir: string, id: string): string | null {
+  const featuresDir = join(projectDir, ".roll", "features");
+  try {
+    for (const epic of readdirSync(featuresDir, { withFileTypes: true })) {
+      if (!epic.isDirectory()) continue;
+      const spec = join(featuresDir, epic.name, id, "spec.md");
+      if (existsSync(spec)) return spec;
+    }
+  } catch {
+    /* features/ unreadable */
+  }
+  return null;
+}
+
+/** A card opts out of changelog coverage with `changelog_exempt: <reason>` in its
+ *  spec frontmatter (a reason is required — a bare key is not an exemption). */
+function cardChangelogExempt(projectDir: string, id: string): boolean {
+  const spec = findCardSpec(projectDir, id);
+  if (spec === null) return false;
+  try {
+    return /^changelog_exempt:\s*\S.*$/m.test(readText(spec));
+  } catch {
+    return false;
+  }
+}
+
+// ─── code dimension: Done claims vs merge facts ──────────────────────────────
+export function checkFeaturesCatalog(projectDir: string): DimResult {
   const backlog = join(projectDir, ".roll", "backlog.md");
-  const features = join(projectDir, ".roll", "features.md");
-  if (!existsSync(backlog) || !existsSync(features)) return { status: "pass", gaps: [] };
-
-  const doneFeatures = readDoneFeatures(readText(backlog));
-  if (doneFeatures.size === 0) return { status: "pass", gaps: [] };
-
-  const featuresText = readText(features);
+  if (!existsSync(backlog)) return { status: "pass", gaps: [] };
+  const backlogText = readText(backlog);
   const gaps: string[] = [];
-  for (const featName of doneFeatures.keys()) {
-    const escaped = escapeRegExp(featName);
-    if (!new RegExp("(^|[\\s/])" + escaped + "([\\s/).]|$)").test(featuresText)) {
-      gaps.push(`Feature '${featName}' has Done stories but is missing from features.md catalog`);
+
+  // Legacy features.md catalog: a Done feature-group heading must appear in the
+  // catalog. (Backlog rows live in tables now, so `### Feature:` headings are
+  // usually absent — this loop then no-ops; the delta check below carries the
+  // dimension. Kept for projects that still use the heading style.)
+  const features = join(projectDir, ".roll", "features.md");
+  if (existsSync(features)) {
+    const featuresText = readText(features);
+    for (const featName of readDoneFeatures(backlogText).keys()) {
+      const escaped = escapeRegExp(featName);
+      if (!new RegExp("(^|[\\s/])" + escaped + "([\\s/).]|$)").test(featuresText)) {
+        gaps.push(`Feature '${featName}' has Done stories but is missing from features.md catalog`);
+      }
     }
   }
+
+  // FIX-375: the real Done↔merge check the dimension claims. Every card merged
+  // to HEAD since the latest release tag (the release delta) must own a ✅ Done
+  // backlog row carrying a merge ref (#NNN / pull/NNN). A delta card whose row
+  // is still Todo/Hold (merged but unclaimed) or Done with no merge ref
+  // (unverifiable claim) is drift. Scoped to ids that own a row — a bare
+  // commit-subject mention of a non-card id is ignored. No-ops without git/tag.
+  const facts = backlogRowFacts(backlogText);
+  for (const id of releaseDeltaCardIds(projectDir)) {
+    const f = facts.get(id);
+    if (f === undefined) continue;
+    if (!f.done) {
+      gaps.push(`${id} was merged since the latest release tag but its backlog row is not ✅ Done — claim/merge drift`);
+    } else if (!f.mergeRef) {
+      gaps.push(`${id} is ✅ Done in the release delta but its row carries no merge ref (#NNN) — unverifiable Done claim`);
+    }
+  }
+
   return { status: gaps.length === 0 ? "pass" : "fail", gaps };
 }
 
@@ -303,14 +397,33 @@ function checkCards(projectDir: string): DimResult {
   return result;
 }
 
-// ─── docs dimension: active command surface drift ───────────────────────────
-function checkDocs(projectDir: string): DimResult {
+// ─── docs dimension: command-surface drift + changelog coverage ──────────────
+export function checkDocs(projectDir: string): DimResult {
   const gaps = checkTopLevelCommands(activeDocsFiles(projectDir), DOC_RETIRED_TOP_LEVEL_COMMANDS);
+
+  // FIX-375: changelog coverage of the release delta. Every card merged since
+  // the latest tag must be accounted for in CHANGELOG.md — either a real entry
+  // (its id appears) or an explicit `changelog_exempt: <reason>` in its spec.
+  // This is the check that stops a user-facing fix/feature from shipping with no
+  // release note (the gap that motivated FIX-375): the choice is forced explicit
+  // per card, no silent omissions. Base-id match (strip a trailing letter) so a
+  // range note like "(FIX-356 / 356a-d)" covers FIX-356c/FIX-356d. No-ops
+  // without git/tag or CHANGELOG.md.
+  const changelogPath = join(projectDir, "CHANGELOG.md");
+  if (existsSync(changelogPath)) {
+    const changelog = readText(changelogPath);
+    for (const id of releaseDeltaCardIds(projectDir)) {
+      const base = id.replace(/[a-z]$/, "");
+      if (changelog.includes(id) || changelog.includes(base) || cardChangelogExempt(projectDir, id)) continue;
+      gaps.push(`Release-delta card ${id} has no CHANGELOG entry and no changelog_exempt: marker — it would ship undocumented`);
+    }
+  }
+
   if (gaps.length > 0) return { status: "fail", gaps };
   return {
     status: "pass",
     gaps: [],
-    note: "retired top-level command scan active; broader docs coverage remains US-CONSIST-002",
+    note: "retired-command scan + release-delta changelog coverage active",
   };
 }
 
@@ -344,13 +457,29 @@ function siteTokens(name: string): Set<string> {
   return tokens;
 }
 
-function checkSite(projectDir: string): DimResult {
+export function checkSite(projectDir: string): DimResult {
   const gaps = checkTopLevelCommands(activeSiteFiles(projectDir), SITE_HIDDEN_TOP_LEVEL_COMMANDS);
   const siteJs = join(projectDir, "site", "roll-data.js");
   const backlog = join(projectDir, ".roll", "backlog.md");
   if (!existsSync(siteJs) || !existsSync(backlog)) return { status: gaps.length === 0 ? "pass" : "fail", gaps };
 
   const siteText = readText(siteJs);
+
+  // FIX-375: no dangling guide references. Every `guide/<lang>/<file>.md` path
+  // the site links must exist on disk — catches rename-leftovers (a guide is
+  // renamed/moved but the site still links the old path) that ship a dead
+  // "read the manual" link. Deterministic; the under-coverage judgment (a guide
+  // that exists but is appropriately/not linked) stays with `$roll-doc-audit`.
+  const seenGuideRefs = new Set<string>();
+  for (const m of siteText.matchAll(/guide\/[a-z]{2}\/[A-Za-z0-9._/-]+?\.md/g)) {
+    const rel = m[0];
+    if (seenGuideRefs.has(rel)) continue;
+    seenGuideRefs.add(rel);
+    if (!existsSync(join(projectDir, rel))) {
+      gaps.push(`site/roll-data.js links a guide that does not exist: ${rel}`);
+    }
+  }
+
   const siteFeatures = new Set<string>();
   for (const m of siteText.matchAll(/\bname:\s*"([^"]+)"/g)) {
     const name = (m[1] ?? "").trim();
@@ -368,7 +497,9 @@ function checkSite(projectDir: string): DimResult {
   for (const name of siteFeatures) for (const tok of siteTokens(name)) allSiteTokens.add(tok);
 
   const doneFeatures = readDoneFeatures(readText(backlog));
-  if (doneFeatures.size === 0) return { status: "pass", gaps: [] };
+  // Preserve any gaps already found (retired-command scan, dangling guide refs)
+  // even when there are no `### Feature:` headings to token-match (FIX-375).
+  if (doneFeatures.size === 0) return { status: gaps.length === 0 ? "pass" : "fail", gaps };
 
   for (const featName of doneFeatures.keys()) {
     if (SITE_INTERNAL_FEATURES.has(featName)) continue;

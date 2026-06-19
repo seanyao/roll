@@ -9,11 +9,12 @@
  * equivalent, and --verbose reveals tier C.
  */
 import { execFileSync } from "node:child_process";
+import { PassThrough } from "node:stream";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { cycleRow, fmtModel, renderState } from "../src/render.js";
-import { formatStream, renderSignal, tierVisible } from "../src/commands/loop-fmt.js";
+import { formatStream, renderSignal, streamThroughRenderer, tierVisible } from "../src/commands/loop-fmt.js";
 import { defaultSmokeCmd } from "../src/commands/loop-maint.js";
 
 const CLI_BIN = join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "roll.js");
@@ -45,6 +46,37 @@ describe("renderSignal", () => {
     const s = renderSignal({ ts: 0, cycleId: "c", seg: "ci", kind: "heartbeat", tier: "A", summary: "…still in ci · 50s · last: roll ci" });
     expect(s).toContain("still in ci");
     expect(s).toContain("last: roll ci");
+  });
+});
+
+describe("streamThroughRenderer — status heartbeat", () => {
+  it("renders event-backed status heartbeats and suppresses unchanged duplicates", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const chunks: string[] = [];
+    output.on("data", (chunk) => chunks.push(String(chunk)));
+
+    let calls = 0;
+    const done = streamThroughRenderer(input, output, {
+      agent: "claude",
+      verbose: false,
+      gapMs: 10,
+      status: () => {
+        calls += 1;
+        return calls < 3
+          ? "status  phase execute · quiet 5m · US-LOOP-046 · codex · cycle c1 · 1 TCR · last building"
+          : "status  phase execute · quiet 6m · US-LOOP-046 · codex · cycle c1 · 1 TCR · last building";
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 45));
+    input.end();
+    await done;
+
+    const lines = chunks.join("").trim().split("\n").filter((line) => line !== "");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("quiet 5m");
+    expect(lines[1]).toContain("quiet 6m");
   });
 });
 

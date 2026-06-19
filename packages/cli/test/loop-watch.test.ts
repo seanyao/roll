@@ -37,6 +37,13 @@ const CYCLE_STREAM = [
   JSON.stringify({ type: "result", subtype: "success", duration_ms: 8000, total_cost_usd: 0.03 }),
 ];
 
+const EVENT_STREAM = [
+  JSON.stringify({ type: "cycle:start", cycleId: "20260619-046-alpha", storyId: "US-LOOP-046", agent: "codex", model: "gpt-5", ts: 1_800_000_000_000 }),
+  JSON.stringify({ type: "cycle:phase", cycleId: "20260619-046-alpha", phase: "execute", ts: 1_800_000_060_000 }),
+  JSON.stringify({ type: "cycle:tcr", cycleId: "20260619-046-alpha", commitHash: "abcdef123456", message: "tcr: status summary", ts: 1_800_000_120_000 }),
+  JSON.stringify({ type: "cycle:stdout", cycleId: "20260619-046-alpha", data: "heartbeat: building status layer", ts: 1_800_000_180_000 }),
+].join("\n");
+
 interface Recorder {
   deps: LoopWatchDeps;
   emitted: string[];
@@ -65,6 +72,7 @@ function makeDeps(overrides: Partial<LoopWatchDeps> & { state?: GoTmuxState } = 
   rec.deps = {
     identity: overrides.identity ?? (async () => ({ path: "/proj", slug: "proj-abc123" })),
     exists: overrides.exists ?? (() => true),
+    readText: overrides.readText ?? (() => EVENT_STREAM),
     follow: overrides.follow ?? ((livePath) => {
       rec.followedPath = livePath;
       return {
@@ -189,6 +197,68 @@ describe("roll loop watch — data sourcing (AC1)", () => {
     expect(checked).toEqual(["/proj/.roll/loop/events.ndjson"]);
     expect(rec.followedPath).toBeNull();
     expect(rec.emitted.join("\n")).toMatch(/no event stream/i);
+  });
+});
+
+describe("roll loop watch — default status layer (US-LOOP-046)", () => {
+  it("prints a current status summary before following live.log", async () => {
+    const rec = makeDeps();
+    const code = await loopWatchCommand([], rec.deps);
+    expect(code).toBe(0);
+    expect(rec.followedPath).toBe("/proj/.roll/loop/live.log");
+    const status = rec.emitted.find((line) => line.startsWith("status  "));
+    expect(status).toContain("phase execute");
+    expect(status).toContain("quiet");
+    expect(status).toContain("US-LOOP-046");
+    expect(status).toContain("codex");
+    expect(status).toContain("cycle 20260619-046");
+    expect(status).toContain("1 TCR");
+    expect(status).toContain("last building status layer");
+    expect(status).toContain("outcome unknown/no end event");
+  });
+
+  it("reports a known cycle outcome when an end event is present", async () => {
+    const rec = makeDeps({
+      readText: () =>
+        [
+          EVENT_STREAM,
+          JSON.stringify({ type: "cycle:end", cycleId: "20260619-046-alpha", outcome: "delivered", cost: { usd: 0.2 }, ts: 1_800_000_240_000 }),
+        ].join("\n"),
+    });
+    await loopWatchCommand([], rec.deps);
+    expect(rec.emitted.find((line) => line.startsWith("status  "))).toContain("outcome delivered");
+  });
+
+  it("degrades to live.log-only when events.ndjson is missing", async () => {
+    const rec = makeDeps({
+      exists: (path) => path.endsWith("live.log"),
+    });
+    const code = await loopWatchCommand([], rec.deps);
+    expect(code).toBe(0);
+    expect(rec.followedPath).toBe("/proj/.roll/loop/live.log");
+    expect(rec.emitted.join("\n")).toContain("no events.ndjson yet - live.log only");
+  });
+
+  it("degrades to live.log-only when events.ndjson is malformed", async () => {
+    const rec = makeDeps({ readText: () => "{not json\n" });
+    const code = await loopWatchCommand([], rec.deps);
+    expect(code).toBe(0);
+    expect(rec.followedPath).toBe("/proj/.roll/loop/live.log");
+    expect(rec.emitted.join("\n")).toContain("event summary unavailable - live.log only");
+  });
+
+  it("updates the status snapshot as new event rows are present", async () => {
+    const rec = makeDeps({
+      readText: () =>
+        [
+          EVENT_STREAM,
+          JSON.stringify({ type: "cycle:tcr", cycleId: "20260619-046-alpha", commitHash: "123456789abc", message: "tcr: second", ts: 1_800_000_240_000 }),
+        ].join("\n"),
+    });
+    await loopWatchCommand([], rec.deps);
+    const status = rec.emitted.find((line) => line.startsWith("status  "));
+    expect(status).toContain("2 TCR");
+    expect(status).toContain("last tcr 123456789 tcr: second");
   });
 });
 

@@ -35,6 +35,7 @@ export * from "./loop/self-downgrade.js";
 export * from "./loop/signals.js";
 export * from "./loop/transcript.js";
 export * from "./loop/watch-render.js";
+export * from "./loop/watch-status.js";
 export * from "./policy/engine.js";
 export * from "./policy/self-tuning.js";
 export * from "./reconcile/engine.js";

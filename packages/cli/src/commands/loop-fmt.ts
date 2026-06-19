@@ -149,15 +149,24 @@ function hms(): string {
 export async function streamThroughRenderer(
   input: Readable,
   out: Writable,
-  opts: { agent: string; verbose: boolean; gapMs?: number },
+  opts: { agent: string; verbose: boolean; gapMs?: number; status?: () => string | null },
 ): Promise<void> {
   const norm = normalizerFor(opts.agent);
   const st = newNormalizerState();
   const gapMs = opts.gapMs ?? DEFAULT_HEARTBEAT_GAP_MS;
+  let lastStatus: string | null = null;
   const write = (sig: ActivitySignal): void => {
     if (tierVisible(sig.tier, opts.verbose)) out.write(renderSignal(sig, { ts: hms() }) + "\n");
   };
   const beat = setInterval(() => {
+    const status = opts.status?.() ?? null;
+    if (status !== null) {
+      if (status !== lastStatus) {
+        out.write(`${hms()}  ${status}\n`);
+        lastStatus = status;
+      }
+      return;
+    }
     for (const sig of maybeHeartbeat(st, Date.now(), gapMs)) write(sig);
   }, Math.min(gapMs, 15_000));
   beat.unref?.();

@@ -25,10 +25,10 @@
  */
 import type { Readable } from "node:stream";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { renderCompactWatchEvent, watchRenderEventFromLine } from "@roll/core";
+import { renderCompactWatchEvent, renderWatchStatusFromEventLines, watchRenderEventFromLine } from "@roll/core";
 import { projectIdentity } from "@roll/infra";
 import { renderState } from "../render.js";
 import { streamThroughRenderer } from "./loop-fmt.js";
@@ -157,11 +157,13 @@ export interface LoopWatchDeps {
   identity: () => Promise<{ path: string; slug: string }>;
   /** Does a path exist on disk? */
   exists: (path: string) => boolean;
+  /** Read a small text snapshot without mutating loop state. */
+  readText: (path: string) => string | null;
   /** Open a follow read of live.log and return its stdout stream + a stopper.
    *  READ-ONLY by contract: it only reads the file. */
   follow: (livePath: string, sinceLines: number) => { stream: Readable; stop: () => void };
   /** Run the renderer over a stream (default {@link streamThroughRenderer}). */
-  render: (input: Readable, opts: { agent: string; verbose: boolean }) => Promise<void>;
+  render: (input: Readable, opts: { agent: string; verbose: boolean; status?: () => string | null }) => Promise<void>;
   /** Render event-log modes over a stream. */
   renderEvents: (input: Readable, opts: { raw: boolean }) => Promise<void>;
   /** Probe the tmux session/window state for a slug. */
@@ -214,6 +216,13 @@ function realDeps(): LoopWatchDeps {
       return { path: id.path, slug: id.slug };
     },
     exists: (p) => existsSync(p),
+    readText: (p) => {
+      try {
+        return readFileSync(p, "utf8");
+      } catch {
+        return null;
+      }
+    },
     follow: realFollow,
     render: (input, opts) => streamThroughRenderer(input, process.stdout, opts),
     renderEvents: streamEvents,
@@ -274,6 +283,19 @@ function attachToWatchWindow(projectPath: string, slug: string, deps: LoopWatchD
   return 0;
 }
 
+function statusSnapshot(eventsPath: string, deps: LoopWatchDeps): string {
+  if (!deps.exists(eventsPath)) {
+    return `status  no events.ndjson yet - live.log only (${eventsPath})`;
+  }
+  const text = deps.readText(eventsPath);
+  const status = text === null ? null : renderWatchStatusFromEventLines(text.split(/\r?\n/), Date.now());
+  return status ?? `status  event summary unavailable - live.log only (${eventsPath})`;
+}
+
+function emitStatusSnapshot(eventsPath: string, deps: LoopWatchDeps): void {
+  deps.emit(statusSnapshot(eventsPath, deps));
+}
+
 /** The `roll loop watch` entry. */
 export async function loopWatchCommand(args: string[], deps: LoopWatchDeps = realDeps()): Promise<number> {
   if (args.includes("--help") || args.includes("-h")) {
@@ -310,13 +332,16 @@ export async function loopWatchCommand(args: string[], deps: LoopWatchDeps = rea
   }
 
   const agent = (process.env["ROLL_LOOP_AGENT"] ?? "claude").trim() || "claude";
+  const eventsPath = join(rt, "events.ndjson");
+  const status = !opts.events && !opts.rawEvents ? () => statusSnapshot(eventsPath, deps) : undefined;
+  if (status !== undefined) emitStatusSnapshot(eventsPath, deps);
   const { stream, stop } = deps.follow(watchPath, opts.sinceLines);
   // Ctrl-C ends the VIEW only (read-only): stop the follow, never the loop.
   const onSigint = (): void => stop();
   process.on("SIGINT", onSigint);
   try {
     if (opts.events || opts.rawEvents) await deps.renderEvents(stream, { raw: opts.rawEvents });
-    else await deps.render(stream, { agent, verbose: opts.verbose });
+    else await deps.render(stream, { agent, verbose: opts.verbose, status });
   } finally {
     process.removeListener("SIGINT", onSigint);
     stop();

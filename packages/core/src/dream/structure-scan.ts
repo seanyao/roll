@@ -127,6 +127,7 @@ export interface DreamStructurePolicy {
 interface ExportDecl {
   node: ts.Node;
   name: string;
+  nameStart: number;
   kind: SymbolNode["kind"];
   file: string;
   fileName: string;
@@ -363,6 +364,7 @@ function exportedDeclarations(ctx: ProgramContext, sourceFile: ts.SourceFile): E
       declarations.push({
         node,
         name: named.name,
+        nameStart: named.nameStart,
         kind: named.kind,
         file,
         fileName: sourceFile.fileName,
@@ -379,17 +381,26 @@ function exportedDeclarations(ctx: ProgramContext, sourceFile: ts.SourceFile): E
 
 function declarationName(
   node: ts.Node,
-): { name: string; kind: SymbolNode["kind"]; typeOnly: boolean } | undefined {
-  if (ts.isFunctionDeclaration(node) && node.name) return { name: node.name.text, kind: "function", typeOnly: false };
-  if (ts.isClassDeclaration(node) && node.name) return { name: node.name.text, kind: "class", typeOnly: false };
-  if (ts.isInterfaceDeclaration(node)) return { name: node.name.text, kind: "interface", typeOnly: true };
-  if (ts.isTypeAliasDeclaration(node)) return { name: node.name.text, kind: "type", typeOnly: true };
-  if (ts.isEnumDeclaration(node)) return { name: node.name.text, kind: "enum", typeOnly: false };
+): { name: string; nameStart: number; kind: SymbolNode["kind"]; typeOnly: boolean } | undefined {
+  if (ts.isFunctionDeclaration(node) && node.name) return named(node.name, "function", false);
+  if (ts.isClassDeclaration(node) && node.name) return named(node.name, "class", false);
+  if (ts.isInterfaceDeclaration(node)) return named(node.name, "interface", true);
+  if (ts.isTypeAliasDeclaration(node)) return named(node.name, "type", true);
+  if (ts.isEnumDeclaration(node)) return named(node.name, "enum", false);
   if (ts.isVariableStatement(node) && hasExportModifier(node)) {
     const first = node.declarationList.declarations[0];
-    if (first && ts.isIdentifier(first.name)) return { name: first.name.text, kind: "const", typeOnly: false };
+    if (first && ts.isIdentifier(first.name)) return named(first.name, "const", false);
   }
   return undefined;
+}
+
+function named(identifier: ts.Identifier, kind: SymbolNode["kind"], typeOnly: boolean): {
+  name: string;
+  nameStart: number;
+  kind: SymbolNode["kind"];
+  typeOnly: boolean;
+} {
+  return { name: identifier.text, nameStart: spanOf(identifier).start, kind, typeOnly };
 }
 
 function hasExportModifier(node: ts.Node): boolean {
@@ -459,7 +470,7 @@ function referenceEdges(
 ): ReferenceEdge[] {
   const symbolId = symbolByFileName.get(`${decl.file}:${decl.name}`);
   if (symbolId === undefined) return [];
-  const refs = languageService.findReferences(decl.fileName, spanOf(decl.node).start) ?? [];
+  const refs = languageService.findReferences(decl.fileName, decl.nameStart) ?? [];
   return refs.flatMap((ref) =>
     ref.references.map((entry) => ({
       fromFile: normalizePath(root, entry.fileName),

@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildPairScorePrompt, enabledPairingStages, reviewTimeoutMs, runPairing, type PairEvent, type RunPairingDeps } from "../src/runner/pairing-gate.js";
+import { buildDesignScorePrompt, buildPairScorePrompt, enabledPairingStages, reviewTimeoutMs, runPairing, type PairEvent, type RunPairingDeps } from "../src/runner/pairing-gate.js";
 
 function project(yaml: string | null): { dir: string; rt: string } {
   const dir = mkdtempSync(join(tmpdir(), "roll-pair-"));
@@ -518,6 +518,88 @@ describe("runScorePairing — US-PAIR-009", () => {
     expect(r.status).toBe("scored");
     expect(r.peer).toBe("claude");
     expect(tried).toEqual(["claude"]); // exactly one spawn — no empty hetero round burned a probe
+  });
+
+  // ── FIX-344: the design score-stage label (roll-design has no loop cycle) ────
+  it("FIX-344: scoreStage='design' stamps the design label on event + session-id + evidence file", async () => {
+    const { dir, rt } = project(SCORE_CFG);
+    const { d, events } = scoreDeps({ scoreStage: "design" });
+    const r = await runScorePairing(dir, rt, "c1", "claude", "US-DSGN-001", "roll-design", "design output summary", d);
+    expect(r.status).toBe("scored");
+    // AC1: a real peer Review Score note (pair provenance, fresh session id),
+    // NOT the design agent grading itself.
+    const notes = readStoryReviewScores(dir, "US-DSGN-001");
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.scoring).toBe("pair");
+    expect(notes[0]?.skill).toBe("roll-design");
+    expect(notes[0]?.scoredBy).toBeDefined();
+    expect(notes[0]?.sessionId).toBe(r.sessionId);
+    // AC1 observability: the session-id prefix + the pair:score event carry stage=design.
+    expect(r.sessionId).toContain(":design:");
+    const scoreEvents = events.filter((e) => e.type === "pair:score") as Extract<PairEvent, { type: "pair:score" }>[];
+    expect(scoreEvents).toHaveLength(1);
+    expect(scoreEvents[0]?.stage).toBe("design");
+    expect((events.filter((e) => e.type === "pair:selected") as Extract<PairEvent, { type: "pair:selected" }>[])[0]?.stage).toBe("design");
+    // evidence lands in the design namespace (not the build cycle's .score.pair.json).
+    const ev = JSON.parse(readFileSync(join(rt, "peer", "cycle-c1.design.pair.json"), "utf8"));
+    expect(ev.stage).toBe("design");
+  });
+
+  it("FIX-344: design score is INDEPENDENT — reviewer session id is never the design agent's own session", async () => {
+    // AC3: the design agent triggers but NEVER scores its own output. The session
+    // id on the note is the reviewer's freshly-minted session, distinct from the
+    // working (design) agent — independence is verifiable, not asserted.
+    const { dir, rt } = project(SCORE_CFG);
+    const { d } = scoreDeps({ scoreStage: "design" });
+    const r = await runScorePairing(dir, rt, "c1", "claude", "US-DSGN-002", "roll-design", "summary", d);
+    expect(r.status).toBe("scored");
+    expect(r.sessionId).toMatch(/^c1:design:[a-z]+:a\d+:\d+$/); // reviewer's fresh session, cycle-scoped
+  });
+
+  it("FIX-344: no scorer for a design output → fail-loud none-available, NO note (AC2)", async () => {
+    const { dir, rt } = project(SCORE_CFG);
+    const { d, events } = scoreDeps({ scoreStage: "design", installed: [] });
+    const r = await runScorePairing(dir, rt, "c1", "claude", "US-DSGN-003", "roll-design", "summary", d);
+    expect(r.status).toBe("none-available");
+    // the absence is audited as a design-stage event, and NO synthesized score is written.
+    expect((events[0] as Extract<PairEvent, { type: "pair:none-available" }>).stage).toBe("design");
+    expect(readStoryReviewScores(dir, "US-DSGN-003")).toHaveLength(0);
+  });
+
+  it("FIX-344: design scorePeer flakes across the bounded retry → timeout, BLOCKS, no design note (AC2)", async () => {
+    const { dir, rt } = project(SCORE_CFG);
+    const { d } = scoreDeps({ scoreStage: "design", scorePeer: async () => null });
+    const r = await runScorePairing(dir, rt, "c1", "claude", "US-DSGN-004", "roll-design", "summary", d);
+    expect(r.status).toBe("timeout");
+    expect(existsSync(join(rt, "peer", "cycle-c1.design.pair.json"))).toBe(false);
+    expect(readStoryReviewScores(dir, "US-DSGN-004")).toHaveLength(0); // no honest score → no note
+  });
+
+  it("FIX-344: default scoreStage stays 'score' (build/fix path unchanged)", async () => {
+    const { dir, rt } = project(SCORE_CFG);
+    const { d, events } = scoreDeps(); // no scoreStage override
+    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-009", "roll-build", "s", d);
+    expect(r.status).toBe("scored");
+    expect(r.sessionId).toContain(":score:");
+    expect((events.filter((e) => e.type === "pair:score") as Extract<PairEvent, { type: "pair:score" }>[])[0]?.stage).toBe("score");
+  });
+});
+
+describe("buildDesignScorePrompt — FIX-344 grades DESIGN quality, not code", () => {
+  it("frames a DESIGN review (INVEST / visual-AC / deliverable / domain) and shares the reply contract", () => {
+    const p = buildDesignScorePrompt("Story: US-DSGN-001\nGoal: login feature\nSpecs: ...");
+    // grades design, not a diff
+    expect(p).toContain("DESIGN");
+    expect(p).toMatch(/INVEST/);
+    expect(p).toMatch(/visual-AC|visual-evidence/i);
+    expect(p).toMatch(/deliverable/i);
+    expect(p).not.toContain("PAIRING scorer"); // NOT the code-delivery rubric
+    expect(p).toMatch(/NOT code/); // it grades design, explicitly not a diff
+    // shared SCORE/VERDICT/RATIONALE contract so parsePairScoreOutput works on the reply
+    expect(p).toContain("SCORE:");
+    expect(p).toContain("VERDICT: good|ok|regression");
+    expect(p).toContain("RATIONALE:");
+    expect(p).toContain("US-DSGN-001"); // the summary is embedded
   });
 });
 

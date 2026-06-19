@@ -67,7 +67,7 @@ export interface PairReview {
 export type PairEvent =
   | { type: "pair:selected"; cycleId: string; workingAgent: string; peer: string; stage: string; timeoutMs?: number; ts: number }
   | { type: "pair:verdict"; cycleId: string; peer: string; verdict: PairReview["verdict"]; findings: number; cost: number; stage: string; ts: number }
-  | { type: "pair:score"; cycleId: string; peer: string; score: number; verdict: PairScore["verdict"]; cost: number; stage: "score"; ts: number }
+  | { type: "pair:score"; cycleId: string; peer: string; score: number; verdict: PairScore["verdict"]; cost: number; stage: "score" | "design"; ts: number }
   | { type: "pair:none-available"; cycleId: string; stage: string; reason: string; ts: number };
 
 export interface RunPairingDeps {
@@ -301,6 +301,18 @@ export interface RunScorePairingDeps {
   epsilon?: number;
   /** Note-writer seam (tests); defaults to {@link writeReviewScoreNote}. */
   writeNote?: typeof writeReviewScoreNote;
+  /**
+   * FIX-344 — the label the `pair:score` event, the reviewer session-id prefix,
+   * and the evidence filename carry. Defaults to `"score"` (a build/fix loop
+   * cycle's Review Score). `"design"` marks the roll-design peer Review Score
+   * path: roll-design has NO loop cycle, so its independent score is triggered at
+   * skill wrap-up and stamped `stage: "design"` so it is distinguishable in the
+   * shared event stream. Candidate SELECTION is unchanged — both routes use the
+   * mandatory same-vendor-fallback `"score"` selector (independence = a fresh
+   * separately-spawned session, never vendor heterogeneity), so the design path
+   * is NOT a new selection mode, only a distinct label + scoring prompt.
+   */
+  scoreStage?: "score" | "design";
 }
 
 export interface RunScorePairingResult {
@@ -360,6 +372,13 @@ export async function runScorePairing(
   deps: RunScorePairingDeps,
 ): Promise<RunScorePairingResult> {
   try {
+    // FIX-344: the OBSERVABILITY label (event/session-id/evidence file). Defaults
+    // to "score" (a loop cycle's Review Score); "design" marks the no-cycle
+    // roll-design path. Candidate SELECTION below is unchanged — it always uses
+    // the mandatory "score" selector, so the design path reuses FIX-343's
+    // independence machinery verbatim (fresh separate session, same-vendor
+    // fallback), only the label differs.
+    const scoreStage = deps.scoreStage ?? "score";
     // FIX-343 (step ④): MANDATORY — read pairing.yaml only for history/epsilon
     // nuance; its enabled/stages flags NO LONGER gate scoring. The "score"
     // selector ignores cfg gating anyway (it is stage-aware), so a synthesized
@@ -381,7 +400,7 @@ export async function runScorePairing(
     });
     if (candidates.length === 0) {
       // Fail-loud: no scorer to spawn a fresh session of → BLOCK (no fallback).
-      deps.event({ type: "pair:none-available", cycleId, stage: "score", reason: "no scorer available to spawn a fresh review session", ts: deps.now() });
+      deps.event({ type: "pair:none-available", cycleId, stage: scoreStage, reason: "no scorer available to spawn a fresh review session", ts: deps.now() });
       return { status: "none-available" };
     }
 
@@ -427,8 +446,12 @@ export async function runScorePairing(
       for (let attempt = 1; attempt <= SCORE_MAX_ATTEMPTS && w === null; attempt++) {
         const probes = pool.map(async (candidate) => {
           const peer = candidate;
-          const sessionId = `${cycleId}:score:${peer}:a${attempt}:${deps.now()}`;
-          deps.event({ type: "pair:selected", cycleId, workingAgent, peer, stage: "score", timeoutMs, ts: deps.now() });
+          // FIX-344: the session-id prefix carries the score-stage label so a
+          // design score's session is `${cycleId}:design:...` (distinguishable
+          // from a cycle's `${cycleId}:score:...`); both remain a unique,
+          // verifiably-independent fresh session id on the note.
+          const sessionId = `${cycleId}:${scoreStage}:${peer}:a${attempt}:${deps.now()}`;
+          deps.event({ type: "pair:selected", cycleId, workingAgent, peer, stage: scoreStage, timeoutMs, ts: deps.now() });
           const scored = await deps.scorePeer(peer, summary, timeoutMs);
           return scored === null ? null : { peer, scored, sessionId };
         });
@@ -469,14 +492,14 @@ export async function runScorePairing(
     });
 
     try {
-      const path = evidencePath(runtimeDir, cycleId, "score");
+      const path = evidencePath(runtimeDir, cycleId, scoreStage);
       mkdirSync(join(runtimeDir, "peer"), { recursive: true });
       writeFileSync(
         path,
-        JSON.stringify({ cycleId, workingAgent, peer, stage: "score", score: scored.score, verdict: scored.verdict, rationale: scored.rationale, cost: scored.cost, sessionId }, null, 2),
+        JSON.stringify({ cycleId, workingAgent, peer, stage: scoreStage, score: scored.score, verdict: scored.verdict, rationale: scored.rationale, cost: scored.cost, sessionId }, null, 2),
         "utf8",
       );
-      deps.event({ type: "pair:score", cycleId, peer, score: scored.score, verdict: scored.verdict, cost: scored.cost, stage: "score", ts: deps.now() });
+      deps.event({ type: "pair:score", cycleId, peer, score: scored.score, verdict: scored.verdict, cost: scored.cost, stage: scoreStage, ts: deps.now() });
     } catch {
       /* evidence/event are auxiliaries — the note is the product */
     }
@@ -654,6 +677,37 @@ export function buildPairScorePrompt(summary: string): string {
     `asked for, as a regression. ` +
     `Reply with exactly one "SCORE: <integer 1..10>" line, one "VERDICT: good|ok|regression" line, ` +
     `and one "RATIONALE: <one sentence>" line.\n\nDELIVERY:\n` +
+    summary
+  );
+}
+
+/**
+ * FIX-344 — the DESIGN score-stage prompt. roll-design produces backlog/spec
+ * artifacts (INVEST stories), NOT a code diff, so the scorer grades DESIGN
+ * quality, not code: INVEST story split, visual-AC completeness (every
+ * user-visible story carries a visual-evidence AC or an honest `screenshot_exempt`
+ * reason), deliverable declarations (`deliverable_url` points at the real product
+ * surface, not the card's own dossier), and domain/spec consistency (backlog rows
+ * match spec files; no jump from idea straight to stories without a worked design
+ * sample). The SAME structured reply contract as {@link buildPairScorePrompt} so
+ * {@link parsePairScoreOutput} parses both identically and the note shape is shared.
+ */
+export function buildDesignScorePrompt(summary: string): string {
+  return (
+    `You are an independent DESIGN Reviewer. A different agent produced the design output below ` +
+    `(backlog rows + story specs from a roll-design session), NOT code. ` +
+    `Grade the DESIGN quality honestly — NOT code, there is no diff to read. Judge: ` +
+    `(1) INVEST story split (each story independent, negotiable, valuable, estimable, small, testable; ` +
+    `right granularity — not a mega-story, not noise); ` +
+    `(2) visual-AC completeness (every user-visible story carries a visual-evidence AC, or an honest ` +
+    `\`screenshot_exempt: <reason>\` — a naked exemption with no reason is a defect); ` +
+    `(3) deliverable declarations (\`deliverable_url\`/\`screenshot_url\` points at the REAL product surface, ` +
+    `never the card's own dossier/report page); ` +
+    `(4) domain & spec consistency (backlog index rows match the spec files; a concrete worked design ` +
+    `precedes decomposition — no idea-straight-to-stories with shallow specs). ` +
+    `Grade against the design's STATED GOAL shown on the "Goal:" line if present. ` +
+    `Reply with exactly one "SCORE: <integer 1..10>" line, one "VERDICT: good|ok|regression" line, ` +
+    `and one "RATIONALE: <one sentence>" line.\n\nDESIGN OUTPUT:\n` +
     summary
   );
 }

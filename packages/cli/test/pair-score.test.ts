@@ -157,3 +157,62 @@ describe("codex pair-review fixes — US-PAIR-010", () => {
     expect(latest).toContain("fallback-reason: pair timed out");
   });
 });
+
+describe("roll pair score --design — FIX-344 (design output peer Review Score)", () => {
+  it("AC1: --design scores the design output via a fresh-session peer, writes a roll-design pair note", async () => {
+    const p = project(SCORE_CFG);
+    const r = await run(p, ["US-DSGN-001", "--summary", "INVEST split + specs", "--design"]);
+    expect(r.code).toBe(0);
+    const notes = readStoryReviewScores(p, "US-DSGN-001");
+    expect(notes).toHaveLength(1);
+    const text = readFileSync(notes[0]?.sourcePath ?? "", "utf8");
+    // AC1: pair provenance, fresh session id, default skill roll-design.
+    expect(text).toContain("scoring: pair");
+    expect(text).toContain("skill: roll-design");
+    expect(text).toMatch(/scored-by: (claude|kimi)/);
+    expect(text).toMatch(/session-id: .+:design:/); // the design stage label on the session id
+  });
+
+  it("AC1: --design grades DESIGN quality (the design prompt is sent to the reviewer, not the code prompt)", async () => {
+    const p = project(SCORE_CFG);
+    let seenPrompt = "";
+    await run(p, ["US-DSGN-001", "--summary", "design output", "--design"], {
+      spawnReviewer: async (input) => {
+        seenPrompt = input.prompt;
+        return { status: "ok" as const, stdout: "SCORE: 8\nVERDICT: good\nRATIONALE: solid INVEST split\n" };
+      },
+    });
+    expect(seenPrompt).toContain("DESIGN");
+    expect(seenPrompt).toMatch(/INVEST/);
+    expect(seenPrompt).not.toContain("PAIRING scorer"); // NOT the code-delivery prompt
+  });
+
+  it("AC2: --design with no scorer available → fail-loud (no note, exit non-zero)", async () => {
+    const p = project(SCORE_CFG);
+    const r = await run(p, ["US-DSGN-002", "--summary", "s", "--design"], { installed: [] });
+    expect(r.code).not.toBe(0);
+    expect(r.err).toContain("No Review Score produced");
+    expect(readStoryReviewScores(p, "US-DSGN-002")).toHaveLength(0);
+  });
+
+  it("AC2: --design reviewer protocol miss → fail-loud honest unscored, no synthesized score", async () => {
+    const p = project(SCORE_CFG);
+    const r = await run(p, ["US-DSGN-003", "--summary", "s", "--design"], {
+      spawnReviewer: async () => ({ status: "ok" as const, stdout: "I think it looks fine" }),
+    });
+    expect(r.code).not.toBe(0);
+    expect(readStoryReviewScores(p, "US-DSGN-003")).toHaveLength(0);
+  });
+
+  it("AC3: the design agent (worker) NEVER scores its own output — the reviewer is a separate fresh session", async () => {
+    const p = project(SCORE_CFG);
+    // worker = the design agent (claude); the score still comes from a fresh
+    // session whose id is the reviewer's, never an in-session self-grade.
+    const r = await run(p, ["US-DSGN-004", "--summary", "s", "--design", "--worker", "claude"], { installed: ["claude"] });
+    expect(r.code).toBe(0);
+    const text = readFileSync(readStoryReviewScores(p, "US-DSGN-004")[0]?.sourcePath ?? "", "utf8");
+    expect(text).toContain("scoring: pair"); // never scoring: self
+    // independence is the fresh session, not vendor: a same-vendor fresh claude is valid.
+    expect(text).toMatch(/session-id: manual-design-US-DSGN-004-\d+:design:claude:/);
+  });
+});

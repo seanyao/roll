@@ -61,6 +61,7 @@ import {
 } from "./loop-maint.js";
 import { loopPrInboxCommand } from "./loop-pr-inbox.js";
 import { runPrHeal } from "./loop-pr-heal.js";
+import { loopReviewResizeCommand } from "./loop-review-resize.js";
 import { loopRunOnceCommand } from "./loop-run-once.js";
 import { loopSelfDowngradeCommand } from "./loop-self-downgrade.js";
 import {
@@ -350,6 +351,10 @@ export function registerAll(): void {
     // 🚫 Hold + append its sub-stories (US-AGENT-042). The roll-build/roll-fix
     // pre-flight and the reviewer-trigger (US-AGENT-041) invoke this.
     if (args[0] === "self-downgrade") return loopSelfDowngradeCommand(args.slice(1));
+    // `loop review-resize <story>`: reviewer-triggered re-split (US-AGENT-041) —
+    // if the latest peer score flagged the scope too large, design sub-stories
+    // from the gaps, gate on heterogeneous consensus, then self-downgrade.
+    if (args[0] === "review-resize") return loopReviewResizeCommand(args.slice(1));
     // `loop fmt`: the observation-window formatter (US-PORT-012) — stdin
     // stream-json → three-tier transcript. v3-native; the watch pipe feeds it.
     if (args[0] === "fmt") return loopFmtCommand(args.slice(1));

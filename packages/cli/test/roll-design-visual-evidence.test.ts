@@ -17,6 +17,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  declaresDeliverableCmd,
   declaresDeliverableUrl,
   hasVisualEvidenceAc,
   validateStoryVisualEvidence,
@@ -224,6 +225,135 @@ screenshot_exempt: ${naked}
       expect(visualSurface("**AC:**\n- [ ] terminal screenshot of `roll x`\n")).toBe("terminal");
       expect(visualSurface("**AC:**\n- [ ] a screenshot proves it\n")).toBe("ambiguous");
       expect(visualSurface("**AC:**\n- [ ] a non-visual check\n")).toBe("none");
+    });
+  });
+
+  describe("FIX-341 — false-negative fixes", () => {
+    describe("AC1: the [visual-evidence] marker is authoritative on its own", () => {
+      it("recognises a [visual-evidence] AC whose text carries NO hard-coded noun (US-DOSSIER-043 AC7 实案)", () => {
+        // The verb 截 (capture) does not match the noun 截图 — before FIX-341 this
+        // AC was wrongly flagged missing-visual-evidence-ac. The marker IS the verdict.
+        const spec = `---
+deliverable_url: .roll/features/index.html#now
+---
+## US-DOSSIER-043 Dossier Now landing 📋
+
+**AC:**
+- [ ] AC7 [visual-evidence] headless 截 Now 及各 tab 真实渲染页:证明落 Now、四区齐全、tab 顺序对
+`;
+        expect(hasVisualEvidenceAc(spec)).toBe(true);
+        const v = validateStoryVisualEvidence(spec);
+        expect(v.ok).toBe(true);
+        expect(v.code).toBeUndefined();
+        expect(v.hasVisualEvidenceAc).toBe(true);
+      });
+
+      it("the marker counts even with NO surrounding screenshot keyword at all", () => {
+        const spec = `## FIX-700 Some visible change 📋
+
+**AC:**
+- [ ] [visual-evidence] the new banner shows the updated copy
+`;
+        expect(hasVisualEvidenceAc(spec)).toBe(true);
+      });
+
+      it("does NOT relax for a non-visual AC lacking the marker (no false positive)", () => {
+        // RED LINE: a plain non-visual AC stays non-visual.
+        expect(hasVisualEvidenceAc("**AC:**\n- [ ] telemetry is captured from the API\n")).toBe(false);
+        expect(hasVisualEvidenceAc("**AC:**\n- [ ] sorting persists across reloads\n")).toBe(false);
+      });
+    });
+
+    describe("AC2: surface prefers the declared deliverable surface over AC-text heuristics", () => {
+      it("a card with a [visual-evidence] AC + declared web deliverable_url is surface=web (US-EVID-018 / DOSSIER-042 实案)", () => {
+        // The AC prose mentions `roll`/CLI cues (would heuristically read terminal),
+        // but the frontmatter declares a real web page — the declaration wins.
+        const spec = `---
+deliverable_url: .roll/features/agents.html
+---
+## US-EVID-018 Tooling dossier surface 📋
+
+**AC:**
+- [ ] [visual-evidence] 档案页(经 \`roll\` 渲染)显性化工具可用性
+`;
+        const v = validateStoryVisualEvidence(spec);
+        expect(v.surface).toBe("web");
+        expect(v.ok).toBe(true);
+        expect(v.declaresDeliverableUrl).toBe(true);
+        expect(visualSurface(spec)).toBe("web");
+      });
+
+      it("an explicit deliverable_url overrides a terminal-cued AC text", () => {
+        const spec = `---
+deliverable_url: .roll/features/index.html#loop
+---
+## US-DOSSIER-042 Loop tab 📋
+
+**AC:**
+- [ ] terminal screenshot of \`roll status\` AND [visual-evidence] the loop tab page
+`;
+        expect(visualSurface(spec)).toBe("web");
+      });
+
+      it("a declared deliverable_cmd (no url) keeps a visual-evidence AC terminal", () => {
+        const spec = `---
+deliverable_cmd: roll status --fmt summary
+---
+## FIX-701 CLI demo 📋
+
+**AC:**
+- [ ] [visual-evidence] the new status summary renders
+`;
+        const v = validateStoryVisualEvidence(spec);
+        expect(v.surface).toBe("terminal");
+        expect(v.ok).toBe(true);
+        expect(v.declaresDeliverableUrl).toBe(false);
+      });
+
+      it("a deliverable_cmd YAML block-list (no url) is detected and keeps surface=terminal", () => {
+        const spec = `---
+deliverable_cmd:
+  - roll status
+  - roll cycles
+---
+## FIX-702 CLI demo list 📋
+
+**AC:**
+- [ ] [visual-evidence] the commands render the new output
+`;
+        expect(declaresDeliverableCmd(spec)).toBe(true);
+        expect(visualSurface(spec)).toBe("terminal");
+      });
+
+      it("with NO declaration, surface still falls back to the AC-text heuristic (no regression)", () => {
+        expect(visualSurface("**AC:**\n- [ ] screenshot of the web page\n")).toBe("web");
+        expect(visualSurface("**AC:**\n- [ ] terminal screenshot of \`roll x\`\n")).toBe("terminal");
+        expect(visualSurface("**AC:**\n- [ ] a screenshot proves it\n")).toBe("ambiguous");
+      });
+
+      it("a declared deliverable surface does NOT manufacture a visual AC out of nothing (surface=none when no visual AC)", () => {
+        // The declaration only classifies an EXISTING visual AC; it never invents one.
+        const spec = `---
+deliverable_url: .roll/features/index.html
+---
+## US-Y-9 Redesign 📋
+
+**AC:**
+- [ ] the dashboard groups cards by epic
+`;
+        expect(visualSurface(spec)).toBe("none");
+        expect(validateStoryVisualEvidence(spec).code).toBe("missing-visual-evidence-ac");
+      });
+    });
+
+    describe("declaresDeliverableCmd helper", () => {
+      it("reads the scalar form and the block-list form, rejects empty/absent", () => {
+        expect(declaresDeliverableCmd("---\ndeliverable_cmd: roll status\n---\n")).toBe(true);
+        expect(declaresDeliverableCmd("---\ndeliverable_cmd:\n  - roll status\n---\n")).toBe(true);
+        expect(declaresDeliverableCmd("---\ndeliverable_cmd:\n---\n")).toBe(false);
+        expect(declaresDeliverableCmd("---\ndeliverable_cmd:\nother: x\n---\n")).toBe(false);
+        expect(declaresDeliverableCmd("no frontmatter")).toBe(false);
+      });
     });
   });
 });

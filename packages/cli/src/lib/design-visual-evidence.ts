@@ -114,13 +114,26 @@ const DUAL_USE_VISUAL_TOKENS = [
 ];
 
 /**
+ * The AUTHORITATIVE visual-evidence MARKER (FIX-341 AC1). An author who writes a
+ * literal `[visual-evidence]` marker on an AC item has EXPLICITLY declared "this
+ * AC carries visual evidence" — the marker IS the verdict. It counts on its own,
+ * exactly like an unambiguous noun, and is NOT subject to the dual-use rule (it
+ * does NOT need an accompanying `screenshot`/`截图` keyword). This closes the
+ * false-negative where `[visual-evidence] headless 截 Now 及各 tab 真实渲染页`
+ * was wrongly flagged `missing-visual-evidence-ac` because the verb "截" did not
+ * match the hard-coded noun "截图".
+ */
+const VISUAL_EVIDENCE_MARKER = "[visual-evidence]";
+
+/**
  * Explicit visual-evidence CONTEXT cues — when present in the same AC item, they
- * promote an otherwise dual-use token into a real visual-evidence AC. An explicit
- * `[visual-evidence]` marker, the Chinese "截图证明 / 截图佐证", or any of the
- * unambiguous nouns above (so "deliverable_url screenshot" still counts).
+ * promote an otherwise dual-use token into a real visual-evidence AC. The Chinese
+ * "截图证明 / 截图佐证", or any of the unambiguous nouns above (so
+ * "deliverable_url screenshot" still counts). The `[visual-evidence]` marker is
+ * NOT here — it is authoritative on its own (see {@link itemIsVisualEvidence}),
+ * not merely a promoter of dual-use tokens.
  */
 const VISUAL_CONTEXT_CUES = [
-  "[visual-evidence]",
   "visual-evidence",
   "visual evidence",
   "截图证明",
@@ -236,7 +249,35 @@ export function declaresDeliverableUrl(specText: string): boolean {
 }
 
 /**
+ * Whether the spec frontmatter declares a `deliverable_cmd` — a CLI/terminal
+ * deliverable that rides the terminal-capture lane. Accepts both the scalar form
+ * (`deliverable_cmd: roll status`) and the YAML block-list form
+ * (`deliverable_cmd:\n  - roll status\n  - roll cycles`).
+ */
+export function declaresDeliverableCmd(specText: string): boolean {
+  const fm = frontmatter(specText);
+  if (fm === null) return false;
+  const lines = fm.split("\n");
+  const keyIdx = lines.findIndex((l) => /^deliverable_cmd:\s*(.*)$/.test(l));
+  if (keyIdx === -1) return false;
+  const scalar = stripQuotes((/^deliverable_cmd:\s*(.*)$/.exec(lines[keyIdx] ?? "")?.[1] ?? "").trim());
+  if (scalar !== "") return true;
+  // Block-list form: the key line is empty; an indented `- …` item follows
+  // before the next top-level key.
+  for (const l of lines.slice(keyIdx + 1)) {
+    if (l.trim() === "") continue;
+    if (/^\s+-\s+\S/.test(l)) return true; // indented list item
+    break; // any other content (incl. the next key) ends the block
+  }
+  return false;
+}
+
+/**
  * Whether a single AC item's text is a visual-evidence AC.
+ *
+ * FIX-341 AC1: an explicit `[visual-evidence]` MARKER is authoritative — the
+ * author declared this AC carries visual evidence, so it counts on its own
+ * regardless of which nouns/verbs the AC text uses.
  *
  * FIX-311b dual-use fix: an UNAMBIGUOUS noun (`screenshot`, `截图`, `录屏`, …)
  * counts on its own; a DUAL-USE token (`captured`, `deliverable_url`, …) counts
@@ -246,6 +287,7 @@ export function declaresDeliverableUrl(specText: string): boolean {
  */
 function itemIsVisualEvidence(itemText: string): boolean {
   const text = itemText.toLowerCase();
+  if (text.includes(VISUAL_EVIDENCE_MARKER)) return true;
   if (UNAMBIGUOUS_VISUAL_TOKENS.some((tok) => cueMatches(text, tok))) return true;
   const hasDualUse = DUAL_USE_VISUAL_TOKENS.some((tok) => cueMatches(text, tok));
   if (!hasDualUse) return false;
@@ -286,8 +328,18 @@ export function hasVisualEvidenceAc(specText: string): boolean {
  *                   OR a mix that does not cleanly resolve. Conservatively NOT
  *                   forced to declare a url (FIX-309 backstops at capture time).
  *
- * WEB wins when present and unambiguous: a card that screenshots a web page
- * genuinely owes a real product url even if it also captures a terminal step.
+ * FIX-341 AC2 — the DECLARATION is authoritative over AC-text heuristics. Once a
+ * visual-evidence AC exists, the surface is read from the frontmatter FIRST:
+ *   1. a declared web `deliverable_url` / `screenshot_url` ⇒ `web` (the card has
+ *      committed to a real product page, so it must capture one — this fixes the
+ *      false-negative where US-DOSSIER-042 / US-EVID-018 declared `agents.html` /
+ *      `index.html#loop` yet were mis-classified `terminal` from their AC prose).
+ *   2. else a declared `deliverable_cmd` ⇒ `terminal` (a CLI deliverable).
+ *   3. else fall back to the AC-text heuristic below.
+ *
+ * In the AC-text fallback, WEB wins when present and unambiguous: a card that
+ * screenshots a web page genuinely owes a real product url even if it also
+ * captures a terminal step.
  */
 export function visualSurface(specText: string): VisualSurface {
   let sawVisual = false;
@@ -305,6 +357,9 @@ export function visualSurface(specText: string): VisualSurface {
     }
   }
   if (!sawVisual) return "none";
+  // FIX-341 AC2: the declared surface wins over AC-text heuristics.
+  if (declaresDeliverableUrl(specText)) return "web";
+  if (declaresDeliverableCmd(specText)) return "terminal";
   if (sawWeb) return "web"; // a real web surface always owes its url
   if (sawTerminal && !sawAmbiguous) return "terminal";
   return "ambiguous";

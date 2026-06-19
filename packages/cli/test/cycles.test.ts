@@ -233,6 +233,20 @@ describe("roll cycles --detail — US-LOOP-076 build-phase timeline", () => {
     expect(j.timeline.length).toBe(6);
   });
 
+  it("US-LOOP-043: detail order uses observed tcr ts, not old commitTs", () => {
+    const events: RollEvent[] = [
+      { type: "cycle:start", cycleId: CYCLE, storyId: "FIX-284", agent: "codex", model: "gpt-5", ts: 10_000 },
+      { type: "cycle:tcr", cycleId: CYCLE, commitHash: "old1112223", message: "tcr: observed now", ts: 10_500, commitTs: 1_000 },
+      { type: "cycle:end", cycleId: CYCLE, outcome: "delivered", cost: { cycleId: CYCLE, agent: "codex", model: "gpt-5", tokensIn: 0, tokensOut: 0, estimatedCost: 0, revertCount: 0, effectiveCost: 0 }, ts: 11_000 },
+    ];
+    const j = cycleDetailJson(events, CYCLE) as { timeline: Array<{ marker: string; offsetSec: number }> };
+    expect(j.timeline.map((e) => [e.marker, e.offsetSec])).toEqual([
+      ["cycle:start", 0],
+      ["tcr", 500],
+      ["cycle:end", 1000],
+    ]);
+  });
+
   it("cyclesCommand --detail reads events.ndjson and prints the timeline (exit 0)", async () => {
     const p = mkdtempSync(join(tmpdir(), "roll-cyc-detail-"));
     dirs.push(p);

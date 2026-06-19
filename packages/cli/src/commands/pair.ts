@@ -194,12 +194,25 @@ export function renderPairingActivity(summary: PairingCostSummary, opts: { noCol
     .join(", ");
   const cost = `$${summary.totalCost.toFixed(2)}`;
   const peerStr = byPeer === "" ? "—" : byPeer;
+  // FIX-346: peers dropped from the pool after repeated headless auth failures —
+  // surfaced so the owner SEES why an agent stopped being consulted (and can
+  // re-login it offline). Empty → "—".
+  const excluded = summary.excludedPeers ?? {};
+  const excludedStr =
+    Object.keys(excluded).length === 0
+      ? "—"
+      : Object.keys(excluded)
+          .sort()
+          .map((p) => `${agentDisplayName(p)}(auth×${excluded[p]})`)
+          .join(", ");
   const lines: string[] = [
     `  Pairing activity — 结对活动`,
     `  ${DIM}pairings to date: ${summary.pairings} · by peer: ${peerStr}${NC}`,
     `  ${DIM}total cost: ${cost} · findings: ${summary.totalFindings} · none-available: ${summary.noneAvailable}${NC}`,
+    `  ${DIM}auth-excluded peers: ${excludedStr}${NC}`,
     `  ${DIM}累计结对：${summary.pairings} 次 · 各 peer：${peerStr}${NC}`,
     `  ${DIM}总花费：${cost} · 发现问题：${summary.totalFindings} · 无可用 peer：${summary.noneAvailable}${NC}`,
+    `  ${DIM}因认证失败被剔除的 peer：${excludedStr}${NC}`,
   ];
   return lines.join("\n");
 }

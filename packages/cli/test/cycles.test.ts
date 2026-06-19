@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { RollEvent } from "@roll/spec";
-import { cyclesCommand, cyclesLedgerJson, renderCyclesLedger, renderCycleDetail, cycleDetailJson } from "../src/commands/cycles.js";
-import { collectCycleLedger } from "../src/lib/cycle-ledger.js";
+import { cyclesCommand, cyclesLedgerJson, renderCyclesLedger, renderCycleDetail, cycleDetailJson, summaryBuckets } from "../src/commands/cycles.js";
+import { collectCycleLedger, type CycleLedgerRow } from "../src/lib/cycle-ledger.js";
 import { stripAnsi } from "../src/render.js";
 
 const dirs: string[] = [];
@@ -113,6 +113,83 @@ describe("roll cycles — US-CLI-012", () => {
       process.chdir(save);
     }
     expect(err).toContain("--detail needs a cycle id");
+  });
+});
+
+describe("FIX-337 (AC2) — summaryBuckets: total === sum(buckets), every non-zero bucket shown", () => {
+  // A hand-built ledger that carries EVERY verdict the summary can show, so the
+  // old `5 delivered · 20 failed → 25 ≠ 28` divergence (an unpublished /
+  // superseded cycle hiding in neither figure) is provably impossible.
+  function row(verdict: CycleLedgerRow["verdict"]): CycleLedgerRow {
+    return {
+      cycleId: `c-${verdict}`,
+      tsSec: NOW - 3600,
+      verdict,
+      storyId: "",
+      agent: "claude",
+      model: "claude",
+      tokens: "—",
+      cost: "—",
+      toolSummary: "",
+      toolCosts: [],
+      toolTimeline: [],
+      duration: "—",
+      tape: [],
+      evidence: [],
+    };
+  }
+
+  const mixed: CycleLedgerRow[] = [
+    row("delivered"),
+    row("pending_merge"),
+    row("unpublished"),
+    row("superseded"),
+    row("failed"),
+    row("reverted"), // folds into the failed cluster
+    row("blocked"), // folds into the failed cluster
+    row("idle"),
+    row("unknown"),
+  ];
+
+  it("total equals the sum of every displayed bucket (failed cluster folded)", () => {
+    const { total, parts } = summaryBuckets(mixed);
+    expect(total).toBe(mixed.length); // 9 rows
+    // the failed cluster (failed+reverted+blocked) is ONE part with count 3.
+    const summed = parts.reduce((a, p) => a + p.count, 0);
+    expect(summed).toBe(total); // ← the invariant the AC names
+    expect(parts.find((p) => p.verdict === "failed")?.count).toBe(3);
+    // reverted/blocked are never their own parts — they fold into `failed`.
+    expect(parts.some((p) => p.verdict === "reverted")).toBe(false);
+    expect(parts.some((p) => p.verdict === "blocked")).toBe(false);
+  });
+
+  it("the render lists EVERY non-zero bucket (delivered/pending_merge/unpublished/superseded/failed/idle/unknown)", () => {
+    const out = stripAnsi(renderCyclesLedger(mixed, "all", "en", NOW));
+    expect(out).toContain("9 cycles");
+    expect(out).toContain("1 delivered");
+    expect(out).toContain("1 pending_merge");
+    expect(out).toContain("1 unpublished");
+    expect(out).toContain("1 superseded");
+    expect(out).toContain("3 failed/reverted/blocked");
+    expect(out).toContain("1 idle");
+    expect(out).toContain("1 unknown");
+  });
+
+  it("--json exposes every bucket and they sum to cycles", () => {
+    const json = cyclesLedgerJson(mixed, "all", NOW) as { cycles: number; buckets: Record<string, number> };
+    expect(json.cycles).toBe(9);
+    const summed = Object.values(json.buckets).reduce((a, b) => a + b, 0);
+    expect(summed).toBe(json.cycles); // bucketCounts folds unknowns → never under-counts
+    expect(json.buckets["superseded"]).toBe(1);
+    expect(json.buckets["unpublished"]).toBe(1);
+  });
+
+  it("a zero bucket is omitted from the human line (only non-zero shown)", () => {
+    const out = stripAnsi(renderCyclesLedger([row("delivered"), row("delivered")], "all", "en", NOW));
+    expect(out).toContain("2 delivered");
+    expect(out).not.toContain("superseded");
+    expect(out).not.toContain("unpublished");
+    expect(out).not.toContain("failed");
   });
 });
 

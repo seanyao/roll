@@ -7,7 +7,6 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { existsSync as fsExistsSync, readFileSync as fsReadFileSync } from "node:fs";
 import { resolveLang, type Lang, type RollEvent, parseEventLine } from "@roll/spec";
 import { extractCycleSignals, parseBacklog, signalKindForMarker, type TimelineEntry } from "@roll/core";
 import {
@@ -35,9 +34,9 @@ import { findCycle } from "./cycle.js";
 function buildIsStorySuperseded(cwd: string, git: GitDossierFacts | null): (storyId: string) => boolean {
   const done = new Set<string>();
   const backlogPath = `${cwd}/.roll/backlog.md`;
-  if (fsExistsSync(backlogPath)) {
+  if (existsSync(backlogPath)) {
     try {
-      for (const item of parseBacklog(fsReadFileSync(backlogPath, "utf8"))) {
+      for (const item of parseBacklog(readFileSync(backlogPath, "utf8"))) {
         if (item.status.includes("✅") || /\bDone\b/i.test(item.status)) done.add(item.id);
       }
     } catch {
@@ -105,7 +104,6 @@ const VERDICT_COLOR: Record<string, string> = {
 // labels. `failed/reverted/blocked` are GROUPED into one "failed/reverted/blocked"
 // figure (the FIX-248 vocabulary), but every other non-zero bucket is shown so
 // the displayed total === the sum of all buckets.
-const FAILED_CLUSTER: ReadonlySet<CycleLedgerVerdict> = new Set(["failed", "reverted", "blocked"]);
 const BUCKET_LABEL: Record<CycleLedgerVerdict, { en: string; zh: string }> = {
   delivered: { en: "delivered", zh: "已交付" },
   pending_merge: { en: "pending_merge", zh: "待合并" },
@@ -264,13 +262,22 @@ export function renderCyclesLedger(rows: CycleLedgerRow[], sinceLabel: string, l
       ].join(" "),
     );
   }
-  const delivered = within.filter((r) => r.verdict === "delivered").length;
-  const failed = ledgerFailedCount(within);
+  // FIX-337 (AC2): the summary enumerates ALL non-zero buckets so the displayed
+  // total === sum(buckets). `summaryBuckets` folds failed+reverted+blocked into
+  // one `failed/reverted/blocked` figure (FIX-248 vocabulary) and guarantees the
+  // total equals the sum of the parts — the old `5 delivered · 20 failed → 25 ≠
+  // 28` divergence (an unpublished/superseded cycle hiding in neither figure) is
+  // impossible. Each part wears its verdict color (the failed cluster is red
+  // when non-zero, every other bucket its own VERDICT_COLOR).
+  const { total, parts } = summaryBuckets(within);
   const costStr = costSummary(within, lang);
-  const summary =
-    lang === "zh"
-      ? `${within.length} 个周期 · ${delivered} 已交付 · ${c(failed > 0 ? "red" : "green", String(failed))} 失败/回滚/阻塞 · ${costStr}`
-      : `${within.length} cycles · ${delivered} delivered · ${c(failed > 0 ? "red" : "green", String(failed))} failed/reverted/blocked · ${costStr}`;
+  const cycleWord = lang === "zh" ? `${total} 个周期` : `${total} cycles`;
+  const partStrs = parts.map((part) => {
+    const label = BUCKET_LABEL[part.verdict][lang === "zh" ? "zh" : "en"];
+    const color = part.verdict === "failed" ? "red" : VERDICT_COLOR[part.verdict] ?? "muted";
+    return `${c(color, String(part.count))} ${label}`;
+  });
+  const summary = [cycleWord, ...partStrs, costStr].join(" · ");
   const latest = within[0];
   // `roll cycle <handle>` is the spec'd companion (US-CLI-013, next card) —
   // the hint is the contract between the two surfaces, not a dead end.

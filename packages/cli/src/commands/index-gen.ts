@@ -35,7 +35,7 @@ import { launchAgentsDir } from "./loop-sched.js";
 import { projectSlug } from "./dashboard.js";
 import { morningReportHref } from "../lib/morning-report.js";
 import { renderEpicPage } from "../lib/epic-page.js";
-import { buildDossierRunCache, collectStoryDossierInput, renderStoryDossier, stationsDone, storyEvidenceFlags, storyHasMergeEvidence, type StoryDossierInput } from "../lib/story-dossier.js";
+import { buildDossierRunCache, collectStoryDossierInput, renderStoryDossier, stationsDone, storyEvidenceFlags, storyHasMergeEvidence, storyHasSpecPrMergeEvidence, type StoryDossierInput } from "../lib/story-dossier.js";
 import { renderMarkdown } from "../lib/markdown.js";
 
 function iso(sec: number): string {
@@ -286,7 +286,7 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
   // the rebuild path has no live PR-evidence snapshot, so a merge commit is what
   // keeps an already-merged card's delivered banner from being stripped.
   const runCache = buildDossierRunCache(cwd);
-  const epics = collectDossier(cwd, { mergeEvidence: (id) => storyHasMergeEvidence(runCache.git, id) });
+  const epics = collectDossier(cwd, { mergeEvidence: (id) => storyHasMergeEvidence(runCache.git, id) || storyHasSpecPrMergeEvidence(runCache, id) });
   // US-DOSSIER: enrich each story with its real lifecycle stations (read its
   // evidence via the same collector the per-story page uses) so the index spine
   // reflects definition→design→execution→delivery→retrospective accurately.

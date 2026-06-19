@@ -2139,11 +2139,14 @@ export interface DossierRunCache {
   specRefs: StorySpecRef[];
   /** id → the ids its spec declares under depends-on. */
   dependsOnById: Map<string, string[]>;
+  /** id → PR numbers explicitly linked from the story spec. */
+  prNumbersById: Map<string, number[]>;
 }
 
 export function buildDossierRunCache(projectPath: string): DossierRunCache {
   const specRefs = scanStorySpecs(projectPath);
   const dependsOnById = new Map<string, string[]>();
+  const prNumbersById = new Map<string, number[]>();
   for (const ref of specRefs) {
     let spec = "";
     try {
@@ -2152,12 +2155,14 @@ export function buildDossierRunCache(projectPath: string): DossierRunCache {
       /* unreadable spec → no deps */
     }
     dependsOnById.set(ref.id, extractDependsOnIds(spec));
+    prNumbersById.set(ref.id, extractSpecPrNumbers(spec));
   }
   return {
     git: collectGitDossierFacts(projectPath),
     reviewScoreTrend: readReviewScoreTrend(projectPath),
     specRefs,
     dependsOnById,
+    prNumbersById,
   };
 }
 
@@ -2222,6 +2227,11 @@ export function gitHasPrMergeCommit(facts: GitDossierFacts | null, prNumber: num
   return false;
 }
 
+export function storyHasSpecPrMergeEvidence(cache: Pick<DossierRunCache, "git" | "prNumbersById">, storyId: string): boolean {
+  const prs = cache.prNumbersById.get(storyId) ?? [];
+  return prs.some((pr) => gitHasPrMergeCommit(cache.git, pr));
+}
+
 /**
  * FIX-350 — the merge-truth probe the cycle ledger reconcile injects, made
  * CYCLE-ACCURATE: a pending_merge cycle is delivered IFF its OWN recorded PR
@@ -2257,6 +2267,19 @@ function factsPrNumbers(facts: GitDossierFacts, storyId: string): number[] {
     }
   }
   return [...nums];
+}
+
+function extractSpecPrNumbers(spec: string): number[] {
+  const nums = new Set<number>();
+  for (const match of spec.matchAll(/github\.com\/[^\s)]+\/[^\s)]+\/pull\/(\d+)\b/gi)) {
+    const n = numberFromString(match[1]);
+    if (n !== undefined) nums.add(n);
+  }
+  for (const match of spec.matchAll(/\bPR\s*#?(\d+)\b/gi)) {
+    const n = numberFromString(match[1]);
+    if (n !== undefined) nums.add(n);
+  }
+  return [...nums].sort((a, b) => a - b);
 }
 
 /**

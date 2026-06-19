@@ -123,9 +123,9 @@ import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFile
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import {
+  agentSpawnEnvironment,
   type AgentSpawn,
   realAgentSpawn,
-  reasonixEnv,
 } from "./agent-spawn.js";
 import { classifyBlockSignature, probeAgentReachable, type ReachResult } from "./agent-liveness.js";
 import { readSkipCards } from "./skip-cards.js";
@@ -850,11 +850,7 @@ export async function executeCommand(
           env: {
             ...process.env,
             ROLL_LOOP_ALERT: ports.paths.alertsPath,
-            // FIX-359: reasonix reads DEEPSEEK_API_KEY from env but does not
-            // auto-load ~/.reasonix/.env — inject it best-effort ONLY for the
-            // reasonix worker. The value flows solely into this spawn env; it is
-            // never logged, alerted, or emitted as an event.
-            ...(cmd.agent === "reasonix" ? reasonixEnv() : {}),
+            ...agentSpawnEnvironment(cmd.agent),
           },
           // FIX-204B: pin the executor-picked story into the agent prompt — the
           // claim (pick_story → 🔨) and the work must be the same story.

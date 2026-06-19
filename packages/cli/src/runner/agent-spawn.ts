@@ -38,6 +38,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { getAgentSpec } from "@roll/core";
 
 /**
  * FIX-204D — live-children registry. The signal teardown must kill an
@@ -97,6 +98,22 @@ export const AGENT_ARGV_TODO: Record<string, string> = {
   openai: "codex exec <prompt>",
   opencode: "opencode run <prompt>",
 };
+
+export interface SpawnCommand {
+  bin: string;
+  args: string[];
+}
+
+export interface AgentProfile {
+  name: string;
+  buildSpawnCommand(opts: AgentSpawnOptions): SpawnCommand;
+  usesWorkspaceSandbox: boolean;
+  ptyWhenPiped: boolean;
+  acceptance: {
+    canReviewHeadless: boolean;
+  };
+  childEnv?(home?: string): Record<string, string>;
+}
 
 /**
  * FIX-204B — the story-pin directive. The executor picks + claims the story
@@ -194,6 +211,107 @@ export function buildClaudeArgv(input: ClaudeArgvInput): { bin: string; args: st
   return { bin, args };
 }
 
+function agentPrompt(opts: AgentSpawnOptions): string {
+  return opts.bare === true
+    ? opts.skillBody
+    : `${AUTORUN_DIRECTIVE}${opts.storyId !== undefined && opts.storyId !== "" ? storyPinDirective(opts.storyId) : ""}${opts.skillBody}`;
+}
+
+function canonicalProfileName(name: string): string {
+  const raw = name.trim().toLowerCase();
+  if (raw === "antigravity" || raw === "gemini") return "agy";
+  if (raw === "openai") return "openai";
+  if (raw === "deepseek") return "deepseek";
+  const spec = getAgentSpec(raw);
+  if (spec !== undefined) return spec.name;
+  return raw;
+}
+
+function simplePromptProfile(name: string, bin: string, args: (prompt: string) => string[]): AgentProfile {
+  return {
+    name,
+    usesWorkspaceSandbox: false,
+    ptyWhenPiped: true,
+    acceptance: { canReviewHeadless: getAgentSpec(name)?.canReviewHeadless === true },
+    buildSpawnCommand: (opts) => ({ bin: opts.bin ?? bin, args: args(agentPrompt(opts)) }),
+  };
+}
+
+const AGENT_PROFILES: Readonly<Record<string, AgentProfile>> = {
+  claude: {
+    name: "claude",
+    usesWorkspaceSandbox: false,
+    ptyWhenPiped: false,
+    acceptance: { canReviewHeadless: getAgentSpec("claude")?.canReviewHeadless === true },
+    buildSpawnCommand: (opts) =>
+      buildClaudeArgv({
+        worktree: opts.cwd,
+        skillBody: opts.skillBody,
+        ...(opts.storyId !== undefined ? { storyId: opts.storyId } : {}),
+        bin: opts.bin,
+        interactive: opts.interactive,
+        ...(opts.bare === true ? { bare: true } : {}),
+      }),
+  },
+  pi: simplePromptProfile("pi", "pi", (prompt) => ["-p", prompt]),
+  kimi: simplePromptProfile("kimi", "kimi", (prompt) => ["-p", prompt]),
+  deepseek: simplePromptProfile("deepseek", "deepseek", (prompt) => [prompt]),
+  qwen: simplePromptProfile("qwen", "qwen", (prompt) => [prompt]),
+  agy: simplePromptProfile("agy", "agy", (prompt) => ["--dangerously-skip-permissions", "-p", prompt]),
+  codex: {
+    name: "codex",
+    usesWorkspaceSandbox: true,
+    ptyWhenPiped: true,
+    acceptance: { canReviewHeadless: getAgentSpec("codex")?.canReviewHeadless === true },
+    buildSpawnCommand: (opts) => {
+      const prompt = agentPrompt(opts);
+      const roots = [...new Set(opts.writableRoots ?? [])].filter((p) => p.trim() !== "");
+      const sandboxArgs =
+        roots.length > 0
+          ? ["--cd", opts.cwd, "--sandbox", "workspace-write", ...roots.flatMap((p) => ["--add-dir", p])]
+          : [];
+      if (opts.codexSessionId !== undefined && opts.codexSessionId !== "") {
+        const resumePrompt = `${resetDirective(opts.storyId ?? "")}${prompt}`;
+        const resumeConfigArgs =
+          roots.length > 0
+            ? [
+                "-c",
+                'sandbox_mode="workspace-write"',
+                "-c",
+                `sandbox_workspace_write.writable_roots=${JSON.stringify(roots)}`,
+              ]
+            : [];
+        return {
+          bin: opts.bin ?? "codex",
+          args: ["exec", "resume", "--all", ...resumeConfigArgs, opts.codexSessionId, resumePrompt],
+        };
+      }
+      return { bin: opts.bin ?? "codex", args: ["exec", ...sandboxArgs, prompt] };
+    },
+  },
+  reasonix: {
+    name: "reasonix",
+    usesWorkspaceSandbox: false,
+    ptyWhenPiped: true,
+    acceptance: { canReviewHeadless: getAgentSpec("reasonix")?.canReviewHeadless === true },
+    buildSpawnCommand: (opts) => ({ bin: opts.bin ?? "reasonix", args: ["run", "--dir", opts.cwd, agentPrompt(opts)] }),
+    childEnv: reasonixEnv,
+  },
+};
+
+export function agentProfile(name: string): AgentProfile {
+  const canonical = canonicalProfileName(name);
+  const profile = AGENT_PROFILES[canonical];
+  if (profile !== undefined) return profile;
+  const hint = AGENT_ARGV_TODO[canonical] ?? "unknown agent";
+  throw new Error(`runner: agent '${name}' argv not yet ported. v2 shape: ${hint}`);
+}
+
+export function agentSpawnEnvironment(agent: string, home?: string): Record<string, string> {
+  const profile = AGENT_PROFILES[canonicalProfileName(agent)];
+  return profile?.childEnv?.(home) ?? {};
+}
+
 /** Options for an {@link AgentSpawn} call. */
 export interface AgentSpawnOptions {
   /** US-PORT-011: live sink — called with every raw stdout/stderr chunk as it
@@ -259,100 +377,7 @@ export type AgentSpawn = (
  */
 /** Build the spawn argv for a resolved agent — exported for unit tests. */
 export function buildSpawnCommand(agent: string, opts: AgentSpawnOptions): { bin: string; args: string[] } {
-  // FIX-319: bare (peer-reviewer) spawn sends the body verbatim — no worker
-  // autorun directive, no story pin — for every agent shape below.
-  const prompt =
-    opts.bare === true
-      ? opts.skillBody
-      : `${AUTORUN_DIRECTIVE}${opts.storyId !== undefined && opts.storyId !== "" ? storyPinDirective(opts.storyId) : ""}${opts.skillBody}`;
-  if (agent === "claude") {
-    return buildClaudeArgv({
-      worktree: opts.cwd,
-      skillBody: opts.skillBody,
-      ...(opts.storyId !== undefined ? { storyId: opts.storyId } : {}),
-      bin: opts.bin,
-      interactive: opts.interactive,
-      ...(opts.bare === true ? { bare: true } : {}),
-    });
-  }
-  if (agent === "pi") {
-    // pi -p "<prompt>" in the worktree CWD — no stream-json, no --add-dir.
-    // The agent's stdout is plain text; onChunk feeds it to the live log.
-    return { bin: opts.bin ?? "pi", args: ["-p", prompt] };
-  }
-  if (agent === "kimi") {
-    return { bin: opts.bin ?? "kimi", args: ["-p", prompt] };
-  }
-  if (agent === "codex") {
-    const roots = [...new Set(opts.writableRoots ?? [])].filter((p) => p.trim() !== "");
-    // COLD `codex exec`: the workspace sandbox is set with the exec-only flags
-    // (--cd / --sandbox / --add-dir). These do NOT exist on `codex exec resume`.
-    const sandboxArgs =
-      roots.length > 0
-        ? ["--cd", opts.cwd, "--sandbox", "workspace-write", ...roots.flatMap((p) => ["--add-dir", p])]
-        : [];
-    // lever-4 (default-OFF; only reached when the flag-guarded wiring set
-    // codexSessionId): RESUME the prior session and prepend the RESET directive
-    // so the warm context re-orients onto the new card / fresh worktree. The
-    // resume argv is isolated to THIS codex branch — no cross-agent branching.
-    if (opts.codexSessionId !== undefined && opts.codexSessionId !== "") {
-      const resumePrompt = `${resetDirective(opts.storyId ?? "")}${prompt}`;
-      // `codex exec resume` REJECTS --cd / --sandbox / --add-dir (those are
-      // plain-`codex exec` flags) — passing them would error → cold fallback.
-      // Empirically (codex-cli 0.139.0) resume binds its workdir to the SPAWN's
-      // PROCESS cwd (the runner already spawns with cwd = the fresh worktree),
-      // so warm reasoning lands in the fresh tree without --cd. The sandbox is
-      // re-expressed as `-c` config overrides (keys verified against codex
-      // 0.139.0's config schema — `sandbox_mode` is a top-level key and
-      // `sandbox_workspace_write` is a table whose `writable_roots` field is the
-      // resume-side equivalent of cold's --add-dir):
-      //   --sandbox workspace-write          → -c sandbox_mode="workspace-write"
-      //                                         (auto-grants [cwd, /tmp, $TMPDIR])
-      //   --add-dir <root>…                  → -c sandbox_workspace_write.writable_roots=[…]
-      // `--all` disables resume's cwd-based session filtering (we resume by an
-      // explicit id from a DIFFERENT cwd than the capture). No `--` terminator is
-      // needed: each `-c` binds exactly one `key=value`, so the two bare
-      // positionals (SESSION_ID then PROMPT) parse cleanly after the options
-      // (verified against codex 0.139.0 clap parsing); the RESET_DIRECTIVE always
-      // leads the prompt so it never begins with a `-`.
-      const resumeConfigArgs =
-        roots.length > 0
-          ? [
-              "-c",
-              'sandbox_mode="workspace-write"',
-              "-c",
-              `sandbox_workspace_write.writable_roots=${JSON.stringify(roots)}`,
-            ]
-          : [];
-      return {
-        bin: opts.bin ?? "codex",
-        args: ["exec", "resume", "--all", ...resumeConfigArgs, opts.codexSessionId, resumePrompt],
-      };
-    }
-    return { bin: opts.bin ?? "codex", args: ["exec", ...sandboxArgs, prompt] };
-  }
-  if (agent === "deepseek") {
-    return { bin: opts.bin ?? "deepseek", args: [prompt] };
-  }
-  if (agent === "qwen") {
-    return { bin: opts.bin ?? "qwen", args: [prompt] };
-  }
-  if (agent === "agy" || agent === "gemini" || agent === "antigravity") {
-    return { bin: opts.bin ?? "agy", args: ["--dangerously-skip-permissions", "-p", prompt] };
-  }
-  if (agent === "reasonix") {
-    // FIX-359: `reasonix run [--dir PATH] "<task>"` runs ONE task autonomously
-    // (it drives write_file/bash tools itself) and exits — so the loop hands it
-    // the worktree via --dir and the full autorun+pin prompt as the single
-    // positional task. The DeepSeek key is injected into the spawn ENV by the
-    // executor ({@link reasonixEnv}); it is NEVER an argv flag (no key on the
-    // command line). reasonix bills in RMB (¥), not USD.
-    return { bin: opts.bin ?? "reasonix", args: ["run", "--dir", opts.cwd, prompt] };
-  }
-  const hint = AGENT_ARGV_TODO[agent] ?? "unknown agent";
-  throw new Error(
-    `runner: agent '${agent}' argv not yet ported. v2 shape: ${hint}`,
-  );
+  return agentProfile(agent).buildSpawnCommand(opts);
 }
 
 /**
@@ -370,7 +395,7 @@ export function withPtyWrap(
   agent: string,
   platform: NodeJS.Platform = process.platform,
 ): { bin: string; args: string[]; pty: boolean } {
-  if (agent === "claude" || platform !== "darwin") return { ...cmd, pty: false };
+  if (!agentProfile(agent).ptyWhenPiped || platform !== "darwin") return { ...cmd, pty: false };
   return { bin: "script", args: ["-q", "/dev/null", cmd.bin, ...cmd.args], pty: true };
 }
 

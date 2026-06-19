@@ -21,6 +21,20 @@ Use `roll agent use openai` to select it — the same binary is invoked.
 | opencode | `opencode` | AGENTS.md sync |
 | Qwen | `qwen` | Alibaba Cloud / DashScope |
 
+## Adding an Agent
+
+Agent-specific behavior belongs in one profile, not in downstream runner gates.
+To add or adjust an agent:
+
+1. Add the public registry entry in `packages/core/src/agent/specs.ts`.
+2. Add or update the runner profile in `packages/cli/src/runner/agent-spawn.ts`.
+   The profile owns argv construction, workspace-sandbox consumption, PTY
+   wrapping, headless-review capability, and any child environment hook.
+3. Keep `executor.ts`, attest gates, and test routing code agent-agnostic. They
+   call `agentProfile(name)` or `agentSpawnEnvironment(name)` instead of
+   checking concrete agent names.
+4. Add unit coverage for the profile and the registry entry.
+
 ## Complexity Routing (four slots)
 
 Roll routes work to an agent by **task complexity**. A story's `est_min` is

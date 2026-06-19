@@ -83,20 +83,60 @@ export function collectProjectsRegistry(home?: string): ProjectRegistryEntry[] {
 }
 
 /**
+ * FIX-376 — a project path is NOT a real project when its resolved path lies
+ * under any OS temp directory (tmpdir() or /tmp) or when its last path segment
+ * is `.roll` (a nested roll-meta repo, not a standalone project). Resolves
+ * symlinks before checking so /tmp → /private/tmp is caught on macOS.
+ * Non-existent paths return true (they are already excluded by the reachable
+ * filter — a dead path tells us nothing about whether it would be temp).
+ */
+export function isRealProjectPath(path: string): boolean {
+  let real: string;
+  try {
+    real = realpathSync(path);
+  } catch {
+    // Path doesn't exist — can't determine, treat as real (already filtered by existsSync)
+    return true;
+  }
+  // Basename .roll → nested meta repo, never a standalone project
+  if (basename(real) === ".roll") return false;
+  // Check against tmpdir()
+  let tmpReal = tmpdir();
+  try {
+    tmpReal = realpathSync(tmpReal);
+  } catch {
+    /* fall back to the un-resolved tmpdir() */
+  }
+  const tmpPrefix = tmpReal.endsWith(sep) ? tmpReal : tmpReal + sep;
+  if (real.startsWith(tmpPrefix)) return false;
+  // Also check system /tmp (which may differ from tmpdir() on macOS)
+  let sysTmpReal = "/tmp";
+  try {
+    sysTmpReal = realpathSync("/tmp");
+  } catch {
+    /* /tmp not resolvable — skip */
+  }
+  const sysTmpPrefix = sysTmpReal.endsWith(sep) ? sysTmpReal : sysTmpReal + sep;
+  if (real.startsWith(sysTmpPrefix)) return false;
+  return true;
+}
+
+/**
  * FIX-283 (AC2): the registry rows whose `path` still exists on disk — the ONLY
  * set the web switcher should render. The CLI `roll ls` keeps listing every row
  * with missing/stale flags (that honesty is for the operator); the switcher is a
  * navigation control, so a dead path (a stale tmp fixture that leaked, or a
- * project since deleted) must never render as an un-clickable / 404 entry. Pure:
- * `pathExists` is injected (defaults to `existsSync`) so the filter stays
- * testable without touching the real filesystem. Order is preserved (the input
- * is already name-sorted by `parseProjectsRegistry`).
+ * project since deleted) must never render as an un-clickable / 404 entry.
+ * FIX-376: also excludes temp paths (resolved path under OS tmpdir or /tmp) and
+ * `.roll` basenames (nested meta repos). Pure: `pathExists` is injected
+ * (defaults to `existsSync`) so the existence check stays testable. Order is
+ * preserved (the input is already name-sorted by `parseProjectsRegistry`).
  */
 export function reachableProjects(
   rows: ProjectRegistryEntry[],
   pathExists: (p: string) => boolean = existsSync,
 ): ProjectRegistryEntry[] {
-  return rows.filter((r) => pathExists(r.path));
+  return rows.filter((r) => pathExists(r.path) && isRealProjectPath(r.path));
 }
 
 /**
@@ -125,14 +165,9 @@ export function shouldSelfRegister(cwd: string): boolean {
   }
   // FIX-283: skip fixture paths under the OS temp dir unconditionally (no longer
   // gated on ROLL_HOME being unset) — a tmp cwd is never a real project.
-  let tmpReal = tmpdir();
-  try {
-    tmpReal = realpathSync(tmpReal);
-  } catch {
-    /* fall back to the un-resolved tmpdir() */
-  }
-  const tmpPrefix = tmpReal.endsWith(sep) ? tmpReal : tmpReal + sep;
-  return projectReal !== tmpReal && !projectReal.startsWith(tmpPrefix);
+  // FIX-376: also check system /tmp (may differ from tmpdir() on macOS).
+  if (!isRealProjectPath(projectReal)) return false;
+  return true;
 }
 
 function gitOutput(cwd: string, args: string[]): string | null {

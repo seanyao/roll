@@ -3,10 +3,10 @@
  * ONE TruthSnapshot; tabs are hash-routed; brand is injected; copy is fully
  * bilingual (single-language presentation via roll-lang).
  */
-import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { join, resolve } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
 import { serializeTruthSnapshot, type TruthSnapshot } from "@roll/spec";
 import { renderTruthConsole, renderMachineStubPage, rollScope, type ProjectRegistryEntry } from "../src/lib/truth-console.js";
 import { collectLoopLiveFeed } from "../src/commands/index-gen.js";
@@ -1331,6 +1331,11 @@ describe("top-bar shell — US-DOSSIER-027", () => {
 });
 
 describe("projects registry parser — US-DOSSIER-027", () => {
+  const homes: string[] = [];
+  afterAll(() => {
+    for (const d of homes.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
   it("parses the 028 array contract, sorts by name, keeps optional fields", () => {
     const text = JSON.stringify([
       { name: "zeta", slug: "zeta", path: "/z" },
@@ -1364,6 +1369,57 @@ describe("projects registry parser — US-DOSSIER-027", () => {
     expect(reachableProjects(rows, () => false)).toEqual([]);
     // all reachable → identity (order preserved)
     expect(reachableProjects(rows, () => true)).toEqual(rows);
+  });
+
+  // FIX-376: the switcher must exclude projects whose resolved path is under
+  // the OS temp dir (tmpdir() or /tmp) — even when the directory still exists.
+  // A stale temp fixture from a test/CI run that hasn't been cleaned up should
+  // never appear as a clickable project in the dropdown.
+  it("AC1 (FIX-376): reachableProjects drops rows whose resolved path is under the OS temp dir", () => {
+    const repoRoot = resolve(__dirname, "../../..");
+    const realProj = realpathSync(mkdtempSync(join(repoRoot, "roll-fix376-real-")));
+    homes.push(realProj);
+    const tmpProj = realpathSync(mkdtempSync(join(tmpdir(), "roll-fix376-tmp-")));
+    homes.push(tmpProj);
+    // Also create a path under /tmp (system temp — may differ from tmpdir() on macOS)
+    let sysTmpProj = "";
+    try {
+      sysTmpProj = realpathSync(mkdtempSync(join(realpathSync("/tmp"), "roll-fix376-sys-")));
+      homes.push(sysTmpProj);
+    } catch {
+      /* /tmp may not be writable — skip */
+    }
+    const rows: ProjectRegistryEntry[] = [
+      { name: "real", slug: "real", path: realProj },
+      { name: "tmp", slug: "tmp", path: tmpProj },
+      ...(sysTmpProj !== "" ? [{ name: "sys-tmp", slug: "sys-tmp", path: sysTmpProj }] : []),
+    ];
+    // All paths exist — the temp check is what filters
+    const out = reachableProjects(rows);
+    expect(out.map((r) => r.slug)).toEqual(["real"]);
+    expect(out.find((r) => r.slug === "tmp")).toBeUndefined();
+    if (sysTmpProj !== "") {
+      expect(out.find((r) => r.slug === "sys-tmp")).toBeUndefined();
+    }
+  });
+
+  // FIX-376: nested .roll meta repos (registered from inside a project's .roll
+  // subdirectory) are not real projects — exclude paths whose basename is .roll.
+  it("AC2 (FIX-376): reachableProjects drops rows whose path has basename .roll", () => {
+    const repoRoot = resolve(__dirname, "../../..");
+    const realProj = realpathSync(mkdtempSync(join(repoRoot, "roll-fix376b-real-")));
+    homes.push(realProj);
+    // Create a real directory ending in /.roll — simulate the nested meta repo case
+    const nestedDir = join(realProj, ".roll");
+    mkdirSync(nestedDir, { recursive: true });
+    const nestedReal = realpathSync(nestedDir);
+    const rows: ProjectRegistryEntry[] = [
+      { name: "parent", slug: "parent", path: realProj },
+      { name: "nested-meta", slug: "nested-meta", path: nestedReal },
+    ];
+    const out = reachableProjects(rows);
+    expect(out.map((r) => r.slug)).toEqual(["parent"]);
+    expect(out.find((r) => r.slug === "nested-meta")).toBeUndefined();
   });
 
   it("degrades to [] on malformed JSON or wrong-shape rows (never throws)", () => {

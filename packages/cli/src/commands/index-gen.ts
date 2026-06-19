@@ -24,6 +24,7 @@ import { collectProjectsRegistry, reachableProjects, resolveProjectName, shouldS
 import type { CycleLedgerRow } from "../lib/cycle-ledger.js";
 import { reconciledLedger, cyclesCycleBoard } from "./cycles.js";
 import { collectAgentPanel } from "../lib/agent-panel.js";
+import { collectExternalTools } from "../lib/external-tools.js";
 import { collectReleasePanel } from "../lib/release-panel.js";
 import { collectReleaseScope } from "../lib/release-scope.js";
 import { collectSkillsPanel } from "../lib/skills-panel.js";
@@ -480,7 +481,7 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
     try {
       writeFileSync(
         join(featuresDir, "agents.html"),
-        renderAgentsMachinePage({ ...machineBar, agents: collectAgentPanel(cwd) }),
+        renderAgentsMachinePage({ ...machineBar, agents: collectAgentPanel(cwd), externalTools: collectExternalTools() }),
         "utf8",
       );
       pages += 1;

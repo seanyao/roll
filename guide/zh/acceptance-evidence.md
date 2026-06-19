@@ -81,6 +81,24 @@ soft 模式会记录缺口并发出同一类审计信号，但不阻塞本轮交
   所以声明了 `deliverable_url: .roll/features/agents.html` 的卡判为 **web** 面，
   即便其 AC 文案里提到 `roll` 命令。
 
+## 外部工具就绪度
+
+可视证据依赖机器级工具；这些工具会被显式声明，并在启动时探测：
+
+- `macOS screencapture` —— 可选的终端/GUI 截图工具。它是 macOS 内置工具，
+  但运行 `roll` 的终端需要 Screen Recording 权限。缺权限时终端/GUI 截图降级；
+  web 证据仍可走 headless Chromium。
+- `Playwright Chromium` —— 可选的 headless web 截图工具，用于 `roll attest`
+  和 dossier 截图。安装命令是 `npx playwright install chromium`。
+
+`roll doctor` 总是打印这些工具的可用性、权限状态、影响和修复命令。`roll init`
+与 `roll loop go` 在启动时跑同一套探测；交互式终端会询问是否安装/打开缺失的
+设置步骤，自动化环境默认静默，除非设置 `ROLL_EXTERNAL_TOOLS=yes` 或
+`ROLL_EXTERNAL_TOOLS=no`。选择 `no` 时会说明证据影响，然后继续，不改机器状态。
+
+机器级 Agents 页面（`.roll/features/agents.html`）也显示同一块工具状态，方便
+dossier 审阅者区分证据采集问题来自机器配置，而不是 story 代码。
+
 ## Review Score 折叠区
 
 `.roll/notes/` 里存在该 story 的评审分条目时，报告底部出现折叠的

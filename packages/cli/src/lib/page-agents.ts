@@ -25,6 +25,7 @@
  */
 import { bi } from "@roll/core";
 import type { AgentPanelRow } from "./agent-panel.js";
+import type { ExternalToolState } from "./external-tools.js";
 import {
   agentRow,
   C,
@@ -50,6 +51,8 @@ export interface AgentsPageInput {
    * output behind the Loop tab → one source of truth.
    */
   agents: AgentPanelRow[];
+  /** Machine-level external capture/auth dependencies used by evidence flows. */
+  externalTools?: ExternalToolState[];
   /** Cross-project switcher rows (read-only, US-DOSSIER-027). */
   projects?: ProjectRegistryEntry[];
   currentSlug?: string;
@@ -68,7 +71,41 @@ a{color:${C.blue};}
 .ag-row[open] .bl-caret{transform:rotate(90deg);}
 .ag-row summary:hover{background:#fbfcfe;}
 .copy-chip:hover{border-color:${C.blue};}
+.tool-row{display:grid;grid-template-columns:190px 112px 1fr;gap:14px;align-items:start;padding:14px 18px;border-top:1px solid ${C.line};}
+.tool-row:first-child{border-top:0;}
+.tool-status{${MONO}font-size:11px;text-transform:uppercase;font-weight:700;letter-spacing:.04em;}
+@media (max-width:760px){.tool-row{grid-template-columns:1fr;gap:6px;}}
 `;
+
+function toolStatusColor(status: ExternalToolState["status"]): string {
+  if (status === "ok") return C.green;
+  if (status === "permission-missing") return C.amber;
+  if (status === "missing") return C.red;
+  return C.faint;
+}
+
+function externalToolRow(tool: ExternalToolState): string {
+  const repair =
+    tool.repairCommand === undefined
+      ? ""
+      : `<button type="button" class="copy-chip" data-copy="${esc(tool.repairCommand)}" style="margin-top:8px;border:1px solid ${C.line};background:#fff;border-radius:999px;padding:5px 8px;${MONO}font-size:11px;color:${C.blue};cursor:pointer;">${esc(
+          tool.repairCommand,
+        )}</button>`;
+  return (
+    `<div class="tool-row">` +
+    `<div><b style="font-size:13px;color:${C.ink};">${esc(tool.label)}</b><div style="${MONO}font-size:11px;color:${C.faint};margin-top:4px;">${esc(
+      tool.required ? "required" : "optional",
+    )}</div></div>` +
+    `<div class="tool-status" style="color:${toolStatusColor(tool.status)};">${esc(tool.status)}</div>` +
+    `<div style="font-size:12.5px;color:${C.sub};line-height:1.55;">` +
+    `<div>${esc(tool.purpose)}</div>` +
+    `<div style="color:${C.dim};margin-top:4px;">${esc(tool.detail)}</div>` +
+    (tool.status === "ok" ? "" : `<div style="color:${C.amber};margin-top:4px;">${esc(tool.impact)}</div>`) +
+    repair +
+    `</div>` +
+    `</div>`
+  );
+}
 
 /**
  * US-DOSSIER-031 — render the machine-global Agents page. Reuses the top-bar
@@ -80,6 +117,7 @@ export function renderAgentsMachinePage(input: AgentsPageInput): string {
   const header = topBar({ ...input, machinePage: "agents" });
   const installedN = input.agents.filter((a) => a.installed).length;
   const staleN = input.agents.filter((a) => a.syncStale).length;
+  const externalTools = input.externalTools ?? [];
 
   // AC5: the fixed 72h window is stated explicitly so the number stays honest in
   // a frozen snapshot (the agent-panel.ts window note).
@@ -110,6 +148,31 @@ export function renderAgentsMachinePage(input: AgentsPageInput): string {
         )}</div>`) +
     `</section>`;
 
+  const toolHeader =
+    `<div style="display:flex;align-items:baseline;gap:12px;margin:26px 0 12px;flex-wrap:wrap;">` +
+    `<span style="${MONO}font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${C.sub};font-weight:600;white-space:nowrap;">${bi(
+      "External tools",
+      "外部工具",
+    )}</span>` +
+    `<span style="${MONO}font-size:11.5px;color:${C.faint};">${bi(
+      "machine dependencies for screenshot and web evidence",
+      "截图与网页证据的机器依赖",
+    )}</span>` +
+    `<span style="flex:1;height:1px;background:#dfe4ec;min-width:16px;"></span>` +
+    `<span style="${MONO}font-size:11.5px;color:${C.dim};white-space:nowrap;">${externalTools.filter((t) => t.status === "ok").length}/${externalTools.length} ${bi(
+      "available",
+      "可用",
+    )}</span>` +
+    `</div>`;
+
+  const toolSection =
+    externalTools.length === 0
+      ? ""
+      : toolHeader +
+        `<section style="border:1px solid ${C.line};border-radius:12px;background:${C.card};overflow:hidden;margin:0 0 8px;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
+        externalTools.map(externalToolRow).join("") +
+        `</section>`;
+
   return (
     htmlHead(rollScope(input)) +
     `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
@@ -129,6 +192,7 @@ export function renderAgentsMachinePage(input: AgentsPageInput): string {
     }) +
     sectionHeader +
     section +
+    toolSection +
     `</main>\n</body>\n</html>\n`
   );
 }

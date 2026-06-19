@@ -92,7 +92,18 @@ interface Run {
 }
 
 function tsDoctor(e: Env): Run {
-  const keys = ["PATH", "HOME", "ROLL_HOME", "_LAUNCHD_DIR", "NO_COLOR", "ROLL_LANG", "LC_ALL", "LANG", "ROLL_PKG_DIR"];
+  const keys = [
+    "PATH",
+    "HOME",
+    "ROLL_HOME",
+    "_LAUNCHD_DIR",
+    "_ROLL_EXTERNAL_TOOLS_PLATFORM",
+    "NO_COLOR",
+    "ROLL_LANG",
+    "LC_ALL",
+    "LANG",
+    "ROLL_PKG_DIR",
+  ];
   const save: Record<string, string | undefined> = {};
   for (const k of keys) save[k] = process.env[k];
   for (const k of keys) delete process.env[k];
@@ -100,6 +111,7 @@ function tsDoctor(e: Env): Run {
   process.env["HOME"] = e.home;
   process.env["ROLL_HOME"] = join(e.home, ".roll");
   process.env["_LAUNCHD_DIR"] = e.launchd;
+  process.env["_ROLL_EXTERNAL_TOOLS_PLATFORM"] = "linux";
   process.env["NO_COLOR"] = "1";
   process.env["ROLL_LANG"] = e.lang;
   if (e.pkg !== undefined) process.env["ROLL_PKG_DIR"] = e.pkg;
@@ -209,6 +221,19 @@ describe("frozen: roll doctor", () => {
       Skill catalog
       技能清单
         ✅ guide/skills.md matches skills/*/SKILL.md
+
+      External tools
+      外部工具
+
+        ? macOS screencapture — unknown
+          use: Terminal and GUI screenshot evidence on macOS.
+          macOS-only tool; not applicable on this host.
+          impact: Terminal/GUI screenshots are skipped; web evidence may fall back to headless Chromium.
+        − Playwright Chromium — missing
+          use: Headless web screenshots for attest and dossier visual evidence.
+          npx is not on PATH.
+          fix: npm install -g npm
+          impact: Web screenshot evidence is skipped when GUI capture is unavailable.
       ",
       }
     `);
@@ -266,6 +291,19 @@ describe("frozen: roll doctor", () => {
       Skill catalog
       技能清单
         ✅ guide/skills.md 与 skills/*/SKILL.md 一致
+
+      External tools
+      外部工具
+
+        ? macOS screencapture — unknown
+          use: Terminal and GUI screenshot evidence on macOS.
+          macOS-only tool; not applicable on this host.
+          impact: Terminal/GUI screenshots are skipped; web evidence may fall back to headless Chromium.
+        − Playwright Chromium — missing
+          use: Headless web screenshots for attest and dossier visual evidence.
+          npx is not on PATH.
+          fix: npm install -g npm
+          impact: Web screenshot evidence is skipped when GUI capture is unavailable.
       ",
       }
     `);
@@ -286,6 +324,19 @@ describe("frozen: roll doctor", () => {
       Skill catalog
       技能清单
         ⚠️  guide/skills.md is stale — run 'roll setup skills'
+
+      External tools
+      外部工具
+
+        ? macOS screencapture — unknown
+          use: Terminal and GUI screenshot evidence on macOS.
+          macOS-only tool; not applicable on this host.
+          impact: Terminal/GUI screenshots are skipped; web evidence may fall back to headless Chromium.
+        − Playwright Chromium — missing
+          use: Headless web screenshots for attest and dossier visual evidence.
+          npx is not on PATH.
+          fix: npm install -g npm
+          impact: Web screenshot evidence is skipped when GUI capture is unavailable.
       ",
       }
     `);
@@ -305,6 +356,19 @@ describe("frozen: roll doctor", () => {
       Skill catalog
       技能清单
         ⚠️  guide/skills.md 已过期 — 请运行 'roll setup skills'
+
+      External tools
+      外部工具
+
+        ? macOS screencapture — unknown
+          use: Terminal and GUI screenshot evidence on macOS.
+          macOS-only tool; not applicable on this host.
+          impact: Terminal/GUI screenshots are skipped; web evidence may fall back to headless Chromium.
+        − Playwright Chromium — missing
+          use: Headless web screenshots for attest and dossier visual evidence.
+          npx is not on PATH.
+          fix: npm install -g npm
+          impact: Web screenshot evidence is skipped when GUI capture is unavailable.
       ",
       }
     `);
@@ -323,6 +387,19 @@ describe("frozen: roll doctor", () => {
       Skill catalog
       技能清单
         ⚠️  guide/skills.md is stale — run 'roll setup skills'
+
+      External tools
+      外部工具
+
+        ? macOS screencapture — unknown
+          use: Terminal and GUI screenshot evidence on macOS.
+          macOS-only tool; not applicable on this host.
+          impact: Terminal/GUI screenshots are skipped; web evidence may fall back to headless Chromium.
+        − Playwright Chromium — missing
+          use: Headless web screenshots for attest and dossier visual evidence.
+          npx is not on PATH.
+          fix: npm install -g npm
+          impact: Web screenshot evidence is skipped when GUI capture is unavailable.
       ",
       }
     `);
@@ -340,6 +417,19 @@ describe("frozen: roll doctor", () => {
       Skill catalog
       技能清单
         ⚠️  guide/skills.md 已过期 — 请运行 'roll setup skills'
+
+      External tools
+      外部工具
+
+        ? macOS screencapture — unknown
+          use: Terminal and GUI screenshot evidence on macOS.
+          macOS-only tool; not applicable on this host.
+          impact: Terminal/GUI screenshots are skipped; web evidence may fall back to headless Chromium.
+        − Playwright Chromium — missing
+          use: Headless web screenshots for attest and dossier visual evidence.
+          npx is not on PATH.
+          fix: npm install -g npm
+          impact: Web screenshot evidence is skipped when GUI capture is unavailable.
       ",
       }
     `);
@@ -378,6 +468,19 @@ describe("frozen: roll doctor", () => {
         ⚠ com.roll.loop.demo
           WorkingDirectory missing: /tmp/roll-doctor-this-dir-does-not-exist-xyz
           Path is stale, clean up with: launchctl bootout gui/<UID>/com.roll.loop.demo; rm '<LAUNCHD>/com.roll.loop.demo.plist'
+
+      External tools
+      外部工具
+
+        ? macOS screencapture — unknown
+          use: Terminal and GUI screenshot evidence on macOS.
+          macOS-only tool; not applicable on this host.
+          impact: Terminal/GUI screenshots are skipped; web evidence may fall back to headless Chromium.
+        − Playwright Chromium — missing
+          use: Headless web screenshots for attest and dossier visual evidence.
+          npx is not on PATH.
+          fix: npm install -g npm
+          impact: Web screenshot evidence is skipped when GUI capture is unavailable.
       ",
       }
     `);

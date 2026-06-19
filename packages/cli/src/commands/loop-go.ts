@@ -24,6 +24,7 @@ import { projectAgent } from "./agent-list.js";
 import { cardArchiveDir } from "../lib/archive.js";
 import { storyTruthFromBacklog } from "../lib/truth-adapter.js";
 import { runPeerReview, spawnPeerReviewAgent, type SpawnPeerReviewResult } from "./peer.js";
+import { guideExternalToolSetup } from "../lib/external-tools.js";
 
 const GO_LOCK_STALE_SEC = 21_600; // 6h: covers the planned 5h goal window.
 const FINAL_REVIEW_TIMEOUT_MS = 300_000;
@@ -70,6 +71,7 @@ export interface LoopGoDeps {
   followFeed?: (projectPath: string, rollBin: string) => Promise<void>;
   runOnce: (input: RunOnceInput) => Promise<number>;
   sleep?: (ms: number) => Promise<void>;
+  externalTools?: (surface: "go") => void;
   prEvidence?: (projectPath: string, storyId: string, backlogStatus: string) => Promise<AuditPrEvidence | undefined>;
   finalReview?: (input: GoalFinalReviewInput) => Promise<GoalFinalReviewResult>;
 }
@@ -209,6 +211,7 @@ function realDeps(): LoopGoDeps {
     followFeed: followGoLiveFeed,
     runOnce: realRunOnce,
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    externalTools: guideExternalToolSetup,
     prEvidence: defaultPrEvidence,
   };
 }
@@ -1515,6 +1518,7 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
 
   const startedAt = deps.nowIso();
   const startedSec = deps.nowSec();
+  deps.externalTools?.("go");
   const sid = sessionId(startedAt, deps.pid());
   const baseline = summarizeRuns(runsPath(id.path));
   let initialUsage: RunSummary = { cycles: 0, costUsd: 0 };

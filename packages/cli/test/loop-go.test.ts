@@ -139,6 +139,7 @@ describe("US-GOAL-002 — roll loop go", () => {
   it("runs cycles back-to-back until a pause marker, then pauses the goal at the cycle boundary", async () => {
     const p = project();
     let calls = 0;
+    let externalToolChecks = 0;
     const deps: LoopGoDeps = {
       identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
       pid: () => 12345,
@@ -146,6 +147,9 @@ describe("US-GOAL-002 — roll loop go", () => {
       nowIso: () => `2026-06-11T08:00:0${calls}Z`,
       hasTmux: () => false,
       startTmux: () => false,
+      externalTools: () => {
+        externalToolChecks += 1;
+      },
       runOnce: async ({ projectPath }) => {
         calls += 1;
         const rt = join(projectPath, ".roll", "loop");
@@ -169,6 +173,7 @@ describe("US-GOAL-002 — roll loop go", () => {
     const r = await capture(() => loopGoCommand(["--worker"], deps));
 
     expect(r.code).toBe(0);
+    expect(externalToolChecks).toBe(1);
     expect(calls).toBe(2);
     expect(existsSync(join(p, ".roll", "loop", "go.lock"))).toBe(false);
     const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));

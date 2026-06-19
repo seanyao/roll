@@ -294,7 +294,15 @@ const AGENT_PROFILES: Readonly<Record<string, AgentProfile>> = {
     usesWorkspaceSandbox: false,
     ptyWhenPiped: true,
     acceptance: { canReviewHeadless: getAgentSpec("reasonix")?.canReviewHeadless === true },
-    buildSpawnCommand: (opts) => ({ bin: opts.bin ?? "reasonix", args: ["run", "--dir", opts.cwd, agentPrompt(opts)] }),
+    buildSpawnCommand: (opts) => {
+      const routedModel = opts.model?.trim();
+      const model = routedModel !== undefined && routedModel !== "" ? routedModel : getAgentSpec("reasonix")?.defaultModel ?? "deepseek-flash";
+      const maxSteps = opts.maxSteps ?? 1000;
+      return {
+        bin: opts.bin ?? "reasonix",
+        args: ["run", "--max-steps", String(maxSteps), "--model", model, "--dir", opts.cwd, agentPrompt(opts)],
+      };
+    },
     childEnv: reasonixEnv,
   },
 };
@@ -334,6 +342,10 @@ export interface AgentSpawnOptions {
   runDir?: string;
   /** Extra writable roots for agents with an explicit workspace sandbox (codex). */
   writableRoots?: string[];
+  /** Routed model, consumed by agent profiles whose CLI accepts an explicit model. */
+  model?: string;
+  /** Agent-local autonomous step budget for CLIs that expose one. */
+  maxSteps?: number;
   /** FIX-220: when the user manually triggers `roll loop now`, drop --verbose
    *  and --output-format stream-json for a human-readable terminal. */
   interactive?: boolean;

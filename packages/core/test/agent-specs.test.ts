@@ -37,7 +37,7 @@ describe("AgentSpec registry — FIX-313", () => {
   });
 
   it("declares headless-review capability only for agents the runner can spawn", () => {
-    for (const agent of ["claude", "codex", "openai", "kimi", "qwen", "pi"]) {
+    for (const agent of ["claude", "codex", "openai", "kimi", "qwen", "pi", "reasonix"]) {
       expect(agentCanReviewHeadless(agent)).toBe(true);
     }
     // FIX-360: agy (antigravity/gemini) is NOT a headless reviewer — its headless
@@ -46,6 +46,19 @@ describe("AgentSpec registry — FIX-313", () => {
     for (const agent of ["cursor", "trae", "opencode", "openclaw", "agy", "gemini", "antigravity"]) {
       expect(agentCanReviewHeadless(agent)).toBe(false);
     }
+  });
+
+  it("US-AGENT-002: declares the complete Reasonix agent spec", () => {
+    expect(getAgentSpec("reasonix")).toEqual({
+      name: "reasonix",
+      displayName: "reasonix",
+      defaultModel: "deepseek-flash",
+      canReviewHeadless: true,
+      normalizer: "generic",
+      usage: { stdoutExtractor: "generic" },
+      smokeCommand: 'reasonix run --max-steps 1 "Reply with a single word: hello"',
+    });
+    expect(agentSmokeCommand("reasonix")).toBe('reasonix run --max-steps 1 "Reply with a single word: hello"');
   });
 
   it("lets downstream support a new agent by registry-only extension", () => {

@@ -73,6 +73,7 @@ import {
 } from "./loop-sched.js";
 import { offboardCommand } from "./offboard.js";
 import { pricesCommand } from "./prices.js";
+import { pulseCommand } from "./pulse.js";
 import { releaseCommand } from "./release.js";
 import { setupCommand } from "./setup.js";
 import { SHOWCASE_USAGE, showcaseCommand } from "./showcase.js";
@@ -246,6 +247,7 @@ export function registerAll(): void {
   // `refresh` uses the native vendor registry/parser/snapshot writer; no bash
   // fallback remains (US-PORT-017). REFACTOR-051 owner review kept this as the
   // human-operated cost-accounting source.
+  registerPorted("pulse", pulseCommand);
   registerPorted("prices", pricesCommand);
   // `config`: FULLY TS now (US-PORT-006 — 整个 config 命令收口). Read surface
   // (help/--list/key read) + write surface + the three compact facades

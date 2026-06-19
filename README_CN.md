@@ -51,6 +51,7 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 | `roll backlog [sync\|block\|defer\|lint\|…]` | 查看、管理、从 GitHub Issues 同步待处理任务 |
 | `roll loop alert [list\|ack\|resolve\|log]` | 查看 / 清除 loop 告警 |
 | `roll status` | 判定优先的真相摘要，读自同一份快照——LOOP · CYCLE · RELEASE · STORY，STORY 行带 attest 验收覆盖率(`done ≡ 已合并 ∧ 已验收`)——其后是约定/AI 客户端同步健康 |
+| `roll pulse [--json]` | 今日交付脉搏：窗口内周期数、已合 merged 数、已验收 attested 数，外加一条来自故事光谱的 ASCII 火花线。双语中/EN。`--json` 输出机读 JSON |
 | `roll doctor [skills]` | 环境与安装体检(agents、技能清单、plist、launchd lanes) |
 | `roll tune [reset]` | 只建议不自动应用的自调参报告 |
 | **卡片与证据** | |

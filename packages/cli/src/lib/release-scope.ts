@@ -74,9 +74,12 @@ export interface ScopeStoryInput {
   claim?: string;
 }
 
-/** Merge truth per story: the `pr:merge` event's PR number AND its `ts`. */
+/** Merge truth per story: the merge `ts` (epoch seconds) and, when known, the
+ *  PR number. `prNumber` is optional — a git-derived merge whose commit subject
+ *  carries no `(#N)` still has a valid `ts` (consumers fall back to the Done
+ *  row's `PR#` claim). */
 interface MergeRecord {
-  prNumber: number;
+  prNumber?: number;
   ts: number;
 }
 

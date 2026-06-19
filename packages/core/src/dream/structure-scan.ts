@@ -154,23 +154,31 @@ export function buildStaticProjectGraph(input: {
   excludeGlobs?: string[];
 }): StaticProjectGraph {
   const root = resolve(input.root);
-  const tsconfigPath = input.tsconfigPath ? resolve(root, input.tsconfigPath) : findTsconfig(root);
-  if (tsconfigPath === undefined) {
+  const tsconfigPaths = input.tsconfigPath ? [resolve(root, input.tsconfigPath)] : findTsconfigs(root);
+  if (tsconfigPaths.length === 0) {
     return emptyGraph(root, "No tsconfig.json found for Dream structure scan");
   }
 
-  const config = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
-  if (config.error !== undefined) {
-    return emptyGraph(root, flattenDiagnostic(config.error));
+  const diagnostics: StaticDiagnostic[] = [];
+  const fileSet = new Set<string>();
+  let compilerOptions: ts.CompilerOptions = {};
+  for (const tsconfigPath of tsconfigPaths) {
+    const config = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
+    if (config.error !== undefined) {
+      diagnostics.push(flattenDiagnostic(config.error));
+      continue;
+    }
+    const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, dirname(tsconfigPath));
+    diagnostics.push(...parsed.errors.map(flattenDiagnostic));
+    compilerOptions = { ...compilerOptions, ...parsed.options };
+    for (const fileName of parsed.fileNames) fileSet.add(fileName);
   }
 
-  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, dirname(tsconfigPath));
-  const diagnostics = parsed.errors.map(flattenDiagnostic);
-  const fileNames = parsed.fileNames
+  const fileNames = [...fileSet]
     .filter((file) => SOURCE_EXTENSIONS.has(extname(file)))
     .filter((file) => !isExcluded(root, file));
-  const program = ts.createProgram(fileNames, parsed.options);
-  const servicesHost = createLanguageServiceHost(fileNames, parsed.options);
+  const program = ts.createProgram(fileNames, compilerOptions);
+  const servicesHost = createLanguageServiceHost(fileNames, compilerOptions);
   const languageService = ts.createLanguageService(servicesHost, ts.createDocumentRegistry());
   const sourceFiles = program
     .getSourceFiles()
@@ -189,7 +197,7 @@ export function buildStaticProjectGraph(input: {
 
   return {
     projectRoot: root,
-    tsconfigPath: normalizePath(root, tsconfigPath),
+    tsconfigPath: tsconfigPaths.map((path) => normalizePath(root, path)).join(","),
     files,
     symbols,
     imports,
@@ -294,14 +302,12 @@ function emptyGraph(root: string, error: string | StaticDiagnostic): StaticProje
   };
 }
 
-function findTsconfig(root: string): string | undefined {
+function findTsconfigs(root: string): string[] {
   const direct = join(root, "tsconfig.json");
-  if (existsSync(direct)) return direct;
-  for (const candidate of ["packages/core/tsconfig.json", "packages/cli/tsconfig.json"]) {
-    const path = join(root, candidate);
-    if (existsSync(path)) return path;
-  }
-  return undefined;
+  if (existsSync(direct)) return [direct];
+  return ["packages/spec/tsconfig.json", "packages/core/tsconfig.json", "packages/infra/tsconfig.json", "packages/cli/tsconfig.json"]
+    .map((candidate) => join(root, candidate))
+    .filter((path) => existsSync(path));
 }
 
 function createLanguageServiceHost(fileNames: readonly string[], options: ts.CompilerOptions): ts.LanguageServiceHost {

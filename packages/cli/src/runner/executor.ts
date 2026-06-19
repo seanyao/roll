@@ -1750,8 +1750,18 @@ export async function executeCommand(
           revertPrematureDone(ports, terminalStoryId, ctx.preCycleStatus);
         }
       } else if ((cmd.status === "idle" || cmd.status === "gave_up") && terminalStoryId !== "") {
-        // idle / gave_up never merged → the row goes back to 📋 Todo (re-pickable).
-        ports.backlog.markStatus?.(ports.repoCwd, terminalStoryId, STATUS_MARKER.todo);
+        // idle / gave_up never merged → the row goes back to 📋 Todo (re-pickable)
+        // — UNLESS this cycle deliberately parked it at 🚫 Hold via self-downgrade
+        // (US-AGENT-042). A too-big card runs `roll loop self-downgrade`, which
+        // flips the parent to Hold and appends sub-stories, then exits with NO TCR
+        // commits → an idle terminal. Blindly flipping it back to Todo would
+        // clobber the authoritative Hold and re-pick the too-big card forever (the
+        // harness-systemic failure FIX-364 was opened to prevent). A Hold at the
+        // terminal is a deliberate park (self-downgrade or a manual hold), never a
+        // premature claim to release — leave it.
+        if (!isParkedAtHold(ports, terminalStoryId)) {
+          ports.backlog.markStatus?.(ports.repoCwd, terminalStoryId, STATUS_MARKER.todo);
+        }
       } else if (terminalStoryId !== "") {
         // FIX-304: a failed / blocked / aborted / orphan terminal NEVER merged
         // this cycle's work to main. If the agent pre-flipped the row ✅ Done
@@ -2124,6 +2134,26 @@ export async function resolveResumeBase(
  * when it was unread or itself Done (a re-run of an already-Done card), fall back
  * to 📋 Todo so a non-merged story is left re-pickable, never falsely Done.
  */
+/**
+ * US-AGENT-042 — is the story CURRENTLY parked at 🚫 Hold in the main backlog?
+ * A self-downgrade cycle flips the picked card to Hold (and appends its
+ * sub-stories) mid-cycle, then exits with no commits → an idle terminal. The
+ * idle-terminal reconcile must NOT flip that authoritative Hold back to Todo, or
+ * the too-big card is re-picked forever. Best-effort read (mirrors
+ * {@link revertPrematureDone}); a read blip returns false so the normal release
+ * still runs.
+ */
+export function isParkedAtHold(ports: Ports, storyId: string): boolean {
+  try {
+    const rows = ports.backlog.read(ports.repoCwd) as Array<{ id: string; status?: string }>;
+    const row = rows.find((r) => r.id === storyId);
+    if (row === undefined) return false;
+    return findStatusMarker(row.status ?? "") === STATUS_MARKER.hold;
+  } catch {
+    return false;
+  }
+}
+
 export function revertPrematureDone(ports: Ports, storyId: string, preCycleStatus: string | undefined): void {
   try {
     const rows = ports.backlog.read(ports.repoCwd) as Array<{ id: string; status?: string }>;

@@ -188,6 +188,24 @@ export type RollEvent =
   // audit must SEE every waiver (release_verdict / release_waiver anchors).
   | { type: "release:gate"; tag: string; verdict: "pass" | "blocked" | "waived"; failCount: number; waivedRules: string[]; ts: number }
   | { type: "release:waiver"; reason: string; scope: string; expiresSec: number; operator: string; ts: number }
+  // Self-downgrade (US-AGENT-042) — the durable record of an automatic
+  // decomposition decision. A `capped: false` split parked the parent at 🚫 Hold
+  // and appended `childStoryIds` as fresh 📋 Todo rows (each inheriting the
+  // parent's ORIGINAL inbound deps, never the parked parent). A `capped: true`
+  // event is a REFUSED split — the chain already auto-split `chainDepth` times
+  // (≥ the cap) or the story was irreducible — so the parent is held with NO
+  // children and an ALERT is raised for human triage (US-AGENT-009 cap). The
+  // reconcile reads this so a deliberately-parked parent is NOT mistaken for a
+  // premature-done to revert at the cycle terminal.
+  | {
+      type: "story:split";
+      parentStoryId: string;
+      childStoryIds: string[];
+      reason: string;
+      chainDepth: number;
+      capped: boolean;
+      ts: number;
+    }
   // US-TRUTH-001 — the versioned complete-or-reasoned terminal record. One per
   // cycle from schema v1 on; events older than the switch are GRANDFATHERED
   // (read under legacy rules, never retro-rewritten).

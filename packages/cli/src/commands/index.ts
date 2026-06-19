@@ -62,6 +62,7 @@ import {
 import { loopPrInboxCommand } from "./loop-pr-inbox.js";
 import { runPrHeal } from "./loop-pr-heal.js";
 import { loopRunOnceCommand } from "./loop-run-once.js";
+import { loopSelfDowngradeCommand } from "./loop-self-downgrade.js";
 import {
   loopNowCommand,
   loopOffCommand,
@@ -345,6 +346,10 @@ export function registerAll(): void {
     if (args[0] === "monitor") return loopMonitorRetired();
     if (args[0] === "attach") return loopAttachRetired();
     if (args[0] === "run-once") return loopRunOnceCommand(args.slice(1));
+    // `loop self-downgrade <story> <reason> [subs]`: park a too-big story at
+    // 🚫 Hold + append its sub-stories (US-AGENT-042). The roll-build/roll-fix
+    // pre-flight and the reviewer-trigger (US-AGENT-041) invoke this.
+    if (args[0] === "self-downgrade") return loopSelfDowngradeCommand(args.slice(1));
     // `loop fmt`: the observation-window formatter (US-PORT-012) — stdin
     // stream-json → three-tier transcript. v3-native; the watch pipe feeds it.
     if (args[0] === "fmt") return loopFmtCommand(args.slice(1));

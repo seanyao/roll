@@ -31,6 +31,7 @@ import {
   buildTerminalRecord,
   dryRunPlan,
   executeCommand,
+  isParkedAtHold,
   parseEstMin,
   reasonixEnv,
   realAgentSpawn,
@@ -2008,6 +2009,49 @@ describe("executeCommand — command → executor mapping", () => {
   it("FIX-253: idle terminal releases the claimed story back to Todo", async () => {
     const markStatus = vi.fn();
     const { ports } = fakePorts({ backlog: { read: vi.fn(() => []), markStatus } });
+    await executeCommand(
+      { kind: "append_run", status: "idle", outcome: "idle_no_work", cycleId: CTX.cycleId },
+      ports,
+      CTX,
+    );
+    expect(markStatus).toHaveBeenCalledWith("/repo", "US-RUN-001", "📋 Todo");
+  });
+
+  // ── US-AGENT-042: a self-downgrade cycle parks the picked card at 🚫 Hold
+  // (and appends sub-stories), then exits with no commits → an idle terminal.
+  // The idle reconcile must NOT clobber that authoritative Hold back to Todo, or
+  // the too-big card is re-picked forever. ──────────────────────────────────
+  it("US-AGENT-042: isParkedAtHold reflects the current backlog status", () => {
+    const held = fakePorts({
+      backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "🚫 Hold" }]), markStatus: vi.fn() },
+    });
+    expect(isParkedAtHold(held.ports, "US-RUN-001")).toBe(true);
+    const todo = fakePorts({
+      backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "📋 Todo" }]), markStatus: vi.fn() },
+    });
+    expect(isParkedAtHold(todo.ports, "US-RUN-001")).toBe(false);
+    expect(isParkedAtHold(todo.ports, "US-MISSING")).toBe(false);
+  });
+
+  it("US-AGENT-042: an idle terminal does NOT release a story parked at 🚫 Hold (self-downgrade)", async () => {
+    const markStatus = vi.fn();
+    const { ports } = fakePorts({
+      // self-downgrade already flipped the picked card to Hold mid-cycle.
+      backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "🚫 Hold" }]), markStatus },
+    });
+    await executeCommand(
+      { kind: "append_run", status: "idle", outcome: "idle_no_work", cycleId: CTX.cycleId },
+      ports,
+      CTX,
+    );
+    expect(markStatus).not.toHaveBeenCalledWith("/repo", "US-RUN-001", "📋 Todo");
+  });
+
+  it("US-AGENT-042: an idle terminal STILL releases a normal 🔨 In Progress claim to Todo (no regression)", async () => {
+    const markStatus = vi.fn();
+    const { ports } = fakePorts({
+      backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "🔨 In Progress" }]), markStatus },
+    });
     await executeCommand(
       { kind: "append_run", status: "idle", outcome: "idle_no_work", cycleId: CTX.cycleId },
       ports,

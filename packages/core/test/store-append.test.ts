@@ -47,4 +47,27 @@ describe("appendBacklogRow", () => {
     expect(r.appended).toBe(true);
     expect(r.content).toContain("| [US-A-1](.roll/features/e/US-A-1/spec.md) | t | 📋 Todo |");
   });
+
+  // US-AGENT-042 — self-downgrade children carry depends-on + chain_depth tags.
+  it("appends chain_depth + depends-on tags to the Description cell when given", () => {
+    const r = appendBacklogRow(BASE, {
+      id: "US-PAY-002",
+      title: "chargebacks",
+      epic: "payments",
+      dependsOn: ["US-PAY-001", "US-1"],
+      chainDepth: 1,
+    });
+    const lines = r.content.split("\n");
+    const idx = lines.findIndex((l) => l.includes("US-PAY-002"));
+    expect(lines[idx]).toBe(
+      "| [US-PAY-002](.roll/features/payments/US-PAY-002/spec.md) | chargebacks chain_depth:1 depends-on:US-PAY-001,US-1 | 📋 Todo |",
+    );
+  });
+
+  it("omits the tags (byte-identical to a bare row) when absent / empty / zero", () => {
+    const a = appendBacklogRow(BASE, { id: "US-PAY-003", title: "x", epic: "payments" });
+    const b = appendBacklogRow(BASE, { id: "US-PAY-003", title: "x", epic: "payments", dependsOn: [], chainDepth: 0 });
+    expect(a.content).toBe(b.content);
+    expect(a.content).toContain("| [US-PAY-003](.roll/features/payments/US-PAY-003/spec.md) | x | 📋 Todo |");
+  });
 });

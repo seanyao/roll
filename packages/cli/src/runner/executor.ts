@@ -71,6 +71,7 @@ import {
   type WarmSessionEntry,
   type CycleObserverState,
   type ObservedCommit,
+  baselineCommits,
   newCycleObserverState,
   observeBuildStart,
   observeCommits,
@@ -389,7 +390,7 @@ const OBSERVE_POLL_MS = 5_000;
  * {@link maybeBuildHeartbeat}; this is just the I/O loop (git read + event
  * append). Best-effort throughout: observation must NEVER fail the cycle.
  */
-function startCycleObserver(ports: Ports, cycleId: string): { stop(): Promise<void> } {
+async function startCycleObserver(ports: Ports, cycleId: string): Promise<{ stop(): Promise<void> }> {
   if (cycleId === "") return { stop: async () => {} };
   const st: CycleObserverState = newCycleObserverState(cycleId);
   const emit = (events: RollEvent[]): void => {
@@ -402,6 +403,11 @@ function startCycleObserver(ports: Ports, cycleId: string): { stop(): Promise<vo
     }
   };
   const pollGapMs = Number((process.env["ROLL_OBSERVE_POLL_MS"] ?? "").trim()) || OBSERVE_POLL_MS;
+  try {
+    baselineCommits(await ports.git.recentCommits(ports.paths.worktreePath), st);
+  } catch {
+    /* baseline is best-effort; observation must not block the cycle */
+  }
   emit(observeBuildStart(st, Date.now()));
   let running = false;
   const tick = async (): Promise<void> => {
@@ -792,7 +798,7 @@ export async function executeCommand(
       // git commits on the worktree branch + the wall clock — and DERIVES standard
       // cycle:tcr / cycle:phase / build-heartbeat events into events.ndjson. It
       // never parses the agent's stdout, so a single path serves EVERY agent.
-      const observer = startCycleObserver(ports, ctx.cycleId ?? "");
+      const observer = await startCycleObserver(ports, ctx.cycleId ?? "");
       // FIX-338 (Phase B 杠杆2): when `loop_safety.project_map: true`, PREPEND a
       // concise, bounded project map into the working agent's initial context so it
       // doesn't burn execute time on sed/rg exploration. Agent-agnostic (one prompt

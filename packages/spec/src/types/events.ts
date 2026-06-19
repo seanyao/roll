@@ -21,7 +21,7 @@ export type RollEvent =
   | { type: "cycle:start"; cycleId: string; storyId: string; agent: AgentId; model: string; ts: number }
   | { type: "cycle:phase"; cycleId: string; phase: CyclePhase; ts: number }
   | { type: "cycle:stdout"; cycleId: string; data: string; ts: number }
-  | { type: "cycle:tcr"; cycleId: string; commitHash: string; message: string; ts: number }
+  | { type: "cycle:tcr"; cycleId: string; commitHash: string; message: string; ts: number; commitTs?: number }
   | { type: "cycle:first_edit"; cycleId: string; commitHash: string; ts: number }
   | { type: "cycle:end"; cycleId: string; outcome: TerminalOutcome; cost: CycleCost; ts: number }
   // Routing (BC3) — auditable, reproducible (I10)

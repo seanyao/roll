@@ -8,7 +8,7 @@
  *
  *   - observeBuildStart fires the execute-phase marker exactly once;
  *   - observeCommits emits one cycle:tcr per NEW commit, dedupes across snapshots,
- *     preserves git timestamps (so per-commit timing is real), order-stable;
+ *     uses observation time for event ordering and preserves commitTs for audit;
  *   - maybeBuildHeartbeat beats only after the quiet gap, and a fresh commit
  *     resets the baseline (a commit IS liveness).
  */
@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 import type { RollEvent } from "@roll/spec";
 import {
   BUILD_HEARTBEAT_GAP_MS,
+  baselineCommits,
   maybeBuildHeartbeat,
   newCycleObserverState,
   observeBuildStart,
@@ -38,7 +39,7 @@ describe("cycle-observer — runner-derived standard signals (agent-agnostic)", 
     expect(observeBuildStart(st, 2_000)).toEqual([]);
   });
 
-  it("observeCommits emits one cycle:tcr per NEW commit, in order, with git ts", () => {
+  it("observeCommits emits one cycle:tcr per NEW commit, in order, with observation ts and commitTs", () => {
     const st = newCycleObserverState(CYCLE);
     const out = observeCommits(
       [commit("aaa111", "tcr: red", 1700000010), commit("bbb222", "tcr: green", 1700000040)],
@@ -47,9 +48,23 @@ describe("cycle-observer — runner-derived standard signals (agent-agnostic)", 
     );
     expect(out).toEqual<RollEvent[]>([
       // FIX-357: cycle:first_edit precedes the FIRST commit's cycle:tcr (emitted once).
-      { type: "cycle:first_edit", cycleId: CYCLE, commitHash: "aaa111", ts: 1700000010000 },
-      { type: "cycle:tcr", cycleId: CYCLE, commitHash: "aaa111", message: "tcr: red", ts: 1700000010000 },
-      { type: "cycle:tcr", cycleId: CYCLE, commitHash: "bbb222", message: "tcr: green", ts: 1700000040000 },
+      { type: "cycle:first_edit", cycleId: CYCLE, commitHash: "aaa111", ts: 5_000 },
+      { type: "cycle:tcr", cycleId: CYCLE, commitHash: "aaa111", message: "tcr: red", ts: 5_000, commitTs: 1700000010000 },
+      { type: "cycle:tcr", cycleId: CYCLE, commitHash: "bbb222", message: "tcr: green", ts: 5_000, commitTs: 1700000040000 },
+    ]);
+  });
+
+  it("baselines commits already present at observer startup", () => {
+    const st = newCycleObserverState(CYCLE);
+    baselineCommits([commit("old111", "tcr: old", 1700000000), commit("", "garbage", 1700000001)], st);
+    const out = observeCommits(
+      [commit("old111", "tcr: old", 1700000000), commit("new222", "tcr: new", 1700000100)],
+      st,
+      9_000,
+    );
+    expect(out).toEqual<RollEvent[]>([
+      { type: "cycle:first_edit", cycleId: CYCLE, commitHash: "new222", ts: 9_000 },
+      { type: "cycle:tcr", cycleId: CYCLE, commitHash: "new222", message: "tcr: new", ts: 9_000, commitTs: 1700000100000 },
     ]);
   });
 
@@ -62,12 +77,11 @@ describe("cycle-observer — runner-derived standard signals (agent-agnostic)", 
     expect(later.map((e) => e.type)).toEqual(["cycle:tcr"]);
   });
 
-  it("cycle:first_edit ts is epoch milliseconds, matching cycle:phase (FIX-352 unit guard)", () => {
+  it("cycle:first_edit ts is the observation time, matching cycle:phase units", () => {
     const st = newCycleObserverState(CYCLE);
     const out = observeCommits([commit("aaa111", "tcr: red", 1700000010)], st, 5_000);
     const fe = out.find((e) => e.type === "cycle:first_edit") as { ts: number };
-    expect(fe.ts).toBe(1700000010000);
-    expect(fe.ts).toBeGreaterThanOrEqual(1e12);
+    expect(fe.ts).toBe(5_000);
   });
 
   it("a zero-commit / empty-hash poll emits no cycle:first_edit", () => {
@@ -88,10 +102,11 @@ describe("cycle-observer — runner-derived standard signals (agent-agnostic)", 
     expect(second.map((e) => (e as { commitHash: string }).commitHash)).toEqual(["ccc333"]);
   });
 
-  it("falls back to nowMs when a commit ts is missing/zero", () => {
+  it("omits commitTs when a commit ts is missing/zero", () => {
     const st = newCycleObserverState(CYCLE);
     const out = observeCommits([commit("ddd444", "tcr: no-ts", 0)], st, 9_000);
     expect((out[0] as { ts: number }).ts).toBe(9_000);
+    expect(out[1]).toEqual({ type: "cycle:tcr", cycleId: CYCLE, commitHash: "ddd444", message: "tcr: no-ts", ts: 9_000 });
   });
 
   it("ignores empty-hash rows defensively", () => {

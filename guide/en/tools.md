@@ -96,9 +96,76 @@ network.fetch      network     yes      30000    -      network=restricted
 
 Use it after editing `.roll/policy.yaml` to confirm Roll sees the intended state.
 
+## Complete Example
+
+This example locks browser screenshots to a local dev server, confirms the effective policy, and then verifies where the tool evidence appears after a delivery.
+
+1. Configure browser and network policy for the project:
+
+```yaml
+tools:
+  browser.screenshot:
+    timeoutMs: 60000
+    sandbox:
+      headlessOnly: true
+      allowedOrigins: [http://localhost:4173]
+
+  network.fetch:
+    timeoutMs: 10000
+    retry:
+      attempts: 2
+      backoffMs: 250
+    sandbox:
+      network: restricted
+      allowedOrigins: [http://localhost:4173]
+```
+
+2. Confirm Roll resolved the policy:
+
+```bash
+roll tool status
+```
+
+Expected rows:
+
+```text
+browser.screenshot browser     yes      60000    -      allowedOrigins=http://localhost:4173,headlessOnly=true,maxOutputBytes=2097152
+network.fetch      network     yes      10000    -      allowedOrigins=http://localhost:4173,network=restricted
+```
+
+3. Run a delivery that has a visible web surface. The story spec should declare the page it wants captured:
+
+```yaml
+---
+deliverable_url: http://localhost:4173
+---
+```
+
+During attest, Roll captures the page through `browser.screenshot`. The exposed Roll tool id is `browser.screenshot`; Playwright or Chrome may be used underneath, but `playwright` is not a policy key or tool id.
+
+4. Inspect the evidence:
+
+```bash
+roll cycle <cycle-id>
+```
+
+Look for rows like:
+
+```text
+tools browser.screenshot×1(2.0s) network.fetch×1(0.4s)
+```
+
+In the attest report and Delivery Dossier, the same event stream appears as:
+
+| Evidence | What to check |
+|----------|---------------|
+| `tool:invoke` | Tool id, caller cycle, resolved policy. |
+| `tool:result` | Success or error code, duration, output path. |
+| Screenshot link | A `.roll/tool-dumps/...png` or attached card screenshot path. |
+| Cost row | Currency is preserved as USD, CNY/RMB, or `¥`; mixed currencies are not collapsed into one fake total. |
+
 ## Evidence And Cost
 
 `roll loop status`, `roll cycle`, attest reports, and the Delivery Dossier show tool summaries from the event stream. Failed tool calls keep their error codes, and screenshot tools can link directly to captured images.
 
 Tool costs preserve their native currency. USD rows stay USD. CNY/RMB rows stay CNY/RMB or `¥`. Roll does not relabel RMB-denominated tool or model costs as dollars and does not blindly add mixed currencies into one number.
-

@@ -96,9 +96,76 @@ network.fetch      network     yes      30000    -      network=restricted
 
 修改 `.roll/policy.yaml` 后，可以用它确认 Roll 读到的状态符合预期。
 
+## 完整示例
+
+这个示例把浏览器截图限制在本地 dev server，先确认有效 policy，再说明一次交付完成后应该去哪里看工具证据。
+
+1. 为项目配置 browser 和 network policy：
+
+```yaml
+tools:
+  browser.screenshot:
+    timeoutMs: 60000
+    sandbox:
+      headlessOnly: true
+      allowedOrigins: [http://localhost:4173]
+
+  network.fetch:
+    timeoutMs: 10000
+    retry:
+      attempts: 2
+      backoffMs: 250
+    sandbox:
+      network: restricted
+      allowedOrigins: [http://localhost:4173]
+```
+
+2. 确认 Roll 解析到的 policy：
+
+```bash
+roll tool status
+```
+
+预期能看到这些行：
+
+```text
+browser.screenshot browser     yes      60000    -      allowedOrigins=http://localhost:4173,headlessOnly=true,maxOutputBytes=2097152
+network.fetch      network     yes      10000    -      allowedOrigins=http://localhost:4173,network=restricted
+```
+
+3. 跑一个有可视网页面的交付。故事 spec 应声明要截图的页面：
+
+```yaml
+---
+deliverable_url: http://localhost:4173
+---
+```
+
+attest 阶段会通过 `browser.screenshot` 捕获这个页面。对 Roll 暴露的工具 id 是 `browser.screenshot`；底层可能使用 Playwright 或 Chrome，但 `playwright` 不是 policy key，也不是工具 id。
+
+4. 检查证据：
+
+```bash
+roll cycle <cycle-id>
+```
+
+寻找类似这样的行：
+
+```text
+tools browser.screenshot×1(2.0s) network.fetch×1(0.4s)
+```
+
+attest report 和 Delivery Dossier 会从同一条事件流展示：
+
+| 证据 | 检查点 |
+|------|--------|
+| `tool:invoke` | 工具 id、调用 cycle、合成后的 policy。 |
+| `tool:result` | 成功或 errorCode、耗时、输出路径。 |
+| 截图链接 | `.roll/tool-dumps/...png` 或卡片目录里附加的截图路径。 |
+| 成本行 | 保留 USD、CNY/RMB 或 `¥`；混合币种不会被折成一个假的总额。 |
+
 ## 证据与成本
 
 `roll loop status`、`roll cycle`、attest report 和 Delivery Dossier 都会从事件流展示工具摘要。失败的工具调用保留 errorCode，截图工具可以直接链接到图片证据。
 
 工具成本保留原生币种。美元行仍是 USD。人民币行仍是 CNY/RMB 或 `¥`。Roll 不会把人民币计价的工具或模型成本标成美元，也不会把混合币种盲目加成一个数字。
-

@@ -35,6 +35,7 @@
 | guide/en/project-setup.md | Roll — Project Setup | guide | 2026-05-28 |
 | guide/en/skills.md | Roll Skill Selection Guide | guide | 2026-05-19 |
 | guide/en/test-isolation.md | Roll — Test Isolation (roll test) | guide | 2026-05-28 |
+| guide/en/tools.md | Roll — Tools & Policy | guide | 2026-06-19 |
 | guide/en/testing.md | Roll — Testing Workflow | guide | 2026-05-23 |
 | guide/en/testing/quality-rubric.md | Test Quality Rubric | guide | 2026-05-23 |
 | guide/zh/ai-agents.md | Roll — AI Agent 支持 | guide | 2026-05-28 |
@@ -64,6 +65,7 @@
 | guide/zh/project-setup.md | Roll — 项目初始化 | guide | 2026-05-28 |
 | guide/zh/skills.md | Roll 技能选择指南 | guide | 2026-05-19 |
 | guide/zh/test-isolation.md | Roll — 测试隔离（roll test）| guide | 2026-05-28 |
+| guide/zh/tools.md | Roll — 工具与策略 | guide | 2026-06-19 |
 | guide/zh/testing.md | Roll — 测试工作流 | guide | 2026-05-23 |
 | guide/zh/testing/quality-rubric.md | 测试质量评分卷 | guide | 2026-05-23 |
 | lib/agent_usage/README.md | Agent Usage Tracking | module | — |

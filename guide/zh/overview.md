@@ -143,6 +143,7 @@ Roll 支持三种接入模式，按项目起点选择 —— 决策树见
 |------|------|
 | 第一次跑通项目 | [getting-started.md](getting-started.md) |
 | 调度、子命令、tmux 可见性 | [loop.md](loop.md) |
+| 受治理的工具注册表与策略 | [tools.md](tools.md) |
 | 夜间代码健康巡检与 REFACTOR 生成 | [dream.md](dream.md) |
 | 跨 Agent 评审协议 | [peer.md](peer.md) |
 | 完整技能目录 | [skills.md](skills.md) |

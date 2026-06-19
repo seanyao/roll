@@ -75,6 +75,7 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 | `roll doctor skills [--strict] [--json]` | 严格技能审计(技能 · 违规 · hub 行数 + 四组调用频次——与 web Skills 页同口径) |
 | `roll setup skills` | 同步 `guide/skills.md` 技能目录 |
 | `roll doc [--lang en\|zh] [name]` | 在终端查看 Charter / 语言指南文档(`--lang` 缺省回落到配置语言) |
+| `roll tool status` | 查看已注册工具及其有效 `.roll/policy.yaml` 状态 |
 | `roll prices [refresh]` | 模型价目表(成本核算来源) |
 | `roll setup [skills\|-f]` | 首次安装、生成技能目录或重新同步约定到所有 AI 客户端 |
 | `roll update` | 升级到最新版本并重新同步 |
@@ -112,7 +113,7 @@ template/      roll init 安装的项目脚手架
 | | |
 |---|---|
 | **从这里开始** | [快速上手](guide/zh/getting-started.md) · [概述与架构](guide/zh/overview.md) · [工程方法论](guide/zh/methodology.md) |
-| **日常使用** | [Loop（自主执行器）](guide/zh/loop.md) · [配置](guide/zh/configuration.md) · [价格与成本](guide/zh/pricing.md) · [FAQ](guide/zh/faq.md) |
+| **日常使用** | [Loop（自主执行器）](guide/zh/loop.md) · [工具与策略](guide/zh/tools.md) · [配置](guide/zh/configuration.md) · [价格与成本](guide/zh/pricing.md) · [FAQ](guide/zh/faq.md) |
 | **质量机制** | [验收证据（`roll attest`）](guide/zh/acceptance-evidence.md) · [证据生命周期](guide/zh/acceptance-evidence.md#三段式生命周期) · [一致性与发版闸](guide/zh/consistency.md) · [跨 Agent 配对](guide/zh/pairing.md) · [Peer 评审](guide/zh/peer.md) · [测试隔离](guide/zh/test-isolation.md) |
 | **底层设计** | [架构：分层·领域·不变量](docs/architecture.md) · [验证体系](docs/verification.md) · [理念宣言](docs/manifesto.md) |
 

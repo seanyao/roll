@@ -40,6 +40,8 @@
 
 - **既有 infra 调用迁移到工具治理路径**:process exec、git/gh wrapper 和默认 web screenshot 现在会经 infra tool delegation seam 执行,保留原命令语义的同时向 events.ndjson 追加脱敏 tool invoke/result 事件。(US-TOOL-014) `[tools-layer]`
 
+- **工具层文档和状态命令落地**:新增英文/中文 Tools guide 与 `roll tool status`,用户可以查看注册工具、有效 policy 状态、CLI/Dashboard 工具用量入口和原生币种成本边界。(US-TOOL-015) `[tools-layer]`
+
 ## v3.618.3 — 2026-06-18
 
 ### 修复

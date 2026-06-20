@@ -1,4 +1,4 @@
-import type { RollEvent, CycleActivityEvent, CyclePhase } from "@roll/spec";
+import type { RollEvent, CycleActivityEvent } from "@roll/spec";
 import type { ActivityKind, ActivitySignal, Segment } from "./activity-signal.js";
 import { signalKindForMarker } from "./signals.js";
 import { extractCycleSignals, type TimelineEntry } from "./transcript.js";

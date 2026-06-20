@@ -4,6 +4,12 @@
 
 ### 修复
 
+- **watch 事件行时间戳与状态行统一显示设备本地时区**：之前事件行硬编码 UTC 渲染（`getUTCHours`），状态行却走本地时区，同屏出现时差；`cycle:terminal`、`report:morning` 等事件类型也落到了 "unsupported event" 无意义渲染。现在时间戳统一走设备本地时区，新增 `cycle:terminal` 和 `report:morning` 的显式渲染，未知事件干净降级不再显示 "unsupported event"。(FIX-385) `[loop-engine]`
+
+- **loop 不再盲目重选「在飞」的卡**：发 PR 后卡↔PR 连接不再断裂（`pr=None` 根治），reconcile 对 gh 探测失败也稳健守住 🔨，CI 红不再只是报警——走 fix-forward 恢复原分支修而非从头重选。(FIX-384) `[loop-engine]`
+
+- `roll loop watch` 状态行现在正确显示故事和 agent `[loop]`
+
 - **无人值守 loop 现在能为可视卡真正截图，不再空转挂起**：之前 loop 在 cycle 工作树里跑网页截图时，因为工作树没装 playwright 依赖（`require('playwright')` 找不到模块）就直接跳过，带页面证据的卡验收报告成了空壳、纠正熔断把整条 loop 停掉。现在截图失败会自动回退到能在工作树里跑、且会自愈安装浏览器的 headless 命令行路径，可视卡得以在无人值守下真正截图并交付。(FIX-379) `[acceptance-evidence]`
 
 ## v3.620.1 — 2026-06-20

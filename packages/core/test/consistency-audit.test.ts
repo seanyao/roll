@@ -11,8 +11,11 @@ import { describe, expect, it } from "vitest";
 import {
   emptyAuditSnapshot,
   runConsistencyAudit,
+  correctBacklogStatus,
   type AuditSnapshot,
 } from "../src/index.js";
+import type { DeliveryRecord } from "@roll/spec";
+import { present, absent } from "@roll/spec";
 
 /** Schema epoch for these tests: 2026-06-11T00:00:00Z. */
 const EPOCH = Date.UTC(2026, 5, 11) / 1000;
@@ -241,6 +244,280 @@ describe("rule local-main-ahead — FIX-252 local main is not a publish endpoint
     expect(r.findings).toContainEqual(
       expect.objectContaining({ rule: "local-main-ahead", severity: "fail", subject: "main" }),
     );
+  });
+});
+
+// ── US-TRUTH-018: claim-drift rule ──────────────────────────────────────────
+
+describe("rule claim-drift — backlog status vs structured delivery truth", () => {
+  function deliveryRecord(overrides: Partial<DeliveryRecord> = {}): DeliveryRecord {
+    return {
+      storyId: "US-DRIFT",
+      cycleId: "cycle-001",
+      lifecycleState: "in_flight",
+      prNumber: present(42),
+      prUrl: present("https://gh/pull/42"),
+      mergedAt: absent("not_merged"),
+      mergeCommit: absent("not_merged"),
+      recordedAt: 1000,
+      ...overrides,
+    };
+  }
+
+  // AC4: injected drift samples → audit catches all
+
+  it("backlog ✅ Done but truth not delivered → fail (premature Done)", () => {
+    const r = runConsistencyAudit(
+      snap({
+        backlog: [{ id: "US-PREMATURE", status: "✅ Done" }],
+        deliveries: [
+          deliveryRecord({ storyId: "US-PREMATURE", lifecycleState: "in_flight" }),
+        ],
+      }),
+    );
+    const drift = r.findings.filter((f) => f.rule === "claim-drift" && f.subject === "US-PREMATURE");
+    expect(drift).toHaveLength(1);
+    expect(drift[0]!.severity).toBe("fail");
+    expect(drift[0]!.detail).toContain("🔨 In Progress");
+    expect(drift[0]!.detail).toContain("lifecycle=in_flight");
+    expect(drift[0]!.detail).toContain("delivered=false");
+  });
+
+  it("backlog 📋 Todo but truth in_flight → warn (lagging view)", () => {
+    const r = runConsistencyAudit(
+      snap({
+        backlog: [{ id: "US-LAGGING", status: "📋 Todo" }],
+        deliveries: [
+          deliveryRecord({ storyId: "US-LAGGING", lifecycleState: "in_flight", prNumber: present(99) }),
+        ],
+      }),
+    );
+    const drift = r.findings.filter((f) => f.rule === "claim-drift" && f.subject === "US-LAGGING");
+    expect(drift).toHaveLength(1);
+    expect(drift[0]!.severity).toBe("warn");
+    expect(drift[0]!.detail).toContain("📋 Todo");
+    expect(drift[0]!.detail).toContain("🔨 In Progress");
+  });
+
+  it("backlog 🔨 In Progress but truth done → warn (lagging view, not premature)", () => {
+    const r = runConsistencyAudit(
+      snap({
+        backlog: [{ id: "US-STALE-PROGRESS", status: "🔨 In Progress" }],
+        deliveries: [
+          deliveryRecord({
+            storyId: "US-STALE-PROGRESS",
+            lifecycleState: "done",
+            prNumber: present(10),
+            mergedAt: present(2000),
+            mergeCommit: present("abc123def"),
+          }),
+        ],
+      }),
+    );
+    const drift = r.findings.filter((f) => f.rule === "claim-drift" && f.subject === "US-STALE-PROGRESS");
+    expect(drift).toHaveLength(1);
+    expect(drift[0]!.severity).toBe("warn");
+    expect(drift[0]!.detail).toContain("🔨 In Progress");
+    expect(drift[0]!.detail).toContain("✅ Done");
+  });
+
+  it("backlog status matches truth → no finding", () => {
+    const r = runConsistencyAudit(
+      snap({
+        backlog: [{ id: "US-MATCH", status: "🔨 In Progress" }],
+        deliveries: [
+          deliveryRecord({ storyId: "US-MATCH", lifecycleState: "in_flight", prNumber: present(42) }),
+        ],
+      }),
+    );
+    expect(r.findings.filter((f) => f.rule === "claim-drift")).toHaveLength(0);
+  });
+
+  it("backlog Done matches truth done → no finding", () => {
+    const r = runConsistencyAudit(
+      snap({
+        backlog: [{ id: "US-DONE-MATCH", status: "✅ Done" }],
+        deliveries: [
+          deliveryRecord({
+            storyId: "US-DONE-MATCH",
+            lifecycleState: "done",
+            prNumber: present(1),
+            mergedAt: present(2000),
+            mergeCommit: present("abc"),
+            recordedAt: 5000,
+          }),
+        ],
+      }),
+    );
+    expect(r.findings.filter((f) => f.rule === "claim-drift")).toHaveLength(0);
+  });
+
+  it("no delivery records in snapshot → rule silently skipped (no findings)", () => {
+    const r = runConsistencyAudit(
+      snap({
+        backlog: [{ id: "US-NO-DEL", status: "✅ Done" }],
+        // deliveries absent
+      }),
+    );
+    expect(r.findings.filter((f) => f.rule === "claim-drift")).toHaveLength(0);
+  });
+
+  it("empty deliveries array → rule skipped", () => {
+    const r = runConsistencyAudit(
+      snap({
+        backlog: [{ id: "US-EMPTY", status: "📋 Todo" }],
+        deliveries: [],
+      }),
+    );
+    expect(r.findings.filter((f) => f.rule === "claim-drift")).toHaveLength(0);
+  });
+
+  it("story with no delivery records → skipped (backlog is the only truth)", () => {
+    const r = runConsistencyAudit(
+      snap({
+        backlog: [{ id: "US-NO-MATCH", status: "📋 Todo" }],
+        deliveries: [
+          deliveryRecord({ storyId: "US-OTHER", lifecycleState: "in_flight" }),
+        ],
+      }),
+    );
+    expect(r.findings.filter((f) => f.rule === "claim-drift" && f.subject === "US-NO-MATCH")).toHaveLength(0);
+  });
+
+  it("multiple stories, mixed drift — all caught", () => {
+    const r = runConsistencyAudit(
+      snap({
+        backlog: [
+          { id: "US-A", status: "✅ Done" },
+          { id: "US-B", status: "📋 Todo" },
+          { id: "US-C", status: "🔨 In Progress" },
+        ],
+        deliveries: [
+          deliveryRecord({ storyId: "US-A", lifecycleState: "in_flight" }), // premature Done → fail
+          deliveryRecord({ storyId: "US-B", lifecycleState: "in_flight", prNumber: present(5) }), // lagging → warn
+          deliveryRecord({ storyId: "US-C", lifecycleState: "in_flight", prNumber: present(7) }), // match → ok
+        ],
+      }),
+    );
+    const drifts = r.findings.filter((f) => f.rule === "claim-drift");
+    expect(drifts).toHaveLength(2);
+    const failSubjects = drifts.filter((f) => f.severity === "fail").map((f) => f.subject);
+    const warnSubjects = drifts.filter((f) => f.severity === "warn").map((f) => f.subject);
+    expect(failSubjects).toContain("US-A");
+    expect(warnSubjects).toContain("US-B");
+  });
+
+  it("backlog Done with annotation suffix still matches truth Done (normalization)", () => {
+    const r = runConsistencyAudit(
+      snap({
+        backlog: [{ id: "US-ANNOTATED", status: "✅ Done · evidence(.roll/features/...)" }],
+        deliveries: [
+          deliveryRecord({
+            storyId: "US-ANNOTATED",
+            lifecycleState: "done",
+            prNumber: present(1),
+            mergedAt: present(2000),
+            mergeCommit: present("abc"),
+            recordedAt: 5000,
+          }),
+        ],
+      }),
+    );
+    expect(r.findings.filter((f) => f.rule === "claim-drift")).toHaveLength(0);
+  });
+});
+
+// ── US-TRUTH-018 AC2: correctBacklogStatus ─────────────────────────────────
+
+describe("US-TRUTH-018 AC2 — correctBacklogStatus", () => {
+  function deliveryRecord(overrides: Partial<DeliveryRecord> = {}): DeliveryRecord {
+    return {
+      storyId: "US-CORRECT",
+      cycleId: "cycle-001",
+      lifecycleState: "in_flight",
+      prNumber: present(42),
+      prUrl: present("https://gh/pull/42"),
+      mergedAt: absent("not_merged"),
+      mergeCommit: absent("not_merged"),
+      recordedAt: 1000,
+      ...overrides,
+    };
+  }
+
+  it("returns corrected status when backlog shows Todo but truth is in_flight", () => {
+    const result = correctBacklogStatus(
+      "US-CORRECT",
+      "📋 Todo",
+      [deliveryRecord({ storyId: "US-CORRECT", lifecycleState: "in_flight", prNumber: present(99) })],
+    );
+    expect(result).toBe("🔨 In Progress · PR#99");
+  });
+
+  it("returns corrected status when backlog shows Done but truth is in_flight (premature)", () => {
+    const result = correctBacklogStatus(
+      "US-CORRECT",
+      "✅ Done",
+      [deliveryRecord({ storyId: "US-CORRECT", lifecycleState: "in_flight", prNumber: present(10) })],
+    );
+    expect(result).toBe("🔨 In Progress · PR#10");
+  });
+
+  it("returns null when status already matches truth", () => {
+    const result = correctBacklogStatus(
+      "US-CORRECT",
+      "🔨 In Progress",
+      [deliveryRecord({ storyId: "US-CORRECT", lifecycleState: "in_flight", prNumber: present(42) })],
+    );
+    expect(result).toBeNull();
+  });
+
+  it("returns null when no delivery records exist for the story", () => {
+    const result = correctBacklogStatus(
+      "US-NO-RECORDS",
+      "📋 Todo",
+      [deliveryRecord({ storyId: "US-OTHER" })],
+    );
+    expect(result).toBeNull();
+  });
+
+  it("returns null when deliveries array is empty", () => {
+    const result = correctBacklogStatus("US-EMPTY", "📋 Todo", []);
+    expect(result).toBeNull();
+  });
+
+  it("correctStatus for done → derived display includes merge commit", () => {
+    const result = correctBacklogStatus(
+      "US-CORRECT",
+      "🔨 In Progress",
+      [
+        deliveryRecord({
+          storyId: "US-CORRECT",
+          lifecycleState: "done",
+          prNumber: present(1),
+          mergedAt: present(2000),
+          mergeCommit: present("deadbeefcafe"),
+          recordedAt: 5000,
+        }),
+      ],
+    );
+    expect(result).toBe("✅ Done · merged deadbee");
+  });
+
+  it("does not modify human-written fields — only returns the status string", () => {
+    // The function returns ONLY the status string. The caller (BacklogStore)
+    // replaces just the status cell in the markdown row, leaving the title,
+    // priority annotations, etc. untouched. Here we verify the function
+    // signature is correct: it takes a status string and returns a status
+    // string, never full markdown rows.
+    const result = correctBacklogStatus(
+      "US-CORRECT",
+      "📋 Todo",
+      [deliveryRecord({ storyId: "US-CORRECT", lifecycleState: "in_flight", prNumber: present(5) })],
+    );
+    expect(typeof result).toBe("string");
+    expect(result).toContain("PR#5");
+    // The result is a clean status cell — no markdown row wrapping
+    expect(result).not.toContain("|");
   });
 });
 

@@ -1,0 +1,143 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`cycleActivityFromEvents — AC3 agent-agnostic projection > produces a stable, deterministic output from a known fixture (snapshot) 1`] = `
+[
+  {
+    "agent": "claude",
+    "cycle_id": "cycle-20260620-1",
+    "kind": "lifecycle",
+    "payload": {
+      "detail": "US-OBS-026",
+      "event": "cycle:start",
+    },
+    "ts": 1000,
+  },
+  {
+    "agent": "claude",
+    "cycle_id": "cycle-20260620-1",
+    "kind": "phase",
+    "payload": {
+      "phase": "execute",
+    },
+    "ts": 2000,
+  },
+  {
+    "agent": "claude",
+    "cycle_id": "cycle-20260620-1",
+    "kind": "tcr",
+    "payload": {
+      "commitHash": "abc1234def",
+      "firstEdit": true,
+      "message": "first edit",
+    },
+    "ts": 30000,
+  },
+  {
+    "agent": "claude",
+    "cycle_id": "cycle-20260620-1",
+    "kind": "tcr",
+    "payload": {
+      "commitHash": "abc1234def",
+      "commitTs": 30000,
+      "firstEdit": false,
+      "message": "tcr: define CycleActivityEvent type",
+    },
+    "ts": 31000,
+  },
+  {
+    "agent": "claude",
+    "cycle_id": "cycle-20260620-1",
+    "kind": "tcr",
+    "payload": {
+      "commitHash": "def5678abc",
+      "commitTs": 59000,
+      "firstEdit": false,
+      "message": "tcr: add projection function",
+    },
+    "ts": 60000,
+  },
+  {
+    "agent": "claude",
+    "cycle_id": "cycle-20260620-1",
+    "kind": "stdout",
+    "payload": {
+      "data": "heartbeat: building · still working (1) · 2m quiet · 2 tcr so far",
+    },
+    "ts": 120000,
+  },
+  {
+    "agent": "claude",
+    "cycle_id": "cycle-20260620-1",
+    "kind": "phase",
+    "payload": {
+      "phase": "publish",
+    },
+    "ts": 180000,
+  },
+  {
+    "agent": "claude",
+    "cycle_id": "cycle-20260620-1",
+    "kind": "gate",
+    "payload": {
+      "detail": "hetero peer reviewed",
+      "gate": "peer",
+      "verdict": "consulted",
+    },
+    "ts": 190000,
+  },
+  {
+    "agent": "claude",
+    "cycle_id": "cycle-20260620-1",
+    "kind": "gate",
+    "payload": {
+      "detail": undefined,
+      "gate": "attest",
+      "verdict": "produced",
+    },
+    "ts": 200000,
+  },
+  {
+    "agent": "claude",
+    "cycle_id": "cycle-20260620-1",
+    "kind": "gate",
+    "payload": {
+      "gate": "pr",
+      "ref": "#999",
+      "verdict": "open",
+    },
+    "ts": 210000,
+  },
+  {
+    "agent": "claude",
+    "cycle_id": "cycle-20260620-1",
+    "kind": "gate",
+    "payload": {
+      "gate": "ci",
+      "ref": "#999",
+      "verdict": "pass",
+    },
+    "ts": 250000,
+  },
+  {
+    "agent": "claude",
+    "cycle_id": "cycle-20260620-1",
+    "kind": "gate",
+    "payload": {
+      "gate": "pr",
+      "ref": "#999",
+      "verdict": "merged",
+    },
+    "ts": 260000,
+  },
+  {
+    "agent": "claude",
+    "cycle_id": "cycle-20260620-1",
+    "kind": "lifecycle",
+    "payload": {
+      "detail": "delivered",
+      "event": "cycle:end",
+    },
+    "ts": 270000,
+  },
+]
+`;

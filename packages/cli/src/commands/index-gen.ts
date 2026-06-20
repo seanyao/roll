@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
 import { parseEventLine } from "@roll/spec";
 import { buildTruthSnapshot } from "@roll/core";
+import { collectDossierState, type CollectorDeps } from "@roll/core";
 import { serializeTruthSnapshot } from "@roll/spec";
 import { collectDossier, generateIndex } from "../lib/archive.js";
 import { SPINE_STAGES, countLegacyStories, deriveDeliveryLadder, storySpectrumState, type TruthBoardInput, type TruthBoardVerdict } from "../lib/dossier-index.js";
@@ -461,31 +462,24 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
   );
   let pages = 0;
   try {
-    // FIX-337 (AC1): build THE canonical reconciled ledger ONCE — the same
-    // pipeline `roll cycles` runs (collectCycleLedger → pending-merge reconcile →
-    // superseded reconcile). Both the truth.json `cycle` aggregate AND the page's
-    // cycle panel read from these exact rows, so `roll cycles`, the dossier panel,
-    // and `roll status` (truth.json) can never show divergent counts/cost.
+    // FIX-337 (AC1): build THE canonical reconciled ledger ONCE.
     const cycleRows = reconciledLedger(cwd);
     writeCycleSignalFiles(cwd, cycleRows);
-    // US-DOSSIER-010: ONE aggregation per run — the snapshot is serialized once,
-    // written to truth.json AND embedded verbatim in index.html, so every
-    // surface reads the same numbers from the same computation.
-    const truth = collectTruthBoardInput(cwd, renderNowSec(), cycleRows);
-    const snapshot = buildTruthSnapshot({
-      generatedAt: truth.generatedAt ?? new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
-      ...(truth.collectedAt !== undefined ? { collectedAt: truth.collectedAt } : {}),
-      storyStates: epics.flatMap((e) => e.stories.map(storySpectrumState)),
-      legacyCount: countLegacyStories(epics),
-      ...(truth.audit !== undefined ? { audit: truth.audit } : {}),
-      ...(truth.cycle !== undefined ? { cycle: truth.cycle } : {}),
-      ...(truth.release !== undefined ? { release: truth.release } : {}),
-      // US-DOSSIER-011: the loop heartbeat is part of the ONE snapshot too.
-      loop: collectLoopHeartbeat(defaultHeartbeatDeps(cwd, projectSlug(), launchAgentsDir())),
-      // US-DOSSIER-021: the per-story ladder + evidence registry rides the SAME
-      // snapshot, so truth.json and the index.html embed carry it identically.
-      stories: storyRegistry,
-    });
+
+    // US-OBS-016: the ONE read-side selector — wired with full cli collectors
+    // for byte-identical output.
+    const cliDeps: CollectorDeps = {
+      buildRunCache: () => runCache,
+      mergeEvidence: (cache, id) => {
+        const rc = cache as typeof runCache;
+        return storyHasMergeEvidence(rc.git, id) || storyHasSpecPrMergeEvidence(rc, id);
+      },
+      collectTruthBoard: (_cwd, nowSec) => collectTruthBoardInput(_cwd, nowSec, cycleRows),
+      collectLoopHeartbeat: (_cwd) =>
+        collectLoopHeartbeat(defaultHeartbeatDeps(_cwd, projectSlug(), launchAgentsDir())),
+      collectEvidenceFlags: (_cwd, story) => storyEvidenceFlags(_cwd, story as Parameters<typeof storyEvidenceFlags>[1]),
+    };
+    const snapshot = collectDossierState(cwd, { deps: cliDeps });
     const snapshotJson = serializeTruthSnapshot(snapshot);
     writeFileSync(join(featuresDir, "truth.json"), snapshotJson, "utf8");
     const projectName = resolveProjectName(cwd);

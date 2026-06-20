@@ -80,6 +80,7 @@ import { skillsCommand } from "./skills.js";
 import { statusCommand } from "./status.js";
 import { testCommand } from "./test.js";
 import { TOOL_USAGE, toolCommand } from "./tool.js";
+import { TRUTH_USAGE, truthCommand } from "./truth.js";
 import { tuneCommand } from "./tune.js";
 import { updateCommand } from "./update.js";
 import { versionCommand } from "./version.js";
@@ -304,6 +305,10 @@ export function registerAll(): void {
   // silent host fallback (US-ISO-003). No sub-paths on bash.
   registerPorted("test", testCommand);
   registerPorted("tool", toolCommand, { help: TOOL_USAGE });
+  // `truth`: deterministic delivery-truth query (US-TRUTH-016). Pure read-only
+  // — reads deliveries.jsonl, runs queryStoryDelivery, prints the verdict.
+  // Zero markdown parse. `--json` emits the StoryDeliveryTruth verbatim.
+  registerPorted("truth", truthCommand, { help: TRUTH_USAGE, hidden: true });
   // `tune`: v3-native US-EVID-015 second-order control loop, READ-ONLY. Aggregates
   // four trend signals (review-score notes / runs.jsonl pass rate / events.ndjson
   // misjudgments / runs result_eval.dims rubric relevance) into the pure

@@ -6,8 +6,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { queryStoryDelivery, deriveBacklogStatus, type StoryDeliveryTruth } from "../src/index.js";
-import type { DeliveryRecord } from "@roll/spec";
-import { present, absent } from "@roll/spec";
+import type { DeliveryRecord, PrState, TerminalOutcome } from "@roll/spec";
+import { present, absent, lifecycleFromFacts } from "@roll/spec";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -373,5 +373,105 @@ describe("US-TRUTH-015 AC4 — end-to-end: query → derive", () => {
     // A machine can check the truth directly:
     expect(truth.lifecycleState).toBe("in_flight");
     expect(truth.prNumber).toBe(5);
+  });
+});
+
+// ── AC5: alignment with lifecycleFromFacts ──────────────────────────────────
+
+describe("US-TRUTH-016 AC5 — alignment with lifecycleFromFacts (US-TRUTH-013)", () => {
+  function makeAlignedRecord(
+    storyId: string,
+    terminalOutcome: TerminalOutcome,
+    prState: PrState,
+    overrides: Partial<DeliveryRecord> = {},
+  ): DeliveryRecord {
+    const lc = lifecycleFromFacts(terminalOutcome, prState);
+    return {
+      storyId,
+      cycleId: `cycle-${storyId}`,
+      lifecycleState: lc,
+      prNumber: prState === "open" || prState === "open_ci_red" || prState === "merged" ? present(1) : absent("no_pr"),
+      prUrl: prState === "open" || prState === "open_ci_red" || prState === "merged" ? present(`https://gh/pull/1`) : absent("no_pr"),
+      mergedAt: prState === "merged" ? present(2000) : absent("not_merged"),
+      mergeCommit: prState === "merged" ? present("abc123") : absent("not_merged"),
+      recordedAt: 1000,
+      ...overrides,
+    };
+  }
+
+  // published_pending_merge + PR open → in_flight
+  it("published_pending_merge + open PR → query shows in_flight, not delivered", () => {
+    const record = makeAlignedRecord("US-ALIGN1", "published_pending_merge", "open");
+    expect(record.lifecycleState).toBe("in_flight"); // lifecycleFromFacts
+    const truth = queryStoryDelivery("US-ALIGN1", [record]);
+    expect(truth.lifecycleState).toBe("in_flight");
+    expect(truth.delivered).toBe(false);
+    expect(truth.prNumber).toBe(1);
+  });
+
+  // published_pending_merge + PR open_ci_red → ci_red
+  it("published_pending_merge + ci_red PR → query shows ci_red (sub-state of in_flight)", () => {
+    const record = makeAlignedRecord("US-ALIGN2", "published_pending_merge", "open_ci_red");
+    expect(record.lifecycleState).toBe("ci_red");
+    const truth = queryStoryDelivery("US-ALIGN2", [record]);
+    expect(truth.lifecycleState).toBe("ci_red");
+    expect(truth.delivered).toBe(false);
+  });
+
+  // PR merged → done
+  it("any outcome + merged PR → query shows done, delivered true", () => {
+    const record = makeAlignedRecord("US-ALIGN3", "delivered", "merged");
+    expect(record.lifecycleState).toBe("done");
+    const truth = queryStoryDelivery("US-ALIGN3", [record]);
+    expect(truth.lifecycleState).toBe("done");
+    expect(truth.delivered).toBe(true);
+    expect(truth.mergeCommit).toBe("abc123");
+  });
+
+  // failed outcome + no PR → failed
+  it("failed outcome + no PR → query shows failed", () => {
+    const record = makeAlignedRecord("US-ALIGN4", "failed", "none");
+    expect(record.lifecycleState).toBe("failed");
+    const truth = queryStoryDelivery("US-ALIGN4", [record]);
+    expect(truth.lifecycleState).toBe("failed");
+    expect(truth.delivered).toBe(false);
+  });
+
+  // idle_no_work → todo
+  it("idle_no_work → query shows todo (no delivery happened)", () => {
+    const record = makeAlignedRecord("US-ALIGN5", "idle_no_work", "none");
+    expect(record.lifecycleState).toBe("todo");
+    const truth = queryStoryDelivery("US-ALIGN5", [record]);
+    expect(truth.lifecycleState).toBe("todo");
+    expect(truth.delivered).toBe(false);
+  });
+
+  // blocked → blocked
+  it("blocked outcome → query shows blocked", () => {
+    const record = makeAlignedRecord("US-ALIGN6", "blocked", "none");
+    expect(record.lifecycleState).toBe("blocked");
+    const truth = queryStoryDelivery("US-ALIGN6", [record]);
+    expect(truth.lifecycleState).toBe("blocked");
+    expect(truth.delivered).toBe(false);
+  });
+
+  // lifecycle progression: in_flight → done
+  it("lifecycle progression: in_flight → done, query reflects merge", () => {
+    const inFlight = makeAlignedRecord("US-PROG", "published_pending_merge", "open", {
+      cycleId: "cycle-1",
+      recordedAt: 100,
+    });
+    const done = makeAlignedRecord("US-PROG", "delivered", "merged", {
+      cycleId: "cycle-1",
+      recordedAt: 200,
+    });
+    expect(inFlight.lifecycleState).toBe("in_flight");
+    expect(done.lifecycleState).toBe("done");
+
+    const truth = queryStoryDelivery("US-PROG", [inFlight, done]);
+    // Last-wins on same (storyId, cycleId): latest recordedAt wins → done
+    expect(truth.lifecycleState).toBe("done");
+    expect(truth.delivered).toBe(true);
+    expect(truth.mergeCommit).toBe("abc123");
   });
 });

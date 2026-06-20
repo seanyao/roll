@@ -22,6 +22,7 @@ const HIDDEN = new Set([
   "gc",
   "index",
   "skills",
+  "truth",
   "version",
 ]);
 

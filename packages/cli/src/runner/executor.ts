@@ -33,7 +33,9 @@
 import {
   BacklogStore,
   agentsInstalled,
+  appendDelivery,
   heteroAvailable,
+  nodeDeliveryStore,
   type CapturedFacts,
   type CycleCommand,
   type CycleContext,
@@ -99,6 +101,7 @@ import {
   type Clock,
   acquireLock,
   ghRepoSlug,
+  prNumberFromUrl,
   prViewState,
   releaseLock,
   remoteUrl,
@@ -1682,6 +1685,33 @@ export async function executeCommand(
       if (r.status === 0 && r.prUrl !== "" && !cmd.docOnly && ctx.storyId !== undefined) {
         mountExecutionAtPublish(ports.repoCwd, ctx.storyId, r.prUrl);
       }
+      // US-TRUTH-015 AC1: force-write DeliveryRecord on successful publish.
+      // The authoritative write path — every publish produces exactly one
+      // in_flight record with prNumber/prUrl. If prNumber is unparseable,
+      // record it as absent with an explicit reason (no half-record).
+      if (r.status === 0 && r.prUrl !== "" && ctx.storyId !== undefined && ctx.cycleId !== undefined) {
+        const parsedNumber = prNumberFromUrl(r.prUrl);
+        try {
+          appendDelivery(nodeDeliveryStore, ports.repoCwd, {
+            storyId: ctx.storyId,
+            cycleId: ctx.cycleId,
+            lifecycleState: "in_flight",
+            prNumber: parsedNumber !== undefined
+              ? present(Number(parsedNumber))
+              : absent("not_recorded"),
+            prUrl: present(r.prUrl),
+            mergedAt: absent("not_recorded"),
+            mergeCommit: absent("not_recorded"),
+            recordedAt: ports.clock(),
+          });
+        } catch {
+          // DeliveryRecord write is best-effort — never block publish on it.
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `US-TRUTH-015: appendDelivery failed for ${ctx.storyId} (cycle ${ctx.cycleId})`,
+          );
+        }
+      }
       const pub: PublishResult = { status: r.status, manualMerge };
       return {
         event: { type: "published", result: pub },
@@ -1793,6 +1823,32 @@ export async function executeCommand(
         const state = await ports.github.prState(ports.repoCwd, ctx.branch).catch(() => "UNKNOWN");
         if (state === "MERGED") {
           terminalMerged = true;
+          // US-TRUTH-015 AC2: force-write a done DeliveryRecord when merge is
+          // detected. mergedAt/mergeCommit are absent here (backfillable later
+          // by reconcile) — the key fact is lifecycleState: done.
+          if (ctx.cycleId !== undefined) {
+            try {
+              appendDelivery(nodeDeliveryStore, ports.repoCwd, {
+                storyId: terminalStoryId,
+                cycleId: ctx.cycleId,
+                lifecycleState: "done",
+                prNumber: ctx.prUrl !== undefined
+                  ? present(Number(prNumberFromUrl(ctx.prUrl) ?? 0))
+                  : absent("not_recorded"),
+                prUrl: ctx.prUrl !== undefined
+                  ? present(ctx.prUrl)
+                  : absent("not_recorded"),
+                mergedAt: absent("not_recorded"),
+                mergeCommit: absent("not_recorded"),
+                recordedAt: ports.clock(),
+              });
+            } catch {
+              ports.events.appendAlert(
+                ports.paths.alertsPath,
+                `US-TRUTH-015: appendDelivery done failed for ${terminalStoryId} (cycle ${ctx.cycleId})`,
+              );
+            }
+          }
           ports.backlog.markStatus?.(ports.repoCwd, terminalStoryId, STATUS_MARKER.done);
         } else {
           // FIX-304: done ≡ merged. The PR did NOT merge (still OPEN / closed /

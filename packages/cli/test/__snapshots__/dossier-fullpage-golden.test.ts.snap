@@ -1,0 +1,533 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`US-OBS-017 — full-page dossier golden snapshot > AC1: renders the full dossier page from collectDossierState fixture against a committed golden 1`] = `
+"<!DOCTYPE html>
+<html lang="zh-CN" data-roll-scope="roll">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>roll · Truth Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+SC:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{background:#eef1f5;color:#3a4252;font-family:"IBM Plex Sans","IBM Plex Sans SC",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased;}
+@keyframes beat{0%{box-shadow:0 0 0 0 rgba(23,138,82,.5);}70%{box-shadow:0 0 0 8px rgba(23,138,82,0);}100%{box-shadow:0 0 0 0 rgba(23,138,82,0);}}
+::selection{background:rgba(45,84,232,.16);}
+html[data-lang="en"] .lang-zh{display:none;}
+html[data-lang="zh"] .lang-en{display:none;}
+html:not([data-lang]) .lang-zh{display:none;}
+.lang-btn{appearance:none;border:0;background:transparent;color:#8f98ad;font-family:'IBM Plex Mono',monospace;font-size:11px;padding:4px 11px;cursor:pointer;}
+.lang-btn.on{background:#2d54e8;color:#fff;}
+.proj-switch-btn:hover{background:rgba(255,255,255,.05);}
+.proj-switch-btn[aria-expanded="true"] .proj-caret{transform:rotate(180deg);}
+.proj-item:hover{background:rgba(255,255,255,.06);border-radius:7px;}
+.mach-link:hover{color:#fff;}
+
+.console-tab{appearance:none;border:1px solid transparent;border-bottom:0;background:transparent;color:#525c6e;font-size:13px;font-weight:600;padding:9px 16px;border-radius:9px 9px 0 0;cursor:pointer;text-decoration:none;}
+.console-tab.on{background:#fff;border-color:#e0e5ee;color:#161b26;box-shadow:0 -1px 2px rgba(17,26,69,.04);}
+.console-tab:hover{color:#161b26;}
+a{color:#2d54e8;}
+.bl-epic{border:1px solid #e0e5ee;border-radius:12px;background:#fff;margin:0 0 9px;overflow:hidden;box-shadow:0 1px 2px rgba(17,26,69,.04);}
+.bl-epic summary::-webkit-details-marker{display:none;}
+.bl-epic[open] .bl-caret{transform:rotate(90deg);}
+.bl-row:hover{background:#f6f8fb;}
+.bl-chip.on{border-color:#2d54e8;box-shadow:0 0 0 1px #2d54e833;}
+.cy-row summary::-webkit-details-marker{display:none;}
+.cy-row[open] .bl-caret{transform:rotate(90deg);}
+.cy-row summary:hover{background:#fbfcfe;}
+.cy-range.on{background:#2d54e8;color:#fff;}
+.ag-row summary::-webkit-details-marker{display:none;}
+@media(max-width:720px){[data-exec-ladder="true"]{grid-template-columns:1fr 1fr!important;}}
+@media(max-width:520px){[data-exec-ladder="true"],[data-scenario-role],[data-hook]{grid-template-columns:1fr!important;}}
+.ag-row[open] .bl-caret{transform:rotate(90deg);}
+.ag-row summary:hover{background:#fbfcfe;}
+.sk-row summary::-webkit-details-marker{display:none;}
+.sk-row[open] .bl-caret{transform:rotate(90deg);}
+.sk-row summary:hover{background:#fbfcfe;}
+@media(max-width:760px){[data-now-section="operations"]{grid-template-columns:1fr!important;}}
+@media (max-width:720px){.charter-browser{grid-template-columns:1fr !important;}.charter-tree{position:static !important;max-height:none !important;}}
+
+.md-body{font-size:14.5px;line-height:1.7;color:#3a4252;word-break:break-word;}
+.md-body h1{font-size:23px;line-height:1.2;font-weight:700;letter-spacing:-.01em;color:#161b26;margin:0 0 14px;}
+.md-body h2{font-size:18px;font-weight:700;color:#161b26;margin:26px 0 10px;padding-top:14px;border-top:1px solid #eef1f5;}
+.md-body h3{font-size:15px;font-weight:600;color:#161b26;margin:20px 0 8px;}
+.md-body h4,.md-body h5,.md-body h6{font-size:13.5px;font-weight:600;color:#525c6e;margin:16px 0 6px;}
+.md-body p{margin:10px 0;}
+.md-body ul{margin:10px 0;padding-left:22px;}
+.md-body li{margin:4px 0;}
+.md-body a{color:#2d54e8;text-decoration:none;}
+.md-body a:hover{text-decoration:underline;}
+.md-body code{font-family:'IBM Plex Mono',monospace;font-size:12.5px;background:#eef1f7;border:1px solid #e0e5ee;border-radius:5px;padding:1px 5px;color:#161b26;}
+.md-body strong{font-weight:600;color:#161b26;}
+.md-tree-item.on{background:#eef2ff;border-color:#2d54e855;}
+.md-tree-item:hover{background:#f6f8fb;}
+.md-doc{display:none;}
+.md-doc.on{display:block;}
+</style>
+<script>
+(function () {
+  var d = document.documentElement;
+  function get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  var lang = get("roll-lang") || ((navigator.language || "").toLowerCase().indexOf("zh") === 0 ? "zh" : "en");
+  // US-DOSSIER-034: persistence is SCOPED per project so the project switcher
+  // never carries one project's open rows / chosen tab into another. The scope
+  // is the project key stamped on <html data-roll-scope> at generate time; lang
+  // stays GLOBAL (roll-lang, one reading language across the machine).
+  var scope = d.getAttribute("data-roll-scope") || "";
+  function tabKey() { return "roll-tab:" + scope; }
+  function openKey() { return "roll-open:" + scope; }
+  // US-DOSSIER-034: the set of open <details> ids, keyed by their stable
+  // data-open-key (cycle id / agent / epic / skill / release tag — never DOM
+  // order), so a reader's expansions survive reload + drilldown re-render.
+  function readOpen() {
+    var raw = get(openKey());
+    if (!raw) return {};
+    try { var o = JSON.parse(raw); return o && typeof o === "object" ? o : {}; } catch (e) { return {}; }
+  }
+  function writeOpen(map) { set(openKey(), JSON.stringify(map)); }
+  function restoreOpen() {
+    var map = readOpen();
+    var els = document.querySelectorAll("[data-open-key]");
+    for (var i = 0; i < els.length; i++) {
+      var k = els[i].getAttribute("data-open-key");
+      if (!k) continue;
+      if (map[k]) els[i].setAttribute("open", ""); else els[i].removeAttribute("open");
+    }
+  }
+  function bindOpenPersistence() {
+    var els = document.querySelectorAll("[data-open-key]");
+    for (var i = 0; i < els.length; i++) {
+      els[i].addEventListener("toggle", function () {
+        var k = this.getAttribute("data-open-key");
+        if (!k) return;
+        var map = readOpen();
+        if (this.open) map[k] = 1; else delete map[k];
+        writeOpen(map);
+      });
+    }
+  }
+  function applyLang() {
+    d.setAttribute("data-lang", lang);
+    d.setAttribute("lang", lang === "zh" ? "zh-CN" : "en");
+    var bs = document.querySelectorAll("[data-set-lang]");
+    for (var i = 0; i < bs.length; i++) {
+      var on = bs[i].getAttribute("data-set-lang") === lang;
+      bs[i].classList.toggle("on", on);
+      bs[i].setAttribute("aria-pressed", String(on));
+    }
+  }
+  var TABS = ["now","backlog","loop","release","casting","charter"];
+  function hashParts() {
+    return (location.hash || "").replace(/^#/, "").split("/");
+  }
+  function currentTab() {
+    var h = hashParts()[0];
+    if (TABS.indexOf(h) >= 0) return h;
+    // US-DOSSIER-034/043: no tab in the hash (a bare reload, or arriving back
+    // from a drilldown that dropped the hash) → restore the last tab from
+    // storage; first visit lands on Now.
+    var saved = get(tabKey());
+    if (TABS.indexOf(saved) >= 0) return saved;
+    return "now";
+  }
+  function applyTab() {
+    var cur = currentTab();
+    for (var i = 0; i < TABS.length; i++) {
+      var pane = document.getElementById("tab-" + TABS[i]);
+      if (pane) pane.style.display = TABS[i] === cur ? "" : "none";
+      var btn = document.querySelector('[data-tab="' + TABS[i] + '"]');
+      if (btn) btn.classList.toggle("on", TABS[i] === cur);
+    }
+    // US-DOSSIER-034: remember the active tab so it survives reload / drilldown.
+    set(tabKey(), cur);
+    if (cur === "charter") applyCharter();
+  }
+  // US-DOSSIER-033: the Charter browser doc selector — pure client interaction
+  // (the doc bodies are already baked into the page; no fetch). #charter/<id>
+  // selects that doc; otherwise the first doc shows by default.
+  function applyCharter() {
+    var items = document.querySelectorAll(".md-tree-item");
+    if (!items.length) return;
+    var want = hashParts()[1] || "";
+    if (want) { try { want = decodeURIComponent(want); } catch (e) { /* raw */ } }
+    // US-DOSSIER-034: no doc in the hash → restore the last-read doc from storage
+    // (scoped per project) so a bare reload / back-nav keeps the reader's place.
+    if (!want) { var saved = get("roll-charter:" + scope); if (saved) want = saved; }
+    var found = false;
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].getAttribute("data-doc") === want) { found = true; break; }
+    }
+    if (!found) want = items[0].getAttribute("data-doc");
+    for (var j = 0; j < items.length; j++) {
+      items[j].classList.toggle("on", items[j].getAttribute("data-doc") === want);
+    }
+    var docs = document.querySelectorAll(".md-doc");
+    for (var k = 0; k < docs.length; k++) {
+      docs[k].classList.toggle("on", docs[k].getAttribute("data-doc") === want);
+    }
+    set("roll-charter:" + scope, want);
+  }
+  // US-DOSSIER-012: backlog search + state filters; #backlog/<state> pre-sets one.
+  var active = {};
+  function applyFilters() {
+    var q = (document.getElementById("bl-search") || { value: "" }).value.toLowerCase();
+    var any = Object.keys(active).some(function (k) { return active[k]; });
+    var rows = document.querySelectorAll(".bl-row");
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      var okState = !any || active[r.getAttribute("data-state")];
+      var okText = q === "" || (r.getAttribute("data-text") || "").indexOf(q) >= 0;
+      r.style.display = okState && okText ? "" : "none";
+    }
+    var epics = document.querySelectorAll(".bl-epic");
+    for (var j = 0; j < epics.length; j++) {
+      var visible = epics[j].querySelectorAll('.bl-row:not([style*="display: none"])').length;
+      epics[j].style.display = visible > 0 ? "" : "none";
+      if ((any || q !== "") && visible > 0) epics[j].setAttribute("open", "");
+    }
+    var chips = document.querySelectorAll(".bl-chip");
+    for (var c = 0; c < chips.length; c++) {
+      chips[c].classList.toggle("on", !!active[chips[c].getAttribute("data-filter")]);
+    }
+  }
+  // US-DOSSIER-013 / FIX-297: cycle ledger range filter. Rows render newest-first.
+  // The default "recent" window count-caps the view to the newest RECENT_CAP cycles
+  // (the loop runs hundreds a week, so showing all history overwhelms the page).
+  // Two invariants hold for EVERY range, including "recent":
+  //   1. A failed/reverted/blocked cycle is NEVER hidden by the window — failures
+  //      are first-class, always in view however narrow the window.
+  //   2. The "failed" tally counts the FULL ledger, not just what's visible, so it
+  //      stays accurate no matter which range is active.
+  var RECENT_CAP = 50;
+  function applyRange(range) {
+    var rows = document.querySelectorAll(".cy-row");
+    var nowSec = Math.floor(Date.now() / 1000);
+    var horizon = range === "all" || range === "recent" ? Infinity : Number(range) * 86400;
+    var shown = 0, failedAll = 0, kept = 0;
+    for (var i = 0; i < rows.length; i++) {
+      var v = rows[i].getAttribute("data-verdict");
+      var isFail = v === "failed" || v === "reverted" || v === "blocked";
+      if (isFail) failedAll++; // full-ledger tally, independent of the window
+      var ts = Number(rows[i].getAttribute("data-ts")) || 0;
+      var inWindow = range === "all" ? true
+        : range === "recent" ? kept < RECENT_CAP
+        : nowSec - ts <= horizon;
+      // Failures are always shown; otherwise honor the window.
+      var show = isFail || inWindow;
+      rows[i].style.display = show ? "" : "none";
+      if (show) shown++;
+      if (inWindow) kept++; // the cap counts non-fail slots; failures are bonus
+    }
+    var c = document.getElementById("cy-count");
+    var f = document.getElementById("cy-failed");
+    if (c) c.textContent = String(shown);
+    if (f) f.textContent = String(failedAll);
+    var btns = document.querySelectorAll(".cy-range");
+    for (var b = 0; b < btns.length; b++) btns[b].classList.toggle("on", btns[b].getAttribute("data-range") === range);
+  }
+  function applyPrefilter() {
+    var parts = hashParts();
+    if (parts[0] === "backlog" && parts[1]) {
+      if (parts[1].indexOf("q:") === 0) {
+        // US-DOSSIER-015: dimension drift chips deep-link a search query.
+        var q = parts[1].slice(2);
+        try { q = decodeURIComponent(q); } catch (e) { /* malformed escape — use raw */ }
+        var box = document.getElementById("bl-search");
+        if (box) { box.value = q; }
+        active = {};
+        applyFilters();
+      } else {
+        active = {};
+        active[parts[1]] = true;
+        applyFilters();
+      }
+    }
+  }
+  // US-DOSSIER-018: the snapshot is honest about being a snapshot.
+  function applyFreshness() {
+    var b = document.getElementById("freshness-banner");
+    if (!b) return;
+    var gen = Date.parse(b.getAttribute("data-generated") || "");
+    var STALE_MS = 6 * 3600 * 1000;
+    if (isFinite(gen) && Date.now() - gen > STALE_MS) b.style.display = "";
+  }
+  function tickCountdown() {
+    var els = document.querySelectorAll(".hb-next");
+    for (var i = 0; i < els.length; i++) {
+      var next = Date.parse(els[i].getAttribute("data-next") || "");
+      if (!isFinite(next)) continue;
+      var ms = next - Date.now();
+      els[i].textContent = ms <= 0 ? "due" : "in " + Math.max(1, Math.round(ms / 60000)) + "m";
+    }
+  }
+  // US-DOSSIER-044: browser-side live feed is READ-ONLY. The generated page
+  // already contains a server-folded snapshot from loop-fmt; this poller only
+  // attempts to read ../loop/live.log and summarize newly visible lines. It never
+  // writes loop state, opens tmux, signals a process, or depends on the network.
+  function summarizeLiveLine(line) {
+    if (!line) return "";
+    if (/^── cycle /.test(line) || /cycle done|cycle failed|cycle aborted/i.test(line)) return line;
+    try {
+      var obj = JSON.parse(line);
+      var typ = obj && obj.type;
+      if (typ === "result") return "cycle done" + (obj.total_cost_usd ? " — $" + obj.total_cost_usd + " USD" : "");
+      var content = obj && obj.message && obj.message.content;
+      if (Array.isArray(content)) {
+        for (var i = 0; i < content.length; i++) {
+          var part = content[i] || {};
+          if (part.type === "tool_use") {
+            var name = String(part.name || "tool");
+            var input = part.input || {};
+            var file = String(input.file_path || input.path || "");
+            var cmd = String(input.command || "");
+            if (file) return "› edit " + file;
+            if (/\\b(test|vitest|pnpm|npm|ci)\\b/i.test(cmd)) return "→ test " + cmd;
+            if (/\\b(pr|pull request|gh pr)\\b/i.test(cmd)) return "→ pr " + cmd;
+            return "› " + name + (cmd ? " " + cmd : "");
+          }
+          if (part.type === "tool_result") {
+            var txt = String(part.content || "");
+            var commit = /\\b[0-9a-f]{7,40}\\b/.exec(txt);
+            if (commit) return "→ tcr commit " + commit[0];
+            if (/fail|error/i.test(txt)) return "→ alert " + txt.slice(0, 140);
+          }
+        }
+      }
+    } catch (e) {
+      /* plain text fallback below */
+    }
+    if (/\\b(US-|FIX-|REFACTOR-|BUG-|PR #|#\\d+|test|vitest|attest|ci|merge|merged|fail|error|blocked)\\b/i.test(line)) return line;
+    return "";
+  }
+  function setupLiveFeeds() {
+    var feeds = document.querySelectorAll("[data-live-feed]");
+    var fetcher = window.fetch;
+    if (!feeds.length || typeof fetcher !== "function") return;
+    for (var i = 0; i < feeds.length; i++) {
+      (function (feed) {
+        var src = feed.getAttribute("data-live-src") || "";
+        var status = feed.querySelector("[data-live-status]");
+        var linesEl = feed.querySelector("[data-live-lines]");
+        if (!src || !linesEl) return;
+        var lastText = "";
+        function setStatus(text, color) {
+          if (!status) return;
+          status.textContent = text;
+          status.style.color = color;
+          status.style.borderColor = color + "44";
+        }
+        function render(text) {
+          if (text === lastText) return;
+          lastText = text;
+          var raw = text.split(/\\r?\\n/).filter(Boolean).slice(-200);
+          var rows = [];
+          for (var j = 0; j < raw.length; j++) {
+            var s = summarizeLiveLine(raw[j]);
+            if (s) rows.push(s);
+          }
+          rows = rows.slice(-24);
+          if (!rows.length) {
+            setStatus("idle", "#727c8e");
+            return;
+          }
+          linesEl.innerHTML = "";
+          if (linesEl.tagName !== "OL") {
+            var ol = document.createElement("ol");
+            ol.setAttribute("data-live-lines", "true");
+            ol.style.cssText = "list-style:none;margin:0;padding:0;display:grid;gap:4px;max-height:420px;overflow:auto;";
+            linesEl.parentNode.replaceChild(ol, linesEl);
+            linesEl = ol;
+          }
+          for (var k = 0; k < rows.length; k++) {
+            var li = document.createElement("li");
+            li.style.cssText = "font-family:'IBM Plex Mono',monospace;font-size:11.5px;line-height:1.45;white-space:pre-wrap;color:#d8dee9;";
+            li.textContent = rows[k];
+            linesEl.appendChild(li);
+          }
+          setStatus("live", "#178a52");
+          linesEl.scrollTop = linesEl.scrollHeight;
+        }
+        function refresh() {
+          fetcher.call(window, src, { cache: "no-store" })
+            .then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.text(); })
+            .then(render)
+            .catch(function () { setStatus("snapshot", "#c77d12"); });
+        }
+        refresh();
+        setInterval(refresh, 5000);
+      })(feeds[i]);
+    }
+  }
+  // US-DOSSIER-027: the project switcher dropdown — pure client interaction
+  // (no data fetch). Opens "roll · this machine", closes on outside click / Esc.
+  function setupSwitcher() {
+    var btn = document.getElementById("proj-switch-btn");
+    var menu = document.getElementById("proj-menu");
+    if (!btn || !menu) return; // single-project degrade: no dropdown rendered
+    function close() {
+      menu.hidden = true;
+      btn.setAttribute("aria-expanded", "false");
+    }
+    function open() {
+      menu.hidden = false;
+      btn.setAttribute("aria-expanded", "true");
+    }
+    btn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (menu.hidden) open(); else close();
+    });
+    document.addEventListener("click", function (e) {
+      if (!menu.hidden && !menu.contains(e.target) && e.target !== btn) close();
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") close();
+    });
+  }
+  window.addEventListener("hashchange", function () { applyTab(); applyPrefilter(); });
+  document.addEventListener("DOMContentLoaded", function () {
+    applyLang();
+    applyTab();
+    // US-DOSSIER-034: restore the reader's expanded sections (keyed by stable id)
+    // before the filters run, then keep them in sync as the reader toggles rows.
+    restoreOpen();
+    bindOpenPersistence();
+    applyPrefilter();
+    setupSwitcher();
+    var chips = document.querySelectorAll(".bl-chip");
+    for (var c = 0; c < chips.length; c++) {
+      chips[c].addEventListener("click", function () {
+        var k = this.getAttribute("data-filter");
+        active[k] = !active[k];
+        applyFilters();
+      });
+    }
+    var search = document.getElementById("bl-search");
+    if (search) search.addEventListener("input", applyFilters);
+    var chipsCopy = document.querySelectorAll(".copy-chip");
+    for (var cc = 0; cc < chipsCopy.length; cc++) {
+      chipsCopy[cc].addEventListener("click", function () {
+        var text = this.getAttribute("data-copy") || this.textContent;
+        var self = this;
+        try {
+          navigator.clipboard.writeText(text).then(function () {
+            var old = self.textContent;
+            self.textContent = "✓ copied";
+            setTimeout(function () { self.textContent = old; }, 1200);
+          });
+        } catch (e) { /* clipboard unavailable (file://) — chip stays copyable by selection */ }
+      });
+    }
+    var rbs = document.querySelectorAll(".cy-range");
+    for (var rb = 0; rb < rbs.length; rb++) {
+      rbs[rb].addEventListener("click", function () { applyRange(this.getAttribute("data-range")); });
+    }
+    applyRange("recent");
+    applyFreshness();
+    tickCountdown();
+    setInterval(tickCountdown, 30000);
+    setupLiveFeeds();
+    var bs = document.querySelectorAll("[data-set-lang]");
+    for (var i = 0; i < bs.length; i++) {
+      bs[i].addEventListener("click", function () {
+        lang = this.getAttribute("data-set-lang");
+        set("roll-lang", lang);
+        applyLang();
+      });
+    }
+  });
+  applyLang();
+})();
+</script>
+</head>
+<body>
+<header style="position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:16px;height:54px;padding:0 22px;background:rgba(27,34,56,.97);backdrop-filter:blur(8px);border-bottom:1px solid #0e1424;"><a href="#now" class="proj-switch-btn" style="display:flex;align-items:center;gap:9px;cursor:pointer;flex:none;text-decoration:none;padding:5px 7px;"><span style="width:9px;height:9px;border-radius:50%;background:#178a52;box-shadow:0 0 0 3px rgba(23,138,82,.22);flex:none;"></span><span style="font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:15px;letter-spacing:.02em;color:#fff;white-space:nowrap;">roll</span></a><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#8f98ad;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:none;max-width:220px;">It just works.</span><nav style="flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:9px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8f98ad;overflow:hidden;" aria-label="machine layer · 机器层"><span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:#5b6480;flex:none;"><span class="lang-en">Machine</span><span class="lang-zh">机器</span></span><a class="mach-link" data-machine="agents" href="agents.html" style="text-decoration:none;color:#8f98ad;font-weight:400;white-space:nowrap;flex:none;"><span class="lang-en">Agents</span><span class="lang-zh">Agents</span></a><span style="color:#3a4360;flex:none;">·</span><a class="mach-link" data-machine="skills" href="skills.html" style="text-decoration:none;color:#8f98ad;font-weight:400;white-space:nowrap;flex:none;"><span class="lang-en">Skills</span><span class="lang-zh">技能</span></a><span style="color:#3a4360;flex:none;">·</span><a class="mach-link" data-machine="tools" href="tools.html" style="text-decoration:none;color:#8f98ad;font-weight:400;white-space:nowrap;flex:none;"><span class="lang-en">Tools</span><span class="lang-zh">工具</span></a><span style="color:#3a4360;flex:none;">·</span><a class="mach-link" data-machine="conventions" href="conventions.html" style="text-decoration:none;color:#8f98ad;font-weight:400;white-space:nowrap;flex:none;"><span class="lang-en">Conventions</span><span class="lang-zh">约定</span></a><span style="color:#3a4360;flex:none;">·</span><a class="mach-link" data-machine="about" href="about.html" style="text-decoration:none;color:#8f98ad;font-weight:400;white-space:nowrap;flex:none;"><span class="lang-en">About</span><span class="lang-zh">关于</span></a></nav><div style="flex:none;display:flex;align-items:center;gap:14px;"><div style="display:flex;border:1px solid #313a55;border-radius:999px;overflow:hidden;flex:none;"><button type="button" data-set-lang="en" class="lang-btn">EN</button><button type="button" data-set-lang="zh" class="lang-btn">中</button></div></div></header><main style="max-width:1100px;margin:0 auto;padding:0 22px 64px;"><div style="display:flex;gap:6px;align-items:flex-end;border-bottom:1px solid #dfe4ec;position:sticky;top:54px;background:#eef1f5;z-index:20;padding:16px 0 0;"><a href="#now" data-tab="now" class="console-tab"><span class="lang-en">Now</span><span class="lang-zh">现在</span></a><a href="#backlog" data-tab="backlog" class="console-tab"><span class="lang-en">Backlog</span><span class="lang-zh">待办</span></a><a href="#loop" data-tab="loop" class="console-tab"><span class="lang-en">Loop</span><span class="lang-zh">循环</span></a><a href="#release" data-tab="release" class="console-tab"><span class="lang-en">Release</span><span class="lang-zh">发版</span></a><a href="#casting" data-tab="casting" class="console-tab"><span class="lang-en">Casting</span><span class="lang-zh">选角</span></a><a href="#charter" data-tab="charter" class="console-tab"><span class="lang-en">Charter</span><span class="lang-zh">章程</span></a></div><div id="tab-now"><div id="freshness-banner" data-generated="2026-06-20T12:00:00Z" style="display:none;margin:16px 0 0;padding:10px 16px;border:1px solid #c77d1255;border-radius:10px;background:#c77d120d;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#c77d12;"><span class="lang-en">This snapshot is stale — run <code>roll index</code> to refresh.</span><span class="lang-zh">数据已过期——运行 <code>roll index</code> 刷新。</span></div><div style="padding:34px 0 8px;"><div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#2d54e8;font-weight:600;">roll · <span class="lang-en">Truth Console</span><span class="lang-zh">真相控制台</span></div><h1 style="margin:10px 0 0;font-size:33px;line-height:1.1;font-weight:700;letter-spacing:0;color:#161b26;"><span class="lang-en">Now</span><span class="lang-zh">现在</span></h1><p style="margin:12px 0 0;max-width:660px;font-size:15.5px;line-height:1.6;color:#525c6e;"><span class="lang-en">What is happening right now: live cycle, heartbeat, next picks, items needing you, and where things stand.</span><span class="lang-zh">现在发生什么：实时周期、心跳、下批候选、需要你处理的项，以及当前总体站位。</span></p></div><section data-now-section="live-cycle-wrap" style="margin:20px 0 14px;"><section data-now-section="live-cycle" style="border:1px solid #e0e5ee;border-radius:12px;background:#fff;padding:14px 18px;box-shadow:0 1px 2px rgba(17,26,69,.05);"><div style="display:flex;align-items:center;gap:10px;"><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:#9aa3b2;font-weight:600;"><span class="lang-en">Live cycle</span><span class="lang-zh">实时周期</span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:10px;padding:2px 8px;border-radius:999px;border:1px solid #727c8e44;color:#727c8e;"><span class="lang-en">idle</span><span class="lang-zh">空闲</span></span><span style="flex:1;"></span><a href="#loop" data-tab-link="loop" style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#2d54e8;text-decoration:none;"><span class="lang-en">open loop</span><span class="lang-zh">打开循环页</span> →</a></div><div style="display:flex;align-items:center;gap:12px;margin-top:13px;"><span style="width:10px;height:10px;border-radius:50%;flex:none;background:#727c8e;"></span><span style="font-family:'IBM Plex Mono',monospace;font-weight:600;color:#727c8e;"><span class="lang-en">no cycle is running</span><span class="lang-zh">当前没有周期在跑</span></span></div><div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#9aa3b2;margin-top:10px;"><span class="lang-en">no recorded cycle yet</span><span class="lang-zh">尚无历史周期</span></div></section></section><section data-now-section="operations" style="display:grid;grid-template-columns:1.5fr 1fr;gap:14px;margin:14px 0;align-items:start;"><section data-now-section="on-deck" style="border:1px solid #e0e5ee;border-radius:12px;background:#fff;padding:14px 18px 0;box-shadow:0 1px 2px rgba(17,26,69,.05);"><div style="display:flex;align-items:center;gap:10px;"><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:#9aa3b2;font-weight:600;"><span class="lang-en">On deck</span><span class="lang-zh">下一步要做</span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:10px;padding:2px 9px;border-radius:999px;color:#178a52;background:#e6f6ef;font-weight:600;">1</span></div><div style="display:grid;gap:4px;margin-top:11px;"><a href="delivery-dossier/US-A-2/index.html" style="display:block;text-decoration:none;padding:9px 0;border-top:1px solid #eef1f5;"><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#2d54e8;font-weight:600;">US-A-2</span><span style="display:block;color:#525c6e;font-size:12.5px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Alpha — second story (todo)</span></a></div><div style="font-size:12px;color:#8a93a3;padding:11px 0 12px;border-top:1px solid #eef1f5;margin-top:4px;"><span class="lang-en">When idle the loop pulls cards from here in order; click any to open its card page.</span><span class="lang-zh">循环空闲时会从这里按序取卡;点任意一张直接进它的卡页。</span></div></section><section data-now-section="needs-you" style="border:1px solid #e0e5ee;border-radius:12px;background:#fff;padding:14px 18px 14px;box-shadow:0 1px 2px rgba(17,26,69,.05);"><div style="display:flex;align-items:center;gap:10px;"><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:#9aa3b2;font-weight:600;"><span class="lang-en">Needs you</span><span class="lang-zh">需要你处理</span></span><span data-needs-total="0" style="font-family:'IBM Plex Mono',monospace;font-size:10px;padding:2px 9px;border-radius:999px;color:#178a52;background:#e6f6ef;font-weight:600;">0</span></div><div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#178a52;font-style:italic;margin-top:10px;"><span class="lang-en">nothing is blocked or failed</span><span class="lang-zh">没有阻塞或失败项</span></div></section></section><section data-now-section="live-stream" data-live-feed="true" data-live-src="../loop/live.log" data-live-readonly="true" data-live-agent="claude" style="border:1px solid #e0e5ee;border-radius:12px;background:#fff;overflow:hidden;margin:14px 0 14px;box-shadow:0 1px 2px rgba(17,26,69,.05);"><div style="display:flex;align-items:center;gap:10px;padding:13px 18px;border-bottom:1px solid #eef1f5;"><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:#9aa3b2;font-weight:600;"><span class="lang-en">Loop live stream</span><span class="lang-zh">Loop 实时流</span></span><span data-live-status="true" style="font-family:'IBM Plex Mono',monospace;font-size:10px;padding:2px 8px;border-radius:999px;border:1px solid #727c8e44;color:#727c8e;"><span class="lang-en">idle</span><span class="lang-zh">空闲</span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#8a93a3;"><span class="lang-en">same source as roll loop watch</span><span class="lang-zh">与 roll loop watch 同源</span></span><span style="flex:1;"></span><a href="#loop" data-tab-link="loop" style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#2d54e8;text-decoration:none;"><span class="lang-en">open loop</span><span class="lang-zh">打开循环页</span> →</a></div><div style="padding:16px 18px 18px;background:#0f1722;color:#d8dee9;"><div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#93a0b8;"><span><span class="lang-en">agent</span><span class="lang-zh">agent</span> claude</span><span><span class="lang-en">raw lines</span><span class="lang-zh">原始行</span> 0</span><span><span class="lang-en">updated</span><span class="lang-zh">更新</span> 06-20 12:00Z</span></div><div data-live-lines="true" style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;line-height:1.7;color:#93a0b8;font-style:italic;">live feed not collected during this index run</div><div style="margin-top:12px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:#748196;">.roll/loop/live.log · <span class="lang-en">read-only polling, no loop writes</span><span class="lang-zh">只读轮询，不写 loop</span></div></div></section><section style="border:1px solid #e0e5ee;border-radius:12px;background:#fff;overflow:hidden;margin:20px 0 14px;box-shadow:0 1px 2px rgba(17,26,69,.05);"><div style="display:flex;align-items:center;gap:11px;padding:13px 18px;border-bottom:1px solid #eef1f5;"><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:#9aa3b2;font-weight:600;"><span class="lang-en">Loop heartbeat</span><span class="lang-zh">循环心跳</span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;padding:2px 9px;border-radius:999px;color:#727c8e;background:#eef1f7;font-weight:600;white-space:nowrap;">0/1 <span class="lang-en">running</span><span class="lang-zh">运行中</span></span><span style="flex:1;"></span><a href="#loop" data-tab-link="loop" style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#2d54e8;cursor:pointer;text-decoration:none;"><span class="lang-en">open loop</span><span class="lang-zh">打开循环页</span> →</a></div><div data-now-section="heartbeat-head" style="display:grid;grid-template-columns:1.6fr .8fr .7fr 1fr 1fr;align-items:center;gap:14px;padding:9px 18px;border-top:1px solid #eef1f5;background:#fafbfe;"><span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:#9aa3b2;">Lane</span><span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:#9aa3b2;"><span class="lang-en">mode</span><span class="lang-zh">模式</span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:#9aa3b2;"><span class="lang-en">every</span><span class="lang-zh">周期</span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:#9aa3b2;"><span class="lang-en">last</span><span class="lang-zh">上次</span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:#9aa3b2;"><span class="lang-en">next</span><span class="lang-zh">下次</span></span></div><div style="display:grid;grid-template-columns:1.6fr .8fr .7fr 1fr 1fr;align-items:center;gap:14px;padding:13px 18px;border-top:1px solid #f4f6f9;"><div style="display:flex;align-items:center;gap:11px;min-width:0;"><span style="width:9px;height:9px;border-radius:50%;background:#c2402a;flex:none;"></span><div style="min-width:0;"><div style="font-size:13.5px;font-weight:600;color:#161b26;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">backlog loop</div><div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#c2402a;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"><span class="lang-en">zombie</span><span class="lang-zh">僵尸</span></div></div></div><div style="font-size:12.5px;color:#3a4252;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">backlog</div><div style="font-size:12.5px;color:#3a4252;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">—</div><div style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#3a4252;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">06-20 11:00Z</div><div class="hb-next" data-next="" style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#3a4252;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">—</div></div></section><div data-now-section="where-things-stand"><section style="margin:22px 0 16px;display:flex;align-items:stretch;gap:0;border:1px solid #e0e5ee;border-left:4px solid #c77d12;border-radius:12px;background:#fff;overflow:hidden;box-shadow:0 1px 2px rgba(17,26,69,.05);"><div style="padding:16px 20px;display:flex;flex-direction:column;justify-content:center;gap:3px;border-right:1px solid #eef1f5;min-width:182px;"><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:#9aa3b2;font-weight:600;"><span class="lang-en">Truth verdict</span><span class="lang-zh">真相判定</span></span><div style="display:flex;align-items:center;gap:9px;"><span data-truth="verdict" style="font-size:25px;font-weight:700;letter-spacing:-.01em;color:#c77d12;">WARN</span></div><div style="font-size:11.5px;color:#8a93a3;"><span class="lang-en">warnings to triage</span><span class="lang-zh">有警告待处理</span></div></div><div style="flex:1 1 auto;display:flex;align-items:center;flex-wrap:wrap;gap:9px;padding:14px 20px;"><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border:1px solid #178a5233;border-radius:999px;color:#178a52;background:#178a520d;"><b style="font-weight:600;">fail</b>&nbsp;0</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border:1px solid #c77d1233;border-radius:999px;color:#c77d12;background:#c77d120d;"><b style="font-weight:600;">warn</b>&nbsp;1</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border:1px solid #727c8e33;border-radius:999px;color:#727c8e;background:#727c8e0d;"><b style="font-weight:600;">?</b>&nbsp;0</span></div><div style="display:flex;flex:none;flex-direction:column;justify-content:center;gap:4px;padding:14px 20px;border-left:1px solid #eef1f5;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#9aa3b2;text-align:right;white-space:nowrap;"><div><span class="lang-en">generated</span><span class="lang-zh">生成</span> <span style="color:#5b6478;">06-20 12:00Z</span></div><div><span class="lang-en">collected</span><span class="lang-zh">采集</span> <span style="color:#5b6478;">06-20 11:00Z</span></div></div></section><section style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:0 0 8px;"><a href="#backlog" data-tab-link="backlog" style="border:1px solid #e0e5ee;border-radius:12px;background:#fff;padding:16px 18px 14px;box-shadow:0 1px 2px rgba(17,26,69,.05);cursor:pointer;text-decoration:none;display:block;"><div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:#9aa3b2;font-weight:600;"><span class="lang-en">Story</span><span class="lang-zh">故事</span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:10px;padding:2px 8px;border-radius:999px;border:1px solid #2d54e844;color:#2d54e8;"><span class="lang-en">backlog</span><span class="lang-zh">待办页</span></span></div><div style="display:flex;align-items:baseline;gap:8px;margin:13px 0 12px;"><span style="font-size:30px;font-weight:700;letter-spacing:-.02em;color:#161b26;font-variant-numeric:tabular-nums;font-family:'IBM Plex Mono',monospace;">3</span><span style="font-size:11.5px;color:#8a93a3;line-height:1.25;"><span class="lang-en">stories on the board</span><span class="lang-zh">面板上的故事</span></span></div><dl style="display:grid;grid-template-columns:1fr auto;gap:6px 12px;margin:0;font-family:'IBM Plex Mono',monospace;font-size:11.5px;"><dt style="color:#8a93a3;"><span class="lang-en">done</span><span class="lang-zh">已交付</span></dt><dd style="margin:0;color:#178a52;font-weight:600;text-align:right;">0</dd><dt style="color:#8a93a3;"><span class="lang-en">todo</span><span class="lang-zh">待办</span></dt><dd style="margin:0;color:#c77d12;font-weight:600;text-align:right;">1</dd><dt style="color:#8a93a3;"><span class="lang-en">legacy</span><span class="lang-zh">历史交付</span></dt><dd style="margin:0;color:#727c8e;font-weight:600;text-align:right;">0</dd></dl></a><a href="#loop" data-tab-link="loop" style="border:1px solid #e0e5ee;border-radius:12px;background:#fff;padding:16px 18px 14px;box-shadow:0 1px 2px rgba(17,26,69,.05);cursor:pointer;text-decoration:none;display:block;"><div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:#9aa3b2;font-weight:600;"><span class="lang-en">Cycle</span><span class="lang-zh">周期</span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:10px;padding:2px 8px;border-radius:999px;border:1px solid #2d54e844;color:#2d54e8;">72h</span></div><div style="display:flex;align-items:baseline;gap:8px;margin:13px 0 12px;"><span style="font-size:30px;font-weight:700;letter-spacing:-.02em;color:#161b26;font-variant-numeric:tabular-nums;font-family:'IBM Plex Mono',monospace;">2</span><span style="font-size:11.5px;color:#8a93a3;line-height:1.25;"><span class="lang-en">cycles in the window</span><span class="lang-zh">窗口内周期</span></span></div><dl style="display:grid;grid-template-columns:1fr auto;gap:6px 12px;margin:0;font-family:'IBM Plex Mono',monospace;font-size:11.5px;"><dt style="color:#8a93a3;"><span class="lang-en">failed</span><span class="lang-zh">失败</span></dt><dd style="margin:0;color:#178a52;font-weight:600;text-align:right;">0</dd><dt style="color:#8a93a3;"><span class="lang-en">cost</span><span class="lang-zh">花费</span></dt><dd style="margin:0;color:#3a4252;font-weight:600;text-align:right;">$1.30</dd></dl></a><a href="#release" data-tab-link="release" style="border:1px solid #e0e5ee;border-radius:12px;background:#fff;padding:16px 18px 14px;box-shadow:0 1px 2px rgba(17,26,69,.05);cursor:pointer;text-decoration:none;display:block;"><div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:#9aa3b2;font-weight:600;"><span class="lang-en">Release</span><span class="lang-zh">发版</span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:10px;padding:2px 8px;border-radius:999px;border:1px solid #727c8e44;color:#727c8e;">?</span></div><div style="display:flex;align-items:baseline;gap:8px;margin:13px 0 12px;"><span style="font-size:30px;font-weight:700;letter-spacing:-.02em;color:#161b26;font-variant-numeric:tabular-nums;font-family:'IBM Plex Mono',monospace;">—</span><span style="font-size:11.5px;color:#8a93a3;line-height:1.25;"><span class="lang-en">latest gated tag</span><span class="lang-zh">最近过闸 tag</span></span></div><dl style="display:grid;grid-template-columns:1fr auto;gap:6px 12px;margin:0;font-family:'IBM Plex Mono',monospace;font-size:11.5px;"><dt style="color:#8a93a3;"><span class="lang-en">gate</span><span class="lang-zh">闸门</span></dt><dd style="margin:0;color:#727c8e;font-weight:600;text-align:right;">—</dd><dt style="color:#8a93a3;"><span class="lang-en">waiver</span><span class="lang-zh">豁免</span></dt><dd style="margin:0;color:#3a4252;font-weight:600;text-align:right;">—</dd></dl></a></section><section style="border:1px solid #e0e5ee;border-radius:14px;background:#fff;overflow:hidden;margin:14px 0 8px;box-shadow:0 1px 2px rgba(17,26,69,.05);"><div style="display:grid;grid-template-columns:repeat(6,1fr);"><a href="#backlog/done" data-tab-link="backlog" data-prefilter="done" title="DONE · 已交付" style="position:relative;display:block;padding:14px 14px 12px;text-decoration:none;border-left:1px solid #eef1f5;cursor:pointer;"><span style="position:absolute;left:0;top:0;height:3px;width:100%;background:#178a52;opacity:.25;"></span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#178a52;">✓</span><div data-truth="spectrum-done" style="font-size:30px;font-weight:700;letter-spacing:-.02em;color:#c3cad6;font-variant-numeric:tabular-nums;margin:5px 0 1px;font-family:'IBM Plex Mono',monospace;">0</div><div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:#727c8e;font-weight:600;"><span class="lang-en">DONE</span><span class="lang-zh">已交付</span></div><div style="font-size:10px;color:#9aa3b2;margin-top:3px;min-height:12px;"><span class="lang-en">merged to main</span><span class="lang-zh">已合主干</span></div></a><a href="#backlog/fail" data-tab-link="backlog" data-prefilter="fail" title="DRIFT · 漂移" style="position:relative;display:block;padding:14px 14px 12px;text-decoration:none;border-left:1px solid #eef1f5;cursor:pointer;"><span style="position:absolute;left:0;top:0;height:3px;width:100%;background:#c2402a;opacity:.25;"></span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#c2402a;">!</span><div data-truth="spectrum-fail" style="font-size:30px;font-weight:700;letter-spacing:-.02em;color:#c3cad6;font-variant-numeric:tabular-nums;margin:5px 0 1px;font-family:'IBM Plex Mono',monospace;">0</div><div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:#727c8e;font-weight:600;"><span class="lang-en">DRIFT</span><span class="lang-zh">漂移</span></div><div style="font-size:10px;color:#9aa3b2;margin-top:3px;min-height:12px;"><span class="lang-en">claim ≠ truth</span><span class="lang-zh">声明≠真相</span></div></a><a href="#backlog/unknown" data-tab-link="backlog" data-prefilter="unknown" title="UNKNOWN · 未知" style="position:relative;display:block;padding:14px 14px 12px;text-decoration:none;border-left:1px solid #eef1f5;cursor:pointer;"><span style="position:absolute;left:0;top:0;height:3px;width:100%;background:#727c8e;opacity:1;"></span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#727c8e;">?</span><div data-truth="spectrum-unknown" style="font-size:30px;font-weight:700;letter-spacing:-.02em;color:#161b26;font-variant-numeric:tabular-nums;margin:5px 0 1px;font-family:'IBM Plex Mono',monospace;">1</div><div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:#727c8e;font-weight:600;"><span class="lang-en">UNKNOWN</span><span class="lang-zh">未知</span></div><div style="font-size:10px;color:#9aa3b2;margin-top:3px;min-height:12px;"><span class="lang-en">no evidence</span><span class="lang-zh">无证据</span></div></a><a href="#backlog/wip" data-tab-link="backlog" data-prefilter="wip" title="WIP · 进行中" style="position:relative;display:block;padding:14px 14px 12px;text-decoration:none;border-left:1px solid #eef1f5;cursor:pointer;"><span style="position:absolute;left:0;top:0;height:3px;width:100%;background:#2d54e8;opacity:1;"></span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#2d54e8;">●</span><div data-truth="spectrum-wip" style="font-size:30px;font-weight:700;letter-spacing:-.02em;color:#161b26;font-variant-numeric:tabular-nums;margin:5px 0 1px;font-family:'IBM Plex Mono',monospace;">1</div><div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:#727c8e;font-weight:600;"><span class="lang-en">WIP</span><span class="lang-zh">进行中</span></div><div style="font-size:10px;color:#9aa3b2;margin-top:3px;min-height:12px;"><span class="lang-en">being built</span><span class="lang-zh">建造中</span></div></a><a href="#backlog/todo" data-tab-link="backlog" data-prefilter="todo" title="TODO · 待办" style="position:relative;display:block;padding:14px 14px 12px;text-decoration:none;border-left:1px solid #eef1f5;cursor:pointer;"><span style="position:absolute;left:0;top:0;height:3px;width:100%;background:#c77d12;opacity:1;"></span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#c77d12;">○</span><div data-truth="spectrum-todo" style="font-size:30px;font-weight:700;letter-spacing:-.02em;color:#161b26;font-variant-numeric:tabular-nums;margin:5px 0 1px;font-family:'IBM Plex Mono',monospace;">1</div><div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:#727c8e;font-weight:600;"><span class="lang-en">TODO</span><span class="lang-zh">待办</span></div><div style="font-size:10px;color:#9aa3b2;margin-top:3px;min-height:12px;"><span class="lang-en">still a wish</span><span class="lang-zh">仍是愿望</span></div></a><a href="#backlog/hold" data-tab-link="backlog" data-prefilter="hold" title="HOLD · 挂起" style="position:relative;display:block;padding:14px 14px 12px;text-decoration:none;border-left:1px solid #eef1f5;cursor:pointer;"><span style="position:absolute;left:0;top:0;height:3px;width:100%;background:#7048bc;opacity:.25;"></span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#7048bc;">⏸</span><div data-truth="spectrum-hold" style="font-size:30px;font-weight:700;letter-spacing:-.02em;color:#c3cad6;font-variant-numeric:tabular-nums;margin:5px 0 1px;font-family:'IBM Plex Mono',monospace;">0</div><div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:#727c8e;font-weight:600;"><span class="lang-en">HOLD</span><span class="lang-zh">挂起</span></div><div style="font-size:10px;color:#9aa3b2;margin-top:3px;min-height:12px;"><span class="lang-en">parked</span><span class="lang-zh">停放</span></div></a></div><div style="padding:16px 18px 15px;border-top:1px solid #eef1f5;background:#fbfcfe;"><div style="display:flex;height:13px;border-radius:999px;overflow:hidden;border:1px solid #e0e5ee;background:#fff;"><span title="UNKNOWN 1" style="flex:1 1 0%;background:#727c8e;"></span><span title="WIP 1" style="flex:1 1 0%;background:#2d54e8;"></span><span title="TODO 1" style="flex:1 1 0%;background:#c77d12;"></span></div><div style="display:flex;justify-content:space-between;gap:12px;margin-top:9px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#8a93a3;"><span data-truth="total">3 <span class="lang-en">stories</span><span class="lang-zh">个故事</span></span><span><b data-truth="merged-pct" style="color:#178a52;font-weight:600;">0%</b> <span class="lang-en">merged to main</span><span class="lang-zh">已合入主干</span></span></div><div style="display:flex;flex-wrap:wrap;gap:16px;margin-top:11px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#727c8e;"><span style="display:inline-flex;align-items:center;gap:6px;"><i style="width:9px;height:9px;border-radius:3px;background:#178a52;display:inline-block;"></i><span class="lang-en">DONE</span><span class="lang-zh">已交付</span> 0</span><span style="display:inline-flex;align-items:center;gap:6px;"><i style="width:9px;height:9px;border-radius:3px;background:#c2402a;display:inline-block;"></i><span class="lang-en">DRIFT</span><span class="lang-zh">漂移</span> 0</span><span style="display:inline-flex;align-items:center;gap:6px;"><i style="width:9px;height:9px;border-radius:3px;background:#727c8e;display:inline-block;"></i><span class="lang-en">UNKNOWN</span><span class="lang-zh">未知</span> 1</span><span style="display:inline-flex;align-items:center;gap:6px;"><i style="width:9px;height:9px;border-radius:3px;background:#2d54e8;display:inline-block;"></i><span class="lang-en">WIP</span><span class="lang-zh">进行中</span> 1</span><span style="display:inline-flex;align-items:center;gap:6px;"><i style="width:9px;height:9px;border-radius:3px;background:#c77d12;display:inline-block;"></i><span class="lang-en">TODO</span><span class="lang-zh">待办</span> 1</span><span style="display:inline-flex;align-items:center;gap:6px;"><i style="width:9px;height:9px;border-radius:3px;background:#7048bc;display:inline-block;"></i><span class="lang-en">HOLD</span><span class="lang-zh">挂起</span> 0</span></div></div></section></div></div><div id="tab-backlog" style="display:none;"><div style="padding:30px 0 4px;"><div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#2d54e8;font-weight:600;"><span class="lang-en">Wishes, not yet truth</span><span class="lang-zh">愿望，尚未成真</span></div><h1 style="margin:10px 0 0;font-size:28px;line-height:1.1;font-weight:700;letter-spacing:-.02em;color:#161b26;"><span class="lang-en">Backlog</span><span class="lang-zh">待办</span></h1><p style="margin:10px 0 0;max-width:660px;font-size:14.5px;line-height:1.55;color:#525c6e;"><span class="lang-en">Every card here is a wish until main proves the merge. Each row shows the claim beside the truth.</span><span class="lang-zh">这里的每张卡都只是愿望，直到主干证明它合并才算完成。每行同时给出声明与真相。</span></p></div><div style="display:flex;gap:10px;align-items:center;margin:22px 0 12px;flex-wrap:wrap;"><div style="flex:1 1 280px;display:flex;align-items:center;gap:9px;background:#fff;border:1px solid #dfe4ec;border-radius:999px;padding:9px 16px;"><span style="color:#9aa3b2;font-size:13px;">⌕</span><input type="search" id="bl-search" placeholder="Search epics &amp; stories · 搜索史诗与故事" style="flex:1;border:none;outline:none;background:none;font-family:inherit;font-size:13.5px;color:#3a4252;"></div><div style="display:flex;gap:6px;flex-wrap:wrap;"><button type="button" class="bl-chip" data-filter="done" style="font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 12px;border-radius:999px;border:1px solid #e0e5ee;background:#fff;color:#178a52;cursor:pointer;">✓ <span class="lang-en">DONE</span><span class="lang-zh">已交付</span></button><button type="button" class="bl-chip" data-filter="fail" style="font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 12px;border-radius:999px;border:1px solid #e0e5ee;background:#fff;color:#c2402a;cursor:pointer;">! <span class="lang-en">DRIFT</span><span class="lang-zh">漂移</span></button><button type="button" class="bl-chip" data-filter="unknown" style="font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 12px;border-radius:999px;border:1px solid #e0e5ee;background:#fff;color:#727c8e;cursor:pointer;">? <span class="lang-en">UNKNOWN</span><span class="lang-zh">未知</span></button><button type="button" class="bl-chip" data-filter="wip" style="font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 12px;border-radius:999px;border:1px solid #e0e5ee;background:#fff;color:#2d54e8;cursor:pointer;">● <span class="lang-en">WIP</span><span class="lang-zh">进行中</span></button><button type="button" class="bl-chip" data-filter="todo" style="font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 12px;border-radius:999px;border:1px solid #e0e5ee;background:#fff;color:#c77d12;cursor:pointer;">○ <span class="lang-en">TODO</span><span class="lang-zh">待办</span></button><button type="button" class="bl-chip" data-filter="hold" style="font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 12px;border-radius:999px;border:1px solid #e0e5ee;background:#fff;color:#7048bc;cursor:pointer;">⏸ <span class="lang-en">HOLD</span><span class="lang-zh">挂起</span></button></div></div><div style="display:flex;align-items:baseline;gap:12px;margin:24px 0 12px;"><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#525c6e;font-weight:600;"><span class="lang-en">Shipping to main</span><span class="lang-zh">交付中</span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#2d54e8;font-weight:600;">2</span><span style="flex:1;height:1px;background:#dfe4ec;"></span></div><details class="bl-epic" data-epic="delivery-dossier" data-open-key="ep:delivery-dossier"><summary style="display:grid;grid-template-columns:20px 1fr auto;align-items:center;gap:14px;padding:13px 16px;cursor:pointer;list-style:none;"><span class="bl-caret" style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#9aa3b2;text-align:center;transition:transform .18s;">▶</span><div style="min-width:0;"><a href="delivery-dossier/index.html" style="font-size:16px;font-weight:600;letter-spacing:-.01em;color:#161b26;text-decoration:none;">delivery-dossier</a><div style="display:flex;height:6px;border-radius:999px;overflow:hidden;margin-top:8px;max-width:320px;border:1px solid #e4e8ef;"><span style="width:50%;background:#178a52;"></span><span style="flex:1;background:#eef1f5;"></span></div></div><span style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#8a93a3;white-space:nowrap;"><b style="color:#178a52;font-weight:600;">1</b> / 2</span></summary><div style="border-top:1px solid #eef1f5;padding:5px 8px 9px;"><a class="bl-row" data-state="done" data-text="us-a-1 alpha — first shipped story" href="delivery-dossier/US-A-1/index.html" style="display:grid;grid-template-columns:62px 150px 1fr 110px minmax(150px,auto);align-items:center;gap:12px;padding:8px 10px;border-radius:8px;cursor:pointer;text-decoration:none;"><span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;font-weight:600;padding:2px 7px;border-radius:5px;border:1px solid #2d54e844;color:#2d54e8;text-align:center;">US</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#2d54e8;font-weight:600;overflow:hidden;text-overflow:ellipsis;">US-A-1</span><span style="font-size:13.5px;color:#525c6e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Alpha — first shipped story</span><span style="display:inline-flex;gap:3px;"><span title="definition" style="width:14px;height:5px;border-radius:3px;background:#178a52;"></span><span title="design" style="width:14px;height:5px;border-radius:3px;background:#178a52;"></span><span title="execution" style="width:14px;height:5px;border-radius:3px;background:#178a52;"></span><span title="delivery" style="width:14px;height:5px;border-radius:3px;background:#178a52;"></span><span title="retrospective" style="width:14px;height:5px;border-radius:3px;background:#178a52;"></span></span><span style="display:flex;align-items:center;gap:7px;justify-content:flex-end;font-family:'IBM Plex Mono',monospace;font-size:11px;"><span style="width:7px;height:7px;border-radius:50%;background:#178a52;flex:none;"></span><span style="color:#178a52;font-weight:600;"><span class="lang-en">DONE</span><span class="lang-zh">已交付</span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.04em;text-transform:uppercase;padding:2px 6px;border-radius:4px;border:1px solid #178a5255;color:#178a52;white-space:nowrap;">truth ✓</span></span></a><a class="bl-row" data-state="todo" data-text="us-a-2 alpha — second story (todo)" href="delivery-dossier/US-A-2/index.html" style="display:grid;grid-template-columns:62px 150px 1fr 110px minmax(150px,auto);align-items:center;gap:12px;padding:8px 10px;border-radius:8px;cursor:pointer;text-decoration:none;"><span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;font-weight:600;padding:2px 7px;border-radius:5px;border:1px solid #2d54e844;color:#2d54e8;text-align:center;">US</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#2d54e8;font-weight:600;overflow:hidden;text-overflow:ellipsis;">US-A-2</span><span style="font-size:13.5px;color:#525c6e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Alpha — second story (todo)</span><span style="display:inline-flex;gap:3px;"><span title="definition" style="width:14px;height:5px;border-radius:3px;background:#178a52;"></span><span title="design" style="width:14px;height:5px;border-radius:3px;background:#e4e8ef;"></span><span title="execution" style="width:14px;height:5px;border-radius:3px;background:#e4e8ef;"></span><span title="delivery" style="width:14px;height:5px;border-radius:3px;background:#e4e8ef;"></span><span title="retrospective" style="width:14px;height:5px;border-radius:3px;background:#e4e8ef;"></span></span><span style="display:flex;align-items:center;gap:7px;justify-content:flex-end;font-family:'IBM Plex Mono',monospace;font-size:11px;"><span style="width:7px;height:7px;border-radius:50%;background:#c77d12;flex:none;"></span><span style="color:#c77d12;font-weight:600;"><span class="lang-en">TODO</span><span class="lang-zh">待办</span></span></span></a></div></details><details class="bl-epic" data-epic="loop-observability" data-open-key="ep:loop-observability"><summary style="display:grid;grid-template-columns:20px 1fr auto;align-items:center;gap:14px;padding:13px 16px;cursor:pointer;list-style:none;"><span class="bl-caret" style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#9aa3b2;text-align:center;transition:transform .18s;">▶</span><div style="min-width:0;"><a href="loop-observability/index.html" style="font-size:16px;font-weight:600;letter-spacing:-.01em;color:#161b26;text-decoration:none;">loop-observability</a><div style="display:flex;height:6px;border-radius:999px;overflow:hidden;margin-top:8px;max-width:320px;border:1px solid #e4e8ef;"><span style="width:0%;background:#178a52;"></span><span style="flex:1;background:#eef1f5;"></span></div></div><span style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#8a93a3;white-space:nowrap;"><b style="color:#178a52;font-weight:600;">0</b> / 1</span></summary><div style="border-top:1px solid #eef1f5;padding:5px 8px 9px;"><a class="bl-row" data-state="wip" data-text="us-obs-1 observability first card" href="loop-observability/US-OBS-1/index.html" style="display:grid;grid-template-columns:62px 150px 1fr 110px minmax(150px,auto);align-items:center;gap:12px;padding:8px 10px;border-radius:8px;cursor:pointer;text-decoration:none;"><span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;font-weight:600;padding:2px 7px;border-radius:5px;border:1px solid #2d54e844;color:#2d54e8;text-align:center;">US</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#2d54e8;font-weight:600;overflow:hidden;text-overflow:ellipsis;">US-OBS-1</span><span style="font-size:13.5px;color:#525c6e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Observability first card</span><span style="display:inline-flex;gap:3px;"><span title="definition" style="width:14px;height:5px;border-radius:3px;background:#178a52;"></span><span title="design" style="width:14px;height:5px;border-radius:3px;background:#e4e8ef;"></span><span title="execution" style="width:14px;height:5px;border-radius:3px;background:#e4e8ef;"></span><span title="delivery" style="width:14px;height:5px;border-radius:3px;background:#e4e8ef;"></span><span title="retrospective" style="width:14px;height:5px;border-radius:3px;background:#e4e8ef;"></span></span><span style="display:flex;align-items:center;gap:7px;justify-content:flex-end;font-family:'IBM Plex Mono',monospace;font-size:11px;"><span style="width:7px;height:7px;border-radius:50%;background:#2d54e8;flex:none;"></span><span style="color:#2d54e8;font-weight:600;"><span class="lang-en">WIP</span><span class="lang-zh">进行中</span></span></span></a></div></details><div style="display:flex;align-items:baseline;gap:12px;margin:24px 0 12px;"><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#525c6e;font-weight:600;"><span class="lang-en">Settled on main</span><span class="lang-zh">已落定</span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#178a52;font-weight:600;">0</span><span style="flex:1;height:1px;background:#dfe4ec;"></span></div></div><div id="tab-loop" style="display:none;"><div style="padding:30px 0 4px;"><div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#2d54e8;font-weight:600;"><span class="lang-en">The engine says it runs — here is the tape</span><span class="lang-zh">引擎说在跑——这是轨迹带</span></div><h1 style="margin:10px 0 0;font-size:28px;line-height:1.1;font-weight:700;letter-spacing:-.02em;color:#161b26;"><span class="lang-en">Loop & Cycles</span><span class="lang-zh">循环与周期</span></h1><p style="margin:10px 0 0;max-width:660px;font-size:14.5px;line-height:1.55;color:#525c6e;"><span class="lang-en">Every cycle, complete and replayable. Failures are first-class — never swallowed.</span><span class="lang-zh">每一个 cycle 完整、可回溯。失败是一等公民——绝不吞。</span></p></div><div style="display:flex;align-items:baseline;gap:12px;margin:24px 0 12px;flex-wrap:wrap;"><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#525c6e;font-weight:600;"><span class="lang-en">Loops on this repo</span><span class="lang-zh">本仓 Loops</span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#9aa3b2;"><span class="lang-en">backlog · PR · dream · go sessions</span><span class="lang-zh">backlog · PR · dream · go 会话</span></span><span style="flex:1;height:1px;background:#dfe4ec;min-width:16px;"></span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#8a93a3;white-space:nowrap;">0/1 <span class="lang-en">running</span><span class="lang-zh">运行中</span></span></div><section style="border:1px solid #e0e5ee;border-radius:14px;background:#fff;overflow:hidden;margin:0 0 8px;box-shadow:0 1px 2px rgba(17,26,69,.05);"><div data-now-section="heartbeat-head" style="display:grid;grid-template-columns:1.6fr .8fr .7fr 1fr 1fr;align-items:center;gap:14px;padding:9px 18px;border-top:1px solid #eef1f5;background:#fafbfe;"><span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:#9aa3b2;">Lane</span><span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:#9aa3b2;"><span class="lang-en">mode</span><span class="lang-zh">模式</span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:#9aa3b2;"><span class="lang-en">every</span><span class="lang-zh">周期</span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:#9aa3b2;"><span class="lang-en">last</span><span class="lang-zh">上次</span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:#9aa3b2;"><span class="lang-en">next</span><span class="lang-zh">下次</span></span></div><div style="display:grid;grid-template-columns:1.6fr .8fr .7fr 1fr 1fr;align-items:center;gap:14px;padding:13px 18px;border-top:1px solid #f4f6f9;"><div style="display:flex;align-items:center;gap:11px;min-width:0;"><span style="width:9px;height:9px;border-radius:50%;background:#c2402a;flex:none;"></span><div style="min-width:0;"><div style="font-size:13.5px;font-weight:600;color:#161b26;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">backlog loop</div><div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#c2402a;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"><span class="lang-en">zombie</span><span class="lang-zh">僵尸</span></div></div></div><div style="font-size:12.5px;color:#3a4252;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">backlog</div><div style="font-size:12.5px;color:#3a4252;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">—</div><div style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#3a4252;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">06-20 11:00Z</div><div class="hb-next" data-next="" style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#3a4252;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">—</div></div></section><div style="display:flex;align-items:center;gap:12px;margin:24px 0 12px;flex-wrap:wrap;"><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#525c6e;font-weight:600;white-space:nowrap;"><span class="lang-en">Hooks · this repo</span><span class="lang-zh">钩子 · 本仓</span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#9aa3b2;"><span class="lang-en">git hooks wired into this checkout</span><span class="lang-zh">本检出已配置的 git 钩子</span></span><span style="flex:1;height:1px;background:#dfe4ec;min-width:16px;"></span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#8a93a3;white-space:nowrap;">0 <span class="lang-en">git hooks</span><span class="lang-zh">git 钩子</span> · .git/hooks</span></div><section data-hooks="this-repo" style="border:1px solid #e0e5ee;border-radius:12px;background:#fff;overflow:hidden;margin:0 0 8px;box-shadow:0 1px 2px rgba(17,26,69,.05);"><div style="padding:14px 18px;font-size:12.5px;color:#9aa3b2;font-style:italic;"><span class="lang-en">no configured git hooks in this checkout</span><span class="lang-zh">本检出没有已配置的 git 钩子</span></div></section><div style="display:flex;align-items:center;gap:12px;margin:24px 0 12px;flex-wrap:wrap;"><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#525c6e;font-weight:600;"><span class="lang-en">Cycle ledger</span><span class="lang-zh">周期账本</span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#9aa3b2;"><span class="lang-en">what it actually did while you were away</span><span class="lang-zh">你不在的时候它到底干了什么</span></span><span style="flex:1;height:1px;background:#dfe4ec;min-width:16px;"></span><div style="display:flex;border:1px solid #dfe4ec;border-radius:999px;overflow:hidden;background:#fff;"><button type="button" class="cy-range on" data-range="recent" style="appearance:none;border:0;background:transparent;font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 13px;cursor:pointer;color:#525c6e;"><span class="lang-en">Recent</span><span class="lang-zh">近期</span></button><button type="button" class="cy-range" data-range="1" style="appearance:none;border:0;background:transparent;font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 13px;cursor:pointer;color:#525c6e;"><span class="lang-en">Today</span><span class="lang-zh">今天</span></button><button type="button" class="cy-range" data-range="3" style="appearance:none;border:0;background:transparent;font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 13px;cursor:pointer;color:#525c6e;"><span class="lang-en">3 days</span><span class="lang-zh">三天</span></button><button type="button" class="cy-range" data-range="7" style="appearance:none;border:0;background:transparent;font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 13px;cursor:pointer;color:#525c6e;"><span class="lang-en">7 days</span><span class="lang-zh">七天</span></button><button type="button" class="cy-range" data-range="all" style="appearance:none;border:0;background:transparent;font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 13px;cursor:pointer;color:#525c6e;"><span class="lang-en">All</span><span class="lang-zh">全部</span></button></div><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#8a93a3;white-space:nowrap;"><span id="cy-count">—</span> <span class="lang-en">shown</span><span class="lang-zh">显示</span> <span style="color:#9aa3b2;">·</span> <b id="cy-failed" style="color:#d23b3b;font-weight:600;">—</b> <span class="lang-en">failed (all)</span><span class="lang-zh">失败（全部）</span></span></div><section id="cy-ledger" style="border:1px solid #e0e5ee;border-radius:14px;background:#fff;overflow:hidden;box-shadow:0 1px 2px rgba(17,26,69,.05);"><div style="padding:16px 18px;font-size:12.5px;color:#9aa3b2;font-style:italic;"><span class="lang-en">no cycles recorded yet</span><span class="lang-zh">尚无周期记录</span></div></section></div><div id="tab-release" style="display:none;"><div style="padding:30px 0 4px;"><div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#2d54e8;font-weight:600;"><span class="lang-en">It says it will ship — the gate decides</span><span class="lang-zh">说要发——闸门说了算</span></div><h1 style="margin:10px 0 0;font-size:28px;line-height:1.1;font-weight:700;letter-spacing:-.02em;color:#161b26;"><span class="lang-en">Release</span><span class="lang-zh">发版</span></h1><p style="margin:10px 0 0;max-width:660px;font-size:14.5px;line-height:1.55;color:#525c6e;"><span class="lang-en">Why can't it ship? Read it, don't guess it: six reconciled dimensions, every drift with an address.</span><span class="lang-zh">为什么发不了版？读出来，不用猜：六个对账维度，每处漂移都有地址。</span></p></div><section style="border:1px solid #e0e5ee;border-radius:12px;background:#fff;overflow:hidden;margin:20px 0 8px;box-shadow:0 1px 2px rgba(17,26,69,.05);"><div style="display:flex;flex-wrap:wrap;align-items:center;gap:30px;padding:16px 20px;"><div><div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:#9aa3b2;"><span class="lang-en">release</span><span class="lang-zh">发版</span></div><div style="font-family:'IBM Plex Mono',monospace;font-size:24px;font-weight:600;color:#161b26;margin-top:3px;">—</div></div><div><div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:#9aa3b2;"><span class="lang-en">verdict</span><span class="lang-zh">判定</span></div><div style="margin-top:6px;"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.05em;text-transform:uppercase;font-weight:600;padding:3px 10px;border-radius:999px;border:1px solid #727c8e55;color:#727c8e;">unknown</span></div></div><div><div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:#9aa3b2;"><span class="lang-en">gate</span><span class="lang-zh">闸门</span></div><div style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#3a4252;margin-top:8px;white-space:nowrap;">f:0 w:0 ?:0</div></div><div><div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:#9aa3b2;"><span class="lang-en">cut</span><span class="lang-zh">切版</span></div><div style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#3a4252;margin-top:8px;white-space:nowrap;">—</div></div><div><div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:#9aa3b2;"><span class="lang-en">previous</span><span class="lang-zh">上一版</span></div><div style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#3a4252;margin-top:8px;white-space:nowrap;">—</div></div><span style="flex:1;"></span><div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8a93a3;white-space:nowrap;"><b style="color:#178a52;font-weight:600;">0</b> <span class="lang-en">merged</span><span class="lang-zh">已合</span> · <b style="color:#c77d12;font-weight:600;">0</b> <span class="lang-en">pending</span><span class="lang-zh">待交付</span></div></div><div style="padding:0 20px 16px;"><div style="display:flex;height:11px;border-radius:999px;overflow:hidden;border:1px solid #e4e8ef;"><span style="width:100%;background:#178a52;"></span><span style="flex:1;background:#eef1f5;"></span></div></div></section><div style="display:flex;align-items:baseline;gap:12px;margin:26px 0 12px;flex-wrap:wrap;"><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#525c6e;font-weight:600;white-space:nowrap;"><span class="lang-en">Consistency gate</span><span class="lang-zh">一致性闸门</span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#9aa3b2;"><span class="lang-en">six dimensions reconciled against truth anchors</span><span class="lang-zh">六维对真相锚点对账</span> · 06-20 12:00Z</span><span style="flex:1;height:1px;background:#dfe4ec;min-width:16px;"></span><code class="copy-chip" data-copy="roll release --gate-check" style="font-family:'IBM Plex Mono',monospace;font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid #e0e5ee;color:#2d54e8;background:#fff;cursor:pointer;">roll release --gate-check</code></div><section style="border:1px solid #e0e5ee;border-radius:12px;background:#fff;overflow:hidden;margin:0 0 8px;box-shadow:0 1px 2px rgba(17,26,69,.05);"><div data-truth="gate-verdict" data-blocking="0" style="display:flex;align-items:center;gap:12px;padding:14px 18px;background:#178a520d;border-bottom:1px solid #eef1f5;"><span style="font-size:17px;line-height:1;flex:none;">✅</span><span style="font-size:13.5px;font-weight:600;color:#178a52;"><span class="lang-en">Ready to release — all six dimensions reconciled</span><span class="lang-zh">可以发版 — 六维全部对齐</span></span><span style="flex:1;"></span><span data-truth="gate-total-inline"><span style="display:flex;gap:14px;justify-content:flex-end;font-family:'IBM Plex Mono',monospace;font-size:11.5px;white-space:nowrap;"><span style="color:#b6bdc9;font-weight:600;">f:0</span><span style="color:#b6bdc9;font-weight:600;">w:0</span><span style="color:#b6bdc9;">?:0</span></span></span></div><div data-truth="gate-collapsed" style="display:flex;align-items:center;gap:10px;padding:13px 18px;border-top:1px solid #eef1f5;color:#525c6e;font-size:12.5px;"><span style="width:8px;height:8px;border-radius:50%;background:#178a52;flex:none;"></span><span class="lang-en">All six dimensions — code↔backlog · cards · docs · tests · bilingual · site — reconcile. Nothing to fix.</span><span class="lang-zh">六个维度——代码↔待办 · 卡片 · 文档 · 测试 · 双语 · 站点——全部对齐，无需处理。</span></div></section><div style="display:flex;align-items:baseline;gap:12px;margin:28px 0 12px;"><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#525c6e;font-weight:600;white-space:nowrap;"><span class="lang-en">Pending delivery</span><span class="lang-zh">待交付</span></span><span data-truth="pending-count" style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#c77d12;font-weight:600;">0</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#9aa3b2;"><span class="lang-en">merged to main since the latest tag — the next release</span><span class="lang-zh">自最近 tag 起合入 main——下个版本的内容</span></span><span style="flex:1;height:1px;background:#dfe4ec;"></span></div><section style="border:1px dashed #e0e5ee;border-radius:12px;background:#fff;padding:16px 20px;color:#9aa3b2;font-size:12.5px;font-style:italic;"><span class="lang-en">nothing merged since the latest tag — already shipped</span><span class="lang-zh">自最近 tag 起没有新合并——都已发布</span></section><div style="display:flex;align-items:baseline;gap:12px;margin:28px 0 12px;"><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#525c6e;font-weight:600;white-space:nowrap;"><span class="lang-en">Changelog (merged truth)</span><span class="lang-zh">变更日志（合并真相）</span></span><span data-truth="shipped-count" style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#178a52;font-weight:600;">0</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#9aa3b2;"><span class="lang-en">generated from merged PRs, not claims</span><span class="lang-zh">从 merged PR 生成，不读声明</span></span><span style="flex:1;height:1px;background:#dfe4ec;"></span></div><div style="display:flex;align-items:baseline;gap:12px;margin:28px 0 12px;"><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#525c6e;font-weight:600;"><span class="lang-en">Version history</span><span class="lang-zh">历史版本</span></span><span style="flex:1;height:1px;background:#dfe4ec;"></span></div><section style="border:1px solid #e0e5ee;border-radius:12px;background:#fff;overflow:hidden;margin:0 0 8px;"></section></div><div id="tab-casting" style="display:none;"><div style="padding:30px 0 4px;"><div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#2d54e8;font-weight:600;"><span class="lang-en">Who plays which role — complexity slots + scenarios</span><span class="lang-zh">谁演什么——复杂度槽位 + 场景角色</span></div><h1 style="margin:10px 0 0;font-size:28px;line-height:1.1;font-weight:700;letter-spacing:-.02em;color:#161b26;"><span class="lang-en">Casting</span><span class="lang-zh">选角</span></h1><p style="margin:10px 0 0;max-width:660px;font-size:14.5px;line-height:1.55;color:#525c6e;"><span class="lang-en">The executor complexity ladder and the scenario roles — resolved from the router slot config, never a guessed agent.</span><span class="lang-zh">执行复杂度槽位与场景角色——从路由槽位配置解析，绝不臆测 agent。</span></p></div><div style="display:flex;align-items:baseline;gap:12px;margin:24px 0 12px;"><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#525c6e;font-weight:600;white-space:nowrap;"><span class="lang-en">Casting</span><span class="lang-zh">角色分工</span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#9aa3b2;"><span class="lang-en">complexity slots + scenario roles — who plays what</span><span class="lang-zh">复杂度槽位 + 场景角色——谁在什么场景演什么</span></span><span style="flex:1;height:1px;background:#dfe4ec;"></span><code class="copy-chip" data-copy="roll agent list" style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;padding:3px 9px;border-radius:6px;border:1px solid #e0e5ee;color:#2d54e8;background:#fff;cursor:pointer;">roll agent list</code></div><section style="border:1px solid #e0e5ee;border-radius:12px;background:#fff;overflow:hidden;margin:0 0 8px;box-shadow:0 1px 2px rgba(17,26,69,.05);"><div data-exec-ladder="true" style="display:grid;grid-template-columns:repeat(3,1fr) 1.1fr;gap:12px;padding:16px 18px;background:#fbfcfe;"><article data-exec-slot="easy" data-ramp="1" style="min-width:0;border:1px solid #e0e5ee;border-radius:8px;background:#fff;padding:14px 14px 13px;display:flex;flex-direction:column;gap:11px;"><div style="display:flex;align-items:flex-end;justify-content:space-between;gap:10px;"><div aria-hidden="true" style="height:36px;display:flex;align-items:flex-end;gap:4px;"><span data-ramp-bar="easy" style="display:block;width:8px;height:17px;border-radius:5px;background:#2d54e8;opacity:0.52;"></span></div><span style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:#9aa3b2;font-weight:600;"><span class="lang-en">easy</span><span class="lang-zh">easy</span></span></div><div><div style="font-size:12px;color:#525c6e;font-weight:600;white-space:nowrap;"><span class="lang-en">Executor · easy</span><span class="lang-zh">执行 · easy</span></div><div style="margin-top:5px;"><span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:700;color:#161b26;"><span class="lang-en">kimi</span><span class="lang-zh">kimi</span></span></div></div><div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#9aa3b2;margin-top:auto;"><span class="lang-en">slot</span><span class="lang-zh">槽位</span></div></article><article data-exec-slot="default" data-ramp="2" style="min-width:0;border:1px solid #e0e5ee;border-radius:8px;background:#fff;padding:14px 14px 13px;display:flex;flex-direction:column;gap:11px;"><div style="display:flex;align-items:flex-end;justify-content:space-between;gap:10px;"><div aria-hidden="true" style="height:36px;display:flex;align-items:flex-end;gap:4px;"><span data-ramp-bar="default" style="display:block;width:8px;height:17px;border-radius:5px;background:#2d54e8;opacity:0.52;"></span><span data-ramp-bar="default" style="display:block;width:8px;height:24px;border-radius:5px;background:#2d54e8;opacity:0.7;"></span></div><span style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:#9aa3b2;font-weight:600;"><span class="lang-en">default</span><span class="lang-zh">default</span></span></div><div><div style="font-size:12px;color:#525c6e;font-weight:600;white-space:nowrap;"><span class="lang-en">Executor · default</span><span class="lang-zh">执行 · default</span></div><div style="margin-top:5px;"><span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:700;color:#161b26;"><span class="lang-en">codex</span><span class="lang-zh">codex</span></span></div></div><div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#9aa3b2;margin-top:auto;"><span class="lang-en">slot</span><span class="lang-zh">槽位</span></div></article><article data-exec-slot="hard" data-ramp="3" style="min-width:0;border:1px solid #e0e5ee;border-radius:8px;background:#fff;padding:14px 14px 13px;display:flex;flex-direction:column;gap:11px;"><div style="display:flex;align-items:flex-end;justify-content:space-between;gap:10px;"><div aria-hidden="true" style="height:36px;display:flex;align-items:flex-end;gap:4px;"><span data-ramp-bar="hard" style="display:block;width:8px;height:17px;border-radius:5px;background:#2d54e8;opacity:0.52;"></span><span data-ramp-bar="hard" style="display:block;width:8px;height:24px;border-radius:5px;background:#2d54e8;opacity:0.7;"></span><span data-ramp-bar="hard" style="display:block;width:8px;height:31px;border-radius:5px;background:#2d54e8;opacity:0.8800000000000001;"></span></div><span style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:#9aa3b2;font-weight:600;"><span class="lang-en">hard</span><span class="lang-zh">hard</span></span></div><div><div style="font-size:12px;color:#525c6e;font-weight:600;white-space:nowrap;"><span class="lang-en">Executor · hard</span><span class="lang-zh">执行 · hard</span></div><div style="margin-top:5px;"><span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:700;color:#161b26;"><span class="lang-en">claude</span><span class="lang-zh">claude</span></span></div></div><div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#9aa3b2;margin-top:auto;"><span class="lang-en">slot</span><span class="lang-zh">槽位</span></div></article><article data-exec-slot="fallback" data-ramp="0" style="min-width:0;border:1px dashed #e0e5ee;border-radius:8px;background:#fbfcfe;padding:14px 14px 13px;display:flex;flex-direction:column;gap:11px;"><div style="display:flex;align-items:flex-end;justify-content:space-between;gap:10px;"><div aria-hidden="true" style="font-family:'IBM Plex Mono',monospace;font-size:26px;line-height:1;color:#9aa3b2;">↩</div><span style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:#9aa3b2;font-weight:600;"><span class="lang-en">fallback</span><span class="lang-zh">fallback</span></span></div><div><div style="font-size:12px;color:#525c6e;font-weight:600;white-space:nowrap;"><span class="lang-en">Executor · fallback</span><span class="lang-zh">执行 · fallback</span></div><div style="margin-top:5px;"><span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:700;color:#161b26;"><span class="lang-en">claude</span><span class="lang-zh">claude</span></span></div></div><div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#9aa3b2;margin-top:auto;"><span class="lang-en">slot</span><span class="lang-zh">槽位</span></div></article></div><div data-scenario-roles="true"><div data-scenario-role="peer" style="display:grid;grid-template-columns:140px 1fr auto;align-items:center;gap:14px;padding:10px 18px;border-top:1px solid #f4f6f9;"><span style="font-size:12.5px;color:#525c6e;font-weight:600;white-space:nowrap;"><span class="lang-en">Peer re-check</span><span class="lang-zh">同伴复核 peer</span></span><span><span style="font-size:12.5px;color:#525c6e;"><span class="lang-en">auto-picked — must differ from builder</span><span class="lang-zh">自动挑选——强制异构于执行者</span></span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#9aa3b2;white-space:nowrap;"><span class="lang-en">pairing rule</span><span class="lang-zh">结对规则</span></span></div><div data-scenario-role="review-pr" style="display:grid;grid-template-columns:140px 1fr auto;align-items:center;gap:14px;padding:10px 18px;border-top:1px solid #f4f6f9;"><span style="font-size:12.5px;color:#525c6e;font-weight:600;white-space:nowrap;"><span class="lang-en">PR review</span><span class="lang-zh">PR 评审</span></span><span><span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:600;color:#161b26;"><span class="lang-en">codex</span><span class="lang-zh">codex</span></span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#9aa3b2;white-space:nowrap;"><span class="lang-en">review-pr</span><span class="lang-zh">review-pr</span></span></div><div data-scenario-role="spar" style="display:grid;grid-template-columns:140px 1fr auto;align-items:center;gap:14px;padding:10px 18px;border-top:1px solid #f4f6f9;"><span style="font-size:12.5px;color:#525c6e;font-weight:600;white-space:nowrap;"><span class="lang-en">Adversarial TDD</span><span class="lang-zh">攻防 spar</span></span><span><span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:600;color:#161b26;"><span class="lang-en">claude ⚔ kimi</span><span class="lang-zh">claude ⚔ kimi</span></span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#9aa3b2;white-space:nowrap;"><span class="lang-en">pair</span><span class="lang-zh">对抗对</span></span></div><div data-scenario-role="onboard" style="display:grid;grid-template-columns:140px 1fr auto;align-items:center;gap:14px;padding:10px 18px;border-top:1px solid #f4f6f9;"><span style="font-size:12.5px;color:#525c6e;font-weight:600;white-space:nowrap;"><span class="lang-en">Onboard</span><span class="lang-zh">接入 onboard</span></span><span><span style="font-size:12.5px;color:#525c6e;"><span class="lang-en">follows the active client</span><span class="lang-zh">跟随当前交互客户端</span></span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#9aa3b2;white-space:nowrap;"><span class="lang-en">interactive</span><span class="lang-zh">交互式</span></span></div></div></section></div><div id="tab-charter" style="display:none;"><div style="padding:30px 0 4px;"><div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#2d54e8;font-weight:600;"><span class="lang-en">Read-only · the rulebook you are governed by</span><span class="lang-zh">只读 · 你被约束的规则书</span></div><h1 style="margin:10px 0 0;font-size:28px;line-height:1.1;font-weight:700;letter-spacing:-.02em;color:#161b26;"><span class="lang-en">Charter</span><span class="lang-zh">章程</span></h1><p style="margin:10px 0 0;max-width:660px;font-size:14.5px;line-height:1.55;color:#525c6e;"><span class="lang-en">Browse the project's own charter — manifesto, architecture, epic plans, and the guide map — rendered read-only from the repo. One markdown engine, no document drift.</span><span class="lang-zh">浏览项目自身的章程——理念、架构、史诗计划、指南索引——从仓库只读渲染。一套 markdown 引擎，零文档漂移。</span></p></div><section class="charter-browser" style="display:grid;grid-template-columns:268px 1fr;gap:18px;margin:18px 0 8px;align-items:start;"><nav class="charter-tree" style="border:1px solid #e0e5ee;border-radius:12px;background:#fff;padding:12px 10px;position:sticky;top:108px;max-height:calc(100vh - 132px);overflow:auto;box-shadow:0 1px 2px rgba(17,26,69,.04);" aria-label="<span class="lang-en">charter docs</span><span class="lang-zh">章程文档</span>"><div style="margin:0 0 14px;"><div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#9aa3b2;font-weight:600;margin:0 0 6px;padding:0 4px;"><span class="lang-en">Charter</span><span class="lang-zh">章程</span> <span style="color:#2d54e8;">1</span></div><div style="display:flex;flex-direction:column;gap:2px;"><a href="#charter/docs%2Fmanifesto.md" class="md-tree-item" data-doc="docs/manifesto.md" style="display:block;text-decoration:none;border:1px solid transparent;border-radius:8px;padding:7px 10px;cursor:pointer;"><span style="font-size:13px;color:#161b26;font-weight:600;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Manifesto</span><span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#9aa3b2;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">docs/manifesto.md</span></a></div></div><div style="margin:0 0 14px;"><div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#9aa3b2;font-weight:600;margin:0 0 6px;padding:0 4px;"><span class="lang-en">Guide</span><span class="lang-zh">指南</span> <span style="color:#2d54e8;">0</span></div><div style="display:flex;flex-direction:column;gap:2px;"></div></div><div style="margin:0 0 14px;"><div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#9aa3b2;font-weight:600;margin:0 0 6px;padding:0 4px;"><span class="lang-en">Epic plans</span><span class="lang-zh">史诗计划</span> <span style="color:#2d54e8;">0</span></div><div style="display:flex;flex-direction:column;gap:2px;"></div></div></nav><div class="charter-reader" style="border:1px solid #e0e5ee;border-radius:12px;background:#fff;padding:22px 26px;min-width:0;box-shadow:0 1px 2px rgba(17,26,69,.04);"><article class="md-doc on" data-doc="docs/manifesto.md" id="charter-doc-docs%2Fmanifesto.md"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 14px;padding:0 0 12px;border-bottom:1px solid #eef1f5;"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#2d54e8;background:#2d54e80d;border:1px solid #2d54e833;border-radius:6px;padding:3px 9px;">docs/manifesto.md</span></div><div class="md-body"><p>main is truth</p></div></article></div></section></div></main>
+<script id="roll-truth" type="application/json">
+{
+  "generatedAt": "2026-06-20T12:00:00Z",
+  "collectedAt": "2026-06-20T11:00:00Z",
+  "story": {
+    "total": 3,
+    "spectrum": {
+      "done": 0,
+      "wip": 1,
+      "hold": 0,
+      "todo": 1,
+      "fail": 0,
+      "unknown": 1
+    },
+    "legacy": 0
+  },
+  "audit": {
+    "fail": 0,
+    "warn": 1,
+    "unknown": 0,
+    "collectedAt": "2026-06-20T10:00:00Z"
+  },
+  "cycle": {
+    "cycles3d": 2,
+    "failed3d": 0,
+    "costUsd3d": 1.3,
+    "collectedAt": "2026-06-20T11:00:00Z"
+  },
+  "loop": {
+    "lanes": [
+      {
+        "name": "backlog loop",
+        "source": "launchd",
+        "running": false,
+        "mode": "backlog",
+        "lastAt": "2026-06-20T11:00:00Z"
+      }
+    ]
+  },
+  "stories": [
+    {
+      "id": "US-A-1",
+      "epic": "delivery-dossier",
+      "ladder": "claimed",
+      "evidence": {
+        "report": true,
+        "acMap": true,
+        "visualEvidence": false
+      },
+      "truthState": "unknown",
+      "truthReason": "merge_evidence_unavailable",
+      "legacy": false
+    },
+    {
+      "id": "US-A-2",
+      "epic": "delivery-dossier",
+      "ladder": "none",
+      "evidence": {
+        "report": false,
+        "acMap": false,
+        "visualEvidence": false
+      },
+      "truthState": "todo",
+      "truthReason": "no_claim_no_evidence",
+      "legacy": false
+    },
+    {
+      "id": "US-OBS-1",
+      "epic": "loop-observability",
+      "ladder": "none",
+      "evidence": {
+        "report": false,
+        "acMap": false,
+        "visualEvidence": false
+      },
+      "truthState": "wip",
+      "truthReason": "no_claim_no_evidence",
+      "legacy": false
+    }
+  ]
+}
+</script>
+</body>
+</html>
+"
+`;

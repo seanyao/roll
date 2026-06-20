@@ -189,6 +189,11 @@ function fakeGithub(status: 0 | 1 | 2, prState: string = "MERGED"): Ports["githu
     async prState() {
       return prState;
     },
+    async prMergeInfo() {
+      return prState === "MERGED"
+        ? { state: "MERGED", mergedAt: "2026-06-21T00:00:00Z", mergeCommit: "abc123def456" }
+        : { state: prState };
+    },
   };
 }
 
@@ -755,6 +760,12 @@ describe("FIX-211 — preflight reconcile 补翻: async PR-loop merge flips a st
       },
       async prState(_repoCwd, branch) {
         return byBranch[branch] ?? "OPEN";
+      },
+      async prMergeInfo(_repoCwd, branch) {
+        const state = byBranch[branch] ?? "OPEN";
+        return state === "MERGED"
+          ? { state: "MERGED", mergedAt: "2026-06-21T00:00:00Z", mergeCommit: "abc123def456" }
+          : { state };
       },
     };
   }

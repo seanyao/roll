@@ -19,6 +19,7 @@
  */
 import { TERMINAL_OUTCOMES, type TerminalOutcome } from "@roll/spec";
 import type { AuditPrEvidence } from "../consistency/audit.js";
+import type { StoryDeliveryTruth } from "./query.js";
 
 export type TruthState = "truth" | "warn" | "fail" | "unknown" | "grandfathered";
 
@@ -51,10 +52,25 @@ export interface DeliveringCycle {
 
 /** Snapshot slice for one story — every field maps to a declared anchor:
  *  backlogStatus (derived view), prEvidence (story_delivery authority),
- *  deliveringCycles (cycle_outcome view). */
+ *  deliveringCycles (cycle_outcome view).
+ *
+ *  US-TRUTH-017: {@link deliveryTruth} is the structured replacement for
+ *  backlogStatus string parsing. When present, isDone/hasPr are derived from
+ *  it; {@link backlogStatus} is kept as a deprecated fallback for legacy rows
+ *  that predate the structured delivery store.
+ *
+ *  Migration (AC3 two-step):
+ *    1. Add deliveryTruth (this change) — structured path primary, backlogStatus
+ *       parse remains as fallback.
+ *    2. After all writers produce DeliveryRecords, remove the string-parse
+ *       fallback (future story). */
 export interface StoryTruthInput {
   storyId: string;
   backlogStatus: string;
+  /** US-TRUTH-017: structured delivery truth — the preferred input source.
+   *  When present, {@link isDoneRow} and {@link annotated} are derived from
+   *  lifecycleState / prNumber rather than parsed from {@link backlogStatus}. */
+  deliveryTruth?: StoryDeliveryTruth;
   prEvidence?: AuditPrEvidence;
   deliveringCycles: DeliveringCycle[];
   nowSec: number;
@@ -73,8 +89,16 @@ export interface StoryTruth {
 }
 
 export function deriveStoryTruth(input: StoryTruthInput): StoryTruth {
-  const isDoneRow = input.backlogStatus.includes("✅");
-  const annotated = /PR#\d+/.test(input.backlogStatus);
+  // US-TRUTH-017: prefer structured delivery truth over string parsing.
+  // When deliveryTruth is present, derive isDone/hasPr from it;
+  // otherwise fall back to the deprecated backlogStatus parse (legacy rows).
+  const dt = input.deliveryTruth;
+  const isDoneRow = dt !== undefined
+    ? dt.lifecycleState === "done"
+    : input.backlogStatus.includes("✅");
+  const annotated = dt !== undefined
+    ? dt.prNumber !== undefined
+    : /PR#\d+/.test(input.backlogStatus);
   const ev = input.prEvidence;
   const superseded = input.deliveringCycles.filter((c) => !c.merged).map((c) => c.cycleId);
   const withSuperseded = (t: StoryTruth): StoryTruth =>

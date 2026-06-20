@@ -20,6 +20,7 @@ import {
   type StoryTruth,
   type TruthState,
 } from "./selectors.js";
+import type { StoryDeliveryTruth } from "./query.js";
 import { TERMINAL_SCHEMA_EPOCH_SEC, type TerminalOutcome } from "@roll/spec";
 
 /** US-TRUTH-001 schema epoch — single home in @roll/spec (terminal.ts). */
@@ -77,15 +78,21 @@ export function rowDelivered(row: TruthRunRow, nowSec: number = Math.floor(Date.
 }
 
 /** Story truth for presentation consumers. The caller owns evidence gathering;
- *  absence stays unknown/grandfathered per the selector, never guessed here. */
+ *  absence stays unknown/grandfathered per the selector, never guessed here.
+ *
+ *  US-TRUTH-017: {@link deliveryTruth} is the structured input — when provided
+ *  it replaces backlogStatus string parsing (AC1). Callers SHOULD pass it when
+ *  they have access to deliveries; the selector falls back to the deprecated
+ *  string parse path only for legacy rows that predate the structured store. */
 export function storyTruthFromBacklog(
   storyId: string,
   backlogStatus: string,
-  opts: { prEvidence?: AuditPrEvidence; nowSec?: number } = {},
+  opts: { prEvidence?: AuditPrEvidence; nowSec?: number; deliveryTruth?: StoryDeliveryTruth } = {},
 ): StoryTruth {
   return deriveStoryTruth({
     storyId,
     backlogStatus,
+    ...(opts.deliveryTruth !== undefined ? { deliveryTruth: opts.deliveryTruth } : {}),
     ...(opts.prEvidence !== undefined ? { prEvidence: opts.prEvidence } : {}),
     deliveringCycles: [],
     nowSec: opts.nowSec ?? Math.floor(Date.now() / 1000),

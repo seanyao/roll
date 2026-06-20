@@ -8,6 +8,7 @@ export * from "./types/truth-snapshot.js";
 export * from "./types/loop.js";
 export * from "./types/agent.js";
 export * from "./types/cycle.js";
+export * from "./types/cycle-activity.js";
 export * from "./types/truth.js";
 export * from "./types/terminal.js";
 export * from "./types/truth-registry.js";

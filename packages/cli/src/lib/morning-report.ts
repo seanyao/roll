@@ -24,11 +24,24 @@ function readEvents(path: string): RollEvent[] {
 
 function readRuns(path: string): MorningRunRow[] {
   try {
-    return readFileSync(path, "utf8")
+    const all = readFileSync(path, "utf8")
       .split("\n")
       .map((line) => line.trim())
       .filter((line) => line !== "")
       .map((line) => JSON.parse(line) as MorningRunRow);
+    // US-TRUTH-019: last-wins by (story_id, cycle_id) for append-only safety
+    const lastWins = new Map<string, MorningRunRow>();
+    const unkeyed: MorningRunRow[] = [];
+    for (const row of all) {
+      const sid = typeof row.story_id === "string" ? row.story_id : "";
+      const cid = typeof row.cycle_id === "string" ? (row.cycle_id as string) : "";
+      if (sid !== "" && cid !== "") {
+        lastWins.set(`${sid}\t${cid}`, row);
+      } else {
+        unkeyed.push(row);
+      }
+    }
+    return [...unkeyed, ...lastWins.values()];
   } catch {
     return [];
   }

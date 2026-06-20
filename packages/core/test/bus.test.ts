@@ -115,7 +115,7 @@ describe("ensureEventFiles", () => {
   });
 });
 
-describe("upsertRun dedupe by (storyId + cycleId)", () => {
+describe("upsertRun append-only (US-TRUTH-019)", () => {
   it("new key → appended", () => {
     const store = fakeStore();
     const bus = new EventBus(store);
@@ -124,12 +124,15 @@ describe("upsertRun dedupe by (storyId + cycleId)", () => {
     expect(bus.readRuns(RUNS)).toHaveLength(1);
   });
 
-  it("same story+cycle → updated in place (no duplicate row)", () => {
+  it("same story+cycle → appended again (append-only; last-wins on read)", () => {
     const store = fakeStore();
     const bus = new EventBus(store);
     bus.upsertRun(RUNS, { storyId: "US-1", cycleId: "cyc-a" }, { status: "built" });
     const r = bus.upsertRun(RUNS, { storyId: "US-1", cycleId: "cyc-a" }, { status: "delivered" });
-    expect(r).toBe("updated");
+    expect(r).toBe("appended");
+    // raw: both rows present
+    expect(bus.readRunsRaw(RUNS)).toHaveLength(2);
+    // last-wins: only the last row survives
     const rows = bus.readRuns(RUNS);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.["status"]).toBe("delivered");
@@ -137,23 +140,91 @@ describe("upsertRun dedupe by (storyId + cycleId)", () => {
     expect(rows[0]?.["cycle_id"]).toBe("cyc-a");
   });
 
-  it("distinct cycle of same story → appended (new row)", () => {
+  it("distinct cycle of same story → appended (new row; both survive last-wins)", () => {
     const store = fakeStore();
     const bus = new EventBus(store);
     bus.upsertRun(RUNS, { storyId: "US-1", cycleId: "cyc-a" }, { status: "built" });
     const r = bus.upsertRun(RUNS, { storyId: "US-1", cycleId: "cyc-b" }, { status: "built" });
     expect(r).toBe("appended");
+    // raw + last-wins both show 2 (different cycle_ids)
+    expect(bus.readRunsRaw(RUNS)).toHaveLength(2);
     expect(bus.readRuns(RUNS)).toHaveLength(2);
   });
 
-  it("matches rows that carry routed_story/cycleId field aliases", () => {
+  it("matches rows that carry routed_story/cycleId field aliases (last-wins merges)", () => {
     const store = fakeStore();
     const bus = new EventBus(store);
     // seed a row in the bash-ish shape using routed_story.
     store.writeText(RUNS, `${JSON.stringify({ routed_story: "US-9", cycle_id: "z", status: "x" })}\n`);
     const r = bus.upsertRun(RUNS, { storyId: "US-9", cycleId: "z" }, { status: "done" });
-    expect(r).toBe("updated");
-    expect(bus.readRuns(RUNS)).toHaveLength(1);
+    expect(r).toBe("appended");
+    // raw: 2 rows; last-wins: 1 (latest wins)
+    expect(bus.readRunsRaw(RUNS)).toHaveLength(2);
+    const rows = bus.readRuns(RUNS);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.["status"]).toBe("done");
+  });
+
+  it("AC3: concurrent writers — two distinct cycles appended independently survive", () => {
+    const store = fakeStore();
+    const bus = new EventBus(store);
+    // Simulate two concurrent writes to different cycles
+    bus.upsertRun(RUNS, { storyId: "US-CONC", cycleId: "cyc-1" }, { status: "ok" });
+    bus.upsertRun(RUNS, { storyId: "US-CONC", cycleId: "cyc-2" }, { status: "ok" });
+    expect(bus.readRunsRaw(RUNS)).toHaveLength(2);
+    expect(bus.readRuns(RUNS)).toHaveLength(2);
+  });
+
+  it("AC3: same cycle updated multiple times — last-wins picks latest", () => {
+    const store = fakeStore();
+    const bus = new EventBus(store);
+    bus.upsertRun(RUNS, { storyId: "US-LW", cycleId: "cyc-x" }, { status: "built", cost: 1 });
+    bus.upsertRun(RUNS, { storyId: "US-LW", cycleId: "cyc-x" }, { status: "failed", cost: 1 });
+    bus.upsertRun(RUNS, { storyId: "US-LW", cycleId: "cyc-x" }, { status: "delivered", cost: 3 });
+    const rows = bus.readRuns(RUNS);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.["status"]).toBe("delivered");
+    expect(rows[0]?.["cost"]).toBe(3);
+  });
+
+  it("AC4: backward compat — old single-row data reads correctly via last-wins", () => {
+    const store = fakeStore();
+    const bus = new EventBus(store);
+    // Pre-seed with old-style data (one row per key, no duplicates)
+    store.writeText(RUNS,
+      `${JSON.stringify({ story_id: "OLD-1", cycle_id: "cyc-a", status: "done" })}\n` +
+      `${JSON.stringify({ story_id: "OLD-2", cycle_id: "cyc-b", status: "failed" })}\n`,
+    );
+    const rows = bus.readRuns(RUNS);
+    expect(rows).toHaveLength(2);
+    const done = rows.find((r) => r["story_id"] === "OLD-1");
+    expect(done?.["status"]).toBe("done");
+  });
+
+  it("AC4: mixed old + new append-only data — last-wins still correct", () => {
+    const store = fakeStore();
+    const bus = new EventBus(store);
+    // Old-style seed
+    store.writeText(RUNS,
+      `${JSON.stringify({ story_id: "MIX-1", cycle_id: "cyc-a", status: "built", v: 1 })}\n`,
+    );
+    // New append for same key
+    bus.upsertRun(RUNS, { storyId: "MIX-1", cycleId: "cyc-a" }, { status: "delivered", v: 2 });
+    const rows = bus.readRuns(RUNS);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.["status"]).toBe("delivered");
+    expect(rows[0]?.["v"]).toBe(2);
+  });
+
+  it("unkeyed rows (no story_id/cycle_id) pass through unmerged", () => {
+    const store = fakeStore();
+    const bus = new EventBus(store);
+    store.writeText(RUNS, `${JSON.stringify({ note: "legacy row without keys" })}\n`);
+    bus.upsertRun(RUNS, { storyId: "US-K", cycleId: "cyc-k" }, { status: "ok" });
+    const rows = bus.readRuns(RUNS);
+    // unkeyed row + the keyed one = 2
+    expect(rows).toHaveLength(2);
+    expect(rows.some((r) => r["note"] === "legacy row without keys")).toBe(true);
   });
 });
 

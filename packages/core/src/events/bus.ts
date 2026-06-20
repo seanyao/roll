@@ -163,55 +163,51 @@ export class EventBus {
   }
 
   /**
-   * Idempotent upsert of a runs.jsonl row keyed by (storyId + cycleId),
-   * mirroring `_runs_append`'s `grep -qF '"run_id":"…"' && return` dedupe but
-   * with the refined key the card requires:
-   *   - NEW key            → append the row (single atomic line write).
-   *   - SAME key           → REPLACE the existing row in place (update
-   *                          semantics; bash returns early, but the v3 contract
-   *                          is an upsert so a re-emitted cycle row reflects its
-   *                          final state).
-   *   - DISTINCT cycle     → append (a new cycle of the same story is a new row).
-   * Returns the action taken. The row is serialized with the key fields written
-   * so a subsequent read can re-derive the token.
+   * Append a runs.jsonl row keyed by (storyId + cycleId). US-TRUTH-019:
+   * append-only — a single atomic O_APPEND write, no read-modify-write.
+   * Same (storyId, cycleId) may produce multiple rows; {@link readRuns}
+   * resolves last-wins on read.
+   *
+   * Returns "appended" (always — the caller's port already returns void).
+   * The row is serialized with story_id / cycle_id stamped so readers can
+   * re-derive the dedupe token.
    */
-  upsertRun(runsPath: string, key: RunKey, row: RunRow): "appended" | "updated" {
+  upsertRun(runsPath: string, key: RunKey, row: RunRow): "appended" {
     this.store.ensureFile(runsPath);
-    const text = this.store.readText(runsPath);
-    const token = runToken(key);
     const merged: RunRow = { ...row, story_id: key.storyId, cycle_id: key.cycleId };
     const line = `${JSON.stringify(merged)}\n`;
-
-    const lines = text.split("\n");
-    let replaced = false;
-    const out: string[] = [];
-    for (const raw of lines) {
-      if (raw === "") continue;
-      let parsed: RunRow | null;
-      try {
-        parsed = JSON.parse(raw) as RunRow;
-      } catch {
-        out.push(raw); // preserve unparseable rows verbatim
-        continue;
-      }
-      if (!replaced && rowToken(parsed) === token) {
-        out.push(JSON.stringify(merged));
-        replaced = true;
-      } else {
-        out.push(raw);
-      }
-    }
-
-    if (replaced) {
-      this.store.writeText(runsPath, `${out.join("\n")}\n`);
-      return "updated";
-    }
     this.store.appendLine(runsPath, line);
     return "appended";
   }
 
-  /** Read all runs.jsonl rows (skips blank / unparseable lines). */
+  /**
+   * Read all runs.jsonl rows, last-wins by (story_id, cycle_id).
+   * US-TRUTH-019: rows with the same (story_id, cycle_id) dedupe to the
+   * LAST occurrence (file order). Rows without a valid (story_id, cycle_id)
+   * token pass through unmerged (they can't collide). Blank / unparseable
+   * lines are skipped.
+   */
   readRuns(runsPath: string): RunRow[] {
+    const raw = this.readRunsRaw(runsPath);
+    const lastWins = new Map<string, RunRow>();
+    const unkeyed: RunRow[] = [];
+    for (const row of raw) {
+      const token = rowToken(row);
+      if (token !== null) {
+        lastWins.set(token, row);
+      } else {
+        unkeyed.push(row);
+      }
+    }
+    return [...unkeyed, ...lastWins.values()];
+  }
+
+  /**
+   * Read all runs.jsonl rows raw (no dedup). Consumers that need the full
+   * append-only history for forensics / migration can use this; most
+   * consumers want {@link readRuns} (last-wins).
+   */
+  readRunsRaw(runsPath: string): RunRow[] {
     const text = this.store.readText(runsPath);
     const out: RunRow[] = [];
     for (const raw of text.split("\n")) {

@@ -2190,12 +2190,15 @@ export function buildTerminalRecord(
 }
 
 /** Read runs.jsonl as {@link ReconcileRunRow}[] for the preflight claim
- *  reconcile (FIX-211). Tolerant: missing file / malformed lines → skipped, so
- *  a corrupt row never topples the cycle's orphan-recovery pass. */
+ *  reconcile (FIX-211). US-TRUTH-019: last-wins by (story_id, cycle_id) —
+ *  append-only can produce duplicate keys; the last row wins. Rows without
+ *  a valid (story_id, cycle_id) token pass through unmerged.
+ *  Tolerant: missing file / malformed lines → skipped, so a corrupt row
+ *  never topples the cycle's orphan-recovery pass. */
 function readRunsRows(runsPath: string): ReconcileRunRow[] {
   try {
     if (!existsSync(runsPath)) return [];
-    return readFileSync(runsPath, "utf8")
+    const all = readFileSync(runsPath, "utf8")
       .split("\n")
       .filter((l) => l.trim() !== "")
       .map((l) => {
@@ -2206,6 +2209,19 @@ function readRunsRows(runsPath: string): ReconcileRunRow[] {
         }
       })
       .filter((r): r is ReconcileRunRow => r !== undefined);
+    // last-wins: dedupe by (story_id, cycle_id)
+    const lastWins = new Map<string, ReconcileRunRow>();
+    const unkeyed: ReconcileRunRow[] = [];
+    for (const row of all) {
+      const sid = typeof row["story_id"] === "string" ? row["story_id"] : "";
+      const cid = typeof row["cycle_id"] === "string" ? row["cycle_id"] : "";
+      if (sid !== "" && cid !== "") {
+        lastWins.set(`${sid}\t${cid}`, row);
+      } else {
+        unkeyed.push(row);
+      }
+    }
+    return [...unkeyed, ...lastWins.values()];
   } catch {
     return [];
   }

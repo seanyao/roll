@@ -116,24 +116,36 @@ function defaultCollectTruthBoard(cwd: string, nowSec: number): TruthBoardInput 
       let cycles3d = 0, failed3d = 0, latestTsSec = 0;
       let costUsd3d = 0;
       const costByCurrency: Record<string, number> = {};
-      for (const line of readFileSync(runsPath, "utf8").trim().split("\n")) {
+      // US-TRUTH-019: read all rows, then last-wins by (story_id, cycle_id)
+      // before counting — append-only can produce duplicate keys.
+      const allRows: Record<string, unknown>[] = [];
+      for (const line of readFileSync(runsPath, "utf8").split("\n")) {
         if (line.trim() === "") continue;
-        try {
-          const row = JSON.parse(line) as Record<string, unknown>;
-          const ts = str(row["ts"]);
-          if (ts === undefined) continue;
-          const sec = Date.parse(ts) / 1000;
-          if (!Number.isFinite(sec) || nowSec - sec > 3 * 24 * 3600) continue;
-          cycles3d++;
-          if (sec > latestTsSec) latestTsSec = sec;
-          const stat = str(row["status"]) ?? "";
-          const out = str(row["outcome"]) ?? "";
-          if (stat === "failed" || stat === "reverted" || out === "failed" || out === "blocked" || out === "aborted_no_delivery") failed3d++;
-          const usd = num(row["cost_usd"]);
-          if (usd !== undefined && usd > 0) costUsd3d += usd;
-          const cur = str(row["cost_currency"]), amt = num(row["cost_amount"]);
-          if (cur !== undefined && amt !== undefined && amt > 0) costByCurrency[cur] = (costByCurrency[cur] ?? 0) + amt;
-        } catch { /* skip */ }
+        try { allRows.push(JSON.parse(line) as Record<string, unknown>); }
+        catch { /* skip */ }
+      }
+      const lastWins = new Map<string, Record<string, unknown>>();
+      for (const row of allRows) {
+        const sid = str(row["story_id"]);
+        const cid = str(row["cycle_id"] ?? row["cycleId"]);
+        if (sid !== "" && cid !== "") lastWins.set(`${sid}\t${cid}`, row);
+        // unkeyed rows are silently dropped from the 3d count (they lack
+        // the fields needed to dedupe them anyway).
+      }
+      for (const row of lastWins.values()) {
+        const ts = str(row["ts"]);
+        if (ts === undefined) continue;
+        const sec = Date.parse(ts) / 1000;
+        if (!Number.isFinite(sec) || nowSec - sec > 3 * 24 * 3600) continue;
+        cycles3d++;
+        if (sec > latestTsSec) latestTsSec = sec;
+        const stat = str(row["status"]) ?? "";
+        const out = str(row["outcome"]) ?? "";
+        if (stat === "failed" || stat === "reverted" || out === "failed" || out === "blocked" || out === "aborted_no_delivery") failed3d++;
+        const usd = num(row["cost_usd"]);
+        if (usd !== undefined && usd > 0) costUsd3d += usd;
+        const cur = str(row["cost_currency"]), amt = num(row["cost_amount"]);
+        if (cur !== undefined && amt !== undefined && amt > 0) costByCurrency[cur] = (costByCurrency[cur] ?? 0) + amt;
       }
       cycle = {
         cycles3d, failed3d,

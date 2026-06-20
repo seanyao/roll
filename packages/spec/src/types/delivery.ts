@@ -1,0 +1,157 @@
+/**
+ * US-TRUTH-013 — Structured Delivery Record + Lifecycle State enumeration.
+ *
+ * This is the foundation of the structured-truth-review epic: the machine-managed
+ * delivery truth lives as a strong-schema record, NOT parsed from markdown prose.
+ *
+ * Two orthogonal dimensions (pi clarified in the 3-agent review):
+ *   - LifecycleState: WHERE the card is in the delivery pipeline (machine-derived).
+ *   - TruthState (truth.ts selectors): the VERDICT on whether a claim matches
+ *     the facts (truth/warn/fail/unknown/grandfathered).
+ *
+ * These are independent fields that must NOT be conflated — a card can be
+ * `in_flight` (lifecycle) AND `warn` (verdict, because its claim lagged).
+ *
+ * Lifecycle is DERIVED from TerminalOutcome + PR state via lifecycleFromFacts(),
+ * never hand-set — no second vocabulary.
+ */
+import type { TerminalOutcome } from "./terminal.js";
+import type { FactOr } from "./terminal.js";
+
+// ── LifecycleState (AC2) ─────────────────────────────────────────────────────
+
+/**
+ * Closed lifecycle state vocabulary. These represent WHERE a story is in the
+ * delivery pipeline, machine-derived from TerminalOutcome + PR facts.
+ *
+ * @remarks
+ * **Orthogonal to {@link TruthState}** (truth/warn/fail/unknown/grandfathered).
+ * TruthState is the VERDICT of a claim-vs-facts audit; LifecycleState is the
+ * current pipeline position. They are ALWAYS both present as independent fields
+ * — never conflate them. Example: a card with an open PR whose backlog row
+ * still reads 📋 Todo has lifecycle `in_flight` (the PR proves work is in
+ * flight) and TruthState `warn` (the claim lags).
+ */
+export const LIFECYCLE_STATES = [
+  "todo",
+  "building",
+  "in_flight",
+  "ci_red",
+  "blocked",
+  "on_hold",
+  "done",
+  "failed",
+  "abandoned",
+] as const;
+export type LifecycleState = (typeof LIFECYCLE_STATES)[number];
+
+/**
+ * PR-level state, used as input to lifecycleFromFacts. The `ci_red` lifecycle
+ * state is derived when a story is in_flight AND the PR has a CI-red signal.
+ */
+export type PrState = "none" | "open" | "open_ci_red" | "merged" | "closed" | "unknown";
+
+// ── DeliveryRecord (AC1) ─────────────────────────────────────────────────────
+
+/**
+ * A machine-managed structured delivery record — the authoritative truth about
+ * one story's delivery lifecycle. Built ON TerminalOutcome (no parallel truth
+ * type). Every field uses FactOr<T> so a missing value carries an explicit
+ * reason, never a silent zero/null.
+ */
+export interface DeliveryRecord {
+  /** Story identifier (US-XXX / FIX-XXX / REFACTOR-XXX). */
+  storyId: string;
+  /** The cycle that produced this delivery. */
+  cycleId: string;
+  /** Machine-derived lifecycle state — computed, never hand-set. */
+  lifecycleState: LifecycleState;
+  /** GitHub PR number, when one exists. */
+  prNumber: FactOr<number>;
+  /** GitHub PR URL, when one exists. */
+  prUrl: FactOr<string>;
+  /** When the PR merged (epoch ms), when applicable. */
+  mergedAt: FactOr<number>;
+  /** The merge commit SHA on main, when the PR merged. */
+  mergeCommit: FactOr<string>;
+  /** When this record was written (epoch ms). */
+  recordedAt: number;
+}
+
+// ── lifecycleFromFacts (AC3) ─────────────────────────────────────────────────
+
+/**
+ * AC5 — CI-red sub-state annotation. When the story lifecycle is `in_flight`
+ * and the PR CI is red, this flag is set on the record so consumers can
+ * distinguish "PR open, waiting for CI" (normal in_flight) from
+ * "CI red, needs fix-forward" (in_flight with ciRed sub-marker).
+ *
+ * The story is still `in_flight` — the author pushes a fix, CI re-runs, and
+ * the story stays `in_flight` (NOT state-flipped to a transient "ci_red").
+ * The ci_red LIFECYCLE_STATE value above is the STATES-MATRIX definition;
+ * it IS a LifecycleState for consumers that prefer a flat state, but its
+ * semantics are "in_flight + sub:ci_red".
+ */
+export interface CiRedSubState {
+  /** True when the PR's CI check is failing. */
+  ciRed: true;
+}
+
+/**
+ * Pure function: derive a card's lifecycle state from two machine facts —
+ * the terminal outcome (what the cycle produced) and the PR state (what
+ * GitHub confirms).
+ *
+ * @param terminalOutcome - The cycle's TerminalOutcome (US-TRUTH-001 vocabulary).
+ * @param prState - The PR's current state on GitHub.
+ * @returns The derived LifecycleState — never hand-set.
+ */
+export function lifecycleFromFacts(
+  terminalOutcome: TerminalOutcome,
+  prState: PrState,
+): LifecycleState {
+  // ── Done: PR merged → done ──────────────────────────────────────────
+  if (prState === "merged") return "done";
+
+  // ── In-flight cluster ──────────────────────────────────────────────
+  // published_pending_merge + PR open → in_flight (the classic case)
+  if (terminalOutcome === "published_pending_merge") {
+    if (prState === "open") return "in_flight";
+    if (prState === "open_ci_red") return "ci_red";
+    // PR closed without merge → abandoned (work was pushed, PR got closed)
+    if (prState === "closed") return "abandoned";
+    // PR unknown → still in_flight (we published, assume PR is open)
+    return "in_flight";
+  }
+
+  // delivered (already merged or will be) — if not merged yet, it's in_flight
+  if (terminalOutcome === "delivered") {
+    if (prState === "open") return "in_flight";
+    if (prState === "open_ci_red") return "ci_red";
+    return "done"; // prState === "merged" handled above; fallback for backfilled
+  }
+
+  // unpublished: gates passed, publish didn't land — the work exists locally
+  if (terminalOutcome === "unpublished") return "building";
+
+  // ── Failed cluster ─────────────────────────────────────────────────
+  if (terminalOutcome === "failed") return "failed";
+  if (terminalOutcome === "blocked") return "blocked";
+
+  // ── Aborted cluster ────────────────────────────────────────────────
+  if (terminalOutcome === "aborted_no_delivery") return "failed";
+  if (terminalOutcome === "aborted_with_delivery") {
+    if (prState === "open") return "in_flight";
+    if (prState === "open_ci_red") return "ci_red";
+    return "failed";
+  }
+
+  // ── Idle / gave_up / orphan ────────────────────────────────────────
+  if (terminalOutcome === "idle_no_work") return "todo";
+  if (terminalOutcome === "gave_up") return "failed";
+  if (terminalOutcome === "orphan_timeout") return "blocked";
+
+  // ── Unknown ────────────────────────────────────────────────────────
+  // A cycle that started but has no known outcome → building (best guess)
+  return "building";
+}

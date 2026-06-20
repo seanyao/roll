@@ -120,6 +120,15 @@ describe("roll loop watch — data sourcing (AC1)", () => {
   });
 
   it("--events follows the resolved project's .roll/loop/events.ndjson", async () => {
+    // The watch renderer uses device-local time (watch-render.ts hhmmss).
+    // Compute expected timestamps from epoch 0/1 seconds in local timezone
+    // so the assertion is portable across TZ (CI=UTC, dev=local).
+    const p2 = (n: number): string => String(n).padStart(2, "0");
+    const d0 = new Date(0);
+    const d1 = new Date(1000);
+    const ts0 = `${p2(d0.getHours())}:${p2(d0.getMinutes())}:${p2(d0.getSeconds())}`;
+    const ts1 = `${p2(d1.getHours())}:${p2(d1.getMinutes())}:${p2(d1.getSeconds())}`;
+
     const rec = makeDeps({
       follow: (path) => {
         rec.followedPath = path;
@@ -138,8 +147,8 @@ describe("roll loop watch — data sourcing (AC1)", () => {
     expect(code).toBe(0);
     expect(rec.followedPath).toBe("/proj/.roll/loop/events.ndjson");
     expect(rec.renderedEvents).toEqual([
-      "00:00:00  cycle:start            c1 · US-LOOP-045 · codex",
-      "00:00:01  tcr                    abcdef123 · tcr: event mode",
+      `${ts0}  cycle:start            c1 · US-LOOP-045 · codex`,
+      `${ts1}  tcr                    abcdef123 · tcr: event mode`,
     ]);
     expect(rec.followStopped).toBe(true);
   });

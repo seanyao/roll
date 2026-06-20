@@ -12,6 +12,7 @@ import {
   deriveCycleTruth,
   deriveEvidenceTruth,
   deriveStoryTruth,
+  type StoryDeliveryTruth,
   type StoryTruthInput,
 } from "../src/index.js";
 
@@ -91,6 +92,105 @@ describe("deriveStoryTruth — Done ≡ merged (story_delivery anchor)", () => {
       storyInput({ prEvidence: { state: "MERGED", mergedAtSec: EPOCH }, deliveringCycles: [] }),
     );
     expect(t).toMatchObject({ state: "truth", delivered: true });
+  });
+});
+
+// ── US-TRUTH-017: structured delivery truth input ───────────────────────────
+
+function dtInput(overrides: Partial<StoryDeliveryTruth> = {}): StoryDeliveryTruth {
+  return {
+    storyId: "US-X-001",
+    lifecycleState: "done",
+    delivered: true,
+    prNumber: 10,
+    prUrl: "https://github.com/example/pull/10",
+    lastRecordedAt: NOW * 1000,
+    deliveringCycles: ["C-A"],
+    ...overrides,
+  };
+}
+
+describe("US-TRUTH-017 AC1 — deriveStoryTruth with structured deliveryTruth", () => {
+  it("deliveryTruth done + MERGED evidence → truth delivered (same as string path)", () => {
+    const t = deriveStoryTruth(
+      storyInput({
+        deliveryTruth: dtInput({ lifecycleState: "done", delivered: true }),
+        prEvidence: { state: "MERGED", mergedAtSec: EPOCH },
+      }),
+    );
+    expect(t).toMatchObject({ state: "truth", delivered: true, reason: "merge_evidence_confirms" });
+  });
+
+  it("deliveryTruth in_flight + OPEN PR → no premature_done (not claiming done)", () => {
+    const t = deriveStoryTruth(
+      storyInput({
+        backlogStatus: "📋 Todo", // string claim is "not done"
+        deliveryTruth: dtInput({ lifecycleState: "in_flight", delivered: false, prNumber: 42 }),
+        prEvidence: { state: "OPEN" },
+      }),
+    );
+    // Not claiming done in structured truth → truth, no premature_done
+    expect(t).toMatchObject({ state: "truth", delivered: false, reason: "no_claim_no_evidence" });
+  });
+
+  it("deliveryTruth done + has prNumber but no PR evidence → unknown (same as legacy Done+PR# row)", () => {
+    // Equivalent to: backlog says "✅ Done · PR#10" with no GitHub probe.
+    const t = deriveStoryTruth(
+      storyInput({
+        deliveryTruth: dtInput({ lifecycleState: "done", delivered: true, prNumber: 10 }),
+      }),
+    );
+    expect(t).toMatchObject({ state: "unknown", reason: "merge_evidence_unavailable" });
+  });
+
+  it("deliveryTruth todo → no claim (not reading ✅ from backlog)", () => {
+    // Even if backlogStatus says "✅ Done", deliveryTruth says "todo" →
+    // the structured truth wins and there is no claim being made.
+    const t = deriveStoryTruth(
+      storyInput({
+        backlogStatus: "✅ Done · PR#10",
+        deliveryTruth: dtInput({ lifecycleState: "todo", delivered: false, prNumber: undefined }),
+      }),
+    );
+    // Since deliveryTruth does NOT claim done, it's no_claim_no_evidence
+    expect(t).toMatchObject({ state: "truth", delivered: false, reason: "no_claim_no_evidence" });
+  });
+
+  it("deliveryTruth done + MERGED but no prNumber → annotated=false → grandfathered fallback (pre-card-era)", () => {
+    // This is the edge case: structured says done but no PR number AND no git evidence.
+    const t = deriveStoryTruth(
+      storyInput({
+        deliveryTruth: dtInput({ lifecycleState: "done", delivered: true, prNumber: undefined, mergeCommit: undefined }),
+      }),
+    );
+    // Without prEvidence AND without prNumber, the done claim has no annotation.
+    // This maps to the grandfathered case (pre-card-era done).
+    expect(t).toMatchObject({ state: "grandfathered", delivered: false, reason: "pre_card_era" });
+  });
+
+  it("deliveryTruth in_flight with prNumber + MERGED evidence → merge confirms (backlog may lag)", () => {
+    const t = deriveStoryTruth(
+      storyInput({
+        backlogStatus: "🔨 In Progress",
+        deliveryTruth: dtInput({ lifecycleState: "in_flight", delivered: false, prNumber: 42 }),
+        prEvidence: { state: "MERGED", mergedAtSec: NOW - GRACE - 10 },
+      }),
+    );
+    // MERGED evidence but deliveryTruth hasn't caught up → lagging_view
+    expect(t).toMatchObject({ state: "warn", delivered: true, reason: "lagging_view" });
+  });
+
+  it("AC4 — no consumer reads backlog emoji when deliveryTruth present (✅ in string ignored)", () => {
+    // A backlogStatus that says "✅ Done" but deliveryTruth says "building" →
+    // the structured truth wins; ✅ emoji is NEVER parsed.
+    const t = deriveStoryTruth(
+      storyInput({
+        backlogStatus: "✅ Done · PR#99",
+        deliveryTruth: dtInput({ lifecycleState: "building", delivered: false, prNumber: 99 }),
+      }),
+    );
+    // building ≠ done → no claim made, no PR# parsed from string
+    expect(t).toMatchObject({ state: "truth", delivered: false, reason: "no_claim_no_evidence" });
   });
 });
 

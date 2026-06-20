@@ -222,3 +222,66 @@ web          控制台（React，WebSocket 订阅 daemon）
 - **影子审计**:只读漂移扫描作为 `roll release` 闸的内部模块运行,报告落 `.roll/reports/consistency/`。
 - **发版闸**:`roll release` 是唯一发版命令,事务内置一致性闸;任一维 fail 拦截发版,没有豁免路径——修掉漂移才能发。历史 release:waiver 事件仅作存档,不再有写入者。一致性闸跑在**开 PR / 合并之前**(发布分支上 bump+changelog 已提交、未合并),漂移在落 `main` 前就被拦,绝不留"已合并但没打 tag"的半成品。`main` 受 PR 保护,发版给自己也开 PR,再用 GitHub 原生 auto-merge(`gh pr merge --auto --squash`)自驱合并:不依赖 `com.roll.pr.<slug>` 看护 lane,进程中断也由 GitHub 完成合并;等待期逐轮打印进度,CI 不调度时推空提交 nudge;仓库未开 "Allow auto-merge" 则诚实报错而非静默挂死。
 - **变更点护栏** `packages/spec/src/types/truth-registry.ts`(`TRUTH_FIELD_REGISTRY`):落盘且被第二处读取的字段必须登记(绑锚点、记写者、derived-cache 必声明 rebuild);未登记字段 CI 红并指路登记——历史 v2 字段 grandfather 列单。局部变量不登记。
+
+### 结构化交付真相 (`DeliveryRecord` / `deliveries.jsonl`)
+
+Backlog 状态格（`✅ Done` / `🔨 In Progress` 等）是**给人看的派生显示**——机器**绝不** parse 它当真相。机器管理的交付生命周期真相存放在结构化 `DeliveryRecord` 中，存储在 `.roll/loop/deliveries.jsonl`（append-only JSONL，原子单行追加）。
+
+**`DeliveryRecord`**（`packages/spec/src/types/delivery.ts`）：
+- `storyId` / `cycleId` — 唯一定位一次交付
+- `lifecycleState` — 机器派生的生命周期状态（见下一节）
+- `prNumber` / `prUrl` / `mergedAt` / `mergeCommit` — PR 事实（`FactOr<T>`，缺失带枚举化原因，非静默零）
+- `recordedAt` — 记录写入时间（epoch ms）
+
+**写入规则**：Cycle 发 PR 时**强制**写 `DeliveryRecord`（含 PR 号）；PR 合并后重写（lifecycle 从 `in_flight` → `done`）。同一 `(storyId, cycleId)` 的多次写入按 `recordedAt` last-wins。
+
+**读取规则**：所有消费者（picker / reconcile / dossier / watch）**一律**走 `queryStoryDelivery()`，不读 markdown 状态——见 [唯一查询入口](#唯一查询入口-querystorydelivery)。
+
+### 生命周期与裁定正交
+
+两个维度各自独立——绝不混：
+
+| 维度 | 语义 | 值空间 | 来源 |
+|------|------|--------|------|
+| **LifecycleState**（生命周期） | 卡**在哪**（管道位置） | `todo` / `building` / `in_flight` / `ci_red` / `blocked` / `on_hold` / `done` / `failed` / `abandoned` | 机器从 `TerminalOutcome` + PR 状态**派生**（`lifecycleFromFacts()`），不手设 |
+| **TruthState**（裁定） | claim 是否**对**（校验结果） | `truth` / `warn` / `fail` / `unknown` / `grandfathered` | 选择器 `deriveStoryTruth`/`deriveCycleTruth` 从权威锚点仲裁 |
+
+一张卡可以同时处于 `in_flight`（生命周期：PR 已开）和 `warn`（裁定：backlog 行仍标记 `📋 Todo`，声明滞后）——两个字段独立承载，不互斥、不塌缩。`ci_red` 是 `in_flight` 的 PR 级子状态（CI 挂了但卡仍在飞——修→重推→还 `in_flight`）。
+
+### 唯一查询入口 (`queryStoryDelivery`)
+
+**`queryStoryDelivery(storyId, deliveries) → StoryDeliveryTruth`**（`packages/core/src/truth/query.ts`）是交付真相的**唯一确定性查询函数**。纯函数、零 I/O、零 markdown parse——给定 story ID 和所有 `DeliveryRecord`，返回一个序列化 verdict。
+
+**消费者契约（硬约束）**：
+- **picker**（选卡）：跳过 `lifecycleState ∈ {in_flight, ci_red, done, blocked, on_hold}` 的卡
+- **reconcile**（对账）：比对 `StoryDeliveryTruth.delivered` 与 backlog 声明
+- **dossier**（档案）：`lifecycleState` + `deliveringCycles` 渲染交付阶段
+- **watch / dashboard**（监控）：`TruthState` + 派生 backlog 状态格
+
+**新增消费者必须走 `queryStoryDelivery`**——再写一个本地 markdown 解析、backlog 正则匹配、或 `runs.jsonl` 裸读，就是本 epic 关掉的回归。
+
+**`deriveBacklogStatus(truth) → string`**：从 `StoryDeliveryTruth` 派生 backlog 显示字符串（如 `🔨 In Progress · PR#878`、`✅ Done · merged abc1234`）。backlog 状态格从此是**纯派生视图**——人可读但机器不认。`roll truth query <storyId>` CLI 命令直接调用 `queryStoryDelivery`，输出结构化 verdict。
+
+### 存储裁定：不上 SQLite 当源
+
+真实发生的 3-agent 会审（codex + kimi + pi，2026-06-20）一致否决 SQLite 作权威真相源。理由：
+
+1. **毁 git-native** — SQLite 二进制不可 diff、不可 PR 评审、不可 `git revert` 单行回滚（I8）。
+2. **毁 worktree 隔离** — Cycle worktree 各自操作同一个 SQLite 文件 → 需要 WAL 模式 + 文件锁 + 额外并发协议（I7）。
+3. **毁可重建性** — 从事件流重建 SQLite 须维护 schema 迁移链；JSONL 按行追加，重建 = `cat events → filter → append`（I8）。
+4. **过度工程** — "原子记全 卡↔PR↔🔨" justify 的是**事务性写入边界**（单 writer 一条复合 record 一次原子 append），不必是 DB。单行 JSON 远小于 `PIPE_BUF`（POSIX 保证原子性），一个 `O_APPEND write()` 就够了。
+
+**当前方案**：`deliveries.jsonl` — append-only JSONL，复用已有原子写。SQLite **仅可作未来可重建的派生查询缓存**（每日从事件流重建），永不做真相源。
+
+### 消费者契约总结
+
+```
+consumer         input                     output / 行为
+────────         ─────                     ─────────────
+picker           queryStoryDelivery()      skip if in_flight/ci_red/done/blocked/on_hold
+reconcile        queryStoryDelivery()      delivered? vs backlog claim → drift verdict
+dossier          StoryDeliveryTruth        lifecycle + deliveringCycles → phase UI
+watch/dashboard  StoryDeliveryTruth        TruthState + derived backlog status → display
+release gate     queryStoryDelivery()      all stories delivered? → gate pass/fail
+shadow audit     queryStoryDelivery()      claim vs truth drift → .roll/reports/consistency/
+```

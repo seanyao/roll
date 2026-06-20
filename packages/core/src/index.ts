@@ -52,6 +52,7 @@ export * from "./html/chrome.js";
 export * from "./consistency/audit.js";
 export * from "./consistency/gate.js";
 export * from "./truth/selectors.js";
+export * from "./truth/query.js";
 export * from "./truth/adapter.js";
 export * from "./truth/dossier-collect.js";
 export * from "./truth/dossier-ladder.js";

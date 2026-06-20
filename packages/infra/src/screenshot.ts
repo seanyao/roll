@@ -526,7 +526,14 @@ export async function captureScreenshot(
       const forceHeadless = (env["ROLL_ATTEST_HEADLESS"] ?? "") === "1";
       if (deps.run === undefined) {
         const result = await captureWebViaBrowserTool(req, forceHeadless || platform !== "darwin");
-        if (result !== null) return result;
+        // FIX-379: only short-circuit on a REAL capture. A FAILED BrowserTool
+        // attempt — e.g. `require('playwright')` MODULE_NOT_FOUND from a cycle
+        // worktree (no node_modules) — must fall through to the npx-CLI ladder
+        // below (loads file:// headless, self-heals the browser install), NOT
+        // return a terminal skip. Otherwise the loop never captures a declared
+        // web surface, every visual card empty-shells (FIX-339), and the
+        // correction breaker pauses the loop (observed 2026-06-20).
+        if (result !== null && result.taken === true) return result;
       }
       // FIX-291 fallback ladder — NEVER silently downgrade to DOM:
       //   (1) macOS GUI (Aqua + screen-recording, not forced headless) → real-browser

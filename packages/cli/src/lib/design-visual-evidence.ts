@@ -43,6 +43,7 @@
  * card needs one.
  */
 import { parseAcBlocks } from "@roll/core";
+import { allowedDeliverableCmd } from "../runner/attest-gate.js";
 
 /** The user-visible surface a story's visual-evidence AC captures. */
 export type VisualSurface =
@@ -59,7 +60,7 @@ export interface VisualEvidenceVerdict {
   /** true ⇒ the spec satisfies the design-phase visual-evidence contract. */
   ok: boolean;
   /** Machine-readable failure code; undefined when ok. */
-  code?: "missing-visual-evidence-ac" | "web-surface-without-deliverable-url";
+  code?: "missing-visual-evidence-ac" | "web-surface-without-deliverable-url" | "deliverable-cmd-rejected";
   /** Human-readable reason (EN) — undefined when ok. */
   reason?: string;
   /** When exempt, the recorded exemption reason (the contract was waived, not met). */
@@ -70,6 +71,10 @@ export interface VisualEvidenceVerdict {
   hasVisualEvidenceAc: boolean;
   /** The surface the visual-evidence AC captures (drives the url requirement). */
   surface: VisualSurface;
+  /** deliverable_cmd entries rejected by the allowlist (same as attest gate would reject). */
+  rejectedDeliverableCmds?: string[];
+  /** deliverable_cmd entries that look like streaming/never-terminating commands. */
+  streamingDeliverableCmds?: string[];
 }
 
 /**
@@ -255,21 +260,59 @@ export function declaresDeliverableUrl(specText: string): boolean {
  * (`deliverable_cmd:\n  - roll status\n  - roll cycles`).
  */
 export function declaresDeliverableCmd(specText: string): boolean {
+  return parseDeliverableCmdsFromSpec(specText).length > 0;
+}
+
+/**
+ * Parse the `deliverable_cmd:` frontmatter values from a spec. Returns the raw
+ * commands (scalar = whole line, block list = per item; NO comma split, because
+ * a command line legitimately carries commas). Empty / absent ⇒ [].
+ *
+ * FIX-383 — this pure-text parser mirrors the shape parser in attest-gate.ts
+ * (`rawDeliverableCmdsForStory`), but works on raw spec text rather than
+ * worktree+storyId, so `validateStoryVisualEvidence` can check the commands
+ * against `allowedDeliverableCmd` during design-time validation.
+ */
+export function parseDeliverableCmdsFromSpec(specText: string): string[] {
   const fm = frontmatter(specText);
-  if (fm === null) return false;
+  if (fm === null) return [];
   const lines = fm.split("\n");
   const keyIdx = lines.findIndex((l) => /^deliverable_cmd:\s*(.*)$/.test(l));
-  if (keyIdx === -1) return false;
+  if (keyIdx === -1) return [];
   const scalar = stripQuotes((/^deliverable_cmd:\s*(.*)$/.exec(lines[keyIdx] ?? "")?.[1] ?? "").trim());
-  if (scalar !== "") return true;
-  // Block-list form: the key line is empty; an indented `- …` item follows
+  if (scalar !== "") return [scalar];
+  // Block-list form: the key line is empty; indented `- …` items follow
   // before the next top-level key.
+  const cmds: string[] = [];
   for (const l of lines.slice(keyIdx + 1)) {
+    const m = /^\s+-\s*(.+?)\s*$/.exec(l);
+    if (m !== null) {
+      const cmd = stripQuotes((m[1] ?? "").trim());
+      if (cmd !== "") cmds.push(cmd);
+      continue;
+    }
     if (l.trim() === "") continue;
-    if (/^\s+-\s+\S/.test(l)) return true; // indented list item
     break; // any other content (incl. the next key) ends the block
   }
-  return false;
+  return cmds;
+}
+
+/**
+ * Known streaming/never-terminating command patterns. A deliverable_cmd matching
+ * any of these can never produce a single-frame screenshot (the capture mechanism
+ * hangs waiting for the command to exit), so it is not suitable as a
+ * deliverable_cmd — the author should use `--once` / a snapshot mode, or declare
+ * `screenshot_exempt`.
+ */
+const STREAMING_CMD_PATTERNS: RegExp[] = [
+  /\bwatch\b/i,
+  /\btail\s+-f\b/i,
+  /\bstream\b/i,
+];
+
+/** Whether a command looks like a streaming/never-terminating command. */
+function isStreamingCommand(cmd: string): boolean {
+  return STREAMING_CMD_PATTERNS.some((re) => re.test(cmd));
 }
 
 /**
@@ -417,6 +460,35 @@ export function validateStoryVisualEvidence(specText: string): VisualEvidenceVer
       hasVisualEvidenceAc: hasAc,
       surface,
     };
+  }
+
+  // FIX-383 — validate deliverable_cmd against the SAME allowlist attest uses.
+  // A deliverable_cmd that attest would reject must be caught at design time
+  // (validate), not left to runtime (attest gate) where it wastes a whole cycle.
+  const rawCmds = parseDeliverableCmdsFromSpec(specText);
+  if (rawCmds.length > 0) {
+    const rejected = rawCmds.filter((c) => !allowedDeliverableCmd(c));
+    const streaming = rawCmds.filter((c) => isStreamingCommand(c));
+    if (rejected.length > 0) {
+      const streamingHint =
+        streaming.length > 0
+          ? "\n  💡 流式命令提示: 检测到 watch/tail -f/stream 类命令 — 这些命令持续输出不会终止,截图机制会挂;请改用 `--once`/快照子模式(渲一帧即退出)再声明,或加 `screenshot_exempt` 走豁免。"
+          : "";
+      return {
+        ok: false,
+        code: "deliverable-cmd-rejected",
+        reason:
+          `deliverable_cmd 非白名单(仅限 roll 只读子命令): ${rejected.join(", ")} — 与 attest 闸同口径,` +
+          ` 以下会被运行时拒绝: ${rejected.join(", ")}。` +
+          ` 请改用只读 roll 子命令(如 roll status/pulse/cycles/ls),或加 screenshot_exempt 豁免截图。` +
+          streamingHint,
+        declaresDeliverableUrl: declares,
+        hasVisualEvidenceAc: hasAc,
+        surface,
+        rejectedDeliverableCmds: rejected,
+        streamingDeliverableCmds: streaming.length > 0 ? streaming : undefined,
+      };
+    }
   }
 
   return { ok: true, declaresDeliverableUrl: declares, hasVisualEvidenceAc: hasAc, surface };

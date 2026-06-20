@@ -103,6 +103,15 @@ export function storyValidateCommand(args: string[]): number {
   // non-exempt card must carry one.
   if (!exempt && !visual.ok) {
     fails.push(visual.reason ?? "visual-evidence contract not satisfied");
+    // FIX-383 — surface rejected deliverable_cmd entries with streaming hints.
+    if (visual.rejectedDeliverableCmds && visual.rejectedDeliverableCmds.length > 0) {
+      for (const cmd of visual.rejectedDeliverableCmds) {
+        const isStreaming = visual.streamingDeliverableCmds?.includes(cmd);
+        fails.push(
+          `  ↳ rejected: \`${cmd}\` — 非白名单(仅限 roll 只读子命令)${isStreaming ? " (流式命令,截图机制会挂)" : ""}`,
+        );
+      }
+    }
   }
 
   const ok = fails.length === 0;

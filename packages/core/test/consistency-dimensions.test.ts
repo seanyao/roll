@@ -6,6 +6,7 @@ const f = (rule: string, severity: AuditFinding["severity"], subject = "US-X-1")
 
 describe("dimensionOfRule", () => {
   it("maps every known rule and never loses an unknown one (total mapping)", () => {
+    expect(dimensionOfRule("claim-drift")).toBe("code-backlog");
     expect(dimensionOfRule("done-no-merge")).toBe("code-backlog");
     expect(dimensionOfRule("terminal-twin-missing")).toBe("code-backlog");
     expect(dimensionOfRule("done-missing-attest")).toBe("cards");
@@ -20,6 +21,7 @@ describe("dimensionOfRule", () => {
 describe("tallyByDimension — AC2 strict equality", () => {
   it("six rows sum exactly to the status line; grandfathered stays out", () => {
     const findings: AuditFinding[] = [
+      f("claim-drift", "warn", "US-X-0"),
       f("done-no-merge", "fail"),
       f("done-no-merge", "grandfathered"),
       f("done-missing-attest", "warn", "US-X-2"),
@@ -36,8 +38,9 @@ describe("tallyByDimension — AC2 strict equality", () => {
       uSum += tallies[d].unknown;
     }
     expect(fSum).toBe(2); // grandfathered excluded
-    expect(wSum).toBe(2);
+    expect(wSum).toBe(3);
     expect(uSum).toBe(2);
+    expect(tallies["code-backlog"].subjects).toContain("US-X-0");
     expect(tallies["code-backlog"].subjects).toContain("US-X-1");
     expect(tallies["docs"].fail).toBe(1);
   });

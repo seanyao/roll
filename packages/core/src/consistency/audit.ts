@@ -20,6 +20,8 @@
  * same purity bar US-TRUTH-003's selectors inherit).
  */
 import { DEFAULT_GRACE_WINDOW_SEC } from "@roll/spec";
+import type { DeliveryRecord } from "@roll/spec";
+import { queryStoryDelivery, deriveBacklogStatus, type StoryDeliveryTruth } from "../truth/query.js";
 
 /** PR/merge evidence as the gatherer resolved it; absence in the map = probe
  *  did not resolve (→ unknown, never fail). */
@@ -68,6 +70,9 @@ export interface AuditSnapshot {
   eventFailedCount?: number;
   /** Local publish-line drift: commits on main that have not reached origin/main. */
   localMainAhead?: number;
+  /** US-TRUTH-018 — structured delivery records from deliveries.jsonl.
+   *  When absent, the claim-drift rule is silently skipped. */
+  deliveries?: readonly DeliveryRecord[];
 }
 
 export type AuditSeverity = "fail" | "warn" | "unknown" | "grandfathered";
@@ -248,9 +253,86 @@ export function runConsistencyAudit(s: AuditSnapshot): AuditReport {
     );
   }
 
+  // ── claim-drift: backlog status vs structured delivery truth ──────────────
+  // Only runs when structured delivery records are available; silently skipped
+  // otherwise (backlog status is the fallback truth when deliveries don't exist).
+  if (s.deliveries && s.deliveries.length > 0) {
+    for (const row of s.backlog) {
+      const truth = queryStoryDelivery(row.id, s.deliveries);
+      // If no records exist for this story, the backlog status is the only
+      // known truth — nothing to drift from.
+      if (truth.lifecycleState === "todo" && truth.lastRecordedAt === 0) continue;
+
+      const derivedStatus = deriveBacklogStatus(truth);
+      // Normalize: strip annotation suffixes from the backlog status when
+      // comparing (e.g. "✅ Done · evidence(link)" should still match "✅ Done").
+      const normalizedClaim = row.status.replace(/\s*·.*$/, "").trim();
+      const normalizedDerived = derivedStatus.replace(/\s*·.*$/, "").trim();
+
+      if (normalizedClaim === normalizedDerived) continue;
+
+      // Severity: Done claim without merge truth → fail (premature Done).
+      // Other mismatches → warn (lagging derived view).
+      const claimedDone = normalizedClaim.includes("✅");
+      const truthDelivered = truth.delivered;
+
+      if (claimedDone && !truthDelivered) {
+        add(
+          "claim-drift",
+          "fail",
+          row.id,
+          `backlog claims \`${row.status}\` but structured truth says lifecycle=${truth.lifecycleState} delivered=${truth.delivered} — derived status should be \`${derivedStatus}\``,
+        );
+      } else {
+        add(
+          "claim-drift",
+          "warn",
+          row.id,
+          `backlog shows \`${row.status}\` but structured truth derives \`${derivedStatus}\` (lifecycle=${truth.lifecycleState} delivered=${truth.delivered})`,
+        );
+      }
+    }
+  }
+
   const summary: Record<AuditSeverity, number> = { fail: 0, warn: 0, unknown: 0, grandfathered: 0 };
   for (const f of findings) summary[f.severity] += 1;
   return { findings, summary };
+}
+
+// ── claim-drift correction (US-TRUTH-018 AC2) ──────────────────────────────
+
+/**
+ * Given a backlog row's current status and the structured delivery truth,
+ * return the derived (correct) status cell string.
+ *
+ * US-TRUTH-018 AC2: "修派生视图:把 backlog 状态格刷新成与结构化真相一致的派生显示;
+ * 人写的 intent 字段(标题/优先级)不动。"
+ *
+ * This is a pure derivation — it does NOT modify the markdown file. The caller
+ * is responsible for writing the corrected row back via {@link BacklogStore}.
+ *
+ * @param storyId - The story identifier.
+ * @param currentStatus - The current backlog status cell (e.g. "📋 Todo").
+ * @param deliveries - All structured delivery records.
+ * @returns `null` when the current status already matches the derived truth
+ *   (no drift), or the corrected status string when drift is detected.
+ */
+export function correctBacklogStatus(
+  storyId: string,
+  currentStatus: string,
+  deliveries: readonly DeliveryRecord[],
+): string | null {
+  const truth = queryStoryDelivery(storyId, deliveries);
+  // If no records exist for this story, the backlog is the only truth — nothing to correct.
+  if (truth.lifecycleState === "todo" && truth.lastRecordedAt === 0) return null;
+
+  const derivedStatus = deriveBacklogStatus(truth);
+  // Normalize: strip annotation suffixes (· evidence, · PR#N, etc.) when comparing.
+  const normalizedClaim = currentStatus.replace(/\s*·.*$/, "").trim();
+  const normalizedDerived = derivedStatus.replace(/\s*·.*$/, "").trim();
+
+  if (normalizedClaim === normalizedDerived) return null;
+  return derivedStatus;
 }
 
 // ── US-DOSSIER-015: the six-dimension split of the gate audit ────────────────
@@ -373,6 +455,7 @@ export const CONSISTENCY_DIMENSION_LABELS: Record<ConsistencyDimension, Consiste
  */
 export function dimensionOfRule(rule: string): ConsistencyDimension {
   switch (rule) {
+    case "claim-drift":
     case "done-no-merge":
     case "terminal-twin-missing":
     case "usage-missing":

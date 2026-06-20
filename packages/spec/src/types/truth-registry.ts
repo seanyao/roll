@@ -21,7 +21,7 @@
 import { TRUTH_ANCHORS } from "./truth.js";
 
 /** Which persisted surface a field lives on. */
-export type TruthSurface = "runs" | "event:cycle:terminal" | "event:release:gate" | "event:release:waiver" | "goal";
+export type TruthSurface = "runs" | "event:cycle:terminal" | "event:release:gate" | "event:release:waiver" | "goal" | "delivery";
 
 export interface RegisteredField {
   /** The literal key as persisted (e.g. "cost_usd"). */
@@ -98,6 +98,16 @@ export const TRUTH_FIELD_REGISTRY: readonly RegisteredField[] = [
   { field: "usage", surface: "event:cycle:terminal", anchor: "usage_cost", writer: "buildTerminalEvent", kind: "derived-cache", rebuild: "re-extract from agent usage records" },
   { field: "cost", surface: "event:cycle:terminal", anchor: "usage_cost", writer: "buildTerminalEvent", kind: "derived-cache", rebuild: "recompute from tokens via the price table" },
   { field: "ts", surface: "event:cycle:terminal", anchor: "cycle_outcome", writer: "buildTerminalEvent", kind: "authoritative" },
+
+  // ── delivery record (US-TRUTH-013) ───────────────────────────────────────
+  { field: "storyId", surface: "delivery", anchor: "story_delivery", writer: "cycle runner buildDeliveryRecord", kind: "authoritative" },
+  { field: "cycleId", surface: "delivery", anchor: "cycle_outcome", writer: "cycle runner buildDeliveryRecord", kind: "authoritative" },
+  { field: "lifecycleState", surface: "delivery", anchor: "story_delivery", writer: "cycle runner buildDeliveryRecord", kind: "authoritative" },
+  { field: "prNumber", surface: "delivery", anchor: "pr_merge", writer: "cycle runner buildDeliveryRecord", kind: "authoritative" },
+  { field: "prUrl", surface: "delivery", anchor: "pr_merge", writer: "cycle runner buildDeliveryRecord", kind: "authoritative" },
+  { field: "mergedAt", surface: "delivery", anchor: "pr_merge", writer: "cycle runner buildDeliveryRecord", kind: "authoritative" },
+  { field: "mergeCommit", surface: "delivery", anchor: "pr_merge", writer: "cycle runner buildDeliveryRecord", kind: "authoritative" },
+  { field: "recordedAt", surface: "delivery", anchor: "story_delivery", writer: "cycle runner buildDeliveryRecord", kind: "authoritative" },
 
   // ── release records (US-TRUTH-005) ────────────────────────────────────────
   { field: "type", surface: "event:release:gate", anchor: "release_verdict", writer: "release ship recordGate", kind: "authoritative" },

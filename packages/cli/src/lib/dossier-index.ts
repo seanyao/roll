@@ -10,22 +10,35 @@
  * Self-contained single file: chrome script + dossier filter script only.
  */
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
+import {
+  SPINE_STAGES,
+  deriveDeliveryLadder,
+  storySpectrumState,
+  countLegacyStories,
+  NO_EVIDENCE,
+  type TruthBoardAudit,
+  type TruthBoardCycle,
+  type TruthBoardRelease,
+  type TruthBoardInput,
+  type TruthBoardVerdict,
+} from "@roll/core";
 import { STATUS_MARKER, type DeliveryLadder, type StoryEvidenceFlags } from "@roll/spec";
 import { type DossierEpic } from "./archive.js";
 import { DOSSIER_CSS, DOSSIER_FILTER_SCRIPT } from "./dossier-css.js";
 
-/** Evidence flags fall back to all-false so a delivered story with no enriched
- *  flags lands on the honest `merged` rung, never a silent `attested`. */
-const NO_EVIDENCE: StoryEvidenceFlags = { report: false, acMap: false, visualEvidence: false };
+// Re-export for backward compat (US-OBS-016: logic moved to @roll/core)
+export {
+  SPINE_STAGES,
+  deriveDeliveryLadder,
+  storySpectrumState,
+  countLegacyStories,
+  NO_EVIDENCE,
+  type TruthBoardInput,
+  type TruthBoardVerdict,
+};
 
 /** The five lifecycle stations, shared with epic/story pages (001b/001c). */
-export const SPINE_STAGES = [
-  { key: "definition", en: "Definition", zh: "立项" },
-  { key: "design", en: "Design", zh: "设计" },
-  { key: "execution", en: "Execution", zh: "执行" },
-  { key: "delivery", en: "Delivery", zh: "交付" },
-  { key: "retrospective", en: "Retrospective", zh: "复盘" },
-] as const;
+// SPINE_STAGES — imported from @roll/core (US-OBS-016)
 
 const esc = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -103,38 +116,7 @@ export type LadderState = "attested" | "merged" | "claimed" | "wip" | "hold" | "
 const LADDER_STATES: readonly LadderState[] = ["attested", "merged", "claimed", "fail", "unknown", "wip", "todo", "hold"];
 const STAGE_KEYS = SPINE_STAGES.map((s) => s.key);
 
-export type TruthBoardVerdict = "pass" | "warn" | "fail" | "unknown";
-
-export interface TruthBoardAudit {
-  fail: number;
-  warn: number;
-  unknown: number;
-  collectedAt?: string;
-}
-
-export interface TruthBoardCycle {
-  cycles3d: number;
-  failed3d: number;
-  costUsd3d: number;
-  /** FIX-361: cost separated by native currency so display never blindly sums ¥+$. */
-  costByCurrency3d?: Record<string, number>;
-  collectedAt?: string;
-}
-
-export interface TruthBoardRelease {
-  latestTag?: string;
-  verdict: TruthBoardVerdict;
-  waiver?: string;
-  collectedAt?: string;
-}
-
-export interface TruthBoardInput {
-  generatedAt?: string;
-  collectedAt?: string;
-  audit?: TruthBoardAudit;
-  cycle?: TruthBoardCycle;
-  release?: TruthBoardRelease;
-}
+// TruthBoard types — re-exported from @roll/core (US-OBS-016)
 
 export interface RenderFeaturesIndexOptions {
   morningReportHref?: string;
@@ -146,14 +128,7 @@ export interface RenderFeaturesIndexOptions {
 
 /** Claim/truth-aligned delivery state for one story (US-DOSSIER-010: exported
  *  as the ONE spectrum classifier every surface shares). */
-export function storySpectrumState(s: StoryView): State {
-  return storyState(s);
-}
-
-/** US-DOSSIER-010: delivered pre-v3 stories without a v3 trail, across epics. */
-export function countLegacyStories(epics: DossierEpic[]): number {
-  return countLegacy(epics);
-}
+// storySpectrumState, countLegacyStories — imported from @roll/core (US-OBS-016)
 
 /**
  * US-DOSSIER-021 — the claim↔truth ladder rung a story has reached, derived from
@@ -168,15 +143,7 @@ export function countLegacyStories(epics: DossierEpic[]): number {
  *     merge evidence (a premature-Done: the selector keeps `delivered` false).
  *   - `"none"`   — not even claimed done (todo / wip / hold / absent).
  */
-export function deriveDeliveryLadder(
-  story: Pick<StoryView, "delivered" | "status">,
-  evidence: StoryEvidenceFlags,
-): DeliveryLadder | "none" {
-  if (story.delivered) {
-    return evidence.report && evidence.acMap && evidence.visualEvidence ? "attested" : "merged";
-  }
-  return story.status === "done" ? "claimed" : "none";
-}
+// deriveDeliveryLadder — imported from @roll/core (US-OBS-016)
 
 /**
  * US-DOSSIER-025 — the ONE ladder classifier every front-page surface shares,

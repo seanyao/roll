@@ -8,6 +8,12 @@ import {
   type WatchRenderEvent,
 } from "../src/loop/watch-render.js";
 
+/** Scrub the volatile HH:MM:SS timestamp prefix (8 chars) from watch render output
+ *  so snapshots are TZ-portable (difftest paradigm). */
+function scrubTime(out: string[]): string[] {
+  return out.map((line) => line.replace(/^\d{2}:\d{2}:\d{2}/, "HH:MM:SS"));
+}
+
 function line(ev: RollEvent | Record<string, unknown>): string {
   return JSON.stringify(ev);
 }
@@ -122,24 +128,24 @@ describe("watch-render — compact RollEvent observation model", () => {
   });
 
   it("renders stable compact one-line output", () => {
-    expect(renderCompactWatchLines(events.map(line))).toMatchInlineSnapshot(`
+    expect(scrubTime(renderCompactWatchLines(events.map(line)))).toMatchInlineSnapshot(`
       [
-        "00:00:00  cycle:start            20260619-044 · US-LOOP-044 · codex",
-        "00:00:01  phase                  execute",
-        "00:00:02  heartbeat              building · still working (1) · 3m quiet · 2 tcr so far",
-        "00:00:03  tcr                    abcdef123 · tcr: add renderer",
-        "00:00:04  visual:gate            ok · terminal",
-        "00:00:05  evidence:frame-opened  /tmp/run",
-        "00:00:06  pr:open                #850 · US-LOOP-044",
-        "00:00:07  pr:merge               #850 · US-LOOP-044",
-        "00:00:08  pr:rebase              #850",
-        "00:00:09  pr:close               #850 · superseded",
-        "00:00:10  ci:pass                #850",
-        "00:00:11  ci:fail                #850 · lint failed",
-        "00:00:12  ci:rerun               #850",
-        "00:00:13  peer:gate              consulted",
-        "00:00:14  attest:gate            produced",
-        "00:00:15  alert:notify           loop · stuck",
+        "HH:MM:SS  cycle:start            20260619-044 · US-LOOP-044 · codex",
+        "HH:MM:SS  phase                  execute",
+        "HH:MM:SS  heartbeat              building · still working (1) · 3m quiet · 2 tcr so far",
+        "HH:MM:SS  tcr                    abcdef123 · tcr: add renderer",
+        "HH:MM:SS  visual:gate            ok · terminal",
+        "HH:MM:SS  evidence:frame-opened  /tmp/run",
+        "HH:MM:SS  pr:open                #850 · US-LOOP-044",
+        "HH:MM:SS  pr:merge               #850 · US-LOOP-044",
+        "HH:MM:SS  pr:rebase              #850",
+        "HH:MM:SS  pr:close               #850 · superseded",
+        "HH:MM:SS  ci:pass                #850",
+        "HH:MM:SS  ci:fail                #850 · lint failed",
+        "HH:MM:SS  ci:rerun               #850",
+        "HH:MM:SS  peer:gate              consulted",
+        "HH:MM:SS  attest:gate            produced",
+        "HH:MM:SS  alert:notify           loop · stuck",
       ]
     `);
   });
@@ -150,11 +156,11 @@ describe("watch-render — compact RollEvent observation model", () => {
       line({ type: "future:event", ts: 16, payload: "x" }),
       line({ type: "future:no-ts" }),
     ]);
-    expect(out).toMatchInlineSnapshot(`
+    expect(scrubTime(out)).toMatchInlineSnapshot(`
       [
-        "00:00:00  malformed              {not-json",
-        "00:00:16  future:event           unsupported event",
-        "00:00:00  malformed              {"type":"future:no-ts"}",
+        "HH:MM:SS  malformed              {not-json",
+        "HH:MM:SS  future:event",
+        "HH:MM:SS  malformed              {"type":"future:no-ts"}",
       ]
     `);
   });
@@ -163,7 +169,7 @@ describe("watch-render — compact RollEvent observation model", () => {
     const rendered = renderCompactWatchLines([
       line({ type: "cycle:tcr", cycleId: "c", commitHash: "abc123456", message: "\u001b[31mtcr: red\u001b[0m\u001b[A", ts: 1 }),
     ]);
-    expect(rendered).toEqual(["00:00:01  tcr                    abc123456 · tcr: red"]);
+    expect(scrubTime(rendered)).toEqual(["HH:MM:SS  tcr                    abc123456 · tcr: red"]);
   });
 
   it("raw-events mode preserves source lines unchanged", () => {
@@ -179,6 +185,102 @@ describe("watch-render — compact RollEvent observation model", () => {
   it("compact renderer can be used directly for visual terminal evidence", () => {
     const ev = watchRenderEventFromRollEvent({ type: "visual:gate", cycleId: "c", storyId: "US-X", verdict: "flagged", code: "missing", reasons: [], ts: 4 });
     expect(ev).not.toBeNull();
-    expect(renderCompactWatchEvent(ev!)).toBe("00:00:04  visual:gate            flagged · missing");
+    expect(renderCompactWatchEvent(ev!)).toMatch(/^\d{2}:\d{2}:\d{2}\s+visual:gate\s+flagged · missing$/);
+  });
+
+  // ── FIX-385: timezone & unsupported event rendering ──────────────────────
+
+  it("renders timestamps in device-local time, not UTC (AC1)", () => {
+    const ev = watchRenderEventFromRollEvent({ type: "cycle:start", cycleId: "c", storyId: "s", agent: "a", model: "m", ts: 0 });
+    const rendered = renderCompactWatchEvent(ev!);
+    const localHour = new Date(0).getHours();
+    const utcHour = new Date(0).getUTCHours();
+    // The rendered hour (first two chars) must equal local hour, not UTC
+    const match = rendered.match(/^(\d{2}):/);
+    expect(match).not.toBeNull();
+    const renderedHour = parseInt(match![1], 10);
+    expect(renderedHour).toBe(localHour);
+    if (localHour !== utcHour) {
+      expect(renderedHour).not.toBe(utcHour);
+    }
+  });
+
+  it("renders cycle:terminal meaningfully, not 'unsupported event' (AC3)", () => {
+    const ev = watchRenderEventFromRollEvent({
+      type: "cycle:terminal",
+      schema: 1 as const,
+      cycleId: "cy-1",
+      storyId: "US-X",
+      agent: "codex",
+      model: "gpt-5",
+      startedAt: 1000,
+      endedAt: 5000,
+      outcome: "delivered",
+      pr: { present: false, reason: "no_publish_attempted" },
+      branch: { present: false, reason: "not_applicable" },
+      commit: { present: false, reason: "no_commits" },
+      tcr: { present: false, reason: "no_commits" },
+      attest: { present: false, reason: "not_rendered" },
+      usage: { present: false, reason: "no_parseable_usage" },
+      cost: { present: false, reason: "no_parseable_usage" },
+      ts: 100,
+    });
+    expect(ev).not.toBeNull();
+    expect(ev!.kind).toBe("cycle");
+    expect(ev!.summary).toBe("cycle:terminal");
+    expect(ev!.detail).toContain("delivered");
+    expect(ev!.detail).toContain("codex");
+    expect(ev!.severity).toBe("good");
+    const rendered = renderCompactWatchEvent(ev!);
+    expect(rendered).not.toContain("unsupported event");
+    expect(rendered).toContain("cycle:terminal");
+    expect(rendered).toContain("delivered");
+  });
+
+  it("renders report:morning meaningfully, not 'unsupported event' (AC3)", () => {
+    const ev = watchRenderEventFromRollEvent({
+      type: "report:morning",
+      path: "/tmp/report.html",
+      windowStart: 1000,
+      windowEnd: 5000,
+      cycles: 3,
+      corrections: 0,
+      paused: false,
+      ts: 200,
+    });
+    expect(ev).not.toBeNull();
+    expect(ev!.summary).toBe("report:morning");
+    expect(ev!.detail).toContain("/tmp/report.html");
+    const rendered = renderCompactWatchEvent(ev!);
+    expect(rendered).not.toContain("unsupported event");
+    expect(rendered).toContain("report:morning");
+    expect(rendered).toContain("/tmp/report.html");
+  });
+
+  it("TZ-sticky: renders timestamps by device TZ, never hardcoded UTC or +8 (AC2)", () => {
+    // Pick a ts where local != UTC in any non-UTC TZ
+    const ts = 0; // epoch
+    const localHour = new Date(ts).getHours();
+    const utcHour = new Date(ts).getUTCHours();
+    const ev = watchRenderEventFromRollEvent({ type: "cycle:start", cycleId: "c", storyId: "s", agent: "a", model: "m", ts });
+    const rendered = renderCompactWatchEvent(ev!);
+    const match = rendered.match(/^(\d{2}):/);
+    expect(match).not.toBeNull();
+    const renderedHour = parseInt(match![1], 10);
+    // Must equal device-local hour, not UTC (proves getHours not getUTCHours)
+    expect(renderedHour).toBe(localHour);
+    // Document the expectation: if local != UTC, rendered must differ from UTC
+    if (localHour !== utcHour) {
+      expect(renderedHour).not.toBe(utcHour);
+    }
+  });
+
+  it("unknown event types show clean degradation (no 'unsupported event') (AC3)", () => {
+    const ev = watchRenderEventFromRollEvent({ type: "future:event" } as unknown as RollEvent);
+    expect(ev).not.toBeNull();
+    expect(ev!.detail).toBe("");
+    const rendered = renderCompactWatchEvent(ev!);
+    expect(rendered).not.toContain("unsupported event");
+    expect(rendered).toContain("future:event");
   });
 });

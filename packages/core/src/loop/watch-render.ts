@@ -57,7 +57,7 @@ function eventFromUnknown(raw: RollEvent): WatchRenderEvent | null {
     kind: "raw",
     observedAt: ts,
     summary: clean(String(rec["type"] ?? "unknown")),
-    detail: "unsupported event",
+    detail: "",
     severity: "muted",
   };
 }
@@ -198,6 +198,24 @@ export function watchRenderEventFromRollEvent(ev: RollEvent, mode: WatchMode = "
         detail: [ev.channel, text(ev.message)].filter((v) => v !== "").join(" · "),
         severity: "bad",
       };
+    case "cycle:terminal":
+      return {
+        kind: "cycle",
+        observedAt: eventTs(ev),
+        cycleId: ev.cycleId,
+        storyId: ev.storyId,
+        summary: "cycle:terminal",
+        detail: [ev.outcome, ev.agent, ev.model].filter((v) => v !== "").join(" · "),
+        severity: ev.outcome === "delivered" ? "good" : ev.outcome === "failed" || ev.outcome === "blocked" ? "bad" : "warn",
+      };
+    case "report:morning":
+      return {
+        kind: "raw",
+        observedAt: eventTs(ev),
+        summary: "report:morning",
+        detail: [ev.path, ev.paused ? "paused" : ""].filter((v) => v !== "").join(" · "),
+        severity: "muted",
+      };
     default:
       return mode === "status" ? null : eventFromUnknown(ev);
   }
@@ -226,7 +244,7 @@ function observedDate(ts: number): Date {
 function hhmmss(ts: number): string {
   const d = observedDate(ts);
   const p = (n: number): string => String(n).padStart(2, "0");
-  return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
 function renderLabel(ev: WatchRenderEvent): string {

@@ -102,6 +102,7 @@ import {
   acquireLock,
   ghRepoSlug,
   prNumberFromUrl,
+  prViewMergeInfo,
   prViewState,
   releaseLock,
   remoteUrl,
@@ -225,6 +226,8 @@ export interface GithubPort {
   ): Promise<{ status: 0 | 1 | 2; prUrl: string; ok: boolean }>;
   /** Poll a PR's merge state (sync merge-wait). Returns the gh state string. */
   prState(repoCwd: string, branch: string): Promise<string>;
+  /** Poll a PR's full merge info (state, mergedAt, mergeCommit). Returns undefined on gh failure. */
+  prMergeInfo(repoCwd: string, branch: string): Promise<{ state: string; mergedAt?: string; mergeCommit?: string } | undefined>;
 }
 
 /** Process facet — lock + heartbeat (infra/process.ts). */
@@ -1820,14 +1823,21 @@ export async function executeCommand(
       const terminalStoryId = ctx.storyId ?? "";
       let terminalMerged = false;
       if ((cmd.status === "done" || cmd.status === "published") && terminalStoryId !== "") {
-        const state = await ports.github.prState(ports.repoCwd, ctx.branch).catch(() => "UNKNOWN");
+        // US-TRUTH-015 AC2: use prMergeInfo for both the state check AND the
+        // mergedAt/mergeCommit facts (one gh call, not two).
+        const mergeInfo = await ports.github.prMergeInfo(ports.repoCwd, ctx.branch).catch(() => undefined);
+        const state = mergeInfo?.state ?? "UNKNOWN";
         if (state === "MERGED") {
           terminalMerged = true;
-          // US-TRUTH-015 AC2: force-write a done DeliveryRecord when merge is
-          // detected. mergedAt/mergeCommit are absent here (backfillable later
-          // by reconcile) — the key fact is lifecycleState: done.
+          // Force-write a done DeliveryRecord with real mergedAt/mergeCommit.
           if (ctx.cycleId !== undefined) {
             try {
+              const mergedAtVal = mergeInfo?.mergedAt !== undefined
+                ? present(new Date(mergeInfo.mergedAt).getTime())
+                : absent("not_recorded");
+              const mergeCommitVal = mergeInfo?.mergeCommit !== undefined
+                ? present(mergeInfo.mergeCommit)
+                : absent("not_recorded");
               appendDelivery(nodeDeliveryStore, ports.repoCwd, {
                 storyId: terminalStoryId,
                 cycleId: ctx.cycleId,
@@ -1838,8 +1848,8 @@ export async function executeCommand(
                 prUrl: ctx.prUrl !== undefined
                   ? present(ctx.prUrl)
                   : absent("not_recorded"),
-                mergedAt: absent("not_recorded"),
-                mergeCommit: absent("not_recorded"),
+                mergedAt: mergedAtVal,
+                mergeCommit: mergeCommitVal,
                 recordedAt: ports.clock(),
               });
             } catch {
@@ -1873,12 +1883,59 @@ export async function executeCommand(
         if (!isParkedAtHold(ports, terminalStoryId)) {
           ports.backlog.markStatus?.(ports.repoCwd, terminalStoryId, STATUS_MARKER.todo);
         }
+        // US-TRUTH-015 AC2: write a failed DeliveryRecord when the cycle gave up
+        // or idled without merging. The reason is the terminal status.
+        if (ctx.cycleId !== undefined) {
+          try {
+            appendDelivery(nodeDeliveryStore, ports.repoCwd, {
+              storyId: terminalStoryId,
+              cycleId: ctx.cycleId,
+              lifecycleState: "failed",
+              prNumber: ctx.prUrl !== undefined
+                ? present(Number(prNumberFromUrl(ctx.prUrl) ?? 0))
+                : absent("no_publish_attempted"),
+              prUrl: ctx.prUrl !== undefined
+                ? present(ctx.prUrl)
+                : absent("no_publish_attempted"),
+              mergedAt: absent("not_recorded"),
+              mergeCommit: absent("not_recorded"),
+              recordedAt: ports.clock(),
+            });
+          } catch {
+            // best-effort — never block the terminal on delivery record write
+          }
+        }
       } else if (terminalStoryId !== "") {
         // FIX-304: a failed / blocked / aborted / orphan terminal NEVER merged
         // this cycle's work to main. If the agent pre-flipped the row ✅ Done
         // (the FIX-284 / FIX-285 false-Done), revert it to the pre-cycle status
         // so a non-merged cycle can never leave a premature Done in the backlog.
         revertPrematureDone(ports, terminalStoryId, ctx.preCycleStatus);
+        // US-TRUTH-015 AC2: write a DeliveryRecord for non-success terminals
+        // (failed / blocked / aborted / orphan) so the truth stream is complete.
+        if (ctx.cycleId !== undefined) {
+          const terminalLcs = cmd.status === "blocked" ? "blocked" as const
+            : cmd.status === "aborted" || cmd.status === "orphan" ? "abandoned" as const
+            : "failed" as const;
+          try {
+            appendDelivery(nodeDeliveryStore, ports.repoCwd, {
+              storyId: terminalStoryId,
+              cycleId: ctx.cycleId,
+              lifecycleState: terminalLcs,
+              prNumber: ctx.prUrl !== undefined
+                ? present(Number(prNumberFromUrl(ctx.prUrl) ?? 0))
+                : absent("no_publish_attempted"),
+              prUrl: ctx.prUrl !== undefined
+                ? present(ctx.prUrl)
+                : absent("no_publish_attempted"),
+              mergedAt: absent("not_recorded"),
+              mergeCommit: absent("not_recorded"),
+              recordedAt: ports.clock(),
+            });
+          } catch {
+            // best-effort — never block the terminal on delivery record write
+          }
+        }
       }
       // Hook 3 (spec-truth reconciliation): on ANY non-merged terminal
       // (idle/gave_up/failed/blocked/aborted/orphan) reset a stale "✅ Fixed/Done"
@@ -3239,6 +3296,11 @@ export function nodePorts(opts: {
         const slug = ghRepoSlug(await remoteUrl(repoCwd));
         if (slug === undefined) return "UNKNOWN";
         return prViewState(slug, branch);
+      },
+      async prMergeInfo(repoCwd, branch) {
+        const slug = ghRepoSlug(await remoteUrl(repoCwd));
+        if (slug === undefined) return undefined;
+        return prViewMergeInfo(slug, branch);
       },
     },
     process: {

@@ -706,6 +706,7 @@ function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<str
       repoSlug: vi.fn(async () => "o/r"),
       runPublishPlan: vi.fn(async () => ({ status: 0 as const, prUrl: "u", ok: true })),
       prState: vi.fn(async () => "MERGED"),
+      prMergeInfo: vi.fn(async () => ({ state: "MERGED", mergedAt: "2026-06-21T00:00:00Z", mergeCommit: "abc123def456" })),
     },
     process: {
       acquireLock: vi.fn(() => ({ acquired: true, heldByPid: undefined })),
@@ -2367,7 +2368,7 @@ describe("executeCommand — command → executor mapping", () => {
     const markStatus = vi.fn();
     const { ports } = fakePorts({
       backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "🔨 In Progress" }]), markStatus },
-      github: { ...fakePorts().ports.github, prState: vi.fn(async () => "MERGED") },
+      github: { ...fakePorts().ports.github, prMergeInfo: vi.fn(async () => ({ state: "MERGED", mergedAt: "2026-06-21T00:00:00Z", mergeCommit: "abc123def456" })) },
     });
     await executeCommand(
       { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
@@ -2381,7 +2382,7 @@ describe("executeCommand — command → executor mapping", () => {
     const markStatus = vi.fn();
     const { ports } = fakePorts({
       backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "🔨 In Progress" }]), markStatus },
-      github: { ...fakePorts().ports.github, prState: vi.fn(async () => "OPEN") },
+      github: { ...fakePorts().ports.github, prMergeInfo: vi.fn(async () => ({ state: "OPEN" })) },
     });
     await executeCommand(
       { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
@@ -2397,8 +2398,8 @@ describe("executeCommand — command → executor mapping", () => {
     const markStatus = vi.fn();
     const { ports } = fakePorts({
       backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "🔨 In Progress" }]), markStatus },
-      // gh down / PR never opened → prState probe rejects → "UNKNOWN" fallback.
-      github: { ...fakePorts().ports.github, prState: vi.fn(async () => Promise.reject(new Error("gh down"))) },
+      // gh down / PR never opened → prMergeInfo probe rejects → undefined fallback.
+      github: { ...fakePorts().ports.github, prMergeInfo: vi.fn(async () => Promise.reject(new Error("gh down"))) },
     });
     await executeCommand(
       { kind: "append_run", status: "published", outcome: "published_pending_merge", cycleId: CTX.cycleId },
@@ -2445,7 +2446,7 @@ describe("executeCommand — command → executor mapping", () => {
     const { ports } = fakePorts({
       // The agent already flipped the row ✅ Done inside the worktree (symlinked .roll).
       backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "✅ Done" }]), markStatus },
-      github: { ...fakePorts().ports.github, prState: vi.fn(async () => "OPEN") },
+      github: { ...fakePorts().ports.github, prMergeInfo: vi.fn(async () => ({ state: "OPEN" })) },
     });
     await executeCommand(
       { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
@@ -2475,7 +2476,7 @@ describe("executeCommand — command → executor mapping", () => {
     const markStatus = vi.fn();
     const { ports } = fakePorts({
       backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "✅ Done" }]), markStatus },
-      github: { ...fakePorts().ports.github, prState: vi.fn(async () => "MERGED") },
+      github: { ...fakePorts().ports.github, prMergeInfo: vi.fn(async () => ({ state: "MERGED", mergedAt: "2026-06-21T00:00:00Z", mergeCommit: "abc123def456" })) },
     });
     await executeCommand(
       { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
@@ -2491,7 +2492,7 @@ describe("executeCommand — command → executor mapping", () => {
     const markStatus = vi.fn();
     const { ports } = fakePorts({
       backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "🔨 In Progress" }]), markStatus },
-      github: { ...fakePorts().ports.github, prState: vi.fn(async () => "OPEN") },
+      github: { ...fakePorts().ports.github, prMergeInfo: vi.fn(async () => ({ state: "OPEN" })) },
     });
     await executeCommand(
       { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },

@@ -216,6 +216,59 @@ describe("v3 loop runner template", () => {
   it("FIX-230: cycle start logs the effective proxy env (observability for env drift)", () => {
     expect(script).toMatch(/env: HTTP_PROXY=.*HTTPS_PROXY=.*ALL_PROXY=/);
   });
+
+  // ─── FIX-393: cycle inflight guard + headless capture ──────────────────────
+
+  it("FIX-393 AC1: guards against overlapping cycles with cycle-inflight.lock (mirrors go.lock pattern)", () => {
+    expect(script).toContain("cycle-inflight.lock");
+    expect(script).toContain("cycle:tick_skipped");
+    expect(script).toContain("cycle_inflight");
+    // Guard check is before run-once invocation.
+    const guardIdx = script.indexOf("cycle-inflight.lock");
+    const runIdx = script.indexOf('"$ROLL_BIN" loop run-once');
+    expect(guardIdx).toBeGreaterThan(-1);
+    expect(guardIdx).toBeLessThan(runIdx);
+  });
+
+  it("FIX-393 AC2: staleness threshold is 5400s (90min)", () => {
+    expect(script).toContain("-lt 5400");
+  });
+
+  it("FIX-393 AC3: go.lock check comes BEFORE cycle-inflight check (independent, coexisting)", () => {
+    const goIdx = script.indexOf("go.lock");
+    const cycleIdx = script.indexOf("cycle-inflight.lock");
+    expect(goIdx).toBeGreaterThan(-1);
+    expect(cycleIdx).toBeGreaterThan(-1);
+    expect(goIdx).toBeLessThan(cycleIdx);
+  });
+
+  it("FIX-393 AC6: sets headless capture env vars for unattended loop", () => {
+    expect(script).toContain('export ROLL_ATTEST_HEADLESS="${ROLL_ATTEST_HEADLESS:-1}"');
+    expect(script).toContain('export ROLL_ATTEST_NO_TERMINAL="${ROLL_ATTEST_NO_TERMINAL:-1}"');
+    const headlessIdx = script.indexOf("ROLL_ATTEST_HEADLESS");
+    const runIdx = script.indexOf('"$ROLL_BIN" loop run-once');
+    expect(headlessIdx).toBeGreaterThan(-1);
+    expect(headlessIdx).toBeLessThan(runIdx);
+  });
+
+  it("FIX-393: acquires the cycle inflight lock and sets trap EXIT before caffeinate", () => {
+    const acquireIdx = script.indexOf("printf '%s:%s");
+    const trapIdx = script.indexOf("trap 'rm -f");
+    const caffIdx = script.indexOf("caffeinate");
+    const runIdx = script.indexOf('"$ROLL_BIN" loop run-once');
+    expect(acquireIdx).toBeGreaterThan(-1);
+    expect(trapIdx).toBeGreaterThan(-1);
+    // Acquire + trap must come BEFORE the cycle starts (caffeinate / run-once).
+    expect(acquireIdx).toBeLessThan(caffIdx);
+    expect(trapIdx).toBeLessThan(caffIdx);
+    expect(acquireIdx).toBeLessThan(runIdx);
+  });
+
+  it("FIX-393: env var defaults can be overridden by caller", () => {
+    // The :- syntax in ${VAR:-1} lets the caller override.
+    expect(script).toContain("${ROLL_ATTEST_HEADLESS:-1}");
+    expect(script).toContain("${ROLL_ATTEST_NO_TERMINAL:-1}");
+  });
 });
 
 describe("v3 loop runner — EXECUTION in a sandbox (the contract that matters)", () => {
@@ -279,6 +332,72 @@ describe("v3 loop runner — EXECUTION in a sandbox (the contract that matters)"
     const events = readFileSync(join(proj, ".roll", "loop", "events.ndjson"), "utf8");
     expect(events).toContain('"type":"goal:tick_skipped"');
     expect(events).toContain('"reason":"go_session_lock"');
+  });
+
+  // ─── FIX-393: cycle inflight lock execution tests ─────────────────────────
+
+  it("FIX-393 AC1: live cycle-inflight.lock → tick yields with event, no run-once", () => {
+    const proj = tmp("cycle-live");
+    mkdirSync(join(proj, ".roll", "loop"), { recursive: true });
+    // Simulate a live cycle-inflight.lock held by this process.
+    writeFileSync(join(proj, ".roll", "loop", "cycle-inflight.lock"), `${process.pid}:${Math.floor(Date.now() / 1000)}\n`);
+    const { status, argvLog } = runScript(proj, "s1", "12");
+    expect(status).toBe(0);
+    // run-once must NOT have been called.
+    expect(existsSync(argvLog)).toBe(false);
+    // Event must record the yield.
+    const events = readFileSync(join(proj, ".roll", "loop", "events.ndjson"), "utf8");
+    expect(events).toContain('"type":"cycle:tick_skipped"');
+    expect(events).toContain('"reason":"cycle_inflight"');
+    // Log must mention the inflight lock.
+    const log = readFileSync(join(proj, ".roll", "loop", "cron.log"), "utf8");
+    expect(log).toContain("cycle inflight lock held by pid");
+  });
+
+  it("FIX-393 AC2: stale cycle-inflight.lock (dead PID) → cleaned, cycle runs", () => {
+    const proj = tmp("cycle-stale");
+    mkdirSync(join(proj, ".roll", "loop"), { recursive: true });
+    // Simulate a lock held by a PID that does not exist.
+    writeFileSync(join(proj, ".roll", "loop", "cycle-inflight.lock"), `99999:${Math.floor(Date.now() / 1000)}\n`);
+    const { status, argvLog } = runScript(proj, "s1", "12");
+    expect(status).toBe(0);
+    // run-once MUST have been called (stale lock cleaned, cycle ran).
+    expect(existsSync(argvLog)).toBe(true);
+    expect(readFileSync(argvLog, "utf8").trim()).toBe("loop run-once");
+  });
+
+  it("FIX-393 AC2: stale cycle-inflight.lock (old timestamp beyond 90min) → cleaned, cycle runs", () => {
+    const proj = tmp("cycle-old");
+    mkdirSync(join(proj, ".roll", "loop"), { recursive: true });
+    // Simulate a lock with a timestamp > 90min ago but held by a live PID.
+    const oldTs = Math.floor(Date.now() / 1000) - 5500; // 91+ min ago
+    writeFileSync(join(proj, ".roll", "loop", "cycle-inflight.lock"), `${process.pid}:${oldTs}\n`);
+    const { argvLog } = runScript(proj, "s1", "12");
+    // Even though PID is alive, the lock is stale (>5400s) → cleaned, cycle runs.
+    expect(existsSync(argvLog)).toBe(true);
+  });
+
+  it("FIX-393 AC3: go.lock takes priority — when BOTH locks are held, go.lock yields first", () => {
+    const proj = tmp("cycle-both");
+    mkdirSync(join(proj, ".roll", "loop"), { recursive: true });
+    // Both locks held by live PIDs.
+    writeFileSync(join(proj, ".roll", "loop", "go.lock"), `${process.pid}:${Math.floor(Date.now() / 1000)}\n`);
+    writeFileSync(join(proj, ".roll", "loop", "cycle-inflight.lock"), `${process.pid}:${Math.floor(Date.now() / 1000)}\n`);
+    const { argvLog } = runScript(proj, "s1", "12");
+    // go.lock is checked FIRST → goal:tick_skipped, no run-once.
+    expect(existsSync(argvLog)).toBe(false);
+    const events = readFileSync(join(proj, ".roll", "loop", "events.ndjson"), "utf8");
+    expect(events).toContain('"reason":"go_session_lock"');
+  });
+
+  it("FIX-393: the cycle inflight lock is released when the cycle completes", () => {
+    const proj = tmp("cycle-release");
+    const { status, argvLog } = runScript(proj, "s1", "12");
+    expect(status).toBe(0);
+    expect(existsSync(argvLog)).toBe(true);
+    // After the cycle completes, the lock file must be gone.
+    const lockPath = join(proj, ".roll", "loop", "cycle-inflight.lock");
+    expect(existsSync(lockPath)).toBe(false);
   });
 
   it("PAUSE marker short-circuits before any invocation", () => {

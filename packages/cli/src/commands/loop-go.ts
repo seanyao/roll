@@ -833,6 +833,10 @@ export function isCardInFlight(
   prEvidence: AuditPrEvidence | undefined,
   deliveryTruth?: StoryDeliveryTruth,
 ): boolean {
+  // US-TRUTH-017 (codex review): structured `done` is authoritative — it must
+  // win over potentially-stale OPEN PR evidence, so a delivered card is never
+  // kept in-flight by a lagging probe.
+  if (deliveryTruth?.lifecycleState === "done") return false;
   if (prEvidence !== undefined) {
     const state = prEvidence.state.toUpperCase();
     if (state === "MERGED") return false; // a merge is delivery, not in-flight
@@ -840,7 +844,13 @@ export function isCardInFlight(
   }
   // US-TRUTH-017: prefer structured delivery truth for in-flight detection.
   if (deliveryTruth !== undefined) {
-    return deliveryTruth.lifecycleState === "in_flight" || deliveryTruth.lifecycleState === "ci_red";
+    // in_flight/ci_red is "handed to the PR lane" ONLY with a real PR number; a
+    // lifecycle in those states but with no prNumber is a half-written/abnormal
+    // state, not in-flight (codex review — don't skip the picker on it).
+    if (deliveryTruth.lifecycleState === "in_flight" || deliveryTruth.lifecycleState === "ci_red") {
+      return deliveryTruth.prNumber !== undefined;
+    }
+    return false; // todo / failed / other → not in-flight
   }
   // Deprecated fallback (AC3): regex parse of backlog status string.
   // Kept for legacy rows that predate the structured delivery store.

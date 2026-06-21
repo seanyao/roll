@@ -59,6 +59,16 @@ describe("US-TRUTH-017 AC2 — isCardInFlight with structured deliveryTruth", ()
     expect(isCardInFlight("✅ Done", undefined, dt({ lifecycleState: "done", delivered: true, prNumber: 10 }))).toBe(false);
   });
 
+  it("deliveryTruth done + stale OPEN prEvidence → false (structured done wins over a lagging PR probe — codex review)", () => {
+    expect(
+      isCardInFlight("🔨 In Progress · PR#42", { state: "OPEN" }, dt({ lifecycleState: "done", prNumber: 10 })),
+    ).toBe(false);
+  });
+
+  it("deliveryTruth in_flight but no prNumber → false (half-written state, not handed to the PR lane — codex review)", () => {
+    expect(isCardInFlight("🔨 In Progress", undefined, dt({ lifecycleState: "in_flight", prNumber: undefined }))).toBe(false);
+  });
+
   it("deliveryTruth todo → false (never picked up)", () => {
     expect(isCardInFlight("📋 Todo", undefined, dt({ lifecycleState: "todo", prNumber: undefined }))).toBe(false);
   });

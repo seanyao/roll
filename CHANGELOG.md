@@ -4,6 +4,8 @@
 
 ### 修复
 
+- **chromium/playwright 依赖加固——钉版本、init 预装、离线优雅提示**：之前三处用 `playwright@latest`（未钉版本），`latest` 可能拉到新版导致浏览器版本漂移、偶发截图失败；chromium 在第一次需要截图的 cycle 当场下载（~100-200MB），网抖则该 cycle 截图失败。现在 `screenshot.ts` 和 `browser.ts` 统一使用钉定版本 `playwright@1.52.0`，缓存命中一致不重装；`roll init` 和 loop 首启时静默预装 chromium（已缓存秒返、失败不阻塞）；离线/网络错误时 skip 消息区分「headless Chromium unavailable (offline or network error)」；Tools 页 browser tool 可用性联动 chromium 安装状态。(FIX-394) `[acceptance-evidence]`
+
 - **终端交付命令在 headless loop 不再假死、命令 stdout 升格为可过闸证据**：之前带 `deliverable_cmd`（终端命令）的卡在无人值守 launchd loop 中因无 GUI session 无法截图，attest 门判败堵死整条 loop。现在终端 lane 镜像 web lane 的 headless 回退——命令执行成功但无 GUI 时自动把 stdout 文本升格为 `taken:true` 终端证据，attest 门可正常通过，不再依赖 epic 级 `screenshot_exempt` 豁免。修复也拓宽了回退条件：原先只匹配 "no GUI session"，现覆盖所有 headless 跳过（含 "not macOS" 等），条件是命令已成功运行。(FIX-392) `[acceptance-evidence]`
 
 ### 稳定性

@@ -253,10 +253,18 @@ export function runConsistencyAudit(s: AuditSnapshot): AuditReport {
     );
   }
 
-  // ── claim-drift: backlog status vs structured delivery truth ──────────────
+  // ── claim-drift: backlog status ↔ structured delivery truth (bidirectional) ─
+  // FIX-390: runs bidirectionally — backlog→truth AND truth→backlog.
   // Only runs when structured delivery records are available; silently skipped
   // otherwise (backlog status is the fallback truth when deliveries don't exist).
   if (s.deliveries && s.deliveries.length > 0) {
+    const backlogById = new Map<string, typeof s.backlog[number]>();
+    for (const row of s.backlog) backlogById.set(row.id, row);
+
+    // Stories already covered by a forward finding — reverse lane skips them.
+    const driftReported = new Set<string>();
+
+    // ── Forward: every backlog row vs structured truth ─────────────────────
     for (const row of s.backlog) {
       const truth = queryStoryDelivery(row.id, s.deliveries);
       // If no records exist for this story, the backlog status is the only
@@ -270,6 +278,8 @@ export function runConsistencyAudit(s: AuditSnapshot): AuditReport {
       const normalizedDerived = derivedStatus.replace(/\s*·.*$/, "").trim();
 
       if (normalizedClaim === normalizedDerived) continue;
+
+      driftReported.add(row.id);
 
       // Severity: Done claim without merge truth → fail (premature Done).
       // Other mismatches → warn (lagging derived view).
@@ -289,6 +299,34 @@ export function runConsistencyAudit(s: AuditSnapshot): AuditReport {
           "warn",
           row.id,
           `backlog shows \`${row.status}\` but structured truth derives \`${derivedStatus}\` (lifecycle=${truth.lifecycleState} delivered=${truth.delivered})`,
+        );
+      }
+    }
+
+    // ── Reverse (FIX-390 AC2): deliveries done → backlog not Done ─────────
+    const seenDelivered = new Set<string>();
+    for (const d of s.deliveries) {
+      if (d.lifecycleState !== "done") continue;
+      if (seenDelivered.has(d.storyId)) continue;
+      seenDelivered.add(d.storyId);
+      if (driftReported.has(d.storyId)) continue; // already in forward findings
+
+      const row = backlogById.get(d.storyId);
+      if (row === undefined) {
+        // Story is done in projection but missing from backlog entirely.
+        add(
+          "claim-drift",
+          "warn",
+          d.storyId,
+          `structured truth says done (cycle=${d.cycleId}) but the story is absent from backlog.md — backlog is missing a delivered row`,
+        );
+      } else if (!row.status.includes(DONE_MARK)) {
+        // Story is done in projection but backlog row says otherwise.
+        add(
+          "claim-drift",
+          "warn",
+          d.storyId,
+          `structured truth says done (cycle=${d.cycleId}) but backlog shows \`${row.status}\` — backlog row lags the merge truth`,
         );
       }
     }

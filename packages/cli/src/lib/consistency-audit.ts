@@ -21,6 +21,8 @@ import {
   parseBacklog,
   reconcileBranchName,
   runConsistencyAudit,
+  readDeliveries,
+  nodeDeliveryStore,
   type AuditReport,
   type AuditSnapshot,
 } from "@roll/core";
@@ -235,6 +237,9 @@ export async function gatherAuditSnapshot(
       }
     }
   }
+
+  // ── FIX-390: load structured deliveries for claim-drift rule ──────────
+  snapshot.deliveries = readDeliveries(nodeDeliveryStore, projectPath);
 
   return { snapshot, skipped };
 }

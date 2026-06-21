@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v3.621.1 — 2026-06-21
+
 ### 修复
 
 - **watch 事件行时间戳与状态行统一显示设备本地时区**：之前事件行硬编码 UTC 渲染（`getUTCHours`），状态行却走本地时区，同屏出现时差；`cycle:terminal`、`report:morning` 等事件类型也落到了 "unsupported event" 无意义渲染。现在时间戳统一走设备本地时区，新增 `cycle:terminal` 和 `report:morning` 的显式渲染，未知事件干净降级不再显示 "unsupported event"。(FIX-385) `[loop-engine]`

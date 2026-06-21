@@ -1,4 +1,4 @@
-import { EventBus, parseBacklog, type AuditPrEvidence, type StoryDeliveryTruth, type StoryTruth } from "@roll/core";
+import { EventBus, parseBacklog, readDeliveries, nodeDeliveryStore, queryStoryDelivery, type AuditPrEvidence, type StoryDeliveryTruth, type StoryTruth } from "@roll/core";
 import {
   GOAL_REVIEW_MODES,
   GOAL_SCHEMA_VERSION,
@@ -1147,10 +1147,16 @@ async function evaluateGoal(
   // so the `delivered` reading credits them like the cycle-ledger pending_merge
   // figure. Completion stays merge-gated (these remain blockers).
   const inFlightIds = new Set<string>();
+  // FIX-388: batch-read delivery truth once, reuse per story (AC5).
+  const deliveries = readDeliveries(nodeDeliveryStore, projectPath);
   for (const row of rows) {
+    // AC4: only pass deliveryTruth when the card has real delivery records;
+    // cards with no records fall back to markdown parsing (backward compat).
+    const rawTruth = queryStoryDelivery(row.id, deliveries);
+    const deliveryTruth = rawTruth.lastRecordedAt > 0 ? rawTruth : undefined;
     const prEvidence = deps.prEvidence !== undefined ? await deps.prEvidence(projectPath, row.id, row.status) : undefined;
-    if (isCardInFlight(row.status, prEvidence)) inFlightIds.add(row.id);
-    truths.push(storyTruthFromBacklog(row.id, row.status, { ...(prEvidence !== undefined ? { prEvidence } : {}), nowSec: deps.nowSec() }));
+    if (isCardInFlight(row.status, prEvidence, deliveryTruth)) inFlightIds.add(row.id);
+    truths.push(storyTruthFromBacklog(row.id, row.status, { ...(prEvidence !== undefined ? { prEvidence } : {}), nowSec: deps.nowSec(), deliveryTruth }));
   }
   const verdict = goalEvaluationFromTruth(truths, goal.scope, { allowEmptyAllComplete: backlogExists(projectPath), inFlightIds });
   bus.appendEvent(eventsPath(projectPath), {

@@ -148,3 +148,54 @@ describe("FIX-337 (AC5) — goalEvaluationFromTruth: delivered counts in-flight,
     expect(ev.delivered).toBe(1);
   });
 });
+
+describe("FIX-388 — storyTruthFromBacklog with deliveryTruth (structured path wins)", () => {
+  it("AC3: deliveryTruth todo with real records → backlogStatus '✅ Done' ignored, returns truth/no_claim_no_evidence", () => {
+    // A card whose delivery record says "todo" but whose backlog says "✅ Done"
+    // → structured truth wins, the markdown ✅ is NOT read.
+    // (deliveringCycles non-empty signals real records exist)
+    const t = storyTruthFromBacklog("FIX-388", "✅ Done", {
+      nowSec: NOW,
+      deliveryTruth: dt({ lifecycleState: "todo", delivered: false, prNumber: undefined, deliveringCycles: ["c1"] }),
+    });
+    // If markdown were parsed, "✅ Done" would be isDoneRow=true → grandfathered.
+    // With deliveryTruth todo, isDoneRow=false → no_claim_no_evidence.
+    expect(t.state).toBe("truth");
+    expect(t.reason).toBe("no_claim_no_evidence");
+    expect(t.delivered).toBe(false);
+  });
+
+  it("AC3: deliveryTruth done + no prEvidence → unknown (structured), NOT reading '📋 Todo'", () => {
+    // deliveryTruth says done, backlogStatus says "📋 Todo". If the old markdown
+    // parser ran, it would report no_claim_no_evidence. The structured path gives
+    // unknown (done but no merge evidence) — a DIFFERENT outcome, proving the
+    // structured path was used.
+    const t = storyTruthFromBacklog("FIX-388", "📋 Todo", {
+      nowSec: NOW,
+      deliveryTruth: dt({ lifecycleState: "done", delivered: true, prNumber: 42 }),
+    });
+    expect(t.state).toBe("unknown"); // structured: done but no merge evidence
+    expect(t.state).not.toBe("no_claim_no_evidence"); // NOT reading backlogStatus
+  });
+
+  it("AC3: isCardInFlight with deliveryTruth done → false even if backlogStatus says PR#99", () => {
+    // BacklogStatus contains "PR#99" but delivery says done → structured wins.
+    expect(
+      isCardInFlight("🔨 In Progress · PR#99", undefined, dt({ lifecycleState: "done", delivered: true, prNumber: 42 })),
+    ).toBe(false);
+  });
+
+  it("AC4: no deliveryTruth → falls back to markdown parsing (backward compat)", () => {
+    // When deliveryTruth is undefined, the markdown fallback still works.
+    expect(isCardInFlight("🔨 In Progress · PR#42", undefined)).toBe(true);
+    // A todo card without a PR annotation reads as not-in-flight.
+    expect(isCardInFlight("📋 Todo", undefined)).toBe(false);
+  });
+
+  it("AC3: deliveryTruth in_flight with prNumber → true regardless of backlogStatus", () => {
+    // Even if backlog says "🚫 Hold", structured truth says in_flight → is in-flight.
+    expect(
+      isCardInFlight("🚫 Hold", undefined, dt({ lifecycleState: "in_flight", delivered: false, prNumber: 88 })),
+    ).toBe(true);
+  });
+});

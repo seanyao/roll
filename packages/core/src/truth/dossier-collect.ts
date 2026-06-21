@@ -12,6 +12,8 @@ import type { AuditPrEvidence } from "../consistency/audit.js";
 import { storyTruthFromBacklog } from "./adapter.js";
 import { classifyStatus, type StoryEvidenceFlags, type StoryStatus } from "@roll/spec";
 import type { TruthReason, TruthState } from "./selectors.js";
+import { readDeliveries, nodeDeliveryStore } from "../delivery/store.js";
+import { queryStoryDelivery } from "../truth/query.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -78,6 +80,9 @@ export interface CollectDossierOptions {
   /** FIX-278: durable, offline merge-truth probe — true when git history carries
    *  a merge commit referencing this story id. */
   mergeEvidence?: (storyId: string) => boolean;
+  /** FIX-388: pre-loaded deliveries for structured truth lookup.
+   *  When absent, read from `.roll/loop/deliveries.jsonl` on disk. */
+  deliveries?: readonly import("@roll/spec").DeliveryRecord[];
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -193,6 +198,9 @@ export function collectDossier(projectPath: string, opts: CollectDossierOptions 
   } catch {
     /* no backlog → heuristic-only */
   }
+  // FIX-388: load deliveries for structured truth lookup (AC5: batch-read once).
+  const deliveries: readonly import("@roll/spec").DeliveryRecord[] =
+    opts.deliveries ?? readDeliveries(nodeDeliveryStore, projectPath);
   const epics: DossierEpic[] = [];
   let epicDirs: string[] = [];
   try {
@@ -230,8 +238,14 @@ export function collectDossier(projectPath: string, opts: CollectDossierOptions 
       const status = backlogStatus.get(id);
       const rawStatus = backlogRawStatus.get(id);
       const merged = opts.mergeEvidence?.(id) ?? false;
+      // FIX-388: pass structured delivery truth so the selector reads the
+      // delivery record, NOT the markdown backlog status string.
+      // AC4: only pass when the card has real delivery records; cards with
+      // no records fall back to markdown parsing (backward compat).
+      const rawTruth = queryStoryDelivery(id, deliveries);
+      const deliveryTruth = rawTruth.lastRecordedAt > 0 ? rawTruth : undefined;
       const storyTruth = rawStatus !== undefined
-        ? storyTruthFromBacklog(id, rawStatus, { prEvidence: opts.prEvidence?.[id], nowSec: opts.nowSec })
+        ? storyTruthFromBacklog(id, rawStatus, { prEvidence: opts.prEvidence?.[id], nowSec: opts.nowSec, ...(deliveryTruth !== undefined ? { deliveryTruth } : {}) })
         : undefined;
       if (storyTruth !== undefined) delivered = storyTruth.delivered || (status === "done" && merged);
       const legacy = delivered && !hasLatest && !existsSync(join(dir, "ac-map.json"));

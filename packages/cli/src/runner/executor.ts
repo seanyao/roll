@@ -148,6 +148,7 @@ import { realAgentEnv } from "../commands/agent-list.js";
 import { attestCommand } from "../commands/attest.js";
 import { refreshAggregates } from "../commands/index-gen.js";
 import { cardArchiveDir, mountExecutionAtPublish } from "../lib/archive.js";
+import { readLatestStoryReviewScore, REVIEW_SCORE_LOW_THRESHOLD, type ReviewScoreEntry } from "../lib/review-score.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -822,6 +823,16 @@ export async function executeCommand(
         readProjectMapEnabled(ports.repoCwd),
         ctx.storyId,
       );
+      // FIX-386: when the story was re-picked after a low peer review score,
+      // inject the reviewer's findings as a fix-forward task so the builder
+      // fixes on the same resumed branch instead of starting fresh.
+      const lowScoreFeedback = ctx.storyId !== undefined && ctx.storyId !== ""
+        ? buildLowScoreFixForwardPrompt(ports.repoCwd, ctx.storyId)
+        : "";
+      const finalSkillBody =
+        lowScoreFeedback !== ""
+          ? `${lowScoreFeedback}\n\n${skillBodyForSpawn}`
+          : skillBodyForSpawn;
       // lever-4 (default-OFF): when warm-context is enabled AND this agent's spec
       // supports reuse (only codex) AND a PRIOR session is in the ledger, resume
       // it on THIS card (codex `exec resume <id>`). NEXT-CARD-ONLY + SINGLE-USE:
@@ -882,7 +893,7 @@ export async function executeCommand(
       try {
         res = await ports.agentSpawn(cmd.agent, {
           cwd: ports.paths.worktreePath,
-          skillBody: skillBodyForSpawn,
+          skillBody: finalSkillBody,
           ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
           writableRoots: agentWritableRoots(ports.repoCwd, ports.paths.alertsPath),
           ...(ctx.model !== undefined && ctx.model !== "" ? { model: ctx.model } : {}),
@@ -3148,6 +3159,71 @@ export function maybeInjectProjectMap(
   const map = buildProjectMap(worktreePath, storyId);
   if (map === "") return skillBody;
   return `${map}\n\n${skillBody}`;
+}
+
+// ── FIX-386: low peer review score fix-forward context injection ────────────
+
+/** Max chars of reviewer rationale to inject into the agent context. A short
+ *  fix-forward task keeps the prompt bounded; the full note is still on disk. */
+const LOW_SCORE_FEEDBACK_MAX_CHARS = 1200;
+
+/**
+ * FIX-386 — build a fix-forward task prompt from the reviewer's low-score
+ * findings. Returns an empty string when there is no low score to forward, or
+ * when the latest score is above the low threshold. The prompt tells the builder
+ * to fix the specific reviewer findings ON THE SAME BRANCH (resumed worktree),
+ * then re-submit for peer review — no fresh re-pick, no context loss.
+ *
+ * Reads the LATEST review score note for the story from the PERSISTENT .roll
+ * (repoCwd). Best-effort: a read blip returns "" so the agent runs cold without
+ * the fix-forward hint — suboptimal but never cycle-toppling.
+ */
+export function buildLowScoreFixForwardPrompt(
+  projectPath: string,
+  storyId: string,
+): string {
+  if (storyId === "") return "";
+  let entry: ReviewScoreEntry | undefined;
+  try {
+    entry = readLatestStoryReviewScore(projectPath, storyId);
+  } catch {
+    return "";
+  }
+  if (entry === undefined) return "";
+  if (entry.score > REVIEW_SCORE_LOW_THRESHOLD) return "";
+  const verdict = entry.verdict.toLowerCase();
+  if (verdict !== "ok" && verdict !== "regression") return "";
+
+  const headline =
+    verdict === "regression"
+      ? `⚠️  Prior peer review REGRESSION (${entry.score}/10) — fix these findings on the SAME branch and re-submit for review. Do NOT start fresh.`
+      : `⚠️  Prior peer review LOW SCORE (${entry.score}/10) — address reviewer findings on the SAME branch, then re-submit for peer review.`;
+
+  const rationale =
+    (entry.note ?? "").trim() === ""
+      ? `(no detailed rationale recorded — check ${entry.sourcePath})`
+      : entry.note.trim().slice(0, LOW_SCORE_FEEDBACK_MAX_CHARS);
+
+  const who = entry.scoredBy !== undefined && entry.scoredBy !== ""
+    ? ` (reviewed by ${entry.scoredBy})`
+    : "";
+
+  return [
+    "## 🔧 Fix-Forward: Low Peer Review Score",
+    "",
+    `${headline}${who}`,
+    "",
+    "**Reviewer findings:**",
+    rationale,
+    "",
+    "**Instructions:**",
+    `- You are resuming the EXISTING branch for ${storyId} — all prior code is already here.`,
+    "- Fix each finding above with minimal, targeted changes.",
+    "- Write/update regression tests for each fix.",
+    `- When done, the cycle's peer review stage will RE-SCORE this delivery.`,
+    "- If the score is still low, the loop will escalate to the owner.",
+    "",
+  ].join("\n");
 }
 
 /** Submodule update can clone over the network (cold) — give it the same room. */

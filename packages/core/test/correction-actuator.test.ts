@@ -41,19 +41,118 @@ describe("US-EVID-014 correction actuator decisions", () => {
     expect(decision.attribution.evidence).toContain("ac-map.json");
   });
 
-  it("auto mode returns regression review-score stories to Todo/Hold", () => {
+  it("first low review score → return_story with retry budget", () => {
     const decision = decideCorrectionAction({
-      storyId: "US-EVID-014",
+      storyId: "FIX-386",
       cycleId: "cycle-1",
-      reasons: ["review-score regression 3/10 blocks Done"],
+      reasons: ["low review-score ok 4/10 marks partial + Discrepancy"],
       mode: "auto",
       events: [],
     });
 
     expect(decision).toMatchObject({
       action: "return_story",
+      plannedAction: "return_story",
       signal: "review_score_regression",
       source: "review-score",
+      retryBudget: 1, // one retry remaining after this first low score
+    });
+  });
+
+  it("second low review score (one prior correction) → still return_story with zero retry budget", () => {
+    const events: RollEvent[] = [
+      {
+        type: "correction:action",
+        cycleId: "cycle-1",
+        storyId: "FIX-386",
+        action: "return_story",
+        signal: "review_score_regression",
+        reason: "first low score",
+        ts: 10,
+      },
+    ];
+    const decision = decideCorrectionAction({
+      storyId: "FIX-386",
+      cycleId: "cycle-2",
+      reasons: ["low review-score ok 4/10 marks partial + Discrepancy"],
+      mode: "auto",
+      events,
+    });
+
+    // FIX-386: with 1 prior correction (≤ MAX_REVIEW_SCORE_RETRIES=1), still return_story
+    // giving one more fix-forward cycle before escalating.
+    expect(decision).toMatchObject({
+      action: "return_story",
+      plannedAction: "return_story",
+      signal: "review_score_regression",
+      retryBudget: 0, // last retry — no more after this
+    });
+  });
+
+  it("third low review score (retry budget exhausted) → route_adjust escalation", () => {
+    const events: RollEvent[] = [
+      {
+        type: "correction:action",
+        cycleId: "cycle-1",
+        storyId: "FIX-386",
+        action: "return_story",
+        signal: "review_score_regression",
+        reason: "first low score",
+        ts: 10,
+      },
+      {
+        type: "correction:action",
+        cycleId: "cycle-2",
+        storyId: "FIX-386",
+        action: "return_story",
+        signal: "review_score_regression",
+        reason: "second low score",
+        ts: 11,
+      },
+    ];
+    const decision = decideCorrectionAction({
+      storyId: "FIX-386",
+      cycleId: "cycle-3",
+      reasons: ["low review-score ok 4/10 marks partial + Discrepancy"],
+      mode: "auto",
+      events,
+    });
+
+    // FIX-386: with 2 prior corrections (> MAX_REVIEW_SCORE_RETRIES=1), escalate.
+    // The story will be marked Hold by the CLI correction actuator.
+    expect(decision).toMatchObject({
+      action: "route_adjust",
+      plannedAction: "route_adjust",
+      signal: "review_score_regression",
+      retryBudget: 0,
+    });
+  });
+
+  it("regression review score (one prior) → return_story with retry budget", () => {
+    const events: RollEvent[] = [
+      {
+        type: "correction:action",
+        cycleId: "cycle-1",
+        storyId: "FIX-386",
+        action: "return_story",
+        signal: "review_score_regression",
+        reason: "regression 3/10",
+        ts: 10,
+      },
+    ];
+    const decision = decideCorrectionAction({
+      storyId: "FIX-386",
+      cycleId: "cycle-2",
+      reasons: ["review-score regression 3/10 blocks Done"],
+      mode: "auto",
+      events,
+    });
+
+    expect(decision).toMatchObject({
+      action: "return_story",
+      signal: "review_score_regression",
+      source: "review-score",
+      retryBudget: 0,
     });
   });
 

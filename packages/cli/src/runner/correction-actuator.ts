@@ -199,9 +199,31 @@ function createFix(projectPath: string, decision: CorrectionDecision): { mutatio
   return { mutation: "alert_only" };
 }
 
+/** FIX-386: mark a story Hold when a bounded-retry signal exhausts its budget.
+ *  Only applies when retryBudget === 0 (the escalation threshold). */
+function markStoryHold(projectPath: string, storyId: string, reason: string): CorrectionMutation {
+  try {
+    const path = join(projectPath, ".roll", "backlog.md");
+    const store = new BacklogStore();
+    const snap = store.readBacklog(path);
+    const row = snap.items.find((it) => it.id === storyId);
+    if (row === undefined) return "alert_only";
+    if (classifyStatus(row.status) === "hold") return "human_override";
+    store.mark(path, snap.hash, storyId, `${STATUS_MARKER.hold} [low-review-score: ${reason.slice(0, 80)}]`);
+    return "returned_story";
+  } catch {
+    return "alert_only";
+  }
+}
+
 function mutationForAction(projectPath: string, decision: CorrectionDecision): { mutation: CorrectionMutation; fixId?: string } {
   if (decision.action === "open_fix") return createFix(projectPath, decision);
   if (decision.action === "return_story") return { mutation: markStoryTodo(projectPath, decision.storyId) };
+  // FIX-386: when review_score_regression exhausts its retry budget, mark Hold
+  // instead of silently alerting. The story stays parked until a human un-holds.
+  if (decision.action === "route_adjust" && decision.signal === "review_score_regression" && decision.retryBudget === 0) {
+    return { mutation: markStoryHold(projectPath, decision.storyId, decision.reason) };
+  }
   if (decision.action === "route_adjust") return { mutation: "alert_only" };
   return { mutation: decision.plannedAction === "alert_only" ? "none" : "alert_only" };
 }

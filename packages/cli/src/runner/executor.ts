@@ -190,6 +190,9 @@ export interface GitPort {
   commitsAhead(worktreeCwd: string): Promise<number>;
   /** FIX-252: `git rev-list --count origin/main..main` in the main checkout. */
   mainAhead(repoCwd: string): Promise<number>;
+  /** FIX-903: save the current main HEAD as a rescue ref (`rescue/leaked-<cycleId>`),
+   *  then reset main to origin/main. Returns the rescued SHA and exit code. */
+  rescueLeaked(repoCwd: string, refName: string): Promise<{ code: number; rescuedSha: string }>;
   /** FIX-208: count `tcr:` commits ahead of origin/main (v2口径:
    *  `git log --oneline origin/main..HEAD | grep -c ' tcr:'`) in the worktree. */
   tcrCount(worktreeCwd: string): Promise<number>;
@@ -1748,6 +1751,25 @@ export async function executeCommand(
       return {};
     }
 
+    // FIX-903: save leaked main commits to a rescue ref, then reset main.
+    case "rescue_leaked": {
+      const refName = `rescue/leaked-${cmd.cycleId}`;
+      const r = await ports.git.rescueLeaked(ports.repoCwd, refName);
+      ports.events.appendAlert(
+        ports.paths.alertsPath,
+        `rescue_leaked ${cmd.cycleId}: saved ${r.rescuedSha.slice(0, 8)} to ${refName} ref; main reset ${r.code === 0 ? "ok" : "failed"}`,
+      );
+      // FIX-903 AC3: emit an audit event so the rescue is observable.
+      ports.events.appendEvent(ports.paths.eventsPath, {
+        type: "cycle:rescue",
+        cycleId: cmd.cycleId,
+        ref: refName,
+        rescuedSha: r.rescuedSha,
+        ts: eventTs(ports),
+      });
+      return {};
+    }
+
     // delivery/pr nextWaitAction sync merge-wait poll. Re-poll the gh state and
     // feed merge_polled back so the orchestrator's nextWaitAction drives it.
     case "wait_merge": {
@@ -3260,6 +3282,41 @@ export function nodePorts(opts: {
         }).catch(() => ({ stdout: "0" }));
         const n = Number((r.stdout ?? "0").trim());
         return Number.isFinite(n) ? n : 0;
+      },
+      async rescueLeaked(repoCwd, refName) {
+        // FIX-903: capture the current main HEAD SHA, then create a rescue branch
+        // and reset main to origin/main so the leaked commits are reachable via
+        // the rescue ref but main is clean again.
+        let rescuedSha = "";
+        try {
+          const headR = await execFileAsync("git", ["rev-parse", "HEAD"], {
+            cwd: repoCwd,
+            encoding: "utf8",
+          });
+          rescuedSha = (headR.stdout ?? "").trim();
+        } catch {
+          return { code: 1, rescuedSha: "" };
+        }
+        // Create the rescue branch at current main HEAD.
+        let code = 0;
+        try {
+          await execFileAsync("git", ["branch", refName], {
+            cwd: repoCwd,
+            encoding: "utf8",
+          });
+        } catch {
+          code = 1;
+        }
+        // Reset main to origin/main (clean up the leaked commits from main).
+        try {
+          await execFileAsync("git", ["reset", "--hard", "origin/main"], {
+            cwd: repoCwd,
+            encoding: "utf8",
+          });
+        } catch {
+          code = 1;
+        }
+        return { code, rescuedSha };
       },
       async tcrCount(worktreeCwd) {
         // v2口径 (bin/roll:8724): git log --oneline origin/main..HEAD | grep -c ' tcr:'.

@@ -464,6 +464,7 @@ export type CycleCommand =
   | { kind: "publish_pr"; branch: string; docOnly: boolean } // delivery/pr planPublishPr.
   | { kind: "merge_back"; branch: string } // _worktree_merge_back (gh-missing tier).
   | { kind: "push_orphan"; branch: string } // FIX-039 orphan branch+tag.
+  | { kind: "rescue_leaked"; cycleId: string } // FIX-903: save leaked main commits to rescue ref.
   | { kind: "wait_merge"; branch: string; elapsedSec: number } // delivery/pr nextWaitAction.
   | { kind: "reconcile" } // reconcile/engine reconcileMergeEvidence.
   | { kind: "cleanup_worktree"; branch: string } // _worktree_cleanup.
@@ -823,9 +824,10 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
                 ]
             : status === "failed" && (event.facts.mainAhead ?? 0) > 0
               ? [
+                  { kind: "rescue_leaked", cycleId: state.ctx.cycleId },
                   {
                     kind: "append_alert",
-                    message: `cycle ${state.ctx.cycleId}: local main is ahead of origin/main by ${event.facts.mainAhead} commit(s) while cycle branch has ${event.facts.commitsAhead} commit(s); leaving state untouched for rescue (FIX-252)`,
+                    message: `cycle ${state.ctx.cycleId}: local main is ahead of origin/main by ${event.facts.mainAhead} commit(s) while cycle branch has ${event.facts.commitsAhead} commit(s) — leaked commits saved to rescue/leaked-${state.ctx.cycleId} ref; main reset to origin/main (FIX-903)`,
                   },
                 ]
             : status === "failed" && event.facts.commitsAhead > 0

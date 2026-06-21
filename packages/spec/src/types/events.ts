@@ -24,6 +24,8 @@ export type RollEvent =
   | { type: "cycle:tcr"; cycleId: string; commitHash: string; message: string; ts: number; commitTs?: number }
   | { type: "cycle:first_edit"; cycleId: string; commitHash: string; ts: number }
   | { type: "cycle:end"; cycleId: string; outcome: TerminalOutcome; cost: CycleCost; ts: number }
+  // FIX-903: leaked main commits were saved to a rescue ref before reset.
+  | { type: "cycle:rescue"; cycleId: string; ref: string; rescuedSha: string; ts: number }
   | {
       type: "warm-session:resume-selected";
       cycleId: string;

@@ -721,6 +721,7 @@ function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<str
       push: vi.fn(async () => ({ code: 0 })),
       commitsAhead: vi.fn(async () => 3),
       mainAhead: vi.fn(async () => 0),
+      rescueLeaked: vi.fn(async () => ({ code: 0, rescuedSha: "abc123def456" })),
       tcrCount: vi.fn(async () => 4),
       recentCommits: vi.fn(async () => []),
       // RESUME-PRIOR-WORK probes — defaults make every fakePorts cycle base on
@@ -1726,6 +1727,24 @@ describe("executeCommand — command → executor mapping", () => {
     });
     const r = await executeCommand({ kind: "capture_facts" }, ports, CTX);
     expect(r.event).toMatchObject({ type: "facts_captured", facts: { commitsAhead: 0, mainAhead: 2 } });
+  });
+
+  it("FIX-903: rescue_leaked saves leaked main commits to a rescue ref and resets main", async () => {
+    const { ports, calls } = fakePorts({
+      git: {
+        ...fakePorts().ports.git,
+        rescueLeaked: vi.fn(async () => ({ code: 0, rescuedSha: "deadbeef12345678" })),
+      },
+    });
+    await executeCommand({ kind: "rescue_leaked", cycleId: "20260622-014647-792" }, ports, CTX);
+    // Verify git.rescueLeaked was called with correct ref name
+    const rescueCall = (ports.git.rescueLeaked as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[];
+    expect(rescueCall[0]).toBe("/repo");
+    expect(rescueCall[1]).toBe("rescue/leaked-20260622-014647-792");
+    // Verify alert was appended
+    expect(calls["alert"]?.length).toBeGreaterThanOrEqual(1);
+    // Verify cycle:rescue event was appended
+    expect(calls["event"]?.length).toBeGreaterThanOrEqual(1);
   });
 
   it("FIX-208: capture_facts returns real tcr count via git port → ctxPatch.tcrCount", async () => {

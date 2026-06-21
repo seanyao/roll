@@ -17,7 +17,7 @@
  * AC7: genuinely not-delivered cards stay todo (no false positives).
  */
 import type { DeliveryRecord, FactOr } from "@roll/spec";
-import { present, absent, lifecycleFromFacts } from "@roll/spec";
+import { present, absent } from "@roll/spec";
 import type { RunRow } from "../events/bus.js";
 
 // ── Fact types ───────────────────────────────────────────────────────────────
@@ -67,7 +67,16 @@ export function extractRunFact(row: RunRow): RunFact | null {
 
   const prNum = row["pr_number"] ?? row["prNumber"];
   const mergeCommit = row["merge_commit"] ?? row["mergeCommit"];
-  const mergedAt = row["merged_at"] ?? row["mergedAt"];
+
+  // mergedAt: number (epoch ms) or ISO string (from older backfill stamps)
+  const mergedAtRaw = row["merged_at"] ?? row["mergedAt"];
+  let mergedAt: number | undefined;
+  if (typeof mergedAtRaw === "number" && Number.isFinite(mergedAtRaw)) {
+    mergedAt = mergedAtRaw;
+  } else if (typeof mergedAtRaw === "string") {
+    const ms = Date.parse(mergedAtRaw);
+    if (Number.isFinite(ms)) mergedAt = ms;
+  }
 
   const ts = row["ts"] ?? row["recordedAt"];
   let recordedAt = 0;
@@ -85,7 +94,7 @@ export function extractRunFact(row: RunRow): RunFact | null {
     outcome: typeof row["outcome"] === "string" ? row["outcome"] : "",
     prNumber: typeof prNum === "number" ? prNum : undefined,
     mergeCommit: typeof mergeCommit === "string" && mergeCommit !== "" ? mergeCommit : undefined,
-    mergedAt: typeof mergedAt === "number" ? mergedAt : undefined,
+    mergedAt,
     recordedAt,
   };
 }
@@ -165,10 +174,12 @@ export function rebuildDeliveriesFromFacts(
   merges: MergeFact[],
   repoSlug?: string,
 ): DeliveryRecord[] {
-  // Index merges by prNumber for fast lookup
+  // Index merges by prNumber AND by mergeCommit SHA for cross-reference
   const mergeByPr = new Map<number, MergeFact>();
+  const mergeBySha = new Map<string, MergeFact>();
   for (const m of merges) {
     mergeByPr.set(m.prNumber, m);
+    mergeBySha.set(m.mergeCommit, m);
   }
 
   // Group runs by storyId
@@ -191,11 +202,19 @@ export function rebuildDeliveriesFromFacts(
 
     // 1. Check if this story has a merged PR — the authoritative done signal.
     let mergedFact: MergeFact | undefined;
+    let mergedPrNumber: number | undefined;
     for (const r of storyRuns) {
       // If the run already has merge data (from backfill), treat as merged
       if (r.mergeCommit !== undefined) {
+        // Try to find prNumber: from run first, then git SHA lookup
+        if (r.prNumber !== undefined) {
+          mergedPrNumber = r.prNumber;
+        } else {
+          const shaMatch = mergeBySha.get(r.mergeCommit);
+          if (shaMatch) mergedPrNumber = shaMatch.prNumber;
+        }
         mergedFact = {
-          prNumber: r.prNumber ?? 0,
+          prNumber: mergedPrNumber ?? 0,
           mergeCommit: r.mergeCommit,
           mergedAt: r.mergedAt !== undefined ? Math.floor(r.mergedAt / 1000) : 0,
         };
@@ -205,25 +224,35 @@ export function rebuildDeliveriesFromFacts(
       if (r.prNumber !== undefined) {
         const m = mergeByPr.get(r.prNumber);
         if (m) {
+          mergedPrNumber = r.prNumber;
           mergedFact = m;
           break;
         }
       }
     }
 
-    if (mergedFact && mergedFact.prNumber > 0) {
-      const prUrl = repoSlug !== undefined
-        ? `https://github.com/${repoSlug}/pull/${mergedFact.prNumber}`
+    // Done when: (a) merge evidence exists AND (b) either we have a prNumber or
+    // we at least have a mergeCommit (done-without-PR is legal for backfilled history).
+    if (mergedFact !== undefined &&
+        (mergedFact.prNumber > 0 || mergedFact.mergeCommit !== "")) {
+      const fact: MergeFact = mergedFact; // narrow for strict TS
+      const effectivePr = fact.prNumber > 0 ? fact.prNumber : mergedPrNumber;
+      const prUrl = effectivePr !== undefined && effectivePr > 0 && repoSlug !== undefined
+        ? `https://github.com/${repoSlug}/pull/${effectivePr}`
         : undefined;
       result.push({
         storyId,
         cycleId: latest.cycleId,
         lifecycleState: "done",
-        prNumber: present(mergedFact.prNumber),
+        prNumber: effectivePr !== undefined && effectivePr > 0
+          ? present(effectivePr)
+          : absent("no_publish_attempted"),
         prUrl: prUrl !== undefined ? present(prUrl) : absent("not_recorded"),
-        mergedAt: present(mergedFact.mergedAt * 1000),
-        mergeCommit: present(mergedFact.mergeCommit),
-        recordedAt: mergedFact.mergedAt * 1000,
+        mergedAt: fact.mergedAt > 0
+          ? present(fact.mergedAt * 1000)
+          : absent("not_recorded"),
+        mergeCommit: present(fact.mergeCommit),
+        recordedAt: fact.mergedAt > 0 ? fact.mergedAt * 1000 : latest.recordedAt,
       });
       continue;
     }

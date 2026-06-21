@@ -86,6 +86,36 @@ describe("extractRunFact", () => {
     expect(extractRunFact(row)).toBeNull();
   });
 
+  it("parses merged_at as string timestamp", () => {
+    const row: Record<string, unknown> = {
+      story_id: "US-STRMERGED",
+      cycle_id: "c1",
+      status: "merged",
+      outcome: "delivered",
+      merge_commit: "abc123",
+      merged_at: "2026-06-20T18:07:32Z",
+      ts: "2026-06-21T10:00:00Z",
+    };
+    const f = extractRunFact(row);
+    expect(f).not.toBeNull();
+    expect(f!.mergedAt).toBe(1781978852000);
+    expect(f!.mergeCommit).toBe("abc123");
+  });
+
+  it("parses merged_at as number", () => {
+    const row: Record<string, unknown> = {
+      story_id: "US-NUMMERGED",
+      cycle_id: "c1",
+      status: "merged",
+      outcome: "delivered",
+      merged_at: 1718885252000,
+      ts: "2026-06-21T10:00:00Z",
+    };
+    const f = extractRunFact(row);
+    expect(f).not.toBeNull();
+    expect(f!.mergedAt).toBe(1718885252000);
+  });
+
   it("handles numeric ts as recordedAt", () => {
     const row: Record<string, unknown> = {
       story_id: "US-NUMTS",
@@ -441,6 +471,82 @@ describe("rebuildDeliveriesFromFacts — constraints", () => {
 });
 
 // ── Edge cases ───────────────────────────────────────────────────────────────
+
+describe("rebuildDeliveriesFromFacts — backfill mergeCommit without prNumber", () => {
+  it("emits done when backfill has mergeCommit but no prNumber", () => {
+    const runs = [makeRun({
+      storyId: "US-NOPR",
+      prNumber: undefined,
+      mergeCommit: "nopr-sha",
+      mergedAt: 5000000,
+    })];
+    const result = rebuildDeliveriesFromFacts(runs, []);
+    expect(result).toHaveLength(1);
+    expect(result[0].lifecycleState).toBe("done");
+    expect(result[0].mergeCommit).toEqual({ present: true, value: "nopr-sha" });
+    // prNumber absent when not available
+    expect(result[0].prNumber.present).toBe(false);
+  });
+
+  it("cross-references git merges by SHA to find missing prNumber", () => {
+    const runs = [makeRun({
+      storyId: "US-SHALOOKUP",
+      prNumber: undefined,
+      mergeCommit: "abc123sha",
+      mergedAt: 5000000,
+    })];
+    const merges = [
+      { prNumber: 883, mergeCommit: "abc123sha", mergedAt: 2000 },
+    ];
+    const result = rebuildDeliveriesFromFacts(runs, merges);
+    expect(result).toHaveLength(1);
+    expect(result[0].lifecycleState).toBe("done");
+    expect(result[0].prNumber).toEqual({ present: true, value: 883 });
+    expect(result[0].mergeCommit).toEqual({ present: true, value: "abc123sha" });
+  });
+
+  it("prefers backfill prNumber over git SHA lookup", () => {
+    const runs = [makeRun({
+      storyId: "US-PREFER",
+      prNumber: 42,
+      mergeCommit: "shared-sha",
+      mergedAt: 5000000,
+    })];
+    const merges = [
+      { prNumber: 883, mergeCommit: "shared-sha", mergedAt: 2000 },
+    ];
+    const result = rebuildDeliveriesFromFacts(runs, merges);
+    expect(result).toHaveLength(1);
+    // Backfill prNumber wins
+    expect(result[0].prNumber).toEqual({ present: true, value: 42 });
+  });
+
+  it("AC4: US-TRUTH-016 scenario — mergeCommit present, prNumber from git, done", () => {
+    // Simulates the real US-TRUTH-016 row: mergeCommit=9efd807, no pr_number
+    const runs: RunFact[] = [{
+      storyId: "US-TRUTH-016",
+      cycleId: "20260621-014644-46091",
+      status: "merged",
+      outcome: "delivered",
+      prNumber: undefined,
+      mergeCommit: "9efd807189ca538ccde38bfb55f461b2a5e614c9",
+      mergedAt: 1718885252000,
+      recordedAt: 1718885176000,
+    }];
+    const merges: MergeFact[] = [{
+      prNumber: 883,
+      mergeCommit: "9efd807189ca538ccde38bfb55f461b2a5e614c9",
+      mergedAt: 1718885251,
+    }];
+    const result = rebuildDeliveriesFromFacts(runs, merges, "seanyao/roll");
+    expect(result).toHaveLength(1);
+    expect(result[0].storyId).toBe("US-TRUTH-016");
+    expect(result[0].lifecycleState).toBe("done");
+    expect(result[0].prNumber).toEqual({ present: true, value: 883 });
+    expect(result[0].mergeCommit).toEqual({ present: true, value: "9efd807189ca538ccde38bfb55f461b2a5e614c9" });
+    expect(result[0].prUrl).toEqual({ present: true, value: "https://github.com/seanyao/roll/pull/883" });
+  });
+});
 
 describe("rebuildDeliveriesFromFacts — edge cases", () => {
   it("multiple runs for same story, merge found via first run's PR", () => {

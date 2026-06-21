@@ -68,13 +68,16 @@ function ensureDeliveriesFresh(projectRoot: string): ReturnType<typeof readDeliv
   const dp = deliveriesPath(projectRoot);
   const rp = runsPath(projectRoot);
 
-  // Get mtimes (0 when file absent)
-  const deliveriesMtime = existsSync(dp) ? statSync(dp).mtimeMs : 0;
-  const runsMtime = existsSync(rp) ? statSync(rp).mtimeMs : 0;
+  // Get mtimes floored to seconds (sub-second precision is unreliable across
+  // atomic writes; equal-second mtimes are ambiguous and trigger a rebuild).
+  const deliveriesMtimeSec = existsSync(dp) ? Math.floor(statSync(dp).mtimeMs / 1000) : 0;
+  const runsMtimeSec = existsSync(rp) ? Math.floor(statSync(rp).mtimeMs / 1000) : 0;
 
-  // Fresh when deliveries exist and are newer than or equal to runs.
+  // Fresh when deliveries exist and are strictly newer than runs (by seconds).
+  // Equal-second mtimes are ambiguous — rebuild to be safe (deliveries may have
+  // been created before the rebuild logic existed and lack historical data).
   // Also return cached when runs.jsonl is absent (nothing to rebuild from).
-  if (deliveriesMtime > 0 && (runsMtime === 0 || deliveriesMtime >= runsMtime)) {
+  if (deliveriesMtimeSec > 0 && (runsMtimeSec === 0 || deliveriesMtimeSec > runsMtimeSec)) {
     return readDeliveries(nodeDeliveryStore, projectRoot);
   }
 

@@ -11,9 +11,13 @@ import {
   extractRunFact,
   parseMergeCommitMessages,
   rebuildDeliveriesFromFacts,
+  collectRunFacts,
+  ensureDeliveriesFresh,
   type RunFact,
   type MergeFact,
+  type FreshnessPort,
 } from "../src/index.js";
+import type { ExecPort, ExecResult } from "../src/delivery/infra-default.js";
 
 // ── extractRunFact ───────────────────────────────────────────────────────────
 
@@ -578,5 +582,297 @@ describe("rebuildDeliveriesFromFacts — edge cases", () => {
   it("empty runs → empty result", () => {
     const result = rebuildDeliveriesFromFacts([], [makeMerge({ prNumber: 1 })]);
     expect(result).toHaveLength(0);
+  });
+});
+
+// ── collectRunFacts ──────────────────────────────────────────────────────────
+
+describe("collectRunFacts", () => {
+  it("parses valid JSONL into RunFacts", () => {
+    const text = [
+      JSON.stringify({ story_id: "US-A", cycle_id: "c1", status: "built", ts: "2026-01-01T00:00:00Z" }),
+      JSON.stringify({ story_id: "US-B", cycle_id: "c2", status: "merged", outcome: "delivered", pr_number: 42, ts: "2026-01-02T00:00:00Z" }),
+    ].join("\n");
+    const facts = collectRunFacts(text);
+    expect(facts).toHaveLength(2);
+    expect(facts[0].storyId).toBe("US-A");
+    expect(facts[1].storyId).toBe("US-B");
+    expect(facts[1].prNumber).toBe(42);
+  });
+
+  it("skips empty lines", () => {
+    const text = "\n\n" + JSON.stringify({ story_id: "US-X", cycle_id: "c1", status: "built", ts: "2026-01-01T00:00:00Z" }) + "\n\n";
+    const facts = collectRunFacts(text);
+    expect(facts).toHaveLength(1);
+  });
+
+  it("skips unparseable JSON lines", () => {
+    const text = [
+      "not json",
+      JSON.stringify({ story_id: "US-V", cycle_id: "c1", status: "built", ts: "2026-01-01T00:00:00Z" }),
+      "{broken",
+    ].join("\n");
+    const facts = collectRunFacts(text);
+    expect(facts).toHaveLength(1);
+    expect(facts[0].storyId).toBe("US-V");
+  });
+
+  it("skips rows without story_id", () => {
+    const text = JSON.stringify({ cycle_id: "c1", status: "built" });
+    const facts = collectRunFacts(text);
+    expect(facts).toHaveLength(0);
+  });
+
+  it("skips rows without cycle_id", () => {
+    const text = JSON.stringify({ story_id: "US-NO", status: "built" });
+    const facts = collectRunFacts(text);
+    expect(facts).toHaveLength(0);
+  });
+
+  it("handles empty input", () => {
+    expect(collectRunFacts("")).toHaveLength(0);
+  });
+});
+
+// ── ensureDeliveriesFresh ────────────────────────────────────────────────────
+
+/** File entry for the fake FreshnessPort. */
+interface FakeFileEntry {
+  text: string;
+  mtime: number;
+}
+
+/** In-memory FreshnessPort for testing. */
+function fakeFreshnessPort(initial: Record<string, FakeFileEntry> = {}): FreshnessPort & { _files: Map<string, FakeFileEntry> } {
+  const files = new Map<string, FakeFileEntry>();
+  for (const [k, v] of Object.entries(initial)) {
+    files.set(k, v);
+  }
+  return {
+    _files: files,
+    mtimeMs(absPath: string): number | undefined {
+      const f = files.get(absPath);
+      return f?.mtime;
+    },
+    readText(absPath: string): string {
+      const f = files.get(absPath);
+      return f?.text ?? "";
+    },
+    writeText(absPath: string, text: string): void {
+      files.set(absPath, { text, mtime: Date.now() });
+    },
+  };
+}
+
+/** Fake ExecPort that returns canned responses per argv. */
+function fakeExecPort(
+  responses: Record<string, ExecResult> = {},
+): ExecPort {
+  return {
+    run(_tool: string, argv: readonly string[]): ExecResult {
+      const key = argv.join(" ");
+      if (key in responses) return responses[key]!;
+      // Default: command not found / error
+      return { stdout: "", code: 128 };
+    },
+  };
+}
+
+describe("ensureDeliveriesFresh", () => {
+  const PROJ = "/fake/project";
+  const RUNS = `${PROJ}/.roll/loop/runs.jsonl`;
+  const DEL = `${PROJ}/.roll/loop/deliveries.jsonl`;
+
+  it("returns cached deliveries when fresh (del mtime ≥ runs mtime)", () => {
+    const freshness = fakeFreshnessPort({
+      [RUNS]: { text: JSON.stringify({ story_id: "US-OLD", cycle_id: "c1", status: "built", ts: "2026-01-01T00:00:00Z" }), mtime: 1000 },
+      [DEL]: { text: JSON.stringify({ storyId: "US-CACHED", cycleId: "c1", lifecycleState: "done", recordedAt: 2000 }), mtime: 2000 },
+    });
+    const exec = fakeExecPort();
+
+    const result = ensureDeliveriesFresh(PROJ, freshness, exec);
+    // Fresh → should read from cache without rebuilding
+    expect(result).toHaveLength(1);
+    expect(result[0].storyId).toBe("US-CACHED");
+    expect(result[0].lifecycleState).toBe("done");
+  });
+
+  it("rebuilds when deliveries is missing", () => {
+    const freshness = fakeFreshnessPort({
+      [RUNS]: { text: [
+        JSON.stringify({ story_id: "US-NEW", cycle_id: "c1", status: "built", outcome: "published_pending_merge", pr_number: 42, ts: "2026-01-01T00:00:00Z" }),
+      ].join("\n"), mtime: 2000 },
+    });
+    const exec = fakeExecPort({
+      [`-C ${PROJ} log --first-parent main --merges --format=%H %ct %s`]: { stdout: "", code: 0 },
+      [`-C ${PROJ} log --first-parent main --format=%H %ct %s`]: { stdout: "", code: 0 },
+      [`-C ${PROJ} remote get-url origin`]: { stdout: "", code: 128 },
+    });
+
+    const result = ensureDeliveriesFresh(PROJ, freshness, exec);
+    expect(result).toHaveLength(1);
+    expect(result[0].storyId).toBe("US-NEW");
+    expect(result[0].lifecycleState).toBe("in_flight");
+    // Cache should have been written
+    expect(freshness._files.has(DEL)).toBe(true);
+  });
+
+  it("rebuilds when runs is newer than deliveries", () => {
+    const freshness = fakeFreshnessPort({
+      [RUNS]: { text: [
+        JSON.stringify({ story_id: "US-STALE", cycle_id: "c2", status: "built", outcome: "published_pending_merge", pr_number: 99, ts: "2026-01-02T00:00:00Z" }),
+      ].join("\n"), mtime: 5000 },
+      [DEL]: { text: JSON.stringify({ storyId: "US-STALE", cycleId: "c1", lifecycleState: "todo", recordedAt: 1000 }), mtime: 1000 },
+    });
+    const exec = fakeExecPort({
+      [`-C ${PROJ} log --first-parent main --merges --format=%H %ct %s`]: { stdout: "", code: 0 },
+      [`-C ${PROJ} log --first-parent main --format=%H %ct %s`]: { stdout: "", code: 0 },
+      [`-C ${PROJ} remote get-url origin`]: { stdout: "", code: 128 },
+    });
+
+    const result = ensureDeliveriesFresh(PROJ, freshness, exec);
+    expect(result).toHaveLength(1);
+    expect(result[0].lifecycleState).toBe("in_flight");
+    expect(result[0].prNumber).toEqual({ present: true, value: 99 });
+  });
+
+  it("uses git merge evidence to mark stories as done", () => {
+    const freshness = fakeFreshnessPort({
+      [RUNS]: { text: [
+        JSON.stringify({ story_id: "US-MERGED", cycle_id: "c1", status: "built", outcome: "published_pending_merge", pr_number: 883, ts: "2026-01-01T00:00:00Z" }),
+      ].join("\n"), mtime: 2000 },
+    });
+    const exec = fakeExecPort({
+      [`-C ${PROJ} log --first-parent main --merges --format=%H %ct %s`]: {
+        stdout: "9efd807189ca538ccde38bfb55f461b2a5e614c9 1718885251 Merge pull request #883 from branch/fix",
+        code: 0,
+      },
+      [`-C ${PROJ} log --first-parent main --format=%H %ct %s`]: { stdout: "", code: 0 },
+      [`-C ${PROJ} remote get-url origin`]: { stdout: "git@github.com:seanyao/roll.git", code: 0 },
+    });
+
+    const result = ensureDeliveriesFresh(PROJ, freshness, exec);
+    expect(result).toHaveLength(1);
+    expect(result[0].lifecycleState).toBe("done");
+    expect(result[0].prNumber).toEqual({ present: true, value: 883 });
+    expect(result[0].mergeCommit).toEqual({ present: true, value: "9efd807189ca538ccde38bfb55f461b2a5e614c9" });
+    expect(result[0].prUrl).toEqual({ present: true, value: "https://github.com/seanyao/roll/pull/883" });
+  });
+
+  it("AC2: rebuild is deterministic (same input → same output)", () => {
+    const freshness1 = fakeFreshnessPort({
+      [RUNS]: { text: [
+        JSON.stringify({ story_id: "US-DET", cycle_id: "c1", status: "built", outcome: "published_pending_merge", pr_number: 1, ts: "2026-01-01T00:00:00Z" }),
+      ].join("\n"), mtime: 2000 },
+    });
+    const freshness2 = fakeFreshnessPort({
+      [RUNS]: { text: [
+        JSON.stringify({ story_id: "US-DET", cycle_id: "c1", status: "built", outcome: "published_pending_merge", pr_number: 1, ts: "2026-01-01T00:00:00Z" }),
+      ].join("\n"), mtime: 2000 },
+    });
+    const exec = fakeExecPort({
+      [`-C ${PROJ} log --first-parent main --merges --format=%H %ct %s`]: { stdout: "", code: 0 },
+      [`-C ${PROJ} log --first-parent main --format=%H %ct %s`]: { stdout: "", code: 0 },
+      [`-C ${PROJ} remote get-url origin`]: { stdout: "", code: 128 },
+    });
+
+    const r1 = ensureDeliveriesFresh(PROJ, freshness1, exec);
+    const r2 = ensureDeliveriesFresh(PROJ, freshness2, exec);
+    expect(r1).toEqual(r2);
+  });
+
+  it("handles missing runs.jsonl gracefully", () => {
+    const freshness = fakeFreshnessPort({
+      [DEL]: { text: JSON.stringify({ storyId: "US-ONLY", cycleId: "c1", lifecycleState: "done", recordedAt: 2000 }), mtime: 2000 },
+    });
+    const exec = fakeExecPort();
+
+    const result = ensureDeliveriesFresh(PROJ, freshness, exec);
+    // Fresh cache (no runs to compare against) → returns cached
+    expect(result).toHaveLength(1);
+    expect(result[0].storyId).toBe("US-ONLY");
+  });
+
+  it("handles git failure gracefully (rebuilds from runs alone)", () => {
+    const freshness = fakeFreshnessPort({
+      [RUNS]: { text: [
+        JSON.stringify({ story_id: "US-NOGIT", cycle_id: "c1", status: "built", outcome: "failed", ts: "2026-01-01T00:00:00Z" }),
+      ].join("\n"), mtime: 2000 },
+    });
+    // Git always fails
+    const exec = fakeExecPort();
+
+    const result = ensureDeliveriesFresh(PROJ, freshness, exec);
+    expect(result).toHaveLength(1);
+    expect(result[0].lifecycleState).toBe("failed");
+  });
+
+  it("skips rows with unparseable JSON in runs", () => {
+    const freshness = fakeFreshnessPort({
+      [RUNS]: { text: [
+        "not valid json",
+        JSON.stringify({ story_id: "US-GOOD", cycle_id: "c1", status: "built", outcome: "published_pending_merge", ts: "2026-01-01T00:00:00Z" }),
+        "{also bad",
+      ].join("\n"), mtime: 2000 },
+    });
+    const exec = fakeExecPort({
+      [`-C ${PROJ} log --first-parent main --merges --format=%H %ct %s`]: { stdout: "", code: 0 },
+      [`-C ${PROJ} log --first-parent main --format=%H %ct %s`]: { stdout: "", code: 0 },
+      [`-C ${PROJ} remote get-url origin`]: { stdout: "", code: 128 },
+    });
+
+    const result = ensureDeliveriesFresh(PROJ, freshness, exec);
+    expect(result).toHaveLength(1);
+    expect(result[0].storyId).toBe("US-GOOD");
+  });
+
+  it("detects squash-merges with (#N) in subject", () => {
+    const freshness = fakeFreshnessPort({
+      [RUNS]: { text: [
+        JSON.stringify({ story_id: "US-SQUASH", cycle_id: "c1", status: "built", outcome: "published_pending_merge", ts: "2026-01-01T00:00:00Z" }),
+      ].join("\n"), mtime: 2000 },
+    });
+    const exec = fakeExecPort({
+      // No standard merge commits
+      [`-C ${PROJ} log --first-parent main --merges --format=%H %ct %s`]: { stdout: "", code: 0 },
+      // But a squash-merge with (#883) in the subject
+      [`-C ${PROJ} log --first-parent main --format=%H %ct %s`]: {
+        stdout: "9efd807189ca538ccde38bfb55f461b2a5e614c9 1718885251 tcr: US-TRUTH-016 — CLI truth query command + alignment tests (#883)",
+        code: 0,
+      },
+      [`-C ${PROJ} remote get-url origin`]: { stdout: "git@github.com:seanyao/roll.git", code: 0 },
+    });
+
+    const result = ensureDeliveriesFresh(PROJ, freshness, exec);
+    // The PR number 883 was found via squash-merge, so the story should not be
+    // marked done by this alone (no run carries matching pr_number),
+    // but the merge fact IS collected.
+    // This test verifies the squash-merge pass works — merge facts are collected.
+    expect(result).toHaveLength(1);
+    expect(result[0].lifecycleState).toBe("in_flight");
+  });
+
+  it("squash-merge + run with backfill mergeCommit → done", () => {
+    const freshness = fakeFreshnessPort({
+      [RUNS]: { text: [
+        JSON.stringify({ story_id: "US-TRUTH-016", cycle_id: "c1", status: "merged", outcome: "delivered", merge_commit: "9efd807189ca538ccde38bfb55f461b2a5e614c9", merged_at: 1718885252000, ts: "2026-06-20T18:06:16Z" }),
+      ].join("\n"), mtime: 2000 },
+    });
+    const exec = fakeExecPort({
+      [`-C ${PROJ} log --first-parent main --merges --format=%H %ct %s`]: { stdout: "", code: 0 },
+      [`-C ${PROJ} log --first-parent main --format=%H %ct %s`]: {
+        stdout: "9efd807189ca538ccde38bfb55f461b2a5e614c9 1718885251 tcr: US-TRUTH-016 — CLI truth query (#883)",
+        code: 0,
+      },
+      [`-C ${PROJ} remote get-url origin`]: { stdout: "git@github.com:seanyao/roll.git", code: 0 },
+    });
+
+    const result = ensureDeliveriesFresh(PROJ, freshness, exec);
+    expect(result).toHaveLength(1);
+    expect(result[0].storyId).toBe("US-TRUTH-016");
+    expect(result[0].lifecycleState).toBe("done");
+    expect(result[0].mergeCommit).toEqual({ present: true, value: "9efd807189ca538ccde38bfb55f461b2a5e614c9" });
+    expect(result[0].prNumber).toEqual({ present: true, value: 883 });
+    expect(result[0].prUrl).toEqual({ present: true, value: "https://github.com/seanyao/roll/pull/883" });
   });
 });

@@ -19,6 +19,10 @@
 import type { DeliveryRecord, FactOr } from "@roll/spec";
 import { present, absent } from "@roll/spec";
 import type { RunRow } from "../events/bus.js";
+import type { ExecPort } from "./infra-default.js";
+import { RUNS_FILE } from "../events/bus.js";
+import { deliveriesPath } from "./store.js";
+import { join } from "node:path";
 
 // ── Fact types ───────────────────────────────────────────────────────────────
 
@@ -302,4 +306,204 @@ export function rebuildDeliveriesFromFacts(
   }
 
   return result;
+}
+
+// ── Collection helpers (orchestration utilities) ─────────────────────────────
+
+/**
+ * Parse runs.jsonl raw text into {@link RunFact} array.
+ *
+ * Each line is JSON-parsed and passed to {@link extractRunFact}.
+ * Bad JSON / unparseable lines and rows without story+cycle identity
+ * are silently skipped.
+ */
+export function collectRunFacts(runsJsonlText: string): RunFact[] {
+  const facts: RunFact[] = [];
+  for (const line of runsJsonlText.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "") continue;
+    let row: unknown;
+    try {
+      row = JSON.parse(trimmed);
+    } catch {
+      continue; // skip bad JSON silently
+    }
+    if (row === null || typeof row !== "object") continue;
+    const fact = extractRunFact(row as RunRow);
+    if (fact !== null) facts.push(fact);
+  }
+  return facts;
+}
+
+// ── Freshness gate + rebuild orchestration ───────────────────────────────────
+
+/**
+ * Minimal port for mtime + read/write of the two JSONL files.
+ *
+ * Separated from {@link DeliveryStoreInterface} because the freshness gate
+ * needs overwrite semantics (rebuild replaces the cache file) while the
+ * store's append-only contract intentionally does not have a delete/truncate
+ * method — rebuilding is the ONE sanctioned overwrite path.
+ */
+export interface FreshnessPort {
+  /**
+   * Return the file's mtime in epoch milliseconds, or `undefined` when the
+   * file does not exist or the stat fails.
+   */
+  mtimeMs(absPath: string): number | undefined;
+  /**
+   * Read the full file as UTF-8 text.
+   *
+   * @returns The file content, or `""` when the file does not exist.
+   */
+  readText(absPath: string): string;
+  /**
+   * Overwrite (truncate + write) the full file with `text`.
+   *
+   * Creates parent directories and the file itself as needed.
+   */
+  writeText(absPath: string, text: string): void;
+}
+
+/**
+ * Ensure `deliveries.jsonl` is a fresh projection from runs+git facts.
+ *
+ * **AC2**: if deliveries.jsonl is older than runs.jsonl (or missing entirely),
+ * rebuild it deterministically from the two authoritative sources:
+ *   1. `runs.jsonl` rows (intent / `pending_merge` truth)
+ *   2. `git log --first-parent --merges` on main (`done` truth)
+ *
+ * Otherwise the cache is fresh and this is a no-op.
+ *
+ * The caller must provide:
+ *   - `projectRoot` — absolute path to the git working tree
+ *   - `freshness` — mtime + read/write port (typically `node:fs` wrappers)
+ *   - `exec` — for `git log` and `git remote` (typically `nodeExecPort`)
+ *
+ * @returns The (possibly rebuilt) DeliveryRecord array.
+ */
+export function ensureDeliveriesFresh(
+  projectRoot: string,
+  freshness: FreshnessPort,
+  exec: ExecPort,
+): DeliveryRecord[] {
+  const runsPath = join(projectRoot, ".roll", "loop", RUNS_FILE);
+  const delPath = deliveriesPath(projectRoot);
+
+  // ── 1. Freshness check ──────────────────────────────────────────────────
+  const runsMtime = freshness.mtimeMs(runsPath) ?? 0;
+  const delMtime = freshness.mtimeMs(delPath) ?? 0;
+
+  if (delMtime > 0 && delMtime >= runsMtime) {
+    // Cache is fresh — read and return without rebuild.
+    return parseDeliveriesFromText(freshness.readText(delPath));
+  }
+
+  // ── 2. Rebuild from facts ───────────────────────────────────────────────
+  // 2a. Collect run facts
+  const runsText = freshness.readText(runsPath);
+  const runs = collectRunFacts(runsText);
+
+  // 2b. Collect git merge facts from main (the authoritative done source).
+  // Must target `main` explicitly — the worktree may be on a feature branch
+  // whose history does not include the merges we need.
+  //
+  // Two passes:
+  //   (a) `--merges` for GitHub merge-button commits ("Merge pull request #N")
+  //   (b) without `--merges` for squash-merge commits with "(#N)" in subject
+  let merges: MergeFact[] = [];
+  const seenPrs = new Set<number>();
+
+  // Pass (a): standard merge commits
+  const gitLog = exec.run("git", [
+    "-C", projectRoot,
+    "log", "--first-parent", "main", "--merges",
+    "--format=%H %ct %s",
+  ]);
+  if (gitLog.code === 0 && gitLog.stdout !== "") {
+    const parsed = parseMergeCommitMessages(gitLog.stdout.split("\n"));
+    for (const m of parsed) seenPrs.add(m.prNumber);
+    merges.push(...parsed);
+  }
+
+  // Pass (b): squash-merge commits (any commit with "(#N)")
+  const squashLog = exec.run("git", [
+    "-C", projectRoot,
+    "log", "--first-parent", "main",
+    "--format=%H %ct %s",
+  ]);
+  if (squashLog.code === 0 && squashLog.stdout !== "") {
+    for (const line of squashLog.stdout.split("\n")) {
+      if (/\(#\d+\)/.test(line) && !/^Merge pull request #\d+/.test(line)) {
+        const parsed = parseMergeCommitMessages([line]);
+        for (const m of parsed) {
+          if (!seenPrs.has(m.prNumber)) {
+            seenPrs.add(m.prNumber);
+            merges.push(m);
+          }
+        }
+      }
+    }
+  }
+
+  // 2c. Derive repo slug
+  let repoSlug: string | undefined;
+  const remote = exec.run("git", ["-C", projectRoot, "remote", "get-url", "origin"]);
+  if (remote.code === 0 && remote.stdout !== "") {
+    repoSlug = ghRepoSlugFromUrl(remote.stdout);
+  }
+
+  // 2d. Project
+  const records = rebuildDeliveriesFromFacts(runs, merges, repoSlug);
+
+  // 2e. Persist cache
+  const output = records.map((r) => JSON.stringify(r)).join("\n") + "\n";
+  freshness.writeText(delPath, output);
+
+  return records;
+}
+
+/**
+ * Inline slug-from-url parser — mirrors `@roll/infra` `ghRepoSlug` but keeps
+ * the core rebuild module dependency-free (zero infra imports).
+ */
+function ghRepoSlugFromUrl(originUrl: string): string | undefined {
+  let url = originUrl.trim();
+  if (url.startsWith("git@github.com:")) url = url.slice("git@github.com:".length);
+  else if (url.startsWith("ssh://git@github.com/")) url = url.slice("ssh://git@github.com/".length);
+  else if (url.startsWith("https://github.com/")) url = url.slice("https://github.com/".length);
+  else if (url.startsWith("http://github.com/")) url = url.slice("http://github.com/".length);
+  else return undefined;
+  if (url.endsWith(".git")) url = url.slice(0, -".git".length);
+  if (url === "") return undefined;
+  return url;
+}
+
+/**
+ * Parse deliveries.jsonl text into {@link DeliveryRecord}[].
+ *
+ * Same logic as `readDeliveries` read path (last-wins by story+cycle),
+ * but operates on raw text — avoids a round-trip through the store interface
+ * when we already have the text from {@link FreshnessPort.readText}.
+ */
+function parseDeliveriesFromText(text: string): DeliveryRecord[] {
+  const map = new Map<string, DeliveryRecord>();
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "") continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    if (parsed === null || typeof parsed !== "object") continue;
+    const r = parsed as Record<string, unknown>;
+    const storyId = r["storyId"];
+    const cycleId = r["cycleId"];
+    if (typeof storyId !== "string" || typeof cycleId !== "string") continue;
+    const key = `${storyId}\t${cycleId}`;
+    map.set(key, parsed as DeliveryRecord);
+  }
+  return [...map.values()];
 }

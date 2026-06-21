@@ -6,6 +6,10 @@
 
 - **终端交付命令在 headless loop 不再假死、命令 stdout 升格为可过闸证据**：之前带 `deliverable_cmd`（终端命令）的卡在无人值守 launchd loop 中因无 GUI session 无法截图，attest 门判败堵死整条 loop。现在终端 lane 镜像 web lane 的 headless 回退——命令执行成功但无 GUI 时自动把 stdout 文本升格为 `taken:true` 终端证据，attest 门可正常通过，不再依赖 epic 级 `screenshot_exempt` 豁免。修复也拓宽了回退条件：原先只匹配 "no GUI session"，现覆盖所有 headless 跳过（含 "not macOS" 等），条件是命令已成功运行。(FIX-392) `[acceptance-evidence]`
 
+### 稳定性
+
+- **无人值守 loop 上一轮没跑完时不再并发起新轮，不会堆积拖慢机器**：调度脚本生成器加了「在飞守卫」——上一个 cycle 还在跑时，新的 launchd tick 自动让路而不是硬起一轮，根治了「cycle 超过调度间隔→并发堆积→CPU thrash→更慢→更多并发」的死亡螺旋。生成器同时默认设好 headless 截图环境，无人值守 loop 不再弹 macOS 屏幕录制授权框。(FIX-393) `[loop-engine]`
+
 ## v3.621.1 — 2026-06-21
 
 ### 修复

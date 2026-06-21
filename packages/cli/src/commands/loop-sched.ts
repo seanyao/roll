@@ -198,6 +198,21 @@ if [ -f "$GO_LOCK" ]; then
   fi
   rm -f "$GO_LOCK"
 fi
+# Cycle inflight guard (FIX-393) — while the previous scheduled cycle is still
+# running, the next launchd tick yields instead of piling on concurrent cycles.
+# 90-min (5400s) staleness: a crashed/hung cycle self-heals on the next tick.
+CYCLE_LOCK="$RT/cycle-inflight.lock"
+if [ -f "$CYCLE_LOCK" ]; then
+  _cp=""; _ct=""
+  IFS=: read -r _cp _ct < "$CYCLE_LOCK" 2>/dev/null || true
+  _now=$(date -u +%s)
+  if [ -n "$_cp" ] && [ -n "$_ct" ] && kill -0 "$_cp" 2>/dev/null && [ "$((_now - _ct))" -lt 5400 ]; then
+    printf '{"type":"cycle:tick_skipped","reason":"cycle_inflight","heldByPid":%s,"ts":%s}\\n' "$_cp" "$_now" >> "$RT/events.ndjson"
+    echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] cycle inflight lock held by pid $_cp; tick skipped" >> "$LOG"
+    exit 0
+  fi
+  rm -f "$CYCLE_LOCK"
+fi
 ROLL_BIN="\${ROLL_BIN:-${input.rollBin ?? '$(command -v roll || echo /opt/homebrew/bin/roll)'}}"
 # FIX-204E + US-LOOP-047 observation window: every cycle runs inside tmux session
 # roll-loop-${input.slug} (v2's session model around the TS heart): window 0
@@ -216,6 +231,13 @@ if [ -z "$ROLL_TMUX_WRAPPED" ] && [ -z "$ROLL_LOOP_NO_TMUX" ] && command -v "$TM
     exit 0
   fi
 fi
+# Headless capture defaults for unattended loop (FIX-393) — prevents macOS
+# screen recording permission dialogs from blocking the cycle.
+export ROLL_ATTEST_HEADLESS="\${ROLL_ATTEST_HEADLESS:-1}"
+export ROLL_ATTEST_NO_TERMINAL="\${ROLL_ATTEST_NO_TERMINAL:-1}"
+# Acquire the cycle inflight lock so the next launchd tick yields (FIX-393).
+printf '%s:%s\\n' "$$" "$(date -u +%s)" > "$CYCLE_LOCK"
+trap 'rm -f "$CYCLE_LOCK"' EXIT
 # Keep the box awake for the duration of the cycle.
 caffeinate -i -w $$ 2>/dev/null &
 cd "${input.projectPath}" || exit 0

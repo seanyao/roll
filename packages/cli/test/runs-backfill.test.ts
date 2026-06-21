@@ -44,8 +44,8 @@ describe("backfillMergedRuns", () => {
       junk,
     ]);
     const fetchInfo = vi.fn(async (_slug: string, branch: string) => {
-      if (branch === reconcileBranchName("c1")) return { state: "MERGED", mergedAt: "2026-06-11T02:00:00Z", mergeCommit: "aaa" };
-      if (branch === reconcileBranchName("c2")) return { state: "MERGED", mergedAt: "2026-06-11T02:05:00Z", mergeCommit: "bbb" };
+      if (branch === reconcileBranchName("c1")) return { state: "MERGED", mergedAt: "2026-06-11T02:00:00Z", mergeCommit: "aaa", prNumber: 577, prUrl: "https://github.com/o/r/pull/577" };
+      if (branch === reconcileBranchName("c2")) return { state: "MERGED", mergedAt: "2026-06-11T02:05:00Z", mergeCommit: "bbb", prNumber: 578, prUrl: "https://github.com/o/r/pull/578" };
       if (branch === reconcileBranchName("c3")) return { state: "CLOSED", mergedAt: undefined, mergeCommit: undefined };
       return undefined;
     });
@@ -53,9 +53,9 @@ describe("backfillMergedRuns", () => {
     expect(credited.map((c) => c.cycleId).sort()).toEqual(["c1", "c2"]);
     const lines = readFileSync(p, "utf8").trimEnd().split("\n");
     const r1 = JSON.parse(lines[0] ?? "") as Record<string, unknown>;
-    expect(r1).toMatchObject({ status: "merged", outcome: "delivered", merge_commit: "aaa", story_id: "FIX-9" });
+    expect(r1).toMatchObject({ status: "merged", outcome: "delivered", merge_commit: "aaa", story_id: "FIX-9", pr_number: 577, pr_url: "https://github.com/o/r/pull/577" });
     const r2 = JSON.parse(lines[1] ?? "") as Record<string, unknown>;
-    expect(r2).toMatchObject({ status: "merged", merged_at: "2026-06-11T02:05:00Z" });
+    expect(r2).toMatchObject({ status: "merged", merged_at: "2026-06-11T02:05:00Z", pr_number: 578, pr_url: "https://github.com/o/r/pull/578" });
     expect(JSON.parse(lines[2] ?? "") as Record<string, unknown>).toMatchObject({ status: "failed" }); // CLOSED ≠ credit
     expect(lines[3]).toBe(row("c4", "done")); // untouched, byte-verbatim
     expect(lines[4]).toBe(junk); // junk preserved verbatim
@@ -89,5 +89,37 @@ describe("backfillMergedRuns", () => {
     const fetchInfo = vi.fn(async () => undefined);
     await backfillMergedRuns("/unused", p, { slug: "o/r", fetchInfo });
     expect(fetchInfo).not.toHaveBeenCalled();
+  });
+
+  // FIX-389b AC5: PR-lane merge path — the executor published a PR, wrote
+  // pr_number + pr_url to the runs row, but never ran the "done" terminal
+  // (the PR merged via the async PR-lane). The backfill must credit the row
+  // with merge_commit, pr_number, pr_url — all fields the projection needs.
+  it("FIX-389b AC5: backfill credits a published row with merge_commit + pr_number + pr_url (PR-lane merge, executor never ran done)", async () => {
+    const p = tmpRuns([
+      row("c7", "published", { pr_number: 891, pr_url: "https://github.com/o/r/pull/891" }),
+    ]);
+    const fetchInfo = vi.fn(async () => ({
+      state: "MERGED",
+      mergedAt: "2026-06-21T10:00:00Z",
+      mergeCommit: "abc123def",
+      prNumber: 891,
+      prUrl: "https://github.com/o/r/pull/891",
+    }));
+    const credited = await backfillMergedRuns("/unused", p, { slug: "o/r", fetchInfo });
+    expect(credited).toHaveLength(1);
+    const lines = readFileSync(p, "utf8").trimEnd().split("\n");
+    const r = JSON.parse(lines[0] ?? "") as Record<string, unknown>;
+    // All projection-required fields present:
+    expect(r).toMatchObject({
+      status: "merged",
+      outcome: "delivered",
+      merge_commit: "abc123def",
+      pr_number: 891,
+      pr_url: "https://github.com/o/r/pull/891",
+    });
+    // The original pr_number + pr_url from publish are preserved (not clobbered).
+    expect(r["pr_number"]).toBe(891);
+    expect(r["pr_url"]).toBe("https://github.com/o/r/pull/891");
   });
 });

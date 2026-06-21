@@ -74,6 +74,8 @@ export const TRUTH_FIELD_REGISTRY: readonly RegisteredField[] = [
   { field: "cost_usd", surface: "runs", anchor: "usage_cost", writer: RUNNER, kind: "derived-cache", rebuild: "recompute from tokens via the price table (toCycleCost)" },
   { field: "cost_effective_usd", surface: "runs", anchor: "usage_cost", writer: RUNNER, kind: "derived-cache", rebuild: "estimated × (reverts + 1) — toCycleCost" },
   { field: "cost_currency", surface: "runs", anchor: "usage_cost", writer: RUNNER, kind: "derived-cache", rebuild: "resolve from model's price-table currency (currencyFor / cycleCurrency)" },
+  { field: "pr_number", surface: "runs", anchor: "pr_merge", writer: `${RUNNER}; corrected by ${BACKFILL}`, kind: "authoritative" },
+  { field: "pr_url", surface: "runs", anchor: "pr_merge", writer: `${RUNNER}; corrected by ${BACKFILL}`, kind: "authoritative" },
   { field: "merged_at", surface: "runs", anchor: "pr_merge", writer: BACKFILL, kind: "derived-cache", rebuild: REBUILD_BACKFILL },
   { field: "merge_commit", surface: "runs", anchor: "pr_merge", writer: BACKFILL, kind: "derived-cache", rebuild: REBUILD_BACKFILL },
 

@@ -61,7 +61,8 @@ export interface ReconcileRunRow {
 }
 
 /** Real PR merge evidence for one cycle branch (what `gh pr view` reports). The
- *  adapter fetches this; core consumes it as data. */
+ *  adapter fetches this; core consumes it as data.
+ *  FIX-389b: extended with prNumber + prUrl for the projection engine. */
 export interface MergeEvidence {
   /** PR state — only `MERGED` credits the row (mirrors the oracle's gate). */
   state: "MERGED" | "CLOSED" | "OPEN" | "UNKNOWN" | string;
@@ -69,6 +70,10 @@ export interface MergeEvidence {
   mergedAt?: string;
   /** Merge-commit oid (`mergeCommit.oid`); stamped when MERGED. */
   mergeCommit?: string;
+  /** PR number (integer). Stamped as `pr_number` on the credited row. */
+  prNumber?: number;
+  /** PR URL. Stamped as `pr_url` on the credited row. */
+  prUrl?: string;
 }
 
 /** Statuses the merge-evidence backfill probes (FIX-243/244): the v2 "built"
@@ -81,11 +86,14 @@ export function reconcileBranchName(cycleId: string): string {
   return `loop/cycle-${cycleId}`;
 }
 
-/** One row the reconcile credited from `built` → `merged`. */
+/** One row the reconcile credited from `built` → `merged`.
+ *  FIX-389b: carries prNumber + prUrl for the projection engine. */
 export interface CreditedRun {
   cycleId: string;
   mergedAt: string;
   mergeCommit: string;
+  prNumber?: number;
+  prUrl?: string;
 }
 
 /** Outcome of {@link reconcileMergeEvidence}: rewritten rows + the audit list. */
@@ -139,10 +147,22 @@ export function reconcileMergeEvidence(
     }
     const mergedAt = ev.mergedAt ?? "";
     const mergeCommit = ev.mergeCommit ?? "";
-    // v3 extension over the oracle's jq: also correct `outcome` — a credited
-    // row IS a delivery; leaving outcome=failed would keep dashboards lying.
-    out.push({ ...row, status: "merged", outcome: "delivered", merged_at: mergedAt, merge_commit: mergeCommit });
-    credited.push({ cycleId, mergedAt, mergeCommit });
+    // FIX-389b: stamp pr_number + pr_url onto the credited row so the
+    // projection engine (FIX-389a) can rebuild deliveries from runs alone.
+    const creditedRow: ReconcileRunRow = {
+      ...row,
+      status: "merged",
+      outcome: "delivered",
+      merged_at: mergedAt,
+      merge_commit: mergeCommit,
+    };
+    if (ev.prNumber !== undefined) creditedRow["pr_number"] = ev.prNumber;
+    if (ev.prUrl !== undefined) creditedRow["pr_url"] = ev.prUrl;
+    out.push(creditedRow);
+    const cr: CreditedRun = { cycleId, mergedAt, mergeCommit };
+    if (ev.prNumber !== undefined) cr.prNumber = ev.prNumber;
+    if (ev.prUrl !== undefined) cr.prUrl = ev.prUrl;
+    credited.push(cr);
   }
   return { rows: out, credited };
 }

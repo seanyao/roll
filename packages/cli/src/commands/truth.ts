@@ -1,20 +1,25 @@
 /**
- * US-TRUTH-016 AC4 — `roll truth query <storyId>`: the one CLI entry point for
- * deterministic delivery-truth queries.
+ * FIX-389a / US-TRUTH-016 AC4 — `roll truth query <storyId>`: the one CLI
+ * entry point for deterministic delivery-truth queries.
  *
- * Reads the append-only deliveries.jsonl (US-TRUTH-014), runs the pure
- * queryStoryDelivery selector (US-TRUTH-016 AC1-3), and prints the structured
- * verdict. Zero markdown parse — the truth is derived from structured records.
+ * Before reading deliveries.jsonl, calls `ensureDeliveriesFresh` (from core)
+ * so the projection engine rebuilds the cache from runs+git facts when stale.
+ * This means deleting deliveries.jsonl and re-running produces the same
+ * result — the cache is never authoritative (AC2).
  *
  * Usage:
  *   roll truth query <storyId>       — human-readable, locale-resolved
  *   roll truth query <storyId> --json — machine-readable JSON
  */
+import { statSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import { resolveLang } from "@roll/spec";
 import {
   queryStoryDelivery,
-  readDeliveries,
   nodeDeliveryStore,
+  nodeExecPort,
+  ensureDeliveriesFresh,
+  type FreshnessPort,
   type StoryDeliveryTruth,
 } from "@roll/core";
 
@@ -39,6 +44,30 @@ function formatTruth(t: StoryDeliveryTruth, lang: "en" | "zh"): string {
   }
   return `${lines.join("\n")}\n`;
 }
+
+// ── Node-backed FreshnessPort ────────────────────────────────────────────────
+
+/** Node `fs`-backed {@link FreshnessPort} for production use. */
+const nodeFreshnessPort: FreshnessPort = {
+  mtimeMs(absPath: string): number | undefined {
+    try {
+      return statSync(absPath).mtimeMs;
+    } catch {
+      return undefined;
+    }
+  },
+  readText(absPath: string): string {
+    try {
+      return readFileSync(absPath, "utf8");
+    } catch {
+      return "";
+    }
+  },
+  writeText(absPath: string, text: string): void {
+    mkdirSync(dirname(absPath), { recursive: true });
+    writeFileSync(absPath, text, "utf8");
+  },
+};
 
 export function truthCommand(args: string[]): number {
   const lang = resolveLang({
@@ -76,7 +105,10 @@ export function truthCommand(args: string[]): number {
     return 1;
   }
 
-  const deliveries = readDeliveries(nodeDeliveryStore, process.cwd());
+  // FIX-389a AC2: ensure the deliveries cache is fresh (project from runs+git)
+  // before querying. Delete deliveries.jsonl + re-run → same result.
+  const cwd = process.cwd();
+  const deliveries = ensureDeliveriesFresh(cwd, nodeFreshnessPort, nodeExecPort);
   const truth = queryStoryDelivery(storyId, deliveries);
 
   if (json) {

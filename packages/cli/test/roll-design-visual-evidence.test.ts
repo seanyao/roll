@@ -20,6 +20,7 @@ import {
   declaresDeliverableCmd,
   declaresDeliverableUrl,
   hasVisualEvidenceAc,
+  parseDeliverableCmdsFromSpec,
   validateStoryVisualEvidence,
   visualExemptionReason,
   visualSurface,
@@ -353,6 +354,161 @@ deliverable_url: .roll/features/index.html
         expect(declaresDeliverableCmd("---\ndeliverable_cmd:\n---\n")).toBe(false);
         expect(declaresDeliverableCmd("---\ndeliverable_cmd:\nother: x\n---\n")).toBe(false);
         expect(declaresDeliverableCmd("no frontmatter")).toBe(false);
+      });
+    });
+
+    describe("parseDeliverableCmdsFromSpec helper", () => {
+      it("returns the scalar command as a single-element array", () => {
+        expect(parseDeliverableCmdsFromSpec("---\ndeliverable_cmd: roll status\n---\n")).toEqual(["roll status"]);
+      });
+      it("returns block-list items", () => {
+        expect(parseDeliverableCmdsFromSpec("---\ndeliverable_cmd:\n  - roll status\n  - roll cycles\n---\n")).toEqual(["roll status", "roll cycles"]);
+      });
+      it("returns empty array when absent / empty", () => {
+        expect(parseDeliverableCmdsFromSpec("no frontmatter")).toEqual([]);
+        expect(parseDeliverableCmdsFromSpec("---\ndeliverable_cmd:\n---\n")).toEqual([]);
+      });
+    });
+  });
+
+  describe("FIX-383 — validate uses attest's allowedDeliverableCmd whitelist", () => {
+    describe("AC1/AC2 — rejected commands fail validate", () => {
+      it("rejects a state-changing roll subcommand (loop watch) that attest would also reject", () => {
+        const spec = `---
+deliverable_cmd: roll loop watch
+---
+## FIX-800 Demo 📋
+
+**AC:**
+- [ ] CLI screenshot of \`roll loop watch\` output
+`;
+        const v = validateStoryVisualEvidence(spec);
+        expect(v.ok).toBe(false);
+        expect(v.code).toBe("deliverable-cmd-rejected");
+        expect(v.rejectedDeliverableCmds).toEqual(["roll loop watch"]);
+      });
+
+      it("rejects roll release as state-changing", () => {
+        const spec = `---
+deliverable_cmd: roll release
+---
+## FIX-801 Demo 📋
+
+**AC:**
+- [ ] CLI screenshot of \`roll release\` output
+`;
+        const v = validateStoryVisualEvidence(spec);
+        expect(v.ok).toBe(false);
+        expect(v.code).toBe("deliverable-cmd-rejected");
+        expect(v.rejectedDeliverableCmds).toEqual(["roll release"]);
+      });
+
+      it("rejects shell metacharacters in the command", () => {
+        const spec = `---
+deliverable_cmd: roll status; rm x
+---
+## FIX-802 Demo 📋
+
+**AC:**
+- [ ] CLI screenshot
+`;
+        const v = validateStoryVisualEvidence(spec);
+        expect(v.ok).toBe(false);
+        expect(v.code).toBe("deliverable-cmd-rejected");
+      });
+
+      it("passes a legal read-only roll command like roll ls", () => {
+        const spec = `---
+deliverable_cmd: roll ls
+---
+## FIX-803 Demo 📋
+
+**AC:**
+- [ ] CLI screenshot of \`roll ls\` output
+`;
+        const v = validateStoryVisualEvidence(spec);
+        expect(v.ok).toBe(true);
+        expect(v.code).toBeUndefined();
+      });
+
+      it("rejects if ANY command in a block-list is invalid", () => {
+        const spec = `---
+deliverable_cmd:
+  - roll status
+  - roll loop watch
+  - roll cycles
+---
+## FIX-804 Demo 📋
+
+**AC:**
+- [ ] CLI screenshot of the output
+`;
+        const v = validateStoryVisualEvidence(spec);
+        expect(v.ok).toBe(false);
+        expect(v.code).toBe("deliverable-cmd-rejected");
+        expect(v.rejectedDeliverableCmds).toEqual(["roll loop watch"]);
+      });
+    });
+
+    describe("AC3/AC5 — streaming command hint", () => {
+      it("detects a streaming watch command in the rejected list and adds a hint", () => {
+        const spec = `---
+deliverable_cmd: roll loop watch
+---
+## FIX-805 Demo 📋
+
+**AC:**
+- [ ] CLI screenshot
+`;
+        const v = validateStoryVisualEvidence(spec);
+        expect(v.ok).toBe(false);
+        expect(v.streamingDeliverableCmds).toEqual(["roll loop watch"]);
+        expect(v.reason).toMatch(/流式|streaming|watch/);
+      });
+
+      it("does not falsely flag non-streaming rejected commands as streaming", () => {
+        const spec = `---
+deliverable_cmd: roll release
+---
+## FIX-806 Demo 📋
+
+**AC:**
+- [ ] CLI screenshot
+`;
+        const v = validateStoryVisualEvidence(spec);
+        expect(v.ok).toBe(false);
+        expect(v.streamingDeliverableCmds?.length ?? 0).toBe(0);
+      });
+    });
+
+    describe("AC4 — regression: existing legal deliverable_cmd cards still pass", () => {
+      it("a card with a legal deliverable_cmd + visual-evidence AC still validates green", () => {
+        const spec = `---
+deliverable_cmd: roll status --fmt a,b
+---
+## FIX-701 CLI demo 📋
+
+**AC:**
+- [ ] [visual-evidence] the new status summary renders
+`;
+        const v = validateStoryVisualEvidence(spec);
+        expect(v.ok).toBe(true);
+        expect(v.surface).toBe("terminal");
+      });
+
+      it("a card with a legal deliverable_cmd block-list still validates green", () => {
+        const spec = `---
+deliverable_cmd:
+  - roll status
+  - roll cycles
+---
+## FIX-702 CLI demo list 📋
+
+**AC:**
+- [ ] [visual-evidence] the commands render the new output
+`;
+        const v = validateStoryVisualEvidence(spec);
+        expect(v.ok).toBe(true);
       });
     });
   });

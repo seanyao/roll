@@ -140,6 +140,7 @@ describe("US-GOAL-002 — roll loop go", () => {
     const p = project();
     let calls = 0;
     let externalToolChecks = 0;
+    let chromiumPreinstalls = 0;
     const deps: LoopGoDeps = {
       identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
       pid: () => 12345,
@@ -149,6 +150,11 @@ describe("US-GOAL-002 — roll loop go", () => {
       startTmux: () => false,
       externalTools: () => {
         externalToolChecks += 1;
+      },
+      // FIX-394 AC2 is stubbed here so the test never triggers a real
+      // `npx playwright install` (a 5-minute subprocess) on the loop path.
+      preinstallChromium: () => {
+        chromiumPreinstalls += 1;
       },
       runOnce: async ({ projectPath }) => {
         calls += 1;
@@ -174,6 +180,7 @@ describe("US-GOAL-002 — roll loop go", () => {
 
     expect(r.code).toBe(0);
     expect(externalToolChecks).toBe(1);
+    expect(chromiumPreinstalls).toBe(1);
     expect(calls).toBe(2);
     expect(existsSync(join(p, ".roll", "loop", "go.lock"))).toBe(false);
     const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));

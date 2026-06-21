@@ -183,9 +183,12 @@ describe("FIX-394 chromium pre-install and availability", () => {
   });
 
   it("silentPreinstallChromium returns boolean and does not throw", () => {
-    // Best-effort: may install or skip; must never throw.
-    expect(() => silentPreinstallChromium()).not.toThrow();
-    expect(typeof silentPreinstallChromium()).toBe("boolean");
+    // Best-effort: may install or skip; must never throw. Pass NO_BROWSER so a
+    // chromium-absent host (e.g. CI) short-circuits instead of triggering a
+    // real multi-minute `npx playwright install` that would hang the suite.
+    const env = { ...process.env, ROLL_ATTEST_NO_BROWSER: "1" };
+    expect(() => silentPreinstallChromium(env)).not.toThrow();
+    expect(typeof silentPreinstallChromium(env)).toBe("boolean");
   });
 
   it("silentPreinstallChromium returns true when chromium already cached (even with NO_BROWSER=1)", () => {

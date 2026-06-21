@@ -479,19 +479,86 @@ export interface FreshnessPort {
 }
 
 /**
+ * Sidecar filename (next to `deliveries.jsonl`) holding the `origin/main` SHA
+ * the cache was last rebuilt from (FIX-905).
+ *
+ * Kept as a separate, single-line file so the deliveries.jsonl parser never
+ * has to skip a meta row — its line-by-line JSON contract is untouched.
+ */
+const DELIVERIES_HEAD_FILE = "deliveries.head";
+
+/** Absolute path to the `deliveries.head` sidecar for a project root. */
+function deliveriesHeadPath(projectRoot: string): string {
+  return join(projectRoot, ".roll", "loop", DELIVERIES_HEAD_FILE);
+}
+
+/**
+ * Resolve the authoritative `main` ref + its current SHA (FIX-905).
+ *
+ * The authoritative main is the **remote** `origin/main` — the PR lane merges
+ * there, and a loop cycle's preflight fetches origin/main and resets its
+ * worktree to it, but **never updates the local `main` branch ref**. Reading
+ * local `main` therefore lags behind and makes rebuild miss cards that just
+ * merged on origin/main (the FIX-905 false-`failed` / re-pick bug).
+ *
+ * Resolution order:
+ *   1. `git rev-parse --verify origin/main` — preferred. Returns `origin/main`
+ *      + the SHA so the caller can gate on remote-head changes.
+ *   2. fallback `git rev-parse --verify main` — offline / no-remote / fixture.
+ *      Returns `main` + (best-effort) its SHA.
+ *
+ * @returns `{ ref, sha }` — `ref` is always usable in `git log`; `sha` is the
+ *   resolved commit (or `undefined` if even the fallback rev-parse failed, in
+ *   which case `ref` is still returned so `git log` can try it).
+ */
+function resolveMainRef(
+  projectRoot: string,
+  exec: ExecPort,
+): { ref: string; sha: string | undefined } {
+  const originRev = exec.run("git", [
+    "-C", projectRoot, "rev-parse", "--verify", "--quiet", "origin/main",
+  ]);
+  if (originRev.code === 0 && originRev.stdout !== "") {
+    return { ref: "origin/main", sha: originRev.stdout.trim() };
+  }
+
+  // Fallback: local main (offline, no remote, or test fixtures).
+  const localRev = exec.run("git", [
+    "-C", projectRoot, "rev-parse", "--verify", "--quiet", "main",
+  ]);
+  const sha = localRev.code === 0 && localRev.stdout !== ""
+    ? localRev.stdout.trim()
+    : undefined;
+  return { ref: "main", sha };
+}
+
+/**
  * Ensure `deliveries.jsonl` is a fresh projection from runs+git facts.
  *
- * **AC2**: if deliveries.jsonl is older than runs.jsonl (or missing entirely),
- * rebuild it deterministically from the two authoritative sources:
+ * Rebuilds the cache deterministically from the two authoritative sources when
+ * it is stale:
  *   1. `runs.jsonl` rows (intent / `pending_merge` truth)
- *   2. `git log --first-parent --merges` on main (`done` truth)
+ *   2. `git log --first-parent <main-ref>` (`done` truth)
  *
- * Otherwise the cache is fresh and this is a no-op.
+ * **Authoritative ref (FIX-905)**: `<main-ref>` is `origin/main` whenever it
+ * resolves — the remote is where PRs actually merge, and a loop cycle keeps it
+ * fresh via preflight fetch while leaving the local `main` branch ref stale.
+ * Reading local `main` made rebuild miss just-merged cards (false `failed` →
+ * the picker re-selected a card that already shipped). Falls back to local
+ * `main` when there is no remote / it is unreachable / in test fixtures.
+ *
+ * **Staleness gate (AC2 + FIX-905)** — rebuild when ANY of:
+ *   - `deliveries.jsonl` is missing, OR
+ *   - it is older than `runs.jsonl` (mtime), OR
+ *   - the recorded `origin/main` SHA (sidecar `deliveries.head`) differs from
+ *     the current `origin/main` SHA. A remote merge does NOT touch runs.jsonl's
+ *     mtime, so the mtime gate alone would keep serving a stale cache; the SHA
+ *     gate catches that.
  *
  * The caller must provide:
  *   - `projectRoot` — absolute path to the git working tree
  *   - `freshness` — mtime + read/write port (typically `node:fs` wrappers)
- *   - `exec` — for `git log` and `git remote` (typically `nodeExecPort`)
+ *   - `exec` — for `git fetch`/`rev-parse`/`log` and `git remote`
  *
  * @returns The (possibly rebuilt) DeliveryRecord array.
  */
@@ -502,35 +569,52 @@ export function ensureDeliveriesFresh(
 ): DeliveryRecord[] {
   const runsPath = join(projectRoot, ".roll", "loop", RUNS_FILE);
   const delPath = deliveriesPath(projectRoot);
+  const headPath = deliveriesHeadPath(projectRoot);
 
-  // ── 1. Freshness check ──────────────────────────────────────────────────
+  // ── 1. Best-effort refresh the remote ref (FIX-905) ──────────────────────
+  // Cheap, non-fatal: a failure (offline / no remote / no creds) just leaves
+  // the existing origin/main baseline in place, and resolveMainRef will fall
+  // back to local `main` if origin/main never existed. We do NOT reset the
+  // worktree — that is the loop preflight's job; here we only need the ref.
+  exec.run("git", ["-C", projectRoot, "fetch", "origin", "main", "--quiet"]);
+
+  // ── 2. Resolve the authoritative main ref + its current SHA ──────────────
+  const { ref: mainRef, sha: mainSha } = resolveMainRef(projectRoot, exec);
+
+  // ── 3. Staleness gate ────────────────────────────────────────────────────
   const runsMtime = freshness.mtimeMs(runsPath) ?? 0;
   const delMtime = freshness.mtimeMs(delPath) ?? 0;
+  const recordedSha = freshness.readText(headPath).trim();
+  // SHA gate fires only when we have a current SHA AND it disagrees with what
+  // the cache was built from. (Unknown current SHA → don't force a rebuild on
+  // that account; mtime gate still applies.)
+  const shaStale = mainSha !== undefined && recordedSha !== "" && recordedSha !== mainSha;
 
-  if (delMtime > 0 && delMtime >= runsMtime) {
+  if (delMtime > 0 && delMtime >= runsMtime && !shaStale) {
     // Cache is fresh — read and return without rebuild.
     return parseDeliveriesFromText(freshness.readText(delPath));
   }
 
-  // ── 2. Rebuild from facts ───────────────────────────────────────────────
-  // 2a. Collect run facts
+  // ── 4. Rebuild from facts ───────────────────────────────────────────────
+  // 4a. Collect run facts
   const runsText = freshness.readText(runsPath);
   const runs = collectRunFacts(runsText);
 
-  // 2b. Collect git merge facts from main (the authoritative done source).
-  // Must target `main` explicitly — the worktree may be on a feature branch
-  // whose history does not include the merges we need.
+  // 4b. Collect git merge facts from the authoritative main ref (`done` truth).
+  // `mainRef` is origin/main when it resolves (see resolveMainRef), else local
+  // `main`. The worktree may be on a feature branch whose history does not
+  // include the merges we need, so we target the ref explicitly.
   //
   // Two passes:
   //   (a) `--merges` for GitHub merge-button commits ("Merge pull request #N")
   //   (b) without `--merges` for squash-merge commits with "(#N)" in subject
-  let merges: MergeFact[] = [];
+  const merges: MergeFact[] = [];
   const seenPrs = new Set<number>();
 
   // Pass (a): standard merge commits
   const gitLog = exec.run("git", [
     "-C", projectRoot,
-    "log", "--first-parent", "main", "--merges",
+    "log", "--first-parent", mainRef, "--merges",
     "--format=%H %ct %s",
   ]);
   if (gitLog.code === 0 && gitLog.stdout !== "") {
@@ -542,7 +626,7 @@ export function ensureDeliveriesFresh(
   // Pass (b): squash-merge commits (any commit with "(#N)")
   const squashLog = exec.run("git", [
     "-C", projectRoot,
-    "log", "--first-parent", "main",
+    "log", "--first-parent", mainRef,
     "--format=%H %ct %s",
   ]);
   if (squashLog.code === 0 && squashLog.stdout !== "") {
@@ -559,19 +643,22 @@ export function ensureDeliveriesFresh(
     }
   }
 
-  // 2c. Derive repo slug
+  // 4c. Derive repo slug
   let repoSlug: string | undefined;
   const remote = exec.run("git", ["-C", projectRoot, "remote", "get-url", "origin"]);
   if (remote.code === 0 && remote.stdout !== "") {
     repoSlug = ghRepoSlugFromUrl(remote.stdout);
   }
 
-  // 2d. Project
+  // 4d. Project
   const records = rebuildDeliveriesFromFacts(runs, merges, repoSlug);
 
-  // 2e. Persist cache
+  // 4e. Persist cache + the SHA it was built from (FIX-905 staleness gate).
   const output = records.map((r) => JSON.stringify(r)).join("\n") + "\n";
   freshness.writeText(delPath, output);
+  if (mainSha !== undefined) {
+    freshness.writeText(headPath, mainSha + "\n");
+  }
 
   return records;
 }

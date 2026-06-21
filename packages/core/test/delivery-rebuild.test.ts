@@ -1031,3 +1031,144 @@ describe("ensureDeliveriesFresh", () => {
     expect(result[0].prUrl).toEqual({ present: true, value: "https://github.com/seanyao/roll/pull/883" });
   });
 });
+
+// ── FIX-905: rebuild reads origin/main (authoritative remote) ────────────────
+
+describe("ensureDeliveriesFresh — FIX-905: origin/main is authoritative", () => {
+  const PROJ = "/fake/project";
+  const RUNS = `${PROJ}/.roll/loop/runs.jsonl`;
+  const DEL = `${PROJ}/.roll/loop/deliveries.jsonl`;
+  const HEAD = `${PROJ}/.roll/loop/deliveries.head`;
+
+  const ORIGIN_SHA = "cfaaa3300000000000000000000000000000abcd";
+  const LOCAL_SHA = "f8156ed0000000000000000000000000000f00ba";
+
+  it("reads merges from origin/main when it resolves (local main lags)", () => {
+    // The bug scenario: a card merged on origin/main but local `main` is stale
+    // and does NOT contain the merge. rebuild must read origin/main and see done.
+    const freshness = fakeFreshnessPort({
+      [RUNS]: { text: [
+        JSON.stringify({ story_id: "FIX-903", cycle_id: "c1", status: "built", outcome: "published_pending_merge", pr_number: 898, ts: "2026-06-21T10:00:00Z" }),
+      ].join("\n"), mtime: 2000 },
+    });
+    const exec = fakeExecPort({
+      // origin/main resolves → it is the authoritative ref
+      [`-C ${PROJ} rev-parse --verify --quiet origin/main`]: { stdout: ORIGIN_SHA, code: 0 },
+      // origin/main's log carries the merge for FIX-903 / PR #898
+      [`-C ${PROJ} log --first-parent origin/main --merges --format=%H %ct %s`]: {
+        stdout: "cfaaa33 1718885251 Merge pull request #898 from branch/fix-903",
+        code: 0,
+      },
+      [`-C ${PROJ} log --first-parent origin/main --format=%H %ct %s`]: { stdout: "", code: 0 },
+      // local main log would be EMPTY (lags) — must NOT be consulted for the verdict
+      [`-C ${PROJ} log --first-parent main --merges --format=%H %ct %s`]: { stdout: "", code: 0 },
+      [`-C ${PROJ} log --first-parent main --format=%H %ct %s`]: { stdout: "", code: 0 },
+      [`-C ${PROJ} remote get-url origin`]: { stdout: "git@github.com:seanyao/roll.git", code: 0 },
+    });
+
+    const result = ensureDeliveriesFresh(PROJ, freshness, exec);
+    expect(result).toHaveLength(1);
+    expect(result[0].storyId).toBe("FIX-903");
+    expect(result[0].lifecycleState).toBe("done");
+    expect(result[0].prNumber).toEqual({ present: true, value: 898 });
+    // The rebuilt origin/main SHA is recorded in the sidecar.
+    expect(freshness._files.get(HEAD)?.text.trim()).toBe(ORIGIN_SHA);
+  });
+
+  it("SHA gate forces rebuild when origin/main advanced even if mtimes look fresh", () => {
+    // deliveries.jsonl is NEWER than runs.jsonl (mtime gate alone → fresh),
+    // but origin/main advanced past the recorded SHA → must rebuild and see done.
+    const freshness = fakeFreshnessPort({
+      [RUNS]: { text: [
+        JSON.stringify({ story_id: "FIX-903", cycle_id: "c1", status: "built", outcome: "published_pending_merge", pr_number: 898, ts: "2026-06-21T10:00:00Z" }),
+      ].join("\n"), mtime: 1000 },
+      // Stale cache says FIX-903 is still in-flight…
+      [DEL]: { text: JSON.stringify({ storyId: "FIX-903", cycleId: "c1", lifecycleState: "pending_merge", recordedAt: 2000 }), mtime: 5000 },
+      // …and was built from an OLDER origin/main SHA.
+      [HEAD]: { text: LOCAL_SHA + "\n", mtime: 5000 },
+    });
+    const exec = fakeExecPort({
+      [`-C ${PROJ} rev-parse --verify --quiet origin/main`]: { stdout: ORIGIN_SHA, code: 0 },
+      [`-C ${PROJ} log --first-parent origin/main --merges --format=%H %ct %s`]: {
+        stdout: "cfaaa33 1718885251 Merge pull request #898 from branch/fix-903",
+        code: 0,
+      },
+      [`-C ${PROJ} log --first-parent origin/main --format=%H %ct %s`]: { stdout: "", code: 0 },
+      [`-C ${PROJ} remote get-url origin`]: { stdout: "git@github.com:seanyao/roll.git", code: 0 },
+    });
+
+    const result = ensureDeliveriesFresh(PROJ, freshness, exec);
+    expect(result).toHaveLength(1);
+    expect(result[0].lifecycleState).toBe("done");
+    // Sidecar now records the current origin/main SHA.
+    expect(freshness._files.get(HEAD)?.text.trim()).toBe(ORIGIN_SHA);
+  });
+
+  it("does NOT rebuild when origin/main SHA is unchanged and cache is mtime-fresh", () => {
+    const freshness = fakeFreshnessPort({
+      [RUNS]: { text: JSON.stringify({ story_id: "FIX-903", cycle_id: "c1", status: "built", outcome: "published_pending_merge", ts: "2026-06-21T10:00:00Z" }), mtime: 1000 },
+      [DEL]: { text: JSON.stringify({ storyId: "FIX-903", cycleId: "c1", lifecycleState: "done", recordedAt: 2000 }), mtime: 5000 },
+      [HEAD]: { text: ORIGIN_SHA + "\n", mtime: 5000 },
+    });
+    // Any git log call would throw the assertion off — only rev-parse + fetch run.
+    const exec = fakeExecPort({
+      [`-C ${PROJ} rev-parse --verify --quiet origin/main`]: { stdout: ORIGIN_SHA, code: 0 },
+    });
+
+    const result = ensureDeliveriesFresh(PROJ, freshness, exec);
+    // Served from cache untouched (lifecycleState stays the cached "done").
+    expect(result).toHaveLength(1);
+    expect(result[0].storyId).toBe("FIX-903");
+    expect(result[0].lifecycleState).toBe("done");
+  });
+
+  it("falls back to local main when origin/main does not resolve (offline / no remote)", () => {
+    // rev-parse origin/main FAILS → resolveMainRef falls back to local `main`,
+    // local main log is consulted, and nothing crashes. No sidecar is written
+    // (we still have local main's SHA though, so it IS recorded).
+    const freshness = fakeFreshnessPort({
+      [RUNS]: { text: [
+        JSON.stringify({ story_id: "US-OFFLINE", cycle_id: "c1", status: "built", outcome: "published_pending_merge", pr_number: 50, ts: "2026-06-21T10:00:00Z" }),
+      ].join("\n"), mtime: 2000 },
+    });
+    const exec = fakeExecPort({
+      // origin/main rev-parse fails (no remote ref locally)
+      [`-C ${PROJ} rev-parse --verify --quiet origin/main`]: { stdout: "", code: 128 },
+      // local main rev-parse succeeds
+      [`-C ${PROJ} rev-parse --verify --quiet main`]: { stdout: LOCAL_SHA, code: 0 },
+      // local main log carries the merge
+      [`-C ${PROJ} log --first-parent main --merges --format=%H %ct %s`]: {
+        stdout: "f8156ed 1718885251 Merge pull request #50 from branch/x",
+        code: 0,
+      },
+      [`-C ${PROJ} log --first-parent main --format=%H %ct %s`]: { stdout: "", code: 0 },
+      [`-C ${PROJ} remote get-url origin`]: { stdout: "git@github.com:seanyao/roll.git", code: 0 },
+    });
+
+    const result = ensureDeliveriesFresh(PROJ, freshness, exec);
+    expect(result).toHaveLength(1);
+    expect(result[0].storyId).toBe("US-OFFLINE");
+    expect(result[0].lifecycleState).toBe("done");
+    expect(result[0].prNumber).toEqual({ present: true, value: 50 });
+    // Local main SHA recorded in sidecar (best-effort).
+    expect(freshness._files.get(HEAD)?.text.trim()).toBe(LOCAL_SHA);
+  });
+
+  it("does not crash when BOTH origin/main and local main fail to resolve", () => {
+    // Fully detached fixture: no refs resolve, all git fails. Rebuild from runs
+    // alone, no sidecar written, no throw.
+    const freshness = fakeFreshnessPort({
+      [RUNS]: { text: [
+        JSON.stringify({ story_id: "US-NOREF", cycle_id: "c1", status: "built", outcome: "failed", ts: "2026-06-21T10:00:00Z" }),
+      ].join("\n"), mtime: 2000 },
+    });
+    const exec = fakeExecPort(); // everything returns code 128
+
+    const result = ensureDeliveriesFresh(PROJ, freshness, exec);
+    expect(result).toHaveLength(1);
+    expect(result[0].storyId).toBe("US-NOREF");
+    expect(result[0].lifecycleState).toBe("failed");
+    // No SHA available → no sidecar written.
+    expect(freshness._files.has(HEAD)).toBe(false);
+  });
+});

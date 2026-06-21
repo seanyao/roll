@@ -1,4 +1,4 @@
-import { EventBus, parseBacklog, type AuditPrEvidence, type StoryTruth } from "@roll/core";
+import { EventBus, parseBacklog, type AuditPrEvidence, type StoryDeliveryTruth, type StoryTruth } from "@roll/core";
 import {
   GOAL_REVIEW_MODES,
   GOAL_SCHEMA_VERSION,
@@ -818,14 +818,42 @@ function updateProgressFromRows(
  * the merge truth does NOT yet confirm delivered. A MERGED PR is delivery, not
  * in-flight, so it is excluded here (it counts via `truth.delivered`).
  */
-export function isCardInFlight(backlogStatus: string, prEvidence: AuditPrEvidence | undefined): boolean {
+/**
+ * US-TRUTH-017: isCardInFlight now accepts structured delivery truth as the
+ * preferred input. When {@link deliveryTruth} is present, the lifecycleState
+ * field ("in_flight" | "ci_red") replaces the deprecated /PR#\d+/ regex parse
+ * of the backlog status string.
+ *
+ * Two-step migration (AC3):
+ *   1. Add deliveryTruth param — structured path primary, regex fallback kept.
+ *   2. Future: remove regex fallback after all callers pass deliveryTruth.
+ */
+export function isCardInFlight(
+  backlogStatus: string,
+  prEvidence: AuditPrEvidence | undefined,
+  deliveryTruth?: StoryDeliveryTruth,
+): boolean {
+  // US-TRUTH-017 (codex review): structured `done` is authoritative — it must
+  // win over potentially-stale OPEN PR evidence, so a delivered card is never
+  // kept in-flight by a lagging probe.
+  if (deliveryTruth?.lifecycleState === "done") return false;
   if (prEvidence !== undefined) {
     const state = prEvidence.state.toUpperCase();
     if (state === "MERGED") return false; // a merge is delivery, not in-flight
     if (state === "OPEN") return true;
   }
-  // No (or non-OPEN) PR evidence: a `PR#N` annotation still means a PR was opened
-  // for this card — in-flight pending its merge.
+  // US-TRUTH-017: prefer structured delivery truth for in-flight detection.
+  if (deliveryTruth !== undefined) {
+    // in_flight/ci_red is "handed to the PR lane" ONLY with a real PR number; a
+    // lifecycle in those states but with no prNumber is a half-written/abnormal
+    // state, not in-flight (codex review — don't skip the picker on it).
+    if (deliveryTruth.lifecycleState === "in_flight" || deliveryTruth.lifecycleState === "ci_red") {
+      return deliveryTruth.prNumber !== undefined;
+    }
+    return false; // todo / failed / other → not in-flight
+  }
+  // Deprecated fallback (AC3): regex parse of backlog status string.
+  // Kept for legacy rows that predate the structured delivery store.
   return /PR#\d+/.test(backlogStatus);
 }
 

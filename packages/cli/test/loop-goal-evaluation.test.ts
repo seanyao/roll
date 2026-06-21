@@ -4,7 +4,7 @@
  * cards, while `completion` still waits for EVERY scoped card to really merge.
  */
 import { describe, expect, it } from "vitest";
-import type { AuditPrEvidence } from "@roll/core";
+import type { AuditPrEvidence, StoryDeliveryTruth } from "@roll/core";
 import { goalEvaluationFromTruth, isCardInFlight } from "../src/commands/loop-go.js";
 import { storyTruthFromBacklog } from "../src/lib/truth-adapter.js";
 
@@ -12,6 +12,18 @@ const NOW = Math.floor(Date.parse("2026-06-13T00:00:00Z") / 1000);
 
 function truth(id: string, status: string, pr?: AuditPrEvidence) {
   return storyTruthFromBacklog(id, status, { ...(pr !== undefined ? { prEvidence: pr } : {}), nowSec: NOW });
+}
+
+function dt(overrides: Partial<StoryDeliveryTruth> = {}): StoryDeliveryTruth {
+  return {
+    storyId: "US-TEST",
+    lifecycleState: "in_flight",
+    delivered: false,
+    prNumber: 42,
+    lastRecordedAt: Date.now(),
+    deliveringCycles: ["C-A"],
+    ...overrides,
+  };
 }
 
 describe("FIX-337 (AC5) — isCardInFlight", () => {
@@ -31,6 +43,63 @@ describe("FIX-337 (AC5) — isCardInFlight", () => {
   it("no PR opened → not in-flight", () => {
     expect(isCardInFlight("📋 Todo", undefined)).toBe(false);
     expect(isCardInFlight("🚫 Hold", undefined)).toBe(false);
+  });
+});
+
+describe("US-TRUTH-017 AC2 — isCardInFlight with structured deliveryTruth", () => {
+  it("deliveryTruth in_flight → true (picker skips, AC4)", () => {
+    expect(isCardInFlight("📋 Todo", undefined, dt({ lifecycleState: "in_flight" }))).toBe(true);
+  });
+
+  it("deliveryTruth ci_red → true (also in-flight, CI-red sub-state)", () => {
+    expect(isCardInFlight("📋 Todo", undefined, dt({ lifecycleState: "ci_red" }))).toBe(true);
+  });
+
+  it("deliveryTruth done → false (delivered card, not in-flight)", () => {
+    expect(isCardInFlight("✅ Done", undefined, dt({ lifecycleState: "done", delivered: true, prNumber: 10 }))).toBe(false);
+  });
+
+  it("deliveryTruth done + stale OPEN prEvidence → false (structured done wins over a lagging PR probe — codex review)", () => {
+    expect(
+      isCardInFlight("🔨 In Progress · PR#42", { state: "OPEN" }, dt({ lifecycleState: "done", prNumber: 10 })),
+    ).toBe(false);
+  });
+
+  it("deliveryTruth in_flight but no prNumber → false (half-written state, not handed to the PR lane — codex review)", () => {
+    expect(isCardInFlight("🔨 In Progress", undefined, dt({ lifecycleState: "in_flight", prNumber: undefined }))).toBe(false);
+  });
+
+  it("deliveryTruth todo → false (never picked up)", () => {
+    expect(isCardInFlight("📋 Todo", undefined, dt({ lifecycleState: "todo", prNumber: undefined }))).toBe(false);
+  });
+
+  it("deliveryTruth building → false (in progress locally, not in-flight with PR)", () => {
+    expect(isCardInFlight("🔨 In Progress", undefined, dt({ lifecycleState: "building", prNumber: undefined }))).toBe(false);
+  });
+
+  it("deliveryTruth in_flight + prEvidence MERGED → false (merge is delivery, not in-flight, AC2)", () => {
+    // PR evidence showing MERGED takes priority over deliveryTruth lifecycle
+    expect(
+      isCardInFlight("✅ Done", { state: "MERGED", mergedAtSec: NOW - 60 }, dt({ lifecycleState: "in_flight" })),
+    ).toBe(false);
+  });
+
+  it("deliveryTruth in_flight + prEvidence OPEN → true (PR open confirms in-flight)", () => {
+    expect(
+      isCardInFlight("🔨 In Progress", { state: "OPEN" }, dt({ lifecycleState: "in_flight" })),
+    ).toBe(true);
+  });
+
+  it("AC4 — no consumer reads backlog PR# regex when deliveryTruth present (string ignored)", () => {
+    // A backlogStatus with "PR#99" but deliveryTruth says "todo" → NOT in-flight.
+    // The /PR#\d+/ regex is NEVER consulted when deliveryTruth is present.
+    expect(isCardInFlight("📋 Todo · PR#99", undefined, dt({ lifecycleState: "todo", prNumber: undefined }))).toBe(false);
+  });
+
+  it("no deliveryTruth → falls back to regex (deprecated path, backward compat)", () => {
+    // Legacy: when deliveryTruth is absent, the old regex path still works.
+    expect(isCardInFlight("🔨 In Progress · PR#42", undefined)).toBe(true);
+    expect(isCardInFlight("📋 Todo", undefined)).toBe(false);
   });
 });
 

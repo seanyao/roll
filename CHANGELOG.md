@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### 新功能
+
+- `roll truth audit` — 一眼看出哪些卡 backlog 声明和实际交付状态不一致 `[loop]`
+  <!-- evidence: .roll/features/feedback-truth-alignment/FIX-390/20260622-044647-7927/FIX-390-report.html -->
+
 ### 修复
 
 - **chromium/playwright 依赖加固——钉版本、init 预装、离线优雅提示**：之前三处用 `playwright@latest`（未钉版本），`latest` 可能拉到新版导致浏览器版本漂移、偶发截图失败；chromium 在第一次需要截图的 cycle 当场下载（~100-200MB），网抖则该 cycle 截图失败。现在 `screenshot.ts` 和 `browser.ts` 统一使用钉定版本 `playwright@1.52.0`，缓存命中一致不重装；`roll init` 和 loop 首启时静默预装 chromium（已缓存秒返、失败不阻塞）；离线/网络错误时 skip 消息区分「headless Chromium unavailable (offline or network error)」；Tools 页 browser tool 可用性联动 chromium 安装状态。(FIX-394) `[acceptance-evidence]`

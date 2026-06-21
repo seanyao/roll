@@ -339,7 +339,7 @@ describe("failure branches", () => {
     expect(kinds.slice(-3)).toEqual(["cleanup_worktree", "emit_event", "append_run"]);
   });
 
-  it("FIX-252: local-main drift fails loud, leaves worktree, and writes an alert", () => {
+  it("FIX-252: local-main drift fails loud, saves rescue ref, leaves worktree, and writes an alert", () => {
     const { state, kinds, commands } = walk([
       { type: "start", ctx: CTX },
       { type: "preflight_done" },
@@ -351,7 +351,12 @@ describe("failure branches", () => {
     ]);
     expect(state.terminal).toBe("failed");
     expect(kinds).not.toContain("cleanup_worktree");
-    expect(kinds.slice(-3)).toEqual(["append_alert", "emit_event", "append_run"]);
+    // FIX-903: rescue_leaked saves commits before alert + terminal
+    expect(kinds.slice(-4)).toEqual(["rescue_leaked", "append_alert", "emit_event", "append_run"]);
+    expect(commands.find((c) => c.kind === "rescue_leaked")).toMatchObject({
+      kind: "rescue_leaked",
+      cycleId: CTX.cycleId,
+    });
     expect(commands.find((c) => c.kind === "append_alert")).toMatchObject({
       message: expect.stringContaining("local main is ahead of origin/main"),
     });

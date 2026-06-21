@@ -273,6 +273,8 @@ function describeCommand(cmd: CycleCommand): string {
       return `merge_back           → git.push(${cmd.branch}) ff fallback`;
     case "push_orphan":
       return `push_orphan          → git.push(${cmd.branch}) audit safety net`;
+    case "rescue_leaked":
+      return `rescue_leaked        → git.rescueLeaked(rescue/leaked-${cmd.cycleId})`;
     case "wait_merge":
       return `wait_merge           → github.prState(${cmd.branch}) poll`;
     case "reconcile":

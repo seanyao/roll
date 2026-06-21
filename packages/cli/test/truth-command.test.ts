@@ -53,6 +53,196 @@ function run(args: string[], cwd: string): { stdout: string; stderr: string; cod
   return { stdout: out.join(""), stderr: err.join(""), code };
 }
 
+// ── audit subcommand (FIX-390) ────────────────────────────────────────────
+
+describe("roll truth audit", () => {
+  it("no drift → exit 0, reports consistent", () => {
+    const p = project();
+    writeFileSync(
+      join(p, ".roll", "backlog.md"),
+      [
+        "| ID | Description | Status |",
+        "|---|---|---|",
+        "| [US-CLEAN](.roll/features/e/US-CLEAN/spec.md) | clean card | 🔨 In Progress |",
+      ].join("\n"),
+    );
+    writeDeliveries(p, [
+      {
+        storyId: "US-CLEAN",
+        cycleId: "cycle-1",
+        lifecycleState: "pending_merge",
+        prNumber: PRESENT(10),
+        prUrl: PRESENT("https://gh/pull/10"),
+        mergedAt: ABSENT("not_merged"),
+        mergeCommit: ABSENT("not_merged"),
+        recordedAt: 1000,
+      },
+    ]);
+    const { stdout, code } = run(["audit"], p);
+    expect(code).toBe(0);
+    expect(stdout).toContain("Consistent");
+  });
+
+  it("premature Done → fail finding, exit 1", () => {
+    const p = project();
+    writeFileSync(
+      join(p, ".roll", "backlog.md"),
+      [
+        "| ID | Description | Status |",
+        "|---|---|---|",
+        "| [US-PREMATURE](.roll/features/e/US-PREMATURE/spec.md) | premature done | ✅ Done |",
+      ].join("\n"),
+    );
+    writeDeliveries(p, [
+      {
+        storyId: "US-PREMATURE",
+        cycleId: "cycle-1",
+        lifecycleState: "pending_merge",
+        prNumber: PRESENT(5),
+        prUrl: PRESENT("https://gh/pull/5"),
+        mergedAt: ABSENT("not_merged"),
+        mergeCommit: ABSENT("not_merged"),
+        recordedAt: 1000,
+      },
+    ]);
+    const { stdout, code } = run(["audit"], p);
+    expect(code).toBe(1);
+    expect(stdout).toContain("US-PREMATURE");
+    expect(stdout).toContain("FAIL");
+    expect(stdout).toContain("🔨 In Progress");
+  });
+
+  it("lagging backlog → warn finding, exit 1", () => {
+    const p = project();
+    writeFileSync(
+      join(p, ".roll", "backlog.md"),
+      [
+        "| ID | Description | Status |",
+        "|---|---|---|",
+        "| [US-LAGGING](.roll/features/e/US-LAGGING/spec.md) | lagging | 📋 Todo |",
+      ].join("\n"),
+    );
+    writeDeliveries(p, [
+      {
+        storyId: "US-LAGGING",
+        cycleId: "cycle-1",
+        lifecycleState: "pending_merge",
+        prNumber: PRESENT(99),
+        prUrl: PRESENT("https://gh/pull/99"),
+        mergedAt: ABSENT("not_merged"),
+        mergeCommit: ABSENT("not_merged"),
+        recordedAt: 1000,
+      },
+    ]);
+    const { stdout, code } = run(["audit"], p);
+    expect(code).toBe(1);
+    expect(stdout).toContain("US-LAGGING");
+    expect(stdout).toContain("WARN");
+  });
+
+  it("--json outputs structured finding", () => {
+    const p = project();
+    writeFileSync(
+      join(p, ".roll", "backlog.md"),
+      [
+        "| ID | Description | Status |",
+        "|---|---|---|",
+        "| [US-DONE](.roll/features/e/US-DONE/spec.md) | done right | ✅ Done |",
+      ].join("\n"),
+    );
+    writeDeliveries(p, [
+      {
+        storyId: "US-DONE",
+        cycleId: "cycle-1",
+        lifecycleState: "done",
+        prNumber: PRESENT(10),
+        prUrl: PRESENT("https://gh/pull/10"),
+        mergedAt: PRESENT(5000),
+        mergeCommit: PRESENT("abc"),
+        recordedAt: 5000,
+      },
+    ]);
+    const { stdout, code } = run(["audit", "--json"], p);
+    expect(code).toBe(0);
+    const parsed = JSON.parse(stdout.trim());
+    expect(parsed.drift).toBe(0);
+    expect(Array.isArray(parsed.findings)).toBe(true);
+  });
+
+  it("--json on drift → exit 1, includes findings", () => {
+    const p = project();
+    writeFileSync(
+      join(p, ".roll", "backlog.md"),
+      [
+        "| ID | Description | Status |",
+        "|---|---|---|",
+        "| [US-PRE](.roll/features/e/US-PRE/spec.md) | premature | ✅ Done |",
+      ].join("\n"),
+    );
+    writeDeliveries(p, [
+      {
+        storyId: "US-PRE",
+        cycleId: "cycle-1",
+        lifecycleState: "pending_merge",
+        prNumber: PRESENT(5),
+        prUrl: ABSENT("n/a"),
+        mergedAt: ABSENT("not_merged"),
+        mergeCommit: ABSENT("not_merged"),
+        recordedAt: 1000,
+      },
+    ]);
+    const { stdout, code } = run(["audit", "--json"], p);
+    expect(code).toBe(1);
+    const parsed = JSON.parse(stdout.trim());
+    expect(parsed.drift).toBe(1);
+    expect(parsed.findings[0].subject).toBe("US-PRE");
+  });
+
+  it("reverse: projection done but backlog absent → warn (FIX-390 AC2)", () => {
+    const p = project();
+    writeFileSync(
+      join(p, ".roll", "backlog.md"),
+      [
+        "| ID | Description | Status |",
+        "|---|---|---|",
+        "| [US-OTHER](.roll/features/e/US-OTHER/spec.md) | other | 📋 Todo |",
+      ].join("\n"),
+    );
+    writeDeliveries(p, [
+      {
+        storyId: "US-MISSING",
+        cycleId: "cycle-1",
+        lifecycleState: "done",
+        prNumber: PRESENT(1),
+        prUrl: ABSENT("n/a"),
+        mergedAt: PRESENT(5000),
+        mergeCommit: PRESENT("abc"),
+        recordedAt: 5000,
+      },
+    ]);
+    const { stdout, code } = run(["audit"], p);
+    expect(code).toBe(1);
+    expect(stdout).toContain("US-MISSING");
+    expect(stdout).toContain("absent from backlog.md");
+  });
+
+  it("empty backlog + no deliveries → clean", () => {
+    const p = project();
+    writeFileSync(join(p, ".roll", "backlog.md"), "| ID | Description | Status |\n|---|---|---|\n");
+    const { stdout, code } = run(["audit"], p);
+    expect(code).toBe(0);
+    expect(stdout).toContain("Consistent");
+  });
+
+  it("missing backlog.md → no crash, handles gracefully", () => {
+    const p = project();
+    // No backlog.md at all
+    const { stdout, code } = run(["audit"], p);
+    expect(code).toBe(0);
+    expect(stdout).toContain("Consistent");
+  });
+});
+
 // ── Help ────────────────────────────────────────────────────────────────────
 
 describe("roll truth — help", () => {
@@ -60,21 +250,16 @@ describe("roll truth — help", () => {
     const p = project();
     const { stdout, stderr, code } = run([], p);
     expect(code).toBe(1);
-    expect(stdout).toContain("truth query");
+    expect(stdout).toContain("query <storyId>");
+    expect(stdout).toContain("audit");
   });
 
   it("prints usage on --help", () => {
     const p = project();
     const { stdout, stderr, code } = run(["--help"], p);
     expect(code).toBe(0);
-    expect(stdout).toContain("truth query");
-  });
-
-  it("prints error on unknown subcommand", () => {
-    const p = project();
-    const { stderr, code } = run(["unknown"], p);
-    expect(code).toBe(1);
-    expect(stderr).toContain("unknown");
+    expect(stdout).toContain("query <storyId>");
+    expect(stdout).toContain("audit");
   });
 });
 

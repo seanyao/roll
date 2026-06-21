@@ -11,22 +11,30 @@
  *   roll truth query <storyId>       — human-readable, locale-resolved
  *   roll truth query <storyId> --json — machine-readable JSON
  */
-import { statSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { statSync, readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { resolveLang } from "@roll/spec";
 import {
   queryStoryDelivery,
   nodeDeliveryStore,
   nodeExecPort,
   ensureDeliveriesFresh,
+  runConsistencyAudit,
+  parseBacklog,
+  emptyAuditSnapshot,
   type FreshnessPort,
   type StoryDeliveryTruth,
+  type AuditFinding,
 } from "@roll/core";
+import { TERMINAL_SCHEMA_EPOCH_SEC } from "../lib/consistency-audit.js";
 
 export const TRUTH_USAGE =
-  "Usage: roll truth query <storyId>\n" +
-  "  Deterministic delivery-truth query (structured, zero markdown parse).\n" +
-  "结构化交付真相查询（确定性，不解析 markdown）。";
+  "Usage: roll truth <command>\n" +
+  "  query <storyId>  Deterministic delivery-truth query (structured, zero markdown parse).\n" +
+  "  audit            Bidirectional drift audit: backlog Done ↔ projection truth.\n" +
+  "命令:\n" +
+  "  query <storyId>  结构化交付真相查询（确定性，不解析 markdown）\n" +
+  "  audit            双向漂移审计：backlog Done ↔ 投影真相";
 
 function formatTruth(t: StoryDeliveryTruth, lang: "en" | "zh"): string {
   const lines: string[] = [];
@@ -69,6 +77,93 @@ const nodeFreshnessPort: FreshnessPort = {
   },
 };
 
+// ── `roll truth audit` — bidirectional drift audit (FIX-390) ─────────────
+
+function truthAuditCommand(args: string[], lang: "en" | "zh"): number {
+  const json = args.includes("--json");
+  const cwd = process.cwd();
+  const nowSec = Math.floor(Date.now() / 1000);
+
+  // Read backlog
+  const backlogPath = join(cwd, ".roll", "backlog.md");
+  const backlogRows: Array<{ id: string; status: string }> = existsSync(backlogPath)
+    ? parseBacklog(readFileSync(backlogPath, "utf8")).map((r) => ({ id: r.id, status: r.status }))
+    : [];
+
+  // Load deliveries (ensure fresh projection)
+  const deliveries = ensureDeliveriesFresh(cwd, nodeFreshnessPort, nodeExecPort);
+
+  // Build snapshot — only feedback sources needed for claim-drift (FIX-390)
+  const snapshot = emptyAuditSnapshot(nowSec, TERMINAL_SCHEMA_EPOCH_SEC);
+  snapshot.backlog = backlogRows;
+  snapshot.deliveries = deliveries;
+
+  // Single verdict function (FIX-390 AC3): same as roll release consistency audit
+  const report = runConsistencyAudit(snapshot);
+
+  // Isolate claim-drift findings (the only rule this light snapshot exercises)
+  const driftFindings = report.findings.filter((f) => f.rule === "claim-drift");
+
+  if (json) {
+    process.stdout.write(
+      JSON.stringify(
+        {
+          drift: driftFindings.length,
+          findings: driftFindings,
+          summary: report.summary,
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+    return driftFindings.length > 0 ? 1 : 0;
+  }
+
+  // No drift → clean
+  if (driftFindings.length === 0) {
+    process.stdout.write(
+      lang === "zh"
+        ? "✅ 一致 — backlog 与投影一致。\n"
+        : "✅ Consistent — backlog matches projection.\n",
+    );
+    process.stdout.write(
+      lang === "zh"
+        ? `审计: 失败 ${report.summary.fail} · 警告 ${report.summary.warn} · 未知 ${report.summary.unknown} · 历史豁免 ${report.summary.grandfathered}\n`
+        : `Audit: fail ${report.summary.fail} · warn ${report.summary.warn} · unknown ${report.summary.unknown} · grandfathered ${report.summary.grandfathered}\n`,
+    );
+    return 0;
+  }
+
+  // Drift found → report each card
+  const failCount = driftFindings.filter((f) => f.severity === "fail").length;
+  const warnCount = driftFindings.filter((f) => f.severity === "warn").length;
+
+  process.stdout.write(
+    lang === "zh"
+      ? `⚠ 漂移发现 — ${driftFindings.length} 卡不一致（失败 ${failCount} · 警告 ${warnCount}）\n\n`
+      : `⚠ Drift detected — ${driftFindings.length} card(s) inconsistent (fail ${failCount} · warn ${warnCount})\n\n`,
+  );
+
+  for (const f of driftFindings) {
+    const label =
+      f.severity === "fail"
+        ? lang === "zh" ? "✗ 失败" : "✗ FAIL"
+        : lang === "zh" ? "⚠ 警告" : "⚠ WARN";
+    process.stdout.write(`  ${label}  ${f.subject}\n`);
+    // Indent the already bilingual detail from the rule
+    process.stdout.write(`    ${f.detail}\n\n`);
+  }
+
+  process.stdout.write(
+    lang === "zh"
+      ? `审计: 失败 ${report.summary.fail} · 警告 ${report.summary.warn} · 未知 ${report.summary.unknown} · 历史豁免 ${report.summary.grandfathered}\n`
+      : `Audit: fail ${report.summary.fail} · warn ${report.summary.warn} · unknown ${report.summary.unknown} · grandfathered ${report.summary.grandfathered}\n`,
+  );
+
+  // FIX-390 AC5: non-zero exit on drift
+  return 1;
+}
+
 export function truthCommand(args: string[]): number {
   const lang = resolveLang({
     rollLang: process.env["ROLL_LANG"],
@@ -83,11 +178,15 @@ export function truthCommand(args: string[]): number {
     return sub === undefined ? 1 : 0;
   }
 
+  if (sub === "audit") {
+    return truthAuditCommand(args.slice(1), lang);
+  }
+
   if (sub !== "query") {
     process.stderr.write(
       lang === "zh"
-        ? `[roll] 未知 truth 子命令: ${sub}（试试 roll truth query <storyId>）\n`
-        : `[roll] unknown truth subcommand: ${sub} (try roll truth query <storyId>)\n`,
+        ? `[roll] 未知 truth 子命令: ${sub}（试试 roll truth query <storyId> 或 roll truth audit）\n`
+        : `[roll] unknown truth subcommand: ${sub} (try roll truth query <storyId> or roll truth audit)\n`,
     );
     return 1;
   }

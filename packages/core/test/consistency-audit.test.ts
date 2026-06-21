@@ -407,6 +407,94 @@ describe("rule claim-drift — backlog status vs structured delivery truth", () 
     expect(warnSubjects).toContain("US-B");
   });
 
+  it("reverse: projection done but backlog Todo → warn (FIX-390 AC2)", () => {
+    const r = runConsistencyAudit(
+      snap({
+        backlog: [{ id: "US-REVERSE", status: "📋 Todo" }],
+        deliveries: [
+          deliveryRecord({
+            storyId: "US-REVERSE",
+            lifecycleState: "done",
+            prNumber: present(1),
+            mergedAt: present(2000),
+            mergeCommit: present("abc"),
+            recordedAt: 5000,
+          }),
+        ],
+      }),
+    );
+    // Forward loop already catches this (Todo vs Done mismatch) —
+    // the reverse lane should NOT double-report it.
+    const drift = r.findings.filter((f) => f.rule === "claim-drift" && f.subject === "US-REVERSE");
+    expect(drift).toHaveLength(1);
+    expect(drift[0]!.severity).toBe("warn");
+    expect(drift[0]!.detail).toContain("📋 Todo");
+    expect(drift[0]!.detail).toContain("✅ Done");
+  });
+
+  it("reverse: projection done but story absent from backlog → warn (FIX-390 AC2)", () => {
+    const r = runConsistencyAudit(
+      snap({
+        backlog: [{ id: "US-OTHER", status: "📋 Todo" }],
+        deliveries: [
+          deliveryRecord({
+            storyId: "US-MISSING",
+            lifecycleState: "done",
+            prNumber: present(1),
+            mergedAt: present(2000),
+            mergeCommit: present("abc"),
+            recordedAt: 5000,
+          }),
+        ],
+      }),
+    );
+    const drift = r.findings.filter((f) => f.rule === "claim-drift" && f.subject === "US-MISSING");
+    expect(drift).toHaveLength(1);
+    expect(drift[0]!.severity).toBe("warn");
+    expect(drift[0]!.detail).toContain("absent from backlog");
+  });
+
+  it("reverse: projection done but backlog shows non-Done → warn (FIX-390 AC2)", () => {
+    const r = runConsistencyAudit(
+      snap({
+        backlog: [{ id: "US-STILL-WIP", status: "🔨 In Progress" }],
+        deliveries: [
+          deliveryRecord({
+            storyId: "US-STILL-WIP",
+            lifecycleState: "done",
+            prNumber: present(1),
+            mergedAt: present(2000),
+            mergeCommit: present("abc"),
+            recordedAt: 5000,
+          }),
+        ],
+      }),
+    );
+    // Forward catches this (In Progress vs Done mismatch), reverse skips.
+    const drift = r.findings.filter((f) => f.rule === "claim-drift" && f.subject === "US-STILL-WIP");
+    expect(drift).toHaveLength(1);
+    expect(drift[0]!.severity).toBe("warn");
+  });
+
+  it("reverse: projection done + backlog Done → no finding (both agree)", () => {
+    const r = runConsistencyAudit(
+      snap({
+        backlog: [{ id: "US-BOTH", status: "✅ Done" }],
+        deliveries: [
+          deliveryRecord({
+            storyId: "US-BOTH",
+            lifecycleState: "done",
+            prNumber: present(1),
+            mergedAt: present(2000),
+            mergeCommit: present("abc"),
+            recordedAt: 5000,
+          }),
+        ],
+      }),
+    );
+    expect(r.findings.filter((f) => f.rule === "claim-drift")).toHaveLength(0);
+  });
+
   it("backlog Done with annotation suffix still matches truth Done (normalization)", () => {
     const r = runConsistencyAudit(
       snap({

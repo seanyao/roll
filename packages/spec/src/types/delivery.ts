@@ -35,7 +35,7 @@ import type { FactOr } from "./terminal.js";
 export const LIFECYCLE_STATES = [
   "todo",
   "building",
-  "in_flight",
+  "pending_merge",
   "ci_red",
   "blocked",
   "on_hold",
@@ -116,17 +116,17 @@ export function lifecycleFromFacts(
   // ── In-flight cluster ──────────────────────────────────────────────
   // published_pending_merge + PR open → in_flight (the classic case)
   if (terminalOutcome === "published_pending_merge") {
-    if (prState === "open") return "in_flight";
+    if (prState === "open") return "pending_merge";
     if (prState === "open_ci_red") return "ci_red";
     // PR closed without merge → abandoned (work was pushed, PR got closed)
     if (prState === "closed") return "abandoned";
     // PR unknown → still in_flight (we published, assume PR is open)
-    return "in_flight";
+    return "pending_merge";
   }
 
   // delivered (already merged or will be) — if not merged yet, it's in_flight
   if (terminalOutcome === "delivered") {
-    if (prState === "open") return "in_flight";
+    if (prState === "open") return "pending_merge";
     if (prState === "open_ci_red") return "ci_red";
     return "done"; // prState === "merged" handled above; fallback for backfilled
   }
@@ -141,7 +141,7 @@ export function lifecycleFromFacts(
   // ── Aborted cluster ────────────────────────────────────────────────
   if (terminalOutcome === "aborted_no_delivery") return "failed";
   if (terminalOutcome === "aborted_with_delivery") {
-    if (prState === "open") return "in_flight";
+    if (prState === "open") return "pending_merge";
     if (prState === "open_ci_red") return "ci_red";
     return "failed";
   }

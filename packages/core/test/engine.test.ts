@@ -94,6 +94,51 @@ describe("reconcileMergeEvidence — built ≠ merged (I4)", () => {
     expect(res.rows).toEqual(rows);
     expect(res.credited).toHaveLength(0);
   });
+
+  // FIX-389b: prNumber + prUrl stamped onto credited rows for the projection engine.
+  it("FIX-389b: stamps pr_number + pr_url on credited rows when MergeEvidence carries them", () => {
+    const rows: ReconcileRunRow[] = [{ status: "built", cycle_id: "c1" }];
+    const res = reconcileMergeEvidence(
+      rows,
+      lookup({
+        [reconcileBranchName("c1")]: {
+          state: "MERGED",
+          mergedAt: "2026-06-21T00:00:00Z",
+          mergeCommit: "abc123",
+          prNumber: 891,
+          prUrl: "https://github.com/o/r/pull/891",
+        },
+      }),
+    );
+    expect(res.rows[0]).toMatchObject({
+      status: "merged",
+      outcome: "delivered",
+      pr_number: 891,
+      pr_url: "https://github.com/o/r/pull/891",
+    });
+    expect(res.credited).toEqual([{
+      cycleId: "c1",
+      mergedAt: "2026-06-21T00:00:00Z",
+      mergeCommit: "abc123",
+      prNumber: 891,
+      prUrl: "https://github.com/o/r/pull/891",
+    }]);
+  });
+
+  it("FIX-389b: omits pr_number + pr_url from credited rows when MergeEvidence lacks them (backward compat)", () => {
+    const rows: ReconcileRunRow[] = [{ status: "built", cycle_id: "c2" }];
+    const res = reconcileMergeEvidence(
+      rows,
+      lookup({
+        [reconcileBranchName("c2")]: { state: "MERGED", mergedAt: "2026-01-01T00:00:00Z", mergeCommit: "def" },
+      }),
+    );
+    expect(res.rows[0]).toMatchObject({ status: "merged", merged_at: "2026-01-01T00:00:00Z" });
+    expect(res.rows[0]).not.toHaveProperty("pr_number");
+    expect(res.rows[0]).not.toHaveProperty("pr_url");
+    expect(res.credited[0]).toMatchObject({ cycleId: "c2" });
+    expect(res.credited[0]).not.toHaveProperty("prNumber");
+  });
 });
 
 describe("cycleEndForPick — latest pick → its cycle_end", () => {

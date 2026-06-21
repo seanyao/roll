@@ -1688,17 +1688,18 @@ export async function executeCommand(
       if (r.status === 0 && r.prUrl !== "" && !cmd.docOnly && ctx.storyId !== undefined) {
         mountExecutionAtPublish(ports.repoCwd, ctx.storyId, r.prUrl);
       }
-      // US-TRUTH-015 AC1: force-write DeliveryRecord on successful publish.
-      // The authoritative write path — every publish produces exactly one
-      // in_flight record with prNumber/prUrl. If prNumber is unparseable,
-      // record it as absent with an explicit reason (no half-record).
+      // US-TRUTH-015 AC1 + FIX-389b: write DeliveryRecord on successful publish.
+      // This is now an OPTIONAL CACHE WARM — the correctness path is runs+git
+      // projection (FIX-389a). The DeliveryRecord here is immediately available
+      // for readers that haven't switched to the projection yet. When FIX-389a
+      // is fully adopted, this block can become a no-op or be removed.
       if (r.status === 0 && r.prUrl !== "" && ctx.storyId !== undefined && ctx.cycleId !== undefined) {
         const parsedNumber = prNumberFromUrl(r.prUrl);
         try {
           appendDelivery(nodeDeliveryStore, ports.repoCwd, {
             storyId: ctx.storyId,
             cycleId: ctx.cycleId,
-            lifecycleState: "in_flight",
+            lifecycleState: "pending_merge",
             prNumber: parsedNumber !== undefined
               ? present(Number(parsedNumber))
               : absent("not_recorded"),
@@ -2096,6 +2097,14 @@ export function buildRunRow(
     // an unknown marker instead of a misleading "$0.00 · 0/0". model + duration
     // above are still present (failure ≠ empty record).
     row["usage_unknown"] = true;
+  }
+  // FIX-389b: write pr_number + pr_url onto the runs row from the publish
+  // context so the projection engine (FIX-389a) can rebuild deliveries from
+  // runs alone, without depending on appendDelivery correctness.
+  if (ctx.prUrl !== undefined && ctx.prUrl !== "") {
+    row["pr_url"] = ctx.prUrl;
+    const parsed = prNumberFromUrl(ctx.prUrl);
+    if (parsed !== undefined) row["pr_number"] = Number(parsed);
   }
   return row;
 }

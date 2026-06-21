@@ -96,7 +96,7 @@ describe("roll truth query — human-readable", () => {
       {
         storyId: "US-INF",
         cycleId: "cycle-001",
-        lifecycleState: "in_flight",
+        lifecycleState: "pending_merge",
         prNumber: PRESENT(42),
         prUrl: PRESENT("https://gh/pull/42"),
         mergedAt: ABSENT("not_merged"),
@@ -106,7 +106,7 @@ describe("roll truth query — human-readable", () => {
     ]);
     const { stdout, code } = run(["query", "US-INF"], p);
     expect(code).toBe(0);
-    expect(stdout).toContain("lifecycleState: in_flight");
+    expect(stdout).toContain("lifecycleState: pending_merge");
     expect(stdout).toContain("prNumber: 42");
     expect(stdout).toContain("prUrl: https://gh/pull/42");
     expect(stdout).toContain("delivered: false");
@@ -165,7 +165,7 @@ describe("roll truth query --json", () => {
       {
         storyId: "US-JSON",
         cycleId: "cycle-json",
-        lifecycleState: "in_flight",
+        lifecycleState: "pending_merge",
         prNumber: PRESENT(77),
         prUrl: PRESENT("https://gh/pull/77"),
         mergedAt: ABSENT("not_merged"),
@@ -177,7 +177,7 @@ describe("roll truth query --json", () => {
     expect(code).toBe(0);
     const parsed = JSON.parse(stdout.trim());
     expect(parsed.storyId).toBe("US-JSON");
-    expect(parsed.lifecycleState).toBe("in_flight");
+    expect(parsed.lifecycleState).toBe("pending_merge");
     expect(parsed.delivered).toBe(false);
     expect(parsed.prNumber).toBe(77);
     expect(parsed.prUrl).toBe("https://gh/pull/77");
@@ -211,7 +211,7 @@ describe("roll truth query — edge cases", () => {
       [
         // Valid record — different cycleId so both survive readDeliveries dedup
         JSON.stringify({
-          storyId: "US-A", cycleId: "c1", lifecycleState: "in_flight",
+          storyId: "US-A", cycleId: "c1", lifecycleState: "pending_merge",
           prNumber: PRESENT(1), prUrl: ABSENT("n/a"), mergedAt: ABSENT("n/a"),
           mergeCommit: ABSENT("n/a"), recordedAt: 100,
         }) + "\n",

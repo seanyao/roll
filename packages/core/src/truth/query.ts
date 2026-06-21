@@ -97,10 +97,10 @@ export function queryStoryDelivery(
   const deliveringCycles = [...new Set(records.map((r) => r.cycleId))].sort();
 
   // 4. Extract PR facts from the most informative record:
-  //    - Prefer a "done" record (has merge details) over "in_flight" over others.
+  //    - Prefer a "done" record (has merge details) over "pending_merge" over others.
   //    - Within the same lifecycleState, prefer the most recent.
   const doneRecord = records.filter((r) => r.lifecycleState === "done").at(-1);
-  const inFlightRecord = records.filter((r) => r.lifecycleState === "in_flight" || r.lifecycleState === "ci_red").at(-1);
+  const inFlightRecord = records.filter((r) => r.lifecycleState === "pending_merge" || r.lifecycleState === "ci_red").at(-1);
   const bestRecord = doneRecord ?? inFlightRecord ?? latest;
 
   let prNumber: number | undefined;
@@ -110,13 +110,13 @@ export function queryStoryDelivery(
 
   if (bestRecord.prNumber.present) {
     prNumber = bestRecord.prNumber.value;
-  } else if (bestRecord.lifecycleState === "in_flight" || bestRecord.lifecycleState === "done") {
+  } else if (bestRecord.lifecycleState === "pending_merge" || bestRecord.lifecycleState === "done") {
     missingReason = `pr_number_${bestRecord.prNumber.reason}`;
   }
 
   if (bestRecord.prUrl.present) {
     prUrl = bestRecord.prUrl.value;
-  } else if (bestRecord.lifecycleState === "in_flight" || bestRecord.lifecycleState === "done") {
+  } else if (bestRecord.lifecycleState === "pending_merge" || bestRecord.lifecycleState === "done") {
     if (missingReason === undefined) missingReason = `pr_url_${bestRecord.prUrl.reason}`;
   }
 
@@ -167,7 +167,7 @@ export function deriveBacklogStatus(truth: StoryDeliveryTruth): string {
       return "📋 Todo";
     case "building":
       return "🔨 In Progress";
-    case "in_flight":
+    case "pending_merge":
     case "ci_red": {
       const suffix = truth.prNumber !== undefined ? ` · PR#${truth.prNumber}` : "";
       return `🔨 In Progress${suffix}`;

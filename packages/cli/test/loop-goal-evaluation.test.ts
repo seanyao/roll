@@ -17,7 +17,7 @@ function truth(id: string, status: string, pr?: AuditPrEvidence) {
 function dt(overrides: Partial<StoryDeliveryTruth> = {}): StoryDeliveryTruth {
   return {
     storyId: "US-TEST",
-    lifecycleState: "in_flight",
+    lifecycleState: "pending_merge",
     delivered: false,
     prNumber: 42,
     lastRecordedAt: Date.now(),
@@ -48,7 +48,7 @@ describe("FIX-337 (AC5) — isCardInFlight", () => {
 
 describe("US-TRUTH-017 AC2 — isCardInFlight with structured deliveryTruth", () => {
   it("deliveryTruth in_flight → true (picker skips, AC4)", () => {
-    expect(isCardInFlight("📋 Todo", undefined, dt({ lifecycleState: "in_flight" }))).toBe(true);
+    expect(isCardInFlight("📋 Todo", undefined, dt({ lifecycleState: "pending_merge" }))).toBe(true);
   });
 
   it("deliveryTruth ci_red → true (also in-flight, CI-red sub-state)", () => {
@@ -66,7 +66,7 @@ describe("US-TRUTH-017 AC2 — isCardInFlight with structured deliveryTruth", ()
   });
 
   it("deliveryTruth in_flight but no prNumber → false (half-written state, not handed to the PR lane — codex review)", () => {
-    expect(isCardInFlight("🔨 In Progress", undefined, dt({ lifecycleState: "in_flight", prNumber: undefined }))).toBe(false);
+    expect(isCardInFlight("🔨 In Progress", undefined, dt({ lifecycleState: "pending_merge", prNumber: undefined }))).toBe(false);
   });
 
   it("deliveryTruth todo → false (never picked up)", () => {
@@ -80,13 +80,13 @@ describe("US-TRUTH-017 AC2 — isCardInFlight with structured deliveryTruth", ()
   it("deliveryTruth in_flight + prEvidence MERGED → false (merge is delivery, not in-flight, AC2)", () => {
     // PR evidence showing MERGED takes priority over deliveryTruth lifecycle
     expect(
-      isCardInFlight("✅ Done", { state: "MERGED", mergedAtSec: NOW - 60 }, dt({ lifecycleState: "in_flight" })),
+      isCardInFlight("✅ Done", { state: "MERGED", mergedAtSec: NOW - 60 }, dt({ lifecycleState: "pending_merge" })),
     ).toBe(false);
   });
 
   it("deliveryTruth in_flight + prEvidence OPEN → true (PR open confirms in-flight)", () => {
     expect(
-      isCardInFlight("🔨 In Progress", { state: "OPEN" }, dt({ lifecycleState: "in_flight" })),
+      isCardInFlight("🔨 In Progress", { state: "OPEN" }, dt({ lifecycleState: "pending_merge" })),
     ).toBe(true);
   });
 
@@ -195,7 +195,7 @@ describe("FIX-388 — storyTruthFromBacklog with deliveryTruth (structured path 
   it("AC3: deliveryTruth in_flight with prNumber → true regardless of backlogStatus", () => {
     // Even if backlog says "🚫 Hold", structured truth says in_flight → is in-flight.
     expect(
-      isCardInFlight("🚫 Hold", undefined, dt({ lifecycleState: "in_flight", delivered: false, prNumber: 88 })),
+      isCardInFlight("🚫 Hold", undefined, dt({ lifecycleState: "pending_merge", delivered: false, prNumber: 88 })),
     ).toBe(true);
   });
 });

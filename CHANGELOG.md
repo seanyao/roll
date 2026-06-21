@@ -12,6 +12,9 @@
 
 - **无人值守 loop 上一轮没跑完时不再并发起新轮，不会堆积拖慢机器**：调度脚本生成器加了「在飞守卫」——上一个 cycle 还在跑时，新的 launchd tick 自动让路而不是硬起一轮，根治了「cycle 超过调度间隔→并发堆积→CPU thrash→更慢→更多并发」的死亡螺旋。生成器同时默认设好 headless 截图环境，无人值守 loop 不再弹 macOS 屏幕录制授权框。(FIX-393) `[loop-engine]`
 
+- **手动合并或抢救交付的卡，loop 不再当成未完成反复空转**：交付真相引擎现在直接读 git merge commit 的提交主题来判定卡的完成状态，不再依赖 loop 自己有没有记录 PR 号——即使卡是手动 merge、PR-lane 直合或 claude 抢救交付的，也能被正确识别为已交付，pick 不再重选。(FIX-904) `[loop]`
+  <!-- evidence: .roll/features/feedback-truth-alignment/FIX-904/latest/FIX-904-report.html -->
+
 ## v3.621.1 — 2026-06-21
 
 ### 修复

@@ -95,7 +95,15 @@ export async function backfillMergedRuns(
     try {
       const info = await fetchInfo(slug, branch);
       if (info !== undefined) {
-        evidence.set(branch, { state: info.state, mergedAt: info.mergedAt, mergeCommit: info.mergeCommit });
+        evidence.set(branch, {
+          state: info.state,
+          mergedAt: info.mergedAt,
+          mergeCommit: info.mergeCommit,
+          // FIX-389b: thread prNumber + prUrl from gh so reconcileMergeEvidence
+          // stamps them onto the credited runs row.
+          prNumber: info.prNumber,
+          prUrl: info.prUrl,
+        });
       }
     } catch {
       /* gh hiccup on one row must not kill the pass */

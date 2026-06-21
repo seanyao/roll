@@ -372,31 +372,42 @@ export async function prAutoMergeArmed(slug: string, ref: string): Promise<boole
   return am !== "" && am !== "null";
 }
 
-/** Parsed `--json state,mergedAt,mergeCommit` view (bin/roll 13744, backfill). */
+/** Parsed `--json state,mergedAt,mergeCommit,number,url` view (bin/roll 13744, backfill).
+ *  FIX-389b: extends with prNumber + prUrl so the backfill can stamp these
+ *  onto runs rows for the projection engine. */
 export interface PrMergeInfo {
   state: GhPrState;
   mergedAt: string | undefined;
   mergeCommit: string | undefined;
+  /** PR number (integer). Absent when gh cannot resolve it. */
+  prNumber: number | undefined;
+  /** PR URL (e.g. https://github.com/o/r/pull/N). Absent when gh cannot resolve it. */
+  prUrl: string | undefined;
 }
 
 /**
- * `gh -R <slug> pr view <ref> --json state,mergedAt,mergeCommit` (bin/roll
- * 13744). Returns undefined on failure (the oracle's `|| view_json=""` skip).
+ * `gh -R <slug> pr view <ref> --json state,mergedAt,mergeCommit,number,url`
+ * (bin/roll 13744 + FIX-389b prNumber/prUrl extension).
+ * Returns undefined on failure (the oracle's `|| view_json=""` skip).
  * `mergeCommit` is GitHub's `{ oid }` object — we surface the oid string.
  */
 export async function prViewMergeInfo(slug: string, ref: string): Promise<PrMergeInfo | undefined> {
-  const r = await gh(["-R", slug, "pr", "view", ref, "--json", "state,mergedAt,mergeCommit"]);
+  const r = await gh(["-R", slug, "pr", "view", ref, "--json", "state,mergedAt,mergeCommit,number,url"]);
   if (r.code !== 0 || r.stdout.trim() === "") return undefined;
   try {
     const j = JSON.parse(r.stdout) as {
       state?: string;
       mergedAt?: string | null;
       mergeCommit?: { oid?: string } | null;
+      number?: number | null;
+      url?: string | null;
     };
     return {
       state: j.state ?? "UNKNOWN",
       mergedAt: j.mergedAt == null ? undefined : j.mergedAt,
       mergeCommit: j.mergeCommit?.oid == null ? undefined : j.mergeCommit.oid,
+      prNumber: typeof j.number === "number" ? j.number : undefined,
+      prUrl: typeof j.url === "string" && j.url !== "" ? j.url : undefined,
     };
   } catch {
     return undefined;

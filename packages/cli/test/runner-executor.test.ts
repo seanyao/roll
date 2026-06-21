@@ -542,6 +542,34 @@ describe("buildRunRow — v2 runs.jsonl shape", () => {
     expect(row["ts"]).toBe("2026-06-05T19:34:42Z");
     expect(row).not.toHaveProperty("duration_sec");
   });
+
+  // FIX-389b: pr_number + pr_url written from the publish context (ctx.prUrl).
+  it("FIX-389b: writes pr_number + pr_url when ctx.prUrl is set (publish succeeded)", () => {
+    const row = buildRunRow(
+      { kind: "append_run", status: "published", outcome: "published_pending_merge", cycleId: CTX.cycleId },
+      { ...CTX, prUrl: "https://github.com/owner/repo/pull/891" },
+    );
+    expect(row["pr_url"]).toBe("https://github.com/owner/repo/pull/891");
+    expect(row["pr_number"]).toBe(891);
+  });
+
+  it("FIX-389b: omits pr_number + pr_url when ctx.prUrl is absent (no publish)", () => {
+    const row = buildRunRow(
+      { kind: "append_run", status: "failed", outcome: "failed", cycleId: CTX.cycleId },
+      CTX,
+    );
+    expect(row).not.toHaveProperty("pr_url");
+    expect(row).not.toHaveProperty("pr_number");
+  });
+
+  it("FIX-389b: omits pr_number when prUrl is unparseable (no PR number extracted)", () => {
+    const row = buildRunRow(
+      { kind: "append_run", status: "published", outcome: "published_pending_merge", cycleId: CTX.cycleId },
+      { ...CTX, prUrl: "https://example.com/not-a-pr" },
+    );
+    expect(row["pr_url"]).toBe("https://example.com/not-a-pr");
+    expect(row).not.toHaveProperty("pr_number");
+  });
 });
 
 describe("buildTerminalRecord — the cycle:terminal twin (US-TRUTH-001 + FIX-294)", () => {

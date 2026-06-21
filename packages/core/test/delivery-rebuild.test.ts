@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   extractRunFact,
   parseMergeCommitMessages,
+  parseStoryIdsFromSubject,
   rebuildDeliveriesFromFacts,
   collectRunFacts,
   ensureDeliveriesFresh,
@@ -215,6 +216,7 @@ function makeMerge(overrides: Partial<MergeFact> = {}): MergeFact {
     prNumber: 42,
     mergeCommit: "abc123def456",
     mergedAt: 2000,
+    storyIds: [],
     ...overrides,
   };
 }
@@ -449,8 +451,8 @@ describe("rebuildDeliveriesFromFacts — constraints", () => {
       { storyId: "US-OLD4", cycleId: "c4", status: "failed", outcome: "failed", recordedAt: 40 },
     ];
     const merges: MergeFact[] = [
-      { prNumber: 1, mergeCommit: "aaa", mergedAt: 15 },
-      { prNumber: 3, mergeCommit: "ccc", mergedAt: 35 },
+      { prNumber: 1, mergeCommit: "aaa", mergedAt: 15, storyIds: [] },
+      { prNumber: 3, mergeCommit: "ccc", mergedAt: 35, storyIds: [] },
     ];
 
     const deliveries = rebuildDeliveriesFromFacts(runs, merges);
@@ -500,7 +502,7 @@ describe("rebuildDeliveriesFromFacts — backfill mergeCommit without prNumber",
       mergedAt: 5000000,
     })];
     const merges = [
-      { prNumber: 883, mergeCommit: "abc123sha", mergedAt: 2000 },
+      { prNumber: 883, mergeCommit: "abc123sha", mergedAt: 2000, storyIds: [] },
     ];
     const result = rebuildDeliveriesFromFacts(runs, merges);
     expect(result).toHaveLength(1);
@@ -517,7 +519,7 @@ describe("rebuildDeliveriesFromFacts — backfill mergeCommit without prNumber",
       mergedAt: 5000000,
     })];
     const merges = [
-      { prNumber: 883, mergeCommit: "shared-sha", mergedAt: 2000 },
+      { prNumber: 883, mergeCommit: "shared-sha", mergedAt: 2000, storyIds: [] },
     ];
     const result = rebuildDeliveriesFromFacts(runs, merges);
     expect(result).toHaveLength(1);
@@ -541,6 +543,7 @@ describe("rebuildDeliveriesFromFacts — backfill mergeCommit without prNumber",
       prNumber: 883,
       mergeCommit: "9efd807189ca538ccde38bfb55f461b2a5e614c9",
       mergedAt: 1718885251,
+      storyIds: [],
     }];
     const result = rebuildDeliveriesFromFacts(runs, merges, "seanyao/roll");
     expect(result).toHaveLength(1);
@@ -582,6 +585,151 @@ describe("rebuildDeliveriesFromFacts — edge cases", () => {
   it("empty runs → empty result", () => {
     const result = rebuildDeliveriesFromFacts([], [makeMerge({ prNumber: 1 })]);
     expect(result).toHaveLength(0);
+  });
+});
+
+// ── FIX-904: git-subject story-id is the authoritative done signal ───────────
+
+describe("parseStoryIdsFromSubject (FIX-904)", () => {
+  it("extracts a single story-id", () => {
+    expect(parseStoryIdsFromSubject("FIX-204: heartbeat fix (#421)")).toEqual(["FIX-204"]);
+  });
+
+  it("extracts compound-epic ids (US-TRUTH-016)", () => {
+    expect(parseStoryIdsFromSubject("tcr: US-TRUTH-016 — CLI truth query (#883)")).toEqual(["US-TRUTH-016"]);
+  });
+
+  it("expands FIX-389a/b/c shorthand into three ids", () => {
+    expect(parseStoryIdsFromSubject("FIX-389a/b/c — salvage delivery (#893)")).toEqual([
+      "FIX-389a",
+      "FIX-389b",
+      "FIX-389c",
+    ]);
+  });
+
+  it("returns [] for subjects with no story-id (loop cycle commit)", () => {
+    expect(parseStoryIdsFromSubject("loop cycle cycle-20260621-014644 (#892)")).toEqual([]);
+  });
+
+  it("de-duplicates repeated ids", () => {
+    expect(parseStoryIdsFromSubject("FIX-1 and FIX-1 again (#5)")).toEqual(["FIX-1"]);
+  });
+
+  it("handles multiple distinct ids in one subject", () => {
+    expect(parseStoryIdsFromSubject("US-A-1 plus FIX-2 (#9)")).toEqual(["US-A-1", "FIX-2"]);
+  });
+
+  it("does not over-expand a plain numeric id (no letter suffix)", () => {
+    // FIX-389 (no suffix) followed by "/b" must NOT consume the slash run.
+    expect(parseStoryIdsFromSubject("FIX-389/cleanup (#1)")).toEqual(["FIX-389"]);
+  });
+});
+
+describe("parseMergeCommitMessages — FIX-904 storyIds", () => {
+  it("attaches expanded story-ids to the MergeFact", () => {
+    const facts = parseMergeCommitMessages([
+      "abc1234 1719000000 FIX-389a/b/c … (#893)",
+    ]);
+    expect(facts).toHaveLength(1);
+    expect(facts[0].prNumber).toBe(893);
+    expect(facts[0].storyIds).toEqual(["FIX-389a", "FIX-389b", "FIX-389c"]);
+  });
+
+  it("loop-cycle subject yields empty storyIds (no false positive)", () => {
+    const facts = parseMergeCommitMessages([
+      "def5678 1719000100 loop cycle cycle-20260621-014644 (#892)",
+    ]);
+    expect(facts).toHaveLength(1);
+    expect(facts[0].prNumber).toBe(892);
+    expect(facts[0].storyIds).toEqual([]);
+  });
+});
+
+describe("rebuildDeliveriesFromFacts — FIX-904: merge subject = authoritative done", () => {
+  it("FIX-389a/b/c subject with no matching runs → three done records", () => {
+    // The real #893 salvage: merge names FIX-389a/b/c but no loop run carried
+    // pr_number 893, and the FIX-389a run was failed.
+    const runs = [makeRun({ storyId: "FIX-389a", outcome: "failed", prNumber: undefined, recordedAt: 100 })];
+    const merges = parseMergeCommitMessages([
+      "deadbee1234567 1719000000 FIX-389a/b/c — salvage delivery (#893)",
+    ]);
+    const result = rebuildDeliveriesFromFacts(runs, merges, "seanyao/roll");
+
+    const a = result.find((r) => r.storyId === "FIX-389a");
+    const b = result.find((r) => r.storyId === "FIX-389b");
+    const c = result.find((r) => r.storyId === "FIX-389c");
+    expect(a).toBeDefined();
+    expect(b).toBeDefined();
+    expect(c).toBeDefined();
+    // FIX-389a had a run → done via story loop (merge beats failed run).
+    expect(a!.lifecycleState).toBe("done");
+    // FIX-389b/c had no run → done via merge-only pass with sentinel cycleId.
+    expect(b!.lifecycleState).toBe("done");
+    expect(c!.lifecycleState).toBe("done");
+    expect(b!.cycleId).toBe("merge:deadbee");
+    expect(c!.cycleId).toBe("merge:deadbee");
+    // All carry the merge commit + PR.
+    expect(a!.mergeCommit).toEqual({ present: true, value: "deadbee1234567" });
+    expect(b!.mergeCommit).toEqual({ present: true, value: "deadbee1234567" });
+    expect(b!.prNumber).toEqual({ present: true, value: 893 });
+    expect(b!.prUrl).toEqual({ present: true, value: "https://github.com/seanyao/roll/pull/893" });
+  });
+
+  it("failed run + merge subject referencing the story → done (merge wins)", () => {
+    const runs = [makeRun({ storyId: "FIX-500", outcome: "failed", prNumber: undefined, recordedAt: 100 })];
+    const merges = parseMergeCommitMessages([
+      "cafe1234567890 1719000000 FIX-500: fix the thing (#777)",
+    ]);
+    const result = rebuildDeliveriesFromFacts(runs, merges, "seanyao/roll");
+    expect(result).toHaveLength(1);
+    expect(result[0].storyId).toBe("FIX-500");
+    expect(result[0].lifecycleState).toBe("done");
+    expect(result[0].mergeCommit).toEqual({ present: true, value: "cafe1234567890" });
+    expect(result[0].prNumber).toEqual({ present: true, value: 777 });
+    // run loop path keeps the run's cycleId, not the sentinel
+    expect(result[0].cycleId).toBe("cycle-default");
+  });
+
+  it("loop-cycle merge subject does NOT mark any story done", () => {
+    const runs = [makeRun({ storyId: "US-INFLIGHT", outcome: "published_pending_merge", prNumber: 1, recordedAt: 100 })];
+    const merges = parseMergeCommitMessages([
+      "beef1234567890 1719000000 loop cycle cycle-20260621-014644 (#892)",
+    ]);
+    const result = rebuildDeliveriesFromFacts(runs, merges, "seanyao/roll");
+    // Only the in-flight story, no merge-derived done records.
+    expect(result).toHaveLength(1);
+    expect(result[0].storyId).toBe("US-INFLIGHT");
+    expect(result[0].lifecycleState).toBe("pending_merge");
+  });
+
+  it("does not double-emit when a story has both a run AND a merge subject", () => {
+    const runs = [makeRun({ storyId: "FIX-600", outcome: "failed", prNumber: undefined, recordedAt: 100 })];
+    const merges = parseMergeCommitMessages([
+      "abcd1234567890 1719000000 FIX-600: done (#601)",
+    ]);
+    const result = rebuildDeliveriesFromFacts(runs, merges);
+    // Exactly one record for FIX-600 (run loop handled it; merge-only pass skips).
+    expect(result.filter((r) => r.storyId === "FIX-600")).toHaveLength(1);
+  });
+
+  it("first (newest) merge wins when two subjects name the same story", () => {
+    const merges = parseMergeCommitMessages([
+      "newsha1234567 1719000200 FIX-700: redo (#702)",
+      "oldsha1234567 1719000100 FIX-700: first (#701)",
+    ]);
+    const result = rebuildDeliveriesFromFacts([], merges);
+    expect(result).toHaveLength(1);
+    expect(result[0].mergeCommit).toEqual({ present: true, value: "newsha1234567" });
+    expect(result[0].prNumber).toEqual({ present: true, value: 702 });
+  });
+
+  it("merge-only done records are deterministic", () => {
+    const merges = parseMergeCommitMessages([
+      "sha11234567890 1719000000 FIX-389a/b/c … (#893)",
+    ]);
+    const r1 = rebuildDeliveriesFromFacts([], merges, "o/r");
+    const r2 = rebuildDeliveriesFromFacts([], merges, "o/r");
+    expect(r1).toEqual(r2);
   });
 });
 
@@ -844,12 +992,19 @@ describe("ensureDeliveriesFresh", () => {
     });
 
     const result = ensureDeliveriesFresh(PROJ, freshness, exec);
-    // The PR number 883 was found via squash-merge, so the story should not be
-    // marked done by this alone (no run carries matching pr_number),
-    // but the merge fact IS collected.
-    // This test verifies the squash-merge pass works — merge facts are collected.
-    expect(result).toHaveLength(1);
-    expect(result[0].lifecycleState).toBe("pending_merge");
+    // The squash-merge pass collects PR #883 AND parses its story-id
+    // (US-TRUTH-016) from the subject. Under FIX-904 that subject is the
+    // authoritative `done` signal even though no run carries pr_number 883.
+    // The unrelated in-flight US-SQUASH run stays pending_merge.
+    expect(result).toHaveLength(2);
+    const squash = result.find((r) => r.storyId === "US-SQUASH");
+    const truth = result.find((r) => r.storyId === "US-TRUTH-016");
+    expect(squash!.lifecycleState).toBe("pending_merge");
+    expect(truth!.lifecycleState).toBe("done");
+    expect(truth!.prNumber).toEqual({ present: true, value: 883 });
+    expect(truth!.mergeCommit).toEqual({ present: true, value: "9efd807189ca538ccde38bfb55f461b2a5e614c9" });
+    // No run for US-TRUTH-016 → sentinel cycleId.
+    expect(truth!.cycleId).toBe("merge:9efd807");
   });
 
   it("squash-merge + run with backfill mergeCommit → done", () => {

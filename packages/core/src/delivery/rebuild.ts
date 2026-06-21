@@ -52,6 +52,71 @@ export interface MergeFact {
   mergeCommit: string;
   /** Merge timestamp (epoch seconds from git commit date). */
   mergedAt: number;
+  /**
+   * Story-ids parsed from the merge commit subject (FIX-904).
+   *
+   * This is the **authoritative `done` signal** — a merge whose subject names
+   * a story-id proves that story shipped, regardless of whether any loop run
+   * recorded the PR number (manual salvage, PR-lane direct merge, etc.).
+   *
+   * Shorthand like `FIX-389a/b/c` is expanded to `["FIX-389a","FIX-389b","FIX-389c"]`.
+   * Subjects with no story-id (e.g. `loop cycle cycle-… (#892)`) yield `[]`.
+   */
+  storyIds: string[];
+}
+
+/**
+ * Canonical Roll story-id pattern (mirrors `STORY_ID_PATTERN` in the CLI).
+ * Matches `US-…`, `FIX-…`, `REFACTOR-…`, `IDEA-…` ids with an optional
+ * single trailing lowercase letter (the shorthand-suffix form, e.g. `FIX-389a`).
+ */
+const STORY_ID_RE = /\b(?:US|FIX|REFACTOR|IDEA)(?:-[A-Z0-9]+)*-\d+[a-z]?\b/g;
+
+/**
+ * Extract story-ids from a merge-commit subject, expanding `/`-joined
+ * shorthand suffixes (FIX-904).
+ *
+ * A match that ends in a single lowercase letter (e.g. `FIX-389a`) followed
+ * immediately by a `/<single-letter>` sequence (`FIX-389a/b/c`) expands to
+ * `FIX-389a`, `FIX-389b`, `FIX-389c` — all sharing the numeric base.
+ *
+ * @returns De-duplicated story-ids in first-seen order. `[]` when none match.
+ */
+export function parseStoryIdsFromSubject(subject: string): string[] {
+  const ids: string[] = [];
+  const add = (id: string): void => {
+    if (!ids.includes(id)) ids.push(id);
+  };
+
+  STORY_ID_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = STORY_ID_RE.exec(subject)) !== null) {
+    const id = match[0];
+    add(id);
+
+    // Shorthand expansion: only when the id carries a single-letter suffix.
+    // e.g. id = "FIX-389a" → base = "FIX-389", then consume "/b/c" → 389b, 389c.
+    const suffixMatch = /^(.*-\d+)([a-z])$/.exec(id);
+    if (suffixMatch === null) continue;
+    const base = suffixMatch[1]!;
+
+    // Consume a run of "/<single-letter>" immediately after the match.
+    let cursor = STORY_ID_RE.lastIndex;
+    const shorthand = /^\/([a-z])(?![a-z0-9])/;
+    for (;;) {
+      const rest = subject.slice(cursor);
+      const sh = shorthand.exec(rest);
+      if (sh === null) break;
+      add(`${base}${sh[1]}`);
+      cursor += sh[0].length;
+    }
+    // Advance the outer scan past what we consumed so the letters don't
+    // re-match (they wouldn't anyway — bare "b" isn't a story-id — but keep
+    // the cursor honest).
+    STORY_ID_RE.lastIndex = cursor;
+  }
+
+  return ids;
 }
 
 // ── Fact extractors ──────────────────────────────────────────────────────────
@@ -147,9 +212,12 @@ export function parseMergeCommitMessages(lines: string[]): MergeFact[] {
 
     if (prNum === undefined || !Number.isFinite(prNum) || prNum <= 0) continue;
 
+    // FIX-904: parse story-ids from the subject (authoritative done signal).
+    const storyIds = parseStoryIdsFromSubject(subject);
+
     // First occurrence wins (reverse-chronological input)
     if (!map.has(prNum)) {
-      map.set(prNum, { prNumber: prNum, mergeCommit: sha, mergedAt });
+      map.set(prNum, { prNumber: prNum, mergeCommit: sha, mergedAt, storyIds });
     }
   }
 
@@ -181,9 +249,18 @@ export function rebuildDeliveriesFromFacts(
   // Index merges by prNumber AND by mergeCommit SHA for cross-reference
   const mergeByPr = new Map<number, MergeFact>();
   const mergeBySha = new Map<string, MergeFact>();
+  // FIX-904: index merges by story-id parsed from the commit subject — the
+  // authoritative `done` signal that does NOT depend on any loop run having
+  // recorded a PR number (manual salvage, PR-lane direct merge, …).
+  // First occurrence wins: input is reverse-chronological, so the newest
+  // merge that names a story is the one we keep.
+  const mergeByStoryId = new Map<string, MergeFact>();
   for (const m of merges) {
     mergeByPr.set(m.prNumber, m);
     mergeBySha.set(m.mergeCommit, m);
+    for (const sid of m.storyIds) {
+      if (!mergeByStoryId.has(sid)) mergeByStoryId.set(sid, m);
+    }
   }
 
   // Group runs by storyId
@@ -221,6 +298,7 @@ export function rebuildDeliveriesFromFacts(
           prNumber: mergedPrNumber ?? 0,
           mergeCommit: r.mergeCommit,
           mergedAt: r.mergedAt !== undefined ? Math.floor(r.mergedAt / 1000) : 0,
+          storyIds: [],
         };
         break;
       }
@@ -232,6 +310,18 @@ export function rebuildDeliveriesFromFacts(
           mergedFact = m;
           break;
         }
+      }
+    }
+
+    // FIX-904: authoritative git-subject signal. If NO run-based merge was
+    // found above (no PR number recorded, no backfill stamp), fall back to a
+    // merge commit whose subject names this story-id. A merge here beats any
+    // failed/in-flight run — the story demonstrably shipped on main.
+    if (mergedFact === undefined) {
+      const m = mergeByStoryId.get(storyId);
+      if (m !== undefined) {
+        mergedPrNumber = m.prNumber > 0 ? m.prNumber : undefined;
+        mergedFact = m;
       }
     }
 
@@ -302,6 +392,29 @@ export function rebuildDeliveriesFromFacts(
       mergedAt: absent("not_recorded"),
       mergeCommit: absent("not_recorded"),
       recordedAt: latest.recordedAt,
+    });
+  }
+
+  // FIX-904: emit `done` for stories that appear ONLY in merge subjects and
+  // have no run at all (manual salvage / external merge with no loop run).
+  // Sentinel cycleId `merge:<sha7>` marks the absence of a run cycle.
+  for (const [storyId, fact] of mergeByStoryId) {
+    if (byStory.has(storyId)) continue; // already handled by the run loop
+    const effectivePr = fact.prNumber > 0 ? fact.prNumber : undefined;
+    const prUrl = effectivePr !== undefined && repoSlug !== undefined
+      ? `https://github.com/${repoSlug}/pull/${effectivePr}`
+      : undefined;
+    result.push({
+      storyId,
+      cycleId: `merge:${fact.mergeCommit.slice(0, 7)}`,
+      lifecycleState: "done",
+      prNumber: effectivePr !== undefined
+        ? present(effectivePr)
+        : absent("no_publish_attempted"),
+      prUrl: prUrl !== undefined ? present(prUrl) : absent("not_recorded"),
+      mergedAt: fact.mergedAt > 0 ? present(fact.mergedAt * 1000) : absent("not_recorded"),
+      mergeCommit: present(fact.mergeCommit),
+      recordedAt: fact.mergedAt > 0 ? fact.mergedAt * 1000 : 0,
     });
   }
 

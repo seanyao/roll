@@ -28,7 +28,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { renderCompactWatchEvent, renderWatchStatusFromEventLines, watchRenderEventFromLine } from "@roll/core";
+import { renderCompactWatchEvent, renderWatchStatusFromEventLines, watchRenderEventFromLine, type DurableCycleLookup } from "@roll/core";
 import { projectIdentity } from "@roll/infra";
 import { renderState } from "../render.js";
 import { streamThroughRenderer } from "./loop-fmt.js";
@@ -292,17 +292,42 @@ function attachToWatchWindow(projectPath: string, slug: string, deps: LoopWatchD
   return 0;
 }
 
-function statusSnapshot(eventsPath: string, deps: LoopWatchDeps): string {
+/** FIX-382: parse runs.jsonl into a DurableCycleLookup (cycleId → { storyId, agent }).
+ *  Returns an empty record when the file is missing or unparseable. */
+function buildDurableLookup(runsPath: string, deps: LoopWatchDeps): DurableCycleLookup {
+  if (!deps.exists(runsPath)) return {};
+  const text = deps.readText(runsPath);
+  if (text === null) return {};
+  const lookup: DurableCycleLookup = {};
+  for (const line of text.split(/\r?\n/)) {
+    if (line.trim() === "") continue;
+    try {
+      const row: Record<string, unknown> = JSON.parse(line);
+      const cycleId = typeof row["cycle_id"] === "string" ? row["cycle_id"] : undefined;
+      const storyId = typeof row["story_id"] === "string" ? row["story_id"] : "";
+      const agent = typeof row["agent"] === "string" ? row["agent"] : "";
+      if (cycleId !== undefined && cycleId !== "") {
+        // Last-wins: a later row for the same cycle overwrites.
+        lookup[cycleId] = { storyId, agent };
+      }
+    } catch {
+      // skip malformed lines
+    }
+  }
+  return lookup;
+}
+
+function statusSnapshot(eventsPath: string, deps: LoopWatchDeps, durableLookup: DurableCycleLookup): string {
   if (!deps.exists(eventsPath)) {
     return `status  no events.ndjson yet - live.log only (${eventsPath})`;
   }
   const text = deps.readText(eventsPath);
-  const status = text === null ? null : renderWatchStatusFromEventLines(text.split(/\r?\n/), Date.now());
+  const status = text === null ? null : renderWatchStatusFromEventLines(text.split(/\r?\n/), Date.now(), durableLookup);
   return status ?? `status  event summary unavailable - live.log only (${eventsPath})`;
 }
 
-function emitStatusSnapshot(eventsPath: string, deps: LoopWatchDeps): void {
-  deps.emit(statusSnapshot(eventsPath, deps));
+function emitStatusSnapshot(eventsPath: string, deps: LoopWatchDeps, durableLookup: DurableCycleLookup): void {
+  deps.emit(statusSnapshot(eventsPath, deps, durableLookup));
 }
 
 /** The `roll loop watch` entry. */
@@ -342,8 +367,12 @@ export async function loopWatchCommand(args: string[], deps: LoopWatchDeps = rea
 
   const agent = (process.env["ROLL_LOOP_AGENT"] ?? "claude").trim() || "claude";
   const eventsPath = join(rt, "events.ndjson");
-  const status = !opts.events && !opts.rawEvents ? () => statusSnapshot(eventsPath, deps) : undefined;
-  if (status !== undefined) emitStatusSnapshot(eventsPath, deps);
+  // FIX-382: build durable fallback lookup from runs.jsonl so story/agent can
+  // be resolved even when cycle:start has been pushed out of the tail window.
+  const runsPath = join(rt, "runs.jsonl");
+  const durableLookup = buildDurableLookup(runsPath, deps);
+  const status = !opts.events && !opts.rawEvents ? () => statusSnapshot(eventsPath, deps, durableLookup) : undefined;
+  if (status !== undefined) emitStatusSnapshot(eventsPath, deps, durableLookup);
   const { stream, stop } = deps.follow(watchPath, opts.sinceLines);
   // Ctrl-C ends the VIEW only (read-only): stop the follow, never the loop.
   const onSigint = (): void => stop();

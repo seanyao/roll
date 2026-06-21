@@ -59,3 +59,55 @@ describe("watch-status — default loop watch summary", () => {
     expect(second?.lastSignal).toBe("tcr 123456789 tcr: second");
   });
 });
+
+// ── FIX-382: durable fallback ───────────────────────────────────────────────
+
+describe("watch-status — durable cycle lookup (FIX-382)", () => {
+  const durable: Record<string, { storyId: string; agent: string }> = {
+    "20260622-001-alpha": { storyId: "US-OBS-027", agent: "claude" },
+  };
+
+  it("resolves story and agent from durable lookup when window has no cycle:start", () => {
+    // Window with phase + tcr + heartbeat but NO cycle:start — tail-window scenario.
+    const rendered = renderWatchStatusFromEventLines(
+      [
+        line({ type: "cycle:phase", cycleId: "20260622-001-alpha", phase: "execute", ts: 1_800_000_060_000 }),
+        line({ type: "cycle:tcr", cycleId: "20260622-001-alpha", commitHash: "aaa111222333", message: "tcr: fix", ts: 1_800_000_120_000 }),
+        line({ type: "cycle:stdout", cycleId: "20260622-001-alpha", data: "heartbeat: working", ts: 1_800_000_180_000 }),
+      ],
+      1_800_000_480_000,
+      durable,
+    );
+    expect(rendered).toContain("US-OBS-027");
+    expect(rendered).toContain("claude");
+    expect(rendered).not.toContain("story unknown");
+    expect(rendered).not.toContain("agent unknown");
+  });
+
+  it("returns unknown when cycleId is not in the durable lookup", () => {
+    const rendered = renderWatchStatusFromEventLines(
+      [
+        line({ type: "cycle:phase", cycleId: "20260622-002-beta", phase: "execute", ts: 1_800_000_060_000 }),
+      ],
+      1_800_000_480_000,
+      durable,
+    );
+    expect(rendered).toContain("story unknown");
+    expect(rendered).toContain("agent unknown");
+  });
+
+  it("in-window cycle:start takes precedence over durable lookup", () => {
+    // cycle:start in window says FIX-99/claude; durable says US-OBS-027/claude.
+    const rendered = renderWatchStatusFromEventLines(
+      [
+        line({ type: "cycle:start", cycleId: "20260622-001-alpha", storyId: "FIX-99", agent: "codex", model: "gpt-5", ts: 1_800_000_000_000 }),
+        line({ type: "cycle:phase", cycleId: "20260622-001-alpha", phase: "execute", ts: 1_800_000_060_000 }),
+      ],
+      1_800_000_480_000,
+      durable,
+    );
+    expect(rendered).toContain("FIX-99");
+    expect(rendered).toContain("codex");
+    expect(rendered).not.toContain("US-OBS-027");
+  });
+});

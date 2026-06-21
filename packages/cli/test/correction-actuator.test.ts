@@ -130,4 +130,34 @@ describe("US-EVID-014 correction actuator runner adapter", () => {
     expect(result).toMatchObject({ action: "return_story", mutation: "human_override" });
     expect(readFileSync(p.backlog, "utf8")).toContain("🚫 Hold [human triage]");
   });
+
+  it("FIX-386: exhausted review-score retry budget marks story Hold", () => {
+    const p = project();
+    writeFileSync(join(p.root, ".roll", "policy.yaml"), "loop_safety:\n  correction_actuator: auto\n");
+    // Simulate two prior correction events so the retry budget is exhausted.
+    // Pre-write correction events into the events file.
+    const eventsPath = p.events;
+    mkdirSync(join(p.root, ".roll", "loop"), { recursive: true });
+    writeFileSync(eventsPath, [
+      JSON.stringify({ type: "correction:action", storyId: "US-EVID-014", action: "return_story", signal: "review_score_regression", reason: "first low", ts: 10 }),
+      JSON.stringify({ type: "correction:action", storyId: "US-EVID-014", action: "return_story", signal: "review_score_regression", reason: "second low", ts: 11 }),
+      "",
+    ].join("\n"), "utf8");
+    const result = applyCorrectionAction({
+      projectPath: p.root,
+      eventsPath: p.events,
+      alertsPath: p.alerts,
+      storyId: "US-EVID-014",
+      cycleId: "cycle-3",
+      reasons: ["low review-score ok 3/10 marks partial + Discrepancy"],
+      nowSec: 100,
+    });
+
+    // FIX-386: when retryBudget is exhausted, route_adjust marks story Hold
+    expect(result).toMatchObject({ action: "route_adjust", plannedAction: "route_adjust", retryBudget: 0 });
+    expect(result.mutation).toBe("returned_story"); // Hold marker = returned_story mutation
+    const backlog = readFileSync(p.backlog, "utf8");
+    expect(backlog).toContain("🚫 Hold");
+    expect(backlog).toContain("low-review-score");
+  });
 });

@@ -29,6 +29,10 @@ export interface CorrectionDecision {
   source: CorrectionAttribution["source"];
   attribution: CorrectionAttribution;
   priorCorrections: number;
+  /** FIX-386: remaining fix-forward retries before escalating. Present only when
+   *  the signal supports bounded retry (review_score_regression). Absent ⇒ no
+   *  retry budget applies (default signal path). */
+  retryBudget?: number;
 }
 
 function compact(s: string): string {
@@ -47,9 +51,14 @@ function classifyAttribution(storyId: string, reasons: readonly string[]): {
 } {
   const text = reasonText(reasons);
   const lower = text.toLowerCase();
-  if (/review[-\s]?score.*regression|regression.*review[-\s]?score/.test(lower)) {
+  // FIX-386: match both "review-score regression" (regression verdict) and
+  // "low review-score ok" (low-score ok verdict with partial + Discrepancy).
+  if (/review[-\s]?score.*(?:regression|low|partial)/.test(lower)) {
     return {
       signal: "review_score_regression",
+      // FIX-386: low review score → return_story so the story is re-pickable.
+      // The executor injects reviewer findings into the agent context on resume,
+      // and bounded retry (below) caps fix-forward cycles before escalating.
       plannedAction: "return_story",
       attribution: {
         source: "review-score",
@@ -128,20 +137,41 @@ function priorCorrectionCount(events: readonly RollEvent[], storyId: string, sig
   return n;
 }
 
+/** FIX-386: max fix-forward retries for a low review score before escalating.
+ *  1 retry means: first low score → return_story (retry 1); second low score
+ *  → escalate (route_adjust + Hold). */
+const MAX_REVIEW_SCORE_RETRIES = 1;
+
 export function decideCorrectionAction(input: CorrectionDecisionInput): CorrectionDecision {
   const classified = classifyAttribution(input.storyId, input.reasons);
   const priorCorrections = priorCorrectionCount(input.events ?? [], input.storyId, classified.signal);
-  let plannedAction =
-    priorCorrections > 0 && classified.plannedAction !== "alert_only"
-      ? "route_adjust"
-      : classified.plannedAction;
-  // FIX-332: a repeated empty-shell acceptance report for the same story means the
-  // resume-evidence bridge (or the agent) failed to produce content twice. Stop
-  // minting endless autofix cards and return the story to Todo so the loop's
-  // cross-session dead-loop breaker can pause the goal instead of burning cycles.
-  if (priorCorrections > 0 && classified.signal === "empty_acceptance_report") {
-    plannedAction = "return_story";
+  let plannedAction: CorrectionAction;
+  let retryBudget: number | undefined;
+
+  // FIX-386: review_score_regression has its own bounded-retry budget.
+  // Allow up to MAX_REVIEW_SCORE_RETRIES retries; after that, escalate.
+  if (classified.signal === "review_score_regression") {
+    if (priorCorrections <= MAX_REVIEW_SCORE_RETRIES) {
+      plannedAction = "return_story";
+      retryBudget = MAX_REVIEW_SCORE_RETRIES - priorCorrections;
+    } else {
+      plannedAction = "route_adjust";
+      retryBudget = 0;
+    }
+  } else {
+    plannedAction =
+      priorCorrections > 0 && classified.plannedAction !== "alert_only"
+        ? "route_adjust"
+        : classified.plannedAction;
+    // FIX-332: a repeated empty-shell acceptance report for the same story means the
+    // resume-evidence bridge (or the agent) failed to produce content twice. Stop
+    // minting endless autofix cards and return the story to Todo so the loop's
+    // cross-session dead-loop breaker can pause the goal instead of burning cycles.
+    if (priorCorrections > 0 && classified.signal === "empty_acceptance_report") {
+      plannedAction = "return_story";
+    }
   }
+
   const action = input.mode === "conservative" ? "alert_only" : plannedAction;
   return {
     mode: input.mode,
@@ -154,5 +184,6 @@ export function decideCorrectionAction(input: CorrectionDecisionInput): Correcti
     source: classified.attribution.source,
     attribution: classified.attribution,
     priorCorrections,
+    ...(retryBudget !== undefined ? { retryBudget } : {}),
   };
 }

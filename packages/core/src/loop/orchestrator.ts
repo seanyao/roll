@@ -705,10 +705,10 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
 
     case "worktree_created":
       // Worktree up → pick the next story INSIDE it (bin/roll:8938).
+      // FIX-382: cycle:start moved to route_resolved so it carries real storyId+agent.
       return {
         state: { ...state, phase: "pick", worktreeReady: true },
         commands: [
-          { kind: "emit_event", event: cycleStartEvent(state.ctx) },
           { kind: "pick_story" },
         ],
       };
@@ -750,6 +750,8 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
       // The cost/budget gate is REMOVED — the loop no longer stops on a dollar
       // ceiling. Route resolves straight into the agent spawn (the progress
       // guardrails in loop-go now own runaway-spend protection).
+      // FIX-382: cycle:start is emitted HERE (not worktree_created) so it carries
+      // the now-resolved storyId (from story_picked) + agent/model (from this event).
       return {
         state: {
           ...state,
@@ -757,7 +759,10 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
           attempt: 1,
           ctx: { ...state.ctx, agent: event.agent, model: event.model },
         },
-        commands: [{ kind: "spawn_agent", agent: event.agent, attempt: 1 }],
+        commands: [
+          { kind: "emit_event", event: cycleStartEvent({ ...state.ctx, agent: event.agent, model: event.model }) },
+          { kind: "spawn_agent", agent: event.agent, attempt: 1 },
+        ],
       };
 
     case "agent_exited": {

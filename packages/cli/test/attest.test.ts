@@ -1170,6 +1170,180 @@ describe("scopeCycleEvents", () => {
   });
 });
 
+// ── FIX-392 — headless terminal fallback ──────────────────────────────────
+describe("FIX-392 — terminal deliverable_cmd headless fallback", () => {
+  function cmdProject(): string {
+    const proj = realpathSync(mkdtempSync(join(tmpdir(), "roll-attest-cmd-")));
+    dirs.push(proj);
+    mkdirSync(join(proj, ".roll", "features", "demo", "FIX-CMD"), { recursive: true });
+    writeFileSync(
+      join(proj, ".roll", "features", "demo", "FIX-CMD", "spec.md"),
+      ["# FIX-CMD — CLI deliverable", "", "**AC:**", "- [ ] CLI command works", ""].join("\n"),
+    );
+    return proj;
+  }
+
+  function headlessNoGui(): ShotRun {
+    return (cmd, argv) => {
+      if (cmd === "sh") return Promise.resolve({ code: 0, stdout: "deliverable output line 1\ndeliverable output line 2\n", stderr: "" });
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Background\n", stderr: "" }); // not Aqua → headless
+      if (cmd === "screencapture") return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+  }
+
+  // AC4: headless + deliverable_cmd → command stdout becomes taken:true terminal evidence → gate PASS
+  it("headless (no GUI) + successful deliverable_cmd → stdout promoted to taken:true terminal capture", async () => {
+    const proj = cmdProject();
+    await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["FIX-CMD", "--capture-command", "roll status"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          capture: { run: headlessNoGui(), platform: "darwin", env: {} },
+        }),
+      ),
+    );
+    const runDir = join(proj, ".roll", "features", "demo", "FIX-CMD", "2026-06-06T01-02-03");
+    // Text evidence file exists
+    const txtPath = join(runDir, "screenshots", "terminal-headless.txt");
+    expect(existsSync(txtPath)).toBe(true);
+    expect(readFileSync(txtPath, "utf8")).toContain("deliverable output line 1");
+    // Evidence manifest records it as taken:true terminal capture
+    const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
+      captures?: Array<{ kind?: string; out?: string; taken?: boolean }>;
+      capture_command?: { exitCode?: number; stdoutTail?: string };
+    };
+    expect(evidence.captures).toContainEqual({ kind: "terminal", out: txtPath, taken: true });
+    // capture_command fact also recorded
+    expect(evidence.capture_command?.exitCode).toBe(0);
+    expect(evidence.capture_command?.stdoutTail).toContain("deliverable output line 1");
+  });
+
+  // AC4: command non-zero exit → still fails (does NOT promote)
+  it("headless but command fails → terminal capture stays taken:false (no dilution)", async () => {
+    const proj = cmdProject();
+    const failingCmd: ShotRun = (cmd, argv) => {
+      if (cmd === "sh") return Promise.resolve({ code: 1, stdout: "", stderr: "command not found" });
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+    const code = await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["FIX-CMD", "--capture-command", "roll status"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          capture: { run: failingCmd, platform: "darwin", env: {} },
+        }),
+      ),
+    );
+    const runDir = join(proj, ".roll", "features", "demo", "FIX-CMD", "2026-06-06T01-02-03");
+    const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
+      captures?: Array<{ kind?: string; taken?: boolean; skipped?: string }>;
+      capture_command?: { exitCode?: number };
+    };
+    // Command failed → not promoted
+    expect(evidence.capture_command?.exitCode).toBe(1);
+    expect(evidence.captures?.[0]?.taken).toBe(false);
+    expect(evidence.captures?.[0]?.skipped).toContain("capture command exited");
+    expect(code).toBe(3);
+    // No headless txt file
+    expect(existsSync(join(runDir, "screenshots", "terminal-headless.txt"))).toBe(false);
+  });
+
+  // AC5 regression: with GUI → real terminal screenshot (not the text fallback)
+  it("GUI present → real terminal screenshot (no regression to text fallback)", async () => {
+    const proj = cmdProject();
+    const guiRun: ShotRun = (cmd, argv) => {
+      if (cmd === "sh") {
+        const fullCmd = argv.join(" ");
+        if (fullCmd.includes("lsappinfo")) return Promise.resolve({ code: 0, stdout: "Terminal\n", stderr: "" });
+        return Promise.resolve({ code: 0, stdout: "deliverable output\n", stderr: "" });
+      }
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" }); // GUI session
+      if (cmd === "osascript") return Promise.resolve({ code: 0, stdout: argv[1]?.includes("bounds") ? "0, 0, 1280, 800" : "yes\n", stderr: "" });
+      if (cmd === "screencapture") {
+        writeFileSync(String(argv[argv.length - 1]), "PNGDATA");
+        return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+      }
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+    await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["FIX-CMD", "--capture-command", "roll status"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          capture: { run: guiRun, platform: "darwin", env: {} },
+        }),
+      ),
+    );
+    const runDir = join(proj, ".roll", "features", "demo", "FIX-CMD", "2026-06-06T01-02-03");
+    // Real screenshot PNG exists (not the .txt fallback)
+    expect(existsSync(join(runDir, "screenshots", "terminal.png"))).toBe(true);
+    expect(existsSync(join(runDir, "screenshots", "terminal-headless.txt"))).toBe(false);
+    const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
+      captures?: Array<{ kind?: string; taken?: boolean }>;
+    };
+    expect(evidence.captures?.[0]?.taken).toBe(true);
+    expect(evidence.captures?.[0]?.kind).toBe("terminal");
+  });
+
+  // AC5: not macOS → fallback promotes text evidence
+  it("not macOS → stdout promoted to taken:true terminal capture via headless fallback", async () => {
+    const proj = cmdProject();
+    const linuxRun: ShotRun = (cmd, argv) => {
+      if (cmd === "sh") return Promise.resolve({ code: 0, stdout: "linux output\n", stderr: "" });
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+    await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["FIX-CMD", "--capture-command", "roll status"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          capture: { run: linuxRun, platform: "linux", env: {} },
+        }),
+      ),
+    );
+    const runDir = join(proj, ".roll", "features", "demo", "FIX-CMD", "2026-06-06T01-02-03");
+    // Headless text evidence exists
+    const txtPath = join(runDir, "screenshots", "terminal-headless.txt");
+    expect(existsSync(txtPath)).toBe(true);
+    expect(readFileSync(txtPath, "utf8")).toContain("linux output");
+    // Terminal capture is taken:true
+    const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
+      captures?: Array<{ kind?: string; taken?: boolean }>;
+    };
+    expect(evidence.captures).toContainEqual({ kind: "terminal", out: txtPath, taken: true });
+  });
+
+  // AC1: the headless .txt file exists and contains the command stdout
+  it("headless fallback writes stdout to screenshots/terminal-headless.txt", async () => {
+    const proj = cmdProject();
+    const multiOutput: ShotRun = (cmd, argv) => {
+      if (cmd === "sh") return Promise.resolve({ code: 0, stdout: "Line A\nLine B\nLine C\n", stderr: "" });
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Background\n", stderr: "" });
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+    await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["FIX-CMD", "--capture-command", "roll status"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          capture: { run: multiOutput, platform: "darwin", env: {} },
+        }),
+      ),
+    );
+    const runDir = join(proj, ".roll", "features", "demo", "FIX-CMD", "2026-06-06T01-02-03");
+    const txt = readFileSync(join(runDir, "screenshots", "terminal-headless.txt"), "utf8");
+    expect(txt).toContain("Line A");
+    expect(txt).toContain("Line C");
+  });
+});
+
 describe("attestCommand — process trace inline (US-ATTEST-014)", () => {
   // Pin the runtime dir to the temp project so the default reader can't fall
   // through to a real .roll/loop when the suite runs inside the loop itself.

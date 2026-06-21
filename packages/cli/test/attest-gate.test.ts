@@ -1221,6 +1221,36 @@ describe("FIX-339 — multi-surface deliverables (web list + deliverable_cmd) + 
     expect(verificationReportHasContent(wtBad, "FIX-S13")).toBe(false);
   });
 
+  // ── FIX-392: headless terminal fallback (text evidence satisfies gate) ─────
+  it("FIX-392: headless deliverable_cmd taken:true text evidence → gate PASS", () => {
+    const wt = withReport("FIX-S16", 2000, '<figure class="shot"><img src="screenshots/terminal-headless.txt"></figure>');
+    addSpec(wt, "FIX-S16", "---\nid: FIX-S16\ndeliverable_cmd: roll status\n---\n# x\n\n## Acceptance Criteria\n\n- [ ] cli works\n");
+    withPeerScore(wt, "FIX-S16", 8, "good", "c-s16");
+    // Headless fallback: a taken:true terminal capture with txt output
+    writeEvidenceJson(wt, "FIX-S16", { captures: [{ kind: "terminal", out: "screenshots/terminal-headless.txt", taken: true }] });
+    expect(verificationReportHasContent(wt, "FIX-S16")).toBe(true);
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-S16", "c-s16", "hard", 1000, s);
+    expect(r.verdict).toBe("produced");
+    expect(r.blocked).toBe(false);
+    // No alert; ALERT only fires on skip
+    expect(alerts).toHaveLength(0);
+  });
+
+  it("FIX-392: headless deliverable_cmd without fallback (taken:false) → gate FAIL (regression guard)", () => {
+    // This test guards against accidentally removing the gate — the OLD
+    // broken behaviour (taken:false on headless) must still fail.
+    const wt = withReport("FIX-S17", 2000, '<figure class="shot"><img src="screenshots/terminal.png"></figure>');
+    addSpec(wt, "FIX-S17", "---\nid: FIX-S17\ndeliverable_cmd: roll status\n---\n# x\n\n## Acceptance Criteria\n\n- [ ] cli works\n");
+    withPeerScore(wt, "FIX-S17", 8, "good", "c-s17");
+    writeEvidenceJson(wt, "FIX-S17", { captures: [{ kind: "terminal", out: "screenshots/terminal.png", taken: false, skipped: "no GUI session" }] });
+    expect(verificationReportHasContent(wt, "FIX-S17")).toBe(false);
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-S17", "c-s17", "hard", 1000, s);
+    expect(r.verdict).toBe("skipped");
+    expect(r.blocked).toBe(true);
+  });
+
   // ── back-compat: single-url card + exempt card unchanged ────────────────────
   it("back-compat: a single-url card still passes with one real web shot (no regression)", () => {
     const wt = withReport("FIX-S14", 2000, '<figure class="shot"><img src="screenshots/web.png"></figure>');

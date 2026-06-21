@@ -2,8 +2,9 @@
 
 ## Unreleased
 
-### 稳定性
-- loop 现在真正从结构化交付账本读取卡状态，不再走 backlog 文字解析回落 `[loop]`
+### 修复
+
+- **终端交付命令在 headless loop 不再假死、命令 stdout 升格为可过闸证据**：之前带 `deliverable_cmd`（终端命令）的卡在无人值守 launchd loop 中因无 GUI session 无法截图，attest 门判败堵死整条 loop。现在终端 lane 镜像 web lane 的 headless 回退——命令执行成功但无 GUI 时自动把 stdout 文本升格为 `taken:true` 终端证据，attest 门可正常通过，不再依赖 epic 级 `screenshot_exempt` 豁免。修复也拓宽了回退条件：原先只匹配 "no GUI session"，现覆盖所有 headless 跳过（含 "not macOS" 等），条件是命令已成功运行。(FIX-392) `[acceptance-evidence]`
 
 ## v3.621.1 — 2026-06-21
 

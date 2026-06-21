@@ -57,6 +57,7 @@ import {
   type EvidenceRun,
   type RunOut,
   type ScreenshotDeps,
+  type ScreenshotResult,
 } from "@roll/infra";
 import {
   existsSync,
@@ -954,9 +955,9 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
         fact = await captureCommandFact(projectPath, lane.command, deps.capture);
         if (commandFact === null) commandFact = fact; // first command is the representative capture_command (back-compat)
       }
-      const shot =
+      let shot: ScreenshotResult =
         fact !== null && fact.exitCode !== 0
-          ? { kind: "terminal" as const, out, taken: false, skipped: `capture command exited ${fact.exitCode}` }
+          ? { kind: "terminal", out, taken: false, skipped: `capture command exited ${fact.exitCode}` }
           : await captureScreenshot(
               {
                 kind: "terminal",
@@ -967,15 +968,27 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
               },
               deps.capture ?? {},
             );
+      // FIX-392: headless fallback — when a terminal deliverable_cmd ran
+      // successfully but the screenshot lane skipped (no GUI / not macOS /
+      // headless), promote the command's stdout to a taken text evidence
+      // artifact so the attest gate does not deadlock. The stdout text IS
+      // the terminal capture.
+      let refStem = stem;
+      if (!shot.taken && fact !== null && fact.exitCode === 0) {
+        refStem = li === 0 ? "terminal-headless.txt" : `terminal-headless-${li}.txt`;
+        const txtOut = join(runDir, "screenshots", refStem);
+        writeFileSync(txtOut, fact.stdoutTail, "utf8");
+        shot = { kind: "terminal", out: txtOut, taken: true };
+      }
       captureFacts.push({
         kind: shot.kind,
         out: shot.out,
         taken: shot.taken,
         ...(shot.skipped !== undefined ? { skipped: shot.skipped } : {}),
       });
-      const ref = screenshotEvidenceRef(shot, `screenshots/${stem}`);
+      const ref = screenshotEvidenceRef(shot, `screenshots/${refStem}`);
       if (ref !== null) selfCaptures.push(ref);
-      else warn(`terminal self-capture skipped (${stem}): ${shot.skipped ?? "unknown"}`);
+      else warn(`terminal self-capture skipped (${refStem}): ${shot.skipped ?? "unknown"}`);
     }
   }
   // FIX-339 (复核 #1): record a terminal skip fact for each REJECTED deliverable_cmd

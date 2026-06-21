@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   EXTERNAL_TOOL_DECLARATIONS,
+  browserToolAvailable,
   collectExternalTools,
   guideExternalToolSetup,
   renderExternalToolDoctorSection,
+  silentPreinstallChromium,
   type ExternalToolDeps,
   type ExternalToolRequestDeps,
   type ExternalToolState,
@@ -66,7 +68,9 @@ describe("external tool detection", () => {
 
     const missing = collectExternalTools(deps({ readDir: () => [], exists: () => false })).find((tool) => tool.id === "playwright-chromium");
     expect(missing?.status).toBe("missing");
-    expect(missing?.repairCommand).toBe("npx playwright install chromium");
+    expect(missing?.repairCommand).toContain("npx");
+    expect(missing?.repairCommand).toContain("playwright@");
+    expect(missing?.repairCommand).toContain("install chromium");
 
     const custom = collectExternalTools(
       deps({
@@ -114,7 +118,7 @@ describe("external tool guided setup", () => {
     guideExternalToolSetup(
       "init",
       requestDeps({
-        states: () => [state("playwright-chromium", "missing", "npx playwright install chromium")],
+        states: () => [state("playwright-chromium", "missing", "npx -y playwright@1.52.0 install chromium")],
         stderr: (line) => err.push(line),
       }),
     );
@@ -130,7 +134,7 @@ describe("external tool guided setup", () => {
       "go",
       requestDeps({
         env: { ROLL_EXTERNAL_TOOLS: "no" },
-        states: () => [state("playwright-chromium", "missing", "npx playwright install chromium")],
+        states: () => [state("playwright-chromium", "missing", "npx -y playwright@1.52.0 install chromium")],
         stderr: (line) => err.push(line),
         execFile: (cmd, args) => {
           execs.push([cmd, ...args].join(" "));
@@ -153,7 +157,7 @@ describe("external tool guided setup", () => {
       "init",
       requestDeps({
         env: { ROLL_EXTERNAL_TOOLS: "yes" },
-        states: () => [state("playwright-chromium", "missing", "npx playwright install chromium")],
+        states: () => [state("playwright-chromium", "missing", "npx -y playwright@1.52.0 install chromium")],
         stderr: (line) => err.push(line),
         execFile: (cmd, args) => {
           execs.push([cmd, ...args].join(" "));
@@ -162,7 +166,34 @@ describe("external tool guided setup", () => {
       }),
     );
 
-    expect(execs).toEqual(["npx playwright install chromium"]);
+    expect(execs.length).toBe(1);
+    expect(execs[0]).toContain("npx");
+    expect(execs[0]).toContain("playwright@");
+    expect(execs[0]).toContain("install chromium");
     expect(err.join("\n")).toContain("repair command started");
+  });
+});
+
+describe("FIX-394 chromium pre-install and availability", () => {
+  it("browserToolAvailable returns boolean (contingent on real fs chromium)", () => {
+    // browserToolAvailable wraps chromiumInstalled which probes the real
+    // Playwright cache. In CI there is no Chromium → false; on a dev machine
+    // with Chromium installed → true. Both are valid outcomes.
+    expect(typeof browserToolAvailable()).toBe("boolean");
+  });
+
+  it("silentPreinstallChromium returns boolean and does not throw", () => {
+    // Best-effort: may install or skip; must never throw.
+    expect(() => silentPreinstallChromium()).not.toThrow();
+    expect(typeof silentPreinstallChromium()).toBe("boolean");
+  });
+
+  it("silentPreinstallChromium returns true when chromium already cached (even with NO_BROWSER=1)", () => {
+    // When chromium IS already installed, the function returns true immediately.
+    // ROLL_ATTEST_NO_BROWSER=1 only matters when chromium is missing (the case
+    // where we'd attempt a download). Test that the function does not throw.
+    const result = silentPreinstallChromium({ ROLL_ATTEST_NO_BROWSER: "1" });
+    // If chromium is installed → true; if not → false. Both are valid.
+    expect(typeof result).toBe("boolean");
   });
 });

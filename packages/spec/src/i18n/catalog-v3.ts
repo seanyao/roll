@@ -184,4 +184,26 @@ export const v3Catalog: Catalog = {
     en: "%s needs the network, but it is STILL unreachable after running the configured proxy-enable command. Check that the command actually turns on connectivity, verify your network, then retry.",
     zh: "%s 需要网络，但执行已配置的代理启用命令后仍不可达。请确认该命令确实能打开网络、检查连接后重试。",
   },
+
+  // FIX-394 — chromium headless browser messages
+  "fix394.chromium_unavailable": {
+    en: "headless Chromium unavailable",
+    zh: "无头 Chromium 不可用",
+  },
+  "fix394.chromium_offline_hint": {
+    en: "offline or network error — chromium download may have failed",
+    zh: "离线或网络错误 — Chromium 下载可能失败",
+  },
+  "fix394.web_evidence_skipped": {
+    en: "web evidence skipped",
+    zh: "网页证据已跳过",
+  },
+  "fix394.chromium_fix_hint": {
+    en: "run `roll init` or `npx playwright install chromium` after connecting to the network to enable web screenshots",
+    zh: "联网后运行 `roll init` 或 `npx playwright install chromium` 以启用网页截图",
+  },
+  "fix394.browser_tool_degraded": {
+    en: "browser tool unavailable — headless Chromium not installed",
+    zh: "浏览器工具不可用 — 无头 Chromium 未安装",
+  },
 };

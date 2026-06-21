@@ -18,7 +18,7 @@
  *                     `screencapture -x -R` the live window rect, then close the
  *                     window. Zero-install, real pixels, no Playwright dependency.
  *                 (2) no GUI / CI / ROLL_ATTEST_HEADLESS=1 → headless Chromium via
- *                     `npx -y playwright@latest screenshot <url> <out>`.
+ *                     `npx -y playwright@<pinned> screenshot <url> <out>` (version pinned per FIX-394).
  *                 (3) neither → honest machine-skip (taken:false + reason).
  *                 skip: ROLL_ATTEST_NO_BROWSER=1 · npx/network unavailable
  *   mobile-ios    `xcrun simctl io booted screenshot <out>`
@@ -46,6 +46,7 @@ import type { RunOut } from "./evidence.js";
 import { containsSecret } from "./redact.js";
 import { BrowserTool, type BrowserScreenshotInput, type BrowserScreenshotOutput } from "./tools/browser.js";
 import { infraToolExecFile, infraToolFs, invokeInfraTool, redactInfraToolValue } from "./tools/delegation.js";
+import { PLAYWRIGHT_PIN, chromiumInstalled } from "./playwright-pin.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -544,22 +545,27 @@ export async function captureScreenshot(
         const reason = await captureWebViaBrowser(req, run);
         if (reason !== null) return skip(`GUI browser capture: ${reason}`);
       } else {
-        let r = await run("npx", ["-y", "playwright@latest", "screenshot", req.url, req.out]);
-        // FIX-314: `playwright@latest` may resolve to a version whose headless
-        // browser isn't installed yet ("Executable doesn't exist … run: npx
-        // playwright install"). Self-heal: install the headless shell once and
-        // retry, so an unattended loop captures a REAL screenshot instead of an
-        // honest skip. (Validated: installing chromium-headless-shell unblocked it.)
+        let r = await run("npx", ["-y", PLAYWRIGHT_PIN, "screenshot", req.url, req.out]);
+        // FIX-314: the pinned headless browser may not be installed yet
+        // ("Executable doesn't exist … run: npx playwright install").
+        // Self-heal: install the headless shell once and retry, so an
+        // unattended loop captures a REAL screenshot instead of an honest skip.
+        // FIX-394: pinned version keeps the install and screenshot aligned;
+        // the cache hit is deterministic across cycles.
         if (r.code !== 0 && /Executable doesn't exist|playwright install/i.test(`${r.stderr}\n${r.stdout}`)) {
-          await run("npx", ["-y", "playwright@latest", "install", "chromium-headless-shell"]);
-          r = await run("npx", ["-y", "playwright@latest", "screenshot", req.url, req.out]);
+          await run("npx", ["-y", PLAYWRIGHT_PIN, "install", "chromium"]);
+          r = await run("npx", ["-y", PLAYWRIGHT_PIN, "screenshot", req.url, req.out]);
         }
         if (r.code !== 0) {
           const why = forceHeadless ? "ROLL_ATTEST_HEADLESS=1 (headless-only mode)" : platform === "darwin" ? "no GUI session" : "non-macOS host";
+          // FIX-394: distinguish the failure cause so the user / log can act.
+          const offlineHint = /ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ETIMEDOUT|network/i.test(`${r.stderr}\n${r.stdout}`)
+            ? " (offline or network error — chromium download may have failed)"
+            : "";
           // Surface the actual failure (last stderr/stdout line) — the old skip
           // hid WHY (e.g. the missing-browser hint), masking the real cause.
           const detail = (r.stderr || r.stdout || "").trim().split("\n").pop()?.slice(0, 160) ?? "";
-          return skip(`headless Chromium unavailable or capture failed (${why}${detail ? `: ${detail}` : ""}; screencapture fallback not applicable)`);
+          return skip(`headless Chromium unavailable${offlineHint} (${why}${detail ? `: ${detail}` : ""})`);
         }
       }
     } else if (req.kind === "mobile-ios") {

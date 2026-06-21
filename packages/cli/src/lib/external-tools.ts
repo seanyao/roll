@@ -2,6 +2,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { accessSync, constants, existsSync, mkdtempSync, readdirSync, readSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
+import { PLAYWRIGHT_INSTALL_CHROMIUM, chromiumInstalled, PLAYWRIGHT_VERSION, PLAYWRIGHT_PIN } from "@roll/infra";
 
 export type ExternalToolStatus = "ok" | "missing" | "permission-missing" | "unknown";
 
@@ -46,7 +47,7 @@ export const EXTERNAL_TOOL_DECLARATIONS: readonly ExternalToolDeclaration[] = [
     label: "Playwright Chromium",
     purpose: "Headless web screenshots for attest and dossier visual evidence.",
     required: false,
-    install: "npx playwright install chromium",
+    install: PLAYWRIGHT_INSTALL_CHROMIUM,
     authorize: "No OS permission needed.",
     impact: "Web screenshot evidence is skipped when GUI capture is unavailable.",
   },
@@ -143,15 +144,15 @@ function playwrightChromiumState(decl: ExternalToolDeclaration, deps: ExternalTo
   }
   const cache = deps.env["PLAYWRIGHT_BROWSERS_PATH"] ?? defaultPlaywrightBrowsersPath(deps);
   const entries = deps.readDir(cache);
-  const hasChromium = entries.some((name) => /^chromium(-|_headless_shell-|$)/.test(name) || /^chromium_headless_shell-/.test(name));
-  if (hasChromium || deps.exists(join(cache, "chromium"))) {
-    return { ...decl, status: "ok", detail: `Chromium browser files found in ${cache}.` };
+  const hasChromium = entries.some((name) => /^chromium(-|_headless_shell-|$)/.test(name) || /^chromium_headless_shell-/.test(name)) || deps.exists(join(cache, "chromium"));
+  if (hasChromium) {
+    return { ...decl, status: "ok", detail: `Chromium browser files found in ${cache} (playwright pinned v${PLAYWRIGHT_VERSION}).` };
   }
   return {
     ...decl,
     status: "missing",
-    detail: `No Chromium browser files found in ${cache}.`,
-    repairCommand: "npx playwright install chromium",
+    detail: `No Chromium browser files found in ${cache} (playwright pinned v${PLAYWRIGHT_VERSION}).`,
+    repairCommand: PLAYWRIGHT_INSTALL_CHROMIUM,
   };
 }
 
@@ -253,4 +254,42 @@ export function guideExternalToolSetup(
     const r = deps.execFile(cmd, args);
     deps.stderr(`  ${tool.label}: ${r.code === 0 ? "repair command started" : "repair command failed"}`);
   }
+}
+
+/**
+ * FIX-394 AC2 — best-effort silent Chromium pre-install. Called during init
+ * and at the start of every unattended loop cycle. When Chromium is already
+ * cached the call is a cheap no-op (a readdir + exist check). When missing and
+ * npx is reachable, runs `PLAYWRIGHT_INSTALL_CHROMIUM` with a generous timeout
+ * and swallows all errors — this is an optional tool, never a hard gate.
+ *
+ * Returns `true` when Chromium was installed (or was already present), `false`
+ * when the attempt failed or was skipped.
+ */
+export function silentPreinstallChromium(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (chromiumInstalled()) return true;
+  // Skip entirely when the owner opted out.
+  if ((env["ROLL_ATTEST_NO_BROWSER"] ?? "") === "1") return false;
+  try {
+    const r = spawnSync("npx", ["-y", PLAYWRIGHT_PIN, "install", "chromium"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 300_000, // 5 min — Chromium download can be large
+      env,
+    });
+    return r.status === 0 && chromiumInstalled();
+  } catch {
+    return false;
+  }
+}
+
+
+/**
+ * FIX-394 AC6 — whether the browser tool is usable on this host.
+ * The browser tool (headless Chromium screenshot / console / DOM query) depends
+ * on chromium being installed. When chromium is absent, the Tools page and the
+ * dossier rendering should mark the browser tool as degraded.
+ */
+export function browserToolAvailable(): boolean {
+  return chromiumInstalled();
 }

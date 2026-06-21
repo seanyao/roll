@@ -991,7 +991,7 @@ describe("FIX-305 — UI/dossier web self-capture lane (real screenshot, not a s
     // a real PNG landed — not a machine-skip, not an empty screenshots dir
     expect(existsSync(join(runDir, "screenshots", "web.png"))).toBe(true);
     // the headless rung was invoked with the EXACT url to shoot
-    expect(calls.join("\n")).toContain("playwright@latest screenshot https://app.test/casting");
+    expect(calls.join("\n")).toContain("playwright@1.52.0 screenshot https://app.test/casting");
     const html = readFileSync(join(runDir, "FIX-WEB-report.html"), "utf8");
     expect(html).toContain('<img src="screenshots/web.png"');
     const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {

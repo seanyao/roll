@@ -24,7 +24,7 @@ import { projectAgent } from "./agent-list.js";
 import { cardArchiveDir } from "../lib/archive.js";
 import { storyTruthFromBacklog } from "../lib/truth-adapter.js";
 import { runPeerReview, spawnPeerReviewAgent, type SpawnPeerReviewResult } from "./peer.js";
-import { guideExternalToolSetup } from "../lib/external-tools.js";
+import { guideExternalToolSetup, silentPreinstallChromium } from "../lib/external-tools.js";
 
 const GO_LOCK_STALE_SEC = 21_600; // 6h: covers the planned 5h goal window.
 const FINAL_REVIEW_TIMEOUT_MS = 300_000;
@@ -1545,6 +1545,9 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
   const startedAt = deps.nowIso();
   const startedSec = deps.nowSec();
   deps.externalTools?.("go");
+  // FIX-394 AC2: best-effort Chromium pre-install before the first cycle
+  // so web screenshot evidence doesn't stall on a 100-200 MB download.
+  silentPreinstallChromium();
   const sid = sessionId(startedAt, deps.pid());
   const baseline = summarizeRuns(runsPath(id.path));
   let initialUsage: RunSummary = { cycles: 0, costUsd: 0 };

@@ -52,7 +52,7 @@ import { onPath, rollPkgDir, syncConventions as sharedSyncConventions } from "./
 import { rollVersion } from "./version.js";
 import { resolveProjectName, shouldSelfRegister, writeProjectRow } from "../lib/projects-registry.js";
 import { projectSlug } from "./dashboard.js";
-import { guideExternalToolSetup } from "../lib/external-tools.js";
+import { guideExternalToolSetup, silentPreinstallChromium } from "../lib/external-tools.js";
 
 /**
  * FIX-283 (AC4): adopting roll registers the project into `~/.roll/projects.json`
@@ -1185,6 +1185,10 @@ export function initCommand(args: string[]): number {
     projectDir = process.cwd();
   }
   guideExternalToolSetup("init");
+  // FIX-394 AC2: best-effort silent Chromium pre-install so the first
+  // cycle that needs a web screenshot doesn't download 100-200 MB on the
+  // critical path. Never blocks init.
+  silentPreinstallChromium();
   let hasAgents = false;
   const summary: Summary = [];
 

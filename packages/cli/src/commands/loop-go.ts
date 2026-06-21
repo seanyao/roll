@@ -821,7 +821,7 @@ function updateProgressFromRows(
 /**
  * US-TRUTH-017: isCardInFlight now accepts structured delivery truth as the
  * preferred input. When {@link deliveryTruth} is present, the lifecycleState
- * field ("in_flight" | "ci_red") replaces the deprecated /PR#\d+/ regex parse
+ * field ("pending_merge" | "ci_red") replaces the deprecated /PR#\d+/ regex parse
  * of the backlog status string.
  *
  * Two-step migration (AC3):
@@ -847,7 +847,7 @@ export function isCardInFlight(
     // in_flight/ci_red is "handed to the PR lane" ONLY with a real PR number; a
     // lifecycle in those states but with no prNumber is a half-written/abnormal
     // state, not in-flight (codex review — don't skip the picker on it).
-    if (deliveryTruth.lifecycleState === "in_flight" || deliveryTruth.lifecycleState === "ci_red") {
+    if (deliveryTruth.lifecycleState === "pending_merge" || deliveryTruth.lifecycleState === "ci_red") {
       return deliveryTruth.prNumber !== undefined;
     }
     return false; // todo / failed / other → not in-flight

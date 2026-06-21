@@ -254,7 +254,7 @@ describe("rule claim-drift — backlog status vs structured delivery truth", () 
     return {
       storyId: "US-DRIFT",
       cycleId: "cycle-001",
-      lifecycleState: "in_flight",
+      lifecycleState: "pending_merge",
       prNumber: present(42),
       prUrl: present("https://gh/pull/42"),
       mergedAt: absent("not_merged"),
@@ -271,7 +271,7 @@ describe("rule claim-drift — backlog status vs structured delivery truth", () 
       snap({
         backlog: [{ id: "US-PREMATURE", status: "✅ Done" }],
         deliveries: [
-          deliveryRecord({ storyId: "US-PREMATURE", lifecycleState: "in_flight" }),
+          deliveryRecord({ storyId: "US-PREMATURE", lifecycleState: "pending_merge" }),
         ],
       }),
     );
@@ -279,7 +279,7 @@ describe("rule claim-drift — backlog status vs structured delivery truth", () 
     expect(drift).toHaveLength(1);
     expect(drift[0]!.severity).toBe("fail");
     expect(drift[0]!.detail).toContain("🔨 In Progress");
-    expect(drift[0]!.detail).toContain("lifecycle=in_flight");
+    expect(drift[0]!.detail).toContain("lifecycle=pending_merge");
     expect(drift[0]!.detail).toContain("delivered=false");
   });
 
@@ -288,7 +288,7 @@ describe("rule claim-drift — backlog status vs structured delivery truth", () 
       snap({
         backlog: [{ id: "US-LAGGING", status: "📋 Todo" }],
         deliveries: [
-          deliveryRecord({ storyId: "US-LAGGING", lifecycleState: "in_flight", prNumber: present(99) }),
+          deliveryRecord({ storyId: "US-LAGGING", lifecycleState: "pending_merge", prNumber: present(99) }),
         ],
       }),
     );
@@ -326,7 +326,7 @@ describe("rule claim-drift — backlog status vs structured delivery truth", () 
       snap({
         backlog: [{ id: "US-MATCH", status: "🔨 In Progress" }],
         deliveries: [
-          deliveryRecord({ storyId: "US-MATCH", lifecycleState: "in_flight", prNumber: present(42) }),
+          deliveryRecord({ storyId: "US-MATCH", lifecycleState: "pending_merge", prNumber: present(42) }),
         ],
       }),
     );
@@ -377,7 +377,7 @@ describe("rule claim-drift — backlog status vs structured delivery truth", () 
       snap({
         backlog: [{ id: "US-NO-MATCH", status: "📋 Todo" }],
         deliveries: [
-          deliveryRecord({ storyId: "US-OTHER", lifecycleState: "in_flight" }),
+          deliveryRecord({ storyId: "US-OTHER", lifecycleState: "pending_merge" }),
         ],
       }),
     );
@@ -393,9 +393,9 @@ describe("rule claim-drift — backlog status vs structured delivery truth", () 
           { id: "US-C", status: "🔨 In Progress" },
         ],
         deliveries: [
-          deliveryRecord({ storyId: "US-A", lifecycleState: "in_flight" }), // premature Done → fail
-          deliveryRecord({ storyId: "US-B", lifecycleState: "in_flight", prNumber: present(5) }), // lagging → warn
-          deliveryRecord({ storyId: "US-C", lifecycleState: "in_flight", prNumber: present(7) }), // match → ok
+          deliveryRecord({ storyId: "US-A", lifecycleState: "pending_merge" }), // premature Done → fail
+          deliveryRecord({ storyId: "US-B", lifecycleState: "pending_merge", prNumber: present(5) }), // lagging → warn
+          deliveryRecord({ storyId: "US-C", lifecycleState: "pending_merge", prNumber: present(7) }), // match → ok
         ],
       }),
     );
@@ -434,7 +434,7 @@ describe("US-TRUTH-018 AC2 — correctBacklogStatus", () => {
     return {
       storyId: "US-CORRECT",
       cycleId: "cycle-001",
-      lifecycleState: "in_flight",
+      lifecycleState: "pending_merge",
       prNumber: present(42),
       prUrl: present("https://gh/pull/42"),
       mergedAt: absent("not_merged"),
@@ -448,7 +448,7 @@ describe("US-TRUTH-018 AC2 — correctBacklogStatus", () => {
     const result = correctBacklogStatus(
       "US-CORRECT",
       "📋 Todo",
-      [deliveryRecord({ storyId: "US-CORRECT", lifecycleState: "in_flight", prNumber: present(99) })],
+      [deliveryRecord({ storyId: "US-CORRECT", lifecycleState: "pending_merge", prNumber: present(99) })],
     );
     expect(result).toBe("🔨 In Progress · PR#99");
   });
@@ -457,7 +457,7 @@ describe("US-TRUTH-018 AC2 — correctBacklogStatus", () => {
     const result = correctBacklogStatus(
       "US-CORRECT",
       "✅ Done",
-      [deliveryRecord({ storyId: "US-CORRECT", lifecycleState: "in_flight", prNumber: present(10) })],
+      [deliveryRecord({ storyId: "US-CORRECT", lifecycleState: "pending_merge", prNumber: present(10) })],
     );
     expect(result).toBe("🔨 In Progress · PR#10");
   });
@@ -466,7 +466,7 @@ describe("US-TRUTH-018 AC2 — correctBacklogStatus", () => {
     const result = correctBacklogStatus(
       "US-CORRECT",
       "🔨 In Progress",
-      [deliveryRecord({ storyId: "US-CORRECT", lifecycleState: "in_flight", prNumber: present(42) })],
+      [deliveryRecord({ storyId: "US-CORRECT", lifecycleState: "pending_merge", prNumber: present(42) })],
     );
     expect(result).toBeNull();
   });
@@ -512,7 +512,7 @@ describe("US-TRUTH-018 AC2 — correctBacklogStatus", () => {
     const result = correctBacklogStatus(
       "US-CORRECT",
       "📋 Todo",
-      [deliveryRecord({ storyId: "US-CORRECT", lifecycleState: "in_flight", prNumber: present(5) })],
+      [deliveryRecord({ storyId: "US-CORRECT", lifecycleState: "pending_merge", prNumber: present(5) })],
     );
     expect(typeof result).toBe("string");
     expect(result).toContain("PR#5");

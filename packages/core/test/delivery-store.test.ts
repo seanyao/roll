@@ -59,7 +59,7 @@ function makeRecord(overrides: Partial<DeliveryRecord> = {}): DeliveryRecord {
   return {
     storyId: "US-TEST-001",
     cycleId: "cycle-20260621-0001",
-    lifecycleState: "in_flight",
+    lifecycleState: "pending_merge",
     prNumber: present(42),
     prUrl: present("https://github.com/example/pull/42"),
     mergedAt: absent("not_recorded"),
@@ -100,7 +100,7 @@ describe("US-TRUTH-014 AC2 — validateDeliveryRecord", () => {
     expect(r).not.toBeNull();
     expect(r!.storyId).toBe("US-TEST-001");
     expect(r!.cycleId).toBe("cycle-20260621-0001");
-    expect(r!.lifecycleState).toBe("in_flight");
+    expect(r!.lifecycleState).toBe("pending_merge");
   });
 
   it("rejects null / non-object", () => {
@@ -263,7 +263,7 @@ describe("US-TRUTH-014 AC3 — readDeliveries last-wins dedup", () => {
 
   it("same (storyId, cycleId) → last occurrence wins", () => {
     const store = new FakeDeliveryStore();
-    appendDelivery(store, PROJ, makeRecord({ storyId: "US-A", cycleId: "c1", lifecycleState: "in_flight", recordedAt: 1000 }));
+    appendDelivery(store, PROJ, makeRecord({ storyId: "US-A", cycleId: "c1", lifecycleState: "pending_merge", recordedAt: 1000 }));
     // Same story+cycle, later write with updated lifecycle
     appendDelivery(store, PROJ, makeRecord({ storyId: "US-A", cycleId: "c1", lifecycleState: "done", recordedAt: 2000 }));
 
@@ -276,7 +276,7 @@ describe("US-TRUTH-014 AC3 — readDeliveries last-wins dedup", () => {
 
   it("different cycleId with same storyId → distinct records", () => {
     const store = new FakeDeliveryStore();
-    appendDelivery(store, PROJ, makeRecord({ storyId: "US-A", cycleId: "c1", lifecycleState: "in_flight" }));
+    appendDelivery(store, PROJ, makeRecord({ storyId: "US-A", cycleId: "c1", lifecycleState: "pending_merge" }));
     appendDelivery(store, PROJ, makeRecord({ storyId: "US-A", cycleId: "c2", lifecycleState: "done" }));
 
     const records = readDeliveries(store, PROJ);
@@ -288,8 +288,8 @@ describe("US-TRUTH-014 AC3 — readDeliveries last-wins dedup", () => {
   it("multiple re-emissions → only the last survives", () => {
     const store = new FakeDeliveryStore();
     appendDelivery(store, PROJ, makeRecord({ storyId: "US-X", cycleId: "cy", lifecycleState: "building", recordedAt: 1 }));
-    appendDelivery(store, PROJ, makeRecord({ storyId: "US-Y", cycleId: "cy2", lifecycleState: "in_flight", recordedAt: 2 }));
-    appendDelivery(store, PROJ, makeRecord({ storyId: "US-X", cycleId: "cy", lifecycleState: "in_flight", recordedAt: 3 }));
+    appendDelivery(store, PROJ, makeRecord({ storyId: "US-Y", cycleId: "cy2", lifecycleState: "pending_merge", recordedAt: 2 }));
+    appendDelivery(store, PROJ, makeRecord({ storyId: "US-X", cycleId: "cy", lifecycleState: "pending_merge", recordedAt: 3 }));
     appendDelivery(store, PROJ, makeRecord({ storyId: "US-X", cycleId: "cy", lifecycleState: "done", recordedAt: 4 }));
 
     const records = readDeliveries(store, PROJ);

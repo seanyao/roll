@@ -164,7 +164,7 @@ export function parseMergeCommitMessages(lines: string[]): MergeFact[] {
  * Rules (AC1, AC4, AC7):
  *   - Per story, latest run wins.
  *   - If ANY run's PR is merged on main → lifecycleState: "done".
- *   - Else if latest run has outcome "published_pending_merge" → "in_flight".
+ *   - Else if latest run has outcome "published_pending_merge" → "pending_merge".
  *   - Else if latest run has terminal outcome → that lifecycleState.
  *   - Otherwise → no record emitted (= todo).
  *
@@ -266,7 +266,7 @@ export function rebuildDeliveriesFromFacts(
     let lifecycle: DeliveryRecord["lifecycleState"];
 
     if (outcome === "published_pending_merge") {
-      lifecycle = "in_flight";
+      lifecycle = "pending_merge";
     } else if (outcome === "failed") {
       lifecycle = "failed";
     } else if (outcome === "blocked") {
@@ -277,7 +277,7 @@ export function rebuildDeliveriesFromFacts(
     } else if (outcome === "aborted_no_delivery" || outcome === "gave_up") {
       lifecycle = "failed";
     } else if (outcome === "aborted_with_delivery") {
-      lifecycle = "in_flight";
+      lifecycle = "pending_merge";
     } else if (outcome === "orphan_timeout") {
       lifecycle = "blocked";
     } else if (outcome === "idle_no_work") {

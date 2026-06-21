@@ -125,7 +125,7 @@ describe("US-TRUTH-017 AC1 — deriveStoryTruth with structured deliveryTruth", 
     const t = deriveStoryTruth(
       storyInput({
         backlogStatus: "📋 Todo", // string claim is "not done"
-        deliveryTruth: dtInput({ lifecycleState: "in_flight", delivered: false, prNumber: 42 }),
+        deliveryTruth: dtInput({ lifecycleState: "pending_merge", delivered: false, prNumber: 42 }),
         prEvidence: { state: "OPEN" },
       }),
     );
@@ -172,7 +172,7 @@ describe("US-TRUTH-017 AC1 — deriveStoryTruth with structured deliveryTruth", 
     const t = deriveStoryTruth(
       storyInput({
         backlogStatus: "🔨 In Progress",
-        deliveryTruth: dtInput({ lifecycleState: "in_flight", delivered: false, prNumber: 42 }),
+        deliveryTruth: dtInput({ lifecycleState: "pending_merge", delivered: false, prNumber: 42 }),
         prEvidence: { state: "MERGED", mergedAtSec: NOW - GRACE - 10 },
       }),
     );

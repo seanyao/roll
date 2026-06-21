@@ -24,7 +24,7 @@ describe("US-TRUTH-013 AC2 — LifecycleState enum", () => {
     expect(LIFECYCLE_STATES).toEqual([
       "todo",
       "building",
-      "in_flight",
+      "pending_merge",
       "ci_red",
       "blocked",
       "on_hold",
@@ -49,7 +49,7 @@ describe("US-TRUTH-013 AC1 — DeliveryRecord type shape", () => {
     const record: DeliveryRecord = {
       storyId: "US-TEST-001",
       cycleId: "cycle-1",
-      lifecycleState: "in_flight",
+      lifecycleState: "pending_merge",
       prNumber: present(42),
       prUrl: present("https://github.com/example/pull/42"),
       mergedAt: absent("not_recorded"),
@@ -57,7 +57,7 @@ describe("US-TRUTH-013 AC1 — DeliveryRecord type shape", () => {
       recordedAt: 1000,
     };
     expect(record.storyId).toBe("US-TEST-001");
-    expect(record.lifecycleState).toBe("in_flight");
+    expect(record.lifecycleState).toBe("pending_merge");
     expect(record.prNumber).toEqual(present(42));
     expect(record.prUrl).toEqual(present("https://github.com/example/pull/42"));
   });
@@ -85,18 +85,18 @@ describe("US-TRUTH-013 AC3 — lifecycleFromFacts deterministic mappings", () =>
 
   const cases: Case[] = [
     // published_pending_merge + PR open → in_flight (the classic case)
-    ["published_pending_merge", "open", "in_flight"],
+    ["published_pending_merge", "open", "pending_merge"],
     // published_pending_merge + PR open_ci_red → ci_red (AC5)
     ["published_pending_merge", "open_ci_red", "ci_red"],
     // published_pending_merge + PR closed → abandoned
     ["published_pending_merge", "closed", "abandoned"],
     // published_pending_merge + PR unknown → still in_flight
-    ["published_pending_merge", "unknown", "in_flight"],
+    ["published_pending_merge", "unknown", "pending_merge"],
 
     // delivered + PR merged → done
     ["delivered", "merged", "done"],
     // delivered + PR open (delivered from backfill, PR not merged yet) → in_flight
-    ["delivered", "open", "in_flight"],
+    ["delivered", "open", "pending_merge"],
     // delivered + PR open_ci_red → ci_red
     ["delivered", "open_ci_red", "ci_red"],
 
@@ -117,7 +117,7 @@ describe("US-TRUTH-013 AC3 — lifecycleFromFacts deterministic mappings", () =>
     ["aborted_no_delivery", "none", "failed"],
 
     // aborted_with_delivery + PR open → in_flight (work was pushed)
-    ["aborted_with_delivery", "open", "in_flight"],
+    ["aborted_with_delivery", "open", "pending_merge"],
     // aborted_with_delivery + PR open_ci_red → ci_red
     ["aborted_with_delivery", "open_ci_red", "ci_red"],
     // aborted_with_delivery + no PR → failed
@@ -195,11 +195,11 @@ describe("US-TRUTH-013 AC5 — ci_red as PR-level sub-state", () => {
     // published_pending_merge + open_ci_red → ci_red (not in_flight)
     expect(lifecycleFromFacts("published_pending_merge", "open_ci_red")).toBe("ci_red");
     // But open (clean CI) still maps to in_flight
-    expect(lifecycleFromFacts("published_pending_merge", "open")).toBe("in_flight");
+    expect(lifecycleFromFacts("published_pending_merge", "open")).toBe("pending_merge");
   });
 
   it("ci_red is distinct from in_flight — they are separate states in the closed set", () => {
-    expect("ci_red" as LifecycleState).not.toBe("in_flight");
+    expect("ci_red" as LifecycleState).not.toBe("pending_merge");
     // The distinction: ci_red means PR CI is red; in_flight means PR CI is passing.
     // Both mean the story is still actively in flight.
   });

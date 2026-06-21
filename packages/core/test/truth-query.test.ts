@@ -15,7 +15,7 @@ function makeRecord(overrides: Partial<DeliveryRecord> = {}): DeliveryRecord {
   return {
     storyId: "US-TEST-001",
     cycleId: "cycle-20260621-0001",
-    lifecycleState: "in_flight",
+    lifecycleState: "pending_merge",
     prNumber: present(42),
     prUrl: present("https://github.com/example/pull/42"),
     mergedAt: absent("not_recorded"),
@@ -53,7 +53,7 @@ describe("US-TRUTH-016 AC2 — queryStoryDelivery with no records", () => {
 describe("US-TRUTH-016 AC2 — deterministic output", () => {
   it("same input produces identical output twice", () => {
     const records = [
-      makeRecord({ storyId: "US-DET", cycleId: "c1", lifecycleState: "in_flight", recordedAt: 100 }),
+      makeRecord({ storyId: "US-DET", cycleId: "c1", lifecycleState: "pending_merge", recordedAt: 100 }),
       makeRecord({ storyId: "US-DET", cycleId: "c1", lifecycleState: "done", recordedAt: 200 }),
     ];
     const r1 = queryStoryDelivery("US-DET", records);
@@ -63,7 +63,7 @@ describe("US-TRUTH-016 AC2 — deterministic output", () => {
 
   it("last-wins: later recordedAt overrides same (storyId, cycleId)", () => {
     const records = [
-      makeRecord({ storyId: "US-LW", cycleId: "c1", lifecycleState: "in_flight", recordedAt: 100 }),
+      makeRecord({ storyId: "US-LW", cycleId: "c1", lifecycleState: "pending_merge", recordedAt: 100 }),
       makeRecord({ storyId: "US-LW", cycleId: "c1", lifecycleState: "done", recordedAt: 200 }),
     ];
     const result = queryStoryDelivery("US-LW", records);
@@ -76,10 +76,10 @@ describe("US-TRUTH-016 AC2 — deterministic output", () => {
 describe("US-TRUTH-016 AC3 — in_flight ≠ todo", () => {
   it("in_flight is clearly distinct from todo", () => {
     const records = [
-      makeRecord({ storyId: "US-INF", cycleId: "c1", lifecycleState: "in_flight", recordedAt: 100 }),
+      makeRecord({ storyId: "US-INF", cycleId: "c1", lifecycleState: "pending_merge", recordedAt: 100 }),
     ];
     const result = queryStoryDelivery("US-INF", records);
-    expect(result.lifecycleState).toBe("in_flight");
+    expect(result.lifecycleState).toBe("pending_merge");
     expect(result.delivered).toBe(false);
     expect(result.prNumber).toBe(42);
   });
@@ -120,10 +120,10 @@ describe("US-TRUTH-016 AC1 — done scenario", () => {
   it("delivered: true even if the latest record is in_flight but an earlier record is done", () => {
     const records = [
       makeRecord({ storyId: "US-MULTI", cycleId: "c1", lifecycleState: "done", recordedAt: 100 }),
-      makeRecord({ storyId: "US-MULTI", cycleId: "c2", lifecycleState: "in_flight", recordedAt: 200 }),
+      makeRecord({ storyId: "US-MULTI", cycleId: "c2", lifecycleState: "pending_merge", recordedAt: 200 }),
     ];
     const result = queryStoryDelivery("US-MULTI", records);
-    expect(result.lifecycleState).toBe("in_flight"); // latest
+    expect(result.lifecycleState).toBe("pending_merge"); // latest
     expect(result.delivered).toBe(true); // any done
     expect(result.deliveringCycles).toEqual(["c1", "c2"]);
   });
@@ -131,10 +131,10 @@ describe("US-TRUTH-016 AC1 — done scenario", () => {
   it("extracts merge details from the done record even when a later in_flight exists", () => {
     const records = [
       makeRecord({ storyId: "US-DET", cycleId: "c1", lifecycleState: "done", prNumber: present(1), mergeCommit: present("aaa"), recordedAt: 100 }),
-      makeRecord({ storyId: "US-DET", cycleId: "c2", lifecycleState: "in_flight", prNumber: present(2), recordedAt: 200 }),
+      makeRecord({ storyId: "US-DET", cycleId: "c2", lifecycleState: "pending_merge", prNumber: present(2), recordedAt: 200 }),
     ];
     const result = queryStoryDelivery("US-DET", records);
-    expect(result.lifecycleState).toBe("in_flight");
+    expect(result.lifecycleState).toBe("pending_merge");
     expect(result.delivered).toBe(true);
     // Merge commit comes from the done record
     expect(result.mergeCommit).toBe("aaa");
@@ -172,14 +172,14 @@ describe("US-TRUTH-015 AC1 — missing prNumber on publish", () => {
       makeRecord({
         storyId: "US-NOPR",
         cycleId: "c1",
-        lifecycleState: "in_flight",
+        lifecycleState: "pending_merge",
         prNumber: absent("pr_number_unparseable"),
         prUrl: present("https://gh/pull/unknown"),
         recordedAt: 100,
       }),
     ];
     const result = queryStoryDelivery("US-NOPR", records);
-    expect(result.lifecycleState).toBe("in_flight");
+    expect(result.lifecycleState).toBe("pending_merge");
     expect(result.prNumber).toBeUndefined();
     expect(result.missingReason).toBe("pr_number_pr_number_unparseable");
   });
@@ -224,7 +224,7 @@ describe("US-TRUTH-015 AC3 — deriveBacklogStatus", () => {
 
   it("in_flight with PR → 🔨 In Progress · PR#42", () => {
     const t: StoryDeliveryTruth = {
-      storyId: "US-INF", lifecycleState: "in_flight", delivered: false,
+      storyId: "US-INF", lifecycleState: "pending_merge", delivered: false,
       prNumber: 42, prUrl: "https://gh/pull/42",
       lastRecordedAt: 100, deliveringCycles: ["c1"],
     };
@@ -233,7 +233,7 @@ describe("US-TRUTH-015 AC3 — deriveBacklogStatus", () => {
 
   it("in_flight without PR → 🔨 In Progress (no suffix)", () => {
     const t: StoryDeliveryTruth = {
-      storyId: "US-INF2", lifecycleState: "in_flight", delivered: false,
+      storyId: "US-INF2", lifecycleState: "pending_merge", delivered: false,
       lastRecordedAt: 100, deliveringCycles: ["c1"],
     };
     expect(deriveBacklogStatus(t)).toBe("🔨 In Progress");
@@ -315,14 +315,14 @@ describe("US-TRUTH-015 AC4 — end-to-end: query → derive", () => {
       makeRecord({
         storyId: "US-E2E",
         cycleId: "cycle-pub",
-        lifecycleState: "in_flight",
+        lifecycleState: "pending_merge",
         prNumber: present(878),
         prUrl: present("https://github.com/owner/repo/pull/878"),
         recordedAt: 1000,
       }),
     ];
     const truth = queryStoryDelivery("US-E2E", records);
-    expect(truth.lifecycleState).toBe("in_flight");
+    expect(truth.lifecycleState).toBe("pending_merge");
     expect(truth.delivered).toBe(false);
     expect(truth.prNumber).toBe(878);
 
@@ -335,7 +335,7 @@ describe("US-TRUTH-015 AC4 — end-to-end: query → derive", () => {
       makeRecord({
         storyId: "US-E2E",
         cycleId: "cycle-pub",
-        lifecycleState: "in_flight",
+        lifecycleState: "pending_merge",
         prNumber: present(878),
         prUrl: present("https://github.com/owner/repo/pull/878"),
         recordedAt: 1000,
@@ -363,7 +363,7 @@ describe("US-TRUTH-015 AC4 — end-to-end: query → derive", () => {
   it("backlog status consistent with structured truth (not markdown)", () => {
     // The backlog display string is purely derived — no markdown parsing
     const records = [
-      makeRecord({ storyId: "US-CONS", cycleId: "c1", lifecycleState: "in_flight", prNumber: present(5), recordedAt: 100 }),
+      makeRecord({ storyId: "US-CONS", cycleId: "c1", lifecycleState: "pending_merge", prNumber: present(5), recordedAt: 100 }),
     ];
     const truth = queryStoryDelivery("US-CONS", records);
     const status = deriveBacklogStatus(truth);
@@ -371,7 +371,7 @@ describe("US-TRUTH-015 AC4 — end-to-end: query → derive", () => {
     // markdown cell — so it should be deterministic and machine-readable.
     expect(status).toContain("PR#5");
     // A machine can check the truth directly:
-    expect(truth.lifecycleState).toBe("in_flight");
+    expect(truth.lifecycleState).toBe("pending_merge");
     expect(truth.prNumber).toBe(5);
   });
 });
@@ -402,9 +402,9 @@ describe("US-TRUTH-016 AC5 — alignment with lifecycleFromFacts (US-TRUTH-013)"
   // published_pending_merge + PR open → in_flight
   it("published_pending_merge + open PR → query shows in_flight, not delivered", () => {
     const record = makeAlignedRecord("US-ALIGN1", "published_pending_merge", "open");
-    expect(record.lifecycleState).toBe("in_flight"); // lifecycleFromFacts
+    expect(record.lifecycleState).toBe("pending_merge"); // lifecycleFromFacts
     const truth = queryStoryDelivery("US-ALIGN1", [record]);
-    expect(truth.lifecycleState).toBe("in_flight");
+    expect(truth.lifecycleState).toBe("pending_merge");
     expect(truth.delivered).toBe(false);
     expect(truth.prNumber).toBe(1);
   });
@@ -465,7 +465,7 @@ describe("US-TRUTH-016 AC5 — alignment with lifecycleFromFacts (US-TRUTH-013)"
       cycleId: "cycle-1",
       recordedAt: 200,
     });
-    expect(inFlight.lifecycleState).toBe("in_flight");
+    expect(inFlight.lifecycleState).toBe("pending_merge");
     expect(done.lifecycleState).toBe("done");
 
     const truth = queryStoryDelivery("US-PROG", [inFlight, done]);

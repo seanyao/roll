@@ -271,7 +271,7 @@ describe("rebuildDeliveriesFromFacts — AC1: in_flight when published not merge
     })];
     const result = rebuildDeliveriesFromFacts(runs, []);
     expect(result).toHaveLength(1);
-    expect(result[0].lifecycleState).toBe("in_flight");
+    expect(result[0].lifecycleState).toBe("pending_merge");
     expect(result[0].prNumber).toEqual({ present: true, value: 42 });
     expect(result[0].mergeCommit).toEqual({ present: false, reason: "not_recorded" });
   });
@@ -341,7 +341,7 @@ describe("rebuildDeliveriesFromFacts — AC1: other outcomes", () => {
     })];
     const result = rebuildDeliveriesFromFacts(runs, []);
     expect(result).toHaveLength(1);
-    expect(result[0].lifecycleState).toBe("in_flight");
+    expect(result[0].lifecycleState).toBe("pending_merge");
   });
 });
 
@@ -399,7 +399,7 @@ describe("rebuildDeliveriesFromFacts — constraints", () => {
     ];
     const result = rebuildDeliveriesFromFacts(runs, []);
     expect(result).toHaveLength(1);
-    expect(result[0].lifecycleState).toBe("in_flight");
+    expect(result[0].lifecycleState).toBe("pending_merge");
   });
 
   it("merged beats in_flight: even if latest run is in_flight, merge wins", () => {
@@ -436,7 +436,7 @@ describe("rebuildDeliveriesFromFacts — constraints", () => {
     // US-AC2B should be in_flight
     const flightRec = d2.find((r) => r.storyId === "US-AC2B");
     expect(flightRec).toBeDefined();
-    expect(flightRec!.lifecycleState).toBe("in_flight");
+    expect(flightRec!.lifecycleState).toBe("pending_merge");
   });
 
   it("AC4: backfill = rebuild — no separate script needed", () => {
@@ -461,7 +461,7 @@ describe("rebuildDeliveriesFromFacts — constraints", () => {
 
     // US-OLD2: published but not merged → in_flight
     const d2 = deliveries.find((d) => d.storyId === "US-OLD2");
-    expect(d2!.lifecycleState).toBe("in_flight");
+    expect(d2!.lifecycleState).toBe("pending_merge");
 
     // US-OLD3: published AND merged (via git) → done
     const d3 = deliveries.find((d) => d.storyId === "US-OLD3");
@@ -712,7 +712,7 @@ describe("ensureDeliveriesFresh", () => {
     const result = ensureDeliveriesFresh(PROJ, freshness, exec);
     expect(result).toHaveLength(1);
     expect(result[0].storyId).toBe("US-NEW");
-    expect(result[0].lifecycleState).toBe("in_flight");
+    expect(result[0].lifecycleState).toBe("pending_merge");
     // Cache should have been written
     expect(freshness._files.has(DEL)).toBe(true);
   });
@@ -732,7 +732,7 @@ describe("ensureDeliveriesFresh", () => {
 
     const result = ensureDeliveriesFresh(PROJ, freshness, exec);
     expect(result).toHaveLength(1);
-    expect(result[0].lifecycleState).toBe("in_flight");
+    expect(result[0].lifecycleState).toBe("pending_merge");
     expect(result[0].prNumber).toEqual({ present: true, value: 99 });
   });
 
@@ -849,7 +849,7 @@ describe("ensureDeliveriesFresh", () => {
     // but the merge fact IS collected.
     // This test verifies the squash-merge pass works — merge facts are collected.
     expect(result).toHaveLength(1);
-    expect(result[0].lifecycleState).toBe("in_flight");
+    expect(result[0].lifecycleState).toBe("pending_merge");
   });
 
   it("squash-merge + run with backfill mergeCommit → done", () => {

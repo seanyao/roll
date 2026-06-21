@@ -1699,7 +1699,7 @@ export async function executeCommand(
           appendDelivery(nodeDeliveryStore, ports.repoCwd, {
             storyId: ctx.storyId,
             cycleId: ctx.cycleId,
-            lifecycleState: "in_flight",
+            lifecycleState: "pending_merge",
             prNumber: parsedNumber !== undefined
               ? present(Number(parsedNumber))
               : absent("not_recorded"),

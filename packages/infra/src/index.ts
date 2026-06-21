@@ -8,3 +8,4 @@ export * from "./evidence.js";
 export * from "./screenshot.js";
 export * from "./redact.js";
 export * from "./tools/index.js";
+export * from "./playwright-pin.js";

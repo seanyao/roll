@@ -63,7 +63,7 @@ describe("web (headless Chromium lane — no GUI / CI)", () => {
     const { run, calls } = fake({ npx: { code: 0, writes: true } });
     const r = await captureScreenshot({ kind: "web", url: "https://x", out: outPath() }, { run, env: {}, platform: "linux" });
     expect(r.taken).toBe(true);
-    expect(calls[0]).toContain("playwright@latest screenshot https://x");
+    expect(calls[0]).toContain("playwright@1.52.0 screenshot https://x");
   });
 
   it("ROLL_ATTEST_NO_BROWSER=1 skips before any spawn", async () => {
@@ -112,7 +112,7 @@ describe("FIX-314 ROLL_ATTEST_HEADLESS=1 — loop / unattended path forces headl
     expect(r.taken).toBe(true);
     const joined = calls.join("\n");
     // headless playwright was used
-    expect(joined).toContain("playwright@latest screenshot file:///tmp/dossier/index.html");
+    expect(joined).toContain("playwright@1.52.0 screenshot file:///tmp/dossier/index.html");
     // GUI probed must NOT have happened (launchctl never called; the flag short-circuits before it)
     expect(calls.some((c) => c.startsWith("launchctl "))).toBe(false);
     // No real browser window was opened
@@ -128,7 +128,7 @@ describe("FIX-314 ROLL_ATTEST_HEADLESS=1 — loop / unattended path forces headl
       { run, env: { ROLL_ATTEST_HEADLESS: "1" }, platform: "linux" },
     );
     expect(r.taken).toBe(true);
-    expect(calls.some((c) => c.includes("playwright@latest screenshot"))).toBe(true);
+    expect(calls.some((c) => c.includes("playwright@1.52.0 screenshot"))).toBe(true);
     expect(calls.some((c) => c.startsWith("launchctl "))).toBe(false);
   });
 
@@ -191,7 +191,7 @@ describe("FIX-291 web fallback ladder — never a silent DOM downgrade", () => {
     expect(r.taken).toBe(true);
     const joined = calls.join("\n");
     expect(joined).toContain("launchctl managername"); // GUI probed first
-    expect(joined).toContain("playwright@latest screenshot https://x"); // then headless
+    expect(joined).toContain("playwright@1.52.0 screenshot https://x"); // then headless
     expect(calls.some((c) => c.startsWith("osascript ") && c.includes("Chrome"))).toBe(false); // no browser window
   });
 
@@ -820,7 +820,7 @@ describe("US-EVID-003 capture markers", () => {
     expect(after.taken).toBe(true);
     expect(existsSync(join(runDir, "screenshots", "before-home.png"))).toBe(true);
     expect(existsSync(join(runDir, "screenshots", "after-home.png"))).toBe(true);
-    expect(calls.join("\n")).toContain("playwright@latest screenshot https://app.test");
+    expect(calls.join("\n")).toContain("playwright@1.52.0 screenshot https://app.test");
   });
 
   it("captures terminal gate markers through tmux into the same screenshots dir", async () => {

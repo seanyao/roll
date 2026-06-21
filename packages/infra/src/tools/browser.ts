@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import type { ExecResult, ToolDeclaration, ToolDeps, ToolErrorCode, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
+import { PLAYWRIGHT_PIN } from "../playwright-pin.js";
 
 export type BrowserToolId = "browser.screenshot" | "browser.console" | "browser.dom-query";
 
@@ -258,7 +259,7 @@ function headlessArgs(
   return [
     "-y",
     "-p",
-    "playwright@latest",
+    PLAYWRIGHT_PIN,
     "node",
     "-e",
     headlessScript(action),

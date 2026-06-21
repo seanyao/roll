@@ -10,7 +10,7 @@
  * on every machine. Pure + deterministic (no clock, no RNG, no network): the
  * same machine always renders byte-identical rows.
  */
-import { builtinToolDeclarations } from "@roll/infra";
+import { builtinToolDeclarations, chromiumInstalled } from "@roll/infra";
 import type { ToolDeclaration, ToolDefaults, ToolKind, ToolRequirement, ToolSandbox } from "@roll/spec";
 
 export interface ToolPanelGuardrails {
@@ -34,6 +34,14 @@ export interface ToolPanelRow {
   guardrails: ToolPanelGuardrails;
   /** declaration.requirements mapped to human labels; [] when none. */
   requirements: string[];
+  /**
+   * FIX-394 AC6 — a tool whose host dependency is absent is marked unavailable
+   * rather than silently shown as ready. The caller (tool display / dossier
+   * renderer) should degrade the row (icon, label) when this is false.
+   */
+  available: boolean;
+  /** Human reason for unavailable — may be '' when available. */
+  unavailableReason: string;
 }
 
 /**
@@ -45,6 +53,7 @@ export function collectToolPanel(): ToolPanelRow[] {
 }
 
 function toRow(declaration: ToolDeclaration): ToolPanelRow {
+  const avail = toolAvailability(declaration);
   return {
     id: String(declaration.id),
     kind: declaration.kind,
@@ -53,7 +62,22 @@ function toRow(declaration: ToolDeclaration): ToolPanelRow {
     emitsEvents: declaration.emitsEvents ?? false,
     guardrails: guardrailsOf(declaration.defaults),
     requirements: (declaration.requirements ?? []).map(requirementLabel),
+    available: avail.ok,
+    unavailableReason: avail.reason,
   };
+}
+
+/** FIX-394 AC6 — check whether the host dependency for a built-in tool is present. */
+function toolAvailability(declaration: ToolDeclaration): { ok: boolean; reason: string } {
+  // Browser tools (browser.screenshot / .console / .dom-query) depend on
+  // headless Chromium being installed. When chromium is absent, mark the
+  // tools as unavailable so the user sees WHY web evidence was skipped.
+  if (declaration.kind === "browser") {
+    return chromiumInstalled()
+      ? { ok: true, reason: "" }
+      : { ok: false, reason: "headless Chromium not installed — run `npx playwright install chromium` or `roll init` to pre-install" };
+  }
+  return { ok: true, reason: "" };
 }
 
 function guardrailsOf(defaults: ToolDefaults | undefined): ToolPanelGuardrails {

@@ -201,6 +201,7 @@ afterAll(() => {
 const ENV_KEYS = [
   "PATH", "HOME", "ROLL_HOME", "ROLL_PKG_DIR", "NO_COLOR", "ROLL_LANG", "LC_ALL", "LANG", "PWD",
   "ROLL_AGENT_ROUTES_TEMPLATE", "ROLL_ONBOARD_AGENT", "ROLL_ASSUME_TTY", "ROLL_BRAND_NAME",
+  "ROLL_ATTEST_NO_BROWSER",
 ];
 
 function envBase(fx: Fixture, extra: Record<string, string>): Record<string, string> {
@@ -212,6 +213,12 @@ function envBase(fx: Fixture, extra: Record<string, string>): Record<string, str
     NO_COLOR: "1",
     ROLL_LANG: "en",
     PWD: fx.proj,
+    // FIX-394: init does a best-effort silent Chromium pre-install. The
+    // difftest fixtures use an empty HOME, so without this the test would
+    // trigger a real `npx playwright install` (a multi-minute network
+    // subprocess) and risk hanging CI. The difftest does not exercise the
+    // browser tool, so opting out keeps it deterministic and fast.
+    ROLL_ATTEST_NO_BROWSER: "1",
     ...extra,
   };
 }

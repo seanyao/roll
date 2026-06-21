@@ -20,6 +20,8 @@ const FIXTURE: ToolPanelRow[] = [
     emitsEvents: false,
     guardrails: { timeoutMs: 120000, sandbox: "workspace-write", retries: 1 },
     requirements: [],
+    available: true,
+    unavailableReason: "",
   },
   {
     id: "browser.screenshot",
@@ -29,6 +31,8 @@ const FIXTURE: ToolPanelRow[] = [
     emitsEvents: true,
     guardrails: { timeoutMs: 30000, sandbox: "headless" },
     requirements: ["playwright-or-chrome (optional)"],
+    available: true,
+    unavailableReason: "",
   },
   {
     id: "browser.console",
@@ -38,6 +42,8 @@ const FIXTURE: ToolPanelRow[] = [
     emitsEvents: true,
     guardrails: { timeoutMs: 30000, sandbox: "headless" },
     requirements: ["playwright-or-chrome (optional)"],
+    available: true,
+    unavailableReason: "",
   },
   {
     id: "git.commit",
@@ -47,6 +53,8 @@ const FIXTURE: ToolPanelRow[] = [
     emitsEvents: true,
     guardrails: { timeoutMs: 60000 },
     requirements: ["git"],
+    available: true,
+    unavailableReason: "",
   },
   {
     // no guardrails set → "default policy"; no requirements → out-of-the-box.
@@ -57,6 +65,8 @@ const FIXTURE: ToolPanelRow[] = [
     emitsEvents: false,
     guardrails: {},
     requirements: [],
+    available: true,
+    unavailableReason: "",
   },
 ];
 

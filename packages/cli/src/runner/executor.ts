@@ -54,6 +54,7 @@ import {
   nodeExecPort,
   type FreshnessPort,
   latestDeliveringCycle,
+  runRowHasPublishedPr,
   parseClaimedIdsFromBacklog,
   parseBacklog,
   parsePolicy,
@@ -762,7 +763,7 @@ export async function executeCommand(
                 .prState(ports.repoCwd, reconcileBranchName(cycle))
                 .catch(() => undefined);
             }
-            const decision = decideClaimReconcile({ hasDeliveringCycle: cycle !== undefined, prState });
+            const decision = decideClaimReconcile({ hasDeliveringCycle: cycle !== undefined, prState, hasPublishedPr: runRowHasPublishedPr(runRows, claim.id) });
             if (decision === "done") ports.backlog.markStatus?.(ports.repoCwd, claim.id, STATUS_MARKER.done);
             else if (decision === "todo") ports.backlog.markStatus?.(ports.repoCwd, claim.id, STATUS_MARKER.todo);
             // "keep" → leave 🔨 (delivered, pending merge).

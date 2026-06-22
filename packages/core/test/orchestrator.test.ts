@@ -290,13 +290,14 @@ describe("happy-path phase walk → done", () => {
     ]);
     // The budget gate is REMOVED — route_resolved now emits spawn_agent directly
     // (no intermediate budget_check step).
+    // FIX-382: cycle:start moved from worktree_created to route_resolved.
     expect(kinds).toEqual([
       "preflight",
       "create_worktree",
-      "emit_event", // cycle:start
       "pick_story",
       "resume_worktree", // RESUME-PRIOR-WORK re-point (post-pick, before route/spawn)
       "resolve_route",
+      "emit_event", // cycle:start (FIX-382: now emitted at route_resolved with real storyId+agent)
       "spawn_agent",
       "capture_facts",
       "publish_pr",
@@ -482,8 +483,8 @@ describe("failure branches", () => {
     drive({ type: "worktree_created" });
     drive({ type: "story_picked", storyId: "US-1" });
     const cmds = drive({ type: "route_resolved", agent: "claude", model: "opus" });
-    // No budget_check / halt_cycle step — the route goes straight to spawn.
-    expect(cmds.map((c) => c.kind)).toEqual(["spawn_agent"]);
+    // FIX-382: route_resolved now emits cycle:start (with resolved storyId+agent) before spawn.
+    expect(cmds.map((c) => c.kind)).toEqual(["emit_event", "spawn_agent"]);
     expect(state.phase).toBe("execute");
     expect(state.attempt).toBe(1);
   });

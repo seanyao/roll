@@ -1,5 +1,9 @@
 import { parseEventLine, type RollEvent } from "@roll/spec";
 
+/** FIX-382: durable cycle→story/agent lookup from runs.jsonl, used as fallback
+ *  when the in-window events don't contain a cycle:start. */
+export type DurableCycleLookup = Record<string, { storyId: string; agent: string }>;
+
 export interface WatchStatusSummary {
   cycleId?: string;
   storyId?: string;
@@ -69,7 +73,7 @@ function signalLabel(ev: RollEvent): string | undefined {
   }
 }
 
-export function summarizeWatchEvents(lines: readonly string[]): WatchStatusSummary | null {
+export function summarizeWatchEvents(lines: readonly string[], durableLookup?: DurableCycleLookup): WatchStatusSummary | null {
   const summary: WatchStatusSummary = { tcrCount: 0, hasEnd: false };
   let seen = false;
   for (const line of lines) {
@@ -101,6 +105,18 @@ export function summarizeWatchEvents(lines: readonly string[]): WatchStatusSumma
       summary.lastSignalAt = ev.ts;
     }
   }
+  // FIX-382: when cycle:start is outside the event window, fall back to the
+  // durable runs.jsonl lookup by cycleId to resolve storyId/agent.
+  if (seen && summary.cycleId !== undefined) {
+    if ((summary.storyId === undefined || summary.storyId === "") && durableLookup !== undefined) {
+      const dur = durableLookup[summary.cycleId];
+      if (dur !== undefined) summary.storyId = dur.storyId;
+    }
+    if ((summary.agent === undefined || summary.agent === "") && durableLookup !== undefined) {
+      const dur = durableLookup[summary.cycleId];
+      if (dur !== undefined) summary.agent = dur.agent;
+    }
+  }
   return seen ? summary : null;
 }
 
@@ -127,7 +143,7 @@ export function renderWatchStatusSummary(summary: WatchStatusSummary, nowMs: num
   return `status  ${phase} · ${quietText(summary, nowMs)} · ${story} · ${agent} · ${cycle} · ${tcr} · ${last} · ${outcome}`;
 }
 
-export function renderWatchStatusFromEventLines(lines: readonly string[], nowMs: number): string | null {
-  const summary = summarizeWatchEvents(lines);
+export function renderWatchStatusFromEventLines(lines: readonly string[], nowMs: number, durableLookup?: DurableCycleLookup): string | null {
+  const summary = summarizeWatchEvents(lines, durableLookup);
   return summary === null ? null : renderWatchStatusSummary(summary, nowMs);
 }

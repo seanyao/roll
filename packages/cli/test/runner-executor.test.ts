@@ -39,6 +39,8 @@ import {
   reasonixEnv,
   realAgentSpawn,
   resetDirective,
+  startSpawnTimeoutWatchdog,
+  readCycleTimeoutThresholds,
   storyPinDirective,
   RESUME_DISABLED_ENV,
   resolveResumeBase,
@@ -3327,5 +3329,195 @@ describe("FIX-346 — auth-failing peer is excluded from the pool and swapped ou
     expect(spawned).toContain("codex");
     const events = readFileSync(eventsPath, "utf8").split("\n").filter((l) => l.trim() !== "").map((l) => JSON.parse(l) as RollEvent);
     expect(events.some((e) => e.type === "pair:excluded")).toBe(false);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// FIX-907 — per-cycle HARD timeout watchdog (the hung-builder killer).
+// ════════════════════════════════════════════════════════════════════════════
+
+describe("FIX-907 startSpawnTimeoutWatchdog — kills a hung builder, never the slow-but-progressing one", () => {
+  /** Injected clock in SECONDS; advance to drive the watchdog deterministically. */
+  function clockSeconds(start: number): { clock: () => number; set: (v: number) => void } {
+    let now = start;
+    return { clock: () => now, set: (v) => (now = v) };
+  }
+
+  it("WALL breach: a quiet runaway over the ceiling is killed + records cycle:timeout(wall)", async () => {
+    vi.useFakeTimers();
+    try {
+      const fc = clockSeconds(1000);
+      const events: RollEvent[] = [];
+      let kills = 0;
+      const wd = startSpawnTimeoutWatchdog({
+        cycleId: "c-wall",
+        thresholds: { wallSec: 60, noProgressSec: 30 },
+        clock: fc.clock,
+        commitCount: async () => 1, // a single early commit, then quiet (no new ones)
+        appendEvent: (ev) => events.push(ev),
+        kill: () => (kills += 1, 1),
+        pollMs: 1000,
+      });
+      // The first tick after baseline: still alive (idle 0, elapsed 0).
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(kills).toBe(0);
+      // Jump past the WALL ceiling (also past idle, but wall is attributed first).
+      fc.set(1000 + 61);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(kills).toBe(1);
+      const stop = wd.stop();
+      expect(stop.firedReason).toBe("wall");
+      const timeout = events.find((e) => e.type === "cycle:timeout");
+      expect(timeout).toMatchObject({ type: "cycle:timeout", cycleId: "c-wall", reason: "wall" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("NO-PROGRESS breach: a SILENT hang (no new commit, no stdout) is killed + cycle:timeout(no-progress)", async () => {
+    vi.useFakeTimers();
+    try {
+      const fc = clockSeconds(5000);
+      const events: RollEvent[] = [];
+      let kills = 0;
+      const wd = startSpawnTimeoutWatchdog({
+        cycleId: "c-hang",
+        thresholds: { wallSec: 100000, noProgressSec: 30 }, // wall far away; only idle matters
+        clock: fc.clock,
+        commitCount: async () => 1, // ONE commit then frozen — exactly the FIX-390 shape
+        appendEvent: (ev) => events.push(ev),
+        kill: () => (kills += 1, 1),
+        pollMs: 1000,
+      });
+      await vi.advanceTimersByTimeAsync(1000); // alive
+      fc.set(5000 + 31); // > noProgress window with no new commit / no markProgress
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(kills).toBe(1);
+      expect(wd.stop().firedReason).toBe("no-progress");
+      expect(events.find((e) => e.type === "cycle:timeout")).toMatchObject({ reason: "no-progress", cycleId: "c-hang" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("误杀-prevention: stdout chunks (markProgress) keep a slow deepseek alive past the idle window", async () => {
+    vi.useFakeTimers();
+    try {
+      const fc = clockSeconds(0);
+      const events: RollEvent[] = [];
+      let kills = 0;
+      const wd = startSpawnTimeoutWatchdog({
+        cycleId: "c-slow",
+        thresholds: { wallSec: 100000, noProgressSec: 30 },
+        clock: fc.clock,
+        commitCount: async () => 0, // NO commits at all — only stdout keeps it alive
+        appendEvent: (ev) => events.push(ev),
+        kill: () => (kills += 1, 1),
+        pollMs: 1000,
+      });
+      // Simulate a slow call: emit a stdout chunk every 20s for 100s total. Idle
+      // never reaches 30s because each chunk resets the progress clock.
+      for (let t = 20; t <= 100; t += 20) {
+        fc.set(t);
+        wd.markProgress(); // a chunk arrived (0% CPU but still emitting)
+        await vi.advanceTimersByTimeAsync(1000);
+      }
+      expect(kills).toBe(0);
+      expect(wd.stop().firedReason).toBeNull();
+      expect(events.some((e) => e.type === "cycle:timeout")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("误杀-prevention: a NEW commit each window keeps a working builder alive (commit is progress)", async () => {
+    vi.useFakeTimers();
+    try {
+      const fc = clockSeconds(0);
+      const events: RollEvent[] = [];
+      let kills = 0;
+      let commits = 0;
+      const wd = startSpawnTimeoutWatchdog({
+        cycleId: "c-commits",
+        thresholds: { wallSec: 100000, noProgressSec: 30 },
+        clock: fc.clock,
+        commitCount: async () => commits, // grows over time → progress
+        appendEvent: (ev) => events.push(ev),
+        kill: () => (kills += 1, 1),
+        pollMs: 1000,
+      });
+      for (let t = 20; t <= 100; t += 20) {
+        fc.set(t);
+        commits += 1; // a TCR commit landed — observed as progress on the next tick
+        await vi.advanceTimersByTimeAsync(1000);
+      }
+      expect(kills).toBe(0);
+      expect(wd.stop().firedReason).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("both criteria disabled (0/0) → an inert handle that never fires", async () => {
+    vi.useFakeTimers();
+    try {
+      const fc = clockSeconds(0);
+      let kills = 0;
+      const wd = startSpawnTimeoutWatchdog({
+        cycleId: "c-off",
+        thresholds: { wallSec: 0, noProgressSec: 0 },
+        clock: fc.clock,
+        commitCount: async () => 0,
+        appendEvent: () => {},
+        kill: () => (kills += 1, 1),
+        pollMs: 1000,
+      });
+      fc.set(1e9);
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(kills).toBe(0);
+      expect(wd.stop().firedReason).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("FIX-907 readCycleTimeoutThresholds — policy + env override", () => {
+  it("defaults to 45min wall / 15min no-progress with no policy", () => {
+    const dir = mkdtempSync(join(tmpdir(), "roll-timeout-"));
+    execDirs.push(dir);
+    const t = readCycleTimeoutThresholds(dir);
+    expect(t).toEqual({ wallSec: 2700, noProgressSec: 900 });
+  });
+
+  it("reads loop_safety thresholds from policy.yaml", () => {
+    const dir = mkdtempSync(join(tmpdir(), "roll-timeout-"));
+    execDirs.push(dir);
+    mkdirSync(join(dir, ".roll"), { recursive: true });
+    writeFileSync(
+      join(dir, ".roll", "policy.yaml"),
+      "loop_safety:\n  cycle_wall_timeout_sec: 1800\n  cycle_no_progress_sec: 600\n",
+      "utf8",
+    );
+    expect(readCycleTimeoutThresholds(dir)).toEqual({ wallSec: 1800, noProgressSec: 600 });
+  });
+
+  it("env override beats policy + default", () => {
+    const dir = mkdtempSync(join(tmpdir(), "roll-timeout-"));
+    execDirs.push(dir);
+    mkdirSync(join(dir, ".roll"), { recursive: true });
+    writeFileSync(join(dir, ".roll", "policy.yaml"), "loop_safety:\n  cycle_wall_timeout_sec: 1800\n", "utf8");
+    const savedWall = process.env["ROLL_CYCLE_WALL_TIMEOUT_SEC"];
+    const savedNp = process.env["ROLL_CYCLE_NO_PROGRESS_SEC"];
+    process.env["ROLL_CYCLE_WALL_TIMEOUT_SEC"] = "120";
+    process.env["ROLL_CYCLE_NO_PROGRESS_SEC"] = "30";
+    try {
+      expect(readCycleTimeoutThresholds(dir)).toEqual({ wallSec: 120, noProgressSec: 30 });
+    } finally {
+      if (savedWall === undefined) delete process.env["ROLL_CYCLE_WALL_TIMEOUT_SEC"];
+      else process.env["ROLL_CYCLE_WALL_TIMEOUT_SEC"] = savedWall;
+      if (savedNp === undefined) delete process.env["ROLL_CYCLE_NO_PROGRESS_SEC"];
+      else process.env["ROLL_CYCLE_NO_PROGRESS_SEC"] = savedNp;
+    }
   });
 });

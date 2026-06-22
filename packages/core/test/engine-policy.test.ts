@@ -110,7 +110,32 @@ describe("parsePolicy — v3 spec shape round-trip", () => {
       correctionSignalThreshold: 3,
       correctionSignalWindowSec: 43200,
       correctionActuator: "conservative",
+      cycleWallTimeoutSec: 2700,
+      cycleNoProgressSec: 900,
     });
+  });
+
+  it("FIX-907: parses loop_safety cycle timeout thresholds; absent ⇒ 45min wall / 15min no-progress", () => {
+    expect(parsePolicy("").loopSafety.cycleWallTimeoutSec).toBe(2700);
+    expect(parsePolicy("").loopSafety.cycleNoProgressSec).toBe(900);
+    const tuned = parsePolicy(`
+loop_safety:
+  cycle_wall_timeout_sec: 3600
+  cycle_no_progress_sec: 600
+`);
+    expect(tuned.loopSafety.cycleWallTimeoutSec).toBe(3600);
+    expect(tuned.loopSafety.cycleNoProgressSec).toBe(600);
+    // 0 / negative DISABLES that criterion (operator escape hatch) — passed through.
+    const disabled = parsePolicy(`
+loop_safety:
+  cycle_wall_timeout_sec: 0
+  cycle_no_progress_sec: -1
+`);
+    expect(disabled.loopSafety.cycleWallTimeoutSec).toBe(0);
+    expect(disabled.loopSafety.cycleNoProgressSec).toBe(-1);
+    // junk → default.
+    const junk = parsePolicy("loop_safety:\n  cycle_wall_timeout_sec: soon\n");
+    expect(junk.loopSafety.cycleWallTimeoutSec).toBe(2700);
   });
 
   it("parses loop_safety.correction_actuator; absent/junk stays conservative", () => {

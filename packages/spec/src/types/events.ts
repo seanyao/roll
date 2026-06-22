@@ -23,6 +23,14 @@ export type RollEvent =
   | { type: "cycle:stdout"; cycleId: string; data: string; ts: number }
   | { type: "cycle:tcr"; cycleId: string; commitHash: string; message: string; ts: number; commitTs?: number }
   | { type: "cycle:first_edit"; cycleId: string; commitHash: string; ts: number }
+  // FIX-907 — the per-cycle HARD TIMEOUT tripped: a builder hung (process alive,
+  // 0% CPU, no new commits/events) or a runaway exceeded the wall-clock ceiling.
+  // `reason` is the criterion that fired — `wall` (total cycle time > ceiling) or
+  // `no-progress` (no new commit/stdout for the idle window; NOT pure elapsed
+  // time, so a slow-but-still-emitting deepseek call never trips it). The agent
+  // process tree was killed, the inflight lock released, and the worktree branch
+  // PRESERVED (work salvageable). `elapsedSec`/`idleSec` make the trip auditable.
+  | { type: "cycle:timeout"; cycleId: string; reason: "wall" | "no-progress"; elapsedSec: number; idleSec: number; ts: number }
   | { type: "cycle:end"; cycleId: string; outcome: TerminalOutcome; cost: CycleCost; ts: number }
   // FIX-903: leaked main commits were saved to a rescue ref before reset.
   | { type: "cycle:rescue"; cycleId: string; ref: string; rescuedSha: string; ts: number }

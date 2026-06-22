@@ -29,9 +29,12 @@ import {
   retryPlan,
   timeoutTeardownCommands,
   watchdogVerdict,
+  cycleTimeoutVerdict,
   MAX_AGENT_ATTEMPTS,
   RETRY_BASE_BACKOFF_SEC,
   CYCLE_TIMEOUT_SEC,
+  CYCLE_WALL_TIMEOUT_SEC,
+  CYCLE_NO_PROGRESS_SEC,
 } from "../src/index.js";
 
 const CTX: CycleContext = {
@@ -498,6 +501,56 @@ describe("watchdogVerdict — hard timeout (bin/roll:8473)", () => {
   it("breaches at the boundary (>=) and reports overshoot", () => {
     expect(watchdogVerdict(2700, 2700)).toEqual({ breached: true, overshootSec: 0 });
     expect(watchdogVerdict(2750, 2700)).toEqual({ breached: true, overshootSec: 50 });
+  });
+});
+
+describe("FIX-907 — cycleTimeoutVerdict (per-cycle hard timeout: wall + no-progress)", () => {
+  it("defaults are 45min wall / 15min no-progress", () => {
+    expect(CYCLE_WALL_TIMEOUT_SEC).toBe(2700);
+    expect(CYCLE_NO_PROGRESS_SEC).toBe(900);
+  });
+
+  it("not timed out below both limits — reports the tighter remaining budget", () => {
+    const v = cycleTimeoutVerdict({ elapsedSec: 100, idleSec: 60, wallLimitSec: 2700, noProgressLimitSec: 900 });
+    // wall remaining 2600, idle remaining 840 → tighter is 840.
+    expect(v).toEqual({ timedOut: false, remainingSec: 840 });
+  });
+
+  it("WALL breach at the boundary (>=) is attributed to wall", () => {
+    const v = cycleTimeoutVerdict({ elapsedSec: 2700, idleSec: 10, wallLimitSec: 2700, noProgressLimitSec: 900 });
+    expect(v).toEqual({ timedOut: true, reason: "wall", elapsedSec: 2700, idleSec: 10 });
+  });
+
+  it("NO-PROGRESS breach (silent hang) when idle exceeds the window but wall is fine", () => {
+    const v = cycleTimeoutVerdict({ elapsedSec: 1000, idleSec: 900, wallLimitSec: 2700, noProgressLimitSec: 900 });
+    expect(v).toEqual({ timedOut: true, reason: "no-progress", elapsedSec: 1000, idleSec: 900 });
+  });
+
+  it("误杀-prevention: a slow-but-progressing call (high elapsed, LOW idle) does NOT trip", () => {
+    // 40min into the cycle but progress 30s ago (e.g. a slow deepseek call still
+    // emitting stdout) — neither criterion fires.
+    const v = cycleTimeoutVerdict({ elapsedSec: 2400, idleSec: 30, wallLimitSec: 2700, noProgressLimitSec: 900 });
+    expect(v.timedOut).toBe(false);
+  });
+
+  it("WALL wins when BOTH would trip (attribution is wall-first)", () => {
+    const v = cycleTimeoutVerdict({ elapsedSec: 3000, idleSec: 1000, wallLimitSec: 2700, noProgressLimitSec: 900 });
+    expect(v).toEqual({ timedOut: true, reason: "wall", elapsedSec: 3000, idleSec: 1000 });
+  });
+
+  it("a 0 / negative limit DISABLES that criterion (operator escape hatch)", () => {
+    // wall disabled → a huge elapsed never trips on wall; idle still guards.
+    expect(cycleTimeoutVerdict({ elapsedSec: 1e9, idleSec: 10, wallLimitSec: 0, noProgressLimitSec: 900 }).timedOut).toBe(false);
+    // both disabled → never times out.
+    expect(cycleTimeoutVerdict({ elapsedSec: 1e9, idleSec: 1e9, wallLimitSec: 0, noProgressLimitSec: 0 }).timedOut).toBe(false);
+    // no-progress disabled, idle huge, wall fine → still alive.
+    expect(cycleTimeoutVerdict({ elapsedSec: 100, idleSec: 1e9, wallLimitSec: 2700, noProgressLimitSec: -1 }).timedOut).toBe(false);
+  });
+
+  it("uses the core defaults when limits are omitted", () => {
+    expect(cycleTimeoutVerdict({ elapsedSec: 2700, idleSec: 0 })).toMatchObject({ timedOut: true, reason: "wall" });
+    expect(cycleTimeoutVerdict({ elapsedSec: 1000, idleSec: 900 })).toMatchObject({ timedOut: true, reason: "no-progress" });
+    expect(cycleTimeoutVerdict({ elapsedSec: 10, idleSec: 10 }).timedOut).toBe(false);
   });
 });
 

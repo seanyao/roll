@@ -37,7 +37,15 @@ const BASE_AGENT_SPECS: readonly AgentSpec[] = [
     name: "claude",
     displayName: "claude",
     defaultModel: "claude-sonnet-4",
-    canReviewHeadless: true,
+    // claude can NOT be a headless peer reviewer — its auth is an OAuth/login
+    // token bound to the GUI login session (keychain), with no plaintext
+    // ANTHROPIC_API_KEY fallback set; a launchd headless daemon can't reach it,
+    // so `claude -p` review/score returns 401 (cause:auth). Evidence: 22 score+
+    // review auth blocks vs 1 successful score. Same rationale as agy (FIX-360):
+    // canReviewHeadless=false removes it from every reviewer pool path so the
+    // loop never spawns it as a headless reviewer. claude stays in the registry
+    // for manual / auth-having (interactive) use.
+    canReviewHeadless: false,
     normalizer: "claude",
     usage: { stdoutExtractor: "claude-stream", sessionBackfill: "claude-projects" },
     smokeCommand: 'claude -p "Reply with a single word: hello"',

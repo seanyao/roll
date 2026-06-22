@@ -18,10 +18,15 @@ function project(yaml: string | null): { dir: string; rt: string } {
   return { dir, rt };
 }
 
-const ENABLED = `enabled: true\nstages: [code]\ncapability:\n  claude: [code]\n  codex: [code]\n  kimi: [code]\n`;
+// NOTE: claude is NOT a headless reviewer (canReviewHeadless=false — its
+// OAuth/keychain login is unreachable from a launchd headless daemon, 401), so it
+// must NOT appear in a pairing.yaml capability block (parsePairingConfig fail-loud
+// rejects a non-headless reviewer). The capable reviewers here are codex/kimi/qwen.
+// claude remains a valid WORKING agent (builder) — it just never headless-reviews.
+const ENABLED = `enabled: true\nstages: [code]\ncapability:\n  codex: [code]\n  kimi: [code]\n  qwen: [code]\n`;
 // US-PAIR-004: a config that enables every stage and declares each agent
 // capable across them, so stage plumbing can be exercised independently.
-const ALL_STAGES = `enabled: true\nstages: [design, test, code, cycle]\ncapability:\n  claude: [design, test, code, cycle]\n  codex: [design, test, code, cycle]\n  kimi: [design, test, code, cycle]\n`;
+const ALL_STAGES = `enabled: true\nstages: [design, test, code, cycle]\ncapability:\n  codex: [design, test, code, cycle]\n  kimi: [design, test, code, cycle]\n  qwen: [design, test, code, cycle]\n`;
 const highComplexity = async (): Promise<string[]> => ["a.ts", "b.ts", "c.ts", "d.ts"]; // >3 → high
 
 function deps(over: Partial<RunPairingDeps> = {}): { d: RunPairingDeps; events: PairEvent[] } {
@@ -333,7 +338,9 @@ describe("enabledPairingStages — executor stage iteration seam (US-PAIR-004)",
 import { parsePairScoreOutput, runScorePairing, type RunScorePairingDeps } from "../src/runner/pairing-gate.js";
 import { readStoryReviewScores } from "../src/lib/review-score.js";
 
-const SCORE_CFG = `enabled: true\nstages: [code, score]\ncapability:\n  claude: [code, score]\n  codex: [code, score]\n  kimi: [code, score]\n`;
+// claude omitted: not a headless reviewer (see ENABLED note). codex/kimi/qwen are
+// the declared-capable scorers.
+const SCORE_CFG = `enabled: true\nstages: [code, score]\ncapability:\n  codex: [code, score]\n  kimi: [code, score]\n  qwen: [code, score]\n`;
 
 function scoreDeps(over: Partial<RunScorePairingDeps> = {}): { d: RunScorePairingDeps; events: PairEvent[] } {
   const events: PairEvent[] = [];
@@ -413,16 +420,18 @@ describe("runScorePairing — US-PAIR-009", () => {
   });
 
   it("FIX-343: single-agent env → scores via a fresh SAME-TYPE session (independence = fresh session, not vendor)", async () => {
+    // Builder is kimi here, not claude: same-type fallback requires the builder's
+    // own type to be a headless reviewer, and claude is not (canReviewHeadless=false).
     const { dir, rt } = project(SCORE_CFG);
-    const { d } = scoreDeps({ installed: ["claude"] }); // only the builder's own type
-    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
+    const { d } = scoreDeps({ installed: ["kimi"] }); // only the builder's own type
+    const r = await runScorePairing(dir, rt, "c1", "kimi", "US-X-001", "roll-build", "s", d);
     expect(r.status).toBe("scored");
-    expect(r.peer).toBe("claude"); // a fresh instance of the builder's own type
+    expect(r.peer).toBe("kimi"); // a fresh instance of the builder's own type
     expect(r.sessionId).toBeDefined();
     const notes = readStoryReviewScores(dir, "US-X-001");
     expect(notes).toHaveLength(1);
     expect(notes[0]?.scoring).toBe("pair");
-    expect(notes[0]?.scoredBy).toBe("claude");
+    expect(notes[0]?.scoredBy).toBe("kimi");
   });
 
   it("FIX-343: no scorer at all (empty pool) → fail-loud none-available, BLOCKS (no note)", async () => {
@@ -482,42 +491,44 @@ describe("runScorePairing — US-PAIR-009", () => {
   });
 
   it("FIX-343 (②): hetero pool ALL-FAILS within budget → FALLS BACK to same-vendor-fresh", async () => {
-    // builder=claude; hetero = codex,kimi (both flake null across the bounded
-    // retry); same-vendor = claude (scores). The gate must still produce a Review
-    // Score via the same-vendor-fresh fallback — never block on a dead hetero pool.
+    // builder=kimi (claude is not a headless reviewer so it cannot be the
+    // same-vendor-fresh scorer); hetero = codex,qwen (both flake null across the
+    // bounded retry); same-vendor = kimi (scores). The gate must still produce a
+    // Review Score via the same-vendor-fresh fallback — never block on a dead hetero pool.
     const { dir, rt } = project(SCORE_CFG);
     const tried: string[] = [];
     const { d } = scoreDeps({
-      installed: ["claude", "codex", "kimi"],
+      installed: ["kimi", "codex", "qwen"],
       scorePeer: async (peer: string) => {
         tried.push(peer);
-        return peer === "claude" ? { score: 8, verdict: "good" as const, rationale: "same-vendor fresh session scored", cost: 0.01 } : null;
+        return peer === "kimi" ? { score: 8, verdict: "good" as const, rationale: "same-vendor fresh session scored", cost: 0.01 } : null;
       },
     });
-    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
+    const r = await runScorePairing(dir, rt, "c1", "kimi", "US-X-001", "roll-build", "s", d);
     expect(r.status).toBe("scored");
-    expect(r.peer).toBe("claude"); // same-vendor fallback won after hetero failed
+    expect(r.peer).toBe("kimi"); // same-vendor fallback won after hetero failed
     expect(tried).toContain("codex"); // hetero round was attempted first
-    expect(tried).toContain("kimi");
-    expect(readStoryReviewScores(dir, "US-X-001")[0]?.scoredBy).toBe("claude");
+    expect(tried).toContain("qwen");
+    expect(readStoryReviewScores(dir, "US-X-001")[0]?.scoredBy).toBe("kimi");
   });
 
   it("FIX-343 (②): SINGLE-VENDOR install → same-vendor immediately, no hetero wait/hang", async () => {
     // Only the builder's own vendor is installed → the hetero pool is EMPTY, so
-    // we go straight to the same-vendor round (no wasted hetero spawn/wait).
+    // we go straight to the same-vendor round (no wasted hetero spawn/wait). Builder
+    // is kimi: claude is not a headless reviewer so it cannot be the same-vendor scorer.
     const { dir, rt } = project(SCORE_CFG);
     const tried: string[] = [];
     const { d } = scoreDeps({
-      installed: ["claude"],
+      installed: ["kimi"],
       scorePeer: async (peer: string) => {
         tried.push(peer);
         return { score: 8, verdict: "good" as const, rationale: "single-vendor fresh session", cost: 0 };
       },
     });
-    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
+    const r = await runScorePairing(dir, rt, "c1", "kimi", "US-X-001", "roll-build", "s", d);
     expect(r.status).toBe("scored");
-    expect(r.peer).toBe("claude");
-    expect(tried).toEqual(["claude"]); // exactly one spawn — no empty hetero round burned a probe
+    expect(r.peer).toBe("kimi");
+    expect(tried).toEqual(["kimi"]); // exactly one spawn — no empty hetero round burned a probe
   });
 
   // ── FIX-344: the design score-stage label (roll-design has no loop cycle) ────

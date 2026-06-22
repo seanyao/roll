@@ -327,7 +327,9 @@ describe("US-AGENT-001 AgentProfile factory", () => {
     expect(claude.buildSpawnCommand({ cwd: "/wt", skillBody: "DO WORK" }).args).toContain("--add-dir");
     expect(claude.usesWorkspaceSandbox).toBe(false);
     expect(claude.ptyWhenPiped).toBe(false);
-    expect(claude.acceptance.canReviewHeadless).toBe(true);
+    // claude is NOT a headless reviewer (canReviewHeadless=false): its
+    // OAuth/keychain login is unreachable from a launchd headless daemon (401).
+    expect(claude.acceptance.canReviewHeadless).toBe(false);
 
     const codex = agentProfile("codex");
     expect(codex.usesWorkspaceSandbox).toBe(true);

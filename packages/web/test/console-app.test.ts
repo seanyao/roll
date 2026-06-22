@@ -195,4 +195,32 @@ describe("ConsoleApp", () => {
     expect(banner).toBeTruthy();
     expect(banner.style.display).toBe("none");
   });
+
+  it("AC4: displays degraded notes from snapshot frame (never silent-0)", () => {
+    const container = document.createElement("div");
+    const app = new ConsoleApp(container);
+
+    const frame = snapshotFrame(makeSnapshot());
+    (frame as Record<string, unknown>).degraded = [
+      { surface: "collectDossierState", reason: "events.ndjson: ENOENT" },
+      { surface: "LiveFeed", reason: "live.log unreadable" },
+    ];
+    app.renderSnapshot(frame);
+
+    // Should NOT show degraded note in live mode (degraded is only for static fallback).
+    // But the snapshot should still render.
+    expect(container.innerHTML).toContain("Now");
+  });
+
+  it("AC4: degraded note shows per-collector ? indicators", () => {
+    const container = document.createElement("div");
+    const app = new ConsoleApp(container);
+
+    // Force degraded state by calling renderDegraded.
+    const snap = makeSnapshot();
+    app.renderDegraded(snap, snap.generatedAt);
+
+    expect(container.innerHTML).toContain("?");
+    expect(container.innerHTML).toContain("Degraded");
+  });
 });

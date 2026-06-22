@@ -115,6 +115,8 @@ export class ConsoleApp {
 
   /** Current snapshot data (null until first frame). */
   private snapshot: TruthSnapshot | null = null;
+  /** Current degraded notes (AC4: never silent-0). */
+  private degradedNotes: DegradedNote[] = [];
   /** Current liveness from the most recent heartbeat. */
   private liveness: LivenessState = "not-configured";
   /** Whether we are in degraded (static fallback) mode. */
@@ -132,6 +134,7 @@ export class ConsoleApp {
     this.snapshot = frame.snapshot;
     this.renderedEtag = frame.etag;
     this.degraded = false;
+    this.degradedNotes = frame.degraded ?? [];
     this.renderNow();
   }
 
@@ -313,11 +316,47 @@ export class ConsoleApp {
     return container;
   }
 
-  /** AC4: degraded[] per-collector failures → visible `?` / paused indicator. */
+  /** AC4: degraded[] per-collector failures → visible `?` / paused indicator, never silent-0. */
   private buildDegradedNote(): HTMLElement {
-    return div(
+    const container = div(
       `margin:12px 0;padding:10px 14px;border:1px solid ${C.amber}44;border-radius:8px;background:${C.amber}08;${MONO}font-size:11.5px;color:${C.amber};`,
-      "⚠ Degraded — showing static snapshot. Some collectors may be paused.",
     );
+    container.appendChild(
+      span("font-weight:600;", "⚠ Degraded — showing static snapshot. "),
+    );
+
+    if (this.degradedNotes.length > 0) {
+      const list = el("ul", {
+        style: `margin:6px 0 0 16px;padding:0;list-style:none;`,
+      });
+      for (const note of this.degradedNotes) {
+        const li = el("li", {
+          style: `margin:4px 0;display:flex;align-items:center;gap:6px;`,
+        });
+        li.appendChild(
+          span(
+            `${MONO}font-size:10px;padding:1px 6px;border-radius:4px;background:${C.amber}22;color:${C.amber};`,
+            "?",
+          ),
+        );
+        li.appendChild(
+          span(
+            `font-size:11px;color:${C.dim};`,
+            `${esc(note.surface)}: ${esc(note.reason)}`,
+          ),
+        );
+        list.appendChild(li);
+      }
+      container.appendChild(list);
+    } else {
+      container.appendChild(
+        span(
+          `font-size:11px;color:${C.dim};`,
+          "Some collectors may be paused.",
+        ),
+      );
+    }
+
+    return container;
   }
 }

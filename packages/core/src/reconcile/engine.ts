@@ -377,6 +377,11 @@ export interface ClaimEvidence {
   hasDeliveringCycle: boolean;
   /** The cycle branch's PR state, when probed (undefined ⇒ unprobed/unknown). */
   prState?: string;
+  /** FIX-397 AC2: true when runs.jsonl records a published delivering cycle
+   *  WITH a real pr_number — a stronger in-flight signal than hasDeliveringCycle
+   *  alone. When true, a gh probe failure (EOF/UNKNOWN) MUST NOT revert the card
+   *  to Todo; it stays at 🔨 (keep) until definitive MERGED/CLOSED evidence. */
+  hasPublishedPr?: boolean;
 }
 
 /** Decide the preflight reconcile action for one 🔨 claim (see type doc). */
@@ -384,6 +389,13 @@ export function decideClaimReconcile(ev: ClaimEvidence): ClaimReconcileDecision 
   if (!ev.hasDeliveringCycle) return "todo";
   if (ev.prState === "MERGED") return "done";
   if (ev.prState === "CLOSED") return "todo";
+  // FIX-397 AC2: when runs.jsonl proves a published PR exists (hasPublishedPr),
+  // a gh probe gap (EOF/UNKNOWN/undefined prState) is NOT evidence of absence —
+  // the card stays 🔨 (keep) until definitive MERGED/CLOSED evidence arrives.
+  // This is a deliberate redundancy: the final `return "keep"` already handles
+  // unknown prState, but hasPublishedPr makes the intent explicit and guards
+  // against a future change that flips unknown→todo by default.
+  if (ev.hasPublishedPr && ev.prState !== "MERGED" && ev.prState !== "CLOSED") return "keep";
   return "keep";
 }
 
@@ -505,6 +517,52 @@ export function resumeCandidateBranches(
   // Oldest→newest in the ledger → reverse to most-recent-first so the caller
   // prefers the freshest stranded work and only falls back to older branches.
   return cycleIds.reverse().map((id) => reconcileBranchName(id));
+}
+
+// ── 4. FIX-397 AC3: PR-info extractors from runs rows ────────────────────────
+
+/**
+ * Extract the pr_number from the latest delivering row for `storyId` in runs
+ * (FIX-397 AC3). Returns a positive integer pr_number, or undefined when:
+ *   - no delivering row exists for this story
+ *   - the latest delivering row has no pr_number (legacy `pr=None`)
+ *   - the stored pr_number is 0 / empty / NaN (falsy guard for corrupted data)
+ *
+ * The lookup mirrors {@link latestDeliveringCycle} (scans oldest→newest, last
+ * delivering-write wins), but returns the pr_number instead of the cycle id.
+ */
+export function runRowPrNumber(
+  rows: readonly ReconcileRunRow[],
+  storyId: string,
+): number | undefined {
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = rows[i];
+    if (row === undefined) continue;
+    const sid = typeof row["story_id"] === "string" ? (row["story_id"] as string) : "";
+    if (sid !== storyId) continue;
+    const status = typeof row.status === "string" ? row.status : "";
+    // Only delivering-status rows carry a real PR number.
+    if (status !== "done" && status !== "built" && status !== "merged" && status !== "published") continue;
+    const pn = typeof row["pr_number"] === "number" ? (row["pr_number"] as number) : undefined;
+    if (pn !== undefined && pn > 0 && Number.isFinite(pn)) return pn;
+  }
+  return undefined;
+}
+
+/**
+ * True when runs.jsonl records a published delivering cycle WITH a real
+ * pr_number for `storyId` (FIX-397 AC3). This is the signal that feeds
+ * {@link ClaimEvidence.hasPublishedPr} — a stronger in-flight proof than
+ * `hasDeliveringCycle` alone, because it means the cycle not only delivered
+ * but also recorded WHICH PR, so the card↔PR connection is intact.
+ *
+ * Legacy rows (published but pr=None) → false (no PR info to trust).
+ */
+export function runRowHasPublishedPr(
+  rows: readonly ReconcileRunRow[],
+  storyId: string,
+): boolean {
+  return runRowPrNumber(rows, storyId) !== undefined;
 }
 
 /** Apply a stuck-story revert to backlog text: flip the FIRST `| 🔨 In Progress |`

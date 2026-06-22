@@ -17,7 +17,11 @@ afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
-const SCORE_CFG = `enabled: true\nstages: [code, score]\ncapability:\n  claude: [code, score]\n  kimi: [code, score]\n`;
+// claude is NOT a headless reviewer (canReviewHeadless=false — OAuth/keychain
+// login unreachable from a launchd headless daemon), so it must not appear in a
+// capability block (parsePairingConfig fail-loud rejects a non-headless reviewer).
+// kimi/codex are the declared-capable scorers; claude stays the WORKING (builder) agent.
+const SCORE_CFG = `enabled: true\nstages: [code, score]\ncapability:\n  kimi: [code, score]\n  codex: [code, score]\n`;
 
 function project(yaml: string | null): string {
   const p = mkdtempSync(join(tmpdir(), "roll-pairscore-"));
@@ -81,12 +85,14 @@ describe("roll pair score — US-PAIR-010", () => {
   });
 
   it("FIX-343: single-agent env scores via a fresh SAME-TYPE session, exit 0", async () => {
+    // Builder is kimi, not claude: a same-type fresh-session score requires the
+    // lone agent to be a headless reviewer, and claude is not (canReviewHeadless=false).
     const p = project(SCORE_CFG);
-    const r = await run(p, ["US-T-001", "--summary", "s"], { installed: ["claude"] });
+    const r = await run(p, ["US-T-001", "--summary", "s"], { installed: ["kimi"], workingAgent: () => "kimi" });
     expect(r.code).toBe(0);
     const notes = readStoryReviewScores(p, "US-T-001");
     expect(notes).toHaveLength(1);
-    expect(readFileSync(notes[0]?.sourcePath ?? "", "utf8")).toContain("scored-by: claude");
+    expect(readFileSync(notes[0]?.sourcePath ?? "", "utf8")).toContain("scored-by: kimi");
   });
 
   it("FIX-343: reviewer timeout / protocol miss → FAIL LOUD (no Review Score, exit non-zero, no self-grade escape)", async () => {
@@ -206,13 +212,14 @@ describe("roll pair score --design — FIX-344 (design output peer Review Score)
 
   it("AC3: the design agent (worker) NEVER scores its own output — the reviewer is a separate fresh session", async () => {
     const p = project(SCORE_CFG);
-    // worker = the design agent (claude); the score still comes from a fresh
-    // session whose id is the reviewer's, never an in-session self-grade.
-    const r = await run(p, ["US-DSGN-004", "--summary", "s", "--design", "--worker", "claude"], { installed: ["claude"] });
+    // worker = the design agent (kimi, a headless-reviewable agent — claude is not,
+    // canReviewHeadless=false); the score still comes from a fresh session whose id
+    // is the reviewer's, never an in-session self-grade.
+    const r = await run(p, ["US-DSGN-004", "--summary", "s", "--design", "--worker", "kimi"], { installed: ["kimi"], workingAgent: () => "kimi" });
     expect(r.code).toBe(0);
     const text = readFileSync(readStoryReviewScores(p, "US-DSGN-004")[0]?.sourcePath ?? "", "utf8");
     expect(text).toContain("scoring: pair"); // never scoring: self
-    // independence is the fresh session, not vendor: a same-vendor fresh claude is valid.
-    expect(text).toMatch(/session-id: manual-design-US-DSGN-004-\d+:design:claude:/);
+    // independence is the fresh session, not vendor: a same-vendor fresh kimi is valid.
+    expect(text).toMatch(/session-id: manual-design-US-DSGN-004-\d+:design:kimi:/);
   });
 });

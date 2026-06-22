@@ -37,13 +37,18 @@ describe("AgentSpec registry — FIX-313", () => {
   });
 
   it("declares headless-review capability only for agents the runner can spawn", () => {
-    for (const agent of ["claude", "codex", "openai", "kimi", "qwen", "pi", "reasonix"]) {
+    for (const agent of ["codex", "openai", "kimi", "qwen", "pi", "reasonix"]) {
       expect(agentCanReviewHeadless(agent)).toBe(true);
     }
     // FIX-360: agy (antigravity/gemini) is NOT a headless reviewer — its headless
     // review triggers an interactive Google OAuth popup, so it is excluded from
     // every reviewer pool (it stays in the registry for manual use only).
-    for (const agent of ["cursor", "trae", "opencode", "openclaw", "agy", "gemini", "antigravity"]) {
+    // claude is likewise NOT a headless reviewer — its OAuth/keychain login token
+    // is bound to the GUI session and unreachable from a launchd headless daemon,
+    // so `claude -p` review/score returns 401 (cause:auth). Same rationale as agy:
+    // canReviewHeadless=false removes it from every reviewer pool path; claude
+    // stays in the registry for manual / auth-having (interactive) use only.
+    for (const agent of ["claude", "cursor", "trae", "opencode", "openclaw", "agy", "gemini", "antigravity"]) {
       expect(agentCanReviewHeadless(agent)).toBe(false);
     }
   });

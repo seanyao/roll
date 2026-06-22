@@ -55,8 +55,10 @@ describe("heteroAvailable (FIX-312 — the review-routing switch)", () => {
     expect(heteroAvailable(["agy", "gemini"], "agy")).toBe(false);
   });
   it("builder absent from the pool still counts other vendors", () => {
-    // builder is kimi (not installed locally) but a claude peer is available.
-    expect(heteroAvailable(["claude"], "kimi")).toBe(true);
+    // builder is kimi (not installed locally) but a codex peer is available.
+    // (claude is not a headless reviewer — canReviewHeadless=false — so a pool of
+    // only claude would not count; codex is a headless-reviewable other vendor.)
+    expect(heteroAvailable(["codex"], "kimi")).toBe(true);
   });
   it("unknown agents are not treated as headless reviewers without a profile", () => {
     expect(heteroAvailable(["claude", "made-up-agent"], "claude")).toBe(false);
@@ -102,15 +104,18 @@ describe("selectPairingCandidates — rational hard filter", () => {
   });
 
   it("never pairs same-vendor (codex worker, openai-alias excluded)", () => {
+    // kimi (not claude) is the heterogeneous reviewable peer here: claude is no
+    // longer a headless reviewer (canReviewHeadless=false), so it would be
+    // filtered out and could not demonstrate the same-vendor exclusion.
     const got = selectPairingCandidates({
-      installed: ["codex", "claude"],
+      installed: ["codex", "kimi"],
       isAvailable: always,
       workingAgent: "codex",
       stage: "code",
-      cfg: cfg({ capability: { claude: ["code"], codex: ["code"] } }),
+      cfg: cfg({ capability: { kimi: ["code"], codex: ["code"] } }),
       cycleId: "c1",
     });
-    expect(got).toEqual(["claude"]); // heterogeneous only
+    expect(got).toEqual(["kimi"]); // heterogeneous only
   });
 });
 
@@ -142,11 +147,14 @@ describe("selectPairingCandidates — seeded round-robin rotation", () => {
 
 describe("parsePairingConfig", () => {
   it("parses enabled/stages/capability", () => {
-    const c = parsePairingConfig(`enabled: true\nstages: [code, design]\ncapability:\n  codex: [code, test]\n  claude: [code, design, cycle]\n`);
+    // kimi (not claude) is the second capable agent: claude is no longer a
+    // headless reviewer (canReviewHeadless=false), so declaring capability for it
+    // would fail-loud (see the FIX-328 non-headless-reviewer case below).
+    const c = parsePairingConfig(`enabled: true\nstages: [code, design]\ncapability:\n  codex: [code, test]\n  kimi: [code, design, cycle]\n`);
     expect(c.enabled).toBe(true);
     expect(c.stages).toEqual(["code", "design"]);
     expect(c.capability.codex).toEqual(["code", "test"]);
-    expect(c.capability.claude).toEqual(["code", "design", "cycle"]);
+    expect(c.capability.kimi).toEqual(["code", "design", "cycle"]);
   });
   it("ignores comments and blank lines", () => {
     const c = parsePairingConfig(`# pairing\nenabled: true  # on\n\nstages: [code]\n`);
@@ -179,10 +187,13 @@ describe("parsePairingConfig", () => {
 
 describe("defaultPairingConfig + renderPairingConfig (roll pair init scaffold)", () => {
   it("enables when ≥2 distinct vendors, declares all installed code+score-capable", () => {
-    const c = defaultPairingConfig(["claude", "codex"]);
+    // kimi + codex are two headless-reviewable vendors. claude is no longer a
+    // headless reviewer (canReviewHeadless=false), so defaultPairingConfig drops
+    // it from the pool — it would never count toward the vendor total.
+    const c = defaultPairingConfig(["kimi", "codex"]);
     expect(c.enabled).toBe(true);
     expect(c.stages).toEqual(["code", "score"]);
-    expect(c.capability).toEqual({ claude: ["code", "score"], codex: ["code", "score"] });
+    expect(c.capability).toEqual({ kimi: ["code", "score"], codex: ["code", "score"] });
   });
   it("disabled when fewer than 2 vendors (alias collapse)", () => {
     expect(defaultPairingConfig(["codex"]).enabled).toBe(false);
@@ -193,50 +204,61 @@ describe("defaultPairingConfig + renderPairingConfig (roll pair init scaffold)",
     const c = parsePairingConfig("enabled: true\nstages: [code, score]\ncapability:\n  codex: [score]\n");
     expect(c.stages).toEqual(["code", "score"]);
     expect(c.capability).toEqual({ codex: ["score"] });
-    const d = defaultPairingConfig(["claude", "codex"]);
+    // claude is no longer a headless reviewer, so use kimi as the second vendor.
+    const d = defaultPairingConfig(["kimi", "codex"]);
     expect(d.stages).toEqual(["code", "score"]);
-    expect(d.capability["claude"]).toEqual(["code", "score"]);
+    expect(d.capability["kimi"]).toEqual(["code", "score"]);
   });
-  it("FIX-360: default config excludes agy (non-headless reviewer) from the pool", () => {
-    // agy's headless review triggers an interactive Google OAuth popup, so it is
-    // not a headless reviewer (canReviewHeadless=false) and must never land in a
-    // reviewer pool — even when installed alongside heterogeneous peers.
-    const d = defaultPairingConfig(["claude", "agy", "codex"]);
-    expect(d.enabled).toBe(true); // claude + codex are still ≥2 vendors
-    expect(d.capability).toEqual({ claude: ["code", "score"], codex: ["code", "score"] });
+  it("FIX-360: default config excludes agy AND claude (non-headless reviewers) from the pool", () => {
+    // agy's headless review triggers an interactive Google OAuth popup, and
+    // claude's OAuth/keychain login token is unreachable from a launchd headless
+    // daemon (401) — both are NOT headless reviewers (canReviewHeadless=false) and
+    // must never land in a reviewer pool, even when installed alongside
+    // heterogeneous peers. kimi + codex remain as two headless-reviewable vendors.
+    const d = defaultPairingConfig(["claude", "agy", "kimi", "codex"]);
+    expect(d.enabled).toBe(true); // kimi + codex are still ≥2 headless-reviewable vendors
+    expect(d.capability).toEqual({ kimi: ["code", "score"], codex: ["code", "score"] });
     expect(d.capability["agy"]).toBeUndefined();
+    expect(d.capability["claude"]).toBeUndefined();
     expect(renderPairingConfig(d)).not.toContain("agy:");
+    expect(renderPairingConfig(d)).not.toContain("claude:");
     // aliases collapse to agy and are likewise absent
-    expect(defaultPairingConfig(["claude", "gemini", "codex"]).capability["agy"]).toBeUndefined();
-    // and the live score-stage selector never picks agy even when installed
+    expect(defaultPairingConfig(["claude", "gemini", "kimi", "codex"]).capability["agy"]).toBeUndefined();
+    // and the live score-stage selector never picks agy or claude even when installed
     const picked = selectPairingCandidates({
-      installed: ["claude", "agy", "codex"],
+      installed: ["claude", "agy", "kimi", "codex"],
       isAvailable: () => true,
-      workingAgent: "claude",
+      workingAgent: "kimi",
       stage: "score",
       cfg: cfg({ enabled: false, stages: [], capability: {} }),
       cycleId: "c1",
     });
     expect(picked).not.toContain("agy");
+    expect(picked).not.toContain("claude");
   });
   it("FIX-328: default config excludes IDE/config-only agents from review pools", () => {
-    const d = defaultPairingConfig(["claude", "cursor", "trae", "codex"]);
+    // kimi + codex are the headless-reviewable vendors; cursor/trae are
+    // config-only and claude is no longer a headless reviewer — all excluded.
+    const d = defaultPairingConfig(["kimi", "cursor", "trae", "codex"]);
     expect(d.enabled).toBe(true);
-    expect(d.capability).toEqual({ claude: ["code", "score"], codex: ["code", "score"] });
+    expect(d.capability).toEqual({ kimi: ["code", "score"], codex: ["code", "score"] });
     expect(renderPairingConfig(d)).not.toContain("cursor:");
     expect(renderPairingConfig(d)).not.toContain("trae:");
   });
   it("FIX-328: score candidates exclude installed IDE/config-only agents", () => {
+    // Worker is kimi (a headless reviewer). claude is no longer headless-reviewable
+    // so it is also excluded from the score pool, alongside the IDE-only cursor/trae.
     const picked = selectPairingCandidates({
-      installed: ["claude", "cursor", "trae", "codex"],
+      installed: ["kimi", "cursor", "trae", "codex"],
       isAvailable: () => true,
-      workingAgent: "claude",
+      workingAgent: "kimi",
       stage: "score",
       cfg: cfg({ enabled: false, stages: [], capability: {} }),
       cycleId: "c1",
     });
-    expect(picked).toContain("claude");
+    expect(picked).toContain("kimi");
     expect(picked).toContain("codex");
+    expect(picked).not.toContain("claude");
     expect(picked).not.toContain("cursor");
     expect(picked).not.toContain("trae");
   });
@@ -247,25 +269,43 @@ describe("defaultPairingConfig + renderPairingConfig (roll pair init scaffold)",
   it("FIX-343: the score stage is same-vendor-friendly — a fresh instance of the BUILDER'S OWN type qualifies", () => {
     // Independence = another assigned fresh session, NOT vendor heterogeneity:
     // the score stage drops the isHeterogeneous filter and INCLUDES the builder's
-    // own canonical type (spawned as a fresh subprocess).
+    // own canonical type (spawned as a fresh subprocess). The builder must itself
+    // be a headless reviewer for its own type to qualify — claude is no longer one
+    // (canReviewHeadless=false), so kimi stands in as the builder here.
     const picked = selectPairingCandidates({
-      installed: ["claude", "codex", "kimi"],
+      installed: ["kimi", "codex", "qwen"],
       isAvailable: () => true,
-      workingAgent: "claude",
+      workingAgent: "kimi",
       stage: "score",
-      cfg: cfg({ stages: ["score"], capability: { codex: ["score"], kimi: ["score"] } }),
+      cfg: cfg({ stages: ["score"], capability: { codex: ["score"], qwen: ["score"] } }),
       cycleId: "c1",
     });
     expect(picked.length).toBe(3);
-    expect(picked).toContain("claude"); // builder's own type — a fresh session is independent
+    expect(picked).toContain("kimi"); // builder's own type — a fresh session is independent
     expect(picked).toContain("codex");
-    expect(picked).toContain("kimi");
+    expect(picked).toContain("qwen");
   });
 
   it("FIX-343: the score stage is MANDATORY — qualifies even when pairing is disabled / no score stage / no capability", () => {
     // A repo with NO pairing.yaml (cfg.enabled=false, empty stages/capability)
-    // still owes a Review Score: the selector must yield the installed agents.
+    // still owes a Review Score: the selector must yield the installed agents that
+    // CAN headless-review. A single-agent env of a headless-reviewable agent (kimi)
+    // still yields that agent (a fresh same-type session is the minimum independence).
     const picked = selectPairingCandidates({
+      installed: ["kimi"],
+      isAvailable: () => true,
+      workingAgent: "kimi",
+      stage: "score",
+      cfg: cfg({ enabled: false, stages: [], capability: {} }),
+      cycleId: "c1",
+    });
+    expect(picked).toEqual(["kimi"]); // single-agent env: a fresh same-type session
+
+    // But a single-agent env of CLAUDE alone now yields an EMPTY pool: claude is
+    // no longer a headless reviewer (canReviewHeadless=false — its OAuth/keychain
+    // login is unreachable from a launchd headless daemon, 401), so there is no
+    // headless scorer available and the selector fails loud with [].
+    const claudeOnly = selectPairingCandidates({
       installed: ["claude"],
       isAvailable: () => true,
       workingAgent: "claude",
@@ -273,7 +313,7 @@ describe("defaultPairingConfig + renderPairingConfig (roll pair init scaffold)",
       cfg: cfg({ enabled: false, stages: [], capability: {} }),
       cycleId: "c1",
     });
-    expect(picked).toEqual(["claude"]); // single-agent env: a fresh same-type session
+    expect(claudeOnly).toEqual([]); // no headless-reviewable scorer in a claude-only env
   });
   it("renders explicit, re-parseable yaml (round-trip)", () => {
     const c = defaultPairingConfig(["claude", "codex", "kimi"]);

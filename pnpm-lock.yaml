@@ -50,6 +50,19 @@ importers:
         specifier: ^25.9.1
         version: 25.9.1
 
+  packages/daemon:
+    dependencies:
+      '@roll/core':
+        specifier: workspace:*
+        version: link:../core
+      '@roll/spec':
+        specifier: workspace:*
+        version: link:../spec
+    devDependencies:
+      '@types/node':
+        specifier: ^25.9.1
+        version: 25.9.1
+
   packages/infra:
     dependencies:
       '@roll/spec':

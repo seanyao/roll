@@ -19,7 +19,7 @@
  *       either signals the hot-fix path (exit 2, within heal budget) or aborts
  *       the cycle with an ALERT (exit 1). Green/pending → pass (exit 0).
  *
- *   (B) RED → HEAL-OR-ALERT — {@link prHealVerdict}. Mirrors `_loop_pr_heal_self`
+ *   (B) RED → HEAL-OR-FIX_FORWARD — {@link prHealVerdict}. Mirrors `_loop_pr_heal_self`
  *       (bin/roll 11484-11524): a red loop/* PR is background-healed UP TO a
  *       per-PR budget (heal_count.pr:<n> < ROLL_LOOP_HEAL_MAX, default 2;
  *       ROLL_LOOP_NO_HEAL=1 disables), guarded by a per-PR lock (live pid ⇒
@@ -201,7 +201,8 @@ export type HealAlertReason =
 /** The red-PR heal decision. */
 export type PrHealVerdict =
   | { kind: "in_flight" } // a heal is already running for this PR (lock live).
-  | { kind: "alert"; reason: HealAlertReason; message: string } // deduped ALERT.
+  | { kind: "alert"; reason: HealAlertReason; message: string } // truly unrecoverable → deduped ALERT.
+  | { kind: "fix_forward"; reason: HealAlertReason; message: string } // auto-heal off/budget hit → signal main loop to resume original branch.
   | { kind: "dispatch"; nextCount: number; attempt: string }; // background heal.
 
 /** Facts for {@link prHealVerdict}. */
@@ -219,12 +220,12 @@ export interface PrHealInput {
 }
 
 /**
- * The red loop/* PR heal-or-alert decision — mirrors `_loop_pr_heal_self`
+ * The red loop/* PR heal-or-fix_forward decision — mirrors `_loop_pr_heal_self`
  * (bin/roll 11484-11524) in order:
- *   1. healMax <= 0 (disabled)        → deduped ALERT "auto-heal off" (11489-11491).
+ *   1. healMax <= 0 (disabled)        → fix_forward "auto-heal off" (11489-11491).
  *   2. lock live                      → in_flight, no-op (11499-11500).
  *      lock dead → reclaim, continue (11502).
- *   3. count >= max                   → deduped ALERT "budget exhausted" (11509-11511).
+ *   3. count >= max                   → fix_forward "budget exhausted" (11509-11511).
  *   4. else                           → dispatch background heal; persist
  *                                       heal_count.pr:<n> = count+1 (11513-11522).
  * The `message` strings mirror the oracle's `_loop_pr_ci_red_alert` payloads
@@ -234,9 +235,9 @@ export interface PrHealInput {
 export function prHealVerdict(input: PrHealInput): PrHealVerdict {
   if (input.healMax <= 0) {
     return {
-      kind: "alert",
+      kind: "fix_forward",
       reason: "disabled",
-      message: "auto-heal off (ROLL_LOOP_NO_HEAL) — fix manually",
+      message: "auto-heal off (ROLL_LOOP_NO_HEAL) — main loop should resume original branch",
     };
   }
   if (input.lock.kind === "in_flight") {
@@ -244,9 +245,9 @@ export function prHealVerdict(input: PrHealInput): PrHealVerdict {
   }
   if (input.prHealCount >= input.healMax) {
     return {
-      kind: "alert",
+      kind: "fix_forward",
       reason: "budget_exhausted",
-      message: `auto-heal budget exhausted (${input.prHealCount}/${input.healMax}) — fix manually`,
+      message: `auto-heal budget exhausted (${input.prHealCount}/${input.healMax}) — main loop should resume original branch`,
     };
   }
   return {

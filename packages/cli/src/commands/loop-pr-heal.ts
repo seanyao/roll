@@ -162,6 +162,13 @@ export function prHealSelf(num: string, headRef: string, slug: string, deps: Hea
     if (!deps.alertHasKey(key)) deps.appendAlert(ciRedAlertLine(deps.now(), num, headRef, verdict.message));
     return;
   }
+  if (verdict.kind === "fix_forward") {
+    const key = `[TYPE:loop-fix-forward] PR #${num} `;
+    if (!deps.alertHasKey(key)) {
+      deps.appendAlert(`[${deps.now()}] [warn] [TYPE:loop-fix-forward] PR #${num} ${headRef}: ${verdict.message}`);
+    }
+    return;
+  }
   // dispatch
   deps.setPrHealCount(num, verdict.nextCount);
   deps.writeLock(num);

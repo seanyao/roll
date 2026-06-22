@@ -17,3 +17,4 @@ export * from "./types/policy.js";
 export * from "./types/config.js";
 export * from "./types/goal.js";
 export * from "./types/delivery.js";
+export * from "./types/dossier-frame.js";

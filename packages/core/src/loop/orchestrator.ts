@@ -129,7 +129,7 @@ import { nextWaitAction, type WaitAction } from "../delivery/pr.js";
  *               (bin/roll:8756).
  *   - blocked : hard-timeout breach (bin/roll:8679).
  */
-export type V2CycleStatus = "idle" | "gave_up" | "built" | "done" | "published" | "orphan" | "local" | "failed" | "aborted" | "blocked";
+export type V2CycleStatus = "idle" | "gave_up" | "built" | "done" | "published" | "orphan" | "local" | "needs_review" | "failed" | "aborted" | "blocked";
 
 /**
  * Bridge v2's runs.jsonl status onto the closed {@link TerminalOutcome}
@@ -167,6 +167,13 @@ export function mapV2Status(status: V2CycleStatus): TerminalOutcome {
       // A NEUTRAL non-failure terminal — the dashboard renders it as "ran
       // locally, not published", never red.
       return "unpublished";
+    case "needs_review":
+      // FIX-908: real work (≥1 commit + ≥1 tcr:) committed and code-stage peer
+      // agreed, but a REQUIRED acceptance artifact is missing at the terminal (no
+      // independent peer Review Score / empty-shell report). The gate honestly
+      // blocked Done; the branch is preserved. NOT a `failed` (no code defect) —
+      // a distinct "awaits review" terminal so the completed work is not orphaned.
+      return "needs_review";
     case "failed":
       return "failed";
     case "aborted":
@@ -196,6 +203,19 @@ export interface CapturedFacts {
   /** True when a hard attest or peer gate blocked the cycle — the agent
    *  produced work but it was withheld by policy, not by a code defect. */
   gateBlocked?: boolean;
+  /**
+   * FIX-908 — the cycle did REAL work (≥1 commit AND ≥1 tcr: commit) but is
+   * missing a REQUIRED acceptance artifact at the terminal: the independent
+   * fresh-session peer Review Score was NOT produced (runScorePairing status ≠
+   * "scored"), or the acceptance report is an empty shell (no AC content / no
+   * ac-map). The attest gate has already honestly blocked Done (no synthesized
+   * artifact — `evaluateReviewScoreGate`/`readLatestStoryPeerScore` stay
+   * fail-loud), so this is NOT a code defect. It marks a `gateBlocked` cycle for
+   * the `needs_review` terminal (preserve the branch, record awaits-review)
+   * INSTEAD of plain `failed` + an orphaned branch. The executor computes this
+   * from the consumed `runScorePairing` result + the report content check; it is
+   * NEVER set when the gate passed or when there is no real work. */
+  needsReview?: boolean;
   /** Watchdog fired this cycle (`_CYCLE_TIMED_OUT=1`). bin/roll:9074. */
   timedOut: boolean;
   /** Commits ahead of origin/main in the worktree (bin/roll:9139). */
@@ -237,6 +257,15 @@ export function classifyCaptured(facts: CapturedFacts): V2CycleStatus {
     // (FIX-243) arbitrates the final credit.
     if (facts.commitsAhead > 0 && (facts.prState === "OPEN" || facts.prState === "MERGED"))
       return "published";
+    // FIX-908: a gate-blocked cycle that did REAL work (≥1 commit, the executor
+    // also requires ≥1 tcr: before setting `needsReview`) but is only missing a
+    // REQUIRED acceptance artifact (no independent peer Review Score / empty-shell
+    // report) is NOT a no-output failure — the work is sound and committed on the
+    // branch. Classify `needs_review` (preserve the branch, awaits review) so the
+    // completed work is not orphaned. The gate stays fail-loud (no Done, no
+    // synthesized artifact); this only changes the TERMINAL CLASSIFICATION, never
+    // the gate. Guarded on commitsAhead so a 0-commit block still falls to failed.
+    if (facts.commitsAhead > 0 && facts.needsReview === true) return "needs_review";
     return "failed";
   }
   if (facts.agentExit !== 0) {

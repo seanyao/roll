@@ -147,7 +147,7 @@ import {
 import { classifyBlockSignature, probeAgentReachable, type ReachResult } from "./agent-liveness.js";
 import { readSkipCards } from "./skip-cards.js";
 import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, runPeerGate } from "./peer-gate.js";
-import { declaresAnySurface, deliverableCmdsForStory, readAttestGateMode, rejectedDeliverableCmdsForStory, runAttestGate, screenshotExemption, storyRequiresScreenshot, verificationReportPath, webCaptureTargetsForStory } from "./attest-gate.js";
+import { declaresAnySurface, deliverableCmdsForStory, readAttestGateMode, rejectedDeliverableCmdsForStory, runAttestGate, screenshotExemption, storyRequiresScreenshot, verificationReportHasContent, verificationReportPath, webCaptureTargetsForStory } from "./attest-gate.js";
 import { recoverCodexSessionCapture, recoverCodexUsage, recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
 import { validateStoryVisualEvidence } from "../lib/design-visual-evidence.js";
 import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, autoAttachScreenshotToAcMap, buildAcMapRemediationPrompt, needsAcMapRemediation } from "./attest-remediation.js";
@@ -1699,6 +1699,15 @@ export async function executeCommand(
         }
       }
       const storyId = ctx.storyId ?? "";
+      // FIX-908: the score stage's result is no longer fire-and-forget. We capture
+      // whether the SOLE producer of the cycle's Review Score (runScorePairing)
+      // actually produced one ("scored") or failed loud (none-available / timeout /
+      // error). A failed score stage on a cycle that did REAL work is the keystone
+      // signal for the `needs_review` terminal (computed at facts-capture below).
+      // Default "scored" so a NON-delivery cycle (commitsAhead===0 — the score
+      // stage is never run) is never mis-flagged: needs_review is gated on
+      // commitsAhead>0 anyway, so the default only matters when the stage ran.
+      let scoreStatus: "none-available" | "scored" | "timeout" | "error" = "scored";
       // FIX-343 (step ③) pipeline order: peer-score → report render → attest gate
       // → terminal → teardown. The score stage runs BEFORE the report render so
       // the report embeds the FRESHLY-written peer score (never a stale one). A
@@ -1767,7 +1776,13 @@ export async function executeCommand(
         // worktree teardown and the gate (reading repoCwd) finds it. FIX-343: use
         // the SAME injectable installed-agents seam as the peer gate so the
         // mandatory score stage is hermetic under test (no real-env spawns).
-        await runScorePairing(ports.repoCwd, dirname(ports.paths.eventsPath), ctx.cycleId ?? "", ctx.agent ?? "", storyId, skill, summary, {
+        // FIX-908: CONSUME the result (was fire-and-forget). A non-"scored" status
+        // means the gate will fail loud on "missing peer review score"; we remember
+        // it so a cycle that nonetheless did real work is classified `needs_review`
+        // (work preserved) rather than plain `failed` + orphaned branch. The score
+        // note itself is still written ONLY by runScorePairing — we synthesize
+        // nothing here (the independence red line stands).
+        const scoreResult = await runScorePairing(ports.repoCwd, dirname(ports.paths.eventsPath), ctx.cycleId ?? "", ctx.agent ?? "", storyId, skill, summary, {
           installed: ports.installedAgents?.() ?? agentsInstalled(realAgentEnv()),
           // FIX-346: an auth-excluded peer is unavailable to score too. The score
           // stage stays fail-loud only when the WHOLE pool is excluded (one
@@ -1777,6 +1792,7 @@ export async function executeCommand(
           event: (e: PairEvent) => ports.events.appendEvent(ports.paths.eventsPath, e as RollEvent),
           now: () => eventTs(ports),
         });
+        scoreStatus = scoreResult.status;
       }
       if (commitsAhead > 0 && storyId !== "" && ctx.evidenceRunDir !== undefined && ctx.evidenceRunDir !== "") {
         // FIX-246: ac-map omission remediation. Agents deliver real work yet
@@ -1903,6 +1919,27 @@ export async function executeCommand(
       // on the runs row). A defensively-empty agent slot stays idle.
       const agentExecuted = (ctx.agent ?? "").trim() !== "";
       const gateBlocked = attestBlocked || peerBlocked;
+      // FIX-908: a gate-blocked cycle that did REAL work (≥1 commit AND ≥1 tcr:
+      // commit) but is only missing a REQUIRED acceptance artifact — the
+      // independent peer Review Score was not produced (scoreStatus ≠ "scored") OR
+      // the acceptance report is an empty shell (no AC content / no ac-map) — is
+      // NOT a no-output failure. The work is sound and committed; the attest gate
+      // has already honestly blocked Done (no synthesized artifact). Flag it so
+      // classifyCaptured returns `needs_review` (branch preserved, awaits review)
+      // instead of plain `failed` + an orphaned, discarded branch. Scoped tightly:
+      // ONLY when blocked, with real work, and no PR already out (the FIX-244
+      // published path arbitrates that case first). NEVER set on a passing gate or
+      // on a 0-commit / 0-tcr give-up — those stay `failed`/`gave_up`/`idle`.
+      const missingRequiredArtifact =
+        scoreStatus !== "scored" ||
+        (storyId !== "" && !verificationReportHasContent(ports.paths.worktreePath, storyId));
+      const needsReview =
+        gateBlocked &&
+        commitsAhead > 0 &&
+        tcrCount > 0 &&
+        missingRequiredArtifact &&
+        prState !== "OPEN" &&
+        prState !== "MERGED";
       const facts: CapturedFacts = {
         usedWorktree: true,
         agentExecuted,
@@ -1915,6 +1952,7 @@ export async function executeCommand(
         timedOut: false,
         commitsAhead,
         ...(gateBlocked ? { gateBlocked: true } : {}),
+        ...(needsReview ? { needsReview: true } : {}),
         ...(mainAhead > 0 ? { mainAhead } : {}),
         ...(prState !== undefined ? { prState } : {}),
       };
@@ -2423,6 +2461,10 @@ export function buildTerminalRecord(
     // FIX-351: gates passed but publish could not complete (work committed
     // locally, never published) — a neutral terminal, NOT a failure.
     local: "unpublished",
+    // FIX-908: real work committed + code-stage peer agreed, but a required
+    // acceptance artifact is missing (no independent peer Review Score /
+    // empty-shell report). Branch preserved, awaits review — NOT a failure.
+    needs_review: "needs_review",
   };
   let attest: FactOr<TerminalAttestFact>;
   if (storyId === "") {

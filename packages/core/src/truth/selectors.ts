@@ -185,6 +185,9 @@ const ROW_TO_TERMINAL: Record<string, TerminalOutcome> = {
   // FIX-351: gates passed but publish did not land (work committed locally) — a
   // neutral non-failure terminal, NOT mapped into the failed cluster.
   local: "unpublished",
+  // FIX-908: real work committed but a required acceptance artifact is missing —
+  // a neutral "awaits review" terminal, NOT a failure (the branch is preserved).
+  needs_review: "needs_review",
 };
 
 export function deriveCycleTruth(input: CycleTruthInput): CycleTruth {

@@ -11,6 +11,7 @@ import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { CycleCommand, CycleContext, RollEvent, WarmSessionEntry } from "@roll/core";
 import { agentWritableRoots } from "../src/runner/executor.js";
+import { evaluateReviewScoreGate, readLatestStoryPeerScore } from "../src/lib/review-score.js";
 import {
   AGENT_ARGV_TODO,
   AUTORUN_DIRECTIVE,
@@ -1887,6 +1888,96 @@ describe("executeCommand — command → executor mapping", () => {
     const { ports } = fakePorts();
     const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
     expect(r.event).toMatchObject({ type: "facts_captured", facts: { gateBlocked: true, agentExit: 0 } });
+  });
+
+  // FIX-908 — the keystone: a cycle that did REAL work (≥1 commit + ≥1 tcr:) but
+  // is missing a REQUIRED acceptance artifact (no independent peer Review Score)
+  // must capture `needsReview: true` so the terminal is classified `needs_review`
+  // (branch preserved) instead of plain `failed` + an orphaned, discarded branch.
+  // The score stage's result is CONSUMED (no longer fire-and-forget). RED LINE:
+  // the gate stays fail-loud — NO peer score is synthesized, NO Done is flipped.
+  it("FIX-908: real work + score stage fails (no scorer) → needsReview captured; peer score STILL absent, gate STILL missing", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-908-")));
+    execDirs.push(repo);
+    mkdirSync(join(repo, ".roll"), { recursive: true });
+    const wt = join(repo, "wt");
+    mkdirSync(wt, { recursive: true });
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      paths: { ...fakePorts().ports.paths, worktreePath: wt, eventsPath: join(repo, ".roll", "events.ndjson") },
+      // No installed agents → runScorePairing finds NO scorer → status "none-available".
+      installedAgents: () => [],
+      github: {
+        ...fakePorts().ports.github,
+        // Not a published cycle — so the FIX-244 `published` path does NOT pre-empt.
+        prState: vi.fn(async () => "NONE"),
+      },
+    });
+    const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1, builderSessionId: "builder-session-1" });
+    // Real work (commitsAhead 3 + tcrCount 4) + gate block + missing score → needs_review.
+    expect(r.event).toMatchObject({ type: "facts_captured", facts: { gateBlocked: true, needsReview: true, commitsAhead: 3 } });
+
+    // RED LINE 1 — no peer score was synthesized: the SOLE producer (runScorePairing)
+    // failed, so the persistent .roll carries NO pair Review Score for this story.
+    expect(readLatestStoryPeerScore(repo, "US-RUN-001", "builder-session-1", "20260605-000000-1")).toBeUndefined();
+    // RED LINE 2 — the gate is STILL "missing" (fail-loud): needs_review never
+    // launders a missing score into a pass. The gate logic is untouched.
+    const gate = evaluateReviewScoreGate(repo, "US-RUN-001", "builder-session-1", "20260605-000000-1");
+    expect(gate.status).toBe("missing");
+  });
+
+  it("FIX-908: a gate-blocked cycle with ZERO commits never sets needsReview (no real work to preserve → stays failed)", async () => {
+    const { ports } = fakePorts({
+      git: { ...fakePorts().ports.git, commitsAhead: vi.fn(async () => 0), mainAhead: vi.fn(async () => 0), tcrCount: vi.fn(async () => 0) },
+      github: { ...fakePorts().ports.github, prState: vi.fn(async () => "NONE") },
+    });
+    const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
+    const facts = (r.event as { facts: Record<string, unknown> }).facts;
+    expect(facts["needsReview"]).toBeUndefined();
+  });
+
+  it("FIX-908: a non-gate-blocked cycle is NEVER flagged needsReview (normal published/built path unchanged)", async () => {
+    // The needs_review flag is set ONLY on a gate block (attestBlocked||peerBlocked).
+    // A clean cycle that passes its gates must capture WITHOUT needsReview, so the
+    // normal render/attest/publish ladder is untouched. We force a non-blocking
+    // (soft) attest gate so the cycle is not gate-blocked.
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-908-soft-")));
+    execDirs.push(repo);
+    mkdirSync(join(repo, ".roll"), { recursive: true });
+    writeFileSync(join(repo, ".roll", "policy.yaml"), "loop_safety:\n  attest_gate: soft\n");
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      paths: { ...fakePorts().ports.paths, worktreePath: join(repo, "wt"), eventsPath: join(repo, ".roll", "events.ndjson") },
+      github: { ...fakePorts().ports.github, prState: vi.fn(async () => "NONE") },
+    });
+    const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
+    const facts = (r.event as { facts: Record<string, unknown> }).facts;
+    // Soft gate ⇒ not blocked ⇒ needsReview must be absent (no gate block to escalate).
+    expect(facts["gateBlocked"]).toBeUndefined();
+    expect(facts["needsReview"]).toBeUndefined();
+  });
+
+  it("FIX-908: score stage result is CONSUMED — a successful scorer writes a real independent peer score note (gate passes the score half)", async () => {
+    // Proves the consume-path didn't break normal scoring: when a fresh-session
+    // scorer (codex, ≠ builder claude) replies with a valid score, runScorePairing
+    // writes the pair Review Score note to the PERSISTENT .roll and the score gate
+    // is satisfied. The note is written ONLY by runScorePairing — never synthesized.
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-908-scored-")));
+    execDirs.push(repo);
+    mkdirSync(join(repo, ".roll"), { recursive: true });
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      paths: { ...fakePorts().ports.paths, worktreePath: join(repo, "wt"), eventsPath: join(repo, ".roll", "events.ndjson") },
+      installedAgents: () => ["codex"],
+      agentSpawn: vi.fn(async () => ({ stdout: "SCORE: 8\nVERDICT: good\nRATIONALE: solid delivery\n", stderr: "", exitCode: 0, timedOut: false })),
+      github: { ...fakePorts().ports.github, prState: vi.fn(async () => "NONE") },
+    });
+    await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1, agent: "claude", builderSessionId: "builder-session-1" });
+    // The fresh-session scorer wrote a real, independent peer score (scoredBy=codex,
+    // session ≠ builder). The score gate's score-half is satisfied.
+    const entry = readLatestStoryPeerScore(repo, "US-RUN-001", "builder-session-1", "20260605-000000-1");
+    expect(entry?.scoring).toBe("pair");
+    expect(entry?.score).toBe(8);
   });
 
   // FIX-246 — ac-map omission remediation. Agents consistently skip skill step

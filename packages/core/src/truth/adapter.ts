@@ -121,6 +121,12 @@ export function outcomeToPanel(outcome: CycleTruth["outcome"], state: TruthState
     // never counts a sound-but-unpublished cycle as a fail (it is not red).
     case "unpublished":
       return "idle";
+    // FIX-908: real work committed but a required acceptance artifact is missing —
+    // the work is preserved on the branch awaiting review, NOT a failure. Bucket
+    // it neutrally (idle-side, like unpublished) so the panel/tally never paints a
+    // sound-but-unreviewed cycle red.
+    case "needs_review":
+      return "idle";
     case "failed":
     case "blocked":
     case "aborted_no_delivery":

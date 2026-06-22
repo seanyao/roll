@@ -46,6 +46,16 @@ export const TERMINAL_OUTCOMES = [
   // distinct from `failed` (a gate genuinely failed / errored) and from
   // `aborted_with_delivery` (publish failed but the branch WAS pushed for audit).
   "unpublished",
+  // FIX-908 — a cycle that did REAL work (≥1 commit, ≥1 tcr: commit, code-stage
+  // peer agreed) but is missing a REQUIRED acceptance artifact at the terminal
+  // (no independent peer Review Score, or an empty-shell acceptance report). The
+  // attest gate honestly blocks it (no Done, no synthesized artifact), but the
+  // work is SOUND and committed on the cycle branch. Pre-FIX-908 this fell into
+  // plain `failed` + `no_publish_attempted` and the branch was orphaned/discarded.
+  // `needs_review` keeps the branch and records that the delivery awaits a human/
+  // re-run review — NOT a code defect, NOT a Done. Distinct from `failed` (a real
+  // gate/code failure) and `unpublished` (gates PASSED but publish could not land).
+  "needs_review",
   "unknown",
 ] as const;
 export type TerminalOutcome = (typeof TERMINAL_OUTCOMES)[number];

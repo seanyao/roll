@@ -158,6 +158,39 @@ describe("FIX-244 — phantom-failure classification (published terminal)", () =
       classifyCaptured({ usedWorktree: true, agentExit: 0, gateBlocked: true, timedOut: false, commitsAhead: 3, prState: "OPEN" }),
     ).toBe("published");
   });
+  // FIX-908: a gate-blocked cycle that did real work but is only missing a
+  // required acceptance artifact is `needs_review` (work preserved), NOT `failed`.
+  it("FIX-908: gateBlocked + commits + needsReview → needs_review (work preserved, not orphaned)", () => {
+    expect(
+      classifyCaptured({ usedWorktree: true, agentExit: 0, gateBlocked: true, timedOut: false, commitsAhead: 3, needsReview: true }),
+    ).toBe("needs_review");
+  });
+  it("FIX-908: gateBlocked + ZERO commits + needsReview → failed (no real work to preserve)", () => {
+    // needs_review is gated on real work; a 0-commit block can never escape failed.
+    expect(
+      classifyCaptured({ usedWorktree: true, agentExit: 0, gateBlocked: true, timedOut: false, commitsAhead: 0, needsReview: true }),
+    ).toBe("failed");
+  });
+  it("FIX-908: gateBlocked + commits WITHOUT needsReview → failed (normal failed path unchanged)", () => {
+    expect(
+      classifyCaptured({ usedWorktree: true, agentExit: 0, gateBlocked: true, timedOut: false, commitsAhead: 3 }),
+    ).toBe("failed");
+  });
+  it("FIX-908: existing PR pre-empts needs_review → published (FIX-244 takes precedence)", () => {
+    expect(
+      classifyCaptured({ usedWorktree: true, agentExit: 0, gateBlocked: true, timedOut: false, commitsAhead: 3, needsReview: true, prState: "MERGED" }),
+    ).toBe("published");
+  });
+  it("FIX-908: needsReview never escapes a non-gateBlocked clean built cycle", () => {
+    // A passing-gate built cycle ignores needsReview entirely (it is only set on a
+    // gate block) — defends against any future caller leaking the flag onto a pass.
+    expect(
+      classifyCaptured({ usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 3, needsReview: true }),
+    ).toBe("built");
+  });
+  it("FIX-908: mapV2Status(needs_review) → needs_review (distinct terminal outcome)", () => {
+    expect(mapV2Status("needs_review")).toBe("needs_review");
+  });
   it("OPEN PR but zero commits ahead → not published (nothing of this cycle is in it)", () => {
     expect(
       classifyCaptured({ usedWorktree: true, agentExit: 1, timedOut: false, commitsAhead: 0, prState: "OPEN" }),

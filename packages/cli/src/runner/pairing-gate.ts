@@ -706,6 +706,70 @@ export function buildPairScorePrompt(summary: string): string {
   );
 }
 
+// ── FIX-387: review prompt with repo context + build/TCR trust ──────────────
+
+export interface ReviewPromptContext {
+  diff: string;
+  /** Number of commits ahead of main on this cycle's branch. */
+  commitsAhead: number;
+  /** Number of `tcr:` commits — evidence the build/TCR passed green. */
+  tcrCount: number;
+}
+
+/**
+ * FIX-387 — build the peer-review prompt with REPO CONTEXT so the reviewer knows:
+ * (a) the build already passed (TCR green) — don't flag imports as build regression,
+ * (b) symbols imported but not defined in the diff exist on the main baseline.
+ *
+ * Before this fix, the reviewer saw ONLY the diff and flagged `import { X }` as
+ * "missing definition / build regression" when X was defined on main (outside the
+ * diff). This feeds the reviewer the build/TCR facts and an explicit instruction
+ * to avoid that mis-classification.
+ *
+ * AC4 guarantee: the instruction does NOT weaken detection of genuinely broken
+ * code — the reviewer is still told to flag real issues INSIDE the diff or real
+ * build failures, just not to mistake baseline imports for missing source.
+ */
+export function buildReviewPrompt(ctx: ReviewPromptContext): string {
+  const buildLine =
+    ctx.commitsAhead > 0
+      ? `BUILD STATUS: ${ctx.commitsAhead} commit(s) ahead of main, ` +
+        `${ctx.tcrCount > 0 ? `${ctx.tcrCount} TCR ` : ""}green — ` +
+        `the build/TCR pipeline already passed. ` +
+        `Do NOT flag imports, type references, or function calls to symbols defined ` +
+        `OUTSIDE this diff (on the main baseline branch) as "build regression", ` +
+        `"missing source", "undefined import", or "would fail build". ` +
+        `The compiler already found those definitions on main.\n`
+      : "";
+
+  return (
+    `You are a heterogeneous PAIRING reviewer — a DIFFERENT agent wrote the diff below. ` +
+    `Your ONLY job is a terse second-pair-of-eyes review (correctness, edge cases, quality). ` +
+    `Do NOT modify files, do NOT commit, do NOT try to "complete" or deliver anything — just review. ` +
+    // FIX-387: trust the build/TCR pipeline that already passed. A symbol imported
+    // but defined in a file UNCHANGED by this diff exists on the `main` baseline
+    // and was resolved by the compiler — do NOT flag it as a build regression.
+    `REPO CONTEXT: ` +
+    `The branch targets \`origin/main\`; all files NOT listed in this diff are ` +
+    `UNCHANGED from main and their contents (including exported symbols, types, ` +
+    `and functions) exist on the baseline. ` +
+    `\n` +
+    (buildLine !== "" ? `TRUST BUILD: ${buildLine}` : "") +
+    `Important — judge the diff ITSELF for correctness: ` +
+    `  • Flag real bugs, logic errors, missing error handling, security issues, ` +
+    `    broken patterns, or inconsistent changes WITHIN the diff. ` +
+    `  • BUT if the diff IMPORTS a symbol / type / function and you cannot find ` +
+    `    its definition WITHIN the diff → that symbol lives on main (the baseline) ` +
+    `    and the compiler already resolved it. This is NORMAL — do NOT flag it. ` +
+    `  • The ONLY time a missing import is real: the import path ITSELF is newly ` +
+    `    introduced in this diff AND the file it points to is also in this diff BUT ` +
+    `    missing the exported symbol. ` +
+    `End with exactly one line "VERDICT: agree|refine|object" and one ` +
+    `"FINDING: <issue>" line per concrete issue.\n\nDIFF:\n` +
+    ctx.diff
+  );
+}
+
 /**
  * FIX-344 — the DESIGN score-stage prompt. roll-design produces backlog/spec
  * artifacts (INVEST stories), NOT a code diff, so the scorer grades DESIGN

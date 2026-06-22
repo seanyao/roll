@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildDesignScorePrompt, buildPairScorePrompt, enabledPairingStages, reviewTimeoutMs, runPairing, type PairEvent, type RunPairingDeps } from "../src/runner/pairing-gate.js";
+import { buildDesignScorePrompt, buildPairScorePrompt, buildReviewPrompt, enabledPairingStages, reviewTimeoutMs, runPairing, type PairEvent, type RunPairingDeps } from "../src/runner/pairing-gate.js";
 
 function project(yaml: string | null): { dir: string; rt: string } {
   const dir = mkdtempSync(join(tmpdir(), "roll-pair-"));
@@ -816,6 +816,109 @@ describe("retryPeerConsult — FIX-293 follow-up: same-type SEPARATE-SESSION fal
     const none = events.find((e) => e.type === "pair:none-available") as Extract<PairEvent, { type: "pair:none-available" }>;
     expect(none.reason).toContain("no peer could be consulted");
     expect(existsSync(join(rt, "peer", "cycle-c-none.pair.json"))).toBe(false);
+  });
+});
+
+// ── FIX-387: review prompt with repo context + build/TCR trust ───────────────
+
+describe("buildReviewPrompt — FIX-387 repo context + build trust", () => {
+  const diff = `diff --git a/packages/cli/src/new.ts b/packages/cli/src/new.ts
+new file mode 100644
+index 0000000..abc1234
+--- /dev/null
++++ b/packages/cli/src/new.ts
+@@ -0,0 +1,10 @@
++import { StoryDeliveryTruth, queryDeliveryTruth } from "@roll/core";
++import { existsSync } from "node:fs";
++
++export function checkDelivery(storyId: string): boolean {
++  return queryDeliveryTruth(storyId) !== null;
++}
+`;
+
+  it("includes build/TCR status when commits ahead > 0 (AC2: trust already-passed build)", () => {
+    const prompt = buildReviewPrompt({ diff, commitsAhead: 5, tcrCount: 3 });
+    // AC2: build & TCR status is communicated
+    expect(prompt).toMatch(/BUILD STATUS/);
+    expect(prompt).toContain("5 commit(s) ahead of main");
+    expect(prompt).toContain("3 TCR");
+    expect(prompt).toMatch(/green/);
+    expect(prompt).toMatch(/build.*TCR.*pipeline.*already passed/i);
+    expect(prompt).toMatch(/Do NOT flag.*imports.*build regression/i);
+    // AC4 guard: still tells reviewer to flag real issues
+    expect(prompt).toMatch(/judge the diff ITSELF for correctness/i);
+    expect(prompt).toMatch(/Flag real bugs/i);
+  });
+
+  it("includes repo context: main-baseline instruction (AC1)", () => {
+    const prompt = buildReviewPrompt({ diff, commitsAhead: 2, tcrCount: 2 });
+    // AC1: reviewer is told about main-baseline symbols
+    expect(prompt).toMatch(/REPO CONTEXT/);
+    expect(prompt).toContain("origin/main");
+    expect(prompt).toContain("files NOT listed");
+    expect(prompt).toContain("UNCHANGED from main");
+    expect(prompt).toContain("exported symbols");
+    expect(prompt).toContain("exist on the baseline");
+    // AC1: explicit guidance on not mis-flagging imports from baseline
+    expect(prompt).toContain("IMPORTS a symbol");
+    expect(prompt).toContain("cannot find");
+    expect(prompt).toContain("WITHIN the diff");
+    expect(prompt).toContain("symbol lives on main");
+    expect(prompt).toContain("the baseline");
+    expect(prompt).toContain("compiler already resolved");
+    expect(prompt).toContain("do NOT flag it");
+  });
+
+  it("omits build status line when zero commits ahead (idle cycle / no build to trust)", () => {
+    const prompt = buildReviewPrompt({ diff, commitsAhead: 0, tcrCount: 0 });
+    // When nothing was built, no BUILD STATUS line appears — the reviewer gets
+    // only the REPO CONTEXT instruction (main-baseline awareness, no trust claim).
+    expect(prompt).not.toMatch(/BUILD STATUS/);
+    expect(prompt).not.toMatch(/TRUST BUILD/);
+    // Repo context still there
+    expect(prompt).toMatch(/REPO CONTEXT/);
+    expect(prompt).toContain("origin/main");
+    // Still has the diff
+    expect(prompt).toContain(diff);
+  });
+
+  it("AC3: import of main-only symbol NOT flagged as regression — instructions cover the scenario", () => {
+    // The diff imports StoryDeliveryTruth and queryDeliveryTruth from @roll/core.
+    // These symbols are defined on main (outside the diff). The prompt must
+    // instruct the reviewer NOT to flag this as "build regression" or "missing source".
+    const prompt = buildReviewPrompt({ diff, commitsAhead: 3, tcrCount: 3 });
+    // The diff content (import from @roll/core) is present
+    expect(prompt).toContain("StoryDeliveryTruth");
+    expect(prompt).toContain("queryDeliveryTruth");
+    // The instruction explicitly covers this case
+    expect(prompt).toMatch(/Do NOT flag imports.*defined OUTSIDE this diff/);
+    expect(prompt).toMatch(/missing source.*undefined import.*would fail build/);
+    expect(prompt).toMatch(/symbol lives on main/);
+    // The structured verdict contract is preserved
+    expect(prompt).toContain("VERDICT: agree|refine|object");
+    expect(prompt).toContain("FINDING:");
+  });
+
+  it("AC4: still tells reviewer to catch real issues — the instruction does NOT weaken genuine problem detection", () => {
+    const prompt = buildReviewPrompt({ diff, commitsAhead: 1, tcrCount: 1 });
+    // The reviewer is still told to judge the diff for correctness
+    expect(prompt).toContain("judge the diff ITSELF for correctness");
+    expect(prompt).toContain("Flag real bugs");
+    expect(prompt).toContain("logic errors");
+    expect(prompt).toContain("security issues");
+    // The ONLY time a missing import is real: new import path + new file in diff + missing export
+    expect(prompt).toContain("The ONLY time a missing import is real");
+    expect(prompt).toContain("import path ITSELF is newly");
+    expect(prompt).toContain("introduced in this diff");
+    // Does NOT say to skip all import checks
+    expect(prompt).not.toMatch(/never flag/i);
+    expect(prompt).not.toMatch(/ignore all import/i);
+  });
+
+  it("embeds the full diff at the end", () => {
+    const prompt = buildReviewPrompt({ diff: "sample diff", commitsAhead: 1, tcrCount: 1 });
+    expect(prompt).toContain("sample diff");
+    expect(prompt).toMatch(/DIFF:\n/);
   });
 });
 

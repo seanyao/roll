@@ -143,7 +143,7 @@ import { recoverCodexSessionCapture, recoverCodexUsage, recoverKimiUsage, recove
 import { validateStoryVisualEvidence } from "../lib/design-visual-evidence.js";
 import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, autoAttachScreenshotToAcMap, buildAcMapRemediationPrompt, needsAcMapRemediation } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
-import { buildPairScorePrompt, enabledPairingStages, parsePairScoreOutput, retryPeerConsult, runPairing, runScorePairing, type PairEvent, type PairReview } from "./pairing-gate.js";
+import { buildPairScorePrompt, buildReviewPrompt, enabledPairingStages, parsePairScoreOutput, retryPeerConsult, runPairing, runScorePairing, type PairEvent, type PairReview } from "./pairing-gate.js";
 import { realAgentEnv } from "../commands/agent-list.js";
 import { attestCommand } from "../commands/attest.js";
 import { refreshAggregates } from "../commands/index-gen.js";
@@ -1239,12 +1239,13 @@ export async function executeCommand(
         // "complete the delivery / don't just summarize / do the work", which made
         // reviewers try to deliver (and risk mutating the worktree) instead of
         // returning a terse verdict.
-        const prompt =
-          `You are a heterogeneous PAIRING reviewer — a DIFFERENT agent wrote the diff below. ` +
-          `Your ONLY job is a terse second-pair-of-eyes review (correctness, edge cases, quality). ` +
-          `Do NOT modify files, do NOT commit, do NOT try to "complete" or deliver anything — just review. ` +
-          `End with exactly one line "VERDICT: agree|refine|object" and one "FINDING: <issue>" line per concrete issue.\n\nDIFF:\n` +
-          diff;
+        // FIX-387: enrich with build/TCR status + main-baseline context so the
+        // reviewer does NOT mistake imports of main-defined symbols as build regressions.
+        const prompt = buildReviewPrompt({
+          diff,
+          commitsAhead,
+          tcrCount,
+        });
         // FIX-319: record EVERY consult's real wall-clock + outcome (pair:consult)
         // so the 120s hard timeout can be tuned from data, not guessed.
         const t0 = Date.now();

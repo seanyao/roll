@@ -378,6 +378,75 @@ export function timeoutTeardownCommands(ctx: TerminalContext): CycleCommand[] {
   ];
 }
 
+// ── FIX-907: per-cycle HARD timeout (wall-clock + no-progress) ───────────────
+//
+// The watchdog above ({@link watchdogVerdict}) is checked only BETWEEN steps of
+// the driver loop. The agent spawn is a single blocking `await`, so while a
+// builder HANGS (process alive, 0% CPU, no new commits/events) the driver is
+// parked at that await and the watchdog never re-fires — a hung cycle holds the
+// inflight lock forever, blocking the whole loop (实证: FIX-390's builder hung
+// 46min after one TCR commit). FIX-907 races the spawn against this decision so
+// a hung builder is killed and the lock freed without human intervention.
+//
+// TWO criteria, EITHER trips:
+//   (a) WALL — total cycle elapsed exceeds the hard ceiling (default 45min).
+//   (b) NO-PROGRESS — no NEW commit or stdout/event for the idle window
+//       (default 15min). Critically this is keyed on the LAST PROGRESS time, NOT
+//       on pure elapsed time: a slow `deepseek` call sits at 0% CPU but keeps
+//       emitting stdout/events, which bumps `lastProgressSec`, so it is NEVER
+//       mis-killed. Only a TRULY silent hang trips no-progress.
+
+/** v3 per-cycle WALL-clock hard ceiling (seconds). Default 45min — a cycle that
+ *  runs this long total is a runaway, killed regardless of recent progress.
+ *  Aligned with the legacy {@link CYCLE_TIMEOUT_SEC} (2700s = 45min). */
+export const CYCLE_WALL_TIMEOUT_SEC = 2700;
+/** v3 per-cycle NO-PROGRESS idle window (seconds). Default 15min — if the
+ *  builder produces no new commit AND no new stdout/event for this long, it is
+ *  judged hung (the FIX-390 silent-hang shape) and killed. */
+export const CYCLE_NO_PROGRESS_SEC = 900;
+
+/** The per-cycle hard-timeout verdict. `timedOut:false` carries the tighter of
+ *  the two remaining budgets so the poller can schedule its next wake. */
+export type CycleTimeoutVerdict =
+  | { timedOut: false; remainingSec: number }
+  | { timedOut: true; reason: "wall" | "no-progress"; elapsedSec: number; idleSec: number };
+
+/** Inputs for {@link cycleTimeoutVerdict} — all clocks injected (pure). */
+export interface CycleTimeoutInput {
+  /** Seconds since the agent spawn started (now - spawnStart). */
+  elapsedSec: number;
+  /** Seconds since the LAST observed progress (new commit or stdout/event):
+   *  now - lastProgressSec. Reset to 0 whenever progress is seen, so a slow but
+   *  still-emitting call (deepseek) never accrues idle time. */
+  idleSec: number;
+  /** WALL ceiling (default {@link CYCLE_WALL_TIMEOUT_SEC}). */
+  wallLimitSec?: number;
+  /** NO-PROGRESS idle window (default {@link CYCLE_NO_PROGRESS_SEC}). */
+  noProgressLimitSec?: number;
+}
+
+/**
+ * Pure per-cycle hard-timeout decision (FIX-907). WALL is checked FIRST so a
+ * runaway that also happens to be idle is attributed to the wall ceiling. A
+ * non-positive limit DISABLES that criterion (an operator escape hatch); if both
+ * are disabled the cycle never times out by this gate. Boundary `>=` (the limit
+ * itself is a breach, mirroring {@link watchdogVerdict}).
+ */
+export function cycleTimeoutVerdict(input: CycleTimeoutInput): CycleTimeoutVerdict {
+  const wall = input.wallLimitSec ?? CYCLE_WALL_TIMEOUT_SEC;
+  const idle = input.noProgressLimitSec ?? CYCLE_NO_PROGRESS_SEC;
+  if (wall > 0 && input.elapsedSec >= wall) {
+    return { timedOut: true, reason: "wall", elapsedSec: input.elapsedSec, idleSec: input.idleSec };
+  }
+  if (idle > 0 && input.idleSec >= idle) {
+    return { timedOut: true, reason: "no-progress", elapsedSec: input.elapsedSec, idleSec: input.idleSec };
+  }
+  // Remaining = the tighter of the two budgets (whichever is enabled).
+  const wallRemain = wall > 0 ? wall - input.elapsedSec : Number.POSITIVE_INFINITY;
+  const idleRemain = idle > 0 ? idle - input.idleSec : Number.POSITIVE_INFINITY;
+  return { timedOut: false, remainingSec: Math.min(wallRemain, idleRemain) };
+}
+
 // ── Transient retry / backoff (B-group AC, I6; mirrors bin/roll:9032-9072) ────
 
 /** v2 in-cycle agent-spawn retry budget (`for _attempt in 1 2 3`, bin/roll:9032). */

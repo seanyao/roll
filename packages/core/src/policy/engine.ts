@@ -114,6 +114,14 @@ export interface LoopSafetyConfig {
   sessionReuse?: boolean;
   /** FIX-370: explicit warm-resume boundary. Absent / invalid ⇒ off. */
   resumeScope?: ResumeScope;
+  /** FIX-907: per-cycle WALL-clock hard ceiling (seconds). A cycle running this
+   *  long total is killed regardless of recent progress. Default 2700 (45min). */
+  cycleWallTimeoutSec: number;
+  /** FIX-907: per-cycle NO-PROGRESS idle window (seconds). A builder with no new
+   *  commit AND no new stdout/event for this long is judged hung and killed.
+   *  Keyed on last-progress time (not pure elapsed), so a slow-but-emitting call
+   *  never trips. Default 900 (15min). */
+  cycleNoProgressSec: number;
 }
 
 /** The whole parsed policy.yaml. */
@@ -131,6 +139,10 @@ export const DEFAULT_CORRECTION_OSCILLATION_THRESHOLD = 3;
 export const DEFAULT_CORRECTION_SIGNAL_THRESHOLD = 3;
 export const DEFAULT_CORRECTION_SIGNAL_WINDOW_SEC = 12 * 60 * 60;
 export const DEFAULT_CORRECTION_ACTUATOR = "conservative";
+/** FIX-907: per-cycle WALL-clock hard ceiling (seconds) — default 45min. */
+export const DEFAULT_CYCLE_WALL_TIMEOUT_SEC = 2700;
+/** FIX-907: per-cycle NO-PROGRESS idle window (seconds) — default 15min. */
+export const DEFAULT_CYCLE_NO_PROGRESS_SEC = 900;
 
 // ── Minimal YAML parser for the policy.yaml shape ────────────────────────────
 //
@@ -241,6 +253,8 @@ export function parsePolicy(yaml: string): Policy {
     correctionSignalThreshold: DEFAULT_CORRECTION_SIGNAL_THRESHOLD,
     correctionSignalWindowSec: DEFAULT_CORRECTION_SIGNAL_WINDOW_SEC,
     correctionActuator: DEFAULT_CORRECTION_ACTUATOR,
+    cycleWallTimeoutSec: DEFAULT_CYCLE_WALL_TIMEOUT_SEC,
+    cycleNoProgressSec: DEFAULT_CYCLE_NO_PROGRESS_SEC,
   };
 
   for (let i = 0; i < lines.length; i++) {
@@ -352,6 +366,12 @@ function parseLoopSafety(lines: PreLine[], start: number): [number, LoopSafetyCo
     correctionSignalThreshold: numOr(flat["correction_signal_threshold"], DEFAULT_CORRECTION_SIGNAL_THRESHOLD),
     correctionSignalWindowSec: numOr(flat["correction_signal_window_sec"], DEFAULT_CORRECTION_SIGNAL_WINDOW_SEC),
     correctionActuator: flat["correction_actuator"] === "auto" ? "auto" : DEFAULT_CORRECTION_ACTUATOR,
+    // FIX-907: per-cycle hard-timeout thresholds. A 0 / negative value DISABLES
+    // that criterion (operator escape hatch); a garbage value falls back to the
+    // default. Keyed by snake_case under `loop_safety:` (`cycle_wall_timeout_sec`
+    // / `cycle_no_progress_sec`).
+    cycleWallTimeoutSec: numOr(flat["cycle_wall_timeout_sec"], DEFAULT_CYCLE_WALL_TIMEOUT_SEC),
+    cycleNoProgressSec: numOr(flat["cycle_no_progress_sec"], DEFAULT_CYCLE_NO_PROGRESS_SEC),
     ...(flat["attest_gate"] === "hard" || flat["attest_gate"] === "soft"
       ? { attestGate: flat["attest_gate"] as "soft" | "hard" }
       : {}),

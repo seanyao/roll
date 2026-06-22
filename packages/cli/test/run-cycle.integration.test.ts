@@ -414,6 +414,84 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
     expect(result2.terminal).toBe("published"); // FIX-244
   });
 
+  it("FIX-907 hung builder (no-progress timeout): agent killed mid-spawn → blocked, lock released, branch PRESERVED, cycle:timeout recorded", async () => {
+    const { repo } = makeFixture("hang907");
+    const rt = tmp("hang907-rt");
+    const cycleId = "20260622-090000-9907";
+    const branch = `loop/cycle-${cycleId}`;
+    const p = paths(rt, cycleId);
+    const fc = fixedClock(3_000_000);
+
+    // Pin SHORT real-poll + small idle window via env so the per-cycle watchdog
+    // (FIX-907) trips in real wall-time inside the test. The builder NEVER commits
+    // and NEVER emits — the exact FIX-390 silent-hang shape.
+    const savedPoll = process.env["ROLL_TIMEOUT_POLL_MS"];
+    const savedNp = process.env["ROLL_CYCLE_NO_PROGRESS_SEC"];
+    const savedWall = process.env["ROLL_CYCLE_WALL_TIMEOUT_SEC"];
+    process.env["ROLL_TIMEOUT_POLL_MS"] = "20";
+    process.env["ROLL_CYCLE_NO_PROGRESS_SEC"] = "10"; // 10 fake-seconds of idle
+    process.env["ROLL_CYCLE_WALL_TIMEOUT_SEC"] = "100000"; // wall far away — only idle trips
+
+    // A hanging builder: it advances the FAKE clock past the idle window (so the
+    // watchdog's pure verdict trips on the next real tick), then blocks until the
+    // watchdog records cycle:timeout, then returns as if killed. No commit, no
+    // onChunk → no progress signal at all.
+    const hungBuilder: AgentSpawn = async () => {
+      fc.set(3_000_000 + 11); // now-lastProgress = 11 > 10 → no-progress breach
+      // Wait (bounded) for the real-timer watchdog to fire + record the event.
+      const deadline = Date.now() + 3000;
+      // eslint-disable-next-line no-constant-condition
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 10));
+        if (existsSync(p.eventsPath) && readFileSync(p.eventsPath, "utf8").includes('"cycle:timeout"')) break;
+      }
+      return { stdout: "", stderr: "", exitCode: 137, timedOut: false };
+    };
+
+    try {
+      const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps, clock: fc.clock });
+      const ports: Ports = { ...base, agentSpawn: hungBuilder, github: fakeGithub(0) };
+      const result = await runCycleOnce({
+        ports,
+        ctx: { cycleId, branch, loop: "ci" as never },
+      });
+
+      expect(result.ran).toBe(true);
+      // AC1: the no-progress hard timeout drove the cycle to a blocked terminal.
+      expect(result.terminal).toBe("blocked");
+
+      const events = readFileSync(p.eventsPath, "utf8")
+        .split("\n")
+        .filter((l) => l.trim() !== "")
+        .map((l) => JSON.parse(l) as { type: string; outcome?: string; reason?: string; cycleId?: string });
+
+      // AC4: a cycle:timeout event was recorded with the cycleId + reason.
+      const timeout = events.find((e) => e.type === "cycle:timeout");
+      expect(timeout).toBeDefined();
+      expect(timeout?.reason).toBe("no-progress");
+      expect(timeout?.cycleId).toBe(cycleId);
+
+      // I8 / AC1: a terminal cycle:end (blocked) is still written.
+      const end = events.find((e) => e.type === "cycle:end");
+      expect(end?.outcome).toBe("blocked");
+
+      // AC2: the inflight lock is RELEASED (a fresh cycle can take over).
+      expect(existsSync(p.lockPath)).toBe(false);
+
+      // AC3: the worktree branch is PRESERVED (work not discarded) — timeout
+      // teardown never cleans the worktree. The branch ref still resolves.
+      expect(() => git(repo, ["rev-parse", "--verify", branch])).not.toThrow();
+    } finally {
+      const restore = (k: string, v: string | undefined): void => {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      };
+      restore("ROLL_TIMEOUT_POLL_MS", savedPoll);
+      restore("ROLL_CYCLE_NO_PROGRESS_SEC", savedNp);
+      restore("ROLL_CYCLE_WALL_TIMEOUT_SEC", savedWall);
+    }
+  });
+
   it("lock contention: a second concurrent cycle is skipped (ran=false)", async () => {
     const { repo } = makeFixture("lock");
     const rt = tmp("lock-rt");

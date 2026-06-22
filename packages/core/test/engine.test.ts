@@ -18,6 +18,8 @@ import {
   reconcileMergeEvidence,
   reconcileStuckBacklog,
   resumeCandidateBranches,
+  runRowHasPublishedPr,
+  runRowPrNumber,
 } from "../src/index.js";
 
 const HOUR = 3_600_000;
@@ -254,6 +256,74 @@ describe("decideClaimReconcile — FIX-211: Done ≡ merged (no publish-time抢�
   it("reverts a dead claim with no delivering cycle to 📋 Todo (orphan recovery)", () => {
     expect(decideClaimReconcile({ hasDeliveringCycle: false })).toBe("todo");
     expect(decideClaimReconcile({ hasDeliveringCycle: false, prState: "MERGED" })).toBe("todo");
+  });
+
+  // FIX-397 AC2: reconcile robust when gh probe fails
+  it("AC2: keeps when hasPublishedPr=true + gh EOF (prState=undefined) — never re-pick in-flight", () => {
+    expect(decideClaimReconcile({ hasDeliveringCycle: true, hasPublishedPr: true })).toBe("keep");
+  });
+
+  it("AC2: keeps when hasPublishedPr=true + gh returns UNKNOWN — published evidence > probe gap", () => {
+    expect(decideClaimReconcile({ hasDeliveringCycle: true, hasPublishedPr: true, prState: "UNKNOWN" })).toBe("keep");
+  });
+
+  it("AC2: keeps when hasPublishedPr=true + gh returns OPEN — already in-flight", () => {
+    expect(decideClaimReconcile({ hasDeliveringCycle: true, hasPublishedPr: true, prState: "OPEN" })).toBe("keep");
+  });
+
+  it("AC2: still flips to done when MERGED (even with hasPublishedPr=true)", () => {
+    expect(decideClaimReconcile({ hasDeliveringCycle: true, hasPublishedPr: true, prState: "MERGED" })).toBe("done");
+  });
+
+  it("AC2: still reverts to todo when CLOSED (even with hasPublishedPr=true — abandoned)", () => {
+    expect(decideClaimReconcile({ hasDeliveringCycle: true, hasPublishedPr: true, prState: "CLOSED" })).toBe("todo");
+  });
+
+  it("AC2: without hasPublishedPr, unknown prState still keeps (existing safety net)", () => {
+    expect(decideClaimReconcile({ hasDeliveringCycle: true, hasPublishedPr: false })).toBe("keep");
+  });
+});
+
+describe("runRowPrNumber / runRowHasPublishedPr — FIX-397 AC3", () => {
+  const rows: ReconcileRunRow[] = [
+    { story_id: "US-1", cycle_id: "c1", status: "failed" },
+    { story_id: "US-1", cycle_id: "c2", status: "published", pr_number: 890, pr_url: "https://github.com/o/r/pull/890" },
+    { story_id: "US-2", cycle_id: "c3", status: "published" },
+    { story_id: "US-3", cycle_id: "c4", status: "built", pr_number: 0, pr_url: "" },
+    { story_id: "US-4", cycle_id: "c5", status: "done", pr_number: 891 },
+  ];
+
+  it("AC3: runRowPrNumber returns pr_number from latest delivering row", () => {
+    expect(runRowPrNumber(rows, "US-1")).toBe(890);
+    expect(runRowPrNumber(rows, "US-4")).toBe(891);
+  });
+
+  it("AC3: runRowPrNumber returns undefined when no delivering row", () => {
+    expect(runRowPrNumber(rows, "US-404")).toBeUndefined();
+  });
+
+  it("AC3: runRowPrNumber returns undefined for published row WITHOUT pr_number (legacy)", () => {
+    expect(runRowPrNumber(rows, "US-2")).toBeUndefined();
+  });
+
+  it("AC3: runRowPrNumber returns undefined when pr_number is 0 / empty (falsy guard)", () => {
+    expect(runRowPrNumber(rows, "US-3")).toBeUndefined();
+  });
+
+  it("AC3: runRowHasPublishedPr returns true when a published row has a real pr_number", () => {
+    expect(runRowHasPublishedPr(rows, "US-1")).toBe(true);
+  });
+
+  it("AC3: runRowHasPublishedPr returns false for legacy row without pr_number", () => {
+    expect(runRowHasPublishedPr(rows, "US-2")).toBe(false);
+  });
+
+  it("AC3: runRowHasPublishedPr returns false for unknown story", () => {
+    expect(runRowHasPublishedPr(rows, "US-404")).toBe(false);
+  });
+
+  it("AC3: runRowHasPublishedPr returns false when no rows at all", () => {
+    expect(runRowHasPublishedPr([], "US-1")).toBe(false);
   });
 });
 

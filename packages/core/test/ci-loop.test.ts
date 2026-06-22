@@ -114,12 +114,12 @@ describe("healLockVerdict (bin/roll 11497-11503)", () => {
   });
 });
 
-describe("prHealVerdict — heal-or-alert (bin/roll 11484-11524)", () => {
+describe("prHealVerdict — heal-or-alert-or-fix_forward (bin/roll 11484-11524)", () => {
   const base = { pr: "42", headRef: "loop/cycle-x", healMax: 2, prHealCount: 0, lock: { kind: "free" } as const };
-  it("disabled → alert disabled", () => {
+  it("disabled → fix_forward", () => {
     const v = prHealVerdict({ ...base, healMax: 0 });
-    expect(v.kind).toBe("alert");
-    if (v.kind === "alert") {
+    expect(v.kind).toBe("fix_forward");
+    if (v.kind === "fix_forward") {
       expect(v.reason).toBe("disabled");
       expect(v.message).toContain("auto-heal off");
     }
@@ -127,12 +127,12 @@ describe("prHealVerdict — heal-or-alert (bin/roll 11484-11524)", () => {
   it("lock live → in_flight", () => {
     expect(prHealVerdict({ ...base, lock: { kind: "in_flight" } }).kind).toBe("in_flight");
   });
-  it("budget exhausted → alert budget_exhausted", () => {
+  it("budget exhausted → fix_forward", () => {
     const v = prHealVerdict({ ...base, prHealCount: 2 });
-    expect(v.kind).toBe("alert");
-    if (v.kind === "alert") {
+    expect(v.kind).toBe("fix_forward");
+    if (v.kind === "fix_forward") {
       expect(v.reason).toBe("budget_exhausted");
-      expect(v.message).toBe("auto-heal budget exhausted (2/2) — fix manually");
+      expect(v.message).toContain("auto-heal budget exhausted");
     }
   });
   it("under budget → dispatch with next count + attempt", () => {
@@ -141,7 +141,7 @@ describe("prHealVerdict — heal-or-alert (bin/roll 11484-11524)", () => {
   });
   it("disabled takes precedence over a live lock", () => {
     const v = prHealVerdict({ ...base, healMax: 0, lock: { kind: "in_flight" } });
-    expect(v.kind).toBe("alert"); // oracle checks NO_HEAL before the lock
+    expect(v.kind).toBe("fix_forward"); // oracle checks NO_HEAL before the lock
   });
 });
 

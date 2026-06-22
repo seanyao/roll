@@ -40,7 +40,7 @@ describe("prHealSelf — heal gate (US-PORT-021)", () => {
     expect(calls).toEqual([]);
   });
 
-  it("heal disabled (healMax 0) → deduped ALERT, no dispatch", () => {
+  it("heal disabled (healMax 0) → fix_forward signal, no dispatch", () => {
     const { deps, calls } = healDeps({ healMax: () => 0 });
     prHealSelf("12", "feat/x", "o/r", deps);
     expect(calls.some((c) => c.startsWith("alert:") && c.includes("auto-heal off"))).toBe(true);
@@ -60,7 +60,7 @@ describe("prHealSelf — heal gate (US-PORT-021)", () => {
     expect(calls).toContain("dispatch:12");
   });
 
-  it("budget exhausted (count >= max) → deduped ALERT, no dispatch", () => {
+  it("budget exhausted (count >= max) → fix_forward signal, no dispatch", () => {
     const { deps, calls } = healDeps({ prHealCount: () => 2 });
     prHealSelf("12", "feat/x", "o/r", deps);
     expect(calls.some((c) => c.includes("budget exhausted"))).toBe(true);

@@ -49,6 +49,10 @@ import {
   classifyComplexity,
   decideClaimReconcile,
   hasMergedDelivery,
+  ensureDeliveriesFresh,
+  queryStoryDelivery,
+  nodeExecPort,
+  type FreshnessPort,
   latestDeliveringCycle,
   parseClaimedIdsFromBacklog,
   parseBacklog,
@@ -127,7 +131,7 @@ import {
   type ScreenshotResult,
 } from "@roll/infra";
 import { execFile, execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -351,6 +355,22 @@ export interface Ports {
    *  environment probe. */
   installedAgents?: () => string[];
   depsExec?: DepsExec;
+  /**
+   * FIX-906: unified delivery-truth predicate — true iff this story has a
+   * MERGED delivery according to the single structured projection
+   * (`ensureDeliveriesFresh` → `queryStoryDelivery(id).delivered`), which reads
+   * BOTH runs.jsonl AND git merges on origin/main (FIX-904/905). This sees
+   * EXTERNAL / manual merges (claude salvage, PR-lane direct merge of a
+   * non-loop-cycle PR) that the runs-only {@link hasMergedDelivery} is blind to.
+   *
+   * The picker's done eligibility and the preflight done-flip both consult this
+   * so the loop never re-picks a card that already shipped on main, regardless of
+   * HOW it merged. Injectable + optional: unset (the test default) → no unified
+   * probe, falling back to the runs-only signal; {@link nodePorts} wires the real
+   * projection. The implementation memoizes the projection per cycle so the
+   * `git log` it shells out to runs at most once.
+   */
+  mergedDelivery?: (storyId: string) => boolean;
   clock: ProcessClock;
   /** Runtime paths the executor writes to. */
   paths: RunnerPaths;
@@ -526,14 +546,20 @@ export async function executeCommand(
       try {
         const rows = ports.backlog.read(ports.repoCwd) as Array<{ id: string; status?: string }>;
         const runRows = readRunsRows(ports.paths.runsPath);
-        // FIX-323: a 📋 Todo card whose delivery already MERGED is Done — its
-        // deliverable is on main (a prior gave_up reset the status text but not
-        // the merge). Flip it here (cheap, local, no gh probe) so the picker
-        // pool stays honest and the merged zombie is never re-picked. This
-        // complements the picker's own hasMergedDelivery guard (belt-and-suspenders).
+        // FIX-323 / FIX-906: a 📋 Todo card whose delivery already MERGED is Done
+        // — its deliverable is on main (a prior gave_up reset the status text but
+        // not the merge). Flip it here (cheap, local, no gh probe) so the picker
+        // pool stays honest and the merged zombie is never re-picked. The merge
+        // signal is the UNIFIED delivery truth ({@link mergedFromTruth}): the
+        // structured projection (runs + git merges on origin/main) when wired,
+        // OR'd with the runs-only `hasMergedDelivery` — so an external / manual
+        // merge (claude salvage, PR-lane direct merge) flips the card too, not
+        // just loop-cycle deliveries. Complements the picker's own guard.
+        const mergedFromTruth = (id: string): boolean =>
+          (ports.mergedDelivery?.(id) ?? false) || hasMergedDelivery(runRows, id);
         for (const r of rows) {
           if (!(r.status ?? "").includes(STATUS_MARKER.todo)) continue;
-          if (hasMergedDelivery(runRows, r.id)) {
+          if (mergedFromTruth(r.id)) {
             ports.backlog.markStatus?.(ports.repoCwd, r.id, STATUS_MARKER.done);
           }
         }
@@ -655,11 +681,18 @@ export async function executeCommand(
       // .roll/, so the worktree has no backlog at all — a worktree read picks
       // nothing and the loop silently idles.
       const items = ports.backlog.read(ports.repoCwd);
-      // FIX-323: feed the picker the merge truth from runs.jsonl. A card whose
+      // FIX-323 / FIX-906: feed the picker the UNIFIED merge truth. A card whose
       // deliverable already MERGED is Done — even if its backlog row was reset to
       // 📋 Todo by a prior gave_up cycle (the agent found the work on main, made
       // no commit → gave_up → status reset → re-pick → burn). The picker reads
       // only backlog text, so without this it re-picks the merged zombie forever.
+      // The signal is the structured projection (`ensureDeliveriesFresh` →
+      // `queryStoryDelivery(id).delivered`, which reads runs + git merges on
+      // origin/main — FIX-904/905) when wired via {@link mergedDelivery}, OR'd
+      // with the runs-only `hasMergedDelivery`. The projection sees EXTERNAL /
+      // manual merges (claude salvage, PR-lane direct merge of a non-loop-cycle
+      // PR) that runs.jsonl is blind to — the exact case that had the picker
+      // re-selecting already-merged cards (FIX-903/904/390) every cycle.
       const pickRunRows = readRunsRows(ports.paths.runsPath);
       // FIX-363 (loop resilience): skip poison-pill cards (failed K times) so a
       // single un-deliverable card no longer halts the WHOLE loop — it keeps
@@ -667,7 +700,8 @@ export async function executeCommand(
       // truth is untouched.
       const skipCards = readSkipCards(dirname(ports.paths.eventsPath));
       const story = pickStory(items as never, {
-        hasMergedDelivery: (id) => hasMergedDelivery(pickRunRows, id),
+        hasMergedDelivery: (id) =>
+          (ports.mergedDelivery?.(id) ?? false) || hasMergedDelivery(pickRunRows, id),
         shouldSkip: (id) => skipCards.has(id),
       });
       if (story === undefined) return { event: { type: "no_story" } };
@@ -3319,12 +3353,66 @@ export function nodePorts(opts: {
   const bus = new EventBus();
   const clock = opts.clock ?? systemClock;
   const spawn = opts.agentSpawn ?? realAgentSpawn;
+
+  // FIX-906: the unified delivery-truth predicate. The structured projection
+  // (`ensureDeliveriesFresh`, FIX-904/905) rebuilds deliveries.jsonl from BOTH
+  // runs.jsonl AND git merges on origin/main, so `queryStoryDelivery(id).delivered`
+  // recognizes external / manual merges (claude salvage, PR-lane direct merge)
+  // that the runs-only `hasMergedDelivery` is blind to. Memoized per cycle: the
+  // projection (which may shell out to `git log`) runs at most ONCE, then every
+  // story id reads the same in-memory snapshot. Wholly best-effort — a git/IO
+  // failure leaves an empty snapshot and the picker/preflight fall back to the
+  // runs-only signal they OR with, never toppling the cycle.
+  const deliveryFreshness: FreshnessPort = {
+    mtimeMs(absPath: string): number | undefined {
+      try {
+        return statSync(absPath).mtimeMs;
+      } catch {
+        return undefined;
+      }
+    },
+    readText(absPath: string): string {
+      try {
+        return readFileSync(absPath, "utf8");
+      } catch {
+        return "";
+      }
+    },
+    writeText(absPath: string, text: string): void {
+      mkdirSync(dirname(absPath), { recursive: true });
+      writeFileSync(absPath, text, "utf8");
+    },
+  };
+  let deliveredCache: Set<string> | undefined;
+  const mergedDelivery = (storyId: string): boolean => {
+    if (deliveredCache === undefined) {
+      try {
+        const deliveries = ensureDeliveriesFresh(opts.repoCwd, deliveryFreshness, nodeExecPort);
+        // Derive `delivered` per story via the single deterministic query so the
+        // verdict matches `roll truth query` exactly (FIX-906: one truth, all
+        // consumers). Group by storyId first to avoid re-querying the same id.
+        const set = new Set<string>();
+        const ids = new Set(deliveries.map((d) => d.storyId));
+        for (const id of ids) {
+          if (queryStoryDelivery(id, deliveries).delivered) set.add(id);
+        }
+        deliveredCache = set;
+      } catch {
+        deliveredCache = new Set<string>(); // best-effort: empty → fall back to runs-only
+      }
+    }
+    return deliveredCache.has(storyId);
+  };
+
   return {
     repoCwd: opts.repoCwd,
     paths: opts.paths,
     skillBody: opts.skillBody,
     clock,
     agentSpawn: spawn,
+    // FIX-906: unified delivery-truth predicate (structured projection over
+    // runs + git merges on origin/main — recognizes external/manual merges).
+    mergedDelivery,
     // FIX-363: the real connectivity probe reuses the same spawn the reviews use.
     agentReachable: (agent) => probeAgentReachable(agent, spawn, { cwd: opts.repoCwd }),
     git: {

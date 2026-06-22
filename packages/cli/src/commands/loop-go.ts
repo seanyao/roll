@@ -1,4 +1,4 @@
-import { EventBus, parseBacklog, readDeliveries, nodeDeliveryStore, queryStoryDelivery, type AuditPrEvidence, type StoryDeliveryTruth, type StoryTruth } from "@roll/core";
+import { EventBus, parseBacklog, ensureDeliveriesFresh, nodeExecPort, queryStoryDelivery, type AuditPrEvidence, type FreshnessPort, type StoryDeliveryTruth, type StoryTruth } from "@roll/core";
 import {
   GOAL_REVIEW_MODES,
   GOAL_SCHEMA_VERSION,
@@ -25,6 +25,35 @@ import { cardArchiveDir } from "../lib/archive.js";
 import { storyTruthFromBacklog } from "../lib/truth-adapter.js";
 import { runPeerReview, spawnPeerReviewAgent, type SpawnPeerReviewResult } from "./peer.js";
 import { guideExternalToolSetup, silentPreinstallChromium } from "../lib/external-tools.js";
+
+/**
+ * FIX-906: node fs-backed {@link FreshnessPort} for `ensureDeliveriesFresh`.
+ * Goal evaluation now reads the UNIFIED projection (runs + git merges on
+ * origin/main) instead of the raw `deliveries.jsonl` cache, so a card merged
+ * EXTERNALLY (claude salvage, PR-lane direct merge) is counted delivered —
+ * the same truth `roll truth query` reports (FIX-904/905). Mirrors the port in
+ * truth.ts; kept local to avoid widening the core export surface.
+ */
+const nodeFreshnessPort: FreshnessPort = {
+  mtimeMs(absPath: string): number | undefined {
+    try {
+      return statSync(absPath).mtimeMs;
+    } catch {
+      return undefined;
+    }
+  },
+  readText(absPath: string): string {
+    try {
+      return readFileSync(absPath, "utf8");
+    } catch {
+      return "";
+    }
+  },
+  writeText(absPath: string, text: string): void {
+    mkdirSync(dirname(absPath), { recursive: true });
+    writeFileSync(absPath, text, "utf8");
+  },
+};
 
 const GO_LOCK_STALE_SEC = 21_600; // 6h: covers the planned 5h goal window.
 const FINAL_REVIEW_TIMEOUT_MS = 300_000;
@@ -1156,8 +1185,13 @@ async function evaluateGoal(
   // so the `delivered` reading credits them like the cycle-ledger pending_merge
   // figure. Completion stays merge-gated (these remain blockers).
   const inFlightIds = new Set<string>();
-  // FIX-388: batch-read delivery truth once, reuse per story (AC5).
-  const deliveries = readDeliveries(nodeDeliveryStore, projectPath);
+  // FIX-388 / FIX-906: batch-read delivery truth once, reuse per story (AC5).
+  // `ensureDeliveriesFresh` (not the raw `readDeliveries`) rebuilds the cache
+  // from runs + git merges on origin/main when stale (FIX-904/905), so goal
+  // evaluation sees EXTERNAL / manual merges — the same unified truth the
+  // picker/preflight and `roll truth query` read. Best-effort: a git/IO failure
+  // inside ensureDeliveriesFresh leaves the existing cache, never topples eval.
+  const deliveries = ensureDeliveriesFresh(projectPath, nodeFreshnessPort, nodeExecPort);
   for (const row of rows) {
     // AC4: only pass deliveryTruth when the card has real delivery records;
     // cards with no records fall back to markdown parsing (backward compat).

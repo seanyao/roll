@@ -993,6 +993,81 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r2.event).toEqual({ type: "no_story" });
   });
 
+  // ── FIX-906: status derivation + picker eligibility read the UNIFIED delivery
+  // truth (the structured projection over runs + git merges on origin/main —
+  // `mergedDelivery` port). A card merged EXTERNALLY (claude salvage / PR-lane
+  // direct merge of a non-loop-cycle PR) has NO merged row in runs.jsonl, so the
+  // runs-only `hasMergedDelivery` is blind to it; before this, the picker re-
+  // selected such already-shipped cards every cycle (FIX-903/904/390 superseded).
+  // The injected `mergedDelivery` predicate closes that gap. ──────────────────
+  describe("FIX-906 — unified delivery truth for picker + preflight", () => {
+    it("picker skips a 📋 Todo card the unified truth marks delivered (external merge), takes the next", async () => {
+      // EXT-1 merged externally → no runs.jsonl merged row (default runsPath does
+      // not exist), but the projection sees the git merge → mergedDelivery true.
+      const { ports } = fakePorts({
+        backlog: { read: () => [
+          { id: "FIX-EXT-1", desc: "est_min:5", status: "📋 Todo" },
+          { id: "FIX-EXT-2", desc: "est_min:5", status: "📋 Todo" },
+        ] },
+        mergedDelivery: (id) => id === "FIX-EXT-1",
+      });
+      const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
+      expect(r.event).toEqual({ type: "story_picked", storyId: "FIX-EXT-2" });
+    });
+
+    it("picker idles (no_story) when the ONLY Todo was merged externally", async () => {
+      const { ports } = fakePorts({
+        backlog: { read: () => [{ id: "FIX-EXT-1", desc: "est_min:5", status: "📋 Todo" }] },
+        mergedDelivery: (id) => id === "FIX-EXT-1",
+      });
+      const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
+      expect(r.event).toEqual({ type: "no_story" });
+    });
+
+    it("preflight flips an externally-merged 📋 Todo card to ✅ Done via the unified truth", async () => {
+      const markStatus = vi.fn();
+      const { ports } = fakePorts({
+        backlog: {
+          read: vi.fn(() => [{ id: "FIX-EXT-1", desc: "est_min:5", status: "📋 Todo" }]),
+          markStatus,
+        },
+        mergedDelivery: (id) => id === "FIX-EXT-1",
+      });
+      const r = await executeCommand({ kind: "preflight" }, ports, CTX);
+      expect(r.event).toEqual({ type: "preflight_done" });
+      // Flipped to Done even though runs.jsonl carries NO merged row for it —
+      // the structured projection (git merge) is the authoritative signal.
+      expect(markStatus).toHaveBeenCalledWith("/repo", "FIX-EXT-1", "✅ Done");
+    });
+
+    it("a loop-cycle card is NOT spuriously flipped/skipped when the unified truth says not-delivered", async () => {
+      // mergedDelivery present but returns false for this card → behaviour is
+      // exactly the pre-FIX-906 runs-only path (no regression for loop deliveries).
+      const markStatus = vi.fn();
+      const { ports } = fakePorts({
+        backlog: {
+          read: vi.fn(() => [{ id: "FIX-LOOP-1", desc: "est_min:5", status: "📋 Todo" }]),
+          markStatus,
+        },
+        mergedDelivery: () => false,
+      });
+      const pre = await executeCommand({ kind: "preflight" }, ports, CTX);
+      expect(pre.event).toEqual({ type: "preflight_done" });
+      expect(markStatus).not.toHaveBeenCalledWith("/repo", "FIX-LOOP-1", "✅ Done");
+      const pick = await executeCommand({ kind: "pick_story" }, ports, CTX);
+      expect(pick.event).toEqual({ type: "story_picked", storyId: "FIX-LOOP-1" });
+    });
+
+    it("with mergedDelivery unwired (test default), picker falls back to the runs-only signal", async () => {
+      // No projection port → the card stays pickable on the runs-only path.
+      const { ports } = fakePorts({
+        backlog: { read: () => [{ id: "FIX-PLAIN-1", desc: "est_min:5", status: "📋 Todo" }] },
+      });
+      const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
+      expect(r.event).toEqual({ type: "story_picked", storyId: "FIX-PLAIN-1" });
+    });
+  });
+
   it("US-EVID-001: pick_story opens an evidence frame before spawn and records the run dir", async () => {
     const { ports, calls } = fakePorts();
     const r = await executeCommand({ kind: "pick_story" }, ports, CTX);

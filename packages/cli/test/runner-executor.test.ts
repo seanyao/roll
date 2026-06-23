@@ -2700,6 +2700,52 @@ describe.runIf(process.platform === "darwin")("FIX-224 darwin integration — re
   }, 20000);
 });
 
+describe("FIX-914 — builder git environment is pinned to the cycle worktree", () => {
+  it("pi child commits the cycle worktree even if the agent internally cd's back to the shared checkout", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-fix914-")));
+    execDirs.push(root);
+    const main = join(root, "main");
+    const wt = join(root, "wt");
+    mkdirSync(main, { recursive: true });
+    execFileSync("git", ["init", "--initial-branch=main"], { cwd: main });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: main });
+    execFileSync("git", ["config", "user.name", "Roll Test"], { cwd: main });
+    writeFileSync(join(main, "README.md"), "base\n");
+    execFileSync("git", ["add", "README.md"], { cwd: main });
+    execFileSync("git", ["commit", "-m", "base"], { cwd: main });
+    execFileSync("git", ["worktree", "add", "-b", "cycle", wt], { cwd: main });
+
+    writeFileSync(join(wt, "probe.txt"), "probe\n");
+    const shim = join(root, "pi");
+    writeFileSync(
+      shim,
+      [
+        "#!/bin/sh",
+        "set -eu",
+        "cd \"$MAIN_CHECKOUT\"",
+        "git add probe.txt",
+        "git commit -m 'tcr: FIX-914 probe'",
+        "printf 'top=%s\\n' \"$(git rev-parse --show-toplevel)\"",
+        "",
+      ].join("\n"),
+    );
+    chmodSync(shim, 0o755);
+
+    const r = await realAgentSpawn("pi", {
+      cwd: wt,
+      skillBody: "X",
+      bin: shim,
+      env: { ...process.env, MAIN_CHECKOUT: main },
+      timeoutMs: 15000,
+    });
+
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain(`top=${wt}`);
+    expect(execFileSync("git", ["rev-list", "--count", "main..HEAD"], { cwd: wt }).toString().trim()).toBe("1");
+    expect(execFileSync("git", ["status", "--short"], { cwd: main }).toString().trim()).toBe("");
+  });
+});
+
 describe("FIX-268 — worktree deps bootstrap before agent spawn", () => {
   function tmpWorktree(): string {
     const d = realpathSync(mkdtempSync(join(tmpdir(), "roll-deps-")));

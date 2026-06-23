@@ -36,10 +36,10 @@
  * PATH (a fake binary that makes a `tcr:` commit in the worktree), so no real
  * agent ever runs in tests.
  */
-import { type ChildProcess, spawn } from "node:child_process";
+import { execFileSync, type ChildProcess, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { getAgentSpec } from "@roll/core";
 
 /**
@@ -419,9 +419,37 @@ function evidenceFrameEnv(runDir: string): NodeJS.ProcessEnv {
   };
 }
 
+const INHERITED_GIT_ENV_KEYS = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE"] as const;
+
+/** FIX-914: pin git operations to the cycle worktree even if an agent shell
+ *  internally wanders back to the shared checkout before running `git`.
+ *  Non-git cwd returns no pin, but inherited git env is still scrubbed by
+ *  {@link childEnv} so parent shell state cannot leak into the agent. */
+export function gitEnvironmentForWorktree(cwd: string): Record<string, string> {
+  try {
+    const worktree = execFileSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    const gitDir = execFileSync("git", ["-C", cwd, "rev-parse", "--git-dir"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (worktree === "" || gitDir === "") return {};
+    return {
+      GIT_DIR: isAbsolute(gitDir) ? gitDir : resolve(cwd, gitDir),
+      GIT_WORK_TREE: worktree,
+    };
+  } catch {
+    return {};
+  }
+}
+
 function childEnv(opts: AgentSpawnOptions): NodeJS.ProcessEnv {
-  const base = opts.env ?? process.env;
-  return opts.runDir !== undefined && opts.runDir !== "" ? { ...base, ...evidenceFrameEnv(opts.runDir) } : base;
+  const env: NodeJS.ProcessEnv = { ...(opts.env ?? process.env) };
+  for (const key of INHERITED_GIT_ENV_KEYS) delete env[key];
+  Object.assign(env, gitEnvironmentForWorktree(opts.cwd));
+  return opts.runDir !== undefined && opts.runDir !== "" ? { ...env, ...evidenceFrameEnv(opts.runDir) } : env;
 }
 
 function spawnAndWait(bin: string, args: string[], opts: AgentSpawnOptions, pty = false): Promise<AgentSpawnResult> {

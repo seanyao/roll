@@ -179,6 +179,7 @@ describe("frozen: roll consistency", () => {
       ✅ tests: pass
       ✅ bilingual: pass
       ✅ site: pass
+      ✅ truth-live: pass
       --------------------------------------------------
       Overall: pass
       ",
@@ -218,6 +219,10 @@ describe("frozen: roll consistency", () => {
           "site": {
             "status": "pass",
             "gaps": []
+          },
+          "truth-live": {
+            "status": "pass",
+            "gaps": []
           }
         }
       }
@@ -242,6 +247,7 @@ describe("frozen: roll consistency", () => {
       ✅ tests: pass
       ✅ bilingual: pass
       ✅ site: pass
+      ✅ truth-live: pass
       --------------------------------------------------
       Overall: fail
       ",
@@ -283,6 +289,10 @@ describe("frozen: roll consistency", () => {
           "site": {
             "status": "pass",
             "gaps": []
+          },
+          "truth-live": {
+            "status": "pass",
+            "gaps": []
           }
         }
       }
@@ -309,6 +319,7 @@ describe("frozen: roll consistency", () => {
          • i18n key 'only.en' has EN but is missing ZH translation
          • i18n key 'only.zh' has ZH but is missing EN translation
       ✅ site: pass
+      ✅ truth-live: pass
       --------------------------------------------------
       Overall: fail
       ",
@@ -352,6 +363,10 @@ describe("frozen: roll consistency", () => {
           "site": {
             "status": "pass",
             "gaps": []
+          },
+          "truth-live": {
+            "status": "pass",
+            "gaps": []
           }
         }
       }
@@ -377,6 +392,7 @@ describe("frozen: roll consistency", () => {
          • Test file 'stalefeature.bats' appears to reference feature 'stalefeature' which does not exist in backlog — may be stale
       ✅ bilingual: pass
       ✅ site: pass
+      ✅ truth-live: pass
       --------------------------------------------------
       Overall: fail
       ",
@@ -419,6 +435,10 @@ describe("frozen: roll consistency", () => {
           "site": {
             "status": "pass",
             "gaps": []
+          },
+          "truth-live": {
+            "status": "pass",
+            "gaps": []
           }
         }
       }
@@ -443,6 +463,7 @@ describe("frozen: roll consistency", () => {
       ✅ bilingual: pass
       ❌ site: fail
          • Feature 'dashboard' has Done stories but is not mentioned on the landing page — site may be missing this capability
+      ✅ truth-live: pass
       --------------------------------------------------
       Overall: fail
       ",
@@ -484,6 +505,10 @@ describe("frozen: roll consistency", () => {
             "gaps": [
               "Feature 'dashboard' has Done stories but is not mentioned on the landing page — site may be missing this capability"
             ]
+          },
+          "truth-live": {
+            "status": "pass",
+            "gaps": []
           }
         }
       }
@@ -507,6 +532,7 @@ describe("frozen: roll consistency", () => {
       ✅ tests: pass
       ✅ bilingual: pass
       ✅ site: pass
+      ✅ truth-live: pass
       --------------------------------------------------
       Overall: fail
       ",
@@ -549,6 +575,10 @@ describe("frozen: roll consistency", () => {
             "gaps": [
               "site/roll-data.js:1 references hidden/retired top-level 'roll alert' (use 'roll loop alert')"
             ]
+          },
+          "truth-live": {
+            "status": "pass",
+            "gaps": []
           }
         }
       }
@@ -572,6 +602,7 @@ describe("frozen: roll consistency", () => {
       ✅ tests: pass
       ✅ bilingual: pass
       ✅ site: pass
+      ✅ truth-live: pass
       --------------------------------------------------
       Overall: pass
       ",
@@ -587,12 +618,12 @@ describe("frozen: roll consistency", () => {
         "stdout": "Usage: roll release --gate-check <subcommand>
 
         check [--json] [--project-dir DIR]    逐维度跑一致性检查
-          Run checks across six dimensions (code-backlog, cards, docs, tests,
-          bilingual, site) and produce a verdict-first table. Any failing
+          Run checks across seven dimensions (code-backlog, cards, docs, tests,
+          bilingual, site, truth-live) and produce a verdict-first table. Any failing
           dimension aborts the release.
-          跑六维一致性、判定优先输出；任一维失败即中止发版。
+          跑七维一致性、判定优先输出；任一维失败即中止发版。
 
-        roll release --gate-check check                # verdict-first six-dimension table
+        roll release --gate-check check                # verdict-first seven-dimension table
         roll release --gate-check check --json         # machine-readable JSON (same computation)
         roll release --gate-check audit [--json]       # US-TRUTH-002 shadow drift audit (read-only, exit 0)
       ",
@@ -626,8 +657,8 @@ describe("frozen: roll consistency", () => {
 
 // ── US-DOSSIER-022: same-vocabulary contract (AC2 / AC3) ─────────────────────
 // Both faces read @roll/core's CONSISTENCY_DIMENSIONS. The web panel proves it
-// in truth-console.test.ts (data-dim="<key>" for all six); here we prove the
-// `roll release` gate report emits the SAME six keys in the SAME order, so a
+// in truth-console.test.ts (data-dim="<key>" for all gate dimensions); here we prove the
+// `roll release` gate report emits the SAME keys in the SAME order, so a
 // reader who sees `bilingual` in the browser sees `bilingual` (never `i18n`) in
 // the terminal — Delivery Dossier ruling #3, 各面同口径.
 
@@ -647,7 +678,7 @@ function reportJson(proj: string): { overall: string; dimensions: Record<string,
 }
 
 describe("US-DOSSIER-022: web + CLI read one dimension vocabulary", () => {
-  it("AC2: the gate report's six dimension keys equal CONSISTENCY_DIMENSIONS, in order", () => {
+  it("AC2: the gate report's dimension keys equal CONSISTENCY_DIMENSIONS, in order", () => {
     const p = healthy();
     const cliKeys = reportDimKeys(cn(["check", "--project-dir", p], p).stdout);
     // The exact constant the web panel (release-panel.ts) iterates.
@@ -674,8 +705,8 @@ describe("US-DOSSIER-022: web + CLI read one dimension vocabulary", () => {
 });
 
 // ── US-DOSSIER-036: `roll release consistency check` verdict-first table ──────
-// The public command renders the verdict-first six-dimension table (renderMode
-// "table") from the SAME runAll computation the gate runs. AC3 (six dims, one
+// The public command renders the verdict-first seven-dimension table (renderMode
+// "table") from the SAME runAll computation the gate runs. AC3 (gate dims, one
 // vocabulary, f/w/?), AC4 (any f>0 fails → exit non-zero, verdict first), AC7
 // (--json field-by-field parity with the human table).
 
@@ -712,13 +743,13 @@ function tableRun(args: string[], proj: string, extra: Record<string, string> = 
 }
 
 describe("US-DOSSIER-036: roll release consistency check — verdict-first table", () => {
-  it("AC3/AC4: healthy → PASS first, six ①…⑥ dims, f:0 everywhere, exit 0", () => {
+  it("AC3/AC4: healthy → PASS first, seven ①…⑦ dims, f:0 everywhere, exit 0", () => {
     const r = tableRun(["check", "--project-dir", healthy()], "", { ROLL_LANG: "en" });
     expect(r.status).toBe(0);
     const first = r.stdout.split("\n")[0] ?? "";
     expect(first).toContain("PASS");
     expect(first).toContain("exit 0");
-    for (const glyph of ["① code ↔ backlog", "② cards / evidence", "③ docs", "④ tests", "⑤ bilingual", "⑥ site"]) {
+    for (const glyph of ["① code ↔ backlog", "② cards / evidence", "③ docs", "④ tests", "⑤ bilingual", "⑥ site", "⑦ truth live"]) {
       expect(r.stdout).toContain(glyph);
     }
     expect(r.stdout).toContain("any f>0 aborts the release");
@@ -744,7 +775,7 @@ describe("US-DOSSIER-036: roll release consistency check — verdict-first table
     };
     expect(j.overall).toBe("fail");
     expect(human.stdout.split("\n")[0]).toContain("FAIL");
-    // The six dims, in the shared CONSISTENCY_DIMENSIONS order.
+    // The dims, in the shared CONSISTENCY_DIMENSIONS order.
     expect(Object.keys(j.dimensions)).toEqual([...CONSISTENCY_DIMENSIONS]);
     // The failing dim's count equals the f:N the human row printed.
     expect(j.dimensions["code-backlog"]?.fail).toBe(1);

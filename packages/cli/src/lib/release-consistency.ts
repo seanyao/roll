@@ -4,27 +4,36 @@
  *
  * Subcommands: check (default) | --help/-h/help | unknown.
  *
- * `check [--json] [--project-dir DIR]` runs the six reconciled dimensions
- * (code-backlog, cards, docs, tests, bilingual, site — the SAME vocabulary the
- * web panel reads, from @roll/core's CONSISTENCY_DIMENSIONS) and prints a human
+ * `check [--json] [--project-dir DIR]` runs the seven reconciled dimensions
+ * (code-backlog, cards, docs, tests, bilingual, site, truth-live — the SAME
+ * vocabulary the web panel reads, from @roll/core's CONSISTENCY_DIMENSIONS) and prints a human
  * report (format_human) or JSON. Exit 0 when all dimensions pass, 1 when any
  * dimension has gaps — mirroring main()'s `return 0 if overall == "pass" else 1`.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import type { Dirent } from "node:fs";
-import { join } from "node:path";
-import { CONSISTENCY_DIMENSIONS, CONSISTENCY_DIMENSION_LABELS, type ConsistencyDimension } from "@roll/core";
+import { dirname, join } from "node:path";
+import {
+  CONSISTENCY_DIMENSIONS,
+  CONSISTENCY_DIMENSION_LABELS,
+  ensureDeliveriesFresh,
+  queryStoryDelivery,
+  type ConsistencyDimension,
+  type ExecPort,
+  type FreshnessPort,
+} from "@roll/core";
 import { resolveLang, STATUS_MARKER, t, v2Catalog, type Lang } from "@roll/spec";
 import { c, renderState, strw, trunc } from "../render.js";
 import { consistencyAuditCommand } from "./consistency-audit.js";
 
-// US-DOSSIER-022: the gate report reads the SAME six-dimension vocabulary the
+// US-DOSSIER-022/FIX-391: the gate report reads the SAME seven-dimension vocabulary the
 // web panel does (CONSISTENCY_DIMENSIONS from @roll/core: code-backlog · cards ·
-// docs · tests · bilingual · site). No more local `['code',…,'i18n',…]` table —
+// docs · tests · bilingual · site · truth-live). No more local `['code',…,'i18n',…]` table —
 // the two faces could never agree while they each named the dimensions. Each
 // key maps to the check that produces its gaps; `code-backlog`→features catalog,
-// `bilingual`→guide/i18n parity (Delivery Dossier ruling #3: 各面同口径).
+// `truth-live`→structured delivery projection, `bilingual`→guide/i18n parity
+// (Delivery Dossier ruling #3: 各面同口径).
 const DIM_CHECKS: Record<ConsistencyDimension, (projectDir: string) => DimResult> = {
   "code-backlog": (p) => checkFeaturesCatalog(p),
   cards: (p) => checkCards(p),
@@ -32,6 +41,7 @@ const DIM_CHECKS: Record<ConsistencyDimension, (projectDir: string) => DimResult
   tests: (p) => checkTests(p),
   bilingual: (p) => checkI18n(p),
   site: (p) => checkSite(p),
+  "truth-live": (p) => checkTruthLive(p),
 };
 
 interface DimResult {
@@ -229,7 +239,7 @@ function gitCapture(projectDir: string, args: string[]): string | null {
 function releaseDeltaCardIds(projectDir: string): Set<string> {
   const tag = gitCapture(projectDir, ["describe", "--tags", "--abbrev=0", "--match", "v*"])?.trim();
   if (tag === undefined || tag === "") return new Set();
-  const log = gitCapture(projectDir, ["log", `${tag}..HEAD`, "--format=%s"]);
+  const log = gitCapture(projectDir, ["log", `${tag}..HEAD`, "--format=%B"]);
   if (log === null) return new Set();
   const ids = new Set<string>();
   for (const m of log.matchAll(CARD_ID_RE)) ids.add(m[0]);
@@ -237,16 +247,64 @@ function releaseDeltaCardIds(projectDir: string): Set<string> {
 }
 
 /** Per-id backlog facts: is the row ✅ Done, and does it carry a `#NNN` merge ref. */
-function backlogRowFacts(backlogText: string): Map<string, { done: boolean; mergeRef: boolean }> {
-  const facts = new Map<string, { done: boolean; mergeRef: boolean }>();
+function backlogRowFacts(backlogText: string): Map<string, { done: boolean; mergeRef: boolean; status: string }> {
+  const facts = new Map<string, { done: boolean; mergeRef: boolean; status: string }>();
   for (const line of backlogText.split("\n")) {
     const row = /^\|\s*\[?((?:US|FIX|REFACTOR|IDEA)-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*)\]?/.exec(line);
     if (row === null) continue;
     const id = row[1] ?? "";
     if (id === "") continue;
-    facts.set(id, { done: line.includes(STATUS_MARKER.done), mergeRef: /#\d+|pull\/\d+/.test(line) });
+    const cells = line.split("|").map((cell) => cell.trim());
+    const status = cells.at(-2) ?? line;
+    facts.set(id, { done: line.includes(STATUS_MARKER.done), mergeRef: /#\d+|pull\/\d+/.test(line), status });
   }
   return facts;
+}
+
+const nodeFreshnessPort: FreshnessPort = {
+  mtimeMs(absPath: string): number | undefined {
+    try {
+      return statSync(absPath).mtimeMs;
+    } catch {
+      return undefined;
+    }
+  },
+  readText(absPath: string): string {
+    try {
+      return readFileSync(absPath, "utf8");
+    } catch {
+      return "";
+    }
+  },
+  writeText(absPath: string, text: string): void {
+    mkdirSync(dirname(absPath), { recursive: true });
+    writeFileSync(absPath, text, "utf8");
+  },
+};
+
+const quietExecPort: ExecPort = {
+  run(tool: string, argv: readonly string[]) {
+    try {
+      const stdout = execFileSync(tool, [...argv], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      return { stdout: stdout.trim(), code: 0 };
+    } catch (err: unknown) {
+      const e = err as { stdout?: Buffer | string; status?: number | null };
+      const out = e.stdout === undefined ? "" : e.stdout.toString();
+      return { stdout: out.trim(), code: typeof e.status === "number" ? e.status : 1 };
+    }
+  },
+};
+
+function prNumbersFromStatus(status: string): number[] {
+  const nums: number[] = [];
+  for (const match of status.matchAll(/(?:PR#|pull\/)(\d+)/g)) {
+    const n = Number(match[1]);
+    if (Number.isFinite(n) && n > 0 && !nums.includes(n)) nums.push(n);
+  }
+  return nums;
 }
 
 /** The card-folder spec path for an id (`features/<epic>/<id>/spec.md`), or null. */
@@ -298,12 +356,6 @@ export function checkFeaturesCatalog(projectDir: string): DimResult {
     }
   }
 
-  // FIX-375: the real Done↔merge check the dimension claims. Every card merged
-  // to HEAD since the latest release tag (the release delta) must own a ✅ Done
-  // backlog row carrying a merge ref (#NNN / pull/NNN). A delta card whose row
-  // is still Todo/Hold (merged but unclaimed) or Done with no merge ref
-  // (unverifiable claim) is drift. Scoped to ids that own a row — a bare
-  // commit-subject mention of a non-card id is ignored. No-ops without git/tag.
   const facts = backlogRowFacts(backlogText);
   for (const id of releaseDeltaCardIds(projectDir)) {
     const f = facts.get(id);
@@ -312,6 +364,48 @@ export function checkFeaturesCatalog(projectDir: string): DimResult {
       gaps.push(`${id} was merged since the latest release tag but its backlog row is not ✅ Done — claim/merge drift`);
     } else if (!f.mergeRef) {
       gaps.push(`${id} is ✅ Done in the release delta but its row carries no merge ref (#NNN) — unverifiable Done claim`);
+    }
+  }
+
+  return { status: gaps.length === 0 ? "pass" : "fail", gaps };
+}
+
+// ─── truth-live dimension: structured projection is the release arbiter ──────
+export function checkTruthLive(projectDir: string): DimResult {
+  const backlog = join(projectDir, ".roll", "backlog.md");
+  if (!existsSync(backlog)) return { status: "pass", gaps: [] };
+  const backlogText = readText(backlog);
+  const facts = backlogRowFacts(backlogText);
+  const deltaIds = releaseDeltaCardIds(projectDir);
+  if (deltaIds.size === 0) return { status: "pass", gaps: [] };
+
+  const deliveries = ensureDeliveriesFresh(projectDir, nodeFreshnessPort, quietExecPort);
+  const gaps: string[] = [];
+
+  for (const id of deltaIds) {
+    const f = facts.get(id);
+    if (f === undefined) {
+      gaps.push(`${id} was merged since the latest release tag but has no backlog row — truth-live cannot reconcile it`);
+      continue;
+    }
+    if (!f.done) {
+      gaps.push(`${id} was merged since the latest release tag but its backlog row is not ✅ Done — truth-live requires backlog to reflect main`);
+      continue;
+    }
+
+    const truth = queryStoryDelivery(id, deliveries);
+    if (!truth.delivered) {
+      gaps.push(
+        `${id} is in the release delta and backlog says Done, but queryStoryDelivery() says lifecycle=${truth.lifecycleState} delivered=${truth.delivered} — run delivery rebuild or fix the merge/story-id evidence`,
+      );
+      continue;
+    }
+
+    const prNums = prNumbersFromStatus(f.status);
+    if (prNums.length > 0 && (truth.prNumber === undefined || !prNums.includes(truth.prNumber))) {
+      gaps.push(
+        `${id} backlog merge ref ${prNums.map((n) => `#${n}`).join(",")} does not match queryStoryDelivery() PR ${truth.prNumber ?? "n/a"} — fix the Done row or delivery projection`,
+      );
     }
   }
 
@@ -691,7 +785,7 @@ function pyListRepr(items: string[]): string {
 }
 
 // ─── orchestration ────────────────────────────────────────────────────────────
-/** Programmatic pass/fail for the six dimensions — the `roll release` gate. */
+/** Programmatic pass/fail for the seven dimensions — the `roll release` gate. */
 export function consistencyPasses(projectDir: string): boolean {
   return runAll(projectDir).overall === "pass";
 }
@@ -725,7 +819,7 @@ function formatHuman(report: Report): string {
   return lines.join("\n");
 }
 
-// ─── US-DOSSIER-036: the verdict-first six-dimension gate table ───────────────
+// ─── US-DOSSIER-036/FIX-391: the verdict-first seven-dimension gate table ─────
 //
 // One vocabulary, one source: the table reads the SAME runAll() computation the
 // gate and the web panel read (CONSISTENCY_DIMENSION_LABELS from @roll/core), so
@@ -883,12 +977,12 @@ function checkHelp(command: string): string {
   return `Usage: ${command} <subcommand>
 
   check [--json] [--project-dir DIR]    逐维度跑一致性检查
-    Run checks across six dimensions (code-backlog, cards, docs, tests,
-    bilingual, site) and produce a verdict-first table. Any failing
+    Run checks across seven dimensions (code-backlog, cards, docs, tests,
+    bilingual, site, truth-live) and produce a verdict-first table. Any failing
     dimension aborts the release.
-    跑六维一致性、判定优先输出；任一维失败即中止发版。
+    跑七维一致性、判定优先输出；任一维失败即中止发版。
 
-  ${command} check                # verdict-first six-dimension table
+  ${command} check                # verdict-first seven-dimension table
   ${command} check --json         # machine-readable JSON (same computation)
   ${command} audit [--json]       # US-TRUTH-002 shadow drift audit (read-only, exit 0)
 `;
@@ -896,14 +990,14 @@ function checkHelp(command: string): string {
 
 export interface ConsistencyRunOptions {
   /** "report" (default) = the frozen pass/gap report the gate runs; "table" =
-   *  the US-DOSSIER-036 verdict-first six-dimension table the public command
+   *  the US-DOSSIER-036/FIX-391 verdict-first seven-dimension table the public command
    *  `roll release consistency check` prints (same computation, richer render). */
   renderMode?: "report" | "table";
 }
 
 /** US-REL-007: the gate's internal check runner. US-DOSSIER-036: also the
  *  computation behind the public `roll release consistency check` (renderMode
- *  "table" → verdict-first six-dim table); the gate keeps "report" byte-stable. */
+ *  "table" → verdict-first seven-dim table); the gate keeps "report" byte-stable. */
 export function runConsistencyCheck(
   args: string[],
   command = "roll release --gate-check",

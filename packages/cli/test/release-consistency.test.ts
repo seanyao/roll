@@ -18,7 +18,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { checkDocs, checkFeaturesCatalog, checkSite } from "../src/lib/release-consistency.js";
+import { checkDocs, checkFeaturesCatalog, checkSite, checkTruthLive } from "../src/lib/release-consistency.js";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -40,7 +40,7 @@ function makeProject(opts: ProjectOpts): string {
   const git = (...args: string[]): void => {
     execFileSync("git", ["-C", dir, ...args], { stdio: "ignore" });
   };
-  git("init", "-q");
+  git("init", "-q", "-b", "main");
   git("config", "user.email", "t@example.com");
   git("config", "user.name", "Test");
   writeFileSync(join(dir, "seed.txt"), "seed\n");
@@ -110,6 +110,55 @@ describe("checkFeaturesCatalog — code↔backlog Done↔merge (FIX-375)", () =>
     mkdirSync(join(dir, ".roll"), { recursive: true });
     writeFileSync(join(dir, ".roll", "backlog.md"), "| [FIX-904](x) | thing | 📋 Todo |\n");
     expect(checkFeaturesCatalog(dir).status).toBe("pass");
+  });
+});
+
+describe("checkTruthLive — structured delivery truth release gate (FIX-391)", () => {
+  it("passes when a release-delta Done row is backed by queryStoryDelivery", () => {
+    const dir = makeProject({
+      deltaSubjects: ["Fix: FIX-391 thing (#391)"],
+      backlog: "| [FIX-391](x) | thing | ✅ Done · [PR#391](https://github.com/o/r/pull/391) |\n",
+    });
+    expect(checkTruthLive(dir).status).toBe("pass");
+  });
+
+  it("fails when a release-delta story has no backlog row", () => {
+    const dir = makeProject({
+      deltaSubjects: ["Fix: FIX-392 thing (#392)"],
+      backlog: "| [FIX-OTHER](x) | thing | ✅ Done · [PR#1](https://github.com/o/r/pull/1) |\n",
+    });
+    const r = checkTruthLive(dir);
+    expect(r.status).toBe("fail");
+    expect(r.gaps.join("\n")).toContain("no backlog row");
+  });
+
+  it("fails when a release-delta story is still Todo in backlog", () => {
+    const dir = makeProject({
+      deltaSubjects: ["Fix: FIX-393 thing (#393)"],
+      backlog: "| [FIX-393](x) | thing | 📋 Todo |\n",
+    });
+    const r = checkTruthLive(dir);
+    expect(r.status).toBe("fail");
+    expect(r.gaps.join("\n")).toContain("not ✅ Done");
+  });
+
+  it("fails when Done row PR disagrees with queryStoryDelivery", () => {
+    const dir = makeProject({
+      deltaSubjects: ["Fix: FIX-394 thing (#394)"],
+      backlog: "| [FIX-394](x) | thing | ✅ Done · [PR#999](https://github.com/o/r/pull/999) |\n",
+    });
+    const r = checkTruthLive(dir);
+    expect(r.status).toBe("fail");
+    expect(r.gaps.join("\n")).toContain("#999");
+    expect(r.gaps.join("\n")).toContain("PR 394");
+  });
+
+  it("reads story ids from commit bodies, matching GitHub merge-button shape", () => {
+    const dir = makeProject({
+      deltaSubjects: ["Merge pull request #922 from branch/fix\n\nFIX-399: remove phantom deepseek agent"],
+      backlog: "| [FIX-399](x) | thing | ✅ Done · [PR#922](https://github.com/o/r/pull/922) |\n",
+    });
+    expect(checkTruthLive(dir).status).toBe("pass");
   });
 });
 

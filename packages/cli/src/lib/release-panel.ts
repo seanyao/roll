@@ -1,7 +1,7 @@
 /**
- * US-DOSSIER-015 — the release tab's gate head + six-dimension consistency
+ * US-DOSSIER-015 / FIX-391 — the release tab's gate head + seven-dimension consistency
  * panel view model. The opaque "gate audit" line becomes a readable table:
- * each dimension carries its f/w/? and drift-card handles; the six rows sum
+ * each dimension carries its f/w/? and drift-card handles; the rows sum
  * STRICTLY to the status line (the same audit summary truth.json carries).
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -22,7 +22,7 @@ export interface ReleasePanelDim {
 }
 
 export interface ReleasePanelVM {
-  /** Per-dimension tallies in the ①..⑥ order. */
+  /** Per-dimension tallies in the ①..⑦ order. */
   dims: ReleasePanelDim[];
   /** The audit status line (excl. grandfathered) — rows sum to exactly this. */
   total: { fail: number; warn: number; unknown: number };

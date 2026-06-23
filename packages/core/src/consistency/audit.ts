@@ -375,8 +375,8 @@ export function correctBacklogStatus(
 
 // ── US-DOSSIER-015: the six-dimension split of the gate audit ────────────────
 
-/** The six reconciled dimensions (guide/en/consistency.md) + the proposed ⑦. */
-export type ConsistencyDimension = "code-backlog" | "cards" | "docs" | "tests" | "bilingual" | "site";
+/** The reconciled release-gate dimensions. */
+export type ConsistencyDimension = "code-backlog" | "cards" | "docs" | "tests" | "bilingual" | "site" | "truth-live";
 export const CONSISTENCY_DIMENSIONS: readonly ConsistencyDimension[] = [
   "code-backlog",
   "cards",
@@ -384,6 +384,7 @@ export const CONSISTENCY_DIMENSIONS: readonly ConsistencyDimension[] = [
   "tests",
   "bilingual",
   "site",
+  "truth-live",
 ];
 
 /**
@@ -392,7 +393,7 @@ export const CONSISTENCY_DIMENSIONS: readonly ConsistencyDimension[] = [
  * The web six-dimension panel (truth-console DIM_META) and the `roll release`
  * gate report (release-consistency) must show the SAME six names in the SAME
  * order so the same f/w/? reconcile across faces (Delivery Dossier ruling #3:
- * 各面同口径). `no` is the panel's ①…⑥ glyph; `en`/`zh` are the bilingual
+ * 各面同口径). `no` is the panel's ①…⑦ glyph; `en`/`zh` are the bilingual
  * label (rendered side-by-side in HTML via bi(), on separate lines in the CLI
  * plaintext report — never inline-mixed). `whatEn`/`whatZh` is the one-line
  * "what this dimension reconciles" caption the web panel shows.
@@ -483,6 +484,17 @@ export const CONSISTENCY_DIMENSION_LABELS: Record<ConsistencyDimension, Consiste
     actionEn: "regenerate and republish the site so it matches the repo",
     actionZh: "重新生成并发布站点，使其与仓库一致",
   },
+  "truth-live": {
+    no: "⑦",
+    en: "truth live",
+    zh: "真相活体",
+    whatEn: "release-delta stories resolve through structured delivery truth",
+    whatZh: "发布增量故事经结构化交付真相裁定",
+    failMeansEn: "a merged release-delta story is not backed by queryStoryDelivery()",
+    failMeansZh: "发布增量里的已合故事没有被 queryStoryDelivery() 支撑",
+    actionEn: "run `roll truth query <id>`; fix the Done row or merge/story-id evidence",
+    actionZh: "运行 `roll truth query <id>`；修正 Done 行或合并/story-id 证据",
+  },
 };
 
 /**
@@ -512,6 +524,8 @@ export function dimensionOfRule(rule: string): ConsistencyDimension {
       return "bilingual";
     case "site-drift":
       return "site";
+    case "truth-live":
+      return "truth-live";
     default:
       return "code-backlog";
   }

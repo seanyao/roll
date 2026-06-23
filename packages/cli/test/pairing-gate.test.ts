@@ -1095,3 +1095,176 @@ describe("buildPairScorePrompt — FIX-363 intent-aware scoring (don't misjudge 
     expect(prompt).toContain("Goal: Remove roll-sentinel");
   });
 });
+
+// ── FIX-911: pool-level escalation when hetero + same-vendor all fail ───────
+
+describe("runScorePairing — FIX-911 pool-level escalation", () => {
+  // Hetero pool (pi, reasonix) and same-vendor pool (kimi) all flake null.
+  // pi was excluded from the candidate pool by isAvailable (probe missed it),
+  // but is actually reachable — the escalation round tries it and succeeds.
+  it("AC1: hetero + same-vendor all fail → escalates to untried reachable reviewer, scores", async () => {
+    const { dir, rt } = project(SCORE_CFG);
+    const tried: string[] = [];
+    const { d, events } = scoreDeps({
+      installed: ["kimi", "pi", "reasonix"],
+      // pi is excluded by the probe (isAvailable returns false) — it won't be in
+      // the initial candidate pool, but it IS installed + headless-capable.
+      isAvailable: (a) => a === "kimi" || a === "reasonix",
+      scorePeer: async (peer: string) => {
+        tried.push(peer);
+        // hetero (reasonix) + same-vendor (kimi) both flake; escalation (pi) scores.
+        if (peer === "pi") return { score: 7, verdict: "ok" as const, rationale: "escalation rescued the score", cost: 0.02 };
+        return null;
+      },
+    });
+    const r = await runScorePairing(dir, rt, "c-escalate", "kimi", "US-X-911a", "roll-build", "summary", d);
+    expect(r.status).toBe("scored");
+    expect(r.peer).toBe("pi"); // the escalated peer won
+    // pi was tried AFTER hetero and same-vendor rounds had exhausted
+    expect(tried).toContain("reasonix"); // hetero round ran first
+    expect(tried).toContain("kimi"); // same-vendor fallback ran second
+    expect(tried.indexOf("pi")).toBeGreaterThan(tried.indexOf("kimi")); // escalation ran last
+    // still a valid pair score — all independence invariants hold
+    const notes = readStoryReviewScores(dir, "US-X-911a");
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.scoring).toBe("pair");
+    expect(notes[0]?.scoredBy).toBe("pi");
+    expect(notes[0]?.sessionId).toBe(r.sessionId);
+    // evidence file written
+    expect(existsSync(join(rt, "peer", "cycle-c-escalate.score.pair.json"))).toBe(true);
+    // pair:score event emitted
+    expect(events.some((e) => e.type === "pair:score")).toBe(true);
+  });
+
+  // FIX-397 shape: hetero [reasonix] timeout, same-vendor [kimi] timeout,
+  // but escalation pool has pi (was excluded by probe) → pi scores = rescue.
+  it("AC1 (FIX-397 shape): codex-auth and kimi-timeout pattern → escalation rescues", async () => {
+    const { dir, rt } = project(SCORE_CFG);
+    const tried: string[] = [];
+    const { d } = scoreDeps({
+      installed: ["kimi", "pi", "reasonix"],
+      // Only kimi passes the probe — pi and reasonix are excluded
+      isAvailable: (a) => a === "kimi",
+      scorePeer: async (peer: string) => {
+        tried.push(peer);
+        // kimi (only candidate) → null (timeout); pi (escalation) → scores; reasonix → null
+        if (peer === "pi") return { score: 8, verdict: "good" as const, rationale: "escalation rescue after kimi timeout", cost: 0.03 };
+        return null;
+      },
+    });
+    const r = await runScorePairing(dir, rt, "c-fix397", "kimi", "US-X-911b", "roll-build", "summary", d);
+    expect(r.status).toBe("scored");
+    expect(r.peer).toBe("pi");
+    // Progression: same-vendor [kimi] ran first (only candidate, up to 2 attempts),
+    // then escalation pi (which scores)
+    expect(tried[0]).toBe("kimi");
+    expect(tried).toContain("pi"); // escalation tried and scored
+    expect(readStoryReviewScores(dir, "US-X-911b")[0]?.score).toBe(8);
+  });
+
+  it("AC2: full pool exhaustion (all escalation candidates also null) → clean timeout, no death-spiral", async () => {
+    const { dir, rt } = project(SCORE_CFG);
+    let calls = 0;
+    const { d } = scoreDeps({
+      installed: ["kimi", "pi", "reasonix"],
+      // kimi in pool; pi+reasonix excluded by probe → become escalation candidates
+      isAvailable: (a) => a === "kimi",
+      scorePeer: async () => {
+        calls++;
+        return null; // EVERYONE flakes — hetero, same-vendor, AND escalation
+      },
+    });
+    const r = await runScorePairing(dir, rt, "c-exhaust", "kimi", "US-X-911c", "roll-build", "summary", d);
+    expect(r.status).toBe("timeout");
+    // Hard budget cap: ESCALATION_MAX_ROUNDS=2 → at most 2 escalation peers tried.
+    // But the escalation pool here has 2 peers (pi, reasonix), so both get tried.
+    // No infinite loop — the function returns cleanly.
+    expect(calls).toBeGreaterThan(3); // kimi(retries) + pi(retries) + reasonix(retries)
+    // Bounded: we don't loop forever
+    const MAX_EXPECTED = (2 /* kimi attempts */) + (2 /* pi max attempts */) + (2 /* reasonix max attempts */);
+    expect(calls).toBeLessThanOrEqual(MAX_EXPECTED);
+    expect(existsSync(join(rt, "peer", "cycle-c-exhaust.score.pair.json"))).toBe(false);
+  });
+
+  it("AC2: escalation respects ESCALATION_MAX_ROUNDS cap — large pool doesn't spiral", async () => {
+    // Simulate many installed agents but only 2 escalation rounds allowed
+    const { dir, rt } = project(SCORE_CFG);
+    const tried: string[] = [];
+    const manyAgents = ["kimi", "pi", "reasonix", "deepseek"];
+    const { d } = scoreDeps({
+      installed: manyAgents,
+      // Only kimi passes probe; the other 3 become escalation candidates
+      isAvailable: (a) => a === "kimi",
+      scorePeer: async (peer: string) => {
+        tried.push(peer);
+        return null; // all fail
+      },
+    });
+    const r = await runScorePairing(dir, rt, "c-cap", "kimi", "US-X-911d", "roll-build", "summary", d);
+    expect(r.status).toBe("timeout");
+    // ESCALATION_MAX_ROUNDS = 2 → at most 2 escalation peers tried (beyond kimi)
+    const escalationTried = tried.filter((p) => p !== "kimi");
+    const maxRounds = 2;
+    // Each escalation peer gets up to SCORE_MAX_ATTEMPTS=2 attempts, but the
+    // round cap stops after 2 peers regardless of attempts per peer.
+    // The actual unique peers from escalation should be ≤ 2.
+    const uniqueEscalation = [...new Set(escalationTried)];
+    expect(uniqueEscalation.length).toBeLessThanOrEqual(maxRounds);
+  });
+
+  it("AC3: escalation peer gets the standard per-peer timeout (SCORE_TIMEOUT_MS)", async () => {
+    const { dir, rt } = project(SCORE_CFG);
+    let escalationTimeout = -1;
+    const { d } = scoreDeps({
+      installed: ["kimi", "pi"],
+      isAvailable: (a) => a === "kimi", // pi excluded → escalation
+      scorePeer: async (peer: string, _summary: string, timeoutMs: number) => {
+        if (peer === "pi") escalationTimeout = timeoutMs;
+        if (peer === "kimi") return null;
+        return { score: 7, verdict: "ok" as const, rationale: "escalation", cost: 0 };
+      },
+    });
+    const r = await runScorePairing(dir, rt, "c-time", "kimi", "US-X-911e", "roll-build", "summary", d);
+    expect(r.status).toBe("scored");
+    // The escalation round reuses the same timeout as normal rounds
+    expect(escalationTimeout).toBeGreaterThan(0);
+  });
+
+  it("AC4: escalation score still passes independence gate — sessionId ≠ builder, pair provenance", async () => {
+    const { dir, rt } = project(SCORE_CFG);
+    const { d } = scoreDeps({
+      installed: ["kimi", "pi"],
+      isAvailable: (a) => a === "kimi",
+      scorePeer: async (peer: string) => {
+        if (peer === "pi") return { score: 6, verdict: "ok" as const, rationale: "escalation peer scored", cost: 0.01 };
+        return null;
+      },
+    });
+    const r = await runScorePairing(dir, rt, "c-indep", "kimi", "US-X-911f", "roll-build", "summary", d);
+    expect(r.status).toBe("scored");
+    // sessionId is the reviewer's fresh session, never the builder's
+    expect(r.sessionId).toBeDefined();
+    expect(r.sessionId).toContain(":score:");
+    expect(r.sessionId).toContain(":pi:"); // the escalation peer
+    // pair provenance preserved
+    const notes = readStoryReviewScores(dir, "US-X-911f");
+    expect(notes[0]?.scoring).toBe("pair");
+    expect(notes[0]?.scoredBy).toBe("pi");
+  });
+
+  it("AC5: no escalation candidates (all agents already tried) → clean timeout, no wasted work", async () => {
+    const { dir, rt } = project(SCORE_CFG);
+    let calls = 0;
+    const { d } = scoreDeps({
+      installed: ["kimi"], // only one agent — already in the candidate pool
+      scorePeer: async () => {
+        calls++;
+        return null;
+      },
+    });
+    const r = await runScorePairing(dir, rt, "c-solo", "kimi", "US-X-911g", "roll-build", "summary", d);
+    expect(r.status).toBe("timeout");
+    // Single agent, same-vendor round only, no escalation pool → bounded retries
+    expect(calls).toBeLessThanOrEqual(2); // SCORE_MAX_ATTEMPTS
+  });
+});

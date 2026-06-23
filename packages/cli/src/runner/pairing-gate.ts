@@ -483,7 +483,38 @@ export async function runScorePairing(
     let winner = await runRound(heteroPool, true);
     if (winner === null) winner = await runRound(sameVendorPool, false);
     if (winner === null) {
-      // Both rounds' scorer pools flaked across all attempts → honest timeout, BLOCK.
+      // FIX-911 — pool-level escalation: before giving up, try ANY reachable
+      // reviewer that was NOT in the candidate pool (excluded by isAvailable
+      // probe) but IS installed + headless-capable. The probe can miss a
+      // genuinely reachable peer (transient timeout, stale auth state); this
+      // escalation gives them one more chance with a hard budget cap to avoid
+      // death-spiralling on genuinely dead peers.
+      const triedPeers = new Set([...heteroPool, ...sameVendorPool].map(canonicalAgentName));
+      const allHeadless = deps.installed
+        .map(canonicalAgentName)
+        .filter((a, i, arr) => arr.indexOf(a) === i)
+        .filter((a) => agentCanReviewHeadless(a));
+      const escalationPool = allHeadless.filter((a) => !triedPeers.has(a));
+      if (escalationPool.length > 0) {
+        // Serial dispatch — we are budget-conscious and only need ONE score.
+        // Parallel firstValid here would burn all candidates at once with no
+        // budget awareness, and a fast-failing auth-block would waste a slot.
+        const ESCALATION_MAX_ROUNDS = 2; // hard cap on escalation attempts
+        const rounds = Math.min(ESCALATION_MAX_ROUNDS, escalationPool.length);
+        for (let i = 0; i < rounds && winner === null; i++) {
+          const peer = escalationPool[i] as string;
+          // Single-peer round (escalation is serial, not parallel). Reuse the
+          // same SCORE_MAX_ATTEMPTS budget per peer so a single flake doesn't
+          // kill the round, but a dead peer doesn't spiral either.
+          const singlePool = [peer];
+          // coerceThrowToNull=false: the escalation is the last resort, so a
+          // broken probe (throw) is a defect → status "error", per FIX-335.
+          winner = await runRound(singlePool, false);
+        }
+      }
+    }
+    if (winner === null) {
+      // All rounds (hetero, same-vendor, escalation) exhausted → honest timeout, BLOCK.
       return { status: "timeout" };
     }
     const { peer, scored, sessionId } = winner;

@@ -665,7 +665,9 @@ export function ensureDeliveriesFresh(
   //   (a) `--merges` for GitHub merge-button commits ("Merge pull request #N")
   //   (b) without `--merges` for squash-merge commits with "(#N)" in subject
   const merges: MergeFact[] = [];
-  const seenPrs = new Set<number>();
+  const seenMergeKeys = new Set<string>();
+  const mergeKey = (fact: MergeFact): string =>
+    fact.prNumber > 0 ? `pr:${fact.prNumber}` : `sha:${fact.mergeCommit}`;
 
   // Pass (a): standard merge commits
   const gitLog = exec.run("git", [
@@ -675,7 +677,7 @@ export function ensureDeliveriesFresh(
   ]);
   if (gitLog.code === 0 && gitLog.stdout !== "") {
     const parsed = parseMergeCommitLog(gitLog.stdout);
-    for (const m of parsed) seenPrs.add(m.prNumber);
+    for (const m of parsed) seenMergeKeys.add(mergeKey(m));
     merges.push(...parsed);
   }
 
@@ -688,8 +690,9 @@ export function ensureDeliveriesFresh(
   if (squashLog.code === 0 && squashLog.stdout !== "") {
     const parsed = parseMergeCommitLog(squashLog.stdout);
     for (const m of parsed) {
-      if (!seenPrs.has(m.prNumber)) {
-        seenPrs.add(m.prNumber);
+      const key = mergeKey(m);
+      if (!seenMergeKeys.has(key)) {
+        seenMergeKeys.add(key);
         merges.push(m);
       }
     }

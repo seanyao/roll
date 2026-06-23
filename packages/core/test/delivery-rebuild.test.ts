@@ -1203,6 +1203,58 @@ describe("ensureDeliveriesFresh — FIX-905: origin/main is authoritative", () =
     expect(freshness._files.get(HEAD)?.text.trim()).toBe(ORIGIN_SHA);
   });
 
+  it("FIX-925: keeps story-only squash commits even after a prior prNumber=0 merge fact", () => {
+    // Regression from the live US-AGENT-045 failure:
+    // pass (a) can parse a no-PR story-only merge and record seenPrs.add(0).
+    // pass (b) must still keep later no-PR squash/story commits by SHA, not skip
+    // every prNumber=0 fact as if it were the same PR.
+    const rs = "\x1e";
+    const fs = "\x1f";
+    const freshness = fakeFreshnessPort({
+      [RUNS]: { text: [
+        JSON.stringify({ story_id: "US-AGENT-045", cycle_id: "c045", status: "failed", outcome: "failed", ts: "2026-06-23T19:28:57Z" }),
+      ].join("\n"), mtime: 2000 },
+    });
+    const exec = fakeExecPort({
+      [`-C ${PROJ} rev-parse --verify --quiet origin/main`]: { stdout: ORIGIN_SHA, code: 0 },
+      [`-C ${PROJ} log --first-parent origin/main --merges --format=%x1e%H%x1f%ct%x1f%B`]: {
+        stdout: [
+          rs,
+          "oldzero0000000000000000000000000000000000",
+          fs,
+          "1782240000",
+          fs,
+          "FIX-OLD-001: old story-only merge without PR marker",
+        ].join(""),
+        code: 0,
+      },
+      [`-C ${PROJ} log --first-parent origin/main --format=%x1e%H%x1f%ct%x1f%B`]: {
+        stdout: [
+          rs,
+          "dcbf2b3fee6571c723be6349d675e9641cf88bf7",
+          fs,
+          "1782243394",
+          fs,
+          "US-AGENT-045: migrate removed agent config compatibility\n\n",
+          "Co-authored-by: Roll Test <test@example.com>",
+        ].join(""),
+        code: 0,
+      },
+      [`-C ${PROJ} remote get-url origin`]: { stdout: "git@github.com:seanyao/roll.git", code: 0 },
+    });
+
+    const result = ensureDeliveriesFresh(PROJ, freshness, exec);
+
+    const story = result.find((r) => r.storyId === "US-AGENT-045");
+    expect(story).toBeDefined();
+    expect(story!.lifecycleState).toBe("done");
+    expect(story!.prNumber).toEqual({ present: false, reason: "no_publish_attempted" });
+    expect(story!.mergeCommit).toEqual({
+      present: true,
+      value: "dcbf2b3fee6571c723be6349d675e9641cf88bf7",
+    });
+  });
+
   it("SHA gate forces rebuild when origin/main advanced even if mtimes look fresh", () => {
     // deliveries.jsonl is NEWER than runs.jsonl (mtime gate alone → fresh),
     // but origin/main advanced past the recorded SHA → must rebuild and see done.

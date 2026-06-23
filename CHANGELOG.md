@@ -4,6 +4,8 @@
 
 ### 稳定性
 
+- **agent 适应度闸上线**：结构化断言 + agent-position 禁出现检查驻入 CI，被删 agent（qwen/cursor/trae/opencode/openclaw）回流为 agent 名称即红挡合并；`Rig { agent, model }` 轻量类型收口指派签名防 agent/model 错配。(US-AGENT-047) `[agents]`
+
 - **agent 名册收敛到 6 个一等成员**：`claude`、`kimi`、`codex`、`pi`、`antigravity (agy)`、`reasonix` 成为唯一可列出/探测/派发的 agent roster；`openai`、`deepseek` 继续作为 provider/model alias 保留，不再作为独立 agent 冒出。(US-AGENT-043) `[agents]`
 
 - **agent 名册改为单一真相源派生**：`AGENTS` 现在承载一等 agent 身份、显示名、PATH 探测 bin、默认模型和能力标记；registry、`roll agent list`、doctor/setup 探测和 spawn profile 覆盖都从同一组 6 个身份派生，减少后续名册漂移。(US-AGENT-044) `[agents]`

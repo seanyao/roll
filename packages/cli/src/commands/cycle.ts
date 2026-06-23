@@ -6,7 +6,7 @@
  * omitted) → evidence pointers (PR / diff / story dossier).
  */
 import { parseEventLine, resolveLang, type RollEvent } from "@roll/spec";
-import { cycleActivitySignalsFromEvents } from "@roll/core";
+import { cycleActivitySignalsFromEvents, type ActivitySignal } from "@roll/core";
 import { existsSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
@@ -180,6 +180,38 @@ function readEvents(eventsPath: string): RollEvent[] {
   return out;
 }
 
+function readSignals(signalsPath: string): ActivitySignal[] {
+  if (!existsSync(signalsPath)) return [];
+  let text = "";
+  try {
+    text = readFileSync(signalsPath, "utf8");
+  } catch {
+    return [];
+  }
+  const out: ActivitySignal[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (line.trim() === "") continue;
+    try {
+      const parsed: unknown = JSON.parse(line);
+      if (isActivitySignal(parsed)) out.push(parsed);
+    } catch {
+      /* skip torn/malformed lines */
+    }
+  }
+  return out;
+}
+
+function isActivitySignal(value: unknown): value is ActivitySignal {
+  if (typeof value !== "object" || value === null) return false;
+  const rec = value as Record<string, unknown>;
+  return typeof rec["ts"] === "number" &&
+    typeof rec["cycleId"] === "string" &&
+    typeof rec["seg"] === "string" &&
+    typeof rec["kind"] === "string" &&
+    typeof rec["tier"] === "string" &&
+    typeof rec["summary"] === "string";
+}
+
 function cycleEventId(ev: RollEvent): string | undefined {
   return "cycleId" in ev && typeof (ev as { cycleId?: unknown }).cycleId === "string" ? (ev as { cycleId: string }).cycleId : undefined;
 }
@@ -230,11 +262,11 @@ function cycleOutcome(events: readonly RollEvent[], row: CycleLedgerRow | undefi
   return row?.verdict ?? "running";
 }
 
-function renderCycleWatchFrame(cycleId: string, events: readonly RollEvent[], row: CycleLedgerRow | undefined, json: boolean): string {
+function renderCycleWatchFrame(cycleId: string, events: readonly RollEvent[], row: CycleLedgerRow | undefined, json: boolean, persistedSignals: readonly ActivitySignal[] = []): string {
   const scoped = eventsForCycle(events, cycleId);
   const facts = cycleStartFacts(scoped, row);
   const outcome = cycleOutcome(scoped, row);
-  const signals = cycleActivitySignalsFromEvents(scoped, cycleId);
+  const signals = persistedSignals.length > 0 ? [...persistedSignals] : cycleActivitySignalsFromEvents(scoped, cycleId);
   if (json) {
     return JSON.stringify(
       {
@@ -258,6 +290,35 @@ function renderCycleWatchFrame(cycleId: string, events: readonly RollEvent[], ro
   for (const sig of signals) lines.push(renderSignal(sig));
   if (signals.length === 0) lines.push("no activity signals recorded for this cycle");
   return `${lines.join("\n")}\n`;
+}
+
+async function followSignalFile(signalsPath: string, sinceLines: number): Promise<number> {
+  const seek = sinceLines === 0 ? "+1" : String(sinceLines);
+  const child = spawn("tail", ["-n", seek, "-F", signalsPath], { stdio: ["ignore", "pipe", "inherit"] });
+  const stop = (): void => {
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      /* already gone */
+    }
+  };
+  process.on("SIGINT", stop);
+  try {
+    const rl = createInterface({ input: child.stdout as Readable, crlfDelay: Infinity });
+    for await (const line of rl) {
+      if (line.trim() === "") continue;
+      try {
+        const parsed: unknown = JSON.parse(line);
+        if (isActivitySignal(parsed)) process.stdout.write(`${renderSignal(parsed)}\n`);
+      } catch {
+        /* skip torn/malformed lines */
+      }
+    }
+    return 0;
+  } finally {
+    process.removeListener("SIGINT", stop);
+    stop();
+  }
 }
 
 async function followCycle(eventsPath: string, cycleId: string, sinceLines: number): Promise<number> {
@@ -310,14 +371,17 @@ function cycleWatchCommand(args: string[]): number | Promise<number> {
     return 1;
   }
   const row = rows.find((r) => r.cycleId === cycleId);
+  const signalsPath = join(rt, `cycle-${cycleId}.signals.jsonl`);
+  const persistedSignals = readSignals(signalsPath);
   if (parsed.once) {
-    process.stdout.write(renderCycleWatchFrame(cycleId, events, row, parsed.json));
+    process.stdout.write(renderCycleWatchFrame(cycleId, events, row, parsed.json, persistedSignals));
     return 0;
   }
   if (parsed.json) {
-    process.stdout.write(renderCycleWatchFrame(cycleId, events, row, true));
+    process.stdout.write(renderCycleWatchFrame(cycleId, events, row, true, persistedSignals));
     return 0;
   }
+  if (persistedSignals.length > 0) return followSignalFile(signalsPath, parsed.sinceLines);
   return followCycle(eventsPath, cycleId, parsed.sinceLines);
 }
 

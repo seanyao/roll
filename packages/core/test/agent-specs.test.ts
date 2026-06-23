@@ -19,7 +19,8 @@ describe("AgentSpec registry — FIX-313", () => {
     expect(agentDefaultModel("agy")).toBe("gemini-2.5-pro");
     expect(agentDefaultModel("antigravity")).toBe("gemini-2.5-pro");
     expect(agentDefaultModel("reasonix")).toBe("deepseek-flash");
-    expect(agentNormalizerKind("kimi")).toBe("generic");
+    expect(agentNormalizerKind("kimi")).toBe("kimi");
+    expect(agentNormalizerKind("pi")).toBe("pi");
     expect(agentSmokeCommand("kimi")).toContain("kimi");
   });
 

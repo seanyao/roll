@@ -219,6 +219,35 @@ describe("US-OBS-027 — roll cycle watch", () => {
     expect(text).toContain("Attest gate · produced");
   });
 
+  it("US-OBS-028: --once prefers persisted ActivitySignal replay with tool granularity", () => {
+    const p = watchProject();
+    const rt = join(p, ".roll", "loop");
+    writeFileSync(
+      join(rt, "cycle-20260624-watch-12345.signals.jsonl"),
+      [
+        JSON.stringify({ ts: 1_800_000_000_000, cycleId: "20260624-watch-12345", seg: "cycle", kind: "lifecycle", tier: "A", summary: "cycle start" }),
+        JSON.stringify({ ts: 1_800_000_001_000, cycleId: "20260624-watch-12345", seg: "build", kind: "tool_call", tier: "B", summary: "tool_call Bash", detail: "pnpm test", ref: "Bash" }),
+        JSON.stringify({ ts: 1_800_000_002_000, cycleId: "20260624-watch-12345", seg: "build", kind: "tool_result", tier: "B", summary: "tool_result Bash", detail: "exit 0", result: "pass", ref: "Bash" }),
+      ].join("\n") + "\n",
+    );
+    const save = process.cwd();
+    process.chdir(p);
+    let out = "";
+    const so = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((s: string) => ((out += s), true)) as typeof process.stdout.write;
+    try {
+      expect(cycleCommand(["watch", "20260624-watch-12345", "--once", "--no-color"])).toBe(0);
+    } finally {
+      process.stdout.write = so;
+      process.chdir(save);
+    }
+    const text = stripAnsi(out);
+    expect(text).toContain("call tool_call Bash");
+    expect(text).toContain("pnpm test");
+    expect(text).toContain("result tool_result Bash");
+    expect(text).toContain("exit 0");
+  });
+
   it("--once without an id replays the latest cycle when no cycle is running", () => {
     const save = process.cwd();
     process.chdir(watchProject());

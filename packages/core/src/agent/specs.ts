@@ -2,7 +2,7 @@
 // used for harness cost/activity normalization, even though it is NOT a member of
 // the orchestrated agent POOL (see registry.ts). So "claude"/"claude-stream"
 // remain in these unions as harness kinds.
-export type AgentNormalizerKind = "claude" | "codex" | "generic";
+export type AgentNormalizerKind = "claude" | "codex" | "kimi" | "pi" | "generic";
 export type UsageExtractorKind = "claude-stream" | "openai" | "gemini" | "kimi" | "qwen" | "pi" | "generic";
 export type SessionRecoveryKind = "pi" | "kimi" | "codex";
 export type SessionBackfillKind = "claude-projects";
@@ -65,7 +65,7 @@ export const AGENTS: readonly AgentSpec[] = [
     defaultModel: "kimi-k2",
     cliBin: ["kimi-code", "kimi-cli", "kimi"],
     canReviewHeadless: true,
-    normalizer: "generic",
+    normalizer: "kimi",
     usage: { stdoutExtractor: "kimi", sessionRecovery: "kimi" },
     smokeCommand: 'kimi -p "Reply with a single word: hello"',
   },
@@ -87,7 +87,7 @@ export const AGENTS: readonly AgentSpec[] = [
     defaultModel: "deepseek-v4-pro",
     cliBin: ["pi"],
     canReviewHeadless: true,
-    normalizer: "generic",
+    normalizer: "pi",
     usage: { stdoutExtractor: "pi", sessionRecovery: "pi" },
     smokeCommand: 'pi -p "Reply with a single word: hello"',
   },

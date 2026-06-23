@@ -21,9 +21,11 @@ import {
   claudeNormalizer,
   DEFAULT_HEARTBEAT_GAP_MS,
   genericNormalizer,
+  kimiNormalizer,
   maybeHeartbeat,
   newNormalizerState,
   normalizerFor,
+  piNormalizer,
 } from "../src/loop/activity-signal.js";
 import { signalKindForMarker } from "../src/loop/signals.js";
 
@@ -212,19 +214,49 @@ describe("genericNormalizer — passthrough for unknown agents", () => {
   });
 });
 
+describe("pi/kimi normalizers — conservative tool granularity", () => {
+  it("pi parses explicit tool_call/tool_result lines into standard tool signals", () => {
+    const st = newNormalizerState();
+    piNormalizer.normalize("── cycle 20260624-1 · US-X · agent pi ──", st, 1);
+    const call = piNormalizer.normalize("tool_call: Bash: pnpm test", st, 2);
+    const result = piNormalizer.normalize("tool_result: Bash: exit 0", st, 3);
+    expect(call[0]).toMatchObject({ cycleId: "20260624-1", kind: "tool_call", summary: "tool_call Bash", detail: "pnpm test", tier: "B" });
+    expect(result[0]).toMatchObject({ cycleId: "20260624-1", kind: "tool_result", summary: "tool_result Bash", detail: "exit 0", result: "pass" });
+  });
+
+  it("kimi recognizes natural command/tool forms without claiming unknown prose is a tool", () => {
+    const st = newNormalizerState();
+    const bash = kimiNormalizer.normalize("Running command: git status --short", st, 1);
+    const edit = kimiNormalizer.normalize("Tool: Edit: packages/core/src/x.ts", st, 2);
+    const prose = kimiNormalizer.normalize("I will inspect the repo first.", st, 3);
+    expect(bash[0]).toMatchObject({ kind: "tool_call", ref: "Bash", detail: "git status --short" });
+    expect(edit[0]).toMatchObject({ kind: "tool_call", ref: "Edit", detail: "packages/core/src/x.ts" });
+    expect(prose[0]).toMatchObject({ kind: "say", tier: "C" });
+  });
+
+  it("structured JSON tool events parse when available and error results stay fail-loud", () => {
+    const st = newNormalizerState();
+    const call = piNormalizer.normalize(JSON.stringify({ type: "tool_call", tool: "Read", input: { file: "a.ts" } }), st, 1);
+    const fail = piNormalizer.normalize(JSON.stringify({ type: "tool_result", tool: "Bash", ok: false, summary: "exit 1" }), st, 2);
+    expect(call[0]).toMatchObject({ kind: "tool_call", ref: "Read" });
+    expect(call[0]!.detail).toContain("a.ts");
+    expect(fail[0]).toMatchObject({ kind: "tool_result", ref: "Bash", result: "fail", detail: "exit 1" });
+  });
+});
+
 describe("normalizerFor — agent → normalizer mapping (downstream stays agnostic)", () => {
   it("routes known stream formats while keeping plain agents on genericNormalizer", () => {
     expect(normalizerFor("claude").agent).toBe("claude");
     expect(normalizerFor("codex").agent).toBe("generic");
-    expect(normalizerFor("kimi").agent).toBe("generic");
-    expect(normalizerFor("pi").agent).toBe("generic");
+    expect(normalizerFor("kimi").agent).toBe("kimi");
+    expect(normalizerFor("pi").agent).toBe("pi");
     expect(normalizerFor("agy").agent).toBe("generic");
     expect(normalizerFor("reasonix").agent).toBe("generic");
     expect(normalizerFor("something-new").agent).toBe("generic");
     expect(normalizerFor("").agent).toBe("generic");
   });
   it("is case-insensitive and trims", () => {
-    expect(normalizerFor("  KIMI ").agent).toBe("generic");
+    expect(normalizerFor("  KIMI ").agent).toBe("kimi");
     expect(normalizerFor("  CODEX ").agent).toBe("generic");
     expect(normalizerFor("  Reasonix ").agent).toBe("generic");
   });

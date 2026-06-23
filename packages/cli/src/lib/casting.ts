@@ -271,7 +271,9 @@ export function defaultCastingDeps(projectPath: string): CastingDeps {
     readSlot: (slot) => {
       if (agentsText === null) return undefined;
       if (!SLOTS.includes(slot)) return undefined;
-      return readSlotFromText(agentsText, slot);
+      // The Casting view shows only the agent token; the slot's model (if any)
+      // is not surfaced here.
+      return readSlotFromText(agentsText, slot)?.agent;
     },
     routeAudit: (slot) => auditBySlot.get(slot),
   };

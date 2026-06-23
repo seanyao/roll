@@ -210,13 +210,31 @@ function canonicalProfileName(name: string): string {
   return raw;
 }
 
-function simplePromptProfile(name: string, bin: string, args: (prompt: string) => string[]): AgentProfile {
+/**
+ * Build a simple-prompt profile (pi/kimi/deepseek shapes). `modelFlag`, when the
+ * agent's CLI accepts an explicit model, is PREPENDED to the prompt argv as the
+ * native flag pair (pi: `--model <m>`, kimi: `-m <m>`) ONLY when a non-empty
+ * routed model is present — absent ⇒ no flag, the agent uses its own default.
+ * The model string is the agent's NATIVE `--model` value, including any
+ * `:thinking` effort suffix (e.g. `deepseek/deepseek-v4-pro:high`); it is passed
+ * through verbatim as ONE argv token.
+ */
+function simplePromptProfile(
+  name: string,
+  bin: string,
+  args: (prompt: string) => string[],
+  modelFlag?: string,
+): AgentProfile {
   return {
     name,
     usesWorkspaceSandbox: false,
     ptyWhenPiped: true,
     acceptance: { canReviewHeadless: getAgentSpec(name)?.canReviewHeadless === true },
-    buildSpawnCommand: (opts) => ({ bin: opts.bin ?? bin, args: args(agentPrompt(opts)) }),
+    buildSpawnCommand: (opts) => {
+      const model = opts.model?.trim();
+      const modelArgs = modelFlag !== undefined && model !== undefined && model !== "" ? [modelFlag, model] : [];
+      return { bin: opts.bin ?? bin, args: [...modelArgs, ...args(agentPrompt(opts))] };
+    },
   };
 }
 
@@ -236,8 +254,13 @@ const AGENT_PROFILES: Readonly<Record<string, AgentProfile>> = {
         ...(opts.bare === true ? { bare: true } : {}),
       }),
   },
-  pi: simplePromptProfile("pi", "pi", (prompt) => ["-p", prompt]),
-  kimi: simplePromptProfile("kimi", "kimi", (prompt) => ["-p", prompt]),
+  // pi `--model "provider/id:thinking"` (the `:thinking` suffix folds the
+  // thinking-effort into the model string — no separate effort field).
+  pi: simplePromptProfile("pi", "pi", (prompt) => ["-p", prompt], "--model"),
+  // kimi `-m <model>` / `--model <model>` (use the short form).
+  kimi: simplePromptProfile("kimi", "kimi", (prompt) => ["-p", prompt], "-m"),
+  // deepseek (pi engine via the `deepseek` binary) takes a positional prompt and
+  // no documented model flag here → leave the model to its own default.
   deepseek: simplePromptProfile("deepseek", "deepseek", (prompt) => [prompt]),
   reasonix: {
     name: "reasonix",

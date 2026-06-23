@@ -12,6 +12,7 @@ import {
   type FallbackDeps,
   type HitRates,
   type RouteDeps,
+  type RouteSlot,
 } from "../src/index.js";
 
 describe("classifyComplexity", () => {
@@ -71,22 +72,30 @@ describe("nudgeWithinTier", () => {
   });
 });
 
-function routeDeps(slots: Partial<Record<string, string>>, first?: string): RouteDeps {
+/** A slot value can be given as a bare agent string (back-compat: `{ agent }`)
+ *  or a full `{ agent, model? }` for the model-carrying cases. */
+type SlotInput = string | RouteSlot;
+
+function routeDeps(slots: Partial<Record<string, SlotInput>>, first?: string): RouteDeps {
   return {
-    readSlot: (s) => slots[s],
+    readSlot: (s) => {
+      const v = slots[s];
+      if (v === undefined) return undefined;
+      return typeof v === "string" ? { agent: v } : v;
+    },
     firstInstalled: () => first,
   };
 }
 
 describe("resolveRoute slot chain", () => {
   it("uses the tier slot when present", () => {
-    const d = routeDeps({ easy: "kimi", default: "claude" });
+    const d = routeDeps({ easy: "kimi", default: "pi" });
     expect(resolveRoute("easy", d)).toEqual({ agent: "kimi", tier: "easy" });
   });
 
   it("falls back to default slot when tier slot empty", () => {
-    const d = routeDeps({ default: "claude" });
-    expect(resolveRoute("hard", d)).toEqual({ agent: "claude", tier: "hard" });
+    const d = routeDeps({ default: "pi" });
+    expect(resolveRoute("hard", d)).toEqual({ agent: "pi", tier: "hard" });
   });
 
   it("falls back to firstInstalled with a warning when both empty", () => {
@@ -102,18 +111,99 @@ describe("resolveRoute slot chain", () => {
 
   it("default tier never reads the default slot twice (no double fallback)", () => {
     // tier=default with empty default slot → straight to firstInstalled.
-    const d = routeDeps({}, "claude");
-    expect(resolveRoute("default", d).agent).toBe("claude");
+    const d = routeDeps({}, "kimi");
+    expect(resolveRoute("default", d).agent).toBe("kimi");
   });
 
   it("applies the nudge after slot resolution", () => {
-    const d = routeDeps({ easy: "claude" });
+    const d = routeDeps({ easy: "pi" });
     const hr: HitRates = {
-      [hitRateKey("claude", "US")]: { hit_rate: 0.5, sample_n: 10 },
+      [hitRateKey("pi", "US")]: { hit_rate: 0.5, sample_n: 10 },
       [hitRateKey("kimi", "US")]: { hit_rate: 0.99, sample_n: 10 },
     };
     const r = resolveRoute("easy", d, { storyType: "US", candidates: ["kimi"], hitRates: hr });
     expect(r.agent).toBe("kimi");
+  });
+});
+
+describe("resolveRoute carries the slot model (US: explicit --model wiring)", () => {
+  it("threads the tier slot's model into RouteDecision", () => {
+    const d = routeDeps({ hard: { agent: "pi", model: "bailian/glm-5.2" } });
+    expect(resolveRoute("hard", d)).toEqual({
+      agent: "pi",
+      tier: "hard",
+      model: "bailian/glm-5.2",
+    });
+  });
+
+  it("preserves the effort suffix (`:thinking`) in the model string verbatim", () => {
+    const d = routeDeps({ default: { agent: "pi", model: "deepseek/deepseek-v4-pro:high" } });
+    expect(resolveRoute("default", d).model).toBe("deepseek/deepseek-v4-pro:high");
+  });
+
+  it("a model-less slot carries NO model (back-compat: omitted, not empty)", () => {
+    const d = routeDeps({ easy: "kimi" });
+    const r = resolveRoute("easy", d);
+    expect(r.model).toBeUndefined();
+    expect(r).toEqual({ agent: "kimi", tier: "easy" });
+  });
+
+  it("fallback chain carries the DEFAULT slot's model when the tier slot is empty", () => {
+    const d = routeDeps({ default: { agent: "pi", model: "bailian/glm-5.2" } });
+    const r = resolveRoute("hard", d);
+    expect(r.agent).toBe("pi");
+    expect(r.model).toBe("bailian/glm-5.2");
+  });
+
+  it("the tier slot's model wins over the default slot's model (no cross-contamination)", () => {
+    const d = routeDeps({
+      hard: { agent: "pi", model: "bailian/glm-5.2" },
+      default: { agent: "kimi", model: "moonshot/kimi-k2" },
+    });
+    expect(resolveRoute("hard", d).model).toBe("bailian/glm-5.2");
+  });
+
+  it("firstInstalled last-resort carries no model (it has no slot config)", () => {
+    const d = routeDeps({}, "pi");
+    expect(resolveRoute("hard", d).model).toBeUndefined();
+  });
+
+  it("a nudge to a DIFFERENT agent drops the original slot's model", () => {
+    const d = routeDeps({ easy: { agent: "pi", model: "bailian/glm-5.2" } });
+    const hr: HitRates = {
+      [hitRateKey("pi", "US")]: { hit_rate: 0.5, sample_n: 10 },
+      [hitRateKey("kimi", "US")]: { hit_rate: 0.99, sample_n: 10 },
+    };
+    const r = resolveRoute("easy", d, { storyType: "US", candidates: ["kimi"], hitRates: hr });
+    expect(r.agent).toBe("kimi");
+    expect(r.model).toBeUndefined();
+  });
+
+  it("a nudge that KEEPS the slot agent preserves its model", () => {
+    const d = routeDeps({ easy: { agent: "pi", model: "bailian/glm-5.2" } });
+    const hr: HitRates = {
+      [hitRateKey("pi", "US")]: { hit_rate: 0.99, sample_n: 10 },
+      [hitRateKey("kimi", "US")]: { hit_rate: 0.1, sample_n: 10 },
+    };
+    const r = resolveRoute("easy", d, { storyType: "US", candidates: ["kimi"], hitRates: hr });
+    expect(r.agent).toBe("pi");
+    expect(r.model).toBe("bailian/glm-5.2");
+  });
+
+  it("purity: same inputs → same decision; readSlot is the ONLY model source", () => {
+    let calls = 0;
+    const deps: RouteDeps = {
+      readSlot: (s) => {
+        calls += 1;
+        return s === "hard" ? { agent: "pi", model: "bailian/glm-5.2" } : undefined;
+      },
+      firstInstalled: () => undefined,
+    };
+    const a = resolveRoute("hard", deps);
+    const b = resolveRoute("hard", deps);
+    expect(a).toEqual(b);
+    expect(a).toEqual({ agent: "pi", tier: "hard", model: "bailian/glm-5.2" });
+    expect(calls).toBeGreaterThan(0); // model came through the injected port only.
   });
 });
 

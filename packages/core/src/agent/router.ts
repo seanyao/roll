@@ -184,11 +184,20 @@ export function nudgeWithinTier(
 
 // ── Tier → agent slot resolution (mirrors _loop_pick_agent_for_story) ─────────
 
+/** A routing slot's resolved value: the agent token + an optional NATIVE
+ *  `--model` argument (mirrors core's `SlotConfig`; re-declared here so the
+ *  router stays import-free of the registry's I/O surface and PURE — the model
+ *  arrives ONLY through the injected {@link RouteDeps.readSlot}). */
+export interface RouteSlot {
+  agent: string;
+  model?: string;
+}
+
 /** Ports injected into {@link resolveRoute}; keep the router pure. */
 export interface RouteDeps {
-  /** Read a tier slot's agent (`undefined` when empty/missing). Mirrors
-   *  `_agents_config_slot <tier>`. */
-  readSlot(slot: Tier | "fallback"): string | undefined;
+  /** Read a tier slot's `{ agent, model? }` (`undefined` when empty/missing).
+   *  Mirrors `_agents_config_slot <tier>` extended with the slot's model. */
+  readSlot(slot: Tier | "fallback"): RouteSlot | undefined;
   /** First-installed last-resort agent (`undefined` when none). Mirrors
    *  `_first_installed_agent`. */
   firstInstalled(): string | undefined;
@@ -198,6 +207,11 @@ export interface RouteDeps {
 export interface RouteDecision {
   agent: string;
   tier: Tier;
+  /** The NATIVE `--model` argument carried by whichever slot supplied the agent
+   *  (tier → default fallback both carry their own model). Absent when the slot
+   *  had no model OR the agent came from the firstInstalled last-resort (which
+   *  has no slot config). The spawn omits `--model` when this is absent. */
+  model?: string;
   /** A `warn`-worthy note when both the tier slot and `default` were empty and
    *  the firstInstalled fallback fired (mirrors the bash WARN), else undefined. */
   warning?: string;
@@ -223,16 +237,24 @@ export interface RouteNudge {
  * Then apply the in-tier soft nudge when `nudge` is supplied.
  */
 export function resolveRoute(tier: Tier, deps: RouteDeps, nudge?: RouteNudge): RouteDecision {
-  let agent = deps.readSlot(tier);
+  // The model must follow whichever slot actually supplies the agent: tier slot
+  // first, then the `default` slot on fallback. The firstInstalled last-resort
+  // has no slot config, so it carries no model.
+  let slot = deps.readSlot(tier);
+  let agent = slot?.agent;
+  let model = slot?.model;
   let warning: string | undefined;
 
   if ((agent === undefined || agent === "") && tier !== "default") {
-    agent = deps.readSlot("default");
+    slot = deps.readSlot("default");
+    agent = slot?.agent;
+    model = slot?.model;
   }
   if (agent === undefined || agent === "") {
     const first = deps.firstInstalled();
     if (first !== undefined && first !== "") {
       agent = first;
+      model = undefined; // last-resort agent has no slot config → no model.
       warning = `agents.yaml: tier '${tier}' and 'default' slot both empty; using first installed agent '${first}'`;
     }
   }
@@ -247,10 +269,20 @@ export function resolveRoute(tier: Tier, deps: RouteDeps, nudge?: RouteNudge): R
       sampleFloor: nudge.sampleFloor,
       enabled: nudge.enabled,
     });
-    if (r.agent !== "") agent = r.agent;
+    // A nudge re-points to a DIFFERENT agent (a soft historical preference). The
+    // model is bound to the original slot's agent; if the nudge swaps the agent,
+    // the slot's model no longer applies, so drop it (the new agent spawns with
+    // its own default).
+    if (r.agent !== "" && r.agent !== agent) {
+      agent = r.agent;
+      model = undefined;
+    }
   }
 
-  return warning !== undefined ? { agent, tier, warning } : { agent, tier };
+  const out: RouteDecision = { agent, tier };
+  if (model !== undefined && model !== "") out.model = model;
+  if (warning !== undefined) out.warning = warning;
+  return out;
 }
 
 // ── Pre-spawn availability fallback (mirrors _loop_resolve_fallback_agent) ────

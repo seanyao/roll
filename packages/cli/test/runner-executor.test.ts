@@ -178,6 +178,45 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
     expect(args).toEqual(["run", "--max-steps", "12", "--model", "deepseek-reasoner", "--dir", "/wt", prompt]);
   });
 
+  // ── explicit --model wiring (rig → router → spawn) ──────────────────────────
+  it("pi: a routed model is appended as `--model <model>` (GLM-5.2 via 百炼)", () => {
+    const { bin, args } = buildSpawnCommand("pi", { cwd: "/wt", skillBody: "DO WORK", model: "bailian/glm-5.2" });
+    expect(bin).toBe("pi");
+    expect(args).toEqual(["--model", "bailian/glm-5.2", "-p", prompt]);
+  });
+
+  it("pi: a routed model with a `:thinking` effort suffix passes through as ONE token", () => {
+    const { args } = buildSpawnCommand("pi", {
+      cwd: "/wt",
+      skillBody: "DO WORK",
+      model: "deepseek/deepseek-v4-pro:high",
+    });
+    expect(args).toEqual(["--model", "deepseek/deepseek-v4-pro:high", "-p", prompt]);
+  });
+
+  it("pi: NO model → no --model flag (back-compat: agent uses its own default)", () => {
+    const { args } = buildSpawnCommand("pi", { cwd: "/wt", skillBody: "DO WORK" });
+    expect(args).toEqual(["-p", prompt]);
+    expect(args).not.toContain("--model");
+  });
+
+  it("kimi: a routed model is appended as `-m <model>`", () => {
+    const { bin, args } = buildSpawnCommand("kimi", { cwd: "/wt", skillBody: "DO WORK", model: "moonshot/kimi-k2" });
+    expect(bin).toBe("kimi");
+    expect(args).toEqual(["-m", "moonshot/kimi-k2", "-p", prompt]);
+  });
+
+  it("kimi: NO model → no -m flag", () => {
+    const { args } = buildSpawnCommand("kimi", { cwd: "/wt", skillBody: "DO WORK" });
+    expect(args).toEqual(["-p", prompt]);
+    expect(args).not.toContain("-m");
+  });
+
+  it("an empty/whitespace routed model is treated as absent (no flag)", () => {
+    expect(buildSpawnCommand("pi", { cwd: "/wt", skillBody: "DO WORK", model: "" }).args).toEqual(["-p", prompt]);
+    expect(buildSpawnCommand("pi", { cwd: "/wt", skillBody: "DO WORK", model: "   " }).args).toEqual(["-p", prompt]);
+  });
+
   it("throws a loud, documented error for an un-ported agent (fail-loud, not silent)", () => {
     expect(() => buildSpawnCommand("made-up-agent", { cwd: "/wt", skillBody: "x" })).toThrow(
       /agent 'made-up-agent' argv not yet ported/,

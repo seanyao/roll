@@ -86,12 +86,12 @@ describe("frozen: slot write bytes + round-trip read == bash", () => {
     it(`${c.name}: bytes + round-trip read`, () => {
       const bytes = setSlotInText(c.initial ?? "", c.slot, c.agent);
       expect(bytes).toBe(c.bytes);
-      expect(readSlotFromText(bytes, c.slot) ?? "").toBe(c.read);
+      expect(readSlotFromText(bytes, c.slot)?.agent ?? "").toBe(c.read);
     });
   }
 
   it("read of an unknown-agent slot still returns the value", () => {
-    expect(readSlotFromText("schema: v3\neasy: { agent: bogusagent }\n", "easy") ?? "").toBe("bogusagent");
+    expect(readSlotFromText("schema: v3\neasy: { agent: bogusagent }\n", "easy")?.agent ?? "").toBe("bogusagent");
   });
 });
 

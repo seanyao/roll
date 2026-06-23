@@ -101,7 +101,7 @@ roll setup
 
 ## 多 Agent Peer Review
 
-`$roll-peer` 将设计或代码决策路由到第二个 AI Agent 进行交叉验证。路由按 capability map — 若主 Agent 是 Claude，Peer 默认使用 Kimi 或 DeepSeek。
+`$roll-peer` 将设计或代码决策路由到第二个 AI Agent 进行交叉验证。路由按 capability map — 若主 Agent 是 Claude，Peer 默认使用 Kimi 或 Reasonix。
 
 详见 [peer.md](peer.md)。
 

@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   AGENT_REGISTRY_NAMES,
@@ -12,6 +15,20 @@ import { AGENTS, AGENT_SPECS, getAgentIdentitySpec, getAgentSpec } from "../src/
 
 const CANONICAL_ROSTER = ["claude", "kimi", "codex", "pi", "agy", "reasonix"] as const;
 const REMOVED_AGENT_TOKENS = ["openclaw", "qwen", "opencode", "cursor", "trae"] as const;
+const GUIDE_ROSTER_COMMANDS = ["claude", "kimi-code", "codex", "agy", "pi", "reasonix"] as const;
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+
+function readProjectFile(path: string): string {
+  return readFileSync(resolve(REPO_ROOT, path), "utf8");
+}
+
+function markdownTableCommands(path: string): string[] {
+  return readProjectFile(path)
+    .split("\n")
+    .filter((line) => line.startsWith("| ") && !line.includes("---"))
+    .slice(1)
+    .map((line) => line.split("|")[2]?.match(/`([^`]+)`/)?.[1] ?? "");
+}
 
 function envWithBins(bins: readonly string[]): AgentEnv {
   const onPath = new Set(bins);
@@ -40,7 +57,7 @@ describe("US-AGENT-043 canonical agent roster", () => {
       expect(agentIsKnown(agent)).toBe(true);
       expect(agentBinNames(agent)).not.toBeNull();
     }
-});
+  });
 
   it("agent specs expose exactly six canonical entries while preserving provider aliases", () => {
     const canonicalSpecNames = Object.values(AGENT_SPECS)
@@ -72,5 +89,48 @@ describe("US-AGENT-043 canonical agent roster", () => {
     const env = envWithBins(["reasonix"]);
     expect(agentsInstalled(env)).toEqual(["reasonix"]);
     expect(firstInstalledAgent(env)).toBe("reasonix");
+  });
+
+  it("US-AGENT-046: live agent guides list exactly the six supported agents", () => {
+    expect(markdownTableCommands("guide/en/ai-agents.md")).toEqual([...GUIDE_ROSTER_COMMANDS]);
+    expect(markdownTableCommands("guide/zh/ai-agents.md")).toEqual([...GUIDE_ROSTER_COMMANDS]);
+  });
+
+  it("US-AGENT-046: live guide/site/skill surfaces drop removed agents as agent entries", () => {
+    const surfaces = [
+      "guide/en/ai-agents.md",
+      "guide/zh/ai-agents.md",
+      "guide/en/methodology.md",
+      "guide/zh/methodology.md",
+      "site/roll-data.js",
+      "skills/roll-doctor/SKILL.md",
+      "skills/roll-loop/references/full-contract.md",
+      "skills/roll-onboard/SKILL.md",
+      "skills/roll-peer/references/full-contract.md",
+    ];
+    const forbiddenAgentEntryPatterns = [
+      /\bCursor reads\b/,
+      /\bCursor 读\b/,
+      /\.cursor-rules\b/,
+      /\bopencode scheduled tasks\b/,
+      /\bopencode 定时任务\b/,
+      /\bKimi or DeepSeek\b/,
+      /\bKimi 或 DeepSeek\b/,
+      /\bopenclaw\b/i,
+      /\bqwen\b/i,
+      /\btrae\b/i,
+      /\bopencode\b/i,
+    ];
+
+    for (const surface of surfaces) {
+      const text = readProjectFile(surface);
+      for (const pattern of forbiddenAgentEntryPatterns) {
+        expect(text, `${surface} should not contain ${pattern}`).not.toMatch(pattern);
+      }
+    }
+
+    const site = readProjectFile("site/roll-data.js");
+    expect(site).toContain("Works with Claude · Antigravity · Codex · Kimi · Pi · Reasonix");
+    expect(site).toContain("支持 Claude · Antigravity · Codex · Kimi · Pi · Reasonix");
   });
 });

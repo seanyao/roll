@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  AWAITING_REVIEW_STATUS_MARKER,
   classifyStatus,
   findStatusMarker,
   LEGACY_STATUS_MARKERS,
@@ -29,6 +30,11 @@ describe("classifyStatus", () => {
     expect(classifyStatus("🔨 In Progress")).toBe("in_progress");
     expect(classifyStatus("✅ Done")).toBe("done");
     expect(classifyStatus("🚫 Hold (claude 直做并行)")).toBe("hold");
+  });
+
+  it("FIX-909: ⏳ 待复评 is visible but re-pickable, not Hold/Done", () => {
+    expect(classifyStatus(AWAITING_REVIEW_STATUS_MARKER)).toBe("todo");
+    expect(findStatusMarker(`| FIX-909 | x | ${AWAITING_REVIEW_STATUS_MARKER} |`)).toBe(AWAITING_REVIEW_STATUS_MARKER);
   });
 
   it("recognizes Cut as a terminal status distinct from an unknown cell", () => {

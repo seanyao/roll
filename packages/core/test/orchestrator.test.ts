@@ -205,6 +205,9 @@ describe("classifyPublish — publish ladder refines built (bin/roll:9239-9356)"
   it("FIX-244: status 0 → published (PR open, merge pending — done ≡ merged, I4)", () => {
     expect(classifyPublish({ status: 0 })).toBe("published");
   });
+  it("FIX-909: status 0 + draft manual review stays needs_review", () => {
+    expect(classifyPublish({ status: 0, manualMerge: true, draft: true })).toBe("needs_review");
+  });
   it("status 2 + mergedBack → done (gh missing, ff)", () => {
     expect(classifyPublish({ status: 2, mergedBack: true })).toBe("done");
   });
@@ -358,6 +361,18 @@ describe("happy-path phase walk → done", () => {
     expect(r.commands[resumeIdx]).toEqual({ kind: "resume_worktree", storyId: "FIX-284" });
     // The story id threaded into ctx is the picked one (feeds resolveResumeBase).
     expect(r.state.ctx.storyId).toBe("FIX-284");
+  });
+
+  it("FIX-909: needs_review publishes a draft/manual PR instead of silently ending", () => {
+    const r = cycleStep(
+      { ...initialCycleState(CTX), phase: "reconcile", ctx: { ...CTX, branch: "loop/cycle-x", storyId: "FIX-909" } },
+      {
+        type: "facts_captured",
+        facts: { usedWorktree: true, agentExit: 0, gateBlocked: true, needsReview: true, timedOut: false, commitsAhead: 2 },
+      },
+    );
+    expect(r.state.phase).toBe("publish");
+    expect(r.commands).toEqual([{ kind: "publish_pr", branch: "loop/cycle-x", docOnly: false, manualMerge: true, draft: true }]);
   });
 });
 

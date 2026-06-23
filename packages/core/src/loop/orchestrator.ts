@@ -299,6 +299,8 @@ export interface PublishResult {
   status: number;
   /** Human merge required: PR may open, but no local merge-back may count done. */
   manualMerge?: boolean;
+  /** FIX-909: the PR was opened as a draft awaits-review signal. */
+  draft?: boolean;
   /** Did the gh-missing ff `_worktree_merge_back` succeed? (bin/roll:9272). */
   mergedBack?: boolean;
   /** Did the orphan branch+tag push succeed? (bin/roll:9303-9305 etc). */
@@ -327,6 +329,7 @@ export interface PublishResult {
  * Only call on a `built` capture; idle/failed/blocked never reach the ladder.
  */
 export function classifyPublish(pub: PublishResult): V2CycleStatus {
+  if (pub.status === 0 && pub.manualMerge === true && pub.draft === true) return "needs_review";
   // FIX-244: publish-ok means the PR is OPEN, merge pending — "published", not
   // "done" (done ≡ merged to main, I4). Backfill flips it on merge evidence.
   if (pub.status === 0) return "published";
@@ -559,7 +562,7 @@ export type CycleCommand =
   | { kind: "kill_agent"; graceSec: number } // watchdog teardown.
   | { kind: "sleep_backoff"; seconds: number } // retry backoff (adapter sleeps).
   | { kind: "capture_facts" } // git rev-list/log count (bin/roll:9127-9157).
-  | { kind: "publish_pr"; branch: string; docOnly: boolean } // delivery/pr planPublishPr.
+  | { kind: "publish_pr"; branch: string; docOnly: boolean; manualMerge?: boolean; draft?: boolean } // delivery/pr planPublishPr.
   | { kind: "merge_back"; branch: string } // _worktree_merge_back (gh-missing tier).
   | { kind: "push_orphan"; branch: string } // FIX-039 orphan branch+tag.
   | { kind: "rescue_leaked"; cycleId: string } // FIX-903: save leaked main commits to rescue ref.
@@ -903,6 +906,12 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
       const status = classifyCaptured(event.facts);
       const next = { ...state, phase: "reconcile" as CyclePhase, captured: event.facts };
       if (status !== "built") {
+        if (status === "needs_review") {
+          return {
+            state: { ...next, phase: "publish" },
+            commands: [{ kind: "publish_pr", branch: state.ctx.branch, docOnly: false, manualMerge: true, draft: true }],
+          };
+        }
         // idle → clean + terminal; failed/blocked → terminal (no publish).
         // idle: nothing to keep. published (FIX-244): branch + PR are on the
         // remote — keep the worktree too would strand it (FIX-247's lesson).

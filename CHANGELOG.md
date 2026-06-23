@@ -10,6 +10,8 @@
 
 - **发版闸不再放过假 Done**：待发布卡会核对真实交付记录，backlog 写错会直接拦住。(FIX-391) `[feedback-truth-alignment]`
 
+- **缺验收件的已完成工作不再沉底**：loop 会开待复评 draft PR，并把卡标成待复评等待补件。(FIX-909) `[loop-engine]`
+
 ## v3.624.1 — 2026-06-24
 
 ### 新功能

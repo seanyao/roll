@@ -4,6 +4,7 @@
  * first-in-file-order selection.
  */
 import { describe, expect, it } from "vitest";
+import { AWAITING_REVIEW_STATUS_MARKER } from "@roll/spec";
 import { type BacklogItem, parseDependsOn, pickStory } from "../src/index.js";
 
 /** Terse fixture row builder. */
@@ -41,6 +42,11 @@ describe("pickStory — status skip rules", () => {
 
   it("returns undefined when nothing is Todo", () => {
     expect(pickStory([item("US-1", DONE), item("FIX-1", "🚫 Hold")])).toBeUndefined();
+  });
+
+  it("FIX-909: picks ⏳ 待复评 rows for conservative resume", () => {
+    const items = [item("FIX-909", AWAITING_REVIEW_STATUS_MARKER), item("FIX-910", TODO)];
+    expect(pickStory(items)?.id).toBe("FIX-909");
   });
 
   it("FIX-363: skips a poison-pill card on the runtime skip-list, takes the next Todo", () => {

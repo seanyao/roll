@@ -93,6 +93,7 @@ import {
 import {
   parseEventLine,
   STATUS_MARKER,
+  AWAITING_REVIEW_STATUS_MARKER,
   absent,
   buildTerminalEvent,
   findStatusMarker,
@@ -1891,11 +1892,11 @@ export async function executeCommand(
 
     // delivery/pr planPublishPr → github.runPublishPlan → published result.
     case "publish_pr": {
-      const manualMerge = storyRequiresManualMerge(ports.repoCwd, ctx.storyId);
+      const manualMerge = cmd.manualMerge === true || storyRequiresManualMerge(ports.repoCwd, ctx.storyId);
       const slug = await ports.github.repoSlug(ports.repoCwd);
       if (slug === undefined) {
         // gh unavailable / no github remote → status 2 (gh-missing tier).
-        const pub: PublishResult = { status: 2, mergedBack: false, orphanPushed: false, manualMerge };
+        const pub: PublishResult = { status: 2, mergedBack: false, orphanPushed: false, manualMerge, ...(cmd.draft === true ? { draft: true } : {}) };
         return { event: { type: "published", result: pub } };
       }
       // FIX-245 AC2: an agent that opened its own PR inside the cycle bypassed
@@ -1908,12 +1909,12 @@ export async function executeCommand(
           ports.paths.alertsPath,
           `discipline: agent self-published a PR for ${cmd.branch} (cycle ${ctx.cycleId}) — runner adopted it; gates ran post-hoc (FIX-245)`,
         );
-        const pub: PublishResult = { status: 0, manualMerge };
+        const pub: PublishResult = { status: 0, manualMerge, ...(cmd.draft === true ? { draft: true } : {}) };
         return { event: { type: "published", result: pub } };
       }
       const plan = cmd.docOnly
-        ? planPublishDocPr({ branch: cmd.branch, slug, body: publishBody(ctx), manualMerge })
-        : planPublishPr({ branch: cmd.branch, slug, body: publishBody(ctx), manualMerge });
+        ? planPublishDocPr({ branch: cmd.branch, slug, body: publishBody(ctx), manualMerge, draft: cmd.draft })
+        : planPublishPr({ branch: cmd.branch, slug, body: publishBody(ctx), manualMerge, draft: cmd.draft });
       const r = await ports.github.runPublishPlan(plan);
       // US-DOSSIER-007 AC2: mount the execution section onto the story dossier at
       // PR-open with the fact known now (the PR link), not reconstructed later
@@ -1949,7 +1950,7 @@ export async function executeCommand(
           );
         }
       }
-      const pub: PublishResult = { status: r.status, manualMerge };
+      const pub: PublishResult = { status: r.status, manualMerge, ...(cmd.draft === true ? { draft: true } : {}) };
       return {
         event: { type: "published", result: pub },
         // US-TRUTH-001: thread the PR url into the cycle context so the
@@ -2144,6 +2145,28 @@ export async function executeCommand(
               storyId: terminalStoryId,
               cycleId: ctx.cycleId,
               lifecycleState: "failed",
+              prNumber: ctx.prUrl !== undefined
+                ? present(Number(prNumberFromUrl(ctx.prUrl) ?? 0))
+                : absent("no_publish_attempted"),
+              prUrl: ctx.prUrl !== undefined
+                ? present(ctx.prUrl)
+                : absent("no_publish_attempted"),
+              mergedAt: absent("not_recorded"),
+              mergeCommit: absent("not_recorded"),
+              recordedAt: ports.clock(),
+            });
+          } catch {
+            // best-effort — never block the terminal on delivery record write
+          }
+        }
+      } else if (cmd.status === "needs_review" && terminalStoryId !== "") {
+        ports.backlog.markStatus?.(ports.repoCwd, terminalStoryId, AWAITING_REVIEW_STATUS_MARKER);
+        if (ctx.cycleId !== undefined) {
+          try {
+            appendDelivery(nodeDeliveryStore, ports.repoCwd, {
+              storyId: terminalStoryId,
+              cycleId: ctx.cycleId,
+              lifecycleState: "pending_merge",
               prNumber: ctx.prUrl !== undefined
                 ? present(Number(prNumberFromUrl(ctx.prUrl) ?? 0))
                 : absent("no_publish_attempted"),

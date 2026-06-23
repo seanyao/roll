@@ -61,6 +61,7 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 | `roll init` | 在当前项目落地 Roll(历史代码走 agent 接入) |
 | `roll offboard` | 从项目移除 Roll |
 | `roll test [--where] [--reset]` | 运行测试套件(通过隔离适配器分发;未知类型显式报错) |
+| `roll daemon <start\|stop\|status>` | 管理只读可观测驻守服务(可选加入,从不自动启动) |
 | `roll ci [--wait]` | 查看 / 等待当前 commit 的 CI 状态 |
 | `roll release [--dry-run]` | 唯一发版流:版本号→折叠changelog→包闸→提交推送→一致性闸→PR→自动合并→推tag(闸在合并前跑;用 GitHub auto-merge 自驱合并) |
 | `roll showcase [--card <ID>]` | 黄金路径标准 E2E(隔离沙箱):重置卡片→异构选角真模型三角(kimi/claude/pi)→走 loop 交付→采集 CLI+web 截屏→装配证据链→给出通过/失败判定 |

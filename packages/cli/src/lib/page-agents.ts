@@ -51,7 +51,7 @@ export interface AgentsPageInput {
    * output behind the Loop tab → one source of truth.
    */
   agents: AgentPanelRow[];
-  /** Machine-level external capture/auth dependencies used by evidence flows. */
+  /** Machine-level external capture/auth requirements used by evidence flows. */
   externalTools?: ExternalToolState[];
   /** Cross-project switcher rows (read-only, US-DOSSIER-027). */
   projects?: ProjectRegistryEntry[];
@@ -151,8 +151,8 @@ export function renderAgentsMachinePage(input: AgentsPageInput): string {
   const toolHeader =
     `<div style="display:flex;align-items:baseline;gap:12px;margin:26px 0 12px;flex-wrap:wrap;">` +
     `<span style="${MONO}font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${C.sub};font-weight:600;white-space:nowrap;">${bi(
-      "External tools",
-      "外部工具",
+      "External requirements",
+      "外部依赖",
     )}</span>` +
     `<span style="${MONO}font-size:11.5px;color:${C.faint};">${bi(
       "machine dependencies for screenshot and web evidence",

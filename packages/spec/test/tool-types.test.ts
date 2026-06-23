@@ -20,6 +20,7 @@ import type {
   ToolMeta,
   ToolPolicy,
   ToolRequirement,
+  ToolRequirementResolution,
   ToolResult,
   ToolSandbox,
 } from "../src/index.js";
@@ -48,6 +49,12 @@ describe("US-TOOL-001 tool type contracts", () => {
       maxInvocationsPerCycle: 3,
     };
     const requirement: ToolRequirement = { kind: "executable", name: "bash", optional: false };
+    const requirementResolution: ToolRequirementResolution = {
+      requirement,
+      status: "missing",
+      detail: "bash is not on PATH.",
+      repair: { command: "brew install bash" },
+    };
     const declaration: ToolDeclaration = { id, kind, title: "Bash", description: "Execute argv", defaults, requirements: [requirement] };
     const caller: ToolCaller = { cycleId: "cycle-1", storyId: "US-TOOL-001", agent: "codex" };
     const sandbox: ToolSandbox = { allowedOrigins: ["http://localhost"], headlessOnly: true };
@@ -98,6 +105,7 @@ describe("US-TOOL-001 tool type contracts", () => {
       declaration,
       failed,
       invokeEvent,
+      requirementResolution,
       resultEvent,
       cycleCost,
       deps,

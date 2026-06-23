@@ -97,13 +97,21 @@ describe("collectToolPanel", () => {
   it("maps requirements to labels, and [] when a declaration has none", () => {
     const rows = collectToolPanel();
     expect(row(rows, "bash").requirements).toEqual(["system-shell"]);
-    expect(row(rows, "browser.screenshot").requirements).toEqual(["playwright-or-chrome (optional)"]);
+    expect(row(rows, "browser.screenshot").requirements).toEqual(["playwright-chromium (optional)"]);
     expect(row(rows, "git.commit").requirements).toEqual(["git"]);
     expect(row(rows, "github.pr").requirements).toEqual(["gh"]);
     // network / filesystem / mcp declare no requirements → [].
     expect(row(rows, "network.fetch").requirements).toEqual([]);
     expect(row(rows, "filesystem.stat").requirements).toEqual([]);
     expect(row(rows, "mcp.call").requirements).toEqual([]);
+  });
+
+  it("keeps requirements as host resources and never models tool-to-tool dependencies", () => {
+    for (const declaration of builtinToolDeclarations()) {
+      for (const requirement of declaration.requirements ?? []) {
+        expect(requirement.kind).not.toBe("tool");
+      }
+    }
   });
 
   it("is deterministic: byte-stable across runs and sorted by (kind, id)", () => {

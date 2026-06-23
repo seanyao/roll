@@ -30,7 +30,7 @@ const FIXTURE: ToolPanelRow[] = [
     description: "Screenshot a rendered page.",
     emitsEvents: true,
     guardrails: { timeoutMs: 30000, sandbox: "headless" },
-    requirements: ["playwright-or-chrome (optional)"],
+    requirements: ["playwright-chromium (optional)"],
     available: true,
     unavailableReason: "",
   },
@@ -41,7 +41,7 @@ const FIXTURE: ToolPanelRow[] = [
     description: "Read page console output.",
     emitsEvents: true,
     guardrails: { timeoutMs: 30000, sandbox: "headless" },
-    requirements: ["playwright-or-chrome (optional)"],
+    requirements: ["playwright-chromium (optional)"],
     available: true,
     unavailableReason: "",
   },
@@ -158,7 +158,7 @@ describe("Tools machine page — acceptance criteria (US-TOOL-017)", () => {
     expect(html).toContain("workspace-write");
     expect(html).toMatch(/retry<\/span><span class="lang-zh">重试<\/span> ×1/);
     // requirements chip + the "none" friendly state
-    expect(html).toContain("playwright-or-chrome (optional)");
+    expect(html).toContain("playwright-chromium (optional)");
     expect(html).toContain("none — works out of the box");
     expect(html).toContain("无 — 开箱即用");
   });

@@ -6,12 +6,12 @@
  * page reads `collectAgentPanel`: the catalog can never disagree with the
  * actually-registered adapters because it maps over `builtinToolDeclarations()`.
  *
- * Machine-global → takes no project argument; the built-in catalog is identical
- * on every machine. Pure + deterministic (no clock, no RNG, no network): the
- * same machine always renders byte-identical rows.
+ * Machine-global → takes no project argument. The built-in catalog is stable,
+ * while requirement readiness reflects this host's dependency state.
  */
-import { builtinToolDeclarations, chromiumInstalled } from "@roll/infra";
+import { builtinToolDeclarations } from "@roll/infra";
 import type { ToolDeclaration, ToolDefaults, ToolKind, ToolRequirement, ToolSandbox } from "@roll/spec";
+import { resolveRequirement } from "./external-tools.js";
 
 export interface ToolPanelGuardrails {
   timeoutMs?: number;
@@ -45,8 +45,8 @@ export interface ToolPanelRow {
 }
 
 /**
- * Map every built-in tool declaration → a panel row. Pure over
- * `builtinToolDeclarations()`, so order is the same deterministic `(kind, id)`.
+ * Map every built-in tool declaration → a panel row. Order is deterministic
+ * `(kind, id)`; availability comes from the requirement resolver.
  */
 export function collectToolPanel(): ToolPanelRow[] {
   return builtinToolDeclarations().map(toRow);
@@ -69,13 +69,18 @@ function toRow(declaration: ToolDeclaration): ToolPanelRow {
 
 /** FIX-394 AC6 — check whether the host dependency for a built-in tool is present. */
 function toolAvailability(declaration: ToolDeclaration): { ok: boolean; reason: string } {
-  // Browser tools (browser.screenshot / .console / .dom-query) depend on
-  // headless Chromium being installed. When chromium is absent, mark the
-  // tools as unavailable so the user sees WHY web evidence was skipped.
-  if (declaration.kind === "browser") {
-    return chromiumInstalled()
-      ? { ok: true, reason: "" }
-      : { ok: false, reason: "headless Chromium not installed — run `npx playwright install chromium` or `roll init` to pre-install" };
+  const required = (declaration.requirements ?? []).filter((requirement) => requirement.optional !== true);
+  const requiredFailure = required.map((requirement) => resolveRequirement(requirement)).find((resolution) => resolution.status !== "ok");
+  if (requiredFailure !== undefined) return { ok: false, reason: requiredFailure.detail };
+
+  const optionalFailure = (declaration.requirements ?? [])
+    .filter((requirement) => requirement.optional === true)
+    .map((requirement) => resolveRequirement(requirement))
+    .find((resolution) => resolution.status !== "ok");
+  if (optionalFailure !== undefined && declaration.kind === "browser") {
+    const repair = optionalFailure.repair?.command;
+    const suffix = repair === undefined ? "" : ` — run \`${repair}\``;
+    return { ok: false, reason: `${optionalFailure.detail}${suffix}` };
   }
   return { ok: true, reason: "" };
 }
@@ -106,7 +111,7 @@ function sandboxLabel(sandbox: ToolSandbox | undefined): string | undefined {
   return "workspace";
 }
 
-/** "git", "playwright-or-chrome (optional)", "OPENAI_API_KEY (env)", … */
+/** "git", "playwright-chromium (optional)", "OPENAI_API_KEY (env)", … */
 function requirementLabel(requirement: ToolRequirement): string {
   const suffix = requirement.optional === true ? " (optional)" : "";
   if (requirement.kind === "executable") return `${requirement.name}${suffix}`;

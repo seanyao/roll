@@ -3,8 +3,11 @@ import {
   EXTERNAL_TOOL_DECLARATIONS,
   browserToolAvailable,
   collectExternalTools,
+  collectExternalRequirements,
   guideExternalToolSetup,
+  renderExternalRequirementDoctorSection,
   renderExternalToolDoctorSection,
+  resolveRequirement,
   silentPreinstallChromium,
   type ExternalToolDeps,
   type ExternalToolRequestDeps,
@@ -49,6 +52,39 @@ function requestDeps(overrides: Partial<ExternalToolRequestDeps>): ExternalToolR
 }
 
 describe("external tool detection", () => {
+  it("resolves a declared requirement through the single dependency detector", () => {
+    const ok = resolveRequirement({ kind: "executable", name: "playwright-chromium", optional: true }, deps());
+    expect(ok.status).toBe("ok");
+    expect(ok.detail).toContain("Chromium browser files found");
+
+    const missing = resolveRequirement(
+      { kind: "executable", name: "playwright-chromium", optional: true },
+      deps({ readDir: () => [], exists: () => false }),
+    );
+    expect(missing.status).toBe("missing");
+    expect(missing.repair?.command).toContain("playwright@");
+    expect(missing.repair?.command).toContain("install chromium");
+  });
+
+  it("resolves macOS screen-recording authorization as a requirement state", () => {
+    const permission = resolveRequirement(
+      { kind: "executable", name: "screencapture", optional: true },
+      deps({ execFile: () => ({ code: 1, stdout: "", stderr: "permission denied" }) }),
+    );
+
+    expect(permission.status).toBe("permission-missing");
+    expect(permission.authorize?.command).toContain("Privacy_ScreenCapture");
+    expect(permission.repair?.command).toBe(permission.authorize?.command);
+  });
+
+  it("keeps external-tool compatibility while exposing external requirements as the primary API", () => {
+    const requirements = collectExternalRequirements(deps());
+    const tools = collectExternalTools(deps());
+
+    expect(requirements.map((requirement) => requirement.id)).toEqual(["screencapture", "playwright-chromium"]);
+    expect(tools).toEqual(requirements);
+  });
+
   it("detects screencapture permission separately from installation", () => {
     expect(collectExternalTools(deps()).find((tool) => tool.id === "screencapture")?.status).toBe("ok");
 
@@ -99,15 +135,16 @@ describe("external tool detection", () => {
   });
 
   it("renders doctor output with impact and repair instructions", () => {
-    const lines = renderExternalToolDoctorSection([
+    const lines = renderExternalRequirementDoctorSection([
       state("screencapture", "permission-missing", "open x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"),
     ]);
 
-    expect(lines.join("\n")).toContain("External tools");
-    expect(lines.join("\n")).toContain("外部工具");
+    expect(lines.join("\n")).toContain("External requirements");
+    expect(lines.join("\n")).toContain("外部依赖");
     expect(lines.join("\n")).toContain("permission-missing");
     expect(lines.join("\n")).toContain("fix: open x-apple.systempreferences");
     expect(lines.join("\n")).toContain("impact:");
+    expect(renderExternalToolDoctorSection([state("screencapture", "ok")]).join("\n")).toContain("External requirements");
   });
 });
 
@@ -143,7 +180,7 @@ describe("external tool guided setup", () => {
       }),
     );
 
-    expect(err.join("\n")).toContain("External tool setup (go)");
+    expect(err.join("\n")).toContain("External requirement setup (go)");
     expect(err.join("\n")).toContain("declined");
     expect(err.join("\n")).toContain("impact:");
     expect(execs).toEqual([]);

@@ -224,8 +224,8 @@ describe("Agents machine page — acceptance criteria (US-DOSSIER-031)", () => {
       currentSlug: "roll",
     });
 
-    expect(withTools).toContain("External tools");
-    expect(withTools).toContain("外部工具");
+    expect(withTools).toContain("External requirements");
+    expect(withTools).toContain("外部依赖");
     expect(withTools).toContain("machine dependencies for screenshot and web evidence");
     expect(withTools).toContain("截图与网页证据的机器依赖");
     expect(withTools).toContain("macOS screencapture");

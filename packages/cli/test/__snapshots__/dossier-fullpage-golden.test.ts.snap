@@ -484,6 +484,17 @@ a{color:#2d54e8;}
       }
     ]
   },
+  "onDeck": {
+    "count": 1,
+    "rows": [
+      {
+        "id": "US-A-2",
+        "epic": "delivery-dossier",
+        "title": "Alpha — second story (todo)",
+        "href": "delivery-dossier/US-A-2/index.html"
+      }
+    ]
+  },
   "stories": [
     {
       "id": "US-A-1",

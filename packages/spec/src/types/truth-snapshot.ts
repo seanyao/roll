@@ -100,6 +100,18 @@ export interface TruthSnapshotLoop {
   collectedAt?: string;
 }
 
+export interface TruthSnapshotOnDeckRow {
+  id: string;
+  epic: string;
+  title: string;
+  href: string;
+}
+
+export interface TruthSnapshotOnDeck {
+  count: number;
+  rows: TruthSnapshotOnDeckRow[];
+}
+
 /**
  * US-DOSSIER-021 — one per-story registry row carried by the ONE snapshot.
  *
@@ -137,6 +149,9 @@ export interface TruthSnapshot {
   cycle?: TruthSnapshotCycle;
   release?: TruthSnapshotRelease;
   loop?: TruthSnapshotLoop;
+  /** US-OBS-018 — queued picks computed from backlog Todo rows as primary truth,
+   *  with story folders used only to provide card deep-links. */
+  onDeck?: TruthSnapshotOnDeck;
   /** US-DOSSIER-021 — the per-story delivery-ladder + evidence registry. Optional
    *  and additive: older consumers and snapshots minted before this story stay
    *  valid (a snapshot without it serializes byte-identically to before). */

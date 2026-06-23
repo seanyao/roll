@@ -459,18 +459,26 @@ function nowOpsPanel(input: TruthConsoleInput): string {
 
   const stories = flattenStories(input.backlog);
 
-  // FIX-373: On-Deck — deep-link each pick to its own card page.
-  const onDeckAll = stories.filter((s) => s.state === "todo");
+  // US-OBS-018: On-Deck is backlog-primary in the shared snapshot. Older
+  // snapshots fall back to the pre-existing backlog VM so historical fixtures
+  // remain renderable.
+  const onDeckAll = input.snapshot.onDeck?.rows ?? stories.filter((s) => s.state === "todo").map((story) => ({
+    id: story.id,
+    epic: story.epic,
+    title: story.title,
+    href: storyCardHref(story),
+  }));
+  const onDeckCount = input.snapshot.onDeck?.count ?? onDeckAll.length;
   const onDeckRows = onDeckAll.slice(0, 6);
   const onDeck =
     `<section data-now-section="on-deck" style="border:1px solid ${C.line};border-radius:12px;background:${C.card};padding:14px 18px 0;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
     `<div style="display:flex;align-items:center;gap:10px;">${sectionLabel(bi("On deck", "下一步要做"))}` +
-    `<span style="${MONO}font-size:10px;padding:2px 9px;border-radius:999px;color:${onDeckAll.length > 0 ? C.green : C.slate};background:${onDeckAll.length > 0 ? "#e6f6ef" : "#eef1f7"};font-weight:600;">${onDeckAll.length}</span></div>` +
+    `<span style="${MONO}font-size:10px;padding:2px 9px;border-radius:999px;color:${onDeckCount > 0 ? C.green : C.slate};background:${onDeckCount > 0 ? "#e6f6ef" : "#eef1f7"};font-weight:600;">${onDeckCount}</span></div>` +
     (onDeckRows.length > 0
       ? `<div style="display:grid;gap:4px;margin-top:11px;">${onDeckRows
           .map(
             (story) =>
-              `<a href="${storyCardHref(story)}" style="display:block;text-decoration:none;padding:9px 0;border-top:1px solid ${C.hair};">` +
+              `<a href="${esc(story.href)}" style="display:block;text-decoration:none;padding:9px 0;border-top:1px solid ${C.hair};">` +
               `<span style="${MONO}font-size:12px;color:${C.blue};font-weight:600;">${esc(story.id)}</span>` +
               `<span style="display:block;color:${C.sub};font-size:12.5px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(story.title)}</span></a>`,
           )

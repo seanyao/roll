@@ -268,6 +268,7 @@ import {
   type TruthSnapshotAudit,
   type TruthSnapshotCycle,
   type TruthSnapshotLoop,
+  type TruthSnapshotOnDeck,
   type TruthSnapshotRelease,
   type TruthSnapshotStoryEntry,
   type TruthSpectrumState,
@@ -284,6 +285,7 @@ export interface TruthSnapshotInput {
   cycle?: TruthSnapshotCycle;
   release?: TruthSnapshotRelease;
   loop?: TruthSnapshotLoop;
+  onDeck?: TruthSnapshotOnDeck;
   /** US-DOSSIER-021 — the per-story delivery-ladder + evidence registry, built
    *  at the collection edge (index-gen) and carried verbatim onto the snapshot.
    *  Optional/additive: omitting it keeps the snapshot byte-identical to before. */
@@ -306,6 +308,7 @@ export function buildTruthSnapshot(input: TruthSnapshotInput): TruthSnapshot {
     ...(input.cycle !== undefined ? { cycle: input.cycle } : {}),
     ...(input.release !== undefined ? { release: input.release } : {}),
     ...(input.loop !== undefined ? { loop: input.loop } : {}),
+    ...(input.onDeck !== undefined ? { onDeck: input.onDeck } : {}),
     ...(input.stories !== undefined ? { stories: [...input.stories] } : {}),
   };
 }

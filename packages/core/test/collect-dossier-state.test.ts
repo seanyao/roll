@@ -177,4 +177,36 @@ describe("collectDossierState — US-OBS-016 view-model selector", () => {
     expect(evidenceFlagsCalled).toBe(true);
     expect(s.generatedAt).toBe("2026-01-01T00:00:00Z");
   });
+
+  it("US-OBS-018: On Deck is backed by backlog Todo rows, excludes folder-orphans and Cut rows", () => {
+    const cwd = realpathSync(mkdtempSync(join(tmpdir(), "roll-cds-ondeck-")));
+    dirs.push(cwd);
+    const features = join(cwd, ".roll", "features", "loop-observability");
+    for (const id of ["US-OBS-1", "US-OBS-2", "US-OBS-3", "US-OBS-4"]) {
+      mkdirSync(join(features, id), { recursive: true });
+      writeFileSync(join(features, id, "spec.md"), `---\nid: ${id}\ntitle: ${id} title\n---\n\n# ${id} — ${id} title\n`);
+    }
+    writeFileSync(
+      join(cwd, ".roll", "backlog.md"),
+      [
+        "| [US-OBS-1](.roll/features/loop-observability/US-OBS-1/spec.md) | real todo with folder | 📋 Todo |",
+        "| [US-OBS-2](.roll/features/loop-observability/US-OBS-2/spec.md) | cut card | 🗑️ Cut (superseded) |",
+        "| [US-OBS-5](.roll/features/loop-observability/US-OBS-5/spec.md) | folderless todo | 📋 Todo |",
+        "| [US-OBS-6](.roll/features/loop-observability/US-OBS-6/spec.md) | done row | ✅ Done |",
+      ].join("\n"),
+    );
+
+    const snapshot = collectDossierState(cwd);
+    expect(snapshot.onDeck?.count).toBe(2);
+    expect(snapshot.onDeck?.rows.map((row) => row.id)).toEqual(["US-OBS-1", "US-OBS-5"]);
+    expect(snapshot.onDeck?.rows[0]).toMatchObject({
+      id: "US-OBS-1",
+      epic: "loop-observability",
+      href: "loop-observability/US-OBS-1/index.html",
+    });
+    expect(snapshot.onDeck?.rows[1]).toMatchObject({
+      id: "US-OBS-5",
+      href: "#backlog/todo",
+    });
+  });
 });

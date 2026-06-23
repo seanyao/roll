@@ -247,8 +247,9 @@ export function registerAll(): void {
   // `refresh` uses the native vendor registry/parser/snapshot writer; no bash
   // fallback remains (US-PORT-017). REFACTOR-051 owner review kept this as the
   // human-operated cost-accounting source.
-  registerPorted("pulse", pulseCommand);
   registerPorted("prices", pricesCommand);
+  // `pulse`: today's delivery pulse — CLI (US-DEMO-001). v3-native; reads truth.json.
+  registerPorted("pulse", pulseCommand, { help: "Usage: roll pulse [--json]\n  Today's delivery pulse from truth.json.\n今日交付脉搏。" });
   // `config`: FULLY TS now (US-PORT-006 — 整个 config 命令收口). Read surface
   // (help/--list/key read) + write surface + the three compact facades
   // (loop-window/loop-schedule/dream-time) all run native; no bash fallback.

@@ -160,6 +160,24 @@ describe("checkTruthLive — structured delivery truth release gate (FIX-391)", 
     });
     expect(checkTruthLive(dir).status).toBe("pass");
   });
+
+  it("ignores incidental story ids in later commit-body detail lines", () => {
+    const dir = makeProject({
+      deltaSubjects: [
+        [
+          "tcr: FIX-911 — pool-level escalation (#921)",
+          "",
+          "- After hetero and same-vendor scoring rounds both exhaust, escalate again.",
+          "- Regression shape mentions FIX-397 but does not deliver it in this PR.",
+        ].join("\n"),
+      ],
+      backlog: [
+        "| [FIX-911](x) | thing | ✅ Done · [PR#921](https://github.com/o/r/pull/921) |",
+        "| [FIX-397](x) | prior thing | ✅ Done · [PR#905](https://github.com/o/r/pull/905) |",
+      ].join("\n"),
+    });
+    expect(checkTruthLive(dir).status).toBe("pass");
+  });
 });
 
 describe("checkDocs — changelog coverage of the release delta (FIX-375)", () => {
@@ -193,6 +211,24 @@ describe("checkDocs — changelog coverage of the release delta (FIX-375)", () =
       deltaSubjects: ["Fix: FIX-356c (#1)"],
       backlog: "| [FIX-356c](x) | a | ✅ Done (#1) |\n",
       changelog: "# Changelog\n\n## Unreleased\n\n- retire (FIX-356 / 356a-d) `[x]`\n",
+    });
+    expect(checkDocs(dir).status).toBe("pass");
+  });
+
+  it("does not require changelog coverage for incidental ids in commit-body details", () => {
+    const dir = makeProject({
+      deltaSubjects: [
+        [
+          "tcr: FIX-911 — pool-level escalation (#921)",
+          "",
+          "- Regression shape mentions FIX-397 but does not deliver it in this PR.",
+        ].join("\n"),
+      ],
+      backlog: [
+        "| [FIX-911](x) | thing | ✅ Done (#921) |",
+        "| [FIX-397](x) | prior thing | ✅ Done (#905) |",
+      ].join("\n"),
+      changelog: "# Changelog\n\n## Unreleased\n\n- scoring pool fix (FIX-911) `[loop]`\n",
     });
     expect(checkDocs(dir).status).toBe("pass");
   });

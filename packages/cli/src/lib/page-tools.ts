@@ -60,7 +60,9 @@ a{color:${C.blue};}
 .ag-row[open] .bl-caret{transform:rotate(90deg);}
 .ag-row summary:hover{background:#fbfcfe;}
 .tl-chip{${MONO}font-size:10.5px;color:${C.sub};border:1px solid ${C.line};border-radius:999px;padding:2px 9px;white-space:nowrap;}
-@media (max-width:760px){.tl-sum{grid-template-columns:1fr !important;gap:6px !important;}}
+.tl-req{border:1px solid ${C.line};border-radius:8px;background:#fff;padding:10px 11px;}
+.tl-req + .tl-req{margin-top:8px;}
+@media (max-width:760px){.tl-sum{grid-template-columns:1fr !important;gap:6px !important;}.tl-status-strip{justify-content:flex-start !important;}}
 `;
 
 /** Human-readable bilingual label per kind heading. Unknown kinds fall back to
@@ -96,6 +98,46 @@ function guardrailLine(row: ToolPanelRow): string {
   return parts.length === 0 ? bi("default policy", "默认策略") : parts.join(` <span style="color:${C.faint};">·</span> `);
 }
 
+function readinessChip(status: string): string {
+  const color = status === "available" ? C.green : status === "degraded" ? C.amber : C.red;
+  return `<span class="tl-chip" style="border-color:${color};color:${color};font-weight:600;">${esc(status)}</span>`;
+}
+
+function requirementStatusChip(status: string): string {
+  const color = status === "ok" ? C.green : status === "permission-missing" ? C.amber : status === "missing" ? C.red : C.sub;
+  return `<span class="tl-chip" style="border-color:${color};color:${color};font-weight:600;">${esc(status)}</span>`;
+}
+
+function requirementChain(row: ToolPanelRow): string {
+  if (row.requirementDetails.length === 0) {
+    return `<div style="font-size:12.5px;color:${C.faint};font-style:italic;">${bi("none — works out of the box", "无 — 开箱即用")}</div>`;
+  }
+  return row.requirementDetails
+    .map((requirement) => {
+      const fix =
+        requirement.repairCommand === undefined
+          ? ""
+          : `<div style="${MONO}font-size:11.5px;color:${C.blue};margin-top:6px;">fix: ${esc(requirement.repairCommand)}</div>`;
+      const authorize =
+        requirement.authorizeCommand === undefined
+          ? ""
+          : `<div style="${MONO}font-size:11.5px;color:${C.amber};margin-top:6px;">authorize: ${esc(requirement.authorizeCommand)}</div>`;
+      return (
+        `<div class="tl-req" data-requirement="${esc(requirement.name)}">` +
+        `<div style="display:flex;align-items:center;gap:8px;justify-content:space-between;min-width:0;flex-wrap:wrap;">` +
+        `<div style="min-width:0;"><span style="${MONO}font-size:12.5px;font-weight:650;color:${C.ink};">${esc(requirement.label)}</span>` +
+        `<span style="${MONO}font-size:10.5px;color:${C.faint};margin-left:8px;">${esc(requirement.kind)}${requirement.optional ? ` · ${bi("optional", "可选")}` : ""}</span></div>` +
+        requirementStatusChip(requirement.status) +
+        `</div>` +
+        `<div style="font-size:12.5px;line-height:1.5;color:${C.body};margin-top:7px;">${esc(requirement.detail)}</div>` +
+        fix +
+        authorize +
+        `</div>`
+      );
+    })
+    .join("");
+}
+
 /** One tool row: a collapsed grid summary (caret · id · kind · title · events)
  *  + an expanded body with the full description, the exact default policy, and
  *  the external requirements. Same `<details class="ag-row">` accordion idiom as
@@ -110,11 +152,12 @@ function toolRow(row: ToolPanelRow): string {
       : `<span style="${MONO}font-size:11px;color:${C.sub};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${bi("requires", "依赖")} ${esc(row.requirements.join(", "))}</span>`;
   return (
     `<details class="ag-row" data-tool="${esc(row.id)}" data-open-key="tl:${esc(row.id)}" style="border-top:1px solid ${C.hair};">` +
-    `<summary class="tl-sum" style="display:grid;grid-template-columns:220px 110px 1fr auto auto;align-items:center;gap:14px;padding:11px 18px;cursor:pointer;list-style:none;">` +
+    `<summary class="tl-sum" style="display:grid;grid-template-columns:220px 110px 1fr auto auto auto;align-items:center;gap:14px;padding:11px 18px;cursor:pointer;list-style:none;">` +
     `<span style="display:flex;align-items:center;gap:10px;min-width:0;"><span class="bl-caret" style="${MONO}font-size:9px;color:${C.faint};transition:transform .18s;flex:none;">▶</span>` +
     `<span style="${MONO}font-size:13px;font-weight:600;color:${C.ink};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(row.id)}</span></span>` +
     `<span style="${MONO}font-size:11.5px;color:${C.sub};white-space:nowrap;">${esc(row.kind)}</span>` +
     `<span style="font-size:12.5px;color:${C.sub};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(row.title)}</span>` +
+    readinessChip(row.readiness) +
     events +
     reqInline +
     `</summary>` +
@@ -127,12 +170,11 @@ function toolRow(row: ToolPanelRow): string {
     `<div style="${MONO}font-size:12px;color:${C.body};margin-top:3px;">${guardrailLine(row)}</div></div>` +
     `</div>` +
     `<div style="margin-top:13px;">` +
-    `<div style="${MONO}font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:${C.faint};margin-bottom:6px;">${bi("requirements", "外部依赖")}</div>` +
-    (row.requirements.length === 0
-      ? `<div style="font-size:12.5px;color:${C.faint};font-style:italic;">${bi("none — works out of the box", "无 — 开箱即用")}</div>`
-      : `<div style="display:flex;flex-wrap:wrap;gap:8px;">${row.requirements
-          .map((r) => `<span class="tl-chip">${esc(r)}</span>`)
-          .join("")}</div>`) +
+    `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px;">` +
+    `<div style="${MONO}font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:${C.faint};">${bi("requirement chain", "依赖链")}</div>` +
+    `<div class="tl-status-strip" style="display:flex;align-items:center;gap:8px;justify-content:flex-end;">${readinessChip(row.readiness)}</div>` +
+    `</div>` +
+    requirementChain(row) +
     `</div>` +
     `</div></details>`
   );
@@ -228,7 +270,7 @@ export function renderToolsPage(input: ToolsPageInput): string {
     }) +
     body +
     `<footer style="margin-top:42px;padding-top:18px;border-top:1px solid #dfe4ec;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;${MONO}font-size:11.5px;color:${C.faint};">` +
-    `<span>${bi("machine-global · same on every box", "机器级 · 每台机器一致")}</span>` +
+    `<span>${bi("machine-global · live requirements vary by host", "机器级 · live 依赖随宿主变化")}</span>` +
     `<span>${bi("one source of truth: builtinToolDeclarations()", "单一真相来源:builtinToolDeclarations()")}</span></footer>` +
     `</main>\n</body>\n</html>\n`
   );

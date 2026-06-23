@@ -106,6 +106,20 @@ describe("collectToolPanel", () => {
     expect(row(rows, "mcp.call").requirements).toEqual([]);
   });
 
+  it("US-TOOL-021: carries live requirement details under each tool row", () => {
+    const rows = collectToolPanel();
+    expect(row(rows, "bash").requirementDetails).toEqual([
+      expect.objectContaining({ name: "system-shell", label: "system-shell", status: "ok", optional: false }),
+    ]);
+    expect(row(rows, "browser.screenshot").requirementDetails).toEqual([
+      expect.objectContaining({ name: "playwright-chromium", label: "playwright-chromium (optional)", optional: true }),
+    ]);
+    expect(row(rows, "github.pr").requirementDetails).toEqual([
+      expect.objectContaining({ name: "gh", label: "gh", optional: false }),
+    ]);
+    expect(row(rows, "network.fetch").requirementDetails).toEqual([]);
+  });
+
   it("derives tool readiness from resolved requirements", () => {
     const rows = collectToolPanel();
     expect(row(rows, "bash").readiness).toBe("available");

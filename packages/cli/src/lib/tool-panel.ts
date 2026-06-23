@@ -11,7 +11,7 @@
  */
 import { deriveToolReadiness } from "@roll/core";
 import { builtinToolDeclarations } from "@roll/infra";
-import type { ToolDeclaration, ToolDefaults, ToolKind, ToolReadinessStatus, ToolRequirement, ToolSandbox } from "@roll/spec";
+import type { ToolDeclaration, ToolDefaults, ToolKind, ToolReadinessStatus, ToolRequirement, ToolRequirementStatus, ToolSandbox } from "@roll/spec";
 import { resolveRequirement } from "./external-tools.js";
 
 export interface ToolPanelGuardrails {
@@ -21,6 +21,17 @@ export interface ToolPanelGuardrails {
   /** A human label derived from defaults.sandbox — omitted when none. */
   sandbox?: string;
   maxPerCycle?: number;
+}
+
+export interface ToolPanelRequirementRow {
+  name: string;
+  kind: ToolRequirement["kind"];
+  optional: boolean;
+  label: string;
+  status: ToolRequirementStatus;
+  detail: string;
+  repairCommand?: string;
+  authorizeCommand?: string;
 }
 
 export interface ToolPanelRow {
@@ -35,6 +46,8 @@ export interface ToolPanelRow {
   guardrails: ToolPanelGuardrails;
   /** declaration.requirements mapped to human labels; [] when none. */
   requirements: string[];
+  /** Live requirement resolution rows, visually nested under this tool. */
+  requirementDetails: ToolPanelRequirementRow[];
   /** available / degraded / unavailable, derived from requirement resolution. */
   readiness: ToolReadinessStatus;
   /**
@@ -57,6 +70,16 @@ export function collectToolPanel(): ToolPanelRow[] {
 
 function toRow(declaration: ToolDeclaration): ToolPanelRow {
   const readiness = deriveToolReadiness(declaration, resolveRequirement);
+  const requirementDetails = readiness.requirements.map((resolution) => ({
+    name: resolution.requirement.name,
+    kind: resolution.requirement.kind,
+    optional: resolution.requirement.optional === true,
+    label: requirementLabel(resolution.requirement),
+    status: resolution.status,
+    detail: resolution.detail,
+    ...(resolution.repair?.command !== undefined ? { repairCommand: resolution.repair.command } : {}),
+    ...(resolution.authorize?.command !== undefined ? { authorizeCommand: resolution.authorize.command } : {}),
+  }));
   return {
     id: String(declaration.id),
     kind: declaration.kind,
@@ -64,7 +87,8 @@ function toRow(declaration: ToolDeclaration): ToolPanelRow {
     description: declaration.description ?? "",
     emitsEvents: declaration.emitsEvents ?? false,
     guardrails: guardrailsOf(declaration.defaults),
-    requirements: (declaration.requirements ?? []).map(requirementLabel),
+    requirements: requirementDetails.map((requirement) => requirement.label),
+    requirementDetails,
     readiness: readiness.status,
     available: readiness.status !== "unavailable",
     unavailableReason: readiness.status === "available" ? "" : (readiness.detail ?? ""),

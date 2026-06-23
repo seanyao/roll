@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { CycleCommand, CycleContext, RollEvent, WarmSessionEntry } from "@roll/core";
+import { AGENTS } from "../../core/src/agent/specs.js";
 import { AWAITING_REVIEW_STATUS_MARKER } from "@roll/spec";
 import { agentWritableRoots } from "../src/runner/executor.js";
 import { evaluateReviewScoreGate, readLatestStoryPeerScore } from "../src/lib/review-score.js";
@@ -259,6 +260,10 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
 });
 
 describe("US-AGENT-001 AgentProfile factory", () => {
+  it("US-AGENT-044: every core AGENTS identity has a spawn profile", () => {
+    expect(AGENTS.map((spec) => agentProfile(spec.name).name)).toEqual(AGENTS.map((spec) => spec.name));
+  });
+
   it("returns one profile surface for spawn, sandbox, acceptance, and env", () => {
     const claude = agentProfile("claude");
     expect(claude.buildSpawnCommand({ cwd: "/wt", skillBody: "DO WORK" }).args).toContain("--add-dir");

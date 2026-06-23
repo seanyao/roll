@@ -6,6 +6,8 @@
 
 - **agent 名册收敛到 6 个一等成员**：`claude`、`kimi`、`codex`、`pi`、`antigravity (agy)`、`reasonix` 成为唯一可列出/探测/派发的 agent roster；`openai`、`deepseek` 继续作为 provider/model alias 保留，不再作为独立 agent 冒出。(US-AGENT-043) `[agents]`
 
+- **agent 名册改为单一真相源派生**：`AGENTS` 现在承载一等 agent 身份、显示名、PATH 探测 bin、默认模型和能力标记；registry、`roll agent list`、doctor/setup 探测和 spawn profile 覆盖都从同一组 6 个身份派生，减少后续名册漂移。(US-AGENT-044) `[agents]`
+
 - **loop 已合并卡不再回流**：合进 main 的卡会被稳定识别为已交付，不再反复被选回待办。(FIX-399 / FIX-923) `[feedback-truth-alignment]`
 
 - **评审评分池不再太早放弃**：异构 reviewer 都不可用时，会继续尝试同厂可用候选，减少无谓失败。(FIX-911) `[loop-engine]`

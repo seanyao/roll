@@ -52,6 +52,7 @@ describe("AgentSpec registry — FIX-313", () => {
       name: "reasonix",
       displayName: "reasonix",
       defaultModel: "deepseek-flash",
+      cliBin: ["reasonix"],
       canReviewHeadless: true,
       normalizer: "generic",
       usage: { stdoutExtractor: "generic" },
@@ -64,8 +65,10 @@ describe("AgentSpec registry — FIX-313", () => {
     const specs = withAgentSpecs([
       {
         name: "fixture-agent",
+        providerAliases: ["fixture-provider"],
         displayName: "Fixture Agent",
         defaultModel: "fixture-model-1",
+        cliBin: ["fixture-agent"],
         normalizer: "generic",
         canReviewHeadless: true,
         usage: { stdoutExtractor: "generic" },
@@ -74,6 +77,7 @@ describe("AgentSpec registry — FIX-313", () => {
     ]);
 
     expect(getAgentSpec("fixture-agent", specs)?.defaultModel).toBe("fixture-model-1");
+    expect(getAgentSpec("fixture-provider", specs)?.name).toBe("fixture-agent");
     expect(agentDefaultModel("fixture-agent", specs)).toBe("fixture-model-1");
     expect(agentNormalizerKind("fixture-agent", specs)).toBe("generic");
     expect(agentSmokeCommand("fixture-agent", specs)).toBe("fixture-agent --smoke");

@@ -32,6 +32,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { AGENT_REGISTRY_NAMES, agentInstalledByName as coreAgentInstalledByName, type AgentEnv } from "@roll/core";
 import { repoRoot } from "../bridge.js";
 
 // ─── env (bin/roll:7-24) ──────────────────────────────────────────────────────
@@ -86,28 +87,6 @@ export function canonicalDir(path: string): string | null {
   }
 }
 
-// ─── _agent_bin_names (98) ────────────────────────────────────────────────────
-function agentBinNames(agent: string): string[] | null {
-  switch (agent) {
-    case "claude":
-      return ["claude"];
-    case "kimi":
-      return ["kimi-code", "kimi-cli", "kimi"];
-    case "codex":
-      return ["codex"];
-    case "pi":
-      return ["pi"];
-    case "agy":
-    case "antigravity":
-    case "gemini":
-      return ["agy", "gemini"];
-    case "reasonix":
-      return ["reasonix"];
-    default:
-      return null;
-  }
-}
-
 /** `command -v <bin>` equivalent: is an executable named bin on PATH? */
 export function onPath(bin: string): boolean {
   const path = process.env["PATH"] ?? "";
@@ -126,11 +105,20 @@ export function onPath(bin: string): boolean {
 
 // ─── _agent_installed_by_name (137) ───────────────────────────────────────────
 function agentInstalledByName(agent: string, dir = ""): boolean {
-  const bins = agentBinNames(agent);
-  if (bins !== null) {
-    return bins.some((b) => onPath(b));
-  }
-  return dir !== "" && existsSync(dir);
+  const env: AgentEnv = {
+    home: homedir(),
+    commandOnPath: onPath,
+    dirExists: existsSync,
+    fileExecutable: (p) => {
+      try {
+        const st = statSync(p);
+        return st.isFile() && (st.mode & 0o111) !== 0;
+      } catch {
+        return false;
+      }
+    },
+  };
+  return coreAgentInstalledByName(env, agent, dir);
 }
 
 /** _is_ai_installed (639): map a config dir → canonical agent, then probe. */
@@ -367,7 +355,7 @@ primary_agent: claude
 `;
 
 function firstInstalledAgent(): string | null {
-  for (const agent of ["claude", "kimi", "codex", "pi", "agy", "reasonix"]) {
+  for (const agent of AGENT_REGISTRY_NAMES) {
     if (agentInstalledByName(agent)) return agent;
   }
   return null;

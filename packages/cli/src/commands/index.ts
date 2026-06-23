@@ -27,6 +27,7 @@ import {
 // US-DOSSIER-037: `roll cast` (routing view) + `roll doc --lang` (Charter/guide viewer).
 import { CAST_USAGE, castCommand } from "./cast.js";
 import { DOC_USAGE, docCommand } from "./doc.js";
+import { daemonCommand, daemonHelp } from "./daemon.js";
 import { ciCommand, ciWaitCommand } from "./ci.js";
 import { configCommand } from "./config.js";
 import { CYCLE_USAGE, cycleCommand } from "./cycle.js";
@@ -304,6 +305,7 @@ export function registerAll(): void {
   // (incl. a stale `tart` — lane removed by REFACTOR-046) errors non-zero WITHOUT a
   // silent host fallback (US-ISO-003). No sub-paths on bash.
   registerPorted("test", testCommand);
+  registerPorted("daemon", daemonCommand, { help: () => daemonHelp(resolveLang({ rollLang: process.env["ROLL_LANG"], lcAll: process.env["LC_ALL"], lang: process.env["LANG"] })) });
   registerPorted("tool", toolCommand, { help: TOOL_USAGE });
   // `truth`: deterministic delivery-truth query (US-TRUTH-016). Pure read-only
   // — reads deliveries.jsonl, runs queryStoryDelivery, prints the verdict.

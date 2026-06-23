@@ -136,18 +136,87 @@ web          控制台（React，WebSocket 订阅 daemon）
 
 不可变事件流是唯一的真相源。所有状态都从事件重建，无独立缓存。
 
-**三类持久化文件**：
+#### 三流权威边界（Keystone 契约）
+
+实时可观测收死在三条流的明确边界上——不新建第四条流：
+
+| 流 | 权威级别 | 语义 |
+|---|---------|------|
+| `events.ndjson` | **唯一持久真相** | 全量结构化 `RollEvent`（原子追加）；所有状态从这里重建。runner 写的事实（`cycle:phase/first_edit/tcr/stdout/end`、`pr:*`、`gate`、`attest`）跨 agent 通用、不可变。 |
+| `ActivitySignal` | **投影模型** | 从 `RollEvent` 流派生（`cycleActivitySignalsFromEvents`），是按 tier/seg/summary 归一化的 UI 模型。所有下游渲染（watch 窗口、web 控制台、cycle ledger）**只消费 `ActivitySignal`**——不做 per-agent 解析。`cycle-<id>.signals.jsonl` 持久化全量信号。 |
+| `live.log` | **debug 附件** | Agent stdout 直通记录——不参与判定、不打分、不作为证据。可被截断、可缺失。仅供调试。 |
+
+**单读选择器不变量**：`collectDossierState(cwd) → TruthSnapshot` 是读侧唯一数据归口。页面的 ~18 个面板（agent、On Deck、projects、casting、charter、skills 等）全部走这个快照——页面渲染路径不得绕过它直读文件或单独 collect。来自 US-OBS-016（读侧收口）和 FIX-376/377（幽灵项目/On Deck 计数）的教训：只要存在"第二条读取路径"，漂移就是时间问题。`truth-adapter.ts`（在 `@roll/core`）是选择器的唯一入口。
+
+**持久化文件**：
 | 文件 | 内容 |
 |------|------|
 | `events.ndjson` | 全量事件（每行一个 JSON，原子追加） |
 | `runs.jsonl` | 运行摘要（按 story+cycle_id 去重） |
 | `heartbeat` | 活性心跳（idle 也写） |
+| `cycle-<id>.signals.jsonl` | 每个 cycle 的标准 ActivitySignal 全量持久化 |
 
-**事件类型**：`cycle:start/phase/tcr/end`、`warm-session:capture/resume-selected/resume-skipped`、`pr:open/merge`、`route:resolve`、`loop:heartbeat/fire/paused`、`policy:safety_pause`、`alert`。
+**事件类型**：`cycle:start/phase/tcr/end/terminal`、`warm-session:capture/resume-selected/resume-skipped`、`pr:open/merge`、`route:resolve`、`loop:heartbeat/fire/paused`、`policy:safety_pause`、`alert`、`peer:gate`、`attest:gate`、`ci:*`。
 
-**daemon**：独立进程，fs.watch 监控事件文件，通过 WebSocket 广播。它是只读观察者——挂了不影响任何 loop。loop 只写文件，不依赖 daemon。
+#### CLI-first 实时控制台（`roll cycle watch`）
 
-**Delivery Dossier**：页面是 `TruthSnapshot` 的纯投影；页面渲染路径不得绕过 snapshot 直接调用面板 collector 或直读文件，新增数据面必须先进入 `collectDossierState`。
+主线是 CLI：`roll cycle watch [<id>] [--once] [--since <lines>] [--json]` 提供一个进行中 cycle 的**标准 ActivitySignal 流**。不传 id 时自动跟随当前 running cycle。
+
+窗口显示：
+- **顶部概要**：cycle id、story id、agent、outcome
+- **信号行**（`●` 彩色圆点 + tier/seg/summary）：lifecycle（开始/结束/超时回收）、TCR（每次 test/commit/revert）、gate（peer/attest 闸通过/失败）、stdout（agent 输出摘要）、工具调用（tool_use → tool_result）
+- **证据指针**：cycle 结束或 `--once` 时输出 PR/diff/story 链接
+
+信号来自 `events.ndjson` → `cycleActivitySignalsFromEvents()` 或已持久化的 `signals.jsonl`；消费 `tail -F` 跟随，不依赖 daemon。
+
+对非当前 running cycle，`--once` 回放一帧后退出；`--json` 输出机器可读视图。
+
+详见 [实时控制台指南](live-console.md)。
+
+#### 静态导出 vs 实时服务
+
+- **静态导出**（`roll index`）：`collectDossierState` → `truth.json` + `index.html`，以 `file://` 打开。是一次性快照，不自动更新——适合快速查阅、归档、CI artifact。
+- **实时服务**（daemon + web）：`packages/daemon` 通过 fs.watch + `collectDossierState` 生成 `DossierFrame`（snapshot 快照帧 + heartbeat 心跳帧），经 WebSocket 推送到 `packages/web` 的 `ConsoleApp`。页面订阅帧流、实时重渲染。daemon 挂了 web 自动降级到上次 baked snapshot。
+- **实时 CLI**（`roll cycle watch`）：直接跟随 `events.ndjson` 或 `signals.jsonl`，不经过 daemon——CLI 窗口在任何时候都是可用的一线视图。
+
+三者共享同一个选择器（`collectDossierState` / `cycleActivitySignalsFromEvents`），是同一条标准流的不同发射器。
+
+#### Web / Daemon 第二发射器
+
+`packages/daemon` 和 `packages/web` 是**同一标准流的第二发射器**（相对 CLI-first 实时窗口）。它们的架构尊重以下原则：
+
+- **依赖方向**：daemon 只依赖 `spec`（事件 schema + `DossierFrame`）+ `core` 读侧选择器；web 只依赖 daemon WebSocket 帧 + 静态 snapshot 降级。没有反向依赖——loop 不 import daemon。
+- **只读隔离**：daemon 是纯只读观察者（fs.watch 文件、WebSocket 广播）——没有写路径，挂了不影响任何 loop。loop 只写文件，不依赖 daemon。
+- **第二发射器 = 后续阶段**：CLI `roll cycle watch` 是独立可用的一线视图；web live 控制台是同一帧流在浏览器里的呈现。web/daemon 的覆盖在 US-OBS-021..024 中完成，CLI watch 窗口更早落地（US-OBS-026）。
+- **`DossierFrame`**（`@roll/spec`）：包含两种帧——`DossierSnapshotFrame`（完整 `TruthSnapshot`，debounced ~30s）和 `DossierHeartbeatFrame`（liveness 信号 + 近期 `RollEvent` 尾，定时 ~45s）。这是同一 `collectDossierState` 快照的 WebSocket 序列化。
+- **daemon CLI**：`roll daemon start|stop|status` 管理 daemon 进程生命周期。默认 `localhost:7077`，无认证。
+
+#### 远程就绪缝（design-constraint-only，未建）
+
+以下为**设计约束**，写入架构是为了防止未来的"先建后设计"——当前**一条代码都没写**：
+
+- **传输**：默认 `localhost-bind + no-auth` → 未来可切 `network-bind + bearer-token + relay`
+- **通道分离**：READ 可观测通道 ⟂ 未来 WRITE/控制通道（独立端口 + 认证，不同安全域）
+- **relay 未解**：异步路径借 GitHub 交会点绕过了 NAT（roll-meta repo 作异步 rendezvous）；实时路径没有等价物——"bind 0.0.0.0 + token"只是暴露端口，不解决可达性。relay 是未来真问题，不是这个 sprint 的。
+- **不杜撰 API**：未写服务发现、健康检查、连接恢复、reconnect backoff 等协议——留到真实建立时。
+
+#### 异步远程（现有，互补）
+
+实时控制台（CLI watch / web live）和 git-snapshot 异步远程（roll-meta + GitHub 作交会点）是**同一选择器、不同发射器**的关系：
+
+- **异步路径**：`roll-meta` 私有 git 仓通过 `commitRollMetadataRepo` 提交 `.roll` 状态快照。远端 agent 读取 roll-meta + GitHub API 感知项目状态——不依赖实时连接。
+- **实时路径**：`roll cycle watch` / daemon WebSocket 在本地网络内提供亚秒级更新。
+- **共存**：二者彼此独立、并行不悖。实时路径不做异步远程做的事（跨 NAT 状态同步）；异步路径不做实时路径的事（秒级活信号）。详见 `.roll/features/loop-observability/live-console-design.md` §2.3。
+
+#### 证据按构造（US-OBS-031）
+
+证据从 activity 流 + diff **自动起草**，不再是 builder 手动步骤：
+
+- ac-map（AC→证据映射）从 cycle 活动流（改了哪些文件、跑了哪些命令、通过了哪些闸）和 git diff 自动生成骨架
+- 报告（attest report）由 `roll attest` 从 ac-map + 截图 + 测试输出自动渲染
+- 截图由 loop runner 的 headless Playwright 自动捕获（声明了 `deliverable_url` 的卡）
+
+这是一个方向声明——US-OBS-031 的实际落地范围以它自己的 spec 为准。架构锚点是：**证据的素材源（activity stream + diff）已经在 BC7 中提供；证据生成路径不从外部另起。**
 
 ### BC8 · 成本
 

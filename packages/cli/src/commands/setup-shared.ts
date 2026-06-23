@@ -91,20 +91,14 @@ function agentBinNames(agent: string): string[] | null {
   switch (agent) {
     case "claude":
       return ["claude"];
-    case "codex":
-    case "openai":
-      return ["codex"];
-    case "agy":
-    case "gemini":
-      return ["agy", "gemini"];
     case "kimi":
       return ["kimi-code", "kimi-cli", "kimi"];
     case "deepseek":
       return ["deepseek"];
-    case "qwen":
-      return ["qwen"];
     case "pi":
       return ["pi"];
+    case "reasonix":
+      return ["reasonix"];
     default:
       return null;
   }
@@ -163,7 +157,6 @@ export function isAiInstalled(aiDir: string): boolean {
   if (bn === "agent" || bn === "workspace") {
     bn = basename(dirname(aiDir)).replace(/^\./, "");
   }
-  if (bn === "gemini") bn = "agy";
   if (bn === "kimi-code") bn = "kimi";
   return agentInstalledByName(bn, aiDir);
 }
@@ -327,17 +320,15 @@ function pullSkills(): void {
 // ─── _ensure_config_entries (843) ─────────────────────────────────────────────
 const DEFAULT_AI_KEYS: Array<[string, string]> = [
   ["ai_claude", "~/.claude|CLAUDE.md|CLAUDE.md"],
-  ["ai_agy", "~/.gemini|GEMINI.md|GEMINI.md"],
   ["ai_kimi", "~/.kimi|AGENTS.md|AGENTS.md"],
   ["ai_kimi_code", "~/.kimi-code|AGENTS.md|AGENTS.md"],
-  ["ai_codex", "~/.codex|AGENTS.md|AGENTS.md"],
   ["ai_cursor", "~/.cursor|.cursor-rules|.cursor-rules"],
   ["ai_trae", "~/.trae|user_rules.md|project_rules.md"],
   ["ai_opencode", "~/.config/opencode|AGENTS.md|AGENTS.md"],
   ["ai_openclaw", "~/.openclaw/workspace|AGENTS.md|AGENTS.md"],
   ["ai_pi", "~/.pi/agent|AGENTS.md|AGENTS.md"],
   ["ai_deepseek", "~/.deepseek|AGENTS.md|AGENTS.md"],
-  ["ai_qwen", "~/.qwen|AGENTS.md|AGENTS.md"],
+  ["ai_reasonix", "~/.reasonix|AGENTS.md|AGENTS.md"],
 ];
 
 function ensureConfigEntries(): void {
@@ -374,16 +365,15 @@ const DEFAULT_CONFIG = `# Roll Configuration
 # AI tools — each entry controls both convention sync and skill linking
 # Format: <name>: <dir>|<config_file>|<convention_src>
 ai_claude: ~/.claude|CLAUDE.md|CLAUDE.md
-ai_agy: ~/.gemini|GEMINI.md|GEMINI.md
 ai_kimi: ~/.kimi|AGENTS.md|AGENTS.md
 ai_kimi_code: ~/.kimi-code|AGENTS.md|AGENTS.md
-ai_codex: ~/.codex|AGENTS.md|AGENTS.md
 ai_cursor: ~/.cursor|.cursor-rules|.cursor-rules
 ai_trae: ~/.trae|user_rules.md|project_rules.md
 ai_opencode: ~/.config/opencode|AGENTS.md|AGENTS.md
 ai_openclaw: ~/.openclaw/workspace|AGENTS.md|AGENTS.md
 ai_pi: ~/.pi/agent|AGENTS.md|AGENTS.md
 ai_deepseek: ~/.deepseek|AGENTS.md|AGENTS.md
+ai_reasonix: ~/.reasonix|AGENTS.md|AGENTS.md
 
 # User preferences
 default_language: zh
@@ -401,7 +391,7 @@ primary_agent: claude
 
 function firstInstalledAgent(): string | null {
   for (const agent of [
-    "claude", "codex", "kimi", "deepseek", "qwen", "agy", "pi", "cursor", "opencode", "trae", "openclaw",
+    "claude", "kimi", "deepseek", "pi", "reasonix", "cursor", "opencode", "trae", "openclaw",
   ]) {
     if (agentInstalledByName(agent)) return agent;
   }

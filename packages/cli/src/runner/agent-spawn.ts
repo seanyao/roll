@@ -27,9 +27,11 @@
  *     cost/usage parse (cost/tracker.ts).
  *
  * {@link buildClaudeArgv} reproduces that argv construction for the `claude`
- * agent. Other agents (kimi/pi/codex/gemini/qwen/reasonix/opencode/deepseek) have
- * their own `_agent_argv` shapes (bin/roll:4531-4581) and loop enhancements that DIFFER
- * (only claude gets the stream-json / --add-dir splice); porting each is deferred
+ * agent (harness — roll runs inside Claude Code; claude is not a pool agent but
+ * powers the harness reviewer/cost path). Pool agents (kimi/pi/reasonix, plus
+ * deepseek→pi/opencode) have their own `_agent_argv` shapes and loop enhancements
+ * that DIFFER (only claude gets the stream-json / --add-dir splice); porting each
+ * is deferred
  * — see {@link AGENT_ARGV_TODO}. The integration tests use a SHIM `claude` on
  * PATH (a fake binary that makes a `tcr:` commit in the worktree), so no real
  * agent ever runs in tests.
@@ -95,7 +97,6 @@ export const AUTORUN_DIRECTIVE =
  * (NEVER a silent no-op) so the parallel-verification protocol surfaces the gap.
  */
 export const AGENT_ARGV_TODO: Record<string, string> = {
-  openai: "codex exec <prompt>",
   opencode: "opencode run <prompt>",
 };
 
@@ -126,20 +127,6 @@ export function storyPinDirective(storyId: string): string {
   return (
     `[本周期指定故事] 调度器已锁定 ${storyId} 并在 backlog 标记 🔨 In Progress——` +
     `只执行这一个故事,严禁重新挑选或顺手做别的;若它确实不可执行,写 ALERT 说明原因后干净退出。\n\n`
-  );
-}
-
-/**
- * lever-4 — the warm-context RESET directive. When a codex session is RESUMED on
- * the NEXT card, the model still carries the prior card's context; this bounded
- * preface tells it to drop those specifics and re-orient onto the fresh card +
- * fresh worktree (origin/main) BEFORE any edit. Prepended to the prompt; kept
- * short so it never bloats the already-lean prompt.
- */
-export function resetDirective(storyId: string): string {
-  return (
-    `NEW CARD ${storyId}. Ignore the prior card's specifics/files/branch/decisions; ` +
-    `this is a fresh worktree on origin/main — re-read the backlog + the new card spec before any edit.\n\n`
   );
 }
 
@@ -219,8 +206,6 @@ function agentPrompt(opts: AgentSpawnOptions): string {
 
 function canonicalProfileName(name: string): string {
   const raw = name.trim().toLowerCase();
-  if (raw === "antigravity" || raw === "gemini") return "agy";
-  if (raw === "openai") return "openai";
   if (raw === "deepseek") return "deepseek";
   const spec = getAgentSpec(raw);
   if (spec !== undefined) return spec.name;
@@ -256,39 +241,6 @@ const AGENT_PROFILES: Readonly<Record<string, AgentProfile>> = {
   pi: simplePromptProfile("pi", "pi", (prompt) => ["-p", prompt]),
   kimi: simplePromptProfile("kimi", "kimi", (prompt) => ["-p", prompt]),
   deepseek: simplePromptProfile("deepseek", "deepseek", (prompt) => [prompt]),
-  qwen: simplePromptProfile("qwen", "qwen", (prompt) => [prompt]),
-  agy: simplePromptProfile("agy", "agy", (prompt) => ["--dangerously-skip-permissions", "-p", prompt]),
-  codex: {
-    name: "codex",
-    usesWorkspaceSandbox: true,
-    ptyWhenPiped: true,
-    acceptance: { canReviewHeadless: getAgentSpec("codex")?.canReviewHeadless === true },
-    buildSpawnCommand: (opts) => {
-      const prompt = agentPrompt(opts);
-      const roots = [...new Set(opts.writableRoots ?? [])].filter((p) => p.trim() !== "");
-      const sandboxArgs =
-        roots.length > 0
-          ? ["--cd", opts.cwd, "--sandbox", "workspace-write", ...roots.flatMap((p) => ["--add-dir", p])]
-          : [];
-      if (opts.codexSessionId !== undefined && opts.codexSessionId !== "") {
-        const resumePrompt = `${resetDirective(opts.storyId ?? "")}${prompt}`;
-        const resumeConfigArgs =
-          roots.length > 0
-            ? [
-                "-c",
-                'sandbox_mode="workspace-write"',
-                "-c",
-                `sandbox_workspace_write.writable_roots=${JSON.stringify(roots)}`,
-              ]
-            : [];
-        return {
-          bin: opts.bin ?? "codex",
-          args: ["exec", "resume", "--all", ...resumeConfigArgs, opts.codexSessionId, resumePrompt],
-        };
-      }
-      return { bin: opts.bin ?? "codex", args: ["exec", ...sandboxArgs, prompt] };
-    },
-  },
   reasonix: {
     name: "reasonix",
     usesWorkspaceSandbox: false,
@@ -340,7 +292,8 @@ export interface AgentSpawnOptions {
   env?: NodeJS.ProcessEnv;
   /** US-EVID-001: explicit evidence frame for this child; overrides ambient env. */
   runDir?: string;
-  /** Extra writable roots for agents with an explicit workspace sandbox (codex). */
+  /** Extra writable roots for agents with an explicit workspace sandbox. (No
+   *  current pool agent declares one; retained for a future sandboxed engine.) */
   writableRoots?: string[];
   /** Routed model, consumed by agent profiles whose CLI accepts an explicit model. */
   model?: string;
@@ -352,12 +305,6 @@ export interface AgentSpawnOptions {
   /** FIX-319: bare spawn — send `skillBody` verbatim (no autorun directive / no
    *  story pin). Used for the heterogeneous peer reviewer (review-only framing). */
   bare?: boolean;
-  /** lever-4 (cross-card warm-context): when set, the codex branch RESUMES this
-   *  prior session id (`codex exec resume <id>`) instead of a cold `codex exec`,
-   *  and PREPENDS the RESET_DIRECTIVE so the resumed context re-orients onto the
-   *  new card. Absent (the universal default) ⇒ unchanged cold spawn. Only the
-   *  codex branch reads it — it is isolated there, never a cross-agent branch. */
-  codexSessionId?: string;
 }
 
 /** Result of an agent spawn — the orchestrator feeds `exitCode` back as

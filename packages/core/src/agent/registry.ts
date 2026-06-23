@@ -32,16 +32,16 @@ import { type FileStore, nodeFileStore } from "../backlog/infra-default.js";
 
 // ── Identity / canonicalization (pure) ───────────────────────────────────────
 
-/** `antigravity`/`gemini` collapse to the canonical `agy`; everything else is
- *  returned verbatim. Mirrors bash `_canonical_agent_name`. */
+/** No-op canonicalization: the overseas agents (and their aliases) were removed
+ *  from the pool, so there are no remaining alias collapses here. Returned
+ *  verbatim. (The spec layer still maps `deepseek`→`pi` for usage adapters.) */
 export function canonicalAgentName(name: string): string {
-  return name === "antigravity" || name === "gemini" ? "agy" : name;
+  return name;
 }
 
-/** Human-facing label. `agy` shows the product name + binary in parens; every
- *  other agent shows its bare (canonical) token. Mirrors `_agent_display_name`. */
+/** Human-facing label — the bare (canonical) agent token. */
 export function agentDisplayName(name: string): string {
-  return canonicalAgentName(name) === "agy" ? "antigravity (agy)" : name;
+  return name;
 }
 
 /**
@@ -53,20 +53,10 @@ export function agentDisplayName(name: string): string {
  */
 export function agentBinNames(agent: string): string[] | null {
   switch (agent) {
-    case "claude":
-      return ["claude"];
-    case "codex":
-    case "openai":
-      return ["codex"];
-    case "agy":
-    case "gemini":
-      return ["agy", "gemini"];
     case "kimi":
       return ["kimi-code", "kimi-cli", "kimi"];
     case "deepseek":
       return ["deepseek"];
-    case "qwen":
-      return ["qwen"];
     case "pi":
       return ["pi"];
     case "reasonix":
@@ -156,12 +146,9 @@ export function agentInstalledByName(env: AgentEnv, agent: string, dir?: string)
  * absent (a pi-loaded model, not a routable agent).
  */
 export const AGENT_REGISTRY_NAMES = [
-  "claude",
-  "codex",
   "kimi",
-  "qwen",
-  "agy",
   "pi",
+  "reasonix",
   "cursor",
   "opencode",
   "trae",
@@ -176,19 +163,16 @@ export function agentsInstalled(env: AgentEnv): string[] {
 
 /**
  * First-installed scan order, used as the last-resort routing fallback. This
- * order DIFFERS from {@link AGENT_REGISTRY_NAMES}: bash `_first_installed_agent`
- * scans `claude codex kimi deepseek qwen agy pi cursor opencode trae openclaw`
- * (note `deepseek` IS scanned here, even though it is excluded from
- * `_agents_installed`). Returns `undefined` when none are installed.
+ * order DIFFERS from {@link AGENT_REGISTRY_NAMES} in that `deepseek` IS scanned
+ * here (it resolves to the `pi` engine's binary), even though it is excluded
+ * from `_agents_installed`. Returns `undefined` when none are installed.
+ * (Pool narrowed to 国产/开源 agents — kimi/pi/reasonix; overseas agents removed.)
  */
 const FIRST_INSTALLED_ORDER = [
-  "claude",
-  "codex",
   "kimi",
   "deepseek",
-  "qwen",
-  "agy",
   "pi",
+  "reasonix",
   "cursor",
   "opencode",
   "trae",

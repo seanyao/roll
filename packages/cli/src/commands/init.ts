@@ -350,17 +350,10 @@ function interactiveAgentCommand(agent: string, prompt: string): { bin: string; 
       return { bin: "deepseek", args: [prompt] };
     case "pi":
       return { bin: "pi", args: [prompt] };
-    case "codex":
-    case "openai":
-      return { bin: "codex", args: [prompt] };
+    case "reasonix":
+      return { bin: "reasonix", args: [prompt] };
     case "opencode":
       return { bin: "opencode", args: [prompt] };
-    case "gemini":
-    case "agy":
-    case "antigravity":
-      return { bin: "agy", args: ["-i", prompt] };
-    case "qwen":
-      return { bin: "qwen", args: [prompt] };
     default:
       return null;
   }
@@ -421,7 +414,7 @@ function legacyOnboardGuide(projectDir: string): number {
   for (const name of missing) process.stdout.write(`    ${RED}✗${NC} ${name}   (not found)\n`);
   if (installed.length === 0) {
     process.stdout.write("\n");
-    err("No AI agent detected. Install one (e.g., 'claude', 'codex', 'kimi') and try again.");
+    err("No AI agent detected. Install one (e.g., 'claude', 'kimi', 'pi') and try again.");
     err(m("init.no_ai_agent_detected_install_one"));
     return 1;
   }

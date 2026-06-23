@@ -48,8 +48,8 @@ export interface ConventionsVM {
 const SYNC_KEYS: ReadonlyArray<{ key: string; agent: string }> = [
   { key: "sync_claude", agent: "claude" },
   { key: "sync_kimi", agent: "kimi" },
-  { key: "sync_codex", agent: "codex" },
-  { key: "sync_agy", agent: "agy" },
+  { key: "sync_pi", agent: "pi" },
+  { key: "sync_reasonix", agent: "reasonix" },
 ] as const;
 
 export interface ConventionsDeps {
@@ -111,8 +111,8 @@ function esc(s: string): string {
 const AGENT_LABEL: Record<string, string> = {
   claude: "Claude Code",
   kimi: "Kimi CLI",
-  codex: "Codex CLI",
-  agy: "Antigravity (Gemini)",
+  pi: "pi CLI",
+  reasonix: "reasonix CLI",
 };
 
 export interface RenderConventionsInput {

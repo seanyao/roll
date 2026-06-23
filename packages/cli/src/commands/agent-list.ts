@@ -59,13 +59,16 @@ export function currentLang(): Lang {
   return direct;
 }
 
-// ── Agent registry helpers (mirror bin/roll helpers 1:1) ────────────────────
+// ── Agent registry helpers (mirror @roll/core registry) ─────────────────────
+// Pool narrowed to 国产/开源 agents (kimi/pi/reasonix). claude is kept here for
+// the user-facing `roll agent list` roster (harness/manual agent — roll runs
+// inside Claude Code), not as an orchestrated pool member. The overseas agents
+// (codex/openai, agy/antigravity/gemini, qwen) were removed.
 export function canonicalAgentName(name: string): string {
-  return name === "antigravity" || name === "gemini" ? "agy" : name;
+  return name;
 }
 
 function agentDisplayName(a: string): string {
-  if (canonicalAgentName(a) === "agy") return "antigravity (agy)";
   return a;
 }
 
@@ -73,18 +76,10 @@ function agentBinNames(agent: string): string[] | null {
   switch (agent) {
     case "claude":
       return ["claude"];
-    case "codex":
-    case "openai":
-      return ["codex"];
-    case "agy":
-    case "gemini":
-      return ["agy", "gemini"];
     case "kimi":
       return ["kimi-code", "kimi-cli", "kimi"];
     case "deepseek":
       return ["deepseek"];
-    case "qwen":
-      return ["qwen"];
     case "pi":
       return ["pi"];
     case "reasonix":
@@ -180,7 +175,7 @@ export function projectAgent(): string {
 }
 
 // ── Entry ────────────────────────────────────────────────────────────────────
-const AGENT_ORDER = ["claude", "kimi", "deepseek", "opencode", "codex", "openai", "pi", "qwen", "agy", "reasonix"];
+const AGENT_ORDER = ["claude", "kimi", "deepseek", "opencode", "pi", "reasonix"];
 
 export function agentListCommand(_args: string[]): number {
   const noColor = (process.env["NO_COLOR"] ?? "") !== "";

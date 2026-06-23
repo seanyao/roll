@@ -18,17 +18,10 @@ export function textAgentArgv(agent: string, prompt: string): { bin: string; arg
       return { bin: "deepseek", args: [prompt] };
     case "pi":
       return { bin: "pi", args: ["-p", prompt] };
-    case "codex":
-    case "openai":
-      return { bin: "codex", args: ["exec", prompt] };
+    case "reasonix":
+      return { bin: "reasonix", args: ["run", "--max-steps", "1000", prompt] };
     case "opencode":
       return { bin: "opencode", args: ["run", prompt] };
-    case "qwen":
-      return { bin: "qwen", args: [prompt] };
-    case "gemini":
-    case "agy":
-    case "antigravity":
-      return { bin: "agy", args: ["--dangerously-skip-permissions", "-p", prompt] };
     default:
       return null;
   }

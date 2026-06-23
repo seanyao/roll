@@ -2,11 +2,13 @@
  * lever-4 — cross-card WARM-CONTEXT adapter port (agent-AGNOSTIC).
  *
  * Warm-context (reusing a routed agent's prior session on the NEXT same-agent
- * card) is treated as a STANDARD agent capability, NOT a codex special-case. The
- * cycle path resolves ONE adapter via `sessionReuseFor(agent, spec)` and calls
- * its ports — it never branches per-agent. Only the agent whose spec declares
- * `sessionReuse: 'codex-exec-resume'` (codex) gets the warm adapter; every other
- * engine gets the COLD no-op adapter, the universal default.
+ * card) is treated as a STANDARD agent capability declared by an engine's spec
+ * (`sessionReuse`). The cycle path resolves ONE adapter via
+ * `sessionReuseFor(agent, spec)` and calls its ports — it never branches
+ * per-agent. After the pool was narrowed to 国产/开源 agents (kimi/pi/reasonix),
+ * NO current engine declares a warm-reuse kind, so every engine resolves to the
+ * COLD no-op adapter (the universal default). The port shape is preserved so a
+ * future resumable engine is a registry-only addition.
  *
  * This module is PURE + zero-IO: rollout evidence and the ledger are passed IN
  * (the CLI does the file read/write/consume around it), so capture and matching
@@ -87,7 +89,7 @@ export interface SessionReuseAdapter {
 }
 
 /** The COLD no-op adapter: never resumes, never injects — the universal default
- *  for every engine except codex (and the fail-safe target on any error). */
+ *  for every current pool engine (and the fail-safe target on any error). */
 const COLD_ADAPTER: SessionReuseAdapter = {
   supportsReuse: () => false,
   resolvePriorSessionId: () => null,
@@ -95,37 +97,15 @@ const COLD_ADAPTER: SessionReuseAdapter = {
   coldFallback: (opts) => opts,
 };
 
-/** The codex `exec resume` warm adapter: resolves the prior card's session id
- *  and injects it as `codexSessionId` (the Step-7 argv reads this). */
-const CODEX_RESUME_ADAPTER: SessionReuseAdapter = {
-  supportsReuse: () => true,
-  resolvePriorSessionId: (ledger, priorStoryId) => {
-    if (!priorStoryId) return null;
-    for (let i = ledger.length - 1; i >= 0; i--) {
-      const e = ledger[i];
-      if (isWarmSessionEntry(e) && e.storyId === priorStoryId && e.agent === "codex") {
-        return e.sessionId;
-      }
-    }
-    return null;
-  },
-  injectSessionId: (opts, sessionId) => ({ ...opts, codexSessionId: sessionId }),
-  coldFallback: (opts) => opts,
-};
-
 /**
  * Resolve the warm-context adapter for an agent from its spec capability. Agent
  * name is accepted for symmetry / future engines but the DECISION is the spec's
  * `sessionReuse` kind — so adding a resumable engine is registry-only, no code
- * change here. Absent / 'none' ⇒ the cold no-op adapter.
+ * change here. No current pool engine declares a reuse kind, so this always
+ * resolves to the cold no-op adapter (absent / 'none' ⇒ cold).
  */
-export function sessionReuseFor(_agent: string, spec: AgentUsageSpec | undefined): SessionReuseAdapter {
-  switch (spec?.sessionReuse) {
-    case "codex-exec-resume":
-      return CODEX_RESUME_ADAPTER;
-    default:
-      return COLD_ADAPTER;
-  }
+export function sessionReuseFor(_agent: string, _spec: AgentUsageSpec | undefined): SessionReuseAdapter {
+  return COLD_ADAPTER;
 }
 
 /**
@@ -164,6 +144,14 @@ export function captureWarmSession(input: CaptureWarmSessionInput): WarmSessionE
   };
 }
 
+/**
+ * Decide whether THIS card resumes a prior warm session. After the pool was
+ * narrowed to 国产/开源 agents (kimi/pi/reasonix), NO current engine declares a
+ * warm-reuse capability, so the only non-`off` outcome is `agent_unsupported`:
+ * every cycle runs COLD. The `resumeScope` / ledger inputs are retained for the
+ * caller's signature stability and a future resumable engine; an explicit `off`
+ * scope still reports `policy_off`.
+ */
 export function decideWarmResume(input: {
   agent: string;
   storyId: string;
@@ -172,57 +160,7 @@ export function decideWarmResume(input: {
   nowSec: number;
 }): ResumeDecision {
   if (input.resumeScope === "off") return { mode: "cold", reason: "policy_off" };
-  if (input.agent !== "codex") return { mode: "cold", reason: "agent_unsupported" };
-
-  const newest = newestValidEntry(input.ledger, input.agent);
-  if (newest === null) return { mode: "cold", reason: "no_prior_session" };
-
-  if (input.resumeScope === "same-story") {
-    const sameStory = newestValidEntry(input.ledger.filter((entry) => isWarmSessionEntry(entry) && entry.storyId === input.storyId), input.agent);
-    if (sameStory === null) {
-      return {
-        mode: "cold",
-        reason: "scope_mismatch",
-        sourceCycleId: newest.cycleId,
-        sourceStoryId: newest.storyId,
-      };
-    }
-    return {
-      mode: "resume",
-      reason: "selected",
-      sessionId: sameStory.sessionId,
-      sourceCycleId: sameStory.cycleId,
-      sourceStoryId: sameStory.storyId,
-    };
-  }
-
-  if (input.resumeScope === "cross-card-experimental") {
-    return {
-      mode: "cold",
-      reason: "scope_mismatch",
-      sourceCycleId: newest.cycleId,
-      sourceStoryId: newest.storyId,
-    };
-  }
-
-  return {
-    mode: "resume",
-    reason: "selected",
-    sessionId: newest.sessionId,
-    sourceCycleId: newest.cycleId,
-    sourceStoryId: newest.storyId,
-  };
-}
-
-function newestValidEntry(ledger: readonly WarmSessionEntry[], agent: string): WarmSessionEntry | null {
-  let newest: WarmSessionEntry | null = null;
-  for (const entry of ledger) {
-    if (!isWarmSessionEntry(entry)) continue;
-    if (entry.agent !== agent) continue;
-    if (entry.spawnedWarm) continue;
-    if (newest === null || entry.capturedAtSec >= newest.capturedAtSec) newest = entry;
-  }
-  return newest;
+  return { mode: "cold", reason: "agent_unsupported" };
 }
 
 export function isWarmSessionEntry(value: unknown): value is WarmSessionEntry {

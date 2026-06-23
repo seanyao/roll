@@ -148,7 +148,7 @@ import { classifyBlockSignature, probeAgentReachable, type ReachResult } from ".
 import { readSkipCards } from "./skip-cards.js";
 import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, runPeerGate } from "./peer-gate.js";
 import { declaresAnySurface, deliverableCmdsForStory, readAttestGateMode, rejectedDeliverableCmdsForStory, runAttestGate, screenshotExemption, storyRequiresScreenshot, verificationReportHasContent, verificationReportPath, webCaptureTargetsForStory } from "./attest-gate.js";
-import { recoverCodexSessionCapture, recoverCodexUsage, recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
+import { recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
 import { validateStoryVisualEvidence } from "../lib/design-visual-evidence.js";
 import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, autoAttachScreenshotToAcMap, buildAcMapRemediationPrompt, needsAcMapRemediation } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
@@ -1073,62 +1073,12 @@ export async function executeCommand(
         lowScoreFeedback !== ""
           ? `${lowScoreFeedback}\n\n${skillBodyForSpawn}`
           : skillBodyForSpawn;
-      // lever-4 (default-OFF): when warm-context is enabled AND this agent's spec
-      // supports reuse (only codex) AND a PRIOR session is in the ledger, resume
-      // it on THIS card (codex `exec resume <id>`). NEXT-CARD-ONLY + SINGLE-USE:
-      // resolve the immediately-prior codex entry, inject its id, and CONSUME it
-      // so a session is reused at most once. Any miss / error ⇒ SILENT cold
-      // fallback (the universal default) + an ALERT for observability. The
-      // builderSessionId minting above (FIX-343) is ORTHOGONAL — codex's exec
-      // session is a separate identity; we never reuse the builder id here.
-      let codexResumeId: string | undefined;
-      const resumeScope = readSessionReuseEnabled(ports.repoCwd) ? readResumeScope(ports.repoCwd) : "off";
-      if (resumeScope !== "off") {
-        try {
-          const reuse = sessionReuseFor(cmd.agent, getAgentSpec(cmd.agent)?.usage);
-          const ledger = readWarmSessions(ports.repoCwd);
-          const decision = decideWarmResume({
-            agent: cmd.agent,
-            storyId: ctx.storyId ?? "",
-            resumeScope,
-            ledger,
-            nowSec: ports.clock(),
-          });
-          if (decision.mode === "resume" && decision.sessionId !== undefined && reuse.supportsReuse()) {
-            codexResumeId = decision.sessionId;
-            consumeWarmSession(ports.repoCwd, decision.sourceStoryId ?? ctx.storyId ?? ""); // single-use
-            ports.events.appendEvent(ports.paths.eventsPath, {
-              type: "warm-session:resume-selected",
-              cycleId: ctx.cycleId ?? "",
-              storyId: ctx.storyId ?? "",
-              agent: cmd.agent,
-              sessionId: decision.sessionId,
-              sourceCycleId: decision.sourceCycleId ?? "",
-              sourceStoryId: decision.sourceStoryId ?? "",
-              reason: "selected",
-              ts: eventTs(ports),
-            });
-          } else {
-            ports.events.appendEvent(ports.paths.eventsPath, {
-              type: "warm-session:resume-skipped",
-              cycleId: ctx.cycleId ?? "",
-              storyId: ctx.storyId ?? "",
-              agent: cmd.agent,
-              reason: decision.reason === "selected" ? "agent_unsupported" : decision.reason,
-              ...(decision.sourceCycleId !== undefined ? { sourceCycleId: decision.sourceCycleId } : {}),
-              ...(decision.sourceStoryId !== undefined ? { sourceStoryId: decision.sourceStoryId } : {}),
-              ts: eventTs(ports),
-            });
-          }
-        } catch {
-          // SILENT cold fallback on any resume-resolution error (fail-safe).
-          codexResumeId = undefined;
-          ports.events.appendAlert(
-            ports.paths.alertsPath,
-            `[WARN] lever-4 warm-context: resume resolution failed for ${ctx.storyId ?? "?"} — cold fallback`,
-          );
-        }
-      }
+      // lever-4 (cross-card warm-context): after the pool was narrowed to
+      // 国产/开源 agents (kimi/pi/reasonix), NO current engine declares a
+      // warm-reuse capability — every cycle runs COLD. The resume-resolution +
+      // session-capture wiring (formerly codex `exec resume`) was removed with
+      // codex; the cold spawn below is the only path. A future resumable engine
+      // re-introduces this as registry-driven, agent-agnostic logic.
       let res: Awaited<ReturnType<typeof ports.agentSpawn>>;
       let timeoutFired: "wall" | "no-progress" | null = null;
       try {
@@ -1138,10 +1088,6 @@ export async function executeCommand(
           ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
           writableRoots: agentWritableRoots(ports.repoCwd, ports.paths.alertsPath),
           ...(ctx.model !== undefined && ctx.model !== "" ? { model: ctx.model } : {}),
-          // lever-4: only set when a prior codex session resolved (default-OFF ⇒
-          // always undefined ⇒ unchanged cold spawn). Isolated to the codex argv
-          // branch in agent-spawn.ts.
-          ...(codexResumeId !== undefined ? { codexSessionId: codexResumeId } : {}),
           env: {
             ...process.env,
             ROLL_LOOP_ALERT: ports.paths.alertsPath,
@@ -1201,76 +1147,11 @@ export async function executeCommand(
           ts: eventTs(ports),
         });
       }
-      // lever-4 (default-OFF) — FIX-354: CAPTURE this card's resumable session id
-      // HERE, immediately after the agent exits, NOT at worktree teardown. The
-      // codex rollout exists (the agent just ran) and the worktree still exists on
-      // disk (the cwd-match the recovery needs), so the capture works REGARDLESS of
-      // the later publish/preserve outcome. The old home (`cleanup_worktree`) is
-      // SKIPPED whenever the worktree is preserved (publish-fail / `unpublished`),
-      // so a failed cycle never captured → the ledger stayed empty → the next codex
-      // card ran cold. Post-agent-exit fires unconditionally and fixes that.
-      // Agent-AGNOSTIC: the spec capability decides — only codex's adapter supports
-      // reuse; every other engine is a cold no-op here. Persisted to the PERSISTENT
-      // .roll/loop ledger (repoCwd), so it survives a later teardown + a .roll reset,
-      // like runs.jsonl. Best-effort: a capture miss/slip ALERTs for observability
-      // and leaves the next card cold (fail-safe) — it NEVER topples the cycle.
-      // FIX-355 DEPTH-1 CAP: capture ONLY when THIS cycle spawned COLD. A set
-      // `codexResumeId` means this cycle itself RESUMED a prior session; re-seeding
-      // from it would chain warm context unboundedly (A→B→C…) so every later card
-      // inherits an ever-growing, anchoring context → systemic degradation. Cold-
-      // origin-only capture bounds each chain to a single hop (cold→warm→cold→warm).
-      const spawnedWarm = codexResumeId !== undefined;
-      if (resumeScope !== "off") {
-        try {
-          const agentName = ctx.agent ?? cmd.agent;
-          const reuse = sessionReuseFor(agentName, getAgentSpec(agentName)?.usage);
-          const storyId = ctx.storyId ?? "";
-          if (reuse.supportsReuse() && storyId !== "") {
-            const rootOverride = (process.env["ROLL_CODEX_SESSIONS_DIR"] ?? "").trim();
-            const recovered = recoverCodexSessionCapture(
-              ports.paths.worktreePath,
-              ctx.startSec,
-              ...(rootOverride !== "" ? [rootOverride] : []),
-            );
-            const entry =
-              recovered === null
-                ? null
-                : captureWarmSession({
-                    storyId,
-                    cycleId: ctx.cycleId ?? "",
-                    agent: agentName,
-                    sessionId: recovered.sessionId,
-                    worktreePath: ports.paths.worktreePath,
-                    rolloutPath: recovered.rolloutPath,
-                    rolloutMtimeSec: recovered.rolloutMtimeSec,
-                    cycleStartSec: ctx.startSec ?? ports.clock(),
-                    capturedAtSec: ports.clock(),
-                    spawnedWarm,
-                  });
-            if (entry !== null) {
-              appendWarmSession(ports.repoCwd, entry);
-              ports.events.appendEvent(ports.paths.eventsPath, {
-                type: "warm-session:capture",
-                cycleId: entry.cycleId,
-                storyId: entry.storyId,
-                agent: entry.agent,
-                sessionId: entry.sessionId,
-                ...(entry.rolloutPath !== undefined ? { rolloutPath: entry.rolloutPath } : {}),
-                spawnedWarm: entry.spawnedWarm,
-                ts: eventTs(ports),
-              });
-            } else {
-              ports.events.appendAlert(
-                ports.paths.alertsPath,
-                `[WARN] lever-4 warm-context: no codex session id captured for ${storyId} ` +
-                  `(cwd ${ports.paths.worktreePath}) — next codex card stays cold`,
-              );
-            }
-          }
-        } catch {
-          /* warm-context capture is strictly best-effort: never topple the cycle */
-        }
-      }
+      // lever-4 (cross-card warm-context) capture: removed with codex from the
+      // pool. No current engine (kimi/pi/reasonix) declares a warm-reuse
+      // capability, so there is no resumable session id to capture here — every
+      // cycle is cold-origin. A future resumable engine re-introduces capture as
+      // registry-driven, agent-agnostic logic.
       // F4 lesson (信号成对/可观测不归零): persist the agent's full output as a
       // per-cycle log next to events/runs — v2 keeps cycle logs; without this
       // an agent that "ran but delivered nothing" is undiagnosable.
@@ -1291,15 +1172,14 @@ export async function executeCommand(
       // cost via a per-agent normalization layer onto ONE 4-component model
       // (input/output/cache-read/cache-write — the roll thesis). Lanes:
       //   1. claude stream-json (per-turn usage + final total_cost_usd);
-      //   2. AUTHORITATIVE session-store recovery for the agents whose `-p`/
-      //      `exec` stdout carries no parseable usage — each writes real per-turn
+      //   2. AUTHORITATIVE session-store recovery for the agents whose `-p`
+      //      stdout carries no parseable usage — each writes real per-turn
       //      usage to its own store, scoped here to this cycle's worktree + start:
       //        pi    → ~/.pi/agent/sessions/<encoded-cwd>/*.jsonl
       //        kimi  → ~/.kimi-code/sessions/wd_<wt>_*/.../wire.jsonl
-      //        codex → ~/.codex/sessions/<date>/rollout-*.jsonl
-      //   3. generic stdout-scrape footer agents (openai/gemini/kimi/qwen
-      //      REGISTRY) — the lossy 2-component legacy fallback, tried LAST so a
-      //      session recovery's full 4-component split always wins when present.
+      //   3. generic stdout-scrape footer agents (kimi REGISTRY) — the lossy
+      //      2-component legacy fallback, tried LAST so a session recovery's full
+      //      4-component split always wins when present.
       // Best-effort: a miss on every lane leaves cost absent (n/a, never a fake
       // zero) — usage accounting must never fail the cycle.
       let costPatch: CycleCost | undefined;
@@ -1319,14 +1199,6 @@ export async function executeCommand(
         if (usage === null && usageSpec?.sessionRecovery === "kimi") {
           const rootOverride = (process.env["ROLL_KIMI_SESSIONS_DIR"] ?? "").trim();
           usage = recoverKimiUsage(
-            ports.paths.worktreePath,
-            ctx.startSec,
-            ...(rootOverride !== "" ? [rootOverride] : []),
-          );
-        }
-        if (usage === null && usageSpec?.sessionRecovery === "codex") {
-          const rootOverride = (process.env["ROLL_CODEX_SESSIONS_DIR"] ?? "").trim();
-          usage = recoverCodexUsage(
             ports.paths.worktreePath,
             ctx.startSec,
             ...(rootOverride !== "" ? [rootOverride] : []),

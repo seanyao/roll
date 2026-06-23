@@ -29,18 +29,15 @@ function isStage(s: string): s is PairingStage {
 
 /**
  * Vendor key for heterogeneity: two agents are heterogeneous iff their vendors
- * differ. Aliases that wrap the same backend collapse to one vendor (codex and
- * openai → "openai"), so they are NOT a valid heterogeneous pair. Unknown
- * agents default to their own canonical name (treated as distinct vendors).
+ * differ. Unknown agents default to their own canonical name (treated as distinct
+ * vendors). The pool was narrowed to 国产/开源 agents (kimi/pi/reasonix); the
+ * overseas vendors (openai/codex, google/agy/gemini, alibaba/qwen) were removed.
+ * `claude` is kept as a harness vendor entry (roll runs inside Claude Code) even
+ * though claude is not a routable pool agent.
  */
 const AGENT_VENDOR: Readonly<Record<string, string>> = {
   claude: "anthropic",
-  codex: "openai",
-  openai: "openai",
-  agy: "google",
-  gemini: "google",
   kimi: "moonshot",
-  qwen: "alibaba",
   deepseek: "deepseek",
   reasonix: "reasonix",
   pi: "pi",
@@ -137,8 +134,8 @@ function parseStageList(raw: string, ctx: string): PairingStage[] {
  *   enabled: true
  *   stages: [code]
  *   capability:
- *     codex: [code, test]
- *     claude: [code, design, cycle]
+ *     kimi: [code, test]
+ *     pi: [code, score]
  */
 export function parsePairingConfig(yaml: string): PairingConfig {
   const cfg: PairingConfig = { enabled: false, stages: [], capability: {} };
@@ -275,11 +272,10 @@ export function renderPairingConfig(cfg: PairingConfig): string {
 /**
  * Turn a peer agent's raw stdout into a REAL list cost (USD) for the
  * pair:verdict `cost` field — never the 0 placeholder again (owner's top
- * priority: "至少知道花了多少钱"). claude runs with `--output-format stream-json`
- * so its usage is summed via {@link sumClaudeStream}; the four stdout-scrape
- * agents (openai/codex, gemini, kimi, qwen) go through {@link extractUsage};
- * pi/text-mode and unknown agents have no parseable usage and record 0. The peer
- * is canonicalised first (codex → openai) so the alias hits the right extractor.
+ * priority: "至少知道花了多少钱"). claude (harness) runs with `--output-format
+ * stream-json` so its usage is summed via {@link sumClaudeStream}; the kimi
+ * stdout-scrape agent goes through {@link extractUsage}; pi/text-mode and unknown
+ * agents have no parseable usage and record 0.
  *
  * Best-effort by contract: a parse miss or any throw yields 0, NEVER an
  * exception — pairing must stay non-blocking, and cost accounting must not fail
@@ -306,7 +302,7 @@ export function peerReviewCost(peer: string, stdout: string): number {
 export interface PairingCostSummary {
   /** pair:verdict events seen (a completed pairing). */
   pairings: number;
-  /** count of pairings per peer agent (canonical), e.g. { codex: 2, kimi: 1 }. */
+  /** count of pairings per peer agent (canonical), e.g. { pi: 2, kimi: 1 }. */
   byPeer: Record<string, number>;
   /** sum of pair:verdict `cost` across all pairings (USD list cost). */
   totalCost: number;
@@ -321,7 +317,7 @@ export interface PairingCostSummary {
 
 /**
  * Fold the pair:* events into an activity/spend summary for `roll pair status`
- * and the dashboard: "pairings to date: N, by peer (codex×K, kimi×J…), total
+ * and the dashboard: "pairings to date: N, by peer (pi×K, kimi×J…), total
  * cost $X, M findings". Pure (events → summary) so the CLI is a thin renderer
  * and this is unit-testable. Non-pair events are ignored.
  *

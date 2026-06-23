@@ -66,20 +66,14 @@ function agentBinNames(agent: string): string[] | null {
   switch (agent) {
     case "claude":
       return ["claude"];
-    case "codex":
-    case "openai":
-      return ["codex"];
-    case "agy":
-    case "gemini":
-      return ["agy", "gemini"];
     case "kimi":
       return ["kimi-code", "kimi-cli", "kimi"];
     case "deepseek":
       return ["deepseek"];
-    case "qwen":
-      return ["qwen"];
     case "pi":
       return ["pi"];
+    case "reasonix":
+      return ["reasonix"];
     default:
       return null;
   }

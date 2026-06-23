@@ -5,11 +5,11 @@ import { agentNormalizerKind } from "../agent/specs.js";
  * + a per-agent normalization layer.
  *
  * roll's core thesis: find the commonality, normalize away agent differences via
- * a STANDARD layer. The loop runs many agents (claude / codex / kimi / pi / …);
- * each emits a different raw stream — claude speaks `--output-format stream-json`,
- * codex emits plain text / jsonl, others emit free text. The watch window used to
- * only understand claude's stream-json, so a NON-claude cycle looked frozen even
- * while the agent worked.
+ * a STANDARD layer. The loop runs many agents (kimi / pi / reasonix / …) plus the
+ * claude harness; each emits a different raw stream — claude speaks
+ * `--output-format stream-json`, the others emit free text. The watch window used
+ * to only understand claude's stream-json, so a NON-claude cycle looked frozen
+ * even while the agent worked.
  *
  * The fix: EVERY agent's raw stream maps into one standard {@link ActivitySignal}.
  * Downstream code (renderers, the future web window, ledgers) consumes ONLY
@@ -535,121 +535,6 @@ export const claudeNormalizer: AgentActivityNormalizer = {
 };
 
 // ════════════════════════════════════════════════════════════════════════════
-// codexNormalizer — codex emits plain text / jsonl (NOT stream-json). Parse the
-// turning points out of human-readable output so a codex cycle isn't blank.
-// ════════════════════════════════════════════════════════════════════════════
-
-/** A vitest/test FAIL summary line, e.g. `Tests  2 failed | 5 passed`. */
-const VITEST_FAIL_RE = /(\d+)\s+failed|FAIL\b|✗|✘|✖|tests?\s+failed|failed\s+\(\d+\)/i;
-/** A vitest/test PASS summary, e.g. `Test Files  3 passed (3)` / `5 passed`. */
-const VITEST_PASS_RE = /\b(\d+)\s+passed\b|✓\s+\d+|all tests pass|tests?\s+passed/i;
-/** A `path/to/x.test.ts:NN` reference (test file location). */
-const TEST_FILE_RE = /([\w./-]+\.(?:test|spec)\.[jt]sx?)(?::(\d+))?/;
-/** A diff/edit marker: codex prints `✎ file`, or unified-diff `+++ b/file` / `--- a/file`. */
-const DIFF_FILE_RE = /(?:^|\s)(?:✎|✏|edit(?:ing)?|writing|modified|patch(?:ing)?)\s+([\w./-]+)/i;
-const UNIFIED_DIFF_RE = /^\s*(?:\+\+\+|---)\s+[ab]\/([\w./-]+)/;
-/** A command / tool invocation line codex prints, e.g. `$ pnpm test` or `Running: git commit`. */
-const CMD_RE = /^\s*(?:\$|>|Running:|Exec:|Command:|\+\s)\s*(.+)$/;
-
-function codexJsonl(line: string): { kind?: string; text?: string } | null {
-  if (!/^\s*\{/.test(line)) return null;
-  try {
-    const o = JSON.parse(line) as Record<string, unknown>;
-    const text =
-      (typeof o["text"] === "string" && o["text"]) ||
-      (typeof o["message"] === "string" && o["message"]) ||
-      (typeof o["content"] === "string" && o["content"]) ||
-      (typeof o["delta"] === "string" && o["delta"]) ||
-      "";
-    const kind = typeof o["type"] === "string" ? (o["type"] as string) : typeof o["role"] === "string" ? (o["role"] as string) : undefined;
-    const r: { kind?: string; text?: string } = {};
-    if (kind !== undefined) r.kind = kind;
-    if (typeof text === "string" && text !== "") r.text = text;
-    return r;
-  } catch {
-    return null;
-  }
-}
-
-export const codexNormalizer: AgentActivityNormalizer = {
-  agent: "codex",
-  reset: resetState,
-  normalize(raw: string, st: NormalizerState, nowMs: number): ActivitySignal[] {
-    const line = raw.replace(/\s+$/, "");
-    if (line.trim() === "") return [];
-
-    const banner = matchBanner(line);
-    if (banner) {
-      resetState(st);
-      st.cycleId = banner.cycleId;
-      return [emit(st, nowMs, { seg: "cycle", kind: "lifecycle", summary: banner.label })];
-    }
-
-    // jsonl: unwrap to its text payload, then run the same text heuristics.
-    let text = line;
-    const j = codexJsonl(line);
-    if (j !== null) {
-      if (j.text === undefined) return []; // structural-only frame
-      text = j.text;
-    }
-    const t = text.trim();
-    if (t === "") return [];
-
-    // 1) test verdicts (fail wins over pass when both regexes hit the same line)
-    const fileM = TEST_FILE_RE.exec(t);
-    if (VITEST_FAIL_RE.test(t)) {
-      st.seg = "ci";
-      st.editStreakFile = null;
-      const ref = fileM ? fileM[1]! + (fileM[2] ? `:${fileM[2]}` : "") : "";
-      return [emit(st, nowMs, { seg: "ci", kind: "test", summary: clip(t, 60), result: "fail", ref, marker: "ci:fail" })];
-    }
-    if (VITEST_PASS_RE.test(t)) {
-      st.seg = "ci";
-      st.editStreakFile = null;
-      const ref = fileM ? fileM[1]! + (fileM[2] ? `:${fileM[2]}` : "") : "";
-      return [emit(st, nowMs, { seg: "ci", kind: "test", summary: clip(t, 60), result: "pass", ref, marker: "ci:pass" })];
-    }
-
-    // 2) tcr / pr / commit lines in plain output
-    const tcrM = /\[[\w/-]+\s+([0-9a-f]{7,})\]\s*tcr:\s*(.+)/.exec(t);
-    if (tcrM) {
-      st.tcrCount += 1;
-      st.editStreakFile = null;
-      return [emit(st, nowMs, { kind: "tcr", summary: tcrM[1]!.slice(0, 7), detail: clip(tcrM[2]!.trim(), 60), ref: tcrM[1]!.slice(0, 7), result: "pass", marker: "tcr" })];
-    }
-    const prM = /(?:Merged|merge[ds]?)\b[^#]*#(\d+)/.exec(t);
-    if (prM) {
-      st.seg = "pr";
-      st.editStreakFile = null;
-      return [emit(st, nowMs, { seg: "pr", kind: "pr", summary: `#${prM[1]}`, ref: `#${prM[1]}`, detail: "merged", result: "pass", marker: "pr:merge" })];
-    }
-
-    // 3) edit / diff blocks → edit (collapse consecutive same-file)
-    const diffM = DIFF_FILE_RE.exec(t) ?? UNIFIED_DIFF_RE.exec(t);
-    if (diffM) {
-      const path = diffM[1]!;
-      if (path === st.editStreakFile) return [];
-      st.editStreakFile = path;
-      st.seg = "build";
-      return [emit(st, nowMs, { seg: "build", kind: "edit", summary: basename(path), ref: path })];
-    }
-
-    // 4) command / tool lines → tool
-    const cmdM = CMD_RE.exec(t);
-    if (cmdM) {
-      st.editStreakFile = null;
-      const cmd = cmdM[1]!.trim();
-      if (/git\s+commit/.test(cmd) || /gh\s+pr\s+(create|merge)/.test(cmd)) st.seg = "pr";
-      else if (/test|vitest|pnpm\s+-r/.test(cmd)) st.seg = "ci";
-      return [emit(st, nowMs, { kind: "tool", summary: clip(cmd, 60), ref: "cmd" })];
-    }
-
-    // 5) anything else meaningful → say (verbose-only)
-    return [emit(st, nowMs, { kind: "say", summary: clip(t, 80) })];
-  },
-};
-
-// ════════════════════════════════════════════════════════════════════════════
 // genericNormalizer — any unknown agent. Timestamped passthrough of non-empty
 // lines as tier-C "say", with banner recognition so the cycle id is still set.
 // ════════════════════════════════════════════════════════════════════════════
@@ -671,13 +556,13 @@ export const genericNormalizer: AgentActivityNormalizer = {
 };
 
 /**
- * Pick the normalizer for an agent. claude → stream-json fold; codex → plain /
- * jsonl heuristics; everything else (kimi / pi / unknown) → generic passthrough.
- * This is the ONLY place a name maps to a parser — downstream stays agnostic.
+ * Pick the normalizer for an agent. claude → stream-json fold (harness — roll
+ * runs inside Claude Code); everything else (kimi / pi / reasonix / unknown) →
+ * generic passthrough. This is the ONLY place a name maps to a parser —
+ * downstream stays agnostic.
  */
 export function normalizerFor(agent: string): AgentActivityNormalizer {
   const kind = agentNormalizerKind(agent);
   if (kind === "claude") return claudeNormalizer;
-  if (kind === "codex") return codexNormalizer;
   return genericNormalizer;
 }

@@ -600,9 +600,8 @@ export function probeMissingAgents(
   // availability — report all cast agents missing (fail-loud).
   if (r.code !== 0 && r.stdout.trim() === "") return wanted;
   const available = parseAvailableAgents(r.stdout);
-  // Compare on canonical names so an agent listed as `antigravity (agy)` matches
-  // a cast `agy`/`gemini`/`antigravity`. A cast agent absent from the available
-  // set — including one explicitly marked ✗ (not installed) — is reported missing.
+  // Compare on canonical names. A cast agent absent from the available set —
+  // including one explicitly marked ✗ (not installed) — is reported missing.
   return wanted.filter((a) => !available.has(canonicalAgentName(a)));
 }
 
@@ -613,13 +612,13 @@ export function probeMissingAgents(
  *
  *   \x1b[0;32m✓ claude\x1b[0m  (current)
  *   \x1b[0;33m✗ deepseek\x1b[0m  (not installed)
- *   \x1b[0;32m✓ antigravity (agy)\x1b[0m
+ *   \x1b[0;32m✓ kimi\x1b[0m
  *
  * The previous probe did a naive substring scan of the whole blob, which both
  * (a) ignored the ✓/✗ marker — so a ✗ "not installed" agent counted as present —
  * and (b) was collision-prone. This strips ANSI, reads the marker per line, and
- * extracts the agent token (including any parenthesised canonical like `(agy)`),
- * canonicalising for a robust, marker-aware membership check.
+ * extracts the agent token, canonicalising for a robust, marker-aware membership
+ * check.
  */
 export function parseAvailableAgents(out: string): Set<string> {
   const available = new Set<string>();
@@ -630,10 +629,9 @@ export function parseAvailableAgents(out: string): Set<string> {
     const isAvailable = line.startsWith("✓");
     const isMissing = line.startsWith("✗") || /\(not installed\)/i.test(line);
     if (!isAvailable || isMissing) continue;
-    // Strip the marker, then take the first word as the agent token. The first
-    // word is always the agent name (`antigravity` in `antigravity (agy)`);
-    // trailing parens are annotations (`(current)`) — never the name. Canonicalise
-    // so `antigravity` → `agy`, matching a cast `agy`/`gemini`/`antigravity`.
+    // Strip the marker, then take the first word as the agent token; trailing
+    // parens are annotations (`(current)`) — never the name. Canonicalise for a
+    // robust membership check.
     const token = line.replace(/^✓\s*/, "").split(/\s+/)[0];
     if (token) available.add(canonicalAgentName(token));
   }

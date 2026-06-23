@@ -8,6 +8,8 @@
 
 - **agent 名册改为单一真相源派生**：`AGENTS` 现在承载一等 agent 身份、显示名、PATH 探测 bin、默认模型和能力标记；registry、`roll agent list`、doctor/setup 探测和 spawn profile 覆盖都从同一组 6 个身份派生，减少后续名册漂移。(US-AGENT-044) `[agents]`
 
+- **交付真相重建不再丢无 PR 号的 story-only merge**：多个只含 story id、没有 `(#PR)` 的合并提交现在按 commit SHA 保留，不会因 `prNumber=0` 互相覆盖；release gate 可稳定识别这类已合主干的卡。(FIX-924) `[feedback-truth-alignment]`
+
 - **loop 已合并卡不再回流**：合进 main 的卡会被稳定识别为已交付，不再反复被选回待办。(FIX-399 / FIX-923) `[feedback-truth-alignment]`
 
 - **评审评分池不再太早放弃**：异构 reviewer 都不可用时，会继续尝试同厂可用候选，减少无谓失败。(FIX-911) `[loop-engine]`

@@ -701,6 +701,28 @@ describe("parseMergeCommitLog — FIX-923 full commit messages", () => {
     expect(facts[0].prNumber).toBe(0);
     expect(facts[0].storyIds).toEqual(["FIX-923"]);
   });
+
+  it("keeps multiple story-id merge commits with no PR identity", () => {
+    const text = [
+      rs,
+      "newsha043",
+      fs,
+      "1782240570",
+      fs,
+      "US-AGENT-043: limit agent roster to six\n\n",
+      rs,
+      "oldsha923",
+      fs,
+      "1782234189",
+      fs,
+      "FIX-923: parse merge commit bodies for delivery truth\n\n",
+    ].join("");
+
+    const facts = parseMergeCommitLog(text);
+
+    expect(facts.map((fact) => fact.mergeCommit)).toEqual(["newsha043", "oldsha923"]);
+    expect(facts.flatMap((fact) => fact.storyIds)).toEqual(["US-AGENT-043", "FIX-923"]);
+  });
 });
 
 describe("rebuildDeliveriesFromFacts — FIX-904: merge subject = authoritative done", () => {

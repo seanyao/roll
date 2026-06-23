@@ -198,6 +198,12 @@ export type RollEvent =
   // (no ac-map.json) gets ONE surgical same-agent second pass before attest
   // renders. The outcome is auditable; honest statuses only — never a bypass.
   | { type: "attest:remediation"; cycleId: string; storyId: string; agent: string; outcome: "written" | "still-missing" | "spawn-failed"; ts: number }
+  // FIX-912 — ac-map draft auto-generation. The harness wrote an ac-map.json
+  // DRAFT from cycle evidence (commits, test files, changed files) BEFORE the
+  // FIX-246 remediation ran. The draft has full AC structure + evidence chain
+  // with CONSERVATIVE statuses ("pass-with-evidence" only with clear test
+  // signals; otherwise "needs-confirmation"). The agent only needs to confirm.
+  | { type: "attest:draft-generated"; cycleId: string; storyId: string; ts: number }
   // FIX-317 — the harness bridged a REAL captured screenshot into the ac-map's
   // pass ACs (the agent wired text-only evidence; the visual floor needs a
   // per-AC screenshot ref). Auditable: `href` + `attachedCount` distinguish

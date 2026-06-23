@@ -163,3 +163,89 @@ describe("kimi pair-review regressions", () => {
     expect(out).toContain("nothing addressable");
   });
 });
+
+function watchProject(): string {
+  const p = mkdtempSync(join(tmpdir(), "roll-cycle-watch-"));
+  dirs.push(p);
+  const rt = join(p, ".roll", "loop");
+  mkdirSync(rt, { recursive: true });
+  writeFileSync(
+    join(rt, "runs.jsonl"),
+    JSON.stringify({
+      cycle_id: "20260624-watch-12345",
+      status: "delivered",
+      outcome: "delivered",
+      story_id: "US-OBS-027",
+      agent: "pi",
+      model: "deepseek-v4-pro",
+      ts: "2026-06-24T04:00:00Z",
+      duration_sec: 90,
+    }) + "\n",
+  );
+  writeFileSync(
+    join(rt, "events.ndjson"),
+    [
+      JSON.stringify({ type: "cycle:start", cycleId: "20260624-watch-12345", storyId: "US-OBS-027", agent: "pi", model: "deepseek-v4-pro", ts: 1_800_000_000 }),
+      JSON.stringify({ type: "cycle:phase", cycleId: "20260624-watch-12345", phase: "execute", ts: 1_800_000_010 }),
+      JSON.stringify({ type: "cycle:stdout", cycleId: "20260624-watch-12345", data: "heartbeat: building · still working", ts: 1_800_000_020 }),
+      JSON.stringify({ type: "cycle:tcr", cycleId: "20260624-watch-12345", commitHash: "abcdef123456", message: "tcr: add cycle watch once", ts: 1_800_000_030 }),
+      JSON.stringify({ type: "attest:gate", cycleId: "20260624-watch-12345", verdict: "produced", reasons: ["fresh acceptance report present"], ts: 1_800_000_040 }),
+      JSON.stringify({ type: "cycle:end", cycleId: "20260624-watch-12345", outcome: "delivered", cost: { cycleId: "20260624-watch-12345", agent: "pi", model: "deepseek-v4-pro", tokensIn: 10, tokensOut: 5, estimatedCost: 0.01, revertCount: 0, effectiveCost: 0.01 }, ts: 1_800_000_050 }),
+    ].join("\n") + "\n",
+  );
+  return p;
+}
+
+describe("US-OBS-027 — roll cycle watch", () => {
+  it("--once replays one cycle as a deterministic ActivitySignal frame", () => {
+    const save = process.cwd();
+    process.chdir(watchProject());
+    let out = "";
+    const so = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((s: string) => ((out += s), true)) as typeof process.stdout.write;
+    try {
+      expect(cycleCommand(["watch", "20260624-watch-12345", "--once", "--no-color"])).toBe(0);
+    } finally {
+      process.stdout.write = so;
+      process.chdir(save);
+    }
+    const text = stripAnsi(out);
+    expect(text).toContain("cycle 20260624-watch-12345");
+    expect(text).toContain("story US-OBS-027");
+    expect(text).toContain("agent pi");
+    expect(text).toContain("outcome delivered");
+    expect(text).toContain("phase · execute");
+    expect(text).toContain("TCR abcdef123");
+    expect(text).toContain("Attest gate · produced");
+  });
+
+  it("--once without an id replays the latest cycle when no cycle is running", () => {
+    const save = process.cwd();
+    process.chdir(watchProject());
+    let out = "";
+    const so = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((s: string) => ((out += s), true)) as typeof process.stdout.write;
+    try {
+      expect(cycleCommand(["watch", "--once", "--no-color"])).toBe(0);
+    } finally {
+      process.stdout.write = so;
+      process.chdir(save);
+    }
+    expect(stripAnsi(out)).toContain("cycle 20260624-watch-12345");
+  });
+
+  it("without a running cycle, follow mode fails with an explicit message instead of blank output", () => {
+    const save = process.cwd();
+    process.chdir(watchProject());
+    let err = "";
+    const se = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((s: string) => ((err += s), true)) as typeof process.stderr.write;
+    try {
+      expect(cycleCommand(["watch"])).toBe(1);
+    } finally {
+      process.stderr.write = se;
+      process.chdir(save);
+    }
+    expect(err).toContain("no running cycle");
+  });
+});

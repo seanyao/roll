@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 import {
   extractRunFact,
+  parseMergeCommitLog,
   parseMergeCommitMessages,
   parseStoryIdsFromSubject,
   rebuildDeliveriesFromFacts,
@@ -645,6 +646,45 @@ describe("parseMergeCommitMessages — FIX-904 storyIds", () => {
   });
 });
 
+describe("parseMergeCommitLog — FIX-923 full commit messages", () => {
+  const rs = "\x1e";
+  const fs = "\x1f";
+
+  it("extracts story-ids from a GitHub merge commit body", () => {
+    const text = [
+      rs,
+      "79101a83683ef341f0326b9b080298ee4abdefbe",
+      fs,
+      "1782233269",
+      fs,
+      "Merge pull request #922 from seanyao/fix/remove-deepseek-phantom-agent\n\n",
+      "FIX-399: remove phantom deepseek agent\n\n",
+      "Remove the phantom DeepSeek agent from Roll's selectable agent registry.",
+    ].join("");
+
+    const facts = parseMergeCommitLog(text);
+
+    expect(facts).toHaveLength(1);
+    expect(facts[0].prNumber).toBe(922);
+    expect(facts[0].mergeCommit).toBe("79101a83683ef341f0326b9b080298ee4abdefbe");
+    expect(facts[0].storyIds).toEqual(["FIX-399"]);
+  });
+
+  it("does not use a body-only '(#N)' reference as PR identity", () => {
+    const text = [
+      rs,
+      "abc123",
+      fs,
+      "1782233269",
+      fs,
+      "docs: mention issue reference\n\n",
+      "This body mentions (#922), but the subject is not a PR merge.",
+    ].join("");
+
+    expect(parseMergeCommitLog(text)).toHaveLength(0);
+  });
+});
+
 describe("rebuildDeliveriesFromFacts — FIX-904: merge subject = authoritative done", () => {
   it("FIX-389a/b/c subject with no matching runs → three done records", () => {
     // The real #893 salvage: merge names FIX-389a/b/c but no loop run carried
@@ -710,6 +750,30 @@ describe("rebuildDeliveriesFromFacts — FIX-904: merge subject = authoritative 
     const result = rebuildDeliveriesFromFacts(runs, merges);
     // Exactly one record for FIX-600 (run loop handled it; merge-only pass skips).
     expect(result.filter((r) => r.storyId === "FIX-600")).toHaveLength(1);
+  });
+
+  it("failed run + GitHub merge body referencing the story → done (merge wins)", () => {
+    const runs = [makeRun({ storyId: "FIX-399", outcome: "failed", prNumber: undefined, recordedAt: 100 })];
+    const merges = parseMergeCommitLog([
+      "\x1e",
+      "79101a83683ef341f0326b9b080298ee4abdefbe",
+      "\x1f",
+      "1782233269",
+      "\x1f",
+      "Merge pull request #922 from seanyao/fix/remove-deepseek-phantom-agent\n\n",
+      "FIX-399: remove phantom deepseek agent",
+    ].join(""));
+    const result = rebuildDeliveriesFromFacts(runs, merges, "seanyao/roll");
+
+    expect(result).toHaveLength(1);
+    expect(result[0].storyId).toBe("FIX-399");
+    expect(result[0].lifecycleState).toBe("done");
+    expect(result[0].mergeCommit).toEqual({
+      present: true,
+      value: "79101a83683ef341f0326b9b080298ee4abdefbe",
+    });
+    expect(result[0].prNumber).toEqual({ present: true, value: 922 });
+    expect(result[0].prUrl).toEqual({ present: true, value: "https://github.com/seanyao/roll/pull/922" });
   });
 
   it("first (newest) merge wins when two subjects name the same story", () => {
@@ -820,6 +884,8 @@ function fakeExecPort(
     run(_tool: string, argv: readonly string[]): ExecResult {
       const key = argv.join(" ");
       if (key in responses) return responses[key]!;
+      const legacyKey = key.replace("--format=%x1e%H%x1f%ct%x1f%B", "--format=%H %ct %s");
+      if (legacyKey in responses) return responses[legacyKey]!;
       // Default: command not found / error
       return { stdout: "", code: 128 };
     },

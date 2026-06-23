@@ -1206,6 +1206,37 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r.event).toEqual({ type: "agent_exited", exit: 0, timedOut: false });
   });
 
+  it("US-OBS-028: spawn_agent persists normalized pi tool signals for replay", async () => {
+    const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-signals-")));
+    execDirs.push(rt);
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      paths: {
+        ...base.ports.paths,
+        eventsPath: join(rt, "events.ndjson"),
+        runsPath: join(rt, "runs.jsonl"),
+        alertsPath: join(rt, "alerts.log"),
+        lockPath: join(rt, "inner.lock"),
+        heartbeatPath: join(rt, "heartbeat"),
+        worktreePath: rt,
+      },
+      agentSpawn: vi.fn(async (_agent, opts) => {
+        opts.onChunk?.(Buffer.from("tool_call: Bash: pnpm test\n"));
+        opts.onChunk?.(Buffer.from("tool_result: Bash: exit 0\n"));
+        return { stdout: "tool_call: Bash: pnpm test\ntool_result: Bash: exit 0\n", stderr: "", exitCode: 0, timedOut: false };
+      }),
+    });
+    await executeCommand({ kind: "spawn_agent", agent: "pi", attempt: 1 }, ports, { ...CTX, agent: "pi" });
+    const signals = readFileSync(join(rt, `cycle-${CTX.cycleId}.signals.jsonl`), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(signals.map((s) => s["kind"])).toContain("tool_call");
+    expect(signals.map((s) => s["kind"])).toContain("tool_result");
+    expect(signals.find((s) => s["kind"] === "tool_call")).toMatchObject({ summary: "tool_call Bash", detail: "pnpm test" });
+    expect(signals.find((s) => s["kind"] === "tool_result")).toMatchObject({ summary: "tool_result Bash", detail: "exit 0" });
+  });
+
   it("FIX-366: an UNAUTHENTICATED builder spawn (403/login) emits agent:blocked stage:build cause:auth", async () => {
     const { ports, calls } = fakePorts({
       // The builder ran but is not logged in — it printed a 403 / login prompt

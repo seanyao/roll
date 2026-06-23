@@ -89,6 +89,11 @@ import {
   cycleTimeoutVerdict,
   CYCLE_WALL_TIMEOUT_SEC,
   CYCLE_NO_PROGRESS_SEC,
+  newNormalizerState,
+  normalizerFor,
+  type ActivitySignal,
+  type AgentActivityNormalizer,
+  type NormalizerState,
 } from "@roll/core";
 import {
   parseEventLine,
@@ -161,6 +166,55 @@ import { cardArchiveDir, mountExecutionAtPublish } from "../lib/archive.js";
 import { readLatestStoryReviewScore, REVIEW_SCORE_LOW_THRESHOLD, type ReviewScoreEntry } from "../lib/review-score.js";
 
 const execFileAsync = promisify(execFile);
+
+class ActivitySignalRecorder {
+  private buffered = "";
+  private readonly normalizer: AgentActivityNormalizer;
+  private readonly state: NormalizerState;
+
+  constructor(
+    private readonly signalPath: string,
+    agent: string,
+    banner: string,
+    private readonly nowMs: () => number,
+  ) {
+    this.normalizer = normalizerFor(agent);
+    this.state = newNormalizerState();
+    try {
+      mkdirSync(dirname(signalPath), { recursive: true });
+      writeFileSync(signalPath, "", "utf8");
+    } catch {
+      /* best-effort projection */
+    }
+    this.recordLine(banner);
+  }
+
+  accept(chunk: Buffer): void {
+    this.buffered += chunk.toString("utf8");
+    const lines = this.buffered.split(/\r?\n/);
+    this.buffered = lines.pop() ?? "";
+    for (const line of lines) this.recordLine(line);
+  }
+
+  flush(): void {
+    if (this.buffered.trim() !== "") this.recordLine(this.buffered);
+    this.buffered = "";
+  }
+
+  private recordLine(line: string): void {
+    const signals = this.normalizer.normalize(line, this.state, this.nowMs());
+    if (signals.length === 0) return;
+    this.append(signals);
+  }
+
+  private append(signals: readonly ActivitySignal[]): void {
+    try {
+      appendFileSync(this.signalPath, signals.map((sig) => JSON.stringify(sig)).join("\n") + "\n", "utf8");
+    } catch {
+      /* best-effort projection */
+    }
+  }
+}
 
 /** The injectable wall clock (epoch seconds) — infra's {@link Clock}. */
 export type ProcessClock = Clock;
@@ -1014,14 +1068,18 @@ export async function executeCommand(
       // truncated at each agent start, fed every chunk in real time. The popup
       // (runner template) and any `tail -f` watcher read THIS, not buffers.
       const livePath = join(dirname(ports.paths.eventsPath), "live.log");
+      const liveBanner = `── cycle ${ctx.cycleId ?? "?"} · ${ctx.storyId ?? "?"} · agent ${cmd.agent} · build-session ${builderSessionId} ──`;
       try {
-        writeFileSync(
-          livePath,
-          `── cycle ${ctx.cycleId ?? "?"} · ${ctx.storyId ?? "?"} · agent ${cmd.agent} · build-session ${builderSessionId} ──\n`,
-        );
+        writeFileSync(livePath, `${liveBanner}\n`);
       } catch {
         /* observation is best-effort */
       }
+      const signalRecorder = new ActivitySignalRecorder(
+        join(dirname(ports.paths.eventsPath), `cycle-${ctx.cycleId ?? "unknown"}.signals.jsonl`),
+        cmd.agent,
+        liveBanner,
+        () => eventTs(ports),
+      );
       const captureSink =
         ctx.evidenceRunDir !== undefined && ctx.evidenceRunDir !== ""
           ? createCaptureMarkerSink(ctx.evidenceRunDir, ports.capture)
@@ -1107,9 +1165,11 @@ export async function executeCommand(
             } catch {
               /* best-effort */
             }
+            signalRecorder.accept(d);
           },
         });
       } finally {
+        signalRecorder.flush();
         // Stop the timer AND take one final synchronous-await snapshot so the LAST
         // TCR commits (landed between the last tick and agent exit) are not lost.
         await observer.stop();

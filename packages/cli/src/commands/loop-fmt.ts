@@ -39,6 +39,8 @@ const KIND_COLOR: Record<ActivityKind, string> = {
   edit: "muted",
   test: "green",
   tool: "muted",
+  tool_call: "muted",
+  tool_result: "muted",
   say: "dim",
   tcr: "green",
   commit: "green",
@@ -54,6 +56,8 @@ const KIND_CAT: Record<ActivityKind, string> = {
   edit: "✏",
   test: "test",
   tool: "›",
+  tool_call: "call",
+  tool_result: "result",
   say: "·",
   tcr: "tcr",
   commit: "commit",
@@ -83,9 +87,10 @@ export function renderSignal(sig: ActivitySignal, opts: { ts?: string } = {}): s
     return `${ts}${c("dim", sig.summary)}${detail}`;
   }
   // Muted fold lines (edit / tool / say) → dim category + summary, no arrow.
-  if (sig.kind === "edit" || sig.kind === "tool" || sig.kind === "say") {
+  if (sig.kind === "edit" || sig.kind === "tool" || sig.kind === "tool_call" || sig.kind === "tool_result" || sig.kind === "say") {
     const cat = KIND_CAT[sig.kind];
-    return `${ts}${c("muted", `${cat} ${sig.summary}`)}`;
+    const detail = sig.detail !== undefined && sig.detail !== "" ? `  ${sig.detail}` : "";
+    return `${ts}${c("muted", `${cat} ${sig.summary}${detail}`)}`;
   }
   // Signal rows (tcr / pr / gate / test / commit / alert / heartbeat).
   const isFail = sig.result === "fail" || sig.kind === "alert";

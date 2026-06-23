@@ -38,6 +38,8 @@ export type ActivityKind =
   | "edit"
   | "test"
   | "tool"
+  | "tool_call"
+  | "tool_result"
   | "say"
   | "tcr"
   | "commit"
@@ -153,6 +155,8 @@ const KIND_TIER: Record<ActivityKind, DisplayTier> = {
   test: "B", // pass → B; a FAIL is promoted to A at emit time
   edit: "B",
   tool: "B",
+  tool_call: "B",
+  tool_result: "B",
   say: "C",
 };
 
@@ -555,6 +559,102 @@ export const genericNormalizer: AgentActivityNormalizer = {
   },
 };
 
+type ParsedToolSignal = { kind: "tool_call" | "tool_result"; tool: string; detail: string; result?: ActivitySignal["result"] };
+
+function parseStructuredToolLine(line: string): ParsedToolSignal | null {
+  let ev: unknown;
+  try {
+    ev = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  if (typeof ev !== "object" || ev === null) return null;
+  const rec = ev as Record<string, unknown>;
+  const type = typeof rec["type"] === "string" ? rec["type"] : "";
+  const kind = type === "tool_call" || type === "tool_use"
+    ? "tool_call"
+    : type === "tool_result" || type === "tool_output"
+      ? "tool_result"
+      : "";
+  if (kind === "") return null;
+  const tool = typeof rec["tool"] === "string"
+    ? rec["tool"]
+    : typeof rec["name"] === "string"
+      ? rec["name"]
+      : "tool";
+  const detailValue = rec["summary"] ?? rec["input"] ?? rec["content"] ?? rec["output"] ?? "";
+  const detail = typeof detailValue === "string" ? detailValue : JSON.stringify(detailValue);
+  const result = kind === "tool_result"
+    ? rec["is_error"] === true || rec["ok"] === false
+      ? "fail"
+      : "pass"
+    : undefined;
+  return { kind, tool, detail, ...(result !== undefined ? { result } : {}) };
+}
+
+const TOOL_NAME = /[A-Za-z][A-Za-z0-9_.-]*/;
+
+function parseTextToolSignal(line: string): ParsedToolSignal | null {
+  const trimmed = line.trim();
+  if (trimmed === "") return null;
+
+  let m = new RegExp(`^(?:tool_call|tool call|tool-use|tool use)\\s*[:：]\\s*(${TOOL_NAME.source})(?:\\s*[:：-]\\s*(.*))?$`, "i").exec(trimmed);
+  if (m) return { kind: "tool_call", tool: m[1]!, detail: m[2] ?? "" };
+
+  m = new RegExp(`^(?:tool_result|tool result|tool-output|tool output)\\s*[:：]\\s*(${TOOL_NAME.source})(?:\\s*[:：-]\\s*(.*))?$`, "i").exec(trimmed);
+  if (m) return { kind: "tool_result", tool: m[1]!, detail: m[2] ?? "", result: /\\b(fail|error|failed|exit\\s*[1-9])\\b/i.test(m[2] ?? "") ? "fail" : "pass" };
+
+  m = new RegExp(`^(?:Tool|工具)\\s*[:：]\\s*(${TOOL_NAME.source})(?:\\s*[:：-]\\s*(.*))?$`, "i").exec(trimmed);
+  if (m) return { kind: "tool_call", tool: m[1]!, detail: m[2] ?? "" };
+
+  m = /^(?:Running command|run command|执行命令)\s*[:：]\s*(.+)$/i.exec(trimmed);
+  if (m) return { kind: "tool_call", tool: "Bash", detail: m[1] ?? "" };
+
+  m = new RegExp(`^(${TOOL_NAME.source})\\((.*)\\)$`).exec(trimmed);
+  if (m && ["Bash", "Read", "Edit", "Write", "Glob", "Grep"].includes(m[1]!)) {
+    return { kind: "tool_call", tool: m[1]!, detail: m[2] ?? "" };
+  }
+
+  m = /^(?:Command output|命令输出)\s*[:：]\s*(.+)$/i.exec(trimmed);
+  if (m) return { kind: "tool_result", tool: "Bash", detail: m[1] ?? "", result: "pass" };
+
+  return null;
+}
+
+function textToolNormalizer(agent: "pi" | "kimi"): AgentActivityNormalizer {
+  return {
+    agent,
+    reset: resetState,
+    normalize(raw: string, st: NormalizerState, nowMs: number): ActivitySignal[] {
+      const line = raw.replace(/\s+$/, "");
+      if (line.trim() === "") return [];
+      const banner = matchBanner(line);
+      if (banner) {
+        resetState(st);
+        st.cycleId = banner.cycleId;
+        return [emit(st, nowMs, { seg: "cycle", kind: "lifecycle", summary: banner.label })];
+      }
+      const parsed = parseStructuredToolLine(line) ?? parseTextToolSignal(line);
+      if (parsed !== null) {
+        st.editStreakFile = null;
+        st.seg = "build";
+        return [emit(st, nowMs, {
+          seg: "build",
+          kind: parsed.kind,
+          summary: `${parsed.kind} ${parsed.tool}`,
+          detail: clip(parsed.detail, 80),
+          ref: parsed.tool,
+          ...(parsed.result !== undefined ? { result: parsed.result } : {}),
+        })];
+      }
+      return [emit(st, nowMs, { kind: "say", summary: clip(line, 100) })];
+    },
+  };
+}
+
+export const piNormalizer: AgentActivityNormalizer = textToolNormalizer("pi");
+export const kimiNormalizer: AgentActivityNormalizer = textToolNormalizer("kimi");
+
 /**
  * Pick the normalizer for an agent. claude → stream-json fold (harness — roll
  * runs inside Claude Code); everything else (kimi / codex / pi / agy /
@@ -564,5 +664,7 @@ export const genericNormalizer: AgentActivityNormalizer = {
 export function normalizerFor(agent: string): AgentActivityNormalizer {
   const kind = agentNormalizerKind(agent);
   if (kind === "claude") return claudeNormalizer;
+  if (kind === "pi") return piNormalizer;
+  if (kind === "kimi") return kimiNormalizer;
   return genericNormalizer;
 }

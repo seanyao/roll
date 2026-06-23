@@ -343,7 +343,7 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
     expect(html).toContain(">Now<");
     // FIX-373: the redesigned Now carries Live cycle, On-deck, Needs-you and the
     // live stream; Processes was folded into the heartbeat (its running dots).
-    for (const section of ["live-cycle", "live-stream", "on-deck", "needs-you", "where-things-stand"]) {
+    for (const section of ["live-cycle", "live-stream", "daemon-status", "on-deck", "needs-you", "where-things-stand"]) {
       expect(html).toContain(`data-now-section="${section}"`);
     }
     expect(html).toContain("Live cycle");

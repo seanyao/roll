@@ -107,6 +107,14 @@ export interface LoopLiveFeedVM {
   note?: string;
 }
 
+export interface DaemonStatusVM {
+  status: "running" | "stopped";
+  sourcePath: string;
+  pid?: number;
+  address?: string;
+  startedAt?: number;
+}
+
 export interface TruthConsoleInput {
   snapshot: TruthSnapshot;
   /** The EXACT serialized snapshot written to truth.json (US-DOSSIER-010). */
@@ -139,6 +147,8 @@ export interface TruthConsoleInput {
   gitHooks?: GitHooksVM;
   /** US-DOSSIER-044 — read-only live loop feed for the Now tab. */
   liveFeed?: LoopLiveFeedVM;
+  /** US-OBS-024 — read-only daemon liveness reflected on the Now tab. */
+  daemon?: DaemonStatusVM;
   /**
    * US-DOSSIER-033 — the Charter PROJECT TAB: a markdown browser over the
    * project's own charter docs (docs/*.md, the per-epic plan .md files, and the
@@ -400,6 +410,35 @@ function loopLiveFeedPanel(input: TruthConsoleInput): string {
       : `<div data-live-lines="true" style="${MONO}font-size:12.5px;line-height:1.7;color:#93a0b8;font-style:italic;">${esc(empty)}</div>`) +
     `<div style="margin-top:12px;${MONO}font-size:10px;color:#748196;">${esc(feed.sourcePath)} · ${bi("read-only polling, no loop writes", "只读轮询，不写 loop")}</div>` +
     `</div></section>`
+  );
+}
+
+function daemonStatusPanel(input: TruthConsoleInput): string {
+  const daemon = input.daemon ?? {
+    status: "stopped",
+    sourcePath: ".roll/loop/daemon.pid",
+  };
+  const running = daemon.status === "running";
+  const color = running ? C.green : C.slate;
+  const pill = running ? bi("running", "运行中") : bi("stopped", "已停止");
+  const detail = running
+    ? `${bi("pid", "pid")} ${daemon.pid ?? "?"} · ${esc(daemon.address ?? "ws://127.0.0.1:7077")}`
+    : bi("not connected — start with roll daemon start", "未连接——使用 roll daemon start 启动");
+  const since =
+    daemon.startedAt !== undefined
+      ? `<span>${bi("since", "自")} ${shortTs(new Date(daemon.startedAt).toISOString().replace(/\.\d{3}Z$/, "Z"))}</span>`
+      : "";
+  return (
+    `<section data-now-section="daemon-status" data-daemon-status="${daemon.status}" style="border:1px solid ${C.line};border-radius:12px;background:${C.card};padding:14px 18px;margin:14px 0;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
+    `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">` +
+    sectionLabel(bi("Observability daemon", "可观测 daemon")) +
+    `<span style="${MONO}font-size:10px;padding:2px 8px;border-radius:999px;border:1px solid ${color}44;color:${color};">${pill}</span>` +
+    `<span style="${MONO}font-size:12px;color:${running ? C.body : C.dim};">${detail}</span>` +
+    `<span style="flex:1;"></span>` +
+    `<span style="${MONO}font-size:10.5px;color:${C.faint};">${since}</span>` +
+    `</div>` +
+    `<div style="margin-top:9px;${MONO}font-size:10px;color:${C.dim};">${esc(daemon.sourcePath)} · ${bi("read-only pid probe, no auto-start", "只读 pid 探测，不自动启动")}</div>` +
+    `</section>`
   );
 }
 
@@ -733,6 +772,7 @@ function nowTab(input: TruthConsoleInput): string {
     nowPulseBadge(input) +
     nowOpsPanel(input) +
     loopLiveFeedPanel(input) +
+    daemonStatusPanel(input) +
     heartbeat +
     `<div data-now-section="where-things-stand">` +
     verdictStrip +

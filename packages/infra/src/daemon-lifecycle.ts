@@ -9,9 +9,8 @@
  * This is a per-project runtime artefact, never committed.
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import { systemPidAlive, type PidAlive } from "./process.js";
 
 /** Content of the daemon pid file. */
@@ -75,40 +74,42 @@ export function isDaemonRunning(cwd: string, pidAlive: PidAlive = systemPidAlive
   return pidAlive(record.pid);
 }
 
+export interface SpawnDaemonOptions {
+  host?: string;
+  port?: number;
+  /**
+   * CLI entrypoint to spawn. Production defaults to the current roll executable
+   * (`process.argv[1]`), which keeps the npm package self-contained.
+   */
+  entrypoint?: string;
+  /** Hidden command registered by the CLI bridge; injectable for tests. */
+  childCommand?: string;
+  timeoutMs?: number;
+}
+
 /**
  * Spawn the daemon as a detached child process.
  *
- * In development (when `conventions/` exists), spawns via `node --import tsx <bin.ts>`.
- * In production, spawns via `node <dist/bin.js>`.
- *
- * Returns the child process (so the caller can detach/wait), the pid, and the
- * ws:// address parsed from the child's stdout.
+ * The published package ships a single bundled CLI file, so the child process
+ * must re-enter that same CLI through a hidden command instead of looking for
+ * workspace source paths that do not exist after `npm pack`.
  */
 export function spawnDaemon(
   cwd: string,
-  opts: { host?: string; port?: number },
+  opts: SpawnDaemonOptions,
 ): Promise<{ child: ChildProcess; pid: number; address: string }> {
   return new Promise((resolve, reject) => {
     const host = opts.host ?? "127.0.0.1";
     const port = opts.port ?? 7077;
-
-    // Resolve the daemon bin module relative to the daemon package.
-    // Walk up from this module to find the daemon package root.
-    const daemonBin = resolveDaemonBin();
+    const entrypoint = resolveCliEntrypoint(opts);
+    const childCommand = opts.childCommand ?? "-daemon";
 
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       ROLL_DAEMON_OPTS: JSON.stringify({ host, port, cwd }),
     };
 
-    const args: string[] = [];
-    if (isDev()) {
-      // In dev: use tsx to run the raw TypeScript.
-      args.push("--import", "tsx");
-    }
-    args.push(daemonBin);
-
-    const child = spawn(process.execPath, args, {
+    const child = spawn(process.execPath, [entrypoint, childCommand], {
       cwd,
       env,
       detached: true,
@@ -119,17 +120,29 @@ export function spawnDaemon(
     let address = "";
     let stderr = "";
     let resolved = false;
+    let timer: NodeJS.Timeout | undefined;
+
+    const finish = <T>(fn: (value: T) => void, value: T): void => {
+      if (resolved) return;
+      resolved = true;
+      if (timer !== undefined) clearTimeout(timer);
+      fn(value);
+    };
 
     const onData = (data: Buffer): void => {
       address += data.toString();
       // The first line of stdout is the ws:// address.
       const nl = address.indexOf("\n");
-      if (nl !== -1 && !resolved) {
-        resolved = true;
+      if (nl !== -1) {
         const addr = address.slice(0, nl).trim();
         child.stdout?.removeListener("data", onData);
         child.unref(); // Detach — child runs independently.
-        resolve({ child, pid: child.pid!, address: addr });
+        const pid = child.pid;
+        if (pid === undefined) {
+          finish(reject, new Error("Daemon child did not expose a pid"));
+          return;
+        }
+        finish(resolve, { child, pid, address: addr });
       }
     };
 
@@ -141,55 +154,28 @@ export function spawnDaemon(
     child.stderr?.on("data", onErr);
 
     child.on("error", (err) => {
-      if (!resolved) {
-        resolved = true;
-        reject(err);
-      }
+      finish(reject, err);
     });
 
     child.on("exit", (code) => {
-      if (!resolved) {
-        resolved = true;
-        reject(new Error(`Daemon exited early (code ${code}) stderr: ${stderr.slice(0, 500)}`));
-      }
+      finish(reject, new Error(`Daemon exited early (code ${code}) stderr: ${stderr.slice(0, 500)}`));
     });
 
     // Timeout: give the daemon 5s to print its address.
-    setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        child.kill();
-        reject(new Error(`Daemon did not start within 5s. stderr: ${stderr.slice(0, 500)}`));
-      }
-    }, 5000);
+    timer = setTimeout(() => {
+      child.kill();
+      finish(reject, new Error(`Daemon did not start within ${opts.timeoutMs ?? 5000}ms. stderr: ${stderr.slice(0, 500)}`));
+    }, opts.timeoutMs ?? 5000);
+    timer.unref();
   });
 }
 
 // ── private helpers ──────────────────────────────────────────────────────────
 
-function resolveDaemonBin(): string {
-  // Walk up from this module to find packages/daemon.
-  let dir = dirname(fileURLToPath(import.meta.url));
-  for (let i = 0; i < 10; i++) {
-    const candidate = join(dir, "daemon", "src", "bin.ts");
-    if (existsSync(candidate)) return candidate;
-    const distCandidate = join(dir, "daemon", "dist", "bin.js");
-    if (existsSync(distCandidate)) return distCandidate;
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
+function resolveCliEntrypoint(opts: SpawnDaemonOptions): string {
+  const entrypoint = opts.entrypoint ?? process.env["ROLL_DAEMON_ENTRYPOINT"] ?? process.argv[1];
+  if (entrypoint === undefined || entrypoint.trim() === "") {
+    throw new Error("Cannot resolve daemon CLI entrypoint");
   }
-  throw new Error("Cannot resolve daemon bin module");
-}
-
-/** True when running in the dev monorepo (conventions/ marker exists). */
-function isDev(): boolean {
-  let dir = dirname(fileURLToPath(import.meta.url));
-  for (let i = 0; i < 10; i++) {
-    if (existsSync(join(dir, "conventions"))) return true;
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return false;
+  return entrypoint;
 }

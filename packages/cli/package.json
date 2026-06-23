@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@roll/core": "workspace:*",
+    "@roll/daemon": "workspace:*",
     "@roll/infra": "workspace:*",
     "@roll/spec": "workspace:*"
   }

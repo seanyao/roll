@@ -28,6 +28,7 @@ import {
 import { CAST_USAGE, castCommand } from "./cast.js";
 import { DOC_USAGE, docCommand } from "./doc.js";
 import { daemonCommand, daemonHelp } from "./daemon.js";
+import { daemonChildCommand } from "./daemon-child.js";
 import { ciCommand, ciWaitCommand } from "./ci.js";
 import { configCommand } from "./config.js";
 import { CYCLE_USAGE, cycleCommand } from "./cycle.js";
@@ -216,6 +217,7 @@ export function registerAll(): void {
   // guide tree, falling back to the configured language via the SAME resolver
   // `roll lang` uses; an unknown --lang exits non-zero bilingually. Read-only viewer.
   registerPorted("doc", docCommand, { help: DOC_USAGE });
+  registerPorted("-daemon", daemonChildCommand, { hidden: true });
   // `idea`: v3-native deterministic backlog capture (US-PORT-003). Classifies
   // bug→FIX / idea→IDEA, auto-numbers (max suffix + 1), lint-gates the
   // description with the same rules as the bash _backlog_lint oracle, and

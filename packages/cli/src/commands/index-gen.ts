@@ -9,6 +9,7 @@ import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
+import { daemonPidPath, isDaemonRunning, readDaemonPid } from "@roll/infra";
 import { parseEventLine } from "@roll/spec";
 import { buildTruthSnapshot } from "@roll/core";
 import { collectDossierState, type CollectorDeps } from "@roll/core";
@@ -16,7 +17,7 @@ import { serializeTruthSnapshot, type TruthSnapshotPanelSlot } from "@roll/spec"
 import { collectDossier, generateIndex } from "../lib/archive.js";
 import { SPINE_STAGES, countLegacyStories, deriveDeliveryLadder, storySpectrumState, type TruthBoardInput, type TruthBoardVerdict } from "../lib/dossier-index.js";
 import type { TruthSnapshotStoryEntry } from "@roll/spec";
-import { renderTruthConsole, renderMachineStubPage, type BacklogEpicVM, type BacklogVM, type LoopLiveFeedVM } from "../lib/truth-console.js";
+import { renderTruthConsole, renderMachineStubPage, type BacklogEpicVM, type BacklogVM, type DaemonStatusVM, type LoopLiveFeedVM } from "../lib/truth-console.js";
 import { renderAgentsMachinePage } from "../lib/page-agents.js";
 import { collectCharter, defaultCharterDeps } from "../lib/page-charter.js";
 import { collectAbout, defaultAboutDeps, renderAboutPage } from "../lib/page-about.js";
@@ -291,6 +292,21 @@ export function collectLoopLiveFeed(projectPath: string, nowSec = renderNowSec()
   } finally {
     renderState.useColor = prevColor;
   }
+}
+
+export function collectDaemonStatus(projectPath: string): DaemonStatusVM {
+  const sourcePath = daemonPidPath(projectPath);
+  const record = readDaemonPid(projectPath);
+  if (record === null || !isDaemonRunning(projectPath)) {
+    return { status: "stopped", sourcePath };
+  }
+  return {
+    status: "running",
+    sourcePath,
+    pid: record.pid,
+    address: `ws://${record.host}:${record.port}`,
+    startedAt: record.startedAt,
+  };
 }
 
 export function collectTruthBoardInput(projectPath: string, nowSec = renderNowSec(), cycleRows?: readonly CycleLedgerRow[]): TruthBoardInput {
@@ -609,6 +625,7 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
         // `roll loop watch` follows. The generated snapshot is folded through
         // loop-fmt's ActivitySignal renderer; browser polling reads only.
         liveFeed: slotData(snapshot.panels?.liveFeed, pausedLiveFeed(cwd, renderNowSec())),
+        daemon: collectDaemonStatus(cwd),
         // US-OBS-019: project switcher rows now come from collectDossierState,
         // where the reachable filter runs at the shared read-side selector.
         projects: snapshot.projects,

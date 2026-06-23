@@ -39,6 +39,7 @@ import {
   parseEstMin,
   reasonixEnv,
   realAgentSpawn,
+  resetDirective,
   startSpawnTimeoutWatchdog,
   readCycleTimeoutThresholds,
   storyPinDirective,

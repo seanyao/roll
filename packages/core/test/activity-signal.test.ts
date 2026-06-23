@@ -19,7 +19,6 @@ import { describe, expect, it } from "vitest";
 import {
   type ActivitySignal,
   claudeNormalizer,
-  codexNormalizer,
   DEFAULT_HEARTBEAT_GAP_MS,
   genericNormalizer,
   maybeHeartbeat,
@@ -32,10 +31,6 @@ import { signalKindForMarker } from "../src/loop/signals.js";
 function runClaude(lines: string[], nowMs = 1000): ActivitySignal[] {
   const st = newNormalizerState();
   return lines.flatMap((l) => claudeNormalizer.normalize(l, st, nowMs));
-}
-function runCodex(lines: string[], nowMs = 1000): ActivitySignal[] {
-  const st = newNormalizerState();
-  return lines.flatMap((l) => codexNormalizer.normalize(l, st, nowMs));
 }
 
 const asst = (content: unknown[]) => JSON.stringify({ type: "assistant", message: { content } });
@@ -197,96 +192,6 @@ describe("claudeNormalizer — signalKind matches the report timeline taxonomy",
 });
 
 // ════════════════════════════════════════════════════════════════════════════
-// codex — plain text / jsonl → NOT blank.
-// ════════════════════════════════════════════════════════════════════════════
-
-describe("codexNormalizer — meaningful signals from plain text", () => {
-  it("a vitest fail line → test fail signal (tier A) carrying the test file ref", () => {
-    const out = runCodex(["FAIL  packages/core/test/x.test.ts:42  expected 1 to be 2"]);
-    expect(out).toHaveLength(1);
-    expect(out[0]!.kind).toBe("test");
-    expect(out[0]!.result).toBe("fail");
-    expect(out[0]!.tier).toBe("A");
-    expect(out[0]!.ref).toContain("x.test.ts:42");
-    expect(out[0]!.signalKind).toBe(signalKindForMarker("ci:fail"));
-  });
-  it("a vitest pass summary → test pass signal (tier B)", () => {
-    const out = runCodex(["Test Files  3 passed (3)"]);
-    expect(out).toHaveLength(1);
-    expect(out[0]!.kind).toBe("test");
-    expect(out[0]!.result).toBe("pass");
-    expect(out[0]!.tier).toBe("B");
-  });
-  it("an edit/diff block → edit signal, collapsing consecutive same-file lines", () => {
-    const st = newNormalizerState();
-    const a = codexNormalizer.normalize("✎ src/loop/activity-signal.ts", st, 1);
-    const b = codexNormalizer.normalize("✎ src/loop/activity-signal.ts", st, 2);
-    expect(a).toHaveLength(1);
-    expect(a[0]!.kind).toBe("edit");
-    expect(a[0]!.summary).toContain("activity-signal.ts");
-    expect(b).toEqual([]); // same file collapses
-  });
-  it("a unified-diff header → edit signal", () => {
-    const out = runCodex(["+++ b/packages/core/src/index.ts"]);
-    expect(out).toHaveLength(1);
-    expect(out[0]!.kind).toBe("edit");
-    expect(out[0]!.summary).toContain("index.ts");
-  });
-  it("a command line → tool signal", () => {
-    const out = runCodex(["$ pnpm -r test"]);
-    expect(out).toHaveLength(1);
-    expect(out[0]!.kind).toBe("tool");
-    expect(out[0]!.summary).toContain("pnpm -r test");
-  });
-  it("a tcr commit line in plain output → tcr signal", () => {
-    const out = runCodex(["[loop/c-1 abc1234] tcr: codex did a thing"]);
-    expect(out).toHaveLength(1);
-    expect(out[0]!.kind).toBe("tcr");
-    expect(out[0]!.summary).toContain("abc1234");
-    expect(out[0]!.signalKind).toBe(signalKindForMarker("tcr"));
-  });
-  it("a merged-PR line → pr signal", () => {
-    const out = runCodex(["Merged PR #321 into main"]);
-    expect(out).toHaveLength(1);
-    expect(out[0]!.kind).toBe("pr");
-    expect(out[0]!.summary).toContain("321");
-  });
-  it("other meaningful prose → tier-C say (hidden by default but NOT blank in verbose)", () => {
-    const out = runCodex(["Thinking about how to approach the refactor"]);
-    expect(out).toHaveLength(1);
-    expect(out[0]!.kind).toBe("say");
-    expect(out[0]!.tier).toBe("C");
-  });
-  it("jsonl frames are unwrapped to their text payload", () => {
-    const out = runCodex([JSON.stringify({ type: "message", text: "$ git status" })]);
-    expect(out).toHaveLength(1);
-    expect(out[0]!.kind).toBe("tool");
-    expect(out[0]!.summary).toContain("git status");
-  });
-  it("a codex stream is NOT blank end-to-end (the core bug US-LOOP-077 fixes)", () => {
-    const out = runCodex([
-      "── cycle 20260613-2 · FIX-9 · agent codex ──",
-      "Reading the failing test first",
-      "✎ src/foo.ts",
-      "$ pnpm test",
-      "FAIL  test/foo.test.ts:10",
-      "✎ src/foo.ts",
-      "$ pnpm test",
-      "Test Files  1 passed (1)",
-      "[loop/c-2 fee1234] tcr: fix foo",
-      "Merged PR #42",
-    ]);
-    expect(out.length).toBeGreaterThan(5); // demonstrably not blank
-    expect(out.some((s) => s.kind === "test" && s.result === "fail")).toBe(true);
-    expect(out.some((s) => s.kind === "tcr")).toBe(true);
-    expect(out.some((s) => s.kind === "pr")).toBe(true);
-  });
-  it("tolerates malformed input without throwing", () => {
-    expect(() => runCodex(["{not json", "", "   ", " garbage"])).not.toThrow();
-  });
-});
-
-// ════════════════════════════════════════════════════════════════════════════
 // generic — any unknown agent → timestamped passthrough.
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -308,21 +213,21 @@ describe("genericNormalizer — passthrough for unknown agents", () => {
 });
 
 describe("normalizerFor — agent → normalizer mapping (downstream stays agnostic)", () => {
-  it("claude → claudeNormalizer", () => {
-    expect(normalizerFor("claude").agent).toBe("claude");
-  });
-  it("codex → codexNormalizer", () => {
-    expect(normalizerFor("codex").agent).toBe("codex");
-  });
-  it("kimi / pi / unknown → genericNormalizer", () => {
+  // claude is no longer a pool member (no AgentSpec entry), so name-routing
+  // resolves it to the generic normalizer. The claudeNormalizer harness export
+  // remains directly usable by the Claude Code harness — see the claudeNormalizer
+  // describe blocks above — it is simply not reachable via name routing.
+  it("every pool/unknown agent → genericNormalizer (claude has no spec → generic too)", () => {
     expect(normalizerFor("kimi").agent).toBe("generic");
     expect(normalizerFor("pi").agent).toBe("generic");
+    expect(normalizerFor("reasonix").agent).toBe("generic");
+    expect(normalizerFor("claude").agent).toBe("generic");
     expect(normalizerFor("something-new").agent).toBe("generic");
     expect(normalizerFor("").agent).toBe("generic");
   });
   it("is case-insensitive and trims", () => {
-    expect(normalizerFor("  Claude ").agent).toBe("claude");
-    expect(normalizerFor("CODEX").agent).toBe("codex");
+    expect(normalizerFor("  KIMI ").agent).toBe("generic");
+    expect(normalizerFor("  Reasonix ").agent).toBe("generic");
   });
 });
 
@@ -358,8 +263,8 @@ describe("maybeHeartbeat — keeps the window alive when the agent goes quiet", 
     expect(maybeHeartbeat(st, t1, DEFAULT_HEARTBEAT_GAP_MS)).toHaveLength(1);
     expect(maybeHeartbeat(st, t1 + 100, DEFAULT_HEARTBEAT_GAP_MS)).toEqual([]); // too soon since last beat
   });
-  it("works the same for any agent (claude/codex/generic) — agent-agnostic", () => {
-    for (const norm of [claudeNormalizer, codexNormalizer, genericNormalizer]) {
+  it("works the same for any agent (claude/generic) — agent-agnostic", () => {
+    for (const norm of [claudeNormalizer, genericNormalizer]) {
       const st = newNormalizerState();
       norm.normalize("── cycle 20260613-9 · S · agent x ──", st, 5000);
       const beat = maybeHeartbeat(st, 5000 + DEFAULT_HEARTBEAT_GAP_MS + 1, DEFAULT_HEARTBEAT_GAP_MS);
@@ -374,17 +279,17 @@ describe("maybeHeartbeat — keeps the window alive when the agent goes quiet", 
 // ════════════════════════════════════════════════════════════════════════════
 
 describe("tier split — default tiers per kind", () => {
-  it("lifecycle/tcr/pr/gate/alert/test-fail = A; edit/test-pass/tool = B; say = C", () => {
+  it("lifecycle/tcr/gate = A; edit/tool = B; say = C", () => {
     // A: story (lifecycle)
     expect(visible(runClaude([asst([toolUse("Skill", { skill: "roll-build", args: "US-1" })])]))[0]!.tier).toBe("A");
     // A: tcr
     const stT = newNormalizerState();
     claudeNormalizer.normalize(asst([toolUse("Bash", { command: "git commit -m 'tcr: a'" })]), stT, 1);
     expect(claudeNormalizer.normalize(toolResult("[x abc1234] tcr: a"), stT, 2)[0]!.tier).toBe("A");
-    // A: test fail (codex)
-    expect(runCodex(["FAIL test/x.test.ts:1"])[0]!.tier).toBe("A");
-    // B: test pass (codex)
-    expect(runCodex(["12 passed"])[0]!.tier).toBe("B");
+    // A: ci gate (fail)
+    const stCi = newNormalizerState();
+    claudeNormalizer.normalize(asst([toolUse("Bash", { command: "roll ci --wait" })]), stCi, 1);
+    expect(claudeNormalizer.normalize(toolResult("CI red — build failed"), stCi, 2)[0]!.tier).toBe("A");
     // B: edit
     expect(runClaude([asst([toolUse("Edit", { file_path: "z.ts" })])])[0]!.tier).toBe("B");
     // B: tool (non-signal bash)

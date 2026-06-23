@@ -85,12 +85,7 @@ describe("frozen: roll agent list render", () => {
           [0;32m✓ claude[0m  (current)
           [0;32m✓ kimi[0m
           [0;33m✗ deepseek[0m  (not installed)
-          [0;33m✗ opencode[0m  (not installed)
-          [0;33m✗ codex[0m  (not installed)
-          [0;33m✗ openai[0m  (not installed)
           [0;33m✗ pi[0m  (not installed)
-          [0;33m✗ qwen[0m  (not installed)
-          [0;33m✗ antigravity (agy)[0m  (not installed)
           [0;33m✗ reasonix[0m  (not installed)
 
       "
@@ -105,12 +100,7 @@ describe("frozen: roll agent list render", () => {
           [0;32m✓ claude[0m  (current)
           [0;32m✓ kimi[0m
           [0;33m✗ deepseek[0m  (not installed)
-          [0;33m✗ opencode[0m  (not installed)
-          [0;33m✗ codex[0m  (not installed)
-          [0;33m✗ openai[0m  (not installed)
           [0;33m✗ pi[0m  (not installed)
-          [0;33m✗ qwen[0m  (not installed)
-          [0;33m✗ antigravity (agy)[0m  (not installed)
           [0;33m✗ reasonix[0m  (not installed)
 
       "
@@ -125,12 +115,7 @@ describe("frozen: roll agent list render", () => {
           ✓ claude  (current)
           ✓ kimi
           ✗ deepseek  (not installed)
-          ✗ opencode  (not installed)
-          ✗ codex  (not installed)
-          ✗ openai  (not installed)
           ✗ pi  (not installed)
-          ✗ qwen  (not installed)
-          ✗ antigravity (agy)  (not installed)
           ✗ reasonix  (not installed)
 
       "
@@ -150,12 +135,7 @@ describe("frozen: roll agent list render", () => {
             ✓ claude
             ✓ kimi  (current)
             ✗ deepseek  (not installed)
-            ✗ opencode  (not installed)
-            ✗ codex  (not installed)
-            ✗ openai  (not installed)
             ✗ pi  (not installed)
-            ✗ qwen  (not installed)
-            ✗ antigravity (agy)  (not installed)
             ✗ reasonix  (not installed)
 
         "

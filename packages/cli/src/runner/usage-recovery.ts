@@ -1,13 +1,14 @@
 /**
  * Session-file usage recovery (cli adapters over core's pure summers).
  *
- * FIX-303 broadened this from pi-only to the three agents whose `-p`/`exec`
- * stdout carries no parseable usage — pi, kimi, and codex — so a real cycle
- * for any of them no longer records `usage_unknown` (tokens "?", cost $0).
- * Each agent persists authoritative per-turn usage to its own store, and the
- * core summers (`sumPiSession`/`sumKimiWire`/`sumCodexSession`) normalize all
- * three onto the ONE 4-component model; these adapters do the per-agent file
- * discovery the core deliberately leaves to the caller.
+ * FIX-303 broadened this from pi-only to the agents whose `-p` stdout carries no
+ * parseable usage — pi and kimi — so a real cycle for either no longer records
+ * `usage_unknown` (tokens "?", cost $0). Each agent persists authoritative
+ * per-turn usage to its own store, and the core summers
+ * (`sumPiSession`/`sumKimiWire`) normalize both onto the ONE 4-component model;
+ * these adapters do the per-agent file discovery the core deliberately leaves to
+ * the caller. (The codex recovery lane was removed with codex from the agent
+ * pool — owner ruling: the unattended loop only spawns kimi/pi/reasonix.)
  *
  * FIX-249 — pi session-file usage recovery (cli adapter).
  *
@@ -26,16 +27,14 @@
  * THIS cycle (mtime ≥ cycle start), sum, and shape the result as AgentUsage so
  * `toCycleCost` prices it from the table (pi reports no list cost).
  */
-import { type Dirent, readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import {
-  CODEX_DEFAULT_MODEL,
   KIMI_DEFAULT_MODEL,
   PI_DEFAULT_MODEL,
   type AgentUsage,
   aggregateSessions,
-  sumCodexSession,
   sumKimiWire,
   sumPiSession,
 } from "@roll/core";
@@ -155,180 +154,4 @@ export function recoverKimiUsage(
     cache_creation_tokens: agg.cache_creation_tokens,
     cache_read_tokens: agg.cache_read_tokens,
   };
-}
-
-// ── codex session-file recovery (FIX-303) ────────────────────────────────────
-
-/** Default codex CLI session store root (env override → ~/.codex/sessions). */
-export function defaultCodexSessionsRoot(): string {
-  return (process.env["ROLL_CODEX_SESSIONS_DIR"] ?? "").trim() || join(homedir(), ".codex", "sessions");
-}
-
-/** Recursively collect `rollout-*.jsonl` files under a codex sessions root
- *  (codex shards by `<root>/YYYY/MM/DD/rollout-*.jsonl`). Tolerant of a missing
- *  root and unreadable subdirs — a probe miss is never a cycle failure. */
-function collectCodexRollouts(root: string): string[] {
-  const out: string[] = [];
-  const walk = (dir: string, depth: number): void => {
-    if (depth > 6) return;
-    let entries: Dirent[];
-    try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      const p = join(dir, e.name);
-      if (e.isDirectory()) walk(p, depth + 1);
-      else if (e.isFile() && e.name.startsWith("rollout-") && e.name.endsWith(".jsonl")) out.push(p);
-    }
-  };
-  walk(root, 0);
-  return out;
-}
-
-/**
- * Recover this cycle's codex usage from its persisted session jsonl (FIX-303:
- * codex `exec` prints no usage footer, so the stdout-scrape lane is always
- * null — without this the codex runs row showed tokens "?"/cost $0). codex
- * writes one `rollout-*.jsonl` per session under
- *   <root>/YYYY/MM/DD/rollout-<ts>-<id>.jsonl
- * whose `session_meta` carries the run `cwd`. Scope: select rollouts whose
- * `session_meta.payload.cwd` matches the cycle worktree (basename, robust to
- * realpath/symlink differences) and whose mtime ≥ cycle start, then take the
- * one with the largest cumulative `total_token_usage` (the running total for
- * the cycle's worktree; an exec re-invocation appends a fresh cumulative
- * snapshot rather than splitting the count). Returns null when nothing is
- * attributable ("n/a, never fake zeros").
- */
-export function recoverCodexUsage(
-  worktreeCwd: string,
-  sinceSec?: number,
-  sessionsRoot: string = defaultCodexSessionsRoot(),
-): AgentUsage | null {
-  const wantBasename = basename(worktreeCwd.replace(/\/+$/, ""));
-  const files = collectCodexRollouts(sessionsRoot);
-  let best: AgentUsage | null = null;
-  let bestTokens = -1;
-  for (const p of files) {
-    let raw: string;
-    try {
-      if (sinceSec !== undefined && statSync(p).mtimeMs / 1000 < sinceSec) continue;
-      raw = readFileSync(p, "utf8");
-    } catch {
-      continue;
-    }
-    if (!sessionCwdMatches(raw, worktreeCwd, wantBasename)) continue;
-    const agg = sumCodexSession(raw.split("\n"));
-    if (agg === null) continue;
-    const tokens = agg.input_tokens + agg.output_tokens + agg.cache_read_tokens + agg.cache_creation_tokens;
-    if (tokens > bestTokens) {
-      bestTokens = tokens;
-      best = {
-        model: agg.model ?? CODEX_DEFAULT_MODEL,
-        input_tokens: agg.input_tokens,
-        output_tokens: agg.output_tokens,
-        cache_creation_tokens: agg.cache_creation_tokens,
-        cache_read_tokens: agg.cache_read_tokens,
-      };
-    }
-  }
-  return best;
-}
-
-/** Parse the codex session id from a `rollout-<ts>-<id>.jsonl` path. codex names
- *  each rollout `rollout-YYYY-MM-DDTHH-MM-SS-<uuid>.jsonl`; the session id is the
- *  trailing RFC-4122 UUID. Returns null when the basename doesn't carry one (so a
- *  malformed / non-rollout name never yields a bogus resume id). */
-export function parseCodexSessionId(rolloutPath: string): string | null {
-  const name = basename(rolloutPath);
-  // Anchor on a trailing UUID before `.jsonl` — robust to the dashes inside both
-  // the timestamp prefix and the UUID itself (a naive split on `-` would shatter
-  // both). 8-4-4-4-12 hex, case-insensitive.
-  const m = name.match(/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$/);
-  return m?.[1] ?? null;
-}
-
-/**
- * lever-4 (cross-card warm-context) — recover the codex SESSION ID of the work
- * just done in `worktreeCwd`, so the NEXT codex-routed card can resume it via
- * `codex exec resume <id>`. Reuses the exact discovery + scoping + selection of
- * `recoverCodexUsage` (collectCodexRollouts + sessionCwdMatches + highest-token
- * pick): the winning rollout is the cycle's authoritative session, and its id is
- * parsed from the `rollout-<ts>-<id>.jsonl` filename. `sinceSec` scopes to files
- * touched this cycle (mtime ≥ cycle start). Returns null when nothing is
- * attributable (no root / no matching rollout / no token total / unparseable id)
- * — the caller treats null as a capture-miss and stays cold (fail-safe).
- */
-export function recoverCodexSessionId(
-  worktreeCwd: string,
-  sinceSec?: number,
-  sessionsRoot: string = defaultCodexSessionsRoot(),
-): string | null {
-  return recoverCodexSessionCapture(worktreeCwd, sinceSec, sessionsRoot)?.sessionId ?? null;
-}
-
-export interface RecoveredCodexSession {
-  sessionId: string;
-  rolloutPath: string;
-  rolloutMtimeSec: number;
-}
-
-export function recoverCodexSessionCapture(
-  worktreeCwd: string,
-  sinceSec?: number,
-  sessionsRoot: string = defaultCodexSessionsRoot(),
-): RecoveredCodexSession | null {
-  const wantBasename = basename(worktreeCwd.replace(/\/+$/, ""));
-  const files = collectCodexRollouts(sessionsRoot);
-  let bestPath: string | null = null;
-  let bestMtimeSec = 0;
-  let bestTokens = -1;
-  for (const p of files) {
-    let raw: string;
-    let mtimeSec: number;
-    try {
-      mtimeSec = statSync(p).mtimeMs / 1000;
-      if (sinceSec !== undefined && mtimeSec < sinceSec) continue;
-      raw = readFileSync(p, "utf8");
-    } catch {
-      continue;
-    }
-    if (!sessionCwdMatches(raw, worktreeCwd, wantBasename)) continue;
-    const agg = sumCodexSession(raw.split("\n"));
-    if (agg === null) continue;
-    const tokens = agg.input_tokens + agg.output_tokens + agg.cache_read_tokens + agg.cache_creation_tokens;
-    if (tokens > bestTokens) {
-      bestTokens = tokens;
-      bestPath = p;
-      bestMtimeSec = mtimeSec;
-    }
-  }
-  if (bestPath === null) return null;
-  const sessionId = parseCodexSessionId(bestPath);
-  if (sessionId === null) return null;
-  return { sessionId, rolloutPath: bestPath, rolloutMtimeSec: bestMtimeSec };
-}
-
-/** True iff a codex rollout's `session_meta.payload.cwd` is the cycle worktree.
- *  Matches the full path first, then falls back to the basename so a realpath /
- *  symlink difference between the spawn cwd and the recorded cwd never drops a
- *  genuine match. */
-function sessionCwdMatches(raw: string, worktreeCwd: string, wantBasename: string): boolean {
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed === "") continue;
-    let o: Record<string, unknown>;
-    try {
-      o = JSON.parse(trimmed) as Record<string, unknown>;
-    } catch {
-      continue;
-    }
-    if (o["type"] !== "session_meta") continue;
-    const p = (o["payload"] ?? {}) as Record<string, unknown>;
-    const cwd = typeof p["cwd"] === "string" ? (p["cwd"] as string) : "";
-    if (cwd === "") return false;
-    return cwd === worktreeCwd || basename(cwd.replace(/\/+$/, "")) === wantBasename;
-  }
-  return false;
 }

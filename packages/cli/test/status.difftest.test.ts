@@ -85,7 +85,6 @@ describe("frozen: roll status render", () => {
 
         + AGENTS.md
         + CLAUDE.md
-        − GEMINI.md  missing
         + .cursor-rules
         − project_rules.md  missing
 
@@ -96,10 +95,10 @@ describe("frozen: roll status render", () => {
         name          convention    sync          skills
         ────────────────────────────────────────────────────────────────────────────────────────────────
         claude        CLAUDE.md     ✓ in sync     12
-        cursor        AGENTS.md     ~ out of sync 12
-             fix: roll setup -f cursor
-        agy           GEMINI.md     − missing     0
-             fix: roll setup -f agy
+        kimi          AGENTS.md     ~ out of sync 12
+             fix: roll setup -f kimi
+        pi            AGENTS.md     − missing     0
+             fix: roll setup -f pi
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -151,12 +150,12 @@ describe("frozen: roll status render", () => {
     writeFileSync(join(claudeDir, "roll.md"), "ROLL GLOBAL\n");
     writeFileSync(join(gd, "CLAUDE.md"), "ROLL GLOBAL\n"); // src == roll.md
     // missing client: dir exists but no cfg file
-    mkdirSync(join(home, ".cursor"), { recursive: true });
+    mkdirSync(join(home, ".kimi"), { recursive: true });
     writeFileSync(
       join(rollHome, "config.yaml"),
       [
         `ai_claude: ${claudeDir}|CLAUDE.md|CLAUDE.md`,
-        `ai_cursor: ${join(home, ".cursor")}|AGENTS.md|AGENTS.md`,
+        `ai_kimi: ${join(home, ".kimi")}|AGENTS.md|AGENTS.md`,
         "",
       ].join("\n"),
     );
@@ -195,7 +194,6 @@ describe("frozen: roll status render", () => {
 
         + AGENTS.md
         + CLAUDE.md
-        − GEMINI.md  missing
         + .cursor-rules
         − project_rules.md  missing
 
@@ -206,8 +204,8 @@ describe("frozen: roll status render", () => {
         name          convention    sync          skills
         ────────────────────────────────────────────────────────────────────────────────────────────────
         claude        CLAUDE.md     ✓ in sync     2
-        cursor        AGENTS.md     − missing     0
-             fix: roll setup -f cursor
+        kimi          AGENTS.md     − missing     0
+             fix: roll setup -f kimi
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 

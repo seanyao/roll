@@ -67,7 +67,7 @@ function projectSlugPy(): string {
 }
 
 // ── Data loaders (mirror the python loaders 1:1) ─────────────────────────────
-const CONVENTION_FILES = ["AGENTS.md", "CLAUDE.md", "GEMINI.md", ".cursor-rules", "project_rules.md"];
+const CONVENTION_FILES = ["AGENTS.md", "CLAUDE.md", ".cursor-rules", "project_rules.md"];
 const TEMPLATES = ["fullstack", "frontend-only", "backend-service", "cli"];
 
 type Conventions = Array<[string, boolean]>;
@@ -213,14 +213,13 @@ function fixtureData(): StatusData {
     conventions: [
       ["AGENTS.md", true],
       ["CLAUDE.md", true],
-      ["GEMINI.md", false],
       [".cursor-rules", true],
       ["project_rules.md", false],
     ],
     ai_clients: [
       { name: "claude", cfg_file: "CLAUDE.md", path: "~/.claude/CLAUDE.md", sync: "sync", skills: 12 },
-      { name: "cursor", cfg_file: "AGENTS.md", path: "~/.cursor/AGENTS.md", sync: "out-of-sync", skills: 12 },
-      { name: "agy", cfg_file: "GEMINI.md", path: "~/.gemini/GEMINI.md", sync: "missing", skills: 0 },
+      { name: "kimi", cfg_file: "AGENTS.md", path: "~/.kimi/AGENTS.md", sync: "out-of-sync", skills: 12 },
+      { name: "pi", cfg_file: "AGENTS.md", path: "~/.pi/agent/AGENTS.md", sync: "missing", skills: 0 },
     ],
     templates: [
       ["fullstack", 14],

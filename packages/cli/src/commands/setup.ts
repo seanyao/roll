@@ -300,10 +300,7 @@ export function setupCommand(args: string[]): number {
   submoduleGuard();
 
   const home = rollHome();
-  const aiDirsList = [
-    ".claude", ".gemini", ".kimi", ".kimi-code", ".codex", ".cursor", ".trae",
-    ".config/opencode", ".openclaw", ".pi", ".deepseek", ".qwen",
-  ];
+  const aiDirsList = [".claude", ".kimi", ".kimi-code", ".pi", ".deepseek", ".reasonix"];
   const homeDir = process.env["HOME"] ?? "";
   const aiDirs = aiDirsList.map((d) => join(homeDir, d)).join(":");
 

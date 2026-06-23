@@ -66,20 +66,14 @@ function agentBinNames(agent: string): string[] | null {
   switch (agent) {
     case "claude":
       return ["claude"];
-    case "codex":
-    case "openai":
-      return ["codex"];
-    case "agy":
-    case "gemini":
-      return ["agy", "gemini"];
     case "kimi":
       return ["kimi-code", "kimi-cli", "kimi"];
     case "deepseek":
       return ["deepseek"];
-    case "qwen":
-      return ["qwen"];
     case "pi":
       return ["pi"];
+    case "reasonix":
+      return ["reasonix"];
     default:
       return null;
   }
@@ -100,29 +94,9 @@ function commandOnPath(bin: string): boolean {
 }
 /** Faithful port of bin/roll _agent_installed_by_name(name, dir) (137-169). */
 function agentInstalledByName(agent: string, dir: string): boolean {
-  const home = homedir();
-  switch (agent) {
-    case "trae":
-      return existsSync(join(home, "Library", "Application Support", "Trae")) || existsSync(join(home, ".config", "Trae"));
-    case "opencode": {
-      const p = join(home, ".opencode", "bin", "opencode");
-      try {
-        accessSync(p, constants.X_OK);
-        return statSync(p).isFile();
-      } catch {
-        return false;
-      }
-    }
-    case "cursor":
-      return commandOnPath("cursor") || existsSync(join(home, ".cursor"));
-    case "openclaw":
-      return existsSync(join(home, ".openclaw", "workspace"));
-    default: {
-      const bins = agentBinNames(agent);
-      if (bins !== null) return bins.some(commandOnPath);
-      return dir !== "" && existsSync(dir) && safeIsDir(dir); // unknown → dir presence
-    }
-  }
+  const bins = agentBinNames(agent);
+  if (bins !== null) return bins.some(commandOnPath);
+  return dir !== "" && existsSync(dir) && safeIsDir(dir); // unknown → dir presence
 }
 function safeIsDir(p: string): boolean {
   try {

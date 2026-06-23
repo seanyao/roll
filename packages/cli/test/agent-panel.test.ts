@@ -66,14 +66,14 @@ describe("collectAgentPanel", () => {
     expect(kimi.setupCmd).toBe("roll setup -f kimi");
   });
 
-  it("live regression: alias config entries collapse into the canonical agent row", () => {
+  it("installed + config entry for the same agent merge into one row", () => {
     const p = project([]);
     const rows = collectAgentPanel(p, {
-      installed: () => ["agy"],
+      installed: () => ["kimi"],
       versionOf: () => null,
       nowSec: () => NOW,
-      aiEntries: () => [{ name: "antigravity", ai_dir: "/nonexistent/.antigravity", cfg_file: "AGENTS.md", src_file: "AGENTS.md" }],
+      aiEntries: () => [{ name: "kimi", ai_dir: "/nonexistent/.kimi", cfg_file: "AGENTS.md", src_file: "AGENTS.md" }],
     });
-    expect(rows.filter((r) => r.name === "agy" || r.name === "antigravity")).toHaveLength(1);
+    expect(rows.filter((r) => r.name === "kimi")).toHaveLength(1);
   });
 });

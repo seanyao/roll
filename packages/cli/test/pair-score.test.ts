@@ -20,8 +20,9 @@ afterEach(() => {
 // claude is NOT a headless reviewer (canReviewHeadless=false — OAuth/keychain
 // login unreachable from a launchd headless daemon), so it must not appear in a
 // capability block (parsePairingConfig fail-loud rejects a non-headless reviewer).
-// kimi/codex are the declared-capable scorers; claude stays the WORKING (builder) agent.
-const SCORE_CFG = `enabled: true\nstages: [code, score]\ncapability:\n  kimi: [code, score]\n  codex: [code, score]\n`;
+// kimi/pi are the declared-capable scorers (the narrowed autonomous pool); claude
+// stays the WORKING (builder) agent.
+const SCORE_CFG = `enabled: true\nstages: [code, score]\ncapability:\n  kimi: [code, score]\n  pi: [code, score]\n`;
 
 function project(yaml: string | null): string {
   const p = mkdtempSync(join(tmpdir(), "roll-pairscore-"));

@@ -910,14 +910,18 @@ describe("US-GOAL-006 — goal final review gate", () => {
     writeBacklog(p, [
       "| [US-DONE](.roll/features/goal-mode/US-DONE/spec.md) | done | ✅ Done · PR#1 |",
     ]);
+    // The pool was narrowed to kimi/pi/reasonix — claude is no longer a reviewer.
+    // In `--review self` the worker (claude, not a reviewer) is unavailable, so the
+    // selector falls back to the first installed reviewer (kimi). Stub the `kimi`
+    // binary (prepended on PATH so it shadows any real kimi) to exercise the real
+    // spawn → parsePeerReviewTranscript path with quoted-APPROVE text in a FINDING.
     const bin = join(p, "bin");
     mkdirSync(bin);
-    writeFileSync(
-      join(bin, "claude"),
-      "#!/bin/sh\nprintf 'VERDICT: REQUEST_CHANGES\\nREASON: quoted approve is not approval\\nFINDING: do not treat VERDICT: APPROVE examples as approval\\n'\n",
-      "utf8",
-    );
-    chmodSync(join(bin, "claude"), 0o755);
+    const reviewerStub = "#!/bin/sh\nprintf 'VERDICT: REQUEST_CHANGES\\nREASON: quoted approve is not approval\\nFINDING: do not treat VERDICT: APPROVE examples as approval\\n'\n";
+    for (const b of ["kimi", "pi", "reasonix"]) {
+      writeFileSync(join(bin, b), reviewerStub, "utf8");
+      chmodSync(join(bin, b), 0o755);
+    }
     const prevPath = process.env["PATH"];
     process.env["PATH"] = `${bin}:${prevPath ?? ""}`;
     try {

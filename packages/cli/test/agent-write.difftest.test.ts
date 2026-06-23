@@ -108,21 +108,14 @@ describe("roll agent write surface", () => {
   });
 
   it("use locks easy/default/hard and syncs local.yaml", () => {
-    const r = run(["use", "claude"], { installed: ["claude"] });
+    const r = run(["use", "kimi"], { installed: ["kimi"] });
     expect(r.code).toBe(0);
     expect(r.stderr).toBe("");
-    expect(r.stdout).toBe("[roll] easy/default/hard all locked to claude  (fallback unchanged)\n");
+    expect(r.stdout).toBe("[roll] easy/default/hard all locked to kimi  (fallback unchanged)\n");
     expect(readFileSync(join(r.cwd, ".roll", "agents.yaml"), "utf8")).toBe(
-      "schema: v3\neasy: { agent: claude }\ndefault: { agent: claude }\nhard: { agent: claude }\n",
+      "schema: v3\neasy: { agent: kimi }\ndefault: { agent: kimi }\nhard: { agent: kimi }\n",
     );
-    expect(readFileSync(join(r.cwd, ".roll", "local.yaml"), "utf8")).toBe("agent: claude\n");
-  });
-
-  it("use canonicalizes antigravity to agy", () => {
-    const r = run(["use", "antigravity"], { installed: ["agy"] });
-    expect(r.code).toBe(0);
-    expect(r.stdout).toBe("[roll] easy/default/hard all locked to antigravity (agy)  (fallback unchanged)\n");
-    expect(readFileSync(join(r.cwd, ".roll", "agents.yaml"), "utf8")).toContain("easy: { agent: agy }");
+    expect(readFileSync(join(r.cwd, ".roll", "local.yaml"), "utf8")).toBe("agent: kimi\n");
   });
 
   it("use rejects known but uninstalled agents", () => {
@@ -178,12 +171,12 @@ describe("roll agent write surface", () => {
   });
 
   it("use removes the legacy root .roll.yaml agent line", () => {
-    const r = run(["use", "claude"], {
-      installed: ["claude"],
+    const r = run(["use", "kimi"], {
+      installed: ["kimi"],
       before: (cwd) => {
         rmSync(join(cwd, ".roll.yaml"), { force: true });
         // Include another key so the file is preserved after the agent line is removed.
-        writeFileSync(join(cwd, ".roll.yaml"), "agent: kimi\nother: kept\n", "utf8");
+        writeFileSync(join(cwd, ".roll.yaml"), "agent: pi\nother: kept\n", "utf8");
       },
     });
     const legacy = join(r.cwd, ".roll.yaml");

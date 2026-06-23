@@ -29,7 +29,7 @@ import type { GoTmuxState } from "../src/commands/loop-go.js";
 const CLI_BIN = join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "roll.js");
 
 const CYCLE_STREAM = [
-  "── cycle 20260614-1 · US-LOOP-074 · agent claude ──",
+  "── cycle 20260614-1 · US-LOOP-074 · agent kimi ──",
   JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Edit", input: { file_path: "packages/cli/src/commands/loop-watch.ts" } }] } }),
   JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "let me reason about this for a while" }] } }), // tier C
   JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "git commit -m 'tcr: add watch'" } }] } }),
@@ -299,15 +299,17 @@ describe("roll loop watch — read-only (AC2)", () => {
 });
 
 describe("roll loop watch — concise by default, verbose reveals raw (AC3)", () => {
-  it("default hides tier-C agent prose; key nodes (story/edit/tcr/cycle done) show", async () => {
+  it("default shows the cycle banner but hides tier-C agent prose", async () => {
+    // Pool narrowing: the orchestrated agents are kimi/pi/reasonix and claude is
+    // no longer a pool agent — all route to the generic normalizer, which surfaces
+    // the cycle banner (tier-A lifecycle) and folds every other line to tier-C
+    // "say" (hidden by default, shown only with --verbose/--raw).
     const rec = makeDeps();
     await loopWatchCommand([], rec.deps);
     const out = rec.rendered.join("\n");
-    expect(out).toContain("US-LOOP-074"); // story banner
-    expect(out).toContain("loop-watch.ts"); // edit (folded)
-    expect(out).toContain("def4567"); // tcr
-    expect(out).toContain("cycle done"); // lifecycle end + cost
-    expect(out).not.toContain("let me reason"); // tier C hidden by default
+    expect(out).toContain("US-LOOP-074"); // story banner (lifecycle, always shown)
+    expect(out).not.toContain("let me reason"); // tier-C prose hidden by default
+    expect(out).not.toContain("def4567"); // raw agent line is tier-C, hidden by default
   });
 
   it("--verbose surfaces the tier-C prose", async () => {
@@ -443,8 +445,10 @@ describe("roll loop watch — mid-stream rendering + read-only (AC4/AC2, spawned
     const rt = join(dir, ".roll", "loop");
     mkdirSync(rt, { recursive: true });
     const live = join(rt, "live.log");
-    // Seed only the banner — the rest arrives AFTER the watcher attaches.
-    writeFileSync(live, "── cycle 20260614-9 · US-LOOP-074 · agent claude ──\n", "utf8");
+    // Seed only the first banner — the rest arrives AFTER the watcher attaches.
+    // Pool narrowing: the worker is kimi (generic normalizer), which surfaces
+    // cycle banners (tier-A lifecycle) in the concise default view.
+    writeFileSync(live, "── cycle 20260614-9 · US-LOOP-074 · agent kimi ──\n", "utf8");
 
     const child = spawn("node", [CLI_BIN, "loop", "watch", "-n", "all"], {
       cwd: dir,
@@ -453,7 +457,7 @@ describe("roll loop watch — mid-stream rendering + read-only (AC4/AC2, spawned
         NO_COLOR: "1",
         ROLL_MAIN_SLUG: "watch-e2e",
         ROLL_PROJECT_RUNTIME_DIR: rt,
-        ROLL_LOOP_AGENT: "claude",
+        ROLL_LOOP_AGENT: "kimi",
       },
       stdio: ["ignore", "pipe", "ignore"],
     });
@@ -462,13 +466,14 @@ describe("roll loop watch — mid-stream rendering + read-only (AC4/AC2, spawned
       out += String(d);
     });
 
-    // After the watcher is following, append a tcr result mid-stream.
+    // After the watcher is following, append a SECOND cycle banner mid-stream.
+    // A banner is a tier-A lifecycle node the generic normalizer renders in the
+    // concise default view, so its appearance proves the stream did not freeze.
     await new Promise((r) => setTimeout(r, 600));
-    appendFileSync(live, JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "git commit -m 'tcr: live append'" } }] } }) + "\n", "utf8");
-    appendFileSync(live, JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", is_error: false, content: "[story/x abcd123] tcr: live append" }] } }) + "\n", "utf8");
+    appendFileSync(live, "── cycle 20260614-9 · US-LOOP-099 · agent kimi ──\n", "utf8");
     await new Promise((r) => setTimeout(r, 800));
 
-    // Read-only: the only bytes in live.log are the banner + OUR two appends.
+    // Read-only: the only bytes in live.log are the banner + OUR append.
     // If watch ever wrote, the size would exceed this exact expected length.
     const expectedBytes = statSync(live).size;
     child.kill("SIGINT");
@@ -477,6 +482,6 @@ describe("roll loop watch — mid-stream rendering + read-only (AC4/AC2, spawned
 
     // The mid-stream append rendered (it did NOT look frozen) — the core AC4 claim.
     expect(out).toContain("US-LOOP-074"); // seeded banner
-    expect(out).toContain("abcd123"); // the tcr that arrived AFTER attach
+    expect(out).toContain("US-LOOP-099"); // the banner that arrived AFTER attach
   }, 15_000);
 });

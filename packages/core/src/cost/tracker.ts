@@ -9,12 +9,11 @@
  *       `extract(lines) -> dict | None`; a result missing any required field
  *       (`model`/`input_tokens`/`output_tokens`/`cost_list_usd`) is treated as
  *       None (caller falls back to the null payload). {@link extractUsage}.
- *   - stdout-scrape adapters openai / gemini / kimi / qwen
- *       (lib/agent_usage/{openai,gemini,kimi,qwen}.py): IDENTICAL parsing — only
- *       the default model differs. One generic {@link makeStdoutExtractor} +
- *       a per-agent default mirrors all four. The regexes, the
+ *   - stdout-scrape adapter kimi (lib/agent_usage/kimi.py): one generic
+ *       {@link makeStdoutExtractor} + a per-agent default. The regexes, the
  *       total-without-split fallback, and the price-table cost fallback are
- *       ported line-for-line.
+ *       ported line-for-line. (The overseas stdout-scrape adapters — openai /
+ *       gemini / qwen — were removed with their agents from the pool.)
  *   - pi adapter `extract()` stub (lib/agent_usage/pi.py:27-35): pi `-p` text
  *       mode carries no usage → always None. {@link piExtract}.
  *   - session-file summers `_sum_session_file` (pi.py:53-108) /
@@ -57,9 +56,9 @@ export type Extractor = (lines: readonly string[]) => AgentUsage | null;
 
 // ── Stdout-scrape adapters (openai / gemini / kimi / qwen) ───────────────────
 
-// Regexes ported verbatim from the four adapter modules. openai's TOTAL regex
-// also accepts "tokens used"; gemini/kimi/qwen use a plain "total" anchor. The
-// MODEL/INPUT/OUTPUT/COST regexes are identical across all four.
+// Regexes ported verbatim from the adapter modules. The "openai" TOTAL flavour
+// also accepts "tokens used"; the generic flavour (kimi + the generic fallback)
+// uses a plain "total" anchor. The MODEL/INPUT/OUTPUT/COST regexes are shared.
 const MODEL_RE = /^\s*model\s*[:=]\s*([A-Za-z0-9][\w.\-]*)/i;
 const INPUT_RE = /input(?:\s+tokens)?\s*[:=]\s*([\d,]+)/i;
 const OUTPUT_RE = /output(?:\s+tokens)?\s*[:=]\s*([\d,]+)/i;
@@ -78,17 +77,16 @@ export interface StdoutAgentSpec {
   totalKind: "openai" | "generic";
 }
 
-/** The default models + total-regex flavour for the four stdout-scrape agents. */
+/** The default models + total-regex flavour for the stdout-scrape agents. The
+ *  `openai` total-regex flavour (TOTAL_RE_OPENAI) is retained for the generic
+ *  fallback's symmetry, but no pool agent uses it. */
 export const STDOUT_AGENTS: Record<string, StdoutAgentSpec> = {
-  openai: { defaultModel: "gpt-4o", totalKind: "openai" },
-  gemini: { defaultModel: "gemini-2.5-pro", totalKind: "generic" },
   kimi: { defaultModel: "kimi-k2", totalKind: "generic" },
-  qwen: { defaultModel: "qwen-coder-plus", totalKind: "generic" },
 };
 
 /**
- * Build a stdout-scrape extractor mirroring the openai/gemini/kimi/qwen
- * `extract()` bodies line-for-line: scan every line accumulating the last-seen
+ * Build a stdout-scrape extractor mirroring the kimi `extract()` body
+ * line-for-line: scan every line accumulating the last-seen
  * model / input / output / total / cost; require ≥1 token figure; derive
  * input from a bare total; default the model; and fall back to the price table
  * for cost when no explicit cost line was present.
@@ -151,30 +149,19 @@ export function makeStdoutExtractor(spec: StdoutAgentSpec): Extractor {
   };
 }
 
-export const openaiExtract: Extractor = makeStdoutExtractor(
-  STDOUT_AGENTS["openai"] as StdoutAgentSpec,
-);
-export const geminiExtract: Extractor = makeStdoutExtractor(
-  STDOUT_AGENTS["gemini"] as StdoutAgentSpec,
-);
 export const kimiExtract: Extractor = makeStdoutExtractor(
   STDOUT_AGENTS["kimi"] as StdoutAgentSpec,
-);
-export const qwenExtract: Extractor = makeStdoutExtractor(
-  STDOUT_AGENTS["qwen"] as StdoutAgentSpec,
 );
 
 /** pi `extract()` stub: text-mode stdout carries no usage → always null. */
 export const piExtract: Extractor = (): AgentUsage | null => null;
 
-/** The stdout-scrape registry (pi maps to its always-null stub). */
+/** The stdout-scrape registry (pi maps to its always-null stub). `claude-stream`
+ *  is harness-only — claude is not a pool agent but powers harness cost tracking. */
 export const REGISTRY: Record<string, Extractor> = {
   "claude-stream": sumClaudeStream,
   pi: piExtract,
-  openai: openaiExtract,
-  gemini: geminiExtract,
   kimi: kimiExtract,
-  qwen: qwenExtract,
   generic: makeStdoutExtractor({ defaultModel: "generic", totalKind: "generic" }),
 };
 
@@ -314,69 +301,6 @@ export function sumKimiWire(lines: readonly string[]): SessionAgg | null {
     output_tokens: tout,
     cache_creation_tokens: tcw,
     cache_read_tokens: tcr,
-    cost_reported: 0,
-  };
-}
-
-/** FIX-303: exported — the cli codex session-recovery adapter needs the same
- *  default when a codex session omits its model id. Tracks the codex CLI's
- *  current default model (gpt-5.5); priced in USD via the openai/gpt snapshot. */
-export const CODEX_DEFAULT_MODEL = "gpt-5.5";
-
-/**
- * Sum a codex CLI session `rollout-*.jsonl`, mirroring how pi/kimi recover from
- * their persisted stores (FIX-303 — codex `exec` prints no parseable usage
- * footer, so its stdout-scrape lane is always null; the authoritative usage
- * lives in `~/.codex/sessions/**` + `/rollout-*.jsonl`). Each `event_msg` line
- * whose `payload.type === "token_count"` carries a CUMULATIVE
- * `info.total_token_usage` snapshot, so — unlike pi/kimi per-message lines that
- * SUM — the running total is the LAST snapshot (taking the max guards against an
- * out-of-order tail). Field mapping (OpenAI billing): codex `input_tokens`
- * INCLUDES `cached_input_tokens`, so cache-miss input = input − cached;
- * cache_read = cached_input_tokens; output = output_tokens (reasoning is already
- * counted within the billed output total, not additive); OpenAI levies no
- * cache-write surcharge so cache_creation = 0. The model is the session's
- * `turn_context` / `session_meta` `payload.model`. Returns null when no
- * token_count event was seen ("n/a, never fake zero").
- */
-export function sumCodexSession(lines: readonly string[]): SessionAgg | null {
-  let inputTotal = 0;
-  let cachedTotal = 0;
-  let outputTotal = 0;
-  let model: string | null = null;
-  let seen = false;
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (line === "") continue;
-    let o: Record<string, unknown>;
-    try {
-      o = JSON.parse(line) as Record<string, unknown>;
-    } catch {
-      continue;
-    }
-    const p = (o["payload"] ?? {}) as Record<string, unknown>;
-    const type = o["type"];
-    if ((type === "session_meta" || type === "turn_context") && typeof p["model"] === "string" && p["model"]) {
-      model = p["model"] as string;
-    }
-    if (type !== "event_msg" || p["type"] !== "token_count") continue;
-    const info = (p["info"] ?? {}) as Record<string, unknown>;
-    const total = info["total_token_usage"] as Record<string, unknown> | undefined | null;
-    if (!total) continue;
-    seen = true;
-    // Cumulative snapshots: take the max so an out-of-order tail can't shrink it.
-    inputTotal = Math.max(inputTotal, intOr(total["input_tokens"]));
-    cachedTotal = Math.max(cachedTotal, intOr(total["cached_input_tokens"]));
-    outputTotal = Math.max(outputTotal, intOr(total["output_tokens"]));
-  }
-  if (!seen) return null;
-  const cacheRead = Math.min(cachedTotal, inputTotal);
-  return {
-    model: model ?? CODEX_DEFAULT_MODEL,
-    input_tokens: Math.max(0, inputTotal - cacheRead),
-    output_tokens: outputTotal,
-    cache_creation_tokens: 0,
-    cache_read_tokens: cacheRead,
     cost_reported: 0,
   };
 }

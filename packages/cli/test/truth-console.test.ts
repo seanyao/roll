@@ -60,7 +60,7 @@ const AGENTS = [
     syncStale: true, setupCmd: "roll setup -f kimi",
   },
   {
-    name: "trae", display: "trae", runner: "trae CLI", version: "—", installed: false,
+    name: "pi", display: "pi", runner: "pi CLI", version: "—", installed: false,
     cycles72h: 0, costUsd72h: 0, files: [], syncStale: false,
   },
 ];
@@ -504,7 +504,10 @@ describe("collectLoopLiveFeed — US-DOSSIER-044", () => {
     writeFileSync(
       join(dir, ".roll", "loop", "live.log"),
       [
-        "── cycle 20260619-1 · US-DOSSIER-044 · agent claude ──",
+        // Pool narrowing: the worker is kimi (generic normalizer). The concise
+        // feed surfaces the cycle banner (tier-A lifecycle); every other line is
+        // tier-C "say" and is dropped from the concise (verbose:false) view.
+        "── cycle 20260619-1 · US-DOSSIER-044 · agent kimi ──",
         JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Edit", input: { file_path: "packages/cli/src/lib/truth-console.ts" } }] } }),
         JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "hidden tier C prose" }] } }),
         JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "pnpm test" } }] } }),
@@ -520,11 +523,10 @@ describe("collectLoopLiveFeed — US-DOSSIER-044", () => {
     expect(feed.status).toBe("live");
     expect(feed.relativeHref).toBe("../loop/live.log");
     expect(feed.rawLineCount).toBe(6);
-    expect(out).toContain("US-DOSSIER-044");
-    expect(out).toContain("truth-console.ts");
-    expect(out).toContain("pnpm test");
-    expect(out).toContain("cycle done");
+    expect(out).toContain("US-DOSSIER-044"); // banner (lifecycle) surfaces in concise feed
+    // The raw agent prose / tool lines are tier-C and stay out of the concise feed.
     expect(out).not.toContain("hidden tier C prose");
+    expect(out).not.toContain("def4567");
   });
 
   it("renders idle explicitly when no live.log exists", () => {

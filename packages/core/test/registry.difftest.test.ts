@@ -33,14 +33,16 @@ afterAll(() => {
 });
 
 describe("frozen: identity helpers == bash", () => {
-  const names = ["antigravity", "gemini", "agy", "claude", "codex", "kimi", "weird"];
-  const CANON = ["agy", "agy", "agy", "claude", "codex", "kimi", "weird"];
-  const DISPLAY = ["antigravity (agy)", "antigravity (agy)", "antigravity (agy)", "claude", "codex", "kimi", "weird"];
+  // Overseas agents + their aliases were removed from the pool, so
+  // canonicalAgentName / agentDisplayName are now no-ops: every name (including
+  // unknowns) is returned verbatim.
+  const names = ["kimi", "pi", "reasonix", "deepseek", "weird"];
+  const VERBATIM = ["kimi", "pi", "reasonix", "deepseek", "weird"];
   it("canonicalAgentName", () => {
-    expect(names.map((n) => canonicalAgentName(n))).toEqual(CANON);
+    expect(names.map((n) => canonicalAgentName(n))).toEqual(VERBATIM);
   });
   it("agentDisplayName", () => {
-    expect(names.map((n) => agentDisplayName(n))).toEqual(DISPLAY);
+    expect(names.map((n) => agentDisplayName(n))).toEqual(VERBATIM);
   });
 });
 
@@ -116,32 +118,22 @@ describe("frozen: installed-by-name under a fabricated PATH/HOME", () => {
     };
   }
 
-  it("binary on a fabricated PATH → installed (codex/openai), others absent", () => {
+  it("binary on a fabricated PATH → installed (pi), others absent", () => {
     const sandbox = mkdtempSync(join(tmpdir(), "roll-path-"));
     dirs.push(sandbox);
     const binDir = join(sandbox, "bin");
     const home = join(sandbox, "home");
     mkdirSync(binDir, { recursive: true });
     mkdirSync(home, { recursive: true });
-    const codex = join(binDir, "codex");
-    writeFileSync(codex, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-    execFileSync("chmod", ["+x", codex]);
+    const pi = join(binDir, "pi");
+    writeFileSync(pi, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    execFileSync("chmod", ["+x", pi]);
 
     const env = tsEnv(binDir, home);
-    // codex/openai both resolve to the codex binary → installed; claude/kimi absent.
-    const FROZEN: Record<string, boolean> = { codex: true, openai: true, claude: false, kimi: false };
+    // pi binary present → installed; kimi/reasonix binaries absent.
+    const FROZEN: Record<string, boolean> = { pi: true, kimi: false, reasonix: false };
     for (const [a, expected] of Object.entries(FROZEN)) {
       expect(agentInstalledByName(env, a)).toBe(expected);
     }
-  });
-
-  it("trae dir under fabricated HOME → installed", () => {
-    const sandbox = mkdtempSync(join(tmpdir(), "roll-home-"));
-    dirs.push(sandbox);
-    const binDir = join(sandbox, "bin");
-    const home = join(sandbox, "home");
-    mkdirSync(binDir, { recursive: true });
-    mkdirSync(join(home, ".config", "Trae"), { recursive: true });
-    expect(agentInstalledByName(tsEnv(binDir, home), "trae")).toBe(true);
   });
 });

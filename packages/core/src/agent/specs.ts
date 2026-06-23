@@ -1,20 +1,24 @@
-export type AgentNormalizerKind = "claude" | "codex" | "generic";
-export type UsageExtractorKind = "claude-stream" | "openai" | "gemini" | "kimi" | "qwen" | "pi" | "generic";
-export type SessionRecoveryKind = "pi" | "kimi" | "codex";
+// claude is KEPT here (harness): the loop runs inside Claude Code and claude is
+// used for harness cost/activity normalization, even though it is NOT a member of
+// the orchestrated agent POOL (see registry.ts). So "claude"/"claude-stream"
+// remain in these unions as harness kinds.
+export type AgentNormalizerKind = "claude" | "generic";
+export type UsageExtractorKind = "claude-stream" | "kimi" | "pi" | "generic";
+export type SessionRecoveryKind = "pi" | "kimi";
 export type SessionBackfillKind = "claude-projects";
 /** lever-4: how (if at all) an agent's prior session is REUSED across the next
  *  same-agent card (cross-card warm-context). Agent-AGNOSTIC capability — every
  *  engine declares its kind so the cycle path can resolve one adapter port and
- *  never branch per-agent. `'codex-exec-resume'` = resume via `codex exec resume
- *  <id>`; `'none'` (or absent) = cold no-op (the universal default). */
-export type SessionReuseKind = "codex-exec-resume" | "none";
+ *  never branch per-agent. `'none'` (or absent) = cold no-op (the universal
+ *  default — every current pool agent). */
+export type SessionReuseKind = "none";
 
 export interface AgentUsageSpec {
   stdoutExtractor?: UsageExtractorKind;
   sessionRecovery?: SessionRecoveryKind;
   sessionBackfill?: SessionBackfillKind;
-  /** lever-4 warm-context capability. Absent ⇒ cold no-op (every engine except
-   *  codex). Only codex declares `'codex-exec-resume'`. */
+  /** lever-4 warm-context capability. Absent ⇒ cold no-op (the universal default
+   *  for every current pool agent). */
   sessionReuse?: SessionReuseKind;
 }
 
@@ -32,34 +36,14 @@ export interface AgentSpec {
 
 export type AgentSpecRegistry = Readonly<Record<string, AgentSpec>>;
 
+// Owner ruling: the UNATTENDED loop may only spawn 国产/开源 agents —
+// kimi / pi / reasonix. The overseas agents (codex/openai, agy/antigravity/gemini,
+// qwen) were removed from the pool entirely. claude is SPECIAL: roll runs inside
+// Claude Code and claude powers harness cost/activity normalization, so its
+// harness machinery is kept (sumClaudeStream, claudeNormalizer, the "claude" /
+// "claude-stream" union members), but it is NOT a pool member — it has no
+// BASE_AGENT_SPECS entry and is absent from the registry's routable lists.
 const BASE_AGENT_SPECS: readonly AgentSpec[] = [
-  {
-    name: "claude",
-    displayName: "claude",
-    defaultModel: "claude-sonnet-4",
-    // claude can NOT be a headless peer reviewer — its auth is an OAuth/login
-    // token bound to the GUI login session (keychain), with no plaintext
-    // ANTHROPIC_API_KEY fallback set; a launchd headless daemon can't reach it,
-    // so `claude -p` review/score returns 401 (cause:auth). Evidence: 22 score+
-    // review auth blocks vs 1 successful score. Same rationale as agy (FIX-360):
-    // canReviewHeadless=false removes it from every reviewer pool path so the
-    // loop never spawns it as a headless reviewer. claude stays in the registry
-    // for manual / auth-having (interactive) use.
-    canReviewHeadless: false,
-    normalizer: "claude",
-    usage: { stdoutExtractor: "claude-stream", sessionBackfill: "claude-projects" },
-    smokeCommand: 'claude -p "Reply with a single word: hello"',
-  },
-  {
-    name: "codex",
-    aliases: ["openai"],
-    displayName: "codex",
-    defaultModel: "gpt-5.5",
-    canReviewHeadless: true,
-    normalizer: "codex",
-    usage: { stdoutExtractor: "openai", sessionRecovery: "codex", sessionReuse: "codex-exec-resume" },
-    smokeCommand: 'codex exec "Reply with a single word: hello"',
-  },
   {
     name: "kimi",
     displayName: "kimi",
@@ -68,32 +52,6 @@ const BASE_AGENT_SPECS: readonly AgentSpec[] = [
     normalizer: "generic",
     usage: { stdoutExtractor: "kimi", sessionRecovery: "kimi" },
     smokeCommand: 'kimi -p "Reply with a single word: hello"',
-  },
-  {
-    name: "qwen",
-    displayName: "qwen",
-    defaultModel: "qwen-coder-plus",
-    canReviewHeadless: true,
-    normalizer: "generic",
-    usage: { stdoutExtractor: "qwen" },
-    smokeCommand: 'qwen -p "Reply with a single word: hello"',
-  },
-  {
-    name: "agy",
-    aliases: ["antigravity", "gemini"],
-    displayName: "antigravity (agy)",
-    defaultModel: "gemini-2.5-pro",
-    // FIX-360: agy (antigravity/gemini) can NOT be a headless peer reviewer — its
-    // headless review keeps triggering an interactive Google OAuth login popup the
-    // owner has to clear by hand (agy needs a browser Google login it can't do
-    // headlessly). canReviewHeadless=false removes it from every reviewer pool path
-    // (defaultPairingConfig / selectPairingCandidates / parsePairingConfig), so the
-    // loop never spawns agy → no more OAuth popups. agy stays in the registry so it
-    // can still be used manually.
-    canReviewHeadless: false,
-    normalizer: "generic",
-    usage: { stdoutExtractor: "gemini" },
-    smokeCommand: 'agy -p "Reply with a single word: hello"',
   },
   {
     name: "reasonix",
@@ -114,44 +72,10 @@ const BASE_AGENT_SPECS: readonly AgentSpec[] = [
     usage: { stdoutExtractor: "pi", sessionRecovery: "pi" },
     smokeCommand: 'pi -p "Reply with a single word: hello"',
   },
-  {
-    name: "cursor",
-    displayName: "cursor",
-    defaultModel: "cursor",
-    normalizer: "generic",
-    usage: { stdoutExtractor: "generic" },
-    smokeCommand: 'cursor --version',
-  },
-  {
-    name: "opencode",
-    displayName: "opencode",
-    defaultModel: "opencode",
-    normalizer: "generic",
-    usage: { stdoutExtractor: "generic" },
-    smokeCommand: 'opencode --version',
-  },
-  {
-    name: "trae",
-    displayName: "trae",
-    defaultModel: "trae",
-    normalizer: "generic",
-    usage: { stdoutExtractor: "generic" },
-    smokeCommand: 'trae --version',
-  },
-  {
-    name: "openclaw",
-    displayName: "openclaw",
-    defaultModel: "openclaw",
-    normalizer: "generic",
-    usage: { stdoutExtractor: "generic" },
-    smokeCommand: 'openclaw --version',
-  },
 ];
 
 function canonicalSpecKey(name: string): string {
   const raw = name.trim().toLowerCase();
-  if (raw === "antigravity" || raw === "gemini") return "agy";
-  if (raw === "openai") return "codex";
   if (raw === "deepseek") return "pi";
   return raw;
 }

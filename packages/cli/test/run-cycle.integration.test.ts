@@ -223,7 +223,16 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
       return r;
     };
 
-    const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
+    // claude is no longer a pool agent (no AgentSpec), but the claude-stream
+    // harness cost extractor (sumClaudeStream) is KEPT and reachable via the
+    // "claude-stream" usage kind. Route this cost-folding E2E to "claude-stream"
+    // so the shim's claude wire-format stdout is parsed (the pool agents pi/kimi
+    // do not emit claude stream-json).
+    const claudeStreamRoute: RouteDeps = {
+      readSlot: () => "claude-stream",
+      firstInstalled: () => "claude-stream",
+    };
+    const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps: claudeStreamRoute });
     const ports: Ports = { ...base, agentSpawn: shim, github: fakeGithub(0) };
 
     const result = await runCycleOnce({
@@ -262,7 +271,7 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
       expect(Object.keys(row)).toContain(key);
     }
     expect(row["status"]).toBe("published"); // FIX-244: runs row keeps the pending-merge distinction for backfill
-    expect(row["agent"]).toBe("claude");
+    expect(row["agent"]).toBe("claude-stream");
     expect(row["cycle_id"]).toBe(cycleId);
     expect(row["story_id"]).toBe("US-RUN-001");
     expect(row["built"]).toEqual(["US-RUN-001"]);

@@ -6,14 +6,14 @@ describe("US-GOAL-006 — goal final review reviewer selection", () => {
     expect(
       selectGoalFinalReviewer({
         mode: "auto",
-        installedAgents: ["claude", "codex", "kimi"],
-        workerAgents: ["claude"],
+        installedAgents: ["kimi", "pi", "reasonix"],
+        workerAgents: ["kimi"],
       }),
     ).toMatchObject({
       status: "selected",
       effectiveMode: "hetero",
-      reviewer: "codex",
-      provider: "openai",
+      reviewer: "pi",
+      provider: "pi",
       degraded: false,
     });
   });
@@ -22,14 +22,14 @@ describe("US-GOAL-006 — goal final review reviewer selection", () => {
     expect(
       selectGoalFinalReviewer({
         mode: "auto",
-        installedAgents: ["claude"],
-        workerAgents: ["claude"],
+        installedAgents: ["kimi"],
+        workerAgents: ["kimi"],
       }),
     ).toEqual({
       status: "selected",
       effectiveMode: "self",
-      reviewer: "claude",
-      provider: "anthropic",
+      reviewer: "kimi",
+      provider: "moonshot",
       degraded: true,
       reason: "single_provider_available",
     });
@@ -39,8 +39,8 @@ describe("US-GOAL-006 — goal final review reviewer selection", () => {
     expect(
       selectGoalFinalReviewer({
         mode: "hetero",
-        installedAgents: ["codex"],
-        workerAgents: ["codex"],
+        installedAgents: ["kimi"],
+        workerAgents: ["kimi"],
       }),
     ).toEqual({
       status: "unavailable",
@@ -52,14 +52,14 @@ describe("US-GOAL-006 — goal final review reviewer selection", () => {
     expect(
       selectGoalFinalReviewer({
         mode: "self",
-        installedAgents: ["claude", "codex"],
-        workerAgents: ["claude"],
+        installedAgents: ["kimi", "pi"],
+        workerAgents: ["kimi"],
       }),
     ).toMatchObject({
       status: "selected",
       effectiveMode: "self",
-      reviewer: "claude",
-      provider: "anthropic",
+      reviewer: "kimi",
+      provider: "moonshot",
       degraded: false,
     });
   });

@@ -48,14 +48,9 @@ export interface AgentPanelDeps {
 
 const RUNNER_LABEL: Record<string, string> = {
   claude: "Claude Code",
-  codex: "Codex CLI",
-  openai: "Codex CLI",
   kimi: "Kimi CLI",
-  gemini: "Gemini CLI",
-  agy: "Gemini CLI",
   pi: "pi CLI",
-  cursor: "Cursor CLI",
-  qwen: "Qwen CLI",
+  reasonix: "reasonix CLI",
   deepseek: "DeepSeek CLI",
 };
 

@@ -11,11 +11,8 @@
 import { describe, expect, it } from "vitest";
 import {
   extractUsage,
-  geminiExtract,
   kimiExtract,
-  openaiExtract,
   piExtract,
-  qwenExtract,
   sumKimiWire,
   sumPiSession,
   type Extractor,
@@ -25,52 +22,17 @@ type Usage = Record<string, unknown> | null;
 
 const STDOUT_FIXTURES: Array<{ agent: string; ex: Extractor; lines: string[]; expected: Usage }> = [
   {
-    agent: "openai", ex: openaiExtract,
-    lines: ["Model: gpt-4o", "Token usage: total=18420 input=15300 output=3120"],
-    expected: { model: "gpt-4o", input_tokens: 15300, output_tokens: 3120, cost_list_usd: 0.0694, duration_ms: null },
-  },
-  {
-    agent: "openai", ex: openaiExtract,
-    lines: ["tokens used: 12,345"],
-    expected: { model: "gpt-4o", input_tokens: 12345, output_tokens: 0, cost_list_usd: 0.0309, duration_ms: null },
-  },
-  {
-    agent: "openai", ex: openaiExtract,
-    lines: ["input tokens: 15300", "output tokens: 3120", "model: o3-mini"],
-    expected: { model: "o3-mini", input_tokens: 15300, output_tokens: 3120, cost_list_usd: 0.1837, duration_ms: null },
-  },
-  {
-    agent: "gemini", ex: geminiExtract,
-    lines: ["Model: gemini-2.5-pro", "Tokens: input=15300 output=3120"],
-    expected: { model: "gemini-2.5-pro", input_tokens: 15300, output_tokens: 3120, cost_list_usd: 0.1837, duration_ms: null },
-  },
-  {
-    agent: "gemini", ex: geminiExtract,
-    lines: ["Input tokens:  15,300", "Output tokens:  3,120", "Total tokens:  18,420", "model: gemini-2.5-flash"],
-    expected: { model: "gemini-2.5-flash", input_tokens: 15300, output_tokens: 3120, cost_list_usd: 0.1837, duration_ms: null },
-  },
-  {
     agent: "kimi", ex: kimiExtract,
     lines: ["Model: kimi-k2", "Tokens: input=15300 output=3120"],
     expected: { model: "kimi-k2", input_tokens: 15300, output_tokens: 3120, cost_list_usd: 0.1837, duration_ms: null },
   },
   {
-    agent: "qwen", ex: qwenExtract,
-    lines: ["Model: qwen-coder-plus", "Tokens: input=15300 output=3120"],
-    expected: { model: "qwen-coder-plus", input_tokens: 15300, output_tokens: 3120, cost_list_usd: 0.1837, duration_ms: null },
+    agent: "kimi", ex: kimiExtract,
+    lines: ["Input tokens:  15,300", "Output tokens:  3,120", "Total tokens:  18,420", "model: kimi-k2"],
+    expected: { model: "kimi-k2", input_tokens: 15300, output_tokens: 3120, cost_list_usd: 0.1837, duration_ms: null },
   },
-  {
-    agent: "qwen", ex: qwenExtract,
-    lines: ["Input tokens:  15,300", "Output tokens:  3,120", "Total tokens:  18,420", "model: qwen-max"],
-    expected: { model: "qwen-max", input_tokens: 15300, output_tokens: 3120, cost_list_usd: 0.1837, duration_ms: null },
-  },
-  {
-    agent: "openai", ex: openaiExtract,
-    lines: ["Model: gpt-4o", "input=100 output=50", "cost: $0.0123 USD"],
-    expected: { model: "gpt-4o", input_tokens: 100, output_tokens: 50, cost_list_usd: 0.0123, duration_ms: null },
-  },
-  { agent: "openai", ex: openaiExtract, lines: ["hello, world", "nothing useful here"], expected: null },
-  { agent: "gemini", ex: geminiExtract, lines: [], expected: null },
+  { agent: "kimi", ex: kimiExtract, lines: ["hello, world", "nothing useful here"], expected: null },
+  { agent: "kimi", ex: kimiExtract, lines: [], expected: null },
 ];
 
 /** Compare a TS usage object to the frozen expected, with cost tolerance. */
@@ -103,9 +65,9 @@ describe("frozen: stdout-scrape extractors == python adapters", () => {
 
   it("extractUsage validates required fields like extract_usage", () => {
     expect(extractUsage("nope", ["input=1 output=1"])).toBeNull();
-    const u = extractUsage("openai", ["Model: gpt-4o", "input=10 output=5"]);
+    const u = extractUsage("kimi", ["Model: kimi-k2", "input=10 output=5"]);
     expect(u).not.toBeNull();
-    expect(u?.model).toBe("gpt-4o");
+    expect(u?.model).toBe("kimi-k2");
   });
 });
 

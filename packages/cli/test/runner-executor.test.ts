@@ -39,7 +39,6 @@ import {
   parseEstMin,
   reasonixEnv,
   realAgentSpawn,
-  resetDirective,
   startSpawnTimeoutWatchdog,
   readCycleTimeoutThresholds,
   storyPinDirective,
@@ -154,121 +153,10 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
     expect(args).toEqual(["-p", prompt]);
   });
 
-  it("codex: codex exec <prompt>", () => {
-    const { bin, args } = buildSpawnCommand("codex", { cwd: "/wt", skillBody: "DO WORK" });
-    expect(bin).toBe("codex");
-    expect(args).toEqual(["exec", prompt]);
-  });
-
-  it("FIX-253: codex gets explicit workspace-write roots for symlinked .roll and durable alerts", () => {
-    const { bin, args } = buildSpawnCommand("codex", {
-      cwd: "/wt",
-      skillBody: "DO WORK",
-      writableRoots: ["/repo/.roll-real", "/repo/.roll-real/loop"],
-    });
-    expect(bin).toBe("codex");
-    expect(args).toEqual([
-      "exec",
-      "--cd",
-      "/wt",
-      "--sandbox",
-      "workspace-write",
-      "--add-dir",
-      "/repo/.roll-real",
-      "--add-dir",
-      "/repo/.roll-real/loop",
-      prompt,
-    ]);
-  });
-
-  it("lever-4: codex with NO codexSessionId is the unchanged cold spawn (default)", () => {
-    // The default — no resume id — must produce the byte-identical cold argv.
-    const { bin, args } = buildSpawnCommand("codex", { cwd: "/wt", skillBody: "DO WORK" });
-    expect(bin).toBe("codex");
-    expect(args).toEqual(["exec", prompt]);
-    expect(args).not.toContain("resume");
-  });
-
-  it("lever-4: codex WITH codexSessionId resumes (--all) + prepends the RESET directive", () => {
-    // No writableRoots → no sandbox -c overrides; bare resume by id.
-    const { bin, args } = buildSpawnCommand("codex", {
-      cwd: "/wt",
-      skillBody: "DO WORK",
-      storyId: "FIX-777",
-      codexSessionId: "uuid-abc",
-    });
-    expect(bin).toBe("codex");
-    const resumePrompt = `${resetDirective("FIX-777")}${AUTORUN_DIRECTIVE}${storyPinDirective("FIX-777")}DO WORK`;
-    // Exact shape: exec resume --all <id> <reset+prompt> — id positional before
-    // the prompt positional, options ahead of both, no sandbox flags.
-    expect(args).toEqual(["exec", "resume", "--all", "uuid-abc", resumePrompt]);
-    expect(args[args.length - 1]).toContain("NEW CARD FIX-777");
-    // `codex exec resume` REJECTS the cold-path flags — they must NOT appear.
-    expect(args).not.toContain("--cd");
-    expect(args).not.toContain("-C");
-    expect(args).not.toContain("--sandbox");
-    expect(args).not.toContain("-s");
-    expect(args).not.toContain("--add-dir");
-    // No `--` terminator — each -c binds one value, positionals parse cleanly.
-    expect(args).not.toContain("--");
-  });
-
-  it("lever-4: resume argv expresses the sandbox via -c config overrides (not --sandbox/--add-dir)", () => {
-    const { args } = buildSpawnCommand("codex", {
-      cwd: "/wt",
-      skillBody: "DO WORK",
-      storyId: "FIX-777",
-      codexSessionId: "uuid-abc",
-      writableRoots: ["/repo/.roll-real"],
-    });
-    const resumePrompt = `${resetDirective("FIX-777")}${AUTORUN_DIRECTIVE}${storyPinDirective("FIX-777")}DO WORK`;
-    // Sandbox is re-expressed as `-c` config overrides (codex 0.139 schema keys),
-    // placed BEFORE the positional SESSION_ID then PROMPT.
-    expect(args).toEqual([
-      "exec",
-      "resume",
-      "--all",
-      "-c",
-      'sandbox_mode="workspace-write"',
-      "-c",
-      'sandbox_workspace_write.writable_roots=["/repo/.roll-real"]',
-      "uuid-abc",
-      resumePrompt,
-    ]);
-    // The rejected exec-only flags must NOT leak onto the resume argv.
-    expect(args).not.toContain("--cd");
-    expect(args).not.toContain("--sandbox");
-    expect(args).not.toContain("--add-dir");
-  });
-
   it("deepseek: deepseek <prompt> (positional)", () => {
     const { bin, args } = buildSpawnCommand("deepseek", { cwd: "/wt", skillBody: "DO WORK" });
     expect(bin).toBe("deepseek");
     expect(args).toEqual([prompt]);
-  });
-
-  it("qwen: qwen <prompt> (positional)", () => {
-    const { bin, args } = buildSpawnCommand("qwen", { cwd: "/wt", skillBody: "DO WORK" });
-    expect(bin).toBe("qwen");
-    expect(args).toEqual([prompt]);
-  });
-
-  it("agy: agy --dangerously-skip-permissions -p <prompt> (FIX-296: flag before -p so -p does not swallow it)", () => {
-    const { bin, args } = buildSpawnCommand("agy", { cwd: "/wt", skillBody: "DO WORK" });
-    expect(bin).toBe("agy");
-    expect(args).toEqual(["--dangerously-skip-permissions", "-p", prompt]);
-  });
-
-  it("gemini aliases to agy argv (FIX-296 order)", () => {
-    const { bin, args } = buildSpawnCommand("gemini", { cwd: "/wt", skillBody: "DO WORK" });
-    expect(bin).toBe("agy");
-    expect(args).toEqual(["--dangerously-skip-permissions", "-p", prompt]);
-  });
-
-  it("antigravity aliases to agy argv (FIX-296 order)", () => {
-    const { bin, args } = buildSpawnCommand("antigravity", { cwd: "/wt", skillBody: "DO WORK" });
-    expect(bin).toBe("agy");
-    expect(args).toEqual(["--dangerously-skip-permissions", "-p", prompt]);
   });
 
   it("US-AGENT-002 reasonix: reasonix run --max-steps <N> --model <model> --dir <cwd> <prompt>", () => {
@@ -291,10 +179,11 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
   });
 
   it("throws a loud, documented error for an un-ported agent (fail-loud, not silent)", () => {
-    expect(() => buildSpawnCommand("opencode", { cwd: "/wt", skillBody: "x" })).toThrow(
-      /agent 'opencode' argv not yet ported/,
+    expect(() => buildSpawnCommand("made-up-agent", { cwd: "/wt", skillBody: "x" })).toThrow(
+      /agent 'made-up-agent' argv not yet ported/,
     );
-    expect(Object.keys(AGENT_ARGV_TODO)).toContain("opencode");
+    // The pool is fully ported (kimi/pi/reasonix + claude harness) → no TODO entries.
+    expect(Object.keys(AGENT_ARGV_TODO)).toHaveLength(0);
   });
 
   // FIX-319 — a BARE spawn (peer reviewer) sends the body verbatim: NO worker
@@ -308,8 +197,8 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
       expect(args[1]).not.toContain(AUTORUN_DIRECTIVE);
       expect(args[1]).not.toContain("FIX-1"); // no story pin either
     });
-    it("pi/kimi/codex bare: body verbatim, no autorun directive", () => {
-      for (const agent of ["pi", "kimi", "codex"]) {
+    it("pi/kimi bare: body verbatim, no autorun directive", () => {
+      for (const agent of ["pi", "kimi"]) {
         const { args } = buildSpawnCommand(agent, { cwd: "/wt", skillBody: "REVIEW THIS", bare: true });
         expect(args.some((a) => a.includes(AUTORUN_DIRECTIVE))).toBe(false);
         expect(args.some((a) => a === "REVIEW THIS")).toBe(true);
@@ -332,10 +221,6 @@ describe("US-AGENT-001 AgentProfile factory", () => {
     // OAuth/keychain login is unreachable from a launchd headless daemon (401).
     expect(claude.acceptance.canReviewHeadless).toBe(false);
 
-    const codex = agentProfile("codex");
-    expect(codex.usesWorkspaceSandbox).toBe(true);
-    expect(codex.buildSpawnCommand({ cwd: "/wt", skillBody: "DO WORK", writableRoots: ["/repo/.roll"] }).args).toContain("--add-dir");
-
     const reasonix = agentProfile("reasonix");
     expect(reasonix.acceptance.canReviewHeadless).toBe(true);
     expect(reasonix.buildSpawnCommand({ cwd: "/wt", skillBody: "DO WORK" }).args.slice(0, 7)).toEqual([
@@ -350,8 +235,6 @@ describe("US-AGENT-001 AgentProfile factory", () => {
   });
 
   it("keeps CLI argv aliases in the profile layer, not downstream executor branches", () => {
-    expect(agentProfile("gemini").buildSpawnCommand({ cwd: "/wt", skillBody: "DO WORK" }).bin).toBe("agy");
-    expect(agentProfile("antigravity").buildSpawnCommand({ cwd: "/wt", skillBody: "DO WORK" }).bin).toBe("agy");
     expect(agentProfile("deepseek").buildSpawnCommand({ cwd: "/wt", skillBody: "DO WORK" }).bin).toBe("deepseek");
   });
 
@@ -1426,34 +1309,6 @@ describe("executeCommand — command → executor mapping", () => {
     expect(readWarmSessions(repo)).toEqual([warmEntry()]);
   });
 
-  it("lever-4 same-story scope: codex spawn resumes a same-story ledger session AND consumes it (single-use)", async () => {
-    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n  resume_scope: same-story\n");
-    writeFileSync(
-      join(repo, ".roll", "loop", "warm-sessions.json"),
-      JSON.stringify([warmEntry("US-RUN-001", "uuid-prior")]),
-    );
-    const base = fakePorts();
-    const { ports, calls } = fakePorts({
-      repoCwd: repo,
-      paths: { ...base.ports.paths, worktreePath: wt, alertsPath: join(repo, ".roll", "loop", "ALERT.md") },
-    });
-    await executeCommand({ kind: "spawn_agent", agent: "codex", attempt: 1 }, ports, { ...CTX, agent: "codex" });
-    const opts = (ports.agentSpawn as ReturnType<typeof vi.fn>).mock.calls[0][1] as Record<string, unknown>;
-    expect(opts.codexSessionId).toBe("uuid-prior");
-    // single-use: the entry is consumed (ledger now empty).
-    expect(readWarmSessions(repo)).toEqual([]);
-    const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: "warm-session:resume-selected",
-        storyId: "US-RUN-001",
-        sessionId: "uuid-prior",
-        sourceCycleId: "cycle-US-RUN-001",
-        sourceStoryId: "US-RUN-001",
-      }),
-    );
-  });
-
   it("FIX-370: session_reuse true without resume_scope does not resume", async () => {
     const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n");
     writeFileSync(join(repo, ".roll", "loop", "warm-sessions.json"), JSON.stringify([warmEntry("US-RUN-001", "uuid-prior")]));
@@ -1468,32 +1323,6 @@ describe("executeCommand — command → executor mapping", () => {
     const opts = (ports.agentSpawn as ReturnType<typeof vi.fn>).mock.calls[0][1] as Record<string, unknown>;
     expect(opts.codexSessionId).toBeUndefined();
     expect(readWarmSessions(repo)).toEqual([warmEntry("US-RUN-001", "uuid-prior")]);
-  });
-
-  it("FIX-370/FIX-371: same-story scope skips cross-card sessions with scope_mismatch", async () => {
-    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n  resume_scope: same-story\n");
-    writeFileSync(join(repo, ".roll", "loop", "warm-sessions.json"), JSON.stringify([warmEntry("FIX-OTHER", "uuid-other")]));
-    const base = fakePorts();
-    const { ports, calls } = fakePorts({
-      repoCwd: repo,
-      paths: { ...base.ports.paths, worktreePath: wt, alertsPath: join(repo, ".roll", "loop", "ALERT.md") },
-    });
-
-    await executeCommand({ kind: "spawn_agent", agent: "codex", attempt: 1 }, ports, { ...CTX, agent: "codex" });
-
-    const opts = (ports.agentSpawn as ReturnType<typeof vi.fn>).mock.calls[0][1] as Record<string, unknown>;
-    expect(opts.codexSessionId).toBeUndefined();
-    expect(readWarmSessions(repo)).toEqual([warmEntry("FIX-OTHER", "uuid-other")]);
-    const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: "warm-session:resume-skipped",
-        storyId: "US-RUN-001",
-        reason: "scope_mismatch",
-        sourceCycleId: "cycle-FIX-OTHER",
-        sourceStoryId: "FIX-OTHER",
-      }),
-    );
   });
 
   it("lever-4 ON but NON-codex agent: cold no-op (no resume, ledger untouched)", async () => {
@@ -1568,74 +1397,6 @@ describe("executeCommand — command → executor mapping", () => {
     }
     expect(readWarmSessions(repo)).toEqual([]); // teardown does NOT capture
     expect(ports.git.worktreeRemove).toHaveBeenCalled(); // teardown still happens
-  });
-
-  it("lever-4 ON: spawn_agent capture-miss ALERTs (observability) and stays cold", async () => {
-    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n  resume_scope: same-story\n");
-    const base = fakePorts();
-    const { ports, calls } = fakePorts({
-      repoCwd: repo,
-      paths: { ...base.ports.paths, worktreePath: wt, alertsPath: join(repo, ".roll", "loop", "ALERT.md") },
-    });
-    // point codex session recovery at an empty root ⇒ no id captured ⇒ ALERT.
-    const prev = process.env["ROLL_CODEX_SESSIONS_DIR"];
-    process.env["ROLL_CODEX_SESSIONS_DIR"] = join(repo, "no-codex-sessions");
-    try {
-      await executeCommand({ kind: "spawn_agent", agent: "codex", attempt: 1 }, ports, { ...CTX, agent: "codex" });
-    } finally {
-      if (prev === undefined) delete process.env["ROLL_CODEX_SESSIONS_DIR"];
-      else process.env["ROLL_CODEX_SESSIONS_DIR"] = prev;
-    }
-    expect(readWarmSessions(repo)).toEqual([]); // nothing captured
-    const alerts = (calls["alert"] ?? []).map((a) => String((a as unknown[])[1]));
-    expect(alerts.join("\n")).toContain("lever-4 warm-context: no codex session id captured");
-  });
-
-  it("FIX-354: a PRESERVED-worktree cycle STILL captures the codex session (capture is post-agent-exit, NOT in cleanup_worktree)", async () => {
-    const { repo, wt } = lever4Repo("loop_safety:\n  session_reuse: true\n  resume_scope: same-story\n"); // flag ON
-    const sessionsRoot = join(repo, "codex-sessions");
-    // the agent ran and wrote a cwd-matched rollout — exactly what publish-fail
-    // (FIX-351 `unpublished`) leaves on disk when it PRESERVES the worktree.
-    writeCodexRollout(sessionsRoot, wt, "cafe1234-2222-2222-2222-222222222222");
-    const base = fakePorts();
-    const { ports, calls } = fakePorts({
-      repoCwd: repo,
-      paths: { ...base.ports.paths, worktreePath: wt, alertsPath: join(repo, ".roll", "loop", "ALERT.md") },
-    });
-    const prev = process.env["ROLL_CODEX_SESSIONS_DIR"];
-    process.env["ROLL_CODEX_SESSIONS_DIR"] = sessionsRoot;
-    try {
-      // ONLY spawn_agent runs — NO cleanup_worktree (the worktree is preserved).
-      await executeCommand({ kind: "spawn_agent", agent: "codex", attempt: 1 }, ports, { ...CTX, agent: "codex" });
-    } finally {
-      if (prev === undefined) delete process.env["ROLL_CODEX_SESSIONS_DIR"];
-      else process.env["ROLL_CODEX_SESSIONS_DIR"] = prev;
-    }
-    // the session is captured into the ledger DESPITE no teardown ever happening,
-    // so the NEXT codex card has something to resume (warm-context engages).
-    const ledger = readWarmSessions(repo);
-    expect(ledger).toHaveLength(1);
-    expect(ledger[0]).toMatchObject({
-      storyId: "US-RUN-001",
-      cycleId: "20260605-000000-1",
-      agent: "codex",
-      sessionId: "cafe1234-2222-2222-2222-222222222222",
-      worktreePath: wt,
-      cycleStartSec: 42,
-      capturedAtSec: 42,
-      spawnedWarm: false,
-    });
-    expect(ledger[0]?.rolloutPath).toContain("rollout-2026-06-14T20-00-00-cafe1234-2222-2222-2222-222222222222.jsonl");
-    const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: "warm-session:capture",
-        storyId: "US-RUN-001",
-        sessionId: "cafe1234-2222-2222-2222-222222222222",
-        spawnedWarm: false,
-      }),
-    );
-    expect(ports.git.worktreeRemove).not.toHaveBeenCalled(); // worktree preserved
   });
 
   it("FIX-354: lever-4 ON but NON-codex agent: post-agent-exit capture is a no-op (agent-agnostic)", async () => {
@@ -1726,6 +1487,9 @@ describe("executeCommand — command → executor mapping", () => {
   });
 
   it("FIX-208: spawn_agent parses claude stream-json stdout → ctxPatch.cost", async () => {
+    // claude is no longer a pool agent (no AgentSpec), but the claude-stream
+    // harness extractor (sumClaudeStream) is KEPT — reachable via the
+    // "claude-stream" usage-extractor kind that remains in the registry.
     const stream = [
       JSON.stringify({ type: "assistant", message: { model: "claude-opus-4-8", usage: { input_tokens: 120, output_tokens: 30 } } }),
       JSON.stringify({ type: "result", subtype: "success", total_cost_usd: 0.05 }),
@@ -1733,7 +1497,10 @@ describe("executeCommand — command → executor mapping", () => {
     const { ports } = fakePorts({
       agentSpawn: vi.fn(async () => ({ stdout: stream, stderr: "", exitCode: 0, timedOut: false })),
     });
-    const r = await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);
+    const r = await executeCommand({ kind: "spawn_agent", agent: "claude-stream", attempt: 1 }, ports, {
+      ...CTX,
+      agent: "claude-stream",
+    });
     expect(r.ctxPatch?.cost).toBeDefined();
     expect(r.ctxPatch?.cost?.tokensIn).toBe(120);
     expect(r.ctxPatch?.cost?.tokensOut).toBe(30);
@@ -1746,15 +1513,16 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r.ctxPatch?.cost).toBeUndefined();
   });
 
-  // FIX-249 — the two missing adapter lanes: stdout-scrape agents (openai/
-  // gemini/kimi/qwen print a usage footer) and pi (no stdout usage at all —
-  // recovered from its session store, scoped to the cycle worktree + window).
-  it("FIX-249: spawn_agent scrapes a stdout-footer agent (openai) → ctxPatch.cost", async () => {
+  // FIX-249 — the two missing adapter lanes: stdout-scrape agents that print a
+  // usage footer (the generic-scrape lane, kept for reasonix) and pi (no stdout
+  // usage at all — recovered from its session store, scoped to the cycle worktree
+  // + window).
+  it("FIX-249: spawn_agent scrapes a stdout-footer agent (reasonix/generic) → ctxPatch.cost", async () => {
     const stdout = ["model: gpt-5.2", "input tokens: 1,200", "output tokens: 300", "total: 1,500", "cost: $0.07"].join("\n");
     const { ports } = fakePorts({
       agentSpawn: vi.fn(async () => ({ stdout, stderr: "", exitCode: 0, timedOut: false })),
     });
-    const r = await executeCommand({ kind: "spawn_agent", agent: "openai", attempt: 1 }, ports, { ...CTX, agent: "openai" });
+    const r = await executeCommand({ kind: "spawn_agent", agent: "reasonix", attempt: 1 }, ports, { ...CTX, agent: "reasonix" });
     expect(r.ctxPatch?.cost?.tokensIn).toBe(1200);
     expect(r.ctxPatch?.cost?.tokensOut).toBe(300);
     expect(r.ctxPatch?.cost?.model).toBe("gpt-5.2");
@@ -1959,7 +1727,7 @@ describe("executeCommand — command → executor mapping", () => {
 
   it("FIX-908: score stage result is CONSUMED — a successful scorer writes a real independent peer score note (gate passes the score half)", async () => {
     // Proves the consume-path didn't break normal scoring: when a fresh-session
-    // scorer (codex, ≠ builder claude) replies with a valid score, runScorePairing
+    // scorer (pi, ≠ builder claude) replies with a valid score, runScorePairing
     // writes the pair Review Score note to the PERSISTENT .roll and the score gate
     // is satisfied. The note is written ONLY by runScorePairing — never synthesized.
     const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-908-scored-")));
@@ -1968,7 +1736,7 @@ describe("executeCommand — command → executor mapping", () => {
     const { ports } = fakePorts({
       repoCwd: repo,
       paths: { ...fakePorts().ports.paths, worktreePath: join(repo, "wt"), eventsPath: join(repo, ".roll", "events.ndjson") },
-      installedAgents: () => ["codex"],
+      installedAgents: () => ["pi"],
       agentSpawn: vi.fn(async () => ({ stdout: "SCORE: 8\nVERDICT: good\nRATIONALE: solid delivery\n", stderr: "", exitCode: 0, timedOut: false })),
       github: { ...fakePorts().ports.github, prState: vi.fn(async () => "NONE") },
     });
@@ -2146,10 +1914,10 @@ describe("executeCommand — command → executor mapping", () => {
     const base = fakePorts();
     const { ports, calls } = fakePorts({
       paths: { ...base.ports.paths, worktreePath: wt, eventsPath: join(rt, "events.ndjson"), alertsPath: join(rt, "alerts.log") },
-      // Pin a deterministic peer pool: codex is heterogeneous from claude, so the
+      // Pin a deterministic peer pool: pi is heterogeneous from claude, so the
       // retry DOES consult — but the peer spawn fails (exit 1 → reviewPeer null →
       // timeout) so no evidence is produced and the cycle stays blocked NOT-Done.
-      installedAgents: () => ["claude", "codex"],
+      installedAgents: () => ["claude", "pi"],
       agentSpawn: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 1, timedOut: false })),
     });
     const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
@@ -2171,7 +1939,7 @@ describe("executeCommand — command → executor mapping", () => {
     // re-run sees `consulted` regardless of which heterogeneous peer was picked).
     const { ports, calls } = fakePorts({
       paths: { ...base.ports.paths, worktreePath: wt, eventsPath: join(rt, "events.ndjson"), alertsPath: join(rt, "alerts.log") },
-      installedAgents: () => ["claude", "codex"], // codex is the heterogeneous reviewer
+      installedAgents: () => ["claude", "pi"], // pi is the heterogeneous reviewer
       agentSpawn: vi.fn(async () => {
         // A successful peer consult: retryPeerConsult writes the canonical
         // evidence file on a non-null review (exit 0, parseable VERDICT).
@@ -2226,7 +1994,7 @@ describe("executeCommand — command → executor mapping", () => {
     const base = fakePorts();
     const { ports, calls } = fakePorts({
       paths: { ...base.ports.paths, worktreePath: wt, eventsPath: join(rt, "events.ndjson"), alertsPath: join(rt, "alerts.log") },
-      installedAgents: () => ["claude", "codex"], // codex is heterogeneous from claude → hetero IS available
+      installedAgents: () => ["claude", "pi"], // pi is heterogeneous from claude → hetero IS available
       agentSpawn: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 1, timedOut: false })), // retry spawn fails → no evidence
     });
     const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
@@ -2254,7 +2022,7 @@ describe("executeCommand — command → executor mapping", () => {
       // and the verdict flips "skipped"↔"self-review-allowed" by environment. This test's
       // intent is the SOFT-mode contract: a gated delivery records "skipped" but does NOT
       // block — which requires the gated (hetero-available) path.
-      installedAgents: () => ["claude", "codex"],
+      installedAgents: () => ["claude", "pi"],
     });
     const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
     expect(r.event).toMatchObject({ type: "facts_captured", facts: { agentExit: 0 } });
@@ -3397,7 +3165,7 @@ describe("FIX-346 — auth-failing peer is excluded from the pool and swapped ou
     const eventsPath = join(rt, "events.ndjson");
     writeFileSync(
       eventsPath,
-      JSON.stringify({ type: "agent:blocked", cycleId: "c0", agent: "codex", cause: "auth", stage: "score", detail: "403", ts: 1 }) + "\n",
+      JSON.stringify({ type: "agent:blocked", cycleId: "c0", agent: "kimi", cause: "auth", stage: "score", detail: "403", ts: 1 }) + "\n",
       "utf8",
     );
     const spawned: string[] = [];
@@ -3405,7 +3173,7 @@ describe("FIX-346 — auth-failing peer is excluded from the pool and swapped ou
     const { ports } = fakePorts({
       repoCwd: rt,
       paths: { ...base.ports.paths, worktreePath: wt, eventsPath, alertsPath: join(rt, "alerts.log") },
-      installedAgents: () => ["claude", "codex"], // codex is the only hetero peer
+      installedAgents: () => ["claude", "kimi"], // kimi is the only hetero peer
       agentSpawn: vi.fn(async (agent: string) => {
         spawned.push(agent);
         return { stdout: "SCORE: 7\nVERDICT: ok\nRATIONALE: fine\n", stderr: "", exitCode: 0, timedOut: false };
@@ -3418,8 +3186,8 @@ describe("FIX-346 — auth-failing peer is excluded from the pool and swapped ou
       },
     });
     await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, agent: "claude", startSec: 1 });
-    // One strike is tolerated → codex is still consulted, never excluded.
-    expect(spawned).toContain("codex");
+    // One strike is tolerated → kimi is still consulted, never excluded.
+    expect(spawned).toContain("kimi");
     const events = readFileSync(eventsPath, "utf8").split("\n").filter((l) => l.trim() !== "").map((l) => JSON.parse(l) as RollEvent);
     expect(events.some((e) => e.type === "pair:excluded")).toBe(false);
   });

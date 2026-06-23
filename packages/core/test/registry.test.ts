@@ -14,6 +14,7 @@ import {
   canonicalAgentName,
   firstInstalledAgent,
   lineAgentValue,
+  lineModelValue,
   parseProbeCache,
   probeTtl,
   readSlotFromText,
@@ -164,21 +165,46 @@ describe("slot config read", () => {
     expect(lineAgentValue("sub_agent: kimi")).toBeUndefined();
   });
 
-  it("reads inline flow form", () => {
-    const txt = "schema: v3\neasy: { agent: kimi }\ndefault: { agent: claude }\n";
-    expect(readSlotFromText(txt, "easy")).toBe("kimi");
-    expect(readSlotFromText(txt, "default")).toBe("claude");
+  it("lineModelValue token boundary (model may itself carry a `:thinking` suffix)", () => {
+    expect(lineModelValue("model: bailian/glm-5.2")).toBe(" bailian/glm-5.2");
+    expect(lineModelValue("default: { agent: pi, model: deepseek/deepseek-v4-pro:high }")).toBe(
+      " deepseek/deepseek-v4-pro:high }",
+    );
+    expect(lineModelValue("agent: pi")).toBeUndefined();
+    expect(lineModelValue("sub_model: x")).toBeUndefined();
+  });
+
+  it("reads inline flow form as { agent } (back-compat: no model)", () => {
+    const txt = "schema: v3\neasy: { agent: kimi }\ndefault: { agent: pi }\n";
+    expect(readSlotFromText(txt, "easy")).toEqual({ agent: "kimi" });
+    expect(readSlotFromText(txt, "default")).toEqual({ agent: "pi" });
     expect(readSlotFromText(txt, "hard")).toBeUndefined();
   });
 
-  it("reads nested form, ends block at next top-level key", () => {
-    const txt = "easy:\n  agent: qwen\nhard:\n  agent: claude\n";
-    expect(readSlotFromText(txt, "easy")).toBe("qwen");
-    expect(readSlotFromText(txt, "hard")).toBe("claude");
+  it("reads inline flow form WITH a model (effort folded into the model string)", () => {
+    const txt =
+      "schema: v3\n" +
+      "default: { agent: pi, model: deepseek/deepseek-v4-pro:high }\n" +
+      "hard: { agent: pi, model: bailian/glm-5.2 }\n";
+    expect(readSlotFromText(txt, "default")).toEqual({
+      agent: "pi",
+      model: "deepseek/deepseek-v4-pro:high",
+    });
+    expect(readSlotFromText(txt, "hard")).toEqual({ agent: "pi", model: "bailian/glm-5.2" });
   });
 
-  it("strips comments / quotes", () => {
-    expect(readSlotFromText('easy: { agent: "kimi" } # comment\n', "easy")).toBe("kimi");
+  it("reads nested form (agent + model on separate indented lines)", () => {
+    const txt = "easy:\n  agent: kimi\nhard:\n  agent: pi\n  model: bailian/glm-5.2\n";
+    expect(readSlotFromText(txt, "easy")).toEqual({ agent: "kimi" });
+    expect(readSlotFromText(txt, "hard")).toEqual({ agent: "pi", model: "bailian/glm-5.2" });
+  });
+
+  it("strips comments / quotes (agent + model)", () => {
+    expect(readSlotFromText('easy: { agent: "kimi" } # comment\n', "easy")).toEqual({ agent: "kimi" });
+    expect(readSlotFromText('hard: { agent: "pi", model: "bailian/glm-5.2" }\n', "hard")).toEqual({
+      agent: "pi",
+      model: "bailian/glm-5.2",
+    });
   });
 });
 
@@ -187,26 +213,42 @@ describe("slot config write", () => {
     expect(setSlotInText("", "easy", "kimi")).toBe("schema: v3\neasy: { agent: kimi }\n");
   });
 
-  it("rewrites an existing inline slot, preserving others + comments", () => {
-    const txt = "schema: v3\n# keep me\neasy: { agent: kimi }\ndefault: { agent: claude }\n";
-    const out = setSlotInText(txt, "easy", "qwen");
-    expect(out).toBe("schema: v3\n# keep me\neasy: { agent: qwen }\ndefault: { agent: claude }\n");
+  it("seeds a fresh file WITH a model (effort folded into the model string)", () => {
+    expect(setSlotInText("", "hard", "pi", "bailian/glm-5.2")).toBe(
+      "schema: v3\nhard: { agent: pi, model: bailian/glm-5.2 }\n",
+    );
+    expect(setSlotInText("", "default", "pi", "deepseek/deepseek-v4-pro:high")).toBe(
+      "schema: v3\ndefault: { agent: pi, model: deepseek/deepseek-v4-pro:high }\n",
+    );
   });
 
-  it("rewrites a nested slot to inline form, dropping the old agent line", () => {
-    const txt = "easy:\n  agent: kimi\nhard:\n  agent: claude\n";
-    const out = setSlotInText(txt, "easy", "qwen");
-    expect(out).toBe("easy: { agent: qwen }\nhard:\n  agent: claude\n");
+  it("rewrites an existing inline slot, preserving others + comments", () => {
+    const txt = "schema: v3\n# keep me\neasy: { agent: kimi }\ndefault: { agent: pi }\n";
+    const out = setSlotInText(txt, "easy", "reasonix");
+    expect(out).toBe("schema: v3\n# keep me\neasy: { agent: reasonix }\ndefault: { agent: pi }\n");
+  });
+
+  it("rewrites a slot to add a model (and drops it again when omitted)", () => {
+    const withModel = setSlotInText("schema: v3\nhard: { agent: pi }\n", "hard", "pi", "bailian/glm-5.2");
+    expect(withModel).toBe("schema: v3\nhard: { agent: pi, model: bailian/glm-5.2 }\n");
+    // Re-set WITHOUT a model → the canonical inline form drops the model again.
+    expect(setSlotInText(withModel, "hard", "pi")).toBe("schema: v3\nhard: { agent: pi }\n");
+  });
+
+  it("rewrites a nested slot to inline form, dropping old agent + model lines", () => {
+    const txt = "easy:\n  agent: kimi\nhard:\n  agent: pi\n  model: old/model:low\n";
+    const out = setSlotInText(txt, "hard", "pi", "bailian/glm-5.2");
+    expect(out).toBe("easy:\n  agent: kimi\nhard: { agent: pi, model: bailian/glm-5.2 }\n");
   });
 
   it("appends an absent slot", () => {
     const txt = "schema: v3\neasy: { agent: kimi }\n";
-    expect(setSlotInText(txt, "hard", "claude")).toBe(
-      "schema: v3\neasy: { agent: kimi }\nhard: { agent: claude }\n",
+    expect(setSlotInText(txt, "hard", "reasonix")).toBe(
+      "schema: v3\neasy: { agent: kimi }\nhard: { agent: reasonix }\n",
     );
   });
 
-  it("round-trips through the registry FileStore", () => {
+  it("round-trips through the registry FileStore ({ agent } and { agent, model })", () => {
     const files = new Map<string, string>();
     const fs = {
       readText: (p: string) => {
@@ -217,9 +259,17 @@ describe("slot config write", () => {
       writeFileAtomic: (p: string, d: string) => void files.set(p, d),
     };
     const reg = new AgentRegistry(makeEnv(), fs);
-    reg.setSlot(".roll/agents.yaml", "default", "claude");
-    expect(reg.readSlot(".roll/agents.yaml", "default")).toBe("claude");
+    // back-compat: agent-only.
     reg.setSlot(".roll/agents.yaml", "default", "kimi");
-    expect(reg.readSlot(".roll/agents.yaml", "default")).toBe("kimi");
+    expect(reg.readSlot(".roll/agents.yaml", "default")).toEqual({ agent: "kimi" });
+    // with a model (effort suffix preserved end-to-end).
+    reg.setSlot(".roll/agents.yaml", "hard", "pi", "deepseek/deepseek-v4-pro:high");
+    expect(reg.readSlot(".roll/agents.yaml", "hard")).toEqual({
+      agent: "pi",
+      model: "deepseek/deepseek-v4-pro:high",
+    });
+    // overwrite hard back to model-less.
+    reg.setSlot(".roll/agents.yaml", "hard", "pi");
+    expect(reg.readSlot(".roll/agents.yaml", "hard")).toEqual({ agent: "pi" });
   });
 });

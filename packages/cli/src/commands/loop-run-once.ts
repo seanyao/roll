@@ -12,7 +12,7 @@
  * The handler stays thin: it resolves the project identity + runtime paths and
  * delegates the entire walk to the runner adapter (packages/cli/src/runner).
  */
-import { EventBus, cycleEndEvent, firstInstalledAgent, mapV2Status, parsePolicy, readSlotFromText, shouldResize, type AgentSlot, type RouteDeps } from "@roll/core";
+import { EventBus, cycleEndEvent, firstInstalledAgent, mapV2Status, parsePolicy, readSlotFromText, shouldResize, type AgentSlot, type RouteDeps, type RouteSlot } from "@roll/core";
 import { absent, buildTerminalEvent, deriveOrphanVerdict, present } from "@roll/spec";
 import { projectIdentity, readLockOwner, releaseLock } from "@roll/infra";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -495,9 +495,11 @@ export function readSkillBody(projectPath: string): string | null {
  * Exported for tests.
  */
 export function buildLoopRouteDeps(projectPath: string): RouteDeps {
-  function readSlot(slot: AgentSlot): string | undefined {
+  function readSlot(slot: AgentSlot): RouteSlot | undefined {
     const agentsYaml = join(projectPath, ".roll", "agents.yaml");
     try {
+      // readSlotFromText already returns `{ agent, model? }` — the router's
+      // RouteSlot shape — so the model rides through unchanged.
       return readSlotFromText(readFileSync(agentsYaml, "utf8"), slot);
     } catch {
       return undefined; // agents.yaml missing — router falls through.

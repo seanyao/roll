@@ -3739,7 +3739,10 @@ export function nodePorts(opts: {
           resolve(_storyId, estMin) {
             const tier: Tier = classifyComplexity(estMin);
             const dec = resolveRoute(tier, opts.routeDeps);
-            return { agent: dec.agent, model: "" };
+            // Thread the slot's NATIVE --model through to the spawn; absent ⇒ ""
+            // (the orchestrator's `ctx.model !== ""` guard then omits --model and
+            // the agent uses its own default).
+            return { agent: dec.agent, model: dec.model ?? "" };
           },
         }
       : { resolve: () => ({ agent: "claude", model: "" }) },

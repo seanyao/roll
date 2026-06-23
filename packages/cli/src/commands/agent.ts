@@ -215,8 +215,14 @@ function viewCommand(deps: AgentCommandDeps): number {
   const text = d.readText(path);
   out.push(`    ${m("agent.view_col_slot").padEnd(9)} ${m("agent.view_col_agent").padEnd(22)} ${m("agent.view_col_status").padEnd(8)} ${m("agent.view_col_note")}`);
   for (const slot of VALID_SLOTS) {
-    const agent = readSlotFromText(text, slot);
-    const disp = agent === undefined ? m("agent.view_slot_unset") : agentDisplayName(agent);
+    const cfg = readSlotFromText(text, slot);
+    const agent = cfg?.agent;
+    const disp =
+      agent === undefined
+        ? m("agent.view_slot_unset")
+        : cfg?.model !== undefined && cfg.model !== ""
+          ? `${agentDisplayName(agent)} (${cfg.model})`
+          : agentDisplayName(agent);
     const status =
       agent === undefined ? "-" : reg.isInstalled(agent) ? `${GREEN}✓${NC}` : `${RED}✗${NC}`;
     const note = slot === "fallback" ? m("agent.view_fallback_idle") : "";

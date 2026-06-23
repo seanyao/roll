@@ -291,6 +291,48 @@ function cleanAgentValue(raw: string): string {
 }
 
 /**
+ * The raw `agent:` value extracted by {@link lineAgentValue} from an inline-flow
+ * slot runs to end-of-line, so for `{ agent: pi, model: X }` it carries the
+ * trailing `, model: X` too. Truncate at a boundary `model:` (line start, or
+ * after `{`, `,`, or whitespace) so {@link cleanAgentValue} sees only the agent
+ * token. A nested-form agent line (`agent: pi`) has no such suffix and is
+ * returned unchanged.
+ */
+function stripTrailingModel(rawAgent: string): string {
+  const m = /(^|[ ,{])model:/.exec(rawAgent);
+  return m === null ? rawAgent : rawAgent.slice(0, m.index);
+}
+
+/**
+ * Extract a `model:` value from a single yaml line, only when `model:` sits at a
+ * token boundary (line start, or right after `{`, `,`, or whitespace) — so
+ * `sub_model:` / `model_x:` do not false-match. Returns the RAW (un-trimmed)
+ * value, or `undefined` when the line has no model key. Mirrors
+ * {@link lineAgentValue}'s boundary handling so a model rides alongside an agent
+ * in the same inline-flow slot (`{ agent: pi, model: bailian/glm-5.2 }`).
+ *
+ * NOTE: a model value may itself carry a `:` (e.g. `deepseek/deepseek-v4-pro:high`
+ * — the `:thinking` effort suffix). The boundary regex anchors on `model:` only,
+ * so the trailing `:high` stays in the captured value; {@link cleanAgentValue}
+ * (which only strips flow punctuation, never `:`) preserves it intact.
+ */
+export function lineModelValue(line: string): string | undefined {
+  const s = line.replace(/\t/g, " ");
+  if (s.startsWith("model:")) return s.slice("model:".length);
+  const m = /[ ,{]model:/.exec(s);
+  if (m === null) return undefined;
+  return s.slice(m.index + m[0].length);
+}
+
+/** A resolved slot: the agent token, plus an optional NATIVE `--model` argument
+ *  (folds any `:thinking` effort suffix; absent ⇒ spawn with the agent's own
+ *  default model). */
+export interface SlotConfig {
+  agent: string;
+  model?: string;
+}
+
+/**
  * Read a slot's agent value from agents.yaml text. Mirrors `_agents_config_slot`:
  * find the slot's top-level block (`^<slot>:` through the next non-indented key),
  * read its first `agent:` value (inline flow form or a nested indented line),
@@ -298,16 +340,21 @@ function cleanAgentValue(raw: string): string {
  * has no agent value. Does NOT warn on unknown agents (that is a caller concern;
  * see {@link AgentRegistry.readSlot}).
  */
-export function readSlotFromText(text: string, slot: AgentSlot): string | undefined {
+export function readSlotFromText(text: string, slot: AgentSlot): SlotConfig | undefined {
   let inBlock = false;
   let agent = "";
   let found = false;
+  // Model is scanned across the WHOLE slot block (it may sit on the header's
+  // inline-flow line beside the agent, or on its own nested line) — independent
+  // of the agent's first-hit short-circuit below.
+  let modelRaw: string | undefined;
   const slotHeader = `${slot}:`;
   for (const raw of text.split("\n")) {
     const line = raw.replace(/\r$/, "");
     // Slot header: `slot:` exactly, `slot: ...`, or `slot:{...}`.
     if (line === slotHeader || line.startsWith(`${slot}: `) || line.startsWith(`${slot}:{`)) {
       inBlock = true;
+      if (modelRaw === undefined) modelRaw = lineModelValue(line);
       const v = lineAgentValue(line);
       if (v !== undefined) {
         agent = v;
@@ -316,18 +363,27 @@ export function readSlotFromText(text: string, slot: AgentSlot): string | undefi
     } else if (line.length > 0 && line[0] !== " ") {
       // A new top-level key (no leading space) ends the slot block.
       if (inBlock) break;
-    } else if (inBlock && !found) {
-      const v = lineAgentValue(line);
-      if (v !== undefined) {
-        agent = v;
-        found = true;
+    } else if (inBlock) {
+      if (modelRaw === undefined) modelRaw = lineModelValue(line);
+      if (!found) {
+        const v = lineAgentValue(line);
+        if (v !== undefined) {
+          agent = v;
+          found = true;
+        }
       }
     }
-    if (found) break;
+    // Inline-flow short-circuit: a `slot:{...}`/`slot: { ... }` header carries
+    // the whole slot on one line, so once we have the agent there we are done.
+    // Nested form keeps scanning until the block ends (next top-level key) so a
+    // model on a later indented line is still picked up.
+    if (found && (line === slotHeader || line.startsWith(`${slot}: {`) || line.startsWith(`${slot}:{`))) break;
   }
   if (!inBlock) return undefined;
-  const cleaned = cleanAgentValue(agent);
-  return cleaned === "" ? undefined : cleaned;
+  const cleanedAgent = cleanAgentValue(stripTrailingModel(agent));
+  if (cleanedAgent === "") return undefined;
+  const cleanedModel = modelRaw === undefined ? "" : cleanAgentValue(modelRaw);
+  return cleanedModel === "" ? { agent: cleanedAgent } : { agent: cleanedAgent, model: cleanedModel };
 }
 
 /**
@@ -339,8 +395,11 @@ export function readSlotFromText(text: string, slot: AgentSlot): string | undefi
  *   - absent slot → append the inline form.
  * The caller persists the result atomically (tmp + rename).
  */
-export function setSlotInText(text: string, slot: AgentSlot, agent: string): string {
-  const newLine = `${slot}: { agent: ${agent} }`;
+export function setSlotInText(text: string, slot: AgentSlot, agent: string, model?: string): string {
+  const newLine =
+    model !== undefined && model !== ""
+      ? `${slot}: { agent: ${agent}, model: ${model} }`
+      : `${slot}: { agent: ${agent} }`;
   if (text === "") {
     return `schema: v3\n${newLine}\n`;
   }
@@ -368,8 +427,9 @@ export function setSlotInText(text: string, slot: AgentSlot, agent: string): str
     if (raw.length > 0 && raw[0] !== " ") {
       inBlock = false;
     }
-    if (inBlock && lineAgentValue(raw) !== undefined) {
-      // Drop the old nested agent line.
+    if (inBlock && (lineAgentValue(raw) !== undefined || lineModelValue(raw) !== undefined)) {
+      // Drop the old nested agent / model lines — the canonical inline header
+      // above now carries both.
       continue;
     }
     out.push(line);
@@ -405,9 +465,9 @@ export class AgentRegistry {
     return undefined;
   }
 
-  /** Read a slot's agent from the file at `path` (returns `undefined` when the
-   *  file is unreadable or the slot has no value). */
-  readSlot(path: string, slot: AgentSlot): string | undefined {
+  /** Read a slot's `{ agent, model? }` from the file at `path` (returns
+   *  `undefined` when the file is unreadable or the slot has no value). */
+  readSlot(path: string, slot: AgentSlot): SlotConfig | undefined {
     let text: string;
     try {
       text = this.fs.readText(path);
@@ -417,16 +477,16 @@ export class AgentRegistry {
     return readSlotFromText(text, slot);
   }
 
-  /** Atomically write `agent` into `slot` at `path` (read-modify-write; seeds a
-   *  fresh file when `path` does not yet exist). */
-  setSlot(path: string, slot: AgentSlot, agent: string): void {
+  /** Atomically write `agent` (and an optional `model`) into `slot` at `path`
+   *  (read-modify-write; seeds a fresh file when `path` does not yet exist). */
+  setSlot(path: string, slot: AgentSlot, agent: string, model?: string): void {
     let text = "";
     try {
       text = this.fs.readText(path);
     } catch {
       text = "";
     }
-    this.fs.writeFileAtomic(path, setSlotInText(text, slot, agent));
+    this.fs.writeFileAtomic(path, setSlotInText(text, slot, agent, model));
   }
 
   /** Pass-throughs to the pure identity helpers, scoped to this registry. */

@@ -8,7 +8,8 @@
  *
  * This module provides:
  *   1. {@link RunFact} / {@link MergeFact} — the two fact types.
- *   2. {@link extractRunFact} / {@link parseMergeCommitMessages} — fact parsers.
+ *   2. {@link extractRunFact} / {@link parseMergeCommitMessages} /
+ *      {@link parseMergeCommitLog} — fact parsers.
  *   3. {@link rebuildDeliveriesFromFacts} — the pure, deterministic projection.
  *
  * AC1: rebuild is deterministic and idempotent.
@@ -168,60 +169,112 @@ export function extractRunFact(row: RunRow): RunFact | null {
   };
 }
 
+const GIT_RECORD_SEPARATOR = "\x1e";
+const GIT_FIELD_SEPARATOR = "\x1f";
+const FULL_GIT_LOG_FORMAT = "%x1e%H%x1f%ct%x1f%B";
+
+function mergeFactFromCommitMessage(
+  sha: string,
+  tsStr: string,
+  message: string,
+): MergeFact | null {
+  const mergedAt = Number(tsStr);
+  if (!Number.isFinite(mergedAt) || mergedAt <= 0) return null;
+
+  const subject = message.split(/\r?\n/, 1)[0]?.trim() ?? "";
+
+  // "Merge pull request #N …"
+  let prNum: number | undefined;
+  const mergeMatch = /^Merge pull request #(\d+)/i.exec(subject);
+  if (mergeMatch) {
+    prNum = Number(mergeMatch[1]);
+  } else {
+    // Squash-merge "(#N)" in the subject. Body-only PR references are not PR identity.
+    const squashMatch = /\(#(\d+)\)/.exec(subject);
+    if (squashMatch) prNum = Number(squashMatch[1]);
+  }
+
+  if (prNum === undefined || !Number.isFinite(prNum) || prNum <= 0) return null;
+
+  // FIX-923: parse story-ids from the full commit message. GitHub merge-button
+  // commits often keep "Merge pull request #N …" as the subject and place the
+  // PR title/body, including the Roll story-id, in the merge commit body.
+  const storyIds = parseStoryIdsFromSubject(message);
+
+  return { prNumber: prNum, mergeCommit: sha, mergedAt, storyIds };
+}
+
 /**
- * Parse `git log --first-parent --merges --format='%H %ct %s'` output into
- * {@link MergeFact} array.
- *
- * Recognises merge commit subjects:
- *   - "Merge pull request #N from …" (GitHub merge button)
- *   - Any subject with "(#N)" (squash-merge)
+ * Parse `git log --format='%x1e%H%x1f%ct%x1f%B'` output into {@link MergeFact}
+ * array. The record/field separators make commit bodies with newlines safe.
  *
  * Last match per prNumber wins (git log is reverse-chronological, so the
  * first occurrence is newest).
  */
-export function parseMergeCommitMessages(lines: string[]): MergeFact[] {
+export function parseMergeCommitLog(text: string): MergeFact[] {
+  if (!text.includes(GIT_FIELD_SEPARATOR)) {
+    return parseLegacyMergeCommitLines(text.split("\n"));
+  }
+
   const map = new Map<number, MergeFact>();
 
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (trimmed === "") continue;
+  for (const rawRecord of text.split(GIT_RECORD_SEPARATOR)) {
+    const record = rawRecord.trim();
+    if (record === "") continue;
 
-    // Format: "<sha> <epoch_sec> <subject>"
-    const firstSpace = trimmed.indexOf(" ");
-    if (firstSpace < 0) continue;
-    const secondSpace = trimmed.indexOf(" ", firstSpace + 1);
-    if (secondSpace < 0) continue;
+    const firstSep = record.indexOf(GIT_FIELD_SEPARATOR);
+    if (firstSep < 0) continue;
+    const secondSep = record.indexOf(GIT_FIELD_SEPARATOR, firstSep + 1);
+    if (secondSep < 0) continue;
 
-    const sha = trimmed.slice(0, firstSpace);
-    const tsStr = trimmed.slice(firstSpace + 1, secondSpace);
-    const subject = trimmed.slice(secondSpace + 1);
+    const sha = record.slice(0, firstSep);
+    const tsStr = record.slice(firstSep + 1, secondSep);
+    const message = record.slice(secondSep + 1);
 
-    const mergedAt = Number(tsStr);
-    if (!Number.isFinite(mergedAt) || mergedAt <= 0) continue;
-
-    // "Merge pull request #N …"
-    let prNum: number | undefined;
-    const mergeMatch = /^Merge pull request #(\d+)/i.exec(subject);
-    if (mergeMatch) {
-      prNum = Number(mergeMatch[1]);
-    } else {
-      // Squash-merge "(#N)" anywhere in the subject
-      const squashMatch = /\(#(\d+)\)/.exec(subject);
-      if (squashMatch) prNum = Number(squashMatch[1]);
-    }
-
-    if (prNum === undefined || !Number.isFinite(prNum) || prNum <= 0) continue;
-
-    // FIX-904: parse story-ids from the subject (authoritative done signal).
-    const storyIds = parseStoryIdsFromSubject(subject);
+    const fact = mergeFactFromCommitMessage(sha, tsStr, message);
+    if (fact === null) continue;
 
     // First occurrence wins (reverse-chronological input)
-    if (!map.has(prNum)) {
-      map.set(prNum, { prNumber: prNum, mergeCommit: sha, mergedAt, storyIds });
+    if (!map.has(fact.prNumber)) {
+      map.set(fact.prNumber, fact);
     }
   }
 
   return [...map.values()];
+}
+
+function parseLegacyMergeCommitLines(lines: string[]): MergeFact[] {
+  const records = lines
+    .map((line) => {
+      const trimmed = line.trim();
+      if (trimmed === "") return "";
+
+      // Format: "<sha> <epoch_sec> <subject>"
+      const firstSpace = trimmed.indexOf(" ");
+      if (firstSpace < 0) return "";
+      const secondSpace = trimmed.indexOf(" ", firstSpace + 1);
+      if (secondSpace < 0) return "";
+
+      const sha = trimmed.slice(0, firstSpace);
+      const tsStr = trimmed.slice(firstSpace + 1, secondSpace);
+      const subject = trimmed.slice(secondSpace + 1);
+      return `${GIT_RECORD_SEPARATOR}${sha}${GIT_FIELD_SEPARATOR}${tsStr}${GIT_FIELD_SEPARATOR}${subject}`;
+    })
+    .join("");
+  if (records === "") return [];
+  return parseMergeCommitLog(records);
+}
+
+/**
+ * Parse legacy `git log --first-parent --merges --format='%H %ct %s'` output
+ * into {@link MergeFact} array.
+ *
+ * Recognises commit subjects:
+ *   - "Merge pull request #N from …" (GitHub merge button)
+ *   - Any subject with "(#N)" (squash-merge)
+ */
+export function parseMergeCommitMessages(lines: string[]): MergeFact[] {
+  return parseLegacyMergeCommitLines(lines);
 }
 
 // ── Projection core ──────────────────────────────────────────────────────────
@@ -615,10 +668,10 @@ export function ensureDeliveriesFresh(
   const gitLog = exec.run("git", [
     "-C", projectRoot,
     "log", "--first-parent", mainRef, "--merges",
-    "--format=%H %ct %s",
+    `--format=${FULL_GIT_LOG_FORMAT}`,
   ]);
   if (gitLog.code === 0 && gitLog.stdout !== "") {
-    const parsed = parseMergeCommitMessages(gitLog.stdout.split("\n"));
+    const parsed = parseMergeCommitLog(gitLog.stdout);
     for (const m of parsed) seenPrs.add(m.prNumber);
     merges.push(...parsed);
   }
@@ -627,18 +680,14 @@ export function ensureDeliveriesFresh(
   const squashLog = exec.run("git", [
     "-C", projectRoot,
     "log", "--first-parent", mainRef,
-    "--format=%H %ct %s",
+    `--format=${FULL_GIT_LOG_FORMAT}`,
   ]);
   if (squashLog.code === 0 && squashLog.stdout !== "") {
-    for (const line of squashLog.stdout.split("\n")) {
-      if (/\(#\d+\)/.test(line) && !/^Merge pull request #\d+/.test(line)) {
-        const parsed = parseMergeCommitMessages([line]);
-        for (const m of parsed) {
-          if (!seenPrs.has(m.prNumber)) {
-            seenPrs.add(m.prNumber);
-            merges.push(m);
-          }
-        }
+    const parsed = parseMergeCommitLog(squashLog.stdout);
+    for (const m of parsed) {
+      if (!seenPrs.has(m.prNumber)) {
+        seenPrs.add(m.prNumber);
+        merges.push(m);
       }
     }
   }

@@ -11,7 +11,7 @@
  * without real evidence; the render layer still downgrades fabricated passes.
  */
 import { execSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -200,7 +200,7 @@ describe("FIX-317 autoAttachScreenshotToAcMap", () => {
 
 // ── FIX-912: ac-map draft auto-generation ───────────────────────────────────
 
-import { ACMAP_DRAFT_STATUS, ACMAP_PASS_WITH_EVIDENCE, generateAcMapDraft, type DraftEvidence } from "../src/runner/attest-remediation.js";
+import { ACMAP_DRAFT_STATUS, ACMAP_PASS_WITH_EVIDENCE, generateAcMapDraft, writeAcMapDraftEvidenceFiles, type DraftEvidence } from "../src/runner/attest-remediation.js";
 
 const FIX_912_SPEC = `---
 id: FIX-912
@@ -313,6 +313,26 @@ describe("FIX-912 generateAcMapDraft", () => {
         [ACMAP_DRAFT_STATUS, ACMAP_PASS_WITH_EVIDENCE].includes(e.status),
       ).toBe(true);
     }
+  });
+
+  it("writes the evidence text files referenced by the generated draft", () => {
+    const wt = withStory("FIX-912", FIX_912_SPEC);
+    const evidence: DraftEvidence = {
+      commitLines: ["abc1234 tcr: fix AC1 and AC5"],
+      diffStatLines: [" packages/cli/src/runner/attest-remediation.ts | 12 +++"],
+      changedFilenames: [
+        "packages/cli/test/fix-912-ac5.test.ts",
+        "packages/cli/src/runner/attest-remediation.ts",
+      ],
+    };
+    writeAcMapDraftEvidenceFiles(wt, "FIX-912", evidence);
+    const evidenceDir = join(dirname(acMapPath(wt, "FIX-912")), "evidence");
+    for (const name of ["commits-FIX-912.txt", "changed-files-FIX-912.txt", "test-output-FIX-912.txt"]) {
+      expect(existsSync(join(evidenceDir, name))).toBe(true);
+    }
+    expect(readFileSync(join(evidenceDir, "commits-FIX-912.txt"), "utf8")).toContain("abc1234");
+    expect(readFileSync(join(evidenceDir, "changed-files-FIX-912.txt"), "utf8")).toContain("attest-remediation.ts");
+    expect(readFileSync(join(evidenceDir, "test-output-FIX-912.txt"), "utf8")).toContain("fix-912-ac5.test.ts");
   });
 
   it("AC5: NEVER writes bare 'pass' — only pass-with-evidence or needs-confirmation", () => {

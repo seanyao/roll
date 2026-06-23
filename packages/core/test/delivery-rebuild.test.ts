@@ -683,6 +683,24 @@ describe("parseMergeCommitLog — FIX-923 full commit messages", () => {
 
     expect(parseMergeCommitLog(text)).toHaveLength(0);
   });
+
+  it("accepts a story-id merge commit with no PR identity", () => {
+    const text = [
+      rs,
+      "10a4ff247301927a82635ca4341d683d5f3a9f57",
+      fs,
+      "1782234189",
+      fs,
+      "FIX-923: parse merge commit bodies for delivery truth\n\n",
+      "Parse full merge commit messages.",
+    ].join("");
+
+    const facts = parseMergeCommitLog(text);
+
+    expect(facts).toHaveLength(1);
+    expect(facts[0].prNumber).toBe(0);
+    expect(facts[0].storyIds).toEqual(["FIX-923"]);
+  });
 });
 
 describe("rebuildDeliveriesFromFacts — FIX-904: merge subject = authoritative done", () => {
@@ -774,6 +792,28 @@ describe("rebuildDeliveriesFromFacts — FIX-904: merge subject = authoritative 
     });
     expect(result[0].prNumber).toEqual({ present: true, value: 922 });
     expect(result[0].prUrl).toEqual({ present: true, value: "https://github.com/seanyao/roll/pull/922" });
+  });
+
+  it("story-only merge commit marks the story done without PR metadata", () => {
+    const merges = parseMergeCommitLog([
+      "\x1e",
+      "10a4ff247301927a82635ca4341d683d5f3a9f57",
+      "\x1f",
+      "1782234189",
+      "\x1f",
+      "FIX-923: parse merge commit bodies for delivery truth",
+    ].join(""));
+    const result = rebuildDeliveriesFromFacts([], merges, "seanyao/roll");
+
+    expect(result).toHaveLength(1);
+    expect(result[0].storyId).toBe("FIX-923");
+    expect(result[0].lifecycleState).toBe("done");
+    expect(result[0].prNumber).toEqual({ present: false, reason: "no_publish_attempted" });
+    expect(result[0].prUrl).toEqual({ present: false, reason: "not_recorded" });
+    expect(result[0].mergeCommit).toEqual({
+      present: true,
+      value: "10a4ff247301927a82635ca4341d683d5f3a9f57",
+    });
   });
 
   it("first (newest) merge wins when two subjects name the same story", () => {

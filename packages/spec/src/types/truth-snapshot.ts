@@ -112,6 +112,16 @@ export interface TruthSnapshotOnDeck {
   rows: TruthSnapshotOnDeckRow[];
 }
 
+/** US-OBS-019 — cross-project switcher rows after read-side reachability filtering. */
+export interface TruthSnapshotProject {
+  name: string;
+  slug: string;
+  path: string;
+  releaseTag?: string;
+  verdict?: string;
+  lastIndexedAt?: string;
+}
+
 /**
  * US-DOSSIER-021 — one per-story registry row carried by the ONE snapshot.
  *
@@ -152,6 +162,9 @@ export interface TruthSnapshot {
   /** US-OBS-018 — queued picks computed from backlog Todo rows as primary truth,
    *  with story folders used only to provide card deep-links. */
   onDeck?: TruthSnapshotOnDeck;
+  /** US-OBS-019 — reachable project switcher rows, filtered by the read selector
+   *  so every emitter serves the same live machine registry view. */
+  projects?: TruthSnapshotProject[];
   /** US-DOSSIER-021 — the per-story delivery-ladder + evidence registry. Optional
    *  and additive: older consumers and snapshots minted before this story stay
    *  valid (a snapshot without it serializes byte-identically to before). */

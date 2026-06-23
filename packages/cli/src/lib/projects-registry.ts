@@ -12,8 +12,9 @@
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, realpathSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
-import { basename, dirname, join, sep } from "node:path";
+import { homedir } from "node:os";
+import { basename, dirname, join } from "node:path";
+import { isRealProjectPath, reachableProjects as filterReachableProjects } from "@roll/core";
 import type { ProjectRegistryEntry } from "./truth-console.js";
 
 /**
@@ -83,45 +84,6 @@ export function collectProjectsRegistry(home?: string): ProjectRegistryEntry[] {
 }
 
 /**
- * FIX-376 — a project path is NOT a real project when its resolved path lies
- * under any OS temp directory (tmpdir() or /tmp) or when its last path segment
- * is `.roll` (a nested roll-meta repo, not a standalone project). Resolves
- * symlinks before checking so /tmp → /private/tmp is caught on macOS.
- * Non-existent paths return true (they are already excluded by the reachable
- * filter — a dead path tells us nothing about whether it would be temp).
- */
-export function isRealProjectPath(path: string): boolean {
-  let real: string;
-  try {
-    real = realpathSync(path);
-  } catch {
-    // Path doesn't exist — can't determine, treat as real (already filtered by existsSync)
-    return true;
-  }
-  // Basename .roll → nested meta repo, never a standalone project
-  if (basename(real) === ".roll") return false;
-  // Check against tmpdir()
-  let tmpReal = tmpdir();
-  try {
-    tmpReal = realpathSync(tmpReal);
-  } catch {
-    /* fall back to the un-resolved tmpdir() */
-  }
-  const tmpPrefix = tmpReal.endsWith(sep) ? tmpReal : tmpReal + sep;
-  if (real.startsWith(tmpPrefix)) return false;
-  // Also check system /tmp (which may differ from tmpdir() on macOS)
-  let sysTmpReal = "/tmp";
-  try {
-    sysTmpReal = realpathSync("/tmp");
-  } catch {
-    /* /tmp not resolvable — skip */
-  }
-  const sysTmpPrefix = sysTmpReal.endsWith(sep) ? sysTmpReal : sysTmpReal + sep;
-  if (real.startsWith(sysTmpPrefix)) return false;
-  return true;
-}
-
-/**
  * FIX-283 (AC2): the registry rows whose `path` still exists on disk — the ONLY
  * set the web switcher should render. The CLI `roll ls` keeps listing every row
  * with missing/stale flags (that honesty is for the operator); the switcher is a
@@ -136,7 +98,7 @@ export function reachableProjects(
   rows: ProjectRegistryEntry[],
   pathExists: (p: string) => boolean = existsSync,
 ): ProjectRegistryEntry[] {
-  return rows.filter((r) => pathExists(r.path) && isRealProjectPath(r.path));
+  return filterReachableProjects(rows, pathExists);
 }
 
 /**

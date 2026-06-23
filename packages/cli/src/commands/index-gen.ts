@@ -21,7 +21,7 @@ import { renderAgentsMachinePage } from "../lib/page-agents.js";
 import { collectCharter, defaultCharterDeps } from "../lib/page-charter.js";
 import { collectAbout, defaultAboutDeps, renderAboutPage } from "../lib/page-about.js";
 import { collectConventions, defaultConventionsDeps, renderConventionsPage } from "../lib/page-conventions.js";
-import { collectProjectsRegistry, reachableProjects, resolveProjectName, shouldSelfRegister, writeProjectRow } from "../lib/projects-registry.js";
+import { collectProjectsRegistry, resolveProjectName, shouldSelfRegister, writeProjectRow } from "../lib/projects-registry.js";
 import type { CycleLedgerRow } from "../lib/cycle-ledger.js";
 import { reconciledLedger, cyclesCycleBoard } from "./cycles.js";
 import { collectAgentPanel } from "../lib/agent-panel.js";
@@ -478,6 +478,7 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
       collectLoopHeartbeat: (_cwd) =>
         collectLoopHeartbeat(defaultHeartbeatDeps(_cwd, projectSlug(), launchAgentsDir())),
       collectEvidenceFlags: (_cwd, story) => storyEvidenceFlags(_cwd, story as Parameters<typeof storyEvidenceFlags>[1]),
+      collectProjects: () => collectProjectsRegistry(),
     };
     const snapshot = collectDossierState(cwd, { deps: cliDeps });
     const snapshotJson = serializeTruthSnapshot(snapshot);
@@ -555,13 +556,9 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
         // `roll loop watch` follows. The generated snapshot is folded through
         // loop-fmt's ActivitySignal renderer; browser polling reads only.
         liveFeed: collectLoopLiveFeed(cwd, renderNowSec()),
-        // US-DOSSIER-027: the top-bar project switcher reads the cross-project
-        // registry (US-DOSSIER-028 writes it). Absent today → [] → the console
-        // degrades to current-project-only via currentSlug, never erroring.
-        // FIX-283 (AC2): the switcher is a navigation control, so it shows only
-        // REACHABLE projects (path exists on disk) — a dead/stale entry would be
-        // an un-clickable 404 item. `roll ls` keeps the full list with flags.
-        projects: reachableProjects(collectProjectsRegistry()),
+        // US-OBS-019: project switcher rows now come from collectDossierState,
+        // where the reachable filter runs at the shared read-side selector.
+        projects: snapshot.projects,
         currentSlug: projectSlug(cwd),
         // kimi pair-review: the PR links need the repo slug — reuse the
         // FIX-275 git snapshot (one probe per run) instead of a fresh git call.
@@ -589,8 +586,8 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
     const machineBar = {
       brand: { name: projectName, slogan: process.env["ROLL_BRAND_SLOGAN"] ?? "It just works." },
       snapshot,
-      // FIX-283 (AC2): reachable-only on the machine pages too — same switcher.
-      projects: reachableProjects(collectProjectsRegistry()),
+      // US-OBS-019: reachable-only via the shared selector, not page-local bake code.
+      projects: snapshot.projects,
       currentSlug: projectSlug(cwd),
     };
     // US-DOSSIER-031: the machine-global Agents page — the SAME collectAgentPanel

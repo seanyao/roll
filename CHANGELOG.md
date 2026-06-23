@@ -2,9 +2,21 @@
 
 ## Unreleased
 
+### 新功能
+
+- **实时控制台底座上线**：档案页可以从静态快照走向实时刷新。(US-OBS-020 / US-OBS-021) `[delivery-dossier]`
+
 ### 修复
 
 - **取分阶段失败归因细分 + unparseable 一次再问救回**：之前取分链路的 `runScorePairing` 把所有 reviewer 失败一律当 null 吞掉——auth 超时、网络不通、进程崩溃、回复了但格式跑偏——四种原因全被静默丢弃，池子耗尽后闸判「缺分数」→ cycle 失败。现在每种失败都发出 `pair:score-failure` 可观测事件（unparseable/timeout/auth-block/exit-error），不再沉默。最冤的「reviewer 答了但格式跑偏」加了一次严格格式重申再问（`你上次回复缺/错了 SCORE/VERDICT/RATIONALE 行，请严格只回这三行`），答了白答的 pi 之类的 reviewer 现在有机会被救回。parse 绝不放松——只接受严格三行协议；闸逻辑逐行不动，救援分须自然满足全部独立性过滤。(FIX-910) `[loop-engine]`
+
+- **loop 交付真相不再漏认已合并卡**：手动合并和外部合并也会被识别，已合卡不再被反复重选。(FIX-389a / FIX-390 / FIX-903 / FIX-904 / FIX-905 / FIX-906) `[feedback-truth-alignment]`
+
+- **loop 挂死或缺验收件时不再丢工作**：周期空挂会硬超时，CI 已绿但缺报告的工作会进入待复评，不再触发假熔断。(FIX-907 / FIX-908 / FIX-913) `[loop-engine]`
+
+- **loop 评审和在飞对账更稳**：评审会带仓库上下文和反馈重试，GitHub 探测失败时也不再误重选在飞卡。(FIX-386 / FIX-387 / FIX-397) `[loop-engine]`
+
+- **`roll loop watch` 状态行不再掉成 unknown**：长时间窗口也能显示真实故事和 agent。(FIX-382) `[loop-engine]`
 
 - **builder 进程 cwd/PWD 钉到 cycle worktree,不再漏写共享 checkout**：pi/kimi 等经 PTY 包装的 agent 现在同时用真实 `cwd` 和 `PWD` 指向 cycle worktree,并清理继承的 `GIT_*` 状态,避免 CLI 依据父进程 `PWD` 写进主 checkout；不再注入 `GIT_DIR`/`GIT_WORK_TREE`,避免污染共享 `.git/config` 的 `core.worktree`。(FIX-914) `[loop-engine]`
 

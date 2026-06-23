@@ -38,11 +38,28 @@ function cycleStoryMap(events: readonly RollEvent[]): Map<string, string> {
   return out;
 }
 
+/** FIX-913: cycles that ended `needs_review` (FIX-908 work-preservation — code
+ *  committed + CI-green but the attest artifact (peer score / ac-map) could not
+ *  yet be produced) are a PRESERVED SUCCESS awaiting re-certification, NOT a
+ *  failure. Their attest:gate-skipped / correction:action signals must NOT feed
+ *  the correction circuit breaker — else preserving work (the whole point of
+ *  FIX-908) falsely trips the breaker and pauses the loop (observed 2026-06-22
+ *  23:03: needs_review mis-counted as unknown_failure → false pause). */
+function needsReviewCycles(events: readonly RollEvent[]): Set<string> {
+  const out = new Set<string>();
+  for (const ev of events) {
+    if (ev.type === "cycle:terminal" && ev.outcome === "needs_review") out.add(ev.cycleId);
+  }
+  return out;
+}
+
 export function correctionSignals(events: readonly RollEvent[]): CorrectionSignal[] {
   const stories = cycleStoryMap(events);
+  const preserved = needsReviewCycles(events);
   const out: CorrectionSignal[] = [];
   for (const ev of events) {
     if (ev.type === "correction:action") {
+      if (ev.cycleId !== undefined && preserved.has(ev.cycleId)) continue;
       const signal = normalizeSignal(ev.signal);
       if (signal === "") continue;
       out.push({
@@ -54,6 +71,7 @@ export function correctionSignals(events: readonly RollEvent[]): CorrectionSigna
         source: "correction",
       });
     } else if (ev.type === "attest:gate" && ev.verdict === "skipped") {
+      if (preserved.has(ev.cycleId)) continue;
       const signal = normalizeSignal(ev.reasons[0] ?? "attest gate skipped");
       if (signal === "") continue;
       const storyId = stories.get(ev.cycleId);

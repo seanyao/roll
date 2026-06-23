@@ -36,15 +36,16 @@ describe("identity helpers", () => {
     expect(agentDisplayName("reasonix")).toBe("reasonix");
   });
 
-  it("agentBinNames mirrors the bash case arms (pool: kimi/pi/reasonix + deepseek engine)", () => {
+  it("agentBinNames mirrors the pool (kimi/pi/reasonix); deepseek is a model, not an agent", () => {
     expect(agentBinNames("kimi")).toEqual(["kimi-code", "kimi-cli", "kimi"]);
     expect(agentBinNames("pi")).toEqual(["pi"]);
-    expect(agentBinNames("deepseek")).toEqual(["deepseek"]);
     expect(agentBinNames("reasonix")).toEqual(["reasonix"]);
+    // FIX-399: `deepseek` is a MODEL pi/reasonix load, never a routable agent.
+    expect(agentBinNames("deepseek")).toBeNull();
     expect(agentBinNames("nope")).toBeNull();
   });
 
-  it("agentIsKnown: deepseek unknown, pool agents known", () => {
+  it("agentIsKnown: deepseek unknown (a model, not an agent), pool agents known", () => {
     expect(agentIsKnown("deepseek")).toBe(false);
     expect(agentIsKnown("kimi")).toBe(true);
     expect(agentIsKnown("pi")).toBe(true);
@@ -92,10 +93,13 @@ describe("installed detection", () => {
     expect(firstInstalledAgent(env)).toBe("kimi");
   });
 
-  it("firstInstalled scans deepseek (which agentsInstalled excludes)", () => {
+  it("firstInstalled never resolves to deepseek (FIX-399: a model, not an agent)", () => {
+    // Only the `deepseek` binary present: it is NOT a routable agent, so both the
+    // installed list and the fallback scan come back empty rather than naming a
+    // phantom agent.
     const env = makeEnv({ commandOnPath: (b) => b === "deepseek" });
     expect(agentsInstalled(env)).toEqual([]);
-    expect(firstInstalledAgent(env)).toBe("deepseek");
+    expect(firstInstalledAgent(env)).toBeUndefined();
   });
 });
 

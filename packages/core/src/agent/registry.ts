@@ -9,7 +9,7 @@
  *   - `_canonical_agent_name`       (~115-120): antigravity|gemini → agy.
  *   - `_agent_display_name`         (~125-130): human label (agy parenthesised).
  *   - `_agent_installed_by_name`    (~137-169): PATH/dir detection per agent.
- *   - `_agent_is_known`             (~178-185): name-validity (deepseek=unknown).
+ *   - `_agent_is_known`             (~178-185): name-validity (deepseek MODEL, not an agent).
  *   - `_agents_installed`           (~524-532): registry order, installed-only.
  *   - `_first_installed_agent`      (~1121-1130): first-installed scan order.
  *   - `_agent_cache_dir`            (~537-543): probe cache dir (env-overridable).
@@ -55,8 +55,6 @@ export function agentBinNames(agent: string): string[] | null {
   switch (agent) {
     case "kimi":
       return ["kimi-code", "kimi-cli", "kimi"];
-    case "deepseek":
-      return ["deepseek"];
     case "pi":
       return ["pi"];
     case "reasonix":
@@ -68,17 +66,14 @@ export function agentBinNames(agent: string): string[] | null {
 
 /**
  * Is NAME a known agent in this machine's registry? "Known" means it has a
- * binary-name entry OR is one of the special-cased non-PATH agents. This is a
- * name-validity check, NOT an installed check. `deepseek` is intentionally
- * unknown for routing (it is a model pi loads). Mirrors `_agent_is_known`:
- * canonicalises first, then checks the special cases / bin-names.
+ * binary-name entry. This is a name-validity check, NOT an installed check.
+ * `deepseek` is NOT a known agent — it is a MODEL that the `pi`/`reasonix`
+ * agents load, never a routable agent in its own right (FIX-399 removed the
+ * phantom `deepseek` agent from the roster). Mirrors `_agent_is_known`:
+ * canonicalises first, then checks the bin-names.
  */
 export function agentIsKnown(name: string): boolean {
   const c = canonicalAgentName(name);
-  switch (c) {
-    case "deepseek":
-      return false;
-  }
   return agentBinNames(c) !== null;
 }
 
@@ -119,7 +114,7 @@ export function agentInstalledByName(env: AgentEnv, agent: string, dir?: string)
 /**
  * Candidate routable agents in the SAME order bash `_AGENT_REGISTRY_NAMES`
  * declares (the order `_agents_installed` scans). `deepseek` is deliberately
- * absent (a pi-loaded model, not a routable agent).
+ * absent (a model the pi/reasonix agents load, not a routable agent).
  */
 export const AGENT_REGISTRY_NAMES = ["kimi", "pi", "reasonix"] as const;
 
@@ -130,13 +125,14 @@ export function agentsInstalled(env: AgentEnv): string[] {
 }
 
 /**
- * First-installed scan order, used as the last-resort routing fallback. This
- * order DIFFERS from {@link AGENT_REGISTRY_NAMES} in that `deepseek` IS scanned
- * here (it resolves to the `pi` engine's binary), even though it is excluded
- * from `_agents_installed`. Returns `undefined` when none are installed.
- * (Pool narrowed to 国产/开源 agents — kimi/pi/reasonix; overseas agents removed.)
+ * First-installed scan order, used as the last-resort routing fallback. Matches
+ * {@link AGENT_REGISTRY_NAMES} — only routable agents are scanned. (FIX-399
+ * removed the phantom `deepseek` agent: it is a MODEL the pi/reasonix agents
+ * load, never an agent to fall back to, so a fallback could never legitimately
+ * resolve to it.) Returns `undefined` when none are installed. (Pool narrowed to
+ * 国产/开源 agents — kimi/pi/reasonix; overseas agents removed.)
  */
-const FIRST_INSTALLED_ORDER = ["kimi", "deepseek", "pi", "reasonix"] as const;
+const FIRST_INSTALLED_ORDER = ["kimi", "pi", "reasonix"] as const;
 
 export function firstInstalledAgent(env: AgentEnv): string | undefined {
   return FIRST_INSTALLED_ORDER.find((a) => agentInstalledByName(env, a));

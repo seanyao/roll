@@ -84,7 +84,6 @@ describe("frozen: roll agent list render", () => {
 
           [0;32m✓ claude[0m  (current)
           [0;32m✓ kimi[0m
-          [0;33m✗ deepseek[0m  (not installed)
           [0;33m✗ pi[0m  (not installed)
           [0;33m✗ reasonix[0m  (not installed)
 
@@ -99,7 +98,6 @@ describe("frozen: roll agent list render", () => {
 
           [0;32m✓ claude[0m  (current)
           [0;32m✓ kimi[0m
-          [0;33m✗ deepseek[0m  (not installed)
           [0;33m✗ pi[0m  (not installed)
           [0;33m✗ reasonix[0m  (not installed)
 
@@ -114,7 +112,6 @@ describe("frozen: roll agent list render", () => {
 
           ✓ claude  (current)
           ✓ kimi
-          ✗ deepseek  (not installed)
           ✗ pi  (not installed)
           ✗ reasonix  (not installed)
 
@@ -134,7 +131,6 @@ describe("frozen: roll agent list render", () => {
 
             ✓ claude
             ✓ kimi  (current)
-            ✗ deepseek  (not installed)
             ✗ pi  (not installed)
             ✗ reasonix  (not installed)
 

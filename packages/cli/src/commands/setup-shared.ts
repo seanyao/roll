@@ -360,7 +360,9 @@ primary_agent: claude
 `;
 
 function firstInstalledAgent(): string | null {
-  for (const agent of ["claude", "kimi", "deepseek", "pi", "reasonix"]) {
+  // FIX-399: `deepseek` removed — it is a MODEL pi/reasonix load, not an agent
+  // that may be written as `primary_agent`.
+  for (const agent of ["claude", "kimi", "pi", "reasonix"]) {
     if (agentInstalledByName(agent)) return agent;
   }
   return null;

@@ -78,8 +78,6 @@ function agentBinNames(agent: string): string[] | null {
       return ["claude"];
     case "kimi":
       return ["kimi-code", "kimi-cli", "kimi"];
-    case "deepseek":
-      return ["deepseek"];
     case "pi":
       return ["pi"];
     case "reasonix":
@@ -152,7 +150,9 @@ export function projectAgent(): string {
 }
 
 // ── Entry ────────────────────────────────────────────────────────────────────
-const AGENT_ORDER = ["claude", "kimi", "deepseek", "pi", "reasonix"];
+// FIX-399: `deepseek` removed — it is a MODEL the pi/reasonix agents load, not a
+// routable agent. Listing it produced a phantom `✗ deepseek (not installed)` row.
+const AGENT_ORDER = ["claude", "kimi", "pi", "reasonix"];
 
 export function agentListCommand(_args: string[]): number {
   const noColor = (process.env["NO_COLOR"] ?? "") !== "";

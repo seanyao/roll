@@ -256,7 +256,7 @@ function releaseDeltaCardIds(projectDir: string): Set<string> {
   return ids;
 }
 
-/** Per-id backlog facts: is the row ✅ Done, and does it carry a `#NNN` merge ref. */
+/** Per-id backlog facts: is the row ✅ Done, and does it carry a verifiable merge ref. */
 function backlogRowFacts(backlogText: string): Map<string, { done: boolean; mergeRef: boolean; status: string }> {
   const facts = new Map<string, { done: boolean; mergeRef: boolean; status: string }>();
   for (const line of backlogText.split("\n")) {
@@ -266,7 +266,7 @@ function backlogRowFacts(backlogText: string): Map<string, { done: boolean; merg
     if (id === "") continue;
     const cells = line.split("|").map((cell) => cell.trim());
     const status = cells.at(-2) ?? line;
-    facts.set(id, { done: line.includes(STATUS_MARKER.done), mergeRef: /#\d+|pull\/\d+/.test(line), status });
+    facts.set(id, { done: line.includes(STATUS_MARKER.done), mergeRef: /#\d+|pull\/\d+|\bmerged\s+[0-9a-f]{7,40}\b/i.test(line), status });
   }
   return facts;
 }
@@ -315,6 +315,15 @@ function prNumbersFromStatus(status: string): number[] {
     if (Number.isFinite(n) && n > 0 && !nums.includes(n)) nums.push(n);
   }
   return nums;
+}
+
+function mergeShasFromStatus(status: string): string[] {
+  const shas: string[] = [];
+  for (const match of status.matchAll(/\bmerged\s+([0-9a-f]{7,40})\b/gi)) {
+    const sha = (match[1] ?? "").toLowerCase();
+    if (sha !== "" && !shas.includes(sha)) shas.push(sha);
+  }
+  return shas;
 }
 
 /** The card-folder spec path for an id (`features/<epic>/<id>/spec.md`), or null. */
@@ -373,7 +382,7 @@ export function checkFeaturesCatalog(projectDir: string): DimResult {
     if (!f.done) {
       gaps.push(`${id} was merged since the latest release tag but its backlog row is not ✅ Done — claim/merge drift`);
     } else if (!f.mergeRef) {
-      gaps.push(`${id} is ✅ Done in the release delta but its row carries no merge ref (#NNN) — unverifiable Done claim`);
+      gaps.push(`${id} is ✅ Done in the release delta but its row carries no merge ref (#NNN or merged <sha>) — unverifiable Done claim`);
     }
   }
 
@@ -415,6 +424,15 @@ export function checkTruthLive(projectDir: string): DimResult {
     if (prNums.length > 0 && (truth.prNumber === undefined || !prNums.includes(truth.prNumber))) {
       gaps.push(
         `${id} backlog merge ref ${prNums.map((n) => `#${n}`).join(",")} does not match queryStoryDelivery() PR ${truth.prNumber ?? "n/a"} — fix the Done row or delivery projection`,
+      );
+    }
+    const mergeShas = mergeShasFromStatus(f.status);
+    if (
+      mergeShas.length > 0 &&
+      (truth.mergeCommit === undefined || !mergeShas.some((sha) => truth.mergeCommit?.toLowerCase().startsWith(sha)))
+    ) {
+      gaps.push(
+        `${id} backlog merge ref ${mergeShas.map((sha) => `merged ${sha}`).join(",")} does not match queryStoryDelivery() merge ${truth.mergeCommit ?? "n/a"} — fix the Done row or delivery projection`,
       );
     }
   }

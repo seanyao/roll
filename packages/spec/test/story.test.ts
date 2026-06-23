@@ -16,7 +16,7 @@ import {
 
 describe("STATUS_MARKER ↔ classifyStatus round-trip", () => {
   it("every canonical marker classifies back to its own status", () => {
-    const statuses: StoryStatus[] = ["todo", "in_progress", "done", "hold"];
+    const statuses: StoryStatus[] = ["todo", "in_progress", "done", "hold", "cut"];
     for (const s of statuses) {
       expect(classifyStatus(STATUS_MARKER[s])).toBe(s);
     }
@@ -29,6 +29,10 @@ describe("classifyStatus", () => {
     expect(classifyStatus("🔨 In Progress")).toBe("in_progress");
     expect(classifyStatus("✅ Done")).toBe("done");
     expect(classifyStatus("🚫 Hold (claude 直做并行)")).toBe("hold");
+  });
+
+  it("recognizes Cut as a terminal status distinct from an unknown cell", () => {
+    expect(classifyStatus("🗑️ Cut (superseded by US-OBS-018)")).toBe("cut");
   });
 
   it("folds historical triage markers 🔒 Blocked / ⏸ Deferred into hold", () => {
@@ -75,7 +79,7 @@ describe("FIX-300 single-source markers — legacy tolerance", () => {
 
 describe("FIX-300 single-source markers — regex / extractor", () => {
   it("the regex matches every canonical marker", () => {
-    const statuses: StoryStatus[] = ["todo", "in_progress", "done", "hold"];
+    const statuses: StoryStatus[] = ["todo", "in_progress", "done", "hold", "cut"];
     for (const s of statuses) {
       expect(statusMarkerRe(false).test(`| ${STATUS_MARKER[s]} |`)).toBe(true);
     }
@@ -107,7 +111,7 @@ describe("FIX-300 single-source markers — regex / extractor", () => {
 
 describe("FIX-300 single-source markers — cross-module agreement", () => {
   it("every canonical marker is recognized identically by classifyStatus and the regex", () => {
-    const statuses: StoryStatus[] = ["todo", "in_progress", "done", "hold"];
+    const statuses: StoryStatus[] = ["todo", "in_progress", "done", "hold", "cut"];
     for (const s of statuses) {
       const marker = STATUS_MARKER[s];
       expect(classifyStatus(marker)).toBe(s);

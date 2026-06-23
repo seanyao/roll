@@ -9,9 +9,11 @@
  * the daemon and tests. The CLI wires the full reconciled collectors for
  * byte-identical output.
  */
-import type { StoryEvidenceFlags, TruthSnapshot, TruthSnapshotLoop, TruthSnapshotStoryEntry } from "@roll/spec";
+import type { StoryEvidenceFlags, TruthSnapshot, TruthSnapshotLoop, TruthSnapshotOnDeck, TruthSnapshotStoryEntry } from "@roll/spec";
+import { classifyStatus } from "@roll/spec";
 import { buildTruthSnapshot } from "./selectors.js";
 import { collectDossier } from "./dossier-collect.js";
+import { parseBacklog } from "../backlog/store.js";
 import {
   deriveDeliveryLadder,
   countLegacyStories,
@@ -242,6 +244,35 @@ function defaultCollectEvidenceFlags(cwd: string, story: { id: string; epic: str
 function defaultBuildRunCache(_cwd: string): unknown { return null; }
 function defaultMergeEvidence(_cache: unknown, _id: string): boolean { return false; }
 
+function collectOnDeck(cwd: string, epics: ReturnType<typeof collectDossier>): TruthSnapshotOnDeck {
+  const byId = new Map<string, { epic: string; title: string }>();
+  for (const epic of epics) {
+    for (const story of epic.stories) {
+      byId.set(story.id, { epic: story.epic, title: story.title ?? story.id });
+    }
+  }
+
+  let rows: TruthSnapshotOnDeck["rows"] = [];
+  try {
+    const backlog = readFileSync(join(cwd, ".roll", "backlog.md"), "utf8");
+    rows = parseBacklog(backlog)
+      .filter((item) => classifyStatus(item.status) === "todo")
+      .map((item) => {
+        const folder = byId.get(item.id);
+        const epic = folder?.epic ?? "backlog";
+        return {
+          id: item.id,
+          epic,
+          title: folder?.title ?? item.desc,
+          href: folder !== undefined ? `${folder.epic}/${item.id}/index.html` : "#backlog/todo",
+        };
+      });
+  } catch {
+    rows = [];
+  }
+  return { count: rows.length, rows };
+}
+
 // ── The selector ────────────────────────────────────────────────────────────
 
 /**
@@ -302,6 +333,9 @@ export function collectDossierState(
   // 4. Collect loop heartbeat
   const loop = collectLoopHeartbeat(cwd);
 
+  // 4.5. On Deck is backlog-primary: folders only provide deep links.
+  const onDeck = collectOnDeck(cwd, epics);
+
   // 5. Assemble snapshot via truth selector
   return buildTruthSnapshot({
     generatedAt: truth.generatedAt ?? iso(nowSec),
@@ -312,6 +346,7 @@ export function collectDossierState(
     ...(truth.cycle !== undefined ? { cycle: truth.cycle } : {}),
     ...(truth.release !== undefined ? { release: truth.release } : {}),
     loop,
+    onDeck,
     stories: storyRegistry,
   });
 }

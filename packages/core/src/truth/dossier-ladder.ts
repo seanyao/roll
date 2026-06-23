@@ -61,6 +61,7 @@ export function storySpectrumState(s: DossierStory): StoryState {
   if (s.status === "hold") return "hold";
   if (s.delivered) return "done";
   if (s.status === "done") return "unknown";
+  if (s.status === "cut") return "unknown";
   return "todo";
 }
 

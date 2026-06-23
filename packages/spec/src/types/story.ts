@@ -3,7 +3,7 @@ export type StoryId = string;
 
 export type TaskLevel = "epic" | "feature" | "story" | "action";
 
-export type StoryStatus = "todo" | "in_progress" | "done" | "hold";
+export type StoryStatus = "todo" | "in_progress" | "done" | "hold" | "cut";
 
 /**
  * The single canonical markdown marker for each {@link StoryStatus}. This is the
@@ -15,6 +15,7 @@ export const STATUS_MARKER: Record<StoryStatus, string> = {
   in_progress: "🔨 In Progress",
   done: "✅ Done",
   hold: "🚫 Hold",
+  cut: "🗑️ Cut",
 };
 
 /**
@@ -55,6 +56,7 @@ const STATUS_MARKER_ALTERNATIVES: ReadonlyArray<{ marker: string; status: StoryS
   { marker: STATUS_MARKER.done, status: "done" },
   { marker: STATUS_MARKER.in_progress, status: "in_progress" },
   { marker: STATUS_MARKER.hold, status: "hold" },
+  { marker: STATUS_MARKER.cut, status: "cut" },
   { marker: STATUS_MARKER.todo, status: "todo" },
   ...LEGACY_STATUS_MARKERS,
 ];
@@ -106,6 +108,7 @@ export function findStatusMarker(line: string): string | undefined {
 export function classifyStatus(cell: string): StoryStatus | null {
   if (cell.includes("✅") || cell.includes("✔️") || cell.includes("✔")) return "done";
   if (cell.includes("🔨") || cell.includes("🔄") || cell.includes("🚧")) return "in_progress";
+  if (cell.includes("🗑️") || cell.includes("🗑")) return "cut";
   if (
     cell.includes("🚫") ||
     cell.includes("🔒") ||
@@ -117,6 +120,7 @@ export function classifyStatus(cell: string): StoryStatus | null {
   // Emoji-less fallback: match the status word, most-specific terminal first.
   if (cell.includes("Done")) return "done";
   if (cell.includes("In Progress") || cell.includes("WIP")) return "in_progress";
+  if (cell.includes("Cut")) return "cut";
   if (cell.includes("Hold") || cell.includes("Blocked") || cell.includes("Deferred")) return "hold";
   if (cell.includes("Todo")) return "todo";
   return null;

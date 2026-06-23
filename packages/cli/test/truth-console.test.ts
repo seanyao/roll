@@ -393,6 +393,35 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
     expect(onDeck).not.toContain('data-prefilter');
   });
 
+  it("US-OBS-018: On-deck renders the shared snapshot queue, not folder-walked todo fallback", () => {
+    const snapshot: TruthSnapshot = {
+      ...SNAP,
+      onDeck: {
+        count: 1,
+        rows: [{ id: "FIX-9", epic: "alpha", title: "fix it", href: "alpha/FIX-9/index.html" }],
+      },
+    };
+    const out = renderTruthConsole({
+      ...baseInput(snapshot),
+      backlog: {
+        shipping: [{
+          name: "alpha",
+          done: 0,
+          total: 2,
+          stories: [
+            { id: "FIX-9", epic: "alpha", type: "FIX", title: "fix it", state: "todo" as const, legacy: false, stages: [] },
+            { id: "US-ORPHAN-1", epic: "alpha", type: "US", title: "folder orphan", state: "todo" as const, legacy: false, stages: [] },
+          ],
+        }],
+        settled: [],
+      },
+    });
+    const onDeck = /data-now-section="on-deck"[\s\S]*?<\/section>/.exec(out)?.[0] ?? "";
+    expect(onDeck).toContain(">1</span>");
+    expect(onDeck).toContain("FIX-9");
+    expect(onDeck).not.toContain("US-ORPHAN-1");
+  });
+
   it("FIX-373: Needs-you shows real total, fail/hold split and a one-line CTA", () => {
     // Build a snapshot/backlog with 1 fail + 1 hold so the split shows both.
     const needsBacklog = {

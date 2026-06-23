@@ -216,7 +216,7 @@ export function parseMergeCommitLog(text: string): MergeFact[] {
     return parseLegacyMergeCommitLines(text.split("\n"));
   }
 
-  const map = new Map<number, MergeFact>();
+  const map = new Map<string, MergeFact>();
 
   for (const rawRecord of text.split(GIT_RECORD_SEPARATOR)) {
     const record = rawRecord.trim();
@@ -234,9 +234,12 @@ export function parseMergeCommitLog(text: string): MergeFact[] {
     const fact = mergeFactFromCommitMessage(sha, tsStr, message);
     if (fact === null) continue;
 
-    // First occurrence wins (reverse-chronological input)
-    if (!map.has(fact.prNumber)) {
-      map.set(fact.prNumber, fact);
+    // First occurrence wins (reverse-chronological input). Real PR merges are
+    // unique by PR number; story-only commits have prNumber=0, so they must be
+    // keyed by commit SHA or every later no-PR story merge disappears.
+    const key = fact.prNumber > 0 ? `pr:${fact.prNumber}` : `sha:${fact.mergeCommit}`;
+    if (!map.has(key)) {
+      map.set(key, fact);
     }
   }
 

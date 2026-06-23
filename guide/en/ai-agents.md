@@ -42,7 +42,9 @@ hard:     { agent: claude }    # est_min > 20
 fallback: { agent: pi }        # used when the picked agent is offline
 ```
 
-Each agent uses its own default model — there is no model layer to configure.
+Each assignment is a rig: `agent × model`. The agent is one of the six supported
+identities; the model is a string owned by that agent. For example, `pi` may run
+`deepseek-v4-pro`, but `deepseek` is not an agent slot value.
 
 ```bash
 roll agent                # show the four slots + online status + recent downgrades

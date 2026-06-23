@@ -4,6 +4,11 @@
 **结对（pair）**而非评审：一个 agent 干完活，一个异构搭档复检，换来视角多样性。
 一个模型盲区里藏着的 bug，另一个模型往往一眼看到。
 
+Roll 把一次评审指派看成一个 **rig**：`agent × model`。agent 是有限的六个身份
+（`claude`、`kimi`、`codex`、`pi`、`agy`、`reasonix`）；model 是挂在该 agent 上的数据。
+因此 DeepSeek 模型应出现在 `pi` 或 `reasonix` rig 的 `model` 字段里，`deepseek`
+本身不是 agent rig。
+
 结对与 [`roll peer`](peer.md) 不同：peer 是你（或 loop 风险闸）按需发起的多轮协商；
 结对是常驻的单向第二遍，接在 cycle 里，由一份显式配置文件管控。
 
@@ -107,7 +112,7 @@ agent 给自己的交付打分是利益冲突，所以质量评分（**Review Sc
   触发同一个全新会话的 Reviewer 评**设计**质量（INVEST 拆分、可视 AC 完整、`deliverable_url`
   正确、领域/spec 一致），而非代码；记为 `stage=design`。设计 agent 只触发、绝不给自己打分；
   无可用评审则诚实标记未评审（fail-loud），绝不合成自评。
-- **独立性看会话，不看厂商**：同厂全新会话是最低可接受档；不同 agent+model+会话
-  （非子 agent）更鼓励。任何与 builder 共享会话的打分——包括其子 agent——都被判为自评而拒收。
+- **独立性看 rig 和会话**：同厂全新会话是最低可接受档；不同 `agent × model × session`
+  rig（非子 agent）更鼓励。任何与 builder 共享会话的打分——包括其子 agent——都被判为自评而拒收。
   无异构候选、超时或协议不符时**不会**回落成自评；缺席通过 `pair:none-available`
   事件留痕，该 story 仍欠一份全新会话的 Review Score 才能 attest（`review_score_missing`）。

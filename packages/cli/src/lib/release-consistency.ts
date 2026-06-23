@@ -239,10 +239,20 @@ function gitCapture(projectDir: string, args: string[]): string | null {
 function releaseDeltaCardIds(projectDir: string): Set<string> {
   const tag = gitCapture(projectDir, ["describe", "--tags", "--abbrev=0", "--match", "v*"])?.trim();
   if (tag === undefined || tag === "") return new Set();
-  const log = gitCapture(projectDir, ["log", `${tag}..HEAD`, "--format=%B"]);
+  const log = gitCapture(projectDir, ["log", `${tag}..HEAD`, "--format=%x1e%B"]);
   if (log === null) return new Set();
   const ids = new Set<string>();
-  for (const m of log.matchAll(CARD_ID_RE)) ids.add(m[0]);
+  for (const message of log.split("\x1e")) {
+    const lines = message.split(/\r?\n/);
+    const subject = lines[0]?.trim() ?? "";
+    const bodyTitle =
+      /^Merge pull request #\d+/i.test(subject)
+        ? lines.slice(1).map((line) => line.trim()).find((line) => line !== "") ?? ""
+        : "";
+    for (const text of [subject, bodyTitle]) {
+      for (const m of text.matchAll(CARD_ID_RE)) ids.add(m[0]);
+    }
+  }
   return ids;
 }
 

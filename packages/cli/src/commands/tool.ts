@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { deriveToolReadiness, ToolPolicyEngine, type ToolRequirementResolver } from "@roll/core";
-import type { ToolDeclaration, ToolReadinessStatus, ToolSandbox } from "@roll/spec";
-import { BashTool, browserTools, fsTools, gitTools, githubTools, mcpTools, networkTools } from "@roll/infra";
+import type { ToolReadinessStatus, ToolSandbox } from "@roll/spec";
+import { collectBuiltinToolDeclarations } from "../lib/builtin-tool-declarations.js";
 import { resolveRequirement } from "../lib/external-tools.js";
 
 export const TOOL_USAGE =
@@ -37,7 +37,7 @@ export async function toolCommand(args: string[]): Promise<number> {
 export async function collectToolRows(projectRoot: string, requirementResolver: ToolRequirementResolver = resolveRequirement): Promise<ToolRow[]> {
   const policy = new ToolPolicyEngine({ policyPath: join(projectRoot, ".roll", "policy.yaml") });
   const rows: ToolRow[] = [];
-  for (const declaration of toolDeclarations(projectRoot)) {
+  for (const declaration of collectBuiltinToolDeclarations(projectRoot)) {
     const effective = await policy.resolve(declaration.id, declaration.defaults);
     const readiness = deriveToolReadiness(declaration, requirementResolver);
     rows.push({
@@ -67,19 +67,6 @@ export function renderToolRows(rows: readonly ToolRow[]): string {
     ].join(""));
   }
   return `${out.join("\n")}\n`;
-}
-
-function toolDeclarations(projectRoot: string): ToolDeclaration[] {
-  const tools: Array<{ declaration: ToolDeclaration }> = [
-    new BashTool(),
-    ...browserTools(),
-    ...fsTools(projectRoot),
-    ...gitTools(),
-    ...githubTools(),
-    ...mcpTools(projectRoot),
-    ...networkTools(),
-  ];
-  return tools.map((tool) => tool.declaration);
 }
 
 function renderSandbox(sandbox: ToolSandbox | undefined): string {

@@ -239,6 +239,35 @@ describe("frozen: roll doctor", () => {
       技能清单
         ✅ guide/skills.md matches skills/*/SKILL.md
 
+      Tool readiness
+      工具就绪度
+
+        ✓ bash (bash) — available
+        ~ browser.console (browser) — degraded
+          npx is not on PATH.
+          fix: npm install -g npm
+        ~ browser.dom-query (browser) — degraded
+          npx is not on PATH.
+          fix: npm install -g npm
+        ~ browser.screenshot (browser) — degraded
+          npx is not on PATH.
+          fix: npm install -g npm
+        ✓ filesystem.read (filesystem) — available
+        ✓ filesystem.stat (filesystem) — available
+        ✓ filesystem.write (filesystem) — available
+        ✓ git.commit (git) — available
+        ✓ git.merge (git) — available
+        ✓ git.push (git) — available
+        ✓ git.status (git) — available
+        − github.ci (github) — unavailable
+          gh is not on PATH.
+          fix: brew install gh
+        − github.pr (github) — unavailable
+          gh is not on PATH.
+          fix: brew install gh
+        ✓ mcp.call (mcp) — available
+        ✓ network.fetch (network) — available
+
       External requirements
       外部依赖
 
@@ -309,6 +338,35 @@ describe("frozen: roll doctor", () => {
       技能清单
         ✅ guide/skills.md 与 skills/*/SKILL.md 一致
 
+      Tool readiness
+      工具就绪度
+
+        ✓ bash (bash) — available
+        ~ browser.console (browser) — degraded
+          npx is not on PATH.
+          fix: npm install -g npm
+        ~ browser.dom-query (browser) — degraded
+          npx is not on PATH.
+          fix: npm install -g npm
+        ~ browser.screenshot (browser) — degraded
+          npx is not on PATH.
+          fix: npm install -g npm
+        ✓ filesystem.read (filesystem) — available
+        ✓ filesystem.stat (filesystem) — available
+        ✓ filesystem.write (filesystem) — available
+        ✓ git.commit (git) — available
+        ✓ git.merge (git) — available
+        ✓ git.push (git) — available
+        ✓ git.status (git) — available
+        − github.ci (github) — unavailable
+          gh is not on PATH.
+          fix: brew install gh
+        − github.pr (github) — unavailable
+          gh is not on PATH.
+          fix: brew install gh
+        ✓ mcp.call (mcp) — available
+        ✓ network.fetch (network) — available
+
       External requirements
       外部依赖
 
@@ -342,6 +400,35 @@ describe("frozen: roll doctor", () => {
       技能清单
         ⚠️  guide/skills.md is stale — run 'roll setup skills'
 
+      Tool readiness
+      工具就绪度
+
+        ✓ bash (bash) — available
+        ~ browser.console (browser) — degraded
+          npx is not on PATH.
+          fix: npm install -g npm
+        ~ browser.dom-query (browser) — degraded
+          npx is not on PATH.
+          fix: npm install -g npm
+        ~ browser.screenshot (browser) — degraded
+          npx is not on PATH.
+          fix: npm install -g npm
+        ✓ filesystem.read (filesystem) — available
+        ✓ filesystem.stat (filesystem) — available
+        ✓ filesystem.write (filesystem) — available
+        ✓ git.commit (git) — available
+        ✓ git.merge (git) — available
+        ✓ git.push (git) — available
+        ✓ git.status (git) — available
+        − github.ci (github) — unavailable
+          gh is not on PATH.
+          fix: brew install gh
+        − github.pr (github) — unavailable
+          gh is not on PATH.
+          fix: brew install gh
+        ✓ mcp.call (mcp) — available
+        ✓ network.fetch (network) — available
+
       External requirements
       外部依赖
 
@@ -374,6 +461,35 @@ describe("frozen: roll doctor", () => {
       技能清单
         ⚠️  guide/skills.md 已过期 — 请运行 'roll setup skills'
 
+      Tool readiness
+      工具就绪度
+
+        ✓ bash (bash) — available
+        ~ browser.console (browser) — degraded
+          npx is not on PATH.
+          fix: npm install -g npm
+        ~ browser.dom-query (browser) — degraded
+          npx is not on PATH.
+          fix: npm install -g npm
+        ~ browser.screenshot (browser) — degraded
+          npx is not on PATH.
+          fix: npm install -g npm
+        ✓ filesystem.read (filesystem) — available
+        ✓ filesystem.stat (filesystem) — available
+        ✓ filesystem.write (filesystem) — available
+        ✓ git.commit (git) — available
+        ✓ git.merge (git) — available
+        ✓ git.push (git) — available
+        ✓ git.status (git) — available
+        − github.ci (github) — unavailable
+          gh is not on PATH.
+          fix: brew install gh
+        − github.pr (github) — unavailable
+          gh is not on PATH.
+          fix: brew install gh
+        ✓ mcp.call (mcp) — available
+        ✓ network.fetch (network) — available
+
       External requirements
       外部依赖
 
@@ -405,6 +521,35 @@ describe("frozen: roll doctor", () => {
       技能清单
         ⚠️  guide/skills.md is stale — run 'roll setup skills'
 
+      Tool readiness
+      工具就绪度
+
+        ✓ bash (bash) — available
+        ~ browser.console (browser) — degraded
+          npx is not on PATH.
+          fix: npm install -g npm
+        ~ browser.dom-query (browser) — degraded
+          npx is not on PATH.
+          fix: npm install -g npm
+        ~ browser.screenshot (browser) — degraded
+          npx is not on PATH.
+          fix: npm install -g npm
+        ✓ filesystem.read (filesystem) — available
+        ✓ filesystem.stat (filesystem) — available
+        ✓ filesystem.write (filesystem) — available
+        ✓ git.commit (git) — available
+        ✓ git.merge (git) — available
+        ✓ git.push (git) — available
+        ✓ git.status (git) — available
+        − github.ci (github) — unavailable
+          gh is not on PATH.
+          fix: brew install gh
+        − github.pr (github) — unavailable
+          gh is not on PATH.
+          fix: brew install gh
+        ✓ mcp.call (mcp) — available
+        ✓ network.fetch (network) — available
+
       External requirements
       外部依赖
 
@@ -434,6 +579,35 @@ describe("frozen: roll doctor", () => {
       Skill catalog
       技能清单
         ⚠️  guide/skills.md 已过期 — 请运行 'roll setup skills'
+
+      Tool readiness
+      工具就绪度
+
+        ✓ bash (bash) — available
+        ~ browser.console (browser) — degraded
+          npx is not on PATH.
+          fix: npm install -g npm
+        ~ browser.dom-query (browser) — degraded
+          npx is not on PATH.
+          fix: npm install -g npm
+        ~ browser.screenshot (browser) — degraded
+          npx is not on PATH.
+          fix: npm install -g npm
+        ✓ filesystem.read (filesystem) — available
+        ✓ filesystem.stat (filesystem) — available
+        ✓ filesystem.write (filesystem) — available
+        ✓ git.commit (git) — available
+        ✓ git.merge (git) — available
+        ✓ git.push (git) — available
+        ✓ git.status (git) — available
+        − github.ci (github) — unavailable
+          gh is not on PATH.
+          fix: brew install gh
+        − github.pr (github) — unavailable
+          gh is not on PATH.
+          fix: brew install gh
+        ✓ mcp.call (mcp) — available
+        ✓ network.fetch (network) — available
 
       External requirements
       外部依赖
@@ -485,6 +659,35 @@ describe("frozen: roll doctor", () => {
         ⚠ com.roll.loop.demo
           WorkingDirectory missing: /tmp/roll-doctor-this-dir-does-not-exist-xyz
           Path is stale, clean up with: launchctl bootout gui/<UID>/com.roll.loop.demo; rm '<LAUNCHD>/com.roll.loop.demo.plist'
+
+      Tool readiness
+      工具就绪度
+
+        ✓ bash (bash) — available
+        ~ browser.console (browser) — degraded
+          npx is not on PATH.
+          fix: npm install -g npm
+        ~ browser.dom-query (browser) — degraded
+          npx is not on PATH.
+          fix: npm install -g npm
+        ~ browser.screenshot (browser) — degraded
+          npx is not on PATH.
+          fix: npm install -g npm
+        ✓ filesystem.read (filesystem) — available
+        ✓ filesystem.stat (filesystem) — available
+        ✓ filesystem.write (filesystem) — available
+        ✓ git.commit (git) — available
+        ✓ git.merge (git) — available
+        ✓ git.push (git) — available
+        ✓ git.status (git) — available
+        − github.ci (github) — unavailable
+          gh is not on PATH.
+          fix: brew install gh
+        − github.pr (github) — unavailable
+          gh is not on PATH.
+          fix: brew install gh
+        ✓ mcp.call (mcp) — available
+        ✓ network.fetch (network) — available
 
       External requirements
       外部依赖

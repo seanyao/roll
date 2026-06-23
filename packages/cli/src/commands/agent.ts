@@ -12,6 +12,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { join } from "node:path";
 import { t, v2Catalog } from "@roll/spec";
 import { agentListCommand, currentLang, realAgentEnv } from "./agent-list.js";
+import { refreshAggregates as refreshDossierAggregates } from "./index-gen.js";
 
 const VALID_SLOTS: AgentSlot[] = ["easy", "default", "hard", "fallback"];
 
@@ -25,6 +26,7 @@ export interface AgentCommandDeps {
   removeFile?: (path: string) => void;
   readLine?: () => string | undefined;
   listCommand?: (args: string[]) => number;
+  refreshAggregates?: (cwd: string) => void;
 }
 
 function pal(): { RED: string; GREEN: string; YELLOW: string; NC: string } {
@@ -47,11 +49,16 @@ function ok(line: string): void {
   process.stdout.write(`${GREEN}[roll]${NC} ${line}\n`);
 }
 
+function warn(line: string): void {
+  const { YELLOW, NC } = pal();
+  process.stderr.write(`${YELLOW}[roll] WARN${NC} ${line}\n`);
+}
+
 function m(key: string, ...args: string[]): string {
   return t(v2Catalog, currentLang(), key, ...args);
 }
 
-function depsWithDefaults(deps: AgentCommandDeps): Required<Omit<AgentCommandDeps, "readLine">> &
+function depsWithDefaults(deps: AgentCommandDeps): Required<Omit<AgentCommandDeps, "readLine" | "refreshAggregates">> &
   Pick<AgentCommandDeps, "readLine"> {
   return {
     env: deps.env ?? realAgentEnv(),
@@ -70,6 +77,14 @@ function depsWithDefaults(deps: AgentCommandDeps): Required<Omit<AgentCommandDep
     readLine: deps.readLine,
     listCommand: deps.listCommand ?? agentListCommand,
   };
+}
+
+function refreshAgentDossier(deps: AgentCommandDeps): void {
+  try {
+    (deps.refreshAggregates ?? refreshDossierAggregates)(process.cwd());
+  } catch (e) {
+    warn(`dossier refresh failed after agent slot update (board may lag until \`roll index\`): ${String(e)}`);
+  }
 }
 
 function registry(deps: AgentCommandDeps): { reg: AgentRegistry; d: ReturnType<typeof depsWithDefaults> } {
@@ -141,6 +156,7 @@ function useCommand(args: string[], deps: AgentCommandDeps): number {
   }
   syncLocalAgent(name, d);
   ok(m("agent.use_locked", agentDisplayName(name)));
+  refreshAgentDossier(deps);
   return 0;
 }
 
@@ -197,6 +213,7 @@ function setCommand(args: string[], deps: AgentCommandDeps): number {
     return 1;
   }
   ok(m("agent.set_saved", slot, agentDisplayName(agent)));
+  refreshAgentDossier(deps);
   return 0;
 }
 

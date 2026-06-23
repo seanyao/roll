@@ -47,7 +47,7 @@ export interface RunFact {
 
 /** One PR merge on main, extracted from git log. */
 export interface MergeFact {
-  /** PR number (parsed from "Merge pull request #N …" or "(#N)"). */
+  /** PR number (parsed from "Merge pull request #N …" or "(#N)"), or 0 when git has only story-id evidence. */
   prNumber: number;
   /** Merge commit SHA on main. */
   mergeCommit: string;
@@ -194,14 +194,14 @@ function mergeFactFromCommitMessage(
     if (squashMatch) prNum = Number(squashMatch[1]);
   }
 
-  if (prNum === undefined || !Number.isFinite(prNum) || prNum <= 0) return null;
-
   // FIX-923: parse story-ids from the full commit message. GitHub merge-button
   // commits often keep "Merge pull request #N …" as the subject and place the
   // PR title/body, including the Roll story-id, in the merge commit body.
   const storyIds = parseStoryIdsFromSubject(message);
+  if (prNum !== undefined && (!Number.isFinite(prNum) || prNum <= 0)) return null;
+  if (prNum === undefined && storyIds.length === 0) return null;
 
-  return { prNumber: prNum, mergeCommit: sha, mergedAt, storyIds };
+  return { prNumber: prNum ?? 0, mergeCommit: sha, mergedAt, storyIds };
 }
 
 /**

@@ -9,6 +9,8 @@ import {
   type AgentEnv,
 } from "../src/agent/registry.js";
 import { AGENTS, AGENT_SPECS, getAgentIdentitySpec, getAgentSpec } from "../src/agent/specs.js";
+import { readFileSync } from "node:fs";
+import { resolve, join } from "node:path";
 
 const CANONICAL_ROSTER = ["claude", "kimi", "codex", "pi", "agy", "reasonix"] as const;
 const REMOVED_AGENT_TOKENS = ["openclaw", "qwen", "opencode", "cursor", "trae"] as const;
@@ -72,5 +74,27 @@ describe("US-AGENT-043 canonical agent roster", () => {
     const env = envWithBins(["reasonix"]);
     expect(agentsInstalled(env)).toEqual(["reasonix"]);
     expect(firstInstalledAgent(env)).toBe("reasonix");
+  });
+});
+
+describe("US-AGENT-046 guide/site agent roster", () => {
+  const DELETED_AGENTS = [
+    "openclaw",
+    "cursor",
+    "trae",
+    "opencode",
+  ] as const;
+
+  const CANONICAL_SIX = ["claude", "kimi", "codex", "pi", "agy", "reasonix"] as const;
+
+  it("guide/en/ai-agents.md lists exactly 6 agents and no deleted agents", () => {
+    const repoRoot = resolve(import.meta.dirname!, "..", "..", "..");
+    const text = readFileSync(join(repoRoot, "guide", "en", "ai-agents.md"), "utf-8");
+    for (const name of CANONICAL_SIX) {
+      expect(text).toContain(name);
+    }
+    for (const removed of DELETED_AGENTS) {
+      expect(text).not.toContain(removed);
+    }
   });
 });

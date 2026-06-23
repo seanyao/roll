@@ -51,6 +51,7 @@ First time through? Start with [Getting started](guide/en/getting-started.md).
 | `roll backlog [sync\|block\|defer\|lint\|…]` | View, manage, and sync (from GitHub Issues) pending tasks |
 | `roll loop alert [list\|ack\|resolve\|log]` | View / clear loop alerts |
 | `roll status` | Verdict-first truth summary read from the ONE snapshot — LOOP · CYCLE · RELEASE · STORY, with the STORY line's attest-coverage % (`done ≡ merged ∧ attested`) — then convention/AI-client sync health |
+| `roll pulse [--json]` | Today's delivery pulse: cycles in window, merged count, attested count, plus an ASCII sparkline from the story spectrum. Bilingual EN/中. `--json` for machine-readable output |
 | `roll doctor [skills]` | Environment + install diagnosis (agents, skill catalog, plists, launchd lanes) |
 | `roll tune [reset]` | Suggest-only self-tuning from loop trends — read-only, never auto-applies |
 | **Cards & evidence** | |

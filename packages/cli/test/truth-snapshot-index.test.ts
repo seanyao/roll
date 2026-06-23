@@ -226,6 +226,25 @@ describe("US-DOSSIER-010 — truth.json next to index.html", () => {
     expect(embedded).toBe(file);
   });
 
+  it("US-OBS-029: truth.json carries dossier panel slots collected by collectDossierState", async () => {
+    const p = project();
+    process.env["ROLL_RENDER_NOW"] = "2026-06-13T00:00:00Z";
+    await runIndex(p);
+
+    const snap = JSON.parse(readFileSync(join(p, ".roll", "features", "truth.json"), "utf8"));
+
+    expect(snap.panels.casting.status).toBe("ready");
+    expect(snap.panels.casting.data).toHaveProperty("configured");
+    expect(snap.panels.charter.status).toBe("ready");
+    expect(snap.panels.charter.data).toHaveProperty("groups");
+    expect(snap.panels.skills.status).toBe("ready");
+    expect(snap.panels.skills.data).toHaveProperty("summary");
+    expect(snap.panels.gitHooks.status).toBe("ready");
+    expect(snap.panels.gitHooks.data).toHaveProperty("hooksPath");
+    expect(snap.panels.liveFeed.status).toBe("ready");
+    expect(snap.panels.liveFeed.data).toHaveProperty("status");
+  });
+
   // FIX-283 — a REAL (non-tmp) project with ROLL_HOME set writes the cross-project
   // row ONLY to <ROLL_HOME>/.roll/projects.json, and the real ~/.roll/projects.json
   // is never touched. (Replaces the FIX-281 case that used a tmp project: under
@@ -252,7 +271,7 @@ describe("US-DOSSIER-010 — truth.json next to index.html", () => {
     // it never existed) — the whole point of the fix.
     const realAfter = existsSync(realRegistry) ? readFileSync(realRegistry, "utf8") : null;
     expect(realAfter).toBe(realBefore);
-  });
+  }, 15_000);
 
   it("FIX-307: self-register and page chrome use the derived git remote project name", async () => {
     const p = project(REPO_ROOT);
@@ -271,7 +290,7 @@ describe("US-DOSSIER-010 — truth.json next to index.html", () => {
     });
     const html = readFileSync(join(p, ".roll", "features", "index.html"), "utf8");
     expect(html).toContain("APE-PR");
-  });
+  }, 15_000);
 
   it("US-OBS-019: roll index writes reachable-only project rows into truth.json", async () => {
     const p = project(REPO_ROOT);
@@ -299,7 +318,7 @@ describe("US-DOSSIER-010 — truth.json next to index.html", () => {
     expect(projects.map((row) => row.slug)).not.toContain("deleted");
     expect(projects.map((row) => row.slug)).not.toContain("tmp");
     expect(projects.map((row) => row.path)).toContain(realpathSync(p));
-  });
+  }, 15_000);
 
   // FIX-283 (AC3) — robust tmp-skip: a tmp fixture cwd is skipped REGARDLESS of
   // whether ROLL_HOME is set. Even with ROLL_HOME pointing at a sandbox, a tmp

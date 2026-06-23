@@ -72,4 +72,20 @@ describe("buildTruthSnapshot", () => {
     expect(s.story.spectrum).toEqual({ done: 2, wip: 0, hold: 0, todo: 1, fail: 0, unknown: 1 });
     expect(s.stories).toHaveLength(4);
   });
+
+  it("US-OBS-029: carries read-side panel slots without changing aggregates", () => {
+    const panels = {
+      casting: { status: "ready" as const, data: { configured: true, rows: [] } },
+      liveFeed: { status: "paused" as const, data: null, note: "live.log unreadable" },
+    };
+    const s = buildTruthSnapshot({
+      generatedAt: "t",
+      storyStates: ["done", "todo"],
+      legacyCount: 0,
+      panels,
+    });
+
+    expect(s.story.spectrum).toEqual({ done: 1, wip: 0, hold: 0, todo: 1, fail: 0, unknown: 0 });
+    expect(s.panels).toEqual(panels);
+  });
 });

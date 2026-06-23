@@ -12,7 +12,7 @@ import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
 import { parseEventLine } from "@roll/spec";
 import { buildTruthSnapshot } from "@roll/core";
 import { collectDossierState, type CollectorDeps } from "@roll/core";
-import { serializeTruthSnapshot } from "@roll/spec";
+import { serializeTruthSnapshot, type TruthSnapshotPanelSlot } from "@roll/spec";
 import { collectDossier, generateIndex } from "../lib/archive.js";
 import { SPINE_STAGES, countLegacyStories, deriveDeliveryLadder, storySpectrumState, type TruthBoardInput, type TruthBoardVerdict } from "../lib/dossier-index.js";
 import type { TruthSnapshotStoryEntry } from "@roll/spec";
@@ -29,13 +29,13 @@ import { collectExternalTools } from "../lib/external-tools.js";
 import { collectReleasePanel } from "../lib/release-panel.js";
 import { collectReleaseScope } from "../lib/release-scope.js";
 import { reconcileReleaseForProject } from "../lib/release-truth.js";
-import { collectSkillsPanel } from "../lib/skills-panel.js";
+import { collectSkillsPanel, type SkillsPanelVM } from "../lib/skills-panel.js";
 import { renderSkillsPage } from "../lib/page-skills.js"; // US-DOSSIER-032
 import { renderToolsPage } from "../lib/page-tools.js"; // US-TOOL-017
 import { collectToolPanel } from "../lib/tool-panel.js"; // US-TOOL-016
 import { collectLoopHeartbeat, defaultHeartbeatDeps } from "../lib/loop-heartbeat.js";
-import { collectCasting, defaultCastingDeps } from "../lib/casting.js";
-import { collectGitHooks, defaultGitHooksDeps } from "../lib/git-hooks.js";
+import { collectCasting, defaultCastingDeps, type CastingVM } from "../lib/casting.js";
+import { collectGitHooks, defaultGitHooksDeps, type GitHooksVM } from "../lib/git-hooks.js";
 import { launchAgentsDir } from "./loop-sched.js";
 import { projectSlug } from "./dashboard.js";
 import { formatStream } from "./loop-fmt.js";
@@ -44,6 +44,7 @@ import { renderEpicPage } from "../lib/epic-page.js";
 import { buildDossierRunCache, collectStoryDossierInput, renderStoryDossier, stationsDone, storyEvidenceFlags, storyHasMergeEvidence, storyHasSpecPrMergeEvidence, type StoryDossierInput } from "../lib/story-dossier.js";
 import { renderMarkdown } from "../lib/markdown.js";
 import { renderState, stripAnsi } from "../render.js";
+import type { CharterVM } from "../lib/page-charter.js";
 
 function iso(sec: number): string {
   return new Date(sec * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -309,6 +310,53 @@ export function collectTruthBoardInput(projectPath: string, nowSec = renderNowSe
   };
 }
 
+function readyPanel<T>(data: T, nowSec: number): TruthSnapshotPanelSlot<T> {
+  return { status: "ready", data, collectedAt: iso(nowSec) };
+}
+
+function slotData<T>(slot: TruthSnapshotPanelSlot | undefined, fallback: T): T {
+  return slot?.data === null || slot?.data === undefined ? fallback : slot.data as T;
+}
+
+function emptySkillsPanel(): SkillsPanelVM {
+  return {
+    summary: { skills: 0, violations: "unknown", hubLines: 0, auditRan: false },
+    groups: [
+      { key: "delivery", rows: [] },
+      { key: "quality", rows: [] },
+      { key: "observe", rows: [] },
+      { key: "lifecycle", rows: [] },
+    ],
+  };
+}
+
+function emptyCastingPanel(): CastingVM {
+  return { rows: [], execSlots: [], scenarioRoles: [], configured: false };
+}
+
+function emptyCharterPanel(): CharterVM {
+  return { groups: [] };
+}
+
+function emptyGitHooksPanel(cwd: string): GitHooksVM {
+  void cwd;
+  return { hooksPath: ".git/hooks", configured: false, rows: [] };
+}
+
+function pausedLiveFeed(cwd: string, nowSec: number): LoopLiveFeedVM {
+  const generatedAt = iso(nowSec);
+  return {
+    sourcePath: join(runtimeDir(cwd), "live.log"),
+    relativeHref: "../loop/live.log",
+    agent: (process.env["ROLL_LOOP_AGENT"] ?? "claude").trim() || "claude",
+    status: "paused",
+    generatedAt,
+    rawLineCount: 0,
+    renderedLines: [],
+    note: "live feed collector failed",
+  };
+}
+
 /** US-DOSSIER-004: render a card's spec.md → a self-contained spec.html (the
  *  minimal markdown renderer + dossier chrome), so the "Design doc" link opens
  *  a rendered page, not raw markdown. Returns null when spec.md is absent. */
@@ -476,9 +524,14 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
       },
       collectTruthBoard: (_cwd, nowSec) => collectTruthBoardInput(_cwd, nowSec, cycleRows),
       collectLoopHeartbeat: (_cwd) =>
-        collectLoopHeartbeat(defaultHeartbeatDeps(_cwd, projectSlug(), launchAgentsDir())),
+        collectLoopHeartbeat(defaultHeartbeatDeps(_cwd, projectSlug(_cwd), launchAgentsDir())),
       collectEvidenceFlags: (_cwd, story) => storyEvidenceFlags(_cwd, story as Parameters<typeof storyEvidenceFlags>[1]),
       collectProjects: () => collectProjectsRegistry(),
+      collectSkillsPanel: (_cwd, nowSec) => readyPanel(collectSkillsPanel(_cwd), nowSec),
+      collectCharterPanel: (_cwd, nowSec) => readyPanel(collectCharter(defaultCharterDeps(_cwd, renderMarkdown)), nowSec),
+      collectCastingPanel: (_cwd, nowSec) => readyPanel(collectCasting(defaultCastingDeps(_cwd)), nowSec),
+      collectGitHooksPanel: (_cwd, nowSec) => readyPanel(collectGitHooks(defaultGitHooksDeps(_cwd)), nowSec),
+      collectLiveFeedPanel: (_cwd, nowSec) => readyPanel(collectLoopLiveFeed(_cwd, nowSec), nowSec),
     };
     const snapshot = collectDossierState(cwd, { deps: cliDeps });
     const snapshotJson = serializeTruthSnapshot(snapshot);
@@ -543,19 +596,19 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
         cycles: cycleRows,
         agents: agentRows,
         releasePanel: collectReleasePanel(cwd),
-        skills: collectSkillsPanel(cwd),
+        skills: slotData(snapshot.panels?.skills, emptySkillsPanel()),
         // US-DOSSIER-033: the Charter project tab — a markdown browser over the
         // project's own charter docs, collected from the real doc tree (docs/*.md,
         // per-epic plan .md files, guide map) and rendered via `renderMarkdown`.
-        charter: collectCharter(defaultCharterDeps(cwd, renderMarkdown)),
+        charter: slotData(snapshot.panels?.charter, emptyCharterPanel()),
         // FIX-284: Casting uses the router slot config; Hooks uses the checkout's
         // configured git hooks path, not loop heartbeat lanes.
-        casting: collectCasting(defaultCastingDeps(cwd)),
-        gitHooks: collectGitHooks(defaultGitHooksDeps(cwd)),
+        casting: slotData(snapshot.panels?.casting, emptyCastingPanel()),
+        gitHooks: slotData(snapshot.panels?.gitHooks, emptyGitHooksPanel(cwd)),
         // US-DOSSIER-044: Now embeds the same read-only live feed source that
         // `roll loop watch` follows. The generated snapshot is folded through
         // loop-fmt's ActivitySignal renderer; browser polling reads only.
-        liveFeed: collectLoopLiveFeed(cwd, renderNowSec()),
+        liveFeed: slotData(snapshot.panels?.liveFeed, pausedLiveFeed(cwd, renderNowSec())),
         // US-OBS-019: project switcher rows now come from collectDossierState,
         // where the reachable filter runs at the shared read-side selector.
         projects: snapshot.projects,

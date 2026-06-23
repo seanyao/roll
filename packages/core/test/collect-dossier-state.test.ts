@@ -229,4 +229,22 @@ describe("collectDossierState — US-OBS-016 view-model selector", () => {
       { name: "real", slug: "real", path: realProject, releaseTag: "v1.0.0", verdict: "pass" },
     ]);
   });
+
+  it("US-OBS-029: panel collectors are folded into TruthSnapshot and degrade independently", () => {
+    const cwd = fixture();
+    const deps: CollectorDeps = {
+      collectCastingPanel: () => ({ status: "ready", data: { configured: true, rows: [{ key: "easy" }] } }),
+      collectCharterPanel: () => {
+        throw new Error("charter locked");
+      },
+      collectSkillsPanel: () => ({ status: "ready", data: { summary: { skills: 0, violations: "unknown", hubLines: 0, auditRan: false }, groups: [] } }),
+    };
+
+    const snapshot = collectDossierState(cwd, { deps });
+
+    expect(snapshot.panels?.casting).toEqual({ status: "ready", data: { configured: true, rows: [{ key: "easy" }] } });
+    expect(snapshot.panels?.charter).toEqual({ status: "paused", data: null, note: "charter locked" });
+    expect(snapshot.panels?.skills?.status).toBe("ready");
+    expect(snapshot.story.total).toBeGreaterThan(0);
+  });
 });

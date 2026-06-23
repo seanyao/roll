@@ -269,6 +269,7 @@ import {
   type TruthSnapshotCycle,
   type TruthSnapshotLoop,
   type TruthSnapshotOnDeck,
+  type TruthSnapshotPanels,
   type TruthSnapshotProject,
   type TruthSnapshotRelease,
   type TruthSnapshotStoryEntry,
@@ -292,6 +293,8 @@ export interface TruthSnapshotInput {
    *  at the collection edge (index-gen) and carried verbatim onto the snapshot.
    *  Optional/additive: omitting it keeps the snapshot byte-identical to before. */
   stories?: readonly TruthSnapshotStoryEntry[];
+  /** US-OBS-029 — read-side dossier panels collected before rendering. */
+  panels?: TruthSnapshotPanels;
 }
 
 /**
@@ -313,5 +316,6 @@ export function buildTruthSnapshot(input: TruthSnapshotInput): TruthSnapshot {
     ...(input.onDeck !== undefined ? { onDeck: input.onDeck } : {}),
     ...(input.projects !== undefined ? { projects: [...input.projects] } : {}),
     ...(input.stories !== undefined ? { stories: [...input.stories] } : {}),
+    ...(input.panels !== undefined ? { panels: input.panels } : {}),
   };
 }

@@ -39,7 +39,8 @@ hard:     { agent: claude }    # est_min > 20
 fallback: { agent: pi }        # 选中的 agent 离线时顶上
 ```
 
-每个 agent 用自己的默认模型 —— 没有 model 层要配。
+每个 agent 用自己的默认模型。`agent × model` 对组成一个 **Rig**——任务指派的最小
+单元。独立性按 rig 判断：两个不同 vendor 的 rig 是异构的。详见 [Pairing](pairing.md)。
 
 ```bash
 roll agent                # 查看四个槽 + 在线状态 + 最近降级痕迹

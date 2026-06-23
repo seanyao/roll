@@ -67,6 +67,17 @@ roll pair status
 成本从第一天起每次结对都记账——即使还没做预算自适应，你也始终知道这第二双眼睛
 花了多少。
 
+## Rig —— 最小的指派单元
+
+**Rig** 是任务指派的最小单元：`agent × model`。每个 cycle 和每次 review 都派给一个
+rig。独立性按 rig 判断——两个不同 vendor 的 rig（即使 model 相同）是**异构**的；同
+一个 agent 的两个 rig 则不是。
+
+代码中 `Rig { agent: AgentName; model: string }` 是 `@roll/spec` 中的轻量类型。六个
+规范 `AgentName` 值为 `claude | kimi | codex | pi | agy | reasonix`——model/provider
+别名（`openai`→codex、`deepseek`→pi）**不是** agent 名，不应出现在 agent 位置字段。
+model 字符串是自由格式的模型 id（可包含 `:thinking` effort 后缀）。
+
 ## 选择逻辑
 
 某阶段触发时，选择器**只**保留：已安装、可用、被声明能做该阶段、能作为 headless

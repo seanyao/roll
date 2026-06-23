@@ -42,7 +42,10 @@ hard:     { agent: claude }    # est_min > 20
 fallback: { agent: pi }        # used when the picked agent is offline
 ```
 
-Each agent uses its own default model — there is no model layer to configure.
+Each agent uses its own default model. The `agent × model` pair forms a **Rig**
+— the smallest unit of task assignment. Independence is judged by rig:
+two rigs with different vendors are heterogeneous. See [Pairing](pairing.md) for
+details.
 
 ```bash
 roll agent                # show the four slots + online status + recent downgrades

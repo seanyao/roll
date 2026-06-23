@@ -78,6 +78,19 @@ agent is excluded), plus **how much pairing has cost**:
 Cost is recorded on every pairing from day one — you always know what the
 second pair of eyes is spending, even without budget-adaptive throttling.
 
+## Rig — the primitive assignment unit
+
+A **Rig** is the smallest unit of task assignment: `agent × model`. Every cycle
+and every review is dispatched to a rig. Independence is judged by rig — two
+rigs with different vendors (even with the same model) are **heterogeneous**;
+two rigs with the same agent are not.
+
+In code, `Rig { agent: AgentName; model: string }` is a lightweight type in
+`@roll/spec`. The six canonical `AgentName` values are `claude | kimi | codex |
+pi | agy | reasonix` — model/provider aliases (`openai`→codex, `deepseek`→pi)
+are NOT agent names and cannot appear in agent-position fields. The model string
+is a free-form model id (may include `:thinking` effort suffixes).
+
 ## How selection works
 
 When a stage fires, the selector keeps **only** agents that are installed,

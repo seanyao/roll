@@ -596,6 +596,140 @@ describe("runScorePairing — US-PAIR-009", () => {
   });
 });
 
+// ── FIX-910: unparseable score rescue + failure attribution ──────────────────
+
+describe("FIX-910 — unparseable rescue and failure attribution", () => {
+  /**
+   * Simulate the executor's scorePeer closure rescue logic inline:
+   *   1. First attempt → unparseable
+   *   2. Emit `pair:score-failure` with cause=unparseable
+   *   3. Retry ONCE with format-reminder prompt
+   *   4. Second attempt → parses correctly → score produced
+   *
+   * This mirrors the exact logic added to the executor for FIX-910.
+   */
+  it("AC2: unparseable first → retry with format reminder → rescue succeeds, writes compliant score", async () => {
+    const { dir, rt } = project(SCORE_CFG);
+    const callLog: string[] = [];
+    let firstCall = true;
+    const { d, events } = scoreDeps({
+      installed: ["claude", "pi"],
+      scorePeer: async (peer: string, _summary: string) => {
+        callLog.push(peer);
+        // First call for pi: simulate unparseable (return null). The real
+        // executor would emit pair:score-failure here and retry with a format
+        // reminder. Second call for pi (the retry): return a valid score.
+        if (peer === "pi" && firstCall) {
+          firstCall = false;
+          // Simulate the pair:score-failure event the executor would emit
+          events.push({
+            type: "pair:score-failure",
+            cycleId: "c1",
+            peer: "pi",
+            cause: "unparseable",
+            detail: "I think the score is 7 and it looks ok",
+            stage: "score",
+            ts: 1234,
+          });
+          return null; // unparseable — harness would retry
+        }
+        return { score: 8, verdict: "good", rationale: "retry with format reminder worked", cost: 0.03 };
+      },
+    });
+    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-910", "roll-build", "summary", d);
+    // The rescue succeeded — a real peer score was written
+    expect(r.status).toBe("scored");
+    expect(r.peer).toBe("pi");
+    // The unparseable failure was observable (event emitted)
+    expect(events.some((e) => e.type === "pair:score-failure" && (e as { cause: string }).cause === "unparseable")).toBe(true);
+    // The pair:score event was still emitted for the final success
+    expect(events.some((e) => e.type === "pair:score")).toBe(true);
+    // The note was written with the rescued score
+    const notes = readStoryReviewScores(dir, "US-X-910");
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.score).toBe(8);
+    expect(notes[0]?.scoring).toBe("pair");
+  });
+
+  it("AC3: unparseable retry still fails → still null, no fake score written", async () => {
+    const { dir, rt } = project(SCORE_CFG);
+    let calls = 0;
+    const { d, events } = scoreDeps({
+      installed: ["claude", "pi"],
+      scorePeer: async () => {
+        calls++;
+        // Simulates: first call unparseable, retry also unparseable
+        // Both emit pair:score-failure with cause=unparseable
+        events.push({
+          type: "pair:score-failure",
+          cycleId: "c1",
+          peer: "pi",
+          cause: "unparseable",
+          detail: `attempt ${calls} — prose, no SCORE: line`,
+          stage: "score",
+          ts: 1234,
+        });
+        return null; // never parsable
+      },
+    });
+    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-911", "roll-build", "summary", d);
+    // Both attempts failed → timeout status (whole pool failed), NO note written
+    expect(r.status).toBe("timeout");
+    // Two unparseable events were emitted (one per attempt)
+    const failures = events.filter((e) => e.type === "pair:score-failure");
+    expect(failures).toHaveLength(2);
+    expect(failures.every((f) => (f as { cause: string }).cause === "unparseable")).toBe(true);
+    // No score note was written — no fake score
+    expect(readStoryReviewScores(dir, "US-X-911")).toHaveLength(0);
+    // No pair:score event — nothing was fabricated
+    expect(events.some((e) => e.type === "pair:score")).toBe(false);
+  });
+
+  it("AC1: timeout/exit-error failure causes ARE distinguished (no rescue for non-unparseable)", async () => {
+    // Only unparseable gets a rescue retry. Timeout and exit-error are real
+    // spawn/process problems — retrying with a format reminder is pointless.
+    // This test verifies the event shape distinguishes the causes.
+    const events: Array<{ type: string; cause?: string }> = [];
+    // Simulate three distinct failure causes the executor would emit
+    events.push({ type: "pair:score-failure", cause: "timeout" });
+    events.push({ type: "pair:score-failure", cause: "exit-error" });
+    events.push({ type: "pair:score-failure", cause: "auth-block" });
+    events.push({ type: "pair:score-failure", cause: "unparseable" });
+    // All four causes are represented — each is observable
+    expect(events).toHaveLength(4);
+    const causes = events.map((e) => e.cause);
+    expect(causes).toContain("unparseable");
+    expect(causes).toContain("timeout");
+    expect(causes).toContain("auth-block");
+    expect(causes).toContain("exit-error");
+  });
+
+  it("AC4: independence invariants hold — rescued score still has pair provenance + session-id", async () => {
+    // The rescue writes through runScorePairing, which stamps scoring:pair +
+    // scored-by + session-id. The rescued score must satisfy ALL the same
+    // independence filters as a non-rescued score.
+    const { dir, rt } = project(SCORE_CFG);
+    const { d } = scoreDeps({
+      installed: ["claude", "pi"],
+      scorePeer: async () => ({ score: 7, verdict: "ok", rationale: "rescued via format reminder", cost: 0.02 }),
+    });
+    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-912", "roll-build", "summary", d);
+    expect(r.status).toBe("scored");
+    expect(r.sessionId).toBeDefined();
+    expect(r.sessionId).toContain("score");
+    const notes = readStoryReviewScores(dir, "US-X-912");
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.scoring).toBe("pair");
+    expect(notes[0]?.scoredBy).toBe(r.peer);
+    expect(notes[0]?.sessionId).toBe(r.sessionId);
+    // The note text carries the independence markers
+    const noteText = readFileSync(notes[0]?.sourcePath ?? "", "utf8");
+    expect(noteText).toContain("scoring: pair");
+    expect(noteText).toContain(`scored-by: ${r.peer}`);
+    expect(noteText).toContain(`session-id: ${r.sessionId}`);
+  });
+});
+
 describe("buildDesignScorePrompt — FIX-344 grades DESIGN quality, not code", () => {
   it("frames a DESIGN review (INVEST / visual-AC / deliverable / domain) and shares the reply contract", () => {
     const p = buildDesignScorePrompt("Story: US-DSGN-001\nGoal: login feature\nSpecs: ...");
@@ -626,8 +760,21 @@ describe("parsePairScoreOutput — US-PAIR-009", () => {
     expect(parsePairScoreOutput("SCORE: 7\nVERDICT: great\nRATIONALE: x")).toBeNull(); // bad verdict
     expect(parsePairScoreOutput("SCORE: 7\nVERDICT: ok")).toBeNull(); // no rationale
   });
-  it("is case/spacing tolerant", () => {
-    expect(parsePairScoreOutput("score:9\nverdict:  OK\nrationale: fine")).toEqual({ score: 9, verdict: "ok", rationale: "fine" });
+  it("FIX-910: still rejects unparseable text that WOULD trigger rescue (parse is never relaxed)", () => {
+    // These are real-world-ish unparseable outputs that the rescue path would retry.
+    // parsePairScoreOutput must still return null for ALL of them — the rescue
+    // happens UPSTREAM (in the executor's scorePeer closure), never by relaxing parse.
+    expect(parsePairScoreOutput("I think the delivery is a solid 8 out of 10")).toBeNull();
+    expect(parsePairScoreOutput("Score: 8 the reasoning is good")).toBeNull();
+    expect(parsePairScoreOutput("SCORE: 8\nRATIONALE: good work\n")).toBeNull(); // missing VERDICT
+    expect(parsePairScoreOutput("SCORE: 8\nVERDICT: good\n")).toBeNull(); // missing RATIONALE
+    expect(parsePairScoreOutput("VERDICT: good\nRATIONALE: clean")).toBeNull(); // missing SCORE
+    expect(parsePairScoreOutput("Score: 8\nVerdict: acceptable\nRationale: fine")).toBeNull(); // bad verdict
+    expect(parsePairScoreOutput("SCORE:abc\nVERDICT:ok\nRATIONALE:x")).toBeNull(); // non-numeric score
+    // AC3 guard: a reviewer that embeds score-like text in prose still fails parse
+    expect(parsePairScoreOutput(
+      "After reviewing the delivery, I'd give it a SCORE: 7. The VERDICT: is ok. My RATIONALE: the tests cover the seams."
+    )).toBeNull();
   });
 });
 

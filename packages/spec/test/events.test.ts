@@ -161,6 +161,59 @@ describe("parseEventLine (I8: readers skip bad lines, never crash)", () => {
     expect(capped.childStoryIds).toHaveLength(0);
   });
 
+  it("types pair:score-failure events (FIX-910 — per-attempt score failure attribution)", () => {
+    // Unparseable: reviewer answered but format didn't match strict protocol
+    const unparseable: RollEvent = {
+      type: "pair:score-failure",
+      cycleId: "c1",
+      peer: "pi",
+      cause: "unparseable",
+      detail: "SCORE: the delivery was good overall",
+      stage: "score",
+      ts: 1,
+    };
+    expect(unparseable.cause).toBe("unparseable");
+    expect(unparseable.peer).toBe("pi");
+    // Timeout: clean timeout, no external block detected
+    const timeout: RollEvent = {
+      type: "pair:score-failure",
+      cycleId: "c2",
+      peer: "kimi",
+      cause: "timeout",
+      stage: "score",
+      ts: 2,
+    };
+    expect(timeout.cause).toBe("timeout");
+    // Auth-block: external block surfaced by attributeBlockCause
+    const authBlock: RollEvent = {
+      type: "pair:score-failure",
+      cycleId: "c3",
+      peer: "codex",
+      cause: "auth-block",
+      detail: "401 Unauthorized",
+      stage: "score",
+      ts: 3,
+    };
+    expect(authBlock.cause).toBe("auth-block");
+    // Exit-error: process exited non-zero, no auth/network signature
+    const exitError: RollEvent = {
+      type: "pair:score-failure",
+      cycleId: "c4",
+      peer: "claude",
+      cause: "exit-error",
+      detail: "Error: spawn failed",
+      stage: "score",
+      ts: 4,
+    };
+    expect(exitError.cause).toBe("exit-error");
+    // parseEventLine round-trips the event
+    const parsed = parseEventLine(
+      '{"type":"pair:score-failure","cycleId":"c1","peer":"pi","cause":"unparseable","detail":"malformed","stage":"score","ts":5}',
+    );
+    expect(parsed).not.toBeNull();
+    expect(parsed?.type).toBe("pair:score-failure");
+  });
+
   it("types goal safety gate trip events (US-GOAL-005; progress + timebox gates)", () => {
     const progress: RollEvent = {
       type: "goal:gate_tripped",

@@ -68,7 +68,12 @@ export type PairEvent =
   | { type: "pair:selected"; cycleId: string; workingAgent: string; peer: string; stage: string; timeoutMs?: number; ts: number }
   | { type: "pair:verdict"; cycleId: string; peer: string; verdict: PairReview["verdict"]; findings: number; cost: number; stage: string; ts: number }
   | { type: "pair:score"; cycleId: string; peer: string; score: number; verdict: PairScore["verdict"]; cost: number; stage: "score" | "design"; ts: number }
-  | { type: "pair:none-available"; cycleId: string; stage: string; reason: string; ts: number };
+  | { type: "pair:none-available"; cycleId: string; stage: string; reason: string; ts: number }
+  /** FIX-910 — per-attempt score-stage failure attribution. Every null return
+   *  from a scorer is now diagnosed (unparseable / timeout / auth-block /
+   *  exit-error) and emitted so the loop can observe WHY a pool failed;
+   *  no more silently swallowed nulls. */
+  | { type: "pair:score-failure"; cycleId: string; peer: string; cause: "unparseable" | "timeout" | "auth-block" | "exit-error"; detail?: string; stage: "score" | "design"; ts: number };
 
 export interface RunPairingDeps {
   /** Installed agents (canonical), e.g. agentsInstalled(realAgentEnv()). */

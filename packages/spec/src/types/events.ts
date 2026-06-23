@@ -143,6 +143,12 @@ export type RollEvent =
   // from a build/fix cycle's `stage: "score"` in the same event stream.
   | { type: "pair:score"; cycleId: string; peer: string; score: number; verdict: "good" | "ok" | "regression"; cost: number; stage: "score" | "design"; ts: number }
   | { type: "pair:none-available"; cycleId: string; stage: string; reason: string; ts: number }
+  // FIX-910 — per-attempt score-stage failure attribution (unparseable / timeout /
+  // auth-block / exit-error), emitted from the executor's scorePeer closure so
+  // every null return from a scorer is observable (no more silently swallowed nulls).
+  // The "unparseable" cause additionally triggers ONE retry with a stricter format
+  // reminder; a second failure is also recorded.
+  | { type: "pair:score-failure"; cycleId: string; peer: string; cause: "unparseable" | "timeout" | "auth-block" | "exit-error"; detail?: string; stage: "score" | "design"; ts: number }
   // FIX-346 — a peer was REMOVED from the candidate pool after repeated headless
   // AUTH failures (expired/unavailable creds it cannot refresh non-interactively:
   // agy's Google OAuth, claude's macOS keychain/auth-daemon cooldown, …). The loop

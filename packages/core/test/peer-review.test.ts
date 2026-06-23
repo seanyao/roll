@@ -18,25 +18,25 @@ describe("FIX-255 peer review adapter core", () => {
     expect(parsed.findings[0]).toContain("ambiguous");
   });
 
-  it("selects only external-provider reviewers and excludes Codex subagents", () => {
-    expect(reviewerKind("codex")).toBe("external");
-    expect(reviewerKind("codex-subagent:Volta")).toBe("auxiliary");
+  it("selects only external-provider reviewers and excludes subagents", () => {
+    expect(reviewerKind("pi")).toBe("external");
+    expect(reviewerKind("subagent:Volta")).toBe("auxiliary");
 
     expect(
       selectPeerReviewer({
         mode: "hetero",
-        candidates: ["codex-subagent:Volta"],
-        workerAgents: ["claude"],
+        candidates: ["subagent:Volta"],
+        workerAgents: ["kimi"],
       }),
     ).toEqual({ status: "unavailable", reason: "no_external_reviewer" });
 
     expect(
       selectPeerReviewer({
         mode: "hetero",
-        candidates: ["codex-subagent:Volta", "codex"],
-        workerAgents: ["claude"],
+        candidates: ["subagent:Volta", "pi"],
+        workerAgents: ["kimi"],
       }),
-    ).toMatchObject({ status: "selected", reviewer: "codex", provider: "openai", effectiveMode: "hetero" });
+    ).toMatchObject({ status: "selected", reviewer: "pi", provider: "pi", effectiveMode: "hetero" });
   });
 });
 
@@ -44,17 +44,17 @@ describe("FIX-336 — ranked heterogeneous peer reviewer selection", () => {
   it("hetero mode returns only heterogeneous candidates in ranked order", () => {
     const selected = selectPeerReviewers({
       mode: "hetero",
-      candidates: ["claude", "codex", "kimi"],
-      workerAgents: ["claude"],
+      candidates: ["kimi", "pi", "reasonix"],
+      workerAgents: ["kimi"],
     });
     expect(selected.status).toBe("selected");
     if (selected.status !== "selected") return;
-    expect(selected.reviewers.map((r) => r.reviewer)).toEqual(["codex", "kimi"]);
+    expect(selected.reviewers.map((r) => r.reviewer)).toEqual(["pi", "reasonix"]);
     expect(selected.reviewers.every((r) => r.effectiveMode === "hetero" && !r.degraded)).toBe(true);
   });
 
   it("hetero mode is unavailable when every candidate shares the worker vendor", () => {
-    expect(selectPeerReviewers({ mode: "hetero", candidates: ["claude"], workerAgents: ["claude"] })).toEqual({
+    expect(selectPeerReviewers({ mode: "hetero", candidates: ["kimi"], workerAgents: ["kimi"] })).toEqual({
       status: "unavailable",
       reason: "no_heterogeneous_reviewer",
     });
@@ -63,26 +63,26 @@ describe("FIX-336 — ranked heterogeneous peer reviewer selection", () => {
   it("auto mode ranks hetero first and marks same-vendor fallback as degraded", () => {
     const selected = selectPeerReviewers({
       mode: "auto",
-      candidates: ["claude", "codex", "kimi"],
-      workerAgents: ["claude"],
+      candidates: ["kimi", "pi", "reasonix"],
+      workerAgents: ["kimi"],
     });
     expect(selected.status).toBe("selected");
     if (selected.status !== "selected") return;
     expect(selected.reviewers.map((r) => ({ reviewer: r.reviewer, mode: r.effectiveMode, degraded: r.degraded }))).toEqual([
-      { reviewer: "codex", mode: "hetero", degraded: false },
-      { reviewer: "kimi", mode: "hetero", degraded: false },
-      { reviewer: "claude", mode: "self", degraded: true },
+      { reviewer: "pi", mode: "hetero", degraded: false },
+      { reviewer: "reasonix", mode: "hetero", degraded: false },
+      { reviewer: "kimi", mode: "self", degraded: true },
     ]);
     expect(selected.reviewers[2]?.reason).toBe("all_heterogeneous_peers_failed");
   });
 
   it("auto single-provider pool degrades to self with single_provider_available", () => {
-    const selected = selectPeerReviewers({ mode: "auto", candidates: ["claude"], workerAgents: ["claude"] });
+    const selected = selectPeerReviewers({ mode: "auto", candidates: ["kimi"], workerAgents: ["kimi"] });
     expect(selected.status).toBe("selected");
     if (selected.status !== "selected") return;
     expect(selected.reviewers).toHaveLength(1);
     expect(selected.reviewers[0]).toMatchObject({
-      reviewer: "claude",
+      reviewer: "kimi",
       effectiveMode: "self",
       degraded: true,
       reason: "single_provider_available",
@@ -90,32 +90,32 @@ describe("FIX-336 — ranked heterogeneous peer reviewer selection", () => {
   });
 
   it("self mode prefers the current worker then other installed reviewers", () => {
-    const selected = selectPeerReviewers({ mode: "self", candidates: ["kimi", "claude", "codex"], workerAgents: ["claude"] });
+    const selected = selectPeerReviewers({ mode: "self", candidates: ["pi", "kimi", "reasonix"], workerAgents: ["kimi"] });
     expect(selected.status).toBe("selected");
     if (selected.status !== "selected") return;
-    expect(selected.reviewers.map((r) => r.reviewer)).toEqual(["claude", "kimi", "codex"]);
+    expect(selected.reviewers.map((r) => r.reviewer)).toEqual(["kimi", "pi", "reasonix"]);
     expect(selected.reviewers.every((r) => r.effectiveMode === "self" && !r.degraded)).toBe(true);
   });
 
   it("requested reviewer bypasses ranking and resolves effective mode from workers", () => {
     expect(
-      selectPeerReviewers({ mode: "auto", candidates: ["claude", "codex"], workerAgents: ["claude"], requestedReviewer: "codex" }),
+      selectPeerReviewers({ mode: "auto", candidates: ["kimi", "pi"], workerAgents: ["kimi"], requestedReviewer: "pi" }),
     ).toEqual({
       status: "selected",
-      reviewers: [{ effectiveMode: "hetero", reviewer: "codex", provider: "openai", degraded: false }],
+      reviewers: [{ effectiveMode: "hetero", reviewer: "pi", provider: "pi", degraded: false }],
     });
 
     expect(
-      selectPeerReviewers({ mode: "auto", candidates: ["claude", "codex"], workerAgents: ["claude"], requestedReviewer: "claude" }),
+      selectPeerReviewers({ mode: "auto", candidates: ["kimi", "pi"], workerAgents: ["kimi"], requestedReviewer: "kimi" }),
     ).toEqual({
       status: "selected",
-      reviewers: [{ effectiveMode: "self", reviewer: "claude", provider: "anthropic", degraded: false }],
+      reviewers: [{ effectiveMode: "self", reviewer: "kimi", provider: "moonshot", degraded: false }],
     });
   });
 
   it("selectPeerReviewer stays backward-compatible as the head of the ranked list", () => {
     expect(
-      selectPeerReviewer({ mode: "auto", candidates: ["claude", "codex", "kimi"], workerAgents: ["claude"] }),
-    ).toMatchObject({ status: "selected", reviewer: "codex", effectiveMode: "hetero", degraded: false });
+      selectPeerReviewer({ mode: "auto", candidates: ["kimi", "pi", "reasonix"], workerAgents: ["kimi"] }),
+    ).toMatchObject({ status: "selected", reviewer: "pi", effectiveMode: "hetero", degraded: false });
   });
 });

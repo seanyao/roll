@@ -75,11 +75,13 @@ describe("validateCasting — heterogeneity", () => {
     expect(r.violations.map((v) => v.code)).toContain("scorer-equals-builder");
   });
 
-  it("rejects a same-vendor alias clash (codex vs openai are one vendor)", () => {
-    // builder=codex, reviewer=openai → both vendor "openai" → NOT heterogeneous.
+  it("formerly-aliased overseas names now resolve to distinct vendors (pool narrowing)", () => {
+    // The pool was narrowed: codex/openai are no longer aliased to one vendor —
+    // canonicalAgentName is a no-op and neither is in the vendor map, so each falls
+    // back to its own literal name → distinct vendors → a valid heterogeneous trio.
     const r = validateCasting({ builder: "codex", reviewer: "openai", scorer: "pi" });
-    expect(r.ok).toBe(false);
-    expect(r.violations.map((v) => v.code)).toContain("reviewer-not-hetero");
+    expect(r.ok).toBe(true);
+    expect(r.violations).toEqual([]);
   });
 
   it("rejects an empty slot", () => {
@@ -286,20 +288,20 @@ describe("probeMissingAgents — queries the REAL env, not the sandbox (FIX-292)
     ]);
   });
 
-  it("FIX-299: parseAvailableAgents reads ✓/✗ markers, strips ANSI, and canonicalises (agy)", () => {
+  it("FIX-299: parseAvailableAgents reads ✓/✗ markers, strips ANSI, takes the first word", () => {
     const realOutput =
       `\n  可用 agent\n\n` +
       `    ${G}✓ claude${NC}  (current)\n` +
       `    ${G}✓ kimi${NC}\n` +
       `    ${Y}✗ deepseek${NC}  (not installed)\n` +
       `    ${G}✓ pi${NC}\n` +
-      `    ${G}✓ antigravity (agy)${NC}\n`;
+      `    ${G}✓ reasonix${NC}\n`;
     const available = parseAvailableAgents(realOutput);
-    // ✓ rows are available (agy comes from the parenthesised canonical name).
+    // ✓ rows are available; the token is the first word (canonicalAgentName is a no-op).
     expect(available.has("claude")).toBe(true);
     expect(available.has("kimi")).toBe(true);
     expect(available.has("pi")).toBe(true);
-    expect(available.has("agy")).toBe(true);
+    expect(available.has("reasonix")).toBe(true);
     // ✗ "not installed" rows are NOT available even though the name is in the blob.
     expect(available.has("deepseek")).toBe(false);
   });

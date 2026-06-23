@@ -130,26 +130,26 @@ describe("collectAbout — US-DOSSIER-041 (pure, structured charter)", () => {
 const AGENTS: AgentPanelRow[] = [
   { name: "claude", display: "claude", runner: "Claude Code", version: "2.1.0", installed: true, cycles72h: 4, costUsd72h: 1, files: [], syncStale: false },
   { name: "kimi", display: "kimi", runner: "Kimi CLI", version: "—", installed: true, cycles72h: 1, costUsd72h: 0, files: [], syncStale: true, setupCmd: "roll setup -f kimi" },
-  // codex / agy absent — not installed on this machine.
+  // pi / reasonix absent — not installed on this machine.
 ];
 
 describe("collectConventions — US-DOSSIER-033 (pure)", () => {
   const config: Record<string, string> = {
     sync_claude: "~/.claude/CLAUDE.md",
     sync_kimi: "~/.kimi/AGENTS.md",
-    sync_codex: "~/.codex/AGENTS.md",
-    sync_agy: "~/.gemini/GEMINI.md",
+    sync_pi: "~/.pi/AGENTS.md",
+    sync_reasonix: "~/.reasonix/AGENTS.md",
   };
   const deps = { readConfig: (k: string) => config[k] ?? "", agents: AGENTS, readDoc: (rel: string) => (rel === "AGENTS.md" ? "# Conventions\nrules" : undefined), render: mdTag };
 
   it("AC4: lists the four sync targets with the SAME ok/stale freshness as the agents panel", () => {
     const vm = collectConventions(deps);
-    expect(vm.targets.map((t) => t.configKey)).toEqual(["sync_claude", "sync_kimi", "sync_codex", "sync_agy"]);
+    expect(vm.targets.map((t) => t.configKey)).toEqual(["sync_claude", "sync_kimi", "sync_pi", "sync_reasonix"]);
     const byAgent = Object.fromEntries(vm.targets.map((t) => [t.agent, t.state]));
     expect(byAgent["claude"]).toBe("sync"); // installed + not stale
     expect(byAgent["kimi"]).toBe("stale"); // installed + syncStale
-    expect(byAgent["codex"]).toBe("absent"); // not installed
-    expect(byAgent["agy"]).toBe("absent");
+    expect(byAgent["pi"]).toBe("absent"); // not installed
+    expect(byAgent["reasonix"]).toBe("absent");
     expect(vm.targets[0]!.dest).toBe("~/.claude/CLAUDE.md");
   });
 
@@ -330,7 +330,7 @@ describe("About machine page — US-DOSSIER-041 (structured charter)", () => {
 
 describe("Conventions machine page — US-DOSSIER-033", () => {
   const convVM = collectConventions({
-    readConfig: (k) => ({ sync_claude: "~/.claude/CLAUDE.md", sync_kimi: "~/.kimi/AGENTS.md", sync_codex: "~/.codex/AGENTS.md", sync_agy: "~/.gemini/GEMINI.md" })[k] ?? "",
+    readConfig: (k) => ({ sync_claude: "~/.claude/CLAUDE.md", sync_kimi: "~/.kimi/AGENTS.md", sync_pi: "~/.pi/AGENTS.md", sync_reasonix: "~/.reasonix/AGENTS.md" })[k] ?? "",
     agents: AGENTS,
     readDoc: (rel) => (rel === "AGENTS.md" ? "# Conventions\n- main is truth" : undefined),
     render: (md) => `<RB>${md}</RB>`,
@@ -348,8 +348,8 @@ describe("Conventions machine page — US-DOSSIER-033", () => {
   it("AC4: lists the four sync targets with in-sync/stale freshness (bilingual labels)", () => {
     expect(html).toContain("sync_claude");
     expect(html).toContain("sync_kimi");
-    expect(html).toContain("sync_codex");
-    expect(html).toContain("sync_agy");
+    expect(html).toContain("sync_pi");
+    expect(html).toContain("sync_reasonix");
     // freshness labels — the same ok/stale口径 as the agents panel
     expect(html).toContain("in sync");
     expect(html).toContain("已同步");
@@ -358,7 +358,7 @@ describe("Conventions machine page — US-DOSSIER-033", () => {
     // claude row in-sync, kimi row stale (driven by the agents panel rows)
     expect(html).toContain('data-target="claude" data-state="sync"');
     expect(html).toContain('data-target="kimi" data-state="stale"');
-    expect(html).toContain('data-target="codex" data-state="absent"');
+    expect(html).toContain('data-target="pi" data-state="absent"');
   });
 
   it("AC4: the rulebook (AGENTS.md) is rendered read-only via the markdown path", () => {

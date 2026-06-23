@@ -18,21 +18,22 @@ function project(yaml: string | null): { dir: string; rt: string } {
   return { dir, rt };
 }
 
-// NOTE: claude is NOT a headless reviewer (canReviewHeadless=false — its
-// OAuth/keychain login is unreachable from a launchd headless daemon, 401), so it
-// must NOT appear in a pairing.yaml capability block (parsePairingConfig fail-loud
-// rejects a non-headless reviewer). The capable reviewers here are codex/kimi/qwen.
-// claude remains a valid WORKING agent (builder) — it just never headless-reviews.
-const ENABLED = `enabled: true\nstages: [code]\ncapability:\n  codex: [code]\n  kimi: [code]\n  qwen: [code]\n`;
+// NOTE: the autonomous pool was narrowed to kimi/pi/reasonix — the only headless
+// reviewers (canReviewHeadless=true). claude is NOT a headless reviewer
+// (canReviewHeadless=false — its OAuth/keychain login is unreachable from a launchd
+// headless daemon, 401), so it must NOT appear in a pairing.yaml capability block
+// (parsePairingConfig fail-loud rejects a non-headless reviewer). The working agent
+// here is kimi (a builder) and the heterogeneous capable reviewers are pi/reasonix.
+const ENABLED = `enabled: true\nstages: [code]\ncapability:\n  kimi: [code]\n  pi: [code]\n  reasonix: [code]\n`;
 // US-PAIR-004: a config that enables every stage and declares each agent
 // capable across them, so stage plumbing can be exercised independently.
-const ALL_STAGES = `enabled: true\nstages: [design, test, code, cycle]\ncapability:\n  codex: [design, test, code, cycle]\n  kimi: [design, test, code, cycle]\n  qwen: [design, test, code, cycle]\n`;
+const ALL_STAGES = `enabled: true\nstages: [design, test, code, cycle]\ncapability:\n  kimi: [design, test, code, cycle]\n  pi: [design, test, code, cycle]\n  reasonix: [design, test, code, cycle]\n`;
 const highComplexity = async (): Promise<string[]> => ["a.ts", "b.ts", "c.ts", "d.ts"]; // >3 → high
 
 function deps(over: Partial<RunPairingDeps> = {}): { d: RunPairingDeps; events: PairEvent[] } {
   const events: PairEvent[] = [];
   const d: RunPairingDeps = {
-    installed: ["claude", "codex", "kimi"],
+    installed: ["kimi", "pi", "reasonix"],
     isAvailable: () => true,
     reviewPeer: async (_peer, _diff, _t) => ({ verdict: "refine", findings: ["x", "y"], cost: 0.12 }),
     changedFiles: highComplexity,
@@ -48,26 +49,26 @@ describe("runPairing — US-PAIR-003", () => {
   it("file absent = off (never silent magic)", async () => {
     const { dir, rt } = project(null);
     const { d } = deps();
-    expect((await runPairing(dir, dir, rt, "c1", "claude", "code", d)).status).toBe("off");
+    expect((await runPairing(dir, dir, rt, "c1", "kimi", "code", d)).status).toBe("off");
   });
 
   it("disabled config = off", async () => {
     const { dir, rt } = project(`enabled: false\nstages: [code]\n`);
     const { d } = deps();
-    expect((await runPairing(dir, dir, rt, "c1", "claude", "code", d)).status).toBe("off");
+    expect((await runPairing(dir, dir, rt, "c1", "kimi", "code", d)).status).toBe("off");
   });
 
   it("low-complexity delivery = not-required (no peer burned)", async () => {
     const { dir, rt } = project(ENABLED);
     const { d, events } = deps({ changedFiles: async () => ["only.ts"] });
-    expect((await runPairing(dir, dir, rt, "c1", "claude", "code", d)).status).toBe("not-required");
+    expect((await runPairing(dir, dir, rt, "c1", "kimi", "code", d)).status).toBe("not-required");
     expect(events).toHaveLength(0);
   });
 
   it("selects a heterogeneous peer, writes evidence, emits selected+verdict with cost", async () => {
     const { dir, rt } = project(ENABLED);
     const { d, events } = deps();
-    const res = await runPairing(dir, dir, rt, "c1", "claude", "code", d);
+    const res = await runPairing(dir, dir, rt, "c1", "kimi", "code", d);
     expect(res.status).toBe("reviewed");
     expect(res.peer).not.toBe("claude"); // heterogeneous
     // evidence written to the peer-gate contract path
@@ -91,7 +92,7 @@ describe("runPairing — US-PAIR-003", () => {
   it("empty diff = not-required, no peer burned, no selected event (pi pair-review)", async () => {
     const { dir, rt } = project(ENABLED);
     const { d, events } = deps({ diff: async () => "   \n" });
-    const res = await runPairing(dir, dir, rt, "c1", "claude", "code", d);
+    const res = await runPairing(dir, dir, rt, "c1", "kimi", "code", d);
     expect(res.status).toBe("not-required");
     expect(events).toHaveLength(0);
   });
@@ -99,7 +100,7 @@ describe("runPairing — US-PAIR-003", () => {
   it("fail-loud none-available when no qualified heterogeneous peer", async () => {
     const { dir, rt } = project(ENABLED);
     const { d, events } = deps({ installed: ["claude"], isAvailable: () => true });
-    const res = await runPairing(dir, dir, rt, "c1", "claude", "code", d);
+    const res = await runPairing(dir, dir, rt, "c1", "kimi", "code", d);
     expect(res.status).toBe("none-available");
     expect(events).toHaveLength(1);
     expect(events[0]?.type).toBe("pair:none-available");
@@ -110,7 +111,7 @@ describe("runPairing — US-PAIR-003", () => {
     // FIX-335: every candidate is fired in parallel (one pair:selected each); the
     // whole pool returning null yields status timeout with NO verdict + no evidence.
     const { d, events } = deps({ reviewPeer: async () => null });
-    const res = await runPairing(dir, dir, rt, "c1", "claude", "code", d);
+    const res = await runPairing(dir, dir, rt, "c1", "kimi", "code", d);
     expect(res.status).toBe("timeout");
     expect(events.length).toBeGreaterThanOrEqual(1);
     expect(events.every((e) => e.type === "pair:selected")).toBe(true); // selected per candidate
@@ -120,47 +121,47 @@ describe("runPairing — US-PAIR-003", () => {
 
   it("FIX-335 parallel take-first: a null peer is skipped, the non-null peer wins, evidence/verdict are the winner's", async () => {
     const { dir, rt } = project(ENABLED);
-    // Two heterogeneous candidates are fired concurrently: "codex" flakes (null),
-    // "kimi" returns a real verdict. The winner must be the non-null peer, with a
+    // Two heterogeneous candidates are fired concurrently: "reasonix" flakes (null),
+    // "pi" returns a real verdict. The winner must be the non-null peer, with a
     // single verdict + evidence recording that peer — regardless of dispatch order.
     const { d, events } = deps({
       reviewPeer: async (peer) =>
-        peer === "kimi" ? { verdict: "agree", findings: ["ok"], cost: 0.1 } : null,
+        peer === "pi" ? { verdict: "agree", findings: ["ok"], cost: 0.1 } : null,
     });
-    const res = await runPairing(dir, dir, rt, "c1", "claude", "code", d);
+    const res = await runPairing(dir, dir, rt, "c1", "kimi", "code", d);
     expect(res.status).toBe("reviewed");
-    expect(res.peer).toBe("kimi"); // the non-null peer won, not the flaky one
+    expect(res.peer).toBe("pi"); // the non-null peer won, not the flaky one
     expect(res.verdict).toBe("agree");
     // every candidate emitted a selected (parallel dispatch); exactly one verdict.
     const selecteds = events.filter((e) => e.type === "pair:selected") as Extract<PairEvent, { type: "pair:selected" }>[];
     expect(selecteds.length).toBeGreaterThanOrEqual(2);
-    expect(selecteds.some((e) => e.peer === "kimi")).toBe(true);
+    expect(selecteds.some((e) => e.peer === "pi")).toBe(true);
     const verdicts = events.filter((e) => e.type === "pair:verdict") as Extract<PairEvent, { type: "pair:verdict" }>[];
     expect(verdicts).toHaveLength(1);
-    expect(verdicts[0]?.peer).toBe("kimi");
+    expect(verdicts[0]?.peer).toBe("pi");
     // evidence is the winner's only — the flaky peer never wrote anything.
     const ev = JSON.parse(readFileSync(join(rt, "peer", "cycle-c1.pair.json"), "utf8"));
-    expect(ev.peer).toBe("kimi");
+    expect(ev.peer).toBe("pi");
     expect(ev.verdict).toBe("agree");
   });
 
   it("FIX-335: the FIRST non-null result wins (a slow null does not beat a faster real verdict)", async () => {
     const { dir, rt } = project(ENABLED);
-    // "codex" returns null quickly; "kimi" returns a real verdict a tick later.
+    // "reasonix" returns null quickly; "pi" returns a real verdict a tick later.
     // take-first must wait past the fast null and use the real verdict, never
     // resolving null while a valid result is still in flight.
     const { d, events } = deps({
       reviewPeer: async (peer) => {
-        if (peer === "kimi") {
+        if (peer === "pi") {
           await new Promise((r) => setTimeout(r, 10));
           return { verdict: "refine", findings: ["a", "b"], cost: 0.2 };
         }
         return null; // fast null
       },
     });
-    const res = await runPairing(dir, dir, rt, "c1", "claude", "code", d);
+    const res = await runPairing(dir, dir, rt, "c1", "kimi", "code", d);
     expect(res.status).toBe("reviewed");
-    expect(res.peer).toBe("kimi");
+    expect(res.peer).toBe("pi");
     const verdicts = events.filter((e) => e.type === "pair:verdict") as Extract<PairEvent, { type: "pair:verdict" }>[];
     expect(verdicts).toHaveLength(1);
     expect(verdicts[0]?.findings).toBe(2);
@@ -173,7 +174,7 @@ describe("runPairing — US-PAIR-003", () => {
         throw new Error("boom");
       },
     });
-    await expect(runPairing(dir, dir, rt, "c1", "claude", "code", d)).resolves.toEqual({ status: "error" });
+    await expect(runPairing(dir, dir, rt, "c1", "kimi", "code", d)).resolves.toEqual({ status: "error" });
   });
 });
 
@@ -201,7 +202,7 @@ describe("runPairing — FIX-363 wires the adaptive budget to the reviewer", () 
         return { verdict: "agree", findings: [], cost: 0 };
       },
     });
-    const res = await runPairing(dir, dir, rt, "c1", "claude", "code", d);
+    const res = await runPairing(dir, dir, rt, "c1", "kimi", "code", d);
     expect(res.status).toBe("reviewed");
     expect(seen).toBe(300_000);
     const selected = events.find((e) => e.type === "pair:selected") as Extract<PairEvent, { type: "pair:selected" }>;
@@ -218,7 +219,7 @@ describe("runPairing — FIX-363 wires the adaptive budget to the reviewer", () 
         return { verdict: "agree", findings: [], cost: 0 };
       },
     });
-    await runPairing(dir, dir, rt, "c1", "claude", "code", d);
+    await runPairing(dir, dir, rt, "c1", "kimi", "code", d);
     expect(seen).toBe(180_000);
   });
 
@@ -233,7 +234,7 @@ describe("runPairing — FIX-363 wires the adaptive budget to the reviewer", () 
         return { verdict: "agree", findings: [], cost: 0 };
       },
     });
-    await runPairing(dir, dir, rt, "c1", "claude", "code", d);
+    await runPairing(dir, dir, rt, "c1", "kimi", "code", d);
     expect(seen).toBe(12345);
   });
 });
@@ -244,14 +245,14 @@ describe("runPairing — US-PAIR-004 multi-stage triggering", () => {
     // is declared design-capable in capability.
     const { dir, rt } = project(ENABLED);
     const { d, events } = deps();
-    expect((await runPairing(dir, dir, rt, "c1", "claude", "design", d)).status).toBe("off");
+    expect((await runPairing(dir, dir, rt, "c1", "kimi", "design", d)).status).toBe("off");
     expect(events).toHaveLength(0);
   });
 
   it("design stage runs when enabled (stage is a real parameter, not hardcoded code)", async () => {
     const { dir, rt } = project(ALL_STAGES);
     const { d, events } = deps();
-    const res = await runPairing(dir, dir, rt, "c1", "claude", "design", d);
+    const res = await runPairing(dir, dir, rt, "c1", "kimi", "design", d);
     expect(res.status).toBe("reviewed");
     // the selected event carries the stage that fired
     const sel = events.find((e) => e.type === "pair:selected") as Extract<PairEvent, { type: "pair:selected" }>;
@@ -264,9 +265,9 @@ describe("runPairing — US-PAIR-004 multi-stage triggering", () => {
   it("each enabled stage writes its OWN evidence file (no cross-stage overwrite)", async () => {
     const { dir, rt } = project(ALL_STAGES);
     const { d } = deps();
-    await runPairing(dir, dir, rt, "c1", "claude", "code", d);
-    await runPairing(dir, dir, rt, "c1", "claude", "design", d);
-    await runPairing(dir, dir, rt, "c1", "claude", "cycle", d);
+    await runPairing(dir, dir, rt, "c1", "kimi", "code", d);
+    await runPairing(dir, dir, rt, "c1", "kimi", "design", d);
+    await runPairing(dir, dir, rt, "c1", "kimi", "cycle", d);
     // code keeps the legacy PAIR-003 contract path (back-compat)
     const code = JSON.parse(readFileSync(join(rt, "peer", "cycle-c1.pair.json"), "utf8"));
     expect(code.stage).toBe("code");
@@ -280,7 +281,7 @@ describe("runPairing — US-PAIR-004 multi-stage triggering", () => {
   it("none-available is fail-loud per stage (event carries the firing stage)", async () => {
     const { dir, rt } = project(ALL_STAGES);
     const { d, events } = deps({ installed: ["claude"] });
-    const res = await runPairing(dir, dir, rt, "c1", "claude", "test", d);
+    const res = await runPairing(dir, dir, rt, "c1", "kimi", "test", d);
     expect(res.status).toBe("none-available");
     const none = events[0] as Extract<PairEvent, { type: "pair:none-available" }>;
     expect(none.stage).toBe("test");
@@ -289,13 +290,13 @@ describe("runPairing — US-PAIR-004 multi-stage triggering", () => {
   it("PAIR-003 safety invariants hold for every stage: timeout is non-blocking, never throws", async () => {
     const { dir, rt } = project(ALL_STAGES);
     const { d: dTimeout } = deps({ reviewPeer: async () => null });
-    expect((await runPairing(dir, dir, rt, "c1", "claude", "cycle", dTimeout)).status).toBe("timeout");
+    expect((await runPairing(dir, dir, rt, "c1", "kimi", "cycle", dTimeout)).status).toBe("timeout");
     const { d: dThrow } = deps({
       reviewPeer: async () => {
         throw new Error("boom");
       },
     });
-    await expect(runPairing(dir, dir, rt, "c1", "claude", "test", dThrow)).resolves.toEqual({ status: "error" });
+    await expect(runPairing(dir, dir, rt, "c1", "kimi", "test", dThrow)).resolves.toEqual({ status: "error" });
   });
 });
 
@@ -338,14 +339,14 @@ describe("enabledPairingStages — executor stage iteration seam (US-PAIR-004)",
 import { parsePairScoreOutput, runScorePairing, type RunScorePairingDeps } from "../src/runner/pairing-gate.js";
 import { readStoryReviewScores } from "../src/lib/review-score.js";
 
-// claude omitted: not a headless reviewer (see ENABLED note). codex/kimi/qwen are
-// the declared-capable scorers.
-const SCORE_CFG = `enabled: true\nstages: [code, score]\ncapability:\n  codex: [code, score]\n  kimi: [code, score]\n  qwen: [code, score]\n`;
+// claude omitted: not a headless reviewer (see ENABLED note). kimi/pi/reasonix are
+// the declared-capable scorers (the narrowed autonomous pool).
+const SCORE_CFG = `enabled: true\nstages: [code, score]\ncapability:\n  kimi: [code, score]\n  pi: [code, score]\n  reasonix: [code, score]\n`;
 
 function scoreDeps(over: Partial<RunScorePairingDeps> = {}): { d: RunScorePairingDeps; events: PairEvent[] } {
   const events: PairEvent[] = [];
   const d: RunScorePairingDeps = {
-    installed: ["claude", "codex", "kimi"],
+    installed: ["kimi", "pi", "reasonix"],
     isAvailable: () => true,
     scorePeer: async () => ({ score: 8, verdict: "good", rationale: "clean delivery, tests cover the seams", cost: 0.05 }),
     event: (e) => events.push(e),
@@ -361,15 +362,15 @@ describe("runScorePairing — US-PAIR-009", () => {
     // (and one with only `code` enabled) still produces a peer Review Score.
     const off = project(null);
     const { d } = scoreDeps();
-    expect((await runScorePairing(off.dir, off.rt, "c1", "claude", "US-X-001", "roll-build", "summary", d)).status).toBe("scored");
+    expect((await runScorePairing(off.dir, off.rt, "c1", "kimi", "US-X-001", "roll-build", "summary", d)).status).toBe("scored");
     const noScore = project(ENABLED); // stages: [code] only — score stage still fires
-    expect((await runScorePairing(noScore.dir, noScore.rt, "c1", "claude", "US-X-002", "roll-build", "summary", scoreDeps().d)).status).toBe("scored");
+    expect((await runScorePairing(noScore.dir, noScore.rt, "c1", "kimi", "US-X-002", "roll-build", "summary", scoreDeps().d)).status).toBe("scored");
   });
 
   it("scores via a fresh-session peer: note + evidence + pair:score event + session id", async () => {
     const { dir, rt } = project(SCORE_CFG);
     const { d, events } = scoreDeps();
-    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "delivery summary", d);
+    const r = await runScorePairing(dir, rt, "c1", "kimi", "US-X-001", "roll-build", "delivery summary", d);
     expect(r.status).toBe("scored");
     // FIX-343: the reviewer's fresh session/cast id is recorded + returned.
     expect(r.sessionId).toBeDefined();
@@ -401,19 +402,19 @@ describe("runScorePairing — US-PAIR-009", () => {
   it("FIX-335: one scorer flakes (null), the other scores → uses the real peer score (not a self-grade)", async () => {
     const { dir, rt } = project(SCORE_CFG);
     const tried: string[] = [];
-    // Both hetero scorers fire in parallel: "codex" flakes (null), "kimi" returns a
+    // Both hetero scorers fire in parallel: "reasonix" flakes (null), "pi" returns a
     // real score → take-first must use the non-null peer, NOT degrade to a self-grade.
     const { d, events } = scoreDeps({
-      installed: ["claude", "codex", "kimi"],
+      installed: ["kimi", "pi", "reasonix"],
       scorePeer: async (peer: string) => {
         tried.push(peer);
-        return peer === "kimi" ? { score: 7, verdict: "ok" as const, rationale: "the live peer scored", cost: 0.02 } : null;
+        return peer === "pi" ? { score: 7, verdict: "ok" as const, rationale: "the live peer scored", cost: 0.02 } : null;
       },
     });
-    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
+    const r = await runScorePairing(dir, rt, "c1", "kimi", "US-X-001", "roll-build", "s", d);
     expect(r.status).toBe("scored"); // a real peer score, NOT a self-grade
     expect(tried.length).toBeGreaterThanOrEqual(2); // both candidates were fired (parallel)
-    expect(r.peer).toBe("kimi"); // the non-null scorer won
+    expect(r.peer).toBe("pi"); // the non-null scorer won
     expect(events.filter((e) => e.type === "pair:selected").length).toBeGreaterThanOrEqual(2);
     expect(events.some((e) => e.type === "pair:score")).toBe(true);
     expect(readStoryReviewScores(dir, "US-X-001")[0]?.score).toBe(7); // recorded as a pair score
@@ -437,7 +438,7 @@ describe("runScorePairing — US-PAIR-009", () => {
   it("FIX-343: no scorer at all (empty pool) → fail-loud none-available, BLOCKS (no note)", async () => {
     const { dir, rt } = project(SCORE_CFG);
     const { d, events } = scoreDeps({ installed: [] });
-    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
+    const r = await runScorePairing(dir, rt, "c1", "kimi", "US-X-001", "roll-build", "s", d);
     expect(r.status).toBe("none-available");
     expect(events.map((e) => e.type)).toEqual(["pair:none-available"]);
     expect(readStoryReviewScores(dir, "US-X-001")).toHaveLength(0); // NO fallback note — the cycle honestly fails
@@ -447,10 +448,10 @@ describe("runScorePairing — US-PAIR-009", () => {
     const { dir, rt } = project(SCORE_CFG);
     let calls = 0;
     const { d } = scoreDeps({ scorePeer: async () => (calls++, null) });
-    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
+    const r = await runScorePairing(dir, rt, "c1", "kimi", "US-X-001", "roll-build", "s", d);
     expect(r.status).toBe("timeout");
-    // FIX-343 (C4): two bounded rounds run — hetero {codex,kimi} FIRST (2
-    // candidates × up to 2 attempts), then the same-vendor fallback {claude} (1
+    // FIX-343 (C4): two bounded rounds run — hetero {pi,reasonix} FIRST (2
+    // candidates × up to 2 attempts), then the same-vendor fallback {kimi} (1
     // candidate × up to 2 attempts). All flake → both rounds exhaust their
     // bounded budget → timeout, with >3 total scorePeer calls.
     expect(calls).toBeGreaterThan(3);
@@ -461,44 +462,43 @@ describe("runScorePairing — US-PAIR-009", () => {
   it("out-of-range / malformed peer score → error status, nothing written", async () => {
     const { dir, rt } = project(SCORE_CFG);
     const { d } = scoreDeps({ scorePeer: async () => ({ score: 99, verdict: "good", rationale: "x", cost: 0 }) });
-    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
+    const r = await runScorePairing(dir, rt, "c1", "kimi", "US-X-001", "roll-build", "s", d);
     expect(r.status).toBe("error");
     expect(readStoryReviewScores(dir, "US-X-001")).toHaveLength(0);
   });
 
   // ── FIX-343 (② BOUNDED hetero preference) ──────────────────────────────────
   it("FIX-343 (②): a hetero peer present+responsive WINS over a faster same-vendor scorer", async () => {
-    // builder=claude; pool = claude (same-vendor) + codex,kimi (hetero). The
-    // same-vendor 'claude' would reply INSTANTLY, the hetero peers a tick later.
-    // The OLD runtime (fire-all + take-first) let claude win; the bounded
+    // builder=kimi; pool = kimi (same-vendor) + pi,reasonix (hetero). The
+    // same-vendor 'kimi' would reply INSTANTLY, the hetero peers a tick later.
+    // The OLD runtime (fire-all + take-first) let kimi win; the bounded
     // preference runs the HETERO round FIRST, so a hetero peer wins.
     const { dir, rt } = project(SCORE_CFG);
     const tried: string[] = [];
     const { d } = scoreDeps({
-      installed: ["claude", "codex", "kimi"],
+      installed: ["kimi", "pi", "reasonix"],
       scorePeer: async (peer: string) => {
         tried.push(peer);
-        if (peer === "claude") return { score: 9, verdict: "good" as const, rationale: "instant same-vendor", cost: 0 };
+        if (peer === "kimi") return { score: 9, verdict: "good" as const, rationale: "instant same-vendor", cost: 0 };
         await new Promise((r) => setTimeout(r, 5)); // hetero replies slightly later
         return { score: 7, verdict: "ok" as const, rationale: "hetero peer scored", cost: 0.03 };
       },
     });
-    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-001", "roll-build", "s", d);
+    const r = await runScorePairing(dir, rt, "c1", "kimi", "US-X-001", "roll-build", "s", d);
     expect(r.status).toBe("scored");
-    expect(["codex", "kimi"]).toContain(r.peer); // a HETERO peer won, NOT same-vendor claude
-    expect(tried).not.toContain("claude"); // the same-vendor round never ran (hetero succeeded first)
-    expect(readStoryReviewScores(dir, "US-X-001")[0]?.scoredBy).not.toBe("claude");
+    expect(["pi", "reasonix"]).toContain(r.peer); // a HETERO peer won, NOT same-vendor kimi
+    expect(tried).not.toContain("kimi"); // the same-vendor round never ran (hetero succeeded first)
+    expect(readStoryReviewScores(dir, "US-X-001")[0]?.scoredBy).not.toBe("kimi");
   });
 
   it("FIX-343 (②): hetero pool ALL-FAILS within budget → FALLS BACK to same-vendor-fresh", async () => {
-    // builder=kimi (claude is not a headless reviewer so it cannot be the
-    // same-vendor-fresh scorer); hetero = codex,qwen (both flake null across the
-    // bounded retry); same-vendor = kimi (scores). The gate must still produce a
+    // builder=kimi; hetero = pi,reasonix (both flake null across the bounded
+    // retry); same-vendor = kimi (scores). The gate must still produce a
     // Review Score via the same-vendor-fresh fallback — never block on a dead hetero pool.
     const { dir, rt } = project(SCORE_CFG);
     const tried: string[] = [];
     const { d } = scoreDeps({
-      installed: ["kimi", "codex", "qwen"],
+      installed: ["kimi", "pi", "reasonix"],
       scorePeer: async (peer: string) => {
         tried.push(peer);
         return peer === "kimi" ? { score: 8, verdict: "good" as const, rationale: "same-vendor fresh session scored", cost: 0.01 } : null;
@@ -507,8 +507,8 @@ describe("runScorePairing — US-PAIR-009", () => {
     const r = await runScorePairing(dir, rt, "c1", "kimi", "US-X-001", "roll-build", "s", d);
     expect(r.status).toBe("scored");
     expect(r.peer).toBe("kimi"); // same-vendor fallback won after hetero failed
-    expect(tried).toContain("codex"); // hetero round was attempted first
-    expect(tried).toContain("qwen");
+    expect(tried).toContain("pi"); // hetero round was attempted first
+    expect(tried).toContain("reasonix");
     expect(readStoryReviewScores(dir, "US-X-001")[0]?.scoredBy).toBe("kimi");
   });
 
@@ -535,7 +535,7 @@ describe("runScorePairing — US-PAIR-009", () => {
   it("FIX-344: scoreStage='design' stamps the design label on event + session-id + evidence file", async () => {
     const { dir, rt } = project(SCORE_CFG);
     const { d, events } = scoreDeps({ scoreStage: "design" });
-    const r = await runScorePairing(dir, rt, "c1", "claude", "US-DSGN-001", "roll-design", "design output summary", d);
+    const r = await runScorePairing(dir, rt, "c1", "kimi", "US-DSGN-001", "roll-design", "design output summary", d);
     expect(r.status).toBe("scored");
     // AC1: a real peer Review Score note (pair provenance, fresh session id),
     // NOT the design agent grading itself.
@@ -562,7 +562,7 @@ describe("runScorePairing — US-PAIR-009", () => {
     // working (design) agent — independence is verifiable, not asserted.
     const { dir, rt } = project(SCORE_CFG);
     const { d } = scoreDeps({ scoreStage: "design" });
-    const r = await runScorePairing(dir, rt, "c1", "claude", "US-DSGN-002", "roll-design", "summary", d);
+    const r = await runScorePairing(dir, rt, "c1", "kimi", "US-DSGN-002", "roll-design", "summary", d);
     expect(r.status).toBe("scored");
     expect(r.sessionId).toMatch(/^c1:design:[a-z]+:a\d+:\d+$/); // reviewer's fresh session, cycle-scoped
   });
@@ -570,7 +570,7 @@ describe("runScorePairing — US-PAIR-009", () => {
   it("FIX-344: no scorer for a design output → fail-loud none-available, NO note (AC2)", async () => {
     const { dir, rt } = project(SCORE_CFG);
     const { d, events } = scoreDeps({ scoreStage: "design", installed: [] });
-    const r = await runScorePairing(dir, rt, "c1", "claude", "US-DSGN-003", "roll-design", "summary", d);
+    const r = await runScorePairing(dir, rt, "c1", "kimi", "US-DSGN-003", "roll-design", "summary", d);
     expect(r.status).toBe("none-available");
     // the absence is audited as a design-stage event, and NO synthesized score is written.
     expect((events[0] as Extract<PairEvent, { type: "pair:none-available" }>).stage).toBe("design");
@@ -580,7 +580,7 @@ describe("runScorePairing — US-PAIR-009", () => {
   it("FIX-344: design scorePeer flakes across the bounded retry → timeout, BLOCKS, no design note (AC2)", async () => {
     const { dir, rt } = project(SCORE_CFG);
     const { d } = scoreDeps({ scoreStage: "design", scorePeer: async () => null });
-    const r = await runScorePairing(dir, rt, "c1", "claude", "US-DSGN-004", "roll-design", "summary", d);
+    const r = await runScorePairing(dir, rt, "c1", "kimi", "US-DSGN-004", "roll-design", "summary", d);
     expect(r.status).toBe("timeout");
     expect(existsSync(join(rt, "peer", "cycle-c1.design.pair.json"))).toBe(false);
     expect(readStoryReviewScores(dir, "US-DSGN-004")).toHaveLength(0); // no honest score → no note
@@ -589,7 +589,7 @@ describe("runScorePairing — US-PAIR-009", () => {
   it("FIX-344: default scoreStage stays 'score' (build/fix path unchanged)", async () => {
     const { dir, rt } = project(SCORE_CFG);
     const { d, events } = scoreDeps(); // no scoreStage override
-    const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-009", "roll-build", "s", d);
+    const r = await runScorePairing(dir, rt, "c1", "kimi", "US-X-009", "roll-build", "s", d);
     expect(r.status).toBe("scored");
     expect(r.sessionId).toContain(":score:");
     expect((events.filter((e) => e.type === "pair:score") as Extract<PairEvent, { type: "pair:score" }>[])[0]?.stage).toBe("score");
@@ -639,7 +639,7 @@ describe("score never routes through the review loop (kimi pair-review)", () => 
   it("runPairing early-offs on score (belt-and-braces)", async () => {
     const { dir, rt } = project(SCORE_CFG);
     const { d, events } = deps();
-    expect((await runPairing(dir, dir, rt, "c1", "claude", "score", d)).status).toBe("off");
+    expect((await runPairing(dir, dir, rt, "c1", "kimi", "score", d)).status).toBe("off");
     expect(events).toHaveLength(0);
   });
 });
@@ -650,8 +650,8 @@ import { retryPeerConsult, type RetryPeerConsultDeps } from "../src/runner/pairi
 function retryDeps(over: Partial<RetryPeerConsultDeps> = {}): { d: RetryPeerConsultDeps; events: PairEvent[] } {
   const events: PairEvent[] = [];
   const d: RetryPeerConsultDeps = {
-    installed: ["claude", "codex"], // codex is heterogeneous from claude
-    workingAgent: "claude",
+    installed: ["kimi", "pi"], // pi is heterogeneous from kimi
+    workingAgent: "kimi",
     reviewPeer: async (_peer, _diff, _t) => ({ verdict: "agree", findings: [], cost: 0.05 }),
     diff: async () => "diff --git a/a.ts ...",
     event: (e) => events.push(e),
@@ -668,7 +668,7 @@ describe("retryPeerConsult — FIX-293 AC-H3 (bounded retry, config-independent)
     const { d, events } = retryDeps();
     const r = await retryPeerConsult(wt, rt, "c-retry", d);
     expect(r.status).toBe("reviewed");
-    expect(r.peer).toBe("codex");
+    expect(r.peer).toBe("pi");
     // The evidence file is the canonical peer-gate path → peerEvidencePresent flips true.
     expect(existsSync(join(rt, "peer", "cycle-c-retry.pair.json"))).toBe(true);
     expect(events.map((e) => e.type)).toEqual(["pair:selected", "pair:verdict"]);
@@ -732,10 +732,10 @@ describe("retryPeerConsult — FIX-293 follow-up: same-type SEPARATE-SESSION fal
   // the same-type fallback is the LAST resort, not the default.
   it("heterogeneous peer still PREFERRED over the same-type fallback", async () => {
     const { rt } = project(null);
-    const { d } = retryDeps({ installed: ["claude", "codex"], workingAgent: "claude" });
+    const { d } = retryDeps({ installed: ["kimi", "pi"], workingAgent: "kimi" });
     const r = await retryPeerConsult(rt, rt, "c-het", d);
     expect(r.status).toBe("reviewed");
-    expect(r.peer).toBe("codex"); // different vendor wins
+    expect(r.peer).toBe("pi"); // different vendor wins
     expect(r.sameTypeFallback).toBe(false);
   });
 
@@ -778,19 +778,19 @@ describe("retryPeerConsult — FIX-293 follow-up: same-type SEPARATE-SESSION fal
     const { rt } = project(null);
     const spawned: string[] = [];
     const { d } = retryDeps({
-      installed: ["claude", "codex"], // codex is heterogeneous from claude
-      workingAgent: "claude",
-      // hetero (codex) fails; the working agent's own type (claude) WOULD pass —
+      installed: ["kimi", "pi"], // pi is heterogeneous from kimi
+      workingAgent: "kimi",
+      // hetero (pi) fails; the working agent's own type (kimi) WOULD pass —
       // but it must never be reached while a hetero peer was available.
       reviewPeer: async (peer) => {
         spawned.push(peer);
-        return peer === "claude" ? { verdict: "agree", findings: [], cost: 0 } : null;
+        return peer === "kimi" ? { verdict: "agree", findings: [], cost: 0 } : null;
       },
     });
     const r = await retryPeerConsult(rt, rt, "c-hetero-allfail", d);
     expect(r.status).toBe("timeout"); // blocked, NOT reviewed via same-type
-    expect(r.sameTypeFallback).toBe(false); // the failing peer was the hetero codex
-    expect(spawned).toEqual(["codex"]); // same-type claude was NEVER attempted
+    expect(r.sameTypeFallback).toBe(false); // the failing peer was the hetero pi
+    expect(spawned).toEqual(["pi"]); // same-type kimi was NEVER attempted
     expect(existsSync(join(rt, "peer", "cycle-c-hetero-allfail.pair.json"))).toBe(false);
   });
 

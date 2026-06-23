@@ -85,7 +85,6 @@ describe("frozen: roll status render", () => {
 
         + AGENTS.md
         + CLAUDE.md
-        − GEMINI.md  missing
         + .cursor-rules
         − project_rules.md  missing
 
@@ -98,8 +97,8 @@ describe("frozen: roll status render", () => {
         claude        CLAUDE.md     ✓ in sync     12
         cursor        AGENTS.md     ~ out of sync 12
              fix: roll setup -f cursor
-        agy           GEMINI.md     − missing     0
-             fix: roll setup -f agy
+        pi            AGENTS.md     − missing     0
+             fix: roll setup -f pi
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -195,7 +194,6 @@ describe("frozen: roll status render", () => {
 
         + AGENTS.md
         + CLAUDE.md
-        − GEMINI.md  missing
         + .cursor-rules
         − project_rules.md  missing
 

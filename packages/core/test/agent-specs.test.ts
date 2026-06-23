@@ -10,10 +10,15 @@ import {
 
 describe("AgentSpec registry — FIX-313", () => {
   it("declares per-agent defaults in one registry", () => {
-    expect(agentDefaultModel("claude")).toBe("claude-sonnet-4");
-    expect(getAgentSpec("claude")?.usage.sessionBackfill).toBe("claude-projects");
+    // The pool is kimi/pi/reasonix. claude is NOT a pool member (no spec entry):
+    // its harness machinery lives elsewhere, so getAgentSpec("claude") is absent
+    // and the default-model lookup falls back to the bare name.
+    expect(getAgentSpec("claude")).toBeUndefined();
+    expect(agentDefaultModel("claude")).toBe("claude");
     expect(agentDefaultModel("pi")).toBe("deepseek-v4-pro");
-    expect(agentNormalizerKind("codex")).toBe("codex");
+    expect(agentDefaultModel("kimi")).toBe("kimi-k2");
+    expect(agentDefaultModel("reasonix")).toBe("deepseek-flash");
+    expect(agentNormalizerKind("kimi")).toBe("generic");
     expect(agentSmokeCommand("kimi")).toContain("kimi");
   });
 
@@ -24,31 +29,23 @@ describe("AgentSpec registry — FIX-313", () => {
     expect(agentSmokeCommand("kimi")).not.toContain("kimi-code");
   });
 
-  it("declares sessionReuse as an agnostic capability — only codex resumes (lever-4)", () => {
-    // codex is the ONLY engine with warm-context (exec resume).
-    expect(getAgentSpec("codex")?.usage.sessionReuse).toBe("codex-exec-resume");
-    // openai is a codex alias — same capability resolves through it.
-    expect(getAgentSpec("openai")?.usage.sessionReuse).toBe("codex-exec-resume");
-    // EVERY other engine is a cold no-op: the field is absent (not 'none' — the
-    // adapter treats absent as cold, so we never accidentally widen reuse).
-    for (const agent of ["claude", "kimi", "qwen", "agy", "pi", "cursor", "opencode", "trae", "openclaw"]) {
+  it("declares sessionReuse as an agnostic capability — no pool engine resumes (lever-4)", () => {
+    // After the pool was narrowed to 国产/开源 agents (kimi/pi/reasonix), NO engine
+    // declares a warm-reuse kind: the field is absent on every spec (the adapter
+    // treats absent as cold, so reuse is never accidentally widened).
+    for (const agent of ["kimi", "pi", "reasonix"]) {
       expect(getAgentSpec(agent)?.usage.sessionReuse).toBeUndefined();
     }
   });
 
   it("declares headless-review capability only for agents the runner can spawn", () => {
-    for (const agent of ["codex", "openai", "kimi", "qwen", "pi", "reasonix"]) {
+    // The pool is kimi/pi/reasonix — all headless-review capable.
+    for (const agent of ["kimi", "pi", "reasonix"]) {
       expect(agentCanReviewHeadless(agent)).toBe(true);
     }
-    // FIX-360: agy (antigravity/gemini) is NOT a headless reviewer — its headless
-    // review triggers an interactive Google OAuth popup, so it is excluded from
-    // every reviewer pool (it stays in the registry for manual use only).
-    // claude is likewise NOT a headless reviewer — its OAuth/keychain login token
-    // is bound to the GUI session and unreachable from a launchd headless daemon,
-    // so `claude -p` review/score returns 401 (cause:auth). Same rationale as agy:
-    // canReviewHeadless=false removes it from every reviewer pool path; claude
-    // stays in the registry for manual / auth-having (interactive) use only.
-    for (const agent of ["claude", "cursor", "trae", "opencode", "openclaw", "agy", "gemini", "antigravity"]) {
+    // claude is NOT a pool member (no spec) and the IDE/config-only agents have no
+    // spec either → canReviewHeadless is false for all of them.
+    for (const agent of ["claude", "cursor", "trae", "opencode", "openclaw"]) {
       expect(agentCanReviewHeadless(agent)).toBe(false);
     }
   });

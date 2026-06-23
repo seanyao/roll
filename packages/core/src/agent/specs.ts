@@ -72,38 +72,6 @@ const BASE_AGENT_SPECS: readonly AgentSpec[] = [
     usage: { stdoutExtractor: "pi", sessionRecovery: "pi" },
     smokeCommand: 'pi -p "Reply with a single word: hello"',
   },
-  {
-    name: "cursor",
-    displayName: "cursor",
-    defaultModel: "cursor",
-    normalizer: "generic",
-    usage: { stdoutExtractor: "generic" },
-    smokeCommand: 'cursor --version',
-  },
-  {
-    name: "opencode",
-    displayName: "opencode",
-    defaultModel: "opencode",
-    normalizer: "generic",
-    usage: { stdoutExtractor: "generic" },
-    smokeCommand: 'opencode --version',
-  },
-  {
-    name: "trae",
-    displayName: "trae",
-    defaultModel: "trae",
-    normalizer: "generic",
-    usage: { stdoutExtractor: "generic" },
-    smokeCommand: 'trae --version',
-  },
-  {
-    name: "openclaw",
-    displayName: "openclaw",
-    defaultModel: "openclaw",
-    normalizer: "generic",
-    usage: { stdoutExtractor: "generic" },
-    smokeCommand: 'openclaw --version',
-  },
 ];
 
 function canonicalSpecKey(name: string): string {

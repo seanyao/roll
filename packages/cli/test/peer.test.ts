@@ -11,8 +11,8 @@ function project(): string {
 function deps(over: Partial<PeerReviewDeps> = {}): PeerReviewDeps {
   let now = 1_000;
   return {
-    installedReviewers: () => ["codex"],
-    currentWorker: () => "claude",
+    installedReviewers: () => ["pi"],
+    currentWorker: () => "kimi",
     nowMs: () => {
       now += 125;
       return now;
@@ -74,12 +74,12 @@ describe("FIX-255 roll peer", () => {
   it("records timeout, command family, duration, and transcript reference", async () => {
     const p = project();
     const facts = await runPeerReview(
-      { projectPath: p, prompt: "review", reviewer: "codex", mode: "self", workerAgents: ["claude"], timeoutMs: 50 },
+      { projectPath: p, prompt: "review", reviewer: "pi", mode: "self", workerAgents: ["kimi"], timeoutMs: 50 },
       deps({ spawnReviewer: async () => ({ status: "timeout", stdout: "FINDING: partial output\n" }) }),
     );
 
     expect(facts.verdict).toBe("TIMEOUT");
-    expect(facts.commandFamily).toBe("codex");
+    expect(facts.commandFamily).toBe("pi");
     expect(facts.durationMs).toBe(125);
     expect(facts.transcriptPath).toBeDefined();
     expect(existsSync(facts.transcriptPath ?? "")).toBe(true);
@@ -89,42 +89,42 @@ describe("FIX-255 roll peer", () => {
     const p = project();
     const calls: string[] = [];
     const facts = await runPeerReview(
-      { projectPath: p, prompt: "review", mode: "auto", workerAgents: ["claude"], timeoutMs: 1_000 },
+      { projectPath: p, prompt: "review", mode: "auto", workerAgents: ["kimi"], timeoutMs: 1_000 },
       deps({
-        installedReviewers: () => ["claude", "codex", "kimi"],
-        currentWorker: () => "claude",
+        installedReviewers: () => ["kimi", "pi", "reasonix"],
+        currentWorker: () => "kimi",
         spawnReviewer: async ({ agent }) => {
           calls.push(agent);
-          if (agent === "codex") return { status: "error", reason: "spawn_failed", stdout: "FINDING: flake\n" };
+          if (agent === "pi") return { status: "error", reason: "spawn_failed", stdout: "FINDING: flake\n" };
           return { status: "ok", stdout: "VERDICT: APPROVE\nREASON: good\n" };
         },
       }),
     );
 
-    expect(calls).toEqual(["codex", "kimi"]);
+    expect(calls).toEqual(["pi", "reasonix"]);
     expect(facts.verdict).toBe("APPROVE");
-    expect(facts.agent).toBe("kimi");
+    expect(facts.agent).toBe("reasonix");
     const runs = readFileSync(join(p, ".roll", "peer", "runs.jsonl"), "utf8").trim().split("\n");
     expect(runs).toHaveLength(2);
     expect(runs[0]).toContain('"verdict":"ERROR"');
-    expect(runs[0]).toContain('"agent":"codex"');
+    expect(runs[0]).toContain('"agent":"pi"');
     expect(runs[1]).toContain('"verdict":"APPROVE"');
-    expect(runs[1]).toContain('"agent":"kimi"');
+    expect(runs[1]).toContain('"agent":"reasonix"');
   });
 
   it("FIX-336: returns the last failure when every candidate fails", async () => {
     const p = project();
     const facts = await runPeerReview(
-      { projectPath: p, prompt: "review", mode: "auto", workerAgents: ["claude"], timeoutMs: 1_000 },
+      { projectPath: p, prompt: "review", mode: "auto", workerAgents: ["kimi"], timeoutMs: 1_000 },
       deps({
-        installedReviewers: () => ["claude", "codex", "kimi"],
-        currentWorker: () => "claude",
+        installedReviewers: () => ["kimi", "pi", "reasonix"],
+        currentWorker: () => "kimi",
         spawnReviewer: async () => ({ status: "error", reason: "all_down", stdout: "" }),
       }),
     );
 
     expect(facts.verdict).toBe("ERROR");
-    expect(facts.agent).toBe("claude");
+    expect(facts.agent).toBe("kimi");
     const runs = readFileSync(join(p, ".roll", "peer", "runs.jsonl"), "utf8").trim().split("\n");
     expect(runs).toHaveLength(3);
   });
@@ -132,18 +132,18 @@ describe("FIX-255 roll peer", () => {
   it("FIX-336: auto degradation is recorded only after hetero peers fail", async () => {
     const p = project();
     const facts = await runPeerReview(
-      { projectPath: p, prompt: "review", mode: "auto", workerAgents: ["claude"], timeoutMs: 1_000 },
+      { projectPath: p, prompt: "review", mode: "auto", workerAgents: ["kimi"], timeoutMs: 1_000 },
       deps({
-        installedReviewers: () => ["claude", "codex", "kimi"],
-        currentWorker: () => "claude",
+        installedReviewers: () => ["kimi", "pi", "reasonix"],
+        currentWorker: () => "kimi",
         spawnReviewer: async ({ agent }) => {
-          if (agent === "claude") return { status: "ok", stdout: "VERDICT: APPROVE\nREASON: self\n" };
+          if (agent === "kimi") return { status: "ok", stdout: "VERDICT: APPROVE\nREASON: self\n" };
           return { status: "error", reason: "down", stdout: "" };
         },
       }),
     );
 
-    expect(facts.agent).toBe("claude");
+    expect(facts.agent).toBe("kimi");
     expect(facts.effectiveMode).toBe("self");
     expect(facts.degradedReason).toBe("all_heterogeneous_peers_failed");
   });

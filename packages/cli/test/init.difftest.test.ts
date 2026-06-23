@@ -109,16 +109,16 @@ function applyFixture(planBody: string): Fixture {
   return fx;
 }
 
-function legacyFixtureWithFakeClaude(): Fixture {
+function legacyFixtureWithFakeAgent(): Fixture {
   const fx = freshFixture();
   writeFileSync(join(fx.proj, "package.json"), "{\"scripts\":{\"test\":\"vitest\"}}\n");
   writeFileSync(
     join(fx.home, "config.yaml"),
-    "# Roll config\nlang: en\nai_claude: ~/.claude|CLAUDE.md|CLAUDE.md\n",
+    "# Roll config\nlang: en\nai_kimi: ~/.kimi|AGENTS.md|AGENTS.md\n",
   );
-  const claude = join(fx.bin, "claude");
+  const kimi = join(fx.bin, "kimi");
   writeFileSync(
-    claude,
+    kimi,
     [
       "#!/bin/sh",
       "mkdir -p .roll",
@@ -541,7 +541,7 @@ describe("frozen: roll init", () => {
   });
 
   it("legacy project launches a selected agent then applies its plan", () => {
-    const fx = legacyFixtureWithFakeClaude();
+    const fx = legacyFixtureWithFakeAgent();
     expect(norm(tsInit(fx, []), fx)).toMatchInlineSnapshot(`
       {
         "status": 0,
@@ -552,7 +552,7 @@ describe("frozen: roll init", () => {
         Onboarding
         Onboarding requires an AI agent to read your code. Detected:
 
-          ✓ claude   (installed)
+          ✓ kimi   (installed)
 
       The process will use your agent to call models. Token cost is on your own account.
         Onboarding uses your agent to call models — tokens are billed to your account.
@@ -561,7 +561,7 @@ describe("frozen: roll init", () => {
         Your code and conversation stay in your agent — Roll never uploads anything.
 
 
-      [roll] Launching claude…
+      [roll] Launching kimi…
         Conversation ends with /exit (or Ctrl-C). On exit Roll will run apply for you.
       Use /exit to end (or Ctrl-C). Roll will auto-apply after exit.
 

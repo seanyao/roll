@@ -24,20 +24,20 @@ import {
 const cfg = (over: Partial<PairingConfig> = {}): PairingConfig => ({
   enabled: true,
   stages: ["code"],
-  // FIX-360: agy is no longer a headless reviewer, so it is filtered out of every
-  // pool regardless of any capability declaration — it stays out of these cfgs.
-  capability: { claude: ["code"], codex: ["code"], kimi: ["code"], qwen: ["code"] },
+  capability: { kimi: ["code"], pi: ["code"], reasonix: ["code"] },
   ...over,
 });
 const always = (): boolean => true;
 
 describe("peerReviewCost — real spend from a peer spawn's stdout", () => {
-  it("parses a claude stream-json peer's usage into a real cost", () => {
+  it("parses a claude-stream (harness) usage into a real cost", () => {
+    // claude is no longer a pool peer, but the claude-stream harness extractor is
+    // KEPT (roll runs inside Claude Code). The cost path still prices it.
     const lines = [
       JSON.stringify({ type: "assistant", message: { model: "claude-sonnet-4", usage: { input_tokens: 1000, output_tokens: 500 } } }),
       JSON.stringify({ type: "result", total_cost_usd: 0.0123, model: "claude-sonnet-4" }),
     ];
-    const cost = peerReviewCost("claude", lines.join("\n"));
+    const cost = peerReviewCost("claude-stream", lines.join("\n"));
     expect(cost).toBeGreaterThan(0);
   });
 
@@ -128,9 +128,9 @@ describe("pairingHistory — per-peer count + hit (found a real finding)", () =>
 
 describe("selectPairingCandidates — ε-greedy hit-rate preference (US-PAIR-006)", () => {
   const base = {
-    installed: ["claude", "codex", "kimi", "qwen", "agy"],
+    installed: ["kimi", "pi", "reasonix"],
     isAvailable: always,
-    workingAgent: "claude",
+    workingAgent: "kimi",
     stage: "code" as const,
     cfg: cfg(),
   };
@@ -142,28 +142,26 @@ describe("selectPairingCandidates — ε-greedy hit-rate preference (US-PAIR-006
   });
 
   it("returns the same qualified SET regardless of ordering (no peer lost)", () => {
-    const history = { codex: { count: 10, hits: 9 } };
+    const history = { pi: { count: 10, hits: 9 } };
     const got = selectPairingCandidates({ ...base, cycleId: "c1", history, epsilon: 0.2 });
-    // FIX-360: agy is installed (see base.installed) but is NOT a headless reviewer,
-    // so it is filtered out of the qualified pool — codex/kimi/qwen remain.
-    expect(got.slice().sort()).toEqual(["codex", "kimi", "qwen"].sort());
-    expect(got).not.toContain("agy");
+    // worker is kimi → the heterogeneous reviewable peers are pi + reasonix.
+    expect(got.slice().sort()).toEqual(["pi", "reasonix"].sort());
   });
 
   it("exploit cycles put the highest-hit-rate peer first", () => {
-    const history = { codex: { count: 10, hits: 9 }, kimi: { count: 10, hits: 1 } };
+    const history = { pi: { count: 10, hits: 9 }, reasonix: { count: 10, hits: 1 } };
     // find a cycleId that lands in the exploit band (most do at ε=0.2)
     let exploitFirst = 0;
     for (let i = 0; i < 50; i++) {
       const got = selectPairingCandidates({ ...base, cycleId: `exploit-${i}`, history, epsilon: 0.2 });
-      if (got[0] === "codex") exploitFirst++;
+      if (got[0] === "pi") exploitFirst++;
     }
-    // with ε=0.2, ~80% of cycles exploit → codex first the large majority of the time.
+    // with ε=0.2, ~80% of cycles exploit → pi first the large majority of the time.
     expect(exploitFirst).toBeGreaterThan(30);
   });
 
   it("preserves exploration: a low-hit peer still leads on some cycles (kimi guardrail)", () => {
-    const history = { codex: { count: 100, hits: 99 } };
+    const history = { pi: { count: 100, hits: 99 } };
     const leaders = new Set<string>();
     for (let i = 0; i < 100; i++) {
       const got = selectPairingCandidates({ ...base, cycleId: `cyc-${i}`, history, epsilon: 0.2 });
@@ -171,21 +169,21 @@ describe("selectPairingCandidates — ε-greedy hit-rate preference (US-PAIR-006
     }
     // the high scorer must NOT monopolize — exploration surfaces other leaders too.
     expect(leaders.size).toBeGreaterThan(1);
-    expect(leaders.has("codex")).toBe(true);
+    expect(leaders.has("pi")).toBe(true);
   });
 
   it("is deterministic/replayable: same cycleId + history → same order", () => {
-    const history = { codex: { count: 10, hits: 5 }, kimi: { count: 8, hits: 6 } };
+    const history = { pi: { count: 10, hits: 5 }, reasonix: { count: 8, hits: 6 } };
     const a = selectPairingCandidates({ ...base, cycleId: "fixed", history, epsilon: 0.2 });
     const b = selectPairingCandidates({ ...base, cycleId: "fixed", history, epsilon: 0.2 });
     expect(a).toEqual(b);
   });
 
   it("ε=0 (pure exploit) always leads with the best hit-rate peer", () => {
-    const history = { kimi: { count: 10, hits: 8 }, codex: { count: 10, hits: 2 } };
+    const history = { reasonix: { count: 10, hits: 8 }, pi: { count: 10, hits: 2 } };
     for (let i = 0; i < 10; i++) {
       const got = selectPairingCandidates({ ...base, cycleId: `x-${i}`, history, epsilon: 0 });
-      expect(got[0]).toBe("kimi");
+      expect(got[0]).toBe("reasonix");
     }
   });
 });

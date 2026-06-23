@@ -95,9 +95,9 @@ describe("FIX-313 — downstream agent presentation uses AgentSpec", () => {
       output_tokens: 0,
       model: null,
       story: "FIX-313",
-      agent: "qwen",
+      agent: "kimi",
     });
-    expect(row.join("\n")).toContain("qwen-coder-plus");
+    expect(row.join("\n")).toContain("kimi-k2");
   });
 
   it("cycle rows surface the tool summary without changing the native cost currency", () => {
@@ -136,24 +136,24 @@ describe("tierVisible", () => {
   });
 });
 
-describe("formatStream — claude stays equivalent (turning points, noise gone)", () => {
-  it("folds a claude stream into edit/story signals, dropping noise + tier C", () => {
+describe("formatStream — claude routes to the generic normalizer (pool narrowing)", () => {
+  // The pool was narrowed to kimi/pi/reasonix and claude has no AgentSpec, so
+  // `normalizerFor("claude")` now returns the GENERIC normalizer. A claude-shaped
+  // stream is therefore not parsed for tool_use/skill turning points — every
+  // non-banner line folds to a tier-C "say" that is hidden by default and only
+  // surfaced with --verbose.
+  it("folds a claude stream into tier-C say lines hidden by default", () => {
     const lines = [
-      JSON.stringify({ type: "system", subtype: "init" }), // dropped
-      JSON.stringify({ type: "assistant", message: { content: [{ type: "thinking", thinking: "x" }] } }), // dropped
-      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Read", input: { file_path: "a" } }] } }), // dropped
-      JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "let me think" }] } }), // tier C → hidden by default
-      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Edit", input: { file_path: "src/x.ts" } }] } }), // B
-      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Skill", input: { skill: "roll-build", args: "US-PORT-012" } }] } }), // A
+      JSON.stringify({ type: "system", subtype: "init" }),
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "thinking", thinking: "x" }] } }),
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Edit", input: { file_path: "src/x.ts" } }] } }),
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "let me think" }] } }),
     ];
-    const out = formatStream(lines, "claude");
-    expect(out.some((l) => l.includes("x.ts"))).toBe(true);
-    expect(out.some((l) => l.includes("US-PORT-012"))).toBe(true);
-    expect(out.some((l) => l.includes("let me think"))).toBe(false); // tier C hidden by default
-    expect(out.length).toBe(2); // edit + story only
+    expect(formatStream(lines, "claude").length).toBe(0); // every line is tier-C, hidden by default
+    expect(formatStream(lines, "claude", { verbose: true }).length).toBe(4); // verbose reveals all
   });
 
-  it("--verbose reveals the tier-C assistant prose", () => {
+  it("--verbose reveals the tier-C passthrough prose", () => {
     const lines = [JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "let me think" }] } })];
     expect(formatStream(lines, "claude").length).toBe(0);
     expect(formatStream(lines, "claude", { verbose: true }).length).toBe(1);
@@ -161,18 +161,6 @@ describe("formatStream — claude stays equivalent (turning points, noise gone)"
 });
 
 describe("formatStream — non-claude agents are NOT blank (the US-LOOP-077 fix)", () => {
-  it("codex plain text yields real signals (test/edit/tool) by default tier", () => {
-    const lines = [
-      "✎ src/x.ts",
-      "$ pnpm test",
-      "FAIL  test/x.test.ts:7",
-    ];
-    const out = formatStream(lines, "codex");
-    expect(out.length).toBe(3); // edit (B) + tool (B) + test-fail (A) — none dropped
-    expect(out.some((l) => l.includes("x.ts"))).toBe(true);
-    expect(out.some((l) => l.includes("pnpm test"))).toBe(true);
-    expect(out.some((l) => l.includes("x.test.ts:7"))).toBe(true);
-  });
   it("a generic (kimi/pi) agent passes lines through only with --verbose (tier C)", () => {
     const lines = ["pi: thinking about the task", "pi: done"];
     expect(formatStream(lines, "pi").length).toBe(0); // tier C hidden by default
@@ -188,27 +176,30 @@ describe("formatStream — non-claude agents are NOT blank (the US-LOOP-077 fix)
 });
 
 describe("formatStream — resilience", () => {
-  it("a torn JSON line in a claude stream does not break the stream", () => {
+  it("a torn JSON line does not break the generic stream", () => {
+    // claude → generic normalizer now: a banner still surfaces (tier A) even
+    // when a torn JSON line precedes it; the torn line folds to a tier-C say
+    // that is hidden by default, and the stream never throws.
     const lines = [
-      '{"type":"assist', // torn
-      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Skill", input: { skill: "roll-fix", args: "FIX-1" } }] } }),
+      '{"type":"assist', // torn — tolerated, folds to tier-C say
+      "── cycle 20260613-3 · FIX-1 · agent kimi ──",
     ];
     const out = formatStream(lines, "claude");
-    expect(out.length).toBe(1);
+    expect(out.length).toBe(1); // only the tier-A banner is visible by default
     expect(out[0]).toContain("FIX-1");
   });
 });
 
 describe("E2E — `roll loop fmt` golden path (spawned binary, stdin→stdout)", () => {
-  it("folds a real claude cycle stream into a readable transcript via the pipe", () => {
+  it("a claude cycle surfaces the banner and hides tier-C noise via the pipe", () => {
+    // claude → generic normalizer now (no AgentSpec): the cycle banner is the
+    // only tier-A line, so it surfaces; the stream-json bodies fold to tier-C
+    // say lines that are hidden by default, so no raw JSON leaks downstream.
     const stream = [
       "── cycle 20260606-1 · US-PORT-012 · agent claude ──",
       JSON.stringify({ type: "system", subtype: "init" }),
       JSON.stringify({ type: "assistant", message: { content: [{ type: "thinking", thinking: "planning" }] } }),
-      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Read", input: { file_path: "x.ts" } }] } }),
       JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Edit", input: { file_path: "src/loop-fmt.ts" } }] } }),
-      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "git commit -m 'tcr: ship it'" } }] } }),
-      JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", is_error: false, content: "[loop/x abc1234] tcr: ship it" }] } }),
       JSON.stringify({ type: "result", subtype: "success", duration_ms: 12000, total_cost_usd: 0.05 }),
     ].join("\n") + "\n";
 
@@ -217,36 +208,29 @@ describe("E2E — `roll loop fmt` golden path (spawned binary, stdin→stdout)",
       encoding: "utf8",
       env: { ...process.env, NO_COLOR: "1", ROLL_LOOP_AGENT: "claude" },
     });
-    expect(out).toContain("US-PORT-012"); // cycle banner
-    expect(out).toContain("loop-fmt.ts"); // muted edit
-    expect(out).toContain("abc1234"); // tcr signal
-    expect(out).toContain("ship it");
-    expect(out).toContain("cycle done");
-    expect(out).not.toContain("planning"); // thinking suppressed
-    expect(out).not.toContain('"type"'); // no raw json leaked
+    expect(out).toContain("US-PORT-012"); // cycle banner (tier A) is visible
+    expect(out).not.toContain("planning"); // tier-C body hidden by default
+    expect(out).not.toContain('"type"'); // no raw json leaked by default
   });
 
-  it("a codex cycle is NOT blank through the pipe (ROLL_LOOP_AGENT=codex)", () => {
+  it("a claude cycle reveals its tier-C bodies under --verbose via the pipe", () => {
+    // The generic normalizer passes each non-banner line through as a clipped
+    // tier-C say (it does not parse stream-json fields), so --verbose surfaces
+    // the line text verbatim.
     const stream = [
-      "── cycle 20260613-2 · FIX-9 · agent codex ──",
-      "✎ src/foo.ts",
-      "$ pnpm test",
-      "FAIL  test/foo.test.ts:10  expected ok",
-      "[loop/c fee1234] tcr: fix foo",
-      "Merged PR #42",
+      "── cycle 20260613-2 · FIX-9 · agent claude ──",
+      "editing src/foo.ts",
+      "ran pnpm test",
     ].join("\n") + "\n";
 
-    const out = execFileSync("node", [CLI_BIN, "loop", "fmt"], {
+    const out = execFileSync("node", [CLI_BIN, "loop", "fmt", "--verbose"], {
       input: stream,
       encoding: "utf8",
-      env: { ...process.env, NO_COLOR: "1", ROLL_LOOP_AGENT: "codex" },
+      env: { ...process.env, NO_COLOR: "1", ROLL_LOOP_AGENT: "claude" },
     });
     expect(out).toContain("FIX-9"); // banner
-    expect(out).toContain("foo.ts"); // edit
-    expect(out).toContain("pnpm test"); // tool
-    expect(out).toContain("foo.test.ts:10"); // test fail
-    expect(out).toContain("fee1234"); // tcr
-    expect(out).toContain("#42"); // pr
-    expect(out.trim().split("\n").length).toBeGreaterThanOrEqual(5); // demonstrably not blank
+    expect(out).toContain("foo.ts"); // tier-C body now surfaced under --verbose
+    expect(out).toContain("pnpm test"); // tier-C body now surfaced under --verbose
+    expect(out.trim().split("\n").length).toBeGreaterThanOrEqual(3); // demonstrably not blank
   });
 });

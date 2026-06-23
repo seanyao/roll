@@ -23,24 +23,22 @@ import {
 } from "../src/index.js";
 
 describe("identity helpers", () => {
-  it("canonicalAgentName collapses antigravity/gemini → agy", () => {
-    expect(canonicalAgentName("antigravity")).toBe("agy");
-    expect(canonicalAgentName("gemini")).toBe("agy");
-    expect(canonicalAgentName("claude")).toBe("claude");
-    expect(canonicalAgentName("agy")).toBe("agy");
+  it("canonicalAgentName is a no-op (overseas aliases removed from the pool)", () => {
+    expect(canonicalAgentName("kimi")).toBe("kimi");
+    expect(canonicalAgentName("pi")).toBe("pi");
+    expect(canonicalAgentName("reasonix")).toBe("reasonix");
   });
 
-  it("agentDisplayName parenthesises agy only", () => {
-    expect(agentDisplayName("agy")).toBe("antigravity (agy)");
-    expect(agentDisplayName("antigravity")).toBe("antigravity (agy)");
-    expect(agentDisplayName("claude")).toBe("claude");
+  it("agentDisplayName returns the bare canonical token", () => {
+    expect(agentDisplayName("kimi")).toBe("kimi");
+    expect(agentDisplayName("pi")).toBe("pi");
+    expect(agentDisplayName("reasonix")).toBe("reasonix");
   });
 
-  it("agentBinNames mirrors the bash case arms", () => {
-    expect(agentBinNames("claude")).toEqual(["claude"]);
-    expect(agentBinNames("openai")).toEqual(["codex"]);
-    expect(agentBinNames("gemini")).toEqual(["agy", "gemini"]);
+  it("agentBinNames mirrors the bash case arms (pool: kimi/pi/reasonix + deepseek engine)", () => {
     expect(agentBinNames("kimi")).toEqual(["kimi-code", "kimi-cli", "kimi"]);
+    expect(agentBinNames("pi")).toEqual(["pi"]);
+    expect(agentBinNames("deepseek")).toEqual(["deepseek"]);
     expect(agentBinNames("reasonix")).toEqual(["reasonix"]);
     expect(agentBinNames("nope")).toBeNull();
   });
@@ -49,8 +47,10 @@ describe("identity helpers", () => {
     expect(agentIsKnown("deepseek")).toBe(false);
     expect(agentIsKnown("trae")).toBe(true);
     expect(agentIsKnown("cursor")).toBe(true);
-    expect(agentIsKnown("gemini")).toBe(true); // canonicalises to agy
-    expect(agentIsKnown("claude")).toBe(true);
+    expect(agentIsKnown("opencode")).toBe(true);
+    expect(agentIsKnown("openclaw")).toBe(true);
+    expect(agentIsKnown("kimi")).toBe(true);
+    expect(agentIsKnown("pi")).toBe(true);
     expect(agentIsKnown("reasonix")).toBe(true);
     expect(agentIsKnown("totally-made-up")).toBe(false);
   });
@@ -68,10 +68,16 @@ function makeEnv(over: Partial<AgentEnv> = {}): AgentEnv {
 
 describe("installed detection", () => {
   it("binary-name agents key on PATH", () => {
-    const env = makeEnv({ commandOnPath: (b) => b === "codex" });
-    expect(agentInstalledByName(env, "codex")).toBe(true);
-    expect(agentInstalledByName(env, "openai")).toBe(true);
-    expect(agentInstalledByName(env, "claude")).toBe(false);
+    const env = makeEnv({ commandOnPath: (b) => b === "pi" });
+    expect(agentInstalledByName(env, "pi")).toBe(true);
+    expect(agentInstalledByName(env, "kimi")).toBe(false);
+    expect(agentInstalledByName(env, "reasonix")).toBe(false);
+  });
+
+  it("kimi matches any of its candidate binaries", () => {
+    expect(agentInstalledByName(makeEnv({ commandOnPath: (b) => b === "kimi-code" }), "kimi")).toBe(true);
+    expect(agentInstalledByName(makeEnv({ commandOnPath: (b) => b === "kimi" }), "kimi")).toBe(true);
+    expect(agentInstalledByName(makeEnv(), "kimi")).toBe(false);
   });
 
   it("trae checks Application Support / .config", () => {
@@ -97,10 +103,12 @@ describe("installed detection", () => {
   });
 
   it("agentsInstalled keeps registry order; firstInstalled uses its own order", () => {
-    // pi + codex installed: agentsInstalled order is codex before pi.
-    const env = makeEnv({ commandOnPath: (b) => b === "pi" || b === "codex" });
-    expect(agentsInstalled(env)).toEqual(["codex", "pi"]);
-    expect(firstInstalledAgent(env)).toBe("codex");
+    // kimi + pi + reasonix installed: agentsInstalled follows AGENT_REGISTRY_NAMES
+    // order (kimi, pi, reasonix). firstInstalled scans FIRST_INSTALLED_ORDER and
+    // returns the first match (kimi).
+    const env = makeEnv({ commandOnPath: (b) => b === "pi" || b === "reasonix" || b === "kimi" });
+    expect(agentsInstalled(env)).toEqual(["kimi", "pi", "reasonix"]);
+    expect(firstInstalledAgent(env)).toBe("kimi");
   });
 
   it("firstInstalled scans deepseek (which agentsInstalled excludes)", () => {
@@ -161,10 +169,10 @@ describe("agentAvailable cache/probe decision", () => {
     expect(r.cacheWrite).toEqual({ checkedAt: 1000, status: "offline" });
   });
 
-  it("canonicalises before probing", () => {
+  it("probes the (canonical) name verbatim — no overseas alias collapse remains", () => {
     const seen: string[] = [];
-    agentAvailable("gemini", { now: () => 1, probe: (n) => (seen.push(n), true) });
-    expect(seen).toEqual(["agy"]);
+    agentAvailable("kimi", { now: () => 1, probe: (n) => (seen.push(n), true) });
+    expect(seen).toEqual(["kimi"]);
   });
 });
 

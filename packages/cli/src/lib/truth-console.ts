@@ -120,7 +120,7 @@ export interface TruthConsoleInput {
   cycles: CycleLedgerRow[];
   /** Agents on this machine (US-DOSSIER-014). */
   agents: AgentPanelRow[];
-  /** Release gate head + six-dimension consistency panel (US-DOSSIER-015). */
+  /** Release gate head + seven-dimension consistency panel (US-DOSSIER-015/FIX-391). */
   releasePanel: ReleasePanelVM;
   /** Pending delivery + shipped changelog + version history (US-DOSSIER-016). */
   releaseScope: ReleaseScopeVM;
@@ -1290,12 +1290,12 @@ function releaseTab(input: TruthConsoleInput): string {
     ? `Blocked — cannot release: ${failDims} dimension${failDims === 1 ? "" : "s"} failing`
     : anyDrift
       ? "Releasable — no failing dimension (warnings/unknowns noted below)"
-      : "Ready to release — all six dimensions reconciled";
+      : "Ready to release — all seven dimensions reconciled";
   const verdictZh = rp.blocking
     ? `不能发版 — ${failDims} 个维度未通过`
     : anyDrift
       ? "可发版 — 无失败维度（下方提示警告/未知）"
-      : "可以发版 — 六维全部对齐";
+      : "可以发版 — 七维全部对齐";
   const verdictLine =
     `<div data-truth="gate-verdict" data-blocking="${rp.blocking ? "1" : "0"}" style="display:flex;align-items:center;gap:12px;padding:14px 18px;background:${verdictColor}0d;border-bottom:1px solid ${C.hair};">` +
     `<span style="font-size:17px;line-height:1;flex:none;">${verdictMark}</span>` +
@@ -1337,27 +1337,16 @@ function releaseTab(input: TruthConsoleInput): string {
   };
 
   // All-pass collapses to one calm line; any drift shows the rows (offending
-  // dimensions expanded). The six names always stay enumerated when there's
+  // dimensions expanded). The seven names always stay enumerated when there's
   // anything to act on, so a fail is never hidden.
   const dimRows = anyDrift
     ? rp.dims.map(dimRow).join("")
     : `<div data-truth="gate-collapsed" style="display:flex;align-items:center;gap:10px;padding:13px 18px;border-top:1px solid ${C.hair};color:${C.sub};font-size:12.5px;">` +
       `<span style="width:8px;height:8px;border-radius:50%;background:${C.green};flex:none;"></span>` +
       `${bi(
-        "All six dimensions — code↔backlog · cards · docs · tests · bilingual · site — reconcile. Nothing to fix.",
-        "六个维度——代码↔待办 · 卡片 · 文档 · 测试 · 双语 · 站点——全部对齐，无需处理。",
+        "All seven dimensions — code↔backlog · cards · docs · tests · bilingual · site · truth-live — reconcile. Nothing to fix.",
+        "七个维度——代码↔待办 · 卡片 · 文档 · 测试 · 双语 · 站点 · 真相活体——全部对齐，无需处理。",
       )}</div>`;
-
-  const proposedRow =
-    `<div class="rel-dim rel-dim-proposed" data-dim="data" style="display:grid;grid-template-columns:215px 1fr 200px;gap:14px;align-items:center;padding:11px 18px;border-top:1px dashed #c8ced6;opacity:.78;">` +
-    `<span style="display:flex;align-items:center;gap:9px;min-width:0;">` +
-    `<span style="width:8px;height:8px;border-radius:50%;border:1px dashed #c8ced6;background:transparent;flex:none;"></span>` +
-    `<span style="${MONO}font-size:12.5px;font-weight:600;color:${C.sub};white-space:nowrap;">⑦ ${bi("data", "数据")}</span>` +
-    `<span style="${MONO}font-size:9px;letter-spacing:.05em;text-transform:uppercase;padding:2px 5px;border-radius:4px;border:1px dashed #c8ced6;color:${C.faint};flex:none;">${bi("proposed", "提案")}</span></span>` +
-    `<span style="min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span style="font-size:12.5px;color:#6b7488;">${bi("schema contracts · the same number equal everywhere", "schema 契约 · 同一个数处处相等")}</span>` +
-    `<a href="#backlog/q:FIX-248" style="${MONO}font-size:10.5px;color:${C.blue};border:1px solid ${C.blue}55;border-radius:5px;padding:2px 7px;text-decoration:none;">FIX-248</a>` +
-    `<a href="#backlog/q:FIX-249" style="${MONO}font-size:10.5px;color:${C.blue};border:1px solid ${C.blue}55;border-radius:5px;padding:2px 7px;text-decoration:none;">FIX-249</a></span>` +
-    `<span style="${MONO}font-size:11.5px;color:${C.faint};text-align:right;">—</span></div>`;
 
   const totalRow =
     `<div style="display:grid;grid-template-columns:215px 1fr 200px;gap:14px;align-items:center;padding:11px 18px;border-top:1px solid ${C.hair};background:#fbfcfe;">` +
@@ -1370,22 +1359,22 @@ function releaseTab(input: TruthConsoleInput): string {
     kicker(bi("It says it will ship — the gate decides", "说要发——闸门说了算")) +
     `<h1 style="margin:10px 0 0;font-size:28px;line-height:1.1;font-weight:700;letter-spacing:-.02em;color:${C.ink};">${bi("Release", "发版")}</h1>` +
     `<p style="margin:10px 0 0;max-width:660px;font-size:14.5px;line-height:1.55;color:${C.sub};">${bi(
-      "Why can't it ship? Read it, don't guess it: six reconciled dimensions, every drift with an address.",
-      "为什么发不了版？读出来，不用猜：六个对账维度，每处漂移都有地址。",
+      "Why can't it ship? Read it, don't guess it: seven reconciled dimensions, every drift with an address.",
+      "为什么发不了版？读出来，不用猜：七个对账维度，每处漂移都有地址。",
     )}</p></div>` +
     gateHead +
     `<div style="display:flex;align-items:baseline;gap:12px;margin:26px 0 12px;flex-wrap:wrap;">` +
     `<span style="${MONO}font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${C.sub};font-weight:600;white-space:nowrap;">${bi("Consistency gate", "一致性闸门")}</span>` +
-    `<span style="${MONO}font-size:11.5px;color:${C.faint};">${bi("six dimensions reconciled against truth anchors", "六维对真相锚点对账")}${rp.generatedAt !== undefined ? ` · ${shortTs(rp.generatedAt)}` : ""}</span>` +
+    `<span style="${MONO}font-size:11.5px;color:${C.faint};">${bi("seven dimensions reconciled against truth anchors", "七维对真相锚点对账")}${rp.generatedAt !== undefined ? ` · ${shortTs(rp.generatedAt)}` : ""}</span>` +
     `<span style="flex:1;height:1px;background:#dfe4ec;min-width:16px;"></span>` +
     `<code class="copy-chip" data-copy="roll release --gate-check" style="${MONO}font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid ${C.line};color:${C.blue};background:${C.card};cursor:pointer;">roll release --gate-check</code></div>` +
     `<section style="border:1px solid ${C.line};border-radius:12px;background:${C.card};overflow:hidden;margin:0 0 8px;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
     verdictLine +
     dimRows +
-    // The proposed ⑦ row + the strict-equality total row are detail; they ride
-    // along only when there is something to act on, so an all-pass panel stays
-    // the calm verdict + one collapsed line (FIX-372).
-    (anyDrift ? proposedRow + totalRow : "") +
+    // The strict-equality total row is detail; it rides along only when there is
+    // something to act on, so an all-pass panel stays the calm verdict + one
+    // collapsed line (FIX-372).
+    (anyDrift ? totalRow : "") +
     `</section>` +
     releaseScopeSections(input)
   );

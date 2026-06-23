@@ -1,13 +1,16 @@
 # Consistency — the release gate inside `roll release`
 
-Six dimensions are continuously reconciled against truth anchors. A backlog
+Seven dimensions are continuously reconciled against truth anchors. A backlog
 `✅ Done` row is a claim; merge evidence on `main`, acceptance reports, terminal
 cycle events, and release-gate events are the facts. The dimensions are:
 ① code ↔ backlog claims · ② cards (every live backlog row owns
 `features/<epic>/<ID>/spec.md`; evidence links never dangle; card-era delivered
 stories with ACs own a `latest/<ID>-report.html`; pre-card-era Done rows are
 counted, not failed) · ③ docs (changelog / features / guide / README / --help)
-· ④ tests · ⑤ bilingual parity (guide en↔zh + i18n keys) · ⑥ site.
+· ④ tests · ⑤ bilingual parity (guide en↔zh + i18n keys) · ⑥ site ·
+⑦ truth-live (`ensureDeliveriesFresh` + `queryStoryDelivery` must prove each
+release-delta story is actually delivered, with PR refs matching the Done row
+when present).
 
 ```bash
 roll release              # the ONE release flow — the gate runs inside it
@@ -38,6 +41,12 @@ asking you to enable the setting or merge the PR manually — never a silent han
 The acceptance-evidence gate is `hard` by default. `loop_safety.attest_gate: soft`
 is an explicit project policy for migration windows; consistency still reports
 missing or dangling evidence so the gap cannot disappear silently.
+
+The truth-live dimension is the anti-false-Done guard. It first rebuilds the
+delivery projection from `runs.jsonl` plus first-parent `main` merge commits,
+then calls `queryStoryDelivery()` for every story id found in the release delta.
+Backlog markdown is only the human claim; `deliveries.jsonl` is a rebuildable
+cache; git merges and run events are the facts.
 
 ## Doc alignment boundary
 

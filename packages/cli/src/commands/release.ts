@@ -46,7 +46,7 @@ function label(lang: Lang, key: string, ...args: ReadonlyArray<string | number>)
 
 // US-DOSSIER-036: `consistency` is RESTORED as a public sub-route of `roll
 // release` — `roll release consistency check [--json]` prints the verdict-first
-// six-dimension table (the web gate panel's twin). The other old sub-surfaces
+// seven-dimension table (the web gate panel's twin). The other old sub-surfaces
 // (ship/waiver/changelog/tag/publish) stay removed: the release transaction is
 // one command. `consistency` is intentionally NOT in this set.
 const REMOVED_ROUTES = new Set(["ship", "waiver", "changelog", "tag", "publish"]);
@@ -666,7 +666,7 @@ export async function releaseCommand(args: string[], depsOverride?: ReleaseFlowD
   const lang = resolveLang({ rollLang: process.env["ROLL_LANG"], lcAll: process.env["LC_ALL"], lang: process.env["LANG"] });
 
   // US-DOSSIER-036: `roll release consistency check [--json]` — the public
-  // verdict-first six-dimension table, the terminal twin of the web gate panel.
+  // verdict-first seven-dimension table, the terminal twin of the web gate panel.
   // Reads the SAME runConsistencyCheck computation the gate runs (renderMode
   // "table"); any f>0 dimension fails → exit non-zero (AC4). Detected BEFORE the
   // top-level --help so `roll release consistency [check] --help` lands on the

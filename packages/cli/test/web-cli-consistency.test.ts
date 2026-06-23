@@ -287,7 +287,7 @@ describe("US-DOSSIER-038 — web ↔ CLI: one number on every surface / 同一�
     for (const raw of web.split('data-dim="').slice(1)) {
       const key = raw.slice(0, raw.indexOf('"'));
       // The proposed ⑦ data row is `data-dim="data"` and carries no f/w/? span —
-      // only the six reconciled gate dimensions tally here.
+      // only the reconciled gate dimensions tally here.
       if (!dimSet.has(key)) continue;
       const block = raw.slice(0, raw.indexOf("data-dim=") === -1 ? raw.length : raw.indexOf("data-dim="));
       const f = intAfter(block, /f:(\d+)</);
@@ -299,7 +299,7 @@ describe("US-DOSSIER-038 — web ↔ CLI: one number on every surface / 同一�
       webTotal.unknown += u;
     }
 
-    // The web panel carries exactly the six dimensions, in canonical order.
+    // The web panel carries exactly the gate dimensions, in canonical order.
     expect(Object.keys(perDimWeb)).toEqual([...CONSISTENCY_DIMENSIONS]);
 
     // The CLI's audit summary is the f/w/? of the SAME report (grandfathered out).

@@ -123,7 +123,7 @@ describe("ported routing (no bash fallback)", () => {
       expect(rr.stderr).toContain("removed");
     }
     // US-DOSSIER-036: `roll release consistency check` IS a public command —
-    // the verdict-first six-dimension table (NOT a removed route).
+    // the verdict-first seven-dimension table (NOT a removed route).
     const cc = await captureDispatch(["release", "consistency", "check"]);
     expect(cc.stderr).not.toContain("removed");
     expect(cc.stdout).toMatch(/① code ↔ backlog/);

@@ -67,7 +67,7 @@ Roll 运行在三个自主层上：
 
 `roll index` 渲染 `index.html`，即交付档案。上面每个数字都读自同一份真相快照，
 因此 web 面与 CLI 打印的聚合一致（`roll cast` ≡ Casting 网格、`roll doctor skills`
-≡ Skills 页、`roll release consistency` ≡ 六维面板、`roll status` ≡ Story 光谱）。
+≡ Skills 页、`roll release consistency` ≡ 七维面板、`roll status` ≡ Story 光谱）。
 一处计算，两副面孔。
 
 控制台的信息架构：

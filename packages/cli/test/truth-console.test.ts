@@ -154,6 +154,7 @@ const RELEASE_PANEL = {
     { key: "tests" as const, tally: { fail: 0, warn: 0, unknown: 0, subjects: [] } },
     { key: "bilingual" as const, tally: { fail: 0, warn: 0, unknown: 0, subjects: [] } },
     { key: "site" as const, tally: { fail: 0, warn: 0, unknown: 0, subjects: [] } },
+    { key: "truth-live" as const, tally: { fail: 0, warn: 0, unknown: 0, subjects: [] } },
   ],
   total: { fail: 1, warn: 3, unknown: 4 },
   blocking: true,
@@ -269,8 +270,8 @@ function renderWith(over: Record<string, unknown>): string {
   } as Parameters<typeof renderTruthConsole>[0]);
 }
 
-/** All six dimensions clean — the all-pass fixture for the collapsed gate line. */
-const PASS_DIMS = (["code-backlog", "cards", "docs", "tests", "bilingual", "site"] as const).map((key) => ({
+/** All seven dimensions clean — the all-pass fixture for the collapsed gate line. */
+const PASS_DIMS = (["code-backlog", "cards", "docs", "tests", "bilingual", "site", "truth-live"] as const).map((key) => ({
   key,
   tally: { fail: 0, warn: 0, unknown: 0, subjects: [] as string[] },
 }));
@@ -1030,11 +1031,11 @@ describe("release tab — US-DOSSIER-015", () => {
     expect(html).toContain("pending");
   });
 
-  it("AC2: six dimension rows + the strict-equality total row", () => {
-    for (const k of ["code-backlog", "cards", "docs", "tests", "bilingual", "site"]) expect(html).toContain(`data-dim="${k}"`);
+  it("AC2: seven dimension rows + the strict-equality total row", () => {
+    for (const k of ["code-backlog", "cards", "docs", "tests", "bilingual", "site", "truth-live"]) expect(html).toContain(`data-dim="${k}"`);
     expect(html).toContain('data-truth="gate-total"');
     expect(html).toContain("① ");
-    expect(html).toContain("⑥ ");
+    expect(html).toContain("⑦ ");
   });
 
   it("AC3: a failing dimension shows the blocking banner", () => {
@@ -1048,11 +1049,10 @@ describe("release tab — US-DOSSIER-015", () => {
     expect(html).toContain("q:"); // hash query prefilter script
   });
 
-  it("AC5: the proposed data dimension renders dashed with FIX-248/249 case links", () => {
-    expect(html).toContain('data-dim="data"');
-    expect(html).toContain("proposed");
-    expect(html).toContain("#backlog/q:FIX-248");
-    expect(html).toContain("#backlog/q:FIX-249");
+  it("AC5: the truth-live dimension renders as the real seventh gate", () => {
+    expect(html).toContain('data-dim="truth-live"');
+    expect(html).toContain("truth live");
+    expect(html).toContain("真相活体");
   });
 
   it("AC6: the copyable consistency command chip is present", () => {

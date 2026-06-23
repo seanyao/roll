@@ -1,4 +1,5 @@
 /** Cycle contracts (BC2/BC8, I11/I12). */
+import type { Rig } from "./agent.js";
 import type { ToolCost } from "./tool.js";
 
 export type CyclePhase =
@@ -17,6 +18,7 @@ export type LegacyCycleOutcome = "delivered" | "built" | "failed" | "blocked" | 
 /** @deprecated Use TerminalOutcome; keep only for legacy read-side callers. */
 export type CycleOutcome = LegacyCycleOutcome;
 
+/** A cycle's cost record — `agent` × `model` form a {@link Rig} (US-AGENT-047 AC5). */
 export interface CycleCost {
   cycleId: string;
   agent: string;

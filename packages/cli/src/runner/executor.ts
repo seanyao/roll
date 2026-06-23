@@ -100,6 +100,7 @@ import {
   present,
   type CycleCost,
   type FactOr,
+  type Rig,
   type RollEvent,
   type TerminalAttestFact,
   type TerminalEvent,
@@ -310,9 +311,10 @@ export interface MetadataPort {
   commit(projectCwd: string, message: string): Promise<MetadataCommitResult>;
 }
 
-/** Routing facet — resolve tier→agent for a story (router.ts). */
+/** Routing facet — resolve tier→agent for a story (router.ts).
+ *  Returns a {@link Rig} (agent × model) — the smallest assignable unit (US-AGENT-047 AC5). */
 export interface RoutePort {
-  resolve(storyId: string, estMin: number | undefined): { agent: string; model: string };
+  resolve(storyId: string, estMin: number | undefined): Rig;
 }
 
 /** Evidence frame facet — opens `.roll/features/<epic>/<ID>/<run-id>/`. */
@@ -3889,10 +3891,10 @@ export function nodePorts(opts: {
             // Thread the slot's NATIVE --model through to the spawn; absent ⇒ ""
             // (the orchestrator's `ctx.model !== ""` guard then omits --model and
             // the agent uses its own default).
-            return { agent: dec.agent, model: dec.model ?? "" };
+            return { agent: dec.agent as Rig["agent"], model: dec.model ?? "" };
           },
         }
-      : { resolve: () => ({ agent: "claude", model: "" }) },
+      : { resolve: () => ({ agent: "claude" as Rig["agent"], model: "" }) },
     evidence: {
       openFrame(projectCwd, storyId, runId) {
         return openEvidenceFrame({ runDir: join(cardArchiveDir(projectCwd, storyId), runId) }).runDir;

@@ -1,12 +1,13 @@
 /** Policy contracts (BC6) — human intent, read and obeyed by loops. */
-import type { AgentId, ModelId } from "./agent.js";
+import type { AgentId, ModelId, Rig } from "./agent.js";
 
+/** A routing rule maps story characteristics → a resolved Rig (US-AGENT-047 AC5). */
 export interface RoutingRule {
   match: { level?: string; type?: string };
   agent: AgentId;
   model: ModelId;
   /** Availability fallback slot (pre-spawn only — never a failure-retry chain, I6). */
-  fallback?: { agent: AgentId; model: ModelId };
+  fallback?: Rig;
   rationale?: string;
 }
 

@@ -298,7 +298,7 @@ export function lineModelValue(line: string): string | undefined {
 
 /** A resolved slot: the agent token, plus an optional NATIVE `--model` argument
  *  (folds any `:thinking` effort suffix; absent ⇒ spawn with the agent's own
- *  default model). */
+ *  default model). The agent × model pair is a {@link Rig} (US-AGENT-047 AC5). */
 export interface SlotConfig {
   agent: string;
   model?: string;

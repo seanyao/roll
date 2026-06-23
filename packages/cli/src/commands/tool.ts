@@ -1,17 +1,19 @@
 import { join } from "node:path";
-import { ToolPolicyEngine } from "@roll/core";
-import type { ToolDeclaration, ToolSandbox } from "@roll/spec";
+import { deriveToolReadiness, ToolPolicyEngine, type ToolRequirementResolver } from "@roll/core";
+import type { ToolDeclaration, ToolReadinessStatus, ToolSandbox } from "@roll/spec";
 import { BashTool, browserTools, fsTools, gitTools, githubTools, mcpTools, networkTools } from "@roll/infra";
+import { resolveRequirement } from "../lib/external-tools.js";
 
 export const TOOL_USAGE =
   "Usage: roll tool status\n" +
-  "  Show registered tools and their effective policy state.\n" +
-  "展示已注册工具及其有效 policy 状态。\n";
+  "  Show registered tools, effective policy state, and requirement readiness.\n" +
+  "展示已注册工具、有效 policy 状态与 requirement 就绪度。\n";
 
 interface ToolRow {
   id: string;
   kind: string;
   enabled: boolean;
+  readiness: ToolReadinessStatus;
   timeout: string;
   limit: string;
   sandbox: string;
@@ -32,15 +34,17 @@ export async function toolCommand(args: string[]): Promise<number> {
   return 0;
 }
 
-export async function collectToolRows(projectRoot: string): Promise<ToolRow[]> {
+export async function collectToolRows(projectRoot: string, requirementResolver: ToolRequirementResolver = resolveRequirement): Promise<ToolRow[]> {
   const policy = new ToolPolicyEngine({ policyPath: join(projectRoot, ".roll", "policy.yaml") });
   const rows: ToolRow[] = [];
   for (const declaration of toolDeclarations(projectRoot)) {
     const effective = await policy.resolve(declaration.id, declaration.defaults);
+    const readiness = deriveToolReadiness(declaration, requirementResolver);
     rows.push({
       id: String(declaration.id),
       kind: declaration.kind,
       enabled: effective.enabled,
+      readiness: readiness.status,
       timeout: effective.timeoutMs === undefined ? "-" : String(effective.timeoutMs),
       limit: effective.maxInvocationsPerCycle === undefined ? "-" : String(effective.maxInvocationsPerCycle),
       sandbox: renderSandbox(effective.sandbox),
@@ -50,12 +54,13 @@ export async function collectToolRows(projectRoot: string): Promise<ToolRow[]> {
 }
 
 export function renderToolRows(rows: readonly ToolRow[]): string {
-  const out = ["tool              kind        enabled  timeout  limit  sandbox"];
+  const out = ["tool              kind        enabled  readiness    timeout  limit  sandbox"];
   for (const row of rows) {
     out.push([
       pad(row.id, 19),
       pad(row.kind, 12),
       pad(row.enabled ? "yes" : "no", 9),
+      pad(row.readiness, 13),
       pad(row.timeout, 9),
       pad(row.limit, 7),
       row.sandbox,

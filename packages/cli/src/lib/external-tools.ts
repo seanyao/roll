@@ -139,12 +139,18 @@ export function resolveRequirement(requirement: ToolRequirement, deps: ExternalT
   if (requirement.kind === "executable" && requirement.name === "system-shell") {
     return deps.commandOnPath("sh") || deps.commandOnPath("bash") || (deps.env["SHELL"] ?? "").trim() !== ""
       ? { requirement, status: "ok", detail: "A system shell is available." }
-      : { requirement, status: "missing", detail: "No system shell was found." };
+      : {
+          requirement,
+          status: "missing",
+          detail: "No system shell was found.",
+          repair: { command: "install sh or bash and ensure it is on PATH", description: "Install a POSIX-compatible shell." },
+        };
   }
   if (requirement.kind === "executable") {
+    const repair = executableRepair(requirement.name);
     return deps.commandOnPath(requirement.name)
       ? { requirement, status: "ok", detail: `${requirement.name} is on PATH.` }
-      : { requirement, status: "missing", detail: `${requirement.name} is not on PATH.` };
+      : { requirement, status: "missing", detail: `${requirement.name} is not on PATH.`, ...(repair !== undefined ? { repair } : {}) };
   }
   if (requirement.kind === "env") {
     return (deps.env[requirement.name] ?? "").trim() !== ""
@@ -156,6 +162,13 @@ export function resolveRequirement(requirement: ToolRequirement, deps: ExternalT
     status: "stale",
     detail: `No live detector is registered for service requirement ${requirement.name}.`,
   };
+}
+
+function executableRepair(name: string): { command: string; description?: string } | undefined {
+  if (name === "git") return { command: "brew install git", description: "Install Git and ensure it is on PATH." };
+  if (name === "gh") return { command: "brew install gh", description: "Install the GitHub CLI and authenticate with gh auth login." };
+  if (name === "npx") return { command: "npm install -g npm", description: "Install npm/npx." };
+  return undefined;
 }
 
 function toExternalRequirementState(decl: ExternalRequirementDeclaration, resolution: ToolRequirementResolution): ExternalRequirementState {

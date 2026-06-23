@@ -36,6 +36,16 @@ export type ToolRequirementResolution = {
   authorize?: ToolRequirementAuthorization;
 };
 
+export type ToolReadinessStatus = "available" | "degraded" | "unavailable";
+
+export type ToolReadiness = {
+  toolId: ToolId;
+  status: ToolReadinessStatus;
+  requirements: readonly ToolRequirementResolution[];
+  detail?: string;
+  repairCommands?: readonly string[];
+};
+
 export type ToolSandbox = {
   allowedPaths?: readonly string[];
   blockedCommands?: readonly string[];

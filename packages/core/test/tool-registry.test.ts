@@ -6,6 +6,7 @@ import type {
   ToolId,
   ToolInvocation,
   ToolPolicy,
+  ToolRequirementResolution,
   ToolResult,
 } from "@roll/spec";
 import { describe, expect, it } from "vitest";
@@ -49,6 +50,10 @@ function policyEngine(policy: Partial<ToolPolicy> = {}): ToolRegistryPolicyEngin
       ...policy,
     }),
   };
+}
+
+function resolution(status: ToolRequirementResolution["status"], detail = status): ToolRequirementResolution {
+  return { requirement: { kind: "executable", name: "git", optional: false }, status, detail };
 }
 
 function sink(): ToolRegistryEventSink & { types: string[]; events: ToolEvent[] } {
@@ -254,6 +259,48 @@ describe("US-TOOL-002 ToolRegistry", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe("policy_denied");
     expect(t.executes).toBe(0);
+  });
+
+  it("gates execution when a non-optional requirement is missing", async () => {
+    const t = tool({ declaration: { ...declaration, requirements: [{ kind: "executable", name: "git", optional: false }] } });
+    const registry = new ToolRegistry({
+      deps: deps(),
+      policyEngine: policyEngine(),
+      requirementResolver: () => resolution("missing", "git is not on PATH."),
+    });
+    registry.register(t);
+
+    const result = await registry.invoke(TOOL_ID, request("x"));
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("policy_denied");
+      expect(result.error.message).toContain("missing required tool requirement");
+      expect(result.error.message).toContain("git is not on PATH.");
+    }
+    expect(t.initCount).toBe(0);
+    expect(t.executes).toBe(0);
+  });
+
+  it("warns but executes when only optional requirements are missing", async () => {
+    const t = tool({ declaration: { ...declaration, requirements: [{ kind: "executable", name: "playwright-chromium", optional: true }] } });
+    const registry = new ToolRegistry({
+      deps: deps(),
+      policyEngine: policyEngine(),
+      requirementResolver: () => ({
+        requirement: { kind: "executable", name: "playwright-chromium", optional: true },
+        status: "missing",
+        detail: "Chromium missing.",
+        repair: { command: "npx playwright install chromium" },
+      }),
+    });
+    registry.register(t);
+
+    const result = await registry.invoke(TOOL_ID, request("x"));
+
+    expect(result.ok).toBe(true);
+    expect(result.warnings).toEqual(["optional requirement playwright-chromium is missing: Chromium missing. fix: npx playwright install chromium"]);
+    expect(t.executes).toBe(1);
   });
 
   it("enforces maxInvocationsPerCycle with an atomic check before async execution", async () => {

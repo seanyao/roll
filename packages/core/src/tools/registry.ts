@@ -8,8 +8,11 @@ import type {
   ToolInvocation,
   ToolMeta,
   ToolPolicy,
+  ToolRequirement,
+  ToolRequirementResolution,
   ToolResult,
 } from "@roll/spec";
+import { deriveToolReadiness, type ToolRequirementResolver } from "./readiness.js";
 
 export interface Tool<I = unknown, O = unknown> {
   readonly declaration: ToolDeclaration;
@@ -35,6 +38,7 @@ export interface ToolInvokeRequest<I = unknown> {
 export interface ToolRegistryOptions {
   deps: ToolDeps;
   policyEngine: ToolRegistryPolicyEngine;
+  requirementResolver?: ToolRequirementResolver;
   events?: ToolRegistryEventSink;
   currency?: string;
 }
@@ -107,11 +111,6 @@ export class ToolRegistry {
       return failed(toolId, request, error("not_found", `tool not found: ${toolId}`), startedAt) as ToolResult<O>;
     }
 
-    const initResult = await this.ensureInitialized(state);
-    if (!initResult.ok) {
-      return failed(toolId, request, initResult.error, startedAt, this.options.deps.now()) as ToolResult<O>;
-    }
-
     let policy: ToolPolicy;
     try {
       policy = await this.options.policyEngine.resolve(toolId, state.tool.declaration.defaults);
@@ -121,6 +120,28 @@ export class ToolRegistry {
 
     if (!policy.enabled) {
       return failed(toolId, request, error("policy_denied", `tool disabled by policy: ${toolId}`), startedAt, this.options.deps.now()) as ToolResult<O>;
+    }
+
+    const readiness = this.requirementReadiness(state.tool.declaration);
+    if (readiness?.status === "unavailable") {
+      const detail = readiness.detail === undefined ? "" : `: ${readiness.detail}`;
+      const fix = readiness.repairCommands?.length ? ` fix: ${readiness.repairCommands.join("; ")}` : "";
+      return failed(
+        toolId,
+        request,
+        error("policy_denied", `missing required tool requirement for ${toolId}${detail}${fix}`),
+        startedAt,
+        this.options.deps.now(),
+      ) as ToolResult<O>;
+    }
+    const requirementWarnings =
+      readiness?.status === "degraded"
+        ? readiness.requirements.filter((resolution) => resolution.requirement.optional === true && resolution.status !== "ok").map(formatOptionalRequirementWarning)
+        : [];
+
+    const initResult = await this.ensureInitialized(state);
+    if (!initResult.ok) {
+      return failed(toolId, request, initResult.error, startedAt, this.options.deps.now()) as ToolResult<O>;
     }
 
     if (!this.reserveBudget(toolId, policy)) {
@@ -148,18 +169,19 @@ export class ToolRegistry {
     }
 
     const result = await this.executeWithRetry<I, O>(state.tool, invocation, request, policy);
+    const resultWithWarnings = appendWarnings(result, requirementWarnings);
     if (emitEvents || !result.ok) {
       await this.emit({
         type: "tool:result",
         cycleId: request.caller.cycleId,
         invocationId: request.invocationId,
         toolId,
-        result: sanitizeResult(result),
+        result: sanitizeResult(resultWithWarnings),
         ts: this.options.deps.now(),
       } as ToolEvent);
     }
-    this.accumulateCost(toolId, request.input, result);
-    return result;
+    this.accumulateCost(toolId, request.input, resultWithWarnings);
+    return resultWithWarnings;
   }
 
   snapshotCosts(): ToolCost[] {
@@ -201,6 +223,11 @@ export class ToolRegistry {
     } catch (cause) {
       return { ok: false, error: error("init_failed", "tool init failed", true, cause) };
     }
+  }
+
+  private requirementReadiness(declaration: ToolDeclaration): ReturnType<typeof deriveToolReadiness> | undefined {
+    if (this.options.requirementResolver === undefined) return undefined;
+    return deriveToolReadiness(declaration, this.options.requirementResolver);
   }
 
   private reserveBudget(toolId: ToolId, policy: ToolPolicy): boolean {
@@ -279,4 +306,23 @@ export class ToolRegistry {
 function sanitizeResult(result: ToolResult<unknown>): SanitizedToolResult {
   if (result.ok) return { ok: true, meta: result.meta };
   return { ok: false, errorCode: result.error.code, meta: result.meta };
+}
+
+function formatRequirement(requirement: ToolRequirement): string {
+  if (requirement.kind === "env") return `${requirement.name} (env)`;
+  if (requirement.kind === "service") return `${requirement.name} (service)`;
+  return requirement.name;
+}
+
+function formatOptionalRequirementWarning(resolution: ToolRequirementResolution): string {
+  const fix = resolution.repair?.command === undefined ? "" : ` fix: ${resolution.repair.command}`;
+  return `optional requirement ${formatRequirement(resolution.requirement)} is ${resolution.status}: ${resolution.detail}${fix}`;
+}
+
+function appendWarnings<T>(result: ToolResult<T>, warnings: readonly string[]): ToolResult<T> {
+  if (warnings.length === 0) return result;
+  return {
+    ...result,
+    warnings: [...(result.warnings ?? []), ...warnings],
+  };
 }

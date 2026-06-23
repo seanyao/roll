@@ -739,11 +739,11 @@ describe("retryPeerConsult — FIX-293 follow-up: same-type SEPARATE-SESSION fal
     expect(r.sameTypeFallback).toBe(false);
   });
 
-  it("FIX-328: IDE/config-only installed agents are not retried as peer reviewers", async () => {
+  it("FIX-328: profile-less installed agents are not retried as peer reviewers", async () => {
     const { rt } = project(null);
     const spawned: string[] = [];
     const { d } = retryDeps({
-      installed: ["claude", "cursor", "trae"], // cursor/trae are installed config targets, not spawnable reviewers
+      installed: ["claude", "made-up-a", "made-up-b"], // profile-less names are not spawnable reviewers
       workingAgent: "claude",
       reviewPeer: async (peer) => {
         spawned.push(peer);

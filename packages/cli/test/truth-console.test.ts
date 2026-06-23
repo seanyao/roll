@@ -60,7 +60,7 @@ const AGENTS = [
     syncStale: true, setupCmd: "roll setup -f kimi",
   },
   {
-    name: "trae", display: "trae", runner: "trae CLI", version: "—", installed: false,
+    name: "pi", display: "pi", runner: "pi CLI", version: "—", installed: false,
     cycles72h: 0, costUsd72h: 0, files: [], syncStale: false,
   },
 ];

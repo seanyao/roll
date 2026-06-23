@@ -352,8 +352,6 @@ function interactiveAgentCommand(agent: string, prompt: string): { bin: string; 
       return { bin: "pi", args: [prompt] };
     case "reasonix":
       return { bin: "reasonix", args: [prompt] };
-    case "opencode":
-      return { bin: "opencode", args: [prompt] };
     default:
       return null;
   }

@@ -78,11 +78,6 @@ export function agentIsKnown(name: string): boolean {
   switch (c) {
     case "deepseek":
       return false;
-    case "trae":
-    case "opencode":
-    case "cursor":
-    case "openclaw":
-      return true;
   }
   return agentBinNames(c) !== null;
 }
@@ -107,11 +102,6 @@ export interface AgentEnv {
   home: string;
 }
 
-/** POSIX-join (the registry only ever builds HOME-relative paths). */
-function joinPath(...parts: string[]): string {
-  return parts.join("/");
-}
-
 /**
  * Detect whether an agent (by name) is usable on this machine. For CLI-only
  * agents this is "binary on PATH"; GUI/bundled agents keep their special-case
@@ -120,20 +110,6 @@ function joinPath(...parts: string[]): string {
  * `_agent_installed_by_name` (note bash does NOT canonicalise its arg).
  */
 export function agentInstalledByName(env: AgentEnv, agent: string, dir?: string): boolean {
-  const home = env.home;
-  switch (agent) {
-    case "trae":
-      return (
-        env.dirExists(joinPath(home, "Library", "Application Support", "Trae")) ||
-        env.dirExists(joinPath(home, ".config", "Trae"))
-      );
-    case "opencode":
-      return env.fileExecutable(joinPath(home, ".opencode", "bin", "opencode"));
-    case "cursor":
-      return env.commandOnPath("cursor") || env.dirExists(joinPath(home, ".cursor"));
-    case "openclaw":
-      return env.dirExists(joinPath(home, ".openclaw", "workspace"));
-  }
   const bins = agentBinNames(agent);
   if (bins !== null) return bins.some((b) => env.commandOnPath(b));
   // Unknown agent — fall back to dir presence so user-added entries still work.
@@ -145,15 +121,7 @@ export function agentInstalledByName(env: AgentEnv, agent: string, dir?: string)
  * declares (the order `_agents_installed` scans). `deepseek` is deliberately
  * absent (a pi-loaded model, not a routable agent).
  */
-export const AGENT_REGISTRY_NAMES = [
-  "kimi",
-  "pi",
-  "reasonix",
-  "cursor",
-  "opencode",
-  "trae",
-  "openclaw",
-] as const;
+export const AGENT_REGISTRY_NAMES = ["kimi", "pi", "reasonix"] as const;
 
 /** Agents actually installed on this machine, in registry order. Mirrors
  *  `_agents_installed`. */
@@ -168,16 +136,7 @@ export function agentsInstalled(env: AgentEnv): string[] {
  * from `_agents_installed`. Returns `undefined` when none are installed.
  * (Pool narrowed to 国产/开源 agents — kimi/pi/reasonix; overseas agents removed.)
  */
-const FIRST_INSTALLED_ORDER = [
-  "kimi",
-  "deepseek",
-  "pi",
-  "reasonix",
-  "cursor",
-  "opencode",
-  "trae",
-  "openclaw",
-] as const;
+const FIRST_INSTALLED_ORDER = ["kimi", "deepseek", "pi", "reasonix"] as const;
 
 export function firstInstalledAgent(env: AgentEnv): string | undefined {
   return FIRST_INSTALLED_ORDER.find((a) => agentInstalledByName(env, a));

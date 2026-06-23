@@ -271,7 +271,6 @@ describe("probeMissingAgents — queries the REAL env, not the sandbox (FIX-292)
       `    ${G}✓ claude${NC}  (current)\n` +
       `    ${G}✓ kimi${NC}\n` +
       `    ${Y}✗ deepseek${NC}  (not installed)\n` +
-      `    ${Y}✗ opencode${NC}  (not installed)\n` +
       `    ${G}✓ codex${NC}\n` +
       `    ${G}✓ openai${NC}\n` +
       `    ${G}✓ pi${NC}\n` +

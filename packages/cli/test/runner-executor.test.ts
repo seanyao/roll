@@ -179,10 +179,11 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
   });
 
   it("throws a loud, documented error for an un-ported agent (fail-loud, not silent)", () => {
-    expect(() => buildSpawnCommand("opencode", { cwd: "/wt", skillBody: "x" })).toThrow(
-      /agent 'opencode' argv not yet ported/,
+    expect(() => buildSpawnCommand("made-up-agent", { cwd: "/wt", skillBody: "x" })).toThrow(
+      /agent 'made-up-agent' argv not yet ported/,
     );
-    expect(Object.keys(AGENT_ARGV_TODO)).toContain("opencode");
+    // The pool is fully ported (kimi/pi/reasonix + claude harness) → no TODO entries.
+    expect(Object.keys(AGENT_ARGV_TODO)).toHaveLength(0);
   });
 
   // FIX-319 — a BARE spawn (peer reviewer) sends the body verbatim: NO worker

@@ -51,8 +51,8 @@ describe("heteroAvailable (FIX-312 — the review-routing switch)", () => {
     expect(heteroAvailable([], "kimi")).toBe(false);
   });
   it("a non-headless-reviewer pool offers no heterogeneous option", () => {
-    // claude + IDE/config-only agents are NOT headless reviewers → none count.
-    expect(heteroAvailable(["claude", "cursor", "trae"], "kimi")).toBe(false);
+    // claude + unknown/profile-less agents are NOT headless reviewers → none count.
+    expect(heteroAvailable(["claude", "made-up-a", "made-up-b"], "kimi")).toBe(false);
   });
   it("builder absent from the pool still counts other vendors", () => {
     // builder is reasonix (not installed locally) but a pi peer is available.
@@ -217,20 +217,20 @@ describe("defaultPairingConfig + renderPairingConfig (roll pair init scaffold)",
     });
     expect(picked).not.toContain("claude");
   });
-  it("FIX-328: default config excludes IDE/config-only agents from review pools", () => {
-    // kimi + pi are the headless-reviewable vendors; cursor/trae are
-    // config-only (no spec, canReviewHeadless=false) — all excluded.
-    const d = defaultPairingConfig(["kimi", "cursor", "trae", "pi"]);
+  it("FIX-328: default config excludes profile-less agents from review pools", () => {
+    // kimi + pi are the headless-reviewable vendors; profile-less agents
+    // (no spec, canReviewHeadless=false) are excluded.
+    const d = defaultPairingConfig(["kimi", "made-up-a", "made-up-b", "pi"]);
     expect(d.enabled).toBe(true);
     expect(d.capability).toEqual({ kimi: ["code", "score"], pi: ["code", "score"] });
-    expect(renderPairingConfig(d)).not.toContain("cursor:");
-    expect(renderPairingConfig(d)).not.toContain("trae:");
+    expect(renderPairingConfig(d)).not.toContain("made-up-a:");
+    expect(renderPairingConfig(d)).not.toContain("made-up-b:");
   });
-  it("FIX-328: score candidates exclude installed IDE/config-only agents", () => {
-    // Worker is kimi (a headless reviewer). The IDE-only cursor/trae are excluded
+  it("FIX-328: score candidates exclude installed profile-less agents", () => {
+    // Worker is kimi (a headless reviewer). Profile-less agents are excluded
     // from the score pool.
     const picked = selectPairingCandidates({
-      installed: ["kimi", "cursor", "trae", "pi"],
+      installed: ["kimi", "made-up-a", "made-up-b", "pi"],
       isAvailable: () => true,
       workingAgent: "kimi",
       stage: "score",
@@ -239,12 +239,12 @@ describe("defaultPairingConfig + renderPairingConfig (roll pair init scaffold)",
     });
     expect(picked).toContain("kimi");
     expect(picked).toContain("pi");
-    expect(picked).not.toContain("cursor");
-    expect(picked).not.toContain("trae");
+    expect(picked).not.toContain("made-up-a");
+    expect(picked).not.toContain("made-up-b");
   });
-  it("FIX-328: heteroAvailable ignores IDE/config-only agents", () => {
-    expect(heteroAvailable(["kimi", "cursor", "trae"], "kimi")).toBe(false);
-    expect(heteroAvailable(["kimi", "cursor", "pi"], "kimi")).toBe(true);
+  it("FIX-328: heteroAvailable ignores profile-less agents", () => {
+    expect(heteroAvailable(["kimi", "made-up-a", "made-up-b"], "kimi")).toBe(false);
+    expect(heteroAvailable(["kimi", "made-up-a", "pi"], "kimi")).toBe(true);
   });
   it("FIX-343: the score stage is same-vendor-friendly — a fresh instance of the BUILDER'S OWN type qualifies", () => {
     // Independence = another assigned fresh session, NOT vendor heterogeneity:

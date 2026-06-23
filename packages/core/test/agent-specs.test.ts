@@ -43,9 +43,8 @@ describe("AgentSpec registry — FIX-313", () => {
     for (const agent of ["kimi", "pi", "reasonix"]) {
       expect(agentCanReviewHeadless(agent)).toBe(true);
     }
-    // claude is NOT a pool member (no spec) and the IDE/config-only agents have no
-    // spec either → canReviewHeadless is false for all of them.
-    for (const agent of ["claude", "cursor", "trae", "opencode", "openclaw"]) {
+    // claude is NOT a pool member (no spec) → canReviewHeadless is false.
+    for (const agent of ["claude"]) {
       expect(agentCanReviewHeadless(agent)).toBe(false);
     }
   });

@@ -41,10 +41,6 @@ const AGENT_VENDOR: Readonly<Record<string, string>> = {
   deepseek: "deepseek",
   reasonix: "reasonix",
   pi: "pi",
-  cursor: "cursor",
-  opencode: "opencode",
-  trae: "trae",
-  openclaw: "openclaw",
 };
 
 export function agentVendor(name: string): string {

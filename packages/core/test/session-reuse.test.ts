@@ -52,7 +52,7 @@ describe("shouldCaptureWarmSession (lever-4 depth-1 cap, FIX-355)", () => {
 
 describe("sessionReuseFor (lever-4 adapter)", () => {
   it("every engine ⇒ cold no-op adapter (the universal default — no pool agent resumes)", () => {
-    for (const agent of ["claude", "kimi", "pi", "reasonix", "cursor", "opencode", "trae", "openclaw"]) {
+    for (const agent of ["claude", "kimi", "pi", "reasonix"]) {
       const a = sessionReuseFor(agent, getAgentSpec(agent)?.usage);
       expect(a.supportsReuse()).toBe(false);
       // cold adapter resolves nothing and injects nothing

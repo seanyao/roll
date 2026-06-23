@@ -218,7 +218,7 @@ function fixtureData(): StatusData {
     ],
     ai_clients: [
       { name: "claude", cfg_file: "CLAUDE.md", path: "~/.claude/CLAUDE.md", sync: "sync", skills: 12 },
-      { name: "cursor", cfg_file: "AGENTS.md", path: "~/.cursor/AGENTS.md", sync: "out-of-sync", skills: 12 },
+      { name: "kimi", cfg_file: "AGENTS.md", path: "~/.kimi/AGENTS.md", sync: "out-of-sync", skills: 12 },
       { name: "pi", cfg_file: "AGENTS.md", path: "~/.pi/agent/AGENTS.md", sync: "missing", skills: 0 },
     ],
     templates: [

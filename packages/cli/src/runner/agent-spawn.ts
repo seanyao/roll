@@ -29,7 +29,7 @@
  * {@link buildClaudeArgv} reproduces that argv construction for the `claude`
  * agent (harness — roll runs inside Claude Code; claude is not a pool agent but
  * powers the harness reviewer/cost path). Pool agents (kimi/pi/reasonix, plus
- * deepseek→pi/opencode) have their own `_agent_argv` shapes and loop enhancements
+ * deepseek→pi) have their own `_agent_argv` shapes and loop enhancements
  * that DIFFER (only claude gets the stream-json / --add-dir splice); porting each
  * is deferred
  * — see {@link AGENT_ARGV_TODO}. The integration tests use a SHIM `claude` on
@@ -96,9 +96,7 @@ export const AUTORUN_DIRECTIVE =
  * agent is a one-function add. Routing to a stubbed agent throws a loud error
  * (NEVER a silent no-op) so the parallel-verification protocol surfaces the gap.
  */
-export const AGENT_ARGV_TODO: Record<string, string> = {
-  opencode: "opencode run <prompt>",
-};
+export const AGENT_ARGV_TODO: Record<string, string> = {};
 
 export interface SpawnCommand {
   bin: string;

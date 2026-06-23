@@ -51,7 +51,6 @@ const RUNNER_LABEL: Record<string, string> = {
   kimi: "Kimi CLI",
   pi: "pi CLI",
   reasonix: "reasonix CLI",
-  cursor: "Cursor CLI",
   deepseek: "DeepSeek CLI",
 };
 

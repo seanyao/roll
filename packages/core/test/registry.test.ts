@@ -43,12 +43,8 @@ describe("identity helpers", () => {
     expect(agentBinNames("nope")).toBeNull();
   });
 
-  it("agentIsKnown: deepseek unknown, special-cased GUI agents known", () => {
+  it("agentIsKnown: deepseek unknown, pool agents known", () => {
     expect(agentIsKnown("deepseek")).toBe(false);
-    expect(agentIsKnown("trae")).toBe(true);
-    expect(agentIsKnown("cursor")).toBe(true);
-    expect(agentIsKnown("opencode")).toBe(true);
-    expect(agentIsKnown("openclaw")).toBe(true);
     expect(agentIsKnown("kimi")).toBe(true);
     expect(agentIsKnown("pi")).toBe(true);
     expect(agentIsKnown("reasonix")).toBe(true);
@@ -78,22 +74,6 @@ describe("installed detection", () => {
     expect(agentInstalledByName(makeEnv({ commandOnPath: (b) => b === "kimi-code" }), "kimi")).toBe(true);
     expect(agentInstalledByName(makeEnv({ commandOnPath: (b) => b === "kimi" }), "kimi")).toBe(true);
     expect(agentInstalledByName(makeEnv(), "kimi")).toBe(false);
-  });
-
-  it("trae checks Application Support / .config", () => {
-    const env = makeEnv({ dirExists: (p) => p === "/home/u/.config/Trae" });
-    expect(agentInstalledByName(env, "trae")).toBe(true);
-  });
-
-  it("opencode checks an executable file", () => {
-    const env = makeEnv({ fileExecutable: (p) => p === "/home/u/.opencode/bin/opencode" });
-    expect(agentInstalledByName(env, "opencode")).toBe(true);
-  });
-
-  it("cursor accepts CLI OR ~/.cursor dir", () => {
-    expect(agentInstalledByName(makeEnv({ commandOnPath: (b) => b === "cursor" }), "cursor")).toBe(true);
-    expect(agentInstalledByName(makeEnv({ dirExists: (p) => p === "/home/u/.cursor" }), "cursor")).toBe(true);
-    expect(agentInstalledByName(makeEnv(), "cursor")).toBe(false);
   });
 
   it("unknown agent falls back to a dir hint", () => {

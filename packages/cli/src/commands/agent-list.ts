@@ -124,32 +124,9 @@ function commandOnPath(bin: string): boolean {
 }
 
 export function agentInstalledByName(agent: string): boolean {
-  const home = homedir();
-  switch (agent) {
-    case "trae":
-      return (
-        existsSync(join(home, "Library", "Application Support", "Trae")) ||
-        existsSync(join(home, ".config", "Trae"))
-      );
-    case "opencode": {
-      const p = join(home, ".opencode", "bin", "opencode");
-      try {
-        accessSync(p, constants.X_OK);
-        return statSync(p).isFile();
-      } catch {
-        return false;
-      }
-    }
-    case "cursor":
-      return commandOnPath("cursor") || existsSync(join(home, ".cursor"));
-    case "openclaw":
-      return existsSync(join(home, ".openclaw", "workspace"));
-    default: {
-      const bins = agentBinNames(agent);
-      if (bins !== null) return bins.some(commandOnPath);
-      return false; // unknown without dir hint
-    }
-  }
+  const bins = agentBinNames(agent);
+  if (bins !== null) return bins.some(commandOnPath);
+  return false; // unknown without dir hint
 }
 
 /** Mirrors _project_agent: local.yaml → .roll.yaml → global config → claude. */
@@ -175,7 +152,7 @@ export function projectAgent(): string {
 }
 
 // ── Entry ────────────────────────────────────────────────────────────────────
-const AGENT_ORDER = ["claude", "kimi", "deepseek", "opencode", "pi", "reasonix"];
+const AGENT_ORDER = ["claude", "kimi", "deepseek", "pi", "reasonix"];
 
 export function agentListCommand(_args: string[]): number {
   const noColor = (process.env["NO_COLOR"] ?? "") !== "";

@@ -20,8 +20,6 @@ export function textAgentArgv(agent: string, prompt: string): { bin: string; arg
       return { bin: "pi", args: ["-p", prompt] };
     case "reasonix":
       return { bin: "reasonix", args: ["run", "--max-steps", "1000", prompt] };
-    case "opencode":
-      return { bin: "opencode", args: ["run", prompt] };
     default:
       return null;
   }

@@ -136,14 +136,4 @@ describe("frozen: installed-by-name under a fabricated PATH/HOME", () => {
       expect(agentInstalledByName(env, a)).toBe(expected);
     }
   });
-
-  it("trae dir under fabricated HOME → installed", () => {
-    const sandbox = mkdtempSync(join(tmpdir(), "roll-home-"));
-    dirs.push(sandbox);
-    const binDir = join(sandbox, "bin");
-    const home = join(sandbox, "home");
-    mkdirSync(binDir, { recursive: true });
-    mkdirSync(join(home, ".config", "Trae"), { recursive: true });
-    expect(agentInstalledByName(tsEnv(binDir, home), "trae")).toBe(true);
-  });
 });

@@ -19,6 +19,7 @@ import type {
   ToolKind,
   ToolMeta,
   ToolPolicy,
+  ToolReadiness,
   ToolRequirement,
   ToolRequirementResolution,
   ToolResult,
@@ -54,6 +55,13 @@ describe("US-TOOL-001 tool type contracts", () => {
       status: "missing",
       detail: "bash is not on PATH.",
       repair: { command: "brew install bash" },
+    };
+    const readiness: ToolReadiness = {
+      toolId: id,
+      status: "unavailable",
+      requirements: [requirementResolution],
+      detail: requirementResolution.detail,
+      repairCommands: ["brew install bash"],
     };
     const declaration: ToolDeclaration = { id, kind, title: "Bash", description: "Execute argv", defaults, requirements: [requirement] };
     const caller: ToolCaller = { cycleId: "cycle-1", storyId: "US-TOOL-001", agent: "codex" };
@@ -105,6 +113,7 @@ describe("US-TOOL-001 tool type contracts", () => {
       declaration,
       failed,
       invokeEvent,
+      readiness,
       requirementResolution,
       resultEvent,
       cycleCost,

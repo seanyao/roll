@@ -106,6 +106,13 @@ describe("collectToolPanel", () => {
     expect(row(rows, "mcp.call").requirements).toEqual([]);
   });
 
+  it("derives tool readiness from resolved requirements", () => {
+    const rows = collectToolPanel();
+    expect(row(rows, "bash").readiness).toBe("available");
+    expect(["available", "degraded"]).toContain(row(rows, "browser.screenshot").readiness);
+    expect(["available", "unavailable"]).toContain(row(rows, "github.pr").readiness);
+  });
+
   it("keeps requirements as host resources and never models tool-to-tool dependencies", () => {
     for (const declaration of builtinToolDeclarations()) {
       for (const requirement of declaration.requirements ?? []) {

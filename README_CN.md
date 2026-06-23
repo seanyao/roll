@@ -76,7 +76,7 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 | `roll doctor skills [--strict] [--json]` | 严格技能审计(技能 · 违规 · hub 行数 + 四组调用频次——与 web Skills 页同口径) |
 | `roll setup skills` | 同步 `guide/skills.md` 技能目录 |
 | `roll doc [--lang en\|zh] [name]` | 在终端查看 Charter / 语言指南文档(`--lang` 缺省回落到配置语言) |
-| `roll tool status` | 查看已注册工具及其有效 `.roll/policy.yaml` 状态 |
+| `roll tool status` | 查看已注册工具、有效 `.roll/policy.yaml` 状态与 requirement 就绪度 |
 | `roll prices [refresh]` | 模型价目表(成本核算来源) |
 | `roll setup [skills\|-f]` | 首次安装、生成技能目录或重新同步约定到所有 AI 客户端 |
 | `roll update` | 升级到最新版本并重新同步 |

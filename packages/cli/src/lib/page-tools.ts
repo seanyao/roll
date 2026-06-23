@@ -7,11 +7,11 @@
  * (timeout · sandbox · retry · per-cycle cap), and any external requirements.
  *
  * One source of truth: rows are rendered from `collectToolPanel`
- * (`ToolPanelRow[]`, US-TOOL-016), the SAME deterministic catalog over
- * `builtinToolDeclarations()`, so the page can never disagree with the
- * actually-registered adapters. Machine-global → no per-project usage/cost (that
- * lives on each project's Loop view). Determinism: this file holds no clock/RNG;
- * the collector is pure, so the page renders byte-identical on a given machine.
+ * (`ToolPanelRow[]`, US-TOOL-016), over `builtinToolDeclarations()`, so the page
+ * can never disagree with the actually-registered adapters. Machine-global → no
+ * per-project usage/cost (that lives on each project's Loop view). The tool
+ * catalog is stable; requirement readiness reflects this host's dependencies,
+ * so the page renders byte-identical only for the same machine state.
  *
  * Edge cases: an empty `tools` set renders a friendly "no built-in tools
  * detected" card, never a crash; multi-tool kinds group under one kind heading,
@@ -39,7 +39,7 @@ export interface ToolsPageInput {
   /**
    * Every built-in tool adapter on this MACHINE (US-TOOL-017 AC2): the row set
    * is the `collectToolPanel()` catalog over `builtinToolDeclarations()`, not a
-   * project's usage ledger — the catalog is identical on every machine.
+   * project's usage ledger. Requirement readiness is host-dependent.
    */
   tools: ToolPanelRow[];
   /** Cross-project switcher rows (read-only, US-DOSSIER-027). */

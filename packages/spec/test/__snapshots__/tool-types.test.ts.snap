@@ -18,6 +18,8 @@ exports[`US-TOOL-001 tool type contracts > exports the complete tool type surfac
   "ToolKind",
   "ToolMeta",
   "ToolPolicy",
+  "ToolReadiness",
+  "ToolReadinessStatus",
   "ToolRequirement",
   "ToolRequirementAuthorization",
   "ToolRequirementRepair",

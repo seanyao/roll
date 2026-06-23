@@ -9,8 +9,9 @@
  * Machine-global → takes no project argument. The built-in catalog is stable,
  * while requirement readiness reflects this host's dependency state.
  */
+import { deriveToolReadiness } from "@roll/core";
 import { builtinToolDeclarations } from "@roll/infra";
-import type { ToolDeclaration, ToolDefaults, ToolKind, ToolRequirement, ToolSandbox } from "@roll/spec";
+import type { ToolDeclaration, ToolDefaults, ToolKind, ToolReadinessStatus, ToolRequirement, ToolSandbox } from "@roll/spec";
 import { resolveRequirement } from "./external-tools.js";
 
 export interface ToolPanelGuardrails {
@@ -34,6 +35,8 @@ export interface ToolPanelRow {
   guardrails: ToolPanelGuardrails;
   /** declaration.requirements mapped to human labels; [] when none. */
   requirements: string[];
+  /** available / degraded / unavailable, derived from requirement resolution. */
+  readiness: ToolReadinessStatus;
   /**
    * FIX-394 AC6 — a tool whose host dependency is absent is marked unavailable
    * rather than silently shown as ready. The caller (tool display / dossier
@@ -53,7 +56,7 @@ export function collectToolPanel(): ToolPanelRow[] {
 }
 
 function toRow(declaration: ToolDeclaration): ToolPanelRow {
-  const avail = toolAvailability(declaration);
+  const readiness = deriveToolReadiness(declaration, resolveRequirement);
   return {
     id: String(declaration.id),
     kind: declaration.kind,
@@ -62,27 +65,10 @@ function toRow(declaration: ToolDeclaration): ToolPanelRow {
     emitsEvents: declaration.emitsEvents ?? false,
     guardrails: guardrailsOf(declaration.defaults),
     requirements: (declaration.requirements ?? []).map(requirementLabel),
-    available: avail.ok,
-    unavailableReason: avail.reason,
+    readiness: readiness.status,
+    available: readiness.status !== "unavailable",
+    unavailableReason: readiness.status === "available" ? "" : (readiness.detail ?? ""),
   };
-}
-
-/** FIX-394 AC6 — check whether the host dependency for a built-in tool is present. */
-function toolAvailability(declaration: ToolDeclaration): { ok: boolean; reason: string } {
-  const required = (declaration.requirements ?? []).filter((requirement) => requirement.optional !== true);
-  const requiredFailure = required.map((requirement) => resolveRequirement(requirement)).find((resolution) => resolution.status !== "ok");
-  if (requiredFailure !== undefined) return { ok: false, reason: requiredFailure.detail };
-
-  const optionalFailure = (declaration.requirements ?? [])
-    .filter((requirement) => requirement.optional === true)
-    .map((requirement) => resolveRequirement(requirement))
-    .find((resolution) => resolution.status !== "ok");
-  if (optionalFailure !== undefined && declaration.kind === "browser") {
-    const repair = optionalFailure.repair?.command;
-    const suffix = repair === undefined ? "" : ` — run \`${repair}\``;
-    return { ok: false, reason: `${optionalFailure.detail}${suffix}` };
-  }
-  return { ok: true, reason: "" };
 }
 
 function guardrailsOf(defaults: ToolDefaults | undefined): ToolPanelGuardrails {

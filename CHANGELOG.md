@@ -12,6 +12,8 @@
 
 - **旧 agent 配置开始显式迁移/拒绝**：`openai`、`deepseek` 作为 provider alias 会静默迁移到 `codex`、`pi`；`cursor`、`trae`、`qwen`、`opencode`、`openclaw` 等已删除 agent 在 `roll agent use/set` 和 doctor/setup 面上不再静默回退，而是明确过滤或报错。(US-AGENT-045) `[agents]`
 
+- **交付真相重建补齐无 PR 号 story-only merge 的跨阶段去重**：`ensureDeliveriesFresh` 两阶段 git log 合并现在按 `pr:<n>` / `sha:<commit>` 去重，避免某个 `prNumber=0` 事实挡掉后续已合主干的 story-only squash commit。(FIX-925) `[feedback-truth-alignment]`
+
 - **loop 已合并卡不再回流**：合进 main 的卡会被稳定识别为已交付，不再反复被选回待办。(FIX-399 / FIX-923) `[feedback-truth-alignment]`
 
 - **评审评分池不再太早放弃**：异构 reviewer 都不可用时，会继续尝试同厂可用候选，减少无谓失败。(FIX-911) `[loop-engine]`

@@ -295,9 +295,7 @@ describe("loop test — US-PORT-022", () => {
     const testRunner = join(shared, "loop", `run-${slug}-test.sh`);
     expect(existsSync(testRunner)).toBe(true);
     const body = readFileSync(testRunner, "utf8");
-    // claude is no longer a pool agent (it has no AgentSpec), so its smoke command
-    // falls back to the generic `<name> --version` probe.
-    expect(body).toContain("claude --version");
+    expect(body).toContain('claude -p "Reply with a single word: hello"');
     expect(body).not.toContain("loop run-once"); // smoke runs the cmd, not a real cycle
     expect(body).toContain("roll-loop-tproj-aaa111"); // tmux session preserved
     expect(r.out).toContain("Smoke test passed (3s, agent: claude)");
@@ -329,8 +327,7 @@ describe("loop test — US-PORT-022", () => {
   });
 
   it("defaultSmokeCmd: pool agent vs fallback", () => {
-    // claude has no AgentSpec (not a pool agent) → generic `--version` fallback.
-    expect(defaultSmokeCmd("claude")).toContain("claude --version");
+    expect(defaultSmokeCmd("claude")).toContain("claude -p");
     // FIX-359: kimi smoke uses the real `kimi` binary (`kimi-code` never existed).
     expect(defaultSmokeCmd("kimi")).toContain("kimi -p");
     expect(defaultSmokeCmd("kimi")).not.toContain("kimi-code");

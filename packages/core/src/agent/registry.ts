@@ -32,16 +32,16 @@ import { type FileStore, nodeFileStore } from "../backlog/infra-default.js";
 
 // ── Identity / canonicalization (pure) ───────────────────────────────────────
 
-/** No-op canonicalization: the overseas agents (and their aliases) were removed
- *  from the pool, so there are no remaining alias collapses here. Returned
- *  verbatim. (The spec layer still maps `deepseek`→`pi` for usage adapters.) */
+/** `antigravity`/`gemini` collapse to the canonical `agy`; everything else is
+ *  returned verbatim. Provider/model aliases (`openai`, `deepseek`) are handled
+ *  by the spec layer, not as first-class registry names. */
 export function canonicalAgentName(name: string): string {
-  return name;
+  return name === "antigravity" || name === "gemini" ? "agy" : name;
 }
 
-/** Human-facing label — the bare (canonical) agent token. */
+/** Human-facing label. `agy` shows the product name + binary in parens. */
 export function agentDisplayName(name: string): string {
-  return name;
+  return canonicalAgentName(name) === "agy" ? "antigravity (agy)" : name;
 }
 
 /**
@@ -53,6 +53,13 @@ export function agentDisplayName(name: string): string {
  */
 export function agentBinNames(agent: string): string[] | null {
   switch (agent) {
+    case "claude":
+      return ["claude"];
+    case "codex":
+      return ["codex"];
+    case "agy":
+    case "gemini":
+      return ["agy", "gemini"];
     case "kimi":
       return ["kimi-code", "kimi-cli", "kimi"];
     case "pi":
@@ -66,11 +73,9 @@ export function agentBinNames(agent: string): string[] | null {
 
 /**
  * Is NAME a known agent in this machine's registry? "Known" means it has a
- * binary-name entry. This is a name-validity check, NOT an installed check.
- * `deepseek` is NOT a known agent — it is a MODEL that the `pi`/`reasonix`
- * agents load, never a routable agent in its own right (FIX-399 removed the
- * phantom `deepseek` agent from the roster). Mirrors `_agent_is_known`:
- * canonicalises first, then checks the bin-names.
+ * binary-name entry after canonicalization. This is a name-validity check, NOT
+ * an installed check. `openai` and `deepseek` are provider/model aliases in the
+ * spec layer, not first-class agent names here.
  */
 export function agentIsKnown(name: string): boolean {
   const c = canonicalAgentName(name);
@@ -112,11 +117,10 @@ export function agentInstalledByName(env: AgentEnv, agent: string, dir?: string)
 }
 
 /**
- * Candidate routable agents in the SAME order bash `_AGENT_REGISTRY_NAMES`
- * declares (the order `_agents_installed` scans). `deepseek` is deliberately
- * absent (a model the pi/reasonix agents load, not a routable agent).
+ * Candidate routable agents. US-AGENT-043 keeps exactly six first-class agent
+ * names; provider/model aliases stay in AgentSpec only.
  */
-export const AGENT_REGISTRY_NAMES = ["kimi", "pi", "reasonix"] as const;
+export const AGENT_REGISTRY_NAMES = ["claude", "kimi", "codex", "pi", "agy", "reasonix"] as const;
 
 /** Agents actually installed on this machine, in registry order. Mirrors
  *  `_agents_installed`. */
@@ -125,14 +129,10 @@ export function agentsInstalled(env: AgentEnv): string[] {
 }
 
 /**
- * First-installed scan order, used as the last-resort routing fallback. Matches
- * {@link AGENT_REGISTRY_NAMES} — only routable agents are scanned. (FIX-399
- * removed the phantom `deepseek` agent: it is a MODEL the pi/reasonix agents
- * load, never an agent to fall back to, so a fallback could never legitimately
- * resolve to it.) Returns `undefined` when none are installed. (Pool narrowed to
- * 国产/开源 agents — kimi/pi/reasonix; overseas agents removed.)
+ * First-installed scan order, used as the last-resort routing fallback. It
+ * matches the six-agent roster; removed agent tokens are never fallback targets.
  */
-const FIRST_INSTALLED_ORDER = ["kimi", "pi", "reasonix"] as const;
+const FIRST_INSTALLED_ORDER = ["claude", "kimi", "codex", "pi", "agy", "reasonix"] as const;
 
 export function firstInstalledAgent(env: AgentEnv): string | undefined {
   return FIRST_INSTALLED_ORDER.find((a) => agentInstalledByName(env, a));

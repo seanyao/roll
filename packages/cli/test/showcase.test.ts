@@ -75,13 +75,10 @@ describe("validateCasting — heterogeneity", () => {
     expect(r.violations.map((v) => v.code)).toContain("scorer-equals-builder");
   });
 
-  it("formerly-aliased overseas names now resolve to distinct vendors (pool narrowing)", () => {
-    // The pool was narrowed: codex/openai are no longer aliased to one vendor —
-    // canonicalAgentName is a no-op and neither is in the vendor map, so each falls
-    // back to its own literal name → distinct vendors → a valid heterogeneous trio.
+  it("rejects provider aliases that collapse to the same vendor", () => {
     const r = validateCasting({ builder: "codex", reviewer: "openai", scorer: "pi" });
-    expect(r.ok).toBe(true);
-    expect(r.violations).toEqual([]);
+    expect(r.ok).toBe(false);
+    expect(r.violations.map((v) => v.code)).toContain("reviewer-not-hetero");
   });
 
   it("rejects an empty slot", () => {

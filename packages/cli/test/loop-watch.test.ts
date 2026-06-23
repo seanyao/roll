@@ -300,16 +300,12 @@ describe("roll loop watch — read-only (AC2)", () => {
 
 describe("roll loop watch — concise by default, verbose reveals raw (AC3)", () => {
   it("default shows the cycle banner but hides tier-C agent prose", async () => {
-    // Pool narrowing: the orchestrated agents are kimi/pi/reasonix and claude is
-    // no longer a pool agent — all route to the generic normalizer, which surfaces
-    // the cycle banner (tier-A lifecycle) and folds every other line to tier-C
-    // "say" (hidden by default, shown only with --verbose/--raw).
     const rec = makeDeps();
     await loopWatchCommand([], rec.deps);
     const out = rec.rendered.join("\n");
     expect(out).toContain("US-LOOP-074"); // story banner (lifecycle, always shown)
     expect(out).not.toContain("let me reason"); // tier-C prose hidden by default
-    expect(out).not.toContain("def4567"); // raw agent line is tier-C, hidden by default
+    expect(out).toContain("def4567"); // parsed TCR signal is tier-B, visible by default
   });
 
   it("--verbose surfaces the tier-C prose", async () => {

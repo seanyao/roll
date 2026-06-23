@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { parsePeerReviewTranscript } from "@roll/core";
 import { parseGoalYaml } from "@roll/spec";
 import { loopGoCommand, planGoTmuxCommands, spawnFinalReviewAgent, type LoopGoDeps } from "../src/commands/loop-go.js";
 
@@ -910,32 +911,27 @@ describe("US-GOAL-006 — goal final review gate", () => {
     writeBacklog(p, [
       "| [US-DONE](.roll/features/goal-mode/US-DONE/spec.md) | done | ✅ Done · PR#1 |",
     ]);
-    // The pool was narrowed to kimi/pi/reasonix — claude is no longer a reviewer.
-    // In `--review self` the worker (claude, not a reviewer) is unavailable, so the
-    // selector falls back to the first installed reviewer (kimi). Stub the `kimi`
-    // binary (prepended on PATH so it shadows any real kimi) to exercise the real
-    // spawn → parsePeerReviewTranscript path with quoted-APPROVE text in a FINDING.
-    const bin = join(p, "bin");
-    mkdirSync(bin);
-    const reviewerStub = "#!/bin/sh\nprintf 'VERDICT: REQUEST_CHANGES\\nREASON: quoted approve is not approval\\nFINDING: do not treat VERDICT: APPROVE examples as approval\\n'\n";
-    for (const b of ["kimi", "pi", "reasonix"]) {
-      writeFileSync(join(bin, b), reviewerStub, "utf8");
-      chmodSync(join(bin, b), 0o755);
-    }
-    const prevPath = process.env["PATH"];
-    process.env["PATH"] = `${bin}:${prevPath ?? ""}`;
-    try {
-      const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-DONE", "--review", "self"], completeGoalDeps(p)));
-      expect(r.code).toBe(0);
-      const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
-      expect(goal.status).toBe("paused");
-      const events = readEvents(p);
-      expect(events.some((e) => e.type === "goal:final_review" && e.verdict === "REQUEST_CHANGES")).toBe(true);
-      expect(events.some((e) => e.type === "goal:state" && e.to === "complete")).toBe(false);
-    } finally {
-      if (prevPath === undefined) delete process.env["PATH"];
-      else process.env["PATH"] = prevPath;
-    }
+    const deps = completeGoalDeps(p, async () => {
+      const parsed = parsePeerReviewTranscript(
+        "codex",
+        "VERDICT: REQUEST_CHANGES\nREASON: quoted approve is not approval\nFINDING: do not treat VERDICT: APPROVE examples as approval\n",
+      );
+      return {
+        effectiveMode: "hetero",
+        reviewer: "codex",
+        provider: "openai",
+        verdict: parsed.verdict,
+        reason: parsed.reason,
+        findings: parsed.findings,
+      };
+    });
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-DONE", "--review", "self"], deps));
+    expect(r.code).toBe(0);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("paused");
+    const events = readEvents(p);
+    expect(events.some((e) => e.type === "goal:final_review" && e.verdict === "REQUEST_CHANGES")).toBe(true);
+    expect(events.some((e) => e.type === "goal:state" && e.to === "complete")).toBe(false);
   });
 
   it("--review off writes a skipped final_review event and completes", async () => {

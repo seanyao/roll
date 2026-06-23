@@ -5,19 +5,23 @@
  * unknown agent (caller decides the fallback).
  */
 import { onPath } from "../commands/setup-shared.js";
+import { getAgentSpec } from "@roll/core";
 
 export function textAgentArgv(agent: string, prompt: string): { bin: string; args: string[] } | null {
-  switch (agent) {
+  const canonical = getAgentSpec(agent.trim().toLowerCase())?.name ?? agent;
+  switch (canonical) {
     case "claude":
       return { bin: "claude", args: ["-p", "--output-format", "text", prompt] };
     case "kimi": {
       const bin = onPath("kimi-code") ? "kimi-code" : onPath("kimi-cli") ? "kimi-cli" : "kimi";
       return { bin, args: ["-p", prompt] };
     }
-    case "deepseek":
-      return { bin: "deepseek", args: [prompt] };
+    case "codex":
+      return { bin: "codex", args: ["exec", prompt] };
     case "pi":
       return { bin: "pi", args: ["-p", prompt] };
+    case "agy":
+      return { bin: "agy", args: ["-p", prompt] };
     case "reasonix":
       return { bin: "reasonix", args: ["run", "--max-steps", "1000", prompt] };
     default:

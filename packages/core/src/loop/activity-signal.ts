@@ -557,8 +557,8 @@ export const genericNormalizer: AgentActivityNormalizer = {
 
 /**
  * Pick the normalizer for an agent. claude → stream-json fold (harness — roll
- * runs inside Claude Code); everything else (kimi / pi / reasonix / unknown) →
- * generic passthrough. This is the ONLY place a name maps to a parser —
+ * runs inside Claude Code); everything else (kimi / codex / pi / agy /
+ * reasonix / unknown) → generic passthrough. This is the ONLY place a name maps to a parser —
  * downstream stays agnostic.
  */
 export function normalizerFor(agent: string): AgentActivityNormalizer {

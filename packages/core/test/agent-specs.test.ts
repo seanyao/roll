@@ -10,13 +10,14 @@ import {
 
 describe("AgentSpec registry — FIX-313", () => {
   it("declares per-agent defaults in one registry", () => {
-    // The pool is kimi/pi/reasonix. claude is NOT a pool member (no spec entry):
-    // its harness machinery lives elsewhere, so getAgentSpec("claude") is absent
-    // and the default-model lookup falls back to the bare name.
-    expect(getAgentSpec("claude")).toBeUndefined();
-    expect(agentDefaultModel("claude")).toBe("claude");
+    expect(getAgentSpec("claude")?.name).toBe("claude");
+    expect(agentDefaultModel("claude")).toBe("claude-sonnet-4");
     expect(agentDefaultModel("pi")).toBe("deepseek-v4-pro");
     expect(agentDefaultModel("kimi")).toBe("kimi-k2");
+    expect(agentDefaultModel("codex")).toBe("gpt-5.5");
+    expect(agentDefaultModel("openai")).toBe("gpt-5.5");
+    expect(agentDefaultModel("agy")).toBe("gemini-2.5-pro");
+    expect(agentDefaultModel("antigravity")).toBe("gemini-2.5-pro");
     expect(agentDefaultModel("reasonix")).toBe("deepseek-flash");
     expect(agentNormalizerKind("kimi")).toBe("generic");
     expect(agentSmokeCommand("kimi")).toContain("kimi");
@@ -30,21 +31,18 @@ describe("AgentSpec registry — FIX-313", () => {
   });
 
   it("declares sessionReuse as an agnostic capability — no pool engine resumes (lever-4)", () => {
-    // After the pool was narrowed to 国产/开源 agents (kimi/pi/reasonix), NO engine
-    // declares a warm-reuse kind: the field is absent on every spec (the adapter
-    // treats absent as cold, so reuse is never accidentally widened).
-    for (const agent of ["kimi", "pi", "reasonix"]) {
+    // Only codex declares the resume adapter; the rest stay cold by default.
+    for (const agent of ["claude", "kimi", "pi", "agy", "reasonix"]) {
       expect(getAgentSpec(agent)?.usage.sessionReuse).toBeUndefined();
     }
+    expect(getAgentSpec("codex")?.usage.sessionReuse).toBe("codex-exec-resume");
   });
 
   it("declares headless-review capability only for agents the runner can spawn", () => {
-    // The pool is kimi/pi/reasonix — all headless-review capable.
-    for (const agent of ["kimi", "pi", "reasonix"]) {
+    for (const agent of ["kimi", "codex", "pi", "reasonix"]) {
       expect(agentCanReviewHeadless(agent)).toBe(true);
     }
-    // claude is NOT a pool member (no spec) → canReviewHeadless is false.
-    for (const agent of ["claude"]) {
+    for (const agent of ["claude", "agy"]) {
       expect(agentCanReviewHeadless(agent)).toBe(false);
     }
   });

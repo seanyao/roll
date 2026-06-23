@@ -28,8 +28,8 @@
  *
  * {@link buildClaudeArgv} reproduces that argv construction for the `claude`
  * agent (harness — roll runs inside Claude Code; claude is not a pool agent but
- * powers the harness reviewer/cost path). Pool agents (kimi/pi/reasonix, plus
- * deepseek→pi) have their own `_agent_argv` shapes and loop enhancements
+ * powers the harness reviewer/cost path). Other agents have their own
+ * `_agent_argv` shapes and loop enhancements
  * that DIFFER (only claude gets the stream-json / --add-dir splice); porting each
  * is deferred
  * — see {@link AGENT_ARGV_TODO}. The integration tests use a SHIM `claude` on
@@ -204,14 +204,13 @@ function agentPrompt(opts: AgentSpawnOptions): string {
 
 function canonicalProfileName(name: string): string {
   const raw = name.trim().toLowerCase();
-  if (raw === "deepseek") return "deepseek";
   const spec = getAgentSpec(raw);
   if (spec !== undefined) return spec.name;
   return raw;
 }
 
 /**
- * Build a simple-prompt profile (pi/kimi/deepseek shapes). `modelFlag`, when the
+ * Build a simple-prompt profile (pi/kimi shapes). `modelFlag`, when the
  * agent's CLI accepts an explicit model, is PREPENDED to the prompt argv as the
  * native flag pair (pi: `--model <m>`, kimi: `-m <m>`) ONLY when a non-empty
  * routed model is present — absent ⇒ no flag, the agent uses its own default.
@@ -259,9 +258,18 @@ const AGENT_PROFILES: Readonly<Record<string, AgentProfile>> = {
   pi: simplePromptProfile("pi", "pi", (prompt) => ["-p", prompt], "--model"),
   // kimi `-m <model>` / `--model <model>` (use the short form).
   kimi: simplePromptProfile("kimi", "kimi", (prompt) => ["-p", prompt], "-m"),
-  // deepseek (pi engine via the `deepseek` binary) takes a positional prompt and
-  // no documented model flag here → leave the model to its own default.
-  deepseek: simplePromptProfile("deepseek", "deepseek", (prompt) => [prompt]),
+  codex: {
+    name: "codex",
+    usesWorkspaceSandbox: true,
+    ptyWhenPiped: false,
+    acceptance: { canReviewHeadless: getAgentSpec("codex")?.canReviewHeadless === true },
+    buildSpawnCommand: (opts) => {
+      const args = ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write"];
+      const prompt = agentPrompt(opts);
+      return { bin: opts.bin ?? "codex", args: [...args, prompt] };
+    },
+  },
+  agy: simplePromptProfile("agy", "agy", (prompt) => ["-p", prompt]),
   reasonix: {
     name: "reasonix",
     usesWorkspaceSandbox: false,

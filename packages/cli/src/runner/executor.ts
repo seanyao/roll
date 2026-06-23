@@ -147,10 +147,10 @@ import {
 import { classifyBlockSignature, probeAgentReachable, type ReachResult } from "./agent-liveness.js";
 import { readSkipCards } from "./skip-cards.js";
 import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, runPeerGate } from "./peer-gate.js";
-import { declaresAnySurface, deliverableCmdsForStory, readAttestGateMode, rejectedDeliverableCmdsForStory, runAttestGate, screenshotExemption, storyRequiresScreenshot, verificationReportHasContent, verificationReportPath, webCaptureTargetsForStory } from "./attest-gate.js";
+import { declaresAnySurface, deliverableCmdsForStory, readAttestGateMode, rejectedDeliverableCmdsForStory, runAttestGate, screenshotExemption, storyRequiresScreenshot, storySpecPath, verificationReportHasContent, verificationReportPath, webCaptureTargetsForStory } from "./attest-gate.js";
 import { recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
 import { validateStoryVisualEvidence } from "../lib/design-visual-evidence.js";
-import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, autoAttachScreenshotToAcMap, buildAcMapRemediationPrompt, needsAcMapRemediation } from "./attest-remediation.js";
+import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, autoAttachScreenshotToAcMap, buildAcMapRemediationPrompt, generateAcMapDraft, needsAcMapRemediation, type DraftEvidence } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
 import { buildPairScorePrompt, buildReviewPrompt, enabledPairingStages, parsePairScoreOutput, retryPeerConsult, runPairing, runScorePairing, type PairEvent, type PairReview } from "./pairing-gate.js";
 import { realAgentEnv } from "../commands/agent-list.js";
@@ -1725,12 +1725,43 @@ export async function executeCommand(
         scoreStatus = scoreResult.status;
       }
       if (commitsAhead > 0 && storyId !== "" && ctx.evidenceRunDir !== undefined && ctx.evidenceRunDir !== "") {
+        // FIX-912: auto-generate ac-map DRAFT from cycle evidence BEFORE the
+        // FIX-246 remediation. The draft has full AC structure + evidence chain
+        // (commits, test files, changed files) with CONSERVATIVE statuses:
+        // "pass-with-evidence" only when a test file named after the AC exists;
+        // otherwise "needs-confirmation". The honesty red line is untouched —
+        // the harness NEVER auto-writes a bare "pass" without clear proof.
+        if (needsAcMapRemediation(ports.paths.worktreePath, storyId)) {
+          try {
+            const specPath = storySpecPath(ports.paths.worktreePath, storyId);
+            if (specPath !== null) {
+              const specText = readFileSync(specPath, "utf8");
+              // Collect git evidence (cheap — max a few hundred lines for
+              // a single cycle's worth of commits + diff).
+              const gitEvidence = await collectDraftEvidence(ports.paths.worktreePath);
+              const draftJson = generateAcMapDraft(specText, storyId, gitEvidence);
+              if (draftJson !== null) {
+                writeFileSync(acMapPath(ports.paths.worktreePath, storyId), draftJson);
+                ports.events.appendEvent(ports.paths.eventsPath, {
+                  type: "attest:draft-generated",
+                  cycleId: ctx.cycleId ?? "",
+                  storyId,
+                  ts: eventTs(ports),
+                });
+              }
+            }
+          } catch {
+            // Draft generation is best-effort — a spec-read / git blip must
+            // never fail the cycle. The FIX-246 remediation still runs below.
+          }
+        }
         // FIX-246: ac-map omission remediation. Agents deliver real work yet
         // consistently skip skill step 10.6 (write ac-map.json) — the hard gate
         // then kills every cycle as an empty shell. Before rendering, give the
-        // SAME agent ONE surgical second pass to write the ac-map (honest
-        // statuses only — the prompt and the render-layer red line both forbid
-        // fabricated passes). One retry structurally: capture runs once.
+        // SAME agent ONE surgical second pass to CONFIRM/CORRECT the ac-map
+        // (the harness already wrote a draft; the agent only adjusts statuses).
+        // Honest statuses only — the prompt and the render-layer red line both
+        // forbid fabricated passes. One retry structurally: capture runs once.
         if (needsAcMapRemediation(ports.paths.worktreePath, storyId)) {
           let outcome: "written" | "still-missing" | "spawn-failed";
           try {
@@ -2812,6 +2843,40 @@ export function parseEstMin(desc: string): number | undefined {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * FIX-912 — collect the git evidence the ac-map draft generator needs.
+ * Three cheap git calls in the worktree; each has a hard cap so they never
+ * stall the cycle (a single cycle's worth of commits + diff is small).
+ * Best-effort: on ANY failure returns an empty evidence structure (the draft
+ * generator then produces an all-`needs-confirmation` skeleton). The cap
+ * values are generous for a normal cycle but bounded for safety.
+ */
+async function collectDraftEvidence(worktreeCwd: string): Promise<DraftEvidence> {
+  const empty: DraftEvidence = { commitLines: [], diffStatLines: [], changedFilenames: [] };
+  try {
+    const [commits, diffStat, changedFiles] = await Promise.all([
+      execFileAsync("git", ["log", "--oneline", "origin/main..HEAD", "-n", "50"], {
+        cwd: worktreeCwd,
+        encoding: "utf8",
+        timeout: 15_000,
+      }).then((r) => r.stdout.trim().split("\n").filter((l) => l !== ""), () => [] as string[]),
+      execFileAsync("git", ["diff", "--stat", "origin/main...HEAD"], {
+        cwd: worktreeCwd,
+        encoding: "utf8",
+        timeout: 15_000,
+      }).then((r) => r.stdout.trim().split("\n").filter((l) => l !== ""), () => [] as string[]),
+      execFileAsync("git", ["diff", "--name-only", "origin/main...HEAD"], {
+        cwd: worktreeCwd,
+        encoding: "utf8",
+        timeout: 15_000,
+      }).then((r) => r.stdout.trim().split("\n").filter((l) => l !== ""), () => [] as string[]),
+    ]);
+    return { commitLines: commits, diffStatLines: diffStat, changedFilenames: changedFiles };
+  } catch {
+    return empty;
+  }
 }
 
 /**

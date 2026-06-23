@@ -1804,7 +1804,10 @@ describe("executeCommand — command → executor mapping", () => {
         ? "# US-RUN-001\n\nprose only\n"
         : "# US-RUN-001\n\n**AC:**\n- [ ] AC1 works\n",
     );
-    if (opts.withAcMap === true) writeFileSync(join(dir, "ac-map.json"), "[]\n");
+    if (opts.withAcMap === true) {
+      // A confirmed ac-map (real statuses, not a harness draft).
+      writeFileSync(join(dir, "ac-map.json"), JSON.stringify([{ ac: "US-RUN-001:AC1", status: "pass" }]) + "\n");
+    }
     return wt;
   }
 
@@ -1845,7 +1848,9 @@ describe("executeCommand — command → executor mapping", () => {
     const { ports, calls } = fakePorts({
       paths: { ...base.ports.paths, worktreePath: wt },
       agentSpawn: vi.fn(async () => {
-        writeFileSync(join(wt, ".roll", "features", "uncategorized", "US-RUN-001", "ac-map.json"), "[]\n");
+        // FIX-912: write a CONFIRMED ac-map (real statuses, not draft/empty).
+        // The harness may have auto-generated a draft first; the agent confirms it.
+        writeFileSync(join(wt, ".roll", "features", "uncategorized", "US-RUN-001", "ac-map.json"), JSON.stringify([{ ac: "US-RUN-001:AC1", status: "pass" }]) + "\n");
         return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
       }),
     });

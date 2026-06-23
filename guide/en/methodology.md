@@ -75,7 +75,7 @@ How the three loops interact:
 
 ### 2.1 The Problem
 
-In environments where multiple AI clients coexist, each client has its own configuration entry point (Claude reads `CLAUDE.md`, agy reads `GEMINI.md`, Cursor reads `.cursor-rules`). Maintaining these files manually leads to:
+In environments where multiple AI clients coexist, each client has its own configuration entry point (Claude reads `CLAUDE.md`, agy reads `GEMINI.md`). Maintaining these files manually leads to:
 
 - **Behavioral drift**: Different AI clients on the same project enforce different coding standards.
 - **Fragmented configuration**: Engineering constraints scattered across multiple locations, with updates prone to gaps.
@@ -108,7 +108,7 @@ Append `--force` (or `-f`) to force-rewrite `roll.md` or rebuild symlinks.
 ├── AGENTS.md        → ~/.kimi/roll.md (+ @roll.md appended to AGENTS.md)
 ├── CLAUDE.md        → ~/.claude/roll.md (+ @roll.md appended to CLAUDE.md)
 ├── GEMINI.md        → ~/.gemini/roll.md (+ @roll.md appended to GEMINI.md)
-└── .cursor-rules    → (project-level distribution)
+└── project_rules.md → (project-level distribution)
 ```
 
 **2.2.3 Project-Level Configuration (`roll init`)**
@@ -602,7 +602,7 @@ On macOS, Roll uses **launchd** (plists installed to `~/Library/LaunchAgents/`);
 
 `roll loop status` provides the scheduler snapshot: launchd status, current execution state, pending queue, alerts, and recent run history. For the live terminal, attach directly with `tmux attach -t roll-loop-<project-slug>`.
 
-If the agent supports native scheduling (Claude Code hooks, opencode scheduled tasks), that is preferred over raw launchd/cron for cleaner lifecycle management.
+If the agent supports native scheduling (e.g. Claude Code hooks), that is preferred over raw launchd/cron for cleaner lifecycle management.
 
 ### 9.4 Per-Machine Agent Routing
 

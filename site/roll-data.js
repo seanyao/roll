@@ -46,7 +46,7 @@ window.RollData = (function () {
         { label: "Read the guide", href: "#guides", primary: false },
         { label: "View on GitHub", href: "https://github.com/seanyao/roll", primary: false, external: true },
       ],
-      meta: ["MIT licensed", "Node 16+", "Works with Claude · Antigravity · Codex · Kimi · Pi"],
+      meta: ["MIT licensed", "Node 16+", "Works with Claude · Antigravity · Codex · Kimi · Pi · Reasonix"],
     },
     TERMINAL: [
       { kind: "prompt", text: "roll loop on" },
@@ -251,7 +251,7 @@ window.RollData = (function () {
         { label: "查看文档", href: "#guides", primary: false },
         { label: "GitHub",  href: "https://github.com/seanyao/roll", primary: false, external: true },
       ],
-      meta: ["MIT 协议", "Node 16+", "支持 Claude · Antigravity · Codex · Kimi · Pi"],
+      meta: ["MIT 协议", "Node 16+", "支持 Claude · Antigravity · Codex · Kimi · Pi · Reasonix"],
     },
     // Terminal stays mostly English — these are real CLI outputs.
     TERMINAL: [

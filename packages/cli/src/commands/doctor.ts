@@ -16,6 +16,7 @@ import { execFileSync } from "node:child_process";
 import { accessSync, constants, existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
+import { agentInstalledByName as coreAgentInstalledByName, type AgentEnv } from "@roll/core";
 import { resolveLang, t, v2Catalog, v3Catalog, type Lang } from "@roll/spec";
 import { repoRoot } from "../bridge.js";
 import { generateCatalog } from "./skills.js";
@@ -61,27 +62,6 @@ function emit(line: string): void {
   out.lines.push(line);
 }
 
-// ── _agent_bin_names / _agent_installed_by_name (137-169, 98-109) ────────────
-function agentBinNames(agent: string): string[] | null {
-  switch (agent) {
-    case "claude":
-      return ["claude"];
-    case "kimi":
-      return ["kimi-code", "kimi-cli", "kimi"];
-    case "codex":
-      return ["codex"];
-    case "pi":
-      return ["pi"];
-    case "agy":
-    case "antigravity":
-    case "gemini":
-      return ["agy", "gemini"];
-    case "reasonix":
-      return ["reasonix"];
-    default:
-      return null;
-  }
-}
 function commandOnPath(bin: string): boolean {
   for (const dir of (process.env["PATH"] ?? "").split(delimiter)) {
     if (dir === "") continue;
@@ -98,9 +78,20 @@ function commandOnPath(bin: string): boolean {
 }
 /** Faithful port of bin/roll _agent_installed_by_name(name, dir) (137-169). */
 function agentInstalledByName(agent: string, dir: string): boolean {
-  const bins = agentBinNames(agent);
-  if (bins !== null) return bins.some(commandOnPath);
-  return dir !== "" && existsSync(dir) && safeIsDir(dir); // unknown → dir presence
+  const env: AgentEnv = {
+    home: homedir(),
+    commandOnPath,
+    dirExists: safeIsDir,
+    fileExecutable: (p) => {
+      try {
+        accessSync(p, constants.X_OK);
+        return statSync(p).isFile();
+      } catch {
+        return false;
+      }
+    },
+  };
+  return coreAgentInstalledByName(env, agent, dir);
 }
 function safeIsDir(p: string): boolean {
   try {

@@ -21,54 +21,31 @@
  *   - `_agents_config_slot`         (~237-300): read a slot's agent value.
  *   - `_agents_config_set_slot`     (~309-373): atomic in-place slot rewrite.
  *
- * DUPLICATION NOTE (intentional, dedupe later): a CLI-side port of
- * canonicalAgentName / agentDisplayName / agentBinNames / agentInstalledByName
- * already lives in packages/cli/src/commands/agent-list.ts. core MUST NOT import
- * from cli, so these four are re-ported here and kept byte-consistent with both
- * the bash oracle and the CLI copy. A future card will hoist the shared core
- * version and have the CLI depend on it.
+ * Agent identity is derived from AgentSpec (`AGENTS`) so registry, CLI listing,
+ * doctor/setup probes, and spawn coverage share one first-class roster.
  */
 import { type FileStore, nodeFileStore } from "../backlog/infra-default.js";
+import { AGENTS, canonicalAgentIdentityName, getAgentIdentitySpec } from "./specs.js";
 
 // ── Identity / canonicalization (pure) ───────────────────────────────────────
 
-/** `antigravity`/`gemini` collapse to the canonical `agy`; everything else is
- *  returned verbatim. Provider/model aliases (`openai`, `deepseek`) are handled
- *  by the spec layer, not as first-class registry names. */
 export function canonicalAgentName(name: string): string {
-  return name === "antigravity" || name === "gemini" ? "agy" : name;
+  return canonicalAgentIdentityName(name);
 }
 
 /** Human-facing label. `agy` shows the product name + binary in parens. */
 export function agentDisplayName(name: string): string {
-  return canonicalAgentName(name) === "agy" ? "antigravity (agy)" : name;
+  return getAgentIdentitySpec(name)?.displayName ?? name;
 }
 
 /**
  * agent → binary-name candidates (first found on PATH wins). `null` for an
  * agent with no PATH binary (the bash `*) return 1` arm). Mirrors
- * `_agent_bin_names`. Note bash keys on the RAW input (e.g. `gemini` and `agy`
- * are separate case arms that both yield `agy gemini`), so we do NOT canonicalise
- * before the switch.
+ * `_agent_bin_names`, but the candidate table is derived from `AGENTS`.
  */
 export function agentBinNames(agent: string): string[] | null {
-  switch (agent) {
-    case "claude":
-      return ["claude"];
-    case "codex":
-      return ["codex"];
-    case "agy":
-    case "gemini":
-      return ["agy", "gemini"];
-    case "kimi":
-      return ["kimi-code", "kimi-cli", "kimi"];
-    case "pi":
-      return ["pi"];
-    case "reasonix":
-      return ["reasonix"];
-    default:
-      return null;
-  }
+  const spec = getAgentIdentitySpec(agent);
+  return spec === undefined ? null : [...spec.cliBin];
 }
 
 /**
@@ -78,8 +55,7 @@ export function agentBinNames(agent: string): string[] | null {
  * spec layer, not first-class agent names here.
  */
 export function agentIsKnown(name: string): boolean {
-  const c = canonicalAgentName(name);
-  return agentBinNames(c) !== null;
+  return getAgentIdentitySpec(name) !== undefined;
 }
 
 // ── Installed detection (injected environment probes) ────────────────────────
@@ -120,7 +96,7 @@ export function agentInstalledByName(env: AgentEnv, agent: string, dir?: string)
  * Candidate routable agents. US-AGENT-043 keeps exactly six first-class agent
  * names; provider/model aliases stay in AgentSpec only.
  */
-export const AGENT_REGISTRY_NAMES = ["claude", "kimi", "codex", "pi", "agy", "reasonix"] as const;
+export const AGENT_REGISTRY_NAMES: readonly string[] = AGENTS.map((spec) => spec.name);
 
 /** Agents actually installed on this machine, in registry order. Mirrors
  *  `_agents_installed`. */
@@ -132,7 +108,7 @@ export function agentsInstalled(env: AgentEnv): string[] {
  * First-installed scan order, used as the last-resort routing fallback. It
  * matches the six-agent roster; removed agent tokens are never fallback targets.
  */
-const FIRST_INSTALLED_ORDER = ["claude", "kimi", "codex", "pi", "agy", "reasonix"] as const;
+const FIRST_INSTALLED_ORDER = AGENT_REGISTRY_NAMES;
 
 export function firstInstalledAgent(env: AgentEnv): string | undefined {
   return FIRST_INSTALLED_ORDER.find((a) => agentInstalledByName(env, a));

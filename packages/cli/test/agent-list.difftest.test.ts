@@ -13,7 +13,8 @@ import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { agentListCommand } from "../src/commands/agent-list.js";
+import { AGENTS } from "../../core/src/agent/specs.js";
+import { AGENT_ORDER, agentListCommand } from "../src/commands/agent-list.js";
 import { seedUpdateCheckCache } from "./helpers.js";
 
 const dirs: string[] = [];
@@ -77,6 +78,10 @@ function tsList(env: Record<string, string>): string {
 }
 
 describe("frozen: roll agent list render", () => {
+  it("US-AGENT-044: list order is derived from core AGENTS", () => {
+    expect([...AGENT_ORDER]).toEqual(AGENTS.map((spec) => spec.name));
+  });
+
   it("default current (claude), colors on, en", () => {
     expect(tsList({ ROLL_LANG: "en" })).toMatchInlineSnapshot(`
       "

@@ -7,7 +7,13 @@ import { execFileSync } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
-import { type AgentEnv } from "@roll/core";
+import {
+  AGENT_REGISTRY_NAMES,
+  agentDisplayName,
+  agentInstalledByName as coreAgentInstalledByName,
+  canonicalAgentName,
+  type AgentEnv,
+} from "@roll/core";
 import { resolveLang, t, v2Catalog, type Lang } from "@roll/spec";
 
 // ── i18n (mirrors bash msg/_i18n_resolve_lang inputs) ───────────────────────
@@ -59,36 +65,6 @@ export function currentLang(): Lang {
   return direct;
 }
 
-// ── Agent registry helpers (mirror @roll/core registry) ─────────────────────
-export function canonicalAgentName(name: string): string {
-  return name === "antigravity" || name === "gemini" ? "agy" : name;
-}
-
-function agentDisplayName(a: string): string {
-  return canonicalAgentName(a) === "agy" ? "antigravity (agy)" : a;
-}
-
-function agentBinNames(agent: string): string[] | null {
-  switch (agent) {
-    case "claude":
-      return ["claude"];
-    case "kimi":
-      return ["kimi-code", "kimi-cli", "kimi"];
-    case "codex":
-      return ["codex"];
-    case "pi":
-      return ["pi"];
-    case "agy":
-    case "antigravity":
-    case "gemini":
-      return ["agy", "gemini"];
-    case "reasonix":
-      return ["reasonix"];
-    default:
-      return null;
-  }
-}
-
 /** Real-filesystem {@link AgentEnv} for core registry probes
  *  (`firstInstalledAgent` / core `agentInstalledByName`). */
 export function realAgentEnv(): AgentEnv {
@@ -124,9 +100,7 @@ function commandOnPath(bin: string): boolean {
 }
 
 export function agentInstalledByName(agent: string): boolean {
-  const bins = agentBinNames(agent);
-  if (bins !== null) return bins.some(commandOnPath);
-  return false; // unknown without dir hint
+  return coreAgentInstalledByName(realAgentEnv(), agent);
 }
 
 /** Mirrors _project_agent: local.yaml → .roll.yaml → global config → claude. */
@@ -152,7 +126,7 @@ export function projectAgent(): string {
 }
 
 // ── Entry ────────────────────────────────────────────────────────────────────
-const AGENT_ORDER = ["claude", "kimi", "codex", "pi", "agy", "reasonix"];
+export const AGENT_ORDER = AGENT_REGISTRY_NAMES;
 
 export function agentListCommand(_args: string[]): number {
   const noColor = (process.env["NO_COLOR"] ?? "") !== "";

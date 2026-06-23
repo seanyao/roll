@@ -2,12 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   AGENT_REGISTRY_NAMES,
   agentBinNames,
+  agentDisplayName,
   agentIsKnown,
   agentsInstalled,
   firstInstalledAgent,
   type AgentEnv,
 } from "../src/agent/registry.js";
-import { AGENT_SPECS, getAgentSpec } from "../src/agent/specs.js";
+import { AGENTS, AGENT_SPECS, getAgentIdentitySpec, getAgentSpec } from "../src/agent/specs.js";
 
 const CANONICAL_ROSTER = ["claude", "kimi", "codex", "pi", "agy", "reasonix"] as const;
 const REMOVED_AGENT_TOKENS = ["openclaw", "qwen", "opencode", "cursor", "trae"] as const;
@@ -23,6 +24,16 @@ function envWithBins(bins: readonly string[]): AgentEnv {
 }
 
 describe("US-AGENT-043 canonical agent roster", () => {
+  it("US-AGENT-044: registry identity surfaces are derived from AGENTS", () => {
+    const agentNames = AGENTS.map((spec) => spec.name);
+    expect([...AGENT_REGISTRY_NAMES]).toEqual(agentNames);
+    for (const spec of AGENTS) {
+      expect(agentDisplayName(spec.name)).toBe(spec.displayName);
+      expect(agentBinNames(spec.name)).toEqual([...spec.cliBin]);
+      expect(getAgentIdentitySpec(spec.name)).toBe(spec);
+    }
+  });
+
   it("registry scans exactly the six supported agents", () => {
     expect([...AGENT_REGISTRY_NAMES]).toEqual([...CANONICAL_ROSTER]);
     for (const agent of CANONICAL_ROSTER) {

@@ -168,6 +168,23 @@ function scrub(r: Run, e: Env): Run {
 // Unrolled (inline snapshots are keyed by call site — a loop can't hold distinct
 // per-case frozen values).
 describe("frozen: roll doctor", () => {
+  it("US-AGENT-045: skips removed ai_* keys and displays aliases as canonical agents", () => {
+    const config =
+      "primary_agent: openai\n" +
+      "ai_openai: ~/.codex\n" +
+      "ai_deepseek: ~/.pi/agent\n" +
+      "ai_qwen: ~/.qwen\n" +
+      "ai_cursor: ~/.cursor\n";
+    const e: Env = { home: freshHome(config), cwd: makeGitRepo(), launchd: emptyLaunchd(), lang: "en" };
+    const rendered = scrub(tsDoctor(e), e).stdout;
+    expect(rendered).toContain("codex       CLI not found   config dir missing  (primary)");
+    expect(rendered).toContain("pi          CLI not found   config dir missing");
+    expect(rendered).not.toContain("qwen");
+    expect(rendered).not.toContain("cursor");
+    expect(rendered).not.toContain("deepseek");
+    expect(rendered).not.toContain("openai");
+  });
+
   it("healthy: git repo + config + matching skills + empty launchd (en)", () => {
     const pkg = freshPkg();
     seedCatalog(pkg);

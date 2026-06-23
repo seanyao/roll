@@ -3,6 +3,7 @@ import {
   agentDisplayName,
   agentIsKnown,
   canonicalAgentName,
+  isRemovedAgentName,
   readSlotFromText,
   type AgentEnv,
   type AgentSlot,
@@ -10,7 +11,7 @@ import {
 } from "@roll/core";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { t, v2Catalog } from "@roll/spec";
+import { t, v2Catalog, v3Catalog } from "@roll/spec";
 import { agentListCommand, currentLang, realAgentEnv } from "./agent-list.js";
 import { refreshAggregates as refreshDossierAggregates } from "./index-gen.js";
 
@@ -55,6 +56,7 @@ function warn(line: string): void {
 }
 
 function m(key: string, ...args: string[]): string {
+  if (v3Catalog[key] !== undefined) return t(v3Catalog, currentLang(), key, ...args);
   return t(v2Catalog, currentLang(), key, ...args);
 }
 
@@ -138,6 +140,12 @@ function useCommand(args: string[], deps: AgentCommandDeps): number {
     err(m("agent.use_usage"));
     return 1;
   }
+  // US-AGENT-045 AC4: reject removed agents with a directed message before
+  // falling through to the generic unknown-agent path.
+  if (isRemovedAgentName(raw)) {
+    err(m("agent.use_removed_agent", raw));
+    return 1;
+  }
   const name = canonicalAgentName(raw);
   const { reg, d } = registry(deps);
   if (!agentIsKnown(name) || !reg.isInstalled(name)) {
@@ -197,6 +205,11 @@ function setCommand(args: string[], deps: AgentCommandDeps): number {
     }
     agent = canonicalAgentName(choice);
   } else {
+    // US-AGENT-045 AC4: reject removed agents in set slot too.
+    if (isRemovedAgentName(agent)) {
+      err(m("agent.use_removed_agent", agent));
+      return 1;
+    }
     agent = canonicalAgentName(agent);
     if (!agentIsKnown(agent)) {
       err(m("agent.set_unknown_agent", agent));

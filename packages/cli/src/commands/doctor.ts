@@ -16,7 +16,7 @@ import { execFileSync } from "node:child_process";
 import { accessSync, constants, existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { agentInstalledByName as coreAgentInstalledByName, type AgentEnv } from "@roll/core";
+import { agentInstalledByName as coreAgentInstalledByName, agentIsKnown, canonicalAgentName, type AgentEnv } from "@roll/core";
 import { resolveLang, t, v2Catalog, v3Catalog, type Lang } from "@roll/spec";
 import { repoRoot } from "../bridge.js";
 import { generateCatalog } from "./skills.js";
@@ -121,6 +121,7 @@ function agentSection(p: Palette): void {
     const m = /^primary_agent:\s*(.*)$/.exec(line);
     if (m !== null) primary = (m[1] ?? "").trim();
   }
+  const primaryCanonical = canonicalAgentName(primary);
   const home = homedir();
   for (const line of text.split("\n")) {
     // IFS=: read -r _key _value → split on FIRST colon, value = remainder.
@@ -129,8 +130,10 @@ function agentSection(p: Palette): void {
     const key = line.slice(0, idx);
     const value = line.slice(idx + 1);
     if (!/^ai_/.test(key)) continue;
-    const name = key.slice("ai_".length);
-    if (name === "kimi_code") continue; // dedupe
+    const rawName = key.slice("ai_".length);
+    if (rawName === "kimi_code") continue; // dedupe
+    if (!agentIsKnown(rawName)) continue; // skip removed/unknown agents (US-AGENT-045)
+    const name = canonicalAgentName(rawName);
     let dir = value.split("|")[0] ?? ""; // ${_value%%|*}
     dir = dir.replace(/^ /, ""); // ${_dir# } strip ONE leading space
     if (dir.startsWith("~")) dir = home + dir.slice(1); // ${_dir/#\~/$HOME}
@@ -140,7 +143,7 @@ function agentSection(p: Palette): void {
     const dirExists = safeIsDir(dir)
       ? t(v2Catalog, msgLang(), "doctor.agent_dir_exists")
       : t(v2Catalog, msgLang(), "doctor.agent_dir_missing");
-    const tag = name === primary ? `  (${t(v2Catalog, msgLang(), "doctor.agent_primary_label")})` : "";
+    const tag = name === primaryCanonical ? `  (${t(v2Catalog, msgLang(), "doctor.agent_primary_label")})` : "";
     // printf "  %-10s  %-14s  %s%s\n"
     emit(`  ${padEnd(name, 10)}  ${padEnd(installed, 14)}  ${dirExists}${tag}`);
   }

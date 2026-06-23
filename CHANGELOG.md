@@ -10,6 +10,8 @@
 
 - **交付真相重建不再丢无 PR 号的 story-only merge**：多个只含 story id、没有 `(#PR)` 的合并提交现在按 commit SHA 保留，不会因 `prNumber=0` 互相覆盖；release gate 可稳定识别这类已合主干的卡。(FIX-924) `[feedback-truth-alignment]`
 
+- **旧 agent 配置开始显式迁移/拒绝**：`openai`、`deepseek` 作为 provider alias 会静默迁移到 `codex`、`pi`；`cursor`、`trae`、`qwen`、`opencode`、`openclaw` 等已删除 agent 在 `roll agent use/set` 和 doctor/setup 面上不再静默回退，而是明确过滤或报错。(US-AGENT-045) `[agents]`
+
 - **loop 已合并卡不再回流**：合进 main 的卡会被稳定识别为已交付，不再反复被选回待办。(FIX-399 / FIX-923) `[feedback-truth-alignment]`
 
 - **评审评分池不再太早放弃**：异构 reviewer 都不可用时，会继续尝试同厂可用候选，减少无谓失败。(FIX-911) `[loop-engine]`

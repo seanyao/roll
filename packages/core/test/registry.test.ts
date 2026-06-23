@@ -36,21 +36,26 @@ describe("identity helpers", () => {
     expect(agentDisplayName("reasonix")).toBe("reasonix");
   });
 
-  it("agentBinNames mirrors the pool (kimi/pi/reasonix); deepseek is a model, not an agent", () => {
+  it("agentBinNames mirrors the pool (kimi/pi/reasonix); deepseek→pi alias (US-AGENT-045)", () => {
     expect(agentBinNames("kimi")).toEqual(["kimi-code", "kimi-cli", "kimi"]);
     expect(agentBinNames("pi")).toEqual(["pi"]);
     expect(agentBinNames("reasonix")).toEqual(["reasonix"]);
-    // FIX-399: `deepseek` is a MODEL pi/reasonix load, never a routable agent.
-    expect(agentBinNames("deepseek")).toBeNull();
+    // US-AGENT-045 AC1: deepseek is now a provider alias → pi (silently resolves).
+    expect(agentBinNames("deepseek")).toEqual(["pi"]);
     expect(agentBinNames("nope")).toBeNull();
   });
 
-  it("agentIsKnown: deepseek unknown (a model, not an agent), pool agents known", () => {
-    expect(agentIsKnown("deepseek")).toBe(false);
+  it("agentIsKnown: deepseek/openai known via provider aliases (US-AGENT-045), removed tokens still unknown", () => {
+    expect(agentIsKnown("deepseek")).toBe(true);
+    expect(agentIsKnown("openai")).toBe(true);
     expect(agentIsKnown("kimi")).toBe(true);
     expect(agentIsKnown("pi")).toBe(true);
     expect(agentIsKnown("reasonix")).toBe(true);
     expect(agentIsKnown("totally-made-up")).toBe(false);
+    // Removed agents (US-AGENT-043) are NOT known.
+    expect(agentIsKnown("cursor")).toBe(false);
+    expect(agentIsKnown("qwen")).toBe(false);
+    expect(agentIsKnown("opencode")).toBe(false);
   });
 });
 
@@ -183,6 +188,18 @@ describe("slot config read", () => {
     expect(readSlotFromText(txt, "easy")).toEqual({ agent: "kimi" });
     expect(readSlotFromText(txt, "default")).toEqual({ agent: "pi" });
     expect(readSlotFromText(txt, "hard")).toBeUndefined();
+  });
+
+  it("US-AGENT-045 AC1: reads provider aliases as canonical agents", () => {
+    const txt =
+      "schema: v3\n" +
+      "easy: { agent: openai }\n" +
+      "default: { agent: deepseek, model: deepseek/deepseek-v4-pro:high }\n";
+    expect(readSlotFromText(txt, "easy")).toEqual({ agent: "codex" });
+    expect(readSlotFromText(txt, "default")).toEqual({
+      agent: "pi",
+      model: "deepseek/deepseek-v4-pro:high",
+    });
   });
 
   it("reads inline flow form WITH a model (effort folded into the model string)", () => {

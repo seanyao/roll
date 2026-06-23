@@ -177,8 +177,8 @@ complexity and how many TCR iterations the agent burned. Switching to Kimi /
 DeepSeek drops this 5–10× at the cost of slower convergence.
 
 **Non-Claude agents:** token/cost capture is per-agent. As of the current
-release, cycles run on **Claude, pi (DeepSeek), OpenAI (codex), Gemini, Kimi,
-and Qwen** show real token counts and cost. Agents without a usage plugin yet —
+release, cycles run on **Claude, pi (DeepSeek), OpenAI (codex), Gemini, Kimi**
+show real token counts and cost. Agents without a usage plugin yet —
 notably **OpenCode** — still show `—/—` in the token/cost columns. Support for a
 new agent does not appear automatically; it ships as a small per-agent plugin
 (see `lib/agent_usage/README.md`).

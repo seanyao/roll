@@ -80,7 +80,7 @@ Choreography is the pattern behind Unix pipelines, microservices event buses, an
 
 ## What This Looks Like in Practice
 
-**DAG approach** — "Add openai agent alias":
+**DAG approach** — "Add a new agent":
 
 ```
 Planner decomposes:
@@ -98,7 +98,7 @@ If Agent 3 times out, Agents 4 and 5 wait. The orchestrator must decide: retry? 
 
 ```
 main loop fires:
-  → reads BACKLOG → picks "US-AI-004: openai agent alias"
+  → reads BACKLOG → picks "US-AI-004: add a new agent"
   → writes code in TCR micro-steps (each step: test → commit or revert)
   → opens PR
 

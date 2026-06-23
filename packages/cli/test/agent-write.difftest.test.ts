@@ -6,7 +6,7 @@
  * they never spawn `bin/roll` and never inspect the real machine's installed
  * agents.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -42,6 +42,7 @@ function run(
     readLine?: () => string | undefined;
     listCommand?: (args: string[]) => number;
     before?: (cwd: string) => void;
+    refreshAggregates?: (cwd: string) => void;
   } = {},
 ): { code: number; stdout: string; stderr: string; cwd: string } {
   const cwd = tempProject();
@@ -67,6 +68,7 @@ function run(
       env: env(opts.installed ?? []),
       readLine: opts.readLine,
       listCommand: opts.listCommand,
+      refreshAggregates: opts.refreshAggregates ?? (() => {}),
     });
   } finally {
     process.chdir(saveCwd);
@@ -182,5 +184,81 @@ describe("roll agent write surface", () => {
     const legacy = join(r.cwd, ".roll.yaml");
     expect(existsSync(legacy)).toBe(true);
     expect(readFileSync(legacy, "utf8")).toBe("other: kept\n");
+  });
+
+  it("FIX-378 AC1: use refreshes dossier aggregates after successful slot writes", () => {
+    let refreshedCwd = "";
+    const r = run(["use", "kimi"], {
+      installed: ["kimi"],
+      refreshAggregates: (cwd) => {
+        refreshedCwd = cwd;
+        expect(readFileSync(join(cwd, ".roll", "agents.yaml"), "utf8")).toContain("default: { agent: kimi }");
+      },
+    });
+    expect(r.code).toBe(0);
+    expect(r.stderr).toBe("");
+    expect(realpathSync(refreshedCwd)).toBe(realpathSync(r.cwd));
+  });
+
+  it("FIX-378 AC2: set refreshes dossier aggregates after a successful slot write", () => {
+    let refreshedCwd = "";
+    const r = run(["set", "fallback", "pi"], {
+      refreshAggregates: (cwd) => {
+        refreshedCwd = cwd;
+        expect(readFileSync(join(cwd, ".roll", "agents.yaml"), "utf8")).toContain("fallback: { agent: pi }");
+      },
+    });
+    expect(r.code).toBe(0);
+    expect(r.stderr).toBe("");
+    expect(realpathSync(refreshedCwd)).toBe(realpathSync(r.cwd));
+  });
+
+  it("FIX-378 AC3: refresh failures warn but keep the committed slot write successful", () => {
+    let called = false;
+    const r = run(["set", "easy", "pi"], {
+      refreshAggregates: () => {
+        called = true;
+        throw new Error("disk full");
+      },
+    });
+    expect(r.code).toBe(0);
+    expect(called).toBe(true);
+    expect(r.stdout).toBe("[roll] easy → pi  saved\n");
+    expect(r.stderr).toContain("[roll] WARN dossier refresh failed after agent slot update");
+    expect(r.stderr).toContain("Error: disk full");
+    expect(readFileSync(join(r.cwd, ".roll", "agents.yaml"), "utf8")).toContain("easy: { agent: pi }");
+  });
+
+  it("FIX-378 AC3: read-only view and list do not refresh dossier aggregates", () => {
+    let calls = 0;
+    const refreshAggregates = (): void => {
+      calls += 1;
+    };
+    const view = run([], { refreshAggregates });
+    const list = run(["list"], {
+      refreshAggregates,
+      listCommand: () => 0,
+    });
+    expect(view.code).toBe(0);
+    expect(list.code).toBe(0);
+    expect(calls).toBe(0);
+  });
+
+  it("FIX-378: failed write commands do not refresh dossier aggregates", () => {
+    let calls = 0;
+    const refreshAggregates = (): void => {
+      calls += 1;
+    };
+    expect(run(["use", "qwen"], { refreshAggregates }).code).toBe(1);
+    expect(run(["set", "bogus", "claude"], { refreshAggregates }).code).toBe(1);
+    expect(run(["set", "easy", "deepseek"], { refreshAggregates }).code).toBe(1);
+    expect(calls).toBe(0);
+  });
+
+  it("FIX-378 AC4: every agent command setSlot mutation is paired with the refresh helper", () => {
+    const src = readFileSync(`${repoRoot()}/packages/cli/src/commands/agent.ts`, "utf8");
+    expect([...src.matchAll(/reg\.setSlot\(/g)]).toHaveLength(2);
+    expect([...src.matchAll(/refreshAgentDossier\(deps\);/g)]).toHaveLength(2);
+    expect(src).not.toContain("writeFileSync(\".roll/agents.yaml\"");
   });
 });

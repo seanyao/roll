@@ -14,6 +14,8 @@
 
 - **ac-map 补救草稿不再只有引用没有证据文件**：loop 自动生成验收映射草稿时，会同步写出提交、改动文件和测试信号文本，方便复评者逐条确认；草稿状态仍需被确认后才可过 attest 闸。(FIX-912) `[acceptance-evidence]`
 
+- **切换 agent 槽位后档案页自动刷新**：`roll agent use` / `roll agent set` 写入槽位后会 best-effort 重建静态档案聚合，Casting/Agents 视图不用等下一次手动 `roll index` 才更新；刷新失败只 WARN，不回滚已写槽位。(FIX-378) `[delivery-dossier]`
+
 ## v3.624.1 — 2026-06-24
 
 ### 新功能

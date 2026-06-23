@@ -82,6 +82,16 @@ describe("checkFeaturesCatalog — code↔backlog Done↔merge (FIX-375)", () =>
     expect(checkFeaturesCatalog(dir).status).toBe("pass");
   });
 
+  it("passes when a no-PR story-only delta card has a Done row with a merge sha ref", () => {
+    const dir = makeProject({
+      deltaSubjects: ["FIX-925: story-only merge"],
+    });
+    const sha = execFileSync("git", ["-C", dir, "rev-parse", "--short=12", "HEAD"], { encoding: "utf8" }).trim();
+    mkdirSync(join(dir, ".roll"), { recursive: true });
+    writeFileSync(join(dir, ".roll", "backlog.md"), `| [FIX-925](x) | thing | ✅ Done · merged ${sha} |\n`);
+    expect(checkFeaturesCatalog(dir).status).toBe("pass");
+  });
+
   it("fails when a merged delta card's row is not Done (claim/merge drift)", () => {
     const dir = makeProject({
       deltaSubjects: ["Fix: FIX-902 thing (#2)"],
@@ -122,6 +132,16 @@ describe("checkTruthLive — structured delivery truth release gate (FIX-391)", 
     expect(checkTruthLive(dir).status).toBe("pass");
   });
 
+  it("passes when a release-delta no-PR Done row is backed by matching merge sha truth", () => {
+    const dir = makeProject({
+      deltaSubjects: ["FIX-925: story-only merge"],
+    });
+    const sha = execFileSync("git", ["-C", dir, "rev-parse", "--short=12", "HEAD"], { encoding: "utf8" }).trim();
+    mkdirSync(join(dir, ".roll"), { recursive: true });
+    writeFileSync(join(dir, ".roll", "backlog.md"), `| [FIX-925](x) | thing | ✅ Done · merged ${sha} |\n`);
+    expect(checkTruthLive(dir).status).toBe("pass");
+  });
+
   it("fails when a release-delta story has no backlog row", () => {
     const dir = makeProject({
       deltaSubjects: ["Fix: FIX-392 thing (#392)"],
@@ -151,6 +171,17 @@ describe("checkTruthLive — structured delivery truth release gate (FIX-391)", 
     expect(r.status).toBe("fail");
     expect(r.gaps.join("\n")).toContain("#999");
     expect(r.gaps.join("\n")).toContain("PR 394");
+  });
+
+  it("fails when Done row merge sha disagrees with queryStoryDelivery", () => {
+    const dir = makeProject({
+      deltaSubjects: ["FIX-926: story-only merge"],
+      backlog: "| [FIX-926](x) | thing | ✅ Done · merged deadbee |\n",
+    });
+    const r = checkTruthLive(dir);
+    expect(r.status).toBe("fail");
+    expect(r.gaps.join("\n")).toContain("merged deadbee");
+    expect(r.gaps.join("\n")).toContain("does not match");
   });
 
   it("reads story ids from commit bodies, matching GitHub merge-button shape", () => {

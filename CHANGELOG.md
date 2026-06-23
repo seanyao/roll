@@ -14,6 +14,8 @@
 
 - **交付真相重建补齐无 PR 号 story-only merge 的跨阶段去重**：`ensureDeliveriesFresh` 两阶段 git log 合并现在按 `pr:<n>` / `sha:<commit>` 去重，避免某个 `prNumber=0` 事实挡掉后续已合主干的 story-only squash commit。(FIX-925) `[feedback-truth-alignment]`
 
+- **release gate 接受无 PR 号交付的 merge SHA 证据**：Done 行现在可用 `merged <sha>` 作为可验证 merge ref；truth-live 在 PR 号缺失时校验 merge commit，避免 story-only squash merge 被迫伪造 PR ref。(FIX-926) `[feedback-truth-alignment]`
+
 - **loop 已合并卡不再回流**：合进 main 的卡会被稳定识别为已交付，不再反复被选回待办。(FIX-399 / FIX-923) `[feedback-truth-alignment]`
 
 - **评审评分池不再太早放弃**：异构 reviewer 都不可用时，会继续尝试同厂可用候选，减少无谓失败。(FIX-911) `[loop-engine]`

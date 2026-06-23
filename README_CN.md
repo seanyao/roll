@@ -53,6 +53,7 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 | `roll status` | 判定优先的真相摘要，读自同一份快照——LOOP · CYCLE · RELEASE · STORY，STORY 行带 attest 验收覆盖率(`done ≡ 已合并 ∧ 已验收`)——其后是约定/AI 客户端同步健康 |
 | `roll pulse [--json]` | 今日交付脉搏：窗口内周期数、已合 merged 数、已验收 attested 数，外加一条来自故事光谱的 ASCII 火花线。双语中/EN。`--json` 输出机读 JSON |
 | `roll doctor [skills]` | 环境与安装体检(agents、技能清单、plist、launchd lanes) |
+| `roll daemon <start\|stop\|status>` | 可选启用的只读实时控制台 daemon；默认 `127.0.0.1:7077`，记录 `.roll/loop/daemon.pid`，loop 从不自动启动它 |
 | `roll tune [reset]` | 只建议不自动应用的自调参报告 |
 | **卡片与证据** | |
 | `roll idea "<一句话描述>"` | 收卡:自动分类、编号、lint、推断 epic、铸全套卡夹——用户加卡的唯一入口 |

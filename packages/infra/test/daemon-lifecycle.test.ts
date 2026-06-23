@@ -1,8 +1,8 @@
 /**
  * US-OBS-024 — daemon lifecycle tests (pid tracking, liveness).
  *
- * Pure function tests; no real process spawn. Spawn is tested at the
- * integration level (daemon test suite in packages/daemon).
+ * Pure function tests; no real process spawn. The CLI daemon test covers the
+ * detached child-spawn path with a real Node shim.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {

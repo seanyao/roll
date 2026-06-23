@@ -29,6 +29,9 @@ importers:
       '@roll/core':
         specifier: workspace:*
         version: link:../core
+      '@roll/daemon':
+        specifier: workspace:*
+        version: link:../daemon
       '@roll/infra':
         specifier: workspace:*
         version: link:../infra

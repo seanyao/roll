@@ -29,7 +29,7 @@
  * step 10.6 then only needs to CONFIRM or CORRECT the statuses — the
  * structure + evidence chain is already done.
  */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { acForStory } from "@roll/core";
 import { cardArchiveDir } from "../lib/archive.js";
@@ -240,6 +240,41 @@ export function generateAcMapDraft(
   }
 
   return JSON.stringify(entries, null, 2) + "\n";
+}
+
+/**
+ * FIX-912 follow-up: the draft's evidence refs must point at files that exist.
+ * `generateAcMapDraft` emits stable refs under `../evidence/`; this materializes
+ * those refs from the same collected facts before attest renders the report.
+ */
+export function writeAcMapDraftEvidenceFiles(
+  worktreeCwd: string,
+  storyId: string,
+  evidence: DraftEvidence,
+): void {
+  const evidenceDir = join(cardArchiveDir(worktreeCwd, storyId), "evidence");
+  mkdirSync(evidenceDir, { recursive: true });
+  writeFileSync(
+    join(evidenceDir, `commits-${storyId}.txt`),
+    `${evidence.commitLines.length === 0 ? "(no commits observed)" : evidence.commitLines.join("\n")}\n`,
+  );
+  writeFileSync(
+    join(evidenceDir, `changed-files-${storyId}.txt`),
+    `${evidence.changedFilenames.length === 0 ? "(no changed files observed)" : evidence.changedFilenames.join("\n")}\n`,
+  );
+  writeFileSync(
+    join(evidenceDir, `test-output-${storyId}.txt`),
+    [
+      "Harness ac-map draft test signals",
+      "",
+      "Changed test files:",
+      ...(evidence.changedFilenames.filter((f) => /(?:^|[\\/])(?:test|tests|__tests__)[\\/]|(?:test|spec)\.[cm]?[jt]sx?$/i.test(f)).map((f) => `- ${f}`)),
+      "",
+      "Diff stat:",
+      ...(evidence.diffStatLines.length === 0 ? ["(no diff stat observed)"] : evidence.diffStatLines),
+      "",
+    ].join("\n"),
+  );
 }
 
 /**

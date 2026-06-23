@@ -151,7 +151,7 @@ import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, runPeerGate }
 import { declaresAnySurface, deliverableCmdsForStory, readAttestGateMode, rejectedDeliverableCmdsForStory, runAttestGate, screenshotExemption, storyRequiresScreenshot, storySpecPath, verificationReportHasContent, verificationReportPath, webCaptureTargetsForStory } from "./attest-gate.js";
 import { recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
 import { validateStoryVisualEvidence } from "../lib/design-visual-evidence.js";
-import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, autoAttachScreenshotToAcMap, buildAcMapRemediationPrompt, generateAcMapDraft, needsAcMapRemediation, type DraftEvidence } from "./attest-remediation.js";
+import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, autoAttachScreenshotToAcMap, buildAcMapRemediationPrompt, generateAcMapDraft, needsAcMapRemediation, writeAcMapDraftEvidenceFiles, type DraftEvidence } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
 import { buildPairScorePrompt, buildReviewPrompt, enabledPairingStages, parsePairScoreOutput, retryPeerConsult, runPairing, runScorePairing, type PairEvent, type PairReview } from "./pairing-gate.js";
 import { realAgentEnv } from "../commands/agent-list.js";
@@ -1742,6 +1742,7 @@ export async function executeCommand(
               const gitEvidence = await collectDraftEvidence(ports.paths.worktreePath);
               const draftJson = generateAcMapDraft(specText, storyId, gitEvidence);
               if (draftJson !== null) {
+                writeAcMapDraftEvidenceFiles(ports.paths.worktreePath, storyId, gitEvidence);
                 writeFileSync(acMapPath(ports.paths.worktreePath, storyId), draftJson);
                 ports.events.appendEvent(ports.paths.eventsPath, {
                   type: "attest:draft-generated",

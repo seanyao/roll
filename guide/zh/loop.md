@@ -335,8 +335,6 @@ cycle cleanly. Next cycle picks up the first smaller sub-story.
 | OpenAI（codex） | ✅ 支持 |
 | Gemini | ✅ 支持 |
 | Kimi | ✅ 支持 |
-| Qwen | ✅ 支持 |
-| OpenCode | ❌ 显示 `—/—` |
 
 没有插件的 agent 退回 `—/—` 占位符。新增 agent 是一个小的按 agent 插件
 （`lib/agent_usage/<agent>.py`），不会自动出现。五步走 howto 见

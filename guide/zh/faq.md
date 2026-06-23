@@ -159,7 +159,7 @@ Claude Opus 4.x 上典型单条 story 成本：**$0.5 – $3**，看故事复杂
 TCR 来回次数。切到 Kimi / DeepSeek 能便宜 5–10 倍，代价是收敛慢一点。
 
 **非 Claude agent：** token/cost 抓取是按 agent 分别支持的。截至当前版本，跑在
-**Claude、pi（DeepSeek）、OpenAI（codex）、Gemini、Kimi、Qwen** 上的 cycle
+**Claude、pi（DeepSeek）、OpenAI（codex）、Gemini、Kimi** 上的 cycle
 都能看到真实 token 数和成本。还没有 usage 插件的 agent —— 主要是 **OpenCode** ——
 token/cost 列仍显示 `—/—`。新 agent 的支持不会自动出现，需要落一个小的按 agent
 插件（见 `lib/agent_usage/README.md`）。

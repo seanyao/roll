@@ -3,24 +3,16 @@
 Roll supports multiple AI coding agents. Every agent gets the same conventions
 and skills — switching agents does not require changing your workflow.
 
-The `openai` agent name is an alias that dispatches to the Codex CLI (`codex`).
-Use `roll agent use openai` to select it — the same binary is invoked.
-
 ## Supported Agents
 
 | Agent | CLI command | Notes |
 |-------|-------------|-------|
 | Claude Code | `claude` | Default primary agent |
 | Kimi CLI | `kimi-code` (legacy: `kimi-cli` / `kimi`) | Good fallback; supports peer review. Config dir: `~/.kimi-code/` (legacy `~/.kimi/` still recognized) |
-| DeepSeek TUI | `ai_deepseek` | Local or API |
-| Codex CLI | `codex` | OpenAI |
-| OpenAI (alias) | `openai` | Alias for `codex`. Install: `npm install -g @openai/codex` |
+| Codex CLI | `codex` | OpenAI; the `openai` alias still resolves to codex. Install: `npm install -g @openai/codex` |
 | Antigravity | `agy` | Successor to the Google Gemini CLI; reuses `~/.gemini/` + `GEMINI.md`. Select with `roll agent use antigravity` (legacy alias `gemini` still accepted). Install: `npm install -g @antigravity/agy` |
-| Pi (pi-coding-agent) | `pi` | |
+| Pi (pi-coding-agent) | `pi` | The `deepseek` alias still resolves to pi. |
 | Reasonix | `reasonix` | DeepSeek-native coding agent. Install: `npm i -g reasonix@next`; requires `DEEPSEEK_API_KEY` |
-| Trae IDE | (IDE-based) | project_rules.md sync |
-| opencode | `opencode` | AGENTS.md sync |
-| Qwen | `qwen` | Alibaba Cloud / DashScope |
 
 ## Adding an Agent
 

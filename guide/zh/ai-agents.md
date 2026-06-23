@@ -2,23 +2,16 @@
 
 Roll 支持多种 AI 编码 Agent。每个 Agent 使用相同的约定和技能——切换 Agent 不需要改变工作流。
 
-`openai` Agent 名称是通往 Codex CLI（`codex`）的别名。使用 `roll agent use openai` 选择它——实际调用的是同一个二进制文件。
-
 ## 支持的 Agent
 
 | Agent | CLI 命令 | 备注 |
 |-------|----------|------|
 | Claude Code | `claude` | 默认主 Agent |
 | Kimi CLI | `kimi-code`（旧版回退：`kimi-cli` / `kimi`） | 良好备用；支持 peer review。配置目录：`~/.kimi-code/`（旧版 `~/.kimi/` 仍可识别） |
-| DeepSeek TUI | `ai_deepseek` | 本地或 API |
-| Codex CLI | `codex` | OpenAI |
-| OpenAI（别名） | `openai` | `codex` 的别名。安装：`npm install -g @openai/codex` |
+| Codex CLI | `codex` | OpenAI；`openai` 别名仍可解析到 codex。安装：`npm install -g @openai/codex` |
 | Antigravity | `agy` | Google Gemini CLI 的继任者，复用 `~/.gemini/` 与 `GEMINI.md`。用 `roll agent use antigravity` 选择（旧别名 `gemini` 仍可识别）。安装：`npm install -g @antigravity/agy` |
-| Pi (pi-coding-agent) | `pi` | |
+| Pi (pi-coding-agent) | `pi` | `deepseek` 别名仍可解析到 pi。 |
 | Reasonix | `reasonix` | DeepSeek 原生 coding agent。安装：`npm i -g reasonix@next`；需要 `DEEPSEEK_API_KEY` |
-| Trae IDE | （IDE 内置） | project_rules.md 同步 |
-| opencode | `opencode` | AGENTS.md 同步 |
-| Qwen | `qwen` | 阿里云 / DashScope |
 
 ## 新增 Agent
 

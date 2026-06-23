@@ -68,7 +68,7 @@ loop_safety:
 
 ## Agent 安装
 
-- `roll agent use openai` 实际调用 Codex CLI。安装方式：
+- `roll agent use codex` 实际调用 Codex CLI。安装方式：
   `npm install -g @openai/codex`
 - `roll agent use antigravity`（别名：`agy`、旧别名 `gemini`）实际调用 Antigravity CLI。安装方式：
   `npm install -g @antigravity/agy`

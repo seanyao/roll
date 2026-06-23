@@ -383,8 +383,6 @@ falls back to the two-part `in/out` format.
 | OpenAI (codex) | ✅ supported |
 | Gemini | ✅ supported |
 | Kimi | ✅ supported |
-| Qwen | ✅ supported |
-| OpenCode | ❌ shows `—/—` |
 
 Agents without a plugin fall back to a `—/—` placeholder. Adding a new agent is
 a small per-agent plugin (`lib/agent_usage/<agent>.py`) — it does not happen

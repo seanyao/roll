@@ -80,7 +80,7 @@ Loop 之间从不直接调用对方。完全通过 artifact 协调。
 
 ## 实际效果对比
 
-**DAG 方案**——"添加 openai agent 别名"：
+**DAG 方案**——"新增 Agent"：
 
 ```
 规划器拆解：
@@ -98,7 +98,7 @@ Loop 之间从不直接调用对方。完全通过 artifact 协调。
 
 ```
 主 loop 触发：
-  → 读 BACKLOG → 选 "US-AI-004: openai agent 别名"
+  → 读 BACKLOG → 选 "US-AI-004: 新增 agent"
   → TCR 微步骤写代码（每步：测试 → 提交 或 回滚）
   → 开 PR
 

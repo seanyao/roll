@@ -6,7 +6,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { indexCommand } from "../src/commands/index-gen.js";
 import { reconciledLedger, cyclesLedgerJson } from "../src/commands/cycles.js";
@@ -271,6 +271,34 @@ describe("US-DOSSIER-010 — truth.json next to index.html", () => {
     });
     const html = readFileSync(join(p, ".roll", "features", "index.html"), "utf8");
     expect(html).toContain("APE-PR");
+  });
+
+  it("US-OBS-019: roll index writes reachable-only project rows into truth.json", async () => {
+    const p = project(REPO_ROOT);
+    const tempRow = mkdtempSync(join(tmpdir(), "roll-truthsnap-project-row-"));
+    dirs.push(tempRow);
+    const sandboxRegistry = join(process.env["ROLL_HOME"]!, ".roll", "projects.json");
+    mkdirSync(dirname(sandboxRegistry), { recursive: true });
+    writeFileSync(
+      sandboxRegistry,
+      JSON.stringify([
+        { name: "real", slug: "real", path: realpathSync(p), releaseTag: "v1.0.0", verdict: "pass" },
+        { name: "deleted", slug: "deleted", path: join(p, "deleted-project") },
+        { name: "tmp", slug: "tmp", path: tempRow },
+      ], null, 2) + "\n",
+    );
+
+    process.env["ROLL_RENDER_NOW"] = "2026-06-13T00:00:00Z";
+    await runIndex(p);
+
+    const snap = JSON.parse(readFileSync(join(p, ".roll", "features", "truth.json"), "utf8")) as {
+      projects?: Array<{ slug: string; path: string }>;
+    };
+    const projects = snap.projects ?? [];
+    expect(projects.map((row) => row.slug)).toContain("real");
+    expect(projects.map((row) => row.slug)).not.toContain("deleted");
+    expect(projects.map((row) => row.slug)).not.toContain("tmp");
+    expect(projects.map((row) => row.path)).toContain(realpathSync(p));
   });
 
   // FIX-283 (AC3) — robust tmp-skip: a tmp fixture cwd is skipped REGARDLESS of

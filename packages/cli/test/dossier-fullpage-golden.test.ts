@@ -26,11 +26,7 @@ import { join } from "node:path";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { serializeTruthSnapshot } from "@roll/spec";
 import { collectDossierState } from "@roll/core";
-import {
-  renderTruthConsole,
-  type ProjectRegistryEntry,
-  type TruthConsoleInput,
-} from "../src/lib/truth-console.js";
+import { renderTruthConsole, type TruthConsoleInput } from "../src/lib/truth-console.js";
 import { collectCasting } from "../src/lib/casting.js";
 import { renderState } from "../src/render.js";
 
@@ -242,7 +238,6 @@ function buildInput(snapshot: ReturnType<typeof collectDossierState>): TruthCons
     charter,
     releaseScope,
     githubSlug: "seanyao/roll",
-    projects: [] as ProjectRegistryEntry[],
   };
 }
 

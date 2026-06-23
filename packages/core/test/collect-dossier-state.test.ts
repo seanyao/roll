@@ -209,4 +209,24 @@ describe("collectDossierState — US-OBS-016 view-model selector", () => {
       href: "#backlog/todo",
     });
   });
+
+  it("US-OBS-019: filters project switcher rows inside collectDossierState", () => {
+    const cwd = fixture();
+    const realProject = realpathSync(process.cwd());
+    const tempProject = realpathSync(mkdtempSync(join(tmpdir(), "roll-cds-project-row-")));
+    dirs.push(tempProject);
+    const deps: CollectorDeps = {
+      collectProjects: () => [
+        { name: "real", slug: "real", path: realProject, releaseTag: "v1.0.0", verdict: "pass" },
+        { name: "deleted", slug: "deleted", path: join(tempProject, "deleted") },
+        { name: "tmp", slug: "tmp", path: tempProject },
+      ],
+    };
+
+    const snapshot = collectDossierState(cwd, { deps });
+
+    expect(snapshot.projects).toEqual([
+      { name: "real", slug: "real", path: realProject, releaseTag: "v1.0.0", verdict: "pass" },
+    ]);
+  });
 });

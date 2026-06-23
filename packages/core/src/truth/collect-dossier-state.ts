@@ -9,11 +9,12 @@
  * the daemon and tests. The CLI wires the full reconciled collectors for
  * byte-identical output.
  */
-import type { StoryEvidenceFlags, TruthSnapshot, TruthSnapshotLoop, TruthSnapshotOnDeck, TruthSnapshotStoryEntry } from "@roll/spec";
+import type { StoryEvidenceFlags, TruthSnapshot, TruthSnapshotLoop, TruthSnapshotOnDeck, TruthSnapshotProject, TruthSnapshotStoryEntry } from "@roll/spec";
 import { classifyStatus } from "@roll/spec";
 import { buildTruthSnapshot } from "./selectors.js";
 import { collectDossier } from "./dossier-collect.js";
 import { parseBacklog } from "../backlog/store.js";
+import { reachableProjects } from "../projects/reachability.js";
 import {
   deriveDeliveryLadder,
   countLegacyStories,
@@ -39,6 +40,9 @@ export type CollectLoopHeartbeatFn = (cwd: string) => TruthSnapshotLoop;
 /** Probe on-disk evidence flags for one story. */
 export type CollectEvidenceFlagsFn = (cwd: string, story: { id: string; epic: string }) => StoryEvidenceFlags;
 
+/** Collect reachable project switcher rows from the shared registry. */
+export type CollectProjectsFn = (cwd: string) => readonly TruthSnapshotProject[];
+
 /** All injectable collectors. Omit to use the default best-effort implementation. */
 export interface CollectorDeps {
   buildRunCache?: BuildDossierRunCache;
@@ -46,6 +50,7 @@ export interface CollectorDeps {
   collectTruthBoard?: CollectTruthBoardFn;
   collectLoopHeartbeat?: CollectLoopHeartbeatFn;
   collectEvidenceFlags?: CollectEvidenceFlagsFn;
+  collectProjects?: CollectProjectsFn;
 }
 
 // ── Default best-effort collectors (node:fs only, no git/launchd) ────────────
@@ -243,6 +248,7 @@ function defaultCollectEvidenceFlags(cwd: string, story: { id: string; epic: str
 
 function defaultBuildRunCache(_cwd: string): unknown { return null; }
 function defaultMergeEvidence(_cache: unknown, _id: string): boolean { return false; }
+function defaultCollectProjects(_cwd: string): readonly TruthSnapshotProject[] { return []; }
 
 function collectOnDeck(cwd: string, epics: ReturnType<typeof collectDossier>): TruthSnapshotOnDeck {
   const byId = new Map<string, { epic: string; title: string }>();
@@ -299,6 +305,7 @@ export function collectDossierState(
   const collectTruthBoard = deps.collectTruthBoard ?? defaultCollectTruthBoard;
   const collectLoopHeartbeat = deps.collectLoopHeartbeat ?? defaultCollectLoopHeartbeat;
   const collectEvidenceFlags = deps.collectEvidenceFlags ?? defaultCollectEvidenceFlags;
+  const collectProjects = deps.collectProjects ?? defaultCollectProjects;
   const nowSec = renderNowSec();
 
   // 1. Collect epics (walk .roll/features/, read backlog, classify stories)
@@ -336,6 +343,9 @@ export function collectDossierState(
   // 4.5. On Deck is backlog-primary: folders only provide deep links.
   const onDeck = collectOnDeck(cwd, epics);
 
+  // 4.6. Project switcher rows are filtered at the shared read selector.
+  const projects = reachableProjects(collectProjects(cwd));
+
   // 5. Assemble snapshot via truth selector
   return buildTruthSnapshot({
     generatedAt: truth.generatedAt ?? iso(nowSec),
@@ -347,6 +357,7 @@ export function collectDossierState(
     ...(truth.release !== undefined ? { release: truth.release } : {}),
     loop,
     onDeck,
+    ...(projects.length > 0 ? { projects } : {}),
     stories: storyRegistry,
   });
 }

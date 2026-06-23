@@ -1590,8 +1590,34 @@ export async function executeCommand(
       // written: the attest gate then fails loud (`missing peer review score`)
       // and the cycle honestly fails — there is no runner-derived fallback.
       if (commitsAhead > 0 && storyId !== "") {
-        const scorePeer = async (peer: string, summary: string, timeoutMs: number): Promise<import("./pairing-gate.js").PairScore | null> => {
-          const prompt = buildPairScorePrompt(summary);
+        // FIX-910 — emit a per-attempt score-stage failure event so every null
+        // return from a scorer is OBSERVABLE (no more silently swallowed nulls).
+        // The cause distinguishes unparseable / timeout / auth-block / exit-error.
+        const emitScoreFailure = (peer: string, cause: "unparseable" | "timeout" | "auth-block" | "exit-error", detail?: string): void => {
+          ports.events.appendEvent(ports.paths.eventsPath, {
+            type: "pair:score-failure",
+            cycleId: ctx.cycleId ?? "",
+            peer,
+            cause,
+            ...(detail !== undefined ? { detail: detail.slice(0, 200) } : {}),
+            stage: "score",
+            ts: eventTs(ports),
+          });
+        };
+        // FIX-910 — single attempt wrapper: try spawning a scorer and parsing its
+        // output. Returns the parsed score on success, or the failure cause on
+        // null (after calling attributeBlockCause for auth/network detection).
+        const tryScoreOnce = async (
+          peer: string,
+          prompt: string,
+          timeoutMs: number,
+        ): Promise<
+          | { outcome: "parsed"; parsed: import("./pairing-gate.js").PairScore }
+          | { outcome: "unparseable"; detail: string }
+          | { outcome: "timeout"; detail: string }
+          | { outcome: "auth-block"; detail: string }
+          | { outcome: "exit-error"; detail: string }
+        > => {
           let res;
           try {
             res = await Promise.race([
@@ -1604,22 +1630,54 @@ export async function executeCommand(
               new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs).unref()),
             ]);
           } catch (e) {
-            // FIX-363: attribute the score-stage failure too (the "missing peer
-            // review score" block originates here) so an external block surfaces.
-            await attributeBlockCause(peer, "error", e instanceof Error ? e.message : String(e), "score");
-            return null;
+            const detail = e instanceof Error ? e.message : String(e);
+            await attributeBlockCause(peer, "error", detail, "score");
+            return { outcome: "auth-block", detail };
           }
           if (res === null || res.timedOut) {
-            await attributeBlockCause(peer, "timeout", res !== null ? `${res.stdout}\n${res.stderr}` : "", "score");
-            return null;
+            const detail = res !== null ? `${res.stdout}\n${res.stderr}` : "";
+            const blockCause = await attributeBlockCause(peer, "timeout", detail, "score");
+            // external block (auth/network) surfaced by attributeBlockCause → auth-block;
+            // genuine slowness with no block signature → timeout.
+            return blockCause === "auth" || blockCause === "network"
+              ? { outcome: "auth-block", detail }
+              : { outcome: "timeout", detail };
           }
           if (res.exitCode !== 0) {
-            await attributeBlockCause(peer, "error", `${res.stdout}\n${res.stderr}`, "score");
-            return null;
+            const detail = `${res.stdout}\n${res.stderr}`;
+            const blockCause = await attributeBlockCause(peer, "error", detail, "score");
+            return blockCause === "auth" || blockCause === "network"
+              ? { outcome: "auth-block", detail }
+              : { outcome: "exit-error", detail };
           }
           const parsed = parsePairScoreOutput(res.stdout);
-          if (parsed === null) return null;
-          return { ...parsed, cost: peerReviewCost(peer, res.stdout) };
+          if (parsed === null) {
+            // The reviewer ANSWERED but the format didn't match the strict
+            // SCORE:/VERDICT:/RATIONALE: protocol — this is unparseable, NOT a
+            // timeout/error. Previously silently discarded; now observable.
+            return { outcome: "unparseable", detail: res.stdout.slice(0, 500) };
+          }
+          return { outcome: "parsed", parsed: { ...parsed, cost: peerReviewCost(peer, res.stdout) } };
+        };
+        const scorePeer = async (peer: string, summary: string, timeoutMs: number): Promise<import("./pairing-gate.js").PairScore | null> => {
+          const prompt = buildPairScorePrompt(summary);
+          // First attempt
+          const first = await tryScoreOnce(peer, prompt, timeoutMs);
+          if (first.outcome === "parsed") return first.parsed;
+          emitScoreFailure(peer, first.outcome, first.detail);
+          // FIX-910 unparseable rescue: the reviewer ANSWERED but the format was
+          // off. Give ONE retry with a stricter format reminder — the reviewer
+          // already did the cognitive work; the harness just needs a parseable
+          // reply. Only unparseable gets a retry; timeout/auth/exit-error do not
+          // (they indicate a real spawn/process problem, not a format issue).
+          if (first.outcome === "unparseable") {
+            const retryPrompt = buildPairScorePrompt(summary) +
+              "\n\n你上次回复缺/错了 SCORE/VERDICT/RATIONALE 行，请严格只回这三行。";
+            const retry = await tryScoreOnce(peer, retryPrompt, timeoutMs);
+            if (retry.outcome === "parsed") return retry.parsed;
+            emitScoreFailure(peer, retry.outcome, retry.detail);
+          }
+          return null;
         };
         let diffStat = "";
         try {

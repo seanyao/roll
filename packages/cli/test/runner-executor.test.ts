@@ -2700,8 +2700,8 @@ describe.runIf(process.platform === "darwin")("FIX-224 darwin integration — re
   }, 20000);
 });
 
-describe("FIX-914 — builder git environment is pinned to the cycle worktree", () => {
-  it("pi child commits the cycle worktree even if the agent internally cd's back to the shared checkout", async () => {
+describe("FIX-914 — builder process cwd/PWD is pinned to the cycle worktree", () => {
+  it("pi child writes and commits in the cycle worktree when the CLI trusts $PWD", async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-fix914-")));
     execDirs.push(root);
     const main = join(root, "main");
@@ -2715,16 +2715,16 @@ describe("FIX-914 — builder git environment is pinned to the cycle worktree", 
     execFileSync("git", ["commit", "-m", "base"], { cwd: main });
     execFileSync("git", ["worktree", "add", "-b", "cycle", wt], { cwd: main });
 
-    writeFileSync(join(wt, "probe.txt"), "probe\n");
     const shim = join(root, "pi");
     writeFileSync(
       shim,
       [
         "#!/bin/sh",
         "set -eu",
-        "cd \"$MAIN_CHECKOUT\"",
+        "printf 'probe\\n' > \"$PWD/probe.txt\"",
         "git add probe.txt",
         "git commit -m 'tcr: FIX-914 probe'",
+        "git config --get core.worktree || true",
         "printf 'top=%s\\n' \"$(git rev-parse --show-toplevel)\"",
         "",
       ].join("\n"),
@@ -2743,6 +2743,13 @@ describe("FIX-914 — builder git environment is pinned to the cycle worktree", 
     expect(r.stdout).toContain(`top=${wt}`);
     expect(execFileSync("git", ["rev-list", "--count", "main..HEAD"], { cwd: wt }).toString().trim()).toBe("1");
     expect(execFileSync("git", ["status", "--short"], { cwd: main }).toString().trim()).toBe("");
+    let coreWorktree = "";
+    try {
+      coreWorktree = execFileSync("git", ["config", "--get", "core.worktree"], { cwd: main }).toString().trim();
+    } catch {
+      coreWorktree = "";
+    }
+    expect(coreWorktree).toBe("");
   });
 });
 

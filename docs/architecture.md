@@ -147,6 +147,8 @@ web          控制台（React，WebSocket 订阅 daemon）
 
 **daemon**：独立进程，fs.watch 监控事件文件，通过 WebSocket 广播。它是只读观察者——挂了不影响任何 loop。loop 只写文件，不依赖 daemon。
 
+**Delivery Dossier**：页面是 `TruthSnapshot` 的纯投影；页面渲染路径不得绕过 snapshot 直接调用面板 collector 或直读文件，新增数据面必须先进入 `collectDossierState`。
+
 ### BC8 · 成本
 
 归集每个 Cycle 的实际消耗并设闸。

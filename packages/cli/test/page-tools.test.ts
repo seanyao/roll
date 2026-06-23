@@ -8,8 +8,21 @@
  */
 import { describe, expect, it } from "vitest";
 import { collectToolPanel } from "../src/lib/tool-panel.js";
-import type { ToolPanelRow } from "../src/lib/tool-panel.js";
+import type { ToolPanelRequirementRow, ToolPanelRow } from "../src/lib/tool-panel.js";
 import { renderToolsPage } from "../src/lib/page-tools.js";
+
+function req(overrides: Partial<ToolPanelRequirementRow> & Pick<ToolPanelRequirementRow, "name">): ToolPanelRequirementRow {
+  return {
+    name: overrides.name,
+    kind: overrides.kind ?? "executable",
+    optional: overrides.optional ?? false,
+    label: overrides.label ?? overrides.name,
+    status: overrides.status ?? "ok",
+    detail: overrides.detail ?? `${overrides.name} is on PATH.`,
+    ...(overrides.repairCommand !== undefined ? { repairCommand: overrides.repairCommand } : {}),
+    ...(overrides.authorizeCommand !== undefined ? { authorizeCommand: overrides.authorizeCommand } : {}),
+  };
+}
 
 const FIXTURE: ToolPanelRow[] = [
   {
@@ -20,6 +33,7 @@ const FIXTURE: ToolPanelRow[] = [
     emitsEvents: false,
     guardrails: { timeoutMs: 120000, sandbox: "workspace-write", retries: 1 },
     requirements: [],
+    requirementDetails: [],
     readiness: "available",
     available: true,
     unavailableReason: "",
@@ -32,6 +46,7 @@ const FIXTURE: ToolPanelRow[] = [
     emitsEvents: true,
     guardrails: { timeoutMs: 30000, sandbox: "headless" },
     requirements: ["playwright-chromium (optional)"],
+    requirementDetails: [req({ name: "playwright-chromium", label: "playwright-chromium (optional)", optional: true })],
     readiness: "available",
     available: true,
     unavailableReason: "",
@@ -44,6 +59,7 @@ const FIXTURE: ToolPanelRow[] = [
     emitsEvents: true,
     guardrails: { timeoutMs: 30000, sandbox: "headless" },
     requirements: ["playwright-chromium (optional)"],
+    requirementDetails: [req({ name: "playwright-chromium", label: "playwright-chromium (optional)", optional: true })],
     readiness: "available",
     available: true,
     unavailableReason: "",
@@ -56,6 +72,7 @@ const FIXTURE: ToolPanelRow[] = [
     emitsEvents: true,
     guardrails: { timeoutMs: 60000 },
     requirements: ["git"],
+    requirementDetails: [req({ name: "git" })],
     readiness: "available",
     available: true,
     unavailableReason: "",
@@ -69,6 +86,7 @@ const FIXTURE: ToolPanelRow[] = [
     emitsEvents: false,
     guardrails: {},
     requirements: [],
+    requirementDetails: [],
     readiness: "available",
     available: true,
     unavailableReason: "",
@@ -164,8 +182,49 @@ describe("Tools machine page — acceptance criteria (US-TOOL-017)", () => {
     expect(html).toMatch(/retry<\/span><span class="lang-zh">重试<\/span> ×1/);
     // requirements chip + the "none" friendly state
     expect(html).toContain("playwright-chromium (optional)");
+    expect(html).toContain('data-requirement="playwright-chromium"');
+    expect(html).toContain("requirement chain");
+    expect(html).toContain("依赖链");
     expect(html).toContain("none — works out of the box");
     expect(html).toContain("无 — 开箱即用");
+  });
+
+  it("US-TOOL-021: renders tool readiness and nested live requirement states", () => {
+    const degraded = render([
+      {
+        ...FIXTURE[1]!,
+        readiness: "degraded",
+        available: true,
+        unavailableReason: "No Chromium browser files found.",
+        requirementDetails: [
+          req({
+            name: "playwright-chromium",
+            label: "playwright-chromium (optional)",
+            optional: true,
+            status: "missing",
+            detail: "No Chromium browser files found.",
+            repairCommand: "npx playwright install chromium",
+          }),
+        ],
+      },
+    ]);
+
+    expect(degraded).toContain("browser.screenshot");
+    expect(degraded).toContain("degraded");
+    expect(degraded).toContain("missing");
+    expect(degraded).toContain("No Chromium browser files found.");
+    expect(degraded).toContain("fix: npx playwright install chromium");
+    expect(degraded).not.toContain('data-tool="playwright-chromium"');
+    expect(degraded).not.toContain('data-tool="screencapture"');
+  });
+
+  it("US-TOOL-021: all-ok requirements keep the tool available", () => {
+    const ok = render([FIXTURE[3]!]);
+    expect(ok).toContain("git.commit");
+    expect(ok).toContain("available");
+    expect(ok).toContain("git is on PATH.");
+    expect(ok).toContain('data-requirement="git"');
+    expect(ok).not.toContain('data-tool="git"');
   });
 
   it("AC2: an empty-guardrails tool reads 'default policy', never blank", () => {

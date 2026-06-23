@@ -59,6 +59,15 @@ describe("US-AGENT-043 canonical agent roster", () => {
     }
   });
 
+  it("US-AGENT-045 AC1: provider aliases (openai→codex, deepseek→pi) silently resolve", () => {
+    expect(agentIsKnown("openai")).toBe(true);
+    expect(agentIsKnown("deepseek")).toBe(true);
+    expect(agentBinNames("openai")).toEqual(["codex"]);
+    expect(agentBinNames("deepseek")).toEqual(["pi"]);
+    expect(agentDisplayName("openai")).toBe("codex");
+    expect(agentDisplayName("deepseek")).toBe("pi");
+  });
+
   it("reasonix participates in installed scanning and fallback order", () => {
     const env = envWithBins(["reasonix"]);
     expect(agentsInstalled(env)).toEqual(["reasonix"]);

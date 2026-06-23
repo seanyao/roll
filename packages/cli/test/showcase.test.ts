@@ -277,11 +277,13 @@ describe("probeMissingAgents — queries the REAL env, not the sandbox (FIX-292)
     // kimi / reasonix / pi are ALL ✓ available → none reported missing (the bug).
     expect(probeMissingAgents("/sandbox", "/throwaway-home", casting, runner)).toEqual([]);
 
+    // deepseek is a pi alias now, so the installed canonical pi row makes it available.
+    const deepseekAliasCast = { builder: "kimi", reviewer: "claude", scorer: "deepseek" };
+    expect(probeMissingAgents("/sandbox", "/throwaway-home", deepseekAliasCast, runner)).toEqual([]);
+
     // A genuinely ✗ (not installed) cast agent IS reported missing.
-    const deepseekCast = { builder: "kimi", reviewer: "claude", scorer: "deepseek" };
-    expect(probeMissingAgents("/sandbox", "/throwaway-home", deepseekCast, runner)).toEqual([
-      "deepseek",
-    ]);
+    const qwenCast = { builder: "kimi", reviewer: "claude", scorer: "qwen" };
+    expect(probeMissingAgents("/sandbox", "/throwaway-home", qwenCast, runner)).toEqual(["qwen"]);
   });
 
   it("FIX-299: parseAvailableAgents reads ✓/✗ markers, strips ANSI, takes the first word", () => {
@@ -298,8 +300,9 @@ describe("probeMissingAgents — queries the REAL env, not the sandbox (FIX-292)
     expect(available.has("kimi")).toBe(true);
     expect(available.has("pi")).toBe(true);
     expect(available.has("reasonix")).toBe(true);
-    // ✗ "not installed" rows are NOT available even though the name is in the blob.
+    // ✗ "not installed" alias rows are NOT available by themselves; the canonical pi row is.
     expect(available.has("deepseek")).toBe(false);
+    expect(available.has("pi")).toBe(true);
   });
 });
 

@@ -9,6 +9,12 @@
 import type { Catalog } from "./index.js";
 
 export const v3Catalog: Catalog = {
+  // `agent.*` — v3-native agent roster compatibility messages (US-AGENT-045).
+  "agent.use_removed_agent": {
+    en: "'%s' is no longer supported. Use one of: claude, kimi, codex, pi, agy, reasonix",
+    zh: "'%s' 已不再支持。请使用：claude, kimi, codex, pi, agy, reasonix",
+  },
+
   // `ideav3.*` — the live `roll idea` capture command (US-PORT-003). Both en and
   // zh are always present so the single-language contract (output follows
   // ROLL_LANG, never mixes) holds.

@@ -33,16 +33,17 @@ afterAll(() => {
 });
 
 describe("frozen: identity helpers == bash", () => {
-  // Overseas agents + their aliases were removed from the pool, so
-  // canonicalAgentName / agentDisplayName are now no-ops: every name (including
-  // unknowns) is returned verbatim.
+  // US-AGENT-045 AC1: provider aliases (openai→codex, deepseek→pi) now silently
+  // resolve; known pool agents + removed tokens stay verbatim.
   const names = ["kimi", "pi", "reasonix", "deepseek", "weird"];
-  const VERBATIM = ["kimi", "pi", "reasonix", "deepseek", "weird"];
+  // deepseek is a provider alias → pi, so it canonicalizes to pi.
+  const EXPECTED_CANONICAL = ["kimi", "pi", "reasonix", "pi", "weird"];
+  const EXPECTED_DISPLAY = ["kimi", "pi", "reasonix", "pi", "weird"];
   it("canonicalAgentName", () => {
-    expect(names.map((n) => canonicalAgentName(n))).toEqual(VERBATIM);
+    expect(names.map((n) => canonicalAgentName(n))).toEqual(EXPECTED_CANONICAL);
   });
   it("agentDisplayName", () => {
-    expect(names.map((n) => agentDisplayName(n))).toEqual(VERBATIM);
+    expect(names.map((n) => agentDisplayName(n))).toEqual(EXPECTED_DISPLAY);
   });
 });
 

@@ -355,7 +355,8 @@ export function readSlotFromText(text: string, slot: AgentSlot): SlotConfig | un
   const cleanedAgent = cleanAgentValue(stripTrailingModel(agent));
   if (cleanedAgent === "") return undefined;
   const cleanedModel = modelRaw === undefined ? "" : cleanAgentValue(modelRaw);
-  return cleanedModel === "" ? { agent: cleanedAgent } : { agent: cleanedAgent, model: cleanedModel };
+  const canonicalAgent = canonicalAgentName(cleanedAgent);
+  return cleanedModel === "" ? { agent: canonicalAgent } : { agent: canonicalAgent, model: cleanedModel };
 }
 
 /**

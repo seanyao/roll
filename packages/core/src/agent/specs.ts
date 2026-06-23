@@ -152,9 +152,28 @@ export function getAgentSpec(name: string, registry: AgentSpecRegistry = AGENT_S
 export function canonicalAgentIdentityName(name: string): string {
   const raw = normalizeAgentKey(name);
   for (const spec of AGENTS) {
-    if (normalizeAgentKey(spec.name) === raw || (spec.nameAliases ?? []).map(normalizeAgentKey).includes(raw)) return spec.name;
+    if (
+      normalizeAgentKey(spec.name) === raw ||
+      (spec.nameAliases ?? []).map(normalizeAgentKey).includes(raw) ||
+      (spec.providerAliases ?? []).map(normalizeAgentKey).includes(raw)
+    )
+      return spec.name;
   }
   return raw;
+}
+
+// ── Removed agent detection (US-AGENT-045) ───────────────────────────────────
+
+/** Agents removed from the roster in US-AGENT-043. When found in user config
+ *  these trigger a fail-loud warning, never a silent fallback. */
+export const REMOVED_AGENTS: readonly string[] = ["cursor", "trae", "qwen", "opencode", "openclaw"];
+
+/** True iff NAME is a removed agent token (checked against REMOVED_AGENTS after
+ *  normalisation, BEFORE canonicalisation — so `openai` (alias→codex) returns
+ *  false while `cursor` returns true). */
+export function isRemovedAgentName(name: string): boolean {
+  const raw = normalizeAgentKey(name);
+  return REMOVED_AGENTS.includes(raw);
 }
 
 export function getAgentIdentitySpec(name: string): AgentSpec | undefined {

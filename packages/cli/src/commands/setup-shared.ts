@@ -32,7 +32,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { AGENT_REGISTRY_NAMES, agentInstalledByName as coreAgentInstalledByName, type AgentEnv } from "@roll/core";
+import { AGENT_REGISTRY_NAMES, agentInstalledByName as coreAgentInstalledByName, isRemovedAgentName, type AgentEnv } from "@roll/core";
 import { repoRoot } from "../bridge.js";
 
 // ─── env (bin/roll:7-24) ──────────────────────────────────────────────────────
@@ -304,9 +304,24 @@ function ensureConfigEntries(): void {
   if (!existsSync(cfg)) return;
   const original = readFileSync(cfg, "utf8");
   let lines = original.split("\n");
+
+  // US-AGENT-045 AC5: prune ai_* entries for removed agents so doctor / agent
+  // use no longer surface them.
+  let pruned = 0;
+  const keepers: string[] = [];
+  for (const line of lines) {
+    const m = /^ai_([a-z_]+):/.exec(line);
+    if (m !== null && isRemovedAgentName((m[1] ?? "").replace(/_code$/, ""))) {
+      pruned += 1;
+      continue;
+    }
+    keepers.push(line);
+  }
+  if (pruned > 0) lines = keepers;
+
   let added = 0;
   for (const [key, val] of DEFAULT_AI_KEYS) {
-    const has = new RegExp(`^${key}:`, "m").test(original);
+    const has = new RegExp(`^${key}:`, "m").test(lines.join("\n"));
     if (has) continue;
     const idx = lines.indexOf("# User preferences");
     if (idx >= 0) {
@@ -323,7 +338,7 @@ function ensureConfigEntries(): void {
     }
     added += 1;
   }
-  if (added > 0) writeFileSync(cfg, lines.join("\n"));
+  if (added > 0 || pruned > 0) writeFileSync(cfg, lines.join("\n"));
 }
 
 // ─── _install_local (1043) ────────────────────────────────────────────────────

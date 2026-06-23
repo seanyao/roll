@@ -30,8 +30,8 @@ describe("agentVendor + isHeterogeneous", () => {
     expect(agentVendor("kimi")).toBe("moonshot");
     expect(agentVendor("pi")).toBe("pi");
     expect(agentVendor("reasonix")).toBe("reasonix");
-    // deepseek is the engine pi loads — its own vendor key.
-    expect(agentVendor("deepseek")).toBe("deepseek");
+    // US-AGENT-045: deepseek is now a provider alias → pi, so its vendor is pi's.
+    expect(agentVendor("deepseek")).toBe("pi");
   });
   it("different vendor is heterogeneous; same vendor is NOT", () => {
     expect(isHeterogeneous("kimi", "pi")).toBe(true);

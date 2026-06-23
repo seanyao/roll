@@ -120,11 +120,22 @@ describe("roll agent write surface", () => {
     expect(readFileSync(join(r.cwd, ".roll", "local.yaml"), "utf8")).toBe("agent: kimi\n");
   });
 
+  it("US-AGENT-045 AC1: use silently migrates provider aliases to canonical agents", () => {
+    const r = run(["use", "openai"], { installed: ["codex"] });
+    expect(r.code).toBe(0);
+    expect(r.stderr).toBe("");
+    expect(r.stdout).toBe("[roll] easy/default/hard all locked to codex  (fallback unchanged)\n");
+    expect(readFileSync(join(r.cwd, ".roll", "agents.yaml"), "utf8")).toBe(
+      "schema: v3\neasy: { agent: codex }\ndefault: { agent: codex }\nhard: { agent: codex }\n",
+    );
+    expect(readFileSync(join(r.cwd, ".roll", "local.yaml"), "utf8")).toBe("agent: codex\n");
+  });
+
   it("use rejects known but uninstalled agents", () => {
     expect(run(["use", "qwen"])).toMatchObject({
       code: 1,
       stdout: "",
-      stderr: "[roll] Unknown or uninstalled agent 'qwen' — run: roll agent list\n",
+      stderr: "[roll] 'qwen' is no longer supported. Use one of: claude, kimi, codex, pi, agy, reasonix\n",
     });
   });
 
@@ -146,16 +157,26 @@ describe("roll agent write surface", () => {
     );
   });
 
+  it("US-AGENT-045 AC1: set silently migrates provider aliases to canonical agents", () => {
+    const r = run(["set", "easy", "deepseek"]);
+    expect(r.code).toBe(0);
+    expect(r.stderr).toBe("");
+    expect(r.stdout).toBe("[roll] easy → pi  saved\n");
+    expect(readFileSync(join(r.cwd, ".roll", "agents.yaml"), "utf8")).toBe(
+      "schema: v3\neasy: { agent: pi }\n",
+    );
+  });
+
   it("set rejects unknown slots and unknown agents", () => {
     expect(run(["set", "bogus", "claude"])).toMatchObject({
       code: 1,
       stdout: "",
       stderr: "[roll] Unknown slot 'bogus' (expected easy|default|hard|fallback)\n",
     });
-    expect(run(["set", "easy", "deepseek"])).toMatchObject({
+    expect(run(["set", "easy", "qwen"])).toMatchObject({
       code: 1,
       stdout: "",
-      stderr: "[roll] Unknown agent 'deepseek' — run: roll agent list\n",
+      stderr: "[roll] 'qwen' is no longer supported. Use one of: claude, kimi, codex, pi, agy, reasonix\n",
     });
   });
 
@@ -251,7 +272,7 @@ describe("roll agent write surface", () => {
     };
     expect(run(["use", "qwen"], { refreshAggregates }).code).toBe(1);
     expect(run(["set", "bogus", "claude"], { refreshAggregates }).code).toBe(1);
-    expect(run(["set", "easy", "deepseek"], { refreshAggregates }).code).toBe(1);
+    expect(run(["set", "easy", "qwen"], { refreshAggregates }).code).toBe(1);
     expect(calls).toBe(0);
   });
 

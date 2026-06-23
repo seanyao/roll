@@ -118,7 +118,7 @@ roll setup
 
 `$roll-peer` routes a design or code decision through a second AI agent for a
 cross-check. The routing uses the capability map — if your primary agent is
-Claude, the peer defaults to Kimi or DeepSeek.
+Claude, the peer defaults to Kimi or Reasonix.
 
 See [peer.md](peer.md) for the full peer review workflow.
 

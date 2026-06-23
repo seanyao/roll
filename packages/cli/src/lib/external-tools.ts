@@ -3,11 +3,13 @@ import { accessSync, constants, existsSync, mkdtempSync, readdirSync, readSync, 
 import { homedir, tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { PLAYWRIGHT_INSTALL_CHROMIUM, chromiumInstalled, PLAYWRIGHT_VERSION, PLAYWRIGHT_PIN } from "@roll/infra";
+import type { ToolRequirement, ToolRequirementResolution, ToolRequirementStatus } from "@roll/spec";
 
-export type ExternalToolStatus = "ok" | "missing" | "permission-missing" | "unknown";
+export type ExternalRequirementStatus = ToolRequirementStatus;
 
-export interface ExternalToolDeclaration {
+export interface ExternalRequirementDeclaration {
   id: string;
+  requirement: ToolRequirement;
   label: string;
   purpose: string;
   required: boolean;
@@ -16,8 +18,8 @@ export interface ExternalToolDeclaration {
   impact: string;
 }
 
-export interface ExternalToolState extends ExternalToolDeclaration {
-  status: ExternalToolStatus;
+export interface ExternalRequirementState extends ExternalRequirementDeclaration {
+  status: ExternalRequirementStatus;
   detail: string;
   repairCommand?: string;
 }
@@ -32,9 +34,10 @@ export interface ExternalToolDeps {
   exists: (path: string) => boolean;
 }
 
-export const EXTERNAL_TOOL_DECLARATIONS: readonly ExternalToolDeclaration[] = [
+export const EXTERNAL_REQUIREMENT_DECLARATIONS: readonly ExternalRequirementDeclaration[] = [
   {
     id: "screencapture",
+    requirement: { kind: "executable", name: "screencapture", optional: true },
     label: "macOS screencapture",
     purpose: "Terminal and GUI screenshot evidence on macOS.",
     required: false,
@@ -44,6 +47,7 @@ export const EXTERNAL_TOOL_DECLARATIONS: readonly ExternalToolDeclaration[] = [
   },
   {
     id: "playwright-chromium",
+    requirement: { kind: "executable", name: "playwright-chromium", optional: true },
     label: "Playwright Chromium",
     purpose: "Headless web screenshots for attest and dossier visual evidence.",
     required: false,
@@ -52,6 +56,15 @@ export const EXTERNAL_TOOL_DECLARATIONS: readonly ExternalToolDeclaration[] = [
     impact: "Web screenshot evidence is skipped when GUI capture is unavailable.",
   },
 ];
+
+/** @deprecated Use ExternalRequirementStatus. Kept for old call sites while the dependency layer is renamed. */
+export type ExternalToolStatus = ExternalRequirementStatus;
+/** @deprecated Use ExternalRequirementDeclaration. */
+export type ExternalToolDeclaration = ExternalRequirementDeclaration;
+/** @deprecated Use ExternalRequirementState. */
+export type ExternalToolState = ExternalRequirementState;
+/** @deprecated Use EXTERNAL_REQUIREMENT_DECLARATIONS. */
+export const EXTERNAL_TOOL_DECLARATIONS = EXTERNAL_REQUIREMENT_DECLARATIONS;
 
 export function defaultExternalToolDeps(): ExternalToolDeps {
   return {
@@ -107,19 +120,64 @@ export function commandOnPath(bin: string): boolean {
   return false;
 }
 
-export function collectExternalTools(deps: ExternalToolDeps = defaultExternalToolDeps()): ExternalToolState[] {
-  return EXTERNAL_TOOL_DECLARATIONS.map((decl) => {
-    if (decl.id === "screencapture") return screencaptureState(decl, deps);
-    return playwrightChromiumState(decl, deps);
-  });
+export function collectExternalRequirements(deps: ExternalToolDeps = defaultExternalToolDeps()): ExternalRequirementState[] {
+  return EXTERNAL_REQUIREMENT_DECLARATIONS.map((decl) => toExternalRequirementState(decl, resolveRequirement(decl.requirement, deps)));
 }
 
-function screencaptureState(decl: ExternalToolDeclaration, deps: ExternalToolDeps): ExternalToolState {
+/** @deprecated Use collectExternalRequirements. */
+export function collectExternalTools(deps: ExternalToolDeps = defaultExternalToolDeps()): ExternalToolState[] {
+  return collectExternalRequirements(deps);
+}
+
+export function resolveRequirement(requirement: ToolRequirement, deps: ExternalToolDeps = defaultExternalToolDeps()): ToolRequirementResolution {
+  if (requirement.kind === "executable" && requirement.name === "playwright-chromium") {
+    return playwrightChromiumResolution(requirement, deps);
+  }
+  if (requirement.kind === "executable" && requirement.name === "screencapture") {
+    return screencaptureResolution(requirement, deps);
+  }
+  if (requirement.kind === "executable" && requirement.name === "system-shell") {
+    return deps.commandOnPath("sh") || deps.commandOnPath("bash") || (deps.env["SHELL"] ?? "").trim() !== ""
+      ? { requirement, status: "ok", detail: "A system shell is available." }
+      : { requirement, status: "missing", detail: "No system shell was found." };
+  }
+  if (requirement.kind === "executable") {
+    return deps.commandOnPath(requirement.name)
+      ? { requirement, status: "ok", detail: `${requirement.name} is on PATH.` }
+      : { requirement, status: "missing", detail: `${requirement.name} is not on PATH.` };
+  }
+  if (requirement.kind === "env") {
+    return (deps.env[requirement.name] ?? "").trim() !== ""
+      ? { requirement, status: "ok", detail: `${requirement.name} is set.` }
+      : { requirement, status: "missing", detail: `${requirement.name} is not set.` };
+  }
+  return {
+    requirement,
+    status: "stale",
+    detail: `No live detector is registered for service requirement ${requirement.name}.`,
+  };
+}
+
+function toExternalRequirementState(decl: ExternalRequirementDeclaration, resolution: ToolRequirementResolution): ExternalRequirementState {
+  return {
+    ...decl,
+    status: resolution.status,
+    detail: resolution.detail,
+    ...(resolution.repair !== undefined ? { repairCommand: resolution.repair.command } : {}),
+  };
+}
+
+function screencaptureResolution(requirement: ToolRequirement, deps: ExternalToolDeps): ToolRequirementResolution {
   if (deps.platform !== "darwin") {
-    return { ...decl, status: "unknown", detail: "macOS-only tool; not applicable on this host." };
+    return { requirement, status: "stale", detail: "macOS-only requirement; not applicable on this host." };
   }
   if (!deps.commandOnPath("screencapture")) {
-    return { ...decl, status: "missing", detail: "screencapture is not on PATH.", repairCommand: "xcode-select --install" };
+    return {
+      requirement,
+      status: "missing",
+      detail: "screencapture is not on PATH.",
+      repair: { command: "xcode-select --install", description: "Install Apple command line tools." },
+    };
   }
   const tmp = join(mkdtempSync(join(tmpdir(), "roll-screen-probe-")), "probe.png");
   const r = deps.execFile("screencapture", ["-x", "-R", "0,0,1,1", tmp]);
@@ -129,30 +187,37 @@ function screencaptureState(decl: ExternalToolDeclaration, deps: ExternalToolDep
   } catch {
     /* best-effort cleanup */
   }
-  if (r.code === 0) return { ...decl, status: "ok", detail: "Installed and Screen Recording permission is usable." };
+  if (r.code === 0) return { requirement, status: "ok", detail: "Installed and Screen Recording permission is usable." };
+  const command = "open x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
   return {
-    ...decl,
+    requirement,
     status: "permission-missing",
     detail: "screencapture ran but could not capture pixels; Screen Recording permission is likely missing.",
-    repairCommand: "open x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+    repair: { command, description: "Open Screen Recording privacy settings." },
+    authorize: { command, description: "Allow the terminal running roll to record the screen." },
   };
 }
 
-function playwrightChromiumState(decl: ExternalToolDeclaration, deps: ExternalToolDeps): ExternalToolState {
+function playwrightChromiumResolution(requirement: ToolRequirement, deps: ExternalToolDeps): ToolRequirementResolution {
   if (!deps.commandOnPath("npx")) {
-    return { ...decl, status: "missing", detail: "npx is not on PATH.", repairCommand: "npm install -g npm" };
+    return {
+      requirement,
+      status: "missing",
+      detail: "npx is not on PATH.",
+      repair: { command: "npm install -g npm", description: "Install npm/npx." },
+    };
   }
   const cache = deps.env["PLAYWRIGHT_BROWSERS_PATH"] ?? defaultPlaywrightBrowsersPath(deps);
   const entries = deps.readDir(cache);
   const hasChromium = entries.some((name) => /^chromium(-|_headless_shell-|$)/.test(name) || /^chromium_headless_shell-/.test(name)) || deps.exists(join(cache, "chromium"));
   if (hasChromium) {
-    return { ...decl, status: "ok", detail: `Chromium browser files found in ${cache} (playwright pinned v${PLAYWRIGHT_VERSION}).` };
+    return { requirement, status: "ok", detail: `Chromium browser files found in ${cache} (playwright pinned v${PLAYWRIGHT_VERSION}).` };
   }
   return {
-    ...decl,
+    requirement,
     status: "missing",
     detail: `No Chromium browser files found in ${cache} (playwright pinned v${PLAYWRIGHT_VERSION}).`,
-    repairCommand: PLAYWRIGHT_INSTALL_CHROMIUM,
+    repair: { command: PLAYWRIGHT_INSTALL_CHROMIUM, description: "Install the pinned Playwright Chromium browser." },
   };
 }
 
@@ -162,17 +227,22 @@ function defaultPlaywrightBrowsersPath(deps: ExternalToolDeps): string {
   return join(deps.home, ".cache", "ms-playwright");
 }
 
-export function renderExternalToolDoctorSection(states: readonly ExternalToolState[]): string[] {
-  const lines = ["", "External tools", "外部工具", ""];
-  for (const tool of states) {
-    const marker = tool.status === "ok" ? "✓" : tool.status === "permission-missing" ? "!" : tool.status === "missing" ? "−" : "?";
-    lines.push(`  ${marker} ${tool.label} — ${tool.status}`);
-    lines.push(`    use: ${tool.purpose}`);
-    lines.push(`    ${tool.detail}`);
-    if (tool.repairCommand !== undefined) lines.push(`    fix: ${tool.repairCommand}`);
-    if (tool.status !== "ok") lines.push(`    impact: ${tool.impact}`);
+export function renderExternalRequirementDoctorSection(states: readonly ExternalRequirementState[]): string[] {
+  const lines = ["", "External requirements", "外部依赖", ""];
+  for (const requirement of states) {
+    const marker = requirement.status === "ok" ? "✓" : requirement.status === "permission-missing" ? "!" : requirement.status === "missing" ? "−" : "?";
+    lines.push(`  ${marker} ${requirement.label} — ${requirement.status}`);
+    lines.push(`    use: ${requirement.purpose}`);
+    lines.push(`    ${requirement.detail}`);
+    if (requirement.repairCommand !== undefined) lines.push(`    fix: ${requirement.repairCommand}`);
+    if (requirement.status !== "ok") lines.push(`    impact: ${requirement.impact}`);
   }
   return lines;
+}
+
+/** @deprecated Use renderExternalRequirementDoctorSection. */
+export function renderExternalToolDoctorSection(states: readonly ExternalToolState[]): string[] {
+  return renderExternalRequirementDoctorSection(states);
 }
 
 export interface ExternalToolRequestDeps {
@@ -225,11 +295,11 @@ export function guideExternalToolSetup(
   if (missing.length === 0) return;
   const forced = (deps.env["ROLL_EXTERNAL_TOOLS"] ?? "").trim().toLowerCase();
   if (forced === "" && !deps.stdinIsTTY) return;
-  deps.stderr(`[roll] External tool setup (${surface})`);
-  for (const tool of missing) {
-    deps.stderr(`  ${tool.label}: ${tool.status}`);
-    deps.stderr(`    impact: ${tool.impact}`);
-    if (tool.repairCommand !== undefined) deps.stderr(`    fix: ${tool.repairCommand}`);
+  deps.stderr(`[roll] External requirement setup (${surface})`);
+  for (const requirement of missing) {
+    deps.stderr(`  ${requirement.label}: ${requirement.status}`);
+    deps.stderr(`    impact: ${requirement.impact}`);
+    if (requirement.repairCommand !== undefined) deps.stderr(`    fix: ${requirement.repairCommand}`);
   }
   const answer =
     forced === "yes" || forced === "y"
@@ -247,12 +317,12 @@ export function guideExternalToolSetup(
     deps.stderr("  declined: continuing without changes; evidence may be degraded.");
     return;
   }
-  for (const tool of missing) {
-    if (tool.repairCommand === undefined) continue;
-    const [cmd, ...args] = tool.repairCommand.split(" ");
+  for (const requirement of missing) {
+    if (requirement.repairCommand === undefined) continue;
+    const [cmd, ...args] = requirement.repairCommand.split(" ");
     if (cmd === undefined || cmd === "") continue;
     const r = deps.execFile(cmd, args);
-    deps.stderr(`  ${tool.label}: ${r.code === 0 ? "repair command started" : "repair command failed"}`);
+    deps.stderr(`  ${requirement.label}: ${r.code === 0 ? "repair command started" : "repair command failed"}`);
   }
 }
 

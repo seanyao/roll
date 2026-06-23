@@ -16,6 +16,26 @@ export type ToolRequirement =
   | { kind: "env"; name: string; optional?: boolean }
   | { kind: "service"; name: string; optional?: boolean };
 
+export type ToolRequirementStatus = "ok" | "missing" | "permission-missing" | "stale";
+
+export type ToolRequirementRepair = {
+  command: string;
+  description?: string;
+};
+
+export type ToolRequirementAuthorization = {
+  command: string;
+  description: string;
+};
+
+export type ToolRequirementResolution = {
+  requirement: ToolRequirement;
+  status: ToolRequirementStatus;
+  detail: string;
+  repair?: ToolRequirementRepair;
+  authorize?: ToolRequirementAuthorization;
+};
+
 export type ToolSandbox = {
   allowedPaths?: readonly string[];
   blockedCommands?: readonly string[];

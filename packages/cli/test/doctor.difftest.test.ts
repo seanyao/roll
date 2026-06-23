@@ -239,12 +239,12 @@ describe("frozen: roll doctor", () => {
       技能清单
         ✅ guide/skills.md matches skills/*/SKILL.md
 
-      External tools
-      外部工具
+      External requirements
+      外部依赖
 
-        ? macOS screencapture — unknown
+        ? macOS screencapture — stale
           use: Terminal and GUI screenshot evidence on macOS.
-          macOS-only tool; not applicable on this host.
+          macOS-only requirement; not applicable on this host.
           impact: Terminal/GUI screenshots are skipped; web evidence may fall back to headless Chromium.
         − Playwright Chromium — missing
           use: Headless web screenshots for attest and dossier visual evidence.
@@ -309,12 +309,12 @@ describe("frozen: roll doctor", () => {
       技能清单
         ✅ guide/skills.md 与 skills/*/SKILL.md 一致
 
-      External tools
-      外部工具
+      External requirements
+      外部依赖
 
-        ? macOS screencapture — unknown
+        ? macOS screencapture — stale
           use: Terminal and GUI screenshot evidence on macOS.
-          macOS-only tool; not applicable on this host.
+          macOS-only requirement; not applicable on this host.
           impact: Terminal/GUI screenshots are skipped; web evidence may fall back to headless Chromium.
         − Playwright Chromium — missing
           use: Headless web screenshots for attest and dossier visual evidence.
@@ -342,12 +342,12 @@ describe("frozen: roll doctor", () => {
       技能清单
         ⚠️  guide/skills.md is stale — run 'roll setup skills'
 
-      External tools
-      外部工具
+      External requirements
+      外部依赖
 
-        ? macOS screencapture — unknown
+        ? macOS screencapture — stale
           use: Terminal and GUI screenshot evidence on macOS.
-          macOS-only tool; not applicable on this host.
+          macOS-only requirement; not applicable on this host.
           impact: Terminal/GUI screenshots are skipped; web evidence may fall back to headless Chromium.
         − Playwright Chromium — missing
           use: Headless web screenshots for attest and dossier visual evidence.
@@ -374,12 +374,12 @@ describe("frozen: roll doctor", () => {
       技能清单
         ⚠️  guide/skills.md 已过期 — 请运行 'roll setup skills'
 
-      External tools
-      外部工具
+      External requirements
+      外部依赖
 
-        ? macOS screencapture — unknown
+        ? macOS screencapture — stale
           use: Terminal and GUI screenshot evidence on macOS.
-          macOS-only tool; not applicable on this host.
+          macOS-only requirement; not applicable on this host.
           impact: Terminal/GUI screenshots are skipped; web evidence may fall back to headless Chromium.
         − Playwright Chromium — missing
           use: Headless web screenshots for attest and dossier visual evidence.
@@ -405,12 +405,12 @@ describe("frozen: roll doctor", () => {
       技能清单
         ⚠️  guide/skills.md is stale — run 'roll setup skills'
 
-      External tools
-      外部工具
+      External requirements
+      外部依赖
 
-        ? macOS screencapture — unknown
+        ? macOS screencapture — stale
           use: Terminal and GUI screenshot evidence on macOS.
-          macOS-only tool; not applicable on this host.
+          macOS-only requirement; not applicable on this host.
           impact: Terminal/GUI screenshots are skipped; web evidence may fall back to headless Chromium.
         − Playwright Chromium — missing
           use: Headless web screenshots for attest and dossier visual evidence.
@@ -435,12 +435,12 @@ describe("frozen: roll doctor", () => {
       技能清单
         ⚠️  guide/skills.md 已过期 — 请运行 'roll setup skills'
 
-      External tools
-      外部工具
+      External requirements
+      外部依赖
 
-        ? macOS screencapture — unknown
+        ? macOS screencapture — stale
           use: Terminal and GUI screenshot evidence on macOS.
-          macOS-only tool; not applicable on this host.
+          macOS-only requirement; not applicable on this host.
           impact: Terminal/GUI screenshots are skipped; web evidence may fall back to headless Chromium.
         − Playwright Chromium — missing
           use: Headless web screenshots for attest and dossier visual evidence.
@@ -486,12 +486,12 @@ describe("frozen: roll doctor", () => {
           WorkingDirectory missing: /tmp/roll-doctor-this-dir-does-not-exist-xyz
           Path is stale, clean up with: launchctl bootout gui/<UID>/com.roll.loop.demo; rm '<LAUNCHD>/com.roll.loop.demo.plist'
 
-      External tools
-      外部工具
+      External requirements
+      外部依赖
 
-        ? macOS screencapture — unknown
+        ? macOS screencapture — stale
           use: Terminal and GUI screenshot evidence on macOS.
-          macOS-only tool; not applicable on this host.
+          macOS-only requirement; not applicable on this host.
           impact: Terminal/GUI screenshots are skipped; web evidence may fall back to headless Chromium.
         − Playwright Chromium — missing
           use: Headless web screenshots for attest and dossier visual evidence.

@@ -91,7 +91,7 @@ export class BrowserTool {
           maxOutputBytes: 2 * 1024 * 1024,
         },
       },
-      requirements: [{ kind: "executable", name: "playwright-or-chrome", optional: true }],
+      requirements: [{ kind: "executable", name: "playwright-chromium", optional: true }],
     };
   }
 

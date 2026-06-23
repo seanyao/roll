@@ -18,6 +18,9 @@ export const STATUS_MARKER: Record<StoryStatus, string> = {
   cut: "🗑️ Cut",
 };
 
+/** FIX-909: visible awaiting-review marker. It is intentionally re-pickable. */
+export const AWAITING_REVIEW_STATUS_MARKER = "⏳ 待复评";
+
 /**
  * Legacy / alias markers that older backlog rows (and the divergent showcase
  * reset) wrote, mapped onto their canonical {@link StoryStatus}. This is the ONE
@@ -58,6 +61,7 @@ const STATUS_MARKER_ALTERNATIVES: ReadonlyArray<{ marker: string; status: StoryS
   { marker: STATUS_MARKER.hold, status: "hold" },
   { marker: STATUS_MARKER.cut, status: "cut" },
   { marker: STATUS_MARKER.todo, status: "todo" },
+  { marker: AWAITING_REVIEW_STATUS_MARKER, status: "todo" },
   ...LEGACY_STATUS_MARKERS,
 ];
 
@@ -106,6 +110,7 @@ export function findStatusMarker(line: string): string | undefined {
  * bug).
  */
 export function classifyStatus(cell: string): StoryStatus | null {
+  if (cell.includes(AWAITING_REVIEW_STATUS_MARKER)) return "todo";
   if (cell.includes("✅") || cell.includes("✔️") || cell.includes("✔")) return "done";
   if (cell.includes("🔨") || cell.includes("🔄") || cell.includes("🚧")) return "in_progress";
   if (cell.includes("🗑️") || cell.includes("🗑")) return "cut";

@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { CycleCommand, CycleContext, RollEvent, WarmSessionEntry } from "@roll/core";
+import { AWAITING_REVIEW_STATUS_MARKER } from "@roll/spec";
 import { agentWritableRoots } from "../src/runner/executor.js";
 import { evaluateReviewScoreGate, readLatestStoryPeerScore } from "../src/lib/review-score.js";
 import {
@@ -2254,6 +2255,12 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r.event).toEqual({ type: "published", result: { status: 0, manualMerge: false } });
   });
 
+  it("FIX-909: needs-review publish opens a draft manual PR", async () => {
+    const { ports } = fakePorts();
+    const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false, manualMerge: true, draft: true }, ports, CTX);
+    expect(r.event).toEqual({ type: "published", result: { status: 0, manualMerge: true, draft: true } });
+  });
+
   it("US-DOSSIER-007 AC2: publish_pr mounts the execution section onto the story dossier at PR-open", async () => {
     const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-exec-mount-")));
     execDirs.push(repo);
@@ -2494,6 +2501,20 @@ describe("executeCommand — command → executor mapping", () => {
       { ...CTX, preCycleStatus: "📋 Todo" },
     );
     expect(markStatus).toHaveBeenCalledWith("/repo", "US-RUN-001", "📋 Todo");
+    expect(markStatus).not.toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done");
+  });
+
+  it("FIX-909: a needs_review terminal marks the story as awaiting review", async () => {
+    const markStatus = vi.fn();
+    const { ports } = fakePorts({
+      backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "🔨 In Progress" }]), markStatus },
+    });
+    await executeCommand(
+      { kind: "append_run", status: "needs_review", outcome: "needs_review", cycleId: CTX.cycleId },
+      ports,
+      { ...CTX, prUrl: "https://github.com/o/r/pull/77" },
+    );
+    expect(markStatus).toHaveBeenCalledWith("/repo", "US-RUN-001", AWAITING_REVIEW_STATUS_MARKER);
     expect(markStatus).not.toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done");
   });
 

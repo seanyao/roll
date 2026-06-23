@@ -109,6 +109,8 @@ export interface PublishPlanInput {
   body: string;
   /** US-EVID-016: auto-created repair work may open a PR, but never arm merge. */
   manualMerge?: boolean;
+  /** FIX-909: visible needs-review work opens as a draft PR for independent review. */
+  draft?: boolean;
 }
 
 /**
@@ -142,6 +144,7 @@ export function planPublishPr(input: PublishPlanInput): PublishStep[] {
         input.slug,
         "pr",
         "create",
+        ...(input.draft === true ? ["--draft"] : []),
         "--base",
         "main",
         "--head",

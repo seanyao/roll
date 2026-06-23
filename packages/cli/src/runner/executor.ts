@@ -151,7 +151,7 @@ import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, runPeerGate }
 import { declaresAnySurface, deliverableCmdsForStory, readAttestGateMode, rejectedDeliverableCmdsForStory, runAttestGate, screenshotExemption, storyRequiresScreenshot, verificationReportHasContent, verificationReportPath, webCaptureTargetsForStory } from "./attest-gate.js";
 import { recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
 import { validateStoryVisualEvidence } from "../lib/design-visual-evidence.js";
-import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, autoAttachScreenshotToAcMap, buildAcMapRemediationPrompt, needsAcMapRemediation } from "./attest-remediation.js";
+import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapDraftTestPassPresent, acMapPath, autoAttachScreenshotToAcMap, buildAcMapRemediationPrompt, needsAcMapRemediation, writeAcMapDraftFromEvidence } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
 import { buildPairScorePrompt, buildReviewPrompt, enabledPairingStages, parsePairScoreOutput, retryPeerConsult, runPairing, runScorePairing, type PairEvent, type PairReview } from "./pairing-gate.js";
 import { realAgentEnv } from "../commands/agent-list.js";
@@ -213,6 +213,9 @@ export interface GitPort {
    *  emits standard signals for EVERY agent, never by parsing agent stdout.
    *  LENIENT: returns [] on any git error (observation must never fail a cycle). */
   recentCommits(worktreeCwd: string): Promise<ObservedCommit[]>;
+  /** FIX-912: changed files on the cycle branch, used as conservative ac-map
+   *  draft evidence. LENIENT: [] on git error. */
+  changedFiles(worktreeCwd: string): Promise<string[]>;
   /** RESUME-PRIOR-WORK: fetch a candidate prior-cycle branch from origin so its
    *  ref resolves locally. LENIENT — `fetched:false` on a missing branch. */
   fetchRemoteBranch(repoCwd: string, branch: string): Promise<{ fetched: boolean }>;
@@ -1726,13 +1729,28 @@ export async function executeCommand(
         scoreStatus = scoreResult.status;
       }
       if (commitsAhead > 0 && storyId !== "" && ctx.evidenceRunDir !== undefined && ctx.evidenceRunDir !== "") {
+        const draft = writeAcMapDraftFromEvidence(ports.paths.worktreePath, storyId, ctx.evidenceRunDir, {
+          commits: await ports.git.recentCommits(ports.paths.worktreePath).catch(() => []),
+          changedFiles: await ports.git.changedFiles(ports.paths.worktreePath).catch(() => []),
+          testPassPresent: acMapDraftTestPassPresent(ports.paths.worktreePath, ctx.evidenceRunDir),
+        });
+        if (draft.written) {
+          ports.events.appendEvent(ports.paths.eventsPath, {
+            type: "attest:acmap-draft",
+            cycleId: ctx.cycleId ?? "",
+            storyId,
+            entries: draft.entries,
+            passWithEvidence: draft.passWithEvidence,
+            ts: eventTs(ports),
+          });
+        }
         // FIX-246: ac-map omission remediation. Agents deliver real work yet
         // consistently skip skill step 10.6 (write ac-map.json) — the hard gate
         // then kills every cycle as an empty shell. Before rendering, give the
         // SAME agent ONE surgical second pass to write the ac-map (honest
         // statuses only — the prompt and the render-layer red line both forbid
         // fabricated passes). One retry structurally: capture runs once.
-        if (needsAcMapRemediation(ports.paths.worktreePath, storyId)) {
+        if (needsAcMapRemediation(ports.paths.worktreePath, storyId) || draft.written) {
           let outcome: "written" | "still-missing" | "spawn-failed";
           try {
             await ports.agentSpawn(ctx.agent ?? "claude", {
@@ -3725,6 +3743,17 @@ export function nodePorts(opts: {
           });
         }
         return out;
+      },
+      async changedFiles(worktreeCwd) {
+        const r = await execFileAsync(
+          "git",
+          ["diff", "--name-only", "origin/main...HEAD"],
+          { cwd: worktreeCwd, encoding: "utf8" },
+        ).catch(() => ({ stdout: "" }));
+        return (r.stdout ?? "")
+          .split("\n")
+          .map((line) => line.trim())
+          .filter((line) => line !== "");
       },
       // RESUME-PRIOR-WORK probes (un-merged audit-branch reuse).
       async fetchRemoteBranch(repoCwd, branch) {

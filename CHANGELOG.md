@@ -12,6 +12,8 @@
 
 - **缺验收件的已完成工作不再沉底**：loop 会开待复评 draft PR，并把卡标成待复评等待补件。(FIX-909) `[loop-engine]`
 
+- **ac-map 缺失时先由 harness 起草**：cycle 收尾会从真实提交、测试 proof 和改动文件生成保守 ac-map 草稿，再交给 agent 确认状态，减少空壳验收件。(FIX-912) `[loop-engine]`
+
 ## v3.624.1 — 2026-06-24
 
 ### 新功能

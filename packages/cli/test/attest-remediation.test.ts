@@ -18,6 +18,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   acMapPath,
   autoAttachScreenshotToAcMap,
+  writeAcMapDraftFromEvidence,
   buildAcMapRemediationPrompt,
   capturedScreenshotRef,
   needsAcMapRemediation,
@@ -88,6 +89,65 @@ describe("buildAcMapRemediationPrompt", () => {
     expect(p).toContain("../evidence/"); // run-dir-relative evidence convention
     expect(p).toMatch(/never fabricate|绝不伪造/); // bilingual red line present
     expect(p).toMatch(/do not commit/i); // surgical scope: file write only
+  });
+});
+
+// ── FIX-912: harness-authored conservative ac-map draft ─────────────────────
+
+describe("FIX-912 writeAcMapDraftFromEvidence", () => {
+  it("writes one draft row per AC with real evidence chain and conservative statuses", () => {
+    const wt = withStory(
+      "FIX-912",
+      [
+        "# FIX-912",
+        "",
+        "## Acceptance Criteria",
+        "",
+        "- [ ] AC1 auto draft exists",
+        "- [ ] AC2 no fake pass",
+        "- [ ] AC3 remediation confirms statuses",
+        "",
+      ].join("\n"),
+    );
+    const runDir = join(dirname(acMapPath(wt, "FIX-912")), "2026-06-24T00-00-00");
+    mkdirSync(runDir, { recursive: true });
+
+    const result = writeAcMapDraftFromEvidence(wt, "FIX-912", runDir, {
+      commits: [{ hash: "abc123def456", message: "tcr: FIX-912 AC1 draft generator", tsSec: 1 }],
+      changedFiles: ["packages/cli/test/fix-912-ac1.test.ts", "packages/cli/src/runner/attest-remediation.ts"],
+      testPassPresent: true,
+    });
+
+    expect(result).toMatchObject({ written: true, entries: 3, passWithEvidence: 1 });
+    const entries = JSON.parse(readFileSync(acMapPath(wt, "FIX-912"), "utf8")) as Array<{
+      ac: string;
+      status: string;
+      draftStatus: string;
+      evidence: Array<{ kind: string; textFile?: string }>;
+    }>;
+    expect(entries.map((e) => e.ac)).toEqual(["FIX-912:AC1", "FIX-912:AC2", "FIX-912:AC3"]);
+    expect(entries[0]).toMatchObject({ status: "pass", draftStatus: "pass-with-evidence" });
+    expect(entries[1]).toMatchObject({ status: "claimed", draftStatus: "needs-confirmation" });
+    expect(entries[2]).toMatchObject({ status: "claimed", draftStatus: "needs-confirmation" });
+    expect(entries.every((e) => e.evidence.some((ev) => ev.kind === "text" && ev.textFile === "../evidence/ac-map-draft.txt"))).toBe(true);
+    const facts = readFileSync(join(dirname(acMapPath(wt, "FIX-912")), "evidence", "ac-map-draft.txt"), "utf8");
+    expect(facts).toContain("abc123def456");
+    expect(facts).toContain("packages/cli/test/fix-912-ac1.test.ts");
+  });
+
+  it("never emits pass when the AC only has commits/files but no explicit passing AC test", () => {
+    const wt = withStory("FIX-913", "# FIX-913\n\n## Acceptance Criteria\n\n- [ ] AC1 stays conservative\n");
+    const runDir = join(dirname(acMapPath(wt, "FIX-913")), "2026-06-24T00-00-00");
+    mkdirSync(runDir, { recursive: true });
+
+    writeAcMapDraftFromEvidence(wt, "FIX-913", runDir, {
+      commits: [{ hash: "def456abc123", message: "tcr: FIX-913 AC1 implementation", tsSec: 1 }],
+      changedFiles: ["packages/cli/src/runner/attest-remediation.ts"],
+      testPassPresent: false,
+    });
+
+    const entries = JSON.parse(readFileSync(acMapPath(wt, "FIX-913"), "utf8")) as Array<{ status: string; draftStatus: string }>;
+    expect(entries[0]).toMatchObject({ status: "claimed", draftStatus: "needs-confirmation" });
   });
 });
 

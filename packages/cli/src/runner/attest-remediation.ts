@@ -16,8 +16,9 @@
  * fabricated passes (US-ATTEST-010). One retry, structurally — the capture
  * step runs once per cycle.
  */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { acForStory } from "@roll/core";
 import { cardArchiveDir } from "../lib/archive.js";
 import { storyHasAcBlock, storyRequiresScreenshot } from "./attest-gate.js";
 
@@ -63,12 +64,13 @@ export function buildAcMapRemediationPrompt(
     `1. Read the story spec and its AC list: ${join(storyDir, "spec.md")}`,
     `2. Review what you actually did this cycle: \`git log --oneline origin/main..HEAD\` and \`git diff origin/main...HEAD --stat\` in ${worktreeCwd}.`,
     `3. Where useful, save REAL command output from this cycle as text evidence under ${join(storyDir, "evidence")}/ (create the dir if absent).`,
-    `4. Write ${target} — a JSON array with EXACTLY one entry per AC:`,
+    `4. Write or confirm ${target} — a JSON array with EXACTLY one entry per AC:`,
     ``,
     `[{ "ac": "${storyId}:AC1", "status": "pass",`,
     `   "evidence": [{ "kind": "text", "label": "vitest run", "textFile": "../evidence/vitest.txt" }] },`,
     ` { "ac": "${storyId}:AC2", "status": "claimed", "evidence": [] }]`,
     ``,
+    `- If ${target} already exists as a harness draft / 如果已有 harness 草稿, read it first and ONLY confirm or correct statuses/evidence; do not start from zero.`,
     `- status ∈ "pass" | "partial" | "readonly" | "claimed" | "missing".`,
     `- Evidence paths are RELATIVE TO THE RUN DIR (${runDir}); story-level dirs are reachable as ../evidence/... and ../screenshots/... Reference ONLY files that exist.`,
     `- 诚实红线:没有真实证据的 AC 必须标 "claimed",绝不伪造 pass。Honesty red line: an AC without real evidence MUST be "claimed" — never fabricate a pass; the render layer downgrades and exposes fabrications anyway.`,
@@ -110,8 +112,114 @@ interface AcMapEvidence {
 interface AcMapEntry {
   ac?: string;
   status?: string;
+  draftStatus?: "pass-with-evidence" | "needs-confirmation";
   note?: string;
   evidence?: AcMapEvidence[];
+}
+
+export interface AcMapDraftEvidenceInput {
+  commits: Array<{ hash: string; message: string; tsSec?: number }>;
+  changedFiles: string[];
+  testPassPresent: boolean;
+}
+
+export interface AcMapDraftResult {
+  written: boolean;
+  entries: number;
+  passWithEvidence: number;
+  path: string;
+}
+
+function acToken(storyId: string, ordinal: number): RegExp {
+  const escaped = storyId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:${escaped}:)?AC\\s*0?${ordinal}\\b`, "i");
+}
+
+function isTestPath(path: string): boolean {
+  return /(?:^|[\\/])(?:test|tests|__tests__)[\\/]/i.test(path) || /\.(?:test|spec)\.[cm]?[jt]sx?$/i.test(path);
+}
+
+function draftEvidenceText(storyId: string, input: AcMapDraftEvidenceInput): string {
+  const lines = [
+    `ac-map draft evidence for ${storyId}`,
+    "",
+    "Commits:",
+    ...(input.commits.length === 0
+      ? ["- none observed"]
+      : input.commits.map((c) => `- ${c.hash} ${c.message}`)),
+    "",
+    "Changed files:",
+    ...(input.changedFiles.length === 0
+      ? ["- none observed"]
+      : input.changedFiles.map((f) => `- ${f}`)),
+    "",
+    "Test-pass proof:",
+    `- ${input.testPassPresent ? "present" : "absent"}`,
+    "",
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+function explicitPassingTestForAc(storyId: string, ordinal: number, input: AcMapDraftEvidenceInput): boolean {
+  if (!input.testPassPresent) return false;
+  const token = acToken(storyId, ordinal);
+  return input.changedFiles.some((file) => isTestPath(file) && token.test(file));
+}
+
+export function acMapDraftTestPassPresent(worktreeCwd: string, runDir: string): boolean {
+  if (existsSync(join(worktreeCwd, ".roll", "last-test-pass"))) return true;
+  try {
+    const parsed = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as { test_pass?: { present?: boolean } };
+    return parsed.test_pass?.present === true;
+  } catch {
+    return false;
+  }
+}
+
+export function writeAcMapDraftFromEvidence(
+  worktreeCwd: string,
+  storyId: string,
+  runDir: string,
+  input: AcMapDraftEvidenceInput,
+): AcMapDraftResult {
+  const target = acMapPath(worktreeCwd, storyId);
+  if (existsSync(target)) return { written: false, entries: 0, passWithEvidence: 0, path: target };
+  const storyDir = cardArchiveDir(worktreeCwd, storyId);
+  const specPath = join(storyDir, "spec.md");
+  if (!existsSync(specPath)) return { written: false, entries: 0, passWithEvidence: 0, path: target };
+  const acs = acForStory(readFileSync(specPath, "utf8"), storyId, { fileOwned: true });
+  if (acs.length === 0) return { written: false, entries: 0, passWithEvidence: 0, path: target };
+
+  const evidenceDir = join(storyDir, "evidence");
+  mkdirSync(evidenceDir, { recursive: true });
+  writeFileSync(join(evidenceDir, "ac-map-draft.txt"), draftEvidenceText(storyId, input));
+
+  let passWithEvidence = 0;
+  const commits = input.commits.slice(0, 5);
+  const entries: AcMapEntry[] = acs.map((ac) => {
+    const explicitPass = explicitPassingTestForAc(storyId, ac.ordinal, input);
+    if (explicitPass) passWithEvidence += 1;
+    const evidence: AcMapEvidence[] = [
+      { kind: "text", label: "harness ac-map draft facts", textFile: "../evidence/ac-map-draft.txt" },
+      ...commits.map((commit) => ({
+        kind: "commit",
+        label: commit.message === "" ? commit.hash.slice(0, 12) : commit.message,
+        href: commit.hash,
+      })),
+      ...(explicitPass ? [{ kind: "test-pass", label: `test-pass proof for ${ac.id}` }] : []),
+    ];
+    return {
+      ac: ac.id,
+      status: explicitPass ? "pass" : "claimed",
+      draftStatus: explicitPass ? "pass-with-evidence" : "needs-confirmation",
+      evidence,
+      note: explicitPass
+        ? "Harness draft: explicit AC test path matched this AC and a test-pass proof was present."
+        : "Harness draft: real cycle evidence collected; status needs human/agent confirmation, not auto-pass.",
+    };
+  });
+  writeFileSync(target, JSON.stringify(entries, null, 2) + "\n");
+  return { written: true, entries: entries.length, passWithEvidence, path: target };
 }
 
 /**

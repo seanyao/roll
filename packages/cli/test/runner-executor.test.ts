@@ -653,6 +653,7 @@ function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<str
       rescueLeaked: vi.fn(async () => ({ code: 0, rescuedSha: "abc123def456" })),
       tcrCount: vi.fn(async () => 4),
       recentCommits: vi.fn(async () => []),
+      changedFiles: vi.fn(async () => []),
       // RESUME-PRIOR-WORK probes — defaults make every fakePorts cycle base on
       // origin/main (no recorded prior branch in the default runs.jsonl path).
       fetchRemoteBranch: vi.fn(async () => ({ fetched: true })),
@@ -1837,7 +1838,36 @@ describe("executeCommand — command → executor mapping", () => {
     expect(opts.skillBody).toContain(join(wt, ".roll", "features", "uncategorized", "US-RUN-001", "ac-map.json"));
     expect(order.indexOf("remediation:spawn")).toBeLessThan(order.indexOf("attest:render")); // remediate, THEN render once
     const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
-    expect(events.some((e) => e.type === "attest:remediation" && e.outcome === "still-missing")).toBe(true);
+    expect(events.some((e) => e.type === "attest:acmap-draft" && e.storyId === "US-RUN-001")).toBe(true);
+    expect(events.some((e) => e.type === "attest:remediation" && e.outcome === "written")).toBe(true);
+  });
+
+  it("FIX-912: missing ac-map gets a harness draft before render, and remediation confirms/corrects the draft instead of starting from zero", async () => {
+    const wt = remediationFixture();
+    writeFileSync(join(wt, ".roll", "last-test-pass"), "tree=fixture\n");
+    const base = fakePorts();
+    const spawn = vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0, timedOut: false }));
+    const { ports, calls } = fakePorts({
+      paths: { ...base.ports.paths, worktreePath: wt },
+      git: {
+        ...base.ports.git,
+        recentCommits: vi.fn(async () => [{ hash: "abc123def456", message: "tcr: US-RUN-001 AC1 draft", tsSec: 1 }]),
+        changedFiles: vi.fn(async () => ["packages/cli/test/us-run-001-ac1.test.ts"]),
+      },
+      agentSpawn: spawn,
+    });
+
+    await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1, evidenceRunDir: "/frame" });
+
+    expect(spawn).toHaveBeenCalledTimes(1);
+    const opts = spawn.mock.calls[0]?.[1] as { skillBody: string } | undefined;
+    expect(opts?.skillBody).toMatch(/draft|草稿|confirm|更正/i);
+    const entries = JSON.parse(readFileSync(join(wt, ".roll", "features", "uncategorized", "US-RUN-001", "ac-map.json"), "utf8")) as Array<{ status: string; draftStatus: string }>;
+    expect(entries[0]).toMatchObject({ status: "pass", draftStatus: "pass-with-evidence" });
+    expect(ports.attest.render).toHaveBeenCalledWith(wt, "US-RUN-001", "/frame");
+    const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
+    expect(events.some((e) => e.type === "attest:acmap-draft" && e.storyId === "US-RUN-001")).toBe(true);
+    expect(events.some((e) => e.type === "attest:remediation" && e.outcome === "written")).toBe(true);
   });
 
   it("FIX-246: remediation agent writes the ac-map → event outcome 'written'", async () => {

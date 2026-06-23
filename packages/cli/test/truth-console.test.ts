@@ -496,6 +496,36 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
     const pct = /data-truth="merged-pct"[^>]*>(\d+)%/.exec(html);
     expect(Number(pct?.[1])).toBe(50);
   });
+
+  it("US-OBS-029: project panels render from snapshot panel slots before legacy input fields", () => {
+    const snapshot: TruthSnapshot = {
+      ...SNAP,
+      panels: {
+        liveFeed: {
+          status: "ready",
+          data: {
+            ...LIVE_FEED,
+            rawLineCount: 1,
+            renderedLines: ["from snapshot panel"],
+          },
+        },
+        charter: {
+          status: "ready",
+          data: { groups: [] },
+        },
+      },
+    };
+
+    const html = renderTruthConsole({
+      ...baseInput(snapshot),
+      liveFeed: { ...LIVE_FEED, renderedLines: ["legacy live feed"] },
+      charter: CHARTER,
+    });
+
+    expect(html).toContain("from snapshot panel");
+    expect(html).not.toContain("legacy live feed");
+    expect(html).toContain("No charter documents found in this project.");
+  });
 });
 
 describe("collectLoopLiveFeed — US-DOSSIER-044", () => {

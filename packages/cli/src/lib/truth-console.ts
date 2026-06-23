@@ -17,7 +17,7 @@
  * Casting/Charter render their project-specific surfaces below it.
  */
 import { bi, CONSISTENCY_DIMENSION_LABELS, type ConsistencyDimensionLabel, FONT_LINKS as CORE_FONT_LINKS } from "@roll/core";
-import type { TruthSnapshot, TruthSnapshotLoopLane } from "@roll/spec";
+import type { TruthSnapshot, TruthSnapshotLoopLane, TruthSnapshotPanelSlot } from "@roll/spec";
 import type { CycleLedgerRow, CycleTapeSegment } from "./cycle-ledger.js";
 import type { AgentPanelRow } from "./agent-panel.js";
 import type { ReleasePanelDim, ReleasePanelVM } from "./release-panel.js";
@@ -186,6 +186,24 @@ export const C = {
 /** bi() with the console's own class names (kept compatible with roll-lang). */
 export function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function panelData<T>(slot: TruthSnapshotPanelSlot | undefined, fallback: T): T {
+  if (slot?.data === undefined || slot.data === null) return fallback;
+  return slot.data as T;
+}
+
+function withSnapshotPanels(input: TruthConsoleInput): TruthConsoleInput {
+  const panels = input.snapshot.panels;
+  if (panels === undefined) return input;
+  return {
+    ...input,
+    skills: panelData(panels.skills, input.skills),
+    casting: panelData(panels.casting, input.casting),
+    charter: panelData(panels.charter, input.charter),
+    gitHooks: panelData(panels.gitHooks, input.gitHooks),
+    liveFeed: panelData(panels.liveFeed, input.liveFeed),
+  };
 }
 
 /**
@@ -2173,12 +2191,13 @@ export function topBar(input: TopBarInput): string {
 }
 
 export function renderTruthConsole(input: TruthConsoleInput): string {
+  const view = withSnapshotPanels(input);
   const tabBar = TABS.map(
     (t) =>
       `<a href="#${t.key}" data-tab="${t.key}" class="console-tab">${bi(t.en, t.zh)}</a>`,
   ).join("");
 
-  const header = topBar(input);
+  const header = topBar(view);
 
   const css = SHELL_CSS + `
 .console-tab{appearance:none;border:1px solid transparent;border-bottom:0;background:transparent;color:${C.sub};font-size:13px;font-weight:600;padding:9px 16px;border-radius:9px 9px 0 0;cursor:pointer;text-decoration:none;}
@@ -2210,17 +2229,17 @@ a{color:${C.blue};}
   // Casting · Charter). Skills is NOT a project tab — it is a machine-global
   // page (skills.html) reached via the MACHINE breadcrumb.
   const panes =
-    `<div id="tab-now">${nowTab(input)}</div>` +
-    `<div id="tab-backlog" style="display:none;">${backlogTab(input)}</div>` +
-    `<div id="tab-loop" style="display:none;">${loopTab(input)}</div>` +
-    `<div id="tab-release" style="display:none;">${releaseTab(input)}</div>` +
-    `<div id="tab-casting" style="display:none;">${castingTab(input)}</div>` +
-    `<div id="tab-charter" style="display:none;">${charterTab(input)}</div>`;
+    `<div id="tab-now">${nowTab(view)}</div>` +
+    `<div id="tab-backlog" style="display:none;">${backlogTab(view)}</div>` +
+    `<div id="tab-loop" style="display:none;">${loopTab(view)}</div>` +
+    `<div id="tab-release" style="display:none;">${releaseTab(view)}</div>` +
+    `<div id="tab-casting" style="display:none;">${castingTab(view)}</div>` +
+    `<div id="tab-charter" style="display:none;">${charterTab(view)}</div>`;
 
   return (
-    htmlHead(rollScope(input)) +
+    htmlHead(rollScope(view)) +
     `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
-    `<title>${esc(input.brand.name)} · Truth Console</title>\n` +
+    `<title>${esc(view.brand.name)} · Truth Console</title>\n` +
     FONT_LINKS +
     `<style>${css}</style>\n` +
     `${CONSOLE_SCRIPT}\n</head>\n<body>\n` +
@@ -2229,7 +2248,7 @@ a{color:${C.blue};}
     `<div style="display:flex;gap:6px;align-items:flex-end;border-bottom:1px solid #dfe4ec;position:sticky;top:54px;background:${C.bg};z-index:20;padding:16px 0 0;">${tabBar}</div>` +
     panes +
     `</main>\n` +
-    `<script id="roll-truth" type="application/json">\n${input.snapshotJson.replace(/<\//g, "<\\/")}</script>\n` +
+    `<script id="roll-truth" type="application/json">\n${view.snapshotJson.replace(/<\//g, "<\\/")}</script>\n` +
     `</body>\n</html>\n`
   );
 }

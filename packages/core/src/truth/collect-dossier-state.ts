@@ -9,7 +9,7 @@
  * the daemon and tests. The CLI wires the full reconciled collectors for
  * byte-identical output.
  */
-import type { StoryEvidenceFlags, TruthSnapshot, TruthSnapshotLoop, TruthSnapshotOnDeck, TruthSnapshotProject, TruthSnapshotStoryEntry } from "@roll/spec";
+import type { StoryEvidenceFlags, TruthSnapshot, TruthSnapshotLoop, TruthSnapshotOnDeck, TruthSnapshotPanelSlot, TruthSnapshotPanels, TruthSnapshotProject, TruthSnapshotStoryEntry } from "@roll/spec";
 import { classifyStatus } from "@roll/spec";
 import { buildTruthSnapshot } from "./selectors.js";
 import { collectDossier } from "./dossier-collect.js";
@@ -43,6 +43,9 @@ export type CollectEvidenceFlagsFn = (cwd: string, story: { id: string; epic: st
 /** Collect reachable project switcher rows from the shared registry. */
 export type CollectProjectsFn = (cwd: string) => readonly TruthSnapshotProject[];
 
+/** Collect one dossier panel into a TruthSnapshot envelope. */
+export type CollectPanelFn = (cwd: string, nowSec: number) => TruthSnapshotPanelSlot;
+
 /** All injectable collectors. Omit to use the default best-effort implementation. */
 export interface CollectorDeps {
   buildRunCache?: BuildDossierRunCache;
@@ -51,6 +54,11 @@ export interface CollectorDeps {
   collectLoopHeartbeat?: CollectLoopHeartbeatFn;
   collectEvidenceFlags?: CollectEvidenceFlagsFn;
   collectProjects?: CollectProjectsFn;
+  collectCastingPanel?: CollectPanelFn;
+  collectCharterPanel?: CollectPanelFn;
+  collectSkillsPanel?: CollectPanelFn;
+  collectGitHooksPanel?: CollectPanelFn;
+  collectLiveFeedPanel?: CollectPanelFn;
 }
 
 // ── Default best-effort collectors (node:fs only, no git/launchd) ────────────
@@ -250,6 +258,38 @@ function defaultBuildRunCache(_cwd: string): unknown { return null; }
 function defaultMergeEvidence(_cache: unknown, _id: string): boolean { return false; }
 function defaultCollectProjects(_cwd: string): readonly TruthSnapshotProject[] { return []; }
 
+function collectorErrorNote(err: unknown): string {
+  return err instanceof Error && err.message.trim() !== "" ? err.message : "collector failed";
+}
+
+function collectPanel(
+  fn: CollectPanelFn | undefined,
+  cwd: string,
+  nowSec: number,
+): TruthSnapshotPanelSlot | undefined {
+  if (fn === undefined) return undefined;
+  try {
+    return fn(cwd, nowSec);
+  } catch (err) {
+    return { status: "paused", data: null, note: collectorErrorNote(err) };
+  }
+}
+
+function collectPanels(cwd: string, nowSec: number, deps: CollectorDeps): TruthSnapshotPanels | undefined {
+  const panels: TruthSnapshotPanels = {};
+  const casting = collectPanel(deps.collectCastingPanel, cwd, nowSec);
+  const charter = collectPanel(deps.collectCharterPanel, cwd, nowSec);
+  const skills = collectPanel(deps.collectSkillsPanel, cwd, nowSec);
+  const gitHooks = collectPanel(deps.collectGitHooksPanel, cwd, nowSec);
+  const liveFeed = collectPanel(deps.collectLiveFeedPanel, cwd, nowSec);
+  if (casting !== undefined) panels.casting = casting;
+  if (charter !== undefined) panels.charter = charter;
+  if (skills !== undefined) panels.skills = skills;
+  if (gitHooks !== undefined) panels.gitHooks = gitHooks;
+  if (liveFeed !== undefined) panels.liveFeed = liveFeed;
+  return Object.keys(panels).length > 0 ? panels : undefined;
+}
+
 function collectOnDeck(cwd: string, epics: ReturnType<typeof collectDossier>): TruthSnapshotOnDeck {
   const byId = new Map<string, { epic: string; title: string }>();
   for (const epic of epics) {
@@ -346,6 +386,9 @@ export function collectDossierState(
   // 4.6. Project switcher rows are filtered at the shared read selector.
   const projects = reachableProjects(collectProjects(cwd));
 
+  // 4.7. Off-schema dossier panels ride the same snapshot envelope.
+  const panels = collectPanels(cwd, nowSec, deps);
+
   // 5. Assemble snapshot via truth selector
   return buildTruthSnapshot({
     generatedAt: truth.generatedAt ?? iso(nowSec),
@@ -359,6 +402,7 @@ export function collectDossierState(
     onDeck,
     ...(projects.length > 0 ? { projects } : {}),
     stories: storyRegistry,
+    ...(panels !== undefined ? { panels } : {}),
   });
 }
 

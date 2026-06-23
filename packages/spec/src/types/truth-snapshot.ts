@@ -151,6 +151,31 @@ export interface TruthSnapshotStoryEntry {
   legacy: boolean;
 }
 
+export type TruthSnapshotPanelStatus = "ready" | "paused" | "unknown";
+
+export interface TruthSnapshotPanelSlot<TData = unknown> {
+  /** ready = collected normally; paused = collector failed; unknown = not wired. */
+  status: TruthSnapshotPanelStatus;
+  /** The serializable panel view-model consumed by renderers. */
+  data: TData;
+  note?: string;
+  collectedAt?: string;
+}
+
+/**
+ * US-OBS-029 — project dossier panels carried by the same TruthSnapshot as the
+ * headline truth facts. The payloads stay structurally typed at their owning
+ * CLI collectors; spec only records the transport envelope so core does not
+ * depend on CLI view-model modules.
+ */
+export interface TruthSnapshotPanels {
+  casting?: TruthSnapshotPanelSlot;
+  charter?: TruthSnapshotPanelSlot;
+  skills?: TruthSnapshotPanelSlot;
+  gitHooks?: TruthSnapshotPanelSlot;
+  liveFeed?: TruthSnapshotPanelSlot;
+}
+
 export interface TruthSnapshot {
   generatedAt: string;
   collectedAt?: string;
@@ -169,6 +194,8 @@ export interface TruthSnapshot {
    *  and additive: older consumers and snapshots minted before this story stay
    *  valid (a snapshot without it serializes byte-identically to before). */
   stories?: TruthSnapshotStoryEntry[];
+  /** US-OBS-029 — off-schema dossier panels routed through the read selector. */
+  panels?: TruthSnapshotPanels;
 }
 
 /** The ONE serialization both index.html's embed and truth.json carry. */

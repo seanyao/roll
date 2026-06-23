@@ -18,6 +18,7 @@ import {
   declaresAnySurface,
   deliverableCmdsForStory,
   deliverableUrlsForStory,
+  findDuplicateBacklogStoryIds,
   findDuplicateStoryIds,
   readAttestGateMode,
   rejectedDeliverableCmdsForStory,
@@ -1567,5 +1568,51 @@ describe("FIX-340 — story id uniqueness (storySpecPath fail-loud + corpus lint
   it("corpus lint on an absent features tree returns [] (nothing to scan)", () => {
     const wt = tmp("absent");
     expect(findDuplicateStoryIds(wt)).toEqual([]);
+  });
+});
+
+/*
+ * FIX-340 (AC3 "…and the backlog") — the BACKLOG half of the uniqueness lint.
+ * `.roll/backlog.md` is the single queue of record: one row per story id. Two
+ * rows sharing an id is the same "一个 ID 一份卡" violation the features-tree lint
+ * guards. `findDuplicateBacklogStoryIds` is PURE (takes the backlog text) so it
+ * needs no backlog on disk.
+ */
+describe("FIX-340 — backlog id uniqueness (findDuplicateBacklogStoryIds)", () => {
+  const row = (id: string, rest = "desc"): string => `| [${id}](.roll/features/x/${id}/spec.md) | ${rest} | ✅ Done |`;
+
+  it("no duplicate rows → []", () => {
+    const backlog = ["# Backlog", "", "| ID | Desc | Status |", "|----|----|----|", row("US-FOO-001"), row("FIX-100"), row("IDEA-002")].join("\n");
+    expect(findDuplicateBacklogStoryIds(backlog)).toEqual([]);
+  });
+
+  it("an id on TWO rows is reported with both 1-based line numbers", () => {
+    const lines = ["# Backlog", "", row("US-AGENT-002"), row("FIX-100"), row("US-AGENT-002", "stale dup")];
+    const dups = findDuplicateBacklogStoryIds(lines.join("\n"));
+    expect(dups).toHaveLength(1);
+    expect(dups[0]?.id).toBe("US-AGENT-002");
+    expect(dups[0]?.lines).toEqual([3, 5]); // the two rows, 1-based
+  });
+
+  it("reports EVERY duplicated id, sorted by id", () => {
+    const lines = [row("FIX-9"), row("US-Z-001"), row("FIX-9"), row("US-Z-001"), row("US-Z-001"), row("US-UNIQ-001")];
+    const dups = findDuplicateBacklogStoryIds(lines.join("\n"));
+    expect(dups.map((d) => d.id)).toEqual(["FIX-9", "US-Z-001"]);
+    expect(dups.find((d) => d.id === "US-Z-001")?.lines).toEqual([2, 4, 5]); // all three rows
+  });
+
+  it("only the LEADING id cell counts — an id mentioned in another column is not a row key", () => {
+    // the second row's id is FIX-200; US-AGENT-002 appears only in its description.
+    const lines = [row("US-AGENT-002"), `| [FIX-200](p) | supersedes US-AGENT-002 | ✅ |`];
+    expect(findDuplicateBacklogStoryIds(lines.join("\n"))).toEqual([]);
+  });
+
+  it("non-row lines (headers, prose, separators) are ignored", () => {
+    const backlog = ["# Backlog", "Some prose mentioning FIX-100 twice: FIX-100.", "| Story | Desc |", "|---|---|", row("FIX-100")].join("\n");
+    expect(findDuplicateBacklogStoryIds(backlog)).toEqual([]);
+  });
+
+  it("empty backlog text → []", () => {
+    expect(findDuplicateBacklogStoryIds("")).toEqual([]);
   });
 });

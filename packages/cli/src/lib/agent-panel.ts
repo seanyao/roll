@@ -55,6 +55,10 @@ const RUNNER_LABEL: Record<string, string> = {
   reasonix: "reasonix CLI",
 };
 
+export function agentRunnerLabelNames(): string[] {
+  return Object.keys(RUNNER_LABEL);
+}
+
 export function defaultAgentPanelDeps(): AgentPanelDeps {
   return {
     installed: () => agentsInstalled(realAgentEnv()),

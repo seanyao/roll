@@ -39,7 +39,9 @@ hard:     { agent: claude }    # est_min > 20
 fallback: { agent: pi }        # 选中的 agent 离线时顶上
 ```
 
-每个 agent 用自己的默认模型 —— 没有 model 层要配。
+每次指派都是一个 rig：`agent × model`。agent 必须是六个支持身份之一；model 是挂在
+该 agent 上的字符串。例如 `pi` 可以运行 `deepseek-v4-pro`，但 `deepseek` 不是 agent
+槽位值。
 
 ```bash
 roll agent                # 查看四个槽 + 在线状态 + 最近降级痕迹

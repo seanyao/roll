@@ -14,6 +14,8 @@
 
 - **文档/站点/技能收口到 6 agent**：docs、guide（中英）、skills 中作为 agent 提及的 `cursor`、`trae`、`opencode`、`openclaw` 及 `openai`/`deepseek`/`qwen` 独立 agent 条目已移除；model/provider 提及不动（`deepseek-v4-pro` 等 model id、`openai` 等 provider alias 保留）。(US-AGENT-046) `[agents]`
 
+- **agent roster 适应度闸与 Rig 类型**：新增结构化 roster gate，CI 测试会校验 core/CLI/spawn/runner-label 等 roster 面都保持六 agent，并用合成 `qwen` 回流证明会红；`Rig` 明确建模 `agent × model`，阻止 `deepseek` 这类 model/provider 被当作 agent 指派。(US-AGENT-047) `[agents]`
+
 - **交付真相重建补齐无 PR 号 story-only merge 的跨阶段去重**：`ensureDeliveriesFresh` 两阶段 git log 合并现在按 `pr:<n>` / `sha:<commit>` 去重，避免某个 `prNumber=0` 事实挡掉后续已合主干的 story-only squash commit。(FIX-925) `[feedback-truth-alignment]`
 
 - **release gate 接受无 PR 号交付的 merge SHA 证据**：Done 行现在可用 `merged <sha>` 作为可验证 merge ref；truth-live 在 PR 号缺失时校验 merge commit，避免 story-only squash merge 被迫伪造 PR ref。(FIX-926) `[feedback-truth-alignment]`

@@ -40,6 +40,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { Rig } from "@roll/spec";
 import { getAgentSpec } from "@roll/core";
 
 /**
@@ -288,6 +289,10 @@ const AGENT_PROFILES: Readonly<Record<string, AgentProfile>> = {
   },
 };
 
+export function agentProfileNames(): string[] {
+  return Object.keys(AGENT_PROFILES);
+}
+
 export function agentProfile(name: string): AgentProfile {
   const canonical = canonicalProfileName(name);
   const profile = AGENT_PROFILES[canonical];
@@ -326,6 +331,8 @@ export interface AgentSpawnOptions {
   writableRoots?: string[];
   /** Routed model, consumed by agent profiles whose CLI accepts an explicit model. */
   model?: string;
+  /** The resolved agent×model assignment; kept alongside legacy fields while call sites migrate. */
+  rig?: Rig;
   /** Agent-local autonomous step budget for CLIs that expose one. */
   maxSteps?: number;
   /** FIX-220: when the user manually triggers `roll loop now`, drop --verbose

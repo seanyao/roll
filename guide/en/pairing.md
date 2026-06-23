@@ -5,6 +5,11 @@ automatically. The primitive is the **pair**, not the review: a working agent
 delivers, and a heterogeneous peer reviews it for perspective diversity. A code
 bug that one model's blind spot hides, another model's catches.
 
+Roll treats a reviewer assignment as a **rig**: `agent × model`. The agent is the
+finite six-name identity (`claude`, `kimi`, `codex`, `pi`, `agy`, `reasonix`);
+the model is data carried by that agent. A DeepSeek model therefore rides inside
+the `model` field of a `pi` or `reasonix` rig; `deepseek` is not an agent rig.
+
 Pairing is distinct from [`roll peer`](peer.md): peer is an on-demand,
 multi-round negotiation you (or the loop's risk gate) trigger; pairing is an
 always-available, one-way second pass wired into the cycle and governed by an
@@ -131,8 +136,9 @@ self-score):
   correctness, domain/spec consistency) — not code. It stamps the score
   `stage=design`. The designing agent triggers but never grades its own work;
   no peer available → honest unscored (fail-loud), never a self-grade.
-- **Independence, not vendor**: a fresh same-vendor session is the minimum
-  acceptable; a different agent+model+session (non-sub-agent) is encouraged.
+- **Independence is by rig and session**: a fresh same-vendor session is the
+  minimum acceptable; a different `agent × model × session` rig (non-sub-agent)
+  is encouraged.
   A score sharing the builder's session — including any sub-agent of it — is
   rejected as a self-score. No heterogeneous candidate, a timeout, or a
   protocol miss does **not** fall back to a self-score; the absence is audited

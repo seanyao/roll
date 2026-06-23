@@ -11,6 +11,7 @@ import {
   firstInstalledAgent,
   type AgentEnv,
 } from "../src/agent/registry.js";
+import { evaluateAgentRosterGate, liveAgentRosterGateInput } from "../src/agent/roster-gate.js";
 import { AGENTS, AGENT_SPECS, getAgentIdentitySpec, getAgentSpec } from "../src/agent/specs.js";
 
 const CANONICAL_ROSTER = ["claude", "kimi", "codex", "pi", "agy", "reasonix"] as const;
@@ -132,5 +133,37 @@ describe("US-AGENT-043 canonical agent roster", () => {
     const site = readProjectFile("site/roll-data.js");
     expect(site).toContain("Works with Claude · Antigravity · Codex · Kimi · Pi · Reasonix");
     expect(site).toContain("支持 Claude · Antigravity · Codex · Kimi · Pi · Reasonix");
+  });
+
+  it("US-AGENT-047: structured roster gate passes the live canonical source", () => {
+    const live = liveAgentRosterGateInput();
+    const result = evaluateAgentRosterGate({
+      ...live,
+      surfaces: [...live.surfaces, { name: "AGENT_REGISTRY_NAMES", agents: AGENT_REGISTRY_NAMES }],
+    });
+    expect(result).toEqual({ ok: true, gaps: [] });
+  });
+
+  it("US-AGENT-047: structured roster gate fails on synthetic removed-agent reflow", () => {
+    const result = evaluateAgentRosterGate({
+      surfaces: [{ name: "synthetic AGENT_REGISTRY_NAMES", agents: [...CANONICAL_ROSTER, "qwen"] }],
+      agentPositions: [{ surface: "fixture", context: "capability.qwen", value: "qwen", kind: "agent" }],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.gaps.join("\n")).toContain("synthetic AGENT_REGISTRY_NAMES roster drift");
+    expect(result.gaps.join("\n")).toContain("forbidden agent-position token qwen");
+  });
+
+  it("US-AGENT-047: model/provider contexts are allowlisted but agent contexts are not", () => {
+    const result = evaluateAgentRosterGate({
+      surfaces: liveAgentRosterGateInput().surfaces,
+      agentPositions: [
+        { surface: "fixture", context: "defaultModel", value: "deepseek", kind: "model" },
+        { surface: "fixture", context: "providerAliases", value: "openai", kind: "provider" },
+        { surface: "fixture", context: "agent", value: "deepseek", kind: "agent" },
+      ],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.gaps).toEqual(["fixture has forbidden agent-position token deepseek in agent"]);
   });
 });

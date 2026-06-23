@@ -30,17 +30,16 @@ function isStage(s: string): s is PairingStage {
 /**
  * Vendor key for heterogeneity: two agents are heterogeneous iff their vendors
  * differ. Unknown agents default to their own canonical name (treated as distinct
- * vendors). The pool was narrowed to 国产/开源 agents (kimi/pi/reasonix); the
- * overseas vendors (openai/codex, google/agy/gemini, alibaba/qwen) were removed.
- * `claude` is kept as a harness vendor entry (roll runs inside Claude Code) even
- * though claude is not a routable pool agent.
+ * vendors). Provider aliases stay aliases in AgentSpec, while the pairing pool
+ * only reasons about canonical agent names.
  */
 const AGENT_VENDOR: Readonly<Record<string, string>> = {
   claude: "anthropic",
   kimi: "moonshot",
-  deepseek: "deepseek",
-  reasonix: "reasonix",
+  codex: "openai",
   pi: "pi",
+  agy: "google",
+  reasonix: "reasonix",
 };
 
 export function agentVendor(name: string): string {

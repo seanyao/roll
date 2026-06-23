@@ -93,10 +93,14 @@ function agentBinNames(agent: string): string[] | null {
       return ["claude"];
     case "kimi":
       return ["kimi-code", "kimi-cli", "kimi"];
-    case "deepseek":
-      return ["deepseek"];
+    case "codex":
+      return ["codex"];
     case "pi":
       return ["pi"];
+    case "agy":
+    case "antigravity":
+    case "gemini":
+      return ["agy", "gemini"];
     case "reasonix":
       return ["reasonix"];
     default:
@@ -136,6 +140,7 @@ export function isAiInstalled(aiDir: string): boolean {
     bn = basename(dirname(aiDir)).replace(/^\./, "");
   }
   if (bn === "kimi-code") bn = "kimi";
+  if (bn === "antigravity" || bn === "gemini") bn = "agy";
   return agentInstalledByName(bn, aiDir);
 }
 
@@ -300,8 +305,9 @@ const DEFAULT_AI_KEYS: Array<[string, string]> = [
   ["ai_claude", "~/.claude|CLAUDE.md|CLAUDE.md"],
   ["ai_kimi", "~/.kimi|AGENTS.md|AGENTS.md"],
   ["ai_kimi_code", "~/.kimi-code|AGENTS.md|AGENTS.md"],
+  ["ai_codex", "~/.codex|AGENTS.md|AGENTS.md"],
   ["ai_pi", "~/.pi/agent|AGENTS.md|AGENTS.md"],
-  ["ai_deepseek", "~/.deepseek|AGENTS.md|AGENTS.md"],
+  ["ai_agy", "~/.agentrules|AGENTS.md|AGENTS.md"],
   ["ai_reasonix", "~/.reasonix|AGENTS.md|AGENTS.md"],
 ];
 
@@ -341,8 +347,9 @@ const DEFAULT_CONFIG = `# Roll Configuration
 ai_claude: ~/.claude|CLAUDE.md|CLAUDE.md
 ai_kimi: ~/.kimi|AGENTS.md|AGENTS.md
 ai_kimi_code: ~/.kimi-code|AGENTS.md|AGENTS.md
+ai_codex: ~/.codex|AGENTS.md|AGENTS.md
 ai_pi: ~/.pi/agent|AGENTS.md|AGENTS.md
-ai_deepseek: ~/.deepseek|AGENTS.md|AGENTS.md
+ai_agy: ~/.agentrules|AGENTS.md|AGENTS.md
 ai_reasonix: ~/.reasonix|AGENTS.md|AGENTS.md
 
 # User preferences
@@ -360,9 +367,7 @@ primary_agent: claude
 `;
 
 function firstInstalledAgent(): string | null {
-  // FIX-399: `deepseek` removed — it is a MODEL pi/reasonix load, not an agent
-  // that may be written as `primary_agent`.
-  for (const agent of ["claude", "kimi", "pi", "reasonix"]) {
+  for (const agent of ["claude", "kimi", "codex", "pi", "agy", "reasonix"]) {
     if (agentInstalledByName(agent)) return agent;
   }
   return null;

@@ -136,24 +136,21 @@ describe("tierVisible", () => {
   });
 });
 
-describe("formatStream — claude routes to the generic normalizer (pool narrowing)", () => {
-  // The pool was narrowed to kimi/pi/reasonix and claude has no AgentSpec, so
-  // `normalizerFor("claude")` now returns the GENERIC normalizer. A claude-shaped
-  // stream is therefore not parsed for tool_use/skill turning points — every
-  // non-banner line folds to a tier-C "say" that is hidden by default and only
-  // surfaced with --verbose.
-  it("folds a claude stream into tier-C say lines hidden by default", () => {
+describe("formatStream — claude routes to the claude stream normalizer", () => {
+  it("folds a claude stream into visible activity signals", () => {
     const lines = [
       JSON.stringify({ type: "system", subtype: "init" }),
       JSON.stringify({ type: "assistant", message: { content: [{ type: "thinking", thinking: "x" }] } }),
       JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Edit", input: { file_path: "src/x.ts" } }] } }),
       JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "let me think" }] } }),
     ];
-    expect(formatStream(lines, "claude").length).toBe(0); // every line is tier-C, hidden by default
-    expect(formatStream(lines, "claude", { verbose: true }).length).toBe(4); // verbose reveals all
+    const out = formatStream(lines, "claude");
+    expect(out.length).toBe(1);
+    expect(out[0]).toContain("x.ts");
+    expect(formatStream(lines, "claude", { verbose: true }).length).toBeGreaterThanOrEqual(1);
   });
 
-  it("--verbose reveals the tier-C passthrough prose", () => {
+  it("text-only claude assistant chunks remain quiet by default", () => {
     const lines = [JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "let me think" }] } })];
     expect(formatStream(lines, "claude").length).toBe(0);
     expect(formatStream(lines, "claude", { verbose: true }).length).toBe(1);
@@ -177,11 +174,8 @@ describe("formatStream — non-claude agents are NOT blank (the US-LOOP-077 fix)
 
 describe("formatStream — resilience", () => {
   it("a torn JSON line does not break the generic stream", () => {
-    // claude → generic normalizer now: a banner still surfaces (tier A) even
-    // when a torn JSON line precedes it; the torn line folds to a tier-C say
-    // that is hidden by default, and the stream never throws.
     const lines = [
-      '{"type":"assist', // torn — tolerated, folds to tier-C say
+      '{"type":"assist', // torn — tolerated
       "── cycle 20260613-3 · FIX-1 · agent kimi ──",
     ];
     const out = formatStream(lines, "claude");
@@ -192,9 +186,6 @@ describe("formatStream — resilience", () => {
 
 describe("E2E — `roll loop fmt` golden path (spawned binary, stdin→stdout)", () => {
   it("a claude cycle surfaces the banner and hides tier-C noise via the pipe", () => {
-    // claude → generic normalizer now (no AgentSpec): the cycle banner is the
-    // only tier-A line, so it surfaces; the stream-json bodies fold to tier-C
-    // say lines that are hidden by default, so no raw JSON leaks downstream.
     const stream = [
       "── cycle 20260606-1 · US-PORT-012 · agent claude ──",
       JSON.stringify({ type: "system", subtype: "init" }),
@@ -209,16 +200,13 @@ describe("E2E — `roll loop fmt` golden path (spawned binary, stdin→stdout)",
       env: { ...process.env, NO_COLOR: "1", ROLL_LOOP_AGENT: "claude" },
     });
     expect(out).toContain("US-PORT-012"); // cycle banner (tier A) is visible
-    expect(out).not.toContain("planning"); // tier-C body hidden by default
+    expect(out).not.toContain("planning"); // thinking body hidden by default
     expect(out).not.toContain('"type"'); // no raw json leaked by default
   });
 
-  it("a claude cycle reveals its tier-C bodies under --verbose via the pipe", () => {
-    // The generic normalizer passes each non-banner line through as a clipped
-    // tier-C say (it does not parse stream-json fields), so --verbose surfaces
-    // the line text verbatim.
+  it("a generic cycle reveals its tier-C bodies under --verbose via the pipe", () => {
     const stream = [
-      "── cycle 20260613-2 · FIX-9 · agent claude ──",
+      "── cycle 20260613-2 · FIX-9 · agent kimi ──",
       "editing src/foo.ts",
       "ran pnpm test",
     ].join("\n") + "\n";
@@ -226,7 +214,7 @@ describe("E2E — `roll loop fmt` golden path (spawned binary, stdin→stdout)",
     const out = execFileSync("node", [CLI_BIN, "loop", "fmt", "--verbose"], {
       input: stream,
       encoding: "utf8",
-      env: { ...process.env, NO_COLOR: "1", ROLL_LOOP_AGENT: "claude" },
+      env: { ...process.env, NO_COLOR: "1", ROLL_LOOP_AGENT: "kimi" },
     });
     expect(out).toContain("FIX-9"); // banner
     expect(out).toContain("foo.ts"); // tier-C body now surfaced under --verbose

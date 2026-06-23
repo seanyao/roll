@@ -155,10 +155,16 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
     expect(args).toEqual(["-p", prompt]);
   });
 
-  it("deepseek: deepseek <prompt> (positional)", () => {
-    const { bin, args } = buildSpawnCommand("deepseek", { cwd: "/wt", skillBody: "DO WORK" });
-    expect(bin).toBe("deepseek");
-    expect(args).toEqual([prompt]);
+  it("codex: codex exec under workspace-write sandbox", () => {
+    const { bin, args } = buildSpawnCommand("codex", { cwd: "/wt", skillBody: "DO WORK" });
+    expect(bin).toBe("codex");
+    expect(args).toEqual(["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", prompt]);
+  });
+
+  it("agy: agy -p <prompt>", () => {
+    const { bin, args } = buildSpawnCommand("agy", { cwd: "/wt", skillBody: "DO WORK" });
+    expect(bin).toBe("agy");
+    expect(args).toEqual(["-p", prompt]);
   });
 
   it("US-AGENT-002 reasonix: reasonix run --max-steps <N> --model <model> --dir <cwd> <prompt>", () => {
@@ -223,7 +229,7 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
     expect(() => buildSpawnCommand("made-up-agent", { cwd: "/wt", skillBody: "x" })).toThrow(
       /agent 'made-up-agent' argv not yet ported/,
     );
-    // The pool is fully ported (kimi/pi/reasonix + claude harness) → no TODO entries.
+    // The six-agent roster is fully ported (claude/kimi/codex/pi/agy/reasonix) → no TODO entries.
     expect(Object.keys(AGENT_ARGV_TODO)).toHaveLength(0);
   });
 
@@ -238,8 +244,8 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
       expect(args[1]).not.toContain(AUTORUN_DIRECTIVE);
       expect(args[1]).not.toContain("FIX-1"); // no story pin either
     });
-    it("pi/kimi bare: body verbatim, no autorun directive", () => {
-      for (const agent of ["pi", "kimi"]) {
+    it("pi/kimi/codex/agy bare: body verbatim, no autorun directive", () => {
+      for (const agent of ["pi", "kimi", "codex", "agy"]) {
         const { args } = buildSpawnCommand(agent, { cwd: "/wt", skillBody: "REVIEW THIS", bare: true });
         expect(args.some((a) => a.includes(AUTORUN_DIRECTIVE))).toBe(false);
         expect(args.some((a) => a === "REVIEW THIS")).toBe(true);
@@ -273,10 +279,19 @@ describe("US-AGENT-001 AgentProfile factory", () => {
       "--dir",
       "/wt",
     ]);
+
+    const codex = agentProfile("codex");
+    expect(codex.acceptance.canReviewHeadless).toBe(true);
+    expect(codex.usesWorkspaceSandbox).toBe(true);
+
+    const agy = agentProfile("agy");
+    expect(agy.acceptance.canReviewHeadless).toBe(false);
   });
 
-  it("keeps CLI argv aliases in the profile layer, not downstream executor branches", () => {
-    expect(agentProfile("deepseek").buildSpawnCommand({ cwd: "/wt", skillBody: "DO WORK" }).bin).toBe("deepseek");
+  it("keeps provider aliases in the profile layer, not downstream executor branches", () => {
+    expect(agentProfile("deepseek").buildSpawnCommand({ cwd: "/wt", skillBody: "DO WORK" }).bin).toBe("pi");
+    expect(agentProfile("openai").buildSpawnCommand({ cwd: "/wt", skillBody: "DO WORK" }).bin).toBe("codex");
+    expect(agentProfile("antigravity").buildSpawnCommand({ cwd: "/wt", skillBody: "DO WORK" }).bin).toBe("agy");
   });
 
   it("profiles own agent-specific child env hooks", () => {

@@ -49,9 +49,10 @@ export interface AgentPanelDeps {
 const RUNNER_LABEL: Record<string, string> = {
   claude: "Claude Code",
   kimi: "Kimi CLI",
+  codex: "Codex CLI",
   pi: "pi CLI",
+  agy: "Antigravity CLI",
   reasonix: "reasonix CLI",
-  deepseek: "DeepSeek CLI",
 };
 
 export function defaultAgentPanelDeps(): AgentPanelDeps {

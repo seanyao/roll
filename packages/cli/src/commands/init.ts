@@ -43,6 +43,7 @@ import {
   agentInstalledByName as coreAgentInstalledByName,
   agentsInstalled,
   defaultPairingConfig,
+  getAgentSpec,
   renderPairingConfig,
 } from "@roll/core";
 import { resolveLang, STATUS_MARKER, t, v2Catalog, type Lang } from "@roll/spec";
@@ -271,6 +272,7 @@ function discoverOnboardAgents(): { installed: string[]; missing: string[] } {
     if (match === null) continue;
     let name = (match[1] ?? "").slice("ai_".length);
     if (name === "kimi_code") name = "kimi";
+    name = getAgentSpec(name)?.name ?? name;
     const dir = expandHome(((match[2] ?? "").split("|")[0] ?? "").trim());
     const target = coreAgentInstalledByName(env, name, dir) ? installed : missing;
     if (!target.includes(name)) target.push(name);
@@ -341,15 +343,18 @@ function kimiBin(): string {
 }
 
 function interactiveAgentCommand(agent: string, prompt: string): { bin: string; args: string[] } | null {
-  switch (agent) {
+  const canonical = getAgentSpec(agent.trim().toLowerCase())?.name ?? agent;
+  switch (canonical) {
     case "claude":
       return { bin: "claude", args: [prompt] };
     case "kimi":
       return { bin: kimiBin(), args: [prompt] };
-    case "deepseek":
-      return { bin: "deepseek", args: [prompt] };
+    case "codex":
+      return { bin: "codex", args: ["exec", prompt] };
     case "pi":
       return { bin: "pi", args: [prompt] };
+    case "agy":
+      return { bin: "agy", args: [prompt] };
     case "reasonix":
       return { bin: "reasonix", args: [prompt] };
     default:

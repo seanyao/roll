@@ -213,20 +213,19 @@ describe("genericNormalizer — passthrough for unknown agents", () => {
 });
 
 describe("normalizerFor — agent → normalizer mapping (downstream stays agnostic)", () => {
-  // claude is no longer a pool member (no AgentSpec entry), so name-routing
-  // resolves it to the generic normalizer. The claudeNormalizer harness export
-  // remains directly usable by the Claude Code harness — see the claudeNormalizer
-  // describe blocks above — it is simply not reachable via name routing.
-  it("every pool/unknown agent → genericNormalizer (claude has no spec → generic too)", () => {
+  it("routes known stream formats while keeping plain agents on genericNormalizer", () => {
+    expect(normalizerFor("claude").agent).toBe("claude");
+    expect(normalizerFor("codex").agent).toBe("generic");
     expect(normalizerFor("kimi").agent).toBe("generic");
     expect(normalizerFor("pi").agent).toBe("generic");
+    expect(normalizerFor("agy").agent).toBe("generic");
     expect(normalizerFor("reasonix").agent).toBe("generic");
-    expect(normalizerFor("claude").agent).toBe("generic");
     expect(normalizerFor("something-new").agent).toBe("generic");
     expect(normalizerFor("").agent).toBe("generic");
   });
   it("is case-insensitive and trims", () => {
     expect(normalizerFor("  KIMI ").agent).toBe("generic");
+    expect(normalizerFor("  CODEX ").agent).toBe("generic");
     expect(normalizerFor("  Reasonix ").agent).toBe("generic");
   });
 });

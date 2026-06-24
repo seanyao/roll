@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { dispatch, isPorted, registerAll } from "../src/index.js";
-import { RUN_ONCE_USAGE, buildLoopRouteDeps, loopRunOnceCommand, readExternalBlock, readSkillBody, shouldSuppressGoalChildFailureCounter } from "../src/commands/loop-run-once.js";
+import { RUN_ONCE_USAGE, buildLoopRouteDeps, idleCounterPath, incrementConsecutiveIdle, loopRunOnceCommand, readExternalBlock, readSkillBody, resetConsecutiveIdle, shouldSuppressGoalChildFailureCounter } from "../src/commands/loop-run-once.js";
 import { resolveRoute } from "@roll/core";
 import { realAgentSpawn } from "../src/runner/index.js";
 
@@ -764,5 +764,75 @@ describe("announceReport — card-layout report surface (US-META-002c follow-thr
   it("no report anywhere → null, no announcement", async () => {
     const { announceReport } = await import("../src/commands/loop-run-once.js");
     expect(announceReport(tmp("announce-none"), "slug-x", "FIX-9", () => {})).toBeNull();
+  });
+});
+
+// ── US-LOOP-079h1: consecutive-idle counter ──────────────────────────────────
+
+describe("US-LOOP-079h1 — consecutive-idle counter", () => {
+  const { existsSync, readFileSync, writeFileSync } = require("node:fs");
+
+  it("idleCounterPath produces the expected file path (AC2: separate from consecutive-fails)", () => {
+    const p = tmp("idle-path");
+    expect(idleCounterPath(p, "default")).toContain("consecutive-idle-default");
+    // AC2: file name is distinct from the consecutive-fails counter.
+    expect(idleCounterPath(p, "default")).not.toContain("consecutive-fails");
+  });
+
+  it("incrementConsecutiveIdle creates the file and returns count (AC1)", () => {
+    const p = tmp("idle-incr");
+    mkdirSync(join(p, ".roll", "loop"), { recursive: true });
+    const count1 = incrementConsecutiveIdle(p, "default");
+    expect(count1).toBe(1);
+    expect(existsSync(join(p, ".roll", "loop", "consecutive-idle-default"))).toBe(true);
+    expect(readFileSync(join(p, ".roll", "loop", "consecutive-idle-default"), "utf8").trim()).toBe("1");
+
+    const count2 = incrementConsecutiveIdle(p, "default");
+    expect(count2).toBe(2);
+    expect(readFileSync(join(p, ".roll", "loop", "consecutive-idle-default"), "utf8").trim()).toBe("2");
+  });
+
+  it("resetConsecutiveIdle sets the file to 0 (AC1: non-idle terminal resets)", () => {
+    const p = tmp("idle-reset");
+    mkdirSync(join(p, ".roll", "loop"), { recursive: true });
+    // Seed with a non-zero value.
+    incrementConsecutiveIdle(p, "default");
+    incrementConsecutiveIdle(p, "default");
+    expect(readFileSync(join(p, ".roll", "loop", "consecutive-idle-default"), "utf8").trim()).toBe("2");
+
+    resetConsecutiveIdle(p, "default");
+    expect(readFileSync(join(p, ".roll", "loop", "consecutive-idle-default"), "utf8").trim()).toBe("0");
+  });
+
+  it("AC3: corrupt / non-numeric file → read as 0 without crashing", () => {
+    const p = tmp("idle-crpt");
+    mkdirSync(join(p, ".roll", "loop"), { recursive: true });
+    writeFileSync(join(p, ".roll", "loop", "consecutive-idle-default"), "not-a-number", "utf8");
+    const count = incrementConsecutiveIdle(p, "default");
+    // Corrupt read → 0, then +1 → 1.
+    expect(count).toBe(1);
+  });
+
+  it("AC3: missing file → treated as 0 (idempotent first increment)", () => {
+    const p = tmp("idle-miss");
+    mkdirSync(join(p, ".roll", "loop"), { recursive: true });
+    const count = incrementConsecutiveIdle(p, "default");
+    expect(count).toBe(1);
+  });
+
+  it("AC3: half-written file (empty) → treated as 0", () => {
+    const p = tmp("idle-empty");
+    mkdirSync(join(p, ".roll", "loop"), { recursive: true });
+    writeFileSync(join(p, ".roll", "loop", "consecutive-idle-default"), "", "utf8");
+    const count = incrementConsecutiveIdle(p, "default");
+    expect(count).toBe(1);
+  });
+
+  it("resetConsecutiveIdle is idempotent (file may not exist)", () => {
+    const p = tmp("idle-nx");
+    mkdirSync(join(p, ".roll", "loop"), { recursive: true });
+    // Should not throw if the file does not exist yet.
+    expect(() => resetConsecutiveIdle(p, "default")).not.toThrow();
+    expect(() => resetConsecutiveIdle(p, "default")).not.toThrow();
   });
 });

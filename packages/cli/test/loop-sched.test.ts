@@ -671,6 +671,39 @@ describe("loop pause/resume (marker file)", () => {
     expect(stateAfter).toContain("status: paused"); // non-heal lines preserved
   });
 
+  // US-LOOP-079h1 AC4: resume must clear the consecutive-idle counter.
+  it("resume resets consecutive-idle counter (US-LOOP-079h1 AC4)", async () => {
+    const proj = tmp("proj-idle1");
+    const { deps } = fakeDeps(proj, tmp("sh-idle1"), tmp("ld-idle1"));
+    const rt = join(proj, ".roll", "loop");
+    const marker = join(rt, "PAUSE-proj-abc123");
+    mkdirSync(rt, { recursive: true });
+
+    // Simulate a paused state with an accumulated idle counter.
+    writeFileSync(marker, "2026-06-11T10:00:00Z\n");
+    writeFileSync(join(rt, "consecutive-idle-proj-abc123"), "5");
+
+    const r = await captureStdout(() => loopResumeCommand([], deps));
+    expect(r.code).toBe(0);
+
+    // consecutive-idle-<slug> reset to 0.
+    expect(existsSync(join(rt, "consecutive-idle-proj-abc123"))).toBe(true);
+    expect(readFileSync(join(rt, "consecutive-idle-proj-abc123"), "utf8").trim()).toBe("0");
+  });
+
+  // US-LOOP-079h1 AC4: resume without a prior idle counter file is safe (no-op).
+  it("resume does not fail when consecutive-idle file does not exist", async () => {
+    const proj = tmp("proj-idle2");
+    const { deps } = fakeDeps(proj, tmp("sh-idle2"), tmp("ld-idle2"));
+    const rt = join(proj, ".roll", "loop");
+    const marker = join(rt, "PAUSE-proj-abc123");
+    mkdirSync(rt, { recursive: true });
+    writeFileSync(marker, "2026-06-11T10:00:00Z\n");
+
+    const r = await captureStdout(() => loopResumeCommand([], deps));
+    expect(r.code).toBe(0);
+  });
+
   it("resume emits loop:resumed event when a PAUSE marker was present", async () => {
     const proj = tmp("proj-fix251b");
     const { deps } = fakeDeps(proj, tmp("sh-fix251b"), tmp("ld-fix251b"));

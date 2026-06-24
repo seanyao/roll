@@ -365,6 +365,49 @@ function resetConsecutiveFails(projectPath: string): void {
   } catch { /* best-effort */ }
 }
 
+// ── US-LOOP-079h1: consecutive-idle counter ───────────────────────────────────
+
+/** Consecutive-idle counter file path (per-project, per-slug suffix). */
+export function idleCounterPath(projectPath: string, slug: string): string {
+  return join(runtimeDir(projectPath), `consecutive-idle-${slug}`);
+}
+
+/**
+ * Increment the consecutive-idle counter. Returns the new count.
+ * AC3: corrupt / unreadable / non-numeric → treated as 0.
+ */
+export function incrementConsecutiveIdle(projectPath: string, slug: string): number {
+  const file = idleCounterPath(projectPath, slug);
+  let count = 0;
+  try {
+    if (existsSync(file)) {
+      count = parseInt(readFileSync(file, "utf8").trim(), 10) || 0;
+    }
+  } catch {
+    /* AC3: corrupt / unreadable → 0 */
+  }
+  count += 1;
+  try {
+    writeFileSync(file, String(count), "utf8");
+  } catch {
+    /* best-effort */
+  }
+  return count;
+}
+
+/**
+ * Reset the consecutive-idle counter to 0 (called on non-idle terminal).
+ * AC1: any non-idle terminal (delivered/failed/blocked) resets the counter.
+ */
+export function resetConsecutiveIdle(projectPath: string, slug: string): void {
+  const file = idleCounterPath(projectPath, slug);
+  try {
+    writeFileSync(file, "0", "utf8");
+  } catch {
+    /* best-effort */
+  }
+}
+
 export function shouldSuppressGoalChildFailureCounter(input: {
   isGoalChild: boolean;
   terminal: string | undefined;
@@ -771,6 +814,7 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     const storyId = (result.state?.ctx?.storyId ?? "").trim();
     announceReport(id.path, id.slug, storyId);
     resetConsecutiveFails(id.path);
+    resetConsecutiveIdle(id.path, id.slug); // US-LOOP-079h1: delivered → reset idle counter
     clearCardFailure(runtimeDir(id.path), storyId); // FIX-363: a delivered card clears its poison-pill tally
   }
   if (result.terminal === "published") {
@@ -788,6 +832,7 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     const storyId = (result.state?.ctx?.storyId ?? "").trim();
     announceReport(id.path, id.slug, storyId);
     resetConsecutiveFails(id.path);
+    resetConsecutiveIdle(id.path, id.slug); // US-LOOP-079h1: delivered locally → reset idle counter
     clearCardFailure(runtimeDir(id.path), storyId); // FIX-363: sound local work clears the card's poison-pill tally
     process.stdout.write(
       "loop run-once: gates passed but publish did not complete — work committed locally on the branch, not published (unpublished, not a failure)\n" +
@@ -807,6 +852,7 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     );
     // idle outcomes are not failures — a no-work cycle is expected behaviour.
     // The consecutive-failure counter is NOT ticked.
+    incrementConsecutiveIdle(id.path, id.slug); // US-LOOP-079h1: idle → increment counter
     return 0;
   }
 
@@ -838,6 +884,8 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     return externalBlock.cause === "auth" ? 0 : isFail ? 1 : 0;
   }
   if (isFail) {
+    // US-LOOP-079h1: any non-idle terminal resets the idle counter.
+    resetConsecutiveIdle(id.path, id.slug);
     // IDEA-001: a cycle that failed while the network is unreachable is NOT a
     // delivery failure — the local work (TCR commits, green tests) is intact;
     // only push/PR could not happen. Degrade to local-only with a notice:

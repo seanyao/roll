@@ -235,7 +235,6 @@ describe("collectDossierState — US-OBS-016 view-model selector", () => {
   });
 
   it("US-OBS-023: default collector reads the machine project registry for daemon snapshots", () => {
-    const cwd = fixture();
     const rollHome = realpathSync(mkdtempSync(join(tmpdir(), "roll-cds-registry-home-")));
     dirs.push(rollHome);
     mkdirSync(join(rollHome, ".roll"), { recursive: true });
@@ -252,7 +251,7 @@ describe("collectDossierState — US-OBS-016 view-model selector", () => {
     );
     process.env["ROLL_HOME"] = rollHome;
 
-    const snapshot = collectDossierState(cwd);
+    const snapshot = collectDossierState(realProject);
 
     expect(snapshot.projects).toEqual([
       { name: "roll", slug: "roll", path: realProject, releaseTag: "v3.0.0", verdict: "pass" },

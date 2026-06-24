@@ -14,7 +14,7 @@ import { classifyStatus } from "@roll/spec";
 import { buildTruthSnapshot } from "./selectors.js";
 import { collectDossier } from "./dossier-collect.js";
 import { parseBacklog } from "../backlog/store.js";
-import { reachableProjects } from "../projects/reachability.js";
+import { isRealProjectPath, reachableProjects } from "../projects/reachability.js";
 import {
   deriveDeliveryLadder,
   countLegacyStories,
@@ -257,7 +257,8 @@ function defaultCollectEvidenceFlags(cwd: string, story: { id: string; epic: str
 
 function defaultBuildRunCache(_cwd: string): unknown { return null; }
 function defaultMergeEvidence(_cache: unknown, _id: string): boolean { return false; }
-function defaultCollectProjects(_cwd: string): readonly TruthSnapshotProject[] {
+function defaultCollectProjects(cwd: string): readonly TruthSnapshotProject[] {
+  if (!isRealProjectPath(cwd)) return [];
   const home = process.env["ROLL_HOME"] ?? homedir();
   let raw: unknown;
   try {

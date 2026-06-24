@@ -6,6 +6,10 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  type Scheduler,
+  CronScheduler,
+  LaunchdScheduler,
+  createScheduler,
   cronHasEntry,
   cronInstall,
   cronLines,
@@ -130,4 +134,145 @@ describe("cronInstall / cronRemove / cronHasEntry (bin/roll 9958-9962 / 10012-10
     expect(cronHasEntry(after, "/proj")).toBe(false);
     expect(cronHasEntry(after, "/other")).toBe(true);
   });
+});
+
+// ─── Scheduler seam interface (US-LOOP-079f1) ─────────────────────────────────
+
+describe("Scheduler interface — AC3 isArmed with injected Set (no real launchctl)", () => {
+  it("isArmed returns false when nothing is loaded", async () => {
+    const s = new LaunchdScheduler(501, { loadedSet: new Set() });
+    await expect(s.isArmed("com.roll.loop.s")).resolves.toBe(false);
+  });
+
+  it("isArmed returns true after wake", async () => {
+    const loaded = new Set<string>();
+    const s = new LaunchdScheduler(501, { loadedSet: loaded });
+    await s.wake("com.roll.loop.s", "/tmp/x.plist");
+    await expect(s.isArmed("com.roll.loop.s")).resolves.toBe(true);
+  });
+
+  it("isArmed returns false after dormant", async () => {
+    const loaded = new Set<string>(["com.roll.loop.s"]);
+    const s = new LaunchdScheduler(501, { loadedSet: loaded });
+    await expect(s.isArmed("com.roll.loop.s")).resolves.toBe(true);
+    await s.dormant("com.roll.loop.s");
+    await expect(s.isArmed("com.roll.loop.s")).resolves.toBe(false);
+  });
+
+  it("isArmed via injected Set — no real launchctl spawn (AC3)", async () => {
+    const loaded = new Set<string>();
+    const s = new LaunchdScheduler(501, { loadedSet: loaded });
+    await expect(s.isArmed("svc-a")).resolves.toBe(false);
+    await expect(s.isArmed("svc-b")).resolves.toBe(false);
+    await s.wake("svc-a", "/tmp/a.plist");
+    await expect(s.isArmed("svc-a")).resolves.toBe(true);
+    await expect(s.isArmed("svc-b")).resolves.toBe(false);
+    await s.dormant("svc-a");
+    await expect(s.isArmed("svc-a")).resolves.toBe(false);
+  });
+});
+
+describe("Scheduler — AC4 wake idempotent (double call = single arm)", () => {
+  it("LaunchdScheduler: double wake returns true both times, arms only once", async () => {
+    const loaded = new Set<string>();
+    const s = new LaunchdScheduler(501, { loadedSet: loaded });
+    const r1 = await s.wake("com.roll.loop.s", "/tmp/x.plist");
+    expect(r1).toBe(true);
+    const r2 = await s.wake("com.roll.loop.s", "/tmp/x.plist");
+    expect(r2).toBe(true);
+    await expect(s.isArmed("com.roll.loop.s")).resolves.toBe(true);
+    expect(loaded.size).toBe(1);
+  });
+
+  it("CronScheduler: double wake is no-op on second call", async () => {
+    const current = "";
+    const cmds = {
+      loopCmd: "cd /p && roll loop now",
+      loopMinute: 17,
+      dreamCmd: "cd /p && roll dream",
+      dreamMinute: 2,
+      dreamHour: 3,
+      projectPath: "/p",
+    };
+    const after1 = cronInstall(current, cmds);
+    expect(cronHasEntry(after1, "/p")).toBe(true);
+    const already = cronHasEntry(after1, "/p");
+    expect(already).toBe(true);
+  });
+
+  it("generic Scheduler: wake after dormant re-arms cleanly", async () => {
+    const loaded = new Set<string>();
+    const s = new LaunchdScheduler(501, { loadedSet: loaded });
+    await s.wake("svc", "/tmp/p.plist");
+    await expect(s.isArmed("svc")).resolves.toBe(true);
+    await s.dormant("svc");
+    await expect(s.isArmed("svc")).resolves.toBe(false);
+    await s.wake("svc", "/tmp/p.plist");
+    await expect(s.isArmed("svc")).resolves.toBe(true);
+  });
+});
+
+describe("createScheduler factory (platform selection)", () => {
+  it("darwin → LaunchdScheduler", () => {
+    const s = createScheduler("darwin", { uid: 501 });
+    expect(s instanceof LaunchdScheduler).toBe(true);
+  });
+
+  it("linux → CronScheduler", () => {
+    const s = createScheduler("linux", {
+      uid: 0,
+      projectPath: "/p",
+      cronCommands: {
+        loopCmd: "loop",
+        loopMinute: 5,
+        dreamCmd: "dream",
+        dreamMinute: 2,
+        dreamHour: 3,
+        projectPath: "/p",
+      },
+    });
+    expect(s instanceof CronScheduler).toBe(true);
+  });
+
+  it("non-darwin platforms all map to CronScheduler", () => {
+    for (const platform of ["linux", "win32", "freebsd", "sunos", "aix"] as NodeJS.Platform[]) {
+      const s = createScheduler(platform, { uid: 0, projectPath: "/p" });
+      expect(s instanceof CronScheduler).toBe(true);
+    }
+  });
+});
+
+describe("Scheduler interface conformance — contract tests", () => {
+  function contract(scheduler: Scheduler, label: string): void {
+    it(`${label}: dormant removes armed state`, async () => {
+      await scheduler.wake("test", "/tmp/t.plist");
+      await expect(scheduler.isArmed("test")).resolves.toBe(true);
+      await scheduler.dormant("test");
+      await expect(scheduler.isArmed("test")).resolves.toBe(false);
+    });
+
+    it(`${label}: wake arms the service`, async () => {
+      await scheduler.wake("test", "/tmp/t.plist");
+      await expect(scheduler.isArmed("test")).resolves.toBe(true);
+    });
+
+    it(`${label}: wake is idempotent (AC4)`, async () => {
+      const r1 = await scheduler.wake("idem", "/tmp/i.plist");
+      const r2 = await scheduler.wake("idem", "/tmp/i.plist");
+      expect(r1).toBe(true);
+      expect(r2).toBe(true);
+      await expect(scheduler.isArmed("idem")).resolves.toBe(true);
+    });
+
+    it(`${label}: dormant of unarmed service is a no-op success`, async () => {
+      const r = await scheduler.dormant("never-armed");
+      expect(r).toBe(true);
+    });
+
+    it(`${label}: isArmed returns false for unknown service`, async () => {
+      await expect(scheduler.isArmed("never-armed")).resolves.toBe(false);
+    });
+  }
+
+  contract(new LaunchdScheduler(501, { loadedSet: new Set<string>() }), "LaunchdScheduler");
 });

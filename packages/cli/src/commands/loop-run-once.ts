@@ -12,12 +12,13 @@
  * The handler stays thin: it resolves the project identity + runtime paths and
  * delegates the entire walk to the runner adapter (packages/cli/src/runner).
  */
-import { EventBus, cycleEndEvent, firstInstalledAgent, mapV2Status, parsePolicy, readSlotFromText, shouldResize, type AgentSlot, type RouteDeps, type RouteSlot } from "@roll/core";
-import { absent, buildTerminalEvent, deriveOrphanVerdict, present } from "@roll/spec";
-import { projectIdentity, readLockOwner, releaseLock } from "@roll/infra";
+import { EventBus, assessBacklog, cycleEndEvent, firstInstalledAgent, mapV2Status, parseBacklog, parsePolicy, readSlotFromText, shouldResize, type AgentSlot, type RouteDeps, type RouteSlot } from "@roll/core";
+import { absent, buildTerminalEvent, deriveOrphanVerdict, present, type BacklogReason } from "@roll/spec";
+import { createScheduler, launchdLabel, projectIdentity, readLockOwner, releaseLock } from "@roll/infra";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type RunnerPaths, buildRunRow, dryRunPlan, killLiveAgents, nodePorts, realAgentSpawn, runCycleOnce } from "../runner/index.js";
+import { dormantMarkerPath, writeDormantMarker } from "./loop-sched.js";
 import { clearCardFailure, recordCardFailure } from "../runner/skip-cards.js";
 import { warnIfBinaryStale } from "../runner/binary-staleness.js";
 import { rollVersion } from "./version.js";
@@ -237,6 +238,20 @@ function runtimeDir(projectPath: string): string {
 
 const PAUSE_THRESHOLD = 3;
 
+/** US-LOOP-079h2 AC2: consecutive-idle threshold before entering dormancy.
+ *  Mirror PAUSE_THRESHOLD pattern — hard-coded const, 3 cycles of debounce. */
+const DORMANCY_THRESHOLD = 3;
+
+/** US-LOOP-079h2 AC3: deep-sleep reasons that qualify for dormancy.
+ *  Only these reasons trigger self-unload; others (all_awaiting_merge,
+ *  all_merged_pending, all_skip_listed, all_blocked_by_deps) stay ACTIVE
+ *  because they resolve without structural change (AC4). */
+const DEEP_SLEEP_REASONS: readonly BacklogReason[] = [
+  "all_done",
+  "backlog_empty",
+  "all_in_progress",
+];
+
 // FIX-363 (loop resilience): after this many failures of the SAME card, skip-list
 // the poison pill (the picker skips it) + reset the global counter so the loop
 // keeps delivering OTHER cards instead of auto-PAUSING the whole loop on one bad
@@ -406,6 +421,120 @@ export function resetConsecutiveIdle(projectPath: string, slug: string): void {
   } catch {
     /* best-effort */
   }
+}
+
+// ── US-LOOP-079h2: dormancy decision ─────────────────────────────────────────
+
+/**
+ * US-LOOP-079h2 AC2-AC4: pure dormancy decision from counter + backlog reason.
+ * The caller feeds the counter (from {@link incrementConsecutiveIdle}) and the
+ * reason (from {@link assessBacklog}); this function decides whether to enter
+ * dormancy. No I/O — all side effects (scheduler, marker, event) are the
+ * caller's responsibility.
+ *
+ * @returns `shouldDormant: true` when the loop should self-unload; `false`
+ *          when it should stay ACTIVE (debounce or non-deep-sleep reason).
+ */
+export function dormancyDecision(
+  counter: number,
+  reason: BacklogReason,
+  opts?: { threshold?: number },
+): { shouldDormant: boolean } {
+  const n = opts?.threshold ?? DORMANCY_THRESHOLD;
+  if (counter < n) return { shouldDormant: false };
+  if (!(DEEP_SLEEP_REASONS as readonly string[]).includes(reason)) {
+    return { shouldDormant: false };
+  }
+  return { shouldDormant: true };
+}
+
+/** US-LOOP-079h2 AC6: the labels the dormant decision targets (loop lane only,
+ *  never pr/dream). The scheduler lane is orthogonal to foreground `roll loop
+ *  go` which does not check DORMANT markers. */
+const DORMANT_LANE = "loop" as const;
+
+/**
+ * US-LOOP-079h2 AC3 + AC5: attempt to enter dormancy — unload the scheduler
+ * lane, write the DORMANT marker, emit loop:dormant, and upsert the
+ * dormant_entered run row. On bootout failure writes PAUSE + loop:dormant_failed
+ * instead (AC5). Returns true when dormancy was entered; false when the
+ * scheduler unload failed (PAUSE written).
+ */
+async function attemptDormancy(
+  projectPath: string,
+  slug: string,
+  cycleId: string,
+  branch: string,
+  eventsPath: string,
+  runsPath: string,
+  counter: number,
+  reason: BacklogReason,
+  schedulerLabel: string,
+): Promise<boolean> {
+  const now = Date.now();
+  const nowSec = Math.floor(now / 1000);
+  // Create the platform-appropriate scheduler.
+  const scheduler = createScheduler(process.platform, {
+    uid: process.getuid?.() ?? 501,
+    projectPath,
+  });
+
+  const dormantOk = await scheduler.dormant(schedulerLabel);
+  if (!dormantOk) {
+    // AC5: bootout failed → write PAUSE marker + loop:dormant_failed event.
+    const pauseMarker = join(projectPath, ".roll", "loop", `PAUSE-${slug}`);
+    mkdirSync(dirname(pauseMarker), { recursive: true });
+    writeFileSync(
+      pauseMarker,
+      `dormant bootout failed at ${new Date(now).toISOString()}\n` +
+        `reason: ${reason} after ${counter} idle cycles\n`,
+    );
+    new EventBus().appendEvent(eventsPath, {
+      type: "loop:dormant_failed",
+      loop: "ci",
+      ts: now,
+      reason,
+      error: "scheduler.dormant returned false",
+    });
+    process.stderr.write(
+      `loop run-once: dormant bootout failed — PAUSE marker written\n` +
+        `loop run-once: 休眠卸载失败——已写 PAUSE 标记\n`,
+    );
+    return false;
+  }
+
+  // AC3 success path: write DORMANT marker + loop:dormant event + dormant_entered run row.
+  const markerBody = {
+    since: new Date(now).toISOString(),
+    reason: `${reason} after ${counter} consecutive idle cycles`,
+  };
+  writeDormantMarker(dormantMarkerPath(projectPath, slug), markerBody);
+
+  new EventBus().appendEvent(eventsPath, {
+    type: "loop:dormant",
+    loop: "ci",
+    ts: now,
+    reason,
+    since: nowSec,
+  });
+
+  // Upsert the runs row from idle_no_work (already written by executor) to
+  // dormant_entered — exactly one dormant_entered, zero idle_no_work (AC3).
+  new EventBus().upsertRun(
+    runsPath,
+    { storyId: "", cycleId },
+    buildRunRow(
+      { kind: "append_run", status: "dormant", outcome: "dormant_entered", cycleId },
+      { cycleId, branch, loop: "ci" as never },
+      nowSec,
+    ),
+  );
+
+  process.stdout.write(
+    `loop run-once: dormant — loop unloaded after ${counter} consecutive idle cycles (${reason})\n` +
+      `loop run-once: 休眠——连续 ${counter} 次空闲后自卸 (${reason})\n`,
+  );
+  return true;
 }
 
 export function shouldSuppressGoalChildFailureCounter(input: {
@@ -840,19 +969,62 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     );
   }
 
-  // US-LOOP-079d2: idle terminal passes through to run-once — explicit branch
-  // provides a reachable hook for US-LOOP-079h2's dormant decision logic.
-  // The runs row already carries status="idle" + outcome="idle_no_work"
-  // (written by the executor's append_run). When dormant is not entered,
-  // idle still ultimately lands as idle_no_work (regression on existing paths).
+  // US-LOOP-079d2 + US-LOOP-079h2: idle terminal passes through to run-once.
+  // AC1: idle branch handles dormancy decision — reads the backlog reason,
+  // checks the consecutive-idle counter, and decides whether to enter dormancy.
   if (result.terminal === "idle") {
     process.stdout.write(
       "loop run-once: idle — no work picked up this cycle\n" +
         "loop run-once: 空闲——本周期未拾取任务\n",
     );
-    // idle outcomes are not failures — a no-work cycle is expected behaviour.
-    // The consecutive-failure counter is NOT ticked.
-    incrementConsecutiveIdle(id.path, id.slug); // US-LOOP-079h1: idle → increment counter
+    const counter = incrementConsecutiveIdle(id.path, id.slug);
+
+    // US-LOOP-079h2: assess the backlog to determine WHY the picker was idle.
+    let reason: BacklogReason = "backlog_empty";
+    try {
+      const backlogPath = join(id.path, ".roll", "backlog.md");
+      if (existsSync(backlogPath)) {
+        const content = readFileSync(backlogPath, "utf8");
+        const items = parseBacklog(content);
+        reason = assessBacklog(items).reason;
+      }
+    } catch {
+      // Read failure → assume empty; the heuristic is conservative.
+    }
+
+    const decision = dormancyDecision(counter, reason);
+    if (!decision.shouldDormant) {
+      // AC2 debounce (counter < N) or AC4 non-deep-sleep reason → stay ACTIVE.
+      if (counter < DORMANCY_THRESHOLD) {
+        process.stdout.write(
+          `loop run-once: idle ${counter}/${DORMANCY_THRESHOLD} — debounce, staying ACTIVE\n` +
+            `loop run-once: 空闲 ${counter}/${DORMANCY_THRESHOLD}——防抖中,保持 ACTIVE\n`,
+        );
+      }
+      return 0;
+    }
+
+    // AC3: counter ≥ N + deep-sleep reason → enter dormancy.
+    // AC6: dormant only affects the scheduler lane (launchd/cron). Foreground
+    //      `roll loop go` does not check DORMANT markers — orthogonal.
+    const schedulerLabel = launchdLabel(DORMANT_LANE, id.slug);
+    const entered = await attemptDormancy(
+      id.path,
+      id.slug,
+      cycleId,
+      branch,
+      paths.eventsPath,
+      paths.runsPath,
+      counter,
+      reason,
+      schedulerLabel,
+    );
+    // AC5: on bootout failure, attemptDormancy writes PAUSE + loop:dormant_failed
+    // and returns false. No dormant_entered is written in that case.
+    if (!entered) {
+      // The PAUSE marker was already written by attemptDormancy.
+      return 0;
+    }
     return 0;
   }
 

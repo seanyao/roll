@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { dispatch, isPorted, registerAll } from "../src/index.js";
-import { RUN_ONCE_USAGE, buildLoopRouteDeps, idleCounterPath, incrementConsecutiveIdle, loopRunOnceCommand, readExternalBlock, readSkillBody, resetConsecutiveIdle, shouldSuppressGoalChildFailureCounter } from "../src/commands/loop-run-once.js";
+import { RUN_ONCE_USAGE, buildLoopRouteDeps, dormancyDecision, idleCounterPath, incrementConsecutiveIdle, loopRunOnceCommand, readExternalBlock, readSkillBody, resetConsecutiveIdle, shouldSuppressGoalChildFailureCounter } from "../src/commands/loop-run-once.js";
 import { resolveRoute } from "@roll/core";
 import { realAgentSpawn } from "../src/runner/index.js";
 
@@ -834,5 +834,47 @@ describe("US-LOOP-079h1 — consecutive-idle counter", () => {
     // Should not throw if the file does not exist yet.
     expect(() => resetConsecutiveIdle(p, "default")).not.toThrow();
     expect(() => resetConsecutiveIdle(p, "default")).not.toThrow();
+  });
+});
+
+// ── US-LOOP-079h2: dormancy decision ─────────────────────────────────────────
+
+describe("US-LOOP-079h2 — dormancy decision (dormancyDecision)", () => {
+  it("AC2: counter < 3 → shouldDormant=false (debounce)", () => {
+    expect(dormancyDecision(0, "backlog_empty")).toEqual({ shouldDormant: false });
+    expect(dormancyDecision(1, "backlog_empty")).toEqual({ shouldDormant: false });
+    expect(dormancyDecision(2, "all_done")).toEqual({ shouldDormant: false });
+  });
+
+  it("AC3: counter ≥ 3 + all_done → shouldDormant=true", () => {
+    expect(dormancyDecision(3, "all_done")).toEqual({ shouldDormant: true });
+    expect(dormancyDecision(5, "all_done")).toEqual({ shouldDormant: true });
+  });
+
+  it("AC3: counter ≥ 3 + backlog_empty → shouldDormant=true", () => {
+    expect(dormancyDecision(3, "backlog_empty")).toEqual({ shouldDormant: true });
+  });
+
+  it("AC3: counter ≥ 3 + all_in_progress → shouldDormant=true", () => {
+    expect(dormancyDecision(3, "all_in_progress")).toEqual({ shouldDormant: true });
+  });
+
+  it("AC4: non-deep-sleep reasons do NOT trigger dormancy even when counter ≥ 3", () => {
+    expect(dormancyDecision(3, "all_awaiting_merge")).toEqual({ shouldDormant: false });
+    expect(dormancyDecision(5, "all_merged_pending")).toEqual({ shouldDormant: false });
+    expect(dormancyDecision(4, "all_skip_listed")).toEqual({ shouldDormant: false });
+    expect(dormancyDecision(3, "all_blocked_by_deps")).toEqual({ shouldDormant: false });
+    expect(dormancyDecision(7, "has_work")).toEqual({ shouldDormant: false });
+  });
+
+  it("AC2: counter exactly at threshold → shouldDormant", () => {
+    expect(dormancyDecision(3, "all_done")).toEqual({ shouldDormant: true });
+  });
+
+  it("custom threshold via opts", () => {
+    // threshold=1 → counter >= 1 triggers for valid reasons.
+    expect(dormancyDecision(1, "all_done", { threshold: 1 })).toEqual({ shouldDormant: true });
+    // threshold=5 → counter=3 does not trigger.
+    expect(dormancyDecision(3, "all_done", { threshold: 5 })).toEqual({ shouldDormant: false });
   });
 });

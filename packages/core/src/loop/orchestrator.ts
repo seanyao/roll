@@ -129,7 +129,7 @@ import { nextWaitAction, type WaitAction } from "../delivery/pr.js";
  *               (bin/roll:8756).
  *   - blocked : hard-timeout breach (bin/roll:8679).
  */
-export type V2CycleStatus = "idle" | "gave_up" | "built" | "done" | "published" | "orphan" | "local" | "needs_review" | "failed" | "aborted" | "blocked";
+export type V2CycleStatus = "idle" | "gave_up" | "built" | "done" | "published" | "orphan" | "local" | "needs_review" | "failed" | "aborted" | "blocked" | "dormant";
 
 /**
  * Bridge v2's runs.jsonl status onto the closed {@link TerminalOutcome}
@@ -159,6 +159,9 @@ export function mapV2Status(status: V2CycleStatus): TerminalOutcome {
       // NOT a silent idle. Distinct outcome so the dashboard/ledger and the
       // dead-loop breaker can tell a give-up from a genuine no-op.
       return "gave_up";
+    case "dormant":
+      // US-LOOP-079d — 连续 N idle 后自卸;终态,此后无 idle 行.
+      return "dormant_entered";
     case "orphan":
       return "aborted_with_delivery";
     case "local":

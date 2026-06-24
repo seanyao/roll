@@ -262,6 +262,9 @@ describe("mapV2Status — v2 rows → TerminalOutcome bridge", () => {
     expect(mapV2Status("failed")).toBe("failed");
     expect(mapV2Status("aborted")).toBe("aborted_no_delivery");
   });
+  it("US-LOOP-079d: dormant → dormant_entered (连续 N idle 后自卸)", () => {
+    expect(mapV2Status("dormant")).toBe("dormant_entered");
+  });
 });
 
 describe("US-TOOL-011 — tool costs in cycle:end", () => {

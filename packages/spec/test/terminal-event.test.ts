@@ -46,7 +46,7 @@ describe("US-TRUTH-001 AC1/AC2 — versioned schema, closed outcome enum", () =>
     expect(e.outcome).toBe("delivered");
   });
 
-  it("the outcome enum is closed and covers the eight required classes", () => {
+  it("the outcome enum is closed and covers the required classes", () => {
     for (const o of [
       "delivered",
       "published_pending_merge",
@@ -55,6 +55,11 @@ describe("US-TRUTH-001 AC1/AC2 — versioned schema, closed outcome enum", () =>
       "aborted_no_delivery",
       "aborted_with_delivery",
       "orphan_timeout",
+      "idle_no_work",
+      "gave_up",
+      "unpublished",
+      "needs_review",
+      "dormant_entered",
       "unknown",
     ]) {
       expect(TERMINAL_OUTCOMES).toContain(o);

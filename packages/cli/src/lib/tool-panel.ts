@@ -9,7 +9,7 @@
  * Machine-global → takes no project argument. The built-in catalog is stable,
  * while requirement readiness reflects this host's dependency state.
  */
-import { deriveToolReadiness } from "@roll/core";
+import { deriveToolReadiness, schemaParameterSummary, schemaTypeLabel } from "@roll/core";
 import { builtinToolDeclarations } from "@roll/infra";
 import type { ToolDeclaration, ToolDefaults, ToolKind, ToolReadinessStatus, ToolRequirement, ToolRequirementStatus, ToolSandbox } from "@roll/spec";
 import { resolveRequirement } from "./external-tools.js";
@@ -58,6 +58,8 @@ export interface ToolPanelRow {
   available: boolean;
   /** Human reason for unavailable — may be '' when available. */
   unavailableReason: string;
+  inputContract: string;
+  outputContract: string;
 }
 
 /**
@@ -92,6 +94,8 @@ function toRow(declaration: ToolDeclaration): ToolPanelRow {
     readiness: readiness.status,
     available: readiness.status !== "unavailable",
     unavailableReason: readiness.status === "available" ? "" : (readiness.detail ?? ""),
+    inputContract: schemaParameterSummary(declaration.inputSchema),
+    outputContract: schemaTypeLabel(declaration.outputSchema),
   };
 }
 

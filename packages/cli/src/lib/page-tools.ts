@@ -166,6 +166,8 @@ function toolRow(row: ToolPanelRow): string {
     `<div style="display:flex;flex-wrap:wrap;gap:18px 36px;margin-top:13px;">` +
     cell(bi("kind", "类别"), esc(row.kind)) +
     cell(bi("emits events", "触发事件"), row.emitsEvents ? bi("yes", "是") : bi("no", "否"), false) +
+    cell(bi("input contract", "入参契约"), esc(row.inputContract ?? "-")) +
+    cell(bi("output contract", "出参契约"), esc(row.outputContract ?? "-")) +
     `<div style="min-width:0;"><div style="${MONO}font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:${C.faint};">${bi("default policy", "默认策略")}</div>` +
     `<div style="${MONO}font-size:12px;color:${C.body};margin-top:3px;">${guardrailLine(row)}</div></div>` +
     `</div>` +

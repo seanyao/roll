@@ -2,6 +2,7 @@ import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import type { RequestOptions } from "node:http";
 import type { ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
+import { networkInputSchema, networkOutputSchema } from "./schema-contracts.js";
 
 export interface NetworkInput {
   url: string;
@@ -35,6 +36,8 @@ export class NetworkTool {
         network: "restricted",
       },
     },
+    inputSchema: networkInputSchema,
+    outputSchema: networkOutputSchema,
   };
 
   async init(_deps: ToolDeps): Promise<void> {

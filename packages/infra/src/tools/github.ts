@@ -1,5 +1,6 @@
 import type { ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
 import { rawGh, type PrMergeMode } from "../github.js";
+import { githubCiInputSchema, githubCiOutputSchema, githubPrInputSchema, githubPrOutputSchema } from "./schema-contracts.js";
 
 export type GitHubToolId = "github.pr" | "github.ci";
 
@@ -78,6 +79,8 @@ export class GitHubTool {
         timeoutMs: 60_000,
       },
       requirements: [{ kind: "executable", name: "gh", optional: false }],
+      inputSchema: id === "github.pr" ? githubPrInputSchema : githubCiInputSchema,
+      outputSchema: id === "github.pr" ? githubPrOutputSchema : githubCiOutputSchema,
     };
   }
 

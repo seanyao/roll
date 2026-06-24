@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { join } from "node:path";
 import type { ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
+import { mcpInputSchema, mcpOutputSchema } from "./schema-contracts.js";
 
 export interface McpInput {
   serverName: string;
@@ -44,6 +45,8 @@ export class McpTool {
         network: "restricted",
       },
     },
+    inputSchema: mcpInputSchema,
+    outputSchema: mcpOutputSchema,
   };
 
   private readonly projectRoot: string;

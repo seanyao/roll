@@ -1,13 +1,13 @@
 import { join } from "node:path";
-import { deriveToolReadiness, ToolPolicyEngine, type ToolRequirementResolver } from "@roll/core";
+import { deriveToolReadiness, schemaParameterSummary, ToolPolicyEngine, type ToolRequirementResolver } from "@roll/core";
 import type { ToolReadinessStatus, ToolSandbox } from "@roll/spec";
 import { collectBuiltinToolDeclarations } from "../lib/builtin-tool-declarations.js";
 import { resolveRequirement } from "../lib/external-tools.js";
 
 export const TOOL_USAGE =
   "Usage: roll tool status\n" +
-  "  Show registered tools, effective policy state, and requirement readiness.\n" +
-  "展示已注册工具、有效 policy 状态与 requirement 就绪度。\n";
+  "  Show registered tools, input contracts, effective policy state, and requirement readiness.\n" +
+  "展示已注册工具、入参契约、有效 policy 状态与 requirement 就绪度。\n";
 
 interface ToolRow {
   id: string;
@@ -16,6 +16,7 @@ interface ToolRow {
   readiness: ToolReadinessStatus;
   timeout: string;
   limit: string;
+  contract: string;
   sandbox: string;
 }
 
@@ -47,6 +48,7 @@ export async function collectToolRows(projectRoot: string, requirementResolver: 
       readiness: readiness.status,
       timeout: effective.timeoutMs === undefined ? "-" : String(effective.timeoutMs),
       limit: effective.maxInvocationsPerCycle === undefined ? "-" : String(effective.maxInvocationsPerCycle),
+      contract: declaration.inputSchema === undefined || declaration.outputSchema === undefined ? "missing" : schemaParameterSummary(declaration.inputSchema),
       sandbox: renderSandbox(effective.sandbox),
     });
   }
@@ -54,7 +56,7 @@ export async function collectToolRows(projectRoot: string, requirementResolver: 
 }
 
 export function renderToolRows(rows: readonly ToolRow[]): string {
-  const out = ["tool              kind        enabled  readiness    timeout  limit  sandbox"];
+  const out = ["tool              kind        enabled  readiness    timeout  limit  contract                                       sandbox"];
   for (const row of rows) {
     out.push([
       pad(row.id, 19),
@@ -63,6 +65,7 @@ export function renderToolRows(rows: readonly ToolRow[]): string {
       pad(row.readiness, 13),
       pad(row.timeout, 9),
       pad(row.limit, 7),
+      pad(row.contract, 47),
       row.sandbox,
     ].join(""));
   }

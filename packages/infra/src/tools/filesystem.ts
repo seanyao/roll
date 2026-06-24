@@ -1,6 +1,7 @@
 import { stat as nodeStat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import type { ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
+import { fsReadInputSchema, fsReadOutputSchema, fsStatInputSchema, fsStatOutputSchema, fsWriteInputSchema, fsWriteOutputSchema } from "./schema-contracts.js";
 
 export type FsToolId = "filesystem.stat" | "filesystem.read" | "filesystem.write";
 
@@ -58,6 +59,8 @@ export class FsTool {
         enabled: true,
         timeoutMs: 30_000,
       },
+      inputSchema: fsInputSchema(id),
+      outputSchema: fsOutputSchema(id),
     };
   }
 
@@ -88,6 +91,18 @@ export class FsTool {
       return failure(invocation, startedAt, deps.now(), "adapter_error", "filesystem operation failed", true, cause);
     }
   }
+}
+
+function fsInputSchema(id: FsToolId): ToolDeclaration["inputSchema"] {
+  if (id === "filesystem.stat") return fsStatInputSchema;
+  if (id === "filesystem.read") return fsReadInputSchema;
+  return fsWriteInputSchema;
+}
+
+function fsOutputSchema(id: FsToolId): ToolDeclaration["outputSchema"] {
+  if (id === "filesystem.stat") return fsStatOutputSchema;
+  if (id === "filesystem.read") return fsReadOutputSchema;
+  return fsWriteOutputSchema;
 }
 
 export function fsTools(projectRoot = process.cwd()): FsTool[] {

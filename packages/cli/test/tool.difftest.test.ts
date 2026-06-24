@@ -53,22 +53,22 @@ describe("US-TOOL-015 roll tool status", () => {
     const stdout = renderToolRows(await collectToolRows(cwd, fakeResolver));
 
     expect(stdout).toMatchInlineSnapshot(`
-      "tool              kind        enabled  readiness    timeout  limit  sandbox
-      bash               bash        yes      available    30000    -      maxOutputBytes=65536
-      browser.console    browser     yes      degraded     60000    -      headlessOnly=true,maxOutputBytes=2097152
-      browser.dom-query  browser     yes      degraded     60000    -      headlessOnly=true,maxOutputBytes=2097152
-      browser.screenshot browser     yes      degraded     60000    -      headlessOnly=true,maxOutputBytes=2097152
-      filesystem.read    filesystem  yes      available    30000    -      -
-      filesystem.stat    filesystem  yes      available    30000    -      -
-      filesystem.write   filesystem  yes      available    30000    -      -
-      git.commit         git         yes      available    60000    -      -
-      git.merge          git         yes      available    60000    -      -
-      git.push           git         yes      available    60000    -      -
-      git.status         git         yes      available    60000    -      -
-      github.ci          github      yes      unavailable  60000    -      -
-      github.pr          github      yes      unavailable  60000    -      -
-      mcp.call           mcp         yes      available    30000    -      network=restricted
-      network.fetch      network     yes      available    30000    -      network=restricted
+      "tool              kind        enabled  readiness    timeout  limit  contract                                       sandbox
+      bash               bash        yes      available    30000    -      args?, command, cwd?, env?                     maxOutputBytes=65536
+      browser.console    browser     yes      degraded     60000    -      url, waitFor?                                  headlessOnly=true,maxOutputBytes=2097152
+      browser.dom-query  browser     yes      degraded     60000    -      selector, url, waitFor?                        headlessOnly=true,maxOutputBytes=2097152
+      browser.screenshot browser     yes      degraded     60000    -      screenshotPath?, url, viewport?, waitFor?      headlessOnly=true,maxOutputBytes=2097152
+      filesystem.read    filesystem  yes      available    30000    -      limit?, offset?, path                          -
+      filesystem.stat    filesystem  yes      available    30000    -      path                                           -
+      filesystem.write   filesystem  yes      available    30000    -      content, path                                  -
+      git.commit         git         yes      available    60000    -      allowEmpty?, cwd, message                      -
+      git.merge          git         yes      available    60000    -      cwd, ffOnly?, noCommit?, ref                   -
+      git.push           git         yes      available    60000    -      branch, cwd, remote?, setUpstream?             -
+      git.status         git         yes      available    60000    -      cwd                                            -
+      github.ci          github      yes      unavailable  60000    -      oneOf                                          -
+      github.pr          github      yes      unavailable  60000    -      oneOf                                          -
+      mcp.call           mcp         yes      available    30000    -      arguments?, serverName, toolName               network=restricted
+      network.fetch      network     yes      available    30000    -      body?, headers?, method?, timeoutMs?, url      network=restricted
       "
     `);
   });
@@ -97,8 +97,8 @@ describe("US-TOOL-015 roll tool status", () => {
 
     expect(result.status).toBe(0);
     expect(result.stderr).toBe("");
-    expect(result.stdout).toContain("bash               bash        no       available    2500     2      allowedPaths=.,maxOutputBytes=65536");
-    expect(result.stdout).toContain("network.fetch      network     yes      available    30000    -      network=blocked");
+    expect(result.stdout).toContain("bash               bash        no       available    2500     2      args?, command, cwd?, env?                     allowedPaths=.,maxOutputBytes=65536");
+    expect(result.stdout).toContain("network.fetch      network     yes      available    30000    -      body?, headers?, method?, timeoutMs?, url      network=blocked");
   });
 
   it("prints usage for bare/help and rejects unknown subcommands", async () => {
@@ -106,7 +106,7 @@ describe("US-TOOL-015 roll tool status", () => {
 
     await expect(tsTool([], cwd)).resolves.toEqual({
       status: 0,
-      stdout: "Usage: roll tool status\n  Show registered tools, effective policy state, and requirement readiness.\n展示已注册工具、有效 policy 状态与 requirement 就绪度。\n",
+      stdout: "Usage: roll tool status\n  Show registered tools, input contracts, effective policy state, and requirement readiness.\n展示已注册工具、入参契约、有效 policy 状态与 requirement 就绪度。\n",
       stderr: "",
     });
     await expect(tsTool(["bogus"], cwd)).resolves.toEqual({

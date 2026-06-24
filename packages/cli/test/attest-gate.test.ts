@@ -9,7 +9,7 @@
 import { execSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import {
   DuplicateStoryIdError,
@@ -355,6 +355,119 @@ describe("verificationReportHasContent (US-ATTEST-012 content floor)", () => {
   });
 });
 
+// ── FIX-400 helpers ────────────────────────────────────────────
+
+/**
+ * Write a CONTENT-BEARING <ID>-report.html + ac-map into a TIMESTAMPED RUN
+ * DIRECTORY (not latest/) under the card archive, simulating what the executor
+ * does via openEvidenceFrame. Returns [worktree, reportPath].
+ */
+function withRunDirReport(
+  storyId: string,
+  runDirName: string,
+  mtimeSec?: number,
+  body = '<div class="ev ev-text">proof</div><figure class="shot"><img src="screenshots/p.png"></figure>',
+): [string, string] {
+  const wt = tmp("rundir");
+  const reportPath = writeRunDirReport(wt, storyId, runDirName, mtimeSec, body);
+  return [wt, reportPath];
+}
+
+function writeRunDirReport(
+  wt: string,
+  storyId: string,
+  runDirName: string,
+  mtimeSec?: number,
+  body = '<div class="ev ev-text">proof</div><figure class="shot"><img src="screenshots/p.png"></figure>',
+): string {
+  const cardDir = join(wt, ".roll", "features", "uncategorized", storyId);
+  const runDir = join(cardDir, runDirName);
+  mkdirSync(runDir, { recursive: true });
+  const reportPath = join(runDir, `${storyId}-report.html`);
+  writeFileSync(reportPath, `<html><body><section class="ac s-pass" id="${storyId}:AC1">${body}</section></body></html>\n`);
+  if (mtimeSec !== undefined) utimesSync(reportPath, mtimeSec, mtimeSec);
+  return reportPath;
+}
+
+function withRunDirAcMap(wt: string, storyId: string, runDirName: string, body: unknown): void {
+  const p = join(wt, ".roll", "features", "uncategorized", storyId, runDirName, "ac-map.json");
+  mkdirSync(dirname(p), { recursive: true });
+  writeFileSync(p, JSON.stringify(body, null, 2) + "\n");
+}
+
+describe("FIX-400 — run-dir fallback for report / ac-map candidates", () => {
+  it("AC1: no latest/ symlink but run dir has report → verificationReportFresh & existingReport find it", () => {
+    // Scenario: executor wrote report into a timestamped run dir, and latest/
+    // symlink was never created (best-effort failure). The gate must still
+    // find the report via run-dir fallback.
+    const [wt] = withRunDirReport("FIX-400A", "20260624-110904-79182", 2000);
+    // No latest/ dir at all — only the run dir exists.
+    expect(verificationReportFresh(wt, "FIX-400A", 1000)).toBe(true);
+    expect(verificationReportFresh(wt, "FIX-400A")).toBe(true);
+  });
+
+  it("AC1: latest/ present (has priority), run dir also present → picks latest/", () => {
+    // When latest/ symlink IS present, it should be the primary candidate.
+    // The run-dir is a fallback, not a replacement.
+    const wt = withReport("FIX-400B", 3000);
+    // Also add a run-dir with an older mtime
+    writeRunDirReport(wt, "FIX-400B", "20260624-110904-79182", 2000);
+    // latest/ exists and is fresher → gate uses latest/
+    expect(verificationReportFresh(wt, "FIX-400B", 2500)).toBe(true);
+  });
+
+  it("AC2: ac-map only in run dir (not in card root) → verificationReportHasContent finds it", () => {
+    const [wt] = withRunDirReport("FIX-400C", "20260624-110904-79182", 2000);
+    withRunDirAcMap(wt, "FIX-400C", "20260624-110904-79182", [
+      { ac: "FIX-400C:AC1", status: "pass", evidence: [{ kind: "screenshot", label: "term", href: "../screenshots/p.png" }] },
+    ]);
+    // No ac-map.json in card root; only in the run dir.
+    expect(verificationReportHasContent(wt, "FIX-400C")).toBe(true);
+  });
+
+  it("AC2: ac-map in card root (legacy, priority) + also in run dir → card-root wins", () => {
+    const wt = withReport("FIX-400D", 2000);
+    withRunDirAcMap(wt, "FIX-400D", "20260624-110904-79182", []);
+    expect(verificationReportHasContent(wt, "FIX-400D")).toBe(true);
+  });
+
+  it("AC3: empty shell in BOTH latest/ AND run dir → still fails (no regression)", () => {
+    const wt = tmp("shell-both");
+    const cardDir = join(wt, ".roll", "features", "uncategorized", "FIX-400E");
+    // latest/ empty shell
+    mkdirSync(join(cardDir, "latest"), { recursive: true });
+    writeFileSync(join(cardDir, "latest", "FIX-400E-report.html"), "<html><body>no ACs</body></html>\n");
+    // run dir empty shell
+    const runDir = join(cardDir, "20260624-110904-79182");
+    mkdirSync(runDir, { recursive: true });
+    writeFileSync(join(runDir, "FIX-400E-report.html"), "<html><body>also no ACs</body></html>\n");
+    // No ac-map anywhere
+    expect(verificationReportHasContent(wt, "FIX-400E")).toBe(false);
+  });
+
+  it("AC5: multiple run dirs → picks the one with newest mtime", () => {
+    const [wt] = withRunDirReport("FIX-400F", "20260624-000001-older", 1000);
+    // Add a newer run dir (no report in it — this tests candidate ordering)
+    const cardDir = join(wt, ".roll", "features", "uncategorized", "FIX-400F");
+    const newerDir = join(cardDir, "20260625-000001-newer");
+    mkdirSync(newerDir, { recursive: true });
+    writeFileSync(join(newerDir, "FIX-400F-report.html"), `<html><body><section class="ac s-pass" id="FIX-400F:AC1"><figure class="shot"><img src="screenshots/n.png"></figure></section></body></html>\n`);
+    // The older run dir has no ac-map; the newer one does.
+    withRunDirAcMap(wt, "FIX-400F", "20260625-000001-newer", [
+      { ac: "FIX-400F:AC1", status: "pass", evidence: [{ kind: "screenshot", label: "n", href: "../screenshots/n.png" }] },
+    ]);
+    // Both run dirs exist, the newer one should be selected for the report.
+    expect(verificationReportFresh(wt, "FIX-400F", 500)).toBe(true);
+    expect(verificationReportHasContent(wt, "FIX-400F")).toBe(true);
+  });
+
+  it("AC5: freshness mtime gate still uses the selected report's mtime (not latest/)", () => {
+    const [wt] = withRunDirReport("FIX-400G", "20260624-110904-79182", 500);
+    // Report mtime is 500 < cycle start 1000 → stale
+    expect(verificationReportFresh(wt, "FIX-400G", 1000)).toBe(false);
+  });
+});
+
 describe("readAttestGateMode", () => {
   it("no policy → hard; attest_gate: soft → soft", () => {
     expect(readAttestGateMode(tmp("nopol"))).toBe("hard");
@@ -622,6 +735,42 @@ describe("runAttestGate (three paths: produced / skipped-soft / skipped-hard)", 
     expect(r.verdict).toBe("skipped");
     expect(r.blocked).toBe(true);
     expect(alerts).toHaveLength(1);
+  });
+
+  // ── FIX-400 (AC4): reason strings carry REAL paths, never literal <epic> ─────
+  it("FIX-400 AC4: empty-shell reason contains real epic path, not literal '<epic>' placeholder", () => {
+    const wt = withEmptyShell("FIX-400H", 2000);
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-400H", "c-fix400", "soft", 1000, s);
+    expect(r.verdict).toBe("skipped");
+    // The reason must NOT contain the literal placeholder
+    for (const reason of r.reasons) {
+      expect(reason).not.toMatch(/<epic>/);
+    }
+    // The reason must contain a real path with the actual epic name (uncategorized in our fixture)
+    const reason = r.reasons.join(" ");
+    expect(reason).toMatch(/uncategorized/);
+    expect(reason).toMatch(/FIX-400H/);
+  });
+
+  it("FIX-400 AC4: no-fresh-report reason also uses real path, not <epic>", () => {
+    const wt = tmp("no-report");
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-400I", "c-fix400b", "soft", 1000, s);
+    expect(r.verdict).toBe("skipped");
+    for (const reason of r.reasons) {
+      expect(reason).not.toMatch(/<epic>/);
+    }
+    expect(r.reasons.join(" ")).toMatch(/FIX-400I/);
+  });
+
+  it("FIX-400 AC4: run-dir empty-shell reason points at the selected run report", () => {
+    const [wt, reportPath] = withRunDirReport("FIX-400J", "20260624-110904-79182", 2000);
+    const { s } = sinks();
+    const r = runAttestGate(wt, "FIX-400J", "c-fix400c", "soft", 1000, s);
+    expect(r.verdict).toBe("skipped");
+    expect(r.reasons.join(" ")).toContain(reportPath);
+    expect(r.reasons.join(" ")).not.toMatch(/<epic>/);
   });
 
   // ── FIX-295: a red assertion is a regression, never an env exception ─────────

@@ -857,6 +857,9 @@ describe("FIX-211 — preflight reconcile 补翻: async PR-loop merge flips a st
           ? { state: "MERGED", mergedAt: "2026-06-21T00:00:00Z", mergeCommit: "abc123def456" }
           : { state };
       },
+      async openPrTitles() {
+        return [];
+      },
     };
   }
 

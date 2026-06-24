@@ -154,6 +154,7 @@ describe("US-TRUTH-013 AC3 — lifecycleFromFacts deterministic mappings", () =>
       "orphan_timeout",
       "idle_no_work",
       "gave_up",
+      "dormant_entered",
       "unpublished",
       "unknown",
     ];

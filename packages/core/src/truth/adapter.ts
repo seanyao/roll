@@ -115,6 +115,7 @@ export function outcomeToPanel(outcome: CycleTruth["outcome"], state: TruthState
     case "published_pending_merge":
       return "done";
     case "idle_no_work":
+    case "dormant_entered":
       return "idle";
     // FIX-351: gates passed but publish did not land (work committed locally) —
     // a NEUTRAL state, NOT a failure. Classified `idle`-side so the panel/tally

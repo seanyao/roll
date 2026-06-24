@@ -2646,6 +2646,8 @@ export function buildTerminalRecord(
     // acceptance artifact is missing (no independent peer Review Score /
     // empty-shell report). Branch preserved, awaits review — NOT a failure.
     needs_review: "needs_review",
+    // US-LOOP-079d — dormant_entered: 连续 N idle 后自卸;终态,此后无 idle 行.
+    dormant: "dormant_entered",
   };
   let attest: FactOr<TerminalAttestFact>;
   if (storyId === "") {

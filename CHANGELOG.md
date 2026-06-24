@@ -4,7 +4,7 @@
 
 ### 稳定性
 
-- **内置工具补齐 JSON Schema 契约并在调用前校验输入**：所有 builtin tools 现在声明真实 `inputSchema` / `outputSchema`，`ToolRegistry` 会在 adapter 初始化前拒绝结构非法的输入并返回 `invalid_input`；`roll tool status` 和机器级 Tools 页同步显示参数契约，便于 agent 内省与排障。(US-TOOL-022) `[tools-layer]`
+- **内置工具补齐 JSON Schema 契约并在调用前校验输入**：所有 builtin tools 现在声明真实 `inputSchema` / `outputSchema`，普通调用和既有委派调用都会在执行前拒绝结构非法的输入并返回 `invalid_input`；`roll tool status` 和机器级 Tools 页同步显示参数契约，便于 agent 内省与排障。(US-TOOL-022) `[tools-layer]`
 
 - **agent 名册收敛到 6 个一等成员**：`claude`、`kimi`、`codex`、`pi`、`antigravity (agy)`、`reasonix` 成为唯一可列出/探测/派发的 agent roster；`openai`、`deepseek` 继续作为 provider/model alias 保留，不再作为独立 agent 冒出。(US-AGENT-043) `[agents]`
 

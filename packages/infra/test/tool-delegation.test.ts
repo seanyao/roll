@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
+import type { ToolDeclaration } from "@roll/spec";
 import { commit, captureScreenshot, execFile, prCreate } from "../src/index.js";
+import { invokeInfraTool } from "../src/tools/delegation.js";
 
 const dirs: string[] = [];
 const originalEnv = { ...process.env };
@@ -106,5 +108,54 @@ node -e 'const fs=require("fs"); const input=JSON.parse(process.argv[1]); fs.wri
 
     expect(result).toMatchObject({ kind: "web", out, taken: true });
     expect(events(eventsPath).map((event) => event.invocation?.toolId ?? event.toolId)).toEqual(["browser.screenshot", "browser.screenshot"]);
+  });
+
+  it("rejects invalid input before the delegated adapter runs and still appends a result event", async () => {
+    const dir = tmp("invalid");
+    const eventsPath = setEventsPath(dir);
+    let ran = false;
+    const declaration: ToolDeclaration = {
+      id: "test.delegated" as ToolDeclaration["id"],
+      kind: "bash",
+      title: "Delegated Test",
+      inputSchema: {
+        type: "object",
+        required: ["command"],
+        properties: {
+          command: { type: "string", minLength: 1 },
+        },
+        additionalProperties: false,
+      },
+      defaults: { enabled: true },
+    };
+
+    const result = await invokeInfraTool({
+      declaration,
+      input: { args: ["--version"] },
+      run: async (invocation) => {
+        ran = true;
+        return {
+          ok: true,
+          output: invocation.input,
+          meta: {
+            invocationId: invocation.invocationId,
+            toolId: invocation.toolId,
+            caller: invocation.caller,
+            startedAt: invocation.ts,
+            endedAt: invocation.ts,
+            durationMs: 0,
+          },
+        };
+      },
+    });
+
+    expect(ran).toBe(false);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("invalid_input");
+      expect(result.error.message).toContain("$.command is required");
+    }
+    expect(events(eventsPath).map((event) => event.invocation?.toolId ?? event.toolId)).toEqual(["test.delegated", "test.delegated"]);
+    expect(events(eventsPath).at(-1)).toMatchObject({ type: "tool:result", result: { ok: false, errorCode: "invalid_input" } });
   });
 });

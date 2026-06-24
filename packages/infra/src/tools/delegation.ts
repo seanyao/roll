@@ -2,6 +2,7 @@ import { execFile as nodeExecFile } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
+import { validateJsonSchemaValue } from "@roll/core";
 import type {
   ExecOpts,
   ExecResult,
@@ -43,6 +44,39 @@ export async function invokeInfraTool<I, O>(options: InfraToolOptions<I, O>): Pr
       ts: Date.now(),
     });
   }
+
+  const inputValidation = validateJsonSchemaValue(options.declaration.inputSchema, options.input);
+  if (!inputValidation.ok) {
+    const result: ToolResult<never> = {
+      ok: false,
+      error: {
+        code: "invalid_input",
+        message: `invalid input for ${options.declaration.id}: ${inputValidation.errors.join("; ")}`,
+        retryable: false,
+        detail: inputValidation.errors,
+      },
+      meta: {
+        invocationId: invocation.invocationId,
+        toolId: invocation.toolId,
+        caller: invocation.caller,
+        startedAt: invocation.ts,
+        endedAt: Date.now(),
+        durationMs: Math.max(0, Date.now() - invocation.ts),
+      },
+    };
+    if (emitEvents || !result.ok) {
+      await appendToolEvent({
+        type: "tool:result",
+        cycleId: caller.cycleId,
+        invocationId: invocation.invocationId,
+        toolId: invocation.toolId,
+        result: sanitizeResult(result),
+        ts: Date.now(),
+      });
+    }
+    return result;
+  }
+
   const result = await options.run(invocation);
   if (emitEvents || !result.ok) {
     await appendToolEvent({

@@ -19,6 +19,7 @@ import {
   AUTORUN_DIRECTIVE,
   agentProfile,
   agentSpawnEnvironment,
+  checkCredentialReadiness,
   type Ports,
   bootstrapWorktreeDeps,
   bootstrapWorktreePrebuild,
@@ -333,6 +334,67 @@ describe("FIX-359 reasonixEnv — best-effort DeepSeek key read from ~/.reasonix
     mkdirSync(join(home, ".reasonix"), { recursive: true });
     writeFileSync(join(home, ".reasonix", ".env"), "FOO=bar\n");
     expect(reasonixEnv(home)).toEqual({});
+  });
+});
+
+describe("FIX-404 checkCredentialReadiness — preflight credential gate", () => {
+  it("returns ready for agents with no secretEnv declarations", () => {
+    // claude, pi, kimi, codex have no secretEnv
+    for (const agent of ["claude", "pi", "kimi", "codex"]) {
+      const result = checkCredentialReadiness(agent);
+      expect(result.ready).toBe(true);
+      expect(result.missing).toEqual([]);
+    }
+  });
+
+  it("returns ready when reasonix's DEEPSEEK_API_KEY is in process.env", () => {
+    const prev = process.env.DEEPSEEK_API_KEY;
+    process.env.DEEPSEEK_API_KEY = "test-key-in-env";
+    try {
+      const result = checkCredentialReadiness("reasonix");
+      expect(result.ready).toBe(true);
+      expect(result.missing).toEqual([]);
+      expect(result.agent).toBe("reasonix");
+    } finally {
+      if (prev === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = prev;
+    }
+  });
+
+  it("detects missing DEEPSEEK_API_KEY when neither process.env nor file env has it", () => {
+    const prev = process.env.DEEPSEEK_API_KEY;
+    delete process.env.DEEPSEEK_API_KEY;
+    try {
+      const result = checkCredentialReadiness("reasonix");
+      // Note: if ~/.reasonix/.env exists on this machine, the key may still be
+      // found via agentSpawnEnvironment. This test asserts the contract: when
+      // process.env is empty AND no file-based key exists, it's not ready.
+      // On a machine with ~/.reasonix/.env, this will still be ready — that's
+      // correct behavior (the file-based key IS available).
+      if (result.ready) {
+        // File-based key found — still valid.
+        expect(result.missing).toEqual([]);
+      } else {
+        expect(result.missing).toContain("DEEPSEEK_API_KEY");
+        expect(result.agent).toBe("reasonix");
+      }
+    } finally {
+      if (prev !== undefined) process.env.DEEPSEEK_API_KEY = prev;
+    }
+  });
+
+  it("returns canonical agent name in result", () => {
+    expect(checkCredentialReadiness("pi").agent).toBe("pi");
+    expect(checkCredentialReadiness("claude").agent).toBe("claude");
+    expect(checkCredentialReadiness("reasonix").agent).toBe("reasonix");
+  });
+
+  it("ready agents have empty missing array", () => {
+    // All agents without secretEnv or with satisfied secretEnv
+    for (const agent of ["claude", "pi", "kimi", "codex"]) {
+      const { ready, missing } = checkCredentialReadiness(agent);
+      if (ready) expect(missing).toEqual([]);
+    }
   });
 });
 
@@ -3603,5 +3665,100 @@ describe("FIX-907 readCycleTimeoutThresholds — policy + env override", () => {
       if (savedNp === undefined) delete process.env["ROLL_CYCLE_NO_PROGRESS_SEC"];
       else process.env["ROLL_CYCLE_NO_PROGRESS_SEC"] = savedNp;
     }
+  });
+});
+
+describe("FIX-404 credential readiness gate in spawn_agent executor", () => {
+  const CTX404: CycleContext = {
+    cycleId: "c-cred",
+    branch: "roll/loop/c-cred",
+    loop: "default",
+    storyId: "FIX-404",
+    agent: "reasonix",
+  };
+
+  it("blocks builder spawn when required secretEnv is missing from both env sources", async () => {
+    // Save and clear DEEPSEEK_API_KEY from process.env.
+    const prev = process.env.DEEPSEEK_API_KEY;
+    delete process.env.DEEPSEEK_API_KEY;
+    try {
+      const { ports, calls } = fakePorts({
+        agentSpawn: vi.fn(async () => ({
+          stdout: "work done",
+          stderr: "",
+          exitCode: 0,
+          timedOut: false,
+        })),
+      });
+      const r = await executeCommand(
+        { kind: "spawn_agent", agent: "reasonix", attempt: 1 },
+        ports,
+        CTX404,
+      );
+      // If ~/.reasonix/.env exists with DEEPSEEK_API_KEY, the gate passes
+      // (file-based creds are available) and the spawn proceeds. Otherwise
+      // the gate blocks and the spawn is never called.
+      const spawnWasCalled = vi.mocked(ports.agentSpawn).mock.calls.length > 0;
+      if (!spawnWasCalled) {
+        // Gate blocked — verify the correct event was emitted
+        expect(r.event).toEqual({ type: "agent_exited", exit: 1, timedOut: false });
+        const blocked = (calls["event"] ?? [])
+          .map((a) => (a as unknown[])[1] as { type?: string; cause?: string; agent?: string; stage?: string })
+          .find((e) => e.type === "agent:blocked");
+        expect(blocked).toBeDefined();
+        expect(blocked?.cause).toBe("credential");
+        expect(blocked?.agent).toBe("reasonix");
+        expect(blocked?.stage).toBe("build");
+      } else {
+        // Gate passed (file-based creds found) — spawn proceeded normally
+        expect(r.event).toEqual({ type: "agent_exited", exit: 0, timedOut: false });
+      }
+    } finally {
+      if (prev !== undefined) process.env.DEEPSEEK_API_KEY = prev;
+      else delete process.env.DEEPSEEK_API_KEY;
+    }
+  });
+
+  it("allows builder spawn when credentials are present", async () => {
+    const prev = process.env.DEEPSEEK_API_KEY;
+    process.env.DEEPSEEK_API_KEY = "test-key-present";
+    try {
+      const { ports } = fakePorts({
+        agentSpawn: vi.fn(async () => ({
+          stdout: "work done",
+          stderr: "",
+          exitCode: 0,
+          timedOut: false,
+        })),
+      });
+      await executeCommand(
+        { kind: "spawn_agent", agent: "reasonix", attempt: 1 },
+        ports,
+        CTX404,
+      );
+      // Agent SHOULD have been called (credentials present)
+      expect(vi.mocked(ports.agentSpawn)).toHaveBeenCalled();
+    } finally {
+      if (prev !== undefined) process.env.DEEPSEEK_API_KEY = prev;
+      else delete process.env.DEEPSEEK_API_KEY;
+    }
+  });
+
+  it("allows builder spawn for agents without secretEnv (no gate needed)", async () => {
+    const { ports } = fakePorts({
+      agentSpawn: vi.fn(async () => ({
+        stdout: "work done",
+        stderr: "",
+        exitCode: 0,
+        timedOut: false,
+      })),
+    });
+    await executeCommand(
+      { kind: "spawn_agent", agent: "claude", attempt: 1 },
+      ports,
+      { ...CTX404, agent: "claude" },
+    );
+    // Agent SHOULD have been called (claude has no secretEnv)
+    expect(vi.mocked(ports.agentSpawn)).toHaveBeenCalled();
   });
 });

@@ -387,7 +387,7 @@ export function peerAuthStates(
 ): Record<string, PeerAuthState> {
   const streak: Record<string, number> = {};
   for (const e of events) {
-    if (e.type === "agent:blocked" && e.cause === "auth") {
+    if (e.type === "agent:blocked" && (e.cause === "auth" || e.cause === "credential")) {
       const peer = canonicalAgentName(e.agent);
       streak[peer] = (streak[peer] ?? 0) + 1;
     } else if (e.type === "pair:verdict" || e.type === "pair:score") {

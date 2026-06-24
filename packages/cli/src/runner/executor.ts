@@ -149,6 +149,7 @@ import { promisify } from "node:util";
 import {
   agentSpawnEnvironment,
   type AgentSpawn,
+  checkCredentialReadiness,
   killLiveAgents,
   realAgentSpawn,
 } from "./agent-spawn.js";
@@ -1198,6 +1199,27 @@ export async function executeCommand(
       // session-capture wiring (formerly codex `exec resume`) was removed with
       // codex; the cold spawn below is the only path. A future resumable engine
       // re-introduces this as registry-driven, agent-agnostic logic.
+      // FIX-404 — credential readiness preflight for the BUILDER.
+      // A missing required key (declared in agent profile `secretEnv`) is a
+      // hard block: emit a clear agent:blocked event naming agent + missing
+      // vars, then return failed immediately. Never spawn a builder without creds.
+      const builderCreds = checkCredentialReadiness(cmd.agent);
+      if (!builderCreds.ready) {
+        ports.events.appendAlert(
+          ports.paths.alertsPath,
+          `[BLOCKED] cycle ${ctx.cycleId ?? "?"}: builder ${builderCreds.agent} missing credentials: ${builderCreds.missing.join(", ")}`,
+        );
+        ports.events.appendEvent(ports.paths.eventsPath, {
+          type: "agent:blocked",
+          cycleId: ctx.cycleId ?? "",
+          agent: builderCreds.agent,
+          cause: "credential",
+          stage: "build",
+          detail: `missing env: ${builderCreds.missing.join(", ")}`,
+          ts: eventTs(ports),
+        });
+        return { event: { type: "agent_exited", exit: 1, timedOut: false } };
+      }
       let res: Awaited<ReturnType<typeof ports.agentSpawn>>;
       let timeoutFired: "wall" | "no-progress" | null = null;
       try {
@@ -1506,6 +1528,27 @@ export async function executeCommand(
             ...(cause !== undefined ? { cause } : {}),
             ts: eventTs(ports),
           });
+        // FIX-404 — credential readiness preflight for REVIEWER.
+        // A missing required key is a SOFT block: emit a clear alert, then
+        // return null so the peer gate skips to the next candidate. Never
+        // block the entire loop for an optional peer's missing key.
+        const reviewerCreds = checkCredentialReadiness(peer);
+        if (!reviewerCreds.ready) {
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `[WARN] cycle ${ctx.cycleId ?? "?"}: reviewer ${reviewerCreds.agent} missing credentials: ${reviewerCreds.missing.join(", ")} — skipping to next peer`,
+          );
+          ports.events.appendEvent(ports.paths.eventsPath, {
+            type: "agent:blocked",
+            cycleId: ctx.cycleId ?? "",
+            agent: reviewerCreds.agent,
+            cause: "credential",
+            stage: "review",
+            detail: `missing env: ${reviewerCreds.missing.join(", ")}`,
+            ts: eventTs(ports),
+          });
+          return null;
+        }
         let res;
         try {
           // Belt-and-braces hard timeout: race the spawn against a wall clock so
@@ -1743,6 +1786,27 @@ export async function executeCommand(
           | { outcome: "auth-block"; detail: string }
           | { outcome: "exit-error"; detail: string }
         > => {
+          // FIX-404 — credential readiness preflight for SCORER.
+          // A missing required key is a SOFT block: emit a clear alert, then
+          // return auth-block so the score pool tries the next peer.
+          const scorerCreds = checkCredentialReadiness(peer);
+          if (!scorerCreds.ready) {
+            const detail = `missing env: ${scorerCreds.missing.join(", ")}`;
+            ports.events.appendAlert(
+              ports.paths.alertsPath,
+              `[WARN] cycle ${ctx.cycleId ?? "?"}: scorer ${scorerCreds.agent} missing credentials: ${scorerCreds.missing.join(", ")} — skipping to next peer`,
+            );
+            ports.events.appendEvent(ports.paths.eventsPath, {
+              type: "agent:blocked",
+              cycleId: ctx.cycleId ?? "",
+              agent: scorerCreds.agent,
+              cause: "credential",
+              stage: "score",
+              detail,
+              ts: eventTs(ports),
+            });
+            return { outcome: "auth-block", detail };
+          }
           let res;
           try {
             res = await Promise.race([
@@ -1905,8 +1969,21 @@ export async function executeCommand(
         // forbid fabricated passes. One retry structurally: capture runs once.
         if (needsAcMapRemediation(ports.paths.worktreePath, storyId)) {
           let outcome: "written" | "still-missing" | "spawn-failed";
+          const acmapAgent = ctx.agent ?? "claude";
+          // FIX-404 — credential readiness preflight for ACMAP remediation.
+          // Best-effort: if the working agent is missing creds, skip the
+          // remediation (the harness already wrote a draft). Never block the
+          // cycle for a missing acmap peer key.
+          const acmapCreds = checkCredentialReadiness(acmapAgent);
+          if (!acmapCreds.ready) {
+            ports.events.appendAlert(
+              ports.paths.alertsPath,
+              `[WARN] cycle ${ctx.cycleId ?? "?"}: acmap remediation skipped — ${acmapCreds.agent} missing credentials: ${acmapCreds.missing.join(", ")}`,
+            );
+            outcome = "spawn-failed";
+          } else {
           try {
-            await ports.agentSpawn(ctx.agent ?? "claude", {
+            await ports.agentSpawn(acmapAgent, {
               cwd: ports.paths.worktreePath,
               skillBody: buildAcMapRemediationPrompt(ports.paths.worktreePath, storyId, ctx.evidenceRunDir),
               storyId,
@@ -1917,6 +1994,7 @@ export async function executeCommand(
           } catch {
             outcome = "spawn-failed";
           }
+          } // end else (acmapCreds.ready)
           ports.events.appendEvent(ports.paths.eventsPath, {
             type: "attest:remediation",
             cycleId: ctx.cycleId ?? "",

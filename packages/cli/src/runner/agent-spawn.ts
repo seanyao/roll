@@ -304,6 +304,31 @@ export function agentSecretEnvNames(agents: readonly string[] = agentProfileName
   return [...names].sort();
 }
 
+/**
+ * FIX-404 — credential readiness preflight. Checks whether an agent's declared
+ * `secretEnv` vars are resolvable (in process.env or via agentSpawnEnvironment)
+ * BEFORE spawning. Returns { ready, missing, agent }.
+ *
+ * Pure synchronous logic — zero cost, no spawn, no network probe.
+ * A missing key that IS in the agent's `secretEnv` list but NOT in process.env
+ * NOR in agentSpawnEnvironment → not ready. An agent with no `secretEnv`
+ * declarations → always ready.
+ */
+export function checkCredentialReadiness(agent: string): { ready: boolean; missing: string[]; agent: string } {
+  const canonical = canonicalProfileName(agent);
+  const profile = AGENT_PROFILES[canonical];
+  const secretEnv = profile?.secretEnv ?? [];
+  if (secretEnv.length === 0) return { ready: true, missing: [], agent: canonical };
+  const fileEnv = agentSpawnEnvironment(agent);
+  const missing: string[] = [];
+  for (const name of secretEnv) {
+    if (process.env[name] !== undefined && process.env[name] !== "") continue;
+    if (fileEnv[name] !== undefined && fileEnv[name] !== "") continue;
+    missing.push(name);
+  }
+  return { ready: missing.length === 0, missing, agent: canonical };
+}
+
 export function agentProfile(name: string): AgentProfile {
   const canonical = canonicalProfileName(name);
   const profile = AGENT_PROFILES[canonical];

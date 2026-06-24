@@ -181,7 +181,7 @@ export type RollEvent =
   // seconds, so the spawn output is signature-matched the same way and folds into
   // the same isolate-from-counter + PAUSE(auth)/breathe(network) path — one block
   // taxonomy for builder/reviewer/scorer (no new precheck, no probe, no cache).
-  | { type: "agent:blocked"; cycleId: string; agent: string; cause: "auth" | "network"; stage: "build" | "review" | "score"; detail: string; ts: number }
+  | { type: "agent:blocked"; cycleId: string; agent: string; cause: "auth" | "network" | "credential"; stage: "build" | "review" | "score"; detail: string; ts: number }
   // Attest gate (FIX-207) — every actual delivery records whether a fresh
   // acceptance report was produced ("produced") or silently skipped ("skipped").
   | { type: "attest:gate"; cycleId: string; verdict: "produced" | "skipped"; reasons: string[]; ts: number }

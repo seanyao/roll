@@ -353,7 +353,7 @@ import {
   aggregatePairingCost,
 } from "../src/index.js";
 
-const blocked = (agent: string, cause: "auth" | "network" = "auth"): any => ({
+const blocked = (agent: string, cause: "auth" | "network" | "credential" = "auth"): any => ({
   type: "agent:blocked",
   cycleId: "c",
   agent,

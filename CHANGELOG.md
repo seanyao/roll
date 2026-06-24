@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v3.624.2 — 2026-06-24
+
 ### 稳定性
 
 - **内置工具补齐 JSON Schema 契约并在调用前校验输入**：所有 builtin tools 现在声明真实 `inputSchema` / `outputSchema`，普通调用和既有委派调用都会在执行前拒绝结构非法的输入并返回 `invalid_input`；`roll tool status` 和机器级 Tools 页同步显示参数契约，便于 agent 内省与排障。(US-TOOL-022) `[tools-layer]`

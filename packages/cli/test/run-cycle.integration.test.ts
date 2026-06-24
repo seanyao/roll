@@ -194,6 +194,9 @@ function fakeGithub(status: 0 | 1 | 2, prState: string = "MERGED"): Ports["githu
         ? { state: "MERGED", mergedAt: "2026-06-21T00:00:00Z", mergeCommit: "abc123def456" }
         : { state: prState };
     },
+    async openPrTitles() {
+      return [];
+    },
   };
 }
 

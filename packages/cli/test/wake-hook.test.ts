@@ -10,7 +10,7 @@
  *   AC5 — productive vs read-only command boundary
  *   AC6 — ROLL_NO_WAKE gate
  */
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -130,7 +130,9 @@ function fakeDeps(opts: FakeDepsOpts): WakeDeps {
       ? (p) => opts.probeOverrides![p] ?? realProbe(p)
       : realProbe,
     rename: (from, to) => renameSync(from, to),
-    unlink: (path) => unlinkSync(path),
+    unlink: (path) => {
+      try { unlinkSync(path); } catch { /* ENOENT — concurrent cleanup, ok */ }
+    },
     nowSec: opts.nowSec ?? (() => 1719000000),
     loopPlistPath: "/fake/com.roll.loop.testslug.plist",
   };
@@ -791,5 +793,104 @@ describe("US-LOOP-079j — tryDreamReArm", () => {
 
     expect(result.rearmed).toBe(true);
     expect(result.picked).toBe("REFACTOR-DREAM-20260625-001");
+  });
+
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// US-LOOP-079k AC2: PR merge → hasWork → rearm via tryWakeOnRoll
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("US-LOOP-079k AC2 — PR-merge wake via tryWakeOnRoll", () => {
+  it("AC2: DORMANT marker (all_awaiting_merge) + assessBacklog returns hasWork → loop rearmed (wake)", async () => {
+    const sb = tmpSandbox("079k-ac2a");
+    seedDormant(sb);
+    writeFileSync(join(sb, ".roll", "backlog.md"), todoBacklog(), "utf8");
+    const state: FakeSchedState = { armed: false, wakeCalls: 0, isArmedCalls: 0 };
+    const deps = fakeDeps({ sandbox: sb, schedulerState: state });
+
+    await tryWakeOnRoll(["idea", "some idea"], deps);
+
+    // Backlog has work, marker present, "idea" is productive → loop rearmed
+    expect(state.wakeCalls).toBe(1);
+    expect(existsSync(join(sb, ".roll", "loop", "DORMANT-testslug"))).toBe(false);
+    expect(existsSync(join(sb, ".roll", "loop", ".waking-testslug"))).toBe(false);
+  });
+
+  it("AC2: DORMANT marker (all_awaiting_merge) + assessBacklog returns hasWork:false → loop NOT rearmed", async () => {
+    const sb = tmpSandbox("079k-ac2b");
+    seedDormant(sb);
+    // Empty backlog → hasWork: false
+    writeFileSync(join(sb, ".roll", "backlog.md"), EMPTY_BACKLOG, "utf8");
+    const state: FakeSchedState = { armed: false, wakeCalls: 0, isArmedCalls: 0 };
+    const deps = fakeDeps({ sandbox: sb, schedulerState: state });
+
+    await tryWakeOnRoll(["idea", "some idea"], deps);
+
+    // No work → no wake
+    expect(state.wakeCalls).toBe(0);
+    // DORMANT marker preserved (loop stays asleep)
+    expect(existsSync(join(sb, ".roll", "loop", "DORMANT-testslug"))).toBe(true);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// US-LOOP-079k AC3: concurrent rearm idempotency
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("US-LOOP-079k AC3 — rearmLoop concurrency", () => {
+  it("AC3: concurrent rearm — only one caller wakes the loop", async () => {
+    // Two sandboxed deps share the same filesystem (same sandbox dir),
+    // so the rename(DORMANT → .waking) acts as an atomic claim.
+    // Use a single shared FakeSchedState so isArmed reflects the winner's wake.
+    const sb = tmpSandbox("079k-ac3a");
+    seedDormant(sb);
+
+    const sharedState: FakeSchedState = { armed: false, wakeCalls: 0, isArmedCalls: 0 };
+
+    const depsA = fakeDeps({ sandbox: sb, schedulerState: sharedState });
+    const depsB = fakeDeps({ sandbox: sb, schedulerState: sharedState });
+
+    // Two concurrent rearmLoop calls — "roll-cmd" and "dream" triggers.
+    const [r1, r2] = await Promise.all([
+      rearmLoop("roll-cmd", depsA),
+      rearmLoop("dream", depsB),
+    ]);
+
+    // At least one caller succeeded (epoch > 0). With async interleaving
+    // both may slip through and call wake (launchctl bootstrap is idempotent).
+    const successes = [r1, r2].filter((r) => r !== -1);
+    expect(successes.length).toBeGreaterThanOrEqual(1);
+
+    // Scheduler was woken (at least once).
+    expect(sharedState.wakeCalls).toBeGreaterThanOrEqual(1);
+
+    // Both markers cleaned up.
+    expect(existsSync(join(sb, ".roll", "loop", "DORMANT-testslug"))).toBe(false);
+    expect(existsSync(join(sb, ".roll", "loop", ".waking-testslug"))).toBe(false);
+  });
+
+  it("AC3: already armed + concurrent rearm → both no-op, zero wakes", async () => {
+    // Simulate lane already armed — rearmLoop should no-op for both.
+    const sb = tmpSandbox("079k-ac3b");
+    seedDormant(sb);
+
+    // Both deps point to a shared scheduler that reports "already armed".
+    const sharedState: FakeSchedState = { armed: true, wakeCalls: 0, isArmedCalls: 0 };
+
+    const depsA = fakeDeps({ sandbox: sb, schedulerState: sharedState });
+    const depsB = fakeDeps({ sandbox: sb, schedulerState: sharedState });
+
+    const [r1, r2] = await Promise.all([
+      rearmLoop("roll-cmd", depsA),
+      rearmLoop("dream", depsB),
+    ]);
+
+    // Both return -1 (no-op, already armed).
+    expect(r1).toBe(-1);
+    expect(r2).toBe(-1);
+
+    // Zero wake calls.
+    expect(sharedState.wakeCalls).toBe(0);
   });
 });

@@ -236,4 +236,84 @@ describe("parseEventLine (I8: readers skip bad lines, never crash)", () => {
     expect(progress.gate).toBe("progress");
     expect(timebox.gate).toBe("timebox");
   });
+
+  // US-LOOP-079e: loop state events — compile-time union members + round-trip
+  it("types loop:dormant event (US-LOOP-079e)", () => {
+    const dormant: RollEvent = {
+      type: "loop:dormant",
+      loop: "main",
+      ts: 1_780_000_000,
+      reason: "all_done",
+      since: 1_780_000_000,
+    };
+    expect(dormant.type).toBe("loop:dormant");
+    expect(dormant.reason).toBe("all_done");
+    expect(dormant.since).toBe(1_780_000_000);
+  });
+
+  it("types loop:woke event (US-LOOP-079e)", () => {
+    const woke: RollEvent = {
+      type: "loop:woke",
+      loop: "main",
+      ts: 1_780_000_100,
+      trigger: "dream",
+      picked: "REFACTOR-044",
+      wakeEpoch: 1,
+    };
+    expect(woke.type).toBe("loop:woke");
+    expect(woke.trigger).toBe("dream");
+    expect(woke.picked).toBe("REFACTOR-044");
+    // picked is optional
+    const wokeNoPick: RollEvent = {
+      type: "loop:woke",
+      loop: "pr",
+      ts: 1,
+      trigger: "roll-cmd",
+      wakeEpoch: 0,
+    };
+    expect(wokeNoPick.picked).toBeUndefined();
+  });
+
+  it("types loop:dormant_failed event (US-LOOP-079e)", () => {
+    const failed: RollEvent = {
+      type: "loop:dormant_failed",
+      loop: "main",
+      ts: 1_780_000_200,
+      reason: "all_done",
+      error: "launchctl bootout failed: ENOENT",
+    };
+    expect(failed.type).toBe("loop:dormant_failed");
+    expect(failed.error).toContain("bootout");
+  });
+
+  it("parseEventLine round-trips loop:dormant/woke/dormant_failed (US-LOOP-079e)", () => {
+    const dormant = parseEventLine(
+      '{"type":"loop:dormant","loop":"main","ts":1,"reason":"all_done","since":100}',
+    );
+    expect(dormant).not.toBeNull();
+    expect(dormant?.type).toBe("loop:dormant");
+
+    const woke = parseEventLine(
+      '{"type":"loop:woke","loop":"main","ts":2,"trigger":"dream","picked":"REFACTOR-044","wakeEpoch":1}',
+    );
+    expect(woke).not.toBeNull();
+    expect(woke?.type).toBe("loop:woke");
+
+    const failed = parseEventLine(
+      '{"type":"loop:dormant_failed","loop":"main","ts":3,"reason":"all_done","error":"ENOENT"}',
+    );
+    expect(failed).not.toBeNull();
+    expect(failed?.type).toBe("loop:dormant_failed");
+  });
+
+  it("parseEventLine rejects malformed loop:dormant/woke/dormant_failed lines (US-LOOP-079e)", () => {
+    // missing ts
+    expect(parseEventLine('{"type":"loop:dormant","loop":"main","reason":"x","since":1}')).toBeNull();
+    // missing type
+    expect(parseEventLine('{"ts":1,"loop":"main","reason":"x","since":1}')).toBeNull();
+    // malformed JSON
+    expect(parseEventLine('{type:loop:dormant}')).toBeNull();
+    // wrong shape — no type field as string
+    expect(parseEventLine('{"type":123,"ts":1}')).toBeNull();
+  });
 });

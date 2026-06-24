@@ -9,6 +9,7 @@ import type {
   DossierSnapshotFrame,
   DossierHeartbeatFrame,
   TruthSnapshot,
+  TruthSnapshotProject,
   DegradedNote,
 } from "@roll/spec";
 import { C, MONO } from "./colors.js";
@@ -115,6 +116,10 @@ export class ConsoleApp {
 
   /** Current snapshot data (null until first frame). */
   private snapshot: TruthSnapshot | null = null;
+  /** Live snapshot frames keyed by ProjectIdentity.slug. */
+  private liveFrames = new Map<string, DossierSnapshotFrame>();
+  /** Currently selected project slug in the live switcher. */
+  private selectedProjectSlug: string | null = null;
   /** Current degraded notes (AC4: never silent-0). */
   private degradedNotes: DegradedNote[] = [];
   /** Current liveness from the most recent heartbeat. */
@@ -131,7 +136,15 @@ export class ConsoleApp {
 
   /** AC1: Render the Now tab from a snapshot frame. ETag skip handled by caller. */
   renderSnapshot(frame: DossierSnapshotFrame): void {
-    this.snapshot = frame.snapshot;
+    if (frame.project.reachable) {
+      this.liveFrames.set(frame.project.slug, frame);
+    } else {
+      this.liveFrames.delete(frame.project.slug);
+    }
+    if (this.selectedProjectSlug === null || !this.liveFrames.has(this.selectedProjectSlug)) {
+      this.selectedProjectSlug = frame.project.slug;
+    }
+    this.snapshot = this.liveFrames.get(this.selectedProjectSlug)?.snapshot ?? frame.snapshot;
     this.renderedEtag = frame.etag;
     this.degraded = false;
     this.degradedNotes = frame.degraded ?? [];
@@ -151,6 +164,7 @@ export class ConsoleApp {
   renderDegraded(snapshot: TruthSnapshot, collectedAt?: string): void {
     this.snapshot = snapshot;
     this.degraded = true;
+    this.selectedProjectSlug = snapshot.projects?.[0]?.slug ?? null;
     this.renderNow();
     if (collectedAt && this.freshnessBanner) {
       this.freshnessBanner.style.display = "block";
@@ -195,6 +209,10 @@ export class ConsoleApp {
 
     // Story spectrum
     if (this.snapshot) {
+      const projectSwitcher = this.buildProjectSwitcher(this.snapshot);
+      if (projectSwitcher !== null) {
+        this.nowRoot.appendChild(projectSwitcher);
+      }
       this.nowRoot.appendChild(this.buildSpectrumBoard(this.snapshot));
     }
 
@@ -314,6 +332,75 @@ export class ConsoleApp {
     container.appendChild(barSection);
 
     return container;
+  }
+
+  private buildProjectSwitcher(s: TruthSnapshot): HTMLElement | null {
+    const projects = s.projects ?? [];
+    if (projects.length === 0) return null;
+    const selected = this.selectedProjectSlug ?? projects[0]?.slug ?? "";
+    const container = div(
+      `display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:14px 0 0;`,
+    );
+    container.setAttribute("data-selected-project", selected);
+    container.appendChild(sectionLabel("Projects"));
+    for (const project of projects) {
+      container.appendChild(
+        this.degraded
+          ? this.buildStaticProjectLink(project, selected)
+          : this.buildLiveProjectButton(project, selected),
+      );
+    }
+    return container;
+  }
+
+  private buildLiveProjectButton(project: TruthSnapshotProject, selected: string): HTMLButtonElement {
+    const frame = this.liveFrames.get(project.slug);
+    const switchable = frame !== undefined && frame.project.reachable === true;
+    const button = el(
+      "button",
+      {
+        type: "button",
+        "data-live-project": project.slug,
+        "data-live-switchable": String(switchable),
+        style:
+          `${MONO}font-size:11.5px;padding:5px 9px;border-radius:999px;border:1px solid ${project.slug === selected ? C.blue : C.line};` +
+          `background:${project.slug === selected ? `${C.blue}12` : C.card};color:${switchable ? C.ink : C.faint};cursor:${switchable ? "pointer" : "not-allowed"};`,
+      },
+      project.name,
+    ) as HTMLButtonElement;
+    if (project.slug === selected) {
+      button.setAttribute("aria-current", "true");
+    }
+    if (!switchable) {
+      button.disabled = true;
+      button.title = "No live frame for this project; use its static snapshot.";
+    } else {
+      button.addEventListener("click", () => {
+        this.selectedProjectSlug = project.slug;
+        this.snapshot = frame.snapshot;
+        this.renderNow();
+      });
+    }
+    return button;
+  }
+
+  private buildStaticProjectLink(project: TruthSnapshotProject, selected: string): HTMLAnchorElement {
+    const href = project.slug === selected ? "#now" : `${project.path}/.roll/features/index.html#now`;
+    const link = el(
+      "a",
+      {
+        href,
+        "data-static-project": project.slug,
+        style:
+          `${MONO}font-size:11.5px;padding:5px 9px;border-radius:999px;border:1px solid ${project.slug === selected ? C.blue : C.line};` +
+          `background:${project.slug === selected ? `${C.blue}12` : C.card};color:${C.ink};text-decoration:none;`,
+      },
+      project.name,
+    ) as HTMLAnchorElement;
+    if (project.slug === selected) {
+      link.setAttribute("aria-current", "true");
+    }
+    return link;
   }
 
   /** AC4: degraded[] per-collector failures → visible `?` / paused indicator, never silent-0. */

@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterAll, beforeEach } from "vitest";
+import { afterAll, afterEach, beforeEach } from "vitest";
 import { execFileSync } from "node:child_process";
 import { collectDossierState, type CollectorDeps } from "../src/truth/collect-dossier-state.js";
 import type { TruthSnapshot } from "@roll/spec";
@@ -23,6 +23,10 @@ afterAll(() => {
 beforeEach(() => {
   // Freeze render time for deterministic generatedAt in snapshot
   process.env["ROLL_RENDER_NOW"] = "2026-06-20T12:00:00.000Z";
+});
+
+afterEach(() => {
+  delete process.env["ROLL_HOME"];
 });
 
 /** Minimal project: one epic, one delivered story, one todo story, backlog. */
@@ -227,6 +231,31 @@ describe("collectDossierState — US-OBS-016 view-model selector", () => {
 
     expect(snapshot.projects).toEqual([
       { name: "real", slug: "real", path: realProject, releaseTag: "v1.0.0", verdict: "pass" },
+    ]);
+  });
+
+  it("US-OBS-023: default collector reads the machine project registry for daemon snapshots", () => {
+    const cwd = fixture();
+    const rollHome = realpathSync(mkdtempSync(join(tmpdir(), "roll-cds-registry-home-")));
+    dirs.push(rollHome);
+    mkdirSync(join(rollHome, ".roll"), { recursive: true });
+    const realProject = realpathSync(process.cwd());
+    const tempProject = realpathSync(mkdtempSync(join(tmpdir(), "roll-cds-registry-temp-")));
+    dirs.push(tempProject);
+    writeFileSync(
+      join(rollHome, ".roll", "projects.json"),
+      JSON.stringify([
+        { name: "roll", slug: "roll", path: realProject, releaseTag: "v3.0.0", verdict: "pass" },
+        { name: "tmp", slug: "tmp", path: tempProject },
+        { name: "deleted", slug: "deleted", path: join(tempProject, "deleted") },
+      ]),
+    );
+    process.env["ROLL_HOME"] = rollHome;
+
+    const snapshot = collectDossierState(cwd);
+
+    expect(snapshot.projects).toEqual([
+      { name: "roll", slug: "roll", path: realProject, releaseTag: "v3.0.0", verdict: "pass" },
     ]);
   });
 

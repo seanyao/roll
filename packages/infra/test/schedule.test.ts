@@ -14,6 +14,11 @@ import {
   cronInstall,
   cronLines,
   cronRemove,
+  extractServiceFromLabel,
+  cronPerServiceLine,
+  cronRemovePerService,
+  cronInstallPerService,
+  cronHasPerServiceEntry,
   launchdLabel,
   launchdPlistPath,
   plistContent,
@@ -275,4 +280,214 @@ describe("Scheduler interface conformance — contract tests", () => {
   }
 
   contract(new LaunchdScheduler(501, { loadedSet: new Set<string>() }), "LaunchdScheduler");
+});
+
+// ─── US-LOOP-079f2: per-lane scheduler operations ──────────────────────────────
+
+describe("extractServiceFromLabel", () => {
+  it("extracts loop from com.roll.loop.main-abc123", () => {
+    expect(extractServiceFromLabel("com.roll.loop.main-abc123")).toBe("loop");
+  });
+  it("extracts dream/pr", () => {
+    expect(extractServiceFromLabel("com.roll.dream.s")).toBe("dream");
+    expect(extractServiceFromLabel("com.roll.pr.s")).toBe("pr");
+  });
+  it("returns empty for non-roll labels", () => {
+    expect(extractServiceFromLabel("com.apple.loop")).toBe("");
+    expect(extractServiceFromLabel("")).toBe("");
+    expect(extractServiceFromLabel("loop")).toBe("");
+  });
+});
+
+const perLaneCmds = {
+  loopCmd: 'cd "/proj" && roll loop now >> /sh/loop/cron-s.log 2>&1',
+  loopMinute: 17,
+  dreamCmd: 'cd "/proj" && roll dream >> /proj/.roll/dream/cron.log 2>&1',
+  dreamMinute: 2,
+  dreamHour: 3,
+  projectPath: "/proj",
+};
+
+describe("cronPerServiceLine", () => {
+  it("loop → returns loop line only", () => {
+    expect(cronPerServiceLine(perLaneCmds, "loop")).toBe(
+      '17 * * * * cd "/proj" && roll loop now >> /sh/loop/cron-s.log 2>&1 # roll-loop:/proj',
+    );
+  });
+  it("dream → returns dream line only", () => {
+    expect(cronPerServiceLine(perLaneCmds, "dream")).toBe(
+      '2 3 * * * cd "/proj" && roll dream >> /proj/.roll/dream/cron.log 2>&1 # roll-loop:/proj',
+    );
+  });
+  it("pr / unknown → null (not managed by cron)", () => {
+    expect(cronPerServiceLine(perLaneCmds, "pr")).toBeNull();
+    expect(cronPerServiceLine(perLaneCmds, "unknown")).toBeNull();
+  });
+});
+
+describe("cronRemovePerService — per-lane dormant on Linux (AC3)", () => {
+  it("dormant loop removes only loop line, keeps dream", () => {
+    const installed = cronInstall("", perLaneCmds);
+    const after = cronRemovePerService(installed, perLaneCmds, "/proj", "loop");
+    // Dream line survives.
+    expect(cronHasPerServiceEntry(after, perLaneCmds, "/proj", "dream")).toBe(true);
+    // Loop line is gone.
+    expect(cronHasPerServiceEntry(after, perLaneCmds, "/proj", "loop")).toBe(false);
+    // Full-project check still true (dream remains).
+    expect(cronHasEntry(after, "/proj")).toBe(true);
+  });
+
+  it("dormant dream removes only dream line, keeps loop", () => {
+    const installed = cronInstall("", perLaneCmds);
+    const after = cronRemovePerService(installed, perLaneCmds, "/proj", "dream");
+    expect(cronHasPerServiceEntry(after, perLaneCmds, "/proj", "loop")).toBe(true);
+    expect(cronHasPerServiceEntry(after, perLaneCmds, "/proj", "dream")).toBe(false);
+  });
+
+  it("dormant loop + dormant dream → empty crontab", () => {
+    const installed = cronInstall("", perLaneCmds);
+    const afterLoop = cronRemovePerService(installed, perLaneCmds, "/proj", "loop");
+    const afterBoth = cronRemovePerService(afterLoop, perLaneCmds, "/proj", "dream");
+    expect(afterBoth).toBe("");
+  });
+
+  it("dormant unknown service → no-op, keeps all entries", () => {
+    const installed = cronInstall("", perLaneCmds);
+    const after = cronRemovePerService(installed, perLaneCmds, "/proj", "pr");
+    expect(after).toBe(installed);
+  });
+
+  it("dormant preserves other projects' entries", () => {
+    const otherCmds = { ...perLaneCmds, projectPath: "/other" };
+    const both = cronInstall(cronInstall("", perLaneCmds), otherCmds);
+    const after = cronRemovePerService(both, perLaneCmds, "/proj", "loop");
+    expect(cronHasEntry(after, "/proj")).toBe(true); // dream still there
+    expect(cronHasEntry(after, "/other")).toBe(true); // other project untouched
+  });
+});
+
+describe("cronInstallPerService — per-lane wake on Linux (AC3)", () => {
+  it("wake loop adds only loop line to empty crontab", () => {
+    const after = cronInstallPerService("", perLaneCmds, "/proj", "loop");
+    expect(cronHasPerServiceEntry(after, perLaneCmds, "/proj", "loop")).toBe(true);
+    expect(cronHasPerServiceEntry(after, perLaneCmds, "/proj", "dream")).toBe(false);
+  });
+
+  it("wake dream adds only dream line to empty crontab", () => {
+    const after = cronInstallPerService("", perLaneCmds, "/proj", "dream");
+    expect(cronHasPerServiceEntry(after, perLaneCmds, "/proj", "dream")).toBe(true);
+    expect(cronHasPerServiceEntry(after, perLaneCmds, "/proj", "loop")).toBe(false);
+  });
+
+  it("wake loop is idempotent: double call = single line (AC4)", () => {
+    const first = cronInstallPerService("", perLaneCmds, "/proj", "loop");
+    const second = cronInstallPerService(first, perLaneCmds, "/proj", "loop");
+    expect(second).toBe(first); // no change on second call
+  });
+
+  it("wake preserves existing entries from other services", () => {
+    const withDream = cronInstallPerService("", perLaneCmds, "/proj", "dream");
+    const withBoth = cronInstallPerService(withDream, perLaneCmds, "/proj", "loop");
+    // After adding loop, both are present.
+    expect(cronHasPerServiceEntry(withBoth, perLaneCmds, "/proj", "loop")).toBe(true);
+    expect(cronHasPerServiceEntry(withBoth, perLaneCmds, "/proj", "dream")).toBe(true);
+    // Both lines are present (order may differ from full cronInstall).
+    expect(cronHasPerServiceEntry(withBoth, perLaneCmds, "/proj", "loop")).toBe(true);
+    expect(cronHasPerServiceEntry(withBoth, perLaneCmds, "/proj", "dream")).toBe(true);
+  });
+});
+
+describe("cronHasPerServiceEntry", () => {
+  it("true for loop when loop line present", () => {
+    const installed = cronInstall("", perLaneCmds);
+    expect(cronHasPerServiceEntry(installed, perLaneCmds, "/proj", "loop")).toBe(true);
+  });
+  it("false for loop after loop removed", () => {
+    const installed = cronInstall("", perLaneCmds);
+    const removed = cronRemovePerService(installed, perLaneCmds, "/proj", "loop");
+    expect(cronHasPerServiceEntry(removed, perLaneCmds, "/proj", "loop")).toBe(false);
+  });
+  it("false for unknown service", () => {
+    const installed = cronInstall("", perLaneCmds);
+    expect(cronHasPerServiceEntry(installed, perLaneCmds, "/proj", "pr")).toBe(false);
+  });
+});
+
+// ─── AC1 + AC2: LaunchdScheduler per-lane — dormant('loop') doesn't affect pr/dream ───
+
+describe("LaunchdScheduler per-lane (AC1, AC2)", () => {
+  it("dormant('loop') only removes loop, pr + dream stay armed", async () => {
+    const loaded = new Set<string>();
+    const s = new LaunchdScheduler(501, { loadedSet: loaded });
+    // Arm all three lanes.
+    await s.wake("com.roll.loop.s", "/tmp/loop.plist");
+    await s.wake("com.roll.pr.s", "/tmp/pr.plist");
+    await s.wake("com.roll.dream.s", "/tmp/dream.plist");
+    expect(loaded.size).toBe(3);
+
+    // Dormant only the loop lane.
+    await s.dormant("com.roll.loop.s");
+
+    // AC2: loop is false, pr + dream are true.
+    await expect(s.isArmed("com.roll.loop.s")).resolves.toBe(false);
+    await expect(s.isArmed("com.roll.pr.s")).resolves.toBe(true);
+    await expect(s.isArmed("com.roll.dream.s")).resolves.toBe(true);
+    // AC1: dormant only called bootout once (for loop).
+    expect(loaded.has("com.roll.loop.s")).toBe(false);
+    expect(loaded.has("com.roll.pr.s")).toBe(true);
+    expect(loaded.has("com.roll.dream.s")).toBe(true);
+  });
+
+  it("wake('loop') re-arms after dormant (AC4)", async () => {
+    const loaded = new Set<string>();
+    const s = new LaunchdScheduler(501, { loadedSet: loaded });
+    await s.wake("com.roll.loop.s", "/tmp/loop.plist");
+    await expect(s.isArmed("com.roll.loop.s")).resolves.toBe(true);
+    await s.dormant("com.roll.loop.s");
+    await expect(s.isArmed("com.roll.loop.s")).resolves.toBe(false);
+    // Re-wake.
+    await s.wake("com.roll.loop.s", "/tmp/loop.plist");
+    await expect(s.isArmed("com.roll.loop.s")).resolves.toBe(true);
+  });
+});
+
+// ─── AC3: CronScheduler per-lane (uses per-service cron ops) ───────────────────
+
+describe("CronScheduler per-lane (AC3, AC4)", () => {
+  // Test CronScheduler per-lane behavior via the pure cron functions.
+  // The CronScheduler.dormant/wake/isArmed delegate to these.
+  // (Integration tests with fake crontab binary are in schedule.difftest.test.ts)
+
+  it("full cronInstall still produces byte-identical lines (existing difftest must pass)", () => {
+    const installed = cronInstall("", perLaneCmds);
+    expect(installed).toBe(
+      '17 * * * * cd "/proj" && roll loop now >> /sh/loop/cron-s.log 2>&1 # roll-loop:/proj\n' +
+      '2 3 * * * cd "/proj" && roll dream >> /proj/.roll/dream/cron.log 2>&1 # roll-loop:/proj\n',
+    );
+  });
+
+  it("dormant loop then wake loop restores loop line idempotently", () => {
+    const installed = cronInstall("", perLaneCmds);
+    // Simulate CronScheduler.dormant("com.roll.loop.s")
+    const afterDormant = cronRemovePerService(installed, perLaneCmds, "/proj", "loop");
+    expect(cronHasPerServiceEntry(afterDormant, perLaneCmds, "/proj", "loop")).toBe(false);
+    expect(cronHasPerServiceEntry(afterDormant, perLaneCmds, "/proj", "dream")).toBe(true);
+    // Simulate CronScheduler.wake("com.roll.loop.s")
+    const afterWake = cronInstallPerService(afterDormant, perLaneCmds, "/proj", "loop");
+    expect(cronHasPerServiceEntry(afterWake, perLaneCmds, "/proj", "loop")).toBe(true);
+    expect(cronHasPerServiceEntry(afterWake, perLaneCmds, "/proj", "dream")).toBe(true);
+    // Restored: both lines present (order may differ from full cronInstall).
+    expect(cronHasPerServiceEntry(afterWake, perLaneCmds, "/proj", "loop")).toBe(true);
+    expect(cronHasPerServiceEntry(afterWake, perLaneCmds, "/proj", "dream")).toBe(true);
+  });
+
+  it("isArmed per-lane: loop true when loop line present, dream when dream present", () => {
+    const installed = cronInstall("", perLaneCmds);
+    expect(cronHasPerServiceEntry(installed, perLaneCmds, "/proj", "loop")).toBe(true);
+    expect(cronHasPerServiceEntry(installed, perLaneCmds, "/proj", "dream")).toBe(true);
+    // Remove loop only.
+    const afterLoopOff = cronRemovePerService(installed, perLaneCmds, "/proj", "loop");
+    expect(cronHasPerServiceEntry(afterLoopOff, perLaneCmds, "/proj", "loop")).toBe(false);
+    expect(cronHasPerServiceEntry(afterLoopOff, perLaneCmds, "/proj", "dream")).toBe(true);
+  });
 });

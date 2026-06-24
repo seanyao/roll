@@ -451,10 +451,89 @@ export class LaunchdScheduler implements Scheduler {
 // ─── CronScheduler (Linux — wraps crontab read-modify-write) ──────────────────
 
 /**
+ * Extract the service name from a launchd label (`com.roll.<svc>.<slug>` → `<svc>`).
+ * Returns empty string for non-roll labels.
+ */
+export function extractServiceFromLabel(label: string): string {
+  const parts = label.split(".");
+  if (parts.length >= 3 && parts[0] === "com" && parts[1] === "roll") {
+    return parts[2]!;
+  }
+  return "";
+}
+
+/**
+ * Return the cron line for a single service ("loop" or "dream").
+ * Returns null for services not managed by cron (e.g., "pr").
+ */
+export function cronPerServiceLine(cmds: CronCommands, svc: string): string | null {
+  const [loop, dream] = cronLines(cmds);
+  if (svc === "loop") return loop;
+  if (svc === "dream") return dream;
+  return null;
+}
+
+/**
+ * Per-service cron removal: removes only the lines matching a specific service
+ * (loop or dream), leaving lines for other services intact. Uses exact line
+ * matching against the output of {@link cronPerServiceLine}.
+ */
+export function cronRemovePerService(
+  currentCrontab: string,
+  cmds: CronCommands,
+  projectPath: string,
+  svc: string,
+): string {
+  const serviceLine = cronPerServiceLine(cmds, svc);
+  if (!serviceLine) return currentCrontab; // unknown service → no-op.
+
+  const lines = currentCrontab.split("\n");
+  const hadTrailing = currentCrontab.endsWith("\n");
+  if (hadTrailing) lines.pop();
+  const kept = lines.filter((l) => l !== serviceLine);
+  if (kept.length === 0) return "";
+  return `${kept.join("\n")}\n`;
+}
+
+/**
+ * Per-service cron install: adds only the line for a specific service if not
+ * already present. Idempotent (AC4).
+ */
+export function cronInstallPerService(
+  currentCrontab: string,
+  cmds: CronCommands,
+  projectPath: string,
+  svc: string,
+): string {
+  const serviceLine = cronPerServiceLine(cmds, svc);
+  if (!serviceLine) return currentCrontab; // unknown service → no-op.
+  if (currentCrontab.includes(serviceLine)) return currentCrontab;
+
+  const base = currentCrontab === "" ? "" : ensureTrailingNewline(currentCrontab);
+  return `${base}${serviceLine}\n`;
+}
+
+/**
+ * Check if a specific service has a cron entry.
+ */
+export function cronHasPerServiceEntry(
+  currentCrontab: string,
+  cmds: CronCommands,
+  projectPath: string,
+  svc: string,
+): boolean {
+  const serviceLine = cronPerServiceLine(cmds, svc);
+  if (!serviceLine) return false;
+  return currentCrontab.includes(serviceLine);
+}
+
+// ─── CronScheduler (Linux — wraps crontab read-modify-write) ──────────────────
+
+/**
  * Cron implementation of {@link Scheduler}. Manages crontab entries keyed on
- * the `# roll-loop:<projectPath>` tag. All entries for a project are treated as
- * a unit (loop + dream lines); the `label` parameter is logged but not used
- * for crontab operations — the project path is the key.
+ * the `# roll-loop:<projectPath>` tag. Supports per-lane operations: the `label`
+ * parameter is parsed to extract the service name (loop/dream/pr), and only that
+ * service's cron lines are added or removed.
  */
 export class CronScheduler implements Scheduler {
   private readonly projectPath: string;
@@ -465,24 +544,39 @@ export class CronScheduler implements Scheduler {
     this.projectPath = projectPath;
   }
 
-  async dormant(_label: string): Promise<boolean> {
+  async dormant(label: string): Promise<boolean> {
+    const svc = extractServiceFromLabel(label);
     const current = await crontabRead();
-    const cleaned = cronRemove(current, this.projectPath);
+    const cleaned = svc
+      ? cronRemovePerService(current, this.cronCommands, this.projectPath, svc)
+      : cronRemove(current, this.projectPath);
     const code = await crontabWrite(cleaned);
     return code === 0;
   }
 
-  async wake(_label: string, _plistPath: string): Promise<boolean> {
-    // AC4: idempotent — if already installed, no-op.
+  async wake(label: string, _plistPath: string): Promise<boolean> {
+    const svc = extractServiceFromLabel(label);
     const current = await crontabRead();
+    if (svc) {
+      // AC4: per-service idempotent — if this service line already exists, no-op.
+      if (cronHasPerServiceEntry(current, this.cronCommands, this.projectPath, svc)) return true;
+      const updated = cronInstallPerService(current, this.cronCommands, this.projectPath, svc);
+      const code = await crontabWrite(updated);
+      return code === 0;
+    }
+    // Fallback: full install (no service extracted from label).
     if (cronHasEntry(current, this.projectPath)) return true;
     const updated = cronInstall(current, this.cronCommands);
     const code = await crontabWrite(updated);
     return code === 0;
   }
 
-  async isArmed(_label: string): Promise<boolean> {
+  async isArmed(label: string): Promise<boolean> {
+    const svc = extractServiceFromLabel(label);
     const current = await crontabRead();
+    if (svc) {
+      return cronHasPerServiceEntry(current, this.cronCommands, this.projectPath, svc);
+    }
     return cronHasEntry(current, this.projectPath);
   }
 }

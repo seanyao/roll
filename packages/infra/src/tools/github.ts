@@ -1,4 +1,4 @@
-import type { ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
+import type { ToolDeclaration, ToolDeps, ToolInvocation, ToolJsonSchema, ToolMeta, ToolResult } from "@roll/spec";
 import { rawGh, type PrMergeMode } from "../github.js";
 
 export type GitHubToolId = "github.pr" | "github.ci";
@@ -64,6 +64,61 @@ const TITLES: Record<GitHubToolId, string> = {
   "github.ci": "GitHub CI",
 };
 
+function githubInputSchema(id: GitHubToolId): ToolJsonSchema {
+  if (id === "github.pr") {
+    return {
+      type: "object",
+      required: ["action", "slug"],
+      properties: {
+        action: { type: "string", enum: ["create", "status", "merge"], description: "PR action to perform" },
+        slug: { type: "string", description: "Repository slug (owner/repo)" },
+        head: { type: "string", description: "[create] Head branch" },
+        title: { type: "string", description: "[create] PR title" },
+        body: { type: "string", description: "[create] PR body" },
+        base: { type: "string", description: "[create] Base branch (default: main)" },
+        ref: { type: "string", description: "[status/merge] PR reference (branch or number)" },
+        mode: { type: "string", enum: ["plain", "auto", "admin"], description: "[merge] Merge mode" },
+      },
+    };
+  }
+  return {
+    type: "object",
+    required: ["action", "slug"],
+    properties: {
+      action: { type: "string", enum: ["status", "rerun"], description: "CI action to perform" },
+      slug: { type: "string", description: "Repository slug (owner/repo)" },
+      commit: { type: "string", description: "[status] Commit SHA" },
+      runId: { type: "string", description: "[rerun] Run ID to re-run" },
+    },
+  };
+}
+
+function githubOutputSchema(id: GitHubToolId): ToolJsonSchema {
+  if (id === "github.pr") {
+    return {
+      type: "object",
+      required: [],
+      additionalProperties: true,
+      description: "Varies by action: create→{prUrl,prNumber}, status→{state}, merge→{code,stdout,stderr}",
+    };
+  }
+  return {
+    type: "object",
+    required: ["state", "runs"],
+    properties: {
+      state: { type: "string", enum: ["pass", "fail", "pending"], description: "Overall CI state" },
+      runs: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: true,
+        },
+        description: "CI run records (status, conclusion)",
+      },
+    },
+  };
+}
+
 export class GitHubTool {
   readonly declaration: ToolDeclaration;
 
@@ -78,6 +133,8 @@ export class GitHubTool {
         timeoutMs: 60_000,
       },
       requirements: [{ kind: "executable", name: "gh", optional: false }],
+      inputSchema: githubInputSchema(id),
+      outputSchema: githubOutputSchema(id),
     };
   }
 

@@ -1,7 +1,7 @@
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import type { RequestOptions } from "node:http";
-import type { ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
+import type { ToolDeclaration, ToolDeps, ToolInvocation, ToolJsonSchema, ToolMeta, ToolResult } from "@roll/spec";
 
 export interface NetworkInput {
   url: string;
@@ -33,6 +33,27 @@ export class NetworkTool {
       retry: { attempts: 1, backoffMs: 0 },
       sandbox: {
         network: "restricted",
+      },
+    },
+    inputSchema: {
+      type: "object",
+      required: ["url"],
+      properties: {
+        url: { type: "string", description: "Target URL (http/https)" },
+        method: { type: "string", enum: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"], description: "HTTP method (default: GET or POST if body is set)" },
+        headers: { type: "object", additionalProperties: true, description: "Request headers" },
+        body: { type: "string", description: "Request body" },
+        timeoutMs: { type: "integer", description: "Per-request timeout in milliseconds" },
+      },
+    },
+    outputSchema: {
+      type: "object",
+      required: ["statusCode", "headers", "body", "durationMs"],
+      properties: {
+        statusCode: { type: "integer", description: "HTTP status code" },
+        headers: { type: "object", additionalProperties: true, description: "Response headers" },
+        body: { type: "string", description: "Response body (redacted)" },
+        durationMs: { type: "integer", description: "Request duration in milliseconds" },
       },
     },
   };

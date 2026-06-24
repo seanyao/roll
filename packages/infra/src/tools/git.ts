@@ -1,6 +1,6 @@
 import type { GitResult } from "../git.js";
 import { rawGit } from "../git.js";
-import type { ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
+import type { ToolDeclaration, ToolDeps, ToolInvocation, ToolJsonSchema, ToolMeta, ToolResult } from "@roll/spec";
 
 export type GitToolId = "git.commit" | "git.status" | "git.push" | "git.merge";
 
@@ -48,6 +48,75 @@ const TITLES: Record<GitToolId, string> = {
   "git.merge": "Git Merge",
 };
 
+function gitInputSchema(id: GitToolId): ToolJsonSchema {
+  if (id === "git.commit") {
+    return {
+      type: "object",
+      required: ["cwd", "message"],
+      properties: {
+        cwd: { type: "string", description: "Repository working directory" },
+        message: { type: "string", description: "Commit message" },
+        allowEmpty: { type: "boolean", description: "Allow empty commit (--allow-empty)" },
+      },
+    };
+  }
+  if (id === "git.status") {
+    return {
+      type: "object",
+      required: ["cwd"],
+      properties: {
+        cwd: { type: "string", description: "Repository working directory" },
+      },
+    };
+  }
+  if (id === "git.push") {
+    return {
+      type: "object",
+      required: ["cwd", "branch"],
+      properties: {
+        cwd: { type: "string", description: "Repository working directory" },
+        branch: { type: "string", description: "Branch to push" },
+        remote: { type: "string", description: "Remote name (default: origin)" },
+        setUpstream: { type: "boolean", description: "Set upstream tracking (-u)" },
+      },
+    };
+  }
+  return {
+    type: "object",
+    required: ["cwd", "ref"],
+    properties: {
+      cwd: { type: "string", description: "Repository working directory" },
+      ref: { type: "string", description: "Reference to merge (branch/tag/commit)" },
+      ffOnly: { type: "boolean", description: "Fast-forward only (--ff-only)" },
+      noCommit: { type: "boolean", description: "Merge without committing (--no-commit)" },
+    },
+  };
+}
+
+function gitOutputSchema(id: GitToolId): ToolJsonSchema {
+  if (id === "git.status") {
+    return {
+      type: "object",
+      required: ["code", "stdout", "stderr", "clean"],
+      properties: {
+        code: { type: "integer", description: "Exit code" },
+        stdout: { type: "string", description: "Standard output" },
+        stderr: { type: "string", description: "Standard error" },
+        clean: { type: "boolean", description: "Whether the working tree is clean" },
+      },
+    };
+  }
+  return {
+    type: "object",
+    required: ["code", "stdout", "stderr"],
+    properties: {
+      code: { type: "integer", description: "Exit code" },
+      stdout: { type: "string", description: "Standard output" },
+      stderr: { type: "string", description: "Standard error" },
+    },
+  };
+}
+
 export class GitTool {
   readonly declaration: ToolDeclaration;
 
@@ -63,6 +132,8 @@ export class GitTool {
         timeoutMs: 60_000,
       },
       requirements: [{ kind: "executable", name: "git", optional: false }],
+      inputSchema: gitInputSchema(id),
+      outputSchema: gitOutputSchema(id),
     };
   }
 

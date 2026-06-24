@@ -1,5 +1,5 @@
 import { join, resolve } from "node:path";
-import type { ExecResult, ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
+import type { ExecResult, ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult, ToolJsonSchema } from "@roll/spec";
 
 export interface BashInput {
   command: string;
@@ -31,6 +31,26 @@ export class BashTool {
       },
     },
     requirements: [{ kind: "executable", name: "system-shell", optional: false }],
+    inputSchema: {
+      type: "object",
+      required: ["command"],
+      properties: {
+        command: { type: "string", description: "The shell command to execute (argv[0] only, no shell interpolation)" },
+        args: { type: "array", items: { type: "string" }, description: "Command arguments" },
+        cwd: { type: "string", description: "Working directory for the command" },
+        env: { type: "object", additionalProperties: true, description: "Extra environment variables" },
+      },
+    },
+    outputSchema: {
+      type: "object",
+      properties: {
+        exitCode: { type: "integer", description: "Process exit code" },
+        stdout: { type: "string", description: "Standard output" },
+        stderr: { type: "string", description: "Standard error" },
+        timedOut: { type: "boolean", description: "Whether the command timed out" },
+      },
+      required: ["exitCode", "stdout", "stderr", "timedOut"],
+    },
   };
 
   async init(_deps: ToolDeps): Promise<void> {

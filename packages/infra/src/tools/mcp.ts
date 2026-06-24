@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { join } from "node:path";
-import type { ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
+import type { ToolDeclaration, ToolDeps, ToolInvocation, ToolJsonSchema, ToolMeta, ToolResult } from "@roll/spec";
 
 export interface McpInput {
   serverName: string;
@@ -42,6 +42,33 @@ export class McpTool {
       timeoutMs: 30_000,
       sandbox: {
         network: "restricted",
+      },
+    },
+    inputSchema: {
+      type: "object",
+      required: ["serverName", "toolName"],
+      properties: {
+        serverName: { type: "string", description: "MCP server name (configured in .roll/mcp-servers.json or policy.yaml)" },
+        toolName: { type: "string", description: "Tool name exposed by the MCP server" },
+        arguments: { type: "object", additionalProperties: true, description: "Tool arguments (server-specific)" },
+      },
+    },
+    outputSchema: {
+      type: "object",
+      required: ["content"],
+      properties: {
+        content: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["type"],
+            properties: {
+              type: { type: "string", description: "Content type" },
+              text: { type: "string", description: "Text content (when type is text)" },
+            },
+          },
+          description: "MCP content items",
+        },
       },
     },
   };

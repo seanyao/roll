@@ -2,6 +2,7 @@ import { execFile as nodeExecFile } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
+import { validateToolInput } from "@roll/core";
 import type {
   ExecOpts,
   ExecResult,
@@ -43,6 +44,31 @@ export async function invokeInfraTool<I, O>(options: InfraToolOptions<I, O>): Pr
       ts: Date.now(),
     });
   }
+
+  // Input validation via JSON Schema (US-TOOL-022 AC3).
+  const schema = options.declaration.inputSchema;
+  if (schema !== undefined) {
+    const validation = validateToolInput(invocation.input, schema);
+    if (!validation.valid) {
+      return {
+        ok: false,
+        error: {
+          code: "invalid_input",
+          message: `input validation failed for ${options.declaration.id}: ${validation.errors.join("; ")}`,
+          retryable: false,
+        },
+        meta: {
+          invocationId: invocation.invocationId,
+          toolId: invocation.toolId,
+          caller: invocation.caller,
+          startedAt: invocation.ts,
+          endedAt: Date.now(),
+          durationMs: 0,
+        },
+      };
+    }
+  }
+
   const result = await options.run(invocation);
   if (emitEvents || !result.ok) {
     await appendToolEvent({

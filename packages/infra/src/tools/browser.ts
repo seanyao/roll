@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import type { ExecResult, ToolDeclaration, ToolDeps, ToolErrorCode, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
+import type { ExecResult, ToolDeclaration, ToolDeps, ToolErrorCode, ToolInvocation, ToolJsonSchema, ToolMeta, ToolResult } from "@roll/spec";
 import { PLAYWRIGHT_PIN } from "../playwright-pin.js";
 
 export type BrowserToolId = "browser.screenshot" | "browser.console" | "browser.dom-query";
@@ -71,6 +71,98 @@ const TOOL_TITLES: Record<BrowserToolId, string> = {
   "browser.dom-query": "Browser DOM Query",
 };
 
+function browserInputSchema(id: BrowserToolId): ToolJsonSchema {
+  if (id === "browser.screenshot") {
+    return {
+      type: "object",
+      required: ["url"],
+      properties: {
+        url: { type: "string", description: "URL to open" },
+        viewport: {
+          type: "object",
+          required: ["width", "height"],
+          properties: {
+            width: { type: "integer", description: "Viewport width in pixels" },
+            height: { type: "integer", description: "Viewport height in pixels" },
+          },
+          description: "Browser viewport dimensions",
+        },
+        waitFor: { type: "string", description: "CSS selector to wait for before capturing" },
+        screenshotPath: { type: "string", description: "File path for the output screenshot" },
+      },
+    };
+  }
+  if (id === "browser.console") {
+    return {
+      type: "object",
+      required: ["url"],
+      properties: {
+        url: { type: "string", description: "URL to open" },
+        waitFor: { type: "string", description: "CSS selector to wait for before capturing console" },
+      },
+    };
+  }
+  return {
+    type: "object",
+    required: ["url", "selector"],
+    properties: {
+      url: { type: "string", description: "URL to open" },
+      selector: { type: "string", description: "CSS selector to query" },
+      waitFor: { type: "string", description: "CSS selector to wait for before querying" },
+    },
+  };
+}
+
+function browserOutputSchema(id: BrowserToolId): ToolJsonSchema {
+  if (id === "browser.screenshot") {
+    return {
+      type: "object",
+      required: ["screenshotPath", "finalUrl"],
+      properties: {
+        screenshotPath: { type: "string", description: "Path to the captured screenshot file" },
+        finalUrl: { type: "string", description: "Final URL after navigation/redirects" },
+        statusCode: { type: "integer", description: "HTTP status code of the page load" },
+      },
+    };
+  }
+  if (id === "browser.console") {
+    return {
+      type: "object",
+      required: ["consoleLogs", "finalUrl"],
+      properties: {
+        consoleLogs: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["level", "text", "ts"],
+            properties: {
+              level: { type: "string", description: "Log level" },
+              text: { type: "string", description: "Log message" },
+              ts: { type: "integer", description: "Unix timestamp in milliseconds" },
+            },
+          },
+          description: "Collected console log entries",
+        },
+        finalUrl: { type: "string", description: "Final URL after navigation/redirects" },
+        statusCode: { type: "integer", description: "HTTP status code of the page load" },
+      },
+    };
+  }
+  return {
+    type: "object",
+    required: ["domResults", "finalUrl"],
+    properties: {
+      domResults: {
+        type: "array",
+        items: { type: "string" },
+        description: "Text content of matched DOM elements",
+      },
+      finalUrl: { type: "string", description: "Final URL after navigation/redirects" },
+      statusCode: { type: "integer", description: "HTTP status code of the page load" },
+    },
+  };
+}
+
 export class BrowserTool {
   readonly declaration: ToolDeclaration;
 
@@ -92,6 +184,8 @@ export class BrowserTool {
         },
       },
       requirements: [{ kind: "executable", name: "playwright-chromium", optional: true }],
+      inputSchema: browserInputSchema(id),
+      outputSchema: browserOutputSchema(id),
     };
   }
 

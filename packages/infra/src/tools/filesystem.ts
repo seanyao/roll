@@ -1,6 +1,6 @@
 import { stat as nodeStat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import type { ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
+import type { ToolDeclaration, ToolDeps, ToolInvocation, ToolJsonSchema, ToolMeta, ToolResult } from "@roll/spec";
 
 export type FsToolId = "filesystem.stat" | "filesystem.read" | "filesystem.write";
 
@@ -42,6 +42,67 @@ const TITLES: Record<FsToolId, string> = {
   "filesystem.write": "Filesystem Write",
 };
 
+function fsInputSchema(id: FsToolId): ToolJsonSchema {
+  if (id === "filesystem.stat") {
+    return {
+      type: "object",
+      required: ["path"],
+      properties: {
+        path: { type: "string", description: "File or directory path (relative to project root)" },
+      },
+    };
+  }
+  if (id === "filesystem.read") {
+    return {
+      type: "object",
+      required: ["path"],
+      properties: {
+        path: { type: "string", description: "File path to read (relative to project root)" },
+        offset: { type: "integer", description: "Line offset to start reading from" },
+        limit: { type: "integer", description: "Maximum lines to read" },
+      },
+    };
+  }
+  return {
+    type: "object",
+    required: ["path", "content"],
+    properties: {
+      path: { type: "string", description: "File path to write (relative to project root)" },
+      content: { type: "string", description: "Content to write" },
+    },
+  };
+}
+
+function fsOutputSchema(id: FsToolId): ToolJsonSchema {
+  if (id === "filesystem.stat") {
+    return {
+      type: "object",
+      required: ["exists", "size"],
+      properties: {
+        exists: { type: "boolean", description: "Whether the path exists" },
+        size: { type: "integer", description: "File size in bytes (0 if not found)" },
+      },
+    };
+  }
+  if (id === "filesystem.read") {
+    return {
+      type: "object",
+      required: ["content", "totalLines"],
+      properties: {
+        content: { type: "string", description: "File content (redacted)" },
+        totalLines: { type: "integer", description: "Total lines in the file" },
+      },
+    };
+  }
+  return {
+    type: "object",
+    required: ["bytesWritten"],
+    properties: {
+      bytesWritten: { type: "integer", description: "Number of bytes written" },
+    },
+  };
+}
+
 export class FsTool {
   readonly declaration: ToolDeclaration;
 
@@ -58,6 +119,8 @@ export class FsTool {
         enabled: true,
         timeoutMs: 30_000,
       },
+      inputSchema: fsInputSchema(id),
+      outputSchema: fsOutputSchema(id),
     };
   }
 

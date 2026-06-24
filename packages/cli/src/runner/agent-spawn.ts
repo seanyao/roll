@@ -112,6 +112,7 @@ export interface AgentProfile {
   acceptance: {
     canReviewHeadless: boolean;
   };
+  secretEnv?: readonly string[];
   childEnv?(home?: string): Record<string, string>;
 }
 
@@ -276,6 +277,7 @@ const AGENT_PROFILES: Readonly<Record<string, AgentProfile>> = {
     usesWorkspaceSandbox: false,
     ptyWhenPiped: true,
     acceptance: { canReviewHeadless: getAgentSpec("reasonix")?.canReviewHeadless === true },
+    secretEnv: ["DEEPSEEK_API_KEY"],
     buildSpawnCommand: (opts) => {
       const routedModel = opts.model?.trim();
       const model = routedModel !== undefined && routedModel !== "" ? routedModel : getAgentSpec("reasonix")?.defaultModel ?? "deepseek-flash";
@@ -291,6 +293,15 @@ const AGENT_PROFILES: Readonly<Record<string, AgentProfile>> = {
 
 export function agentProfileNames(): string[] {
   return Object.keys(AGENT_PROFILES);
+}
+
+export function agentSecretEnvNames(agents: readonly string[] = agentProfileNames()): string[] {
+  const names = new Set<string>();
+  for (const agent of agents) {
+    const profile = AGENT_PROFILES[canonicalProfileName(agent)];
+    for (const name of profile?.secretEnv ?? []) names.add(name);
+  }
+  return [...names].sort();
 }
 
 export function agentProfile(name: string): AgentProfile {
@@ -324,6 +335,8 @@ export interface AgentSpawnOptions {
   bin?: string;
   /** Extra env for the child (tests inject PATH with the shim dir prepended). */
   env?: NodeJS.ProcessEnv;
+  /** Test seam for agent-profile env readers; production uses the OS home dir. */
+  agentEnvHome?: string;
   /** US-EVID-001: explicit evidence frame for this child; overrides ambient env. */
   runDir?: string;
   /** Extra writable roots for agents with an explicit workspace sandbox. (No
@@ -399,8 +412,8 @@ export function withPtyWrap(
  * reasonix reads its API key from the env var `DEEPSEEK_API_KEY` but does NOT
  * auto-load any dotfile; the owner keeps the key at `~/.reasonix/.env` (a
  * `KEY=VALUE` file, chmod 600). This helper reads that file at RUNTIME and
- * returns `{ DEEPSEEK_API_KEY }` ONLY if present (else `{}`), so the executor
- * can merge it into the reasonix spawn's env.
+ * returns `{ DEEPSEEK_API_KEY }` ONLY if present (else `{}`), so the real spawn
+ * layer can merge it into every reasonix child process.
  *
  * SECURITY: the value flows ONLY into the returned env object. It is NEVER
  * logged, echoed, printed, or written anywhere — do not add diagnostics that
@@ -442,6 +455,17 @@ function childEnv(opts: AgentSpawnOptions): NodeJS.ProcessEnv {
   env.PWD = opts.cwd;
   delete env.OLDPWD;
   return opts.runDir !== undefined && opts.runDir !== "" ? { ...env, ...evidenceFrameEnv(opts.runDir) } : env;
+}
+
+function withAgentProfileEnv(agent: string, opts: AgentSpawnOptions): AgentSpawnOptions {
+  return {
+    ...opts,
+    env: {
+      ...process.env,
+      ...agentSpawnEnvironment(agent, opts.agentEnvHome),
+      ...(opts.env ?? {}),
+    },
+  };
 }
 
 function spawnAndWait(bin: string, args: string[], opts: AgentSpawnOptions, pty = false): Promise<AgentSpawnResult> {
@@ -508,5 +532,5 @@ function spawnAndWait(bin: string, args: string[], opts: AgentSpawnOptions, pty 
 
 export const realAgentSpawn: AgentSpawn = (agent, opts) => {
   const { bin, args, pty } = withPtyWrap(buildSpawnCommand(agent, opts), agent);
-  return spawnAndWait(bin, args, opts, pty);
+  return spawnAndWait(bin, args, withAgentProfileEnv(agent, opts), pty);
 };

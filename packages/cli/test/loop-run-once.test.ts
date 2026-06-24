@@ -216,6 +216,39 @@ describe("realAgentSpawn child-process path (PATH shim, no real claude)", () => 
       else process.env["ROLL_RUN_DIR"] = previous;
     }
   });
+
+  it("FIX-403: realAgentSpawn injects agent-profile env for reasonix on every spawn path", async () => {
+    const dir = tmp("reasonix-profile-env");
+    const home = join(dir, "home");
+    mkdirSync(join(home, ".reasonix"), { recursive: true });
+    writeFileSync(join(home, ".reasonix", ".env"), "DEEPSEEK_API_KEY=fake-profile-key\n", "utf8");
+    const shim = join(dir, "reasonix");
+    writeFileSync(
+      shim,
+      [
+        "#!/bin/sh",
+        "echo \"key_len=${#DEEPSEEK_API_KEY}\"",
+        "if [ \"$DEEPSEEK_API_KEY\" = \"fake-profile-key\" ]; then echo key_from_profile=yes; else echo key_from_profile=no; fi",
+        "exit 0",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    chmodSync(shim, 0o755);
+
+    const res = await realAgentSpawn("reasonix", {
+      cwd: dir,
+      skillBody: "score this delivery",
+      bin: shim,
+      agentEnvHome: home,
+      timeoutMs: 15000,
+    });
+
+    expect(res.exitCode).toBe(0);
+    expect(res.stdout).toContain("key_len=16");
+    expect(res.stdout).toContain("key_from_profile=yes");
+    expect(res.stdout).not.toContain("fake-profile-key");
+  });
 });
 
 describe("FIX-204A — skill resolution + blind-agent refusal", () => {

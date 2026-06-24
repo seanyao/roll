@@ -14,6 +14,14 @@ and skills — switching agents does not require changing your workflow.
 | Pi (pi-coding-agent) | `pi` | The `deepseek` alias still resolves to pi. |
 | Reasonix | `reasonix` | DeepSeek-native coding agent. Install: `npm i -g reasonix@next`; requires `DEEPSEEK_API_KEY` |
 
+For unattended loop runs, agent credentials are checked before the selected
+agent is spawned. Reasonix may get `DEEPSEEK_API_KEY` from the environment or
+from `~/.reasonix/.env`; if both are absent, Roll writes an `agent:blocked`
+auth event and an ALERT that names `reasonix` and `DEEPSEEK_API_KEY` before it
+burns a cycle. The check runs only after a concrete builder, reviewer, scorer,
+or ac-map remediation agent has been selected, so an optional unused agent with
+missing credentials does not pause the loop.
+
 ## Adding an Agent
 
 Agent-specific behavior belongs in one profile, not in downstream runner gates.

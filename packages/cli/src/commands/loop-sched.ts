@@ -44,6 +44,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { agentSecretEnvNames } from "../runner/agent-spawn.js";
 
 // ─── injectable deps (tests fake launchd + identity + paths) ─────────────────
 export interface LoopSchedDeps {
@@ -148,10 +149,13 @@ export interface LoopRunnerInput {
  * network env always mirrors the invoker — empty when the caller has none,
  * which HTTP clients treat as unset. Trade-off (recorded on the card): only
  * the proxy family is synced — it is the network-reaching class that rots;
- * PATH is already bootstrapped above, and agent auth lives in $HOME files.
+ * PATH is already bootstrapped above. FIX-403 extends the same safe by-name
+ * forwarding to agent API-key env vars because some agents support env-only
+ * credentials in addition to their $HOME dotfile fallbacks.
  */
 const PROXY_VARS = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy"] as const;
-const proxyPassthrough = PROXY_VARS.map((v) => `${v}='\${${v}:-}'`).join(" ");
+const TMUX_PASSTHROUGH_VARS = [...PROXY_VARS, ...agentSecretEnvNames()] as const;
+const tmuxEnvPassthrough = TMUX_PASSTHROUGH_VARS.map((v) => `${v}='\${${v}:-}'`).join(" ");
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
@@ -227,7 +231,7 @@ if [ -z "$ROLL_TMUX_WRAPPED" ] && [ -z "$ROLL_LOOP_NO_TMUX" ] && command -v "$TM
   _sess="roll-loop-${input.slug}"
   "$TMUX_BIN" has-session -t "$_sess" 2>/dev/null || \\
     "$TMUX_BIN" new-session -d -s "$_sess" -x 200 -y 50 -n watch "cd ${project} && '$ROLL_BIN' loop watch --since all" 2>/dev/null || true
-  if "$TMUX_BIN" new-window -d -t "$_sess" -n "c$(date +%H%M%S)" "ROLL_TMUX_WRAPPED=1 ROLL_LOOP_FORCE='\${ROLL_LOOP_FORCE:-}' ${proxyPassthrough} ROLL_BIN='$ROLL_BIN' exec bash '$0'" 2>/dev/null; then
+  if "$TMUX_BIN" new-window -d -t "$_sess" -n "c$(date +%H%M%S)" "ROLL_TMUX_WRAPPED=1 ROLL_LOOP_FORCE='\${ROLL_LOOP_FORCE:-}' ${tmuxEnvPassthrough} ROLL_BIN='$ROLL_BIN' exec bash '$0'" 2>/dev/null; then
     exit 0
   fi
 fi
@@ -292,7 +296,7 @@ if [ -z "$ROLL_TMUX_WRAPPED" ] && [ -z "$ROLL_LOOP_NO_TMUX" ] && command -v "$TM
   _sess="roll-loop-${input.slug}"
   "$TMUX_BIN" has-session -t "$_sess" 2>/dev/null || \\
     "$TMUX_BIN" new-session -d -s "$_sess" -x 200 -y 50 -n watch "cd ${project} && '$ROLL_BIN' loop watch --since all" 2>/dev/null || true
-  if "$TMUX_BIN" new-window -d -t "$_sess" -n "test$(date +%H%M%S)" "ROLL_TMUX_WRAPPED=1 ROLL_LOOP_FORCE='\${ROLL_LOOP_FORCE:-}' ${proxyPassthrough} ROLL_BIN='$ROLL_BIN' exec bash '$0'" 2>/dev/null; then
+  if "$TMUX_BIN" new-window -d -t "$_sess" -n "test$(date +%H%M%S)" "ROLL_TMUX_WRAPPED=1 ROLL_LOOP_FORCE='\${ROLL_LOOP_FORCE:-}' ${tmuxEnvPassthrough} ROLL_BIN='$ROLL_BIN' exec bash '$0'" 2>/dev/null; then
     exit 0
   fi
 fi

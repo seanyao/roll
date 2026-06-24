@@ -12,6 +12,8 @@
 
 - **失败 cycle 救援不再冲掉 backlog Done**：`rescue_leaked` 清理泄漏 main 提交时会保留已写入但尚未提交的 `.roll/backlog.md` 状态，避免已合并卡回到 Todo 后被重做。(FIX-402) `[loop-engine]`
 
+- **peer reviewer/scorer 不再漏掉 agent 文件凭据**：reasonix 等 agent 的 profile env 现在由真实 spawn 层统一注入，peer review、Review Score 和 ac-map 补救路径都会拿到 `~/.reasonix/.env` 里的密钥；tmux cycle 窗口也追加透传 agent secret env 名，避免 env-only 配置在无人值守 loop 里丢失。(FIX-403) `[loop-engine]`
+
 - **agent 名册收敛到 6 个一等成员**：`claude`、`kimi`、`codex`、`pi`、`antigravity (agy)`、`reasonix` 成为唯一可列出/探测/派发的 agent roster；`openai`、`deepseek` 继续作为 provider/model alias 保留，不再作为独立 agent 冒出。(US-AGENT-043) `[agents]`
 
 - **agent 名册改为单一真相源派生**：`AGENTS` 现在承载一等 agent 身份、显示名、PATH 探测 bin、默认模型和能力标记；registry、`roll agent list`、doctor/setup 探测和 spawn profile 覆盖都从同一组 6 个身份派生，减少后续名册漂移。(US-AGENT-044) `[agents]`

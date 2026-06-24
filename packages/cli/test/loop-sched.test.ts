@@ -213,6 +213,13 @@ describe("v3 loop runner template", () => {
     }
   });
 
+  it("FIX-403: the tmux cycle window forwards agent API key env names without writing values", () => {
+    const win = script.split("\n").find((l) => l.includes("new-window") && l.includes("ROLL_TMUX_WRAPPED=1"));
+    expect(win).toBeDefined();
+    expect(win).toContain("DEEPSEEK_API_KEY='${DEEPSEEK_API_KEY:-}'");
+    expect(script).not.toContain("test-secret-value");
+  });
+
   it("FIX-230: cycle start logs the effective proxy env (observability for env drift)", () => {
     expect(script).toMatch(/env: HTTP_PROXY=.*HTTPS_PROXY=.*ALL_PROXY=/);
   });
@@ -814,6 +821,13 @@ describe("FIX-204E — tmux observation window in the runner template", () => {
     expect(smoke).toContain("'$ROLL_BIN' loop watch --since all");
     expect(smoke).not.toContain("tail -n +1 -F '$RT/live.log' | '$ROLL_BIN' loop fmt");
   });
+
+  it("FIX-403: the smoke runner tmux window also forwards agent API key env names", () => {
+    const smoke = buildLoopTestRunnerScript({ projectPath: "/p", slug: "s9", cmd: "echo ok" });
+    const win = smoke.split("\n").find((l) => l.includes("new-window") && l.includes("ROLL_TMUX_WRAPPED=1"));
+    expect(win).toBeDefined();
+    expect(win).toContain("DEEPSEEK_API_KEY='${DEEPSEEK_API_KEY:-}'");
+  });
 });
 
 describe("FIX-204E — tmux path EXECUTION in a sandbox", () => {
@@ -870,6 +884,7 @@ describe("FIX-204E — tmux path EXECUTION in a sandbox", () => {
     expect(calls).toContain("new-session -d -s roll-loop-t1");
     expect(calls).toContain("new-window -d -t roll-loop-t1");
     expect(calls).toContain("ROLL_TMUX_WRAPPED=1");
+    expect(calls).toContain("DEEPSEEK_API_KEY=''");
     // the cycle log stays untouched — the WRAPPED run owns it
     expect(existsSync(join(proj, ".roll", "loop", "cron.log"))).toBe(false);
   });

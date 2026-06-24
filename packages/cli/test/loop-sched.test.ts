@@ -48,7 +48,7 @@ function tmp(tag: string): string {
   return d;
 }
 
-/** Deps fake: records launchd ops, pins identity/paths to a sandbox. */
+/** Deps fake: records scheduler ops, pins identity/paths to a sandbox. */
 function fakeDeps(proj: string, shared: string, launchdDir: string): {
   deps: LoopSchedDeps;
   calls: string[];
@@ -61,17 +61,17 @@ function fakeDeps(proj: string, shared: string, launchdDir: string): {
       uid: () => 501,
       sharedRoot: () => shared,
       launchdDir: () => launchdDir,
-      launchd: {
-        reinstall: (uid, label, plist) => {
-          calls.push(`reinstall ${uid} ${label} ${plist}`);
-          return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+      scheduler: {
+        wake: (label, plist) => {
+          calls.push(`wake ${label} ${plist}`);
+          return Promise.resolve(true);
         },
-        uninstall: (uid, label) => {
-          calls.push(`uninstall ${uid} ${label}`);
-          return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+        dormant: (label) => {
+          calls.push(`dormant ${label}`);
+          return Promise.resolve(true);
         },
-        isLoaded: (uid, label) => {
-          calls.push(`isLoaded ${uid} ${label}`);
+        isArmed: (label) => {
+          calls.push(`isArmed ${label}`);
           return Promise.resolve(true);
         },
       },
@@ -80,8 +80,8 @@ function fakeDeps(proj: string, shared: string, launchdDir: string): {
 }
 
 /**
- * FIX-212 fake: reinstall fails for the first `failBefore[label]` attempts, and
- * `isLoaded` reports loaded only once that label has been (re)installed past its
+ * FIX-212 fake: wake fails for the first `failBefore[label]` attempts, and
+ * `isArmed` reports armed only once that label has been woken past its
  * failing attempts. Mirrors the bootout+bootstrap race (FIX-027/098) where the
  * job silently does not mount.
  */
@@ -99,19 +99,16 @@ function fakeFlakyDeps(
       uid: () => 501,
       sharedRoot: () => shared,
       launchdDir: () => launchdDir,
-      launchd: {
-        reinstall: (_uid, label) => {
+      scheduler: {
+        wake: (_label) => {
+          const label = _label;
           attempts[label] = (attempts[label] ?? 0) + 1;
           const fails = (failBefore[label] ?? 0) >= attempts[label];
-          return Promise.resolve({
-            code: fails ? 5 : 0,
-            stdout: "",
-            stderr: fails ? `Bootstrap failed: 5: Input/output error` : "",
-          });
+          return Promise.resolve(!fails);
         },
-        uninstall: () => Promise.resolve({ code: 0, stdout: "", stderr: "" }),
-        isLoaded: (_uid, label) =>
-          Promise.resolve((attempts[label] ?? 0) > (failBefore[label] ?? 0)),
+        dormant: () => Promise.resolve(true),
+        isArmed: (_label) =>
+          Promise.resolve((attempts[_label] ?? 0) > (failBefore[_label] ?? 0)),
       },
     },
   };
@@ -541,9 +538,9 @@ describe("loop on/off (injected launchd)", () => {
     const dreamPlist = readFileSync(join(ld, "com.roll.dream.proj-abc123.plist"), "utf8");
     expect(dreamPlist).toContain("<integer>86400</integer>");
 
-    expect(calls.some((c) => c.startsWith("reinstall 501 com.roll.loop.proj-abc123"))).toBe(true);
-    expect(calls.some((c) => c.startsWith("reinstall 501 com.roll.pr.proj-abc123"))).toBe(true);
-    expect(calls.some((c) => c.startsWith("reinstall 501 com.roll.dream.proj-abc123"))).toBe(true); // US-PORT-008
+    expect(calls.some((c) => c.startsWith("wake com.roll.loop.proj-abc123"))).toBe(true);
+    expect(calls.some((c) => c.startsWith("wake com.roll.pr.proj-abc123"))).toBe(true);
+    expect(calls.some((c) => c.startsWith("wake com.roll.dream.proj-abc123"))).toBe(true); // US-PORT-008
 
     expect(out).toContain("Loop enabled");
     expect(out).toContain("run-once"); // the new heart is stated
@@ -554,9 +551,9 @@ describe("loop on/off (injected launchd)", () => {
     const { deps, calls } = fakeDeps(proj, tmp("sh2"), tmp("ld2"));
     const { code } = await captureStdout(() => loopOffCommand([], deps));
     expect(code).toBe(0);
-    expect(calls).toContain("uninstall 501 com.roll.loop.proj-abc123");
-    expect(calls).toContain("uninstall 501 com.roll.dream.proj-abc123");
-    expect(calls).toContain("uninstall 501 com.roll.pr.proj-abc123");
+    expect(calls).toContain("dormant com.roll.loop.proj-abc123");
+    expect(calls).toContain("dormant com.roll.dream.proj-abc123");
+    expect(calls).toContain("dormant com.roll.pr.proj-abc123");
   });
 });
 
@@ -612,8 +609,8 @@ describe("FIX-212 — loop on verifies the mount & fails loud", () => {
     expect(out).toContain("com.roll.loop.proj-abc123");
     expect(out).toContain("com.roll.pr.proj-abc123");
     // the mount was actually probed, not assumed
-    expect(calls.some((c) => c.startsWith("isLoaded 501 com.roll.loop.proj-abc123"))).toBe(true);
-    expect(calls.some((c) => c.startsWith("isLoaded 501 com.roll.pr.proj-abc123"))).toBe(true);
+    expect(calls.some((c) => c.startsWith("isArmed com.roll.loop.proj-abc123"))).toBe(true);
+    expect(calls.some((c) => c.startsWith("isArmed com.roll.pr.proj-abc123"))).toBe(true);
   });
 });
 
@@ -761,7 +758,7 @@ describe("FIX-197 — loop now legacy self-heal", async () => {
     expect(code).toBe(0);
     expect(out).toContain("FIX-197");
     expect(execed).toEqual(["v3"]); // regenerated BEFORE execution
-    expect(calls.some((c) => c.startsWith("reinstall 501 com.roll.loop"))).toBe(true);
+    expect(calls.some((c) => c.startsWith("wake com.roll.loop"))).toBe(true);
   });
 
   it("fresh v3 runner → no regeneration, straight exec; rc propagates", async () => {

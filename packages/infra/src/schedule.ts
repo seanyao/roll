@@ -372,3 +372,151 @@ export async function crontabWrite(text: string): Promise<number> {
 function ensureTrailingNewline(s: string): string {
   return s.endsWith("\n") ? s : `${s}\n`;
 }
+
+// ─── Scheduler seam interface (US-LOOP-079f1) ─────────────────────────────────
+
+/**
+ * Scheduler abstracts launchd (macOS) / crontab (Linux) service lifecycle
+ * behind a common interface: upper layers (loop-sched, state machine) operate
+ * on labels without knowing platform details.
+ */
+export interface Scheduler {
+  /** Deactivate/unload a service. Returns true on success. */
+  dormant(label: string): Promise<boolean>;
+
+  /**
+   * Activate/load a service. Idempotent: calling twice = single arm (AC4).
+   * `plistPath` is the plist file path for the launchd implementation;
+   * cron implementations may interpret it differently.
+   * Returns true on success (including when already armed).
+   */
+  wake(label: string, plistPath: string): Promise<boolean>;
+
+  /** Check if a service is currently active/loaded. */
+  isArmed(label: string): Promise<boolean>;
+}
+
+// ─── LaunchdScheduler (macOS — wraps launchctl reinstall/uninstall/isLoaded) ───
+
+/**
+ * Launchd implementation of {@link Scheduler}. Delegates to the existing
+ * `launchctl` wrappers (reinstall, uninstall, isLoaded) — thin composition, no
+ * new syscalls.
+ *
+ * AC3 test seam: the `loadedSet` option replaces all launchctl I/O with an
+ * in-memory tracking set — no real `launchctl` is spawned.
+ */
+export class LaunchdScheduler implements Scheduler {
+  private readonly uid: number;
+  private readonly loadedSet?: Set<string>;
+
+  constructor(
+    uid: number,
+    opts?: {
+      /** AC3: inject an in-memory loaded-set stub — all mutations and probes
+       *  go through this set instead of calling launchctl. */
+      loadedSet?: Set<string>;
+    },
+  ) {
+    this.uid = uid;
+    this.loadedSet = opts?.loadedSet;
+  }
+
+  async dormant(label: string): Promise<boolean> {
+    if (this.loadedSet) {
+      this.loadedSet.delete(label);
+      return true;
+    }
+    const r = await uninstall(this.uid, label);
+    return r.code === 0;
+  }
+
+  async wake(label: string, plistPath: string): Promise<boolean> {
+    // AC4: idempotent — double call = single arm.
+    if (await this.isArmed(label)) return true;
+    if (this.loadedSet) {
+      this.loadedSet.add(label);
+      return true;
+    }
+    const r = await reinstall(this.uid, label, plistPath);
+    return r.code === 0;
+  }
+
+  async isArmed(label: string): Promise<boolean> {
+    if (this.loadedSet) return this.loadedSet.has(label);
+    return isLoaded(this.uid, label);
+  }
+}
+
+// ─── CronScheduler (Linux — wraps crontab read-modify-write) ──────────────────
+
+/**
+ * Cron implementation of {@link Scheduler}. Manages crontab entries keyed on
+ * the `# roll-loop:<projectPath>` tag. All entries for a project are treated as
+ * a unit (loop + dream lines); the `label` parameter is logged but not used
+ * for crontab operations — the project path is the key.
+ */
+export class CronScheduler implements Scheduler {
+  private readonly projectPath: string;
+  private readonly cronCommands: CronCommands;
+
+  constructor(cronCommands: CronCommands, projectPath: string) {
+    this.cronCommands = cronCommands;
+    this.projectPath = projectPath;
+  }
+
+  async dormant(_label: string): Promise<boolean> {
+    const current = await crontabRead();
+    const cleaned = cronRemove(current, this.projectPath);
+    const code = await crontabWrite(cleaned);
+    return code === 0;
+  }
+
+  async wake(_label: string, _plistPath: string): Promise<boolean> {
+    // AC4: idempotent — if already installed, no-op.
+    const current = await crontabRead();
+    if (cronHasEntry(current, this.projectPath)) return true;
+    const updated = cronInstall(current, this.cronCommands);
+    const code = await crontabWrite(updated);
+    return code === 0;
+  }
+
+  async isArmed(_label: string): Promise<boolean> {
+    const current = await crontabRead();
+    return cronHasEntry(current, this.projectPath);
+  }
+}
+
+// ─── factory ──────────────────────────────────────────────────────────────────
+
+/**
+ * Create a platform-appropriate {@link Scheduler}.
+ *
+ * @param platform - `process.platform` ("darwin" → launchd, anything else → cron).
+ * @param uid - macOS user ID; ignored by cron.
+ * @param cronCommands - crontab entries; required for Linux.
+ * @param projectPath - project path for cron tagging; required for Linux.
+ */
+export function createScheduler(
+  platform: NodeJS.Platform,
+  opts: {
+    uid: number;
+    cronCommands?: CronCommands;
+    projectPath?: string;
+  },
+): Scheduler {
+  if (platform === "darwin") {
+    return new LaunchdScheduler(opts.uid);
+  }
+  return new CronScheduler(
+    opts.cronCommands ?? {
+      loopCmd: "",
+      loopMinute: 17,
+      dreamCmd: "",
+      dreamMinute: 2,
+      dreamHour: 3,
+      projectPath: opts.projectPath ?? "",
+    },
+    opts.projectPath ?? "",
+  );
+}

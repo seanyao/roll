@@ -27,14 +27,12 @@
  *   - loop period  : .roll/local.yaml `loop_schedule.period_minutes` (default 30)
  */
 import {
-  type LaunchctlResult,
+  type Scheduler,
+  createScheduler,
   configResolve,
-  isLoaded as launchdIsLoaded,
   launchdLabel,
   launchdPlistPath,
   plistContent,
-  reinstall as launchdReinstall,
-  uninstall as launchdUninstall,
   projectIdentity,
 } from "@roll/infra";
 import { EventBus } from "@roll/core";
@@ -52,13 +50,8 @@ export interface LoopSchedDeps {
   uid: () => number;
   sharedRoot: () => string;
   launchdDir: () => string;
-  launchd: {
-    reinstall: (uid: number, label: string, plist: string) => Promise<LaunchctlResult>;
-    uninstall: (uid: number, label: string) => Promise<LaunchctlResult>;
-    /** FIX-212: post-bootstrap probe (`launchctl print gui/<uid>/<label>` exit 0)
-     *  — proves the job actually mounted, not just that bootstrap returned 0. */
-    isLoaded?: (uid: number, label: string) => Promise<boolean>;
-  };
+  /** US-LOOP-079f1: Scheduler seam — replaces raw launchd ops. */
+  scheduler: Scheduler;
   /** Run the generated loop runner once, FORCE env set (loop now). */
   execRunner?: (runnerPath: string) => Promise<number>;
   /** FIX-204E: is tmux available? Decides the `loop now` UX branch. */
@@ -73,7 +66,7 @@ function realDeps(): LoopSchedDeps {
     uid: () => process.getuid?.() ?? 501,
     sharedRoot: () => process.env["ROLL_SHARED_ROOT"] || join(homedir(), ".shared", "roll"),
     launchdDir: () => join(homedir(), "Library", "LaunchAgents"),
-    launchd: { reinstall: launchdReinstall, uninstall: launchdUninstall, isLoaded: launchdIsLoaded },
+    scheduler: createScheduler(process.platform, { uid: process.getuid?.() ?? 501 }),
     execRunner: (runner) =>
       new Promise((resolve) => {
         // FIX-204E: run the GENERATED runner — it self-wraps the cycle into
@@ -518,30 +511,27 @@ const LOOP_SERVICES = ["loop", "dream", "pr"] as const;
  * The bootout+bootstrap dance (FIX-027/098) races: `launchctl bootstrap` can
  * return non-zero, OR return 0 while the job silently never mounts. Either way
  * the old `loop on` reported success and the scheduler died quietly for hours.
- * So we treat "mounted" as the authoritative signal (`launchctl print` exit 0,
- * via `deps.launchd.isLoaded`), reinstall once more if the first pass did not
- * land it, and surface the launchctl stderr on failure.
+ * So we treat "mounted" as the authoritative signal (`isArmed` via the
+ * Scheduler seam), reinstall once more if the first pass did not land it, and
+ * surface the launchctl stderr on failure.
  *
- * Returns `{ ok, detail }` — `detail` is the launchctl evidence: "loaded" on
- * success, else the last bootstrap stderr / exit code.
+ * Returns `{ ok, detail }` — `detail` is "loaded" on success, else the
+ * failure reason.
  */
 async function mountService(
   deps: LoopSchedDeps,
-  uid: number,
   label: string,
   plist: string,
 ): Promise<{ ok: boolean; detail: string }> {
-  let last: LaunchctlResult = { code: 0, stdout: "", stderr: "" };
   // Two attempts max: the initial install + a single retry (FIX-212 spec).
   for (let attempt = 0; attempt < 2; attempt++) {
-    last = await deps.launchd.reinstall(uid, label, plist);
-    const loaded = deps.launchd.isLoaded
-      ? await deps.launchd.isLoaded(uid, label)
-      : last.code === 0;
-    if (loaded) return { ok: true, detail: "loaded" };
+    const reinstalled = await deps.scheduler.wake(label, plist);
+    if (reinstalled) {
+      const armed = await deps.scheduler.isArmed(label);
+      if (armed) return { ok: true, detail: "loaded" };
+    }
   }
-  const detail = last.stderr.trim() !== "" ? last.stderr.trim() : `bootstrap exit ${last.code}`;
-  return { ok: false, detail };
+  return { ok: false, detail: `failed to mount after retry` };
 }
 
 /** `roll loop on` — generate v3 runners + plists, (re)load loop & pr. */
@@ -588,7 +578,7 @@ export async function loopOnCommand(_args: string[], deps: LoopSchedDeps = realD
       schedule: { kind: "interval", periodMinutes: period },
     }),
   );
-  const loopMount = await mountService(deps, uid, loopLabel, loopPlist);
+  const loopMount = await mountService(deps, loopLabel, loopPlist);
 
   // 2. pr service — v3 TS tick (roll loop pr-inbox) every 5 min.
   const prRunner = join(shared, "pr", `run-${id.slug}.sh`);
@@ -611,7 +601,7 @@ export async function loopOnCommand(_args: string[], deps: LoopSchedDeps = realD
       schedule: { kind: "interval", periodMinutes: 5 },
     }),
   );
-  const prMount = await mountService(deps, uid, prLabel, prPlist);
+  const prMount = await mountService(deps, prLabel, prPlist);
 
   // 3. dream service — the v3 nightly scan heart (roll dream run-once), daily
   //    (US-PORT-008). Retires the v2 bash zombie runner: the generated script is
@@ -638,7 +628,7 @@ export async function loopOnCommand(_args: string[], deps: LoopSchedDeps = realD
       schedule: { kind: "daily", hour: dream.hour, minute: dream.minute, calendar: dream.calendar },
     }),
   );
-  const dreamMount = await mountService(deps, uid, dreamLabel, dreamPlist);
+  const dreamMount = await mountService(deps, dreamLabel, dreamPlist);
 
   // FIX-212: a silent mount failure is the bug. If any job did not actually
   // land in launchd (even after the retry), fail LOUD — name the label, echo
@@ -683,16 +673,15 @@ export async function loopOnCommand(_args: string[], deps: LoopSchedDeps = realD
 /** `roll loop off` — boot out every roll service for this project. */
 export async function loopOffCommand(_args: string[], deps: LoopSchedDeps = realDeps()): Promise<number> {
   const id = await deps.identity();
-  const uid = deps.uid();
   for (const svc of LOOP_SERVICES) {
-    await deps.launchd.uninstall(uid, launchdLabel(svc, id.slug));
+    await deps.scheduler.dormant(launchdLabel(svc, id.slug));
   }
   // FIX-234 AC2: off owns the FULL lane set — retired shapes (ci/alert/brief
   // from older versions) left zombie jobs pointing at deleted engines; sweep
   // every com.roll.*.<slug> plist, not just the three we install.
   for (const label of listRollLaneLabels(id.slug)) {
     if (LOOP_SERVICES.some((svc) => label === launchdLabel(svc, id.slug))) continue;
-    await deps.launchd.uninstall(uid, label);
+    await deps.scheduler.dormant(label);
     try {
       rmSync(join(launchAgentsDir(), `${label}.plist`), { force: true });
     } catch {

@@ -17,6 +17,10 @@ export type RollEvent =
   | { type: "loop:error"; loop: LoopType; error: string; ts: number }
   | { type: "loop:paused"; loop: LoopType; ts: number }
   | { type: "loop:resumed"; loop: LoopType; ts: number }
+  // US-LOOP-079e: dormant/wake/failed state transitions
+  | { type: "loop:dormant"; loop: LoopType; ts: number; reason: string; since: number }
+  | { type: "loop:woke"; loop: LoopType; ts: number; trigger: "roll-cmd" | "dream" | "pr" | "manual"; picked?: string; wakeEpoch: number }
+  | { type: "loop:dormant_failed"; loop: LoopType; ts: number; reason: string; error: string }
   // Cycle (BC2) — cycle:end anchors reconcile + cost accounting
   | { type: "cycle:start"; cycleId: string; storyId: string; agent: AgentId; model: string; ts: number }
   | { type: "cycle:phase"; cycleId: string; phase: CyclePhase; ts: number }

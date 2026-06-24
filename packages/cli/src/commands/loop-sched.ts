@@ -599,6 +599,91 @@ export async function loopOnCommand(_args: string[], deps: LoopSchedDeps = realD
   const uid = deps.uid();
   mkdirSync(ld, { recursive: true });
 
+  // US-LOOP-079n: lightweight wake when DORMANT marker or orphan .waking
+  // is present. Skip the heavy 3-lane reinstall — only re-arm the loop
+  // lane so pr/dream schedules are undisturbed.
+  const dormant = dormantMarkerPath(id.path, id.slug);
+  const waking = join(id.path, ".roll", "loop", `.waking-${id.slug}`);
+  if (existsSync(dormant) || existsSync(waking)) {
+    const label = launchdLabel("loop", id.slug);
+    const loopPlist = launchdPlistPath("loop", id.slug, ld);
+
+    // Atomic claim: rename DORMANT → .waking (concurrent-safety with
+    // wake-on-roll hooks — at most one winner proceeds).
+    let claimed = false;
+    if (existsSync(dormant)) {
+      try {
+        renameSync(dormant, waking);
+        claimed = true;
+      } catch {
+        // rename failed — another trigger already claimed it
+      }
+    }
+
+    if (!claimed) {
+      // Orphan recovery: .waking exists, DORMANT does not (crash between
+      // rename and wake).
+      if (existsSync(waking)) {
+        const armed = await deps.scheduler.isArmed(label);
+        if (!armed) {
+          await deps.scheduler.wake(label, loopPlist);
+          rmSync(waking, { force: true });
+          mkdirSync(join(id.path, ".roll", "loop"), { recursive: true });
+          new EventBus().appendEvent(join(id.path, ".roll", "loop", "events.ndjson"), {
+            type: "loop:woke",
+            loop: "ci",
+            ts: Math.floor(Date.now() / 1000),
+            trigger: "manual",
+            wakeEpoch: Math.floor(Date.now() / 1000),
+          });
+        } else {
+          rmSync(waking, { force: true });
+        }
+        process.stdout.write(
+          "Loop re-armed from dormant (lightweight wake, pr/dream untouched)\n" +
+          "Loop 已从休眠轻量唤醒（pr/dream 未扰动）\n",
+        );
+        return 0;
+      }
+
+      // Another trigger claimed DORMANT and completed the wake already.
+      process.stdout.write(
+        "Loop already waking or awake\n" +
+        "Loop 正在唤醒或已活跃\n",
+      );
+      return 0;
+    }
+
+    // Claimed — check if lane is already armed (idempotent).
+    const armed = await deps.scheduler.isArmed(label);
+    if (armed) {
+      rmSync(waking, { force: true });
+      process.stdout.write(
+        "Loop already active (wake claim cleaned)\n" +
+        "Loop 已活跃（唤醒声明已清理）\n",
+      );
+      return 0;
+    }
+
+    // Perform the wake — re-arm the loop lane.
+    await deps.scheduler.wake(label, loopPlist);
+    rmSync(waking, { force: true });
+    mkdirSync(join(id.path, ".roll", "loop"), { recursive: true });
+    new EventBus().appendEvent(join(id.path, ".roll", "loop", "events.ndjson"), {
+      type: "loop:woke",
+      loop: "ci",
+      ts: Math.floor(Date.now() / 1000),
+      trigger: "manual",
+      wakeEpoch: Math.floor(Date.now() / 1000),
+    });
+
+    process.stdout.write(
+      "Loop re-armed from dormant (lightweight wake, pr/dream untouched)\n" +
+      "Loop 已从休眠轻量唤醒（pr/dream 未扰动）\n",
+    );
+    return 0;
+  }
+
   // loop period from project local.yaml (live default: 30).
   let period = 30;
   const localYaml = join(id.path, ".roll", "local.yaml");

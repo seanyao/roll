@@ -17,7 +17,7 @@
  */
 import { execSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -1074,5 +1074,202 @@ describe("resolveLoopRunState", () => {
     mkdirSync(loopDir, { recursive: true });
     writeFileSync(join(loopDir, "state.yaml"), "status: paused\n");
     expect(resolveLoopRunState(dir, "test")).toBe("ACTIVE");
+  });
+});
+
+// ── US-LOOP-079n: lightweight wake on `loop on` when DORMANT ────────────────
+describe("loop on during DORMANT (US-LOOP-079n)", () => {
+  function projectWithDormant(): { proj: string; shared: string; ld: string } {
+    const proj = tmp("dorm-wake");
+    mkdirSync(join(proj, ".roll"), { recursive: true });
+    mkdirSync(join(proj, ".roll", "loop"), { recursive: true });
+    writeFileSync(join(proj, ".roll", "local.yaml"), "loop_schedule:\n  period_minutes: 30\n");
+    return { proj, shared: tmp("dorm-sh"), ld: tmp("dorm-ld") };
+  }
+
+  function fakeWakeDeps(proj: string, shared: string, ld: string): {
+    deps: LoopSchedDeps;
+    calls: string[];
+  } {
+    const calls: string[] = [];
+    return {
+      calls,
+      deps: {
+        identity: () => Promise.resolve({ path: proj, slug: "proj-abc123" }),
+        uid: () => 501,
+        sharedRoot: () => shared,
+        launchdDir: () => ld,
+        scheduler: {
+          wake: (label, plist) => {
+            calls.push(`wake ${label} ${plist}`);
+            return Promise.resolve(true);
+          },
+          dormant: (label) => {
+            calls.push(`dormant ${label}`);
+            return Promise.resolve(true);
+          },
+          isArmed: (label) => {
+            calls.push(`isArmed ${label}`);
+            return Promise.resolve(true);
+          },
+        },
+      },
+    };
+  }
+
+  it("AC1: DORMANT marker present → lightweight wake (only loop lane, no runner/plist rewrite)", async () => {
+    const { proj, shared, ld } = projectWithDormant();
+    const body: DormantMarkerBody = { since: "2026-06-25T06:00:00Z", reason: "idle for 6h" };
+    writeDormantMarker(dormantMarkerPath(proj, "proj-abc123"), body);
+
+    const { deps, calls } = fakeWakeDeps(proj, shared, ld);
+    // isArmed must return false so the wake actually fires.
+    deps.scheduler.isArmed = (label: string) => {
+      calls.push(`isArmed ${label}`);
+      return Promise.resolve(false);
+    };
+
+    const { code, out } = await captureStdout(() => loopOnCommand([], deps));
+    expect(code).toBe(0);
+
+    // Only the loop lane was woken (lightweight path).
+    expect(calls.filter((c) => c.startsWith("wake")).length).toBe(1);
+    expect(calls.some((c) => c.includes("com.roll.loop.") && c.startsWith("wake"))).toBe(true);
+    expect(calls.some((c) => c.includes("com.roll.pr.") && c.startsWith("wake"))).toBe(false);
+    expect(calls.some((c) => c.includes("com.roll.dream.") && c.startsWith("wake"))).toBe(false);
+
+    // Runners were NOT generated (no files in shared).
+    expect(existsSync(join(shared, "loop", "run-proj-abc123.sh"))).toBe(false);
+    expect(existsSync(join(shared, "pr", "run-proj-abc123.sh"))).toBe(false);
+    expect(existsSync(join(shared, "dream", "run-proj-abc123.sh"))).toBe(false);
+
+    // DORMANT marker is removed.
+    expect(existsSync(dormantMarkerPath(proj, "proj-abc123"))).toBe(false);
+
+    // Output mentions lightweight wake.
+    expect(out).toContain("lightweight");
+    expect(out).toContain("轻量");
+
+    // loop:woke event was emitted with trigger='manual'.
+    const events = readFileSync(join(proj, ".roll", "loop", "events.ndjson"), "utf8");
+    expect(events).toContain('"type":"loop:woke"');
+    expect(events).toContain('"trigger":"manual"');
+  });
+
+  it("AC1: when lane is already armed, skips wake and cleans the claim marker", async () => {
+    const { proj, shared, ld } = projectWithDormant();
+    const body: DormantMarkerBody = { since: "2026-06-25T06:00:00Z", reason: "idle" };
+    writeDormantMarker(dormantMarkerPath(proj, "proj-abc123"), body);
+
+    const { deps, calls } = fakeWakeDeps(proj, shared, ld);
+    const { code } = await captureStdout(() => loopOnCommand([], deps));
+    expect(code).toBe(0);
+
+    // isArmed returned true → wake was not called.
+    expect(calls.filter((c) => c.startsWith("wake")).length).toBe(0);
+    // DORMANT marker is removed anyway (claim cleaned).
+    expect(existsSync(dormantMarkerPath(proj, "proj-abc123"))).toBe(false);
+    // .waking is cleaned.
+    expect(existsSync(join(proj, ".roll", "loop", ".waking-proj-abc123"))).toBe(false);
+  });
+
+  it("AC2: full loopOnCommand path NOT taken — no 3-lane reinstall when DORMANT", async () => {
+    const { proj, shared, ld } = projectWithDormant();
+    const body: DormantMarkerBody = { since: "2026-06-25T06:00:00Z", reason: "idle" };
+    writeDormantMarker(dormantMarkerPath(proj, "proj-abc123"), body);
+
+    const { deps, calls } = fakeWakeDeps(proj, shared, ld);
+    await loopOnCommand([], deps);
+
+    // Confirm pr/dream lanes were NOT touched.
+    expect(calls.some((c) => c.includes("com.roll.pr.") && c.startsWith("wake"))).toBe(false);
+    expect(calls.some((c) => c.includes("com.roll.dream.") && c.startsWith("wake"))).toBe(false);
+    // No dormant calls either (lightweight path never calls dormant).
+    expect(calls.filter((c) => c.startsWith("dormant")).length).toBe(0);
+  });
+
+  it("AC3: after lightweight wake, DORMANT marker is gone and scheduler reports isArmed", async () => {
+    const { proj, shared, ld } = projectWithDormant();
+    const body: DormantMarkerBody = { since: "2026-06-25T06:00:00Z", reason: "idle" };
+    writeDormantMarker(dormantMarkerPath(proj, "proj-abc123"), body);
+
+    const { deps, calls } = fakeWakeDeps(proj, shared, ld);
+    const { code } = await captureStdout(() => loopOnCommand([], deps));
+    expect(code).toBe(0);
+
+    // DORMANT marker cleaned.
+    expect(existsSync(dormantMarkerPath(proj, "proj-abc123"))).toBe(false);
+    // .waking cleaned.
+    expect(existsSync(join(proj, ".roll", "loop", ".waking-proj-abc123"))).toBe(false);
+    // isArmed was probed (and returned true — the lane is active).
+    expect(calls.some((c) => c.includes("loop") && c.startsWith("isArmed"))).toBe(true);
+  });
+
+  it("no DORMANT marker → full 3-lane reinstall (existing behavior preserved)", async () => {
+    const { proj, shared, ld } = projectWithDormant();
+    // NO DORMANT marker written.
+
+    const { deps, calls } = fakeWakeDeps(proj, shared, ld);
+    const { code } = await captureStdout(() => loopOnCommand([], deps));
+    expect(code).toBe(0);
+
+    // All 3 lanes were woken (full reinstall).
+    expect(calls.some((c) => c.includes("loop") && c.startsWith("wake"))).toBe(true);
+    expect(calls.some((c) => c.includes("pr") && c.startsWith("wake"))).toBe(true);
+    expect(calls.some((c) => c.includes("dream") && c.startsWith("wake"))).toBe(true);
+
+    // Runners were generated.
+    expect(existsSync(join(shared, "loop", "run-proj-abc123.sh"))).toBe(true);
+    expect(existsSync(join(shared, "pr", "run-proj-abc123.sh"))).toBe(true);
+    expect(existsSync(join(shared, "dream", "run-proj-abc123.sh"))).toBe(true);
+  });
+
+  it(".waking orphan without DORMANT → recovers and wakes", async () => {
+    const { proj, shared, ld } = projectWithDormant();
+    // Simulate crash: .waking exists but DORMANT is gone.
+    mkdirSync(join(proj, ".roll", "loop"), { recursive: true });
+    writeFileSync(join(proj, ".roll", "loop", ".waking-proj-abc123"), "orphan\n");
+
+    // Use a scheduler where isArmed returns false so wake happens.
+    const wakeCalls: string[] = [];
+    const deps: LoopSchedDeps = {
+      identity: () => Promise.resolve({ path: proj, slug: "proj-abc123" }),
+      uid: () => 501,
+      sharedRoot: () => shared,
+      launchdDir: () => ld,
+      scheduler: {
+        wake: (label) => { wakeCalls.push(label); return Promise.resolve(true); },
+        dormant: () => Promise.resolve(true),
+        isArmed: () => Promise.resolve(false),
+      },
+    };
+
+    const { code, out } = await captureStdout(() => loopOnCommand([], deps));
+    expect(code).toBe(0);
+    expect(wakeCalls.length).toBe(1);
+    expect(wakeCalls[0]).toContain("loop");
+    expect(out).toContain("lightweight");
+    // .waking cleaned.
+    expect(existsSync(join(proj, ".roll", "loop", ".waking-proj-abc123"))).toBe(false);
+  });
+
+  it("both markers absent → full 3-lane reinstall (uncontested)", async () => {
+    // When neither DORMANT nor .waking exists, the wake was already completed
+    // by a concurrent trigger. A full reinstall is safe and idempotent.
+    const { proj, shared, ld } = projectWithDormant();
+    // Write and immediately delete DORMANT (concurrent trigger completed wake).
+    const marker = dormantMarkerPath(proj, "proj-abc123");
+    const body: DormantMarkerBody = { since: "2026-06-25T06:00:00Z", reason: "idle" };
+    writeDormantMarker(marker, body);
+    rmSync(marker);
+
+    const { deps, calls } = fakeWakeDeps(proj, shared, ld);
+    const { code } = await captureStdout(() => loopOnCommand([], deps));
+    expect(code).toBe(0);
+
+    // Both absent → falls through to full 3-lane reinstall (safe, idempotent).
+    expect(calls.some((c) => c.includes("com.roll.loop.") && c.startsWith("wake"))).toBe(true);
+    expect(calls.some((c) => c.includes("com.roll.pr.") && c.startsWith("wake"))).toBe(true);
+    expect(calls.some((c) => c.includes("com.roll.dream.") && c.startsWith("wake"))).toBe(true);
   });
 });

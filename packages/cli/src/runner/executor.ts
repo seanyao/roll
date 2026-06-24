@@ -94,6 +94,7 @@ import {
   type ActivitySignal,
   type AgentActivityNormalizer,
   type NormalizerState,
+  cycleActivityFromEvents,
 } from "@roll/core";
 import {
   parseEventLine,
@@ -103,6 +104,7 @@ import {
   buildTerminalEvent,
   findStatusMarker,
   present,
+  type CycleActivityEvent,
   type CycleCost,
   type FactOr,
   type RollEvent,
@@ -1800,7 +1802,22 @@ export async function executeCommand(
               // Collect git evidence (cheap — max a few hundred lines for
               // a single cycle's worth of commits + diff).
               const gitEvidence = await collectDraftEvidence(ports.paths.worktreePath);
-              const draftJson = generateAcMapDraft(specText, storyId, gitEvidence);
+              // US-OBS-031: also collect activity signals from the event stream
+              // for richer evidence drafting (TCR commits, gate results, tool calls).
+              let cycleSignals: CycleActivityEvent[] | undefined;
+              try {
+                const bus = new EventBus();
+                const events = bus.readEvents(ports.paths.eventsPath);
+                const cycleEvents = events.filter(
+                  (e) => "cycleId" in e && (e as { cycleId?: string }).cycleId === ctx.cycleId,
+                );
+                if (cycleEvents.length > 0) {
+                  cycleSignals = cycleActivityFromEvents(cycleEvents, ctx.cycleId ?? "");
+                }
+              } catch {
+                // Signal collection is best-effort — never fail the cycle on a read blip.
+              }
+              const draftJson = generateAcMapDraft(specText, storyId, gitEvidence, cycleSignals);
               if (draftJson !== null) {
                 writeAcMapDraftEvidenceFiles(ports.paths.worktreePath, storyId, gitEvidence);
                 writeFileSync(acMapPath(ports.paths.worktreePath, storyId), draftJson);

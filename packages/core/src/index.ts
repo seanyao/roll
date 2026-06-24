@@ -51,6 +51,7 @@ export * from "./attest/gc.js";
 export * from "./attest/ansi-html.js";
 export * from "./attest/report.js";
 export * from "./attest/report-smoke.js";
+export * from "./attest/evidence-drafter.js";
 export * from "./html/chrome.js";
 export * from "./consistency/audit.js";
 export * from "./consistency/gate.js";

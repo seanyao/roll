@@ -31,7 +31,8 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { acForStory } from "@roll/core";
+import { acForStory, draftAcMap } from "@roll/core";
+import type { CycleActivityEvent } from "@roll/spec";
 import { cardArchiveDir } from "../lib/archive.js";
 import { storyHasAcBlock, storyRequiresScreenshot, storySpecPath } from "./attest-gate.js";
 
@@ -141,10 +142,25 @@ export function generateAcMapDraft(
   specText: string,
   storyId: string,
   evidence: DraftEvidence,
+  signals?: CycleActivityEvent[],
 ): string | null {
   if (storyId === "") return null;
   const acItems = acForStory(specText, storyId, { fileOwned: true });
   if (acItems.length === 0) return null;
+
+  // US-OBS-031: when activity signals are available, use the richer
+  // evidence-drafter (core) module to cross-reference signals against ACs.
+  // The signal-based draft is more informative (TCR commits, gate results,
+  // tool calls, screenshot refs) and carries confidence annotations.
+  let signalDraft: Map<string, ReturnType<typeof draftAcMap>[number]> | undefined;
+  if (signals !== undefined && signals.length > 0) {
+    const draftEntries = draftAcMap({
+      acItems,
+      signals,
+      changedFiles: evidence.changedFilenames,
+    });
+    signalDraft = new Map(draftEntries.map((e) => [e.ac, e]));
+  }
 
   // Build a relevance score for each commit: which AC ordinals it mentions.
   const commitAcRelevance = new Map<string, Set<number>>();
@@ -217,6 +233,20 @@ export function generateAcMapDraft(
       });
     }
 
+    // US-OBS-031: enrich with signal-based evidence from the activity stream.
+    // Signal evidence (TCR commits, gate results, tool calls) is more
+    // informative than file-based heuristics and carries confidence annotations.
+    const sd = signalDraft?.get(item.id);
+    if (sd !== undefined && sd.evidence.length > 0) {
+      for (const se of sd.evidence) {
+        const label = `[${se.confidence}] ${se.label}`;
+        const entry: Record<string, string> = { kind: se.kind, label };
+        if (se.href !== undefined) entry["href"] = se.href;
+        if (se.textFile !== undefined) entry["textFile"] = se.textFile;
+        evidenceEntries.push(entry);
+      }
+    }
+
     // Deduplicate evidence entries by label
     const seen = new Set<string>();
     const deduped = evidenceEntries.filter((e) => {
@@ -227,10 +257,12 @@ export function generateAcMapDraft(
     });
 
     // Status determination — CONSERVATIVE by design:
-    //   pass-with-evidence ONLY when a test file named after this AC changed.
+    //   pass-with-evidence ONLY when a test file named after this AC changed
+    //   OR when high-confidence signal evidence exists (US-OBS-031).
     //   Everything else → needs-confirmation (agent must confirm).
     const hasTestSignal = testFiles.length > 0;
-    const status = hasTestSignal ? ACMAP_PASS_WITH_EVIDENCE : ACMAP_DRAFT_STATUS;
+    const hasHighSignal = sd !== undefined && sd.confidence === "high";
+    const status = (hasTestSignal || hasHighSignal) ? ACMAP_PASS_WITH_EVIDENCE : ACMAP_DRAFT_STATUS;
 
     entries.push({
       ac: item.id,

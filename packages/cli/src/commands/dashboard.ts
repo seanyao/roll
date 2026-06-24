@@ -13,6 +13,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { basename, join } from "node:path";
+import { resolveLoopRunState, readDormantMarker, dormantMarkerPath } from "./loop-sched.js";
 import {
   COLS,
   c,
@@ -1735,6 +1736,16 @@ function render(
   // ── Status eyebrow ──
   // A live verdict (computed above) trumps a stale state.yaml.
   const statusWord = (state["status"] ?? "idle").toLowerCase();
+  // US-LOOP-079g: marker-based resolver (PAUSED > DORMANT > ACTIVE) —
+  // truth comes from on-disk PAUSE/DORMANT markers, not state.yaml.
+  const markerState = args.projectSlug !== null
+    ? (() => {
+        const proj = resolveProjectPath(args.projectSlug!);
+        return proj !== null
+          ? resolveLoopRunState(proj, args.projectSlug!)
+          : null;
+      })()
+    : null;
   let ebL: string;
   let ebZh = "";
   if (live.running) {
@@ -1761,7 +1772,7 @@ function render(
       c("dim", "story ") +
       c("blue", item, { bold: true });
     ebZh = c("dim", "  正在运行 · 当前 ") + c("blue", item);
-  } else if (statusWord === "paused") {
+  } else if (statusWord === "paused" || markerState === "PAUSED") {
     ebL =
       c("amber", "⏸ PAUSED", { bold: true }) +
       c("muted", "   ") +
@@ -1770,6 +1781,27 @@ function render(
       c("muted", " · ") +
       c("dim", state["paused_reason"] ?? "");
     ebZh = c("dim", "  已暂停 · run: roll loop resume");
+  } else if (markerState === "DORMANT") {
+    // US-LOOP-079g: DORMANT state — loop suspended via idle detection,
+    // will auto-wake on a `roll loop resume` or new Todo item.
+    const proj = args.projectSlug !== null ? resolveProjectPath(args.projectSlug) : null;
+    let dormantSince = "—";
+    let dormantReason = "";
+    if (proj !== null && args.projectSlug !== null) {
+      const body = readDormantMarker(dormantMarkerPath(proj, args.projectSlug));
+      if (body !== null) {
+        dormantSince = body.since;
+        dormantReason = body.reason;
+      }
+    }
+    ebL =
+      c("fg", "💤 DORMANT", { bold: true }) +
+      c("muted", "   ") +
+      c("dim", "since ") +
+      c("fg", dormantSince) +
+      c("muted", " · ") +
+      c("dim", dormantReason);
+    ebZh = c("dim", "  休眠(闲置) · run: roll loop resume");
   } else {
     const installState = detectInstallState();
     if (installState === "not-installed") {

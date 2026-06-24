@@ -68,6 +68,9 @@ importers:
 
   packages/infra:
     dependencies:
+      '@roll/core':
+        specifier: workspace:*
+        version: link:../core
       '@roll/spec':
         specifier: workspace:*
         version: link:../spec

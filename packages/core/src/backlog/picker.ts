@@ -83,6 +83,61 @@ export function parseDependsOn(desc: string): string[] {
 }
 
 /**
+ * Build a done-ness index over the parsed items (bash re-greps the file per
+ * dep; here we read the same parsed model). A dep is satisfied iff a row with
+ * that id exists and its status contains the ✅ Done marker.
+ *
+ * Shared by `pickStory` and `assessBacklog` (US-LOOP-079b).
+ */
+export function buildDoneIndex(items: BacklogItem[]): (id: string) => boolean {
+  return (id: string): boolean =>
+    items.some((it) => it.id === id && it.status.includes(DONE));
+}
+
+/**
+ * Eligibility predicate covering all 5 gates (single source of truth).
+ *
+ * Gates (order):
+ *   0. Status classifies as `todo` (FIX-300).
+ *   1. Every `depends-on` id resolves to ✅ Done.
+ *   2. No open PR references the id (injected, FIX-141).
+ *   3. No merged delivery for this id (injected, FIX-323).
+ *   4. Not on the runtime skip-list (injected, FIX-363).
+ *
+ * Shared by `pickStory` and `assessBacklog` (US-LOOP-079b).
+ */
+export function isEligible(
+  item: BacklogItem,
+  isDone: (id: string) => boolean,
+  opts: PickOptions = {},
+): boolean {
+  const hasOpenPr = opts.hasOpenPr ?? (() => false);
+  const hasMergedDelivery = opts.hasMergedDelivery ?? (() => false);
+  const shouldSkip = opts.shouldSkip ?? (() => false);
+
+  // Recognize the Todo marker via the single-source classifier (FIX-300),
+  // not an exact-string equality. An annotated status — the Todo marker
+  // followed by parenthetical text (e.g. `📋 Todo (rebased)`) — is still a
+  // Todo and must stay pickable; an exact `=== "📋 Todo"` check silently
+  // dropped such rows and idled the loop (FIX-301).
+  if (classifyStatus(item.status) !== "todo") return false;
+  for (const dep of parseDependsOn(item.desc)) {
+    if (!isDone(dep)) return false;
+  }
+  if (hasOpenPr(item.id)) return false;
+  // FIX-323: a card whose deliverable already MERGED is Done — never re-pick,
+  // even if its backlog status was (wrongly) reset to 📋 Todo. The picker is
+  // blind to delivery truth, so this guard is injected from runs.jsonl.
+  if (hasMergedDelivery(item.id)) return false;
+  // FIX-363: a poison-pill card (failed K times) is on the runtime skip-list —
+  // skip it so the loop keeps delivering OTHER cards instead of halting. The
+  // card stays Todo in the backlog (truth unchanged); an owner clears the
+  // skip-list (or fixes the card) to re-arm it.
+  if (shouldSkip(item.id)) return false;
+  return true;
+}
+
+/**
  * Pure pick: choose the next workable story from `items` (already in file
  * order), applying the oracle gates. Returns the chosen item or `undefined`.
  *
@@ -94,43 +149,12 @@ export function parseDependsOn(desc: string): string[] {
  * Priority: all FIX first (file order), then US, then REFACTOR.
  */
 export function pickStory(items: BacklogItem[], opts: PickOptions = {}): BacklogItem | undefined {
-  const hasOpenPr = opts.hasOpenPr ?? (() => false);
-  const hasMergedDelivery = opts.hasMergedDelivery ?? (() => false);
-  const shouldSkip = opts.shouldSkip ?? (() => false);
-
-  // Done-ness index over the parsed items (bash re-greps the file per dep; here
-  // we read the same parsed model). A dep is satisfied iff a row with that id
-  // exists and its status contains the ✅ Done marker.
-  const isDone = (id: string): boolean =>
-    items.some((it) => it.id === id && it.status.includes(DONE));
-
-  const eligible = (it: BacklogItem): boolean => {
-    // Recognize the Todo marker via the single-source classifier (FIX-300),
-    // not an exact-string equality. An annotated status — the Todo marker
-    // followed by parenthetical text (e.g. `📋 Todo (rebased)`) — is still a
-    // Todo and must stay pickable; an exact `=== "📋 Todo"` check silently
-    // dropped such rows and idled the loop (FIX-301).
-    if (classifyStatus(it.status) !== "todo") return false;
-    for (const dep of parseDependsOn(it.desc)) {
-      if (!isDone(dep)) return false;
-    }
-    if (hasOpenPr(it.id)) return false;
-    // FIX-323: a card whose deliverable already MERGED is Done — never re-pick,
-    // even if its backlog status was (wrongly) reset to 📋 Todo. The picker is
-    // blind to delivery truth, so this guard is injected from runs.jsonl.
-    if (hasMergedDelivery(it.id)) return false;
-    // FIX-363: a poison-pill card (failed K times) is on the runtime skip-list —
-    // skip it so the loop keeps delivering OTHER cards instead of halting. The
-    // card stays Todo in the backlog (truth unchanged); an owner clears the
-    // skip-list (or fixes the card) to re-arm it.
-    if (shouldSkip(it.id)) return false;
-    return true;
-  };
+  const isDone = buildDoneIndex(items);
 
   for (const prefix of PREFIXES) {
     for (const it of items) {
       if (!it.id.startsWith(`${prefix}-`)) continue;
-      if (eligible(it)) return it;
+      if (isEligible(it, isDone, opts)) return it;
     }
   }
   return undefined;

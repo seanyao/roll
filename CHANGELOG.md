@@ -14,6 +14,8 @@
 
 - **peer reviewer/scorer 不再漏掉 agent 文件凭据**：reasonix 等 agent 的 profile env 现在由真实 spawn 层统一注入，peer review、Review Score 和 ac-map 补救路径都会拿到 `~/.reasonix/.env` 里的密钥；tmux cycle 窗口也追加透传 agent secret env 名，避免 env-only 配置在无人值守 loop 里丢失。(FIX-403) `[loop-engine]`
 
+- **agent 凭据就绪闸 — spawn 前主动检查而非等 mid-cycle 失败**：builder 在 execute 前、reviewer/scorer/acmap 在选定 peer 后且 spawn 前，检查该 agent 声明的 `secretEnv` 密钥（env 或文件凭据）是否可得；缺失时点名 agent + var 写入 `agent:blocked credential` 事件——builder 硬阻不浪费 cycle，peer 软跳换下一个候选不拖垮整个 loop。(FIX-404) `[loop-engine]`
+
 - **agent 名册收敛到 6 个一等成员**：`claude`、`kimi`、`codex`、`pi`、`antigravity (agy)`、`reasonix` 成为唯一可列出/探测/派发的 agent roster；`openai`、`deepseek` 继续作为 provider/model alias 保留，不再作为独立 agent 冒出。(US-AGENT-043) `[agents]`
 
 - **agent 名册改为单一真相源派生**：`AGENTS` 现在承载一等 agent 身份、显示名、PATH 探测 bin、默认模型和能力标记；registry、`roll agent list`、doctor/setup 探测和 spawn profile 覆盖都从同一组 6 个身份派生，减少后续名册漂移。(US-AGENT-044) `[agents]`
@@ -24,10 +26,13 @@
 
 - **文档/站点/技能收口到 6 agent**：docs、guide（中英）、skills 中作为 agent 提及的 `cursor`、`trae`、`opencode`、`openclaw` 及 `openai`/`deepseek`/`qwen` 独立 agent 条目已移除；model/provider 提及不动（`deepseek-v4-pro` 等 model id、`openai` 等 provider alias 保留）。(US-AGENT-046) `[agents]`
 
+<<<<<<< Updated upstream
 - **agent roster 适应度闸与 Rig 类型**：新增结构化 roster gate，CI 测试会校验 core/CLI/spawn/runner-label 等 roster 面都保持六 agent，并用合成 `qwen` 回流证明会红；`Rig` 明确建模 `agent × model`，阻止 `deepseek` 这类 model/provider 被当作 agent 指派。(US-AGENT-047) `[agents]`
 
 - **项目切换器不再显示已删除项目**：档案页项目列表的 reachable 过滤移动到 `collectDossierState` 读侧，`truth.json`、静态首页和机器页都消费同一份已过滤项目行；删除目录后的 stale registry 行不会再渲染成 phantom switcher 项。(US-OBS-019) `[delivery-dossier]`
 
+=======
+>>>>>>> Stashed changes
 - **交付真相重建补齐无 PR 号 story-only merge 的跨阶段去重**：`ensureDeliveriesFresh` 两阶段 git log 合并现在按 `pr:<n>` / `sha:<commit>` 去重，避免某个 `prNumber=0` 事实挡掉后续已合主干的 story-only squash commit。(FIX-925) `[feedback-truth-alignment]`
 
 - **release gate 接受无 PR 号交付的 merge SHA 证据**：Done 行现在可用 `merged <sha>` 作为可验证 merge ref；truth-live 在 PR 号缺失时校验 merge commit，避免 story-only squash merge 被迫伪造 PR ref。(FIX-926) `[feedback-truth-alignment]`

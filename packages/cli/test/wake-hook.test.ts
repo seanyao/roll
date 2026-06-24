@@ -19,6 +19,7 @@ import { type Scheduler, launchdLabel } from "@roll/infra";
 import {
   rearmLoop,
   tryWakeOnRoll,
+  tryDreamReArm,
   isProductiveCommand,
   buildProductionWakeDeps,
   type WakeDeps,
@@ -579,5 +580,216 @@ describe("buildProductionWakeDeps", () => {
     expect(typeof deps.unlink).toBe("function");
     expect(typeof deps.nowSec).toBe("function");
     expect(deps.loopPlistPath).toContain("com.roll.loop.abc123.plist");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// US-LOOP-079j — tryDreamReArm
+// ═══════════════════════════════════════════════════════════════════════════
+
+function refactorBacklog(id = "REFACTOR-DREAM-20260625-001"): string {
+  return `| ID | Description | Status |
+|----|-------------|--------|
+| [${id}](.roll/features/refactor/${id}/spec.md) | Remove unused exports detected by Dream | 📋 Todo |
+`;
+}
+
+function writeStructureScan(sandbox: string, findings: Array<{ id: string; stableKey: string }>): void {
+  const dreamDir = join(sandbox, ".roll", "dream");
+  mkdirSync(dreamDir, { recursive: true });
+  writeFileSync(
+    join(dreamDir, "structure-scan.json"),
+    JSON.stringify({ schema: "dream-structure.v1", findings, generatedAt: "2026-06-25T00:00:00Z" }, null, 2),
+    "utf8",
+  );
+}
+
+describe("US-LOOP-079j — tryDreamReArm", () => {
+  it("AC1: DORMANT + structure-scan findings + eligible REFACTOR-DREAM → rearmLoop called with trigger:'dream'", async () => {
+    const sb = tmpSandbox("079j-ac1");
+    seedDormant(sb);
+    writeStructureScan(sb, [{ id: "DS-001", stableKey: "abc123" }]);
+    writeFileSync(join(sb, ".roll", "backlog.md"), refactorBacklog(), "utf8");
+    const state: FakeSchedState = { armed: false, wakeCalls: 0, isArmedCalls: 0 };
+    const deps = fakeDeps({ sandbox: sb, schedulerState: state, nowSec: () => 1719000000 });
+
+    const result = await tryDreamReArm(deps);
+
+    expect(result.rearmed).toBe(true);
+    expect(result.picked).toBe("REFACTOR-DREAM-20260625-001");
+    expect(state.wakeCalls).toBe(1);
+    // DORMANT → renamed, .waking cleaned
+    expect(existsSync(join(sb, ".roll", "loop", "DORMANT-testslug"))).toBe(false);
+    expect(existsSync(join(sb, ".roll", "loop", ".waking-testslug"))).toBe(false);
+  });
+
+  it("AC3: DORMANT absent → returns {rearmed:false}, no wake", async () => {
+    const sb = tmpSandbox("079j-ac3a");
+    // No DORMANT marker
+    writeStructureScan(sb, [{ id: "DS-001", stableKey: "abc123" }]);
+    writeFileSync(join(sb, ".roll", "backlog.md"), refactorBacklog(), "utf8");
+    const state: FakeSchedState = { armed: false, wakeCalls: 0, isArmedCalls: 0 };
+    const deps = fakeDeps({ sandbox: sb, schedulerState: state });
+
+    const result = await tryDreamReArm(deps);
+
+    expect(result.rearmed).toBe(false);
+    expect(state.wakeCalls).toBe(0);
+  });
+
+  it("AC3: structure-scan.json missing → returns {rearmed:false}, no wake", async () => {
+    const sb = tmpSandbox("079j-ac3b");
+    seedDormant(sb);
+    // No structure-scan.json
+    writeFileSync(join(sb, ".roll", "backlog.md"), refactorBacklog(), "utf8");
+    const state: FakeSchedState = { armed: false, wakeCalls: 0, isArmedCalls: 0 };
+    const deps = fakeDeps({ sandbox: sb, schedulerState: state });
+
+    const result = await tryDreamReArm(deps);
+
+    expect(result.rearmed).toBe(false);
+    expect(state.wakeCalls).toBe(0);
+  });
+
+  it("AC3: structure-scan has zero findings → returns {rearmed:false}, no wake", async () => {
+    const sb = tmpSandbox("079j-ac3c");
+    seedDormant(sb);
+    writeStructureScan(sb, []);
+    writeFileSync(join(sb, ".roll", "backlog.md"), refactorBacklog(), "utf8");
+    const state: FakeSchedState = { armed: false, wakeCalls: 0, isArmedCalls: 0 };
+    const deps = fakeDeps({ sandbox: sb, schedulerState: state });
+
+    const result = await tryDreamReArm(deps);
+
+    expect(result.rearmed).toBe(false);
+    expect(state.wakeCalls).toBe(0);
+  });
+
+  it("AC3: no eligible REFACTOR-DREAM in backlog (all Done) → returns {rearmed:false}", async () => {
+    const sb = tmpSandbox("079j-ac3d");
+    seedDormant(sb);
+    writeStructureScan(sb, [{ id: "DS-001", stableKey: "abc123" }]);
+    writeFileSync(
+      join(sb, ".roll", "backlog.md"),
+      `| ID | Description | Status |
+|----|-------------|--------|
+| [REFACTOR-DREAM-20260625-001](./spec.md) | Remove unused exports | ✅ Done |
+`,
+      "utf8",
+    );
+    const state: FakeSchedState = { armed: false, wakeCalls: 0, isArmedCalls: 0 };
+    const deps = fakeDeps({ sandbox: sb, schedulerState: state });
+
+    const result = await tryDreamReArm(deps);
+
+    expect(result.rearmed).toBe(false);
+    expect(state.wakeCalls).toBe(0);
+  });
+
+  it("AC3: REFACTOR-DREAM present but blocked by unsatisfied dependency → no rearm", async () => {
+    const sb = tmpSandbox("079j-ac3e");
+    seedDormant(sb);
+    writeStructureScan(sb, [{ id: "DS-001", stableKey: "abc123" }]);
+    writeFileSync(
+      join(sb, ".roll", "backlog.md"),
+      `| ID | Description | Status |
+|----|-------------|--------|
+| [REFACTOR-DREAM-20260625-001](./spec.md) | Remove unused exports depends-on:US-999 | 📋 Todo |
+`,
+      "utf8",
+    );
+    const state: FakeSchedState = { armed: false, wakeCalls: 0, isArmedCalls: 0 };
+    const deps = fakeDeps({ sandbox: sb, schedulerState: state });
+
+    const result = await tryDreamReArm(deps);
+
+    expect(result.rearmed).toBe(false);
+    expect(state.wakeCalls).toBe(0);
+  });
+
+  it("AC2: loop:woke event includes picked refactor ID", async () => {
+    const sb = tmpSandbox("079j-ac2");
+    seedDormant(sb);
+    writeStructureScan(sb, [{ id: "DS-001", stableKey: "abc123" }]);
+    writeFileSync(join(sb, ".roll", "backlog.md"), refactorBacklog(), "utf8");
+    const state: FakeSchedState = { armed: false, wakeCalls: 0, isArmedCalls: 0 };
+    const events: Array<Record<string, unknown>> = [];
+    const deps = fakeDeps({ sandbox: sb, schedulerState: state, nowSec: () => 1719000000 });
+    deps.eventBus = {
+      appendEvent: (_path, event) => {
+        events.push(event as Record<string, unknown>);
+        return "";
+      },
+      ensureEventFiles: () => {},
+      eventsSize: () => 0,
+      readEvents: () => [],
+      upsertRun: () => "",
+    } as unknown as EventBus;
+
+    await tryDreamReArm(deps);
+
+    expect(events.length).toBeGreaterThanOrEqual(1);
+    const woke = events.find((e) => e["type"] === "loop:woke");
+    expect(woke).toBeDefined();
+    expect(woke!["trigger"]).toBe("dream");
+    expect(woke!["picked"]).toBe("REFACTOR-DREAM-20260625-001");
+  });
+
+  it("picks first eligible REFACTOR-DREAM when multiple exist", async () => {
+    const sb = tmpSandbox("079j-multi");
+    seedDormant(sb);
+    writeStructureScan(sb, [{ id: "DS-001", stableKey: "abc123" }, { id: "DS-002", stableKey: "def456" }]);
+    writeFileSync(
+      join(sb, ".roll", "backlog.md"),
+      `| ID | Description | Status |
+|----|-------------|--------|
+| [REFACTOR-DREAM-20260625-001](./spec.md) | First refactor | 📋 Todo |
+| [REFACTOR-DREAM-20260625-002](./spec.md) | Second refactor | 📋 Todo |
+`,
+      "utf8",
+    );
+    const state: FakeSchedState = { armed: false, wakeCalls: 0, isArmedCalls: 0 };
+    const events: Array<Record<string, unknown>> = [];
+    const deps = fakeDeps({ sandbox: sb, schedulerState: state, nowSec: () => 1719000000 });
+    deps.eventBus = {
+      appendEvent: (_path, event) => {
+        events.push(event as Record<string, unknown>);
+        return "";
+      },
+      ensureEventFiles: () => {},
+      eventsSize: () => 0,
+      readEvents: () => [],
+      upsertRun: () => "",
+    } as unknown as EventBus;
+
+    const result = await tryDreamReArm(deps);
+
+    expect(result.rearmed).toBe(true);
+    expect(result.picked).toBe("REFACTOR-DREAM-20260625-001");
+    expect(state.wakeCalls).toBe(1);
+    expect((events.find((e) => e["type"] === "loop:woke") ?? {})["picked"]).toBe("REFACTOR-DREAM-20260625-001");
+  });
+
+  it("skips non-REFACTOR-DREAM items in backlog", async () => {
+    const sb = tmpSandbox("079j-skip");
+    seedDormant(sb);
+    writeStructureScan(sb, [{ id: "DS-001", stableKey: "abc123" }]);
+    writeFileSync(
+      join(sb, ".roll", "backlog.md"),
+      `| ID | Description | Status |
+|----|-------------|--------|
+| [US-1](./spec.md) | A user story | 📋 Todo |
+| [REFACTOR-DREAM-20260625-001](./spec.md) | Dream refactor | 📋 Todo |
+| [FIX-1](./spec.md) | A fix | 📋 Todo |
+`,
+      "utf8",
+    );
+    const state: FakeSchedState = { armed: false, wakeCalls: 0, isArmedCalls: 0 };
+    const deps = fakeDeps({ sandbox: sb, schedulerState: state });
+
+    const result = await tryDreamReArm(deps);
+
+    expect(result.rearmed).toBe(true);
+    expect(result.picked).toBe("REFACTOR-DREAM-20260625-001");
   });
 });

@@ -15,6 +15,7 @@ exports[`US-TOOL-001 tool type contracts > exports the complete tool type surfac
   "ToolEvent",
   "ToolId",
   "ToolInvocation",
+  "ToolJsonSchemaType",
   "ToolKind",
   "ToolMeta",
   "ToolPolicy",

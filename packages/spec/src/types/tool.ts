@@ -11,6 +11,26 @@ export type ToolKind =
   | "network"
   | (string & {});
 
+export type ToolJsonSchemaType = "string" | "number" | "integer" | "boolean" | "object" | "array";
+
+export interface ToolJsonSchemaProperty {
+  type?: ToolJsonSchemaType;
+  description?: string;
+  enum?: readonly (string | number | boolean)[];
+  items?: ToolJsonSchemaProperty;
+  properties?: Record<string, ToolJsonSchemaProperty>;
+  required?: readonly string[];
+  additionalProperties?: boolean;
+}
+
+export interface ToolJsonSchema {
+  type: "object";
+  properties?: Record<string, ToolJsonSchemaProperty>;
+  required?: readonly string[];
+  additionalProperties?: boolean;
+  description?: string;
+}
+
 export type ToolRequirement =
   | { kind: "executable"; name: string; optional?: boolean }
   | { kind: "env"; name: string; optional?: boolean }
@@ -77,8 +97,8 @@ export type ToolDeclaration = {
   emitsEvents?: boolean;
   defaults?: ToolDefaults;
   requirements?: readonly ToolRequirement[];
-  inputSchema?: unknown;
-  outputSchema?: unknown;
+  inputSchema?: ToolJsonSchema;
+  outputSchema?: ToolJsonSchema;
 };
 
 export type ToolCaller = {

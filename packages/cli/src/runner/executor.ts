@@ -169,6 +169,64 @@ import { readLatestStoryReviewScore, REVIEW_SCORE_LOW_THRESHOLD, type ReviewScor
 
 const execFileAsync = promisify(execFile);
 
+export async function rescueLeakedMain(
+  repoCwd: string,
+  refName: string,
+): Promise<{ code: number; rescuedSha: string }> {
+  // FIX-903: capture the current main HEAD SHA, then create a rescue branch
+  // and reset main to origin/main so the leaked commits are reachable via
+  // the rescue ref but main is clean again.
+  let rescuedSha = "";
+  try {
+    const headR = await execFileAsync("git", ["rev-parse", "HEAD"], {
+      cwd: repoCwd,
+      encoding: "utf8",
+    });
+    rescuedSha = (headR.stdout ?? "").trim();
+  } catch {
+    return { code: 1, rescuedSha: "" };
+  }
+  let code = 0;
+  try {
+    await execFileAsync("git", ["branch", refName], {
+      cwd: repoCwd,
+      encoding: "utf8",
+    });
+  } catch {
+    code = 1;
+  }
+  let backlogWorktreeContent: string | undefined;
+  const backlogPath = join(repoCwd, ".roll", "backlog.md");
+  try {
+    const status = await execFileAsync("git", ["status", "--porcelain", "--", ".roll/backlog.md"], {
+      cwd: repoCwd,
+      encoding: "utf8",
+    });
+    if ((status.stdout ?? "").trim() !== "") {
+      backlogWorktreeContent = readFileSync(backlogPath, "utf8");
+    }
+  } catch {
+    backlogWorktreeContent = undefined;
+  }
+  try {
+    await execFileAsync("git", ["reset", "--hard", "origin/main"], {
+      cwd: repoCwd,
+      encoding: "utf8",
+    });
+  } catch {
+    code = 1;
+  }
+  if (backlogWorktreeContent !== undefined) {
+    try {
+      mkdirSync(dirname(backlogPath), { recursive: true });
+      writeFileSync(backlogPath, backlogWorktreeContent, "utf8");
+    } catch {
+      code = 1;
+    }
+  }
+  return { code, rescuedSha };
+}
+
 class ActivitySignalRecorder {
   private buffered = "";
   private readonly normalizer: AgentActivityNormalizer;
@@ -3807,39 +3865,7 @@ export function nodePorts(opts: {
         return Number.isFinite(n) ? n : 0;
       },
       async rescueLeaked(repoCwd, refName) {
-        // FIX-903: capture the current main HEAD SHA, then create a rescue branch
-        // and reset main to origin/main so the leaked commits are reachable via
-        // the rescue ref but main is clean again.
-        let rescuedSha = "";
-        try {
-          const headR = await execFileAsync("git", ["rev-parse", "HEAD"], {
-            cwd: repoCwd,
-            encoding: "utf8",
-          });
-          rescuedSha = (headR.stdout ?? "").trim();
-        } catch {
-          return { code: 1, rescuedSha: "" };
-        }
-        // Create the rescue branch at current main HEAD.
-        let code = 0;
-        try {
-          await execFileAsync("git", ["branch", refName], {
-            cwd: repoCwd,
-            encoding: "utf8",
-          });
-        } catch {
-          code = 1;
-        }
-        // Reset main to origin/main (clean up the leaked commits from main).
-        try {
-          await execFileAsync("git", ["reset", "--hard", "origin/main"], {
-            cwd: repoCwd,
-            encoding: "utf8",
-          });
-        } catch {
-          code = 1;
-        }
-        return { code, rescuedSha };
+        return rescueLeakedMain(repoCwd, refName);
       },
       async tcrCount(worktreeCwd) {
         // v2口径 (bin/roll:8724): git log --oneline origin/main..HEAD | grep -c ' tcr:'.

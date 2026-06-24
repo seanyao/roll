@@ -41,6 +41,7 @@ import {
   parseEstMin,
   reasonixEnv,
   realAgentSpawn,
+  rescueLeakedMain,
   resetDirective,
   startSpawnTimeoutWatchdog,
   readCycleTimeoutThresholds,
@@ -1701,6 +1702,42 @@ describe("executeCommand — command → executor mapping", () => {
     expect(calls["alert"]?.length).toBeGreaterThanOrEqual(1);
     // Verify cycle:rescue event was appended
     expect(calls["event"]?.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("FIX-402: rescue_leaked preserves uncommitted tracked backlog Done while resetting leaked main commits", async () => {
+    const remote = realpathSync(mkdtempSync(join(tmpdir(), "roll-fix402-remote-")));
+    execDirs.push(remote);
+    execFileSync("git", ["init", "-q", "--bare", "-b", "main"], { cwd: remote });
+
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-fix402-repo-")));
+    execDirs.push(repo);
+    execFileSync("git", ["clone", "-q", remote, "."], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "t@t"], { cwd: repo });
+    execFileSync("git", ["config", "user.name", "t"], { cwd: repo });
+
+    mkdirSync(join(repo, ".roll"), { recursive: true });
+    writeFileSync(join(repo, ".roll", "backlog.md"), "| ID | Status |\n| US-COLL-001 | 📋 Todo |\n", "utf8");
+    writeFileSync(join(repo, "product.txt"), "base\n", "utf8");
+    execFileSync("git", ["add", "-A"], { cwd: repo });
+    execFileSync("git", ["commit", "-q", "-m", "seed todo backlog"], { cwd: repo });
+    execFileSync("git", ["push", "-q", "-u", "origin", "main"], { cwd: repo });
+    const originHead = execFileSync("git", ["rev-parse", "origin/main"], { cwd: repo, encoding: "utf8" }).trim();
+
+    writeFileSync(join(repo, "product.txt"), "leaked main commit\n", "utf8");
+    execFileSync("git", ["add", "product.txt"], { cwd: repo });
+    execFileSync("git", ["commit", "-q", "-m", "leaked product commit"], { cwd: repo });
+    const leakedHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim();
+
+    writeFileSync(join(repo, ".roll", "backlog.md"), "| ID | Status |\n| US-COLL-001 | ✅ Done |\n", "utf8");
+
+    const res = await rescueLeakedMain(repo, "rescue/leaked-FIX-402");
+
+    expect(res.code).toBe(0);
+    expect(res.rescuedSha).toBe(leakedHead);
+    expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim()).toBe(originHead);
+    expect(execFileSync("git", ["rev-parse", "rescue/leaked-FIX-402"], { cwd: repo, encoding: "utf8" }).trim()).toBe(leakedHead);
+    expect(readFileSync(join(repo, ".roll", "backlog.md"), "utf8")).toContain("✅ Done");
+    expect(execFileSync("git", ["status", "--porcelain", "--", ".roll/backlog.md"], { cwd: repo, encoding: "utf8" })).toContain("M .roll/backlog.md");
   });
 
   it("FIX-208: capture_facts returns real tcr count via git port → ctxPatch.tcrCount", async () => {

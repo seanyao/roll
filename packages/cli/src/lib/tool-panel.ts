@@ -58,6 +58,10 @@ export interface ToolPanelRow {
   available: boolean;
   /** Human reason for unavailable — may be '' when available. */
   unavailableReason: string;
+  /** US-TOOL-022 — input parameter contract (JSON Schema). agent-introspectable. */
+  inputSchema: unknown;
+  /** US-TOOL-022 — output/result shape contract (JSON Schema). */
+  outputSchema: unknown;
 }
 
 /**
@@ -92,6 +96,8 @@ function toRow(declaration: ToolDeclaration): ToolPanelRow {
     readiness: readiness.status,
     available: readiness.status !== "unavailable",
     unavailableReason: readiness.status === "available" ? "" : (readiness.detail ?? ""),
+    inputSchema: declaration.inputSchema,
+    outputSchema: declaration.outputSchema,
   };
 }
 

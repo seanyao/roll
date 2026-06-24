@@ -138,6 +138,41 @@ function requirementChain(row: ToolPanelRow): string {
     .join("");
 }
 
+/** US-TOOL-022 — render input/output parameter contracts as a compact summary.
+ *  Each parameter shows: name, type badge, required/optional marker. */
+function schemaSummary(row: ToolPanelRow): string {
+  const input = row.inputSchema as Record<string, unknown> | undefined;
+  const properties = (input?.["properties"] as Record<string, Record<string, unknown>> | undefined) ?? {};
+  const required = (input?.["required"] as string[] | undefined) ?? [];
+  if (Object.keys(properties).length === 0) return "";
+
+  const chip = (label: string, color: string): string =>
+    `<span style="${MONO}font-size:10px;background:${color};color:#fff;border-radius:3px;padding:1px 5px;white-space:nowrap;">${esc(label)}</span>`;
+  const optionalChip = chip(bi("optional", "可选"), C.sub);
+  const requiredChip = chip(bi("required", "必需"), C.ink);
+
+  const params = Object.entries(properties).map(([name, prop]) => {
+    const isRequired = required.includes(name);
+    const type = String(prop["type"] ?? "any");
+    const desc = typeof prop["description"] === "string" ? prop["description"] : "";
+    return (
+      `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0;">` +
+      `<code style="${MONO}font-size:11.5px;color:${C.ink};font-weight:600;white-space:nowrap;">${esc(name)}</code>` +
+      `<span style="${MONO}font-size:10px;color:${C.faint};">${esc(type)}</span>` +
+      (isRequired ? requiredChip : optionalChip) +
+      (desc !== "" ? `<span style="font-size:11px;color:${C.dim};min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(desc)}</span>` : "") +
+      `</div>`
+    );
+  }).join("");
+
+  return (
+    `<div style="margin-top:13px;">` +
+    `<div style="${MONO}font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:${C.faint};margin-bottom:6px;">${bi("parameters", "参数")}</div>` +
+    `<div style="display:flex;flex-direction:column;gap:4px;">${params}</div>` +
+    `</div>`
+  );
+}
+
 /** One tool row: a collapsed grid summary (caret · id · kind · title · events)
  *  + an expanded body with the full description, the exact default policy, and
  *  the external requirements. Same `<details class="ag-row">` accordion idiom as
@@ -169,6 +204,7 @@ function toolRow(row: ToolPanelRow): string {
     `<div style="min-width:0;"><div style="${MONO}font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:${C.faint};">${bi("default policy", "默认策略")}</div>` +
     `<div style="${MONO}font-size:12px;color:${C.body};margin-top:3px;">${guardrailLine(row)}</div></div>` +
     `</div>` +
+    schemaSummary(row) +
     `<div style="margin-top:13px;">` +
     `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px;">` +
     `<div style="${MONO}font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:${C.faint};">${bi("requirement chain", "依赖链")}</div>` +

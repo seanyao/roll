@@ -49,6 +49,7 @@ import {
   classifyComplexity,
   decideClaimReconcile,
   hasMergedDelivery,
+  buildHasOpenPr,
   ensureDeliveriesFresh,
   queryStoryDelivery,
   nodeExecPort,
@@ -117,6 +118,7 @@ import {
   type Clock,
   acquireLock,
   ghRepoSlug,
+  prListOpenTitles,
   prNumberFromUrl,
   prViewMergeInfo,
   prViewState,
@@ -357,6 +359,8 @@ export interface GithubPort {
   prState(repoCwd: string, branch: string): Promise<string>;
   /** Poll a PR's full merge info (state, mergedAt, mergeCommit). Returns undefined on gh failure. */
   prMergeInfo(repoCwd: string, branch: string): Promise<{ state: string; mergedAt?: string; mergeCommit?: string } | undefined>;
+  /** Fetch open PR titles (US-LOOP-079c). Returns [] on gh failure / no open PRs. */
+  openPrTitles(repoCwd: string): Promise<string[]>;
 }
 
 /** Process facet — lock + heartbeat (infra/process.ts). */
@@ -1034,7 +1038,12 @@ export async function executeCommand(
       // delivering the rest. Runtime overlay (.roll/loop/skip-cards.json); backlog
       // truth is untouched.
       const skipCards = readSkipCards(dirname(ports.paths.eventsPath));
+      // US-LOOP-079c: wire the real hasOpenPr predicate — same data source as
+      // delivery/pr.ts (open PR titles from gh, no second truth source).
+      const openPrTitles = await ports.github.openPrTitles(ports.repoCwd);
+      const hasOpenPr = buildHasOpenPr(openPrTitles);
       const story = pickStory(items as never, {
+        hasOpenPr,
         hasMergedDelivery: (id) =>
           (ports.mergedDelivery?.(id) ?? false) || hasMergedDelivery(pickRunRows, id),
         shouldSkip: (id) => skipCards.has(id),
@@ -3980,6 +3989,11 @@ export function nodePorts(opts: {
         const slug = ghRepoSlug(await remoteUrl(repoCwd));
         if (slug === undefined) return undefined;
         return prViewMergeInfo(slug, branch);
+      },
+      async openPrTitles(repoCwd) {
+        const slug = ghRepoSlug(await remoteUrl(repoCwd));
+        if (slug === undefined) return [];
+        return prListOpenTitles(slug);
       },
     },
     process: {

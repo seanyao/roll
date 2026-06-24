@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { AWAITING_REVIEW_STATUS_MARKER } from "@roll/spec";
-import { type BacklogItem, parseDependsOn, pickStory } from "../src/index.js";
+import { assessBacklog, buildHasOpenPr, parseDependsOn, pickStory, prTitleReferences, type BacklogItem } from "../src/index.js";
 
 /** Terse fixture row builder. */
 function item(id: string, status: string, desc = ""): BacklogItem {
@@ -187,5 +187,93 @@ describe("pickStory — annotated Todo gate is tolerant (FIX-301)", () => {
       item("US-X", "📋 Todo (blocked earlier)", "x `depends-on:US-A`"),
     ];
     expect(pickStory(items)?.id).toBe("US-X");
+  });
+});
+
+// ── prTitleReferences (US-LOOP-079c) ────────────────────────────────────────
+
+describe("prTitleReferences — token-bounded id matching", () => {
+  it("matches an exact id in the title", () => {
+    expect(prTitleReferences("US-1", "US-1: wire hasOpenPr")).toBe(true);
+  });
+
+  it("matches at the end of the title", () => {
+    expect(prTitleReferences("FIX-42", "fix: parse FIX-42")).toBe(true);
+  });
+
+  it("does not match a substring (FIX-1 in FIX-10)", () => {
+    expect(prTitleReferences("FIX-1", "FIX-10: big fix")).toBe(false);
+  });
+
+  it("does not match an id followed by a letter", () => {
+    expect(prTitleReferences("US-A", "US-AB: adjacent")).toBe(false);
+  });
+
+  it("does not match when id is absent", () => {
+    expect(prTitleReferences("US-1", "some other title")).toBe(false);
+  });
+
+  it("matches hyphen-separated ids", () => {
+    expect(prTitleReferences("US-LOOP-079c", "cycle US-LOOP-079c published")).toBe(true);
+  });
+
+  it("is case-sensitive", () => {
+    expect(prTitleReferences("us-1", "US-1: lower vs upper")).toBe(false);
+  });
+
+  it("matches across multi-word titles", () => {
+    expect(prTitleReferences("FIX-300", "[FIX-300] classifyStatus tolerance for legacy markers")).toBe(true);
+  });
+});
+
+// ── buildHasOpenPr (US-LOOP-079c) ───────────────────────────────────────────
+
+describe("buildHasOpenPr — predicate from open PR titles", () => {
+  it("returns true when id matches a PR title", () => {
+    const hasOpenPr = buildHasOpenPr(["US-1: wire hasOpenPr", "FIX-42: cleanup"]);
+    expect(hasOpenPr("US-1")).toBe(true);
+  });
+
+  it("returns false when id matches no PR title", () => {
+    const hasOpenPr = buildHasOpenPr(["US-1: wire hasOpenPr"]);
+    expect(hasOpenPr("US-2")).toBe(false);
+  });
+
+  it("returns false for empty title list", () => {
+    const hasOpenPr = buildHasOpenPr([]);
+    expect(hasOpenPr("US-1")).toBe(false);
+  });
+
+  it("returns false when id is a substring of another id in the title", () => {
+    // FIX-1 should NOT match a PR titled "FIX-10: ..."
+    const hasOpenPr = buildHasOpenPr(["FIX-10: big fix"]);
+    expect(hasOpenPr("FIX-1")).toBe(false);
+  });
+
+  it("matching is token-bounded — id followed by non-alphanumeric", () => {
+    const hasOpenPr = buildHasOpenPr(["[US-1] some work"]);
+    expect(hasOpenPr("US-1")).toBe(true);
+  });
+
+  // AC3 fixture: all todos have open PRs → assessBacklog reason=all_awaiting_merge
+  it("AC3: all todos blocked by open PR → all_awaiting_merge in assessBacklog", () => {
+    const items = [
+      item("US-1", "📋 Todo"),
+      item("US-2", "📋 Todo"),
+    ];
+    const hasOpenPr = buildHasOpenPr([
+      "US-1: fix parser",
+      "US-2: add feature",
+    ]);
+    const result = assessBacklog(items, { hasOpenPr });
+    expect(result).toEqual({ hasWork: false, reason: "all_awaiting_merge" });
+  });
+
+  // AC4: cards without open PR → pickStory unchanged
+  it("AC4: no open PR titles → pickStory unchanged (regression)", () => {
+    const items = [item("US-1", "📋 Todo"), item("FIX-42", "📋 Todo")];
+    const hasOpenPr = buildHasOpenPr([]);
+    // No open PRs → FIX has priority, FIX-42 picked
+    expect(pickStory(items, { hasOpenPr })?.id).toBe("FIX-42");
   });
 });

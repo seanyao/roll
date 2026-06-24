@@ -701,6 +701,7 @@ function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<str
       runPublishPlan: vi.fn(async () => ({ status: 0 as const, prUrl: "u", ok: true })),
       prState: vi.fn(async () => "MERGED"),
       prMergeInfo: vi.fn(async () => ({ state: "MERGED", mergedAt: "2026-06-21T00:00:00Z", mergeCommit: "abc123def456" })),
+      openPrTitles: vi.fn(async () => []),
     },
     process: {
       acquireLock: vi.fn(() => ({ acquired: true, heldByPid: undefined })),

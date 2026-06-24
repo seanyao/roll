@@ -66,11 +66,21 @@ export interface PickOptions {
 const DEPENDS_ON_RE = /depends-on:([A-Za-z][A-Za-z0-9,-]+)/;
 
 /** Token-bounded id reference, mirroring bash gate 2 `${id}([^0-9A-Za-z]|$)`. */
-function prTitleReferences(id: string, title: string): boolean {
+export function prTitleReferences(id: string, title: string): boolean {
   const idx = title.indexOf(id);
   if (idx < 0) return false;
   const after = title.charAt(idx + id.length);
   return after === "" || !/[0-9A-Za-z]/.test(after);
+}
+
+/**
+ * Build a `hasOpenPr` predicate from the list of open PR titles (the SAME data
+ * source as {@link prListOpenTitles} in delivery/pr.ts — no second truth source,
+ * US-LOOP-079c AC1). The returned predicate is true for a story id iff any open
+ * PR title contains a token-bounded reference to that id.
+ */
+export function buildHasOpenPr(openPrTitles: readonly string[]): (id: string) => boolean {
+  return (id: string): boolean => openPrTitles.some((title) => prTitleReferences(id, title));
 }
 
 /** Parse a row's depends-on ids (first tag only); empty when none. */

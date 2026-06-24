@@ -474,6 +474,63 @@ function pauseMarkerPath(projectPath: string, slug: string): string {
   return join(projectPath, ".roll", "loop", `PAUSE-${slug}`);
 }
 
+// ─── US-LOOP-079g: DORMANT marker + loop run state resolver ───────────────
+
+export interface DormantMarkerBody {
+  /** ISO 8601 timestamp when the loop entered dormant state. */
+  since: string;
+  /** Human-readable reason (e.g. "idle for 6h with no Todo items"). */
+  reason: string;
+}
+
+/** The loop's run state resolved from on-disk marker files. */
+export type LoopRunState = "PAUSED" | "DORMANT" | "ACTIVE";
+
+/**
+ * US-LOOP-079g AC1: the DORMANT marker path mirrors {@link pauseMarkerPath}.
+ * `<rt>/.roll/loop/DORMANT-<slug>` (ROLL_PROJECT_RUNTIME_DIR-aware).
+ */
+export function dormantMarkerPath(projectPath: string, slug: string): string {
+  return join(projectPath, ".roll", "loop", `DORMANT-${slug}`);
+}
+
+/**
+ * Read and validate a DORMANT marker body. Returns null when missing,
+ * malformed, or missing required fields.
+ */
+export function readDormantMarker(markerPath: string): DormantMarkerBody | null {
+  try {
+    const raw = readFileSync(markerPath, "utf8").trim();
+    const body = JSON.parse(raw);
+    if (typeof body?.since === "string" && typeof body?.reason === "string") {
+      return { since: body.since, reason: body.reason };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Write a structured DORMANT marker to the given path (AC2: round-trip stable).
+ */
+export function writeDormantMarker(markerPath: string, body: DormantMarkerBody): void {
+  mkdirSync(dirname(markerPath), { recursive: true });
+  writeFileSync(markerPath, JSON.stringify(body) + "\n", "utf8");
+}
+
+/**
+ * US-LOOP-079g AC3/AC4: resolve the loop's run state from on-disk markers only.
+ * Priority: PAUSE marker → PAUSED (even if DORMANT also exists);
+ * only DORMANT marker → DORMANT; neither → ACTIVE.
+ * Does NOT read lane-armed state or state.yaml files.
+ */
+export function resolveLoopRunState(projectPath: string, slug: string): LoopRunState {
+  if (existsSync(pauseMarkerPath(projectPath, slug))) return "PAUSED";
+  if (existsSync(dormantMarkerPath(projectPath, slug))) return "DORMANT";
+  return "ACTIVE";
+}
+
 function syncGoalPaused(projectPath: string, reason: string): void {
   const rt = join(projectPath, ".roll", "loop");
   const path = join(rt, "goal.yaml");

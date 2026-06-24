@@ -32,7 +32,13 @@ import {
   loopOffCommand,
   loopPauseCommand,
   loopResumeCommand,
+  dormantMarkerPath,
+  writeDormantMarker,
+  readDormantMarker,
+  resolveLoopRunState,
   type LoopSchedDeps,
+  type LoopRunState,
+  type DormantMarkerBody,
 } from "../src/commands/loop-sched.js";
 import type { LaunchctlResult } from "@roll/infra";
 import { parseGoalYaml } from "@roll/spec";
@@ -949,5 +955,91 @@ describe("FIX-204E — loop now UX branches (injected deps)", () => {
     expect(code).toBe(0);
     expect(out).toContain("no tmux");
     expect(spy.called).toBe(0);
+  });
+});
+
+// ── US-LOOP-079g: DORMANT marker + resolver ──────────────────────────────
+describe("dormantMarkerPath", () => {
+  it("mirrors pauseMarkerPath structure under .roll/loop/", () => {
+    const p = dormantMarkerPath("/proj", "abc");
+    expect(p).toBe("/proj/.roll/loop/DORMANT-abc");
+  });
+});
+
+describe("writeDormantMarker + readDormantMarker", () => {
+  it("round-trip is stable", () => {
+    const dir = tmp("dorm-rw");
+    const body: DormantMarkerBody = { since: "2026-06-24T10:00:00Z", reason: "idle for 6h" };
+    writeDormantMarker(join(dir, "DORMANT-test"), body);
+    const read = readDormantMarker(join(dir, "DORMANT-test"));
+    expect(read).not.toBeNull();
+    expect(read!.since).toBe("2026-06-24T10:00:00Z");
+    expect(read!.reason).toBe("idle for 6h");
+  });
+
+  it("returns null for missing marker", () => {
+    expect(readDormantMarker("/nonexistent/DORMANT-x")).toBeNull();
+  });
+
+  it("returns null for malformed JSON", () => {
+    const dir = tmp("dorm-bad");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "DORMANT-test"), "not json", "utf8");
+    expect(readDormantMarker(join(dir, "DORMANT-test"))).toBeNull();
+  });
+
+  it("returns null when body misses required fields", () => {
+    const dir = tmp("dorm-miss");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "DORMANT-test"), JSON.stringify({ since: "ts" }), "utf8");
+    expect(readDormantMarker(join(dir, "DORMANT-test"))).toBeNull();
+  });
+
+  it("writes marker file as parseable JSON", () => {
+    const dir = tmp("dorm-parse");
+    const body: DormantMarkerBody = { since: "2026-06-24T10:00:00Z", reason: "test reason" };
+    writeDormantMarker(join(dir, "DORMANT-test"), body);
+    const raw = readFileSync(join(dir, "DORMANT-test"), "utf8");
+    const parsed = JSON.parse(raw.trim());
+    expect(parsed.since).toBe("2026-06-24T10:00:00Z");
+    expect(parsed.reason).toBe("test reason");
+  });
+});
+
+describe("resolveLoopRunState", () => {
+  it("no markers → ACTIVE", () => {
+    const dir = tmp("rslv-none");
+    expect(resolveLoopRunState(dir, "test")).toBe("ACTIVE");
+  });
+
+  it("only PAUSE marker → PAUSED", () => {
+    const dir = tmp("rslv-pause");
+    mkdirSync(join(dir, ".roll", "loop"), { recursive: true });
+    writeFileSync(join(dir, ".roll", "loop", "PAUSE-test"), "2026-06-24\n");
+    expect(resolveLoopRunState(dir, "test")).toBe("PAUSED");
+  });
+
+  it("only DORMANT marker → DORMANT", () => {
+    const dir = tmp("rslv-dorm");
+    const body: DormantMarkerBody = { since: "2026-06-24T10:00:00Z", reason: "idle 6h" };
+    writeDormantMarker(join(dir, ".roll", "loop", "DORMANT-test"), body);
+    expect(resolveLoopRunState(dir, "test")).toBe("DORMANT");
+  });
+
+  it("both PAUSE + DORMANT → PAUSED (PAUSED trumps DORMANT)", () => {
+    const dir = tmp("rslv-both");
+    mkdirSync(join(dir, ".roll", "loop"), { recursive: true });
+    writeFileSync(join(dir, ".roll", "loop", "PAUSE-test"), "paused\n");
+    const body: DormantMarkerBody = { since: "2026-06-24T10:00:00Z", reason: "dormant" };
+    writeDormantMarker(join(dir, ".roll", "loop", "DORMANT-test"), body);
+    expect(resolveLoopRunState(dir, "test")).toBe("PAUSED");
+  });
+
+  it("does NOT read lane-armed or state files (markers only)", () => {
+    const dir = tmp("rslv-pure");
+    const loopDir = join(dir, ".roll", "loop");
+    mkdirSync(loopDir, { recursive: true });
+    writeFileSync(join(loopDir, "state.yaml"), "status: paused\n");
+    expect(resolveLoopRunState(dir, "test")).toBe("ACTIVE");
   });
 });

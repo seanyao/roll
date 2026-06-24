@@ -51,19 +51,23 @@ export interface ReachResult {
 // Auth-block signatures: the agent ran but is not authenticated.
 const AUTH_SIGNATURES: RegExp[] = [
   /\/login\b/i,
-  /\bplease run\b/i,
+  /\bplease\s+run\s+\/?login\b/i,
+  /\blog ?in\s+(required|needed)\b/i,
+  /\b(required|need|needs|must|please)\b.{0,40}\blog ?in\b/i,
+  /\bsign ?in\s+(required|needed)\b/i,
+  /\b(required|need|needs|must|please)\b.{0,40}\bsign ?in\b/i,
   /\b401\b/,
   /\b403\b/,
   /unauthor/i,
   /not authenticated/i,
   /authentication (failed|required|error)/i,
-  /\bapi[_ -]?key\b/i,
+  /\b(invalid|missing|expired|required)\b.{0,30}\bapi[_ -]?key\b/i,
+  /\bapi[_ -]?key\b.{0,30}\b(invalid|missing|expired|required)\b/i,
   /request not allowed/i,
-  /\bsign ?in\b/i,
-  /\bcredential/i,
-  /\blog ?in\b/i,
-  /登录/,
-  /鉴权|认证失败|未授权/,
+  /\bcredential(s)?\b.{0,30}\b(missing|required|invalid|expired|error|failed)\b/i,
+  /\b(missing|required|invalid|expired|error|failed)\b.{0,30}\bcredential(s)?\b/i,
+  /请.*登录|登录.*(失败|过期|后重试|必需|需要)/,
+  /鉴权(失败|错误|过期)|认证失败|未授权/,
 ];
 
 // Network-block signatures: cannot reach the API (VPN/proxy down, DNS, TLS).

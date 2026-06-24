@@ -1196,9 +1196,13 @@ export async function executeCommand(
       // loop (re-login then `roll loop resume`), network breathes (self-heals on
       // reconnect). One block taxonomy for builder/reviewer/scorer; a healthy
       // logged-in builder never matches, so the normal cycle is unchanged.
-      // Heuristic by design (it only nudges a counter + raises an alert, never
-      // drops a real delivery) so a false positive is at worst a slightly-wrong hint.
-      const builderBlock = classifyBlockSignature(`${res.stdout}\n${res.stderr}`);
+      //
+      // FIX-401: only classify a builder block after a real failure signal.
+      // Successful long-session summaries can legitimately mention login,
+      // credentials, or auth features; scanning exit-0 output caused false
+      // auth blocks and global PAUSEs after real deliveries.
+      const builderBlock =
+        res.exitCode !== 0 || res.timedOut ? classifyBlockSignature(`${res.stdout}\n${res.stderr}`) : null;
       if (builderBlock === "auth" || builderBlock === "network") {
         ports.events.appendEvent(ports.paths.eventsPath, {
           type: "agent:blocked",

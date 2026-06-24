@@ -36,6 +36,15 @@ describe("classifyBlockSignature — FIX-363 cause heuristics", () => {
     expect(classifyBlockSignature("")).toBeNull();
     expect(classifyBlockSignature("VERDICT: agree")).toBeNull();
     expect(classifyBlockSignature("SCORE: 8\nVERDICT: good\nRATIONALE: solid")).toBeNull();
+    expect(classifyBlockSignature("login flow delivered; credential handling verified")).toBeNull();
+    expect(classifyBlockSignature("鉴权全程正常")).toBeNull();
+  });
+
+  it("auth failure wording still matches after false-positive tightening", () => {
+    expect(classifyBlockSignature("login required")).toBe("auth");
+    expect(classifyBlockSignature("credential missing")).toBe("auth");
+    expect(classifyBlockSignature("鉴权失败")).toBe("auth");
+    expect(classifyBlockSignature("认证失败")).toBe("auth");
   });
 });
 

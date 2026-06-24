@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { existsSync, mkdirSync, writeFileSync, rmSync, utimesSync, watch } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { FileFollower } from "../src/file-follower.js";
 import type { DossierFrame, DossierSnapshotFrame, DossierHeartbeatFrame } from "@roll/spec";
-import { hashSnapshot } from "@roll/spec";
+import { hashSnapshot, projectSlug } from "@roll/spec";
 
 /** Collect frames emitted by a FileFollower. */
 function collectFrames(follower: FileFollower, ms: number): Promise<DossierFrame[]> {
@@ -76,6 +77,27 @@ describe("FileFollower", () => {
     expect(snap.snapshot.story).toBeDefined();
     expect(typeof snap.etag).toBe("string");
     expect(snap.etag.length).toBe(8);
+  });
+
+  it("US-OBS-023: snapshot project slug matches the registry slug contract", async () => {
+    execFileSync("git", ["init"], { cwd: tmpDir, stdio: "ignore" });
+    execFileSync("git", ["remote", "add", "origin", "git@github.com:seanyao/roll.git"], { cwd: tmpDir, stdio: "ignore" });
+    const frames: DossierFrame[] = [];
+    const follower = new FileFollower({
+      cwd: tmpDir,
+      heartbeatMs: 5000,
+      snapshotTtlMs: 5000,
+      onFrame: (f) => frames.push(f),
+    });
+
+    follower.start();
+    await new Promise((r) => setTimeout(r, 100));
+    follower.stop();
+
+    const snap = frames.find((f): f is DossierSnapshotFrame => f.kind === "snapshot");
+    expect(snap?.project.slug).toBe(
+      projectSlug({ path: tmpDir, remoteUrl: "git@github.com:seanyao/roll.git" }),
+    );
   });
 
   it("AC2: etag unchanged → no duplicate snapshot push", async () => {

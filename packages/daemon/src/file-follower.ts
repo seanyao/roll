@@ -7,7 +7,8 @@
  * (parseEventLine returns null → skipped) and collector throws
  * (surface marked degraded, frame still pushed).
  */
-import { watch, statSync, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { watch, statSync, existsSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import type { FSWatcher } from "node:fs";
 import type {
@@ -18,7 +19,7 @@ import type {
   ProjectIdentity,
   TruthSnapshot,
 } from "@roll/spec";
-import { hashSnapshot } from "@roll/spec";
+import { hashSnapshot, projectSlug } from "@roll/spec";
 import { collectDossierState } from "@roll/core";
 
 export interface FileFollowerOptions {
@@ -129,8 +130,29 @@ export class FileFollower {
   // ── private ────────────────────────────────────────────────────────────
 
   private computeSlug(): string {
-    const parts = this.cwd.split("/");
-    return parts[parts.length - 1] ?? "unknown";
+    let path = this.cwd;
+    try {
+      path = realpathSync(this.cwd);
+    } catch {
+      /* use cwd as supplied */
+    }
+    let remoteUrl: string | undefined;
+    try {
+      const out = execFileSync("git", ["remote", "get-url", "origin"], {
+        cwd: this.cwd,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 5_000,
+      }).trim();
+      if (out !== "") remoteUrl = out;
+    } catch {
+      /* path-based fallback */
+    }
+    return projectSlug({
+      path,
+      ...(remoteUrl !== undefined ? { remoteUrl } : {}),
+      ...(process.env["ROLL_MAIN_SLUG"] !== undefined ? { mainSlugOverride: process.env["ROLL_MAIN_SLUG"] } : {}),
+    });
   }
 
   private onFileChange(): void {

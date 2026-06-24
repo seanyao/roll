@@ -9,10 +9,10 @@
  * Atomic claim via rename(DORMANT → .waking) + .waking orphan recovery
  * so concurrent triggers (roll-cmd + dream) yield at most one wake.
  */
-import { existsSync, renameSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { BacklogStore, EventBus, assessBacklog } from "@roll/core";
+import { BacklogStore, EventBus, assessBacklog, buildDoneIndex, isEligible } from "@roll/core";
 import { type Scheduler, launchdLabel } from "@roll/infra";
 import { dormantMarkerPath } from "../commands/loop-sched.js";
 
@@ -64,11 +64,13 @@ function wakingPath(projectPath: string, slug: string): string {
  * loop:woke (unless the lane is already armed).
  *
  * @param trigger — the trigger label for the loop:woke event.
+ * @param picked — optional refactor ID that triggered this wake (dream re-arm).
  * @returns the wake epoch (s) on success, `-1` on no-op.
  */
 export async function rearmLoop(
   trigger: "roll-cmd" | "dream",
   deps: WakeDeps,
+  picked?: string,
 ): Promise<number> {
   const dormant = dormantMarkerPath(deps.projectPath, deps.slug);
   const waking = wakingPath(deps.projectPath, deps.slug);
@@ -90,13 +92,15 @@ export async function rearmLoop(
       await deps.scheduler.wake(label, deps.loopPlistPath);
       deps.unlink(waking);
       const ts = deps.nowSec();
-      deps.eventBus.appendEvent(deps.eventsPath, {
-        type: "loop:woke",
-        loop: "ci",
+      const evt = {
+        type: "loop:woke" as const,
+        loop: "ci" as const,
         ts,
         trigger,
         wakeEpoch: ts,
-      });
+        ...(picked ? { picked } : {}),
+      };
+      deps.eventBus.appendEvent(deps.eventsPath, evt);
       return ts;
     }
     // Lane already armed — just clean the orphan marker
@@ -119,13 +123,15 @@ export async function rearmLoop(
   deps.unlink(waking);
 
   const ts = deps.nowSec();
-  deps.eventBus.appendEvent(deps.eventsPath, {
-    type: "loop:woke",
-    loop: "ci",
+  const evt = {
+    type: "loop:woke" as const,
+    loop: "ci" as const,
     ts,
     trigger,
     wakeEpoch: ts,
-  });
+    ...(picked ? { picked } : {}),
+  };
+  deps.eventBus.appendEvent(deps.eventsPath, evt);
 
   return ts;
 }
@@ -272,4 +278,58 @@ export async function createProductionWakeDeps(): Promise<WakeDeps | undefined> 
   } catch {
     return undefined;
   }
+}
+
+// ─── dream re-arm ───────────────────────────────────────────────────────────
+
+/**
+ * US-LOOP-079j: after a dream scan produces eligible REFACTOR-DREAM backlog
+ * rows, re-arm a dormant loop so those refactors get picked up.
+ *
+ * AC1: reads `.roll/dream/structure-scan.json` deterministically (never agent
+ * stdout). Checks the backlog for eligible REFACTOR-DREAM items using the
+ * shared {@link isEligible} predicate from US-LOOP-079b. When ≥1 eligible
+ * REFACTOR-DREAM is found AND the DORMANT marker exists → calls
+ * {@link rearmLoop}({trigger:'dream'}).
+ *
+ * AC3: DORMANT absent or zero eligible → no rearm (no false wake).
+ *
+ * AC4: reuses 079i's idempotent {@link rearmLoop} — no second wake implementation.
+ */
+export async function tryDreamReArm(deps: WakeDeps): Promise<{ rearmed: boolean; picked?: string }> {
+  // AC3: DORMANT marker must be present (fast path probe)
+  const dormant = dormantMarkerPath(deps.projectPath, deps.slug);
+  if (!deps.probe(dormant)) return { rearmed: false };
+
+  // Read structure-scan.json (deterministic artifact, not agent stdout — AC4)
+  const scanPath = join(deps.projectPath, ".roll", "dream", "structure-scan.json");
+  if (!deps.probe(scanPath)) return { rearmed: false };
+
+  let scanFindings: Array<{ id: string; stableKey: string }> = [];
+  try {
+    const raw = readFileSync(scanPath, "utf8");
+    const parsed = JSON.parse(raw) as { findings?: Array<{ id: string; stableKey: string }> };
+    scanFindings = parsed.findings ?? [];
+  } catch {
+    return { rearmed: false };
+  }
+
+  // AC3: no findings → no rearm
+  if (scanFindings.length === 0) return { rearmed: false };
+
+  // Read backlog; check REFACTOR-DREAM items for eligibility (079b predicate)
+  const snap = deps.readBacklog(deps.backlogPath);
+  const isDone = buildDoneIndex(snap.items);
+
+  for (const item of snap.items) {
+    if (!item.id.startsWith("REFACTOR-DREAM-")) continue;
+    if (isEligible(item, isDone)) {
+      // AC1: rearm with the first eligible refactor ID as picked
+      await rearmLoop("dream", deps, item.id);
+      return { rearmed: true, picked: item.id };
+    }
+  }
+
+  // AC3: zero eligible REFACTOR-DREAM items → no rearm
+  return { rearmed: false };
 }

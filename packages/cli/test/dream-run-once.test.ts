@@ -56,6 +56,7 @@ function deps(proj: string, spawn: AgentSpawn, body: string | null): DreamRunOnc
     skillBody: () => body,
     spawn,
     now: () => new Date("2026-06-06T03:12:00Z"),
+    dreamReArm: () => Promise.resolve({ rearmed: false }),
     structureScan: () => Promise.resolve({
       json: {
         schema: "dream-structure.v1",
@@ -131,5 +132,57 @@ describe("roll dream run-once", () => {
 
     expect(code).toBe(1);
     expect(existsSync(join(proj, ".roll", "dream", "structure-scan.json"))).toBe(false);
+  });
+
+  it("US-LOOP-079j: calls dreamReArm after agent exits with rc=0", async () => {
+    const proj = tmp();
+    let rearmCalled = false;
+    let rearmPath = "";
+    const spy = spySpawn(0, "scanning...\n");
+    const testDeps = deps(proj, spy.spawn, "# Dream\n\nScan the code.");
+    testDeps.dreamReArm = async (path, slug) => {
+      rearmCalled = true;
+      rearmPath = path;
+      return { rearmed: true, picked: "REFACTOR-DREAM-20260625-001" };
+    };
+
+    const code = await dreamRunOnceCommand([], testDeps);
+
+    expect(code).toBe(0);
+    expect(rearmCalled).toBe(true);
+    expect(rearmPath).toBe(proj);
+    const log = readFileSync(join(proj, ".roll", "dream", "cron.log"), "utf8");
+    expect(log).toContain("dream re-arm: woke loop (picked=REFACTOR-DREAM-20260625-001)");
+  });
+
+  it("US-LOOP-079j: does NOT call dreamReArm when agent fails (rc != 0)", async () => {
+    const proj = tmp();
+    let rearmCalled = false;
+    const spy = spySpawn(2);
+    const testDeps = deps(proj, spy.spawn, "body");
+    testDeps.dreamReArm = async () => {
+      rearmCalled = true;
+      return { rearmed: false };
+    };
+
+    const code = await dreamRunOnceCommand([], testDeps);
+
+    expect(code).toBe(2);
+    expect(rearmCalled).toBe(false);
+  });
+
+  it("US-LOOP-079j: dreamReArm throwing does not block dream run-once completion", async () => {
+    const proj = tmp();
+    const spy = spySpawn(0, "ok");
+    const testDeps = deps(proj, spy.spawn, "body");
+    testDeps.dreamReArm = async () => {
+      throw new Error("scheduler unavailable");
+    };
+
+    const code = await dreamRunOnceCommand([], testDeps);
+
+    expect(code).toBe(0); // agent succeeded, rearm failure is non-blocking
+    const log = readFileSync(join(proj, ".roll", "dream", "cron.log"), "utf8");
+    expect(log).toContain("dream re-arm error:");
   });
 });

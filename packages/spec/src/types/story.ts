@@ -133,6 +133,21 @@ export function classifyStatus(cell: string): StoryStatus | null {
 
 export type StoryType = "US" | "FIX" | "REFACTOR" | "IDEA";
 
+/**
+ * The reason a backlog has (or lacks) pickable work — derived from a full
+ * status histogram, not just the eligibility gate (US-LOOP-079b).
+ * Priority order (first match wins) is the declaration order below.
+ */
+export type BacklogReason =
+  | "has_work" // ≥1 row passes all 5 eligibility gates
+  | "all_blocked_by_deps" // Todo rows exist, but all fail on depends-on
+  | "all_awaiting_merge" // Todo rows exist, but all have an open PR
+  | "all_merged_pending" // Todo rows exist, but all have a merged delivery
+  | "all_skip_listed" // Todo rows exist, but all are on the runtime skip-list
+  | "all_in_progress" // No Todo rows, but in_progress/hold rows exist
+  | "all_done" // No Todo/in_progress/hold rows; all remaining are Done
+  | "backlog_empty"; // No rows at all
+
 export interface Story {
   id: StoryId;
   description: string;

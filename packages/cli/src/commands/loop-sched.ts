@@ -792,11 +792,20 @@ export async function loopResumeCommand(_args: string[], deps: LoopSchedDeps = r
 
   // FIX-251: resume must clear the consecutive-failure counter so the first
   // post-resume cycle failure does not immediately re-trip the auto-pause.
+  // US-LOOP-079h1 AC4: also clear the consecutive-idle counter.
   const rt = join(id.path, ".roll", "loop");
   const counterFile = join(rt, "consecutive-fails");
   if (existsSync(counterFile)) {
     try {
       writeFileSync(counterFile, "0", "utf8");
+    } catch {
+      /* best-effort */
+    }
+  }
+  const idleCounterFile = join(rt, `consecutive-idle-${id.slug}`);
+  if (existsSync(idleCounterFile)) {
+    try {
+      writeFileSync(idleCounterFile, "0", "utf8");
     } catch {
       /* best-effort */
     }

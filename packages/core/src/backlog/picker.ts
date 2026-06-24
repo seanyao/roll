@@ -26,6 +26,7 @@
  * bash, which re-greps the same backlog file for each dep's status).
  */
 import { classifyStatus, STATUS_MARKER } from "@roll/spec";
+import type { BacklogReason } from "@roll/spec";
 import type { BacklogItem } from "./store.js";
 
 /** Substring the oracle greps for to decide a dependency is satisfied. */
@@ -158,4 +159,104 @@ export function pickStory(items: BacklogItem[], opts: PickOptions = {}): Backlog
     }
   }
   return undefined;
+}
+
+/**
+ * Assess the whole backlog by scanning EVERY row's classified status (a full
+ * histogram) — NOT just the eligibility gate. Without the histogram, a backlog
+ * where every visible row is 🔨 In Progress is mis-reported as
+ * "backlog_empty" (the pi-identified bug that drove this card).
+ *
+ * Priority (first match wins):
+ *   has_work > all_blocked_by_deps > all_awaiting_merge >
+ *   all_merged_pending > all_skip_listed > all_in_progress >
+ *   all_done > backlog_empty
+ *
+ * The `opts` are the same injected predicates {@link pickStory} uses so
+ * `assessBacklog(…).hasWork === (pickStory(…) !== undefined)` holds for all
+ * inputs (AC5).
+ */
+export function assessBacklog(
+  items: BacklogItem[],
+  opts: PickOptions = {},
+): { hasWork: boolean; reason: BacklogReason } {
+  const isDone = buildDoneIndex(items);
+
+  // --- histogram over ALL rows (AC2) ----------------------------------------
+  let todoCount = 0;
+  let inProgressCount = 0;
+  let holdCount = 0;
+  let doneCount = 0;
+  for (const it of items) {
+    const cls = classifyStatus(it.status);
+    switch (cls) {
+      case "todo":
+        todoCount++;
+        break;
+      case "in_progress":
+        inProgressCount++;
+        break;
+      case "hold":
+        holdCount++;
+        break;
+      case "done":
+        doneCount++;
+        break;
+      // cut rows are excluded — they are not actionable and don't affect the verdict
+    }
+  }
+
+  // --- highest priority: any item passes all 5 gates (AC3) ------------------
+  let hasBlockedByDeps = false;
+  let hasBlockedByPr = false;
+  let hasBlockedByMerged = false;
+  let hasBlockedBySkip = false;
+
+  if (todoCount > 0) {
+    const hasOpenPr = opts.hasOpenPr ?? (() => false);
+    const hasMergedDelivery = opts.hasMergedDelivery ?? (() => false);
+    const shouldSkip = opts.shouldSkip ?? (() => false);
+
+    for (const it of items) {
+      if (classifyStatus(it.status) !== "todo") continue;
+      if (isEligible(it, isDone, opts)) {
+        return { hasWork: true, reason: "has_work" };
+      }
+      // Track which gate(s) blocked this todo item.
+      let blockedByDeps = false;
+      let blockedByPr = false;
+      let blockedByMerged = false;
+      let blockedBySkip = false;
+
+      for (const dep of parseDependsOn(it.desc)) {
+        if (!isDone(dep)) {
+          blockedByDeps = true;
+          break;
+        }
+      }
+      if (!blockedByDeps && hasOpenPr(it.id)) blockedByPr = true;
+      if (!blockedByDeps && !blockedByPr && hasMergedDelivery(it.id)) blockedByMerged = true;
+      if (!blockedByDeps && !blockedByPr && !blockedByMerged && shouldSkip(it.id)) blockedBySkip = true;
+
+      if (blockedByDeps) hasBlockedByDeps = true;
+      if (blockedByPr) hasBlockedByPr = true;
+      if (blockedByMerged) hasBlockedByMerged = true;
+      if (blockedBySkip) hasBlockedBySkip = true;
+    }
+  }
+
+  // --- priority chain: first match wins (AC3) -------------------------------
+  if (hasBlockedByDeps) return { hasWork: false, reason: "all_blocked_by_deps" };
+  if (hasBlockedByPr) return { hasWork: false, reason: "all_awaiting_merge" };
+  if (hasBlockedByMerged) return { hasWork: false, reason: "all_merged_pending" };
+  if (hasBlockedBySkip) return { hasWork: false, reason: "all_skip_listed" };
+
+  if (inProgressCount > 0 || holdCount > 0) {
+    return { hasWork: false, reason: "all_in_progress" };
+  }
+
+  if (items.length === 0) return { hasWork: false, reason: "backlog_empty" };
+
+  // No todo, no in_progress/hold → everything visible is Done (or cut).
+  return { hasWork: false, reason: "all_done" };
 }

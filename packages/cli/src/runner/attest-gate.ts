@@ -895,6 +895,21 @@ function hasRealTerminalCapture(worktreeCwd: string, storyId: string): boolean {
   return takenCaptureCount(worktreeCwd, storyId, "terminal") >= need;
 }
 
+function declaredSurfaceCaptureFloor(worktreeCwd: string, storyId: string): { ok: boolean; reason?: string } {
+  const owesWeb = owesRealWebCapture(worktreeCwd, storyId);
+  const owesTerm = owesTerminalCapture(worktreeCwd, storyId);
+  if (!owesWeb && !owesTerm) return { ok: true };
+  const gaps: string[] = [];
+  if (owesWeb && !hasRealWebCapture(worktreeCwd, storyId)) {
+    gaps.push(`declared deliverable_url(s) not all really captured (need ${webCaptureNeed(worktreeCwd, storyId)} taken web shots)`);
+  }
+  if (owesTerm && !hasRealTerminalCapture(worktreeCwd, storyId)) {
+    gaps.push(`declared deliverable_cmd(s) not all really captured (need ${deliverableCmdsForStory(worktreeCwd, storyId).length} taken terminal shots)`);
+  }
+  if (gaps.length === 0) return { ok: true, reason: "all declared surfaces really captured" };
+  return { ok: false, reason: `declared surface capture missing: ${gaps.join("; ")}` };
+}
+
 function passAcVisualFloor(worktreeCwd: string, storyId: string): { ok: boolean; reason?: string } {
   // FIX-339 (AC6) — must-declare HARD floor. A non-exempt card that declares NO
   // deliverable surface (no url / cmd / exempt) can NEVER produce a real capture;
@@ -926,23 +941,27 @@ function passAcVisualFloor(worktreeCwd: string, storyId: string): { ok: boolean;
   // FIX-339 (AC3): per-surface enforcement. A card may declare web surfaces, CLI
   // commands, or both; EACH declared surface owes a REAL capture and an
   // honest-skip no longer discharges a DECLARED surface.
-  const owesWeb = owesRealWebCapture(worktreeCwd, storyId);
-  const owesTerm = owesTerminalCapture(worktreeCwd, storyId);
-  if (owesWeb || owesTerm) {
-    const gaps: string[] = [];
-    if (owesWeb && !hasRealWebCapture(worktreeCwd, storyId)) {
-      gaps.push(`declared deliverable_url(s) not all really captured (need ${webCaptureNeed(worktreeCwd, storyId)} taken web shots)`);
-    }
-    if (owesTerm && !hasRealTerminalCapture(worktreeCwd, storyId)) {
-      gaps.push(`declared deliverable_cmd(s) not all really captured (need ${deliverableCmdsForStory(worktreeCwd, storyId).length} taken terminal shots)`);
-    }
-    if (gaps.length === 0) return { ok: true, reason: "all declared surfaces really captured" };
+  const declared = declaredSurfaceCaptureFloor(worktreeCwd, storyId);
+  if (declared.reason !== undefined) {
+    if (declared.ok) return declared;
     const ids = missing.map((e) => e.ac ?? "?").join(", ");
-    return { ok: false, reason: `pass AC(s) lack screenshot evidence and a declared surface was never really captured (honest-skip does not satisfy a declared surface): ${gaps.join("; ")} [${ids}]` };
+    return { ok: false, reason: `pass AC(s) lack screenshot evidence and a declared surface was never really captured (honest-skip does not satisfy a declared surface): ${declared.reason} [${ids}]` };
   }
   if (hasMachineCaptureSkip(worktreeCwd, storyId)) return { ok: true, reason: "machine capture skip present" };
   const ids = missing.map((e) => e.ac ?? "?").join(", ");
   return { ok: false, reason: `pass AC(s) lack screenshot evidence or machine capture skip: ${ids}` };
+}
+
+function visualEvidenceFloor(worktreeCwd: string, storyId: string, html: string): { ok: boolean; reason?: string } {
+  const passAc = passAcVisualFloor(worktreeCwd, storyId);
+  if (!passAc.ok) return passAc;
+  if (!storyRequiresScreenshot(worktreeCwd, storyId)) return passAc;
+  const declared = declaredSurfaceCaptureFloor(worktreeCwd, storyId);
+  if (!declared.ok) return declared;
+  if (declared.reason !== undefined) return declared;
+  if (/<figure class="shot\b|href="screenshots\/|src="screenshots\//i.test(html)) return { ok: true };
+  if (hasMachineCaptureSkip(worktreeCwd, storyId)) return { ok: true, reason: "machine capture skip present" };
+  return { ok: false, reason: "visual evidence missing: no screenshot reference or machine capture skip" };
 }
 
 /**
@@ -1025,6 +1044,18 @@ export function verificationReportHasContent(worktreeCwd: string, storyId: strin
   if (p === null) return false;
   try {
     const html = readFileSync(p, "utf8");
+    return verificationReportHasAcceptanceContent(worktreeCwd, storyId) && visualEvidenceFloor(worktreeCwd, storyId, html).ok;
+  } catch {
+    return false;
+  }
+}
+
+function verificationReportHasAcceptanceContent(worktreeCwd: string, storyId: string): boolean {
+  if (storyId === "") return false;
+  const p = existingReport(worktreeCwd, storyId);
+  if (p === null) return false;
+  try {
+    const html = readFileSync(p, "utf8");
     const hasMap = acMapCandidates(worktreeCwd, storyId).some((m) => existsSync(m));
     if (!hasMap) return false;
     const sections = [...html.matchAll(/<section class="ac\s+([^"]+)"[\s\S]*?<\/section>/g)];
@@ -1037,27 +1068,7 @@ export function verificationReportHasContent(worktreeCwd: string, storyId: strin
       if (!/(class="ev\b|class="shot\b|<figure class="shot\b)/.test(body)) return false;
       positiveWithEvidence += 1;
     }
-    if (positiveWithEvidence === 0) return false;
-    if (!passAcVisualFloor(worktreeCwd, storyId).ok) return false;
-    if (storyRequiresScreenshot(worktreeCwd, storyId)) {
-      // FIX-309 (堵 284 洞①+②) + FIX-339 (AC3 逐面强制): a card that DECLARED any
-      // surface (deliverable_url and/or deliverable_cmd) owes a REAL capture of
-      // EACH — neither an honest-skip nor a bare `<figure class=shot>` in the HTML
-      // (which could be a self-referential dossier self-shot, the FIX-321 forgery
-      // shape) discharges it; only recorded `taken:true` captures (one per
-      // declared surface) do. A mixed web+cmd card must satisfy BOTH. A required
-      // card with NO declared surface keeps the prior floor: a captured figure
-      // ref OR an honest skip.
-      const owesWeb = owesRealWebCapture(worktreeCwd, storyId);
-      const owesTerm = owesTerminalCapture(worktreeCwd, storyId);
-      if (owesWeb || owesTerm) {
-        if (owesWeb && !hasRealWebCapture(worktreeCwd, storyId)) return false;
-        if (owesTerm && !hasRealTerminalCapture(worktreeCwd, storyId)) return false;
-        return true;
-      }
-      return /<figure class="shot\b|href="screenshots\/|src="screenshots\//i.test(html) || hasMachineCaptureSkip(worktreeCwd, storyId);
-    }
-    return true;
+    return positiveWithEvidence > 0;
   } catch {
     return false;
   }
@@ -1186,7 +1197,7 @@ export function runAttestGate(
     const fresh = verificationReportFresh(worktreeCwd, storyId, sinceSec);
     // US-ATTEST-012: freshness alone is "存在性" — a fresh empty shell (zero AC /
     // no ac-map, the FIX-214 case) does NOT count as a produced report.
-    if (fresh && verificationReportHasContent(worktreeCwd, storyId)) {
+    if (fresh && verificationReportHasAcceptanceContent(worktreeCwd, storyId)) {
       // FIX-343 (step ③): honor ONLY an INDEPENDENT fresh-session peer score from
       // the PERSISTENT .roll (scoreRepoCwd) — its recorded `sessionId` must be
       // present AND ≠ the builder's session id. A self / legacy / no-sessionId /
@@ -1198,7 +1209,19 @@ export function runAttestGate(
       // branch) no longer soft-passes this cycle's gate.
       const score = evaluateReviewScoreGate(scoreRepoCwd, storyId, builderSessionId, cycleId);
       if (score.status === "pass") {
-        const visual = passAcVisualFloor(worktreeCwd, storyId);
+        const report = existingReport(worktreeCwd, storyId);
+        const html = report === null ? "" : readFileSync(report, "utf8");
+        const visual = visualEvidenceFloor(worktreeCwd, storyId, html);
+        if (!visual.ok) {
+          const reasons = [visual.reason ?? "visual evidence gate failed"];
+          const blocked = mode === "hard";
+          sinks.alert(
+            `attest gate (${mode}): visual evidence gate failed (${storyId}) — ${reasons[0]} — cycle ${cycleId}` +
+              (blocked ? " — BLOCKED (hard mode); story not marked Done" : ""),
+          );
+          sinks.event({ cycleId, verdict: "skipped", reasons });
+          return { verdict: "skipped", mode, reasons, blocked };
+        }
         const reasons = ["fresh acceptance report present", score.reason, ...(visual.reason !== undefined ? [visual.reason] : [])];
         sinks.event({ cycleId, verdict: "produced", reasons });
         return { verdict: "produced", mode, reasons, blocked: false };

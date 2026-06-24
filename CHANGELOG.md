@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **验收报告内容判定与视觉证据闸分离**：`attest:gate` 不再把“报告有 AC/ac-map/E2E 证据但声明的截图面未真实捕获”误报成 empty-shell；这类情况现在按视觉证据缺口给出可操作 reason，避免 correction loop 反复走错修复方向。(FIX-400 follow-up) `[acceptance-evidence]`
+
 ## v3.624.2 — 2026-06-24
 
 ### 稳定性

@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { AWAITING_REVIEW_STATUS_MARKER } from "@roll/spec";
-import { assessBacklog, buildHasOpenPr, parseDependsOn, pickStory, prTitleReferences, type BacklogItem } from "../src/index.js";
+import { assessBacklog, buildHasOpenPr, parseDependsOn, pickStory, prTitleReferences, shouldSuppressDormancy, type BacklogItem } from "../src/index.js";
 
 /** Terse fixture row builder. */
 function item(id: string, status: string, desc = ""): BacklogItem {
@@ -275,5 +275,42 @@ describe("buildHasOpenPr — predicate from open PR titles", () => {
     const hasOpenPr = buildHasOpenPr([]);
     // No open PRs → FIX has priority, FIX-42 picked
     expect(pickStory(items, { hasOpenPr })?.id).toBe("FIX-42");
+  });
+});
+
+// ─── US-LOOP-079k AC1: dormancy suppression ────────────────────────────────
+
+describe("shouldSuppressDormancy", () => {
+  it("returns true for all_awaiting_merge (temporary PR-blocked idle)", () => {
+    expect(shouldSuppressDormancy("all_awaiting_merge")).toBe(true);
+  });
+
+  it("returns false for permanent / structural idle reasons", () => {
+    for (const reason of [
+      "all_blocked_by_deps",
+      "all_merged_pending",
+      "all_skip_listed",
+      "all_in_progress",
+      "all_done",
+      "backlog_empty",
+      "has_work",
+    ] as const) {
+      expect(shouldSuppressDormancy(reason), reason).toBe(false);
+    }
+  });
+
+  it("all_awaiting_merge is the only suppressed reason (tripwire against unintended set growth)", () => {
+    // AC1: DORMANCY_SUPPRESSED_REASONS is a closed set — all_awaiting_merge is
+    // the only temporary idle reason that should keep the loop ACTIVE.
+    // Adding a reason to this set changes dormancy policy and needs a story.
+    expect(shouldSuppressDormancy("all_awaiting_merge")).toBe(true);
+    // Every OTHER known reason should NOT suppress dormancy.
+    expect(shouldSuppressDormancy("all_blocked_by_deps")).toBe(false);
+    expect(shouldSuppressDormancy("all_merged_pending")).toBe(false);
+    expect(shouldSuppressDormancy("all_skip_listed")).toBe(false);
+    expect(shouldSuppressDormancy("all_in_progress")).toBe(false);
+    expect(shouldSuppressDormancy("all_done")).toBe(false);
+    expect(shouldSuppressDormancy("backlog_empty")).toBe(false);
+    expect(shouldSuppressDormancy("has_work")).toBe(false);
   });
 });

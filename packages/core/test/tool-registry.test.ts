@@ -261,6 +261,32 @@ describe("US-TOOL-002 ToolRegistry", () => {
     expect(t.executes).toBe(0);
   });
 
+  it("rejects invalid input against inputSchema before init or execution", async () => {
+    const t = tool({
+      declaration: {
+        ...declaration,
+        inputSchema: {
+          type: "object",
+          required: ["command"],
+          properties: { command: { type: "string", minLength: 1 } },
+          additionalProperties: false,
+        },
+      },
+    });
+    const registry = new ToolRegistry({ deps: deps(), policyEngine: policyEngine() });
+    registry.register(t);
+
+    const result = await registry.invoke(TOOL_ID, request({ command: "" }));
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("invalid_input");
+      expect(result.error.message).toContain("$.command must have length >= 1");
+    }
+    expect(t.initCount).toBe(0);
+    expect(t.executes).toBe(0);
+  });
+
   it("gates execution when a non-optional requirement is missing", async () => {
     const t = tool({ declaration: { ...declaration, requirements: [{ kind: "executable", name: "git", optional: false }] } });
     const registry = new ToolRegistry({

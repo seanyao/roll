@@ -1,4 +1,5 @@
 /** Tool contracts (Tool Use capability layer). */
+import type { JsonSchema } from "./json-schema.js";
 export type ToolId = string & { readonly __brand?: "ToolId" };
 
 export type ToolKind =
@@ -77,8 +78,8 @@ export type ToolDeclaration = {
   emitsEvents?: boolean;
   defaults?: ToolDefaults;
   requirements?: readonly ToolRequirement[];
-  inputSchema?: unknown;
-  outputSchema?: unknown;
+  inputSchema?: JsonSchema;
+  outputSchema?: JsonSchema;
 };
 
 export type ToolCaller = {

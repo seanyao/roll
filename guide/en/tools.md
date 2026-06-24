@@ -28,7 +28,7 @@ Registered tool families today:
 | MCP | `mcp.call` |
 | Network | `network.fetch` |
 
-Browse the full built-in tool catalog — every tool with its capability and default guardrails — on the machine-global **Tools** page (`tools.html`), one of the `MACHINE › …` breadcrumb pages alongside Agents and Skills.
+Browse the full built-in tool catalog — every tool with its capability, input/output contract, default guardrails, and requirements — on the machine-global **Tools** page (`tools.html`), one of the `MACHINE › …` breadcrumb pages alongside Agents and Skills.
 
 ## Project Policy
 
@@ -81,7 +81,7 @@ Unknown fields warn but do not reject the policy file, so newer Roll versions ca
 
 ## CLI
 
-Use `roll tool status` to inspect the registered tools and the effective policy state for the current project.
+Use `roll tool status` to inspect the registered tools, input contracts, requirement readiness, and the effective policy state for the current project.
 
 ```bash
 roll tool status
@@ -90,10 +90,10 @@ roll tool status
 Example output:
 
 ```text
-tool              kind        enabled  timeout  limit  sandbox
-bash               bash        yes      30000    -      maxOutputBytes=65536
-browser.screenshot browser     yes      60000    -      headlessOnly=true,maxOutputBytes=2097152
-network.fetch      network     yes      30000    -      network=restricted
+tool              kind        enabled  readiness    timeout  limit  contract                                       sandbox
+bash               bash        yes      available    30000    -      args?, command, cwd?, env?                     maxOutputBytes=65536
+browser.screenshot browser     yes      available    60000    -      screenshotPath?, url, viewport?, waitFor?      headlessOnly=true,maxOutputBytes=2097152
+network.fetch      network     yes      available    30000    -      body?, headers?, method?, timeoutMs?, url      network=restricted
 ```
 
 Use it after editing `.roll/policy.yaml` to confirm Roll sees the intended state.

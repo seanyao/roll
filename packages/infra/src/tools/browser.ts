@@ -1,6 +1,14 @@
 import { join } from "node:path";
 import type { ExecResult, ToolDeclaration, ToolDeps, ToolErrorCode, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
 import { PLAYWRIGHT_PIN } from "../playwright-pin.js";
+import {
+  browserConsoleInputSchema,
+  browserConsoleOutputSchema,
+  browserDomQueryInputSchema,
+  browserDomQueryOutputSchema,
+  browserScreenshotInputSchema,
+  browserScreenshotOutputSchema,
+} from "./schema-contracts.js";
 
 export type BrowserToolId = "browser.screenshot" | "browser.console" | "browser.dom-query";
 
@@ -92,6 +100,8 @@ export class BrowserTool {
         },
       },
       requirements: [{ kind: "executable", name: "playwright-chromium", optional: true }],
+      inputSchema: browserInputSchema(id),
+      outputSchema: browserOutputSchema(id),
     };
   }
 
@@ -237,6 +247,18 @@ export class BrowserTool {
       meta: meta(invocation, startedAt, deps.now()),
     };
   }
+}
+
+function browserInputSchema(id: BrowserToolId): ToolDeclaration["inputSchema"] {
+  if (id === "browser.screenshot") return browserScreenshotInputSchema;
+  if (id === "browser.console") return browserConsoleInputSchema;
+  return browserDomQueryInputSchema;
+}
+
+function browserOutputSchema(id: BrowserToolId): ToolDeclaration["outputSchema"] {
+  if (id === "browser.screenshot") return browserScreenshotOutputSchema;
+  if (id === "browser.console") return browserConsoleOutputSchema;
+  return browserDomQueryOutputSchema;
 }
 
 export function browserTools(): BrowserTool[] {

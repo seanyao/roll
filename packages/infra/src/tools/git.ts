@@ -1,6 +1,7 @@
 import type { GitResult } from "../git.js";
 import { rawGit } from "../git.js";
 import type { ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
+import { gitCommandOutputSchema, gitCommitInputSchema, gitMergeInputSchema, gitPushInputSchema, gitStatusInputSchema, gitStatusOutputSchema } from "./schema-contracts.js";
 
 export type GitToolId = "git.commit" | "git.status" | "git.push" | "git.merge";
 
@@ -63,6 +64,8 @@ export class GitTool {
         timeoutMs: 60_000,
       },
       requirements: [{ kind: "executable", name: "git", optional: false }],
+      inputSchema: gitInputSchema(id),
+      outputSchema: id === "git.status" ? gitStatusOutputSchema : gitCommandOutputSchema,
     };
   }
 
@@ -114,6 +117,13 @@ export class GitTool {
       };
     }
   }
+}
+
+function gitInputSchema(id: GitToolId): ToolDeclaration["inputSchema"] {
+  if (id === "git.commit") return gitCommitInputSchema;
+  if (id === "git.status") return gitStatusInputSchema;
+  if (id === "git.push") return gitPushInputSchema;
+  return gitMergeInputSchema;
 }
 
 export function gitTools(): GitTool[] {

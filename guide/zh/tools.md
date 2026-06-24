@@ -28,7 +28,7 @@ tools layer 不是 AI 客户端自己的工具白名单替代品。客户端的 
 | MCP | `mcp.call` |
 | Network | `network.fetch` |
 
-完整的内置工具清单——每个工具的能力与默认护栏——可在机器全局 **Tools** 页（`tools.html`）浏览，它是 `MACHINE › …` 面包屑里与 Agents、Skills 同级的页面之一。
+完整的内置工具清单——每个工具的能力、输入/输出契约、默认护栏与依赖——可在机器全局 **Tools** 页（`tools.html`）浏览，它是 `MACHINE › …` 面包屑里与 Agents、Skills 同级的页面之一。
 
 ## 项目策略
 
@@ -81,7 +81,7 @@ tools:
 
 ## CLI
 
-用 `roll tool status` 查看当前项目已注册工具和合成后的有效 policy 状态。
+用 `roll tool status` 查看当前项目已注册工具、输入契约、依赖就绪度和合成后的有效 policy 状态。
 
 ```bash
 roll tool status
@@ -90,10 +90,10 @@ roll tool status
 示例输出：
 
 ```text
-tool              kind        enabled  timeout  limit  sandbox
-bash               bash        yes      30000    -      maxOutputBytes=65536
-browser.screenshot browser     yes      60000    -      headlessOnly=true,maxOutputBytes=2097152
-network.fetch      network     yes      30000    -      network=restricted
+tool              kind        enabled  readiness    timeout  limit  contract                                       sandbox
+bash               bash        yes      available    30000    -      args?, command, cwd?, env?                     maxOutputBytes=65536
+browser.screenshot browser     yes      available    60000    -      screenshotPath?, url, viewport?, waitFor?      headlessOnly=true,maxOutputBytes=2097152
+network.fetch      network     yes      available    30000    -      body?, headers?, method?, timeoutMs?, url      network=restricted
 ```
 
 修改 `.roll/policy.yaml` 后，可以用它确认 Roll 读到的状态符合预期。

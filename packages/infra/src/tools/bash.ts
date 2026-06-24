@@ -1,5 +1,6 @@
 import { join, resolve } from "node:path";
 import type { ExecResult, ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
+import { bashInputSchema, bashOutputSchema } from "./schema-contracts.js";
 
 export interface BashInput {
   command: string;
@@ -31,6 +32,8 @@ export class BashTool {
       },
     },
     requirements: [{ kind: "executable", name: "system-shell", optional: false }],
+    inputSchema: bashInputSchema,
+    outputSchema: bashOutputSchema,
   };
 
   async init(_deps: ToolDeps): Promise<void> {

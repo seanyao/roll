@@ -13,6 +13,7 @@ import type {
   ToolResult,
 } from "@roll/spec";
 import { deriveToolReadiness, type ToolRequirementResolver } from "./readiness.js";
+import { validateJsonSchemaValue } from "./schema.js";
 
 export interface Tool<I = unknown, O = unknown> {
   readonly declaration: ToolDeclaration;
@@ -138,6 +139,17 @@ export class ToolRegistry {
       readiness?.status === "degraded"
         ? readiness.requirements.filter((resolution) => resolution.requirement.optional === true && resolution.status !== "ok").map(formatOptionalRequirementWarning)
         : [];
+
+    const inputValidation = validateJsonSchemaValue(state.tool.declaration.inputSchema, request.input);
+    if (!inputValidation.ok) {
+      return failed(
+        toolId,
+        request,
+        error("invalid_input", `invalid input for ${toolId}: ${inputValidation.errors.join("; ")}`, false, inputValidation.errors),
+        startedAt,
+        this.options.deps.now(),
+      ) as ToolResult<O>;
+    }
 
     const initResult = await this.ensureInitialized(state);
     if (!initResult.ok) {

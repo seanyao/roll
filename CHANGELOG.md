@@ -6,6 +6,26 @@
 
 - **内置工具补齐 JSON Schema 契约并在调用前校验输入**：所有 builtin tools 现在声明真实 `inputSchema` / `outputSchema`，普通调用和既有委派调用都会在执行前拒绝结构非法的输入并返回 `invalid_input`；`roll tool status` 和机器级 Tools 页同步显示参数契约，便于 agent 内省与排障。(US-TOOL-022) `[tools-layer]`
 
+- **工具依赖现在有真实 readiness gate**：内置工具会按声明的 requirement 检测 Git/GitHub/系统命令等依赖，缺少非可选依赖时不再假装可用，而是拦截或给出可操作提示；`roll doctor` 同步展示这些依赖状态。(US-TOOL-020) `[tools-layer]`
+
+- **Tools 页显示依赖链和可用性**：机器级 Tools 页面为每个 tool 展示 input/output 契约、requirement 链、live readiness 和修复提示，工具边界与环境问题更容易排查。(US-TOOL-021) `[tools-layer]`
+
+- **实时控制台项目切换更可信**：live 模式下项目切换器会按 registry/slug 分发对应项目快照，非当前项目不会误用当前帧；删除或不可达项目不再表现为可切换的真项目。(US-OBS-023) `[delivery-dossier]`
+
+- **可观测 daemon 有正式生命周期命令**：新增 `roll daemon start|stop|status` 管理本机只读观测进程，进程 PID、启动/停止和状态输出都有测试覆盖。(US-OBS-024) `[delivery-dossier]`
+
+- **实时控制台文档补齐**：架构文档和新增 live-console 指南记录了 `roll cycle watch`、三流权威边界、静态导出与未来 live serve 的关系，以及证据按构造产生的方向。(US-OBS-025) `[documentation]`
+
+- **单 cycle 实时窗口可回放 activity 流**：`roll cycle watch` 能围绕一个 cycle 展示标准 activity 事件，把生命周期、TCR、gate、stdout 和工具调用投影到同一条实时观察线。(US-OBS-027) `[delivery-dossier]`
+
+- **pi/kimi 工具调用信号被规范化并持久化**：normalizer 补齐工具调用粒度，cycle 信号写入 `signals.jsonl`，后续 dossier、watch 和证据草稿都能消费同一份活动流。(US-OBS-028) `[delivery-dossier]`
+
+- **TruthSnapshot 覆盖所有控制台面板**：casting、charter、skills、git hooks、live feed 等原本 off-schema 的面板进入结构化 snapshot，页面不再绕开同一真相选择器。(US-OBS-029) `[delivery-dossier]`
+
+- **档案页新增 snapshot 适应度闸**：控制台渲染如果读取 snapshot 之外的数据会被测试拦住，防止未来再出现页面局部真相口径漂移。(US-OBS-030) `[delivery-dossier]`
+
+- **ac-map 证据草稿从 activity 流生成**：loop 会结合 activity signals 与 diff 起草 AC→证据映射、报告和截图引用，默认保守不自动通过，但让缺证据问题更早、更具体地暴露。(US-OBS-031) `[acceptance-evidence]`
+
 - **验收报告软链缺失时不再误判空壳**：无人值守 loop 现在能从真实 run 目录找到验收报告和 ac-map，`attest:gate` 的失败原因也会指向真实路径，不再显示 `<epic>` 占位。(FIX-400) `[acceptance-evidence]`
 
 - **成功交付的 builder 收尾不再误触发登录暂停**：builder exit 0 的交付总结即使提到 login、credential 或鉴权，也不会被误判成 auth block；真正的登录失败和网络失败仍照常归因。(FIX-401) `[loop-engine]`

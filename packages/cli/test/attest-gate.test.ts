@@ -773,6 +773,31 @@ describe("runAttestGate (three paths: produced / skipped-soft / skipped-hard)", 
     expect(r.reasons.join(" ")).not.toMatch(/<epic>/);
   });
 
+  it("FIX-400 follow-up: content-bearing report with missing declared capture is not mislabeled empty-shell", () => {
+    const wt = withReport("FIX-400K", 2000, '<div class="ev ev-text">npm test: 124 tests pass</div>');
+    writeFileSync(
+      join(wt, ".roll", "features", "uncategorized", "FIX-400K", "spec.md"),
+      "---\nid: FIX-400K\ndeliverable_url: data/items/example.jsonl\n---\n# FIX-400K\n\n## Acceptance Criteria\n\n- [ ] integration evidence is present\n",
+    );
+    writeAcMap(wt, "FIX-400K", [
+      { ac: "FIX-400K:AC1", status: "pass", evidence: [{ kind: "text", label: "test log", textFile: "evidence/npm-test.txt" }] },
+    ]);
+    writeEvidenceJson(wt, "FIX-400K", {
+      captures: [{ kind: "web", out: "screenshots/web.png", taken: false, skipped: "headless Chromium unavailable" }],
+    });
+    withPeerScore(wt, "FIX-400K", 8, "good", "c-fix400k");
+
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-400K", "c-fix400k", "hard", 1000, s);
+
+    expect(r.verdict).toBe("skipped");
+    expect(r.blocked).toBe(true);
+    expect(r.reasons.join(" ")).not.toMatch(/empty shell|no AC content|no ac-map/i);
+    expect(r.reasons.join(" ")).toMatch(/declared surface|capture|screenshot/i);
+    expect(alerts[0]).toContain("visual evidence gate failed");
+    expect(events[0]?.verdict).toBe("skipped");
+  });
+
   // ── FIX-295: a red assertion is a regression, never an env exception ─────────
 
   it("FIX-295 (AC-FIX2/AC-FIX3): a `fail` AC blocks in hard mode — a red check is a regression, not waivable", () => {

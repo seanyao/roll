@@ -41,18 +41,59 @@ import { evaluateReviewScoreGate } from "../lib/review-score.js";
 export type AttestMode = "soft" | "hard";
 
 /**
- * Report path candidates — the card folder ONLY
- * (`features/<epic>/<ID>/latest/<ID>-report.html`). The legacy
- * `verification/<ID>/` read-compat window closed with US-META-002c: the old
- * tree was migrated (002b) and deleted; nothing writes or reads it anymore.
+ * FIX-400 — find the newest timestamped run directory under the card archive.
+ * Run dirs are named by cycleId (`YYYYMMDD-HHMMSS-<suffix>`) or ISO-ish
+ * (`YYYY-MM-DDTHH…`); the `cycle-` prefix is also a known pattern. Returns
+ * null when no run dirs exist (the card only has a `latest/` symlink).
  */
-function reportCandidates(worktreeCwd: string, storyId: string): string[] {
-  return [join(cardArchiveDir(worktreeCwd, storyId), "latest", reportFileName(storyId))];
+function findNewestRunDir(cardDir: string): string | null {
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(cardDir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  let best: { name: string; mtimeMs: number } | null = null;
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+    if (!/^\d{8}-\d{6}-/.test(e.name) && !/^\d{4}-\d{2}-\d{2}T/.test(e.name) && !e.name.startsWith("cycle-")) continue;
+    try {
+      const st = statSync(join(cardDir, e.name));
+      if (best === null || st.mtimeMs > best.mtimeMs) {
+        best = { name: e.name, mtimeMs: st.mtimeMs };
+      }
+    } catch {
+      /* unreadable entry — skip */
+    }
+  }
+  return best?.name ?? null;
 }
 
-/** ac-map candidates, same single-home rule. */
+/**
+ * Report path candidates — PRIMARY is the card folder's latest/ symlink
+ * (`features/<epic>/<ID>/latest/<ID>-report.html`); FALLBACK is the newest
+ * timestamped run directory (the executor writes the report there FIRST, and
+ * the latest/ symlink is a best-effort post-write step that can silently fail).
+ * The legacy `verification/<ID>/` read-compat window closed with US-META-002c.
+ */
+function reportCandidates(worktreeCwd: string, storyId: string): string[] {
+  const cardDir = cardArchiveDir(worktreeCwd, storyId);
+  const candidates = [join(cardDir, "latest", reportFileName(storyId))];
+  const newest = findNewestRunDir(cardDir);
+  if (newest !== null) candidates.push(join(cardDir, newest, reportFileName(storyId)));
+  return candidates;
+}
+
+/**
+ * ac-map candidates — PRIMARY is the card root (`ac-map.json`); FALLBACK is
+ * the newest timestamped run directory (same rationale as reportCandidates).
+ */
 function acMapCandidates(worktreeCwd: string, storyId: string): string[] {
-  return [join(cardArchiveDir(worktreeCwd, storyId), "ac-map.json")];
+  const cardDir = cardArchiveDir(worktreeCwd, storyId);
+  const candidates = [join(cardDir, "ac-map.json")];
+  const newest = findNewestRunDir(cardDir);
+  if (newest !== null) candidates.push(join(cardDir, newest, "ac-map.json"));
+  return candidates;
 }
 
 /**
@@ -926,8 +967,11 @@ function redAcFailures(worktreeCwd: string, storyId: string): string[] {
 }
 
 /** The acceptance report a delivered story must produce (skill step 10.6) —
- *  the canonical NEW-layout path, used for messaging. */
+ *  the existing selected report path when present, otherwise the canonical
+ *  NEW-layout path used for messaging. */
 export function verificationReportPath(worktreeCwd: string, storyId: string): string {
+  const existing = existingReport(worktreeCwd, storyId);
+  if (existing !== null) return existing;
   return reportCandidates(worktreeCwd, storyId)[0] as string;
 }
 
@@ -1168,10 +1212,11 @@ export function runAttestGate(
       sinks.event({ cycleId, verdict: "skipped", reasons });
       return { verdict: "skipped", mode, reasons, blocked };
     }
+    const reportPath = verificationReportPath(worktreeCwd, storyId);
     const reasons = [
       fresh
-        ? `acceptance report at .roll/features/<epic>/${storyId}/latest/${storyId}-report.html is an empty shell (no AC content / no ac-map)`
-        : `no fresh acceptance report for ${storyId} (checked card archive + legacy verification paths)`,
+        ? `acceptance report at ${reportPath} is an empty shell (no AC content / no ac-map)`
+        : `no fresh acceptance report for ${storyId} at ${reportPath} (checked card archive paths)`,
     ];
     const blocked = mode === "hard";
     const lead = fresh

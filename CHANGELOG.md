@@ -6,6 +6,8 @@
 
 - **内置工具补齐 JSON Schema 契约并在调用前校验输入**：所有 builtin tools 现在声明真实 `inputSchema` / `outputSchema`，普通调用和既有委派调用都会在执行前拒绝结构非法的输入并返回 `invalid_input`；`roll tool status` 和机器级 Tools 页同步显示参数契约，便于 agent 内省与排障。(US-TOOL-022) `[tools-layer]`
 
+- **验收报告软链缺失时不再误判空壳**：无人值守 loop 现在能从真实 run 目录找到验收报告和 ac-map，`attest:gate` 的失败原因也会指向真实路径，不再显示 `<epic>` 占位。(FIX-400) `[acceptance-evidence]`
+
 - **agent 名册收敛到 6 个一等成员**：`claude`、`kimi`、`codex`、`pi`、`antigravity (agy)`、`reasonix` 成为唯一可列出/探测/派发的 agent roster；`openai`、`deepseek` 继续作为 provider/model alias 保留，不再作为独立 agent 冒出。(US-AGENT-043) `[agents]`
 
 - **agent 名册改为单一真相源派生**：`AGENTS` 现在承载一等 agent 身份、显示名、PATH 探测 bin、默认模型和能力标记；registry、`roll agent list`、doctor/setup 探测和 spawn profile 覆盖都从同一组 6 个身份派生，减少后续名册漂移。(US-AGENT-044) `[agents]`

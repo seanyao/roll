@@ -795,6 +795,21 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     );
   }
 
+  // US-LOOP-079d2: idle terminal passes through to run-once — explicit branch
+  // provides a reachable hook for US-LOOP-079h2's dormant decision logic.
+  // The runs row already carries status="idle" + outcome="idle_no_work"
+  // (written by the executor's append_run). When dormant is not entered,
+  // idle still ultimately lands as idle_no_work (regression on existing paths).
+  if (result.terminal === "idle") {
+    process.stdout.write(
+      "loop run-once: idle — no work picked up this cycle\n" +
+        "loop run-once: 空闲——本周期未拾取任务\n",
+    );
+    // idle outcomes are not failures — a no-work cycle is expected behaviour.
+    // The consecutive-failure counter is NOT ticked.
+    return 0;
+  }
+
   // FIX-363/FIX-366: a cycle blocked by an EXTERNAL cause (an agent not logged in
   // / network down) is NOT a code failure — attribute it by CAUSE and act on it,
   // never tick the consecutive-CODE-failure counter (a misleading "3 failures →

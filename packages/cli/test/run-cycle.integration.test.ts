@@ -558,6 +558,15 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
     expect(existsSync(p.lockPath)).toBe(false);
     const events = readFileSync(p.eventsPath, "utf8");
     expect(events).toContain('"cycle:end"');
+    // US-LOOP-079d2: runs row carries status="idle" + outcome="idle_no_work"
+    // so the dashboard and US-LOOP-079h2 dormant hook can read the idle signal.
+    const runsRaw = readFileSync(p.runsPath, "utf8").trim();
+    expect(runsRaw).toBeTruthy();
+    const runsLines = runsRaw.split("\n").filter((l) => l.trim() !== "");
+    expect(runsLines.length).toBeGreaterThanOrEqual(1);
+    const lastRun = JSON.parse(runsLines[runsLines.length - 1] ?? "{}");
+    expect(lastRun.status).toBe("idle");
+    expect(lastRun.outcome).toBe("idle_no_work");
   });
 });
 

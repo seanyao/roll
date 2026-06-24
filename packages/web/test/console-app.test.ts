@@ -38,6 +38,20 @@ function snapshotFrame(snapshot: TruthSnapshot): DossierSnapshotFrame {
   };
 }
 
+function projectFrame(
+  slug: string,
+  snapshot: TruthSnapshot,
+  overrides: Partial<DossierSnapshotFrame["project"]> = {},
+): DossierSnapshotFrame {
+  return {
+    kind: "snapshot",
+    project: { slug, path: `/${slug}`, reachable: true, ...overrides },
+    snapshot,
+    collectedAt: Date.now(),
+    etag: `${slug}-${snapshot.story.total}`,
+  };
+}
+
 function heartbeatFrame(
   liveness: DossierHeartbeatFrame["liveness"],
 ): DossierHeartbeatFrame {
@@ -222,5 +236,82 @@ describe("ConsoleApp", () => {
 
     expect(container.innerHTML).toContain("?");
     expect(container.innerHTML).toContain("Degraded");
+  });
+
+  it("US-OBS-023 AC1/AC2: live project switcher only enables projects with reachable matching frames", () => {
+    const container = document.createElement("div");
+    const app = new ConsoleApp(container);
+    app.renderSnapshot(
+      projectFrame(
+        "roll",
+        makeSnapshot({
+          projects: [
+            { name: "roll", slug: "roll", path: "/roll" },
+            { name: "other", slug: "other", path: "/other" },
+            { name: "stale", slug: "stale", path: "/stale" },
+          ],
+        }),
+      ),
+    );
+
+    const roll = container.querySelector("[data-live-project='roll']") as HTMLButtonElement;
+    const other = container.querySelector("[data-live-project='other']") as HTMLButtonElement;
+    const stale = container.querySelector("[data-live-project='stale']") as HTMLButtonElement;
+
+    expect(roll.getAttribute("data-live-switchable")).toBe("true");
+    expect(roll.disabled).toBe(false);
+    expect(other.getAttribute("data-live-switchable")).toBe("false");
+    expect(other.disabled).toBe(true);
+    expect(stale.getAttribute("data-live-switchable")).toBe("false");
+    expect(stale.disabled).toBe(true);
+  });
+
+  it("US-OBS-023 AC3: selecting a live-served project renders that project's snapshot frame", () => {
+    const container = document.createElement("div");
+    const app = new ConsoleApp(container);
+    const projects = [
+      { name: "roll", slug: "roll", path: "/roll" },
+      { name: "other", slug: "other", path: "/other" },
+    ];
+    app.renderSnapshot(projectFrame("roll", makeSnapshot({ projects })));
+    app.renderSnapshot(
+      projectFrame(
+        "other",
+        makeSnapshot({
+          projects,
+          story: {
+            total: 9,
+            spectrum: { done: 9, wip: 0, hold: 0, todo: 0, fail: 0, unknown: 0 },
+            legacy: 0,
+          },
+        }),
+      ),
+    );
+
+    const other = container.querySelector("[data-live-project='other']") as HTMLButtonElement;
+    expect(other.disabled).toBe(false);
+    other.click();
+
+    expect(container.querySelector("[data-selected-project]")?.getAttribute("data-selected-project")).toBe("other");
+    expect(container.querySelector("[data-spectrum='done']")?.textContent).toContain("9");
+  });
+
+  it("US-OBS-023 AC4: degraded mode keeps project rows as static snapshot links", () => {
+    const container = document.createElement("div");
+    const app = new ConsoleApp(container);
+    app.renderDegraded(
+      makeSnapshot({
+        projects: [
+          { name: "roll", slug: "roll", path: "/roll" },
+          { name: "other", slug: "other", path: "/other" },
+        ],
+      }),
+      undefined,
+    );
+
+    expect(container.querySelector("[data-static-project='other']")?.getAttribute("href")).toBe(
+      "/other/.roll/features/index.html#now",
+    );
+    expect(container.querySelector("[data-live-project='other']")).toBeNull();
   });
 });

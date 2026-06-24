@@ -13,10 +13,10 @@ import type {
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
-function snapshotFrame(etag: string): DossierSnapshotFrame {
+function snapshotFrame(etag: string, slug = "test"): DossierSnapshotFrame {
   return {
     kind: "snapshot",
-    project: { slug: "test", path: "/test", reachable: true },
+    project: { slug, path: `/${slug}`, reachable: true },
     snapshot: {
       generatedAt: "2026-06-22T12:00:00Z",
       story: {
@@ -156,6 +156,33 @@ describe("FrameHandler", () => {
     // Different ETag — should fire.
     send(JSON.stringify(snapshotFrame("etag-bbb")));
     expect(onSnapshot).toHaveBeenCalledTimes(2);
+
+    handler.stop();
+  });
+
+  it("US-OBS-023: ETag dedup is scoped per project slug", async () => {
+    const { MockWs, send } = makeMockWs();
+    (globalThis as Record<string, unknown>).WebSocket = MockWs;
+
+    const onSnapshot = vi.fn();
+    const handler = new FrameHandler({
+      onSnapshot,
+      onHeartbeat: vi.fn(),
+      onDegrade: vi.fn(),
+      onReconnect: vi.fn(),
+    });
+    handler.connect();
+
+    await vi.waitFor(() => expect(onSnapshot).not.toHaveBeenCalled(), {
+      timeout: 100,
+    });
+
+    send(JSON.stringify(snapshotFrame("same-etag", "roll")));
+    send(JSON.stringify(snapshotFrame("same-etag", "other")));
+    send(JSON.stringify(snapshotFrame("same-etag", "roll")));
+
+    expect(onSnapshot).toHaveBeenCalledTimes(2);
+    expect(onSnapshot.mock.calls.map((call) => (call[0] as DossierSnapshotFrame).project.slug)).toEqual(["roll", "other"]);
 
     handler.stop();
   });

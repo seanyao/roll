@@ -14,7 +14,7 @@ import { classifyStatus } from "@roll/spec";
 import { buildTruthSnapshot } from "./selectors.js";
 import { collectDossier } from "./dossier-collect.js";
 import { parseBacklog } from "../backlog/store.js";
-import { reachableProjects } from "../projects/reachability.js";
+import { isRealProjectPath, reachableProjects } from "../projects/reachability.js";
 import {
   deriveDeliveryLadder,
   countLegacyStories,
@@ -65,6 +65,7 @@ export interface CollectorDeps {
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseEventLine } from "@roll/spec";
 
@@ -256,7 +257,38 @@ function defaultCollectEvidenceFlags(cwd: string, story: { id: string; epic: str
 
 function defaultBuildRunCache(_cwd: string): unknown { return null; }
 function defaultMergeEvidence(_cache: unknown, _id: string): boolean { return false; }
-function defaultCollectProjects(_cwd: string): readonly TruthSnapshotProject[] { return []; }
+function defaultCollectProjects(cwd: string): readonly TruthSnapshotProject[] {
+  if (!isRealProjectPath(cwd)) return [];
+  const home = process.env["ROLL_HOME"] ?? homedir();
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(join(home, ".roll", "projects.json"), "utf8"));
+  } catch {
+    return [];
+  }
+  const rows = Array.isArray(raw)
+    ? raw
+    : typeof raw === "object" && raw !== null && Array.isArray((raw as { projects?: unknown }).projects)
+      ? (raw as { projects: unknown[] }).projects
+      : [];
+  const out: TruthSnapshotProject[] = [];
+  for (const row of rows) {
+    if (typeof row !== "object" || row === null) continue;
+    const r = row as Record<string, unknown>;
+    if (typeof r["name"] !== "string" || typeof r["slug"] !== "string" || typeof r["path"] !== "string") continue;
+    const project: TruthSnapshotProject = {
+      name: r["name"],
+      slug: r["slug"],
+      path: r["path"],
+    };
+    if (typeof r["releaseTag"] === "string") project.releaseTag = r["releaseTag"];
+    if (typeof r["verdict"] === "string") project.verdict = r["verdict"];
+    if (typeof r["lastIndexedAt"] === "string") project.lastIndexedAt = r["lastIndexedAt"];
+    out.push(project);
+  }
+  out.sort((a, b) => (a.name === b.name ? a.slug.localeCompare(b.slug) : a.name.localeCompare(b.name)));
+  return out;
+}
 
 function collectorErrorNote(err: unknown): string {
   return err instanceof Error && err.message.trim() !== "" ? err.message : "collector failed";

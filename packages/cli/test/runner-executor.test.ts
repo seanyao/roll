@@ -1289,6 +1289,22 @@ describe("executeCommand — command → executor mapping", () => {
     expect(blocked).toHaveLength(0);
   });
 
+  it("FIX-401: a successful builder summary with auth words emits NO agent:blocked event", async () => {
+    const { ports, calls } = fakePorts({
+      agentSpawn: vi.fn(async () => ({
+        stdout: "US-COLL-004 delivered. Here's the summary:\nlogin flow verified; credential handling checked; 鉴权全程正常\n---\x04",
+        stderr: "",
+        exitCode: 0,
+        timedOut: false,
+      })),
+    });
+    await executeCommand({ kind: "spawn_agent", agent: "pi", attempt: 1 }, ports, CTX);
+    const blocked = (calls["event"] ?? [])
+      .map((a) => (a as unknown[])[1] as { type?: string })
+      .filter((e) => e.type === "agent:blocked");
+    expect(blocked).toHaveLength(0);
+  });
+
   it("US-EVID-001: spawn_agent passes the opened run dir explicitly to the child", async () => {
     const { ports } = fakePorts();
     await executeCommand(

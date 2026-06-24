@@ -29,6 +29,7 @@ export interface ToolJsonSchema {
   required?: readonly string[];
   additionalProperties?: boolean;
   description?: string;
+  enum?: readonly (string | number | boolean)[];
 }
 
 export type ToolRequirement =

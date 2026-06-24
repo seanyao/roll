@@ -147,6 +147,7 @@ import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFile
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import {
+  agentCredentialReadiness,
   agentSpawnEnvironment,
   type AgentSpawn,
   killLiveAgents,
@@ -462,6 +463,10 @@ export interface Ports {
   capture: CapturePort;
   attest: AttestPort;
   agentSpawn: AgentSpawn;
+  /** Test seam for credential readiness checks; production uses process.env. */
+  agentCredentialEnv?: NodeJS.ProcessEnv;
+  /** Test seam for agent profile dotfile readers; production uses the OS home dir. */
+  agentEnvHome?: string;
   /** FIX-363: connectivity/auth probe for a reviewer agent. Used ONLY on the
    *  review-failure path (a silent timeout with no block signature) to tell a
    *  BLOCKED agent (not logged in / network down) from a SLOW one, so the loop
@@ -524,6 +529,32 @@ export interface ExecuteResult {
    *  and clock/spawn-free) — real tcr count + parsed cost. The driver folds
    *  this into liveCtx so the later append_run / cycle:end carry truthful data. */
   ctxPatch?: Partial<CycleContext>;
+}
+
+type AgentBlockedStage = Extract<RollEvent, { type: "agent:blocked" }>["stage"];
+
+function missingCredentialDetail(agent: string, missingEnv: readonly string[]): string {
+  return `missing required credential env for ${agent}: ${missingEnv.join(", ")} (set env or the agent profile dotfile before running unattended loop)`;
+}
+
+function blockIfAgentCredentialsMissing(agent: string, stage: AgentBlockedStage, ports: Ports, ctx: CycleContext): string | null {
+  const readiness = agentCredentialReadiness(agent, ports.agentCredentialEnv ?? process.env, ports.agentEnvHome);
+  if (readiness.ok) return null;
+  const detail = missingCredentialDetail(readiness.agent, readiness.missingEnv);
+  ports.events.appendEvent(ports.paths.eventsPath, {
+    type: "agent:blocked",
+    cycleId: ctx.cycleId ?? "",
+    agent: readiness.agent,
+    cause: "auth",
+    stage,
+    detail,
+    ts: eventTs(ports),
+  });
+  ports.events.appendAlert(
+    ports.paths.alertsPath,
+    `agent credential readiness: ${stage} agent ${readiness.agent} missing ${readiness.missingEnv.join(", ")}; set env or the agent profile dotfile, then resume the loop`,
+  );
+  return detail;
 }
 
 /** Default poll cadence for the runner's build-phase observation (ms). Frequent
@@ -1124,6 +1155,12 @@ export async function executeCommand(
         ctx.builderSessionId !== undefined && ctx.builderSessionId !== ""
           ? ctx.builderSessionId
           : `${ctx.cycleId ?? "cycle"}:build:${cmd.agent}:${ports.clock()}`;
+      if (blockIfAgentCredentialsMissing(cmd.agent, "build", ports, ctx) !== null) {
+        return {
+          event: { type: "agent_exited", exit: 1, timedOut: false },
+          ctxPatch: { builderSessionId },
+        };
+      }
       // US-PORT-011: the live observation file — one stable path per project,
       // truncated at each agent start, fed every chunk in real time. The popup
       // (runner template) and any `tail -f` watcher read THIS, not buffers.
@@ -1507,6 +1544,10 @@ export async function executeCommand(
             ts: eventTs(ports),
           });
         let res;
+        if (blockIfAgentCredentialsMissing(peer, "review", ports, ctx) !== null) {
+          emitConsult("error", "auth");
+          return null;
+        }
         try {
           // Belt-and-braces hard timeout: race the spawn against a wall clock so
           // the cap is enforced even if an agent's spawn path ignores its own
@@ -1743,6 +1784,8 @@ export async function executeCommand(
           | { outcome: "auth-block"; detail: string }
           | { outcome: "exit-error"; detail: string }
         > => {
+          const credentialBlock = blockIfAgentCredentialsMissing(peer, "score", ports, ctx);
+          if (credentialBlock !== null) return { outcome: "auth-block", detail: credentialBlock };
           let res;
           try {
             res = await Promise.race([
@@ -1905,15 +1948,20 @@ export async function executeCommand(
         // forbid fabricated passes. One retry structurally: capture runs once.
         if (needsAcMapRemediation(ports.paths.worktreePath, storyId)) {
           let outcome: "written" | "still-missing" | "spawn-failed";
+          const remediationAgent = ctx.agent ?? "claude";
           try {
-            await ports.agentSpawn(ctx.agent ?? "claude", {
-              cwd: ports.paths.worktreePath,
-              skillBody: buildAcMapRemediationPrompt(ports.paths.worktreePath, storyId, ctx.evidenceRunDir),
-              storyId,
-              timeoutMs: ACMAP_REMEDIATION_TIMEOUT_MS,
-              runDir: ctx.evidenceRunDir,
-            });
-            outcome = needsAcMapRemediation(ports.paths.worktreePath, storyId) ? "still-missing" : "written";
+            if (blockIfAgentCredentialsMissing(remediationAgent, "build", ports, ctx) !== null) {
+              outcome = "spawn-failed";
+            } else {
+              await ports.agentSpawn(remediationAgent, {
+                cwd: ports.paths.worktreePath,
+                skillBody: buildAcMapRemediationPrompt(ports.paths.worktreePath, storyId, ctx.evidenceRunDir),
+                storyId,
+                timeoutMs: ACMAP_REMEDIATION_TIMEOUT_MS,
+                runDir: ctx.evidenceRunDir,
+              });
+              outcome = needsAcMapRemediation(ports.paths.worktreePath, storyId) ? "still-missing" : "written";
+            }
           } catch {
             outcome = "spawn-failed";
           }
@@ -1921,7 +1969,7 @@ export async function executeCommand(
             type: "attest:remediation",
             cycleId: ctx.cycleId ?? "",
             storyId,
-            agent: ctx.agent ?? "",
+            agent: remediationAgent,
             outcome,
             ts: eventTs(ports),
           });

@@ -374,8 +374,8 @@ export function shouldSuppressGoalChildFailureCounter(input: {
 }
 
 /**
- * FIX-363: scan THIS cycle's events for an external reviewer block (`agent:blocked`
- * auth/network, emitted by the executor's review/score failure path). A failed
+ * FIX-363/FIX-404: scan THIS cycle's events for an external agent block
+ * (`agent:blocked` auth/network, emitted by build/review/score paths). A failed
  * cycle caused by such a block is an EXTERNAL failure — not logged in / network
  * down — not slow or buggy code, so it must NOT feed the consecutive-CODE-failure
  * auto-PAUSE (which tells the owner to hunt a phantom bug). AUTH wins over NETWORK
@@ -384,34 +384,41 @@ export function shouldSuppressGoalChildFailureCounter(input: {
 export function readExternalBlock(
   eventsPath: string,
   cycleId: string,
-): { cause: "auth" | "network"; agents: string[] } | null {
+): { cause: "auth" | "network"; agents: string[]; details: string[] } | null {
   const auth: string[] = [];
   const network: string[] = [];
+  const authDetails: string[] = [];
+  const networkDetails: string[] = [];
   try {
     if (!existsSync(eventsPath)) return null;
     for (const line of readFileSync(eventsPath, "utf8").split("\n")) {
       if (line.trim() === "" || !line.includes("agent:blocked")) continue;
-      let e: { type?: string; cycleId?: string; agent?: string; cause?: string };
+      let e: { type?: string; cycleId?: string; agent?: string; cause?: string; detail?: string };
       try {
         e = JSON.parse(line) as typeof e;
       } catch {
         continue;
       }
       if (e.type !== "agent:blocked" || e.cycleId !== cycleId || e.agent === undefined) continue;
-      if (e.cause === "auth") auth.push(e.agent);
-      else if (e.cause === "network") network.push(e.agent);
+      if (e.cause === "auth") {
+        auth.push(e.agent);
+        if (e.detail !== undefined && e.detail.trim() !== "") authDetails.push(e.detail.trim());
+      } else if (e.cause === "network") {
+        network.push(e.agent);
+        if (e.detail !== undefined && e.detail.trim() !== "") networkDetails.push(e.detail.trim());
+      }
     }
   } catch {
     return null;
   }
   const uniq = (xs: string[]): string[] => [...new Set(xs)];
-  if (auth.length > 0) return { cause: "auth", agents: uniq(auth) };
-  if (network.length > 0) return { cause: "network", agents: uniq(network) };
+  if (auth.length > 0) return { cause: "auth", agents: uniq(auth), details: uniq(authDetails) };
+  if (network.length > 0) return { cause: "network", agents: uniq(network), details: uniq(networkDetails) };
   return null;
 }
 
 /**
- * FIX-363: act on a reviewer external block by CAUSE (the owner's "decide what to
+ * FIX-363/FIX-404: act on an agent external block by CAUSE (the owner's "decide what to
  * do by the cause, don't just keep burning"):
  *   • AUTH    → PAUSE with an actionable "re-login" — it will NOT self-heal, so
  *               continuing to spin only burns cycles on a doomed review.
@@ -425,22 +432,24 @@ function writeReviewerBlockedAlert(
   alertsPath: string,
   eventsPath: string,
   cycleId: string,
-  block: { cause: "auth" | "network"; agents: string[] },
+  block: { cause: "auth" | "network"; agents: string[]; details?: string[] },
 ): void {
   const agents = block.agents.join(", ");
+  const details = (block.details ?? []).filter((d) => d.trim() !== "");
   const fix =
     block.cause === "auth"
       ? `Re-login the blocked agent(s): ${agents} (run each agent once interactively to re-authenticate), then: \`roll loop resume\``
       : `Check network / VPN / proxy (HTTP(S)_PROXY) — agent(s) ${agents} could not reach their API. The loop keeps breathing and recovers automatically once connectivity returns.`;
   const title =
     block.cause === "auth"
-      ? "loop paused — reviewer NOT logged in (auth block, not a code bug)"
-      : "reviewer network-blocked (not a code bug) — loop still breathing";
+      ? "loop paused — agent credential/auth block (not a code bug)"
+      : "agent network-blocked (not a code bug) — loop still breathing";
   const msg =
     `# ALERT — ${title}\n\n` +
     `**Cycle**: ${cycleId}\n` +
     `**Cause**: ${block.cause}\n` +
     `**Agent(s)**: ${agents}\n` +
+    (details.length > 0 ? `**Detail**: ${details.join("; ")}\n` : "") +
     `**Action**: ${fix}\n`;
   try {
     appendFileSync(alertsPath, `${msg}\n`, "utf8");
@@ -459,14 +468,14 @@ function writeReviewerBlockedAlert(
     if (!existsSync(pauseMarker)) {
       try {
         writeFileSync(pauseMarker, msg, "utf8");
-        bus.appendEvent(eventsPath, { type: "policy:safety_pause", loop: "ci", reason: `reviewer auth block: ${agents}`, ts });
+        bus.appendEvent(eventsPath, { type: "policy:safety_pause", loop: "ci", reason: `agent auth block: ${agents}`, ts });
       } catch {
         /* best-effort */
       }
     }
   }
   process.stderr.write(
-    `loop run-once: reviewer ${block.cause} block (${agents}) — ${block.cause === "auth" ? "PAUSED (re-login then resume)" : "breathing (self-heals on reconnect)"}\n`,
+    `loop run-once: agent ${block.cause} block (${agents}) — ${block.cause === "auth" ? "PAUSED (re-login then resume)" : "breathing (self-heals on reconnect)"}\n`,
   );
 }
 

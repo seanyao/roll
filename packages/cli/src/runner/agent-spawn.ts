@@ -304,6 +304,13 @@ export function agentSecretEnvNames(agents: readonly string[] = agentProfileName
   return [...names].sort();
 }
 
+export interface AgentCredentialReadiness {
+  agent: string;
+  requiredEnv: string[];
+  missingEnv: string[];
+  ok: boolean;
+}
+
 export function agentProfile(name: string): AgentProfile {
   const canonical = canonicalProfileName(name);
   const profile = AGENT_PROFILES[canonical];
@@ -315,6 +322,31 @@ export function agentProfile(name: string): AgentProfile {
 export function agentSpawnEnvironment(agent: string, home?: string): Record<string, string> {
   const profile = AGENT_PROFILES[canonicalProfileName(agent)];
   return profile?.childEnv?.(home) ?? {};
+}
+
+export function agentCredentialReadiness(
+  agent: string,
+  env: NodeJS.ProcessEnv = process.env,
+  home?: string,
+): AgentCredentialReadiness {
+  const canonical = canonicalProfileName(agent);
+  const profile = AGENT_PROFILES[canonical];
+  const requiredEnv = [...(profile?.secretEnv ?? [])];
+  const profileEnv = profile?.childEnv?.(home) ?? {};
+  const missingEnv = requiredEnv.filter((name) => {
+    const ambient = (env[name] ?? "").trim();
+    const profileValue = (profileEnv[name] ?? "").trim();
+    return ambient === "" && profileValue === "";
+  });
+  return { agent: canonical, requiredEnv, missingEnv, ok: missingEnv.length === 0 };
+}
+
+export function missingAgentSecretEnv(
+  agent: string,
+  env: NodeJS.ProcessEnv = process.env,
+  home?: string,
+): string[] {
+  return agentCredentialReadiness(agent, env, home).missingEnv;
 }
 
 /** Options for an {@link AgentSpawn} call. */

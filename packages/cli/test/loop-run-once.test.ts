@@ -124,6 +124,28 @@ describe("loop run-once CLI wiring", () => {
     expect(readExternalBlock(join(dir, "nope.ndjson"), "c1")).toBeNull();
   });
 
+  it("readExternalBlock — FIX-404 preserves credential detail for actionable ALERT copy", () => {
+    const dir = mkdtempSync(join(tmpdir(), "roll-extblock-credential-"));
+    const ev = join(dir, "events.ndjson");
+    writeFileSync(
+      ev,
+      `${JSON.stringify({
+        type: "agent:blocked",
+        cycleId: "c404",
+        agent: "reasonix",
+        cause: "auth",
+        stage: "score",
+        detail: "missing required credential env for reasonix: DEEPSEEK_API_KEY",
+        ts: 1,
+      })}\n`,
+      "utf8",
+    );
+    const got = readExternalBlock(ev, "c404");
+    expect(got?.cause).toBe("auth");
+    expect(got?.agents).toEqual(["reasonix"]);
+    expect(got?.details).toEqual(["missing required credential env for reasonix: DEEPSEEK_API_KEY"]);
+  });
+
   it("readExternalBlock — FIX-366: a BUILDER block (stage:build) lands in the SAME taxonomy as review/score", () => {
     const dir = mkdtempSync(join(tmpdir(), "roll-extblock-build-"));
     const ev = join(dir, "events.ndjson");

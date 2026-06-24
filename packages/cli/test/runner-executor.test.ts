@@ -18,6 +18,7 @@ import {
   AGENT_ARGV_TODO,
   AUTORUN_DIRECTIVE,
   agentProfile,
+  missingAgentSecretEnv,
   agentSpawnEnvironment,
   type Ports,
   bootstrapWorktreeDeps,
@@ -308,6 +309,18 @@ describe("US-AGENT-001 AgentProfile factory", () => {
 
     expect(agentSpawnEnvironment("reasonix", home)).toEqual({ DEEPSEEK_API_KEY: "test-profile" });
     expect(agentSpawnEnvironment("claude", home)).toEqual({});
+  });
+
+  it("FIX-404: reports missing required agent credentials only when env and file fallback are both absent", () => {
+    const home = mkdtempSync(join(tmpdir(), "reasonix-missing-home-"));
+    execDirs.push(home);
+    expect(missingAgentSecretEnv("reasonix", {}, home)).toEqual(["DEEPSEEK_API_KEY"]);
+    expect(missingAgentSecretEnv("reasonix", { DEEPSEEK_API_KEY: "from-env" }, home)).toEqual([]);
+
+    mkdirSync(join(home, ".reasonix"), { recursive: true });
+    writeFileSync(join(home, ".reasonix", ".env"), "DEEPSEEK_API_KEY=from-file\n");
+    expect(missingAgentSecretEnv("reasonix", {}, home)).toEqual([]);
+    expect(missingAgentSecretEnv("claude", {}, home)).toEqual([]);
   });
 });
 
@@ -652,6 +665,8 @@ function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<str
     // hermetic (no real-env scorer spawns). Tests that exercise the peer gate /
     // scorer pool pin their own installedAgents.
     installedAgents: () => [],
+    agentCredentialEnv: { DEEPSEEK_API_KEY: "fake-test-key" },
+    agentEnvHome: mkdtempSync(join(tmpdir(), "roll-agent-env-home-")),
     agentSpawn: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0, timedOut: false })),
     evidence: {
       openFrame: vi.fn(() => "/repo/.roll/features/demo/US-RUN-001/20260605-000000-1"),
@@ -708,6 +723,23 @@ function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<str
     ...over,
   };
   return { ports, calls };
+}
+
+async function withMissingReasonixCredentials<T>(fn: (home: string) => Promise<T>): Promise<T> {
+  const oldHome = process.env["HOME"];
+  const oldKey = process.env["DEEPSEEK_API_KEY"];
+  const home = mkdtempSync(join(tmpdir(), "reasonix-missing-env-home-"));
+  execDirs.push(home);
+  process.env["HOME"] = home;
+  delete process.env["DEEPSEEK_API_KEY"];
+  try {
+    return await fn(home);
+  } finally {
+    if (oldHome === undefined) delete process.env["HOME"];
+    else process.env["HOME"] = oldHome;
+    if (oldKey === undefined) delete process.env["DEEPSEEK_API_KEY"];
+    else process.env["DEEPSEEK_API_KEY"] = oldKey;
+  }
 }
 
 describe("executeCommand — command → executor mapping", () => {
@@ -1304,6 +1336,32 @@ describe("executeCommand — command → executor mapping", () => {
       .map((a) => (a as unknown[])[1] as { type?: string })
       .filter((e) => e.type === "agent:blocked");
     expect(blocked).toHaveLength(0);
+  });
+
+  it("FIX-404: builder credential gate blocks missing required env before spawning", async () => {
+    await withMissingReasonixCredentials(async (home) => {
+      const { ports, calls } = fakePorts({
+        agentCredentialEnv: {},
+        agentEnvHome: home,
+        agentSpawn: vi.fn(async () => {
+          throw new Error("credential gate should block before spawn");
+        }),
+      });
+
+      const r = await executeCommand({ kind: "spawn_agent", agent: "reasonix", attempt: 1 }, ports, { ...CTX, agent: "reasonix" });
+
+      expect(r.event).toEqual({ type: "agent_exited", exit: 1, timedOut: false });
+      expect(ports.agentSpawn).not.toHaveBeenCalled();
+      const blocked = (calls["event"] ?? [])
+        .map((a) => (a as unknown[])[1] as { type?: string; stage?: string; cause?: string; agent?: string; detail?: string })
+        .find((e) => e.type === "agent:blocked");
+      expect(blocked).toMatchObject({ type: "agent:blocked", stage: "build", cause: "auth", agent: "reasonix" });
+      expect(blocked?.detail).toContain("DEEPSEEK_API_KEY");
+      expect(blocked?.detail).toContain("reasonix");
+      const alert = (calls["alert"] ?? []).map((a) => (a as unknown[])[1] as string).join("\n");
+      expect(alert).toContain("agent credential readiness");
+      expect(alert).toContain("DEEPSEEK_API_KEY");
+    });
   });
 
   it("US-EVID-001: spawn_agent passes the opened run dir explicitly to the child", async () => {
@@ -3413,6 +3471,63 @@ describe("FIX-346 — auth-failing peer is excluded from the pool and swapped ou
     expect(spawned).toContain("kimi");
     const events = readFileSync(eventsPath, "utf8").split("\n").filter((l) => l.trim() !== "").map((l) => JSON.parse(l) as RollEvent);
     expect(events.some((e) => e.type === "pair:excluded")).toBe(false);
+  });
+
+  it("FIX-404: score credential gate skips a missing-key scorer before spawn and lets another scorer win", async () => {
+    const wt = scoreWorktree();
+    const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-404-score-rt-")));
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "roll-404-score-home-")));
+    execDirs.push(rt, home);
+    mkdirSync(join(rt, ".roll"), { recursive: true });
+    const eventsPath = join(rt, "events.ndjson");
+    writeFileSync(eventsPath, "", "utf8");
+    const spawned: string[] = [];
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      repoCwd: rt,
+      agentCredentialEnv: {},
+      agentEnvHome: home,
+      paths: { ...base.ports.paths, worktreePath: wt, eventsPath, alertsPath: join(rt, "alerts.log") },
+      installedAgents: () => ["claude", "reasonix", "pi"],
+      agentSpawn: vi.fn(async (agent: string) => {
+        spawned.push(agent);
+        if (agent === "reasonix") throw new Error("credential gate should block reasonix before spawn");
+        return { stdout: "SCORE: 8\nVERDICT: good\nRATIONALE: alternate scorer won\n", stderr: "", exitCode: 0, timedOut: false };
+      }),
+      events: {
+        ...base.ports.events,
+        appendEvent: vi.fn((_path: string, event: RollEvent) => {
+          writeFileSync(eventsPath, `${JSON.stringify(event)}\n`, { flag: "a" });
+        }),
+      },
+    });
+
+    await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, agent: "claude", startSec: 1 });
+
+    expect(spawned).not.toContain("reasonix");
+    expect(spawned).toContain("pi");
+    const events = readFileSync(eventsPath, "utf8")
+      .split("\n")
+      .filter((l) => l.trim() !== "")
+      .map((l) => JSON.parse(l) as RollEvent);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "agent:blocked",
+      agent: "reasonix",
+      cause: "auth",
+      stage: "score",
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "pair:score-failure",
+      peer: "reasonix",
+      cause: "auth-block",
+      stage: "score",
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "pair:score",
+      peer: "pi",
+      score: 8,
+      stage: "score",
+    }));
   });
 });
 

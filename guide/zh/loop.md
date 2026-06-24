@@ -513,12 +513,14 @@ roll loop unmute      # 🔔 重新开启弹窗
 
 tmux session 是长寿命的，但 cycle 的**网络环境永远跟随调用方**，不吃 session 的
 记忆：每次开 cycle 窗口时，代理族变量（`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/
-`NO_PROXY` 及小写）都从调用方重新注入。所以两次 cycle 之间本机代理开了又关，照常
-工作——不会再出现"session 在代理时代创建、代理关了之后每个 agent 都 ~45 秒超时
-`Connection error`"（FIX-230）。每个 cycle 还会把生效的代理变量记成一行 `env:`
-进 `.roll/loop/cron.log`，环境型故障从日志直读。其它变量仍来自 `roll loop on`
-时创建的 session；若你轮换了别的关键变量，`roll loop off && roll loop on`
-可重建一个干净 session。
+`NO_PROXY` 及小写）都从调用方重新注入。runner profile 声明的 agent secret env 名
+也会按名透传，例如 Reasonix 的 `DEEPSEEK_API_KEY`；`~/.reasonix/.env` 这类文件凭据
+则由 spawn 层加载。所以两次 cycle 之间本机代理开了又关，照常工作——不会再出现
+"session 在代理时代创建、代理关了之后每个 agent 都 ~45 秒超时 `Connection error`"
+（FIX-230），env-only 的 agent 密钥也不再依赖陈旧 tmux session。每个 cycle 还会把
+生效的代理变量记成一行 `env:` 进 `.roll/loop/cron.log`，环境型故障从日志直读。其它
+变量仍来自 `roll loop on` 时创建的 session；若你轮换了别的关键变量，
+`roll loop off && roll loop on` 可重建一个干净 session。
 
 ### Edit 折叠
 

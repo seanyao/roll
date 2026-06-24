@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### 自动化流水线
+- loop 休眠后自动苏醒：有活时跑 `roll build` 或 `roll fix`，休眠的 loop 自己就醒了。`[loop]`
+
 ## v3.624.3 — 2026-06-24
 
 - **验收报告内容判定与视觉证据闸分离**：`attest:gate` 不再把“报告有 AC/ac-map/E2E 证据但声明的截图面未真实捕获”误报成 empty-shell；这类情况现在按视觉证据缺口给出可操作 reason，避免 correction loop 反复走错修复方向。(FIX-400 follow-up) `[acceptance-evidence]`

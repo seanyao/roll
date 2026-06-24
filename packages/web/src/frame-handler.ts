@@ -34,7 +34,7 @@ export class FrameHandler {
   private readonly callbacks: FrameHandlerCallbacks;
 
   private ws: WebSocket | null = null;
-  private lastEtag: string | null = null;
+  private lastEtagByProject = new Map<string, string>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private degraded = false;
   private stopped = false;
@@ -106,8 +106,13 @@ export class FrameHandler {
 
   private handleSnapshot(frame: DossierSnapshotFrame): void {
     // AC1: ETag unchanged → skip re-render (no churn).
-    if (frame.etag && frame.etag === this.lastEtag) return;
-    this.lastEtag = frame.etag ?? null;
+    const projectSlug = frame.project.slug;
+    if (frame.etag && frame.etag === this.lastEtagByProject.get(projectSlug)) return;
+    if (frame.etag) {
+      this.lastEtagByProject.set(projectSlug, frame.etag);
+    } else {
+      this.lastEtagByProject.delete(projectSlug);
+    }
     this.callbacks.onSnapshot(frame);
   }
 

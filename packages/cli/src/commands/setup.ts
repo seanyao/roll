@@ -36,12 +36,20 @@ import { c, renderState, row, COLS } from "../render.js";
 import {
   installLocal,
   onPath,
+  replacePrimaryAgent,
   rollHome,
   rollPkgConventions,
   rollPkgDir,
   syncConventions,
   syncSkills,
 } from "./setup-shared.js";
+import {
+  discoverInteractiveAgents,
+  isPrimaryValid,
+  readPrimaryAgent,
+  readLineFromStdin,
+  selectPrimaryAgent,
+} from "../lib/interactive-agent.js";
 
 // ─── bash UI helpers (bin/roll:41-56) — err only ─────────────────────────────
 function err(line: string): void {
@@ -280,8 +288,10 @@ function emitSetupUi(steps: Step[]): void {
  */
 export function setupCommand(args: string[]): number {
   let force = false;
+  let reselect = false;
   for (const a of args) {
     if (a === "--force" || a === "-f") force = true;
+    else if (a === "--reselect") reselect = true;
     else {
       // FIX-238 AC2: name the offending argument (the v2 oracle quirk that
       // dropped it is retired — an empty-name error was useless).
@@ -342,6 +352,26 @@ export function setupCommand(args: string[]): number {
   const noColor = (process.env["NO_COLOR"] ?? "") !== "" || !process.stdout.isTTY;
   renderState.useColor = !noColor;
   emitSetupUi(steps);
+
+  // US-ONBOARD-NUDGE-006: primary agent selection (base layer).
+  // Runs after all setup steps; discovered installed set reflects any
+  // config changes from this run (e.g. first-ever config creation).
+  const { installed } = discoverInteractiveAgents();
+  const currentPrimary = readPrimaryAgent();
+  const isTTY = process.stdin.isTTY === true;
+  const selection = selectPrimaryAgent({
+    installed,
+    primary: currentPrimary,
+    isTTY,
+    reselect,
+    readLine: readLineFromStdin,
+  });
+  if (selection.selected !== null) {
+    replacePrimaryAgent(selection.selected);
+  }
+  if (selection.guidance !== null) {
+    process.stdout.write(`\n  ${c("dim", selection.guidance)}\n`);
+  }
 
   // FIX-288 AC5: `roll release` drives the merge via GitHub-native auto-merge
   // (`gh pr merge --auto --squash`). That needs "Allow auto-merge" enabled on

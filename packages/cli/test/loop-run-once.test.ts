@@ -374,14 +374,21 @@ describe("FIX-204A — skill resolution + blind-agent refusal", () => {
       if (prevRt === undefined) delete process.env["ROLL_PROJECT_RUNTIME_DIR"];
       else process.env["ROLL_PROJECT_RUNTIME_DIR"] = prevRt;
     }
-    // The network guard may block the cycle before the skill check. Older
-    // egress-only paths say "egress blocked"; the shared guard says the command
-    // needs the network. On a network-clear machine, the skill check fails with
+    // Early-exit gates (in order): pause, repo pushability, network, skill body.
+    // The network guard may block before the skill check. Older egress-only paths
+    // say "egress blocked"; the shared guard says the command needs the network.
+    // A project with no GitHub remote now fails at the repo-pushability gate.
+    // On a network-clear machine with a remote, the skill check fails with
     // "refusing to spawn a blind agent". All are valid early-exit paths.
     const blockedByEgress = err.includes("egress blocked") || err.includes("egress_blocked");
     const blockedByNetworkGuard = err.includes("needs the network") || err.includes("network unreachable");
     const blockedBySkill = err.includes("refusing to spawn a blind agent");
-    expect(blockedByEgress || blockedByNetworkGuard || blockedBySkill).toBe(true);
+    const blockedByRepo =
+      err.includes("No git remote configured") ||
+      err.includes("GitHub repo unreachable") ||
+      err.includes("Not a git repository") ||
+      err.includes("git remote add origin");
+    expect(blockedByEgress || blockedByNetworkGuard || blockedBySkill || blockedByRepo).toBe(true);
     const { readFileSync: rf, existsSync: ex } = await import("node:fs");
     const { readdirSync: rds } = await import("node:fs");
     const alertFiles = rds(rt).filter((f) => f.startsWith("ALERT-") && f.endsWith(".md"));
@@ -392,7 +399,10 @@ describe("FIX-204A — skill resolution + blind-agent refusal", () => {
       alertBody.includes("egress blocked") ||
       alertBody.includes("egress_blocked") ||
       alertBody.includes("needs the network") ||
-      alertBody.includes("network unreachable");
+      alertBody.includes("network unreachable") ||
+      alertBody.includes("GitHub repo unreachable") ||
+      alertBody.includes("No git remote configured") ||
+      alertBody.includes("Not a git repository");
     expect(alertOk).toBe(true);
     expect(ex(join(rt, "inner.lock"))).toBe(false);
     expect(ex(join(rt, "worktrees"))).toBe(false);

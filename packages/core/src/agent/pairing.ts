@@ -66,9 +66,19 @@ export function isHeterogeneous(a: string, b: string): boolean {
  * resolves to a vendor different from the builder's. A single-agent / single-vendor
  * setup → false → self-review is an allowed recorded fallback (never blocked).
  */
-export function heteroAvailable(installed: readonly string[], workingAgent: string): boolean {
+export function heteroAvailable(
+  installed: readonly string[],
+  workingAgent: string,
+  /** FIX-935: project-config allowed agents. When supplied, only agents in this
+   *  set are considered eligible reviewers. */
+  allowedAgents?: Set<string> | readonly string[],
+): boolean {
+  const allowedSet = allowedAgents === undefined ? undefined : new Set([...allowedAgents].map(canonicalAgentName));
   const working = agentVendor(workingAgent);
-  const reviewable = installed.map(canonicalAgentName).filter((a) => agentCanReviewHeadless(a));
+  const reviewable = installed
+    .map(canonicalAgentName)
+    .filter((a) => agentCanReviewHeadless(a))
+    .filter((a) => allowedSet === undefined || allowedSet.has(a));
   if (working === "" || canonicalAgentName(workingAgent) === "") {
     // No builder identity → can't reason about heterogeneity; conservatively
     // treat any second distinct vendor in the pool as a heterogeneous option.
@@ -493,6 +503,13 @@ export interface SelectInput {
   history?: PairingHistory;
   /** ε for the ε-greedy rotation (default {@link DEFAULT_PAIRING_EPSILON}). */
   epsilon?: number;
+  /**
+   * FIX-935: project-config allowed agents (from `.roll/agents.yaml` slots).
+   * When supplied, candidates are restricted to this set — preventing scoring
+   * and pairing from auto-enabling machine-detected agents the project has not
+   * configured (e.g. codex or claude). Absent → backward-compatible behaviour.
+   */
+  allowedAgents?: Set<string> | readonly string[];
 }
 
 /** Stable string hash (FNV-1a-ish) for the rotation seed — deterministic. */
@@ -516,6 +533,18 @@ export function selectPairingCandidates(input: SelectInput): string[] {
   const { installed, isAvailable, workingAgent, stage, cfg, cycleId, history } = input;
   const working = canonicalAgentName(workingAgent);
   const order = new Map(AGENT_REGISTRY_NAMES.map((n, i) => [n as string, i]));
+  const allowedSet = input.allowedAgents === undefined ? undefined : new Set([...input.allowedAgents].map(canonicalAgentName));
+
+  // FIX-935: pre-filter the machine-detected installed list by the project
+  // config allowlist (`.roll/agents.yaml` slots). This keeps the existing
+  // headless / availability / capability filters untouched while preventing
+  // scoring and pairing from auto-enabling agents the project has not declared.
+  const basePool = installed
+    .map(canonicalAgentName)
+    .filter((a, i, arr) => arr.indexOf(a) === i) // de-dupe
+    .filter((a) => agentCanReviewHeadless(a))
+    .filter((a) => allowedSet === undefined || allowedSet.has(a))
+    .sort((x, y) => (order.get(x) ?? 999) - (order.get(y) ?? 999));
 
   // FIX-343 (step ⑤, OWNER B-decision): the "score" stage is MANDATORY,
   // stage-aware, and RANKS heterogeneity as a PREFERENCE (not a hard filter):
@@ -536,12 +565,7 @@ export function selectPairingCandidates(input: SelectInput): string[] {
   // the enabled/stage/capability gating unchanged (independence by vendor is a
   // HARD requirement there, not merely preferred).
   if (stage === "score") {
-    const scorers = installed
-      .map(canonicalAgentName)
-      .filter((a, i, arr) => arr.indexOf(a) === i) // de-dupe
-      .filter((a) => agentCanReviewHeadless(a))
-      .filter((a) => isAvailable(a))
-      .sort((x, y) => (order.get(x) ?? 999) - (order.get(y) ?? 999));
+    const scorers = basePool.filter((a) => isAvailable(a));
     if (scorers.length === 0) return [];
     // Split into heterogeneous (different vendor than the builder) and
     // same-vendor (incl. the builder's own type) pools. A round-robin seed
@@ -564,16 +588,12 @@ export function selectPairingCandidates(input: SelectInput): string[] {
 
   // Rational hard filter: installed + available + capable-for-stage +
   // heterogeneous from the worker. Order by the registry so the seed maps to a
-  // stable index.
-  const qualified = installed
-    .map(canonicalAgentName)
-    .filter((a, i, arr) => arr.indexOf(a) === i) // de-dupe
-    .filter((a) => agentCanReviewHeadless(a))
+  // stable index. FIX-935: the basePool already respects the project allowlist.
+  const qualified = basePool
     .filter((a) => a !== working)
     .filter((a) => isAvailable(a))
     .filter((a) => (cfg.capability[a] ?? []).includes(stage))
-    .filter((a) => isHeterogeneous(a, working))
-    .sort((x, y) => (order.get(x) ?? 999) - (order.get(y) ?? 999));
+    .filter((a) => isHeterogeneous(a, working));
 
   if (qualified.length === 0) return [];
 

@@ -414,6 +414,28 @@ export function setSlotInText(text: string, slot: AgentSlot, agent: string, mode
 }
 
 /**
+ * FIX-935 — read the set of agents explicitly configured across all routing
+ * slots in an agents.yaml file. This is the project-config allowlist for
+ * scoring and pairing: we never auto-enable a machine-detected agent (e.g.
+ * codex or claude) that the project has not declared in its routing config.
+ *
+ * Pure (text → names) so tests and callers can inject file contents. Returns
+ * canonical agent names in registry order; empty array when the file has no
+ * configured slots or is unreadable.
+ */
+export function readAgentsYamlAllowedAgents(text: string): string[] {
+  const slots: AgentSlot[] = ["easy", "default", "hard", "fallback"];
+  const configured = new Set<string>();
+  for (const slot of slots) {
+    const cfg = readSlotFromText(text, slot);
+    if (cfg?.agent !== undefined && cfg.agent !== "") {
+      configured.add(cfg.agent);
+    }
+  }
+  return AGENT_REGISTRY_NAMES.filter((a) => configured.has(a as string));
+}
+
+/**
  * Bound registry over an {@link AgentEnv} (installed detection), a
  * {@link FileStore} (slot config read/write), and optional {@link ProbeDeps}
  * (availability). The slot config path is resolved from

@@ -35,6 +35,7 @@ import {
   agentsInstalled,
   appendDelivery,
   heteroAvailable,
+  readAgentsYamlAllowedAgents,
   nodeDeliveryStore,
   type CapturedFacts,
   type CycleCommand,
@@ -293,6 +294,26 @@ function epochMs(ts: number): number {
 
 function eventTs(ports: Ports): number {
   return epochMs(ports.clock());
+}
+
+/**
+ * FIX-935 — project-config allowed agents from `.roll/agents.yaml` slots.
+ * Returns a Set of canonical agent names configured across easy/default/hard/
+ * fallback slots. When agents.yaml is missing/unreadable, returns undefined so
+ * callers fall back to the installed list (backward-compatible). This prevents
+ * scoring and pairing from auto-enabling machine-detected agents the project
+ * has not declared (e.g. codex or claude).
+ */
+function projectAllowedAgents(repoCwd: string): Set<string> | undefined {
+  const path = join(repoCwd, ".roll", "agents.yaml");
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    return undefined;
+  }
+  const agents = readAgentsYamlAllowedAgents(text);
+  return agents.length > 0 ? new Set(agents) : undefined;
 }
 
 // ── Ports bundle (the injectable execution surface) ───────────────────────────
@@ -1767,6 +1788,10 @@ export async function executeCommand(
       const peerGateMode = readPeerGateMode(ports.repoCwd);
       const runtimeDir = dirname(ports.paths.eventsPath);
       const cycleIdStr = ctx.cycleId ?? "";
+      // FIX-935: agents explicitly configured in `.roll/agents.yaml` are the
+      // project-config allowlist. Scoring and pairing must not auto-enable
+      // machine-detected agents outside this set (e.g. codex or claude).
+      const peerGateAllowedAgents = projectAllowedAgents(ports.repoCwd);
       // FIX-312: hetero-availability drives the gate (owner ruling: "hetero
       // available → must use it; self only when hetero is truly impossible").
       // Computed uniformly by vendor through the standard model (no per-agent
@@ -1775,7 +1800,7 @@ export async function executeCommand(
       // false ⇒ self-review is an allowed recorded fallback (single-agent setups).
       const peerGateInstalled = ports.installedAgents?.() ?? agentsInstalled(realAgentEnv());
       const peerGateWorker = ctx.agent ?? "claude";
-      const peerHeteroAvailable = heteroAvailable(peerGateInstalled, peerGateWorker);
+      const peerHeteroAvailable = heteroAvailable(peerGateInstalled, peerGateWorker, peerGateAllowedAgents);
       const peerGateSinks = {
         alert: (m: string) => ports.events.appendAlert(ports.paths.alertsPath, m),
         event: (p: { cycleId: string; verdict: string; reasons: string[] }) =>
@@ -1839,6 +1864,8 @@ export async function executeCommand(
           diff: cycleDiff,
           event: (e: PairEvent) => ports.events.appendEvent(ports.paths.eventsPath, e as RollEvent),
           now: () => eventTs(ports),
+          // FIX-935: respect project-config agent allowlist.
+          allowedAgents: peerGateAllowedAgents,
         };
         // Iterate the enabled stages (config order). file-absent/disabled → [] →
         // the loop body never runs, so a repo without pairing.yaml is untouched.
@@ -1866,6 +1893,8 @@ export async function executeCommand(
           diff: cycleDiff,
           event: (e: PairEvent) => ports.events.appendEvent(ports.paths.eventsPath, e as RollEvent),
           now: () => eventTs(ports),
+          // FIX-935: respect project-config agent allowlist.
+          allowedAgents: peerGateAllowedAgents,
         });
         if (retry.status === "reviewed" && peerEvidencePresent(runtimeDir, cycleIdStr)) {
           // Retry produced evidence → re-run the gate; it now sees `consulted`.
@@ -2039,6 +2068,8 @@ export async function executeCommand(
           scorePeer,
           event: (e: PairEvent) => ports.events.appendEvent(ports.paths.eventsPath, e as RollEvent),
           now: () => eventTs(ports),
+          // FIX-935: respect project-config agent allowlist.
+          allowedAgents: peerGateAllowedAgents,
         });
         scoreStatus = scoreResult.status;
       }

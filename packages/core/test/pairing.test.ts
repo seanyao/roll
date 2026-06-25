@@ -112,6 +112,45 @@ describe("selectPairingCandidates — rational hard filter", () => {
     });
     expect(got).toEqual(["kimi"]); // heterogeneous only
   });
+
+  it("FIX-935: code stage filters out machine-detected agents not in project-config allowlist", () => {
+    const got = selectPairingCandidates({
+      installed: ["kimi", "pi", "codex", "claude"],
+      isAvailable: always,
+      workingAgent: "kimi",
+      stage: "code",
+      cfg: cfg({ capability: { kimi: ["code"], pi: ["code"], codex: ["code"], claude: ["code"] } }),
+      cycleId: "c1",
+      allowedAgents: ["kimi", "pi"],
+    });
+    expect(got).toEqual(["pi"]); // codex/claude disallowed despite being capable+installed
+  });
+
+  it("FIX-935: score stage filters out machine-detected agents not in project-config allowlist", () => {
+    const got = selectPairingCandidates({
+      installed: ["kimi", "codex", "claude"],
+      isAvailable: always,
+      workingAgent: "kimi",
+      stage: "score",
+      cfg: cfg({ enabled: false, stages: [], capability: {} }),
+      cycleId: "c1",
+      allowedAgents: ["kimi"],
+    });
+    expect(got).toEqual(["kimi"]); // codex/claude disallowed despite being installed headless scorers
+  });
+
+  it("FIX-935: empty allowlist yields empty candidates (fail-loud)", () => {
+    const got = selectPairingCandidates({
+      installed: ["kimi", "pi"],
+      isAvailable: always,
+      workingAgent: "kimi",
+      stage: "code",
+      cfg: cfg(),
+      cycleId: "c1",
+      allowedAgents: [],
+    });
+    expect(got).toEqual([]);
+  });
 });
 
 describe("selectPairingCandidates — fail-loud empties", () => {
@@ -245,6 +284,15 @@ describe("defaultPairingConfig + renderPairingConfig (roll pair init scaffold)",
   it("FIX-328: heteroAvailable ignores profile-less agents", () => {
     expect(heteroAvailable(["kimi", "made-up-a", "made-up-b"], "kimi")).toBe(false);
     expect(heteroAvailable(["kimi", "made-up-a", "pi"], "kimi")).toBe(true);
+  });
+
+  it("FIX-935: heteroAvailable respects project-config allowed agents", () => {
+    // Machine detects codex and pi, but project config only allows pi.
+    expect(heteroAvailable(["kimi", "pi", "codex"], "kimi", ["kimi", "pi"])).toBe(true);
+    // Machine detects codex, but project config does not allow it.
+    expect(heteroAvailable(["kimi", "codex"], "kimi", ["kimi"])).toBe(false);
+    // Empty allowlist → no heterogeneous peer available.
+    expect(heteroAvailable(["kimi", "pi"], "kimi", [])).toBe(false);
   });
   it("FIX-343: the score stage is same-vendor-friendly — a fresh instance of the BUILDER'S OWN type qualifies", () => {
     // Independence = another assigned fresh session, NOT vendor heterogeneity:

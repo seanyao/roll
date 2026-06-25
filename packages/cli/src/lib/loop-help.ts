@@ -33,6 +33,22 @@ const BANDS: Band[] = [
   { key: "internal", color: "faint", en: "internal", zh: "内部", verbs: "test · run-once · story · notify · enforce-tcr · precheck-ci · hotfix-head-context · agent-routes · pr-heal-run" },
 ];
 
+/** US-LOOP-079m (AC1/AC3): the run-state model documented right in `--help` —
+ *  the three states, what DORMANT means (backlog drained → the loop lane
+ *  self-unloads and stops writing idle records), and the three ways a dormant
+ *  loop wakes. Plain language, no internal jargon; EN and 中 each their own
+ *  block (AC4). */
+const STATE_LINES: Record<Lang, string[]> = {
+  en: [
+    `${c("blue", pad("states", 10))}ACTIVE (lanes armed) · DORMANT (backlog drained → loop lane self-unloads, zero idle records) · PAUSED (you stopped it)`,
+    `${c("blue", pad("wake", 10))}a DORMANT loop wakes on any roll command · the daily dream scan · a PR merge`,
+  ],
+  zh: [
+    `${c("blue", pad("状态", 10))}ACTIVE 运行中(lane 就绪) · DORMANT 休眠(backlog 抽干→自卸 loop lane、不再记空转) · PAUSED 已暂停(你停的)`,
+    `${c("blue", pad("唤醒", 10))}休眠的 loop 由以下唤醒：任意 roll 命令 · 每日 dream 扫描 · PR 合并`,
+  ],
+};
+
 /** Render the grouped `roll loop --help` body for the resolved locale. */
 export function renderLoopHelp(lang: Lang): string {
   const title =
@@ -40,5 +56,5 @@ export function renderLoopHelp(lang: Lang): string {
       ? "用法：roll loop <子命令>\n自治交付循环——按作动/传感/告警/维护分组。"
       : "Usage: roll loop <subcommand>\nThe autonomous delivery loop — grouped control / observe / alerts / maintain.";
   const lines = BANDS.map((b) => `${c(b.color, pad(lang === "zh" ? b.zh : b.en, 10))}${b.verbs}`);
-  return `${title}\n\n${lines.join("\n")}\n`;
+  return `${title}\n\n${lines.join("\n")}\n\n${STATE_LINES[lang].join("\n")}\n`;
 }

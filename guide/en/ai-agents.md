@@ -3,6 +3,28 @@
 Roll supports multiple AI coding agents. Every agent gets the same conventions
 and skills — switching agents does not require changing your workflow.
 
+## Default Agent (`primary_agent`)
+
+`roll setup` and `$roll-onboard` now let you pick a default agent from the ones
+installed on your machine. The choice is stored as `primary_agent` in
+`~/.roll/config.yaml`.
+
+Where `primary_agent` is used:
+- **Interactive entry points** — `roll design`, `roll agent use`, and onboard
+  flows default to it. If you have only one agent installed, it is set
+  automatically.
+- **`roll doctor`** — shows the current primary.
+
+Where it is **not** used:
+- **The autonomous loop** — complexity-based routing reads
+  `.roll/agent-routes.yaml` independently. Your interactive default and your
+  loop rig pool are intentionally separable. For example, you might use
+  `claude` for interactive design sessions but route loop work through
+  `kimi`/`pi`/`reasonix`.
+
+`primary_agent` can differ from the agent you configure for the `default`
+complexity slot — this is by design, not a misconfiguration.
+
 ## Supported Agents
 
 | Agent | CLI command | Notes |
@@ -70,9 +92,12 @@ automatically.
 
 `.roll/agents.yaml` is **per-machine**: it is listed in `.roll/.gitignore` and is
 never committed, so each machine manages its own agent slots. This avoids one
-machine's agent choices leaking to another (or into the shared meta repo). There
-is no global `primary_agent` / `fallback_agent` config key any more — routing is
-entirely per-project complexity slots.
+machine's agent choices leaking to another (or into the shared meta repo).
+
+The `primary_agent` in `~/.roll/config.yaml` (set by `roll setup` / onboard) is
+also per-machine and governs interactive defaults. Loop routing, by contrast,
+uses `.roll/agents.yaml` independently — see the [Default Agent](#default-agent-primary_agent)
+section above for the separation.
 
 ## Scoring and Pairing Respect the Same Slots
 

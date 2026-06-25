@@ -20,7 +20,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { dirname, join } from "node:path";
 import { type RunnerPaths, buildRunRow, dryRunPlan, killLiveAgents, nodePorts, realAgentSpawn, runCycleOnce } from "../runner/index.js";
 import { clearCardFailure, recordCardFailure } from "../runner/skip-cards.js";
-import { clearSelfHeal, selfHealBudget } from "../runner/selfheal-budget.js";
+import { autoRecoverEnabled, clearSelfHeal, selfHealBudget } from "../runner/selfheal-budget.js";
 import { maybeSwitchAgent } from "../runner/selfheal-switch.js";
 import { loopExhaustionSplitCommand } from "./loop-exhaustion-split.js";
 import { parseEstMin } from "../runner/executor.js";
@@ -1051,27 +1051,32 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     if (sid !== "" && failedAgent !== "" && zeroTcr) {
       const backlogFile = join(id.path, ".roll", "backlog.md");
       const bus = new EventBus();
-      const swapped = maybeSwitchAgent({
-        runtimeDir: runtimeDir(id.path),
-        storyId: sid,
-        failedAgent,
-        reason: result.terminal === "blocked" ? "stall" : "zero-tcr",
-        estMin: parseEstMin(readBacklogRow(id.path, sid).description ?? ""),
-        routeDeps,
-        budget: selfHealBudget(),
-        cycleId,
-        now: () => Math.floor(Date.now() / 1000),
-        emit: (ev) => bus.appendEvent(paths.eventsPath, ev as never),
-        remarkTodo: (storyId) => {
-          try {
-            const content = readFileSync(backlogFile, "utf8");
-            const r = markStatus(content, storyId, STATUS_MARKER.todo);
-            if (r.count > 0) writeFileSync(backlogFile, r.content, "utf8");
-          } catch {
-            /* best-effort: a missed re-mark just leaves the row as-is */
-          }
-        },
-      });
+      // FIX-932 kill-switch: only attempt the agent SWAP when auto-recovery is on.
+      // ROLL_LOOP_NO_AUTO_RECOVER=1 skips switch + split entirely → the zero-TCR
+      // cycle falls straight to the fail-fast floor (skip-list / isFail PAUSE).
+      const swapped = autoRecoverEnabled()
+        ? maybeSwitchAgent({
+            runtimeDir: runtimeDir(id.path),
+            storyId: sid,
+            failedAgent,
+            reason: result.terminal === "blocked" ? "stall" : "zero-tcr",
+            estMin: parseEstMin(readBacklogRow(id.path, sid).description ?? ""),
+            routeDeps,
+            budget: selfHealBudget(),
+            cycleId,
+            now: () => Math.floor(Date.now() / 1000),
+            emit: (ev) => bus.appendEvent(paths.eventsPath, ev as never),
+            remarkTodo: (storyId) => {
+              try {
+                const content = readFileSync(backlogFile, "utf8");
+                const r = markStatus(content, storyId, STATUS_MARKER.todo);
+                if (r.count > 0) writeFileSync(backlogFile, r.content, "utf8");
+              } catch {
+                /* best-effort: a missed re-mark just leaves the row as-is */
+              }
+            },
+          })
+        : false;
       if (swapped) {
         resetConsecutiveIdle(id.path, id.slug); // a swap is activity, not idle
         process.stdout.write(
@@ -1080,24 +1085,23 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
         );
         return 0; // managed self-heal swap — never ticks consecutive-fails
       }
-      // ANTI-OSCILLATION (FIX-930): the swap was NOT taken (budget/roster
-      // exhausted). A `gave_up` reverts its row to 📋 Todo and the route port
-      // would re-pick the same exhausted agent forever, so it MUST count toward
-      // the poison-pill skip-list (which `blocked` already gets via the isFail
-      // block below). Skip-listing breaks the loop; clear the spent budget. This
-      // is FIX-930's safety floor — FIX-931 later replaces it with auto-split.
+      // ANTI-OSCILLATION (FIX-930): the swap was NOT taken (budget/roster exhausted,
+      // OR auto-recovery disabled). A `gave_up` reverts its row to 📋 Todo and the
+      // route port would re-pick the same agent forever, so it MUST count toward the
+      // poison-pill skip-list (FIX-363; `blocked` already gets this via isFail below).
+      // The skip-list floor is the fail-fast isolation that holds whether or not
+      // auto-recovery is enabled — it predates FIX-928.
       if (result.terminal === "gave_up") {
         const card = recordCardFailure(runtimeDir(id.path), sid, CARD_SKIP_THRESHOLD);
         if (card.nowSkipped) {
           writeCardSkipAlert(alertsPath, paths.eventsPath, cycleId, sid, card.count);
           resetConsecutiveFails(id.path);
           clearSelfHeal(runtimeDir(id.path), sid);
-          // FIX-931: agents exhausted on this card → try to auto-split it into
-          // smaller sub-stories the agents CAN build (parent → Hold, children
-          // appended), instead of leaving it dead-skip-listed. Best-effort upgrade
-          // over the skip-list floor above; on an irreducible card self-downgrade
-          // ALERTs for human triage and the skip-list keeps it isolated.
-          await autoSplitOnExhaustion(sid, card.count);
+          // FIX-931/932: agents exhausted → auto-split into smaller sub-stories the
+          // agents CAN build (parent → Hold), ONLY when auto-recovery is enabled.
+          // Best-effort upgrade over the skip-list floor; irreducible → self-downgrade
+          // ALERTs for human triage and the skip-list keeps the card isolated.
+          if (autoRecoverEnabled()) await autoSplitOnExhaustion(sid, card.count);
         }
       }
     }
@@ -1139,7 +1143,7 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
         // exhausted all agents is a sizing problem the rigs can't chew → auto-split.
         // A generic `failed` (non-zero exit, a real code defect) stays skip-listed —
         // splitting won't fix a bug, only human/code investigation will.
-        if (result.terminal === "blocked") {
+        if (result.terminal === "blocked" && autoRecoverEnabled()) {
           clearSelfHeal(runtimeDir(id.path), storyId);
           await autoSplitOnExhaustion(storyId, card.count);
         }

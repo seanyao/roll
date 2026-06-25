@@ -32,6 +32,18 @@ export function selfHealBudget(env: NodeJS.ProcessEnv = process.env): number {
   return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : SELFHEAL_AGENT_BUDGET;
 }
 
+/**
+ * FIX-932 — the master kill-switch for the whole self-heal chain (detect →
+ * switch → split). `ROLL_LOOP_NO_AUTO_RECOVER=1` disables agent-switching AND
+ * auto-split, restoring the pre-FIX-928 fail-fast behaviour: a zero-TCR / stalled
+ * cycle goes straight to the skip-list / consecutive-fail PAUSE path. Lets an
+ * operator opt out (debugging a flaky rig, or wanting hard failures surfaced
+ * immediately) without reverting code.
+ */
+export function autoRecoverEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env["ROLL_LOOP_NO_AUTO_RECOVER"] ?? "").trim() !== "1";
+}
+
 export interface SelfHealEntry {
   /** Number of agent swaps performed so far for this story. */
   attempts: number;

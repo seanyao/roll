@@ -1247,12 +1247,14 @@ describe("FIX-309 — declared deliverable_url demands a REAL capture (堵 284 �
   });
 
   it("(FIX-339 AC6) a required card that declares NO surface at all is MUST-DECLARE blocked (hard)", () => {
-    // The hardened must-declare floor: a non-exempt card with an AC block but no
-    // deliverable_url / deliverable_cmd / screenshot_exempt can never produce a
-    // real capture → hard FAIL with the canonical must-declare reason, even with
-    // a fresh content report + a good review-score.
+    // The hardened must-declare floor: a non-exempt card WITH a visual-evidence AC
+    // ("screenshot") but NO deliverable_url / deliverable_cmd / screenshot_exempt
+    // can never produce a real capture → hard FAIL with the canonical must-declare
+    // reason, even with a fresh content report + a good review-score.
+    // FIX-933: this only applies when the card HAS a visual AC — a pure back-end
+    // card with no visual AC is NOT must-declare-blocked (it has nothing to capture).
     const wt = withReport("FIX-309NODECL", 2000, '<figure class="shot"><img src="screenshots/web.png"></figure>');
-    addSpec(wt, "FIX-309NODECL", "# FIX-309NODECL — Casting redesign\n\n## Acceptance Criteria\n\n- [ ] the casting layout renders\n");
+    addSpec(wt, "FIX-309NODECL", "# FIX-309NODECL — Casting redesign\n\n## Acceptance Criteria\n\n- [ ] screenshot of the casting layout\n");
     withPeerScore(wt, "FIX-309NODECL", 8, "good", "c-309nodecl");
     expect(storyRequiresScreenshot(wt, "FIX-309NODECL")).toBe(true);
     expect(verificationReportHasContent(wt, "FIX-309NODECL")).toBe(false);
@@ -1459,8 +1461,9 @@ describe("FIX-339 — multi-surface deliverables (web list + deliverable_cmd) + 
 
   // ── AC6: must-declare HARD floor (violatesMustDeclareSurface + the gate FAIL) ─
   describe("AC6: must-declare hard floor", () => {
-    it("violatesMustDeclareSurface — non-exempt + declares nothing ⇒ true; declared/exempt ⇒ false", () => {
-      const noDecl = withSpec("FIX-MD1", "# FIX-MD1 — redesign\n\n## Acceptance Criteria\n\n- [ ] casting renders\n");
+    it("violatesMustDeclareSurface — non-exempt + declares nothing + HAS visual AC ⇒ true; declared/exempt ⇒ false", () => {
+      // Card HAS a visual-evidence AC ("screenshot") but declares NO surface → violates.
+      const noDecl = withSpec("FIX-MD1", "# FIX-MD1 — redesign\n\n## Acceptance Criteria\n\n- [ ] screenshot of the dashboard\n");
       expect(violatesMustDeclareSurface(noDecl, "FIX-MD1")).toBe(true);
 
       const url = withSpec("FIX-MD2", "---\nid: FIX-MD2\ndeliverable_url: https://app.test/x\n---\n# x\n\n**AC:**\n- [ ] x\n");
@@ -1474,6 +1477,18 @@ describe("FIX-339 — multi-surface deliverables (web list + deliverable_cmd) + 
 
       // missing spec → false (fail open; the gate is the single failure surface).
       expect(violatesMustDeclareSurface(tmp("md-none"), "FIX-MDX")).toBe(false);
+    });
+
+    it("FIX-933: backend card with NO visual-evidence AC → NOT a violation (nothing to capture)", () => {
+      // Pure back-end card: AC blocks but no visual-evidence AC (no screenshot, no
+      // terminal capture, no [visual-evidence] marker). Text-only evidence is fine.
+      const backend = withSpec("FIX-MD0", "# FIX-MD0 — API schema update\n\n## Acceptance Criteria\n\n- [ ] endpoint returns 200\n- [ ] response body includes new field\n");
+      expect(violatesMustDeclareSurface(backend, "FIX-MD0")).toBe(false);
+
+      // Back-end card with AC that happens to use the word "captured" in a
+      // non-visual context (dual-use token without a visual context cue).
+      const telemetry = withSpec("FIX-MD0b", "# FIX-MD0b — telemetry\n\n## Acceptance Criteria\n\n- [ ] telemetry data is captured from the API\n");
+      expect(violatesMustDeclareSurface(telemetry, "FIX-MD0b")).toBe(false);
     });
 
     it("epic-exempt card (policy deny-list) declares no surface yet is NOT a violation (no 误杀 back-end)", () => {
@@ -1490,8 +1505,9 @@ describe("FIX-339 — multi-surface deliverables (web list + deliverable_cmd) + 
     });
 
     it("runAttestGate hard-blocks a no-surface non-exempt card with the canonical reason", () => {
+      // Card HAS a visual-evidence AC ("screenshot") but declares NO surface → blocked.
       const wt = withReport("FIX-MD6", 2000, '<figure class="shot"><img src="screenshots/web.png"></figure>');
-      addSpec(wt, "FIX-MD6", "# FIX-MD6 — Casting redesign\n\n## Acceptance Criteria\n\n- [ ] casting renders\n");
+      addSpec(wt, "FIX-MD6", "# FIX-MD6 — Casting redesign\n\n## Acceptance Criteria\n\n- [ ] screenshot of dashboard\n");
       withPeerScore(wt, "FIX-MD6", 8, "good", "c-md6");
       const { alerts, events, s } = sinks();
       const r = runAttestGate(wt, "FIX-MD6", "c-md6", "hard", 1000, s);
@@ -1503,14 +1519,30 @@ describe("FIX-339 — multi-surface deliverables (web list + deliverable_cmd) + 
     });
 
     it("soft mode warns but does NOT block a no-surface card", () => {
+      // Card HAS a visual-evidence AC ("screenshot") but declares NO surface.
       const wt = withReport("FIX-MD7", 2000, '<figure class="shot"><img src="screenshots/web.png"></figure>');
-      addSpec(wt, "FIX-MD7", "# FIX-MD7 — redesign\n\n## Acceptance Criteria\n\n- [ ] renders\n");
+      addSpec(wt, "FIX-MD7", "# FIX-MD7 — redesign\n\n## Acceptance Criteria\n\n- [ ] screenshot of page\n");
       withPeerScore(wt, "FIX-MD7", 8, "good", "c-md7");
       const { alerts, s } = sinks();
       const r = runAttestGate(wt, "FIX-MD7", "c-md7", "soft", 1000, s);
       expect(r.verdict).toBe("skipped");
       expect(r.blocked).toBe(false);
       expect(alerts[0]).not.toContain("BLOCKED");
+    });
+
+    it("FIX-933: attest gate does NOT block a pure backend card (has AC block but no visual AC)", () => {
+      const wt = withReport("FIX-MD9", 2000, '<div class="ev ev-text">API response proof</div>');
+      addSpec(wt, "FIX-MD9", "# FIX-MD9 — API schema update\n\n## Acceptance Criteria\n\n- [ ] endpoint returns 200\n- [ ] response includes new field\n");
+      // Record a honest web skip in evidence.json (the executor passes --capture-web-skip
+      // when a non-exempt card has no declared surface and no deliverable_cmd).
+      writeEvidenceJson(wt, "FIX-MD9", { captures: [{ kind: "web", out: "screenshots/web.png", taken: false, skipped: "no deliverable_url declared" }] });
+      withPeerScore(wt, "FIX-MD9", 8, "good", "c-md9");
+      const { alerts, events, s } = sinks();
+      const r = runAttestGate(wt, "FIX-MD9", "c-md9", "hard", 1000, s);
+      expect(r.verdict).toBe("produced");
+      expect(r.blocked).toBe(false);
+      expect(alerts).toHaveLength(0);
+      expect(events[0]?.verdict).toBe("produced");
     });
 
     it("a no-AC card is NEVER subjected to must-declare (storyHasAcBlock early return)", () => {

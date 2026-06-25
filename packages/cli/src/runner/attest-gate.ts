@@ -36,6 +36,7 @@ import { type Dirent, existsSync, readFileSync, readdirSync, statSync } from "no
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
+import { hasVisualEvidenceAc } from "../lib/design-visual-evidence.js";
 import { evaluateReviewScoreGate } from "../lib/review-score.js";
 
 export type AttestMode = "soft" | "hard";
@@ -737,11 +738,19 @@ export function declaresAnySurface(specText: string): boolean {
  *   non-exempt (epic-aware {@link screenshotExemption})  AND
  *   {@link declaresAnySurface}(spec) === false  (no deliverable_url / deliverable_cmd / screenshot_exempt)
  *
+ * FIX-933: a card whose ACs carry NO visual-evidence item (no screenshot, no
+ * terminal capture, no [visual-evidence] marker) is a pure back-end card — it has
+ * nothing to capture visually. By construction it can never owe a deliverable
+ * surface declaration; its evidence is text-only by nature. It returns false here
+ * so the attest gate never blocks a text-only back-end delivery for lacking a
+ * visual surface it could not produce.
+ *
  * STRUCTURAL, never a classifier guess: it reads ONLY the recorded frontmatter +
  * the policy epic deny-list, exactly the surfaces the runtime capture lanes read.
- * A card that declared any url/cmd, or that is exempt (per-card OR epic), returns
- * false here — the owner red line (误杀 exempt / back-end / declared cards = 阻断
- * loop) is honoured by construction.
+ * A card that declared any url/cmd, or that is exempt (per-card OR epic), or that
+ * has NO visual-evidence AC (pure back-end), returns false here — the owner red
+ * line (误杀 exempt / back-end / declared cards = 阻断 loop) is honoured by
+ * construction.
  *
  * Reached ONLY from the visual floor ({@link passAcVisualFloor} /
  * {@link verificationReportHasContent}), which `runAttestGate` calls AFTER the
@@ -760,6 +769,10 @@ export function violatesMustDeclareSurface(worktreeCwd: string, storyId: string)
   } catch {
     return false;
   }
+  // FIX-933: a card whose ACs carry no visual-evidence item has no surface to
+  // capture — it is a pure back-end card and never owes a deliverable surface
+  // declaration (deliverable_url / deliverable_cmd / screenshot_exempt).
+  if (!hasVisualEvidenceAc(text)) return false;
   return !declaresAnySurface(text);
 }
 

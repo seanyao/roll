@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### 修复
+- **`roll design` 测试在 CI 全部挂掉**：`discoverInteractiveAgents()` 硬编码了 `process.env.PATH`，测试注入的临时 agent 路径完全没被看见，导致 7 个 happy-path 测试永远返回 exit code 1。现在 `discoverInteractiveAgents` 接受可选的 `AgentEnv`，`designCommand` 把注入的 env 传进去。(FIX-935) `[legacy-onboard]`
+
 ## v3.625.2 — 2026-06-25
 
 ### 自动化流水线

@@ -220,4 +220,27 @@ export const v3Catalog: Catalog = {
     en: "Run %s — Found requirement docs but an empty backlog. Turn them into a domain model + INVEST backlog, then roll loop.",
     zh: "运行 %s — 检测到需求文档但待办为空。将其转化为领域模型 + INVEST 待办列表，然后 roll loop。",
   },
+
+  // `design.*` — explicit `roll design` entry point (US-ONBOARD-NUDGE-004).
+  // Thin wrapper that launches the existing $roll-design skill interactively.
+  "design.usage": {
+    en: "Usage: roll design [--agent <name>]\n  Launch the $roll-design skill in an interactive agent conversation.\n  `--agent` and `ROLL_DESIGN_AGENT` override the configured primary_agent.\n  Unlike `roll init`, this command runs an LLM — run it only when you want to design.",
+    zh: "用法：roll design [--agent <name>]\n  在交互式 agent 对话中启动 $roll-design skill。\n  `--agent` 与 `ROLL_DESIGN_AGENT` 覆盖已配置的 primary_agent。\n  与 `roll init` 不同，本命令会运行 LLM——只在需要设计时执行。",
+  },
+  "design.not_roll_project": {
+    en: "This directory is not a Roll project (no .roll/). Run `roll init` first.",
+    zh: "当前目录不是 Roll 项目（缺少 .roll/）。请先运行 `roll init`。",
+  },
+  "design.skill_missing": {
+    en: "Skill file missing: skills/roll-design/SKILL.md. Run `roll setup` or initialise the skills submodule.",
+    zh: "skill 文件缺失：skills/roll-design/SKILL.md。请运行 `roll setup` 或初始化 skills submodule。",
+  },
+  "design.no_agent": {
+    en: "No AI agent detected. Install one (e.g., claude, kimi, pi) and try again.",
+    zh: "未检测到 AI agent。请安装一个（如 claude、kimi、pi）后重试。",
+  },
+  "design.unknown_agent": {
+    en: "Agent '%s' is unknown or not installed.",
+    zh: "agent '%s' 未知或未安装。",
+  },
 };

@@ -60,6 +60,7 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 | `roll story new <ID> --title <t> [--epic <e>] [--no-index]` | agent/skill 用的单一建卡入口:卡夹 + backlog 行 + 索引刷新(批量用 --no-index) |
 | **项目 · 每仓** | |
 | `roll init` | 在当前项目落地 Roll(历史代码走 agent 接入) |
+| `roll design [--agent <name>]` | 交互式启动 `$roll-design`，把需求转化为领域模型 + INVEST 待办 |
 | `roll offboard` | 从项目移除 Roll |
 | `roll test [--where] [--reset]` | 运行测试套件(通过隔离适配器分发;未知类型显式报错) |
 | `roll daemon <start\|stop\|status>` | 管理只读可观测驻守服务(可选加入,从不自动启动) |

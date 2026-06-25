@@ -49,9 +49,16 @@ curl -fsSL https://seanyao.github.io/roll/install | bash   # install roll
 roll setup                 # configure AI tools globally (one time per machine)
 cd my-project
 roll init                  # initialize this project (or run $roll-onboard for legacy code)
-$roll-design               # open a design session to populate .roll/backlog.md
+roll design                # launch an interactive design session to populate .roll/backlog.md
 roll loop on               # enable autonomous execution
 ```
+
+`roll setup` now lets you pick a default agent from the ones installed on your
+machine — it no longer silently picks the first one. This `primary_agent` is
+stored in `~/.roll/config.yaml` and is used by interactive entry points like
+`roll design` and `roll agent use`. The autonomous loop still routes work through
+`.roll/agent-routes.yaml`, which is intentionally separate — your interactive
+default and your loop rig pool can differ.
 
 ## What Gets Created
 

@@ -216,6 +216,73 @@ export function watchRenderEventFromRollEvent(ev: RollEvent, mode: WatchMode = "
         detail: [ev.path, ev.paused ? "paused" : ""].filter((v) => v !== "").join(" · "),
         severity: "muted",
       };
+    // ── FIX-934: pair:* event rendering ────────────────────────────────────
+    case "pair:selected":
+      return {
+        kind: "gate",
+        observedAt: eventTs(ev),
+        cycleId: ev.cycleId,
+        summary: "pair:selected",
+        detail: `${text(ev.workingAgent)} → ${text(ev.peer)} (${text(ev.stage)})`,
+        severity: "normal",
+      };
+    case "pair:verdict":
+      return {
+        kind: "gate",
+        observedAt: eventTs(ev),
+        cycleId: ev.cycleId,
+        summary: "pair:verdict",
+        detail: [ev.peer, ev.verdict, `${ev.findings} finding${ev.findings === 1 ? "" : "s"}`, ev.stage !== undefined ? ev.stage : ""].filter((v) => v !== "").join(" · "),
+        severity: ev.verdict === "agree" ? "good" : ev.verdict === "object" ? "warn" : "normal",
+      };
+    case "pair:score":
+      return {
+        kind: "gate",
+        observedAt: eventTs(ev),
+        cycleId: ev.cycleId,
+        summary: "pair:score",
+        detail: [ev.peer, String(ev.score), ev.verdict].join(" · "),
+        severity: ev.verdict === "good" ? "good" : ev.verdict === "regression" ? "bad" : "warn",
+      };
+    case "pair:consult": {
+      const durSec = (ev.durationMs / 1000).toFixed(1);
+      const causeTag = ev.cause !== undefined ? ` (${ev.cause})` : "";
+      return {
+        kind: "raw",
+        observedAt: eventTs(ev),
+        cycleId: ev.cycleId,
+        summary: "pair:consult",
+        detail: `${text(ev.peer)} · ${ev.outcome} · ${durSec}s${causeTag}`,
+        severity: ev.outcome === "reviewed" ? "good" : ev.outcome === "timeout" ? "warn" : "bad",
+      };
+    }
+    case "pair:none-available":
+      return {
+        kind: "gate",
+        observedAt: eventTs(ev),
+        cycleId: ev.cycleId,
+        summary: "pair:none-available",
+        detail: `${text(ev.stage)} · ${text(ev.reason)}`,
+        severity: "warn",
+      };
+    case "pair:score-failure":
+      return {
+        kind: "gate",
+        observedAt: eventTs(ev),
+        cycleId: ev.cycleId,
+        summary: "pair:score-failure",
+        detail: [ev.peer, ev.cause, ev.detail !== undefined ? ev.detail : ""].filter((v) => v !== "").join(" · "),
+        severity: "bad",
+      };
+    case "pair:excluded":
+      return {
+        kind: "gate",
+        observedAt: eventTs(ev),
+        cycleId: ev.cycleId,
+        summary: "pair:excluded",
+        detail: `${text(ev.agent)} · ${ev.cause} · ${ev.failures} failure${ev.failures === 1 ? "" : "s"}`,
+        severity: "warn",
+      };
     default:
       return mode === "status" ? null : eventFromUnknown(ev);
   }

@@ -275,6 +275,253 @@ describe("watch-render — compact RollEvent observation model", () => {
     }
   });
 
+  // ── FIX-934: pair:* event rendering ─────────────────────────────────────
+
+  it("renders pair:selected with workingAgent → peer (stage)", () => {
+    const ev = watchRenderEventFromRollEvent({
+      type: "pair:selected",
+      cycleId: "c1",
+      workingAgent: "codex",
+      peer: "kimi",
+      stage: "code",
+      ts: 100,
+    });
+    expect(ev).not.toBeNull();
+    expect(ev!.summary).toBe("pair:selected");
+    expect(ev!.detail).toBe("codex → kimi (code)");
+    expect(ev!.kind).toBe("gate");
+    expect(ev!.severity).toBe("normal");
+    const rendered = renderCompactWatchEvent(ev!);
+    expect(rendered).toContain("pair:selected");
+    expect(rendered).toContain("codex → kimi (code)");
+  });
+
+  it("renders pair:verdict with peer + verdict + findings count", () => {
+    const ev = watchRenderEventFromRollEvent({
+      type: "pair:verdict",
+      cycleId: "c1",
+      peer: "kimi",
+      verdict: "refine",
+      findings: 3,
+      cost: 0.15,
+      stage: "code",
+      ts: 200,
+    });
+    expect(ev).not.toBeNull();
+    expect(ev!.summary).toBe("pair:verdict");
+    expect(ev!.detail).toBe("kimi · refine · 3 findings · code");
+    expect(ev!.kind).toBe("gate");
+    expect(ev!.severity).toBe("normal");
+    const rendered = renderCompactWatchEvent(ev!);
+    expect(rendered).toContain("pair:verdict");
+    expect(rendered).toContain("kimi · refine · 3 findings");
+  });
+
+  it("renders pair:verdict agree as good severity", () => {
+    const ev = watchRenderEventFromRollEvent({
+      type: "pair:verdict",
+      cycleId: "c1",
+      peer: "claude",
+      verdict: "agree",
+      findings: 0,
+      cost: 0.1,
+      ts: 201,
+    });
+    expect(ev!.severity).toBe("good");
+    expect(ev!.detail).toContain("0 findings");
+  });
+
+  it("renders pair:verdict object as warn severity", () => {
+    const ev = watchRenderEventFromRollEvent({
+      type: "pair:verdict",
+      cycleId: "c1",
+      peer: "claude",
+      verdict: "object",
+      findings: 5,
+      cost: 0.2,
+      ts: 202,
+    });
+    expect(ev!.severity).toBe("warn");
+    expect(ev!.detail).toContain("5 findings");
+  });
+
+  it("renders pair:score with peer + score + verdict", () => {
+    const ev = watchRenderEventFromRollEvent({
+      type: "pair:score",
+      cycleId: "c1",
+      peer: "kimi",
+      score: 8,
+      verdict: "good",
+      cost: 0.05,
+      stage: "score",
+      ts: 300,
+    });
+    expect(ev).not.toBeNull();
+    expect(ev!.summary).toBe("pair:score");
+    expect(ev!.detail).toBe("kimi · 8 · good");
+    expect(ev!.kind).toBe("gate");
+    expect(ev!.severity).toBe("good");
+    const rendered = renderCompactWatchEvent(ev!);
+    expect(rendered).toContain("pair:score");
+    expect(rendered).toContain("kimi · 8 · good");
+  });
+
+  it("renders pair:score regression as bad severity", () => {
+    const ev = watchRenderEventFromRollEvent({
+      type: "pair:score",
+      cycleId: "c1",
+      peer: "claude",
+      score: 3,
+      verdict: "regression",
+      cost: 0.03,
+      stage: "score",
+      ts: 301,
+    });
+    expect(ev!.severity).toBe("bad");
+    expect(ev!.detail).toBe("claude · 3 · regression");
+  });
+
+  it("renders pair:consult with peer + outcome + durationMs", () => {
+    const ev = watchRenderEventFromRollEvent({
+      type: "pair:consult",
+      cycleId: "c1",
+      peer: "kimi",
+      durationMs: 45200,
+      outcome: "reviewed",
+      ts: 400,
+    });
+    expect(ev).not.toBeNull();
+    expect(ev!.summary).toBe("pair:consult");
+    expect(ev!.detail).toBe("kimi · reviewed · 45.2s");
+    expect(ev!.kind).toBe("raw");
+    expect(ev!.severity).toBe("good");
+    const rendered = renderCompactWatchEvent(ev!);
+    expect(rendered).toContain("pair:consult");
+    expect(rendered).toContain("kimi · reviewed · 45.2s");
+  });
+
+  it("renders pair:consult timeout with cause tag", () => {
+    const ev = watchRenderEventFromRollEvent({
+      type: "pair:consult",
+      cycleId: "c1",
+      peer: "claude",
+      durationMs: 120000,
+      outcome: "timeout",
+      cause: "auth",
+      ts: 401,
+    });
+    expect(ev!.detail).toBe("claude · timeout · 120.0s (auth)");
+    expect(ev!.severity).toBe("warn");
+  });
+
+  it("renders pair:consult error as bad severity", () => {
+    const ev = watchRenderEventFromRollEvent({
+      type: "pair:consult",
+      cycleId: "c1",
+      peer: "pi",
+      durationMs: 500,
+      outcome: "error",
+      cause: "network",
+      ts: 402,
+    });
+    expect(ev!.severity).toBe("bad");
+    expect(ev!.detail).toContain("error");
+    expect(ev!.detail).toContain("0.5s");
+    expect(ev!.detail).toContain("(network)");
+  });
+
+  it("renders pair:none-available with stage + reason", () => {
+    const ev = watchRenderEventFromRollEvent({
+      type: "pair:none-available",
+      cycleId: "c1",
+      stage: "code",
+      reason: "no qualified heterogeneous peer",
+      ts: 500,
+    });
+    expect(ev).not.toBeNull();
+    expect(ev!.summary).toBe("pair:none-available");
+    expect(ev!.detail).toBe("code · no qualified heterogeneous peer");
+    expect(ev!.kind).toBe("gate");
+    expect(ev!.severity).toBe("warn");
+    const rendered = renderCompactWatchEvent(ev!);
+    expect(rendered).toContain("pair:none-available");
+    expect(rendered).toContain("no qualified heterogeneous peer");
+  });
+
+  it("renders pair:score-failure with peer + cause", () => {
+    const ev = watchRenderEventFromRollEvent({
+      type: "pair:score-failure",
+      cycleId: "c1",
+      peer: "kimi",
+      cause: "timeout",
+      stage: "score",
+      ts: 600,
+    });
+    expect(ev).not.toBeNull();
+    expect(ev!.summary).toBe("pair:score-failure");
+    expect(ev!.detail).toBe("kimi · timeout");
+    expect(ev!.kind).toBe("gate");
+    expect(ev!.severity).toBe("bad");
+    const rendered = renderCompactWatchEvent(ev!);
+    expect(rendered).toContain("pair:score-failure");
+    expect(rendered).toContain("kimi · timeout");
+  });
+
+  it("renders pair:excluded with agent + cause + failures", () => {
+    const ev = watchRenderEventFromRollEvent({
+      type: "pair:excluded",
+      cycleId: "c1",
+      agent: "claude",
+      cause: "auth",
+      failures: 3,
+      ts: 700,
+    });
+    expect(ev).not.toBeNull();
+    expect(ev!.summary).toBe("pair:excluded");
+    expect(ev!.detail).toBe("claude · auth · 3 failures");
+    expect(ev!.kind).toBe("gate");
+    expect(ev!.severity).toBe("warn");
+    const rendered = renderCompactWatchEvent(ev!);
+    expect(rendered).toContain("pair:excluded");
+    expect(rendered).toContain("claude · auth · 3 failures");
+  });
+
+  it("renders pair:excluded singular failure count", () => {
+    const ev = watchRenderEventFromRollEvent({
+      type: "pair:excluded",
+      cycleId: "c1",
+      agent: "pi",
+      cause: "auth",
+      failures: 1,
+      ts: 701,
+    });
+    expect(ev!.detail).toBe("pi · auth · 1 failure");
+  });
+
+  it("renders all pair:* events in compact output", () => {
+    const lines = [
+      line({ type: "pair:selected", cycleId: "c1", workingAgent: "codex", peer: "kimi", stage: "code", ts: 100 }),
+      line({ type: "pair:consult", cycleId: "c1", peer: "kimi", durationMs: 45200, outcome: "reviewed", ts: 400 }),
+      line({ type: "pair:verdict", cycleId: "c1", peer: "kimi", verdict: "refine", findings: 3, cost: 0.15, stage: "code", ts: 200 }),
+      line({ type: "pair:score", cycleId: "c1", peer: "kimi", score: 8, verdict: "good", cost: 0.05, stage: "score", ts: 300 }),
+      line({ type: "pair:none-available", cycleId: "c2", stage: "code", reason: "no peer", ts: 500 }),
+      line({ type: "pair:score-failure", cycleId: "c2", peer: "claude", cause: "auth-block", stage: "score", ts: 600 }),
+      line({ type: "pair:excluded", cycleId: "c2", agent: "claude", cause: "auth", failures: 2, ts: 700 }),
+    ];
+    const rendered = scrubTime(renderCompactWatchLines(lines));
+    expect(rendered).toMatchInlineSnapshot(`
+      [
+        "HH:MM:SS  pair:selected          codex → kimi (code)",
+        "HH:MM:SS  pair:consult           kimi · reviewed · 45.2s",
+        "HH:MM:SS  pair:verdict           kimi · refine · 3 findings · code",
+        "HH:MM:SS  pair:score             kimi · 8 · good",
+        "HH:MM:SS  pair:none-available    code · no peer",
+        "HH:MM:SS  pair:score-failure     claude · auth-block",
+        "HH:MM:SS  pair:excluded          claude · auth · 2 failures",
+      ]
+    `);
+  });
+
   it("unknown event types show clean degradation (no 'unsupported event') (AC3)", () => {
     const ev = watchRenderEventFromRollEvent({ type: "future:event" } as unknown as RollEvent);
     expect(ev).not.toBeNull();

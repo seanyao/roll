@@ -64,6 +64,7 @@ import {
 import { loopPrInboxCommand } from "./loop-pr-inbox.js";
 import { runPrHeal } from "./loop-pr-heal.js";
 import { loopReviewResizeCommand } from "./loop-review-resize.js";
+import { loopExhaustionSplitCommand } from "./loop-exhaustion-split.js";
 import { loopRunOnceCommand } from "./loop-run-once.js";
 import { loopSelfDowngradeCommand } from "./loop-self-downgrade.js";
 import {
@@ -366,6 +367,10 @@ export function registerAll(): void {
     // if the latest peer score flagged the scope too large, design sub-stories
     // from the gaps, gate on heterogeneous consensus, then self-downgrade.
     if (args[0] === "review-resize") return loopReviewResizeCommand(args.slice(1));
+    // `loop exhaustion-split <story> [reason]`: agent-exhaustion auto-split
+    // (FIX-931) — after FIX-930's rotation exhausts every rig on a card,
+    // $roll-design mints sub-stories, then self-downgrade parks the parent.
+    if (args[0] === "exhaustion-split") return loopExhaustionSplitCommand(args.slice(1));
     // `loop fmt`: the observation-window formatter (US-PORT-012) — stdin
     // stream-json → three-tier transcript. v3-native; the watch pipe feeds it.
     if (args[0] === "fmt") return loopFmtCommand(args.slice(1));

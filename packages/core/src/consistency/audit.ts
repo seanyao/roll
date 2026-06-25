@@ -43,6 +43,10 @@ export interface AuditAttestProbe {
   acMap: boolean;
   visualEvidence?: boolean;
   machineSkip?: boolean;
+  /** FIX-933: true when the story's ACs carry no visual-evidence item at all
+   *  (pure back-end card). When true, the done-attest-no-visual rule is
+   *  skipped — a card with no visual surface legitimately has no screenshots. */
+  noVisualSurface?: boolean;
 }
 
 export interface AuditSnapshot {
@@ -189,10 +193,13 @@ export function runConsistencyAudit(s: AuditSnapshot): AuditReport {
     }
     if (!probe.report) {
       add("done-missing-attest", "fail", row.id, `Done without an acceptance report${probe.acMap ? "" : " (no ac-map either)"} — attest_evidence anchor`);
-    } else if (probe.acMap && !(probe.visualEvidence ?? false) && !(probe.machineSkip ?? false)) {
+    } else if (probe.acMap && !(probe.visualEvidence ?? false) && !(probe.machineSkip ?? false) && !(probe.noVisualSurface ?? false)) {
       // FIX-270: owner-decreed iron rule — screenshot evidence (or an honestly
       // recorded machine capture skip) is a RELEASE BLOCKER, not advice. The
       // only bypass is a recorded owner waiver.
+      // FIX-933: a pure back-end card with no visual-evidence AC has no surface
+      // to capture — it legitimately carries no screenshots. The gate is skipped
+      // for these cards (noVisualSurface=true).
       add(
         "done-attest-no-visual",
         "fail",

@@ -29,6 +29,7 @@ import {
 import { type PrMergeInfo, ghRepoSlug, prViewMergeInfo, remoteUrl } from "@roll/infra";
 import { parseEventLine } from "@roll/spec";
 import { cardArchiveDir, readIndex, reportFileName } from "./archive.js";
+import { hasVisualEvidenceAc } from "./design-visual-evidence.js";
 
 /** Max GitHub probes per lane — the fan-out must never stall the audit. */
 export const PROBE_CAP = 20;
@@ -177,11 +178,23 @@ export async function gatherAuditSnapshot(
     const card = cardArchiveDir(projectPath, row.id);
     if (!existsSync(card)) continue; // pre-card era → grandfather lane in the rules
     const reportPath = join(card, "latest", reportFileName(row.id));
+    // FIX-933: a pure back-end card has no visual-evidence AC and thus
+    // legitimately carries no screenshots — the audit rule must not flag it.
+    const specPath = join(card, "spec.md");
+    let noVisualSurface = false;
+    if (existsSync(specPath)) {
+      try {
+        noVisualSurface = !hasVisualEvidenceAc(readFileSync(specPath, "utf8"));
+      } catch {
+        // unreadable spec — conservative: don't skip the visual gate
+      }
+    }
     snapshot.attest[row.id] = {
       report: existsSync(reportPath),
       acMap: existsSync(join(card, "ac-map.json")),
       visualEvidence: existsSync(reportPath) ? hasScreenshotArtifact(reportPath) : false,
       machineSkip: existsSync(reportPath) ? hasMachineCaptureSkip(reportPath) : false,
+      noVisualSurface,
     };
   }
 

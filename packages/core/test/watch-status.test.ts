@@ -96,6 +96,85 @@ describe("watch-status — durable cycle lookup (FIX-382)", () => {
     expect(rendered).toContain("agent unknown");
   });
 
+  // ── FIX-934: pair:* signal labels in status summary ────────────────────
+
+  it("shows pair:selected as last signal with workingAgent → peer (stage)", () => {
+    const rendered = renderWatchStatusFromEventLines(
+      [
+        line({ type: "cycle:start", cycleId: "c1", storyId: "US-X", agent: "codex", model: "m", ts: 1_000 }),
+        line({ type: "pair:selected", cycleId: "c1", workingAgent: "codex", peer: "kimi", stage: "code", ts: 2_000 }),
+      ],
+      3_000,
+    );
+    expect(rendered).toContain("last pair codex → kimi (code)");
+  });
+
+  it("shows pair:verdict as last signal", () => {
+    const rendered = renderWatchStatusFromEventLines(
+      [
+        line({ type: "cycle:start", cycleId: "c1", storyId: "US-X", agent: "codex", model: "m", ts: 1_000 }),
+        line({ type: "pair:verdict", cycleId: "c1", peer: "kimi", verdict: "refine", findings: 3, cost: 0.15, ts: 2_000 }),
+      ],
+      3_000,
+    );
+    expect(rendered).toContain("last pair kimi refine (3 findings)");
+  });
+
+  it("shows pair:score as last signal", () => {
+    const rendered = renderWatchStatusFromEventLines(
+      [
+        line({ type: "cycle:start", cycleId: "c1", storyId: "US-X", agent: "codex", model: "m", ts: 1_000 }),
+        line({ type: "pair:score", cycleId: "c1", peer: "kimi", score: 8, verdict: "good", cost: 0.05, stage: "score", ts: 2_000 }),
+      ],
+      3_000,
+    );
+    expect(rendered).toContain("last pair kimi 8 good");
+  });
+
+  it("shows pair:consult as last signal", () => {
+    const rendered = renderWatchStatusFromEventLines(
+      [
+        line({ type: "cycle:start", cycleId: "c1", storyId: "US-X", agent: "codex", model: "m", ts: 1_000 }),
+        line({ type: "pair:consult", cycleId: "c1", peer: "kimi", durationMs: 45200, outcome: "reviewed", ts: 2_000 }),
+      ],
+      3_000,
+    );
+    expect(rendered).toContain("last pair kimi reviewed 45.2s");
+  });
+
+  it("shows pair:none-available as last signal", () => {
+    const rendered = renderWatchStatusFromEventLines(
+      [
+        line({ type: "cycle:start", cycleId: "c1", storyId: "US-X", agent: "codex", model: "m", ts: 1_000 }),
+        line({ type: "pair:none-available", cycleId: "c1", stage: "code", reason: "no peer", ts: 2_000 }),
+      ],
+      3_000,
+    );
+    expect(rendered).toContain("last pair code none-available");
+  });
+
+  it("shows pair:score-failure as last signal", () => {
+    const rendered = renderWatchStatusFromEventLines(
+      [
+        line({ type: "cycle:start", cycleId: "c1", storyId: "US-X", agent: "codex", model: "m", ts: 1_000 }),
+        line({ type: "pair:score-failure", cycleId: "c1", peer: "claude", cause: "auth-block", stage: "score", ts: 2_000 }),
+      ],
+      3_000,
+    );
+    expect(rendered).toContain("last pair claude auth-block");
+  });
+
+  it("shows pair:excluded as last signal", () => {
+    const rendered = renderWatchStatusFromEventLines(
+      [
+        line({ type: "cycle:start", cycleId: "c1", storyId: "US-X", agent: "codex", model: "m", ts: 1_000 }),
+        line({ type: "pair:excluded", cycleId: "c1", agent: "claude", cause: "auth", failures: 3, ts: 2_000 }),
+      ],
+      3_000,
+    );
+    expect(rendered).toContain("last pair claude excluded auth (3)");
+  });
+
   it("in-window cycle:start takes precedence over durable lookup", () => {
     // cycle:start in window says FIX-99/claude; durable says US-OBS-027/claude.
     const rendered = renderWatchStatusFromEventLines(

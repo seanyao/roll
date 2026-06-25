@@ -68,6 +68,24 @@ function signalLabel(ev: RollEvent): string | undefined {
       return `${ev.type} #${ev.prNumber}`;
     case "alert:notify":
       return `alert ${clean(ev.message)}`;
+    // ── FIX-934: pair:* signal labels ─────────────────────────────────────
+    case "pair:selected":
+      return `pair ${clean(ev.workingAgent)} → ${clean(ev.peer)} (${clean(ev.stage)})`;
+    case "pair:verdict":
+      return `pair ${clean(ev.peer)} ${ev.verdict} (${ev.findings} finding${ev.findings === 1 ? "" : "s"})`;
+    case "pair:score":
+      return `pair ${clean(ev.peer)} ${ev.score} ${ev.verdict}`;
+    case "pair:consult": {
+      const durSec = (ev.durationMs / 1000).toFixed(1);
+      const causeTag = ev.cause !== undefined ? ` (${ev.cause})` : "";
+      return `pair ${clean(ev.peer)} ${ev.outcome} ${durSec}s${causeTag}`;
+    }
+    case "pair:none-available":
+      return `pair ${clean(ev.stage)} none-available`;
+    case "pair:score-failure":
+      return `pair ${clean(ev.peer)} ${ev.cause}`;
+    case "pair:excluded":
+      return `pair ${clean(ev.agent)} excluded ${ev.cause} (${ev.failures})`;
     default:
       return undefined;
   }

@@ -20,6 +20,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { dirname, join } from "node:path";
 import { type RunnerPaths, buildRunRow, dryRunPlan, killLiveAgents, nodePorts, realAgentSpawn, runCycleOnce } from "../runner/index.js";
 import { clearCardFailure, recordCardFailure } from "../runner/skip-cards.js";
+import { addPendingPublish, removePendingPublish } from "../runner/pending-publish.js";
 import { autoRecoverEnabled, clearSelfHeal, selfHealBudget } from "../runner/selfheal-budget.js";
 import { maybeSwitchAgent } from "../runner/selfheal-switch.js";
 import { loopExhaustionSplitCommand } from "./loop-exhaustion-split.js";
@@ -915,6 +916,8 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   // evidence backfill (FIX-243) flips the runs row to merged once main proves it.
   if (result.terminal === "done" || result.terminal === "published") {
     const storyId = (result.state?.ctx?.storyId ?? "").trim();
+    // FIX-1018: a delivered/published story is no longer pending-publish.
+    if (storyId !== "") removePendingPublish(runtimeDir(id.path), storyId);
     announceReport(id.path, id.slug, storyId);
     resetConsecutiveFails(id.path);
     resetConsecutiveIdle(id.path, id.slug); // US-LOOP-079h1: delivered → reset idle counter
@@ -934,6 +937,9 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   // prior streak and never accrue toward an auto-PAUSE), and exit 0.
   if (result.terminal === "local") {
     const storyId = (result.state?.ctx?.storyId ?? "").trim();
+    // FIX-1018: remember that this story has sound but unpublished local work so
+    // the next cycle does not re-implement it from scratch.
+    if (storyId !== "") addPendingPublish(runtimeDir(id.path), storyId);
     announceReport(id.path, id.slug, storyId);
     resetConsecutiveFails(id.path);
     resetConsecutiveIdle(id.path, id.slug); // US-LOOP-079h1: delivered locally → reset idle counter

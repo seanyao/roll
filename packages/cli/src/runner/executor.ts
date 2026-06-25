@@ -162,6 +162,7 @@ import {
 } from "./agent-spawn.js";
 import { classifyBlockSignature, probeAgentReachable, type ReachResult } from "./agent-liveness.js";
 import { readSkipCards } from "./skip-cards.js";
+import { readPendingPublish } from "./pending-publish.js";
 import { readSelfHeal } from "./selfheal-budget.js";
 import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, runPeerGate } from "./peer-gate.js";
 import { declaresAnySurface, deliverableCmdsForStory, readAttestGateMode, rejectedDeliverableCmdsForStory, runAttestGate, screenshotExemption, storyRequiresScreenshot, storySpecPath, verificationReportHasContent, verificationReportPath, webCaptureTargetsForStory } from "./attest-gate.js";
@@ -526,6 +527,12 @@ export interface Ports {
    * `git log` it shells out to runs at most once.
    */
   mergedDelivery?: (storyId: string) => boolean;
+  /**
+   * FIX-1018: true iff this story already has locally-committed-but-unpublished
+   * work from a prior cycle. The runtime pending-publish set is written when a
+   * cycle exits unpublished and cleared on delivery.
+   */
+  pendingPublish?: (storyId: string) => boolean;
   clock: ProcessClock;
   /** Runtime paths the executor writes to. */
   paths: RunnerPaths;
@@ -1187,11 +1194,14 @@ export async function executeCommand(
       // delivery/pr.ts (open PR titles from gh, no second truth source).
       const openPrTitles = await ports.github.openPrTitles(ports.repoCwd);
       const hasOpenPr = buildHasOpenPr(openPrTitles);
+      const pendingPublish = readPendingPublish(dirname(ports.paths.eventsPath));
       const story = pickStory(items as never, {
         hasOpenPr,
         hasMergedDelivery: (id) =>
           (ports.mergedDelivery?.(id) ?? false) || hasMergedDelivery(pickRunRows, id),
         shouldSkip: (id) => skipCards.has(id),
+        hasPendingPublish: (id) =>
+          (ports.pendingPublish?.(id) ?? false) || pendingPublish.has(id),
       });
       if (story === undefined) return { event: { type: "no_story" } };
       // Hook 3 (pre-spawn spec-truth check): the picker only returns a card whose
@@ -4060,6 +4070,9 @@ export function nodePorts(opts: {
     // FIX-906: unified delivery-truth predicate (structured projection over
     // runs + git merges on origin/main — recognizes external/manual merges).
     mergedDelivery,
+    // FIX-1018: skip stories that already have locally-committed-but-unpublished
+    // work from a prior cycle. The executor reads the runtime file at pick time.
+    pendingPublish: (storyId) => readPendingPublish(dirname(opts.paths.eventsPath)).has(storyId),
     // FIX-363: the real connectivity probe reuses the same spawn the reviews use.
     agentReachable: (agent) => probeAgentReachable(agent, spawn, { cwd: opts.repoCwd }),
     git: {

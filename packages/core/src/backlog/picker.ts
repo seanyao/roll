@@ -60,6 +60,14 @@ export interface PickOptions {
    * (`.roll/loop/skip-cards.json`, gitignored) — it never mutates backlog truth.
    */
   shouldSkip?: (id: string) => boolean;
+  /**
+   * FIX-1018: true iff this story already has locally-committed work that failed
+   * to publish (a prior cycle landed on the `local`/`unpublished` terminal). Re-
+   * picking it would re-implement the same work and waste tokens. The runtime
+   * pending-publish set is written when a cycle exits unpublished and cleared on
+   * delivery. Optional; defaults to "nothing pending".
+   */
+  hasPendingPublish?: (id: string) => boolean;
 }
 
 /** First occurrence of a depends-on tag, mirroring the bash regex. */
@@ -125,6 +133,7 @@ export function isEligible(
   const hasOpenPr = opts.hasOpenPr ?? (() => false);
   const hasMergedDelivery = opts.hasMergedDelivery ?? (() => false);
   const shouldSkip = opts.shouldSkip ?? (() => false);
+  const hasPendingPublish = opts.hasPendingPublish ?? (() => false);
 
   // Recognize the Todo marker via the single-source classifier (FIX-300),
   // not an exact-string equality. An annotated status — the Todo marker
@@ -145,6 +154,10 @@ export function isEligible(
   // card stays Todo in the backlog (truth unchanged); an owner clears the
   // skip-list (or fixes the card) to re-arm it.
   if (shouldSkip(item.id)) return false;
+  // FIX-1018: a story with already-committed-but-unpublished work from a prior
+  // cycle must not be re-picked; that would re-implement the same work. It stays
+  // Todo until the publish blocker clears and the pending marker is removed.
+  if (hasPendingPublish(item.id)) return false;
   return true;
 }
 
@@ -221,11 +234,13 @@ export function assessBacklog(
   let hasBlockedByPr = false;
   let hasBlockedByMerged = false;
   let hasBlockedBySkip = false;
+  let hasBlockedByPendingPublish = false;
 
   if (todoCount > 0) {
     const hasOpenPr = opts.hasOpenPr ?? (() => false);
     const hasMergedDelivery = opts.hasMergedDelivery ?? (() => false);
     const shouldSkip = opts.shouldSkip ?? (() => false);
+    const hasPendingPublish = opts.hasPendingPublish ?? (() => false);
 
     for (const it of items) {
       if (classifyStatus(it.status) !== "todo") continue;
@@ -237,6 +252,7 @@ export function assessBacklog(
       let blockedByPr = false;
       let blockedByMerged = false;
       let blockedBySkip = false;
+      let blockedByPendingPublish = false;
 
       for (const dep of parseDependsOn(it.desc)) {
         if (!isDone(dep)) {
@@ -247,11 +263,20 @@ export function assessBacklog(
       if (!blockedByDeps && hasOpenPr(it.id)) blockedByPr = true;
       if (!blockedByDeps && !blockedByPr && hasMergedDelivery(it.id)) blockedByMerged = true;
       if (!blockedByDeps && !blockedByPr && !blockedByMerged && shouldSkip(it.id)) blockedBySkip = true;
+      if (
+        !blockedByDeps &&
+        !blockedByPr &&
+        !blockedByMerged &&
+        !blockedBySkip &&
+        hasPendingPublish(it.id)
+      )
+        blockedByPendingPublish = true;
 
       if (blockedByDeps) hasBlockedByDeps = true;
       if (blockedByPr) hasBlockedByPr = true;
       if (blockedByMerged) hasBlockedByMerged = true;
       if (blockedBySkip) hasBlockedBySkip = true;
+      if (blockedByPendingPublish) hasBlockedByPendingPublish = true;
     }
   }
 
@@ -260,6 +285,7 @@ export function assessBacklog(
   if (hasBlockedByPr) return { hasWork: false, reason: "all_awaiting_merge" };
   if (hasBlockedByMerged) return { hasWork: false, reason: "all_merged_pending" };
   if (hasBlockedBySkip) return { hasWork: false, reason: "all_skip_listed" };
+  if (hasBlockedByPendingPublish) return { hasWork: false, reason: "all_pending_publish" };
 
   if (inProgressCount > 0 || holdCount > 0) {
     return { hasWork: false, reason: "all_in_progress" };
@@ -290,6 +316,7 @@ export function assessBacklog(
  */
 export const DORMANCY_SUPPRESSED_REASONS: ReadonlySet<BacklogReason> = new Set([
   "all_awaiting_merge",
+  "all_pending_publish",
 ]);
 
 /** True when the given backlog reason should prevent the loop from entering DORMANT. */

@@ -9,6 +9,7 @@ import {
   nudgeWithinTier,
   resolveFallback,
   resolveRoute,
+  resolveRouteExcluding,
   type FallbackDeps,
   type HitRates,
   type RouteDeps,
@@ -86,6 +87,50 @@ function routeDeps(slots: Partial<Record<string, SlotInput>>, first?: string): R
     firstInstalled: () => first,
   };
 }
+
+describe("FIX-930 resolveRouteExcluding — failure-driven agent swap", () => {
+  it("returns the tier slot agent when not excluded", () => {
+    const d = routeDeps({ hard: "pi", default: "kimi", fallback: "reasonix" });
+    expect(resolveRouteExcluding("hard", d, [])).toEqual({ agent: "pi", tier: "hard" });
+  });
+
+  it("excludes the failed agent → next chain agent (tier excluded → default)", () => {
+    const d = routeDeps({ hard: "pi", default: "kimi", fallback: "reasonix" });
+    expect(resolveRouteExcluding("hard", d, ["pi"])).toEqual({ agent: "kimi", tier: "hard" });
+  });
+
+  it("walks tier → default → fallback as the exclude-set grows", () => {
+    const d = routeDeps({ hard: "pi", default: "kimi", fallback: "reasonix" });
+    expect(resolveRouteExcluding("hard", d, ["pi", "kimi"])).toEqual({ agent: "reasonix", tier: "hard" });
+  });
+
+  it("returns null when EVERY routable agent is already tried (roster exhausted)", () => {
+    const d = routeDeps({ hard: "pi", default: "kimi", fallback: "reasonix" });
+    expect(resolveRouteExcluding("hard", d, ["pi", "kimi", "reasonix"])).toBeNull();
+  });
+
+  it("carries the slot's model through the swap", () => {
+    const d = routeDeps({ hard: { agent: "pi", model: "glm-5.2" }, default: { agent: "kimi", model: "k2" } });
+    expect(resolveRouteExcluding("hard", d, ["pi"])).toEqual({ agent: "kimi", tier: "hard", model: "k2" });
+  });
+
+  it("falls to firstInstalled (minus excluded) as the last resort, with a warning", () => {
+    const d = routeDeps({}, "reasonix");
+    const r = resolveRouteExcluding("hard", d, ["pi"]);
+    expect(r?.agent).toBe("reasonix");
+    expect(r?.warning).toContain("first installed");
+  });
+
+  it("firstInstalled excluded too → null (no infinite swap)", () => {
+    const d = routeDeps({}, "pi");
+    expect(resolveRouteExcluding("hard", d, ["pi"])).toBeNull();
+  });
+
+  it("default tier walks default → fallback (never reads a tier slot named 'default' twice)", () => {
+    const d = routeDeps({ default: "pi", fallback: "kimi" });
+    expect(resolveRouteExcluding("default", d, ["pi"])).toEqual({ agent: "kimi", tier: "default" });
+  });
+});
 
 describe("resolveRoute slot chain", () => {
   it("uses the tier slot when present", () => {

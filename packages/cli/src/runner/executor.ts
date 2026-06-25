@@ -65,6 +65,7 @@ import {
   reconcileBranchName,
   resumeCandidateBranches,
   resolveRoute,
+  resolveRouteExcluding,
   resolveFallback,
   extractUsage,
   getAgentSpec,
@@ -160,6 +161,7 @@ import {
 } from "./agent-spawn.js";
 import { classifyBlockSignature, probeAgentReachable, type ReachResult } from "./agent-liveness.js";
 import { readSkipCards } from "./skip-cards.js";
+import { readSelfHeal } from "./selfheal-budget.js";
 import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, runPeerGate } from "./peer-gate.js";
 import { declaresAnySurface, deliverableCmdsForStory, readAttestGateMode, rejectedDeliverableCmdsForStory, runAttestGate, screenshotExemption, storyRequiresScreenshot, storySpecPath, verificationReportHasContent, verificationReportPath, webCaptureTargetsForStory } from "./attest-gate.js";
 import { recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
@@ -4193,9 +4195,20 @@ export function nodePorts(opts: {
     },
     route: opts.routeDeps
       ? {
-          resolve(_storyId, estMin) {
+          resolve(storyId, estMin) {
             const tier: Tier = classifyComplexity(estMin);
-            const dec = resolveRoute(tier, opts.routeDeps);
+            const routeDeps = opts.routeDeps;
+            // FIX-930: a story re-picked after a zero-TCR self-heal swap carries a
+            // tried-agent set; route the NEXT untried agent (resolveRouteExcluding)
+            // so the swap actually changes who builds. Empty set ⇒ plain resolveRoute
+            // (unchanged behaviour). The store lives at the MAIN runtime dir (repoCwd
+            // is the main project; .roll is symlink-resolved either way).
+            const rt = (process.env["ROLL_PROJECT_RUNTIME_DIR"] ?? "").trim() || join(opts.repoCwd, ".roll", "loop");
+            const tried = storyId !== "" ? readSelfHeal(rt, storyId).triedAgents : [];
+            const dec =
+              tried.length > 0
+                ? (resolveRouteExcluding(tier, routeDeps, tried) ?? resolveRoute(tier, routeDeps))
+                : resolveRoute(tier, routeDeps);
             // Thread the slot's NATIVE --model through to the spawn; absent ⇒ ""
             // (the orchestrator's `ctx.model !== ""` guard then omits --model and
             // the agent uses its own default).

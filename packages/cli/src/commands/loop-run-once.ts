@@ -12,14 +12,18 @@
  * The handler stays thin: it resolves the project identity + runtime paths and
  * delegates the entire walk to the runner adapter (packages/cli/src/runner).
  */
-import { EventBus, assessBacklog, cycleEndEvent, firstInstalledAgent, mapV2Status, parseBacklog, parsePolicy, readSlotFromText, shouldResize, shouldSuppressDormancy, type AgentSlot, type BacklogItem, type RouteDeps, type RouteSlot } from "@roll/core";
-import { absent, buildTerminalEvent, deriveOrphanVerdict, present, type BacklogReason } from "@roll/spec";
+import { EventBus, assessBacklog, cycleEndEvent, firstInstalledAgent, mapV2Status, markStatus, parseBacklog, parsePolicy, readSlotFromText, shouldResize, shouldSuppressDormancy, type AgentSlot, type BacklogItem, type RouteDeps, type RouteSlot } from "@roll/core";
+import { STATUS_MARKER, absent, buildTerminalEvent, deriveOrphanVerdict, present, type BacklogReason } from "@roll/spec";
 import { createScheduler, launchdLabel, projectIdentity, readLockOwner, releaseLock } from "@roll/infra";
 import { dormantMarkerPath, resolveLoopRunState, writeDormantMarker } from "./loop-sched.js";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type RunnerPaths, buildRunRow, dryRunPlan, killLiveAgents, nodePorts, realAgentSpawn, runCycleOnce } from "../runner/index.js";
 import { clearCardFailure, recordCardFailure } from "../runner/skip-cards.js";
+import { clearSelfHeal, selfHealBudget } from "../runner/selfheal-budget.js";
+import { maybeSwitchAgent } from "../runner/selfheal-switch.js";
+import { parseEstMin } from "../runner/executor.js";
+import { readBacklogRow } from "./attest.js";
 import { warnIfBinaryStale } from "../runner/binary-staleness.js";
 import { rollVersion } from "./version.js";
 import { rollHome } from "./setup-shared.js";
@@ -895,6 +899,7 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     resetConsecutiveFails(id.path);
     resetConsecutiveIdle(id.path, id.slug); // US-LOOP-079h1: delivered → reset idle counter
     clearCardFailure(runtimeDir(id.path), storyId); // FIX-363: a delivered card clears its poison-pill tally
+    clearSelfHeal(runtimeDir(id.path), storyId); // FIX-930: genuine delivery resets the agent-rotation budget
   }
   if (result.terminal === "published") {
     process.stdout.write(
@@ -913,6 +918,7 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     resetConsecutiveFails(id.path);
     resetConsecutiveIdle(id.path, id.slug); // US-LOOP-079h1: delivered locally → reset idle counter
     clearCardFailure(runtimeDir(id.path), storyId); // FIX-363: sound local work clears the card's poison-pill tally
+    clearSelfHeal(runtimeDir(id.path), storyId); // FIX-930: sound local delivery resets the agent-rotation budget
     process.stdout.write(
       "loop run-once: gates passed but publish did not complete — work committed locally on the branch, not published (unpublished, not a failure)\n" +
         "loop run-once: 闸已通过但未完成发布——工作已在分支上本地提交,尚未发布(未发布,非失败)\n",
@@ -1004,6 +1010,73 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     // exit 0 so the schedule stops handing out new cards until `roll loop resume`.
     return externalBlock.cause === "auth" ? 0 : isFail ? 1 : 0;
   }
+
+  // FIX-930: agent auto-switch on a ZERO-TCR cycle (the routed agent ran but
+  // produced nothing — `gave_up` — or stalled into a no-progress `blocked`).
+  // Before treating it as a failure, swap to the NEXT untried agent in the tier
+  // chain: the loop must not die on a card just because the routed agent can't
+  // build it (the exact trap that strands hard cards on pi overnight). Bounded by
+  // the per-story self-heal budget + roster exhaustion. A managed swap re-marks
+  // the story 📋 Todo (re-pickable; the route port excludes the tried agent next
+  // cycle), records the tried agent, emits agent:retry, and returns 0 WITHOUT
+  // ticking consecutive-fails — a self-heal is NOT a systemic failure. Placed
+  // BEFORE the isFail block so a stalled `blocked` swap skips the failure tally.
+  // Offline already short-circuited above is impossible (externalBlock owns auth/
+  // network); a genuine offline failure is handled in the isFail block below.
+  {
+    const sid = (result.state?.ctx?.storyId ?? "").trim();
+    const tcr = result.state?.ctx?.tcrCount ?? 0;
+    const failedAgent = (result.state?.ctx?.agent ?? "").trim();
+    const zeroTcr = tcr === 0 && (result.terminal === "gave_up" || result.terminal === "blocked");
+    if (sid !== "" && failedAgent !== "" && zeroTcr) {
+      const backlogFile = join(id.path, ".roll", "backlog.md");
+      const bus = new EventBus();
+      const swapped = maybeSwitchAgent({
+        runtimeDir: runtimeDir(id.path),
+        storyId: sid,
+        failedAgent,
+        reason: result.terminal === "blocked" ? "stall" : "zero-tcr",
+        estMin: parseEstMin(readBacklogRow(id.path, sid).description ?? ""),
+        routeDeps,
+        budget: selfHealBudget(),
+        cycleId,
+        now: () => Math.floor(Date.now() / 1000),
+        emit: (ev) => bus.appendEvent(paths.eventsPath, ev as never),
+        remarkTodo: (storyId) => {
+          try {
+            const content = readFileSync(backlogFile, "utf8");
+            const r = markStatus(content, storyId, STATUS_MARKER.todo);
+            if (r.count > 0) writeFileSync(backlogFile, r.content, "utf8");
+          } catch {
+            /* best-effort: a missed re-mark just leaves the row as-is */
+          }
+        },
+      });
+      if (swapped) {
+        resetConsecutiveIdle(id.path, id.slug); // a swap is activity, not idle
+        process.stdout.write(
+          `loop run-once: zero-TCR on ${sid} (${failedAgent}) — auto-switching agent next cycle (self-heal)\n` +
+            `loop run-once: ${sid} 零产出(${failedAgent})——下一周期自动换代理(自愈)\n`,
+        );
+        return 0; // managed self-heal swap — never ticks consecutive-fails
+      }
+      // ANTI-OSCILLATION (FIX-930): the swap was NOT taken (budget/roster
+      // exhausted). A `gave_up` reverts its row to 📋 Todo and the route port
+      // would re-pick the same exhausted agent forever, so it MUST count toward
+      // the poison-pill skip-list (which `blocked` already gets via the isFail
+      // block below). Skip-listing breaks the loop; clear the spent budget. This
+      // is FIX-930's safety floor — FIX-931 later replaces it with auto-split.
+      if (result.terminal === "gave_up") {
+        const card = recordCardFailure(runtimeDir(id.path), sid, CARD_SKIP_THRESHOLD);
+        if (card.nowSkipped) {
+          writeCardSkipAlert(alertsPath, paths.eventsPath, cycleId, sid, card.count);
+          resetConsecutiveFails(id.path);
+          clearSelfHeal(runtimeDir(id.path), sid);
+        }
+      }
+    }
+  }
+
   if (isFail) {
     // US-LOOP-079h1: any non-idle terminal resets the idle counter.
     resetConsecutiveIdle(id.path, id.slug);

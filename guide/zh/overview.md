@@ -51,7 +51,7 @@ Roll 运行在三个自主层上：
 ### 故事生命周期
 
 - `$roll-idea` — 一行捕获：即时生成 FIX 或 IDEA 条目 `[core]`
-- `$roll-design` — DDD 驱动规划：澄清 → 设计 → 拆分为 INVEST 故事 `[core]`
+- `roll design` / `$roll-design` — DDD 驱动规划：澄清 → 设计 → 拆分为 INVEST 故事。`roll design` 从命令行在你的 AI agent 里拉起设计技能。`[core]`
 - `$roll-build` — TCR 故事执行 → worktree → PR → 自动合入 `[core]`
 - `$roll-fix` — 快速路径 Bug 修复，同样的 CI 门禁，更轻的流程
 

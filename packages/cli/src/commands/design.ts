@@ -7,11 +7,12 @@
  * this command only wires stdin/stdout.
  */
 import { spawnSync, type SpawnSyncOptions } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { t, v2Catalog, v3Catalog, type Lang } from "@roll/spec";
 import { currentLang } from "./agent-list.js";
 import {
+  agentEnvFromEnv,
   discoverInteractiveAgents,
   interactiveAgentCommand,
   readLineFromStdin,
@@ -146,7 +147,7 @@ export function designCommand(args: string[], deps: Partial<DesignCommandDeps> =
     return 1;
   }
 
-  const { installed } = discoverInteractiveAgents();
+  const { installed } = discoverInteractiveAgents(agentEnvFromEnv(d.env));
   if (installed.length === 0) {
     emit(t(v3Catalog, l, "design.no_agent"));
     return 1;

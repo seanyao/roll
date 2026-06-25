@@ -5,12 +5,13 @@
  * Keeps agent discovery / selection / argv mapping in one place so the
  * interactive entry points do not fork their definition of "installed".
  */
-import { existsSync, readFileSync, readSync } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import {
   agentInstalledByName as coreAgentInstalledByName,
   getAgentSpec,
+  type AgentEnv,
 } from "@roll/core";
 import { realAgentEnv } from "../commands/agent-list.js";
 import { onPath, rollConfig, rollPkgDir } from "../commands/setup-shared.js";
@@ -20,17 +21,48 @@ function expandHome(path: string): string {
   return path.replace(/^~/, home);
 }
 
+export function agentEnvFromEnv(envDict: NodeJS.ProcessEnv): AgentEnv {
+  const pathEnv = envDict["PATH"] ?? "";
+  function commandOnPath(bin: string): boolean {
+    for (const dir of pathEnv.split(delimiter)) {
+      if (dir === "") continue;
+      const p = join(dir, bin);
+      try {
+        const st = statSync(p);
+        if (!st.isFile()) continue;
+        accessSync(p, constants.X_OK);
+        return true;
+      } catch { /* keep scanning */ }
+    }
+    return false;
+  }
+  return {
+    home: envDict["HOME"] ?? homedir(),
+    commandOnPath,
+    dirExists: (p: string) => existsSync(p),
+    fileExecutable: (p: string) => {
+      try {
+        accessSync(p, constants.X_OK);
+        return statSync(p).isFile();
+      } catch { return false; }
+    },
+  };
+}
+
 /**
  * Discover interactive agents from the global `~/.roll/config.yaml` `ai_*`
  * registry, probing PATH/binary-name for known agents and dir-existence for
  * unknown/operator-added entries. Mirrors `discoverOnboardAgents` in init.ts.
+ *
+ * Accepts an optional `AgentEnv` so tests can inject a fabricated PATH; when
+ * omitted the real process environment is probed.
  */
-export function discoverInteractiveAgents(): { installed: string[]; missing: string[] } {
+export function discoverInteractiveAgents(agentEnv?: AgentEnv): { installed: string[]; missing: string[] } {
   const installed: string[] = [];
   const missing: string[] = [];
   const cfg = rollConfig();
   if (!existsSync(cfg)) return { installed, missing };
-  const env = realAgentEnv();
+  const env = agentEnv ?? realAgentEnv();
   for (const line of readFileSync(cfg, "utf8").split("\n")) {
     const match = /^(ai_[^:]+):\s*(.*)$/.exec(line);
     if (match === null) continue;

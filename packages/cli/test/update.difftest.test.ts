@@ -142,7 +142,7 @@ function buildFixture(installMethod: "npm" | "curl"): Fixture {
   mkdirSync(join(home, ".roll"), { recursive: true });
   writeFileSync(
     join(home, ".roll", "config.yaml"),
-    "# Roll config\nlang: en\nai_claude: ~/.claude|CLAUDE.md|CLAUDE.md\n",
+    "# Roll config\nlang: en\n",
   );
   const v = binRollVersion();
   writeFileSync(join(home, ".roll", ".update-check"), `${Math.floor(Date.now() / 1000)} ${v} ${v}\n`);

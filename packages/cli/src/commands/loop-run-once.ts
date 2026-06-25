@@ -22,6 +22,7 @@ import { type RunnerPaths, buildRunRow, dryRunPlan, killLiveAgents, nodePorts, r
 import { clearCardFailure, recordCardFailure } from "../runner/skip-cards.js";
 import { clearSelfHeal, selfHealBudget } from "../runner/selfheal-budget.js";
 import { maybeSwitchAgent } from "../runner/selfheal-switch.js";
+import { loopExhaustionSplitCommand } from "./loop-exhaustion-split.js";
 import { parseEstMin } from "../runner/executor.js";
 import { readBacklogRow } from "./attest.js";
 import { warnIfBinaryStale } from "../runner/binary-staleness.js";
@@ -368,6 +369,25 @@ function resetConsecutiveFails(projectPath: string): void {
   try {
     writeFileSync(join(rt, "consecutive-fails"), "0", "utf8");
   } catch { /* best-effort */ }
+}
+
+/**
+ * FIX-931: hand an agent-exhausted card to the auto-splitter — $roll-design mints
+ * smaller sub-stories the agents CAN build, then self-downgrade parks the parent
+ * 🚫 Hold (or ALERTs on an irreducible/cap-hit card for human triage). Best-effort
+ * productive upgrade over the skip-list floor: a split miss is non-fatal (the
+ * card stays skip-listed/isolated either way).
+ */
+async function autoSplitOnExhaustion(storyId: string, failCount: number): Promise<void> {
+  process.stdout.write(
+    `loop run-once: ${storyId} — agents exhausted (${failCount} failed cycles) → auto-split (FIX-931)\n` +
+      `loop run-once: ${storyId} — 代理全部耗尽(${failCount} 次失败)→ 自动拆卡(FIX-931)\n`,
+  );
+  try {
+    await loopExhaustionSplitCommand([storyId, `${failCount} failed cycles`]);
+  } catch {
+    /* best-effort: the skip-list floor already isolated the card */
+  }
 }
 
 // ── US-LOOP-079h1: consecutive-idle counter ───────────────────────────────────
@@ -1072,6 +1092,12 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
           writeCardSkipAlert(alertsPath, paths.eventsPath, cycleId, sid, card.count);
           resetConsecutiveFails(id.path);
           clearSelfHeal(runtimeDir(id.path), sid);
+          // FIX-931: agents exhausted on this card → try to auto-split it into
+          // smaller sub-stories the agents CAN build (parent → Hold, children
+          // appended), instead of leaving it dead-skip-listed. Best-effort upgrade
+          // over the skip-list floor above; on an irreducible card self-downgrade
+          // ALERTs for human triage and the skip-list keeps it isolated.
+          await autoSplitOnExhaustion(sid, card.count);
         }
       }
     }
@@ -1109,6 +1135,14 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
       if (card.nowSkipped) {
         writeCardSkipAlert(alertsPath, paths.eventsPath, cycleId, storyId, card.count);
         resetConsecutiveFails(id.path);
+        // FIX-931: a STALLED card (blocked = FIX-907 no-progress kill) that
+        // exhausted all agents is a sizing problem the rigs can't chew → auto-split.
+        // A generic `failed` (non-zero exit, a real code defect) stays skip-listed —
+        // splitting won't fix a bug, only human/code investigation will.
+        if (result.terminal === "blocked") {
+          clearSelfHeal(runtimeDir(id.path), storyId);
+          await autoSplitOnExhaustion(storyId, card.count);
+        }
       } else {
         incrementConsecutiveFails(id.path, id.slug, alertsPath, paths.eventsPath, cycleId, storyId, result.terminal ?? "unknown");
       }

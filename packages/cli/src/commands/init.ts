@@ -54,6 +54,7 @@ import { rollVersion } from "./version.js";
 import { resolveProjectName, shouldSelfRegister, writeProjectRow } from "../lib/projects-registry.js";
 import { projectSlug } from "./dashboard.js";
 import { guideExternalToolSetup, silentPreinstallChromium } from "../lib/external-tools.js";
+import { detectDesignHandoff, renderDesignNudge } from "../lib/onboard-nudge.js";
 
 /**
  * FIX-283 (AC4): adopting roll registers the project into `~/.roll/projects.json`
@@ -1067,6 +1068,7 @@ function emitInitUi(
   hasAgents: boolean,
   syncStatus: StepStatus,
   summary: Summary,
+  shouldNudge: boolean,
 ): void {
   const headerLabel = hasAgents ? "REINIT" : "INIT";
   const subtitle = hasAgents ? "重新合并约定" : "项目初始化";
@@ -1127,7 +1129,17 @@ function emitInitUi(
   const icon = fStatus === "ok" ? "✓" : "✗";
   lines.push("  " + c(iconColor, icon) + " " + c(iconColor, fLabel, { bold: true }));
 
+  const nudgeMsg = shouldNudge ? (renderDesignNudge(msgLang())[0] ?? "") : "";
+  const nudgePair: [string, string] | undefined =
+    shouldNudge && nudgeMsg !== ""
+      ? ((): [string, string] => {
+          const sep = nudgeMsg.indexOf(" — ");
+          if (sep < 0) return [nudgeMsg, ""];
+          return [nudgeMsg.slice(0, sep), nudgeMsg.slice(sep + 3)];
+        })()
+      : undefined;
   const nextItems: Array<[string, string]> = [
+    ...(nudgePair ? [nudgePair] : []),
     ["Edit .roll/backlog.md", "open the backlog and add your first US"],
     ["Run roll loop now", "execute one cycle manually to test the flow"],
     ["Enable loop scheduling", "roll loop on  — let it run hourly"],
@@ -1214,10 +1226,13 @@ export function initCommand(args: string[]): number {
   // FIX-283 (AC4): register this project in the cross-project switcher registry.
   registerProject(projectDir);
 
+  // US-ONBOARD-NUDGE-002: detect PRD + empty-backlog signal for NEXT nudge.
+  const shouldNudge = detectDesignHandoff(projectDir).shouldNudge;
+
   // Color decision mirrors _emit_init_v2_ui: NO_COLOR or non-TTY → no color.
   const noColor = (process.env["NO_COLOR"] ?? "") !== "" || !process.stdout.isTTY;
   renderState.useColor = !noColor;
-  emitInitUi(projectDir, hasAgents, syncStatus, summary);
+  emitInitUi(projectDir, hasAgents, syncStatus, summary, shouldNudge);
 
   void err;
   return 0;

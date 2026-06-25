@@ -64,6 +64,24 @@ describe("pickStory — status skip rules", () => {
     const items = [item("FIX-1", TODO), item("US-1", DONE)];
     expect(pickStory(items, { shouldSkip: (id) => id === "FIX-1" })).toBeUndefined();
   });
+
+  it("FIX-1018: skips a story with pending unpublished local work, takes the next Todo", () => {
+    const items = [item("US-1", TODO), item("US-2", TODO)];
+    const pending = new Set(["US-1"]);
+    expect(pickStory(items, { hasPendingPublish: (id) => pending.has(id) })?.id).toBe("US-2");
+    // clearing the runtime marker re-arms the story (backlog truth unchanged).
+    expect(pickStory(items)?.id).toBe("US-1");
+  });
+
+  it("FIX-1018: when every Todo is pending-publish, the loop idles", () => {
+    const items = [item("US-1", TODO), item("US-2", TODO)];
+    const pending = new Set(["US-1", "US-2"]);
+    expect(pickStory(items, { hasPendingPublish: (id) => pending.has(id) })).toBeUndefined();
+    expect(assessBacklog(items, { hasPendingPublish: (id) => pending.has(id) })).toEqual({
+      hasWork: false,
+      reason: "all_pending_publish",
+    });
+  });
 });
 
 describe("pickStory — type priority and file order", () => {

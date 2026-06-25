@@ -18,8 +18,12 @@
  *
  * Invariant I10: deterministic route resolution — same inputs (est_min, slot
  * config, probe verdicts, hit-rates) → same (agent, tier) decision. No clock, no
- * rng. Availability-fallback is a PRE-SPAWN slot fallback only, never a
- * failure-retry loop (mirrors bash: one fallback hop, then ALERT-and-stop).
+ * rng. Availability-fallback ({@link resolveFallback}) is a PRE-SPAWN slot
+ * fallback only, never a failure-retry loop (mirrors bash: one fallback hop, then
+ * ALERT-and-stop). FIX-930 carve-out: the ONE failure-driven agent swap is
+ * {@link resolveRouteExcluding} — a deterministic slot-chain walk that excludes
+ * agents already tried zero-TCR on a story. It lives OUTSIDE the pure cycleStep
+ * (the CLI adapter drives it post-cycle); cycleStep/retryPlan still NEVER swap.
  *
  * Purity: this module never reads the filesystem, runs `python3`, or probes
  * PATH. Tier classification + nudge are reimplemented as pure TS (the python is
@@ -322,4 +326,46 @@ export function resolveFallback(primary: string, deps: FallbackDeps): FallbackVe
   return fb !== undefined && fb !== ""
     ? { kind: "exhausted", primary, fallback: fb }
     : { kind: "exhausted", primary };
+}
+
+// ── FIX-930: failure-driven agent swap (zero-TCR self-heal) ───────────────────
+
+/**
+ * FIX-930 — pick the NEXT routable agent for a tier, EXCLUDING agents already
+ * tried (and failed with zero TCR) on this story. Walks the same slot chain as
+ * {@link resolveRoute} extended with the dedicated `fallback` slot, returning the
+ * first agent NOT in `excluded`; `null` when every chain agent is excluded
+ * (roster exhausted → the caller escalates to split/PAUSE).
+ *
+ * SCOPE (invariant I6/I10 carve-out): this is the ONLY failure-driven agent swap
+ * in the system, and it lives OUTSIDE the pure cycleStep machine — the CLI
+ * adapter calls it after a `gave_up` (zero-TCR) cycle. The inner non-zero-exit
+ * {@link retryPlan} budget still NEVER swaps agents (it retries the SAME agent),
+ * and {@link resolveFallback} stays a pre-spawn availability hop only. Purity is
+ * preserved: same (tier, slots, excluded) → same decision, no clock/rng/IO.
+ * Availability is layered SEPARATELY by the caller via {@link resolveFallback}'s
+ * `isAvailable` probe, keeping this function a deterministic slot-chain walk.
+ */
+export function resolveRouteExcluding(
+  tier: Tier,
+  deps: RouteDeps,
+  excluded: readonly string[],
+): RouteDecision | null {
+  const ex = new Set(excluded.filter((a) => a !== ""));
+  const chain: Array<Tier | "fallback"> = tier === "default" ? ["default", "fallback"] : [tier, "default", "fallback"];
+  for (const slot of chain) {
+    const s = deps.readSlot(slot);
+    if (s?.agent !== undefined && s.agent !== "" && !ex.has(s.agent)) {
+      const out: RouteDecision = { agent: s.agent, tier };
+      if (s.model !== undefined && s.model !== "") out.model = s.model;
+      return out;
+    }
+  }
+  // Last resort: the first-installed agent, when not already excluded (no slot
+  // config → no model). Mirrors resolveRoute's firstInstalled rung.
+  const first = deps.firstInstalled();
+  if (first !== undefined && first !== "" && !ex.has(first)) {
+    return { agent: first, tier, warning: `agents.yaml: tier '${tier}' chain exhausted by exclusions; using first installed '${first}'` };
+  }
+  return null; // every routable agent already tried on this story → exhausted.
 }

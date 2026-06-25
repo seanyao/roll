@@ -192,6 +192,10 @@ export type RollEvent =
   // the same isolate-from-counter + PAUSE(auth)/breathe(network) path — one block
   // taxonomy for builder/reviewer/scorer (no new precheck, no probe, no cache).
   | { type: "agent:blocked"; cycleId: string; agent: string; cause: "auth" | "network"; stage: "build" | "review" | "score"; detail: string; ts: number }
+  // FIX-930 — failure-driven agent swap on a zero-TCR/stalled cycle: the loop
+  // re-marks the story Todo and routes the NEXT untried agent (excluding the one
+  // that just gave up). `attempt` is the 1-based self-heal attempt for the story.
+  | { type: "agent:retry"; cycleId: string; storyId: string; fromAgent: string; toAgent: string; attempt: number; reason: "zero-tcr" | "stall"; ts: number }
   // Attest gate (FIX-207) — every actual delivery records whether a fresh
   // acceptance report was produced ("produced") or silently skipped ("skipped").
   | { type: "attest:gate"; cycleId: string; verdict: "produced" | "skipped"; reasons: string[]; ts: number }

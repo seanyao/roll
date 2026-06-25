@@ -164,6 +164,19 @@ describe("rule done-missing-attest — Done with no acceptance evidence", () => 
     );
     expect(r.findings.filter((f) => f.rule === "done-attest-no-visual")).toEqual([]);
   });
+
+  it("FIX-933: pure back-end card (no visual surface) legitimately has no screenshot → no finding", () => {
+    const r = runConsistencyAudit(
+      snap({
+        backlog: [{ id: "FIX-BACKEND", status: "✅ Done · PR#17 · evidence" }],
+        prEvidence: { "FIX-BACKEND": { state: "MERGED", mergedAtSec: EPOCH } },
+        attest: { "FIX-BACKEND": { report: true, acMap: true, noVisualSurface: true } },
+      }),
+    );
+    expect(r.findings.filter((f) => f.rule === "done-attest-no-visual")).toEqual([]);
+    // still has the report (done-missing-attest passed since report=true)
+    expect(r.findings.filter((f) => f.rule === "done-missing-attest" && f.subject === "FIX-BACKEND")).toEqual([]);
+  });
 });
 
 describe("rule usage-missing — the cost-blind-guardrail incident", () => {

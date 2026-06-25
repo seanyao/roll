@@ -40,7 +40,6 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
-  agentInstalledByName as coreAgentInstalledByName,
   agentsInstalled,
   defaultPairingConfig,
   getAgentSpec,
@@ -55,6 +54,7 @@ import { resolveProjectName, shouldSelfRegister, writeProjectRow } from "../lib/
 import { projectSlug } from "./dashboard.js";
 import { guideExternalToolSetup, silentPreinstallChromium } from "../lib/external-tools.js";
 import { detectDesignHandoff, renderDesignNudge } from "../lib/onboard-nudge.js";
+import { discoverInteractiveAgents } from "../lib/interactive-agent.js";
 
 /**
  * FIX-283 (AC4): adopting roll registers the project into `~/.roll/projects.json`
@@ -257,28 +257,8 @@ function legacyFileSummary(projectDir: string): string {
   return `no AGENTS.md, ${parts.join(" ")}`;
 }
 
-function expandHome(path: string): string {
-  const home = process.env["HOME"] ?? homedir();
-  return path.replace(/^~/, home);
-}
-
 function discoverOnboardAgents(): { installed: string[]; missing: string[] } {
-  const installed: string[] = [];
-  const missing: string[] = [];
-  const cfg = join(rollHome(), "config.yaml");
-  if (!existsSync(cfg)) return { installed, missing };
-  const env = realAgentEnv();
-  for (const line of readFileSync(cfg, "utf8").split("\n")) {
-    const match = /^(ai_[^:]+):\s*(.*)$/.exec(line);
-    if (match === null) continue;
-    let name = (match[1] ?? "").slice("ai_".length);
-    if (name === "kimi_code") name = "kimi";
-    name = getAgentSpec(name)?.name ?? name;
-    const dir = expandHome(((match[2] ?? "").split("|")[0] ?? "").trim());
-    const target = coreAgentInstalledByName(env, name, dir) ? installed : missing;
-    if (!target.includes(name)) target.push(name);
-  }
-  return { installed, missing };
+  return discoverInteractiveAgents();
 }
 
 function readLineFromStdin(): string | null {

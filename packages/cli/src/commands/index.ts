@@ -50,6 +50,7 @@ import { indexCommand } from "./index-gen.js";
 import { storyNewCommand } from "./story-new.js";
 import { storyValidateCommand } from "./story-validate.js";
 import { initCommand } from "./init.js";
+import { designCommand } from "./design.js";
 // REFACTOR-049: `roll lang` retired → use `roll config lang <zh|en|--reset>`.
 // The lang module's write/clear/read surfaces are consumed by config.ts.
 import { loopFmtCommand } from "./loop-fmt.js";
@@ -275,6 +276,10 @@ export function registerAll(): void {
   // launcher, --apply plan consumption, unknown flags, and no-template guard).
   // No sub-paths on bash.
   registerPorted("init", initCommand, { help: "Usage: roll init [apply]\n  Onboard this project (agent-driven; `apply` runs a written plan).\n项目接入。" });
+  // `design`: explicit thin entry point for the $roll-design skill
+  // (US-ONBOARD-NUDGE-004). Loads the skill and launches the selected agent;
+  // all design logic lives in the skill, not here.
+  registerPorted("design", designCommand, { help: "Usage: roll design [--agent <name>]\n  Launch $roll-design interactively.\n交互式启动 $roll-design。" });
   // REFACTOR-048: `migrate-features` (card-skeleton backfill for pre-card-era
   // stories, US-META-007) retired — that one-time backfill completed; new cards
   // are minted via `roll story new`.

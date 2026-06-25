@@ -32,6 +32,11 @@ describe("v3Catalog", () => {
     "releasev3.no_pkg",
     "loopv3.monitor_retired",
     "loopv3.attach_retired",
+    "design.usage",
+    "design.not_roll_project",
+    "design.skill_missing",
+    "design.no_agent",
+    "design.unknown_agent",
   ];
 
   it("every v3 key carries both en and zh (no mixed-language gap)", () => {

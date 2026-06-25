@@ -144,7 +144,8 @@ export async function loopSelfDowngradeCommand(
   const rt = (process.env["ROLL_PROJECT_RUNTIME_DIR"] ?? "").trim() || join(project, ".roll", "loop");
   const eventsPath = join(rt, "events.ndjson");
   const alertsPath =
-    (process.env["ROLL_LOOP_ALERT"] ?? "").trim() || join(rt, `ALERT-${projectSlug(project)}.md`);
+    (process.env["ROLL_LOOP_ALERT"] ?? "").trim() ||
+    join(rt, `ALERT-${(process.env["ROLL_MAIN_SLUG"] ?? "").trim() || projectSlug(project)}.md`);
 
   const store = new BacklogStore();
   let snap;

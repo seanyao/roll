@@ -3,7 +3,13 @@
 ## Unreleased
 
 ### 自动化流水线
-- loop 休眠后自动苏醒：有活时跑 `roll build` 或 `roll fix`，休眠的 loop 自己就醒了。`[loop]`
+- **Loop 会自己睡、自己醒了**：backlog 没活时，loop 自动进入休眠——卸掉定时任务、不再每半小时空转、账本也不再记一堆“无事可做”。等你加了新卡、敲了任意 `roll` 命令、或夜间 Dream 扫出活，它自己就醒过来接着干。省电、省噪音、账本干净。(US-LOOP-079a, US-LOOP-079b, US-LOOP-079d2, US-LOOP-079e, US-LOOP-079f1, US-LOOP-079f2, US-LOOP-079h1, US-LOOP-079h2, US-LOOP-079j, US-LOOP-079k, US-LOOP-079n) `[loop-engine]`
+
+### 上手引导
+- **`roll init` 之后会告诉你下一步**：当你手里有需求文档、但 backlog 还是空的时候，`roll status` / `roll doctor` 会提醒你去跑 `$roll-design` 把它变成可执行的 backlog——不用再靠“自己本来就知道”。(US-ONBOARD-NUDGE-003) `[legacy-onboard]`
+
+### 修复
+- **无人值守时不再被 macOS 录屏授权弹窗打断**：headless 运行（launchd 定时任务 / CI）时跳过屏幕录制权限探测，不再反复弹授权框、也不会卡住整轮循环。(FIX-927) `[tools-layer]`
 
 ## v3.624.3 — 2026-06-24
 

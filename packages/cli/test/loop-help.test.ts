@@ -50,6 +50,26 @@ describe("roll loop --help groups — US-DOSSIER-035", () => {
     }
   });
 
+  it("US-LOOP-079m AC1/AC3: --help documents the 3 run-states + dormancy + wake sources", () => {
+    const en = help("en");
+    // the three states, each named
+    expect(en).toMatch(/states\s+ACTIVE.*DORMANT.*PAUSED/);
+    // DORMANT meaning: lane self-unloads + zero idle records
+    expect(en).toMatch(/DORMANT.*self-unloads.*zero idle records/);
+    // the three wake sources
+    expect(en).toMatch(/wake\s+a DORMANT loop wakes on.*roll command.*dream scan.*PR merge/);
+    const zh = help("zh");
+    expect(zh).toMatch(/状态\s+ACTIVE.*DORMANT.*PAUSED/);
+    expect(zh).toContain("自卸 loop lane");
+    expect(zh).toMatch(/唤醒.*roll 命令.*dream 扫描.*PR 合并/);
+  });
+
+  it("US-LOOP-079m AC4: EN and 中 each their own block — no inline language mix on the state lines", () => {
+    // EN block carries no CJK; 中 block carries the CJK labels.
+    expect(/[一-鿿]/.test(help("en"))).toBe(false);
+    expect(help("zh")).toContain("休眠");
+  });
+
   it("AC6: EN/中 snapshots (single-language per locale, color scrubbed)", () => {
     expect(help("en")).toMatchSnapshot();
     expect(help("zh")).toMatchSnapshot();

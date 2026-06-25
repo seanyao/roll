@@ -32,12 +32,33 @@ Requirements: Node.js ≥ 22. Roll is a self-contained TypeScript CLI — no run
 
 ```bash
 cd your-project
-roll init           # set up Roll here
+roll init           # set up Roll here (interactive confirmation)
 roll loop on        # let AI work through the backlog (optional)
 ```
 
 `roll init` detects legacy code and routes you to `$roll-onboard` when appropriate.
+For a fresh project, it prints a project-type summary and asks for confirmation
+before creating files; pass `--auto` to skip the prompt in scripts and CI.
 First time through? Start with [Getting started](guide/en/getting-started.md).
+
+## Quick start for new projects
+
+A new project needs a remote before the loop can push branches and open PRs:
+
+```bash
+cd your-project
+roll init
+# 1. Create a GitHub repository for the project and add it as `origin`
+# 2. Push the current branch so the loop has somewhere to land work
+git push -u origin main
+# 3. Start the autonomous loop
+roll loop on
+```
+
+The loop will fail fast with an alert if the repository is missing or
+unreachable, so it never burns agent tokens against a broken push target.  If
+you need to stop the loop, `roll loop pause` persists a pause marker; resume
+with `roll loop resume` when ready.
 
 ## Commands
 

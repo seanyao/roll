@@ -51,7 +51,7 @@ You set goals, review PRs, and run releases. Everything in between is Roll.
 ### Story Lifecycle
 
 - `$roll-idea` — one-liner capture: instant FIX or IDEA backlog entry `[core]`
-- `$roll-design` — DDD-backed planning: clarify → design → split into INVEST stories `[core]`
+- `roll design` / `$roll-design` — DDD-backed planning: clarify → design → split into INVEST stories. `roll design` launches the skill in your AI agent from the command line. `[core]`
 - `$roll-build` — TCR story execution → worktree → PR → auto-merge `[core]`
 - `$roll-fix` — fast-path bug fix, same CI gate, lighter ceremony
 

@@ -45,9 +45,14 @@ curl -fsSL https://seanyao.github.io/roll/install | bash   # 安装 roll
 roll setup                 # 全机器配置 AI 工具（仅需一次）
 cd my-project
 roll init                  # 初始化该项目（遗留项目走 $roll-onboard）
-$roll-design               # 开设计会话，填充 .roll/backlog.md
+roll design                # 开交互式设计对话，填充 .roll/backlog.md
 roll loop on               # 开启自主执行
 ```
+
+`roll setup` 让你从本机已安装的 agent 里选一个默认 agent。
+这个 `primary_agent` 存在 `~/.roll/config.yaml`，交互入口（`roll design`、
+`roll agent use`）会用它作为默认。自主 loop 仍然按 `.roll/agent-routes.yaml` 的
+分级 rig 路由——二者有意可分：你的交互默认和 loop rig 池可以不同。
 
 ## 创建的文件
 

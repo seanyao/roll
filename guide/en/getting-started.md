@@ -24,7 +24,27 @@ roll init
 `roll init` creates the `.roll/` workspace and `AGENTS.md`. Existing codebases
 may be routed into the legacy onboarding flow before files are written.
 
-## 3. Add One Backlog Item
+## 3. Go from Requirements to a Backlog
+
+If you have requirement docs (a PRD, sketches, notes) but your backlog is still
+empty, Roll will detect this and guide you toward design. Three commands will
+show the prompt: `roll init` (at the end), `roll status`, and `roll doctor`.
+
+To start an interactive design session right away:
+
+```bash
+roll design
+```
+
+This launches the `roll-design` skill in your AI agent. You talk through the
+domain model, the agent writes INVEST stories into `.roll/backlog.md` — and then
+`roll loop` takes over.
+
+You can also run `$roll-design` directly inside your agent if you prefer.
+
+If you already have a story in mind and just want to add it fast, skip to step 4.
+
+## 4. Add One Backlog Item
 
 Add a small story card with one sentence:
 
@@ -40,7 +60,7 @@ Then edit `.roll/features/<epic>/<ID>/spec.md` so the ACs describe what
 
 Keep the first story tiny: one visible behavior, one clear test path.
 
-## 4. Start The Loop
+## 5. Start The Loop
 
 ```bash
 roll loop on
@@ -64,7 +84,7 @@ For an immediate local cycle instead of waiting for the schedule:
 roll loop now
 ```
 
-## 5. Render Acceptance Evidence
+## 6. Render Acceptance Evidence
 
 After the story lands and the backlog row is `✅ Done`, render the offline
 acceptance report:

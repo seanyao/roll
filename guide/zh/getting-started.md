@@ -24,7 +24,26 @@ roll init
 `roll init` 会创建 `.roll/` 工作区和 `AGENTS.md`。已有代码库可能会先进入
 legacy onboarding，再真正写文件。
 
-## 3. 写第一条 Backlog
+## 3. 从需求到 Backlog
+
+如果你手头有需求文档（PRD、草图、笔记），但 backlog 还是空的，Roll 会检测到
+这个状态并在三处提示你进入设计阶段：`roll init`（结尾）、`roll status`、
+`roll doctor`。
+
+想立刻开始设计对话：
+
+```bash
+roll design
+```
+
+这条命令会在你的 AI agent 里拉起 `roll-design` 技能。你描述领域模型，agent 把
+INVEST 故事写入 `.roll/backlog.md`——然后 `roll loop` 接过去接着干。
+
+你也可以直接在 agent 里跑 `$roll-design`，效果一样。
+
+如果你心里已经有故事，只想快速加一条，跳到第 4 步。
+
+## 4. 写第一条 Backlog
 
 用一句话建一张小故事卡：
 
@@ -38,7 +57,7 @@ roll idea "Add a health check endpoint"
 
 第一条故事要小：一个可见行为，一条明确测试路径。
 
-## 4. 启动 Loop
+## 5. 启动 Loop
 
 ```bash
 roll loop on
@@ -61,7 +80,7 @@ roll loop watch
 roll loop now
 ```
 
-## 5. 生成验收报告
+## 6. 生成验收报告
 
 故事落地、backlog 行变成 `✅ Done` 后，生成离线验收报告：
 

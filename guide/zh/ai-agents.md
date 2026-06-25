@@ -2,6 +2,24 @@
 
 Roll 支持多种 AI 编码 Agent。每个 Agent 使用相同的约定和技能——切换 Agent 不需要改变工作流。
 
+## 默认 Agent（`primary_agent`）
+
+`roll setup` 和 `$roll-onboard` 让你从本机已安装的 agent 里选一个默认。选择
+结果作为 `primary_agent` 存在 `~/.roll/config.yaml`。
+
+哪些场景用 `primary_agent`：
+- **交互入口** —— `roll design`、`roll agent use`、onboard 流程默认用它。若本机
+  只装了一个 agent，它会自动设为 primary。
+- **`roll doctor`** —— 显示当前 primary。
+
+哪些场景**不**用：
+- **自主 loop** —— 复杂度路由独立读取 `.roll/agent-routes.yaml`。你的交互默认和
+  loop rig 池有意可分。例如你可以用 `claude` 做交互式设计对话，但 loop 任务路由到
+  `kimi`/`pi`/`reasonix`。
+
+`primary_agent` 和你在复杂度槽里配置的 `default` 档 agent 可以不同——这是有意
+设计的，不是配置错误。
+
 ## 支持的 Agent
 
 | Agent | CLI 命令 | 备注 |
@@ -64,8 +82,11 @@ roll agent use kimi       # 把 easy/default/hard 三档全锁成一个（fallba
 
 `.roll/agents.yaml` 是 **per-machine** 的：它列在 `.roll/.gitignore` 里，绝不
 commit，所以每台机器各管各的 agent 槽。这样一台机器的 agent 选择不会泄漏到另一台
-（或进共享的 meta repo）。不再有全局 `primary_agent` / `fallback_agent` 配置项 ——
-路由完全由项目本地的复杂度槽决定。
+（或进共享的 meta repo）。
+
+`~/.roll/config.yaml` 里的 `primary_agent`（由 `roll setup` / onboard 设置）也是
+per-machine 的，管交互入口默认值。loop 路由独立使用 `.roll/agents.yaml`——二者分离，
+详见上方 [默认 Agent](#默认-agentprimary_agent) 一节。
 
 ## 评分与结对也受同一套槽约束
 

@@ -74,6 +74,15 @@ machine's agent choices leaking to another (or into the shared meta repo). There
 is no global `primary_agent` / `fallback_agent` config key any more — routing is
 entirely per-project complexity slots.
 
+## Scoring and Pairing Respect the Same Slots
+
+The agents declared in `.roll/agents.yaml` also act as the project-config
+allowlist for peer scoring and cross-agent pairing. A machine may have additional
+agents installed (for example, `codex` or `claude`), but scoring and pairing only
+auto-enable agents that are configured in the slots. This keeps unattended review
+and score pools aligned with the project's declared agent roster instead of
+drifting with whatever happens to be installed.
+
 ## Adaptive Soft Priority (in-tier nudge)
 
 On top of the complexity tier — which is a **hard** constraint that decides

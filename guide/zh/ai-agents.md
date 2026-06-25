@@ -67,6 +67,13 @@ commit，所以每台机器各管各的 agent 槽。这样一台机器的 agent 
 （或进共享的 meta repo）。不再有全局 `primary_agent` / `fallback_agent` 配置项 ——
 路由完全由项目本地的复杂度槽决定。
 
+## 评分与结对也受同一套槽约束
+
+`.roll/agents.yaml` 里声明的 agent 同时充当 peer 评分与跨 agent 结对的项目级白名单。
+机器上可能还装了其他 agent（例如 `codex` 或 `claude`），但评分和结对只自动启用槽位里
+已配置的 agent。这样无人值守的评审与打分池就不会随本机已装软件漂移，而是始终对齐项目
+声明的 agent 名册。
+
 ## 透明软优先（档内 nudge）
 
 在复杂度档之上 —— 档（`easy` / `default` / `hard`）是**硬约束**，决定查哪个槽 ——

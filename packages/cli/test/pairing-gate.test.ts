@@ -298,6 +298,24 @@ describe("runPairing — US-PAIR-004 multi-stage triggering", () => {
     });
     await expect(runPairing(dir, dir, rt, "c1", "kimi", "test", dThrow)).resolves.toEqual({ status: "error" });
   });
+
+  it("FIX-935: allowedAgents from project config prevents auto-enabling machine-detected codex", async () => {
+    const { dir, rt } = project(ENABLED);
+    const spawnedPeers: string[] = [];
+    const { d, events } = deps({
+      installed: ["kimi", "pi", "codex"],
+      allowedAgents: ["kimi", "pi"],
+      reviewPeer: async (peer) => {
+        spawnedPeers.push(peer);
+        return { verdict: "agree", findings: [], cost: 0.04 };
+      },
+    });
+    const res = await runPairing(dir, dir, rt, "c1", "kimi", "code", d);
+    expect(res.status).toBe("reviewed");
+    expect(spawnedPeers).not.toContain("codex");
+    const selecteds = events.filter((e) => e.type === "pair:selected") as Extract<PairEvent, { type: "pair:selected" }>[];
+    expect(selecteds.every((e) => e.peer !== "codex")).toBe(true);
+  });
 });
 
 describe("enabledPairingStages — executor stage iteration seam (US-PAIR-004)", () => {
@@ -465,6 +483,24 @@ describe("runScorePairing — US-PAIR-009", () => {
     const r = await runScorePairing(dir, rt, "c1", "kimi", "US-X-001", "roll-build", "s", d);
     expect(r.status).toBe("error");
     expect(readStoryReviewScores(dir, "US-X-001")).toHaveLength(0);
+  });
+
+  it("FIX-935: score stage respects project-config allowedAgents and does not auto-enable codex", async () => {
+    const { dir, rt } = project(SCORE_CFG);
+    const tried: string[] = [];
+    const { d, events } = scoreDeps({
+      installed: ["kimi", "pi", "codex"],
+      allowedAgents: ["kimi", "pi"],
+      scorePeer: async (peer: string) => {
+        tried.push(peer);
+        return { score: 8, verdict: "good" as const, rationale: "allowed peer scored", cost: 0.02 };
+      },
+    });
+    const r = await runScorePairing(dir, rt, "c1", "kimi", "US-X-935", "roll-build", "s", d);
+    expect(r.status).toBe("scored");
+    expect(tried).not.toContain("codex");
+    const selecteds = events.filter((e) => e.type === "pair:selected") as Extract<PairEvent, { type: "pair:selected" }>[];
+    expect(selecteds.every((e) => e.peer !== "codex")).toBe(true);
   });
 
   // ── FIX-343 (② BOUNDED hetero preference) ──────────────────────────────────
@@ -974,6 +1010,55 @@ describe("retryPeerConsult — FIX-293 follow-up: same-type SEPARATE-SESSION fal
     const none = events.find((e) => e.type === "pair:none-available") as Extract<PairEvent, { type: "pair:none-available" }>;
     expect(none.reason).toContain("no peer could be consulted");
     expect(existsSync(join(rt, "peer", "cycle-c-none.pair.json"))).toBe(false);
+  });
+});
+
+// ── FIX-935: peer-gate retry respects project-config allowed agents ───────────
+
+describe("retryPeerConsult — FIX-935 allowedAgents filter", () => {
+  it("does not spawn a machine-detected codex peer when project config only allows kimi/pi", async () => {
+    const { rt } = project(null);
+    const spawnedPeers: string[] = [];
+    const { d } = retryDeps({
+      installed: ["kimi", "pi", "codex"],
+      workingAgent: "kimi",
+      allowedAgents: ["kimi", "pi"],
+      reviewPeer: async (peer) => { spawnedPeers.push(peer); return { verdict: "agree", findings: [], cost: 0.03 }; },
+    });
+    const r = await retryPeerConsult(rt, rt, "c-935-het", d);
+    expect(r.status).toBe("reviewed");
+    expect(r.peer).toBe("pi");
+    expect(spawnedPeers).not.toContain("codex");
+  });
+
+  it("falls back to same-type separate session only when the working agent is allowed", async () => {
+    const { rt } = project(null);
+    const spawnedPeers: string[] = [];
+    const { d } = retryDeps({
+      installed: ["kimi", "codex"],
+      workingAgent: "kimi",
+      allowedAgents: ["kimi"],
+      reviewPeer: async (peer) => { spawnedPeers.push(peer); return { verdict: "agree", findings: [], cost: 0.03 }; },
+    });
+    const r = await retryPeerConsult(rt, rt, "c-935-same", d);
+    expect(r.status).toBe("reviewed");
+    expect(r.peer).toBe("kimi");
+    expect(r.sameTypeFallback).toBe(true);
+    expect(spawnedPeers).toEqual(["kimi"]);
+    expect(spawnedPeers).not.toContain("codex");
+  });
+
+  it("blocks when no allowed heterogeneous peer exists and working agent itself is disallowed", async () => {
+    const { rt } = project(null);
+    const { d, events } = retryDeps({
+      installed: ["kimi", "pi"],
+      workingAgent: "kimi",
+      allowedAgents: ["pi"], // working agent not allowed → no same-type fallback either
+      reviewPeer: async () => null,
+    });
+    const r = await retryPeerConsult(rt, rt, "c-935-block", d);
+    expect(r.status).toBe("timeout");
+    expect(events.some((e) => e.type === "pair:selected" && (e as Extract<PairEvent, { type: "pair:selected" }>).peer === "kimi")).toBe(false);
   });
 });
 

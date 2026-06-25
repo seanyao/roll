@@ -99,6 +99,11 @@ export interface RunPairingDeps {
   history?: PairingHistory;
   /** ε for the ε-greedy rotation (default 0.2). */
   epsilon?: number;
+  /**
+   * FIX-935: project-config allowed agents (from `.roll/agents.yaml` slots).
+   * When supplied, candidates are restricted to this set.
+   */
+  allowedAgents?: Set<string> | readonly string[];
 }
 
 export interface RunPairingResult {
@@ -233,6 +238,8 @@ export async function runPairing(
       // US-PAIR-006: history-driven ε-greedy preference (no-op when absent).
       ...(deps.history !== undefined ? { history: deps.history } : {}),
       ...(deps.epsilon !== undefined ? { epsilon: deps.epsilon } : {}),
+      // FIX-935: respect project-config agent allowlist.
+      ...(deps.allowedAgents !== undefined ? { allowedAgents: deps.allowedAgents } : {}),
     });
     if (candidates.length === 0) {
       // fail-loud: no silent skip — the absence is itself an audited event.
@@ -323,6 +330,11 @@ export interface RunScorePairingDeps {
    * is NOT a new selection mode, only a distinct label + scoring prompt.
    */
   scoreStage?: "score" | "design";
+  /**
+   * FIX-935: project-config allowed agents (from `.roll/agents.yaml` slots).
+   * When supplied, candidates are restricted to this set.
+   */
+  allowedAgents?: Set<string> | readonly string[];
 }
 
 export interface RunScorePairingResult {
@@ -407,6 +419,8 @@ export async function runScorePairing(
       cycleId,
       ...(deps.history !== undefined ? { history: deps.history } : {}),
       ...(deps.epsilon !== undefined ? { epsilon: deps.epsilon } : {}),
+      // FIX-935: respect project-config agent allowlist.
+      ...(deps.allowedAgents !== undefined ? { allowedAgents: deps.allowedAgents } : {}),
     });
     if (candidates.length === 0) {
       // Fail-loud: no scorer to spawn a fresh session of → BLOCK (no fallback).
@@ -490,10 +504,13 @@ export async function runScorePairing(
       // escalation gives them one more chance with a hard budget cap to avoid
       // death-spiralling on genuinely dead peers.
       const triedPeers = new Set([...heteroPool, ...sameVendorPool].map(canonicalAgentName));
+      const allowedSet = deps.allowedAgents === undefined ? undefined : new Set([...deps.allowedAgents].map(canonicalAgentName));
       const allHeadless = deps.installed
         .map(canonicalAgentName)
         .filter((a, i, arr) => arr.indexOf(a) === i)
-        .filter((a) => agentCanReviewHeadless(a));
+        .filter((a) => agentCanReviewHeadless(a))
+        // FIX-935: escalation must also respect the project-config allowlist.
+        .filter((a) => allowedSet === undefined || allowedSet.has(a));
       const escalationPool = allHeadless.filter((a) => !triedPeers.has(a));
       if (escalationPool.length > 0) {
         // Serial dispatch — we are budget-conscious and only need ONE score.
@@ -594,6 +611,11 @@ export interface RetryPeerConsultDeps {
   now: () => number;
   /** Override the 30s default (tests). */
   timeoutMs?: number;
+  /**
+   * FIX-935: project-config allowed agents (from `.roll/agents.yaml` slots).
+   * When supplied, candidates are restricted to this set.
+   */
+  allowedAgents?: Set<string> | readonly string[];
 }
 
 export interface RetryPeerConsultResult {
@@ -648,10 +670,14 @@ export async function retryPeerConsult(
 ): Promise<RetryPeerConsultResult> {
   try {
     const working = canonicalAgentName(deps.workingAgent);
+    const allowedSet = deps.allowedAgents === undefined ? undefined : new Set([...deps.allowedAgents].map(canonicalAgentName));
     const distinct = deps.installed
       .map(canonicalAgentName)
       .filter((a, i, arr) => arr.indexOf(a) === i)
-      .filter((a) => agentCanReviewHeadless(a));
+      .filter((a) => agentCanReviewHeadless(a))
+      // FIX-935: peer-gate retry must not auto-enable machine-detected agents
+      // outside the project's `.roll/agents.yaml` allowlist.
+      .filter((a) => allowedSet === undefined || allowedSet.has(a));
     // FIX-331 (+ codex peer-review): rotate through EVERY heterogeneous peer so one
     // peer's transient unavailability (claude 5h limit / kimi cold-start timeout)
     // doesn't sink the consult. Upholds FIX-293's HARD gate:

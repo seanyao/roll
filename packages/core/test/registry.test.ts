@@ -17,6 +17,7 @@ import {
   lineModelValue,
   parseProbeCache,
   probeTtl,
+  readAgentsYamlAllowedAgents,
   readSlotFromText,
   renderProbeCache,
   setSlotInText,
@@ -292,5 +293,36 @@ describe("slot config write", () => {
     // overwrite hard back to model-less.
     reg.setSlot(".roll/agents.yaml", "hard", "pi");
     expect(reg.readSlot(".roll/agents.yaml", "hard")).toEqual({ agent: "pi" });
+  });
+});
+
+describe("readAgentsYamlAllowedAgents (FIX-935)", () => {
+  it("returns the union of agents configured across all four slots", () => {
+    const txt =
+      "schema: v3\n" +
+      "easy: { agent: reasonix }\n" +
+      "default: { agent: pi, model: deepseek/deepseek-v4-pro:high }\n" +
+      "hard: { agent: kimi }\n" +
+      "fallback: { agent: kimi }\n";
+    expect(readAgentsYamlAllowedAgents(txt).sort()).toEqual(["kimi", "pi", "reasonix"]);
+  });
+
+  it("canonicalises provider aliases and ignores empty slots", () => {
+    const txt =
+      "schema: v3\n" +
+      "easy: { agent: deepseek }\n" +
+      "default: { agent: openai }\n" +
+      "hard: { agent: claude }\n";
+    // deepseek → pi, openai → codex; claude stays claude.
+    expect(readAgentsYamlAllowedAgents(txt).sort()).toEqual(["claude", "codex", "pi"]);
+  });
+
+  it("returns empty array when no slots are configured", () => {
+    expect(readAgentsYamlAllowedAgents("schema: v3\n")).toEqual([]);
+  });
+
+  it("returns empty array for empty/malformed text", () => {
+    expect(readAgentsYamlAllowedAgents("")).toEqual([]);
+    expect(readAgentsYamlAllowedAgents("not yaml at all\n")).toEqual([]);
   });
 });

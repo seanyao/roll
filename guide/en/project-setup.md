@@ -54,7 +54,8 @@ roll loop on               # enable autonomous execution
 ```
 
 `roll setup` now lets you pick a default agent from the ones installed on your
-machine — it no longer silently picks the first one. This `primary_agent` is
+machine — it lets you pick a default agent from the ones installed on your
+machine. This `primary_agent` is
 stored in `~/.roll/config.yaml` and is used by interactive entry points like
 `roll design` and `roll agent use`. The autonomous loop still routes work through
 `.roll/agent-routes.yaml`, which is intentionally separate — your interactive

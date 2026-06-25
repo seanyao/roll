@@ -5,7 +5,7 @@ and skills — switching agents does not require changing your workflow.
 
 ## Default Agent (`primary_agent`)
 
-`roll setup` and `$roll-onboard` now let you pick a default agent from the ones
+`roll setup` and `$roll-onboard` let you pick a default agent from the ones
 installed on your machine. The choice is stored as `primary_agent` in
 `~/.roll/config.yaml`.
 

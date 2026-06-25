@@ -9,7 +9,8 @@ export type CyclePhase =
   | "publish"
   | "merge-wait"
   | "reconcile"
-  | "cleanup";
+  | "cleanup"
+  | "stalled";
 
 /** @deprecated Legacy v2/read-side outcome vocabulary. New writes use TerminalOutcome. */
 export type LegacyCycleOutcome = "delivered" | "built" | "failed" | "blocked" | "aborted" | "reverted";

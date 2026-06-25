@@ -88,8 +88,11 @@ import {
   observeCommits,
   maybeBuildHeartbeat,
   cycleTimeoutVerdict,
+  stallVerdict,
   CYCLE_WALL_TIMEOUT_SEC,
   CYCLE_NO_PROGRESS_SEC,
+  CYCLE_STALL_THRESHOLD_SEC,
+  STALL_STARTUP_GRACE_SEC,
   newNormalizerState,
   normalizerFor,
   type ActivitySignal,
@@ -673,6 +676,29 @@ export function readCycleTimeoutThresholds(repoCwd: string): CycleTimeoutThresho
   };
 }
 
+/** FIX-929 — resolved stall-detection threshold. */
+export interface StallThresholdConfig {
+  thresholdSec: number;
+}
+
+/**
+ * FIX-929 — resolve the stall-detection threshold. Order:
+ *   1. Env override (ROLL_LOOP_STALL_THRESHOLD_MIN) — operator/test can pin a
+ *      value without editing policy.yaml;
+ *   2. The core default ({@link CYCLE_STALL_THRESHOLD_SEC}, 600s = 10min).
+ * 0 / negative ⇒ stall detection DISABLED.
+ */
+export function readStallThreshold(repoCwd: string): StallThresholdConfig {
+  const envNum = (key: string): number | undefined => {
+    const raw = (process.env[key] ?? "").trim();
+    if (raw === "") return undefined;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : undefined;
+  };
+  const thresholdSec = envNum("ROLL_LOOP_STALL_THRESHOLD_MIN");
+  return { thresholdSec: thresholdSec ?? CYCLE_STALL_THRESHOLD_SEC };
+}
+
 /** A live timeout-watchdog handle. `markProgress()` resets the no-progress clock
  *  (the spawn calls it on every stdout chunk); `stop()` clears the timer and
  *  returns whether the watchdog fired (so the caller can fold it into the spawn
@@ -804,6 +830,102 @@ export function startSpawnTimeoutWatchdog(opts: {
     stop: () => {
       clearInterval(timer);
       return { firedReason };
+    },
+  };
+}
+
+/** FIX-929 — agent stall detector. Monitors agent output (stdout token stream)
+ *  and emits a SOFT `agent:stall` signal when the agent has been completely
+ *  silent for ≥ threshold seconds AFTER the startup grace period. Does NOT kill
+ *  the agent — it signals the recovery layer (FIX-930) to switch agents before
+ *  the hard timeout watchdog (FIX-907) kills the process.
+ *
+ *  Distinction from {@link startSpawnTimeoutWatchdog}:
+ *    • Stall detector — SOFT signal at 10min (configurable); no kill; 2min grace.
+ *    • Timeout watchdog — HARD kill at 15min no-progress / 45min wall.
+ */
+export interface StallDetector {
+  /** Bump the last-progress clock (called on every agent stdout chunk). */
+  markProgress(): void;
+  /** Stop the timer. Returns whether stall was detected. */
+  stop(): { stalled: boolean };
+}
+
+/** FIX-929 — start the per-cycle stall detector. Emits `agent:stall` once when
+ *  the agent is idle for ≥ the threshold after the startup grace. Best-effort;
+ *  a probe blip never crashes the detector. Overridable via
+ *  `ROLL_LOOP_STALL_THRESHOLD_MIN` env var. */
+export function startStallDetector(opts: {
+  cycleId: string;
+  agent: string;
+  /** Epoch SECONDS (injected — the runner's ProcessClock). */
+  clock: () => number;
+  /** Append the agent:stall event (best-effort). */
+  appendEvent: (ev: RollEvent) => void;
+  /** Stall threshold seconds (default {@link CYCLE_STALL_THRESHOLD_SEC}). */
+  thresholdSec?: number;
+  /** Startup grace seconds (default {@link STALL_STARTUP_GRACE_SEC}). */
+  startupGraceSec?: number;
+  /** Poll cadence ms (default 5s; tests pin a small value). */
+  pollMs?: number;
+}): StallDetector {
+  const { cycleId, agent, clock, appendEvent } = opts;
+  const thresholdSec = opts.thresholdSec ?? CYCLE_STALL_THRESHOLD_SEC;
+  const startupGraceSec = opts.startupGraceSec ?? STALL_STARTUP_GRACE_SEC;
+  const pollMs = opts.pollMs ?? (Number((process.env["ROLL_STALL_POLL_MS"] ?? "").trim()) || 5_000);
+  // Disabled → inert handle (no timer, never fires).
+  if (thresholdSec <= 0) {
+    return { markProgress: () => {}, stop: () => ({ stalled: false }) };
+  }
+  const startSec = clock();
+  let lastProgressSec = startSec;
+  let fired = false;
+  let running = false;
+
+  const markProgress = (): void => {
+    lastProgressSec = clock();
+  };
+
+  const tick = (): void => {
+    if (running || fired) return;
+    running = true;
+    try {
+      const now = clock();
+      const verdict = stallVerdict({
+        elapsedSec: now - startSec,
+        idleSec: now - lastProgressSec,
+        stallThresholdSec: thresholdSec,
+        startupGraceSec,
+        alreadyFired: fired,
+      });
+      if (verdict.stalled) {
+        fired = true;
+        clearInterval(timer);
+        try {
+          appendEvent({
+            type: "agent:stall",
+            cycleId,
+            agent,
+            idleSec: verdict.idleSec,
+            thresholdSec: verdict.thresholdSec,
+            ts: Date.now(),
+          });
+        } catch {
+          /* event append is best-effort */
+        }
+      }
+    } finally {
+      running = false;
+    }
+  };
+
+  const timer = setInterval(tick, pollMs);
+  timer.unref?.();
+  return {
+    markProgress,
+    stop: () => {
+      clearInterval(timer);
+      return { stalled: fired };
     },
   };
 }
@@ -1210,6 +1332,18 @@ export async function executeCommand(
       // idle window kills the agent tree + records cycle:timeout. On a kill the
       // spawn resolves and we fold `timedOut` so the orchestrator's existing
       // abort_timeout teardown frees the lock and PRESERVES the worktree branch.
+      // FIX-929 — the STALL DETECTOR. Fires a SOFT `agent:stall` signal when
+      // the agent has produced zero output for ≥ threshold after startup grace.
+      // Does NOT kill — it alerts the recovery layer (FIX-930) before the hard
+      // timeout watchdog (below) kills the process. Threshold from env
+      // ROLL_LOOP_STALL_THRESHOLD_MIN (default 10 min).
+      const stallDetector = startStallDetector({
+        cycleId: ctx.cycleId ?? "",
+        agent: cmd.agent,
+        clock: ports.clock,
+        appendEvent: (ev) => ports.events.appendEvent(ports.paths.eventsPath, ev),
+        thresholdSec: readStallThreshold(ports.repoCwd).thresholdSec,
+      });
       const timeoutWatchdog = startSpawnTimeoutWatchdog({
         cycleId: ctx.cycleId ?? "",
         thresholds: readCycleTimeoutThresholds(ports.repoCwd),
@@ -1265,6 +1399,9 @@ export async function executeCommand(
             // FIX-907: any stdout chunk is PROGRESS — resets the no-progress
             // clock so a slow-but-still-emitting agent never trips the idle gate.
             timeoutWatchdog.markProgress();
+            // FIX-929: bump the stall-detector's progress clock — same signal,
+            // separate detector with its own (lower) threshold.
+            stallDetector.markProgress();
             captureSink?.onChunk(d);
             try {
               appendFileSync(livePath, d);
@@ -1280,6 +1417,8 @@ export async function executeCommand(
         // TCR commits (landed between the last tick and agent exit) are not lost.
         await observer.stop();
         timeoutFired = timeoutWatchdog.stop().firedReason;
+        // FIX-929: stop the stall detector and capture whether it fired.
+        stallDetector.stop();
       }
       // FIX-907: fold a watchdog kill into `timedOut` so the orchestrator runs
       // its clean abort_timeout teardown (kill + cycle:end blocked + lock release;

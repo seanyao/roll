@@ -30,11 +30,14 @@ import {
   timeoutTeardownCommands,
   watchdogVerdict,
   cycleTimeoutVerdict,
+  stallVerdict,
   MAX_AGENT_ATTEMPTS,
   RETRY_BASE_BACKOFF_SEC,
   CYCLE_TIMEOUT_SEC,
   CYCLE_WALL_TIMEOUT_SEC,
   CYCLE_NO_PROGRESS_SEC,
+  CYCLE_STALL_THRESHOLD_SEC,
+  STALL_STARTUP_GRACE_SEC,
 } from "../src/index.js";
 
 const CTX: CycleContext = {
@@ -603,6 +606,68 @@ describe("FIX-907 — cycleTimeoutVerdict (per-cycle hard timeout: wall + no-pro
     expect(cycleTimeoutVerdict({ elapsedSec: 2700, idleSec: 0 })).toMatchObject({ timedOut: true, reason: "wall" });
     expect(cycleTimeoutVerdict({ elapsedSec: 1000, idleSec: 900 })).toMatchObject({ timedOut: true, reason: "no-progress" });
     expect(cycleTimeoutVerdict({ elapsedSec: 10, idleSec: 10 }).timedOut).toBe(false);
+  });
+});
+
+describe("FIX-929 — stallVerdict (agent stall detection: soft signal, no kill)", () => {
+  it("defaults are 10min threshold / 2min startup grace", () => {
+    expect(CYCLE_STALL_THRESHOLD_SEC).toBe(600);
+    expect(STALL_STARTUP_GRACE_SEC).toBe(120);
+  });
+
+  it("not stalled when idle is below threshold and grace has passed", () => {
+    const v = stallVerdict({ elapsedSec: 200, idleSec: 100, stallThresholdSec: 600, startupGraceSec: 120 });
+    expect(v).toEqual({ stalled: false });
+  });
+
+  it("not stalled when idle exceeds threshold but still in startup grace", () => {
+    const v = stallVerdict({ elapsedSec: 100, idleSec: 700, stallThresholdSec: 600, startupGraceSec: 120 });
+    expect(v).toEqual({ stalled: false });
+  });
+
+  it("stalled: idle exceeds threshold AND grace has elapsed", () => {
+    const v = stallVerdict({ elapsedSec: 800, idleSec: 600, stallThresholdSec: 600, startupGraceSec: 120 });
+    expect(v).toEqual({ stalled: true, idleSec: 600, thresholdSec: 600 });
+  });
+
+  it("agent produces tokens normally → no false positive", () => {
+    // Agent is active: elapsed=800, but idle=10 (just emitted output).
+    const v = stallVerdict({ elapsedSec: 800, idleSec: 10, stallThresholdSec: 600, startupGraceSec: 120 });
+    expect(v).toEqual({ stalled: false });
+  });
+
+  it("stall once-fired does not re-trigger (alreadyFired gate)", () => {
+    const v = stallVerdict({ elapsedSec: 800, idleSec: 700, stallThresholdSec: 600, startupGraceSec: 120, alreadyFired: true });
+    expect(v).toEqual({ stalled: false });
+  });
+
+  it("stalled uses defaults when limits omitted", () => {
+    const v = stallVerdict({ elapsedSec: 800, idleSec: 600 });
+    // 600 >= default 600 threshold; 800 >= default 120 grace → stalled.
+    expect(v).toEqual({ stalled: true, idleSec: 600, thresholdSec: 600 });
+    // Below default threshold → not stalled.
+    const v2 = stallVerdict({ elapsedSec: 800, idleSec: 599 });
+    expect(v2).toEqual({ stalled: false });
+  });
+
+  it("zero / negative threshold DISABLES stall detection", () => {
+    expect(stallVerdict({ elapsedSec: 1e9, idleSec: 1e9, stallThresholdSec: 0, startupGraceSec: 0 }).stalled).toBe(false);
+    expect(stallVerdict({ elapsedSec: 1e9, idleSec: 1e9, stallThresholdSec: -1, startupGraceSec: 0 }).stalled).toBe(false);
+  });
+
+  it("stall boundary: idle >= threshold at exactly the boundary", () => {
+    // Grace elapsed (300 ≥ 120), idle hits threshold exactly (600).
+    const v = stallVerdict({ elapsedSec: 300, idleSec: 600, stallThresholdSec: 600, startupGraceSec: 120 });
+    expect(v).toEqual({ stalled: true, idleSec: 600, thresholdSec: 600 });
+  });
+
+  it("stall with a custom threshold (env override scenario)", () => {
+    // Shorter threshold: 5 min (300s).
+    const v = stallVerdict({ elapsedSec: 400, idleSec: 300, stallThresholdSec: 300, startupGraceSec: 120 });
+    expect(v).toEqual({ stalled: true, idleSec: 300, thresholdSec: 300 });
+    // Under custom threshold → not stalled.
+    const v2 = stallVerdict({ elapsedSec: 400, idleSec: 299, stallThresholdSec: 300, startupGraceSec: 120 });
+    expect(v2).toEqual({ stalled: false });
   });
 });
 

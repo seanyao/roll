@@ -322,14 +322,14 @@ describe("frozen: roll init", () => {
         ✓ Initialized
 
         NEXT  ·  下一步
-        1. Edit .roll/backlog.md
+        1. Create a GitHub repo and push the initial commit
+           gh repo create <name> --public --source=. --push (or \`git remote add origin ... && git push -u origin main\`)
+        2. Enable the loop schedule
+           \`roll loop\` needs a pushable GitHub remote — create the repo first.
+        3. Edit .roll/backlog.md
            open the backlog and add your first US
-        2. Run roll loop now
+        4. Run roll loop now
            execute one cycle manually to test the flow
-        3. Enable loop scheduling
-           roll loop on  — let it run hourly
-        4. Run roll pair status
-           see the cross-agent pairing pool and what it cost
       ════════════════════════════════════════════════════════════════════════════════
       ",
       }
@@ -363,14 +363,14 @@ describe("frozen: roll init", () => {
         ✓ Initialized
 
         NEXT  ·  下一步
-        1. Edit .roll/backlog.md
+        1. Create a GitHub repo and push the initial commit
+           gh repo create <name> --public --source=. --push (or \`git remote add origin ... && git push -u origin main\`)
+        2. Enable the loop schedule
+           \`roll loop\` needs a pushable GitHub remote — create the repo first.
+        3. Edit .roll/backlog.md
            open the backlog and add your first US
-        2. Run roll loop now
+        4. Run roll loop now
            execute one cycle manually to test the flow
-        3. Enable loop scheduling
-           roll loop on  — let it run hourly
-        4. Run roll pair status
-           see the cross-agent pairing pool and what it cost
       ════════════════════════════════════════════════════════════════════════════════
       ",
       }
@@ -408,14 +408,14 @@ describe("frozen: roll init", () => {
         NEXT  ·  下一步
         1. Run $roll-design
            Found requirement docs but an empty backlog. Turn them into a domain model + INVEST backlog, then roll loop.
-        2. Edit .roll/backlog.md
+        2. Create a GitHub repo and push the initial commit
+           gh repo create <name> --public --source=. --push (or \`git remote add origin ... && git push -u origin main\`)
+        3. Enable the loop schedule
+           \`roll loop\` needs a pushable GitHub remote — create the repo first.
+        4. Edit .roll/backlog.md
            open the backlog and add your first US
-        3. Run roll loop now
+        5. Run roll loop now
            execute one cycle manually to test the flow
-        4. Enable loop scheduling
-           roll loop on  — let it run hourly
-        5. Run roll pair status
-           see the cross-agent pairing pool and what it cost
       ════════════════════════════════════════════════════════════════════════════════
       ",
       }
@@ -491,14 +491,14 @@ describe("frozen: roll init", () => {
         ✓ Initialized
 
         NEXT  ·  下一步
-        1. Edit .roll/backlog.md
+        1. Create a GitHub repo and push the initial commit
+           gh repo create <name> --public --source=. --push (or \`git remote add origin ... && git push -u origin main\`)
+        2. Enable the loop schedule
+           \`roll loop\` needs a pushable GitHub remote — create the repo first.
+        3. Edit .roll/backlog.md
            open the backlog and add your first US
-        2. Run roll loop now
+        4. Run roll loop now
            execute one cycle manually to test the flow
-        3. Enable loop scheduling
-           roll loop on  — let it run hourly
-        4. Run roll pair status
-           see the cross-agent pairing pool and what it cost
       ════════════════════════════════════════════════════════════════════════════════
       ",
       }

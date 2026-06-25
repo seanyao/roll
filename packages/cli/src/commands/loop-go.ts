@@ -1202,13 +1202,22 @@ async function evaluateGoal(
     truths.push(storyTruthFromBacklog(row.id, row.status, { ...(prEvidence !== undefined ? { prEvidence } : {}), nowSec: deps.nowSec(), deliveryTruth }));
   }
   const verdict = goalEvaluationFromTruth(truths, goal.scope, { allowEmptyAllComplete: backlogExists(projectPath), inFlightIds });
+  // FIX-1020: when an --epic scope matches no cards, list the available epic
+  // names so the user knows what value to pass next time.
+  let verdictReason = verdict.reason;
+  if (verdictReason === "waiting:no_scope_cards" && goal.scope.kind === "epic") {
+    const availableEpics = [...new Set(Object.values(readStoryIndex(projectPath)))].sort();
+    if (availableEpics.length > 0) {
+      verdictReason = `${verdictReason} (available epics: ${availableEpics.join(", ")})`;
+    }
+  }
   bus.appendEvent(eventsPath(projectPath), {
     type: "goal:evaluated",
     sessionId: session,
     status: verdict.complete ? "complete" : "continue",
     total: verdict.total,
     delivered: verdict.delivered,
-    reason: verdict.reason,
+    reason: verdictReason,
     blockers: verdict.blockers,
     ts: deps.nowSec(),
   });
@@ -1226,9 +1235,9 @@ async function evaluateGoal(
     appendGoalState(bus, eventsPath(projectPath), goal.status, next, "adjudicator", reason, deps.nowSec());
     return { goal: next, complete: true, reason, reviewBlocked: false };
   }
-  const next = { ...goal, updatedAt: at, lastDecisionReason: verdict.reason };
+  const next = { ...goal, updatedAt: at, lastDecisionReason: verdictReason };
   writeGoal(goalPath(projectPath), next);
-  return { goal: next, complete: false, reason: verdict.reason, reviewBlocked: false };
+  return { goal: next, complete: false, reason: verdictReason, reviewBlocked: false };
 }
 
 function hasSafetyPauseSince(path: string, since: number): boolean {

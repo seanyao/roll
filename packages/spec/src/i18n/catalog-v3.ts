@@ -265,4 +265,22 @@ export const v3Catalog: Catalog = {
     en: "Default agent set to %s.",
     zh: "默认 agent 已设为 %s。",
   },
+
+  // FIX-1020: new-project workflow — repo-first next steps
+  "init.next_create_repo": {
+    en: "Create a GitHub repo and push the initial commit",
+    zh: "创建 GitHub 仓库并推送初始提交",
+  },
+  "init.next_push_commands": {
+    en: "gh repo create <name> --public --source=. --push (or `git remote add origin ... && git push -u origin main`)",
+    zh: "gh repo create <name> --public --source=. --push（或 `git remote add origin ... && git push -u origin main`）",
+  },
+  "init.next_loop_on": {
+    en: "Enable the loop schedule",
+    zh: "启用 loop 定时任务",
+  },
+  "init.next_repo_required": {
+    en: "`roll loop` needs a pushable GitHub remote — create the repo first.",
+    zh: "`roll loop` 需要一个可推送的 GitHub remote — 请先创建仓库。",
+  },
 };

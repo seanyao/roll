@@ -212,4 +212,12 @@ export const v3Catalog: Catalog = {
     en: "browser tool unavailable — headless Chromium not installed",
     zh: "浏览器工具不可用 — 无头 Chromium 未安装",
   },
+
+  // `onboard.*` — design handoff nudge (US-ONBOARD-NUDGE-001).
+  // %s is $roll-design (baseline); `roll design` command phrasing to be
+  // added by US-ONBOARD-NUDGE-005 after US-ONBOARD-NUDGE-004 ships.
+  "onboard.design_nudge": {
+    en: "Run %s — Found requirement docs but an empty backlog. Turn them into a domain model + INVEST backlog, then roll loop.",
+    zh: "运行 %s — 检测到需求文档但待办为空。将其转化为领域模型 + INVEST 待办列表，然后 roll loop。",
+  },
 };

@@ -45,7 +45,7 @@ import {
   getAgentSpec,
   renderPairingConfig,
 } from "@roll/core";
-import { resolveLang, STATUS_MARKER, t, v2Catalog, type Lang } from "@roll/spec";
+import { resolveLang, STATUS_MARKER, t, v2Catalog, v3Catalog, type Lang } from "@roll/spec";
 import { c, renderState, row, COLS } from "../render.js";
 import { realAgentEnv } from "./agent-list.js";
 import { onPath, replacePrimaryAgent, rollPkgDir, syncConventions as sharedSyncConventions } from "./setup-shared.js";
@@ -125,6 +125,9 @@ function msgLang(): Lang {
 }
 function m(key: string, ...args: Array<string | number>): string {
   return t(v2Catalog, msgLang(), key, ...args);
+}
+function m3(key: string, ...args: Array<string | number>): string {
+  return t(v3Catalog, msgLang(), key, ...args);
 }
 
 function initMergeSummaryTitle(): string {
@@ -1124,13 +1127,21 @@ function emitInitUi(
           return [nudgeMsg.slice(0, sep), nudgeMsg.slice(sep + 3)];
         })()
       : undefined;
-  const nextItems: Array<[string, string]> = [
-    ...(nudgePair ? [nudgePair] : []),
-    ["Edit .roll/backlog.md", "open the backlog and add your first US"],
-    ["Run roll loop now", "execute one cycle manually to test the flow"],
-    ["Enable loop scheduling", "roll loop on  — let it run hourly"],
-    ["Run roll pair status", "see the cross-agent pairing pool and what it cost"],
-  ];
+  const nextItems: Array<[string, string]> = hasAgents
+    ? [
+        ...(nudgePair ? [nudgePair] : []),
+        ["Edit .roll/backlog.md", "open the backlog and add your first US"],
+        ["Run roll loop now", "execute one cycle manually to test the flow"],
+        ["Enable loop scheduling", "roll loop on  — let it run hourly"],
+        ["Run roll pair status", "see the cross-agent pairing pool and what it cost"],
+      ]
+    : [
+        ...(nudgePair ? [nudgePair] : []),
+        [m3("init.next_create_repo"), m3("init.next_push_commands")],
+        [m3("init.next_loop_on"), m3("init.next_repo_required")],
+        ["Edit .roll/backlog.md", "open the backlog and add your first US"],
+        ["Run roll loop now", "execute one cycle manually to test the flow"],
+      ];
   lines.push("");
   lines.push("  " + c("pink", "NEXT", { bold: true }) + c("dim", "  ·  下一步"));
   nextItems.forEach(([label, hint], i) => {

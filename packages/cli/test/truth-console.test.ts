@@ -667,6 +667,26 @@ describe("collectLoopHeartbeat — US-DOSSIER-011", () => {
       lastAt: "2026-06-12T23:20:00Z",
     });
   });
+
+  it("US-LOOP-079l: carries the resolved runState (+ DORMANT since/reason) onto the snapshot", () => {
+    const hb = collectLoopHeartbeat({
+      plistText: () => null,
+      lastRunAt: () => null,
+      runState: () => ({ state: "DORMANT", since: "2026-06-25T03:00:00Z", reason: "idle 6h, no Todo" }),
+    });
+    expect(hb.runState).toBe("DORMANT");
+    expect(hb.stateSince).toBe("2026-06-25T03:00:00Z");
+    expect(hb.stateReason).toBe("idle 6h, no Todo");
+  });
+
+  it("US-LOOP-079l: ACTIVE state carries no since/reason; absent dep stays additive (undefined)", () => {
+    const active = collectLoopHeartbeat({ plistText: () => null, lastRunAt: () => null, runState: () => ({ state: "ACTIVE" }) });
+    expect(active.runState).toBe("ACTIVE");
+    expect(active.stateSince).toBeUndefined();
+    expect(active.stateReason).toBeUndefined();
+    const legacy = collectLoopHeartbeat({ plistText: () => null, lastRunAt: () => null });
+    expect(legacy.runState).toBeUndefined();
+  });
 });
 
 describe("loop tab active loops — US-DOSSIER-042", () => {
@@ -1660,5 +1680,79 @@ describe("machine-page persistence parity — US-DOSSIER-034", () => {
       expect(en).toBeGreaterThan(0);
       expect(page).not.toContain("undefined");
     }
+  });
+});
+
+describe("US-LOOP-079l — #loop 3-state dossier header (ACTIVE / DORMANT / PAUSED)", () => {
+  const LANES_DORMANT = [
+    { name: "backlog loop", mode: "backlog", running: false },
+    { name: "PR loop", mode: "pr", running: true },
+    { name: "Dream loop", mode: "dream", running: true },
+  ];
+  const LANES_ALL_ON = [
+    { name: "backlog loop", mode: "backlog", running: true },
+    { name: "PR loop", mode: "pr", running: true },
+    { name: "Dream loop", mode: "dream", running: true },
+  ];
+  const withLoop = (loop: TruthSnapshot["loop"]): TruthSnapshot => ({ ...SNAP, loop });
+
+  it("AC2: DORMANT header spells out since + reason + per-lane load state + wake hint", () => {
+    const html = render(
+      withLoop({
+        runState: "DORMANT",
+        stateSince: "2026-06-25T03:00:00Z",
+        stateReason: "idle 6h, no Todo",
+        lanes: LANES_DORMANT,
+      }),
+    );
+    expect(html).toContain('data-loop-state="DORMANT"');
+    expect(html).toContain("2026-06-25T03:00:00Z"); // since
+    expect(html).toContain("idle 6h, no Todo"); // reason
+    // AC2 exact lane phrasing: loop lane unloaded, PR + Dream active.
+    expect(html).toContain("loop lane unloaded · zero idle");
+    expect(html).toContain("PR lane active");
+    expect(html).toContain("Dream lane active");
+    // next-wake hint
+    expect(html).toContain("Wakes on: new Todo · PR merge · dream scan · roll loop resume");
+  });
+
+  it("AC4: DORMANT header is bilingual EN + ZH (separate lines, no inline mix)", () => {
+    const html = render(
+      withLoop({ runState: "DORMANT", stateSince: "2026-06-25T03:00:00Z", stateReason: "idle 6h", lanes: LANES_DORMANT }),
+    );
+    expect(html).toContain("DORMANT"); // EN
+    expect(html).toContain("休眠"); // ZH
+    expect(html).toContain("唤醒于"); // ZH wake hint
+    expect(html).toContain("loop lane 已卸载 · 零闲置"); // ZH lane line
+  });
+
+  it("AC3: render honours the resolver verdict — PAUSED snapshot renders PAUSED, not dormant/active", () => {
+    const html = render(
+      withLoop({ runState: "PAUSED", stateSince: "2026-06-25T01:00:00Z", stateReason: "owner paused", lanes: LANES_DORMANT }),
+    );
+    expect(html).toContain('data-loop-state="PAUSED"');
+    expect(html).not.toContain('data-loop-state="DORMANT"');
+    expect(html).not.toContain('data-loop-state="ACTIVE"');
+    expect(html).toContain("PAUSED");
+    expect(html).toContain("Resume: roll loop resume");
+    expect(html).toContain("已暂停");
+  });
+
+  it("ACTIVE: all lanes armed → active banner with the armed count", () => {
+    const html = render(withLoop({ runState: "ACTIVE", lanes: LANES_ALL_ON }));
+    expect(html).toContain('data-loop-state="ACTIVE"');
+    expect(html).toContain("loop running · 3/3 lanes armed");
+    expect(html).toContain("活跃"); // ZH
+  });
+
+  it("fallback: a snapshot without runState (older snapshots) renders ACTIVE, never crashes", () => {
+    const html = render(withLoop({ lanes: LANES_ALL_ON }));
+    expect(html).toContain('data-loop-state="ACTIVE"');
+  });
+
+  it("DORMANT with loop lane somehow still armed shows 'loop lane active' (state is lane-derived, not hardcoded)", () => {
+    const html = render(withLoop({ runState: "DORMANT", stateSince: "2026-06-25T03:00:00Z", stateReason: "x", lanes: LANES_ALL_ON }));
+    expect(html).toContain("loop lane active");
+    expect(html).not.toContain("loop lane unloaded · zero idle");
   });
 });

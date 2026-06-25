@@ -98,6 +98,16 @@ export interface TruthSnapshotLoopLane {
 export interface TruthSnapshotLoop {
   lanes: TruthSnapshotLoopLane[];
   collectedAt?: string;
+  /**
+   * US-LOOP-079l: resolved loop run-state for the 3-state dossier header.
+   * Mirrors `resolveLoopRunState` (PAUSED > DORMANT > ACTIVE). Additive —
+   * older snapshots omit it and the renderer falls back to ACTIVE.
+   */
+  runState?: "ACTIVE" | "DORMANT" | "PAUSED";
+  /** When DORMANT/PAUSED: the marker's `since` timestamp (ISO 8601). */
+  stateSince?: string;
+  /** When DORMANT/PAUSED: the marker's human-readable reason. */
+  stateReason?: string;
 }
 
 export interface TruthSnapshotOnDeckRow {

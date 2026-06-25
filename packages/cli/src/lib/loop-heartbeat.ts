@@ -10,6 +10,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseEventLine, parseGoalYaml, type GoalScope, type GoalStatus, type TruthSnapshotLoop, type TruthSnapshotLoopLane } from "@roll/spec";
+import { resolveLoopRunState, dormantMarkerPath, readDormantMarker } from "../commands/loop-sched.js";
 
 export interface HeartbeatDeps {
   /** plist text for a lane, or null when not installed. */
@@ -20,6 +21,12 @@ export interface HeartbeatDeps {
   goalText?: () => string | null;
   /** .roll/loop/events.ndjson text for goal session reconstruction. */
   eventsText?: () => string | null;
+  /**
+   * US-LOOP-079l: resolved loop run-state (+ marker since/reason for DORMANT).
+   * Injected so the snapshot carries it and the dossier render stays pure.
+   * Absent → snapshot omits runState and the renderer falls back to ACTIVE.
+   */
+  runState?: () => { state: "ACTIVE" | "DORMANT" | "PAUSED"; since?: string; reason?: string };
 }
 
 const LAUNCHD_LANES: Array<{ svc: "loop" | "pr" | "dream"; name: string; mode: string }> = [
@@ -77,6 +84,16 @@ export function defaultHeartbeatDeps(projectPath: string, slug: string, launchAg
       } catch {
         return null;
       }
+    },
+    // US-LOOP-079l: resolve the 3-state run-state from on-disk markers; read the
+    // DORMANT marker's since/reason so the dossier header is self-describing.
+    runState: () => {
+      const state = resolveLoopRunState(projectPath, slug);
+      if (state === "DORMANT") {
+        const body = readDormantMarker(dormantMarkerPath(projectPath, slug));
+        return body !== null ? { state, since: body.since, reason: body.reason } : { state };
+      }
+      return { state };
     },
   };
 }
@@ -174,5 +191,14 @@ export function collectLoopHeartbeat(deps: HeartbeatDeps): TruthSnapshotLoop {
   }
   const go = goalLane(deps);
   if (go !== undefined) lanes.push(go);
-  return { lanes };
+  const snapshot: TruthSnapshotLoop = { lanes };
+  // US-LOOP-079l: carry the resolved run-state so the dossier render is a pure
+  // function of the snapshot (3-state header + deterministic tests).
+  const rs = deps.runState?.();
+  if (rs !== undefined) {
+    snapshot.runState = rs.state;
+    if (rs.since !== undefined) snapshot.stateSince = rs.since;
+    if (rs.reason !== undefined) snapshot.stateReason = rs.reason;
+  }
+  return snapshot;
 }

@@ -331,6 +331,70 @@ function heartbeatRow(lane: TruthSnapshotLoopLane, generatedAt?: string): string
   );
 }
 
+/**
+ * US-LOOP-079l — the 3-state loop header (ACTIVE / DORMANT / PAUSED). A PURE
+ * function of the snapshot's resolved `runState` (resolver precedence lives in
+ * `resolveLoopRunState`: PAUSED > DORMANT > ACTIVE — this just renders the
+ * verdict). DORMANT spells out the marker since/reason, each lane's load state
+ * (AC2: "loop lane unloaded · zero idle · PR lane active · Dream lane active"),
+ * and how the loop wakes. Bilingual EN/ZH on SEPARATE lines (project convention).
+ */
+function loopStateBanner(input: TruthConsoleInput): string {
+  const loop = input.snapshot.loop;
+  const state = loop?.runState ?? "ACTIVE";
+  const lanes = loop?.lanes ?? [];
+  const laneRunning = (mode: string): boolean => lanes.find((l) => l.mode === mode)?.running === true;
+  const since = loop?.stateSince !== undefined && loop.stateSince !== "" ? esc(loop.stateSince) : "—";
+  const reasonRaw = loop?.stateReason ?? "";
+  const reason = reasonRaw !== "" ? ` · ${esc(reasonRaw)}` : "";
+
+  const wrap = (accent: string, bg: string, enLines: string[], zhLines: string[]): string =>
+    `<section data-loop-state="${state}" style="border:1px solid ${accent}33;border-left:3px solid ${accent};border-radius:12px;background:${bg};padding:14px 18px;margin:20px 0 4px;">` +
+    enLines.map((l) => `<div style="${MONO}font-size:13px;color:${C.ink};line-height:1.7;">${l}</div>`).join("") +
+    zhLines.map((l) => `<div style="${MONO}font-size:12px;color:${C.sub};line-height:1.7;">${l}</div>`).join("") +
+    `</section>`;
+
+  if (state === "DORMANT") {
+    const laneEn =
+      (laneRunning("backlog") ? "loop lane active" : "loop lane unloaded · zero idle") +
+      " · " +
+      (laneRunning("pr") ? "PR lane active" : "PR lane off") +
+      " · " +
+      (laneRunning("dream") ? "Dream lane active" : "Dream lane off");
+    const laneZh =
+      (laneRunning("backlog") ? "loop lane 活跃" : "loop lane 已卸载 · 零闲置") +
+      " · " +
+      (laneRunning("pr") ? "PR lane 活跃" : "PR lane 关闭") +
+      " · " +
+      (laneRunning("dream") ? "Dream lane 活跃" : "Dream lane 关闭");
+    return wrap(
+      C.purple,
+      "#f7f5fc",
+      [
+        `💤 <b>DORMANT</b> · since ${since}${reason}`,
+        laneEn,
+        "Wakes on: new Todo · PR merge · dream scan · roll loop resume",
+      ],
+      [`💤 休眠 · 自 ${since}${reason}`, laneZh, "唤醒于：新 Todo · PR 合并 · dream 扫描 · roll loop resume"],
+    );
+  }
+  if (state === "PAUSED") {
+    return wrap(
+      C.amber,
+      "#fdf8ef",
+      [`⏸ <b>PAUSED</b>${since !== "—" ? ` · since ${since}` : ""}${reason}`, "Resume: roll loop resume"],
+      [`⏸ 已暂停${since !== "—" ? ` · 自 ${since}` : ""}${reason}`, "恢复：roll loop resume"],
+    );
+  }
+  const armed = lanes.filter((l) => l.running).length;
+  return wrap(
+    C.green,
+    "#f1f9f4",
+    [`● <b>ACTIVE</b> · loop running · ${armed}/${lanes.length} lanes armed`],
+    [`● 活跃 · 循环运行中 · ${armed}/${lanes.length} lane 已就绪`],
+  );
+}
+
 function repoLoopsPanel(input: TruthConsoleInput): string {
   const lanes = input.snapshot.loop?.lanes ?? [];
   return (
@@ -1191,6 +1255,9 @@ function loopTab(input: TruthConsoleInput): string {
       "Every cycle, complete and replayable. Failures are first-class — never swallowed.",
       "每一个 cycle 完整、可回溯。失败是一等公民——绝不吞。",
     )}</p></div>` +
+    // US-LOOP-079l: the 3-state run-state header (ACTIVE/DORMANT/PAUSED) sits
+    // atop the lanes so the dossier reads its own liveness before the grid.
+    loopStateBanner(input) +
     // US-DOSSIER-040: the Loop tab is Loop&Cycle (heartbeat/lanes) + the
     // project-scoped commit-hooks panel + the Cycle ledger. The inline agents
     // panel (now the machine Agents page) and the inline casting ladder (now its

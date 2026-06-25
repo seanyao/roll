@@ -305,4 +305,22 @@ export const v3Catalog: Catalog = {
     en: "`roll loop` needs a pushable GitHub remote — create the repo first.",
     zh: "`roll loop` 需要一个可推送的 GitHub remote — 请先创建仓库。",
   },
+
+  // FIX-1019 / FIX-1020: loop repo pushability precheck + pause gate
+  "loop.paused_marker_present": {
+    en: "loop is paused (PAUSE marker present) — skipping this tick. Run `roll loop resume` when ready.",
+    zh: "loop 已暂停（存在 PAUSE 标记）— 跳过本次触发。准备就绪后运行 `roll loop resume`。",
+  },
+  "loop.repo_unreachable": {
+    en: "GitHub repo unreachable — `git ls-remote origin` failed. Create the remote repo and push before running the loop.",
+    zh: "GitHub 仓库不可达 — `git ls-remote origin` 失败。请先创建远程仓库并推送，再运行 loop。",
+  },
+  "loop.no_remote": {
+    en: "No git remote configured — `roll loop` needs a pushable GitHub remote. Add one with `git remote add origin ...`",
+    zh: "未配置 git remote — `roll loop` 需要一个可推送的 GitHub remote。请用 `git remote add origin ...` 添加。",
+  },
+  "loop.not_a_git_repo": {
+    en: "Not a git repository — `roll loop` needs a git repo with a pushable GitHub remote.",
+    zh: "不是 git 仓库 — `roll loop` 需要一个带有可推送 GitHub remote 的 git 仓库。",
+  },
 };

@@ -40,7 +40,7 @@ import { writeLatestMorningReport } from "../lib/morning-report.js";
 import { backfillMergedRuns } from "../lib/runs-backfill.js";
 import { requireNetwork, tcpConnect } from "../lib/require-network.js";
 import { gcCommand } from "./gc.js";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { lookup } from "node:dns/promises";
 import { resolveLang, t, v3Catalog } from "@roll/spec";
 
@@ -753,6 +753,19 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     worktreePath: join(rt, "worktrees", `cycle-${cycleId}`),
   };
 
+  // FIX-1019: if a prior goal session (or the user) paused the loop, launchd
+  // ticks must ALSO respect the PAUSE marker. Exit 0 so cron does not retry.
+  if (isLoopPaused(id.path, id.slug)) {
+    const lang = resolveLang({
+      rollLang: process.env["ROLL_LANG"],
+      lcAll: process.env["LC_ALL"],
+      lang: process.env["LANG"],
+    });
+    const msg = t(v3Catalog, lang, "loop.paused_marker_present");
+    process.stdout.write(`loop run-once: ${msg}\n`);
+    return 0;
+  }
+
   // FIX-298: the per-cycle network checkpoint is now the SHARED requireNetwork
   // guard (superseding the FIX-232 egress-only pre-check). As the FIRST thing a
   // cycle does — BEFORE acquiring the lock and burning agent tokens — it probes
@@ -787,6 +800,30 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
       }
       return 1;
     }
+  }
+
+  // FIX-1019 / FIX-1020: before burning agent tokens, verify the project has a
+  // pushable GitHub remote. Missing remote / unreachable repo → fast failure
+  // with an actionable ALERT instead of N failed cycles.
+  const repoCheck = checkRepoPushable(id.path);
+  if (!repoCheck.ok) {
+    writeRepoAlert(alertsPath, paths.eventsPath, cycleId, repoCheck);
+    const lang = resolveLang({
+      rollLang: process.env["ROLL_LANG"],
+      lcAll: process.env["LC_ALL"],
+      lang: process.env["LANG"],
+    });
+    const key =
+      repoCheck.reason === "not_git"
+        ? "loop.not_a_git_repo"
+        : repoCheck.reason === "no_remote"
+          ? "loop.no_remote"
+          : "loop.repo_unreachable";
+    process.stderr.write(
+      `loop run-once: ${t(v3Catalog, lang, key)}\n` +
+        `loop run-once: ${repoCheck.detail !== "" ? `(${repoCheck.detail})` : ""}\n`,
+    );
+    return 1;
   }
 
   // FIX-204A: an empty workflow document = a blind agent burning tokens for
@@ -1292,5 +1329,92 @@ export async function egressBlocked(
     // This is the proxy-poison signature: the dead proxy endpoint at
     // 127.0.0.1:7897 intercepts the connection attempt.
     return true;
+  }
+}
+
+// ─── FIX-1019 / FIX-1020: repo pushability + pause persistence gates ──────────
+
+/** True iff a PAUSE marker exists for this project/slug. */
+function isLoopPaused(projectPath: string, slug: string): boolean {
+  return existsSync(join(projectPath, ".roll", "loop", `PAUSE-${slug}`));
+}
+
+export interface RepoPushableResult {
+  ok: boolean;
+  reason: "ok" | "not_git" | "no_remote" | "ls_remote_failed";
+  detail: string;
+}
+
+/**
+ * FIX-1019: fail fast when the loop cannot push. Verifies:
+ *   1. cwd is inside a git repository
+ *   2. an `origin` remote exists
+ *   3. `git ls-remote origin HEAD` succeeds (repo is reachable)
+ *
+ * This catches the "GitHub repo not created yet" case before the cycle burns
+ * agent tokens on work that can never be published.
+ */
+export function checkRepoPushable(projectPath: string): RepoPushableResult {
+  const git = (args: string[]): { code: number; stderr: string } => {
+    const r = spawnSync("git", args, { cwd: projectPath, encoding: "utf8" });
+    return { code: r.status ?? 1, stderr: r.stderr ?? "" };
+  };
+
+  const inside = git(["rev-parse", "--git-dir"]);
+  if (inside.code !== 0) {
+    return { ok: false, reason: "not_git", detail: inside.stderr.trim() };
+  }
+
+  const remote = git(["remote", "get-url", "origin"]);
+  if (remote.code !== 0) {
+    return { ok: false, reason: "no_remote", detail: remote.stderr.trim() };
+  }
+
+  const ls = git(["ls-remote", "origin", "HEAD"]);
+  if (ls.code !== 0) {
+    return { ok: false, reason: "ls_remote_failed", detail: ls.stderr.trim() };
+  }
+
+  return { ok: true, reason: "ok", detail: "" };
+}
+
+/**
+ * Write an actionable repo-unreachable ALERT and emit a matching event.
+ * Mirrors the ALERT contract used by the egress/skill-missing gates.
+ */
+function writeRepoAlert(
+  alertsPath: string,
+  eventsPath: string,
+  cycleId: string,
+  result: RepoPushableResult,
+): void {
+  const lang = resolveLang({
+    rollLang: process.env["ROLL_LANG"],
+    lcAll: process.env["LC_ALL"],
+    lang: process.env["LANG"],
+  });
+  const key =
+    result.reason === "not_git"
+      ? "loop.not_a_git_repo"
+      : result.reason === "no_remote"
+        ? "loop.no_remote"
+        : "loop.repo_unreachable";
+  const headline = t(v3Catalog, lang, key);
+  const detail = result.detail !== "" ? ` (${result.detail})` : "";
+  const msg = `# ALERT — ${headline}${detail}\n\n**Cycle**: ${cycleId}\n**Action**: ${t(v3Catalog, lang, "loop.no_remote")}\n`;
+  try {
+    appendFileSync(alertsPath, `${msg}\n`, "utf8");
+  } catch {
+    /* best-effort */
+  }
+  try {
+    new EventBus().appendEvent(eventsPath, {
+      type: "alert:notify",
+      channel: "loop-safety",
+      message: `${headline}${detail}`,
+      ts: Date.now(),
+    });
+  } catch {
+    /* best-effort */
   }
 }

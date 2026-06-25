@@ -32,6 +32,8 @@ export interface ExternalToolDeps {
   execFile: (cmd: string, args: readonly string[]) => { code: number; stdout: string; stderr: string };
   readDir: (path: string) => string[];
   exists: (path: string) => boolean;
+  /** FIX-927: false ⇒ headless/unattended (non-TTY) — skip the Screen Recording probe. */
+  interactive?: boolean;
 }
 
 export const EXTERNAL_REQUIREMENT_DECLARATIONS: readonly ExternalRequirementDeclaration[] = [
@@ -71,6 +73,8 @@ export function defaultExternalToolDeps(): ExternalToolDeps {
     platform: externalToolPlatform(process.env["_ROLL_EXTERNAL_TOOLS_PLATFORM"]) ?? process.platform,
     env: process.env,
     home: homedir(),
+    // FIX-927: a non-TTY stdout (launchd lane / CI / piped) is headless → skip the probe.
+    interactive: process.stdout.isTTY === true,
     commandOnPath,
     execFile: (cmd, args) => {
       const r = spawnSync(cmd, [...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 15_000 });
@@ -190,6 +194,20 @@ function screencaptureResolution(requirement: ToolRequirement, deps: ExternalToo
       status: "missing",
       detail: "screencapture is not on PATH.",
       repair: { command: "xcode-select --install", description: "Install Apple command line tools." },
+    };
+  }
+  // FIX-927: never probe in a headless / unattended context. The probe is a real
+  // `screencapture` (1×1 px) that re-fires — and BLOCKS on — the macOS TCC Screen
+  // Recording prompt with no one to answer it; every `roll loop go` / `roll doctor`
+  // cycle would stack another dialog. `ROLL_NO_SCREENCAP=1` is the explicit escape
+  // hatch; `interactive === false` (a non-TTY stdout, set in defaultExternalToolDeps)
+  // covers the launchd lane / CI. Real captures still alert on failure (the runtime
+  // attest gate), so skipping the readiness probe loses no safety.
+  if (deps.env["ROLL_NO_SCREENCAP"] === "1" || deps.interactive === false) {
+    return {
+      requirement,
+      status: "stale",
+      detail: "Screen Recording probe skipped (headless / ROLL_NO_SCREENCAP); real captures surface permission failures at capture time.",
     };
   }
   const tmp = join(mkdtempSync(join(tmpdir(), "roll-screen-probe-")), "probe.png");

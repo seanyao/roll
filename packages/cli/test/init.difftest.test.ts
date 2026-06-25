@@ -379,6 +379,132 @@ describe("frozen: roll init", () => {
     assertScaffold(fx);
   });
 
+  it("US-ONBOARD-NUDGE-002 AC1: fresh init with PRD + empty backlog nudges design first", () => {
+    const fx = freshFixture();
+    writeFileSync(join(fx.proj, "prd.md"), "# Product Requirements\n\nFeature list.");
+    expect(norm(tsInit(fx, []), fx)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "  INIT  ·  项目初始化 <PROGRESS>  
+      ────────────────────────────────────────────────────────────────────────────────
+
+        1. ✓  Detect project type
+        2. ✓  Create AGENTS.md
+             +  AGENTS.md
+        3. ✓  Create .roll/backlog.md
+             +  .roll/backlog.md
+        4. ✓  Create .roll/features/
+             +  .roll/features/
+        5. ↷  Merge existing CLAUDE.md
+             not modified
+        6. ✓  Link skills to AI clients
+        7. ✓  Scaffold cross-agent pairing
+             +  .roll/pairing.yaml
+
+      ────────────────────────────────────────────────────────────────────────────────
+        ✓ Initialized
+
+        NEXT  ·  下一步
+        1. Run $roll-design
+           Found requirement docs but an empty backlog. Turn them into a domain model + INVEST backlog, then roll loop.
+        2. Edit .roll/backlog.md
+           open the backlog and add your first US
+        3. Run roll loop now
+           execute one cycle manually to test the flow
+        4. Enable loop scheduling
+           roll loop on  — let it run hourly
+        5. Run roll pair status
+           see the cross-agent pairing pool and what it cost
+      ════════════════════════════════════════════════════════════════════════════════
+      ",
+      }
+    `);
+  });
+
+  it("US-ONBOARD-NUDGE-002 AC1: re-init with PRD + empty backlog nudges design first", () => {
+    const fx = reinitFixture();
+    writeFileSync(join(fx.proj, "prd.md"), "# Product Requirements\n\nFeature list.");
+    expect(norm(tsInit(fx, []), fx)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "  REINIT  ·  重新合并约定 <PROGRESS>  
+      ────────────────────────────────────────────────────────────────────────────────
+
+        1. ✓  Detect project type
+        2. ↷  Create AGENTS.md
+             ·  AGENTS.md
+        3. ✓  Create .roll/backlog.md
+             +  .roll/backlog.md
+        4. ✓  Create .roll/features/
+             +  .roll/features/
+        5. ↷  Merge existing CLAUDE.md
+             not modified
+        6. ✓  Link skills to AI clients
+        7. ✓  Scaffold cross-agent pairing
+             +  .roll/pairing.yaml
+
+      ────────────────────────────────────────────────────────────────────────────────
+        ✓ Re-merged
+
+        NEXT  ·  下一步
+        1. Run $roll-design
+           Found requirement docs but an empty backlog. Turn them into a domain model + INVEST backlog, then roll loop.
+        2. Edit .roll/backlog.md
+           open the backlog and add your first US
+        3. Run roll loop now
+           execute one cycle manually to test the flow
+        4. Enable loop scheduling
+           roll loop on  — let it run hourly
+        5. Run roll pair status
+           see the cross-agent pairing pool and what it cost
+      ════════════════════════════════════════════════════════════════════════════════
+      ",
+      }
+    `);
+  });
+
+  it("US-ONBOARD-NUDGE-002 AC2: fresh init without material keeps NEXT unchanged", () => {
+    const fx = freshFixture();
+    expect(norm(tsInit(fx, []), fx)).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "  INIT  ·  项目初始化 <PROGRESS>  
+      ────────────────────────────────────────────────────────────────────────────────
+
+        1. ✓  Detect project type
+        2. ✓  Create AGENTS.md
+             +  AGENTS.md
+        3. ✓  Create .roll/backlog.md
+             +  .roll/backlog.md
+        4. ✓  Create .roll/features/
+             +  .roll/features/
+        5. ↷  Merge existing CLAUDE.md
+             not modified
+        6. ✓  Link skills to AI clients
+        7. ✓  Scaffold cross-agent pairing
+             +  .roll/pairing.yaml
+
+      ────────────────────────────────────────────────────────────────────────────────
+        ✓ Initialized
+
+        NEXT  ·  下一步
+        1. Edit .roll/backlog.md
+           open the backlog and add your first US
+        2. Run roll loop now
+           execute one cycle manually to test the flow
+        3. Enable loop scheduling
+           roll loop on  — let it run hourly
+        4. Run roll pair status
+           see the cross-agent pairing pool and what it cost
+      ════════════════════════════════════════════════════════════════════════════════
+      ",
+      }
+    `);
+  });
+
   it("re-init over existing AGENTS.md renders re-merge", () => {
     const fx = reinitFixture();
     expect(norm(tsInit(fx, []), fx)).toMatchInlineSnapshot(`

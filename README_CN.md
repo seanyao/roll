@@ -32,12 +32,31 @@ npm install -g @seanyao/roll
 
 ```bash
 cd your-project
-roll init           # 在当前项目落地 Roll
+roll init           # 在当前项目落地 Roll（交互式确认）
 roll loop on        # 可选：让 AI 自动跑 backlog
 ```
 
 `roll init` 会识别老项目并在合适时引导到 `$roll-onboard`。
+全新项目会打印项目类型摘要并请求确认，脚本或 CI 中可传 `--auto` 跳过提示。
 第一次跑建议从[快速上手](guide/zh/getting-started.md)开始。
+
+## 新项目快速启动
+
+新项目需要先配置 remote，loop 才能推送分支并创建 PR：
+
+```bash
+cd your-project
+roll init
+# 1. 为项目创建 GitHub 仓库并添加为 origin
+# 2. 推送当前分支，让 loop 有地方落地工作成果
+git push -u origin main
+# 3. 启动自主循环
+roll loop on
+```
+
+如果仓库不存在或不可达，loop 会快速失败并发出 ALERT，避免在无法推送的目
+标上浪费 agent token。需要暂停时运行 `roll loop pause` 会持久化暂停标记；
+准备好后用 `roll loop resume` 恢复。
 
 ## 命令
 

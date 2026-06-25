@@ -142,7 +142,7 @@ function buildFixture(installMethod: "npm" | "curl"): Fixture {
   mkdirSync(join(home, ".roll"), { recursive: true });
   writeFileSync(
     join(home, ".roll", "config.yaml"),
-    "# Roll config\nlang: en\nai_claude: ~/.claude|CLAUDE.md|CLAUDE.md\n",
+    "# Roll config\nlang: en\n",
   );
   const v = binRollVersion();
   writeFileSync(join(home, ".roll", ".update-check"), `${Math.floor(Date.now() / 1000)} ${v} ${v}\n`);
@@ -166,7 +166,7 @@ interface Run {
 
 function envBase(fx: Fixture, extra: Record<string, string>): Record<string, string> {
   return {
-    PATH: `${fakeBin}:${process.env["PATH"] ?? ""}`,
+    PATH: fakeBin,
     HOME: fx.home,
     ROLL_HOME: join(fx.home, ".roll"),
     ROLL_PKG_DIR: pkgDir,

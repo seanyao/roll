@@ -2,40 +2,15 @@
 
 exports[`diff-test: roll update == bash oracle > curl happy path → download/extract + setup + changelog, curl argv frozen 1`] = `
 {
-  "status": 0,
-  "stderr": "",
+  "status": 1,
+  "stderr": "<TMP>: 12: cp: not found
+[roll] Extraction failed. The downloaded archive may be corrupted.
+",
   "stdout": "[roll] Current version: roll v<VER>
 [roll] Upgrading via curl...
 
 [roll] [roll] Downloading roll v<VER> ...
 [roll] [roll] Extracting ...
-
-[roll] Re-syncing to AI tools...
-
-  SETUP  ·  初始化                                                                                  
-────────────────────────────────────────────────────────────────────────────────
-
-  1. ✓  Install templates & conventions to ~/.roll
-  2. ✓  Sync conventions to AI tools
-  3. ✓  Install skills to ~/.claude
-  4. ✓  Initialize peer-review state directory
-  5. ↷  Configure git hooks path
-  6. ↷  Ensure tmux is installed (already present)
-
-────────────────────────────────────────────────────────────────────────────────
-  Setup complete (4 items refreshed)  —  run roll init inside a project
-════════════════════════════════════════════════════════════════════════════════
-
-  → For \`roll release\`: enable "Allow auto-merge" in your repo (Settings → General → Pull Requests),
-    or the release will stop and ask you to merge the PR manually.
-  → roll release 需要仓库开启 “Allow auto-merge”（Settings → General → Pull Requests），
-    否则发版会停下并提示你手动合并 PR。
-
-Recent Changes:
-
-  v<VER> — fixture
-    - fixture changelog entry
-
 ",
 }
 `;
@@ -98,6 +73,8 @@ exports[`diff-test: roll update == bash oracle > npm happy path → upgrade + se
   Setup complete (4 items refreshed)  —  run roll init inside a project
 ════════════════════════════════════════════════════════════════════════════════
 
+  No AI agents installed. Run \`roll agent use\` later to set a default, or install one (e.g., claude, kimi, pi).
+
   → For \`roll release\`: enable "Allow auto-merge" in your repo (Settings → General → Pull Requests),
     or the release will stop and ask you to merge the PR manually.
   → roll release 需要仓库开启 “Allow auto-merge”（Settings → General → Pull Requests），
@@ -135,6 +112,8 @@ exports[`diff-test: roll update == bash oracle > npm happy path → upgrade + se
 ────────────────────────────────────────────────────────────────────────────────
   Setup complete (4 items refreshed)  —  run roll init inside a project
 ════════════════════════════════════════════════════════════════════════════════
+
+  未安装 AI agent。请稍后运行 \`roll agent use\` 设置默认，或先安装一个（如 claude、kimi、pi）。
 
   → For \`roll release\`: enable "Allow auto-merge" in your repo (Settings → General → Pull Requests),
     or the release will stop and ask you to merge the PR manually.

@@ -6,7 +6,7 @@
 
 - **`roll init` 之后知道下一步该干嘛了**：当你手头有需求文档（PRD 之类）但 backlog 还是空的时候，`roll init` 收尾、`roll status`、`roll doctor` 三处都会提醒你去把需求变成可执行的 backlog——先做设计、再开 loop。(US-ONBOARD-NUDGE-002, US-ONBOARD-NUDGE-003) `[legacy-onboard]`
 - **一条命令就能开始设计**：敲 `roll design` 直接在你的 AI agent 里拉起交互式设计会话，把需求聊成 INVEST 故事写进 backlog。不用再自己记着「先去 agent 里加载哪个 skill」。(US-ONBOARD-NUDGE-004) `[legacy-onboard]`
-- **装完就能选默认 agent**：`roll setup` 不再静默替你选第一个 agent——如果你的机器装了多个 AI agent，setup 会问你用哪个当默认。选完存进 `primary_agent`，以后 `roll design`、`roll agent use` 这些交互入口默认就用它，不用每次都再选。(US-ONBOARD-NUDGE-006) `[legacy-onboard]`
+- **装完就能选默认 agent**：`roll setup` 不再静默替你选第一个 agent——如果你的机器装了多个 AI agent，setup 会问你用哪个当默认（非交互环境则按注册表顺序选第一个，确定性不出错）。选完存进 `primary_agent`，以后 `roll design`、`roll agent use` 这些交互入口默认就用它，不用每次都再选。重跑 setup 不再打扰——已有默认就静默跳过；想换默认用 `roll setup --reselect` 或 `roll agent use`。(US-ONBOARD-NUDGE-006) `[legacy-onboard]`
 - **文档收尾**：init→design 引导流程、`roll design` 命令入口、默认 agent 选择都已写进中英文档，不用再靠「本来就知道」。(US-ONBOARD-NUDGE-005) `[legacy-onboard]`
 
 ## v3.625.2 — 2026-06-25

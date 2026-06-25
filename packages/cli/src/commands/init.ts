@@ -48,7 +48,7 @@ import {
 import { resolveLang, STATUS_MARKER, t, v2Catalog, type Lang } from "@roll/spec";
 import { c, renderState, row, COLS } from "../render.js";
 import { realAgentEnv } from "./agent-list.js";
-import { onPath, rollPkgDir, syncConventions as sharedSyncConventions } from "./setup-shared.js";
+import { onPath, replacePrimaryAgent, rollPkgDir, syncConventions as sharedSyncConventions } from "./setup-shared.js";
 import { rollVersion } from "./version.js";
 import { resolveProjectName, shouldSelfRegister, writeProjectRow } from "../lib/projects-registry.js";
 import { projectSlug } from "./dashboard.js";
@@ -410,6 +410,12 @@ function legacyOnboardGuide(projectDir: string): number {
 
   const chosen = selectOnboardAgent(installed);
   if (chosen === null) return 1;
+
+  // US-ONBOARD-NUDGE-006: persist the user's choice as primary_agent.
+  // Before this, onboard selection was "used for this session only" —
+  // the user picked B but primary stayed unset/claude.
+  replacePrimaryAgent(chosen);
+
   process.stdout.write("\n");
   info(m("init.launching", chosen));
   process.stdout.write("  Conversation ends with /exit (or Ctrl-C). On exit Roll will run apply for you.\n");

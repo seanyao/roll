@@ -13,6 +13,7 @@ import {
   getAgentSpec,
   type AgentEnv,
 } from "@roll/core";
+import { resolveLang, t, v2Catalog, v3Catalog, type Lang } from "@roll/spec";
 import { realAgentEnv } from "../commands/agent-list.js";
 import { onPath, rollConfig, rollPkgDir } from "../commands/setup-shared.js";
 
@@ -148,4 +149,95 @@ export function readLineFromStdin(): string | null {
     if (b !== 13) chunks.push(b);
   }
   return Buffer.from(chunks).toString("utf8");
+}
+
+// ─── Primary agent selection (US-ONBOARD-NUDGE-006) ──────────────────────────
+
+/** Check if a configured `primary_agent` is still in the installed set. */
+export function isPrimaryValid(primary: string | null, installed: string[]): boolean {
+  if (primary === null || primary === "") return false;
+  return installed.includes(primary);
+}
+
+function lang(): Lang {
+  return resolveLang({
+    rollLang: process.env["ROLL_LANG"],
+    lcAll: process.env["LC_ALL"],
+    lang: process.env["LANG"],
+  });
+}
+
+export interface PrimarySelectionOptions {
+  /** Currently installed agent names (available set). */
+  installed: string[];
+  /** Current primary_agent value from config, or null if absent. */
+  primary: string | null;
+  /** Whether stdin is a TTY (controls interactive vs deterministic path). */
+  isTTY: boolean;
+  /** Explicit re-selection requested (--reselect flag). */
+  reselect: boolean;
+  /** Read one line callback (injected for testing). */
+  readLine: () => string | null;
+}
+
+export interface PrimarySelectionResult {
+  /** Agent name to persist as primary_agent, or null if no change. */
+  selected: string | null;
+  /** Human-readable guidance line for the caller to emit, or null. */
+  guidance: string | null;
+}
+
+/**
+ * Select a primary (default) agent according to the rules in US-ONBOARD-NUDGE-006:
+ *
+ *   AC3: installed empty → no selection, return install guidance.
+ *   AC4: valid primary + not reselect → silently keep (selected=null, guidance=null).
+ *   AC2: no valid primary + installed exactly 1 → auto-select that one.
+ *   AC1: no valid primary + installed >1 + TTY → interactive prompt.
+ *   AC5: no valid primary + installed >1 + non-TTY → deterministic first-in-order.
+ *   AC6: primary points to removed agent → treated as no valid primary.
+ */
+export function selectPrimaryAgent(opts: PrimarySelectionOptions): PrimarySelectionResult {
+  const { installed, primary, isTTY, reselect, readLine } = opts;
+  const l = lang();
+
+  // AC3: available set empty → no selection, install guidance
+  if (installed.length === 0) {
+    return { selected: null, guidance: t(v3Catalog, l, "setup.primary_no_agents") };
+  }
+
+  // AC4: valid primary + not reselecting → silently keep (no output per AC4)
+  if (!reselect && isPrimaryValid(primary, installed)) {
+    return { selected: null, guidance: null };
+  }
+
+  // AC6: primary points to removed/unsupported agent → falls through here
+  // (isPrimaryValid returned false), treated as no valid primary.
+
+  // AC2: no valid primary + available set exactly 1 → auto-set
+  if (installed.length === 1) {
+    const chosen = installed[0] ?? "";
+    return { selected: chosen, guidance: t(v3Catalog, l, "setup.primary_auto_set", chosen) };
+  }
+
+  // AC1: no valid primary + available >1 + TTY → interactive prompt
+  if (isTTY) {
+    process.stderr.write(`${t(v3Catalog, l, "setup.primary_prompt")}\n`);
+    installed.forEach((candidate, index) => {
+      process.stderr.write(`    ${index + 1}) ${candidate}\n`);
+    });
+    process.stderr.write(`  Enter number [1-${installed.length}]: `);
+    const choice = readLine();
+    if (choice === null) {
+      return { selected: null, guidance: null };
+    }
+    const n = Number(choice);
+    if (!Number.isInteger(n) || n < 1 || n > installed.length) {
+      return { selected: null, guidance: null };
+    }
+    return { selected: installed[n - 1] ?? null, guidance: null };
+  }
+
+  // AC5: non-TTY + no valid primary → deterministic: first installed by registry order
+  return { selected: installed[0] ?? null, guidance: null };
 }

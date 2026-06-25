@@ -1154,11 +1154,53 @@ function emitInitUi(
   process.stdout.write(lines.join("\n") + "\n");
 }
 
+// ─── FIX-1021: fresh-init project summary + confirmation ─────────────────────
+
+function isStdinInteractive(): boolean {
+  return (process.env["ROLL_ASSUME_TTY"] ?? "") === "1" || process.stdin.isTTY === true;
+}
+
+/**
+ * For a fresh (non-reinit, non-legacy) project, print the auto-detected summary
+ * and ask the user to confirm before scaffolding. In non-interactive contexts
+ * (or with `--auto`) the notice is printed and init proceeds without blocking.
+ */
+function confirmInitProject(projectDir: string, autoMode: boolean): boolean {
+  const projectType = scanProjectType(projectDir);
+  const lang = msgLang();
+  const header = lang === "zh" ? "项目初始化" : "Project setup";
+
+  process.stdout.write("\n");
+  process.stdout.write(`  ${c("fg", header, { bold: true })}\n`);
+  process.stdout.write(`  ${c("dim", divider())}\n`);
+  process.stdout.write(`  ${c("fg", m3("init.detected_project_type", projectType), { bold: true })}\n`);
+  process.stdout.write(`  ${c("dim", m3("init.will_scaffold"))}\n`);
+
+  if (autoMode || !isStdinInteractive()) {
+    process.stdout.write(`  ${c("amber", m3("init.auto_non_interactive"))}\n`);
+    process.stdout.write(`  ${c("dim", divider("═"))}\n`);
+    return true;
+  }
+
+  process.stdout.write("\n");
+  const { BOLD, NC } = pal();
+  process.stderr.write(`  ${BOLD}${m3("init.proceed_prompt")}${NC} [y/N] `);
+  const reply = readLineFromStdin() ?? "";
+  process.stdout.write("\n");
+  if (reply !== "y" && reply !== "Y" && reply !== "yes" && reply !== "YES") {
+    info(m3("init.cancelled"));
+    process.stdout.write(`  ${c("dim", divider("═"))}\n`);
+    return false;
+  }
+  return true;
+}
+
 // ─── cmd_init (2147-2210) ─────────────────────────────────────────────────────
 /**
  * Returns the exit code for the fully ported init surface.
  */
 export function initCommand(args: string[]): number {
+  const autoMode = args.includes("--auto");
   if (args[0] === "--apply") {
     if (!existsSync(rollTemplates())) {
       err(m("init.no_templates_found_run_roll_setup"));
@@ -1172,9 +1214,10 @@ export function initCommand(args: string[]): number {
     }
     return initApply(projectDir);
   }
-  if (args[0] !== undefined && args[0].startsWith("-")) {
+  const unknownFlag = args.find((a) => a.startsWith("-") && a !== "--auto");
+  if (unknownFlag !== undefined) {
     // FIX-238 AC2: name the offending flag (the empty-name message was useless).
-    err(`${m("init.unknown_flag_1")}${args[0]}`);
+    err(`${m("init.unknown_flag_1")}${unknownFlag}`);
     return 1;
   }
 
@@ -1194,6 +1237,12 @@ export function initCommand(args: string[]): number {
   // cycle that needs a web screenshot doesn't download 100-200 MB on the
   // critical path. Never blocks init.
   silentPreinstallChromium();
+
+  // Color decision mirrors _emit_init_v2_ui: NO_COLOR or non-TTY → no color.
+  // Set early so the FIX-1021 confirmation prompt also honors it.
+  const noColor = (process.env["NO_COLOR"] ?? "") !== "" || !process.stdout.isTTY;
+  renderState.useColor = !noColor;
+
   let hasAgents = false;
   const summary: Summary = [];
 
@@ -1201,6 +1250,8 @@ export function initCommand(args: string[]): number {
     hasAgents = true;
   } else if (isLegacyProject(projectDir)) {
     return legacyOnboardGuide(projectDir);
+  } else if (!confirmInitProject(projectDir, autoMode)) {
+    return 0;
   }
 
   // Suppressed step echoes (the `{ … } >/dev/null` block) — outcomes captured
@@ -1226,9 +1277,6 @@ export function initCommand(args: string[]): number {
   // US-ONBOARD-NUDGE-002: detect PRD + empty-backlog signal for NEXT nudge.
   const shouldNudge = detectDesignHandoff(projectDir).shouldNudge;
 
-  // Color decision mirrors _emit_init_v2_ui: NO_COLOR or non-TTY → no color.
-  const noColor = (process.env["NO_COLOR"] ?? "") !== "" || !process.stdout.isTTY;
-  renderState.useColor = !noColor;
   emitInitUi(projectDir, hasAgents, syncStatus, summary, shouldNudge);
 
   void err;

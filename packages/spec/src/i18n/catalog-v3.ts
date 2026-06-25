@@ -266,6 +266,28 @@ export const v3Catalog: Catalog = {
     zh: "默认 agent 已设为 %s。",
   },
 
+  // FIX-1021: `roll init` summary / confirmation
+  "init.detected_project_type": {
+    en: "Detected project type: %s",
+    zh: "检测到项目类型：%s",
+  },
+  "init.will_scaffold": {
+    en: "Roll will scaffold AGENTS.md, .roll/backlog.md, .roll/features/, .roll/pairing.yaml, and .claude/CLAUDE.md.",
+    zh: "Roll 将在此目录生成 AGENTS.md、.roll/backlog.md、.roll/features/、.roll/pairing.yaml 与 .claude/CLAUDE.md。",
+  },
+  "init.proceed_prompt": {
+    en: "Proceed?",
+    zh: "继续？",
+  },
+  "init.cancelled": {
+    en: "Init cancelled. Run `roll init` again when ready.",
+    zh: "初始化已取消。准备就绪后重新运行 `roll init`。",
+  },
+  "init.auto_non_interactive": {
+    en: "Non-interactive mode — proceeding automatically. Use `roll init --auto` to suppress this notice.",
+    zh: "非交互模式 — 自动继续。可使用 `roll init --auto` 跳过此提示。",
+  },
+
   // FIX-1020: new-project workflow — repo-first next steps
   "init.next_create_repo": {
     en: "Create a GitHub repo and push the initial commit",

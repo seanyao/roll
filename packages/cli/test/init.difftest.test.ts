@@ -302,7 +302,14 @@ describe("frozen: roll init", () => {
       {
         "status": 0,
         "stderr": "",
-        "stdout": "  INIT  ·  项目初始化 <PROGRESS>  
+        "stdout": "
+        Project setup
+        ────────────────────────────────────────────────────────────────────────────────
+        Detected project type: unknown
+        Roll will scaffold AGENTS.md, .roll/backlog.md, .roll/features/, .roll/pairing.yaml, and .claude/CLAUDE.md.
+        Non-interactive mode — proceeding automatically. Use \`roll init --auto\` to suppress this notice.
+        ════════════════════════════════════════════════════════════════════════════════
+        INIT  ·  项目初始化 <PROGRESS>  
       ────────────────────────────────────────────────────────────────────────────────
 
         1. ✓  Detect project type
@@ -343,7 +350,14 @@ describe("frozen: roll init", () => {
       {
         "status": 0,
         "stderr": "",
-        "stdout": "  INIT  ·  项目初始化 <PROGRESS>  
+        "stdout": "
+        Project setup
+        ────────────────────────────────────────────────────────────────────────────────
+        Detected project type: cli
+        Roll will scaffold AGENTS.md, .roll/backlog.md, .roll/features/, .roll/pairing.yaml, and .claude/CLAUDE.md.
+        Non-interactive mode — proceeding automatically. Use \`roll init --auto\` to suppress this notice.
+        ════════════════════════════════════════════════════════════════════════════════
+        INIT  ·  项目初始化 <PROGRESS>  
       ────────────────────────────────────────────────────────────────────────────────
 
         1. ✓  Detect project type
@@ -386,7 +400,14 @@ describe("frozen: roll init", () => {
       {
         "status": 0,
         "stderr": "",
-        "stdout": "  INIT  ·  项目初始化 <PROGRESS>  
+        "stdout": "
+        Project setup
+        ────────────────────────────────────────────────────────────────────────────────
+        Detected project type: unknown
+        Roll will scaffold AGENTS.md, .roll/backlog.md, .roll/features/, .roll/pairing.yaml, and .claude/CLAUDE.md.
+        Non-interactive mode — proceeding automatically. Use \`roll init --auto\` to suppress this notice.
+        ════════════════════════════════════════════════════════════════════════════════
+        INIT  ·  项目初始化 <PROGRESS>  
       ────────────────────────────────────────────────────────────────────────────────
 
         1. ✓  Detect project type
@@ -471,7 +492,14 @@ describe("frozen: roll init", () => {
       {
         "status": 0,
         "stderr": "",
-        "stdout": "  INIT  ·  项目初始化 <PROGRESS>  
+        "stdout": "
+        Project setup
+        ────────────────────────────────────────────────────────────────────────────────
+        Detected project type: unknown
+        Roll will scaffold AGENTS.md, .roll/backlog.md, .roll/features/, .roll/pairing.yaml, and .claude/CLAUDE.md.
+        Non-interactive mode — proceeding automatically. Use \`roll init --auto\` to suppress this notice.
+        ════════════════════════════════════════════════════════════════════════════════
+        INIT  ·  项目初始化 <PROGRESS>  
       ────────────────────────────────────────────────────────────────────────────────
 
         1. ✓  Detect project type

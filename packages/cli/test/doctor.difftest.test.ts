@@ -705,4 +705,69 @@ describe("frozen: roll doctor", () => {
       }
     `);
   });
+
+  // ── US-ONBOARD-NUDGE-003: design nudge in roll doctor ──
+
+  it("AC1: nudge appears in doctor when prd.md present + empty backlog", () => {
+    const h = freshHome();
+    const proj = mkdtempSync(join(tmpdir(), "roll-doctor-nudge-"));
+    dirs.push(proj);
+    // Set up a roll project with empty backlog
+    mkdirSync(join(proj, ".roll"), { recursive: true });
+    writeFileSync(join(proj, ".roll", "backlog.md"), "| Story | Description | Status |\n|---|---|---|\n");
+    writeFileSync(join(proj, "AGENTS.md"), "AGENTS\n");
+    // Design material — triggers nudge
+    writeFileSync(join(proj, "prd.md"), "# Product Requirements\n\nSome content.");
+    const pkg = freshPkg();
+    const e: Env = { home: h, cwd: proj, pkg, launchd: emptyLaunchd(), lang: "en" };
+    const run = tsDoctor(e);
+    expect(run.status).toBe(0);
+    expect(run.stdout).toContain("$roll-design");
+    expect(run.stdout).toContain("informational");
+  });
+
+  it("AC2: no nudge when no design materials present", () => {
+    const h = freshHome();
+    const proj = mkdtempSync(join(tmpdir(), "roll-doctor-nonudge-"));
+    dirs.push(proj);
+    mkdirSync(join(proj, ".roll"), { recursive: true });
+    writeFileSync(join(proj, ".roll", "backlog.md"), "| Story | Description | Status |\n|---|---|---|\n");
+    writeFileSync(join(proj, "AGENTS.md"), "AGENTS\n");
+    // No design materials
+    const pkg = freshPkg();
+    const e: Env = { home: h, cwd: proj, pkg, launchd: emptyLaunchd(), lang: "en" };
+    const run = tsDoctor(e);
+    expect(run.status).toBe(0);
+    expect(run.stdout).not.toContain("$roll-design");
+  });
+
+  it("AC2: no nudge when backlog is non-empty", () => {
+    const h = freshHome();
+    const proj = mkdtempSync(join(tmpdir(), "roll-doctor-full-"));
+    dirs.push(proj);
+    // Set up with design material but non-empty backlog
+    mkdirSync(join(proj, ".roll"), { recursive: true });
+    writeFileSync(join(proj, ".roll", "backlog.md"), "| [US-001](spec.md) | Test | 📋 Todo |\n");
+    writeFileSync(join(proj, "prd.md"), "# PRD\n\nContent.");
+    const pkg = freshPkg();
+    const e: Env = { home: h, cwd: proj, pkg, launchd: emptyLaunchd(), lang: "en" };
+    const run = tsDoctor(e);
+    expect(run.status).toBe(0);
+    expect(run.stdout).not.toContain("$roll-design");
+  });
+
+  it("AC4: doctor exit code stays 0 when nudge is shown", () => {
+    const h = freshHome();
+    const proj = mkdtempSync(join(tmpdir(), "roll-doctor-exit-"));
+    dirs.push(proj);
+    mkdirSync(join(proj, ".roll"), { recursive: true });
+    writeFileSync(join(proj, ".roll", "backlog.md"), "| Story | Description | Status |\n|---|---|---|\n");
+    writeFileSync(join(proj, "AGENTS.md"), "AGENTS\n");
+    writeFileSync(join(proj, "prd.md"), "# PRD\n\nContent.");
+    const pkg = freshPkg();
+    const e: Env = { home: h, cwd: proj, pkg, launchd: emptyLaunchd(), lang: "en" };
+    const run = tsDoctor(e);
+    expect(run.status).toBe(0); // exit code unchanged
+    expect(run.stdout).toContain("$roll-design"); // nudge present
+  });
 });

@@ -3,7 +3,7 @@
 exports[`diff-test: roll update == bash oracle > curl happy path → download/extract + setup + changelog, curl argv frozen 1`] = `
 {
   "status": 1,
-  "stderr": "<TMP>: line 12: cp: command not found
+  "stderr": "<TMP>: 12: cp: not found
 [roll] Extraction failed. The downloaded archive may be corrupted.
 ",
   "stdout": "[roll] Current version: roll v<VER>

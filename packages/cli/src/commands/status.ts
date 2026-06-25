@@ -22,6 +22,7 @@ import type { TruthSnapshot } from "@roll/spec";
 import { c, COLS, hr, pad, renderState, row, sectionHead } from "../render.js";
 import { attestCoverage, isSnapshotStale, loadTruthSnapshot, renderNowMs, snapshotVerdict } from "../lib/truth-read.js";
 import type { TruthSnapshotCycle } from "@roll/spec";
+import { detectDesignHandoff, renderDesignNudge } from "../lib/onboard-nudge.js";
 
 /** FIX-361: format a cycle snapshot's cost with correct currency symbols,
  *  separating by currency so ¥ and $ are never blindly summed. */
@@ -588,6 +589,15 @@ export function statusCommand(args: string[]): number {
   renderAiClients(out, d.ai_clients);
   renderTemplates(out, d.templates);
   renderThisProject(out, d);
+
+  // US-ONBOARD-NUDGE-003: surface design-handoff nudge when signals detected
+  const nudgeSignal = detectDesignHandoff(process.cwd());
+  if (nudgeSignal.shouldNudge) {
+    const nudgeLines = renderDesignNudge(lang);
+    for (const line of nudgeLines) out.push(line);
+    out.push("");
+  }
+
   process.stdout.write(out.join("\n") + "\n");
   return 0;
 }

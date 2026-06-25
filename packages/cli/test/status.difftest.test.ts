@@ -226,4 +226,48 @@ describe("frozen: roll status render", () => {
       "
     `);
   });
+
+  // ── US-ONBOARD-NUDGE-003: design nudge in roll status ──
+
+  it("AC1: nudge appears when prd.md present + empty backlog", () => {
+    const proj = mkdtempSync(join(tmpdir(), "roll-status-nudge-"));
+    dirs.push(proj);
+    // Set up a roll project with empty backlog
+    mkdirSync(join(proj, ".roll"), { recursive: true });
+    writeFileSync(join(proj, ".roll", "backlog.md"), "| Story | Description | Status |\n|---|---|---|\n");
+    writeFileSync(join(proj, "AGENTS.md"), "AGENTS\n");
+    // Design material
+    writeFileSync(join(proj, "prd.md"), "# Product Requirements\n\nSome content.");
+    const ts = tsStatus({}, proj)
+      .split(proj).join("<PROJ>")
+      .split(basename(proj)).join("<PROJ>");
+    expect(ts).toContain("$roll-design");
+    expect(ts).toContain("Found requirement docs");
+  });
+
+  it("AC3: no nudge when no design materials present", () => {
+    const proj = mkdtempSync(join(tmpdir(), "roll-status-nonudge-"));
+    dirs.push(proj);
+    mkdirSync(join(proj, ".roll"), { recursive: true });
+    writeFileSync(join(proj, ".roll", "backlog.md"), "| Story | Description | Status |\n|---|---|---|\n");
+    writeFileSync(join(proj, "AGENTS.md"), "AGENTS\n");
+    // No design materials
+    const ts = tsStatus({}, proj)
+      .split(proj).join("<PROJ>")
+      .split(basename(proj)).join("<PROJ>");
+    expect(ts).not.toContain("$roll-design");
+  });
+
+  it("AC3: no nudge when backlog is non-empty", () => {
+    const proj = mkdtempSync(join(tmpdir(), "roll-status-full-"));
+    dirs.push(proj);
+    mkdirSync(join(proj, ".roll"), { recursive: true });
+    writeFileSync(join(proj, ".roll", "backlog.md"), "| [US-001](spec.md) | Test | 📋 Todo |\n");
+    writeFileSync(join(proj, "AGENTS.md"), "AGENTS\n");
+    writeFileSync(join(proj, "prd.md"), "# PRD\n\nContent.");
+    const ts = tsStatus({}, proj)
+      .split(proj).join("<PROJ>")
+      .split(basename(proj)).join("<PROJ>");
+    expect(ts).not.toContain("$roll-design");
+  });
 });

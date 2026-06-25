@@ -22,6 +22,7 @@ import { repoRoot } from "../bridge.js";
 import { generateCatalog } from "./skills.js";
 import { collectExternalTools, renderExternalToolDoctorSection } from "../lib/external-tools.js";
 import { collectToolReadinessDoctorRows, renderToolReadinessDoctorSection } from "../lib/tool-readiness-doctor.js";
+import { detectDesignHandoff, renderDesignNudge } from "../lib/onboard-nudge.js";
 
 interface Palette {
   GREEN: string;
@@ -491,6 +492,18 @@ export function doctorCommand(_args: string[]): number {
   launchdProxySection(lang);
   for (const l of renderToolReadinessDoctorSection(collectToolReadinessDoctorRows(process.cwd()))) emit(l);
   for (const l of renderExternalToolDoctorSection(collectExternalTools())) emit(l);
+
+  // US-ONBOARD-NUDGE-003: surface design-handoff nudge as informational advisory
+  // Does NOT change verdict or exit code (doctor always exits 0).
+  const nudgeSignal = detectDesignHandoff(process.cwd());
+  if (nudgeSignal.shouldNudge) {
+    emit("");
+    emit(lang === "zh" ? "设计交接引导（仅供参考）" : "Design handoff nudge (informational)");
+    emit("");
+    const nudgeLines = renderDesignNudge(lang);
+    for (const line of nudgeLines) emit(`  ${line}`);
+  }
+
   process.stdout.write(out.lines.join("\n") + "\n");
   return 0;
 }

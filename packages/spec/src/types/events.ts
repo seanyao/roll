@@ -27,6 +27,12 @@ export type RollEvent =
   | { type: "cycle:stdout"; cycleId: string; data: string; ts: number }
   | { type: "cycle:tcr"; cycleId: string; commitHash: string; message: string; ts: number; commitTs?: number }
   | { type: "cycle:first_edit"; cycleId: string; commitHash: string; ts: number }
+  // FIX-929 — agent stall detection: the builder produced zero token output for
+  // a configurable threshold (default 10 min). This is a SIGNAL, not a kill —
+  // fire BEFORE the hard timeout watchdog. A 2-min startup grace prevents false
+  // positives during agent initialization. The signal feeds the recovery layer
+  // (FIX-930) so it can switch agents before hitting the hard timeout kill.
+  | { type: "agent:stall"; cycleId: string; agent: string; idleSec: number; thresholdSec: number; ts: number }
   // FIX-907 — the per-cycle HARD TIMEOUT tripped: a builder hung (process alive,
   // 0% CPU, no new commits/events) or a runaway exceeded the wall-clock ceiling.
   // `reason` is the criterion that fired — `wall` (total cycle time > ceiling) or

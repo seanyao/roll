@@ -440,6 +440,14 @@ export const CYCLE_WALL_TIMEOUT_SEC = 2700;
  *  judged hung (the FIX-390 silent-hang shape) and killed. */
 export const CYCLE_NO_PROGRESS_SEC = 900;
 
+/** FIX-929 — agent stall detection threshold (seconds). Default 10min (600s) —
+ *  a softer signal that fires BEFORE the hard timeout kill. Does NOT kill the
+ *  agent; emits `agent:stall` so the recovery layer (FIX-930) can switch agents. */
+export const CYCLE_STALL_THRESHOLD_SEC = 600;
+/** FIX-929 — startup grace period (seconds). No stall detection fires during the
+ *  first 2 minutes of an agent session to avoid误杀 during normal init. */
+export const STALL_STARTUP_GRACE_SEC = 120;
+
 /** The per-cycle hard-timeout verdict. `timedOut:false` carries the tighter of
  *  the two remaining budgets so the poller can schedule its next wake. */
 export type CycleTimeoutVerdict =
@@ -480,6 +488,43 @@ export function cycleTimeoutVerdict(input: CycleTimeoutInput): CycleTimeoutVerdi
   const wallRemain = wall > 0 ? wall - input.elapsedSec : Number.POSITIVE_INFINITY;
   const idleRemain = idle > 0 ? idle - input.idleSec : Number.POSITIVE_INFINITY;
   return { timedOut: false, remainingSec: Math.min(wallRemain, idleRemain) };
+}
+
+/** FIX-929 stall-detection inputs — all clocks injected (pure). */
+export interface StallInput {
+  /** Seconds since the agent spawn started (now - spawnStart). */
+  elapsedSec: number;
+  /** Seconds since the LAST observed stdout/progress event: now - lastProgressSec. */
+  idleSec: number;
+  /** Stall threshold (default {@link CYCLE_STALL_THRESHOLD_SEC}). */
+  stallThresholdSec?: number;
+  /** Startup grace period (default {@link STALL_STARTUP_GRACE_SEC}). */
+  startupGraceSec?: number;
+  /** Whether the stall has already fired (prevent repeated events). */
+  alreadyFired?: boolean;
+}
+
+export type StallVerdict =
+  | { stalled: false }
+  | { stalled: true; idleSec: number; thresholdSec: number };
+
+/**
+ * Pure stall-detection decision (FIX-929). Returns `stalled: true` when the
+ * agent has been idle (no token output) for ≥ `stallThresholdSec` AND the
+ * startup grace period has elapsed AND a stall has not already been signaled.
+ *
+ * A zero/negative threshold DISABLES stall detection. The startup grace exempts
+ * the first N seconds to avoid false positives during normal agent initialization.
+ * The stall fires at most ONCE per cycle (alreadyFired gate).
+ */
+export function stallVerdict(input: StallInput): StallVerdict {
+  const threshold = input.stallThresholdSec ?? CYCLE_STALL_THRESHOLD_SEC;
+  const grace = input.startupGraceSec ?? STALL_STARTUP_GRACE_SEC;
+  if (threshold <= 0) return { stalled: false };
+  if (input.alreadyFired) return { stalled: false };
+  if (input.elapsedSec < grace) return { stalled: false };
+  if (input.idleSec < threshold) return { stalled: false };
+  return { stalled: true, idleSec: input.idleSec, thresholdSec: threshold };
 }
 
 // ── Transient retry / backoff (B-group AC, I6; mirrors bin/roll:9032-9072) ────

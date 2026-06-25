@@ -482,6 +482,46 @@ export function cycleTimeoutVerdict(input: CycleTimeoutInput): CycleTimeoutVerdi
   return { timedOut: false, remainingSec: Math.min(wallRemain, idleRemain) };
 }
 
+/** v3 agent-stall idle window (seconds). FIX-929: MUST be shorter than
+ *  {@link CYCLE_NO_PROGRESS_SEC} so a silent hang is OBSERVED (agent:stall) before
+ *  the no-progress watchdog kills it. Default 5min. */
+export const AGENT_STALL_IDLE_SEC = 300;
+/** FIX-929: seconds after spawn exempt from stall detection (model warmup
+ *  produces no tokens yet). Default 2min. */
+export const AGENT_STALL_STARTUP_EXEMPT_SEC = 120;
+
+/** Agent-stall verdict (FIX-929) — PURELY OBSERVATIONAL, never kills. */
+export type AgentStallVerdict = { stalled: false } | { stalled: true; idleSec: number };
+
+/** Inputs for {@link agentStallVerdict} — all clocks injected (pure). */
+export interface AgentStallInput {
+  /** Seconds since the agent spawn started (now - spawnStart). */
+  sinceSpawnSec: number;
+  /** Seconds since the last token/stdout chunk (now - lastTokenSec). */
+  idleSinceTokenSec: number;
+  /** Idle window (default {@link AGENT_STALL_IDLE_SEC}); non-positive DISABLES. */
+  idleLimitSec?: number;
+  /** Startup-exempt window (default {@link AGENT_STALL_STARTUP_EXEMPT_SEC}). */
+  startupExemptSec?: number;
+}
+
+/**
+ * Pure agent-stall decision (FIX-929). Returns `{stalled:false}` during the
+ * startup-exempt window (model warmup) regardless of idle; past the window,
+ * `{stalled:true}` once idle-since-token `>=` the limit (boundary `>=` mirrors
+ * {@link cycleTimeoutVerdict}). A non-positive idle limit DISABLES detection.
+ * OBSERVATIONAL ONLY — the FIX-907 no-progress/wall gate still owns the kill, so
+ * a slow-but-still-emitting call (deepseek) is never mis-killed by this.
+ */
+export function agentStallVerdict(input: AgentStallInput): AgentStallVerdict {
+  const idle = input.idleLimitSec ?? AGENT_STALL_IDLE_SEC;
+  const exempt = input.startupExemptSec ?? AGENT_STALL_STARTUP_EXEMPT_SEC;
+  if (idle <= 0) return { stalled: false };
+  if (input.sinceSpawnSec < exempt) return { stalled: false };
+  if (input.idleSinceTokenSec >= idle) return { stalled: true, idleSec: input.idleSinceTokenSec };
+  return { stalled: false };
+}
+
 // ── Transient retry / backoff (B-group AC, I6; mirrors bin/roll:9032-9072) ────
 
 /** v2 in-cycle agent-spawn retry budget (`for _attempt in 1 2 3`, bin/roll:9032). */

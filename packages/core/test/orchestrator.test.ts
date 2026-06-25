@@ -30,6 +30,9 @@ import {
   timeoutTeardownCommands,
   watchdogVerdict,
   cycleTimeoutVerdict,
+  agentStallVerdict,
+  AGENT_STALL_IDLE_SEC,
+  AGENT_STALL_STARTUP_EXEMPT_SEC,
   MAX_AGENT_ATTEMPTS,
   RETRY_BASE_BACKOFF_SEC,
   CYCLE_TIMEOUT_SEC,
@@ -603,6 +606,51 @@ describe("FIX-907 — cycleTimeoutVerdict (per-cycle hard timeout: wall + no-pro
     expect(cycleTimeoutVerdict({ elapsedSec: 2700, idleSec: 0 })).toMatchObject({ timedOut: true, reason: "wall" });
     expect(cycleTimeoutVerdict({ elapsedSec: 1000, idleSec: 900 })).toMatchObject({ timedOut: true, reason: "no-progress" });
     expect(cycleTimeoutVerdict({ elapsedSec: 10, idleSec: 10 }).timedOut).toBe(false);
+  });
+});
+
+describe("FIX-929 — agentStallVerdict (observational silent-hang signal)", () => {
+  it("default idle window is shorter than the no-progress KILL window", () => {
+    // The whole point: a stall must be OBSERVED before the no-progress watchdog
+    // would kill, so the self-heal ladder has a chance to act.
+    expect(AGENT_STALL_IDLE_SEC).toBe(300);
+    expect(AGENT_STALL_STARTUP_EXEMPT_SEC).toBe(120);
+    expect(AGENT_STALL_IDLE_SEC).toBeLessThan(CYCLE_NO_PROGRESS_SEC);
+  });
+
+  it("NOT stalled while still emitting tokens (idle below the window)", () => {
+    const v = agentStallVerdict({ sinceSpawnSec: 1000, idleSinceTokenSec: 60, idleLimitSec: 300, startupExemptSec: 120 });
+    expect(v).toEqual({ stalled: false });
+  });
+
+  it("STALLED once idle-since-token crosses the window (boundary >=)", () => {
+    const v = agentStallVerdict({ sinceSpawnSec: 1000, idleSinceTokenSec: 300, idleLimitSec: 300, startupExemptSec: 120 });
+    expect(v).toEqual({ stalled: true, idleSec: 300 });
+  });
+
+  it("startup-exempt: a silent agent within the warmup window is NOT stalled", () => {
+    // 119s after spawn, fully idle — still warming up, no false positive.
+    const v = agentStallVerdict({ sinceSpawnSec: 119, idleSinceTokenSec: 119, idleLimitSec: 300, startupExemptSec: 120 });
+    expect(v).toEqual({ stalled: false });
+  });
+
+  it("past the exempt window, a long idle IS a stall", () => {
+    const v = agentStallVerdict({ sinceSpawnSec: 500, idleSinceTokenSec: 480, idleLimitSec: 300, startupExemptSec: 120 });
+    expect(v).toEqual({ stalled: true, idleSec: 480 });
+  });
+
+  it("a 0 / negative idle limit DISABLES stall detection (operator escape hatch)", () => {
+    expect(agentStallVerdict({ sinceSpawnSec: 1e9, idleSinceTokenSec: 1e9, idleLimitSec: 0 })).toEqual({ stalled: false });
+    expect(agentStallVerdict({ sinceSpawnSec: 1e9, idleSinceTokenSec: 1e9, idleLimitSec: -1 })).toEqual({ stalled: false });
+  });
+
+  it("uses the core defaults when limits are omitted", () => {
+    // idle 300 ≥ default 300, spawn 400 ≥ default exempt 120 → stalled.
+    expect(agentStallVerdict({ sinceSpawnSec: 400, idleSinceTokenSec: 300 })).toEqual({ stalled: true, idleSec: 300 });
+    // idle 299 < 300 → not yet.
+    expect(agentStallVerdict({ sinceSpawnSec: 400, idleSinceTokenSec: 299 })).toEqual({ stalled: false });
+    // within default 120s exempt → not stalled regardless of idle.
+    expect(agentStallVerdict({ sinceSpawnSec: 100, idleSinceTokenSec: 1e9 })).toEqual({ stalled: false });
   });
 });
 

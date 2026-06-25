@@ -90,6 +90,9 @@ import {
   cycleTimeoutVerdict,
   CYCLE_WALL_TIMEOUT_SEC,
   CYCLE_NO_PROGRESS_SEC,
+  agentStallVerdict,
+  AGENT_STALL_IDLE_SEC,
+  AGENT_STALL_STARTUP_EXEMPT_SEC,
   newNormalizerState,
   normalizerFor,
   type ActivitySignal,
@@ -630,6 +633,12 @@ async function startCycleObserver(ports: Ports, cycleId: string): Promise<{ stop
 export interface CycleTimeoutThresholds {
   wallSec: number;
   noProgressSec: number;
+  /** FIX-929 — token-idle window before a NON-FATAL `agent:stall` is emitted.
+   *  Deliberately shorter than `noProgressSec` so a stall is OBSERVED (and the
+   *  self-heal ladder can act) before the hard timeout would kill. 0 ⇒ disabled. */
+  stallIdleSec: number;
+  /** FIX-929 — startup grace: no stall fires within this window of the spawn. */
+  stallStartupSec: number;
 }
 
 /** Poll cadence (ms) for the timeout watchdog. Frequent enough that a breach is
@@ -670,6 +679,11 @@ export function readCycleTimeoutThresholds(repoCwd: string): CycleTimeoutThresho
   return {
     wallSec: envNum("ROLL_CYCLE_WALL_TIMEOUT_SEC") ?? wallSec,
     noProgressSec: envNum("ROLL_CYCLE_NO_PROGRESS_SEC") ?? noProgressSec,
+    // FIX-929 — stall thresholds: env override → core defaults. policy.yaml does
+    // not carry these yet (the stall signal is observational, not a safety fence),
+    // so there is no policy tier to read.
+    stallIdleSec: envNum("ROLL_AGENT_STALL_IDLE_SEC") ?? AGENT_STALL_IDLE_SEC,
+    stallStartupSec: envNum("ROLL_AGENT_STALL_STARTUP_SEC") ?? AGENT_STALL_STARTUP_EXEMPT_SEC,
   };
 }
 
@@ -679,6 +693,11 @@ export function readCycleTimeoutThresholds(repoCwd: string): CycleTimeoutThresho
  *  result's `timedOut`). */
 export interface SpawnTimeoutWatchdog {
   markProgress(): void;
+  /** FIX-929 — bump the token-activity clock (called on every stdout chunk) and
+   *  re-arm the one-shot stall latch. Distinct from {@link markProgress}: a NEW
+   *  commit resets the no-progress clock but is NOT a token, so a silent
+   *  commit-only agent can still be flagged as stalled. */
+  markToken(): void;
   stop(): { firedReason: "wall" | "no-progress" | null };
 }
 
@@ -719,26 +738,37 @@ export function startSpawnTimeoutWatchdog(opts: {
   commitCount: () => Promise<number>;
   /** Append the cycle:timeout event (best-effort). */
   appendEvent: (ev: RollEvent) => void;
+  /** FIX-929 — name of the spawned agent (stamped on the `agent:stall` event). */
+  agent?: string;
   /** Kill the in-flight agent process tree (returns count signalled). */
   kill?: () => number;
   /** Poll cadence ms (default {@link TIMEOUT_POLL_MS}; tests pin a small value). */
   pollMs?: number;
 }): SpawnTimeoutWatchdog {
   const { cycleId, thresholds, clock, commitCount, appendEvent } = opts;
+  const agentName = opts.agent ?? "";
   const kill = opts.kill ?? ((): number => killLiveAgents("SIGKILL"));
   const pollMs = opts.pollMs ?? (Number((process.env["ROLL_TIMEOUT_POLL_MS"] ?? "").trim()) || TIMEOUT_POLL_MS);
-  // Both criteria disabled → an inert handle (no timer, never fires).
-  if (thresholds.wallSec <= 0 && thresholds.noProgressSec <= 0) {
-    return { markProgress: () => {}, stop: () => ({ firedReason: null }) };
+  // ALL criteria disabled (wall + no-progress + stall) → an inert handle (no
+  // timer, never fires). Stall alone still warrants a running timer.
+  if (thresholds.wallSec <= 0 && thresholds.noProgressSec <= 0 && thresholds.stallIdleSec <= 0) {
+    return { markProgress: () => {}, markToken: () => {}, stop: () => ({ firedReason: null }) };
   }
   const startSec = clock();
   let lastProgressSec = startSec;
+  // FIX-929 — token-activity clock + one-shot stall latch (re-armed by markToken).
+  let lastTokenSec = startSec;
+  let stallEmitted = false;
   let lastCommitCount = -1;
   let firedReason: "wall" | "no-progress" | null = null;
   let running = false;
 
   const markProgress = (): void => {
     lastProgressSec = clock();
+  };
+  const markToken = (): void => {
+    lastTokenSec = clock();
+    stallEmitted = false; // fresh output re-arms the latch (a later stall re-fires)
   };
 
   const tick = async (): Promise<void> => {
@@ -756,6 +786,35 @@ export function startSpawnTimeoutWatchdog(opts: {
         /* a git-probe blip is NOT progress and NOT a reason to kill — skip */
       }
       const now = clock();
+      // FIX-929 — OBSERVATIONAL stall signal, checked BEFORE the timeout verdict
+      // so it surfaces earlier (stallIdleSec < noProgressSec by design). Emitting
+      // `agent:stall` NEVER kills and NEVER sets firedReason — it is a non-fatal
+      // side-event the self-heal ladder (FIX-930/931/932) consumes. One-shot per
+      // stall: the latch is re-armed by markToken on the next stdout chunk.
+      if (!stallEmitted) {
+        const stall = agentStallVerdict({
+          sinceSpawnSec: now - startSec,
+          idleSinceTokenSec: now - lastTokenSec,
+          idleLimitSec: thresholds.stallIdleSec,
+          startupExemptSec: thresholds.stallStartupSec,
+        });
+        if (stall.stalled) {
+          stallEmitted = true;
+          try {
+            appendEvent({
+              type: "agent:stall",
+              cycleId,
+              agent: agentName,
+              idleSec: stall.idleSec,
+              sinceSpawnSec: now - startSec,
+              thresholdSec: thresholds.stallIdleSec,
+              ts: epochMs(now),
+            });
+          } catch {
+            /* stall is best-effort observability; never let it crash the tick */
+          }
+        }
+      }
       const verdict = cycleTimeoutVerdict({
         elapsedSec: now - startSec,
         idleSec: now - lastProgressSec,
@@ -801,6 +860,7 @@ export function startSpawnTimeoutWatchdog(opts: {
   timer.unref?.();
   return {
     markProgress,
+    markToken,
     stop: () => {
       clearInterval(timer);
       return { firedReason };
@@ -1216,6 +1276,7 @@ export async function executeCommand(
         clock: ports.clock,
         commitCount: () => ports.git.commitsAhead(ports.paths.worktreePath),
         appendEvent: (ev) => ports.events.appendEvent(ports.paths.eventsPath, ev),
+        agent: cmd.agent, // FIX-929 — stamp the stalling agent on agent:stall
       });
       // FIX-338 (Phase B 杠杆2): when `loop_safety.project_map: true`, PREPEND a
       // concise, bounded project map into the working agent's initial context so it
@@ -1265,6 +1326,9 @@ export async function executeCommand(
             // FIX-907: any stdout chunk is PROGRESS — resets the no-progress
             // clock so a slow-but-still-emitting agent never trips the idle gate.
             timeoutWatchdog.markProgress();
+            // FIX-929: a stdout chunk is also a TOKEN — bump the stall clock and
+            // re-arm the stall latch so only a TRULY silent agent is flagged.
+            timeoutWatchdog.markToken();
             captureSink?.onChunk(d);
             try {
               appendFileSync(livePath, d);

@@ -3551,7 +3551,7 @@ describe("FIX-907 startSpawnTimeoutWatchdog — kills a hung builder, never the 
       let kills = 0;
       const wd = startSpawnTimeoutWatchdog({
         cycleId: "c-wall",
-        thresholds: { wallSec: 60, noProgressSec: 30 },
+        thresholds: { wallSec: 60, noProgressSec: 30, stallIdleSec: 0, stallStartupSec: 0 },
         clock: fc.clock,
         commitCount: async () => 1, // a single early commit, then quiet (no new ones)
         appendEvent: (ev) => events.push(ev),
@@ -3582,7 +3582,7 @@ describe("FIX-907 startSpawnTimeoutWatchdog — kills a hung builder, never the 
       let kills = 0;
       const wd = startSpawnTimeoutWatchdog({
         cycleId: "c-hang",
-        thresholds: { wallSec: 100000, noProgressSec: 30 }, // wall far away; only idle matters
+        thresholds: { wallSec: 100000, noProgressSec: 30, stallIdleSec: 0, stallStartupSec: 0 }, // wall far away; only idle matters
         clock: fc.clock,
         commitCount: async () => 1, // ONE commit then frozen — exactly the FIX-390 shape
         appendEvent: (ev) => events.push(ev),
@@ -3608,7 +3608,7 @@ describe("FIX-907 startSpawnTimeoutWatchdog — kills a hung builder, never the 
       let kills = 0;
       const wd = startSpawnTimeoutWatchdog({
         cycleId: "c-slow",
-        thresholds: { wallSec: 100000, noProgressSec: 30 },
+        thresholds: { wallSec: 100000, noProgressSec: 30, stallIdleSec: 0, stallStartupSec: 0 },
         clock: fc.clock,
         commitCount: async () => 0, // NO commits at all — only stdout keeps it alive
         appendEvent: (ev) => events.push(ev),
@@ -3639,7 +3639,7 @@ describe("FIX-907 startSpawnTimeoutWatchdog — kills a hung builder, never the 
       let commits = 0;
       const wd = startSpawnTimeoutWatchdog({
         cycleId: "c-commits",
-        thresholds: { wallSec: 100000, noProgressSec: 30 },
+        thresholds: { wallSec: 100000, noProgressSec: 30, stallIdleSec: 0, stallStartupSec: 0 },
         clock: fc.clock,
         commitCount: async () => commits, // grows over time → progress
         appendEvent: (ev) => events.push(ev),
@@ -3665,7 +3665,7 @@ describe("FIX-907 startSpawnTimeoutWatchdog — kills a hung builder, never the 
       let kills = 0;
       const wd = startSpawnTimeoutWatchdog({
         cycleId: "c-off",
-        thresholds: { wallSec: 0, noProgressSec: 0 },
+        thresholds: { wallSec: 0, noProgressSec: 0, stallIdleSec: 0, stallStartupSec: 0 },
         clock: fc.clock,
         commitCount: async () => 0,
         appendEvent: () => {},
@@ -3682,12 +3682,150 @@ describe("FIX-907 startSpawnTimeoutWatchdog — kills a hung builder, never the 
   });
 });
 
+describe("FIX-929 startSpawnTimeoutWatchdog — agent:stall (OBSERVATIONAL, never kills)", () => {
+  function clockSeconds(start: number): { clock: () => number; set: (v: number) => void } {
+    let now = start;
+    return { clock: () => now, set: (v) => (now = v) };
+  }
+
+  it("a silent agent past the startup window emits a NON-FATAL agent:stall (kill spy never fires)", async () => {
+    vi.useFakeTimers();
+    try {
+      const fc = clockSeconds(0);
+      const events: RollEvent[] = [];
+      let kills = 0;
+      const wd = startSpawnTimeoutWatchdog({
+        cycleId: "c-stall",
+        // wall + no-progress far away so ONLY the stall criterion is exercised.
+        thresholds: { wallSec: 100000, noProgressSec: 100000, stallIdleSec: 30, stallStartupSec: 10 },
+        clock: fc.clock,
+        commitCount: async () => 0,
+        appendEvent: (ev) => events.push(ev),
+        kill: () => (kills += 1, 1),
+        agent: "pi",
+        pollMs: 1000,
+      });
+      await vi.advanceTimersByTimeAsync(1000); // t=0 still within startup → no stall
+      expect(events.some((e) => e.type === "agent:stall")).toBe(false);
+      fc.set(40); // sinceSpawn 40 ≥ 10 exempt, idle 40 ≥ 30 → stall
+      await vi.advanceTimersByTimeAsync(1000);
+      const stall = events.find((e) => e.type === "agent:stall");
+      expect(stall).toMatchObject({ type: "agent:stall", cycleId: "c-stall", agent: "pi", thresholdSec: 30, idleSec: 40 });
+      expect(kills).toBe(0); // OBSERVATIONAL — never kills, never times out
+      expect(wd.stop().firedReason).toBeNull();
+      // one-shot per stall: a single event, not one per tick.
+      expect(events.filter((e) => e.type === "agent:stall").length).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("no stall within the startup-exempt window even when fully idle", async () => {
+    vi.useFakeTimers();
+    try {
+      const fc = clockSeconds(0);
+      const events: RollEvent[] = [];
+      let kills = 0;
+      const wd = startSpawnTimeoutWatchdog({
+        cycleId: "c-warmup",
+        thresholds: { wallSec: 100000, noProgressSec: 100000, stallIdleSec: 30, stallStartupSec: 60 },
+        clock: fc.clock,
+        commitCount: async () => 0,
+        appendEvent: (ev) => events.push(ev),
+        kill: () => (kills += 1, 1),
+        agent: "pi",
+        pollMs: 1000,
+      });
+      fc.set(50); // idle 50 ≥ 30 BUT sinceSpawn 50 < 60 exempt → NO stall (warmup)
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(events.some((e) => e.type === "agent:stall")).toBe(false);
+      expect(kills).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stdout tokens (markToken) keep the agent un-stalled; a fresh silence re-fires the stall", async () => {
+    vi.useFakeTimers();
+    try {
+      const fc = clockSeconds(0);
+      const events: RollEvent[] = [];
+      let kills = 0;
+      const wd = startSpawnTimeoutWatchdog({
+        cycleId: "c-rearm",
+        thresholds: { wallSec: 100000, noProgressSec: 100000, stallIdleSec: 30, stallStartupSec: 0 },
+        clock: fc.clock,
+        commitCount: async () => 0,
+        appendEvent: (ev) => events.push(ev),
+        kill: () => (kills += 1, 1),
+        agent: "kimi",
+        pollMs: 1000,
+      });
+      // A token every 20s for 100s — idle never reaches 30 → never stalls.
+      for (let t = 20; t <= 100; t += 20) {
+        fc.set(t);
+        wd.markToken();
+        await vi.advanceTimersByTimeAsync(1000);
+      }
+      expect(events.some((e) => e.type === "agent:stall")).toBe(false);
+      // Go silent after the last token (t=100): idle crosses 30 → stall #1.
+      fc.set(140);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(events.filter((e) => e.type === "agent:stall").length).toBe(1);
+      // A NEW token re-arms the latch; silence again → stall #2 (not suppressed).
+      fc.set(150);
+      wd.markToken();
+      await vi.advanceTimersByTimeAsync(1000);
+      fc.set(190);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(events.filter((e) => e.type === "agent:stall").length).toBe(2);
+      expect(kills).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("the stall is OBSERVED before the no-progress watchdog would KILL (stallIdleSec < noProgressSec)", async () => {
+    vi.useFakeTimers();
+    try {
+      const fc = clockSeconds(0);
+      const events: RollEvent[] = [];
+      let kills = 0;
+      const wd = startSpawnTimeoutWatchdog({
+        cycleId: "c-order",
+        thresholds: { wallSec: 100000, noProgressSec: 60, stallIdleSec: 30, stallStartupSec: 0 },
+        clock: fc.clock,
+        commitCount: async () => 0, // no commits, no markProgress → both clocks tick from spawn
+        appendEvent: (ev) => events.push(ev),
+        kill: () => (kills += 1, 1),
+        agent: "pi",
+        pollMs: 1000,
+      });
+      fc.set(35); // idle 35 ≥ stall 30 but < kill 60 → stall, NO kill yet
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(events.some((e) => e.type === "agent:stall")).toBe(true);
+      expect(kills).toBe(0);
+      fc.set(65); // idle 65 ≥ 60 → the no-progress kill finally fires
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(kills).toBe(1);
+      expect(wd.stop().firedReason).toBe("no-progress");
+      // The observational stall was recorded BEFORE the terminal cycle:timeout.
+      const si = events.findIndex((e) => e.type === "agent:stall");
+      const ti = events.findIndex((e) => e.type === "cycle:timeout");
+      expect(si).toBeGreaterThanOrEqual(0);
+      expect(ti).toBeGreaterThan(si);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("FIX-907 readCycleTimeoutThresholds — policy + env override", () => {
   it("defaults to 45min wall / 15min no-progress with no policy", () => {
     const dir = mkdtempSync(join(tmpdir(), "roll-timeout-"));
     execDirs.push(dir);
     const t = readCycleTimeoutThresholds(dir);
-    expect(t).toEqual({ wallSec: 2700, noProgressSec: 900 });
+    expect(t).toEqual({ wallSec: 2700, noProgressSec: 900, stallIdleSec: 300, stallStartupSec: 120 });
   });
 
   it("reads loop_safety thresholds from policy.yaml", () => {
@@ -3699,7 +3837,8 @@ describe("FIX-907 readCycleTimeoutThresholds — policy + env override", () => {
       "loop_safety:\n  cycle_wall_timeout_sec: 1800\n  cycle_no_progress_sec: 600\n",
       "utf8",
     );
-    expect(readCycleTimeoutThresholds(dir)).toEqual({ wallSec: 1800, noProgressSec: 600 });
+    // policy.yaml carries only wall/no-progress; stall thresholds fall to core defaults.
+    expect(readCycleTimeoutThresholds(dir)).toEqual({ wallSec: 1800, noProgressSec: 600, stallIdleSec: 300, stallStartupSec: 120 });
   });
 
   it("env override beats policy + default", () => {
@@ -3709,15 +3848,24 @@ describe("FIX-907 readCycleTimeoutThresholds — policy + env override", () => {
     writeFileSync(join(dir, ".roll", "policy.yaml"), "loop_safety:\n  cycle_wall_timeout_sec: 1800\n", "utf8");
     const savedWall = process.env["ROLL_CYCLE_WALL_TIMEOUT_SEC"];
     const savedNp = process.env["ROLL_CYCLE_NO_PROGRESS_SEC"];
+    const savedStall = process.env["ROLL_AGENT_STALL_IDLE_SEC"];
+    const savedStallStart = process.env["ROLL_AGENT_STALL_STARTUP_SEC"];
     process.env["ROLL_CYCLE_WALL_TIMEOUT_SEC"] = "120";
     process.env["ROLL_CYCLE_NO_PROGRESS_SEC"] = "30";
+    process.env["ROLL_AGENT_STALL_IDLE_SEC"] = "45";
+    process.env["ROLL_AGENT_STALL_STARTUP_SEC"] = "15";
     try {
-      expect(readCycleTimeoutThresholds(dir)).toEqual({ wallSec: 120, noProgressSec: 30 });
+      // FIX-929: the stall env knobs override the core defaults too.
+      expect(readCycleTimeoutThresholds(dir)).toEqual({ wallSec: 120, noProgressSec: 30, stallIdleSec: 45, stallStartupSec: 15 });
     } finally {
       if (savedWall === undefined) delete process.env["ROLL_CYCLE_WALL_TIMEOUT_SEC"];
       else process.env["ROLL_CYCLE_WALL_TIMEOUT_SEC"] = savedWall;
       if (savedNp === undefined) delete process.env["ROLL_CYCLE_NO_PROGRESS_SEC"];
       else process.env["ROLL_CYCLE_NO_PROGRESS_SEC"] = savedNp;
+      if (savedStall === undefined) delete process.env["ROLL_AGENT_STALL_IDLE_SEC"];
+      else process.env["ROLL_AGENT_STALL_IDLE_SEC"] = savedStall;
+      if (savedStallStart === undefined) delete process.env["ROLL_AGENT_STALL_STARTUP_SEC"];
+      else process.env["ROLL_AGENT_STALL_STARTUP_SEC"] = savedStallStart;
     }
   });
 });

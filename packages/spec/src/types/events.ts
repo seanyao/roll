@@ -186,6 +186,11 @@ export type RollEvent =
   // the same isolate-from-counter + PAUSE(auth)/breathe(network) path — one block
   // taxonomy for builder/reviewer/scorer (no new precheck, no probe, no cache).
   | { type: "agent:blocked"; cycleId: string; agent: string; cause: "auth" | "network"; stage: "build" | "review" | "score"; detail: string; ts: number }
+  // FIX-929 — agent silently produced no token output for >= the stall threshold
+  // (past the startup-exempt window). OBSERVATIONAL: distinct from cycle:timeout's
+  // no-progress kill (which fires later at CYCLE_NO_PROGRESS_SEC); this lighter
+  // earlier signal is consumed by the self-heal ladder (FIX-930/931/932). Never kills.
+  | { type: "agent:stall"; cycleId: string; agent: string; idleSec: number; sinceSpawnSec: number; thresholdSec: number; ts: number }
   // Attest gate (FIX-207) — every actual delivery records whether a fresh
   // acceptance report was produced ("produced") or silently skipped ("skipped").
   | { type: "attest:gate"; cycleId: string; verdict: "produced" | "skipped"; reasons: string[]; ts: number }

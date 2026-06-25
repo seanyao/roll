@@ -166,7 +166,7 @@ interface Run {
 
 function envBase(fx: Fixture, extra: Record<string, string>): Record<string, string> {
   return {
-    PATH: `${fakeBin}:${process.env["PATH"] ?? ""}`,
+    PATH: fakeBin,
     HOME: fx.home,
     ROLL_HOME: join(fx.home, ".roll"),
     ROLL_PKG_DIR: pkgDir,

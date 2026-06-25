@@ -91,7 +91,7 @@ function syncedFixture(): Fixture {
 
 function envBase(fx: Fixture, extra: Record<string, string>): Record<string, string> {
   return {
-    PATH: `${fakeBin}:${process.env["PATH"] ?? ""}`,
+    PATH: fakeBin,
     HOME: fx.home,
     ROLL_HOME: join(fx.home, ".roll"),
     ROLL_PKG_DIR: pkgDir,
@@ -177,6 +177,8 @@ describe("frozen: roll setup", () => {
         Setup complete (4 items refreshed)  —  run roll init inside a project
       ════════════════════════════════════════════════════════════════════════════════
 
+        No AI agents installed. Run \`roll agent use\` later to set a default, or install one (e.g., claude, kimi, pi).
+
         → For \`roll release\`: enable "Allow auto-merge" in your repo (Settings → General → Pull Requests),
           or the release will stop and ask you to merge the PR manually.
         → roll release 需要仓库开启 “Allow auto-merge”（Settings → General → Pull Requests），
@@ -206,6 +208,8 @@ describe("frozen: roll setup", () => {
       ────────────────────────────────────────────────────────────────────────────────
         Setup complete (4 items refreshed)  —  run roll init inside a project
       ════════════════════════════════════════════════════════════════════════════════
+
+        未安装 AI agent。请稍后运行 \`roll agent use\` 设置默认，或先安装一个（如 claude、kimi、pi）。
 
         → For \`roll release\`: enable "Allow auto-merge" in your repo (Settings → General → Pull Requests),
           or the release will stop and ask you to merge the PR manually.
@@ -237,6 +241,8 @@ describe("frozen: roll setup", () => {
         Setup re-installed (forced — 4 items)  —  run roll init inside a project
       ════════════════════════════════════════════════════════════════════════════════
 
+        No AI agents installed. Run \`roll agent use\` later to set a default, or install one (e.g., claude, kimi, pi).
+
         → For \`roll release\`: enable "Allow auto-merge" in your repo (Settings → General → Pull Requests),
           or the release will stop and ask you to merge the PR manually.
         → roll release 需要仓库开启 “Allow auto-merge”（Settings → General → Pull Requests），
@@ -266,6 +272,8 @@ describe("frozen: roll setup", () => {
       ────────────────────────────────────────────────────────────────────────────────
         Setup re-installed (forced — 4 items)  —  run roll init inside a project
       ════════════════════════════════════════════════════════════════════════════════
+
+        未安装 AI agent。请稍后运行 \`roll agent use\` 设置默认，或先安装一个（如 claude、kimi、pi）。
 
         → For \`roll release\`: enable "Allow auto-merge" in your repo (Settings → General → Pull Requests),
           or the release will stop and ask you to merge the PR manually.
@@ -319,6 +327,8 @@ describe("frozen: roll setup", () => {
         Setup complete (no changes)  —  everything already up to date
       ════════════════════════════════════════════════════════════════════════════════
 
+        No AI agents installed. Run \`roll agent use\` later to set a default, or install one (e.g., claude, kimi, pi).
+
         → For \`roll release\`: enable "Allow auto-merge" in your repo (Settings → General → Pull Requests),
           or the release will stop and ask you to merge the PR manually.
         → roll release 需要仓库开启 “Allow auto-merge”（Settings → General → Pull Requests），
@@ -348,6 +358,8 @@ describe("frozen: roll setup", () => {
       ────────────────────────────────────────────────────────────────────────────────
         Setup complete (no changes)  —  everything already up to date
       ════════════════════════════════════════════════════════════════════════════════
+
+        No AI agents installed. Run \`roll agent use\` later to set a default, or install one (e.g., claude, kimi, pi).
 
         → For \`roll release\`: enable "Allow auto-merge" in your repo (Settings → General → Pull Requests),
           or the release will stop and ask you to merge the PR manually.

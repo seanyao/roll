@@ -60,6 +60,7 @@ First time through? Start with [Getting started](guide/en/getting-started.md).
 | `roll story new <ID> --title <t> [--epic <e>] [--no-index]` | The one minting entry agents/skills use: card folder + backlog row + index refresh (`--no-index` for batches) |
 | **Project · per repo** | |
 | `roll init` | Set up Roll in this project (agent-driven onboarding for legacy code) |
+| `roll design [--agent <name>]` | Launch `$roll-design` interactively to turn requirements into a domain model + INVEST backlog |
 | `roll offboard` | Remove Roll from this project |
 | `roll test [--where] [--reset]` | Run the test suite (routes through the isolation adapter; unknown types fail loud) |
 | `roll daemon <start\|stop\|status>` | Manage the read-only observability daemon (OPT-IN only; never auto-started) |

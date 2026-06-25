@@ -23,6 +23,8 @@ beforeEach(() => {
   mkdirSync(join(dir, ".roll", "loop"), { recursive: true });
   setEnv("ROLL_MAIN_PROJECT", dir);
   setEnv("ROLL_MAIN_SLUG", "proj-test"); // deterministic ALERT-<slug>.md path
+  setEnv("ROLL_PROJECT_RUNTIME_DIR", join(dir, ".roll", "loop"));
+  setEnv("ROLL_LOOP_ALERT", join(dir, ".roll", "loop", "ALERT-proj-test.md"));
   setEnv("NO_COLOR", "1");
 });
 afterEach(() => {

@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { RouteDeps, RollEvent } from "@roll/core";
 import {
   SELFHEAL_AGENT_BUDGET,
+  autoRecoverEnabled,
   clearSelfHeal,
   readSelfHeal,
   recordSelfHealAttempt,
@@ -61,6 +62,13 @@ describe("FIX-930 selfheal-budget store", () => {
     expect(selfHealBudget({ ROLL_LOOP_AGENT_RETRY_MAX: "4" })).toBe(4);
     expect(selfHealBudget({ ROLL_LOOP_AGENT_RETRY_MAX: "0" })).toBe(0);
     expect(selfHealBudget({ ROLL_LOOP_AGENT_RETRY_MAX: "junk" })).toBe(SELFHEAL_AGENT_BUDGET);
+  });
+
+  it("FIX-932: autoRecoverEnabled defaults on; ROLL_LOOP_NO_AUTO_RECOVER=1 disables the chain", () => {
+    expect(autoRecoverEnabled({})).toBe(true);
+    expect(autoRecoverEnabled({ ROLL_LOOP_NO_AUTO_RECOVER: "1" })).toBe(false);
+    expect(autoRecoverEnabled({ ROLL_LOOP_NO_AUTO_RECOVER: "0" })).toBe(true);
+    expect(autoRecoverEnabled({ ROLL_LOOP_NO_AUTO_RECOVER: "" })).toBe(true);
   });
 });
 

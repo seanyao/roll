@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v3.625.1 — 2026-06-25
+
 ### 自动化流水线
 - **Loop 会自己睡、自己醒了**：backlog 没活时，loop 自动进入休眠——卸掉定时任务、不再每半小时空转、账本也不再记一堆“无事可做”。等你加了新卡、敲了任意 `roll` 命令、或夜间 Dream 扫出活，它自己就醒过来接着干。省电、省噪音、账本干净。(US-LOOP-079a, US-LOOP-079b, US-LOOP-079d2, US-LOOP-079e, US-LOOP-079f1, US-LOOP-079f2, US-LOOP-079h1, US-LOOP-079h2, US-LOOP-079j, US-LOOP-079k, US-LOOP-079n) `[loop-engine]`
 

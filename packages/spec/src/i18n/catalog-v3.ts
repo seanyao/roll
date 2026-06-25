@@ -243,4 +243,26 @@ export const v3Catalog: Catalog = {
     en: "Agent '%s' is unknown or not installed.",
     zh: "agent '%s' 未知或未安装。",
   },
+
+  // `setup.*` — primary agent selection during setup (US-ONBOARD-NUDGE-006).
+  "setup.primary_prompt": {
+    en: "Multiple AI agents detected. Pick a default:",
+    zh: "检测到多个 AI agent，请选择默认：",
+  },
+  "setup.primary_auto_set": {
+    en: "Only %s is installed — set as default agent.",
+    zh: "仅安装了 %s — 已设为默认 agent。",
+  },
+  "setup.primary_no_agents": {
+    en: "No AI agents installed. Run `roll agent use` later to set a default, or install one (e.g., claude, kimi, pi).",
+    zh: "未安装 AI agent。请稍后运行 `roll agent use` 设置默认，或先安装一个（如 claude、kimi、pi）。",
+  },
+  "setup.primary_reselect": {
+    en: "--reselect: pick a new default agent.",
+    zh: "--reselect：重新选择默认 agent。",
+  },
+  "setup.primary_set": {
+    en: "Default agent set to %s.",
+    zh: "默认 agent 已设为 %s。",
+  },
 };

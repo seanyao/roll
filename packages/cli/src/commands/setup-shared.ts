@@ -28,6 +28,7 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  renameSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -376,12 +377,19 @@ function firstInstalledAgent(): string | null {
   return null;
 }
 
-function replacePrimaryAgent(newAgent: string): void {
+/**
+ * Atomically replace primary_agent in config (US-ONBOARD-NUDGE-006 AC7).
+ * Writes to a temp file then renames over the original, preserving all
+ * unknown fields — never truncates config on partial write or concurrent read.
+ */
+export function replacePrimaryAgent(newAgent: string): void {
   const cfg = rollConfig();
   if (!existsSync(cfg) || newAgent === "") return;
   const lines = readFileSync(cfg, "utf8").split("\n");
   const out = lines.map((l) => (/^primary_agent:/.test(l) ? `primary_agent: ${newAgent}` : l));
-  writeFileSync(cfg, out.join("\n"));
+  const tmp = `${cfg}.tmp-${process.pid}`;
+  writeFileSync(tmp, out.join("\n"));
+  renameSync(tmp, cfg);
 }
 
 /** Port of _install_local. Returns false on a hard source-missing failure. */

@@ -75,6 +75,7 @@ import { basename, dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
 import { cardArchiveDir, epicFromFeaturePath, findFeatureFile, findFeatureFiles, generateIndex, reportFileName } from "../lib/archive.js";
 import { physicalTerminalFromSpecText } from "../lib/physical-terminal.js";
+import { plannedVsDeliveredEvidence } from "../runner/attest-gate.js";
 import { readReviewScoreTrend, readStoryReviewScores } from "../lib/review-score.js";
 import { markPhaseDone } from "../lib/story-page.js";
 import { collectToolEvidenceFromEventsPath, formatToolCostSummary } from "../lib/tool-display.js";
@@ -1141,6 +1142,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     ...(captureFacts.some((x) => !x.taken && x.skipped !== undefined)
       ? { captureSkips: captureFacts.filter((x) => !x.taken && x.skipped !== undefined).map((x) => ({ kind: x.kind, out: x.out, skipped: x.skipped ?? "" })) }
       : {}),
+    ...((() => { const d = plannedVsDeliveredEvidence(projectPath, storyId); return d !== "" ? { evidenceDeltaSummary: d } : {}; })()),
   });
   // US-META-001: report carries the card id (`<ID>-report.html`) so a tab /
   // download / share is self-identifying.

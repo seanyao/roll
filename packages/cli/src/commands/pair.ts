@@ -21,6 +21,8 @@ import {
 import { parseEventLine, type RollEvent } from "@roll/spec";
 import { peerReviewCost } from "@roll/core";
 import { buildDesignScorePrompt, buildPairScorePrompt, parsePairScoreOutput, runScorePairing, type PairEvent } from "../runner/pairing-gate.js";
+import { formatEvaluationContractForScorer, parseEvaluationContract } from "../lib/evaluation-contract.js";
+import { cardArchiveDir } from "../lib/archive.js";
 import { projectAgent, realAgentEnv } from "./agent-list.js";
 import { spawnPeerReviewAgent, type SpawnPeerReviewInput, type SpawnPeerReviewResult } from "./peer.js";
 import { loopRuntimeDir, projectSlug, sharedRoot } from "./dashboard.js";
@@ -341,8 +343,20 @@ export async function pairScore(rest: string[], deps: PairScoreCmdDeps = default
   // with the design prompt. The reply contract + parser are shared, so the note
   // shape is identical; only the rubric and the stage label differ.
   const buildPrompt = design ? buildDesignScorePrompt : buildPairScorePrompt;
+  // US-SKILL-030: read the Evaluation contract from spec (best-effort; legacy
+  // specs without the block degrade gracefully — evalContractSummary stays "").
+  let evalContractSummary = "";
+  if (!design) {
+    try {
+      const specPath = join(cardArchiveDir(process.cwd(), storyId), "spec.md");
+      if (existsSync(specPath)) {
+        evalContractSummary = formatEvaluationContractForScorer(parseEvaluationContract(readFileSync(specPath, "utf8")));
+      }
+    } catch { /* best-effort */ }
+  }
   const scorePeer = async (peer: string, s: string, t: number) => {
-    const res = await deps.spawnReviewer({ agent: peer, projectPath: process.cwd(), prompt: buildPrompt(s), timeoutMs: t });
+    const prompt = design ? (buildDesignScorePrompt as (s: string) => string)(s) : buildPairScorePrompt(s, evalContractSummary || undefined);
+    const res = await deps.spawnReviewer({ agent: peer, projectPath: process.cwd(), prompt, timeoutMs: t });
     if (res.status !== "ok") return null;
     const parsed = parsePairScoreOutput(res.stdout);
     return parsed === null ? null : { ...parsed, cost: peerReviewCost(peer, res.stdout) };

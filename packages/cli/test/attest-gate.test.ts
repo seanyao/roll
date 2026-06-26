@@ -1595,7 +1595,11 @@ describe("FIX-339 — multi-surface deliverables (web list + deliverable_cmd) + 
       expect(allowedDeliverableCmd("roll init")).toBe(false);
       expect(allowedDeliverableCmd("roll init --auto")).toBe(false);
       expect(allowedDeliverableCmd("roll init --diagnose --fixture state-matrix")).toBe(true);
+      expect(allowedDeliverableCmd("roll init --attest-smoke existing-codebase-diagnose")).toBe(true);
+      expect(allowedDeliverableCmd("roll init --attest-smoke prd-only")).toBe(true);
+      expect(allowedDeliverableCmd("roll init --attest-smoke existing-codebase-diagnose --auto")).toBe(false);
       expect(allowedDeliverableCmd("node ./bin/roll.js init --diagnose --fixture state-matrix")).toBe(true);
+      expect(allowedDeliverableCmd("node ./bin/roll.js init --attest-smoke existing-codebase-diagnose")).toBe(true);
     });
 
     it("deliverableCmds/rejectedCmds: allowed kept, rejected surfaced separately", () => {

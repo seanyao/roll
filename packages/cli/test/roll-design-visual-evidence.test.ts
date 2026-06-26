@@ -510,6 +510,36 @@ deliverable_cmd:
         const v = validateStoryVisualEvidence(spec);
         expect(v.ok).toBe(true);
       });
+
+      it("passes an isolated roll init attest-smoke fixture but not ordinary init", () => {
+        const isolated = `---
+deliverable_cmd: roll init --attest-smoke existing-codebase-diagnose
+physical_terminal:
+  app: Terminal.app
+  command: roll init --attest-smoke existing-codebase-diagnose
+  evidence: screenshot
+---
+## US-INIT-SMOKE Demo
+
+**AC:**
+- [ ] [visual-evidence] Terminal.app screenshot of the isolated init smoke
+`;
+        const mutating = `---
+deliverable_cmd: roll init --auto
+---
+## US-INIT-BAD Demo
+
+**AC:**
+- [ ] [visual-evidence] Terminal.app screenshot of init
+`;
+
+        expect(validateStoryVisualEvidence(isolated).ok).toBe(true);
+        expect(validateStoryVisualEvidence(mutating)).toMatchObject({
+          ok: false,
+          code: "deliverable-cmd-rejected",
+          rejectedDeliverableCmds: ["roll init --auto"],
+        });
+      });
     });
   });
 });

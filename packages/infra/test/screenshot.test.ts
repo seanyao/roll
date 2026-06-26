@@ -812,6 +812,110 @@ describe("terminal", () => {
   });
 });
 
+describe("physical_terminal", () => {
+  // US-INIT-003d — the physical Terminal.app evidence lane: a real Terminal
+  // window running the declared command, then a live screencapture of that
+  // window. It never falls back to a headless transcript image.
+  const aqua = { code: 0, stdout: "Aqua\n" };
+
+  it("ROLL_ATTEST_NO_TERMINAL=1 skips before any spawn", async () => {
+    const { run, calls } = fake({});
+    const r = await captureScreenshot(
+      { kind: "physical_terminal", command: "roll doctor --tools", out: outPath() },
+      { run, env: { ROLL_ATTEST_NO_TERMINAL: "1" }, platform: "darwin" },
+    );
+    expect(r).toMatchObject({ kind: "physical_terminal", taken: false, skipped: "physical_terminal: ROLL_ATTEST_NO_TERMINAL=1" });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("ROLL_NO_SCREENCAP=1 skips before any spawn", async () => {
+    const { run, calls } = fake({ launchctl: aqua });
+    const r = await captureScreenshot(
+      { kind: "physical_terminal", command: "roll doctor --tools", out: outPath() },
+      { run, env: { ROLL_NO_SCREENCAP: "1" }, platform: "darwin" },
+    );
+    expect(r.taken).toBe(false);
+    expect(r.skipped).toContain("physical_terminal: ROLL_NO_SCREENCAP=1");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("non-macOS skips with a physical_terminal reason before any spawn", async () => {
+    const { run, calls } = fake({});
+    const r = await captureScreenshot(
+      { kind: "physical_terminal", command: "roll doctor --tools", out: outPath() },
+      { run, env: {}, platform: "linux" },
+    );
+    expect(r).toMatchObject({ kind: "physical_terminal", taken: false, skipped: "physical_terminal: not macOS — physical Terminal.app evidence requires macOS" });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("no GUI session skips with a physical_terminal reason", async () => {
+    const { run, calls } = fake({ launchctl: { code: 0, stdout: "Background\n" } });
+    const r = await captureScreenshot(
+      { kind: "physical_terminal", command: "roll doctor --tools", out: outPath() },
+      { run, env: {}, platform: "darwin" },
+    );
+    expect(r).toMatchObject({ kind: "physical_terminal", taken: false, skipped: "physical_terminal: no GUI session — physical Terminal.app evidence requires a logged-in Aqua session" });
+    expect(calls).toEqual(["launchctl managername"]);
+  });
+
+  it("US-ATTEST-012 — a command carrying a secret is REFUSED before any window opens", async () => {
+    const { run, calls } = fake({ launchctl: aqua, osascript: { code: 0 }, screencapture: { code: 0, writes: true } });
+    const r = await captureScreenshot(
+      { kind: "physical_terminal", command: "curl -H 'Authorization: Bearer ghp_0123456789abcdefghijklmnopqrstuvwxyz'", out: outPath() },
+      { run, env: {}, platform: "darwin" },
+    );
+    expect(r.taken).toBe(false);
+    expect(r.skipped).toContain("physical_terminal: secret");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("screencapture failure is reported as a physical_terminal permission skip", async () => {
+    const { run } = fake({ launchctl: aqua, osascript: { code: 0 }, sh: { code: 0 }, screencapture: { code: 1 } });
+    const r = await captureScreenshot(
+      { kind: "physical_terminal", command: "roll doctor --tools", out: outPath() },
+      { run, env: {}, platform: "darwin" },
+    );
+    expect(r.taken).toBe(false);
+    expect(r.skipped).toContain("physical_terminal: screencapture failed");
+  });
+
+  it("GUI + screencapture success → taken:true, kind:physical_terminal, closes the Terminal window", async () => {
+    const { run, calls } = fake({
+      launchctl: aqua,
+      osascript: { code: 0 },
+      sh: { code: 0 },
+      screencapture: { code: 0, writes: true },
+    });
+    const out = outPath();
+    const r = await captureScreenshot(
+      { kind: "physical_terminal", command: "roll doctor --tools", out },
+      { run, env: {}, platform: "darwin" },
+    );
+    expect(r).toMatchObject({ kind: "physical_terminal", out, taken: true });
+    const joined = calls.join("\n");
+    expect(joined).toContain("launchctl managername");
+    expect(joined).toContain("do script");
+    expect(joined).toContain("roll doctor --tools");
+    expect(joined).toContain("screencapture -x -R");
+    expect(joined).toContain("roll-attest-exit-tab");
+    expect(calls.some((c) => c.startsWith("screencapture "))).toBe(true);
+  });
+
+  it("a skipped physical_terminal capture does NOT fabricate a text fallback", async () => {
+    const out = outPath();
+    const { run } = fake({ launchctl: { code: 0, stdout: "Background\n" } });
+    const r = await captureScreenshot(
+      { kind: "physical_terminal", command: "roll doctor --tools", out },
+      { run, env: {}, platform: "darwin" },
+    );
+    expect(r.taken).toBe(false);
+    expect(r.skipped).toContain("physical_terminal: no GUI session");
+    expect(existsSync(out)).toBe(false);
+    expect(existsSync(`${out}.txt`)).toBe(false);
+  });
+});
+
 describe("screenshotEvidenceRef (deletion-contract bridge)", () => {
   const taken: ScreenshotResult = { kind: "terminal", out: "/x/terminal.png", taken: true };
   const skipped: ScreenshotResult = { kind: "terminal", out: "/x/terminal.png", taken: false, skipped: "no GUI session" };

@@ -444,7 +444,7 @@ describe("US-INIT-003d: doctor --tools physical Terminal.app evidence", () => {
   // globally-installed `roll` binary produced kind:terminal + terminal-headless.txt
   // for this story; this subprocess test exercises the CLI exactly as the loop
   // invokes it, so the bundled dev entry point is the code under test.
-  it("CLI entry point records physical_terminal skip (not terminal headless text) on a no-GUI host", () => {
+  it("CLI entry point records physical_terminal skip for `roll doctor --tools` on a no-GUI host", () => {
     const proj = tmp("attest-cli-entry");
     const cardDir = join(proj, ".roll", "features", "init-onboard", "US-PHYS-CLI");
     mkdirSync(cardDir, { recursive: true });
@@ -452,16 +452,21 @@ describe("US-INIT-003d: doctor --tools physical Terminal.app evidence", () => {
     const here = dirname(fileURLToPath(import.meta.url));
     const rollBin = resolve(here, "..", "bin", "roll.js");
 
-    const result = spawnSync(process.execPath, [rollBin, "attest", "US-PHYS-CLI", "--capture-command", "echo hello"], {
-      cwd: proj,
-      env: {
-        ...process.env,
-        ROLL_LANG: "en",
-        ROLL_ATTEST_NO_TERMINAL: "1",
+    const result = spawnSync(
+      process.execPath,
+      [rollBin, "attest", "US-PHYS-CLI", "--capture-command", `node ${rollBin} doctor --tools`],
+      {
+        cwd: proj,
+        env: {
+          ...process.env,
+          ROLL_LANG: "en",
+          NO_COLOR: "1",
+          ROLL_ATTEST_NO_TERMINAL: "1",
+        },
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
       },
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    );
 
     // The command may warn about the skipped capture but exits 0 (attest degrades gracefully).
     expect(result.status).toBe(0);

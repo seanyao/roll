@@ -65,7 +65,7 @@ Facts:
   - facts hash: sha256:...
 Next: $roll-onboard
 Agent status: available: claude, codex
-Run `$roll-onboard` with an available agent, then run `roll init --apply` when the plan is ready.
+Run `$roll-onboard` with an available agent, review the artifacts, then run `roll init --apply`.
 No files changed.
 ```
 
@@ -88,15 +88,23 @@ $roll-onboard
 
 ### 4. 应用 plan
 
-回到终端：
+回到终端，先审阅 `.roll/init-diagnosis.yaml` 和 `.roll/onboard-plan.yaml`，然后执行：
 
 ```bash
 roll init --apply
 ```
 
-这一步会先校验成对的 diagnosis / plan 产物，然后：
+这一步会先校验成对的 diagnosis / plan 产物，任何写文件之前先拒绝不支持的 schema 版本、过期或 stale 的 facts hash、非幂等 file operation、路径穿越和 shell-command key。
+
+如果是在非交互自动化里执行，审阅后要显式确认：
+
+```bash
+roll init --apply --auto
+```
+
+校验通过后，Roll 会：
 - 按你选的 scope 创建 `.roll/` 子目录
-- 如果选了"生成 backlog"，写入初始 `BACKLOG.md`
+- 如果选了"生成 backlog"，写入初始 `.roll/backlog.md`
 - 你标记 include 的现有文档不会被覆盖
 - 如果 Q7 说 yes，把 `.roll/` 加入 `.gitignore`
 - 把 Roll 约定同步到你选的 AI 工具
@@ -168,7 +176,7 @@ Roll 会检测为 pre-2.0 Roll 项目（不是 legacy），让你跑 `npx @seany
 在对话里告诉它。第一组 3 问就是为了让你纠正。Skill 把纠正后的理解写进 plan，bash 信任 plan。
 
 **Q: 能手动编辑 `.roll/onboard-plan.yaml` 吗？**
-可以，但要和 `.roll/init-diagnosis.yaml` 配套。`roll init --apply` 要求两边的 `factsHash` 一致、没有 shell-command key，且 `file_operations` 只能声明那两个允许文件。超过 24 小时或由旧版 `$roll-onboard` 生成的 plan，应该重新生成。
+可以，但要和 `.roll/init-diagnosis.yaml` 配套。`roll init --apply` 要求两边的 `factsHash` 一致，并会重新计算当前项目 facts hash；同时不允许 shell-command key，`file_operations` 只能声明那两个位于项目内且幂等的允许文件。超过 24 小时、相对当前项目已 stale，或由旧版 `$roll-onboard` 生成的 plan，都应该重新生成。
 
 **Q: 我们团队用 GitHub Issues / Jira / Linear，Roll 会替代它们吗？**
 不会。Roll 的 `BACKLOG.md` 是给 AI loop 自治执行用的。你团队的外部 tracker 继续用。有的团队只把"AI-loop 能执行的 story"放 Roll，纯人工任务留在原 tracker。

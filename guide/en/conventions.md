@@ -62,8 +62,9 @@ scanning the whole tree.
 For an existing codebase with no `.roll/` yet, the entry point is
 `$roll-onboard` (the **graft** adoption pattern). It scans the code, asks a
 focused set of cognition / scope / privacy questions, and writes
-`.roll/onboard-plan.yaml` as a reviewable contract. `roll init --apply` then
-turns that plan into the on-disk structure — see
+`.roll/onboard-plan.yaml` as a reviewable contract. After review,
+`roll init --apply` turns that plan into the on-disk structure; non-interactive
+automation must use `roll init --apply --auto` — see
 [legacy-onboarding.md](legacy-onboarding.md) and
 [patterns/](patterns/README.md).
 

@@ -22,8 +22,9 @@ roll init
    `.roll/` directory. It does **not** silently scaffold; instead it surfaces
    `$roll-onboard`, an interactive skill that scans the codebase, asks a short
    set of cognition / scope / privacy questions, and produces
-   `.roll/onboard-plan.yaml` for review. Run `roll init --apply` once the plan
-   looks right. This is the **graft** pattern — see
+   `.roll/onboard-plan.yaml` for review. After reviewing the paired artifacts,
+   run `roll init --apply` in an interactive terminal or `roll init --apply --auto`
+   in non-interactive automation. This is the **graft** pattern — see
    [legacy-onboarding.md](legacy-onboarding.md) and
    [patterns/graft-pattern.md](patterns/graft-pattern.md).
 4. **Already initialized** — `.roll/`, `AGENTS.md`, backlog, and features are

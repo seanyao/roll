@@ -387,6 +387,32 @@ describe("roll init diagnosis router", () => {
     expect(existsSync(join(cwd, ".roll"))).toBe(false);
   });
 
+  it("runs the hidden existing-codebase invalid-plan attest smoke and cleans it up", () => {
+    const cwd = project();
+
+    const run = runInit(cwd, ["--attest-smoke", "existing-codebase-invalid-plan"], {
+      pathEntries: [process.env["PATH"] ?? ""],
+    });
+
+    expect(run.status).toBe(0);
+    expect(run.stdout).toContain("roll init attest smoke: existing-codebase-invalid-plan");
+    expect(run.stdout).toContain("Fixture tree:");
+    expect(run.stdout).toContain("package.json");
+    expect(run.stdout).toContain("src/index.ts");
+    expect(run.stdout).toContain("tests/index.test.ts");
+    expect(run.stdout).toContain(".roll/init-diagnosis.yaml");
+    expect(run.stdout).toContain(".roll/onboard-plan.yaml");
+    expect(run.stderr).toContain("plan factsHash is stale: expected sha256:");
+    expect(run.stderr).toContain("got sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd");
+    expect(run.stdout).toContain("Post-apply mutation check:");
+    expect(run.stdout).toContain("AGENTS.md: missing");
+    expect(run.stdout).toContain(".roll/backlog.md: missing");
+    expect(run.stdout).toContain(".gitignore: missing");
+    expect(run.stdout).toContain("cleanup: removed");
+    expect(existsSync(join(cwd, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(cwd, ".roll"))).toBe(false);
+  });
+
   it("does not route git-only or empty source shells to existing-codebase onboarding", () => {
     const cwd = project();
     mkdir(cwd, "src");

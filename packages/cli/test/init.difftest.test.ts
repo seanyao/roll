@@ -20,6 +20,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { confirmInitProjectForTest, initCommand } from "../src/commands/init.js";
+import { collectInitFacts } from "../src/lib/init-diagnosis.js";
+import { computeInitFactsHash } from "../src/lib/onboard-plan.js";
 import { collectProjectsRegistry } from "../src/lib/projects-registry.js";
 
 const REPO = resolve(__dirname, "../../..");
@@ -117,7 +119,36 @@ function reinitFixture(): Fixture {
   return fx;
 }
 
+function replacePlanFactsHash(planBody: string, factsHash: string): string {
+  return planBody.replace(/factsHash:\s*"?sha256:[0-9a-f]{64}"?/g, `factsHash: "${factsHash}"`);
+}
+
 function applyFixture(planBody: string): Fixture {
+  const fx = freshFixture();
+  mkdirSync(join(fx.proj, ".roll"), { recursive: true });
+  const factsHash = computeInitFactsHash(collectInitFacts(fx.proj, { ignoreOnboardArtifacts: true }));
+  const normalizedPlan = replacePlanFactsHash(planBody, factsHash);
+  writeFileSync(join(fx.proj, ".roll", "onboard-plan.yaml"), normalizedPlan);
+  writeFileSync(
+    join(fx.proj, ".roll", "init-diagnosis.yaml"),
+    `version: 1
+createdAt: "2026-06-27T00:00:00Z"
+factsHash: "${factsHash}"
+diagnosis:
+  kind: codebase-no-roll
+  recommendedPath: agentic-onboard
+  confidence: high
+  reasons:
+    - Existing source, tests, or manifests found without Roll markers.
+agent:
+  name: kimi
+  status: available
+`,
+  );
+  return fx;
+}
+
+function applyFixtureWithRawPlan(planBody: string): Fixture {
   const fx = freshFixture();
   mkdirSync(join(fx.proj, ".roll"), { recursive: true });
   writeFileSync(join(fx.proj, ".roll", "onboard-plan.yaml"), planBody);
@@ -705,9 +736,64 @@ describe("frozen: roll init", () => {
     expect(read(fx.proj, ".roll/backlog.md")).toBe("<MISSING>");
   });
 
-  it("--apply consumes a valid plan and records offboard changeset", () => {
+  it("--apply rejects unsupported schema versions before mutating", () => {
+    const fx = applyFixtureWithRawPlan(validPlan().replace("version: 1", "version: 99"));
+    const run = norm(tsInit(fx, ["--apply", "--auto"]), fx);
+
+    expect(run.status).toBe(1);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain("version 99 not supported");
+    expect(run.stderr).toContain("Plan validation failed");
+    expect(read(fx.proj, "AGENTS.md")).toBe("<MISSING>");
+    expect(read(fx.proj, ".roll/backlog.md")).toBe("<MISSING>");
+  });
+
+  it("--apply rejects stale facts hashes before mutating", () => {
+    const fx = applyFixtureWithRawPlan(validPlan());
+    const run = norm(tsInit(fx, ["--apply", "--auto"]), fx);
+
+    expect(run.status).toBe(1);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain("plan factsHash is stale: expected sha256:");
+    expect(run.stderr).toContain("got sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    expect(run.stderr).toContain("Regenerate the plan by running $roll-onboard again before applying.");
+    expect(read(fx.proj, "AGENTS.md")).toBe("<MISSING>");
+    expect(read(fx.proj, ".roll/backlog.md")).toBe("<MISSING>");
+    expect(read(fx.proj, ".gitignore")).toBe("<MISSING>");
+  });
+
+  it("--apply validates a plan but refuses non-interactive mutation without --auto", () => {
     const fx = applyFixture(validPlan());
     expect(norm(tsInit(fx, ["--apply"]), fx)).toMatchInlineSnapshot(`
+      {
+        "status": 1,
+        "stderr": "",
+        "stdout": "[roll] Onboard plan validated. Review .roll/init-diagnosis.yaml and .roll/onboard-plan.yaml before applying.
+        Non-interactive apply requires explicit review acknowledgement:
+          roll init --apply --auto
+        No files changed.
+      ",
+      }
+    `);
+    expect(read(fx.proj, "AGENTS.md")).toBe("<MISSING>");
+    expect(read(fx.proj, ".roll/backlog.md")).toBe("<MISSING>");
+    expect(read(fx.proj, ".gitignore")).toBe("<MISSING>");
+  });
+
+  it("--apply does not let ROLL_ASSUME_TTY bypass non-interactive review acknowledgement", () => {
+    const fx = applyFixture(validPlan());
+    const run = norm(tsInit(fx, ["--apply"], { ROLL_ASSUME_TTY: "1" }), fx);
+
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain("Non-interactive apply requires explicit review acknowledgement:");
+    expect(run.stdout).toContain("roll init --apply --auto");
+    expect(read(fx.proj, "AGENTS.md")).toBe("<MISSING>");
+    expect(read(fx.proj, ".roll/backlog.md")).toBe("<MISSING>");
+  });
+
+  it("--apply consumes a valid plan and records offboard changeset", () => {
+    const fx = applyFixture(validPlan());
+    expect(norm(tsInit(fx, ["--apply", "--auto"]), fx)).toMatchInlineSnapshot(`
       {
         "status": 0,
         "stderr": "",
@@ -743,7 +829,7 @@ describe("frozen: roll init", () => {
 
   it("--apply renders Phase 2 markdown and skips seed in non-interactive mode", () => {
     const fx = applyFixture(planWithPhase2());
-    expect(norm(tsInit(fx, ["--apply"]), fx)).toMatchInlineSnapshot(`
+    expect(norm(tsInit(fx, ["--apply", "--auto"]), fx)).toMatchInlineSnapshot(`
       {
         "status": 0,
         "stderr": "
@@ -803,7 +889,7 @@ describe("frozen: roll init", () => {
         - facts hash: sha256:9c47dfd498fc38345970e3184dee4b297641268ffc6825ba2fba71def283f2d8
       Next: $roll-onboard
       Agent status: available: kimi
-      Run \`$roll-onboard\` with an available agent, then run \`roll init --apply\` when the plan is ready.
+      Run \`$roll-onboard\` with an available agent, review the artifacts, then run \`roll init --apply\`.
       No files changed.
       ",
       }

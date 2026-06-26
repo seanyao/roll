@@ -82,7 +82,7 @@ from __future__ import annotations
 import sys
 import re
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 try:
     import yaml  # PyYAML
@@ -198,10 +198,17 @@ def validate_file_operations(plan: dict) -> list[str]:
         path = op.get("path")
         if not isinstance(path, str):
             errors.append(f"{where}.path must be a string")
-        elif path not in AGENT_WRITABLE_OUTPUTS:
-            errors.append(f"{where}.path '{path}' is outside the agent writable outputs")
         else:
-            seen.add(path)
+            parts = PurePosixPath(path).parts
+            normalized = PurePosixPath(path).as_posix()
+            if path.startswith("/") or "\\" in path or ".." in parts or normalized != path:
+                errors.append(f"{where}.path must be a normalized relative project path without traversal")
+            if path not in AGENT_WRITABLE_OUTPUTS:
+                errors.append(f"{where}.path '{path}' is outside the agent writable outputs")
+            elif path in seen:
+                errors.append(f"{where}.path '{path}' must not be duplicated")
+            else:
+                seen.add(path)
         if op.get("operation") != "write":
             errors.append(f"{where}.operation must be write")
         if op.get("idempotent") is not True:

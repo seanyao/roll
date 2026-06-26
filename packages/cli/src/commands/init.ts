@@ -60,6 +60,7 @@ import { detectDesignHandoff, renderDesignNudge } from "../lib/onboard-nudge.js"
 import { classifyInitState, collectInitFacts, renderStateMatrixFixture, type InitDiagnosis, type InitFacts } from "../lib/init-diagnosis.js";
 import { renderInitRecommendation } from "../lib/init-diagnosis-render.js";
 import { writeInitBrief, type InitBriefResult } from "../lib/init-brief.js";
+import { validateOnboardApplyPreflight } from "../lib/onboard-apply.js";
 import { computeInitFactsHash } from "../lib/onboard-plan.js";
 import { discoverInteractiveAgents } from "../lib/interactive-agent.js";
 import { confirmYesNo, readConfirmLine } from "../lib/tty-confirm.js";
@@ -393,7 +394,7 @@ function readOnboardPrompt(projectDir: string): string | null {
   const body = readFileSync(skillFile, "utf8").replace(/^---\n[\s\S]*?\n---\n?/, "").trim();
   const context = renderProjectDocContext(projectDir);
   return [
-    "Run the $roll-onboard skill below for this project. Follow it end-to-end and write .roll/onboard-plan.yaml when done.",
+    "Run the $roll-onboard skill below for this project. Follow it end-to-end and write .roll/init-diagnosis.yaml plus .roll/onboard-plan.yaml when done.",
     context,
     body,
   ].filter((part) => part !== "").join("\n\n");
@@ -466,7 +467,7 @@ function runOnboardAgent(agent: string, projectDir: string): number {
   }
   process.stderr.write("\n");
   info(m("init.plan_written_running_apply"));
-  return initApply(projectDir);
+  return initApply(projectDir, { autoMode: true });
 }
 
 function legacyOnboardGuide(projectDir: string): number {
@@ -894,6 +895,14 @@ function runPythonScript(scriptPath: string, args: string[]): number {
   return r.status ?? 1;
 }
 
+function renderApplyPreflightErrors(preflight: ReturnType<typeof validateOnboardApplyPreflight>): string[] {
+  if (preflight.planFactsHash === undefined) return [m3("init.onboard_plan_facts_hash_unreadable")];
+  if (preflight.currentFactsHash !== undefined && preflight.planFactsHash !== preflight.currentFactsHash) {
+    return [m3("init.onboard_plan_facts_hash_stale", preflight.currentFactsHash, preflight.planFactsHash)];
+  }
+  return preflight.errors;
+}
+
 function printMergeSummary(summary: Summary): void {
   if (summary.length === 0) return;
   const { GREEN, YELLOW, CYAN, NC } = pal();
@@ -1023,7 +1032,7 @@ function addRollToGitignore(projectDir: string, changeset: OnboardChangeset): vo
   ok(m("init.added_roll_to_gitignore"));
 }
 
-function initApply(projectDir: string): number {
+function initApply(projectDir: string, opts: { autoMode?: boolean } = {}): number {
   const plan = join(projectDir, ".roll", "onboard-plan.yaml");
   const validator = join(rollPkgDir(), "lib", "roll-plan-validate.py");
   if (!existsSync(plan)) {
@@ -1041,6 +1050,20 @@ function initApply(projectDir: string): number {
     err(m("init.plan_validation_failed_see_errors_above"));
     process.stderr.write("\n");
     process.stderr.write("  If the plan is stale (>24h), regenerate by running $roll-onboard again.\n");
+    return 1;
+  }
+  const preflight = validateOnboardApplyPreflight(projectDir, plan);
+  if (!preflight.ok) {
+    for (const error of renderApplyPreflightErrors(preflight)) err(error);
+    process.stderr.write("\n");
+    process.stderr.write(`  ${m3("init.onboard_regenerate_before_apply")}\n`);
+    return 1;
+  }
+  if (opts.autoMode !== true && process.stdin.isTTY !== true) {
+    info(m3("init.onboard_plan_validated_review"));
+    process.stdout.write(`  ${m3("init.onboard_apply_auto_required")}\n`);
+    process.stdout.write("    roll init --apply --auto\n");
+    process.stdout.write(`  ${m3("init.no_files_changed")}\n`);
     return 1;
   }
   info(m("init.applying_onboard_plan"));
@@ -1398,8 +1421,8 @@ function renderExistingCodebaseDiagnosis(facts: InitFacts, diagnosis: InitDiagno
     lines.push(`${initCopy("Agent status", "Agent 状态")}: ${initCopy("available", "可用")}: ${installedAgents.join(", ")}`);
     lines.push(
       initCopy(
-        "Run `$roll-onboard` with an available agent, then run `roll init --apply` when the plan is ready.",
-        "用可用 agent 运行 `$roll-onboard`，计划准备好后再运行 `roll init --apply`。",
+        "Run `$roll-onboard` with an available agent, review the artifacts, then run `roll init --apply`.",
+        "用可用 agent 运行 `$roll-onboard`，审阅产物后再运行 `roll init --apply`。",
       ),
     );
   }
@@ -1513,10 +1536,100 @@ function runExistingCodebaseDiagnoseAttestSmoke(): number {
   }
 }
 
+function invalidPlanFixture(hash: string): string {
+  const ts = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+  return `version: 1
+generated_at: "${ts}"
+factsHash: "${hash}"
+file_operations:
+  - path: .roll/init-diagnosis.yaml
+    operation: write
+    idempotent: true
+  - path: .roll/onboard-plan.yaml
+    operation: write
+    idempotent: true
+merge_intents:
+  - target: roll_conventions
+    owner: roll-init-apply
+    strategy: merge global Roll conventions into AGENTS.md
+project_understanding:
+  type: cli
+  description: invalid-plan smoke
+  domains: []
+  key_modules: []
+scope:
+  approved: [backlog]
+  declined: []
+include_existing: []
+privacy:
+  gitignore_dot_roll: true
+sync_targets: []
+enable_loop: false
+agent_routes_template: skip
+`;
+}
+
+function invalidDiagnosisFixture(hash: string): string {
+  const ts = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+  return `version: 1
+createdAt: "${ts}"
+factsHash: "${hash}"
+diagnosis:
+  kind: codebase-no-roll
+  recommendedPath: agentic-onboard
+  confidence: high
+  reasons:
+    - Existing source, tests, or manifests found without Roll markers.
+agent:
+  name: attest-smoke
+  status: available
+`;
+}
+
+function runExistingCodebaseInvalidPlanAttestSmoke(): number {
+  const originalCwd = process.cwd();
+  const originalRollHome = process.env["ROLL_HOME"];
+  const workspace = realpathSync(mkdtempSync(join(tmpdir(), "roll-init-invalid-plan-")));
+  const staleHash = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+  try {
+    const smokeHome = join(workspace, ".roll-home");
+    mkdirSync(smokeHome, { recursive: true });
+    cpSync(join(rollPkgDir(), "conventions"), join(smokeHome, "conventions"), { recursive: true });
+    writeFileSync(join(smokeHome, "config.yaml"), "# Roll config\nlang: en\n");
+    process.env["ROLL_HOME"] = smokeHome;
+    writeExistingCodebaseSmokeFixture(workspace);
+    mkdirSync(join(workspace, ".roll"), { recursive: true });
+    writeFileSync(join(workspace, ".roll", "init-diagnosis.yaml"), invalidDiagnosisFixture(staleHash));
+    writeFileSync(join(workspace, ".roll", "onboard-plan.yaml"), invalidPlanFixture(staleHash));
+
+    process.stdout.write("roll init attest smoke: existing-codebase-invalid-plan\n");
+    process.stdout.write(`workspace: ${workspace}\n`);
+    printExistingCodebaseSmokeTree();
+    process.stdout.write("  - .roll/init-diagnosis.yaml\n");
+    process.stdout.write("  - .roll/onboard-plan.yaml\n\n");
+
+    process.chdir(workspace);
+    const code = initCommand(["--apply", "--auto"]);
+    process.chdir(originalCwd);
+    process.stdout.write("\nPost-apply mutation check:\n");
+    process.stdout.write(`  AGENTS.md: ${existsSync(join(workspace, "AGENTS.md")) ? "present" : "missing"}\n`);
+    process.stdout.write(`  .roll/backlog.md: ${existsSync(join(workspace, ".roll", "backlog.md")) ? "present" : "missing"}\n`);
+    process.stdout.write(`  .gitignore: ${existsSync(join(workspace, ".gitignore")) ? "present" : "missing"}\n`);
+    return code === 0 ? 1 : 0;
+  } finally {
+    process.chdir(originalCwd);
+    if (originalRollHome === undefined) delete process.env["ROLL_HOME"];
+    else process.env["ROLL_HOME"] = originalRollHome;
+    rmSync(workspace, { recursive: true, force: true });
+    process.stdout.write(`cleanup: ${existsSync(workspace) ? "failed" : "removed"} ${workspace}\n`);
+  }
+}
+
 function runInitAttestSmoke(args: string[]): number {
   if (args.length === 1 && args[0] === "prd-only") return runPrdOnlyAttestSmoke();
   if (args.length === 1 && args[0] === "existing-codebase-diagnose") return runExistingCodebaseDiagnoseAttestSmoke();
-  err("unknown init attest smoke fixture. Expected: roll init --attest-smoke prd-only | existing-codebase-diagnose");
+  if (args.length === 1 && args[0] === "existing-codebase-invalid-plan") return runExistingCodebaseInvalidPlanAttestSmoke();
+  err("unknown init attest smoke fixture. Expected: roll init --attest-smoke prd-only | existing-codebase-diagnose | existing-codebase-invalid-plan");
   return 1;
 }
 
@@ -1533,6 +1646,11 @@ export function initCommand(args: string[], deps: InitCommandDeps = {}): number 
   const repairMode = args.includes("--repair");
   const autoMode = args.includes("--auto") || repairMode;
   if (args[0] === "--apply") {
+    const applyUnknownFlag = args.slice(1).find((a) => a.startsWith("-") && a !== "--auto");
+    if (applyUnknownFlag !== undefined) {
+      err(`${m("init.unknown_flag_1")}${applyUnknownFlag}`);
+      return 1;
+    }
     if (!existsSync(rollTemplates())) {
       err(m("init.no_templates_found_run_roll_setup"));
       return 1;
@@ -1543,7 +1661,7 @@ export function initCommand(args: string[], deps: InitCommandDeps = {}): number 
     } catch {
       projectDir = process.cwd();
     }
-    return initApply(projectDir);
+    return initApply(projectDir, { autoMode });
   }
   const unknownFlag = args.find((a) => a.startsWith("-") && a !== "--auto" && a !== "--repair");
   if (unknownFlag !== undefined) {

@@ -194,10 +194,13 @@ function mergeFactFromCommitMessage(
     if (squashMatch) prNum = Number(squashMatch[1]);
   }
 
-  // FIX-923: parse story-ids from the full commit message. GitHub merge-button
-  // commits often keep "Merge pull request #N …" as the subject and place the
-  // PR title/body, including the Roll story-id, in the merge commit body.
-  const storyIds = parseStoryIdsFromSubject(message);
+  // FIX-923 + FIX-1024: parse story-ids scope depends on commit format.
+  //   - merge-button ("Merge pull request #N"): body carries PR title → full message
+  //   - squash ("(#N)" in subject):     body is narrative/changelog → subject only
+  //   - other:                          subject only
+  const isMergeButton = mergeMatch !== null;
+  const parseSource = isMergeButton ? message : subject;
+  const storyIds = parseStoryIdsFromSubject(parseSource);
   if (prNum !== undefined && (!Number.isFinite(prNum) || prNum <= 0)) return null;
   if (prNum === undefined && storyIds.length === 0) return null;
 

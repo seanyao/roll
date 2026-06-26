@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -31,7 +32,11 @@ function mkdir(root: string, rel: string): void {
   mkdirSync(join(root, rel), { recursive: true });
 }
 
-function withCapturedOutput<T>(cwd: string, run: () => T): T extends Promise<unknown> ? Promise<Run> : Run {
+function withCapturedOutput<T>(
+  cwd: string,
+  run: () => T,
+  options: { pathEntries?: string[] } = {},
+): T extends Promise<unknown> ? Promise<Run> : Run {
   const saveCwd = process.cwd();
   const emptyBin = mkdtempSync(join(tmpdir(), "roll-init-empty-bin-"));
   dirs.push(emptyBin);
@@ -58,7 +63,7 @@ function withCapturedOutput<T>(cwd: string, run: () => T): T extends Promise<unk
     }
   };
   process.chdir(cwd);
-  process.env["PATH"] = emptyBin;
+  process.env["PATH"] = [emptyBin, ...(options.pathEntries ?? [])].join(":");
   process.env["HOME"] = cwd;
   process.env["ROLL_HOME"] = REPO;
   process.env["ROLL_PKG_DIR"] = REPO;
@@ -87,8 +92,19 @@ function withCapturedOutput<T>(cwd: string, run: () => T): T extends Promise<unk
   }
 }
 
-function runInit(cwd: string, args: string[]): Run {
-  return withCapturedOutput(cwd, () => initCommand(args));
+function runInit(cwd: string, args: string[], options: { pathEntries?: string[] } = {}): Run {
+  return withCapturedOutput(cwd, () => initCommand(args), options);
+}
+
+function gitOnlyPath(): string {
+  const found = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" });
+  const git = (found.stdout ?? "").trim();
+  expect(found.status).toBe(0);
+  expect(git).not.toBe("");
+  const bin = mkdtempSync(join(tmpdir(), "roll-init-git-only-bin-"));
+  dirs.push(bin);
+  symlinkSync(git, join(bin, "git"));
+  return bin;
 }
 
 afterAll(() => {
@@ -211,6 +227,25 @@ describe("roll init diagnosis router", () => {
     mkdir(cwd, "tests");
 
     const run = runInit(cwd, ["--auto"]);
+
+    expect(run.status).toBe(0);
+    expect(run.stdout).toContain("INIT");
+    expect(run.stdout).toContain("Initialized");
+    expect(run.stdout).not.toContain("Onboarding");
+    expect(existsSync(join(cwd, "AGENTS.md"))).toBe(true);
+    expect(existsSync(join(cwd, ".roll", "backlog.md"))).toBe(true);
+  });
+
+  it("does not route git history alone to existing-codebase onboarding", () => {
+    const cwd = project();
+    write(cwd, ".keep", "x\n");
+    expect(spawnSync("git", ["init"], { cwd, stdio: "ignore" }).status).toBe(0);
+    expect(spawnSync("git", ["config", "user.email", "roll-test@example.com"], { cwd, stdio: "ignore" }).status).toBe(0);
+    expect(spawnSync("git", ["config", "user.name", "Roll Test"], { cwd, stdio: "ignore" }).status).toBe(0);
+    expect(spawnSync("git", ["add", ".keep"], { cwd, stdio: "ignore" }).status).toBe(0);
+    expect(spawnSync("git", ["commit", "-m", "seed"], { cwd, stdio: "ignore" }).status).toBe(0);
+
+    const run = runInit(cwd, ["--auto"], { pathEntries: [gitOnlyPath()] });
 
     expect(run.status).toBe(0);
     expect(run.stdout).toContain("INIT");

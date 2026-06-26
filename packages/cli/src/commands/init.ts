@@ -290,32 +290,6 @@ function renderProjectDocContext(projectDir: string): string {
   return lines.join("\n");
 }
 
-function isLegacyProject(projectDir: string): boolean {
-  for (const dir of ["src", "app", "lib", "pkg", "cmd"]) {
-    const p = join(projectDir, dir);
-    if (existsSync(p) && statSync(p).isDirectory()) {
-      if (countNonEmptyFiles(p) >= 10) return true;
-    }
-  }
-  const manifests = [
-    "package.json", "pyproject.toml", "requirements.txt", "setup.py", "setup.cfg", "Pipfile",
-    "go.mod", "Cargo.toml", "Gemfile", "pom.xml", "build.gradle", "build.gradle.kts",
-    "Makefile", "Dockerfile", "docker-compose.yml", "docker-compose.yaml",
-    "app.json", "project.config.json",
-    "mix.exs", "composer.json", "deno.json", "deno.jsonc",
-  ];
-  for (const man of manifests) if (existsSync(join(projectDir, man))) return true;
-  // *.tf at root
-  const tf = spawnSync("bash", ["-c", `compgen -G '${projectDir.replace(/'/g, "'\\''")}/*.tf' >/dev/null 2>&1`]);
-  if (tf.status === 0) return true;
-  // git history
-  if (existsSync(join(projectDir, ".git"))) {
-    const g = spawnSync("git", ["rev-parse", "--verify", "HEAD"], { cwd: projectDir, stdio: "ignore" });
-    if (g.status === 0) return true;
-  }
-  return false;
-}
-
 function legacyFileSummary(projectDir: string): string {
   const parts: string[] = [];
   for (const dir of ["src", "app", "lib", "pkg", "cmd"]) {
@@ -1384,7 +1358,7 @@ export function initCommand(args: string[]): number {
 
   if (existsSync(join(projectDir, "AGENTS.md"))) {
     hasAgents = true;
-  } else if (initDiagnosis.kind === "codebase-no-roll" || isLegacyProject(projectDir)) {
+  } else if (initDiagnosis.kind === "codebase-no-roll") {
     return legacyOnboardGuide(projectDir);
   } else if (!confirmInitProject(projectDir, autoMode)) {
     return 0;

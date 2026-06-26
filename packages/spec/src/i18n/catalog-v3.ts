@@ -181,14 +181,23 @@ export const v3Catalog: Catalog = {
     en: "network restored after the proxy-enable command — continuing.",
     zh: "执行代理启用命令后网络已恢复 — 继续。",
   },
+  // FIX-1025: announced when the precheck is opted out via
+  // `loop_safety.skip_network_check: true` (configured providers reachable directly).
+  "net.skipped": {
+    en: "network precheck skipped (loop_safety.skip_network_check) — assuming configured providers are reachable.",
+    zh: "已跳过网络预检（loop_safety.skip_network_check）——假定所配置的服务可直接访问。",
+  },
   // %s is the command name (e.g. `roll loop go`). Halt message: clear, actionable.
+  // FIX-1025: the probe defaults to a foreign host; if your domestic providers are
+  // reachable directly, point the probe at one (`probe_url`) or opt out
+  // (`skip_network_check`) instead of forcing a proxy the work does not need.
   "net.blocked_no_hook": {
-    en: "%s needs the network, but it is unreachable. No proxy-enable command is configured, so roll will not guess one. Add `loop_safety.proxy_enable_cmd: <your proxy-on command>` to .roll/policy.yaml (e.g. your VPN/proxy toggle), check your connection, then retry.",
-    zh: "%s 需要网络，但当前不可达。未配置代理启用命令，roll 不会自行猜测。请在 .roll/policy.yaml 中加入 `loop_safety.proxy_enable_cmd: <你的开代理命令>`（例如你的 VPN/代理开关），检查网络后重试。",
+    en: "%s needs the network, but the connectivity probe failed. If your configured providers ARE reachable, point the probe at one with `loop_safety.probe_url: <host:port>` or opt out with `loop_safety.skip_network_check: true` in .roll/policy.yaml. Otherwise add `loop_safety.proxy_enable_cmd: <your proxy-on command>` (e.g. your VPN/proxy toggle), check your connection, then retry.",
+    zh: "%s 需要网络，但连通性探测失败。若所配置的服务其实可达，请用 `loop_safety.probe_url: <host:port>` 把探测指向其中一个，或在 .roll/policy.yaml 中设置 `loop_safety.skip_network_check: true` 跳过预检。否则请加入 `loop_safety.proxy_enable_cmd: <你的开代理命令>`（例如你的 VPN/代理开关），检查网络后重试。",
   },
   "net.blocked_after_hook": {
-    en: "%s needs the network, but it is STILL unreachable after running the configured proxy-enable command. Check that the command actually turns on connectivity, verify your network, then retry.",
-    zh: "%s 需要网络，但执行已配置的代理启用命令后仍不可达。请确认该命令确实能打开网络、检查连接后重试。",
+    en: "%s needs the network, but the probe STILL failed after running the configured proxy-enable command. Check that the command actually turns on connectivity, or point `loop_safety.probe_url` at a host you do need, then retry.",
+    zh: "%s 需要网络，但执行已配置的代理启用命令后探测仍失败。请确认该命令确实能打开网络，或将 `loop_safety.probe_url` 指向你确实需要的主机后重试。",
   },
 
   // FIX-394 — chromium headless browser messages

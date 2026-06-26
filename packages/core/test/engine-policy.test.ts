@@ -196,6 +196,31 @@ loop_safety:
 `).loopSafety.proxyEnableCmd).toBeUndefined();
   });
 
+  it("parses loop_safety.probe_url + skip_network_check (FIX-1025)", () => {
+    // defaults: absent ⇒ undefined / off.
+    expect(parsePolicy("").loopSafety.probeUrl).toBeUndefined();
+    expect(parsePolicy("").loopSafety.skipNetworkCheck).toBeUndefined();
+    // probe_url: a non-empty string points the precheck at a host the work needs.
+    expect(parsePolicy(`
+loop_safety:
+  probe_url: api.deepseek.com:443
+`).loopSafety.probeUrl).toBe("api.deepseek.com:443");
+    // empty probe_url ⇒ undefined (fall back to the default host).
+    expect(parsePolicy(`
+loop_safety:
+  probe_url:
+`).loopSafety.probeUrl).toBeUndefined();
+    // skip_network_check: only explicit `true` opts out.
+    expect(parsePolicy(`
+loop_safety:
+  skip_network_check: true
+`).loopSafety.skipNetworkCheck).toBe(true);
+    expect(parsePolicy(`
+loop_safety:
+  skip_network_check: false
+`).loopSafety.skipNetworkCheck).toBeUndefined();
+  });
+
   it("parses loop_safety.prebuild_dist (FIX-338); DEFAULT-OFF unless explicit true", () => {
     // absent ⇒ undefined (the reader treats it as OFF — deploy no-op, 稳字纪律).
     expect(parsePolicy("").loopSafety.prebuildDist).toBeUndefined();

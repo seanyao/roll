@@ -27,11 +27,45 @@ import { join } from "node:path";
 import { parsePolicy } from "@roll/core";
 import { resolveLang, t, v3Catalog, type Lang } from "@roll/spec";
 
-/** Default probe target — the well-known endpoint every roll network path uses. */
+/** Default probe target — the well-known endpoint roll's foreign network paths
+ *  use (PRs, the registry). FIX-1025: this is only a DEFAULT — a domestic-only
+ *  workflow can override it with `loop_safety.probe_url` so the precheck targets
+ *  a host the work actually needs, instead of a fixed GFW-blocked host. */
 const PROBE_HOST = "github.com";
 const PROBE_PORT = 443;
 const DNS_TIMEOUT_MS = 1500;
 const TCP_TIMEOUT_MS = 3000;
+
+/** Parse a configured probe target into { host, port }. Accepts a bare
+ *  `host`, `host:port`, or a full `scheme://host[:port][/path]` URL. Defaults to
+ *  port 443 (https) when none is given; `http://` defaults to 80. Returns
+ *  undefined for unparseable / empty input (caller falls back to the default). */
+export function parseProbeTarget(raw: string): { host: string; port: number } | undefined {
+  const trimmed = raw.trim();
+  if (trimmed === "") return undefined;
+  let scheme = "";
+  let rest = trimmed;
+  const schemeIdx = rest.indexOf("://");
+  if (schemeIdx !== -1) {
+    scheme = rest.slice(0, schemeIdx).toLowerCase();
+    rest = rest.slice(schemeIdx + 3);
+  }
+  // Drop any path / query so only authority remains.
+  const slashIdx = rest.indexOf("/");
+  if (slashIdx !== -1) rest = rest.slice(0, slashIdx);
+  if (rest === "") return undefined;
+  const colonIdx = rest.lastIndexOf(":");
+  let host = rest;
+  let port = scheme === "http" ? 80 : 443;
+  if (colonIdx !== -1) {
+    const p = Number(rest.slice(colonIdx + 1));
+    if (!Number.isFinite(p) || p < 1 || p > 65535) return undefined;
+    host = rest.slice(0, colonIdx);
+    port = p;
+  }
+  if (host === "") return undefined;
+  return { host, port };
+}
 
 /**
  * The standard model of WHICH commands need the network, declared in ONE place
@@ -113,6 +147,10 @@ export interface NetworkProbes {
   resolve?: (host: string) => Promise<unknown>;
   /** TCP connect to the probe endpoint (default: connect github.com:443). */
   tcpProbe?: () => Promise<void>;
+  /** FIX-1025: probe target override (host:port or URL). When set, the default
+   *  DNS + TCP probes target this host:port instead of the fixed default. The
+   *  explicit `resolve` / `tcpProbe` seams still win (tests inject those). */
+  probeUrl?: string;
 }
 
 /**
@@ -130,13 +168,20 @@ export interface NetworkProbes {
  * toggle) is exactly what fixes a plain offline as well as a poisoned proxy.
  */
 export async function networkReachable(probes: NetworkProbes = {}): Promise<boolean> {
+  // FIX-1025: resolve the probe target from the configured `probe_url` (if any),
+  // falling back to the well-known default. The injected seams still take
+  // precedence so unit tests stay IO-free.
+  const target = (probes.probeUrl !== undefined ? parseProbeTarget(probes.probeUrl) : undefined) ?? {
+    host: PROBE_HOST,
+    port: PROBE_PORT,
+  };
   const resolve = probes.resolve ?? ((h: string) => lookup(h));
-  const tcpProbe = probes.tcpProbe ?? (() => tcpConnect(PROBE_HOST, PROBE_PORT, TCP_TIMEOUT_MS));
+  const tcpProbe = probes.tcpProbe ?? (() => tcpConnect(target.host, target.port, TCP_TIMEOUT_MS));
 
   // Tier 1: DNS. A hung resolver must not hold the command open.
   try {
     await Promise.race([
-      resolve(PROBE_HOST),
+      resolve(target.host),
       new Promise((_, rej) => {
         const timer = setTimeout(() => rej(new Error("dns timeout")), DNS_TIMEOUT_MS);
         if (typeof timer === "object") timer.unref();
@@ -159,12 +204,30 @@ export async function networkReachable(probes: NetworkProbes = {}): Promise<bool
  *  Returns the command string, or undefined when unset/unreadable. Mirrors the
  *  other policy readers (readPeerGateMode / readAttestGateMode). */
 export function readProxyEnableCmd(repoCwd: string): string | undefined {
+  return readLoopSafetyNet(repoCwd).proxyEnableCmd;
+}
+
+/** FIX-1025: the network-guard-relevant slice of loop_safety read from
+ *  `<repoCwd>/.roll/policy.yaml`. Returns empty fields when the file is
+ *  missing / unparseable (treated as "nothing configured"). */
+export interface LoopSafetyNet {
+  proxyEnableCmd?: string;
+  probeUrl?: string;
+  skipNetworkCheck: boolean;
+}
+
+export function readLoopSafetyNet(repoCwd: string): LoopSafetyNet {
   try {
     const p = join(repoCwd, ".roll", "policy.yaml");
-    if (!existsSync(p)) return undefined;
-    return parsePolicy(readFileSync(p, "utf8")).loopSafety.proxyEnableCmd;
+    if (!existsSync(p)) return { skipNetworkCheck: false };
+    const ls = parsePolicy(readFileSync(p, "utf8")).loopSafety;
+    return {
+      proxyEnableCmd: ls.proxyEnableCmd,
+      probeUrl: ls.probeUrl,
+      skipNetworkCheck: ls.skipNetworkCheck === true,
+    };
   } catch {
-    return undefined; // unreadable / unparseable → treat as no hook configured.
+    return { skipNetworkCheck: false }; // unreadable / unparseable → nothing configured.
   }
 }
 
@@ -180,9 +243,15 @@ export interface RequireNetworkResult {
 /** Injectable seams for {@link requireNetwork} so it is fully unit-testable. */
 export interface RequireNetworkDeps {
   /** Connectivity probe (default {@link networkReachable}). Re-invoked after the
-   *  recovery command runs, so tests can flip the result between calls. */
+   *  recovery command runs, so tests can flip the result between calls. The
+   *  configured `probe_url` (if any) is threaded through to the default probe. */
   reachable?: (probes?: NetworkProbes) => Promise<boolean>;
-  /** Read the proxy-enable hook (default {@link readProxyEnableCmd}). */
+  /** FIX-1025: read the network-relevant loop_safety slice (probe_url +
+   *  skip_network_check + proxy_enable_cmd). Default {@link readLoopSafetyNet}. */
+  loopSafetyNet?: (repoCwd: string) => LoopSafetyNet;
+  /** Read the proxy-enable hook (default {@link readProxyEnableCmd}). Kept for
+   *  back-compat with existing call sites/tests; when set it overrides the
+   *  proxy-enable command read from {@link loopSafetyNet}. */
   proxyEnableCmd?: (repoCwd: string) => string | undefined;
   /** Run the proxy-enable command (default: spawnSync via the shell). Returns
    *  true if the command exited 0. */
@@ -213,8 +282,11 @@ function defaultLang(): Lang {
 /**
  * The shared FIRST-checkpoint guard for any network-needing command.
  *
- * Flow (owner design):
- *   1. probe connectivity.
+ * Flow (owner design + FIX-1025):
+ *   0. `loop_safety.skip_network_check: true` ⇒ skip the probe entirely (the
+ *      user's configured providers are reachable directly).
+ *   1. probe connectivity — against `loop_safety.probe_url` when configured,
+ *      else the well-known default host.
  *   2. reachable ⇒ proceed.
  *   3. not reachable ⇒ if a proxy-enable command is CONFIGURED: announce, run it,
  *      RE-probe. reachable now ⇒ announce + proceed.
@@ -230,16 +302,32 @@ export async function requireNetwork(
   deps: RequireNetworkDeps = {},
 ): Promise<RequireNetworkResult> {
   const reachable = deps.reachable ?? networkReachable;
-  const readHook = deps.proxyEnableCmd ?? readProxyEnableCmd;
+  const readSafety = deps.loopSafetyNet ?? readLoopSafetyNet;
   const runHook = deps.runProxyEnable ?? defaultRunProxyEnable;
   const emit = deps.emit ?? ((line: string) => process.stderr.write(`${line}\n`));
   const lang = deps.lang ?? defaultLang();
 
-  // FIRST checkpoint: probe.
-  if (await reachable()) return { ok: true, recovered: false };
+  const safety = readSafety(repoCwd);
 
-  // Not reachable — ACTIVE recovery if (and only if) a hook is configured.
-  const hook = readHook(repoCwd);
+  // FIX-1025: explicit opt-out. When the user has declared their configured
+  // providers reachable directly, skip the precheck entirely so a fixed-host
+  // probe (e.g. a dropped VPN to a foreign host the work never needs) cannot
+  // halt loop/release.
+  if (safety.skipNetworkCheck) {
+    emit(t(v3Catalog, lang, "net.skipped"));
+    return { ok: true, recovered: false };
+  }
+
+  // FIX-1025: probe the CONFIGURED target when set (e.g. the domestic provider
+  // base URL), instead of the fixed foreign default.
+  const probes: NetworkProbes = safety.probeUrl !== undefined ? { probeUrl: safety.probeUrl } : {};
+
+  // FIRST checkpoint: probe.
+  if (await reachable(probes)) return { ok: true, recovered: false };
+
+  // Not reachable — ACTIVE recovery if (and only if) a hook is configured. The
+  // explicit proxyEnableCmd dep wins (back-compat), else read from loop_safety.
+  const hook = deps.proxyEnableCmd !== undefined ? deps.proxyEnableCmd(repoCwd) : safety.proxyEnableCmd;
   if (hook === undefined || hook === "") {
     emit(t(v3Catalog, lang, "net.blocked_no_hook", commandName));
     return { ok: false, recovered: false };
@@ -249,7 +337,7 @@ export async function requireNetwork(
   runHook(hook);
 
   // Re-check after recovery — only a real reconnection lets the command proceed.
-  if (await reachable()) {
+  if (await reachable(probes)) {
     emit(t(v3Catalog, lang, "net.recovered"));
     return { ok: true, recovered: true };
   }

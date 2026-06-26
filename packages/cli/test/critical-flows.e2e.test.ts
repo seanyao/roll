@@ -145,6 +145,33 @@ describe("critical CLI E2E", () => {
     expect(existsSync(join(project, ".roll"))).toBe(false);
   });
 
+  it("roll init existing-codebase review checkpoint attest smoke waits before mutation", () => {
+    const project = tmpEmptyProject("init-review-smoke");
+
+    const result = runRoll(project, ["init", "--attest-smoke", "existing-codebase-review"], {
+      ROLL_ATTEST_NO_BROWSER: "1",
+    });
+
+    expect(result.code).toBe(0);
+    expect(result.err).toContain("Proceed with these changes? [y/N]");
+    expect(result.err).toContain("No files changed.");
+    expect(result.out).toContain("roll init attest smoke: existing-codebase-review");
+    expect(result.out).toContain("Fixture tree:");
+    expect(result.out).toContain("package.json");
+    expect(result.out).toContain("src/index.ts");
+    expect(result.out).toContain("tests/index.test.ts");
+    expect(result.out).toContain(".roll/init-diagnosis.yaml");
+    expect(result.out).toContain(".roll/onboard-plan.yaml");
+    expect(result.out).toContain("Onboard apply review checkpoint");
+    expect(result.out).toContain("Post-review mutation check:");
+    expect(result.out).toContain("AGENTS.md: missing");
+    expect(result.out).toContain(".roll/backlog.md: missing");
+    expect(result.out).toContain(".gitignore: missing");
+    expect(result.out).toContain("cleanup: removed");
+    expect(existsSync(join(project, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(project, ".roll"))).toBe(false);
+  });
+
   it("roll story new is the single card-minting entry: card folder + backlog row + index", () => {
     const project = tmpProject("story-new");
     writeFileSync(join(project, ".roll", "backlog.md"), "| Story | Description | Status |\n|---|---|---|\n");

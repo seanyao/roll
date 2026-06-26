@@ -18,8 +18,10 @@ roll init
    这是新项目路径，会指向设计；不会进入 legacy onboarding。
 3. **已有代码库但未接入 Roll** —— Roll 检测到源码但没有 `.roll/`。它**不会**默默
    生成骨架，而是引导你用 `$roll-onboard`：扫描代码、问一组认知 / 范围 /
-   隐私问题、产出 `.roll/onboard-plan.yaml` 供审阅。审阅成对产物后，在交互终端执行
-   `roll init --apply`；非交互自动化里执行 `roll init --apply --auto`。这是 **graft（嫁接）** 模式 —— 见
+   隐私问题、产出 `.roll/onboard-plan.yaml` 供审阅。审阅成对产物后执行
+   `roll init --apply`：它会打印审阅检查点，列出每个计划文件操作的动作、目标路径、
+   合并/创建模式和用户内容处理方式，并在交互终端等待确认。非交互自动化里，审阅后必须显式执行
+   `roll init --apply --auto`。这是 **graft（嫁接）** 模式 —— 见
    [legacy-onboarding.md](legacy-onboarding.md) 与
    [patterns/graft-pattern.md](patterns/graft-pattern.md)。
 4. **已初始化** —— `.roll/`、`AGENTS.md`、backlog、features 都存在。Roll

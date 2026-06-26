@@ -5,7 +5,11 @@ import { dirname, join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { initCommand } from "../src/commands/init.js";
 import { collectInitFacts, classifyInitState, type InitFacts } from "../src/lib/init-diagnosis.js";
-import { validateOnboardApplyPreflight } from "../src/lib/onboard-apply.js";
+import {
+  buildOnboardApplyReviewOperations,
+  renderOnboardApplyReview,
+  validateOnboardApplyPreflight,
+} from "../src/lib/onboard-apply.js";
 import {
   buildOnboardDiagnosisArtifact,
   computeInitFactsHash,
@@ -320,6 +324,154 @@ describe("agentic onboard structured artifacts", () => {
     const result = validateOnboardApplyPreflight(root, planPath);
 
     expect(result).toMatchObject({ ok: true, errors: [], currentFactsHash: hash, planFactsHash: hash });
+  });
+
+  it("renders the onboard apply review checkpoint with every deterministic operation", () => {
+    const root = project("apply-review-render");
+    const operations = buildOnboardApplyReviewOperations({
+      projectDir: root,
+      approved: ["backlog", "features", "domain", "briefs"],
+      gitignoreDotRoll: true,
+      agentRoutesTemplate: "default",
+      includeClaudeConventions: false,
+      includeAgentRoutes: true,
+      includePhase2Artifacts: false,
+    });
+
+    expect(renderOnboardApplyReview(operations)).toMatchInlineSnapshot(`
+      "Onboard apply review checkpoint
+        action      target                            mode                 owner content
+        create      AGENTS.md                         create-if-missing    not present
+        create      .roll/onboard-changeset.yaml      create-if-missing    not present
+        create      .roll/.version                    create-if-missing    not present
+        create      .roll/backlog.md                  create-if-missing    not present
+        create      .roll/agent-routes.yaml           create-if-missing    not present
+        create      .roll/features/                   ensure-directory     not present
+        create      .roll/features.md                 create-if-missing    not present
+        create      .roll/domain/                     ensure-directory     not present
+        create      .roll/briefs/                     ensure-directory     not present
+        append      .gitignore                        append-line          not present
+      "
+    `);
+  });
+
+  it("renders the onboard apply review checkpoint with caller-provided labels", () => {
+    const rendered = renderOnboardApplyReview(
+      [
+        {
+          action: "merge",
+          target: "AGENTS.md",
+          mode: "section-merge",
+          ownerContent: "preserved",
+        },
+      ],
+      {
+        title: "Review",
+        action: "Act",
+        target: "Path",
+        mode: "Mode",
+        ownerContent: "Owner",
+        actions: { append: "A", create: "C", keep: "K", merge: "M", replace: "R" },
+        modes: {
+          "append-line": "Append",
+          "create-if-missing": "Create",
+          "ensure-directory": "Dir",
+          replace: "Replace",
+          "section-merge": "Merge",
+        },
+        ownerContentValues: { "not present": "Missing", preserved: "Saved", replaced: "Changed", "roll-owned": "Roll" },
+      },
+    );
+
+    expect(rendered).toMatchInlineSnapshot(`
+      "Review
+        Act         Path                              Mode                 Owner
+        M           AGENTS.md                         Merge                Saved
+      "
+    `);
+  });
+
+  it("marks .gitignore owner content as preserved only when the file already exists", () => {
+    const root = project("apply-review-gitignore");
+    write(root, ".gitignore", "dist/\n");
+
+    const operation = buildOnboardApplyReviewOperations({
+      projectDir: root,
+      approved: [],
+      gitignoreDotRoll: true,
+      agentRoutesTemplate: "skip",
+      includeClaudeConventions: false,
+      includeAgentRoutes: false,
+      includePhase2Artifacts: false,
+    }).find((op) => op.target === ".gitignore");
+
+    expect(operation).toEqual({
+      action: "append",
+      target: ".gitignore",
+      mode: "append-line",
+      ownerContent: "preserved",
+    });
+  });
+
+  it("marks existing merge, keep, and replace targets accurately", () => {
+    const root = project("apply-review-existing-targets");
+    write(root, "AGENTS.md", "# Project Agents\n");
+    write(root, ".gitignore", ".roll/\n");
+    write(root, ".roll/domain/context-map.md", "# Old Context\n");
+    write(root, ".roll/tech-analysis.md", "# Old Tech\n");
+    write(root, ".roll/test-assessment.md", "# Old Tests\n");
+
+    const operations = buildOnboardApplyReviewOperations({
+      projectDir: root,
+      approved: [],
+      gitignoreDotRoll: true,
+      agentRoutesTemplate: "skip",
+      includeClaudeConventions: false,
+      includeAgentRoutes: false,
+      includePhase2Artifacts: true,
+    });
+
+    expect(operations.find((op) => op.target === "AGENTS.md")).toEqual({
+      action: "merge",
+      target: "AGENTS.md",
+      mode: "section-merge",
+      ownerContent: "preserved",
+    });
+    expect(operations.find((op) => op.target === ".gitignore")).toEqual({
+      action: "keep",
+      target: ".gitignore",
+      mode: "append-line",
+      ownerContent: "preserved",
+    });
+    expect(operations.find((op) => op.target === ".roll/domain/context-map.md")).toEqual({
+      action: "replace",
+      target: ".roll/domain/context-map.md",
+      mode: "replace",
+      ownerContent: "replaced",
+    });
+  });
+
+  it("includes generated Phase 2 artifacts in the onboard apply review checkpoint", () => {
+    const root = project("apply-review-phase2");
+    const operations = buildOnboardApplyReviewOperations({
+      projectDir: root,
+      approved: ["backlog"],
+      gitignoreDotRoll: false,
+      agentRoutesTemplate: "skip",
+      includeClaudeConventions: false,
+      includeAgentRoutes: false,
+      includePhase2Artifacts: true,
+    });
+
+    expect(operations.filter((op) => op.target.startsWith(".roll/"))).toEqual([
+      { action: "create", target: ".roll/onboard-changeset.yaml", mode: "create-if-missing", ownerContent: "not present" },
+      { action: "create", target: ".roll/.version", mode: "create-if-missing", ownerContent: "not present" },
+      { action: "create", target: ".roll/backlog.md", mode: "create-if-missing", ownerContent: "not present" },
+      { action: "create", target: ".roll/domain/", mode: "ensure-directory", ownerContent: "not present" },
+      { action: "create", target: ".roll/domain/context-map.md", mode: "create-if-missing", ownerContent: "not present" },
+      { action: "create", target: ".roll/tech-analysis.md", mode: "create-if-missing", ownerContent: "not present" },
+      { action: "create", target: ".roll/test-assessment.md", mode: "create-if-missing", ownerContent: "not present" },
+    ]);
   });
 
   it("rejects unrooted or non-normalized file operation paths through both TS and Python validators", () => {

@@ -36,10 +36,14 @@ roll init           # 在当前项目落地 Roll（交互式确认）
 roll loop on        # 可选：让 AI 自动跑 backlog
 ```
 
-`roll init` 会识别历史代码，也会读取有意义的 `README.md`、`docs/`、
-`spec/`、PRD 或 requirements 等项目资料；当本机有可交互 agent 时，会进入
-`$roll-onboard`，并把检测到的项目上下文传给 agent。空白全新项目会打印项
-目类型摘要并请求确认，脚本或 CI 中可传 `--auto` 跳过提示。
+`roll init` 会先诊断当前目录：完整 Roll 项目提示 `roll status`；部分接入
+提示 `roll init --repair`；pre-2.0 布局提示迁移且不写文件。已有代码库会进入
+`$roll-onboard`；PRD/文档-only 工作区按新项目处理，生成 `.roll/brief.md` 并指向
+`roll design --from-file`。空目录会在交互终端询问你要做什么；脚本或 CI 中，
+普通 `roll init` 只读，`roll init --auto` 写入占位 brief 后指向 `roll design`。
+已有代码库的 graft 流程里，`roll init --apply` 会先校验产物、打印每个计划文件操作的
+审阅检查点，并在写入前等待 owner 确认；自动化必须在审阅后显式使用
+`roll init --apply --auto`。
 第一次跑建议从[快速上手](guide/zh/getting-started.md)开始。
 
 ## 新项目快速启动
@@ -80,7 +84,7 @@ roll loop on
 | `roll idea "<一句话描述>"` | 收卡:自动分类、编号、lint、推断 epic、铸全套卡夹——用户加卡的唯一入口 |
 | `roll story new <ID> --title <t> [--epic <e>] [--no-index]` | agent/skill 用的单一建卡入口:卡夹 + backlog 行 + 索引刷新(批量用 --no-index) |
 | **项目 · 每仓** | |
-| `roll init` | 在当前项目落地 Roll(历史代码或已有 README/docs/spec 上下文走 agent 接入) |
+| `roll init` | 诊断当前目录并路由到新项目脚手架、PRD/design handoff、已有代码库 onboard、repair、migration 或 `roll status` |
 | `roll design [--agent <name>]` | 交互式启动 `$roll-design`，把需求转化为领域模型 + INVEST 待办 |
 | `roll offboard` | 从项目移除 Roll |
 | `roll test [--where] [--reset]` | 运行测试套件(通过隔离适配器分发;未知类型显式报错) |

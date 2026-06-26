@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### 上手引导
+
+- **`roll init --apply` 写文件前先让你看清楚**：已有代码库 graft 流程现在会在校验 onboard plan 后打印审阅检查点，列出每个计划文件操作的动作、路径、模式和用户内容处理方式；交互终端必须确认，非交互自动化必须显式使用 `roll init --apply --auto`。(US-INIT-006d) `[legacy-onboard]`
+
 ## v3.626.2 — 2026-06-26
 
 ### 自动化流水线

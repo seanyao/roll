@@ -96,6 +96,9 @@ roll init --apply
 
 这一步会先校验成对的 diagnosis / plan 产物，任何写文件之前先拒绝不支持的 schema 版本、过期或 stale 的 facts hash、非幂等 file operation、路径穿越和 shell-command key。
 
+校验通过后，Roll 会打印 apply 审阅检查点：表格列出每个计划操作的动作、目标路径、
+合并/创建模式，以及是否保留用户内容。在交互终端里，确认前不会写入任何已审阅的变更。
+
 如果是在非交互自动化里执行，审阅后要显式确认：
 
 ```bash
@@ -177,6 +180,8 @@ Roll 会检测为 pre-2.0 Roll 项目（不是 legacy），让你跑 `npx @seany
 
 **Q: 能手动编辑 `.roll/onboard-plan.yaml` 吗？**
 可以，但要和 `.roll/init-diagnosis.yaml` 配套。`roll init --apply` 要求两边的 `factsHash` 一致，并会重新计算当前项目 facts hash；同时不允许 shell-command key，`file_operations` 只能声明那两个位于项目内且幂等的允许文件。超过 24 小时、相对当前项目已 stale，或由旧版 `$roll-onboard` 生成的 plan，都应该重新生成。
+
+手动改过的 plan 仍然会进入同一个审阅检查点；没有交互确认或显式 `--auto` 时，不会修改文件。
 
 **Q: 我们团队用 GitHub Issues / Jira / Linear，Roll 会替代它们吗？**
 不会。Roll 的 `BACKLOG.md` 是给 AI loop 自治执行用的。你团队的外部 tracker 继续用。有的团队只把"AI-loop 能执行的 story"放 Roll，纯人工任务留在原 tracker。

@@ -424,7 +424,12 @@ function envBase(fx: Fixture, extra: Record<string, string>): Record<string, str
   };
 }
 
-function tsInit(fx: Fixture, args: string[], extra: Record<string, string> = {}): Run {
+function tsInit(
+  fx: Fixture,
+  args: string[],
+  extra: Record<string, string> = {},
+  deps: { forceInteractive?: boolean; readLine?: () => string } = {},
+): Run {
   const target = envBase(fx, extra);
   const save: Record<string, string | undefined> = {};
   for (const k of ENV_KEYS) save[k] = process.env[k];
@@ -442,7 +447,7 @@ function tsInit(fx: Fixture, args: string[], extra: Record<string, string> = {})
   process.stderr.write = (c: string | Uint8Array): boolean => (errChunks.push(String(c)), true);
   let status: number;
   try {
-    status = initCommand(args);
+    status = initCommand(args, deps);
   } finally {
     process.stdout.write = realOut;
     process.stderr.write = realErr;
@@ -769,6 +774,19 @@ describe("frozen: roll init", () => {
         "status": 1,
         "stderr": "",
         "stdout": "[roll] Onboard plan validated. Review .roll/init-diagnosis.yaml and .roll/onboard-plan.yaml before applying.
+      Onboard apply review checkpoint
+        action      target                            mode                 owner content
+        create      AGENTS.md                         create-if-missing    not present
+        create      .roll/onboard-changeset.yaml      create-if-missing    not present
+        create      .roll/.version                    create-if-missing    not present
+        create      .roll/backlog.md                  create-if-missing    not present
+        create      .roll/agent-routes.yaml           create-if-missing    not present
+        create      .roll/features/                   ensure-directory     not present
+        create      .roll/features.md                 create-if-missing    not present
+        create      .roll/domain/                     ensure-directory     not present
+        create      .roll/briefs/                     ensure-directory     not present
+        append      .gitignore                        append-line          not present
+        After confirmation, Roll also syncs conventions to the configured AI tools and registers this project.
         Non-interactive apply requires explicit review acknowledgement:
           roll init --apply --auto
         No files changed.
@@ -778,6 +796,41 @@ describe("frozen: roll init", () => {
     expect(read(fx.proj, "AGENTS.md")).toBe("<MISSING>");
     expect(read(fx.proj, ".roll/backlog.md")).toBe("<MISSING>");
     expect(read(fx.proj, ".gitignore")).toBe("<MISSING>");
+  });
+
+  it("--apply review checkpoint follows the configured locale", () => {
+    const fx = applyFixture(validPlan());
+    const run = norm(tsInit(fx, ["--apply"], { ROLL_LANG: "zh" }), fx);
+
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain("接入方案已通过校验。应用前请审阅 .roll/init-diagnosis.yaml 和 .roll/onboard-plan.yaml。");
+    expect(run.stdout).toContain("应用接入方案审阅检查点");
+    expect(run.stdout).toContain("动作");
+    expect(run.stdout).toContain("路径");
+    expect(run.stdout).toContain("用户内容");
+    expect(run.stdout).toContain("创建");
+    expect(run.stdout).toContain("追加");
+    expect(run.stdout).toContain("非交互应用需要显式确认已审阅：");
+    expect(run.stdout).toContain("未修改任何文件。");
+    expect(run.stdout).not.toContain("owner content");
+    expect(run.stdout).not.toContain("Non-interactive apply requires");
+    expect(read(fx.proj, "AGENTS.md")).toBe("<MISSING>");
+    expect(read(fx.proj, ".roll/backlog.md")).toBe("<MISSING>");
+    expect(read(fx.proj, ".gitignore")).toBe("<MISSING>");
+  });
+
+  it("--apply --auto review checkpoint follows the configured locale before applying", () => {
+    const fx = applyFixture(validPlan());
+    const run = norm(tsInit(fx, ["--apply", "--auto"], { ROLL_LANG: "zh" }), fx);
+
+    expect(run.status).toBe(0);
+    expect(run.stderr).not.toContain("Proceed with these changes?");
+    expect(run.stdout).toContain("接入方案已通过校验。应用前请审阅 .roll/init-diagnosis.yaml 和 .roll/onboard-plan.yaml。");
+    expect(run.stdout).toContain("应用接入方案审阅检查点");
+    expect(run.stdout).toContain("动作");
+    expect(run.stdout).toContain("创建");
+    expect(run.stdout).toContain("[roll] 正在应用 onboard 计划...");
+    expect(read(fx.proj, "AGENTS.md")).toContain("# Agent Conventions");
   });
 
   it("--apply does not let ROLL_ASSUME_TTY bypass non-interactive review acknowledgement", () => {
@@ -791,13 +844,53 @@ describe("frozen: roll init", () => {
     expect(read(fx.proj, ".roll/backlog.md")).toBe("<MISSING>");
   });
 
+  it("--apply in a TTY waits for owner confirmation and declines without mutating", () => {
+    const fx = applyFixture(validPlan());
+    const run = norm(tsInit(fx, ["--apply"], {}, { forceInteractive: true, readLine: () => "n" }), fx);
+
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain("Onboard apply review checkpoint");
+    expect(run.stderr).toContain("Proceed with these changes? [y/N]");
+    expect(run.stderr).toContain("No files changed.");
+    expect(read(fx.proj, "AGENTS.md")).toBe("<MISSING>");
+    expect(read(fx.proj, ".roll/backlog.md")).toBe("<MISSING>");
+    expect(read(fx.proj, ".gitignore")).toBe("<MISSING>");
+  });
+
+  it("--apply in a TTY applies after owner confirmation", () => {
+    const fx = applyFixture(validPlan());
+    const run = norm(tsInit(fx, ["--apply"], {}, { forceInteractive: true, readLine: () => "y" }), fx);
+
+    expect(run.status).toBe(0);
+    expect(run.stdout).toContain("Onboard apply review checkpoint");
+    expect(run.stderr).toContain("Proceed with these changes? [y/N]");
+    expect(run.stdout).toContain("[roll] Applying onboard plan...");
+    expect(read(fx.proj, "AGENTS.md")).toContain("# Agent Conventions");
+    expect(read(fx.proj, ".roll/backlog.md")).toContain("# Project Backlog");
+    expect(read(fx.proj, ".gitignore")).toContain(".roll/");
+  });
+
   it("--apply consumes a valid plan and records offboard changeset", () => {
     const fx = applyFixture(validPlan());
     expect(norm(tsInit(fx, ["--apply", "--auto"]), fx)).toMatchInlineSnapshot(`
       {
         "status": 0,
         "stderr": "",
-        "stdout": "[roll] Applying onboard plan...
+        "stdout": "[roll] Onboard plan validated. Review .roll/init-diagnosis.yaml and .roll/onboard-plan.yaml before applying.
+      Onboard apply review checkpoint
+        action      target                            mode                 owner content
+        create      AGENTS.md                         create-if-missing    not present
+        create      .roll/onboard-changeset.yaml      create-if-missing    not present
+        create      .roll/.version                    create-if-missing    not present
+        create      .roll/backlog.md                  create-if-missing    not present
+        create      .roll/agent-routes.yaml           create-if-missing    not present
+        create      .roll/features/                   ensure-directory     not present
+        create      .roll/features.md                 create-if-missing    not present
+        create      .roll/domain/                     ensure-directory     not present
+        create      .roll/briefs/                     ensure-directory     not present
+        append      .gitignore                        append-line          not present
+        After confirmation, Roll also syncs conventions to the configured AI tools and registers this project.
+      [roll] Applying onboard plan...
 
       Roll convention sync summary
         │  + created     AGENTS.md                     │
@@ -843,7 +936,24 @@ describe("frozen: roll init", () => {
 
       Non-interactive stdin — skipping BACKLOG seeding (markdown still generated).
       ",
-        "stdout": "[roll] Applying onboard plan...
+        "stdout": "[roll] Onboard plan validated. Review .roll/init-diagnosis.yaml and .roll/onboard-plan.yaml before applying.
+      Onboard apply review checkpoint
+        action      target                            mode                 owner content
+        create      AGENTS.md                         create-if-missing    not present
+        create      .roll/onboard-changeset.yaml      create-if-missing    not present
+        create      .roll/.version                    create-if-missing    not present
+        create      .roll/backlog.md                  create-if-missing    not present
+        create      .roll/agent-routes.yaml           create-if-missing    not present
+        create      .roll/features/                   ensure-directory     not present
+        create      .roll/features.md                 create-if-missing    not present
+        create      .roll/domain/                     ensure-directory     not present
+        create      .roll/briefs/                     ensure-directory     not present
+        create      .roll/domain/context-map.md       create-if-missing    not present
+        create      .roll/tech-analysis.md            create-if-missing    not present
+        create      .roll/test-assessment.md          create-if-missing    not present
+        append      .gitignore                        append-line          not present
+        After confirmation, Roll also syncs conventions to the configured AI tools and registers this project.
+      [roll] Applying onboard plan...
       [roll] Rendered: .roll/domain/context-map.md
       [roll] Rendered: .roll/tech-analysis.md
       [roll] Rendered: .roll/test-assessment.md

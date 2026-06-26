@@ -109,7 +109,7 @@ window.RollData = (function () {
     FEATURE_GROUPS: [
       { id: "adoption", title: "Adoption Paths", blurb: "Three ways to bring roll on board.", features: [
         { name: "roll init",     mono: true, desc: "Fresh project bootstrap — creates AGENTS.md, .roll/backlog.md, .roll/features/, and .roll/pairing.yaml (cross-agent pairing).", badges: ["core"] },
-        { name: "Legacy onboarding plan", desc: "Existing codebase adoption remains plan-first: survey, review, then roll init --apply lays down the .roll/ structure without surprise edits.", badges: ["new", "highlight"] },
+        { name: "Legacy onboarding plan", desc: "Existing codebase adoption remains plan-first: survey, review, then roll init --apply shows an operation checkpoint and waits before laying down the .roll/ structure.", badges: ["new", "highlight"] },
       ]},
       { id: "autonomous", title: "Autonomous Execution", blurb: "Run while you sleep.", features: [
         { name: "roll loop on",        mono: true, desc: "AI picks stories from Backlog and executes hourly in an isolated worktree.", badges: ["core"] },
@@ -315,7 +315,7 @@ window.RollData = (function () {
     FEATURE_GROUPS: [
       { id: "adoption", title: "接入路径", blurb: "三种方式把 roll 接进项目。", features: [
         { name: "roll init",     mono: true, desc: "新项目脚手架——创建 AGENTS.md、.roll/backlog.md、.roll/features/、以及 .roll/pairing.yaml（跨 agent 结对）。", badges: ["core"] },
-        { name: "老项目接入计划", desc: "现有代码库仍然先出计划:问询、review,再由 roll init --apply 落地 .roll/ 结构,不偷改源文件。", badges: ["new", "highlight"] },
+        { name: "老项目接入计划", desc: "现有代码库仍然先出计划:问询、review,再由 roll init --apply 展示操作检查点并等待确认,然后落地 .roll/ 结构。", badges: ["new", "highlight"] },
       ]},
       { id: "autonomous", title: "自主执行", blurb: "你睡觉时它在跑。", features: [
         { name: "roll loop on",        mono: true, desc: "AI 从 Backlog 领取故事,每小时在隔离 worktree 里执行。", badges: ["core"] },

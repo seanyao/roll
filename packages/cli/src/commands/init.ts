@@ -523,11 +523,6 @@ function legacyOnboardGuide(projectDir: string): number {
   return runOnboardAgent(chosen, projectDir);
 }
 
-function shouldOnboardFromProjectDocs(projectDir: string): boolean {
-  if (collectProjectDocs(projectDir).length === 0) return false;
-  return discoverOnboardAgents().installed.length > 0;
-}
-
 // ─── _merge_global_to_project (2022-2093) ─────────────────────────────────────
 function mergeGlobalToProject(projectDir: string, summary: Summary): void {
   const src = join(rollGlobal(), "AGENTS.md");
@@ -1361,8 +1356,6 @@ export function initCommand(args: string[]): number {
   if (existsSync(join(projectDir, "AGENTS.md"))) {
     hasAgents = true;
   } else if (isLegacyProject(projectDir)) {
-    return legacyOnboardGuide(projectDir);
-  } else if (shouldOnboardFromProjectDocs(projectDir)) {
     return legacyOnboardGuide(projectDir);
   } else if (!confirmInitProject(projectDir, autoMode)) {
     return 0;

@@ -28,6 +28,7 @@
 import { spawnSync } from "node:child_process";
 import {
   copyFileSync,
+  cpSync,
   existsSync,
   mkdtempSync,
   mkdirSync,
@@ -1357,6 +1358,7 @@ const PRD_ONLY_SMOKE_FILES = [
   ".roll/backlog.md",
   ".roll/features/",
   ".roll/features.md",
+  ".roll/onboard-changeset.yaml",
   ".roll/agent-routes.yaml",
   ".roll/.version",
   ".roll/pairing.yaml",
@@ -1372,9 +1374,15 @@ function printSmokeCreatedFiles(projectDir: string): void {
 
 function runPrdOnlyAttestSmoke(): number {
   const originalCwd = process.cwd();
+  const originalRollHome = process.env["ROLL_HOME"];
   const workspace = realpathSync(mkdtempSync(join(tmpdir(), "roll-init-attest-prd-only-")));
   let status = 1;
   try {
+    const smokeHome = join(workspace, ".roll-home");
+    mkdirSync(smokeHome, { recursive: true });
+    cpSync(join(rollPkgDir(), "conventions"), join(smokeHome, "conventions"), { recursive: true });
+    writeFileSync(join(smokeHome, "config.yaml"), "# Roll config\nlang: en\n");
+    process.env["ROLL_HOME"] = smokeHome;
     mkdirSync(join(workspace, "docs"), { recursive: true });
     writeFileSync(
       join(workspace, "docs", "intel-radar-PRD.md"),
@@ -1389,6 +1397,8 @@ function runPrdOnlyAttestSmoke(): number {
     return status;
   } finally {
     process.chdir(originalCwd);
+    if (originalRollHome === undefined) delete process.env["ROLL_HOME"];
+    else process.env["ROLL_HOME"] = originalRollHome;
     rmSync(workspace, { recursive: true, force: true });
     process.stdout.write(`cleanup: ${existsSync(workspace) ? "failed" : "removed"} ${workspace}\n`);
   }

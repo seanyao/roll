@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v3.626.1 — 2026-06-26
+
 ### 自动化流水线
 
 - **loop 再也不会弹 macOS 录屏授权了**：以前无人值守跑 loop 时会反复弹「请求录屏」授权框（甚至堆成一摞挡住屏幕），根因是判断「是否无人值守」用的 isTTY 被 loop 的 PTY（script+tmux）包装骗过了。现在 loop 在每个子进程显式关掉截屏探测，探测和真截屏两条路都认这个开关——你自己在终端跑 `roll attest --capture-web` 截图不受影响。(FIX-1022) `[loop-engine]`

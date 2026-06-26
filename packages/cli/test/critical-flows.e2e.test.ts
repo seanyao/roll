@@ -79,6 +79,26 @@ describe("critical CLI E2E", () => {
     expect(existsSync(join(project, ".roll"))).toBe(false);
   });
 
+  it("roll init PRD-only attest smoke runs the intel-radar path and cleans up", () => {
+    const project = tmpEmptyProject("init-prd-only-smoke");
+
+    const result = runRoll(project, ["init", "--attest-smoke", "prd-only"], {
+      ROLL_ATTEST_NO_BROWSER: "1",
+    });
+
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("roll init attest smoke: prd-only");
+    expect(result.out).toContain("INIT");
+    expect(result.out).toContain("Initialized");
+    expect(result.out).toContain("Created files:");
+    expect(result.out).toContain("AGENTS.md");
+    expect(result.out).toContain(".roll/brief.md");
+    expect(result.out).toContain("roll design --from-file docs/intel-radar-PRD.md");
+    expect(result.out).toContain("cleanup: removed");
+    expect(existsSync(join(project, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(project, ".roll"))).toBe(false);
+  });
+
   it("roll story new is the single card-minting entry: card folder + backlog row + index", () => {
     const project = tmpProject("story-new");
     writeFileSync(join(project, ".roll", "backlog.md"), "| Story | Description | Status |\n|---|---|---|\n");

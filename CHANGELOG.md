@@ -2,12 +2,22 @@
 
 ## Unreleased
 
+### 自动化流水线
+
+- **loop 再也不会弹 macOS 录屏授权了**：以前无人值守跑 loop 时会反复弹「请求录屏」授权框（甚至堆成一摞挡住屏幕），根因是判断「是否无人值守」用的 isTTY 被 loop 的 PTY（script+tmux）包装骗过了。现在 loop 在每个子进程显式关掉截屏探测，探测和真截屏两条路都认这个开关——你自己在终端跑 `roll attest --capture-web` 截图不受影响。(FIX-1022) `[loop-engine]`
+- **评分/配对只用你配置里允许的国产代理**：以前会自动启用机器上探测到的 codex/claude 来评分配对，既违反纯国产约束又白白失败。现在只认 `.roll/agents.yaml` 里声明的代理。(FIX-935) `[loop-engine]`
+- **loop 跳过有未发布本地改动的卡**：一张卡若本地还有没提交/没发布的工作，loop 先跳过它，不再覆盖或重复劳动。(FIX-1018) `[loop-engine]`
+- **推送前先体检仓库可推性**：加了仓库可推送性预检 + 暂停闸，推不动时不再硬来、空转。(FIX-1019) `[loop-engine]`
+- **`roll loop --help` 讲清三态**：help 里写明 ACTIVE / DORMANT / PAUSED 三态、休眠含义、三种唤醒方式。(US-LOOP-079m) `[loop-engine]`
+
 ### 上手引导
 
 - **`roll init` 之后知道下一步该干嘛了**：当你手头有需求文档（PRD 之类）但 backlog 还是空的时候，`roll init` 收尾、`roll status`、`roll doctor` 三处都会提醒你去把需求变成可执行的 backlog——先做设计、再开 loop。(US-ONBOARD-NUDGE-002, US-ONBOARD-NUDGE-003) `[legacy-onboard]`
 - **一条命令就能开始设计**：敲 `roll design` 直接在你的 AI agent 里拉起交互式设计会话，把需求聊成 INVEST 故事写进 backlog。不用再自己记着「先去 agent 里加载哪个 skill」。(US-ONBOARD-NUDGE-004) `[legacy-onboard]`
 - **装完就能选默认 agent**：`roll setup` 不再静默替你选第一个 agent——如果你的机器装了多个 AI agent，setup 会问你用哪个当默认（非交互环境则按注册表顺序选第一个，确定性不出错）。选完存进 `primary_agent`，以后 `roll design`、`roll agent use` 这些交互入口默认就用它，不用每次都再选。重跑 setup 不再打扰——已有默认就静默跳过；想换默认用 `roll setup --reselect` 或 `roll agent use`。(US-ONBOARD-NUDGE-006) `[legacy-onboard]`
 - **文档收尾**：init→design 引导流程、`roll design` 命令入口、默认 agent 选择都已写进中英文档，不用再靠「本来就知道」。(US-ONBOARD-NUDGE-005) `[legacy-onboard]`
+- **新项目上手更清晰**：新项目流程改成「先建仓库、再 `roll init`」，并给出 epic 提示，少走弯路。(FIX-1020) `[legacy-onboard]`
+- **`roll init` 收尾有总结/确认，支持 `--auto`**：init 完成时给出「做了什么」的总结 + 确认；加 `--auto` 可非交互一把梭完成。(FIX-1021) `[legacy-onboard]`
 
 ## v3.625.2 — 2026-06-25
 

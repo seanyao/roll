@@ -35,7 +35,7 @@ function mkdir(root: string, rel: string): void {
 function withCapturedOutput<T>(
   cwd: string,
   run: () => T,
-  options: { pathEntries?: string[] } = {},
+  options: { pathEntries?: string[]; rollHome?: string } = {},
 ): T extends Promise<unknown> ? Promise<Run> : Run {
   const saveCwd = process.cwd();
   const emptyBin = mkdtempSync(join(tmpdir(), "roll-init-empty-bin-"));
@@ -65,7 +65,7 @@ function withCapturedOutput<T>(
   process.chdir(cwd);
   process.env["PATH"] = [emptyBin, ...(options.pathEntries ?? [])].join(":");
   process.env["HOME"] = cwd;
-  process.env["ROLL_HOME"] = REPO;
+  process.env["ROLL_HOME"] = options.rollHome ?? REPO;
   process.env["ROLL_PKG_DIR"] = REPO;
   process.env["NO_COLOR"] = "1";
   process.env["ROLL_LANG"] = "en";
@@ -309,10 +309,24 @@ describe("roll init diagnosis router", () => {
     expect(run.stdout).toContain("Created files:");
     expect(run.stdout).toContain("AGENTS.md");
     expect(run.stdout).toContain(".roll/brief.md");
+    expect(run.stdout).toContain(".roll/onboard-changeset.yaml");
     expect(run.stdout).toContain("roll design --from-file docs/intel-radar-PRD.md");
     expect(run.stdout).toContain("cleanup: removed");
     expect(existsSync(join(cwd, "AGENTS.md"))).toBe(false);
     expect(existsSync(join(cwd, ".roll"))).toBe(false);
+  });
+
+  it("runs the hidden PRD-only attest smoke without a preinstalled owner ROLL_HOME", () => {
+    const cwd = project();
+
+    const run = withCapturedOutput(cwd, () => initCommand(["--attest-smoke", "prd-only"]), {
+      rollHome: join(cwd, "missing-roll-home"),
+    });
+
+    expect(run.status).toBe(0);
+    expect(run.stdout).toContain("roll init attest smoke: prd-only");
+    expect(run.stdout).toContain("cleanup: removed");
+    expect(existsSync(join(cwd, "missing-roll-home"))).toBe(false);
   });
 
   it("does not route git-only or empty source shells to existing-codebase onboarding", () => {

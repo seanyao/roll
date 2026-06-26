@@ -93,6 +93,7 @@ describe("critical CLI E2E", () => {
     expect(result.out).toContain("Created files:");
     expect(result.out).toContain("AGENTS.md");
     expect(result.out).toContain(".roll/brief.md");
+    expect(result.out).toContain(".roll/onboard-changeset.yaml");
     expect(result.out).toContain("roll design --from-file docs/intel-radar-PRD.md");
     expect(result.out).toContain("cleanup: removed");
     expect(existsSync(join(project, "AGENTS.md"))).toBe(false);

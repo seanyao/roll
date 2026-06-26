@@ -597,7 +597,11 @@ export function allowedDeliverableCmd(command: string): boolean {
   // (2) denylist — reject state-changing / releasing roll subcommands.
   const sub = (tokens[subIdx] ?? "").toLowerCase();
   if (sub === "") return true; // bare `roll` (prints help) — harmless read-only.
-  if (sub === "init") return tokens.slice(subIdx).join(" ") === "init --diagnose --fixture state-matrix";
+  if (sub === "init") {
+    const tail = tokens.slice(subIdx + 1);
+    if (tail.join(" ") === "--diagnose --fixture state-matrix") return true;
+    return tail.length === 2 && tail[0] === "--attest-smoke" && /^[A-Za-z0-9_.-]+$/.test(tail[1] ?? "");
+  }
   if (DELIVERABLE_CMD_DENY_SUBCOMMANDS.has(sub)) return false;
   return true;
 }

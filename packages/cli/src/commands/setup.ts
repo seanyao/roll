@@ -50,7 +50,7 @@ import {
   readLineFromStdin,
   selectPrimaryAgent,
 } from "../lib/interactive-agent.js";
-import { defaultExternalToolDeps, resolveRequirement } from "../lib/external-tools.js";
+import { collectExternalTools, defaultExternalToolDeps, resolveRequirement, type ExternalToolState } from "../lib/external-tools.js";
 
 // ─── bash UI helpers (bin/roll:41-56) — err only ─────────────────────────────
 function err(line: string): void {
@@ -68,6 +68,18 @@ function msgLang(): Lang {
 }
 function m(key: string, ...args: Array<string | number>): string {
   return t(v2Catalog, msgLang(), key, ...args);
+}
+
+export function renderScreenRecordingSetupNotice(states: readonly ExternalToolState[]): string | null {
+  const screen = states.find((state) => state.id === "screencapture");
+  if (screen?.status !== "permission-missing") return null;
+  return [
+    "",
+    "  ! macOS Screen Recording permission is missing for Terminal.app.",
+    "  Screenshot evidence will be skipped until permission is granted.",
+    "  Open System Settings > Privacy & Security > Screen Recording, allow Terminal.app, then restart Terminal.app.",
+    "",
+  ].join("\n");
 }
 
 // ─── _setup_snapshot (1357) — content fingerprint of watched dirs ────────────
@@ -392,6 +404,9 @@ export function setupCommand(args: string[]): number {
   if (selection.guidance !== null) {
     process.stdout.write(`\n  ${c("dim", selection.guidance)}\n`);
   }
+
+  const screenRecordingNotice = renderScreenRecordingSetupNotice(collectExternalTools());
+  if (screenRecordingNotice !== null) process.stdout.write(screenRecordingNotice);
 
   // FIX-288 AC5: `roll release` drives the merge via GitHub-native auto-merge
   // (`gh pr merge --auto --squash`). That needs "Allow auto-merge" enabled on

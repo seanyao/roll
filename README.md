@@ -39,9 +39,11 @@ roll loop on        # let AI work through the backlog (optional)
 `roll init` first diagnoses the current directory. Complete Roll projects get
 `Already initialized` and `Next: roll status`; partial Roll projects get
 `roll init --repair`, while pre-2.0 layouts get migration guidance without writing files. Existing codebases route to
-`$roll-onboard`. PRD/docs-only workspaces are treated as new projects and point
-to design, not legacy onboarding. Empty directories still use the fresh scaffold
-path; pass `--auto` to skip the confirmation prompt in scripts and CI.
+`$roll-onboard`. PRD/docs-only workspaces are treated as new projects: Roll writes
+`.roll/brief.md` from the detected document and points to `roll design --from-file`.
+Empty directories ask what you are building in an interactive terminal; in scripts
+and CI, plain `roll init` is read-only and `roll init --auto` writes a placeholder
+brief before pointing to `roll design`.
 First time through? Start with [Getting started](guide/en/getting-started.md).
 
 ## Quick start for new projects

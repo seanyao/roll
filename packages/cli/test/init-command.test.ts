@@ -134,7 +134,10 @@ describe("roll init --diagnose fixture", () => {
 
     expect(run.status).toBe(0);
     expect(run.stdout).toContain("Usage: roll init");
+    expect(run.stdout).toContain("--auto");
+    expect(run.stdout).toContain("--repair");
     expect(run.stdout).not.toContain("--diagnose");
+    expect(run.stdout).not.toContain("--attest-smoke");
     expect(run.stdout).not.toContain("state-matrix");
   });
 });

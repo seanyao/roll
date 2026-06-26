@@ -51,23 +51,22 @@ cd your-project
 roll init
 ```
 
-Roll 会检测到这是遗留项目（没有 `AGENTS.md`，但有大量源码），打印类似：
+Roll 会检测到这是已有代码库且尚未接入 Roll（有源码/清单文件，但没有当前 Roll 标记），打印类似：
 
 ```
-[Roll] Detected: legacy project (no AGENTS.md, 47 files in src/)
-
-[Roll] Onboarding 需要一个 AI agent 来读懂这个项目。检测到：
-  ✓ claude    (installed)
-  ✓ codex     (installed)
-  ✗ kimi      (not found)
-
-[Roll] 后续过程会使用你的 agent 调用模型，token 消耗在你自己的账户上。
-       代码与对话都留在你的 agent 工具里 —— Roll 本身不上传任何内容。
-
-[Roll] 下一步：
-         打开任一已安装的 agent，运行：  $roll-onboard
-       完成对话后回到这里：
-         roll init --apply
+Detected: existing codebase without Roll
+Recommended path: agentic-onboard
+Facts:
+  - manifests: package.json
+  - source dirs: src
+  - test dirs: tests
+  - source files: 47
+  - Roll markers: none
+  - facts hash: sha256:...
+Next: $roll-onboard
+Agent status: available: claude, codex
+Run `$roll-onboard` with an available agent, then run `roll init --apply` when the plan is ready.
+No files changed.
 ```
 
 ### 3. 在 AI agent 里跑 `$roll-onboard`
@@ -83,7 +82,7 @@ $roll-onboard
 2. 第一组 3 问：确认推断的项目类型 / 领域 / 关键模块
 3. 第二组 3 问：要生成哪些 `.roll/` 产物，哪些现有文档要 include 而非重新生成
 4. 第三组 3 问：`.gitignore`、AI 工具同步、loop 启用与否
-5. 写入 `.roll/onboard-plan.yaml`，记录所有回答
+5. 只写两个结构化产物：`.roll/init-diagnosis.yaml` 和 `.roll/onboard-plan.yaml`
 
 总耗时：3 分钟以内。
 
@@ -95,7 +94,7 @@ $roll-onboard
 roll init --apply
 ```
 
-这一步会读 plan 并：
+这一步会先校验成对的 diagnosis / plan 产物，然后：
 - 按你选的 scope 创建 `.roll/` 子目录
 - 如果选了"生成 backlog"，写入初始 `BACKLOG.md`
 - 你标记 include 的现有文档不会被覆盖
@@ -119,6 +118,8 @@ Roll 只动它**自己的**文件：
 | `.gitignore`（仅当 Q7 说 yes） | `package.json`、`pyproject.toml` 等 |
 
 如果你已有 `CONTRIBUTING.md` 或 `.github/` workflow，Roll 不会碰它们。如果想把 Roll 工作流接到现有 CI，需要你后续手动配置。
+
+`$roll-onboard` 自己的边界比 `roll init --apply` 更窄：agent 只能写 `.roll/init-diagnosis.yaml` 和 `.roll/onboard-plan.yaml`。`AGENTS.md`、`.gitignore`、backlog、features、docs、offboard changeset 都由 apply 命令负责。
 
 ## 怎么退出
 
@@ -167,7 +168,7 @@ Roll 会检测为 pre-2.0 Roll 项目（不是 legacy），让你跑 `npx @seany
 在对话里告诉它。第一组 3 问就是为了让你纠正。Skill 把纠正后的理解写进 plan，bash 信任 plan。
 
 **Q: 能手动编辑 `.roll/onboard-plan.yaml` 吗？**
-可以。只要通过 `lib/roll-plan-validate.py` 校验（apply 时自动跑）且生成时间 < 24h，bash 会按它执行。可以在 apply 前手动调整 `description` 或 `domains`。
+可以，但要和 `.roll/init-diagnosis.yaml` 配套。`roll init --apply` 要求两边的 `factsHash` 一致、没有 shell-command key，且 `file_operations` 只能声明那两个允许文件。超过 24 小时或由旧版 `$roll-onboard` 生成的 plan，应该重新生成。
 
 **Q: 我们团队用 GitHub Issues / Jira / Linear，Roll 会替代它们吗？**
 不会。Roll 的 `BACKLOG.md` 是给 AI loop 自治执行用的。你团队的外部 tracker 继续用。有的团队只把"AI-loop 能执行的 story"放 Roll，纯人工任务留在原 tracker。

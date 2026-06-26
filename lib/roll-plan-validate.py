@@ -21,6 +21,15 @@ Error messages are written to stderr in both English and Chinese.
 Schema (v1):
     version: 1
     generated_at: ISO 8601 timestamp (UTC or with tz offset)
+    factsHash: sha256:<64 lowercase hex chars>
+    file_operations:
+      - path: .roll/init-diagnosis.yaml | .roll/onboard-plan.yaml
+        operation: write
+        idempotent: true
+    merge_intents:
+      - target: str
+        owner: roll-init-apply
+        strategy: str
     project_understanding:
       type: backend-service | frontend-only | fullstack | cli
       description: str
@@ -71,6 +80,7 @@ carries `evidence: detected` (not a third enum value).
 from __future__ import annotations
 
 import sys
+import re
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -89,6 +99,21 @@ SUPPORTED_VERSIONS = {1}
 MAX_AGE_HOURS = 24
 VALID_PROJECT_TYPES = {"backend-service", "frontend-only", "fullstack", "cli"}
 VALID_SCOPE_ITEMS = {"backlog", "features", "domain", "briefs"}
+VALID_FACTS_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+AGENT_WRITABLE_OUTPUTS = {".roll/init-diagnosis.yaml", ".roll/onboard-plan.yaml"}
+SHELL_COMMAND_KEYS = {"cmd", "command", "commands", "exec", "run", "script", "shell", "shell_commands"}
+VALID_MERGE_INTENT_TARGETS = {
+    "agent_routes",
+    "backlog",
+    "briefs",
+    "claude_conventions",
+    "domain",
+    "features",
+    "gitignore",
+    "phase2_markdown",
+    "roll_conventions",
+    "sync_targets",
+}
 
 # US-ONBOARD-016: anti-hallucination evidence tags. Every test_assessment claim
 # must carry one of these; risks[].evidence (when present) uses the same enum.
@@ -109,7 +134,16 @@ def err(msg_en: str, msg_zh: str = "") -> None:
 def validate_required_top_level(plan: dict) -> list[str]:
     """Return list of missing/invalid top-level fields."""
     errors = []
-    required = ["version", "generated_at", "project_understanding", "scope", "privacy"]
+    required = [
+        "version",
+        "generated_at",
+        "factsHash",
+        "file_operations",
+        "merge_intents",
+        "project_understanding",
+        "scope",
+        "privacy",
+    ]
     for key in required:
         if key not in plan:
             errors.append(f"missing required field: {key}")
@@ -123,6 +157,106 @@ def validate_version(plan: dict) -> list[str]:
     if v not in SUPPORTED_VERSIONS:
         return [f"version {v} not supported (supported: {sorted(SUPPORTED_VERSIONS)})"]
     return []
+
+
+def validate_facts_hash_value(value, where: str) -> list[str]:
+    if not isinstance(value, str):
+        return [f"{where} must be a string"]
+    if not VALID_FACTS_HASH_RE.match(value):
+        return [f"{where} must match sha256:<64 lowercase hex chars>"]
+    return []
+
+
+def validate_shell_command_keys(value, where: str = "$") -> list[str]:
+    """Reject arbitrary shell-command fields anywhere in the agent-authored plan."""
+    errors: list[str] = []
+    if isinstance(value, list):
+        for i, item in enumerate(value):
+            errors += validate_shell_command_keys(item, f"{where}[{i}]")
+        return errors
+    if not isinstance(value, dict):
+        return errors
+    for key, item in value.items():
+        child = f"{where}.{key}"
+        if key in SHELL_COMMAND_KEYS:
+            errors.append(f"{child} is not allowed in onboard artifacts")
+        errors += validate_shell_command_keys(item, child)
+    return errors
+
+
+def validate_file_operations(plan: dict) -> list[str]:
+    errors: list[str] = []
+    operations = plan.get("file_operations")
+    if not isinstance(operations, list):
+        return ["file_operations must be a list"]
+    seen: set[str] = set()
+    for i, op in enumerate(operations):
+        where = f"file_operations[{i}]"
+        if not isinstance(op, dict):
+            errors.append(f"{where} must be a mapping")
+            continue
+        path = op.get("path")
+        if not isinstance(path, str):
+            errors.append(f"{where}.path must be a string")
+        elif path not in AGENT_WRITABLE_OUTPUTS:
+            errors.append(f"{where}.path '{path}' is outside the agent writable outputs")
+        else:
+            seen.add(path)
+        if op.get("operation") != "write":
+            errors.append(f"{where}.operation must be write")
+        if op.get("idempotent") is not True:
+            errors.append(f"{where}.idempotent must be true")
+    for expected in sorted(AGENT_WRITABLE_OUTPUTS):
+        if expected not in seen:
+            errors.append(f"file_operations must include {expected}")
+    return errors
+
+
+def validate_merge_intents(plan: dict) -> list[str]:
+    errors: list[str] = []
+    intents = plan.get("merge_intents")
+    if not isinstance(intents, list):
+        return ["merge_intents must be a list"]
+    for i, intent in enumerate(intents):
+        where = f"merge_intents[{i}]"
+        if not isinstance(intent, dict):
+            errors.append(f"{where} must be a mapping")
+            continue
+        if isinstance(intent.get("path"), str):
+            errors.append(f"{where} must describe a target, not a file path")
+        if intent.get("owner") != "roll-init-apply":
+            errors.append(f"{where}.owner must be roll-init-apply")
+        target = intent.get("target")
+        if not isinstance(target, str) or target not in VALID_MERGE_INTENT_TARGETS:
+            errors.append(
+                f"{where}.target must be one of {sorted(VALID_MERGE_INTENT_TARGETS)}"
+            )
+        strategy = intent.get("strategy")
+        if not isinstance(strategy, str) or strategy.strip() == "":
+            errors.append(f"{where}.strategy must be a non-empty string")
+    return errors
+
+
+def validate_diagnosis_pair(plan: dict, plan_path: Path) -> list[str]:
+    errors = validate_facts_hash_value(plan.get("factsHash"), "factsHash")
+    diagnosis_path = plan_path.parent / "init-diagnosis.yaml"
+    if not diagnosis_path.is_file():
+        return errors + [
+            "missing required paired artifact: .roll/init-diagnosis.yaml"
+        ]
+    try:
+        with diagnosis_path.open("r", encoding="utf-8") as f:
+            diagnosis = yaml.safe_load(f)
+    except (yaml.YAMLError, OSError) as e:
+        return errors + [f"failed to parse paired .roll/init-diagnosis.yaml: {e}"]
+    if not isinstance(diagnosis, dict):
+        return errors + [".roll/init-diagnosis.yaml must be a top-level mapping"]
+    errors += validate_facts_hash_value(diagnosis.get("factsHash"), "init-diagnosis.factsHash")
+    if errors:
+        return errors
+    if diagnosis.get("factsHash") != plan.get("factsHash"):
+        errors.append("plan factsHash must match .roll/init-diagnosis.yaml factsHash")
+    return errors
 
 
 def validate_freshness(plan: dict) -> tuple[list[str], bool]:
@@ -346,6 +480,10 @@ def main(argv: list[str]) -> int:
     schema_errors: list[str] = []
     schema_errors += validate_required_top_level(plan)
     schema_errors += validate_version(plan)
+    schema_errors += validate_diagnosis_pair(plan, path)
+    schema_errors += validate_shell_command_keys(plan)
+    schema_errors += validate_file_operations(plan)
+    schema_errors += validate_merge_intents(plan)
     schema_errors += validate_project_understanding(plan)
     schema_errors += validate_scope(plan)
     schema_errors += validate_privacy(plan)

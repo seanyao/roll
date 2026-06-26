@@ -17,7 +17,7 @@ Python scripts and shell libraries that `bin/roll` delegates to for rendering-he
 | `roll-backlog.py` | Backlog read/write helpers |
 | `roll-peer.py` | Peer review coordination helpers |
 | `roll-help.py` | Renders `roll --help` output |
-| `roll-plan-validate.py` | Validates plan files before story execution |
+| `roll-plan-validate.py` | Validates `.roll/onboard-plan.yaml` and paired `.roll/init-diagnosis.yaml` before `roll init --apply` mutates a project |
 | `model_prices.py` | List-price table for AI model API pricing (per MTok, native currency) |
 | `prices_fetcher.py` | Fetches fresh price snapshots from vendor APIs |
 | `roll_render.py` | Shared rendering utilities (tables, color, formatting) |
@@ -38,4 +38,4 @@ Python scripts and shell libraries that `bin/roll` delegates to for rendering-he
 ## Dependencies
 
 Imported by `bin/roll` via subprocess calls (`python3 lib/<script>.py`).
-No third-party pip dependencies — standard library only (json, sys, os, re, datetime).
+Most helpers are standard-library only; YAML-facing helpers such as `roll-plan-validate.py` and `roll-onboard-render.py` require PyYAML.

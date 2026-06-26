@@ -24,7 +24,7 @@ import { addPendingPublish, removePendingPublish } from "../runner/pending-publi
 import { autoRecoverEnabled, clearSelfHeal, selfHealBudget } from "../runner/selfheal-budget.js";
 import { maybeSwitchAgent } from "../runner/selfheal-switch.js";
 import { loopExhaustionSplitCommand } from "./loop-exhaustion-split.js";
-import { parseEstMin } from "../runner/executor.js";
+import { routerEstMin } from "../runner/executor.js";
 import { readBacklogRow } from "./attest.js";
 import { warnIfBinaryStale } from "../runner/binary-staleness.js";
 import { rollVersion } from "./version.js";
@@ -1103,7 +1103,9 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
             storyId: sid,
             failedAgent,
             reason: result.terminal === "blocked" ? "stall" : "zero-tcr",
-            estMin: parseEstMin(readBacklogRow(id.path, sid).description ?? ""),
+            // FIX-1026: spec frontmatter est_min drives the self-heal re-route
+            // tier too, falling back to the backlog row.
+            estMin: routerEstMin(id.path, sid, readBacklogRow(id.path, sid).description ?? ""),
             routeDeps,
             budget: selfHealBudget(),
             cycleId,

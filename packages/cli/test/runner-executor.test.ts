@@ -11,6 +11,7 @@ import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { CycleCommand, CycleContext, RollEvent, WarmSessionEntry } from "@roll/core";
 import { AGENTS } from "../../core/src/agent/specs.js";
+import { classifyComplexity } from "@roll/core";
 import { AWAITING_REVIEW_STATUS_MARKER } from "@roll/spec";
 import { agentWritableRoots } from "../src/runner/executor.js";
 import { evaluateReviewScoreGate, readLatestStoryPeerScore } from "../src/lib/review-score.js";
@@ -40,6 +41,8 @@ import {
   executeCommand,
   isParkedAtHold,
   parseEstMin,
+  parseEstMinFromSpec,
+  routerEstMin,
   reasonixEnv,
   realAgentSpawn,
   rescueLeakedMain,
@@ -354,6 +357,67 @@ describe("parseEstMin", () => {
     expect(parseEstMin("foo est_min:12 bar")).toBe(12);
     expect(parseEstMin("foo est-min: 7")).toBe(7);
     expect(parseEstMin("no estimate")).toBeUndefined();
+  });
+});
+
+describe("parseEstMinFromSpec — FIX-1026 spec frontmatter est_min", () => {
+  it("reads est_min from the leading YAML frontmatter block", () => {
+    const spec = "---\ntitle: FIX-1 — thing\nest_min: 24\n---\n\n# FIX-1\nbody est_min: 6 should not count\n";
+    expect(parseEstMinFromSpec(spec)).toBe(24);
+  });
+  it("accepts est-min hyphen and surrounding whitespace", () => {
+    expect(parseEstMinFromSpec("---\nest-min:  12 \n---\n")).toBe(12);
+  });
+  it("undefined when frontmatter has no est_min", () => {
+    expect(parseEstMinFromSpec("---\ntitle: x\n---\nbody")).toBeUndefined();
+  });
+  it("undefined when there is no frontmatter (body mention ignored)", () => {
+    expect(parseEstMinFromSpec("# FIX-1\nest_min: 24 in prose only")).toBeUndefined();
+  });
+});
+
+describe("routerEstMin — FIX-1026 spec wins, classifier honors thresholds", () => {
+  function writeSpec(root: string, epic: string, id: string, estMin: number | null): void {
+    const dir = join(root, ".roll", "features", epic, id);
+    mkdirSync(dir, { recursive: true });
+    const fm = estMin === null ? `title: ${id}` : `title: ${id}\nest_min: ${estMin}`;
+    writeFileSync(join(dir, "spec.md"), `---\n${fm}\n---\n\n# ${id}\n`, "utf8");
+  }
+
+  it("est_min:24 in spec frontmatter classifies as hard (the documented lever)", () => {
+    const root = mkdtempSync(join(tmpdir(), "fix1026-hard-"));
+    writeSpec(root, "loop-engine", "FIX-1026", 24);
+    // backlog row says nothing → spec is the only signal.
+    expect(routerEstMin(root, "FIX-1026", "FIX-1026 some work")).toBe(24);
+    expect(classifyComplexity(routerEstMin(root, "FIX-1026", ""))).toBe("hard");
+  });
+
+  it("est_min:6 → easy, est_min:12 → default (threshold boundaries)", () => {
+    const root = mkdtempSync(join(tmpdir(), "fix1026-bounds-"));
+    writeSpec(root, "loop-engine", "FIX-A", 6);
+    writeSpec(root, "loop-engine", "FIX-B", 12);
+    expect(classifyComplexity(routerEstMin(root, "FIX-A", ""))).toBe("easy");
+    expect(classifyComplexity(routerEstMin(root, "FIX-B", ""))).toBe("default");
+  });
+
+  it("spec frontmatter est_min overrides the backlog row tag", () => {
+    const root = mkdtempSync(join(tmpdir(), "fix1026-override-"));
+    writeSpec(root, "loop-engine", "FIX-C", 24);
+    // backlog row claims a small estimate; spec must win → hard, not default.
+    expect(routerEstMin(root, "FIX-C", "FIX-C est_min:6 quick")).toBe(24);
+    expect(classifyComplexity(routerEstMin(root, "FIX-C", "FIX-C est_min:6 quick"))).toBe("hard");
+  });
+
+  it("falls back to the backlog row when the spec has no est_min", () => {
+    const root = mkdtempSync(join(tmpdir(), "fix1026-fallback-"));
+    writeSpec(root, "loop-engine", "FIX-D", null);
+    expect(routerEstMin(root, "FIX-D", "FIX-D est_min:24 big")).toBe(24);
+  });
+
+  it("falls back to the backlog row when no spec exists at all", () => {
+    const root = mkdtempSync(join(tmpdir(), "fix1026-nospec-"));
+    expect(routerEstMin(root, "FIX-NONE", "FIX-NONE est_min:12 mid")).toBe(12);
+    expect(routerEstMin(root, "FIX-NONE", "no estimate")).toBeUndefined();
   });
 });
 

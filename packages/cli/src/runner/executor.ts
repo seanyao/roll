@@ -1300,7 +1300,9 @@ export async function executeCommand(
     case "resolve_route": {
       const items = ports.backlog.read(ports.repoCwd);
       const story = items.find((i) => i.id === cmd.storyId);
-      const estMin = story === undefined ? undefined : parseEstMin(story.desc);
+      // FIX-1026: the spec frontmatter's `est_min` (the documented escalation
+      // lever) drives tier selection, falling back to the backlog row's tag.
+      const estMin = routerEstMin(ports.repoCwd, cmd.storyId, story?.desc ?? "");
       const r = ports.route.resolve(cmd.storyId, estMin);
       return { event: { type: "route_resolved", agent: r.agent, model: r.model } };
     }
@@ -3243,6 +3245,47 @@ function storyRequiresManualMerge(repoCwd: string, storyId: string | undefined):
 export function parseEstMin(desc: string): number | undefined {
   const m = /est[_-]?min:\s*(\d+)/i.exec(desc);
   return m === null ? undefined : Number(m[1]);
+}
+
+/**
+ * FIX-1026 — parse `est_min:<n>` from a STORY SPEC's YAML frontmatter.
+ *
+ * The agents.yaml tier→rig contract (easy ≤8, default 8–20, hard >20) is driven
+ * by `est_min`, and the documented escalation lever is "bump est_min to send a
+ * stuck card to a harder tier". That lever lives in the spec frontmatter, which
+ * was never read by the router — only the backlog row's `est_min:` tag was. A
+ * spec declaring `est_min: 24` therefore still ran on the `default` tier.
+ *
+ * This reads ONLY the leading `--- … ---` frontmatter block (so a stray
+ * `est_min:` mention in the prose body cannot hijack routing) and returns the
+ * first `est_min:` integer there, or undefined when absent/unparseable. The
+ * resolve_route handler prefers this over the backlog row so the spec is the
+ * single source of truth for sizing.
+ */
+export function parseEstMinFromSpec(specText: string): number | undefined {
+  const fm = /^---\n([\s\S]*?)\n---/.exec(specText);
+  if (fm === null) return undefined;
+  const m = /^\s*est[_-]?min:\s*(\d+)/im.exec(fm[1] ?? "");
+  return m === null ? undefined : Number(m[1]);
+}
+
+/**
+ * FIX-1026 — the router's est_min for a story, spec frontmatter taking
+ * precedence over the backlog row. Reading the spec is best-effort: a missing,
+ * unreadable, or frontmatter-less spec falls back to the backlog row's
+ * `est_min:` tag (prior behavior), so routing never regresses on a parse blip.
+ */
+export function routerEstMin(worktreeCwd: string, storyId: string, backlogDesc: string): number | undefined {
+  try {
+    const specPath = storySpecPath(worktreeCwd, storyId);
+    if (specPath !== null && existsSync(specPath)) {
+      const fromSpec = parseEstMinFromSpec(readFileSync(specPath, "utf8"));
+      if (fromSpec !== undefined) return fromSpec;
+    }
+  } catch {
+    /* spec read/parse is an optimization — never topple routing on it */
+  }
+  return parseEstMin(backlogDesc);
 }
 
 function sleep(ms: number): Promise<void> {

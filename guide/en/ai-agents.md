@@ -72,6 +72,17 @@ hard:     { agent: claude }    # est_min > 20
 fallback: { agent: pi }        # used when the picked agent is offline
 ```
 
+The `est_min` that drives tier selection is read from the **story spec's YAML
+frontmatter** (`.roll/features/<epic>/<ID>/spec.md`), falling back to the
+`est_min:` tag on the backlog row when the spec declares none. The spec is the
+single source of truth, so the escalation lever is: bump `est_min` in the spec
+frontmatter to send a stuck card to a harder tier (e.g. `est_min: 24` → `hard`).
+
+驱动分档的 `est_min` 取自**故事 spec 的 YAML frontmatter**
+（`.roll/features/<epic>/<ID>/spec.md`），spec 未声明时回退到 backlog 行的
+`est_min:` 标记。spec 是唯一真相来源，因此升档手段是：在 spec frontmatter 里
+调高 `est_min`，把卡死的卡送进更硬的档位（例如 `est_min: 24` → `hard`）。
+
 Each assignment is a rig: `agent × model`. The agent is one of the six supported
 identities; the model is a string owned by that agent. For example, `pi` may run
 `deepseek-v4-pro`, but `deepseek` is not an agent slot value.

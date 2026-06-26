@@ -20,7 +20,7 @@ import { agentInstalledByName as coreAgentInstalledByName, agentIsKnown, canonic
 import { resolveLang, t, v2Catalog, v3Catalog, type Lang } from "@roll/spec";
 import { repoRoot } from "../bridge.js";
 import { generateCatalog } from "./skills.js";
-import { collectExternalTools, renderExternalToolDoctorSection, screenRecordingPreflight } from "../lib/external-tools.js";
+import { collectExternalTools, renderExternalToolDoctorSection, type ExternalToolState } from "../lib/external-tools.js";
 import { collectToolReadinessDoctorRows, renderToolReadinessDoctorSection } from "../lib/tool-readiness-doctor.js";
 import { detectDesignHandoff, renderDesignNudge } from "../lib/onboard-nudge.js";
 
@@ -62,6 +62,30 @@ function bilingual(key: string): string[] {
 const out: { lines: string[] } = { lines: [] };
 function emit(line: string): void {
   out.lines.push(line);
+}
+
+interface DoctorDeps {
+  externalTools?: () => readonly ExternalToolState[];
+}
+
+function terminalScreenRecordingPreflight(state: ExternalToolState | undefined): {
+  status: "ok" | "skip" | "permission-missing" | "missing-tool";
+  detail: string;
+  repairCommand?: string;
+} {
+  if (state === undefined) {
+    return { status: "skip", detail: "macOS screencapture requirement state is unavailable." };
+  }
+  if (state.status === "ok") {
+    return { status: "ok", detail: state.detail };
+  }
+  if (state.status === "permission-missing") {
+    return { status: "permission-missing", detail: state.detail, ...(state.repairCommand !== undefined ? { repairCommand: state.repairCommand } : {}) };
+  }
+  if (state.status === "missing") {
+    return { status: "missing-tool", detail: state.detail, ...(state.repairCommand !== undefined ? { repairCommand: state.repairCommand } : {}) };
+  }
+  return { status: "skip", detail: state.detail };
 }
 
 function commandOnPath(bin: string): boolean {
@@ -480,11 +504,12 @@ function readWorkingDirectory(plist: string): string {
   return "";
 }
 
-export function doctorCommand(args: string[]): number {
+export function doctorCommand(args: string[], deps: DoctorDeps = {}): number {
   out.lines = [];
   const p = palette();
   const lang = msgLang();
   const toolsOnly = args.includes("--tools");
+  const externalTools = deps.externalTools?.() ?? collectExternalTools();
 
   if (!toolsOnly) {
     agentSection(p);
@@ -495,16 +520,16 @@ export function doctorCommand(args: string[]): number {
     launchdProxySection(lang);
   }
   for (const l of renderToolReadinessDoctorSection(collectToolReadinessDoctorRows(process.cwd()))) emit(l);
-  for (const l of renderExternalToolDoctorSection(collectExternalTools())) emit(l);
+  for (const l of renderExternalToolDoctorSection(externalTools)) emit(l);
 
   if (toolsOnly) {
     // US-INIT-003c: `roll doctor --tools` prints a focused Terminal.app Screen
-    // Recording preflight status so the one-time permission check is explicit.
-    const preflight = screenRecordingPreflight();
+    // Recording preflight status from the already-collected external tool state.
+    const preflight = terminalScreenRecordingPreflight(externalTools.find((tool) => tool.id === "screencapture"));
     emit("");
     const marker = preflight.status === "ok" ? "✓" : preflight.status === "skip" ? "↷" : "✗";
     emit(`  ${marker} Terminal.app Screen Recording — ${preflight.status}`);
-    emit(`    ${preflight.detail}${preflight.cached ? " (cached)" : ""}`);
+    emit(`    ${preflight.detail}`);
     if (preflight.repairCommand !== undefined) emit(`    fix: ${preflight.repairCommand}`);
   }
 

@@ -81,6 +81,33 @@ describe("US-INIT-003c Terminal.app screenshot preflight", () => {
     expect(output).not.toContain("Design handoff nudge");
   });
 
+  it("roll doctor --tools reuses the external requirement result instead of probing twice", () => {
+    let probes = 0;
+    const realOut = process.stdout.write.bind(process.stdout);
+    const chunks: string[] = [];
+    // @ts-expect-error capture-only
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      chunks.push(String(chunk));
+      return true;
+    };
+    try {
+      expect(
+        doctorCommand(["--tools"], {
+          externalTools: () => {
+            probes += 1;
+            return [externalState("permission-missing")];
+          },
+        }),
+      ).toBe(0);
+    } finally {
+      process.stdout.write = realOut;
+    }
+
+    expect(probes).toBe(1);
+    expect(chunks.join("")).toContain("Terminal.app Screen Recording");
+    expect(chunks.join("")).toContain("permission-missing");
+  });
+
   it("setup surfaces Screen Recording remediation only when permission is missing", () => {
     expect(renderScreenRecordingSetupNotice([externalState("ok")])).toBeNull();
     expect(renderScreenRecordingSetupNotice([externalState("stale")])).toBeNull();

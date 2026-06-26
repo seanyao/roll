@@ -32,6 +32,13 @@ function mkdir(root: string, rel: string): void {
   mkdirSync(join(root, rel), { recursive: true });
 }
 
+function writeExistingCodebaseFixture(root: string): void {
+  write(root, "package.json", '{"scripts":{"test":"vitest"}}\n');
+  write(root, "src/index.ts", "export const value = 1;\n");
+  write(root, "tests/index.test.ts", "import { expect, it } from 'vitest';\nit('works', () => expect(1).toBe(1));\n");
+  write(root, "README.md", "# Existing App\n\nA service with real source and tests.\n");
+}
+
 function withCapturedOutput<T>(
   cwd: string,
   run: () => T,
@@ -257,6 +264,30 @@ describe("roll init diagnosis router", () => {
     expect(changeset).toContain(".roll/backlog.md");
   });
 
+  it("diagnoses existing codebases without Roll as non-mutating agentic onboarding", () => {
+    const cwd = project();
+    writeExistingCodebaseFixture(cwd);
+
+    const run = runInit(cwd, []);
+
+    expect(run.status).toBe(0);
+    expect(run.stderr).toBe("");
+    expect(run.stdout).toContain("Detected: existing codebase without Roll");
+    expect(run.stdout).toContain("Recommended path: agentic-onboard");
+    expect(run.stdout).toContain("Facts:");
+    expect(run.stdout).toContain("manifests: package.json");
+    expect(run.stdout).toContain("source dirs: src");
+    expect(run.stdout).toContain("test dirs: tests");
+    expect(run.stdout).toContain("Roll markers: none");
+    expect(run.stdout).toContain("Next: $roll-onboard");
+    expect(run.stdout).toContain("$roll-onboard requires an AI agent");
+    expect(run.stdout).toContain("No suitable AI agent detected");
+    expect(run.stdout).toContain("roll agent use <agent>");
+    expect(run.stdout).toContain("No files changed.");
+    expect(existsSync(join(cwd, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(cwd, ".roll"))).toBe(false);
+  });
+
   it("does not mutate empty non-interactive workspaces without --auto", () => {
     const cwd = project();
 
@@ -327,6 +358,31 @@ describe("roll init diagnosis router", () => {
     expect(run.stdout).toContain("roll init attest smoke: prd-only");
     expect(run.stdout).toContain("cleanup: removed");
     expect(existsSync(join(cwd, "missing-roll-home"))).toBe(false);
+  });
+
+  it("runs the hidden existing-codebase diagnosis attest smoke in an isolated workspace and cleans it up", () => {
+    const cwd = project();
+
+    const run = runInit(cwd, ["--attest-smoke", "existing-codebase-diagnose"]);
+
+    expect(run.status).toBe(0);
+    expect(run.stderr).toBe("");
+    expect(run.stdout).toContain("roll init attest smoke: existing-codebase-diagnose");
+    expect(run.stdout).toContain("Fixture tree:");
+    expect(run.stdout).toContain("package.json");
+    expect(run.stdout).toContain("src/index.ts");
+    expect(run.stdout).toContain("tests/index.test.ts");
+    expect(run.stdout).toContain("Detected: existing codebase without Roll");
+    expect(run.stdout).toContain("Recommended path: agentic-onboard");
+    expect(run.stdout).toContain("manifests: package.json");
+    expect(run.stdout).toContain("source dirs: src");
+    expect(run.stdout).toContain("test dirs: tests");
+    expect(run.stdout).toContain("Roll markers: none");
+    expect(run.stdout).toContain("Next: $roll-onboard");
+    expect(run.stdout).toContain("No files changed.");
+    expect(run.stdout).toContain("cleanup: removed");
+    expect(existsSync(join(cwd, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(cwd, ".roll"))).toBe(false);
   });
 
   it("does not route git-only or empty source shells to existing-codebase onboarding", () => {

@@ -179,6 +179,10 @@ export interface ReportInput {
    *  placeholders and do not count as pixels; they are structured facts that
    *  explain why a screenshot could not be produced. */
   captureSkips?: CaptureSkipReportEntry[];
+  /** US-SKILL-030 — planned-vs-delivered evidence delta from the spec's
+   *  Evaluation contract block. Empty string or absent ⇒ section trimmed
+   *  (legacy specs degrade gracefully). */
+  evidenceDeltaSummary?: string;
 }
 
 const BADGE: Record<AcStatus, { icon: string; en: string; zh: string; cls: string }> = {
@@ -371,6 +375,13 @@ function evidenceIndexBlock(
 <tbody>${rows.join("\n")}</tbody></table></section>`;
 }
 
+function evidenceDeltaBlock(delta: string | undefined): string {
+  if (!delta || delta.trim() === "") return "";
+  return `<section class="evidence-delta"><h2>${bi("Planned vs delivered evidence", "计划 vs 实际证据")}</h2>
+<pre>${esc(delta.trim())}</pre>
+</section>`;
+}
+
 function docGapBlock(warning: ReportInput["docGap"]): string {
   if (warning === undefined || warning.visibleFiles.length === 0) return "";
   const shown = warning.visibleFiles.slice(0, 12);
@@ -529,9 +540,10 @@ ${scoreIssues.length > 0 ? `<p><strong>Review-score discrepancy</strong></p><ul>
   // when non-empty (trim, no hollow section).
   const gate = facts !== "" ? `<h2>${bi("Quality gate", "质量门禁")}</h2>\n${facts}` : "";
   const docGap = docGapBlock(input.docGap);
+  const evDelta = evidenceDeltaBlock(input.evidenceDeltaSummary);
   const evIndex = evidenceIndexBlock(items, input.beforeAfter, input.selfCaptures);
   const reviewScore = reviewScoreBlock(input.reviewScores, input.reviewScoreTrend);
-  const closingInner = [gate, docGap, disc, evIndex, reviewScore].filter((s) => s !== "").join("\n");
+  const closingInner = [gate, docGap, disc, evDelta, evIndex, reviewScore].filter((s) => s !== "").join("\n");
   const closing = closingInner !== "" ? `<section class="closing">\n${closingInner}\n</section>` : "";
 
   return `<!doctype html>

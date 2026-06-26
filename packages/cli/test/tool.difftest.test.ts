@@ -53,22 +53,23 @@ describe("US-TOOL-015 roll tool status", () => {
     const stdout = renderToolRows(await collectToolRows(cwd, fakeResolver));
 
     expect(stdout).toMatchInlineSnapshot(`
-      "tool              kind        enabled  readiness    timeout  limit  contract                                       sandbox
-      bash               bash        yes      available    30000    -      args?, command, cwd?, env?                     maxOutputBytes=65536
-      browser.console    browser     yes      degraded     60000    -      url, waitFor?                                  headlessOnly=true,maxOutputBytes=2097152
-      browser.dom-query  browser     yes      degraded     60000    -      selector, url, waitFor?                        headlessOnly=true,maxOutputBytes=2097152
-      browser.screenshot browser     yes      degraded     60000    -      screenshotPath?, url, viewport?, waitFor?      headlessOnly=true,maxOutputBytes=2097152
-      filesystem.read    filesystem  yes      available    30000    -      limit?, offset?, path                          -
-      filesystem.stat    filesystem  yes      available    30000    -      path                                           -
-      filesystem.write   filesystem  yes      available    30000    -      content, path                                  -
-      git.commit         git         yes      available    60000    -      allowEmpty?, cwd, message                      -
-      git.merge          git         yes      available    60000    -      cwd, ffOnly?, noCommit?, ref                   -
-      git.push           git         yes      available    60000    -      branch, cwd, remote?, setUpstream?             -
-      git.status         git         yes      available    60000    -      cwd                                            -
-      github.ci          github      yes      unavailable  60000    -      oneOf                                          -
-      github.pr          github      yes      unavailable  60000    -      oneOf                                          -
-      mcp.call           mcp         yes      available    30000    -      arguments?, serverName, toolName               network=restricted
-      network.fetch      network     yes      available    30000    -      body?, headers?, method?, timeoutMs?, url      network=restricted
+      "tool                kind        enabled  readiness    timeout  limit  contract                                       sandbox
+      bash                bash        yes      available    30000    -      args?, command, cwd?, env?                     maxOutputBytes=65536
+      browser.console     browser     yes      degraded     60000    -      url, waitFor?                                  headlessOnly=true,maxOutputBytes=2097152
+      browser.dom-query   browser     yes      degraded     60000    -      selector, url, waitFor?                        headlessOnly=true,maxOutputBytes=2097152
+      browser.screenshot  browser     yes      degraded     60000    -      screenshotPath?, url, viewport?, waitFor?      headlessOnly=true,maxOutputBytes=2097152
+      filesystem.read     filesystem  yes      available    30000    -      limit?, offset?, path                          -
+      filesystem.stat     filesystem  yes      available    30000    -      path                                           -
+      filesystem.write    filesystem  yes      available    30000    -      content, path                                  -
+      git.commit          git         yes      available    60000    -      allowEmpty?, cwd, message                      -
+      git.merge           git         yes      available    60000    -      cwd, ffOnly?, noCommit?, ref                   -
+      git.push            git         yes      available    60000    -      branch, cwd, remote?, setUpstream?             -
+      git.status          git         yes      available    60000    -      cwd                                            -
+      github.ci           github      yes      unavailable  60000    -      oneOf                                          -
+      github.pr           github      yes      unavailable  60000    -      oneOf                                          -
+      mcp.call            mcp         yes      available    30000    -      arguments?, serverName, toolName               network=restricted
+      network.fetch       network     yes      available    30000    -      body?, headers?, method?, timeoutMs?, url      network=restricted
+      physical.screenshot browser     yes      available    60000    -      screenshotPath?, url, viewport?, waitFor?      headlessOnly=false,maxOutputBytes=2097152
       "
     `);
   });
@@ -97,8 +98,8 @@ describe("US-TOOL-015 roll tool status", () => {
 
     expect(result.status).toBe(0);
     expect(result.stderr).toBe("");
-    expect(result.stdout).toContain("bash               bash        no       available    2500     2      args?, command, cwd?, env?                     allowedPaths=.,maxOutputBytes=65536");
-    expect(result.stdout).toContain("network.fetch      network     yes      available    30000    -      body?, headers?, method?, timeoutMs?, url      network=blocked");
+    expect(result.stdout).toMatch(/bash\s+bash\s+no\s+available\s+2500\s+2\s+args\?, command, cwd\?, env\?\s+allowedPaths=\.,maxOutputBytes=65536/);
+    expect(result.stdout).toMatch(/network\.fetch\s+network\s+yes\s+available\s+30000\s+-\s+body\?, headers\?, method\?, timeoutMs\?, url\s+network=blocked/);
   });
 
   it("prints usage for bare/help and rejects unknown subcommands", async () => {

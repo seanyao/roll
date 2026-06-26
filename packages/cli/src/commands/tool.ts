@@ -56,10 +56,10 @@ export async function collectToolRows(projectRoot: string, requirementResolver: 
 }
 
 export function renderToolRows(rows: readonly ToolRow[]): string {
-  const out = ["tool              kind        enabled  readiness    timeout  limit  contract                                       sandbox"];
+  const out = ["tool                kind        enabled  readiness    timeout  limit  contract                                       sandbox"];
   for (const row of rows) {
     out.push([
-      pad(row.id, 19),
+      pad(row.id, 20),
       pad(row.kind, 12),
       pad(row.enabled ? "yes" : "no", 9),
       pad(row.readiness, 13),

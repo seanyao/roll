@@ -96,12 +96,13 @@ Two rules decide what the validator recognises:
 Visual evidence uses machine-level tools that are declared explicitly and probed
 at startup:
 
-- `macOS screencapture` — optional terminal/GUI screenshot capture. It is built
-  into macOS, but the terminal running `roll` must have Screen Recording
-  permission. Missing permission downgrades terminal/GUI screenshots; web
-  evidence can still use headless Chromium.
-- `Playwright Chromium` — optional headless web capture for `roll attest` and
-  dossier screenshots. Install with `npx playwright install chromium`.
+- `macOS screencapture` — physical Terminal.app / browser-window screenshot
+  capture. It is built into macOS, but Terminal.app, the stable roll capture
+  host, must have Screen Recording permission. Missing permission means attest
+  records an honest screenshot skip; headless, transcript-rendered, and HTML
+  reproduction images do not count as screenshot evidence.
+- `Playwright Chromium` — optional headless browser diagnostics for non-attest
+  tool use. Install with `npx playwright install chromium`.
 
 `roll doctor` always prints the current availability, permission state, impact,
 and repair command for these tools. `roll init` and `roll loop go` run the same

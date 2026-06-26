@@ -1,26 +1,22 @@
 /**
- * US-ATTEST-004 — three-surface screenshot dispatcher (web / iOS / Android).
+ * US-ATTEST-004 — physical screenshot dispatcher.
  *
  * Each surface carries its own SKIP preconditions (design D6) and the contract
  * is deletion-not-placeholder: a skipped capture returns `taken:false` with a
  * reason, and the report drops the whole screenshot block — no placeholder
  * image, no warning text. CLI/TUI stories never reach this module (their
- * visual evidence is the ANSI→HTML text capture, US-ATTEST-002).
+ * visual evidence is a physical Terminal.app screenshot.
  *
- *   web           FIX-291 fallback ladder — NEVER a silent DOM downgrade:
- *                 ROLL_ATTEST_HEADLESS=1 (set by loop / unattended paths) forces
- *                 the headless lane directly — the GUI lane is NEVER entered when
- *                 this flag is set (prevents GUI browser popup + Chrome file://
- *                 blockage in unattended cycles; FIX-314).
- *                 (1) macOS GUI (Aqua session + screen-recording permission, and
- *                     ROLL_ATTEST_HEADLESS≠1) → open the target in a REAL browser
- *                     window, position it to the capture rect (AppleScript bounds),
- *                     `screencapture -x -R` the live window rect, then close the
- *                     window. Zero-install, real pixels, no Playwright dependency.
- *                 (2) no GUI / CI / ROLL_ATTEST_HEADLESS=1 → headless Chromium via
- *                     `npx -y playwright@<pinned> screenshot <url> <out>` (version pinned per FIX-394).
- *                 (3) neither → honest machine-skip (taken:false + reason).
- *                 skip: ROLL_ATTEST_NO_BROWSER=1 · npx/network unavailable
+ *   web           physical browser window only:
+ *                 macOS GUI (Aqua session + Screen Recording permission) opens
+ *                 the target in a REAL browser window, positions it, verifies the
+ *                 browser is frontmost, and `screencapture -x -R` grabs the live
+ *                 window pixels. Headless Chromium, BrowserTool, DOM captures,
+ *                 HTML reproductions, and transcript renderings are NOT valid
+ *                 attest screenshot evidence.
+ *                 skip: ROLL_ATTEST_NO_BROWSER=1 · ROLL_ATTEST_HEADLESS=1 ·
+ *                 ROLL_NO_SCREENCAP=1 · non-macOS · no Aqua session · missing
+ *                 Screen Recording / Automation permission
  *   mobile-ios    `xcrun simctl io booted screenshot <out>`
  *                 skip: non-macOS · no booted simulator
  *   mobile-android`adb exec-out screencap -p > <out>` (sh -c redirect)
@@ -41,12 +37,8 @@ import { existsSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join, resolve } from "node:path";
-import type { ToolInvocation, ToolResult } from "@roll/spec";
 import type { RunOut } from "./evidence.js";
 import { containsSecret } from "./redact.js";
-import { BrowserTool, type BrowserScreenshotInput, type BrowserScreenshotOutput } from "./tools/browser.js";
-import { infraToolExecFile, infraToolFs, invokeInfraTool, redactInfraToolValue } from "./tools/delegation.js";
-import { PLAYWRIGHT_PIN, chromiumInstalled } from "./playwright-pin.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -147,7 +139,7 @@ function markerOutPath(runDir: string, marker: CaptureMarker): string {
 
 function requestFromMarker(marker: CaptureMarker, out: string, region?: string): ScreenshotRequest {
   if (marker.kind === "web") {
-    return { kind: "web", out, ...(marker.target !== undefined ? { url: marker.target } : {}) };
+    return { kind: "web", out, ...(marker.target !== undefined ? { url: marker.target } : {}), ...(region !== undefined ? { region } : {}) };
   }
   if (marker.kind === "terminal") {
     const target = marker.target ?? "";
@@ -522,58 +514,12 @@ export async function captureScreenshot(
     if (req.kind === "web") {
       if ((env["ROLL_ATTEST_NO_BROWSER"] ?? "") === "1") return skip("ROLL_ATTEST_NO_BROWSER=1");
       if (req.url === undefined || req.url === "") return skip("no url");
-      // FIX-314 — ROLL_ATTEST_HEADLESS=1: unattended / loop paths MUST bypass the
-      // GUI lane entirely. Opening a real browser (a) pops the user's Chrome
-      // repeatedly (disruptive) and (b) modern Chrome blocks file:// access
-      // ("无法访问你的文件"), so the capture grabs an error page. Headless Chromium
-      // can load file:// with no GUI and no popups.
-      // FIX-1022: noScreencap (the master "never touch the screen" switch the
-      // loop sets) folds into forceHeadless so the GUI/screencapture branch is
-      // never entered (headless Chromium still produces real evidence).
-      const forceHeadless = (env["ROLL_ATTEST_HEADLESS"] ?? "") === "1" || noScreencap;
-      if (deps.run === undefined) {
-        const result = await captureWebViaBrowserTool(req, forceHeadless || platform !== "darwin");
-        // FIX-379: only short-circuit on a REAL capture. A FAILED BrowserTool
-        // attempt — e.g. `require('playwright')` MODULE_NOT_FOUND from a cycle
-        // worktree (no node_modules) — must fall through to the npx-CLI ladder
-        // below (loads file:// headless, self-heals the browser install), NOT
-        // return a terminal skip. Otherwise the loop never captures a declared
-        // web surface, every visual card empty-shells (FIX-339), and the
-        // correction breaker pauses the loop (observed 2026-06-20).
-        if (result !== null && result.taken === true) return result;
-      }
-      // FIX-291 fallback ladder — NEVER silently downgrade to DOM:
-      //   (1) macOS GUI (Aqua + screen-recording, not forced headless) → real-browser
-      //       screencapture,
-      //   (2) no GUI / CI / ROLL_ATTEST_HEADLESS=1 → headless Chromium via playwright,
-      //   (3) neither → honest machine-skip with a recorded reason.
-      if (!forceHeadless && platform === "darwin" && await hasGuiSession(run)) {
-        const reason = await captureWebViaBrowser(req, run);
-        if (reason !== null) return skip(`GUI browser capture: ${reason}`);
-      } else {
-        let r = await run("npx", ["-y", PLAYWRIGHT_PIN, "screenshot", req.url, req.out]);
-        // FIX-314: the pinned headless browser may not be installed yet
-        // ("Executable doesn't exist … run: npx playwright install").
-        // Self-heal: install the headless shell once and retry, so an
-        // unattended loop captures a REAL screenshot instead of an honest skip.
-        // FIX-394: pinned version keeps the install and screenshot aligned;
-        // the cache hit is deterministic across cycles.
-        if (r.code !== 0 && /Executable doesn't exist|playwright install/i.test(`${r.stderr}\n${r.stdout}`)) {
-          await run("npx", ["-y", PLAYWRIGHT_PIN, "install", "chromium"]);
-          r = await run("npx", ["-y", PLAYWRIGHT_PIN, "screenshot", req.url, req.out]);
-        }
-        if (r.code !== 0) {
-          const why = forceHeadless ? "ROLL_ATTEST_HEADLESS=1 (headless-only mode)" : platform === "darwin" ? "no GUI session" : "non-macOS host";
-          // FIX-394: distinguish the failure cause so the user / log can act.
-          const offlineHint = /ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ETIMEDOUT|network/i.test(`${r.stderr}\n${r.stdout}`)
-            ? " (offline or network error — chromium download may have failed)"
-            : "";
-          // Surface the actual failure (last stderr/stdout line) — the old skip
-          // hid WHY (e.g. the missing-browser hint), masking the real cause.
-          const detail = (r.stderr || r.stdout || "").trim().split("\n").pop()?.slice(0, 160) ?? "";
-          return skip(`headless Chromium unavailable${offlineHint} (${why}${detail ? `: ${detail}` : ""})`);
-        }
-      }
+      if (noScreencap) return skip("ROLL_NO_SCREENCAP=1 (physical screenshots disabled)");
+      if ((env["ROLL_ATTEST_HEADLESS"] ?? "") === "1") return skip("ROLL_ATTEST_HEADLESS=1 disables physical screenshot evidence");
+      if (platform !== "darwin") return skip("physical browser screenshots require macOS");
+      if (!(await hasGuiSession(run))) return skip("no GUI session");
+      const reason = await captureWebViaBrowser(req, run);
+      if (reason !== null) return skip(`GUI browser capture: ${reason}`);
     } else if (req.kind === "mobile-ios") {
       if (platform !== "darwin") return skip("not macOS");
       const booted = await run("xcrun", ["simctl", "list", "devices", "booted"]);
@@ -674,33 +620,6 @@ export async function captureScreenshot(
   return fileNonEmpty(req.out)
     ? { kind: req.kind, out: req.out, taken: true }
     : skip("empty capture (tool exit code lied)");
-}
-
-async function captureWebViaBrowserTool(req: ScreenshotRequest, headlessOnly: boolean): Promise<ScreenshotResult | null> {
-  if (req.url === undefined || req.url === "") return null;
-  const tool = new BrowserTool("browser.screenshot");
-  const result = await invokeInfraTool<BrowserScreenshotInput, BrowserScreenshotOutput>({
-    declaration: tool.declaration,
-    input: { url: req.url, screenshotPath: req.out },
-    policy: { sandbox: { headlessOnly, maxOutputBytes: 2 * 1024 * 1024 } },
-    run: (invocation: ToolInvocation<BrowserScreenshotInput>): Promise<ToolResult<BrowserScreenshotOutput>> => tool.execute(invocation, {
-      fs: infraToolFs,
-      now: () => Date.now(),
-      execFile: infraToolExecFile,
-      redact: redactInfraToolValue,
-    }) as Promise<ToolResult<BrowserScreenshotOutput>>,
-  });
-  if (!result.ok) {
-    return {
-      kind: req.kind,
-      out: req.out,
-      taken: false,
-      skipped: `browser.screenshot failed: ${result.error.message}`,
-    };
-  }
-  return fileNonEmpty(req.out)
-    ? { kind: req.kind, out: req.out, taken: true }
-    : { kind: req.kind, out: req.out, taken: false, skipped: "empty capture (browser.screenshot output missing)" };
 }
 
 /**

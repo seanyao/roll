@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import type { ExecResult, ToolDeclaration, ToolDeps, ToolErrorCode, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
 import { PLAYWRIGHT_PIN } from "../playwright-pin.js";
+import { captureScreenshot } from "../screenshot.js";
 import {
   browserConsoleInputSchema,
   browserConsoleOutputSchema,
@@ -10,7 +11,7 @@ import {
   browserScreenshotOutputSchema,
 } from "./schema-contracts.js";
 
-export type BrowserToolId = "browser.screenshot" | "browser.console" | "browser.dom-query";
+export type BrowserToolId = "browser.screenshot" | "browser.console" | "browser.dom-query" | "physical.screenshot";
 
 export interface BrowserViewport {
   width: number;
@@ -77,6 +78,7 @@ const TOOL_TITLES: Record<BrowserToolId, string> = {
   "browser.screenshot": "Browser Screenshot",
   "browser.console": "Browser Console",
   "browser.dom-query": "Browser DOM Query",
+  "physical.screenshot": "Physical Screenshot",
 };
 
 export class BrowserTool {
@@ -90,16 +92,20 @@ export class BrowserTool {
       id: id as ToolDeclaration["id"],
       kind: "browser",
       title: TOOL_TITLES[id],
-      description: "Open URLs through the governed browser adapter.",
+      description: id === "physical.screenshot"
+        ? "Capture only real physical browser-window pixels through macOS screencapture."
+        : "Open URLs through the governed browser adapter.",
       defaults: {
         enabled: true,
         timeoutMs: 60_000,
         sandbox: {
-          headlessOnly: true,
+          headlessOnly: id !== "physical.screenshot",
           maxOutputBytes: 2 * 1024 * 1024,
         },
       },
-      requirements: [{ kind: "executable", name: "playwright-chromium", optional: true }],
+      requirements: id === "physical.screenshot"
+        ? [{ kind: "executable", name: "screencapture", optional: false }]
+        : [{ kind: "executable", name: "playwright-chromium", optional: true }],
       inputSchema: browserInputSchema(id),
       outputSchema: browserOutputSchema(id),
     };
@@ -127,7 +133,7 @@ export class BrowserTool {
       return fail(invocation, startedAt, deps.now(), "sandbox_denied", `origin is outside allowedOrigins: ${origin}`, false);
     }
 
-    if (this.id === "browser.screenshot") {
+    if (this.id === "browser.screenshot" || this.id === "physical.screenshot") {
       const result = await this.executeScreenshot(invocation as ToolInvocation<BrowserScreenshotInput>, deps, startedAt);
       return result as ToolResult<BrowserOutput>;
     }
@@ -146,6 +152,7 @@ export class BrowserTool {
   ): Promise<ToolResult<BrowserScreenshotOutput>> {
     const input = invocation.input;
     const screenshotPath = input.screenshotPath ?? join(process.cwd(), ".roll", "tool-dumps", `${invocation.invocationId}.png`);
+    if (this.id === "physical.screenshot") return this.executePhysicalScreenshot(invocation, deps, screenshotPath, startedAt);
     if (shouldUseHeadless(invocation)) return this.executeHeadlessScreenshot(invocation, deps, screenshotPath, startedAt);
 
     const aqua = await hasAquaSession(deps, invocation.policy.timeoutMs);
@@ -211,6 +218,41 @@ export class BrowserTool {
     };
   }
 
+  private async executePhysicalScreenshot(
+    invocation: ToolInvocation<BrowserScreenshotInput>,
+    deps: ToolDeps,
+    screenshotPath: string,
+    startedAt: number,
+  ): Promise<ToolResult<BrowserScreenshotOutput>> {
+    const input = invocation.input;
+    const shot = await captureScreenshot(
+      { kind: "web", url: input.url, out: screenshotPath },
+      {
+        env: process.env,
+        platform: toolPlatform(),
+        run: async (command, args) => {
+          const result = await deps.execFile(command, args, {
+            timeoutMs: invocation.policy.timeoutMs,
+            maxOutputBytes: invocation.policy.sandbox?.maxOutputBytes,
+          });
+          return {
+            code: result.timedOut ? 124 : result.exitCode,
+            stdout: deps.redact(result.stdout),
+            stderr: deps.redact(result.stderr),
+          };
+        },
+      },
+    );
+    if (!shot.taken) {
+      return fail(invocation, startedAt, deps.now(), "adapter_error", `physical screenshot unavailable: ${shot.skipped ?? "unknown"}`, true);
+    }
+    return {
+      ok: true,
+      output: { screenshotPath, finalUrl: input.url, statusCode: null },
+      meta: meta(invocation, startedAt, deps.now()),
+    };
+  }
+
   private async executeHeadlessJson<I extends BrowserInput, O extends BrowserOutput>(
     invocation: ToolInvocation<I>,
     deps: ToolDeps,
@@ -251,12 +293,14 @@ export class BrowserTool {
 
 function browserInputSchema(id: BrowserToolId): ToolDeclaration["inputSchema"] {
   if (id === "browser.screenshot") return browserScreenshotInputSchema;
+  if (id === "physical.screenshot") return browserScreenshotInputSchema;
   if (id === "browser.console") return browserConsoleInputSchema;
   return browserDomQueryInputSchema;
 }
 
 function browserOutputSchema(id: BrowserToolId): ToolDeclaration["outputSchema"] {
   if (id === "browser.screenshot") return browserScreenshotOutputSchema;
+  if (id === "physical.screenshot") return browserScreenshotOutputSchema;
   if (id === "browser.console") return browserConsoleOutputSchema;
   return browserDomQueryOutputSchema;
 }
@@ -267,11 +311,35 @@ export function browserTools(): BrowserTool[] {
     new BrowserTool("browser.screenshot", state),
     new BrowserTool("browser.console", state),
     new BrowserTool("browser.dom-query", state),
+    new BrowserTool("physical.screenshot", state),
   ];
 }
 
 function shouldUseHeadless(invocation: ToolInvocation<BrowserInput>): boolean {
   return invocation.policy.sandbox?.headlessOnly === true || process.env.CI === "true" || process.env.CI === "1";
+}
+
+function toolPlatform(): NodeJS.Platform {
+  return externalToolPlatform(process.env["_ROLL_EXTERNAL_TOOLS_PLATFORM"]) ?? process.platform;
+}
+
+function externalToolPlatform(raw: string | undefined): NodeJS.Platform | undefined {
+  if (
+    raw === "aix" ||
+    raw === "android" ||
+    raw === "darwin" ||
+    raw === "freebsd" ||
+    raw === "haiku" ||
+    raw === "linux" ||
+    raw === "openbsd" ||
+    raw === "sunos" ||
+    raw === "win32" ||
+    raw === "cygwin" ||
+    raw === "netbsd"
+  ) {
+    return raw;
+  }
+  return undefined;
 }
 
 function headlessArgs(

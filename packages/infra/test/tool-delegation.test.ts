@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -90,7 +90,7 @@ exit 2
     expect(events(eventsPath).map((event) => event.invocation?.toolId ?? event.toolId)).toEqual(["github.pr", "github.pr"]);
   });
 
-  it("delegates default web screenshots through browser.screenshot and appends events.ndjson entries", async () => {
+  it("default web screenshots require physical capture and do not delegate to browser.screenshot", async () => {
     const dir = tmp("shot");
     const eventsPath = setEventsPath(dir);
     const out = join(dir, "web.png");
@@ -106,8 +106,9 @@ node -e 'const fs=require("fs"); const input=JSON.parse(process.argv[1]); fs.wri
 
     const result = await captureScreenshot({ kind: "web", url: "https://example.com", out }, { env: {}, platform: "linux" });
 
-    expect(result).toMatchObject({ kind: "web", out, taken: true });
-    expect(events(eventsPath).map((event) => event.invocation?.toolId ?? event.toolId)).toEqual(["browser.screenshot", "browser.screenshot"]);
+    expect(result).toMatchObject({ kind: "web", out, taken: false });
+    expect(result.skipped).toContain("physical browser screenshots require macOS");
+    expect(existsSync(eventsPath)).toBe(false);
   });
 
   it("rejects invalid input before the delegated adapter runs and still appends a result event", async () => {

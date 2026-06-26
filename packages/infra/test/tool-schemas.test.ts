@@ -7,6 +7,7 @@ const VALID_INPUTS: Record<string, unknown> = {
   "browser.console": { url: "http://127.0.0.1:3000" },
   "browser.dom-query": { url: "http://127.0.0.1:3000", selector: "body" },
   "browser.screenshot": { url: "http://127.0.0.1:3000", viewport: { width: 1280, height: 720 } },
+  "physical.screenshot": { url: "http://127.0.0.1:3000", viewport: { width: 1280, height: 720 } },
   "filesystem.read": { path: "README.md", offset: 0, limit: 120 },
   "filesystem.stat": { path: "README.md" },
   "filesystem.write": { path: ".roll/tmp.txt", content: "ok" },

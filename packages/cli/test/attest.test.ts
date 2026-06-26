@@ -959,12 +959,13 @@ describe("FIX-305 — UI/dossier web self-capture lane (real screenshot, not a s
     return proj;
   }
 
-  // A headless host (no GUI) whose npx playwright lands a real PNG at the out path.
+  // A headless host (no GUI) where npx/playwright would be available, but attest
+  // screenshot evidence must still skip because only physical windows count.
   function headlessShot(): { run: ShotRun; calls: string[] } {
     const calls: string[] = [];
     const run: ShotRun = (cmd, argv) => {
       calls.push(`${cmd} ${argv.join(" ")}`);
-      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Background\n", stderr: "" }); // not Aqua → headless rung
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Background\n", stderr: "" }); // not Aqua → skip
       if (cmd === "npx") {
         writeFileSync(String(argv[argv.length - 1]), "PNGDATA"); // out = last argv
         return Promise.resolve({ code: 0, stdout: "", stderr: "" });
@@ -974,7 +975,7 @@ describe("FIX-305 — UI/dossier web self-capture lane (real screenshot, not a s
     return { run, calls };
   }
 
-  it("AC: --capture-web drives the FIX-291 headless ladder and lands a REAL screenshot", async () => {
+  it("AC: --capture-web on a non-physical host records an honest skip, no headless screenshot", async () => {
     const proj = webProject();
     const { run: shot, calls } = headlessShot();
     await silenced(() =>
@@ -983,21 +984,24 @@ describe("FIX-305 — UI/dossier web self-capture lane (real screenshot, not a s
           now: () => T0,
           run: quietRun,
           ghProbe: () => Promise.resolve(false),
-          capture: { run: shot, platform: "linux", env: {} }, // no GUI → headless Chromium
+          capture: { run: shot, platform: "linux", env: {} },
         }),
       ),
     );
     const runDir = join(proj, ".roll", "features", "demo", "FIX-WEB", "2026-06-06T01-02-03");
-    // a real PNG landed — not a machine-skip, not an empty screenshots dir
-    expect(existsSync(join(runDir, "screenshots", "web.png"))).toBe(true);
-    // the headless rung was invoked with the EXACT url to shoot
-    expect(calls.join("\n")).toContain("playwright@1.52.0 screenshot https://app.test/casting");
+    expect(existsSync(join(runDir, "screenshots", "web.png"))).toBe(false);
+    expect(calls.join("\n")).not.toContain("playwright");
     const html = readFileSync(join(runDir, "FIX-WEB-report.html"), "utf8");
-    expect(html).toContain('<img src="screenshots/web.png"');
+    expect(html).not.toContain('<img src="screenshots/web.png"');
     const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
-      captures?: Array<{ kind?: string; taken?: boolean }>;
+      captures?: Array<{ kind?: string; taken?: boolean; skipped?: string }>;
     };
-    expect(evidence.captures).toContainEqual({ kind: "web", out: join(runDir, "screenshots", "web.png"), taken: true });
+    expect(evidence.captures).toContainEqual({
+      kind: "web",
+      out: join(runDir, "screenshots", "web.png"),
+      taken: false,
+      skipped: "physical browser screenshots require macOS",
+    });
   });
 
   it("ROLL_ATTEST_NO_BROWSER=1 → honest skip recorded, no placeholder image", async () => {

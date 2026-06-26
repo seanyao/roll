@@ -58,12 +58,13 @@ function fake(byCmd: Record<string, { code: number; stdout?: string; writes?: bo
   return { run, calls };
 }
 
-describe("web (headless Chromium lane — no GUI / CI)", () => {
-  it("captures via npx playwright; taken only when the file lands non-empty", async () => {
+describe("web physical screenshot policy", () => {
+  it("non-macOS skips instead of using headless Chromium", async () => {
     const { run, calls } = fake({ npx: { code: 0, writes: true } });
     const r = await captureScreenshot({ kind: "web", url: "https://x", out: outPath() }, { run, env: {}, platform: "linux" });
-    expect(r.taken).toBe(true);
-    expect(calls[0]).toContain("playwright@1.52.0 screenshot https://x");
+    expect(r.taken).toBe(false);
+    expect(r.skipped).toContain("physical browser screenshots require macOS");
+    expect(calls).toHaveLength(0);
   });
 
   it("ROLL_ATTEST_NO_BROWSER=1 skips before any spawn", async () => {
@@ -76,25 +77,26 @@ describe("web (headless Chromium lane — no GUI / CI)", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("npx unavailable → honest skip with recorded reason, no throw, no silent DOM", async () => {
+  it("no GUI session skips instead of using headless Chromium", async () => {
     const { run } = fake({ npx: { code: 127 } });
-    const r = await captureScreenshot({ kind: "web", url: "https://x", out: outPath() }, { run, env: {}, platform: "linux" });
+    const r = await captureScreenshot({ kind: "web", url: "https://x", out: outPath() }, { run, env: {}, platform: "darwin" });
     expect(r.taken).toBe(false);
-    expect(r.skipped).toContain("headless Chromium unavailable");
+    expect(r.skipped).toContain("no GUI session");
   });
 
-  it("zero-byte capture is NOT taken (exit codes lie)", async () => {
+  it("ROLL_ATTEST_HEADLESS=1 skips physical screenshot evidence", async () => {
     const { run } = fake({ npx: { code: 0 } }); // exits 0 but writes nothing
-    const r = await captureScreenshot({ kind: "web", url: "https://x", out: outPath() }, { run, env: {}, platform: "linux" });
+    const r = await captureScreenshot(
+      { kind: "web", url: "https://x", out: outPath() },
+      { run, env: { ROLL_ATTEST_HEADLESS: "1" }, platform: "darwin" },
+    );
     expect(r.taken).toBe(false);
-    expect(r.skipped).toContain("empty capture");
+    expect(r.skipped).toContain("ROLL_ATTEST_HEADLESS=1");
   });
 });
 
-describe("FIX-314 ROLL_ATTEST_HEADLESS=1 — loop / unattended path forces headless, never GUI browser", () => {
-  it("macOS GUI host with ROLL_ATTEST_HEADLESS=1 → headless lane only, NO browser window opened", async () => {
-    // Simulate macOS Aqua session (launchctl → "Aqua") but ROLL_ATTEST_HEADLESS=1:
-    // the GUI lane must be completely bypassed — no osascript Chrome window, no screencapture.
+describe("ROLL_ATTEST_HEADLESS and ROLL_NO_SCREENCAP never downgrade to headless evidence", () => {
+  it("macOS GUI host with ROLL_ATTEST_HEADLESS=1 skips without opening a browser or taking a shot", async () => {
     const calls: string[] = [];
     const run: ShotRun = (cmd, argv) => {
       calls.push(`${cmd} ${argv.join(" ")}`);
@@ -109,30 +111,27 @@ describe("FIX-314 ROLL_ATTEST_HEADLESS=1 — loop / unattended path forces headl
       { kind: "web", url: "file:///tmp/dossier/index.html", out: outPath() },
       { run, env: { ROLL_ATTEST_HEADLESS: "1" }, platform: "darwin" },
     );
-    expect(r.taken).toBe(true);
+    expect(r.taken).toBe(false);
+    expect(r.skipped).toContain("ROLL_ATTEST_HEADLESS=1");
     const joined = calls.join("\n");
-    // headless playwright was used
-    expect(joined).toContain("playwright@1.52.0 screenshot file:///tmp/dossier/index.html");
-    // GUI probed must NOT have happened (launchctl never called; the flag short-circuits before it)
+    expect(joined).not.toContain("playwright");
     expect(calls.some((c) => c.startsWith("launchctl "))).toBe(false);
-    // No real browser window was opened
     expect(calls.some((c) => c.includes("tell application") && c.includes("Chrome"))).toBe(false);
-    // No screencapture
     expect(calls.some((c) => c.startsWith("screencapture "))).toBe(false);
   });
 
-  it("ROLL_ATTEST_HEADLESS=1 on non-macOS also hits headless lane", async () => {
+  it("ROLL_ATTEST_HEADLESS=1 on non-macOS skips before spawning tools", async () => {
     const { run, calls } = fake({ npx: { code: 0, writes: true } });
     const r = await captureScreenshot(
       { kind: "web", url: "file:///tmp/dossier/index.html", out: outPath() },
       { run, env: { ROLL_ATTEST_HEADLESS: "1" }, platform: "linux" },
     );
-    expect(r.taken).toBe(true);
-    expect(calls.some((c) => c.includes("playwright@1.52.0 screenshot"))).toBe(true);
-    expect(calls.some((c) => c.startsWith("launchctl "))).toBe(false);
+    expect(r.taken).toBe(false);
+    expect(r.skipped).toContain("ROLL_ATTEST_HEADLESS=1");
+    expect(calls).toHaveLength(0);
   });
 
-  it("FIX-1022: ROLL_NO_SCREENCAP=1 also forces the web GUI lane headless on a macOS GUI host (no browser, no screencapture)", async () => {
+  it("ROLL_NO_SCREENCAP=1 skips instead of using headless Chromium", async () => {
     const calls: string[] = [];
     const run: ShotRun = (cmd, argv) => {
       calls.push(`${cmd} ${argv.join(" ")}`);
@@ -147,21 +146,9 @@ describe("FIX-314 ROLL_ATTEST_HEADLESS=1 — loop / unattended path forces headl
       { kind: "web", url: "file:///tmp/dossier/index.html", out: outPath() },
       { run, env: { ROLL_NO_SCREENCAP: "1" }, platform: "darwin" },
     );
-    expect(r.taken).toBe(true); // headless Chromium still produces real evidence
-    expect(calls.some((c) => c.includes("playwright@1.52.0 screenshot"))).toBe(true);
-    expect(calls.some((c) => c.startsWith("launchctl "))).toBe(false); // GUI probe skipped
-    expect(calls.some((c) => c.startsWith("screencapture "))).toBe(false); // no screen capture
-  });
-
-  it("ROLL_ATTEST_HEADLESS=1 + npx fails → honest skip with ROLL_ATTEST_HEADLESS=1 reason", async () => {
-    const { run } = fake({ npx: { code: 1 } });
-    const r = await captureScreenshot(
-      { kind: "web", url: "file:///tmp/dossier/index.html", out: outPath() },
-      { run, env: { ROLL_ATTEST_HEADLESS: "1" }, platform: "darwin" },
-    );
     expect(r.taken).toBe(false);
-    expect(r.skipped).toContain("ROLL_ATTEST_HEADLESS=1");
-    expect(r.skipped).toContain("headless-only mode");
+    expect(r.skipped).toContain("ROLL_NO_SCREENCAP=1");
+    expect(calls).toHaveLength(0);
   });
 });
 
@@ -200,7 +187,7 @@ describe("FIX-291 web fallback ladder — never a silent DOM downgrade", () => {
     expect(calls.some((c) => c.startsWith("npx "))).toBe(false); // tier-1 never touches Chromium/Playwright
   });
 
-  it("AC1 tier-2: no GUI session on macOS → falls through to headless Chromium", async () => {
+  it("no GUI session on macOS → honest skip, no headless fallback", async () => {
     const { run, calls } = fake({
       launchctl: { code: 0, stdout: "Background\n" }, // not Aqua
       npx: { code: 0, writes: true },
@@ -209,10 +196,11 @@ describe("FIX-291 web fallback ladder — never a silent DOM downgrade", () => {
       { kind: "web", url: "https://x", out: outPath() },
       { run, env: {}, platform: "darwin" },
     );
-    expect(r.taken).toBe(true);
+    expect(r.taken).toBe(false);
+    expect(r.skipped).toContain("no GUI session");
     const joined = calls.join("\n");
     expect(joined).toContain("launchctl managername"); // GUI probed first
-    expect(joined).toContain("playwright@1.52.0 screenshot https://x"); // then headless
+    expect(joined).not.toContain("playwright"); // no headless fallback
     expect(calls.some((c) => c.startsWith("osascript ") && c.includes("Chrome"))).toBe(false); // no browser window
   });
 
@@ -241,15 +229,14 @@ describe("FIX-291 web fallback ladder — never a silent DOM downgrade", () => {
     expect(r.skipped).toContain("permission");
   });
 
-  it("AC3 tier-2 headless absent on a CI/linux host records WHY, no silent substitute", async () => {
+  it("CI/linux host records physical-capture requirement, no silent substitute", async () => {
     const { run } = fake({ npx: { code: 127 } });
     const r = await captureScreenshot(
       { kind: "web", url: "https://x", out: outPath() },
       { run, env: {}, platform: "linux" },
     );
     expect(r.taken).toBe(false);
-    expect(r.skipped).toContain("headless Chromium unavailable");
-    expect(r.skipped).toContain("non-macOS host");
+    expect(r.skipped).toContain("physical browser screenshots require macOS");
   });
 
   it("AC2 GUI lane does NOT depend on playwright/npx — none is ever spawned", async () => {
@@ -812,7 +799,8 @@ describe("captureAll", () => {
       { kind: "web", url: "https://x", out: outPath() },
     ];
     const rs = await captureAll(reqs, { run, env: {}, platform: "linux" });
-    expect(rs.map((r) => r.taken)).toEqual([false, true]);
+    expect(rs.map((r) => r.taken)).toEqual([false, false]);
+    expect(rs[1]?.skipped).toContain("physical browser screenshots require macOS");
   });
 });
 
@@ -834,7 +822,7 @@ describe("US-EVID-003 capture markers", () => {
     expect(parseCaptureMarker("::roll-capture before web ../bad https://x")).toBeNull();
   });
 
-  it("captures before/after web shots into the run frame screenshots dir", async () => {
+  it("web markers on non-physical hosts record skips without headless fallback", async () => {
     const runDir = realpathSync(mkdtempSync(join(tmpdir(), "roll-marker-run-")));
     dirs.push(runDir);
     const { run, calls } = fake({ npx: { code: 0, writes: true } });
@@ -848,11 +836,13 @@ describe("US-EVID-003 capture markers", () => {
       { runDir, deps: { run, env: {}, platform: "linux" } },
     );
 
-    expect(before.taken).toBe(true);
-    expect(after.taken).toBe(true);
-    expect(existsSync(join(runDir, "screenshots", "before-home.png"))).toBe(true);
-    expect(existsSync(join(runDir, "screenshots", "after-home.png"))).toBe(true);
-    expect(calls.join("\n")).toContain("playwright@1.52.0 screenshot https://app.test");
+    expect(before.taken).toBe(false);
+    expect(after.taken).toBe(false);
+    expect(before.skipped).toContain("physical browser screenshots require macOS");
+    expect(after.skipped).toContain("physical browser screenshots require macOS");
+    expect(existsSync(join(runDir, "screenshots", "before-home.png"))).toBe(false);
+    expect(existsSync(join(runDir, "screenshots", "after-home.png"))).toBe(false);
+    expect(calls.join("\n")).not.toContain("playwright");
   });
 
   it("captures terminal gate markers through tmux into the same screenshots dir", async () => {

@@ -67,7 +67,8 @@ exports[`diff-test: roll update == bash oracle > npm happy path → upgrade + se
   3. ✓  Install skills to ~/.claude
   4. ✓  Initialize peer-review state directory
   5. ↷  Configure git hooks path
-  6. ↷  Ensure tmux is installed (already present)
+  6. ↷  Check physical screenshot permissions (Terminal.app)
+  7. ↷  Ensure tmux is installed (already present)
 
 ────────────────────────────────────────────────────────────────────────────────
   Setup complete (4 items refreshed)  —  run roll init inside a project
@@ -107,7 +108,8 @@ exports[`diff-test: roll update == bash oracle > npm happy path → upgrade + se
   3. ✓  Install skills to ~/.claude
   4. ✓  Initialize peer-review state directory
   5. ↷  Configure git hooks path
-  6. ↷  Ensure tmux is installed (already present)
+  6. ↷  Check physical screenshot permissions (Terminal.app)
+  7. ↷  Ensure tmux is installed (already present)
 
 ────────────────────────────────────────────────────────────────────────────────
   Setup complete (4 items refreshed)  —  run roll init inside a project

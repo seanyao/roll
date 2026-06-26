@@ -1,4 +1,7 @@
 import type { ExecOpts, ExecResult, MinimalFs, ToolDeps, ToolInvocation, ToolPolicy } from "@roll/spec";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   BrowserTool,
@@ -57,11 +60,12 @@ function fakeDeps(handler: (command: string, args: readonly string[], opts?: Exe
 }
 
 describe("US-TOOL-005 BrowserTool", () => {
-  it("exposes three browser tool declarations from one adapter family", () => {
+  it("exposes browser and physical screenshot tool declarations from one adapter family", () => {
     expect(browserTools().map((tool) => tool.declaration.id)).toEqual([
       "browser.screenshot",
       "browser.console",
       "browser.dom-query",
+      "physical.screenshot",
     ]);
     expect(browserTools().every((tool) => tool.declaration.kind === "browser")).toBe(true);
   });
@@ -176,6 +180,42 @@ describe("US-TOOL-005 BrowserTool", () => {
     expect(deps.files.get("/tmp/gui.png")).toBe("PNGDATA");
     if (originalCi === undefined) delete process.env.CI;
     else process.env.CI = originalCi;
+  });
+
+  it("physical.screenshot always uses the GUI lane and never falls back to headless", async () => {
+    const originalPlatform = process.env["_ROLL_EXTERNAL_TOOLS_PLATFORM"];
+    process.env["_ROLL_EXTERNAL_TOOLS_PLATFORM"] = "darwin";
+    const dir = mkdtempSync(join(tmpdir(), "roll-physical-tool-"));
+    const screenshotPath = join(dir, "physical.png");
+    const deps = fakeDeps((command, args) => {
+      const script = String(args[1] ?? "");
+      if (command === "launchctl") return { exitCode: 0, stdout: "Aqua\n", stderr: "", timedOut: false };
+      if (command === "osascript" && script.includes("bounds of front window")) return { exitCode: 0, stdout: "10, 20, 810, 620\n", stderr: "", timedOut: false };
+      if (command === "osascript") return { exitCode: 0, stdout: "", stderr: "", timedOut: false };
+      if (command === "sh" && script.includes("lsappinfo")) return { exitCode: 0, stdout: '"LSDisplayName"="Google Chrome"\n', stderr: "", timedOut: false };
+      if (command === "screencapture") {
+        writeFileSync(String(args[args.length - 1]), "PNGDATA");
+        return { exitCode: 0, stdout: "", stderr: "", timedOut: false };
+      }
+      if (command === "npx") return { exitCode: 0, stdout: JSON.stringify({ finalUrl: "https://example.com/app", statusCode: 200, png: "HEADLESS" }), stderr: "", timedOut: false };
+      return { exitCode: 1, stdout: "", stderr: "unexpected", timedOut: false };
+    });
+
+    try {
+      const result = await new BrowserTool("physical.screenshot").execute(
+        invocation("physical.screenshot", { url: "https://example.com/app", screenshotPath }, { headlessOnly: true }),
+        deps,
+      );
+
+      expect(result.ok).toBe(true);
+      expect(deps.calls.map((call) => call.command)).toEqual(["launchctl", "osascript", "osascript", "sh", "screencapture", "osascript"]);
+      expect(deps.calls.some((call) => call.command === "npx")).toBe(false);
+      expect(deps.calls.find((call) => call.command === "screencapture")?.args.join(" ")).toContain("-R 10,20,800,600");
+    } finally {
+      if (originalPlatform === undefined) delete process.env["_ROLL_EXTERNAL_TOOLS_PLATFORM"];
+      else process.env["_ROLL_EXTERNAL_TOOLS_PLATFORM"] = originalPlatform;
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("uses the headless lane when Aqua is unavailable and honestly skips if headless is also unavailable", async () => {

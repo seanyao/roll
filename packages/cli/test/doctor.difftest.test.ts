@@ -267,19 +267,21 @@ describe("frozen: roll doctor", () => {
           fix: brew install gh
         ✓ mcp.call (mcp) — available
         ✓ network.fetch (network) — available
+        − physical.screenshot (browser) — unavailable
+          macOS-only requirement; not applicable on this host.
 
       External requirements
       外部依赖
 
         ? macOS screencapture — stale
-          use: Terminal and GUI screenshot evidence on macOS.
+          use: Physical Terminal.app and browser-window screenshot evidence on macOS.
           macOS-only requirement; not applicable on this host.
-          impact: Terminal/GUI screenshots are skipped; web evidence may fall back to headless Chromium.
+          impact: Attest screenshots are skipped; headless, transcript-rendered, and HTML-reproduction images do not count as screenshot evidence.
         − Playwright Chromium — missing
-          use: Headless web screenshots for attest and dossier visual evidence.
+          use: Headless browser screenshots for non-attest diagnostics and tool use.
           npx is not on PATH.
           fix: npm install -g npm
-          impact: Web screenshot evidence is skipped when GUI capture is unavailable.
+          impact: Headless browser diagnostic screenshots are unavailable; attest screenshot evidence still requires physical capture.
       ",
       }
     `);
@@ -366,19 +368,21 @@ describe("frozen: roll doctor", () => {
           fix: brew install gh
         ✓ mcp.call (mcp) — available
         ✓ network.fetch (network) — available
+        − physical.screenshot (browser) — unavailable
+          macOS-only requirement; not applicable on this host.
 
       External requirements
       外部依赖
 
         ? macOS screencapture — stale
-          use: Terminal and GUI screenshot evidence on macOS.
+          use: Physical Terminal.app and browser-window screenshot evidence on macOS.
           macOS-only requirement; not applicable on this host.
-          impact: Terminal/GUI screenshots are skipped; web evidence may fall back to headless Chromium.
+          impact: Attest screenshots are skipped; headless, transcript-rendered, and HTML-reproduction images do not count as screenshot evidence.
         − Playwright Chromium — missing
-          use: Headless web screenshots for attest and dossier visual evidence.
+          use: Headless browser screenshots for non-attest diagnostics and tool use.
           npx is not on PATH.
           fix: npm install -g npm
-          impact: Web screenshot evidence is skipped when GUI capture is unavailable.
+          impact: Headless browser diagnostic screenshots are unavailable; attest screenshot evidence still requires physical capture.
       ",
       }
     `);
@@ -428,19 +432,21 @@ describe("frozen: roll doctor", () => {
           fix: brew install gh
         ✓ mcp.call (mcp) — available
         ✓ network.fetch (network) — available
+        − physical.screenshot (browser) — unavailable
+          macOS-only requirement; not applicable on this host.
 
       External requirements
       外部依赖
 
         ? macOS screencapture — stale
-          use: Terminal and GUI screenshot evidence on macOS.
+          use: Physical Terminal.app and browser-window screenshot evidence on macOS.
           macOS-only requirement; not applicable on this host.
-          impact: Terminal/GUI screenshots are skipped; web evidence may fall back to headless Chromium.
+          impact: Attest screenshots are skipped; headless, transcript-rendered, and HTML-reproduction images do not count as screenshot evidence.
         − Playwright Chromium — missing
-          use: Headless web screenshots for attest and dossier visual evidence.
+          use: Headless browser screenshots for non-attest diagnostics and tool use.
           npx is not on PATH.
           fix: npm install -g npm
-          impact: Web screenshot evidence is skipped when GUI capture is unavailable.
+          impact: Headless browser diagnostic screenshots are unavailable; attest screenshot evidence still requires physical capture.
       ",
       }
     `);
@@ -489,19 +495,21 @@ describe("frozen: roll doctor", () => {
           fix: brew install gh
         ✓ mcp.call (mcp) — available
         ✓ network.fetch (network) — available
+        − physical.screenshot (browser) — unavailable
+          macOS-only requirement; not applicable on this host.
 
       External requirements
       外部依赖
 
         ? macOS screencapture — stale
-          use: Terminal and GUI screenshot evidence on macOS.
+          use: Physical Terminal.app and browser-window screenshot evidence on macOS.
           macOS-only requirement; not applicable on this host.
-          impact: Terminal/GUI screenshots are skipped; web evidence may fall back to headless Chromium.
+          impact: Attest screenshots are skipped; headless, transcript-rendered, and HTML-reproduction images do not count as screenshot evidence.
         − Playwright Chromium — missing
-          use: Headless web screenshots for attest and dossier visual evidence.
+          use: Headless browser screenshots for non-attest diagnostics and tool use.
           npx is not on PATH.
           fix: npm install -g npm
-          impact: Web screenshot evidence is skipped when GUI capture is unavailable.
+          impact: Headless browser diagnostic screenshots are unavailable; attest screenshot evidence still requires physical capture.
       ",
       }
     `);
@@ -549,19 +557,21 @@ describe("frozen: roll doctor", () => {
           fix: brew install gh
         ✓ mcp.call (mcp) — available
         ✓ network.fetch (network) — available
+        − physical.screenshot (browser) — unavailable
+          macOS-only requirement; not applicable on this host.
 
       External requirements
       外部依赖
 
         ? macOS screencapture — stale
-          use: Terminal and GUI screenshot evidence on macOS.
+          use: Physical Terminal.app and browser-window screenshot evidence on macOS.
           macOS-only requirement; not applicable on this host.
-          impact: Terminal/GUI screenshots are skipped; web evidence may fall back to headless Chromium.
+          impact: Attest screenshots are skipped; headless, transcript-rendered, and HTML-reproduction images do not count as screenshot evidence.
         − Playwright Chromium — missing
-          use: Headless web screenshots for attest and dossier visual evidence.
+          use: Headless browser screenshots for non-attest diagnostics and tool use.
           npx is not on PATH.
           fix: npm install -g npm
-          impact: Web screenshot evidence is skipped when GUI capture is unavailable.
+          impact: Headless browser diagnostic screenshots are unavailable; attest screenshot evidence still requires physical capture.
       ",
       }
     `);
@@ -608,19 +618,21 @@ describe("frozen: roll doctor", () => {
           fix: brew install gh
         ✓ mcp.call (mcp) — available
         ✓ network.fetch (network) — available
+        − physical.screenshot (browser) — unavailable
+          macOS-only requirement; not applicable on this host.
 
       External requirements
       外部依赖
 
         ? macOS screencapture — stale
-          use: Terminal and GUI screenshot evidence on macOS.
+          use: Physical Terminal.app and browser-window screenshot evidence on macOS.
           macOS-only requirement; not applicable on this host.
-          impact: Terminal/GUI screenshots are skipped; web evidence may fall back to headless Chromium.
+          impact: Attest screenshots are skipped; headless, transcript-rendered, and HTML-reproduction images do not count as screenshot evidence.
         − Playwright Chromium — missing
-          use: Headless web screenshots for attest and dossier visual evidence.
+          use: Headless browser screenshots for non-attest diagnostics and tool use.
           npx is not on PATH.
           fix: npm install -g npm
-          impact: Web screenshot evidence is skipped when GUI capture is unavailable.
+          impact: Headless browser diagnostic screenshots are unavailable; attest screenshot evidence still requires physical capture.
       ",
       }
     `);
@@ -688,19 +700,21 @@ describe("frozen: roll doctor", () => {
           fix: brew install gh
         ✓ mcp.call (mcp) — available
         ✓ network.fetch (network) — available
+        − physical.screenshot (browser) — unavailable
+          macOS-only requirement; not applicable on this host.
 
       External requirements
       外部依赖
 
         ? macOS screencapture — stale
-          use: Terminal and GUI screenshot evidence on macOS.
+          use: Physical Terminal.app and browser-window screenshot evidence on macOS.
           macOS-only requirement; not applicable on this host.
-          impact: Terminal/GUI screenshots are skipped; web evidence may fall back to headless Chromium.
+          impact: Attest screenshots are skipped; headless, transcript-rendered, and HTML-reproduction images do not count as screenshot evidence.
         − Playwright Chromium — missing
-          use: Headless web screenshots for attest and dossier visual evidence.
+          use: Headless browser screenshots for non-attest diagnostics and tool use.
           npx is not on PATH.
           fix: npm install -g npm
-          impact: Web screenshot evidence is skipped when GUI capture is unavailable.
+          impact: Headless browser diagnostic screenshots are unavailable; attest screenshot evidence still requires physical capture.
       ",
       }
     `);

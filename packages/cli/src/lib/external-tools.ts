@@ -41,21 +41,21 @@ export const EXTERNAL_REQUIREMENT_DECLARATIONS: readonly ExternalRequirementDecl
     id: "screencapture",
     requirement: { kind: "executable", name: "screencapture", optional: true },
     label: "macOS screencapture",
-    purpose: "Terminal and GUI screenshot evidence on macOS.",
+    purpose: "Physical Terminal.app and browser-window screenshot evidence on macOS.",
     required: false,
     install: "Built into macOS.",
-    authorize: "Open System Settings > Privacy & Security > Screen Recording and allow the terminal running roll.",
-    impact: "Terminal/GUI screenshots are skipped; web evidence may fall back to headless Chromium.",
+    authorize: "Open System Settings > Privacy & Security > Screen Recording and allow Terminal.app (the stable roll capture host).",
+    impact: "Attest screenshots are skipped; headless, transcript-rendered, and HTML-reproduction images do not count as screenshot evidence.",
   },
   {
     id: "playwright-chromium",
     requirement: { kind: "executable", name: "playwright-chromium", optional: true },
     label: "Playwright Chromium",
-    purpose: "Headless web screenshots for attest and dossier visual evidence.",
+    purpose: "Headless browser screenshots for non-attest diagnostics and tool use.",
     required: false,
     install: PLAYWRIGHT_INSTALL_CHROMIUM,
     authorize: "No OS permission needed.",
-    impact: "Web screenshot evidence is skipped when GUI capture is unavailable.",
+    impact: "Headless browser diagnostic screenshots are unavailable; attest screenshot evidence still requires physical capture.",
   },
 ];
 
@@ -207,7 +207,7 @@ function screencaptureResolution(requirement: ToolRequirement, deps: ExternalToo
     return {
       requirement,
       status: "stale",
-      detail: "Screen Recording probe skipped (headless / ROLL_NO_SCREENCAP); real captures surface permission failures at capture time.",
+      detail: "Screen Recording probe skipped (headless / ROLL_NO_SCREENCAP); physical captures surface permission failures at capture time.",
     };
   }
   const tmp = join(mkdtempSync(join(tmpdir(), "roll-screen-probe-")), "probe.png");
@@ -223,9 +223,9 @@ function screencaptureResolution(requirement: ToolRequirement, deps: ExternalToo
   return {
     requirement,
     status: "permission-missing",
-    detail: "screencapture ran but could not capture pixels; Screen Recording permission is likely missing.",
+    detail: "screencapture ran but could not capture pixels; Screen Recording permission for Terminal.app is likely missing.",
     repair: { command, description: "Open Screen Recording privacy settings." },
-    authorize: { command, description: "Allow the terminal running roll to record the screen." },
+    authorize: { command, description: "Allow Terminal.app, the stable roll capture host, to record the screen." },
   };
 }
 
@@ -387,9 +387,9 @@ export function silentPreinstallChromium(env: NodeJS.ProcessEnv = process.env): 
 
 /**
  * FIX-394 AC6 — whether the browser tool is usable on this host.
- * The browser tool (headless Chromium screenshot / console / DOM query) depends
- * on chromium being installed. When chromium is absent, the Tools page and the
- * dossier rendering should mark the browser tool as degraded.
+ * The browser tool (headless Chromium diagnostics / console / DOM query) depends
+ * on chromium being installed. When chromium is absent, the Tools page marks the
+ * browser diagnostic tool as degraded. Attest screenshots use physical capture.
  */
 export function browserToolAvailable(): boolean {
   return chromiumInstalled();

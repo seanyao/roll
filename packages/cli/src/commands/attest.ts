@@ -257,8 +257,8 @@ function tail(text: string, max = 4000): string {
 async function runShell(line: string, deps: ScreenshotDeps | undefined): Promise<RunOut> {
   // RED LINE (US-ATTEST-012 / FIX-339 复核 #2): the GUI screen-capture lane already
   // refuses a command whose body carries a secret (screenshot.ts) — a token baked
-  // into pixels can't be un-baked. The HEADLESS command lane (this sink) runs the
-  // command and persists its output, so it needs the SAME guard: a command body
+  // into pixels can't be un-baked. The non-GUI command sink runs the command and
+  // persists its output, so it needs the SAME guard: a command body
   // carrying a secret must NOT run (it could echo/leak the token into the captured
   // stdout). Refuse it before any spawn; the caller records an honest skip.
   if (containsSecret(line)) {
@@ -766,11 +766,11 @@ const USAGE = [
   "  --capture-tmux <session>   self-capture a terminal attached to a tmux session (unattended Gate)",
   "  --capture-command <cmd>    self-capture a terminal running <cmd> (repeatable — one per deliverable_cmd; FIX-339)",
   "  --capture-command-skip <r> record an honest terminal skip for a refused deliverable_cmd (allowlist; repeatable)",
-  "  --capture-web <url|file>   self-capture a REAL screenshot of a rendered page (FIX-305; repeatable — one per",
-  "                             deliverable_url, FIX-339) — the FIX-291 ladder: macOS GUI browser, else headless Chromium",
+  "  --capture-web <url|file>   self-capture a physical browser-window screenshot of a rendered page (repeatable — one per",
+  "                             deliverable_url); no headless / transcript / HTML reproduction fallback",
   "  --capture-browser <app>    GUI lane browser app to drive (default Google Chrome)",
   "  --capture-region <rect>    screencapture -R rectangle (default 0,0,1280,800)",
-  "  (terminal lane honestly skips off-GUI / without screen-recording permission)",
+  "  (screenshot lanes honestly skip off-GUI / without screen-recording permission)",
 ].join("\n");
 
 /**
@@ -878,11 +878,9 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   const captureRegion = flagVal("--capture-region");
   const captureTerminal = args.includes("--capture-terminal") || captureTmux !== undefined || captureCommands.length > 0;
   // FIX-305 — UI/dossier self-capture lane. A UI/dossier card's acceptance is a
-  // RENDERED page, so its evidence must be a REAL pixel screenshot, not a
-  // machine-skip. `--capture-web <url|file>` drives the FIX-291 web ladder
-  // (macOS GUI browser → headless Chromium → honest skip); the headless rung
-  // needs NO GUI, so a network-only loop runner self-produces a real PNG of the
-  // dossier/story page instead of leaving the screenshots dir empty.
+  // RENDERED page, so its evidence must be a physical browser-window screenshot,
+  // not a headless, transcript-rendered, or HTML-reproduction PNG. Off-GUI hosts
+  // record an honest skip.
   // FIX-339 (AC1): --capture-web may REPEAT — one declared deliverable_url per
   // flag. Each url is captured into web.png, web-1.png, … (no name clash).
   const captureWebs = flagVals("--capture-web");
@@ -1008,12 +1006,9 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
 
   // FIX-305 — UI/dossier web self-capture lane. For a card whose acceptance is a
   // rendered page (the dossier story page, or any url/file the Gate supplies),
-  // attest must CAPTURE a real screenshot rather than machine-skip. We drive the
-  // FIX-291 web ladder: a macOS GUI host shoots a real browser window, and a
-  // headless host (CI / network-only loop runner) falls through to headless
-  // Chromium — NO GUI required — producing an unforgeable PNG. Only an honest
-  // failure (ROLL_ATTEST_NO_BROWSER, no url, npx/network down) yields a recorded
-  // skip; for a reachable web/dossier page the capture succeeds.
+  // attest must CAPTURE physical browser-window pixels. Headless Chromium,
+  // transcript rendering, and HTML reproduction images are not valid screenshot
+  // evidence; off-GUI hosts record an honest skip.
   const realWebs = captureWebs.filter((u) => u !== "");
   if (realWebs.length > 0) {
     mkdirSync(join(runDir, "screenshots"), { recursive: true });

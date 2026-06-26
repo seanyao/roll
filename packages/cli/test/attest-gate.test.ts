@@ -20,6 +20,7 @@ import {
   deliverableUrlsForStory,
   findDuplicateBacklogStoryIds,
   findDuplicateStoryIds,
+  plannedVsDeliveredEvidence,
   readAttestGateMode,
   rejectedDeliverableCmdsForStory,
   runAttestGate,
@@ -1820,5 +1821,84 @@ describe("FIX-340 — backlog id uniqueness (findDuplicateBacklogStoryIds)", () 
 
   it("empty backlog text → []", () => {
     expect(findDuplicateBacklogStoryIds("")).toEqual([]);
+  });
+});
+
+// ── US-SKILL-030: plannedVsDeliveredEvidence ─────────────────────────────────
+
+describe("plannedVsDeliveredEvidence — US-SKILL-030 (AC4)", () => {
+  function tmpProject(specText: string, storyId: string, acMap?: object[]): string {
+    const p = mkdtempSync(join(tmpdir(), "roll-pvd-"));
+    dirs.push(p);
+    // mimic the card archive layout expected by storySpecPath
+    const cardDir = join(p, ".roll", "features", "test-epic", storyId);
+    mkdirSync(cardDir, { recursive: true });
+    writeFileSync(join(cardDir, "spec.md"), specText);
+    if (acMap !== undefined) {
+      writeFileSync(join(cardDir, "ac-map.json"), JSON.stringify(acMap));
+    }
+    return p;
+  }
+
+  it("returns delta summary when spec has evaluation contract and ac-map exists", () => {
+    const specText = `---
+id: US-TEST-001
+title: test story
+screenshot_exempt: unit test only
+---
+
+**Evaluation contract:**
+- expected_evidence:
+  - kind: test
+    target: foo.test.ts
+    proves: AC1
+- scorer_focus:
+  - test coverage
+`;
+    const acMap = [{ ac: "AC1", status: "pass", evidence: [] }];
+    const p = tmpProject(specText, "US-TEST-001", acMap);
+    const result = plannedVsDeliveredEvidence(p, "US-TEST-001");
+    expect(result).toContain("Planned-vs-delivered evidence:");
+    expect(result).toContain("✅ test: foo.test.ts → AC1 (pass)");
+  });
+
+  it("returns empty string for legacy spec without evaluation contract", () => {
+    const legacySpec = `---
+id: US-OLD-001
+title: old story
+screenshot_exempt: test only
+---
+
+## AC
+- [ ] AC1 works
+`;
+    const p = tmpProject(legacySpec, "US-OLD-001");
+    expect(plannedVsDeliveredEvidence(p, "US-OLD-001")).toBe("");
+  });
+
+  it("returns empty string when story has no spec file", () => {
+    const p = mkdtempSync(join(tmpdir(), "roll-pvd-nospec-"));
+    dirs.push(p);
+    expect(plannedVsDeliveredEvidence(p, "US-NOSUCH-001")).toBe("");
+  });
+
+  it("marks planned evidence as missing when ac-map has no entry", () => {
+    const specText = `---
+id: US-TEST-002
+title: story with missing evidence
+screenshot_exempt: test only
+---
+
+**Evaluation contract:**
+- expected_evidence:
+  - kind: screenshot
+    target: console page
+    proves: AC1
+- scorer_focus:
+  - visual accuracy
+`;
+    const p = tmpProject(specText, "US-TEST-002");
+    const result = plannedVsDeliveredEvidence(p, "US-TEST-002");
+    expect(result).toContain("❓ screenshot: console page → AC1 (missing)");
   });
 });

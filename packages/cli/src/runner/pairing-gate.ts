@@ -738,8 +738,18 @@ export async function retryPeerConsult(
   }
 }
 
-/** The score-stage prompt (shared by the loop executor and `roll pair score`). */
-export function buildPairScorePrompt(summary: string): string {
+/**
+ * The score-stage prompt (shared by the loop executor and `roll pair score`).
+ *
+ * US-SKILL-030 — when the story's spec carries an `**Evaluation contract:**`
+ * block, the caller passes its formatted summary here so the peer scorer can
+ * grade the delivery against the PLANNED evidence expectations, not just the
+ * delivered summary. Absent (legacy stories) → no behavior change.
+ */
+export function buildPairScorePrompt(summary: string, evalContractSummary?: string): string {
+  const contractBlock = evalContractSummary !== undefined && evalContractSummary !== ""
+    ? `\nEVALUATION CONTRACT (planned evidence from the story spec — grade against this):\n${evalContractSummary}\n`
+    : "";
   return (
     `You are a heterogeneous PAIRING scorer. A different agent delivered the cycle below; ` +
     `grade the delivery quality honestly (root-cause depth, test coverage, scope discipline, evidence). ` +
@@ -763,7 +773,8 @@ export function buildPairScorePrompt(summary: string): string {
     // gated), NOT to fail it. Omit RESIZE/GAPS for a pure quality problem.\n` +
     `If — and ONLY if — the low score is because the SCOPE is too large for one cycle (entire ACs or ` +
     `surfaces left uncovered, not defects), add a "RESIZE: <one line why>" line and a ` +
-    `"GAPS: <gap one; gap two; ...>" line listing the uncovered scope. Do NOT add them for a quality problem.\n\nDELIVERY:\n` +
+    `"GAPS: <gap one; gap two; ...>" line listing the uncovered scope. Do NOT add them for a quality problem.` +
+    `${contractBlock}\nDELIVERY:\n` +
     summary
   );
 }

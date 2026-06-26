@@ -175,6 +175,7 @@ import { realAgentEnv } from "../commands/agent-list.js";
 import { attestCommand } from "../commands/attest.js";
 import { refreshAggregates } from "../commands/index-gen.js";
 import { cardArchiveDir, mountExecutionAtPublish } from "../lib/archive.js";
+import { formatEvaluationContractForScorer, parseEvaluationContract } from "../lib/evaluation-contract.js";
 import { readLatestStoryReviewScore, REVIEW_SCORE_LOW_THRESHOLD, type ReviewScoreEntry } from "../lib/review-score.js";
 
 const execFileAsync = promisify(execFile);
@@ -2019,7 +2020,7 @@ export async function executeCommand(
           return { outcome: "parsed", parsed: { ...parsed, cost: peerReviewCost(peer, res.stdout) } };
         };
         const scorePeer = async (peer: string, summary: string, timeoutMs: number): Promise<import("./pairing-gate.js").PairScore | null> => {
-          const prompt = buildPairScorePrompt(summary);
+          const prompt = buildPairScorePrompt(summary, evalContractFormatted);
           // First attempt
           const first = await tryScoreOnce(peer, prompt, timeoutMs);
           if (first.outcome === "parsed") return first.parsed;
@@ -2030,7 +2031,7 @@ export async function executeCommand(
           // reply. Only unparseable gets a retry; timeout/auth/exit-error do not
           // (they indicate a real spawn/process problem, not a format issue).
           if (first.outcome === "unparseable") {
-            const retryPrompt = buildPairScorePrompt(summary) +
+            const retryPrompt = buildPairScorePrompt(summary, evalContractFormatted) +
               "\n\n你上次回复缺/错了 SCORE/VERDICT/RATIONALE 行，请严格只回这三行。";
             const retry = await tryScoreOnce(peer, retryPrompt, timeoutMs);
             if (retry.outcome === "parsed") return retry.parsed;
@@ -2050,11 +2051,16 @@ export async function executeCommand(
         // blind to the goal scored a clean roll-sentinel deletion 3/10 and jammed the
         // loop). Best-effort: a missing/unreadable spec degrades to the id-only line.
         let goalLine = "";
+        let evalContractFormatted = "";
         try {
           const specPath = join(cardArchiveDir(ports.repoCwd, storyId), "spec.md");
           if (existsSync(specPath)) {
-            const title = (/^title:\s*(.+)$/m.exec(readFileSync(specPath, "utf8"))?.[1] ?? "").trim();
+            const specText = readFileSync(specPath, "utf8");
+            const title = (/^title:\s*(.+)$/m.exec(specText)?.[1] ?? "").trim();
             if (title !== "") goalLine = `Goal: ${title}\n`;
+            // US-SKILL-030: pass evaluation contract to scorer so it grades against
+            // the planner's intended evidence/focus, not just generic code quality.
+            evalContractFormatted = formatEvaluationContractForScorer(parseEvaluationContract(specText));
           }
         } catch {
           /* best-effort — the scorer still gets the diff stat */

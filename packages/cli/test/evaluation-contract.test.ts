@@ -15,6 +15,7 @@ import {
   parseEvaluationContract,
   type EvaluationContract,
 } from "../src/lib/evaluation-contract.js";
+import { buildPairScorePrompt } from "../src/runner/pairing-gate.js";
 
 const FULL_SPEC = `---
 id: US-EXAMPLE-001
@@ -243,5 +244,40 @@ describe("evidenceDeltaSummary", () => {
 
   it("returns empty string for null contract", () => {
     expect(evidenceDeltaSummary(null, [])).toBe("");
+  });
+});
+
+describe("buildPairScorePrompt with evaluation contract (AC3)", () => {
+  it("includes the evaluation contract in the scorer prompt when present", () => {
+    const summary = "Goal: add feature X\n3 TCR commits, 2 files changed";
+    const contract: EvaluationContract = {
+      expected_evidence: [
+        { kind: "test", target: "x.test.ts", proves: "AC1" },
+        { kind: "screenshot", target: "console page", proves: "AC2" },
+      ],
+      scorer_focus: ["locale consistency", "format correctness"],
+      builder_notes: [],
+    };
+    const contractSummary = formatEvaluationContractForScorer(contract);
+    const prompt = buildPairScorePrompt(summary, contractSummary);
+    expect(prompt).toContain("EVALUATION CONTRACT");
+    expect(prompt).toContain("planned evidence from the story spec");
+    expect(prompt).toContain("test: x.test.ts (proves AC1)");
+    expect(prompt).toContain("locale consistency");
+    expect(prompt).toContain(summary);
+  });
+
+  it("works without evaluation contract (legacy spec — no behavior change)", () => {
+    const summary = "Goal: add feature Y";
+    const prompt = buildPairScorePrompt(summary);
+    expect(prompt).not.toContain("EVALUATION CONTRACT");
+    expect(prompt).toContain(summary);
+    expect(prompt).toContain("SCORE:");
+    expect(prompt).toContain("VERDICT:");
+  });
+
+  it("skips empty contract string", () => {
+    const prompt = buildPairScorePrompt("summary", "");
+    expect(prompt).not.toContain("EVALUATION CONTRACT");
   });
 });

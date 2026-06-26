@@ -37,6 +37,7 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
 import { hasVisualEvidenceAc } from "../lib/design-visual-evidence.js";
+import { evidenceDeltaSummary, parseEvaluationContract } from "../lib/evaluation-contract.js";
 import { physicalTerminalFromSpecText } from "../lib/physical-terminal.js";
 import { evaluateReviewScoreGate } from "../lib/review-score.js";
 
@@ -810,6 +811,30 @@ function readAcMapEntries(worktreeCwd: string, storyId: string): AcMapEntry[] | 
   } catch {
     return null;
   }
+}
+
+/**
+ * US-SKILL-030 — planned-vs-delivered evidence mapping for the attest report.
+ * Reads the story's `**Evaluation contract:**` block (if present) and the
+ * ac-map entries, then returns a human-readable delta summary showing which
+ * planned evidence items were satisfied, changed, or missing.
+ *
+ * Returns "" when the story has no evaluation contract (legacy specs — no
+ * behavior change).
+ */
+export function plannedVsDeliveredEvidence(worktreeCwd: string, storyId: string): string {
+  const spec = storySpecPath(worktreeCwd, storyId);
+  if (spec === null) return "";
+  let text: string;
+  try {
+    text = readFileSync(spec, "utf8");
+  } catch {
+    return "";
+  }
+  const contract = parseEvaluationContract(text);
+  if (contract === null) return "";
+  const acMap = readAcMapEntries(worktreeCwd, storyId) ?? [];
+  return evidenceDeltaSummary(contract, acMap);
 }
 
 function evidenceManifest(worktreeCwd: string, storyId: string): EvidenceManifestLike | null {

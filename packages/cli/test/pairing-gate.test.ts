@@ -1179,6 +1179,21 @@ describe("buildPairScorePrompt — FIX-363 intent-aware scoring (don't misjudge 
     // the delivery summary (with its Goal line) is embedded
     expect(prompt).toContain("Goal: Remove roll-sentinel");
   });
+
+  it("US-SKILL-030: includes EVALUATION CONTRACT block when evalContractSummary is provided", () => {
+    const evalSummary = "Planned evidence:\n  - test: foo.test.ts (proves AC1)\nScorer focus:\n  - contract completeness";
+    const prompt = buildPairScorePrompt("Story: US-SKILL-030\nDiff stat:\n3 files", evalSummary);
+    expect(prompt).toContain("EVALUATION CONTRACT");
+    expect(prompt).toContain("planned evidence from the story spec");
+    expect(prompt).toContain("foo.test.ts (proves AC1)");
+  });
+
+  it("US-SKILL-030: no EVALUATION CONTRACT block when evalContractSummary is absent (legacy)", () => {
+    const prompt = buildPairScorePrompt("Story: US-OLD-001\nGoal: old story\nDiff stat:\n1 file");
+    expect(prompt).not.toContain("EVALUATION CONTRACT");
+    expect(prompt).toContain("SCORE:");
+    expect(prompt).toContain("VERDICT:");
+  });
 });
 
 // ── FIX-911: pool-level escalation when hetero + same-vendor all fail ───────

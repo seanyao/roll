@@ -85,11 +85,12 @@ soft 模式会记录缺口并发出同一类审计信号，但不阻塞本轮交
 
 可视证据依赖机器级工具；这些工具会被显式声明，并在启动时探测：
 
-- `macOS screencapture` —— 可选的终端/GUI 截图工具。它是 macOS 内置工具，
-  但运行 `roll` 的终端需要 Screen Recording 权限。缺权限时终端/GUI 截图降级；
-  web 证据仍可走 headless Chromium。
-- `Playwright Chromium` —— 可选的 headless web 截图工具，用于 `roll attest`
-  和 dossier 截图。安装命令是 `npx playwright install chromium`。
+- `macOS screencapture` —— 物理 Terminal.app / 浏览器窗口截图工具。它是 macOS
+  内置工具，但作为稳定截图宿主的 Terminal.app 需要 Screen Recording 权限。
+  缺权限时 attest 记录明确的截图 skip；headless、transcript 渲染图和 HTML
+  复现图都不算截图证据。
+- `Playwright Chromium` —— 可选的 headless 浏览器诊断工具，用于非 attest 的
+  tool use。安装命令是 `npx playwright install chromium`。
 
 `roll doctor` 总是打印这些工具的可用性、权限状态、影响和修复命令。`roll init`
 与 `roll loop go` 在启动时跑同一套探测；交互式终端会询问是否安装/打开缺失的

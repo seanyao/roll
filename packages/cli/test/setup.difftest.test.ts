@@ -171,7 +171,8 @@ describe("frozen: roll setup", () => {
         3. ✓  Install skills to ~/.claude
         4. ✓  Initialize peer-review state directory
         5. ↷  Configure git hooks path
-        6. ↷  Ensure tmux is installed (already present)
+        6. ↷  Check physical screenshot permissions (Terminal.app)
+        7. ↷  Ensure tmux is installed (already present)
 
       ────────────────────────────────────────────────────────────────────────────────
         Setup complete (4 items refreshed)  —  run roll init inside a project
@@ -203,7 +204,8 @@ describe("frozen: roll setup", () => {
         3. ✓  Install skills to ~/.claude
         4. ✓  Initialize peer-review state directory
         5. ↷  Configure git hooks path
-        6. ↷  Ensure tmux is installed (already present)
+        6. ↷  Check physical screenshot permissions (Terminal.app)
+        7. ↷  Ensure tmux is installed (already present)
 
       ────────────────────────────────────────────────────────────────────────────────
         Setup complete (4 items refreshed)  —  run roll init inside a project
@@ -235,7 +237,8 @@ describe("frozen: roll setup", () => {
         3. ~  Install skills to ~/.claude
         4. ~  Initialize peer-review state directory
         5. ↷  Configure git hooks path
-        6. ↷  Ensure tmux is installed (already present)
+        6. ↷  Check physical screenshot permissions (Terminal.app)
+        7. ↷  Ensure tmux is installed (already present)
 
       ────────────────────────────────────────────────────────────────────────────────
         Setup re-installed (forced — 4 items)  —  run roll init inside a project
@@ -267,7 +270,8 @@ describe("frozen: roll setup", () => {
         3. ~  Install skills to ~/.claude
         4. ~  Initialize peer-review state directory
         5. ↷  Configure git hooks path
-        6. ↷  Ensure tmux is installed (already present)
+        6. ↷  Check physical screenshot permissions (Terminal.app)
+        7. ↷  Ensure tmux is installed (already present)
 
       ────────────────────────────────────────────────────────────────────────────────
         Setup re-installed (forced — 4 items)  —  run roll init inside a project
@@ -321,7 +325,8 @@ describe("frozen: roll setup", () => {
         3. ↷  Install skills to ~/.claude
         4. ↷  Initialize peer-review state directory
         5. ↷  Configure git hooks path
-        6. ↷  Ensure tmux is installed (already present)
+        6. ↷  Check physical screenshot permissions (Terminal.app)
+        7. ↷  Ensure tmux is installed (already present)
 
       ────────────────────────────────────────────────────────────────────────────────
         Setup complete (no changes)  —  everything already up to date
@@ -353,7 +358,8 @@ describe("frozen: roll setup", () => {
         3. ↷  Install skills to ~/.claude
         4. ↷  Initialize peer-review state directory
         5. ↷  Configure git hooks path
-        6. ↷  Ensure tmux is installed (already present)
+        6. ↷  Check physical screenshot permissions (Terminal.app)
+        7. ↷  Ensure tmux is installed (already present)
 
       ────────────────────────────────────────────────────────────────────────────────
         Setup complete (no changes)  —  everything already up to date

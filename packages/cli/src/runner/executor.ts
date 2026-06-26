@@ -4316,13 +4316,9 @@ export function nodePorts(opts: {
     },
     capture: {
       fromMarker(marker, runDir) {
-        // FIX-314 — force headless in the loop capture path: ROLL_ATTEST_HEADLESS=1
-        // prevents the web lane from opening a real GUI browser (disruptive in
-        // unattended cycles; Chrome also blocks file:// → "无法访问你的文件").
-        // Playwright headless Chromium handles file:// with no GUI.
         return captureFromMarker(marker, {
           runDir,
-          deps: { env: { ...process.env, ROLL_ATTEST_HEADLESS: "1" } },
+          deps: { env: { ...process.env } },
         });
       },
     },
@@ -4332,15 +4328,13 @@ export function nodePorts(opts: {
         try {
           process.chdir(projectCwd);
           // FIX-305: a UI/dossier card's acceptance is a RENDERED page, so its
-          // evidence must be a real pixel screenshot, not a machine-skip with an
-          // empty screenshots dir. Auto-drive the web self-capture lane against
+          // evidence must be a real physical-window screenshot, not a headless,
+          // transcript-rendered, or HTML-reproduction PNG. Auto-drive the web
+          // self-capture lane against
           // the card's rendered dossier page (file://…/index.html), or an explicit
-          // ROLL_ATTEST_WEB_URL deployed product page. The FIX-291 ladder falls
-          // through to headless Chromium on a network-only loop runner (no GUI
-          // needed), producing an unforgeable PNG.
-          // FIX-314: pass ROLL_ATTEST_HEADLESS=1 so the web capture in attest
-          // never pops a GUI browser — headless Chromium is the only web lane in
-          // an unattended cycle.
+          // ROLL_ATTEST_WEB_URL deployed product page. On unattended/headless hosts
+          // the capture records an honest skip instead of fabricating visual
+          // evidence.
           // FIX-339 (AC1): capture EVERY declared deliverable_url (a card may ship
           // more than one user-visible web view). FIX-321: if a required story
           // declares none, record an HONEST web skip (no hollow dossier shot) so
@@ -4367,7 +4361,7 @@ export function nodePorts(opts: {
             `deliverable_cmd 非白名单(仅限 roll 只读子命令): ${c}`,
           ]);
           return await attestCommand([storyId, "--run-dir", runDir, ...webArgs, ...cmdArgs, ...cmdSkipArgs], {
-            capture: { env: { ...process.env, ROLL_ATTEST_HEADLESS: "1" } },
+            capture: { env: { ...process.env } },
           });
         } finally {
           process.chdir(prev);

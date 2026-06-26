@@ -23,6 +23,7 @@ describe("collectToolPanel", () => {
       "browser.console",
       "browser.dom-query",
       "browser.screenshot",
+      "physical.screenshot",
       "filesystem.read",
       "filesystem.stat",
       "filesystem.write",
@@ -46,7 +47,7 @@ describe("collectToolPanel", () => {
   it("multi-tool kinds (browser · git · github · filesystem) expand to multiple rows", () => {
     const rows = collectToolPanel();
     const byKind = (kind: string) => rows.filter((r) => r.kind === kind).map((r) => r.id);
-    expect(byKind("browser")).toEqual(["browser.console", "browser.dom-query", "browser.screenshot"]);
+    expect(byKind("browser")).toEqual(["browser.console", "browser.dom-query", "browser.screenshot", "physical.screenshot"]);
     expect(byKind("git")).toEqual(["git.commit", "git.merge", "git.push", "git.status"]);
     expect(byKind("github")).toEqual(["github.ci", "github.pr"]);
     expect(byKind("filesystem")).toEqual(["filesystem.read", "filesystem.stat", "filesystem.write"]);
@@ -76,6 +77,7 @@ describe("collectToolPanel", () => {
     expect(row(rows, "bash").guardrails).toEqual({ timeoutMs: 30_000, sandbox: "bounded-output" });
     // browser: headless sandbox.
     expect(row(rows, "browser.screenshot").guardrails).toEqual({ timeoutMs: 60_000, sandbox: "headless" });
+    expect(row(rows, "physical.screenshot").guardrails).toEqual({ timeoutMs: 60_000, sandbox: "bounded-output" });
     // network: the only built-in with a retry policy (attempts → retries) and a network sandbox.
     expect(row(rows, "network.fetch").guardrails).toEqual({ timeoutMs: 30_000, retries: 1, sandbox: "network:restricted" });
     // mcp: network sandbox, no retry.
@@ -98,6 +100,7 @@ describe("collectToolPanel", () => {
     const rows = collectToolPanel();
     expect(row(rows, "bash").requirements).toEqual(["system-shell"]);
     expect(row(rows, "browser.screenshot").requirements).toEqual(["playwright-chromium (optional)"]);
+    expect(row(rows, "physical.screenshot").requirements).toEqual(["screencapture"]);
     expect(row(rows, "git.commit").requirements).toEqual(["git"]);
     expect(row(rows, "github.pr").requirements).toEqual(["gh"]);
     // network / filesystem / mcp declare no requirements → [].
@@ -114,6 +117,9 @@ describe("collectToolPanel", () => {
     expect(row(rows, "browser.screenshot").requirementDetails).toEqual([
       expect.objectContaining({ name: "playwright-chromium", label: "playwright-chromium (optional)", optional: true }),
     ]);
+    expect(row(rows, "physical.screenshot").requirementDetails).toEqual([
+      expect.objectContaining({ name: "screencapture", label: "screencapture", optional: false }),
+    ]);
     expect(row(rows, "github.pr").requirementDetails).toEqual([
       expect.objectContaining({ name: "gh", label: "gh", optional: false }),
     ]);
@@ -124,6 +130,7 @@ describe("collectToolPanel", () => {
     const rows = collectToolPanel();
     expect(row(rows, "bash").readiness).toBe("available");
     expect(["available", "degraded"]).toContain(row(rows, "browser.screenshot").readiness);
+    expect(["available", "unavailable"]).toContain(row(rows, "physical.screenshot").readiness);
     expect(["available", "unavailable"]).toContain(row(rows, "github.pr").readiness);
   });
 
@@ -159,6 +166,7 @@ describe("builtinToolDeclarations", () => {
       "browser.console",
       "browser.dom-query",
       "browser.screenshot",
+      "physical.screenshot",
       "filesystem.read",
       "filesystem.stat",
       "filesystem.write",

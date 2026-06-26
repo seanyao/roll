@@ -50,6 +50,7 @@ import {
   readLineFromStdin,
   selectPrimaryAgent,
 } from "../lib/interactive-agent.js";
+import { defaultExternalToolDeps, resolveRequirement } from "../lib/external-tools.js";
 
 // ─── bash UI helpers (bin/roll:41-56) — err only ─────────────────────────────
 function err(line: string): void {
@@ -146,6 +147,7 @@ function fileFingerprint(p: string): string {
 }
 
 type StepState = "changed" | "unchanged" | "failed";
+type PermissionState = "ok" | "skip" | "fail";
 
 /** Port of _run_setup_step: snapshot watch, run fn, snapshot again. */
 function runSetupStep(watch: string, fn: () => void): StepState {
@@ -214,6 +216,21 @@ function stateToMarker(s: StepState, force: boolean): Marker {
     default:
       return "fail";
   }
+}
+
+function permissionStateToMarker(s: PermissionState): Marker {
+  if (s === "ok") return "ok";
+  if (s === "skip") return "skip";
+  return "fail";
+}
+
+function checkPhysicalScreenshotPermission(): PermissionState {
+  if (process.stdin.isTTY !== true || process.stdout.isTTY !== true) return "skip";
+  const deps = defaultExternalToolDeps();
+  const resolution = resolveRequirement({ kind: "executable", name: "screencapture" }, deps);
+  if (resolution.status === "ok") return "ok";
+  if (resolution.status === "permission-missing" || resolution.status === "missing") return "fail";
+  return "skip";
 }
 
 // ─── _emit_setup_v2_ui (1482) → lib/roll-setup.py renderer ───────────────────
@@ -341,12 +358,15 @@ export function setupCommand(args: string[]): number {
   });
   steps.push({ num: 5, label: "Configure git hooks path", status: stateToMarker(s5, force) });
 
+  const s6 = checkPhysicalScreenshotPermission();
+  steps.push({ num: 6, label: "Check physical screenshot permissions (Terminal.app)", status: permissionStateToMarker(s6) });
+
   if (tmuxPresent()) {
-    steps.push({ num: 6, label: "Ensure tmux is installed (already present)", status: "skip" });
+    steps.push({ num: 7, label: "Ensure tmux is installed (already present)", status: "skip" });
   } else {
     // _ensure_tmux best-effort install, then re-probe. The brew path is
     // darwin-only and emits nothing to stdout; if tmux still absent → fail.
-    steps.push({ num: 6, label: "Ensure tmux is installed", status: tmuxPresent() ? "ok" : "fail" });
+    steps.push({ num: 7, label: "Ensure tmux is installed", status: tmuxPresent() ? "ok" : "fail" });
   }
 
   const noColor = (process.env["NO_COLOR"] ?? "") !== "" || !process.stdout.isTTY;

@@ -252,13 +252,13 @@ describe("v3 loop runner template", () => {
     expect(goIdx).toBeLessThan(cycleIdx);
   });
 
-  it("FIX-393 AC6: sets headless capture env vars for unattended loop", () => {
-    expect(script).toContain('export ROLL_ATTEST_HEADLESS="${ROLL_ATTEST_HEADLESS:-1}"');
+  it("FIX-393 AC6: disables physical screenshot popups for unattended loop without enabling headless evidence", () => {
+    expect(script).not.toContain("ROLL_ATTEST_HEADLESS");
     expect(script).toContain('export ROLL_ATTEST_NO_TERMINAL="${ROLL_ATTEST_NO_TERMINAL:-1}"');
-    const headlessIdx = script.indexOf("ROLL_ATTEST_HEADLESS");
+    const terminalIdx = script.indexOf("ROLL_ATTEST_NO_TERMINAL");
     const runIdx = script.indexOf('"$ROLL_BIN" loop run-once');
-    expect(headlessIdx).toBeGreaterThan(-1);
-    expect(headlessIdx).toBeLessThan(runIdx);
+    expect(terminalIdx).toBeGreaterThan(-1);
+    expect(terminalIdx).toBeLessThan(runIdx);
   });
 
   it("FIX-1022: exports ROLL_NO_SCREENCAP=1 BEFORE run-once so the screencapture probe skips (isTTY is unreliable under the PTY-wrapped loop)", () => {
@@ -284,8 +284,8 @@ describe("v3 loop runner template", () => {
 
   it("FIX-393: env var defaults can be overridden by caller", () => {
     // The :- syntax in ${VAR:-1} lets the caller override.
-    expect(script).toContain("${ROLL_ATTEST_HEADLESS:-1}");
     expect(script).toContain("${ROLL_ATTEST_NO_TERMINAL:-1}");
+    expect(script).toContain("${ROLL_NO_SCREENCAP:-1}");
   });
 });
 

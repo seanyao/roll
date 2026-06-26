@@ -228,12 +228,12 @@ if [ -z "$ROLL_TMUX_WRAPPED" ] && [ -z "$ROLL_LOOP_NO_TMUX" ] && command -v "$TM
     exit 0
   fi
 fi
-# Headless capture defaults for unattended loop (FIX-393/FIX-927/FIX-1022) —
-# prevents macOS Screen Recording TCC dialogs from blocking the cycle. The
-# readiness probe (external-tools.ts) and both real-capture lanes honor
-# ROLL_NO_SCREENCAP; isTTY is unreliable here because the loop wraps agents in a
-# script(1)+tmux PTY (isTTY===true), so FIX-927's isTTY headless-skip never fired.
-export ROLL_ATTEST_HEADLESS="\${ROLL_ATTEST_HEADLESS:-1}"
+# Physical screenshot defaults for unattended loop (FIX-393/FIX-927/FIX-1022) —
+# prevents macOS Screen Recording TCC dialogs from blocking launchd cycles. Attest
+# screenshot evidence no longer falls back to headless/browser-rendered captures:
+# without a real physical Terminal.app or browser-window screencapture it records
+# an honest skip. isTTY is unreliable here because the loop wraps agents in a
+# script(1)+tmux PTY (isTTY===true), so the explicit kill-switch is required.
 export ROLL_ATTEST_NO_TERMINAL="\${ROLL_ATTEST_NO_TERMINAL:-1}"
 export ROLL_NO_SCREENCAP="\${ROLL_NO_SCREENCAP:-1}"
 # Acquire the cycle inflight lock so the next launchd tick yields (FIX-393).

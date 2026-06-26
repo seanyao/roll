@@ -94,6 +94,82 @@ function docOnly(): Fixture {
   return { proj, home };
 }
 
+function mergedAgents(): Fixture {
+  const proj = mkdtempSync(join(tmpdir(), "roll-ob-proj-"));
+  dirs.push(proj);
+  const home = freshHome();
+  w(
+    proj,
+    "AGENTS.md",
+    [
+      "# Owner Guide",
+      "",
+      "Keep this owner text.",
+      "",
+      "<!-- roll:onboard:start -->",
+      "# Agent Conventions",
+      "",
+      "Roll managed section.",
+      "<!-- roll:onboard:end -->",
+      "",
+    ].join("\n"),
+  );
+  w(
+    proj,
+    ".roll/onboard-changeset.yaml",
+    [
+      'onboarded_at: "2026-01-01T00:00:00Z"',
+      "scope_approved: []",
+      "files_merged:",
+      '  - "AGENTS.md"',
+      "files_created: []",
+      "dirs_created: []",
+      "gitignore_entries_added: []",
+      "launchd_plists_installed: []",
+      "",
+    ].join("\n"),
+  );
+  return { proj, home };
+}
+
+function mergedClaude(): Fixture {
+  const proj = mkdtempSync(join(tmpdir(), "roll-ob-proj-"));
+  dirs.push(proj);
+  const home = freshHome();
+  w(
+    proj,
+    ".claude/CLAUDE.md",
+    [
+      "# Owner Claude Guide",
+      "",
+      "Keep this Claude owner text.",
+      "",
+      "<!-- roll:onboard:start -->",
+      "# Claude Conventions",
+      "",
+      "Roll managed Claude section.",
+      "<!-- roll:onboard:end -->",
+      "",
+    ].join("\n"),
+  );
+  w(
+    proj,
+    ".roll/onboard-changeset.yaml",
+    [
+      'onboarded_at: "2026-01-01T00:00:00Z"',
+      "scope_approved: []",
+      "files_merged:",
+      '  - ".claude/CLAUDE.md"',
+      "files_created: []",
+      "dirs_created: []",
+      "gitignore_entries_added: []",
+      "launchd_plists_installed: []",
+      "",
+    ].join("\n"),
+  );
+  return { proj, home };
+}
+
 function withPlists(): Fixture {
   const proj = mkdtempSync(join(tmpdir(), "roll-ob-proj-"));
   dirs.push(proj);
@@ -158,6 +234,27 @@ function crossProject(): Fixture {
       "scope_approved: []",
       "files_created:",
       '  - "/etc/passwd"',
+      "dirs_created: []",
+      "gitignore_entries_added: []",
+      "launchd_plists_installed: []",
+      "",
+    ].join("\n"),
+  );
+  return { proj, home };
+}
+
+function traversalMergedFile(): Fixture {
+  const proj = mkdtempSync(join(tmpdir(), "roll-ob-proj-"));
+  dirs.push(proj);
+  const home = freshHome();
+  w(
+    proj,
+    ".roll/onboard-changeset.yaml",
+    [
+      "scope_approved: []",
+      "files_merged:",
+      '  - "../outside/AGENTS.md"',
+      "files_created: []",
       "dirs_created: []",
       "gitignore_entries_added: []",
       "launchd_plists_installed: []",
@@ -296,5 +393,40 @@ describe("diff-test: roll offboard == bash oracle", () => {
 
   it("with-plists --confirm inside loop cycle → FIX-125 refuse", () => {
     both(withPlists, ["--confirm"], { ROLL_LOOP_AGENT: "pi" });
+  });
+
+  it("TS offboard strips Roll-owned AGENTS marker blocks without deleting owner content", () => {
+    const fx = mergedAgents();
+    const run = tsOb(fx, ["--confirm"], {});
+
+    expect(run.status).toBe(0);
+    const agents = readFileSync(join(fx.proj, "AGENTS.md"), "utf8");
+    expect(agents).toContain("# Owner Guide");
+    expect(agents).toContain("Keep this owner text.");
+    expect(agents).not.toContain("<!-- roll:onboard:start -->");
+    expect(agents).not.toContain("# Agent Conventions");
+    expect(existsSync(join(fx.proj, ".roll", "onboard-changeset.yaml"))).toBe(false);
+  });
+
+  it("TS offboard strips Roll-owned CLAUDE marker blocks without deleting owner content", () => {
+    const fx = mergedClaude();
+    const run = tsOb(fx, ["--confirm"], {});
+
+    expect(run.status).toBe(0);
+    const claude = readFileSync(join(fx.proj, ".claude", "CLAUDE.md"), "utf8");
+    expect(claude).toContain("# Owner Claude Guide");
+    expect(claude).toContain("Keep this Claude owner text.");
+    expect(claude).not.toContain("<!-- roll:onboard:start -->");
+    expect(claude).not.toContain("# Claude Conventions");
+    expect(existsSync(join(fx.proj, ".roll", "onboard-changeset.yaml"))).toBe(false);
+  });
+
+  it("TS offboard refuses path traversal in merged-file metadata", () => {
+    const fx = traversalMergedFile();
+    const run = tsOb(fx, ["--confirm"], {});
+
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("Refusing to act on '../outside/AGENTS.md'");
+    expect(existsSync(join(fx.proj, ".roll", "onboard-changeset.yaml"))).toBe(true);
   });
 });

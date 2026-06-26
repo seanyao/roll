@@ -134,7 +134,9 @@ Roll 只动它**自己的**文件：
 
 ## 怎么退出
 
-`roll init --apply` 把它创建的每个文件、目录、`.gitignore` 行都记到了 `.roll/onboard-changeset.yaml`。`roll offboard` 命令读这份清单，撤销 onboard 时的全部改动。
+`roll init --apply` 会把 Roll 管理的文件、目录、合并 marker 区块、`.gitignore` 行都记到 `.roll/onboard-changeset.yaml`。重复执行同一个 plan 会保留并去重这份 metadata，不会丢掉第一次 apply 的 offboard 记录。如果 apply 中途失败，先检查 changeset，再在确认后运行 `roll offboard --confirm` 回滚 Roll 管理的产物。
+
+已有 `AGENTS.md` 会被保留。Roll 只会在稳定的 `<!-- roll:onboard:start -->` / `<!-- roll:onboard:end -->` marker 中追加自己管理的区块，之后 offboard 只剥离这些区块。
 
 **先预演（默认）：**
 
@@ -151,7 +153,7 @@ roll offboard
 roll offboard --confirm
 ```
 
-Roll 不创建的文件 / 目录原封不动；你自己加到 `.gitignore` 的内容也保留。执行成功后，清单文件本身也会被删除。
+Roll 不创建的文件 / 目录原封不动；已有用户文件里的 Roll marker 区块会被剥离，但文件本身不会被删除；你自己加到 `.gitignore` 的内容也保留。执行成功后，清单文件本身也会被删除。
 
 安全保障：
 

@@ -94,6 +94,11 @@ export function validateOnboardApplyPreflight(
   const errors: string[] = [];
   if (planFactsHash === null) errors.push("could not read factsHash from .roll/onboard-plan.yaml");
   else if (planFactsHash !== currentFactsHash) {
+    const diagnosisFactsHash = readDiagnosisFactsHash(join(projectDir, ".roll", "init-diagnosis.yaml"));
+    const hasApplyMetadata = existsSync(join(projectDir, ".roll", "onboard-changeset.yaml"));
+    if (hasApplyMetadata && diagnosisFactsHash === planFactsHash) {
+      return { ok: true, errors: [], currentFactsHash, planFactsHash };
+    }
     errors.push(`plan factsHash is stale: expected ${currentFactsHash}, got ${planFactsHash}`);
   }
   return {
@@ -102,6 +107,12 @@ export function validateOnboardApplyPreflight(
     currentFactsHash,
     ...(planFactsHash !== null ? { planFactsHash } : {}),
   };
+}
+
+function readDiagnosisFactsHash(path: string): string | null {
+  if (!existsSync(path)) return null;
+  const match = /^factsHash:\s*"?([^"\n]+)"?/m.exec(readFileSync(path, "utf8"));
+  return match?.[1] ?? null;
 }
 
 function existsProjectPath(projectDir: string, target: string): boolean {

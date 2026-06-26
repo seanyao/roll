@@ -15,7 +15,7 @@
  * verbatim — the bash oracle uses them on every platform too, so parity holds.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { resolveLang, t, v2Catalog, type Lang } from "@roll/spec";
@@ -103,11 +103,12 @@ function runLaunchctl(args: string[]): number {
  * followed by `  - "value"` block items, or `key: []` for an empty list.
  * Returns the values for the requested section, in file order.
  */
-const SECTIONS = ["files_created", "dirs_created", "gitignore_entries_added", "launchd_plists_installed"] as const;
+const SECTIONS = ["files_merged", "files_created", "dirs_created", "gitignore_entries_added", "launchd_plists_installed"] as const;
 type Section = (typeof SECTIONS)[number];
 
 function parseChangeset(text: string): { ok: true; data: Record<Section, string[]> } | { ok: false } {
   const data: Record<Section, string[]> = {
+    files_merged: [],
     files_created: [],
     dirs_created: [],
     gitignore_entries_added: [],
@@ -142,6 +143,27 @@ function parseChangeset(text: string): { ok: true; data: Record<Section, string[
     }
   }
   return { ok: true, data };
+}
+
+const ROLL_MERGE_BLOCK_RE = /<!-- roll:onboard:start -->[\s\S]*?<!-- roll:onboard:end -->\n?/g;
+
+function stripRollMergeBlocks(text: string): string {
+  return text.replace(ROLL_MERGE_BLOCK_RE, "");
+}
+
+function writeFileAtomic(path: string, text: string): void {
+  const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    writeFileSync(tmp, text);
+    renameSync(tmp, path);
+  } catch (error) {
+    rmSync(tmp, { force: true });
+    throw error;
+  }
+}
+
+function resolveChangesetItem(projectDir: string, item: string): string {
+  return item.startsWith("/") ? resolve(item) : resolve(projectDir, item);
 }
 
 const HELP = `Usage: roll offboard [--confirm]
@@ -189,15 +211,16 @@ export function offboardCommand(args: string[]): number {
     err(m("offboard.failed_to_parse_changeset"));
     return 1;
   }
+  const mergedFiles = parsed.data.files_merged;
   const files = parsed.data.files_created;
   const dirs = parsed.data.dirs_created;
   const giEntries = parsed.data.gitignore_entries_added;
   const plists = parsed.data.launchd_plists_installed;
 
   // Cross-project guard — every recorded file/dir must resolve under project_dir.
-  const all = [...files, ...dirs];
+  const all = [...mergedFiles, ...files, ...dirs];
   for (const item of all) {
-    const resolved = item.startsWith("/") ? item : `${projectDir}/${item}`;
+    const resolved = resolveChangesetItem(projectDir, item);
     if (resolved !== projectDir && !resolved.startsWith(`${projectDir}/`)) {
       err(`Refusing to act on '${item}' — it does not resolve under ${projectDir}`);
       err(m("offboard.en", item));
@@ -218,6 +241,11 @@ export function offboardCommand(args: string[]): number {
     for (const item of files) process.stdout.write(`    rm   ${item}\n`);
     process.stdout.write("\n");
   }
+  if (mergedFiles.length > 0) {
+    process.stdout.write(`  ${YELLOW}Roll-owned sections to remove:${NC}\n`);
+    for (const item of mergedFiles) process.stdout.write(`    strip ${item}\n`);
+    process.stdout.write("\n");
+  }
   if (dirs.length > 0) {
     process.stdout.write(`  ${RED}Directories to remove:${NC}\n`);
     for (const item of dirs) process.stdout.write(`    rmdir/r ${item}\n`);
@@ -233,7 +261,7 @@ export function offboardCommand(args: string[]): number {
     for (const item of plists) process.stdout.write(`    unload ${item}\n`);
     process.stdout.write("\n");
   }
-  if (files.length === 0 && dirs.length === 0 && giEntries.length === 0 && plists.length === 0) {
+  if (mergedFiles.length === 0 && files.length === 0 && dirs.length === 0 && giEntries.length === 0 && plists.length === 0) {
     info("Changeset is empty — nothing to offboard.");
     info(m("offboard.change_list_is_empty_nothing_to"));
     return 0;
@@ -255,17 +283,28 @@ export function offboardCommand(args: string[]): number {
 
   // Apply.
   process.stdout.write(m("offboard.applying_offboard") + "\n");
+  for (const item of mergedFiles) {
+    const path = resolveChangesetItem(projectDir, item);
+    if (!existsSync(path)) continue;
+    const before = readFileSync(path, "utf8");
+    const after = stripRollMergeBlocks(before);
+    if (after !== before) {
+      writeFileAtomic(path, after);
+      process.stdout.write(`    stripped     ${item}\n`);
+    }
+  }
   for (const item of files) {
     try {
-      rmSync(join(projectDir, item), { force: true });
-      if (!existsSync(join(projectDir, item))) process.stdout.write(`    removed file ${item}\n`);
+      const path = resolveChangesetItem(projectDir, item);
+      rmSync(path, { force: true });
+      if (!existsSync(path)) process.stdout.write(`    removed file ${item}\n`);
     } catch {
       /* rm -f swallows errors */
     }
   }
   for (const item of dirs) {
     try {
-      rmSync(join(projectDir, item), { recursive: true, force: true });
+      rmSync(resolveChangesetItem(projectDir, item), { recursive: true, force: true });
       process.stdout.write(`    removed dir  ${item}\n`);
     } catch {
       /* rm -rf swallows errors */
@@ -278,7 +317,7 @@ export function offboardCommand(args: string[]): number {
       // grep -qFx: exact full-line match.
       if (lines.includes(item)) {
         const kept = lines.filter((l) => l !== item);
-        writeFileSync(gi, kept.join("\n"));
+        writeFileAtomic(gi, kept.join("\n"));
         process.stdout.write(`    .gitignore -   ${item}\n`);
       }
     }

@@ -44,6 +44,7 @@
  */
 import { parseAcBlocks } from "@roll/core";
 import { allowedDeliverableCmd } from "../runner/attest-gate.js";
+import { declaresPhysicalTerminalSpec, physicalTerminalFromSpecText, physicalTerminalParseError } from "./physical-terminal.js";
 
 /** The user-visible surface a story's visual-evidence AC captures. */
 export type VisualSurface =
@@ -60,7 +61,7 @@ export interface VisualEvidenceVerdict {
   /** true ⇒ the spec satisfies the design-phase visual-evidence contract. */
   ok: boolean;
   /** Machine-readable failure code; undefined when ok. */
-  code?: "missing-visual-evidence-ac" | "web-surface-without-deliverable-url" | "deliverable-cmd-rejected";
+  code?: "missing-visual-evidence-ac" | "web-surface-without-deliverable-url" | "deliverable-cmd-rejected" | "physical-terminal-invalid";
   /** Human-readable reason (EN) — undefined when ok. */
   reason?: string;
   /** When exempt, the recorded exemption reason (the contract was waived, not met). */
@@ -263,6 +264,11 @@ export function declaresDeliverableCmd(specText: string): boolean {
   return parseDeliverableCmdsFromSpec(specText).length > 0;
 }
 
+/** Whether the spec frontmatter declares a `physical_terminal:` block. */
+export function declaresPhysicalTerminal(specText: string): boolean {
+  return declaresPhysicalTerminalSpec(specText);
+}
+
 /**
  * Parse the `deliverable_cmd:` frontmatter values from a spec. Returns the raw
  * commands (scalar = whole line, block list = per item; NO comma split, because
@@ -402,6 +408,7 @@ export function visualSurface(specText: string): VisualSurface {
   if (!sawVisual) return "none";
   // FIX-341 AC2: the declared surface wins over AC-text heuristics.
   if (declaresDeliverableUrl(specText)) return "web";
+  if (declaresPhysicalTerminal(specText)) return "terminal";
   if (declaresDeliverableCmd(specText)) return "terminal";
   if (sawWeb) return "web"; // a real web surface always owes its url
   if (sawTerminal && !sawAmbiguous) return "terminal";
@@ -462,13 +469,29 @@ export function validateStoryVisualEvidence(specText: string): VisualEvidenceVer
     };
   }
 
+  // physical_terminal: validate the parsed spec and its command against the allowlist.
+  const physicalError = physicalTerminalParseError(specText);
+  if (physicalError !== null) {
+    return {
+      ok: false,
+      code: "physical-terminal-invalid",
+      reason: `invalid physical_terminal frontmatter: ${physicalError}`,
+      declaresDeliverableUrl: declares,
+      hasVisualEvidenceAc: hasAc,
+      surface,
+    };
+  }
+
   // FIX-383 — validate deliverable_cmd against the SAME allowlist attest uses.
   // A deliverable_cmd that attest would reject must be caught at design time
   // (validate), not left to runtime (attest gate) where it wastes a whole cycle.
   const rawCmds = parseDeliverableCmdsFromSpec(specText);
-  if (rawCmds.length > 0) {
-    const rejected = rawCmds.filter((c) => !allowedDeliverableCmd(c));
-    const streaming = rawCmds.filter((c) => isStreamingCommand(c));
+  const physicalTerminal = physicalTerminalFromSpecText(specText);
+  const physicalCmds = physicalTerminal === null ? [] : [physicalTerminal.command];
+  const allTerminalCmds = [...rawCmds, ...physicalCmds];
+  if (allTerminalCmds.length > 0) {
+    const rejected = allTerminalCmds.filter((c) => !allowedDeliverableCmd(c));
+    const streaming = allTerminalCmds.filter((c) => isStreamingCommand(c));
     if (rejected.length > 0) {
       const streamingHint =
         streaming.length > 0

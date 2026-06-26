@@ -37,6 +37,7 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
 import { hasVisualEvidenceAc } from "../lib/design-visual-evidence.js";
+import { physicalTerminalFromSpecText } from "../lib/physical-terminal.js";
 import { evaluateReviewScoreGate } from "../lib/review-score.js";
 
 export type AttestMode = "soft" | "hard";
@@ -722,6 +723,7 @@ export function declaresAnySurface(specText: string): boolean {
   // later reject it — the card DID declare an intent to demo a CLI surface; the
   // reject path fails loud at the gate, not here.
   if (parseFrontmatterListField(body, /^deliverable_cmd:/, { commaSplit: false }).length > 0) return true;
+  if (physicalTerminalFromSpecText(specText) !== null) return true;
   const ex = /^screenshot_exempt:\s*(.+)$/m.exec(body);
   if (ex !== null) {
     const reason = stripQuotes((ex[1] ?? "").trim());

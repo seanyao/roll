@@ -347,7 +347,7 @@ describe("frozen: roll init", () => {
     const fx = realFixture();
     execFileSync("git", ["init", "-q"], { cwd: fx.proj });
     execFileSync("git", ["remote", "add", "origin", "git@github.com:seanyao/APE-PR.git"], { cwd: fx.proj });
-    expect(tsInit(fx, []).status).toBe(0);
+    expect(tsInit(fx, ["--auto"]).status).toBe(0);
     expect(collectProjectsRegistry(fx.home)[0]).toMatchObject({
       name: "APE-PR",
       slug: expect.stringContaining("ape-pr-"),
@@ -355,9 +355,9 @@ describe("frozen: roll init", () => {
     });
   });
 
-  it("fresh init scaffolds an unknown project", () => {
+  it("fresh init --auto scaffolds an unknown project with a placeholder brief", () => {
     const fx = freshFixture();
-    expect(norm(tsInit(fx, []), fx)).toMatchInlineSnapshot(`
+    expect(norm(tsInit(fx, ["--auto"]), fx)).toMatchInlineSnapshot(`
       {
         "status": 0,
         "stderr": "",
@@ -376,26 +376,22 @@ describe("frozen: roll init", () => {
              +  AGENTS.md
         3. ✓  Create .roll/backlog.md
              +  .roll/backlog.md
-        4. ✓  Create .roll/features/
+        4. ✓  Create .roll/brief.md
+             +  .roll/brief.md
+        5. ✓  Create .roll/features/
              +  .roll/features/
-        5. ↷  Merge existing CLAUDE.md
+        6. ↷  Merge existing CLAUDE.md
              not modified
-        6. ✓  Link skills to AI clients
-        7. ✓  Scaffold cross-agent pairing
+        7. ✓  Link skills to AI clients
+        8. ✓  Scaffold cross-agent pairing
              +  .roll/pairing.yaml
 
       ────────────────────────────────────────────────────────────────────────────────
         ✓ Initialized
 
         NEXT  ·  下一步
-        1. Create a GitHub repo and push the initial commit
-           gh repo create <name> --public --source=. --push (or \`git remote add origin ... && git push -u origin main\`)
-        2. Enable the loop schedule
-           \`roll loop\` needs a pushable GitHub remote — create the repo first.
-        3. Edit .roll/backlog.md
-           open the backlog and add your first US
-        4. Run roll loop now
-           execute one cycle manually to test the flow
+        1. roll design
+           turn the project brief into Roll stories
       ════════════════════════════════════════════════════════════════════════════════
       ",
       }
@@ -403,9 +399,9 @@ describe("frozen: roll init", () => {
     assertScaffold(fx);
   });
 
-  it("fresh cli project gets a CLAUDE.md template", () => {
+  it("fresh cli project gets a CLAUDE.md template with --auto", () => {
     const fx = cliFixture();
-    expect(norm(tsInit(fx, []), fx)).toMatchInlineSnapshot(`
+    expect(norm(tsInit(fx, ["--auto"]), fx)).toMatchInlineSnapshot(`
       {
         "status": 0,
         "stderr": "",
@@ -424,26 +420,22 @@ describe("frozen: roll init", () => {
              +  AGENTS.md
         3. ✓  Create .roll/backlog.md
              +  .roll/backlog.md
-        4. ✓  Create .roll/features/
+        4. ✓  Create .roll/brief.md
+             +  .roll/brief.md
+        5. ✓  Create .roll/features/
              +  .roll/features/
-        5. ✓  Merge existing CLAUDE.md
+        6. ✓  Merge existing CLAUDE.md
              +  .claude/CLAUDE.md
-        6. ✓  Link skills to AI clients
-        7. ✓  Scaffold cross-agent pairing
+        7. ✓  Link skills to AI clients
+        8. ✓  Scaffold cross-agent pairing
              +  .roll/pairing.yaml
 
       ────────────────────────────────────────────────────────────────────────────────
         ✓ Initialized
 
         NEXT  ·  下一步
-        1. Create a GitHub repo and push the initial commit
-           gh repo create <name> --public --source=. --push (or \`git remote add origin ... && git push -u origin main\`)
-        2. Enable the loop schedule
-           \`roll loop\` needs a pushable GitHub remote — create the repo first.
-        3. Edit .roll/backlog.md
-           open the backlog and add your first US
-        4. Run roll loop now
-           execute one cycle manually to test the flow
+        1. roll design
+           turn the project brief into Roll stories
       ════════════════════════════════════════════════════════════════════════════════
       ",
       }
@@ -516,48 +508,18 @@ describe("frozen: roll init", () => {
     `);
   });
 
-  it("US-ONBOARD-NUDGE-002 AC2: fresh init without material keeps NEXT unchanged", () => {
+  it("US-INIT-005: empty non-interactive init without --auto does not mutate", () => {
     const fx = freshFixture();
     expect(norm(tsInit(fx, []), fx)).toMatchInlineSnapshot(`
       {
         "status": 0,
         "stderr": "",
-        "stdout": "
-        Project setup
-        ────────────────────────────────────────────────────────────────────────────────
-        Detected project type: unknown
-        Roll will scaffold AGENTS.md, .roll/backlog.md, .roll/features/, .roll/pairing.yaml, and .claude/CLAUDE.md.
-        Non-interactive mode — proceeding automatically. Use \`roll init --auto\` to suppress this notice.
-        ════════════════════════════════════════════════════════════════════════════════
-        INIT  ·  项目初始化 <PROGRESS>  
-      ────────────────────────────────────────────────────────────────────────────────
-
-        1. ✓  Detect project type
-        2. ✓  Create AGENTS.md
-             +  AGENTS.md
-        3. ✓  Create .roll/backlog.md
-             +  .roll/backlog.md
-        4. ✓  Create .roll/features/
-             +  .roll/features/
-        5. ↷  Merge existing CLAUDE.md
-             not modified
-        6. ✓  Link skills to AI clients
-        7. ✓  Scaffold cross-agent pairing
-             +  .roll/pairing.yaml
-
-      ────────────────────────────────────────────────────────────────────────────────
-        ✓ Initialized
-
-        NEXT  ·  下一步
-        1. Create a GitHub repo and push the initial commit
-           gh repo create <name> --public --source=. --push (or \`git remote add origin ... && git push -u origin main\`)
-        2. Enable the loop schedule
-           \`roll loop\` needs a pushable GitHub remote — create the repo first.
-        3. Edit .roll/backlog.md
-           open the backlog and add your first US
-        4. Run roll loop now
-           execute one cycle manually to test the flow
-      ════════════════════════════════════════════════════════════════════════════════
+        "stdout": "Detected: empty
+      Recommended path: guided-brief
+      Reasons:
+        - No Roll, codebase, or product-document signals found.
+      Next: roll design
+      No files changed.
       ",
       }
     `);
@@ -595,7 +557,7 @@ describe("frozen: roll init", () => {
 
   it("missing templates guard is owned by TS", () => {
     const fx = noTemplateFixture();
-    expect(norm(tsInit(fx, []), fx)).toMatchInlineSnapshot(`
+    expect(norm(tsInit(fx, ["--auto"]), fx)).toMatchInlineSnapshot(`
       {
         "status": 1,
         "stderr": "[roll] No templates found. Run 'roll setup' first.
@@ -775,7 +737,7 @@ describe("frozen: roll init", () => {
   // would otherwise skip the write.
   it("AC4: fresh init registers the project into ~/.roll/projects.json (one row, path = project)", () => {
     const fx = realFixture();
-    const run = tsInit(fx, []);
+    const run = tsInit(fx, ["--auto"]);
     expect(run.status).toBe(0);
     const rows = collectProjectsRegistry(fx.home);
     expect(rows).toHaveLength(1);

@@ -8,20 +8,24 @@
 roll init
 ```
 
-`roll init` 根据当前目录状态自动选择三种模式之一：
+`roll init` 会先诊断当前目录状态，再决定是否改动文件：
 
 1. **空目录** —— 全新起点。Roll 直接写入 `AGENTS.md`、空的 `.roll/`
    骨架（`backlog.md`、`features/`、`domain/`），以及一份
    `.roll/pairing.yaml`（[跨 agent 结对](pairing.md)，界面会告知），不问问题。这是
    **seed（播种）** 接入模式 —— 见 [patterns/seed-pattern.md](patterns/seed-pattern.md)。
-2. **已有遗留代码库** —— Roll 检测到源码但没有 `.roll/`。它**不会**默默
+2. **PRD/文档-only** —— Roll 发现需求或产品文档，但没有源码和 manifest。
+   这是新项目路径，会指向设计；不会进入 legacy onboarding。
+3. **已有代码库但未接入 Roll** —— Roll 检测到源码但没有 `.roll/`。它**不会**默默
    生成骨架，而是引导你用 `$roll-onboard`：扫描代码、问一组认知 / 范围 /
    隐私问题、产出 `.roll/onboard-plan.yaml` 供审阅。确认方案后执行
    `roll init --apply`。这是 **graft（嫁接）** 模式 —— 见
    [legacy-onboarding.md](legacy-onboarding.md) 与
    [patterns/graft-pattern.md](patterns/graft-pattern.md)。
-3. **重新初始化** —— `.roll/` 已存在。Roll 按章节重新合并全局约定到
-   `AGENTS.md`，保留所有项目特有内容，并补齐缺失的骨架文件。幂等可重复。
+4. **已初始化** —— `.roll/`、`AGENTS.md`、backlog、features 都存在。Roll
+   打印 `Already initialized` 和 `Next: roll next`。
+5. **部分接入 Roll** —— 有一部分 Roll 标记但不完整。Roll 只打印修复路径，不会
+   在项目上叠加新骨架。
 
 正在从 2.0 之前的布局升级（`BACKLOG.md` 在根目录、`docs/features/`、
 `docs/domain/`）？先跑 `npx @seanyao/roll@2 migrate` —— 见
@@ -44,7 +48,7 @@ roll sync
 curl -fsSL https://seanyao.github.io/roll/install | bash   # 安装 roll
 roll setup                 # 全机器配置 AI 工具（仅需一次）
 cd my-project
-roll init                  # 初始化该项目（遗留项目走 $roll-onboard）
+roll init                  # 诊断并路由该项目
 roll design                # 开交互式设计对话，填充 .roll/backlog.md
 roll loop on               # 开启自主执行
 ```
@@ -65,7 +69,8 @@ roll loop on               # 开启自主执行
 
 ## 幂等性
 
-`roll init` 可安全重复执行——已存在的文件会被跳过，只补充缺失的内容。
+`roll init` 可安全重复执行：完整项目会提示 `roll next`，部分项目会给出修复建议，
+不会再次强行跑脚手架。
 
 ## 另见
 

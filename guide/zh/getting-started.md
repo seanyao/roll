@@ -21,14 +21,15 @@ roll setup
 roll init
 ```
 
-`roll init` 会创建 `.roll/` 工作区和 `AGENTS.md`。已有代码库可能会先进入
-legacy onboarding，再真正写文件。
+`roll init` 会先诊断当前目录，再决定是否写文件。空项目走新项目骨架；已有
+代码库走 `$roll-onboard`；只有 PRD/文档的目录会被当成新项目并指向设计；
+部分 Roll 或旧 Roll 布局只打印修复/迁移建议，不直接改文件。
 
 ## 3. 从需求到 Backlog
 
-如果你手头有需求文档（PRD、草图、笔记），但 backlog 还是空的，Roll 会检测到
-这个状态并在三处提示你进入设计阶段：`roll init`（结尾）、`roll status`、
-`roll doctor`。
+如果你手头有需求文档（PRD、草图、笔记）但还没有源码，`roll init` 会把它识别
+为 PRD-only 新项目并指向设计。已有 Roll 骨架但 backlog 为空时，`roll status`
+和 `roll doctor` 仍会提示进入设计阶段。
 
 想立刻开始设计对话：
 

@@ -218,11 +218,12 @@ Clarify → Discuss → [peer: 方向评审] → Analyze+DDD → Design → [pee
 
 ### 4.2 项目初始化：`roll init`
 
-创建启动 Roll 工作流所需的最小文件集。实际行为根据当前目录状态分三种接入模式 —— 见 [patterns/](patterns/README.md)：
+先诊断当前目录，再选择路径 —— 见 [patterns/](patterns/README.md)：
 
 - **Seed（空目录）**：直接生成 `AGENTS.md` + `.roll/` 骨架，不问问题。
-- **Graft（已有遗留代码且无 `.roll/`）**：引导执行 `$roll-onboard`，扫描代码、问澄清问题、产出 `.roll/onboard-plan.yaml` 供审阅 —— 见 [legacy-onboarding.md](legacy-onboarding.md)。
-- **Re-init（`.roll/` 已存在）**：按节重新合并全局约定到 `AGENTS.md`，保留所有项目特定内容。
+- **PRD-only（只有需求文档、无源码）**：作为新项目路径指向设计。
+- **Graft（已有代码且无 `.roll/`）**：引导执行 `$roll-onboard`，扫描代码、问澄清问题、产出 `.roll/onboard-plan.yaml` 供审阅 —— 见 [legacy-onboarding.md](legacy-onboarding.md)。
+- **已初始化 / 部分 Roll / pre-2.0 Roll**：分别打印 `roll next`、修复建议或迁移建议，不在已有 Roll 标记上强行叠加骨架。
 
 2.0 之前的项目（`BACKLOG.md` 在根目录、`docs/features/`）需要先跑 `npx @seanyao/roll@2 migrate` —— 见 [migration-2.0.md](migration-2.0.md)。
 

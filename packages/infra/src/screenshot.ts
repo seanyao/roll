@@ -514,6 +514,9 @@ export async function captureScreenshot(
   const env = deps.env ?? process.env;
   const platform = deps.platform ?? process.platform;
   const skip = (reason: string): ScreenshotResult => ({ kind: req.kind, out: req.out, taken: false, skipped: reason });
+  // FIX-1022: the master "never touch the screen" switch the loop sets — read
+  // once; the web lane folds it into forceHeadless, the terminal lane gates on it.
+  const noScreencap = (env["ROLL_NO_SCREENCAP"] ?? "") === "1";
 
   try {
     if (req.kind === "web") {
@@ -524,10 +527,10 @@ export async function captureScreenshot(
       // repeatedly (disruptive) and (b) modern Chrome blocks file:// access
       // ("无法访问你的文件"), so the capture grabs an error page. Headless Chromium
       // can load file:// with no GUI and no popups.
-      // FIX-1022: ROLL_NO_SCREENCAP=1 is the master "never touch the screen"
-      // switch the loop sets — fold it into forceHeadless so the GUI/screencapture
-      // branch is never entered (headless Chromium still produces real evidence).
-      const forceHeadless = (env["ROLL_ATTEST_HEADLESS"] ?? "") === "1" || (env["ROLL_NO_SCREENCAP"] ?? "") === "1";
+      // FIX-1022: noScreencap (the master "never touch the screen" switch the
+      // loop sets) folds into forceHeadless so the GUI/screencapture branch is
+      // never entered (headless Chromium still produces real evidence).
+      const forceHeadless = (env["ROLL_ATTEST_HEADLESS"] ?? "") === "1" || noScreencap;
       if (deps.run === undefined) {
         const result = await captureWebViaBrowserTool(req, forceHeadless || platform !== "darwin");
         // FIX-379: only short-circuit on a REAL capture. A FAILED BrowserTool
@@ -593,7 +596,7 @@ export async function captureScreenshot(
       // screencapture(1) may fire unattended (the TCC prompt blocks with no one to
       // answer → dialog flood). FIX-392 promotes the deliverable_cmd stdout to a
       // text artifact when this skips, so evidence is preserved.
-      if ((env["ROLL_NO_SCREENCAP"] ?? "") === "1") return skip("ROLL_NO_SCREENCAP=1 (no screen capture in unattended context)");
+      if (noScreencap) return skip("ROLL_NO_SCREENCAP=1 (no screen capture in unattended context)");
       if ((env["ROLL_ATTEST_NO_TERMINAL"] ?? "") === "1") return skip("ROLL_ATTEST_NO_TERMINAL=1");
       if (platform !== "darwin") return skip("not macOS");
       const rawLine =

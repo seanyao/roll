@@ -60,7 +60,13 @@ import { detectDesignHandoff, renderDesignNudge } from "../lib/onboard-nudge.js"
 import { classifyInitState, collectInitFacts, renderStateMatrixFixture, type InitDiagnosis, type InitFacts } from "../lib/init-diagnosis.js";
 import { renderInitRecommendation } from "../lib/init-diagnosis-render.js";
 import { writeInitBrief, type InitBriefResult } from "../lib/init-brief.js";
-import { validateOnboardApplyPreflight } from "../lib/onboard-apply.js";
+import {
+  buildOnboardApplyReviewOperations,
+  renderOnboardApplyReview,
+  validateOnboardApplyPreflight,
+  type OnboardApplyReviewLabels,
+  type OnboardApplyReviewOperation,
+} from "../lib/onboard-apply.js";
 import { computeInitFactsHash } from "../lib/onboard-plan.js";
 import { discoverInteractiveAgents } from "../lib/interactive-agent.js";
 import { confirmYesNo, readConfirmLine } from "../lib/tty-confirm.js";
@@ -862,6 +868,7 @@ interface PlanFields {
   approved: string[];
   gitignoreDotRoll: boolean;
   agentRoutesTemplate: string;
+  renderPhase2Artifacts: boolean;
 }
 
 function readPlanFields(plan: string): PlanFields {
@@ -872,19 +879,21 @@ print(json.dumps({
   "approved": p.get("scope", {}).get("approved", []) or [],
   "gitignoreDotRoll": bool(p.get("privacy", {}).get("gitignore_dot_roll", False)),
   "agentRoutesTemplate": p.get("agent_routes_template", "") or "",
+  "renderPhase2Artifacts": any(isinstance(p.get(k), dict) for k in ("domain_model", "tech_analysis", "test_assessment")),
 }))
 `;
   const r = spawnSync("python3", ["-c", script, plan], { encoding: "utf8" });
-  if (r.status !== 0) return { approved: [], gitignoreDotRoll: false, agentRoutesTemplate: "" };
+  if (r.status !== 0) return { approved: [], gitignoreDotRoll: false, agentRoutesTemplate: "", renderPhase2Artifacts: false };
   try {
     const parsed = JSON.parse(r.stdout) as Partial<PlanFields>;
     return {
       approved: Array.isArray(parsed.approved) ? parsed.approved.filter((v): v is string => typeof v === "string") : [],
       gitignoreDotRoll: parsed.gitignoreDotRoll === true,
       agentRoutesTemplate: typeof parsed.agentRoutesTemplate === "string" ? parsed.agentRoutesTemplate : "",
+      renderPhase2Artifacts: parsed.renderPhase2Artifacts === true,
     };
   } catch {
-    return { approved: [], gitignoreDotRoll: false, agentRoutesTemplate: "" };
+    return { approved: [], gitignoreDotRoll: false, agentRoutesTemplate: "", renderPhase2Artifacts: false };
   }
 }
 
@@ -1032,7 +1041,77 @@ function addRollToGitignore(projectDir: string, changeset: OnboardChangeset): vo
   ok(m("init.added_roll_to_gitignore"));
 }
 
-function initApply(projectDir: string, opts: { autoMode?: boolean } = {}): number {
+function applyIsInteractive(opts: { forceInteractive?: boolean }): boolean {
+  return opts.forceInteractive === true || process.stdin.isTTY === true;
+}
+
+function claudeTemplateAvailable(projectDir: string): boolean {
+  const projectType = scanProjectType(projectDir);
+  return existsSync(join(rollTemplates(), projectType, "CLAUDE.md"));
+}
+
+function agentRoutesTemplateAvailable(templateName: string): boolean {
+  return templateName !== "skip" && existsSync(join(rollTemplates(), "agent-routes", `${templateName}.yaml`));
+}
+
+function applyReviewLabels(): OnboardApplyReviewLabels {
+  return {
+    title: m3("init.onboard_apply_review_title"),
+    action: m3("init.onboard_apply_review_action"),
+    target: m3("init.onboard_apply_review_target"),
+    mode: m3("init.onboard_apply_review_mode"),
+    ownerContent: m3("init.onboard_apply_review_owner_content"),
+    actions: {
+      append: m3("init.onboard_apply_review_action_append"),
+      create: m3("init.onboard_apply_review_action_create"),
+      keep: m3("init.onboard_apply_review_action_keep"),
+      merge: m3("init.onboard_apply_review_action_merge"),
+      replace: m3("init.onboard_apply_review_action_replace"),
+    },
+    modes: {
+      "append-line": m3("init.onboard_apply_review_mode_append_line"),
+      "create-if-missing": m3("init.onboard_apply_review_mode_create_if_missing"),
+      "ensure-directory": m3("init.onboard_apply_review_mode_ensure_directory"),
+      replace: m3("init.onboard_apply_review_mode_replace"),
+      "section-merge": m3("init.onboard_apply_review_mode_section_merge"),
+    },
+    ownerContentValues: {
+      "not present": m3("init.onboard_apply_review_owner_not_present"),
+      preserved: m3("init.onboard_apply_review_owner_preserved"),
+      replaced: m3("init.onboard_apply_review_owner_replaced"),
+      "roll-owned": m3("init.onboard_apply_review_owner_roll_owned"),
+    },
+  };
+}
+
+function printApplyReview(operations: readonly OnboardApplyReviewOperation[]): void {
+  info(m3("init.onboard_plan_validated_review"));
+  process.stdout.write(renderOnboardApplyReview(operations, applyReviewLabels()));
+  process.stdout.write(`  ${m3("init.onboard_apply_review_sync_note")}\n`);
+}
+
+function confirmApplyReview(
+  operations: readonly OnboardApplyReviewOperation[],
+  opts: { autoMode?: boolean; forceInteractive?: boolean; readLine?: () => string },
+): boolean {
+  printApplyReview(operations);
+  if (opts.autoMode === true) return true;
+  if (!applyIsInteractive(opts)) {
+    process.stdout.write(`  ${m3("init.onboard_apply_auto_required")}\n`);
+    process.stdout.write("    roll init --apply --auto\n");
+    process.stdout.write(`  ${m3("init.no_files_changed")}\n`);
+    return false;
+  }
+  const confirmed = confirmYesNo(`${m3("init.onboard_apply_confirm_prompt")} [y/N] `, (s) => process.stderr.write(s), opts.readLine ?? readConfirmLine);
+  if (opts.readLine !== undefined) process.stderr.write("\n");
+  if (!confirmed) process.stderr.write(`${m3("init.no_files_changed")}\n`);
+  return confirmed;
+}
+
+function initApply(
+  projectDir: string,
+  opts: { autoMode?: boolean; forceInteractive?: boolean; readLine?: () => string } = {},
+): number {
   const plan = join(projectDir, ".roll", "onboard-plan.yaml");
   const validator = join(rollPkgDir(), "lib", "roll-plan-validate.py");
   if (!existsSync(plan)) {
@@ -1059,17 +1138,24 @@ function initApply(projectDir: string, opts: { autoMode?: boolean } = {}): numbe
     process.stderr.write(`  ${m3("init.onboard_regenerate_before_apply")}\n`);
     return 1;
   }
-  if (opts.autoMode !== true && process.stdin.isTTY !== true) {
-    info(m3("init.onboard_plan_validated_review"));
-    process.stdout.write(`  ${m3("init.onboard_apply_auto_required")}\n`);
-    process.stdout.write("    roll init --apply --auto\n");
-    process.stdout.write(`  ${m3("init.no_files_changed")}\n`);
+  const fields = readPlanFields(plan);
+  let routesTemplate = fields.agentRoutesTemplate;
+  if (routesTemplate === "") routesTemplate = process.env["ROLL_AGENT_ROUTES_TEMPLATE"] ?? "default";
+  const reviewOperations = buildOnboardApplyReviewOperations({
+    projectDir,
+    approved: fields.approved,
+    gitignoreDotRoll: fields.gitignoreDotRoll,
+    agentRoutesTemplate: routesTemplate,
+    includeClaudeConventions: claudeTemplateAvailable(projectDir),
+    includeAgentRoutes: agentRoutesTemplateAvailable(routesTemplate),
+    includePhase2Artifacts: fields.renderPhase2Artifacts,
+  });
+  if (!confirmApplyReview(reviewOperations, opts)) {
     return 1;
   }
   info(m("init.applying_onboard_plan"));
   const summary: Summary = [];
   const changeset = beginChangeset(projectDir);
-  const fields = readPlanFields(plan);
   for (const item of fields.approved) recordChangeset(projectDir, changeset, "scope_approved", item);
 
   mergeGlobalToProject(projectDir, summary);
@@ -1085,8 +1171,6 @@ function initApply(projectDir: string, opts: { autoMode?: boolean } = {}): numbe
     writeBacklog(join(projectDir, ".roll", "backlog.md"), summary);
     recordChangeset(projectDir, changeset, "files_created", ".roll/backlog.md");
   }
-  let routesTemplate = fields.agentRoutesTemplate;
-  if (routesTemplate === "") routesTemplate = process.env["ROLL_AGENT_ROUTES_TEMPLATE"] ?? "default";
   if (routesTemplate !== "skip") {
     if (initSeedAgentRoutes(routesTemplate, projectDir, summary) === 0) {
       recordChangeset(projectDir, changeset, "files_created", ".roll/agent-routes.yaml");
@@ -1536,7 +1620,7 @@ function runExistingCodebaseDiagnoseAttestSmoke(): number {
   }
 }
 
-function invalidPlanFixture(hash: string): string {
+function onboardPlanFixture(hash: string): string {
   const ts = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
   return `version: 1
 generated_at: "${ts}"
@@ -1569,7 +1653,7 @@ agent_routes_template: skip
 `;
 }
 
-function invalidDiagnosisFixture(hash: string): string {
+function onboardDiagnosisFixture(hash: string): string {
   const ts = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
   return `version: 1
 createdAt: "${ts}"
@@ -1599,8 +1683,8 @@ function runExistingCodebaseInvalidPlanAttestSmoke(): number {
     process.env["ROLL_HOME"] = smokeHome;
     writeExistingCodebaseSmokeFixture(workspace);
     mkdirSync(join(workspace, ".roll"), { recursive: true });
-    writeFileSync(join(workspace, ".roll", "init-diagnosis.yaml"), invalidDiagnosisFixture(staleHash));
-    writeFileSync(join(workspace, ".roll", "onboard-plan.yaml"), invalidPlanFixture(staleHash));
+    writeFileSync(join(workspace, ".roll", "init-diagnosis.yaml"), onboardDiagnosisFixture(staleHash));
+    writeFileSync(join(workspace, ".roll", "onboard-plan.yaml"), onboardPlanFixture(staleHash));
 
     process.stdout.write("roll init attest smoke: existing-codebase-invalid-plan\n");
     process.stdout.write(`workspace: ${workspace}\n`);
@@ -1625,11 +1709,51 @@ function runExistingCodebaseInvalidPlanAttestSmoke(): number {
   }
 }
 
+function runExistingCodebaseReviewAttestSmoke(): number {
+  const originalCwd = process.cwd();
+  const originalRollHome = process.env["ROLL_HOME"];
+  const workspace = realpathSync(mkdtempSync(join(tmpdir(), "roll-init-review-")));
+  try {
+    const smokeHome = join(workspace, ".roll-home");
+    mkdirSync(smokeHome, { recursive: true });
+    cpSync(join(rollPkgDir(), "conventions"), join(smokeHome, "conventions"), { recursive: true });
+    writeFileSync(join(smokeHome, "config.yaml"), "# Roll config\nlang: en\n");
+    process.env["ROLL_HOME"] = smokeHome;
+    writeExistingCodebaseSmokeFixture(workspace);
+    const factsHash = computeInitFactsHash(collectInitFacts(workspace));
+    mkdirSync(join(workspace, ".roll"), { recursive: true });
+    writeFileSync(join(workspace, ".roll", "init-diagnosis.yaml"), onboardDiagnosisFixture(factsHash));
+    writeFileSync(join(workspace, ".roll", "onboard-plan.yaml"), onboardPlanFixture(factsHash));
+
+    process.stdout.write("roll init attest smoke: existing-codebase-review\n");
+    process.stdout.write(`workspace: ${workspace}\n`);
+    printExistingCodebaseSmokeTree();
+    process.stdout.write("  - .roll/init-diagnosis.yaml\n");
+    process.stdout.write("  - .roll/onboard-plan.yaml\n\n");
+
+    process.chdir(workspace);
+    const code = initCommand(["--apply"], { forceInteractive: true, readLine: () => "n" });
+    process.chdir(originalCwd);
+    process.stdout.write("\nPost-review mutation check:\n");
+    process.stdout.write(`  AGENTS.md: ${existsSync(join(workspace, "AGENTS.md")) ? "present" : "missing"}\n`);
+    process.stdout.write(`  .roll/backlog.md: ${existsSync(join(workspace, ".roll", "backlog.md")) ? "present" : "missing"}\n`);
+    process.stdout.write(`  .gitignore: ${existsSync(join(workspace, ".gitignore")) ? "present" : "missing"}\n`);
+    return code === 1 && !existsSync(join(workspace, "AGENTS.md")) && !existsSync(join(workspace, ".roll", "backlog.md")) ? 0 : 1;
+  } finally {
+    process.chdir(originalCwd);
+    if (originalRollHome === undefined) delete process.env["ROLL_HOME"];
+    else process.env["ROLL_HOME"] = originalRollHome;
+    rmSync(workspace, { recursive: true, force: true });
+    process.stdout.write(`cleanup: ${existsSync(workspace) ? "failed" : "removed"} ${workspace}\n`);
+  }
+}
+
 function runInitAttestSmoke(args: string[]): number {
   if (args.length === 1 && args[0] === "prd-only") return runPrdOnlyAttestSmoke();
   if (args.length === 1 && args[0] === "existing-codebase-diagnose") return runExistingCodebaseDiagnoseAttestSmoke();
   if (args.length === 1 && args[0] === "existing-codebase-invalid-plan") return runExistingCodebaseInvalidPlanAttestSmoke();
-  err("unknown init attest smoke fixture. Expected: roll init --attest-smoke prd-only | existing-codebase-diagnose | existing-codebase-invalid-plan");
+  if (args.length === 1 && args[0] === "existing-codebase-review") return runExistingCodebaseReviewAttestSmoke();
+  err("unknown init attest smoke fixture. Expected: roll init --attest-smoke prd-only | existing-codebase-diagnose | existing-codebase-invalid-plan | existing-codebase-review");
   return 1;
 }
 
@@ -1661,7 +1785,7 @@ export function initCommand(args: string[], deps: InitCommandDeps = {}): number 
     } catch {
       projectDir = process.cwd();
     }
-    return initApply(projectDir, { autoMode });
+    return initApply(projectDir, { autoMode, forceInteractive: deps.forceInteractive, readLine: deps.readLine });
   }
   const unknownFlag = args.find((a) => a.startsWith("-") && a !== "--auto" && a !== "--repair");
   if (unknownFlag !== undefined) {

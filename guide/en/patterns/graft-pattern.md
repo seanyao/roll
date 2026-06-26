@@ -71,7 +71,7 @@ my-legacy-project/                    ← 砧木：现有项目，零侵入
 2. Roll 检测到 Legacy 结构（有源码、无 `AGENTS.md`），进入 onboarding 引导
 3. 用户在 AI agent 里运行 `$roll-onboard`
 4. Skill 读代码、理解项目、走三组九问、产出 `.roll/onboard-plan.yaml`
-5. `roll init --apply` 按 plan 落盘 `.roll/` 结构
+5. `roll init --apply` 先打印计划操作检查点并等待确认，再按 plan 落盘 `.roll/` 结构
 6. 团队 review 生成的 backlog，调整后开始用 `$roll-build` 推新故事
 7. 可选：`roll loop on` 进入自治模式
 

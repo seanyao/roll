@@ -23,8 +23,11 @@ roll init
    `$roll-onboard`, an interactive skill that scans the codebase, asks a short
    set of cognition / scope / privacy questions, and produces
    `.roll/onboard-plan.yaml` for review. After reviewing the paired artifacts,
-   run `roll init --apply` in an interactive terminal or `roll init --apply --auto`
-   in non-interactive automation. This is the **graft** pattern — see
+   run `roll init --apply`. It prints a checkpoint listing each planned file
+   operation, including action, target path, merge/create mode, and owner-content
+   handling, then waits for confirmation in an interactive terminal. In
+   non-interactive automation, use `roll init --apply --auto` after that review.
+   This is the **graft** pattern — see
    [legacy-onboarding.md](legacy-onboarding.md) and
    [patterns/graft-pattern.md](patterns/graft-pattern.md).
 4. **Already initialized** — `.roll/`, `AGENTS.md`, backlog, and features are

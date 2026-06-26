@@ -78,8 +78,9 @@ and it only writes to its own directory.
 **Details:** `roll init` in an existing repo detects existing code and routes
 you to `$roll-onboard`. That skill reads your project, asks 9 questions across
 cognition / scope / privacy, and writes `.roll/onboard-plan.yaml` as a contract
-for `roll init --apply` to execute after review. Non-interactive automation must
-use `roll init --apply --auto`.
+for `roll init --apply` to execute after review. `roll init --apply` prints the
+planned operation checkpoint and waits for confirmation before writing.
+Non-interactive automation must use `roll init --apply --auto`.
 
 What Roll adds to your repo:
 

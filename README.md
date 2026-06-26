@@ -44,6 +44,10 @@ roll loop on        # let AI work through the backlog (optional)
 Empty directories ask what you are building in an interactive terminal; in scripts
 and CI, plain `roll init` is read-only and `roll init --auto` writes a placeholder
 brief before pointing to `roll design`.
+For existing-codebase grafts, `roll init --apply` validates the generated
+artifacts, prints a review checkpoint with every planned file operation, and
+waits for owner confirmation before writing. Automation must use
+`roll init --apply --auto` after that review.
 First time through? Start with [Getting started](guide/en/getting-started.md).
 
 ## Quick start for new projects

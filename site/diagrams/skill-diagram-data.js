@@ -6,8 +6,8 @@ window.RollSkillDiagrams = {
       title: { en: "Existing Codebase Onboarding", zh: "已有代码库接入" },
       sub: { en: "Survey. Infer. Plan. Apply later.", zh: "问询、推断、出计划，稍后再应用。" },
       lede: {
-        en: "Bring Roll into an existing codebase without surprise edits. The skill reads the project, asks nine scoped questions, writes only <b>.roll/onboard-plan.yaml</b>, and leaves mutation to <code>roll init --apply</code>.",
-        zh: "把 Roll 接入现有代码库，但不偷改源文件。本技能读取项目、提出 9 个范围化问题，只写 <b>.roll/onboard-plan.yaml</b>，真正落地交给 <code>roll init --apply</code>。"
+        en: "Bring Roll into an existing codebase without surprise edits. The skill reads the project, asks nine scoped questions, writes only <b>.roll/onboard-plan.yaml</b>, and leaves mutation to <code>roll init --apply</code>, which shows an operation checkpoint before writing.",
+        zh: "把 Roll 接入现有代码库，但不偷改源文件。本技能读取项目、提出 9 个范围化问题，只写 <b>.roll/onboard-plan.yaml</b>，真正落地交给 <code>roll init --apply</code>，并在写入前展示操作检查点。"
       },
       modes: [
         { tag: "A", title: { en: "Existing codebase", zh: "已有代码库" }, body: { en: "No Roll structure yet, source files already exist. Read code and infer project shape before asking.", zh: "已有源码、还没有 Roll 结构。先读代码推断项目形态，再提问。" } },
@@ -28,7 +28,7 @@ window.RollSkillDiagrams = {
           { no: "STEP 4", title: { en: "Write onboard plan only", zh: "只写接入计划" }, desc: { en: "Serialize the reviewed contract to <code>.roll/onboard-plan.yaml</code>. Do not edit source, gitignore, docs or backlog.", zh: "把已确认契约序列化到 <code>.roll/onboard-plan.yaml</code>。不改源码、gitignore、文档或 backlog。" }, gate: true, chips: ["hard boundary"] }
         ] },
         { key: "verify", label: { en: "Apply Later", zh: "稍后应用" }, steps: [
-          { no: "HANDOFF", title: { en: "roll init --apply owns mutation", zh: "由 roll init --apply 负责落地" }, desc: { en: "The plan is the handoff artifact. Shell-owned initialization applies it after review.", zh: "接入计划就是交接产物。用户 review 后，由 shell 侧初始化流程应用。" } }
+        { no: "HANDOFF", title: { en: "roll init --apply owns mutation", zh: "由 roll init --apply 负责落地" }, desc: { en: "The plan is the handoff artifact. Shell-owned initialization shows the file-operation checkpoint, waits for confirmation, then applies it.", zh: "接入计划就是交接产物。shell 侧初始化流程会先展示文件操作检查点、等待确认，再应用。" } }
         ] }
       ],
       foot: [

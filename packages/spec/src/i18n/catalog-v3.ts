@@ -310,11 +310,95 @@ export const v3Catalog: Catalog = {
   },
   "init.onboard_plan_validated_review": {
     en: "Onboard plan validated. Review .roll/init-diagnosis.yaml and .roll/onboard-plan.yaml before applying.",
-    zh: "Onboard plan 已通过校验。应用前请审阅 .roll/init-diagnosis.yaml 和 .roll/onboard-plan.yaml。",
+    zh: "接入方案已通过校验。应用前请审阅 .roll/init-diagnosis.yaml 和 .roll/onboard-plan.yaml。",
+  },
+  "init.onboard_apply_review_title": {
+    en: "Onboard apply review checkpoint",
+    zh: "应用接入方案审阅检查点",
+  },
+  "init.onboard_apply_review_action": {
+    en: "action",
+    zh: "动作",
+  },
+  "init.onboard_apply_review_target": {
+    en: "target",
+    zh: "路径",
+  },
+  "init.onboard_apply_review_mode": {
+    en: "mode",
+    zh: "模式",
+  },
+  "init.onboard_apply_review_owner_content": {
+    en: "owner content",
+    zh: "用户内容",
+  },
+  "init.onboard_apply_review_action_append": {
+    en: "append",
+    zh: "追加",
+  },
+  "init.onboard_apply_review_action_create": {
+    en: "create",
+    zh: "创建",
+  },
+  "init.onboard_apply_review_action_keep": {
+    en: "keep",
+    zh: "保留",
+  },
+  "init.onboard_apply_review_action_merge": {
+    en: "merge",
+    zh: "合并",
+  },
+  "init.onboard_apply_review_action_replace": {
+    en: "replace",
+    zh: "替换",
+  },
+  "init.onboard_apply_review_mode_append_line": {
+    en: "append-line",
+    zh: "追加行",
+  },
+  "init.onboard_apply_review_mode_create_if_missing": {
+    en: "create-if-missing",
+    zh: "缺失时创建",
+  },
+  "init.onboard_apply_review_mode_ensure_directory": {
+    en: "ensure-directory",
+    zh: "确保目录",
+  },
+  "init.onboard_apply_review_mode_replace": {
+    en: "replace",
+    zh: "替换",
+  },
+  "init.onboard_apply_review_mode_section_merge": {
+    en: "section-merge",
+    zh: "章节合并",
+  },
+  "init.onboard_apply_review_owner_not_present": {
+    en: "not present",
+    zh: "不存在",
+  },
+  "init.onboard_apply_review_owner_preserved": {
+    en: "preserved",
+    zh: "保留",
+  },
+  "init.onboard_apply_review_owner_replaced": {
+    en: "replaced",
+    zh: "会替换",
+  },
+  "init.onboard_apply_review_owner_roll_owned": {
+    en: "roll-owned",
+    zh: "Roll 管理",
+  },
+  "init.onboard_apply_review_sync_note": {
+    en: "After confirmation, Roll also syncs conventions to the configured AI tools and registers this project.",
+    zh: "确认后，Roll 还会把约定同步到已配置的 AI 工具，并登记这个项目。",
   },
   "init.onboard_apply_auto_required": {
     en: "Non-interactive apply requires explicit review acknowledgement:",
-    zh: "非交互 apply 需要显式确认已审阅：",
+    zh: "非交互应用需要显式确认已审阅：",
+  },
+  "init.onboard_apply_confirm_prompt": {
+    en: "Proceed with these changes?",
+    zh: "确认执行这些变更？",
   },
   "init.no_files_changed": {
     en: "No files changed.",

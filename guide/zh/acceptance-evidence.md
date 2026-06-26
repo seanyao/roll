@@ -98,7 +98,8 @@ soft 模式会记录缺口并发出同一类审计信号，但不阻塞本轮交
 - `Playwright Chromium` —— 可选的 headless web 截图工具，用于 `roll attest`
   和 dossier 截图。安装命令是 `npx playwright install chromium`。
 
-`roll doctor` 总是打印这些工具的可用性、权限状态、影响和修复命令。`roll init`
+`roll doctor` 总是打印这些工具的可用性、权限状态、影响和修复命令。只想看工具与
+Terminal.app Screen Recording 就绪度时，用 `roll doctor --tools`。`roll init`
 与 `roll loop go` 在启动时跑同一套探测；交互式终端会询问是否安装/打开缺失的
 设置步骤，自动化环境默认静默，除非设置 `ROLL_EXTERNAL_TOOLS=yes` 或
 `ROLL_EXTERNAL_TOOLS=no`。选择 `no` 时会说明证据影响，然后继续，不改机器状态。

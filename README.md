@@ -76,7 +76,7 @@ with `roll loop resume` when ready.
 | `roll loop alert [list\|ack\|resolve\|log]` | View / clear loop alerts |
 | `roll status` | Verdict-first truth summary read from the ONE snapshot — LOOP · CYCLE · RELEASE · STORY, with the STORY line's attest-coverage % (`done ≡ merged ∧ attested`) — then convention/AI-client sync health |
 | `roll pulse [--json]` | Today's delivery pulse: cycles in window, merged count, attested count, plus an ASCII sparkline from the story spectrum. Bilingual EN/中. `--json` for machine-readable output |
-| `roll doctor [skills]` | Environment + install diagnosis (agents, skill catalog, plists, launchd lanes) |
+| `roll doctor [skills\|--tools]` | Environment + install diagnosis; `roll doctor --tools` shows focused tool and screenshot readiness, including Terminal.app Screen Recording |
 | `roll daemon <start\|stop\|status>` | Opt-in read-only observability daemon for the live console; defaults to `127.0.0.1:7077`, records `.roll/loop/daemon.pid`, and is never auto-started by the loop |
 | `roll tune [reset]` | Suggest-only self-tuning from loop trends — read-only, never auto-applies |
 | **Cards & evidence** | |

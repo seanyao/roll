@@ -8,15 +8,18 @@
  * AC4: On Linux/headless/no-GUI hosts the report honestly says blocked/missing.
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   captureScreenshot,
   type CaptureFact,
+  type EvidenceRun,
   type ScreenshotKind,
+  type ShotRun,
 } from "@roll/infra";
+import { attestCommand } from "../src/commands/attest.js";
 import {
   hasPhysicalTerminalCapture,
   hasRejectedTerminalForPhysical,
@@ -29,10 +32,51 @@ afterAll(() => {
   for (const d of dirs) execFileSync("rm", ["-rf", d]);
 });
 
+const T0 = new Date("2026-06-06T01:02:03");
+const quietRun: EvidenceRun = () => Promise.resolve({ code: 0, stdout: "", stderr: "" });
+
 function tmp(tag: string): string {
   const d = realpathSync(mkdtempSync(join(tmpdir(), `roll-003b-${tag}-`)));
   dirs.push(d);
   return d;
+}
+
+function inDir<T>(proj: string, fn: () => Promise<T>): Promise<T> {
+  const save = process.cwd();
+  process.chdir(proj);
+  return fn().finally(() => process.chdir(save));
+}
+
+function silenced<T>(fn: () => Promise<T>): Promise<T> {
+  const o = process.stdout.write.bind(process.stdout);
+  const e = process.stderr.write.bind(process.stderr);
+  // @ts-expect-error capture-only
+  process.stdout.write = (): boolean => true;
+  // @ts-expect-error capture-only
+  process.stderr.write = (): boolean => true;
+  return fn().finally(() => {
+    process.stdout.write = o;
+    process.stderr.write = e;
+  });
+}
+
+function doctorPhysicalSpec(id: string): string {
+  return [
+    "---",
+    `id: ${id}`,
+    "physical_terminal:",
+    "  app: Terminal.app",
+    "  command: roll doctor --tools",
+    "  evidence: screenshot",
+    "---",
+    "",
+    `# ${id} — Physical Terminal evidence`,
+    "",
+    "## Acceptance Criteria",
+    "",
+    "- [ ] [visual-evidence] real physical Terminal.app screenshot proves the CLI output",
+    "",
+  ].join("\n");
 }
 
 // ── AC0: ScreenshotKind includes physical_terminal ──
@@ -254,5 +298,98 @@ describe("Attest gate: physical_terminal evidence validation", () => {
       captures: [{ kind: "terminal", out: "/tmp/t.png", taken: true }],
     }));
     expect(hasRejectedTerminalForPhysical(wt, "US-REGULAR-2")).toBe(false);
+  });
+});
+
+describe("US-INIT-003d: doctor --tools physical Terminal.app evidence", () => {
+  it("roll attest maps a real doctor --tools Terminal.app screenshot into a passing AC", async () => {
+    const proj = tmp("attest-gui");
+    const cardDir = join(proj, ".roll", "features", "demo", "US-PHYS-4A");
+    mkdirSync(cardDir, { recursive: true });
+    writeFileSync(join(cardDir, "spec.md"), doctorPhysicalSpec("US-PHYS-4A"));
+    writeFileSync(
+      join(cardDir, "ac-map.json"),
+      JSON.stringify(
+        [
+          {
+            ac: "US-PHYS-4A:AC1",
+            status: "pass",
+            evidence: [{ kind: "screenshot", label: "real Terminal.app doctor --tools", href: "screenshots/terminal.png" }],
+          },
+        ],
+        null,
+        2,
+      ) + "\n",
+    );
+    const guiShot: ShotRun = (cmd, argv) => {
+      if (cmd === "sh") {
+        const joined = argv.join(" ");
+        if (joined.includes("lsappinfo")) return Promise.resolve({ code: 0, stdout: '"LSDisplayName"="Terminal"\n', stderr: "" });
+        return Promise.resolve({ code: 0, stdout: "Tool readiness\nTerminal.app Screen Recording - ok\n", stderr: "" });
+      }
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "osascript" && String(argv[1] ?? "").includes("bounds of w")) {
+        return Promise.resolve({ code: 0, stdout: "0, 0, 1280, 800\n", stderr: "" });
+      }
+      if (cmd === "screencapture") {
+        writeFileSync(String(argv[argv.length - 1]), "PNGDATA");
+        return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+      }
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+
+    await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["US-PHYS-4A", "--capture-command", "roll doctor --tools"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          capture: { run: guiShot, platform: "darwin", env: {} },
+        }),
+      ),
+    );
+
+    const runDir = join(cardDir, "2026-06-06T01-02-03");
+    expect(existsSync(join(runDir, "screenshots", "terminal.png"))).toBe(true);
+    expect(existsSync(join(runDir, "screenshots", "terminal-headless.txt"))).toBe(false);
+    const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
+      captures?: Array<{ kind?: string; taken?: boolean; out?: string }>;
+    };
+    expect(evidence.captures?.[0]).toMatchObject({ kind: "physical_terminal", taken: true });
+    expect(evidence.captures?.[0]?.out).toContain("screenshots/terminal.png");
+    const html = readFileSync(join(runDir, "US-PHYS-4A-report.html"), "utf8");
+    expect(html).toContain('class="ac s-pass" id="US-PHYS-4A:AC1"');
+    expect(html).toContain('src="screenshots/terminal.png"');
+  });
+
+  it("roll attest does not promote headless stdout fallback to physical Terminal.app evidence", async () => {
+    const proj = tmp("attest-headless");
+    const cardDir = join(proj, ".roll", "features", "demo", "US-PHYS-4");
+    mkdirSync(cardDir, { recursive: true });
+    writeFileSync(join(cardDir, "spec.md"), doctorPhysicalSpec("US-PHYS-4"));
+    const headlessNoGui: ShotRun = (cmd) => {
+      if (cmd === "sh") return Promise.resolve({ code: 0, stdout: "doctor tools output\n", stderr: "" });
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Background\n", stderr: "" });
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+
+    await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["US-PHYS-4", "--capture-command", "roll doctor --tools"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          capture: { run: headlessNoGui, platform: "darwin", env: {} },
+        }),
+      ),
+    );
+
+    const runDir = join(cardDir, "2026-06-06T01-02-03");
+    expect(existsSync(join(runDir, "screenshots", "terminal-headless.txt"))).toBe(false);
+    const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
+      captures?: Array<{ kind?: string; taken?: boolean; skipped?: string }>;
+    };
+    expect(evidence.captures?.[0]).toMatchObject({ kind: "physical_terminal", taken: false });
+    expect(evidence.captures?.[0]?.skipped).toMatch(/no GUI|screen|permission|macOS|Terminal/i);
   });
 });

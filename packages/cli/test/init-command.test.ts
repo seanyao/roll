@@ -279,6 +279,7 @@ describe("roll init diagnosis router", () => {
     expect(run.stdout).toContain("source dirs: src");
     expect(run.stdout).toContain("test dirs: tests");
     expect(run.stdout).toContain("Roll markers: none");
+    expect(run.stdout).toMatch(/facts hash: sha256:[0-9a-f]{64}/);
     expect(run.stdout).toContain("Next: $roll-onboard");
     expect(run.stdout).toContain("$roll-onboard requires an AI agent");
     expect(run.stdout).toContain("No suitable AI agent detected");
@@ -378,6 +379,7 @@ describe("roll init diagnosis router", () => {
     expect(run.stdout).toContain("source dirs: src");
     expect(run.stdout).toContain("test dirs: tests");
     expect(run.stdout).toContain("Roll markers: none");
+    expect(run.stdout).toMatch(/facts hash: sha256:[0-9a-f]{64}/);
     expect(run.stdout).toContain("Next: $roll-onboard");
     expect(run.stdout).toContain("No files changed.");
     expect(run.stdout).toContain("cleanup: removed");

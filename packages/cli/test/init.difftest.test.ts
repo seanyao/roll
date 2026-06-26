@@ -38,6 +38,8 @@ interface Run {
   stderr: string;
 }
 
+const FACTS_HASH = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
 function freshHome(): string {
   const home = realpathSync(mkdtempSync(join(tmpdir(), "roll-init-home-")));
   dirs.push(home);
@@ -119,6 +121,30 @@ function applyFixture(planBody: string): Fixture {
   const fx = freshFixture();
   mkdirSync(join(fx.proj, ".roll"), { recursive: true });
   writeFileSync(join(fx.proj, ".roll", "onboard-plan.yaml"), planBody);
+  const factsHash = /factsHash:\s*"?([^"\n]+)"?/.exec(planBody)?.[1] ?? FACTS_HASH;
+  writeFileSync(
+    join(fx.proj, ".roll", "init-diagnosis.yaml"),
+    `version: 1
+createdAt: "2026-06-27T00:00:00Z"
+factsHash: "${factsHash}"
+diagnosis:
+  kind: codebase-no-roll
+  recommendedPath: agentic-onboard
+  confidence: high
+  reasons:
+    - Existing source, tests, or manifests found without Roll markers.
+agent:
+  name: kimi
+  status: available
+`,
+  );
+  return fx;
+}
+
+function applyFixtureWithoutDiagnosis(planBody: string): Fixture {
+  const fx = freshFixture();
+  mkdirSync(join(fx.proj, ".roll"), { recursive: true });
+  writeFileSync(join(fx.proj, ".roll", "onboard-plan.yaml"), planBody);
   return fx;
 }
 
@@ -137,9 +163,35 @@ function existingCodebaseFixtureWithFakeAgent(): Fixture {
       "#!/bin/sh",
       "mkdir -p .roll",
       "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+      `facts="${FACTS_HASH}"`,
+      "cat > .roll/init-diagnosis.yaml <<EOF",
+      "version: 1",
+      "createdAt: \"$ts\"",
+      "factsHash: \"$facts\"",
+      "diagnosis:",
+      "  kind: codebase-no-roll",
+      "  recommendedPath: agentic-onboard",
+      "  confidence: high",
+      "  reasons: [Existing source, tests, or manifests found without Roll markers.]",
+      "agent:",
+      "  name: kimi",
+      "  status: available",
+      "EOF",
       "cat > .roll/onboard-plan.yaml <<EOF",
       "version: 1",
       "generated_at: \"$ts\"",
+      "factsHash: \"$facts\"",
+      "file_operations:",
+      "  - path: .roll/init-diagnosis.yaml",
+      "    operation: write",
+      "    idempotent: true",
+      "  - path: .roll/onboard-plan.yaml",
+      "    operation: write",
+      "    idempotent: true",
+      "merge_intents:",
+      "  - target: roll_conventions",
+      "    owner: roll-init-apply",
+      "    strategy: merge global Roll conventions into AGENTS.md",
       "project_understanding:",
       "  type: cli",
       "  description: legacy cli",
@@ -182,9 +234,35 @@ function docsOnlyFixtureWithFakeAgent(): Fixture {
       "printf '%s' \"$1\" > prompt.txt",
       "mkdir -p .roll",
       "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+      `facts="${FACTS_HASH}"`,
+      "cat > .roll/init-diagnosis.yaml <<EOF",
+      "version: 1",
+      "createdAt: \"$ts\"",
+      "factsHash: \"$facts\"",
+      "diagnosis:",
+      "  kind: codebase-no-roll",
+      "  recommendedPath: agentic-onboard",
+      "  confidence: high",
+      "  reasons: [Existing source, tests, or manifests found without Roll markers.]",
+      "agent:",
+      "  name: kimi",
+      "  status: available",
+      "EOF",
       "cat > .roll/onboard-plan.yaml <<EOF",
       "version: 1",
       "generated_at: \"$ts\"",
+      "factsHash: \"$facts\"",
+      "file_operations:",
+      "  - path: .roll/init-diagnosis.yaml",
+      "    operation: write",
+      "    idempotent: true",
+      "  - path: .roll/onboard-plan.yaml",
+      "    operation: write",
+      "    idempotent: true",
+      "merge_intents:",
+      "  - target: roll_conventions",
+      "    owner: roll-init-apply",
+      "    strategy: merge global Roll conventions into AGENTS.md",
       "project_understanding:",
       "  type: cli",
       "  description: SoloGo Go score tracking app",
@@ -207,6 +285,39 @@ function validPlan(extra = ""): string {
   const ts = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
   return `version: 1
 generated_at: "${ts}"
+factsHash: "${FACTS_HASH}"
+file_operations:
+  - path: .roll/init-diagnosis.yaml
+    operation: write
+    idempotent: true
+  - path: .roll/onboard-plan.yaml
+    operation: write
+    idempotent: true
+merge_intents:
+  - target: roll_conventions
+    owner: roll-init-apply
+    strategy: merge global Roll conventions into AGENTS.md
+  - target: backlog
+    owner: roll-init-apply
+    strategy: create only when approved by scope
+  - target: features
+    owner: roll-init-apply
+    strategy: create only when approved by scope
+  - target: domain
+    owner: roll-init-apply
+    strategy: create only when approved by scope
+  - target: briefs
+    owner: roll-init-apply
+    strategy: create only when approved by scope
+  - target: agent_routes
+    owner: roll-init-apply
+    strategy: seed selected routing template
+  - target: gitignore
+    owner: roll-init-apply
+    strategy: append .roll/ only when privacy requests it
+  - target: sync_targets
+    owner: roll-init-apply
+    strategy: sync conventions after apply succeeds
 project_understanding:
   type: cli
   description: test cli
@@ -582,6 +693,18 @@ describe("frozen: roll init", () => {
     `);
   });
 
+  it("--apply rejects an onboard plan without the paired init diagnosis before mutating", () => {
+    const fx = applyFixtureWithoutDiagnosis(validPlan());
+    const run = norm(tsInit(fx, ["--apply"]), fx);
+
+    expect(run.status).toBe(1);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain("missing required paired artifact: .roll/init-diagnosis.yaml");
+    expect(run.stderr).toContain("Plan validation failed");
+    expect(read(fx.proj, "AGENTS.md")).toBe("<MISSING>");
+    expect(read(fx.proj, ".roll/backlog.md")).toBe("<MISSING>");
+  });
+
   it("--apply consumes a valid plan and records offboard changeset", () => {
     const fx = applyFixture(validPlan());
     expect(norm(tsInit(fx, ["--apply"]), fx)).toMatchInlineSnapshot(`
@@ -677,6 +800,7 @@ describe("frozen: roll init", () => {
         - test dirs: none
         - source files: 0
         - Roll markers: none
+        - facts hash: sha256:9c47dfd498fc38345970e3184dee4b297641268ffc6825ba2fba71def283f2d8
       Next: $roll-onboard
       Agent status: available: kimi
       Run \`$roll-onboard\` with an available agent, then run \`roll init --apply\` when the plan is ready.

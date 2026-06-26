@@ -116,6 +116,7 @@ describe("critical CLI E2E", () => {
     expect(result.out).toContain("tests/index.test.ts");
     expect(result.out).toContain("Detected: existing codebase without Roll");
     expect(result.out).toContain("Recommended path: agentic-onboard");
+    expect(result.out).toMatch(/facts hash: sha256:[0-9a-f]{64}/);
     expect(result.out).toContain("Next: $roll-onboard");
     expect(result.out).toContain("No files changed.");
     expect(result.out).toContain("cleanup: removed");

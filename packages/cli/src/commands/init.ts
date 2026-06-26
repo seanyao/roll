@@ -60,6 +60,7 @@ import { detectDesignHandoff, renderDesignNudge } from "../lib/onboard-nudge.js"
 import { classifyInitState, collectInitFacts, renderStateMatrixFixture, type InitDiagnosis, type InitFacts } from "../lib/init-diagnosis.js";
 import { renderInitRecommendation } from "../lib/init-diagnosis-render.js";
 import { writeInitBrief, type InitBriefResult } from "../lib/init-brief.js";
+import { computeInitFactsHash } from "../lib/onboard-plan.js";
 import { discoverInteractiveAgents } from "../lib/interactive-agent.js";
 import { confirmYesNo, readConfirmLine } from "../lib/tty-confirm.js";
 
@@ -1375,6 +1376,7 @@ function renderExistingCodebaseDiagnosis(facts: InitFacts, diagnosis: InitDiagno
   lines.push(`  - ${initCopy("test dirs", "测试目录")}: ${listOrNone(facts.codebase.testDirs, lang)}`);
   lines.push(`  - ${initCopy("source files", "源码文件数")}: ${facts.codebase.sourceFileCount}`);
   lines.push(`  - ${initCopy("Roll markers", "Roll 标记")}: ${listOrNone(rollMarkers, lang)}`);
+  lines.push(`  - ${initCopy("facts hash", "事实哈希")}: ${computeInitFactsHash(facts)}`);
   lines.push(`${initCopy("Next", "下一步")}: ${diagnosis.nextCommand}`);
   if (installedAgents.length === 0) {
     lines.push(

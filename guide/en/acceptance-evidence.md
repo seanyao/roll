@@ -113,8 +113,9 @@ at startup:
   dossier screenshots. Install with `npx playwright install chromium`.
 
 `roll doctor` always prints the current availability, permission state, impact,
-and repair command for these tools. `roll init` and `roll loop go` run the same
-probe at startup; in an interactive terminal they ask whether to install/open
+and repair command for these tools. Use `roll doctor --tools` when you only want
+the focused tool and Terminal.app Screen Recording readiness view. `roll init`
+and `roll loop go` run the same probe at startup; in an interactive terminal they ask whether to install/open
 the missing setup steps, and in automation they stay silent unless
 `ROLL_EXTERNAL_TOOLS=yes` or `ROLL_EXTERNAL_TOOLS=no` is set. Choosing `no`
 prints the evidence impact and continues without changing the machine.

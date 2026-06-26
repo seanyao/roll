@@ -1,13 +1,16 @@
 import { execSync } from "node:child_process";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { dispatch } from "../src/bridge.js";
 import { doctorCommand } from "../src/commands/doctor.js";
+import { registerAll } from "../src/commands/index.js";
 import { renderScreenRecordingSetupNotice } from "../src/commands/setup.js";
 import { EXTERNAL_TOOL_DECLARATIONS, type ExternalToolState } from "../src/lib/external-tools.js";
 
 const dirs: string[] = [];
+const repoRoot = resolve(__dirname, "../../..");
 
 afterAll(() => {
   for (const dir of dirs) execSync(`rm -rf '${dir}'`);
@@ -87,5 +90,25 @@ describe("US-INIT-003c Terminal.app screenshot preflight", () => {
     expect(notice).not.toBeNull();
     expect(notice).toContain("macOS Screen Recording permission is missing for Terminal.app");
     expect(notice).toContain("restart Terminal.app");
+  });
+
+  it("documents roll doctor --tools in CLI help and README", async () => {
+    registerAll();
+    let stdout = "";
+    const realOut = process.stdout.write.bind(process.stdout);
+    try {
+      // @ts-expect-error capture-only
+      process.stdout.write = (chunk: string | Uint8Array): boolean => {
+        stdout += String(chunk);
+        return true;
+      };
+      const result = await dispatch(["doctor", "--help"]);
+      expect(result.status).toBe(0);
+    } finally {
+      process.stdout.write = realOut;
+    }
+
+    expect(stdout).toContain("--tools");
+    expect(readFileSync(join(repoRoot, "README.md"), "utf8")).toContain("roll doctor --tools");
   });
 });

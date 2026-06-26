@@ -100,6 +100,29 @@ describe("critical CLI E2E", () => {
     expect(existsSync(join(project, ".roll"))).toBe(false);
   });
 
+  it("roll init existing-codebase diagnosis attest smoke runs isolated and cleans up", () => {
+    const project = tmpEmptyProject("init-codebase-smoke");
+
+    const result = runRoll(project, ["init", "--attest-smoke", "existing-codebase-diagnose"], {
+      ROLL_ATTEST_NO_BROWSER: "1",
+    });
+
+    expect(result.code).toBe(0);
+    expect(result.err).toBe("");
+    expect(result.out).toContain("roll init attest smoke: existing-codebase-diagnose");
+    expect(result.out).toContain("Fixture tree:");
+    expect(result.out).toContain("package.json");
+    expect(result.out).toContain("src/index.ts");
+    expect(result.out).toContain("tests/index.test.ts");
+    expect(result.out).toContain("Detected: existing codebase without Roll");
+    expect(result.out).toContain("Recommended path: agentic-onboard");
+    expect(result.out).toContain("Next: $roll-onboard");
+    expect(result.out).toContain("No files changed.");
+    expect(result.out).toContain("cleanup: removed");
+    expect(existsSync(join(project, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(project, ".roll"))).toBe(false);
+  });
+
   it("roll story new is the single card-minting entry: card folder + backlog row + index", () => {
     const project = tmpProject("story-new");
     writeFileSync(join(project, ".roll", "backlog.md"), "| Story | Description | Status |\n|---|---|---|\n");

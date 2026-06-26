@@ -15,9 +15,9 @@
  * _sync_conventions (1300-1303 → _sync_one_tool → _sync_convention_for_tool),
  * and _emit_init_v2_ui (2215-2276) re-implementing lib/roll-init.py.
  *
- * The legacy-codebase onboarding guide and `--apply` path are also owned here:
- * TS launches the selected agent directly, then applies `.roll/onboard-plan.yaml`
- * without entering the frozen bash engine.
+ * Existing-codebase diagnosis points users to `$roll-onboard`; the `--apply`
+ * path remains owned here and applies `.roll/onboard-plan.yaml` without entering
+ * the frozen bash engine.
  *
  * Whitelisted divergence: cmd_init calls `_install_launchd_plists` with all
  * output redirected to /dev/null (`>/dev/null 2>&1 || true`). It contributes
@@ -57,7 +57,7 @@ import { resolveProjectName, shouldSelfRegister, writeProjectRow } from "../lib/
 import { projectSlug } from "./dashboard.js";
 import { guideExternalToolSetup, silentPreinstallChromium } from "../lib/external-tools.js";
 import { detectDesignHandoff, renderDesignNudge } from "../lib/onboard-nudge.js";
-import { classifyInitState, collectInitFacts, renderStateMatrixFixture, type InitDiagnosis } from "../lib/init-diagnosis.js";
+import { classifyInitState, collectInitFacts, renderStateMatrixFixture, type InitDiagnosis, type InitFacts } from "../lib/init-diagnosis.js";
 import { renderInitRecommendation } from "../lib/init-diagnosis-render.js";
 import { writeInitBrief, type InitBriefResult } from "../lib/init-brief.js";
 import { discoverInteractiveAgents } from "../lib/interactive-agent.js";
@@ -1343,6 +1343,68 @@ function renderEmptyNonInteractiveGuide(diagnosis: InitDiagnosis): string {
   return `${renderInitRecommendation({ ...diagnosis, nextCommand: "roll design" }, msgLang())}\nNo files changed.`;
 }
 
+function initCopy(en: string, zh: string): string {
+  return msgLang() === "zh" ? zh : en;
+}
+
+function listOrNone(values: readonly string[], lang: Lang): string {
+  return values.length > 0 ? values.join(", ") : lang === "zh" ? "无" : "none";
+}
+
+function detectedRollMarkers(facts: InitFacts): string[] {
+  const markers: string[] = [];
+  if (facts.roll.dotRoll) markers.push(".roll/");
+  if (facts.roll.backlog) markers.push(".roll/backlog.md");
+  if (facts.roll.features) markers.push(".roll/features/");
+  if (facts.roll.agentsDoc) markers.push("AGENTS.md");
+  markers.push(...facts.roll.oldMarkers);
+  return [...new Set(markers)].sort();
+}
+
+function renderExistingCodebaseDiagnosis(facts: InitFacts, diagnosis: InitDiagnosis): string {
+  const lines: string[] = [];
+  const lang = msgLang();
+  const rollMarkers = detectedRollMarkers(facts);
+  const { installed: installedAgents } = discoverOnboardAgents();
+
+  lines.push(`${initCopy("Detected", "检测结果")}: ${initCopy("existing codebase without Roll", "已有代码库，尚未接入 Roll")}`);
+  lines.push(`${initCopy("Recommended path", "推荐路径")}: ${diagnosis.recommendedPath}`);
+  lines.push(`${initCopy("Facts:", "事实：")}`);
+  lines.push(`  - ${initCopy("manifests", "清单文件")}: ${listOrNone(facts.codebase.manifests, lang)}`);
+  lines.push(`  - ${initCopy("source dirs", "源码目录")}: ${listOrNone(facts.codebase.sourceDirs, lang)}`);
+  lines.push(`  - ${initCopy("test dirs", "测试目录")}: ${listOrNone(facts.codebase.testDirs, lang)}`);
+  lines.push(`  - ${initCopy("source files", "源码文件数")}: ${facts.codebase.sourceFileCount}`);
+  lines.push(`  - ${initCopy("Roll markers", "Roll 标记")}: ${listOrNone(rollMarkers, lang)}`);
+  lines.push(`${initCopy("Next", "下一步")}: ${diagnosis.nextCommand}`);
+  if (installedAgents.length === 0) {
+    lines.push(
+      `${initCopy("Agent status", "Agent 状态")}: ${initCopy("No suitable AI agent detected on PATH.", "PATH 上没有检测到可用的 AI agent。")}`,
+    );
+    lines.push(
+      initCopy(
+        "$roll-onboard requires an AI agent to inspect the codebase.",
+        "$roll-onboard 需要 AI agent 读取并诊断代码库。",
+      ),
+    );
+    lines.push(
+      initCopy(
+        "Install or sign in to an agent CLI (claude, kimi, or pi), or run `roll agent use <agent>`, then rerun `$roll-onboard`.",
+        "安装或登录 agent CLI（claude、kimi 或 pi），或运行 `roll agent use <agent>` 选择 agent，然后重新运行 `$roll-onboard`。",
+      ),
+    );
+  } else {
+    lines.push(`${initCopy("Agent status", "Agent 状态")}: ${initCopy("available", "可用")}: ${installedAgents.join(", ")}`);
+    lines.push(
+      initCopy(
+        "Run `$roll-onboard` with an available agent, then run `roll init --apply` when the plan is ready.",
+        "用可用 agent 运行 `$roll-onboard`，计划准备好后再运行 `roll init --apply`。",
+      ),
+    );
+  }
+  lines.push(initCopy("No files changed.", "未修改任何文件。"));
+  return lines.join("\n");
+}
+
 function promptEmptyProjectBrief(readLine: () => string = () => readConfirmLine()): string {
   process.stdout.write("\nWhat are you building?\n> ");
   try {
@@ -1404,9 +1466,55 @@ function runPrdOnlyAttestSmoke(): number {
   }
 }
 
+const EXISTING_CODEBASE_SMOKE_FILES = ["README.md", "package.json", "src/index.ts", "tests/index.test.ts"] as const;
+
+function writeExistingCodebaseSmokeFixture(workspace: string): void {
+  writeFileSync(join(workspace, "README.md"), "# Existing App\n\nA service with real source and tests.\n");
+  writeFileSync(join(workspace, "package.json"), '{"scripts":{"test":"vitest"}}\n');
+  mkdirSync(join(workspace, "src"), { recursive: true });
+  writeFileSync(join(workspace, "src", "index.ts"), "export const value = 1;\n");
+  mkdirSync(join(workspace, "tests"), { recursive: true });
+  writeFileSync(
+    join(workspace, "tests", "index.test.ts"),
+    "import { expect, it } from 'vitest';\nit('works', () => expect(1).toBe(1));\n",
+  );
+}
+
+function printExistingCodebaseSmokeTree(): void {
+  process.stdout.write("\nFixture tree:\n");
+  for (const rel of EXISTING_CODEBASE_SMOKE_FILES) process.stdout.write(`  - ${rel}\n`);
+}
+
+function runExistingCodebaseDiagnoseAttestSmoke(): number {
+  const originalCwd = process.cwd();
+  const originalPath = process.env["PATH"];
+  const workspace = realpathSync(mkdtempSync(join(tmpdir(), "roll-init-attest-existing-codebase-")));
+  const emptyBin = realpathSync(mkdtempSync(join(tmpdir(), "roll-init-attest-empty-bin-")));
+  let status = 1;
+  try {
+    writeExistingCodebaseSmokeFixture(workspace);
+    process.stdout.write("roll init attest smoke: existing-codebase-diagnose\n");
+    process.stdout.write(`workspace: ${workspace}\n`);
+    printExistingCodebaseSmokeTree();
+    process.chdir(workspace);
+    process.env["PATH"] = emptyBin;
+    status = initCommand([]);
+    process.chdir(originalCwd);
+    return status;
+  } finally {
+    process.chdir(originalCwd);
+    if (originalPath === undefined) delete process.env["PATH"];
+    else process.env["PATH"] = originalPath;
+    rmSync(workspace, { recursive: true, force: true });
+    rmSync(emptyBin, { recursive: true, force: true });
+    process.stdout.write(`cleanup: ${existsSync(workspace) ? "failed" : "removed"} ${workspace}\n`);
+  }
+}
+
 function runInitAttestSmoke(args: string[]): number {
   if (args.length === 1 && args[0] === "prd-only") return runPrdOnlyAttestSmoke();
-  err("unknown init attest smoke fixture. Expected: roll init --attest-smoke prd-only");
+  if (args.length === 1 && args[0] === "existing-codebase-diagnose") return runExistingCodebaseDiagnoseAttestSmoke();
+  err("unknown init attest smoke fixture. Expected: roll init --attest-smoke prd-only | existing-codebase-diagnose");
   return 1;
 }
 
@@ -1461,6 +1569,10 @@ export function initCommand(args: string[], deps: InitCommandDeps = {}): number 
     process.stdout.write(`${renderEmptyNonInteractiveGuide(initDiagnosis)}\n`);
     return 0;
   }
+  if (initDiagnosis.kind === "codebase-no-roll") {
+    process.stdout.write(`${renderExistingCodebaseDiagnosis(initFacts, initDiagnosis)}\n`);
+    return 0;
+  }
   if (shouldRenderDiagnosisOnly(initDiagnosis) && !(repairMode && initDiagnosis.kind === "roll-partial") && !freshConcierge) {
     process.stdout.write(`${renderInitRecommendation(initDiagnosis, msgLang())}\n`);
     return 0;
@@ -1488,8 +1600,6 @@ export function initCommand(args: string[], deps: InitCommandDeps = {}): number 
 
   if (existsSync(join(projectDir, "AGENTS.md"))) {
     hasAgents = true;
-  } else if (initDiagnosis.kind === "codebase-no-roll") {
-    return legacyOnboardGuide(projectDir);
   } else if (emptyInteractive) {
     emptyDescription = promptEmptyProjectBrief(deps.readLine);
   } else if (!confirmInitProject(projectDir, autoMode, deps.readLine, deps.forceInteractive)) {

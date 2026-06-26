@@ -122,7 +122,7 @@ function applyFixture(planBody: string): Fixture {
   return fx;
 }
 
-function legacyFixtureWithFakeAgent(): Fixture {
+function existingCodebaseFixtureWithFakeAgent(): Fixture {
   const fx = freshFixture();
   fx.pkg = fakePkgWithOnboardSkill();
   writeFileSync(join(fx.proj, "package.json"), "{\"scripts\":{\"test\":\"vitest\"}}\n");
@@ -663,51 +663,29 @@ describe("frozen: roll init", () => {
     expect(read(fx.proj, ".roll/backlog.md")).not.toContain("US-SEED-001");
   });
 
-  it("legacy project launches a selected agent then applies its plan", () => {
-    const fx = legacyFixtureWithFakeAgent();
+  it("existing codebase recommends agentic onboarding without mutating", () => {
+    const fx = existingCodebaseFixtureWithFakeAgent();
     expect(norm(tsInit(fx, []), fx)).toMatchInlineSnapshot(`
       {
         "status": 0,
-        "stderr": "
-      ",
-        "stdout": "[roll] Detected: legacy project (no AGENTS.md, manifest: package.json)
-
-        Onboarding
-        Onboarding requires an AI agent to read your code. Detected:
-
-          ✓ kimi   (installed)
-
-      The process will use your agent to call models. Token cost is on your own account.
-        Onboarding uses your agent to call models — tokens are billed to your account.
-
-      Code and conversations stay in your agent tool — Roll does not upload anything.
-        Your code and conversation stay in your agent — Roll never uploads anything.
-
-
-      [roll] Launching kimi…
-        Conversation ends with /exit (or Ctrl-C). On exit Roll will run apply for you.
-      Use /exit to end (or Ctrl-C). Roll will auto-apply after exit.
-
-      [roll] Plan written. Running apply…
-      [roll] Applying onboard plan...
-
-      Roll convention sync summary
-        │  + created     AGENTS.md                     │
-        │  + created     .roll/.version                │
-        │  + created     .roll/backlog.md              │
-        │  + created     .roll/features/               │
-        │  + created     .roll/features.md             │
-        └─────────────────────────────────────────────────────┘
-
-      [roll] Syncing conventions to AI tools...
-
-      [roll] Onboard apply complete.  Onboard
+        "stderr": "",
+        "stdout": "Detected: existing codebase without Roll
+      Recommended path: agentic-onboard
+      Facts:
+        - manifests: package.json
+        - source dirs: none
+        - test dirs: none
+        - source files: 0
+        - Roll markers: none
+      Next: $roll-onboard
+      Agent status: available: kimi
+      Run \`$roll-onboard\` with an available agent, then run \`roll init --apply\` when the plan is ready.
+      No files changed.
       ",
       }
     `);
-    expect(read(fx.proj, ".roll/onboard-plan.yaml")).toContain("legacy cli");
-    expect(read(fx.proj, ".roll/onboard-changeset.yaml")).toContain(".roll/backlog.md");
-    expect(read(fx.proj, "AGENTS.md")).toContain("# Agent Conventions");
+    expect(existsSync(join(fx.proj, ".roll"))).toBe(false);
+    expect(existsSync(join(fx.proj, "AGENTS.md"))).toBe(false);
   });
 
   it("US-INIT-005: docs-only project initializes from the detected document instead of onboard", () => {

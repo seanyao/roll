@@ -228,10 +228,14 @@ if [ -z "$ROLL_TMUX_WRAPPED" ] && [ -z "$ROLL_LOOP_NO_TMUX" ] && command -v "$TM
     exit 0
   fi
 fi
-# Headless capture defaults for unattended loop (FIX-393) — prevents macOS
-# screen recording permission dialogs from blocking the cycle.
+# Headless capture defaults for unattended loop (FIX-393/FIX-927/FIX-1022) —
+# prevents macOS Screen Recording TCC dialogs from blocking the cycle. The
+# readiness probe (external-tools.ts) and both real-capture lanes honor
+# ROLL_NO_SCREENCAP; isTTY is unreliable here because the loop wraps agents in a
+# script(1)+tmux PTY (isTTY===true), so FIX-927's isTTY headless-skip never fired.
 export ROLL_ATTEST_HEADLESS="\${ROLL_ATTEST_HEADLESS:-1}"
 export ROLL_ATTEST_NO_TERMINAL="\${ROLL_ATTEST_NO_TERMINAL:-1}"
+export ROLL_NO_SCREENCAP="\${ROLL_NO_SCREENCAP:-1}"
 # Acquire the cycle inflight lock so the next launchd tick yields (FIX-393).
 printf '%s:%s\\n' "$$" "$(date -u +%s)" > "$CYCLE_LOCK"
 trap 'rm -f "$CYCLE_LOCK"' EXIT
@@ -384,6 +388,9 @@ mkdir -p "$RT"
 # Shared with the loop runner so one pause halts both the loop and the scan.
 if [ -f "${input.projectPath}/.roll/loop/PAUSE-${input.slug}" ]; then exit 0; fi
 ROLL_BIN="\${ROLL_BIN:-${rollBin}}"
+# FIX-1022: dream run-once also hits the screencapture probe — never prompt in the
+# unattended scan (isTTY is unreliable under launchd/PTY; ROLL_NO_SCREENCAP is honored).
+export ROLL_NO_SCREENCAP="\${ROLL_NO_SCREENCAP:-1}"
 cd "${input.projectPath}" || exit 0
 echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] dream start (v3 run-once)" >> "$LOG"
 "$ROLL_BIN" dream run-once >> "$LOG" 2>&1

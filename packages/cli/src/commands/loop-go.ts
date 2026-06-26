@@ -523,7 +523,7 @@ export function planGoTmuxCommands(input: StartTmuxInput, state: GoTmuxState): s
     .concat("--worker")
     .map(shellQuote)
     .join(" ");
-  const command = `cd ${shellQuote(input.projectPath)} && ROLL_LOOP_GO_WORKER=1 ROLL_LOOP_NO_TMUX=1 ROLL_BIN=${shellQuote(input.rollBin)} ${shellQuote(input.rollBin)} loop go ${workerArgs}`;
+  const command = `cd ${shellQuote(input.projectPath)} && ROLL_LOOP_GO_WORKER=1 ROLL_LOOP_NO_TMUX=1 ROLL_NO_SCREENCAP=1 ROLL_BIN=${shellQuote(input.rollBin)} ${shellQuote(input.rollBin)} loop go ${workerArgs}`;
   const plan: string[][] = [];
   if (!state.sessionExists) {
     plan.push(["new-session", "-d", "-s", session, "-x", "200", "-y", "50", "-n", "watch", watch]);
@@ -596,6 +596,9 @@ function realRunOnce(input: RunOnceInput): Promise<number> {
       env: {
         ...process.env,
         ROLL_LOOP_GO_CHILD: "1",
+        // FIX-1022: unattended go-driver child must never trigger the macOS
+        // screencapture TCC prompt (isTTY is unreliable under PTY wrapping).
+        ROLL_NO_SCREENCAP: process.env["ROLL_NO_SCREENCAP"] ?? "1",
         ...(input.allowedCards !== undefined ? { [GOAL_ALLOWED_CARDS_ENV]: input.allowedCards.join(",") } : {}),
       },
       stdio: "inherit",
@@ -1202,7 +1205,7 @@ async function evaluateGoal(
     truths.push(storyTruthFromBacklog(row.id, row.status, { ...(prEvidence !== undefined ? { prEvidence } : {}), nowSec: deps.nowSec(), deliveryTruth }));
   }
   const verdict = goalEvaluationFromTruth(truths, goal.scope, { allowEmptyAllComplete: backlogExists(projectPath), inFlightIds });
-  // FIX-1020: when an --epic scope matches no cards, list the available epic
+  // FIX-1022: when an --epic scope matches no cards, list the available epic
   // names so the user knows what value to pass next time.
   let verdictReason = verdict.reason;
   if (verdictReason === "waiting:no_scope_cards" && goal.scope.kind === "epic") {

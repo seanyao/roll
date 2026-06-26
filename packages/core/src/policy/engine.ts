@@ -89,6 +89,19 @@ export interface LoopSafetyConfig {
    *  no proxy tool is hardcoded — the user sets their own command here; absent ⇒
    *  no auto-enable (the guard halts-and-tells). Absent ⇒ undefined. */
   proxyEnableCmd?: string;
+  /** FIX-1025 network-guard probe TARGET override. The connectivity precheck
+   *  defaults to a well-known foreign host (github.com), which a domestic-only
+   *  workflow never needs and a dropped VPN makes unreachable — wrongly halting
+   *  loop/release even though every CONFIGURED provider is directly reachable.
+   *  Set this to a host:port (or URL) you DO need reachable (e.g. your model /
+   *  embedding provider) so the precheck probes what the work actually uses.
+   *  Absent ⇒ undefined (probe the default host). */
+  probeUrl?: string;
+  /** FIX-1025 network-guard OPT-OUT. When true, the connectivity precheck is
+   *  skipped entirely — for users whose configured providers are reachable
+   *  directly and who do not want a fixed-host probe to gate their work. Absent /
+   *  false ⇒ the precheck runs as before. */
+  skipNetworkCheck?: boolean;
   /** FIX-338 (Phase B 杠杆1) execute-speed lever: PREBUILD the workspace dist into
    *  a fresh cycle worktree right after deps install, so the working agent finds
    *  `dist/roll.mjs` already built (saving the cold round-trips to locate + build
@@ -383,6 +396,17 @@ function parseLoopSafety(lines: PreLine[], start: number): [number, LoopSafetyCo
     ...(flat["proxy_enable_cmd"] !== undefined && flat["proxy_enable_cmd"] !== ""
       ? { proxyEnableCmd: flat["proxy_enable_cmd"] }
       : {}),
+    // FIX-1025: the connectivity-precheck probe TARGET override. A non-empty
+    // string points the probe at a host the domestic workflow actually needs
+    // (instead of the fixed foreign default), so a dropped VPN no longer halts
+    // loop/release when every configured provider is directly reachable.
+    ...(flat["probe_url"] !== undefined && flat["probe_url"] !== ""
+      ? { probeUrl: flat["probe_url"] }
+      : {}),
+    // FIX-1025: the connectivity-precheck OPT-OUT. Only an explicit
+    // `skip_network_check: true` disables the probe; anything else (absent /
+    // false / garbage) leaves it on so the guard runs as before.
+    ...(flat["skip_network_check"] === "true" ? { skipNetworkCheck: true } : {}),
     // FIX-338: the prebuild-dist execute-speed lever. DEFAULT-OFF — only an
     // explicit `prebuild_dist: true` turns it on; anything else (absent / false /
     // garbage) leaves it false so deploy stays a NO-OP (稳字纪律).

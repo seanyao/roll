@@ -15,6 +15,8 @@ import { join } from "node:path";
 import {
   networkNeeds,
   networkReachable,
+  parseProbeTarget,
+  readLoopSafetyNet,
   readProxyEnableCmd,
   requireNetwork,
 } from "../src/lib/require-network.js";
@@ -147,7 +149,7 @@ describe("FIX-298 requireNetwork — first checkpoint + active recovery", () => 
     expect(r.recovered).toBe(true);
     const joined = emitted.join("\n");
     expect(joined).toContain("running the configured proxy-enable command");
-    expect(joined).toContain("STILL unreachable");
+    expect(joined).toContain("STILL failed");
     expect(joined).toContain("roll update");
   });
 
@@ -228,5 +230,109 @@ describe("FIX-298 networkNeeds — the ONE declarative model of which commands n
 
   it("`loop run-once` is NOT centrally gated (it runs its own per-cycle guard)", () => {
     expect(networkNeeds("loop", ["run-once"])).toBeNull();
+  });
+});
+
+describe("FIX-1025 parseProbeTarget — configurable probe destination", () => {
+  it("parses bare host (defaults to 443)", () => {
+    expect(parseProbeTarget("dashscope.aliyuncs.com")).toEqual({ host: "dashscope.aliyuncs.com", port: 443 });
+  });
+  it("parses host:port", () => {
+    expect(parseProbeTarget("api.deepseek.com:8443")).toEqual({ host: "api.deepseek.com", port: 8443 });
+  });
+  it("parses a full https URL (drops scheme + path)", () => {
+    expect(parseProbeTarget("https://api.deepseek.com/v1/chat")).toEqual({ host: "api.deepseek.com", port: 443 });
+  });
+  it("http:// URL defaults to port 80", () => {
+    expect(parseProbeTarget("http://localhost")).toEqual({ host: "localhost", port: 80 });
+  });
+  it("empty / unparseable → undefined (caller falls back to default)", () => {
+    expect(parseProbeTarget("")).toBeUndefined();
+    expect(parseProbeTarget("  ")).toBeUndefined();
+    expect(parseProbeTarget("host:abc")).toBeUndefined();
+    expect(parseProbeTarget("host:0")).toBeUndefined();
+  });
+});
+
+describe("FIX-1025 networkReachable — probe target honors probe_url", () => {
+  it("resolves the CONFIGURED host (not the fixed default) when probe_url is set", async () => {
+    const seen: string[] = [];
+    const ok = await networkReachable({
+      probeUrl: "api.deepseek.com",
+      resolve: (h) => (seen.push(h), Promise.resolve([{ address: "1.2.3.4" }])),
+      tcpProbe: () => Promise.resolve(),
+    });
+    expect(ok).toBe(true);
+    expect(seen).toEqual(["api.deepseek.com"]); // probed the configured host
+  });
+});
+
+describe("FIX-1025 readLoopSafetyNet — probe_url + skip_network_check", () => {
+  it("reads probe_url and skip_network_check from policy.yaml", () => {
+    const repo = tmpRepo(
+      "ls",
+      "loop_safety:\n  probe_url: api.deepseek.com:443\n  skip_network_check: true\n",
+    );
+    const ls = readLoopSafetyNet(repo);
+    expect(ls.probeUrl).toBe("api.deepseek.com:443");
+    expect(ls.skipNetworkCheck).toBe(true);
+  });
+  it("absent file / keys → empty (skip off)", () => {
+    const ls = readLoopSafetyNet(tmpRepo("ls-none"));
+    expect(ls.probeUrl).toBeUndefined();
+    expect(ls.skipNetworkCheck).toBe(false);
+  });
+});
+
+describe("FIX-1025 requireNetwork — opt-out + configured-target probing", () => {
+  it("skip_network_check: true → proceeds WITHOUT probing, no halt", async () => {
+    let probed = false;
+    const emitted: string[] = [];
+    const r = await requireNetwork("roll release", "/tmp/repo", {
+      loopSafetyNet: () => ({ skipNetworkCheck: true }),
+      reachable: () => ((probed = true), Promise.resolve(false)),
+      emit: (l) => emitted.push(l),
+      lang: "en",
+    });
+    expect(r.ok).toBe(true);
+    expect(probed).toBe(false); // the probe was never run
+    expect(emitted.join("\n")).toContain("network precheck skipped");
+  });
+
+  it("probe_url is threaded to the reachability probe (configured target reachable → continue)", async () => {
+    const probeArgs: Array<string | undefined> = [];
+    const r = await requireNetwork("roll loop go", "/tmp/repo", {
+      loopSafetyNet: () => ({ probeUrl: "api.deepseek.com", skipNetworkCheck: false }),
+      reachable: (probes) => (probeArgs.push(probes?.probeUrl), Promise.resolve(true)),
+      emit: () => {},
+      lang: "en",
+    });
+    expect(r.ok).toBe(true);
+    expect(probeArgs).toEqual(["api.deepseek.com"]); // probed the CONFIGURED target
+  });
+
+  it("blocked + no hook → halt message names probe_url AND skip_network_check escape hatches", async () => {
+    const emitted: string[] = [];
+    const r = await requireNetwork("roll loop go", "/tmp/repo", {
+      loopSafetyNet: () => ({ skipNetworkCheck: false }),
+      reachable: () => Promise.resolve(false),
+      emit: (l) => emitted.push(l),
+      lang: "en",
+    });
+    expect(r.ok).toBe(false);
+    expect(emitted[0]).toContain("loop_safety.probe_url");
+    expect(emitted[0]).toContain("loop_safety.skip_network_check");
+  });
+
+  it("end-to-end: reads probe_url + skip from the repo's policy.yaml (no injected safety)", async () => {
+    const repo = tmpRepo("e2e-skip", "loop_safety:\n  skip_network_check: true\n");
+    let probed = false;
+    const r = await requireNetwork("roll loop go", repo, {
+      reachable: () => ((probed = true), Promise.resolve(false)),
+      emit: () => {},
+      lang: "en",
+    });
+    expect(r.ok).toBe(true);
+    expect(probed).toBe(false);
   });
 });

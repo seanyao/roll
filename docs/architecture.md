@@ -128,6 +128,9 @@ web          控制台（React，WebSocket 订阅 daemon）
 - 安全限幅：连续失败 N 次 → 暂停并告警
 - 路由规则：覆盖默认 agent-模型映射
 - 网络首检：任何需要网络的命令（`loop go/run`、agent 拉起、showcase、release 开 PR、update）把连通性（含代理）作为第一道检查。不通时跑配置的恢复钩子 `loop_safety.proxy_enable_cmd` 再复检：通了继续，仍不通就立刻停手并给出可操作的中英文原因——绝不带病前进、绝不空转、绝不静默降级。该钩子是用户自填的命令（roll 不内置任何代理工具）；未配置即停手并告知。
+  - 探测目标默认是 `github.com:443`（海外路径）。若你的工作流只用国内可直连的服务（如 DeepSeek/Bailian），把探测指向你确实需要的主机：`loop_safety.probe_url: <host:port 或 URL>`（FIX-1025）；这样 VPN 掉线也不会因一个工作流根本不需要的固定海外主机而误停。
+  - 完全跳过预检：`loop_safety.skip_network_check: true`（FIX-1025）——当你确认所配置的服务可直连、不希望被任何固定主机探测拦住时使用。
+  - English: the precheck defaults to `github.com:443`. For a domestic-only workflow, point it at a host you actually need via `loop_safety.probe_url`, or opt out entirely with `loop_safety.skip_network_check: true` — so a dropped VPN never halts loop/release when every configured provider is directly reachable.
 - Warm session 复用：`loop_safety.session_reuse: true` 只表达复用意图；必须同时设置 `loop_safety.resume_scope: same-story` 才会在同一 story 重试时复用 codex session。缺省、非法值或未设置 `resume_scope` 都按 `off` 处理，跨卡复用保持禁用。
 
 策略是规则源——它不直接执行动作，而是被其他上下文读取并遵循。

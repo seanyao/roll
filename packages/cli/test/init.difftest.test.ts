@@ -124,7 +124,16 @@ function replacePlanFactsHash(planBody: string, factsHash: string): string {
 }
 
 function applyFixture(planBody: string): Fixture {
+  return applyFixtureWithOwnerFiles(planBody, {});
+}
+
+function applyFixtureWithOwnerFiles(planBody: string, files: Record<string, string>): Fixture {
   const fx = freshFixture();
+  for (const [rel, text] of Object.entries(files)) {
+    const path = join(fx.proj, rel);
+    mkdirSync(join(path, ".."), { recursive: true });
+    writeFileSync(path, text);
+  }
   mkdirSync(join(fx.proj, ".roll"), { recursive: true });
   const factsHash = computeInitFactsHash(collectInitFacts(fx.proj, { ignoreOnboardArtifacts: true }));
   const normalizedPlan = replacePlanFactsHash(planBody, factsHash);
@@ -402,7 +411,7 @@ afterAll(() => {
 const ENV_KEYS = [
   "PATH", "HOME", "ROLL_HOME", "ROLL_PKG_DIR", "NO_COLOR", "ROLL_LANG", "LC_ALL", "LANG", "PWD",
   "ROLL_AGENT_ROUTES_TEMPLATE", "ROLL_ONBOARD_AGENT", "ROLL_ASSUME_TTY", "ROLL_BRAND_NAME",
-  "ROLL_ATTEST_NO_BROWSER",
+  "ROLL_ATTEST_NO_BROWSER", "ROLL_INIT_APPLY_FAIL_AFTER",
 ];
 
 function envBase(fx: Fixture, extra: Record<string, string>): Record<string, string> {
@@ -478,6 +487,10 @@ function norm(run: Run, fx: Fixture): Run {
 function read(relBase: string, rel: string): string {
   const path = join(relBase, rel);
   return existsSync(path) ? readFileSync(path, "utf8") : "<MISSING>";
+}
+
+function count(haystack: string, needle: string): number {
+  return haystack.split(needle).length - 1;
 }
 
 function assertScaffold(fx: Fixture): void {
@@ -918,6 +931,50 @@ describe("frozen: roll init", () => {
     expect(read(fx.proj, ".roll/.version")).toContain("roll_version:");
     expect(existsSync(join(fx.proj, ".roll", "domain"))).toBe(true);
     expect(existsSync(join(fx.proj, ".roll", "briefs"))).toBe(true);
+  });
+
+  it("--apply planned failure leaves recovery metadata and skips later mutations", () => {
+    const fx = applyFixture(validPlan());
+    const run = norm(tsInit(fx, ["--apply", "--auto"], { ROLL_INIT_APPLY_FAIL_AFTER: "backlog" }), fx);
+
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("Onboard apply failed before completion.");
+    expect(run.stderr).toContain("planned apply failure after backlog");
+    expect(run.stderr).toContain(".roll/onboard-changeset.yaml");
+    expect(read(fx.proj, ".gitignore")).toBe("<MISSING>");
+    const changeset = read(fx.proj, ".roll/onboard-changeset.yaml");
+    expect(changeset).toContain("files_created:");
+    expect(changeset).toContain('  - "AGENTS.md"');
+    expect(changeset).toContain('  - ".roll/backlog.md"');
+    expect(changeset).not.toContain('  - ".gitignore"');
+  });
+
+  it("--apply is idempotent for metadata, AGENTS merge markers, and .gitignore entries", () => {
+    const fx = applyFixtureWithOwnerFiles(validPlan(), {
+      "AGENTS.md": "# Owner Guide\n\nKeep this owner text.\n",
+      ".gitignore": "node_modules\n",
+    });
+
+    expect(tsInit(fx, ["--apply", "--auto"]).status).toBe(0);
+    expect(tsInit(fx, ["--apply", "--auto"]).status).toBe(0);
+
+    const agents = read(fx.proj, "AGENTS.md");
+    expect(agents).toContain("# Owner Guide");
+    expect(agents).toContain("Keep this owner text.");
+    expect(agents).toContain("<!-- roll:onboard:start -->");
+    expect(agents).toContain("<!-- roll:onboard:end -->");
+    expect(count(agents, "<!-- roll:onboard:start -->")).toBe(1);
+    expect(count(agents, "## 1. Communication")).toBe(1);
+
+    const gitignoreLines = read(fx.proj, ".gitignore").trimEnd().split("\n");
+    expect(gitignoreLines).toEqual(["node_modules", ".roll/"]);
+
+    const changeset = read(fx.proj, ".roll/onboard-changeset.yaml");
+    expect(count(changeset, '  - "AGENTS.md"')).toBe(1);
+    expect(count(changeset, '  - ".roll/backlog.md"')).toBe(1);
+    expect(count(changeset, '  - ".roll/"')).toBe(1);
+    expect(changeset).toContain("files_merged:");
+    expect(changeset).toContain("gitignore_entries_added:");
   });
 
   it("--apply renders Phase 2 markdown and skips seed in non-interactive mode", () => {

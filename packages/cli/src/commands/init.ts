@@ -36,6 +36,7 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -557,7 +558,7 @@ function mergeGlobalToProject(projectDir: string, summary: Summary): void {
       }
     }
     flush();
-    writeFileSync(dst, out);
+    writeFileAtomic(dst, out);
     summary.push("created|AGENTS.md");
     return;
   }
@@ -591,7 +592,10 @@ function mergeGlobalToProject(projectDir: string, summary: Summary): void {
     }
   }
   tryAppend();
-  if (appendBuffer !== "") writeFileSync(dst, dstText + appendBuffer);
+  if (appendBuffer !== "") {
+    const prefix = dstText.endsWith("\n") ? "\n" : "\n\n";
+    writeFileAtomic(dst, dstText + prefix + rollMergeBlock(appendBuffer));
+  }
 
   if (added > 0) summary.push("merged|AGENTS.md");
   else summary.push("unchanged|AGENTS.md");
@@ -607,7 +611,7 @@ function mergeClaudeToProject(projectDir: string, summary: Summary): void {
   mkdirSync(claudeDir, { recursive: true });
 
   if (!existsSync(outFile)) {
-    copyFileSync(tplFile, outFile);
+    writeFileAtomic(outFile, readFileSync(tplFile, "utf8"));
     summary.push("created|.claude/CLAUDE.md");
     return;
   }
@@ -635,7 +639,10 @@ function mergeClaudeToProject(projectDir: string, summary: Summary): void {
     }
   }
   tryAppend();
-  if (appendBuffer !== "") writeFileSync(outFile, outText + appendBuffer);
+  if (appendBuffer !== "") {
+    const prefix = outText.endsWith("\n") ? "\n" : "\n\n";
+    writeFileAtomic(outFile, outText + prefix + rollMergeBlock(appendBuffer));
+  }
 
   if (added > 0) summary.push("merged|.claude/CLAUDE.md");
   else summary.push("unchanged|.claude/CLAUDE.md");
@@ -658,7 +665,7 @@ function writeBacklog(path: string, summary: Summary): void {
     return;
   }
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, BACKLOG_TEMPLATE);
+  writeFileAtomic(path, BACKLOG_TEMPLATE);
   summary.push("created|.roll/backlog.md");
 }
 
@@ -689,7 +696,7 @@ function writeFeaturesMd(path: string, summary: Summary): void {
     return;
   }
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, FEATURES_TEMPLATE);
+  writeFileAtomic(path, FEATURES_TEMPLATE);
   summary.push("created|.roll/features.md");
 }
 
@@ -707,7 +714,7 @@ function initSeedAgentRoutes(templateName: string, projectDir: string, summary: 
     return 1;
   }
   mkdirSync(dirname(dest), { recursive: true });
-  copyFileSync(src, dest);
+  writeFileAtomic(dest, readFileSync(src, "utf8"));
   summary.push("created|.roll/agent-routes.yaml");
   return 0;
 }
@@ -721,7 +728,7 @@ function writeVersionStamp(projectDir: string, summary: Summary): void {
   }
   mkdirSync(join(projectDir, ".roll"), { recursive: true });
   const installedAt = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
-  writeFileSync(
+  writeFileAtomic(
     stampPath,
     `# Roll project version stamp — written by \`roll init\` (US-ONBOARD-019).
 # Used by \`_check_structure\` to recognise a previously-onboarded Roll project
@@ -748,7 +755,7 @@ function scaffoldPairing(projectDir: string, summary: Summary): void {
     return;
   }
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, renderPairingConfig(defaultPairingConfig(agentsInstalled(realAgentEnv()))));
+  writeFileAtomic(path, renderPairingConfig(defaultPairingConfig(agentsInstalled(realAgentEnv()))));
   summary.push("created|.roll/pairing.yaml");
 }
 
@@ -768,8 +775,27 @@ function syncConventions(): "ok" | "fail" {
   }
 }
 
+const ROLL_MERGE_START = "<!-- roll:onboard:start -->";
+const ROLL_MERGE_END = "<!-- roll:onboard:end -->";
+
+function writeFileAtomic(path: string, text: string): void {
+  const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    writeFileSync(tmp, text);
+    renameSync(tmp, path);
+  } catch (error) {
+    rmSync(tmp, { force: true });
+    throw error;
+  }
+}
+
+function rollMergeBlock(text: string): string {
+  return `${ROLL_MERGE_START}\n${text.replace(/^\n+/, "")}${ROLL_MERGE_END}\n`;
+}
+
 type ChangesetSection =
   | "scope_approved"
+  | "files_merged"
   | "files_created"
   | "dirs_created"
   | "gitignore_entries_added"
@@ -779,6 +805,7 @@ interface OnboardChangeset {
   onboardedAt: string;
   rollVersion: string;
   scopeApproved: string[];
+  filesMerged: string[];
   filesCreated: string[];
   dirsCreated: string[];
   gitignoreEntriesAdded: string[];
@@ -805,6 +832,7 @@ function renderChangeset(changeset: OnboardChangeset): string {
     `onboarded_at: "${changeset.onboardedAt}"\n` +
     `roll_version: "${changeset.rollVersion}"\n` +
     renderYamlList("scope_approved", changeset.scopeApproved) +
+    renderYamlList("files_merged", changeset.filesMerged) +
     renderYamlList("files_created", changeset.filesCreated) +
     renderYamlList("dirs_created", changeset.dirsCreated) +
     renderYamlList("gitignore_entries_added", changeset.gitignoreEntriesAdded) +
@@ -815,18 +843,84 @@ function renderChangeset(changeset: OnboardChangeset): string {
 function writeChangeset(projectDir: string, changeset: OnboardChangeset): void {
   const path = changesetPath(projectDir);
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, renderChangeset(changeset));
+  writeFileAtomic(path, renderChangeset(changeset));
 }
 
-function beginChangeset(projectDir: string): OnboardChangeset {
-  const changeset: OnboardChangeset = {
-    onboardedAt: isoNow(),
-    rollVersion: rollVersion() || "unknown",
+function emptyChangesetLists(): Omit<OnboardChangeset, "onboardedAt" | "rollVersion"> {
+  return {
     scopeApproved: [],
+    filesMerged: [],
     filesCreated: [],
     dirsCreated: [],
     gitignoreEntriesAdded: [],
     launchdPlistsInstalled: [],
+  };
+}
+
+function readExistingChangeset(projectDir: string): Omit<OnboardChangeset, "onboardedAt" | "rollVersion"> {
+  const path = changesetPath(projectDir);
+  const parsed = emptyChangesetLists();
+  if (!existsSync(path)) return parsed;
+  let current: ChangesetSection | null = null;
+  for (const rawLine of readFileSync(path, "utf8").split("\n")) {
+    const itemMatch = /^\s+-\s+(.*)$/.exec(rawLine);
+    if (itemMatch && current !== null) {
+      let value = (itemMatch[1] ?? "").trim();
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+      recordParsedChangesetValue(parsed, current, value);
+      continue;
+    }
+    const keyMatch = /^([a-z_]+):/.exec(rawLine);
+    const key = keyMatch?.[1] ?? "";
+    current = isChangesetSection(key) ? key : null;
+  }
+  return parsed;
+}
+
+function isChangesetSection(value: string): value is ChangesetSection {
+  return (
+    value === "scope_approved" ||
+    value === "files_merged" ||
+    value === "files_created" ||
+    value === "dirs_created" ||
+    value === "gitignore_entries_added" ||
+    value === "launchd_plists_installed"
+  );
+}
+
+function recordParsedChangesetValue(
+  changeset: Omit<OnboardChangeset, "onboardedAt" | "rollVersion">,
+  section: ChangesetSection,
+  value: string,
+): void {
+  const target =
+    section === "scope_approved"
+      ? changeset.scopeApproved
+      : section === "files_merged"
+        ? changeset.filesMerged
+        : section === "files_created"
+          ? changeset.filesCreated
+          : section === "dirs_created"
+            ? changeset.dirsCreated
+            : section === "gitignore_entries_added"
+              ? changeset.gitignoreEntriesAdded
+              : changeset.launchdPlistsInstalled;
+  if (!target.includes(value)) target.push(value);
+}
+
+function beginChangeset(projectDir: string): OnboardChangeset {
+  const existing = readExistingChangeset(projectDir);
+  const changeset: OnboardChangeset = {
+    onboardedAt: isoNow(),
+    rollVersion: rollVersion() || "unknown",
+    scopeApproved: existing.scopeApproved,
+    filesMerged: existing.filesMerged,
+    filesCreated: existing.filesCreated,
+    dirsCreated: existing.dirsCreated,
+    gitignoreEntriesAdded: existing.gitignoreEntriesAdded,
+    launchdPlistsInstalled: existing.launchdPlistsInstalled,
   };
   writeChangeset(projectDir, changeset);
   return changeset;
@@ -836,13 +930,16 @@ function recordChangeset(projectDir: string, changeset: OnboardChangeset, sectio
   const target =
     section === "scope_approved"
       ? changeset.scopeApproved
-      : section === "files_created"
-        ? changeset.filesCreated
-        : section === "dirs_created"
-          ? changeset.dirsCreated
-          : section === "gitignore_entries_added"
-            ? changeset.gitignoreEntriesAdded
-            : changeset.launchdPlistsInstalled;
+      : section === "files_merged"
+        ? changeset.filesMerged
+        : section === "files_created"
+          ? changeset.filesCreated
+          : section === "dirs_created"
+            ? changeset.dirsCreated
+            : section === "gitignore_entries_added"
+              ? changeset.gitignoreEntriesAdded
+              : changeset.launchdPlistsInstalled;
+  if (target.includes(value)) return;
   target.push(value);
   writeChangeset(projectDir, changeset);
 }
@@ -930,6 +1027,28 @@ function printMergeSummary(summary: Summary): void {
   process.stdout.write("  └─────────────────────────────────────────────────────┘\n");
 }
 
+function summaryAction(summary: Summary, file: string): string | null {
+  for (let index = summary.length - 1; index >= 0; index -= 1) {
+    const entry = summary[index] ?? "";
+    const sep = entry.indexOf("|");
+    if (sep < 0) continue;
+    if (entry.slice(sep + 1) === file) return entry.slice(0, sep);
+  }
+  return null;
+}
+
+function recordSummaryOwnership(projectDir: string, changeset: OnboardChangeset, summary: Summary, file: string): void {
+  const action = summaryAction(summary, file);
+  if (action === "created") recordChangeset(projectDir, changeset, "files_created", file);
+  else if (action === "merged") recordChangeset(projectDir, changeset, "files_merged", file);
+}
+
+function maybeFailApplyAfter(label: string): void {
+  if ((process.env["ROLL_INIT_APPLY_FAIL_AFTER"] ?? "") === label) {
+    throw new Error(`planned apply failure after ${label}`);
+  }
+}
+
 function seedBacklogRow(backlog: string, heading: string, row: string, id: string): boolean {
   if (!existsSync(backlog)) return false;
   const text = readFileSync(backlog, "utf8");
@@ -947,7 +1066,7 @@ function seedBacklogRow(backlog: string, heading: string, row: string, id: strin
     }
   }
   if (!inserted) out.push(row);
-  writeFileSync(backlog, out.join("\n"));
+  writeFileAtomic(backlog, out.join("\n"));
   return true;
 }
 
@@ -984,6 +1103,8 @@ function confirmSeed(count: number, noun: "story" | "fix", ids: string[], titles
 function renderAndSeed(projectDir: string, plan: string, changeset: OnboardChangeset): void {
   const renderer = join(rollPkgDir(), "lib", "roll-onboard-render.py");
   if (!existsSync(renderer)) return;
+  const knownRenderedFiles = [".roll/domain/context-map.md", ".roll/tech-analysis.md", ".roll/test-assessment.md"];
+  const existedBefore = new Set(knownRenderedFiles.filter((file) => existsSync(join(projectDir, file))));
   const r = spawnSync("python3", [renderer, plan, projectDir], { encoding: "utf8" });
   if (r.status === 2) return;
   if (r.status !== 0) {
@@ -999,7 +1120,7 @@ function renderAndSeed(projectDir: string, plan: string, changeset: OnboardChang
     if (raw === "") continue;
     const [kind, a = "", b = ""] = raw.split("|");
     if (kind === "FILE") {
-      recordChangeset(projectDir, changeset, "files_created", a);
+      if (!existedBefore.has(a)) recordChangeset(projectDir, changeset, "files_created", a);
       ok(m("init.onboard_rendered", a));
     } else if (kind === "SEED") {
       seedIds.push(a);
@@ -1036,7 +1157,7 @@ function addRollToGitignore(projectDir: string, changeset: OnboardChangeset): vo
   const gi = join(projectDir, ".gitignore");
   const current = existsSync(gi) ? readFileSync(gi, "utf8") : "";
   if (current.split("\n").includes(".roll/")) return;
-  writeFileSync(gi, current + (current === "" || current.endsWith("\n") ? "" : "\n") + ".roll/\n");
+  writeFileAtomic(gi, current + (current === "" || current.endsWith("\n") ? "" : "\n") + ".roll/\n");
   recordChangeset(projectDir, changeset, "gitignore_entries_added", ".roll/");
   ok(m("init.added_roll_to_gitignore"));
 }
@@ -1153,59 +1274,82 @@ function initApply(
   if (!confirmApplyReview(reviewOperations, opts)) {
     return 1;
   }
-  info(m("init.applying_onboard_plan"));
-  const summary: Summary = [];
-  const changeset = beginChangeset(projectDir);
-  for (const item of fields.approved) recordChangeset(projectDir, changeset, "scope_approved", item);
+  try {
+    info(m("init.applying_onboard_plan"));
+    const summary: Summary = [];
+    const changeset = beginChangeset(projectDir);
+    for (const item of fields.approved) recordChangeset(projectDir, changeset, "scope_approved", item);
 
-  mergeGlobalToProject(projectDir, summary);
-  mergeClaudeToProject(projectDir, summary);
+    mergeGlobalToProject(projectDir, summary);
+    recordSummaryOwnership(projectDir, changeset, summary, "AGENTS.md");
+    mergeClaudeToProject(projectDir, summary);
+    recordSummaryOwnership(projectDir, changeset, summary, ".claude/CLAUDE.md");
 
-  const stamp = join(projectDir, ".roll", ".version");
-  const stampExisted = existsSync(stamp);
-  writeVersionStamp(projectDir, summary);
-  if (!stampExisted && existsSync(stamp)) recordChangeset(projectDir, changeset, "files_created", ".roll/.version");
+    const stamp = join(projectDir, ".roll", ".version");
+    const stampExisted = existsSync(stamp);
+    writeVersionStamp(projectDir, summary);
+    if (!stampExisted && existsSync(stamp)) recordChangeset(projectDir, changeset, "files_created", ".roll/.version");
 
-  const approved = new Set(fields.approved);
-  if (approved.has("backlog")) {
-    writeBacklog(join(projectDir, ".roll", "backlog.md"), summary);
-    recordChangeset(projectDir, changeset, "files_created", ".roll/backlog.md");
-  }
-  if (routesTemplate !== "skip") {
-    if (initSeedAgentRoutes(routesTemplate, projectDir, summary) === 0) {
-      recordChangeset(projectDir, changeset, "files_created", ".roll/agent-routes.yaml");
+    const approved = new Set(fields.approved);
+    if (approved.has("backlog")) {
+      const backlogPath = join(projectDir, ".roll", "backlog.md");
+      const existed = existsSync(backlogPath);
+      writeBacklog(backlogPath, summary);
+      if (!existed && existsSync(backlogPath)) recordChangeset(projectDir, changeset, "files_created", ".roll/backlog.md");
+      maybeFailApplyAfter("backlog");
     }
+    if (routesTemplate !== "skip") {
+      const routesPath = join(projectDir, ".roll", "agent-routes.yaml");
+      const existed = existsSync(routesPath);
+      if (initSeedAgentRoutes(routesTemplate, projectDir, summary) === 0 && !existed && existsSync(routesPath)) {
+        recordChangeset(projectDir, changeset, "files_created", ".roll/agent-routes.yaml");
+      }
+    }
+    if (approved.has("features")) {
+      const featuresDir = join(projectDir, ".roll", "features");
+      const featuresMd = join(projectDir, ".roll", "features.md");
+      const dirExisted = existsSync(featuresDir);
+      const mdExisted = existsSync(featuresMd);
+      ensureFeaturesDir(featuresDir, summary);
+      writeFeaturesMd(featuresMd, summary);
+      if (!dirExisted && existsSync(featuresDir)) recordChangeset(projectDir, changeset, "dirs_created", ".roll/features");
+      if (!mdExisted && existsSync(featuresMd)) recordChangeset(projectDir, changeset, "files_created", ".roll/features.md");
+    }
+    if (approved.has("domain")) {
+      const path = join(projectDir, ".roll", "domain");
+      const existed = existsSync(path);
+      mkdirSync(path, { recursive: true });
+      if (!existed && existsSync(path)) recordChangeset(projectDir, changeset, "dirs_created", ".roll/domain");
+    }
+    if (approved.has("briefs")) {
+      const path = join(projectDir, ".roll", "briefs");
+      const existed = existsSync(path);
+      mkdirSync(path, { recursive: true });
+      if (!existed && existsSync(path)) recordChangeset(projectDir, changeset, "dirs_created", ".roll/briefs");
+    }
+
+    renderAndSeed(projectDir, plan, changeset);
+    printMergeSummary(summary);
+
+    if (fields.gitignoreDotRoll) addRollToGitignore(projectDir, changeset);
+
+    process.stdout.write("\n");
+    info(m("init.syncing_conventions_to_ai_tools"));
+    syncConventions();
+
+    // FIX-283 (AC4): the legacy-onboard adoption path also registers the project.
+    registerProject(projectDir);
+
+    process.stdout.write("\n");
+    ok(m("init.onboard_apply_complete_onboard"));
+    return 0;
+  } catch (error) {
+    err(m3("init.onboard_apply_failed"));
+    const message = error instanceof Error ? error.message : String(error);
+    if (message !== "") process.stderr.write(`  ${message}\n`);
+    process.stderr.write(`  ${m3("init.onboard_apply_recovery")}\n`);
+    return 1;
   }
-  if (approved.has("features")) {
-    ensureFeaturesDir(join(projectDir, ".roll", "features"), summary);
-    writeFeaturesMd(join(projectDir, ".roll", "features.md"), summary);
-    recordChangeset(projectDir, changeset, "dirs_created", ".roll/features");
-    recordChangeset(projectDir, changeset, "files_created", ".roll/features.md");
-  }
-  if (approved.has("domain")) {
-    mkdirSync(join(projectDir, ".roll", "domain"), { recursive: true });
-    recordChangeset(projectDir, changeset, "dirs_created", ".roll/domain");
-  }
-  if (approved.has("briefs")) {
-    mkdirSync(join(projectDir, ".roll", "briefs"), { recursive: true });
-    recordChangeset(projectDir, changeset, "dirs_created", ".roll/briefs");
-  }
-
-  renderAndSeed(projectDir, plan, changeset);
-  printMergeSummary(summary);
-
-  if (fields.gitignoreDotRoll) addRollToGitignore(projectDir, changeset);
-
-  process.stdout.write("\n");
-  info(m("init.syncing_conventions_to_ai_tools"));
-  syncConventions();
-
-  // FIX-283 (AC4): the legacy-onboard adoption path also registers the project.
-  registerProject(projectDir);
-
-  process.stdout.write("\n");
-  ok(m("init.onboard_apply_complete_onboard"));
-  return 0;
 }
 
 // ─── _emit_init_v2_ui (2215-2276) — re-implements lib/roll-init.py ────────────

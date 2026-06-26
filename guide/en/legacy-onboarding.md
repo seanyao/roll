@@ -136,7 +136,9 @@ If you've already got a `CONTRIBUTING.md` or a `.github/` workflow, Roll won't r
 
 ## How to exit
 
-`roll init --apply` records every file, directory, and `.gitignore` line it adds into `.roll/onboard-changeset.yaml`. The `roll offboard` command reads that record and undoes exactly those changes.
+`roll init --apply` records every Roll-owned file, directory, merged marker block, and `.gitignore` line it adds into `.roll/onboard-changeset.yaml`. Re-running the same plan keeps that metadata and deduplicates entries instead of losing the original offboard record. If apply fails midway, inspect the changeset and run `roll offboard --confirm` after review to reverse Roll-owned artifacts.
+
+Existing `AGENTS.md` files are preserved. Roll appends its managed sections between stable `<!-- roll:onboard:start -->` / `<!-- roll:onboard:end -->` markers so offboard can strip only those sections later.
 
 **Preview what will be undone (default):**
 
@@ -153,7 +155,7 @@ This is a dry-run — no files are removed. The output lists every artefact the 
 roll offboard --confirm
 ```
 
-Files and directories that Roll did not create are left untouched. Lines you added to `.gitignore` yourself are preserved. The changeset file itself is removed at the end of a successful apply.
+Files and directories that Roll did not create are left untouched. Marker-wrapped Roll sections are removed from existing owner files without deleting the file. Lines you added to `.gitignore` yourself are preserved. The changeset file itself is removed at the end of a successful apply.
 
 Safety:
 

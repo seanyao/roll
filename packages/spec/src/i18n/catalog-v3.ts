@@ -400,6 +400,14 @@ export const v3Catalog: Catalog = {
     en: "Proceed with these changes?",
     zh: "确认执行这些变更？",
   },
+  "init.onboard_apply_failed": {
+    en: "Onboard apply failed before completion.",
+    zh: "onboard 应用未完成即失败。",
+  },
+  "init.onboard_apply_recovery": {
+    en: "Recovery metadata: .roll/onboard-changeset.yaml if present. Inspect it, then run roll offboard --confirm to reverse Roll-owned artifacts.",
+    zh: "恢复元数据：如存在请检查 .roll/onboard-changeset.yaml，然后运行 roll offboard --confirm 回滚 Roll 管理的产物。",
+  },
   "init.no_files_changed": {
     en: "No files changed.",
     zh: "未修改任何文件。",

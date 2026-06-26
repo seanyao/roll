@@ -165,6 +165,13 @@ describe("collectInitFacts", () => {
     expect(result.ambiguityReasons).toContain("document candidate scan capped at 64 entries: docs/");
     expect(classifyInitState(result).kind).toBe("ambiguous");
   });
+
+  it("keeps ambiguous next command executable", () => {
+    const diagnosis = classifyInitState(facts({ ambiguityReasons: ["README.md exists but has no project intent"] }));
+
+    expect(diagnosis.kind).toBe("ambiguous");
+    expect(diagnosis.nextCommand).toBe("roll init");
+  });
 });
 
 describe("classifyInitState", () => {

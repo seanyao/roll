@@ -427,7 +427,7 @@ export function classifyInitState(facts: InitFacts): InitDiagnosis {
     return diagnosis(
       "ambiguous",
       "agentic-onboard",
-      "roll init --diagnose",
+      "roll init",
       facts.ambiguityReasons,
       "low",
       [

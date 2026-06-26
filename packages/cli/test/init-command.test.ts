@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -205,20 +205,49 @@ describe("roll init diagnosis router", () => {
     expect(existsSync(join(cwd, ".roll"))).toBe(false);
   });
 
-  it("classifies PRD-only workspaces as a fresh-project path and never launches onboard", () => {
+  it("routes PRD-only workspaces to fresh scaffold without launching onboard", () => {
     const cwd = project();
     write(cwd, "docs/intel-radar-PRD.md", "# Product Requirements\n\nBuild a radar for intelligence signals.\n");
 
     const run = runInit(cwd, []);
 
     expect(run.status).toBe(0);
-    expect(run.stdout).toContain("Detected: prd-only");
-    expect(run.stdout).toContain("Recommended path: scaffold-from-prd");
-    expect(run.stdout).toContain("Next: $roll-design");
+    expect(run.stdout).toContain("INIT");
+    expect(run.stdout).toContain("Initialized");
+    expect(run.stdout).toContain("roll design --from-file docs/intel-radar-PRD.md");
     expect(run.stdout).not.toContain("Onboarding");
+    expect(run.stdout).not.toContain("Detected: legacy project");
     expect(existsSync(join(cwd, "prompt.txt"))).toBe(false);
-    expect(existsSync(join(cwd, "AGENTS.md"))).toBe(false);
-    expect(existsSync(join(cwd, ".roll"))).toBe(false);
+    expect(existsSync(join(cwd, "AGENTS.md"))).toBe(true);
+    expect(existsSync(join(cwd, ".roll"))).toBe(true);
+  });
+
+  it("scaffolds PRD-only workspaces and writes a design handoff brief", () => {
+    const cwd = project();
+    write(
+      cwd,
+      "docs/intel-radar-PRD.md",
+      "# Intel Radar PRD\n\nBuild a radar for intelligence signals with source ranking and daily review.\n",
+    );
+
+    const run = runInit(cwd, []);
+
+    expect(run.status).toBe(0);
+    expect(run.stdout).toContain("INIT");
+    expect(run.stdout).toContain("Initialized");
+    expect(run.stdout).not.toContain("Onboarding");
+    expect(run.stdout).toContain(".roll/brief.md");
+    expect(run.stdout).toContain("roll design --from-file docs/intel-radar-PRD.md");
+    expect((run.stdout.match(/roll design/g) ?? []).length).toBe(1);
+    expect(existsSync(join(cwd, "AGENTS.md"))).toBe(true);
+    expect(existsSync(join(cwd, ".roll", "backlog.md"))).toBe(true);
+    expect(existsSync(join(cwd, ".roll", "brief.md"))).toBe(true);
+    const brief = readFileSync(join(cwd, ".roll", "brief.md"), "utf8");
+    expect(brief).toContain("docs/intel-radar-PRD.md");
+    expect(brief).toContain("Build a radar for intelligence signals");
+    const changeset = readFileSync(join(cwd, ".roll", "onboard-changeset.yaml"), "utf8");
+    expect(changeset).toContain(".roll/brief.md");
+    expect(changeset).toContain(".roll/backlog.md");
   });
 
   it("does not route git-only or empty source shells to existing-codebase onboarding", () => {

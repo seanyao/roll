@@ -452,23 +452,50 @@ describe("frozen: roll init", () => {
     assertScaffold(fx);
   });
 
-  it("US-INIT-004: fresh PRD-only init renders a new-project diagnosis without scaffolding", () => {
+  it("US-INIT-005: fresh PRD-only init scaffolds a new project brief without onboarding", () => {
     const fx = freshFixture();
     writeFileSync(join(fx.proj, "prd.md"), "# Product Requirements\n\nFeature list.");
     expect(norm(tsInit(fx, []), fx)).toMatchInlineSnapshot(`
       {
         "status": 0,
         "stderr": "",
-        "stdout": "Detected: prd-only
-      Recommended path: scaffold-from-prd
-      Reasons:
-        - Product or requirements documents found without source/manifests.
-      Next: $roll-design
+        "stdout": "
+        Project setup
+        ────────────────────────────────────────────────────────────────────────────────
+        Detected project type: unknown
+        Roll will scaffold AGENTS.md, .roll/backlog.md, .roll/features/, .roll/pairing.yaml, and .claude/CLAUDE.md.
+        Non-interactive mode — proceeding automatically. Use \`roll init --auto\` to suppress this notice.
+        ════════════════════════════════════════════════════════════════════════════════
+        INIT  ·  项目初始化 <PROGRESS>  
+      ────────────────────────────────────────────────────────────────────────────────
+
+        1. ✓  Detect project type
+        2. ✓  Create AGENTS.md
+             +  AGENTS.md
+        3. ✓  Create .roll/backlog.md
+             +  .roll/backlog.md
+        4. ✓  Create .roll/brief.md
+             +  .roll/brief.md
+        5. ✓  Create .roll/features/
+             +  .roll/features/
+        6. ↷  Merge existing CLAUDE.md
+             not modified
+        7. ✓  Link skills to AI clients
+        8. ✓  Scaffold cross-agent pairing
+             +  .roll/pairing.yaml
+
+      ────────────────────────────────────────────────────────────────────────────────
+        ✓ Initialized
+
+        NEXT  ·  下一步
+        1. roll design --from-file prd.md
+           turn the product brief into Roll stories
+      ════════════════════════════════════════════════════════════════════════════════
       ",
       }
     `);
-    expect(existsSync(join(fx.proj, "AGENTS.md"))).toBe(false);
-    expect(existsSync(join(fx.proj, ".roll"))).toBe(false);
+    expect(existsSync(join(fx.proj, "AGENTS.md"))).toBe(true);
+    expect(read(fx.proj, ".roll/brief.md")).toContain("Feature list.");
   });
 
   it("US-INIT-004: AGENTS-only project with PRD is partial Roll, not fresh scaffold", () => {
@@ -721,17 +748,18 @@ describe("frozen: roll init", () => {
     expect(read(fx.proj, "AGENTS.md")).toContain("# Agent Conventions");
   });
 
-  it("US-INIT-004: docs-only project renders PRD-only route instead of onboard", () => {
+  it("US-INIT-005: docs-only project initializes from the detected document instead of onboard", () => {
     const fx = docsOnlyFixtureWithFakeAgent();
     const run = tsInit(fx, []);
     expect(run.status).toBe(0);
-    expect(run.stdout).toContain("Detected: prd-only");
-    expect(run.stdout).toContain("Recommended path: scaffold-from-prd");
-    expect(run.stdout).toContain("Next: $roll-design");
+    expect(run.stdout).toContain("INIT");
+    expect(run.stdout).toContain("Initialized");
+    expect(run.stdout).toContain("roll design --from-file docs/spec.md");
     expect(run.stdout).not.toContain("Onboarding");
     expect(read(fx.proj, "prompt.txt")).toBe("<MISSING>");
     expect(read(fx.proj, ".roll/onboard-plan.yaml")).toBe("<MISSING>");
-    expect(read(fx.proj, "AGENTS.md")).toBe("<MISSING>");
+    expect(read(fx.proj, "AGENTS.md")).toContain("# Agent Conventions");
+    expect(read(fx.proj, ".roll/brief.md")).toContain("docs/spec.md");
   });
 
   it("FIX-1029: fresh init confirmation reads through the tty-confirm seam", () => {

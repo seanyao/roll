@@ -1733,9 +1733,51 @@ function writeExistingCodebaseSmokeFixture(workspace: string): void {
   );
 }
 
-function printExistingCodebaseSmokeTree(): void {
-  process.stdout.write("\nFixture tree:\n");
+function printExistingCodebaseSmokeTree(title = "Fixture tree"): void {
+  process.stdout.write(`\n${title}:\n`);
   for (const rel of EXISTING_CODEBASE_SMOKE_FILES) process.stdout.write(`  - ${rel}\n`);
+}
+
+const EXISTING_CODEBASE_ROLL_SMOKE_FILES = [
+  "AGENTS.md",
+  ".claude/CLAUDE.md",
+  ".roll/init-diagnosis.yaml",
+  ".roll/onboard-plan.yaml",
+  ".roll/onboard-changeset.yaml",
+  ".roll/.version",
+  ".roll/backlog.md",
+  ".gitignore",
+] as const;
+
+function printExistingCodebaseRollState(projectDir: string, title: string): void {
+  process.stdout.write(`\n${title}:\n`);
+  for (const rel of EXISTING_CODEBASE_ROLL_SMOKE_FILES) {
+    process.stdout.write(`  ${rel}: ${existsSync(join(projectDir, rel)) ? "present" : "missing"}\n`);
+  }
+}
+
+function countText(text: string, needle: string): number {
+  return text.split(needle).length - 1;
+}
+
+function runExistingCodebaseIdempotencyChecks(workspace: string): boolean {
+  const gitignore = existsSync(join(workspace, ".gitignore")) ? readFileSync(join(workspace, ".gitignore"), "utf8") : "";
+  const changeset = existsSync(join(workspace, ".roll", "onboard-changeset.yaml"))
+    ? readFileSync(join(workspace, ".roll", "onboard-changeset.yaml"), "utf8")
+    : "";
+  const gitignoreRollEntries = gitignore.split("\n").filter((line) => line === ".roll/").length;
+  const agentsEntries = countText(changeset, '  - "AGENTS.md"');
+  const claudeEntries = countText(changeset, '  - ".claude/CLAUDE.md"');
+  const backlogEntries = countText(changeset, '  - ".roll/backlog.md"');
+  const ok = gitignoreRollEntries === 1 && agentsEntries === 1 && claudeEntries === 1 && backlogEntries === 1;
+
+  process.stdout.write("\nIdempotency checks:\n");
+  process.stdout.write(`  .gitignore .roll/ entries: ${gitignoreRollEntries}\n`);
+  process.stdout.write(`  changeset AGENTS.md entries: ${agentsEntries}\n`);
+  process.stdout.write(`  changeset .claude/CLAUDE.md entries: ${claudeEntries}\n`);
+  process.stdout.write(`  changeset .roll/backlog.md entries: ${backlogEntries}\n`);
+  process.stdout.write(`  result: ${ok ? "pass" : "fail"}\n`);
+  return ok;
 }
 
 function runExistingCodebaseDiagnoseAttestSmoke(): number {
@@ -1892,12 +1934,92 @@ function runExistingCodebaseReviewAttestSmoke(): number {
   }
 }
 
+function writeExistingCodebaseOnboardArtifacts(workspace: string): void {
+  const factsHash = computeInitFactsHash(collectInitFacts(workspace));
+  mkdirSync(join(workspace, ".roll"), { recursive: true });
+  writeFileSync(join(workspace, ".roll", "init-diagnosis.yaml"), onboardDiagnosisFixture(factsHash));
+  writeFileSync(join(workspace, ".roll", "onboard-plan.yaml"), onboardPlanFixture(factsHash));
+}
+
+function printExistingCodebaseSmokeSummary(summary: {
+  diagnosis: string;
+  reviewCheckpoint: boolean;
+  applyCode: number | null;
+  reapplyCode: number | null;
+  idempotency: boolean | null;
+  cleanup: string;
+}): void {
+  process.stdout.write("\nSmoke summary:\n");
+  process.stdout.write(`  diagnosis: ${summary.diagnosis}\n`);
+  process.stdout.write(`  review checkpoint: ${summary.reviewCheckpoint ? "shown" : "not shown"}\n`);
+  process.stdout.write(`  apply result: ${summary.applyCode === null ? "not run" : summary.applyCode === 0 ? "pass" : "fail"}\n`);
+  process.stdout.write(`  idempotent re-apply result: ${summary.reapplyCode === null ? "not run" : summary.reapplyCode === 0 ? "pass" : "fail"}\n`);
+  process.stdout.write(`  idempotency checks: ${summary.idempotency === null ? "not run" : summary.idempotency ? "pass" : "fail"}\n`);
+  process.stdout.write(`  cleanup: ${summary.cleanup}\n`);
+}
+
+function runExistingCodebaseAttestSmoke(): number {
+  const originalCwd = process.cwd();
+  const workspace = realpathSync(mkdtempSync(join(tmpdir(), "roll-init-existing-codebase-")));
+  const summary = {
+    diagnosis: "not run",
+    reviewCheckpoint: false,
+    applyCode: null as number | null,
+    reapplyCode: null as number | null,
+    idempotency: null as boolean | null,
+    cleanup: "pending",
+  };
+  try {
+    writeExistingCodebaseSmokeFixture(workspace);
+    process.stdout.write("roll init attest smoke: existing-codebase\n");
+    process.stdout.write(`workspace: ${workspace}\n`);
+    printExistingCodebaseSmokeTree("Before fixture tree");
+
+    const facts = collectInitFacts(workspace);
+    const diagnosis = classifyInitState(facts);
+    summary.diagnosis = diagnosis.kind;
+    process.stdout.write("\nProduction diagnosis:\n");
+    process.stdout.write(`${renderExistingCodebaseDiagnosis(facts, diagnosis)}\n`);
+
+    writeExistingCodebaseOnboardArtifacts(workspace);
+    process.stdout.write("\nStructured plan artifacts:\n");
+    process.stdout.write("  - .roll/init-diagnosis.yaml\n");
+    process.stdout.write("  - .roll/onboard-plan.yaml\n");
+
+    process.chdir(workspace);
+    const applyCode = initCommand(["--apply"], { forceInteractive: true, readLine: () => "y" });
+    process.chdir(originalCwd);
+    summary.reviewCheckpoint = true;
+    summary.applyCode = applyCode;
+    process.stdout.write(`\nApply result: ${applyCode === 0 ? "pass" : "fail"} (exit ${applyCode})\n`);
+    printExistingCodebaseRollState(workspace, "After apply tree");
+    if (applyCode !== 0) return 1;
+
+    process.chdir(workspace);
+    const reapplyCode = initCommand(["--apply", "--auto"]);
+    process.chdir(originalCwd);
+    summary.reapplyCode = reapplyCode;
+    process.stdout.write(`\nIdempotent re-apply result: ${reapplyCode === 0 ? "pass" : "fail"} (exit ${reapplyCode})\n`);
+    printExistingCodebaseRollState(workspace, "After idempotent re-apply tree");
+    const idempotency = runExistingCodebaseIdempotencyChecks(workspace);
+    summary.idempotency = idempotency;
+    return reapplyCode === 0 && idempotency ? 0 : 1;
+  } finally {
+    process.chdir(originalCwd);
+    rmSync(workspace, { recursive: true, force: true });
+    summary.cleanup = existsSync(workspace) ? "failed" : "removed";
+    process.stdout.write(`cleanup: ${summary.cleanup} ${workspace}\n`);
+    printExistingCodebaseSmokeSummary(summary);
+  }
+}
+
 function runInitAttestSmoke(args: string[]): number {
   if (args.length === 1 && args[0] === "prd-only") return runPrdOnlyAttestSmoke();
+  if (args.length === 1 && args[0] === "existing-codebase") return runExistingCodebaseAttestSmoke();
   if (args.length === 1 && args[0] === "existing-codebase-diagnose") return runExistingCodebaseDiagnoseAttestSmoke();
   if (args.length === 1 && args[0] === "existing-codebase-invalid-plan") return runExistingCodebaseInvalidPlanAttestSmoke();
   if (args.length === 1 && args[0] === "existing-codebase-review") return runExistingCodebaseReviewAttestSmoke();
-  err("unknown init attest smoke fixture. Expected: roll init --attest-smoke prd-only | existing-codebase-diagnose | existing-codebase-invalid-plan | existing-codebase-review");
+  err("unknown init attest smoke fixture. Expected: roll init --attest-smoke prd-only | existing-codebase | existing-codebase-diagnose | existing-codebase-invalid-plan | existing-codebase-review");
   return 1;
 }
 

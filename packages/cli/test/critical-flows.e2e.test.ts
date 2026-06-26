@@ -54,6 +54,12 @@ function runRoll(cwd: string, args: string[], env: NodeJS.ProcessEnv = {}): { co
   return { code: result.status ?? 1, out: result.stdout ?? "", err: result.stderr ?? "" };
 }
 
+function scrubExistingCodebaseSmokeOutput(text: string): string {
+  return text
+    .replace(/workspace: .+roll-init-existing-codebase-[^\n]+/g, "workspace: <existing-codebase-workspace>")
+    .replace(/cleanup: removed .+roll-init-existing-codebase-[^\n]+/g, "cleanup: removed <existing-codebase-workspace>");
+}
+
 describe("critical CLI E2E", () => {
   it("roll init diagnosis fixture prints the full state matrix without mutating cwd", () => {
     const project = tmpEmptyProject("init-diagnose");
@@ -168,6 +174,43 @@ describe("critical CLI E2E", () => {
     expect(result.out).toContain(".roll/backlog.md: missing");
     expect(result.out).toContain(".gitignore: missing");
     expect(result.out).toContain("cleanup: removed");
+    expect(existsSync(join(project, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(project, ".roll"))).toBe(false);
+  });
+
+  it("roll init integrated existing-codebase attest smoke applies, re-applies, and cleans up", () => {
+    const project = tmpEmptyProject("init-codebase-integrated-smoke");
+
+    const result = runRoll(project, ["init", "--attest-smoke", "existing-codebase"], {
+      HOME: project,
+      ROLL_ATTEST_NO_BROWSER: "1",
+      ROLL_HOME: repoRoot,
+      ROLL_PKG_DIR: repoRoot,
+    });
+
+    expect(result.code).toBe(0);
+    expect(result.err).toContain("Proceed with these changes? [y/N]");
+    const out = scrubExistingCodebaseSmokeOutput(result.out);
+    expect(out).toContain("roll init attest smoke: existing-codebase");
+    expect(out).toContain("workspace: <existing-codebase-workspace>");
+    expect(out).toContain("Before fixture tree:");
+    expect(out).toContain("Detected: existing codebase without Roll");
+    expect(out).toContain("Onboard apply review checkpoint");
+    expect(out).toContain("Apply result: pass (exit 0)");
+    expect(out).toContain("After apply tree:");
+    expect(out).toContain("Idempotent re-apply result: pass (exit 0)");
+    expect(out).toContain("After idempotent re-apply tree:");
+    expect(out).toContain(".claude/CLAUDE.md: present");
+    expect(out).toContain("Idempotency checks:");
+    expect(out).toContain("result: pass");
+    expect(out).toContain("cleanup: removed <existing-codebase-workspace>");
+    expect(out).toContain("Smoke summary:");
+    expect(out).toContain("diagnosis: codebase-no-roll");
+    expect(out).toContain("review checkpoint: shown");
+    expect(out).toContain("apply result: pass");
+    expect(out).toContain("idempotent re-apply result: pass");
+    expect(out).toContain("idempotency checks: pass");
+    expect(out).toContain("cleanup: removed");
     expect(existsSync(join(project, "AGENTS.md"))).toBe(false);
     expect(existsSync(join(project, ".roll"))).toBe(false);
   });

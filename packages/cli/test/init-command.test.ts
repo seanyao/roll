@@ -294,6 +294,24 @@ describe("roll init diagnosis router", () => {
     expect(readFileSync(join(cwd, ".roll", "brief.md"), "utf8")).toContain("A weekly ops dashboard for release owners");
   });
 
+  it("runs the hidden PRD-only attest smoke in an isolated workspace and cleans it up", () => {
+    const cwd = project();
+
+    const run = runInit(cwd, ["--attest-smoke", "prd-only"]);
+
+    expect(run.status).toBe(0);
+    expect(run.stdout).toContain("roll init attest smoke: prd-only");
+    expect(run.stdout).toContain("INIT");
+    expect(run.stdout).toContain("Initialized");
+    expect(run.stdout).toContain("Created files:");
+    expect(run.stdout).toContain("AGENTS.md");
+    expect(run.stdout).toContain(".roll/brief.md");
+    expect(run.stdout).toContain("roll design --from-file docs/intel-radar-PRD.md");
+    expect(run.stdout).toContain("cleanup: removed");
+    expect(existsSync(join(cwd, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(cwd, ".roll"))).toBe(false);
+  });
+
   it("does not route git-only or empty source shells to existing-codebase onboarding", () => {
     const cwd = project();
     mkdir(cwd, "src");

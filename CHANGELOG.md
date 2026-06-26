@@ -8,6 +8,11 @@
 - **`roll init --apply` 可重复、可退出**：apply 现在用原子写入落地 Roll 管理文件，重复执行会保留并去重 `.roll/onboard-changeset.yaml`，已有 `AGENTS.md` 只追加带稳定 marker 的 Roll 区块；`roll offboard` 会剥离这些区块而不是删除用户文件，失败时会指向 recovery changeset。(US-INIT-006e) `[legacy-onboard]`
 - **既有代码库 onboard 有了端到端现场 smoke**：`roll init --attest-smoke existing-codebase` 会在隔离 fixture 里跑完整诊断、plan review、deterministic apply、幂等 re-apply 和 cleanup，供真实 Terminal.app 截图验收复现。(US-INIT-006f) `[legacy-onboard]`
 
+### 稳定性
+
+- **CLI 验收不再能「伪造」截图**：声明物理终端验收的故事，`roll attest` 现在只认真实 Terminal.app 窗口截图；无 GUI 或权限时诚实跳过，不再用无头命令输出凑数。(US-INIT-003d) `[acceptance-evidence]`
+  <!-- evidence: .roll/features/init-onboard/US-INIT-003d/latest/US-INIT-003d-report.html -->
+
 ## v3.626.2 — 2026-06-26
 
 ### 自动化流水线

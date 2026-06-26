@@ -7,10 +7,11 @@
  * AC3: Non-`physical_terminal` cards are unaffected by the new rejection logic (regression).
  * AC4: On Linux/headless/no-GUI hosts the report honestly says blocked/missing.
  */
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   captureScreenshot,
@@ -437,4 +438,59 @@ describe("US-INIT-003d: doctor --tools physical Terminal.app evidence", () => {
     expect(evidence.captures?.[0]).toMatchObject({ kind: "physical_terminal", taken: false });
     expect(evidence.captures?.[0]?.skipped).toMatch(/no GUI|screen|permission|macOS|Terminal/i);
   });
+
+  // US-INIT-003d fix-forward regression: the public CLI entry point must honour
+  // physical_terminal cards and refuse the headless text fallback. A stale
+  // globally-installed `roll` binary produced kind:terminal + terminal-headless.txt
+  // for this story; this subprocess test exercises the CLI exactly as the loop
+  // invokes it, so the bundled dev entry point is the code under test.
+  it("CLI entry point records physical_terminal skip for `roll doctor --tools` on a no-GUI host", () => {
+    const proj = tmp("attest-cli-entry");
+    const cardDir = join(proj, ".roll", "features", "init-onboard", "US-PHYS-CLI");
+    mkdirSync(cardDir, { recursive: true });
+    writeFileSync(join(cardDir, "spec.md"), doctorPhysicalSpec("US-PHYS-CLI"));
+    const here = dirname(fileURLToPath(import.meta.url));
+    const rollBin = resolve(here, "..", "bin", "roll.js");
+
+    const result = spawnSync(
+      process.execPath,
+      [rollBin, "attest", "US-PHYS-CLI", "--capture-command", `node ${rollBin} doctor --tools`],
+      {
+        cwd: proj,
+        env: {
+          ...process.env,
+          ROLL_LANG: "en",
+          NO_COLOR: "1",
+          ROLL_ATTEST_NO_TERMINAL: "1",
+        },
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+
+    // The command may warn about the skipped capture but exits 0 (attest degrades gracefully).
+    expect(result.status).toBe(0);
+    let runDir = "";
+    for (const name of readdirIfPossible(cardDir)) {
+      if (/^\d{4}-\d{2}-\d{2}T/.test(name) || /^\d{8}-\d{6}-\d+/.test(name)) {
+        runDir = join(cardDir, name);
+        break;
+      }
+    }
+    expect(runDir).not.toBe("");
+    expect(existsSync(join(runDir, "screenshots", "terminal-headless.txt"))).toBe(false);
+    const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
+      captures?: Array<{ kind?: string; taken?: boolean; skipped?: string }>;
+    };
+    expect(evidence.captures?.[0]).toMatchObject({ kind: "physical_terminal", taken: false });
+    expect(evidence.captures?.[0]?.skipped).toMatch(/physical_terminal/);
+  });
 });
+
+function readdirIfPossible(p: string): string[] {
+  try {
+    return readdirSync(p);
+  } catch {
+    return [];
+  }
+}

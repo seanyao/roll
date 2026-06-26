@@ -107,6 +107,12 @@ function runInitInteractive(cwd: string, args: string[], answer: string): Run {
   return withCapturedOutput(cwd, () => initCommand(args, { forceInteractive: true, readLine: () => answer }));
 }
 
+function scrubExistingCodebaseSmokeOutput(text: string): string {
+  return text
+    .replace(/workspace: .+roll-init-existing-codebase-[^\n]+/g, "workspace: <existing-codebase-workspace>")
+    .replace(/cleanup: removed .+roll-init-existing-codebase-[^\n]+/g, "cleanup: removed <existing-codebase-workspace>");
+}
+
 function gitOnlyPath(): string {
   const found = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" });
   const git = (found.stdout ?? "").trim();
@@ -433,6 +439,52 @@ describe("roll init diagnosis router", () => {
     expect(run.stdout).toContain(".roll/backlog.md: missing");
     expect(run.stdout).toContain(".gitignore: missing");
     expect(run.stdout).toContain("cleanup: removed");
+    expect(existsSync(join(cwd, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(cwd, ".roll"))).toBe(false);
+  });
+
+  it("runs the hidden integrated existing-codebase attest smoke through apply and idempotent re-apply", () => {
+    const cwd = project();
+
+    const run = runInit(cwd, ["--attest-smoke", "existing-codebase"], {
+      pathEntries: [process.env["PATH"] ?? ""],
+    });
+
+    expect(run.status).toBe(0);
+    expect(run.stderr).toContain("Proceed with these changes? [y/N]");
+    const stdout = scrubExistingCodebaseSmokeOutput(run.stdout);
+    expect(stdout).toContain("roll init attest smoke: existing-codebase");
+    expect(stdout).toContain("workspace: <existing-codebase-workspace>");
+    expect(stdout).toContain("Before fixture tree:");
+    expect(stdout).toContain("README.md");
+    expect(stdout).toContain("package.json");
+    expect(stdout).toContain("src/index.ts");
+    expect(stdout).toContain("tests/index.test.ts");
+    expect(stdout).toContain("Detected: existing codebase without Roll");
+    expect(stdout).toContain("Recommended path: agentic-onboard");
+    expect(stdout).toContain("Onboard apply review checkpoint");
+    expect(stdout).toContain("Apply result: pass (exit 0)");
+    expect(stdout).toContain("After apply tree:");
+    expect(stdout).toContain("Idempotent re-apply result: pass (exit 0)");
+    expect(stdout).toContain("After idempotent re-apply tree:");
+    expect(stdout).toContain("AGENTS.md: present");
+    expect(stdout).toContain(".claude/CLAUDE.md: present");
+    expect(stdout).toContain(".roll/backlog.md: present");
+    expect(stdout).toContain(".gitignore: present");
+    expect(stdout).toContain("Idempotency checks:");
+    expect(stdout).toContain(".gitignore .roll/ entries: 1");
+    expect(stdout).toContain("changeset AGENTS.md entries: 1");
+    expect(stdout).toContain("changeset .claude/CLAUDE.md entries: 1");
+    expect(stdout).toContain("changeset .roll/backlog.md entries: 1");
+    expect(stdout).toContain("result: pass");
+    expect(stdout).toContain("cleanup: removed <existing-codebase-workspace>");
+    expect(stdout).toContain("Smoke summary:");
+    expect(stdout).toContain("diagnosis: codebase-no-roll");
+    expect(stdout).toContain("review checkpoint: shown");
+    expect(stdout).toContain("apply result: pass");
+    expect(stdout).toContain("idempotent re-apply result: pass");
+    expect(stdout).toContain("idempotency checks: pass");
+    expect(stdout).toContain("cleanup: removed");
     expect(existsSync(join(cwd, "AGENTS.md"))).toBe(false);
     expect(existsSync(join(cwd, ".roll"))).toBe(false);
   });

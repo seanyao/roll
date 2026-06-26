@@ -90,6 +90,9 @@ export interface ScreenshotDeps {
   platform?: NodeJS.Platform;
 }
 
+const TERMINAL_FRONTMOST_ATTEMPTS = 6;
+const TERMINAL_FRONTMOST_RETRY_SECONDS = 0.25;
+
 export type CapturePhase = "before" | "after" | "gate";
 
 export interface CaptureMarker {
@@ -254,6 +257,15 @@ export function terminalBoundsScript(title: string): string {
 async function hasGuiSession(run: ShotRun): Promise<boolean> {
   const gui = await run("launchctl", ["managername"]);
   return gui.code === 0 && gui.stdout.includes("Aqua");
+}
+
+async function waitForTerminalFrontmost(run: ShotRun): Promise<boolean> {
+  for (let attempt = 0; attempt < TERMINAL_FRONTMOST_ATTEMPTS; attempt += 1) {
+    const prefix = attempt === 0 ? "" : `sleep ${TERMINAL_FRONTMOST_RETRY_SECONDS}; `;
+    const front = await run("sh", ["-c", `${prefix}lsappinfo info -only name $(lsappinfo front)`]);
+    if (front.code === 0 && /Terminal|终端/.test(front.stdout)) return true;
+  }
+  return false;
 }
 
 /** Resolve the live window rect for `screencapture -R`; null → fall back to the configured rect. */
@@ -637,8 +649,7 @@ export async function captureScreenshot(
       // session terminal). Verify Terminal actually owns the foreground before
       // pressing the shutter; otherwise retire the window and skip honestly.
       if (liveRect !== null) {
-        const front = await run("sh", ["-c", "lsappinfo info -only name $(lsappinfo front)"]);
-        if (front.code !== 0 || !/Terminal|终端/.test(front.stdout)) {
+        if (!(await waitForTerminalFrontmost(run))) {
           await teardownCaptureWindow(windowTitle, commandDoneFile !== undefined, run);
           return skip("Terminal not frontmost — refusing to shoot another app's pixels");
         }

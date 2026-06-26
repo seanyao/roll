@@ -524,7 +524,10 @@ export async function captureScreenshot(
       // repeatedly (disruptive) and (b) modern Chrome blocks file:// access
       // ("无法访问你的文件"), so the capture grabs an error page. Headless Chromium
       // can load file:// with no GUI and no popups.
-      const forceHeadless = (env["ROLL_ATTEST_HEADLESS"] ?? "") === "1";
+      // FIX-1022: ROLL_NO_SCREENCAP=1 is the master "never touch the screen"
+      // switch the loop sets — fold it into forceHeadless so the GUI/screencapture
+      // branch is never entered (headless Chromium still produces real evidence).
+      const forceHeadless = (env["ROLL_ATTEST_HEADLESS"] ?? "") === "1" || (env["ROLL_NO_SCREENCAP"] ?? "") === "1";
       if (deps.run === undefined) {
         const result = await captureWebViaBrowserTool(req, forceHeadless || platform !== "darwin");
         // FIX-379: only short-circuit on a REAL capture. A FAILED BrowserTool
@@ -586,6 +589,11 @@ export async function captureScreenshot(
       if (r.code !== 0) return skip("screencap failed");
     } else {
       // terminal lane (US-ATTEST-011): unattended self-capture on macOS GUI hosts.
+      // FIX-1022: ROLL_NO_SCREENCAP=1 is the master kill-switch the loop sets — no
+      // screencapture(1) may fire unattended (the TCC prompt blocks with no one to
+      // answer → dialog flood). FIX-392 promotes the deliverable_cmd stdout to a
+      // text artifact when this skips, so evidence is preserved.
+      if ((env["ROLL_NO_SCREENCAP"] ?? "") === "1") return skip("ROLL_NO_SCREENCAP=1 (no screen capture in unattended context)");
       if ((env["ROLL_ATTEST_NO_TERMINAL"] ?? "") === "1") return skip("ROLL_ATTEST_NO_TERMINAL=1");
       if (platform !== "darwin") return skip("not macOS");
       const rawLine =

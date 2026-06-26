@@ -261,6 +261,14 @@ describe("v3 loop runner template", () => {
     expect(headlessIdx).toBeLessThan(runIdx);
   });
 
+  it("FIX-1022: exports ROLL_NO_SCREENCAP=1 BEFORE run-once so the screencapture probe skips (isTTY is unreliable under the PTY-wrapped loop)", () => {
+    expect(script).toContain('export ROLL_NO_SCREENCAP="${ROLL_NO_SCREENCAP:-1}"');
+    const noScreencapIdx = script.indexOf("ROLL_NO_SCREENCAP");
+    const runIdx = script.indexOf('"$ROLL_BIN" loop run-once');
+    expect(noScreencapIdx).toBeGreaterThan(-1);
+    expect(noScreencapIdx).toBeLessThan(runIdx);
+  });
+
   it("FIX-393: acquires the cycle inflight lock and sets trap EXIT before caffeinate", () => {
     const acquireIdx = script.indexOf("printf '%s:%s");
     const trapIdx = script.indexOf("trap 'rm -f");
@@ -467,6 +475,11 @@ describe("v3 dream runner template (US-PORT-008)", () => {
     expect(script).toContain('cd "/Users/u/proj"');
     expect(script).toContain('RT="/Users/u/proj/.roll/dream"'); // project-local log dir (FIX-139)
     expect(script).toContain('LOG="$RT/cron.log"');
+  });
+
+  it("FIX-1022: exports ROLL_NO_SCREENCAP=1 before the scan (dream run-once hits the same probe)", () => {
+    expect(script).toContain('export ROLL_NO_SCREENCAP="${ROLL_NO_SCREENCAP:-1}"');
+    expect(script.indexOf("ROLL_NO_SCREENCAP")).toBeLessThan(script.indexOf('"$ROLL_BIN" dream run-once'));
   });
 
   it("is self-contained — calls NO bash-engine functions, no source, no tmux", () => {

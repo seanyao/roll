@@ -132,6 +132,27 @@ describe("FIX-314 ROLL_ATTEST_HEADLESS=1 — loop / unattended path forces headl
     expect(calls.some((c) => c.startsWith("launchctl "))).toBe(false);
   });
 
+  it("FIX-1022: ROLL_NO_SCREENCAP=1 also forces the web GUI lane headless on a macOS GUI host (no browser, no screencapture)", async () => {
+    const calls: string[] = [];
+    const run: ShotRun = (cmd, argv) => {
+      calls.push(`${cmd} ${argv.join(" ")}`);
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "npx") {
+        writeFileSync(String(argv[argv.length - 1]), "PNG");
+        return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+      }
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+    const r = await captureScreenshot(
+      { kind: "web", url: "file:///tmp/dossier/index.html", out: outPath() },
+      { run, env: { ROLL_NO_SCREENCAP: "1" }, platform: "darwin" },
+    );
+    expect(r.taken).toBe(true); // headless Chromium still produces real evidence
+    expect(calls.some((c) => c.includes("playwright@1.52.0 screenshot"))).toBe(true);
+    expect(calls.some((c) => c.startsWith("launchctl "))).toBe(false); // GUI probe skipped
+    expect(calls.some((c) => c.startsWith("screencapture "))).toBe(false); // no screen capture
+  });
+
   it("ROLL_ATTEST_HEADLESS=1 + npx fails → honest skip with ROLL_ATTEST_HEADLESS=1 reason", async () => {
     const { run } = fake({ npx: { code: 1 } });
     const r = await captureScreenshot(
@@ -376,6 +397,17 @@ describe("terminal", () => {
     );
     expect(r).toMatchObject({ taken: false, skipped: "ROLL_ATTEST_NO_TERMINAL=1" });
     expect(calls).toHaveLength(0);
+  });
+
+  it("FIX-1022: ROLL_NO_SCREENCAP=1 skips the terminal lane before any spawn (master kill-switch, even on a GUI macOS host)", async () => {
+    const { run, calls } = fake({ launchctl: { code: 0, stdout: "Aqua\n" } });
+    const r = await captureScreenshot(
+      { kind: "terminal", command: "roll status", out: outPath() },
+      { run, env: { ROLL_NO_SCREENCAP: "1" }, platform: "darwin" },
+    );
+    expect(r.taken).toBe(false);
+    expect(r.skipped).toContain("ROLL_NO_SCREENCAP=1");
+    expect(calls).toHaveLength(0); // never reached the GUI probe or screencapture
   });
 
   it("non-macOS skips before any spawn (osascript/screencapture are mac-only)", async () => {

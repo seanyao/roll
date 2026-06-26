@@ -800,17 +800,15 @@ describe("frozen: roll init", () => {
     expect(read(fx.proj, "AGENTS.md")).toContain("# Agent Conventions");
   });
 
-  it("US-INIT-001: docs-only project launches onboard with README/docs context", () => {
+  it("US-INIT-001: docs-only project scaffolds immediately and nudges design", () => {
     const fx = docsOnlyFixtureWithFakeAgent();
     const run = tsInit(fx, []);
     expect(run.status).toBe(0);
-    expect(read(fx.proj, "prompt.txt")).toContain("Project context detected by roll init");
-    expect(read(fx.proj, "prompt.txt")).toContain("README.md");
-    expect(read(fx.proj, "prompt.txt")).toContain("Go score tracking app");
-    expect(read(fx.proj, "prompt.txt")).toContain("docs/spec.md");
-    expect(read(fx.proj, ".roll/onboard-plan.yaml")).toContain("SoloGo Go score tracking app");
-    expect(read(fx.proj, ".roll/onboard-changeset.yaml")).toContain(".roll/backlog.md");
+    expect(existsSync(join(fx.proj, "prompt.txt"))).toBe(false);
+    expect(existsSync(join(fx.proj, ".roll", "onboard-plan.yaml"))).toBe(false);
+    expect(run.stdout).toContain("Run $roll-design");
     expect(read(fx.proj, "AGENTS.md")).toContain("# Agent Conventions");
+    assertScaffold(fx);
   });
 
   it("FIX-1029: fresh init confirmation reads through the tty-confirm seam", () => {

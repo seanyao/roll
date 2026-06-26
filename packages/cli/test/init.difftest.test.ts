@@ -661,6 +661,7 @@ describe("frozen: roll init", () => {
       Recommended path: repair-roll
       Reasons:
         - Roll markers are present but incomplete; repair before scaffolding.
+      Missing Roll pieces: .roll/backlog.md, .roll/features/
       Next: roll init --repair
       No files changed.
       ",
@@ -695,6 +696,7 @@ describe("frozen: roll init", () => {
       Recommended path: repair-roll
       Reasons:
         - Roll markers are present but incomplete; repair before scaffolding.
+      Missing Roll pieces: .roll/backlog.md, .roll/features/
       Next: roll init --repair
       No files changed.
       ",

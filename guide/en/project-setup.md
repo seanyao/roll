@@ -33,8 +33,11 @@ roll init
 4. **Already initialized** — `.roll/`, `AGENTS.md`, backlog, and features are
    present. Roll prints `Already initialized` and `Next: roll status`.
 5. **Partial Roll** — some Roll markers are present but the setup is incomplete.
-   Roll prints `roll init --repair` and does not fresh-scaffold over the project
-   unless you explicitly ask for repair.
+   Roll prints the missing pieces and any stale pre-v2 markers. `roll init --repair`
+   previews the repair and asks in an interactive terminal; non-interactive
+   automation must use `roll init --repair --auto`. Repair only creates missing
+   Roll-owned files or merges Roll-owned sections, and records the changes in
+   `.roll/onboard-changeset.yaml` so `roll offboard` can reverse them later.
 
 Upgrading from a pre-2.0 layout (`BACKLOG.md` at root or `docs/features/`)?
 Run `npx @seanyao/roll@2 migrate` first — see

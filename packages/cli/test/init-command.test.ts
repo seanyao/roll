@@ -6,6 +6,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { dispatch } from "../src/bridge.js";
 import { registerAll } from "../src/commands/index.js";
 import { initCommand } from "../src/commands/init.js";
+import { offboardCommand } from "../src/commands/offboard.js";
 
 const dirs: string[] = [];
 const REPO = resolve(__dirname, "../../..");
@@ -107,6 +108,10 @@ function runInitInteractive(cwd: string, args: string[], answer: string): Run {
   return withCapturedOutput(cwd, () => initCommand(args, { forceInteractive: true, readLine: () => answer }));
 }
 
+function runOffboard(cwd: string, args: string[]): Run {
+  return withCapturedOutput(cwd, () => offboardCommand(args));
+}
+
 function scrubExistingCodebaseSmokeOutput(text: string): string {
   return text
     .replace(/workspace: .+roll-init-existing-codebase-[^\n]+/g, "workspace: <existing-codebase-workspace>")
@@ -170,9 +175,10 @@ describe("roll init diagnosis router", () => {
     expect(run.stdout).toContain("Next: roll status");
   });
 
-  it("renders a repair route for partial Roll projects and does not create AGENTS.md", () => {
+  it("renders missing pieces for partial Roll projects and does not create AGENTS.md", () => {
     const cwd = project();
     write(cwd, ".roll/backlog.md", "# Backlog\n");
+    write(cwd, "BACKLOG.md", "# Old Roll backlog\n");
 
     const run = runInit(cwd, []);
 
@@ -180,19 +186,96 @@ describe("roll init diagnosis router", () => {
     expect(run.stdout).toContain("Detected: roll-partial");
     expect(run.stdout).toContain("Recommended path: repair-roll");
     expect(run.stdout).toContain("Next: roll init");
+    expect(run.stdout).toContain("Missing Roll pieces:");
+    expect(run.stdout).toContain("AGENTS.md");
+    expect(run.stdout).toContain(".roll/features/");
+    expect(run.stdout).toContain("Pre-v2 Roll markers still present:");
+    expect(run.stdout).toContain("BACKLOG.md");
     expect(run.stdout).toContain("No files changed.");
     expect(existsSync(join(cwd, "AGENTS.md"))).toBe(false);
   });
 
-  it("repairs partial Roll projects when explicitly requested", () => {
+  it("previews partial Roll repair without mutating in non-interactive mode", () => {
     const cwd = project();
     write(cwd, ".roll/backlog.md", "# Backlog\n");
 
     const run = runInit(cwd, ["--repair"]);
 
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain("Partial Roll repair preview");
+    expect(run.stdout).toContain("roll init --repair --auto");
+    expect(run.stdout).toContain("No files changed.");
+    expect(existsSync(join(cwd, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(cwd, ".roll", "features"))).toBe(false);
+  });
+
+  it("repairs partial Roll projects with --auto, preserves owner content, and records reversible metadata", () => {
+    const cwd = project();
+    write(cwd, "AGENTS.md", "# Owner Guide\n\nKeep this owner text.\n");
+    write(cwd, ".roll/backlog.md", "# Owner Backlog\n\n| Story | Description | Status |\n|-------|-------------|--------|\n| US-OWN | keep me | 📋 Todo |\n");
+
+    const first = runInit(cwd, ["--repair", "--auto"]);
+    const second = runInit(cwd, ["--repair", "--auto"]);
+    const third = runInit(cwd, ["--repair", "--auto"]);
+
+    expect(first.status).toBe(0);
+    expect(second.status).toBe(0);
+    expect(third.status).toBe(0);
+    expect(first.stdout).toContain("REPAIR");
+    expect(first.stdout).toContain("Repair complete");
+    expect(existsSync(join(cwd, "AGENTS.md"))).toBe(true);
+    expect(existsSync(join(cwd, ".roll", "backlog.md"))).toBe(true);
+    expect(existsSync(join(cwd, ".roll", "features"))).toBe(true);
+    expect(readFileSync(join(cwd, "AGENTS.md"), "utf8")).toContain("Keep this owner text.");
+    expect(readFileSync(join(cwd, ".roll", "backlog.md"), "utf8")).toContain("US-OWN");
+    const agents = readFileSync(join(cwd, "AGENTS.md"), "utf8");
+    expect((agents.match(/<!-- roll:onboard:start -->/g) ?? []).length).toBe(1);
+    const changeset = readFileSync(join(cwd, ".roll", "onboard-changeset.yaml"), "utf8");
+    expect((changeset.match(/"AGENTS.md"/g) ?? []).length).toBe(1);
+    expect((changeset.match(new RegExp('".roll/features"', "g")) ?? []).length).toBe(1);
+    expect(changeset).toContain("files_merged:");
+    expect(changeset).toContain("dirs_created:");
+    expect(changeset).not.toContain('  - ".roll/backlog.md"');
+  });
+
+  it("fails loud when a stale .roll/features file blocks repair", () => {
+    const cwd = project();
+    write(cwd, ".roll/backlog.md", "# Backlog\n");
+    write(cwd, ".roll/features", "not a directory\n");
+
+    const run = runInit(cwd, ["--repair", "--auto"]);
+
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain(".roll/features exists but is not a directory");
+    expect(readFileSync(join(cwd, ".roll", "features"), "utf8")).toContain("not a directory");
+  });
+
+  it("offboards only Roll-owned artifacts after partial repair", () => {
+    const cwd = project();
+    write(cwd, "AGENTS.md", "# Owner Guide\n\nKeep this owner text.\n");
+    write(cwd, ".roll/backlog.md", "# Owner Backlog\n\nKeep this owner backlog.\n");
+
+    expect(runInit(cwd, ["--repair", "--auto"]).status).toBe(0);
+    const offboard = runOffboard(cwd, ["--confirm"]);
+
+    expect(offboard.status).toBe(0);
+    expect(readFileSync(join(cwd, "AGENTS.md"), "utf8")).toContain("Keep this owner text.");
+    expect(readFileSync(join(cwd, "AGENTS.md"), "utf8")).not.toContain("<!-- roll:onboard:start -->");
+    expect(readFileSync(join(cwd, ".roll", "backlog.md"), "utf8")).toContain("Keep this owner backlog.");
+    expect(existsSync(join(cwd, ".roll", "features"))).toBe(false);
+    expect(existsSync(join(cwd, ".roll", "features.md"))).toBe(false);
+    expect(existsSync(join(cwd, ".roll", "onboard-changeset.yaml"))).toBe(false);
+  });
+
+  it("repairs partial Roll projects interactively when confirmed", () => {
+    const cwd = project();
+    write(cwd, ".roll/backlog.md", "# Backlog\n");
+
+    const run = runInitInteractive(cwd, ["--repair"], "y");
+
     expect(run.status).toBe(0);
     expect(run.stdout).toContain("REPAIR");
-    expect(run.stdout).toContain("Repaired");
+    expect(run.stdout).toContain("Repair complete");
     expect(existsSync(join(cwd, "AGENTS.md"))).toBe(true);
     expect(existsSync(join(cwd, ".roll", "backlog.md"))).toBe(true);
     expect(existsSync(join(cwd, ".roll", "features"))).toBe(true);
@@ -214,6 +297,7 @@ describe("roll init diagnosis router", () => {
     const cwd = project();
     write(cwd, "BACKLOG.md", "# Old Roll backlog\n");
     mkdir(cwd, "docs/features");
+    writeExistingCodebaseFixture(cwd);
 
     const run = runInit(cwd, []);
 
@@ -221,6 +305,9 @@ describe("roll init diagnosis router", () => {
     expect(run.stdout).toContain("Detected: roll-legacy-layout");
     expect(run.stdout).toContain("Recommended path: migrate-roll-layout");
     expect(run.stdout).toContain("npx @seanyao/roll@2 migrate --dry-run");
+    expect(run.stdout).toContain("Old Roll markers:");
+    expect(run.stdout).toContain("BACKLOG.md");
+    expect(run.stdout).toContain("docs/features/");
     expect(existsSync(join(cwd, "AGENTS.md"))).toBe(false);
     expect(existsSync(join(cwd, ".roll"))).toBe(false);
   });
@@ -485,6 +572,30 @@ describe("roll init diagnosis router", () => {
     expect(stdout).toContain("idempotent re-apply result: pass");
     expect(stdout).toContain("idempotency checks: pass");
     expect(stdout).toContain("cleanup: removed");
+    expect(existsSync(join(cwd, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(cwd, ".roll"))).toBe(false);
+  });
+
+  it("runs the hidden partial and legacy Roll attest smoke in isolated workspaces and cleans it up", () => {
+    const cwd = project();
+
+    const run = runInit(cwd, ["--attest-smoke", "partial-and-roll-legacy"], {
+      pathEntries: [process.env["PATH"] ?? ""],
+    });
+
+    expect(run.status).toBe(0);
+    expect(run.stdout).toContain("roll init attest smoke: partial-and-roll-legacy");
+    expect(run.stdout).toContain("Partial Roll diagnosis:");
+    expect(run.stdout).toContain("Detected: roll-partial");
+    expect(run.stdout).toContain("Partial repair result: pass");
+    expect(run.stdout).toContain("Idempotent repair result: pass");
+    expect(run.stdout).toContain("Legacy Roll diagnosis:");
+    expect(run.stdout).toContain("Detected: roll-legacy-layout");
+    expect(run.stdout).toContain("Recommended path: migrate-roll-layout");
+    expect(run.stdout).toContain("Legacy mutation check:");
+    expect(run.stdout).toContain("AGENTS.md: missing");
+    expect(run.stdout).toContain(".roll/: missing");
+    expect(run.stdout).toContain("cleanup: removed");
     expect(existsSync(join(cwd, "AGENTS.md"))).toBe(false);
     expect(existsSync(join(cwd, ".roll"))).toBe(false);
   });

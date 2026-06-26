@@ -4,6 +4,7 @@
 
 ### 上手引导
 
+- **partial Roll 修复不再像 fresh init 一样粗暴**：`roll init` 现在会列出缺失的 Roll 组件和仍存在的 pre-v2 标记；`roll init --repair` 在非交互环境只预览并要求 `--auto`，apply 时只补缺失的 Roll-owned 文件/区块，并写入 `.roll/onboard-changeset.yaml`，所以 `roll offboard` 能反向清掉 repair 带来的 Roll-owned 改动。旧 Roll 布局仍只路由到迁移命令，不会叠加新脚手架。(US-INIT-009) `[legacy-onboard]`
 - **`roll init --apply` 写文件前先让你看清楚**：已有代码库 graft 流程现在会在校验 onboard plan 后打印审阅检查点，列出每个计划文件操作的动作、路径、模式和用户内容处理方式；交互终端必须确认，非交互自动化必须显式使用 `roll init --apply --auto`。(US-INIT-006d) `[legacy-onboard]`
 - **`roll init --apply` 可重复、可退出**：apply 现在用原子写入落地 Roll 管理文件，重复执行会保留并去重 `.roll/onboard-changeset.yaml`，已有 `AGENTS.md` 只追加带稳定 marker 的 Roll 区块；`roll offboard` 会剥离这些区块而不是删除用户文件，失败时会指向 recovery changeset。(US-INIT-006e) `[legacy-onboard]`
 - **既有代码库 onboard 有了端到端现场 smoke**：`roll init --attest-smoke existing-codebase` 会在隔离 fixture 里跑完整诊断、plan review、deterministic apply、幂等 re-apply 和 cleanup，供真实 Terminal.app 截图验收复现。(US-INIT-006f) `[legacy-onboard]`

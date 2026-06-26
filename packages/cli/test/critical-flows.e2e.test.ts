@@ -60,6 +60,12 @@ function scrubExistingCodebaseSmokeOutput(text: string): string {
     .replace(/cleanup: removed .+roll-init-existing-codebase-[^\n]+/g, "cleanup: removed <existing-codebase-workspace>");
 }
 
+function scrubPartialLegacySmokeOutput(text: string): string {
+  return text
+    .replace(/workspace: .+roll-init-partial-legacy-[^\n]+/g, "workspace: <partial-legacy-workspace>")
+    .replace(/cleanup: removed .+roll-init-partial-legacy-[^\n]+/g, "cleanup: removed <partial-legacy-workspace>");
+}
+
 describe("critical CLI E2E", () => {
   it("roll init diagnosis fixture prints the full state matrix without mutating cwd", () => {
     const project = tmpEmptyProject("init-diagnose");
@@ -211,6 +217,32 @@ describe("critical CLI E2E", () => {
     expect(out).toContain("idempotent re-apply result: pass");
     expect(out).toContain("idempotency checks: pass");
     expect(out).toContain("cleanup: removed");
+    expect(existsSync(join(project, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(project, ".roll"))).toBe(false);
+  });
+
+  it("roll init partial and legacy attest smoke repairs, routes migration, and cleans up", () => {
+    const project = tmpEmptyProject("init-partial-legacy-smoke");
+
+    const result = runRoll(project, ["init", "--attest-smoke", "partial-and-roll-legacy"], {
+      ROLL_ATTEST_NO_BROWSER: "1",
+    });
+
+    expect(result.code).toBe(0);
+    const out = scrubPartialLegacySmokeOutput(result.out);
+    expect(out).toContain("roll init attest smoke: partial-and-roll-legacy");
+    expect(out).toContain("workspace: <partial-legacy-workspace>");
+    expect(out).toContain("Partial Roll diagnosis:");
+    expect(out).toContain("Detected: roll-partial");
+    expect(out).toContain("Partial repair result: pass");
+    expect(out).toContain("Idempotent repair result: pass");
+    expect(out).toContain("Legacy Roll diagnosis:");
+    expect(out).toContain("Detected: roll-legacy-layout");
+    expect(out).toContain("Recommended path: migrate-roll-layout");
+    expect(out).toContain("Legacy mutation check:");
+    expect(out).toContain("AGENTS.md: missing");
+    expect(out).toContain(".roll/: missing");
+    expect(out).toContain("cleanup: removed <partial-legacy-workspace>");
     expect(existsSync(join(project, "AGENTS.md"))).toBe(false);
     expect(existsSync(join(project, ".roll"))).toBe(false);
   });

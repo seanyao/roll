@@ -42,6 +42,6 @@ Detected: ambiguous
 Recommended path: agentic-onboard
 Reasons:
   - README.md exists but has no project intent
-Next: roll init --diagnose
+Next: roll init
 "
 `;

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, opendirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { type Lang } from "@roll/spec";
 import { detectDesignHandoff } from "./onboard-nudge.js";
@@ -124,6 +124,8 @@ const DOC_DIRS = ["docs", "doc", "spec", "specs", "prd", "requirements"] as cons
 const MAX_DOCS = 16;
 const MAX_DOC_BYTES = 256_000;
 const MAX_SOURCE_FILES = 200;
+const MAX_SOURCE_DIR_ENTRIES = 512;
+const MAX_DOC_CANDIDATES = 64;
 
 function isDir(path: string): boolean {
   try {
@@ -145,6 +147,26 @@ function sortedExisting(paths: readonly string[], root: string, dirsOnly = false
   return paths.filter((rel) => (dirsOnly || rel.endsWith("/") ? isDir(join(root, rel)) : existsSync(join(root, rel)))).sort();
 }
 
+function sortedDirectoryEntries(dir: string, cap: number): { entries: string[]; capped: boolean; unreadable: boolean } {
+  let handle: ReturnType<typeof opendirSync>;
+  try {
+    handle = opendirSync(dir);
+  } catch {
+    return { entries: [], capped: false, unreadable: true };
+  }
+  try {
+    const entries: string[] = [];
+    while (entries.length < cap) {
+      const entry = handle.readSync();
+      if (entry === null) return { entries: entries.sort(), capped: false, unreadable: false };
+      entries.push(entry.name);
+    }
+    return { entries: entries.sort(), capped: handle.readSync() !== null, unreadable: false };
+  } finally {
+    handle.closeSync();
+  }
+}
+
 function gitFacts(projectDir: string): InitFacts["git"] {
   const present = existsSync(join(projectDir, ".git"));
   if (!present) return { present: false, commits: 0 };
@@ -159,23 +181,20 @@ function gitFacts(projectDir: string): InitFacts["git"] {
   };
 }
 
-function countFiles(root: string, remainingDepth: number, cap: number): { count: number; capped: boolean } {
+function countFiles(root: string, remainingDepth: number, cap: number): { count: number; fileCapped: boolean; entryCapped: boolean } {
   let count = 0;
-  let capped = false;
+  let fileCapped = false;
+  let entryCapped = false;
   const walk = (dir: string, depth: number): void => {
     if (count >= cap) {
-      capped = true;
+      fileCapped = true;
       return;
     }
-    let entries: string[];
-    try {
-      entries = readdirSync(dir).sort();
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
+    const listed = sortedDirectoryEntries(dir, MAX_SOURCE_DIR_ENTRIES);
+    entryCapped = entryCapped || listed.capped;
+    for (const entry of listed.entries) {
       if (count >= cap) {
-        capped = true;
+        fileCapped = true;
         return;
       }
       const path = join(dir, entry);
@@ -193,7 +212,7 @@ function countFiles(root: string, remainingDepth: number, cap: number): { count:
     }
   };
   walk(root, remainingDepth);
-  return { count, capped };
+  return { count, fileCapped, entryCapped };
 }
 
 function hasProjectIntent(text: string): boolean {
@@ -264,14 +283,13 @@ function collectDocs(projectDir: string, ambiguityReasons: string[]): Omit<InitF
   for (const dir of DOC_DIRS) {
     const root = join(projectDir, dir);
     if (!isDir(root)) continue;
-    let entries: string[];
-    try {
-      entries = readdirSync(root).sort();
-    } catch {
+    const listed = sortedDirectoryEntries(root, MAX_DOC_CANDIDATES);
+    if (listed.unreadable) {
       ambiguityReasons.push(`unreadable document directory: ${dir}/`);
       continue;
     }
-    for (const entry of entries) {
+    if (listed.capped) ambiguityReasons.push(`document candidate scan capped at ${MAX_DOC_CANDIDATES} entries: ${dir}/`);
+    for (const entry of listed.entries) {
       if (!/\.(md|mdx|txt)$/i.test(entry)) continue;
       add(join(dir, entry));
     }
@@ -292,28 +310,41 @@ function defaultContentScan(projectDir: string): InitContentScan {
 
 export function collectInitFacts(projectDir: string, deps: InitScanDeps = {}): InitFacts {
   const ambiguityReasons: string[] = [];
+  const roll = {
+    dotRoll: isDir(join(projectDir, ".roll")),
+    backlog: isFile(join(projectDir, ".roll", "backlog.md")),
+    features: isDir(join(projectDir, ".roll", "features")),
+    agentsDoc: isFile(join(projectDir, "AGENTS.md")),
+    oldMarkers: sortedExisting(OLD_ROLL_MARKERS, projectDir),
+  };
+  if (roll.dotRoll || roll.backlog || roll.features || roll.agentsDoc || roll.oldMarkers.length > 0) {
+    return {
+      root: projectDir,
+      git: { present: existsSync(join(projectDir, ".git")), commits: 0 },
+      roll,
+      codebase: { manifests: [], sourceDirs: [], testDirs: [], sourceFileCount: 0 },
+      docs: { hasContent: false, prdFiles: [], readmeFiles: [], designDocs: [], extractedSignals: [] },
+      ambiguityReasons,
+    };
+  }
   const sourceDirs = sortedExisting(SOURCE_DIRS, projectDir, true);
   let sourceFileCount = 0;
   for (const dir of sourceDirs) {
     const counted = countFiles(join(projectDir, dir), 4, MAX_SOURCE_FILES - sourceFileCount);
     sourceFileCount += counted.count;
-    if (counted.capped) {
+    if (counted.entryCapped) ambiguityReasons.push(`source directory scan capped at ${MAX_SOURCE_DIR_ENTRIES} entries: ${dir}/`);
+    if (counted.fileCapped) {
       ambiguityReasons.push(`source file scan capped at ${MAX_SOURCE_FILES} files`);
       break;
     }
+    if (counted.entryCapped) break;
   }
   const docSignals = collectDocs(projectDir, ambiguityReasons);
   const contentScan = deps.contentScan?.(projectDir) ?? defaultContentScan(projectDir);
   return {
     root: projectDir,
     git: gitFacts(projectDir),
-    roll: {
-      dotRoll: isDir(join(projectDir, ".roll")),
-      backlog: isFile(join(projectDir, ".roll", "backlog.md")),
-      features: isDir(join(projectDir, ".roll", "features")),
-      agentsDoc: isFile(join(projectDir, "AGENTS.md")),
-      oldMarkers: sortedExisting(OLD_ROLL_MARKERS, projectDir),
-    },
+    roll,
     codebase: {
       manifests: sortedExisting(MANIFESTS, projectDir),
       sourceDirs,

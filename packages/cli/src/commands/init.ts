@@ -29,15 +29,17 @@ import { spawnSync } from "node:child_process";
 import {
   copyFileSync,
   existsSync,
+  mkdtempSync,
   mkdirSync,
   readSync,
   readFileSync,
   readdirSync,
   realpathSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   agentsInstalled,
@@ -1349,6 +1351,55 @@ function promptEmptyProjectBrief(readLine: () => string = () => readConfirmLine(
   }
 }
 
+const PRD_ONLY_SMOKE_FILES = [
+  "AGENTS.md",
+  ".roll/brief.md",
+  ".roll/backlog.md",
+  ".roll/features/",
+  ".roll/features.md",
+  ".roll/agent-routes.yaml",
+  ".roll/.version",
+  ".roll/pairing.yaml",
+] as const;
+
+function printSmokeCreatedFiles(projectDir: string): void {
+  process.stdout.write("\nCreated files:\n");
+  for (const rel of PRD_ONLY_SMOKE_FILES) {
+    const path = rel.endsWith("/") ? join(projectDir, rel.slice(0, -1)) : join(projectDir, rel);
+    if (existsSync(path)) process.stdout.write(`  - ${rel}\n`);
+  }
+}
+
+function runPrdOnlyAttestSmoke(): number {
+  const originalCwd = process.cwd();
+  const workspace = realpathSync(mkdtempSync(join(tmpdir(), "roll-init-attest-prd-only-")));
+  let status = 1;
+  try {
+    mkdirSync(join(workspace, "docs"), { recursive: true });
+    writeFileSync(
+      join(workspace, "docs", "intel-radar-PRD.md"),
+      "# Intel Radar PRD\n\nBuild a radar for intelligence signals with source ranking and daily review.\n",
+    );
+    process.stdout.write("roll init attest smoke: prd-only\n");
+    process.stdout.write(`workspace: ${workspace}\n`);
+    process.chdir(workspace);
+    status = initCommand([]);
+    process.chdir(originalCwd);
+    printSmokeCreatedFiles(workspace);
+    return status;
+  } finally {
+    process.chdir(originalCwd);
+    rmSync(workspace, { recursive: true, force: true });
+    process.stdout.write(`cleanup: ${existsSync(workspace) ? "failed" : "removed"} ${workspace}\n`);
+  }
+}
+
+function runInitAttestSmoke(args: string[]): number {
+  if (args.length === 1 && args[0] === "prd-only") return runPrdOnlyAttestSmoke();
+  err("unknown init attest smoke fixture. Expected: roll init --attest-smoke prd-only");
+  return 1;
+}
+
 // ─── cmd_init (2147-2210) ─────────────────────────────────────────────────────
 /**
  * Returns the exit code for the fully ported init surface.
@@ -1358,6 +1409,7 @@ export function initCommand(args: string[], deps: InitCommandDeps = {}): number 
     process.stdout.write(renderStateMatrixFixture(msgLang()));
     return 0;
   }
+  if (args[0] === "--attest-smoke") return runInitAttestSmoke(args.slice(1));
   const repairMode = args.includes("--repair");
   const autoMode = args.includes("--auto") || repairMode;
   if (args[0] === "--apply") {

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### 自动化流水线
+
+- **调高 spec 里的 `est_min` 现在真能把卡送进更硬的档位了**：文档一直说「在故事 spec 里 bump `est_min` 就能升档（easy ≤8 / default 8–20 / hard >20）」，但路由器只读了 backlog 行上的 `est_min`，spec frontmatter 里的从没被喂进分档器——于是 `est_min: 24` 的卡始终落在 default 档。现在分档以 spec frontmatter 的 `est_min` 为准（spec 没写才回退到 backlog 行），文档承诺的升档手段终于生效。
+  Bumping `est_min` in a story spec now actually escalates it to a harder tier. The router only read the backlog row's `est_min` and ignored the spec frontmatter, so an `est_min: 24` card kept running on `default`. Tier selection now reads the spec frontmatter `est_min` first (falling back to the backlog row), so the documented escalation lever works. (FIX-1026) `[loop-engine]`
+
 ## v3.626.1 — 2026-06-26
 
 ### 自动化流水线

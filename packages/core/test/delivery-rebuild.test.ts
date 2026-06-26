@@ -725,6 +725,88 @@ describe("parseMergeCommitLog — FIX-923 full commit messages", () => {
   });
 });
 
+// ── FIX-1024: squash commits only parse subject, not body ───────────────────
+
+describe("parseMergeCommitLog — FIX-1024 squash subject-only attribution", () => {
+  const rs = "\x1e";
+  const fs = "\x1f";
+
+  it("AC1: squash commit — subject id only; body narrative ignored", () => {
+    // Real squash for #1028: subject names FIX-1022, body narrates FIX-1019/1020/1021.
+    const text = [
+      rs,
+      "7c3aad550b3e01c42b92629d2b7f9c15c1234567",
+      fs,
+      "1782235000",
+      fs,
+      "Fix: FIX-1022 change log group unquote (#1028)\n\n",
+      "补 FIX-1019 RepositoryCanPush 预检、FIX-1020 先建仓再 init、",
+      "FIX-1021 roll init 总结/确认/--auto。",
+    ].join("");
+
+    const facts = parseMergeCommitLog(text);
+
+    expect(facts).toHaveLength(1);
+    expect(facts[0].prNumber).toBe(1028);
+    expect(facts[0].storyIds).toEqual(["FIX-1022"]);
+  });
+
+  it("AC1: squash commit body narrative with card-ids does NOT leak", () => {
+    const text = [
+      rs,
+      "abc4567",
+      fs,
+      "1782235100",
+      fs,
+      "feat: US-SOME-001 add feature (#500)\n\n",
+      "This also cleaned up FIX-999 which was a longstanding bug",
+      "and incidentally US-OTHER-002 test fixtures.",
+    ].join("");
+
+    const facts = parseMergeCommitLog(text);
+
+    expect(facts).toHaveLength(1);
+    expect(facts[0].storyIds).toEqual(["US-SOME-001"]);
+  });
+
+  it("AC2: merge-button commit still reads body story-ids (FIX-923 regression)", () => {
+    const text = [
+      rs,
+      "79101a83683ef341f0326b9b080298ee4abdefbe",
+      fs,
+      "1782233269",
+      fs,
+      "Merge pull request #922 from seanyao/fix/remove-deepseek-phantom-agent\n\n",
+      "FIX-399: remove phantom deepseek agent\n\n",
+      "Remove the phantom DeepSeek agent from Roll's selectable agent registry.",
+    ].join("");
+
+    const facts = parseMergeCommitLog(text);
+
+    expect(facts).toHaveLength(1);
+    expect(facts[0].prNumber).toBe(922);
+    expect(facts[0].storyIds).toEqual(["FIX-399"]);
+  });
+
+  it("non-PR commit with story-id in subject → parsed from subject only", () => {
+    const text = [
+      rs,
+      "10a4ff247301927a82635ca4341d683d5f3a9f57",
+      fs,
+      "1782234189",
+      fs,
+      "FIX-923: parse merge commit bodies for delivery truth\n\n",
+      "Also touched US-OTHER in some analysis.",
+    ].join("");
+
+    const facts = parseMergeCommitLog(text);
+
+    expect(facts).toHaveLength(1);
+    expect(facts[0].prNumber).toBe(0);
+    expect(facts[0].storyIds).toEqual(["FIX-923"]);
+  });
+});
+
 describe("rebuildDeliveriesFromFacts — FIX-904: merge subject = authoritative done", () => {
   it("FIX-389a/b/c subject with no matching runs → three done records", () => {
     // The real #893 salvage: merge names FIX-389a/b/c but no loop run carried

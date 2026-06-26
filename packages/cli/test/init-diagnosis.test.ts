@@ -45,11 +45,8 @@ afterAll(() => {
 });
 
 describe("collectInitFacts", () => {
-  it("records Roll markers, git-free empty state, docs, codebase signals, and content-scan fields", () => {
+  it("records git-free empty state, docs, codebase signals, and content-scan fields", () => {
     const dir = project("signals");
-    mkdir(dir, ".roll/features");
-    write(dir, ".roll/backlog.md", "# Backlog\n");
-    write(dir, "AGENTS.md", "# Agents\n");
     write(dir, "package.json", "{\"scripts\":{\"test\":\"vitest\"}}\n");
     write(dir, "src/index.ts", "export const x = 1;\n");
     mkdir(dir, "tests");
@@ -61,10 +58,10 @@ describe("collectInitFacts", () => {
     });
 
     expect(result.roll).toEqual({
-      dotRoll: true,
-      backlog: true,
-      features: true,
-      agentsDoc: true,
+      dotRoll: false,
+      backlog: false,
+      features: false,
+      agentsDoc: false,
       oldMarkers: [],
     });
     expect(result.git.present).toBe(false);
@@ -76,6 +73,46 @@ describe("collectInitFacts", () => {
     expect(result.docs.readmeFiles).toEqual(["README.md"]);
     expect(result.docs.hasContent).toBe(true);
     expect(result.docs.extractedSignals).toEqual(["docs/intel-radar-PRD.md"]);
+  });
+
+  it("short-circuits content scans for current Roll marker states", () => {
+    const ready = project("ready-short-circuit");
+    mkdir(ready, ".roll/features");
+    write(ready, ".roll/backlog.md", "# Backlog\n");
+    write(ready, "AGENTS.md", "# Agents\n");
+    mkdir(ready, "src");
+
+    const readyResult = collectInitFacts(ready, {
+      contentScan: () => {
+        throw new Error("content scan should not run for complete Roll projects");
+      },
+    });
+    expect(classifyInitState(readyResult).kind).toBe("roll-ready");
+
+    const partial = project("partial-short-circuit");
+    write(partial, ".roll/backlog.md", "# Backlog\n");
+    mkdir(partial, "src");
+
+    const partialResult = collectInitFacts(partial, {
+      contentScan: () => {
+        throw new Error("content scan should not run for partial Roll projects");
+      },
+    });
+    expect(classifyInitState(partialResult).kind).toBe("roll-partial");
+  });
+
+  it("short-circuits content scans for pre-v2 Roll layout markers", () => {
+    const dir = project("legacy-short-circuit");
+    write(dir, "BACKLOG.md", "# Old backlog\n");
+    mkdir(dir, "docs/features");
+
+    const result = collectInitFacts(dir, {
+      contentScan: () => {
+        throw new Error("content scan should not run for old Roll layout markers");
+      },
+    });
+
+    expect(classifyInitState(result).kind).toBe("roll-legacy-layout");
   });
 
   it("detects pre-v2 Roll layout markers separately from business codebase markers", () => {
@@ -113,6 +150,20 @@ describe("collectInitFacts", () => {
 
     expect(result.roll.oldMarkers).toEqual([]);
     expect(classifyInitState(result).kind).toBe("prd-only");
+  });
+
+  it("caps large source and document candidate scans before reading entire directories", () => {
+    const dir = project("large-candidate-caps");
+    for (let i = 0; i < 520; i += 1) write(dir, `src/empty-${String(i).padStart(3, "0")}.ts`, "");
+    for (let i = 0; i < 70; i += 1) write(dir, `docs/note-${String(i).padStart(3, "0")}.md`, "short\n");
+
+    const result = collectInitFacts(dir, {
+      contentScan: () => ({ hasContent: false, extractedSignals: [] }),
+    });
+
+    expect(result.ambiguityReasons).toContain("source directory scan capped at 512 entries: src/");
+    expect(result.ambiguityReasons).toContain("document candidate scan capped at 64 entries: docs/");
+    expect(classifyInitState(result).kind).toBe("ambiguous");
   });
 });
 

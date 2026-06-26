@@ -165,7 +165,7 @@ import { readSkipCards } from "./skip-cards.js";
 import { readPendingPublish } from "./pending-publish.js";
 import { readSelfHeal } from "./selfheal-budget.js";
 import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, runPeerGate } from "./peer-gate.js";
-import { declaresAnySurface, deliverableCmdsForStory, readAttestGateMode, rejectedDeliverableCmdsForStory, runAttestGate, screenshotExemption, storyRequiresScreenshot, storySpecPath, verificationReportHasContent, verificationReportPath, webCaptureTargetsForStory } from "./attest-gate.js";
+import { declaresAnySurface, deliverableCmdsForStory, physicalTerminalForStory, readAttestGateMode, rejectedDeliverableCmdsForStory, runAttestGate, screenshotExemption, storyRequiresScreenshot, storySpecPath, verificationReportHasContent, verificationReportPath, webCaptureTargetsForStory } from "./attest-gate.js";
 import { recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
 import { validateStoryVisualEvidence } from "../lib/design-visual-evidence.js";
 import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, autoAttachScreenshotToAcMap, buildAcMapRemediationPrompt, generateAcMapDraft, needsAcMapRemediation, writeAcMapDraftEvidenceFiles, type DraftEvidence } from "./attest-remediation.js";
@@ -4351,7 +4351,11 @@ export function nodePorts(opts: {
           // deliverable's terminal output). deliverableCmdsForStory returns only
           // ALLOWLISTED commands (roll read-only) — run inside the worktree via
           // attest's `cd <worktree> && …` wrapper.
-          const cmdArgs = deliverableCmdsForStory(projectCwd, storyId).flatMap((c) => ["--capture-command", c]);
+          const physicalTerminal = physicalTerminalForStory(projectCwd, storyId);
+          const physicalCommand = physicalTerminal?.command;
+          const commands = [...deliverableCmdsForStory(projectCwd, storyId)];
+          if (physicalCommand !== undefined && !commands.includes(physicalCommand)) commands.push(physicalCommand);
+          const cmdArgs = commands.flatMap((c) => ["--capture-command", c]);
           // FIX-339 (复核 #1): any deliverable_cmd the allowlist REJECTED (non-roll
           // command or a state-changing roll subcommand) is NEVER run. Record a
           // loud terminal skip fact so the report discloses the refusal and the

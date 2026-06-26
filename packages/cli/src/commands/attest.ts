@@ -77,6 +77,7 @@ import { cardArchiveDir, epicFromFeaturePath, findFeatureFile, findFeatureFiles,
 import { readReviewScoreTrend, readStoryReviewScores } from "../lib/review-score.js";
 import { markPhaseDone } from "../lib/story-page.js";
 import { collectToolEvidenceFromEventsPath, formatToolCostSummary } from "../lib/tool-display.js";
+import { physicalTerminalFromSpecText } from "../lib/physical-terminal.js";
 import { refreshAggregates } from "./index-gen.js";
 
 // Re-export so existing importers (tests, callers) keep their entry point.
@@ -908,6 +909,13 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   // (a real owner wins; no cross-card hijack) are all preserved.
   const acItems = resolveStoryAcItems(projectPath, storyId);
   if (acItems.length === 0) warn(`no AC block for ${storyId} — report will carry facts only`);
+  const physicalTerminal = (() => {
+    try {
+      return physicalTerminalFromSpecText(readFileSync(featureFile, "utf8"));
+    } catch {
+      return null;
+    }
+  })();
 
   // run dir + latest symlink (never overwrite history).
   const now = (deps.now ?? ((): Date => new Date()))();
@@ -948,6 +956,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
       captureCommands.length > 0 ? captureCommands.map((c) => ({ command: c })) : [{}];
     for (let li = 0; li < lanes.length; li += 1) {
       const lane = lanes[li] ?? {};
+      const isPhysicalTerminal = physicalTerminal !== null && lane.command === physicalTerminal.command;
       const stem = li === 0 ? "terminal.png" : `terminal-${li}.png`;
       const out = join(runDir, "screenshots", stem);
       let fact: CaptureCommandFact | null = null;
@@ -974,19 +983,22 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
       // artifact so the attest gate does not deadlock. The stdout text IS
       // the terminal capture.
       let refStem = stem;
-      if (!shot.taken && fact !== null && fact.exitCode === 0) {
+      if (!shot.taken && fact !== null && fact.exitCode === 0 && !isPhysicalTerminal) {
         refStem = li === 0 ? "terminal-headless.txt" : `terminal-headless-${li}.txt`;
         const txtOut = join(runDir, "screenshots", refStem);
         writeFileSync(txtOut, fact.stdoutTail, "utf8");
         shot = { kind: "terminal", out: txtOut, taken: true };
       }
+      const captureKind = isPhysicalTerminal ? "physical-terminal" : shot.kind;
       captureFacts.push({
-        kind: shot.kind,
+        kind: captureKind,
         out: shot.out,
         taken: shot.taken,
         ...(shot.skipped !== undefined ? { skipped: shot.skipped } : {}),
       });
-      const ref = screenshotEvidenceRef(shot, `screenshots/${refStem}`);
+      const ref = shot.taken
+        ? { kind: "screenshot" as const, label: captureKind, href: `screenshots/${refStem}` }
+        : screenshotEvidenceRef(shot, `screenshots/${refStem}`);
       if (ref !== null) selfCaptures.push(ref);
       else warn(`terminal self-capture skipped (${refStem}): ${shot.skipped ?? "unknown"}`);
     }

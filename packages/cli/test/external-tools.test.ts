@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
 import {
   EXTERNAL_TOOL_DECLARATIONS,
   browserToolAvailable,
@@ -14,6 +17,11 @@ import {
   type ExternalToolState,
 } from "../src/lib/external-tools.js";
 
+const dirs: string[] = [];
+afterAll(() => {
+  for (const d of dirs) rmSync(d, { recursive: true, force: true });
+});
+
 function deps(overrides: Partial<ExternalToolDeps> = {}): ExternalToolDeps {
   return {
     platform: "darwin",
@@ -25,6 +33,12 @@ function deps(overrides: Partial<ExternalToolDeps> = {}): ExternalToolDeps {
     exists: () => false,
     ...overrides,
   };
+}
+
+function tempHome(): string {
+  const d = mkdtempSync(join(tmpdir(), "roll-external-tools-"));
+  dirs.push(d);
+  return d;
 }
 
 function state(id: string, status: ExternalToolState["status"], repairCommand?: string): ExternalToolState {
@@ -97,6 +111,24 @@ describe("external tool detection", () => {
         (tool) => tool.id === "screencapture",
       )?.status,
     ).toBe("permission-missing");
+  });
+
+  it("caches successful Terminal.app Screen Recording readiness so doctor does not re-prompt every run", () => {
+    const home = tempHome();
+    let probes = 0;
+    const stateDeps = deps({
+      home,
+      env: { ROLL_HOME: join(home, ".roll") },
+      cacheScreenRecording: true,
+      execFile: () => {
+        probes += 1;
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+
+    expect(collectExternalTools(stateDeps).find((tool) => tool.id === "screencapture")?.status).toBe("ok");
+    expect(collectExternalTools(stateDeps).find((tool) => tool.id === "screencapture")?.status).toBe("ok");
+    expect(probes).toBe(1);
   });
 
   it("detects Playwright Chromium from the browser cache", () => {

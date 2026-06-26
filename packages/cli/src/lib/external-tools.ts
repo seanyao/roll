@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { accessSync, constants, existsSync, mkdtempSync, readdirSync, readSync, rmSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { PLAYWRIGHT_INSTALL_CHROMIUM, chromiumInstalled, PLAYWRIGHT_VERSION, PLAYWRIGHT_PIN } from "@roll/infra";
@@ -34,6 +34,8 @@ export interface ExternalToolDeps {
   exists: (path: string) => boolean;
   /** FIX-927: false ⇒ headless/unattended (non-TTY) — skip the Screen Recording probe. */
   interactive?: boolean;
+  /** US-INIT-003: doctor/setup cache a successful Terminal.app Screen Recording probe. */
+  cacheScreenRecording?: boolean;
 }
 
 export const EXTERNAL_REQUIREMENT_DECLARATIONS: readonly ExternalRequirementDeclaration[] = [
@@ -88,6 +90,7 @@ export function defaultExternalToolDeps(): ExternalToolDeps {
       }
     },
     exists: existsSync,
+    cacheScreenRecording: true,
   };
 }
 
@@ -204,10 +207,25 @@ function screencaptureResolution(requirement: ToolRequirement, deps: ExternalToo
   // covers the launchd lane / CI. Real captures still alert on failure (the runtime
   // attest gate), so skipping the readiness probe loses no safety.
   if (deps.env["ROLL_NO_SCREENCAP"] === "1" || deps.interactive === false) {
+    const cached = deps.cacheScreenRecording === true && readScreenRecordingCache(deps);
+    if (cached && deps.env["ROLL_NO_SCREENCAP"] !== "1") {
+      return {
+        requirement,
+        status: "ok",
+        detail: "Terminal.app Screen Recording readiness is cached; restart Terminal.app if macOS recently granted permission.",
+      };
+    }
     return {
       requirement,
       status: "stale",
       detail: "Screen Recording probe skipped (headless / ROLL_NO_SCREENCAP); real captures surface permission failures at capture time.",
+    };
+  }
+  if (deps.cacheScreenRecording === true && readScreenRecordingCache(deps)) {
+    return {
+      requirement,
+      status: "ok",
+      detail: "Terminal.app Screen Recording readiness is cached; restart Terminal.app if macOS recently granted permission.",
     };
   }
   const tmp = join(mkdtempSync(join(tmpdir(), "roll-screen-probe-")), "probe.png");
@@ -218,7 +236,10 @@ function screencaptureResolution(requirement: ToolRequirement, deps: ExternalToo
   } catch {
     /* best-effort cleanup */
   }
-  if (r.code === 0) return { requirement, status: "ok", detail: "Installed and Screen Recording permission is usable." };
+  if (r.code === 0) {
+    if (deps.cacheScreenRecording === true) writeScreenRecordingCache(deps);
+    return { requirement, status: "ok", detail: "Installed and Screen Recording permission is usable for Terminal.app." };
+  }
   const command = "open x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
   return {
     requirement,
@@ -227,6 +248,47 @@ function screencaptureResolution(requirement: ToolRequirement, deps: ExternalToo
     repair: { command, description: "Open Screen Recording privacy settings." },
     authorize: { command, description: "Allow the terminal running roll to record the screen." },
   };
+}
+
+function screenRecordingCachePath(deps: ExternalToolDeps): string {
+  const rollHome = (deps.env["ROLL_HOME"] ?? "").trim() || join(deps.home, ".roll");
+  return join(rollHome, "cache", "terminal-screen-recording.json");
+}
+
+function readScreenRecordingCache(deps: ExternalToolDeps): boolean {
+  const path = screenRecordingCachePath(deps);
+  if (!existsSync(path)) return false;
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return false;
+    const row = parsed as Record<string, unknown>;
+    return row["version"] === 1 && row["platform"] === "darwin" && row["app"] === "Terminal.app" && row["status"] === "ok";
+  } catch {
+    return false;
+  }
+}
+
+function writeScreenRecordingCache(deps: ExternalToolDeps): void {
+  const path = screenRecordingCachePath(deps);
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(
+      path,
+      JSON.stringify(
+        {
+          version: 1,
+          platform: "darwin",
+          app: "Terminal.app",
+          status: "ok",
+          checkedAt: new Date().toISOString(),
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+  } catch {
+    /* cache is an optimization; capture failures still surface at attest time */
+  }
 }
 
 function playwrightChromiumResolution(requirement: ToolRequirement, deps: ExternalToolDeps): ToolRequirementResolution {

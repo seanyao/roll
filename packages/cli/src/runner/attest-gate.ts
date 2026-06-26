@@ -37,6 +37,7 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
 import { hasVisualEvidenceAc } from "../lib/design-visual-evidence.js";
+import { physicalTerminalFromSpecText, type PhysicalTerminalSpec } from "../lib/physical-terminal.js";
 import { evaluateReviewScoreGate } from "../lib/review-score.js";
 
 export type AttestMode = "soft" | "hard";
@@ -539,6 +540,16 @@ export function rejectedDeliverableCmdsForStory(worktreeCwd: string, storyId: st
   return rawDeliverableCmdsForStory(worktreeCwd, storyId).filter((c) => !allowedDeliverableCmd(c));
 }
 
+export function physicalTerminalForStory(worktreeCwd: string, storyId: string): PhysicalTerminalSpec | null {
+  const spec = storySpecPath(worktreeCwd, storyId);
+  if (spec === null) return null;
+  try {
+    return physicalTerminalFromSpecText(readFileSync(spec, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
 /** Unfiltered deliverable_cmd parse (scalar = whole line, block list = per item; NO comma split). */
 function rawDeliverableCmdsForStory(worktreeCwd: string, storyId: string): string[] {
   const spec = storySpecPath(worktreeCwd, storyId);
@@ -722,6 +733,7 @@ export function declaresAnySurface(specText: string): boolean {
   // later reject it — the card DID declare an intent to demo a CLI surface; the
   // reject path fails loud at the gate, not here.
   if (parseFrontmatterListField(body, /^deliverable_cmd:/, { commaSplit: false }).length > 0) return true;
+  if (physicalTerminalFromSpecText(specText) !== null) return true;
   const ex = /^screenshot_exempt:\s*(.+)$/m.exec(body);
   if (ex !== null) {
     const reason = stripQuotes((ex[1] ?? "").trim());
@@ -858,7 +870,11 @@ function owesRealWebCapture(worktreeCwd: string, storyId: string): boolean {
  * skip no longer discharges a declared command.
  */
 function owesTerminalCapture(worktreeCwd: string, storyId: string): boolean {
-  return storyRequiresScreenshot(worktreeCwd, storyId) && deliverableCmdsForStory(worktreeCwd, storyId).length > 0;
+  return storyRequiresScreenshot(worktreeCwd, storyId) && terminalCaptureNeed(worktreeCwd, storyId) > 0;
+}
+
+function owesPhysicalTerminalCapture(worktreeCwd: string, storyId: string): boolean {
+  return storyRequiresScreenshot(worktreeCwd, storyId) && physicalTerminalForStory(worktreeCwd, storyId) !== null;
 }
 
 /** Count the REAL, taken captures of a given kind in the evidence manifest. */
@@ -903,21 +919,35 @@ function hasRealWebCapture(worktreeCwd: string, storyId: string): boolean {
  * taken:true terminal captures for N declared commands.
  */
 function hasRealTerminalCapture(worktreeCwd: string, storyId: string): boolean {
-  const need = deliverableCmdsForStory(worktreeCwd, storyId).length;
+  const need = terminalCaptureNeed(worktreeCwd, storyId);
   if (need === 0) return false;
   return takenCaptureCount(worktreeCwd, storyId, "terminal") >= need;
+}
+
+function hasRealPhysicalTerminalCapture(worktreeCwd: string, storyId: string): boolean {
+  return takenCaptureCount(worktreeCwd, storyId, "physical-terminal") >= 1;
+}
+
+function terminalCaptureNeed(worktreeCwd: string, storyId: string): number {
+  const physical = physicalTerminalForStory(worktreeCwd, storyId);
+  return deliverableCmdsForStory(worktreeCwd, storyId).filter((cmd) => cmd !== physical?.command).length;
 }
 
 function declaredSurfaceCaptureFloor(worktreeCwd: string, storyId: string): { ok: boolean; reason?: string } {
   const owesWeb = owesRealWebCapture(worktreeCwd, storyId);
   const owesTerm = owesTerminalCapture(worktreeCwd, storyId);
-  if (!owesWeb && !owesTerm) return { ok: true };
+  const owesPhysical = owesPhysicalTerminalCapture(worktreeCwd, storyId);
+  if (!owesWeb && !owesTerm && !owesPhysical) return { ok: true };
   const gaps: string[] = [];
   if (owesWeb && !hasRealWebCapture(worktreeCwd, storyId)) {
     gaps.push(`declared deliverable_url(s) not all really captured (need ${webCaptureNeed(worktreeCwd, storyId)} taken web shots)`);
   }
   if (owesTerm && !hasRealTerminalCapture(worktreeCwd, storyId)) {
-    gaps.push(`declared deliverable_cmd(s) not all really captured (need ${deliverableCmdsForStory(worktreeCwd, storyId).length} taken terminal shots)`);
+    gaps.push(`declared deliverable_cmd(s) not all really captured (need ${terminalCaptureNeed(worktreeCwd, storyId)} taken terminal shots)`);
+  }
+  if (owesPhysical && !hasRealPhysicalTerminalCapture(worktreeCwd, storyId)) {
+    const physical = physicalTerminalForStory(worktreeCwd, storyId);
+    gaps.push(`physical_terminal not really captured (need 1 taken physical-terminal shot from ${physical?.app ?? "Terminal.app"})`);
   }
   if (gaps.length === 0) return { ok: true, reason: "all declared surfaces really captured" };
   return { ok: false, reason: `declared surface capture missing: ${gaps.join("; ")}` };

@@ -43,6 +43,7 @@ import {
   prIdleTick,
   prInboxGate,
   parseRebaseAttempts,
+  promoteDraftAction,
   rebaseCircuitVerdict,
   rebaseRecheckAction,
   reduceCiRollup,
@@ -51,7 +52,7 @@ import {
   DEAD_TICK_NOTES,
   deadTickVerdict,
 } from "@roll/core";
-import { gh, ghAvailable, ghRepoSlug, prMerge, remoteUrl } from "@roll/infra";
+import { gh, ghAvailable, ghRepoSlug, prMerge, prReady, remoteUrl } from "@roll/infra";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { prHealSelf, prRebaseStale } from "./loop-pr-heal.js";
@@ -65,6 +66,7 @@ export interface PrViewFacts {
   ciState: CiRollupState;
   mergeable: MergeStateStatus;
   manualMerge?: boolean;
+  isDraft?: boolean;
 }
 
 /** The raw `gh pr view --json reviews,mergeStateStatus,statusCheckRollup,body,labels` shape. */
@@ -74,6 +76,7 @@ interface PrViewRaw {
   statusCheckRollup?: Array<{ conclusion?: string | null }>;
   body?: string;
   labels?: Array<{ name?: string }>;
+  isDraft?: boolean;
 }
 
 /**
@@ -95,6 +98,7 @@ export function reducePrView(raw: PrViewRaw): PrViewFacts {
     manualMerge:
       (raw.body ?? "").includes("[roll:manual-merge]") ||
       (raw.labels ?? []).some((label) => label.name === "manual-merge" || label.name === "roll:manual-merge"),
+    ...(raw.isDraft === true ? { isDraft: true } : {}),
   };
 }
 
@@ -109,6 +113,8 @@ export interface PrInboxDeps {
   listOpenPrs: (slug: string) => Promise<{ code: number; stdout: string; stderr?: string }>;
   /** `gh -R <slug> pr view <num> --json …` → reduced facts, or undefined on failure (skip). */
   viewPr: (slug: string, num: string) => Promise<PrViewFacts | undefined>;
+  /** `gh -R <slug> pr ready <num>` → true on success. */
+  ready: (slug: string, num: string) => Promise<boolean>;
   /** `gh -R <slug> pr merge <num> --squash --delete-branch` → true on success. */
   merge: (slug: string, num: string) => Promise<boolean>;
   /**
@@ -175,6 +181,19 @@ export async function runPrInbox(deps: PrInboxDeps): Promise<PrTick> {
 
     const facts = await deps.viewPr(slug, num);
     if (facts === undefined) continue; // bash: view failure → i++; continue.
+
+    const promote = promoteDraftAction({
+      isDraft: facts.isDraft === true,
+      manualMerge: facts.manualMerge === true,
+      botReview: facts.bot,
+      ciState: facts.ciState,
+      mergeable: facts.mergeable,
+    });
+    if (promote.kind === "promote_and_merge") {
+      if (await deps.ready(slug, num)) await doMerge(deps, slug, num, headRef);
+      else deps.warn(`PR #${num}: ready failed — left open`);
+      continue;
+    }
 
     const action = selectPrAction(facts);
     switch (action.kind) {
@@ -440,7 +459,7 @@ function realDeps(): PrInboxDeps {
     viewPr: async (slug, num) => {
       const r = await gh([
         "-R", slug, "pr", "view", num,
-        "--json", "reviews,mergeStateStatus,statusCheckRollup,body,labels",
+        "--json", "reviews,mergeStateStatus,statusCheckRollup,body,labels,isDraft",
       ]);
       if (r.code !== 0 || r.stdout.trim() === "") return undefined;
       try {
@@ -449,6 +468,7 @@ function realDeps(): PrInboxDeps {
         return undefined;
       }
     },
+    ready: async (slug, num) => (await prReady(slug, num)).code === 0,
     merge: async (slug, num) => (await prMerge(slug, num, "plain")).code === 0,
     onMerged: async () => {
       // FIX-367: credit the just-merged cycle's runs row → merged/delivered so the
@@ -467,7 +487,7 @@ function realDeps(): PrInboxDeps {
     rebaseStale: async (num, headRef, slug) => {
       prRebaseStale(num, headRef); // US-PORT-021: native TS rebase (was bridged bash)
       // Re-fetch the PR state after the rebase to decide an eager merge.
-      const r = await gh(["-R", slug, "pr", "view", num, "--json", "mergeStateStatus,statusCheckRollup,body,labels"]);
+      const r = await gh(["-R", slug, "pr", "view", num, "--json", "mergeStateStatus,statusCheckRollup,body,labels,isDraft"]);
       if (r.code !== 0 || r.stdout.trim() === "") return undefined;
       try {
         return reducePrView(JSON.parse(r.stdout) as PrViewRaw);

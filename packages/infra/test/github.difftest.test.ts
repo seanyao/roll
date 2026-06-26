@@ -22,6 +22,7 @@ import {
   prList,
   prListLoopBranches,
   prMerge,
+  prReady,
   prReview,
   prViewMergeInfo,
   prViewState,
@@ -47,6 +48,7 @@ case "$*" in
   *"pr view"*"--json state"*)      echo "MERGED" ;;
   *"pr view"*"--json autoMergeRequest"*) echo "null" ;;
   *"pr create"*)                   echo "https://github.com/o/r/pull/8" ;;
+  *"pr ready"*)                    exit 0 ;;
   *"pr merge"*)                    exit 0 ;;
   *"pr diff"*"--name-only"*)       printf 'src/a.ts\\nsrc/b.ts\\n' ;;
   *"pr list"*"startswith"*)        printf 'loop/cycle-1\\nloop/cycle-2\\n' ;;
@@ -159,6 +161,12 @@ describe("gh exec wiring: argv byte-exact vs oracle + parse of fabricated output
     expect(readCalls()[0]).toEqual([
       "-R", "o/r", "pr", "merge", "42", "--squash", "--delete-branch",
     ]);
+  });
+
+  it("prReady → gh pr ready before merging a reviewed draft", async () => {
+    writeFileSync(argvLog, "");
+    await prReady("o/r", "42");
+    expect(readCalls()[0]).toEqual(["-R", "o/r", "pr", "ready", "42"]);
   });
 
   it("prDiffNameOnly → --name-only (bin/roll 11381) + splits lines", async () => {

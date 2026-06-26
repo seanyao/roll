@@ -55,6 +55,7 @@ import { projectSlug } from "./dashboard.js";
 import { guideExternalToolSetup, silentPreinstallChromium } from "../lib/external-tools.js";
 import { detectDesignHandoff, renderDesignNudge } from "../lib/onboard-nudge.js";
 import { discoverInteractiveAgents } from "../lib/interactive-agent.js";
+import { confirmYesNo } from "../lib/tty-confirm.js";
 
 /**
  * FIX-283 (AC4): adopting roll registers the project into `~/.roll/projects.json`
@@ -198,6 +199,95 @@ function countNonEmptyFiles(dir: string): number {
   if (r.status !== 0 || (r.stdout ?? "") === "") return 0;
   return r.stdout.split("\n").filter((l) => l !== "").length;
 }
+
+interface ProjectDocContext {
+  path: string;
+  excerpt: string;
+}
+
+const PROJECT_DOC_ROOTS = new Set([
+  "README.md",
+  "README",
+  "readme.md",
+  "prd.md",
+  "PRD.md",
+  "spec.md",
+  "SPEC.md",
+  "requirements.md",
+  "REQUIREMENTS.md",
+]);
+const PROJECT_DOC_DIRS = new Set(["docs", "doc", "spec", "specs", "prd", "requirements"]);
+
+function normalizeDocExcerpt(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !line.startsWith("<!--"))
+    .slice(0, 12)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .slice(0, 700);
+}
+
+function hasProjectIntent(text: string): boolean {
+  const normalized = normalizeDocExcerpt(text);
+  if (normalized.length < 40) return false;
+  return /project|product|app|service|cli|library|tool|platform|domain|feature|requirement|spec|prd|用户|产品|项目|需求|功能|服务|工具|平台/i.test(
+    normalized,
+  );
+}
+
+function collectProjectDocs(projectDir: string): ProjectDocContext[] {
+  const out: ProjectDocContext[] = [];
+  const seen = new Set<string>();
+  const add = (rel: string): void => {
+    if (out.length >= 8) return;
+    const path = join(projectDir, rel);
+    if (!existsSync(path)) return;
+    try {
+      const real = realpathSync(path);
+      if (seen.has(real)) return;
+      const st = statSync(path);
+      if (!st.isFile() || st.size <= 0 || st.size > 256_000) return;
+      const text = readFileSync(path, "utf8");
+      if (!hasProjectIntent(text)) return;
+      const excerpt = normalizeDocExcerpt(text);
+      if (excerpt !== "") {
+        seen.add(real);
+        out.push({ path: rel, excerpt });
+      }
+    } catch {
+      /* ignore unreadable docs */
+    }
+  };
+
+  for (const rel of PROJECT_DOC_ROOTS) add(rel);
+  for (const dir of PROJECT_DOC_DIRS) {
+    const root = join(projectDir, dir);
+    if (!existsSync(root)) continue;
+    try {
+      for (const name of readdirSync(root).sort()) {
+        if (!/\.(md|mdx|txt)$/i.test(name)) continue;
+        add(join(dir, name));
+      }
+    } catch {
+      /* ignore unreadable doc dirs */
+    }
+  }
+  return out;
+}
+
+function renderProjectDocContext(projectDir: string): string {
+  const docs = collectProjectDocs(projectDir);
+  if (docs.length === 0) return "";
+  const lines = [
+    "Project context detected by roll init:",
+    `- structural type: ${scanProjectType(projectDir)}`,
+  ];
+  for (const doc of docs) lines.push(`- ${doc.path}: ${doc.excerpt}`);
+  return lines.join("\n");
+}
+
 function isLegacyProject(projectDir: string): boolean {
   for (const dir of ["src", "app", "lib", "pkg", "cmd"]) {
     const p = join(projectDir, dir);
@@ -257,6 +347,8 @@ function legacyFileSummary(projectDir: string): string {
   ) {
     parts.push("git history present");
   }
+  const docs = collectProjectDocs(projectDir).map((doc) => doc.path);
+  if (docs.length > 0) parts.push(`project docs: ${docs.join(", ")}`);
   return `no AGENTS.md, ${parts.join(" ")}`;
 }
 
@@ -310,14 +402,19 @@ function selectOnboardAgent(candidates: string[]): string | null {
   return candidates[n - 1] ?? null;
 }
 
-function readOnboardPrompt(): string | null {
+function readOnboardPrompt(projectDir: string): string | null {
   const skillFile = join(rollPkgDir(), "skills", "roll-onboard", "SKILL.md");
   if (!existsSync(skillFile)) {
     err(`Skill file missing: ${skillFile}`);
     return null;
   }
   const body = readFileSync(skillFile, "utf8").replace(/^---\n[\s\S]*?\n---\n?/, "").trim();
-  return `Run the $roll-onboard skill below for this project. Follow it end-to-end and write .roll/onboard-plan.yaml when done.\n\n${body}`;
+  const context = renderProjectDocContext(projectDir);
+  return [
+    "Run the $roll-onboard skill below for this project. Follow it end-to-end and write .roll/onboard-plan.yaml when done.",
+    context,
+    body,
+  ].filter((part) => part !== "").join("\n\n");
 }
 
 function kimiBin(): string {
@@ -360,7 +457,7 @@ function onboardFailureHint(agent: string, code: number): void {
 }
 
 function runOnboardAgent(agent: string, projectDir: string): number {
-  const prompt = readOnboardPrompt();
+  const prompt = readOnboardPrompt(projectDir);
   if (prompt === null) return 1;
   const cmd = interactiveAgentCommand(agent, prompt);
   if (cmd === null) {
@@ -424,6 +521,11 @@ function legacyOnboardGuide(projectDir: string): number {
   process.stdout.write("  Conversation ends with /exit (or Ctrl-C). On exit Roll will run apply for you.\n");
   process.stdout.write(`${m("init.use_exit_to_end_or_ctrl")}\n\n`);
   return runOnboardAgent(chosen, projectDir);
+}
+
+function shouldOnboardFromProjectDocs(projectDir: string): boolean {
+  if (collectProjectDocs(projectDir).length === 0) return false;
+  return discoverOnboardAgents().installed.length > 0;
 }
 
 // ─── _merge_global_to_project (2022-2093) ─────────────────────────────────────
@@ -1165,7 +1267,12 @@ function isStdinInteractive(): boolean {
  * and ask the user to confirm before scaffolding. In non-interactive contexts
  * (or with `--auto`) the notice is printed and init proceeds without blocking.
  */
-function confirmInitProject(projectDir: string, autoMode: boolean): boolean {
+function confirmInitProject(
+  projectDir: string,
+  autoMode: boolean,
+  readConfirm?: () => string,
+  forceInteractive = false,
+): boolean {
   const projectType = scanProjectType(projectDir);
   const lang = msgLang();
   const header = lang === "zh" ? "项目初始化" : "Project setup";
@@ -1176,7 +1283,7 @@ function confirmInitProject(projectDir: string, autoMode: boolean): boolean {
   process.stdout.write(`  ${c("fg", m3("init.detected_project_type", projectType), { bold: true })}\n`);
   process.stdout.write(`  ${c("dim", m3("init.will_scaffold"))}\n`);
 
-  if (autoMode || !isStdinInteractive()) {
+  if (autoMode || (!forceInteractive && !isStdinInteractive())) {
     process.stdout.write(`  ${c("amber", m3("init.auto_non_interactive"))}\n`);
     process.stdout.write(`  ${c("dim", divider("═"))}\n`);
     return true;
@@ -1184,15 +1291,20 @@ function confirmInitProject(projectDir: string, autoMode: boolean): boolean {
 
   process.stdout.write("\n");
   const { BOLD, NC } = pal();
-  process.stderr.write(`  ${BOLD}${m3("init.proceed_prompt")}${NC} [y/N] `);
-  const reply = readLineFromStdin() ?? "";
+  const reply = confirmYesNo(`  ${BOLD}${m3("init.proceed_prompt")}${NC} [y/N] `, (s) => process.stderr.write(s), readConfirm)
+    ? "yes"
+    : "no";
   process.stdout.write("\n");
-  if (reply !== "y" && reply !== "Y" && reply !== "yes" && reply !== "YES") {
+  if (reply !== "yes") {
     info(m3("init.cancelled"));
     process.stdout.write(`  ${c("dim", divider("═"))}\n`);
     return false;
   }
   return true;
+}
+
+export function confirmInitProjectForTest(projectDir: string, autoMode: boolean, readConfirm: () => string): boolean {
+  return confirmInitProject(projectDir, autoMode, readConfirm, true);
 }
 
 // ─── cmd_init (2147-2210) ─────────────────────────────────────────────────────
@@ -1249,6 +1361,8 @@ export function initCommand(args: string[]): number {
   if (existsSync(join(projectDir, "AGENTS.md"))) {
     hasAgents = true;
   } else if (isLegacyProject(projectDir)) {
+    return legacyOnboardGuide(projectDir);
+  } else if (shouldOnboardFromProjectDocs(projectDir)) {
     return legacyOnboardGuide(projectDir);
   } else if (!confirmInitProject(projectDir, autoMode)) {
     return 0;

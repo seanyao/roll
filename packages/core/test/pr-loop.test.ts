@@ -11,6 +11,7 @@ import {
   eagerMergeEligible,
   botReviewAction,
   parseRebaseAttempts,
+  promoteDraftAction,
   prActedTick,
   prIdleTick,
   prInboxGate,
@@ -159,6 +160,65 @@ describe("selectPrAction — composed inbox body (bin/roll 12003-12048)", () => 
       kind: "skip",
       reason: "ready_not_mergeable",
     });
+  });
+});
+
+describe("promoteDraftAction — FIX-1027 manual review draft promotion", () => {
+  it("manual draft + bot APPROVED + clean CI → promote_and_merge", () => {
+    expect(
+      promoteDraftAction({
+        isDraft: true,
+        manualMerge: true,
+        botReview: "APPROVED",
+        ciState: "success",
+        mergeable: "CLEAN",
+      }),
+    ).toEqual({ kind: "promote_and_merge" });
+  });
+
+  it("CI green without bot APPROVED preserves the FIX-909 review gate", () => {
+    expect(
+      promoteDraftAction({
+        isDraft: true,
+        manualMerge: true,
+        botReview: "",
+        ciState: "success",
+        mergeable: "CLEAN",
+      }),
+    ).toEqual({ kind: "skip", reason: "missing_bot_approval" });
+  });
+
+  it("bot APPROVED but red/pending CI does not promote", () => {
+    expect(
+      promoteDraftAction({
+        isDraft: true,
+        manualMerge: true,
+        botReview: "APPROVED",
+        ciState: "failure",
+        mergeable: "CLEAN",
+      }),
+    ).toEqual({ kind: "skip", reason: "not_clean" });
+  });
+
+  it("non-draft or non-manual PRs do not use the draft promotion lane", () => {
+    expect(
+      promoteDraftAction({
+        isDraft: false,
+        manualMerge: true,
+        botReview: "APPROVED",
+        ciState: "success",
+        mergeable: "CLEAN",
+      }),
+    ).toEqual({ kind: "skip", reason: "not_draft" });
+    expect(
+      promoteDraftAction({
+        isDraft: true,
+        manualMerge: false,
+        botReview: "APPROVED",
+        ciState: "success",
+        mergeable: "CLEAN",
+      }),
+    ).toEqual({ kind: "skip", reason: "not_manual_merge" });
   });
 });
 

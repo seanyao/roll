@@ -1591,6 +1591,13 @@ describe("FIX-339 — multi-surface deliverables (web list + deliverable_cmd) + 
       }
     });
 
+    it("allowedDeliverableCmd: init is rejected except for the read-only diagnosis fixture", () => {
+      expect(allowedDeliverableCmd("roll init")).toBe(false);
+      expect(allowedDeliverableCmd("roll init --auto")).toBe(false);
+      expect(allowedDeliverableCmd("roll init --diagnose --fixture state-matrix")).toBe(true);
+      expect(allowedDeliverableCmd("node ./bin/roll.js init --diagnose --fixture state-matrix")).toBe(true);
+    });
+
     it("deliverableCmds/rejectedCmds: allowed kept, rejected surfaced separately", () => {
       const wt = withSpec("FIX-S20", "---\nid: FIX-S20\ndeliverable_cmd:\n  - roll status\n  - rm -rf /\n  - roll release\n---\n# x\n\n**AC:**\n- [ ] x\n");
       expect(deliverableCmdsForStory(wt, "FIX-S20")).toEqual(["roll status"]);

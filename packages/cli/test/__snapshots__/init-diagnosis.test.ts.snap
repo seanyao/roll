@@ -1,0 +1,47 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`init diagnosis rendering > renders the hidden state-matrix fixture deterministically 1`] = `
+"roll init diagnosis fixture: state-matrix
+
+Already initialized.
+Next: roll next
+
+Detected: roll-partial
+Recommended path: repair-roll
+Reasons:
+  - Roll markers are present but incomplete; repair before scaffolding.
+Next: roll init --repair
+No files changed.
+
+Detected: roll-legacy-layout
+Recommended path: migrate-roll-layout
+Reasons:
+  - Old Roll layout marker(s): BACKLOG.md.
+Next: npx @seanyao/roll@2 migrate --dry-run
+No files changed.
+
+Detected: codebase-no-roll
+Recommended path: agentic-onboard
+Reasons:
+  - Existing source, tests, or manifests found without Roll markers.
+Next: $roll-onboard
+
+Detected: prd-only
+Recommended path: scaffold-from-prd
+Reasons:
+  - Product or requirements documents found without source/manifests.
+Next: roll design --from-file docs/PRD.md
+
+Detected: empty
+Recommended path: guided-brief
+Reasons:
+  - No Roll, codebase, or product-document signals found.
+Next: roll init
+
+Detected: ambiguous
+Recommended path: agentic-onboard
+Reasons:
+  - README.md exists but has no project intent
+Next: roll init --diagnose
+"
+`;

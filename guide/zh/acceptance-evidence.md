@@ -75,6 +75,9 @@ soft 模式会记录缺口并发出同一类审计信号，但不阻塞本轮交
 - **声明的交付面优先于 AC 文本。** 一旦卡有了可视证据 AC，其 surface 先看 frontmatter：
   - 声明了 `deliverable_url:`（别名 `screenshot_url:`）⇒ **web**——卡已承诺一个真实
     产品页,就该截 web 图；
+  - 声明了 `physical_terminal:` ⇒ **terminal**，但合同更严格——报告必须包含从 macOS
+    `Terminal.app` 真实屏幕像素截下来的图。headless stdout、transcript 渲染图、
+    HTML replay 图都不能满足这个合同；
   - 否则声明了 `deliverable_cmd:` ⇒ **terminal**——走终端截屏通道的 CLI 交付；
   - 否则由 AC 文本判定（web / terminal / 含糊）。
 
@@ -88,9 +91,11 @@ soft 模式会记录缺口并发出同一类审计信号，但不阻塞本轮交
 - `macOS screencapture` —— 物理 Terminal.app / 浏览器窗口截图工具。它是 macOS
   内置工具，但作为稳定截图宿主的 Terminal.app 需要 Screen Recording 权限。
   缺权限时 attest 记录明确的截图 skip；headless、transcript 渲染图和 HTML
-  复现图都不算截图证据。
-- `Playwright Chromium` —— 可选的 headless 浏览器诊断工具，用于非 attest 的
-  tool use。安装命令是 `npx playwright install chromium`。
+  复现图都不算截图证据。交互式 `Terminal.app` 授权探针一旦成功，会缓存在
+  `ROLL_HOME` 下，后续 `roll doctor` / setup 检查不会反复触发 macOS 权限弹窗；
+  如果刚刚授权，先重启 Terminal.app 再信任缓存。
+- `Playwright Chromium` —— 可选的 headless web 截图工具，用于 `roll attest`
+  和 dossier 截图。安装命令是 `npx playwright install chromium`。
 
 `roll doctor` 总是打印这些工具的可用性、权限状态、影响和修复命令。`roll init`
 与 `roll loop go` 在启动时跑同一套探测；交互式终端会询问是否安装/打开缺失的

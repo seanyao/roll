@@ -720,6 +720,44 @@ describe("terminal", () => {
     expect(calls.some((c) => c.includes("close w saving no"))).toBe(true);
   });
 
+  it("waits briefly for Terminal to become frontmost before shooting", async () => {
+    const calls: string[] = [];
+    let frontChecks = 0;
+    const run: ShotRun = (cmd, argv) => {
+      calls.push(`${cmd} ${argv.join(" ")}`);
+      const script = String(argv[1] ?? "");
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "osascript" && script.includes("bounds of w")) {
+        return Promise.resolve({ code: 0, stdout: "0, 0, 1280, 800\n", stderr: "" });
+      }
+      if (cmd === "osascript" && script.includes("roll-attest-exists-probe")) {
+        return Promise.resolve({ code: 0, stdout: "no\n", stderr: "" });
+      }
+      if (cmd === "sh" && script.includes("lsappinfo")) {
+        frontChecks += 1;
+        return Promise.resolve({
+          code: 0,
+          stdout: frontChecks === 1 ? '"LSDisplayName"="Code"\n' : '"LSDisplayName"="Terminal"\n',
+          stderr: "",
+        });
+      }
+      if (cmd === "screencapture") {
+        writeFileSync(String(argv[argv.length - 1]), "PNG");
+        return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+      }
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+
+    const r = await captureScreenshot(
+      { kind: "terminal", command: "roll status", out: outPath() },
+      { run, env: {}, platform: "darwin" },
+    );
+
+    expect(r.taken).toBe(true);
+    expect(frontChecks).toBe(2);
+    expect(calls.some((c) => c.startsWith("screencapture "))).toBe(true);
+  });
+
   it("FIX-273: another app frontmost → teardown + honest skip, shutter never pressed", async () => {
     const calls: string[] = [];
     const run: ShotRun = (cmd, argv) => {

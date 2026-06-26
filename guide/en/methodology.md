@@ -219,11 +219,12 @@ This separation keeps `.roll/backlog.md` concise and readable as a progress dash
 
 ### 4.2 Project Initialization: `roll init`
 
-Creates the minimal workflow scaffold needed to start a Roll-managed project. The exact behavior depends on the state of the current directory — see the three adoption patterns ([patterns/](patterns/README.md)):
+Diagnoses the current directory before choosing a path — see the adoption patterns ([patterns/](patterns/README.md)):
 
 - **Seed** (empty dir): scaffold `AGENTS.md` + `.roll/` directly, no prompts.
-- **Graft** (existing legacy code, no `.roll/`): surfaces `$roll-onboard`, which scans the code, asks a short clarification set, and writes `.roll/onboard-plan.yaml` for review — see [legacy-onboarding.md](legacy-onboarding.md).
-- **Re-init** (`.roll/` already present): re-merges global conventions into `AGENTS.md`, preserves project-specific sections.
+- **PRD-only** (requirements docs, no source): point to design as a new-project path.
+- **Graft** (existing code, no `.roll/`): surfaces `$roll-onboard`, which scans the code, asks a short clarification set, and writes `.roll/onboard-plan.yaml` for review — see [legacy-onboarding.md](legacy-onboarding.md).
+- **Roll-ready / partial / pre-2.0 Roll**: print `roll next`, repair, or migration guidance without fresh-scaffolding over existing Roll markers.
 
 Pre-2.0 projects (`BACKLOG.md` at root, `docs/features/`) should run `npx @seanyao/roll@2 migrate` first — see [migration-2.0.md](migration-2.0.md).
 

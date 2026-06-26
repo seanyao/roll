@@ -275,7 +275,7 @@ export function registerAll(): void {
   // `init`: full surface TS (fresh/re-init scaffold, legacy-codebase onboard
   // launcher, --apply plan consumption, unknown flags, and no-template guard).
   // No sub-paths on bash.
-  registerPorted("init", initCommand, { help: "Usage: roll init [apply]\n  Onboard this project (agent-driven; `apply` runs a written plan).\n项目接入。" });
+  registerPorted("init", initCommand, { help: "Usage: roll init [apply]\n  Diagnose this project and route to scaffold, design, onboard, repair, migration, or roll next.\n诊断项目并路由到骨架、设计、接入、修复、迁移或 roll next。" });
   // `design`: explicit thin entry point for the $roll-design skill
   // (US-ONBOARD-NUDGE-004). Loads the skill and launches the selected agent;
   // all design logic lives in the skill, not here.

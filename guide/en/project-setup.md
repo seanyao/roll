@@ -8,14 +8,17 @@ From your project root:
 roll init
 ```
 
-`roll init` detects the current directory state and picks one of three modes:
+`roll init` diagnoses the current directory state before any mutation:
 
 1. **Empty directory** — fresh start. Roll writes `AGENTS.md` plus an empty
    `.roll/` scaffold (`backlog.md`, `features/`, `domain/`) and a
    `.roll/pairing.yaml` for [cross-agent pairing](pairing.md) (the init UI
    announces it). No prompts. This is the **seed** adoption pattern — see
    [patterns/seed-pattern.md](patterns/seed-pattern.md).
-2. **Existing legacy codebase** — Roll detects existing source files but no
+2. **PRD/docs-only** — Roll finds requirements or product docs but no source or
+   manifests. It treats this as a new-project path and points you to design; it
+   does not route to legacy onboarding.
+3. **Existing codebase without Roll** — Roll detects existing source files but no
    `.roll/` directory. It does **not** silently scaffold; instead it surfaces
    `$roll-onboard`, an interactive skill that scans the codebase, asks a short
    set of cognition / scope / privacy questions, and produces
@@ -23,9 +26,10 @@ roll init
    looks right. This is the **graft** pattern — see
    [legacy-onboarding.md](legacy-onboarding.md) and
    [patterns/graft-pattern.md](patterns/graft-pattern.md).
-3. **Re-init** — `.roll/` already exists. Roll re-merges global conventions into
-   `AGENTS.md` section-by-section, preserving all project-specific content, and
-   ensures missing scaffold pieces are filled in. Idempotent.
+4. **Already initialized** — `.roll/`, `AGENTS.md`, backlog, and features are
+   present. Roll prints `Already initialized` and `Next: roll next`.
+5. **Partial Roll** — some Roll markers are present but the setup is incomplete.
+   Roll prints a repair route and does not fresh-scaffold over the project.
 
 Upgrading from a pre-2.0 layout (`BACKLOG.md` at root, `docs/features/`,
 `docs/domain/`)? Run `npx @seanyao/roll@2 migrate` first — see
@@ -48,7 +52,7 @@ roll sync
 curl -fsSL https://seanyao.github.io/roll/install | bash   # install roll
 roll setup                 # configure AI tools globally (one time per machine)
 cd my-project
-roll init                  # initialize this project (or run $roll-onboard for legacy code)
+roll init                  # diagnose and route this project
 roll design                # launch an interactive design session to populate .roll/backlog.md
 roll loop on               # enable autonomous execution
 ```
@@ -72,8 +76,8 @@ default and your loop rig pool can differ.
 
 ## Re-initializing
 
-`roll init` is idempotent — running it again on an existing project is safe. It
-skips files that already exist and only creates what is missing.
+`roll init` is safe to repeat. Complete projects get `Next: roll next`; partial
+projects get repair guidance instead of another scaffold pass.
 
 ## See Also
 

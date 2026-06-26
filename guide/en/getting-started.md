@@ -21,14 +21,17 @@ roll setup
 roll init
 ```
 
-`roll init` creates the `.roll/` workspace and `AGENTS.md`. Existing codebases
-may be routed into the legacy onboarding flow before files are written.
+`roll init` diagnoses the directory before it writes anything. Empty projects use
+the fresh scaffold path; existing codebases route to `$roll-onboard`; PRD/docs-only
+projects point to design as a new-project path; partial or old Roll layouts print
+repair/migration guidance without changing files.
 
 ## 3. Go from Requirements to a Backlog
 
-If you have requirement docs (a PRD, sketches, notes) but your backlog is still
-empty, Roll will detect this and guide you toward design. Three commands will
-show the prompt: `roll init` (at the end), `roll status`, and `roll doctor`.
+If you have requirement docs (a PRD, sketches, notes) but no source yet, `roll
+init` classifies that as a PRD-only new project and points you toward design.
+`roll status` and `roll doctor` still show the design nudge after a Roll scaffold
+exists with an empty backlog.
 
 To start an interactive design session right away:
 

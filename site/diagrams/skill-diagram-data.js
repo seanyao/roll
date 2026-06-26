@@ -3,20 +3,20 @@ window.RollSkillDiagrams = {
     {
       id: "roll-onboard",
       name: "$roll-onboard",
-      title: { en: "Legacy Project Onboarding", zh: "老项目接入" },
+      title: { en: "Existing Codebase Onboarding", zh: "已有代码库接入" },
       sub: { en: "Survey. Infer. Plan. Apply later.", zh: "问询、推断、出计划，稍后再应用。" },
       lede: {
         en: "Bring Roll into an existing codebase without surprise edits. The skill reads the project, asks nine scoped questions, writes only <b>.roll/onboard-plan.yaml</b>, and leaves mutation to <code>roll init --apply</code>.",
         zh: "把 Roll 接入现有代码库，但不偷改源文件。本技能读取项目、提出 9 个范围化问题，只写 <b>.roll/onboard-plan.yaml</b>，真正落地交给 <code>roll init --apply</code>。"
       },
       modes: [
-        { tag: "A", title: { en: "Legacy project", zh: "老项目" }, body: { en: "No Roll structure yet, source files already exist. Read code and infer project shape before asking.", zh: "已有源码、还没有 Roll 结构。先读代码推断项目形态，再提问。" } },
-        { tag: "B", title: { en: "Partial migration", zh: "半迁移项目" }, body: { en: "Old markers such as <code>BACKLOG.md</code> or <code>docs/features/</code> stop the flow; migrate with the v2 toolchain first.", zh: "发现 <code>BACKLOG.md</code> 或 <code>docs/features/</code> 等旧标记即停止；先用 v2 工具链迁移。" } }
+        { tag: "A", title: { en: "Existing codebase", zh: "已有代码库" }, body: { en: "No Roll structure yet, source files already exist. Read code and infer project shape before asking.", zh: "已有源码、还没有 Roll 结构。先读代码推断项目形态，再提问。" } },
+        { tag: "B", title: { en: "Roll layout migration", zh: "Roll 布局迁移" }, body: { en: "Old Roll markers such as <code>BACKLOG.md</code> or <code>docs/features/</code> stop the onboard flow; migrate with the v2 toolchain first.", zh: "发现 <code>BACKLOG.md</code> 或 <code>docs/features/</code> 等旧 Roll 标记即停止接入流程；先用 v2 工具链迁移。" } }
       ],
       merge: { en: "▼ both paths protect source files from surprise edits ▼", zh: "▼ 两条路径都保护源文件不被意外修改 ▼" },
       bands: [
         { key: "plan", label: { en: "Discover", zh: "发现" }, steps: [
-          { no: "STEP 0", title: { en: "Pre-flight legacy check", zh: "老项目预检" }, desc: { en: "Confirm this is a legacy root: no <code>AGENTS.md</code>, has source code, no existing onboard plan unless owner approves overwrite.", zh: "确认这是老项目根目录：没有 <code>AGENTS.md</code>、已有源码；若已有接入计划，需询问是否覆盖。" }, chips: ["fail loud"] },
+          { no: "STEP 0", title: { en: "Pre-flight state check", zh: "状态预检" }, desc: { en: "Confirm this is an existing codebase: no complete Roll markers, has source code, and no existing onboard plan unless owner approves overwrite. PRD-only workspaces stay on the new-project design path.", zh: "确认这是已有代码库：没有完整 Roll 标记、已有源码；若已有接入计划，需询问是否覆盖。PRD-only 工作区留在新项目设计路径。" }, chips: ["fail loud"] },
           { no: "STEP 1", title: { en: "Read code and infer domains", zh: "读代码并推断领域" }, desc: { en: "Use manifests, README and tree shape to identify project type, description, domains and key modules.", zh: "基于 manifest、README 和目录形态识别项目类型、描述、领域与关键模块。" } }
         ] },
         { key: "build", label: { en: "Analyze", zh: "分析" }, steps: [

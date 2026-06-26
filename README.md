@@ -36,12 +36,12 @@ roll init           # set up Roll here (interactive confirmation)
 roll loop on        # let AI work through the backlog (optional)
 ```
 
-`roll init` detects legacy code and meaningful project docs such as `README.md`,
-`docs/`, `spec/`, PRDs, or requirements. When an interactive agent is available,
-it routes those projects to `$roll-onboard` and passes the detected context into
-the agent prompt. For an empty fresh project, it prints a project-type summary
-and asks for confirmation before creating files; pass `--auto` to skip the
-prompt in scripts and CI.
+`roll init` first diagnoses the current directory. Complete Roll projects get
+`Already initialized` and `Next: roll next`; partial Roll or pre-2.0 layouts get
+repair/migration guidance without writing files. Existing codebases route to
+`$roll-onboard`. PRD/docs-only workspaces are treated as new projects and point
+to design, not legacy onboarding. Empty directories still use the fresh scaffold
+path; pass `--auto` to skip the confirmation prompt in scripts and CI.
 First time through? Start with [Getting started](guide/en/getting-started.md).
 
 ## Quick start for new projects
@@ -83,7 +83,7 @@ with `roll loop resume` when ready.
 | `roll idea "<one-sentence description>"` | Capture a card: auto-classify, number, lint, infer epic, mint the full story folder — the one user entry for adding cards |
 | `roll story new <ID> --title <t> [--epic <e>] [--no-index]` | The one minting entry agents/skills use: card folder + backlog row + index refresh (`--no-index` for batches) |
 | **Project · per repo** | |
-| `roll init` | Set up Roll in this project (agent-driven onboarding for legacy code or existing README/docs/spec context) |
+| `roll init` | Diagnose this directory and route to fresh scaffold, PRD/design handoff, existing-codebase onboard, repair, migration, or `roll next` |
 | `roll design [--agent <name>]` | Launch `$roll-design` interactively to turn requirements into a domain model + INVEST backlog |
 | `roll offboard` | Remove Roll from this project |
 | `roll test [--where] [--reset]` | Run the test suite (routes through the isolation adapter; unknown types fail loud) |

@@ -24,6 +24,7 @@ import {
   hasPhysicalTerminalCapture,
   hasRejectedTerminalForPhysical,
   owesPhysicalTerminalCapture,
+  runAttestGate,
 } from "../src/runner/attest-gate.js";
 import { physicalTerminalFromSpecText } from "../src/lib/physical-terminal.js";
 
@@ -77,6 +78,28 @@ function doctorPhysicalSpec(id: string): string {
     "- [ ] [visual-evidence] real physical Terminal.app screenshot proves the CLI output",
     "",
   ].join("\n");
+}
+
+function writePeerScore(wt: string, id: string, cycleId: string): void {
+  const dir = join(wt, ".roll", "features", "init-onboard", id, "notes");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, `2026-06-08-roll-build-${id}-8.md`),
+    [
+      "---",
+      "skill: roll-build",
+      `story: ${id}`,
+      "score: 8",
+      "verdict: good",
+      "ts: 2026-06-08T12:00:00Z",
+      "scoring: pair",
+      "scored-by: pi",
+      `session-id: ${cycleId}:score:pi:a1:1700000000`,
+      "---",
+      "",
+      "peer score fixture.",
+    ].join("\n"),
+  );
 }
 
 // ── AC0: ScreenshotKind includes physical_terminal ──
@@ -277,6 +300,28 @@ describe("Attest gate: physical_terminal evidence validation", () => {
       { kind: "physical_terminal", out: "/tmp/pt.png", taken: false, skipped: "physical_terminal: not macOS" },
     ]);
     expect(hasPhysicalTerminalCapture(wt, "US-PT-GATE-4")).toBe(false);
+  });
+
+  it("hard gate blocks a skipped physical_terminal capture; owner-local macOS evidence stays required", () => {
+    const wt = physicalTerminalProject("US-PT-GATE-SKIP");
+    withEvidenceManifest(wt, "US-PT-GATE-SKIP", [
+      { kind: "physical_terminal", out: "screenshots/terminal.png", taken: false, skipped: "ROLL_NO_SCREENCAP=1" },
+    ]);
+    writePeerScore(wt, "US-PT-GATE-SKIP", "c-phys-skip");
+    const alerts: string[] = [];
+    const events: Array<{ verdict: string; reasons: string[] }> = [];
+
+    expect(hasPhysicalTerminalCapture(wt, "US-PT-GATE-SKIP")).toBe(false);
+    const result = runAttestGate(wt, "US-PT-GATE-SKIP", "c-phys-skip", "hard", 0, {
+      alert: (message) => alerts.push(message),
+      event: (payload) => events.push(payload),
+    });
+
+    expect(result.verdict).toBe("skipped");
+    expect(result.blocked).toBe(true);
+    expect(result.reasons.join("\n")).toContain("physical_terminal declared");
+    expect(alerts[0]).toContain("BLOCKED");
+    expect(events[0]?.verdict).toBe("skipped");
   });
 
   it("hasRejectedTerminalForPhysical returns true when physical_terminal card has kind:terminal capture", () => {

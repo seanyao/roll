@@ -6,6 +6,8 @@
 
 - **调高 spec 里的 `est_min` 现在真能把卡送进更硬的档位了**：文档一直说「在故事 spec 里 bump `est_min` 就能升档（easy ≤8 / default 8–20 / hard >20）」，但路由器只读了 backlog 行上的 `est_min`，spec frontmatter 里的从没被喂进分档器——于是 `est_min: 24` 的卡始终落在 default 档。现在分档以 spec frontmatter 的 `est_min` 为准（spec 没写才回退到 backlog 行），文档承诺的升档手段终于生效。
   Bumping `est_min` in a story spec now actually escalates it to a harder tier. The router only read the backlog row's `est_min` and ignored the spec frontmatter, so an `est_min: 24` card kept running on `default`. Tier selection now reads the spec frontmatter `est_min` first (falling back to the backlog row), so the documented escalation lever works. (FIX-1026) `[loop-engine]`
+- **loop 不再因为没开 VPN 就停摆**：纯国产工作流（kimi/pi/reasonix via DeepSeek、Bailian/DashScope embeddings）所有服务本就直连可达，但 loop/release 的连通性预检探的是固定海外主机（github.com），VPN 一关就误判「断网」并 halt——实测掉线后停摆过约 11 小时、零周期。现在可用 `loop_safety.probe_url` 把探测指向你真正需要的主机，或 `loop_safety.skip_network_check: true` 直接跳过预检；原来的 `proxy_enable_cmd` 恢复路径保留。
+  The loop no longer stalls just because the VPN is off. The loop/release connectivity precheck probed a fixed foreign host (github.com), so a dropped VPN was misread as "no network" and halted the loop (~11h of dead cycles observed) even though every configured domestic provider was directly reachable. Point the probe at a host you actually need via `loop_safety.probe_url`, or opt out with `loop_safety.skip_network_check: true`. (FIX-1025) `[loop-engine]`
 
 ## v3.626.1 — 2026-06-26
 

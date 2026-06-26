@@ -30,6 +30,12 @@ function tmpProject(prefix: string): string {
   return dir;
 }
 
+function tmpEmptyProject(prefix: string): string {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), `roll-e2e-${prefix}-`)));
+  dirs.push(dir);
+  return dir;
+}
+
 function runRoll(cwd: string, args: string[], env: NodeJS.ProcessEnv = {}): { code: number; out: string; err: string } {
   const childEnv: NodeJS.ProcessEnv = {
     ...process.env,
@@ -54,6 +60,25 @@ function runRoll(cwd: string, args: string[], env: NodeJS.ProcessEnv = {}): { co
 }
 
 describe("critical CLI E2E", () => {
+  it("roll init diagnosis fixture prints the full state matrix without mutating cwd", () => {
+    const project = tmpEmptyProject("init-diagnose");
+
+    const result = runRoll(project, ["init", "--diagnose", "--fixture", "state-matrix"], {
+      ROLL_ATTEST_NO_BROWSER: "1",
+    });
+
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("roll init diagnosis fixture: state-matrix");
+    for (const kind of ["roll-partial", "roll-legacy-layout", "codebase-no-roll", "prd-only", "empty", "ambiguous"]) {
+      expect(result.out).toContain(`Detected: ${kind}`);
+    }
+    expect(result.out).toContain("Already initialized.");
+    expect(result.out).toContain("Recommended path: migrate-roll-layout");
+    expect(result.out).toContain("Recommended path: scaffold-from-prd");
+    expect(existsSync(join(project, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(project, ".roll"))).toBe(false);
+  });
+
   it("roll story new is the single card-minting entry: card folder + backlog row + index", () => {
     const project = tmpProject("story-new");
     writeFileSync(join(project, ".roll", "backlog.md"), "| Story | Description | Status |\n|---|---|---|\n");

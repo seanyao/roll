@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **bot 批准的草稿 PR 不再卡在待复评**：bot 复评 APPROVED + CI 绿 + 可合并的草稿 PR 现在由 `promoteDraftAction` 自动转正（`gh pr ready`）再合并，run-record 从待复评翻为已交付。仅 bot 批准才转正——仅凭 CI 绿不会自动合并草稿，FIX-909 的复评闸完整保留。(FIX-1027) `[loop-engine]`
+
 ## v3.626.2 — 2026-06-26
 
 ### 自动化流水线

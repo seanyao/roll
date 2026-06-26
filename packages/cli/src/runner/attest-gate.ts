@@ -597,6 +597,7 @@ export function allowedDeliverableCmd(command: string): boolean {
   // (2) denylist — reject state-changing / releasing roll subcommands.
   const sub = (tokens[subIdx] ?? "").toLowerCase();
   if (sub === "") return true; // bare `roll` (prints help) — harmless read-only.
+  if (sub === "init") return tokens.slice(subIdx).join(" ") === "init --diagnose --fixture state-matrix";
   if (DELIVERABLE_CMD_DENY_SUBCOMMANDS.has(sub)) return false;
   return true;
 }
@@ -609,6 +610,7 @@ export function allowedDeliverableCmd(command: string): boolean {
  */
 const DELIVERABLE_CMD_DENY_SUBCOMMANDS: ReadonlySet<string> = new Set([
   "release",
+  "init",
   "loop", // on/off/go/… — operate the loop
   "story",
   "idea",

@@ -54,6 +54,7 @@ import { resolveProjectName, shouldSelfRegister, writeProjectRow } from "../lib/
 import { projectSlug } from "./dashboard.js";
 import { guideExternalToolSetup, silentPreinstallChromium } from "../lib/external-tools.js";
 import { detectDesignHandoff, renderDesignNudge } from "../lib/onboard-nudge.js";
+import { renderStateMatrixFixture } from "../lib/init-diagnosis.js";
 import { discoverInteractiveAgents } from "../lib/interactive-agent.js";
 import { confirmYesNo } from "../lib/tty-confirm.js";
 
@@ -1307,6 +1308,10 @@ export function confirmInitProjectForTest(projectDir: string, autoMode: boolean,
  * Returns the exit code for the fully ported init surface.
  */
 export function initCommand(args: string[]): number {
+  if (args[0] === "--diagnose" && args[1] === "--fixture" && args[2] === "state-matrix" && args.length === 3) {
+    process.stdout.write(renderStateMatrixFixture(msgLang()));
+    return 0;
+  }
   const autoMode = args.includes("--auto");
   if (args[0] === "--apply") {
     if (!existsSync(rollTemplates())) {

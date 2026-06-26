@@ -96,6 +96,10 @@ function runInit(cwd: string, args: string[], options: { pathEntries?: string[] 
   return withCapturedOutput(cwd, () => initCommand(args), options);
 }
 
+function runInitInteractive(cwd: string, args: string[], answer: string): Run {
+  return withCapturedOutput(cwd, () => initCommand(args, { forceInteractive: true, readLine: () => answer }));
+}
+
 function gitOnlyPath(): string {
   const found = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" });
   const git = (found.stdout ?? "").trim();
@@ -248,6 +252,46 @@ describe("roll init diagnosis router", () => {
     const changeset = readFileSync(join(cwd, ".roll", "onboard-changeset.yaml"), "utf8");
     expect(changeset).toContain(".roll/brief.md");
     expect(changeset).toContain(".roll/backlog.md");
+  });
+
+  it("does not mutate empty non-interactive workspaces without --auto", () => {
+    const cwd = project();
+
+    const run = runInit(cwd, []);
+
+    expect(run.status).toBe(0);
+    expect(run.stdout).toContain("Detected: empty");
+    expect(run.stdout).toContain("Recommended path: guided-brief");
+    expect(run.stdout).toContain("Next: roll design");
+    expect(run.stdout).toContain("No files changed.");
+    expect(existsSync(join(cwd, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(cwd, ".roll"))).toBe(false);
+  });
+
+  it("writes a placeholder brief for empty non-interactive workspaces with --auto", () => {
+    const cwd = project();
+
+    const run = runInit(cwd, ["--auto"]);
+
+    expect(run.status).toBe(0);
+    expect(run.stdout).toContain("INIT");
+    expect(run.stdout).toContain(".roll/brief.md");
+    expect(run.stdout).toContain("roll design");
+    expect((run.stdout.match(/roll design/g) ?? []).length).toBe(1);
+    expect(readFileSync(join(cwd, ".roll", "brief.md"), "utf8")).toContain("TODO: Describe the product");
+    expect(readFileSync(join(cwd, ".roll", "onboard-changeset.yaml"), "utf8")).toContain(".roll/brief.md");
+  });
+
+  it("asks empty interactive workspaces what they are building and writes that brief", () => {
+    const cwd = project();
+
+    const run = runInitInteractive(cwd, [], "A weekly ops dashboard for release owners");
+
+    expect(run.status).toBe(0);
+    expect(run.stdout).toContain("What are you building?");
+    expect(run.stdout).toContain("INIT");
+    expect(run.stdout).toContain("roll design");
+    expect(readFileSync(join(cwd, ".roll", "brief.md"), "utf8")).toContain("A weekly ops dashboard for release owners");
   });
 
   it("does not route git-only or empty source shells to existing-codebase onboarding", () => {

@@ -58,7 +58,7 @@ import { classifyInitState, collectInitFacts, renderStateMatrixFixture, type Ini
 import { renderInitRecommendation } from "../lib/init-diagnosis-render.js";
 import { writeInitBrief, type InitBriefResult } from "../lib/init-brief.js";
 import { discoverInteractiveAgents } from "../lib/interactive-agent.js";
-import { confirmYesNo } from "../lib/tty-confirm.js";
+import { confirmYesNo, readConfirmLine } from "../lib/tty-confirm.js";
 
 /**
  * FIX-283 (AC4): adopting roll registers the project into `~/.roll/projects.json`
@@ -1262,6 +1262,15 @@ function isStdinInteractive(): boolean {
   return (process.env["ROLL_ASSUME_TTY"] ?? "") === "1" || process.stdin.isTTY === true;
 }
 
+interface InitCommandDeps {
+  readLine?: () => string;
+  forceInteractive?: boolean;
+}
+
+function isInitInteractive(forceInteractive = false): boolean {
+  return forceInteractive || isStdinInteractive();
+}
+
 /**
  * For a fresh (non-reinit, non-legacy) project, print the auto-detected summary
  * and ask the user to confirm before scaffolding. In non-interactive contexts
@@ -1283,7 +1292,7 @@ function confirmInitProject(
   process.stdout.write(`  ${c("fg", m3("init.detected_project_type", projectType), { bold: true })}\n`);
   process.stdout.write(`  ${c("dim", m3("init.will_scaffold"))}\n`);
 
-  if (autoMode || (!forceInteractive && !isStdinInteractive())) {
+  if (autoMode || !isInitInteractive(forceInteractive)) {
     process.stdout.write(`  ${c("amber", m3("init.auto_non_interactive"))}\n`);
     process.stdout.write(`  ${c("dim", divider("═"))}\n`);
     return true;
@@ -1327,11 +1336,24 @@ function conciergeNextItems(brief: InitBriefResult | null, diagnosis: InitDiagno
   return [[brief.nextCommand, diagnosis.kind === "prd-only" ? "turn the product brief into Roll stories" : "turn the project brief into Roll stories"]];
 }
 
+function renderEmptyNonInteractiveGuide(diagnosis: InitDiagnosis): string {
+  return `${renderInitRecommendation({ ...diagnosis, nextCommand: "roll design" }, msgLang())}\nNo files changed.`;
+}
+
+function promptEmptyProjectBrief(readLine: () => string = () => readConfirmLine()): string {
+  process.stdout.write("\nWhat are you building?\n> ");
+  try {
+    return readLine().trim();
+  } catch {
+    return "";
+  }
+}
+
 // ─── cmd_init (2147-2210) ─────────────────────────────────────────────────────
 /**
  * Returns the exit code for the fully ported init surface.
  */
-export function initCommand(args: string[]): number {
+export function initCommand(args: string[], deps: InitCommandDeps = {}): number {
   if (args[0] === "--diagnose" && args[1] === "--fixture" && args[2] === "state-matrix" && args.length === 3) {
     process.stdout.write(renderStateMatrixFixture(msgLang()));
     return 0;
@@ -1367,10 +1389,15 @@ export function initCommand(args: string[]): number {
   const initFacts = collectInitFacts(projectDir);
   const initDiagnosis = classifyInitState(initFacts);
   const freshConcierge = shouldRunFreshConcierge(initDiagnosis, autoMode);
+  const emptyInteractive = initDiagnosis.kind === "empty" && !autoMode && isInitInteractive(deps.forceInteractive);
   if (repairMode && initDiagnosis.kind !== "roll-partial") {
     process.stdout.write(`${renderInitRecommendation(initDiagnosis, msgLang())}\n`);
     err("roll init --repair only applies to partial Roll projects.");
     return 1;
+  }
+  if (initDiagnosis.kind === "empty" && !autoMode && !emptyInteractive) {
+    process.stdout.write(`${renderEmptyNonInteractiveGuide(initDiagnosis)}\n`);
+    return 0;
   }
   if (shouldRenderDiagnosisOnly(initDiagnosis) && !(repairMode && initDiagnosis.kind === "roll-partial") && !freshConcierge) {
     process.stdout.write(`${renderInitRecommendation(initDiagnosis, msgLang())}\n`);
@@ -1394,13 +1421,16 @@ export function initCommand(args: string[]): number {
   renderState.useColor = !noColor;
 
   let hasAgents = false;
+  let emptyDescription: string | undefined;
   const summary: Summary = [];
 
   if (existsSync(join(projectDir, "AGENTS.md"))) {
     hasAgents = true;
   } else if (initDiagnosis.kind === "codebase-no-roll") {
     return legacyOnboardGuide(projectDir);
-  } else if (!confirmInitProject(projectDir, autoMode)) {
+  } else if (emptyInteractive) {
+    emptyDescription = promptEmptyProjectBrief(deps.readLine);
+  } else if (!confirmInitProject(projectDir, autoMode, deps.readLine, deps.forceInteractive)) {
     return 0;
   }
 
@@ -1415,9 +1445,10 @@ export function initCommand(args: string[]): number {
   initSeedAgentRoutes(routesTemplate, projectDir, summary); // `|| true`
   writeVersionStamp(projectDir, summary);
   scaffoldPairing(projectDir, summary); // US-PAIR-008 (v3 divergence from v2)
-  const brief = freshConcierge ? writeInitBrief(projectDir, initDiagnosis.kind, initFacts) : null;
+  const writesFreshBrief = freshConcierge || emptyInteractive;
+  const brief = writesFreshBrief ? writeInitBrief(projectDir, initDiagnosis.kind, initFacts, { emptyDescription }) : null;
   if (brief !== null) summary.push(`${brief.created ? "created" : "unchanged"}|${brief.relPath}`);
-  if (freshConcierge) recordFreshInitChangeset(projectDir, summary);
+  if (writesFreshBrief) recordFreshInitChangeset(projectDir, summary);
 
   const syncStatus = syncConventions();
 

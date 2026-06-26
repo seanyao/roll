@@ -471,6 +471,22 @@ export async function prMerge(slug: string, ref: string, mode: PrMergeMode): Pro
 }
 
 /**
+ * `gh -R <slug> pr ready <ref>` — mark a draft PR ready for review before the
+ * PR loop merges a manual-review draft that has received bot approval.
+ */
+export async function prReady(slug: string, ref: string): Promise<GhResult> {
+  const result = await invokeInfraTool<GitHubPrReadyToolInput, GhResult>({
+    declaration: GITHUB_PR_DECLARATION,
+    input: { action: "ready", slug, ref },
+    run: async (invocation) => ok(invocation, await rawGh([
+      "-R", invocation.input.slug, "pr", "ready", invocation.input.ref,
+    ])),
+  });
+  if (result.ok) return result.output;
+  return { code: 1, stdout: "", stderr: result.error.message };
+}
+
+/**
  * `gh -R <slug> pr close <pr> --comment <reason>` (bin/roll 12082). Lenient:
  * the oracle runs it `|| true`, so we surface the code but callers ignore it.
  */
@@ -908,6 +924,12 @@ interface GitHubPrMergeToolInput {
   slug: string;
   ref: string;
   mode: PrMergeMode;
+}
+
+interface GitHubPrReadyToolInput {
+  action: "ready";
+  slug: string;
+  ref: string;
 }
 
 interface GitHubCiStatusToolInput {

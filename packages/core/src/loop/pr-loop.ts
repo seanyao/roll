@@ -219,6 +219,31 @@ export function botReviewAction(bot: BotReviewState): BotReviewAction {
   return { kind: "fall_through" };
 }
 
+export interface PromoteDraftFacts {
+  isDraft: boolean;
+  manualMerge: boolean;
+  botReview: BotReviewState;
+  ciState: CiRollupState;
+  mergeable: MergeStateStatus;
+}
+
+export type PromoteDraftAction =
+  | { kind: "promote_and_merge" }
+  | { kind: "skip"; reason: "not_manual_merge" | "not_draft" | "missing_bot_approval" | "not_clean" };
+
+/**
+ * FIX-1027: a manual-review draft can be promoted only after the independent
+ * bot/app review has APPROVED and the normal eager-merge gates are green. This
+ * preserves FIX-909's review gate: CI green alone never undrafts or merges.
+ */
+export function promoteDraftAction(facts: PromoteDraftFacts): PromoteDraftAction {
+  if (!facts.manualMerge) return { kind: "skip", reason: "not_manual_merge" };
+  if (!facts.isDraft) return { kind: "skip", reason: "not_draft" };
+  if (facts.botReview !== "APPROVED") return { kind: "skip", reason: "missing_bot_approval" };
+  if (!eagerMergeEligible(facts.ciState, facts.mergeable)) return { kind: "skip", reason: "not_clean" };
+  return { kind: "promote_and_merge" };
+}
+
 // ── per-PR action plan (mirrors the case "$verdict" switch, bin/roll 12024-12048)
 
 /**

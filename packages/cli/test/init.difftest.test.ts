@@ -19,7 +19,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { initCommand } from "../src/commands/init.js";
+import { confirmInitProjectForTest, initCommand } from "../src/commands/init.js";
 import { collectProjectsRegistry } from "../src/lib/projects-registry.js";
 
 const REPO = resolve(__dirname, "../../..");
@@ -29,6 +29,7 @@ interface Fixture {
   proj: string;
   home: string;
   bin: string;
+  pkg?: string;
 }
 
 interface Run {
@@ -83,6 +84,18 @@ function freshFixture(): Fixture {
   return { proj: freshProj(), home: freshHome(), bin };
 }
 
+function fakePkgWithOnboardSkill(): string {
+  const pkg = realpathSync(mkdtempSync(join(tmpdir(), "roll-init-pkg-")));
+  dirs.push(pkg);
+  cpSync(join(REPO, "lib"), join(pkg, "lib"), { recursive: true });
+  mkdirSync(join(pkg, "skills", "roll-onboard"), { recursive: true });
+  writeFileSync(
+    join(pkg, "skills", "roll-onboard", "SKILL.md"),
+    "---\nname: roll-onboard\ndescription: Onboard a project.\n---\n# roll-onboard\n\nWrite .roll/onboard-plan.yaml.\n",
+  );
+  return pkg;
+}
+
 function noTemplateFixture(): Fixture {
   const bin = realpathSync(mkdtempSync(join(tmpdir(), "roll-init-bin-")));
   dirs.push(bin);
@@ -111,6 +124,7 @@ function applyFixture(planBody: string): Fixture {
 
 function legacyFixtureWithFakeAgent(): Fixture {
   const fx = freshFixture();
+  fx.pkg = fakePkgWithOnboardSkill();
   writeFileSync(join(fx.proj, "package.json"), "{\"scripts\":{\"test\":\"vitest\"}}\n");
   writeFileSync(
     join(fx.home, "config.yaml"),
@@ -129,6 +143,51 @@ function legacyFixtureWithFakeAgent(): Fixture {
       "project_understanding:",
       "  type: cli",
       "  description: legacy cli",
+      "scope:",
+      "  approved: [backlog, features]",
+      "  declined: []",
+      "privacy:",
+      "  gitignore_dot_roll: false",
+      "agent_routes_template: skip",
+      "EOF",
+      "exit 0",
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  return fx;
+}
+
+function docsOnlyFixtureWithFakeAgent(): Fixture {
+  const fx = freshFixture();
+  fx.pkg = fakePkgWithOnboardSkill();
+  mkdirSync(join(fx.proj, "docs"), { recursive: true });
+  writeFileSync(
+    join(fx.proj, "README.md"),
+    "# SoloGo\n\nSoloGo is a Go score tracking app for offline SGF review and tournament notes.\n",
+  );
+  writeFileSync(
+    join(fx.proj, "docs", "spec.md"),
+    "# Product spec\n\nPlayers record games, annotate reviews, and sync tournament summaries.\n",
+  );
+  writeFileSync(
+    join(fx.home, "config.yaml"),
+    "# Roll config\nlang: en\nai_kimi: ~/.kimi|AGENTS.md|AGENTS.md\n",
+  );
+  const kimi = join(fx.bin, "kimi");
+  writeFileSync(
+    kimi,
+    [
+      "#!/bin/sh",
+      "printf '%s' \"$1\" > prompt.txt",
+      "mkdir -p .roll",
+      "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+      "cat > .roll/onboard-plan.yaml <<EOF",
+      "version: 1",
+      "generated_at: \"$ts\"",
+      "project_understanding:",
+      "  type: cli",
+      "  description: SoloGo Go score tracking app",
       "scope:",
       "  approved: [backlog, features]",
       "  declined: []",
@@ -209,7 +268,7 @@ function envBase(fx: Fixture, extra: Record<string, string>): Record<string, str
     PATH: `${fx.bin}:${process.env["PATH"] ?? ""}`,
     HOME: fx.home,
     ROLL_HOME: fx.home,
-    ROLL_PKG_DIR: REPO,
+    ROLL_PKG_DIR: fx.pkg ?? REPO,
     NO_COLOR: "1",
     ROLL_LANG: "en",
     PWD: fx.proj,
@@ -739,6 +798,25 @@ describe("frozen: roll init", () => {
     expect(read(fx.proj, ".roll/onboard-plan.yaml")).toContain("legacy cli");
     expect(read(fx.proj, ".roll/onboard-changeset.yaml")).toContain(".roll/backlog.md");
     expect(read(fx.proj, "AGENTS.md")).toContain("# Agent Conventions");
+  });
+
+  it("US-INIT-001: docs-only project launches onboard with README/docs context", () => {
+    const fx = docsOnlyFixtureWithFakeAgent();
+    const run = tsInit(fx, []);
+    expect(run.status).toBe(0);
+    expect(read(fx.proj, "prompt.txt")).toContain("Project context detected by roll init");
+    expect(read(fx.proj, "prompt.txt")).toContain("README.md");
+    expect(read(fx.proj, "prompt.txt")).toContain("Go score tracking app");
+    expect(read(fx.proj, "prompt.txt")).toContain("docs/spec.md");
+    expect(read(fx.proj, ".roll/onboard-plan.yaml")).toContain("SoloGo Go score tracking app");
+    expect(read(fx.proj, ".roll/onboard-changeset.yaml")).toContain(".roll/backlog.md");
+    expect(read(fx.proj, "AGENTS.md")).toContain("# Agent Conventions");
+  });
+
+  it("FIX-1029: fresh init confirmation reads through the tty-confirm seam", () => {
+    const fx = freshFixture();
+    expect(confirmInitProjectForTest(fx.proj, false, () => "yes")).toBe(true);
+    expect(confirmInitProjectForTest(fx.proj, false, () => "no")).toBe(false);
   });
 
   // FIX-283 (AC4): `roll init` registers the (real) project into the

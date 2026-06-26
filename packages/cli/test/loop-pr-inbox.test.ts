@@ -19,6 +19,7 @@ import { parseRebaseAttempts } from "@roll/core";
 interface Recorder {
   ticks: PrTick[];
   alerts: string[];
+  readied: string[];
   merged: string[];
   healed: string[];
   rebased: string[];
@@ -28,12 +29,16 @@ interface Recorder {
 }
 
 function harness(overrides: Partial<PrInboxDeps> = {}): { deps: PrInboxDeps; rec: Recorder } {
-  const rec: Recorder = { ticks: [], alerts: [], merged: [], healed: [], rebased: [], circuitCalls: [], mergedRecorded: [] };
+  const rec: Recorder = { ticks: [], alerts: [], readied: [], merged: [], healed: [], rebased: [], circuitCalls: [], mergedRecorded: [] };
   const deps: PrInboxDeps = {
     ghAvailable: async () => true,
     resolveSlug: async () => "owner/repo",
     listOpenPrs: async () => ({ code: 0, stdout: "[]" }),
     viewPr: async () => ({ bot: "", ciState: "success", mergeable: "CLEAN" }),
+    ready: async (_slug, num) => {
+      rec.readied.push(num);
+      return true;
+    },
     merge: async (_slug, num) => {
       rec.merged.push(num);
       return true;
@@ -163,6 +168,56 @@ describe("runPrInbox — per-PR action dispatch", () => {
     });
     await runPrInbox(deps);
     expect(rec.merged).toEqual(["8"]);
+  });
+  it("FIX-1027: manual draft + bot APPROVED + clean → ready first, then merge", async () => {
+    const { deps, rec } = harness({
+      listOpenPrs: listOf([{ number: 30, headRefName: "loop/manual-review" }]),
+      viewPr: async () => ({
+        bot: "APPROVED",
+        ciState: "success",
+        mergeable: "CLEAN",
+        manualMerge: true,
+        isDraft: true,
+      }),
+    });
+    await runPrInbox(deps);
+    expect(rec.readied).toEqual(["30"]);
+    expect(rec.merged).toEqual(["30"]);
+    expect(rec.mergedRecorded).toEqual([{ num: "30", headRef: "loop/manual-review" }]);
+  });
+  it("FIX-1027 guard: manual draft with green CI but no bot approve stays open", async () => {
+    const { deps, rec } = harness({
+      listOpenPrs: listOf([{ number: 31, headRefName: "loop/manual-review" }]),
+      viewPr: async () => ({
+        bot: "",
+        ciState: "success",
+        mergeable: "CLEAN",
+        manualMerge: true,
+        isDraft: true,
+      }),
+    });
+    await runPrInbox(deps);
+    expect(rec.readied).toEqual([]);
+    expect(rec.merged).toEqual([]);
+  });
+  it("FIX-1027 guard: failed ready leaves the PR unmerged for the next tick", async () => {
+    const { deps, rec } = harness({
+      listOpenPrs: listOf([{ number: 32, headRefName: "loop/manual-review" }]),
+      viewPr: async () => ({
+        bot: "APPROVED",
+        ciState: "success",
+        mergeable: "CLEAN",
+        manualMerge: true,
+        isDraft: true,
+      }),
+      ready: async (_slug, num) => {
+        rec.readied.push(num);
+        return false;
+      },
+    });
+    await runPrInbox(deps);
+    expect(rec.readied).toEqual(["32"]);
+    expect(rec.merged).toEqual([]);
   });
   it("bot CHANGES_REQUESTED → alert, no merge", async () => {
     const { deps, rec } = harness({

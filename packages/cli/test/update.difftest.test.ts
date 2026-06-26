@@ -197,7 +197,14 @@ function scrub(r: Run): Run {
       .replace(/(?:\/private)?\/(?:var\/folders|tmp)\/[^\s"':)]*/g, "<TMP>")
       // the running version is read from package.json — scrub it so the snapshot
       // survives every release bump (US-PORT-021b: the version-coupling trap).
-      .replace(/v\d+\.\d+\.\d+/g, "v<VER>");
+      .replace(/v\d+\.\d+\.\d+/g, "v<VER>")
+      // "command not found" wording is shell-version-specific: dash emits
+      // `<script>: 12: cp: not found`, bash emits `<script>: line 12: cp:
+      // command not found`. The snapshot would false-fail on whichever shell
+      // didn't freeze it (macOS bash vs CI dash). Canonicalize both forms so
+      // the difftest is portable — we assert the SHAPE (which command was not
+      // found), not the host shell's phrasing. (FIX-1023)
+      .replace(/:\s*(?:line\s+)?\d+:\s*(\S+):\s*(?:command\s+)?not found/g, ": <SH-NOTFOUND:$1>");
   return { status: r.status, stdout: n(r.stdout), stderr: n(r.stderr) };
 }
 

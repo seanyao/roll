@@ -14,6 +14,7 @@ import {
   prActedTick,
   prIdleTick,
   prInboxGate,
+  promoteDraftAction,
   REBASE_CIRCUIT_MAX,
   REBASE_CIRCUIT_WINDOW_SEC,
   reduceCiRollup,
@@ -250,6 +251,111 @@ describe("rebaseable — fork guard (bin/roll 11891)", () => {
   });
   it("same-repo → rebaseable", () => {
     expect(rebaseable(false)).toBe(true);
+  });
+});
+
+describe("promoteDraftAction — FIX-1027 (draft PR promotion gate)", () => {
+  // AC1: APPROVED + CI green + mergeable → promote_and_merge
+  it("APPROVED + draft + CI green + mergeable → promote_and_merge", () => {
+    expect(promoteDraftAction({ isDraft: true, manualMerge: true, botReview: "APPROVED", ciState: "success", mergeable: "CLEAN" })).toEqual({
+      kind: "promote_and_merge",
+    });
+    expect(promoteDraftAction({ isDraft: true, manualMerge: true, botReview: "APPROVED", ciState: "success", mergeable: "MERGEABLE" })).toEqual({
+      kind: "promote_and_merge",
+    });
+  });
+
+  // AC2 (guardrail): CI green but NO bot APPROVE → skip (FIX-909 review gate retained)
+  it("CI green + draft + no bot APPROVE → skip (FIX-909 gate retained)", () => {
+    expect(promoteDraftAction({ isDraft: true, manualMerge: true, botReview: "", ciState: "success", mergeable: "CLEAN" })).toEqual({
+      kind: "skip",
+      reason: "no_bot_approval",
+    });
+    expect(promoteDraftAction({ isDraft: true, manualMerge: true, botReview: "COMMENTED", ciState: "success", mergeable: "CLEAN" })).toEqual({
+      kind: "skip",
+      reason: "no_bot_approval",
+    });
+    // CHANGES_REQUESTED also skips
+    expect(promoteDraftAction({ isDraft: true, manualMerge: true, botReview: "CHANGES_REQUESTED", ciState: "success", mergeable: "CLEAN" })).toEqual({
+      kind: "skip",
+      reason: "no_bot_approval",
+    });
+  });
+
+  // AC3: APPROVED but CI red → skip; still draft without review → skip
+  it("APPROVED + draft + CI red → skip", () => {
+    expect(promoteDraftAction({ isDraft: true, manualMerge: true, botReview: "APPROVED", ciState: "failure", mergeable: "CLEAN" })).toEqual({
+      kind: "skip",
+      reason: "ci_not_green",
+    });
+  });
+
+  it("APPROVED + draft + CI pending → skip", () => {
+    expect(promoteDraftAction({ isDraft: true, manualMerge: true, botReview: "APPROVED", ciState: "pending", mergeable: "CLEAN" })).toEqual({
+      kind: "skip",
+      reason: "ci_not_green",
+    });
+  });
+
+  it("not draft → skip (only meaningful for draft PRs)", () => {
+    expect(promoteDraftAction({ isDraft: false, manualMerge: true, botReview: "APPROVED", ciState: "success", mergeable: "CLEAN" })).toEqual({
+      kind: "skip",
+      reason: "not_draft",
+    });
+  });
+
+  it("not manualMerge → skip", () => {
+    expect(promoteDraftAction({ isDraft: true, manualMerge: false, botReview: "APPROVED", ciState: "success", mergeable: "CLEAN" })).toEqual({
+      kind: "skip",
+      reason: "not_manual_merge",
+    });
+  });
+
+  it("not mergeable → skip", () => {
+    expect(promoteDraftAction({ isDraft: true, manualMerge: true, botReview: "APPROVED", ciState: "success", mergeable: "BEHIND" })).toEqual({
+      kind: "skip",
+      reason: "not_mergeable",
+    });
+  });
+
+  it("isDraft undefined → skip (falsy)", () => {
+    expect(promoteDraftAction({ isDraft: undefined, manualMerge: true, botReview: "APPROVED", ciState: "success", mergeable: "CLEAN" })).toEqual({
+      kind: "skip",
+      reason: "not_draft",
+    });
+  });
+});
+
+describe("selectPrAction with promoteDraftAction (FIX-1027)", () => {
+  // AC1: manualMerge + draft + APPROVED + CI green + mergeable → promote_and_merge through selectPrAction
+  it("bot APPROVED + manualMerge + draft + CI green + mergeable → promote_and_merge", () => {
+    expect(selectPrAction({ bot: "APPROVED", ciState: "success", mergeable: "CLEAN", manualMerge: true, isDraft: true })).toEqual({
+      kind: "promote_and_merge",
+    });
+  });
+
+  // AC2 (guardrail): manualMerge + draft + CI green but NO APPROVE → still skip (FIX-909 gate)
+  it("manualMerge + draft + CI green + no APPROVE → manual_merge_required (FIX-909 gate)", () => {
+    expect(selectPrAction({ bot: "", ciState: "success", mergeable: "CLEAN", manualMerge: true, isDraft: true })).toEqual({
+      kind: "skip",
+      reason: "manual_merge_required",
+    });
+  });
+
+  // Existing behavior preserved: manualMerge without draft still skips
+  it("bot APPROVED + manualMerge + not draft → manual_merge_required (no auto-promote)", () => {
+    expect(selectPrAction({ bot: "APPROVED", ciState: "success", mergeable: "CLEAN", manualMerge: true, isDraft: false })).toEqual({
+      kind: "skip",
+      reason: "manual_merge_required",
+    });
+  });
+
+  // Existing behavior preserved: non-manualMerge bot APPROVED still merges
+  it("bot APPROVED + no manualMerge → merge bot_approved (unchanged)", () => {
+    expect(selectPrAction({ bot: "APPROVED", ciState: "success", mergeable: "CLEAN" })).toEqual({
+      kind: "merge",
+      reason: "bot_approved",
+    });
   });
 });
 

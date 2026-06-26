@@ -230,8 +230,46 @@ export function botReviewAction(bot: BotReviewState): BotReviewAction {
  *   - alert       : dedup ALERT row (bot CHANGES_REQUESTED).
  *   - skip        : no-op (e.g. APPROVED but not yet clean).
  */
+/** The outcome of {@link promoteDraftAction} — a draft-promotion verdict. */
+export type DraftAction =
+  | { kind: "promote_and_merge" }
+  | { kind: "skip"; reason: string };
+
+/** The narrower facts {@link promoteDraftAction} consumes. */
+export interface DraftFacts {
+  isDraft: boolean;
+  manualMerge: boolean;
+  botReview: BotReviewState;
+  ciState: CiRollupState;
+  mergeable: MergeStateStatus;
+}
+
+/**
+ * FIX-1027 — pure decision: should a manual-merge draft PR be promoted (undrafted)
+ * and merged? Reuses the existing APPROVED + eager-merge-eligible signals.
+ *
+ * Only when ALL of these hold:
+ *   - manualMerge (the draft was published with manual_merge set)
+ *   - isDraft (still in draft state)
+ *   - botReview === "APPROVED" (the bot has reviewed and approved — FIX-909 gate)
+ *   - eagerMergeEligible(ciState, mergeable) (CI green + mergeable)
+ *
+ * Never auto-merges a draft without bot approval — the FIX-909 review gate is
+ * preserved. Returns `promote_and_merge` when the PR should be undrafted (gh pr
+ * ready) and then merged; otherwise `skip` with a diagnostic reason.
+ */
+export function promoteDraftAction(f: DraftFacts): DraftAction {
+  if (f.isDraft !== true) return { kind: "skip", reason: "not_draft" };
+  if (f.manualMerge !== true) return { kind: "skip", reason: "not_manual_merge" };
+  if (f.botReview !== "APPROVED") return { kind: "skip", reason: "no_bot_approval" };
+  if (f.ciState !== "success") return { kind: "skip", reason: "ci_not_green" };
+  if (f.mergeable !== "CLEAN" && f.mergeable !== "MERGEABLE") return { kind: "skip", reason: "not_mergeable" };
+  return { kind: "promote_and_merge" };
+}
+
 export type PrAction =
   | { kind: "merge"; reason: "bot_approved" | "eager_ready" | "eager_after_rebase" }
+  | { kind: "promote_and_merge" } // FIX-1027: undraft + merge
   | { kind: "heal" } // ci_red → hand to the CI heal path (ci-loop.ts).
   | { kind: "rebase" } // stale → rebase-circuit + rebase + re-check.
   | { kind: "alert"; reason: "bot_changes_requested" }
@@ -244,6 +282,8 @@ export interface PrFacts {
   mergeable: MergeStateStatus;
   /** US-EVID-016: safety-created repair PRs must stay open for human merge. */
   manualMerge?: boolean;
+  /** FIX-1027: whether the PR is a draft (gh pr view `.isDraft`). */
+  isDraft?: boolean;
 }
 
 /**
@@ -257,11 +297,25 @@ export interface PrFacts {
  *       stale  → rebase (12028-12044, the re-check/eager-merge is the SECOND
  *                phase the adapter drives via {@link rebaseRecheckAction});
  *       ready  → merge iff eager-eligible, else skip (12046-12047 / 11950).
+ *
+ * FIX-1027: before returning `manual_merge_required` for a bot-approved draft,
+ * checks {@link promoteDraftAction} — an APPROVED + CI-green + mergeable draft
+ * is promoted and merged instead of being stuck as a draft.
  */
 export function selectPrAction(f: PrFacts): PrAction {
   const bot = botReviewAction(f.bot);
   if (bot.kind === "merge_if_clean") {
-    if (f.manualMerge === true) return { kind: "skip", reason: "manual_merge_required" };
+    if (f.manualMerge === true) {
+      const draft = promoteDraftAction({
+        isDraft: f.isDraft === true,
+        manualMerge: true,
+        botReview: f.bot,
+        ciState: f.ciState,
+        mergeable: f.mergeable,
+      });
+      if (draft.kind === "promote_and_merge") return draft;
+      return { kind: "skip", reason: "manual_merge_required" };
+    }
     return eagerMergeEligible(f.ciState, f.mergeable)
       ? { kind: "merge", reason: "bot_approved" }
       : { kind: "skip", reason: "bot_approved_not_clean" };

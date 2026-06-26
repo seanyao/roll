@@ -27,12 +27,13 @@ roll init
    [legacy-onboarding.md](legacy-onboarding.md) and
    [patterns/graft-pattern.md](patterns/graft-pattern.md).
 4. **Already initialized** — `.roll/`, `AGENTS.md`, backlog, and features are
-   present. Roll prints `Already initialized` and `Next: roll next`.
+   present. Roll prints `Already initialized` and `Next: roll status`.
 5. **Partial Roll** — some Roll markers are present but the setup is incomplete.
-   Roll prints a repair route and does not fresh-scaffold over the project.
+   Roll prints `roll init --repair` and does not fresh-scaffold over the project
+   unless you explicitly ask for repair.
 
-Upgrading from a pre-2.0 layout (`BACKLOG.md` at root, `docs/features/`,
-`docs/domain/`)? Run `npx @seanyao/roll@2 migrate` first — see
+Upgrading from a pre-2.0 layout (`BACKLOG.md` at root or `docs/features/`)?
+Run `npx @seanyao/roll@2 migrate` first — see
 [migration-2.0.md](migration-2.0.md). `roll init` will refuse to scaffold on top
 of a half-migrated project.
 
@@ -76,8 +77,8 @@ default and your loop rig pool can differ.
 
 ## Re-initializing
 
-`roll init` is safe to repeat. Complete projects get `Next: roll next`; partial
-projects get repair guidance instead of another scaffold pass.
+`roll init` is safe to repeat. Complete projects get `Next: roll status`;
+partial projects get `roll init --repair` instead of another scaffold pass.
 
 ## See Also
 

@@ -1157,10 +1157,11 @@ function emitInitUi(
   syncStatus: StepStatus,
   summary: Summary,
   shouldNudge: boolean,
+  mode: "init" | "reinit" | "repair" = hasAgents ? "reinit" : "init",
 ): void {
-  const headerLabel = hasAgents ? "REINIT" : "INIT";
-  const subtitle = hasAgents ? "重新合并约定" : "项目初始化";
-  const footerLabel = hasAgents ? "Re-merged" : "Initialized";
+  const headerLabel = mode === "repair" ? "REPAIR" : mode === "reinit" ? "REINIT" : "INIT";
+  const subtitle = mode === "repair" ? "补齐 Roll 结构" : mode === "reinit" ? "重新合并约定" : "项目初始化";
+  const footerLabel = mode === "repair" ? "Repaired" : mode === "reinit" ? "Re-merged" : "Initialized";
 
   const byFile = new Map<string, string>();
   for (const entry of summary) {
@@ -1323,7 +1324,8 @@ export function initCommand(args: string[]): number {
     process.stdout.write(renderStateMatrixFixture(msgLang()));
     return 0;
   }
-  const autoMode = args.includes("--auto");
+  const repairMode = args.includes("--repair");
+  const autoMode = args.includes("--auto") || repairMode;
   if (args[0] === "--apply") {
     if (!existsSync(rollTemplates())) {
       err(m("init.no_templates_found_run_roll_setup"));
@@ -1337,7 +1339,7 @@ export function initCommand(args: string[]): number {
     }
     return initApply(projectDir);
   }
-  const unknownFlag = args.find((a) => a.startsWith("-") && a !== "--auto");
+  const unknownFlag = args.find((a) => a.startsWith("-") && a !== "--auto" && a !== "--repair");
   if (unknownFlag !== undefined) {
     // FIX-238 AC2: name the offending flag (the empty-name message was useless).
     err(`${m("init.unknown_flag_1")}${unknownFlag}`);
@@ -1351,7 +1353,7 @@ export function initCommand(args: string[]): number {
     projectDir = process.cwd();
   }
   const initDiagnosis = classifyInitState(collectInitFacts(projectDir));
-  if (shouldRenderDiagnosisOnly(initDiagnosis)) {
+  if (shouldRenderDiagnosisOnly(initDiagnosis) && !(repairMode && initDiagnosis.kind === "roll-partial")) {
     process.stdout.write(`${renderInitRecommendation(initDiagnosis, msgLang())}\n`);
     return 0;
   }
@@ -1406,7 +1408,7 @@ export function initCommand(args: string[]): number {
   // US-ONBOARD-NUDGE-002: detect PRD + empty-backlog signal for NEXT nudge.
   const shouldNudge = detectDesignHandoff(projectDir).shouldNudge;
 
-  emitInitUi(projectDir, hasAgents, syncStatus, summary, shouldNudge);
+  emitInitUi(projectDir, hasAgents, syncStatus, summary, shouldNudge, repairMode ? "repair" : undefined);
 
   void err;
   return 0;

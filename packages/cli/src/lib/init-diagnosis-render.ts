@@ -9,7 +9,7 @@ export function renderInitRecommendation(diagnosis: InitDiagnosis, lang: Lang): 
   const lines: string[] = [];
   if (diagnosis.kind === "roll-ready") {
     lines.push(label("Already initialized.", "已完成初始化。", lang));
-    lines.push("Next: roll next");
+    lines.push(`Next: ${diagnosis.nextCommand}`);
     return lines.join("\n");
   }
 

@@ -4,7 +4,7 @@ exports[`init diagnosis rendering > renders the hidden state-matrix fixture dete
 "roll init diagnosis fixture: state-matrix
 
 Already initialized.
-Next: roll next
+Next: roll status
 
 Detected: roll-partial
 Recommended path: repair-roll
@@ -30,7 +30,7 @@ Detected: prd-only
 Recommended path: scaffold-from-prd
 Reasons:
   - Product or requirements documents found without source/manifests.
-Next: roll design --from-file docs/PRD.md
+Next: $roll-design
 
 Detected: empty
 Recommended path: guided-brief

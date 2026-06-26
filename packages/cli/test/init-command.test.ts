@@ -131,7 +131,7 @@ describe("roll init diagnosis router", () => {
     expect(run.status).toBe(0);
     expect(run.stderr).toBe("");
     expect(run.stdout).toContain("Already initialized");
-    expect(run.stdout).toContain("Next: roll next");
+    expect(run.stdout).toContain("Next: roll status");
   });
 
   it("renders a repair route for partial Roll projects and does not create AGENTS.md", () => {
@@ -143,8 +143,23 @@ describe("roll init diagnosis router", () => {
     expect(run.status).toBe(0);
     expect(run.stdout).toContain("Detected: roll-partial");
     expect(run.stdout).toContain("Recommended path: repair-roll");
+    expect(run.stdout).toContain("Next: roll init");
     expect(run.stdout).toContain("No files changed.");
     expect(existsSync(join(cwd, "AGENTS.md"))).toBe(false);
+  });
+
+  it("repairs partial Roll projects when explicitly requested", () => {
+    const cwd = project();
+    write(cwd, ".roll/backlog.md", "# Backlog\n");
+
+    const run = runInit(cwd, ["--repair"]);
+
+    expect(run.status).toBe(0);
+    expect(run.stdout).toContain("REPAIR");
+    expect(run.stdout).toContain("Repaired");
+    expect(existsSync(join(cwd, "AGENTS.md"))).toBe(true);
+    expect(existsSync(join(cwd, ".roll", "backlog.md"))).toBe(true);
+    expect(existsSync(join(cwd, ".roll", "features"))).toBe(true);
   });
 
   it("routes pre-v2 Roll layout markers to migration without fresh scaffold", () => {
@@ -171,10 +186,25 @@ describe("roll init diagnosis router", () => {
     expect(run.status).toBe(0);
     expect(run.stdout).toContain("Detected: prd-only");
     expect(run.stdout).toContain("Recommended path: scaffold-from-prd");
-    expect(run.stdout).toContain("roll design --from-file docs/intel-radar-PRD.md");
+    expect(run.stdout).toContain("Next: $roll-design");
     expect(run.stdout).not.toContain("Onboarding");
     expect(existsSync(join(cwd, "prompt.txt"))).toBe(false);
     expect(existsSync(join(cwd, "AGENTS.md"))).toBe(false);
     expect(existsSync(join(cwd, ".roll"))).toBe(false);
+  });
+
+  it("does not route git-only or empty source shells to existing-codebase onboarding", () => {
+    const cwd = project();
+    mkdir(cwd, "src");
+    mkdir(cwd, "tests");
+
+    const run = runInit(cwd, ["--auto"]);
+
+    expect(run.status).toBe(0);
+    expect(run.stdout).toContain("INIT");
+    expect(run.stdout).toContain("Initialized");
+    expect(run.stdout).not.toContain("Onboarding");
+    expect(existsSync(join(cwd, "AGENTS.md"))).toBe(true);
+    expect(existsSync(join(cwd, ".roll", "backlog.md"))).toBe(true);
   });
 });

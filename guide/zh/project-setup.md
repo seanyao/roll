@@ -23,12 +23,12 @@ roll init
    [legacy-onboarding.md](legacy-onboarding.md) 与
    [patterns/graft-pattern.md](patterns/graft-pattern.md)。
 4. **已初始化** —— `.roll/`、`AGENTS.md`、backlog、features 都存在。Roll
-   打印 `Already initialized` 和 `Next: roll next`。
-5. **部分接入 Roll** —— 有一部分 Roll 标记但不完整。Roll 只打印修复路径，不会
-   在项目上叠加新骨架。
+   打印 `Already initialized` 和 `Next: roll status`。
+5. **部分接入 Roll** —— 有一部分 Roll 标记但不完整。Roll 打印
+   `roll init --repair`，只有你明确要求修复时才补齐缺失文件。
 
-正在从 2.0 之前的布局升级（`BACKLOG.md` 在根目录、`docs/features/`、
-`docs/domain/`）？先跑 `npx @seanyao/roll@2 migrate` —— 见
+正在从 2.0 之前的布局升级（`BACKLOG.md` 在根目录或 `docs/features/`）？
+先跑 `npx @seanyao/roll@2 migrate` —— 见
 [migration-2.0.md](migration-2.0.md)。`roll init` 会拒绝在迁移到一半的
 项目上叠加骨架。
 
@@ -69,8 +69,8 @@ roll loop on               # 开启自主执行
 
 ## 幂等性
 
-`roll init` 可安全重复执行：完整项目会提示 `roll next`，部分项目会给出修复建议，
-不会再次强行跑脚手架。
+`roll init` 可安全重复执行：完整项目会提示 `roll status`，部分项目会提示
+`roll init --repair`，不会再次强行跑脚手架。
 
 ## 另见
 

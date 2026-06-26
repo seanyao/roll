@@ -224,7 +224,7 @@ Diagnoses the current directory before choosing a path — see the adoption patt
 - **Seed** (empty dir): scaffold `AGENTS.md` + `.roll/` directly, no prompts.
 - **PRD-only** (requirements docs, no source): point to design as a new-project path.
 - **Graft** (existing code, no `.roll/`): surfaces `$roll-onboard`, which scans the code, asks a short clarification set, and writes `.roll/onboard-plan.yaml` for review — see [legacy-onboarding.md](legacy-onboarding.md).
-- **Roll-ready / partial / pre-2.0 Roll**: print `roll next`, repair, or migration guidance without fresh-scaffolding over existing Roll markers.
+- **Roll-ready / partial / pre-2.0 Roll**: print `roll status`, `roll init --repair`, or migration guidance without fresh-scaffolding over existing Roll markers.
 
 Pre-2.0 projects (`BACKLOG.md` at root, `docs/features/`) should run `npx @seanyao/roll@2 migrate` first — see [migration-2.0.md](migration-2.0.md).
 

@@ -162,6 +162,18 @@ describe("roll init diagnosis router", () => {
     expect(existsSync(join(cwd, ".roll", "features"))).toBe(true);
   });
 
+  it("does not let --repair scaffold projects that are not partial Roll", () => {
+    const cwd = project();
+
+    const run = runInit(cwd, ["--repair"]);
+
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain("Detected: empty");
+    expect(run.stderr).toContain("roll init --repair only applies to partial Roll projects.");
+    expect(existsSync(join(cwd, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(cwd, ".roll"))).toBe(false);
+  });
+
   it("routes pre-v2 Roll layout markers to migration without fresh scaffold", () => {
     const cwd = project();
     write(cwd, "BACKLOG.md", "# Old Roll backlog\n");

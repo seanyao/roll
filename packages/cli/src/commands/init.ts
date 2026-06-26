@@ -1353,6 +1353,11 @@ export function initCommand(args: string[]): number {
     projectDir = process.cwd();
   }
   const initDiagnosis = classifyInitState(collectInitFacts(projectDir));
+  if (repairMode && initDiagnosis.kind !== "roll-partial") {
+    process.stdout.write(`${renderInitRecommendation(initDiagnosis, msgLang())}\n`);
+    err("roll init --repair only applies to partial Roll projects.");
+    return 1;
+  }
   if (shouldRenderDiagnosisOnly(initDiagnosis) && !(repairMode && initDiagnosis.kind === "roll-partial")) {
     process.stdout.write(`${renderInitRecommendation(initDiagnosis, msgLang())}\n`);
     return 0;

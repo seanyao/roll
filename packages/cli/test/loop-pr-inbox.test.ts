@@ -38,6 +38,10 @@ function harness(overrides: Partial<PrInboxDeps> = {}): { deps: PrInboxDeps; rec
       rec.merged.push(num);
       return true;
     },
+    promote: async (_slug, num) => {
+      rec.merged.push(`promote:${num}`);
+      return true;
+    },
     onMerged: async (_slug, num, headRef) => {
       rec.mergedRecorded.push({ num, headRef });
     },
@@ -76,11 +80,11 @@ describe("reducePrView — last BOT/APP review + rollup reduction (bin/roll 1199
       mergeStateStatus: "CLEAN",
       statusCheckRollup: [{ conclusion: "SUCCESS" }],
     });
-    expect(f).toEqual({ bot: "APPROVED", ciState: "success", mergeable: "CLEAN", manualMerge: false });
+    expect(f).toEqual({ bot: "APPROVED", ciState: "success", mergeable: "CLEAN", manualMerge: false, isDraft: false });
   });
   it("no bot reviews → empty bot; empty rollup → '' ci", () => {
     const f = reducePrView({ reviews: [{ authorAssociation: "MEMBER", state: "APPROVED" }] });
-    expect(f).toEqual({ bot: "", ciState: "", mergeable: "", manualMerge: false });
+    expect(f).toEqual({ bot: "", ciState: "", mergeable: "", manualMerge: false, isDraft: false });
   });
   it("detects manual-merge marker from PR body or labels", () => {
     expect(reducePrView({ body: "fix\n\n[roll:manual-merge]" }).manualMerge).toBe(true);

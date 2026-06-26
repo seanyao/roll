@@ -479,6 +479,15 @@ export async function prClose(slug: string, pr: string, reason: string): Promise
 }
 
 /**
+ * FIX-1027 — `gh -R <slug> pr ready <pr>` — undraft a PR before merging.
+ * The v2 oracle had no undraft path (grep `gh pr ready`/`undraft`/`readyForReview`
+ * returned 0). Returns the raw {@link GhResult} so callers can decide fatality.
+ */
+export async function prReady(slug: string, pr: string): Promise<GhResult> {
+  return gh(["-R", slug, "pr", "ready", pr]);
+}
+
+/**
  * `gh -R <slug> pr diff <pr>` (bin/roll 12099). Returns the trimmed diff, or
  * undefined on failure — the oracle treats a failed diff as "not empty" (never
  * close a PR it couldn't inspect). Callers test emptiness of the defined value.

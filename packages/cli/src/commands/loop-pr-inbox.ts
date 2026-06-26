@@ -13,8 +13,9 @@
  *   2. `gh pr list --state open --json …` fails  → idle `gh_error`.
  *   3. empty / "[]" / zero-length                → idle `empty_response` /
  *      `no_open_prs` / `zero_prs` (via {@link prInboxGate}).
- *   4. per open PR: `gh pr view --json reviews,mergeStateStatus,statusCheckRollup,body,labels`
- *      → reduce {bot, ciState, mergeable} → {@link selectPrAction}:
+ *   4. per open PR: `gh pr view --json reviews,mergeStateStatus,statusCheckRollup,body,labels,isDraft`
+ *      → reduce {bot, ciState, mergeable, manualMerge, isDraft} → {@link selectPrAction}:
+ *        promote_and_merge → `gh pr ready` undraft + `gh pr merge --squash --delete-branch` (FIX-1027).
  *        merge  → `gh pr merge --squash --delete-branch` (eager / bot-approved).
  *        alert  → bot CHANGES_REQUESTED ALERT row, skip.
  *        heal   → ci_red: hand to the bash heal helper (background agent dispatch;
@@ -51,7 +52,7 @@ import {
   DEAD_TICK_NOTES,
   deadTickVerdict,
 } from "@roll/core";
-import { gh, ghAvailable, ghRepoSlug, prMerge, remoteUrl } from "@roll/infra";
+import { gh, ghAvailable, ghRepoSlug, prMerge, prReady, remoteUrl } from "@roll/infra";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { prHealSelf, prRebaseStale } from "./loop-pr-heal.js";
@@ -65,15 +66,18 @@ export interface PrViewFacts {
   ciState: CiRollupState;
   mergeable: MergeStateStatus;
   manualMerge?: boolean;
+  /** FIX-1027: whether the PR is a draft (gh pr view `.isDraft`). */
+  isDraft?: boolean;
 }
 
-/** The raw `gh pr view --json reviews,mergeStateStatus,statusCheckRollup,body,labels` shape. */
+/** The raw `gh pr view --json reviews,mergeStateStatus,statusCheckRollup,body,labels,isDraft` shape. */
 interface PrViewRaw {
   reviews?: Array<{ authorAssociation?: string; state?: string }>;
   mergeStateStatus?: string;
   statusCheckRollup?: Array<{ conclusion?: string | null }>;
   body?: string;
   labels?: Array<{ name?: string }>;
+  isDraft?: boolean;
 }
 
 /**
@@ -95,6 +99,7 @@ export function reducePrView(raw: PrViewRaw): PrViewFacts {
     manualMerge:
       (raw.body ?? "").includes("[roll:manual-merge]") ||
       (raw.labels ?? []).some((label) => label.name === "manual-merge" || label.name === "roll:manual-merge"),
+    isDraft: raw.isDraft === true,
   };
 }
 
@@ -111,6 +116,8 @@ export interface PrInboxDeps {
   viewPr: (slug: string, num: string) => Promise<PrViewFacts | undefined>;
   /** `gh -R <slug> pr merge <num> --squash --delete-branch` → true on success. */
   merge: (slug: string, num: string) => Promise<boolean>;
+  /** FIX-1027 — `gh -R <slug> pr ready <num>` → true on success. */
+  promote: (slug: string, num: string) => Promise<boolean>;
   /**
    * FIX-367 — durably record merge truth the instant the PR-lane merges. The
    * PR-lane merges a cycle PR asynchronously (5-min cadence); before this, NOTHING
@@ -178,6 +185,15 @@ export async function runPrInbox(deps: PrInboxDeps): Promise<PrTick> {
 
     const action = selectPrAction(facts);
     switch (action.kind) {
+      case "promote_and_merge": {
+        deps.info(`PR #${num}: bot APPROVED + CI green + mergeable — promoting draft → ready → merge`);
+        if (await deps.promote(slug, num)) {
+          await doMerge(deps, slug, num, headRef);
+        } else {
+          deps.warn(`PR #${num}: promote (gh pr ready) failed — left as draft`);
+        }
+        break;
+      }
       case "merge":
         await doMerge(deps, slug, num, headRef);
         break;
@@ -440,7 +456,7 @@ function realDeps(): PrInboxDeps {
     viewPr: async (slug, num) => {
       const r = await gh([
         "-R", slug, "pr", "view", num,
-        "--json", "reviews,mergeStateStatus,statusCheckRollup,body,labels",
+        "--json", "reviews,mergeStateStatus,statusCheckRollup,body,labels,isDraft",
       ]);
       if (r.code !== 0 || r.stdout.trim() === "") return undefined;
       try {
@@ -450,6 +466,7 @@ function realDeps(): PrInboxDeps {
       }
     },
     merge: async (slug, num) => (await prMerge(slug, num, "plain")).code === 0,
+    promote: async (slug, num) => (await prReady(slug, num)).code === 0,
     onMerged: async () => {
       // FIX-367: credit the just-merged cycle's runs row → merged/delivered so the
       // picker's hasMergedDelivery guard durably excludes the card the instant the
@@ -467,7 +484,7 @@ function realDeps(): PrInboxDeps {
     rebaseStale: async (num, headRef, slug) => {
       prRebaseStale(num, headRef); // US-PORT-021: native TS rebase (was bridged bash)
       // Re-fetch the PR state after the rebase to decide an eager merge.
-      const r = await gh(["-R", slug, "pr", "view", num, "--json", "mergeStateStatus,statusCheckRollup,body,labels"]);
+      const r = await gh(["-R", slug, "pr", "view", num, "--json", "mergeStateStatus,statusCheckRollup,body,labels,isDraft"]);
       if (r.code !== 0 || r.stdout.trim() === "") return undefined;
       try {
         return reducePrView(JSON.parse(r.stdout) as PrViewRaw);

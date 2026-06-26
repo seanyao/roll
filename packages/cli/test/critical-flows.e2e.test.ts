@@ -106,6 +106,53 @@ describe("critical CLI E2E", () => {
     expect(report).toContain("Claimed");
   });
 
+  it("physical_terminal stories validate and attest without headless stdout masquerading as pixels", () => {
+    const project = tmpProject("physical-terminal");
+    const storyDir = join(project, ".roll", "features", "acceptance-evidence", "US-PHYS-E2E");
+    mkdirSync(storyDir, { recursive: true });
+    const command = `node ${rollBin} doctor --tools`;
+    writeFileSync(
+      join(storyDir, "spec.md"),
+      [
+        "---",
+        "id: US-PHYS-E2E",
+        "title: physical terminal evidence e2e",
+        "type: us",
+        "epic: acceptance-evidence",
+        "created: 2026-06-26",
+        `deliverable_cmd: ${command}`,
+        "physical_terminal:",
+        "  app: Terminal.app",
+        `  command: ${command}`,
+        "  evidence: screenshot",
+        "---",
+        "",
+        "# US-PHYS-E2E — physical terminal evidence e2e",
+        "",
+        "## Acceptance Criteria",
+        "",
+        "- [ ] [visual-evidence] real physical Terminal.app screenshot proves the CLI output",
+        "",
+      ].join("\n"),
+    );
+
+    const validate = runRoll(project, ["story", "validate", "US-PHYS-E2E"]);
+    expect(validate.code).toBe(0);
+    expect(validate.out).toContain("visual-evidence: ok (surface: terminal)");
+
+    const attest = runRoll(project, ["attest", "US-PHYS-E2E", "--capture-command", command], {
+      ROLL_NO_SCREENCAP: "1",
+    });
+    expect(attest.code).toBe(0);
+    const latest = join(storyDir, "latest");
+    expect(existsSync(join(latest, "screenshots", "terminal-headless.txt"))).toBe(false);
+    const evidence = JSON.parse(readFileSync(join(latest, "evidence.json"), "utf8")) as {
+      captures?: Array<{ kind?: string; taken?: boolean; skipped?: string }>;
+    };
+    expect(evidence.captures?.[0]).toMatchObject({ kind: "physical-terminal", taken: false });
+    expect(evidence.captures?.[0]?.skipped).toContain("ROLL_NO_SCREENCAP");
+  });
+
   it("roll loop runs reads real pre-v3 terminal patterns through the public CLI", () => {
     const project = tmpProject("loop-runs");
     const runtime = join(project, ".roll", "loop");

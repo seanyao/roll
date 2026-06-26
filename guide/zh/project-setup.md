@@ -27,7 +27,10 @@ roll init
 4. **已初始化** —— `.roll/`、`AGENTS.md`、backlog、features 都存在。Roll
    打印 `Already initialized` 和 `Next: roll status`。
 5. **部分接入 Roll** —— 有一部分 Roll 标记但不完整。Roll 打印
-   `roll init --repair`，只有你明确要求修复时才补齐缺失文件。
+   缺失项和仍存在的 pre-v2 旧标记。`roll init --repair` 会先预览修复计划，
+   在交互终端等待确认；非交互自动化必须显式执行 `roll init --repair --auto`。
+   修复只创建缺失的 Roll-owned 文件或合并 Roll-owned 区块，并写入
+   `.roll/onboard-changeset.yaml`，之后 `roll offboard` 可以反向移除这些改动。
 
 正在从 2.0 之前的布局升级（`BACKLOG.md` 在根目录或 `docs/features/`）？
 先跑 `npx @seanyao/roll@2 migrate` —— 见

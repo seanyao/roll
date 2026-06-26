@@ -60,6 +60,7 @@ import { guideExternalToolSetup, silentPreinstallChromium } from "../lib/externa
 import { detectDesignHandoff, renderDesignNudge } from "../lib/onboard-nudge.js";
 import { classifyInitState, collectInitFacts, renderStateMatrixFixture, type InitDiagnosis, type InitFacts } from "../lib/init-diagnosis.js";
 import { renderInitRecommendation } from "../lib/init-diagnosis-render.js";
+import { buildInitRepairPlan, requiredRollMissingPieces, type InitRepairOperation } from "../lib/init-repair.js";
 import { writeInitBrief, type InitBriefResult } from "../lib/init-brief.js";
 import {
   buildOnboardApplyReviewOperations,
@@ -1229,6 +1230,128 @@ function confirmApplyReview(
   return confirmed;
 }
 
+function repairActionLabel(action: InitRepairOperation["action"]): string {
+  switch (action) {
+    case "create":
+      return "create";
+    case "keep":
+      return "keep";
+    case "merge":
+      return "merge";
+    case "update":
+      return "update";
+  }
+}
+
+function renderRepairPlan(operations: readonly InitRepairOperation[]): string {
+  const actionWidth = Math.max(8, ...operations.map((op) => repairActionLabel(op.action).length));
+  const targetWidth = Math.max(32, ...operations.map((op) => op.target.length));
+  const lines = [
+    "Partial Roll repair preview",
+    `  ${"action".padEnd(actionWidth)}  ${"target".padEnd(targetWidth)}  kind       owner content`,
+    ...operations.map(
+      (op) => `  ${repairActionLabel(op.action).padEnd(actionWidth)}  ${op.target.padEnd(targetWidth)}  ${op.kind.padEnd(9)}  ${op.ownerContent}`,
+    ),
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+function confirmRepair(
+  operations: readonly InitRepairOperation[],
+  opts: { autoMode?: boolean; forceInteractive?: boolean; readLine?: () => string },
+): boolean {
+  process.stdout.write(renderRepairPlan(operations));
+  if (opts.autoMode === true) return true;
+  if (!applyIsInteractive(opts)) {
+    process.stdout.write("  Non-interactive stdin — repair requires explicit apply:\n");
+    process.stdout.write("    roll init --repair --auto\n");
+    process.stdout.write(`  ${m3("init.no_files_changed")}\n`);
+    return false;
+  }
+  const confirmed = confirmYesNo("Proceed with repair? [y/N] ", (s) => process.stderr.write(s), opts.readLine ?? readConfirmLine);
+  if (opts.readLine !== undefined) process.stderr.write("\n");
+  if (!confirmed) process.stderr.write(`${m3("init.no_files_changed")}\n`);
+  return confirmed;
+}
+
+function recordCreatedFileIfNeeded(projectDir: string, changeset: OnboardChangeset, rel: string, existed: boolean): void {
+  if (!existed && existsSync(join(projectDir, rel))) recordChangeset(projectDir, changeset, "files_created", rel);
+}
+
+function recordCreatedDirIfNeeded(projectDir: string, changeset: OnboardChangeset, rel: string, existed: boolean): void {
+  if (!existed && existsSync(join(projectDir, rel))) recordChangeset(projectDir, changeset, "dirs_created", rel);
+}
+
+function repairBlocker(projectDir: string): string | null {
+  const featuresDir = join(projectDir, ".roll", "features");
+  if (existsSync(featuresDir) && !statSync(featuresDir).isDirectory()) {
+    return ".roll/features exists but is not a directory. Move or rename it, then rerun `roll init --repair --auto`.";
+  }
+  return null;
+}
+
+function initRepair(
+  projectDir: string,
+  facts: InitFacts,
+  diagnosis: InitDiagnosis,
+  opts: { autoMode?: boolean; forceInteractive?: boolean; readLine?: () => string } = {},
+): number {
+  if (diagnosis.kind === "roll-ready") {
+    process.stdout.write(`${renderInitRecommendation(diagnosis, msgLang())}\n`);
+    return 0;
+  }
+  if (diagnosis.kind !== "roll-partial") {
+    process.stdout.write(`${renderInitRecommendation(diagnosis, msgLang())}\n`);
+    err("roll init --repair only applies to partial Roll projects.");
+    return 1;
+  }
+
+  const repairPlan = buildInitRepairPlan(projectDir, facts);
+  if (!confirmRepair(repairPlan.operations, opts)) return 1;
+  const blocker = repairBlocker(projectDir);
+  if (blocker !== null) {
+    err(blocker);
+    return 1;
+  }
+
+  if (!existsSync(rollTemplates())) {
+    err(m("init.no_templates_found_run_roll_setup_2"));
+    return 1;
+  }
+
+  const summary: Summary = [];
+  const changeset = beginChangeset(projectDir);
+  recordChangeset(projectDir, changeset, "scope_approved", "repair-roll");
+
+  process.stdout.write("\nREPAIR  ·  Partial Roll repair\n");
+  mergeGlobalToProject(projectDir, summary);
+  recordSummaryOwnership(projectDir, changeset, summary, "AGENTS.md");
+
+  const backlog = join(projectDir, ".roll", "backlog.md");
+  const backlogExisted = existsSync(backlog);
+  writeBacklog(backlog, summary);
+  recordCreatedFileIfNeeded(projectDir, changeset, ".roll/backlog.md", backlogExisted);
+
+  const featuresDir = join(projectDir, ".roll", "features");
+  const featuresDirExisted = existsSync(featuresDir);
+  ensureFeaturesDir(featuresDir, summary);
+  recordCreatedDirIfNeeded(projectDir, changeset, ".roll/features", featuresDirExisted);
+
+  const featuresMd = join(projectDir, ".roll", "features.md");
+  const featuresMdExisted = existsSync(featuresMd);
+  writeFeaturesMd(featuresMd, summary);
+  recordCreatedFileIfNeeded(projectDir, changeset, ".roll/features.md", featuresMdExisted);
+
+  const stamp = join(projectDir, ".roll", ".version");
+  const stampExisted = existsSync(stamp);
+  writeVersionStamp(projectDir, summary);
+  recordCreatedFileIfNeeded(projectDir, changeset, ".roll/.version", stampExisted);
+
+  printMergeSummary(summary);
+  ok("Repair complete.");
+  return 0;
+}
+
 function initApply(
   projectDir: string,
   opts: { autoMode?: boolean; forceInteractive?: boolean; readLine?: () => string } = {},
@@ -1658,6 +1781,38 @@ function renderExistingCodebaseDiagnosis(facts: InitFacts, diagnosis: InitDiagno
   return lines.join("\n");
 }
 
+function renderPartialRollDiagnosis(facts: InitFacts, diagnosis: InitDiagnosis): string {
+  const lines: string[] = [];
+  const missing = requiredRollMissingPieces(facts);
+  lines.push(`${initCopy("Detected", "检测结果")}: ${diagnosis.kind}`);
+  lines.push(`${initCopy("Recommended path", "推荐路径")}: ${diagnosis.recommendedPath}`);
+  if (diagnosis.reasons.length > 0) {
+    lines.push(`${initCopy("Reasons:", "原因：")}`);
+    for (const reason of diagnosis.reasons) lines.push(`  - ${reason}`);
+  }
+  lines.push(`${initCopy("Missing Roll pieces", "缺失的 Roll 组件")}: ${listOrNone(missing, msgLang())}`);
+  if (facts.roll.oldMarkers.length > 0) {
+    lines.push(`${initCopy("Pre-v2 Roll markers still present", "仍存在的 pre-v2 Roll 标记")}: ${facts.roll.oldMarkers.join(", ")}`);
+  }
+  lines.push(`${initCopy("Next", "下一步")}: ${diagnosis.nextCommand}`);
+  lines.push(initCopy("No files changed.", "未修改任何文件。"));
+  return lines.join("\n");
+}
+
+function renderLegacyRollDiagnosis(facts: InitFacts, diagnosis: InitDiagnosis): string {
+  const lines: string[] = [];
+  lines.push(`${initCopy("Detected", "检测结果")}: ${diagnosis.kind}`);
+  lines.push(`${initCopy("Recommended path", "推荐路径")}: ${diagnosis.recommendedPath}`);
+  lines.push(`${initCopy("Old Roll markers", "旧 Roll 标记")}: ${listOrNone(facts.roll.oldMarkers, msgLang())}`);
+  if (diagnosis.reasons.length > 0) {
+    lines.push(`${initCopy("Reasons:", "原因：")}`);
+    for (const reason of diagnosis.reasons) lines.push(`  - ${reason}`);
+  }
+  lines.push(`${initCopy("Migration command", "迁移命令")}: ${diagnosis.nextCommand}`);
+  lines.push(initCopy("No files changed.", "未修改任何文件。"));
+  return lines.join("\n");
+}
+
 function promptEmptyProjectBrief(readLine: () => string = () => readConfirmLine()): string {
   process.stdout.write("\nWhat are you building?\n> ");
   try {
@@ -2013,13 +2168,77 @@ function runExistingCodebaseAttestSmoke(): number {
   }
 }
 
+function printPartialRollState(projectDir: string, title: string): void {
+  process.stdout.write(`\n${title}:\n`);
+  for (const rel of ["AGENTS.md", ".roll/backlog.md", ".roll/features/", ".roll/features.md", ".roll/.version", ".roll/onboard-changeset.yaml"]) {
+    const path = rel.endsWith("/") ? join(projectDir, rel.slice(0, -1)) : join(projectDir, rel);
+    process.stdout.write(`  ${rel}: ${existsSync(path) ? "present" : "missing"}\n`);
+  }
+}
+
+function runPartialAndLegacyAttestSmoke(): number {
+  const originalCwd = process.cwd();
+  const originalRollHome = process.env["ROLL_HOME"];
+  const workspace = realpathSync(mkdtempSync(join(tmpdir(), "roll-init-partial-legacy-")));
+  let okSmoke = true;
+  try {
+    const smokeHome = join(workspace, ".roll-home");
+    mkdirSync(smokeHome, { recursive: true });
+    cpSync(join(rollPkgDir(), "conventions"), join(smokeHome, "conventions"), { recursive: true });
+    writeFileSync(join(smokeHome, "config.yaml"), "# Roll config\nlang: en\n");
+    process.env["ROLL_HOME"] = smokeHome;
+
+    const partial = join(workspace, "partial-roll");
+    mkdirSync(join(partial, ".roll"), { recursive: true });
+    writeFileSync(join(partial, "AGENTS.md"), "# Owner Guide\n\nKeep this owner text.\n");
+    writeFileSync(join(partial, ".roll", "backlog.md"), "# Owner Backlog\n\nKeep this backlog.\n");
+    writeFileSync(join(partial, "BACKLOG.md"), "# Old Roll backlog\n");
+
+    process.stdout.write("roll init attest smoke: partial-and-roll-legacy\n");
+    process.stdout.write(`workspace: ${workspace}\n`);
+    process.stdout.write("\nPartial Roll diagnosis:\n");
+    process.chdir(partial);
+    const partialDiagnosis = initCommand([]);
+    const repair = initCommand(["--repair", "--auto"]);
+    const repairAgain = initCommand(["--repair", "--auto"]);
+    process.chdir(originalCwd);
+    process.stdout.write(`\nPartial repair result: ${repair === 0 ? "pass" : "fail"} (exit ${repair})\n`);
+    process.stdout.write(`Idempotent repair result: ${repairAgain === 0 ? "pass" : "fail"} (exit ${repairAgain})\n`);
+    printPartialRollState(partial, "Partial repair state");
+    okSmoke = okSmoke && partialDiagnosis === 0 && repair === 0 && repairAgain === 0;
+
+    const legacy = join(workspace, "legacy-roll");
+    mkdirSync(join(legacy, "docs", "features"), { recursive: true });
+    writeFileSync(join(legacy, "BACKLOG.md"), "# Old Roll backlog\n");
+    writeFileSync(join(legacy, "docs", "features", "feature.md"), "# Old feature\n");
+    writeExistingCodebaseSmokeFixture(legacy);
+
+    process.stdout.write("\nLegacy Roll diagnosis:\n");
+    process.chdir(legacy);
+    const legacyDiagnosis = initCommand([]);
+    process.chdir(originalCwd);
+    process.stdout.write("\nLegacy mutation check:\n");
+    process.stdout.write(`  AGENTS.md: ${existsSync(join(legacy, "AGENTS.md")) ? "present" : "missing"}\n`);
+    process.stdout.write(`  .roll/: ${existsSync(join(legacy, ".roll")) ? "present" : "missing"}\n`);
+    okSmoke = okSmoke && legacyDiagnosis === 0 && !existsSync(join(legacy, "AGENTS.md")) && !existsSync(join(legacy, ".roll"));
+    return okSmoke ? 0 : 1;
+  } finally {
+    process.chdir(originalCwd);
+    if (originalRollHome === undefined) delete process.env["ROLL_HOME"];
+    else process.env["ROLL_HOME"] = originalRollHome;
+    rmSync(workspace, { recursive: true, force: true });
+    process.stdout.write(`cleanup: ${existsSync(workspace) ? "failed" : "removed"} ${workspace}\n`);
+  }
+}
+
 function runInitAttestSmoke(args: string[]): number {
   if (args.length === 1 && args[0] === "prd-only") return runPrdOnlyAttestSmoke();
   if (args.length === 1 && args[0] === "existing-codebase") return runExistingCodebaseAttestSmoke();
   if (args.length === 1 && args[0] === "existing-codebase-diagnose") return runExistingCodebaseDiagnoseAttestSmoke();
   if (args.length === 1 && args[0] === "existing-codebase-invalid-plan") return runExistingCodebaseInvalidPlanAttestSmoke();
   if (args.length === 1 && args[0] === "existing-codebase-review") return runExistingCodebaseReviewAttestSmoke();
-  err("unknown init attest smoke fixture. Expected: roll init --attest-smoke prd-only | existing-codebase | existing-codebase-diagnose | existing-codebase-invalid-plan | existing-codebase-review");
+  if (args.length === 1 && args[0] === "partial-and-roll-legacy") return runPartialAndLegacyAttestSmoke();
+  err("unknown init attest smoke fixture. Expected: roll init --attest-smoke prd-only | existing-codebase | existing-codebase-diagnose | existing-codebase-invalid-plan | existing-codebase-review | partial-and-roll-legacy");
   return 1;
 }
 
@@ -2034,7 +2253,7 @@ export function initCommand(args: string[], deps: InitCommandDeps = {}): number 
   }
   if (args[0] === "--attest-smoke") return runInitAttestSmoke(args.slice(1));
   const repairMode = args.includes("--repair");
-  const autoMode = args.includes("--auto") || repairMode;
+  const autoMode = args.includes("--auto");
   if (args[0] === "--apply") {
     const applyUnknownFlag = args.slice(1).find((a) => a.startsWith("-") && a !== "--auto");
     if (applyUnknownFlag !== undefined) {
@@ -2070,11 +2289,7 @@ export function initCommand(args: string[], deps: InitCommandDeps = {}): number 
   const initDiagnosis = classifyInitState(initFacts);
   const freshConcierge = shouldRunFreshConcierge(initDiagnosis, autoMode);
   const emptyInteractive = initDiagnosis.kind === "empty" && !autoMode && isInitInteractive(deps.forceInteractive);
-  if (repairMode && initDiagnosis.kind !== "roll-partial") {
-    process.stdout.write(`${renderInitRecommendation(initDiagnosis, msgLang())}\n`);
-    err("roll init --repair only applies to partial Roll projects.");
-    return 1;
-  }
+  if (repairMode) return initRepair(projectDir, initFacts, initDiagnosis, { autoMode, forceInteractive: deps.forceInteractive, readLine: deps.readLine });
   if (initDiagnosis.kind === "empty" && !autoMode && !emptyInteractive) {
     process.stdout.write(`${renderEmptyNonInteractiveGuide(initDiagnosis)}\n`);
     return 0;
@@ -2083,7 +2298,15 @@ export function initCommand(args: string[], deps: InitCommandDeps = {}): number 
     process.stdout.write(`${renderExistingCodebaseDiagnosis(initFacts, initDiagnosis)}\n`);
     return 0;
   }
-  if (shouldRenderDiagnosisOnly(initDiagnosis) && !(repairMode && initDiagnosis.kind === "roll-partial") && !freshConcierge) {
+  if (initDiagnosis.kind === "roll-partial" && !freshConcierge) {
+    process.stdout.write(`${renderPartialRollDiagnosis(initFacts, initDiagnosis)}\n`);
+    return 0;
+  }
+  if (initDiagnosis.kind === "roll-legacy-layout") {
+    process.stdout.write(`${renderLegacyRollDiagnosis(initFacts, initDiagnosis)}\n`);
+    return 0;
+  }
+  if (shouldRenderDiagnosisOnly(initDiagnosis) && !freshConcierge) {
     process.stdout.write(`${renderInitRecommendation(initDiagnosis, msgLang())}\n`);
     return 0;
   }

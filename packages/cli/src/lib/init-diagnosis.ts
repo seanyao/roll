@@ -117,8 +117,6 @@ const OLD_ROLL_MARKERS = [
   "docs/features/",
   "docs/briefs/",
   "docs/dream/",
-  "docs/design/",
-  "docs/domain/",
   "docs/practices/loop-autorun-verification.md",
 ] as const;
 const DOC_ROOTS = ["README.md", "README", "readme.md", "prd.md", "PRD.md", "spec.md", "SPEC.md", "requirements.md", "REQUIREMENTS.md"] as const;
@@ -353,8 +351,6 @@ function hasCurrentRollMarker(facts: InitFacts): boolean {
 function hasCodebaseSignal(facts: InitFacts): boolean {
   return (
     facts.codebase.manifests.length > 0 ||
-    facts.codebase.sourceDirs.length > 0 ||
-    facts.codebase.testDirs.length > 0 ||
     facts.codebase.sourceFileCount > 0
   );
 }
@@ -372,7 +368,7 @@ function hasDocSignal(facts: InitFacts): boolean {
 export function classifyInitState(facts: InitFacts): InitDiagnosis {
   if (hasCurrentRollMarker(facts)) {
     if (facts.roll.dotRoll && facts.roll.agentsDoc && facts.roll.backlog && facts.roll.features) {
-      return diagnosis("roll-ready", "already-ready", "roll next", ["Roll markers are complete: .roll/, AGENTS.md, backlog, and features."]);
+      return diagnosis("roll-ready", "already-ready", "roll status", ["Roll markers are complete: .roll/, AGENTS.md, backlog, and features."]);
     }
     return diagnosis("roll-partial", "repair-roll", "roll init --repair", ["Roll markers are present but incomplete; repair before scaffolding."], "medium");
   }
@@ -389,11 +385,10 @@ export function classifyInitState(facts: InitFacts): InitDiagnosis {
     return diagnosis("codebase-no-roll", "agentic-onboard", "$roll-onboard", ["Existing source, tests, or manifests found without Roll markers."]);
   }
   if (hasDocSignal(facts)) {
-    const found = [...facts.docs.prdFiles, ...facts.docs.readmeFiles, ...facts.docs.designDocs, ...facts.docs.extractedSignals];
     return diagnosis(
       "prd-only",
       "scaffold-from-prd",
-      found.length > 0 ? `roll design --from-file ${found[0]}` : "roll design",
+      "$roll-design",
       ["Product or requirements documents found without source/manifests."],
     );
   }
@@ -420,7 +415,7 @@ export function shouldRunAgenticDiagnosis(diagnosisResult: InitDiagnosis): boole
 export function executeInitPath(path: InitRecommendedPath, _opts: InitExecutionOptions): InitRouteDecision {
   switch (path) {
     case "already-ready":
-      return { path, mutates: false, nextCommand: "roll next" };
+      return { path, mutates: false, nextCommand: "roll status" };
     case "repair-roll":
       return { path, mutates: false, nextCommand: "roll init --repair" };
     case "migrate-roll-layout":

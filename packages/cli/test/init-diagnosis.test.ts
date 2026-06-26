@@ -89,6 +89,31 @@ describe("collectInitFacts", () => {
     expect(result.codebase.manifests).toEqual([]);
     expect(result.codebase.sourceFileCount).toBe(0);
   });
+
+  it("does not treat empty source/test dirs or git history as codebase signals", () => {
+    const dir = project("empty-shell");
+    mkdir(dir, "src");
+    mkdir(dir, "tests");
+
+    const result = collectInitFacts(dir);
+
+    expect(result.codebase.sourceDirs).toEqual(["src"]);
+    expect(result.codebase.testDirs).toEqual(["tests"]);
+    expect(result.codebase.sourceFileCount).toBe(0);
+    expect(classifyInitState(result).kind).toBe("empty");
+    expect(classifyInitState(facts({ git: { present: true, commits: 1 } })).kind).toBe("empty");
+  });
+
+  it("does not treat ordinary design/domain docs as pre-v2 Roll layout markers", () => {
+    const dir = project("ordinary-design-docs");
+    write(dir, "docs/design/api.md", "# API Design\n\nDesign notes for this product service.\n");
+    write(dir, "docs/domain/model.md", "# Domain Model\n\nProduct domain notes and requirements.\n");
+
+    const result = collectInitFacts(dir);
+
+    expect(result.roll.oldMarkers).toEqual([]);
+    expect(classifyInitState(result).kind).toBe("prd-only");
+  });
 });
 
 describe("classifyInitState", () => {
@@ -176,7 +201,7 @@ describe("init diagnosis rendering", () => {
     );
 
     expect(ready).toContain("Already initialized");
-    expect(ready).toContain("Next: roll next");
+    expect(ready).toContain("Next: roll status");
     expect(partial).toContain("Recommended path: repair-roll");
     expect(partial).toContain("No files changed");
     expect(legacy).toContain("Recommended path: migrate-roll-layout");

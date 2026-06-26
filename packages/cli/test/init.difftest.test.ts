@@ -463,7 +463,7 @@ describe("frozen: roll init", () => {
       Recommended path: scaffold-from-prd
       Reasons:
         - Product or requirements documents found without source/manifests.
-      Next: roll design --from-file prd.md
+      Next: $roll-design
       ",
       }
     `);
@@ -727,7 +727,7 @@ describe("frozen: roll init", () => {
     expect(run.status).toBe(0);
     expect(run.stdout).toContain("Detected: prd-only");
     expect(run.stdout).toContain("Recommended path: scaffold-from-prd");
-    expect(run.stdout).toContain("roll design --from-file docs/spec.md");
+    expect(run.stdout).toContain("Next: $roll-design");
     expect(run.stdout).not.toContain("Onboarding");
     expect(read(fx.proj, "prompt.txt")).toBe("<MISSING>");
     expect(read(fx.proj, ".roll/onboard-plan.yaml")).toBe("<MISSING>");

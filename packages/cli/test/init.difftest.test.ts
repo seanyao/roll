@@ -452,94 +452,38 @@ describe("frozen: roll init", () => {
     assertScaffold(fx);
   });
 
-  it("US-ONBOARD-NUDGE-002 AC1: fresh init with PRD + empty backlog nudges design first", () => {
+  it("US-INIT-004: fresh PRD-only init renders a new-project diagnosis without scaffolding", () => {
     const fx = freshFixture();
     writeFileSync(join(fx.proj, "prd.md"), "# Product Requirements\n\nFeature list.");
     expect(norm(tsInit(fx, []), fx)).toMatchInlineSnapshot(`
       {
         "status": 0,
         "stderr": "",
-        "stdout": "
-        Project setup
-        ────────────────────────────────────────────────────────────────────────────────
-        Detected project type: unknown
-        Roll will scaffold AGENTS.md, .roll/backlog.md, .roll/features/, .roll/pairing.yaml, and .claude/CLAUDE.md.
-        Non-interactive mode — proceeding automatically. Use \`roll init --auto\` to suppress this notice.
-        ════════════════════════════════════════════════════════════════════════════════
-        INIT  ·  项目初始化 <PROGRESS>  
-      ────────────────────────────────────────────────────────────────────────────────
-
-        1. ✓  Detect project type
-        2. ✓  Create AGENTS.md
-             +  AGENTS.md
-        3. ✓  Create .roll/backlog.md
-             +  .roll/backlog.md
-        4. ✓  Create .roll/features/
-             +  .roll/features/
-        5. ↷  Merge existing CLAUDE.md
-             not modified
-        6. ✓  Link skills to AI clients
-        7. ✓  Scaffold cross-agent pairing
-             +  .roll/pairing.yaml
-
-      ────────────────────────────────────────────────────────────────────────────────
-        ✓ Initialized
-
-        NEXT  ·  下一步
-        1. Run $roll-design
-           Found requirement docs but an empty backlog. Turn them into a domain model + INVEST backlog, then roll loop.
-        2. Create a GitHub repo and push the initial commit
-           gh repo create <name> --public --source=. --push (or \`git remote add origin ... && git push -u origin main\`)
-        3. Enable the loop schedule
-           \`roll loop\` needs a pushable GitHub remote — create the repo first.
-        4. Edit .roll/backlog.md
-           open the backlog and add your first US
-        5. Run roll loop now
-           execute one cycle manually to test the flow
-      ════════════════════════════════════════════════════════════════════════════════
+        "stdout": "Detected: prd-only
+      Recommended path: scaffold-from-prd
+      Reasons:
+        - Product or requirements documents found without source/manifests.
+      Next: roll design --from-file prd.md
       ",
       }
     `);
+    expect(existsSync(join(fx.proj, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(fx.proj, ".roll"))).toBe(false);
   });
 
-  it("US-ONBOARD-NUDGE-002 AC1: re-init with PRD + empty backlog nudges design first", () => {
+  it("US-INIT-004: AGENTS-only project with PRD is partial Roll, not fresh scaffold", () => {
     const fx = reinitFixture();
     writeFileSync(join(fx.proj, "prd.md"), "# Product Requirements\n\nFeature list.");
     expect(norm(tsInit(fx, []), fx)).toMatchInlineSnapshot(`
       {
         "status": 0,
         "stderr": "",
-        "stdout": "  REINIT  ·  重新合并约定 <PROGRESS>  
-      ────────────────────────────────────────────────────────────────────────────────
-
-        1. ✓  Detect project type
-        2. ↷  Create AGENTS.md
-             ·  AGENTS.md
-        3. ✓  Create .roll/backlog.md
-             +  .roll/backlog.md
-        4. ✓  Create .roll/features/
-             +  .roll/features/
-        5. ↷  Merge existing CLAUDE.md
-             not modified
-        6. ✓  Link skills to AI clients
-        7. ✓  Scaffold cross-agent pairing
-             +  .roll/pairing.yaml
-
-      ────────────────────────────────────────────────────────────────────────────────
-        ✓ Re-merged
-
-        NEXT  ·  下一步
-        1. Run $roll-design
-           Found requirement docs but an empty backlog. Turn them into a domain model + INVEST backlog, then roll loop.
-        2. Edit .roll/backlog.md
-           open the backlog and add your first US
-        3. Run roll loop now
-           execute one cycle manually to test the flow
-        4. Enable loop scheduling
-           roll loop on  — let it run hourly
-        5. Run roll pair status
-           see the cross-agent pairing pool and what it cost
-      ════════════════════════════════════════════════════════════════════════════════
+        "stdout": "Detected: roll-partial
+      Recommended path: repair-roll
+      Reasons:
+        - Roll markers are present but incomplete; repair before scaffolding.
+      Next: roll init --repair
+      No files changed.
       ",
       }
     `);
@@ -592,41 +536,18 @@ describe("frozen: roll init", () => {
     `);
   });
 
-  it("re-init over existing AGENTS.md renders re-merge", () => {
+  it("US-INIT-004: AGENTS-only project renders partial Roll repair route", () => {
     const fx = reinitFixture();
     expect(norm(tsInit(fx, []), fx)).toMatchInlineSnapshot(`
       {
         "status": 0,
         "stderr": "",
-        "stdout": "  REINIT  ·  重新合并约定 <PROGRESS>  
-      ────────────────────────────────────────────────────────────────────────────────
-
-        1. ✓  Detect project type
-        2. ↷  Create AGENTS.md
-             ·  AGENTS.md
-        3. ✓  Create .roll/backlog.md
-             +  .roll/backlog.md
-        4. ✓  Create .roll/features/
-             +  .roll/features/
-        5. ↷  Merge existing CLAUDE.md
-             not modified
-        6. ✓  Link skills to AI clients
-        7. ✓  Scaffold cross-agent pairing
-             +  .roll/pairing.yaml
-
-      ────────────────────────────────────────────────────────────────────────────────
-        ✓ Re-merged
-
-        NEXT  ·  下一步
-        1. Edit .roll/backlog.md
-           open the backlog and add your first US
-        2. Run roll loop now
-           execute one cycle manually to test the flow
-        3. Enable loop scheduling
-           roll loop on  — let it run hourly
-        4. Run roll pair status
-           see the cross-agent pairing pool and what it cost
-      ════════════════════════════════════════════════════════════════════════════════
+        "stdout": "Detected: roll-partial
+      Recommended path: repair-roll
+      Reasons:
+        - Roll markers are present but incomplete; repair before scaffolding.
+      Next: roll init --repair
+      No files changed.
       ",
       }
     `);
@@ -800,15 +721,17 @@ describe("frozen: roll init", () => {
     expect(read(fx.proj, "AGENTS.md")).toContain("# Agent Conventions");
   });
 
-  it("US-INIT-001: docs-only project scaffolds immediately and nudges design", () => {
+  it("US-INIT-004: docs-only project renders PRD-only route instead of onboard", () => {
     const fx = docsOnlyFixtureWithFakeAgent();
     const run = tsInit(fx, []);
     expect(run.status).toBe(0);
-    expect(existsSync(join(fx.proj, "prompt.txt"))).toBe(false);
-    expect(existsSync(join(fx.proj, ".roll", "onboard-plan.yaml"))).toBe(false);
-    expect(run.stdout).toContain("Run $roll-design");
-    expect(read(fx.proj, "AGENTS.md")).toContain("# Agent Conventions");
-    assertScaffold(fx);
+    expect(run.stdout).toContain("Detected: prd-only");
+    expect(run.stdout).toContain("Recommended path: scaffold-from-prd");
+    expect(run.stdout).toContain("roll design --from-file docs/spec.md");
+    expect(run.stdout).not.toContain("Onboarding");
+    expect(read(fx.proj, "prompt.txt")).toBe("<MISSING>");
+    expect(read(fx.proj, ".roll/onboard-plan.yaml")).toBe("<MISSING>");
+    expect(read(fx.proj, "AGENTS.md")).toBe("<MISSING>");
   });
 
   it("FIX-1029: fresh init confirmation reads through the tty-confirm seam", () => {

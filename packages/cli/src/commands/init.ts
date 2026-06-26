@@ -54,7 +54,8 @@ import { resolveProjectName, shouldSelfRegister, writeProjectRow } from "../lib/
 import { projectSlug } from "./dashboard.js";
 import { guideExternalToolSetup, silentPreinstallChromium } from "../lib/external-tools.js";
 import { detectDesignHandoff, renderDesignNudge } from "../lib/onboard-nudge.js";
-import { renderStateMatrixFixture } from "../lib/init-diagnosis.js";
+import { classifyInitState, collectInitFacts, renderStateMatrixFixture, type InitDiagnosis } from "../lib/init-diagnosis.js";
+import { renderInitRecommendation } from "../lib/init-diagnosis-render.js";
 import { discoverInteractiveAgents } from "../lib/interactive-agent.js";
 import { confirmYesNo } from "../lib/tty-confirm.js";
 
@@ -1303,6 +1304,16 @@ export function confirmInitProjectForTest(projectDir: string, autoMode: boolean,
   return confirmInitProject(projectDir, autoMode, readConfirm, true);
 }
 
+function shouldRenderDiagnosisOnly(diagnosis: InitDiagnosis): boolean {
+  return (
+    diagnosis.kind === "roll-ready" ||
+    diagnosis.kind === "roll-partial" ||
+    diagnosis.kind === "roll-legacy-layout" ||
+    diagnosis.kind === "prd-only" ||
+    diagnosis.kind === "ambiguous"
+  );
+}
+
 // ─── cmd_init (2147-2210) ─────────────────────────────────────────────────────
 /**
  * Returns the exit code for the fully ported init surface.
@@ -1333,17 +1344,23 @@ export function initCommand(args: string[]): number {
     return 1;
   }
 
-  if (!existsSync(rollTemplates())) {
-    err(m("init.no_templates_found_run_roll_setup_2"));
-    return 1;
-  }
-
   let projectDir: string;
   try {
     projectDir = realpathSync(process.cwd());
   } catch {
     projectDir = process.cwd();
   }
+  const initDiagnosis = classifyInitState(collectInitFacts(projectDir));
+  if (shouldRenderDiagnosisOnly(initDiagnosis)) {
+    process.stdout.write(`${renderInitRecommendation(initDiagnosis, msgLang())}\n`);
+    return 0;
+  }
+
+  if (!existsSync(rollTemplates())) {
+    err(m("init.no_templates_found_run_roll_setup_2"));
+    return 1;
+  }
+
   guideExternalToolSetup("init");
   // FIX-394 AC2: best-effort silent Chromium pre-install so the first
   // cycle that needs a web screenshot doesn't download 100-200 MB on the
@@ -1360,7 +1377,7 @@ export function initCommand(args: string[]): number {
 
   if (existsSync(join(projectDir, "AGENTS.md"))) {
     hasAgents = true;
-  } else if (isLegacyProject(projectDir)) {
+  } else if (initDiagnosis.kind === "codebase-no-roll" || isLegacyProject(projectDir)) {
     return legacyOnboardGuide(projectDir);
   } else if (!confirmInitProject(projectDir, autoMode)) {
     return 0;

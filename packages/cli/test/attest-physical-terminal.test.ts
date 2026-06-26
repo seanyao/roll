@@ -1,0 +1,258 @@
+/**
+ * US-INIT-003b — `roll attest` records `physical_terminal` evidence as its own kind
+ * and rejects non-physical captures for physical_terminal ACs.
+ *
+ * AC1: `roll attest` records `physical_terminal` evidence as a distinct evidence kind.
+ * AC2: For a `physical_terminal` AC, headless/transcript-rendered captures are rejected.
+ * AC3: Non-`physical_terminal` cards are unaffected by the new rejection logic (regression).
+ * AC4: On Linux/headless/no-GUI hosts the report honestly says blocked/missing.
+ */
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
+import {
+  captureScreenshot,
+  type CaptureFact,
+  type ScreenshotKind,
+} from "@roll/infra";
+import {
+  hasPhysicalTerminalCapture,
+  hasRejectedTerminalForPhysical,
+  owesPhysicalTerminalCapture,
+} from "../src/runner/attest-gate.js";
+import { physicalTerminalFromSpecText } from "../src/lib/physical-terminal.js";
+
+const dirs: string[] = [];
+afterAll(() => {
+  for (const d of dirs) execFileSync("rm", ["-rf", d]);
+});
+
+function tmp(tag: string): string {
+  const d = realpathSync(mkdtempSync(join(tmpdir(), `roll-003b-${tag}-`)));
+  dirs.push(d);
+  return d;
+}
+
+// ── AC0: ScreenshotKind includes physical_terminal ──
+describe("ScreenshotKind includes physical_terminal", () => {
+  it("physical_terminal is a valid ScreenshotKind", () => {
+    const kinds: ScreenshotKind[] = ["web", "mobile-ios", "mobile-android", "terminal", "physical_terminal"];
+    expect(kinds).toContain("physical_terminal");
+  });
+});
+
+// ── AC4: physical_terminal captures honestly skip on headless ──
+describe("AC4: physical_terminal capture skips on headless / no-GUI", () => {
+  it("returns taken:false with blocked/missing reason on non-macOS", async () => {
+    const out = join(tmp("linux"), "pt.png");
+    const result = await captureScreenshot(
+      { kind: "physical_terminal", out, command: "echo hello" },
+      { platform: "linux", env: {} },
+    );
+    expect(result.taken).toBe(false);
+    expect(result.skipped).toMatch(/physical_terminal/);
+  });
+
+  it("returns taken:false with blocked/missing reason when ROLL_NO_SCREENCAP=1", async () => {
+    const out = join(tmp("noscreencap"), "pt.png");
+    const result = await captureScreenshot(
+      { kind: "physical_terminal", out, command: "echo hello" },
+      { platform: "darwin", env: { ROLL_NO_SCREENCAP: "1" } },
+    );
+    expect(result.taken).toBe(false);
+    expect(result.skipped).toMatch(/physical_terminal/);
+  });
+
+  it("returns taken:false with blocked/missing reason when ROLL_ATTEST_NO_TERMINAL=1", async () => {
+    const out = join(tmp("noterm"), "pt.png");
+    const result = await captureScreenshot(
+      { kind: "physical_terminal", out, command: "echo hello" },
+      { platform: "darwin", env: { ROLL_ATTEST_NO_TERMINAL: "1" } },
+    );
+    expect(result.taken).toBe(false);
+    expect(result.skipped).toMatch(/physical_terminal/);
+  });
+
+  it("does NOT fall back to headless text artifact (unlike terminal lane)", async () => {
+    const out = join(tmp("no-fallback"), "pt.png");
+    const result = await captureScreenshot(
+      { kind: "physical_terminal", out, command: "echo hello" },
+      { platform: "linux", env: {} },
+    );
+    expect(result.taken).toBe(false);
+    expect(result.skipped).toBeDefined();
+    expect(result.skipped!.toLowerCase()).toMatch(/physical/);
+  });
+});
+
+// ── AC1: evidence kind is "physical_terminal" ──
+describe("AC1: evidence records kind: physical_terminal", () => {
+  it("CaptureFact carries kind physical_terminal", () => {
+    const fact: CaptureFact = { kind: "physical_terminal", out: "/tmp/pt.png", taken: true };
+    expect(fact.kind).toBe("physical_terminal");
+  });
+});
+
+// ── AC2: rejection of non-physical evidence for physical_terminal AC ──
+describe("AC2: attest gate rejects non-physical evidence for physical_terminal ACs", () => {
+  it("physicalTerminalFromSpecText returns spec for valid physical_terminal frontmatter", () => {
+    const spec = [
+      "---",
+      "id: US-PT-TEST",
+      "physical_terminal:",
+      "  app: Terminal.app",
+      "  command: roll doctor --tools",
+      "  evidence: screenshot",
+      "---",
+      "",
+      "# US-PT-TEST",
+      "",
+      "## Acceptance Criteria",
+      "- [ ] [visual-evidence] real physical Terminal.app screenshot",
+    ].join("\n");
+
+    const pt = physicalTerminalFromSpecText(spec);
+    expect(pt).not.toBeNull();
+    expect(pt!.app).toBe("Terminal.app");
+    expect(pt!.command).toBe("roll doctor --tools");
+    expect(pt!.evidence).toBe("screenshot");
+  });
+
+  it("physicalTerminalFromSpecText returns null for non-physical_terminal spec", () => {
+    const spec = [
+      "---",
+      "id: US-REGULAR",
+      "deliverable_url: https://example.com",
+      "---",
+      "",
+      "# US-REGULAR",
+    ].join("\n");
+
+    expect(physicalTerminalFromSpecText(spec)).toBeNull();
+  });
+});
+
+// ── AC3: regression — non-physical_terminal cards unaffected ──
+describe("AC3: non-physical_terminal cards unaffected", () => {
+  it("regular terminal capture still works (kind: terminal)", async () => {
+    const out = join(tmp("reg-term"), "t.png");
+    const result = await captureScreenshot(
+      { kind: "terminal", out, command: "echo hello" },
+      {
+        platform: "linux",
+        env: {},
+        run: async (_cmd, _argv) => ({ code: 0, stdout: "hello\n", stderr: "" }),
+      },
+    );
+    expect(result.kind).toBe("terminal");
+  });
+
+  it("web capture still works with kind: web", async () => {
+    const out = join(tmp("reg-web"), "w.png");
+    const result = await captureScreenshot(
+      { kind: "web", out, url: "https://example.com" },
+      { platform: "linux", env: { ROLL_ATTEST_NO_BROWSER: "1" } },
+    );
+    expect(result.kind).toBe("web");
+    expect(result.taken).toBe(false);
+  });
+});
+
+// ── Attest gate: physical_terminal evidence validation ──
+describe("Attest gate: physical_terminal evidence validation", () => {
+  function physicalTerminalProject(id: string): string {
+    const wt = tmp(`gate-${id}`);
+    const specDir = join(wt, ".roll", "features", "init-onboard", id);
+    mkdirSync(specDir, { recursive: true });
+    writeFileSync(join(specDir, "spec.md"), [
+      "---",
+      `id: ${id}`,
+      "physical_terminal:",
+      "  app: Terminal.app",
+      "  command: roll doctor --tools",
+      "  evidence: screenshot",
+      "---",
+      "",
+      `# ${id}`,
+      "",
+      "## Acceptance Criteria",
+      "- [ ] [visual-evidence] real physical Terminal.app screenshot",
+    ].join("\n"));
+    return wt;
+  }
+
+  function withEvidenceManifest(wt: string, storyId: string, captures: CaptureFact[]): void {
+    const cardDir = join(wt, ".roll", "features", "init-onboard", storyId);
+    const latestDir = join(cardDir, "latest");
+    mkdirSync(latestDir, { recursive: true });
+    writeFileSync(join(latestDir, `evidence.json`), JSON.stringify({ captures }));
+    writeFileSync(
+      join(latestDir, `${storyId}-report.html`),
+      `<html><body><section class="ac s-pass" id="${storyId}:AC1"><figure class="shot"><img src="screenshots/pt.png"></figure></section></body></html>`,
+    );
+    writeFileSync(
+      join(cardDir, "ac-map.json"),
+      JSON.stringify([{ ac: `${storyId}:AC1`, status: "pass", evidence: [{ kind: "screenshot", label: "terminal", href: "screenshots/pt.png" }] }]),
+    );
+  }
+
+  it("owesPhysicalTerminalCapture returns true when spec has physical_terminal:", () => {
+    const wt = physicalTerminalProject("US-PT-GATE-1");
+    expect(owesPhysicalTerminalCapture(wt, "US-PT-GATE-1")).toBe(true);
+  });
+
+  it("owesPhysicalTerminalCapture returns false for non-physical_terminal cards", () => {
+    const wt = tmp("no-pt");
+    const specDir = join(wt, ".roll", "features", "uncategorized", "US-REGULAR");
+    mkdirSync(specDir, { recursive: true });
+    writeFileSync(join(specDir, "spec.md"), "---\nid: US-REGULAR\n---\n# US-REGULAR\n");
+    expect(owesPhysicalTerminalCapture(wt, "US-REGULAR")).toBe(false);
+  });
+
+  it("hasPhysicalTerminalCapture returns true when evidence has kind:physical_terminal taken capture", () => {
+    const wt = physicalTerminalProject("US-PT-GATE-2");
+    withEvidenceManifest(wt, "US-PT-GATE-2", [
+      { kind: "physical_terminal", out: "/tmp/pt.png", taken: true },
+    ]);
+    expect(hasPhysicalTerminalCapture(wt, "US-PT-GATE-2")).toBe(true);
+  });
+
+  it("hasPhysicalTerminalCapture returns false when evidence has kind:terminal (wrong kind)", () => {
+    const wt = physicalTerminalProject("US-PT-GATE-3");
+    withEvidenceManifest(wt, "US-PT-GATE-3", [
+      { kind: "terminal", out: "/tmp/t.png", taken: true },
+    ]);
+    expect(hasPhysicalTerminalCapture(wt, "US-PT-GATE-3")).toBe(false);
+  });
+
+  it("hasPhysicalTerminalCapture returns false when capture is taken:false", () => {
+    const wt = physicalTerminalProject("US-PT-GATE-4");
+    withEvidenceManifest(wt, "US-PT-GATE-4", [
+      { kind: "physical_terminal", out: "/tmp/pt.png", taken: false, skipped: "physical_terminal: not macOS" },
+    ]);
+    expect(hasPhysicalTerminalCapture(wt, "US-PT-GATE-4")).toBe(false);
+  });
+
+  it("hasRejectedTerminalForPhysical returns true when physical_terminal card has kind:terminal capture", () => {
+    const wt = physicalTerminalProject("US-PT-GATE-5");
+    withEvidenceManifest(wt, "US-PT-GATE-5", [
+      { kind: "terminal", out: "/tmp/t.png", taken: true },
+    ]);
+    expect(hasRejectedTerminalForPhysical(wt, "US-PT-GATE-5")).toBe(true);
+  });
+
+  it("hasRejectedTerminalForPhysical returns false for non-physical_terminal cards", () => {
+    const wt = tmp("no-pt-rej");
+    const specDir = join(wt, ".roll", "features", "uncategorized", "US-REGULAR-2");
+    mkdirSync(specDir, { recursive: true });
+    writeFileSync(join(specDir, "spec.md"), "---\nid: US-REGULAR-2\n---\n# US-REGULAR-2\n");
+    const latestDir = join(wt, ".roll", "features", "uncategorized", "US-REGULAR-2", "latest");
+    mkdirSync(latestDir, { recursive: true });
+    writeFileSync(join(latestDir, "evidence.json"), JSON.stringify({
+      captures: [{ kind: "terminal", out: "/tmp/t.png", taken: true }],
+    }));
+    expect(hasRejectedTerminalForPhysical(wt, "US-REGULAR-2")).toBe(false);
+  });
+});

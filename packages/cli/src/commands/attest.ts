@@ -74,6 +74,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { basename, dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
 import { cardArchiveDir, epicFromFeaturePath, findFeatureFile, findFeatureFiles, generateIndex, reportFileName } from "../lib/archive.js";
+import { physicalTerminalFromSpecText } from "../lib/physical-terminal.js";
 import { readReviewScoreTrend, readStoryReviewScores } from "../lib/review-score.js";
 import { markPhaseDone } from "../lib/story-page.js";
 import { collectToolEvidenceFromEventsPath, formatToolCostSummary } from "../lib/tool-display.js";
@@ -929,6 +930,17 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   const runDir = safeProvidedRunDir ?? join(storyDir, generatedRunId);
   openEvidenceFrame({ runDir });
 
+  // US-INIT-003b: detect physical_terminal cards — they use kind: "physical_terminal"
+  // and NEVER fall back to headless text artifacts.
+  const isPhysicalTerminal = ((): boolean => {
+    try {
+      return physicalTerminalFromSpecText(readFileSync(featureFile, "utf8")) !== null;
+    } catch {
+      return false;
+    }
+  })();
+  const terminalCaptureKind: "terminal" | "physical_terminal" = isPhysicalTerminal ? "physical_terminal" : "terminal";
+
   // terminal self-capture (US-ATTEST-011): drive the dispatcher's terminal lane
   // into this run's screenshots/ BEFORE evidence sweep, then bridge a TAKEN shot
   // to a report figure. A SKIP (headless / no permission) yields null → the
@@ -957,10 +969,10 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
       }
       let shot: ScreenshotResult =
         fact !== null && fact.exitCode !== 0
-          ? { kind: "terminal", out, taken: false, skipped: `capture command exited ${fact.exitCode}` }
+          ? { kind: terminalCaptureKind, out, taken: false, skipped: `capture command exited ${fact.exitCode}` }
           : await captureScreenshot(
               {
-                kind: "terminal",
+                kind: terminalCaptureKind,
                 out,
                 ...(lane.command === undefined && captureTmux !== undefined ? { tmux: captureTmux } : {}),
                 ...(lane.command !== undefined ? { command: commandInProject(projectPath, lane.command) } : {}),
@@ -973,8 +985,10 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
       // headless), promote the command's stdout to a taken text evidence
       // artifact so the attest gate does not deadlock. The stdout text IS
       // the terminal capture.
+      // US-INIT-003b: physical_terminal cards NEVER fall back to headless text —
+      // physical evidence cannot be satisfied by a transcript dump.
       let refStem = stem;
-      if (!shot.taken && fact !== null && fact.exitCode === 0) {
+      if (!shot.taken && fact !== null && fact.exitCode === 0 && !isPhysicalTerminal) {
         refStem = li === 0 ? "terminal-headless.txt" : `terminal-headless-${li}.txt`;
         const txtOut = join(runDir, "screenshots", refStem);
         writeFileSync(txtOut, fact.stdoutTail, "utf8");

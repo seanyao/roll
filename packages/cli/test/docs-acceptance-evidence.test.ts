@@ -56,6 +56,24 @@ describe("acceptance evidence documentation", () => {
     expect(doc("guide/INDEX.md")).toContain("证据生命周期");
   });
 
+  it("documents the stricter physical_terminal evidence contract", () => {
+    expectAll(doc("guide/en/acceptance-evidence.md"), [
+      "physical_terminal:",
+      "Terminal.app",
+      "Headless stdout",
+      "HTML replays",
+      "cached under `ROLL_HOME`",
+    ]);
+
+    expectAll(doc("guide/zh/acceptance-evidence.md"), [
+      "physical_terminal:",
+      "Terminal.app",
+      "headless stdout",
+      "HTML replay",
+      "ROLL_HOME",
+    ]);
+  });
+
   it("does not keep stale docs saying the frame is created only by attest or that the gate is soft by default", () => {
     const paths = [
       "guide/en/acceptance-evidence.md",

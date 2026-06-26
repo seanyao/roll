@@ -84,6 +84,10 @@ Two rules decide what the validator recognises:
   AC, its surface is read from the frontmatter first:
   - a declared `deliverable_url:` (alias `screenshot_url:`) ⇒ **web** — the card
     has committed to a real product page, so it owes a web screenshot;
+  - a declared `physical_terminal:` ⇒ **terminal** with a stricter contract — the
+    report must contain a real macOS `Terminal.app` screenshot captured from
+    screen pixels. Headless stdout, transcript-rendered images, and HTML replays
+    are rejected for this contract;
   - else a declared `deliverable_cmd:` ⇒ **terminal** — a CLI deliverable that
     rides the terminal-capture lane;
   - else the AC text decides (web / terminal / ambiguous).
@@ -99,7 +103,10 @@ at startup:
 - `macOS screencapture` — optional terminal/GUI screenshot capture. It is built
   into macOS, but the terminal running `roll` must have Screen Recording
   permission. Missing permission downgrades terminal/GUI screenshots; web
-  evidence can still use headless Chromium.
+  evidence can still use headless Chromium. A successful interactive
+  `Terminal.app` permission probe is cached under `ROLL_HOME` so repeated
+  `roll doctor` / setup checks do not keep re-triggering the macOS prompt; if
+  permission was just granted, restart Terminal.app before trusting the cache.
 - `Playwright Chromium` — optional headless web capture for `roll attest` and
   dossier screenshots. Install with `npx playwright install chromium`.
 

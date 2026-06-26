@@ -153,6 +153,22 @@ describe("critical CLI E2E", () => {
     expect(evidence.captures?.[0]?.skipped).toContain("ROLL_NO_SCREENCAP");
   });
 
+  it("roll doctor --tools is a focused tool and screenshot-readiness smoke", () => {
+    const project = tmpProject("doctor-tools");
+    const result = runRoll(project, ["doctor", "--tools"], {
+      _ROLL_EXTERNAL_TOOLS_PLATFORM: "linux",
+      ROLL_NO_SCREENCAP: "1",
+    });
+
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("Tool readiness");
+    expect(result.out).toContain("External requirements");
+    expect(result.out).toContain("macOS screencapture");
+    expect(result.out).toContain("Terminal.app Screen Recording");
+    expect(result.out).not.toContain("Skill catalog");
+    expect(result.out).not.toContain("PR review extras");
+  });
+
   it("roll loop runs reads real pre-v3 terminal patterns through the public CLI", () => {
     const project = tmpProject("loop-runs");
     const runtime = join(project, ".roll", "loop");

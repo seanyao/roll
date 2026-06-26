@@ -56,6 +56,7 @@ import { guideExternalToolSetup, silentPreinstallChromium } from "../lib/externa
 import { detectDesignHandoff, renderDesignNudge } from "../lib/onboard-nudge.js";
 import { classifyInitState, collectInitFacts, renderStateMatrixFixture, type InitDiagnosis } from "../lib/init-diagnosis.js";
 import { renderInitRecommendation } from "../lib/init-diagnosis-render.js";
+import { writeInitBrief, type InitBriefResult } from "../lib/init-brief.js";
 import { discoverInteractiveAgents } from "../lib/interactive-agent.js";
 import { confirmYesNo } from "../lib/tty-confirm.js";
 
@@ -149,6 +150,7 @@ function rollTemplates(): string {
 }
 // merge-summary accumulator (mirrors _ROLL_MERGE_SUMMARY entries "action|file").
 type Summary = string[];
+type NextItem = [string, string];
 
 // ─── scan_project_type_from_files (3387-3429) ─────────────────────────────────
 function scanProjectType(dir: string): string {
@@ -834,6 +836,23 @@ function recordChangeset(projectDir: string, changeset: OnboardChangeset, sectio
   writeChangeset(projectDir, changeset);
 }
 
+function recordFreshInitChangeset(projectDir: string, summary: Summary): void {
+  const created = summary
+    .map((entry): { action: string; file: string } | null => {
+      const idx = entry.indexOf("|");
+      if (idx < 0) return null;
+      return { action: entry.slice(0, idx), file: entry.slice(idx + 1) };
+    })
+    .filter((entry): entry is { action: string; file: string } => entry !== null && entry.action === "created");
+  if (created.length === 0) return;
+  const changeset = beginChangeset(projectDir);
+  recordChangeset(projectDir, changeset, "scope_approved", "fresh-init");
+  for (const entry of created) {
+    if (entry.file.endsWith("/")) recordChangeset(projectDir, changeset, "dirs_created", entry.file.replace(/\/$/, ""));
+    else recordChangeset(projectDir, changeset, "files_created", entry.file);
+  }
+}
+
 interface PlanFields {
   approved: string[];
   gitignoreDotRoll: boolean;
@@ -1132,6 +1151,7 @@ function emitInitUi(
   summary: Summary,
   shouldNudge: boolean,
   mode: "init" | "reinit" | "repair" = hasAgents ? "reinit" : "init",
+  nextItemsOverride?: NextItem[],
 ): void {
   const headerLabel = mode === "repair" ? "REPAIR" : mode === "reinit" ? "REINIT" : "INIT";
   const subtitle = mode === "repair" ? "补齐 Roll 结构" : mode === "reinit" ? "重新合并约定" : "项目初始化";
@@ -1150,15 +1170,21 @@ function emitInitUi(
     if (act === undefined) return { num, label, status: "skip", note: "not modified" };
     return { num, label, status: STATUS_MAP[act] ?? "ok", files: [[OP_MAP[act] ?? "·", fname]] };
   };
+  let nextStep = 1;
   const steps: Step[] = [
-    { num: 1, label: "Detect project type", status: "ok" },
-    step(2, "Create AGENTS.md", "AGENTS.md"),
-    step(3, "Create .roll/backlog.md", ".roll/backlog.md"),
-    step(4, "Create .roll/features/", ".roll/features/"),
-    step(5, "Merge existing CLAUDE.md", ".claude/CLAUDE.md"),
-    { num: 6, label: "Link skills to AI clients", status: syncStatus },
-    step(7, "Scaffold cross-agent pairing", ".roll/pairing.yaml"),
+    { num: nextStep++, label: "Detect project type", status: "ok" },
+    step(nextStep++, "Create AGENTS.md", "AGENTS.md"),
+    step(nextStep++, "Create .roll/backlog.md", ".roll/backlog.md"),
   ];
+  if (byFile.has(".roll/brief.md")) {
+    steps.push(step(nextStep++, "Create .roll/brief.md", ".roll/brief.md"));
+  }
+  steps.push(
+    step(nextStep++, "Create .roll/features/", ".roll/features/"),
+    step(nextStep++, "Merge existing CLAUDE.md", ".claude/CLAUDE.md"),
+    { num: nextStep++, label: "Link skills to AI clients", status: syncStatus },
+    step(nextStep++, "Scaffold cross-agent pairing", ".roll/pairing.yaml"),
+  );
   const footerStatus: StepStatus = steps.some((s) => s.status === "fail") ? "fail" : "ok";
 
   const lines: string[] = [];
@@ -1201,21 +1227,23 @@ function emitInitUi(
           return [nudgeMsg.slice(0, sep), nudgeMsg.slice(sep + 3)];
         })()
       : undefined;
-  const nextItems: Array<[string, string]> = hasAgents
-    ? [
-        ...(nudgePair ? [nudgePair] : []),
-        ["Edit .roll/backlog.md", "open the backlog and add your first US"],
-        ["Run roll loop now", "execute one cycle manually to test the flow"],
-        ["Enable loop scheduling", "roll loop on  — let it run hourly"],
-        ["Run roll pair status", "see the cross-agent pairing pool and what it cost"],
-      ]
-    : [
-        ...(nudgePair ? [nudgePair] : []),
-        [m3("init.next_create_repo"), m3("init.next_push_commands")],
-        [m3("init.next_loop_on"), m3("init.next_repo_required")],
-        ["Edit .roll/backlog.md", "open the backlog and add your first US"],
-        ["Run roll loop now", "execute one cycle manually to test the flow"],
-      ];
+  const nextItems: NextItem[] =
+    nextItemsOverride ??
+    (hasAgents
+      ? [
+          ...(nudgePair ? [nudgePair] : []),
+          ["Edit .roll/backlog.md", "open the backlog and add your first US"],
+          ["Run roll loop now", "execute one cycle manually to test the flow"],
+          ["Enable loop scheduling", "roll loop on  — let it run hourly"],
+          ["Run roll pair status", "see the cross-agent pairing pool and what it cost"],
+        ]
+      : [
+          ...(nudgePair ? [nudgePair] : []),
+          [m3("init.next_create_repo"), m3("init.next_push_commands")],
+          [m3("init.next_loop_on"), m3("init.next_repo_required")],
+          ["Edit .roll/backlog.md", "open the backlog and add your first US"],
+          ["Run roll loop now", "execute one cycle manually to test the flow"],
+        ]);
   lines.push("");
   lines.push("  " + c("pink", "NEXT", { bold: true }) + c("dim", "  ·  下一步"));
   nextItems.forEach(([label, hint], i) => {
@@ -1289,6 +1317,16 @@ function shouldRenderDiagnosisOnly(diagnosis: InitDiagnosis): boolean {
   );
 }
 
+function shouldRunFreshConcierge(diagnosis: InitDiagnosis, autoMode: boolean): boolean {
+  if (diagnosis.kind === "prd-only") return true;
+  return autoMode && diagnosis.kind === "empty";
+}
+
+function conciergeNextItems(brief: InitBriefResult | null, diagnosis: InitDiagnosis): NextItem[] | undefined {
+  if (brief === null) return undefined;
+  return [[brief.nextCommand, diagnosis.kind === "prd-only" ? "turn the product brief into Roll stories" : "turn the project brief into Roll stories"]];
+}
+
 // ─── cmd_init (2147-2210) ─────────────────────────────────────────────────────
 /**
  * Returns the exit code for the fully ported init surface.
@@ -1326,13 +1364,15 @@ export function initCommand(args: string[]): number {
   } catch {
     projectDir = process.cwd();
   }
-  const initDiagnosis = classifyInitState(collectInitFacts(projectDir));
+  const initFacts = collectInitFacts(projectDir);
+  const initDiagnosis = classifyInitState(initFacts);
+  const freshConcierge = shouldRunFreshConcierge(initDiagnosis, autoMode);
   if (repairMode && initDiagnosis.kind !== "roll-partial") {
     process.stdout.write(`${renderInitRecommendation(initDiagnosis, msgLang())}\n`);
     err("roll init --repair only applies to partial Roll projects.");
     return 1;
   }
-  if (shouldRenderDiagnosisOnly(initDiagnosis) && !(repairMode && initDiagnosis.kind === "roll-partial")) {
+  if (shouldRenderDiagnosisOnly(initDiagnosis) && !(repairMode && initDiagnosis.kind === "roll-partial") && !freshConcierge) {
     process.stdout.write(`${renderInitRecommendation(initDiagnosis, msgLang())}\n`);
     return 0;
   }
@@ -1375,6 +1415,9 @@ export function initCommand(args: string[]): number {
   initSeedAgentRoutes(routesTemplate, projectDir, summary); // `|| true`
   writeVersionStamp(projectDir, summary);
   scaffoldPairing(projectDir, summary); // US-PAIR-008 (v3 divergence from v2)
+  const brief = freshConcierge ? writeInitBrief(projectDir, initDiagnosis.kind, initFacts) : null;
+  if (brief !== null) summary.push(`${brief.created ? "created" : "unchanged"}|${brief.relPath}`);
+  if (freshConcierge) recordFreshInitChangeset(projectDir, summary);
 
   const syncStatus = syncConventions();
 
@@ -1387,7 +1430,15 @@ export function initCommand(args: string[]): number {
   // US-ONBOARD-NUDGE-002: detect PRD + empty-backlog signal for NEXT nudge.
   const shouldNudge = detectDesignHandoff(projectDir).shouldNudge;
 
-  emitInitUi(projectDir, hasAgents, syncStatus, summary, shouldNudge, repairMode ? "repair" : undefined);
+  emitInitUi(
+    projectDir,
+    hasAgents,
+    syncStatus,
+    summary,
+    shouldNudge,
+    repairMode ? "repair" : undefined,
+    conciergeNextItems(brief, initDiagnosis),
+  );
 
   void err;
   return 0;

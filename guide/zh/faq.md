@@ -68,8 +68,8 @@ loop 开起来之前先看清 Roll 到底碰了什么。
 
 **细节：** 在已有代码的仓库里跑 `roll init`，会自动检测并引你走
 `$roll-onboard`。这个 skill 会读你的项目，问 9 个关于认知 / 范围 / 隐私
-的问题，先写出 `.roll/onboard-plan.yaml` 作为契约，再由
-`roll init --apply` 实际动手。
+的问题，先写出 `.roll/onboard-plan.yaml` 作为契约，审阅后再由
+`roll init --apply` 实际动手。非交互自动化必须使用 `roll init --apply --auto`。
 
 Roll 写到你仓库里的东西：
 

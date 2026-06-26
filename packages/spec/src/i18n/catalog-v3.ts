@@ -296,6 +296,30 @@ export const v3Catalog: Catalog = {
     en: "Non-interactive mode — proceeding automatically. Use `roll init --auto` to suppress this notice.",
     zh: "非交互模式 — 自动继续。可使用 `roll init --auto` 跳过此提示。",
   },
+  "init.onboard_plan_facts_hash_unreadable": {
+    en: "could not read factsHash from .roll/onboard-plan.yaml",
+    zh: "无法读取 .roll/onboard-plan.yaml 中的 factsHash",
+  },
+  "init.onboard_plan_facts_hash_stale": {
+    en: "plan factsHash is stale: expected %s, got %s",
+    zh: "plan factsHash 已过期：当前应为 %s，plan 中为 %s",
+  },
+  "init.onboard_regenerate_before_apply": {
+    en: "Regenerate the plan by running $roll-onboard again before applying.",
+    zh: "应用前请重新运行 $roll-onboard 生成 plan。",
+  },
+  "init.onboard_plan_validated_review": {
+    en: "Onboard plan validated. Review .roll/init-diagnosis.yaml and .roll/onboard-plan.yaml before applying.",
+    zh: "Onboard plan 已通过校验。应用前请审阅 .roll/init-diagnosis.yaml 和 .roll/onboard-plan.yaml。",
+  },
+  "init.onboard_apply_auto_required": {
+    en: "Non-interactive apply requires explicit review acknowledgement:",
+    zh: "非交互 apply 需要显式确认已审阅：",
+  },
+  "init.no_files_changed": {
+    en: "No files changed.",
+    zh: "未修改任何文件。",
+  },
 
   // FIX-1020: new-project workflow — repo-first next steps
   "init.next_create_repo": {

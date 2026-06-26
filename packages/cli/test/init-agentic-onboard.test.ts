@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { initCommand } from "../src/commands/init.js";
 import { collectInitFacts, classifyInitState, type InitFacts } from "../src/lib/init-diagnosis.js";
+import { validateOnboardApplyPreflight } from "../src/lib/onboard-apply.js";
 import {
   buildOnboardDiagnosisArtifact,
   computeInitFactsHash,
@@ -292,6 +293,99 @@ describe("agentic onboard structured artifacts", () => {
     expect(result.stderr).toContain("plan factsHash must match .roll/init-diagnosis.yaml factsHash");
   });
 
+  it("apply preflight recomputes current facts and rejects stale plan hashes", () => {
+    const root = project("stale-preflight");
+    writeExistingCodebase(root);
+    mkdirSync(join(root, ".roll"), { recursive: true });
+    const planPath = join(root, ".roll", "onboard-plan.yaml");
+    writeFileSync(planPath, validPlan(VALID_HASH));
+
+    const result = validateOnboardApplyPreflight(root, planPath);
+
+    expect(result.ok).toBe(false);
+    expect(result.currentFactsHash).toBe(computeInitFactsHash(collectInitFacts(root, { ignoreOnboardArtifacts: true })));
+    expect(result.errors.join("\n")).toContain("plan factsHash is stale: expected sha256:");
+    expect(result.errors.join("\n")).toContain(`got ${VALID_HASH}`);
+  });
+
+  it("apply preflight ignores only the two onboard artifacts when recomputing the facts hash", () => {
+    const root = project("fresh-preflight");
+    writeExistingCodebase(root);
+    const hash = computeInitFactsHash(collectInitFacts(root));
+    mkdirSync(join(root, ".roll"), { recursive: true });
+    const planPath = join(root, ".roll", "onboard-plan.yaml");
+    writeFileSync(planPath, validPlan(hash));
+    writeFileSync(join(root, ".roll", "init-diagnosis.yaml"), diagnosis(hash));
+
+    const result = validateOnboardApplyPreflight(root, planPath);
+
+    expect(result).toMatchObject({ ok: true, errors: [], currentFactsHash: hash, planFactsHash: hash });
+  });
+
+  it("rejects unrooted or non-normalized file operation paths through both TS and Python validators", () => {
+    for (const badPath of ["../.roll/onboard-plan.yaml", "/tmp/onboard-plan.yaml", ".roll\\onboard-plan.yaml"]) {
+      const errors = validateOnboardPlanContract({
+        version: 1,
+        factsHash: VALID_HASH,
+        file_operations: [
+          { path: ".roll/init-diagnosis.yaml", operation: "write", idempotent: true },
+          { path: badPath, operation: "write", idempotent: true },
+        ],
+        merge_intents: [{ target: "roll_conventions", owner: "roll-init-apply", strategy: "merge conventions" }],
+      });
+      expect(errors.join("\n")).toContain("file_operations[1].path must be a normalized relative project path without traversal");
+    }
+
+    for (const badPath of ["../.roll/onboard-plan.yaml", "/tmp/onboard-plan.yaml", ".roll\\onboard-plan.yaml"]) {
+      const result = validatePlan(validPlan().replace(".roll/onboard-plan.yaml", badPath));
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("file_operations[1].path must be a normalized relative project path without traversal");
+    }
+  });
+
+  it("rejects duplicate file operation paths through both TS and Python validators", () => {
+    const errors = validateOnboardPlanContract({
+      version: 1,
+      factsHash: VALID_HASH,
+      file_operations: [
+        { path: ".roll/init-diagnosis.yaml", operation: "write", idempotent: true },
+        { path: ".roll/init-diagnosis.yaml", operation: "write", idempotent: true },
+      ],
+      merge_intents: [{ target: "roll_conventions", owner: "roll-init-apply", strategy: "merge conventions" }],
+    });
+
+    expect(errors.join("\n")).toContain("file_operations[1].path '.roll/init-diagnosis.yaml' must not be duplicated");
+
+    const result = validatePlan(validPlan().replace(".roll/onboard-plan.yaml", ".roll/init-diagnosis.yaml"));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("file_operations[1].path '.roll/init-diagnosis.yaml' must not be duplicated");
+  });
+
+  it("rejects non-idempotent file operations through both TS and Python validators", () => {
+    const errors = validateOnboardPlanContract({
+      version: 1,
+      factsHash: VALID_HASH,
+      file_operations: [
+        { path: ".roll/init-diagnosis.yaml", operation: "write", idempotent: true },
+        { path: ".roll/onboard-plan.yaml", operation: "write", idempotent: false },
+      ],
+      merge_intents: [{ target: "roll_conventions", owner: "roll-init-apply", strategy: "merge conventions" }],
+    });
+
+    expect(errors.join("\n")).toContain("file_operations[1].idempotent must be true");
+
+    const result = validatePlan(validPlan().replace("    idempotent: true\nmerge_intents:", "    idempotent: false\nmerge_intents:"));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("file_operations[1].idempotent must be true");
+  });
+
+  it("rejects unsupported onboard plan schema versions", () => {
+    const result = validatePlan(validPlan().replace("version: 1", "version: 99"));
+
+    expect(result.status).toBe(3);
+    expect(result.stderr).toContain("version 99 not supported");
+  });
+
   it("documents the roll-onboard skill contract as structured existing-codebase outputs only", () => {
     const body = readFileSync(join(REPO, "skills", "roll-onboard", "SKILL.md"), "utf8");
 
@@ -302,5 +396,7 @@ describe("agentic onboard structured artifacts", () => {
     expect(body).toContain("Do not use this skill for PRD-only workspaces");
     expect(body).toContain("No `cmd`, `command`, `commands`, `exec`, `run`, `script`, `shell`, or `shell_commands` keys.");
     expect(body).toContain("Do not run `roll init --apply` yourself.");
+    expect(body).toContain("Review `.roll/init-diagnosis.yaml` and `.roll/onboard-plan.yaml` before applying.");
+    expect(body).toContain("roll init --apply --auto");
   });
 });

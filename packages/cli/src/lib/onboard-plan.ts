@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { posix as pathPosix } from "node:path";
 import { type InitDiagnosis, type InitFacts } from "./init-diagnosis.js";
 
 export const ONBOARD_SCHEMA_VERSION = 1;
@@ -176,6 +177,13 @@ function validateFactsHash(value: unknown, field: string): string[] {
   return /^sha256:[0-9a-f]{64}$/.test(value) ? [] : [`${field} must match sha256:<64 lowercase hex chars>`];
 }
 
+function validateProjectRelativePath(path: string, field: string): string[] {
+  if (path.startsWith("/") || path.includes("\\") || path.split("/").includes("..") || pathPosix.normalize(path) !== path) {
+    return [`${field} must be a normalized relative project path without traversal`];
+  }
+  return [];
+}
+
 export function validateOnboardPlanContract(plan: Record<string, unknown>): string[] {
   const errors: string[] = [];
   if (plan["version"] !== ONBOARD_SCHEMA_VERSION) errors.push(`version must be ${ONBOARD_SCHEMA_VERSION}`);
@@ -196,10 +204,15 @@ export function validateOnboardPlanContract(plan: Record<string, unknown>): stri
       const path = item["path"];
       if (typeof path !== "string") {
         errors.push(`${where}.path must be a string`);
-      } else if (!ONBOARD_AGENT_WRITABLE_OUTPUTS.includes(path as OnboardArtifactPath)) {
-        errors.push(`${where}.path '${path}' is outside the agent writable outputs`);
       } else {
-        seen.add(path);
+        errors.push(...validateProjectRelativePath(path, `${where}.path`));
+        if (!ONBOARD_AGENT_WRITABLE_OUTPUTS.includes(path as OnboardArtifactPath)) {
+          errors.push(`${where}.path '${path}' is outside the agent writable outputs`);
+        } else if (seen.has(path)) {
+          errors.push(`${where}.path '${path}' must not be duplicated`);
+        } else {
+          seen.add(path);
+        }
       }
       if (item["operation"] !== "write") errors.push(`${where}.operation must be write`);
       if (item["idempotent"] !== true) errors.push(`${where}.idempotent must be true`);

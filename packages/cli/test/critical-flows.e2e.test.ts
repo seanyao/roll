@@ -7,7 +7,7 @@
  * These tests run the public CLI subprocess from this checkout. They never call
  * the user's installed `roll` entry.
  */
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -44,19 +44,14 @@ function runRoll(cwd: string, args: string[], env: NodeJS.ProcessEnv = {}): { co
   };
   delete childEnv["ROLL_PROJECT_RUNTIME_DIR"];
   delete childEnv["_LOOP_RUNS"];
-  try {
-    const out = execFileSync(process.execPath, [rollBin, ...args], {
-      cwd,
-      env: childEnv,
-      encoding: "utf8",
-      maxBuffer: 8 * 1024 * 1024,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    return { code: 0, out, err: "" };
-  } catch (error) {
-    const e = error as { status?: number; stdout?: string; stderr?: string };
-    return { code: e.status ?? 1, out: e.stdout ?? "", err: e.stderr ?? "" };
-  }
+  const result = spawnSync(process.execPath, [rollBin, ...args], {
+    cwd,
+    env: childEnv,
+    encoding: "utf8",
+    maxBuffer: 8 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  return { code: result.status ?? 1, out: result.stdout ?? "", err: result.stderr ?? "" };
 }
 
 describe("critical CLI E2E", () => {
@@ -119,6 +114,32 @@ describe("critical CLI E2E", () => {
     expect(result.out).toMatch(/facts hash: sha256:[0-9a-f]{64}/);
     expect(result.out).toContain("Next: $roll-onboard");
     expect(result.out).toContain("No files changed.");
+    expect(result.out).toContain("cleanup: removed");
+    expect(existsSync(join(project, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(project, ".roll"))).toBe(false);
+  });
+
+  it("roll init existing-codebase invalid-plan attest smoke refuses before mutation", () => {
+    const project = tmpEmptyProject("init-invalid-plan-smoke");
+
+    const result = runRoll(project, ["init", "--attest-smoke", "existing-codebase-invalid-plan"], {
+      ROLL_ATTEST_NO_BROWSER: "1",
+    });
+
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("roll init attest smoke: existing-codebase-invalid-plan");
+    expect(result.out).toContain("Fixture tree:");
+    expect(result.out).toContain("package.json");
+    expect(result.out).toContain("src/index.ts");
+    expect(result.out).toContain("tests/index.test.ts");
+    expect(result.out).toContain(".roll/init-diagnosis.yaml");
+    expect(result.out).toContain(".roll/onboard-plan.yaml");
+    expect(result.err).toContain("plan factsHash is stale: expected sha256:");
+    expect(result.err).toContain("got sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd");
+    expect(result.out).toContain("Post-apply mutation check:");
+    expect(result.out).toContain("AGENTS.md: missing");
+    expect(result.out).toContain(".roll/backlog.md: missing");
+    expect(result.out).toContain(".gitignore: missing");
     expect(result.out).toContain("cleanup: removed");
     expect(existsSync(join(project, "AGENTS.md"))).toBe(false);
     expect(existsSync(join(project, ".roll"))).toBe(false);

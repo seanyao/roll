@@ -55,7 +55,8 @@ Success Criteria: <可衡量的完成标准>
 对于尚无 `.roll/` 的已有代码库，入口是 `$roll-onboard`（**graft（嫁接）**
 接入模式）：扫描代码、问一组聚焦的认知 / 范围 / 隐私问题、产出
 `.roll/onboard-plan.yaml` 作为可审阅的契约。审阅通过后执行
-`roll init --apply` 把方案落到磁盘 —— 见
+`roll init --apply` 把方案落到磁盘；非交互自动化必须使用
+`roll init --apply --auto` —— 见
 [legacy-onboarding.md](legacy-onboarding.md) 和
 [patterns/](patterns/README.md)。
 

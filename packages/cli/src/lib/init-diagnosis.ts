@@ -29,6 +29,7 @@ export interface InitContentScan {
 
 export interface InitScanDeps {
   contentScan?: (projectDir: string) => InitContentScan;
+  ignoreOnboardArtifacts?: boolean;
 }
 
 export interface InitFacts {
@@ -121,6 +122,7 @@ const OLD_ROLL_MARKERS = [
 ] as const;
 const DOC_ROOTS = ["README.md", "README", "readme.md", "prd.md", "PRD.md", "spec.md", "SPEC.md", "requirements.md", "REQUIREMENTS.md"] as const;
 const DOC_DIRS = ["docs", "doc", "spec", "specs", "prd", "requirements"] as const;
+const ONBOARD_ONLY_DOT_ROLL_ENTRIES = new Set(["init-diagnosis.yaml", "onboard-plan.yaml"]);
 const MAX_DOCS = 16;
 const MAX_DOC_BYTES = 256_000;
 const MAX_SOURCE_FILES = 200;
@@ -310,8 +312,14 @@ function defaultContentScan(projectDir: string): InitContentScan {
 
 export function collectInitFacts(projectDir: string, deps: InitScanDeps = {}): InitFacts {
   const ambiguityReasons: string[] = [];
+  const dotRoll = isDir(join(projectDir, ".roll"));
+  let dotRollMarker = dotRoll;
+  if (dotRoll && deps.ignoreOnboardArtifacts === true) {
+    const listed = sortedDirectoryEntries(join(projectDir, ".roll"), MAX_SOURCE_DIR_ENTRIES);
+    dotRollMarker = listed.unreadable || listed.capped || listed.entries.some((entry) => !ONBOARD_ONLY_DOT_ROLL_ENTRIES.has(entry));
+  }
   const roll = {
-    dotRoll: isDir(join(projectDir, ".roll")),
+    dotRoll: dotRollMarker,
     backlog: isFile(join(projectDir, ".roll", "backlog.md")),
     features: isDir(join(projectDir, ".roll", "features")),
     agentsDoc: isFile(join(projectDir, "AGENTS.md")),

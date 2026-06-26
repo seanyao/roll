@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
 import {
   EXTERNAL_TOOL_DECLARATIONS,
   browserToolAvailable,
@@ -14,17 +17,34 @@ import {
   type ExternalToolState,
 } from "../src/lib/external-tools.js";
 
+const dirs: string[] = [];
+afterAll(() => {
+  for (const d of dirs) rmSync(d, { recursive: true, force: true });
+});
+
 function deps(overrides: Partial<ExternalToolDeps> = {}): ExternalToolDeps {
   return {
     platform: "darwin",
     env: {},
     home: "/home/test",
     commandOnPath: () => true,
-    execFile: () => ({ code: 0, stdout: "", stderr: "" }),
+    execFile: (_cmd, args) => {
+      const out = String(args[args.length - 1] ?? "");
+      if (out !== "") writeFileSync(out, "PNGDATA");
+      return { code: 0, stdout: "", stderr: "" };
+    },
     readDir: () => ["chromium-1234"],
     exists: () => false,
+    interactive: true,
+    hasAquaGUI: true,
     ...overrides,
-  };
+  } as ExternalToolDeps;
+}
+
+function tempHome(): string {
+  const dir = mkdtempSync(join(tmpdir(), "roll-external-tools-"));
+  dirs.push(dir);
+  return dir;
 }
 
 function state(id: string, status: ExternalToolState["status"], repairCommand?: string): ExternalToolState {
@@ -97,6 +117,74 @@ describe("external tool detection", () => {
         (tool) => tool.id === "screencapture",
       )?.status,
     ).toBe("permission-missing");
+  });
+
+  it("caches successful Terminal.app Screen Recording readiness so doctor does not re-prompt every run", () => {
+    const home = tempHome();
+    let probes = 0;
+    const stateDeps = deps({
+      home,
+      env: { ROLL_HOME: join(home, ".roll") },
+      cacheScreenRecording: true,
+      execFile: (_cmd, args) => {
+        probes += 1;
+        const out = String(args[args.length - 1] ?? "");
+        if (out !== "") writeFileSync(out, "PNGDATA");
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+
+    expect(collectExternalTools(stateDeps).find((tool) => tool.id === "screencapture")?.status).toBe("ok");
+    expect(collectExternalTools(stateDeps).find((tool) => tool.id === "screencapture")?.status).toBe("ok");
+    expect(probes).toBe(1);
+  });
+
+  it("does not cache stale screencapture success when no pixels are written", () => {
+    const home = tempHome();
+    let probes = 0;
+    const stateDeps = deps({
+      home,
+      env: { ROLL_HOME: join(home, ".roll") },
+      cacheScreenRecording: true,
+      execFile: () => {
+        probes += 1;
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+
+    const first = collectExternalTools(stateDeps).find((tool) => tool.id === "screencapture");
+    const second = collectExternalTools(stateDeps).find((tool) => tool.id === "screencapture");
+
+    expect(first?.status).toBe("stale");
+    expect(first?.detail).toContain("produced no pixels");
+    expect(second?.status).toBe("stale");
+    expect(probes).toBe(2);
+  });
+
+  it("skips Screen Recording preflight on macOS without an Aqua GUI session", () => {
+    let probes = 0;
+    const tool = collectExternalTools(
+      deps({
+        hasAquaGUI: false,
+        execFile: () => {
+          probes += 1;
+          return { code: 0, stdout: "", stderr: "" };
+        },
+      }),
+    ).find((row) => row.id === "screencapture");
+
+    expect(tool?.status).toBe("stale");
+    expect(tool?.detail).toContain("No macOS GUI session");
+    expect(probes).toBe(0);
+  });
+
+  it("keeps TCC failure honest and hints Terminal.app restart after recent authorization", () => {
+    const permission = collectExternalTools(deps({ execFile: () => ({ code: 1, stdout: "", stderr: "not authorized" }) })).find(
+      (row) => row.id === "screencapture",
+    );
+
+    expect(permission?.status).toBe("permission-missing");
+    expect(permission?.detail).toContain("restart Terminal.app");
   });
 
   it("detects Playwright Chromium from the browser cache", () => {

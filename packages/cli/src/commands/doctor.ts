@@ -20,7 +20,7 @@ import { agentInstalledByName as coreAgentInstalledByName, agentIsKnown, canonic
 import { resolveLang, t, v2Catalog, v3Catalog, type Lang } from "@roll/spec";
 import { repoRoot } from "../bridge.js";
 import { generateCatalog } from "./skills.js";
-import { collectExternalTools, renderExternalToolDoctorSection } from "../lib/external-tools.js";
+import { collectExternalTools, renderExternalToolDoctorSection, type ExternalToolState } from "../lib/external-tools.js";
 import { collectToolReadinessDoctorRows, renderToolReadinessDoctorSection } from "../lib/tool-readiness-doctor.js";
 import { detectDesignHandoff, renderDesignNudge } from "../lib/onboard-nudge.js";
 
@@ -62,6 +62,30 @@ function bilingual(key: string): string[] {
 const out: { lines: string[] } = { lines: [] };
 function emit(line: string): void {
   out.lines.push(line);
+}
+
+interface DoctorDeps {
+  externalTools?: () => readonly ExternalToolState[];
+}
+
+function terminalScreenRecordingPreflight(state: ExternalToolState | undefined): {
+  status: "ok" | "skip" | "permission-missing" | "missing-tool";
+  detail: string;
+  repairCommand?: string;
+} {
+  if (state === undefined) {
+    return { status: "skip", detail: "macOS screencapture requirement state is unavailable." };
+  }
+  if (state.status === "ok") {
+    return { status: "ok", detail: state.detail };
+  }
+  if (state.status === "permission-missing") {
+    return { status: "permission-missing", detail: state.detail, ...(state.repairCommand !== undefined ? { repairCommand: state.repairCommand } : {}) };
+  }
+  if (state.status === "missing") {
+    return { status: "missing-tool", detail: state.detail, ...(state.repairCommand !== undefined ? { repairCommand: state.repairCommand } : {}) };
+  }
+  return { status: "skip", detail: state.detail };
 }
 
 function commandOnPath(bin: string): boolean {
@@ -480,28 +504,46 @@ function readWorkingDirectory(plist: string): string {
   return "";
 }
 
-export function doctorCommand(_args: string[]): number {
+export function doctorCommand(args: string[], deps: DoctorDeps = {}): number {
   out.lines = [];
   const p = palette();
   const lang = msgLang();
-  agentSection(p);
-  prSection(lang);
-  skillsCatalogSection(lang);
-  lanesSection(lang, realLaneProbe());
-  launchdStaleSection(lang);
-  launchdProxySection(lang);
-  for (const l of renderToolReadinessDoctorSection(collectToolReadinessDoctorRows(process.cwd()))) emit(l);
-  for (const l of renderExternalToolDoctorSection(collectExternalTools())) emit(l);
+  const toolsOnly = args.includes("--tools");
+  const externalTools = deps.externalTools?.() ?? collectExternalTools();
 
-  // US-ONBOARD-NUDGE-003: surface design-handoff nudge as informational advisory
-  // Does NOT change verdict or exit code (doctor always exits 0).
-  const nudgeSignal = detectDesignHandoff(process.cwd());
-  if (nudgeSignal.shouldNudge) {
+  if (!toolsOnly) {
+    agentSection(p);
+    prSection(lang);
+    skillsCatalogSection(lang);
+    lanesSection(lang, realLaneProbe());
+    launchdStaleSection(lang);
+    launchdProxySection(lang);
+  }
+  for (const l of renderToolReadinessDoctorSection(collectToolReadinessDoctorRows(process.cwd()))) emit(l);
+  for (const l of renderExternalToolDoctorSection(externalTools)) emit(l);
+
+  if (toolsOnly) {
+    // US-INIT-003c: `roll doctor --tools` prints a focused Terminal.app Screen
+    // Recording preflight status from the already-collected external tool state.
+    const preflight = terminalScreenRecordingPreflight(externalTools.find((tool) => tool.id === "screencapture"));
     emit("");
-    emit(lang === "zh" ? "设计交接引导（仅供参考）" : "Design handoff nudge (informational)");
-    emit("");
-    const nudgeLines = renderDesignNudge(lang);
-    for (const line of nudgeLines) emit(`  ${line}`);
+    const marker = preflight.status === "ok" ? "✓" : preflight.status === "skip" ? "↷" : "✗";
+    emit(`  ${marker} Terminal.app Screen Recording — ${preflight.status}`);
+    emit(`    ${preflight.detail}`);
+    if (preflight.repairCommand !== undefined) emit(`    fix: ${preflight.repairCommand}`);
+  }
+
+  if (!toolsOnly) {
+    // US-ONBOARD-NUDGE-003: surface design-handoff nudge as informational advisory
+    // Does NOT change verdict or exit code (doctor always exits 0).
+    const nudgeSignal = detectDesignHandoff(process.cwd());
+    if (nudgeSignal.shouldNudge) {
+      emit("");
+      emit(lang === "zh" ? "设计交接引导（仅供参考）" : "Design handoff nudge (informational)");
+      emit("");
+      const nudgeLines = renderDesignNudge(lang);
+      for (const line of nudgeLines) emit(`  ${line}`);
+    }
   }
 
   process.stdout.write(out.lines.join("\n") + "\n");

@@ -139,7 +139,7 @@ export function registerAll(): void {
       return skillsCommand(["check", ...rest]);
     }
     return doctorCommand(args);
-  }, { help: "Usage: roll doctor [skills]\n  Environment + install diagnosis.\n环境与安装体检。" });
+  }, { help: "Usage: roll doctor [skills|--tools]\n  Environment + install diagnosis; --tools shows focused tool and screenshot readiness.\n环境与安装体检；--tools 只看工具与截图就绪度。" });
   // `attest`: the acceptance-evidence report (US-ATTEST-006) — v3-native, no
   // bash counterpart (additive; the evidence chain is new product surface).
   registerPorted("attest", attestCommand, { hidden: true });

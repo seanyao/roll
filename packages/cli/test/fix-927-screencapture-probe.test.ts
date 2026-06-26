@@ -8,6 +8,7 @@
  * `execFile` proves whether the real `screencapture` ran.
  */
 import { describe, expect, it } from "vitest";
+import { writeFileSync } from "node:fs";
 import { resolveRequirement, type ExternalToolDeps } from "../src/lib/external-tools.js";
 
 const SCREENCAP = { kind: "executable", name: "screencapture", optional: true } as const;
@@ -23,8 +24,10 @@ function makeDeps(over: Partial<ExternalToolDeps> & { probeCode?: number } = {})
     env: over.env ?? {},
     home: "/tmp/home",
     commandOnPath: over.commandOnPath ?? (() => true),
-    execFile: () => {
+    execFile: (_cmd, args) => {
       calls.n += 1;
+      const out = String(args[args.length - 1] ?? "");
+      if ((over.probeCode ?? 0) === 0 && out !== "") writeFileSync(out, "PNGDATA");
       return { code: over.probeCode ?? 0, stdout: "", stderr: "" };
     },
     readDir: () => [],

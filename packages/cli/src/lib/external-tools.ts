@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { PLAYWRIGHT_INSTALL_CHROMIUM, chromiumInstalled, PLAYWRIGHT_VERSION, PLAYWRIGHT_PIN } from "@roll/infra";
@@ -34,8 +34,19 @@ export interface ExternalToolDeps {
   exists: (path: string) => boolean;
   /** FIX-927: false ⇒ headless/unattended (non-TTY) — skip the Screen Recording probe. */
   interactive?: boolean;
+  /** macOS Aqua GUI session availability. false means a real window capture cannot be preflighted. */
+  hasAquaGUI?: boolean;
   /** US-INIT-003: doctor/setup cache a successful Terminal.app Screen Recording probe. */
   cacheScreenRecording?: boolean;
+}
+
+export type ScreenRecordingPreflightStatus = "ok" | "skip" | "permission-missing" | "missing-tool";
+
+export interface ScreenRecordingPreflightResult {
+  status: ScreenRecordingPreflightStatus;
+  detail: string;
+  cached: boolean;
+  repairCommand?: string;
 }
 
 export const EXTERNAL_REQUIREMENT_DECLARATIONS: readonly ExternalRequirementDeclaration[] = [
@@ -71,17 +82,20 @@ export type ExternalToolState = ExternalRequirementState;
 export const EXTERNAL_TOOL_DECLARATIONS = EXTERNAL_REQUIREMENT_DECLARATIONS;
 
 export function defaultExternalToolDeps(): ExternalToolDeps {
+  const platform = externalToolPlatform(process.env["_ROLL_EXTERNAL_TOOLS_PLATFORM"]) ?? process.platform;
+  const interactive = process.stdout.isTTY === true;
+  const execFile = (cmd: string, args: readonly string[]): { code: number; stdout: string; stderr: string } => {
+    const r = spawnSync(cmd, [...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 15_000 });
+    return { code: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+  };
   return {
-    platform: externalToolPlatform(process.env["_ROLL_EXTERNAL_TOOLS_PLATFORM"]) ?? process.platform,
+    platform,
     env: process.env,
     home: homedir(),
     // FIX-927: a non-TTY stdout (launchd lane / CI / piped) is headless → skip the probe.
-    interactive: process.stdout.isTTY === true,
+    interactive,
     commandOnPath,
-    execFile: (cmd, args) => {
-      const r = spawnSync(cmd, [...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 15_000 });
-      return { code: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
-    },
+    execFile,
     readDir: (path) => {
       try {
         return readdirSync(path);
@@ -90,8 +104,14 @@ export function defaultExternalToolDeps(): ExternalToolDeps {
       }
     },
     exists: existsSync,
+    ...(platform === "darwin" && interactive && process.env["ROLL_NO_SCREENCAP"] !== "1" ? { hasAquaGUI: macosHasAquaGUI(execFile) } : {}),
     cacheScreenRecording: true,
   };
+}
+
+function macosHasAquaGUI(execFile: ExternalToolDeps["execFile"]): boolean {
+  const r = execFile("launchctl", ["managername"]);
+  return r.code === 0 && r.stdout.includes("Aqua");
 }
 
 function externalToolPlatform(raw: string | undefined): NodeJS.Platform | undefined {
@@ -187,16 +207,16 @@ function toExternalRequirementState(decl: ExternalRequirementDeclaration, resolu
   };
 }
 
-function screencaptureResolution(requirement: ToolRequirement, deps: ExternalToolDeps): ToolRequirementResolution {
+export function screenRecordingPreflight(deps: ExternalToolDeps = defaultExternalToolDeps()): ScreenRecordingPreflightResult {
   if (deps.platform !== "darwin") {
-    return { requirement, status: "stale", detail: "macOS-only requirement; not applicable on this host." };
+    return { status: "skip", detail: "macOS-only requirement; not applicable on this host.", cached: false };
   }
   if (!deps.commandOnPath("screencapture")) {
     return {
-      requirement,
-      status: "missing",
+      status: "missing-tool",
       detail: "screencapture is not on PATH.",
-      repair: { command: "xcode-select --install", description: "Install Apple command line tools." },
+      cached: false,
+      repairCommand: "xcode-select --install",
     };
   }
   // FIX-927: never probe in a headless / unattended context. The probe is a real
@@ -210,44 +230,95 @@ function screencaptureResolution(requirement: ToolRequirement, deps: ExternalToo
     const cached = deps.cacheScreenRecording === true && readScreenRecordingCache(deps);
     if (cached && deps.env["ROLL_NO_SCREENCAP"] !== "1") {
       return {
-        requirement,
         status: "ok",
         detail: "Terminal.app Screen Recording readiness is cached; restart Terminal.app if macOS recently granted permission.",
+        cached: true,
       };
     }
     return {
-      requirement,
-      status: "stale",
+      status: "skip",
       detail: "Screen Recording probe skipped (headless / ROLL_NO_SCREENCAP); real captures surface permission failures at capture time.",
+      cached: false,
     };
   }
   if (deps.cacheScreenRecording === true && readScreenRecordingCache(deps)) {
     return {
-      requirement,
       status: "ok",
       detail: "Terminal.app Screen Recording readiness is cached; restart Terminal.app if macOS recently granted permission.",
+      cached: true,
+    };
+  }
+  if (deps.hasAquaGUI === false) {
+    return {
+      status: "skip",
+      detail: "No macOS GUI session (Aqua) is available; Screen Recording preflight skipped.",
+      cached: false,
     };
   }
   const tmp = join(mkdtempSync(join(tmpdir(), "roll-screen-probe-")), "probe.png");
   const r = deps.execFile("screencapture", ["-x", "-R", "0,0,1,1", tmp]);
+  const capturedPixels = fileNonEmpty(tmp);
   try {
     rmSync(tmp, { force: true });
     rmSync(dirname(tmp), { recursive: true, force: true });
   } catch {
     /* best-effort cleanup */
   }
-  if (r.code === 0) {
+  if (r.code === 0 && capturedPixels) {
     if (deps.cacheScreenRecording === true) writeScreenRecordingCache(deps);
-    return { requirement, status: "ok", detail: "Installed and Screen Recording permission is usable for Terminal.app." };
+    return { status: "ok", detail: "Installed and Screen Recording permission is usable for Terminal.app.", cached: false };
+  }
+  if (r.code === 0) {
+    return {
+      status: "skip",
+      detail: "screencapture reported success but produced no pixels; Terminal.app Screen Recording readiness was not cached.",
+      cached: false,
+    };
   }
   const command = "open x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
   return {
-    requirement,
     status: "permission-missing",
-    detail: "screencapture ran but could not capture pixels; Screen Recording permission is likely missing.",
-    repair: { command, description: "Open Screen Recording privacy settings." },
-    authorize: { command, description: "Allow the terminal running roll to record the screen." },
+    detail: "screencapture ran but could not capture pixels; Screen Recording permission is likely missing. If permission was recently granted, restart Terminal.app.",
+    cached: false,
+    repairCommand: command,
   };
+}
+
+function screencaptureResolution(requirement: ToolRequirement, deps: ExternalToolDeps): ToolRequirementResolution {
+  const preflight = screenRecordingPreflight(deps);
+  switch (preflight.status) {
+    case "ok":
+      return { requirement, status: "ok", detail: preflight.detail };
+    case "skip":
+      return { requirement, status: "stale", detail: preflight.detail };
+    case "missing-tool": {
+      const command = preflight.repairCommand ?? "xcode-select --install";
+      return {
+        requirement,
+        status: "missing",
+        detail: preflight.detail,
+        repair: { command, description: "Install Apple command line tools." },
+      };
+    }
+    case "permission-missing": {
+      const command = preflight.repairCommand ?? "";
+      return {
+        requirement,
+        status: "permission-missing",
+        detail: preflight.detail,
+        repair: { command, description: "Open Screen Recording privacy settings." },
+        authorize: { command, description: "Allow the terminal running roll to record the screen." },
+      };
+    }
+  }
+}
+
+function fileNonEmpty(path: string): boolean {
+  try {
+    return statSync(path).size > 0;
+  } catch {
+    return false;
+  }
 }
 
 function screenRecordingCachePath(deps: ExternalToolDeps): string {

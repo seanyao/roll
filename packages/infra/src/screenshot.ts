@@ -66,7 +66,7 @@ const defaultRun: ShotRun = async (cmd, argv) => {
   }
 };
 
-export type ScreenshotKind = "web" | "mobile-ios" | "mobile-android" | "terminal";
+export type ScreenshotKind = "web" | "mobile-ios" | "mobile-android" | "terminal" | "physical_terminal";
 
 export interface ScreenshotRequest {
   kind: ScreenshotKind;
@@ -590,6 +590,57 @@ export async function captureScreenshot(
       // binary stdout → shell redirect through the same seam.
       const r = await run("sh", ["-c", `adb exec-out screencap -p > '${req.out}'`]);
       if (r.code !== 0) return skip("screencap failed");
+    } else if (req.kind === "physical_terminal") {
+      // physical_terminal lane (US-INIT-003b): REAL physical Terminal.app capture
+      // only. NEVER falls back to headless text artifacts — physical evidence
+      // cannot be satisfied by a transcript dump. Skip reasons carry
+      // "physical_terminal" so the attest gate can distinguish a physical miss
+      // from a generic terminal skip.
+      if (noScreencap) return skip("physical_terminal: ROLL_NO_SCREENCAP=1 (no screen capture in unattended context)");
+      if ((env["ROLL_ATTEST_NO_TERMINAL"] ?? "") === "1") return skip("physical_terminal: ROLL_ATTEST_NO_TERMINAL=1");
+      if (platform !== "darwin") return skip("physical_terminal: not macOS — physical Terminal.app evidence requires macOS");
+      const physRawLine =
+        req.tmux !== undefined && req.tmux !== "" ? `tmux attach -t ${req.tmux}` : (req.command ?? "");
+      if (containsSecret(physRawLine)) return skip("physical_terminal: secret in capture command — redact & reshoot");
+      if (!(await hasGuiSession(run))) return skip("physical_terminal: no GUI session — physical Terminal.app evidence requires a logged-in Aqua session");
+      const physRect = parseRegion(req.region ?? DEFAULT_REGION);
+      if (physRect === null) return skip("physical_terminal: bad region");
+      const physDoneFile =
+        req.tmux === undefined && req.command !== undefined && req.command !== "" ? resolve(`${req.out}.done`) : undefined;
+      if (physDoneFile !== undefined) {
+        try { rmSync(physDoneFile, { force: true }); } catch { /* stale sentinel cleanup */ }
+      }
+      const physLine = physDoneFile !== undefined ? terminalCommandWithDoneFile(physRawLine, physDoneFile) : physRawLine;
+      const physTitle = terminalWindowTitle(req.out);
+      const physOpened = await run("osascript", ["-e", terminalOpenScript(physLine, physRect, physTitle)]);
+      if (physOpened.code !== 0) return skip("physical_terminal: osascript Terminal open failed");
+      if (physDoneFile !== undefined && !(await waitForTerminalCommandExit(physDoneFile, run))) {
+        return skip("physical_terminal: command still running; window left open");
+      }
+      const physLiveRect = await resolveWindowRect(physTitle, run);
+      if (physLiveRect !== null) {
+        const physFront = await run("sh", ["-c", "lsappinfo info -only name $(lsappinfo front)"]);
+        if (physFront.code !== 0 || !/Terminal|终端/.test(physFront.stdout)) {
+          await teardownCaptureWindow(physTitle, physDoneFile !== undefined, run);
+          return skip("physical_terminal: Terminal not frontmost — refusing to shoot another app's pixels");
+        }
+      }
+      if (physLiveRect === null) {
+        if (!(await teardownCaptureWindow(physTitle, physDoneFile !== undefined, run))) {
+          return skip("physical_terminal: capture window not found; Terminal close failed");
+        }
+        return skip("physical_terminal: capture window not found — refusing a blind-region shot");
+      }
+      const physShot = await run("screencapture", ["-x", "-R", `${physLiveRect.x},${physLiveRect.y},${physLiveRect.w},${physLiveRect.h}`, req.out]);
+      if (physShot.code !== 0) {
+        if (!(await teardownCaptureWindow(physTitle, physDoneFile !== undefined, run))) {
+          return skip("physical_terminal: screencapture failed; Terminal close failed");
+        }
+        return skip("physical_terminal: screencapture failed (screen-recording permission?)");
+      }
+      if (!(await teardownCaptureWindow(physTitle, physDoneFile !== undefined, run))) {
+        return skip("physical_terminal: Terminal close failed after capture");
+      }
     } else {
       // terminal lane (US-ATTEST-011): unattended self-capture on macOS GUI hosts.
       // FIX-1022: ROLL_NO_SCREENCAP=1 is the master kill-switch the loop sets — no

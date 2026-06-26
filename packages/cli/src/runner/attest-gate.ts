@@ -910,16 +910,66 @@ function hasRealTerminalCapture(worktreeCwd: string, storyId: string): boolean {
   return takenCaptureCount(worktreeCwd, storyId, "terminal") >= need;
 }
 
+/**
+ * US-INIT-003b — whether this delivery OWES a REAL physical Terminal.app
+ * capture: the story declares `physical_terminal:` frontmatter AND is non-exempt.
+ */
+export function owesPhysicalTerminalCapture(worktreeCwd: string, storyId: string): boolean {
+  if (!storyRequiresScreenshot(worktreeCwd, storyId)) return false;
+  const spec = storySpecPath(worktreeCwd, storyId);
+  if (spec === null) return false;
+  try {
+    return physicalTerminalFromSpecText(readFileSync(spec, "utf8")) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * US-INIT-003b — the physical_terminal capture is REAL: ≥1 taken:true capture
+ * with kind "physical_terminal" in the evidence manifest.
+ */
+export function hasPhysicalTerminalCapture(worktreeCwd: string, storyId: string): boolean {
+  return takenCaptureCount(worktreeCwd, storyId, "physical_terminal") >= 1;
+}
+
+/**
+ * US-INIT-003b — check if capture facts in the evidence manifest carry a
+ * REJECTED terminal fallback for a physical_terminal card (kind: "terminal"
+ * instead of kind: "physical_terminal"). A physical_terminal AC cannot be
+ * satisfied by a headless terminal capture.
+ */
+export function hasRejectedTerminalForPhysical(worktreeCwd: string, storyId: string): boolean {
+  if (!owesPhysicalTerminalCapture(worktreeCwd, storyId)) return false;
+  const manifest = evidenceManifest(worktreeCwd, storyId);
+  if (manifest === null || !Array.isArray(manifest.captures)) return false;
+  // A physical_terminal card has REJECTED evidence if any capture has
+  // kind: "terminal" — the card declared physical_terminal: so only
+  // kind: "physical_terminal" evidence is valid.
+  return manifest.captures.some((raw) => {
+    if (typeof raw !== "object" || raw === null) return false;
+    const row = raw as Record<string, unknown>;
+    return row["kind"] === "terminal" && row["taken"] === true;
+  });
+}
+
 function declaredSurfaceCaptureFloor(worktreeCwd: string, storyId: string): { ok: boolean; reason?: string } {
   const owesWeb = owesRealWebCapture(worktreeCwd, storyId);
   const owesTerm = owesTerminalCapture(worktreeCwd, storyId);
-  if (!owesWeb && !owesTerm) return { ok: true };
+  const owesPhys = owesPhysicalTerminalCapture(worktreeCwd, storyId);
+  if (!owesWeb && !owesTerm && !owesPhys) return { ok: true };
   const gaps: string[] = [];
   if (owesWeb && !hasRealWebCapture(worktreeCwd, storyId)) {
     gaps.push(`declared deliverable_url(s) not all really captured (need ${webCaptureNeed(worktreeCwd, storyId)} taken web shots)`);
   }
   if (owesTerm && !hasRealTerminalCapture(worktreeCwd, storyId)) {
     gaps.push(`declared deliverable_cmd(s) not all really captured (need ${deliverableCmdsForStory(worktreeCwd, storyId).length} taken terminal shots)`);
+  }
+  if (owesPhys && !hasPhysicalTerminalCapture(worktreeCwd, storyId)) {
+    gaps.push(`physical_terminal declared but no kind:"physical_terminal" capture taken — physical Terminal.app evidence required`);
+  }
+  if (owesPhys && hasRejectedTerminalForPhysical(worktreeCwd, storyId)) {
+    gaps.push(`physical_terminal card carries kind:"terminal" capture — physical evidence must be kind:"physical_terminal", not a headless terminal fallback`);
   }
   if (gaps.length === 0) return { ok: true, reason: "all declared surfaces really captured" };
   return { ok: false, reason: `declared surface capture missing: ${gaps.join("; ")}` };

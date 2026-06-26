@@ -44,7 +44,7 @@
  */
 import { parseAcBlocks } from "@roll/core";
 import { allowedDeliverableCmd } from "../runner/attest-gate.js";
-import { declaresPhysicalTerminalSpec, physicalTerminalFromSpecText } from "./physical-terminal.js";
+import { declaresPhysicalTerminalSpec, physicalTerminalFromSpecText, physicalTerminalParseError } from "./physical-terminal.js";
 
 /** The user-visible surface a story's visual-evidence AC captures. */
 export type VisualSurface =
@@ -61,7 +61,7 @@ export interface VisualEvidenceVerdict {
   /** true ⇒ the spec satisfies the design-phase visual-evidence contract. */
   ok: boolean;
   /** Machine-readable failure code; undefined when ok. */
-  code?: "missing-visual-evidence-ac" | "web-surface-without-deliverable-url" | "deliverable-cmd-rejected";
+  code?: "missing-visual-evidence-ac" | "web-surface-without-deliverable-url" | "deliverable-cmd-rejected" | "physical-terminal-invalid";
   /** Human-readable reason (EN) — undefined when ok. */
   reason?: string;
   /** When exempt, the recorded exemption reason (the contract was waived, not met). */
@@ -462,6 +462,18 @@ export function validateStoryVisualEvidence(specText: string): VisualEvidenceVer
       code: "web-surface-without-deliverable-url",
       reason:
         "a WEB-surface visual-evidence AC is present but the spec frontmatter declares no `deliverable_url:` (alias `screenshot_url:`) pointing at the real product page — the runtime web gate would have no target to capture and the card would honest-skip forever; a terminal/CLI deliverable does not need a url (it rides the terminal-capture lane)",
+      declaresDeliverableUrl: declares,
+      hasVisualEvidenceAc: hasAc,
+      surface,
+    };
+  }
+
+  const physicalError = physicalTerminalParseError(specText);
+  if (physicalError !== null) {
+    return {
+      ok: false,
+      code: "physical-terminal-invalid",
+      reason: `invalid physical_terminal frontmatter: ${physicalError}`,
       declaresDeliverableUrl: declares,
       hasVisualEvidenceAc: hasAc,
       surface,

@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readSync, rmSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { PLAYWRIGHT_INSTALL_CHROMIUM, chromiumInstalled, PLAYWRIGHT_VERSION, PLAYWRIGHT_PIN } from "@roll/infra";
@@ -257,7 +257,6 @@ function screenRecordingCachePath(deps: ExternalToolDeps): string {
 
 function readScreenRecordingCache(deps: ExternalToolDeps): boolean {
   const path = screenRecordingCachePath(deps);
-  if (!existsSync(path)) return false;
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return false;
@@ -270,10 +269,11 @@ function readScreenRecordingCache(deps: ExternalToolDeps): boolean {
 
 function writeScreenRecordingCache(deps: ExternalToolDeps): void {
   const path = screenRecordingCachePath(deps);
+  const tmpPath = `${path}.${process.pid}.${Date.now()}.tmp`;
   try {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(
-      path,
+      tmpPath,
       JSON.stringify(
         {
           version: 1,
@@ -286,7 +286,13 @@ function writeScreenRecordingCache(deps: ExternalToolDeps): void {
         2,
       ) + "\n",
     );
+    renameSync(tmpPath, path);
   } catch {
+    try {
+      rmSync(tmpPath, { force: true });
+    } catch {
+      /* ignore cleanup failures */
+    }
     /* cache is an optimization; capture failures still surface at attest time */
   }
 }

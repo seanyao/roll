@@ -77,7 +77,9 @@ soft 模式会记录缺口并发出同一类审计信号，但不阻塞本轮交
     产品页,就该截 web 图；
   - 声明了 `physical_terminal:` ⇒ **terminal**，但合同更严格——报告必须包含从 macOS
     `Terminal.app` 真实屏幕像素截下来的图。headless stdout、transcript 渲染图、
-    HTML replay 图都不能满足这个合同；
+    HTML replay 图都不能满足这个合同。其 `command` 也必须通过与 `deliverable_cmd`
+    相同的只读 `roll` 命令白名单；当前唯一合法的物理宿主/证据组合是
+    `Terminal.app` 加 `screenshot`；
   - 否则声明了 `deliverable_cmd:` ⇒ **terminal**——走终端截屏通道的 CLI 交付；
   - 否则由 AC 文本判定（web / terminal / 含糊）。
 

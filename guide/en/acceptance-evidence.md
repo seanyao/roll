@@ -87,7 +87,9 @@ Two rules decide what the validator recognises:
   - a declared `physical_terminal:` ⇒ **terminal** with a stricter contract — the
     report must contain a real macOS `Terminal.app` screenshot captured from
     screen pixels. Headless stdout, transcript-rendered images, and HTML replays
-    are rejected for this contract;
+    are rejected for this contract. The command is subject to the same read-only
+    `roll` command allowlist as `deliverable_cmd`, and today the only valid
+    physical host/evidence pair is `Terminal.app` plus `screenshot`;
   - else a declared `deliverable_cmd:` ⇒ **terminal** — a CLI deliverable that
     rides the terminal-capture lane;
   - else the AC text decides (web / terminal / ambiguous).

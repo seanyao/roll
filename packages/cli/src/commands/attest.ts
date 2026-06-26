@@ -77,7 +77,7 @@ import { cardArchiveDir, epicFromFeaturePath, findFeatureFile, findFeatureFiles,
 import { readReviewScoreTrend, readStoryReviewScores } from "../lib/review-score.js";
 import { markPhaseDone } from "../lib/story-page.js";
 import { collectToolEvidenceFromEventsPath, formatToolCostSummary } from "../lib/tool-display.js";
-import { physicalTerminalFromSpecText } from "../lib/physical-terminal.js";
+import { physicalTerminalForStory } from "../runner/attest-gate.js";
 import { refreshAggregates } from "./index-gen.js";
 
 // Re-export so existing importers (tests, callers) keep their entry point.
@@ -909,13 +909,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   // (a real owner wins; no cross-card hijack) are all preserved.
   const acItems = resolveStoryAcItems(projectPath, storyId);
   if (acItems.length === 0) warn(`no AC block for ${storyId} — report will carry facts only`);
-  const physicalTerminal = (() => {
-    try {
-      return physicalTerminalFromSpecText(readFileSync(featureFile, "utf8"));
-    } catch {
-      return null;
-    }
-  })();
+  const physicalTerminal = physicalTerminalForStory(projectPath, storyId);
 
   // run dir + latest symlink (never overwrite history).
   const now = (deps.now ?? ((): Date => new Date()))();

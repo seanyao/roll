@@ -37,7 +37,7 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
 import { hasVisualEvidenceAc } from "../lib/design-visual-evidence.js";
-import { physicalTerminalFromSpecText, type PhysicalTerminalSpec } from "../lib/physical-terminal.js";
+import { physicalTerminalFromSpecText, physicalTerminalParseError, type PhysicalTerminalSpec } from "../lib/physical-terminal.js";
 import { evaluateReviewScoreGate } from "../lib/review-score.js";
 
 export type AttestMode = "soft" | "hard";
@@ -540,14 +540,35 @@ export function rejectedDeliverableCmdsForStory(worktreeCwd: string, storyId: st
   return rawDeliverableCmdsForStory(worktreeCwd, storyId).filter((c) => !allowedDeliverableCmd(c));
 }
 
-export function physicalTerminalForStory(worktreeCwd: string, storyId: string): PhysicalTerminalSpec | null {
+function physicalTerminalSpecTextForStory(worktreeCwd: string, storyId: string): string | null {
   const spec = storySpecPath(worktreeCwd, storyId);
   if (spec === null) return null;
   try {
-    return physicalTerminalFromSpecText(readFileSync(spec, "utf8"));
+    return readFileSync(spec, "utf8");
   } catch {
     return null;
   }
+}
+
+export function physicalTerminalForStory(worktreeCwd: string, storyId: string): PhysicalTerminalSpec | null {
+  const specText = physicalTerminalSpecTextForStory(worktreeCwd, storyId);
+  return specText === null ? null : physicalTerminalFromSpecText(specText);
+}
+
+export function physicalTerminalParseErrorForStory(worktreeCwd: string, storyId: string): string | null {
+  const specText = physicalTerminalSpecTextForStory(worktreeCwd, storyId);
+  return specText === null ? null : physicalTerminalParseError(specText);
+}
+
+export function physicalTerminalCaptureCommandForStory(worktreeCwd: string, storyId: string): string | null {
+  const physical = physicalTerminalForStory(worktreeCwd, storyId);
+  if (physical === null || !allowedDeliverableCmd(physical.command)) return null;
+  return physical.command;
+}
+
+export function rejectedPhysicalTerminalCmdsForStory(worktreeCwd: string, storyId: string): string[] {
+  const physical = physicalTerminalForStory(worktreeCwd, storyId);
+  return physical !== null && !allowedDeliverableCmd(physical.command) ? [physical.command] : [];
 }
 
 /** Unfiltered deliverable_cmd parse (scalar = whole line, block list = per item; NO comma split). */
@@ -930,23 +951,29 @@ function hasRealPhysicalTerminalCapture(worktreeCwd: string, storyId: string): b
 
 function terminalCaptureNeed(worktreeCwd: string, storyId: string): number {
   const physical = physicalTerminalForStory(worktreeCwd, storyId);
+  return terminalCaptureNeedForPhysical(worktreeCwd, storyId, physical);
+}
+
+function terminalCaptureNeedForPhysical(worktreeCwd: string, storyId: string, physical: PhysicalTerminalSpec | null): number {
   return deliverableCmdsForStory(worktreeCwd, storyId).filter((cmd) => cmd !== physical?.command).length;
 }
 
 function declaredSurfaceCaptureFloor(worktreeCwd: string, storyId: string): { ok: boolean; reason?: string } {
+  const requiresScreenshot = storyRequiresScreenshot(worktreeCwd, storyId);
+  const physical = physicalTerminalForStory(worktreeCwd, storyId);
+  const terminalNeed = requiresScreenshot ? terminalCaptureNeedForPhysical(worktreeCwd, storyId, physical) : 0;
   const owesWeb = owesRealWebCapture(worktreeCwd, storyId);
-  const owesTerm = owesTerminalCapture(worktreeCwd, storyId);
-  const owesPhysical = owesPhysicalTerminalCapture(worktreeCwd, storyId);
+  const owesTerm = terminalNeed > 0;
+  const owesPhysical = requiresScreenshot && physical !== null;
   if (!owesWeb && !owesTerm && !owesPhysical) return { ok: true };
   const gaps: string[] = [];
   if (owesWeb && !hasRealWebCapture(worktreeCwd, storyId)) {
     gaps.push(`declared deliverable_url(s) not all really captured (need ${webCaptureNeed(worktreeCwd, storyId)} taken web shots)`);
   }
-  if (owesTerm && !hasRealTerminalCapture(worktreeCwd, storyId)) {
-    gaps.push(`declared deliverable_cmd(s) not all really captured (need ${terminalCaptureNeed(worktreeCwd, storyId)} taken terminal shots)`);
+  if (owesTerm && takenCaptureCount(worktreeCwd, storyId, "terminal") < terminalNeed) {
+    gaps.push(`declared deliverable_cmd(s) not all really captured (need ${terminalNeed} taken terminal shots)`);
   }
   if (owesPhysical && !hasRealPhysicalTerminalCapture(worktreeCwd, storyId)) {
-    const physical = physicalTerminalForStory(worktreeCwd, storyId);
     gaps.push(`physical_terminal not really captured (need 1 taken physical-terminal shot from ${physical?.app ?? "Terminal.app"})`);
   }
   if (gaps.length === 0) return { ok: true, reason: "all declared surfaces really captured" };
@@ -1176,20 +1203,31 @@ export function runAttestGate(
   // thrown error in the score read is fail-closed (blocked in hard mode), and
   // its result is reused inside the main path below.
   try {
+    const physicalError = physicalTerminalParseErrorForStory(worktreeCwd, storyId);
+    if (physicalError !== null) {
+      const reasons = [`invalid physical_terminal frontmatter: ${physicalError}`];
+      const blocked = mode === "hard";
+      sinks.alert(
+        `attest gate (${mode}): invalid physical_terminal frontmatter (${storyId}) — ${physicalError} — cycle ${cycleId}` +
+          (blocked ? " — BLOCKED (hard mode); story not marked Done" : ""),
+      );
+      sinks.event({ cycleId, verdict: "skipped", reasons });
+      return { verdict: "skipped", mode, reasons, blocked };
+    }
     // FIX-339 (复核 #1) — a deliverable_cmd outside the roll read-only allowlist
     // is rejected BEFORE anything else: the spec asked the attest lane to run a
     // non-roll command or a state-changing roll subcommand (agent-controlled
     // arbitrary execution). The command never ran; the gate FAILS LOUD here (it
     // is never silently honest-skipped). Reported even ahead of the AC-block
     // exemption, since the security problem stands regardless of AC shape.
-    const rejectedCmds = rejectedDeliverableCmdsForStory(worktreeCwd, storyId);
+    const rejectedCmds = [...rejectedDeliverableCmdsForStory(worktreeCwd, storyId), ...rejectedPhysicalTerminalCmdsForStory(worktreeCwd, storyId)];
     if (rejectedCmds.length > 0) {
       const reasons = [
-        `deliverable_cmd 非白名单(仅限 roll 只读子命令): ${rejectedCmds.join(", ")} — refused (no arbitrary command execution; no state-changing roll subcommand)`,
+        `terminal capture command 非白名单(仅限 roll 只读子命令): ${rejectedCmds.join(", ")} — refused (no arbitrary command execution; no state-changing roll subcommand)`,
       ];
       const blocked = mode === "hard";
       sinks.alert(
-        `attest gate (${mode}): deliverable_cmd outside the roll read-only allowlist (${storyId}) — refused: ${rejectedCmds.join(", ")} — cycle ${cycleId}` +
+        `attest gate (${mode}): terminal capture command outside the roll read-only allowlist (${storyId}) — refused: ${rejectedCmds.join(", ")} — cycle ${cycleId}` +
           (blocked ? " — BLOCKED (hard mode); story not marked Done" : ""),
       );
       sinks.event({ cycleId, verdict: "skipped", reasons });

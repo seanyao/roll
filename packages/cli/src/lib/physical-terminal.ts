@@ -4,6 +4,11 @@ export interface PhysicalTerminalSpec {
   evidence: string;
 }
 
+export type PhysicalTerminalParseResult =
+  | { kind: "absent" }
+  | { kind: "invalid"; reason: string }
+  | { kind: "ok"; spec: PhysicalTerminalSpec };
+
 function frontmatter(specText: string): string | null {
   const m = /^---\n([\s\S]*?)\n---/.exec(specText);
   return m === null ? null : (m[1] ?? "");
@@ -16,12 +21,12 @@ function stripQuotes(value: string): string {
   return value;
 }
 
-export function physicalTerminalFromSpecText(specText: string): PhysicalTerminalSpec | null {
+export function parsePhysicalTerminalSpec(specText: string): PhysicalTerminalParseResult {
   const fm = frontmatter(specText);
-  if (fm === null) return null;
+  if (fm === null) return { kind: "absent" };
   const lines = fm.split(/\r?\n/);
   const start = lines.findIndex((line) => /^physical_terminal:\s*$/.test(line));
-  if (start === -1) return null;
+  if (start === -1) return { kind: "absent" };
 
   const fields = new Map<string, string>();
   for (const line of lines.slice(start + 1)) {
@@ -35,14 +40,33 @@ export function physicalTerminalFromSpecText(specText: string): PhysicalTerminal
   }
 
   const command = fields.get("command");
-  if (command === undefined || command === "") return null;
-  return {
+  if (command === undefined || command === "") {
+    return { kind: "invalid", reason: "physical_terminal.command is required" };
+  }
+  const spec = {
     app: fields.get("app") ?? "Terminal.app",
     command,
     evidence: fields.get("evidence") ?? "screenshot",
   };
+  if (spec.app !== "Terminal.app") {
+    return { kind: "invalid", reason: "physical_terminal.app must be Terminal.app" };
+  }
+  if (spec.evidence !== "screenshot") {
+    return { kind: "invalid", reason: "physical_terminal.evidence must be screenshot" };
+  }
+  return { kind: "ok", spec };
+}
+
+export function physicalTerminalFromSpecText(specText: string): PhysicalTerminalSpec | null {
+  const parsed = parsePhysicalTerminalSpec(specText);
+  return parsed.kind === "ok" ? parsed.spec : null;
+}
+
+export function physicalTerminalParseError(specText: string): string | null {
+  const parsed = parsePhysicalTerminalSpec(specText);
+  return parsed.kind === "invalid" ? parsed.reason : null;
 }
 
 export function declaresPhysicalTerminalSpec(specText: string): boolean {
-  return physicalTerminalFromSpecText(specText) !== null;
+  return parsePhysicalTerminalSpec(specText).kind !== "absent";
 }

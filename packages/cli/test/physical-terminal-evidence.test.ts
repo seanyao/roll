@@ -1,5 +1,4 @@
-import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -12,14 +11,17 @@ import {
 } from "../src/lib/design-visual-evidence.js";
 import {
   declaresAnySurface,
+  physicalTerminalCaptureCommandForStory,
   physicalTerminalForStory,
+  rejectedPhysicalTerminalCmdsForStory,
+  runAttestGate,
   verificationReportHasContent,
 } from "../src/runner/attest-gate.js";
 
 const dirs: string[] = [];
 
 afterAll(() => {
-  for (const d of dirs) execSync(`rm -rf '${d}'`);
+  for (const d of dirs) rmSync(d, { recursive: true, force: true });
 });
 
 const T0 = new Date("2026-06-06T01:02:03");
@@ -74,6 +76,23 @@ function physicalSpecWithOptions(id: string, includeDeliverableCmd: boolean): st
   ].join("\n");
 }
 
+function physicalSpecWithFields(id: string, fields: readonly string[]): string {
+  return [
+    "---",
+    `id: ${id}`,
+    "physical_terminal:",
+    ...fields,
+    "---",
+    "",
+    `# ${id} — Physical Terminal evidence`,
+    "",
+    "## Acceptance Criteria",
+    "",
+    "- [ ] [visual-evidence] real physical Terminal.app screenshot proves the CLI output",
+    "",
+  ].join("\n");
+}
+
 function withPhysicalReport(id: string, captureKind: string): string {
   const wt = tmp("gate");
   const cardDir = join(wt, ".roll", "features", "uncategorized", id);
@@ -109,6 +128,27 @@ describe("US-INIT-003 physical Terminal.app evidence contract", () => {
     expect(declaresAnySurface(spec)).toBe(true);
   });
 
+  it("invalid physical_terminal frontmatter fails design validation", () => {
+    const missingCommand = physicalSpecWithFields("US-PHYS-BAD1", ["  app: Terminal.app", "  evidence: screenshot"]);
+    const wrongApp = physicalSpecWithFields("US-PHYS-BAD2", ["  app: iTerm.app", "  command: roll doctor --tools", "  evidence: screenshot"]);
+    const wrongEvidence = physicalSpecWithFields("US-PHYS-BAD3", ["  app: Terminal.app", "  command: roll doctor --tools", "  evidence: transcript"]);
+
+    expect(declaresPhysicalTerminal(missingCommand)).toBe(true);
+    expect(validateStoryVisualEvidence(missingCommand)).toMatchObject({ ok: false, code: "physical-terminal-invalid" });
+    expect(validateStoryVisualEvidence(wrongApp)).toMatchObject({ ok: false, code: "physical-terminal-invalid" });
+    expect(validateStoryVisualEvidence(wrongEvidence)).toMatchObject({ ok: false, code: "physical-terminal-invalid" });
+  });
+
+  it("physical_terminal.command is subject to the terminal command allowlist", () => {
+    const spec = physicalSpecWithFields("US-PHYS-BAD4", ["  app: Terminal.app", "  command: rm -rf /", "  evidence: screenshot"]);
+
+    expect(validateStoryVisualEvidence(spec)).toMatchObject({
+      ok: false,
+      code: "deliverable-cmd-rejected",
+      rejectedDeliverableCmds: ["rm -rf /"],
+    });
+  });
+
   it("attest gate accepts a taken physical-terminal capture for physical_terminal stories", () => {
     const wt = withPhysicalReport("US-PHYS-2", "physical-terminal");
 
@@ -134,6 +174,29 @@ describe("US-INIT-003 physical Terminal.app evidence contract", () => {
     const wt = withPhysicalReport("US-PHYS-3", "terminal");
 
     expect(verificationReportHasContent(wt, "US-PHYS-3")).toBe(false);
+  });
+
+  it("attest gate rejects rejected physical_terminal.command before it can run", () => {
+    const wt = withPhysicalReport("US-PHYS-3B", "physical-terminal");
+    writeFileSync(
+      join(wt, ".roll", "features", "uncategorized", "US-PHYS-3B", "spec.md"),
+      physicalSpecWithFields("US-PHYS-3B", ["  app: Terminal.app", "  command: rm -rf /", "  evidence: screenshot"]),
+    );
+    const alerts: string[] = [];
+    const events: Array<{ verdict: string; reasons: string[] }> = [];
+
+    expect(physicalTerminalCaptureCommandForStory(wt, "US-PHYS-3B")).toBeNull();
+    expect(rejectedPhysicalTerminalCmdsForStory(wt, "US-PHYS-3B")).toEqual(["rm -rf /"]);
+    const result = runAttestGate(wt, "US-PHYS-3B", "c-phys", "hard", 0, {
+      alert: (message) => alerts.push(message),
+      event: (payload) => events.push(payload),
+    });
+
+    expect(result.verdict).toBe("skipped");
+    expect(result.blocked).toBe(true);
+    expect(result.reasons[0]).toMatch(/非白名单|allowlist/);
+    expect(alerts[0]).toContain("BLOCKED");
+    expect(events[0]?.verdict).toBe("skipped");
   });
 
   it("roll attest does not promote headless stdout fallback to physical Terminal.app evidence", async () => {

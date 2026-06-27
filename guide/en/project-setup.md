@@ -39,6 +39,13 @@ roll init
    Roll-owned files or merges Roll-owned sections, and records the changes in
    `.roll/onboard-changeset.yaml` so `roll offboard` can reverse them later.
 
+After any of these paths, `roll next` is the continuation command. It reads the
+same Roll markers plus `.roll/brief.md`, `.roll/onboard-plan.yaml`, and
+`.roll/backlog.md`, then prints one next action: design from the brief, review
+and apply an onboard plan, repair partial markers, run the old-layout migration,
+start the loop on the next Todo card, or inspect status when nothing is
+actionable.
+
 Upgrading from a pre-2.0 layout (`BACKLOG.md` at root or `docs/features/`)?
 Run `npx @seanyao/roll@2 migrate` first — see
 [migration-2.0.md](migration-2.0.md). `roll init` will refuse to scaffold on top
@@ -61,7 +68,7 @@ curl -fsSL https://seanyao.github.io/roll/install | bash   # install roll
 roll setup                 # configure AI tools globally (one time per machine)
 cd my-project
 roll init                  # diagnose and route this project
-roll design                # launch an interactive design session to populate .roll/backlog.md
+roll next                  # continue with design/apply/repair/migrate/loop/status
 roll loop on               # enable autonomous execution
 ```
 

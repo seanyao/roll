@@ -32,6 +32,11 @@ roll init
    修复只创建缺失的 Roll-owned 文件或合并 Roll-owned 区块，并写入
    `.roll/onboard-changeset.yaml`，之后 `roll offboard` 可以反向移除这些改动。
 
+任一路径之后，都可以用 `roll next` 接着走。它读取相同的 Roll 标记，以及
+`.roll/brief.md`、`.roll/onboard-plan.yaml`、`.roll/backlog.md`，只输出一个下一步：
+从 brief 进入设计、审阅并 apply onboard plan、修复 partial 标记、执行旧布局迁移、
+对下一张 Todo 开 loop，或在没有可执行项时查看 status。
+
 正在从 2.0 之前的布局升级（`BACKLOG.md` 在根目录或 `docs/features/`）？
 先跑 `npx @seanyao/roll@2 migrate` —— 见
 [migration-2.0.md](migration-2.0.md)。`roll init` 会拒绝在迁移到一半的
@@ -54,7 +59,7 @@ curl -fsSL https://seanyao.github.io/roll/install | bash   # 安装 roll
 roll setup                 # 全机器配置 AI 工具（仅需一次）
 cd my-project
 roll init                  # 诊断并路由该项目
-roll design                # 开交互式设计对话，填充 .roll/backlog.md
+roll next                  # 接续 design/apply/repair/migrate/loop/status
 roll loop on               # 开启自主执行
 ```
 

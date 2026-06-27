@@ -50,6 +50,7 @@ import { indexCommand } from "./index-gen.js";
 import { storyNewCommand } from "./story-new.js";
 import { storyValidateCommand } from "./story-validate.js";
 import { initCommand } from "./init.js";
+import { NEXT_USAGE, nextCommand } from "./next.js";
 import { designCommand } from "./design.js";
 // REFACTOR-049: `roll lang` retired → use `roll config lang <zh|en|--reset>`.
 // The lang module's write/clear/read surfaces are consumed by config.ts.
@@ -276,6 +277,7 @@ export function registerAll(): void {
   // launcher, --apply plan consumption, unknown flags, and no-template guard).
   // No sub-paths on bash.
   registerPorted("init", initCommand, { help: "Usage: roll init [--auto|--repair|apply]\n  Diagnose this project and route to scaffold, design, onboard, repair, migration, or roll status.\n  --auto: apply deterministic fresh-project scaffolding in non-interactive runs.\n  --repair: repair partial Roll markers only.\n诊断项目并路由到骨架、设计、接入、修复、迁移或 roll status。" });
+  registerPorted("next", nextCommand, { help: NEXT_USAGE });
   // `design`: explicit thin entry point for the $roll-design skill
   // (US-ONBOARD-NUDGE-004). Loads the skill and launches the selected agent;
   // all design logic lives in the skill, not here.

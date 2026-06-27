@@ -85,6 +85,7 @@ roll loop on
 | `roll story new <ID> --title <t> [--epic <e>] [--no-index]` | agent/skill 用的单一建卡入口:卡夹 + backlog 行 + 索引刷新(批量用 --no-index) |
 | **项目 · 每仓** | |
 | `roll init` | 诊断当前目录并路由到新项目脚手架、PRD/design handoff、已有代码库 onboard、repair、migration 或 `roll status` |
+| `roll next` | 接续 init/onboard 流程，只给一个最合适的下一步命令：design、apply、repair、migrate、loop 或 status |
 | `roll design [--agent <name>]` | 交互式启动 `$roll-design`，把需求转化为领域模型 + INVEST 待办 |
 | `roll offboard` | 从项目移除 Roll |
 | `roll test [--where] [--reset]` | 运行测试套件(通过隔离适配器分发;未知类型显式报错) |

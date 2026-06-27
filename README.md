@@ -41,7 +41,8 @@ roll loop on        # let AI work through the backlog (optional)
 `Already initialized` and `Next: roll status`; partial Roll projects get
 `roll init --repair`, while pre-2.0 layouts get migration guidance without writing files. Existing codebases route to
 `$roll-onboard`. PRD/docs-only workspaces are treated as new projects: Roll writes
-`.roll/brief.md` from the detected document and points to `roll design --from-file`.
+`.roll/brief.md` from the detected document and points to
+`roll design --from-file <detected-doc>`.
 Empty directories ask what you are building in an interactive terminal; in scripts
 and CI, plain `roll init` is read-only and `roll init --auto` writes a placeholder
 brief before pointing to `roll design`.
@@ -95,7 +96,7 @@ with `roll loop resume` when ready.
 | **Project · per repo** | |
 | `roll init` | Diagnose this directory and route to fresh scaffold, PRD/design handoff, existing-codebase onboard, repair, migration, or `roll status` |
 | `roll next` | Continue the init/onboard journey with one best next command: design, apply, repair, migrate, loop, or status |
-| `roll design [--agent <name>]` | Launch `$roll-design` interactively to turn requirements into a domain model + INVEST backlog |
+| `roll design [--from-file <path>] [--agent <name>]` | Launch `$roll-design` interactively; `--from-file` binds a PRD/brief as the design input |
 | `roll offboard` | Remove Roll from this project |
 | `roll test [--where] [--reset]` | Run the test suite (routes through the isolation adapter; unknown types fail loud) |
 | `roll daemon <start\|stop\|status>` | Manage the read-only observability daemon (OPT-IN only; never auto-started) |

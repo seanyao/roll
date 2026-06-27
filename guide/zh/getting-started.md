@@ -34,11 +34,13 @@ roll init
 想立刻开始设计对话：
 
 ```bash
-roll design
+roll design --from-file docs/PRD.md
 ```
 
-这条命令会在你的 AI agent 里拉起 `roll-design` 技能。你描述领域模型，agent 把
-INVEST 故事写入 `.roll/backlog.md`——然后 `roll loop` 接过去接着干。
+如果 `roll init` 检测到 PRD，就使用它打印出来的那条
+`roll design --from-file ...` 命令；没有文件时，`roll design` 仍会在你的 AI
+agent 里拉起同一个 `roll-design` 技能。你描述领域模型，agent 把 INVEST 故事写入
+`.roll/backlog.md`——然后 `roll loop` 接过去接着干。
 
 你也可以直接在 agent 里跑 `$roll-design`，效果一样。
 

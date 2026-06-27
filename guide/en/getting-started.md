@@ -36,12 +36,14 @@ exists with an empty backlog.
 To start an interactive design session right away:
 
 ```bash
-roll design
+roll design --from-file docs/PRD.md
 ```
 
-This launches the `roll-design` skill in your AI agent. You talk through the
-domain model, the agent writes INVEST stories into `.roll/backlog.md` — and then
-`roll loop` takes over.
+Use the exact `roll design --from-file ...` command printed by `roll init` when
+it detects a PRD. Without a file, `roll design` still launches the same
+`roll-design` skill in your AI agent. You talk through the domain model, the
+agent writes INVEST stories into `.roll/backlog.md` — and then `roll loop`
+takes over.
 
 You can also run `$roll-design` directly inside your agent if you prefer.
 

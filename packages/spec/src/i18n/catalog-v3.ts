@@ -233,8 +233,8 @@ export const v3Catalog: Catalog = {
   // `design.*` — explicit `roll design` entry point (US-ONBOARD-NUDGE-004).
   // Thin wrapper that launches the existing $roll-design skill interactively.
   "design.usage": {
-    en: "Usage: roll design [--agent <name>]\n  Launch the $roll-design skill in an interactive agent conversation.\n  `--agent` and `ROLL_DESIGN_AGENT` override the configured primary_agent.\n  Unlike `roll init`, this command runs an LLM — run it only when you want to design.",
-    zh: "用法：roll design [--agent <name>]\n  在交互式 agent 对话中启动 $roll-design skill。\n  `--agent` 与 `ROLL_DESIGN_AGENT` 覆盖已配置的 primary_agent。\n  与 `roll init` 不同，本命令会运行 LLM——只在需要设计时执行。",
+    en: "Usage: roll design [--from-file <path>] [--agent <name>]\n  Launch the $roll-design skill in an interactive agent conversation.\n  `--from-file` binds a PRD/brief file as the design input.\n  `--agent` and `ROLL_DESIGN_AGENT` override the configured primary_agent.\n  Unlike `roll init`, this command runs an LLM — run it only when you want to design.",
+    zh: "用法：roll design [--from-file <path>] [--agent <name>]\n  在交互式 agent 对话中启动 $roll-design skill。\n  `--from-file` 会把 PRD/brief 文件绑定为设计输入。\n  `--agent` 与 `ROLL_DESIGN_AGENT` 覆盖已配置的 primary_agent。\n  与 `roll init` 不同，本命令会运行 LLM——只在需要设计时执行。",
   },
   "design.not_roll_project": {
     en: "This directory is not a Roll project (no .roll/). Run `roll init` first.",
@@ -251,6 +251,14 @@ export const v3Catalog: Catalog = {
   "design.unknown_agent": {
     en: "Agent '%s' is unknown or not installed.",
     zh: "agent '%s' 未知或未安装。",
+  },
+  "design.from_file_missing": {
+    en: "`--from-file` requires a path.",
+    zh: "`--from-file` 需要一个文件路径。",
+  },
+  "design.from_file_not_found": {
+    en: "Design source file not found: %s",
+    zh: "未找到设计输入文件：%s",
   },
 
   // `setup.*` — primary agent selection during setup (US-ONBOARD-NUDGE-006).

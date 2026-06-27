@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v3.627.1 — 2026-06-27
+
 ### 上手引导
 
 - **`roll init` 会先分清项目类型**：PRD、空项目、已有代码库、partial Roll、旧布局和已就绪项目都会走不同下一步。(US-INIT-004, US-INIT-005, US-INIT-006a, US-INIT-009) `[legacy-onboard]`

@@ -50,7 +50,7 @@ Success Criteria: <可衡量的完成标准>
 
 `$roll-design` 在新增文档和目录时维护此表。任何进入项目的 Agent 无需扫描整棵树就能导航到权威来源。
 
-## 存量项目：`$roll-onboard` 与 `$roll-doc-audit`
+## 已有代码库：`$roll-onboard` 与 `$roll-doc-audit`
 
 对于尚无 `.roll/` 的已有代码库，入口是 `$roll-onboard`（**graft（嫁接）**
 接入模式）：扫描代码、问一组聚焦的认知 / 范围 / 隐私问题、产出

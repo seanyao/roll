@@ -4,6 +4,7 @@
 
 ### 上手引导
 
+- **init/onboard 文档和站点统一成一条路**：README、指南、CLI help、skill contract、站点导航和 `$roll-onboard` 图现在都把接入路径讲成“已有代码库 → 只读诊断/计划 → `roll init --apply` → `roll next`”；“legacy”只保留在历史迁移或兼容链接语境里。验收截图标准同步落到真实物理窗口：CLI 用 Terminal.app，站点图用真实浏览器窗口截图。(US-INIT-008) `[legacy-onboard]`
 - **`roll next` 成为 init/onboard 后的继续按钮**：它会读取 `.roll/brief.md`、`.roll/onboard-plan.yaml`、backlog 和 Roll 标记，只给一个下一步命令：去 design、apply onboard plan、repair、migrate、跑下一张 Todo 或查看 status；隐藏 smoke fixture 可用于真实终端截图验收。(US-INIT-007) `[legacy-onboard]`
 - **partial Roll 修复不再像 fresh init 一样粗暴**：`roll init` 现在会列出缺失的 Roll 组件和仍存在的 pre-v2 标记；`roll init --repair` 在非交互环境只预览并要求 `--auto`，apply 时只补缺失的 Roll-owned 文件/区块，并写入 `.roll/onboard-changeset.yaml`，所以 `roll offboard` 能反向清掉 repair 带来的 Roll-owned 改动。旧 Roll 布局仍只路由到迁移命令，不会叠加新脚手架。(US-INIT-009) `[legacy-onboard]`
 - **`roll init --apply` 写文件前先让你看清楚**：已有代码库 graft 流程现在会在校验 onboard plan 后打印审阅检查点，列出每个计划文件操作的动作、路径、模式和用户内容处理方式；交互终端必须确认，非交互自动化必须显式使用 `roll init --apply --auto`。(US-INIT-006d) `[legacy-onboard]`

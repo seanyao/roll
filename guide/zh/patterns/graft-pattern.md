@@ -100,9 +100,9 @@ graft 不是一次性事件，可以分阶段加深采用：
 
 ## 实例
 
-任何使用 Roll 的存量项目都是 graft 的实例。典型场景：
+任何使用 Roll 的已有代码库都是 graft 的实例。典型场景：
 
 - 5 年的 Django 项目，团队装 Roll 只为给新功能做自治管理
 - Spring Boot 微服务集群，装 Roll 给跨服务的 PR 评审做 peer
-- Legacy bash 工具链，装 Roll 给文档新鲜度做 dream 巡检
+- 长期演进的 bash 工具链，装 Roll 给文档新鲜度做 dream 巡检
 - 任何已有 `git log` 但缺方法论的项目

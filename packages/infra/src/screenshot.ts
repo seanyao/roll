@@ -290,7 +290,8 @@ async function resolveWindowRect(
 // Terminal lane: read the live window bounds, shoot `-R`, then close window 1.
 
 const DEFAULT_BROWSER = "Google Chrome";
-const BROWSER_RENDER_DELAY_S = 2;
+const BROWSER_RENDER_DELAY_S = 3;
+const BROWSER_POST_BOUNDS_DELAY_S = 1;
 
 /**
  * AppleScript that opens one fresh browser window on `target`, sizes it to the
@@ -318,6 +319,7 @@ export function browserOpenScript(target: string, browserApp: string, r: { x: nu
     "  try",
     `    set bounds of front window to {${r.x}, ${r.y}, ${r.x + r.w}, ${r.y + r.h}}`,
     "  end try",
+    `  delay ${BROWSER_POST_BOUNDS_DELAY_S}`,
     "end tell",
   ].join("\n");
 }

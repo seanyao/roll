@@ -17,7 +17,7 @@
 | guide/en/faq.md | Roll FAQ | guide | 2026-05-28 |
 | guide/en/getting-started.md | Roll — Getting Started | guide | 2026-06-08 |
 | guide/en/installation.md | Roll — Installation & Updates | guide | 2026-05-19 |
-| guide/en/legacy-onboarding.md | Legacy Project Onboarding | guide | 2026-05-20 |
+| guide/en/legacy-onboarding.md | Existing Codebase Onboarding | guide | 2026-05-20 |
 | guide/en/loop-driven-architecture.md | Loop-Driven Agent Architecture | guide | 2026-05-27 |
 | guide/en/loop.md | roll loop — Autonomous BACKLOG Executor | guide | 2026-05-28 |
 | guide/en/methodology.md | Roll Engineering Methodology | guide | 2026-05-25 |
@@ -46,7 +46,7 @@
 | guide/zh/faq.md | Roll 常见问题 | guide | 2026-05-28 |
 | guide/zh/getting-started.md | Roll — 快速上手 | guide | 2026-06-08 |
 | guide/zh/installation.md | Roll — 安装与更新 | guide | 2026-05-19 |
-| guide/zh/legacy-onboarding.md | 遗留项目接入 Roll | guide | 2026-05-20 |
+| guide/zh/legacy-onboarding.md | 已有代码库接入 Roll | guide | 2026-05-20 |
 | guide/zh/loop-driven-architecture.md | Loop 驱动的 Agent 架构 | guide | 2026-05-27 |
 | guide/zh/acceptance-evidence.md | 验收证据 — roll attest / 证据生命周期 | guide | 2026-06-08 |
 | guide/zh/loop.md | roll loop — 自主 BACKLOG 执行器 | guide | 2026-05-28 |

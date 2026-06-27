@@ -140,7 +140,7 @@ export function registerAll(): void {
       return skillsCommand(["check", ...rest]);
     }
     return doctorCommand(args);
-  }, { help: "Usage: roll doctor [skills|--tools]\n  Environment + install diagnosis; --tools shows focused tool and screenshot readiness.\n环境与安装体检；--tools 只看工具与截图就绪度。" });
+  }, { help: "Usage: roll doctor [skills|--tools]\n  Environment + install diagnosis; --tools shows focused tool, physical screenshot, and permission preflight readiness.\n环境与安装体检；--tools 只看工具、真实截图与权限预检就绪度。" });
   // `attest`: the acceptance-evidence report (US-ATTEST-006) — v3-native, no
   // bash counterpart (additive; the evidence chain is new product surface).
   registerPorted("attest", attestCommand, { hidden: true });
@@ -273,10 +273,10 @@ export function registerAll(): void {
   // surface ported; the python orchestrator is reimplemented byte-for-byte).
   // REFACTOR-051: `roll feedback` retired. Use `roll idea` for backlog capture
   // or `gh issue create` for GitHub issues.
-  // `init`: full surface TS (fresh/re-init scaffold, legacy-codebase onboard
+  // `init`: full surface TS (fresh/re-init scaffold, existing-codebase onboard
   // launcher, --apply plan consumption, unknown flags, and no-template guard).
   // No sub-paths on bash.
-  registerPorted("init", initCommand, { help: "Usage: roll init [--auto|--repair|apply]\n  Diagnose this project and route to scaffold, design, onboard, repair, migration, or roll status.\n  --auto: apply deterministic fresh-project scaffolding in non-interactive runs.\n  --repair: repair partial Roll markers only.\n诊断项目并路由到骨架、设计、接入、修复、迁移或 roll status。" });
+  registerPorted("init", initCommand, { help: "Usage: roll init [--auto|--repair|--apply]\n  Diagnose this project and route to scaffold, PRD design, existing-codebase onboard, repair, migration, or roll status.\n  --auto: apply deterministic fresh-project scaffolding in non-interactive runs.\n  --repair: repair partial Roll markers only.\n  --apply: validate and apply a reviewed existing-codebase onboard plan.\n诊断项目并路由到骨架、PRD 设计、已有代码库接入、修复、迁移或 roll status。\n  --apply：校验并应用已审阅的已有代码库接入计划。" });
   registerPorted("next", nextCommand, { help: NEXT_USAGE });
   // `design`: explicit thin entry point for the $roll-design skill
   // (US-ONBOARD-NUDGE-004). Loads the skill and launches the selected agent;

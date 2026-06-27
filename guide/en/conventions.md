@@ -57,7 +57,7 @@ and the navigation table is the single map agents need.
 Any agent entering the project can navigate to authoritative sources without
 scanning the whole tree.
 
-## Legacy Projects: `$roll-onboard` and `$roll-doc-audit`
+## Existing Codebases: `$roll-onboard` and `$roll-doc-audit`
 
 For an existing codebase with no `.roll/` yet, the entry point is
 `$roll-onboard` (the **graft** adoption pattern). It scans the code, asks a

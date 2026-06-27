@@ -2,8 +2,8 @@ import { renderInitJourneyAttestSmoke, recommendNext, renderNextRecommendation }
 
 export const NEXT_USAGE =
   "Usage: roll next\n" +
-  "  Print the single best next action for this project's Roll onboarding state.\n" +
-  "  当前项目 Roll 接入状态的下一步。\n";
+  "  Continue the roll init/onboard journey with one best next action: design, apply, repair, migrate, loop, or status.\n" +
+  "  接续 roll init/onboard 流程，只给一个下一步：design、apply、repair、migrate、loop 或 status。\n";
 
 function isHelp(arg: string | undefined): boolean {
   return arg === "help" || arg === "--help" || arg === "-h";

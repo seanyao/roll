@@ -148,7 +148,7 @@ npm install -g @seanyao/roll@1           # 重装老版本
 独立处理。Roll 2.0 遇到老结构会拒绝运行，提示 `npx @seanyao/roll@2 migrate`，不会静默出错。
 
 **Q: 能不能不迁移，一直用 Roll 1.x？**
-可以。npm 历史版本永远在。但新特性（Legacy onboarding、agent 发现、plan 驱动 init）就用不到。
+可以。npm 历史版本永远在。但新特性（已有代码库接入、agent 发现、plan 驱动 init）就用不到。
 
 **Q: 迁移后 `npm test` 大量失败，是预期吗？**
 不是。迁移不应该改变测试结果。如果失败，跑 `git diff HEAD~1` 看哪些文件移动了，找 workflow / test fixture 里漏改的路径。提 issue 附 diff。

@@ -162,7 +162,7 @@
   function localizedRelations(l) {
     const text = {
       en: {
-        onboardIdea: ".roll scaffold creates the backlog and feature-card homes",
+        onboardIdea: "onboard plan applies through roll init --apply, then roll next continues",
         ideaDesign: "discussion-worthy IDEA rows become design input",
         ideaFix: "bug-like captures become FIX rows",
         designBuild: "signed-off INVEST stories enter one-cycle delivery",
@@ -178,7 +178,7 @@
         doctorOnboard: "broken install/convention state can block onboarding"
       },
       zh: {
-        onboardIdea: ".roll 脚手架建立 backlog 与 feature card 的落点",
+        onboardIdea: "接入计划经 roll init --apply 落地，再由 roll next 接续",
         ideaDesign: "值得讨论的 IDEA 行进入设计输入",
         ideaFix: "缺陷类捕获成为 FIX 行",
         designBuild: "已签字 INVEST stories 进入单 cycle 交付",
@@ -237,7 +237,7 @@
         context: "BDD / Scrum / DDD",
         anchors: [".roll/backlog.md", ".roll/features/*", ".roll/domain/*"],
         nodes: [
-          ["roll-onboard", "entry", l === "zh" ? ".roll/onboard-plan.yaml -> roll init --apply" : ".roll/onboard-plan.yaml -> roll init --apply"],
+          ["roll-onboard", "entry", l === "zh" ? "diagnosis + onboard-plan -> roll init --apply -> roll next" : "diagnosis + onboard-plan -> roll init --apply -> roll next"],
           ["roll-idea", "entry", l === "zh" ? "IDEA/FIX row -> .roll/backlog.md" : "IDEA/FIX row -> .roll/backlog.md"],
           ["roll-design", "shape", l === "zh" ? ".roll/features + AC -> cycle" : ".roll/features + AC -> cycle"]
         ]

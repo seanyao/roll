@@ -3,7 +3,7 @@
  * helpers, plus the v2 UI renderer lib/roll-init.py (rendered natively here via
  * the shared render primitives). Mirrors the DETERMINISTIC happy path:
  *
- *   - fresh project (no AGENTS.md, not a legacy codebase) → scaffold AGENTS.md
+ *   - fresh project (no AGENTS.md, not an existing codebase) → scaffold AGENTS.md
  *     (project-type-filtered), .claude/CLAUDE.md (template), .roll/backlog.md,
  *     .roll/features/, .roll/features.md, .roll/agent-routes.yaml, .roll/.version
  *   - re-init (AGENTS.md present) → section-merge global conventions + CLAUDE.md

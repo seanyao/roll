@@ -91,6 +91,7 @@ describe("roll design", () => {
     spy.mockRestore();
     expect(code).toBe(0);
     expect(out.data).toContain("Usage: roll design");
+    expect(out.data).toContain("--from-file <path>");
     expect(out.data).toContain("ROLL_DESIGN_AGENT");
   });
 
@@ -142,6 +143,43 @@ describe("roll design", () => {
     expect(d.calls[0]?.args[0]).toContain("Run the $roll-design skill");
     expect(d.calls[0]?.args[0]).toContain("Load when the user wants to discuss approaches");
     expect(d.calls[0]?.opts.cwd).toBe(proj);
+  });
+
+  it("accepts the init-suggested --from-file handoff and binds the source file in the prompt", () => {
+    const proj = freshProj();
+    dirs.push(proj);
+    mkdirSync(join(proj, "docs"), { recursive: true });
+    writeFileSync(join(proj, "docs", "intel-radar-PRD.md"), "# Intel Radar PRD\n", "utf8");
+    makeAgent(bin, "claude");
+    writeConfig(home, "lang: en\nai_claude: ~/.claude\n");
+    const d = makeDeps(proj, bin);
+    const code = designCommand(["--from-file", "docs/intel-radar-PRD.md"], d);
+    expect(code).toBe(0);
+    expect(d.calls).toHaveLength(1);
+    expect(d.calls[0]?.bin).toBe("claude");
+    expect(d.calls[0]?.args[0]).toContain("Use this product brief file as the design input: docs/intel-radar-PRD.md");
+  });
+
+  it("fails loud when --from-file has no value", () => {
+    const proj = freshProj();
+    dirs.push(proj);
+    makeAgent(bin, "claude");
+    writeConfig(home, "lang: en\nai_claude: ~/.claude\n");
+    const d = makeDeps(proj, bin);
+    const code = designCommand(["--from-file"], d);
+    expect(code).toBe(1);
+    expect(d.calls).toHaveLength(0);
+  });
+
+  it("fails loud when --from-file points at a missing file", () => {
+    const proj = freshProj();
+    dirs.push(proj);
+    makeAgent(bin, "claude");
+    writeConfig(home, "lang: en\nai_claude: ~/.claude\n");
+    const d = makeDeps(proj, bin);
+    const code = designCommand(["--from-file", "docs/missing.md"], d);
+    expect(code).toBe(1);
+    expect(d.calls).toHaveLength(0);
   });
 
   it("selects agent from ROLL_DESIGN_AGENT", () => {

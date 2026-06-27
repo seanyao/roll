@@ -40,7 +40,7 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 `roll init` 会先诊断当前目录：完整 Roll 项目提示 `roll status`；部分接入
 提示 `roll init --repair`；pre-2.0 布局提示迁移且不写文件。已有代码库会进入
 `$roll-onboard`；PRD/文档-only 工作区按新项目处理，生成 `.roll/brief.md` 并指向
-`roll design --from-file`。空目录会在交互终端询问你要做什么；脚本或 CI 中，
+`roll design --from-file <detected-doc>`。空目录会在交互终端询问你要做什么；脚本或 CI 中，
 普通 `roll init` 只读，`roll init --auto` 写入占位 brief 后指向 `roll design`。
 已有代码库的 graft 流程里，`roll init --apply` 会先校验产物、打印每个计划文件操作的
 审阅检查点，并在写入前等待 owner 确认；自动化必须在审阅后显式使用
@@ -89,7 +89,7 @@ roll loop on
 | **项目 · 每仓** | |
 | `roll init` | 诊断当前目录并路由到新项目脚手架、PRD/design handoff、已有代码库 onboard、repair、migration 或 `roll status` |
 | `roll next` | 接续 init/onboard 流程，只给一个最合适的下一步命令：design、apply、repair、migrate、loop 或 status |
-| `roll design [--agent <name>]` | 交互式启动 `$roll-design`，把需求转化为领域模型 + INVEST 待办 |
+| `roll design [--from-file <path>] [--agent <name>]` | 交互式启动 `$roll-design`；`--from-file` 绑定 PRD/brief 作为设计输入 |
 | `roll offboard` | 从项目移除 Roll |
 | `roll test [--where] [--reset]` | 运行测试套件(通过隔离适配器分发;未知类型显式报错) |
 | `roll daemon <start\|stop\|status>` | 管理只读可观测驻守服务(可选加入,从不自动启动) |

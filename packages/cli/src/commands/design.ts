@@ -7,8 +7,8 @@
  * this command only wires stdin/stdout.
  */
 import { spawnSync, type SpawnSyncOptions } from "node:child_process";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { t, v2Catalog, v3Catalog, type Lang } from "@roll/spec";
 import { currentLang } from "./agent-list.js";
 import {
@@ -28,15 +28,32 @@ function emit(line: string): void {
   process.stderr.write(`${line}\n`);
 }
 
-function readDesignPrompt(): string | null {
+function readDesignPrompt(fromFile: string | undefined): string | null {
   const body = readSkillBody("roll-design");
   if (body === null) return null;
-  return `Run the $roll-design skill below for this project. Follow it end-to-end.\n\n${body}`;
+  const handoff =
+    fromFile === undefined
+      ? ""
+      : [
+          `The user invoked \`roll design --from-file ${fromFile}\`.`,
+          `Use this product brief file as the design input: ${fromFile}`,
+          "Read it before asking broad discovery questions, then run the $roll-design workflow.",
+          "",
+        ].join("\n");
+  return `${handoff}Run the $roll-design skill below for this project. Follow it end-to-end.\n\n${body}`;
 }
 
-function parseAgentFlag(args: string[]): { agent: string | undefined; rest: string[] } {
+interface ParsedDesignFlags {
+  agent: string | undefined;
+  fromFile: string | undefined;
+  rest: string[];
+  error: "from_file_missing" | null;
+}
+
+function parseDesignFlags(args: string[]): ParsedDesignFlags {
   const rest: string[] = [];
   let agent: string | undefined;
+  let fromFile: string | undefined;
   for (let i = 0; i < args.length; i += 1) {
     const a = args[i] ?? "";
     if (a === "--agent") {
@@ -44,15 +61,34 @@ function parseAgentFlag(args: string[]): { agent: string | undefined; rest: stri
       i += 1;
     } else if (a.startsWith("--agent=")) {
       agent = a.slice("--agent=".length);
+    } else if (a === "--from-file") {
+      const value = args[i + 1];
+      if (value === undefined || value === "" || value.startsWith("-")) {
+        return { agent, fromFile, rest, error: "from_file_missing" };
+      }
+      fromFile = value;
+      i += 1;
+    } else if (a.startsWith("--from-file=")) {
+      const value = a.slice("--from-file=".length);
+      if (value === "") return { agent, fromFile, rest, error: "from_file_missing" };
+      fromFile = value;
     } else {
       rest.push(a);
     }
   }
-  return { agent, rest };
+  return { agent, fromFile, rest, error: null };
 }
 
 function isRollProject(cwd: string): boolean {
   return existsSync(join(cwd, ".roll"));
+}
+
+function isRegularFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
 }
 
 export interface DesignSpawnResult {
@@ -129,7 +165,12 @@ export function designCommand(args: string[], deps: Partial<DesignCommandDeps> =
     process.stdout.write(`${t(v3Catalog, l, "design.usage")}\n`);
     return 0;
   }
-  const { agent: forced, rest } = parseAgentFlag(args);
+  const { agent: forced, fromFile, rest, error: parseError } = parseDesignFlags(args);
+  if (parseError === "from_file_missing") {
+    emit(t(v3Catalog, l, "design.from_file_missing"));
+    process.stderr.write(`${t(v3Catalog, l, "design.usage")}\n`);
+    return 1;
+  }
   if (rest.some((a) => a.startsWith("-"))) {
     // Unknown flag: print usage and fail loud (matches init flag handling).
     process.stderr.write(`${t(v3Catalog, l, "design.usage")}\n`);
@@ -140,8 +181,12 @@ export function designCommand(args: string[], deps: Partial<DesignCommandDeps> =
     emit(t(v3Catalog, l, "design.not_roll_project"));
     return 1;
   }
+  if (fromFile !== undefined && !isRegularFile(resolve(d.cwd, fromFile))) {
+    emit(t(v3Catalog, l, "design.from_file_not_found", fromFile));
+    return 1;
+  }
 
-  const prompt = readDesignPrompt();
+  const prompt = readDesignPrompt(fromFile);
   if (prompt === null) {
     emit(t(v3Catalog, l, "design.skill_missing"));
     return 1;

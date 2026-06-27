@@ -228,7 +228,10 @@ export class BrowserTool {
     const shot = await captureScreenshot(
       { kind: "web", url: input.url, out: screenshotPath },
       {
-        env: process.env,
+        // US-INIT-003e: physical.screenshot is the *physical* browser lane. It
+        // must never fold into headless Chromium, even when the CI fixture sets
+        // ROLL_ATTEST_HEADLESS=1 to disable ordinary browser.screenshot fallback.
+        env: { ...process.env, ROLL_ATTEST_HEADLESS: undefined },
         platform: toolPlatform(),
         run: async (command, args) => {
           const result = await deps.execFile(command, args, {

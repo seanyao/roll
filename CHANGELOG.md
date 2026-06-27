@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### 上手引导
+
+- **`roll init` 给出的 PRD 下一步现在能直接运行**：`roll design --from-file <path>` 会校验输入文件并把 PRD/brief 绑定到 `$roll-design`，不再落到 usage。(#1065) `[legacy-onboard]`
+
 ## v3.627.1 — 2026-06-27
 
 ### 上手引导

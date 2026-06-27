@@ -275,8 +275,12 @@ describe("US-DOSSIER-010 — truth.json next to index.html", () => {
 
   it("FIX-307: self-register and page chrome use the derived git remote project name", async () => {
     const p = project(REPO_ROOT);
+    const remoteRoot = mkdtempSync(join(tmpdir(), "roll-truthsnap-remote-"));
+    dirs.push(remoteRoot);
+    const remote = join(remoteRoot, "APE-PR.git");
+    execFileSync("git", ["init", "--bare", "-q", remote]);
     execFileSync("git", ["init", "-q"], { cwd: p });
-    execFileSync("git", ["remote", "add", "origin", "git@github.com:seanyao/APE-PR.git"], { cwd: p });
+    execFileSync("git", ["remote", "add", "origin", remote], { cwd: p });
 
     process.env["ROLL_RENDER_NOW"] = "2026-06-13T00:00:00Z";
     await runIndex(p);

@@ -66,6 +66,12 @@ function scrubPartialLegacySmokeOutput(text: string): string {
     .replace(/cleanup: removed .+roll-init-partial-legacy-[^\n]+/g, "cleanup: removed <partial-legacy-workspace>");
 }
 
+function scrubNextJourneySmokeOutput(text: string): string {
+  return text
+    .replace(/workspace: .+roll-next-journey-[^\n]+/g, "workspace: <next-journey-workspace>")
+    .replace(/cleanup: removed .+roll-next-journey-[^\n]+/g, "cleanup: removed <next-journey-workspace>");
+}
+
 describe("critical CLI E2E", () => {
   it("roll init diagnosis fixture prints the full state matrix without mutating cwd", () => {
     const project = tmpEmptyProject("init-diagnose");
@@ -243,6 +249,32 @@ describe("critical CLI E2E", () => {
     expect(out).toContain("AGENTS.md: missing");
     expect(out).toContain(".roll/: missing");
     expect(out).toContain("cleanup: removed <partial-legacy-workspace>");
+    expect(existsSync(join(project, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(project, ".roll"))).toBe(false);
+  });
+
+  it("roll next init journey attest smoke renders each next action and cleans up", () => {
+    const project = tmpEmptyProject("next-init-journey-smoke");
+
+    const result = runRoll(project, ["next", "--attest-smoke", "init-journey"], {
+      ROLL_ATTEST_NO_BROWSER: "1",
+    });
+
+    expect(result.code).toBe(0);
+    const out = scrubNextJourneySmokeOutput(result.out);
+    expect(out).toContain("roll next attest smoke: init-journey");
+    expect(out).toContain("workspace: <next-journey-workspace>");
+    expect(out).toContain("[prd-only]");
+    expect(out).toContain("Next: roll design --from-file docs/PRD.md");
+    expect(out).toContain("[codebase-onboard]");
+    expect(out).toContain("Next: roll init --apply");
+    expect(out).toContain("[partial-roll]");
+    expect(out).toContain("Next: roll init --repair");
+    expect(out).toContain("[old-roll-layout]");
+    expect(out).toContain("Next: npx @seanyao/roll@2 migrate --dry-run");
+    expect(out).toContain("[roll-ready]");
+    expect(out).toContain("Next: roll loop go");
+    expect(out).toContain("cleanup: removed <next-journey-workspace>");
     expect(existsSync(join(project, "AGENTS.md"))).toBe(false);
     expect(existsSync(join(project, ".roll"))).toBe(false);
   });

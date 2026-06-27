@@ -15,10 +15,11 @@ roll init
    `.roll/pairing.yaml`（[跨 agent 结对](pairing.md)，界面会告知），不问问题。这是
    **seed（播种）** 接入模式 —— 见 [patterns/seed-pattern.md](patterns/seed-pattern.md)。
 2. **PRD/文档-only** —— Roll 发现需求或产品文档，但没有源码和 manifest。
-   这是新项目路径，会指向设计；不会进入 legacy onboarding。
+   这是新项目路径，会指向设计；不会进入已有代码库接入。
 3. **已有代码库但未接入 Roll** —— Roll 检测到源码但没有 `.roll/`。它**不会**默默
    生成骨架，而是引导你用 `$roll-onboard`：扫描代码、问一组认知 / 范围 /
-   隐私问题、产出 `.roll/onboard-plan.yaml` 供审阅。审阅成对产物后执行
+   隐私问题、产出 `.roll/init-diagnosis.yaml` 和 `.roll/onboard-plan.yaml`
+   供审阅。审阅成对产物后执行
    `roll init --apply`：它会打印审阅检查点，列出每个计划文件操作的动作、目标路径、
    合并/创建模式和用户内容处理方式，并在交互终端等待确认。非交互自动化里，审阅后必须显式执行
    `roll init --apply --auto`。这是 **graft（嫁接）** 模式 —— 见

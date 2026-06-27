@@ -6,8 +6,8 @@ window.RollSkillDiagrams = {
       title: { en: "Existing Codebase Onboarding", zh: "已有代码库接入" },
       sub: { en: "Survey. Infer. Plan. Apply later.", zh: "问询、推断、出计划，稍后再应用。" },
       lede: {
-        en: "Bring Roll into an existing codebase without surprise edits. The skill reads the project, asks nine scoped questions, writes only <b>.roll/onboard-plan.yaml</b>, and leaves mutation to <code>roll init --apply</code>, which shows an operation checkpoint before writing.",
-        zh: "把 Roll 接入现有代码库，但不偷改源文件。本技能读取项目、提出 9 个范围化问题，只写 <b>.roll/onboard-plan.yaml</b>，真正落地交给 <code>roll init --apply</code>，并在写入前展示操作检查点。"
+        en: "Bring Roll into an existing codebase without surprise edits. The skill reads the project, asks nine scoped questions, writes only <b>.roll/init-diagnosis.yaml</b> and <b>.roll/onboard-plan.yaml</b>, and leaves mutation to <code>roll init --apply</code>, which shows an operation checkpoint before writing.",
+        zh: "把 Roll 接入现有代码库，但不偷改源文件。本技能读取项目、提出 9 个范围化问题，只写 <b>.roll/init-diagnosis.yaml</b> 与 <b>.roll/onboard-plan.yaml</b>，真正落地交给 <code>roll init --apply</code>，并在写入前展示操作检查点。"
       },
       modes: [
         { tag: "A", title: { en: "Existing codebase", zh: "已有代码库" }, body: { en: "No Roll structure yet, source files already exist. Read code and infer project shape before asking.", zh: "已有源码、还没有 Roll 结构。先读代码推断项目形态，再提问。" } },
@@ -25,14 +25,14 @@ window.RollSkillDiagrams = {
         ] },
         { key: "ship", label: { en: "Plan", zh: "计划" }, steps: [
           { no: "STEP 3", title: { en: "Nine questions across three groups", zh: "三组九问" }, desc: { en: "Ask about scope/privacy, workflow and conventions. User answers become hard constraints, not suggestions.", zh: "围绕范围/隐私、工作流与约定提问。用户答案成为硬约束，不是建议。" } },
-          { no: "STEP 4", title: { en: "Write onboard plan only", zh: "只写接入计划" }, desc: { en: "Serialize the reviewed contract to <code>.roll/onboard-plan.yaml</code>. Do not edit source, gitignore, docs or backlog.", zh: "把已确认契约序列化到 <code>.roll/onboard-plan.yaml</code>。不改源码、gitignore、文档或 backlog。" }, gate: true, chips: ["hard boundary"] }
+          { no: "STEP 4", title: { en: "Write diagnosis and onboard plan only", zh: "只写诊断与接入计划" }, desc: { en: "Serialize the read-only diagnosis and reviewed contract to <code>.roll/init-diagnosis.yaml</code> and <code>.roll/onboard-plan.yaml</code>. Do not edit source, gitignore, docs or backlog.", zh: "把只读诊断与已确认契约序列化到 <code>.roll/init-diagnosis.yaml</code> 和 <code>.roll/onboard-plan.yaml</code>。不改源码、gitignore、文档或 backlog。" }, gate: true, chips: ["hard boundary"] }
         ] },
         { key: "verify", label: { en: "Apply Later", zh: "稍后应用" }, steps: [
-        { no: "HANDOFF", title: { en: "roll init --apply owns mutation", zh: "由 roll init --apply 负责落地" }, desc: { en: "The plan is the handoff artifact. Shell-owned initialization shows the file-operation checkpoint, waits for confirmation, then applies it.", zh: "接入计划就是交接产物。shell 侧初始化流程会先展示文件操作检查点、等待确认，再应用。" } }
+        { no: "HANDOFF", title: { en: "roll init --apply owns mutation", zh: "由 roll init --apply 负责落地" }, desc: { en: "The plan is the handoff artifact. Shell-owned initialization shows the file-operation checkpoint, waits for confirmation, applies it, then <code>roll next</code> continues the journey.", zh: "接入计划就是交接产物。shell 侧初始化流程会先展示文件操作检查点、等待确认、执行应用，随后用 <code>roll next</code> 接续下一步。" } }
         ] }
       ],
       foot: [
-        { title: { en: "Hard boundary", zh: "硬边界" }, items: { en: ["Read and infer, but do not mutate project source.", "Only <code>.roll/onboard-plan.yaml</code> may be created.", "Privacy and scope answers are hard constraints."], zh: ["可以读和推断，但不修改项目源码。", "唯一可创建文件是 <code>.roll/onboard-plan.yaml</code>。", "隐私与范围答案是硬约束。"] } },
+        { title: { en: "Hard boundary", zh: "硬边界" }, items: { en: ["Read and infer, but do not mutate project source.", "Only <code>.roll/init-diagnosis.yaml</code> and <code>.roll/onboard-plan.yaml</code> may be created.", "Privacy and scope answers are hard constraints."], zh: ["可以读和推断，但不修改项目源码。", "唯一可创建文件是 <code>.roll/init-diagnosis.yaml</code> 与 <code>.roll/onboard-plan.yaml</code>。", "隐私与范围答案是硬约束。"] } },
         { title: { en: "Stop signs", zh: "停止信号" }, hard: true, items: { en: ["Partial v2 migration markers require v2 migrate first.", "Existing plan requires explicit overwrite approval.", "Untaggable test claims fail validation."], zh: ["发现 v2 半迁移标记时先跑 v2 migrate。", "已有计划时需明确批准覆盖。", "测试结论没有证据标签会校验失败。"] } }
       ]
     },

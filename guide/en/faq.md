@@ -246,7 +246,7 @@ idea into an INVEST-shaped story with ACs.
 - Highly specialized domains (low-level OS, embedded, formal verification)
   where AI agents underperform
 
-**Edge case — legacy codebase with no tests:** This is a bootstrap problem,
+**Edge case — existing codebase with no tests:** This is a bootstrap problem,
 not a disqualifier. TCR needs *something* to gate on, so the loop can't run
 on a zero-test repo on day one — but recovering this kind of codebase is
 exactly what Roll is built to drive. Workflow: run `$roll-onboard` to

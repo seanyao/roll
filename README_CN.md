@@ -33,6 +33,7 @@ npm install -g @seanyao/roll
 ```bash
 cd your-project
 roll init           # 在当前项目落地 Roll（交互式确认）
+roll next           # 接续 design、apply、repair、migrate、loop 或 status
 roll loop on        # 可选：让 AI 自动跑 backlog
 ```
 
@@ -44,6 +45,8 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 已有代码库的 graft 流程里，`roll init --apply` 会先校验产物、打印每个计划文件操作的
 审阅检查点，并在写入前等待 owner 确认；自动化必须在审阅后显式使用
 `roll init --apply --auto`。
+任一路径之后，`roll next` 都是继续按钮：它读取同一份 brief、onboard plan、
+backlog 和 Roll 标记，只打印一个最合适的下一步命令，而不是让用户自己猜。
 第一次跑建议从[快速上手](guide/zh/getting-started.md)开始。
 
 ## 新项目快速启动
@@ -77,7 +80,7 @@ roll loop on
 | `roll loop alert [list\|ack\|resolve\|log]` | 查看 / 清除 loop 告警 |
 | `roll status` | 判定优先的真相摘要，读自同一份快照——LOOP · CYCLE · RELEASE · STORY，STORY 行带 attest 验收覆盖率(`done ≡ 已合并 ∧ 已验收`)——其后是约定/AI 客户端同步健康 |
 | `roll pulse [--json]` | 今日交付脉搏：窗口内周期数、已合 merged 数、已验收 attested 数，外加一条来自故事光谱的 ASCII 火花线。双语中/EN。`--json` 输出机读 JSON |
-| `roll doctor [skills]` | 环境与安装体检(agents、技能清单、plist、launchd lanes) |
+| `roll doctor [skills\|--tools]` | 环境与安装体检；`roll doctor --tools` 展示工具与真实截图权限预检，包括 Terminal.app Screen Recording |
 | `roll daemon <start\|stop\|status>` | 可选启用的只读实时控制台 daemon；默认 `127.0.0.1:7077`，记录 `.roll/loop/daemon.pid`，loop 从不自动启动它 |
 | `roll tune [reset]` | 只建议不自动应用的自调参报告 |
 | **卡片与证据** | |

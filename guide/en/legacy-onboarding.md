@@ -1,6 +1,9 @@
-# Legacy Project Onboarding
+# Existing Codebase Onboarding
 
 > Adopt Roll on an existing codebase without breaking your team's current workflow.
+
+This page keeps the `legacy-onboarding.md` path for link stability. The visible
+workflow name is **Existing Codebase Onboarding**.
 
 If you have a real project that's been alive for a while — code, tests, history, conventions, the works — and you want to start using Roll on it, this is your path.
 
@@ -9,7 +12,7 @@ If you have a real project that's been alive for a while — code, tests, histor
 | Mode | Use when | Trade-off |
 |------|----------|-----------|
 | **Seed** | You're starting a brand-new project | Lowest friction; specs/backlog from day 1 |
-| **Graft** (this page) | You have a live legacy project that keeps evolving | Zero intrusion on existing code; Roll layered on top |
+| **Graft** (this page) | You have a live existing codebase that keeps evolving | Zero intrusion on existing code; Roll layered on top |
 | **Replant** | You want a clean rewrite, debt cleared | Higher effort; you reverse-engineer specs first |
 
 This page covers **graft**. For seed vs. replant, see [adoption patterns](https://github.com/seanyao/roll-meta) (maintainer-only repo, public summary in the README).
@@ -114,7 +117,7 @@ After validation passes, Roll:
 - Adds `.roll/` to `.gitignore` if you said yes
 - Syncs Roll conventions to the AI tools you picked
 
-Done. Run `roll status` to see the new state.
+Done. Run `roll next` to continue with the next action.
 
 ### 5. (Optional) Turn on autonomous loop
 
@@ -177,7 +180,7 @@ Your project is now exactly as it was before adoption.
 You need at least one. Install Claude Code, Codex CLI, or Cursor — they're free to install (the AI calls cost tokens via your account).
 
 **Q: What if I already have a `BACKLOG.md` from another tool?**
-Roll detects this as a pre-2.0 Roll project (not a legacy project) and tells you to run `npx @seanyao/roll@2 migrate`. If the file came from a totally different tool, rename it first (`mv BACKLOG.md old-backlog.md`) then run `roll init`.
+Roll detects this as a pre-2.0 Roll project (not an existing-codebase onboard target) and tells you to run `npx @seanyao/roll@2 migrate`. If the file came from a totally different tool, rename it first (`mv BACKLOG.md old-backlog.md`) then run `roll init`.
 
 **Q: Roll-onboard infers my project type wrong — what do I do?**
 Tell the skill in chat. Group 1 questions exist specifically so you can correct misidentification. The skill writes the corrected understanding into the plan; bash trusts the plan.

@@ -109,7 +109,7 @@ window.RollData = (function () {
     FEATURE_GROUPS: [
       { id: "adoption", title: "Adoption Paths", blurb: "Three ways to bring roll on board.", features: [
         { name: "roll init",     mono: true, desc: "Fresh project bootstrap — creates AGENTS.md, .roll/backlog.md, .roll/features/, and .roll/pairing.yaml (cross-agent pairing).", badges: ["core"] },
-        { name: "Legacy onboarding plan", desc: "Existing codebase adoption remains plan-first: survey, review, then roll init --apply shows an operation checkpoint and waits before laying down the .roll/ structure.", badges: ["new", "highlight"] },
+        { name: "Existing codebase onboarding plan", desc: "Existing codebase adoption remains plan-first: survey, review, then roll init --apply shows an operation checkpoint before laying down the .roll/ structure; roll next continues after apply.", badges: ["new", "highlight"] },
       ]},
       { id: "autonomous", title: "Autonomous Execution", blurb: "Run while you sleep.", features: [
         { name: "roll loop on",        mono: true, desc: "AI picks stories from Backlog and executes hourly in an isolated worktree.", badges: ["core"] },
@@ -161,7 +161,7 @@ window.RollData = (function () {
     },
     SKILL_GROUPS: [
       { id: "intake", title: "Intake & Planning", blurb: "Turn raw intent into structured work.", features: [
-        { name: "$roll-onboard", mono: true, desc: "Existing codebase adoption: survey, infer domains, write .roll/onboard-plan.yaml only.", badges: ["new", "highlight"], href: "diagrams/roll-onboard-skill.html", external: true },
+        { name: "$roll-onboard", mono: true, desc: "Existing codebase adoption: survey, infer domains, write only .roll/init-diagnosis.yaml + .roll/onboard-plan.yaml.", badges: ["new", "highlight"], href: "diagrams/roll-onboard-skill.html", external: true },
         { name: "$roll-idea", mono: true, desc: "One-liner capture — instant FIX or IDEA backlog entry.", badges: ["core"], href: "diagrams/roll-idea-skill.html", external: true },
         { name: "$roll-design", mono: true, desc: "DDD-backed planning: clarify → model → design → split into INVEST stories.", badges: ["core"], href: "diagrams/roll-design-skill.html", external: true },
       ]},
@@ -214,7 +214,7 @@ window.RollData = (function () {
         { name: "Skills",           path: "guide/en/skills.md",            desc: "Skill catalog and the decision tree for picking the right one." },
         { name: "Tools & Policy",   path: "guide/en/tools.md",             desc: "Built-in tools (bash / browser / git / github / network / fs / mcp), their per-cycle policy guardrails, and roll tool status." },
         { name: "Migration 2.0",    path: "guide/en/migration-2.0.md",     desc: "Upgrade an existing 1.x project by pinning the old v2 toolchain for the one-time layout move." },
-        { name: "Legacy Onboarding",path: "guide/en/legacy-onboarding.md", desc: "Bring roll into an existing codebase via $roll-onboard — 3-minute survey, no surprise edits." },
+        { name: "Existing Codebase Onboarding", path: "guide/en/legacy-onboarding.md", desc: "Bring roll into an existing codebase via $roll-onboard — 3-minute survey, no surprise edits." },
       ],
     },
   };
@@ -315,7 +315,7 @@ window.RollData = (function () {
     FEATURE_GROUPS: [
       { id: "adoption", title: "接入路径", blurb: "三种方式把 roll 接进项目。", features: [
         { name: "roll init",     mono: true, desc: "新项目脚手架——创建 AGENTS.md、.roll/backlog.md、.roll/features/、以及 .roll/pairing.yaml（跨 agent 结对）。", badges: ["core"] },
-        { name: "老项目接入计划", desc: "现有代码库仍然先出计划:问询、review,再由 roll init --apply 展示操作检查点并等待确认,然后落地 .roll/ 结构。", badges: ["new", "highlight"] },
+        { name: "已有代码库接入计划", desc: "现有代码库仍然先出计划:问询、review,再由 roll init --apply 展示操作检查点并等待确认,然后落地 .roll/ 结构；apply 后用 roll next 接续。", badges: ["new", "highlight"] },
       ]},
       { id: "autonomous", title: "自主执行", blurb: "你睡觉时它在跑。", features: [
         { name: "roll loop on",        mono: true, desc: "AI 从 Backlog 领取故事,每小时在隔离 worktree 里执行。", badges: ["core"] },
@@ -367,7 +367,7 @@ window.RollData = (function () {
     },
     SKILL_GROUPS: [
       { id: "intake", title: "捕获与规划", blurb: "把原始意图变成结构化工作。", features: [
-        { name: "$roll-onboard", mono: true, desc: "老项目接入:问询、推断领域,只写 .roll/onboard-plan.yaml。", badges: ["new", "highlight"], href: "diagrams/roll-onboard-skill.html", external: true },
+        { name: "$roll-onboard", mono: true, desc: "已有代码库接入:问询、推断领域,只写结构化诊断与计划。", badges: ["new", "highlight"], href: "diagrams/roll-onboard-skill.html", external: true },
         { name: "$roll-idea", mono: true, desc: "一行捕获——即时生成 FIX 或 IDEA backlog 条目。", badges: ["core"], href: "diagrams/roll-idea-skill.html", external: true },
         { name: "$roll-design", mono: true, desc: "DDD 驱动规划:澄清 → 建模 → 设计 → 拆成 INVEST stories。", badges: ["core"], href: "diagrams/roll-design-skill.html", external: true },
       ]},
@@ -419,8 +419,8 @@ window.RollData = (function () {
         { name: "Peer",       path: "guide/zh/peer.md",              desc: "跨 Agent 评审协议 — AGREE / REFINE / OBJECT / ESCALATE。" },
         { name: "技能",        path: "guide/zh/skills.md",            desc: "技能目录与选用决策树。" },
         { name: "工具与策略",   path: "guide/zh/tools.md",             desc: "内置工具(bash / browser / git / github / network / fs / mcp)、各自的每周期策略护栏，以及 roll tool status。" },
-        { name: "Migration 2.0", path: "guide/zh/migration-2.0.md",  desc: "升级 1.x 老项目：pin 旧版 v2 工具链执行一次性布局迁移。" },
-        { name: "老项目接入",    path: "guide/zh/legacy-onboarding.md", desc: "通过 $roll-onboard 把 roll 带进现有代码库——3 分钟问询，不偷改文件。" },
+        { name: "Migration 2.0", path: "guide/zh/migration-2.0.md",  desc: "升级 1.x 旧版布局项目：pin 旧版 v2 工具链执行一次性布局迁移。" },
+        { name: "已有代码库接入", path: "guide/zh/legacy-onboarding.md", desc: "通过 $roll-onboard 把 roll 带进现有代码库——3 分钟问询，不偷改文件。" },
       ],
     },
   };

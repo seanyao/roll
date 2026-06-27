@@ -17,13 +17,13 @@ roll init
    [patterns/seed-pattern.md](patterns/seed-pattern.md).
 2. **PRD/docs-only** — Roll finds requirements or product docs but no source or
    manifests. It treats this as a new-project path and points you to design; it
-   does not route to legacy onboarding.
+   does not route to existing-codebase onboarding.
 3. **Existing codebase without Roll** — Roll detects existing source files but no
    `.roll/` directory. It does **not** silently scaffold; instead it surfaces
    `$roll-onboard`, an interactive skill that scans the codebase, asks a short
    set of cognition / scope / privacy questions, and produces
-   `.roll/onboard-plan.yaml` for review. After reviewing the paired artifacts,
-   run `roll init --apply`. It prints a checkpoint listing each planned file
+   `.roll/init-diagnosis.yaml` and `.roll/onboard-plan.yaml` for review. After
+   reviewing the paired artifacts, run `roll init --apply`. It prints a checkpoint listing each planned file
    operation, including action, target path, merge/create mode, and owner-content
    handling, then waits for confirmation in an interactive terminal. In
    non-interactive automation, use `roll init --apply --auto` after that review.

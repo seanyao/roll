@@ -10,6 +10,7 @@ curl -fsSL https://seanyao.github.io/roll/install | bash
 cd my-project
 roll setup && roll init
 
+roll next           # 接续 design/apply/repair/migrate/loop/status
 roll loop on        # AI 按可配置频次执行 BACKLOG
 roll loop status    # 查看调度状态和最近 cycle
 roll loop watch     # 可选：只读实时旁观当前 cycle

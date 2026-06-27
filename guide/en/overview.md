@@ -10,6 +10,7 @@ curl -fsSL https://seanyao.github.io/roll/install | bash
 cd my-project
 roll setup && roll init
 
+roll next           # continue with design/apply/repair/migrate/loop/status
 roll loop on        # AI starts executing BACKLOG on a configurable schedule
 roll loop status    # check scheduler state and recent cycles
 roll loop watch     # optional: read-only live view of the current cycle
@@ -159,7 +160,7 @@ point — see [patterns/](patterns/README.md) for the decision tree:
 | Cross-agent review protocol | [peer.md](peer.md) |
 | Complete skill catalog | [skills.md](skills.md) |
 | Adoption patterns (seed / graft / replant) | [patterns/](patterns/README.md) |
-| Onboarding a legacy codebase | [legacy-onboarding.md](legacy-onboarding.md) |
+| Onboarding an existing codebase | [legacy-onboarding.md](legacy-onboarding.md) |
 | Upgrading from pre-2.0 layout | [migration-2.0.md](migration-2.0.md) |
 | Common scenarios and troubleshooting | [faq.md](faq.md) |
 | Environment variable configuration | [configuration.md](configuration.md) |

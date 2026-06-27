@@ -1,6 +1,9 @@
-# 遗留项目接入 Roll
+# 已有代码库接入 Roll
 
 > 在现有代码库上接入 Roll，不破坏你团队现有的工作流。
+
+本页继续保留 `legacy-onboarding.md` 路径以保证旧链接稳定；可见流程名称统一为
+**已有代码库接入 Roll**。
 
 如果你有一个已经运行了一段时间的真实项目——有代码、有测试、有历史、有约定——想开始用 Roll 管理它，这是你要走的路径。
 
@@ -9,7 +12,7 @@
 | 模式 | 适用场景 | 取舍 |
 |------|---------|------|
 | **Seed**（播种） | 新项目从零开始 | 摩擦最低，day 1 就有 specs/backlog |
-| **Graft**（嫁接，本页） | 活跃的遗留项目，还在演化 | 零侵入原代码，Roll 在上层叠加 |
+| **Graft**（嫁接，本页） | 活跃的已有代码库，还在演化 | 零侵入原代码，Roll 在上层叠加 |
 | **Replant**（翻种） | 想清债、重写一次 | 工作量大，需要先反推规格 |
 
 本页讲 **graft**。关于 seed / replant，见 [接入模式文档](https://github.com/seanyao/roll-meta)（维护者私有仓，README 有公开摘要）。
@@ -112,7 +115,7 @@ roll init --apply --auto
 - 如果 Q7 说 yes，把 `.roll/` 加入 `.gitignore`
 - 把 Roll 约定同步到你选的 AI 工具
 
-完事。`roll status` 看新状态。
+完事。执行 `roll next` 接续下一步。
 
 ### 5.（可选）启动自治 loop
 
@@ -175,7 +178,7 @@ npm uninstall -g @seanyao/roll
 至少装一个。Claude Code、Codex CLI、Cursor 都可以——安装免费，AI 调用走你的账户消耗 token。
 
 **Q: 已经有从别的工具来的 `BACKLOG.md` 怎么办？**
-Roll 会检测为 pre-2.0 Roll 项目（不是 legacy），让你跑 `npx @seanyao/roll@2 migrate`。如果文件来自完全不同的工具，先重命名（`mv BACKLOG.md old-backlog.md`）再跑 `roll init`。
+Roll 会检测为 pre-2.0 Roll 项目（不是已有代码库接入目标），让你跑 `npx @seanyao/roll@2 migrate`。如果文件来自完全不同的工具，先重命名（`mv BACKLOG.md old-backlog.md`）再跑 `roll init`。
 
 **Q: roll-onboard 推断的项目类型不对，怎么改？**
 在对话里告诉它。第一组 3 问就是为了让你纠正。Skill 把纠正后的理解写进 plan，bash 信任 plan。

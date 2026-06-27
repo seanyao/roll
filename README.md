@@ -33,6 +33,7 @@ Requirements: Node.js ≥ 22. Roll is a self-contained TypeScript CLI — no run
 ```bash
 cd your-project
 roll init           # set up Roll here (interactive confirmation)
+roll next           # continue with design, apply, repair, migrate, loop, or status
 roll loop on        # let AI work through the backlog (optional)
 ```
 
@@ -48,6 +49,9 @@ For existing-codebase grafts, `roll init --apply` validates the generated
 artifacts, prints a review checkpoint with every planned file operation, and
 waits for owner confirmation before writing. Automation must use
 `roll init --apply --auto` after that review.
+After any init path, `roll next` is the continuation button: it reads the same
+brief, onboard plan, backlog, and Roll markers, then prints one best next
+command instead of a menu.
 First time through? Start with [Getting started](guide/en/getting-started.md).
 
 ## Quick start for new projects

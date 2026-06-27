@@ -148,7 +148,7 @@ Update them in the same commit window. If CI breaks after migration, that's almo
 Each project independently. Roll 2.0 refuses to run on old structure with a clear hint pointing to `npx @seanyao/roll@2 migrate`, so nothing silently breaks.
 
 **Q: Can I skip migration and stay on Roll 1.x forever?**
-Yes. Old npm versions are permanent. But you'll miss new features (legacy onboarding, agent discovery, plan-driven init).
+Yes. Old npm versions are permanent. But you'll miss new features (existing-codebase onboarding, agent discovery, plan-driven init).
 
 **Q: Roll runs `npm test` and many tests fail after migration — is that expected?**
 No. The migration should not change test outcomes. If tests break, run `git diff HEAD~1` to see what moved and look for paths in test files or fixtures that didn't get migrated. File an issue with the diff.

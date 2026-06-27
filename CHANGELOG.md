@@ -4,17 +4,27 @@
 
 ### 上手引导
 
-- **init/onboard 文档和站点统一成一条路**：README、指南、CLI help、skill contract、站点导航和 `$roll-onboard` 图现在都把接入路径讲成“已有代码库 → 只读诊断/计划 → `roll init --apply` → `roll next`”；“legacy”只保留在历史迁移或兼容链接语境里。验收截图标准同步落到真实物理窗口：CLI 用 Terminal.app，站点图用真实浏览器窗口截图。(US-INIT-008) `[legacy-onboard]`
-- **`roll next` 成为 init/onboard 后的继续按钮**：它会读取 `.roll/brief.md`、`.roll/onboard-plan.yaml`、backlog 和 Roll 标记，只给一个下一步命令：去 design、apply onboard plan、repair、migrate、跑下一张 Todo 或查看 status；隐藏 smoke fixture 可用于真实终端截图验收。(US-INIT-007) `[legacy-onboard]`
-- **partial Roll 修复不再像 fresh init 一样粗暴**：`roll init` 现在会列出缺失的 Roll 组件和仍存在的 pre-v2 标记；`roll init --repair` 在非交互环境只预览并要求 `--auto`，apply 时只补缺失的 Roll-owned 文件/区块，并写入 `.roll/onboard-changeset.yaml`，所以 `roll offboard` 能反向清掉 repair 带来的 Roll-owned 改动。旧 Roll 布局仍只路由到迁移命令，不会叠加新脚手架。(US-INIT-009) `[legacy-onboard]`
-- **`roll init --apply` 写文件前先让你看清楚**：已有代码库 graft 流程现在会在校验 onboard plan 后打印审阅检查点，列出每个计划文件操作的动作、路径、模式和用户内容处理方式；交互终端必须确认，非交互自动化必须显式使用 `roll init --apply --auto`。(US-INIT-006d) `[legacy-onboard]`
-- **`roll init --apply` 可重复、可退出**：apply 现在用原子写入落地 Roll 管理文件，重复执行会保留并去重 `.roll/onboard-changeset.yaml`，已有 `AGENTS.md` 只追加带稳定 marker 的 Roll 区块；`roll offboard` 会剥离这些区块而不是删除用户文件，失败时会指向 recovery changeset。(US-INIT-006e) `[legacy-onboard]`
-- **既有代码库 onboard 有了端到端现场 smoke**：`roll init --attest-smoke existing-codebase` 会在隔离 fixture 里跑完整诊断、plan review、deterministic apply、幂等 re-apply 和 cleanup，供真实 Terminal.app 截图验收复现。(US-INIT-006f) `[legacy-onboard]`
+- **`roll init` 会先分清项目类型**：PRD、空项目、已有代码库、partial Roll、旧布局和已就绪项目都会走不同下一步。(US-INIT-004, US-INIT-005, US-INIT-006a, US-INIT-009) `[legacy-onboard]`
+  <!-- evidence: .roll/features/init-onboard/US-INIT-004/latest/US-INIT-004-report.html -->
+  <!-- evidence: .roll/features/init-onboard/US-INIT-005/latest/US-INIT-005-report.html -->
+  <!-- evidence: .roll/features/init-onboard/US-INIT-006a/latest/US-INIT-006a-report.html -->
+- **已有代码库先诊断再应用**：`roll init` 先产诊断和计划，确认后再 `roll init --apply`，不会一上来改你的仓库。(US-INIT-006b, US-INIT-006c, US-INIT-006d) `[legacy-onboard]`
+  <!-- evidence: .roll/features/init-onboard/US-INIT-006b/latest/US-INIT-006b-report.html -->
+  <!-- evidence: .roll/features/init-onboard/US-INIT-006c/latest/US-INIT-006c-report.html -->
+  <!-- evidence: .roll/features/init-onboard/US-INIT-006d/latest/US-INIT-006d-report.html -->
+- **`roll init --apply` 可以放心重跑和退出**：重复执行会复用变更账本，`roll offboard` 只移除 Roll 管理的内容。(US-INIT-006e, US-INIT-006f) `[legacy-onboard]`
+  <!-- evidence: .roll/features/init-onboard/US-INIT-006e/latest/US-INIT-006e-report.html -->
+  <!-- evidence: .roll/features/init-onboard/US-INIT-006f/latest/US-INIT-006f-report.html -->
+- **`roll next` 成了上手流程的继续按钮**：init、onboard、repair、migrate、design 和下一张 Todo 都会收束到一个显然下一步。(US-INIT-007) `[legacy-onboard]`
+  <!-- evidence: .roll/features/init-onboard/US-INIT-007/latest/US-INIT-007-report.html -->
+- **文档、CLI help 和站点图现在讲同一条路**：README、指南、skill contract 和 `$roll-onboard` 图都改成“已有代码库”视角。(US-INIT-008) `[legacy-onboard]`
+  <!-- evidence: .roll/features/init-onboard/US-INIT-008/latest/US-INIT-008-report.html -->
 
 ### 稳定性
 
-- **CLI 验收不再能「伪造」截图**：声明物理终端验收的故事，`roll attest` 现在只认真实 Terminal.app 窗口截图；无 GUI 或权限时诚实跳过，不再用无头命令输出凑数。(US-INIT-003d) `[acceptance-evidence]`
+- **验收截图不再能伪造现场**：CLI 用 Terminal.app，站点图用真实浏览器窗口；无 GUI 或无权限时诚实跳过。(US-INIT-003d, US-INIT-008) `[acceptance-evidence]`
   <!-- evidence: .roll/features/init-onboard/US-INIT-003d/latest/US-INIT-003d-report.html -->
+  <!-- evidence: .roll/features/init-onboard/US-INIT-008/latest/US-INIT-008-report.html -->
 
 ## v3.626.2 — 2026-06-26
 

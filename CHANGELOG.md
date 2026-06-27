@@ -6,6 +6,8 @@
 
 ### 上手引导
 
+- **新拆的卡会带验收契约**：`roll design` 现在把预期证据和评分重点写进 story，交付和评审看同一份标准。(US-SKILL-030) `[skill-ecosystem]`
+  <!-- evidence: .roll/features/skill-ecosystem/US-SKILL-030/2026-06-27T02-11-16/US-SKILL-030-report.html -->
 - **`roll init` 会先分清项目类型**：PRD、空项目、已有代码库、partial Roll、旧布局和已就绪项目都会走不同下一步。(US-INIT-004, US-INIT-005, US-INIT-006a, US-INIT-009) `[legacy-onboard]`
   <!-- evidence: .roll/features/init-onboard/US-INIT-004/latest/US-INIT-004-report.html -->
   <!-- evidence: .roll/features/init-onboard/US-INIT-005/latest/US-INIT-005-report.html -->

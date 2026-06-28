@@ -104,8 +104,11 @@ import {
   classifyStoryRisk,
   selectExecutionProfile,
   explainExecutionProfile,
+  assembleEvalReport,
+  renderEvalReport,
+  validateEvaluatorArtifact,
 } from "@roll/core";
-import type { ExecutionProfile } from "@roll/spec";
+import type { ArtifactManifest, ExecutionProfile, Rig } from "@roll/spec";
 import {
   parseEventLine,
   STATUS_MARKER,
@@ -2219,6 +2222,10 @@ export async function executeCommand(
       // Done without acceptance evidence.
       // Scoped to actual deliveries: an idle cycle has nothing to attest.
       let attestBlocked = false;
+      // US-V4-005: capture the attest verdict + reasons so the Evaluator artifact
+      // (verified/planned) can record evidence status + blocking findings.
+      let attestVerdict: "produced" | "skipped" | "unknown" = "unknown";
+      let attestReasons: readonly string[] = [];
       if (commitsAhead > 0 && storyId !== "") {
         const mode = readAttestGateMode(ports.repoCwd);
         const res = runAttestGate(
@@ -2259,6 +2266,29 @@ export async function executeCommand(
           });
         }
         attestBlocked = res.blocked;
+        attestVerdict = res.verdict;
+        attestReasons = res.reasons;
+      }
+      // US-V4-005: for verified/planned profiles, write the Evaluator artifact
+      // (eval-report.md + artifact-manifest.json) into the run dir, ASSEMBLED from
+      // the cycle's separate review/score/attest signals (never one pass/fail).
+      // Best-effort + non-toppling: the existing attest/peer gates remain the
+      // actual blockers; this records the structured evaluator verdict + manifest.
+      if (
+        (ctx.selectedProfile === "verified" || ctx.selectedProfile === "planned") &&
+        commitsAhead > 0 &&
+        storyId !== ""
+      ) {
+        const ev = writeEvaluatorArtifact(ports, ctx, {
+          attestStatus: attestVerdict,
+          blockingFindings: attestBlocked || peerBlocked ? attestReasons : [],
+        });
+        if (ev.written && !ev.valid) {
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `evaluator artifact (${ctx.selectedProfile}) failed closed for ${storyId}: ${ev.reasons.join("; ")} — cycle ${ctx.cycleId ?? "?"}`,
+          );
+        }
       }
       // FIX-244: phantom-failure probe. A hard-blocked delivery whose work is
       // ALREADY out as a PR (agent self-published, observed 2026-06-10: cycles
@@ -3329,6 +3359,67 @@ export function recordExecutionProfile(
     /* recording is best-effort; never topple routing on an event-append blip */
   }
   return profile;
+}
+
+/**
+ * US-V4-005 — write + validate the EVALUATOR artifact for a verified/planned
+ * cycle. The Evaluator role is not a new monolithic gate: it ASSEMBLES the three
+ * separate contracts the cycle already produced in fresh sessions — the
+ * independent Review Score, the blocking review/attest findings, and the attest
+ * evidence status — into `eval-report.md` + `artifact-manifest.json` under the
+ * run dir, then validates fail-closed (manifest well-formed, evaluator session ≠
+ * builder session). Best-effort writer: a write blip returns `valid:false` with
+ * reasons; the existing attest/peer gates remain the actual cycle blockers.
+ */
+export function writeEvaluatorArtifact(
+  ports: Ports,
+  ctx: CycleContext,
+  signals: { attestStatus: "produced" | "skipped" | "unknown"; blockingFindings: readonly string[]; plannedVsDelivered?: string },
+): { written: boolean; valid: boolean; reasons: readonly string[] } {
+  const profile = ctx.selectedProfile;
+  if (profile !== "verified" && profile !== "planned") return { written: false, valid: true, reasons: [] };
+  const storyId = ctx.storyId ?? "";
+  const runDir = ctx.evidenceRunDir ?? "";
+  if (storyId === "" || runDir === "") return { written: false, valid: false, reasons: ["no story id / run dir for evaluator artifact"] };
+  const scoreEntry = readLatestStoryReviewScore(ports.repoCwd, storyId);
+  const verdict: "good" | "ok" | "regression" =
+    scoreEntry?.verdict === "good" || scoreEntry?.verdict === "regression" ? scoreEntry.verdict : "ok";
+  const report = assembleEvalReport({
+    storyId,
+    blockingFindings: signals.blockingFindings,
+    ...(scoreEntry !== undefined ? { score: { value: scoreEntry.score, verdict } } : {}),
+    attestStatus: signals.attestStatus,
+    ...(signals.plannedVsDelivered !== undefined && signals.plannedVsDelivered !== ""
+      ? { plannedVsDelivered: signals.plannedVsDelivered }
+      : {}),
+  });
+  const reportMd = renderEvalReport(report);
+  const manifest: ArtifactManifest = {
+    schemaVersion: 1,
+    storyId,
+    cycleId: ctx.cycleId ?? "",
+    role: "evaluator",
+    rig: { agent: (scoreEntry?.scoredBy ?? "reasonix") } as Rig,
+    sessionId: scoreEntry?.sessionId ?? "",
+    worktreeCwd: ports.paths.worktreePath,
+    scoreRepoCwd: ports.repoCwd,
+    inputs: [
+      { path: `${storyId}-report.html`, kind: "report" },
+      { path: "ac-map.json", kind: "evidence" },
+    ],
+    outputs: [{ path: "role-artifacts/evaluator/eval-report.md", kind: "report" }],
+    createdAt: new Date(eventTs(ports)).toISOString(),
+  };
+  const dir = join(runDir, "role-artifacts", "evaluator");
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "eval-report.md"), reportMd);
+    writeFileSync(join(dir, "artifact-manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
+  } catch {
+    return { written: false, valid: false, reasons: ["failed to write evaluator artifact files"] };
+  }
+  const v = validateEvaluatorArtifact({ manifest, reportMd, storyId, builderSessionId: ctx.builderSessionId ?? "" });
+  return { written: true, valid: v.ok, reasons: v.reasons };
 }
 
 export function routerEstMin(worktreeCwd: string, storyId: string, backlogDesc: string): number | undefined {

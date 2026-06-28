@@ -165,6 +165,28 @@ export interface AgentConfigParse {
   readonly errors: readonly string[];
 }
 
+/** US-V4-005 — the Evaluator's recommendation (kept SEPARATE from the score and
+ *  the blocking-review verdict — three distinct contracts, never one pass/fail). */
+export type EvalRecommendation = "merge" | "repair" | "resize" | "hold" | "escalate";
+
+/** US-V4-005 — the structured Evaluator report (`eval-report.md`). Blocking
+ *  findings, advisory findings, score, and attest/evidence status stay separate
+ *  dimensions; `recommendation` is the Evaluator's synthesis, never the Builder's. */
+export interface EvalReport {
+  readonly storyId: string;
+  /** Findings that BLOCK merge until repaired (the gate dimension). */
+  readonly blockingFindings: readonly string[];
+  /** Non-blocking advice (recorded, never gating). */
+  readonly advisoryFindings: readonly string[];
+  /** The independent review score (separate contract) — absent when not scored. */
+  readonly score?: { readonly value: number; readonly verdict: "good" | "ok" | "regression" };
+  /** Whether story-scoped acceptance evidence was produced (separate contract). */
+  readonly attestStatus: "produced" | "skipped" | "unknown";
+  /** Planned-vs-delivered mapping summary (present only under `planned`). */
+  readonly plannedVsDelivered?: string;
+  readonly recommendation: EvalRecommendation;
+}
+
 /** US-V4-004 — the risk signals that drive execution-profile selection (arch §12).
  *  All fields are derivable from a story's spec + facts; none require running it. */
 export interface StoryRiskInput {

@@ -13,7 +13,7 @@ import type { CycleCommand, CycleContext, RollEvent, WarmSessionEntry } from "@r
 import { AGENTS } from "../../core/src/agent/specs.js";
 import { classifyComplexity } from "@roll/core";
 import { AWAITING_REVIEW_STATUS_MARKER } from "@roll/spec";
-import { agentWritableRoots, recordExecutionProfile } from "../src/runner/executor.js";
+import { agentWritableRoots, recordExecutionProfile, writeEvaluatorArtifact } from "../src/runner/executor.js";
 import { evaluateReviewScoreGate, readLatestStoryPeerScore } from "../src/lib/review-score.js";
 import {
   AGENT_ARGV_TODO,
@@ -3827,5 +3827,64 @@ describe("US-V4-004 — execution profile selection + durable recording", () => 
     expect(recordExecutionProfile(ports, "C-4", "US-NONE", undefined)).toBe("standard");
     // Still records the (standard) decision durably.
     expect(profileEvents(calls)[0]).toMatchObject({ profile: "standard" });
+  });
+});
+
+describe("US-V4-005 — verified execution: evaluator artifact boundary", () => {
+  function repoWithScore(id: string, sessionId: string, verdict: "good" | "ok" | "regression", score: number): string {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-v4-005-")));
+    execDirs.push(repo);
+    const notesDir = join(repo, ".roll", "features", "uncategorized", id, "notes");
+    mkdirSync(notesDir, { recursive: true });
+    writeFileSync(
+      join(notesDir, `2026-06-28-roll-build-${id}-${score}.md`),
+      ["---", "skill: roll-build", `story: ${id}`, `score: ${score}`, `verdict: ${verdict}`, "ts: 2026-06-28T12:00:00Z", "scoring: pair", "scored-by: reasonix", `session-id: ${sessionId}`, "---", "", "peer rationale."].join("\n"),
+    );
+    return repo;
+  }
+  function ctxFor(repo: string, id: string, profile: "standard" | "verified" | "planned", builderSession: string): Parameters<typeof writeEvaluatorArtifact>[1] {
+    const runDir = join(repo, ".roll", "features", "uncategorized", id, "run-1");
+    mkdirSync(runDir, { recursive: true });
+    return { cycleId: "C-1", branch: "b", loop: "x", storyId: id, selectedProfile: profile, evidenceRunDir: runDir, builderSessionId: builderSession };
+  }
+
+  it("standard profile writes no evaluator artifact", () => {
+    const repo = repoWithScore("US-E1", "C-1:score:reasonix:1", "good", 8);
+    const { ports } = fakePorts({ repoCwd: repo });
+    const r = writeEvaluatorArtifact(ports, ctxFor(repo, "US-E1", "standard", "C-1:build:codex:0"), { attestStatus: "produced", blockingFindings: [] });
+    expect(r.written).toBe(false);
+    expect(r.valid).toBe(true);
+  });
+
+  it("verified profile writes eval-report.md + manifest from a fresh-session score → valid", () => {
+    const repo = repoWithScore("US-E2", "C-1:score:reasonix:1", "good", 8);
+    const { ports } = fakePorts({ repoCwd: repo });
+    const ctx = ctxFor(repo, "US-E2", "verified", "C-1:build:codex:0");
+    const r = writeEvaluatorArtifact(ports, ctx, { attestStatus: "produced", blockingFindings: [] });
+    expect(r.written).toBe(true);
+    expect(r.valid).toBe(true);
+    const reportPath = join(ctx.evidenceRunDir as string, "role-artifacts", "evaluator", "eval-report.md");
+    expect(readFileSync(reportPath, "utf8")).toContain("## Recommendation");
+    expect(readFileSync(reportPath, "utf8")).toContain("merge");
+    const man = JSON.parse(readFileSync(join(ctx.evidenceRunDir as string, "role-artifacts", "evaluator", "artifact-manifest.json"), "utf8"));
+    expect(man.role).toBe("evaluator");
+  });
+
+  it("BUILDER SELF-GRADE: evaluator session == builder session → written but fails closed (invalid)", () => {
+    const shared = "C-1:build:codex:0";
+    const repo = repoWithScore("US-E3", shared, "good", 8);
+    const { ports } = fakePorts({ repoCwd: repo });
+    const r = writeEvaluatorArtifact(ports, ctxFor(repo, "US-E3", "verified", shared), { attestStatus: "produced", blockingFindings: [] });
+    expect(r.written).toBe(true);
+    expect(r.valid).toBe(false);
+    expect(r.reasons.join(" ")).toContain("self-grade");
+  });
+
+  it("a blocking finding → repair recommendation in the eval report", () => {
+    const repo = repoWithScore("US-E4", "C-1:score:reasonix:1", "ok", 7);
+    const { ports } = fakePorts({ repoCwd: repo });
+    const ctx = ctxFor(repo, "US-E4", "verified", "C-1:build:codex:0");
+    writeEvaluatorArtifact(ports, ctx, { attestStatus: "produced", blockingFindings: ["AC2 has no test"] });
+    expect(readFileSync(join(ctx.evidenceRunDir as string, "role-artifacts", "evaluator", "eval-report.md"), "utf8")).toContain("repair");
   });
 });

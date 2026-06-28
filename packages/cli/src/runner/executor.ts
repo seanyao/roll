@@ -104,6 +104,8 @@ import {
   classifyStoryRisk,
   selectExecutionProfile,
   explainExecutionProfile,
+  applyExecutionPolicy,
+  normalizeAgentConfig,
   assembleEvalReport,
   renderEvalReport,
   validateEvaluatorArtifact,
@@ -3349,6 +3351,19 @@ export function parseEstMinFromSpec(specText: string): number | undefined {
  * unreadable, or frontmatter-less spec falls back to the backlog row's
  * `est_min:` tag (prior behavior), so routing never regresses on a parse blip.
  */
+/** US-V4-004/003 — the project's `execution_policy.mode` from `.roll/agents.yaml`
+ *  (default "standard" when absent/unparseable). Gates whether verified/planned
+ *  stages execute; standard keeps the cycle Builder-only (no regression). */
+function executionPolicyMode(repoCwd: string): "standard" | "verified" | "planned" | "auto" {
+  try {
+    const p = join(repoCwd, ".roll", "agents.yaml");
+    if (!existsSync(p)) return "standard";
+    return normalizeAgentConfig(readFileSync(p, "utf8")).config.executionPolicy.mode;
+  } catch {
+    return "standard";
+  }
+}
+
 /**
  * US-V4-004 — select the Story execution profile from the spec's risk signals and
  * RECORD it in a durable `execution:profile` event. Pure-decision + one append;
@@ -3371,8 +3386,13 @@ export function recordExecutionProfile(
       const input = classifyStoryRisk(storyId, readFileSync(specPath, "utf8"), {
         ...(estMin !== undefined ? { estimatedMinutes: estMin } : {}),
       });
-      profile = selectExecutionProfile(input);
-      reason = explainExecutionProfile(input);
+      const classified = selectExecutionProfile(input);
+      // Apply execution_policy.mode (default "standard" — incl. no agents.yaml) so
+      // a project that has not opted into verified/planned stays Builder-only (the
+      // v4.0 no-regression guarantee). The classification still informs the reason.
+      const mode = executionPolicyMode(ports.repoCwd);
+      profile = applyExecutionPolicy(classified, mode);
+      reason = `${explainExecutionProfile(input)} [policy:${mode} → ${profile}]`;
     }
   } catch {
     profile = "standard";

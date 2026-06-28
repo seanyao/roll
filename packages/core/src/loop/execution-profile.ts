@@ -33,6 +33,33 @@ export function selectExecutionProfile(input: StoryRiskInput): ExecutionProfile 
   return "standard";
 }
 
+/**
+ * Apply the project's `execution_policy.mode` to a classified profile to get the
+ * EFFECTIVE profile that actually executes. The default mode is `standard`
+ * (including no `.roll/agents.yaml`), so a project that has not opted into
+ * verified/planned execution stays Builder-only — the v4.0 no-regression
+ * guarantee (US-V4-004). A project opts in via `execution_policy.mode`:
+ *   standard → always standard (opt-out);
+ *   auto     → the classified profile;
+ *   verified → floor at verified (planned still escalates);
+ *   planned  → always the full Planner→Builder→Evaluator pipeline.
+ */
+export function applyExecutionPolicy(
+  classified: ExecutionProfile,
+  mode: "standard" | "verified" | "planned" | "auto",
+): ExecutionProfile {
+  switch (mode) {
+    case "standard":
+      return "standard";
+    case "auto":
+      return classified;
+    case "verified":
+      return classified === "planned" ? "planned" : "verified";
+    case "planned":
+      return "planned";
+  }
+}
+
 /** A short, human-readable rationale for the chosen profile (for the event +
  *  watch/status surfaces). Deterministic from the same input. */
 export function explainExecutionProfile(input: StoryRiskInput): string {

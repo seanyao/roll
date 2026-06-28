@@ -4,7 +4,7 @@
  * backwards-compatible "no v4 signals → standard" path.
  */
 import { describe, expect, it } from "vitest";
-import { classifyStoryRisk, explainExecutionProfile, selectExecutionProfile } from "../src/loop/execution-profile.js";
+import { applyExecutionPolicy, classifyStoryRisk, explainExecutionProfile, selectExecutionProfile } from "../src/loop/execution-profile.js";
 import type { StoryRiskInput } from "@roll/spec";
 
 function base(over: Partial<StoryRiskInput> = {}): StoryRiskInput {
@@ -49,6 +49,27 @@ describe("selectExecutionProfile (arch §12)", () => {
     expect(explainExecutionProfile(base())).toMatch(/^standard/);
     expect(explainExecutionProfile(base({ userVisible: true }))).toMatch(/^verified/);
     expect(explainExecutionProfile(base({ touchesTruthOrRelease: true }))).toMatch(/^planned/);
+  });
+});
+
+describe("applyExecutionPolicy (execution_policy.mode gates execution)", () => {
+  it("standard mode forces standard regardless of classification (no-regression default)", () => {
+    expect(applyExecutionPolicy("planned", "standard")).toBe("standard");
+    expect(applyExecutionPolicy("verified", "standard")).toBe("standard");
+    expect(applyExecutionPolicy("standard", "standard")).toBe("standard");
+  });
+  it("auto mode uses the classified profile", () => {
+    expect(applyExecutionPolicy("planned", "auto")).toBe("planned");
+    expect(applyExecutionPolicy("verified", "auto")).toBe("verified");
+    expect(applyExecutionPolicy("standard", "auto")).toBe("standard");
+  });
+  it("verified mode floors at verified; planned still escalates", () => {
+    expect(applyExecutionPolicy("standard", "verified")).toBe("verified");
+    expect(applyExecutionPolicy("verified", "verified")).toBe("verified");
+    expect(applyExecutionPolicy("planned", "verified")).toBe("planned");
+  });
+  it("planned mode forces the full pipeline", () => {
+    expect(applyExecutionPolicy("standard", "planned")).toBe("planned");
   });
 });
 

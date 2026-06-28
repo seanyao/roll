@@ -3785,19 +3785,22 @@ describe("FIX-907 readCycleTimeoutThresholds — policy + env override", () => {
 });
 
 describe("US-V4-004 — execution profile selection + durable recording", () => {
-  function repoWithSpec(id: string, specText: string): string {
+  // `mode` opts the project into auto profile selection; absent → no agents.yaml →
+  // default execution_policy.mode "standard" (the no-regression default).
+  function repoWithSpec(id: string, specText: string, mode?: "auto" | "verified" | "planned"): string {
     const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-v4-004-")));
     execDirs.push(repo);
     const specDir = join(repo, ".roll", "features", "uncategorized", id);
     mkdirSync(specDir, { recursive: true });
     writeFileSync(join(specDir, "spec.md"), specText);
+    if (mode !== undefined) writeFileSync(join(repo, ".roll", "agents.yaml"), `schema: v4\nexecution_policy:\n  mode: ${mode}\n`);
     return repo;
   }
   const profileEvents = (calls: Record<string, unknown[]>): RollEvent[] =>
     (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent).filter((e) => e.type === "execution:profile");
 
-  it("records standard for a low-risk, screenshot-exempt FIX with ACs", () => {
-    const repo = repoWithSpec("FIX-V4A", "---\nid: FIX-V4A\nscreenshot_exempt: internal parser fix\n---\n## Acceptance Criteria\n- [ ] parser handles edge case\n");
+  it("records standard for a low-risk, screenshot-exempt FIX with ACs (auto mode)", () => {
+    const repo = repoWithSpec("FIX-V4A", "---\nid: FIX-V4A\nscreenshot_exempt: internal parser fix\n---\n## Acceptance Criteria\n- [ ] parser handles edge case\n", "auto");
     const { ports, calls } = fakePorts({ repoCwd: repo });
     const profile = recordExecutionProfile(ports, "C-1", "FIX-V4A", 5);
     expect(profile).toBe("standard");
@@ -3806,18 +3809,26 @@ describe("US-V4-004 — execution profile selection + durable recording", () => 
     expect(evs[0]).toMatchObject({ type: "execution:profile", cycleId: "C-1", storyId: "FIX-V4A", profile: "standard" });
   });
 
-  it("records verified for a user-visible / visual-evidence story", () => {
-    const repo = repoWithSpec("US-V4B", "---\nid: US-V4B\nphysical_terminal: required\n---\n## Acceptance Criteria\n- [ ] [visual-evidence] terminal shows the new output\n");
+  it("records verified for a user-visible / visual-evidence story (auto mode)", () => {
+    const repo = repoWithSpec("US-V4B", "---\nid: US-V4B\nphysical_terminal: required\n---\n## Acceptance Criteria\n- [ ] [visual-evidence] terminal shows the new output\n", "auto");
     const { ports, calls } = fakePorts({ repoCwd: repo });
     expect(recordExecutionProfile(ports, "C-2", "US-V4B", undefined)).toBe("verified");
     expect(profileEvents(calls)[0]).toMatchObject({ profile: "verified" });
   });
 
-  it("records planned for a truth/release-semantics story", () => {
-    const repo = repoWithSpec("US-V4C", "## Context\nChange the release consistency gate + DeliveryRecord truth.\n\n## Acceptance Criteria\n- [ ] gate reads structured truth\n");
+  it("records planned for a truth/release-semantics story (auto mode)", () => {
+    const repo = repoWithSpec("US-V4C", "## Context\nChange the release consistency gate + DeliveryRecord truth.\n\n## Acceptance Criteria\n- [ ] gate reads structured truth\n", "auto");
     const { ports, calls } = fakePorts({ repoCwd: repo });
     expect(recordExecutionProfile(ports, "C-3", "US-V4C", undefined)).toBe("planned");
     expect(profileEvents(calls)[0]).toMatchObject({ profile: "planned" });
+  });
+
+  it("NO-REGRESSION: default policy (standard / no agents.yaml) keeps a planned-risk story Builder-only", () => {
+    // Same truth/release spec as above, but NO agents.yaml → execution_policy.mode
+    // defaults to "standard" → the cycle stays standard (no planner/evaluator).
+    const repo = repoWithSpec("US-V4D", "## Context\nChange the release consistency gate + DeliveryRecord truth.\n\n## Acceptance Criteria\n- [ ] gate reads structured truth\n");
+    const { ports } = fakePorts({ repoCwd: repo });
+    expect(recordExecutionProfile(ports, "C-5", "US-V4D", undefined)).toBe("standard");
   });
 
   it("backwards compat: a missing spec falls back to standard (no v4 config needed)", () => {

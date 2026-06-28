@@ -351,6 +351,33 @@ The chain is capped at **2 auto re-splits**. The third would be refused and a
 `StorySplitCapHit` ALERT is written, forcing human triage instead of letting
 the chain grow indefinitely.
 
+## Execution profiles (standard / verified / planned)
+
+Routing above chooses the **Rig** (`agent × model`) for a slot. Separately, Roll
+chooses an **execution profile** per Story — the cheapest *sufficient* role
+pipeline for that Story's risk and ROI. You do not declare it; it is selected
+once at cycle start from the story's risk signals and recorded in an
+`execution:profile` event. These are **not user-facing "team shapes"** — they are
+risk/ROI tiers:
+
+- **`standard` = Builder only** — low-risk, local scope, clear acceptance, low
+  evidence risk (a copy fix, a small parser bug, an internal rename).
+- **`verified` = Builder → Evaluator** — user-visible behavior, screenshot/visual
+  evidence required, or a history of weak/missing evidence. An independent
+  Evaluator (fresh session) judges the delivery; blocking review, score, and
+  attest stay three separate dimensions.
+- **`planned` = Planner → Builder → Evaluator** — the risk is doing the *wrong*
+  work: unclear requirements, cross-module change, or truth/release/routing/state
+  semantics. A Planner writes a contract before the Builder; the Evaluator maps
+  planned-vs-delivered. Evaluator → Builder repair rounds are strictly bounded
+  (max rounds, repeated-finding signature, budget, timeout) and escalate on a
+  bound trip.
+
+Roles hand off through artifacts only (planner contract, builder evidence,
+eval-report) — never a shared raw session. Project-level coordination across
+Stories (ordering, conflicts, budget, release readiness) belongs to the
+**Supervisor Agent** (`roll supervisor`), not to any single Story's execution.
+
 ## Status Dashboard
 
 `roll loop status` prints a compact dashboard with per-cycle rows and daily rollup totals.

@@ -100,11 +100,13 @@ web          控制台（React，WebSocket 订阅 daemon）
 
 管理可用的 AI agent 及其路由规则。
 
-**路由规则**：根据任务的层级（epic/feature/story）和类型（US/FIX/REFACTOR）映射到 `(agent, model)`。同一输入永远返回同一路由——结果可审计、可复现。
+**Rig 与 Route Profile（v4）**：**Rig = agent × model**，是可调用的执行身份。**Route Profile** 是项目本地（`.roll/agents.yaml`）的策略，把 story 的风险/复杂度映射到 Rig。`easy / default / hard / fallback` 是 **route slot（路由槽，纯策略标签）**，不是 Agent 或 Rig 的类型——同一个 Rig 在一个项目里可能是 `default`、在另一个项目里是 `hard`。机器默认 agent（`primary_agent`）在 `~/.roll/config.yaml`，是全局的；Route Profile 是项目本地的。
 
-**探活**：spawn agent 前进行秒级探测并缓存结果。不可用时依次尝试 fallback 槽。全部不可用 → 暂停并告警。
+**路由规则**：根据任务的层级（epic/feature/story）和类型（US/FIX/REFACTOR）映射到一个 Rig。同一输入永远返回同一路由——结果可审计、可复现。
 
-**反规则**：不因历史表现自动调整路由偏好。不做跨 agent 自动切换（失败不偷偷换人重试）。
+**探活**：spawn agent 前进行秒级探测并缓存结果。不可用时尝试一次 `fallback` 槽（**仅 spawn 前的可用性回退，绝不是失败后自动换人重试链**）。全部不可用 → 暂停并告警。
+
+**反规则**：不因历史表现自动调整路由偏好。不做跨 agent 自动切换（失败不偷偷换人重试）。指标可以*建议*策略变更，但绝不静默改写策略。
 
 ### BC4 · 交付
 
@@ -228,6 +230,24 @@ web          控制台（React，WebSocket 订阅 daemon）
 **记录内容**：`(agent, model, 输入 token, 输出 token, 预估成本, 回退次数, 含回退的有效成本)`。
 
 **Budget guardrails**：项目/全局设日和周上限。逼近上限 → 自动降级到便宜模型或暂停并通知。便宜模型回退率高导致总成本反超 → 建议升级。
+
+### BC9 · Supervisor Agent 与执行剖面（v4）
+
+v4 把"一张 Story 怎么交付"和"项目级怎么协调"分成两层。
+
+**Story Execution Unit（执行剖面 / Execution Profile）**：一张 Story 的交付按风险/ROI 选最便宜够用的角色流水线，用户不必先想"团队形状"：
+
+- `standard` = Builder（低风险、范围局部、AC 清晰、证据风险低）
+- `verified` = Builder → Evaluator（用户可见 / 需视觉证据 / 历史证据薄弱——靠独立判断而非自评）
+- `planned` = Planner → Builder → Evaluator（需求模糊 / 跨模块 / 触及 truth·release·路由·状态语义——风险是"做错事"而不仅是"证不出来"）
+
+剖面在 Cycle 开始时选一次并记入 `execution:profile` 事件。角色之间只通过 artifact（`planner-contract.md` / `builder-evidence` / `eval-report.md` + `artifact-manifest.json`）交接，不共享原始会话；每个角色都是 fresh session。Evaluator 不是单一 `pass/fail`——blocking review、score、attest 是三个分开的契约。Evaluator→Builder 的修复回合受硬熔断约束（最大轮数、重复 finding 签名、预算、超时），触界即升级。
+
+**Supervisor Agent**：项目级协调者，负责不属于某一张具体 Story 的工作——跨 Story/Epic 上下文、backlog 排序、风险分级、执行剖面建议、路由/Rig 建议、预算、并行、卡住的 cycle、重复失败、文件冲突、合并队列、发布就绪、truth 漂移、系统级用户交互（"接下来做什么？""为什么卡住？"）与 owner 升级。
+
+Supervisor **绝不**：实现具体 Story、写 Story 的评估报告、覆盖 Evaluator 裁定、绕过 attest 闸、直接标记 Story 为 Done、用指标静默改写路由/策略。v4.0 的 Supervisor 是 observe/advise（`roll supervisor`）：先用确定性 selector 把事实结构化，再（必要时）让 agent 措辞建议；持久化策略变更一律需 owner 确认。安全并行调度（`max_parallel_cycles`、文件冲突串行化、合并队列/预算暂停）的决策逻辑已就位，活体并行交付留待 v4.1。
+
+> 命名：只用 **Supervisor Agent / Execution Profile / Story Execution Unit / Rig / Route Profile**。不引入 Prime / Watchman / Dispatcher / Governor 作为竞争角色名，也不把 solo/paired team 当用户面概念。
 
 ### 上下文协作
 

@@ -304,6 +304,27 @@ cycle cleanly. Next cycle picks up the first smaller sub-story.
 链路最多自动拆 **2 次**。第三次会被 `StorySplitCapHit` ALERT 拦下，翻 🚫 Hold
 等人工介入，避免无限套娃。
 
+## 执行剖面（standard / verified / planned）
+
+上面的路由为某个槽选 **Rig**（`agent × model`）。另一件独立的事是：Roll 为每张
+Story 选一个**执行剖面**——按这张 Story 的风险与 ROI 选**最便宜够用**的角色流水线。
+你不必声明它；它在 cycle 开始时按 story 的风险信号选一次，并记入 `execution:profile`
+事件。它们**不是用户面的"团队形状"**，而是风险/ROI 档：
+
+- **`standard` = 仅 Builder** —— 低风险、范围局部、AC 清晰、证据风险低（改文案、小
+  parser bug、内部重命名）。
+- **`verified` = Builder → Evaluator** —— 用户可见行为、需截图/视觉证据，或历史证据
+  薄弱。独立 Evaluator（fresh session）裁定交付；blocking review、score、attest 是
+  三个分开的维度。
+- **`planned` = Planner → Builder → Evaluator** —— 风险是"做错事"：需求不清、跨模块、
+  或触及 truth/release/路由/状态语义。Planner 先写契约再交给 Builder；Evaluator 做
+  planned-vs-delivered 映射。Evaluator → Builder 的修复回合受硬熔断约束（最大轮数、
+  重复 finding 签名、预算、超时），触界即升级。
+
+角色之间只通过 artifact 交接（planner 契约、builder 证据、eval-report），绝不共享原始
+会话。跨 Story 的项目级协调（排序、冲突、预算、发布就绪）归 **Supervisor Agent**
+（`roll supervisor`），不属于任何单张 Story 的执行。
+
 ## Status Dashboard（状态仪表盘）
 
 `roll loop status` 输出一个紧凑的仪表盘，包含每个 cycle 的行记录和每日汇总。

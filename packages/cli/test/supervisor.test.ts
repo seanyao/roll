@@ -87,6 +87,14 @@ describe("supervisorCommand", () => {
     expect(r.out).toContain("backlog: 2 todo");
   });
 
+  it("`status` is an alias for the default observe + advise view", () => {
+    const cwd = project(BACKLOG, { events: [JSON.stringify({ type: "pr:merge", prNumber: 1, storyId: "US-1", ts: 1 })] });
+    const r = run(cwd, ["status"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("Supervisor Agent — project facts");
+    expect(r.out).toContain("Supervisor Agent —"); // advice block too
+  });
+
   it("flags truth drift in advise when a Done card is unconfirmed by main", () => {
     const cwd = project(BACKLOG); // no pr:merge → US-1 Done but undelivered
     const r = run(cwd, ["advise"]);

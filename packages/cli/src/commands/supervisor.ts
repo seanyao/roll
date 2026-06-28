@@ -28,8 +28,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 export const SUPERVISOR_USAGE = [
-  "Usage: roll supervisor [observe|advise|next|why] [--json]",
-  "  (no subcommand)  observe + advise summary",
+  "Usage: roll supervisor [status|observe|advise|next|why] [--json]",
+  "  status           observe + advise summary (alias for no subcommand)",
   "  observe          structured project facts (backlog, truth drift, PRs, release readiness)",
   "  advise           Supervisor decisions (advisory; persistent changes need owner confirmation)",
   "  next             what should Roll do next?",
@@ -118,7 +118,9 @@ function fmtAdvice(input: SupervisorInput): string {
 
 export function supervisorCommand(args: string[]): number {
   const json = args.includes("--json");
-  const sub = args.find((a) => !a.startsWith("-"));
+  let sub = args.find((a) => !a.startsWith("-"));
+  // `status` is an alias for the default observe + advise summary.
+  if (sub === "status") sub = undefined;
   if (sub !== undefined && !["observe", "advise", "next", "why"].includes(sub)) {
     process.stderr.write(SUPERVISOR_USAGE + "\n");
     return 1;

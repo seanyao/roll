@@ -101,7 +101,11 @@ import {
   type AgentActivityNormalizer,
   type NormalizerState,
   cycleActivityFromEvents,
+  classifyStoryRisk,
+  selectExecutionProfile,
+  explainExecutionProfile,
 } from "@roll/core";
+import type { ExecutionProfile } from "@roll/spec";
 import {
   parseEventLine,
   STATUS_MARKER,
@@ -1304,7 +1308,13 @@ export async function executeCommand(
       // lever) drives tier selection, falling back to the backlog row's tag.
       const estMin = routerEstMin(ports.repoCwd, cmd.storyId, story?.desc ?? "");
       const r = ports.route.resolve(cmd.storyId, estMin);
-      return { event: { type: "route_resolved", agent: r.agent, model: r.model } };
+      // US-V4-004: select + RECORD the Story execution profile once, here at
+      // route-resolve (before execute). Best-effort + never toppling routing: a
+      // spec read/parse blip falls back to `standard` (builder-only, current
+      // behavior). v4.0 records the profile but still executes standard only;
+      // verified/planned add evaluator/planner stages in later stories.
+      const selectedProfile = recordExecutionProfile(ports, ctx.cycleId ?? "", cmd.storyId, estMin);
+      return { event: { type: "route_resolved", agent: r.agent, model: r.model }, ctxPatch: { selectedProfile } };
     }
 
     // execute: spawn the agent (TCR commits happen inside the worktree). The
@@ -3277,6 +3287,50 @@ export function parseEstMinFromSpec(specText: string): number | undefined {
  * unreadable, or frontmatter-less spec falls back to the backlog row's
  * `est_min:` tag (prior behavior), so routing never regresses on a parse blip.
  */
+/**
+ * US-V4-004 — select the Story execution profile from the spec's risk signals and
+ * RECORD it in a durable `execution:profile` event. Pure-decision + one append;
+ * never throws (a spec read blip falls back to `standard`, the current
+ * builder-only path). Returns the profile so the executor can fold it into the
+ * cycle context. In v4.0 only `standard` actually executes — recording the chosen
+ * profile is the foundation verified/planned execution builds on (US-V4-005/006).
+ */
+export function recordExecutionProfile(
+  ports: Ports,
+  cycleId: string,
+  storyId: string,
+  estMin: number | undefined,
+): ExecutionProfile {
+  let profile: ExecutionProfile = "standard";
+  let reason = "standard: spec unavailable";
+  try {
+    const specPath = storySpecPath(ports.repoCwd, storyId);
+    if (specPath !== null && existsSync(specPath)) {
+      const input = classifyStoryRisk(storyId, readFileSync(specPath, "utf8"), {
+        ...(estMin !== undefined ? { estimatedMinutes: estMin } : {}),
+      });
+      profile = selectExecutionProfile(input);
+      reason = explainExecutionProfile(input);
+    }
+  } catch {
+    profile = "standard";
+    reason = "standard: profile selection failed (fell back)";
+  }
+  try {
+    ports.events.appendEvent(ports.paths.eventsPath, {
+      type: "execution:profile",
+      cycleId,
+      storyId,
+      profile,
+      reason,
+      ts: eventTs(ports),
+    });
+  } catch {
+    /* recording is best-effort; never topple routing on an event-append blip */
+  }
+  return profile;
+}
+
 export function routerEstMin(worktreeCwd: string, storyId: string, backlogDesc: string): number | undefined {
   try {
     const specPath = storySpecPath(worktreeCwd, storyId);

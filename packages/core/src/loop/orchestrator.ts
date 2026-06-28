@@ -101,7 +101,7 @@
  * state back in with the next observed event; the {@link CycleCommand}s name the
  * existing ports/plans so the adapter dispatches them 1:1.
  */
-import type { AgentId, CycleCost, CyclePhase, ModelId, TerminalOutcome } from "@roll/spec";
+import type { AgentId, CycleCost, CyclePhase, ExecutionProfile, ModelId, TerminalOutcome } from "@roll/spec";
 import { cycleCurrency } from "../cost/tracker.js";
 import type { RollEvent } from "@roll/spec";
 import { nextWaitAction, type WaitAction } from "../delivery/pr.js";
@@ -650,6 +650,11 @@ export interface CycleContext {
    *  ⇒ the builder has not spawned yet (the gate then treats every score as a
    *  potential self-grade and demands a session-id present + distinct). */
   builderSessionId?: string;
+  /** US-V4-004: the Story execution profile selected at route-resolve (standard |
+   *  verified | planned). Recorded in a durable `execution:profile` event; in
+   *  v4.0 only `standard` (builder-only) actually executes — verified/planned add
+   *  evaluator/planner stages in later stories. Absent ⇒ not yet selected. */
+  selectedProfile?: ExecutionProfile;
   /** FIX-208: the real per-cycle cost folded from the agent's parsed usage
    *  (cost/tracker.ts), set by the executor after spawn_agent. Threaded into
    *  BOTH the cycle:end event and the runs row so they agree. Absent ⇒ no

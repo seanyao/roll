@@ -164,3 +164,19 @@ export interface AgentConfigParse {
   readonly config: NormalizedAgentConfig;
   readonly errors: readonly string[];
 }
+
+/** US-V4-004 — the risk signals that drive execution-profile selection (arch §12).
+ *  All fields are derivable from a story's spec + facts; none require running it. */
+export interface StoryRiskInput {
+  readonly storyId: string;
+  readonly storyType: "US" | "FIX" | "REFACTOR" | "IDEA";
+  readonly estimatedMinutes?: number;
+  readonly filesHint: readonly string[];
+  readonly userVisible: boolean;
+  readonly visualEvidenceRequired: boolean;
+  readonly crossModule: boolean;
+  readonly touchesTruthOrRelease: boolean;
+  readonly touchesAgentRuntime: boolean;
+  readonly acceptanceAmbiguous: boolean;
+  readonly historicalEvidenceRisk: boolean;
+}

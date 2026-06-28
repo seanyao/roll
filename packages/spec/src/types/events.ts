@@ -3,7 +3,7 @@
  * events.ndjson; all state is rebuilt from this stream, no separate cache.
  * Schema per specs/architecture §3 (v2-aligned).
  */
-import type { AgentId } from "./agent.js";
+import type { AgentId, ExecutionProfile } from "./agent.js";
 import type { CycleCost, CyclePhase } from "./cycle.js";
 import type { GoalReviewMode, GoalSafetyGate, GoalScope, GoalStatus, GoalTransitionActor } from "./goal.js";
 import type { LoopType } from "./loop.js";
@@ -23,6 +23,9 @@ export type RollEvent =
   | { type: "loop:dormant_failed"; loop: LoopType; ts: number; reason: string; error: string }
   // Cycle (BC2) — cycle:end anchors reconcile + cost accounting
   | { type: "cycle:start"; cycleId: string; storyId: string; agent: AgentId; model: string; ts: number }
+  // US-V4-004: the selected Story execution profile, recorded once per cycle at
+  // route-resolve (before execute). standard = builder only (current behavior).
+  | { type: "execution:profile"; cycleId: string; storyId: string; profile: ExecutionProfile; reason: string; ts: number }
   | { type: "cycle:phase"; cycleId: string; phase: CyclePhase; ts: number }
   | { type: "cycle:stdout"; cycleId: string; data: string; ts: number }
   | { type: "cycle:tcr"; cycleId: string; commitHash: string; message: string; ts: number; commitTs?: number }

@@ -13,7 +13,7 @@ import type { CycleCommand, CycleContext, RollEvent, WarmSessionEntry } from "@r
 import { AGENTS } from "../../core/src/agent/specs.js";
 import { classifyComplexity } from "@roll/core";
 import { AWAITING_REVIEW_STATUS_MARKER } from "@roll/spec";
-import { agentWritableRoots } from "../src/runner/executor.js";
+import { agentWritableRoots, recordExecutionProfile } from "../src/runner/executor.js";
 import { evaluateReviewScoreGate, readLatestStoryPeerScore } from "../src/lib/review-score.js";
 import {
   AGENT_ARGV_TODO,
@@ -3781,5 +3781,51 @@ describe("FIX-907 readCycleTimeoutThresholds — policy + env override", () => {
       if (savedNp === undefined) delete process.env["ROLL_CYCLE_NO_PROGRESS_SEC"];
       else process.env["ROLL_CYCLE_NO_PROGRESS_SEC"] = savedNp;
     }
+  });
+});
+
+describe("US-V4-004 — execution profile selection + durable recording", () => {
+  function repoWithSpec(id: string, specText: string): string {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-v4-004-")));
+    execDirs.push(repo);
+    const specDir = join(repo, ".roll", "features", "uncategorized", id);
+    mkdirSync(specDir, { recursive: true });
+    writeFileSync(join(specDir, "spec.md"), specText);
+    return repo;
+  }
+  const profileEvents = (calls: Record<string, unknown[]>): RollEvent[] =>
+    (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent).filter((e) => e.type === "execution:profile");
+
+  it("records standard for a low-risk, screenshot-exempt FIX with ACs", () => {
+    const repo = repoWithSpec("FIX-V4A", "---\nid: FIX-V4A\nscreenshot_exempt: internal parser fix\n---\n## Acceptance Criteria\n- [ ] parser handles edge case\n");
+    const { ports, calls } = fakePorts({ repoCwd: repo });
+    const profile = recordExecutionProfile(ports, "C-1", "FIX-V4A", 5);
+    expect(profile).toBe("standard");
+    const evs = profileEvents(calls);
+    expect(evs).toHaveLength(1);
+    expect(evs[0]).toMatchObject({ type: "execution:profile", cycleId: "C-1", storyId: "FIX-V4A", profile: "standard" });
+  });
+
+  it("records verified for a user-visible / visual-evidence story", () => {
+    const repo = repoWithSpec("US-V4B", "---\nid: US-V4B\nphysical_terminal: required\n---\n## Acceptance Criteria\n- [ ] [visual-evidence] terminal shows the new output\n");
+    const { ports, calls } = fakePorts({ repoCwd: repo });
+    expect(recordExecutionProfile(ports, "C-2", "US-V4B", undefined)).toBe("verified");
+    expect(profileEvents(calls)[0]).toMatchObject({ profile: "verified" });
+  });
+
+  it("records planned for a truth/release-semantics story", () => {
+    const repo = repoWithSpec("US-V4C", "## Context\nChange the release consistency gate + DeliveryRecord truth.\n\n## Acceptance Criteria\n- [ ] gate reads structured truth\n");
+    const { ports, calls } = fakePorts({ repoCwd: repo });
+    expect(recordExecutionProfile(ports, "C-3", "US-V4C", undefined)).toBe("planned");
+    expect(profileEvents(calls)[0]).toMatchObject({ profile: "planned" });
+  });
+
+  it("backwards compat: a missing spec falls back to standard (no v4 config needed)", () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-v4-004-nospec-")));
+    execDirs.push(repo);
+    const { ports, calls } = fakePorts({ repoCwd: repo });
+    expect(recordExecutionProfile(ports, "C-4", "US-NONE", undefined)).toBe("standard");
+    // Still records the (standard) decision durably.
+    expect(profileEvents(calls)[0]).toMatchObject({ profile: "standard" });
   });
 });

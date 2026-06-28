@@ -113,15 +113,17 @@ describe("roll story new — US-META-009", () => {
     expect(existsSync(join(p, ".roll", "features", "uncategorized", "IDEA-9", "spec.md"))).toBe(true);
   });
 
-  it("FIX-231: minting refreshes the dossier aggregate pages — the new card is on the front page immediately", () => {
+  it("US-V4-001: minting does NOT refresh the global dossier front page (no delivery side effect)", () => {
     const p = project();
     expect(inProj(p, ["US-NEW-1", "--title", "一条新故事", "--epic", "alpha"]).code).toBe(0);
-    const front = readFileSync(join(p, ".roll", "features", "index.html"), "utf8");
-    expect(front).toContain("US-NEW-1");
-    // the existing story page (mount board) must NOT be clobbered by the refresh.
-    const storyIdx = join(p, ".roll", "features", "alpha", "US-NEW-1", "index.html");
-    writeFileSync(storyIdx, "<html>MOUNTED-MARK</html>");
-    expect(inProj(p, ["FIX-8", "--title", "另一张"]).code).toBe(0);
-    expect(readFileSync(storyIdx, "utf8")).toContain("MOUNTED-MARK");
+    // The global front page is rendered ON DEMAND by `roll index`, never as a
+    // side effect of minting a card. Card creation only writes the story's own
+    // spec + skeleton page + the lightweight index.json cache.
+    expect(existsSync(join(p, ".roll", "features", "index.html"))).toBe(false);
+    // The story's own skeleton page is still written at creation (renderStoryPage).
+    expect(existsSync(join(p, ".roll", "features", "alpha", "US-NEW-1", "index.html"))).toBe(true);
+    // The index.json cache records the new card's epic for live-walk-free lookups.
+    const idx = JSON.parse(readFileSync(join(p, ".roll", "index.json"), "utf8")) as { stories: Record<string, string> };
+    expect(idx.stories["US-NEW-1"]).toBe("alpha");
   });
 });

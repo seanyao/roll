@@ -2493,16 +2493,13 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r.event).toEqual({ type: "published", result: { status: 0, manualMerge: true, draft: true } });
   });
 
-  it("US-DOSSIER-007 AC2: publish_pr mounts the execution section onto the story dossier at PR-open", async () => {
+  it("US-V4-001: publish_pr does NOT mount an execution section onto a story index.html", async () => {
     const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-exec-mount-")));
     execDirs.push(repo);
     const dir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
     mkdirSync(dir, { recursive: true });
-    writeFileSync(
-      join(dir, "index.html"),
-      '<html><section class="phase phase-pending" data-phase="execution"><h2>x</h2><p>e</p></section></html>',
-      "utf8",
-    );
+    const skeleton = '<html><section class="phase phase-pending" data-phase="execution"><h2>x</h2><p>e</p></section></html>';
+    writeFileSync(join(dir, "index.html"), skeleton, "utf8");
     const { ports } = fakePorts({
       repoCwd: repo,
       github: {
@@ -2513,31 +2510,32 @@ describe("executeCommand — command → executor mapping", () => {
     });
     const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
     expect(r.event).toEqual({ type: "published", result: { status: 0, manualMerge: false } });
+    // The story page is left BYTE-FOR-BYTE untouched: publish records the PR in
+    // events + DeliveryRecord, never by mounting onto a dossier page (v4).
     const out = readFileSync(join(dir, "index.html"), "utf8");
-    expect(out).toContain("PR #321");
-    expect(out).toContain('class="phase phase-done" data-phase="execution"');
+    expect(out).toBe(skeleton);
+    expect(out).not.toContain("PR #321");
   });
 
-  it("FIX-290 AC5/AC6: a non-delivery (idle) cycle terminal triggers a dossier refresh so it surfaces on #loop", async () => {
+  it("US-V4-001: an idle cycle terminal does NOT refresh the global dossier (no side effect)", async () => {
     const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-290-idle-refresh-")));
     execDirs.push(repo);
     const featuresDir = join(repo, ".roll", "features");
     mkdirSync(featuresDir, { recursive: true });
     writeFileSync(join(repo, ".roll", "backlog.md"), "## Backlog\n\n- 📋 Todo US-RUN-001 demo card\n", "utf8");
-    // A STALE index.html carrying a marker the real regen never emits — if the
-    // idle terminal refreshes the dossier, the regenerate overwrites it and the
-    // marker is gone (the FIX-290 bug was: only DELIVERY regenerated the board).
+    // A stale page marker: if the idle terminal regenerated the dossier it would
+    // be overwritten. v4 removed that side effect, so the marker MUST survive.
     const indexPath = join(featuresDir, "index.html");
-    writeFileSync(indexPath, "<!-- STALE-BEFORE-FIX290 -->", "utf8");
+    writeFileSync(indexPath, "<!-- STALE-NO-REFRESH -->", "utf8");
     const { ports } = fakePorts({ repoCwd: repo });
     await executeCommand(
       { kind: "append_run", status: "idle", outcome: "idle_no_work", cycleId: CTX.cycleId },
       ports,
       CTX,
     );
-    const out = readFileSync(indexPath, "utf8");
-    expect(out).not.toContain("STALE-BEFORE-FIX290"); // refresh ran → board regenerated
-    expect(out.length).toBeGreaterThan(100); // a real console, not the stale stub
+    // Cycle terminal is event-only; the dossier page is rendered on demand by
+    // `roll index`, never as a delivery/terminal side effect.
+    expect(readFileSync(indexPath, "utf8")).toBe("<!-- STALE-NO-REFRESH -->");
   });
 
   it("FIX-245: a pre-existing OPEN PR on the cycle branch is ADOPTED — no second create, discipline alert logged", async () => {

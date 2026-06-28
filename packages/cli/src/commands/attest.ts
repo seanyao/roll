@@ -25,7 +25,6 @@
  */
 import {
   acForStory,
-  bi,
   parseBacklog,
   renderReport,
   ansiPre,
@@ -73,13 +72,11 @@ import {
 import { execFile, execFileSync } from "node:child_process";
 import { basename, dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
-import { cardArchiveDir, epicFromFeaturePath, findFeatureFile, findFeatureFiles, generateIndex, reportFileName } from "../lib/archive.js";
+import { cardArchiveDir, epicFromFeaturePath, findFeatureFile, findFeatureFiles, reportFileName } from "../lib/archive.js";
 import { physicalTerminalFromSpecText } from "../lib/physical-terminal.js";
 import { plannedVsDeliveredEvidence } from "../runner/attest-gate.js";
 import { readReviewScoreTrend, readStoryReviewScores } from "../lib/review-score.js";
-import { markPhaseDone } from "../lib/story-page.js";
 import { collectToolEvidenceFromEventsPath, formatToolCostSummary } from "../lib/tool-display.js";
-import { refreshAggregates } from "./index-gen.js";
 
 // Re-export so existing importers (tests, callers) keep their entry point.
 export { findFeatureFile } from "../lib/archive.js";
@@ -732,35 +729,6 @@ export function detectAfterOnly(runDir: string): AfterOnlyShot[] {
   return shots;
 }
 
-function escHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-function webJoin(...parts: string[]): string {
-  return parts.filter((p) => p !== "").join("/").replace(/\\/g, "/").replace(/\/+/g, "/");
-}
-
-function dossierVisualsHtml(runRel: string, pairs: BeforeAfterPair[], afterOnly: AfterOnlyShot[]): string {
-  const figs: string[] = [];
-  for (const p of pairs) {
-    const before = webJoin(runRel, p.before.href ?? "");
-    const after = webJoin(runRel, p.after.href ?? "");
-    figs.push(
-      `<div class="delivery-shot-pair" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:10px 0;">` +
-        `<figure style="margin:0;"><a href="${escHtml(before)}"><img src="${escHtml(before)}" alt="${escHtml(p.before.label)}" style="width:100%;height:auto;border-radius:6px;"></a><figcaption>${bi("Before", "改前")} ${escHtml(p.label)}</figcaption></figure>` +
-        `<figure style="margin:0;"><a href="${escHtml(after)}"><img src="${escHtml(after)}" alt="${escHtml(p.after.label)}" style="width:100%;height:auto;border-radius:6px;"></a><figcaption>${bi("After", "改后")} ${escHtml(p.label)}</figcaption></figure>` +
-      `</div>`,
-    );
-  }
-  for (const shot of afterOnly) {
-    const href = webJoin(runRel, shot.shot.href ?? "");
-    figs.push(
-      `<figure class="delivery-shot-single" style="margin:10px 0;"><a href="${escHtml(href)}"><img src="${escHtml(href)}" alt="${escHtml(shot.shot.label)}" style="width:100%;max-width:720px;height:auto;border-radius:6px;"></a><figcaption>${bi("After", "改后")} ${escHtml(shot.label)}</figcaption></figure>`,
-    );
-  }
-  return figs.length > 0 ? `<div class="delivery-shots">${figs.join("\n")}</div>\n` : "";
-}
-
 const USAGE = [
   "Usage: roll attest <story-id> [--deploy-url <url>] [--run-dir <path>]",
   "                   [--capture-terminal | --capture-tmux <session> | --capture-command <cmd>]",
@@ -1129,6 +1097,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     facts: { tcrCount: manifest.tcr_commits.length, ciConclusion: manifest.ci.conclusion, testPassAge: age },
     ...(context !== undefined ? { context } : {}),
     ...(beforeAfter.length > 0 ? { beforeAfter } : {}),
+    ...(afterOnly.length > 0 ? { afterOnly: afterOnly.map((a) => a.shot) } : {}),
     ...(processArchive !== undefined ? { process: processArchive } : {}),
     ...(docGap !== undefined ? { docGap } : {}),
     ...(reviewScores.length > 0 ? { reviewScores } : {}),
@@ -1153,42 +1122,20 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     warn("latest symlink update failed (report still written)");
   }
 
-  // US-META-006: update index.html delivery section if the skeleton exists.
-  const indexPath = join(storyDir, "index.html");
-  if (existsSync(indexPath)) {
-    try {
-      const runRel = relativeFromPhysical(storyDir, runDir).replace(/\\/g, "/");
-      const reportRel = join(runRel, reportFileName(storyId)).replace(/\\/g, "/");
-      const deliveryHtml =
-        `<p><a href="${reportRel}">${bi("Attestation report", "验收报告")}</a></p>\n` +
-        dossierVisualsHtml(runRel, beforeAfter, afterOnly) +
-        `<p class="muted">${bi("Delivered", "交付于")} ${new Date().toISOString().slice(0, 10)}</p>\n`;
-      const idx = markPhaseDone(readFileSync(indexPath, "utf8"), "delivery", deliveryHtml);
-      writeFileSync(indexPath, idx, "utf8");
-    } catch {
-      /* best-effort: index.html update is non-blocking */
-    }
-  }
-
   // Render smoke (US-ATTEST-012): the report exists — but is it actually
   // openable? A broken <img> ref or an external CDN asset is a real defect, so
   // (unlike the never-block degrade path) a smoke failure is surfaced as a
   // NON-ZERO exit. The report file stays on disk — evidence is never discarded.
   const smoke = smokeCheckReport(html, (rel) => existsSync(join(runDir, rel)));
   process.stdout.write(`Acceptance report written\n验收报告已生成\n  ${relative(projectPath, reportPath)}\n`);
-  // US-META-009: archive self-heal — a fresh report changes the dossier's
-  // truth, so refresh the ID→epic index right here (best-effort, never blocks
-  // the evidence path). Projects that never ran `roll index` converge on
-  // their first attest instead of drifting (SoloGo shape).
-  try {
-    generateIndex(projectPath);
-  } catch {
-    /* never block the evidence path */
-  }
-  // FIX-231: same truth change must reach the board's aggregate pages (front +
-  // epic) — without this the new report is invisible until a manual `roll
-  // index`. Mounted story pages are never clobbered (US-DOSSIER-007).
-  refreshAggregates(projectPath);
+  // US-V4-001: attest is STORY-SCOPED. It writes only this story's immutable run
+  // report (`<run-id>/<ID>-report.html`) + the `latest/` pointer above — nothing
+  // else. It deliberately no longer mounts a story `index.html` delivery section,
+  // regenerates `.roll/index.json`, or refreshes the global dossier/epic pages.
+  // Delivery truth is the story-scoped report + structured evidence + main
+  // reconciliation; the global dossier/index/web refresh plane is not a v4
+  // delivery side effect. (Was: US-META-006 index.html mount, US-META-009
+  // generateIndex self-heal, FIX-231 refreshAggregates.)
   if (!smoke.ok) {
     for (const p of smoke.problems) warn(`render smoke: ${p}`);
     return 2;

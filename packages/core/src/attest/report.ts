@@ -158,6 +158,11 @@ export interface ReportInput {
   context?: CardContext;
   /** US-ATTEST-013 — before/after comparison pairs (empty ⇒ section trimmed). */
   beforeAfter?: BeforeAfterPair[];
+  /** US-EVID-004 / US-V4-001 — after-only delivery visuals for brand-new
+   *  surfaces (no `before-*` counterpart). Rendered inside the same Before/After
+   *  section so the evidence has a home in the STORY-SCOPED report now that the
+   *  global dossier delivery page is retired. Empty/absent ⇒ nothing emitted. */
+  afterOnly?: EvidenceRef[];
   /** Summary facts row (counts come from evidence.json). */
   facts?: { tcrCount: number; ciConclusion: string; testPassAge: string };
   /** US-ATTEST-009 — same-story Review Score entries from .roll/notes/; the
@@ -303,13 +308,12 @@ ${techHtml}
  * emitted only for a ref that carries an href; a pair with neither shot is
  * dropped, and an empty list trims the whole section (全新功能免出).
  */
-function beforeAfterBlock(pairs: ReportInput["beforeAfter"]): string {
-  if (pairs === undefined || pairs.length === 0) return "";
+function beforeAfterBlock(pairs: ReportInput["beforeAfter"], afterOnly?: ReportInput["afterOnly"]): string {
   const fig = (ref: EvidenceRef, side: string, cls: string): string =>
     ref.href !== undefined
       ? `<figure class="shot ${cls}"><img src="${esc(ref.href)}" alt="${esc(ref.label)}"><figcaption>${side}：${esc(ref.label)}</figcaption></figure>`
       : "";
-  const groups = pairs
+  const groups = (pairs ?? [])
     .map((p) => {
       const before = fig(p.before, bi("Before", "改前"), "ba-before");
       const after = fig(p.after, bi("After", "改后"), "ba-after");
@@ -317,8 +321,14 @@ function beforeAfterBlock(pairs: ReportInput["beforeAfter"]): string {
       return `<div class="before-after"><h3>${esc(p.label)}</h3><div class="ba-pair">${before}${after}</div></div>`;
     })
     .filter((s) => s !== "");
-  if (groups.length === 0) return "";
-  return `<section class="before-after-section"><h2>${bi("Before / After", "对照实拍")}</h2>\n${groups.join("\n")}\n</section>`;
+  // US-V4-001: after-only delivery shots (brand-new surfaces) render in the same
+  // section so they keep an evidence home in the story-scoped report.
+  const singles = (afterOnly ?? [])
+    .map((ref) => fig(ref, bi("After", "改后"), "ba-after delivery-shot-single"))
+    .filter((s) => s !== "");
+  if (groups.length === 0 && singles.length === 0) return "";
+  const body = [...groups, ...singles].join("\n");
+  return `<section class="before-after-section"><h2>${bi("Before / After", "对照实拍")}</h2>\n${body}\n</section>`;
 }
 
 /**
@@ -627,7 +637,7 @@ ${CHROME_CONTROLS}
 ${cardContextBlock(input.context)}
 <p>${summary}</p>
 ${items.map(acSection).join("\n")}
-${beforeAfterBlock(input.beforeAfter)}
+${beforeAfterBlock(input.beforeAfter, input.afterOnly)}
 ${selfCaptureBlock(input.selfCaptures)}
 ${captureSkipBlock(input.captureSkips)}
 ${processTraceBlock(input.process)}

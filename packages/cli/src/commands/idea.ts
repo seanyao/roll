@@ -32,7 +32,6 @@ import { type Lang, resolveLang, t, v2Catalog, v3Catalog } from "@roll/spec";
 import { generateIndex } from "../lib/archive.js";
 import { UNCATEGORIZED } from "../lib/archive.js";
 import { renderSpecMd, renderStoryPage } from "../lib/story-page.js";
-import { refreshAggregates } from "./index-gen.js";
 import { c, renderState } from "../render.js";
 
 const BACKLOG_PATH = ".roll/backlog.md";
@@ -136,13 +135,14 @@ export function ideaCommand(args: string[]): number {
     /* best-effort: folder creation is non-blocking */
   }
 
-  // FIX-231: a new card changes the board's truth — refresh index and dossier
-  // aggregate pages so it appears on the front page immediately.
+  // US-V4-001: maintain the lightweight `.roll/index.json` ID→epic CACHE at card
+  // creation (best-effort; the live-first locator works without it). The global
+  // dossier/epic page refresh is NO LONGER a delivery side effect — run
+  // `roll index` to (re)render those pages on demand.
   try {
     generateIndex(projectPath);
-    refreshAggregates(projectPath);
   } catch {
-    /* index refresh is best-effort; attest re-derives via live walk */
+    /* index cache is best-effort; the locator re-derives via live walk */
   }
 
   return 0;

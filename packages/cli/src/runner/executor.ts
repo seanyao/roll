@@ -173,8 +173,7 @@ import { applyCorrectionAction } from "./correction-actuator.js";
 import { buildPairScorePrompt, buildReviewPrompt, enabledPairingStages, parsePairScoreOutput, retryPeerConsult, runPairing, runScorePairing, type PairEvent, type PairReview } from "./pairing-gate.js";
 import { realAgentEnv } from "../commands/agent-list.js";
 import { attestCommand } from "../commands/attest.js";
-import { refreshAggregates } from "../commands/index-gen.js";
-import { cardArchiveDir, mountExecutionAtPublish } from "../lib/archive.js";
+import { cardArchiveDir } from "../lib/archive.js";
 import { formatEvaluationContractForScorer, parseEvaluationContract } from "../lib/evaluation-contract.js";
 import { readLatestStoryReviewScore, REVIEW_SCORE_LOW_THRESHOLD, type ReviewScoreEntry } from "../lib/review-score.js";
 
@@ -2334,12 +2333,11 @@ export async function executeCommand(
         ? planPublishDocPr({ branch: cmd.branch, slug, body: publishBody(ctx), manualMerge, draft: cmd.draft })
         : planPublishPr({ branch: cmd.branch, slug, body: publishBody(ctx), manualMerge, draft: cmd.draft });
       const r = await ports.github.runPublishPlan(plan);
-      // US-DOSSIER-007 AC2: mount the execution section onto the story dossier at
-      // PR-open with the fact known now (the PR link), not reconstructed later
-      // from squash-flattened history. Best-effort; never blocks the cycle.
-      if (r.status === 0 && r.prUrl !== "" && !cmd.docOnly && ctx.storyId !== undefined) {
-        mountExecutionAtPublish(ports.repoCwd, ctx.storyId, r.prUrl);
-      }
+      // US-V4-001: publish no longer mounts a PR link onto a story `index.html`
+      // dossier page — the global dossier/story-page refresh is not a v4 delivery
+      // side effect. The PR fact lives in the DeliveryRecord + events below and is
+      // surfaced by `roll cycles` / `roll truth`; render dossier pages on demand
+      // with `roll index`.
       // US-TRUTH-015 AC1 + FIX-389b: write DeliveryRecord on successful publish.
       // This is now an OPTIONAL CACHE WARM — the correctness path is runs+git
       // projection (FIX-389a). The DeliveryRecord here is immediately available
@@ -2643,12 +2641,10 @@ export async function executeCommand(
       if (!terminalMerged && terminalStoryId !== "") {
         resetStaleSpecTruth(ports, terminalStoryId);
       }
-      // FIX-290 AC5: a failed/idle cycle is first-class — refresh the dossier
-      // aggregates on EVERY cycle terminal so the cycle surfaces on the web #loop
-      // ledger immediately, not only after the next delivery (which mounted the
-      // execution section at publish) or a manual `roll index`. Best-effort: a
-      // refresh failure WARNs and never fails the cycle terminal.
-      refreshAggregates(ports.repoCwd);
+      // US-V4-001: a cycle terminal no longer refreshes the global dossier
+      // aggregate pages as a side effect. Cycle facts are durable events
+      // (events.ndjson / runs.jsonl) surfaced by `roll cycles` / `roll cycle
+      // watch` / `roll truth`; render dossier pages on demand with `roll index`.
       // FIX-306: the RUNNER commits + pushes the `.roll` metadata repo — the
       // sandboxed agent (codex) only WROTE its files (acceptance report, evidence,
       // ac-map, backlog marks) and CANNOT git-commit `.roll` (its git-internal dir

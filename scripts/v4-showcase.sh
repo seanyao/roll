@@ -98,9 +98,21 @@ hr "4+5. roll attest US-V4-008   (story-scoped report; no global dossier refresh
 # Physical Terminal.app screenshots are Evaluator evidence work; on a headless /
 # no-Screen-Recording host the capture lane records an HONEST skip (never a fake
 # image, never an owner ask). The story-scoped report is still produced.
+INDEX_BEFORE="absent"
+if [ -f .roll/features/index.html ]; then
+  INDEX_BEFORE="$(cksum .roll/features/index.html)"
+fi
 $ROLL_BIN attest US-V4-008 || true
+INDEX_AFTER="absent"
+if [ -f .roll/features/index.html ]; then
+  INDEX_AFTER="$(cksum .roll/features/index.html)"
+fi
 echo "   → report:  .roll/features/autonomous-evolution/US-V4-008/latest/US-V4-008-report.html"
-echo "   → attest writes ONLY the story folder; it does NOT write .roll/features/index.html:"
-test ! -f .roll/features/index.html && echo "     [ok] no global dossier index written by delivery"
+echo "   → attest writes ONLY the story folder; it does NOT refresh .roll/features/index.html:"
+if [ "$INDEX_BEFORE" = "$INDEX_AFTER" ]; then
+  echo "     [ok] global dossier index unchanged"
+else
+  echo "     [warn] global dossier index changed"
+fi
 
 hr "showcase complete"

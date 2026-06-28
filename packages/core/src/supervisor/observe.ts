@@ -44,8 +44,9 @@ export function observeProject(input: SupervisorInput): SupervisorFacts {
   }
   const stuckStories = input.recentFailures
     .filter((f) => f.consecutiveFailures >= SUPERVISOR_STUCK_THRESHOLD)
-    .map((f) => f.storyId);
-  const blockers = [...input.releaseBlockers, ...truthDrift.map((id) => `${id}: backlog Done but main truth unconfirmed`)];
+    .map((f) => f.storyId.trim())
+    .filter((id) => id !== "");
+  const blockers = [...input.releaseBlockers];
   const budgetHealth =
     input.budget === undefined || input.budget.cap === null
       ? { ok: true, note: "no budget cap set" }

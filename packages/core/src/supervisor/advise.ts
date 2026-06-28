@@ -10,13 +10,22 @@
  */
 import type { SupervisorDecision, SupervisorFacts, SupervisorInput } from "@roll/spec";
 
+function summarizeIds(ids: readonly string[], limit = 5): string {
+  if (ids.length === 0) return "none";
+  const shown = ids.slice(0, limit).join(", ");
+  const remaining = ids.length - limit;
+  return remaining > 0 ? `${shown}, … +${remaining} more` : shown;
+}
+
 /** Produce the Supervisor's ordered advice from the project facts. Pure. */
 export function adviseProject(facts: SupervisorFacts): SupervisorDecision[] {
   const decisions: SupervisorDecision[] = [];
   if (facts.truthDrift.length > 0) {
     decisions.push({
-      kind: "release-readiness",
-      reason: `truth drift: ${facts.truthDrift.length} story(ies) claim Done but main truth disagrees (${facts.truthDrift.join(", ")})`,
+      kind: "escalate",
+      reason:
+        `truth coverage partial: ${facts.truthDrift.length} Done row(s) lack structured delivery truth ` +
+        `(${summarizeIds(facts.truthDrift)}). This is a backfill/audit task, not a release blocker unless release consistency fails.`,
       evidence: [],
       requiresOwner: true,
     });
@@ -24,7 +33,7 @@ export function adviseProject(facts: SupervisorFacts): SupervisorDecision[] {
   if (facts.stuckStories.length > 0) {
     decisions.push({
       kind: "escalate",
-      reason: `stuck stories (repeated failures): ${facts.stuckStories.join(", ")}`,
+      reason: `stuck stories (repeated failures): ${summarizeIds(facts.stuckStories)}`,
       evidence: [],
       requiresOwner: true,
     });
@@ -43,7 +52,7 @@ export function adviseProject(facts: SupervisorFacts): SupervisorDecision[] {
   if (!facts.releaseReadiness.ready) {
     decisions.push({
       kind: "release-readiness",
-      reason: `release blocked: ${facts.releaseReadiness.blockers.join("; ")}`,
+      reason: `release blocked: ${summarizeIds(facts.releaseReadiness.blockers)}`,
       evidence: [],
       requiresOwner: true,
     });
@@ -79,8 +88,8 @@ export function recommendNext(input: SupervisorInput): { storyId: string | null;
 /** US-V4-008 — answer "why is the project stuck?" from the facts. */
 export function explainStuck(facts: SupervisorFacts): string {
   const parts: string[] = [];
-  if (facts.stuckStories.length > 0) parts.push(`repeated failures on: ${facts.stuckStories.join(", ")}`);
-  if (facts.truthDrift.length > 0) parts.push(`truth drift on: ${facts.truthDrift.join(", ")}`);
+  if (facts.stuckStories.length > 0) parts.push(`repeated failures on: ${summarizeIds(facts.stuckStories)}`);
+  if (facts.truthDrift.length > 0) parts.push(`truth coverage partial on: ${summarizeIds(facts.truthDrift)}`);
   if (facts.routeConfigErrors.length > 0) parts.push(`route config errors: ${facts.routeConfigErrors.join("; ")}`);
   if (!facts.budgetHealth.ok) parts.push(facts.budgetHealth.note);
   if (facts.counts.todo === 0 && facts.openPrCount === 0) parts.push("no Todo work and no open PRs");

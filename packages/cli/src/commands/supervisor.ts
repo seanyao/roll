@@ -17,20 +17,25 @@
 import {
   EventBus,
   adviseProject,
+  ensureDeliveriesFresh,
   explainStuck,
   normalizeAgentConfig,
   observeProject,
   parseBacklog,
+  queryStoryDelivery,
+  type ExecPort,
   recommendNext,
+  type FreshnessPort,
 } from "@roll/core";
 import type { RollEvent, SupervisorInput } from "@roll/spec";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 export const SUPERVISOR_USAGE = [
   "Usage: roll supervisor [status|observe|advise|next|why] [--json]",
   "  status           observe + advise summary (alias for no subcommand)",
-  "  observe          structured project facts (backlog, truth drift, PRs, release readiness)",
+  "  observe          structured project facts (backlog, truth coverage, PRs, release readiness)",
   "  advise           Supervisor decisions (advisory; persistent changes need owner confirmation)",
   "  next             what should Roll do next?",
   "  why              why is the project stuck?",
@@ -39,6 +44,50 @@ export const SUPERVISOR_USAGE = [
 function depsOf(desc: string): string[] {
   const m = /depends-on:\s*([A-Za-z0-9_,-]+)/i.exec(desc);
   return m === null ? [] : (m[1] ?? "").split(",").map((s) => s.trim()).filter((s) => s !== "");
+}
+
+const nodeFreshnessPort: FreshnessPort = {
+  mtimeMs(absPath: string): number | undefined {
+    try {
+      return statSync(absPath).mtimeMs;
+    } catch {
+      return undefined;
+    }
+  },
+  readText(absPath: string): string {
+    try {
+      return readFileSync(absPath, "utf8");
+    } catch {
+      return "";
+    }
+  },
+  writeText(absPath: string, text: string): void {
+    mkdirSync(dirname(absPath), { recursive: true });
+    writeFileSync(absPath, text, "utf8");
+  },
+};
+
+const quietExecPort: ExecPort = {
+  run(tool: string, argv: readonly string[]) {
+    try {
+      const stdout = execFileSync(tool, [...argv], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      return { stdout: stdout.trim(), code: 0 };
+    } catch (err: unknown) {
+      const e = err as { stdout?: Buffer | string; status?: number | null };
+      const out = e.stdout === undefined ? "" : e.stdout.toString();
+      return { stdout: out.trim(), code: typeof e.status === "number" ? e.status : 1 };
+    }
+  },
+};
+
+function summarizeList(items: readonly string[], limit = 5): string {
+  if (items.length === 0) return "none";
+  const shown = items.slice(0, limit).join(", ");
+  const remaining = items.length - limit;
+  return remaining > 0 ? `${shown}, … +${remaining} more` : shown;
 }
 
 /** Gather the Supervisor's structured input from project state (deterministic). */
@@ -76,6 +125,17 @@ export function gatherSupervisorInput(projectPath: string): SupervisorInput {
       }
     }
   }
+
+  try {
+    const deliveries = ensureDeliveriesFresh(projectPath, nodeFreshnessPort, quietExecPort);
+    for (const row of backlog) {
+      if (queryStoryDelivery(row.id, deliveries).delivered) merged.add(row.id);
+    }
+  } catch {
+    // Keep Supervisor observe usable in partial/non-git projects; event truth is
+    // still consumed above, and missing delivery truth is rendered as coverage.
+  }
+
   const openPrStories = [...opened].filter((s) => !merged.has(s));
   const recentFailures = [...failuresByStory.entries()]
     .filter(([, n]) => n > 0)
@@ -93,16 +153,20 @@ export function gatherSupervisorInput(projectPath: string): SupervisorInput {
 
 function fmtFacts(input: SupervisorInput): string {
   const f = observeProject(input);
+  const truthCoverage =
+    f.truthDrift.length === 0
+      ? "complete"
+      : `partial — ${f.truthDrift.length} Done row(s) lack structured delivery truth (${summarizeList(f.truthDrift)}); run roll truth audit for detail`;
   const lines = [
     "",
     "  Supervisor Agent — project facts (observe)",
     "",
     `    backlog: ${f.counts.todo} todo · ${f.counts.inProgress} in-progress · ${f.counts.blocked} blocked · ${f.counts.done} done`,
     `    open PRs: ${f.openPrCount}`,
-    `    truth drift: ${f.truthDrift.length === 0 ? "none" : f.truthDrift.join(", ")}`,
-    `    stuck stories: ${f.stuckStories.length === 0 ? "none" : f.stuckStories.join(", ")}`,
-    `    route config: ${f.routeConfigErrors.length === 0 ? "ok" : f.routeConfigErrors.join("; ")}`,
-    `    release: ${f.releaseReadiness.ready ? "ready" : "blocked — " + f.releaseReadiness.blockers.join("; ")}`,
+    `    truth coverage: ${truthCoverage}`,
+    `    stuck stories: ${summarizeList(f.stuckStories)}`,
+    `    route config: ${f.routeConfigErrors.length === 0 ? "ok" : summarizeList(f.routeConfigErrors)}`,
+    `    release: ${f.releaseReadiness.ready ? "ready" : "blocked — " + summarizeList(f.releaseReadiness.blockers)}`,
     `    budget: ${f.budgetHealth.note}`,
     "",
   ];

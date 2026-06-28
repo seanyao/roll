@@ -41,7 +41,19 @@ describe("observeProject", () => {
   it("flags truth drift: backlog Done but main truth unconfirmed", () => {
     const f = observeProject(input({ backlog: [{ id: "US-9", status: "✅ Done" }], delivered: [] }));
     expect(f.truthDrift).toEqual(["US-9"]);
-    expect(f.releaseReadiness.ready).toBe(false);
+    expect(f.releaseReadiness.ready).toBe(true);
+  });
+
+  it("keeps release readiness tied to explicit release blockers, not legacy truth coverage", () => {
+    const f = observeProject(
+      input({
+        backlog: [{ id: "US-9", status: "✅ Done" }],
+        delivered: [],
+        releaseBlockers: ["US-10: release delta missing delivery truth"],
+      }),
+    );
+    expect(f.truthDrift).toEqual(["US-9"]);
+    expect(f.releaseReadiness).toEqual({ ready: false, blockers: ["US-10: release delta missing delivery truth"] });
   });
 
   it("flags stuck stories at/above the threshold", () => {
@@ -49,6 +61,7 @@ describe("observeProject", () => {
       input({
         recentFailures: [
           { storyId: "US-1", consecutiveFailures: SUPERVISOR_STUCK_THRESHOLD },
+          { storyId: " ", consecutiveFailures: SUPERVISOR_STUCK_THRESHOLD },
           { storyId: "US-2", consecutiveFailures: 1 },
         ],
       }),
@@ -70,17 +83,41 @@ describe("observeProject", () => {
 });
 
 describe("adviseProject — advisory, owner-gated", () => {
-  it("emits release-readiness on truth drift (owner confirmation required)", () => {
+  it("summarizes truth coverage without turning legacy Done rows into release blockers", () => {
     const f = observeProject(input({ backlog: [{ id: "US-9", status: "✅ Done" }] }));
     const d = adviseProject(f);
-    const drift = d.find((x) => x.reason.includes("truth drift"));
-    expect(drift?.kind).toBe("release-readiness");
+    const drift = d.find((x) => x.reason.includes("truth coverage"));
+    expect(drift?.kind).toBe("escalate");
     expect(drift?.requiresOwner).toBe(true);
+    expect(d.some((x) => x.reason.includes("release blocked"))).toBe(false);
+  });
+
+  it("caps long truth coverage advice", () => {
+    const f = observeProject(
+      input({
+        backlog: Array.from({ length: 12 }, (_, i) => ({ id: `US-${i + 1}`, status: "✅ Done" })),
+      }),
+    );
+    const drift = adviseProject(f).find((x) => x.reason.includes("truth coverage"));
+    expect(drift?.reason).toContain("12 Done row(s)");
+    expect(drift?.reason).toContain("US-1, US-2, US-3, US-4, US-5");
+    expect(drift?.reason).toContain("… +7 more");
   });
 
   it("escalates stuck stories", () => {
     const f = observeProject(input({ recentFailures: [{ storyId: "US-1", consecutiveFailures: 3 }] }));
     expect(adviseProject(f).some((x) => x.kind === "escalate" && x.requiresOwner)).toBe(true);
+  });
+
+  it("caps long stuck-story advice", () => {
+    const f = observeProject(
+      input({
+        recentFailures: Array.from({ length: 8 }, (_, i) => ({ storyId: `US-STUCK-${i + 1}`, consecutiveFailures: 3 })),
+      }),
+    );
+    const stuck = adviseProject(f).find((x) => x.reason.includes("stuck stories"));
+    expect(stuck?.reason).toContain("US-STUCK-1, US-STUCK-2, US-STUCK-3, US-STUCK-4, US-STUCK-5");
+    expect(stuck?.reason).toContain("… +3 more");
   });
 
   it("recommends a route change on config errors (never auto-applies)", () => {
@@ -135,7 +172,7 @@ describe("explainStuck — why is the project stuck?", () => {
     const f = observeProject(input({ recentFailures: [{ storyId: "US-1", consecutiveFailures: 3 }], backlog: [{ id: "US-9", status: "✅ Done" }] }));
     const why = explainStuck(f);
     expect(why).toContain("repeated failures");
-    expect(why).toContain("truth drift");
+    expect(why).toContain("truth coverage");
   });
   it("says not-stuck when work is flowing", () => {
     const f = observeProject(input({ backlog: [{ id: "US-1", status: "📋 Todo" }], openPrStories: ["US-1"] }));

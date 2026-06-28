@@ -86,6 +86,7 @@ with `roll loop resume` when ready.
 | `roll backlog [sync\|block\|defer\|lint\|…]` | View, manage, and sync (from GitHub Issues) pending tasks |
 | `roll loop alert [list\|ack\|resolve\|log]` | View / clear loop alerts |
 | `roll status` | Verdict-first truth summary read from the ONE snapshot — LOOP · CYCLE · RELEASE · STORY, with the STORY line's attest-coverage % (`done ≡ merged ∧ attested`) — then convention/AI-client sync health |
+| `roll supervisor [observe\|advise\|next\|why] [--json]` | Project-level Supervisor Agent (v0 observe/advise): reads backlog, merge truth, open PRs, route config, repeated failures, and release readiness, then emits advisory decisions. Cross-Story coordination only — never implements a Story; persistent policy changes need owner confirmation |
 | `roll pulse [--json]` | Today's delivery pulse: cycles in window, merged count, attested count, plus an ASCII sparkline from the story spectrum. Bilingual EN/中. `--json` for machine-readable output |
 | `roll doctor [skills\|--tools]` | Environment + install diagnosis; `roll doctor --tools` shows focused tool and screenshot readiness, including Terminal.app Screen Recording |
 | `roll daemon <start\|stop\|status>` | Opt-in read-only observability daemon for the live console; defaults to `127.0.0.1:7077`, records `.roll/loop/daemon.pid`, and is never auto-started by the loop |

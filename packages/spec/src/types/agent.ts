@@ -110,6 +110,39 @@ export interface StoryExecutionRun {
   readonly roles: readonly RoleRun[];
 }
 
+/** US-V4-008 — the structured facts the Supervisor Agent reads, gathered by
+ *  DETERMINISTIC selectors (no agent call needed to build them). Project-level
+ *  only — never a single Story's implementation. */
+export interface SupervisorInput {
+  /** Backlog rows: id + raw status cell + parsed depends-on ids. */
+  readonly backlog: readonly { readonly id: string; readonly status: string; readonly dependsOn?: readonly string[] }[];
+  /** Story ids confirmed delivered (merge evidence on main / queryStoryDelivery). */
+  readonly delivered: readonly string[];
+  /** Story ids with an OPEN PR/Cycle in flight. */
+  readonly openPrStories: readonly string[];
+  /** Per-story consecutive-failure counts (from terminal events). */
+  readonly recentFailures: readonly { readonly storyId: string; readonly consecutiveFailures: number }[];
+  /** Route-profile normalizer errors (unknown rig refs / malformed bindings). */
+  readonly routeConfigErrors: readonly string[];
+  /** Release-consistency blockers (e.g. backlog-says-Done but main disagrees). */
+  readonly releaseBlockers: readonly string[];
+  /** Optional daily budget signal: spent vs cap (same unit). */
+  readonly budget?: { readonly spent: number; readonly cap: number | null };
+}
+
+/** US-V4-008 — the Supervisor's projection over {@link SupervisorInput}. */
+export interface SupervisorFacts {
+  readonly counts: { readonly todo: number; readonly inProgress: number; readonly blocked: number; readonly done: number };
+  /** Stories the backlog claims Done that main truth does NOT confirm. */
+  readonly truthDrift: readonly string[];
+  readonly openPrCount: number;
+  /** Stories stuck on repeated failures (≥ the stuck threshold). */
+  readonly stuckStories: readonly string[];
+  readonly routeConfigErrors: readonly string[];
+  readonly releaseReadiness: { readonly ready: boolean; readonly blockers: readonly string[] };
+  readonly budgetHealth: { readonly ok: boolean; readonly note: string };
+}
+
 /** A Supervisor Agent decision record — project-level coordination, never Story
  *  implementation. `requiresOwner` gates persistent policy changes. */
 export interface SupervisorDecision {

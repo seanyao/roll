@@ -79,6 +79,7 @@ roll loop on
 | `roll backlog [sync\|block\|defer\|lint\|…]` | 查看、管理、从 GitHub Issues 同步待处理任务 |
 | `roll loop alert [list\|ack\|resolve\|log]` | 查看 / 清除 loop 告警 |
 | `roll status` | 判定优先的真相摘要，读自同一份快照——LOOP · CYCLE · RELEASE · STORY，STORY 行带 attest 验收覆盖率(`done ≡ 已合并 ∧ 已验收`)——其后是约定/AI 客户端同步健康 |
+| `roll supervisor [observe\|advise\|next\|why] [--json]` | 项目级 Supervisor Agent(v0 观察/建议):读取 backlog、合并真相、open PR、路由配置、重复失败与发布就绪，再给出建议性决策。只做跨 Story 协调——绝不实现具体 Story；持久化策略变更需 owner 确认 |
 | `roll pulse [--json]` | 今日交付脉搏：窗口内周期数、已合 merged 数、已验收 attested 数，外加一条来自故事光谱的 ASCII 火花线。双语中/EN。`--json` 输出机读 JSON |
 | `roll doctor [skills\|--tools]` | 环境与安装体检；`roll doctor --tools` 展示工具与真实截图权限预检，包括 Terminal.app Screen Recording |
 | `roll daemon <start\|stop\|status>` | 可选启用的只读实时控制台 daemon；默认 `127.0.0.1:7077`，记录 `.roll/loop/daemon.pid`，loop 从不自动启动它 |

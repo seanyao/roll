@@ -33,6 +33,7 @@ import { ciCommand, ciWaitCommand } from "./ci.js";
 import { configCommand } from "./config.js";
 import { CYCLE_USAGE, cycleCommand } from "./cycle.js";
 import { CYCLES_USAGE, cyclesCommand } from "./cycles.js";
+import { SUPERVISOR_USAGE, supervisorCommand } from "./supervisor.js";
 import { LS_USAGE, lsCommand } from "./ls.js"; // US-DOSSIER-028
 import { dashboardCommand, loopEvalCommand, loopStoryCommand } from "./dashboard.js";
 import { loopRunsCommand } from "./loop-runs.js";
@@ -149,6 +150,9 @@ export function registerAll(): void {
   registerPorted("cycles", cyclesCommand, { help: CYCLES_USAGE });
   // `cycle`: one cycle's trace tape (US-CLI-013) — the `roll cycles` tail hint target.
   registerPorted("cycle", cycleCommand, { help: CYCLE_USAGE });
+  // US-V4-008: `supervisor` — the project-level Supervisor Agent (observe/advise).
+  // Cross-Story coordination, never Story implementation.
+  registerPorted("supervisor", supervisorCommand, { help: SUPERVISOR_USAGE });
   // FIX-343 (AC1): the agent-facing self-grade command is REMOVED. The working
   // agent never grades its own delivery; the cycle's Review Score is produced
   // solely by a fresh-session peer Reviewer (runScorePairing). The only writer of

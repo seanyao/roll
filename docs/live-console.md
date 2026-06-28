@@ -1,4 +1,4 @@
-# 实时控制台指南 / Live Console Guide
+# CLI 实时观察指南 / CLI Live Observation Guide
 
 > roll 的 CLI-first 实时可观测：跟着一个正在跑的 cycle，看它的标准 activity 流，不依赖 web/daemon。
 
@@ -116,17 +116,17 @@ evidence  PR https://github.com/seanyao/roll/pull/999 · diff https://github.com
 
 **外挂不变量**：watch 窗口只消费 `ActivitySignal`；永不做 per-agent raw stream 解析。添加新 agent = 加一个 `normalizerFor(agent).normalize()`，watch 窗口零改动。
 
-## 静态导出 vs 实时服务 vs CLI watch
+## 静态导出 vs CLI watch
 
-三者是**同一标准流的三种发射器**——共享 `collectDossierState` / `cycleActivitySignalsFromEvents` 选择器，不同载体：
+当前产品面是 CLI-first：共享 `collectDossierState` / `cycleActivitySignalsFromEvents` 选择器，不同 CLI 入口读取同一批事实：
 
-| 发射器 | 触发 | 更新 | 依赖 |
+| 入口 | 触发 | 更新 | 依赖 |
 |--------|------|------|------|
 | `roll index`（静态） | 手动 | 不更新 | 无 |
-| daemon + web（实时） | 自动 | WebSocket 推送，~30s debounce | daemon 进程 |
 | `roll cycle watch`（CLI） | 手动 | `tail -F` 实时跟随 | 无（纯文件跟随） |
+| `roll status` / `roll pulse` / `roll loop runs` | 手动 | 命令时刻快照 | 无 |
 
-CLI watch 是唯一不需要外部进程的实时路径——终端开着就能看。web 实时控制台（`packages/web` 的 `ConsoleApp`）订阅 daemon 的 `DossierFrame`，degrade-to-static-snapshot 当 daemon 不在。
+CLI watch 是唯一不需要外部进程的实时路径——终端开着就能看。完整 Supervisor Live Console / 多角色 board 是后续工作；当前文档不把浏览器控制台作为已交付产品面。
 
 ## 证据按构造（方向）
 

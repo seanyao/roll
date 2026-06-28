@@ -1,6 +1,6 @@
 # Roll — 概述
 
-Roll 是一个自主交付系统。把目标写进 `.roll/backlog.md`，让 Roll 去执行。
+Roll 是 Supervisor-led 的交付 harness。把目标写下来，让 Roll 拆成 Story，并把每张 Story 路由进合适的 Planner / Builder / Evaluator 流程。
 
 ## 快速开始
 
@@ -13,18 +13,63 @@ roll setup && roll init
 roll next           # 接续 design/apply/repair/migrate/loop/status
 roll loop on        # AI 按可配置频次执行 BACKLOG
 roll loop status    # 查看调度状态和最近 cycle
-roll loop watch     # 可选：只读实时旁观当前 cycle
+roll loop watch     # 可选：CLI-first 实时旁观当前 cycle
 ```
 
 ## 工作原理
 
-Roll 运行在三个自主层上：
+Roll 以 V4 Supervisor 执行系统运行：
 
-- **Loop** — 按可配置频次从 BACKLOG 摘取最高优先级故事，在隔离的 worktree 里通过 `$roll-build` 执行。CI 通过后才会落到 `main`。
+- **Supervisor Agent** —— 项目级 observe/advise 角色。它读取 backlog、merge truth、open PR、route profile、重复失败、发布就绪和 owner 问题。它协调跨 Story 工作；不实现具体 Story，也不覆盖证据闸。
+- **Story Execution Unit** —— 一张 Story 由一个执行剖面交付：`standard` = Builder，`verified` = Builder -> Evaluator，`planned` = Planner -> Builder -> Evaluator。
+- **角色与 rig** —— Planner / Builder / Evaluator 是稳定角色；具体 agent/model/rig 按 Story 选择。请求的 rig 不可用时，Roll 记录并 fail loud，不冒充成另一个 agent。
+- **Loop** —— 按可配置频次从 BACKLOG 摘取最高优先级故事，在隔离 worktree 里执行。CI 通过后才会落到 `main`。
 - **Dream** — 凌晨 3 点扫描代码库，发现死代码、文档缺口和架构漂移，将 `REFACTOR-NNN` 条目排队交给 loop 领取。
-- **Peer** — 高风险构建前，第二个 AI agent 评审方案或 diff，同意后才继续执行。
+- **Skills** —— 仍然是能力层。角色调用 `$roll-design`、`$roll-build`、`$roll-fix`、`$roll-peer`、`$roll-.qa` 等技能。
 
 你负责提需求、审 PR、执行发布。中间的一切交给 Roll。
+
+### 接入样例
+
+**从零开始的新项目**
+
+```bash
+mkdir my-product && cd my-product
+roll init
+roll next
+roll design --from-file .roll/brief.md
+roll loop on
+```
+
+从一句需求、PRD 或几条笔记开始。Roll 说明下一步设计动作，而不是静默创建假工作；Planner/design 创建 backlog，Supervisor 为每张 Story 选择执行剖面，角色执行，owner 查看按 Story 收口的 attest 证据。
+
+**已有项目接入**
+
+```bash
+cd existing-codebase
+roll init
+roll next
+roll init --apply
+roll loop on
+```
+
+Roll 无破坏地诊断现有代码，审阅后才创建或更新 Roll metadata，然后基于已有 backlog/docs/context 推理。当前状态通过 CLI-first 可观测入口查看：`roll status`、`roll loop watch`、`roll loop runs`、`roll cycle <id>`、告警和 Story 报告。
+
+**按 Story 路由角色**
+
+```yaml
+story: US-V4-012
+execution_profile: verified
+roles:
+  builder:
+    agent: kimi
+    responsibility: update README, docs, guides, website, and samples
+  evaluator:
+    agent: pi
+    responsibility: evaluate new-user clarity and product narrative
+```
+
+运行时可用性必须显式记录：不可用 agent 记录为 unavailable；fallback 必须响，不能静默替换。
 
 ## 功能一览
 
@@ -53,46 +98,24 @@ Roll 运行在三个自主层上：
 
 - `$roll-idea` — 一行捕获：即时生成 FIX 或 IDEA 条目 `[core]`
 - `roll design` / `$roll-design` — DDD 驱动规划：澄清 → 设计 → 拆分为 INVEST 故事。`roll design` 从命令行在你的 AI agent 里拉起设计技能。`[core]`
-- `$roll-build` — TCR 故事执行 → worktree → PR → 自动合入 `[core]`
+- `$roll-build` — Builder 角色执行：TCR 故事执行 → worktree → PR → 证据 `[core]`
 - `$roll-fix` — 快速路径 Bug 修复，同样的 CI 门禁，更轻的流程
+- Evaluator 角色 —— 执行剖面需要时，做独立评审、可视证据检查、score/attest 契约
 
 ### 可观测性
 
 - `roll status` — 判定优先的真相摘要（LOOP · CYCLE · RELEASE · STORY，含 attest 验收覆盖率），其后是约定/AI 客户端同步健康 `[core]`
-- 交付档案 — web 控制台：判定条、loop 心跳、三聚合、六态 Story 光谱，全部读自同一份真相快照
+- `roll loop watch` — 当前 cycle 的 CLI-first 实时 activity 流
+- `roll cycle <id>` — 单个 cycle 的轨迹与证据指针
 - `roll loop runs` — 每轮 TerminalOutcome 历史，含 TCR 次数和耗时
 - `roll loop alert` — 查看、确认、清除 loop 告警
-- `roll dossier` — 交付档案：已发布、进行中、队列、真相漂移、发布就绪，全部读自同一份真相账本 `[highlight]`
+- Story 报告 —— Story 自己的 `latest/<id>-report.html` 是人类验收入口 `[highlight]`
 
-### 交付档案 —— web 控制台
+### 当前可观测性
 
-`roll index` 渲染 `index.html`，即交付档案。上面每个数字都读自同一份真相快照，
-因此 web 面与 CLI 打印的聚合一致（`roll cast` ≡ Casting 网格、`roll doctor skills`
-≡ Skills 页、`roll release consistency` ≡ 七维面板、`roll status` ≡ Story 光谱）。
-一处计算，两副面孔。
+当前产品是 CLI-first。`roll status`、`roll loop watch`、`roll loop runs`、`roll cycle <id>`、`roll pulse`、告警和按 Story 收口的 attest 报告，是当前活体真相入口。`roll index` 是按需静态归档/修复渲染器，适合 CI artifact 和迁移对账；它不是当前真相入口。
 
-控制台的信息架构：
-
-- **深色顶栏 + 绿点项目切换器** —— 当前项目带一个绿色状态点；切换器列出
-  `~/.roll/projects.json` 里的每个项目（与 `roll ls` 打印的同一份注册表），可在各项目
-  的控制台之间跳转。
-- **EN / 中 语言切换** —— 单语呈现；切换会把整个控制台在中英之间整体翻面。
-- **项目页签** —— Now · Backlog · Loop · Release · Casting · Charter。Now 是默认
-  落地视图：实时 cycle、loop 心跳、运行进程、下批候选、需要你处理的行，以及带判定、
-  聚合块和六态 Story 光谱的真相汇总。
-- **机器全局面包屑（`MACHINE › …`）** —— Agents · Skills · Tools · Conventions ·
-  About。这些页面描述的是机器而非单个项目：本机安装的 agents、治理本机每个项目的
-  `skills/<name>/SKILL.md` 契约、**Tools** 页（`tools.html`）上的内置工具清单与每个
-  工具的默认护栏（超时 / 沙箱 / 重试 / 每周期上限）、以及同步进各 AI 客户端的约定。
-- **Charter** —— 一个 markdown 浏览器，内联渲染项目的 charter 文档、语言指南
-  （`guide/en` ↔ `guide/zh`）与史诗规划。
-- **Casting** —— 谁演什么：四个复杂度槽位（easy / default / hard / fallback）加上
-  场景角色（peer · PR review · spar · onboard）。未配置的槽位显式打出破折号，绝不臆测。
-
-三态交付阶梯 —— **claimed → merged → attested** —— 取代二值的「完成」标志。
-backlog 行写了 Done 只是 `claimed`；交付 PR 合入 `main` 后变 `merged`，验收证据
-（报告 · AC 映射 · 视觉证据）齐备后变 `attested`。**一个故事当且仅当既已合并又已验收
-时才算完成**（`done ≡ 已合并 ∧ 已验收`）；不到这一步只会渲染成漂移或未知，绝不悄悄显示绿色。
+三态交付阶梯仍然成立：**claimed -> merged -> attested**。backlog 行写了 Done 只是 `claimed`；PR 合入 `main` 后变 `merged`；Story 证据齐备后变 `attested`。完整 Supervisor Live Console / 多角色看板是下一阶段工作。
 
 ### 按需技能
 
@@ -103,7 +126,7 @@ backlog 行写了 Done 只是 `claimed`；交付 PR 合入 `main` 后变 `merged
 
 ### 多 Agent 协作
 
-- 故障转移路由 — 主 agent 宕机 → 自动切换备用 `[highlight]`
+- Fail-loud 路由 — 请求的 agent/model/rig 不可用 → 记录限制并暂停，或仅按显式 fallback 策略路由 `[highlight]`
 - `$roll-peer` — 多轮协商；`roll peer` 记录一次性结构化 review facts `[core]`
 - PR 收件箱 — 外部 PR 先经 AI 评审再合入；过时 PR 自动 rebase `[new]`
 - `roll review-pr` — 对任意 PR 按需发起 AI 评审，可指定 agent `[new]`

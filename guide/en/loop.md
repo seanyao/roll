@@ -575,7 +575,7 @@ text. The stable vocabulary is:
 `idle_no_work`, `unknown`.
 
 Older `runs.jsonl` records may contain free-form result strings. Readers
-convert them through the truth adapter before rendering dashboards, dossiers,
+convert them through the truth adapter before rendering dashboards, archives,
 or summaries.
 
 ## Visibility (tmux + popup)
@@ -748,7 +748,7 @@ Loop sees the `🔨 In Progress` marker and skips it.
 | TCR: 0 commits | Revert story to 📋 Todo, write ALERT.md |
 | HEAD CI red | Hot-fix attempt (see below), or ALERT if exhausted |
 
-ALERT entries surface in `roll loop status`, `roll loop alert`, and the Delivery Dossier (`roll dossier`).
+ALERT entries surface in `roll loop status`, `roll loop alert`, and cycle/story evidence views.
 
 ## CI Self-Healing (US-LOOP-046..050)
 

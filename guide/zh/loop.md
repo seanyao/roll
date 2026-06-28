@@ -504,7 +504,7 @@ result-eval: mean 6.8↓ / min 4 / out 75% ci 67% scope 75% qual 75% eff 50% cle
 `aborted_no_delivery`, `aborted_with_delivery`, `orphan_timeout`,
 `idle_no_work`, `unknown`。
 
-早期 `runs.jsonl` 可能含自由文本结果。dashboard、dossier、summary 渲染前
+早期 `runs.jsonl` 可能含自由文本结果。dashboard、archive、summary 渲染前
 都先经 truth adapter 转换。
 
 ## 可见性（tmux + 弹窗）
@@ -673,7 +673,7 @@ loop 看到 `🔨 In Progress` 标记就会自动跳过。
 | TCR 提交数为 0 | 故事回退为 📋 Todo，写 ALERT.md |
 | HEAD CI 红 | 尝试自动热修（见下），用完次数后才写 ALERT |
 
-ALERT 条目会在 `roll loop status`、`roll loop alert` 和 Delivery Dossier（`roll dossier`）中显示。
+ALERT 条目会在 `roll loop status`、`roll loop alert` 和 cycle/story 证据视图中显示。
 
 ## CI 自愈（US-LOOP-046..050）
 

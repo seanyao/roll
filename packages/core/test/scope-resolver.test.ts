@@ -1,0 +1,407 @@
+import { describe, expect, it } from "vitest";
+import { normalizeAgentScopeConfig } from "../src/agent/scope-config.js";
+import { resolveAgentScopeRole, type AgentScopeResolveLayer } from "../src/agent/scope-resolver.js";
+
+function cfg(text: string, path: string): AgentScopeResolveLayer {
+  const { config, errors } = normalizeAgentScopeConfig(text);
+  expect(errors).toEqual([]);
+  expect(config).not.toBeNull();
+  return { config: config!, path };
+}
+
+const MACHINE = cfg(`schema: roll-agents/v1
+scope: machine
+agents:
+  codex:
+    capabilities: [supervise, execute]
+  kimi:
+    capabilities: [execute, evaluate]
+  pi:
+    capabilities: [evaluate]
+roles:
+  supervise:
+    kind: fixed
+    agent: codex
+  execute:
+    kind: fixed
+    agent: codex
+`, "~/.roll/agents.yaml");
+
+const PROJECT = cfg(`schema: roll-agents/v1
+scope: project
+inherits: machine
+roles:
+  supervise:
+    kind: inherit
+defaults:
+  story:
+    roles:
+      execute:
+        kind: select
+        from: [codex, kimi]
+        require: [execute]
+        strategy: first-available
+  skill:
+    roles:
+      evaluate:
+        kind: fixed
+        agent: pi
+`, ".roll/agents.yaml");
+
+describe("resolveAgentScopeRole — US-V4-016", () => {
+  it("resolves machine -> project inheritance and direct story override", () => {
+    const projectSupervise = resolveAgentScopeRole({
+      scope: "project",
+      role: "supervise",
+      layers: [MACHINE, PROJECT],
+    });
+    expect(projectSupervise).toEqual({
+      ok: true,
+      resolved: {
+        scope: "project",
+        role: "supervise",
+        agent: "codex",
+        binding: { kind: "fixed", agent: "codex" },
+        source: "~/.roll/agents.yaml:roles.supervise",
+        selectedStrategy: "fixed",
+        candidates: ["codex"],
+        skipped: [],
+        trace: [
+          { source: ".roll/agents.yaml:roles.supervise", bindingKind: "inherit", action: "inherit" },
+          { source: "~/.roll/agents.yaml:roles.supervise", bindingKind: "fixed", action: "resolve" },
+        ],
+      },
+    });
+
+    const story = cfg(`schema: roll-agents/v1
+scope: story
+roles:
+  execute:
+    kind: fixed
+    agent: kimi
+`, ".roll/story/US-1/agents.yaml");
+    const storyExecute = resolveAgentScopeRole({ scope: "story", role: "execute", layers: [MACHINE, PROJECT, story] });
+    expect(storyExecute.ok).toBe(true);
+    if (storyExecute.ok) {
+      expect(storyExecute.resolved.agent).toBe("kimi");
+      expect(storyExecute.resolved.source).toBe(".roll/story/US-1/agents.yaml:roles.execute");
+    }
+  });
+
+  it("resolves full machine -> project -> story -> skill recursive inheritance", () => {
+    const machine = cfg(`schema: roll-agents/v1
+scope: machine
+roles:
+  execute:
+    kind: fixed
+    agent: codex
+`, "~/.roll/agents.yaml");
+    const project = cfg(`schema: roll-agents/v1
+scope: project
+roles:
+  execute:
+    kind: inherit
+`, ".roll/agents.yaml");
+    const story = cfg(`schema: roll-agents/v1
+scope: story
+roles:
+  execute:
+    kind: inherit
+`, ".roll/story/US-1/agents.yaml");
+    const skill = cfg(`schema: roll-agents/v1
+scope: skill
+roles:
+  execute:
+    kind: inherit
+`, ".roll/skills/build/agents.yaml");
+    const resolved = resolveAgentScopeRole({ scope: "skill", role: "execute", layers: [machine, project, story, skill] });
+    expect(resolved).toEqual({
+      ok: true,
+      resolved: {
+        scope: "skill",
+        role: "execute",
+        agent: "codex",
+        binding: { kind: "fixed", agent: "codex" },
+        source: "~/.roll/agents.yaml:roles.execute",
+        selectedStrategy: "fixed",
+        candidates: ["codex"],
+        skipped: [],
+        trace: [
+          { source: ".roll/skills/build/agents.yaml:roles.execute", bindingKind: "inherit", action: "inherit" },
+          { source: ".roll/story/US-1/agents.yaml:roles.execute", bindingKind: "inherit", action: "inherit" },
+          { source: ".roll/agents.yaml:roles.execute", bindingKind: "inherit", action: "inherit" },
+          { source: "~/.roll/agents.yaml:roles.execute", bindingKind: "fixed", action: "resolve" },
+        ],
+      },
+    });
+  });
+
+  it("uses project defaults for story and skill scopes", () => {
+    const storyExecute = resolveAgentScopeRole({ scope: "story", role: "execute", layers: [MACHINE, PROJECT] });
+    expect(storyExecute.ok).toBe(true);
+    if (storyExecute.ok) {
+      expect(storyExecute.resolved.agent).toBe("codex");
+      expect(storyExecute.resolved.source).toBe(".roll/agents.yaml:defaults.story.roles.execute");
+      expect(storyExecute.resolved.selectedStrategy).toBe("first-available");
+      expect(storyExecute.resolved.candidates).toEqual(["codex", "kimi"]);
+    }
+
+    const skillEvaluate = resolveAgentScopeRole({ scope: "skill", role: "evaluate", layers: [MACHINE, PROJECT] });
+    expect(skillEvaluate.ok).toBe(true);
+    if (skillEvaluate.ok) {
+      expect(skillEvaluate.resolved.agent).toBe("pi");
+      expect(skillEvaluate.resolved.source).toBe(".roll/agents.yaml:defaults.skill.roles.evaluate");
+    }
+  });
+
+  it("includes optional model in the resolved fixed-binding audit", () => {
+    const machine = cfg(`schema: roll-agents/v1
+scope: machine
+roles:
+  supervise:
+    kind: fixed
+    agent: codex
+    model: gpt-5.5
+`, "~/.roll/agents.yaml");
+    const resolved = resolveAgentScopeRole({ scope: "machine", role: "supervise", layers: [machine] });
+    expect(resolved.ok).toBe(true);
+    if (resolved.ok) {
+      expect(resolved.resolved).toEqual({
+        scope: "machine",
+        role: "supervise",
+        agent: "codex",
+        model: "gpt-5.5",
+        binding: { kind: "fixed", agent: "codex", model: "gpt-5.5" },
+        source: "~/.roll/agents.yaml:roles.supervise",
+        selectedStrategy: "fixed",
+        candidates: ["codex"],
+        skipped: [],
+        trace: [{ source: "~/.roll/agents.yaml:roles.supervise", bindingKind: "fixed", action: "resolve" }],
+      });
+    }
+  });
+
+  it("skips temporarily unavailable candidates without mutating config", () => {
+    const before = JSON.stringify(PROJECT.config);
+    const resolved = resolveAgentScopeRole({
+      scope: "story",
+      role: "execute",
+      layers: [MACHINE, PROJECT],
+      runtimeHealth: { codex: { available: false, reason: "auth" } },
+    });
+    expect(resolved.ok).toBe(true);
+    if (resolved.ok) {
+      expect(resolved.resolved.agent).toBe("kimi");
+      expect(resolved.resolved.skipped).toEqual([{ agent: "codex", reason: "unavailable: auth" }]);
+      expect(resolved.resolved.candidates).toEqual(["codex", "kimi"]);
+    }
+    expect(JSON.stringify(PROJECT.config)).toBe(before);
+  });
+
+  it("avoid-current-role skips the agent already assigned to that role", () => {
+    const project = cfg(`schema: roll-agents/v1
+scope: project
+agents:
+  codex:
+    capabilities: [execute, evaluate]
+  pi:
+    capabilities: [evaluate]
+defaults:
+  story:
+    roles:
+      evaluate:
+        kind: select
+        from: [codex, pi]
+        require: [evaluate]
+        avoid: [execute]
+`, ".roll/agents.yaml");
+    const resolved = resolveAgentScopeRole({
+      scope: "story",
+      role: "evaluate",
+      layers: [project],
+      assignedRoles: { execute: "codex" },
+    });
+    expect(resolved.ok).toBe(true);
+    if (resolved.ok) {
+      expect(resolved.resolved.agent).toBe("pi");
+      expect(resolved.resolved.skipped).toEqual([{ agent: "codex", reason: "assigned-to-avoided-role: execute" }]);
+    }
+  });
+
+  it("select without from uses the declared agent pool", () => {
+    const project = cfg(`schema: roll-agents/v1
+scope: project
+agents:
+  codex:
+    capabilities: [evaluate]
+  pi:
+    capabilities: [evaluate]
+defaults:
+  story:
+    roles:
+      evaluate:
+        kind: select
+        require: [evaluate]
+`, ".roll/agents.yaml");
+    const resolved = resolveAgentScopeRole({ scope: "story", role: "evaluate", layers: [project] });
+    expect(resolved.ok).toBe(true);
+    if (resolved.ok) {
+      expect(resolved.resolved.agent).toBe("codex");
+      expect(resolved.resolved.candidates).toEqual(["codex", "pi"]);
+    }
+  });
+
+  it("select.require skips candidates lacking required capabilities", () => {
+    const project = cfg(`schema: roll-agents/v1
+scope: project
+agents:
+  codex:
+    capabilities: [execute]
+  pi:
+    capabilities: [evaluate]
+defaults:
+  story:
+    roles:
+      evaluate:
+        kind: select
+        from: [codex, pi]
+        require: [evaluate]
+`, ".roll/agents.yaml");
+    const resolved = resolveAgentScopeRole({ scope: "story", role: "evaluate", layers: [project] });
+    expect(resolved.ok).toBe(true);
+    if (resolved.ok) {
+      expect(resolved.resolved.agent).toBe("pi");
+      expect(resolved.resolved.skipped).toEqual([{ agent: "codex", reason: "missing-required-capability: evaluate" }]);
+    }
+  });
+
+  it("supports least-recent and deterministic seeded-random selection", () => {
+    const project = cfg(`schema: roll-agents/v1
+scope: project
+agents:
+  codex:
+    capabilities: [evaluate]
+  kimi:
+    capabilities: [evaluate]
+  pi:
+    capabilities: [evaluate]
+defaults:
+  story:
+    roles:
+      evaluate:
+        kind: select
+        from: [codex, kimi, pi]
+        require: [evaluate]
+        strategy: least-recent
+`, ".roll/agents.yaml");
+    const leastRecent = resolveAgentScopeRole({
+      scope: "story",
+      role: "evaluate",
+      layers: [project],
+      recentUse: { codex: 30, kimi: 10, pi: 20 },
+    });
+    expect(leastRecent.ok).toBe(true);
+    if (leastRecent.ok) expect(leastRecent.resolved.agent).toBe("kimi");
+
+    const seededProject = cfg(`schema: roll-agents/v1
+scope: project
+agents:
+  codex:
+    capabilities: [evaluate]
+  kimi:
+    capabilities: [evaluate]
+  pi:
+    capabilities: [evaluate]
+defaults:
+  story:
+    roles:
+      evaluate:
+        kind: select
+        from: [codex, kimi, pi]
+        require: [evaluate]
+        strategy: seeded-random
+`, ".roll/agents.yaml");
+    const a = resolveAgentScopeRole({ scope: "story", role: "evaluate", layers: [seededProject], seed: "US-123" });
+    const b = resolveAgentScopeRole({ scope: "story", role: "evaluate", layers: [seededProject], seed: "US-123" });
+    const c = resolveAgentScopeRole({ scope: "story", role: "evaluate", layers: [seededProject], seed: "US-124" });
+    expect(a).toEqual(b);
+    expect(a.ok).toBe(true);
+    expect(c.ok).toBe(true);
+    if (a.ok && c.ok) {
+      expect(a.resolved.agent).toBe("kimi");
+      expect(c.resolved.agent).toBe("pi");
+    }
+  });
+
+  it("fails loud for unavailable fixed bindings instead of silently falling back", () => {
+    const resolved = resolveAgentScopeRole({
+      scope: "machine",
+      role: "execute",
+      layers: [MACHINE],
+      runtimeHealth: { codex: { available: false, reason: "vpn" } },
+    });
+    expect(resolved).toEqual({
+      ok: false,
+      failure: {
+        scope: "machine",
+        role: "execute",
+        source: "~/.roll/agents.yaml:roles.execute",
+        errors: ["~/.roll/agents.yaml:roles.execute: fixed agent 'codex' unavailable: vpn"],
+        candidates: ["codex"],
+        skipped: [{ agent: "codex", reason: "unavailable: vpn" }],
+        trace: [{ source: "~/.roll/agents.yaml:roles.execute", bindingKind: "fixed", action: "fail" }],
+      },
+    });
+  });
+
+  it("fails loud when selection has no available candidates", () => {
+    const resolved = resolveAgentScopeRole({
+      scope: "story",
+      role: "execute",
+      layers: [MACHINE, PROJECT],
+      runtimeHealth: {
+        codex: { available: false, reason: "auth" },
+        kimi: { available: false, reason: "rate-limit" },
+      },
+    });
+    expect(resolved).toEqual({
+      ok: false,
+      failure: {
+        scope: "story",
+        role: "execute",
+        source: ".roll/agents.yaml:defaults.story.roles.execute",
+        errors: [".roll/agents.yaml:defaults.story.roles.execute: no candidates available"],
+        candidates: ["codex", "kimi"],
+        skipped: [
+          { agent: "codex", reason: "unavailable: auth" },
+          { agent: "kimi", reason: "unavailable: rate-limit" },
+        ],
+        trace: [{ source: ".roll/agents.yaml:defaults.story.roles.execute", bindingKind: "select", action: "fail" }],
+      },
+    });
+  });
+
+  it("fails loud when selection has a literally empty candidate pool", () => {
+    const project = cfg(`schema: roll-agents/v1
+scope: project
+defaults:
+  story:
+    roles:
+      evaluate:
+        kind: select
+`, ".roll/agents.yaml");
+    const resolved = resolveAgentScopeRole({ scope: "story", role: "evaluate", layers: [project] });
+    expect(resolved).toEqual({
+      ok: false,
+      failure: {
+        scope: "story",
+        role: "evaluate",
+        source: ".roll/agents.yaml:defaults.story.roles.evaluate",
+        errors: [".roll/agents.yaml:defaults.story.roles.evaluate: no candidates available"],
+        candidates: [],
+        skipped: [],
+        trace: [{ source: ".roll/agents.yaml:defaults.story.roles.evaluate", bindingKind: "select", action: "fail" }],
+      },
+    });
+  });
+});

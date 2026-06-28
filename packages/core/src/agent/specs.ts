@@ -34,7 +34,8 @@ export interface AgentSpec {
   defaultModel: string;
   /** PATH binary candidates, in probe order. */
   cliBin: readonly string[];
-  /** True iff the runner can spawn this agent as a headless peer reviewer. */
+  /** True iff Roll has a prompt-mode spawn profile for this agent. Runtime
+   *  auth/VPN/account health is checked at spawn time, not encoded here. */
   canReviewHeadless?: boolean;
   normalizer: AgentNormalizerKind;
   usage: AgentUsageSpec;
@@ -52,9 +53,7 @@ export const AGENTS: readonly AgentSpec[] = [
     displayName: "claude",
     defaultModel: "claude-sonnet-4",
     cliBin: ["claude"],
-    // claude can be used manually/harness-side, but headless review remains
-    // disabled because launchd/headless auth cannot reach its GUI-bound token.
-    canReviewHeadless: false,
+    canReviewHeadless: true,
     normalizer: "claude",
     usage: { stdoutExtractor: "claude-stream", sessionBackfill: "claude-projects" },
     smokeCommand: 'claude -p "Reply with a single word: hello"',
@@ -97,9 +96,7 @@ export const AGENTS: readonly AgentSpec[] = [
     displayName: "antigravity (agy)",
     defaultModel: "gemini-2.5-pro",
     cliBin: ["agy", "gemini"],
-    // agy requires interactive Google auth; keep it as a supported manual agent
-    // but never place it in unattended headless review pools.
-    canReviewHeadless: false,
+    canReviewHeadless: true,
     normalizer: "generic",
     usage: { stdoutExtractor: "gemini" },
     smokeCommand: 'agy -p "Reply with a single word: hello"',

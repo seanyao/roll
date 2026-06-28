@@ -24,7 +24,7 @@ export interface TruthSnapshotStory {
  * US-DOSSIER-020 — the claimed→merged→attested delivery ladder.
  *
  * Replaces the binary done/not-done with a three-rung truth ladder, the core
- * interaction of the Delivery Dossier web console:
+ * interaction of the static archive console:
  *   - `claimed`   — the backlog says done (weakest; may be drift).
  *   - `merged`    — merge evidence on main (FIX-278 `storyHasMergeEvidence`).
  *   - `attested`  — every AC proven with appropriate evidence; observable/UI

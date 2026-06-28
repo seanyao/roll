@@ -172,7 +172,7 @@ export function buildOnboardApplyReviewOperations(input: OnboardApplyReviewInput
   operations.push(createIfMissing(input.projectDir, ".roll/.version"));
   if (approved.has("backlog")) operations.push(createIfMissing(input.projectDir, ".roll/backlog.md"));
   if (input.agentRoutesTemplate !== "skip" && input.includeAgentRoutes) {
-    operations.push(createIfMissing(input.projectDir, ".roll/agent-routes.yaml"));
+    operations.push(createIfMissing(input.projectDir, ".roll/agents.yaml"));
   }
   if (approved.has("features")) {
     operations.push(createIfMissing(input.projectDir, ".roll/features/"));

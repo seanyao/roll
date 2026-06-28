@@ -1,6 +1,6 @@
 /**
  * US-V4-008 — `roll supervisor` CLI: gathers structured facts from a real project
- * (backlog + agents.yaml + events.ndjson) and renders observe/advise/next/why,
+ * (backlog + agents.yaml + events.ndjson) and renders observe/advise/next/why/live,
  * never implementing a Story or marking one Done.
  */
 import { afterAll, describe, expect, it } from "vitest";
@@ -85,6 +85,8 @@ describe("supervisorCommand", () => {
     expect(r.code).toBe(0);
     expect(r.out).toContain("Supervisor Agent — project facts");
     expect(r.out).toContain("backlog: 2 todo");
+    expect(r.out).toContain("mode: guided");
+    expect(r.out).toContain("owner action:");
   });
 
   it("`status` is an alias for the default observe + advise view", () => {
@@ -122,14 +124,82 @@ describe("supervisorCommand", () => {
     const cwd = project(BACKLOG, { events: [JSON.stringify({ type: "pr:merge", prNumber: 1, storyId: "US-1", ts: 1 })] });
     const r = run(cwd, ["next"]);
     expect(r.out).toContain("US-2"); // US-2 depends-on US-1 (delivered) → ready
+    expect(r.out).toContain("mode: guided");
+    expect(r.out).toContain("roll loop go --cards US-2");
+    expect(r.out).toContain("scheduler:");
   });
 
   it("--json emits machine-readable facts + decisions", () => {
     const cwd = project(BACKLOG);
     const r = run(cwd, ["--json"]);
     const parsed = JSON.parse(r.out);
+    expect(parsed.mode.mode).toBe("guided");
     expect(parsed.facts.counts.done).toBe(1);
     expect(Array.isArray(parsed.decisions)).toBe(true);
+  });
+
+  it("why explains operating mode and the next owner action", () => {
+    const cwd = project(BACKLOG);
+    const r = run(cwd, ["why"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("Supervisor — why stuck");
+    expect(r.out).toContain("mode: guided");
+    expect(r.out).toContain("owner action:");
+    expect(r.out).toContain("will not start long-running Story execution");
+  });
+
+  it("live renders full-team role panes and handoff flow", () => {
+    const cwd = project(BACKLOG, {
+      events: [
+        JSON.stringify({ type: "cycle:start", cycleId: "C-plan", storyId: "US-2", agent: "codex", model: "gpt", ts: 1 }),
+        JSON.stringify({ type: "execution:profile", cycleId: "C-plan", storyId: "US-2", profile: "planned", reason: "planned: cross-module", ts: 2 }),
+        JSON.stringify({ type: "cycle:phase", cycleId: "C-plan", phase: "execute", ts: 3 }),
+        JSON.stringify({ type: "cycle:phase", cycleId: "C-plan", phase: "publish", ts: 4 }),
+        JSON.stringify({ type: "peer:gate", cycleId: "C-plan", verdict: "consulted", reasons: [], ts: 5 }),
+      ],
+    });
+    const r = run(cwd, ["live"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("Supervisor Live");
+    expect(r.out).toContain("C-plan · US-2 · planned");
+    expect(r.out).toContain("planner   done");
+    expect(r.out).toContain("builder   done");
+    expect(r.out).toContain("evaluator done");
+    expect(r.out).toContain("planner->builder:ready");
+    expect(r.out).toContain("builder->evaluator:ready");
+  });
+
+  it("live shows not_required panes for standard rows and not_available for missing evaluator", () => {
+    const cwd = project(BACKLOG, {
+      events: [
+        JSON.stringify({ type: "cycle:start", cycleId: "C-std", storyId: "US-3", agent: "codex", model: "gpt", ts: 10 }),
+        JSON.stringify({ type: "cycle:start", cycleId: "C-eval", storyId: "US-4", agent: "codex", model: "gpt", ts: 20 }),
+        JSON.stringify({ type: "execution:profile", cycleId: "C-eval", storyId: "US-4", profile: "verified", reason: "verified: user-visible", ts: 21 }),
+        JSON.stringify({ type: "cycle:phase", cycleId: "C-eval", phase: "execute", ts: 22 }),
+        JSON.stringify({ type: "cycle:phase", cycleId: "C-eval", phase: "publish", ts: 23 }),
+        JSON.stringify({ type: "pair:none-available", cycleId: "C-eval", stage: "score", reason: "no evaluator", ts: 24 }),
+      ],
+    });
+    const r = run(cwd, ["live"]);
+    expect(r.out).toContain("C-std · US-3 · standard");
+    expect(r.out).toContain("planner   not_required");
+    expect(r.out).toContain("evaluator not_required");
+    expect(r.out).toContain("C-eval · US-4 · verified · not_available");
+    expect(r.out).toContain("evaluator not_available");
+  });
+
+  it("live --json emits the shared board view model", () => {
+    const cwd = project(BACKLOG, {
+      events: [JSON.stringify({ type: "cycle:start", cycleId: "C-json", storyId: "US-2", agent: "codex", model: "gpt", ts: 1 })],
+    });
+    const r = run(cwd, ["live", "--json"]);
+    const parsed = JSON.parse(r.out);
+    expect(parsed.supervisor.state).toBe("observing");
+    expect(parsed.rows[0].roles.map((x: { role: string; state: string }) => [x.role, x.state])).toEqual([
+      ["planner", "not_required"],
+      ["builder", "pending"],
+      ["evaluator", "not_required"],
+    ]);
   });
 
   it("rejects an unknown subcommand with usage", () => {

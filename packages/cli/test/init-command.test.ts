@@ -376,7 +376,7 @@ describe("roll init diagnosis router", () => {
     expect(run.stdout).toContain("Next: $roll-onboard");
     expect(run.stdout).toContain("$roll-onboard requires an AI agent");
     expect(run.stdout).toContain("No suitable AI agent detected");
-    expect(run.stdout).toContain("roll agent default <agent>");
+    expect(run.stdout).toContain("roll agent migrate --dry-run");
     expect(run.stdout).toContain("No files changed.");
     expect(existsSync(join(cwd, "AGENTS.md"))).toBe(false);
     expect(existsSync(join(cwd, ".roll"))).toBe(false);

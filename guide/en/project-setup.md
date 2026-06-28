@@ -11,9 +11,8 @@ roll init
 `roll init` diagnoses the current directory state before any mutation:
 
 1. **Empty directory** — fresh start. Roll writes `AGENTS.md` plus an empty
-   `.roll/` scaffold (`backlog.md`, `features/`, `domain/`) and a
-   `.roll/pairing.yaml` for [cross-agent pairing](pairing.md) (the init UI
-   announces it). No prompts. This is the **seed** adoption pattern — see
+   `.roll/` scaffold (`backlog.md`, `features/`, `domain/`) ready for scoped
+   agent bindings in `.roll/agents.yaml`. No prompts. This is the **seed** adoption pattern — see
    [patterns/seed-pattern.md](patterns/seed-pattern.md).
 2. **PRD/docs-only** — Roll finds requirements or product docs but no source or
    manifests. It treats this as a new-project path and points you to design; it
@@ -72,13 +71,11 @@ roll next                  # continue with design/apply/repair/migrate/loop/stat
 roll loop on               # enable autonomous execution
 ```
 
-`roll setup` now lets you pick a default agent from the ones installed on your
-machine — it lets you pick a default agent from the ones installed on your
-machine. This `primary_agent` is
-stored in `~/.roll/config.yaml` and is used by interactive entry points like
-`roll design` and `roll agent use`. The autonomous loop still routes work through
-`.roll/agent-routes.yaml`, which is intentionally separate — your interactive
-default and your loop rig pool can differ.
+`roll setup` syncs conventions for the AI tools installed on the machine.
+Agent semantics live in `~/.roll/agents.yaml` (Machine Scope) and
+`.roll/agents.yaml` (Project Scope). Run `roll agent migrate --dry-run` to
+convert older `primary_agent`, local-agent, pairing, or v3 route-slot data into
+the scoped model.
 
 ## What Gets Created
 

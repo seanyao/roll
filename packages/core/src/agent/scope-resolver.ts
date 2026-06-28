@@ -1,0 +1,260 @@
+/**
+ * US-V4-016 — pure resolver for recursive Agent Scope / Role bindings.
+ *
+ * The resolver does not spawn agents and does not mutate config. Runtime health
+ * is an input to the current resolution only.
+ */
+import {
+  type AgentName,
+  type AgentScopeConfig,
+  type AgentScopeKind,
+  type AgentScopeResolutionFailure,
+  type AgentScopeResolutionTrace,
+  type AgentScopeRole,
+  type AgentScopeRoleBinding,
+  type AgentScopeRoleResolution,
+  type AgentScopeSkippedCandidate,
+} from "@roll/spec";
+
+export interface AgentScopeResolveLayer {
+  readonly config: AgentScopeConfig;
+  readonly path: string;
+}
+
+export interface AgentScopeRuntimeHealth {
+  readonly available: boolean;
+  readonly reason?: string;
+}
+
+export interface ResolveAgentScopeRoleInput {
+  readonly scope: AgentScopeKind;
+  readonly role: AgentScopeRole;
+  readonly layers: readonly AgentScopeResolveLayer[];
+  readonly runtimeHealth?: Readonly<Partial<Record<AgentName, AgentScopeRuntimeHealth>>>;
+  /** Larger means more recently used. Missing means never used. */
+  readonly recentUse?: Readonly<Partial<Record<AgentName, number>>>;
+  /** Already-resolved role assignments used by `avoid`. */
+  readonly assignedRoles?: Readonly<Partial<Record<AgentScopeRole, AgentName>>>;
+  readonly seed?: string;
+}
+
+interface BindingCandidate {
+  readonly scope: AgentScopeKind;
+  readonly source: string;
+  readonly binding: AgentScopeRoleBinding;
+}
+
+const RESOLUTION_SCOPES: readonly AgentScopeKind[] = ["machine", "project", "story", "skill"];
+
+function scopeRank(scope: AgentScopeKind): number {
+  const i = RESOLUTION_SCOPES.indexOf(scope);
+  return i >= 0 ? i : RESOLUTION_SCOPES.length;
+}
+
+function layerFor(layers: readonly AgentScopeResolveLayer[], scope: AgentScopeKind): AgentScopeResolveLayer | undefined {
+  return [...layers].reverse().find((layer) => layer.config.scope === scope);
+}
+
+function bindingChain(input: ResolveAgentScopeRoleInput): BindingCandidate[] {
+  const targetRank = scopeRank(input.scope);
+  const chain: BindingCandidate[] = [];
+  for (let i = targetRank; i >= 0; i -= 1) {
+    const scope = RESOLUTION_SCOPES[i];
+    if (scope === undefined) continue;
+    const layer = layerFor(input.layers, scope);
+    if (layer === undefined) continue;
+    if (scope === input.scope) {
+      const binding = layer.config.roles[input.role];
+      if (binding !== undefined) chain.push({ scope, source: `${layer.path}:roles.${input.role}`, binding });
+      continue;
+    }
+
+    const scopedDefault = layer.config.defaults[input.scope]?.roles[input.role];
+    if (scopedDefault !== undefined) {
+      chain.push({ scope, source: `${layer.path}:defaults.${input.scope}.roles.${input.role}`, binding: scopedDefault });
+    }
+    const inherited = layer.config.roles[input.role];
+    if (inherited !== undefined) chain.push({ scope, source: `${layer.path}:roles.${input.role}`, binding: inherited });
+  }
+  return chain;
+}
+
+function agentDeclarations(layers: readonly AgentScopeResolveLayer[]): Map<AgentName, readonly AgentScopeRole[]> {
+  const out = new Map<AgentName, readonly AgentScopeRole[]>();
+  for (const layer of layers) {
+    for (const [agent, spec] of Object.entries(layer.config.agents) as [AgentName, NonNullable<AgentScopeConfig["agents"][AgentName]>][]) {
+      out.set(agent, spec.capabilities);
+    }
+  }
+  return out;
+}
+
+function declaredAgents(layers: readonly AgentScopeResolveLayer[]): AgentName[] {
+  const out: AgentName[] = [];
+  for (const layer of layers) {
+    for (const agent of Object.keys(layer.config.agents) as AgentName[]) {
+      if (!out.includes(agent)) out.push(agent);
+    }
+  }
+  return out;
+}
+
+function unavailableReason(input: ResolveAgentScopeRoleInput, agent: AgentName): string | null {
+  const health = input.runtimeHealth?.[agent];
+  if (health === undefined || health.available) return null;
+  return `unavailable: ${health.reason ?? "runtime-health"}`;
+}
+
+function hash(seed: string, agent: AgentName): number {
+  let h = 2166136261;
+  const text = `${seed}:${agent}`;
+  for (let i = 0; i < text.length; i += 1) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function orderedAvailable(binding: Extract<AgentScopeRoleBinding, { kind: "select" }>, available: readonly AgentName[], input: ResolveAgentScopeRoleInput): AgentName[] {
+  const withIndex = available.map((agent, index) => ({ agent, index }));
+  if (binding.strategy === "least-recent") {
+    return withIndex
+      .sort((a, b) => (input.recentUse?.[a.agent] ?? Number.NEGATIVE_INFINITY) - (input.recentUse?.[b.agent] ?? Number.NEGATIVE_INFINITY) || a.index - b.index)
+      .map((x) => x.agent);
+  }
+  if (binding.strategy === "seeded-random") {
+    const seed = input.seed ?? `${input.scope}:${input.role}`;
+    return withIndex
+      .sort((a, b) => hash(seed, a.agent) - hash(seed, b.agent) || a.index - b.index)
+      .map((x) => x.agent);
+  }
+  return available.slice();
+}
+
+function failure(input: ResolveAgentScopeRoleInput, fields: Omit<AgentScopeResolutionFailure, "scope" | "role">): AgentScopeRoleResolution {
+  return {
+    ok: false,
+    failure: {
+      scope: input.scope,
+      role: input.role,
+      ...fields,
+    },
+  };
+}
+
+function resolveFixed(input: ResolveAgentScopeRoleInput, candidate: BindingCandidate, trace: readonly AgentScopeResolutionTrace[]): AgentScopeRoleResolution {
+  const binding = candidate.binding;
+  if (binding.kind !== "fixed") throw new Error("resolveFixed called with non-fixed binding");
+  const unavailable = unavailableReason(input, binding.agent);
+  if (unavailable !== null) {
+    return failure(input, {
+      source: candidate.source,
+      errors: [`${candidate.source}: fixed agent '${binding.agent}' unavailable: ${unavailable.replace(/^unavailable: /, "")}`],
+      candidates: [binding.agent],
+      skipped: [{ agent: binding.agent, reason: unavailable }],
+      trace: [...trace, { source: candidate.source, bindingKind: "fixed", action: "fail" }],
+    });
+  }
+  return {
+    ok: true,
+    resolved: {
+      scope: input.scope,
+      role: input.role,
+      agent: binding.agent,
+      ...(binding.model !== undefined ? { model: binding.model } : {}),
+      binding,
+      source: candidate.source,
+      selectedStrategy: "fixed",
+      candidates: [binding.agent],
+      skipped: [],
+      trace: [...trace, { source: candidate.source, bindingKind: "fixed", action: "resolve" }],
+    },
+  };
+}
+
+function skipForAgent(
+  agent: AgentName,
+  binding: Extract<AgentScopeRoleBinding, { kind: "select" }>,
+  declarations: ReadonlyMap<AgentName, readonly AgentScopeRole[]>,
+  input: ResolveAgentScopeRoleInput,
+): string | null {
+  for (const avoidedRole of binding.avoid ?? []) {
+    if (input.assignedRoles?.[avoidedRole] === agent) return `assigned-to-avoided-role: ${avoidedRole}`;
+  }
+  const caps = declarations.get(agent) ?? [];
+  for (const required of binding.require ?? []) {
+    if (!caps.includes(required)) return `missing-required-capability: ${required}`;
+  }
+  return unavailableReason(input, agent);
+}
+
+function resolveSelect(input: ResolveAgentScopeRoleInput, candidate: BindingCandidate, trace: readonly AgentScopeResolutionTrace[]): AgentScopeRoleResolution {
+  const binding = candidate.binding;
+  if (binding.kind !== "select") throw new Error("resolveSelect called with non-select binding");
+  const declarations = agentDeclarations(input.layers);
+  const candidates = binding.from !== undefined && binding.from.length > 0 ? [...binding.from] : declaredAgents(input.layers);
+  const skipped: AgentScopeSkippedCandidate[] = [];
+  const available: AgentName[] = [];
+  for (const agent of candidates) {
+    const reason = skipForAgent(agent, binding, declarations, input);
+    if (reason !== null) skipped.push({ agent, reason });
+    else available.push(agent);
+  }
+
+  if (available.length === 0) {
+    return failure(input, {
+      source: candidate.source,
+      errors: [`${candidate.source}: no candidates available`],
+      candidates,
+      skipped,
+      trace: [...trace, { source: candidate.source, bindingKind: "select", action: "fail" }],
+    });
+  }
+
+  const [agent] = orderedAvailable(binding, available, input);
+  return {
+    ok: true,
+    resolved: {
+      scope: input.scope,
+      role: input.role,
+      agent: agent as AgentName,
+      binding,
+      source: candidate.source,
+      selectedStrategy: binding.strategy,
+      candidates,
+      skipped,
+      trace: [...trace, { source: candidate.source, bindingKind: "select", action: "select" }],
+    },
+  };
+}
+
+/** Resolve one Scope + Role to an auditable Agent assignment. Pure + total. */
+export function resolveAgentScopeRole(input: ResolveAgentScopeRoleInput): AgentScopeRoleResolution {
+  const chain = bindingChain(input);
+  const trace: AgentScopeResolutionTrace[] = [];
+  let index = 0;
+  while (index < chain.length) {
+    const candidate = chain[index] as BindingCandidate;
+    const binding = candidate.binding;
+    if (binding.kind === "inherit") {
+      trace.push({ source: candidate.source, bindingKind: "inherit", action: "inherit" });
+      if (binding.from !== undefined) {
+        const target = scopeRank(binding.from as AgentScopeKind);
+        const next = chain.findIndex((c, i) => i > index && scopeRank(c.scope) <= target);
+        index = next >= 0 ? next : chain.length;
+      } else {
+        index += 1;
+      }
+      continue;
+    }
+    if (binding.kind === "fixed") return resolveFixed(input, candidate, trace);
+    if (binding.kind === "select") return resolveSelect(input, candidate, trace);
+    index += 1;
+  }
+  return failure(input, {
+    errors: [`${input.scope}.${input.role}: no binding found`],
+    candidates: [],
+    skipped: [],
+    trace,
+  });
+}

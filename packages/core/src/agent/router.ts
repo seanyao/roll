@@ -13,7 +13,7 @@
  *         → empty? firstInstalledAgent (with WARN) → nudge within tier.
  *       * `_loop_resolve_fallback_agent` (~13356-13401): PRE-SPAWN availability
  *         fallback (NOT failure-retry). primary online → primary; else fallback
- *         slot online → fallback (record fallback_from); else exhausted → ALERT.
+ *         slot online → fallback with legacy provenance metadata; else exhausted → ALERT.
  *       * `_loop_tier_nudge` (~13180-13243): candidate-pool assembly + python call.
  *
  * Invariant I10: deterministic route resolution — same inputs (est_min, slot

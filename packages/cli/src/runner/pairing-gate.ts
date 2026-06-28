@@ -17,10 +17,84 @@
  * without launching real agents; the executor wires the real agentSpawn in.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
-import { agentCanReviewHeadless, canonicalAgentName, isHeterogeneous, parsePairingConfig, parseResizeSignal, selectPairingCandidates, type PairingHistory, type PairingStage, type ResizeSignal } from "@roll/core";
+import {
+  agentIsKnown,
+  AGENT_REGISTRY_NAMES,
+  canonicalAgentName,
+  isHeterogeneous,
+  normalizeAgentScopeConfig,
+  pairingConfigFromAgentScopeConfig,
+  parsePairingConfig,
+  parseResizeSignal,
+  selectPairingCandidates,
+  type PairingConfig,
+  type PairingHistory,
+  type PairingStage,
+  type ResizeSignal,
+} from "@roll/core";
+import type { AgentScopeConfig } from "@roll/spec";
 import { writeReviewScoreNote } from "../lib/review-score.js";
 import { assessComplexity } from "./peer-gate.js";
+
+type PairingConfigSource = "scoped-agents" | "legacy-pairing" | "default-score";
+type LoadedPairingConfig = { cfg: PairingConfig; source: PairingConfigSource } | null;
+
+function readScopedAgentLayer(path: string): { config: AgentScopeConfig; path: string } | null {
+  if (!existsSync(path)) return null;
+  const text = readFileSync(path, "utf8");
+  if (!text.includes("roll-agents/v1")) return null;
+  const parsed = normalizeAgentScopeConfig(text);
+  if (parsed.config === null || parsed.errors.length > 0) {
+    throw new Error(`invalid roll-agents/v1 config: ${parsed.errors.join("; ")}`);
+  }
+  return { config: parsed.config, path };
+}
+
+function loadScopedPairingConfig(projectDir: string, installed: readonly string[]): LoadedPairingConfig {
+  const rollHome = process.env["ROLL_HOME"] ?? join(homedir(), ".roll");
+  const layers = [
+    readScopedAgentLayer(join(rollHome, "agents.yaml")),
+    readScopedAgentLayer(join(projectDir, ".roll", "agents.yaml")),
+  ].filter((layer): layer is { config: AgentScopeConfig; path: string } => layer !== null);
+  if (layers.length === 0) return null;
+  const scoped = layers.length === 1 ? layers[0]?.config : mergeScopedPairingLayers(layers.map((layer) => layer.config));
+  if (scoped === undefined) return null;
+  const cfg = pairingConfigFromAgentScopeConfig(scoped, installed);
+  return cfg === null ? null : { cfg, source: "scoped-agents" };
+}
+
+function mergeScopedPairingLayers(layers: readonly AgentScopeConfig[]): AgentScopeConfig | undefined {
+  const [base, ...rest] = layers;
+  if (base === undefined) return undefined;
+  return rest.reduce<AgentScopeConfig>(
+    (acc, layer) => ({
+      ...acc,
+      agents: { ...acc.agents, ...layer.agents },
+      models: { ...acc.models, ...layer.models },
+      roles: { ...acc.roles, ...layer.roles },
+      defaults: {
+        ...acc.defaults,
+        ...Object.fromEntries(
+          Object.entries(layer.defaults).map(([scope, value]) => [
+            scope,
+            { roles: { ...(acc.defaults[scope]?.roles ?? {}), ...value.roles } },
+          ]),
+        ),
+      },
+    }),
+    base,
+  );
+}
+
+function loadPairingConfig(projectDir: string, installed: readonly string[], fallback?: PairingConfig): LoadedPairingConfig {
+  const scoped = loadScopedPairingConfig(projectDir, installed);
+  if (scoped !== null) return scoped;
+  const cfgPath = join(projectDir, ".roll", "pairing.yaml");
+  if (existsSync(cfgPath)) return { cfg: parsePairingConfig(readFileSync(cfgPath, "utf8")), source: "legacy-pairing" };
+  return fallback === undefined ? null : { cfg: fallback, source: "default-score" };
+}
 
 /**
  * US-PAIR-004 — the executor's stage-iteration seam. Reads `.roll/pairing.yaml`
@@ -32,9 +106,9 @@ import { assessComplexity } from "./peer-gate.js";
  */
 export function enabledPairingStages(projectDir: string): PairingStage[] {
   try {
-    const cfgPath = join(projectDir, ".roll", "pairing.yaml");
-    if (!existsSync(cfgPath)) return [];
-    const cfg = parsePairingConfig(readFileSync(cfgPath, "utf8"));
+    const loaded = loadPairingConfig(projectDir, AGENT_REGISTRY_NAMES);
+    if (loaded === null) return [];
+    const cfg = loaded.cfg;
     if (!cfg.enabled) return [];
     // De-dupe (kimi pair-review): a config that repeats a stage must not fire it
     // twice — duplicate peer spawns, duplicate events, and a clobbered evidence
@@ -219,9 +293,9 @@ export async function runPairing(
 ): Promise<RunPairingResult> {
   try {
     if (stage === "score") return { status: "off" }; // belt-and-braces: score never routes through the review loop (US-PAIR-009)
-    const cfgPath = join(projectDir, ".roll", "pairing.yaml");
-    if (!existsSync(cfgPath)) return { status: "off" }; // file absent = pairing off
-    const cfg = parsePairingConfig(readFileSync(cfgPath, "utf8"));
+    const loaded = loadPairingConfig(projectDir, deps.installed);
+    if (loaded === null) return { status: "off" }; // file absent = pairing off
+    const cfg = loaded.cfg;
     if (!cfg.enabled || !cfg.stages.includes(stage)) return { status: "off" };
 
     // Only pair a delivery worth a second pair of eyes (align with peer-gate).
@@ -239,7 +313,7 @@ export async function runPairing(
       ...(deps.history !== undefined ? { history: deps.history } : {}),
       ...(deps.epsilon !== undefined ? { epsilon: deps.epsilon } : {}),
       // FIX-935: respect project-config agent allowlist.
-      ...(deps.allowedAgents !== undefined ? { allowedAgents: deps.allowedAgents } : {}),
+      ...(deps.allowedAgents !== undefined && loaded.source !== "scoped-agents" ? { allowedAgents: deps.allowedAgents } : {}),
     });
     if (candidates.length === 0) {
       // fail-loud: no silent skip — the absence is itself an audited event.
@@ -405,10 +479,9 @@ export async function runScorePairing(
     // nuance; its enabled/stages flags NO LONGER gate scoring. The "score"
     // selector ignores cfg gating anyway (it is stage-aware), so a synthesized
     // minimal cfg is sufficient when no config exists.
-    const cfgPath = join(projectDir, ".roll", "pairing.yaml");
-    const cfg = existsSync(cfgPath)
-      ? parsePairingConfig(readFileSync(cfgPath, "utf8"))
-      : { enabled: true, stages: ["score"] as PairingStage[], capability: {} };
+    const loaded = loadPairingConfig(projectDir, deps.installed, { enabled: true, stages: ["score"] as PairingStage[], capability: {} });
+    const cfg = loaded?.cfg ?? { enabled: true, stages: ["score"] as PairingStage[], capability: {} };
+    const selectionAllowedAgents = loaded?.source === "scoped-agents" ? Object.keys(cfg.capability) : deps.allowedAgents;
 
     const candidates = selectPairingCandidates({
       installed: deps.installed,
@@ -420,7 +493,7 @@ export async function runScorePairing(
       ...(deps.history !== undefined ? { history: deps.history } : {}),
       ...(deps.epsilon !== undefined ? { epsilon: deps.epsilon } : {}),
       // FIX-935: respect project-config agent allowlist.
-      ...(deps.allowedAgents !== undefined ? { allowedAgents: deps.allowedAgents } : {}),
+      ...(selectionAllowedAgents !== undefined ? { allowedAgents: selectionAllowedAgents } : {}),
     });
     if (candidates.length === 0) {
       // Fail-loud: no scorer to spawn a fresh session of → BLOCK (no fallback).
@@ -504,14 +577,14 @@ export async function runScorePairing(
       // escalation gives them one more chance with a hard budget cap to avoid
       // death-spiralling on genuinely dead peers.
       const triedPeers = new Set([...heteroPool, ...sameVendorPool].map(canonicalAgentName));
-      const allowedSet = deps.allowedAgents === undefined ? undefined : new Set([...deps.allowedAgents].map(canonicalAgentName));
-      const allHeadless = deps.installed
+      const allowedSet = selectionAllowedAgents === undefined ? undefined : new Set([...selectionAllowedAgents].map(canonicalAgentName));
+      const allKnown = deps.installed
         .map(canonicalAgentName)
         .filter((a, i, arr) => arr.indexOf(a) === i)
-        .filter((a) => agentCanReviewHeadless(a))
+        .filter((a) => agentIsKnown(a))
         // FIX-935: escalation must also respect the project-config allowlist.
         .filter((a) => allowedSet === undefined || allowedSet.has(a));
-      const escalationPool = allHeadless.filter((a) => !triedPeers.has(a));
+      const escalationPool = allKnown.filter((a) => !triedPeers.has(a));
       if (escalationPool.length > 0) {
         // Serial dispatch — we are budget-conscious and only need ONE score.
         // Parallel firstValid here would burn all candidates at once with no
@@ -674,7 +747,7 @@ export async function retryPeerConsult(
     const distinct = deps.installed
       .map(canonicalAgentName)
       .filter((a, i, arr) => arr.indexOf(a) === i)
-      .filter((a) => agentCanReviewHeadless(a))
+      .filter((a) => agentIsKnown(a))
       // FIX-935: peer-gate retry must not auto-enable machine-detected agents
       // outside the project's `.roll/agents.yaml` allowlist.
       .filter((a) => allowedSet === undefined || allowedSet.has(a));

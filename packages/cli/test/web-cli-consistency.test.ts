@@ -220,12 +220,12 @@ describe("US-DOSSIER-038 — web ↔ CLI: one number on every surface / 同一�
 
   // ── ① CASTING — `roll cast` table vs the web Casting grid ───────────────────
   it("① casting: row count + empty (em-dash) slots match between roll cast and the web grid", () => {
-    // CLI: one row per VM row; an empty slot prints the em-dash agent + the
-    // deterministic "slot empty" note (the peer row's prose also contains an
+    // CLI: one row per VM row; an empty legacy route prints the em-dash agent +
+    // the deterministic "legacy route empty" note (the peer row's prose also contains an
     // em-dash, so we count the note column, not raw — glyphs).
     const cli = stripAnsi(renderCastTable(CASTING, "en"));
     const cliBodyRows = cli.split("\n").filter((l) => /^ {2}\S/.test(l) && !/^ {2}Role\b/.test(l)).length;
-    const cliEmpty = count(cli, "slot empty");
+    const cliEmpty = count(cli, "legacy route empty");
 
     // WEB: the grid renders four `data-exec-slot` cards plus four
     // `data-scenario-role` rows; together they are still one DOM row per VM row.

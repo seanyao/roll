@@ -13,10 +13,9 @@
  * (same vendor, different model does NOT count); MVP rotation is pure seeded
  * round-robin (hit-rate bias deferred to US-PAIR-006); fail-loud when no peer.
  */
-import type { RollEvent } from "@roll/spec";
+import type { AgentName, AgentScopeConfig, AgentScopeRoleBinding, RollEvent } from "@roll/spec";
 import { extractUsage, toCycleCost } from "../cost/tracker.js";
 import { AGENT_REGISTRY_NAMES, agentIsKnown, canonicalAgentName } from "./registry.js";
-import { agentCanReviewHeadless } from "./specs.js";
 
 // US-PAIR-009 / FIX-343: `score` — the finished cycle's Review Score is produced
 // by a fresh-session peer Reviewer; the working agent never grades its own work.
@@ -77,7 +76,7 @@ export function heteroAvailable(
   const working = agentVendor(workingAgent);
   const reviewable = installed
     .map(canonicalAgentName)
-    .filter((a) => agentCanReviewHeadless(a))
+    .filter((a) => agentIsKnown(a))
     .filter((a) => allowedSet === undefined || allowedSet.has(a));
   if (working === "" || canonicalAgentName(workingAgent) === "") {
     // No builder identity → can't reason about heterogeneity; conservatively
@@ -104,6 +103,50 @@ export class PairingConfigError extends Error {
     super(message);
     this.name = "PairingConfigError";
   }
+}
+
+function uniqueKnownAgents(input: readonly string[]): AgentName[] {
+  const out: AgentName[] = [];
+  for (const raw of input) {
+    const agent = canonicalAgentName(raw);
+    if (!agentIsKnown(agent)) continue;
+    if (!out.includes(agent as AgentName)) out.push(agent as AgentName);
+  }
+  return out;
+}
+
+function scopedEvaluateBinding(config: AgentScopeConfig): AgentScopeRoleBinding | undefined {
+  return config.defaults["story"]?.roles.evaluate ?? config.roles.evaluate;
+}
+
+function roleScopedPool(config: AgentScopeConfig, binding: AgentScopeRoleBinding, installed: readonly string[]): AgentName[] {
+  if (binding.kind === "fixed") return [binding.agent];
+  if (binding.kind !== "select") return [];
+  const base = binding.from !== undefined && binding.from.length > 0 ? [...binding.from] : uniqueKnownAgents(installed);
+  const require = binding.require ?? [];
+  if (require.length === 0) return uniqueKnownAgents(base);
+  return uniqueKnownAgents(base).filter((agent) => {
+    const declared = config.agents[agent]?.capabilities;
+    return declared === undefined || require.every((role) => declared.includes(role));
+  });
+}
+
+/**
+ * US-V4-018 — project `roll-agents/v1` uses the recursive `evaluate` Role as
+ * the authoring surface for pair-review/score candidates. This adapter keeps
+ * the existing pairing selector stable while moving the config source:
+ *   - `roles.evaluate` / `defaults.story.roles.evaluate` narrows the reviewer pool.
+ *   - no explicit `from` means "all installed supported agents", not historical
+ *     easy/default/hard route slots.
+ *   - runtime auth/VPN/account health remains a selector-time availability check.
+ */
+export function pairingConfigFromAgentScopeConfig(config: AgentScopeConfig, installed: readonly string[] = AGENT_REGISTRY_NAMES): PairingConfig | null {
+  const binding = scopedEvaluateBinding(config);
+  if (binding === undefined || binding.kind === "inherit") return null;
+  const pool = roleScopedPool(config, binding, installed);
+  if (pool.length === 0) return { enabled: false, stages: ["code", "score"], capability: {} };
+  const capability = Object.fromEntries(pool.map((agent) => [agent, ["code", "score"] as PairingStage[]]));
+  return { enabled: true, stages: ["code", "score"], capability };
 }
 
 // NOTE (kimi pair-review): crude `#` truncation is safe ONLY because the schema's
@@ -171,9 +214,6 @@ export function parsePairingConfig(yaml: string): PairingConfig {
       if (!agentIsKnown(canon)) {
         throw new PairingConfigError(`capability declared for unknown agent "${agent}" (registry cross-check failed)`);
       }
-      if (!agentCanReviewHeadless(canon)) {
-        throw new PairingConfigError(`capability declared for non-headless reviewer "${agent}" (headless review profile failed)`);
-      }
       cfg.capability[canon] = parseStageList(val ?? "", `capability.${agent}`);
     } else {
       // indented line outside the only nesting block (capability) — a mis-indent
@@ -185,7 +225,7 @@ export function parsePairingConfig(yaml: string): PairingConfig {
 }
 
 /**
- * Build the default config `roll pair init` materialises from the live registry:
+ * Build the default legacy pairing config materialised from the live registry:
  * every installed agent is declared code-capable; pairing is enabled only when
  * ≥2 distinct vendors are present (else there is no heterogeneous peer to pair
  * with, so it lands disabled with the reason left to the renderer). MVP stage is
@@ -195,7 +235,7 @@ export function defaultPairingConfig(installed: string[]): PairingConfig {
   const agents = installed
     .map(canonicalAgentName)
     .filter((a, i, arr) => arr.indexOf(a) === i)
-    .filter((a) => agentCanReviewHeadless(a));
+    .filter((a) => agentIsKnown(a));
   const vendors = new Set(agents.map(agentVendor));
   const capability: Record<string, PairingStage[]> = {};
   // US-PAIR-009: every installed agent is declared score-capable too — scoring a
@@ -258,9 +298,9 @@ export function pairingPoolView(installed: string[], cfg: PairingConfig): Pairin
  */
 export function renderPairingConfig(cfg: PairingConfig): string {
   const lines: string[] = [
-    "# .roll/pairing.yaml — Cross-Agent Pairing (US-PAIR-001).",
-    "# Generated by `roll pair init` from `roll agents list`. Edit freely.",
-    "# File present = pairing on; delete this file = pairing off (never silent).",
+    "# .roll/pairing.yaml — Legacy Cross-Agent Pairing (US-PAIR-001).",
+    "# Generated by the legacy pair init command from installed agents. Edit freely.",
+    "# Scoped evaluate roles in .roll/agents.yaml take precedence over this file.",
   ];
   if (!cfg.enabled) {
     lines.push("# Disabled: fewer than two distinct vendors installed — no heterogeneous peer to pair with.");
@@ -315,8 +355,7 @@ export interface PairingCostSummary {
   totalFindings: number;
   /** pair:none-available events (fail-loud absences — a pairing that did not happen). */
   noneAvailable: number;
-  /** FIX-346: peers dropped from the pool after repeated headless auth failures
-   *  (canonical agent → most-recent recorded consecutive-failure count). */
+  /** Legacy pair:excluded events (canonical agent → most-recent recorded count). */
   excludedPeers: Record<string, number>;
 }
 
@@ -358,16 +397,12 @@ export function aggregatePairingCost(events: readonly RollEvent[]): PairingCostS
   return summary;
 }
 
-// ── FIX-346: auth-failure pool exclusion ─────────────────────────────────────
+// ── FIX-346 legacy auth-failure observability ────────────────────────────────
 
 /**
- * Default consecutive-auth-failure threshold before a peer is dropped from the
- * candidate pool. ONE blip can be transient (a keychain cooldown that clears, a
- * daemon restart), so a single failure must NOT bench a peer — but a peer that
- * has failed auth this many times IN A ROW (with no successful review/score in
- * between) cannot refresh its creds non-interactively in this unattended loop, so
- * re-spawning it every cycle only wastes a review slot and floods the data with
- * `cause:auth` noise (the claude-keychain symptom in FIX-346). Two strikes.
+ * Legacy threshold retained for interpreting historical event streams.
+ * V4 fair candidate pools do not bench a peer because of prior auth failures;
+ * current availability is checked at resolution/spawn time instead.
  */
 export const DEFAULT_AUTH_EXCLUDE_THRESHOLD = 2;
 
@@ -375,7 +410,7 @@ export const DEFAULT_AUTH_EXCLUDE_THRESHOLD = 2;
 export interface PeerAuthState {
   /** Consecutive trailing `agent:blocked cause:auth` events (reset by any success). */
   consecutiveAuthFailures: number;
-  /** True once the streak has reached the exclusion threshold. */
+  /** Legacy diagnostic: true once the historical streak reached the old threshold. */
   excluded: boolean;
 }
 
@@ -415,22 +450,16 @@ export function peerAuthStates(
 }
 
 /**
- * FIX-346 — the set of canonical peers to DROP from the candidate pool because
- * they have failed headless auth `threshold` times in a row (see
- * {@link peerAuthStates}). The executor feeds this into the `isAvailable` seam so
- * {@link selectPairingCandidates} stops re-selecting them and swaps to the next
- * heterogeneous peer; scoring still fail-loud only when the WHOLE pool is empty.
+ * V4 fairness: historical auth failures never remove an agent from the static
+ * candidate pool. The current spawn/probe decides availability for this run.
  */
 export function excludedPeers(
   events: readonly RollEvent[],
   threshold: number = DEFAULT_AUTH_EXCLUDE_THRESHOLD,
 ): Set<string> {
-  const states = peerAuthStates(events, threshold);
-  const out = new Set<string>();
-  for (const peer of Object.keys(states)) {
-    if (states[peer]?.excluded === true) out.add(peer);
-  }
-  return out;
+  void events;
+  void threshold;
+  return new Set<string>();
 }
 
 // ── US-PAIR-006: hit-rate-driven rotation ────────────────────────────────────
@@ -542,7 +571,7 @@ export function selectPairingCandidates(input: SelectInput): string[] {
   const basePool = installed
     .map(canonicalAgentName)
     .filter((a, i, arr) => arr.indexOf(a) === i) // de-dupe
-    .filter((a) => agentCanReviewHeadless(a))
+    .filter((a) => agentIsKnown(a))
     .filter((a) => allowedSet === undefined || allowedSet.has(a))
     .sort((x, y) => (order.get(x) ?? 999) - (order.get(y) ?? 999));
 

@@ -939,10 +939,10 @@ describe("FIX-305 — webCaptureTargetForStory: drive a real screenshot for UI/d
   });
 
   it("FIX-321b: a relative deliverable_url with a #fragment deep-links a tab (split before join, re-appended)", () => {
-    const wt = withSpec("FIX-FRAG", "---\nid: FIX-FRAG\ndeliverable_url: .roll/features/index.html#casting\n---\n# FIX-FRAG\n\n**AC:**\n- [ ] x\n");
+    const wt = withSpec("FIX-FRAG", "---\nid: FIX-FRAG\ndeliverable_url: ui/casting.html#board\n---\n# FIX-FRAG\n\n**AC:**\n- [ ] x\n");
     const t = webCaptureTargetForStory(wt, "FIX-FRAG");
     expect(t).toMatch(/^file:\/\//);
-    expect(t).toContain("/.roll/features/index.html#casting"); // fragment preserved, not encoded into the path
+    expect(t).toContain("/ui/casting.html#board"); // fragment preserved, not encoded into the path
     expect(t).not.toContain("%23"); // the "#" must NOT be percent-encoded into the filename
   });
 
@@ -1059,7 +1059,7 @@ describe("FIX-309 — screenshot baseline: default REQUIRED, rules only EXEMPT",
     addSpec(
       wt,
       "FIX-CAP",
-      "---\nid: FIX-CAP\ndeliverable_url: .roll/features/index.html#casting\n---\n# FIX-CAP — Casting redesign\n\n## Acceptance Criteria\n\n- [ ] the casting layout is reworked\n",
+      "---\nid: FIX-CAP\ndeliverable_url: https://app.example.test/casting#board\n---\n# FIX-CAP — Casting redesign\n\n## Acceptance Criteria\n\n- [ ] the casting layout is reworked\n",
     );
     withPeerScore(wt, "FIX-CAP", 8, "good", "c-cap");
     writeEvidenceJson(wt, "FIX-CAP", { captures: [{ kind: "web", out: "screenshots/casting.png", taken: true }] });
@@ -1182,7 +1182,7 @@ describe("FIX-309 — declared deliverable_url demands a REAL capture (堵 284 �
     addSpec(
       wt,
       "FIX-309D",
-      "---\nid: FIX-309D\ndeliverable_url: .roll/features/index.html#casting\n---\n# FIX-309D — Casting redesign\n\n## Acceptance Criteria\n\n- [ ] casting renders\n",
+      "---\nid: FIX-309D\ndeliverable_url: https://app.example.test/casting#board\n---\n# FIX-309D — Casting redesign\n\n## Acceptance Criteria\n\n- [ ] casting renders\n",
     );
     withPeerScore(wt, "FIX-309D", 8, "good", "c-309d");
     writeEvidenceJson(wt, "FIX-309D", {
@@ -1228,7 +1228,7 @@ describe("FIX-309 — declared deliverable_url demands a REAL capture (堵 284 �
     addSpec(
       wt,
       "FIX-309E",
-      "---\nid: FIX-309E\ndeliverable_url: .roll/features/index.html#casting\n---\n# FIX-309E — Casting redesign\n\n## Acceptance Criteria\n\n- [ ] casting renders\n",
+      "---\nid: FIX-309E\ndeliverable_url: https://app.example.test/casting#board\n---\n# FIX-309E — Casting redesign\n\n## Acceptance Criteria\n\n- [ ] casting renders\n",
     );
     withPeerScore(wt, "FIX-309E", 8, "good", "c-309e");
     writeEvidenceJson(wt, "FIX-309E", {

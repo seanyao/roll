@@ -5,9 +5,9 @@
  * Keeps agent discovery / selection / argv mapping in one place so the
  * interactive entry points do not fork their definition of "installed".
  */
-import { accessSync, constants, existsSync, mkdirSync, readFileSync, readSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { delimiter, join } from "node:path";
 import {
   agentInstalledByName as coreAgentInstalledByName,
   getAgentSpec,
@@ -77,7 +77,7 @@ export function discoverInteractiveAgents(agentEnv?: AgentEnv): { installed: str
   return { installed, missing };
 }
 
-/** Read the globally-configured `primary_agent`, or `null` if absent/empty. */
+/** Read legacy `primary_agent`, or `null` if absent/empty. New writes use `~/.roll/agents.yaml`. */
 export function readPrimaryAgent(): string | null {
   const cfg = rollConfig();
   if (!existsSync(cfg)) return null;
@@ -89,36 +89,6 @@ export function readPrimaryAgent(): string | null {
     }
   }
   return null;
-}
-
-/**
- * US-V4-002 — set the global machine default agent (`primary_agent:`) in
- * `~/.roll/config.yaml` (honors `ROLL_HOME`). Replaces an existing line or
- * appends one; creates the file/dir when absent. Atomic (tmp + rename) so a
- * crash never leaves a half-written global config.
- */
-export function writePrimaryAgent(name: string): void {
-  const cfg = rollConfig();
-  mkdirSync(dirname(cfg), { recursive: true });
-  const lines = existsSync(cfg) ? readFileSync(cfg, "utf8").split("\n") : [];
-  let replaced = false;
-  const next = lines.map((line) => {
-    if (/^primary_agent:\s*/.test(line)) {
-      replaced = true;
-      return `primary_agent: ${name}`;
-    }
-    return line;
-  });
-  if (!replaced) {
-    // Drop a trailing empty line so the new key sits at the end of content.
-    if (next.length > 0 && next[next.length - 1] === "") next.pop();
-    next.push(`primary_agent: ${name}`);
-  }
-  let text = next.join("\n");
-  if (!text.endsWith("\n")) text += "\n";
-  const tmp = `${cfg}.tmp.${process.pid}`;
-  writeFileSync(tmp, text, "utf8");
-  renameSync(tmp, cfg);
 }
 
 /**
@@ -181,9 +151,9 @@ export function readLineFromStdin(): string | null {
   return Buffer.from(chunks).toString("utf8");
 }
 
-// ─── Primary agent selection (US-ONBOARD-NUDGE-006) ──────────────────────────
+// ─── Initial supervise-role selection (US-ONBOARD-NUDGE-006) ─────────────────
 
-/** Check if a configured `primary_agent` is still in the installed set. */
+/** Check if a legacy configured primary agent is still in the installed set. */
 export function isPrimaryValid(primary: string | null, installed: string[]): boolean {
   if (primary === null || primary === "") return false;
   return installed.includes(primary);
@@ -200,7 +170,7 @@ function lang(): Lang {
 export interface PrimarySelectionOptions {
   /** Currently installed agent names (available set). */
   installed: string[];
-  /** Current primary_agent value from config, or null if absent. */
+  /** Legacy primary_agent value from config, or null if absent. */
   primary: string | null;
   /** Whether stdin is a TTY (controls interactive vs deterministic path). */
   isTTY: boolean;
@@ -211,21 +181,21 @@ export interface PrimarySelectionOptions {
 }
 
 export interface PrimarySelectionResult {
-  /** Agent name to persist as primary_agent, or null if no change. */
+  /** Agent name to persist as Machine Scope supervise role, or null if no change. */
   selected: string | null;
   /** Human-readable guidance line for the caller to emit, or null. */
   guidance: string | null;
 }
 
 /**
- * Select a primary (default) agent according to the rules in US-ONBOARD-NUDGE-006:
+ * Select an initial supervise agent according to the rules in US-ONBOARD-NUDGE-006:
  *
  *   AC3: installed empty → no selection, return install guidance.
- *   AC4: valid primary + not reselect → silently keep (selected=null, guidance=null).
- *   AC2: no valid primary + installed exactly 1 → auto-select that one.
- *   AC1: no valid primary + installed >1 + TTY → interactive prompt.
- *   AC5: no valid primary + installed >1 + non-TTY → deterministic first-in-order.
- *   AC6: primary points to removed agent → treated as no valid primary.
+ *   AC4: valid legacy primary + not reselect → silently keep (selected=null, guidance=null).
+ *   AC2: no valid legacy primary + installed exactly 1 → auto-select that one.
+ *   AC1: no valid legacy primary + installed >1 + TTY → interactive prompt.
+ *   AC5: no valid legacy primary + installed >1 + non-TTY → deterministic first-in-order.
+ *   AC6: legacy primary points to removed agent → treated as no valid selection.
  */
 export function selectPrimaryAgent(opts: PrimarySelectionOptions): PrimarySelectionResult {
   const { installed, primary, isTTY, reselect, readLine } = opts;

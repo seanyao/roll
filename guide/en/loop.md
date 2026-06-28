@@ -5,6 +5,12 @@ When enabled, it wakes up on a configurable schedule (within your active
 window), picks the top pending story, and executes it — committing changes in
 TCR micro-steps.
 
+`roll loop on` is the explicit switch into **autonomous** mode. `roll loop off`
+or `roll loop pause` returns the project to **guided** operation, where the
+owner asks `roll supervisor next/why` and starts any long-running Story work
+explicitly. `roll loop resume` switches back to autonomous without changing
+agent bindings.
+
 ## How It Works
 
 1. Reads `BACKLOG.md`, picks the highest-priority `📋 Todo` item.
@@ -118,8 +124,8 @@ roll config loop-window 10-18 --global   # active window for every project
 roll config loop-schedule 60 --global    # default interval for every project
 ```
 
-(Agent selection is no longer a global config key — it is per-project complexity
-routing in `.roll/agents.yaml`. See [Complexity-based agent routing](#complexity-based-agent-routing).)
+(Agent selection is no longer a global config key. It is resolved from Machine
+Scope and Project Scope agent files. See [Autonomous Role Resolution](#autonomous-role-resolution).)
 
 Project-level `.roll/local.yaml` always takes priority over the global default.
 
@@ -183,7 +189,7 @@ roll loop gc --keep-days 14   # Override retention (also: loop_gc.retention_days
 roll loop events      # Show last 20 cycle events
 roll loop events 50   # Show last 50 events
 
-roll agent                           # Show the four complexity slots + online status
+roll agent                           # Show scopes, roles, agent pool, and legacy inputs
 roll agent list                      # Show agents installed on this machine
 ```
 
@@ -263,75 +269,47 @@ reviewer is installed. Use `--review self` to allow same-provider review. Use
 `--review off` only as an explicit operator waiver; Roll skips the gate but
 still records a `goal:final_review` event with `verdict: SKIPPED`.
 
-## Complexity-based agent routing
+## Autonomous Role Resolution
 
-Loop routes each cycle along a single axis — **task complexity**. A story's
-`est_min` is classified into one of three tiers, and the tier maps to an agent
-through four slots in the per-project `.roll/agents.yaml`. There is no global
-`primary_agent` and no `agent×model` selection (each agent uses its own default
-model). The tier itself is a hard constraint — history only ever re-orders the
-agent *within* a tier (the in-tier soft nudge), never crosses tiers.
+Loop resolves agents through the scoped Agent model:
 
-每轮 cycle 只按一根轴选 agent —— **任务复杂度**。故事的 `est_min` 归到三档之一，
-再由项目本地 `.roll/agents.yaml` 的四个槽映射到具体 agent。没有全局
-primary_agent，不再选 agent×model（每个 agent 用自己的默认模型）。档位本身是硬约束——
-历史只会在同一档位内重排 agent（in-tier 软微调），绝不跨档。
-
-The complexity classifier (single source of truth, fixed thresholds):
-
-```
-est_min <= 8        → easy
-8 < est_min <= 20   → default
-est_min > 20        → hard
-missing / invalid   → default
+```text
+Scope -> Role -> Binding -> Agent -> optional Model
 ```
 
-The four slots in `.roll/agents.yaml` (schema v3):
+Machine Scope lives in `~/.roll/agents.yaml`; Project Scope lives in
+`.roll/agents.yaml`. A loop cycle resolves `story.execute` for the Builder and
+`story.evaluate` for review/score, using inherited machine declarations when the
+project says `inherits: machine`.
 
 ```yaml
-schema: v3
-easy:     { agent: kimi }
-default:  { agent: kimi }
-hard:     { agent: claude }
-fallback: { agent: pi }
+schema: roll-agents/v1
+scope: project
+inherits: machine
+defaults:
+  story:
+    roles:
+      execute:
+        kind: select
+        from: [kimi, codex, pi]
+        require: [execute]
+        strategy: first-available
+      evaluate:
+        kind: select
+        from: [claude, codex, kimi, pi, agy, reasonix]
+        require: [evaluate]
+        avoid: [execute]
+        strategy: least-recent
 ```
 
-`agents.yaml` is per-machine — it lives in `.roll/.gitignore` and is never
-committed, so each machine manages its own slots. When a tier's slot is empty,
-routing falls back to the `default` slot → the `local.yaml` single-agent
-default (if present) → WARNs and uses the first installed agent. Per-tier
-selection reads `agents.yaml` only; `ROLL_LOOP_AGENT` is the route's OUTPUT
-(consumed by display/dream), never a selection input.
+`roll agent` shows the effective Machine Scope, Project Scope, resolved roles,
+candidate pool, runtime health notes, and any legacy compatibility inputs. Use
+`roll agent migrate --dry-run` to preview conversion from old agent files.
 
-每轮 cycle 启动时 cron log 会打印一行（`via <tier>` 是复杂度档，不是硬规则命中）：
-
-```
-[loop] story US-AGENT-007 routed to claude via hard est_min=24 → tier=hard
-[loop] story FIX-127 routed to kimi via easy est_min=6 → tier=easy
-```
-
-Inspect and change routing:
-
-```
-roll agent                           # four slots + online status + recent downgrades
-roll agent set hard claude           # set one slot
-roll agent use kimi                  # lock easy/default/hard to one agent (fallback unchanged)
-```
-
-### Mechanical fallback
-
-After a tier resolves to an agent, loop probes whether that agent is usable
-right now (on PATH + a one-shot auth/network check). If it is offline — no
-binary, expired token, or no network — loop swaps to the `fallback` slot agent
-and records `fallback_from: <original agent>` in `runs.jsonl`. The downed agent
-is cached as unavailable (~30 min) so later cycles skip it. If the `fallback`
-slot agent is also unavailable, loop does not keep trying other agents — it
-writes an ALERT and stops, so a human can fix the environment.
-
-主 agent 解析出来后，loop 先探测它当前能不能跑（在 PATH + 一次 auth/网络探测）。
-离线（没装 / 断 token / 断网）就切到 `fallback` 槽 agent，并在 `runs.jsonl` 记
-`fallback_from`；挂掉的 agent 写入不可用缓存（约 30 min）后续跳过。`fallback`
-也不可用时不无限顺试，写 ALERT 停下等人介入。
+Runtime health is not static policy. Auth, network, VPN, account, or missing
+binary failures skip a candidate for the current resolution and are recorded as
+runtime facts. If no candidate remains, loop pauses and writes an ALERT instead
+of silently rewriting the pool.
 
 ### Agent self-downgrade (too_big verdict)
 
@@ -353,23 +331,23 @@ the chain grow indefinitely.
 
 ## Execution profiles (standard / verified / planned)
 
-Routing above chooses the **Rig** (`agent × model`) for a slot. Separately, Roll
-chooses an **execution profile** per Story — the cheapest *sufficient* role
-pipeline for that Story's risk and ROI. You do not declare it; it is selected
-once at cycle start from the story's risk signals and recorded in an
-`execution:profile` event. These are **not user-facing "team shapes"** — they are
-risk/ROI tiers:
+Role resolution above chooses the concrete Agent and optional Model for the
+`execute` and `evaluate` roles. Separately, Roll chooses an **execution profile** per
+Story — the cheapest *sufficient* role pipeline for that Story's risk and ROI.
+You do not declare it; it is selected once at cycle start from the story's risk
+signals and recorded in an `execution:profile` event. These are **not
+user-facing "team shapes"** — they are risk/ROI tiers:
 
-- **`standard` = Builder only** — low-risk, local scope, clear acceptance, low
+- **`standard` = execute only** — low-risk, local scope, clear acceptance, low
   evidence risk (a copy fix, a small parser bug, an internal rename).
-- **`verified` = Builder → Evaluator** — user-visible behavior, screenshot/visual
+- **`verified` = execute → evaluate** — user-visible behavior, screenshot/visual
   evidence required, or a history of weak/missing evidence. An independent
-  Evaluator (fresh session) judges the delivery; blocking review, score, and
+  `evaluate` role (fresh session) judges the delivery; blocking review, score, and
   attest stay three separate dimensions.
-- **`planned` = Planner → Builder → Evaluator** — the risk is doing the *wrong*
+- **`planned` = plan artifact → execute → evaluate** — the risk is doing the *wrong*
   work: unclear requirements, cross-module change, or truth/release/routing/state
-  semantics. A Planner writes a contract before the Builder; the Evaluator maps
-  planned-vs-delivered. Evaluator → Builder repair rounds are strictly bounded
+  semantics. A plan artifact is written before `execute`; `evaluate` maps
+  planned-vs-delivered. evaluate → execute repair rounds are strictly bounded
   (max rounds, repeated-finding signature, budget, timeout) and escalate on a
   bound trip.
 
@@ -743,8 +721,8 @@ Loop sees the `🔨 In Progress` marker and skips it.
 | Condition | What happens |
 |-----------|-------------|
 | API error | Retry up to 3×, 30s backoff |
-| Primary agent fails | Switch to fallback agent |
-| Both agents fail | Pause loop, write ALERT.md |
+| Role candidate unavailable | Skip for current resolution, record runtime health |
+| No role candidate available | Pause loop, write ALERT.md |
 | TCR: 0 commits | Revert story to 📋 Todo, write ALERT.md |
 | HEAD CI red | Hot-fix attempt (see below), or ALERT if exhausted |
 

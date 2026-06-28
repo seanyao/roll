@@ -39,12 +39,9 @@ describe("AgentSpec registry — FIX-313", () => {
     expect(getAgentSpec("codex")?.usage.sessionReuse).toBe("codex-exec-resume");
   });
 
-  it("declares headless-review capability only for agents the runner can spawn", () => {
-    for (const agent of ["kimi", "codex", "pi", "reasonix"]) {
+  it("declares prompt-mode review capability for every supported agent", () => {
+    for (const agent of ["claude", "kimi", "codex", "pi", "agy", "reasonix"]) {
       expect(agentCanReviewHeadless(agent)).toBe(true);
-    }
-    for (const agent of ["claude", "agy"]) {
-      expect(agentCanReviewHeadless(agent)).toBe(false);
     }
   });
 

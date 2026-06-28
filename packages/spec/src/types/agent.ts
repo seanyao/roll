@@ -224,6 +224,112 @@ export interface AgentConfigParse {
   readonly errors: readonly string[];
 }
 
+// ── US-V4-015: fractal Agent Scope / Role / Binding model ──────────────────
+
+export const AGENT_SCOPE_SCHEMA = "roll-agents/v1" as const;
+export type AgentScopeSchema = typeof AGENT_SCOPE_SCHEMA;
+
+export const AGENT_SCOPE_KINDS = ["machine", "project", "story", "skill", "review", "score"] as const;
+export type AgentScopeKind = (typeof AGENT_SCOPE_KINDS)[number];
+
+/** Minimal Role vocabulary for the recursive Agent-domain model. */
+export const AGENT_SCOPE_ROLES = ["supervise", "execute", "evaluate"] as const;
+export type AgentScopeRole = (typeof AGENT_SCOPE_ROLES)[number];
+
+export const AGENT_BINDING_STRATEGIES = ["first-available", "least-recent", "seeded-random"] as const;
+export type AgentBindingStrategy = (typeof AGENT_BINDING_STRATEGIES)[number];
+
+/** Static Agent declaration inside `~/.roll/agents.yaml`. Runtime health is not
+ *  encoded here; it is supplied by the resolver/spawn path. */
+export interface AgentScopeAgent {
+  readonly id: AgentName;
+  readonly adapter: AgentName;
+  readonly home?: string;
+  readonly convention?: string;
+  readonly capabilities: readonly AgentScopeRole[];
+  readonly models?: readonly ModelId[];
+}
+
+export interface AgentScopeModel {
+  readonly id: ModelId;
+  readonly provider?: string;
+  readonly capabilities?: readonly string[];
+  readonly contextTokens?: number;
+  readonly costClass?: "low" | "medium" | "high";
+}
+
+export type AgentScopeRoleBinding =
+  | { readonly kind: "inherit"; readonly from?: string }
+  | { readonly kind: "fixed"; readonly agent: AgentName; readonly model?: ModelId }
+  | {
+      readonly kind: "select";
+      readonly from?: readonly AgentName[];
+      readonly require?: readonly AgentScopeRole[];
+      readonly avoid?: readonly AgentScopeRole[];
+      readonly strategy: AgentBindingStrategy;
+    };
+
+export interface AgentScopeDefaults {
+  readonly roles: Readonly<Partial<Record<AgentScopeRole, AgentScopeRoleBinding>>>;
+}
+
+export type AgentScopeResolutionStrategy = AgentBindingStrategy | "fixed";
+
+export interface AgentScopeSkippedCandidate {
+  readonly agent: AgentName;
+  readonly reason: string;
+}
+
+export interface AgentScopeResolutionTrace {
+  readonly source: string;
+  readonly bindingKind: AgentScopeRoleBinding["kind"];
+  readonly action: "inherit" | "select" | "resolve" | "fail";
+}
+
+/** A concrete role assignment after scope inheritance, selection, and runtime
+ *  availability checks have been resolved by the future resolver. */
+export interface AgentScopeResolvedRole {
+  readonly scope: AgentScopeKind;
+  readonly role: AgentScopeRole;
+  readonly agent: AgentName;
+  readonly model?: ModelId;
+  readonly binding: AgentScopeRoleBinding;
+  readonly source: string;
+  readonly selectedStrategy: AgentScopeResolutionStrategy;
+  readonly candidates: readonly AgentName[];
+  readonly skipped: readonly AgentScopeSkippedCandidate[];
+  readonly trace: readonly AgentScopeResolutionTrace[];
+}
+
+export interface AgentScopeResolutionFailure {
+  readonly scope: AgentScopeKind;
+  readonly role: AgentScopeRole;
+  readonly source?: string;
+  readonly errors: readonly string[];
+  readonly candidates: readonly AgentName[];
+  readonly skipped: readonly AgentScopeSkippedCandidate[];
+  readonly trace: readonly AgentScopeResolutionTrace[];
+}
+
+export type AgentScopeRoleResolution =
+  | { readonly ok: true; readonly resolved: AgentScopeResolvedRole }
+  | { readonly ok: false; readonly failure: AgentScopeResolutionFailure };
+
+export interface AgentScopeConfig {
+  readonly schema: AgentScopeSchema;
+  readonly scope: AgentScopeKind;
+  readonly inherits?: string;
+  readonly agents: Readonly<Partial<Record<AgentName, AgentScopeAgent>>>;
+  readonly models: Readonly<Record<ModelId, AgentScopeModel>>;
+  readonly roles: Readonly<Partial<Record<AgentScopeRole, AgentScopeRoleBinding>>>;
+  readonly defaults: Readonly<Record<string, AgentScopeDefaults>>;
+}
+
+export interface AgentScopeConfigParse {
+  readonly config: AgentScopeConfig | null;
+  readonly errors: readonly string[];
+}
+
 /** US-V4-006 — the Planner contract (`planner-contract.md`) a `planned` execution
  *  produces in a fresh session BEFORE the Builder. Builder consumes it via
  *  artifact refs; the Evaluator maps planned-vs-delivered against it. */

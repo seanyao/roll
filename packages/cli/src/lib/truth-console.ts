@@ -94,7 +94,7 @@ export interface BacklogVM {
 export interface LoopLiveFeedVM {
   /** Absolute live.log path, shown as provenance only. */
   sourcePath: string;
-  /** Browser-side read-only polling target from .roll/features/index.html. */
+  /** Static archive read-only polling target from .roll/features/index.html. */
   relativeHref: string;
   /** Agent normalizer used by the generated snapshot. */
   agent: string;
@@ -105,14 +105,6 @@ export interface LoopLiveFeedVM {
   rawLineCount: number;
   renderedLines: string[];
   note?: string;
-}
-
-export interface DaemonStatusVM {
-  status: "running" | "stopped";
-  sourcePath: string;
-  pid?: number;
-  address?: string;
-  startedAt?: number;
 }
 
 export interface TruthConsoleInput {
@@ -137,18 +129,15 @@ export interface TruthConsoleInput {
   /** Skills catalog + strict-audit truth (US-DOSSIER-017). */
   skills: SkillsPanelVM;
   /**
-   * US-DOSSIER-030 — the Loop-tab Casting grid view-model: complexity slots
-   * (easy/default/hard/fallback → agent, from the router slot config) + the
-   * scenario roles (peer re-check, PR review, adversarial spar, onboard).
-   * Resolved by the pure `collectCasting()`; never a hardcoded array.
+   * US-DOSSIER-030 — the Casting grid view-model: scoped-role casting plus
+   * legacy execute route sources (easy/default/hard/fallback) for compatibility,
+   * and scenario roles (peer re-check, PR review, adversarial spar, onboard).
    */
   casting: CastingVM;
   /** FIX-284 — project-scoped git hooks, sourced from core.hooksPath/.git hooks. */
   gitHooks?: GitHooksVM;
   /** US-DOSSIER-044 — read-only live loop feed for the Now tab. */
   liveFeed?: LoopLiveFeedVM;
-  /** US-OBS-024 — read-only daemon liveness reflected on the Now tab. */
-  daemon?: DaemonStatusVM;
   /**
    * US-DOSSIER-033 — the Charter PROJECT TAB: a markdown browser over the
    * project's own charter docs (docs/*.md, the per-epic plan .md files, and the
@@ -474,35 +463,6 @@ function loopLiveFeedPanel(input: TruthConsoleInput): string {
       : `<div data-live-lines="true" style="${MONO}font-size:12.5px;line-height:1.7;color:#93a0b8;font-style:italic;">${esc(empty)}</div>`) +
     `<div style="margin-top:12px;${MONO}font-size:10px;color:#748196;">${esc(feed.sourcePath)} · ${bi("read-only polling, no loop writes", "只读轮询，不写 loop")}</div>` +
     `</div></section>`
-  );
-}
-
-function daemonStatusPanel(input: TruthConsoleInput): string {
-  const daemon = input.daemon ?? {
-    status: "stopped",
-    sourcePath: ".roll/loop/daemon.pid",
-  };
-  const running = daemon.status === "running";
-  const color = running ? C.green : C.slate;
-  const pill = running ? bi("running", "运行中") : bi("stopped", "已停止");
-  const detail = running
-    ? `${bi("pid", "pid")} ${daemon.pid ?? "?"} · ${esc(daemon.address ?? "ws://127.0.0.1:7077")}`
-    : bi("not connected — start with roll daemon start", "未连接——使用 roll daemon start 启动");
-  const since =
-    daemon.startedAt !== undefined
-      ? `<span>${bi("since", "自")} ${shortTs(new Date(daemon.startedAt).toISOString().replace(/\.\d{3}Z$/, "Z"))}</span>`
-      : "";
-  return (
-    `<section data-now-section="daemon-status" data-daemon-status="${daemon.status}" style="border:1px solid ${C.line};border-radius:12px;background:${C.card};padding:14px 18px;margin:14px 0;box-shadow:0 1px 2px rgba(17,26,69,.05);">` +
-    `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">` +
-    sectionLabel(bi("Observability daemon", "可观测 daemon")) +
-    `<span style="${MONO}font-size:10px;padding:2px 8px;border-radius:999px;border:1px solid ${color}44;color:${color};">${pill}</span>` +
-    `<span style="${MONO}font-size:12px;color:${running ? C.body : C.dim};">${detail}</span>` +
-    `<span style="flex:1;"></span>` +
-    `<span style="${MONO}font-size:10.5px;color:${C.faint};">${since}</span>` +
-    `</div>` +
-    `<div style="margin-top:9px;${MONO}font-size:10px;color:${C.dim};">${esc(daemon.sourcePath)} · ${bi("read-only pid probe, no auto-start", "只读 pid 探测，不自动启动")}</div>` +
-    `</section>`
   );
 }
 
@@ -836,7 +796,6 @@ function nowTab(input: TruthConsoleInput): string {
     nowPulseBadge(input) +
     nowOpsPanel(input) +
     loopLiveFeedPanel(input) +
-    daemonStatusPanel(input) +
     heartbeat +
     `<div data-now-section="where-things-stand">` +
     verdictStrip +
@@ -1151,10 +1110,9 @@ function scenarioRoleRow(cr: CastingRow): string {
 }
 
 /**
- * US-DOSSIER-030 — the CASTING grid: who plays which role. Four complexity slots
- * resolved from the router config + four scenario roles, rendered as the design
- * reference's Role / Agent / Note grid. Header carries a copyable `roll agent
- * list` chip (the command that reconciles these slots).
+ * US-DOSSIER-030 — the CASTING grid: who plays which role. Legacy execute route
+ * sources plus four scenario roles, rendered as the design reference's Role /
+ * Agent / Note grid. Header carries a copyable `roll agent list` chip.
  */
 function castingGrid(input: TruthConsoleInput): string {
   const execSlots = input.casting.execSlots ?? [];
@@ -1163,8 +1121,8 @@ function castingGrid(input: TruthConsoleInput): string {
     `<div style="display:flex;align-items:baseline;gap:12px;margin:24px 0 12px;">` +
     `<span style="${MONO}font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${C.sub};font-weight:600;white-space:nowrap;">${bi("Casting", "角色分工")}</span>` +
     `<span style="${MONO}font-size:11.5px;color:${C.faint};">${bi(
-      "complexity slots + scenario roles — who plays what",
-      "复杂度槽位 + 场景角色——谁在什么场景演什么",
+      "scoped roles + legacy route sources — who plays what",
+      "scoped roles + legacy route sources——谁在什么场景演什么",
     )}</span>` +
     `<span style="flex:1;height:1px;background:#dfe4ec;"></span>` +
     copyChip("roll agent list") +
@@ -1191,11 +1149,11 @@ function castingGrid(input: TruthConsoleInput): string {
 function castingTab(input: TruthConsoleInput): string {
   return (
     `<div style="padding:30px 0 4px;">` +
-    kicker(bi("Who plays which role — complexity slots + scenarios", "谁演什么——复杂度槽位 + 场景角色")) +
+    kicker(bi("Who plays which role — scoped roles + scenarios", "谁演什么——scoped roles + 场景角色")) +
     `<h1 style="margin:10px 0 0;font-size:28px;line-height:1.1;font-weight:700;letter-spacing:-.02em;color:${C.ink};">${bi("Casting", "选角")}</h1>` +
     `<p style="margin:10px 0 0;max-width:660px;font-size:14.5px;line-height:1.55;color:${C.sub};">${bi(
-      "The executor complexity ladder and the scenario roles — resolved from the router slot config, never a guessed agent.",
-      "执行复杂度槽位与场景角色——从路由槽位配置解析，绝不臆测 agent。",
+      "Scoped role bindings and legacy route sources are shown together, never as a guessed agent.",
+      "scoped role binding 与 legacy route source 同屏展示，绝不臆测 agent。",
     )}</p></div>` +
     castingGrid(input)
   );
@@ -2262,7 +2220,7 @@ export function topBar(input: TopBarInput): string {
   const menuItems = entries
     .map((p) => {
       const on = p.slug === currentSlug;
-      // Other projects live at their own .roll/features/index.html on disk; the
+      // Other projects expose their own static archive at .roll/features/index.html; the
       // current project's row routes home to the console Now tab (FIX-283:
       // `index.html#now` when this is a machine page, `#now` on console).
       const href = on ? homeHref : `${esc(p.path)}/.roll/features/index.html`;

@@ -5,59 +5,44 @@ automatically. The primitive is the **pair**, not the review: a working agent
 delivers, and a heterogeneous peer reviews it for perspective diversity. A code
 bug that one model's blind spot hides, another model's catches.
 
-Roll treats a reviewer assignment as a **rig**: `agent × model`. The agent is the
+Roll treats reviewer assignment as the `evaluate` role in the scoped Agent
+model: `Scope -> Role -> Binding -> Agent -> optional Model`. The agent is the
 finite six-name identity (`claude`, `kimi`, `codex`, `pi`, `agy`, `reasonix`);
-the model is data carried by that agent. A DeepSeek model therefore rides inside
-the `model` field of a `pi` or `reasonix` rig; `deepseek` is not an agent rig.
+the model is optional data carried by that agent.
 
 Pairing is distinct from [`roll peer`](peer.md): peer is an on-demand,
 multi-round negotiation you (or the loop's risk gate) trigger; pairing is an
-always-available, one-way second pass wired into the cycle and governed by an
-explicit config file.
+always-available, one-way second pass wired into the cycle and governed by the
+Project Scope `evaluate` binding.
 
 ## Turning it on — explicit, never silent
 
 ```bash
-# New project: nothing to do — `roll init` already scaffolds it.
-# Existing project: one command adds it.
-roll pair init        # scaffold .roll/pairing.yaml from your installed agents
+roll agent                         # inspect story.evaluate
+roll agent migrate --dry-run       # convert legacy pairing.yaml if present
 ```
 
-- **New projects**: `roll init` scaffolds `.roll/pairing.yaml` for you (and the
-  init UI says so) — no separate step.
-- **Existing roll projects**: just run `roll pair init`. It is the precise,
-  minimal command — you do **not** need to re-run the full `roll init` (that
-  would also re-merge conventions; overkill for adding pairing).
-
-Both paths produce the identical file (same scaffold logic), and `roll pair init`
-is idempotent (it won't overwrite an existing `pairing.yaml` — use `--force` to
-regenerate).
-
-This is the "third way" between a hidden default-on and hand-authored opt-in:
-the command **generates** an explicit, auditable `.roll/pairing.yaml` from
-`roll agents list`, writing every default into the file (not a hidden code
-default). **The file's presence is the switch** — present = pairing on, delete
-it = off. Pairing never fires silently.
+New projects should author the evaluator pool in `.roll/agents.yaml`:
 
 ```yaml
-# .roll/pairing.yaml — generated, edit freely
-enabled: true
-stages: [code, score]
-capability:
-  claude: [code, score]
-  codex: [code, score]
-  kimi: [code, score]
+# .roll/agents.yaml
+schema: roll-agents/v1
+scope: project
+defaults:
+  story:
+    roles:
+      evaluate:
+        kind: select
+        from: [claude, codex, kimi, pi, agy, reasonix]
+        require: [evaluate]
+        avoid: [execute]
+        strategy: least-recent
 ```
 
-- `enabled` — master switch. `roll pair init` sets it `true` only when at least
-  two **distinct vendors** with headless review capability are installed
-  (otherwise there is no heterogeneous peer to pair with). IDE/config-only
-  targets such as Cursor or Trae are not scaffolded as reviewers.
-- `stages` — which lifecycle stages trigger pairing: `design`, `test`, `code`,
-  `cycle`, `score`. Each is independently opt-out. Default is `code` and `score`.
-- `capability` — per agent, the stages it is declared competent to review.
-  Declarations are cross-checked against the registry and the headless-review
-  profile, so a bogus or non-spawnable reviewer name is rejected.
+`.roll/pairing.yaml` remains a legacy compatibility input. When both files are
+present, the scoped `evaluate` role is preferred. Static config lists fair
+candidates; runtime auth/network/VPN/account failures skip candidates only for
+the current resolution.
 
 ## Seeing what it does — observability
 

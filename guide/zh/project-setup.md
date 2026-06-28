@@ -11,8 +11,8 @@ roll init
 `roll init` 会先诊断当前目录状态，再决定是否改动文件：
 
 1. **空目录** —— 全新起点。Roll 直接写入 `AGENTS.md`、空的 `.roll/`
-   骨架（`backlog.md`、`features/`、`domain/`），以及一份
-   `.roll/pairing.yaml`（[跨 agent 结对](pairing.md)，界面会告知），不问问题。这是
+   骨架（`backlog.md`、`features/`、`domain/`），可继续在 `.roll/agents.yaml`
+   声明 scoped agent binding。不问问题。这是
    **seed（播种）** 接入模式 —— 见 [patterns/seed-pattern.md](patterns/seed-pattern.md)。
 2. **PRD/文档-only** —— Roll 发现需求或产品文档，但没有源码和 manifest。
    这是新项目路径，会指向设计；不会进入已有代码库接入。
@@ -64,10 +64,10 @@ roll next                  # 接续 design/apply/repair/migrate/loop/status
 roll loop on               # 开启自主执行
 ```
 
-`roll setup` 让你从本机已安装的 agent 里选一个默认 agent。
-这个 `primary_agent` 存在 `~/.roll/config.yaml`，交互入口（`roll design`、
-`roll agent use`）会用它作为默认。自主 loop 仍然按 `.roll/agent-routes.yaml` 的
-分级 rig 路由——二者有意可分：你的交互默认和 loop rig 池可以不同。
+`roll setup` 会为本机已安装的 AI 工具同步约定。Agent 语义写在
+`~/.roll/agents.yaml`（Machine Scope）和 `.roll/agents.yaml`（Project Scope）。
+旧的 `primary_agent`、local agent、pairing 或 v3 route-slot 数据可以通过
+`roll agent migrate --dry-run` 预览迁移到 scoped 模型。
 
 ## 创建的文件
 

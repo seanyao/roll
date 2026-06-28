@@ -1,5 +1,4 @@
 export * from "./config.js";
-export * from "./daemon-lifecycle.js";
 export * from "./git.js";
 export * from "./github.js";
 export * from "./process.js";

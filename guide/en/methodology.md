@@ -612,26 +612,30 @@ On macOS, Roll uses **launchd** (plists installed to `~/Library/LaunchAgents/`);
 
 If the agent supports native scheduling (e.g. Claude Code hooks), that is preferred over raw launchd/cron for cleaner lifecycle management.
 
-### 9.4 Per-Machine Agent Routing
+### 9.4 Scoped Agent Roles
 
-Agent selection is **per-machine**, via `.roll/agents.yaml` — four complexity
-slots, each mapped to a locally-installed agent:
+Agent selection is expressed as `Scope -> Role -> Binding -> Agent -> optional
+Model`. Machine Scope lives in `~/.roll/agents.yaml`; Project Scope lives in
+`.roll/agents.yaml`. The loop resolves `story.execute` for the Builder and
+`story.evaluate` for review/score.
 
 ```yaml
-# .roll/agents.yaml (per-machine; never committed)
-schema: v3
-easy:     { agent: pi }
-default:  { agent: pi }
-hard:     { agent: claude }
-fallback: { agent: kimi }
+schema: roll-agents/v1
+scope: project
+inherits: machine
+defaults:
+  story:
+    roles:
+      execute:
+        kind: select
+        from: [kimi, codex, pi]
+        require: [execute]
+        strategy: first-available
 ```
 
-A story's `est_min` picks the tier (easy ≤ 8 < default ≤ 20 < hard); the tier
-slot picks the agent. When a tier's slot is empty, routing falls back to the
-`default` slot → the `local.yaml` single-agent default (non-loop contexts'
-preference, if present) → the first installed agent. `roll agent use <name>`
-updates the slots. There is no per-tier override outside `agents.yaml` — one
-project field never collapses the complexity tiers onto a single agent.
+Runtime availability is checked at resolution/spawn time. A failed auth,
+network, VPN, account, or binary probe skips that candidate for the current
+resolution; it does not rewrite the static pool.
 
 ### 9.5 Human Authority
 
@@ -650,7 +654,8 @@ roll loop on|off          # enable / disable scheduled execution for this projec
 roll loop now             # trigger one cycle immediately
 roll loop status          # show scheduler state + any ALERT
 roll cycle <id>           # inspect one cycle trace and evidence pointers
-roll agent use <name>     # switch this project's agent
+roll agent                # inspect Machine Scope, Project Scope, roles, pool
+roll agent migrate        # convert legacy agent files to roll-agents/v1
 roll agent list           # show installed agents
 roll                      # project dashboard (in project dir): loop status + summary
 ```
@@ -702,9 +707,9 @@ Commands fall into two categories: bash commands run pure shell logic; agent com
 | `roll init` | Create `AGENTS.md` + `.roll/` scaffold (`backlog.md`, `features/`, `domain/`) in cwd; surfaces `$roll-onboard` for legacy code; re-merges if `AGENTS.md` exists |
 | `roll status` | Display current sync status, skill links, and detected AI tools |
 | `roll backlog` | Show all pending tasks from `.roll/backlog.md` |
-| `roll agent [use <name>\|list]` | Per-project agent selection — affects all 🤖 commands |
+| `roll agent [migrate\|list]` | Inspect/migrate scoped agent roles in `~/.roll/agents.yaml` and `.roll/agents.yaml` |
 | `roll loop <on\|off\|now\|status\|runs\|log\|story\|events\|eval\|signals\|pause\|resume\|reset\|gc>` | 🤖 Manage the autonomous BACKLOG executor (three lanes: loop/dream/pr) |
 | `roll cycle <id>` | Show one cycle's trace tape, PR/diff pointers, and evidence links |
-| `roll pair [init\|status]` | 🤖 Cross-agent pairing: heterogeneous peer re-checks during builds |
+| `roll pair [status\|score]` | 🤖 Pairing observability and explicit review scoring; new defaults live in `.roll/agents.yaml` |
 | `roll release [ship\|waiver]` | Release guidance · gated tag push · recorded drift waiver — npm publish stays human |
 | `roll` (no args, in project dir) | Dashboard: loop status, pending count, latest summary |

@@ -1,6 +1,6 @@
 # Roll — Overview
 
-Roll is a Supervisor-led delivery harness. Write a goal, let Roll turn it into Stories, and route each Story through the right Planner / Builder / Evaluator workflow.
+Roll is a Supervisor-led delivery harness. Write a goal, let Roll turn it into Stories, and route each Story through scoped `supervise`, `execute`, and `evaluate` roles.
 
 ## Quick Start
 
@@ -20,14 +20,24 @@ roll loop watch     # optional: CLI-first live view of the current cycle
 
 Roll runs as a V4 Supervisor execution system:
 
-- **Supervisor Agent** — project-level observe/advise role. It reads backlog, merge truth, open PRs, route profile, repeated failures, release readiness, and owner questions. It coordinates across Stories; it never implements a Story or overrides evidence gates.
-- **Story Execution Unit** — one Story delivered under an execution profile: `standard` = Builder, `verified` = Builder -> Evaluator, `planned` = Planner -> Builder -> Evaluator.
-- **Roles and rigs** — Planner / Builder / Evaluator are stable roles. The concrete agent/model/rig is selected per Story. If a requested rig is unavailable, Roll records that and fails loud instead of pretending another agent was used.
+- **Supervisor Agent** — project-level observe/advise role. It reads backlog, merge truth, open PRs, scoped role bindings, repeated failures, release readiness, and owner questions. It coordinates across Stories; it never implements a Story or overrides evidence gates.
+- **Story Execution Unit** — one Story delivered through `execute` and, when configured, `evaluate`.
+- **Roles and bindings** — `supervise`, `execute`, and `evaluate` are stable roles. The concrete agent and optional model are resolved from `Scope -> Role -> Binding -> Agent -> Model`. If a requested binding is unavailable, Roll records that and fails loud instead of pretending another agent was used.
 - **Loop** — on a configurable schedule, picks the top story from BACKLOG and executes it in an isolated worktree. CI must pass before anything lands on `main`.
 - **Dream** — at 3am, scans the codebase for dead code, doc gaps, and architectural drift. Queues `REFACTOR-NNN` entries for loop to pick up.
 - **Skills** — remain the capability layer. Roles invoke `$roll-design`, `$roll-build`, `$roll-fix`, `$roll-peer`, `$roll-.qa`, and other skills.
 
 You set goals, review PRs, and run releases. Everything in between is Roll.
+
+## Operating Modes
+
+Roll has two modes over the same backlog, route profile, evidence, Evaluator,
+and release gates. `guided` means the owner asks `roll supervisor status/next/why`
+and explicitly starts work, usually with `roll loop go --cards <id>`.
+`autonomous` means `roll loop on` has installed the scheduler, so eligible Todo
+work may run within the existing gates. `roll loop pause` / `roll loop off`
+return control to guided operation; `roll loop resume` / `roll loop on` switch
+back explicitly.
 
 ### Onboarding Samples
 
@@ -55,21 +65,20 @@ roll loop on
 
 Roll diagnoses current code without destructive migration, creates or updates Roll metadata after review, and then reasons over the existing backlog/docs/context. Inspect state through CLI-first observability: `roll status`, `roll loop watch`, `roll loop runs`, `roll cycle <id>`, alerts, and story reports.
 
-**Role routing per Story**
+**Scoped role routing**
 
 ```yaml
-story: US-V4-012
-execution_profile: verified
-roles:
-  builder:
-    agent: kimi
-    responsibility: update README, docs, guides, website, and samples
-  evaluator:
-    agent: pi
-    responsibility: evaluate new-user clarity and product narrative
+schema: roll-agents/v1
+defaults:
+  story:
+    roles:
+      execute:
+        candidates: [kimi, codex]
+      evaluate:
+        candidates: [pi, reasonix]
 ```
 
-Runtime availability is explicit. Unavailable agents are recorded as unavailable; fallback is fail-loud, not silent substitution.
+Runtime availability is explicit. Unavailable agents are recorded as unavailable; role resolution is fail-loud, not silent substitution.
 
 ## Features
 
@@ -115,7 +124,7 @@ Runtime availability is explicit. Unavailable agents are recorded as unavailable
 
 The current product is CLI-first. `roll status`, `roll loop watch`, `roll loop runs`, `roll cycle <id>`, `roll pulse`, alerts, and story-scoped attest reports are the active truth surfaces. `roll index` is an on-demand static archive/repair renderer, useful for CI artifacts and migration reconciliation; it is not the current truth surface.
 
-The three-state delivery ladder still matters: **claimed -> merged -> attested**. A backlog row that says done is only `claimed`; it becomes `merged` when the PR lands on `main`, and `attested` when story-scoped evidence is on file. Full Supervisor Live Console / multi-role board is next work.
+The three-state delivery ladder still matters: **claimed -> merged -> attested**. A backlog row that says done is only `claimed`; it becomes `merged` when the PR lands on `main`, and `attested` when story-scoped evidence is on file. Use `roll supervisor live` for the CLI-first multi-role board; browser/TUI Supervisor Live Console remains future work.
 
 ### On-Demand Skills
 

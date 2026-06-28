@@ -648,7 +648,8 @@ export async function loopOnCommand(_args: string[], deps: LoopSchedDeps = realD
         }
         process.stdout.write(
           "Loop re-armed from dormant (lightweight wake, pr/dream untouched)\n" +
-          "Loop 已从休眠轻量唤醒（pr/dream 未扰动）\n",
+          "Loop 已从休眠轻量唤醒（pr/dream 未扰动）\n" +
+          "mode: autonomous — scheduler can pick eligible Todo within pause/budget/route/evidence/Evaluator/release gates\n",
         );
         return 0;
       }
@@ -686,7 +687,8 @@ export async function loopOnCommand(_args: string[], deps: LoopSchedDeps = realD
 
     process.stdout.write(
       "Loop re-armed from dormant (lightweight wake, pr/dream untouched)\n" +
-      "Loop 已从休眠轻量唤醒（pr/dream 未扰动）\n",
+      "Loop 已从休眠轻量唤醒（pr/dream 未扰动）\n" +
+      "mode: autonomous — scheduler can pick eligible Todo within pause/budget/route/evidence/Evaluator/release gates\n",
     );
     return 0;
   }
@@ -813,6 +815,7 @@ export async function loopOnCommand(_args: string[], deps: LoopSchedDeps = realD
       // FIX-212: evidence the jobs are actually mounted (launchctl print exit 0),
       // not merely that bootstrap was issued.
       `  • verified mounted / 已验证挂载: ${loopLabel}, ${prLabel}, ${dreamLabel}`,
+      `  • mode: autonomous — scheduler can pick eligible Todo within pause/budget/route/evidence/Evaluator/release gates`,
       ``,
     ].join("\n"),
   );
@@ -838,7 +841,11 @@ export async function loopOffCommand(_args: string[], deps: LoopSchedDeps = real
     }
     process.stdout.write(`  swept zombie lane: ${label}\n`);
   }
-  process.stdout.write(`Loop disabled (loop/dream/pr booted out)\nLoop 已停用(loop/dream/pr 均已卸载)\n`);
+  process.stdout.write(
+    `Loop disabled (loop/dream/pr booted out)\n` +
+    `Loop 已停用(loop/dream/pr 均已卸载)\n` +
+    `mode: guided — scheduler disabled; owner drives \`roll supervisor next\` or explicit \`roll loop go\`\n`,
+  );
   return 0;
 }
 
@@ -871,6 +878,9 @@ export async function loopPauseCommand(_args: string[], deps: LoopSchedDeps = re
     already
       ? `Loop already paused\nLoop 已处于暂停\n`
       : `Loop paused — next scheduled cycles will skip\nLoop 已暂停 — 后续排程周期将跳过\n`,
+  );
+  process.stdout.write(
+    "mode: guided — scheduler will not start long-running Story execution until `roll loop resume`\n",
   );
   return 0;
 }
@@ -946,6 +956,9 @@ export async function loopResumeCommand(_args: string[], deps: LoopSchedDeps = r
     existed
       ? `Loop resumed — scheduling active again\nLoop 已恢复 — 排程重新生效\n`
       : `Loop was not paused\nLoop 本就未暂停\n`,
+  );
+  process.stdout.write(
+    "mode: autonomous — scheduler can pick eligible Todo within pause/budget/route/evidence/Evaluator/release gates\n",
   );
   return 0;
 }

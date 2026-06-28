@@ -106,7 +106,7 @@ export const ROLL_DOMAINS: AboutDomain[] = [
   { name: { en: "Execution / Sandbox", zh: "执行隔离" }, home: "infra", plane: "core" },
   { name: { en: "Tool Use", zh: "工具 / 多 agent" }, home: "core · infra", plane: "core" },
   { name: { en: "Context Engineering", zh: "上下文" }, home: "skills · .roll/", plane: "core" },
-  { name: { en: "Observability", zh: "可观测" }, home: "spec · core · daemon", plane: "control" },
+  { name: { en: "Observability", zh: "可观测" }, home: "spec · core · cli", plane: "control" },
   { name: { en: "Evals", zh: "验证 / 评分" }, home: "core", plane: "control" },
   { name: { en: "Guardrails", zh: "治理" }, home: "core", plane: "control" },
 ];

@@ -36,12 +36,12 @@ import { c, renderState, row, COLS } from "../render.js";
 import {
   installLocal,
   onPath,
-  replacePrimaryAgent,
   rollHome,
   rollPkgConventions,
   rollPkgDir,
   syncConventions,
   syncSkills,
+  writeMachineAgentScope,
 } from "./setup-shared.js";
 import {
   discoverInteractiveAgents,
@@ -385,7 +385,7 @@ export function setupCommand(args: string[]): number {
   renderState.useColor = !noColor;
   emitSetupUi(steps);
 
-  // US-ONBOARD-NUDGE-006: primary agent selection (base layer).
+  // US-ONBOARD-NUDGE-006: Machine Scope supervise agent selection.
   // Runs after all setup steps; discovered installed set reflects any
   // config changes from this run (e.g. first-ever config creation).
   const { installed } = discoverInteractiveAgents();
@@ -399,7 +399,7 @@ export function setupCommand(args: string[]): number {
     readLine: readLineFromStdin,
   });
   if (selection.selected !== null) {
-    replacePrimaryAgent(selection.selected);
+    writeMachineAgentScope(selection.selected);
   }
   if (selection.guidance !== null) {
     process.stdout.write(`\n  ${c("dim", selection.guidance)}\n`);

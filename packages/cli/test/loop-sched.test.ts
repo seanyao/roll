@@ -563,16 +563,19 @@ describe("loop on/off (injected launchd)", () => {
 
     expect(out).toContain("Loop enabled");
     expect(out).toContain("run-once"); // the new heart is stated
+    expect(out).toContain("mode: autonomous");
+    expect(out).toContain("pause/budget/route/evidence/Evaluator/release gates");
   });
 
   it("off: boots out loop+dream+pr labels", async () => {
     const proj = tmp("proj2");
     const { deps, calls } = fakeDeps(proj, tmp("sh2"), tmp("ld2"));
-    const { code } = await captureStdout(() => loopOffCommand([], deps));
+    const { code, out } = await captureStdout(() => loopOffCommand([], deps));
     expect(code).toBe(0);
     expect(calls).toContain("dormant com.roll.loop.proj-abc123");
     expect(calls).toContain("dormant com.roll.dream.proj-abc123");
     expect(calls).toContain("dormant com.roll.pr.proj-abc123");
+    expect(out).toContain("mode: guided");
   });
 });
 
@@ -641,6 +644,7 @@ describe("loop pause/resume (marker file)", () => {
 
     const p = await captureStdout(() => loopPauseCommand([], deps));
     expect(p.code).toBe(0);
+    expect(p.out).toContain("mode: guided");
     expect(existsSync(marker)).toBe(true);
 
     const p2 = await captureStdout(() => loopPauseCommand([], deps));
@@ -648,6 +652,7 @@ describe("loop pause/resume (marker file)", () => {
 
     const r = await captureStdout(() => loopResumeCommand([], deps));
     expect(r.code).toBe(0);
+    expect(r.out).toContain("mode: autonomous");
     expect(existsSync(marker)).toBe(false);
 
     const r2 = await captureStdout(() => loopResumeCommand([], deps));

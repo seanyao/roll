@@ -27,8 +27,6 @@ import {
 // US-DOSSIER-037: `roll cast` (routing view) + `roll doc --lang` (Charter/guide viewer).
 import { CAST_USAGE, castCommand } from "./cast.js";
 import { DOC_USAGE, docCommand } from "./doc.js";
-import { daemonCommand, daemonHelp } from "./daemon.js";
-import { daemonChildCommand } from "./daemon-child.js";
 import { ciCommand, ciWaitCommand } from "./ci.js";
 import { configCommand } from "./config.js";
 import { CYCLE_USAGE, cycleCommand } from "./cycle.js";
@@ -188,9 +186,9 @@ export function registerAll(): void {
   registerPorted("dream", dreamCommand, { hidden: true, help: "Usage: roll dream run-once\n  Nightly self-scan (patterns, docs freshness, test quality) — run one pass now.\n夜间自检跑一遍。" });
   // `agent`: full surface TS (view/list/use/set/unknown). The write face owns
   // .roll/agents.yaml plus legacy .roll/local.yaml sync; no bash fallback.
-  registerPorted("agent", agentCommand, { help: "Usage: roll agent [default <agent>|set <route> <agent>|list]\n  View the machine default agent + project route profile, or change them (`use` is retired).\n查看机器默认 agent 与项目路由，或修改它们（`use` 已退役）。" });
+  registerPorted("agent", agentCommand, { help: "Usage: roll agent [migrate [--dry-run]|list]\n  View Agent Scope roles, migrate legacy config, or list installed agents.\n查看 Agent Scope 角色、迁移旧配置，或列出已安装 agent。" });
   // `pair`: v3-native Cross-Agent Pairing (US-PAIR-001). `pair init` scaffolds
-  // an explicit .roll/pairing.yaml from the installed registry. No bash fallback
+  // legacy pairing compatibility commands. No bash fallback
   // (v2 had no pairing).
   registerPorted("pair", pairCommand);
   // `peer`: v3-native one-shot heterogeneous peer review adapter (FIX-255).
@@ -213,8 +211,8 @@ export function registerAll(): void {
   // FIX-356a: `roll brief` retired — US-PORT-002 was an immature owner digest.
   // The absent-command convention (standard unknown-command error from the bridge)
   // is the chosen retired-surface behaviour.
-  // US-DOSSIER-037: `roll cast` — the same complexity-ladder → role Casting table
-  // the web console renders (US-DOSSIER-030 Casting grid). ONE computation, two
+  // US-DOSSIER-037: `roll cast` — the same role Casting table
+  // the static archive renders (US-DOSSIER-030 Casting grid). ONE computation, two
   // surfaces: it calls the shared `collectCasting()` view-model (no re-read of the
   // router); `--json` emits that view-model verbatim. Manual, read-only.
   registerPorted("cast", castCommand, { help: CAST_USAGE });
@@ -224,7 +222,6 @@ export function registerAll(): void {
   // guide tree, falling back to the configured language via the SAME resolver
   // `roll lang` uses; an unknown --lang exits non-zero bilingually. Read-only viewer.
   registerPorted("doc", docCommand, { help: DOC_USAGE });
-  registerPorted("-daemon", daemonChildCommand, { hidden: true });
   // `idea`: v3-native deterministic backlog capture (US-PORT-003). Classifies
   // bug→FIX / idea→IDEA, auto-numbers (max suffix + 1), lint-gates the
   // description with the same rules as the bash _backlog_lint oracle, and
@@ -321,7 +318,6 @@ export function registerAll(): void {
   // (incl. a stale `tart` — lane removed by REFACTOR-046) errors non-zero WITHOUT a
   // silent host fallback (US-ISO-003). No sub-paths on bash.
   registerPorted("test", testCommand);
-  registerPorted("daemon", daemonCommand, { help: () => daemonHelp(resolveLang({ rollLang: process.env["ROLL_LANG"], lcAll: process.env["LC_ALL"], lang: process.env["LANG"] })) });
   registerPorted("tool", toolCommand, { help: TOOL_USAGE });
   // `truth`: deterministic delivery-truth query (US-TRUTH-016). Pure read-only
   // — reads deliveries.jsonl, runs queryStoryDelivery, prints the verdict.

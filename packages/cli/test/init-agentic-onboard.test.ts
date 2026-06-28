@@ -345,7 +345,7 @@ describe("agentic onboard structured artifacts", () => {
         create      .roll/onboard-changeset.yaml      create-if-missing    not present
         create      .roll/.version                    create-if-missing    not present
         create      .roll/backlog.md                  create-if-missing    not present
-        create      .roll/agent-routes.yaml           create-if-missing    not present
+        create      .roll/agents.yaml                 create-if-missing    not present
         create      .roll/features/                   ensure-directory     not present
         create      .roll/features.md                 create-if-missing    not present
         create      .roll/domain/                     ensure-directory     not present

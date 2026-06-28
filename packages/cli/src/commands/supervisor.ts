@@ -12,11 +12,13 @@
  *   roll supervisor advise     # decisions
  *   roll supervisor next       # "what should Roll do next?"
  *   roll supervisor why        # "why is the project stuck?"
+ *   roll supervisor live       # read-only Planner/Builder/Evaluator board
  *   roll supervisor --json     # machine-readable
  */
 import {
   EventBus,
   adviseProject,
+  buildSupervisorLiveBoard,
   ensureDeliveriesFresh,
   explainStuck,
   normalizeAgentConfig,
@@ -31,14 +33,16 @@ import type { RollEvent, SupervisorInput } from "@roll/spec";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { formatOperatingMode, resolveOperatingMode, suggestedGuidedRun } from "../lib/operating-mode.js";
 
 export const SUPERVISOR_USAGE = [
-  "Usage: roll supervisor [status|observe|advise|next|why] [--json]",
+  "Usage: roll supervisor [status|observe|advise|next|why|live] [--json]",
   "  status           observe + advise summary (alias for no subcommand)",
   "  observe          structured project facts (backlog, truth coverage, PRs, release readiness)",
   "  advise           Supervisor decisions (advisory; persistent changes need owner confirmation)",
   "  next             what should Roll do next?",
   "  why              why is the project stuck?",
+  "  live             read-only Supervisor live board with Planner/Builder/Evaluator panes",
 ].join("\n");
 
 function depsOf(desc: string): string[] {
@@ -153,6 +157,7 @@ export function gatherSupervisorInput(projectPath: string): SupervisorInput {
 
 function fmtFacts(input: SupervisorInput): string {
   const f = observeProject(input);
+  const mode = resolveOperatingMode(process.cwd());
   const truthCoverage =
     f.truthDrift.length === 0
       ? "complete"
@@ -168,6 +173,8 @@ function fmtFacts(input: SupervisorInput): string {
     `    route config: ${f.routeConfigErrors.length === 0 ? "ok" : summarizeList(f.routeConfigErrors)}`,
     `    release: ${f.releaseReadiness.ready ? "ready" : "blocked — " + summarizeList(f.releaseReadiness.blockers)}`,
     `    budget: ${f.budgetHealth.note}`,
+    `    ${formatOperatingMode(mode)}`,
+    `    owner action: ${mode.ownerAction}`,
     "",
   ];
   return lines.join("\n") + "\n";
@@ -180,28 +187,75 @@ function fmtAdvice(input: SupervisorInput): string {
   return ["", "  Supervisor Agent — advisory decisions", "", ...rows, ""].join("\n") + "\n";
 }
 
+function readSupervisorEvents(projectPath: string): RollEvent[] {
+  const eventsPath = join(projectPath, ".roll", "loop", "events.ndjson");
+  try {
+    if (existsSync(eventsPath)) return new EventBus().readEvents(eventsPath);
+  } catch {
+    return [];
+  }
+  return [];
+}
+
+function shortTs(ts: number): string {
+  if (!Number.isFinite(ts) || ts <= 0) return "n/a";
+  return new Date(ts).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+function agentModel(agent: string, model: string): string {
+  return model.trim() === "" ? agent : `${agent}/${model}`;
+}
+
+function fmtLive(projectPath: string): string {
+  const board = buildSupervisorLiveBoard(readSupervisorEvents(projectPath));
+  const lines = ["", "  Supervisor Live — read-only role board", "", `    supervisor: ${board.supervisor.state} · ${board.supervisor.summary}`, ""];
+  if (board.rows.length === 0) {
+    lines.push("    no cycle rows yet", "");
+    return lines.join("\n") + "\n";
+  }
+  for (const row of board.rows) {
+    lines.push(
+      `    ${row.cycleId} · ${row.storyId} · ${row.profile} · ${row.status} · ${agentModel(row.agent, row.model)}`,
+      `      updated ${shortTs(row.updatedAt)} · ${row.profileReason}`,
+    );
+    for (const role of row.roles) {
+      const agent = role.agent === null ? "-" : role.agent;
+      lines.push(`      ${role.role.padEnd(9)} ${role.state.padEnd(13)} agent=${agent} · ${role.reason}`);
+    }
+    lines.push(`      handoff ${row.handoffs.map((h) => `${h.from}->${h.to}:${h.state}`).join(" · ")}`, "");
+  }
+  return lines.join("\n") + "\n";
+}
+
 export function supervisorCommand(args: string[]): number {
   const json = args.includes("--json");
   let sub = args.find((a) => !a.startsWith("-"));
   // `status` is an alias for the default observe + advise summary.
   if (sub === "status") sub = undefined;
-  if (sub !== undefined && !["observe", "advise", "next", "why"].includes(sub)) {
+  if (sub !== undefined && !["observe", "advise", "next", "why", "live"].includes(sub)) {
     process.stderr.write(SUPERVISOR_USAGE + "\n");
     return 1;
   }
   const projectPath = process.cwd();
+  if (sub === "live") {
+    const board = buildSupervisorLiveBoard(readSupervisorEvents(projectPath));
+    if (json) process.stdout.write(JSON.stringify(board, null, 2) + "\n");
+    else process.stdout.write(fmtLive(projectPath));
+    return 0;
+  }
   const input = gatherSupervisorInput(projectPath);
   const facts = observeProject(input);
 
   if (json) {
+    const mode = resolveOperatingMode(projectPath);
     const out =
       sub === "advise"
-        ? { decisions: adviseProject(facts) }
+        ? { mode, decisions: adviseProject(facts) }
         : sub === "next"
-          ? { next: recommendNext(input) }
+          ? { mode, next: recommendNext(input) }
           : sub === "why"
-            ? { why: explainStuck(facts) }
-            : { facts, decisions: adviseProject(facts), next: recommendNext(input) };
+            ? { mode, why: explainStuck(facts) }
+            : { mode, facts, decisions: adviseProject(facts), next: recommendNext(input) };
     process.stdout.write(JSON.stringify(out, null, 2) + "\n");
     return 0;
   }
@@ -216,11 +270,18 @@ export function supervisorCommand(args: string[]): number {
   }
   if (sub === "next") {
     const n = recommendNext(input);
-    process.stdout.write(`\n  Supervisor — next: ${n.storyId ?? "(nothing ready)"}\n  ${n.reason}\n\n`);
+    const mode = resolveOperatingMode(projectPath);
+    const action = mode.mode === "guided" ? suggestedGuidedRun(n.storyId) : mode.ownerAction;
+    process.stdout.write(
+      `\n  Supervisor — next: ${n.storyId ?? "(nothing ready)"}\n  ${n.reason}\n  ${formatOperatingMode(mode)}\n  owner action: ${action}\n  scheduler: ${mode.schedulerAction}\n\n`,
+    );
     return 0;
   }
   if (sub === "why") {
-    process.stdout.write(`\n  Supervisor — why stuck: ${explainStuck(facts)}\n\n`);
+    const mode = resolveOperatingMode(projectPath);
+    process.stdout.write(
+      `\n  Supervisor — why stuck: ${explainStuck(facts)}\n  ${formatOperatingMode(mode)}\n  owner action: ${mode.ownerAction}\n  scheduler: ${mode.schedulerAction}\n\n`,
+    );
     return 0;
   }
   // default: observe + advise

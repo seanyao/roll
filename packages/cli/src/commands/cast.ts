@@ -1,6 +1,6 @@
 /**
- * US-DOSSIER-037 — `roll cast`: the same complexity-ladder → role Casting table
- * the web console shows (US-DOSSIER-030 Casting grid), brought to the terminal.
+ * US-DOSSIER-037 — `roll cast`: the same role Casting table the static archive
+ * shows (US-DOSSIER-030 Casting grid), brought to the terminal.
  *
  * ONE computation, two surfaces: this command calls the exact `collectCasting()`
  * view-model the web renders — it does NOT re-read the router or recompute slots,
@@ -18,8 +18,8 @@ import { c, pad, renderState, strw } from "../render.js";
 
 export const CAST_USAGE =
   "Usage: roll cast [--json]\n" +
-  "  Print the complexity-ladder → role Casting table (same data as the web grid).\n" +
-  "打印复杂度阶梯→角色分工表（与 web 网格同源同数据）。";
+  "  Print the role Casting table (same data as the web grid).\n" +
+  "打印角色分工表（与 web 网格同源同数据）。";
 
 /** Active language for the human table (same ladder as `roll lang` / siblings). */
 function castLang(): "en" | "zh" {
@@ -61,7 +61,7 @@ export function renderCastTable(vm: CastingVM, lang: "en" | "zh"): string {
   if (!vm.configured) {
     lines.push("");
     lines.push(
-      c("muted", lang === "zh" ? "  尚无槽位配置 — 用 roll agent set <槽位> <agent> 选角。" : "  No slots configured — cast with roll agent set <slot> <agent>."),
+      c("muted", lang === "zh" ? "  尚无 legacy route 配置 — 使用 .roll/agents.yaml 维护 scoped roles。" : "  No legacy routes configured — author scoped roles in .roll/agents.yaml."),
     );
   }
   return `${lines.join("\n")}\n`;

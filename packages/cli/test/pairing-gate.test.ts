@@ -18,12 +18,12 @@ function project(yaml: string | null): { dir: string; rt: string } {
   return { dir, rt };
 }
 
-// NOTE: the autonomous pool was narrowed to kimi/pi/reasonix — the only headless
-// reviewers (canReviewHeadless=true). claude is NOT a headless reviewer
-// (canReviewHeadless=false — its OAuth/keychain login is unreachable from a launchd
-// headless daemon, 401), so it must NOT appear in a pairing.yaml capability block
-// (parsePairingConfig fail-loud rejects a non-headless reviewer). The working agent
-// here is kimi (a builder) and the heterogeneous capable reviewers are pi/reasonix.
+function writeScopedAgents(dir: string, yaml: string): void {
+  writeFileSync(join(dir, ".roll", "agents.yaml"), yaml);
+}
+
+// Static pairing config declares fair supported candidates. Runtime auth/VPN/account
+// health is filtered by availability/readiness, not by permanent config exclusion.
 const ENABLED = `enabled: true\nstages: [code]\ncapability:\n  kimi: [code]\n  pi: [code]\n  reasonix: [code]\n`;
 // US-PAIR-004: a config that enables every stage and declares each agent
 // capable across them, so stage plumbing can be exercised independently.
@@ -87,6 +87,34 @@ describe("runPairing — US-PAIR-003", () => {
     expect(verdicts[0]?.cost).toBe(0.12);
     // the lone verdict is emitted only after a peer was selected.
     expect(events.indexOf(verdicts[0]!)).toBeGreaterThan(events.indexOf(selecteds[0]!));
+  });
+
+  it("US-V4-018: runs code pairing from scoped evaluate role when pairing.yaml is absent", async () => {
+    const { dir, rt } = project(null);
+    writeScopedAgents(dir, `schema: roll-agents/v1
+scope: project
+defaults:
+  story:
+    roles:
+      evaluate:
+        kind: select
+        from: [reasonix]
+        require: [evaluate]
+        avoid: [execute]
+        strategy: least-recent
+`);
+    const tried: string[] = [];
+    const { d } = deps({
+      installed: ["kimi", "pi", "reasonix"],
+      reviewPeer: async (peer) => {
+        tried.push(peer);
+        return { verdict: "agree" as const, findings: [], cost: 0.01 };
+      },
+    });
+    const res = await runPairing(dir, dir, rt, "c1", "kimi", "code", d);
+    expect(res.status).toBe("reviewed");
+    expect(res.peer).toBe("reasonix");
+    expect(tried).toEqual(["reasonix"]);
   });
 
   it("empty diff = not-required, no peer burned, no selected event (pi pair-review)", async () => {
@@ -351,14 +379,31 @@ describe("enabledPairingStages — executor stage iteration seam (US-PAIR-004)",
     const { dir } = project(`enabled: true\nstages: [code, code, design, code]\n`);
     expect(enabledPairingStages(dir)).toEqual(["code", "design"]);
   });
+
+  it("US-V4-018: reads code review stages from scoped evaluate role when pairing.yaml is absent", () => {
+    const { dir } = project(null);
+    writeScopedAgents(dir, `schema: roll-agents/v1
+scope: project
+defaults:
+  story:
+    roles:
+      evaluate:
+        kind: select
+        from: [pi, reasonix]
+        require: [evaluate]
+        avoid: [execute]
+        strategy: least-recent
+`);
+    expect(enabledPairingStages(dir)).toEqual(["code"]);
+  });
 });
 
 // ── US-PAIR-009: score stage — heterogeneous peer scores the cycle ───────────
 import { parsePairScoreOutput, runScorePairing, type RunScorePairingDeps } from "../src/runner/pairing-gate.js";
 import { readStoryReviewScores } from "../src/lib/review-score.js";
 
-// claude omitted: not a headless reviewer (see ENABLED note). kimi/pi/reasonix are
-// the declared-capable scorers (the narrowed autonomous pool).
+// This fixture keeps the declared-capable scorers narrow on purpose; supported
+// agents outside the fixture may still be used by runtime escalation.
 const SCORE_CFG = `enabled: true\nstages: [code, score]\ncapability:\n  kimi: [code, score]\n  pi: [code, score]\n  reasonix: [code, score]\n`;
 
 function scoreDeps(over: Partial<RunScorePairingDeps> = {}): { d: RunScorePairingDeps; events: PairEvent[] } {
@@ -439,8 +484,8 @@ describe("runScorePairing — US-PAIR-009", () => {
   });
 
   it("FIX-343: single-agent env → scores via a fresh SAME-TYPE session (independence = fresh session, not vendor)", async () => {
-    // Builder is kimi here, not claude: same-type fallback requires the builder's
-    // own type to be a headless reviewer, and claude is not (canReviewHeadless=false).
+    // Builder is kimi here: same-type fallback uses the builder's own type as a
+    // fresh separate session.
     const { dir, rt } = project(SCORE_CFG);
     const { d } = scoreDeps({ installed: ["kimi"] }); // only the builder's own type
     const r = await runScorePairing(dir, rt, "c1", "kimi", "US-X-001", "roll-build", "s", d);
@@ -460,6 +505,64 @@ describe("runScorePairing — US-PAIR-009", () => {
     expect(r.status).toBe("none-available");
     expect(events.map((e) => e.type)).toEqual(["pair:none-available"]);
     expect(readStoryReviewScores(dir, "US-X-001")).toHaveLength(0); // NO fallback note — the cycle honestly fails
+  });
+
+  it("US-V4-018: scoped evaluate role is preferred over legacy pairing.yaml for score candidates", async () => {
+    const { dir, rt } = project(`enabled: true\nstages: [code, score]\ncapability:\n  pi: [code, score]\n`);
+    writeScopedAgents(dir, `schema: roll-agents/v1
+scope: project
+defaults:
+  story:
+    roles:
+      evaluate:
+        kind: select
+        from: [reasonix]
+        require: [evaluate]
+        avoid: [execute]
+        strategy: least-recent
+`);
+    const tried: string[] = [];
+    const { d } = scoreDeps({
+      installed: ["kimi", "pi", "reasonix"],
+      allowedAgents: ["kimi", "pi"],
+      scorePeer: async (peer: string) => {
+        tried.push(peer);
+        return { score: 8, verdict: "good" as const, rationale: "scoped reviewer scored", cost: 0.02 };
+      },
+    });
+    const r = await runScorePairing(dir, rt, "c1", "kimi", "US-V4-018", "roll-build", "s", d);
+    expect(r.status).toBe("scored");
+    expect(r.peer).toBe("reasonix");
+    expect(tried).toEqual(["reasonix"]);
+  });
+
+  it("US-V4-018: runtime availability skips scoped candidates only for the current resolution", async () => {
+    const { dir, rt } = project(null);
+    writeScopedAgents(dir, `schema: roll-agents/v1
+scope: project
+defaults:
+  story:
+    roles:
+      evaluate:
+        kind: select
+        from: [pi, reasonix]
+        require: [evaluate]
+        avoid: [execute]
+        strategy: least-recent
+`);
+    const tried: string[] = [];
+    const { d } = scoreDeps({
+      installed: ["kimi", "pi", "reasonix"],
+      isAvailable: (agent) => agent !== "pi",
+      scorePeer: async (peer: string) => {
+        tried.push(peer);
+        return { score: 8, verdict: "good" as const, rationale: "runtime-available reviewer scored", cost: 0.02 };
+      },
+    });
+    const r = await runScorePairing(dir, rt, "c1", "kimi", "US-V4-018", "roll-build", "s", d);
+    expect(r.status).toBe("scored");
+    expect(r.peer).toBe("reasonix");
+    expect(tried).toEqual(["reasonix"]);
   });
 
   it("FIX-343: peer flakes across the bounded retry → status timeout, BLOCKS, no note/evidence", async () => {
@@ -550,8 +653,7 @@ describe("runScorePairing — US-PAIR-009", () => {
 
   it("FIX-343 (②): SINGLE-VENDOR install → same-vendor immediately, no hetero wait/hang", async () => {
     // Only the builder's own vendor is installed → the hetero pool is EMPTY, so
-    // we go straight to the same-vendor round (no wasted hetero spawn/wait). Builder
-    // is kimi: claude is not a headless reviewer so it cannot be the same-vendor scorer.
+    // we go straight to the same-vendor round (no wasted hetero spawn/wait).
     const { dir, rt } = project(SCORE_CFG);
     const tried: string[] = [];
     const { d } = scoreDeps({
@@ -709,11 +811,12 @@ describe("FIX-910 — unparseable rescue and failure attribution", () => {
       },
     });
     const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-911", "roll-build", "summary", d);
-    // Both attempts failed → timeout status (whole pool failed), NO note written
+    // Hetero pi fails twice, then same-vendor claude fresh-session fallback fails
+    // twice → timeout status (whole pool failed), NO note written.
     expect(r.status).toBe("timeout");
-    // Two unparseable events were emitted (one per attempt)
+    // Four unparseable events were emitted (two per attempted scorer).
     const failures = events.filter((e) => e.type === "pair:score-failure");
-    expect(failures).toHaveLength(2);
+    expect(failures).toHaveLength(4);
     expect(failures.every((f) => (f as { cause: string }).cause === "unparseable")).toBe(true);
     // No score note was written — no fake score
     expect(readStoryReviewScores(dir, "US-X-911")).toHaveLength(0);

@@ -9,6 +9,8 @@ import {
   defaultPairingConfig,
   heteroAvailable,
   isHeterogeneous,
+  normalizeAgentScopeConfig,
+  pairingConfigFromAgentScopeConfig,
   pairingPoolView,
   parsePairingConfig,
   PairingConfigError,
@@ -50,15 +52,15 @@ describe("heteroAvailable (FIX-312 — the review-routing switch)", () => {
     expect(heteroAvailable(["kimi"], "kimi")).toBe(false);
     expect(heteroAvailable([], "kimi")).toBe(false);
   });
-  it("a non-headless-reviewer pool offers no heterogeneous option", () => {
-    // claude + unknown/profile-less agents are NOT headless reviewers → none count.
-    expect(heteroAvailable(["claude", "made-up-a", "made-up-b"], "kimi")).toBe(false);
+  it("known supported agents are fair heterogeneous options; unknown/profile-less agents are ignored", () => {
+    // Runtime auth/VPN/account health is not a static pairing-policy exclusion.
+    expect(heteroAvailable(["claude", "made-up-a", "made-up-b"], "kimi")).toBe(true);
   });
   it("builder absent from the pool still counts other vendors", () => {
     // builder is reasonix (not installed locally) but a pi peer is available.
     expect(heteroAvailable(["pi"], "reasonix")).toBe(true);
   });
-  it("unknown agents are not treated as headless reviewers without a profile", () => {
+  it("unknown agents are not treated as supported reviewers without a profile", () => {
     expect(heteroAvailable(["kimi", "made-up-agent"], "kimi")).toBe(false);
   });
 });
@@ -198,7 +200,7 @@ describe("parsePairingConfig", () => {
   it("fail-loud on capability for an unknown agent (registry cross-check)", () => {
     expect(() => parsePairingConfig(`enabled: true\ncapability:\n  notanagent: [code]\n`)).toThrow(PairingConfigError);
   });
-  it("FIX-328: fail-loud on capability for a non-headless reviewer", () => {
+  it("FIX-328: fail-loud on capability for an unregistered reviewer", () => {
     expect(() => parsePairingConfig(`enabled: true\ncapability:\n  cursor: [code]\n`)).toThrow(PairingConfigError);
   });
   it("absent/empty config is disabled (file-absent = off)", () => {
@@ -216,9 +218,9 @@ describe("parsePairingConfig", () => {
   });
 });
 
-describe("defaultPairingConfig + renderPairingConfig (roll pair init scaffold)", () => {
+describe("defaultPairingConfig + renderPairingConfig (legacy pairing scaffold)", () => {
   it("enables when ≥2 distinct vendors, declares all installed code+score-capable", () => {
-    // kimi + pi are two headless-reviewable vendors.
+    // kimi + pi are two supported vendors.
     const c = defaultPairingConfig(["kimi", "pi"]);
     expect(c.enabled).toBe(true);
     expect(c.stages).toEqual(["code", "score"]);
@@ -235,20 +237,16 @@ describe("defaultPairingConfig + renderPairingConfig (roll pair init scaffold)",
     expect(d.stages).toEqual(["code", "score"]);
     expect(d.capability["kimi"]).toEqual(["code", "score"]);
   });
-  it("FIX-360: default config excludes claude (non-headless reviewer) from the pool", () => {
-    // claude's OAuth/keychain login token is unreachable from a launchd headless
-    // daemon (401) — it is NOT a headless reviewer (it has no spec at all now) and
-    // must never land in a reviewer pool, even when installed alongside
-    // heterogeneous peers. kimi + pi remain as two headless-reviewable vendors.
+  it("fair pool: default config includes every installed supported agent", () => {
+    // Historical local auth failures are runtime health, not static policy.
     const d = defaultPairingConfig(["claude", "kimi", "pi"]);
-    expect(d.enabled).toBe(true); // kimi + pi are still ≥2 headless-reviewable vendors
-    expect(d.capability).toEqual({ kimi: ["code", "score"], pi: ["code", "score"] });
-    expect(d.capability["claude"]).toBeUndefined();
-    expect(renderPairingConfig(d)).not.toContain("claude:");
-    // and the live score-stage selector never picks claude even when installed
+    expect(d.enabled).toBe(true);
+    expect(d.capability).toEqual({ claude: ["code", "score"], kimi: ["code", "score"], pi: ["code", "score"] });
+    expect(renderPairingConfig(d)).toContain("claude: [code, score]");
+    // Runtime availability still filters the live score-stage selector.
     const picked = selectPairingCandidates({
       installed: ["claude", "kimi", "pi"],
-      isAvailable: () => true,
+      isAvailable: (a) => a !== "claude",
       workingAgent: "kimi",
       stage: "score",
       cfg: cfg({ enabled: false, stages: [], capability: {} }),
@@ -257,8 +255,7 @@ describe("defaultPairingConfig + renderPairingConfig (roll pair init scaffold)",
     expect(picked).not.toContain("claude");
   });
   it("FIX-328: default config excludes profile-less agents from review pools", () => {
-    // kimi + pi are the headless-reviewable vendors; profile-less agents
-    // (no spec, canReviewHeadless=false) are excluded.
+    // kimi + pi are registered supported agents; profile-less agents are excluded.
     const d = defaultPairingConfig(["kimi", "made-up-a", "made-up-b", "pi"]);
     expect(d.enabled).toBe(true);
     expect(d.capability).toEqual({ kimi: ["code", "score"], pi: ["code", "score"] });
@@ -266,8 +263,7 @@ describe("defaultPairingConfig + renderPairingConfig (roll pair init scaffold)",
     expect(renderPairingConfig(d)).not.toContain("made-up-b:");
   });
   it("FIX-328: score candidates exclude installed profile-less agents", () => {
-    // Worker is kimi (a headless reviewer). Profile-less agents are excluded
-    // from the score pool.
+    // Worker is kimi. Profile-less agents are excluded from the score pool.
     const picked = selectPairingCandidates({
       installed: ["kimi", "made-up-a", "made-up-b", "pi"],
       isAvailable: () => true,
@@ -297,8 +293,7 @@ describe("defaultPairingConfig + renderPairingConfig (roll pair init scaffold)",
   it("FIX-343: the score stage is same-vendor-friendly — a fresh instance of the BUILDER'S OWN type qualifies", () => {
     // Independence = another assigned fresh session, NOT vendor heterogeneity:
     // the score stage drops the isHeterogeneous filter and INCLUDES the builder's
-    // own canonical type (spawned as a fresh subprocess). The builder must itself
-    // be a headless reviewer for its own type to qualify — kimi is the builder here.
+    // own canonical type (spawned as a fresh subprocess).
     const picked = selectPairingCandidates({
       installed: ["kimi", "pi", "reasonix"],
       isAvailable: () => true,
@@ -315,9 +310,9 @@ describe("defaultPairingConfig + renderPairingConfig (roll pair init scaffold)",
 
   it("FIX-343: the score stage is MANDATORY — qualifies even when pairing is disabled / no score stage / no capability", () => {
     // A repo with NO pairing.yaml (cfg.enabled=false, empty stages/capability)
-    // still owes a Review Score: the selector must yield the installed agents that
-    // CAN headless-review. A single-agent env of a headless-reviewable agent (kimi)
-    // still yields that agent (a fresh same-type session is the minimum independence).
+    // still owes a Review Score: the selector must yield installed supported
+    // agents. A single-agent env of kimi still yields that agent (a fresh
+    // same-type session is the minimum independence).
     const picked = selectPairingCandidates({
       installed: ["kimi"],
       isAvailable: () => true,
@@ -328,10 +323,6 @@ describe("defaultPairingConfig + renderPairingConfig (roll pair init scaffold)",
     });
     expect(picked).toEqual(["kimi"]); // single-agent env: a fresh same-type session
 
-    // But a single-agent env of CLAUDE alone now yields an EMPTY pool: claude is
-    // no longer a headless reviewer (canReviewHeadless=false — its OAuth/keychain
-    // login is unreachable from a launchd headless daemon, 401), so there is no
-    // headless scorer available and the selector fails loud with [].
     const claudeOnly = selectPairingCandidates({
       installed: ["claude"],
       isAvailable: () => true,
@@ -340,18 +331,88 @@ describe("defaultPairingConfig + renderPairingConfig (roll pair init scaffold)",
       cfg: cfg({ enabled: false, stages: [], capability: {} }),
       cycleId: "c1",
     });
-    expect(claudeOnly).toEqual([]); // no headless-reviewable scorer in a claude-only env
+    expect(claudeOnly).toEqual(["claude"]); // fresh same-type session
   });
   it("renders explicit, re-parseable yaml (round-trip)", () => {
     const c = defaultPairingConfig(["kimi", "pi", "reasonix"]);
     const yaml = renderPairingConfig(c);
     expect(yaml).toContain("enabled: true");
     expect(yaml).toContain("stages: [code, score]");
-    expect(yaml).toContain("# File present = pairing on");
+    expect(yaml).toContain("# Scoped evaluate roles in .roll/agents.yaml take precedence");
     expect(parsePairingConfig(yaml)).toEqual(c); // explicit defaults survive a round-trip
   });
   it("disabled config carries the reason as a comment", () => {
     expect(renderPairingConfig(defaultPairingConfig(["kimi"]))).toContain("# Disabled:");
+  });
+});
+
+describe("pairingConfigFromAgentScopeConfig — US-V4-018 evaluate role bridge", () => {
+  it("projects an explicit evaluate candidate pool into code+score capabilities", () => {
+    const parsed = normalizeAgentScopeConfig(`schema: roll-agents/v1
+scope: project
+defaults:
+  story:
+    roles:
+      evaluate:
+        kind: select
+        from: [claude, codex, kimi, pi, agy, reasonix]
+        require: [evaluate]
+        avoid: [execute]
+        strategy: least-recent
+`);
+    expect(parsed.errors).toEqual([]);
+    const c = pairingConfigFromAgentScopeConfig(parsed.config!, ["claude", "codex", "kimi", "pi", "agy", "reasonix"]);
+    expect(c).toEqual({
+      enabled: true,
+      stages: ["code", "score"],
+      capability: {
+        claude: ["code", "score"],
+        codex: ["code", "score"],
+        kimi: ["code", "score"],
+        pi: ["code", "score"],
+        agy: ["code", "score"],
+        reasonix: ["code", "score"],
+      },
+    });
+  });
+
+  it("uses the installed supported pool when evaluate select has no explicit from", () => {
+    const parsed = normalizeAgentScopeConfig(`schema: roll-agents/v1
+scope: project
+roles:
+  evaluate:
+    kind: select
+    require: [evaluate]
+    strategy: first-available
+`);
+    expect(parsed.errors).toEqual([]);
+    const c = pairingConfigFromAgentScopeConfig(parsed.config!, ["kimi", "made-up", "claude"]);
+    expect(c?.capability).toEqual({ kimi: ["code", "score"], claude: ["code", "score"] });
+  });
+
+  it("lets an explicit project binding narrow the pool", () => {
+    const parsed = normalizeAgentScopeConfig(`schema: roll-agents/v1
+scope: project
+roles:
+  evaluate:
+    kind: select
+    from: [reasonix]
+    strategy: first-available
+`);
+    expect(parsed.errors).toEqual([]);
+    expect(pairingConfigFromAgentScopeConfig(parsed.config!, ["kimi", "reasonix"])?.capability).toEqual({ reasonix: ["code", "score"] });
+  });
+
+  it("keeps unknown agents fail-loud in scoped config normalization", () => {
+    const parsed = normalizeAgentScopeConfig(`schema: roll-agents/v1
+scope: project
+roles:
+  evaluate:
+    kind: select
+    from: [cursor]
+    strategy: first-available
+`);
+    expect(parsed.errors).toContain("roles.evaluate.from: unknown agent 'cursor'");
   });
 });
 
@@ -421,7 +482,7 @@ const verdict = (peer: string): any => ({
   ts: 1,
 });
 
-describe("peerAuthStates / excludedPeers (FIX-346)", () => {
+describe("peerAuthStates / excludedPeers (V4 fair pool)", () => {
   it("default threshold is two strikes", () => {
     expect(DEFAULT_AUTH_EXCLUDE_THRESHOLD).toBe(2);
   });
@@ -435,9 +496,9 @@ describe("peerAuthStates / excludedPeers (FIX-346)", () => {
     });
   });
 
-  it("two consecutive auth failures exclude the peer", () => {
+  it("two consecutive auth failures remain diagnostic only", () => {
     const ex = excludedPeers([blocked("claude"), blocked("claude")]);
-    expect(ex.has("claude")).toBe(true);
+    expect(ex.has("claude")).toBe(false);
     expect(peerAuthStates([blocked("claude"), blocked("claude")]).claude.excluded).toBe(true);
   });
 
@@ -452,15 +513,15 @@ describe("peerAuthStates / excludedPeers (FIX-346)", () => {
     expect(ex.has("kimi")).toBe(false);
   });
 
-  it("excludes one auth-failing peer while leaving a healthy peer in the pool (swap)", () => {
+  it("does not exclude one auth-failing peer from the fair pool", () => {
     const ex = excludedPeers([blocked("claude"), blocked("claude"), verdict("codex")]);
-    expect(ex.has("claude")).toBe(true);
+    expect(ex.has("claude")).toBe(false);
     expect(ex.has("codex")).toBe(false);
   });
 
   it("keys the agent name verbatim (no overseas alias collapse remains)", () => {
     const ex = excludedPeers([blocked("kimi"), blocked("kimi")]);
-    expect(ex.has("kimi")).toBe(true);
+    expect(ex.has("kimi")).toBe(false);
   });
 });
 

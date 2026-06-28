@@ -59,16 +59,37 @@ function tmp(tag: string): string {
  * now MUST present captured visual evidence (the screenshot-floor cases that
  * deliberately use text-only / claimed-only evidence pass their own `body`).
  */
-function withReport(storyId: string, mtimeSec?: number, body = '<div class="ev ev-text">proof</div><figure class="shot"><img src="screenshots/p.png"></figure>'): string {
+function withReport(
+  storyId: string,
+  mtimeSec?: number,
+  body = '<div class="ev ev-text">proof</div><figure class="shot"><img src="screenshots/p.png"></figure>',
+  // US-V4-001: the gate now reads STRUCTURED truth (ac-map.json), not the rendered
+  // HTML. The default fixture is a generic real delivery — one pass AC backed by a
+  // screenshot — so it clears both the content floor and the visual floor. Tests
+  // that exercise text-only / claimed / empty scenarios pass their own `acMap`
+  // (or call writeAcMap afterward).
+  acMap: unknown = [{ ac: `${storyId}:AC1`, status: "pass", evidence: [{ kind: "screenshot", label: "p", href: "screenshots/p.png" }] }],
+): string {
   const wt = tmp("wt");
   const storyDir = join(wt, ".roll", "features", "uncategorized", storyId);
   const dir = join(storyDir, "latest");
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(storyDir, "ac-map.json"), "[]\n");
+  writeFileSync(join(storyDir, "ac-map.json"), JSON.stringify(acMap, null, 2) + "\n");
   const p = join(dir, `${storyId}-report.html`);
   writeFileSync(p, `<html><body><section class="ac s-pass" id="${storyId}:AC1">${body}</section></body></html>\n`);
   if (mtimeSec !== undefined) utimesSync(p, mtimeSec, mtimeSec);
   return wt;
+}
+
+/** A pass AC backed only by TEXT evidence (no screenshot) — clears the content
+ *  floor but NOT the visual floor for a non-exempt story. */
+function textOnlyAcMap(storyId: string): unknown {
+  return [{ ac: `${storyId}:AC1`, status: "pass", evidence: [{ kind: "text", label: "log", textFile: "evidence/proof.txt" }] }];
+}
+
+/** A claimed-only AC (no evidence) — fails the content floor (empty shell). */
+function claimedAcMap(storyId: string): unknown {
+  return [{ ac: `${storyId}:AC1`, status: "claimed" }];
 }
 
 function writeAcMap(wt: string, storyId: string, body: unknown): void {
@@ -201,12 +222,12 @@ describe("verificationReportHasContent (US-ATTEST-012 content floor)", () => {
   });
 
   it("pure claimed / zero evidence report → NO content", () => {
-    const wt = withReport("FIX-323", 2000, "statement only");
+    const wt = withReport("FIX-323", 2000, "statement only", claimedAcMap("FIX-323"));
     expect(verificationReportHasContent(wt, "FIX-323")).toBe(false);
   });
 
   it("interactive story requires screenshot evidence or a machine capture skip", () => {
-    const noShot = withReport("FIX-CLI", 2000, '<div class="ev ev-text">text proof only</div>');
+    const noShot = withReport("FIX-CLI", 2000, '<div class="ev ev-text">text proof only</div>', textOnlyAcMap("FIX-CLI"));
     writeFileSync(join(noShot, ".roll", "features", "uncategorized", "FIX-CLI", "spec.md"), "**AC:**\n- [ ] CLI shows output\n");
     expect(verificationReportHasContent(noShot, "FIX-CLI")).toBe(false);
 
@@ -234,7 +255,7 @@ describe("verificationReportHasContent (US-ATTEST-012 content floor)", () => {
   });
 
   it("FIX-261/FIX-258: modern Acceptance Criteria makes CLI text-only reports fail the screenshot floor", () => {
-    const noShot = withReport("FIX-MODERN", 2000, '<div class="ev ev-text">text proof only</div>');
+    const noShot = withReport("FIX-MODERN", 2000, '<div class="ev ev-text">text proof only</div>', textOnlyAcMap("FIX-MODERN"));
     writeFileSync(
       join(noShot, ".roll", "features", "uncategorized", "FIX-MODERN", "spec.md"),
       "# FIX-MODERN\n\n## Acceptance Criteria\n\n- [ ] CLI output can be inspected\n",
@@ -353,6 +374,28 @@ describe("verificationReportHasContent (US-ATTEST-012 content floor)", () => {
     ]);
     expect(storyRequiresScreenshot(wt, "FIX-341N")).toBe(true); // not exempt → still owes capture
     expect(verificationReportHasContent(wt, "FIX-341N")).toBe(false);
+  });
+
+  // US-V4-001 (no-HTML-parsing red line): the content gate is a MACHINE DECISION
+  // over structured truth (ac-map.json), never the rendered HTML report. These two
+  // tests deliberately MISMATCH the HTML and the ac-map to prove the gate follows
+  // the structured data and ignores the HTML body.
+  it("US-V4-001: a report whose HTML has NO evidence markup still has content when the ac-map does (structured wins)", () => {
+    // The HTML body carries no `class="ev"` / `class="shot"` markup — the old
+    // HTML-scanning gate would have called this an empty shell. The structured
+    // ac-map declares a pass AC with a screenshot, so the gate sees content.
+    const wt = withReport("FIX-STRUCT", 2000, "<!-- pure noise, no evidence markup -->", [
+      { ac: "FIX-STRUCT:AC1", status: "pass", evidence: [{ kind: "screenshot", label: "p", href: "screenshots/p.png" }] },
+    ]);
+    expect(verificationReportHasContent(wt, "FIX-STRUCT")).toBe(true);
+  });
+
+  it("US-V4-001: rich HTML AC sections with an EMPTY ac-map have NO content (HTML is ignored)", () => {
+    // The default rich HTML body has a `s-pass` section with `class="ev"` + a
+    // `<figure class="shot">` — the old gate would have passed it. With an empty
+    // ac-map there is no structured content, so the gate fails it.
+    const wt = withReport("FIX-NOACMAP", 2000, undefined, []);
+    expect(verificationReportHasContent(wt, "FIX-NOACMAP")).toBe(false);
   });
 });
 
@@ -996,7 +1039,7 @@ describe("FIX-309 — screenshot baseline: default REQUIRED, rules only EXEMPT",
   it("AC4: the gate FAILS a REQUIRED-but-uncaptured story (no screenshot, no honest skip) — hard-blocked", () => {
     // A FIX-284-shape delivery (no keywords) with a content report but NO captured
     // visual evidence and NO machine-skip → not "produced".
-    const wt = withReport("FIX-UNCAP", 2000, '<div class="ev ev-text">text proof only</div>');
+    const wt = withReport("FIX-UNCAP", 2000, '<div class="ev ev-text">text proof only</div>', textOnlyAcMap("FIX-UNCAP"));
     addSpec(wt, "FIX-UNCAP", "# FIX-UNCAP — Casting redesign\n\n## Acceptance Criteria\n\n- [ ] the casting layout is reworked\n");
     withPeerScore(wt, "FIX-UNCAP", 8, "good", "c-uncap");
     expect(storyRequiresScreenshot(wt, "FIX-UNCAP")).toBe(true);
@@ -1031,7 +1074,7 @@ describe("FIX-309 — screenshot baseline: default REQUIRED, rules only EXEMPT",
   });
 
   it("AC4: an EXEMPT story PASSES with text-only evidence (no capture owed)", () => {
-    const wt = withReport("FIX-EXEMPT", 2000, '<div class="ev ev-text">text proof only</div>');
+    const wt = withReport("FIX-EXEMPT", 2000, '<div class="ev ev-text">text proof only</div>', textOnlyAcMap("FIX-EXEMPT"));
     addSpec(
       wt,
       "FIX-EXEMPT",

@@ -21,6 +21,13 @@ Runs are timestamped and never overwritten. The backlog `✅ Done` row links to
 `latest/<id>-report.html`; CHANGELOG bullets may carry an invisible
 `<!-- evidence: ... -->` marker for traceability.
 
+**The story's `latest/<id>-report.html` is the human acceptance entry.** A
+story is accepted by opening its own report — not a global dossier/index page.
+`roll attest` is story-scoped: it writes only this story's run report and the
+`latest` pointer. It does not refresh any global dossier, epic, or front-page
+HTML. Those board pages, when you want them, are rendered on demand with
+`roll index`; they are a convenience view, not the delivery-truth surface.
+
 ## Lifecycle in three stages
 
 1. Open the evidence frame. At the beginning of a loop cycle the runner creates
@@ -37,9 +44,10 @@ Runs are timestamped and never overwritten. The backlog `✅ Done` row links to
 3. Close with the hard attest gate. The runner calls
    `roll attest <story-id> --run-dir "$ROLL_RUN_DIR"` at the end of delivery.
    `roll attest` sweeps the hard facts (TCR commits, latest CI run, optional
-   deploy probe, test-pass proof), renders the report, moves `latest` to the
-   run, refreshes the story delivery section when a dossier page exists, and
-   refreshes `.roll/index.json`.
+   deploy probe, test-pass proof), renders the report, and moves `latest` to the
+   run. That is all it writes — it is story-scoped. It does not mount a story
+   dossier delivery section, regenerate `.roll/index.json`, or refresh any global
+   dossier/epic/front page (run `roll index` on demand for those board pages).
 
 `roll attest` also runs standalone — without an intent map every AC renders as
 🟧 Claimed, honestly.

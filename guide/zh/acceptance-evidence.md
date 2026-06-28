@@ -20,6 +20,11 @@
 `latest/<id>-report.html`；CHANGELOG 条目旁可带不可见的
 `<!-- evidence: ... -->` 注释 marker 供追溯。
 
+**故事自己的 `latest/<id>-report.html` 就是人类验收入口。** 验收一张故事看的是
+它自己的报告，不是全局 dossier/index 页面。`roll attest` 只对当前故事负责：
+它只写本故事的 run 报告和 `latest` 指针，不刷新任何全局 dossier / 史诗 / 首页
+HTML。那些看板页想看时用 `roll index` 按需渲染，它们是便捷视图，不是交付真相面。
+
 ## 三段式生命周期
 
 1. 立框。loop 周期一开始，runner 先创建带时间戳的 run 目录，并把它通过
@@ -33,8 +38,9 @@
 3. 收尾硬闸。交付结束时 runner 调用
    `roll attest <story-id> --run-dir "$ROLL_RUN_DIR"`。`roll attest` 清扫硬事实
    （TCR commits、最新 CI、可选部署探针、test-pass 凭证），渲染报告，把
-   `latest` 指向本次 run；若故事档案页存在，则刷新交付段，并刷新
-   `.roll/index.json`。
+   `latest` 指向本次 run。仅此而已——它只对当前故事负责：不挂载故事页交付段、
+   不重建 `.roll/index.json`、不刷新任何全局 dossier/史诗/首页（那些看板页用
+   `roll index` 按需渲染）。
 
 `roll attest` 也可独立运行——没有意图映射时，每条 AC 诚实渲染为 🟧 仅声明。
 

@@ -240,9 +240,9 @@ v4 把"一张 Story 怎么交付"和"项目级怎么协调"分成两层。
 
 剖面在 Cycle 开始时选一次并记入 `execution:profile` 事件。角色之间只通过 artifact（`planner-contract.md` / `builder-evidence` / `eval-report.md` + `artifact-manifest.json`）交接，不共享原始会话；每个角色都是 fresh session。Evaluator 不是单一 `pass/fail`——blocking review、score、attest 是三个分开的契约。Evaluator→Builder 的修复回合受硬熔断约束（最大轮数、重复 finding 签名、预算、超时），触界即升级。
 
-**Supervisor Agent**：项目级协调者，负责不属于某一张具体 Story 的工作——跨 Story/Epic 上下文、backlog 排序、风险分级、执行剖面建议、路由/Rig 建议、预算、并行、卡住的 cycle、重复失败、文件冲突、合并队列、发布就绪、truth 漂移、系统级用户交互（"接下来做什么？""为什么卡住？"）与 owner 升级。
+**Supervisor Agent**：项目级协调者，负责不属于某一张具体 Story 的工作——跨 Story/Epic 上下文、backlog 排序、风险分级、执行剖面建议、路由/Rig 建议、预算、并行、卡住的 cycle、重复失败、文件冲突、合并队列、发布就绪、truth coverage / 显式 release blockers、系统级用户交互（"接下来做什么？""为什么卡住？"）与 owner 升级。
 
-Supervisor **绝不**：实现具体 Story、写 Story 的评估报告、覆盖 Evaluator 裁定、绕过 attest 闸、直接标记 Story 为 Done、用指标静默改写路由/策略。v4.0 的 Supervisor 是 observe/advise（`roll supervisor`）：先用确定性 selector 把事实结构化，再（必要时）让 agent 措辞建议；持久化策略变更一律需 owner 确认。安全并行调度（`max_parallel_cycles`、文件冲突串行化、合并队列/预算暂停）的决策逻辑已就位，活体并行交付留待 v4.1。
+Supervisor **绝不**：实现具体 Story、写 Story 的评估报告、覆盖 Evaluator 裁定、绕过 attest 闸、直接标记 Story 为 Done、用指标静默改写路由/策略。v4.0 的 Supervisor 是 observe/advise（`roll supervisor`）：先用确定性 selector 把事实结构化，再（必要时）让 agent 措辞建议；历史 Done 缺少结构化 DeliveryRecord 只作为 truth coverage/backfill 提醒，发布是否阻塞以显式 release blockers / release consistency 为准；持久化策略变更一律需 owner 确认。安全并行调度（`max_parallel_cycles`、文件冲突串行化、合并队列/预算暂停）的决策逻辑已就位，活体并行交付留待 v4.1。
 
 > 命名：只用 **Supervisor Agent / Execution Profile / Story Execution Unit / Rig / Route Profile**。不引入 Prime / Watchman / Dispatcher / Governor 作为竞争角色名，也不把 solo/paired team 当用户面概念。
 

@@ -95,11 +95,27 @@ describe("supervisorCommand", () => {
     expect(r.out).toContain("Supervisor Agent —"); // advice block too
   });
 
-  it("flags truth drift in advise when a Done card is unconfirmed by main", () => {
+  it("summarizes truth coverage in advise when a Done card lacks structured proof", () => {
     const cwd = project(BACKLOG); // no pr:merge → US-1 Done but undelivered
     const r = run(cwd, ["advise"]);
-    expect(r.out).toContain("truth drift");
+    expect(r.out).toContain("truth coverage");
     expect(r.out).toContain("owner confirmation required");
+  });
+
+  it("keeps default status concise for large legacy backlogs", () => {
+    const rows = Array.from(
+      { length: 25 },
+      (_, i) => `| US-LEG-${i + 1} | historical row | ✅ Done |`,
+    ).join("\n");
+    const cwd = project(`# Backlog\n\n| ID | Description | Status |\n| --- | --- | --- |\n${rows}\n`);
+    const r = run(cwd, ["status"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("truth coverage: partial — 25 Done row(s)");
+    expect(r.out).toContain("US-LEG-1, US-LEG-2, US-LEG-3, US-LEG-4, US-LEG-5");
+    expect(r.out).toContain("… +20 more");
+    expect(r.out).toContain("release: ready");
+    expect(r.out).not.toContain("US-LEG-20, US-LEG-21");
+    expect(r.out.length).toBeLessThan(1600);
   });
 
   it("next recommends the first ready Todo whose deps are delivered", () => {

@@ -204,9 +204,10 @@ describe("attestCommand", () => {
     expect(html).toContain("bash×2(21s)");
     expect(lstatSync(join(storyDir, "latest")).isSymbolicLink()).toBe(true);
     expect(readlinkSync(join(storyDir, "latest"))).toBe("2026-06-06T01-02-03");
-    // FIX-231: a fresh report changes the dossier's truth — the front page is
-    // refreshed in the same hot path (best-effort), so the board never lags.
-    expect(readFileSync(join(proj, ".roll", "features", "index.html"), "utf8")).toContain("FIX-300");
+    // US-V4-001: attest is story-scoped. Writing the report does NOT refresh the
+    // global dossier front page (`.roll/features/index.html`) — that page is
+    // rendered on demand by `roll index`, not as a delivery side effect.
+    expect(existsSync(join(proj, ".roll", "features", "index.html"))).toBe(false);
   });
 
   it("FIX-315: ac-map evidence at the story/card dir resolves — a pass with story-level evidence is NOT downgraded to claimed", async () => {
@@ -390,7 +391,7 @@ describe("attestCommand", () => {
     expect(readlinkSync(join(storyDir, "latest"))).toBe("cycle-env");
   });
 
-  it("US-EVID-004: attest refreshes an existing card dossier delivery phase", async () => {
+  it("US-V4-001: attest does NOT mount a delivery section onto a story index.html", async () => {
     const proj = project();
     const storyDir = join(proj, ".roll", "features", "demo", "FIX-300");
     mkdirSync(storyDir, { recursive: true });
@@ -399,19 +400,27 @@ describe("attestCommand", () => {
       renderStoryPage({ id: "FIX-300", title: "demo", created: "2026-06-06", type: "fix", epic: "demo" }),
       "utf8",
     );
+    const before = readFileSync(join(storyDir, "index.html"), "utf8");
 
     const code = await silenced(() =>
       inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
     );
 
     expect(code).toBe(0);
-    const html = readFileSync(join(storyDir, "index.html"), "utf8");
-    expect(html).toContain('class="phase phase-done" data-phase="delivery"');
-    expect(html).toContain("2026-06-06T01-02-03/FIX-300-report.html");
-    expect(html).not.toContain("Not yet delivered");
+    // The pre-existing story page skeleton is left BYTE-FOR-BYTE untouched —
+    // attest is story-scoped and never mounts a dossier "delivery" section.
+    const after = readFileSync(join(storyDir, "index.html"), "utf8");
+    expect(after).toBe(before);
+    expect(after).not.toContain('class="phase phase-done" data-phase="delivery"');
+    // The story-scoped acceptance report IS written under the run dir + latest.
+    expect(existsSync(join(storyDir, "2026-06-06T01-02-03", "FIX-300-report.html"))).toBe(true);
+    expect(existsSync(join(storyDir, "latest", "FIX-300-report.html"))).toBe(true);
+    // AC#5: attest writes NONE of the global / epic dossier index pages.
+    expect(existsSync(join(proj, ".roll", "features", "index.html"))).toBe(false);
+    expect(existsSync(join(proj, ".roll", "features", "demo", "index.html"))).toBe(false);
   });
 
-  it("US-EVID-004: card dossier delivery phase renders before/after pairs and after-only shots", async () => {
+  it("US-V4-001: before/after visuals render in the story REPORT, not a dossier index.html", async () => {
     const proj = project();
     const storyDir = join(proj, ".roll", "features", "demo", "FIX-300");
     const runDir = join(storyDir, "cycle-visuals");
@@ -419,11 +428,6 @@ describe("attestCommand", () => {
     writeFileSync(join(runDir, "screenshots", "before-home.png"), "PNG");
     writeFileSync(join(runDir, "screenshots", "after-home.png"), "PNG");
     writeFileSync(join(runDir, "screenshots", "after-new-panel.png"), "PNG");
-    writeFileSync(
-      join(storyDir, "index.html"),
-      renderStoryPage({ id: "FIX-300", title: "demo", created: "2026-06-06", type: "fix", epic: "demo" }),
-      "utf8",
-    );
 
     const code = await silenced(() =>
       inDir(proj, () =>
@@ -432,13 +436,13 @@ describe("attestCommand", () => {
     );
 
     expect(code).toBe(0);
-    const html = readFileSync(join(storyDir, "index.html"), "utf8");
-    expect(html).toContain('class="delivery-shot-pair"');
-    expect(html).toContain("cycle-visuals/screenshots/before-home.png");
-    expect(html).toContain("cycle-visuals/screenshots/after-home.png");
-    expect(html).toContain('class="delivery-shot-single"');
-    expect(html).toContain("cycle-visuals/screenshots/after-new-panel.png");
-    expect(html).not.toContain("before-new-panel.png");
+    // Visual evidence lives in the story-scoped report, not a dossier page.
+    const report = readFileSync(join(runDir, "FIX-300-report.html"), "utf8");
+    expect(report).toContain("before-home.png");
+    expect(report).toContain("after-home.png");
+    expect(report).toContain("after-new-panel.png");
+    // No story index.html is created or mounted as a side effect of attest.
+    expect(existsSync(join(storyDir, "index.html"))).toBe(false);
   });
 
   it("no ac-map.json ⇒ every AC honestly Claimed (red line, no invented evidence)", async () => {

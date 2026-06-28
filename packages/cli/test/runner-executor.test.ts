@@ -5,7 +5,7 @@
  * row builder, and the dry-run plan. No real git / gh / agent — pure fakes.
  */
 import { execFileSync, execSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -13,7 +13,7 @@ import type { CycleCommand, CycleContext, RollEvent, WarmSessionEntry } from "@r
 import { AGENTS } from "../../core/src/agent/specs.js";
 import { classifyComplexity } from "@roll/core";
 import { AWAITING_REVIEW_STATUS_MARKER } from "@roll/spec";
-import { agentWritableRoots } from "../src/runner/executor.js";
+import { agentWritableRoots, recordExecutionProfile, writeEvaluatorArtifact, runPlannerStage } from "../src/runner/executor.js";
 import { evaluateReviewScoreGate, readLatestStoryPeerScore } from "../src/lib/review-score.js";
 import {
   AGENT_ARGV_TODO,
@@ -2493,16 +2493,13 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r.event).toEqual({ type: "published", result: { status: 0, manualMerge: true, draft: true } });
   });
 
-  it("US-DOSSIER-007 AC2: publish_pr mounts the execution section onto the story dossier at PR-open", async () => {
+  it("US-V4-001: publish_pr does NOT mount an execution section onto a story index.html", async () => {
     const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-exec-mount-")));
     execDirs.push(repo);
     const dir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
     mkdirSync(dir, { recursive: true });
-    writeFileSync(
-      join(dir, "index.html"),
-      '<html><section class="phase phase-pending" data-phase="execution"><h2>x</h2><p>e</p></section></html>',
-      "utf8",
-    );
+    const skeleton = '<html><section class="phase phase-pending" data-phase="execution"><h2>x</h2><p>e</p></section></html>';
+    writeFileSync(join(dir, "index.html"), skeleton, "utf8");
     const { ports } = fakePorts({
       repoCwd: repo,
       github: {
@@ -2513,31 +2510,32 @@ describe("executeCommand — command → executor mapping", () => {
     });
     const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
     expect(r.event).toEqual({ type: "published", result: { status: 0, manualMerge: false } });
+    // The story page is left BYTE-FOR-BYTE untouched: publish records the PR in
+    // events + DeliveryRecord, never by mounting onto a dossier page (v4).
     const out = readFileSync(join(dir, "index.html"), "utf8");
-    expect(out).toContain("PR #321");
-    expect(out).toContain('class="phase phase-done" data-phase="execution"');
+    expect(out).toBe(skeleton);
+    expect(out).not.toContain("PR #321");
   });
 
-  it("FIX-290 AC5/AC6: a non-delivery (idle) cycle terminal triggers a dossier refresh so it surfaces on #loop", async () => {
+  it("US-V4-001: an idle cycle terminal does NOT refresh the global dossier (no side effect)", async () => {
     const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-290-idle-refresh-")));
     execDirs.push(repo);
     const featuresDir = join(repo, ".roll", "features");
     mkdirSync(featuresDir, { recursive: true });
     writeFileSync(join(repo, ".roll", "backlog.md"), "## Backlog\n\n- 📋 Todo US-RUN-001 demo card\n", "utf8");
-    // A STALE index.html carrying a marker the real regen never emits — if the
-    // idle terminal refreshes the dossier, the regenerate overwrites it and the
-    // marker is gone (the FIX-290 bug was: only DELIVERY regenerated the board).
+    // A stale page marker: if the idle terminal regenerated the dossier it would
+    // be overwritten. v4 removed that side effect, so the marker MUST survive.
     const indexPath = join(featuresDir, "index.html");
-    writeFileSync(indexPath, "<!-- STALE-BEFORE-FIX290 -->", "utf8");
+    writeFileSync(indexPath, "<!-- STALE-NO-REFRESH -->", "utf8");
     const { ports } = fakePorts({ repoCwd: repo });
     await executeCommand(
       { kind: "append_run", status: "idle", outcome: "idle_no_work", cycleId: CTX.cycleId },
       ports,
       CTX,
     );
-    const out = readFileSync(indexPath, "utf8");
-    expect(out).not.toContain("STALE-BEFORE-FIX290"); // refresh ran → board regenerated
-    expect(out.length).toBeGreaterThan(100); // a real console, not the stale stub
+    // Cycle terminal is event-only; the dossier page is rendered on demand by
+    // `roll index`, never as a delivery/terminal side effect.
+    expect(readFileSync(indexPath, "utf8")).toBe("<!-- STALE-NO-REFRESH -->");
   });
 
   it("FIX-245: a pre-existing OPEN PR on the cycle branch is ADOPTED — no second create, discipline alert logged", async () => {
@@ -3783,5 +3781,205 @@ describe("FIX-907 readCycleTimeoutThresholds — policy + env override", () => {
       if (savedNp === undefined) delete process.env["ROLL_CYCLE_NO_PROGRESS_SEC"];
       else process.env["ROLL_CYCLE_NO_PROGRESS_SEC"] = savedNp;
     }
+  });
+});
+
+describe("US-V4-004 — execution profile selection + durable recording", () => {
+  // `mode` opts the project into auto profile selection; absent → no agents.yaml →
+  // default execution_policy.mode "standard" (the no-regression default).
+  function repoWithSpec(id: string, specText: string, mode?: "auto" | "verified" | "planned"): string {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-v4-004-")));
+    execDirs.push(repo);
+    const specDir = join(repo, ".roll", "features", "uncategorized", id);
+    mkdirSync(specDir, { recursive: true });
+    writeFileSync(join(specDir, "spec.md"), specText);
+    if (mode !== undefined) writeFileSync(join(repo, ".roll", "agents.yaml"), `schema: v4\nexecution_policy:\n  mode: ${mode}\n`);
+    return repo;
+  }
+  const profileEvents = (calls: Record<string, unknown[]>): RollEvent[] =>
+    (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent).filter((e) => e.type === "execution:profile");
+
+  it("records standard for a low-risk, screenshot-exempt FIX with ACs (auto mode)", () => {
+    const repo = repoWithSpec("FIX-V4A", "---\nid: FIX-V4A\nscreenshot_exempt: internal parser fix\n---\n## Acceptance Criteria\n- [ ] parser handles edge case\n", "auto");
+    const { ports, calls } = fakePorts({ repoCwd: repo });
+    const profile = recordExecutionProfile(ports, "C-1", "FIX-V4A", 5);
+    expect(profile).toBe("standard");
+    const evs = profileEvents(calls);
+    expect(evs).toHaveLength(1);
+    expect(evs[0]).toMatchObject({ type: "execution:profile", cycleId: "C-1", storyId: "FIX-V4A", profile: "standard" });
+  });
+
+  it("records verified for a user-visible / visual-evidence story (auto mode)", () => {
+    const repo = repoWithSpec("US-V4B", "---\nid: US-V4B\nphysical_terminal: required\n---\n## Acceptance Criteria\n- [ ] [visual-evidence] terminal shows the new output\n", "auto");
+    const { ports, calls } = fakePorts({ repoCwd: repo });
+    expect(recordExecutionProfile(ports, "C-2", "US-V4B", undefined)).toBe("verified");
+    expect(profileEvents(calls)[0]).toMatchObject({ profile: "verified" });
+  });
+
+  it("records planned for a truth/release-semantics story (auto mode)", () => {
+    const repo = repoWithSpec("US-V4C", "## Context\nChange the release consistency gate + DeliveryRecord truth.\n\n## Acceptance Criteria\n- [ ] gate reads structured truth\n", "auto");
+    const { ports, calls } = fakePorts({ repoCwd: repo });
+    expect(recordExecutionProfile(ports, "C-3", "US-V4C", undefined)).toBe("planned");
+    expect(profileEvents(calls)[0]).toMatchObject({ profile: "planned" });
+  });
+
+  it("NO-REGRESSION: default policy (standard / no agents.yaml) keeps a planned-risk story Builder-only", () => {
+    // Same truth/release spec as above, but NO agents.yaml → execution_policy.mode
+    // defaults to "standard" → the cycle stays standard (no planner/evaluator).
+    const repo = repoWithSpec("US-V4D", "## Context\nChange the release consistency gate + DeliveryRecord truth.\n\n## Acceptance Criteria\n- [ ] gate reads structured truth\n");
+    const { ports } = fakePorts({ repoCwd: repo });
+    expect(recordExecutionProfile(ports, "C-5", "US-V4D", undefined)).toBe("standard");
+  });
+
+  it("backwards compat: a missing spec falls back to standard (no v4 config needed)", () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-v4-004-nospec-")));
+    execDirs.push(repo);
+    const { ports, calls } = fakePorts({ repoCwd: repo });
+    expect(recordExecutionProfile(ports, "C-4", "US-NONE", undefined)).toBe("standard");
+    // Still records the (standard) decision durably.
+    expect(profileEvents(calls)[0]).toMatchObject({ profile: "standard" });
+  });
+});
+
+describe("US-V4-005 — verified execution: evaluator artifact boundary", () => {
+  function repoWithScore(id: string, sessionId: string, verdict: "good" | "ok" | "regression", score: number): string {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-v4-005-")));
+    execDirs.push(repo);
+    const notesDir = join(repo, ".roll", "features", "uncategorized", id, "notes");
+    mkdirSync(notesDir, { recursive: true });
+    writeFileSync(
+      join(notesDir, `2026-06-28-roll-build-${id}-${score}.md`),
+      ["---", "skill: roll-build", `story: ${id}`, `score: ${score}`, `verdict: ${verdict}`, "ts: 2026-06-28T12:00:00Z", "scoring: pair", "scored-by: reasonix", `session-id: ${sessionId}`, "---", "", "peer rationale."].join("\n"),
+    );
+    return repo;
+  }
+  function ctxFor(repo: string, id: string, profile: "standard" | "verified" | "planned", builderSession: string): Parameters<typeof writeEvaluatorArtifact>[1] {
+    const runDir = join(repo, ".roll", "features", "uncategorized", id, "run-1");
+    mkdirSync(runDir, { recursive: true });
+    return { cycleId: "C-1", branch: "b", loop: "x", storyId: id, selectedProfile: profile, evidenceRunDir: runDir, builderSessionId: builderSession };
+  }
+
+  it("standard profile writes no evaluator artifact", () => {
+    const repo = repoWithScore("US-E1", "C-1:score:reasonix:1", "good", 8);
+    const { ports } = fakePorts({ repoCwd: repo });
+    const r = writeEvaluatorArtifact(ports, ctxFor(repo, "US-E1", "standard", "C-1:build:codex:0"), { attestStatus: "produced", blockingFindings: [] });
+    expect(r.written).toBe(false);
+    expect(r.valid).toBe(true);
+  });
+
+  it("verified profile writes eval-report.md + manifest from a fresh-session score → valid", () => {
+    const repo = repoWithScore("US-E2", "C-1:score:reasonix:1", "good", 8);
+    const { ports } = fakePorts({ repoCwd: repo });
+    const ctx = ctxFor(repo, "US-E2", "verified", "C-1:build:codex:0");
+    const r = writeEvaluatorArtifact(ports, ctx, { attestStatus: "produced", blockingFindings: [] });
+    expect(r.written).toBe(true);
+    expect(r.valid).toBe(true);
+    const reportPath = join(ctx.evidenceRunDir as string, "role-artifacts", "evaluator", "eval-report.md");
+    expect(readFileSync(reportPath, "utf8")).toContain("## Recommendation");
+    expect(readFileSync(reportPath, "utf8")).toContain("merge");
+    const man = JSON.parse(readFileSync(join(ctx.evidenceRunDir as string, "role-artifacts", "evaluator", "artifact-manifest.json"), "utf8"));
+    expect(man.role).toBe("evaluator");
+  });
+
+  it("BUILDER SELF-GRADE: evaluator session == builder session → written but fails closed (invalid)", () => {
+    const shared = "C-1:build:codex:0";
+    const repo = repoWithScore("US-E3", shared, "good", 8);
+    const { ports } = fakePorts({ repoCwd: repo });
+    const r = writeEvaluatorArtifact(ports, ctxFor(repo, "US-E3", "verified", shared), { attestStatus: "produced", blockingFindings: [] });
+    expect(r.written).toBe(true);
+    expect(r.valid).toBe(false);
+    expect(r.reasons.join(" ")).toContain("self-grade");
+  });
+
+  it("a blocking finding → repair recommendation in the eval report", () => {
+    const repo = repoWithScore("US-E4", "C-1:score:reasonix:1", "ok", 7);
+    const { ports } = fakePorts({ repoCwd: repo });
+    const ctx = ctxFor(repo, "US-E4", "verified", "C-1:build:codex:0");
+    writeEvaluatorArtifact(ports, ctx, { attestStatus: "produced", blockingFindings: ["AC2 has no test"] });
+    expect(readFileSync(join(ctx.evidenceRunDir as string, "role-artifacts", "evaluator", "eval-report.md"), "utf8")).toContain("repair");
+  });
+});
+
+describe("US-V4-006 — planned execution: Planner contract before the Builder", () => {
+  const VALID_CONTRACT = [
+    "# Planner contract",
+    "## Scope boundary",
+    "- picker only",
+    "## Acceptance contract",
+    "- picker prefers est_min",
+    "## Expected evidence",
+    "- unit test",
+    "## Risks",
+    "- legacy cards",
+    "## Out of scope",
+    "- spawn changes",
+    "",
+  ].join("\n");
+
+  function plannedCtx(repo: string, id: string): Parameters<typeof runPlannerStage>[1] {
+    const runDir = join(repo, ".roll", "features", "uncategorized", id, "run-1");
+    mkdirSync(runDir, { recursive: true });
+    return { cycleId: "C-1", branch: "b", loop: "x", storyId: id, selectedProfile: "planned", evidenceRunDir: runDir };
+  }
+
+  it("no-op for non-planned profiles", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-v4-006-")));
+    execDirs.push(repo);
+    const { ports } = fakePorts({ repoCwd: repo });
+    const r = await runPlannerStage(ports, { ...plannedCtx(repo, "US-P0"), selectedProfile: "verified" }, "codex");
+    expect(r.ran).toBe(false);
+    expect(r.ok).toBe(true);
+  });
+
+  it("planner writes a valid contract → ok, contract + manifest recorded", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-v4-006-")));
+    execDirs.push(repo);
+    const ctx = plannedCtx(repo, "US-P1");
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      // The Planner skill writes the contract into the planner role-artifacts dir.
+      agentSpawn: (async (_agent: string, opts: { runDir?: string }) => {
+        writeFileSync(join(opts.runDir as string, "planner-contract.md"), VALID_CONTRACT);
+        return { exitCode: 0, timedOut: false };
+      }) as unknown as Ports["agentSpawn"],
+    });
+    const r = await runPlannerStage(ports, ctx, "codex");
+    expect(r.ran).toBe(true);
+    expect(r.ok).toBe(true);
+    const dir = join(ctx.evidenceRunDir as string, "role-artifacts", "planner");
+    expect(existsSync(join(dir, "planner-contract.md"))).toBe(true);
+    expect(JSON.parse(readFileSync(join(dir, "artifact-manifest.json"), "utf8")).role).toBe("planner");
+  });
+
+  it("FAIL-CLOSED: planner produces no contract → ok=false (Builder must not start)", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-v4-006-")));
+    execDirs.push(repo);
+    const ctx = plannedCtx(repo, "US-P2");
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      agentSpawn: (async () => ({ exitCode: 0, timedOut: false })) as unknown as Ports["agentSpawn"], // writes nothing
+    });
+    const r = await runPlannerStage(ports, ctx, "codex");
+    expect(r.ran).toBe(true);
+    expect(r.ok).toBe(false);
+    expect(r.reasons.join(" ")).toContain("planner-contract.md missing or malformed");
+  });
+
+  it("Evaluator reports planned-vs-delivered when a planner contract exists", () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-v4-006-")));
+    execDirs.push(repo);
+    const id = "US-P3";
+    const runDir = join(repo, ".roll", "features", "uncategorized", id, "run-1");
+    mkdirSync(join(runDir, "role-artifacts", "planner"), { recursive: true });
+    writeFileSync(join(runDir, "role-artifacts", "planner", "planner-contract.md"), VALID_CONTRACT);
+    // an ac-map delivering the planned acceptance item
+    mkdirSync(join(repo, ".roll", "features", "uncategorized", id), { recursive: true });
+    writeFileSync(join(repo, ".roll", "features", "uncategorized", id, "ac-map.json"), JSON.stringify([{ ac: "picker prefers est_min", status: "pass" }]));
+    const { ports } = fakePorts({ repoCwd: repo });
+    const ctx = { cycleId: "C-1", branch: "b", loop: "x", storyId: id, selectedProfile: "planned" as const, evidenceRunDir: runDir, builderSessionId: "C-1:build:codex:0" };
+    writeEvaluatorArtifact(ports, ctx, { attestStatus: "produced", blockingFindings: [] });
+    const report = readFileSync(join(runDir, "role-artifacts", "evaluator", "eval-report.md"), "utf8");
+    expect(report).toContain("## Planned vs delivered");
+    expect(report).toContain("satisfied");
   });
 });

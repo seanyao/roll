@@ -809,14 +809,69 @@ interface EvidenceManifestLike {
 }
 
 function readAcMapEntries(worktreeCwd: string, storyId: string): AcMapEntry[] | null {
-  const path = acMapCandidates(worktreeCwd, storyId)[0];
-  if (path === undefined || !existsSync(path)) return null;
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
-    return Array.isArray(parsed) ? (parsed.filter((x) => typeof x === "object" && x !== null) as AcMapEntry[]) : null;
-  } catch {
-    return null;
+  // US-V4-001: read whichever ac-map.json candidate exists (card root first, then
+  // the newest run dir) so the structured-truth gate works regardless of which
+  // story-scoped location the skill wrote it to.
+  for (const path of acMapCandidates(worktreeCwd, storyId)) {
+    if (path === undefined || !existsSync(path)) continue;
+    try {
+      const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+      if (Array.isArray(parsed)) return parsed.filter((x) => typeof x === "object" && x !== null) as AcMapEntry[];
+      return null;
+    } catch {
+      return null;
+    }
   }
+  return null;
+}
+
+/**
+ * US-V4-001 — whether an ac-map evidence entry would render as REAL evidence in
+ * the report. Mirrors the renderer's `toRef` contract (attest.ts) exactly: text
+ * needs a `textFile`, cast/video need an `href`, and screenshot/commit/ci/deploy/
+ * test-pass are evidence on their own. The gate reads this STRUCTURED fact rather
+ * than scanning the rendered HTML for `class="ev"` / `class="shot"`.
+ */
+function acMapEvidenceIsReal(ev: AcMapEvidence): boolean {
+  const kind = ev.kind ?? "";
+  if (kind === "text") return typeof ev.textFile === "string" && ev.textFile !== "";
+  if (kind === "cast" || kind === "video") return typeof ev.href === "string" && ev.href !== "";
+  return ["screenshot", "commit", "ci", "deploy", "test-pass"].includes(kind);
+}
+
+/**
+ * US-V4-001 — structured visual-evidence signal (replaces scanning the rendered
+ * report HTML for `screenshots/` references). The report shows a screenshot iff
+ * ANY of these structured sources is present: an ac-map screenshot evidence ref,
+ * a real `taken:true` capture in evidence.json, or an actual image file under the
+ * report's run-dir `screenshots/`. No HTML is parsed.
+ */
+function hasRenderedVisualEvidence(worktreeCwd: string, storyId: string): boolean {
+  const entries = readAcMapEntries(worktreeCwd, storyId) ?? [];
+  if (
+    entries.some((e) =>
+      (e.evidence ?? []).some((ev) => ev.kind === "screenshot" && typeof ev.href === "string" && ev.href !== ""),
+    )
+  ) {
+    return true;
+  }
+  const manifest = evidenceManifest(worktreeCwd, storyId);
+  if (
+    manifest !== null &&
+    Array.isArray(manifest.captures) &&
+    manifest.captures.some((raw) => typeof raw === "object" && raw !== null && (raw as Record<string, unknown>)["taken"] === true)
+  ) {
+    return true;
+  }
+  const report = existingReport(worktreeCwd, storyId);
+  if (report !== null) {
+    try {
+      if (readdirSync(join(dirname(report), "screenshots")).some((f) => /\.(png|jpe?g|webp)$/i.test(f))) return true;
+    } catch {
+      /* no screenshots dir under the run dir */
+    }
+  }
+  return false;
 }
 
 /**
@@ -1048,14 +1103,17 @@ function passAcVisualFloor(worktreeCwd: string, storyId: string): { ok: boolean;
   return { ok: false, reason: `pass AC(s) lack screenshot evidence or machine capture skip: ${ids}` };
 }
 
-function visualEvidenceFloor(worktreeCwd: string, storyId: string, html: string): { ok: boolean; reason?: string } {
+function visualEvidenceFloor(worktreeCwd: string, storyId: string): { ok: boolean; reason?: string } {
   const passAc = passAcVisualFloor(worktreeCwd, storyId);
   if (!passAc.ok) return passAc;
   if (!storyRequiresScreenshot(worktreeCwd, storyId)) return passAc;
   const declared = declaredSurfaceCaptureFloor(worktreeCwd, storyId);
   if (!declared.ok) return declared;
   if (declared.reason !== undefined) return declared;
-  if (/<figure class="shot\b|href="screenshots\/|src="screenshots\//i.test(html)) return { ok: true };
+  // US-V4-001: judge visual evidence from STRUCTURED truth (ac-map screenshot
+  // refs + evidence.json captures + on-disk screenshots), never by scanning the
+  // rendered report HTML.
+  if (hasRenderedVisualEvidence(worktreeCwd, storyId)) return { ok: true };
   if (hasMachineCaptureSkip(worktreeCwd, storyId)) return { ok: true, reason: "machine capture skip present" };
   return { ok: false, reason: "visual evidence missing: no screenshot reference or machine capture skip" };
 }
@@ -1136,38 +1194,32 @@ export function verificationReportFresh(
  */
 export function verificationReportHasContent(worktreeCwd: string, storyId: string): boolean {
   if (storyId === "") return false;
-  const p = existingReport(worktreeCwd, storyId);
-  if (p === null) return false;
-  try {
-    const html = readFileSync(p, "utf8");
-    return verificationReportHasAcceptanceContent(worktreeCwd, storyId) && visualEvidenceFloor(worktreeCwd, storyId, html).ok;
-  } catch {
-    return false;
-  }
+  // A rendered report must EXIST (existence check — not parsed).
+  if (existingReport(worktreeCwd, storyId) === null) return false;
+  return verificationReportHasAcceptanceContent(worktreeCwd, storyId) && visualEvidenceFloor(worktreeCwd, storyId).ok;
 }
 
+/**
+ * US-V4-001 — the content floor reads STRUCTURED truth (the `ac-map.json` the
+ * skill writes), never the rendered HTML. A real delivery's report carries an
+ * ac-map with ≥1 positive AC (`pass`/`partial`/`readonly`) and EVERY positive AC
+ * is backed by real evidence (the empty-shell red line: a positive AC with no
+ * evidence fails). The rendered report is the same data passed through the pure
+ * renderer, so reading the ac-map is faithful to the old HTML-section scan while
+ * keeping the gate a machine decision over structured facts (no HTML parsing).
+ */
 function verificationReportHasAcceptanceContent(worktreeCwd: string, storyId: string): boolean {
   if (storyId === "") return false;
-  const p = existingReport(worktreeCwd, storyId);
-  if (p === null) return false;
-  try {
-    const html = readFileSync(p, "utf8");
-    const hasMap = acMapCandidates(worktreeCwd, storyId).some((m) => existsSync(m));
-    if (!hasMap) return false;
-    const sections = [...html.matchAll(/<section class="ac\s+([^"]+)"[\s\S]*?<\/section>/g)];
-    if (sections.length === 0) return false;
-    let positiveWithEvidence = 0;
-    for (const m of sections) {
-      const cls = m[1] ?? "";
-      const body = m[0] ?? "";
-      if (!/\bs-(pass|partial|readonly)\b/.test(cls)) continue;
-      if (!/(class="ev\b|class="shot\b|<figure class="shot\b)/.test(body)) return false;
-      positiveWithEvidence += 1;
-    }
-    return positiveWithEvidence > 0;
-  } catch {
-    return false;
+  if (existingReport(worktreeCwd, storyId) === null) return false;
+  const entries = readAcMapEntries(worktreeCwd, storyId);
+  if (entries === null || entries.length === 0) return false;
+  let positiveWithEvidence = 0;
+  for (const e of entries) {
+    if (e.status !== "pass" && e.status !== "partial" && e.status !== "readonly") continue;
+    if (!(e.evidence ?? []).some((ev) => acMapEvidenceIsReal(ev))) return false;
+    positiveWithEvidence += 1;
   }
+  return positiveWithEvidence > 0;
 }
 
 /** Read `loop_safety.attest_gate` from `<repoCwd>/.roll/policy.yaml`; default hard. */
@@ -1305,9 +1357,7 @@ export function runAttestGate(
       // branch) no longer soft-passes this cycle's gate.
       const score = evaluateReviewScoreGate(scoreRepoCwd, storyId, builderSessionId, cycleId);
       if (score.status === "pass") {
-        const report = existingReport(worktreeCwd, storyId);
-        const html = report === null ? "" : readFileSync(report, "utf8");
-        const visual = visualEvidenceFloor(worktreeCwd, storyId, html);
+        const visual = visualEvidenceFloor(worktreeCwd, storyId);
         if (!visual.ok) {
           const reasons = [visual.reason ?? "visual evidence gate failed"];
           const blocked = mode === "hard";

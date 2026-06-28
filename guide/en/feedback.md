@@ -9,7 +9,7 @@ Roll keeps two feedback paths deliberately separate:
 
 ```bash
 roll idea "Safari login fails after the session cookie expires"
-roll idea "Add a dark theme to the dossier"
+roll idea "Add dark mode to the story report archive"
 ```
 
 `roll idea` classifies the note, assigns the next ID, infers the epic, mints

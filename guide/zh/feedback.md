@@ -9,7 +9,7 @@ Roll 把两条反馈路径分开：
 
 ```bash
 roll idea "Safari 登录在 session cookie 过期后失败"
-roll idea "给交付档案加暗色主题"
+roll idea "给 Story 报告归档加暗色主题"
 ```
 
 `roll idea` 会分类、分配下一个 ID、推断 epic、铸卡夹、追加 backlog 行并刷新索引。

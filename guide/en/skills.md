@@ -12,7 +12,7 @@ Quickly select the right skill or tool.
 | **"Fix a bug"** / **"Change some copy"** | `roll-fix` | Quick fix, no full workflow |
 | **"Plan requirements"** / **"Split into stories"** | `roll-design` | Plan only, no implementation, outputs BACKLOG.md |
 | **"Run several Actions in parallel"** | `roll-build` | Auto-determines parallelism after splitting Actions |
-| **"What shipped / what's queued?"** | `roll status` / `roll dossier` | Delivery surface: shipped / in-progress / queue / truth drift / release readiness |
+| **"What shipped / what's queued?"** | `roll status` / `roll cycle` / story reports | CLI-first delivery state, cycle trace, and story-scoped evidence |
 | **"Debug this page"** | `roll-debug` | Deep diagnosis, collect logs/network/DOM |
 
 ## Support Skills
@@ -94,7 +94,7 @@ a fresh, separate session (never a sub-agent of the builder). After a
 Reviewer and writes one structured Review Score note into the story's card
 folder (US-META-008 — the card folder is the story's single home; the flat
 `.roll/notes/` keeps the project diary and pre-migration history, and both
-the dashboard trend and the story dossier merge the two sources):
+the dashboard trend and the story archive merge the two sources):
 
 ```
 .roll/features/<epic>/US-AUTH-001/notes/2026-05-29-roll-build-US-AUTH-001-1717000000.md

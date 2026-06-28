@@ -101,7 +101,23 @@ import {
   type AgentActivityNormalizer,
   type NormalizerState,
   cycleActivityFromEvents,
+  classifyStoryRisk,
+  selectExecutionProfile,
+  explainExecutionProfile,
+  applyExecutionPolicy,
+  normalizeAgentConfig,
+  assembleEvalReport,
+  renderEvalReport,
+  validateEvaluatorArtifact,
+  validatePlannerArtifact,
+  parsePlannerContract,
+  plannedVsDelivered,
+  summarizePlannedVsDelivered,
+  decideRepair,
+  initialRepairState,
+  DEFAULT_MAX_REPAIR_ROUNDS,
 } from "@roll/core";
+import type { ArtifactManifest, ExecutionProfile, Rig } from "@roll/spec";
 import {
   parseEventLine,
   STATUS_MARKER,
@@ -173,8 +189,7 @@ import { applyCorrectionAction } from "./correction-actuator.js";
 import { buildPairScorePrompt, buildReviewPrompt, enabledPairingStages, parsePairScoreOutput, retryPeerConsult, runPairing, runScorePairing, type PairEvent, type PairReview } from "./pairing-gate.js";
 import { realAgentEnv } from "../commands/agent-list.js";
 import { attestCommand } from "../commands/attest.js";
-import { refreshAggregates } from "../commands/index-gen.js";
-import { cardArchiveDir, mountExecutionAtPublish } from "../lib/archive.js";
+import { cardArchiveDir } from "../lib/archive.js";
 import { formatEvaluationContractForScorer, parseEvaluationContract } from "../lib/evaluation-contract.js";
 import { readLatestStoryReviewScore, REVIEW_SCORE_LOW_THRESHOLD, type ReviewScoreEntry } from "../lib/review-score.js";
 
@@ -1305,7 +1320,13 @@ export async function executeCommand(
       // lever) drives tier selection, falling back to the backlog row's tag.
       const estMin = routerEstMin(ports.repoCwd, cmd.storyId, story?.desc ?? "");
       const r = ports.route.resolve(cmd.storyId, estMin);
-      return { event: { type: "route_resolved", agent: r.agent, model: r.model } };
+      // US-V4-004: select + RECORD the Story execution profile once, here at
+      // route-resolve (before execute). Best-effort + never toppling routing: a
+      // spec read/parse blip falls back to `standard` (builder-only, current
+      // behavior). v4.0 records the profile but still executes standard only;
+      // verified/planned add evaluator/planner stages in later stories.
+      const selectedProfile = recordExecutionProfile(ports, ctx.cycleId ?? "", cmd.storyId, estMin);
+      return { event: { type: "route_resolved", agent: r.agent, model: r.model }, ctxPatch: { selectedProfile } };
     }
 
     // execute: spawn the agent (TCR commits happen inside the worktree). The
@@ -1327,6 +1348,19 @@ export async function executeCommand(
           event: { type: "agent_exited", exit: 1, timedOut: false },
           ctxPatch: { builderSessionId },
         };
+      }
+      // US-V4-006: for a `planned` cycle, run the Planner BEFORE the Builder in a
+      // fresh session and FAIL CLOSED on a missing/malformed planner contract —
+      // the Builder never starts without a valid plan. No-op for standard/verified.
+      if (ctx.selectedProfile === "planned") {
+        const plan = await runPlannerStage(ports, ctx, cmd.agent);
+        if (plan.ran && !plan.ok) {
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `planner stage failed closed for ${ctx.storyId ?? "?"}: ${plan.reasons.join("; ")} — Builder not started (cycle ${ctx.cycleId ?? "?"})`,
+          );
+          return { event: { type: "agent_exited", exit: 1, timedOut: false }, ctxPatch: { builderSessionId } };
+        }
       }
       // US-PORT-011: the live observation file — one stable path per project,
       // truncated at each agent start, fed every chunk in real time. The popup
@@ -2210,6 +2244,10 @@ export async function executeCommand(
       // Done without acceptance evidence.
       // Scoped to actual deliveries: an idle cycle has nothing to attest.
       let attestBlocked = false;
+      // US-V4-005: capture the attest verdict + reasons so the Evaluator artifact
+      // (verified/planned) can record evidence status + blocking findings.
+      let attestVerdict: "produced" | "skipped" | "unknown" = "unknown";
+      let attestReasons: readonly string[] = [];
       if (commitsAhead > 0 && storyId !== "") {
         const mode = readAttestGateMode(ports.repoCwd);
         const res = runAttestGate(
@@ -2250,6 +2288,39 @@ export async function executeCommand(
           });
         }
         attestBlocked = res.blocked;
+        attestVerdict = res.verdict;
+        attestReasons = res.reasons;
+      }
+      // US-V4-005: for verified/planned profiles, write the Evaluator artifact
+      // (eval-report.md + artifact-manifest.json) into the run dir, ASSEMBLED from
+      // the cycle's separate review/score/attest signals (never one pass/fail).
+      // FAIL-CLOSED (US-V4-005): a malformed/missing evaluator artifact, or one
+      // whose session is the builder's (self-grade), BLOCKS the cycle — it never
+      // marks Done. US-V4-007: the bounded repair DECISION (decideRepair) frames
+      // the Evaluator→Builder repair signal with a structured reason; the live
+      // re-spawn loop that consumes a `repair` action is v4.1.
+      let evaluatorBlocked = false;
+      if (
+        (ctx.selectedProfile === "verified" || ctx.selectedProfile === "planned") &&
+        commitsAhead > 0 &&
+        storyId !== ""
+      ) {
+        const blocking = attestBlocked || peerBlocked ? attestReasons : [];
+        const ev = writeEvaluatorArtifact(ports, ctx, { attestStatus: attestVerdict, blockingFindings: blocking });
+        if (ev.written && !ev.valid) {
+          evaluatorBlocked = true;
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `evaluator artifact (${ctx.selectedProfile}) failed closed for ${storyId}: ${ev.reasons.join("; ")} — cycle ${ctx.cycleId ?? "?"}`,
+          );
+        }
+        const repair = decideRepair(blocking, initialRepairState(), { maxRounds: DEFAULT_MAX_REPAIR_ROUNDS });
+        if (repair.action !== "done") {
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `repair decision (${ctx.selectedProfile}) for ${storyId}: ${repair.action} — ${repair.reason} (live repair loop is v4.1; cycle held for review) — cycle ${ctx.cycleId ?? "?"}`,
+          );
+        }
       }
       // FIX-244: phantom-failure probe. A hard-blocked delivery whose work is
       // ALREADY out as a PR (agent self-published, observed 2026-06-10: cycles
@@ -2267,7 +2338,9 @@ export async function executeCommand(
       // an agent slot is set, and the spawn ran (its spend/duration are recorded
       // on the runs row). A defensively-empty agent slot stays idle.
       const agentExecuted = (ctx.agent ?? "").trim() !== "";
-      const gateBlocked = attestBlocked || peerBlocked;
+      // US-V4-005: a verified/planned cycle with an invalid Evaluator artifact is
+      // gate-blocked (fail-closed) alongside the attest/peer gates.
+      const gateBlocked = attestBlocked || peerBlocked || evaluatorBlocked;
       // FIX-908: a gate-blocked cycle that did REAL work (≥1 commit AND ≥1 tcr:
       // commit) but is only missing a REQUIRED acceptance artifact — the
       // independent peer Review Score was not produced (scoreStatus ≠ "scored") OR
@@ -2334,12 +2407,11 @@ export async function executeCommand(
         ? planPublishDocPr({ branch: cmd.branch, slug, body: publishBody(ctx), manualMerge, draft: cmd.draft })
         : planPublishPr({ branch: cmd.branch, slug, body: publishBody(ctx), manualMerge, draft: cmd.draft });
       const r = await ports.github.runPublishPlan(plan);
-      // US-DOSSIER-007 AC2: mount the execution section onto the story dossier at
-      // PR-open with the fact known now (the PR link), not reconstructed later
-      // from squash-flattened history. Best-effort; never blocks the cycle.
-      if (r.status === 0 && r.prUrl !== "" && !cmd.docOnly && ctx.storyId !== undefined) {
-        mountExecutionAtPublish(ports.repoCwd, ctx.storyId, r.prUrl);
-      }
+      // US-V4-001: publish no longer mounts a PR link onto a story `index.html`
+      // dossier page — the global dossier/story-page refresh is not a v4 delivery
+      // side effect. The PR fact lives in the DeliveryRecord + events below and is
+      // surfaced by `roll cycles` / `roll truth`; render dossier pages on demand
+      // with `roll index`.
       // US-TRUTH-015 AC1 + FIX-389b: write DeliveryRecord on successful publish.
       // This is now an OPTIONAL CACHE WARM — the correctness path is runs+git
       // projection (FIX-389a). The DeliveryRecord here is immediately available
@@ -2643,12 +2715,10 @@ export async function executeCommand(
       if (!terminalMerged && terminalStoryId !== "") {
         resetStaleSpecTruth(ports, terminalStoryId);
       }
-      // FIX-290 AC5: a failed/idle cycle is first-class — refresh the dossier
-      // aggregates on EVERY cycle terminal so the cycle surfaces on the web #loop
-      // ledger immediately, not only after the next delivery (which mounted the
-      // execution section at publish) or a manual `roll index`. Best-effort: a
-      // refresh failure WARNs and never fails the cycle terminal.
-      refreshAggregates(ports.repoCwd);
+      // US-V4-001: a cycle terminal no longer refreshes the global dossier
+      // aggregate pages as a side effect. Cycle facts are durable events
+      // (events.ndjson / runs.jsonl) surfaced by `roll cycles` / `roll cycle
+      // watch` / `roll truth`; render dossier pages on demand with `roll index`.
       // FIX-306: the RUNNER commits + pushes the `.roll` metadata repo — the
       // sandboxed agent (codex) only WROTE its files (acceptance report, evidence,
       // ac-map, backlog marks) and CANNOT git-commit `.roll` (its git-internal dir
@@ -3281,6 +3351,239 @@ export function parseEstMinFromSpec(specText: string): number | undefined {
  * unreadable, or frontmatter-less spec falls back to the backlog row's
  * `est_min:` tag (prior behavior), so routing never regresses on a parse blip.
  */
+/** US-V4-004/003 — the project's `execution_policy.mode` from `.roll/agents.yaml`
+ *  (default "standard" when absent/unparseable). Gates whether verified/planned
+ *  stages execute; standard keeps the cycle Builder-only (no regression). */
+function executionPolicyMode(repoCwd: string): "standard" | "verified" | "planned" | "auto" {
+  try {
+    const p = join(repoCwd, ".roll", "agents.yaml");
+    if (!existsSync(p)) return "standard";
+    return normalizeAgentConfig(readFileSync(p, "utf8")).config.executionPolicy.mode;
+  } catch {
+    return "standard";
+  }
+}
+
+/**
+ * US-V4-004 — select the Story execution profile from the spec's risk signals and
+ * RECORD it in a durable `execution:profile` event. Pure-decision + one append;
+ * never throws (a spec read blip falls back to `standard`, the current
+ * builder-only path). Returns the profile so the executor can fold it into the
+ * cycle context. In v4.0 only `standard` actually executes — recording the chosen
+ * profile is the foundation verified/planned execution builds on (US-V4-005/006).
+ */
+export function recordExecutionProfile(
+  ports: Ports,
+  cycleId: string,
+  storyId: string,
+  estMin: number | undefined,
+): ExecutionProfile {
+  let profile: ExecutionProfile = "standard";
+  let reason = "standard: spec unavailable";
+  try {
+    const specPath = storySpecPath(ports.repoCwd, storyId);
+    if (specPath !== null && existsSync(specPath)) {
+      const input = classifyStoryRisk(storyId, readFileSync(specPath, "utf8"), {
+        ...(estMin !== undefined ? { estimatedMinutes: estMin } : {}),
+      });
+      const classified = selectExecutionProfile(input);
+      // Apply execution_policy.mode (default "standard" — incl. no agents.yaml) so
+      // a project that has not opted into verified/planned stays Builder-only (the
+      // v4.0 no-regression guarantee). The classification still informs the reason.
+      const mode = executionPolicyMode(ports.repoCwd);
+      profile = applyExecutionPolicy(classified, mode);
+      reason = `${explainExecutionProfile(input)} [policy:${mode} → ${profile}]`;
+    }
+  } catch {
+    profile = "standard";
+    reason = "standard: profile selection failed (fell back)";
+  }
+  try {
+    ports.events.appendEvent(ports.paths.eventsPath, {
+      type: "execution:profile",
+      cycleId,
+      storyId,
+      profile,
+      reason,
+      ts: eventTs(ports),
+    });
+  } catch {
+    /* recording is best-effort; never topple routing on an event-append blip */
+  }
+  return profile;
+}
+
+/**
+ * US-V4-005 — write + validate the EVALUATOR artifact for a verified/planned
+ * cycle. The Evaluator role is not a new monolithic gate: it ASSEMBLES the three
+ * separate contracts the cycle already produced in fresh sessions — the
+ * independent Review Score, the blocking review/attest findings, and the attest
+ * evidence status — into `eval-report.md` + `artifact-manifest.json` under the
+ * run dir, then validates fail-closed (manifest well-formed, evaluator session ≠
+ * builder session). Best-effort writer: a write blip returns `valid:false` with
+ * reasons; the existing attest/peer gates remain the actual cycle blockers.
+ */
+export function writeEvaluatorArtifact(
+  ports: Ports,
+  ctx: CycleContext,
+  signals: { attestStatus: "produced" | "skipped" | "unknown"; blockingFindings: readonly string[]; plannedVsDelivered?: string },
+): { written: boolean; valid: boolean; reasons: readonly string[] } {
+  const profile = ctx.selectedProfile;
+  if (profile !== "verified" && profile !== "planned") return { written: false, valid: true, reasons: [] };
+  const storyId = ctx.storyId ?? "";
+  const runDir = ctx.evidenceRunDir ?? "";
+  if (storyId === "" || runDir === "") return { written: false, valid: false, reasons: ["no story id / run dir for evaluator artifact"] };
+  const scoreEntry = readLatestStoryReviewScore(ports.repoCwd, storyId);
+  const verdict: "good" | "ok" | "regression" =
+    scoreEntry?.verdict === "good" || scoreEntry?.verdict === "regression" ? scoreEntry.verdict : "ok";
+  // US-V4-006: when a planner contract exists (planned profile), the Evaluator
+  // reports planned-vs-delivered against it.
+  let plannedSummary = signals.plannedVsDelivered;
+  if (plannedSummary === undefined || plannedSummary === "") {
+    const contractPath = join(runDir, "role-artifacts", "planner", "planner-contract.md");
+    if (existsSync(contractPath)) {
+      try {
+        const contract = parsePlannerContract(readFileSync(contractPath, "utf8"), storyId);
+        if (contract !== null) {
+          plannedSummary = summarizePlannedVsDelivered(plannedVsDelivered(contract, deliveredAcItems(ports.repoCwd, storyId)));
+        }
+      } catch {
+        /* planned-vs-delivered is best-effort context for the report */
+      }
+    }
+  }
+  const report = assembleEvalReport({
+    storyId,
+    blockingFindings: signals.blockingFindings,
+    ...(scoreEntry !== undefined ? { score: { value: scoreEntry.score, verdict } } : {}),
+    attestStatus: signals.attestStatus,
+    ...(plannedSummary !== undefined && plannedSummary !== "" ? { plannedVsDelivered: plannedSummary } : {}),
+  });
+  const reportMd = renderEvalReport(report);
+  const manifest: ArtifactManifest = {
+    schemaVersion: 1,
+    storyId,
+    cycleId: ctx.cycleId ?? "",
+    role: "evaluator",
+    rig: { agent: (scoreEntry?.scoredBy ?? "reasonix") } as Rig,
+    sessionId: scoreEntry?.sessionId ?? "",
+    worktreeCwd: ports.paths.worktreePath,
+    scoreRepoCwd: ports.repoCwd,
+    inputs: [
+      { path: `${storyId}-report.html`, kind: "report" },
+      { path: "ac-map.json", kind: "evidence" },
+    ],
+    outputs: [{ path: "role-artifacts/evaluator/eval-report.md", kind: "report" }],
+    createdAt: new Date(eventTs(ports)).toISOString(),
+  };
+  const dir = join(runDir, "role-artifacts", "evaluator");
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "eval-report.md"), reportMd);
+    writeFileSync(join(dir, "artifact-manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
+  } catch {
+    return { written: false, valid: false, reasons: ["failed to write evaluator artifact files"] };
+  }
+  const v = validateEvaluatorArtifact({ manifest, reportMd, storyId, builderSessionId: ctx.builderSessionId ?? "" });
+  return { written: true, valid: v.ok, reasons: v.reasons };
+}
+
+/** US-V4-006 — the AC items a delivery covered (ac-map entries with a positive
+ *  status), used for planned-vs-delivered mapping. Best-effort + lenient. */
+function deliveredAcItems(repoCwd: string, storyId: string): string[] {
+  try {
+    const p = join(cardArchiveDir(repoCwd, storyId), "ac-map.json");
+    if (!existsSync(p)) return [];
+    const arr = JSON.parse(readFileSync(p, "utf8")) as Array<{ ac?: string; status?: string }>;
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter((e) => e.status === "pass" || e.status === "partial" || e.status === "readonly")
+      .map((e) => e.ac ?? "")
+      .filter((a) => a !== "");
+  } catch {
+    return [];
+  }
+}
+
+const PLANNER_TIMEOUT_MS = 20 * 60 * 1000;
+
+/** US-V4-006 — the Planner prompt (roll-design capability). TS owns the
+ *  orchestration + the output contract; the skill does the planning. */
+function buildPlannerPrompt(storyId: string, contractAbsPath: string): string {
+  return [
+    `You are the PLANNER for story ${storyId} in a planned execution profile.`,
+    `Read the story spec under .roll/features/**/${storyId}/spec.md and produce a planner contract.`,
+    `Write the contract to: ${contractAbsPath}`,
+    "It MUST be markdown with these sections (use '- ' bullets):",
+    "## Scope boundary",
+    "## Acceptance contract",
+    "## Expected evidence",
+    "## Risks",
+    "## Out of scope",
+    "## Resize / split guidance   (optional prose)",
+    "Do NOT write product code — you only plan. The Builder consumes this contract next.",
+  ].join("\n");
+}
+
+/**
+ * US-V4-006 — run the Planner stage BEFORE the Builder for a `planned` cycle.
+ * The Planner (roll-design capability) runs in a FRESH session and writes
+ * `planner-contract.md`; the runner records the planner `artifact-manifest.json`.
+ * The contract is then validated FAIL-CLOSED — a missing/malformed/empty contract
+ * stops the cycle before any Builder work. No-op for standard/verified. Idempotent
+ * across retries (an existing valid contract is reused, not re-planned).
+ */
+export async function runPlannerStage(
+  ports: Ports,
+  ctx: CycleContext,
+  plannerAgent: string,
+): Promise<{ ran: boolean; ok: boolean; reasons: readonly string[] }> {
+  if (ctx.selectedProfile !== "planned") return { ran: false, ok: true, reasons: [] };
+  const storyId = ctx.storyId ?? "";
+  const runDir = ctx.evidenceRunDir ?? "";
+  if (storyId === "" || runDir === "") return { ran: false, ok: false, reasons: ["no story id / run dir for planner stage"] };
+  const dir = join(runDir, "role-artifacts", "planner");
+  const contractPath = join(dir, "planner-contract.md");
+  const manifestPath = join(dir, "artifact-manifest.json");
+  const plannerSessionId = `${ctx.cycleId ?? "cycle"}:plan:${plannerAgent}:${ports.clock()}`;
+  if (!existsSync(contractPath)) {
+    try {
+      mkdirSync(dir, { recursive: true });
+      await ports.agentSpawn(plannerAgent, {
+        cwd: ports.paths.worktreePath,
+        skillBody: buildPlannerPrompt(storyId, contractPath),
+        storyId,
+        timeoutMs: PLANNER_TIMEOUT_MS,
+        runDir: dir,
+      });
+    } catch {
+      /* a planner spawn blip → no contract → validation below fails closed */
+    }
+  }
+  // The runner records the planner role manifest (the skill writes the contract).
+  const manifest: ArtifactManifest = {
+    schemaVersion: 1,
+    storyId,
+    cycleId: ctx.cycleId ?? "",
+    role: "planner",
+    rig: { agent: plannerAgent } as Rig,
+    sessionId: plannerSessionId,
+    worktreeCwd: ports.paths.worktreePath,
+    scoreRepoCwd: ports.repoCwd,
+    inputs: [{ path: `.roll/features/**/${storyId}/spec.md`, kind: "contract" }],
+    outputs: [{ path: "role-artifacts/planner/planner-contract.md", kind: "contract" }],
+    createdAt: new Date(eventTs(ports)).toISOString(),
+  };
+  try {
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+  } catch {
+    /* best-effort manifest record */
+  }
+  const contractMd = existsSync(contractPath) ? readFileSync(contractPath, "utf8") : null;
+  const v = validatePlannerArtifact({ manifest, contractMd, storyId });
+  return { ran: true, ok: v.ok, reasons: v.reasons };
+}
+
 export function routerEstMin(worktreeCwd: string, storyId: string, backlogDesc: string): number | undefined {
   try {
     const specPath = storySpecPath(worktreeCwd, storyId);

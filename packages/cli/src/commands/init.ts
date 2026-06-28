@@ -1764,8 +1764,8 @@ function renderExistingCodebaseDiagnosis(facts: InitFacts, diagnosis: InitDiagno
     );
     lines.push(
       initCopy(
-        "Install or sign in to an agent CLI (claude, kimi, or pi), or run `roll agent use <agent>`, then rerun `$roll-onboard`.",
-        "安装或登录 agent CLI（claude、kimi 或 pi），或运行 `roll agent use <agent>` 选择 agent，然后重新运行 `$roll-onboard`。",
+        "Install or sign in to an agent CLI (claude, kimi, or pi), or run `roll agent default <agent>`, then rerun `$roll-onboard`.",
+        "安装或登录 agent CLI（claude、kimi 或 pi），或运行 `roll agent default <agent>` 设置默认 agent，然后重新运行 `$roll-onboard`。",
       ),
     );
   } else {

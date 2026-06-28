@@ -13,7 +13,7 @@
 > **Roll 有两套界面。** 读这份 FAQ 时请分清：
 >
 > - **CLI 命令** —— 在终端里跑：`roll init`、`roll loop on`、`roll status`、
->   `roll dossier` 等。负责状态管理、调度、观测。**它们本身不写代码**。
+>   `roll cycle` 等。负责状态管理、调度、观测。**它们本身不写代码**。
 > - **Skill** —— 在你的 AI agent 里调用（Claude Code、Cursor、Codex、Pi
 >   等）：`$roll-build`、`$roll-design`、`$roll-fix`、`$roll-onboard` 等。
 >   在 Claude Code 里输入形式是 `/roll-build`；`$` 前缀是文档里跨工具的
@@ -448,8 +448,8 @@ git push --force-with-lease
 
 **原理：** 每个周期向 `<project>/.roll/loop/runs.jsonl` 追加一条 JSONL，
 包含 story ID、模型、TCR commit 数、耗时、结果、成本（按公开单价）。
-`roll status` 与交付档案（`roll dossier`）把这些——连同真相账本的其余部分——
-聚合成单一的人类可读界面。实时 watch 是只读视图，会把 live 活动和结构化事件事实合并展示；
+`roll status`、`roll cycle` 与按 Story 收口的 attest 报告把这些——连同真相账本的其余部分——
+聚合成人类可读界面。实时 watch 是只读视图，会把 live 活动和结构化事件事实合并展示；
 tmux 观测 pane 使用同一个 watch 入口。
 
 **观测入口：**
@@ -464,7 +464,7 @@ tmux 观测 pane 使用同一个 watch 入口。
 | 实时看 agent 在做什么 | `roll loop watch` |
 | 调试 compact 事件事实 | `roll loop watch --events` |
 | 原始审计 JSON 事件 | `roll loop watch --raw-events` |
-| 一眼看清已发布 / 进行中 / 队列 / 发布就绪 | `roll dossier` |
+| 一眼看清已发布 / 进行中 / 队列 / 发布就绪 | `roll status` |
 | 需要关注的告警 | `roll loop alert` |
 | 完整 cycle agent 输出（纯文本） | `roll loop log` |
 | 完整 agent 对话记录 | `roll loop watch --verbose` 或 `roll loop log` |

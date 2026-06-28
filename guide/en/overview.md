@@ -1,6 +1,6 @@
 # Roll — Overview
 
-Roll is an autonomous delivery system. Write a goal in `.roll/backlog.md`, let Roll execute it.
+Roll is a Supervisor-led delivery harness. Write a goal, let Roll turn it into Stories, and route each Story through the right Planner / Builder / Evaluator workflow.
 
 ## Quick Start
 
@@ -13,18 +13,63 @@ roll setup && roll init
 roll next           # continue with design/apply/repair/migrate/loop/status
 roll loop on        # AI starts executing BACKLOG on a configurable schedule
 roll loop status    # check scheduler state and recent cycles
-roll loop watch     # optional: read-only live view of the current cycle
+roll loop watch     # optional: CLI-first live view of the current cycle
 ```
 
 ## How It Works
 
-Roll runs on three autonomous layers:
+Roll runs as a V4 Supervisor execution system:
 
-- **Loop** — on a configurable schedule, picks the top story from BACKLOG and executes it via `$roll-build` in an isolated worktree. CI must pass before anything lands on `main`.
+- **Supervisor Agent** — project-level observe/advise role. It reads backlog, merge truth, open PRs, route profile, repeated failures, release readiness, and owner questions. It coordinates across Stories; it never implements a Story or overrides evidence gates.
+- **Story Execution Unit** — one Story delivered under an execution profile: `standard` = Builder, `verified` = Builder -> Evaluator, `planned` = Planner -> Builder -> Evaluator.
+- **Roles and rigs** — Planner / Builder / Evaluator are stable roles. The concrete agent/model/rig is selected per Story. If a requested rig is unavailable, Roll records that and fails loud instead of pretending another agent was used.
+- **Loop** — on a configurable schedule, picks the top story from BACKLOG and executes it in an isolated worktree. CI must pass before anything lands on `main`.
 - **Dream** — at 3am, scans the codebase for dead code, doc gaps, and architectural drift. Queues `REFACTOR-NNN` entries for loop to pick up.
-- **Peer** — before any risky build, a second AI agent reviews the plan or diff and must agree before execution continues.
+- **Skills** — remain the capability layer. Roles invoke `$roll-design`, `$roll-build`, `$roll-fix`, `$roll-peer`, `$roll-.qa`, and other skills.
 
 You set goals, review PRs, and run releases. Everything in between is Roll.
+
+### Onboarding Samples
+
+**New project from zero**
+
+```bash
+mkdir my-product && cd my-product
+roll init
+roll next
+roll design --from-file .roll/brief.md
+roll loop on
+```
+
+Start with a short requirement, PRD, or notes. Roll explains the next design step instead of silently creating fake work; Planner/design creates the backlog, Supervisor picks execution profiles per Story, roles execute, and the owner reviews story-scoped attest evidence.
+
+**Existing project**
+
+```bash
+cd existing-codebase
+roll init
+roll next
+roll init --apply
+roll loop on
+```
+
+Roll diagnoses current code without destructive migration, creates or updates Roll metadata after review, and then reasons over the existing backlog/docs/context. Inspect state through CLI-first observability: `roll status`, `roll loop watch`, `roll loop runs`, `roll cycle <id>`, alerts, and story reports.
+
+**Role routing per Story**
+
+```yaml
+story: US-V4-012
+execution_profile: verified
+roles:
+  builder:
+    agent: kimi
+    responsibility: update README, docs, guides, website, and samples
+  evaluator:
+    agent: pi
+    responsibility: evaluate new-user clarity and product narrative
+```
+
+Runtime availability is explicit. Unavailable agents are recorded as unavailable; fallback is fail-loud, not silent substitution.
 
 ## Features
 
@@ -53,54 +98,24 @@ You set goals, review PRs, and run releases. Everything in between is Roll.
 
 - `$roll-idea` — one-liner capture: instant FIX or IDEA backlog entry `[core]`
 - `roll design` / `$roll-design` — DDD-backed planning: clarify → design → split into INVEST stories. `roll design` launches the skill in your AI agent from the command line. `[core]`
-- `$roll-build` — TCR story execution → worktree → PR → auto-merge `[core]`
+- `$roll-build` — Builder role execution: TCR story execution → worktree → PR → evidence `[core]`
 - `$roll-fix` — fast-path bug fix, same CI gate, lighter ceremony
+- Evaluator role — independent review, visual evidence checks, score/attest contracts where the execution profile requires it
 
 ### Observability
 
 - `roll status` — verdict-first truth summary (LOOP · CYCLE · RELEASE · STORY with attest coverage), then convention/AI-client sync health `[core]`
-- Delivery Dossier — the web console: a verdict strip, the loop heartbeat, three aggregates, and the six-state Story spectrum, all from the ONE truth snapshot
+- `roll loop watch` — CLI-first live activity stream for the current cycle
+- `roll cycle <id>` — one cycle's trace and evidence pointers
 - `roll loop runs` — per-cycle TerminalOutcome history with TCR count and duration
 - `roll loop alert` — view, acknowledge, and clear loop alerts
-- `roll dossier` — the Delivery Dossier: shipped / in-progress / queue / truth drift / release readiness, all from one truth ledger `[highlight]`
+- Story report — the Story's own `latest/<id>-report.html` is the human acceptance entry `[highlight]`
 
-### Delivery Dossier — the web console
+### Current Observability
 
-`roll index` renders `index.html`, the Delivery Dossier. Every number on it
-reads from one truth snapshot, so the web surface and the CLI print the same
-aggregates (`roll cast` ≡ the Casting grid, `roll doctor skills` ≡ the Skills
-page, `roll release consistency` ≡ the seven-dimension panel, `roll status` ≡ the
-Story spectrum). One computation, two faces.
+The current product is CLI-first. `roll status`, `roll loop watch`, `roll loop runs`, `roll cycle <id>`, `roll pulse`, alerts, and story-scoped attest reports are the active truth surfaces. `roll index` is an on-demand static archive/repair renderer, useful for CI artifacts and migration reconciliation; it is not the current truth surface.
 
-The console's information architecture:
-
-- **Dark top-bar with a green-dot project switcher** — the active project carries
-  a green status dot; the switcher lists every project in `~/.roll/projects.json`
-  (the same registry `roll ls` prints) and jumps between their consoles.
-- **EN / 中 language toggle** — single-language presentation; the toggle flips the
-  whole console between English and Chinese.
-- **Project tabs** — Now · Backlog · Loop · Release · Casting · Charter. Now is
-  the default landing view: live cycle, loop heartbeat, running processes, next
-  picks, needs-you rows, and the truth rollup with verdict, aggregates, and the
-  six-state Story spectrum.
-- **Machine-global breadcrumb (`MACHINE › …`)** — Agents · Skills · Tools ·
-  Conventions · About. These pages describe the machine, not one project: the
-  agents installed on this box, the `skills/<name>/SKILL.md` contracts that govern
-  every project here, the built-in tool catalog with each tool's default
-  guardrails (timeout / sandbox / retry / per-cycle cap) on the **Tools** page
-  (`tools.html`), and the conventions synced into each AI client.
-- **Charter** — a markdown browser over the project's charter docs, language
-  guides (`guide/en` ↔ `guide/zh`), and epic plans, rendered inline.
-- **Casting** — who plays which role: the four complexity slots
-  (easy / default / hard / fallback) plus the scenario roles (peer · PR review ·
-  spar · onboard). An unconfigured slot shows an explicit em-dash, never a guess.
-
-The three-state delivery ladder — **claimed → merged → attested** — replaces a
-binary done flag. A backlog row that says done is only `claimed`; it becomes
-`merged` when the delivery PR is merged to `main`, and `attested` when its
-acceptance evidence (report · AC map · visual evidence) is on file. **A story is
-done if and only if it is both merged and attested** (`done ≡ merged ∧ attested`);
-anything short of that renders as drift or unknown, never a silent green.
+The three-state delivery ladder still matters: **claimed -> merged -> attested**. A backlog row that says done is only `claimed`; it becomes `merged` when the PR lands on `main`, and `attested` when story-scoped evidence is on file. Full Supervisor Live Console / multi-role board is next work.
 
 ### On-Demand Skills
 
@@ -111,7 +126,7 @@ anything short of that renders as drift or unknown, never a silent green.
 
 ### Multi-Agent
 
-- Fallback Routing — primary agent down → automatic failover `[highlight]`
+- Fail-loud Routing — requested agent/model/rig unavailable → record the limit and pause or route only through an explicit fallback policy `[highlight]`
 - `$roll-peer` — multi-round negotiation; `roll peer` records one-shot structured review facts `[core]`
 - PR Inbox — external PRs get AI review before merge; stale PRs auto-rebase `[new]`
 - `roll review-pr` — on-demand AI review for any PR, any agent `[new]`

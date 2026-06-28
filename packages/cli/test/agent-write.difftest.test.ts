@@ -1,12 +1,18 @@
 /**
- * Frozen-expectation tests for the TS-owned `roll agent` write surface.
+ * Frozen-expectation tests for the TS-owned `roll agent` write surface (v4).
  *
- * US-PORT-018 removes the command-level bash fallback: view/list/use/set/unknown
- * all run in TS. These tests use an injected AgentEnv and temp project dirs, so
- * they never spawn `bin/roll` and never inspect the real machine's installed
- * agents.
+ * US-V4-002 separates the GLOBAL machine default (`primary_agent` in
+ * `~/.roll/config.yaml`) from the PROJECT route profile (`.roll/agents.yaml`):
+ *   - `roll agent default <agent>` sets the machine default and only rewrites
+ *     project routes that still FOLLOW the old default (customized profiles are
+ *     preserved);
+ *   - `roll agent set <route> <agent>` overrides one project route;
+ *   - `roll agent use` is RETIRED — it fails loudly with migration guidance.
+ *
+ * These tests inject an AgentEnv + in-memory default store and temp project
+ * dirs, so they never spawn `bin/roll` and never touch the real machine config.
  */
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -42,9 +48,9 @@ function run(
     readLine?: () => string | undefined;
     listCommand?: (args: string[]) => number;
     before?: (cwd: string) => void;
-    refreshAggregates?: (cwd: string) => void;
+    initialDefault?: string | null;
   } = {},
-): { code: number; stdout: string; stderr: string; cwd: string } {
+): { code: number; stdout: string; stderr: string; cwd: string; finalDefault: string | null } {
   const cwd = tempProject();
   const saveCwd = process.cwd();
   const saveEnv: Record<string, string | undefined> = {};
@@ -61,6 +67,8 @@ function run(
   // @ts-expect-error capture-only
   process.stderr.write = (c: string | Uint8Array): boolean => (err.push(String(c)), true);
   process.chdir(cwd);
+  // In-memory global machine default (US-V4-002 seam — never touches real ~/.roll).
+  let defaultAgent: string | null = opts.initialDefault ?? null;
   let code = 1;
   try {
     opts.before?.(cwd);
@@ -68,7 +76,10 @@ function run(
       env: env(opts.installed ?? []),
       readLine: opts.readLine,
       listCommand: opts.listCommand,
-      refreshAggregates: opts.refreshAggregates ?? (() => {}),
+      readDefaultAgent: () => defaultAgent,
+      writeDefaultAgent: (n) => {
+        defaultAgent = n;
+      },
     });
   } finally {
     process.chdir(saveCwd);
@@ -79,10 +90,17 @@ function run(
       else process.env[key] = value;
     }
   }
-  return { code, stdout: out.join(""), stderr: err.join(""), cwd };
+  return { code, stdout: out.join(""), stderr: err.join(""), cwd, finalDefault: defaultAgent };
 }
 
-describe("roll agent write surface", () => {
+/** Seed a project route profile (.roll/agents.yaml) in canonical inline form. */
+function seedRoutes(cwd: string, lines: Record<string, string>): void {
+  mkdirSync(join(cwd, ".roll"), { recursive: true });
+  const body = ["schema: v3", ...Object.entries(lines).map(([slot, agent]) => `${slot}: { agent: ${agent} }`)].join("\n");
+  writeFileSync(join(cwd, ".roll", "agents.yaml"), body + "\n", "utf8");
+}
+
+describe("roll agent write surface (v4)", () => {
   it("delegates list without fallback", () => {
     let seen: string[] = [];
     const r = run(["list", "--x"], {
@@ -95,76 +113,131 @@ describe("roll agent write surface", () => {
     expect(seen).toEqual(["--x"]);
   });
 
-  it("bare view renders the no-config state in TS", () => {
-    expect(run([])).toMatchObject({
-      code: 0,
-      stderr: "",
-      stdout: `
-  Complexity routing (.roll/agents.yaml)
-
-    No .roll/agents.yaml yet — routing falls back to the first installed agent.
-    Set up routing: roll agent set <slot> <agent>  (or migrate from a legacy config)
-
-`,
-    });
+  it("bare view shows the default-agent section and the project-route section", () => {
+    const r = run([]);
+    expect(r.code).toBe(0);
+    expect(r.stderr).toBe("");
+    // Two distinct concerns are surfaced.
+    expect(r.stdout).toContain("Default agent (~/.roll/config.yaml)");
+    expect(r.stdout).toContain("No machine default agent set yet");
+    expect(r.stdout).toContain("Project routes (.roll/agents.yaml)");
+    expect(r.stdout).toContain("No .roll/agents.yaml yet");
+    // v4 help: default + set, no `use`.
+    expect(r.stdout).toContain("roll agent default <agent>");
+    expect(r.stdout).toContain("roll agent set <route> <agent>");
+    expect(r.stdout).not.toContain("roll agent use");
   });
 
-  it("use locks easy/default/hard and syncs local.yaml", () => {
+  it("bare view renders the configured default and project routes", () => {
+    const r = run([], {
+      installed: ["codex"],
+      initialDefault: "codex",
+      before: (cwd) => seedRoutes(cwd, { default: "codex", hard: "kimi" }),
+    });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("codex"); // machine default shown
+    expect(r.stdout).toContain("kimi"); // a project route override shown
+  });
+
+  // ── roll agent default ───────────────────────────────────────────
+  it("default <agent> sets the machine default (no project routes to rewrite)", () => {
+    const r = run(["default", "codex"]);
+    expect(r.code).toBe(0);
+    expect(r.stderr).toBe("");
+    expect(r.finalDefault).toBe("codex");
+    expect(r.stdout).toContain("Machine default agent set to");
+    // No agents.yaml is created by a default change.
+    expect(existsSync(join(r.cwd, ".roll", "agents.yaml"))).toBe(false);
+  });
+
+  it("default with no arg prints the current default", () => {
+    const r = run(["default"], { initialDefault: "kimi" });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("Machine default agent:");
+    expect(r.stdout).toContain("kimi");
+  });
+
+  it("default with no arg and no configured default says so", () => {
+    const r = run(["default"]);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("No machine default agent set yet");
+  });
+
+  it("default rewrites project routes that still FOLLOW the old default", () => {
+    const r = run(["default", "codex"], {
+      initialDefault: "claude",
+      before: (cwd) => seedRoutes(cwd, { easy: "claude", default: "claude", hard: "claude" }),
+    });
+    expect(r.code).toBe(0);
+    expect(r.finalDefault).toBe("codex");
+    expect(r.stdout).toContain("updated to"); // routes-followed message
+    const yaml = readFileSync(join(r.cwd, ".roll", "agents.yaml"), "utf8");
+    expect(yaml).toContain("easy: { agent: codex }");
+    expect(yaml).toContain("default: { agent: codex }");
+    expect(yaml).toContain("hard: { agent: codex }");
+  });
+
+  it("default PRESERVES customized project routes (does not silently overwrite)", () => {
+    const r = run(["default", "codex"], {
+      initialDefault: "claude",
+      before: (cwd) => seedRoutes(cwd, { easy: "kimi", default: "claude", hard: "claude" }),
+    });
+    expect(r.code).toBe(0);
+    expect(r.finalDefault).toBe("codex");
+    expect(r.stdout).toContain("preserved");
+    // The customized profile is untouched.
+    const yaml = readFileSync(join(r.cwd, ".roll", "agents.yaml"), "utf8");
+    expect(yaml).toContain("easy: { agent: kimi }");
+    expect(yaml).toContain("default: { agent: claude }");
+  });
+
+  it("default rejects a removed agent with directed guidance", () => {
+    const r = run(["default", "qwen"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("no longer supported");
+    expect(r.finalDefault).toBeNull();
+  });
+
+  it("default rejects an unknown agent", () => {
+    const r = run(["default", "bogus"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("Unknown agent 'bogus'");
+    expect(r.finalDefault).toBeNull();
+  });
+
+  // ── roll agent use (retired) ─────────────────────────────────────
+  it("use is RETIRED — fails loudly with migration guidance, writes nothing", () => {
     const r = run(["use", "kimi"], { installed: ["kimi"] });
-    expect(r.code).toBe(0);
-    expect(r.stderr).toBe("");
-    expect(r.stdout).toBe("[roll] easy/default/hard all locked to kimi  (fallback unchanged)\n");
-    expect(readFileSync(join(r.cwd, ".roll", "agents.yaml"), "utf8")).toBe(
-      "schema: v3\neasy: { agent: kimi }\ndefault: { agent: kimi }\nhard: { agent: kimi }\n",
-    );
-    expect(readFileSync(join(r.cwd, ".roll", "local.yaml"), "utf8")).toBe("agent: kimi\n");
+    expect(r.code).toBe(1);
+    expect(r.stdout).toBe("");
+    expect(r.stderr).toContain("retired");
+    expect(r.stderr).toContain("roll agent default");
+    expect(r.stderr).toContain("roll agent set");
+    expect(existsSync(join(r.cwd, ".roll", "agents.yaml"))).toBe(false);
+    expect(existsSync(join(r.cwd, ".roll", "local.yaml"))).toBe(false);
   });
 
-  it("US-AGENT-045 AC1: use silently migrates provider aliases to canonical agents", () => {
-    const r = run(["use", "openai"], { installed: ["codex"] });
-    expect(r.code).toBe(0);
-    expect(r.stderr).toBe("");
-    expect(r.stdout).toBe("[roll] easy/default/hard all locked to codex  (fallback unchanged)\n");
-    expect(readFileSync(join(r.cwd, ".roll", "agents.yaml"), "utf8")).toBe(
-      "schema: v3\neasy: { agent: codex }\ndefault: { agent: codex }\nhard: { agent: codex }\n",
-    );
-    expect(readFileSync(join(r.cwd, ".roll", "local.yaml"), "utf8")).toBe("agent: codex\n");
-  });
-
-  it("use rejects known but uninstalled agents", () => {
-    expect(run(["use", "qwen"])).toMatchObject({
-      code: 1,
-      stdout: "",
-      stderr: "[roll] 'qwen' is no longer supported. Use one of: claude, kimi, codex, pi, agy, reasonix\n",
-    });
-  });
-
-  it("use without a name prints usage", () => {
-    expect(run(["use"])).toMatchObject({
-      code: 1,
-      stdout: "",
-      stderr: "[roll] Usage: roll agent use <name>   (locks easy/default/hard to one agent)\n",
-    });
-  });
-
-  it("set writes a single slot and does not require the agent to be installed", () => {
+  // ── roll agent set ───────────────────────────────────────────────
+  it("set writes a single route and does not require the agent to be installed", () => {
     const r = run(["set", "fallback", "pi"]);
     expect(r.code).toBe(0);
     expect(r.stderr).toBe("");
     expect(r.stdout).toBe("[roll] fallback → pi  saved\n");
-    expect(readFileSync(join(r.cwd, ".roll", "agents.yaml"), "utf8")).toBe(
-      "schema: v3\nfallback: { agent: pi }\n",
-    );
+    expect(readFileSync(join(r.cwd, ".roll", "agents.yaml"), "utf8")).toBe("schema: v3\nfallback: { agent: pi }\n");
   });
 
-  it("US-AGENT-045 AC1: set silently migrates provider aliases to canonical agents", () => {
+  it("set silently migrates provider aliases to canonical agents", () => {
     const r = run(["set", "easy", "deepseek"]);
     expect(r.code).toBe(0);
     expect(r.stderr).toBe("");
     expect(r.stdout).toBe("[roll] easy → pi  saved\n");
-    expect(readFileSync(join(r.cwd, ".roll", "agents.yaml"), "utf8")).toBe(
-      "schema: v3\neasy: { agent: pi }\n",
-    );
+    expect(readFileSync(join(r.cwd, ".roll", "agents.yaml"), "utf8")).toBe("schema: v3\neasy: { agent: pi }\n");
+  });
+
+  it("set does NOT change the machine default (project-local only)", () => {
+    const r = run(["set", "easy", "pi"], { initialDefault: "claude" });
+    expect(r.code).toBe(0);
+    expect(r.finalDefault).toBe("claude"); // global default untouched
   });
 
   it("set rejects unknown slots and unknown agents", () => {
@@ -180,10 +253,10 @@ describe("roll agent write surface", () => {
     });
   });
 
-  it("unknown subcommand is TS-owned", () => {
+  it("unknown subcommand is TS-owned (v4 usage line)", () => {
     expect(run(["bogus"])).toMatchObject({
       code: 1,
-      stdout: "Usage: roll agent [set <slot> <agent>|use <name>|list]\n",
+      stdout: "Usage: roll agent [default <agent>|set <route> <agent>|list]\n",
       stderr: "[roll] Unknown subcommand: bogus\n",
     });
   });
@@ -193,93 +266,9 @@ describe("roll agent write surface", () => {
     expect(src).not.toContain('fallbackToBash(["agent"');
   });
 
-  it("use removes the legacy root .roll.yaml agent line", () => {
-    const r = run(["use", "kimi"], {
-      installed: ["kimi"],
-      before: (cwd) => {
-        rmSync(join(cwd, ".roll.yaml"), { force: true });
-        // Include another key so the file is preserved after the agent line is removed.
-        writeFileSync(join(cwd, ".roll.yaml"), "agent: pi\nother: kept\n", "utf8");
-      },
-    });
-    const legacy = join(r.cwd, ".roll.yaml");
-    expect(existsSync(legacy)).toBe(true);
-    expect(readFileSync(legacy, "utf8")).toBe("other: kept\n");
-  });
-
-  it("FIX-378 AC1: use refreshes dossier aggregates after successful slot writes", () => {
-    let refreshedCwd = "";
-    const r = run(["use", "kimi"], {
-      installed: ["kimi"],
-      refreshAggregates: (cwd) => {
-        refreshedCwd = cwd;
-        expect(readFileSync(join(cwd, ".roll", "agents.yaml"), "utf8")).toContain("default: { agent: kimi }");
-      },
-    });
-    expect(r.code).toBe(0);
-    expect(r.stderr).toBe("");
-    expect(realpathSync(refreshedCwd)).toBe(realpathSync(r.cwd));
-  });
-
-  it("FIX-378 AC2: set refreshes dossier aggregates after a successful slot write", () => {
-    let refreshedCwd = "";
-    const r = run(["set", "fallback", "pi"], {
-      refreshAggregates: (cwd) => {
-        refreshedCwd = cwd;
-        expect(readFileSync(join(cwd, ".roll", "agents.yaml"), "utf8")).toContain("fallback: { agent: pi }");
-      },
-    });
-    expect(r.code).toBe(0);
-    expect(r.stderr).toBe("");
-    expect(realpathSync(refreshedCwd)).toBe(realpathSync(r.cwd));
-  });
-
-  it("FIX-378 AC3: refresh failures warn but keep the committed slot write successful", () => {
-    let called = false;
-    const r = run(["set", "easy", "pi"], {
-      refreshAggregates: () => {
-        called = true;
-        throw new Error("disk full");
-      },
-    });
-    expect(r.code).toBe(0);
-    expect(called).toBe(true);
-    expect(r.stdout).toBe("[roll] easy → pi  saved\n");
-    expect(r.stderr).toContain("[roll] WARN dossier refresh failed after agent slot update");
-    expect(r.stderr).toContain("Error: disk full");
-    expect(readFileSync(join(r.cwd, ".roll", "agents.yaml"), "utf8")).toContain("easy: { agent: pi }");
-  });
-
-  it("FIX-378 AC3: read-only view and list do not refresh dossier aggregates", () => {
-    let calls = 0;
-    const refreshAggregates = (): void => {
-      calls += 1;
-    };
-    const view = run([], { refreshAggregates });
-    const list = run(["list"], {
-      refreshAggregates,
-      listCommand: () => 0,
-    });
-    expect(view.code).toBe(0);
-    expect(list.code).toBe(0);
-    expect(calls).toBe(0);
-  });
-
-  it("FIX-378: failed write commands do not refresh dossier aggregates", () => {
-    let calls = 0;
-    const refreshAggregates = (): void => {
-      calls += 1;
-    };
-    expect(run(["use", "qwen"], { refreshAggregates }).code).toBe(1);
-    expect(run(["set", "bogus", "claude"], { refreshAggregates }).code).toBe(1);
-    expect(run(["set", "easy", "qwen"], { refreshAggregates }).code).toBe(1);
-    expect(calls).toBe(0);
-  });
-
-  it("FIX-378 AC4: every agent command setSlot mutation is paired with the refresh helper", () => {
+  it("US-V4-002: agent writes no longer trigger a global dossier refresh", () => {
     const src = readFileSync(`${repoRoot()}/packages/cli/src/commands/agent.ts`, "utf8");
-    expect([...src.matchAll(/reg\.setSlot\(/g)]).toHaveLength(2);
-    expect([...src.matchAll(/refreshAgentDossier\(deps\);/g)]).toHaveLength(2);
-    expect(src).not.toContain("writeFileSync(\".roll/agents.yaml\"");
+    expect(src).not.toContain("refreshAggregates");
+    expect(src).not.toContain("refreshAgentDossier");
   });
 });

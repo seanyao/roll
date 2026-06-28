@@ -5,9 +5,9 @@
  * Keeps agent discovery / selection / argv mapping in one place so the
  * interactive entry points do not fork their definition of "installed".
  */
-import { accessSync, constants, existsSync, readFileSync, readSync, statSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, readSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import {
   agentInstalledByName as coreAgentInstalledByName,
   getAgentSpec,
@@ -89,6 +89,36 @@ export function readPrimaryAgent(): string | null {
     }
   }
   return null;
+}
+
+/**
+ * US-V4-002 — set the global machine default agent (`primary_agent:`) in
+ * `~/.roll/config.yaml` (honors `ROLL_HOME`). Replaces an existing line or
+ * appends one; creates the file/dir when absent. Atomic (tmp + rename) so a
+ * crash never leaves a half-written global config.
+ */
+export function writePrimaryAgent(name: string): void {
+  const cfg = rollConfig();
+  mkdirSync(dirname(cfg), { recursive: true });
+  const lines = existsSync(cfg) ? readFileSync(cfg, "utf8").split("\n") : [];
+  let replaced = false;
+  const next = lines.map((line) => {
+    if (/^primary_agent:\s*/.test(line)) {
+      replaced = true;
+      return `primary_agent: ${name}`;
+    }
+    return line;
+  });
+  if (!replaced) {
+    // Drop a trailing empty line so the new key sits at the end of content.
+    if (next.length > 0 && next[next.length - 1] === "") next.pop();
+    next.push(`primary_agent: ${name}`);
+  }
+  let text = next.join("\n");
+  if (!text.endsWith("\n")) text += "\n";
+  const tmp = `${cfg}.tmp.${process.pid}`;
+  writeFileSync(tmp, text, "utf8");
+  renameSync(tmp, cfg);
 }
 
 /**

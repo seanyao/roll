@@ -176,7 +176,7 @@ describe("selectPrimaryAgent — AC3: no agents installed", () => {
     });
     expect(selected).toBeNull();
     expect(guidance).toBeTruthy();
-    expect(guidance).toContain("roll agent use");
+    expect(guidance).toContain("roll agent default");
   });
 });
 

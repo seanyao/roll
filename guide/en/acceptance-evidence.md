@@ -21,6 +21,13 @@ Runs are timestamped and never overwritten. The backlog `✅ Done` row links to
 `latest/<id>-report.html`; CHANGELOG bullets may carry an invisible
 `<!-- evidence: ... -->` marker for traceability.
 
+**The story's `latest/<id>-report.html` is the human acceptance entry.** A
+story is accepted by opening its own report — not a global archive/index page.
+`roll attest` is story-scoped: it writes only this story's run report and the
+`latest` pointer. It does not refresh any global archive, epic, or front-page
+HTML. Those board pages, when you want them, are rendered on demand with
+`roll index`; they are a convenience/archive view, not the delivery-truth surface.
+
 ## Lifecycle in three stages
 
 1. Open the evidence frame. At the beginning of a loop cycle the runner creates
@@ -37,9 +44,10 @@ Runs are timestamped and never overwritten. The backlog `✅ Done` row links to
 3. Close with the hard attest gate. The runner calls
    `roll attest <story-id> --run-dir "$ROLL_RUN_DIR"` at the end of delivery.
    `roll attest` sweeps the hard facts (TCR commits, latest CI run, optional
-   deploy probe, test-pass proof), renders the report, moves `latest` to the
-   run, refreshes the story delivery section when a dossier page exists, and
-   refreshes `.roll/index.json`.
+   deploy probe, test-pass proof), renders the report, and moves `latest` to the
+   run. That is all it writes — it is story-scoped. It does not mount a story
+   archive delivery section, regenerate `.roll/index.json`, or refresh any global
+   archive/epic/front page (run `roll index` on demand for those board pages).
 
 `roll attest` also runs standalone — without an intent map every AC renders as
 🟧 Claimed, honestly.
@@ -110,7 +118,7 @@ at startup:
   prompt; if permission was just granted, restart Terminal.app before trusting
   the cache.
 - `Playwright Chromium` — optional headless web capture for `roll attest` and
-  dossier screenshots. Install with `npx playwright install chromium`.
+  archive screenshots. Install with `npx playwright install chromium`.
 
 `roll doctor` always prints the current availability, permission state, impact,
 and repair command for these tools. Use `roll doctor --tools` when you only want
@@ -121,7 +129,7 @@ the missing setup steps, and in automation they stay silent unless
 prints the evidence impact and continues without changing the machine.
 
 The machine Agents page (`.roll/features/agents.html`) includes the same tool
-status block so a dossier reviewer can see whether evidence capture depends on
+status block so a reviewer can see whether evidence capture depends on
 machine setup rather than story code.
 
 ## Review Score fold
@@ -159,18 +167,18 @@ cards are born once, then evolved by hand. Skills never hand-create card
 files; the `cards` consistency dimension fails the release gate on any
 live backlog row without a card.
 
-## The Delivery Dossier — `roll index`
+## Static Archive — `roll index`
 
-`roll index` regenerates the whole archive as a browsable, three-layer
-**Delivery Dossier** (every page a self-contained HTML file — bilingual,
+`roll index` is an on-demand repair/archive renderer. It regenerates browsable,
+three-layer static HTML pages (every page is self-contained, bilingual,
 theme-aware, printable):
 
 ```
-.roll/features/index.html              ← front page: truth board (Story / Cycle /
+.roll/features/index.html              ← archive front page (Story / Cycle /
                                          Release), truth strip, searchable epic cards
 .roll/features/<epic>/index.html       ← epic page: epic ledger + stories in three
                                          groups (merged / in a cycle / in backlog)
-.roll/features/<epic>/<id>/index.html  ← story dossier: five stations — Definition,
+.roll/features/<epic>/<id>/index.html  ← story archive: five stations — Definition,
                                          Design, Execution, Delivery (attest banner
                                          + per-AC evidence blocks), Retrospective
 ```
@@ -181,21 +189,18 @@ and evidence truth; Cycle facts use TerminalOutcome records; Release facts use
 the latest gate verdict and active waiver. The guiding line: **backlog is wish,
 main is truth, done ≡ merged.**
 
-The front-page truth board keeps unknown visible. `?` means the fact is absent
+The archive front page keeps unknown visible. `?` means the fact is absent
 or outside the known schema; `0` means a known zero. A premature backlog
 `✅ Done` row is treated as a claim that conflicts with truth and is rendered as
 drift, not as delivered work.
 
-On story dossier pages, screenshot evidence remains a thumbnail linked to the
+On story archive pages, screenshot evidence remains a thumbnail linked to the
 full image. Text evidence such as Vitest output is read from the referenced
 evidence file and shown inline under the AC in a folded, scrollable block; if
 the file is missing or unreadable, the page shows an explicit unavailable state.
 
-**Freshness model (FIX-231):** the board keeps itself fresh — every
-truth-changing node (`roll story new`, `roll attest`, `roll backlog
-block/defer/unblock/promote`) refreshes the aggregate pages (front + epic) on
-its own, best-effort, so a new card or status flip appears immediately. Story
-pages stay *mount boards*: lifecycle nodes mount their facts in place and a
-refresh never clobbers them. You only need `roll index` by hand for
-reconciliation — `--rebuild` re-renders every story page from source (after
-hand-merges or history migrations).
+The current delivery truth remains story-scoped attest plus CLI-first
+observability (`roll status`, `roll loop watch`, `roll loop runs`,
+`roll cycle <id>`). Use `roll index` by hand for reconciliation, archive
+export, CI artifacts, or migration repair; `--rebuild` re-renders every story
+page from source after hand-merges or history migrations.

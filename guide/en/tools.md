@@ -157,7 +157,7 @@ Look for rows like:
 tools browser.screenshot×1(2.0s) network.fetch×1(0.4s)
 ```
 
-In the attest report and Delivery Dossier, the same event stream appears as:
+In the story attest report and cycle views, the same event stream appears as:
 
 | Evidence | What to check |
 |----------|---------------|
@@ -168,6 +168,6 @@ In the attest report and Delivery Dossier, the same event stream appears as:
 
 ## Evidence And Cost
 
-`roll loop status`, `roll cycle`, attest reports, and the Delivery Dossier show tool summaries from the event stream. Failed tool calls keep their error codes, and screenshot tools can link directly to captured images.
+`roll loop status`, `roll cycle`, and attest reports show tool summaries from the event stream. Failed tool calls keep their error codes, and screenshot tools can link directly to captured images.
 
 Tool costs preserve their native currency. USD rows stay USD. CNY/RMB rows stay CNY/RMB or `¥`. Roll does not relabel RMB-denominated tool or model costs as dollars and does not blindly add mixed currencies into one number.

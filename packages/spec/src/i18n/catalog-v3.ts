@@ -15,6 +15,48 @@ export const v3Catalog: Catalog = {
     zh: "'%s' 已不再支持。请使用：claude, kimi, codex, pi, agy, reasonix",
   },
 
+  // `agent.*` — v4 default-agent vs project route-profile separation (US-V4-002).
+  "agent.default_usage": {
+    en: "Usage: roll agent default <agent>",
+    zh: "用法：roll agent default <agent>",
+  },
+  "agent.default_current": {
+    en: "Machine default agent: %s",
+    zh: "机器默认 agent：%s",
+  },
+  "agent.default_none": {
+    en: "No machine default agent set yet (falls back to the first installed agent)",
+    zh: "尚未设置机器默认 agent（回退到首个已安装的 agent）",
+  },
+  "agent.default_unknown_agent": {
+    en: "Unknown agent '%s'. Use one of: claude, kimi, codex, pi, agy, reasonix",
+    zh: "未知 agent '%s'。可用：claude, kimi, codex, pi, agy, reasonix",
+  },
+  "agent.default_saved": {
+    en: "Machine default agent set to %s",
+    zh: "机器默认 agent 已设为 %s",
+  },
+  "agent.default_routes_followed": {
+    en: "Project routes that followed the old default were updated to %s",
+    zh: "原先跟随旧默认的项目路由已更新为 %s",
+  },
+  "agent.default_routes_preserved": {
+    en: "Customized project routes in .roll/agents.yaml were preserved",
+    zh: "已保留 .roll/agents.yaml 中自定义的项目路由",
+  },
+  "agent.use_retired": {
+    en: "`roll agent use` is retired. Set the machine default with `roll agent default <agent>`, or override one project route with `roll agent set <route> <agent>`.",
+    zh: "`roll agent use` 已退役。用 `roll agent default <agent>` 设置机器默认，或用 `roll agent set <route> <agent>` 覆盖单条项目路由。",
+  },
+  "agent.view_default_label": {
+    en: "Default agent (~/.roll/config.yaml)",
+    zh: "默认 agent（~/.roll/config.yaml）",
+  },
+  "agent.view_routes_label": {
+    en: "Project routes (.roll/agents.yaml)",
+    zh: "项目路由（.roll/agents.yaml）",
+  },
+
   // `ideav3.*` — the live `roll idea` capture command (US-PORT-003). Both en and
   // zh are always present so the single-language contract (output follows
   // ROLL_LANG, never mixes) holds.
@@ -271,8 +313,8 @@ export const v3Catalog: Catalog = {
     zh: "仅安装了 %s — 已设为默认 agent。",
   },
   "setup.primary_no_agents": {
-    en: "No AI agents installed. Run `roll agent use` later to set a default, or install one (e.g., claude, kimi, pi).",
-    zh: "未安装 AI agent。请稍后运行 `roll agent use` 设置默认，或先安装一个（如 claude、kimi、pi）。",
+    en: "No AI agents installed. Run `roll agent default <agent>` later to set the machine default, or install one (e.g., claude, kimi, pi).",
+    zh: "未安装 AI agent。请稍后运行 `roll agent default <agent>` 设置机器默认，或先安装一个（如 claude、kimi、pi）。",
   },
   "setup.primary_reselect": {
     en: "--reselect: pick a new default agent.",

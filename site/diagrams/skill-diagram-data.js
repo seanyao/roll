@@ -100,7 +100,7 @@ window.RollSkillDiagrams = {
         ] },
         { key: "verify", label: { en: "Verify", zh: "验证" }, steps: [
           { no: "PHASE 10.5", title: { en: "Fresh evidence gate", zh: "新鲜证据闸" }, desc: { en: "Before Done, tests/build/runtime verification evidence must be freshly produced in-session.", zh: "翻 Done 前，测试/构建/运行时验证证据必须是本会话新鲜产出。" }, gate: true },
-          { no: "PHASE 10.6", title: { en: "Acceptance evidence deposit", zh: "验收证据落地" }, desc: { en: "Map ACs to evidence, render report and refresh the delivery dossier.", zh: "把 AC 映射到证据、渲染报告并刷新交付档案。" } }
+          { no: "PHASE 10.6", title: { en: "Acceptance evidence deposit", zh: "验收证据落地" }, desc: { en: "Map ACs to story-scoped evidence and render the report.", zh: "把 AC 映射到按 Story 收口的证据，并渲染报告。" } }
         ] }
       ]
     },

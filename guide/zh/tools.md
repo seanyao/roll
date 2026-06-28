@@ -157,7 +157,7 @@ roll cycle <cycle-id>
 tools browser.screenshot×1(2.0s) network.fetch×1(0.4s)
 ```
 
-attest report 和 Delivery Dossier 会从同一条事件流展示：
+Story attest report 和 cycle 视图会从同一条事件流展示：
 
 | 证据 | 检查点 |
 |------|--------|
@@ -168,6 +168,6 @@ attest report 和 Delivery Dossier 会从同一条事件流展示：
 
 ## 证据与成本
 
-`roll loop status`、`roll cycle`、attest report 和 Delivery Dossier 都会从事件流展示工具摘要。失败的工具调用保留 errorCode，截图工具可以直接链接到图片证据。
+`roll loop status`、`roll cycle` 和 attest report 都会从事件流展示工具摘要。失败的工具调用保留 errorCode，截图工具可以直接链接到图片证据。
 
 工具成本保留原生币种。美元行仍是 USD。人民币行仍是 CNY/RMB 或 `¥`。Roll 不会把人民币计价的工具或模型成本标成美元，也不会把混合币种盲目加成一个数字。

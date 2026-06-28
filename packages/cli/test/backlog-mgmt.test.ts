@@ -2,7 +2,7 @@
  * US-PORT-019 — `roll backlog` write/maintenance arms (TS port off bin/roll).
  * Covers block/defer/unblock/promote (set-status) + lint.
  */
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -99,15 +99,15 @@ describe("backlog block/defer/unblock/promote — US-PORT-019", () => {
     expect(statusOf("US-002")).toBe("📋 Todo");
   });
 
-  it("FIX-231: a status flip refreshes the dossier front page (board reflects the new state)", () => {
+  it("US-V4-001: a status flip is backlog-only and does NOT refresh the global dossier front page", () => {
     seedBacklog("| [FIX-001](x) | fix a thing | 📋 Todo |\n");
-    // a card folder so the dossier walk sees the story.
     mkdirSync(join(".roll", "features", "alpha", "FIX-001"), { recursive: true });
     writeFileSync(join(".roll", "features", "alpha", "FIX-001", "spec.md"), "# FIX-001 — fix a thing\n");
     capture(() => backlogSetStatusCommand("block", ["FIX-001", "waiting"]));
-    const front = readFileSync(join(".roll", "features", "index.html"), "utf8");
-    expect(front).toContain("FIX-001");
-    expect(front).toContain('data-state="hold"'); // 🔒 Blocked classifies as hold
+    // The status change lands in backlog.md; the global dossier page is NOT a
+    // delivery side effect — it is rendered on demand by `roll index`.
+    expect(statusOf("FIX-001")).toContain("🔒 Blocked");
+    expect(existsSync(join(".roll", "features", "index.html"))).toBe(false);
   });
 
   it("no match → 'No items matched', exit 0, file unchanged", () => {

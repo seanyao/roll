@@ -14,7 +14,7 @@
 [![npm version](https://img.shields.io/npm/v/@seanyao/roll.svg)](https://www.npmjs.com/package/@seanyao/roll)
 [![CI](https://github.com/seanyao/roll/actions/workflows/ci.yml/badge.svg)](https://github.com/seanyao/roll/actions/workflows/ci.yml)
 
-让 AI agent 自己从 backlog 取任务，走你既有的 git + CI 流程交付。支持 Claude、Cursor、Codex、Kimi 等。
+Roll 是 Supervisor-led 的 CLI harness：把 AI agent 路由进按 Story 收口的规划、构建、评估、git、CI 与验收证据流程。支持 Claude、Cursor、Codex、Kimi、Pi、Reasonix 等本机可用 rig。
 
 ## 安装
 
@@ -49,6 +49,60 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 backlog 和 Roll 标记，只打印一个最合适的下一步命令，而不是让用户自己猜。
 第一次跑建议从[快速上手](guide/zh/getting-started.md)开始。
 
+## V4 Supervisor 执行模型
+
+Roll V4 把项目协调和单 Story 交付拆开：
+
+- **Supervisor Agent** 负责项目级协调：backlog 顺序、跨 Story 上下文、路由建议、重复失败、发布就绪、预算与 owner 升级。它只观察和建议，不实现具体 Story，也不覆盖证据闸。
+- **Story Execution Unit** 用执行剖面交付一张 Story：`standard` = Builder，`verified` = Builder -> Evaluator，`planned` = Planner -> Builder -> Evaluator。
+- **Planner / Builder / Evaluator 角色**是稳定契约；具体 `agent`、`model`、`rig` 可按 Story 通过路由策略变化。
+- **Skills 仍然存在**，是角色调用的能力层。角色调用 `$roll-design`、`$roll-build`、`$roll-fix`、`$roll-peer`、`$roll-.qa` 等技能，而不是把技能重写进 TS。
+- **fallback 必须响**。请求的 agent 或 rig 不可用时，Roll 记录不可用并暂停或询问 owner；不会悄悄冒充成另一个 agent。
+- **attest 与证据按 Story 收口**。验收入口是这张 Story 自己的 `latest/<id>-report.html`、AC map 和截图/测试产物。
+
+每张 Story 可以声明角色路由：
+
+```yaml
+story: US-V4-012
+execution_profile: verified
+roles:
+  builder:
+    agent: kimi
+    responsibility: update README, docs, guides, website, and samples
+  evaluator:
+    agent: pi
+    responsibility: evaluate new-user clarity and product narrative
+```
+
+运行时可用性必须显式记录：如果当前机器不能调用 `kimi` 或 `pi`，交付证据要记录这个限制，不能用静默 fallback 掩盖。
+
+## 接入样例
+
+**从零开始的新项目**
+
+```bash
+mkdir my-product && cd my-product
+roll init
+# 在交互终端描述需求、指向 PRD，或让 Roll 从已有笔记写 .roll/brief.md。
+roll next
+roll design --from-file .roll/brief.md
+roll loop on
+```
+
+Roll 会说明下一步设计动作，而不是静默创建假工作。Planner 把需求拆成 Stories，Supervisor 为每张 Story 选择 `standard`、`verified` 或 `planned`，Builder/Evaluator 角色执行，owner 查看按 Story 收口的 attest 证据。
+
+**已有项目接入**
+
+```bash
+cd existing-codebase
+roll init
+roll next
+roll init --apply        # 审阅生成的 onboard plan 后再执行
+roll loop on
+```
+
+Roll 先无破坏地诊断仓库；只有审阅后才写入或更新 Roll metadata。随后 Supervisor 基于已有 backlog、docs、context、open PR 与 route profile 推理。当前状态通过 CLI-first 可观测入口查看：`roll status`、`roll loop watch`、`roll loop runs`、`roll cycle <id>`、`roll loop alert` 和 Story 报告。
+
 ## 新项目快速启动
 
 新项目需要先配置 remote，loop 才能推送分支并创建 PR：
@@ -79,9 +133,10 @@ roll loop on
 | `roll backlog [sync\|block\|defer\|lint\|…]` | 查看、管理、从 GitHub Issues 同步待处理任务 |
 | `roll loop alert [list\|ack\|resolve\|log]` | 查看 / 清除 loop 告警 |
 | `roll status` | 判定优先的真相摘要，读自同一份快照——LOOP · CYCLE · RELEASE · STORY，STORY 行带 attest 验收覆盖率(`done ≡ 已合并 ∧ 已验收`)——其后是约定/AI 客户端同步健康 |
+| `roll supervisor [observe\|advise\|next\|why] [--json]` | 项目级 Supervisor Agent(v0 观察/建议):读取 backlog、合并真相、open PR、路由配置、重复失败与发布就绪，再给出建议性决策。只做跨 Story 协调——绝不实现具体 Story；持久化策略变更需 owner 确认 |
 | `roll pulse [--json]` | 今日交付脉搏：窗口内周期数、已合 merged 数、已验收 attested 数，外加一条来自故事光谱的 ASCII 火花线。双语中/EN。`--json` 输出机读 JSON |
 | `roll doctor [skills\|--tools]` | 环境与安装体检；`roll doctor --tools` 展示工具与真实截图权限预检，包括 Terminal.app Screen Recording |
-| `roll daemon <start\|stop\|status>` | 可选启用的只读实时控制台 daemon；默认 `127.0.0.1:7077`，记录 `.roll/loop/daemon.pid`，loop 从不自动启动它 |
+| `roll daemon <start\|stop\|status>` | 面向未来浏览器可观测的实验性只读事件广播器；默认 `127.0.0.1:7077`，记录 `.roll/loop/daemon.pid`，loop 从不自动启动它 |
 | `roll tune [reset]` | 只建议不自动应用的自调参报告 |
 | **卡片与证据** | |
 | `roll idea "<一句话描述>"` | 收卡:自动分类、编号、lint、推断 epic、铸全套卡夹——用户加卡的唯一入口 |
@@ -92,20 +147,19 @@ roll loop on
 | `roll design [--from-file <path>] [--agent <name>]` | 交互式启动 `$roll-design`；`--from-file` 绑定 PRD/brief 作为设计输入 |
 | `roll offboard` | 从项目移除 Roll |
 | `roll test [--where] [--reset]` | 运行测试套件(通过隔离适配器分发;未知类型显式报错) |
-| `roll daemon <start\|stop\|status>` | 管理只读可观测驻守服务(可选加入,从不自动启动) |
+| `roll daemon <start\|stop\|status>` | 管理实验性只读可观测驻守服务(可选加入,从不自动启动) |
 | `roll ci [--wait]` | 查看 / 等待当前 commit 的 CI 状态 |
 | `roll release [--dry-run]` | 唯一发版流:版本号→折叠changelog→包闸→提交推送→一致性闸→PR→自动合并→推tag(闸在合并前跑;用 GitHub auto-merge 自驱合并) |
 | `roll showcase [--card <ID>]` | 黄金路径标准 E2E(隔离沙箱):重置卡片→异构选角真模型三角(kimi/claude/pi)→走 loop 交付→采集 CLI+web 截屏→装配证据链→给出通过/失败判定 |
 | `roll pair [init\|status\|score]` | 跨 Agent 配对:异构同行复检与交付打分 |
 | `roll cycles [--since 1d\|3d\|7d\|all]` | 周期账本——每行一个 cycle,失败不被吞 |
-| `roll cycle <id>` | 单个 cycle 的完整轨迹带(cycle→story→build→peer→ci→pr→end) |
-| web `#loop` cycle 行 | 同一账本展开为共享 ActivitySignal 流，并写 `.roll/loop/cycle-<id>.signals.jsonl` 供回放 |
+| `roll cycle <id>` | 单个 cycle 的完整轨迹带(cycle→story→build→peer→ci→pr→end)；同一份轨迹持久化为 `.roll/loop/cycle-<id>.signals.jsonl` 供回放 |
 | `roll peer [--reviewer <agent>] (--prompt <text>\|--file <path>)` | 一次性结构化外部 provider 评审；记录 `.roll/peer/runs.jsonl` |
 | **配置 · 本机** | |
 | `roll ls [--json] [--stale-days <n>]` | 列出跨项目注册表(`~/.roll/projects.json`):名称 · 版本 · 判定 · 路径;缺失/过期行会被标注,绝不丢弃 |
 | `roll config [lang <zh\|en\|--reset>\|…]` | 读写 roll 配置(语言、loop 窗口、dream 时间) |
 | `roll agent [set <slot> <agent>\|use <name>\|list]` | 本机复杂度槽位路由(easy/default/hard/fallback) |
-| `roll cast [--json]` | 打印复杂度阶梯→角色分工表(与 web 控制台网格同源同数据;`--json` 为机器视图) |
+| `roll cast [--json]` | 打印复杂度阶梯→角色分工表（`--json` 为机器视图） |
 | `roll doctor skills [--strict] [--json]` | 严格技能审计(技能 · 违规 · hub 行数 + 四组调用频次——与 web Skills 页同口径) |
 | `roll setup skills` | 同步 `guide/skills.md` 技能目录 |
 | `roll doc [--lang en\|zh] [name]` | 在终端查看 Charter / 语言指南文档(`--lang` 缺省回落到配置语言) |
@@ -115,16 +169,20 @@ roll loop on
 | `roll update` | 升级到最新版本并重新同步 |
 | `roll --version` / `roll -v` | 显示已安装的 roll 版本 |
 
-## UI 里的真相模型
+## 当前可观测性
 
-交付档案是真相投影，不是 backlog 镜像。持久事实只走一条读路径：
-anchors -> selectors -> adapter -> projections。`roll index` 用 Story、
-Cycle、Release 三个聚合渲染首页真相板。
+Roll 当前是 CLI-first 可观测。持久事实只走一条读路径：anchors -> selectors
+-> adapter -> projections。`roll status`、`roll loop watch`、`roll loop runs`、
+`roll cycle <id>`、`roll pulse` 和按 Story 收口的 attest 报告，是当前用户面的
+真相入口。`roll index` 只是按需的归档/修复渲染器，用来生成静态 HTML 页面；
+它不是当前活体交付真相入口。
 
 - backlog 行是声明；`main` 上的 merge 证据和记录化验收证据才是真相。过早写
   `✅ Done` 会显示成漂移。
 - cycle 历史使用 TerminalOutcome 词汇，不再教旧的自由文本摘要。
 - 缺失事实显示 `?`。可见的 `0` 表示已知为零，不表示未知。
+
+完整的 Supervisor Live Console 和多角色看板是下一阶段工作，不是本 README 声称已交付的能力。
 
 ## 仓库结构
 

@@ -17,7 +17,6 @@ import { join } from "node:path";
 import { UNCATEGORIZED, generateIndex } from "../lib/archive.js";
 import { BacklogStore, appendBacklogRow } from "@roll/core";
 import { STORY_ID_RE, renderSpecMd, renderStoryPage } from "../lib/story-page.js";
-import { refreshAggregates } from "./index-gen.js";
 
 function todayYmd(): string {
   const d = new Date();
@@ -94,17 +93,16 @@ export function storyNewCommand(args: string[]): number {
   } catch (e) {
     rowNote = `  backlog row append failed (${e instanceof Error ? e.message : "?"}) — append it manually\n`;
   }
-  // FIX-250: --no-index defers the (linear-cost) index + aggregate refresh for
-  // batch minting; a batch ends with ONE `roll index`.
+  // US-V4-001: maintain the lightweight `.roll/index.json` ID→epic CACHE at card
+  // creation (best-effort; the live-first locator works without it). --no-index
+  // defers even that for batch minting. The global dossier/epic page refresh is
+  // NO LONGER a delivery side effect — run `roll index` to render pages on demand.
   if (!args.includes("--no-index")) {
     try {
       generateIndex(cwd);
     } catch {
-      /* index refresh is best-effort; attest re-derives via live walk */
+      /* index cache is best-effort; the locator re-derives via live walk */
     }
-    // FIX-231: a new card changes the board's truth — refresh the aggregate
-    // pages so it appears on the front page immediately (never blocks).
-    refreshAggregates(cwd);
   }
   process.stdout.write(`card minted\n卡已建档\n  .roll/features/${epic}/${id}/spec.md\n${rowNote}`);
   return 0;

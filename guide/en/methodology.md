@@ -40,7 +40,7 @@ graph TB
     end
 
     subgraph "Loop C: Observability & Maintenance"
-        C1["roll status / roll dossier<br/>Delivery Truth Surface"] --> C2{"Drift or health issue?"}
+        C1["roll status / roll cycle / story reports<br/>CLI-first Truth Surface"] --> C2{"Drift or health issue?"}
         C2 -->|Yes| C3["$roll-debug / $roll-doc-audit / $roll-doctor<br/>Diagnostics + Root Cause Analysis"]
         C3 --> C5["$roll-fix / REFACTOR<br/>Correction filed to backlog"]
         C6["$roll-.dream<br/>Nightly Code-Health Scan"] --> C2
@@ -67,7 +67,7 @@ How the three loops interact:
 - **Loop B → Loop C**: Each delivery feeds the truth ledger, so the maintenance loop sees shipped / in-progress / queue / truth drift / release readiness as facts.
 - **Loop C → Loop A**: Drift or code-health issues surfaced by the observability surfaces become `FIX-XXX` / `REFACTOR-XXX` entries; anything beyond a quick fix escalates back to the design loop for reassessment.
 
-**Optional autonomous layer** (enabled via `roll loop on`): `roll-loop` executes pending BACKLOG items on a configurable schedule; `roll-.dream` scans code health nightly and produces `REFACTOR` entries. The human reads `roll status`, the Delivery Dossier, the external console, and truth signals (and the loop also rebuilds a generated morning report page from events/runs). The human retains sole authority over `roll-release`. See §9 for details.
+**Optional autonomous layer** (enabled via `roll loop on`): `roll-loop` executes pending BACKLOG items on a configurable schedule; `roll-.dream` scans code health nightly and produces `REFACTOR` entries. The human reads CLI-first surfaces (`roll status`, `roll loop watch`, `roll cycle`, alerts, and story reports). The human retains sole authority over `roll-release`. See §9 for details.
 
 ---
 
@@ -113,11 +113,15 @@ Append `--force` (or `-f`) to force-rewrite `roll.md` or rebuild symlinks.
 
 **2.2.3 Project-Level Configuration (`roll init`)**
 
-`roll init` creates three workflow files in the current directory — instantly, with no prompts:
+`roll init` first diagnoses the current directory, then chooses the safest
+adoption path:
 
-- `AGENTS.md` — global engineering constraints (copied from `~/.roll/conventions/global/`)
-- `.roll/backlog.md` — empty task index
-- `.roll/features/` — directory for story details and design documents
+- **Seed**: create `AGENTS.md` + `.roll/` as a minimal starting point and show
+  the next design/backlog step.
+- **PRD-only**: preserve the requirement/brief as the source of truth and route
+  to design.
+- **Existing codebase**: route to onboard diagnosis and an apply checkpoint
+  before writing project changes.
 
 For **existing projects** (AGENTS.md already present), `roll init` re-merges the global conventions section-by-section, preserving all existing project-specific content.
 
@@ -221,8 +225,10 @@ This separation keeps `.roll/backlog.md` concise and readable as a progress dash
 
 Diagnoses the current directory before choosing a path — see the adoption patterns ([patterns/](patterns/README.md)):
 
-- **Seed** (empty dir): scaffold `AGENTS.md` + `.roll/` directly, no prompts.
-- **PRD-only** (requirements docs, no source): point to design as a new-project path.
+- **Seed** (empty dir): create `AGENTS.md` + `.roll/` as a minimal starting point
+  and show the next design/backlog step.
+- **PRD-only** (requirements docs, no source): preserve the requirement/brief as
+  the source of truth and point to design as the new-project path.
 - **Graft** (existing code, no `.roll/`): surfaces `$roll-onboard`, which scans the code, asks a short clarification set, and writes `.roll/init-diagnosis.yaml` plus `.roll/onboard-plan.yaml` for review; `roll init --apply` then prints a planned-operation checkpoint, waits for confirmation before writing, and hands back to `roll next` — see [legacy-onboarding.md](legacy-onboarding.md).
 - **Roll-ready / partial / pre-2.0 Roll**: print `roll status`, `roll init --repair`, or migration guidance without fresh-scaffolding over existing Roll markers.
 
@@ -362,7 +368,7 @@ A Roll project's CI pipeline is triggered on every push / PR:
                     # Records the run into the truth ledger
 ```
 
-Every CI run is recorded into the same truth ledger that Loop C reads from. That is the infrastructure-level unity across all three loops: Loop C's observability surfaces (`roll status`, the Delivery Dossier, truth signals) are projections of the same delivery facts CI produces — not a separate monitoring system bolted on top.
+Every CI run is recorded into the same truth ledger that Loop C reads from. That is the infrastructure-level unity across all three loops: Loop C's observability surfaces (`roll status`, `roll cycle`, story reports, truth signals) are projections of the same delivery facts CI produces — not a separate monitoring system bolted on top.
 
 **4.4.4 The CD and Verification Gate Dependency Chain**
 
@@ -418,18 +424,18 @@ After each successful deployment, two mechanisms ensure deliverables remain trac
 
 ## 5. Loop C: Observability and Maintenance
 
-Loop C is observability and maintenance: status, dossier, debug/doc/doctor, dream code-health scans, and truth signals feed corrections back into the backlog.
+Loop C is observability and maintenance: status, cycle trace, story reports, debug/doc/doctor, dream code-health scans, and truth signals feed corrections back into the backlog.
 
 ### 5.1 Methodology Inheritance
 
 | Classical Methodology | Roll Implementation |
 |----------------------|--------------------|
-| SRE (Site Reliability Engineering) | `roll status` / `roll dossier`: delivery truth surface from a single ledger |
-| Observability | The external console + truth signals (truth.json / release readiness / `roll loop status`) |
+| SRE (Site Reliability Engineering) | `roll status` / `roll cycle` / story reports: delivery truth surface from a single ledger |
+| Observability | CLI-first truth signals (`roll loop watch`, `roll loop status`, cycle traces, release readiness) |
 | Continuous maintenance | `$roll-.dream`: nightly code-health scans that file `REFACTOR-XXX` entries |
 | Digital Forensics + RCA | `$roll-debug` / `$roll-doc-audit` / `$roll-doctor`: project-owned diagnostics, documentation, and toolchain health |
 
-### 5.2 Delivery Truth Surface: `roll status` / `roll dossier`
+### 5.2 Delivery Truth Surface: CLI-first status, cycle trace, and story reports
 
 Loop C is not production patrol. It is the mature delivery-control surface: it reads from a single truth ledger and presents shipped / in-progress / queue / truth drift / release readiness as **facts**, not assertions.
 
@@ -438,17 +444,18 @@ Loop C is not production patrol. It is the mature delivery-control surface: it r
 | Surface | What it shows |
 |---------|--------------|
 | `roll status` | Sync status, skill links, detected AI tools, and the live delivery state |
-| `roll dossier` | The Delivery Dossier — shipped / in-progress / queue / truth drift / release readiness in one place |
-| External console | The same facts rendered as a browsable page for non-engineers |
-| Truth signals | `truth.json`, release readiness, `roll loop status` — the machine-readable ledger underneath |
+| `roll loop watch` | Live ActivitySignal stream for the current cycle |
+| `roll cycle <id>` | One cycle's trace tape, PR/diff pointers, and evidence links |
+| Story attest report | The Story's own AC map, screenshots, command artifacts, and verdicts |
+| Truth signals | release readiness, `roll loop status`, and machine-readable event facts |
 
-**Truth drift** — these surfaces reconcile the planning record (`.roll/backlog.md`, `.roll/features/`) against git history and acceptance evidence. When a Story is marked Done but lacks merge evidence on `main` or Verification Gate evidence, that mismatch shows up as drift on the dossier rather than passing silently.
+**Truth drift** — these surfaces reconcile the planning record (`.roll/backlog.md`, `.roll/features/`) against git history and acceptance evidence. When a Story is marked Done but lacks merge evidence on `main` or Verification Gate evidence, that mismatch shows up as drift rather than passing silently.
 
 **Corrections feed back to the backlog** — anything the surfaces reveal as a problem becomes a `FIX-XXX` or `REFACTOR-XXX` entry that re-enters the loop. Loop C → Loop A: anything beyond a quick fix escalates to design.
 
-> **Scenario**: Following the TaskFlow v1.3 release, the owner opens `roll dossier`. The Delivery Dossier shows US-007 (audit write) as Done, but a truth-drift flag is raised: the latest acceptance evidence captured `GET /api/audit` returning audit events with an empty `timestamp` field, which contradicts US-007's AC ("events include a timestamp"). At the same time, the most recent `$roll-.dream` nightly scan flagged the serialization layer as a code-health hot spot after the v1.3 ORM upgrade.
+> **Scenario**: Following the TaskFlow v1.3 release, the owner runs `roll status` and opens the US-007 story report. The status output shows a truth-drift flag: the latest acceptance evidence captured `GET /api/audit` returning audit events with an empty `timestamp` field, which contradicts US-007's AC ("events include a timestamp"). At the same time, the most recent `$roll-.dream` nightly scan flagged the serialization layer as a code-health hot spot after the v1.3 ORM upgrade.
 >
-> The drift is real, so `FIX-012: audit event timestamp is null` is filed to the Backlog. On the next loop cycle it is routed to `$roll-fix`, and the dossier's release-readiness signal stays red until the fix lands.
+> The drift is real, so `FIX-012: audit event timestamp is null` is filed to the Backlog. On the next loop cycle it is routed to `$roll-fix`, and the release-readiness signal stays red until the fix lands.
 
 ### 5.3 Automated Forensics and Root Cause Diagnosis: `$roll-debug`
 
@@ -483,7 +490,7 @@ Executes a fix for a single issue — lighter-weight than `$roll-build`, but hel
 
 > **Scenario (cont.)**: `$roll-fix` executes FIX-012, with scope strictly limited to the serialization layer field mapping. A regression test is added (asserting `timestamp` is non-null and conforms to ISO 8601 format).
 >
-> 1 commit, CI GREEN, post-deployment Verification Gate confirms the audit list timestamps have recovered, FIX-012 closed. The new acceptance evidence reconciles against US-007's AC, so on the next `roll dossier` refresh the truth-drift flag clears and the release-readiness signal returns to green.
+> 1 commit, CI GREEN, post-deployment Verification Gate confirms the audit list timestamps have recovered, FIX-012 closed. The new acceptance evidence reconciles against US-007's AC, so `roll status` and the story report clear the truth-drift signal and release readiness returns to green.
 
 ---
 
@@ -543,7 +550,7 @@ graph LR
         D["$roll-design<br/>INVEST Stories"]
         SB["$roll-build<br/>TCR Micro-steps"]
         SP["$roll-spar<br/>Adversarial TDD"]
-        ST["roll status / dossier<br/>Delivery Truth Surface"]
+        ST["roll status / cycle / reports<br/>CLI-first Truth Surface"]
         BB["$roll-debug<br/>Auto Forensics"]
     end
 
@@ -577,7 +584,7 @@ It is off by default. Enabling it requires an explicit `roll loop on`.
 │  Autonomous layer (opt-in: roll loop on)                │
 │  roll-loop   — BACKLOG executor (configurable schedule)  │
 │  roll-.dream — nightly code health scan                 │
-│  Human reads status / dossier / console; release stays human │
+│  Human reads status / cycle / reports; release stays human   │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -587,7 +594,7 @@ It is off by default. Enabling it requires an explicit `roll loop on`.
 
 **`roll-.dream`** — Runs nightly (03:00 local) via macOS launchd (Linux: crontab). Scans the codebase for dead code, architectural drift against `.roll/domain/`, pruning candidates, and emerging patterns. Outputs `REFACTOR-XXX` entries to BACKLOG and a log to `.roll/dream/YYYY-MM-DD.md`.
 
-**Reading delivery state** — There is no owner-brief skill. The human reads `roll status`, the Delivery Dossier (`roll dossier`), the external console, and truth signals (`roll loop status`) on their own schedule; the loop also rebuilds a generated morning report page — one fixed page reconstructed from events/runs, not a personalized digest. This is distinct from `roll-.changelog` (the user-facing changelog).
+**Reading delivery state** — There is no owner-brief skill. The human reads CLI-first surfaces (`roll status`, `roll loop watch`, `roll cycle <id>`, `roll loop status`, alerts, and story reports) on their own schedule. This is distinct from `roll-.changelog` (the user-facing changelog).
 
 ### 9.3 Why Local Scheduling, Not GitHub Actions
 
@@ -628,7 +635,7 @@ project field never collapses the complexity tiers onto a single agent.
 
 ### 9.5 Human Authority
 
-The autonomous layer **never** invokes `roll-release`. Production deployment is always a human decision, made after reading the delivery truth surface and optionally inspecting the diff. The Delivery Dossier (`roll dossier`) provides:
+The autonomous layer **never** invokes `roll-release`. Production deployment is always a human decision, made after reading the delivery truth surface and optionally inspecting the diff. CLI-first surfaces provide:
 
 - What the agent completed since the human last looked
 - Any escalations that require human input
@@ -642,10 +649,10 @@ This keeps the human informed without requiring them to be present for every ste
 roll loop on|off          # enable / disable scheduled execution for this project
 roll loop now             # trigger one cycle immediately
 roll loop status          # show scheduler state + any ALERT
-roll dossier              # show the Delivery Dossier (shipped / queue / drift / release readiness)
+roll cycle <id>           # inspect one cycle trace and evidence pointers
 roll agent use <name>     # switch this project's agent
 roll agent list           # show installed agents
-roll                      # project dashboard (in project dir): loop status + dossier summary
+roll                      # project dashboard (in project dir): loop status + summary
 ```
 
 ---
@@ -664,7 +671,7 @@ roll                      # project dashboard (in project dir): loop status + do
 
 - **Multi-Agent coordination overhead**: `$roll-build` evaluates Action dependencies to determine whether to launch parallel sub-Agents, but cross-Agent state synchronization and conflict resolution currently depend on conventions rather than enforced protocols, incurring coordination overhead in high-concurrency scenarios.
 - **Framework coupling**: Skill definitions are written in Markdown and rely on AI clients' ability to interpret natural language instructions — execution precision varies across different models. Each Skill now pins a model in its frontmatter (`model:` — e.g. Opus for `roll-design`, Haiku for `roll-idea`) and declares a tool allowlist (`allowed-tools:`), mitigating precision drift and accidental tool misuse, though both fields still depend on the client honoring them.
-- **Observability is reactive**: Loop C's truth surfaces (`roll status` / `roll dossier`) and `$roll-.dream` scans surface drift and code-health issues from delivery facts and nightly analysis, but they do not continuously re-exercise shipped features the way a live regression suite would — a regression that produces no new evidence and no failing test can persist until the next acceptance run or scan touches it.
+- **Observability is reactive**: Loop C's truth surfaces (`roll status`, `roll cycle`, story reports) and `$roll-.dream` scans surface drift and code-health issues from delivery facts and nightly analysis, but they do not continuously re-exercise shipped features the way a live regression suite would — a regression that produces no new evidence and no failing test can persist until the next acceptance run or scan touches it.
 
 ---
 
@@ -697,7 +704,7 @@ Commands fall into two categories: bash commands run pure shell logic; agent com
 | `roll backlog` | Show all pending tasks from `.roll/backlog.md` |
 | `roll agent [use <name>\|list]` | Per-project agent selection — affects all 🤖 commands |
 | `roll loop <on\|off\|now\|status\|runs\|log\|story\|events\|eval\|signals\|pause\|resume\|reset\|gc>` | 🤖 Manage the autonomous BACKLOG executor (three lanes: loop/dream/pr) |
-| `roll dossier` | Show the Delivery Dossier: shipped / in-progress / queue / truth drift / release readiness |
+| `roll cycle <id>` | Show one cycle's trace tape, PR/diff pointers, and evidence links |
 | `roll pair [init\|status]` | 🤖 Cross-agent pairing: heterogeneous peer re-checks during builds |
 | `roll release [ship\|waiver]` | Release guidance · gated tag push · recorded drift waiver — npm publish stays human |
-| `roll` (no args, in project dir) | Dashboard: loop status, pending count, latest dossier summary |
+| `roll` (no args, in project dir) | Dashboard: loop status, pending count, latest summary |

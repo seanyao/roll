@@ -74,6 +74,16 @@ export function watchRenderEventFromRollEvent(ev: RollEvent, mode: WatchMode = "
         detail: [ev.cycleId, ev.storyId, ev.agent].filter((v) => v !== "").join(" · "),
         severity: "normal",
       };
+    // US-V4-004: surface the selected Story execution profile in the live stream.
+    case "execution:profile":
+      return {
+        kind: "phase",
+        observedAt: eventTs(ev),
+        cycleId: ev.cycleId,
+        summary: "execution profile",
+        detail: `${ev.profile} (${ev.reason})`,
+        severity: "normal",
+      };
     case "cycle:phase":
       return {
         kind: "phase",

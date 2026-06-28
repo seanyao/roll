@@ -33,6 +33,7 @@ import { ciCommand, ciWaitCommand } from "./ci.js";
 import { configCommand } from "./config.js";
 import { CYCLE_USAGE, cycleCommand } from "./cycle.js";
 import { CYCLES_USAGE, cyclesCommand } from "./cycles.js";
+import { SUPERVISOR_USAGE, supervisorCommand } from "./supervisor.js";
 import { LS_USAGE, lsCommand } from "./ls.js"; // US-DOSSIER-028
 import { dashboardCommand, loopEvalCommand, loopStoryCommand } from "./dashboard.js";
 import { loopRunsCommand } from "./loop-runs.js";
@@ -149,6 +150,9 @@ export function registerAll(): void {
   registerPorted("cycles", cyclesCommand, { help: CYCLES_USAGE });
   // `cycle`: one cycle's trace tape (US-CLI-013) — the `roll cycles` tail hint target.
   registerPorted("cycle", cycleCommand, { help: CYCLE_USAGE });
+  // US-V4-008: `supervisor` — the project-level Supervisor Agent (observe/advise).
+  // Cross-Story coordination, never Story implementation.
+  registerPorted("supervisor", supervisorCommand, { help: SUPERVISOR_USAGE });
   // FIX-343 (AC1): the agent-facing self-grade command is REMOVED. The working
   // agent never grades its own delivery; the cycle's Review Score is produced
   // solely by a fresh-session peer Reviewer (runScorePairing). The only writer of
@@ -184,7 +188,7 @@ export function registerAll(): void {
   registerPorted("dream", dreamCommand, { hidden: true, help: "Usage: roll dream run-once\n  Nightly self-scan (patterns, docs freshness, test quality) — run one pass now.\n夜间自检跑一遍。" });
   // `agent`: full surface TS (view/list/use/set/unknown). The write face owns
   // .roll/agents.yaml plus legacy .roll/local.yaml sync; no bash fallback.
-  registerPorted("agent", agentCommand, { help: "Usage: roll agent [set <slot> <agent>|use <name>|list]\n  View or change the agent slots.\n查看/切换 agent 槽位。" });
+  registerPorted("agent", agentCommand, { help: "Usage: roll agent [default <agent>|set <route> <agent>|list]\n  View the machine default agent + project route profile, or change them (`use` is retired).\n查看机器默认 agent 与项目路由，或修改它们（`use` 已退役）。" });
   // `pair`: v3-native Cross-Agent Pairing (US-PAIR-001). `pair init` scaffolds
   // an explicit .roll/pairing.yaml from the installed registry. No bash fallback
   // (v2 had no pairing).

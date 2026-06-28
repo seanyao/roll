@@ -14,7 +14,7 @@ in your journey with Roll:
 > **Roll has two surfaces.** Keep them straight as you read this FAQ:
 >
 > - **CLI commands** — run in your terminal: `roll init`, `roll loop on`,
->   `roll status`, `roll dossier`, etc. These manage state, scheduling, and
+>   `roll status`, `roll cycle`, etc. These manage state, scheduling, and
 >   observability. They do not write code themselves.
 > - **Skills** — invoked inside your AI agent (Claude Code, Cursor, Codex,
 >   Pi, etc.): `$roll-build`, `$roll-design`, `$roll-fix`, `$roll-onboard`,
@@ -501,9 +501,9 @@ are multiple surfaces depending on what you need.
 
 **Under the hood:** Each cycle appends a JSONL record to
 `<project>/.roll/loop/runs.jsonl` with story ID, model, TCR commit count,
-duration, outcome, and cost (public pricing). `roll status` and the Delivery
-Dossier (`roll dossier`) read this — and the rest of the truth ledger — into a
-single human-readable surface. The live watch view is read-only and combines
+duration, outcome, and cost (public pricing). `roll status`, `roll cycle`, and
+story-scoped attest reports read this — and the rest of the truth ledger — into
+human-readable surfaces. The live watch view is read-only and combines
 live activity with structured event facts; the tmux observe pane uses the same
 watch entrypoint.
 
@@ -519,7 +519,7 @@ watch entrypoint.
 | Watch the agent in real time | `roll loop watch` |
 | Debug compact event facts | `roll loop watch --events` |
 | Raw audit event JSON | `roll loop watch --raw-events` |
-| Shipped / in-progress / queue / release readiness at a glance | `roll dossier` |
+| Shipped / in-progress / queue / release readiness at a glance | `roll status` |
 | Alerts that need attention | `roll loop alert` |
 | Full cycle agent output (plain text) | `roll loop log` |
 | Full agent transcript | `roll loop watch --verbose` or `roll loop log` |

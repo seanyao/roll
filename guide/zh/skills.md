@@ -12,7 +12,7 @@
 | **"修个 bug"** / **"改文案"** | `roll-fix` | 快速修复，无需完整工作流 |
 | **"规划需求"** / **"拆成故事"** | `roll-design` | 仅规划，不实现，输出 BACKLOG.md |
 | **"并行跑多个 Action"** | `roll-build` | 拆分 Action 后自动判断是否并行 |
-| **"交付了什么 / 队列里还有什么？"** | `roll status` / `roll dossier` | 交付面：已交付 / 进行中 / 队列 / 真相漂移 / 发版就绪 |
+| **"交付了什么 / 队列里还有什么？"** | `roll status` / `roll cycle` / Story 报告 | CLI-first 交付状态、cycle 轨迹和按 Story 收口的证据 |
 | **"调试这个页面"** | `roll-debug` | 深度诊断，采集日志/网络/DOM |
 
 ## 支撑技能

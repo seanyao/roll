@@ -46,7 +46,7 @@ my-legacy-project/                    ← 砧木：现有项目，零侵入
                               .roll/（接穗）嫁接进来
                                   ↓
                               Roll 工具链接管新故事的管理与自治执行
-                              （loop / dream / peer review / status·dossier 可观测）
+                              （loop / dream / peer review / status·cycle 可观测）
 ```
 
 ## 砧木与接穗的边界
@@ -60,7 +60,7 @@ my-legacy-project/                    ← 砧木：现有项目，零侵入
 | 新故事的实现 | — | ✓ Loop 增量执行 |
 | 文档新鲜度巡检 | — | ✓ `$roll-.dream` 自动巡 |
 | 跨 agent 评审 | — | ✓ Peer review 入循环 |
-| 交付可观测 | — | ✓ `roll status` / `roll dossier` + 外部 console 呈现 |
+| 交付可观测 | — | ✓ `roll status` / `roll cycle` / story reports |
 
 **`.roll/` 完全可以被 `rm -rf` 整体移除，项目回到嫁接前的状态。**
 这是 graft-pattern 与 replant-pattern 的根本区别——嫁接是**可逆**的。

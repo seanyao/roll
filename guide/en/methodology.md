@@ -113,11 +113,15 @@ Append `--force` (or `-f`) to force-rewrite `roll.md` or rebuild symlinks.
 
 **2.2.3 Project-Level Configuration (`roll init`)**
 
-`roll init` creates three workflow files in the current directory — instantly, with no prompts:
+`roll init` first diagnoses the current directory, then chooses the safest
+adoption path:
 
-- `AGENTS.md` — global engineering constraints (copied from `~/.roll/conventions/global/`)
-- `.roll/backlog.md` — empty task index
-- `.roll/features/` — directory for story details and design documents
+- **Seed**: create `AGENTS.md` + `.roll/` as a minimal starting point and show
+  the next design/backlog step.
+- **PRD-only**: preserve the requirement/brief as the source of truth and route
+  to design.
+- **Existing codebase**: route to onboard diagnosis and an apply checkpoint
+  before writing project changes.
 
 For **existing projects** (AGENTS.md already present), `roll init` re-merges the global conventions section-by-section, preserving all existing project-specific content.
 
@@ -221,8 +225,10 @@ This separation keeps `.roll/backlog.md` concise and readable as a progress dash
 
 Diagnoses the current directory before choosing a path — see the adoption patterns ([patterns/](patterns/README.md)):
 
-- **Seed** (empty dir): scaffold `AGENTS.md` + `.roll/` directly, no prompts.
-- **PRD-only** (requirements docs, no source): point to design as a new-project path.
+- **Seed** (empty dir): create `AGENTS.md` + `.roll/` as a minimal starting point
+  and show the next design/backlog step.
+- **PRD-only** (requirements docs, no source): preserve the requirement/brief as
+  the source of truth and point to design as the new-project path.
 - **Graft** (existing code, no `.roll/`): surfaces `$roll-onboard`, which scans the code, asks a short clarification set, and writes `.roll/init-diagnosis.yaml` plus `.roll/onboard-plan.yaml` for review; `roll init --apply` then prints a planned-operation checkpoint, waits for confirmation before writing, and hands back to `roll next` — see [legacy-onboarding.md](legacy-onboarding.md).
 - **Roll-ready / partial / pre-2.0 Roll**: print `roll status`, `roll init --repair`, or migration guidance without fresh-scaffolding over existing Roll markers.
 

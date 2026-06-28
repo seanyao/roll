@@ -142,7 +142,7 @@ window.RollData = (function () {
         { name: "roll loop runs",  mono: true, desc: "Per-cycle TerminalOutcome history with TCR count and duration.", badges: [] },
         { name: "roll loop story", mono: true, desc: "Per-story rollup: cycles, span, duration, tokens, cost, PRs.", badges: [] },
         { name: "roll loop alert", mono: true, desc: "View, acknowledge and clear loop alerts from one place.", badges: [] },
-        { name: "Story-scoped evidence", desc: "Attest reports, AC maps, screenshots and command artifacts live with each Story. roll index is only an on-demand static archive/repair renderer.", badges: ["highlight"] },
+        { name: "Story-scoped evidence", desc: "Attest reports, AC maps, screenshots and command artifacts live with each Story. Delivery Dossier rendering is now an on-demand archive and repair surface.", badges: ["highlight"] },
       ]},
       { id: "multi-agent", title: "Multi-Agent", blurb: "One vendor doesn't own the keys.", features: [
         { name: "Fail-loud routing", desc: "Execution profiles route roles to agent/model/rig choices. Unavailable requested agents are recorded as unavailable; fallback only happens through explicit policy.", badges: ["highlight"] },
@@ -348,7 +348,7 @@ window.RollData = (function () {
         { name: "roll loop runs",  mono: true, desc: "每轮 TerminalOutcome 历史,含 TCR 次数和耗时。", badges: [] },
         { name: "roll loop story", mono: true, desc: "按故事汇总:cycle 数、跨度、耗时、token、成本、PR 列表。", badges: [] },
         { name: "roll loop alert", mono: true, desc: "在一处查看、确认、清除 loop 告警。", badges: [] },
-        { name: "按 Story 收口的证据", desc: "Attest 报告、AC map、截图与命令产物都放在各自 Story 下。roll index 只是按需静态归档/修复渲染器。", badges: ["highlight"] },
+        { name: "按 Story 收口的证据", desc: "Attest 报告、AC map、截图与命令产物都放在各自 Story 下。Delivery Dossier 渲染现在只是按需归档和修复界面。", badges: ["highlight"] },
       ]},
       { id: "multi-agent", title: "多 Agent", blurb: "钥匙不归一家供应商。", features: [
         { name: "Fail-loud 路由", desc: "执行剖面把角色路由到 agent/model/rig。请求的 agent 不可用会被记录为 unavailable；fallback 只按显式策略发生。", badges: ["highlight"] },

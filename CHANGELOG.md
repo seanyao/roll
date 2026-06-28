@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### 自动化流水线
+
+- **V4 Supervisor 执行架构上线**：Story 现在按 standard、verified、planned 剖面交付，Supervisor 负责项目级观察与建议，验收证据按 Story 收口，不再依赖全局档案刷新。(US-V4-001, US-V4-002, US-V4-003, US-V4-004, US-V4-005, US-V4-006, US-V4-007, US-V4-008, US-V4-009, US-V4-010, US-V4-012) `[autonomous-evolution]`
+  <!-- evidence: .roll/features/autonomous-evolution/US-V4-008/latest/US-V4-008-report.html -->
+  <!-- evidence: .roll/features/autonomous-evolution/US-V4-012/latest/US-V4-012-report.html -->
+
 ## v3.628.1 — 2026-06-28
 
 ### 上手引导

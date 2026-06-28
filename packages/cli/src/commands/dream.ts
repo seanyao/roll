@@ -35,7 +35,7 @@ const EXAMPLES: ReadonlyArray<readonly [string, string]> = [
   ["roll --version", "显示已安装版本"],
   ["roll loop on", "启用自主执行循环"],
   ["roll backlog defer US-DOC '过早引入'", "推迟一类任务"],
-  ["roll agent use kimi", "切换当前项目到 kimi"],
+  ["roll agent default kimi", "把机器默认 agent 设为 kimi"],
   ["roll config lang zh", "设置语言为中文 (REFACTOR-049: `roll lang` 已移入 config)"],
 ];
 

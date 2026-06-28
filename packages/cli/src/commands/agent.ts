@@ -13,9 +13,11 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { join } from "node:path";
 import { t, v2Catalog, v3Catalog } from "@roll/spec";
 import { agentListCommand, currentLang, realAgentEnv } from "./agent-list.js";
-import { refreshAggregates as refreshDossierAggregates } from "./index-gen.js";
+import { readPrimaryAgent, writePrimaryAgent } from "../lib/interactive-agent.js";
 
 const VALID_SLOTS: AgentSlot[] = ["easy", "default", "hard", "fallback"];
+/** Routing slots that carry a complexity tier (fallback is availability-only). */
+const TIER_SLOTS: AgentSlot[] = ["easy", "default", "hard"];
 
 export interface AgentCommandDeps {
   env?: AgentEnv;
@@ -27,7 +29,9 @@ export interface AgentCommandDeps {
   removeFile?: (path: string) => void;
   readLine?: () => string | undefined;
   listCommand?: (args: string[]) => number;
-  refreshAggregates?: (cwd: string) => void;
+  /** US-V4-002 — seam for the GLOBAL machine default (`~/.roll/config.yaml`). */
+  readDefaultAgent?: () => string | null;
+  writeDefaultAgent?: (name: string) => void;
 }
 
 function pal(): { RED: string; GREEN: string; YELLOW: string; NC: string } {
@@ -60,8 +64,10 @@ function m(key: string, ...args: string[]): string {
   return t(v2Catalog, currentLang(), key, ...args);
 }
 
-function depsWithDefaults(deps: AgentCommandDeps): Required<Omit<AgentCommandDeps, "readLine" | "refreshAggregates">> &
-  Pick<AgentCommandDeps, "readLine"> {
+function depsWithDefaults(
+  deps: AgentCommandDeps,
+): Required<Omit<AgentCommandDeps, "readLine" | "readDefaultAgent" | "writeDefaultAgent">> &
+  Pick<AgentCommandDeps, "readLine" | "readDefaultAgent" | "writeDefaultAgent"> {
   return {
     env: deps.env ?? realAgentEnv(),
     fileExists: deps.fileExists ?? existsSync,
@@ -78,15 +84,9 @@ function depsWithDefaults(deps: AgentCommandDeps): Required<Omit<AgentCommandDep
     removeFile: deps.removeFile ?? ((path) => rmSync(path, { force: true })),
     readLine: deps.readLine,
     listCommand: deps.listCommand ?? agentListCommand,
+    readDefaultAgent: deps.readDefaultAgent,
+    writeDefaultAgent: deps.writeDefaultAgent,
   };
-}
-
-function refreshAgentDossier(deps: AgentCommandDeps): void {
-  try {
-    (deps.refreshAggregates ?? refreshDossierAggregates)(process.cwd());
-  } catch (e) {
-    warn(`dossier refresh failed after agent slot update (board may lag until \`roll index\`): ${String(e)}`);
-  }
 }
 
 function registry(deps: AgentCommandDeps): { reg: AgentRegistry; d: ReturnType<typeof depsWithDefaults> } {
@@ -102,70 +102,84 @@ function agentsPath(reg: AgentRegistry, d: ReturnType<typeof depsWithDefaults>):
   return reg.configPath(process.env["ROLL_AGENTS_CONFIG"], d.fileExists) ?? ".roll/agents.yaml";
 }
 
-function syncLocalAgent(name: string, d: ReturnType<typeof depsWithDefaults>): void {
-  d.mkdirp(".roll");
-  const local = ".roll/local.yaml";
-  let text = "";
-  if (d.fileExists(local)) {
-    text = d.readText(local);
-    const lines = text.split("\n");
-    let replaced = false;
-    const next = lines.map((line) => {
-      if (line.startsWith("agent:")) {
-        replaced = true;
-        return `agent: ${name}`;
-      }
-      return line;
-    });
-    if (!replaced) {
-      if (text !== "" && !text.endsWith("\n")) next.push("");
-      next.push(`agent: ${name}`);
-    }
-    d.writeText(local, next.join("\n"));
-  } else {
-    d.writeText(local, `agent: ${name}\n`);
+/** US-V4-002 — the project route profile still FOLLOWS the machine default when
+ *  every configured tier slot (easy/default/hard) points at the old default (or
+ *  is unset). A single slot aimed at a different agent makes the profile
+ *  customized → a default change must not silently overwrite it. A null old
+ *  default means there is nothing to follow, so any set slot counts as custom. */
+function projectRoutesFollowDefault(text: string, oldDefault: string | null): boolean {
+  if (oldDefault === null) {
+    return TIER_SLOTS.every((slot) => readSlotFromText(text, slot)?.agent === undefined);
   }
-
-  if (d.fileExists(".roll.yaml")) {
-    const kept = d.readText(".roll.yaml").split("\n").filter((line) => !line.startsWith("agent:"));
-    const next = kept.join("\n");
-    if (next.trim() === "") d.removeFile(".roll.yaml");
-    else d.writeText(".roll.yaml", next.endsWith("\n") ? next : `${next}\n`);
+  for (const slot of TIER_SLOTS) {
+    const agent = readSlotFromText(text, slot)?.agent;
+    if (agent !== undefined && agent !== oldDefault) return false;
   }
+  return true;
 }
 
-function useCommand(args: string[], deps: AgentCommandDeps): number {
+/** `roll agent default [<agent>]` — read or set the GLOBAL machine default
+ *  (`primary_agent` in `~/.roll/config.yaml`). No arg prints the current default.
+ *  Setting it only rewrites project routes that STILL follow the old default;
+ *  customized `.roll/agents.yaml` profiles are preserved (US-V4-002). */
+function defaultCommand(args: string[], deps: AgentCommandDeps): number {
+  const readDefault = deps.readDefaultAgent ?? readPrimaryAgent;
+  const writeDefault = deps.writeDefaultAgent ?? writePrimaryAgent;
   const raw = args[0] ?? "";
   if (raw === "") {
-    err(m("agent.use_usage"));
-    return 1;
+    const cur = readDefault();
+    ok(cur !== null && cur !== "" ? m("agent.default_current", agentDisplayName(cur)) : m("agent.default_none"));
+    return 0;
   }
-  // US-AGENT-045 AC4: reject removed agents with a directed message before
-  // falling through to the generic unknown-agent path.
   if (isRemovedAgentName(raw)) {
     err(m("agent.use_removed_agent", raw));
     return 1;
   }
   const name = canonicalAgentName(raw);
-  const { reg, d } = registry(deps);
-  if (!agentIsKnown(name) || !reg.isInstalled(name)) {
-    err(m("agent.use_unknown_agent", name));
+  if (!agentIsKnown(name)) {
+    err(m("agent.default_unknown_agent", name));
     return 1;
   }
-  d.mkdirp(".roll");
-  const path = agentsPath(reg, d);
-  for (const slot of ["easy", "default", "hard"] as const) {
-    try {
-      reg.setSlot(path, slot, name);
-    } catch {
-      err(m("agent.set_write_failed", slot));
-      return 1;
+  const oldDefault = readDefault();
+  try {
+    writeDefault(name);
+  } catch (e) {
+    err(`failed to write machine default: ${String(e)}`);
+    return 1;
+  }
+  ok(m("agent.default_saved", agentDisplayName(name)));
+  // Only rewrite project routes when the profile still follows the old default —
+  // never clobber a customized .roll/agents.yaml.
+  const { reg, d } = registry(deps);
+  const path = reg.configPath(process.env["ROLL_AGENTS_CONFIG"], d.fileExists);
+  if (path !== undefined && d.fileExists(path)) {
+    const text = d.readText(path);
+    if (projectRoutesFollowDefault(text, oldDefault) && oldDefault !== null) {
+      let rewrote = false;
+      for (const slot of TIER_SLOTS) {
+        if (readSlotFromText(text, slot)?.agent === oldDefault) {
+          try {
+            reg.setSlot(path, slot, name);
+            rewrote = true;
+          } catch {
+            warn(m("agent.set_write_failed", slot));
+          }
+        }
+      }
+      if (rewrote) ok(m("agent.default_routes_followed", agentDisplayName(name)));
+    } else if (!projectRoutesFollowDefault(text, oldDefault)) {
+      ok(m("agent.default_routes_preserved"));
     }
   }
-  syncLocalAgent(name, d);
-  ok(m("agent.use_locked", agentDisplayName(name)));
-  refreshAgentDossier(deps);
   return 0;
+}
+
+/** US-V4-002 — `roll agent use` is retired. It fails loudly with migration
+ *  guidance toward `roll agent default` (machine default) and `roll agent set`
+ *  (one project route), never silently aliasing the old "lock all tiers". */
+function useCommand(_args: string[], _deps: AgentCommandDeps): number {
+  err(m("agent.use_retired"));
+  return 1;
 }
 
 function setCommand(args: string[], deps: AgentCommandDeps): number {
@@ -226,7 +240,8 @@ function setCommand(args: string[], deps: AgentCommandDeps): number {
     return 1;
   }
   ok(m("agent.set_saved", slot, agentDisplayName(agent)));
-  refreshAgentDossier(deps);
+  // US-V4-002: setting a project route is project-local — it no longer triggers a
+  // global dossier refresh (that retired side effect belongs to `roll index`).
   return 0;
 }
 
@@ -234,34 +249,38 @@ function viewCommand(deps: AgentCommandDeps): number {
   const { reg, d } = registry(deps);
   const { YELLOW, RED, GREEN, NC } = pal();
   const path = reg.configPath(process.env["ROLL_AGENTS_CONFIG"], d.fileExists);
-  const out: string[] = ["", `  ${m("agent.view_header")}`, ""];
+  const readDefault = deps.readDefaultAgent ?? readPrimaryAgent;
+  const cur = readDefault();
+  // US-V4-002: the default view shows BOTH the global machine default and the
+  // project route profile, two distinct concerns.
+  const out: string[] = ["", `  ${m("agent.view_default_label")}`, ""];
+  out.push(`    ${cur !== null && cur !== "" ? agentDisplayName(cur) : m("agent.default_none")}`, "");
+  out.push(`  ${m("agent.view_routes_label")}`, "");
   if (path === undefined) {
     out.push(`    ${YELLOW}${m("agent.view_no_config")}${NC}`);
     out.push(`    ${m("agent.view_no_config_hint")}`, "");
-    process.stdout.write(out.join("\n") + "\n");
-    return 0;
-  }
-
-  const text = d.readText(path);
-  out.push(`    ${m("agent.view_col_slot").padEnd(9)} ${m("agent.view_col_agent").padEnd(22)} ${m("agent.view_col_status").padEnd(8)} ${m("agent.view_col_note")}`);
-  for (const slot of VALID_SLOTS) {
-    const cfg = readSlotFromText(text, slot);
-    const agent = cfg?.agent;
-    const disp =
-      agent === undefined
-        ? m("agent.view_slot_unset")
-        : cfg?.model !== undefined && cfg.model !== ""
-          ? `${agentDisplayName(agent)} (${cfg.model})`
-          : agentDisplayName(agent);
-    const status =
-      agent === undefined ? "-" : reg.isInstalled(agent) ? `${GREEN}✓${NC}` : `${RED}✗${NC}`;
-    const note = slot === "fallback" ? m("agent.view_fallback_idle") : "";
-    out.push(`    ${slot.padEnd(9)} ${disp.padEnd(22)} ${status.padEnd(8)} ${note}`);
+  } else {
+    const text = d.readText(path);
+    out.push(`    ${m("agent.view_col_slot").padEnd(9)} ${m("agent.view_col_agent").padEnd(22)} ${m("agent.view_col_status").padEnd(8)} ${m("agent.view_col_note")}`);
+    for (const slot of VALID_SLOTS) {
+      const cfg = readSlotFromText(text, slot);
+      const agent = cfg?.agent;
+      const disp =
+        agent === undefined
+          ? m("agent.view_slot_unset")
+          : cfg?.model !== undefined && cfg.model !== ""
+            ? `${agentDisplayName(agent)} (${cfg.model})`
+            : agentDisplayName(agent);
+      const status =
+        agent === undefined ? "-" : reg.isInstalled(agent) ? `${GREEN}✓${NC}` : `${RED}✗${NC}`;
+      const note = slot === "fallback" ? m("agent.view_fallback_idle") : "";
+      out.push(`    ${slot.padEnd(9)} ${disp.padEnd(22)} ${status.padEnd(8)} ${note}`);
+    }
   }
   out.push(
     "",
-    "  roll agent set <slot> <agent>   — set the agent for a slot",
-    "  roll agent use <name>           — switch agent for this project",
+    "  roll agent default <agent>      — set the machine default agent (~/.roll/config.yaml)",
+    "  roll agent set <route> <agent>  — set one project route (easy|default|hard|fallback)",
     "  roll agent list                 — show installed agents",
     "",
   );
@@ -272,10 +291,11 @@ function viewCommand(deps: AgentCommandDeps): number {
 export function agentCommand(args: string[], deps: AgentCommandDeps = {}): number {
   const [sub, ...rest] = args;
   if (sub === "list") return (deps.listCommand ?? agentListCommand)(rest);
-  if (sub === "use") return useCommand(rest, deps);
+  if (sub === "default") return defaultCommand(rest, deps);
   if (sub === "set") return setCommand(rest, deps);
+  if (sub === "use") return useCommand(rest, deps); // retired — fails loud with migration guidance
   if (sub === undefined || sub === "") return viewCommand(deps);
   err(`Unknown subcommand: ${sub}`);
-  process.stdout.write("Usage: roll agent [set <slot> <agent>|use <name>|list]\n");
+  process.stdout.write("Usage: roll agent [default <agent>|set <route> <agent>|list]\n");
   return 1;
 }

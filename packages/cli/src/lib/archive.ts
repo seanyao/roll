@@ -211,14 +211,21 @@ export function generateIndex(projectPath: string): Record<string, string> {
 }
 
 /**
- * The epic to place a story under, consulting the authoritative index first,
- * then a live walk, then null (→ uncategorized). attest stays usable even when
- * the index has not been regenerated yet.
+ * The epic to place a story under. US-V4-001 (v4 truth plane): the LIVE
+ * filesystem is authoritative for a story's location — the existing
+ * `features/<epic>/<storyId>/` (or its feature markdown) IS the story's home.
+ * `.roll/index.json` is consulted ONLY as a fallback cache for ids the live walk
+ * can't place; it is never a delivery precondition. This is the inversion of the
+ * v3 "index-first" order: story artifact location no longer depends on a freshly
+ * regenerated index (a stale index entry can no longer mis-route an attest write).
+ * Returns null when neither the live walk nor the cache resolves (→ uncategorized).
  */
 export function epicForStory(projectPath: string, storyId: string): string | null {
+  const live = liveEpicOf(projectPath, storyId);
+  if (live !== null) return live;
   const fromIndex = readIndex(projectPath)[storyId];
   if (fromIndex !== undefined && fromIndex !== "") return fromIndex;
-  return liveEpicOf(projectPath, storyId);
+  return null;
 }
 
 /**

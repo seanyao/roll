@@ -110,12 +110,21 @@ describe("generateIndex", () => {
 });
 
 describe("epicForStory", () => {
-  it("prefers the authoritative index over a live walk", () => {
+  // US-V4-001: the live filesystem is authoritative; a stale index entry must NOT
+  // override the story's real on-disk home. (Inverts the v3 index-first order so
+  // attest no longer depends on a freshly regenerated .roll/index.json.)
+  it("prefers the live walk over a (possibly stale) index entry", () => {
     const proj = project(["| US-A-1 | x | 📋 Todo |"], [["alpha/US-A-1.md", "# US-A-1\n"]]);
-    writeFileSync(join(proj, ".roll", "index.json"), serializeIndex({ "US-A-1": "pinned" }));
-    expect(epicForStory(proj, "US-A-1")).toBe("pinned");
+    writeFileSync(join(proj, ".roll", "index.json"), serializeIndex({ "US-A-1": "stale-pin" }));
+    expect(epicForStory(proj, "US-A-1")).toBe("alpha");
   });
-  it("falls back to the live walk when the index has no entry", () => {
+  it("falls back to the index cache only when the live walk finds nothing", () => {
+    // No feature markdown on disk → live walk returns null → index cache resolves.
+    const proj = project(["| US-A-1 | x | 📋 Todo |"]);
+    writeFileSync(join(proj, ".roll", "index.json"), serializeIndex({ "US-A-1": "cached" }));
+    expect(epicForStory(proj, "US-A-1")).toBe("cached");
+  });
+  it("resolves a story from its live feature file with no index at all", () => {
     const proj = project(["| US-A-1 | x | 📋 Todo |"], [["alpha/US-A-1.md", "# US-A-1\n"]]);
     expect(epicForStory(proj, "US-A-1")).toBe("alpha");
   });

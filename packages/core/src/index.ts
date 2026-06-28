@@ -37,6 +37,7 @@ export * from "./loop/planner-contract.js";
 export * from "./loop/repair-loop.js";
 export * from "./supervisor/observe.js";
 export * from "./supervisor/advise.js";
+export * from "./supervisor/scheduler.js";
 export * from "./loop/morning-report.js";
 export * from "./loop/pr-loop.js";
 export * from "./loop/quality-gate.js";

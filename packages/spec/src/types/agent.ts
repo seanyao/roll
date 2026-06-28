@@ -130,6 +130,32 @@ export interface SupervisorInput {
   readonly budget?: { readonly spent: number; readonly cap: number | null };
 }
 
+/** US-V4-009 — an in-flight or candidate cycle for the parallel scheduler. */
+export interface SchedulableCycle {
+  readonly storyId: string;
+  /** Files the story is expected to touch (for conflict serialization). */
+  readonly files?: readonly string[];
+}
+
+/** US-V4-009 — inputs to the (pure) Supervisor parallel-cycle scheduler. */
+export interface ScheduleInput {
+  readonly maxParallelCycles: number;
+  readonly active: readonly SchedulableCycle[];
+  readonly candidates: readonly SchedulableCycle[];
+  /** Stories already with an OPEN PR (single-PR-per-story invariant). */
+  readonly openPrStories: readonly string[];
+  readonly budgetOk: boolean;
+  /** Merge queue depth + cap; when depth ≥ cap, new starts pause. */
+  readonly mergeQueue?: { readonly depth: number; readonly cap: number };
+}
+
+/** US-V4-009 — the scheduler's decision: which stories may start now + why the
+ *  rest must wait (serialized for conflict, capacity, budget, or merge queue). */
+export interface ScheduleDecision {
+  readonly start: readonly string[];
+  readonly wait: readonly { readonly storyId: string; readonly reason: string }[];
+}
+
 /** US-V4-008 — the Supervisor's projection over {@link SupervisorInput}. */
 export interface SupervisorFacts {
   readonly counts: { readonly todo: number; readonly inProgress: number; readonly blocked: number; readonly done: number };

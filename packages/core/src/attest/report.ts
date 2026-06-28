@@ -629,7 +629,7 @@ ${CHROME_SCRIPT}
 <body>
 ${CHROME_CONTROLS}
 <header class="doc">
-<p class="kicker">Roll · ${bi("Delivery Dossier", "交付档案")}</p>
+<p class="kicker">Roll · ${bi("Acceptance Report", "验收报告")}</p>
 <h1>${esc(input.title)}</h1>
 <p class="meta"><code>${esc(input.storyId)}</code> · ${bi("generated", "生成于")} ${esc(input.generatedAt)} · Gate: PASS</p>
 <div class="seal" aria-hidden="true"><span>ROLL</span>验讫</div>

@@ -17,8 +17,8 @@ export const v3Catalog: Catalog = {
 
   // `agent.*` — v4 default-agent vs project route-profile separation (US-V4-002).
   "agent.default_usage": {
-    en: "Usage: roll agent default <agent>",
-    zh: "用法：roll agent default <agent>",
+    en: "`roll agent default` is retired. Use `roll agent migrate --dry-run`, then author `supervise` in ~/.roll/agents.yaml.",
+    zh: "`roll agent default` 已退役。先用 `roll agent migrate --dry-run`，再在 ~/.roll/agents.yaml 中维护 `supervise`。",
   },
   "agent.default_current": {
     en: "Machine default agent: %s",
@@ -45,8 +45,8 @@ export const v3Catalog: Catalog = {
     zh: "已保留 .roll/agents.yaml 中自定义的项目路由",
   },
   "agent.use_retired": {
-    en: "`roll agent use` is retired. Set the machine default with `roll agent default <agent>`, or override one project route with `roll agent set <route> <agent>`.",
-    zh: "`roll agent use` 已退役。用 `roll agent default <agent>` 设置机器默认，或用 `roll agent set <route> <agent>` 覆盖单条项目路由。",
+    en: "This legacy agent command is retired. Use `roll agent migrate --dry-run`, then author roles in ~/.roll/agents.yaml or .roll/agents.yaml.",
+    zh: "这个 legacy agent 命令已退役。先用 `roll agent migrate --dry-run`，再在 ~/.roll/agents.yaml 或 .roll/agents.yaml 中维护角色绑定。",
   },
   "agent.view_default_label": {
     en: "Default agent (~/.roll/config.yaml)",
@@ -275,8 +275,8 @@ export const v3Catalog: Catalog = {
   // `design.*` — explicit `roll design` entry point (US-ONBOARD-NUDGE-004).
   // Thin wrapper that launches the existing $roll-design skill interactively.
   "design.usage": {
-    en: "Usage: roll design [--from-file <path>] [--agent <name>]\n  Launch the $roll-design skill in an interactive agent conversation.\n  `--from-file` binds a PRD/brief file as the design input.\n  `--agent` and `ROLL_DESIGN_AGENT` override the configured primary_agent.\n  Unlike `roll init`, this command runs an LLM — run it only when you want to design.",
-    zh: "用法：roll design [--from-file <path>] [--agent <name>]\n  在交互式 agent 对话中启动 $roll-design skill。\n  `--from-file` 会把 PRD/brief 文件绑定为设计输入。\n  `--agent` 与 `ROLL_DESIGN_AGENT` 覆盖已配置的 primary_agent。\n  与 `roll init` 不同，本命令会运行 LLM——只在需要设计时执行。",
+    en: "Usage: roll design [--from-file <path>] [--agent <name>]\n  Launch the $roll-design skill in an interactive agent conversation.\n  `--from-file` binds a PRD/brief file as the design input.\n  `--agent` and `ROLL_DESIGN_AGENT` override only this design session; scoped roles live in ~/.roll/agents.yaml and .roll/agents.yaml.\n  Unlike `roll init`, this command runs an LLM — run it only when you want to design.",
+    zh: "用法：roll design [--from-file <path>] [--agent <name>]\n  在交互式 agent 对话中启动 $roll-design skill。\n  `--from-file` 会把 PRD/brief 文件绑定为设计输入。\n  `--agent` 与 `ROLL_DESIGN_AGENT` 只覆盖本次 design session；scoped roles 位于 ~/.roll/agents.yaml 和 .roll/agents.yaml。\n  与 `roll init` 不同，本命令会运行 LLM——只在需要设计时执行。",
   },
   "design.not_roll_project": {
     en: "This directory is not a Roll project (no .roll/). Run `roll init` first.",
@@ -303,26 +303,26 @@ export const v3Catalog: Catalog = {
     zh: "未找到设计输入文件：%s",
   },
 
-  // `setup.*` — primary agent selection during setup (US-ONBOARD-NUDGE-006).
+  // `setup.*` — legacy setup agent selection (compatibility only).
   "setup.primary_prompt": {
-    en: "Multiple AI agents detected. Pick a default:",
-    zh: "检测到多个 AI agent，请选择默认：",
+    en: "Multiple AI agents detected. Pick the initial supervise role:",
+    zh: "检测到多个 AI agent，请选择初始 supervise 角色：",
   },
   "setup.primary_auto_set": {
-    en: "Only %s is installed — set as default agent.",
-    zh: "仅安装了 %s — 已设为默认 agent。",
+    en: "Only %s is installed — recorded as the initial supervise agent.",
+    zh: "仅安装了 %s — 已记录为初始 supervise agent。",
   },
   "setup.primary_no_agents": {
-    en: "No AI agents installed. Run `roll agent default <agent>` later to set the machine default, or install one (e.g., claude, kimi, pi).",
-    zh: "未安装 AI agent。请稍后运行 `roll agent default <agent>` 设置机器默认，或先安装一个（如 claude、kimi、pi）。",
+    en: "No AI agents installed. Install one (e.g., claude, kimi, pi), then run `roll agent migrate --dry-run` or author ~/.roll/agents.yaml.",
+    zh: "未安装 AI agent。请先安装一个（如 claude、kimi、pi），再运行 `roll agent migrate --dry-run` 或维护 ~/.roll/agents.yaml。",
   },
   "setup.primary_reselect": {
-    en: "--reselect: pick a new default agent.",
-    zh: "--reselect：重新选择默认 agent。",
+    en: "--reselect: pick a new initial supervise agent.",
+    zh: "--reselect：重新选择初始 supervise agent。",
   },
   "setup.primary_set": {
-    en: "Default agent set to %s.",
-    zh: "默认 agent 已设为 %s。",
+    en: "Initial supervise agent recorded as %s.",
+    zh: "初始 supervise agent 已记录为 %s。",
   },
 
   // FIX-1021: `roll init` summary / confirmation
@@ -331,8 +331,8 @@ export const v3Catalog: Catalog = {
     zh: "检测到项目类型：%s",
   },
   "init.will_scaffold": {
-    en: "Roll will scaffold AGENTS.md, .roll/backlog.md, .roll/features/, .roll/pairing.yaml, and .claude/CLAUDE.md.",
-    zh: "Roll 将在此目录生成 AGENTS.md、.roll/backlog.md、.roll/features/、.roll/pairing.yaml 与 .claude/CLAUDE.md。",
+    en: "Roll will scaffold AGENTS.md, .roll/backlog.md, .roll/features/, scoped agent-ready .roll/, and .claude/CLAUDE.md.",
+    zh: "Roll 将在此目录生成 AGENTS.md、.roll/backlog.md、.roll/features/、可承载 scoped agent 配置的 .roll/ 与 .claude/CLAUDE.md。",
   },
   "init.proceed_prompt": {
     en: "Proceed?",

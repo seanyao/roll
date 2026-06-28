@@ -12,6 +12,7 @@ import {
   agentDisplayName,
   agentInstalledByName as coreAgentInstalledByName,
   canonicalAgentName,
+  normalizeAgentScopeConfig,
   type AgentEnv,
 } from "@roll/core";
 import { resolveLang, t, v2Catalog, type Lang } from "@roll/spec";
@@ -103,7 +104,20 @@ export function agentInstalledByName(agent: string): boolean {
   return coreAgentInstalledByName(realAgentEnv(), agent);
 }
 
-/** Mirrors _project_agent: local.yaml → .roll.yaml → global config → claude. */
+function scopedSuperviseAgent(file: string): string | undefined {
+  if (!existsSync(file)) return undefined;
+  const text = readFileSync(file, "utf8");
+  if (!text.includes("roll-agents/v1")) return undefined;
+  const parsed = normalizeAgentScopeConfig(text);
+  if (parsed.config === null || parsed.errors.length > 0) return undefined;
+  const binding = parsed.config.roles.supervise;
+  if (binding === undefined) return undefined;
+  if (binding.kind === "fixed") return binding.agent;
+  if (binding.kind === "select") return binding.from?.[0] ?? Object.keys(parsed.config.agents)[0];
+  return undefined;
+}
+
+/** Current marker: scoped supervise role → legacy local/global hints → claude. */
 export function projectAgent(): string {
   const firstAgentField = (file: string, pattern: RegExp): string | undefined => {
     if (!existsSync(file)) return undefined;
@@ -115,11 +129,15 @@ export function projectAgent(): string {
     }
     return undefined;
   };
+  const rollHome = process.env["ROLL_HOME"] ?? join(homedir(), ".roll");
+  const fromProjectScope = scopedSuperviseAgent(".roll/agents.yaml");
+  if (fromProjectScope !== undefined) return fromProjectScope;
+  const fromMachineScope = scopedSuperviseAgent(join(rollHome, "agents.yaml"));
+  if (fromMachineScope !== undefined) return fromMachineScope;
   const fromLocal = firstAgentField(".roll/local.yaml", /^agent:/);
   if (fromLocal !== undefined) return fromLocal;
   const fromRollYaml = firstAgentField(".roll.yaml", /^agent:/);
   if (fromRollYaml !== undefined) return fromRollYaml;
-  const rollHome = process.env["ROLL_HOME"] ?? join(homedir(), ".roll");
   const fromGlobal = firstAgentField(join(rollHome, "config.yaml"), /primary_agent:/);
   if (fromGlobal !== undefined) return fromGlobal;
   return "claude";

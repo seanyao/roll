@@ -17,7 +17,7 @@ roll 的可靠性不靠「线上没出事」来证明，靠可执行、可证伪
 | I7 | 两个名字重叠的项目并行跑 | 状态互不污染（路径即身份） |
 | I8 | 写 cycle_end 前杀进程 | 仅凭事件流重建出正确终态；trap 补写 |
 | I9 | 两个 loop 同时写 Backlog | 乐观锁重试，不丢更新；精确匹配不误伤 depends-on 行 |
-| I10 | 路由目标 agent 不可用 | 切 fallback 槽；同输入路由结果恒定 |
+| I10 | 角色候选 agent 不可用 | 当前 resolution 记录 skipped runtime health；无可用候选则 PAUSE + ALERT，不静默改写静态池 |
 | I11 | 模拟成本逼近日上限 | 自动降级到便宜槽 或 暂停 + ALERT |
 | I12 | 制造 0 个 TCR 提交的 Cycle | 判定失败 + ALERT；Feature 可 revert 到 Cycle 1 且仓库干净 |
 
@@ -45,7 +45,7 @@ roll 的可靠性不靠「线上没出事」来证明，靠可执行、可证伪
 | I1–I4, I7, I8, I12 | S | 保持 S | 对应 L1 混沌测试常绿 + L2 outcome/cleanliness 趋势 |
 | I5 | A | S | L1-I5 通过 + 毒 Story 不拖累吞吐 |
 | I9 | A | S | L1-I9 通过 + 无 Backlog 写冲突丢更新 |
-| I10 | A | S | L1-I10 通过 + 路由可预测性 |
+| I10 | A | S | L1-I10 通过 + 角色解析可预测性 |
 | I11 | B | S | L1-I11 通过 + 成本不破上限 |
 
 任何能力从 S 降级 = 回归，触发 ALERT。

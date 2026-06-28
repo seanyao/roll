@@ -32,10 +32,10 @@
  */
 import {
   BacklogStore,
+  AGENT_REGISTRY_NAMES,
   agentsInstalled,
   appendDelivery,
   heteroAvailable,
-  readAgentsYamlAllowedAgents,
   nodeDeliveryStore,
   type CapturedFacts,
   type CycleCommand,
@@ -106,6 +106,8 @@ import {
   explainExecutionProfile,
   applyExecutionPolicy,
   normalizeAgentConfig,
+  normalizeAgentScopeConfig,
+  resolveAgentScopeRole,
   assembleEvalReport,
   renderEvalReport,
   validateEvaluatorArtifact,
@@ -117,7 +119,7 @@ import {
   initialRepairState,
   DEFAULT_MAX_REPAIR_ROUNDS,
 } from "@roll/core";
-import type { ArtifactManifest, ExecutionProfile, Rig } from "@roll/spec";
+import type { AgentName, AgentScopeConfig, AgentScopeRole, AgentScopeRoleBinding, ArtifactManifest, ExecutionProfile, Rig } from "@roll/spec";
 import {
   parseEventLine,
   STATUS_MARKER,
@@ -167,6 +169,7 @@ import {
 } from "@roll/infra";
 import { execFile, execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -313,24 +316,65 @@ function eventTs(ports: Ports): number {
   return epochMs(ports.clock());
 }
 
+function scopedCandidateAgents(
+  binding: AgentScopeRoleBinding,
+  layers: readonly { config: AgentScopeConfig; path: string }[],
+): AgentName[] | null {
+  if (binding.kind === "inherit") return null;
+  if (binding.kind === "fixed") return [binding.agent];
+  const declared = new Map<AgentName, readonly AgentScopeRole[]>();
+  for (const layer of layers) {
+    for (const [agent, spec] of Object.entries(layer.config.agents) as [AgentName, NonNullable<AgentScopeConfig["agents"][AgentName]>][]) {
+      declared.set(agent, spec.capabilities);
+    }
+  }
+  const registryAgents = AGENT_REGISTRY_NAMES as readonly AgentName[];
+  const pool: readonly AgentName[] =
+    binding.from !== undefined && binding.from.length > 0 ? binding.from : registryAgents.filter((agent) => declared.has(agent));
+  const required = binding.require ?? [];
+  return pool.filter((agent) => {
+    const caps = declared.get(agent) ?? [];
+    return required.every((role) => caps.includes(role));
+  });
+}
+
+function scopedEvaluateAllowedAgents(layers: readonly { config: AgentScopeConfig; path: string }[]): AgentName[] | null {
+  for (const layer of [...layers].reverse()) {
+    const binding = layer.config.defaults["story"]?.roles.evaluate ?? layer.config.roles.evaluate;
+    if (binding === undefined) continue;
+    const agents = scopedCandidateAgents(binding, layers);
+    if (agents !== null) return agents;
+  }
+  return null;
+}
+
 /**
- * FIX-935 — project-config allowed agents from `.roll/agents.yaml` slots.
- * Returns a Set of canonical agent names configured across easy/default/hard/
- * fallback slots. When agents.yaml is missing/unreadable, returns undefined so
- * callers fall back to the installed list (backward-compatible). This prevents
- * scoring and pairing from auto-enabling machine-detected agents the project
- * has not declared (e.g. codex or claude).
+ * Project-config allowed agents from `.roll/agents.yaml`.
+ * `roll-agents/v1` story.evaluate bindings are primary. Legacy route-slot
+ * allowlists are read only for projects that have not migrated yet.
  */
 function projectAllowedAgents(repoCwd: string): Set<string> | undefined {
   const path = join(repoCwd, ".roll", "agents.yaml");
+  const machinePath = join(process.env["ROLL_HOME"] ?? join(homedir(), ".roll"), "agents.yaml");
+  const scopedLayers = [readScopedAgentLayer(machinePath), readScopedAgentLayer(path)].filter(
+    (layer): layer is { config: AgentScopeConfig; path: string } => layer !== null,
+  );
+  if (scopedLayers.length > 0) {
+    const agents = scopedEvaluateAllowedAgents(scopedLayers);
+    return agents !== null ? new Set(agents) : undefined;
+  }
+
   let text: string;
   try {
     text = readFileSync(path, "utf8");
   } catch {
     return undefined;
   }
-  const agents = readAgentsYamlAllowedAgents(text);
-  return agents.length > 0 ? new Set(agents) : undefined;
+  const parsed = normalizeAgentConfig(text);
+  const legacyAgents = AGENT_REGISTRY_NAMES.filter((agent) =>
+    ["easy", "default", "hard", "fallback"].some((slot) => parsed.config.routing[slot as keyof typeof parsed.config.routing]?.rig.agent === agent),
+  );
+  return legacyAgents.length > 0 ? new Set(legacyAgents) : undefined;
 }
 
 // ── Ports bundle (the injectable execution surface) ───────────────────────────
@@ -1677,58 +1721,25 @@ export async function executeCommand(
         }
         return cause;
       };
-      // FIX-346 — read the persisted event stream and fold it into the set of
-      // peers to DROP from selection because they have failed headless auth too
-      // many times in a row (agy's Google OAuth / claude's keychain cooldown —
-      // creds the unattended loop CANNOT refresh interactively). The first time a
-      // peer crosses the threshold we also emit one `pair:excluded` event so the
-      // exclusion is OBSERVABLE (AC3) — the owner sees WHY an agent stopped being
-      // consulted and can re-login it offline. Best-effort: an unreadable stream
-      // yields an empty exclusion set (no peer is wrongly benched). Re-reading the
-      // file (rather than threading the parsed list) keeps this self-contained and
-      // picks up the `agent:blocked` events `attributeBlockCause` just appended.
-      const computeExcludedPeers = (): Set<string> => {
+      // V4 fairness: historical auth failures are observability, not static pool
+      // policy. We still fold the stream so diagnostics can explain auth streaks,
+      // but the returned exclusion set is intentionally empty. Current runtime
+      // availability is decided by the spawn/probe for this attempt.
+      const computeAuthDiagnostics = (): Set<string> => {
         try {
           if (!existsSync(ports.paths.eventsPath)) return new Set();
           const events = readFileSync(ports.paths.eventsPath, "utf8")
             .split("\n")
             .map(parseEventLine)
             .filter((e): e is RollEvent => e !== null);
-          const states = peerAuthStates(events);
-          const excluded = excludedPeers(events);
-          // Emit `pair:excluded` only when a peer crosses the threshold for a NEW
-          // streak — i.e. it is excluded now AND the stream does not already carry a
-          // `pair:excluded` for this peer since its last success (verdict/score/
-          // reset). This keeps the announcement once-per-streak: a persistently
-          // excluded peer does NOT re-emit every cycle (the whole point of FIX-346
-          // is to KILL the per-cycle auth noise, not relocate it).
-          const announced = new Set<string>();
-          for (const e of events) {
-            if (e.type === "pair:verdict" || e.type === "pair:score") announced.delete(canonicalAgentName(e.peer));
-            else if (e.type === "pair:excluded") announced.add(canonicalAgentName(e.agent));
-          }
-          for (const peer of excluded) {
-            if (announced.has(peer)) continue; // already announced this streak
-            ports.events.appendEvent(ports.paths.eventsPath, {
-              type: "pair:excluded",
-              cycleId: ctx.cycleId ?? "",
-              agent: peer,
-              cause: "auth",
-              failures: states[peer]?.consecutiveAuthFailures ?? 0,
-              ts: eventTs(ports),
-            });
-          }
-          return excluded;
+          peerAuthStates(events);
+          return excludedPeers(events);
         } catch {
-          return new Set(); // best-effort — a read miss never benches a peer
+          return new Set();
         }
       };
-      // `isAvailable` for selection: a peer over its consecutive-auth-failure
-      // budget is treated as UNAVAILABLE so selectPairingCandidates drops it and
-      // swaps to the next heterogeneous peer (AC2). Computed up front from the
-      // stream so far; this cycle's fresh failures bench the peer on the NEXT cycle.
       const peerAvailable = (() => {
-        const excluded = computeExcludedPeers();
+        const excluded = computeAuthDiagnostics();
         return (agent: string): boolean => !excluded.has(canonicalAgentName(agent));
       })();
       // The one-way peer-consult closure, shared by the peer gate's retry
@@ -1867,11 +1878,11 @@ export async function executeCommand(
       // high-complexity / cross-module delivery (e.g. a legit 16-file currency fix)
       // as `hetero_available_self_review_violation`, even though a genuine hetero
       // review ran moments later. The peerGate* setup vars above are consumed there.
-      // US-PAIR-003 cross-agent pairing: a heterogeneous
-      // peer ONE-WAY reviews the diff. file-absent (.roll/pairing.yaml) = OFF, so
-      // this is inert until the owner opts in via `roll pair init` — no behavior
-      // change for repos without the config. NEVER blocks the cycle (30s hard
-      // timeout in reviewPeer; runPairing swallows all errors).
+      // US-PAIR-003 legacy cross-agent pairing: a heterogeneous peer ONE-WAY
+      // reviews the diff for projects that still carry .roll/pairing.yaml. New
+      // projects bind story.evaluate in .roll/agents.yaml; pairing remains a
+      // compatibility path. NEVER blocks the cycle (30s hard timeout in reviewPeer;
+      // runPairing swallows all errors).
       //
       // US-PAIR-004 multi-stage: pairing fires at EVERY enabled stage
       // (design/test/code/cycle), each independently opt-out via pairing.yaml
@@ -1902,8 +1913,8 @@ export async function executeCommand(
         // US-PAIR-004: build the deps once, then run each enabled stage.
         const pairingDeps = {
           installed: ports.installedAgents?.() ?? agentsInstalled(realAgentEnv()),
-          // FIX-346: drop a peer that has repeatedly failed headless auth so the
-          // selector swaps to the next heterogeneous peer (no re-spawn-and-refail).
+          // Historical auth streaks are diagnostics only; current availability
+          // is checked by the runtime attempt.
           isAvailable: peerAvailable,
           reviewPeer,
           ...(pairHistory !== undefined ? { history: pairHistory } : {}),
@@ -1928,10 +1939,6 @@ export async function executeCommand(
       let peerBlocked = peerGate.blocked;
       if (peerGate.blocked) {
         // AC-H3: bounded retry — exactly one re-attempt via the existing consult.
-        // FIX-346: drop auth-excluded peers from the retry pool too — re-spawning a
-        // peer that keeps failing headless auth only re-fails (and re-pops nothing,
-        // since the spawn is headless). The next non-excluded hetero peer is tried;
-        // if none remain the retry blocks fail-loud (unchanged), never self-reviews.
         const retryInstalled = peerGateInstalled.filter((a) => peerAvailable(a));
         const retry = await retryPeerConsult(ports.paths.worktreePath, runtimeDir, cycleIdStr, {
           installed: retryInstalled.length > 0 ? retryInstalled : peerGateInstalled,
@@ -2113,9 +2120,7 @@ export async function executeCommand(
         // nothing here (the independence red line stands).
         const scoreResult = await runScorePairing(ports.repoCwd, dirname(ports.paths.eventsPath), ctx.cycleId ?? "", ctx.agent ?? "", storyId, skill, summary, {
           installed: ports.installedAgents?.() ?? agentsInstalled(realAgentEnv()),
-          // FIX-346: an auth-excluded peer is unavailable to score too. The score
-          // stage stays fail-loud only when the WHOLE pool is excluded (one
-          // expired agent must not fail the cycle — AC2).
+          // Historical auth streaks do not shrink the fair candidate pool.
           isAvailable: peerAvailable,
           scorePeer,
           event: (e: PairEvent) => ports.events.appendEvent(ports.paths.eventsPath, e as RollEvent),
@@ -4346,6 +4351,50 @@ export async function bootstrapWorktreeSkills(
 
 // ── Node-backed Ports wiring (real infra) ─────────────────────────────────────
 
+function readScopedAgentLayer(path: string): { config: AgentScopeConfig; path: string } | null {
+  if (!existsSync(path)) return null;
+  const text = readFileSync(path, "utf8");
+  if (!text.includes("roll-agents/v1")) return null;
+  const parsed = normalizeAgentScopeConfig(text);
+  if (parsed.config === null || parsed.errors.length > 0) return null;
+  return { config: parsed.config, path };
+}
+
+function scopedStoryExecuteRoute(repoCwd: string): { agent: string; model: string } | null {
+  const rollHome = process.env["ROLL_HOME"] ?? join(homedir(), ".roll");
+  const layers = [
+    readScopedAgentLayer(join(rollHome, "agents.yaml")),
+    readScopedAgentLayer(join(repoCwd, ".roll", "agents.yaml")),
+  ].filter((layer): layer is { config: AgentScopeConfig; path: string } => layer !== null);
+  if (layers.length === 0) return null;
+
+  const installed = new Set(agentsInstalled(realAgentEnv()).map((name) => canonicalAgentName(name)));
+  const runtimeHealth = Object.fromEntries(
+    AGENT_REGISTRY_NAMES.map((agent) => [
+      agent,
+      installed.has(agent) ? { available: true } : { available: false, reason: "not-installed" },
+    ]),
+  ) as Partial<Record<AgentName, { available: boolean; reason?: string }>>;
+  const resolution = resolveAgentScopeRole({
+    scope: "story",
+    role: "execute",
+    layers,
+    runtimeHealth,
+  });
+  if (resolution.ok) {
+    return {
+      agent: resolution.resolved.agent,
+      model: resolution.resolved.model ?? "",
+    };
+  }
+  const hasScopedBindingFailure = resolution.failure.source !== undefined || resolution.failure.candidates.length > 0;
+  if (hasScopedBindingFailure) {
+    const reason = resolution.failure.errors[0] ?? "story.execute unresolved";
+    throw new Error(`scoped story.execute resolution failed: ${reason}`);
+  }
+  return null;
+}
+
 /**
  * Build the real Node-backed {@link Ports} bundle. The agent spawn defaults to
  * {@link realAgentSpawn} (claude argv); tests override `agentSpawn` (+ the github
@@ -4592,20 +4641,23 @@ export function nodePorts(opts: {
     route: opts.routeDeps
       ? {
           resolve(storyId, estMin) {
+            const scoped = scopedStoryExecuteRoute(opts.repoCwd);
+            if (scoped !== null) return scoped;
             const tier: Tier = classifyComplexity(estMin);
             const routeDeps = opts.routeDeps;
-            // FIX-930: a story re-picked after a zero-TCR self-heal swap carries a
-            // tried-agent set; route the NEXT untried agent (resolveRouteExcluding)
-            // so the swap actually changes who builds. Empty set ⇒ plain resolveRoute
-            // (unchanged behaviour). The store lives at the MAIN runtime dir (repoCwd
-            // is the main project; .roll is symlink-resolved either way).
+            // Compatibility fallback for legacy tier slots. FIX-930: a story
+            // re-picked after a zero-TCR self-heal swap carries a tried-agent
+            // set; route the NEXT untried agent (resolveRouteExcluding) so the
+            // swap actually changes who builds. Empty set => plain resolveRoute.
+            // The store lives at the MAIN runtime dir (repoCwd is the main
+            // project; .roll is symlink-resolved either way).
             const rt = (process.env["ROLL_PROJECT_RUNTIME_DIR"] ?? "").trim() || join(opts.repoCwd, ".roll", "loop");
             const tried = storyId !== "" ? readSelfHeal(rt, storyId).triedAgents : [];
             const dec =
               tried.length > 0
                 ? (resolveRouteExcluding(tier, routeDeps, tried) ?? resolveRoute(tier, routeDeps))
                 : resolveRoute(tier, routeDeps);
-            // Thread the slot's NATIVE --model through to the spawn; absent ⇒ ""
+            // Thread the legacy slot's native --model through to the spawn; absent => ""
             // (the orchestrator's `ctx.model !== ""` guard then omits --model and
             // the agent uses its own default).
             return { agent: dec.agent, model: dec.model ?? "" };

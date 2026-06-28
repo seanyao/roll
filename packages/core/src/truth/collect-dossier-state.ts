@@ -6,7 +6,7 @@
  * Architecture: the selector is PURE composition. I/O is injected via the
  * optional CollectorDeps parameter. When deps are omitted, a default
  * best-effort implementation (using node:fs directly) is used — suitable for
- * the daemon and tests. The CLI wires the full reconciled collectors for
+ * static archive rendering and tests. The CLI wires the full reconciled collectors for
  * byte-identical output.
  */
 import type { StoryEvidenceFlags, TruthSnapshot, TruthSnapshotLoop, TruthSnapshotOnDeck, TruthSnapshotPanelSlot, TruthSnapshotPanels, TruthSnapshotProject, TruthSnapshotStoryEntry } from "@roll/spec";
@@ -358,7 +358,7 @@ function collectOnDeck(cwd: string, epics: ReturnType<typeof collectDossier>): T
  * dossier data collectors into one TruthSnapshot.
  *
  * When called as `collectDossierState(cwd)`, uses default best-effort I/O
- * collectors (suitable for daemon / tests). When called with `deps`, the
+ * collectors (suitable for archive rendering / tests). When called with `deps`, the
  * caller can wire the full reconciled collectors for byte-identical output
  * (used by generateDossierPages).
  *
@@ -370,7 +370,7 @@ export function collectDossierState(
   cwd: string,
   opts?: { rebuild?: boolean; deps?: CollectorDeps },
 ): TruthSnapshot {
-  void opts?.rebuild; // reserved for future daemon cache rebuild
+  void opts?.rebuild; // reserved for future archive cache rebuild
   const deps = opts?.deps ?? {};
   const buildRunCache = deps.buildRunCache ?? defaultBuildRunCache;
   const mergeEvidence = deps.mergeEvidence ?? defaultMergeEvidence;

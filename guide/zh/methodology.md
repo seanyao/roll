@@ -601,20 +601,28 @@ macOS 上使用 **launchd**（plist 安装到 `~/Library/LaunchAgents/`），Lin
 
 如果使用的 agent 支持原生调度（如 Claude Code hooks），优先使用原生调度，生命周期管理更干净。
 
-### 9.4 按机器的 Agent 路由
+### 9.4 Scoped Agent 角色
 
-Agent 选择是**按机器**的，配置在 `.roll/agents.yaml`——四个复杂度槽位，各自映射到一个本机已装 agent：
+Agent 选择表达为 `Scope -> Role -> Binding -> Agent -> optional Model`。
+Machine Scope 在 `~/.roll/agents.yaml`，Project Scope 在 `.roll/agents.yaml`。
+loop 解析 `story.execute` 给 Builder，解析 `story.evaluate` 给评审/打分。
 
 ```yaml
-# .roll/agents.yaml（按机器；永不提交）
-schema: v3
-easy:     { agent: pi }
-default:  { agent: pi }
-hard:     { agent: claude }
-fallback: { agent: kimi }
+schema: roll-agents/v1
+scope: project
+inherits: machine
+defaults:
+  story:
+    roles:
+      execute:
+        kind: select
+        from: [kimi, codex, pi]
+        require: [execute]
+        strategy: first-available
 ```
 
-故事的 `est_min` 决定档位（easy ≤ 8 < default ≤ 20 < hard），档位槽决定 agent。档位槽为空时依次回落：`default` 槽 → `local.yaml` 的单 agent 默认（非 loop 场景的偏好，存在时）→ 首个已装 agent。`roll agent use <name>` 更新槽位。`agents.yaml` 之外不存在逐档覆盖——任何项目级单字段都不会把全部复杂度档坍缩到一个 agent 上。
+运行时可用性在 resolution/spawn 时检查。auth、网络、VPN、账号或 binary 探测失败只让
+候选在本次 resolution 中被跳过，不会改写静态 pool。
 
 ### 9.5 人类保留的权力
 
@@ -633,7 +641,8 @@ roll loop on|off          # 启用 / 停用当前项目的定时执行
 roll loop now             # 立即触发一个周期
 roll loop status          # 查看调度状态 + 任何 ALERT
 roll cycle <id>           # 查看单个 cycle 轨迹与证据指针
-roll agent use <name>     # 切换当前项目的 agent
+roll agent                # 查看 Machine Scope、Project Scope、角色、pool
+roll agent migrate        # 把 legacy agent 文件迁到 roll-agents/v1
 roll agent list           # 列出已安装的 agent
 roll                      # 项目 dashboard（在项目目录）：loop 状态 + 摘要
 ```
@@ -685,9 +694,9 @@ roll                      # 项目 dashboard（在项目目录）：loop 状态 
 | `roll init` | 在项目目录创建 `AGENTS.md` + `.roll/` 骨架（`backlog.md`、`features/`、`domain/`）；已有代码库引导到 `$roll-onboard`；已有 `AGENTS.md` 则重新合并 |
 | `roll status` | 显示同步状态、技能软链接、检测到的 AI 工具 |
 | `roll backlog` | 显示 `.roll/backlog.md` 中所有待处理任务 |
-| `roll agent [use <name>\|list]` | 切换项目 agent——影响所有 🤖 命令 |
+| `roll agent [migrate\|list]` | 查看/迁移 `~/.roll/agents.yaml` 与 `.roll/agents.yaml` 中的 scoped agent roles |
 | `roll loop <on\|off\|now\|status\|runs\|log\|story\|events\|eval\|signals\|pause\|resume\|reset\|gc>` | 🤖 管理自主 BACKLOG 执行器(三通道:loop/dream/pr) |
 | `roll cycle <id>` | 展示单个 cycle 的轨迹、PR/diff 指针和证据链接 |
-| `roll pair [init\|status]` | 🤖 跨 Agent 配对:建造期异构同行复检 |
+| `roll pair [status\|score]` | 🤖 结对可观测与显式评审打分；新默认配置在 `.roll/agents.yaml` |
 | `roll release [ship\|waiver]` | 发版指引 · 过闸打 tag · 记录化漂移豁免——npm publish 永远人工 |
 | `roll`（无参数，在项目目录） | Dashboard：loop 状态、待办数量、最新摘要 |

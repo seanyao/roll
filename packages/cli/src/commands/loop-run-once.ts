@@ -640,13 +640,14 @@ export function readSkillBody(projectPath: string): string | null {
 }
 
 /**
- * Build route deps mirroring bash `_loop_pick_agent_for_story`: the per-tier
- * slot comes from agents.yaml ONLY (the router walks tier → default →
- * firstInstalled). `local.yaml agent:` is NOT a tier override — in v2 it is
- * the single-agent default for non-loop contexts and the cold-start seed for
- * the `default` slot; consulting it per-slot would collapse all tiers to one
- * agent (FIX-223). `ROLL_LOOP_AGENT` is likewise routing OUTPUT consumed by
- * loop-fmt/dream, never a selection input.
+ * Build legacy route deps for projects that have not migrated to scoped
+ * `roll-agents/v1` role bindings. The executor first tries `story.execute`;
+ * this tier slot reader is only the compatibility fallback. `local.yaml agent:`
+ * is NOT a tier override — in v2 it is the single-agent default for non-loop
+ * contexts and the cold-start seed for the `default` slot; consulting it
+ * per-slot would collapse all tiers to one agent (FIX-223). `ROLL_LOOP_AGENT`
+ * is likewise routing OUTPUT consumed by loop-fmt/dream, never a selection
+ * input.
  *
  * Exported for tests.
  */

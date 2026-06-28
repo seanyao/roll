@@ -33,7 +33,14 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { AGENT_REGISTRY_NAMES, agentInstalledByName as coreAgentInstalledByName, isRemovedAgentName, type AgentEnv } from "@roll/core";
+import {
+  AGENT_REGISTRY_NAMES,
+  agentInstalledByName as coreAgentInstalledByName,
+  isRemovedAgentName,
+  planAgentScopeMigration,
+  type AgentEnv,
+} from "@roll/core";
+import type { AgentName } from "@roll/spec";
 import { repoRoot } from "../bridge.js";
 
 // ─── env (bin/roll:7-24) ──────────────────────────────────────────────────────
@@ -367,7 +374,6 @@ editor: \${EDITOR:-vim}
 # loop_minute: 5        # omit to auto-derive from project hash
 loop_dream_hour: 3
 # loop_dream_minute: 10 # omit to auto-derive
-primary_agent: claude
 `;
 
 function firstInstalledAgent(): string | null {
@@ -377,19 +383,31 @@ function firstInstalledAgent(): string | null {
   return null;
 }
 
-/**
- * Atomically replace primary_agent in config (US-ONBOARD-NUDGE-006 AC7).
- * Writes to a temp file then renames over the original, preserving all
- * unknown fields — never truncates config on partial write or concurrent read.
- */
-export function replacePrimaryAgent(newAgent: string): void {
+function atomicWrite(path: string, text: string): void {
+  const tmp = `${path}.tmp-${process.pid}`;
+  writeFileSync(tmp, text);
+  renameSync(tmp, path);
+}
+
+export function writeMachineAgentScope(superviseAgent?: string): void {
   const cfg = rollConfig();
-  if (!existsSync(cfg) || newAgent === "") return;
-  const lines = readFileSync(cfg, "utf8").split("\n");
-  const out = lines.map((l) => (/^primary_agent:/.test(l) ? `primary_agent: ${newAgent}` : l));
-  const tmp = `${cfg}.tmp-${process.pid}`;
-  writeFileSync(tmp, out.join("\n"));
-  renameSync(tmp, cfg);
+  const target = join(rollHome(), "agents.yaml");
+  const globalConfigText = existsSync(cfg) ? readFileSync(cfg, "utf8") : DEFAULT_CONFIG;
+  const existing = existsSync(target) ? readFileSync(target, "utf8") : undefined;
+  const machineSuperviseAgent =
+    superviseAgent !== undefined && (AGENT_REGISTRY_NAMES as readonly string[]).includes(superviseAgent)
+      ? (superviseAgent as AgentName)
+      : undefined;
+  const plan = planAgentScopeMigration({
+    globalConfigText,
+    machineAgentsText: existing,
+    machineTargetPath: target,
+    projectTargetPath: ".roll/agents.yaml",
+    machineSuperviseAgent,
+  });
+  if (!plan.machine.changed) return;
+  mkdirSync(dirname(target), { recursive: true });
+  atomicWrite(target, plan.machine.text);
 }
 
 /** Port of _install_local. Returns false on a hard source-missing failure. */
@@ -407,9 +425,10 @@ export function installLocal(force: boolean): boolean {
   if (!existsSync(cfg)) {
     writeFileSync(cfg, DEFAULT_CONFIG);
     const detected = firstInstalledAgent();
-    if (detected !== null && detected !== "claude") replacePrimaryAgent(detected);
+    writeMachineAgentScope(detected ?? undefined);
   }
   ensureConfigEntries();
+  if (!existsSync(join(rollHome(), "agents.yaml"))) writeMachineAgentScope(firstInstalledAgent() ?? undefined);
   return true;
 }
 

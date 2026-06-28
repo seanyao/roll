@@ -60,27 +60,52 @@ First time through? Start with [Getting started](guide/en/getting-started.md).
 Roll V4 separates project coordination from story delivery:
 
 - **Supervisor Agent** coordinates at project level: backlog order, cross-Story context, route advice, repeated failures, release readiness, budget, and owner escalation. It observes and advises; it does not implement a Story or override evidence gates.
-- **Story Execution Unit** delivers one Story through an execution profile: `standard` = Builder, `verified` = Builder -> Evaluator, `planned` = Planner -> Builder -> Evaluator.
-- **Planner / Builder / Evaluator roles** are stable contracts. The concrete `agent`, `model`, and `rig` can vary per Story through route profiles.
+- **Story Execution Unit** delivers one Story through scoped roles: `execute` performs the Story work, `evaluate` reviews/scores evidence, and `supervise` coordinates above the Story boundary.
+- **supervise / execute / evaluate roles** are stable contracts. The concrete `agent` and optional `model` are resolved through the Agent Scope model: `Scope -> Role -> Binding -> Agent -> Model`.
 - **Skills remain** the capability layer. Roles invoke `$roll-design`, `$roll-build`, `$roll-fix`, `$roll-peer`, `$roll-.qa`, and related skills instead of rewriting those contracts into TypeScript.
 - **Fallback is fail-loud**. If a requested agent or rig is unavailable, Roll records that unavailability and pauses or asks for owner action; it does not silently pretend another agent was used.
+
+### Operating modes
+
+Roll has two product modes over the same backlog, truth, route profile, execution
+profiles, evidence, Evaluator, and release gates:
+
+- **guided** — the owner drives through `roll supervisor status/next/why` and
+  starts work explicitly with commands such as `roll loop go --cards <id>`.
+  Guided mode never silently starts long-running Story execution.
+- **autonomous** — `roll loop on` installs the scheduler; eligible Stories may
+  be picked within the existing pause, budget, route, evidence, Evaluator, and
+  release gates. `roll loop pause` / `roll loop off` return control to guided
+  operation; `roll loop resume` / `roll loop on` switch back explicitly.
 - **Attest and evidence are story-scoped**. A Story is accepted through its own `latest/<id>-report.html`, AC map, and screenshots/test artifacts.
 
-Role routing can be declared per Story:
+Agent bindings are declared in two files: `~/.roll/agents.yaml` for Machine Scope
+and `.roll/agents.yaml` for Project Scope. A Project can inherit the machine pool
+and bind Story roles:
 
 ```yaml
-story: US-V4-012
-execution_profile: verified
-roles:
-  builder:
-    agent: kimi
-    responsibility: update README, docs, guides, website, and samples
-  evaluator:
-    agent: pi
-    responsibility: evaluate new-user clarity and product narrative
+schema: roll-agents/v1
+scope: project
+inherits: machine
+defaults:
+  story:
+    roles:
+      execute:
+        kind: select
+        from: [kimi, codex, pi]
+        require: [execute]
+        strategy: first-available
+      evaluate:
+        kind: select
+        from: [claude, codex, kimi, pi, agy, reasonix]
+        require: [evaluate]
+        avoid: [execute]
+        strategy: least-recent
 ```
 
-Runtime availability is explicit: if `kimi` or `pi` is not callable on the current machine, the delivery records that limitation instead of hiding it behind a silent fallback.
+Runtime availability is explicit: if a candidate is not callable on the current
+machine because of auth, network, VPN, or account state, the current resolution
+records that limitation instead of rewriting the static pool.
 
 ## Onboarding Samples
 
@@ -96,7 +121,7 @@ roll design --from-file .roll/brief.md
 roll loop on
 ```
 
-Roll explains the next design step instead of inventing fake work. The Planner turns the requirement into Stories, the Supervisor selects `standard`, `verified`, or `planned` per Story, Builder/Evaluator roles execute, and the owner reviews story-scoped attest evidence.
+Roll explains the next design step instead of inventing fake work. The Supervisor turns the requirement into Stories, resolves `execute` and optional `evaluate` roles per Story, and the owner reviews story-scoped attest evidence.
 
 **Existing project**
 
@@ -108,7 +133,7 @@ roll init --apply        # after reviewing the generated onboard plan
 roll loop on
 ```
 
-Roll diagnoses the repository without destructive migration, writes or updates Roll metadata only after review, and then lets the Supervisor reason over existing backlog, docs, context, open PRs, and route profiles. Current state is visible through CLI-first observability: `roll status`, `roll loop watch`, `roll loop runs`, `roll cycle <id>`, `roll loop alert`, and story reports.
+Roll diagnoses the repository without destructive migration, writes or updates Roll metadata only after review, and then lets the Supervisor reason over existing backlog, docs, context, open PRs, and scoped role bindings. Current state is visible through CLI-first observability: `roll status`, `roll loop watch`, `roll loop runs`, `roll cycle <id>`, `roll loop alert`, and story reports.
 
 ## Quick start for new projects
 
@@ -141,10 +166,9 @@ with `roll loop resume` when ready.
 | `roll backlog [sync\|block\|defer\|lint\|…]` | View, manage, and sync (from GitHub Issues) pending tasks |
 | `roll loop alert [list\|ack\|resolve\|log]` | View / clear loop alerts |
 | `roll status` | Verdict-first truth summary read from the ONE snapshot — LOOP · CYCLE · RELEASE · STORY, with the STORY line's attest-coverage % (`done ≡ merged ∧ attested`) — then convention/AI-client sync health |
-| `roll supervisor [observe\|advise\|next\|why] [--json]` | Project-level Supervisor Agent (v0 observe/advise): reads backlog, delivery-truth coverage, open PRs, route config, repeated failures, and explicit release blockers, then emits concise advisory decisions. Cross-Story coordination only — never implements a Story; persistent policy changes need owner confirmation |
+| `roll supervisor [status\|observe\|advise\|next\|why\|live] [--json]` | Project-level Supervisor Agent: observes project truth, explains guided/autonomous mode and next owner action, advises next steps, and renders a read-only live role board with Planner / Builder / Evaluator panes. Cross-Story coordination only — never implements a Story; persistent policy changes need owner confirmation |
 | `roll pulse [--json]` | Today's delivery pulse: cycles in window, merged count, attested count, plus an ASCII sparkline from the story spectrum. Bilingual EN/中. `--json` for machine-readable output |
 | `roll doctor [skills\|--tools]` | Environment + install diagnosis; `roll doctor --tools` shows focused tool and screenshot readiness, including Terminal.app Screen Recording |
-| `roll daemon <start\|stop\|status>` | Experimental read-only event broadcaster for future browser observability; defaults to `127.0.0.1:7077`, records `.roll/loop/daemon.pid`, and is never auto-started by the loop |
 | `roll tune [reset]` | Suggest-only self-tuning from loop trends — read-only, never auto-applies |
 | **Cards & evidence** | |
 | `roll idea "<one-sentence description>"` | Capture a card: auto-classify, number, lint, infer epic, mint the full story folder — the one user entry for adding cards |
@@ -155,7 +179,6 @@ with `roll loop resume` when ready.
 | `roll design [--from-file <path>] [--agent <name>]` | Launch `$roll-design` interactively; `--from-file` binds a PRD/brief as the design input |
 | `roll offboard` | Remove Roll from this project |
 | `roll test [--where] [--reset]` | Run the test suite (routes through the isolation adapter; unknown types fail loud) |
-| `roll daemon <start\|stop\|status>` | Manage the experimental read-only observability daemon (opt-in only; never auto-started) |
 | `roll ci [--wait]` | Show or wait for current commit's CI status |
 | `roll release [--dry-run]` | The ONE release flow: bump → changelog fold → package gate → commit-push → consistency gate → PR → auto-merge → tag push (gate runs before merge; drives the merge via GitHub auto-merge) |
 | `roll showcase [--card <ID>]` | The golden-path standard E2E in an isolated sandbox: reset the card, cast a heterogeneous real-agent trio (kimi/claude/pi), deliver via the loop, capture CLI+web screenshots, assemble the evidence chain, emit a pass/fail verdict |
@@ -167,8 +190,8 @@ with `roll loop resume` when ready.
 | **Config & machine** | |
 | `roll ls [--json] [--stale-days <n>]` | List the cross-project registry (`~/.roll/projects.json`): name · tag · verdict · path; missing/stale rows flagged, never dropped |
 | `roll config [lang <zh\|en\|--reset>\|…]` | Read/write roll config (language, loop window, dream time) |
-| `roll agent [set <slot> <agent>\|use <name>\|list]` | Per-machine complexity-slot routing (easy/default/hard/fallback) |
-| `roll cast [--json]` | Print the complexity-ladder -> role Casting table (`--json` for the machine view) |
+| `roll agent [migrate --dry-run\|migrate\|list]` | Agent Scope view: Machine Scope, Project Scope, resolved roles, pool health, and legacy compatibility |
+| `roll cast [--json]` | Print the current role casting view (`--json` for the machine view) |
 | `roll doctor skills [--strict] [--json]` | Strict skills audit (skills · violations · hub lines + the four invocation groups — the SAME yardstick the web Skills page reads) |
 | `roll setup skills` | Sync the `guide/skills.md` skill catalog |
 | `roll doc [--lang en\|zh] [name]` | View the Charter / language guide markdown in the terminal (`--lang` falls back to the configured language) |
@@ -193,8 +216,8 @@ it is not the active delivery truth surface.
   free-form summary text.
 - Missing facts render as `?`. A visible `0` means a known zero, not unknown.
 
-The full Supervisor Live Console and multi-role board are next work, not
-something this README claims as shipped.
+`roll supervisor live` is the shipped CLI-first multi-role board. A browser/TUI
+Supervisor Live Console remains future work and must reuse the same view model.
 
 ## Repository layout
 

@@ -27,14 +27,15 @@ describe("observeProject", () => {
       input({
         backlog: [
           { id: "US-1", status: "📋 Todo" },
-          { id: "US-2", status: "🔨 In Progress" },
+          { id: "US-2", status: "🔨 In Progress (local implementation validated; await PR/main before Done)" },
           { id: "US-3", status: "🔒 Blocked [x]" },
           { id: "US-4", status: "✅ Done" },
+          { id: "IDEA-1", status: "🚫 Hold (planning idea only; split before implementation)" },
         ],
         delivered: ["US-4"],
       }),
     );
-    expect(f.counts).toEqual({ todo: 1, inProgress: 1, blocked: 1, done: 1 });
+    expect(f.counts).toEqual({ todo: 1, inProgress: 1, blocked: 2, done: 1 });
     expect(f.truthDrift).toEqual([]);
   });
 

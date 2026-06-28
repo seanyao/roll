@@ -274,9 +274,9 @@ describe("US-AGENT-001 AgentProfile factory", () => {
     expect(claude.buildSpawnCommand({ cwd: "/wt", skillBody: "DO WORK" }).args).toContain("--add-dir");
     expect(claude.usesWorkspaceSandbox).toBe(false);
     expect(claude.ptyWhenPiped).toBe(false);
-    // claude is NOT a headless reviewer (canReviewHeadless=false): its
-    // OAuth/keychain login is unreachable from a launchd headless daemon (401).
-    expect(claude.acceptance.canReviewHeadless).toBe(false);
+    // Static capability means Roll has a prompt-mode spawn profile. Runtime
+    // auth/VPN/account health is handled by readiness and spawn events.
+    expect(claude.acceptance.canReviewHeadless).toBe(true);
 
     const reasonix = agentProfile("reasonix");
     expect(reasonix.acceptance.canReviewHeadless).toBe(true);
@@ -295,7 +295,7 @@ describe("US-AGENT-001 AgentProfile factory", () => {
     expect(codex.usesWorkspaceSandbox).toBe(true);
 
     const agy = agentProfile("agy");
-    expect(agy.acceptance.canReviewHeadless).toBe(false);
+    expect(agy.acceptance.canReviewHeadless).toBe(true);
   });
 
   it("keeps provider aliases in the profile layer, not downstream executor branches", () => {
@@ -1243,7 +1243,7 @@ describe("executeCommand — command → executor mapping", () => {
     it("a WEB card that DECLARES a deliverable_url is NOT flagged — verdict ok", async () => {
       const { ports, calls } = portsWithSpec(
         "US-WEB-2",
-        `---\ndeliverable_url: .roll/features/index.html#x\n---\n## US-WEB-2 Web polish 📋\n\n**AC:**\n- [ ] Screenshot of the rendered web page is captured\n`,
+        `---\ndeliverable_url: https://app.example.test/x\n---\n## US-WEB-2 Web polish 📋\n\n**AC:**\n- [ ] Screenshot of the rendered web page is captured\n`,
       );
       await executeCommand({ kind: "pick_story" }, ports, CTX);
       const ve = visualEvents(calls);
@@ -3439,8 +3439,8 @@ describe("agentWritableRoots — FIX-326: a sandboxed agent can write the git-in
   });
 });
 
-// ── FIX-346: headless peer auth-failure exclusion + swap ─────────────────────
-describe("FIX-346 — auth-failing peer is excluded from the pool and swapped out", () => {
+// ── V4 fair pool: historical auth failures are diagnostics only ──────────────
+describe("V4 fair pool — prior auth failures do not exclude peers", () => {
   // A worktree with a story spec (no AC block → attest gate inert) so the score
   // stage runs (commitsAhead from the git mock is 3 + a real storyId).
   function scoreWorktree(): string {
@@ -3452,12 +3452,13 @@ describe("FIX-346 — auth-failing peer is excluded from the pool and swapped ou
     return wt;
   }
 
-  it("a peer over its consecutive auth-failure budget is NOT spawned to score; a healthy peer is swapped in + pair:excluded recorded", async () => {
+  it("a peer over the legacy auth-failure threshold no longer emits pair:excluded", async () => {
     const wt = scoreWorktree();
     const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-346-rt-")));
     execDirs.push(rt);
     const eventsPath = join(rt, "events.ndjson");
-    // Pre-seed: codex already failed headless auth twice in a row → excluded.
+    // Pre-seed: codex already failed auth twice historically. V4 keeps this as
+    // diagnostics only; the current runtime attempt decides availability.
     const seed =
       JSON.stringify({ type: "agent:blocked", cycleId: "c0", agent: "codex", cause: "auth", stage: "score", detail: "Please run /login", ts: 1 }) +
       "\n" +
@@ -3470,13 +3471,12 @@ describe("FIX-346 — auth-failing peer is excluded from the pool and swapped ou
     const { ports, calls } = fakePorts({
       repoCwd: rt,
       paths: { ...base.ports.paths, worktreePath: wt, eventsPath, alertsPath: join(rt, "alerts.log") },
-      installedAgents: () => ["claude", "codex", "kimi"], // claude=builder; codex(excluded) + kimi are hetero
+      installedAgents: () => ["claude", "codex"], // claude=builder; codex is the only hetero peer
       agentSpawn: vi.fn(async (agent: string) => {
         spawned.push(agent);
-        // A valid score reply so the swapped-in peer (kimi) completes the stage.
         return { stdout: "SCORE: 8\nVERDICT: good\nRATIONALE: clean\n", stderr: "", exitCode: 0, timedOut: false };
       }),
-      // appendEvent writes to disk so computeExcludedPeers re-reads emitted events.
+      // appendEvent writes to disk so diagnostics re-read emitted events.
       events: {
         ...base.ports.events,
         appendEvent: vi.fn((_path: string, event: RollEvent) => {
@@ -3487,19 +3487,12 @@ describe("FIX-346 — auth-failing peer is excluded from the pool and swapped ou
 
     await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, agent: "claude", startSec: 1 });
 
-    // AC2: the auth-excluded peer (codex) was never spawned again this cycle.
-    expect(spawned).not.toContain("codex");
-    // AC2 swap: the healthy heterogeneous peer (kimi) was consulted instead.
-    expect(spawned).toContain("kimi");
-
-    // AC3: the exclusion is observable — a pair:excluded event for codex landed.
     const events = readFileSync(eventsPath, "utf8")
       .split("\n")
       .filter((l) => l.trim() !== "")
       .map((l) => JSON.parse(l) as RollEvent);
     const excl = events.filter((e) => e.type === "pair:excluded");
-    expect(excl.length).toBe(1);
-    expect(excl[0]).toMatchObject({ type: "pair:excluded", agent: "codex", cause: "auth", failures: 2 });
+    expect(excl.length).toBe(0);
   });
 
   it("a single prior auth failure does NOT exclude the peer (transient blip → still consulted)", async () => {

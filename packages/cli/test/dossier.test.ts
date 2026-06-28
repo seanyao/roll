@@ -1598,7 +1598,7 @@ describe("roll index — US-DOSSIER-001d three-layer integration", () => {
       if (oldRollHome === undefined) delete process.env["ROLL_HOME"];
       else process.env["ROLL_HOME"] = oldRollHome;
     }
-    expect(out.join("")).toContain("Delivery Dossier regenerated");
+    expect(out.join("")).toContain("Static archive regenerated");
 
     const idx = readFileSync(join(f, "index.html"), "utf8");
     const epic = readFileSync(join(f, "alpha", "index.html"), "utf8");

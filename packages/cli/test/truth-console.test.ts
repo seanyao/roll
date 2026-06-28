@@ -84,8 +84,8 @@ const SKILLS = {
   ],
 };
 
-// US-DOSSIER-030 — Casting view-model: the four complexity slots fully resolved
-// (with one route-resolve audit rationale on `hard`) + the four scenario rows.
+// US-DOSSIER-030 — Casting view-model: the four legacy execute sources fully
+// resolved (with one route-resolve audit rationale on `hard`) + four scenarios.
 const CASTING = collectCasting({
   readSlot: (slot) => ({ easy: "kimi", default: "codex", hard: "claude", fallback: "claude" })[slot],
   sparPair: () => ["claude", "kimi"],
@@ -343,9 +343,11 @@ describe("renderTruthConsole — US-DOSSIER-011", () => {
     expect(html).toContain(">Now<");
     // FIX-373: the redesigned Now carries Live cycle, On-deck, Needs-you and the
     // live stream; Processes was folded into the heartbeat (its running dots).
-    for (const section of ["live-cycle", "live-stream", "daemon-status", "on-deck", "needs-you", "where-things-stand"]) {
+    for (const section of ["live-cycle", "live-stream", "on-deck", "needs-you", "where-things-stand"]) {
       expect(html).toContain(`data-now-section="${section}"`);
     }
+    const retiredLiveTransportSection = ["daemon", "status"].join("-");
+    expect(html).not.toContain(`data-now-section="${retiredLiveTransportSection}"`);
     expect(html).toContain("Live cycle");
     expect(html).toContain("On deck");
     expect(html).toContain("Needs you");
@@ -890,7 +892,7 @@ describe("collectCasting — US-DOSSIER-030 (pure)", () => {
       slot === "hard" ? "claude best for US in-tier (hit_rate 0.91, n=12); slot kept" : undefined,
   };
 
-  it("AC1: four complexity-slot rows resolve from readSlot in design order", () => {
+  it("AC1: four legacy execute-source rows resolve from readSlot in design order", () => {
     const vm = collectCasting(deps);
     const slots = vm.rows.filter((r) => ["easy", "default", "hard", "fallback"].includes(r.key));
     expect(slots.map((r) => r.key)).toEqual(["easy", "default", "hard", "fallback"]);
@@ -1007,8 +1009,8 @@ describe("Casting tab + Loop tab IA — US-DOSSIER-030 / US-DOSSIER-040", () => 
       expect(castingPane).toContain(`data-scenario-role="${key}"`);
     }
     expect(castingPane).toContain("grid-template-columns:140px 1fr auto");
-    expect(html).toContain("Executor · easy");
-    expect(html).toContain("执行 · easy");
+    expect(html).toContain("story.execute · legacy easy");
+    expect(html).toContain("执行角色 · legacy easy");
     // resolved slot agents from the router config (no hardcoded arrays)
     expect(html).toContain(">kimi<");
     expect(html).toContain(">codex<");
@@ -1044,7 +1046,7 @@ describe("Casting tab + Loop tab IA — US-DOSSIER-030 / US-DOSSIER-040", () => 
     // the casting grid + scenario roles are NOT inside the Loop pane (moved out)
     expect(loopPane).not.toContain('data-exec-slot="easy"');
     expect(loopPane).not.toContain('data-scenario-role="peer"');
-    expect(loopPane).not.toContain("Executor · easy");
+    expect(loopPane).not.toContain("story.execute · legacy easy");
     expect(loopPane).not.toContain("roll agent list");
     // the inline agents inventory left the Loop tab (it is the machine Agents page)
     expect(loopPane).not.toContain("Agents on this machine");
@@ -1597,7 +1599,7 @@ describe("lang/tab/section persistence + bilingual closer — US-DOSSIER-034", (
       // Casting + Hooks (US-DOSSIER-030)
       ["Casting", "角色分工"],
       ["Hooks · this repo", "钩子 · 本仓"],
-      ["Executor · easy", "执行 · easy"],
+      ["story.execute · legacy easy", "执行角色 · legacy easy"],
       ["must differ from builder", "强制异构于执行者"],
       ["follows the active client", "跟随当前交互客户端"],
       // Charter tab (US-DOSSIER-033)

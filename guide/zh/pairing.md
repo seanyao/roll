@@ -4,49 +4,40 @@
 **结对（pair）**而非评审：一个 agent 干完活，一个异构搭档复检，换来视角多样性。
 一个模型盲区里藏着的 bug，另一个模型往往一眼看到。
 
-Roll 把一次评审指派看成一个 **rig**：`agent × model`。agent 是有限的六个身份
-（`claude`、`kimi`、`codex`、`pi`、`agy`、`reasonix`）；model 是挂在该 agent 上的数据。
-因此 DeepSeek 模型应出现在 `pi` 或 `reasonix` rig 的 `model` 字段里，`deepseek`
-本身不是 agent rig。
+Roll 把评审指派看成 scoped Agent 模型里的 `evaluate` 角色：
+`Scope -> Role -> Binding -> Agent -> optional Model`。agent 是有限的六个身份
+（`claude`、`kimi`、`codex`、`pi`、`agy`、`reasonix`）；model 是挂在该 agent 上的可选数据。
 
 结对与 [`roll peer`](peer.md) 不同：peer 是你（或 loop 风险闸）按需发起的多轮协商；
-结对是常驻的单向第二遍，接在 cycle 里，由一份显式配置文件管控。
+结对是常驻的单向第二遍，接在 cycle 里，由 Project Scope 的 `evaluate` binding 管控。
 
 ## 开启 —— 显式，绝不静默
 
 ```bash
-# 新项目：无需操作——`roll init` 已经帮你生成。
-# 现有项目：一条命令补上。
-roll pair init        # 从已安装的 agent 物化 .roll/pairing.yaml
+roll agent                         # 查看 story.evaluate
+roll agent migrate --dry-run       # 如有旧 pairing.yaml，预览迁移
 ```
 
-- **新项目**：`roll init` 会顺带生成 `.roll/pairing.yaml`（界面会告知）——无需单独一步。
-- **现有 roll 项目**：直接跑 `roll pair init` 即可，这是最精准最小的命令——**不用**重跑完整
-  `roll init`（那还会 re-merge 约定，给 pairing 用是杀鸡用牛刀）。
-
-两条路生成的文件完全一致（同一套脚手架逻辑）；`roll pair init` 幂等（已有 pairing.yaml
-不会覆盖，要重生成才加 `--force`）。
-
-这是"默认隐式开"和"纯手写 opt-in"之间的第三条路：命令从 `roll agents list`
-**生成**一份显式、可审计的 `.roll/pairing.yaml`，把每个默认值都写进文件（而非藏在
-代码里的隐式默认）。**文件存在与否就是开关**——在=开，删掉=关。结对绝不静默触发。
+新项目应在 `.roll/agents.yaml` 里声明 evaluator pool：
 
 ```yaml
-# .roll/pairing.yaml —— 自动生成，可自由编辑
-enabled: true
-stages: [code, score]
-capability:
-  claude: [code, score]
-  codex: [code, score]
-  kimi: [code, score]
+# .roll/agents.yaml
+schema: roll-agents/v1
+scope: project
+defaults:
+  story:
+    roles:
+      evaluate:
+        kind: select
+        from: [claude, codex, kimi, pi, agy, reasonix]
+        require: [evaluate]
+        avoid: [execute]
+        strategy: least-recent
 ```
 
-- `enabled` —— 总开关。只有装了至少两个**不同厂商**时 `roll pair init` 才置 `true`
-  （否则没有异构搭档可配）。Cursor、Trae 这类 IDE/配置目标不会被脚手架成 reviewer。
-- `stages` —— 哪些生命周期阶段触发结对：`design`、`test`、`code`、`cycle`、`score`，
-  每个可独立关闭，默认是 `code` 和 `score`。
-- `capability` —— 每个 agent 被声明能复检的阶段。声明会与 registry 交叉校验，
-  乱写的名字或不能 headless spawn 的 reviewer 会被拒绝。
+`.roll/pairing.yaml` 仍是 legacy compatibility 输入；两者同时存在时优先使用 scoped
+`evaluate` role。静态配置列公平候选，auth/network/VPN/account 等运行时失败只在本次
+resolution 中跳过候选。
 
 ## 看它做了什么 —— 可观测性
 

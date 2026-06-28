@@ -499,7 +499,6 @@ function assertScaffold(fx: Fixture): void {
   expect(existsSync(join(fx.proj, ".roll", "features"))).toBe(true);
   expect(read(fx.proj, ".roll/features.md")).toContain("# Features");
   expect(read(fx.proj, ".roll/.version")).toContain("roll_version:");
-  expect(read(fx.proj, ".roll/pairing.yaml")).toContain("# .roll/pairing.yaml");
 }
 
 describe("frozen: roll init", () => {
@@ -525,7 +524,7 @@ describe("frozen: roll init", () => {
         Project setup
         ────────────────────────────────────────────────────────────────────────────────
         Detected project type: unknown
-        Roll will scaffold AGENTS.md, .roll/backlog.md, .roll/features/, .roll/pairing.yaml, and .claude/CLAUDE.md.
+        Roll will scaffold AGENTS.md, .roll/backlog.md, .roll/features/, scoped agent-ready .roll/, and .claude/CLAUDE.md.
         Non-interactive mode — proceeding automatically. Use \`roll init --auto\` to suppress this notice.
         ════════════════════════════════════════════════════════════════════════════════
         INIT  ·  项目初始化 <PROGRESS>  
@@ -543,8 +542,6 @@ describe("frozen: roll init", () => {
         6. ↷  Merge existing CLAUDE.md
              not modified
         7. ✓  Link skills to AI clients
-        8. ✓  Scaffold cross-agent pairing
-             +  .roll/pairing.yaml
 
       ────────────────────────────────────────────────────────────────────────────────
         ✓ Initialized
@@ -569,7 +566,7 @@ describe("frozen: roll init", () => {
         Project setup
         ────────────────────────────────────────────────────────────────────────────────
         Detected project type: cli
-        Roll will scaffold AGENTS.md, .roll/backlog.md, .roll/features/, .roll/pairing.yaml, and .claude/CLAUDE.md.
+        Roll will scaffold AGENTS.md, .roll/backlog.md, .roll/features/, scoped agent-ready .roll/, and .claude/CLAUDE.md.
         Non-interactive mode — proceeding automatically. Use \`roll init --auto\` to suppress this notice.
         ════════════════════════════════════════════════════════════════════════════════
         INIT  ·  项目初始化 <PROGRESS>  
@@ -587,8 +584,6 @@ describe("frozen: roll init", () => {
         6. ✓  Merge existing CLAUDE.md
              +  .claude/CLAUDE.md
         7. ✓  Link skills to AI clients
-        8. ✓  Scaffold cross-agent pairing
-             +  .roll/pairing.yaml
 
       ────────────────────────────────────────────────────────────────────────────────
         ✓ Initialized
@@ -615,7 +610,7 @@ describe("frozen: roll init", () => {
         Project setup
         ────────────────────────────────────────────────────────────────────────────────
         Detected project type: unknown
-        Roll will scaffold AGENTS.md, .roll/backlog.md, .roll/features/, .roll/pairing.yaml, and .claude/CLAUDE.md.
+        Roll will scaffold AGENTS.md, .roll/backlog.md, .roll/features/, scoped agent-ready .roll/, and .claude/CLAUDE.md.
         Non-interactive mode — proceeding automatically. Use \`roll init --auto\` to suppress this notice.
         ════════════════════════════════════════════════════════════════════════════════
         INIT  ·  项目初始化 <PROGRESS>  
@@ -633,8 +628,6 @@ describe("frozen: roll init", () => {
         6. ↷  Merge existing CLAUDE.md
              not modified
         7. ✓  Link skills to AI clients
-        8. ✓  Scaffold cross-agent pairing
-             +  .roll/pairing.yaml
 
       ────────────────────────────────────────────────────────────────────────────────
         ✓ Initialized
@@ -795,7 +788,7 @@ describe("frozen: roll init", () => {
         create      .roll/onboard-changeset.yaml      create-if-missing    not present
         create      .roll/.version                    create-if-missing    not present
         create      .roll/backlog.md                  create-if-missing    not present
-        create      .roll/agent-routes.yaml           create-if-missing    not present
+        create      .roll/agents.yaml                 create-if-missing    not present
         create      .roll/features/                   ensure-directory     not present
         create      .roll/features.md                 create-if-missing    not present
         create      .roll/domain/                     ensure-directory     not present
@@ -898,7 +891,7 @@ describe("frozen: roll init", () => {
         create      .roll/onboard-changeset.yaml      create-if-missing    not present
         create      .roll/.version                    create-if-missing    not present
         create      .roll/backlog.md                  create-if-missing    not present
-        create      .roll/agent-routes.yaml           create-if-missing    not present
+        create      .roll/agents.yaml                 create-if-missing    not present
         create      .roll/features/                   ensure-directory     not present
         create      .roll/features.md                 create-if-missing    not present
         create      .roll/domain/                     ensure-directory     not present
@@ -911,7 +904,7 @@ describe("frozen: roll init", () => {
         │  + created     AGENTS.md                     │
         │  + created     .roll/.version                │
         │  + created     .roll/backlog.md              │
-        │  + created     .roll/agent-routes.yaml       │
+        │  + created     .roll/agents.yaml             │
         │  + created     .roll/features/               │
         │  + created     .roll/features.md             │
         └─────────────────────────────────────────────────────┘
@@ -1002,7 +995,7 @@ describe("frozen: roll init", () => {
         create      .roll/onboard-changeset.yaml      create-if-missing    not present
         create      .roll/.version                    create-if-missing    not present
         create      .roll/backlog.md                  create-if-missing    not present
-        create      .roll/agent-routes.yaml           create-if-missing    not present
+        create      .roll/agents.yaml                 create-if-missing    not present
         create      .roll/features/                   ensure-directory     not present
         create      .roll/features.md                 create-if-missing    not present
         create      .roll/domain/                     ensure-directory     not present
@@ -1023,7 +1016,7 @@ describe("frozen: roll init", () => {
         │  + created     AGENTS.md                     │
         │  + created     .roll/.version                │
         │  + created     .roll/backlog.md              │
-        │  + created     .roll/agent-routes.yaml       │
+        │  + created     .roll/agents.yaml             │
         │  + created     .roll/features/               │
         │  + created     .roll/features.md             │
         └─────────────────────────────────────────────────────┘

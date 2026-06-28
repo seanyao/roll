@@ -1,7 +1,7 @@
 /**
- * US-V4-007 — bounded repair loop between Evaluator and Builder.
+ * US-V4-007 — bounded repair loop between evaluate and execute.
  *
- * Shape: Evaluator blocking finding → Builder repair → Evaluator rerun. This loop
+ * Shape: evaluate blocking finding → execute repair → evaluate rerun. This loop
  * is STRICTLY bounded so it can never run unbounded or burn tokens re-fixing the
  * same finding forever:
  *   - max rounds;
@@ -10,7 +10,7 @@
  *   - wall-clock timeout.
  * When ANY bound trips while blocking findings remain, the cycle ESCALATES with a
  * structured reason (it never silently keeps looping). This module is the PURE
- * decision; the runner drives Builder/Evaluator sessions and writes a repair note.
+ * decision; the runner drives execute/evaluate sessions and writes a repair note.
  *
  * NON-GOAL (per spec): no failure-driven automatic agent switching here — that is
  * a Supervisor recommendation or an explicit policy change, not a repair step.

@@ -19,11 +19,11 @@ import type { SupervisorFacts, SupervisorInput } from "@roll/spec";
 export const SUPERVISOR_STUCK_THRESHOLD = 2;
 
 function statusBucket(status: string): "todo" | "inProgress" | "blocked" | "done" | "other" {
-  const s = status.toLowerCase();
-  if (s.includes("done") || s.includes("✅")) return "done";
-  if (s.includes("progress") || s.includes("🔨")) return "inProgress";
-  if (s.includes("blocked") || s.includes("🔒") || s.includes("deferred") || s.includes("⏸")) return "blocked";
-  if (s.includes("todo") || s.includes("📋")) return "todo";
+  const s = status.trim().toLowerCase();
+  if (s.startsWith("📋") || /^todo\b/.test(s)) return "todo";
+  if (s.startsWith("🔨") || /^in\s+progress\b/.test(s)) return "inProgress";
+  if (s.startsWith("🔒") || s.startsWith("⏸") || s.startsWith("🚫") || /^(blocked|deferred|hold|paused)\b/.test(s)) return "blocked";
+  if (s.startsWith("✅") || /^done\b/.test(s)) return "done";
   return "other";
 }
 

@@ -1,13 +1,11 @@
 /**
  * US-DOSSIER-030 — the Loop-tab CASTING collector: "who plays which role".
  *
- * The design reference (`Delivery Dossier.dc.html` lines 224–239 / `CASTING`
- * data 929–938) shows a Role | Agent | Note grid with two row families:
- *   - four COMPLEXITY slots — Executor · easy / default / hard / fallback —
- *     resolved from the router slot config (`agents.yaml`, read via the same
- *     `readSlot(tier|"fallback")` port `packages/core/src/agent/router.ts`
- *     consumes). An empty/unconfigured slot renders an explicit em-dash, never
- *     a guessed agent.
+ * The design reference shows a Role | Agent | Note grid with two row families:
+ *   - legacy story.execute route sources — easy / default / hard / fallback —
+ *     shown only as compatibility inputs for projects that have not migrated to
+ *     scoped `roll-agents/v1` bindings. An empty/unconfigured source renders an
+ *     explicit em-dash, never a guessed agent.
  *   - four SCENARIO roles — peer re-check, PR review, adversarial spar, onboard
  *     — the "who plays what" view the loop dispatches across. The peer row
  *     carries the heterogeneity rule (auto-picked, MUST differ from the
@@ -44,7 +42,7 @@ export interface CastingRow {
   audit: string;
 }
 
-/** One executor tier card in the Casting tab's 3+1 complexity ladder. */
+/** One legacy executor source card in the Casting tab. */
 export interface CastingExecSlot {
   key: "easy" | "default" | "hard" | "fallback";
   roleEn: string;
@@ -61,10 +59,10 @@ export interface CastingExecSlot {
   fallback: boolean;
 }
 
-/** The Casting view-model (the four complexity slots, then the four scenarios). */
+/** The Casting view-model (legacy execute sources, then the scenario roles). */
 export interface CastingVM {
   rows: CastingRow[];
-  /** FIX-284: executor complexity ladder cards for the web Casting tab. */
+  /** FIX-284: legacy executor source cards for the web Casting tab. */
   execSlots?: CastingExecSlot[];
   /** FIX-284: scenario role rows rendered below the ladder. */
   scenarioRoles?: CastingRow[];
@@ -74,8 +72,7 @@ export interface CastingVM {
 
 /** Ports injected into {@link collectCasting}; keep the collector pure. */
 export interface CastingDeps {
-  /** Read a router slot's agent (`undefined` when empty/unconfigured) — the SAME
-   *  port `resolveRoute` consumes (`agents.yaml`). */
+  /** Read a legacy router slot's agent (`undefined` when empty/unconfigured). */
   readSlot: (slot: AgentSlot) => string | undefined;
   /** The heterogeneous adversarial spar pair `[a, b]`, when pairing is configured
    *  and both candidates are known; `undefined` ⇒ unconfigured (em-dash). */
@@ -90,7 +87,7 @@ export interface CastingDeps {
 
 const EM_DASH = "—";
 
-/** Build one complexity-slot row honestly: configured agent or em-dash. */
+/** Build one legacy execute-source row honestly: configured agent or em-dash. */
 function slotRow(
   key: "easy" | "default" | "hard" | "fallback",
   roleEn: string,
@@ -108,8 +105,8 @@ function slotRow(
     agentZh: empty ? EM_DASH : agent,
     mono: !empty,
     empty,
-    noteEn: empty ? "slot empty" : "slot",
-    noteZh: empty ? "槽位未配" : "槽位",
+    noteEn: empty ? "legacy route empty" : "legacy route",
+    noteZh: empty ? "legacy route 未配" : "legacy route",
     audit,
   };
 }
@@ -118,8 +115,8 @@ function slotRow(
  * Resolve the Casting view-model from injected ports — pure, deterministic.
  *
  * Row order matches the design reference exactly:
- *   Executor · easy / default / hard / fallback, then peer / review-pr / spar /
- *   onboard. The peer row never resolves to a concrete agent (it is auto-picked
+ *   story.execute legacy easy / default / hard / fallback, then peer /
+ *   review-pr / spar / onboard. The peer row never resolves to a concrete agent (it is auto-picked
  *   per cycle and MUST differ from the builder); the review-pr row reuses the
  *   `default` slot agent (the loop dispatches PR review to it) and falls back to
  *   an em-dash when unconfigured; the spar row shows the heterogeneous pair when
@@ -127,10 +124,10 @@ function slotRow(
  */
 export function collectCasting(deps: CastingDeps): CastingVM {
   const complexityRows: CastingRow[] = [
-    slotRow("easy", "Executor · easy", "执行 · easy", deps),
-    slotRow("default", "Executor · default", "执行 · default", deps),
-    slotRow("hard", "Executor · hard", "执行 · hard", deps),
-    slotRow("fallback", "Executor · fallback", "执行 · fallback", deps),
+    slotRow("easy", "story.execute · legacy easy", "执行角色 · legacy easy", deps),
+    slotRow("default", "story.execute · legacy default", "执行角色 · legacy default", deps),
+    slotRow("hard", "story.execute · legacy hard", "执行角色 · legacy hard", deps),
+    slotRow("fallback", "story.execute · legacy fallback", "执行角色 · legacy fallback", deps),
   ];
   const rows: CastingRow[] = [...complexityRows];
 

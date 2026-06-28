@@ -598,18 +598,16 @@ when the work is ambiguous or the environment is broken — never guesses.**
 **Auto-recovers (no human needed):**
 
 - Network timeout → retries with backoff (2s, 4s, 8s, 16s)
-- Routed agent offline (no PATH / auth / network) or token exhausted → swaps to
-  the `fallback` slot agent and records `fallback_from` in `runs.jsonl`. The
-  downed agent is cached as unavailable (~30 min) so later cycles skip it.
+- Role candidate unavailable (no PATH / auth / network / account) or token
+  exhausted → skipped for the current resolution and recorded as runtime health.
 - Stale LOCK from a crashed process → next cycle cleans it up
 - Orphan `🔨 In Progress` from a crashed cycle → next cycle reverts to
   `📋 Todo`
 
 **Needs you:**
 
-- Both the routed agent and the `fallback` slot agent are down → an ALERT is
-  written and the loop stops (it never loops forever). Fix env, then
-  `roll loop resume`
+- No candidate remains for the required role → an ALERT is written and the loop
+  stops. Fix env or narrow/update the role binding, then `roll loop resume`.
 - CI persistently red → fix the failing test/build, then `roll loop now`
 - Merge conflict on PR → resolve manually, push
 - `gh` auth expired → `gh auth login`
@@ -768,35 +766,26 @@ git -C .roll log --oneline -3        # shows last synced commits
 git -C .roll fetch && git -C .roll reset --hard origin/main
 ```
 
-### C5. Why is this cycle running on `<agent>` instead of my configured default?
+### C5. Why is this cycle running on `<agent>`?
 
-**Symptoms:** you expected one agent, but cron.log shows
-`[loop] story US-AGENT-007 routed to claude via hard est_min=24 → tier=hard`.
+**Symptoms:** you expected one agent, but the loop selected another.
 
-为什么这个 cycle 用了 claude 而不是我以为的那个 agent？
-
-**Why this happens:** routing is now driven by a single axis — **task
-complexity**. Each story's `est_min` is classified into one of three tiers
-(`est_min ≤ 8 → easy`, `8 < est_min ≤ 20 → default`, `est_min > 20 → hard`;
-missing or invalid estimate → `default`), and the tier maps to an agent through
-the four slots in `.roll/agents.yaml` (`easy` / `default` / `hard` / `fallback`).
-The old three-dimensional matcher (`type` / `est_min` / `risk_zone`) and the
-soft-preference history (`runs.jsonl` hit-rate, `cold_start_default`) are
-retired. The `via hard`/`via easy` token in the log line is the complexity tier,
-not a hard-rule match.
+**Why this happens:** Roll resolves a scoped role binding, not a hidden default.
+The Builder comes from `story.execute`; review and scoring come from
+`story.evaluate`. The binding can be inherited from Machine Scope
+(`~/.roll/agents.yaml`) or declared in Project Scope (`.roll/agents.yaml`).
 
 **Inspect:**
 
 ```bash
-roll agent                            # four slots + online status + recent downgrades
-roll agent list                       # which agents this machine has installed
-roll loop runs 20                     # see which agent + tier each cycle picked
+roll agent          # Machine Scope, Project Scope, resolved roles, pool health
+roll agent list     # which agents this machine has installed
+roll loop runs 20   # see recent cycle agents
 ```
 
-If you want a story to always run on a specific agent, set every tier to the
-same agent with `roll agent use <name>` (locks `easy`/`default`/`hard`; the
-`fallback` slot is left untouched). To change a single tier, use
-`roll agent set <slot> <agent>`.
+If the selected candidate is unavailable because of auth, network, VPN, account,
+or a missing binary, Roll skips that candidate for the current resolution and
+records the runtime fact. It does not silently rewrite the static pool.
 
 ### C6. Why was my story flipped to 🚫 Hold instead of Done?
 

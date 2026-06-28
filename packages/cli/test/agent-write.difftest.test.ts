@@ -1,13 +1,9 @@
 /**
  * Frozen-expectation tests for the TS-owned `roll agent` write surface (v4).
  *
- * US-V4-002 separates the GLOBAL machine default (`primary_agent` in
- * `~/.roll/config.yaml`) from the PROJECT route profile (`.roll/agents.yaml`):
- *   - `roll agent default <agent>` sets the machine default and only rewrites
- *     project routes that still FOLLOW the old default (customized profiles are
- *     preserved);
- *   - `roll agent set <route> <agent>` overrides one project route;
- *   - `roll agent use` is RETIRED — it fails loudly with migration guidance.
+ * US-V4 scoped agent management makes `~/.roll/agents.yaml` and
+ * `.roll/agents.yaml` the primary role-binding surfaces. Legacy write commands
+ * (`default`, `set`, `use`) fail loudly with migration guidance.
  *
  * These tests inject an AgentEnv + in-memory default store and temp project
  * dirs, so they never spawn `bin/roll` and never touch the real machine config.
@@ -54,10 +50,11 @@ function run(
   const cwd = tempProject();
   const saveCwd = process.cwd();
   const saveEnv: Record<string, string | undefined> = {};
-  for (const key of ["NO_COLOR", "ROLL_LANG", "ROLL_AGENTS_CONFIG"]) saveEnv[key] = process.env[key];
+  for (const key of ["NO_COLOR", "ROLL_LANG", "ROLL_AGENTS_CONFIG", "ROLL_HOME"]) saveEnv[key] = process.env[key];
   process.env["NO_COLOR"] = "1";
   process.env["ROLL_LANG"] = "en";
   delete process.env["ROLL_AGENTS_CONFIG"];
+  process.env["ROLL_HOME"] = join(cwd, "home", ".roll");
   const out: string[] = [];
   const err: string[] = [];
   const realOut = process.stdout.write.bind(process.stdout);
@@ -100,6 +97,16 @@ function seedRoutes(cwd: string, lines: Record<string, string>): void {
   writeFileSync(join(cwd, ".roll", "agents.yaml"), body + "\n", "utf8");
 }
 
+function rollHome(cwd: string): string {
+  return join(cwd, "home", ".roll");
+}
+
+function scrubAgentView(stdout: string, cwd: string): string {
+  return stdout
+    .replaceAll(rollHome(cwd), "<ROLL_HOME>")
+    .replaceAll(cwd, "<PROJECT>");
+}
+
 describe("roll agent write surface (v4)", () => {
   it("delegates list without fallback", () => {
     let seen: string[] = [];
@@ -113,96 +120,244 @@ describe("roll agent write surface (v4)", () => {
     expect(seen).toEqual(["--x"]);
   });
 
-  it("bare view shows the default-agent section and the project-route section", () => {
+  it("bare view shows the scope-role-agent model with no config", () => {
     const r = run([]);
     expect(r.code).toBe(0);
     expect(r.stderr).toBe("");
-    // Two distinct concerns are surfaced.
-    expect(r.stdout).toContain("Default agent (~/.roll/config.yaml)");
-    expect(r.stdout).toContain("No machine default agent set yet");
-    expect(r.stdout).toContain("Project routes (.roll/agents.yaml)");
-    expect(r.stdout).toContain("No .roll/agents.yaml yet");
-    // v4 help: default + set, no `use`.
-    expect(r.stdout).toContain("roll agent default <agent>");
-    expect(r.stdout).toContain("roll agent set <route> <agent>");
-    expect(r.stdout).not.toContain("roll agent use");
+    expect(scrubAgentView(r.stdout, r.cwd)).toMatchInlineSnapshot(`
+      "
+        Agent Scope View
+
+        Machine Scope
+
+          file: <ROLL_HOME>/agents.yaml
+          status: missing
+
+        Project Scope
+
+          file: .roll/agents.yaml
+          status: missing
+
+        Resolved roles
+
+          no roll-agents/v1 scope files to resolve
+
+        Agent pool
+
+          agent       status        note
+          claude      not found     runtime auth/network/account checked at spawn
+          kimi        not found     runtime auth/network/account checked at spawn
+          codex       not found     runtime auth/network/account checked at spawn
+          pi          not found     runtime auth/network/account checked at spawn
+          agy         not found     runtime auth/network/account checked at spawn
+          reasonix    not found     runtime auth/network/account checked at spawn
+
+        Role bindings are authored in ~/.roll/agents.yaml and .roll/agents.yaml.
+        roll agent migrate [--dry-run]  — convert legacy defaults/routes/pairing to roll-agents/v1
+        roll agent list                 — show installed agents
+
+      "
+    `);
   });
 
-  it("bare view renders the configured default and project routes", () => {
+  it("bare view renders scoped machine/project roles and resolved story bindings", () => {
     const r = run([], {
-      installed: ["codex"],
-      initialDefault: "codex",
-      before: (cwd) => seedRoutes(cwd, { default: "codex", hard: "kimi" }),
+      installed: ["codex", "kimi", "reasonix"],
+      before: (cwd) => {
+        mkdirSync(rollHome(cwd), { recursive: true });
+        writeFileSync(join(rollHome(cwd), "agents.yaml"), `schema: roll-agents/v1
+scope: machine
+agents:
+  codex:
+    capabilities: [supervise, execute, evaluate]
+  kimi:
+    capabilities: [execute, evaluate]
+  reasonix:
+    capabilities: [evaluate]
+roles:
+  supervise:
+    use: codex
+`, "utf8");
+        mkdirSync(join(cwd, ".roll"), { recursive: true });
+        writeFileSync(join(cwd, ".roll", "agents.yaml"), `schema: roll-agents/v1
+scope: project
+inherits: machine
+roles:
+  supervise:
+    inherit: true
+defaults:
+  story:
+    roles:
+      execute:
+        kind: select
+        from: [kimi, codex]
+        require: [execute]
+        strategy: first-available
+      evaluate:
+        kind: select
+        from: [reasonix, codex]
+        require: [evaluate]
+        avoid: [execute]
+        strategy: least-recent
+`, "utf8");
+      },
     });
     expect(r.code).toBe(0);
-    expect(r.stdout).toContain("codex"); // machine default shown
-    expect(r.stdout).toContain("kimi"); // a project route override shown
+    expect(scrubAgentView(r.stdout, r.cwd)).toMatchInlineSnapshot(`
+      "
+        Agent Scope View
+
+        Machine Scope
+
+          file: <ROLL_HOME>/agents.yaml
+          status: roll-agents/v1
+          agents: codex, kimi, reasonix
+          models: -
+
+        Project Scope
+
+          file: .roll/agents.yaml
+          status: roll-agents/v1
+          agents: -
+          models: -
+
+        Resolved roles
+
+          supervise        codex  via=fixed/fixed  source=<ROLL_HOME>/agents.yaml:roles.supervise trace=inherit:.roll/agents.yaml:roles.supervise -> resolve:<ROLL_HOME>/agents.yaml:roles.supervise
+          story.execute    kimi  via=select/first-available  source=.roll/agents.yaml:defaults.story.roles.execute pool=[kimi, codex] trace=select:.roll/agents.yaml:defaults.story.roles.execute
+          story.evaluate   reasonix  via=select/least-recent  source=.roll/agents.yaml:defaults.story.roles.evaluate pool=[reasonix, codex] trace=select:.roll/agents.yaml:defaults.story.roles.evaluate
+
+        Agent pool
+
+          agent       status        note
+          claude      not found     runtime auth/network/account checked at spawn
+          kimi        installed     runtime auth/network/account checked at spawn
+          codex       installed     runtime auth/network/account checked at spawn
+          pi          not found     runtime auth/network/account checked at spawn
+          agy         not found     runtime auth/network/account checked at spawn
+          reasonix    installed     runtime auth/network/account checked at spawn
+
+        Role bindings are authored in ~/.roll/agents.yaml and .roll/agents.yaml.
+        roll agent migrate [--dry-run]  — convert legacy defaults/routes/pairing to roll-agents/v1
+        roll agent list                 — show installed agents
+
+      "
+    `);
   });
 
-  // ── roll agent default ───────────────────────────────────────────
-  it("default <agent> sets the machine default (no project routes to rewrite)", () => {
-    const r = run(["default", "codex"]);
+  it("bare view demotes migrated legacy inputs to Legacy compatibility", () => {
+    const r = run([], {
+      before: (cwd) => {
+        seedRoutes(cwd, { default: "pi", hard: "kimi" });
+        writeFileSync(join(cwd, ".roll", "pairing.yaml"), "enabled: true\nstages: [score]\ncapability:\n  reasonix: [score]\n", "utf8");
+        writeFileSync(join(cwd, ".roll", "local.yaml"), "agent: 'claude' # legacy local default\n", "utf8");
+      },
+    });
     expect(r.code).toBe(0);
-    expect(r.stderr).toBe("");
-    expect(r.finalDefault).toBe("codex");
-    expect(r.stdout).toContain("Machine default agent set to");
-    // No agents.yaml is created by a default change.
+    expect(scrubAgentView(r.stdout, r.cwd)).toMatchInlineSnapshot(`
+      "
+        Agent Scope View
+
+        Machine Scope
+
+          file: <ROLL_HOME>/agents.yaml
+          status: missing
+
+        Project Scope
+
+          file: .roll/agents.yaml
+          status: legacy config (run \`roll agent migrate\` to convert)
+
+        Resolved roles
+
+          no roll-agents/v1 scope files to resolve
+
+        Agent pool
+
+          agent       status        note
+          claude      not found     runtime auth/network/account checked at spawn
+          kimi        not found     runtime auth/network/account checked at spawn
+          codex       not found     runtime auth/network/account checked at spawn
+          pi          not found     runtime auth/network/account checked at spawn
+          agy         not found     runtime auth/network/account checked at spawn
+          reasonix    not found     runtime auth/network/account checked at spawn
+
+        Legacy compatibility
+
+          v3 route slots in .roll/agents.yaml: default=pi, hard=kimi
+          .roll/local.yaml agent: claude
+          .roll/pairing.yaml: legacy evaluator pool reasonix
+          migration: roll agent migrate [--dry-run]
+
+        Role bindings are authored in ~/.roll/agents.yaml and .roll/agents.yaml.
+        roll agent migrate [--dry-run]  — convert legacy defaults/routes/pairing to roll-agents/v1
+        roll agent list                 — show installed agents
+
+      "
+    `);
+  });
+
+  it("bare view reports invalid roll-agents/v1 config fail-loud", () => {
+    const r = run([], {
+      before: (cwd) => {
+        mkdirSync(join(cwd, ".roll"), { recursive: true });
+        writeFileSync(join(cwd, ".roll", "agents.yaml"), `schema: roll-agents/v1
+scope: project
+roles:
+  execute:
+    use: cursor
+`, "utf8");
+      },
+    });
+    expect(r.code).toBe(0);
+    expect(scrubAgentView(r.stdout, r.cwd)).toMatchInlineSnapshot(`
+      "
+        Agent Scope View
+
+        Machine Scope
+
+          file: <ROLL_HOME>/agents.yaml
+          status: missing
+
+        Project Scope
+
+          file: .roll/agents.yaml
+          status: invalid roll-agents/v1
+          error: roles.execute: unknown agent 'cursor'
+
+        Resolved roles
+
+          no roll-agents/v1 scope files to resolve
+
+        Agent pool
+
+          agent       status        note
+          claude      not found     runtime auth/network/account checked at spawn
+          kimi        not found     runtime auth/network/account checked at spawn
+          codex       not found     runtime auth/network/account checked at spawn
+          pi          not found     runtime auth/network/account checked at spawn
+          agy         not found     runtime auth/network/account checked at spawn
+          reasonix    not found     runtime auth/network/account checked at spawn
+
+        Role bindings are authored in ~/.roll/agents.yaml and .roll/agents.yaml.
+        roll agent migrate [--dry-run]  — convert legacy defaults/routes/pairing to roll-agents/v1
+        roll agent list                 — show installed agents
+
+      "
+    `);
+  });
+
+  // ── retired legacy route commands ────────────────────────────────
+  it("default is RETIRED — fails loudly with scoped-role migration guidance", () => {
+    const r = run(["default", "codex"], { initialDefault: "claude" });
+    expect(r.code).toBe(1);
+    expect(r.stdout).toBe("");
+    expect(r.stderr).toContain("retired");
+    expect(r.stderr).toContain("roll agent migrate --dry-run");
+    expect(r.stderr).toContain("~/.roll/agents.yaml");
+    expect(r.stderr).toContain(".roll/agents.yaml");
+    expect(r.finalDefault).toBe("claude");
     expect(existsSync(join(r.cwd, ".roll", "agents.yaml"))).toBe(false);
-  });
-
-  it("default with no arg prints the current default", () => {
-    const r = run(["default"], { initialDefault: "kimi" });
-    expect(r.code).toBe(0);
-    expect(r.stdout).toContain("Machine default agent:");
-    expect(r.stdout).toContain("kimi");
-  });
-
-  it("default with no arg and no configured default says so", () => {
-    const r = run(["default"]);
-    expect(r.code).toBe(0);
-    expect(r.stdout).toContain("No machine default agent set yet");
-  });
-
-  it("default rewrites project routes that still FOLLOW the old default", () => {
-    const r = run(["default", "codex"], {
-      initialDefault: "claude",
-      before: (cwd) => seedRoutes(cwd, { easy: "claude", default: "claude", hard: "claude" }),
-    });
-    expect(r.code).toBe(0);
-    expect(r.finalDefault).toBe("codex");
-    expect(r.stdout).toContain("updated to"); // routes-followed message
-    const yaml = readFileSync(join(r.cwd, ".roll", "agents.yaml"), "utf8");
-    expect(yaml).toContain("easy: { agent: codex }");
-    expect(yaml).toContain("default: { agent: codex }");
-    expect(yaml).toContain("hard: { agent: codex }");
-  });
-
-  it("default PRESERVES customized project routes (does not silently overwrite)", () => {
-    const r = run(["default", "codex"], {
-      initialDefault: "claude",
-      before: (cwd) => seedRoutes(cwd, { easy: "kimi", default: "claude", hard: "claude" }),
-    });
-    expect(r.code).toBe(0);
-    expect(r.finalDefault).toBe("codex");
-    expect(r.stdout).toContain("preserved");
-    // The customized profile is untouched.
-    const yaml = readFileSync(join(r.cwd, ".roll", "agents.yaml"), "utf8");
-    expect(yaml).toContain("easy: { agent: kimi }");
-    expect(yaml).toContain("default: { agent: claude }");
-  });
-
-  it("default rejects a removed agent with directed guidance", () => {
-    const r = run(["default", "qwen"]);
-    expect(r.code).toBe(1);
-    expect(r.stderr).toContain("no longer supported");
-    expect(r.finalDefault).toBeNull();
-  });
-
-  it("default rejects an unknown agent", () => {
-    const r = run(["default", "bogus"]);
-    expect(r.code).toBe(1);
-    expect(r.stderr).toContain("Unknown agent 'bogus'");
-    expect(r.finalDefault).toBeNull();
   });
 
   // ── roll agent use (retired) ─────────────────────────────────────
@@ -211,52 +366,92 @@ describe("roll agent write surface (v4)", () => {
     expect(r.code).toBe(1);
     expect(r.stdout).toBe("");
     expect(r.stderr).toContain("retired");
-    expect(r.stderr).toContain("roll agent default");
-    expect(r.stderr).toContain("roll agent set");
+    expect(r.stderr).toContain("roll agent migrate --dry-run");
+    expect(r.stderr).toContain("~/.roll/agents.yaml");
+    expect(r.stderr).toContain(".roll/agents.yaml");
     expect(existsSync(join(r.cwd, ".roll", "agents.yaml"))).toBe(false);
     expect(existsSync(join(r.cwd, ".roll", "local.yaml"))).toBe(false);
   });
 
-  // ── roll agent set ───────────────────────────────────────────────
-  it("set writes a single route and does not require the agent to be installed", () => {
-    const r = run(["set", "fallback", "pi"]);
+  it("set is RETIRED — fails loudly and never writes v3 route slots", () => {
+    const r = run(["set", "fallback", "pi"], { initialDefault: "claude" });
+    expect(r.code).toBe(1);
+    expect(r.stdout).toBe("");
+    expect(r.stderr).toContain("retired");
+    expect(r.stderr).toContain("roll agent migrate --dry-run");
+    expect(r.finalDefault).toBe("claude");
+    expect(existsSync(join(r.cwd, ".roll", "agents.yaml"))).toBe(false);
+  });
+
+  // ── roll agent migrate ───────────────────────────────────────────
+  it("migrate --dry-run prints source files, target files, and exact bindings without writing", () => {
+    const r = run(["migrate", "--dry-run"], {
+      before: (cwd) => {
+        mkdirSync(rollHome(cwd), { recursive: true });
+        writeFileSync(join(rollHome(cwd), "config.yaml"), "primary_agent: codex\nai_codex: ~/.codex|AGENTS.md|AGENTS.md\n", "utf8");
+        seedRoutes(cwd, { default: "pi", hard: "kimi" });
+        writeFileSync(join(cwd, ".roll", "pairing.yaml"), "enabled: true\nstages: [score]\ncapability:\n  reasonix: [score]\n", "utf8");
+        writeFileSync(join(cwd, ".roll", "local.yaml"), "agent: claude\n", "utf8");
+      },
+    });
     expect(r.code).toBe(0);
     expect(r.stderr).toBe("");
-    expect(r.stdout).toBe("[roll] fallback → pi  saved\n");
-    expect(readFileSync(join(r.cwd, ".roll", "agents.yaml"), "utf8")).toBe("schema: v3\nfallback: { agent: pi }\n");
+    expect(r.stdout).toContain("Agent config migration");
+    expect(r.stdout).toContain(`${rollHome(r.cwd)}/config.yaml`);
+    expect(r.stdout).toContain(`${rollHome(r.cwd)}/agents.yaml`);
+    expect(r.stdout).toContain(`${rollHome(r.cwd)}/config.yaml ai_codex -> ${rollHome(r.cwd)}/agents.yaml agents.codex`);
+    expect(r.stdout).toContain(`${rollHome(r.cwd)}/config.yaml primary_agent -> ${rollHome(r.cwd)}/agents.yaml roles.supervise = fixed codex`);
+    expect(r.stdout).toContain(".roll/agents.yaml v3 routes -> .roll/agents.yaml defaults.story.roles.execute = select [pi, kimi]");
+    expect(r.stdout).toContain(".roll/pairing.yaml capability -> .roll/agents.yaml defaults.story.roles.evaluate = select [reasonix]");
+    expect(r.stdout).toContain(".roll/local.yaml agent ignored (project execute binding already exists; legacy source preserved)");
+    expect(r.stdout).toContain("Dry run: no files written");
+    expect(existsSync(join(rollHome(r.cwd), "agents.yaml"))).toBe(false);
+    expect(readFileSync(join(r.cwd, ".roll", "agents.yaml"), "utf8")).toContain("schema: v3");
   });
 
-  it("set silently migrates provider aliases to canonical agents", () => {
-    const r = run(["set", "easy", "deepseek"]);
-    expect(r.code).toBe(0);
-    expect(r.stderr).toBe("");
-    expect(r.stdout).toBe("[roll] easy → pi  saved\n");
-    expect(readFileSync(join(r.cwd, ".roll", "agents.yaml"), "utf8")).toBe("schema: v3\neasy: { agent: pi }\n");
-  });
-
-  it("set does NOT change the machine default (project-local only)", () => {
-    const r = run(["set", "easy", "pi"], { initialDefault: "claude" });
-    expect(r.code).toBe(0);
-    expect(r.finalDefault).toBe("claude"); // global default untouched
-  });
-
-  it("set rejects unknown slots and unknown agents", () => {
-    expect(run(["set", "bogus", "claude"])).toMatchObject({
-      code: 1,
-      stdout: "",
-      stderr: "[roll] Unknown slot 'bogus' (expected easy|default|hard|fallback)\n",
+  it("migrate writes roll-agents/v1 targets and preserves legacy source files", () => {
+    const r = run(["migrate"], {
+      before: (cwd) => {
+        mkdirSync(rollHome(cwd), { recursive: true });
+        writeFileSync(join(rollHome(cwd), "config.yaml"), "primary_agent: codex\nai_codex: ~/.codex|AGENTS.md|AGENTS.md\n", "utf8");
+        seedRoutes(cwd, { default: "pi" });
+        writeFileSync(join(cwd, ".roll", "pairing.yaml"), "enabled: true\nstages: [score]\ncapability:\n  kimi: [score]\n", "utf8");
+      },
     });
-    expect(run(["set", "easy", "qwen"])).toMatchObject({
-      code: 1,
-      stdout: "",
-      stderr: "[roll] 'qwen' is no longer supported. Use one of: claude, kimi, codex, pi, agy, reasonix\n",
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("Migration written");
+    expect(readFileSync(join(rollHome(r.cwd), "config.yaml"), "utf8")).toContain("primary_agent: codex");
+    expect(readFileSync(join(r.cwd, ".roll", "pairing.yaml"), "utf8")).toContain("kimi: [score]");
+    const machine = readFileSync(join(rollHome(r.cwd), "agents.yaml"), "utf8");
+    const project = readFileSync(join(r.cwd, ".roll", "agents.yaml"), "utf8");
+    expect(machine).toContain("schema: roll-agents/v1");
+    expect(machine).toContain("scope: machine");
+    expect(machine).toContain("agent: codex");
+    expect(project).toContain("schema: roll-agents/v1");
+    expect(project).toContain("scope: project");
+    expect(project).toContain("execute:");
+    expect(project).toContain("evaluate:");
+
+    const again = run(["migrate"], {
+      before: (cwd) => {
+        mkdirSync(rollHome(cwd), { recursive: true });
+        writeFileSync(join(rollHome(cwd), "config.yaml"), "primary_agent: codex\nai_codex: ~/.codex|AGENTS.md|AGENTS.md\n", "utf8");
+        writeFileSync(join(rollHome(cwd), "agents.yaml"), machine, "utf8");
+        mkdirSync(join(cwd, ".roll"), { recursive: true });
+        writeFileSync(join(cwd, ".roll", "agents.yaml"), project, "utf8");
+        writeFileSync(join(cwd, ".roll", "pairing.yaml"), "enabled: true\nstages: [score]\ncapability:\n  kimi: [score]\n", "utf8");
+      },
     });
+    expect(again.code).toBe(0);
+    expect(again.stdout).toContain("no legacy bindings to migrate");
+    expect(readFileSync(join(rollHome(again.cwd), "agents.yaml"), "utf8")).toBe(machine);
+    expect(readFileSync(join(again.cwd, ".roll", "agents.yaml"), "utf8")).toBe(project);
   });
 
   it("unknown subcommand is TS-owned (v4 usage line)", () => {
     expect(run(["bogus"])).toMatchObject({
       code: 1,
-      stdout: "Usage: roll agent [default <agent>|set <route> <agent>|list]\n",
+      stdout: "Usage: roll agent [migrate [--dry-run]|list]\n",
       stderr: "[roll] Unknown subcommand: bogus\n",
     });
   });

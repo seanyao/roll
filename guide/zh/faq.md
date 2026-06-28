@@ -538,16 +538,15 @@ roll loop reset
 **自动恢复（不需要你）：**
 
 - 网络超时 → 指数退避重试（2s、4s、8s、16s）
-- 选中的 agent 离线（不在 PATH / 断 auth / 断网）或 token 耗尽 → 切到
-  `fallback` 槽的 agent，并在 `runs.jsonl` 记 `fallback_from`；挂掉的 agent
-  写入不可用缓存（约 30 min），后续 cycle 先跳过
+- 角色候选 agent 离线（不在 PATH / 断 auth / 断网 / 账号不可用）或 token 耗尽 →
+  在本次 resolution 中跳过，并记录 runtime health
 - 崩溃进程留下的僵死 LOCK → 下个周期自动清理
 - 崩溃周期留下的孤儿 `🔨 In Progress` → 下个周期回退为 `📋 Todo`
 
 **需要你：**
 
-- 选中的 agent 和 `fallback` 槽 agent 都挂了 → 写 ALERT 停下（绝不无限顺试）；
-  修环境后 `roll loop resume`
+- 所需角色没有剩余可用候选 → 写 ALERT 停下；修环境或调整 role binding 后
+  `roll loop resume`
 - CI 持续红 → 修测试 / build，然后 `roll loop now`
 - PR 合并冲突 → 手动解决，push
 - `gh` 认证过期 → `gh auth login`
@@ -696,29 +695,24 @@ git -C .roll fetch && git -C .roll reset --hard origin/main
 
 ### C5. 为什么这个 cycle 用了别的 agent 而不是我以为的那个？
 
-**症状**：你以为会用某个 agent，但 cron.log 显示
-`[loop] story US-AGENT-007 routed to claude via hard est_min=24 → tier=hard`。
+**症状**：你以为会用某个 agent，但 loop 选了另一个。
 
 Why is this cycle running on a different agent than I expected?
 
-**原因**：路由现在只看一根轴 —— **任务复杂度**。每个故事的 `est_min`
-归到三档之一（`est_min ≤ 8 → easy`、`8 < est_min ≤ 20 → default`、
-`est_min > 20 → hard`；评不出或非法 → `default`），再由 `.roll/agents.yaml`
-的四个槽（`easy` / `default` / `hard` / `fallback`）映射到具体 agent。
-旧的三维匹配（`type` / `est_min` / `risk_zone`）和软偏好历史
-（`runs.jsonl` 命中率、`cold_start_default`）都已退役。日志里的
-`via hard` / `via easy` 是复杂度档，不是硬规则命中。
+**原因**：Roll 解析的是 scoped role binding，不是隐藏默认值。Builder 来自
+`story.execute`；评审和打分来自 `story.evaluate`。绑定可能继承 Machine Scope
+（`~/.roll/agents.yaml`），也可能在 Project Scope（`.roll/agents.yaml`）里声明。
 
 **自检**：
 
 ```bash
-roll agent                            # 四个槽 + 在线状态 + 最近降级痕迹
-roll agent list                       # 本机装了哪些 agent
-roll loop runs 20                     # 看最近 20 个 cycle 各自的 agent + tier
+roll agent          # Machine Scope、Project Scope、已解析角色、pool health
+roll agent list     # 本机装了哪些 agent
+roll loop runs 20   # 看最近 20 个 cycle 的 agent
 ```
 
-想让某故事固定走某个 agent：用 `roll agent use <name>` 把 easy/default/hard
-三档全锁成同一个（fallback 槽不动）。只改一档用 `roll agent set <slot> <agent>`。
+如果候选因为 auth、网络、VPN、账号或 binary 缺失不可用，Roll 只会在本次
+resolution 中跳过它并记录运行时事实，不会静默改写静态 pool。
 
 ### C6. 故事为什么翻成 🚫 搁置了，cycle 不是跑了吗？
 

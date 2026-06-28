@@ -1,6 +1,9 @@
 export * from "./agent/registry.js";
 export * from "./agent/specs.js";
 export * from "./agent/config-v4.js";
+export * from "./agent/scope-config.js";
+export * from "./agent/scope-resolver.js";
+export * from "./agent/scope-migration.js";
 export * from "./agent/roster-gate.js";
 export * from "./projects/reachability.js";
 export * from "./agent/session-reuse.js";
@@ -38,6 +41,7 @@ export * from "./loop/repair-loop.js";
 export * from "./supervisor/observe.js";
 export * from "./supervisor/advise.js";
 export * from "./supervisor/scheduler.js";
+export * from "./supervisor/live-board.js";
 export * from "./loop/morning-report.js";
 export * from "./loop/pr-loop.js";
 export * from "./loop/quality-gate.js";

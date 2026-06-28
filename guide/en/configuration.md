@@ -19,7 +19,7 @@ shared conventions.
 | `ROLL_LOOP_NO_POPUP` | unset | When set to any non-empty value, the runner does **not** auto-spawn a macOS Terminal.app window running `tmux attach`. For tests and headless batch runs — the popup outlives the killed tmux session and clutters the desktop. |
 | `ROLL_LOOP_GC_RETENTION_DAYS` | `30` | Override the GC retention period for `roll loop gc`. Takes precedence over `loop_gc.retention_days` in `.roll/local.yaml`. |
 | `ROLL_FEED_BUDGET_BYTES` | `16384` | Byte budget for the context feed handed to the inner agent each cycle. Set it to a positive integer to dial the feed to the inner agent's capacity; non-numeric or non-positive values fall back to the default. |
-| `ROLL_AGENT_NUDGE` | `1` (on) | The in-tier nudge that picks the best agent within the routed complexity tier from recent run history. Set to `0` (or `off`/`false`/`no`) to disable it; the tier itself is never changed either way. |
+| `ROLL_AGENT_NUDGE` | `1` (on) | Compatibility agent preference switch. The scoped role binding is the primary selector; set this to `0` (or `off`/`false`/`no`) to disable legacy history preference. |
 | `ROLL_RUN_DIR` | unset | Canonical acceptance-evidence run directory. The loop runner sets it before agent spawn; `roll attest --run-dir` and standalone `roll attest` can also consume it. |
 | `ROLL_EVIDENCE_DIR` | derived from `ROLL_RUN_DIR` | Directory for raw command/test artifacts inside the open evidence frame. Normally set by the runner or `roll test`, not by hand. |
 | `ROLL_SCREENSHOTS_DIR` | derived from `ROLL_RUN_DIR` | Directory for visual proof inside the open evidence frame. Normally set by the runner or capture lane, not by hand. |
@@ -72,11 +72,16 @@ directory structure issues under the resolved `ROLL_HOME`.
 
 ## Agent Installation
 
-- `roll agent use codex` dispatches to the Codex CLI. Install with:
-  `npm install -g @openai/codex`
-- `roll agent use antigravity` (aliases: `agy`, legacy `gemini`) dispatches to the
-  Antigravity CLI. Install with: `npm install -g @antigravity/agy`
-- See [ai-agents.md](ai-agents.md) for the full supported agent list.
+Install the agent CLI, then declare or bind it through the scoped agent files:
+`~/.roll/agents.yaml` for Machine Scope and `.roll/agents.yaml` for Project
+Scope. For example:
+
+- Codex CLI: `npm install -g @openai/codex`
+- Antigravity CLI: `npm install -g @antigravity/agy`
+
+Run `roll agent` to inspect the effective scopes, or `roll agent migrate
+--dry-run` to convert legacy agent config. See [ai-agents.md](ai-agents.md) for
+the full model and supported agent list.
 
 ## See Also
 

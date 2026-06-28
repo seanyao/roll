@@ -1,7 +1,7 @@
 /**
  * US-V4-006 — the Planner contract for `planned` execution.
  *
- * A `planned` Story runs Planner → Builder → Evaluator. The Planner (the
+ * A `planned` Story writes a plan artifact before execute/evaluate. The planner step (the
  * `roll-design` skill capability, in a FRESH session before the Builder) writes
  * `planner-contract.md` + `artifact-manifest.json`. The Builder consumes the
  * contract via artifact refs; the Evaluator maps planned-vs-delivered against it.

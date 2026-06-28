@@ -1,6 +1,6 @@
 # Roll — 概述
 
-Roll 是 Supervisor-led 的交付 harness。把目标写下来，让 Roll 拆成 Story，并把每张 Story 路由进合适的 Planner / Builder / Evaluator 流程。
+Roll 是 Supervisor-led 的交付 harness。把目标写下来，让 Roll 拆成 Story，并把每张 Story 路由进 scoped `supervise`、`execute`、`evaluate` 角色。
 
 ## 快速开始
 
@@ -20,14 +20,22 @@ roll loop watch     # 可选：CLI-first 实时旁观当前 cycle
 
 Roll 以 V4 Supervisor 执行系统运行：
 
-- **Supervisor Agent** —— 项目级 observe/advise 角色。它读取 backlog、merge truth、open PR、route profile、重复失败、发布就绪和 owner 问题。它协调跨 Story 工作；不实现具体 Story，也不覆盖证据闸。
-- **Story Execution Unit** —— 一张 Story 由一个执行剖面交付：`standard` = Builder，`verified` = Builder -> Evaluator，`planned` = Planner -> Builder -> Evaluator。
-- **角色与 rig** —— Planner / Builder / Evaluator 是稳定角色；具体 agent/model/rig 按 Story 选择。请求的 rig 不可用时，Roll 记录并 fail loud，不冒充成另一个 agent。
+- **Supervisor Agent** —— 项目级 observe/advise 角色。它读取 backlog、merge truth、open PR、scoped role bindings、重复失败、发布就绪和 owner 问题。它协调跨 Story 工作；不实现具体 Story，也不覆盖证据闸。
+- **Story Execution Unit** —— 一张 Story 通过 `execute` 交付，并在配置后由 `evaluate` 评审。
+- **角色与绑定** —— `supervise`、`execute`、`evaluate` 是稳定角色；具体 agent 和可选 model 由 `Scope -> Role -> Binding -> Agent -> Model` 解析。请求的绑定不可用时，Roll 记录并 fail loud，不冒充成另一个 agent。
 - **Loop** —— 按可配置频次从 BACKLOG 摘取最高优先级故事，在隔离 worktree 里执行。CI 通过后才会落到 `main`。
 - **Dream** — 凌晨 3 点扫描代码库，发现死代码、文档缺口和架构漂移，将 `REFACTOR-NNN` 条目排队交给 loop 领取。
 - **Skills** —— 仍然是能力层。角色调用 `$roll-design`、`$roll-build`、`$roll-fix`、`$roll-peer`、`$roll-.qa` 等技能。
 
 你负责提需求、审 PR、执行发布。中间的一切交给 Roll。
+
+## 运行模式
+
+Roll 有两个模式，它们共用同一套 backlog、路由剖面、证据、Evaluator 和发布闸。
+`guided` 表示 owner 通过 `roll supervisor status/next/why` 理解状态，并显式启动工作，通常是
+`roll loop go --cards <id>`。`autonomous` 表示 `roll loop on` 已安装 scheduler，合格 Todo
+可以在既有闸内被调度。`roll loop pause` / `roll loop off` 回到 guided；`roll loop resume` /
+`roll loop on` 显式切回 autonomous。
 
 ### 接入样例
 
@@ -55,21 +63,20 @@ roll loop on
 
 Roll 无破坏地诊断现有代码，审阅后才创建或更新 Roll metadata，然后基于已有 backlog/docs/context 推理。当前状态通过 CLI-first 可观测入口查看：`roll status`、`roll loop watch`、`roll loop runs`、`roll cycle <id>`、告警和 Story 报告。
 
-**按 Story 路由角色**
+**按 Scope 路由角色**
 
 ```yaml
-story: US-V4-012
-execution_profile: verified
-roles:
-  builder:
-    agent: kimi
-    responsibility: update README, docs, guides, website, and samples
-  evaluator:
-    agent: pi
-    responsibility: evaluate new-user clarity and product narrative
+schema: roll-agents/v1
+defaults:
+  story:
+    roles:
+      execute:
+        candidates: [kimi, codex]
+      evaluate:
+        candidates: [pi, reasonix]
 ```
 
-运行时可用性必须显式记录：不可用 agent 记录为 unavailable；fallback 必须响，不能静默替换。
+运行时可用性必须显式记录：不可用 agent 记录为 unavailable；角色解析必须 fail-loud，不能静默替换。
 
 ## 功能一览
 
@@ -115,7 +122,7 @@ roles:
 
 当前产品是 CLI-first。`roll status`、`roll loop watch`、`roll loop runs`、`roll cycle <id>`、`roll pulse`、告警和按 Story 收口的 attest 报告，是当前活体真相入口。`roll index` 是按需静态归档/修复渲染器，适合 CI artifact 和迁移对账；它不是当前真相入口。
 
-三态交付阶梯仍然成立：**claimed -> merged -> attested**。backlog 行写了 Done 只是 `claimed`；PR 合入 `main` 后变 `merged`；Story 证据齐备后变 `attested`。完整 Supervisor Live Console / 多角色看板是下一阶段工作。
+三态交付阶梯仍然成立：**claimed -> merged -> attested**。backlog 行写了 Done 只是 `claimed`；PR 合入 `main` 后变 `merged`；Story 证据齐备后变 `attested`。使用 `roll supervisor live` 查看 CLI-first 多角色看板；浏览器/TUI 版 Supervisor Live Console 仍是未来工作。
 
 ### 按需技能
 

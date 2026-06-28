@@ -1,5 +1,5 @@
 /**
- * US-DOSSIER-037 — `roll cast`: the complexity-ladder → role Casting table in the
+ * US-DOSSIER-037 — `roll cast`: role Casting table in the
  * terminal, computed from the SAME `collectCasting()` view-model the web grid
  * renders. Tests: slot resolution, empty-slot em-dash, scenario rows, JSON↔human
  * parity, and determinism (mirrors router Invariant I10).
@@ -41,28 +41,28 @@ const configured: CastingVM = collectCasting({
 });
 
 describe("renderCastTable — US-DOSSIER-037", () => {
-  it("AC2: renders the four complexity-slot rows resolved from the shared collector", () => {
+  it("AC2: renders the four legacy execute-source rows resolved from the shared collector", () => {
     const text = stripAnsi(renderCastTable(configured, "en"));
-    expect(text).toContain("Executor · easy");
+    expect(text).toContain("story.execute · legacy easy");
     expect(text).toContain("kimi");
-    expect(text).toContain("Executor · default");
+    expect(text).toContain("story.execute · legacy default");
     expect(text).toContain("codex");
-    expect(text).toContain("Executor · hard");
-    expect(text).toContain("Executor · fallback");
+    expect(text).toContain("story.execute · legacy hard");
+    expect(text).toContain("story.execute · legacy fallback");
   });
 
   it("AC2: an empty/unconfigured slot prints an em-dash, never a guessed agent", () => {
     const empty = collectCasting({ readSlot: () => undefined });
     const text = stripAnsi(renderCastTable(empty, "en"));
     // every complexity slot resolves to "—" and the table never invents an agent
-    expect(text).toContain("Executor · easy");
-    expect(text).toMatch(/Executor · easy\s+—/);
+    expect(text).toContain("story.execute · legacy easy");
+    expect(text).toMatch(/story\.execute · legacy easy\s+—/);
     expect(text).not.toContain("kimi");
     expect(text).not.toContain("codex");
     // PR review reuses the (empty) default slot → also an em-dash
     expect(text).toMatch(/PR review\s+—/);
     // the unconfigured footer hint shows
-    expect(text).toContain("No slots configured");
+    expect(text).toContain("No legacy routes configured");
   });
 
   it("AC2: the four scenario rows match the web grid (peer · PR review · spar · onboard)", () => {
@@ -78,7 +78,7 @@ describe("renderCastTable — US-DOSSIER-037", () => {
 
   it("AC5: the table renders in the active language (zh), separate-line headers", () => {
     const text = stripAnsi(renderCastTable(configured, "zh"));
-    expect(text).toContain("执行 · easy");
+    expect(text).toContain("执行角色 · legacy easy");
     expect(text).toContain("同伴复核 peer");
     expect(text).toContain("强制异构");
     // header row in zh, never an inline EN+中 mix on the row

@@ -17,11 +17,8 @@ afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
-// claude is NOT a headless reviewer (canReviewHeadless=false — OAuth/keychain
-// login unreachable from a launchd headless daemon), so it must not appear in a
-// capability block (parsePairingConfig fail-loud rejects a non-headless reviewer).
-// kimi/pi are the declared-capable scorers (the narrowed autonomous pool); claude
-// stays the WORKING (builder) agent.
+// Static score config declares supported candidates. Runtime auth/VPN/account
+// health is filtered by availability/readiness, not by permanent config exclusion.
 const SCORE_CFG = `enabled: true\nstages: [code, score]\ncapability:\n  kimi: [code, score]\n  pi: [code, score]\n`;
 
 function project(yaml: string | null): string {
@@ -86,8 +83,8 @@ describe("roll pair score — US-PAIR-010", () => {
   });
 
   it("FIX-343: single-agent env scores via a fresh SAME-TYPE session, exit 0", async () => {
-    // Builder is kimi, not claude: a same-type fresh-session score requires the
-    // lone agent to be a headless reviewer, and claude is not (canReviewHeadless=false).
+    // Builder is kimi: a same-type fresh-session score uses the lone supported
+    // agent when it is available.
     const p = project(SCORE_CFG);
     const r = await run(p, ["US-T-001", "--summary", "s"], { installed: ["kimi"], workingAgent: () => "kimi" });
     expect(r.code).toBe(0);
@@ -213,8 +210,7 @@ describe("roll pair score --design — FIX-344 (design output peer Review Score)
 
   it("AC3: the design agent (worker) NEVER scores its own output — the reviewer is a separate fresh session", async () => {
     const p = project(SCORE_CFG);
-    // worker = the design agent (kimi, a headless-reviewable agent — claude is not,
-    // canReviewHeadless=false); the score still comes from a fresh session whose id
+    // worker = the design agent (kimi); the score still comes from a fresh session whose id
     // is the reviewer's, never an in-session self-grade.
     const r = await run(p, ["US-DSGN-004", "--summary", "s", "--design", "--worker", "kimi"], { installed: ["kimi"], workingAgent: () => "kimi" });
     expect(r.code).toBe(0);

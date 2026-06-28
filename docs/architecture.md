@@ -4,7 +4,7 @@
 
 roll 是 AI coding agent 的**外层控制系统**（agent harness / reliability layer）。它不进入 agent 内部（不管理 token 窗口、不压缩对话、不干预单次推理），而是在外部建立一个闭环：设定目标 → 调度执行 → 感知结果 → 修正方向。
 
-当前用户入口是 CLI-first：`roll init`、`roll supervisor`、`roll loop`、`roll status`、`roll cycle` 与按 Story 收口的 `roll attest` 报告。完整 Supervisor Live Console / 多角色看板是下一阶段工作，不作为当前产品面承诺。安装方式：`npm install -g @seanyao/roll`。
+当前用户入口是 CLI-first：`roll init`、`roll supervisor`、`roll supervisor live`、`roll loop`、`roll status`、`roll cycle` 与按 Story 收口的 `roll attest` 报告。浏览器/TUI 版 Supervisor Live Console 是下一阶段工作，不作为当前产品面承诺。安装方式：`npm install -g @seanyao/roll`。
 
 ## 为什么是分层闭环
 
@@ -94,17 +94,32 @@ web          站点与静态展示（当前不是活体 Supervisor 控制台）
 | ci | 监控 CI 状态 |
 | alert | 消费 ALERT 文件，推送到用户 |
 
-### BC3 · Agent 路由
+### BC3 · Agent Scope / Role
 
-管理可用的 AI agent 及其路由规则。
+管理可用的 AI agent 及其角色绑定。领域模型是递归的：
 
-**Rig 与 Route Profile（v4）**：**Rig = agent × model**，是可调用的执行身份。**Route Profile** 是项目本地（`.roll/agents.yaml`）的策略，把 story 的风险/复杂度映射到 Rig。`easy / default / hard / fallback` 是 **route slot（路由槽，纯策略标签）**，不是 Agent 或 Rig 的类型——同一个 Rig 在一个项目里可能是 `default`、在另一个项目里是 `hard`。机器默认 agent（`primary_agent`）在 `~/.roll/config.yaml`，是全局的；Route Profile 是项目本地的。
+```text
+Scope -> Role -> Binding -> Agent -> optional Model
+```
 
-**路由规则**：根据任务的层级（epic/feature/story）和类型（US/FIX/REFACTOR）映射到一个 Rig。同一输入永远返回同一路由——结果可审计、可复现。
+**Scope**：`machine` / `project` / `story` / `skill` 等层级使用同一套形状。
+Machine Scope 写在 `~/.roll/agents.yaml`，声明本机 Agent Pool、能力和机器级
+`supervise`；Project Scope 写在 `.roll/agents.yaml`，绑定项目/Story 默认角色并可
+`inherits: machine`。
 
-**探活**：spawn agent 前进行秒级探测并缓存结果。不可用时尝试一次 `fallback` 槽（**仅 spawn 前的可用性回退，绝不是失败后自动换人重试链**）。全部不可用 → 暂停并告警。
+**Role**：核心角色是 `supervise`、`execute`、`evaluate`。Supervisor Agent 负责项目级
+协调；Story Execution Unit 通过 `story.execute` 交付，通过 `story.evaluate` 评审和打分。
 
-**反规则**：不因历史表现自动调整路由偏好。不做跨 agent 自动切换（失败不偷偷换人重试）。指标可以*建议*策略变更，但绝不静默改写策略。
+**Binding**：角色可以固定到一个 agent，也可以从候选池选择。选择策略是显式、可审计的
+（例如 `first-available`、`least-recent`、`seeded-random`），结果记录 source、trace、
+candidates 和 skipped runtime health。
+
+**公平候选池**：静态配置列出公平候选，不因历史 auth/VPN/account/network 事故永久排除
+支持的 agent。运行时探活只影响当前 resolution：不可用候选被记录为 skipped，静态池不被
+悄悄改写。
+
+**反规则**：不因历史表现自动改写角色绑定。不做失败后的静默跨 agent 重试。指标可以*建议*
+策略变更，但绝不绕过 human-on-the-loop。
 
 ### BC4 · 交付
 
@@ -126,7 +141,7 @@ web          站点与静态展示（当前不是活体 Supervisor 控制台）
 - 自动合并：满足条件自动 merge PR
 - 审查标记：特定文件或层级标记需人审查
 - 安全限幅：连续失败 N 次 → 暂停并告警
-- 路由规则：覆盖默认 agent-模型映射
+- 角色绑定：覆盖 scoped role 到 agent/model 的解析
 - 网络首检：任何需要网络的命令（`loop go/run`、agent 拉起、showcase、release 开 PR、update）把连通性（含代理）作为第一道检查。不通时跑配置的恢复钩子 `loop_safety.proxy_enable_cmd` 再复检：通了继续，仍不通就立刻停手并给出可操作的中英文原因——绝不带病前进、绝不空转、绝不静默降级。该钩子是用户自填的命令（roll 不内置任何代理工具）；未配置即停手并告知。
   - 探测目标默认是 `github.com:443`（海外路径）。若你的工作流只用国内可直连的服务（如 DeepSeek/Bailian），把探测指向你确实需要的主机：`loop_safety.probe_url: <host:port 或 URL>`（FIX-1025）；这样 VPN 掉线也不会因一个工作流根本不需要的固定海外主机而误停。
   - 完全跳过预检：`loop_safety.skip_network_check: true`（FIX-1025）——当你确认所配置的服务可直连、不希望被任何固定主机探测拦住时使用。
@@ -184,14 +199,14 @@ web          站点与静态展示（当前不是活体 Supervisor 控制台）
 
 这些入口共享 `collectDossierState` / `cycleActivitySignalsFromEvents`，但当前产品承诺以 CLI-first 为准。
 
-#### Supervisor Live Console（next work）
+#### Supervisor Live Board
 
-完整 Supervisor Live Console / 多角色 board 还未作为当前产品面交付。未来浏览器面应复用同一标准流，并遵守以下边界：
+`roll supervisor live` 是当前已交付的 CLI-first 多角色 board：读取事件流生成 Supervisor pane 与 Planner / Builder / Evaluator role panes。未来浏览器/TUI 面应复用同一 view model，并遵守以下边界：
 
 - **依赖方向**：浏览器可观测只读消费 `spec` 事件 schema 与 `core` 读侧选择器；loop 不依赖浏览器进程。
 - **只读隔离**：观察面不得写入 loop 状态，不得影响 Story Execution Unit 的 TCR、CI、merge 或 attest 闸。
-- **角色视图**：未来 board 展示 Supervisor Agent、Story Execution Unit、execution profile、Planner/Builder/Evaluator 角色、agent/model/rig 路由、fallback 记录和 story-scoped evidence；它不替代 Evaluator 裁定或 owner 决策。
-- **fail-loud**：浏览器面只能显示不可用 agent/model/rig 和 fallback 事实，不能把替代执行包装成原请求 agent。
+- **角色视图**：未来 board 展示 Supervisor Agent、Story Execution Unit、`supervise` / `execute` / `evaluate` 角色、scope/role/binding 解析、agent/model、runtime skipped candidates 和 story-scoped evidence；它不替代 evaluate 裁定或 owner 决策。
+- **fail-loud**：浏览器面只能显示不可用 agent/model 和 skipped runtime facts，不能把替代执行包装成原请求 agent。
 
 #### 远程就绪缝（design-constraint-only，未建）
 
@@ -204,10 +219,10 @@ web          站点与静态展示（当前不是活体 Supervisor 控制台）
 
 #### 异步远程（现有，互补）
 
-实时控制台（CLI watch / web live）和 git-snapshot 异步远程（roll-meta + GitHub 作交会点）是**同一选择器、不同发射器**的关系：
+实时控制台（CLI watch / future browser live）和 git-snapshot 异步远程（roll-meta + GitHub 作交会点）是**同一选择器、不同发射器**的关系：
 
 - **异步路径**：`roll-meta` 私有 git 仓通过 `commitRollMetadataRepo` 提交 `.roll` 状态快照。远端 agent 读取 roll-meta + GitHub API 感知项目状态——不依赖实时连接。
-- **实时路径**：`roll cycle watch` / daemon WebSocket 在本地网络内提供亚秒级更新。
+- **实时路径**：当前产品只交付 `roll cycle watch`；未来浏览器实时面必须复用同一标准流，不能重新引入旧 daemon/frame surface。
 - **共存**：二者彼此独立、并行不悖。实时路径不做异步远程做的事（跨 NAT 状态同步）；异步路径不做实时路径的事（秒级活信号）。详见 `.roll/features/loop-observability/live-console-design.md` §2.3。
 
 #### 证据按构造（US-OBS-031）
@@ -228,23 +243,31 @@ web          站点与静态展示（当前不是活体 Supervisor 控制台）
 
 **Budget guardrails**：项目/全局设日和周上限。逼近上限 → 自动降级到便宜模型或暂停并通知。便宜模型回退率高导致总成本反超 → 建议升级。
 
+### BC8.5 · 运行模式（guided / autonomous）
+
+Roll 的运行模式只有两个：`guided` 和 `autonomous`。它们不是两套 agent 配置，而是同一套 backlog、truth、route profile、execution profile、attest evidence、Evaluator 和 release gates 之上的两种触发方式。
+
+- `guided`：owner 通过 `roll supervisor status/next/why` 理解状态和下一步，再显式运行 `roll loop go --cards <id>` 等命令。guided 模式不会静默启动长时间 Story 执行。
+- `autonomous`：`roll loop on` 安装 scheduler；scheduler 可以在 pause、budget、route、evidence、Evaluator 和 release gates 内领取合格 Todo。`roll loop pause` / `roll loop off` 回到 guided；`roll loop resume` / `roll loop on` 显式切回 autonomous。
+- 持久化来源只使用已有 loop/supervisor 状态：launchd plist、PAUSE/DORMANT marker、events/runs/backlog。不得新增独立 `mode.yaml` 之类的第二真相。
+
 ### BC9 · Supervisor Agent 与执行剖面（v4）
 
 v4 把"一张 Story 怎么交付"和"项目级怎么协调"分成两层。
 
 **Story Execution Unit（执行剖面 / Execution Profile）**：一张 Story 的交付按风险/ROI 选最便宜够用的角色流水线，用户不必先想"团队形状"：
 
-- `standard` = Builder（低风险、范围局部、AC 清晰、证据风险低）
-- `verified` = Builder → Evaluator（用户可见 / 需视觉证据 / 历史证据薄弱——靠独立判断而非自评）
-- `planned` = Planner → Builder → Evaluator（需求模糊 / 跨模块 / 触及 truth·release·路由·状态语义——风险是"做错事"而不仅是"证不出来"）
+- `standard` = execute（低风险、范围局部、AC 清晰、证据风险低）
+- `verified` = execute → evaluate（用户可见 / 需视觉证据 / 历史证据薄弱——靠独立判断而非自评）
+- `planned` = plan artifact → execute → evaluate（需求模糊 / 跨模块 / 触及 truth·release·路由·状态语义——风险是"做错事"而不仅是"证不出来"）
 
-剖面在 Cycle 开始时选一次并记入 `execution:profile` 事件。角色之间只通过 artifact（`planner-contract.md` / `builder-evidence` / `eval-report.md` + `artifact-manifest.json`）交接，不共享原始会话；每个角色都是 fresh session。Evaluator 不是单一 `pass/fail`——blocking review、score、attest 是三个分开的契约。Evaluator→Builder 的修复回合受硬熔断约束（最大轮数、重复 finding 签名、预算、超时），触界即升级。
+剖面在 Cycle 开始时选一次并记入 `execution:profile` 事件。角色之间只通过 artifact（`planner-contract.md` / `execute-evidence` / `eval-report.md` + `artifact-manifest.json`）交接，不共享原始会话；每个角色都是 fresh session。`evaluate` 不是单一 `pass/fail`——blocking review、score、attest 是三个分开的契约。evaluate→execute 的修复回合受硬熔断约束（最大轮数、重复 finding 签名、预算、超时），触界即升级。
 
 **Supervisor Agent**：项目级协调者，负责不属于某一张具体 Story 的工作——跨 Story/Epic 上下文、backlog 排序、风险分级、执行剖面建议、路由/Rig 建议、预算、并行、卡住的 cycle、重复失败、文件冲突、合并队列、发布就绪、truth coverage / 显式 release blockers、系统级用户交互（"接下来做什么？""为什么卡住？"）与 owner 升级。
 
 Supervisor **绝不**：实现具体 Story、写 Story 的评估报告、覆盖 Evaluator 裁定、绕过 attest 闸、直接标记 Story 为 Done、用指标静默改写路由/策略。v4.0 的 Supervisor 是 observe/advise（`roll supervisor`）：先用确定性 selector 把事实结构化，再（必要时）让 agent 措辞建议；历史 Done 缺少结构化 DeliveryRecord 只作为 truth coverage/backfill 提醒，发布是否阻塞以显式 release blockers / release consistency 为准；持久化策略变更一律需 owner 确认。安全并行调度（`max_parallel_cycles`、文件冲突串行化、合并队列/预算暂停）的决策逻辑已就位，活体并行交付留待 v4.1。
 
-> 命名：只用 **Supervisor Agent / Execution Profile / Story Execution Unit / Rig / Route Profile**。不引入 Prime / Watchman / Dispatcher / Governor 作为竞争角色名，也不把 solo/paired team 当用户面概念。
+> 命名：只用 **Supervisor Agent / Story Execution Unit / Agent Scope / Role / Binding / Agent / Model**。核心角色是 `supervise` / `execute` / `evaluate`；旧路由配置术语只在迁移/兼容说明中出现，不作为新的用户面模型。
 
 ### 上下文协作
 

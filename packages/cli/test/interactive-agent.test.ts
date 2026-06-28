@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { isPrimaryValid, selectPrimaryAgent, type PrimarySelectionOptions, type PrimarySelectionResult } from "../src/lib/interactive-agent.js";
-import { replacePrimaryAgent } from "../src/commands/setup-shared.js";
+import { writeMachineAgentScope } from "../src/commands/setup-shared.js";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -176,7 +176,7 @@ describe("selectPrimaryAgent — AC3: no agents installed", () => {
     });
     expect(selected).toBeNull();
     expect(guidance).toBeTruthy();
-    expect(guidance).toContain("roll agent default");
+    expect(guidance).toContain("roll agent migrate --dry-run");
   });
 });
 
@@ -311,18 +311,19 @@ describe("selectPrimaryAgent — AC6: removed/uninstalled primary", () => {
 });
 
 // ---------------------------------------------------------------------------
-// AC7: Atomic write is tested via setup-shared replacePrimaryAgent
+// AC7: Machine Scope writes are tested via setup-shared writeMachineAgentScope
 // (tested in setup.difftest.test.ts — config is written atomically)
 // ---------------------------------------------------------------------------
 
-describe("replacePrimaryAgent — AC7: atomic write", () => {
-  it("preserves unknown config fields and writes atomically", () => {
+describe("writeMachineAgentScope — AC7: atomic write", () => {
+  it("preserves config.yaml and writes supervise role to agents.yaml atomically", () => {
     const home = mkHome();
     const cfgPath = join(home, ".roll", "config.yaml");
     writeFileSync(cfgPath, [
       "# My config",
       "lang: zh",
-      "primary_agent: claude",
+      "ai_claude: ~/.claude|CLAUDE.md|CLAUDE.md",
+      "ai_pi: ~/.pi/agent|AGENTS.md|AGENTS.md",
       "custom_field: keep_me",
       "# a comment",
     ].join("\n") + "\n");
@@ -330,18 +331,24 @@ describe("replacePrimaryAgent — AC7: atomic write", () => {
     const saveHome = process.env["ROLL_HOME"];
     process.env["ROLL_HOME"] = join(home, ".roll");
     try {
-      replacePrimaryAgent("pi");
+      writeMachineAgentScope("pi");
 
       const cfg = readFileSync(cfgPath, "utf8");
-      expect(cfg).toContain("primary_agent: pi");
       expect(cfg).toContain("custom_field: keep_me");
       expect(cfg).toContain("# My config");
       expect(cfg).toContain("lang: zh");
-      expect(cfg).not.toContain("primary_agent: claude");
+      expect(cfg).not.toContain("primary_agent:");
+
+      const agents = readFileSync(join(home, ".roll", "agents.yaml"), "utf8");
+      expect(agents).toContain("schema: roll-agents/v1");
+      expect(agents).toContain("scope: machine");
+      expect(agents).toContain("agent: pi");
+      expect(agents).toContain("roles:");
+      expect(agents).toContain("supervise:");
 
       // No tmp file left behind
       const dotRollFiles = readdirSync(join(home, ".roll"));
-      const tmpFiles = dotRollFiles.filter((f) => f.startsWith("config.yaml.tmp-"));
+      const tmpFiles = dotRollFiles.filter((f) => f.includes(".tmp-"));
       expect(tmpFiles.length).toBe(0);
     } finally {
       if (saveHome === undefined) delete process.env["ROLL_HOME"];

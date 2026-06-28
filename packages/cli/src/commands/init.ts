@@ -5,12 +5,12 @@
  *
  *   - fresh project (no AGENTS.md, not an existing codebase) → scaffold AGENTS.md
  *     (project-type-filtered), .claude/CLAUDE.md (template), .roll/backlog.md,
- *     .roll/features/, .roll/features.md, .roll/agent-routes.yaml, .roll/.version
+ *     .roll/features/, .roll/features.md, .roll/agents.yaml, .roll/.version
  *   - re-init (AGENTS.md present) → section-merge global conventions + CLAUDE.md
  *
  * Ported helpers: _merge_global_to_project (2022-2093), _merge_claude_to_project
  * (2095-2139), _write_backlog (3432-3451), _ensure_features_dir (3478-3487),
- * _write_features_md (3572-3591), _init_seed_agent_routes (3456-3476),
+ * _write_features_md (3572-3591), _init_seed_project_agents,
  * _write_version_stamp (3497-3515), scan_project_type_from_files (3387-3429),
  * _sync_conventions (1300-1303 → _sync_one_tool → _sync_convention_for_tool),
  * and _emit_init_v2_ui (2215-2276) re-implementing lib/roll-init.py.
@@ -43,16 +43,10 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import {
-  agentsInstalled,
-  defaultPairingConfig,
-  getAgentSpec,
-  renderPairingConfig,
-} from "@roll/core";
+import { getAgentSpec } from "@roll/core";
 import { resolveLang, STATUS_MARKER, t, v2Catalog, v3Catalog, type Lang } from "@roll/spec";
 import { c, renderState, row, COLS } from "../render.js";
-import { realAgentEnv } from "./agent-list.js";
-import { onPath, replacePrimaryAgent, rollPkgDir, syncConventions as sharedSyncConventions } from "./setup-shared.js";
+import { onPath, rollPkgDir, syncConventions as sharedSyncConventions, writeMachineAgentScope } from "./setup-shared.js";
 import { rollVersion } from "./version.js";
 import { resolveProjectName, shouldSelfRegister, writeProjectRow } from "../lib/projects-registry.js";
 import { projectSlug } from "./dashboard.js";
@@ -502,10 +496,8 @@ function legacyOnboardGuide(projectDir: string): number {
   const chosen = selectOnboardAgent(installed);
   if (chosen === null) return 1;
 
-  // US-ONBOARD-NUDGE-006: persist the user's choice as primary_agent.
-  // Before this, onboard selection was "used for this session only" —
-  // the user picked B but primary stayed unset/claude.
-  replacePrimaryAgent(chosen);
+  // Persist the user's choice as the Machine Scope supervise role.
+  writeMachineAgentScope(chosen);
 
   process.stdout.write("\n");
   info(m("init.launching", chosen));
@@ -701,22 +693,34 @@ function writeFeaturesMd(path: string, summary: Summary): void {
   summary.push("created|.roll/features.md");
 }
 
-// ─── _init_seed_agent_routes (3456-3476) ──────────────────────────────────────
-function initSeedAgentRoutes(templateName: string, projectDir: string, summary: Summary): number {
-  const dest = join(projectDir, ".roll", "agent-routes.yaml");
+const PROJECT_AGENTS_TEMPLATE = `schema: roll-agents/v1
+scope: project
+inherits: machine
+
+roles:
+  supervise:
+    kind: inherit
+
+defaults:
+  story:
+    roles:
+      execute:
+        kind: inherit
+      evaluate:
+        kind: select
+        require: [evaluate]
+        strategy: seeded-random
+`;
+
+function initSeedProjectAgents(projectDir: string, summary: Summary): number {
+  const dest = join(projectDir, ".roll", "agents.yaml");
   if (existsSync(dest)) {
-    summary.push("unchanged|.roll/agent-routes.yaml");
+    summary.push("unchanged|.roll/agents.yaml");
     return 0;
   }
-  const src = join(rollTemplates(), "agent-routes", `${templateName}.yaml`);
-  if (!existsSync(src)) {
-    // err() here is inside the discarded `{ … } >/dev/null` block in cmd_init,
-    // and the call is `… || true` — so a missing template is swallowed.
-    return 1;
-  }
   mkdirSync(dirname(dest), { recursive: true });
-  writeFileAtomic(dest, readFileSync(src, "utf8"));
-  summary.push("created|.roll/agent-routes.yaml");
+  writeFileAtomic(dest, PROJECT_AGENTS_TEMPLATE);
+  summary.push("created|.roll/agents.yaml");
   return 0;
 }
 
@@ -739,25 +743,6 @@ installed_at: "${installedAt}"
 `,
   );
   summary.push("created|.roll/.version");
-}
-
-// ─── US-PAIR-008: scaffold .roll/pairing.yaml during onboarding ──────────────
-/**
- * Cross-agent pairing is a first-class quality feature, so a new project gets
- * its config at init time — no separate `roll pair init` step. Stays EXPLICIT
- * (a real, self-documenting file the user sees + the UI announces it) rather
- * than an invisible default-on. Idempotent: never clobbers an existing file.
- * A v3 divergence from the frozen v2 oracle (init.difftest accounts for it).
- */
-function scaffoldPairing(projectDir: string, summary: Summary): void {
-  const path = join(projectDir, ".roll", "pairing.yaml");
-  if (existsSync(path)) {
-    summary.push("unchanged|.roll/pairing.yaml");
-    return;
-  }
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileAtomic(path, renderPairingConfig(defaultPairingConfig(agentsInstalled(realAgentEnv()))));
-  summary.push("created|.roll/pairing.yaml");
 }
 
 // ─── _sync_conventions (1300-1303) — shared with setup.ts ────────────────────
@@ -1172,8 +1157,8 @@ function claudeTemplateAvailable(projectDir: string): boolean {
   return existsSync(join(rollTemplates(), projectType, "CLAUDE.md"));
 }
 
-function agentRoutesTemplateAvailable(templateName: string): boolean {
-  return templateName !== "skip" && existsSync(join(rollTemplates(), "agent-routes", `${templateName}.yaml`));
+function projectAgentsConfigEnabled(templateName: string): boolean {
+  return templateName !== "skip";
 }
 
 function applyReviewLabels(): OnboardApplyReviewLabels {
@@ -1391,7 +1376,7 @@ function initApply(
     gitignoreDotRoll: fields.gitignoreDotRoll,
     agentRoutesTemplate: routesTemplate,
     includeClaudeConventions: claudeTemplateAvailable(projectDir),
-    includeAgentRoutes: agentRoutesTemplateAvailable(routesTemplate),
+    includeAgentRoutes: projectAgentsConfigEnabled(routesTemplate),
     includePhase2Artifacts: fields.renderPhase2Artifacts,
   });
   if (!confirmApplyReview(reviewOperations, opts)) {
@@ -1422,10 +1407,10 @@ function initApply(
       maybeFailApplyAfter("backlog");
     }
     if (routesTemplate !== "skip") {
-      const routesPath = join(projectDir, ".roll", "agent-routes.yaml");
+      const routesPath = join(projectDir, ".roll", "agents.yaml");
       const existed = existsSync(routesPath);
-      if (initSeedAgentRoutes(routesTemplate, projectDir, summary) === 0 && !existed && existsSync(routesPath)) {
-        recordChangeset(projectDir, changeset, "files_created", ".roll/agent-routes.yaml");
+      if (initSeedProjectAgents(projectDir, summary) === 0 && !existed && existsSync(routesPath)) {
+        recordChangeset(projectDir, changeset, "files_created", ".roll/agents.yaml");
       }
     }
     if (approved.has("features")) {
@@ -1561,7 +1546,6 @@ function emitInitUi(
     step(nextStep++, "Create .roll/features/", ".roll/features/"),
     step(nextStep++, "Merge existing CLAUDE.md", ".claude/CLAUDE.md"),
     { num: nextStep++, label: "Link skills to AI clients", status: syncStatus },
-    step(nextStep++, "Scaffold cross-agent pairing", ".roll/pairing.yaml"),
   );
   const footerStatus: StepStatus = steps.some((s) => s.status === "fail") ? "fail" : "ok";
 
@@ -1764,8 +1748,8 @@ function renderExistingCodebaseDiagnosis(facts: InitFacts, diagnosis: InitDiagno
     );
     lines.push(
       initCopy(
-        "Install or sign in to an agent CLI (claude, kimi, or pi), or run `roll agent default <agent>`, then rerun `$roll-onboard`.",
-        "安装或登录 agent CLI（claude、kimi 或 pi），或运行 `roll agent default <agent>` 设置默认 agent，然后重新运行 `$roll-onboard`。",
+        "Install or sign in to an agent CLI (claude, kimi, or pi), then run `roll agent migrate --dry-run` or author ~/.roll/agents.yaml before rerunning `$roll-onboard`.",
+        "安装或登录 agent CLI（claude、kimi 或 pi），然后运行 `roll agent migrate --dry-run` 或维护 ~/.roll/agents.yaml，再重新运行 `$roll-onboard`。",
       ),
     );
   } else {
@@ -1829,9 +1813,8 @@ const PRD_ONLY_SMOKE_FILES = [
   ".roll/features/",
   ".roll/features.md",
   ".roll/onboard-changeset.yaml",
-  ".roll/agent-routes.yaml",
+  ".roll/agents.yaml",
   ".roll/.version",
-  ".roll/pairing.yaml",
 ] as const;
 
 function printSmokeCreatedFiles(projectDir: string): void {
@@ -2347,9 +2330,8 @@ export function initCommand(args: string[], deps: InitCommandDeps = {}): number 
   ensureFeaturesDir(join(projectDir, ".roll", "features"), summary);
   writeFeaturesMd(join(projectDir, ".roll", "features.md"), summary);
   const routesTemplate = process.env["ROLL_AGENT_ROUTES_TEMPLATE"] ?? "default";
-  initSeedAgentRoutes(routesTemplate, projectDir, summary); // `|| true`
+  if (routesTemplate !== "skip") initSeedProjectAgents(projectDir, summary);
   writeVersionStamp(projectDir, summary);
-  scaffoldPairing(projectDir, summary); // US-PAIR-008 (v3 divergence from v2)
   const writesFreshBrief = freshConcierge || emptyInteractive;
   const brief = writesFreshBrief ? writeInitBrief(projectDir, initDiagnosis.kind, initFacts, { emptyDescription }) : null;
   if (brief !== null) summary.push(`${brief.created ? "created" : "unchanged"}|${brief.relPath}`);

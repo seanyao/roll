@@ -13,7 +13,7 @@
  *   2. `ActivitySignal` = PROJECTION model.
  *      Derived FROM the durable truth (RollEvent stream) OR from a
  *      per-agent raw-stream normalizer. Downstream renderers (watch
- *      window, web console, cycle ledger) consume ONLY ActivitySignal
+ *      window, static archive, cycle ledger) consume ONLY ActivitySignal
  *      — never agent-specific parsing. This is the rich UI model
  *      with tier / seg / summary / result / ref / signalKind.
  *

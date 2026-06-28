@@ -30,7 +30,7 @@ describe("FIX-311 design-phase visual-evidence contract", () => {
   describe("pass paths", () => {
     it("a web/visual card with a web visual-evidence AC + a declared deliverable_url is valid", () => {
       const spec = `---
-deliverable_url: .roll/features/index.html#casting
+deliverable_url: https://app.example.test/casting#board
 ---
 ## US-CAST-001 Casting board redesign 📋
 
@@ -154,7 +154,7 @@ deliverable_url: https://app.test/x
   describe("fail paths", () => {
     it("hole ②: a non-exempt card with NO visual-evidence AC is invalid (keyword-as-enabler leak closed)", () => {
       const spec = `---
-deliverable_url: .roll/features/index.html
+deliverable_url: https://app.example.test/dashboard
 ---
 ## US-Y-2 Redesign the dashboard 📋
 
@@ -235,7 +235,7 @@ screenshot_exempt: ${naked}
         // The verb 截 (capture) does not match the noun 截图 — before FIX-341 this
         // AC was wrongly flagged missing-visual-evidence-ac. The marker IS the verdict.
         const spec = `---
-deliverable_url: .roll/features/index.html#now
+deliverable_url: https://app.example.test/now
 ---
 ## US-DOSSIER-043 Dossier Now landing 📋
 
@@ -286,7 +286,7 @@ deliverable_url: .roll/features/agents.html
 
       it("an explicit deliverable_url overrides a terminal-cued AC text", () => {
         const spec = `---
-deliverable_url: .roll/features/index.html#loop
+deliverable_url: https://app.example.test/loop
 ---
 ## US-DOSSIER-042 Loop tab 📋
 
@@ -335,7 +335,7 @@ deliverable_cmd:
       it("a declared deliverable surface does NOT manufacture a visual AC out of nothing (surface=none when no visual AC)", () => {
         // The declaration only classifies an EXISTING visual AC; it never invents one.
         const spec = `---
-deliverable_url: .roll/features/index.html
+deliverable_url: https://app.example.test/redesign
 ---
 ## US-Y-9 Redesign 📋
 

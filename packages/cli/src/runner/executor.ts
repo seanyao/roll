@@ -107,6 +107,10 @@ import {
   assembleEvalReport,
   renderEvalReport,
   validateEvaluatorArtifact,
+  validatePlannerArtifact,
+  parsePlannerContract,
+  plannedVsDelivered,
+  summarizePlannedVsDelivered,
 } from "@roll/core";
 import type { ArtifactManifest, ExecutionProfile, Rig } from "@roll/spec";
 import {
@@ -1339,6 +1343,19 @@ export async function executeCommand(
           event: { type: "agent_exited", exit: 1, timedOut: false },
           ctxPatch: { builderSessionId },
         };
+      }
+      // US-V4-006: for a `planned` cycle, run the Planner BEFORE the Builder in a
+      // fresh session and FAIL CLOSED on a missing/malformed planner contract —
+      // the Builder never starts without a valid plan. No-op for standard/verified.
+      if (ctx.selectedProfile === "planned") {
+        const plan = await runPlannerStage(ports, ctx, cmd.agent);
+        if (plan.ran && !plan.ok) {
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `planner stage failed closed for ${ctx.storyId ?? "?"}: ${plan.reasons.join("; ")} — Builder not started (cycle ${ctx.cycleId ?? "?"})`,
+          );
+          return { event: { type: "agent_exited", exit: 1, timedOut: false }, ctxPatch: { builderSessionId } };
+        }
       }
       // US-PORT-011: the live observation file — one stable path per project,
       // truncated at each agent start, fed every chunk in real time. The popup
@@ -3384,14 +3401,28 @@ export function writeEvaluatorArtifact(
   const scoreEntry = readLatestStoryReviewScore(ports.repoCwd, storyId);
   const verdict: "good" | "ok" | "regression" =
     scoreEntry?.verdict === "good" || scoreEntry?.verdict === "regression" ? scoreEntry.verdict : "ok";
+  // US-V4-006: when a planner contract exists (planned profile), the Evaluator
+  // reports planned-vs-delivered against it.
+  let plannedSummary = signals.plannedVsDelivered;
+  if (plannedSummary === undefined || plannedSummary === "") {
+    const contractPath = join(runDir, "role-artifacts", "planner", "planner-contract.md");
+    if (existsSync(contractPath)) {
+      try {
+        const contract = parsePlannerContract(readFileSync(contractPath, "utf8"), storyId);
+        if (contract !== null) {
+          plannedSummary = summarizePlannedVsDelivered(plannedVsDelivered(contract, deliveredAcItems(ports.repoCwd, storyId)));
+        }
+      } catch {
+        /* planned-vs-delivered is best-effort context for the report */
+      }
+    }
+  }
   const report = assembleEvalReport({
     storyId,
     blockingFindings: signals.blockingFindings,
     ...(scoreEntry !== undefined ? { score: { value: scoreEntry.score, verdict } } : {}),
     attestStatus: signals.attestStatus,
-    ...(signals.plannedVsDelivered !== undefined && signals.plannedVsDelivered !== ""
-      ? { plannedVsDelivered: signals.plannedVsDelivered }
-      : {}),
+    ...(plannedSummary !== undefined && plannedSummary !== "" ? { plannedVsDelivered: plannedSummary } : {}),
   });
   const reportMd = renderEvalReport(report);
   const manifest: ArtifactManifest = {
@@ -3420,6 +3451,102 @@ export function writeEvaluatorArtifact(
   }
   const v = validateEvaluatorArtifact({ manifest, reportMd, storyId, builderSessionId: ctx.builderSessionId ?? "" });
   return { written: true, valid: v.ok, reasons: v.reasons };
+}
+
+/** US-V4-006 — the AC items a delivery covered (ac-map entries with a positive
+ *  status), used for planned-vs-delivered mapping. Best-effort + lenient. */
+function deliveredAcItems(repoCwd: string, storyId: string): string[] {
+  try {
+    const p = join(cardArchiveDir(repoCwd, storyId), "ac-map.json");
+    if (!existsSync(p)) return [];
+    const arr = JSON.parse(readFileSync(p, "utf8")) as Array<{ ac?: string; status?: string }>;
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter((e) => e.status === "pass" || e.status === "partial" || e.status === "readonly")
+      .map((e) => e.ac ?? "")
+      .filter((a) => a !== "");
+  } catch {
+    return [];
+  }
+}
+
+const PLANNER_TIMEOUT_MS = 20 * 60 * 1000;
+
+/** US-V4-006 — the Planner prompt (roll-design capability). TS owns the
+ *  orchestration + the output contract; the skill does the planning. */
+function buildPlannerPrompt(storyId: string, contractAbsPath: string): string {
+  return [
+    `You are the PLANNER for story ${storyId} in a planned execution profile.`,
+    `Read the story spec under .roll/features/**/${storyId}/spec.md and produce a planner contract.`,
+    `Write the contract to: ${contractAbsPath}`,
+    "It MUST be markdown with these sections (use '- ' bullets):",
+    "## Scope boundary",
+    "## Acceptance contract",
+    "## Expected evidence",
+    "## Risks",
+    "## Out of scope",
+    "## Resize / split guidance   (optional prose)",
+    "Do NOT write product code — you only plan. The Builder consumes this contract next.",
+  ].join("\n");
+}
+
+/**
+ * US-V4-006 — run the Planner stage BEFORE the Builder for a `planned` cycle.
+ * The Planner (roll-design capability) runs in a FRESH session and writes
+ * `planner-contract.md`; the runner records the planner `artifact-manifest.json`.
+ * The contract is then validated FAIL-CLOSED — a missing/malformed/empty contract
+ * stops the cycle before any Builder work. No-op for standard/verified. Idempotent
+ * across retries (an existing valid contract is reused, not re-planned).
+ */
+export async function runPlannerStage(
+  ports: Ports,
+  ctx: CycleContext,
+  plannerAgent: string,
+): Promise<{ ran: boolean; ok: boolean; reasons: readonly string[] }> {
+  if (ctx.selectedProfile !== "planned") return { ran: false, ok: true, reasons: [] };
+  const storyId = ctx.storyId ?? "";
+  const runDir = ctx.evidenceRunDir ?? "";
+  if (storyId === "" || runDir === "") return { ran: false, ok: false, reasons: ["no story id / run dir for planner stage"] };
+  const dir = join(runDir, "role-artifacts", "planner");
+  const contractPath = join(dir, "planner-contract.md");
+  const manifestPath = join(dir, "artifact-manifest.json");
+  const plannerSessionId = `${ctx.cycleId ?? "cycle"}:plan:${plannerAgent}:${ports.clock()}`;
+  if (!existsSync(contractPath)) {
+    try {
+      mkdirSync(dir, { recursive: true });
+      await ports.agentSpawn(plannerAgent, {
+        cwd: ports.paths.worktreePath,
+        skillBody: buildPlannerPrompt(storyId, contractPath),
+        storyId,
+        timeoutMs: PLANNER_TIMEOUT_MS,
+        runDir: dir,
+      });
+    } catch {
+      /* a planner spawn blip → no contract → validation below fails closed */
+    }
+  }
+  // The runner records the planner role manifest (the skill writes the contract).
+  const manifest: ArtifactManifest = {
+    schemaVersion: 1,
+    storyId,
+    cycleId: ctx.cycleId ?? "",
+    role: "planner",
+    rig: { agent: plannerAgent } as Rig,
+    sessionId: plannerSessionId,
+    worktreeCwd: ports.paths.worktreePath,
+    scoreRepoCwd: ports.repoCwd,
+    inputs: [{ path: `.roll/features/**/${storyId}/spec.md`, kind: "contract" }],
+    outputs: [{ path: "role-artifacts/planner/planner-contract.md", kind: "contract" }],
+    createdAt: new Date(eventTs(ports)).toISOString(),
+  };
+  try {
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+  } catch {
+    /* best-effort manifest record */
+  }
+  const contractMd = existsSync(contractPath) ? readFileSync(contractPath, "utf8") : null;
+  const v = validatePlannerArtifact({ manifest, contractMd, storyId });
+  return { ran: true, ok: v.ok, reasons: v.reasons };
 }
 
 export function routerEstMin(worktreeCwd: string, storyId: string, backlogDesc: string): number | undefined {

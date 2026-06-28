@@ -5,7 +5,7 @@
  * row builder, and the dry-run plan. No real git / gh / agent — pure fakes.
  */
 import { execFileSync, execSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -13,7 +13,7 @@ import type { CycleCommand, CycleContext, RollEvent, WarmSessionEntry } from "@r
 import { AGENTS } from "../../core/src/agent/specs.js";
 import { classifyComplexity } from "@roll/core";
 import { AWAITING_REVIEW_STATUS_MARKER } from "@roll/spec";
-import { agentWritableRoots, recordExecutionProfile, writeEvaluatorArtifact } from "../src/runner/executor.js";
+import { agentWritableRoots, recordExecutionProfile, writeEvaluatorArtifact, runPlannerStage } from "../src/runner/executor.js";
 import { evaluateReviewScoreGate, readLatestStoryPeerScore } from "../src/lib/review-score.js";
 import {
   AGENT_ARGV_TODO,
@@ -3886,5 +3886,89 @@ describe("US-V4-005 — verified execution: evaluator artifact boundary", () => 
     const ctx = ctxFor(repo, "US-E4", "verified", "C-1:build:codex:0");
     writeEvaluatorArtifact(ports, ctx, { attestStatus: "produced", blockingFindings: ["AC2 has no test"] });
     expect(readFileSync(join(ctx.evidenceRunDir as string, "role-artifacts", "evaluator", "eval-report.md"), "utf8")).toContain("repair");
+  });
+});
+
+describe("US-V4-006 — planned execution: Planner contract before the Builder", () => {
+  const VALID_CONTRACT = [
+    "# Planner contract",
+    "## Scope boundary",
+    "- picker only",
+    "## Acceptance contract",
+    "- picker prefers est_min",
+    "## Expected evidence",
+    "- unit test",
+    "## Risks",
+    "- legacy cards",
+    "## Out of scope",
+    "- spawn changes",
+    "",
+  ].join("\n");
+
+  function plannedCtx(repo: string, id: string): Parameters<typeof runPlannerStage>[1] {
+    const runDir = join(repo, ".roll", "features", "uncategorized", id, "run-1");
+    mkdirSync(runDir, { recursive: true });
+    return { cycleId: "C-1", branch: "b", loop: "x", storyId: id, selectedProfile: "planned", evidenceRunDir: runDir };
+  }
+
+  it("no-op for non-planned profiles", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-v4-006-")));
+    execDirs.push(repo);
+    const { ports } = fakePorts({ repoCwd: repo });
+    const r = await runPlannerStage(ports, { ...plannedCtx(repo, "US-P0"), selectedProfile: "verified" }, "codex");
+    expect(r.ran).toBe(false);
+    expect(r.ok).toBe(true);
+  });
+
+  it("planner writes a valid contract → ok, contract + manifest recorded", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-v4-006-")));
+    execDirs.push(repo);
+    const ctx = plannedCtx(repo, "US-P1");
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      // The Planner skill writes the contract into the planner role-artifacts dir.
+      agentSpawn: (async (_agent: string, opts: { runDir?: string }) => {
+        writeFileSync(join(opts.runDir as string, "planner-contract.md"), VALID_CONTRACT);
+        return { exitCode: 0, timedOut: false };
+      }) as unknown as Ports["agentSpawn"],
+    });
+    const r = await runPlannerStage(ports, ctx, "codex");
+    expect(r.ran).toBe(true);
+    expect(r.ok).toBe(true);
+    const dir = join(ctx.evidenceRunDir as string, "role-artifacts", "planner");
+    expect(existsSync(join(dir, "planner-contract.md"))).toBe(true);
+    expect(JSON.parse(readFileSync(join(dir, "artifact-manifest.json"), "utf8")).role).toBe("planner");
+  });
+
+  it("FAIL-CLOSED: planner produces no contract → ok=false (Builder must not start)", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-v4-006-")));
+    execDirs.push(repo);
+    const ctx = plannedCtx(repo, "US-P2");
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      agentSpawn: (async () => ({ exitCode: 0, timedOut: false })) as unknown as Ports["agentSpawn"], // writes nothing
+    });
+    const r = await runPlannerStage(ports, ctx, "codex");
+    expect(r.ran).toBe(true);
+    expect(r.ok).toBe(false);
+    expect(r.reasons.join(" ")).toContain("planner-contract.md missing or malformed");
+  });
+
+  it("Evaluator reports planned-vs-delivered when a planner contract exists", () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-v4-006-")));
+    execDirs.push(repo);
+    const id = "US-P3";
+    const runDir = join(repo, ".roll", "features", "uncategorized", id, "run-1");
+    mkdirSync(join(runDir, "role-artifacts", "planner"), { recursive: true });
+    writeFileSync(join(runDir, "role-artifacts", "planner", "planner-contract.md"), VALID_CONTRACT);
+    // an ac-map delivering the planned acceptance item
+    mkdirSync(join(repo, ".roll", "features", "uncategorized", id), { recursive: true });
+    writeFileSync(join(repo, ".roll", "features", "uncategorized", id, "ac-map.json"), JSON.stringify([{ ac: "picker prefers est_min", status: "pass" }]));
+    const { ports } = fakePorts({ repoCwd: repo });
+    const ctx = { cycleId: "C-1", branch: "b", loop: "x", storyId: id, selectedProfile: "planned" as const, evidenceRunDir: runDir, builderSessionId: "C-1:build:codex:0" };
+    writeEvaluatorArtifact(ports, ctx, { attestStatus: "produced", blockingFindings: [] });
+    const report = readFileSync(join(runDir, "role-artifacts", "evaluator", "eval-report.md"), "utf8");
+    expect(report).toContain("## Planned vs delivered");
+    expect(report).toContain("satisfied");
   });
 });

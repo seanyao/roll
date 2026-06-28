@@ -33,6 +33,7 @@ export * from "./loop/cycle-observer.js";
 export * from "./loop/cycle-activity.js";
 export * from "./loop/execution-profile.js";
 export * from "./loop/evaluator-artifact.js";
+export * from "./loop/planner-contract.js";
 export * from "./loop/morning-report.js";
 export * from "./loop/pr-loop.js";
 export * from "./loop/quality-gate.js";

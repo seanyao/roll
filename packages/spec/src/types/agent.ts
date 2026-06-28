@@ -165,6 +165,32 @@ export interface AgentConfigParse {
   readonly errors: readonly string[];
 }
 
+/** US-V4-006 — the Planner contract (`planner-contract.md`) a `planned` execution
+ *  produces in a fresh session BEFORE the Builder. Builder consumes it via
+ *  artifact refs; the Evaluator maps planned-vs-delivered against it. */
+export interface PlannerContract {
+  readonly storyId: string;
+  /** What is in scope for this Story (the boundary the Builder must respect). */
+  readonly scopeBoundary: readonly string[];
+  /** Acceptance / evaluation contract: how the delivery will be judged. */
+  readonly acceptanceContract: readonly string[];
+  /** Evidence the delivery is expected to produce. */
+  readonly expectedEvidence: readonly string[];
+  /** Known risks the Builder should watch. */
+  readonly risks: readonly string[];
+  /** Explicit out-of-scope items (must NOT be done in this Story). */
+  readonly outOfScope: readonly string[];
+  /** Resize/split guidance when the Planner judges the Story too large. */
+  readonly resizeGuidance?: string;
+}
+
+/** US-V4-006 — planned-vs-delivered mapping row: each acceptance item the planner
+ *  contracted, mapped to whether the delivery satisfied it. */
+export interface PlannedVsDeliveredRow {
+  readonly item: string;
+  readonly status: "satisfied" | "missing" | "changed";
+}
+
 /** US-V4-005 — the Evaluator's recommendation (kept SEPARATE from the score and
  *  the blocking-review verdict — three distinct contracts, never one pass/fail). */
 export type EvalRecommendation = "merge" | "repair" | "resize" | "hold" | "escalate";

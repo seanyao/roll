@@ -1,5 +1,6 @@
 export * from "./agent/registry.js";
 export * from "./agent/specs.js";
+export * from "./agent/config-v4.js";
 export * from "./agent/roster-gate.js";
 export * from "./projects/reachability.js";
 export * from "./agent/session-reuse.js";

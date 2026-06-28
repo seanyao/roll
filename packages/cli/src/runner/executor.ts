@@ -111,6 +111,9 @@ import {
   parsePlannerContract,
   plannedVsDelivered,
   summarizePlannedVsDelivered,
+  decideRepair,
+  initialRepairState,
+  DEFAULT_MAX_REPAIR_ROUNDS,
 } from "@roll/core";
 import type { ArtifactManifest, ExecutionProfile, Rig } from "@roll/spec";
 import {
@@ -2289,21 +2292,31 @@ export async function executeCommand(
       // US-V4-005: for verified/planned profiles, write the Evaluator artifact
       // (eval-report.md + artifact-manifest.json) into the run dir, ASSEMBLED from
       // the cycle's separate review/score/attest signals (never one pass/fail).
-      // Best-effort + non-toppling: the existing attest/peer gates remain the
-      // actual blockers; this records the structured evaluator verdict + manifest.
+      // FAIL-CLOSED (US-V4-005): a malformed/missing evaluator artifact, or one
+      // whose session is the builder's (self-grade), BLOCKS the cycle — it never
+      // marks Done. US-V4-007: the bounded repair DECISION (decideRepair) frames
+      // the Evaluator→Builder repair signal with a structured reason; the live
+      // re-spawn loop that consumes a `repair` action is v4.1.
+      let evaluatorBlocked = false;
       if (
         (ctx.selectedProfile === "verified" || ctx.selectedProfile === "planned") &&
         commitsAhead > 0 &&
         storyId !== ""
       ) {
-        const ev = writeEvaluatorArtifact(ports, ctx, {
-          attestStatus: attestVerdict,
-          blockingFindings: attestBlocked || peerBlocked ? attestReasons : [],
-        });
+        const blocking = attestBlocked || peerBlocked ? attestReasons : [];
+        const ev = writeEvaluatorArtifact(ports, ctx, { attestStatus: attestVerdict, blockingFindings: blocking });
         if (ev.written && !ev.valid) {
+          evaluatorBlocked = true;
           ports.events.appendAlert(
             ports.paths.alertsPath,
             `evaluator artifact (${ctx.selectedProfile}) failed closed for ${storyId}: ${ev.reasons.join("; ")} — cycle ${ctx.cycleId ?? "?"}`,
+          );
+        }
+        const repair = decideRepair(blocking, initialRepairState(), { maxRounds: DEFAULT_MAX_REPAIR_ROUNDS });
+        if (repair.action !== "done") {
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `repair decision (${ctx.selectedProfile}) for ${storyId}: ${repair.action} — ${repair.reason} (live repair loop is v4.1; cycle held for review) — cycle ${ctx.cycleId ?? "?"}`,
           );
         }
       }
@@ -2323,7 +2336,9 @@ export async function executeCommand(
       // an agent slot is set, and the spawn ran (its spend/duration are recorded
       // on the runs row). A defensively-empty agent slot stays idle.
       const agentExecuted = (ctx.agent ?? "").trim() !== "";
-      const gateBlocked = attestBlocked || peerBlocked;
+      // US-V4-005: a verified/planned cycle with an invalid Evaluator artifact is
+      // gate-blocked (fail-closed) alongside the attest/peer gates.
+      const gateBlocked = attestBlocked || peerBlocked || evaluatorBlocked;
       // FIX-908: a gate-blocked cycle that did REAL work (≥1 commit AND ≥1 tcr:
       // commit) but is only missing a REQUIRED acceptance artifact — the
       // independent peer Review Score was not produced (scoreStatus ≠ "scored") OR

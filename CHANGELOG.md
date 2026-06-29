@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v4.629.2 — 2026-06-29
+
 ### Agent 管理
 
 - **Agent 配置收敛成 Scope → Role → Binding → Agent → Model**：机器级和项目级 Agent 域现在只写 `~/.roll/agents.yaml` / `.roll/agents.yaml`，`roll agent` 展示 Machine Scope、Project Scope、继承来源、resolved role、Agent pool health 和 legacy compatibility；`roll agent migrate` 可以把旧的 primary/local/pairing/route 配置迁到新模型，迁移默认不删除旧文件。(US-V4-015, US-V4-016, US-V4-017, US-V4-019, US-V4-020, #1073) `[autonomous-evolution]`

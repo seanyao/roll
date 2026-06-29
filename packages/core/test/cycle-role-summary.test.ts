@@ -95,6 +95,7 @@ const fixtureEvents: RollEvent[] = [
     peer: "agy",
     cause: "unparseable",
     detail: "control characters before SCORE",
+    artifactPath: ".roll/loop/cycle-logs/obs-035-test/peer/agy.score.raw.txt",
     stage: "score",
     ts: 1410,
   },
@@ -324,6 +325,7 @@ describe("cycle-role-summary", () => {
           peer: "pi",
           cause: "unparseable",
           detail: "missing SCORE line",
+          artifactPath: ".roll/loop/cycle-logs/SCORE-RETRY/peer/pi.score.raw.txt",
           stage: "score",
           ts: 300,
         },
@@ -392,6 +394,19 @@ describe("cycle-role-summary", () => {
       expect(md).toContain("agy: failed unparseable");
       expect(md).toContain("kimi: returned");
       expect(md).toContain("## Gates");
+    });
+
+    it("renders raw artifact path for failed evaluators (US-OBS-035)", () => {
+      const summary = buildCycleRoleSummary(fixtureInput);
+      const md = renderCycleRoleSummaryMarkdown(summary);
+
+      // agy has a pair:score-failure with artifactPath
+      expect(md).toContain("agy: failed unparseable");
+      expect(md).toContain("raw artifact: .roll/loop/cycle-logs/obs-035-test/peer/agy.score.raw.txt");
+
+      // kimi returned but didn't fail — no raw artifact line
+      expect(md).toContain("kimi: returned");
+      expect(md).not.toContain("kimi: raw artifact");
     });
 
     it("renders minimal summary gracefully", () => {

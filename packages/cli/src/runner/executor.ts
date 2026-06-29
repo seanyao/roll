@@ -2067,16 +2067,27 @@ export async function executeCommand(
       // written: the attest gate then fails loud (`missing peer review score`)
       // and the cycle honestly fails — there is no runner-derived fallback.
       if (commitsAhead > 0 && storyId !== "") {
+        // US-OBS-035 — save raw peer output to a deterministic artifact path
+        // so parse failures can be inspected post-hoc. Path scheme:
+        //   cycle-logs/{cycleId}/peer/{peer}.{stage}.raw.txt
+        const savePeerRawOutput = (peer: string, stage: "score" | "review", stdout: string, stderr: string): string => {
+          const peerDir = join(dirname(ports.paths.eventsPath), "cycle-logs", ctx.cycleId ?? "cycle", "peer");
+          mkdirSync(peerDir, { recursive: true });
+          const artifactPath = join(peerDir, `${peer}.${stage}.raw.txt`);
+          writeFileSync(artifactPath, `--- stdout ---\n${stdout}\n--- stderr ---\n${stderr}\n`);
+          return artifactPath;
+        };
         // FIX-910 — emit a per-attempt score-stage failure event so every null
         // return from a scorer is OBSERVABLE (no more silently swallowed nulls).
         // The cause distinguishes unparseable / timeout / auth-block / exit-error.
-        const emitScoreFailure = (peer: string, cause: "unparseable" | "timeout" | "auth-block" | "exit-error", detail?: string): void => {
+        const emitScoreFailure = (peer: string, cause: "unparseable" | "timeout" | "auth-block" | "exit-error", detail?: string, artifactPath?: string): void => {
           ports.events.appendEvent(ports.paths.eventsPath, {
             type: "pair:score-failure",
             cycleId: ctx.cycleId ?? "",
             peer,
             cause,
             ...(detail !== undefined ? { detail: detail.slice(0, 200) } : {}),
+            ...(artifactPath !== undefined ? { artifactPath } : {}),
             stage: "score",
             ts: eventTs(ports),
           });
@@ -2090,10 +2101,10 @@ export async function executeCommand(
           timeoutMs: number,
         ): Promise<
           | { outcome: "parsed"; parsed: import("./pairing-gate.js").PairScore }
-          | { outcome: "unparseable"; detail: string }
-          | { outcome: "timeout"; detail: string }
-          | { outcome: "auth-block"; detail: string }
-          | { outcome: "exit-error"; detail: string }
+          | { outcome: "unparseable"; detail: string; artifactPath: string }
+          | { outcome: "timeout"; detail: string; artifactPath?: string }
+          | { outcome: "auth-block"; detail: string; artifactPath?: string }
+          | { outcome: "exit-error"; detail: string; artifactPath: string }
         > => {
           const credentialBlock = blockIfAgentCredentialsMissing(peer, "score", ports, ctx);
           if (credentialBlock !== null) return { outcome: "auth-block", detail: credentialBlock };
@@ -2115,26 +2126,32 @@ export async function executeCommand(
           }
           if (res === null || res.timedOut) {
             const detail = res !== null ? `${res.stdout}\n${res.stderr}` : "";
+            let artifactPath: string | undefined;
+            if (res !== null) {
+              artifactPath = savePeerRawOutput(peer, "score", res.stdout, res.stderr);
+            }
             const blockCause = await attributeBlockCause(peer, "timeout", detail, "score");
             // external block (auth/network) surfaced by attributeBlockCause → auth-block;
             // genuine slowness with no block signature → timeout.
             return blockCause === "auth" || blockCause === "network"
-              ? { outcome: "auth-block", detail }
-              : { outcome: "timeout", detail };
+              ? { outcome: "auth-block", detail, artifactPath }
+              : { outcome: "timeout", detail, artifactPath };
           }
           if (res.exitCode !== 0) {
             const detail = `${res.stdout}\n${res.stderr}`;
+            const artifactPath = savePeerRawOutput(peer, "score", res.stdout, res.stderr);
             const blockCause = await attributeBlockCause(peer, "error", detail, "score");
             return blockCause === "auth" || blockCause === "network"
-              ? { outcome: "auth-block", detail }
-              : { outcome: "exit-error", detail };
+              ? { outcome: "auth-block", detail, artifactPath }
+              : { outcome: "exit-error", detail, artifactPath };
           }
           const parsed = parsePairScoreOutput(res.stdout);
           if (parsed === null) {
             // The reviewer ANSWERED but the format didn't match the strict
             // SCORE:/VERDICT:/RATIONALE: protocol — this is unparseable, NOT a
             // timeout/error. Previously silently discarded; now observable.
-            return { outcome: "unparseable", detail: res.stdout.slice(0, 500) };
+            const artifactPath = savePeerRawOutput(peer, "score", res.stdout, res.stderr);
+            return { outcome: "unparseable", detail: res.stdout.slice(0, 500), artifactPath };
           }
           return { outcome: "parsed", parsed: { ...parsed, cost: peerReviewCost(peer, res.stdout) } };
         };
@@ -2143,7 +2160,7 @@ export async function executeCommand(
           // First attempt
           const first = await tryScoreOnce(peer, prompt, timeoutMs);
           if (first.outcome === "parsed") return first.parsed;
-          emitScoreFailure(peer, first.outcome, first.detail);
+          emitScoreFailure(peer, first.outcome, first.detail, first.artifactPath);
           // FIX-910 unparseable rescue: the reviewer ANSWERED but the format was
           // off. Give ONE retry with a stricter format reminder — the reviewer
           // already did the cognitive work; the harness just needs a parseable
@@ -2154,7 +2171,7 @@ export async function executeCommand(
               "\n\n你上次回复缺/错了 SCORE/VERDICT/RATIONALE 行，请严格只回这三行。";
             const retry = await tryScoreOnce(peer, retryPrompt, timeoutMs);
             if (retry.outcome === "parsed") return retry.parsed;
-            emitScoreFailure(peer, retry.outcome, retry.detail);
+            emitScoreFailure(peer, retry.outcome, retry.detail, retry.artifactPath);
           }
           return null;
         };

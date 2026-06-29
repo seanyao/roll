@@ -114,6 +114,7 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
     peer: string;
     cause: string;
     detail?: string;
+    artifactPath?: string;
     stage: string;
     ts: number;
   }>;
@@ -226,6 +227,7 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
           ts: failure.ts,
           cause: failure.cause,
           detail: failure.detail,
+          artifactPath: failure.artifactPath,
         })),
       ...scores
         .filter((s) => s.peer === peer && s.ts >= sel.ts && s.ts < nextSelectionTs)
@@ -268,6 +270,7 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
           ts: event.ts,
         });
       } else {
+        const failureArtifactPath = "artifactPath" in event ? (event as { artifactPath?: string }).artifactPath : undefined;
         roles.push({
           role: "evaluator",
           agent: peer,
@@ -275,7 +278,7 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
           state: "failed",
           cause: event.cause,
           detail: event.detail,
-          artifactPath: scoreArtifactPath,
+          artifactPath: failureArtifactPath ?? scoreArtifactPath,
           acceptedByGate: false,
           ts: event.ts,
         });
@@ -297,7 +300,7 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
         state: "failed",
         cause: fail.cause,
         detail: fail.detail,
-        artifactPath: scoreArtifactPath,
+        artifactPath: fail.artifactPath ?? scoreArtifactPath,
         acceptedByGate: false,
         ts: fail.ts,
       });
@@ -464,6 +467,9 @@ export function renderCycleRoleSummaryMarkdown(summary: CycleRoleSummary): strin
       if (e.cause) detail += ` ${e.cause}`;
       if (e.detail) detail += ` (${e.detail})`;
       lines.push(`- ${agent}: ${detail}`);
+      if (e.state === "failed" && e.artifactPath) {
+        lines.push(`  - raw artifact: ${e.artifactPath}`);
+      }
     }
     lines.push("");
   } else {

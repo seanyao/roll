@@ -165,7 +165,7 @@ export type RollEvent =
   // every null return from a scorer is observable (no more silently swallowed nulls).
   // The "unparseable" cause additionally triggers ONE retry with a stricter format
   // reminder; a second failure is also recorded.
-  | { type: "pair:score-failure"; cycleId: string; peer: string; cause: "unparseable" | "timeout" | "auth-block" | "exit-error"; detail?: string; stage: "score" | "design"; ts: number }
+  | { type: "pair:score-failure"; cycleId: string; peer: string; cause: "unparseable" | "timeout" | "auth-block" | "exit-error"; detail?: string; artifactPath?: string; stage: "score" | "design"; ts: number }
   // FIX-346 — a peer was REMOVED from the candidate pool after repeated headless
   // AUTH failures (expired/unavailable creds it cannot refresh non-interactively:
   // agy's Google OAuth, claude's macOS keychain/auth-daemon cooldown, …). The loop

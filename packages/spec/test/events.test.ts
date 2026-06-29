@@ -206,12 +206,33 @@ describe("parseEventLine (I8: readers skip bad lines, never crash)", () => {
       ts: 4,
     };
     expect(exitError.cause).toBe("exit-error");
-    // parseEventLine round-trips the event
+    // With artifactPath (US-OBS-035 — raw output persisted)
+    const withArtifact: RollEvent = {
+      type: "pair:score-failure",
+      cycleId: "c5",
+      peer: "reasonix",
+      cause: "unparseable",
+      detail: "SCORE: good work",
+      artifactPath: ".roll/loop/cycle-logs/c5/peer/reasonix.score.raw.txt",
+      stage: "score",
+      ts: 5,
+    };
+    expect(withArtifact.artifactPath).toBe(".roll/loop/cycle-logs/c5/peer/reasonix.score.raw.txt");
+    // parseEventLine round-trips with artifactPath
     const parsed = parseEventLine(
       '{"type":"pair:score-failure","cycleId":"c1","peer":"pi","cause":"unparseable","detail":"malformed","stage":"score","ts":5}',
     );
     expect(parsed).not.toBeNull();
     expect(parsed?.type).toBe("pair:score-failure");
+    // parseEventLine round-trips artifactPath (US-OBS-035)
+    const parsedWithArtifact = parseEventLine(
+      '{"type":"pair:score-failure","cycleId":"c5","peer":"reasonix","cause":"unparseable","detail":"malformed","artifactPath":".roll/loop/cycle-logs/c5/peer/reasonix.score.raw.txt","stage":"score","ts":5}',
+    );
+    expect(parsedWithArtifact).not.toBeNull();
+    expect(parsedWithArtifact?.type).toBe("pair:score-failure");
+    if (parsedWithArtifact?.type === "pair:score-failure") {
+      expect(parsedWithArtifact.artifactPath).toBe(".roll/loop/cycle-logs/c5/peer/reasonix.score.raw.txt");
+    }
   });
 
   it("types goal safety gate trip events (US-GOAL-005; progress + timebox gates)", () => {

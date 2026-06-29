@@ -21,7 +21,7 @@ const fixtureEvents: unknown[] = [
   { type: "pair:consult", cycleId: CYCLE_ID, peer: "codex", durationMs: 52000, outcome: "reviewed", ts: 1220 },
   { type: "pair:selected", cycleId: CYCLE_ID, workingAgent: "pi", peer: "reasonix", stage: "score", ts: 1300 },
   { type: "pair:score", cycleId: CYCLE_ID, peer: "reasonix", score: 10, verdict: "good", cost: 0.05, stage: "score", ts: 1400 },
-  { type: "pair:score-failure", cycleId: CYCLE_ID, peer: "agy", cause: "unparseable", detail: "control characters before SCORE", stage: "score", ts: 1410 },
+  { type: "pair:score-failure", cycleId: CYCLE_ID, peer: "agy", cause: "unparseable", detail: "control characters before SCORE", artifactPath: ".roll/loop/cycle-logs/20260629-112437-39253/peer/agy.score.raw.txt", stage: "score", ts: 1410 },
   { type: "attest:gate", cycleId: CYCLE_ID, verdict: "produced", reasons: ["review-score good 10/10 present"], ts: 1500 },
   { type: "peer:gate", cycleId: CYCLE_ID, verdict: "consulted", reasons: ["peer review completed"], ts: 1510 },
   { type: "cycle:end", cycleId: CYCLE_ID, outcome: "delivered", cost: { cycleId: CYCLE_ID, agent: "pi", model: "deepseek-v4-pro", tokensIn: 10000, tokensOut: 2000, estimatedCost: 1.5, revertCount: 0, effectiveCost: 1.5 }, ts: 1600 },
@@ -147,6 +147,7 @@ describe("cycle roles view", () => {
     expect(stdout).toContain("## Evaluator / Score");
     expect(stdout).toContain("reasonix: accepted score=10 verdict=good");
     expect(stdout).toContain("agy: failed unparseable");
+    expect(stdout).toContain("raw artifact: .roll/loop/cycle-logs/20260629-112437-39253/peer/agy.score.raw.txt");
 
     // Gates section
     expect(stdout).toContain("## Gates");

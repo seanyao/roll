@@ -110,6 +110,12 @@ export function lifecycleFromFacts(
   terminalOutcome: TerminalOutcome,
   prState: PrState,
 ): LifecycleState {
+  // Delivery gate outcomes are structural blocks. They intentionally outrank
+  // merge evidence because FIX-1032 treats these as "must not be recorded as
+  // delivered" until the owner fixes the missing guardian or red main CI.
+  if (terminalOutcome === "ci_red_after_merge") return "ci_red";
+  if (terminalOutcome === "pr_loop_unavailable") return "blocked";
+
   // ── Done: PR merged → done ──────────────────────────────────────────
   if (prState === "merged") return "done";
 
@@ -154,7 +160,6 @@ export function lifecycleFromFacts(
   // gives the owner a recovery path; the backlog story stays retryable.
   if (terminalOutcome === "handoff_without_tcr") return "failed";
   if (terminalOutcome === "orphan_timeout") return "blocked";
-  if (terminalOutcome === "pr_loop_unavailable") return "blocked";
 
   // ── Unknown ────────────────────────────────────────────────────────
   // A cycle that started but has no known outcome → building (best guess)

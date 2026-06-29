@@ -148,8 +148,9 @@ describe("US-TRUTH-013 AC3 — lifecycleFromFacts deterministic mappings", () =>
     });
   }
 
-  it("PR merged always wins — overrides any terminal outcome to done", () => {
-    // Exhaustively test every terminal outcome with PR merged → done
+  it("PR merged wins except delivery-gate blocking outcomes", () => {
+    // Exhaustively test every terminal outcome with PR merged → done, except
+    // structural delivery gates that explicitly mean "never record delivered".
     const allOutcomes: TerminalOutcome[] = [
       "delivered",
       "published_pending_merge",
@@ -164,13 +165,13 @@ describe("US-TRUTH-013 AC3 — lifecycleFromFacts deterministic mappings", () =>
       "dormant_entered",
       "unpublished",
       "needs_review",
-      "ci_red_after_merge",
-      "pr_loop_unavailable",
       "unknown",
     ];
     for (const o of allOutcomes) {
       expect(lifecycleFromFacts(o, "merged")).toBe("done");
     }
+    expect(lifecycleFromFacts("ci_red_after_merge", "merged")).toBe("ci_red");
+    expect(lifecycleFromFacts("pr_loop_unavailable", "merged")).toBe("blocked");
   });
 });
 

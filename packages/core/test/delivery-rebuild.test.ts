@@ -416,6 +416,38 @@ describe("rebuildDeliveriesFromFacts — constraints", () => {
     expect(result[0].lifecycleState).toBe("done");
   });
 
+  it("FIX-1032b: ci_red_after_merge is not rebuilt as done even with merge evidence", () => {
+    const runs = [
+      makeRun({ storyId: "US-CIRED", outcome: "ci_red_after_merge", prNumber: 77, recordedAt: 200 }),
+    ];
+    const merges = [makeMerge({ prNumber: 77, mergeCommit: "red123", mergedAt: 3000 })];
+    const result = rebuildDeliveriesFromFacts(runs, merges, "o/r");
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      storyId: "US-CIRED",
+      lifecycleState: "ci_red",
+      prNumber: { present: true, value: 77 },
+      prUrl: { present: true, value: "https://github.com/o/r/pull/77" },
+      mergeCommit: { present: true, value: "red123" },
+    });
+  });
+
+  it("FIX-1032b: pr_loop_unavailable is not rebuilt as done even with later merge evidence", () => {
+    const runs = [
+      makeRun({ storyId: "US-NOPRLOOP", outcome: "pr_loop_unavailable", prNumber: 78, recordedAt: 200 }),
+    ];
+    const merges = [makeMerge({ prNumber: 78, mergeCommit: "noguard123", mergedAt: 3000 })];
+    const result = rebuildDeliveriesFromFacts(runs, merges, "o/r");
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      storyId: "US-NOPRLOOP",
+      lifecycleState: "blocked",
+      prNumber: { present: true, value: 78 },
+      prUrl: { present: true, value: "https://github.com/o/r/pull/78" },
+      mergeCommit: { present: true, value: "noguard123" },
+    });
+  });
+
   it("AC2: delete deliveries → rebuild → same result (simulated)", () => {
     // Rebuilding from the same facts always produces the same deliveries.
     // This simulates the "delete the file and rebuild" scenario.

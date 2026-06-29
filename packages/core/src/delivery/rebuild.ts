@@ -17,8 +17,8 @@
  * AC4: no separate backfill script needed; first rebuild covers all history.
  * AC7: genuinely not-delivered cards stay todo (no false positives).
  */
-import type { DeliveryRecord, FactOr } from "@roll/spec";
-import { present, absent } from "@roll/spec";
+import type { DeliveryRecord, FactOr, TerminalOutcome } from "@roll/spec";
+import { present, absent, lifecycleFromFacts } from "@roll/spec";
 import type { RunRow } from "../events/bus.js";
 import type { ExecPort } from "./infra-default.js";
 import { RUNS_FILE } from "../events/bus.js";
@@ -64,6 +64,29 @@ export interface MergeFact {
    * Subjects with no story-id (e.g. `loop cycle cycle-… (#892)`) yield `[]`.
    */
   storyIds: string[];
+}
+
+function terminalOutcomeFromRun(outcome: string): TerminalOutcome | undefined {
+  if (outcome === "ci_red_after_merge" || outcome === "pr_loop_unavailable") return outcome;
+  if (outcome === "published_pending_merge") return outcome;
+  if (outcome === "delivered") return outcome;
+  if (outcome === "failed") return outcome;
+  if (outcome === "blocked") return outcome;
+  if (outcome === "aborted_no_delivery") return outcome;
+  if (outcome === "gave_up") return outcome;
+  if (outcome === "handoff_without_tcr") return outcome;
+  if (outcome === "orphan_timeout") return outcome;
+  if (outcome === "idle_no_work") return outcome;
+  if (outcome === "aborted_with_delivery") return outcome;
+  if (outcome === "unpublished") return outcome;
+  if (outcome === "needs_review") return outcome;
+  if (outcome === "dormant_entered") return outcome;
+  if (outcome === "unknown") return outcome;
+  return undefined;
+}
+
+function isDeliveryGateBlockingOutcome(outcome: string): outcome is "ci_red_after_merge" | "pr_loop_unavailable" {
+  return outcome === "ci_red_after_merge" || outcome === "pr_loop_unavailable";
 }
 
 /**
@@ -386,6 +409,9 @@ export function rebuildDeliveriesFromFacts(
 
     // Done when: (a) merge evidence exists AND (b) either we have a prNumber or
     // we at least have a mergeCommit (done-without-PR is legal for backfilled history).
+    // Delivery-gate outcomes are the explicit exception: they preserve the
+    // structural block even when merge facts are present, so rebuild cannot turn
+    // "main CI red after merge" or "PR loop absent" back into a false done.
     if (mergedFact !== undefined &&
         (mergedFact.prNumber > 0 || mergedFact.mergeCommit !== "")) {
       const fact: MergeFact = mergedFact; // narrow for strict TS
@@ -393,10 +419,14 @@ export function rebuildDeliveriesFromFacts(
       const prUrl = effectivePr !== undefined && effectivePr > 0 && repoSlug !== undefined
         ? `https://github.com/${repoSlug}/pull/${effectivePr}`
         : undefined;
+      const terminalOutcome = terminalOutcomeFromRun(latest.outcome);
+      const lifecycleState = isDeliveryGateBlockingOutcome(latest.outcome) && terminalOutcome !== undefined
+        ? lifecycleFromFacts(terminalOutcome, "merged")
+        : "done";
       result.push({
         storyId,
         cycleId: latest.cycleId,
-        lifecycleState: "done",
+        lifecycleState,
         prNumber: effectivePr !== undefined && effectivePr > 0
           ? present(effectivePr)
           : absent("no_publish_attempted"),

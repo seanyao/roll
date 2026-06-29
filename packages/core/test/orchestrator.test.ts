@@ -127,6 +127,48 @@ describe("Hook 1 — productivity floor: gave_up vs idle", () => {
   });
 });
 
+describe("FIX-1039 — handoff_without_tcr: dirty worktree but zero TCR commits", () => {
+  it("exit 0 + 0 commits + dirty worktree → handoff_without_tcr (recoverable, not gave_up)", () => {
+    expect(
+      classifyCaptured({ usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 0, worktreeDirty: true }),
+    ).toBe("handoff_without_tcr");
+  });
+  it("exit 0 + 0 commits + agent executed + dirty worktree → handoff_without_tcr takes priority over gave_up", () => {
+    expect(
+      classifyCaptured({ usedWorktree: true, agentExecuted: true, agentExit: 0, timedOut: false, commitsAhead: 0, worktreeDirty: true }),
+    ).toBe("handoff_without_tcr");
+  });
+  it("exit 0 + 0 commits + clean worktree → gave_up (no dirt to preserve)", () => {
+    expect(
+      classifyCaptured({ usedWorktree: true, agentExecuted: true, agentExit: 0, timedOut: false, commitsAhead: 0 }),
+    ).toBe("gave_up");
+  });
+  it("handoff_without_tcr maps to its own terminal outcome (failed-class, not gave_up)", () => {
+    expect(mapV2Status("handoff_without_tcr")).toBe("handoff_without_tcr");
+  });
+  it("a handoff_without_tcr cycle PRESERVES the worktree (no cleanup_worktree) and ALERTs", () => {
+    const { state, kinds, commands } = walk([
+      { type: "start", ctx: CTX },
+      { type: "preflight_done" },
+      { type: "worktree_created" },
+      { type: "story_picked", storyId: "FIX-284" },
+      { type: "route_resolved", agent: "codex", model: "" },
+      { type: "agent_exited", exit: 0, timedOut: false },
+      { type: "facts_captured", facts: { usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 0, worktreeDirty: true } },
+    ]);
+    expect(state.terminal).toBe("handoff_without_tcr");
+    // NO cleanup_worktree — the worktree is PRESERVED for recovery
+    expect(kinds).not.toContain("cleanup_worktree");
+    // ALERT explains the situation and names the preserved branch
+    const alert = commands.find((c) => c.kind === "append_alert");
+    expect(alert).toMatchObject({ message: expect.stringContaining("handoff_without_tcr") });
+    expect(alert).toMatchObject({ message: expect.stringContaining("worktree preserved") });
+    // The terminal runs row carries the handoff_without_tcr status
+    const run = commands.find((c) => c.kind === "append_run");
+    expect(run).toMatchObject({ status: "handoff_without_tcr", outcome: "handoff_without_tcr" });
+  });
+});
+
 describe("FIX-244 — phantom-failure classification (published terminal)", () => {
   it("non-zero exit + commits + OPEN PR for the cycle branch → published, not failed", () => {
     expect(

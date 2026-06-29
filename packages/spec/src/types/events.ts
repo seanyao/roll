@@ -47,6 +47,10 @@ export type RollEvent =
   | { type: "cycle:end"; cycleId: string; outcome: TerminalOutcome; cost: CycleCost; ts: number }
   // FIX-903: leaked main commits were saved to a rescue ref before reset.
   | { type: "cycle:rescue"; cycleId: string; ref: string; rescuedSha: string; ts: number }
+  // FIX-1037: a builder escaped the cycle worktree or the main checkout was
+  // already dirty before spawn. This is a sandbox/execution-boundary failure,
+  // distinct from agent auth/network blocks.
+  | { type: "sandbox:main_dirty"; cycleId: string; phase: "pre-spawn" | "post-spawn" | "capture"; files: string[]; ts: number }
   | {
       type: "warm-session:resume-selected";
       cycleId: string;

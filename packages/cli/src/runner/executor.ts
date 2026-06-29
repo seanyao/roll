@@ -198,6 +198,47 @@ import { readLatestStoryReviewScore, REVIEW_SCORE_LOW_THRESHOLD, type ReviewScor
 
 const execFileAsync = promisify(execFile);
 
+type MainDirtyPhase = Extract<RollEvent, { type: "sandbox:main_dirty" }>["phase"];
+
+function parsePorcelainPath(line: string): string {
+  const raw = line.length > 3 ? line.slice(3).trim() : line.trim();
+  const target = raw.includes(" -> ") ? raw.split(" -> ").at(-1) ?? raw : raw;
+  return target.replace(/^"|"$/g, "");
+}
+
+export async function checkMainDirty(repoCwd: string): Promise<string[]> {
+  try {
+    const { stdout } = await execFileAsync("git", ["status", "--porcelain", "--untracked-files=all"], {
+      cwd: repoCwd,
+      encoding: "utf8",
+    });
+    return stdout
+      .split("\n")
+      .map((line) => line.trimEnd())
+      .filter((line) => line.trim() !== "")
+      .map(parsePorcelainPath)
+      .filter((path) => path !== ".roll" && !path.startsWith(".roll/"))
+      .slice(0, 50);
+  } catch {
+    return [];
+  }
+}
+
+function recordMainDirty(ports: Ports, ctx: CycleContext, phase: MainDirtyPhase, files: readonly string[]): void {
+  const visible = files.slice(0, 20);
+  ports.events.appendEvent(ports.paths.eventsPath, {
+    type: "sandbox:main_dirty",
+    cycleId: ctx.cycleId ?? "",
+    phase,
+    files: visible,
+    ts: eventTs(ports),
+  });
+  ports.events.appendAlert(
+    ports.paths.alertsPath,
+    `cycle ${ctx.cycleId ?? "?"}: main checkout dirty at ${phase}; builder work must stay in the cycle worktree. Files: ${visible.join(", ")}`,
+  );
+}
+
 export async function rescueLeakedMain(
   repoCwd: string,
   refName: string,
@@ -1387,6 +1428,14 @@ export async function executeCommand(
         ctx.builderSessionId !== undefined && ctx.builderSessionId !== ""
           ? ctx.builderSessionId
           : `${ctx.cycleId ?? "cycle"}:build:${cmd.agent}:${ports.clock()}`;
+      const preSpawnDirty = await checkMainDirty(ports.repoCwd);
+      if (preSpawnDirty.length > 0) {
+        recordMainDirty(ports, ctx, "pre-spawn", preSpawnDirty);
+        return {
+          event: { type: "agent_exited", exit: 1, timedOut: false },
+          ctxPatch: { builderSessionId, mainDirty: true },
+        };
+      }
       if (blockIfAgentCredentialsMissing(cmd.agent, "build", ports, ctx) !== null) {
         return {
           event: { type: "agent_exited", exit: 1, timedOut: false },
@@ -1541,6 +1590,10 @@ export async function executeCommand(
       if (timeoutFired !== null) res = { ...res, timedOut: true };
       await captureSink?.flush();
       persistWorktreeAlerts(ports.paths.worktreePath, ports.paths.alertsPath, ports.events);
+      const postSpawnDirty = await checkMainDirty(ports.repoCwd);
+      if (postSpawnDirty.length > 0) {
+        recordMainDirty(ports, ctx, "post-spawn", postSpawnDirty);
+      }
       // FIX-366 — BUILDER auth/network fast-fail (extends FIX-363's taxonomy from
       // reviewer/scorer to the main working agent). An UNAUTHENTICATED builder does
       // not silently burn the whole cycle: it prints a 403 / "Please run /login" in
@@ -1648,7 +1701,11 @@ export async function executeCommand(
         // FIX-343 (step ①): persist the builder session id on the cycle context so
         // it survives to the attest gate (the scorer≠builder-session check). Minted
         // once; reused across retries (the spawn reads ctx.builderSessionId first).
-        ctxPatch: { builderSessionId, ...(costPatch !== undefined ? { cost: costPatch } : {}) },
+        ctxPatch: {
+          builderSessionId,
+          ...(postSpawnDirty.length > 0 ? { mainDirty: true } : {}),
+          ...(costPatch !== undefined ? { cost: costPatch } : {}),
+        },
       };
     }
 
@@ -1675,6 +1732,14 @@ export async function executeCommand(
         mainAhead = await ports.git.mainAhead(ports.repoCwd);
       } catch {
         /* drift probe is best-effort */
+      }
+      let mainDirty = ctx.mainDirty === true;
+      if (!mainDirty) {
+        const dirtyFiles = await checkMainDirty(ports.repoCwd);
+        if (dirtyFiles.length > 0) {
+          mainDirty = true;
+          recordMainDirty(ports, ctx, "capture", dirtyFiles);
+        }
       }
       // FIX-208: count real `tcr:` commits while the worktree is still alive
       // (the done/cleanup path removes it before the runs row is written). Folded
@@ -2381,9 +2446,10 @@ export async function executeCommand(
         ...(gateBlocked ? { gateBlocked: true } : {}),
         ...(needsReview ? { needsReview: true } : {}),
         ...(mainAhead > 0 ? { mainAhead } : {}),
+        ...(mainDirty ? { mainDirty: true } : {}),
         ...(prState !== undefined ? { prState } : {}),
       };
-      return { event: { type: "facts_captured", facts }, ctxPatch: { tcrCount } };
+      return { event: { type: "facts_captured", facts }, ctxPatch: { tcrCount, ...(mainDirty ? { mainDirty: true } : {}) } };
     }
 
     // delivery/pr planPublishPr → github.runPublishPlan → published result.
@@ -3054,6 +3120,14 @@ export async function resolveResumeBase(
     for (const branch of candidates) {
       const { fetched } = await ports.git.fetchRemoteBranch(ports.repoCwd, branch);
       if (!fetched) continue; // branch gone from origin → nothing to resume here.
+      const prState = await ports.github.prState(ports.repoCwd, branch).catch(() => "UNKNOWN");
+      if (prState === "CLOSED") {
+        ports.events.appendAlert(
+          ports.paths.alertsPath,
+          `resume-prior-work: ${storyId} skips prior branch ${branch} because its PR is CLOSED — starting from origin/main unless explicitly rescued`,
+        );
+        continue;
+      }
       // Condition (a): a branch already merged into origin/main has nothing to
       // resume — its work is on main; the next candidate (older) may still hold
       // un-merged work, so keep scanning.

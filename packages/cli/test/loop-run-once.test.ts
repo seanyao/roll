@@ -3,7 +3,7 @@
  * path (driven against a PATH shim 'claude', never a real agent).
  */
 import { execFileSync } from "node:child_process";
-import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -94,6 +94,58 @@ describe("loop run-once CLI wiring", () => {
     }
     expect(r).toBe(0);
     expect(out).toContain("Usage: roll loop run-once");
+  });
+
+  it("FIX-1040: unscoped run-once yields while a scoped loop go session holds directory go.lock", async () => {
+    const p = tmp("go-lock-dir");
+    execFileSync("git", ["init", "-q", p]);
+    const rt = join(p, ".roll", "loop");
+    const lockDir = join(rt, "go.lock");
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(
+      join(lockDir, "meta.json"),
+      `${JSON.stringify({
+        pid: process.pid,
+        hostname: "",
+        startedAt: Math.floor(Date.now() / 1000),
+        cycleId: "goal-20260629151450-69149",
+      })}\n`,
+    );
+
+    const prevCwd = process.cwd();
+    const prevRt = process.env["ROLL_PROJECT_RUNTIME_DIR"];
+    const prevSlug = process.env["ROLL_MAIN_SLUG"];
+    const prevAllowed = process.env["ROLL_LOOP_GO_ALLOWED_CARDS"];
+    let out = "";
+    const write = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((s: string) => {
+      out += s;
+      return true;
+    }) as typeof process.stdout.write;
+    try {
+      process.chdir(p);
+      process.env["ROLL_PROJECT_RUNTIME_DIR"] = rt;
+      process.env["ROLL_MAIN_SLUG"] = "proj-abc123";
+      delete process.env["ROLL_LOOP_GO_ALLOWED_CARDS"];
+      const r = await loopRunOnceCommand([]);
+      expect(r).toBe(0);
+    } finally {
+      process.stdout.write = write;
+      process.chdir(prevCwd);
+      if (prevRt === undefined) delete process.env["ROLL_PROJECT_RUNTIME_DIR"];
+      else process.env["ROLL_PROJECT_RUNTIME_DIR"] = prevRt;
+      if (prevSlug === undefined) delete process.env["ROLL_MAIN_SLUG"];
+      else process.env["ROLL_MAIN_SLUG"] = prevSlug;
+      if (prevAllowed === undefined) delete process.env["ROLL_LOOP_GO_ALLOWED_CARDS"];
+      else process.env["ROLL_LOOP_GO_ALLOWED_CARDS"] = prevAllowed;
+    }
+
+    expect(out).toContain("go session already active");
+    expect(existsSync(join(rt, "inner.lock"))).toBe(false);
+    expect(existsSync(join(rt, "worktrees"))).toBe(false);
+    const events = readFileSync(join(rt, "events.ndjson"), "utf8");
+    expect(events).toContain('"type":"goal:tick_skipped"');
+    expect(events).toContain('"reason":"go_session_lock"');
   });
 
   it("does not count goal-child zero-delivery failures as consecutive failures", () => {

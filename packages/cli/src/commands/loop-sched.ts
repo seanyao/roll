@@ -184,7 +184,17 @@ fi
 # Goal go session lock — while \`roll loop go\` is chaining cycles, scheduled
 # launchd ticks yield instead of racing the next card between two run-once calls.
 GO_LOCK="$RT/go.lock"
-if [ -f "$GO_LOCK" ]; then
+if [ -d "$GO_LOCK" ]; then
+  _gp="$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' "$GO_LOCK/meta.json" 2>/dev/null)"
+  _gt="$(sed -n 's/.*"startedAt"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' "$GO_LOCK/meta.json" 2>/dev/null)"
+  _now=$(date -u +%s)
+  if [ -n "$_gp" ] && [ -n "$_gt" ] && kill -0 "$_gp" 2>/dev/null && [ "$((_now - _gt))" -lt 21600 ]; then
+    printf '{"type":"goal:tick_skipped","reason":"go_session_lock","heldByPid":%s,"ts":%s}\\n' "$_gp" "$_now" >> "$RT/events.ndjson"
+    echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] goal go session lock held by pid $_gp; tick skipped" >> "$LOG"
+    exit 0
+  fi
+  rm -rf "$GO_LOCK"
+elif [ -f "$GO_LOCK" ]; then
   _gp=""; _gt=""
   IFS=: read -r _gp _gt < "$GO_LOCK" 2>/dev/null || true
   _now=$(date -u +%s)

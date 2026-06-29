@@ -128,6 +128,12 @@ export interface SupervisorInput {
   readonly releaseBlockers: readonly string[];
   /** Optional daily budget signal: spent vs cap (same unit). */
   readonly budget?: { readonly spent: number; readonly cap: number | null };
+  /** Roll metadata repo state, gathered by the CLI when available. */
+  readonly rollMeta?: {
+    readonly state: "clean" | "dirty" | "unknown";
+    readonly detail: string;
+    readonly files?: readonly string[];
+  };
 }
 
 /** US-V4-009 — an in-flight or candidate cycle for the parallel scheduler. */

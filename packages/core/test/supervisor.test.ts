@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { observeProject, SUPERVISOR_STUCK_THRESHOLD } from "../src/supervisor/observe.js";
-import { adviseProject, explainStuck, recommendNext } from "../src/supervisor/advise.js";
+import { adviseProject, buildSupervisorRunbookState, explainStuck, recommendNext } from "../src/supervisor/advise.js";
 import type { SupervisorInput } from "@roll/spec";
 
 function input(over: Partial<SupervisorInput> = {}): SupervisorInput {
@@ -165,6 +165,89 @@ describe("recommendNext — what should Roll do next?", () => {
       openPrStories: ["US-2"],
     });
     expect(recommendNext(inp).storyId).toBe("US-3");
+  });
+
+  it("US-V4-021: freezes the FIX-301 vs US-OBS-032 divergence", () => {
+    const inp = input({
+      backlog: [
+        { id: "FIX-301", status: "✅ Done" },
+        { id: "US-OBS-032", status: "📋 Todo" },
+      ],
+      delivered: ["FIX-301"],
+    });
+    const next = recommendNext(inp);
+    expect(next.storyId).toBe("US-OBS-032");
+    expect(next.reason).toContain("US/FIX/REFACTOR");
+  });
+
+  it("US-V4-021: continues past Bug Fixes when User Stories and Refactors remain", () => {
+    const us = recommendNext(
+      input({
+        backlog: [
+          { id: "FIX-1", status: "✅ Done" },
+          { id: "US-1", status: "📋 Todo" },
+          { id: "REFACTOR-1", status: "📋 Todo" },
+        ],
+        delivered: ["FIX-1"],
+      }),
+    );
+    expect(us.storyId).toBe("US-1");
+
+    const refactor = recommendNext(
+      input({
+        backlog: [
+          { id: "FIX-1", status: "✅ Done" },
+          { id: "US-1", status: "✅ Done" },
+          { id: "REFACTOR-1", status: "📋 Todo" },
+        ],
+        delivered: ["FIX-1", "US-1"],
+      }),
+    );
+    expect(refactor.storyId).toBe("REFACTOR-1");
+  });
+
+  it("US-V4-021: diagnoses repeated failure instead of blindly retrying the same card", () => {
+    const state = buildSupervisorRunbookState(
+      input({
+        backlog: [{ id: "US-1", status: "📋 Todo" }],
+        recentFailures: [{ storyId: "US-1", consecutiveFailures: SUPERVISOR_STUCK_THRESHOLD }],
+      }),
+    );
+    expect(state.next.kind).toBe("diagnose_failure");
+    expect(state.next.storyId).toBe("US-1");
+    expect(state.next.ownerAction).toContain("root-cause");
+  });
+
+  it("US-V4-021: ignores historical repeated failures outside the live scope", () => {
+    const state = buildSupervisorRunbookState(
+      input({
+        backlog: [
+          { id: "FIX-382", status: "✅ Done" },
+          { id: "US-OBS-035", status: "📋 Todo" },
+        ],
+        recentFailures: [{ storyId: "FIX-382", consecutiveFailures: SUPERVISOR_STUCK_THRESHOLD }],
+      }),
+    );
+    expect(state.next.kind).toBe("run_card");
+    expect(state.next.storyId).toBe("US-OBS-035");
+  });
+
+  it("US-V4-021: reports the whole live backlog scope by family", () => {
+    const state = buildSupervisorRunbookState(
+      input({
+        backlog: [
+          { id: "FIX-1", status: "📋 Todo" },
+          { id: "FIX-2", status: "🚫 Hold" },
+          { id: "US-1", status: "🔨 In Progress" },
+          { id: "REFACTOR-1", status: "📋 Todo" },
+          { id: "IDEA-1", status: "📋 Todo" },
+        ],
+      }),
+    );
+    expect(state.scope.families).toEqual(["FIX", "US", "REFACTOR"]);
+    expect(state.scope.remainingByFamily).toEqual({ FIX: 1, US: 1, REFACTOR: 1 });
+    expect(state.scope.excluded).toContain("IDEA-1: outside supervisor backlog-clearing scope");
+    expect(state.scope.excluded).toContain("FIX-2: hold");
   });
 });
 

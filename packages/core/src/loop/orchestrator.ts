@@ -230,6 +230,11 @@ export interface CapturedFacts {
    *  capture step ONLY when the exit is non-zero with commits ahead — the
    *  phantom-failure check. Absent = not probed / no PR. */
   prState?: string;
+  /** FIX-1037: main checkout was polluted by the agent post-spawn (non-.roll
+   *  files added/modified/deleted on main). When true, the capture layer records
+   *  the dirty files list so the terminal classifier excludes deliverable
+   *  outcomes (no PR, no Done). */
+  mainDirty?: boolean;
 }
 
 /**
@@ -293,6 +298,12 @@ export function classifyCaptured(facts: CapturedFacts): V2CycleStatus {
     // ⇒ executed (back-compat: capture is only reached after an agent spawn).
     return facts.agentExecuted === false ? "idle" : "gave_up";
   }
+  // FIX-1037 (AC2): main checkout polluted post-spawn — the agent wrote
+  // outside the worktree. Work is committed on the branch but the landing
+  // zone is dirty, so we cannot safely publish. Classify as "failed" (not
+  // published/delivered) so the terminal handler writes an ALERT + preserves
+  // the branch. Commits exist but delivery is blocked by the breach.
+  if (facts.mainDirty === true) return "failed";
   return "built";
 }
 
@@ -676,6 +687,11 @@ export interface CycleContext {
    *  Set by the executor before the publish phase. When false, the published PR
    *  has no merge guardian and the cycle must NOT write delivered. */
   prLoopHealthy?: boolean;
+  /** FIX-1037 (AC2): true when the post-spawn pollution check found non-.roll
+   *  dirty files on the main checkout after the agent exited. Set by the
+   *  executor's spawn_agent handler; consumed by capture_facts to prevent
+   *  publishing when the sandbox was breached. */
+  mainDirty?: boolean;
 }
 
 /** Minimal context for building a terminal cycle:end event + runs row. */

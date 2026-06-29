@@ -1376,6 +1376,33 @@ export async function executeCommand(
     // execute: spawn the agent (TCR commits happen inside the worktree). The
     // exit code + timeout feed back as agent_exited; usage is captured for cost.
     case "spawn_agent": {
+      // FIX-1037 (AC1): pre-spawn main-checkout cleanliness guard. If the main
+      // checkout has non-.roll dirty changes when the agent is about to start,
+      // fail-loud: write an ALERT with the specific dirty files, emit a
+      // sandbox:main_dirty event, and return agent_exited so the cycle aborts
+      // before any agent process runs. This prevents a leaking workspace from
+      // being attributed to the spawned agent.
+      const preDirty = checkMainDirty(ports.repoCwd);
+      if (preDirty.length > 0) {
+        const detail = `pre-spawn main checkout dirty: ${preDirty.join(", ")}`;
+        ports.events.appendAlert(
+          ports.paths.alertsPath,
+          `# FIX-1037 pre-spawn guard\n\n${detail}\n\ncycle ${ctx.cycleId ?? "?"} · ${ctx.storyId ?? "?"} — builder NOT started`,
+        );
+        ports.events.appendEvent(ports.paths.eventsPath, {
+          type: "sandbox:main_dirty",
+          cycleId: ctx.cycleId ?? "",
+          storyId: ctx.storyId ?? "",
+          stage: "pre-spawn",
+          dirtyFiles: preDirty,
+          detail,
+          ts: eventTs(ports),
+        });
+        return {
+          event: { type: "agent_exited", exit: 1, timedOut: false },
+          ctxPatch: {},
+        };
+      }
       // FIX-343 (step ①): mint the BUILDER's unique session id ONCE, here at the
       // working-agent spawn, and reuse it across retries (a non-empty
       // ctx.builderSessionId means a prior attempt already minted it). The attest
@@ -1643,12 +1670,40 @@ export async function executeCommand(
       } catch {
         /* usage parse is best-effort */
       }
+      // FIX-1037 (AC2): post-spawn pollution guard. After the builder exits,
+      // check that the main checkout is still clean (no non-.roll changes). If
+      // the agent dirtied main, emit a sandbox:main_dirty event and signal the
+      // cycle (via ctxPatch.mainDirty) so capture_facts / classifyCaptured
+      // block publication. Main checkout changes are ONLY allowed in .roll/
+      // (backlog/evidence/commit metadata) and .git/ (worktree refs); anything
+      // else is a sandbox breach.
+      const postDirty = checkMainDirty(ports.repoCwd);
+      if (postDirty.length > 0) {
+        const detail = `post-spawn main checkout dirty: ${postDirty.join(", ")}`;
+        ports.events.appendAlert(
+          ports.paths.alertsPath,
+          `# FIX-1037 post-spawn guard\n\n${detail}\n\ncycle ${ctx.cycleId ?? "?"} · ${ctx.storyId ?? "?"} — publication blocked`,
+        );
+        ports.events.appendEvent(ports.paths.eventsPath, {
+          type: "sandbox:main_dirty",
+          cycleId: ctx.cycleId ?? "",
+          storyId: ctx.storyId ?? "",
+          stage: "post-spawn",
+          dirtyFiles: postDirty,
+          detail,
+          ts: eventTs(ports),
+        });
+      }
       return {
         event: { type: "agent_exited", exit: res.exitCode, timedOut: res.timedOut },
         // FIX-343 (step ①): persist the builder session id on the cycle context so
         // it survives to the attest gate (the scorer≠builder-session check). Minted
         // once; reused across retries (the spawn reads ctx.builderSessionId first).
-        ctxPatch: { builderSessionId, ...(costPatch !== undefined ? { cost: costPatch } : {}) },
+        ctxPatch: {
+          builderSessionId,
+          ...(costPatch !== undefined ? { cost: costPatch } : {}),
+          ...(postDirty.length > 0 ? { mainDirty: true } : {}),
+        },
       };
     }
 
@@ -2382,6 +2437,10 @@ export async function executeCommand(
         ...(needsReview ? { needsReview: true } : {}),
         ...(mainAhead > 0 ? { mainAhead } : {}),
         ...(prState !== undefined ? { prState } : {}),
+        // FIX-1037 (AC2): propagate post-spawn main checkout pollution
+        // detected by the spawn_agent guard into captured facts so
+        // classifyCaptured can block the publish ladder.
+        ...(ctx.mainDirty === true ? { mainDirty: true } : {}),
       };
       return { event: { type: "facts_captured", facts }, ctxPatch: { tcrCount } };
     }
@@ -3699,6 +3758,31 @@ function persistWorktreeAlerts(worktreePath: string, alertsPath: string, events:
     } catch {
       /* alert salvage is best-effort */
     }
+  }
+}
+
+/**
+ * FIX-1037: run `git status --short` on the main checkout and return every
+ * non-`.roll` dirty path. Returns [] when main is clean or the git probe fails
+ * (best-effort — a probe blip must never fail the cycle). Used by the pre-spawn
+ * guard (AC1) and post-spawn pollution guard (AC2).
+ */
+export function checkMainDirty(repoCwd: string): string[] {
+  try {
+    const out = execFileSync("git", ["status", "--short"], {
+      cwd: repoCwd,
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+    }).trim();
+    if (out === "") return [];
+    return out
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l !== "")
+      .map((l) => l.slice(2).trim()) // strip status prefix like "M " / "?? "
+      .filter((p) => !p.startsWith(".roll/") && p !== ".roll");
+  } catch {
+    return [];
   }
 }
 

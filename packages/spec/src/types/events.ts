@@ -276,6 +276,12 @@ export type RollEvent =
       capped: boolean;
       ts: number;
     }
+  // FIX-1037 — main checkout pollution (AC5: classified separately from
+  // auth/timeout/unparseable evaluator failures). `stage` distinguishes
+  // "pre-spawn" (guard blocked start) from "post-spawn" (agent dirtied it).
+  // `dirtyFiles` lists every non-.roll file that was added/modified/deleted on
+  // main during the cycle wall-clock.
+  | { type: "sandbox:main_dirty"; cycleId: string; storyId: string; stage: "pre-spawn" | "post-spawn"; dirtyFiles: string[]; detail?: string; ts: number }
   // US-TRUTH-001 — the versioned complete-or-reasoned terminal record. One per
   // cycle from schema v1 on; events older than the switch are GRANDFATHERED
   // (read under legacy rules, never retro-rewritten).

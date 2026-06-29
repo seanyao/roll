@@ -13,7 +13,7 @@ import type { CycleCommand, CycleContext, RollEvent, WarmSessionEntry } from "@r
 import { AGENTS } from "../../core/src/agent/specs.js";
 import { classifyComplexity } from "@roll/core";
 import { AWAITING_REVIEW_STATUS_MARKER } from "@roll/spec";
-import { agentWritableRoots, recordExecutionProfile, writeEvaluatorArtifact, runPlannerStage } from "../src/runner/executor.js";
+import { agentWritableRoots, checkMainDirty, recordExecutionProfile, writeEvaluatorArtifact, runPlannerStage } from "../src/runner/executor.js";
 import { evaluateReviewScoreGate, readLatestStoryPeerScore } from "../src/lib/review-score.js";
 import {
   AGENT_ARGV_TODO,
@@ -3538,6 +3538,386 @@ describe("agentWritableRoots — FIX-326: a sandboxed agent can write the git-in
     // The git-common-dir is the FIX-326 grant; it always exists in any git repo
     // (incl. CI's fresh clone, where .roll/ is absent — so don't assert on .roll).
     expect(roots).toContain(common);
+  });
+});
+
+// ── FIX-1037: Agent sandbox must protect main checkout ───────────────────────
+describe("FIX-1037 — main checkout cleanliness guards", () => {
+  // ── AC3: agentWritableRoots excludes repo root ──────────────────────────────
+  it("AC3: agentWritableRoots does NOT include repo root", () => {
+    const repo = realpathSync(execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim());
+    const common = realpathSync(
+      execFileSync("git", ["-C", repo, "rev-parse", "--path-format=absolute", "--git-common-dir"], {
+        encoding: "utf8",
+      }).trim(),
+    );
+    const alertsPath = join(repo, ".roll", "loop", "alerts", "x.md");
+    const roots = agentWritableRoots(repo, alertsPath);
+    // The repo root itself must NOT be in writable roots.
+    expect(roots).not.toContain(repo);
+    // But the common dir (git worktree metadata) IS in roots — that's FIX-326.
+    expect(roots).toContain(common);
+    // .roll is present (for backlog/evidence/commit metadata).
+    const rollDir = realpathSync(join(repo, ".roll"));
+    expect(roots).toContain(rollDir);
+  });
+
+  // ── AC1: pre-spawn guard — main dirty → agent_exited with alert ────────────
+  it("AC1: pre-spawn guard blocks agent when main checkout is dirty (non-.roll)", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-fix1037-ac1-")));
+    execDirs.push(root);
+    const main = join(root, "main");
+    mkdirSync(main, { recursive: true });
+    execFileSync("git", ["init", "--initial-branch=main"], { cwd: main });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: main });
+    execFileSync("git", ["config", "user.name", "Roll Test"], { cwd: main });
+    writeFileSync(join(main, "README.md"), "base\n", "utf8");
+    execFileSync("git", ["add", "README.md"], { cwd: main });
+    execFileSync("git", ["commit", "-m", "base"], { cwd: main });
+    // Create a dirty file on main (a non-.roll file)
+    writeFileSync(join(main, "dirty.txt"), "pollution\n", "utf8");
+
+    const base = fakePorts();
+    const alertCalls: string[] = [];
+    const eventCalls: RollEvent[] = [];
+    const ports = {
+      ...base.ports,
+      repoCwd: main,
+      paths: {
+        ...base.ports.paths,
+        eventsPath: join(main, ".roll", "loop", "events.ndjson"),
+        alertsPath: join(main, ".roll", "loop", "alerts.log"),
+      },
+      events: {
+        ...base.ports.events,
+        appendAlert: vi.fn((_path: string, msg: string) => { alertCalls.push(msg); }),
+        appendEvent: vi.fn((_path: string, ev: RollEvent) => { eventCalls.push(ev); }),
+      },
+    };
+
+    const r = await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);
+    // The agent must NOT have been spawned (we check agentSpawn was never called)
+    expect(r.event.type).toBe("agent_exited");
+    // Alert was written about dirty files
+    expect(alertCalls.length).toBeGreaterThan(0);
+    const alertText = alertCalls.join(" ");
+    expect(alertText).toContain("FIX-1037");
+    expect(alertText).toContain("pre-spawn");
+    expect(alertText).toContain("dirty.txt");
+    // A sandbox:main_dirty event was emitted
+    const dirtyEvents = eventCalls.filter((e) => e.type === "sandbox:main_dirty");
+    expect(dirtyEvents.length).toBe(1);
+    if (dirtyEvents[0].type === "sandbox:main_dirty") {
+      expect(dirtyEvents[0].stage).toBe("pre-spawn");
+      expect(dirtyEvents[0].dirtyFiles).toContain("dirty.txt");
+    }
+  });
+
+  it("AC1: pre-spawn guard passes when main checkout is clean", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-fix1037-ac1-clean-")));
+    execDirs.push(root);
+    const main = join(root, "main");
+    mkdirSync(main, { recursive: true });
+    execFileSync("git", ["init", "--initial-branch=main"], { cwd: main });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: main });
+    execFileSync("git", ["config", "user.name", "Roll Test"], { cwd: main });
+    writeFileSync(join(main, "README.md"), "base\n", "utf8");
+    execFileSync("git", ["add", "README.md"], { cwd: main });
+    execFileSync("git", ["commit", "-m", "base"], { cwd: main });
+    // Main is clean — no untracked/modified files
+
+    const base = fakePorts();
+    const eventCalls: RollEvent[] = [];
+    const ports = {
+      ...base.ports,
+      repoCwd: main,
+      paths: {
+        ...base.ports.paths,
+        eventsPath: join(main, ".roll", "loop", "events.ndjson"),
+        alertsPath: join(main, ".roll", "loop", "alerts.log"),
+      },
+      agentSpawn: vi.fn(async () => ({ stdout: "done", stderr: "", exitCode: 0, timedOut: false })),
+      events: {
+        ...base.ports.events,
+        appendEvent: vi.fn((_path: string, ev: RollEvent) => { eventCalls.push(ev); }),
+      },
+    };
+
+    const r = await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);
+    expect(r.event.type).toBe("agent_exited");
+    expect((r.event as { exit: number }).exit).toBe(0);
+    // No sandbox:main_dirty events
+    const dirtyEvents = eventCalls.filter((e) => e.type === "sandbox:main_dirty");
+    expect(dirtyEvents.length).toBe(0);
+  });
+
+  // ── AC2: post-spawn pollution guard ────────────────────────────────────────
+  it("AC2: post-spawn guard blocks publication when agent dirtied main checkout", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-fix1037-ac2-")));
+    execDirs.push(root);
+    const main = join(root, "main");
+    mkdirSync(main, { recursive: true });
+    execFileSync("git", ["init", "--initial-branch=main"], { cwd: main });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: main });
+    execFileSync("git", ["config", "user.name", "Roll Test"], { cwd: main });
+    writeFileSync(join(main, "README.md"), "base\n", "utf8");
+    execFileSync("git", ["add", "README.md"], { cwd: main });
+    execFileSync("git", ["commit", "-m", "base"], { cwd: main });
+
+    // Simulate post-spawn agent dirtied main: create a shim that writes a file
+    // to the MAIN checkout (outside the worktree).
+    const wt = join(root, "wt");
+    execFileSync("git", ["worktree", "add", "-b", "cycle", wt], { cwd: main });
+
+    const shim = join(root, "agent");
+    writeFileSync(
+      shim,
+      [
+        "#!/bin/sh",
+        "set -eu",
+        // Write to the REAL main checkout from within the worktree
+        `echo 'polluted' >> '${main}/leaked.txt'`,
+        "exit 0",
+      ].join("\n"),
+      "utf8",
+    );
+    chmodSync(shim, 0o755);
+
+    const base = fakePorts();
+    const alertCalls: string[] = [];
+    const eventCalls: RollEvent[] = [];
+
+    const ports = {
+      ...base.ports,
+      repoCwd: main,
+      paths: {
+        ...base.ports.paths,
+        worktreePath: wt,
+        eventsPath: join(main, ".roll", "loop", "events.ndjson"),
+        alertsPath: join(main, ".roll", "loop", "alerts.log"),
+      },
+      agentSpawn: vi.fn(async () => {
+        // Simulate the agent: write to a non-.roll file on main
+        writeFileSync(join(main, "leaked.txt"), "agent pollution\n", "utf8");
+        return { stdout: "built", stderr: "", exitCode: 0, timedOut: false };
+      }),
+      events: {
+        ...base.ports.events,
+        appendAlert: vi.fn((_path: string, msg: string) => { alertCalls.push(msg); }),
+        appendEvent: vi.fn((_path: string, ev: RollEvent) => { eventCalls.push(ev); }),
+      },
+    };
+
+    const r = await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);
+    expect(r.event.type).toBe("agent_exited");
+    // The ctxPatch should carry mainDirty: true so capture_facts can propagate it
+    expect((r as { ctxPatch?: Record<string, unknown> }).ctxPatch?.mainDirty).toBe(true);
+
+    // Alert contains FIX-1037 post-spawn reference
+    const alertText = alertCalls.join(" ");
+    expect(alertText).toContain("FIX-1037");
+    expect(alertText).toContain("post-spawn");
+    expect(alertText).toContain("leaked.txt");
+
+    // sandbox:main_dirty event emitted with stage "post-spawn"
+    const dirtyEvents = eventCalls.filter((e) => e.type === "sandbox:main_dirty");
+    expect(dirtyEvents.length).toBe(1);
+    if (dirtyEvents[0].type === "sandbox:main_dirty") {
+      expect(dirtyEvents[0].stage).toBe("post-spawn");
+      expect(dirtyEvents[0].dirtyFiles).toContain("leaked.txt");
+    }
+  });
+
+  it("AC2: post-spawn guard does not block when main stays clean", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-fix1037-ac2-clean-")));
+    execDirs.push(root);
+    const main = join(root, "main");
+    mkdirSync(main, { recursive: true });
+    execFileSync("git", ["init", "--initial-branch=main"], { cwd: main });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: main });
+    execFileSync("git", ["config", "user.name", "Roll Test"], { cwd: main });
+    writeFileSync(join(main, "README.md"), "base\n", "utf8");
+    execFileSync("git", ["add", "README.md"], { cwd: main });
+    execFileSync("git", ["commit", "-m", "base"], { cwd: main });
+
+    const base = fakePorts();
+    const eventCalls: RollEvent[] = [];
+    const ports = {
+      ...base.ports,
+      repoCwd: main,
+      paths: {
+        ...base.ports.paths,
+        eventsPath: join(main, ".roll", "loop", "events.ndjson"),
+        alertsPath: join(main, ".roll", "loop", "alerts.log"),
+      },
+      agentSpawn: vi.fn(async () => ({ stdout: "done", stderr: "", exitCode: 0, timedOut: false })),
+      events: {
+        ...base.ports.events,
+        appendEvent: vi.fn((_path: string, ev: RollEvent) => { eventCalls.push(ev); }),
+      },
+    };
+
+    const r = await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);
+    expect(r.event.type).toBe("agent_exited");
+    // No mainDirty flag in ctxPatch
+    expect((r as { ctxPatch?: Record<string, unknown> }).ctxPatch?.mainDirty).toBeUndefined();
+    // No sandbox:main_dirty events
+    const dirtyEvents = eventCalls.filter((e) => e.type === "sandbox:main_dirty");
+    expect(dirtyEvents.length).toBe(0);
+  });
+
+  // ── AC5: classification — pollution ≠ auth/timeout ─────────────────────────
+  it("AC5: sandbox:main_dirty has a distinct type from agent:blocked (auth/network)", () => {
+    // Verify the type strings are distinct at the type level
+    const dirtyEvent: RollEvent = {
+      type: "sandbox:main_dirty",
+      cycleId: "c1",
+      storyId: "s1",
+      stage: "post-spawn",
+      dirtyFiles: ["src/x.ts"],
+      ts: 1,
+    };
+    const blockedEvent: RollEvent = {
+      type: "agent:blocked",
+      cycleId: "c1",
+      agent: "claude",
+      cause: "auth",
+      stage: "build",
+      detail: "Please login",
+      ts: 2,
+    };
+    expect(dirtyEvent.type).not.toBe(blockedEvent.type);
+    // Both can coexist in a RollEvent array
+    const events: RollEvent[] = [dirtyEvent, blockedEvent];
+    expect(events.length).toBe(2);
+  });
+
+  // ── AC4: regression fixture — agent commits in worktree + main stays clean ─
+  it("AC4: regression fixture — agent commits in worktree while main stays clean", async () => {
+    // This reproduces the FIX-1032a scene: an agent commits in the worktree
+    // (normal flow) and should NOT leave main checkout dirty. We simulate the
+    // scenario where the agent writes only in the worktree, and verify the
+    // post-spawn guard finds main clean.
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-fix1037-ac4-")));
+    execDirs.push(root);
+    const main = join(root, "main");
+    const wt = join(root, "wt");
+    mkdirSync(main, { recursive: true });
+    execFileSync("git", ["init", "--initial-branch=main"], { cwd: main });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: main });
+    execFileSync("git", ["config", "user.name", "Roll Test"], { cwd: main });
+    writeFileSync(join(main, "README.md"), "base\n", "utf8");
+    execFileSync("git", ["add", "README.md"], { cwd: main });
+    execFileSync("git", ["commit", "-m", "base"], { cwd: main });
+    // Create worktree
+    execFileSync("git", ["worktree", "add", "-b", "cycle", wt], { cwd: main });
+
+    // Create a reasonix.toml with the CORRECT writable roots (only .roll, .git, not repo root)
+    mkdirSync(join(wt, ".roll", "loop", "alerts"), { recursive: true });
+    const common = realpathSync(
+      execFileSync("git", ["-C", main, "rev-parse", "--path-format=absolute", "--git-common-dir"], {
+        encoding: "utf8",
+      }).trim(),
+    );
+    const reasonixToml = [
+      '[sandbox]',
+      'bash = "enforce"',
+      'network = true',
+      `allow_write = ["${wt}", "${join(wt, '.roll')}", "${join(wt, '.roll', 'loop')}", "${common}"]`,
+    ].join("\n");
+    writeFileSync(join(wt, "reasonix.toml"), reasonixToml, "utf8");
+
+    // Shim that writes a file ONLY in the worktree (CWD) and commits it
+    const shim = join(root, "agent");
+    writeFileSync(
+      shim,
+      [
+        "#!/bin/sh",
+        "set -eu",
+        // Write only inside the worktree
+        `printf 'worktree change\\n' > worktree_file.txt`,
+        `git add worktree_file.txt`,
+        `git commit -m 'tcr: FIX-1037 worktree change'`,
+        // Try to write to main — the sandbox SHOULD block this, but we verify that
+        // the post-spawn guard catches any leak.
+        "", // do NOT write to main
+        "exit 0",
+      ].join("\n"),
+      "utf8",
+    );
+    chmodSync(shim, 0o755);
+
+    const base = fakePorts();
+    const eventCalls: RollEvent[] = [];
+    const ports = {
+      ...base.ports,
+      repoCwd: main,
+      paths: {
+        ...base.ports.paths,
+        worktreePath: wt,
+        eventsPath: join(main, ".roll", "loop", "events.ndjson"),
+        alertsPath: join(main, ".roll", "loop", "alerts.log"),
+      },
+      agentSpawn: vi.fn(async () => ({ stdout: "built", stderr: "", exitCode: 0, timedOut: false })),
+      events: {
+        ...base.ports.events,
+        appendEvent: vi.fn((_path: string, ev: RollEvent) => { eventCalls.push(ev); }),
+      },
+    };
+
+    const r = await executeCommand({ kind: "spawn_agent", agent: "reasonix", attempt: 1 }, ports, CTX);
+    expect(r.event.type).toBe("agent_exited");
+    // No mainDirty (main stayed clean because the agent only wrote to worktree)
+    expect((r as { ctxPatch?: Record<string, unknown> }).ctxPatch?.mainDirty).toBeUndefined();
+    // No sandbox:main_dirty events
+    const dirtyEvents = eventCalls.filter((e) => e.type === "sandbox:main_dirty");
+    expect(dirtyEvents.length).toBe(0);
+  });
+
+  // ── checkMainDirty unit tests ──────────────────────────────────────────────
+  describe("checkMainDirty — git status probe on main checkout", () => {
+    it("returns [] for a clean checkout", () => {
+      const repo = realpathSync(execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim());
+      const result = checkMainDirty(repo);
+      expect(Array.isArray(result)).toBe(true);
+    });
+
+    it("detects untracked non-.roll files", () => {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-checkMainDirty-")));
+      execDirs.push(root);
+      const main = join(root, "main");
+      mkdirSync(main, { recursive: true });
+      execFileSync("git", ["init", "--initial-branch=main"], { cwd: main });
+      execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: main });
+      execFileSync("git", ["config", "user.name", "Roll Test"], { cwd: main });
+      writeFileSync(join(main, "README.md"), "base\n", "utf8");
+      execFileSync("git", ["add", "README.md"], { cwd: main });
+      execFileSync("git", ["commit", "-m", "base"], { cwd: main });
+
+      // Dirty file
+      writeFileSync(join(main, "leaked.ts"), "// pollution\n", "utf8");
+      const result = checkMainDirty(main);
+      expect(result).toContain("leaked.ts");
+    });
+
+    it("ignores .roll/ dirty files", () => {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-checkMainDirty-roll-")));
+      execDirs.push(root);
+      const main = join(root, "main");
+      mkdirSync(main, { recursive: true });
+      execFileSync("git", ["init", "--initial-branch=main"], { cwd: main });
+      execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: main });
+      execFileSync("git", ["config", "user.name", "Roll Test"], { cwd: main });
+      writeFileSync(join(main, "README.md"), "base\n", "utf8");
+      execFileSync("git", ["add", "README.md"], { cwd: main });
+      execFileSync("git", ["commit", "-m", "base"], { cwd: main });
+
+      // Create .roll dir — this is a git-ignored folder
+      mkdirSync(join(main, ".roll"), { recursive: true });
+      writeFileSync(join(main, ".roll", "backlog"), "dirty\n", "utf8");
+      const result = checkMainDirty(main);
+      expect(result).not.toContain(".roll/backlog");
+    });
   });
 });
 

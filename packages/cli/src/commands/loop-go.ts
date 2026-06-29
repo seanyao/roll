@@ -19,6 +19,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
+import os from "node:os";
 import { GOAL_ALLOWED_CARDS_ENV, runAttemptFromRow } from "../lib/goal-progress.js";
 import { projectAgent } from "./agent-list.js";
 import { cardArchiveDir } from "../lib/archive.js";
@@ -725,6 +726,45 @@ function allowedCardsForScope(projectPath: string, goal: RollGoal, progress: Pro
 function allScopeCardsSkipped(projectPath: string, goal: RollGoal, progress: ProgressState): boolean {
   const rows = rowsForScope(projectPath, goal.scope);
   return rows.length > 0 && rows.every((row) => progress.skippedCards.has(row.id));
+}
+
+/**
+ * FIX-1032b AC4: check runs.jsonl for delivery-gate-blocked outcomes on recent
+ * cycles. Returns short diagnostic strings like "pr_loop_unavailable" or
+ * "ci_red_after_merge", or empty array when nothing is blocked.
+ */
+function deliveryGateStopDetails(projectPath: string, slug: string): string[] {
+  const out: string[] = [];
+  // Try per-project runtime first, then shared root (~/.roll)
+  const localPath = join(projectPath, ".roll", "loop", "runs.jsonl");
+  const homeRoll = join(os.homedir(), ".roll");
+  const sharedPath = join(homeRoll, "loop", "runs.jsonl");
+  const runsPath = existsSync(localPath) ? localPath : (existsSync(sharedPath) ? sharedPath : null);
+  if (runsPath === null) return out;
+  let content: string;
+  try {
+    content = readFileSync(runsPath, "utf8");
+  } catch {
+    return out;
+  }
+  const now = Date.now();
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "") continue;
+    let rec: Record<string, unknown>;
+    try { rec = JSON.parse(trimmed) as Record<string, unknown>; } catch { continue; }
+    const outcome = typeof rec["outcome"] === "string" ? (rec["outcome"] as string) : "";
+    if (outcome !== "ci_red_after_merge" && outcome !== "pr_loop_unavailable") continue;
+    const ts = typeof rec.ts === "string" ? new Date(rec.ts).getTime() : 0;
+    if (ts > 0 && now - ts > 86400000) continue;
+    const storyId = typeof rec.story_id === "string" ? (rec.story_id as string) : "";
+    if (outcome === "ci_red_after_merge") {
+      out.push(`ci_red_after_merge:${storyId}`);
+    } else {
+      out.push(`pr_loop_unavailable:${storyId}`);
+    }
+  }
+  return out.slice(0, 3);
 }
 
 /**
@@ -1749,8 +1789,12 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
       // scope card is now settled for this session (delivered in-flight and/or
       // skipped). End CLEANLY rather than loop back and re-pick a card we already
       // shipped — re-delivering it would open a SECOND PR for the same work.
+      // FIX-1032b AC4: include delivery gate diagnostics when stopping for
+      // scope_in_flight, so the operator sees why cards are stuck (PR loop
+      // absent or CI red) instead of the generic reason alone.
       if (allScopeCardsSettled(id.path, goal, progress)) {
-        stopReason = "scope_in_flight";
+        const dgLines = deliveryGateStopDetails(id.path, id.slug);
+        stopReason = dgLines.length > 0 ? `scope_in_flight:${dgLines[0]}` : "scope_in_flight";
         break;
       }
       const timeboxGate = applyTimeboxGate(id.path, bus, sid, goal, deps, deadlineSec);

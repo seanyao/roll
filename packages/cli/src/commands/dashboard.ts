@@ -1472,6 +1472,36 @@ function tickAgeLine(loopType: string, now: Date): string | null {
   return `${loopType}: tick ${ageStr} ago`;
 }
 
+/**
+ * FIX-1032b AC2/AC3: read pre-loaded runs records for delivery-gate-blocked
+ * outcomes (ci_red_after_merge / pr_loop_unavailable) and return diagnostic lines.
+ * Returns an empty array when nothing is blocked.
+ */
+function deliveryGateDiagnostics(runs: Record<string, RunRecord>): string[] {
+  const out: string[] = [];
+  const now = Date.now();
+  // Check recent cycles (within last 24h) for delivery gate blocks
+  for (const [cycleId, row] of Object.entries(runs)) {
+    const outcome = typeof row["outcome"] === "string" ? (row["outcome"] as string) : "";
+    if (outcome !== "ci_red_after_merge" && outcome !== "pr_loop_unavailable") continue;
+    // Check age: skip rows older than 24h
+    const ts = typeof row.ts === "string" ? new Date(row.ts).getTime() : 0;
+    if (ts > 0 && now - ts > 86400000) continue;
+    const prUrl = typeof row.pr_url === "string" ? (row.pr_url as string) : "";
+    const ciUrl = typeof row.ci_run_url === "string" ? (row.ci_run_url as string) : "";
+    const storyId = typeof row.story_id === "string" ? (row.story_id as string) : cycleId;
+    if (outcome === "ci_red_after_merge") {
+      const ci = ciUrl ? ` · ${ciUrl}` : "";
+      out.push(c("red", "⚠ main CI red") + c("dim", `  ${storyId}${ci}`));
+    } else {
+      const pr = prUrl ? ` · ${prUrl}` : "";
+      out.push(c("amber", "⚠ PR loop absent") + c("dim", `  ${storyId}${pr}`));
+    }
+  }
+  // Limit to 3 lines to avoid clutter
+  return out.slice(0, 3);
+}
+
 type LoopPlistSchedule =
   | { mode: "calendar"; minutes: number[] }
   | { mode: "interval"; intervalSec: number };
@@ -1869,6 +1899,12 @@ function render(
   for (const loop of ["pr"]) {
     const tl = tickAgeLine(loop, now);
     if (tl) out.push("  " + c("dim", tl));
+  }
+  // FIX-1032b AC2/AC3: delivery gate diagnostics — read runs for recent
+  // delivery-blocked cycles (ci_red_after_merge, pr_loop_unavailable).
+  if (args.projectSlug !== null) {
+    const dtLines = deliveryGateDiagnostics(args.runs);
+    for (const line of dtLines) out.push("  " + line);
   }
   out.push("");
 

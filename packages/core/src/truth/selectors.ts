@@ -204,6 +204,16 @@ export function deriveCycleTruth(input: CycleTruthInput): CycleTruth {
     return { cycleId: input.cycleId, outcome: "delivered", state: "fail", reason: "phantom_failure_uncorrected" };
   }
 
+  // ── FIX-1032b AC1: merge stamp + delivered outcome outranks terminal twin.
+  // When hasMergeStamp is true AND the row outcome is "delivered", the delivery
+  // gate has already passed (reconcileMergeEvidence stamped it). The terminal
+  // twin may still say "published_pending_merge" (the cycle:end event was written
+  // before backfill), so we must prefer the merge-stamped verdict here, not the
+  // terminal event. published_pending_merge + delivered → the cycle IS delivered.
+  if (input.hasMergeStamp && input.runOutcome === "delivered") {
+    return { cycleId: input.cycleId, outcome: "delivered", state: "truth", reason: "merge_evidence_confirms" };
+  }
+
   // A terminal twin is the self-reported truth for non-merge questions.
   if (input.terminalOutcome !== undefined) {
     return { cycleId: input.cycleId, outcome: input.terminalOutcome, state: "truth", reason: "terminal_self_reported" };

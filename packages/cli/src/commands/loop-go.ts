@@ -1660,7 +1660,7 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
         break;
       }
       const maxCycles = goal.limits.maxCycles;
-      if (maxCycles !== undefined && goal.usage.cycles >= maxCycles) {
+      if (maxCycles !== undefined && goal.usage.cycles - initialUsage.cycles >= maxCycles) {
         stopReason = "max_cycles";
         break;
       }
@@ -1733,6 +1733,15 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
       }
       if (adjudication.reviewBlocked) {
         stopReason = adjudication.reason;
+        break;
+      }
+      // FIX-1034: check --max-cycles after evaluateGoal (so goal:evaluated
+      // fires) but before allScopeCardsSettled (so the explicit session cap
+      // takes priority over scope_in_flight when a card was delivered but the
+      // owner explicitly asked to stop after N cycles).
+      const maxCyclesAfter = goal.limits.maxCycles;
+      if (maxCyclesAfter !== undefined && goal.usage.cycles - initialUsage.cycles >= maxCyclesAfter) {
+        stopReason = "max_cycles";
         break;
       }
       // FIX-333: the truth adjudicator did not complete (the just-delivered

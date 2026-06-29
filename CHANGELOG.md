@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### 自动化流水线
+
+- **Reasonix builder 可以在 linked worktree 里正常提交了**：loop 现在会给每个 Reasonix cycle 生成临时本地 sandbox 配置，把已计算出的 git common dir 写入允许写目录；不需要永久放宽 `~/.reasonix/config.toml`，也不会把 API key 写进 argv 或配置文件。(FIX-1036) `[loop-engine]`
+
 ## v4.629.2 — 2026-06-29
 
 ### Agent 管理

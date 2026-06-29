@@ -37,7 +37,7 @@
  * agent ever runs in tests.
  */
 import { type ChildProcess, spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Rig } from "@roll/spec";
@@ -204,6 +204,79 @@ function agentPrompt(opts: AgentSpawnOptions): string {
     : `${AUTORUN_DIRECTIVE}${opts.storyId !== undefined && opts.storyId !== "" ? storyPinDirective(opts.storyId) : ""}${opts.skillBody}`;
 }
 
+function tomlBasicString(value: string): string {
+  return JSON.stringify(value);
+}
+
+function normalizeWritableRoots(roots: readonly string[] | undefined): string[] {
+  const out: string[] = [];
+  for (const root of roots ?? []) {
+    const trimmed = root.trim();
+    if (trimmed === "") continue;
+    const normalized = existsSync(trimmed) ? realpathSafe(trimmed) : trimmed;
+    if (!out.includes(normalized)) out.push(normalized);
+  }
+  return out;
+}
+
+function realpathSafe(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
+function stripSandboxTable(toml: string): string {
+  const lines = toml.split("\n");
+  const kept: string[] = [];
+  let droppingSandbox = false;
+  for (const line of lines) {
+    const table = line.match(/^\s*\[([^\]]+)\]\s*$/);
+    if (table !== null) {
+      const name = table[1]?.trim() ?? "";
+      droppingSandbox = name === "sandbox" || name.startsWith("sandbox.");
+    }
+    if (!droppingSandbox) kept.push(line);
+  }
+  return kept.join("\n").trimEnd();
+}
+
+function reasonixSandboxBlock(roots: readonly string[]): string {
+  const list = roots.map(tomlBasicString).join(", ");
+  return ["[sandbox]", 'bash = "enforce"', "network = true", `allow_write = [${list}]`, ""].join("\n");
+}
+
+function chainCleanup(existing: (() => void) | undefined, next: () => void): () => void {
+  return () => {
+    try {
+      next();
+    } finally {
+      existing?.();
+    }
+  };
+}
+
+function writeReasonixSandboxConfig(cwd: string, roots: readonly string[]): () => void {
+  const configPath = join(cwd, "reasonix.toml");
+  const hadConfig = existsSync(configPath);
+  const previous = hadConfig ? readFileSync(configPath, "utf8") : "";
+  const base = hadConfig ? stripSandboxTable(previous) : "";
+  const next = `${base !== "" ? `${base}\n\n` : ""}${reasonixSandboxBlock(roots)}`;
+  writeFileSync(configPath, next, "utf8");
+  return () => {
+    if (hadConfig) {
+      writeFileSync(configPath, previous, "utf8");
+      return;
+    }
+    try {
+      unlinkSync(configPath);
+    } catch {
+      /* already gone */
+    }
+  };
+}
+
 function canonicalProfileName(name: string): string {
   const raw = name.trim().toLowerCase();
   const spec = getAgentSpec(raw);
@@ -282,6 +355,11 @@ const AGENT_PROFILES: Readonly<Record<string, AgentProfile>> = {
       const routedModel = opts.model?.trim();
       const model = routedModel !== undefined && routedModel !== "" ? routedModel : getAgentSpec("reasonix")?.defaultModel ?? "deepseek-flash";
       const maxSteps = opts.maxSteps ?? 1000;
+      // FIX-1036: write a per-cycle reasonix.toml so the Seatbelt sandbox
+      // allows writes to the git common dir (outside the worktree root).
+      // The file is cleaned up via opts.cleanup after the child exits.
+      const roots = normalizeWritableRoots(opts.writableRoots);
+      if (roots.length > 0) opts.cleanup = chainCleanup(opts.cleanup, writeReasonixSandboxConfig(opts.cwd, roots));
       return {
         bin: opts.bin ?? "reasonix",
         args: ["run", "--max-steps", String(maxSteps), "--model", model, "--dir", opts.cwd, agentPrompt(opts)],
@@ -386,6 +464,9 @@ export interface AgentSpawnOptions {
   /** FIX-319: bare spawn — send `skillBody` verbatim (no autorun directive / no
    *  story pin). Used for the heterogeneous peer reviewer (review-only framing). */
   bare?: boolean;
+  /** Optional cleanup callback invoked once after the child exits. Used to
+   *  remove per-spawn artifacts (e.g. reasonix sandbox config in the worktree). */
+  cleanup?: () => void;
 }
 
 /** Result of an agent spawn — the orchestrator feeds `exitCode` back as
@@ -540,6 +621,11 @@ function spawnAndWait(bin: string, args: string[], opts: AgentSpawnOptions, pty 
       settled = true;
       liveAgents.delete(child); // FIX-204D
       if (timer !== undefined) clearTimeout(timer);
+      try {
+        opts.cleanup?.();
+      } catch {
+        /* cleanup is best-effort; the child result is the authoritative outcome */
+      }
       resolve(result);
     };
     child.on("error", (e) => {

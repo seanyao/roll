@@ -275,8 +275,8 @@ export const v3Catalog: Catalog = {
   // `design.*` — explicit `roll design` entry point (US-ONBOARD-NUDGE-004).
   // Thin wrapper that launches the existing $roll-design skill interactively.
   "design.usage": {
-    en: "Usage: roll design [--from-file <path>] [--agent <name>]\n  Launch the $roll-design skill in an interactive agent conversation.\n  `--from-file` binds a PRD/brief file as the design input.\n  `--agent` and `ROLL_DESIGN_AGENT` override only this design session; scoped roles live in ~/.roll/agents.yaml and .roll/agents.yaml.\n  Unlike `roll init`, this command runs an LLM — run it only when you want to design.",
-    zh: "用法：roll design [--from-file <path>] [--agent <name>]\n  在交互式 agent 对话中启动 $roll-design skill。\n  `--from-file` 会把 PRD/brief 文件绑定为设计输入。\n  `--agent` 与 `ROLL_DESIGN_AGENT` 只覆盖本次 design session；scoped roles 位于 ~/.roll/agents.yaml 和 .roll/agents.yaml。\n  与 `roll init` 不同，本命令会运行 LLM——只在需要设计时执行。",
+    en: "Usage: roll design [--from-file <path> | \"<requirement>\"] [--agent <name>]\n  Launch the $roll-design skill in an interactive agent conversation.\n  `--from-file` binds a PRD/brief file as the design input.\n  `\"<requirement>\"` binds a free-text design target; it cannot be combined with `--from-file`.\n  `--agent` and `ROLL_DESIGN_AGENT` override only this design session; scoped roles live in ~/.roll/agents.yaml and .roll/agents.yaml.\n  Unlike `roll init`, this command runs an LLM — run it only when you want to design.",
+    zh: "用法：roll design [--from-file <path> | \"<requirement>\"] [--agent <name>]\n  在交互式 agent 对话中启动 $roll-design skill。\n  `--from-file` 会把 PRD/brief 文件绑定为设计输入。\n  `\"<requirement>\"` 会绑定自由文本设计目标；不能与 `--from-file` 混用。\n  `--agent` 与 `ROLL_DESIGN_AGENT` 只覆盖本次 design session；scoped roles 位于 ~/.roll/agents.yaml 和 .roll/agents.yaml。\n  与 `roll init` 不同，本命令会运行 LLM——只在需要设计时执行。",
   },
   "design.not_roll_project": {
     en: "This directory is not a Roll project (no .roll/). Run `roll init` first.",
@@ -301,6 +301,10 @@ export const v3Catalog: Catalog = {
   "design.from_file_not_found": {
     en: "Design source file not found: %s",
     zh: "未找到设计输入文件：%s",
+  },
+  "design.bare_backlog_help": {
+    en: "No design target given. This project already has a backlog with work items.\n  Provide a target to scope the design session:\n    roll design --from-file <path>    — design from a PRD/brief/requirement file\n    roll design \"<requirement>\"       — one-shot design from a free-text requirement\n    roll supervisor next              — pick the next item from the backlog\n    roll loop go --cards <id>         — dispatch a backlog card directly\n  Run `roll design --help` for full usage.",
+    zh: "未指定设计目标。该项目已有待办事项。\n  请指定目标以限定设计范围：\n    roll design --from-file <path>    — 从 PRD/brief/需求文件开始设计\n    roll design \"<requirement>\"       — 从自由文本需求开始一次性设计\n    roll supervisor next              — 从待办中选择下一项\n    roll loop go --cards <id>         — 直接分派待办卡\n  执行 `roll design --help` 查看完整用法。",
   },
 
   // `setup.*` — legacy setup agent selection (compatibility only).

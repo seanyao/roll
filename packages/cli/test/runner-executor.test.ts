@@ -19,6 +19,7 @@ import {
   AGENT_ARGV_TODO,
   AUTORUN_DIRECTIVE,
   agentProfile,
+  type AgentSpawnOptions,
   missingAgentSecretEnv,
   agentSpawnEnvironment,
   type Ports,
@@ -190,6 +191,52 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
       maxSteps: 12,
     });
     expect(args).toEqual(["run", "--max-steps", "12", "--model", "deepseek-reasoner", "--dir", "/wt", prompt]);
+  });
+
+  it("FIX-1036 reasonix: writableRoots become a reversible local sandbox config, never argv secrets", () => {
+    const wt = realpathSync(mkdtempSync(join(tmpdir(), "roll-reasonix-sandbox-")));
+    execDirs.push(wt);
+    const gitCommon = join(wt, "git-common");
+    mkdirSync(gitCommon, { recursive: true });
+    const originalConfig = [
+      'default_model = "project-model"',
+      "",
+      "[sandbox]",
+      'bash = "off"',
+      'allow_write = ["/old"]',
+      "",
+      "[agent]",
+      'auto_plan = "off"',
+      "",
+    ].join("\n");
+    writeFileSync(join(wt, "reasonix.toml"), originalConfig, "utf8");
+
+    const opts: AgentSpawnOptions = {
+      cwd: wt,
+      skillBody: "DO WORK",
+      writableRoots: [gitCommon, gitCommon, "  "],
+      env: { DEEPSEEK_API_KEY: "secret" },
+    };
+    const { bin, args } = buildSpawnCommand("reasonix", opts);
+
+    expect(bin).toBe("reasonix");
+    expect(args).toEqual(["run", "--max-steps", "1000", "--model", "deepseek-flash", "--dir", wt, prompt]);
+    expect(args.join("\n")).not.toContain("DEEPSEEK_API_KEY");
+    expect(args.join("\n")).not.toContain("secret");
+
+    const config = readFileSync(join(wt, "reasonix.toml"), "utf8");
+    expect(config).toContain('default_model = "project-model"');
+    expect(config).toContain("[agent]");
+    expect(config).toContain("[sandbox]");
+    expect(config).toContain('bash = "enforce"');
+    expect(config).toContain("network = true");
+    expect(config).toContain(`allow_write = [${JSON.stringify(realpathSync(gitCommon))}]`);
+    expect(config).not.toContain("/old");
+    expect(config).not.toContain("DEEPSEEK_API_KEY");
+    expect(config).not.toContain("secret");
+
+    opts.cleanup?.();
+    expect(readFileSync(join(wt, "reasonix.toml"), "utf8")).toBe(originalConfig);
   });
 
   // ── explicit --model wiring (rig → router → spawn) ──────────────────────────
@@ -3002,6 +3049,61 @@ describe("FIX-914 — builder process cwd/PWD is pinned to the cycle worktree", 
       coreWorktree = "";
     }
     expect(coreWorktree).toBe("");
+  });
+});
+
+describe("FIX-1036 — reasonix linked-worktree git common-dir sandbox grants", () => {
+  it("reasonix-style spawn config grants the linked worktree git common dir and cleans up after commit", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-fix1036-")));
+    execDirs.push(root);
+    const main = join(root, "main");
+    const wt = join(root, "wt");
+    mkdirSync(main, { recursive: true });
+    execFileSync("git", ["init", "--initial-branch=main"], { cwd: main });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: main });
+    execFileSync("git", ["config", "user.name", "Roll Test"], { cwd: main });
+    writeFileSync(join(main, "README.md"), "base\n", "utf8");
+    execFileSync("git", ["add", "README.md"], { cwd: main });
+    execFileSync("git", ["commit", "-m", "base"], { cwd: main });
+    execFileSync("git", ["worktree", "add", "-b", "cycle", wt], { cwd: main });
+    const common = realpathSync(
+      execFileSync("git", ["-C", main, "rev-parse", "--path-format=absolute", "--git-common-dir"], {
+        encoding: "utf8",
+      }).trim(),
+    );
+    const alertsPath = join(main, ".roll", "loop", "alerts", "x.md");
+    mkdirSync(dirname(alertsPath), { recursive: true });
+
+    const shim = join(root, "reasonix");
+    writeFileSync(
+      shim,
+      [
+        "#!/bin/sh",
+        "set -eu",
+        "test -f reasonix.toml",
+        'grep -F "$EXPECTED_GIT_COMMON_DIR" reasonix.toml >/dev/null',
+        'if grep -F "DEEPSEEK_API_KEY" reasonix.toml >/dev/null; then exit 23; fi',
+        "printf 'probe\\n' > probe.txt",
+        "git add probe.txt",
+        "git commit -m 'tcr: reasonix linked worktree probe'",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    chmodSync(shim, 0o755);
+
+    const r = await realAgentSpawn("reasonix", {
+      cwd: wt,
+      skillBody: "X",
+      bin: shim,
+      writableRoots: agentWritableRoots(main, alertsPath),
+      env: { ...process.env, EXPECTED_GIT_COMMON_DIR: common, DEEPSEEK_API_KEY: "secret" },
+      timeoutMs: 15000,
+    });
+
+    expect(r.exitCode).toBe(0);
+    expect(execFileSync("git", ["rev-list", "--count", "main..HEAD"], { cwd: wt }).toString().trim()).toBe("1");
+    expect(existsSync(join(wt, "reasonix.toml"))).toBe(false);
   });
 });
 

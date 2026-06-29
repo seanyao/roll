@@ -356,6 +356,16 @@ eval-report) — never a shared raw session. Project-level coordination across
 Stories (ordering, conflicts, budget, release readiness) belongs to the
 **Supervisor Agent** (`roll supervisor`), not to any single Story's execution.
 
+When the owner asks to clear the backlog, Supervisor uses a backlog-clearing
+standard rather than a fix-only queue. The default scope is every live non-Hold
+`FIX-*`, `US-*`, and `REFACTOR-*` row. Before starting another card it reconciles
+backlog truth, open PRs, CI/evaluator gates, recent cycle endings, manual-merge
+PRs, and `.roll` meta state. Each card gets a fresh Builder and, when its
+execution profile requires it, an independent Evaluator/Scorer from the current
+Agent roster. Repeated failure, zero TCR, missing evidence, parser failure,
+auth/permission blocks, or `[roll:manual-merge]` PRs stop scheduling until the
+owner action shown by `roll supervisor status/next/why` is resolved.
+
 ## Status Dashboard
 
 `roll loop status` prints a compact dashboard with per-cycle rows and daily rollup totals.

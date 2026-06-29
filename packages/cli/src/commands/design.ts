@@ -7,9 +7,10 @@
  * this command only wires stdin/stdout.
  */
 import { spawnSync, type SpawnSyncOptions } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { t, v2Catalog, v3Catalog, type Lang } from "@roll/spec";
+import { parseBacklog } from "@roll/core";
 import { currentLang } from "./agent-list.js";
 import {
   agentEnvFromEnv,
@@ -28,18 +29,25 @@ function emit(line: string): void {
   process.stderr.write(`${line}\n`);
 }
 
-function readDesignPrompt(fromFile: string | undefined): string | null {
+function readDesignPrompt(fromFile: string | undefined, rest: string[]): string | null {
   const body = readSkillBody("roll-design");
   if (body === null) return null;
-  const handoff =
-    fromFile === undefined
-      ? ""
-      : [
-          `The user invoked \`roll design --from-file ${fromFile}\`.`,
-          `Use this product brief file as the design input: ${fromFile}`,
-          "Read it before asking broad discovery questions, then run the $roll-design workflow.",
-          "",
-        ].join("\n");
+  const parts: string[] = [];
+  if (fromFile !== undefined) {
+    parts.push(
+      `The user invoked \`roll design --from-file ${fromFile}\`.`,
+      `Use this product brief file as the design input: ${fromFile}`,
+      "Read it before asking broad discovery questions, then run the $roll-design workflow.",
+    );
+  }
+  const req = rest.join(" ").trim();
+  if (req !== "") {
+    parts.push(
+      `The user invoked \`roll design ${req}\`.`,
+      `Design requirement: ${req}`,
+    );
+  }
+  const handoff = parts.length > 0 ? parts.join("\n") + "\n\n" : "";
   return `${handoff}Run the $roll-design skill below for this project. Follow it end-to-end.\n\n${body}`;
 }
 
@@ -86,6 +94,17 @@ function isRollProject(cwd: string): boolean {
 function isRegularFile(path: string): boolean {
   try {
     return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** True when `.roll/backlog.md` has at least one parseable card row. */
+function hasNonEmptyBacklog(cwd: string): boolean {
+  const bp = join(cwd, ".roll", "backlog.md");
+  try {
+    const content = readFileSync(bp, "utf8");
+    return parseBacklog(content).length > 0;
   } catch {
     return false;
   }
@@ -186,7 +205,16 @@ export function designCommand(args: string[], deps: Partial<DesignCommandDeps> =
     return 1;
   }
 
-  const prompt = readDesignPrompt(fromFile);
+  // Bound bare design: no target and non-empty backlog → bounded help, no spawn.
+  if (fromFile === undefined && rest.length === 0) {
+    if (hasNonEmptyBacklog(d.cwd)) {
+      process.stdout.write(`${t(v3Catalog, l, "design.bare_backlog_help")}\n`);
+      return 0;
+    }
+    // Empty backlog → fall through (onboarding path may still launch agent).
+  }
+
+  const prompt = readDesignPrompt(fromFile, rest);
   if (prompt === null) {
     emit(t(v3Catalog, l, "design.skill_missing"));
     return 1;

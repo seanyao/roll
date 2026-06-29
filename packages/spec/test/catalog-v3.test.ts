@@ -37,6 +37,7 @@ describe("v3Catalog", () => {
     "design.skill_missing",
     "design.no_agent",
     "design.unknown_agent",
+    "design.bare_backlog_help",
   ];
 
   it("every v3 key carries both en and zh (no mixed-language gap)", () => {

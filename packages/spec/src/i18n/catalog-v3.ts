@@ -302,6 +302,10 @@ export const v3Catalog: Catalog = {
     en: "Design source file not found: %s",
     zh: "未找到设计输入文件：%s",
   },
+  "design.bare_backlog_help": {
+    en: "No design target given. This project already has a backlog with work items.\n  Provide a target to scope the design session:\n    roll design --from-file <path>    — design from a PRD/brief/requirement file\n    roll design \"<requirement>\"       — one-shot design from a free-text requirement\n    roll supervisor next              — pick the next item from the backlog\n    roll loop go --cards <id>         — dispatch a backlog card directly\n  Run `roll design --help` for full usage.",
+    zh: "未指定设计目标。该项目已有待办事项。\n  请指定目标以限定设计范围：\n    roll design --from-file <path>    — 从 PRD/brief/需求文件开始设计\n    roll design \"<requirement>\"       — 从自由文本需求开始一次性设计\n    roll supervisor next              — 从待办中选择下一项\n    roll loop go --cards <id>         — 直接分派待办卡\n  执行 `roll design --help` 查看完整用法。",
+  },
 
   // `setup.*` — legacy setup agent selection (compatibility only).
   "setup.primary_prompt": {

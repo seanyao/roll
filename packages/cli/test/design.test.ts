@@ -280,4 +280,52 @@ describe("roll design", () => {
     const code = designCommand([], d);
     expect(code).toBe(42);
   });
+
+  it("bare design with non-empty backlog prints bounded help and does not spawn", () => {
+    const proj = freshProj();
+    dirs.push(proj);
+    // Write a non-empty backlog
+    const backlog = [
+      "| Story | Description | Status |",
+      "|-------|-------------|--------|",
+      "| [US-TEST-001](.roll/features/test/US-TEST-001/spec.md) | Test item | 📋 Todo |",
+    ].join("\n") + "\n";
+    writeFileSync(join(proj, ".roll", "backlog.md"), backlog, "utf8");
+    const d = makeDeps(proj, bin);
+    const out = { data: "" };
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation((s) => {
+      out.data += String(s);
+      return true;
+    });
+    const code = designCommand([], d);
+    spy.mockRestore();
+    expect(code).toBe(0);
+    expect(out.data).toContain("No design target given");
+    expect(out.data).toContain("--from-file");
+    expect(d.calls).toHaveLength(0);
+  });
+
+  it("bare design with empty backlog still spawns agent (onboarding path)", () => {
+    const proj = freshProj();
+    dirs.push(proj);
+    makeAgent(bin, "claude");
+    writeConfig(home, "lang: en\nai_claude: ~/.claude\n");
+    const d = makeDeps(proj, bin);
+    const code = designCommand([], d);
+    expect(code).toBe(0);
+    expect(d.calls).toHaveLength(1);
+    expect(d.calls[0]?.bin).toBe("claude");
+  });
+
+  it("design with positional requirement text includes it in the prompt", () => {
+    const proj = freshProj();
+    dirs.push(proj);
+    makeAgent(bin, "claude");
+    writeConfig(home, "lang: en\nai_claude: ~/.claude\n");
+    const d = makeDeps(proj, bin);
+    const code = designCommand(["build a login system"], d);
+    expect(code).toBe(0);
+    expect(d.calls).toHaveLength(1);
+    expect(d.calls[0]?.args[0]).toContain("Design requirement: build a login system");
+  });
 });

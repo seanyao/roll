@@ -24,6 +24,7 @@ export interface SupervisorBlockedCard {
     | "delivered"
     | "unmet_dependency"
     | "repeated_failure"
+    | "structural_failure"
     | "unknown_status";
   readonly detail: string;
 }
@@ -41,6 +42,7 @@ export interface SupervisorRunbookState {
     readonly drift: readonly string[];
     readonly openPrCount: number;
     readonly manualMergeGates: readonly NonNullable<SupervisorInput["manualMergeGates"]>[number][];
+    readonly structuralFailures: readonly NonNullable<SupervisorInput["structuralFailures"]>[number][];
   };
   readonly next: {
     readonly kind: "run_card" | "manual_merge_gate" | "diagnose_failure" | "no_work";
@@ -107,6 +109,7 @@ export function buildSupervisorRunbookState(input: SupervisorInput): SupervisorR
   const excluded: string[] = [];
   const blockedCards: SupervisorBlockedCard[] = [];
   const manualMergeGates = input.manualMergeGates ?? [];
+  const structuralFailures = input.structuralFailures ?? [];
   const { deliveredSet, openPrSet, stuckSet } = blockingDetails(input);
   const confirmedDelivered = new Set(input.delivered);
   const truthDrift = input.backlog
@@ -150,6 +153,7 @@ export function buildSupervisorRunbookState(input: SupervisorInput): SupervisorR
         drift: truthDrift,
         openPrCount: input.openPrStories.length,
         manualMergeGates,
+        structuralFailures,
       },
       next: {
         kind: "manual_merge_gate",
@@ -157,6 +161,31 @@ export function buildSupervisorRunbookState(input: SupervisorInput): SupervisorR
         reason: `manual merge gate on PR #${manualMerge.prNumber} for ${manualMerge.storyId}: ${manualMerge.detail}`,
         ownerAction: `review PR #${manualMerge.prNumber}; merge only after CI=${manualMerge.ciState}, evaluator=${manualMerge.reviewState}, merge=${manualMerge.mergeable} are acceptable`,
         schedulerAction: "do not start another card until the manual-merge PR is merged, closed, or explicitly deferred",
+      },
+      blockedCards,
+    };
+  }
+
+  const structural = structuralFailures.find(
+    (failure) => liveScopeIds.has(failure.storyId) && !deliveredSet.has(failure.storyId) && !openPrSet.has(failure.storyId),
+  );
+  if (structural !== undefined) {
+    blockedCards.push(blocker(structural.storyId, "structural_failure", structural.detail));
+    return {
+      scope: { label: "live non-Hold FIX/US/REFACTOR", families: SUPERVISOR_FAMILIES, remainingByFamily, todoByFamily, excluded },
+      truth: {
+        coverage: truthDrift.length > 0 ? "partial" : "complete",
+        drift: truthDrift,
+        openPrCount: input.openPrStories.length,
+        manualMergeGates,
+        structuralFailures,
+      },
+      next: {
+        kind: "diagnose_failure",
+        storyId: structural.storyId,
+        reason: `diagnose structural failure on ${structural.storyId}: ${structural.detail}`,
+        ownerAction: `pause execution and inspect or rescue ${structural.storyId}; source: ${structural.source}`,
+        schedulerAction: "do not retry this card until the structural failure is resolved or recorded as a root-cause card",
       },
       blockedCards,
     };
@@ -172,6 +201,7 @@ export function buildSupervisorRunbookState(input: SupervisorInput): SupervisorR
         drift: truthDrift,
         openPrCount: input.openPrStories.length,
         manualMergeGates,
+        structuralFailures,
       },
       next: {
         kind: "diagnose_failure",
@@ -230,6 +260,7 @@ export function buildSupervisorRunbookState(input: SupervisorInput): SupervisorR
         drift: truthDrift,
         openPrCount: input.openPrStories.length,
         manualMergeGates,
+        structuralFailures,
       },
         next: {
           kind: "run_card",
@@ -250,6 +281,7 @@ export function buildSupervisorRunbookState(input: SupervisorInput): SupervisorR
       drift: truthDrift,
       openPrCount: input.openPrStories.length,
       manualMergeGates,
+      structuralFailures,
     },
     next: {
       kind: "no_work",

@@ -247,6 +247,57 @@ describe("recommendNext — what should Roll do next?", () => {
     expect(state.truth.manualMergeGates).toHaveLength(1);
   });
 
+  it("US-V4-021: diagnoses zero-TCR dirty-worktree handoff before retrying", () => {
+    const state = buildSupervisorRunbookState(
+      input({
+        backlog: [
+          { id: "US-1", status: "📋 Todo" },
+          { id: "US-2", status: "📋 Todo" },
+        ],
+        structuralFailures: [
+          {
+            storyId: "US-1",
+            kind: "zero_tcr_dirty_worktree",
+            detail: "zero TCR with dirty preserved worktree; owner must inspect or rescue before retry",
+            source: "cycle:end/C1",
+          },
+        ],
+      }),
+    );
+    expect(state.next.kind).toBe("diagnose_failure");
+    expect(state.next.storyId).toBe("US-1");
+    expect(state.next.reason).toContain("zero TCR");
+    expect(state.next.ownerAction).toContain("inspect or rescue");
+    expect(state.blockedCards[0]).toMatchObject({ storyId: "US-1", reason: "structural_failure" });
+  });
+
+  it("US-V4-021: ignores stale structural failures after delivered truth exists", () => {
+    const state = buildSupervisorRunbookState(
+      input({
+        backlog: [
+          { id: "US-1", status: "📋 Todo" },
+          { id: "US-2", status: "📋 Todo" },
+        ],
+        delivered: ["US-1"],
+        structuralFailures: [
+          {
+            storyId: "US-1",
+            kind: "zero_tcr_dirty_worktree",
+            detail: "older handoff without TCR",
+            source: "cycle:end/C-old",
+          },
+        ],
+      }),
+    );
+    expect(state.next.kind).toBe("run_card");
+    expect(state.next.storyId).toBe("US-2");
+    expect(state.blockedCards).toContainEqual({
+      storyId: "US-1",
+      reason: "delivered",
+      detail: "delivery truth already marks this card delivered",
+    });
+  });
+
   it("US-V4-021: ignores historical repeated failures outside the live scope", () => {
     const state = buildSupervisorRunbookState(
       input({

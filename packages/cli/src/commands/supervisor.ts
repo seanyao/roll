@@ -224,16 +224,36 @@ export function gatherSupervisorInput(projectPath: string): SupervisorInput {
   const opened = new Set<string>();
   const cycleStory = new Map<string, string>();
   const failuresByStory = new Map<string, number>();
+  const structuralFailures = new Map<string, NonNullable<SupervisorInput["structuralFailures"]>[number]>();
   const FAIL = new Set(["failed", "gave_up", "blocked", "aborted"]);
   for (const ev of events) {
     if (ev.type === "pr:merge") merged.add(ev.storyId);
     else if (ev.type === "pr:open") opened.add(ev.storyId);
     else if (ev.type === "cycle:start") cycleStory.set(ev.cycleId, ev.storyId);
+    else if (ev.type === "sandbox:main_dirty") {
+      const sid = cycleStory.get(ev.cycleId);
+      if (sid !== undefined) {
+        structuralFailures.set(sid, {
+          storyId: sid,
+          kind: "main_checkout_dirty",
+          detail: `main checkout dirty at ${ev.phase}; files: ${ev.files.join(", ") || "unknown"}`,
+          source: `sandbox:main_dirty/${ev.cycleId}`,
+        });
+      }
+    }
     else if (ev.type === "cycle:end") {
       const sid = cycleStory.get(ev.cycleId);
       if (sid !== undefined) {
         // consecutive trailing failures: reset on a non-failure terminal.
         failuresByStory.set(sid, FAIL.has(ev.outcome) ? (failuresByStory.get(sid) ?? 0) + 1 : 0);
+        if (ev.outcome === "handoff_without_tcr") {
+          structuralFailures.set(sid, {
+            storyId: sid,
+            kind: "zero_tcr_dirty_worktree",
+            detail: "zero TCR with dirty preserved worktree; owner must inspect or rescue before retry",
+            source: `cycle:end/${ev.cycleId}`,
+          });
+        }
       }
     }
   }
@@ -262,6 +282,7 @@ export function gatherSupervisorInput(projectPath: string): SupervisorInput {
     releaseBlockers: [],
     rollMeta: readRollMetaState(projectPath),
     manualMergeGates: readManualMergeGates(projectPath, events, quietExecPort, backlog.map((row) => row.id)),
+    structuralFailures: [...structuralFailures.values()],
   };
 }
 

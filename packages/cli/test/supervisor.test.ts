@@ -313,6 +313,35 @@ describe("supervisorCommand", () => {
     expect(r.out).not.toContain("roll loop go --cards US-1");
   });
 
+  it("US-V4-021: why diagnoses zero-TCR dirty-worktree handoff before another run command", () => {
+    const cwd = project(`# Backlog
+
+| ID | Description | Status |
+| --- | --- | --- |
+| US-1 | dirty worktree handoff | 📋 Todo |
+| US-2 | next story | 📋 Todo |
+`, {
+      events: [
+        JSON.stringify({ type: "cycle:start", cycleId: "C-zero", storyId: "US-1", agent: "pi", model: "m", ts: 1 }),
+        JSON.stringify({ type: "cycle:end", cycleId: "C-zero", outcome: "handoff_without_tcr", cost: {}, ts: 2 }),
+      ],
+    });
+    const r = run(cwd, ["why"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("diagnose structural failure on US-1");
+    expect(r.out).toContain("zero TCR with dirty preserved worktree");
+    expect(r.out).toContain("do not retry this card");
+    expect(r.out).not.toContain("roll loop go --cards US-2");
+
+    const json = JSON.parse(run(cwd, ["why", "--json"]).out);
+    expect(json.runbook.next.kind).toBe("diagnose_failure");
+    expect(json.runbook.truth.structuralFailures[0]).toMatchObject({
+      storyId: "US-1",
+      kind: "zero_tcr_dirty_worktree",
+      source: "cycle:end/C-zero",
+    });
+  });
+
   it("US-V4-021: why ignores historical repeated failures when no live scoped card exists", () => {
     const cwd = project(`# Backlog
 

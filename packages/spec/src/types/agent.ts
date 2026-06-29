@@ -136,6 +136,8 @@ export interface SupervisorInput {
   };
   /** Open PRs that intentionally require an owner/manual merge decision. */
   readonly manualMergeGates?: readonly SupervisorManualMergeGate[];
+  /** Structural execution-boundary failures that must be diagnosed before retry. */
+  readonly structuralFailures?: readonly SupervisorStructuralFailure[];
 }
 
 /** A surfaced open PR gate that must be reconciled before starting new work. */
@@ -146,6 +148,14 @@ export interface SupervisorManualMergeGate {
   readonly reviewState: string;
   readonly mergeable: string;
   readonly action: string;
+  readonly detail: string;
+  readonly source: string;
+}
+
+/** A non-ordinary cycle failure that points to runner/worktree/gate structure. */
+export interface SupervisorStructuralFailure {
+  readonly storyId: string;
+  readonly kind: "zero_tcr_dirty_worktree" | "main_checkout_dirty";
   readonly detail: string;
   readonly source: string;
 }

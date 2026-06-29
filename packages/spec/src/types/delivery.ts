@@ -146,9 +146,13 @@ export function lifecycleFromFacts(
     return "failed";
   }
 
-  // ── Idle / gave_up / orphan ────────────────────────────────────────
+  // ── Idle / gave_up / handoff_without_tcr / orphan ────────────────────
   if (terminalOutcome === "idle_no_work") return "todo";
   if (terminalOutcome === "gave_up") return "failed";
+  // FIX-1039: a builder left worktree changes without TCR — the cycle did not
+  // deliver, so it's failed (recoverable but not done). The preserved worktree
+  // gives the owner a recovery path; the backlog story stays retryable.
+  if (terminalOutcome === "handoff_without_tcr") return "failed";
   if (terminalOutcome === "orphan_timeout") return "blocked";
 
   // ── Unknown ────────────────────────────────────────────────────────

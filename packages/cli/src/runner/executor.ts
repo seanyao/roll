@@ -1750,6 +1750,18 @@ export async function executeCommand(
       } catch {
         /* count is best-effort; a git miss must not fail the cycle */
       }
+      // FIX-1039: check whether the worktree has uncommitted/untracked files.
+      // Best-effort → false on git error (the probe must never fail the cycle).
+      let worktreeDirty = false;
+      try {
+        const { stdout } = await execFileAsync("git", ["status", "--porcelain", "--untracked-files=all"], {
+          cwd: ports.paths.worktreePath,
+          encoding: "utf8",
+        });
+        worktreeDirty = stdout.trim() !== "";
+      } catch {
+        /* probe is best-effort */
+      }
       // FIX-363: attribute a reviewer/scorer failure to its CAUSE. Signature-match
       // the output we ALREADY have (zero cost); only a SILENT timeout (no output,
       // no signature) spends ONE cheap reachability probe to tell a blocked agent
@@ -2447,6 +2459,7 @@ export async function executeCommand(
         ...(needsReview ? { needsReview: true } : {}),
         ...(mainAhead > 0 ? { mainAhead } : {}),
         ...(mainDirty ? { mainDirty: true } : {}),
+        ...(worktreeDirty ? { worktreeDirty: true } : {}),
         ...(prState !== undefined ? { prState } : {}),
       };
       return { event: { type: "facts_captured", facts }, ctxPatch: { tcrCount, ...(mainDirty ? { mainDirty: true } : {}) } };

@@ -129,6 +129,9 @@ describe("US-TRUTH-013 AC3 — lifecycleFromFacts deterministic mappings", () =>
     // gave_up → failed
     ["gave_up", "none", "failed"],
 
+    // handoff_without_tcr → failed (FIX-1039: recoverable but not delivered)
+    ["handoff_without_tcr", "none", "failed"],
+
     // orphan_timeout → blocked
     ["orphan_timeout", "none", "blocked"],
 
@@ -154,8 +157,11 @@ describe("US-TRUTH-013 AC3 — lifecycleFromFacts deterministic mappings", () =>
       "orphan_timeout",
       "idle_no_work",
       "gave_up",
+      "handoff_without_tcr",
       "dormant_entered",
       "unpublished",
+      "needs_review",
+      "ci_red_after_merge",
       "unknown",
     ];
     for (const o of allOutcomes) {

@@ -130,7 +130,7 @@ import { deliveryGate } from "../delivery/gate.js";
  *               (bin/roll:8756).
  *   - blocked : hard-timeout breach (bin/roll:8679).
  */
-export type V2CycleStatus = "idle" | "gave_up" | "built" | "done" | "published" | "orphan" | "local" | "needs_review" | "failed" | "aborted" | "blocked" | "dormant";
+export type V2CycleStatus = "idle" | "gave_up" | "handoff_without_tcr" | "built" | "done" | "published" | "orphan" | "local" | "needs_review" | "failed" | "aborted" | "blocked" | "dormant";
 
 /**
  * Bridge v2's runs.jsonl status onto the closed {@link TerminalOutcome}
@@ -160,6 +160,12 @@ export function mapV2Status(status: V2CycleStatus): TerminalOutcome {
       // NOT a silent idle. Distinct outcome so the dashboard/ledger and the
       // dead-loop breaker can tell a give-up from a genuine no-op.
       return "gave_up";
+    case "handoff_without_tcr":
+      // FIX-1039: builder produced uncommitted work in the worktree but never
+      // TCR-committed it — a recoverable handoff contract gap. The worktree is
+      // PRESERVED. This is a failed-class outcome (no delivery), but distinct
+      // from gave_up (agent had nothing to show) and from idle (no agent ran).
+      return "handoff_without_tcr";
     case "dormant":
       // US-LOOP-079d — 连续 N idle 后自卸;终态,此后无 idle 行.
       return "dormant_entered";
@@ -228,6 +234,15 @@ export interface CapturedFacts {
   mainAhead?: number;
   /** FIX-1037: main checkout has uncommitted/untracked product-code dirt. */
   mainDirty?: boolean;
+  /**
+   * FIX-1039: the cycle worktree has uncommitted/untracked files (dirty) at
+   * capture time. When combined with commitsAhead === 0, this means the
+   * builder produced code but never TCR-committed it — a handoff contract
+   * gap rather than a "did nothing" gave_up. The worktree is PRESERVED so
+   * the owner can recover the uncommitted work. Best-effort: absence means
+   * the probe didn't run (defaulting to false in classifyCaptured).
+   */
+  worktreeDirty?: boolean;
   /** FIX-244: PR state for the cycle branch ("OPEN"/"MERGED"/...), probed by the
    *  capture step ONLY when the exit is non-zero with commits ahead — the
    *  phantom-failure check. Absent = not probed / no PR. */
@@ -241,6 +256,8 @@ export interface CapturedFacts {
  *   - worktree-setup failed           → failed (bin/roll:9000-9007).
  *   - agent exit ≠ 0                  → failed (bin/roll:9132-9133).
  *   - exit 0, commitsAhead === 0 and local main not ahead:
+ *       · worktree dirty (uncommitted files) but no TCR commit → handoff_without_tcr
+ *         (FIX-1039: recoverable, the worktree is PRESERVED).
  *       · an agent EXECUTED (Hook 1 productivity floor) → gave_up (failed-class,
  *         alerted on cycle 1 — an agent that burned tokens/time but produced
  *         nothing is NOT a silent idle).
@@ -293,6 +310,11 @@ export function classifyCaptured(facts: CapturedFacts): V2CycleStatus {
   }
   if (facts.commitsAhead === 0 && (facts.mainAhead ?? 0) > 0) return "failed";
   if (facts.commitsAhead === 0) {
+    // FIX-1039: worktree has uncommitted/untracked changes but 0 commits
+    // ahead — the builder produced code but never TCR-committed it. This is
+    // a handoff contract gap, NOT a "did nothing" gave_up. The worktree is
+    // PRESERVED so the owner can inspect or rescue the uncommitted work.
+    if (facts.worktreeDirty === true) return "handoff_without_tcr";
     // Hook 1 (productivity floor): split the commit-count-only idle. An agent
     // that EXECUTED but left 0 commits and no delivery gave_up (a failed-class
     // terminal); a cycle where no agent ran is a genuine idle no-op. `undefined`
@@ -998,6 +1020,16 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
                   {
                     kind: "append_alert",
                     message: `cycle ${state.ctx.cycleId}: agent executed but produced 0 commits and no delivery — gave_up (productivity floor); story left re-pickable, spec truth reset`,
+                  },
+                ]
+            : status === "handoff_without_tcr"
+              ? // FIX-1039: builder produced code but never TCR-committed it.
+                // Preserve the worktree so the owner can inspect or rescue the
+                // uncommitted work. NO cleanup_worktree — the worktree stays.
+                [
+                  {
+                    kind: "append_alert",
+                    message: `cycle ${state.ctx.cycleId}: builder exited exit 0 with uncommitted changes in worktree but 0 TCR commits — handoff_without_tcr; worktree preserved at branch ${state.ctx.branch} for recovery`,
                   },
                 ]
             : status === "failed" && (event.facts.mainAhead ?? 0) > 0

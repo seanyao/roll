@@ -63,6 +63,12 @@ export const TERMINAL_OUTCOMES = [
   // — the code is broken per CI evidence. Distinct from `delivered` (CI green)
   // and `failed` (no merge occurred). The CI run URL is recorded for diagnostics.
   "ci_red_after_merge",
+  // FIX-1039 — a builder exited with code 0 and left changes in the worktree
+  // but did not create a TCR commit. The work is real but uncommitted; the
+  // worktree is PRESERVED so the owner can inspect or rescue it. Distinct
+  // from `gave_up` (agent ran, 0 output, nothing to preserve) and from
+  // `idle_no_work` (no agent ran at all, no dirt).
+  "handoff_without_tcr",
   "unknown",
 ] as const;
 export type TerminalOutcome = (typeof TERMINAL_OUTCOMES)[number];

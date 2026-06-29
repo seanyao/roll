@@ -141,6 +141,79 @@ describe("reconcileMergeEvidence — built ≠ merged (I4)", () => {
     expect(res.credited[0]).toMatchObject({ cycleId: "c2" });
     expect(res.credited[0]).not.toHaveProperty("prNumber");
   });
+
+  // ── FIX-1032a: delivery gate integration ────────────────────────────────
+
+  it("FIX-1032a AC2: CI red after merge → outcome ci_red_after_merge, not delivered", () => {
+    const rows: ReconcileRunRow[] = [{ status: "built", cycle_id: "c10" }];
+    const res = reconcileMergeEvidence(
+      rows,
+      lookup({
+        [reconcileBranchName("c10")]: {
+          state: "MERGED",
+          mergedAt: "2026-06-30T00:00:00Z",
+          mergeCommit: "ci-red",
+          mainCiStatus: "red",
+          ciRunUrl: "https://ci.example.com/run/fail-1",
+        },
+      }),
+    );
+    expect(res.rows[0]).toMatchObject({
+      status: "merged",
+      outcome: "ci_red_after_merge",
+      merged_at: "2026-06-30T00:00:00Z",
+      ci_run_url: "https://ci.example.com/run/fail-1",
+    });
+    expect(res.credited).toHaveLength(1);
+  });
+
+  it("FIX-1032a AC2: CI unknown → outcome delivered (non-red passes)", () => {
+    const rows: ReconcileRunRow[] = [{ status: "built", cycle_id: "c11" }];
+    const res = reconcileMergeEvidence(
+      rows,
+      lookup({
+        [reconcileBranchName("c11")]: {
+          state: "MERGED",
+          mergedAt: "2026-06-30T01:00:00Z",
+          mergeCommit: "ci-unknown",
+          mainCiStatus: "unknown",
+        },
+      }),
+    );
+    expect(res.rows[0]).toMatchObject({ status: "merged", outcome: "delivered" });
+  });
+
+  it("FIX-1032a AC2: CI pending → outcome delivered (non-red passes)", () => {
+    const rows: ReconcileRunRow[] = [{ status: "built", cycle_id: "c12" }];
+    const res = reconcileMergeEvidence(
+      rows,
+      lookup({
+        [reconcileBranchName("c12")]: {
+          state: "MERGED",
+          mergedAt: "2026-06-30T02:00:00Z",
+          mergeCommit: "ci-pending",
+          mainCiStatus: "pending",
+        },
+      }),
+    );
+    expect(res.rows[0]).toMatchObject({ status: "merged", outcome: "delivered" });
+  });
+
+  it("FIX-1032a AC2: CI green → outcome delivered (regression guard)", () => {
+    const rows: ReconcileRunRow[] = [{ status: "built", cycle_id: "c13" }];
+    const res = reconcileMergeEvidence(
+      rows,
+      lookup({
+        [reconcileBranchName("c13")]: {
+          state: "MERGED",
+          mergedAt: "2026-06-30T03:00:00Z",
+          mergeCommit: "ci-green",
+          mainCiStatus: "green",
+        },
+      }),
+    );
+    expect(res.rows[0]).toMatchObject({ status: "merged", outcome: "delivered" });
+  });
 });
 
 describe("cycleEndForPick — latest pick → its cycle_end", () => {

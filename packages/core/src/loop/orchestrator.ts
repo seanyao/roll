@@ -105,6 +105,7 @@ import type { AgentId, CycleCost, CyclePhase, ExecutionProfile, ModelId, Termina
 import { cycleCurrency } from "../cost/tracker.js";
 import type { RollEvent } from "@roll/spec";
 import { nextWaitAction, type WaitAction } from "../delivery/pr.js";
+import { deliveryGate } from "../delivery/gate.js";
 
 // ── v2 terminal vocabulary (six-state model) ─────────────────────────────────
 
@@ -671,6 +672,10 @@ export interface CycleContext {
    *  the cycle did NOT merge — done ≡ merged. Absent ⇒ status unread at pick
    *  (no revert target; the terminal leaves the row untouched). */
   preCycleStatus?: string;
+  /** FIX-1032a: true iff the project has a PR loop service installed and healthy.
+   *  Set by the executor before the publish phase. When false, the published PR
+   *  has no merge guardian and the cycle must NOT write delivered. */
+  prLoopHealthy?: boolean;
 }
 
 /** Minimal context for building a terminal cycle:end event + runs row. */
@@ -1018,9 +1023,21 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
       if (status === "published" || status === "done") {
         // Published (PR open, merge → PR Loop, US-AUTO-044) or locally
         // ff-merged (gh-missing tier → done) → clean worktree → terminal.
-        return terminate({ ...state, phase: "cleanup" }, status, [
+        // FIX-1032a: check delivery gate for PR loop health.
+        const extra: CycleCommand[] = [
           { kind: "cleanup_worktree", branch: state.ctx.branch },
-        ]);
+        ];
+        if (status === "published" && state.ctx.prLoopHealthy === false) {
+          const gate = deliveryGate({
+            prLoopHealthy: false,
+            mainCiStatus: "unknown",
+            prUrl: state.ctx.prUrl,
+          });
+          if (gate.verdict === "pr_loop_unavailable") {
+            extra.push({ kind: "append_alert", message: gate.alert });
+          }
+        }
+        return terminate({ ...state, phase: "cleanup" }, status, extra);
       }
       if (status === "orphan") {
         // Commits pushed for audit; worktree cleaned (bin/roll:9333).

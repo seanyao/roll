@@ -58,6 +58,11 @@ export const TERMINAL_OUTCOMES = [
   // re-run review — NOT a code defect, NOT a Done. Distinct from `failed` (a real
   // gate/code failure) and `unpublished` (gates PASSED but publish could not land).
   "needs_review",
+  // FIX-1032a — a cycle whose PR was merged but main CI is red on the merge
+  // commit. The merge landed (code is on main), but the delivery is NOT complete
+  // — the code is broken per CI evidence. Distinct from `delivered` (CI green)
+  // and `failed` (no merge occurred). The CI run URL is recorded for diagnostics.
+  "ci_red_after_merge",
   "unknown",
 ] as const;
 export type TerminalOutcome = (typeof TERMINAL_OUTCOMES)[number];

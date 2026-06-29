@@ -63,6 +63,7 @@ export * from "./release/flow.js";
 export * from "./attest/ac-parser.js";
 export * from "./attest/gc.js";
 export * from "./attest/ansi-html.js";
+export * from "./attest/execution-cast.js";
 export * from "./attest/report.js";
 export * from "./attest/report-smoke.js";
 export * from "./attest/evidence-drafter.js";

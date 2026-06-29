@@ -10,6 +10,10 @@
 
 - `roll design` 不再在已有 backlog 的项目里意外启动完整设计 session，而是先给出可选的几种目标方式（`--from-file`、直接需求文本等）(FIX-1031) `[loop]`
 
+### 可见性
+
+- 验收报告和故事档案开始显示执行阵容（Execution Cast），每位 Builder、Peer Reviewer、Evaluator 和验收门禁在交付页面上一眼可见（US-OBS-034）`[loop]`
+
 ## v4.629.2 — 2026-06-29
 
 ### Agent 管理

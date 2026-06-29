@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlink
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { STATUS_MARKER } from "@roll/spec";
+import { STATUS_MARKER, type CycleRoleSummary } from "@roll/spec";
 import { generateDossierPages } from "../src/commands/index-gen.js";
 import { collectDossier, type DossierEpic, type DossierStory } from "../src/lib/archive.js";
 import { DOSSIER_CSS, DOSSIER_FILTER_SCRIPT } from "../src/lib/dossier-css.js";
@@ -2123,5 +2123,80 @@ describe("FIX-282 — story-page evidence hrefs resolve from the story root", ()
       expect(src.startsWith("../")).toBe(false);
       expect(existsSync(join(storyDir, src))).toBe(true);
     }
+  });
+
+  it("US-OBS-034: renders escaped Execution Cast with artifact links and anchor", () => {
+    const story: DossierStory = { id: "US-OBS-034", epic: "loop-observability", type: "US", delivered: true };
+    const summary: CycleRoleSummary = {
+      schema: "cycle-role-summary.v1",
+      cycleId: "cycle-escape",
+      storyId: "US-OBS-034",
+      executionProfile: "verified",
+      generatedAt: "2026-06-29T12:00:00Z",
+      roles: [
+        { role: "builder", agent: "pi<script>alert(1)</script>", model: "deepseek<img>", stage: "build", state: "accepted", acceptedByGate: false, ts: 1000 },
+        { role: "peer_reviewer", agent: "reasonix", stage: "review", state: "accepted", verdict: "refine", findings: 2, artifactPath: "/tmp/peer/cycle-escape.pair.json", acceptedByGate: true, ts: 1200 },
+        { role: "evaluator", agent: "badscore", stage: "score", state: "failed", cause: "unparseable <raw>", artifactPath: "/tmp/peer/cycle-escape.score.pair.json", acceptedByGate: false, ts: 1300 },
+        { role: "evaluator", agent: "codex", stage: "score", state: "accepted", score: 8, verdict: "good<script>", artifactPath: "/tmp/peer/cycle-escape.score.pair.json", acceptedByGate: true, ts: 1400 },
+      ],
+      gates: { peerGate: "consulted", attestGate: "produced", delivery: "merged" },
+      sources: [],
+    };
+    const html = renderStoryDossier({
+      story,
+      cycleRoleSummary: summary,
+      cycleRoleSummaryHref: "../../../loop/cycle-logs/cycle-escape/summary.json",
+      cycleRoleArtifactHrefs: {
+        "/tmp/peer/cycle-escape.pair.json": "../../../loop/peer/cycle-escape.pair.json",
+        "/tmp/peer/cycle-escape.score.pair.json": "../../../loop/peer/cycle-escape.score.pair.json",
+      },
+    });
+    expect(html).toContain('id="execution-cast"');
+    expect(html).toContain("accepted peer artifact");
+    expect(html).toContain("raw failure artifact");
+    expect(html).toContain("summary.json");
+    expect(html).toContain("../../../loop/peer/cycle-escape.score.pair.json");
+    expect(html).not.toContain("pi<script>alert(1)</script>");
+    expect(html).not.toContain("deepseek<img>");
+    expect(html).not.toContain("good<script>");
+    expect(html).not.toContain("unparseable <raw>");
+    expect(html).toContain("pi&lt;script&gt;alert(1)&lt;/script&gt;");
+    expect(html).toContain("deepseek&lt;img&gt;");
+    expect(html).toContain("good&lt;script&gt;");
+    expect(html).toContain("unparseable &lt;raw&gt;");
+  });
+
+  it("US-OBS-034: collectStoryDossierInput picks the newest matching role summary by generatedAt", () => {
+    const p = project();
+    const logs = join(p, ".roll", "loop", "cycle-logs");
+    mkdirSync(join(logs, "zz-old"), { recursive: true });
+    mkdirSync(join(logs, "aa-new"), { recursive: true });
+    const oldSummary: CycleRoleSummary = {
+      schema: "cycle-role-summary.v1",
+      cycleId: "zz-old",
+      storyId: "US-A-1",
+      executionProfile: "standard",
+      generatedAt: "2026-06-29T10:00:00Z",
+      roles: [{ role: "builder", agent: "old-agent", state: "accepted", acceptedByGate: false, ts: 1000 }],
+      gates: {},
+      sources: [],
+    };
+    const newSummary: CycleRoleSummary = {
+      schema: "cycle-role-summary.v1",
+      cycleId: "aa-new",
+      storyId: "US-A-1",
+      executionProfile: "standard",
+      generatedAt: "2026-06-29T12:00:00Z",
+      roles: [{ role: "builder", agent: "new-agent", state: "accepted", acceptedByGate: false, ts: 2000 }],
+      gates: {},
+      sources: [],
+    };
+    writeFileSync(join(logs, "zz-old", "summary.json"), JSON.stringify(oldSummary));
+    writeFileSync(join(logs, "aa-new", "summary.json"), JSON.stringify(newSummary));
+    writeFileSync(join(logs, "aa-new", "summary.md"), "# new\n");
+
+    const input = collectStoryDossierInput(p, { id: "US-A-1", epic: "alpha", type: "US", delivered: true });
+    expect(input.cycleRoleSummary?.cycleId).toBe("aa-new");
+    expect(input.cycleRoleSummaryHref).toBe("../../../loop/cycle-logs/aa-new/summary.json");
   });
 });

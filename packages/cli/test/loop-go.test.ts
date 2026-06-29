@@ -1512,3 +1512,229 @@ lastDecisionReason: no_progress_breaker
     expect(goal.lastDecisionReason).toContain("no_progress_breaker");
   });
 });
+
+describe("FIX-1034 — max-cycles counts session delta, not historical usage", () => {
+  // AC1: historical goal with usage.cycles: 49, --max-cycles 1 → runs one cycle.
+  it("runs one cycle when historical usage is 49 and --max-cycles is 1", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [FIX-NEW](.roll/features/loop-engine/FIX-NEW/spec.md) | new fix | 📋 Todo |",
+    ]);
+    writeFileSync(
+      join(p, ".roll", "loop", "goal.yaml"),
+      `schema: goal.v1
+scope:
+  kind: cards
+  cards: [FIX-NEW]
+review: off
+limits:
+status: active
+usage:
+  cycles: 49
+  costUsd: 10
+createdAt: 2026-06-14T19:20:25Z
+updatedAt: 2026-06-29T06:04:22Z
+lastDecisionReason: go_start
+`,
+    );
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_030_000 + calls,
+      nowIso: () => `2026-06-29T10:00:0${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async ({ projectPath }) => {
+        calls += 1;
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "runs.jsonl"),
+          `${JSON.stringify({ story_id: "FIX-NEW", cycle_id: `cycle-${calls}`, tcr_count: 1, ts: `2026-06-29T10:00:0${calls}Z` })}\n`,
+          { flag: "a" },
+        );
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "FIX-NEW", "--max-cycles", "1"], deps));
+
+    expect(r.code).toBe(0);
+    // Must run exactly one cycle — NOT zero because of historical usage.
+    expect(calls).toBe(1);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    // usage.cycles cumulative → 50, but the session-end event shows delta.
+    expect(goal.usage.cycles).toBe(50);
+    const events = readEvents(p);
+    const endEvent = events.find((e) => e.type === "goal:session_end");
+    expect(endEvent).toBeDefined();
+    expect(endEvent!.cycles).toBe(1);
+    expect(endEvent!.reason).toBe("max_cycles");
+  });
+
+  // AC2: session-end cycles field shows session delta (2), not total (22).
+  // Uses no-progress rows (no tcr_count) so the card stays undelivered and
+  // maxCycles drives the stop, not scope_in_flight.
+  it("goal:session_end.cycles shows session delta when historical usage exists", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [FIX-NEW](.roll/features/loop-engine/FIX-NEW/spec.md) | new fix | 📋 Todo |",
+    ]);
+    writeFileSync(
+      join(p, ".roll", "loop", "goal.yaml"),
+      `schema: goal.v1
+scope:
+  kind: cards
+  cards: [FIX-NEW]
+review: off
+limits:
+status: active
+usage:
+  cycles: 20
+  costUsd: 5
+createdAt: 2026-06-14T19:20:25Z
+updatedAt: 2026-06-29T06:04:22Z
+lastDecisionReason: go_start
+`,
+    );
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_031_000 + calls,
+      nowIso: () => `2026-06-29T10:00:0${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async ({ projectPath }) => {
+        calls += 1;
+        // No tcr_count → card is NOT marked as delivered → maxCycles will stop it.
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "runs.jsonl"),
+          `${JSON.stringify({ story_id: "FIX-NEW", cycle_id: `cycle-${calls}`, ts: `2026-06-29T10:00:0${calls}Z` })}\n`,
+          { flag: "a" },
+        );
+        return 0;
+      },
+    };
+
+    // max-cycles 2 with historical 20 → should run 2 cycles, then stop.
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "FIX-NEW", "--max-cycles", "2"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(2);
+    const events = readEvents(p);
+    const endEvent = events.find((e) => e.type === "goal:session_end");
+    expect(endEvent).toBeDefined();
+    // session delta, NOT total cumulative
+    expect(endEvent!.cycles).toBe(2);
+    expect(endEvent!.reason).toBe("max_cycles");
+  });
+
+  // AC3: --max-cycles 0 still exits without calling runOnce, even with historical usage.
+  it("max-cycles 0 stops immediately with historical usage present", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [FIX-NEW](.roll/features/loop-engine/FIX-NEW/spec.md) | new fix | 📋 Todo |",
+    ]);
+    writeFileSync(
+      join(p, ".roll", "loop", "goal.yaml"),
+      `schema: goal.v1
+scope:
+  kind: cards
+  cards: [FIX-NEW]
+review: off
+limits:
+status: active
+usage:
+  cycles: 49
+  costUsd: 10
+createdAt: 2026-06-14T19:20:25Z
+updatedAt: 2026-06-29T06:04:22Z
+lastDecisionReason: go_start
+`,
+    );
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_032_000 + calls,
+      nowIso: () => `2026-06-29T10:00:0${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async () => {
+        calls += 1;
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "FIX-NEW", "--max-cycles", "0"], deps));
+
+    expect(r.code).toBe(0);
+    // Zero cycles should run — no runOnce call.
+    expect(calls).toBe(0);
+    const events = readEvents(p);
+    const endEvent = events.find((e) => e.type === "goal:session_end");
+    expect(endEvent).toBeDefined();
+    expect(endEvent!.cycles).toBe(0);
+    expect(endEvent!.reason).toBe("max_cycles");
+  });
+
+  // AC4: scope-change still resets progress counters but does NOT zero historical usage.
+  it("scope change resets progress but preserves historical usage for session delta", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [FIX-OLD](.roll/features/loop-engine/FIX-OLD/spec.md) | old scope | 📋 Todo |",
+      "| [FIX-NEW](.roll/features/loop-engine/FIX-NEW/spec.md) | new scope | 📋 Todo |",
+    ]);
+    writeFileSync(
+      join(p, ".roll", "loop", "goal.yaml"),
+      `schema: goal.v1
+scope:
+  kind: cards
+  cards: [FIX-OLD]
+review: off
+limits:
+status: active
+usage:
+  cycles: 49
+  costUsd: 10
+createdAt: 2026-06-14T19:20:25Z
+updatedAt: 2026-06-29T06:04:22Z
+lastDecisionReason: go_start
+`,
+    );
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_033_000 + calls,
+      nowIso: () => `2026-06-29T10:00:0${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async ({ projectPath }) => {
+        calls += 1;
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "runs.jsonl"),
+          `${JSON.stringify({ story_id: "FIX-NEW", cycle_id: `cycle-${calls}`, tcr_count: 1, ts: `2026-06-29T10:00:0${calls}Z` })}\n`,
+          { flag: "a" },
+        );
+        return 0;
+      },
+    };
+
+    // Change scope from FIX-OLD to FIX-NEW.
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "FIX-NEW", "--max-cycles", "1"], deps));
+
+    expect(r.code).toBe(0);
+    // Scope changed → progress counters cleared → one cycle runs, then max_cycles.
+    expect(calls).toBe(1);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    // Historical usage preserved after scope change.
+    expect(goal.usage.cycles).toBe(50);
+    // Progress counters were cleared by the scope change.
+    expect(goal.progress).toBeUndefined();
+    const events = readEvents(p);
+    const endEvent = events.find((e) => e.type === "goal:session_end");
+    expect(endEvent).toBeDefined();
+    expect(endEvent!.cycles).toBe(1);
+  });
+});

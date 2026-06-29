@@ -46,6 +46,7 @@
  */
 import { STATUS_MARKER } from "@roll/spec";
 import { type BacklogItem, parseBacklog } from "../backlog/store.js";
+import { deliveryGate } from "../delivery/gate.js";
 
 // ── 1. Merge-evidence reconcile (mirrors _loop_backfill_merged) ──────────────
 
@@ -62,7 +63,8 @@ export interface ReconcileRunRow {
 
 /** Real PR merge evidence for one cycle branch (what `gh pr view` reports). The
  *  adapter fetches this; core consumes it as data.
- *  FIX-389b: extended with prNumber + prUrl for the projection engine. */
+ *  FIX-389b: extended with prNumber + prUrl for the projection engine.
+ *  FIX-1032a: extended with mainCiStatus + ciRunUrl for the delivery gate. */
 export interface MergeEvidence {
   /** PR state — only `MERGED` credits the row (mirrors the oracle's gate). */
   state: "MERGED" | "CLOSED" | "OPEN" | "UNKNOWN" | string;
@@ -74,6 +76,10 @@ export interface MergeEvidence {
   prNumber?: number;
   /** PR URL. Stamped as `pr_url` on the credited row. */
   prUrl?: string;
+  /** FIX-1032a: main CI status on the merge commit (green/red/unknown/pending). */
+  mainCiStatus?: string;
+  /** FIX-1032a: CI run URL for diagnostics (meaningful when CI is red). */
+  ciRunUrl?: string;
 }
 
 /** Statuses the merge-evidence backfill probes (FIX-243/244): the v2 "built"
@@ -147,17 +153,27 @@ export function reconcileMergeEvidence(
     }
     const mergedAt = ev.mergedAt ?? "";
     const mergeCommit = ev.mergeCommit ?? "";
+    // FIX-1032a: check the delivery gate before writing "delivered".
+    // A merge onto main is only "delivered" when main CI is not red.
+    const gate = deliveryGate({
+      prLoopHealthy: true, // PR loop health is not checked at backfill time (PR already merged)
+      mainCiStatus: (ev.mainCiStatus as "green" | "red" | "unknown" | "pending") ?? "unknown",
+      prUrl: ev.prUrl,
+      ciRunUrl: ev.ciRunUrl,
+    });
+    const outcome = gate.verdict === "allowed" ? "delivered" : gate.verdict;
     // FIX-389b: stamp pr_number + pr_url onto the credited row so the
     // projection engine (FIX-389a) can rebuild deliveries from runs alone.
     const creditedRow: ReconcileRunRow = {
       ...row,
       status: "merged",
-      outcome: "delivered",
+      outcome,
       merged_at: mergedAt,
       merge_commit: mergeCommit,
     };
     if (ev.prNumber !== undefined) creditedRow["pr_number"] = ev.prNumber;
     if (ev.prUrl !== undefined) creditedRow["pr_url"] = ev.prUrl;
+    if (ev.ciRunUrl !== undefined) creditedRow["ci_run_url"] = ev.ciRunUrl;
     out.push(creditedRow);
     const cr: CreditedRun = { cycleId, mergedAt, mergeCommit };
     if (ev.prNumber !== undefined) cr.prNumber = ev.prNumber;

@@ -19,6 +19,7 @@ export * from "./backlog/store.js";
 export * from "./cost/prices.js";
 export * from "./cost/tracker.js";
 export * from "./delivery/infra-default.js";
+export * from "./delivery/gate.js";
 export * from "./delivery/pr.js";
 export * from "./delivery/store.js";
 export * from "./delivery/tcr.js";

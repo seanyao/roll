@@ -14,15 +14,13 @@ import {
   type CycleRoleAttemptState,
   type CycleRoleSummary,
 } from "@roll/spec";
-import { readFileSync } from "node:fs";
-import { writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { dirname } from "node:path";
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
 export interface BuildCycleRoleSummaryInput {
   readonly cycleId: string;
   readonly events: readonly RollEvent[];
+  readonly eventsPath?: string;
   readonly peerDir: string;
   readonly cycleLogDir: string;
   readonly deliveries?: readonly DeliveryRecord[];
@@ -45,7 +43,11 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
   let storyId = "";
   let executionProfile: "standard" | "verified" | "planned" = "standard";
   let builderSessionId: string | undefined;
-  const sources: string[] = [cycleLogDir];
+  const sources: string[] = [];
+  addSource(sources, input.eventsPath);
+  addSource(sources, cycleLogDir);
+  const peerArtifactPath = artifactPath(peerDir, cycleId, "review");
+  const scoreArtifactPath = artifactPath(peerDir, cycleId, "score");
 
   // Builder: from cycle:start
   const startEvent = cycleEvents.find((e) => e.type === "cycle:start") as
@@ -65,7 +67,7 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
         ts: startEvent.ts,
         logPath: builderLog,
       });
-      sources.push(builderLog);
+      addSource(sources, builderLog);
     }
   }
 
@@ -79,7 +81,7 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
 
   // Pair events: peer reviewers and scorers
   const selectedReviewers = cycleEvents.filter(
-    (e) => e.type === "pair:selected" && (e as { stage?: string }).stage === "review",
+    (e) => e.type === "pair:selected" && isPeerReviewStage((e as { stage?: string }).stage),
   ) as Array<{ type: "pair:selected"; cycleId: string; workingAgent: string; peer: string; stage: string; ts: number }>;
 
   const selectedScorers = cycleEvents.filter(
@@ -144,7 +146,8 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
   // Peer Reviewers
   for (const sel of selectedReviewers) {
     const peer = sel.peer;
-    const verdict = verdicts.find((v) => v.peer === peer);
+    addSource(sources, peerArtifactPath);
+    const verdict = verdicts.find((v) => v.peer === peer && isPeerReviewStage(v.stage ?? sel.stage));
     const consult = consults.find((c) => c.peer === peer);
     const block = blocks.find((b) => b.agent === peer && b.stage === "review");
 
@@ -152,9 +155,11 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
       roles.push({
         role: "peer_reviewer",
         agent: peer,
+        stage: "review",
         state: "failed",
         cause: block.cause,
         detail: block.detail,
+        artifactPath: peerArtifactPath,
         acceptedByGate: false,
         ts: block.ts,
       });
@@ -166,9 +171,11 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
       roles.push({
         role: "peer_reviewer",
         agent: peer,
+        stage: "review",
         state: accepted ? "accepted" : "returned",
         verdict: verdict.verdict,
         findings: verdict.findings,
+        artifactPath: peerArtifactPath,
         acceptedByGate: accepted,
         ts: verdict.ts,
       });
@@ -178,8 +185,10 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
       roles.push({
         role: "peer_reviewer",
         agent: peer,
+        stage: "review",
         state: "returned",
         detail: consult.outcome === "reviewed" ? "reviewed, no structured verdict accepted" : consult.outcome,
+        artifactPath: peerArtifactPath,
         acceptedByGate: false,
         ts: consult.ts,
       });
@@ -187,7 +196,9 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
       roles.push({
         role: "peer_reviewer",
         agent: peer,
+        stage: "review",
         state: "selected",
+        artifactPath: peerArtifactPath,
         acceptedByGate: false,
         ts: sel.ts,
       });
@@ -197,6 +208,7 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
   // Evaluators / Scorers
   for (const sel of selectedScorers) {
     const peer = sel.peer;
+    addSource(sources, scoreArtifactPath);
     const score = scores.find((s) => s.peer === peer);
     const failure = scoreFailures.find((f) => f.peer === peer);
     const block = blocks.find((b) => b.agent === peer && b.stage === "score");
@@ -205,9 +217,11 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
       roles.push({
         role: "evaluator",
         agent: peer,
+        stage: "score",
         state: "failed",
         cause: block.cause,
         detail: block.detail,
+        artifactPath: scoreArtifactPath,
         acceptedByGate: false,
         ts: block.ts,
       });
@@ -215,9 +229,11 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
       roles.push({
         role: "evaluator",
         agent: peer,
+        stage: "score",
         state: "failed",
         cause: failure.cause,
         detail: failure.detail,
+        artifactPath: scoreArtifactPath,
         acceptedByGate: false,
         ts: failure.ts,
       });
@@ -230,9 +246,11 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
       roles.push({
         role: "evaluator",
         agent: peer,
+        stage: "score",
         state: "accepted",
         score: score.score,
         verdict: score.verdict,
+        artifactPath: scoreArtifactPath,
         acceptedByGate,
         ts: score.ts,
       });
@@ -241,7 +259,9 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
       roles.push({
         role: "evaluator",
         agent: peer,
+        stage: "score",
         state: "selected",
+        artifactPath: scoreArtifactPath,
         acceptedByGate: false,
         ts: sel.ts,
       });
@@ -254,12 +274,15 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
       (r) => r.role === "evaluator" && r.agent === fail.peer,
     );
     if (!alreadyHandled) {
+      addSource(sources, scoreArtifactPath);
       roles.push({
         role: "evaluator",
         agent: fail.peer,
+        stage: "score",
         state: "failed",
         cause: fail.cause,
         detail: fail.detail,
+        artifactPath: scoreArtifactPath,
         acceptedByGate: false,
         ts: fail.ts,
       });
@@ -272,6 +295,7 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
       roles.push({
         role: na.stage === "score" ? ("evaluator" as CycleRoleName) : ("peer_reviewer" as CycleRoleName),
         agent: null,
+        stage: na.stage === "score" ? "score" : "review",
         state: "not_available",
         acceptedByGate: false,
         ts: na.ts,
@@ -288,6 +312,7 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
     roles.push({
       role: "attest_gate",
       agent: null,
+      stage: "attest",
       state: attestGateEvent.verdict === "produced" ? "accepted" : "rejected",
       verdict: attestGateEvent.verdict,
       detail: attestGateEvent.reasons?.join("; "),
@@ -326,7 +351,7 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
     cycleId,
     storyId: storyId || "unknown",
     executionProfile,
-    generatedAt: new Date().toISOString(),
+    generatedAt: generatedAtFromEvents(cycleEvents),
     builderSessionId,
     roles,
     gates: {
@@ -420,26 +445,6 @@ export function renderCycleRoleSummaryMarkdown(summary: CycleRoleSummary): strin
   return lines.join("\n");
 }
 
-// ── Artifact writer ──────────────────────────────────────────────────────────
-
-/**
- * Write summary.md and summary.json to the output directory.
- * Creates the directory if it doesn't exist.
- */
-export function writeCycleRoleSummaryArtifacts(summary: CycleRoleSummary, outDir: string): void {
-  if (!existsSync(outDir)) {
-    mkdirSync(outDir, { recursive: true });
-  }
-
-  // Write JSON
-  const jsonPath = `${outDir}/summary.json`;
-  writeFileSync(jsonPath, JSON.stringify(summary, null, 2), "utf-8");
-
-  // Write Markdown
-  const mdPath = `${outDir}/summary.md`;
-  writeFileSync(mdPath, renderCycleRoleSummaryMarkdown(summary), "utf-8");
-}
-
 // ── Terminal rendering ───────────────────────────────────────────────────────
 
 /**
@@ -472,4 +477,27 @@ function groupBy<T, K extends string | number | symbol>(
     }
   }
   return map;
+}
+
+function isPeerReviewStage(stage: string | undefined): boolean {
+  return stage === undefined || stage === "review" || stage === "code";
+}
+
+function artifactPath(peerDir: string, cycleId: string, kind: "review" | "score"): string | undefined {
+  if (!peerDir) return undefined;
+  const suffix = kind === "score" ? ".score.pair.json" : ".pair.json";
+  return `${peerDir}/cycle-${cycleId}${suffix}`;
+}
+
+function addSource(sources: string[], path: string | undefined): void {
+  if (!path) return;
+  if (sources.includes(path)) return;
+  sources.push(path);
+}
+
+function generatedAtFromEvents(events: readonly RollEvent[]): string {
+  const maxTs = events.reduce((latest, event) => {
+    return Number.isFinite(event.ts) && event.ts > latest ? event.ts : latest;
+  }, 0);
+  return new Date(maxTs).toISOString();
 }

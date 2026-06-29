@@ -7,11 +7,11 @@
  * for the completed cycle, and writes the artifacts to
  * `.roll/loop/cycle-logs/<cycleId>/`.
  */
-import { existsSync, readFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { parseEventLine, type RollEvent } from "@roll/spec";
 import {
   buildCycleRoleSummary,
-  writeCycleRoleSummaryArtifacts,
+  renderCycleRoleSummaryMarkdown,
   type BuildCycleRoleSummaryInput,
 } from "@roll/core";
 
@@ -54,6 +54,7 @@ export function writeCycleRoleSummaryBestEffort(
     const input: BuildCycleRoleSummaryInput = {
       cycleId,
       events,
+      eventsPath,
       peerDir: cycleLogDir.replace("/cycle-logs", "/peer"),
       cycleLogDir,
     };
@@ -61,7 +62,8 @@ export function writeCycleRoleSummaryBestEffort(
     const summary = buildCycleRoleSummary(input);
 
     // Write artifacts
-    writeCycleRoleSummaryArtifacts(summary, outDir);
+    writeFileSync(`${outDir}/summary.json`, JSON.stringify(summary, null, 2), "utf-8");
+    writeFileSync(`${outDir}/summary.md`, renderCycleRoleSummaryMarkdown(summary), "utf-8");
   } catch {
     // Best-effort — never disrupt the cycle terminal
   }

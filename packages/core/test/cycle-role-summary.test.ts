@@ -133,6 +133,7 @@ const fixtureEvents: RollEvent[] = [
 const fixtureInput: BuildCycleRoleSummaryInput = {
   cycleId: CYCLE_ID,
   events: fixtureEvents,
+  eventsPath: ".roll/loop/events.ndjson",
   peerDir: ".roll/loop/peer",
   cycleLogDir: ".roll/loop/cycle-logs",
 };
@@ -198,6 +199,74 @@ describe("cycle-role-summary", () => {
       expect(summary.gates.peerGate).toBe("consulted");
       expect(summary.gates.attestGate).toBe("produced");
       expect(summary.gates.delivery).toBe("delivered");
+    });
+
+    it("uses event facts for byte-stable generatedAt and sources", () => {
+      const first = buildCycleRoleSummary(fixtureInput);
+      const second = buildCycleRoleSummary(fixtureInput);
+
+      expect(first.generatedAt).toBe("1970-01-01T00:00:01.600Z");
+      expect(JSON.stringify(first)).toBe(JSON.stringify(second));
+      expect(first.sources).toEqual([
+        ".roll/loop/events.ndjson",
+        ".roll/loop/cycle-logs",
+        ".roll/loop/cycle-logs/20260629-112437-39253.agent.log",
+        ".roll/loop/peer/cycle-20260629-112437-39253.pair.json",
+        ".roll/loop/peer/cycle-20260629-112437-39253.score.pair.json",
+      ]);
+    });
+
+    it("maps current code-stage peer review events to Peer Reviewer", () => {
+      const codeStageEvents: RollEvent[] = [
+        {
+          type: "cycle:start",
+          cycleId: "CODE-STAGE",
+          storyId: "US-CODE-STAGE",
+          agent: "reasonix",
+          model: "deepseek-flash",
+          ts: 100,
+        },
+        {
+          type: "pair:selected",
+          cycleId: "CODE-STAGE",
+          workingAgent: "reasonix",
+          peer: "codex",
+          stage: "code",
+          ts: 200,
+        },
+        {
+          type: "pair:verdict",
+          cycleId: "CODE-STAGE",
+          peer: "codex",
+          verdict: "refine",
+          findings: 1,
+          cost: 0,
+          stage: "code",
+          ts: 300,
+        },
+        {
+          type: "peer:gate",
+          cycleId: "CODE-STAGE",
+          verdict: "consulted",
+          reasons: ["code peer returned"],
+          ts: 400,
+        },
+      ];
+
+      const summary = buildCycleRoleSummary({
+        cycleId: "CODE-STAGE",
+        events: codeStageEvents,
+        eventsPath: ".roll/loop/events.ndjson",
+        peerDir: ".roll/loop/peer",
+        cycleLogDir: ".roll/loop/cycle-logs",
+      });
+
+      const reviewer = summary.roles.find((r) => r.role === "peer_reviewer" && r.agent === "codex");
+      expect(reviewer).toBeDefined();
+      expect(reviewer!.state).toBe("accepted");
+      expect(reviewer!.stage).toBe("review");
+      expect(reviewer!.artifactPath).toBe(".roll/loop/peer/cycle-CODE-STAGE.pair.json");
+      expect(summary.sources).toContain(".roll/loop/peer/cycle-CODE-STAGE.pair.json");
     });
 
     it("selects only events for the targeted cycle", () => {

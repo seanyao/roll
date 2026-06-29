@@ -92,6 +92,7 @@ describe("roll design", () => {
     expect(code).toBe(0);
     expect(out.data).toContain("Usage: roll design");
     expect(out.data).toContain("--from-file <path>");
+    expect(out.data).toContain("\"<requirement>\"");
     expect(out.data).toContain("ROLL_DESIGN_AGENT");
   });
 

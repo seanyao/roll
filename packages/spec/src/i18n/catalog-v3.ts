@@ -275,8 +275,8 @@ export const v3Catalog: Catalog = {
   // `design.*` — explicit `roll design` entry point (US-ONBOARD-NUDGE-004).
   // Thin wrapper that launches the existing $roll-design skill interactively.
   "design.usage": {
-    en: "Usage: roll design [--from-file <path>] [--agent <name>]\n  Launch the $roll-design skill in an interactive agent conversation.\n  `--from-file` binds a PRD/brief file as the design input.\n  `--agent` and `ROLL_DESIGN_AGENT` override only this design session; scoped roles live in ~/.roll/agents.yaml and .roll/agents.yaml.\n  Unlike `roll init`, this command runs an LLM — run it only when you want to design.",
-    zh: "用法：roll design [--from-file <path>] [--agent <name>]\n  在交互式 agent 对话中启动 $roll-design skill。\n  `--from-file` 会把 PRD/brief 文件绑定为设计输入。\n  `--agent` 与 `ROLL_DESIGN_AGENT` 只覆盖本次 design session；scoped roles 位于 ~/.roll/agents.yaml 和 .roll/agents.yaml。\n  与 `roll init` 不同，本命令会运行 LLM——只在需要设计时执行。",
+    en: "Usage: roll design [--from-file <path> | \"<requirement>\"] [--agent <name>]\n  Launch the $roll-design skill in an interactive agent conversation.\n  `--from-file` binds a PRD/brief file as the design input.\n  `\"<requirement>\"` binds a free-text design target; it cannot be combined with `--from-file`.\n  `--agent` and `ROLL_DESIGN_AGENT` override only this design session; scoped roles live in ~/.roll/agents.yaml and .roll/agents.yaml.\n  Unlike `roll init`, this command runs an LLM — run it only when you want to design.",
+    zh: "用法：roll design [--from-file <path> | \"<requirement>\"] [--agent <name>]\n  在交互式 agent 对话中启动 $roll-design skill。\n  `--from-file` 会把 PRD/brief 文件绑定为设计输入。\n  `\"<requirement>\"` 会绑定自由文本设计目标；不能与 `--from-file` 混用。\n  `--agent` 与 `ROLL_DESIGN_AGENT` 只覆盖本次 design session；scoped roles 位于 ~/.roll/agents.yaml 和 .roll/agents.yaml。\n  与 `roll init` 不同，本命令会运行 LLM——只在需要设计时执行。",
   },
   "design.not_roll_project": {
     en: "This directory is not a Roll project (no .roll/). Run `roll init` first.",

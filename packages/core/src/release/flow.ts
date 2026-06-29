@@ -21,6 +21,23 @@ export interface ChangelogFold {
 }
 
 /**
+ * Returns true when the changelog contains releasable notes for this release:
+ * either a pre-written `## v<version>` section or an `## Unreleased` section
+ * with at least one bullet. Pure function, no I/O.
+ */
+export function isChangelogReady(text: string, version?: string): boolean {
+  const pre = version !== undefined ? findVersionHeading(text, version) : null;
+  if (pre !== null) {
+    const body = sectionBody(text, pre.index + pre[0].length);
+    return hasBullet(body);
+  }
+  const idx = text.indexOf("## Unreleased");
+  if (idx === -1) return false;
+  const body = sectionBody(text, idx + "## Unreleased".length);
+  return hasBullet(body);
+}
+
+/**
  * Fold `## Unreleased` into `## v<version> — <date>`. Fail-loud contract: an
  * absent Unreleased section or one without a single bullet returns null — an
  * empty changelog must abort the release before anything mutates.
@@ -29,7 +46,7 @@ export interface ChangelogFold {
  */
 export function foldUnreleased(text: string, version: string, dateStr: string): ChangelogFold | null {
   const heading = `## v${version} — ${dateStr}`;
-  const pre = new RegExp(`^## v${version.replace(/\./g, "\\.")}\\b.*$`, "m").exec(text);
+  const pre = findVersionHeading(text, version);
   if (pre !== null) {
     const body = sectionBody(text, pre.index + pre[0].length);
     return hasBullet(body) ? { text, notes: body.trim() } : null;
@@ -55,6 +72,14 @@ function sectionBody(text: string, from: number): string {
 
 function hasBullet(s: string): boolean {
   return /^\s*-\s+\S/m.test(s);
+}
+
+function findVersionHeading(text: string, version: string): RegExpExecArray | null {
+  return new RegExp(`^## v${escapeRegex(version)}\\b.*$`, "m").exec(text);
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**

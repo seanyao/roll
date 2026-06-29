@@ -1,6 +1,6 @@
 /** US-REL-007 — foldUnreleased: deterministic, fail-loud changelog folding. */
 import { describe, expect, it } from "vitest";
-import { RELEASE_STEPS, foldUnreleased } from "../src/release/flow.js";
+import { RELEASE_STEPS, foldUnreleased, isChangelogReady } from "../src/release/flow.js";
 
 const CL = `# Changelog
 
@@ -45,6 +45,50 @@ describe("foldUnreleased", () => {
     const r = foldUnreleased(pre, "9.9.9", "2026-06-13")!;
     expect(r.text).toBe(pre);
     expect(r.notes).toContain("prewritten");
+  });
+});
+
+describe("isChangelogReady — FIX-1030: shared changelog readiness predicate", () => {
+  it("returns true when Unreleased has bullets", () => {
+    expect(isChangelogReady("# C\n\n## Unreleased\n\n- fix one\n")).toBe(true);
+    expect(isChangelogReady("# C\n\n## Unreleased\n\n### 新功能\n\n- feature one\n\n## v1 — d\n\n- old\n")).toBe(true);
+  });
+
+  it("returns true when the target version section is already pre-written", () => {
+    const pre = "# C\n\n## v2.0.0 — 2026-06-29\n\n- prewritten\n\n## v1 — d\n\n- old\n";
+    expect(isChangelogReady(pre, "2.0.0")).toBe(true);
+  });
+
+  it("ignores pre-written sections for a different target version", () => {
+    const pre = "# C\n\n## v1.9.9 — 2026-06-28\n\n- previous\n";
+    expect(isChangelogReady(pre, "2.0.0")).toBe(false);
+  });
+
+  it("returns false when Unreleased is empty (no bullets)", () => {
+    expect(isChangelogReady("# C\n\n## Unreleased\n\n## v1 — d\n\n- old\n")).toBe(false);
+  });
+
+  it("returns false when Unreleased section is absent", () => {
+    expect(isChangelogReady("# C\n\n## v1 — d\n\n- old\n")).toBe(false);
+    expect(isChangelogReady("")).toBe(false);
+  });
+
+  it("returns false when Unreleased has only whitespace", () => {
+    expect(isChangelogReady("# C\n\n## Unreleased\n  \n")).toBe(false);
+  });
+
+  it("matches foldUnreleased's own detection — same input produces same verdict", () => {
+    const withBullets = "# C\n\n## Unreleased\n\n- release ready\n\n## v1 — d\n\n- old\n";
+    expect(isChangelogReady(withBullets)).toBe(true);
+    expect(foldUnreleased(withBullets, "2.0.0", "2026-06-29")).not.toBeNull();
+
+    const emptyUnreleased = "# C\n\n## Unreleased\n\n## v1 — d\n\n- old\n";
+    expect(isChangelogReady(emptyUnreleased)).toBe(false);
+    expect(foldUnreleased(emptyUnreleased, "2.0.0", "2026-06-29")).toBeNull();
+
+    const alreadyFolded = "# C\n\n## v2.0.0 — 2026-06-29\n\n- prewritten\n\n## v1 — d\n\n- old\n";
+    expect(isChangelogReady(alreadyFolded, "2.0.0")).toBe(true);
+    expect(foldUnreleased(alreadyFolded, "2.0.0", "2026-06-29")).not.toBeNull();
   });
 });
 

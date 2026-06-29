@@ -32,7 +32,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { EventBus, EVENTS_FILE, foldUnreleased, planRelease, type ReleaseDate, type ReleaseStep } from "@roll/core";
+import { EventBus, EVENTS_FILE, foldUnreleased, isChangelogReady, planRelease, type ReleaseDate, type ReleaseStep } from "@roll/core";
 import { isTransientGhError } from "@roll/infra";
 import { type Lang, resolveLang, t, v2Catalog, v3Catalog } from "@roll/spec";
 import { c, renderState } from "../render.js";
@@ -717,10 +717,19 @@ export async function releaseCommand(args: string[], depsOverride?: ReleaseFlowD
 
   if (args.includes("--json")) {
     const d = deps.now();
+    const date = { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate() };
+    const currentVersion = deps.version(cwd);
+    let changelogText: string | undefined;
+    try {
+      changelogText = deps.readChangelog(cwd);
+    } catch {
+      // Unreadable changelog reports changelogReady: false.
+    }
+    const next = planRelease({ currentVersion, date, changelogReady: false });
     const plan = planRelease({
-      currentVersion: deps.version(cwd),
-      date: { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate() },
-      changelogReady: true,
+      currentVersion,
+      date,
+      changelogReady: changelogText !== undefined ? isChangelogReady(changelogText, next.nextVersion) : false,
     });
     process.stdout.write(`${JSON.stringify(plan)}\n`);
     return 0;

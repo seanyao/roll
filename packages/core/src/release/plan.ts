@@ -65,7 +65,7 @@ export function computeNextVersion(current: string, date: ReleaseDate): string {
 export interface ReleasePlanInput {
   currentVersion: string;
   date: ReleaseDate;
-  /** True when CHANGELOG.md has releasable content under `## Unreleased`. */
+  /** True when CHANGELOG.md has releasable notes for the planned release. */
   changelogReady: boolean;
 }
 

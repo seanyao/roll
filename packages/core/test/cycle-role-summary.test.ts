@@ -299,6 +299,81 @@ describe("cycle-role-summary", () => {
       expect(emptySummary.gates.attestGate).toBeUndefined();
       expect(emptySummary.storyId).toBe("unknown");
     });
+
+    it("keeps both a failed score attempt and the later accepted retry", () => {
+      const retryEvents: RollEvent[] = [
+        {
+          type: "cycle:start",
+          cycleId: "SCORE-RETRY",
+          storyId: "US-SCORE-RETRY",
+          agent: "claude",
+          model: "opus-4",
+          ts: 100,
+        },
+        {
+          type: "pair:selected",
+          cycleId: "SCORE-RETRY",
+          workingAgent: "claude",
+          peer: "pi",
+          stage: "score",
+          ts: 200,
+        },
+        {
+          type: "pair:score-failure",
+          cycleId: "SCORE-RETRY",
+          peer: "pi",
+          cause: "unparseable",
+          detail: "missing SCORE line",
+          stage: "score",
+          ts: 300,
+        },
+        {
+          type: "pair:selected",
+          cycleId: "SCORE-RETRY",
+          workingAgent: "claude",
+          peer: "pi",
+          stage: "score",
+          ts: 400,
+        },
+        {
+          type: "pair:score",
+          cycleId: "SCORE-RETRY",
+          peer: "pi",
+          score: 8,
+          verdict: "good",
+          cost: 0.03,
+          stage: "score",
+          ts: 500,
+        },
+        {
+          type: "attest:gate",
+          cycleId: "SCORE-RETRY",
+          verdict: "produced",
+          reasons: ["review-score good 8/10 present"],
+          ts: 600,
+        },
+      ];
+
+      const summary = buildCycleRoleSummary({
+        cycleId: "SCORE-RETRY",
+        events: retryEvents,
+        peerDir: ".roll/loop/peer",
+        cycleLogDir: ".roll/loop/cycle-logs",
+      });
+
+      const piAttempts = summary.roles.filter((r) => r.role === "evaluator" && r.agent === "pi");
+      expect(piAttempts).toHaveLength(2);
+      expect(piAttempts[0]).toMatchObject({
+        state: "failed",
+        cause: "unparseable",
+      });
+      expect(piAttempts[1]).toMatchObject({
+        state: "accepted",
+        score: 8,
+        verdict: "good",
+        acceptedByGate: true,
+      });
+    });
   });
 
   describe("renderCycleRoleSummaryMarkdown", () => {
@@ -358,8 +433,16 @@ describe("cycle-role-summary", () => {
         cycleLogDir: "",
       });
       expect(summary.storyId).toBe("US-NO-PAIR");
-      // Only builder and attest_gate
-      expect(summary.roles.length).toBeLessThanOrEqual(2);
+      expect(summary.roles).toContainEqual(expect.objectContaining({
+        role: "peer_reviewer",
+        agent: null,
+        state: "not_required",
+      }));
+      expect(summary.roles).toContainEqual(expect.objectContaining({
+        role: "evaluator",
+        agent: null,
+        state: "not_required",
+      }));
     });
 
     it("handles agent blocked events", () => {

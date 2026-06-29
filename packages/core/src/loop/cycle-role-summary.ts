@@ -209,53 +209,35 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
   for (const sel of selectedScorers) {
     const peer = sel.peer;
     addSource(sources, scoreArtifactPath);
-    const score = scores.find((s) => s.peer === peer);
-    const failure = scoreFailures.find((f) => f.peer === peer);
-    const block = blocks.find((b) => b.agent === peer && b.stage === "score");
+    const nextSelectionTs = selectedScorers.find((candidate) => candidate.peer === peer && candidate.ts > sel.ts)?.ts ?? Number.POSITIVE_INFINITY;
+    const attemptEvents = [
+      ...blocks
+        .filter((b) => b.agent === peer && b.stage === "score" && b.ts >= sel.ts && b.ts < nextSelectionTs)
+        .map((block) => ({
+          kind: "block" as const,
+          ts: block.ts,
+          cause: block.cause,
+          detail: block.detail,
+        })),
+      ...scoreFailures
+        .filter((f) => f.peer === peer && f.ts >= sel.ts && f.ts < nextSelectionTs)
+        .map((failure) => ({
+          kind: "failure" as const,
+          ts: failure.ts,
+          cause: failure.cause,
+          detail: failure.detail,
+        })),
+      ...scores
+        .filter((s) => s.peer === peer && s.ts >= sel.ts && s.ts < nextSelectionTs)
+        .map((score) => ({
+          kind: "score" as const,
+          ts: score.ts,
+          score: score.score,
+          verdict: score.verdict,
+        })),
+    ].sort((a, b) => a.ts - b.ts);
 
-    if (block) {
-      roles.push({
-        role: "evaluator",
-        agent: peer,
-        stage: "score",
-        state: "failed",
-        cause: block.cause,
-        detail: block.detail,
-        artifactPath: scoreArtifactPath,
-        acceptedByGate: false,
-        ts: block.ts,
-      });
-    } else if (failure) {
-      roles.push({
-        role: "evaluator",
-        agent: peer,
-        stage: "score",
-        state: "failed",
-        cause: failure.cause,
-        detail: failure.detail,
-        artifactPath: scoreArtifactPath,
-        acceptedByGate: false,
-        ts: failure.ts,
-      });
-    } else if (score) {
-      // Accepted score — check attest gate
-      const attestGate = cycleEvents.find((e) => e.type === "attest:gate") as
-        | { type: "attest:gate"; cycleId: string; verdict: string }
-        | undefined;
-      const acceptedByGate = attestGate !== undefined && attestGate.verdict === "produced";
-      roles.push({
-        role: "evaluator",
-        agent: peer,
-        stage: "score",
-        state: "accepted",
-        score: score.score,
-        verdict: score.verdict,
-        artifactPath: scoreArtifactPath,
-        acceptedByGate,
-        ts: score.ts,
-      });
-    } else {
-      // Selected, no score returned yet
+    if (attemptEvents.length === 0) {
       roles.push({
         role: "evaluator",
         agent: peer,
@@ -265,6 +247,39 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
         acceptedByGate: false,
         ts: sel.ts,
       });
+      continue;
+    }
+
+    for (const event of attemptEvents) {
+      if (event.kind === "score") {
+        const attestGate = cycleEvents.find((e) => e.type === "attest:gate") as
+          | { type: "attest:gate"; cycleId: string; verdict: string }
+          | undefined;
+        const acceptedByGate = attestGate !== undefined && attestGate.verdict === "produced";
+        roles.push({
+          role: "evaluator",
+          agent: peer,
+          stage: "score",
+          state: "accepted",
+          score: event.score,
+          verdict: event.verdict,
+          artifactPath: scoreArtifactPath,
+          acceptedByGate,
+          ts: event.ts,
+        });
+      } else {
+        roles.push({
+          role: "evaluator",
+          agent: peer,
+          stage: "score",
+          state: "failed",
+          cause: event.cause,
+          detail: event.detail,
+          artifactPath: scoreArtifactPath,
+          acceptedByGate: false,
+          ts: event.ts,
+        });
+      }
     }
   }
 
@@ -301,6 +316,28 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
         ts: na.ts,
       });
     }
+  }
+
+  if (startEvent && !roles.some((r) => r.role === "peer_reviewer")) {
+    roles.push({
+      role: "peer_reviewer",
+      agent: null,
+      stage: "review",
+      state: "not_required",
+      acceptedByGate: false,
+      ts: startEvent?.ts ?? 0,
+    });
+  }
+
+  if (startEvent && !roles.some((r) => r.role === "evaluator")) {
+    roles.push({
+      role: "evaluator",
+      agent: null,
+      stage: "score",
+      state: executionProfile === "standard" ? "not_required" : "not_available",
+      acceptedByGate: false,
+      ts: startEvent?.ts ?? 0,
+    });
   }
 
   // Attest Gate — only add if an actual attest:gate event exists

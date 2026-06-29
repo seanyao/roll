@@ -46,6 +46,33 @@ describe("classifyBlockSignature — FIX-363 cause heuristics", () => {
     expect(classifyBlockSignature("鉴权失败")).toBe("auth");
     expect(classifyBlockSignature("认证失败")).toBe("auth");
   });
+
+  // FIX-1033: bare 403/401 in non-auth context must not trigger auth classification
+  it("incidental bare 403/401 strings (card IDs, test names, PR numbers) → null", () => {
+    expect(classifyBlockSignature("FIX-403: realAgentSpawn injects agent-profile env")).toBeNull();
+    expect(classifyBlockSignature("US-403")).toBeNull();
+    expect(classifyBlockSignature("PR #403")).toBeNull();
+    expect(classifyBlockSignature("test 403 regression")).toBeNull();
+    expect(classifyBlockSignature("US-401")).toBeNull();
+    expect(classifyBlockSignature("issue 401 is a known http code")).toBeNull();
+  });
+
+  // FIX-1033: real 403/401 in HTTP/auth context still returns auth
+  it("real 403/401 in HTTP/auth context still returns auth", () => {
+    expect(classifyBlockSignature("API Error: 403 Request not allowed")).toBe("auth");
+    expect(classifyBlockSignature("HTTP 403 Unauthorized")).toBe("auth");
+    expect(classifyBlockSignature("403 Please run /login")).toBe("auth");
+    expect(classifyBlockSignature("403 Forbidden")).toBe("auth");
+    expect(classifyBlockSignature("HTTP 401 Unauthorized")).toBe("auth");
+    expect(classifyBlockSignature("API Error: 401 token expired")).toBe("auth");
+    expect(classifyBlockSignature("401 Unauthorized")).toBe("auth");
+  });
+
+  // FIX-1033: auth still wins over network when both 403 and proxy appear
+  it("auth still wins over network when both 403 proxy appear", () => {
+    expect(classifyBlockSignature("403 via proxy")).toBe("auth");
+    expect(classifyBlockSignature("HTTP 403 connection reset via proxy")).toBe("auth");
+  });
 });
 
 describe("probeAgentReachable — FIX-363 failure-path disambiguator", () => {

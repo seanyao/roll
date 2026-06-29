@@ -14,7 +14,7 @@
  */
 import { EventBus, assessBacklog, cycleEndEvent, firstInstalledAgent, mapV2Status, markStatus, parseBacklog, parsePolicy, readSlotFromText, shouldResize, shouldSuppressDormancy, type AgentSlot, type BacklogItem, type RouteDeps, type RouteSlot } from "@roll/core";
 import { STATUS_MARKER, absent, buildTerminalEvent, deriveOrphanVerdict, present, type BacklogReason } from "@roll/spec";
-import { createScheduler, launchdLabel, projectIdentity, readLockOwner, releaseLock } from "@roll/infra";
+import { createScheduler, isOwnerHeld, launchdLabel, projectIdentity, readLockOwner, releaseLock } from "@roll/infra";
 import { dormantMarkerPath, resolveLoopRunState, writeDormantMarker } from "./loop-sched.js";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -243,6 +243,7 @@ function runtimeDir(projectPath: string): string {
 // ── FIX-216b: consecutive-failure auto-PAUSE ──────────────────────────────────
 
 const PAUSE_THRESHOLD = 3;
+const GO_LOCK_STALE_SEC = 21_600;
 
 // FIX-363 (loop resilience): after this many failures of the SAME card, skip-list
 // the poison pill (the picker skips it) + reset the global counter so the loop
@@ -754,6 +755,22 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     worktreePath: join(rt, "worktrees", `cycle-${cycleId}`),
   };
 
+  const allowedCards = parseAllowedCardsEnv();
+  if (allowedCards === undefined) {
+    const goLockOwner = readLockOwner(join(rt, "go.lock"));
+    if (isOwnerHeld(goLockOwner, Math.floor(Date.now() / 1000), GO_LOCK_STALE_SEC)) {
+      const ts = Math.floor(Date.now() / 1000);
+      new EventBus().appendEvent(paths.eventsPath, {
+        type: "goal:tick_skipped",
+        reason: "go_session_lock",
+        ...(goLockOwner?.pid !== undefined ? { heldByPid: goLockOwner.pid } : {}),
+        ts,
+      });
+      process.stdout.write(`loop run-once: go session already active (pid ${goLockOwner?.pid ?? "?"}); skipped\n`);
+      return 0;
+    }
+  }
+
   // FIX-1019: if a prior goal session (or the user) paused the loop, launchd
   // ticks must ALSO respect the PAUSE marker. Exit 0 so cron does not retry.
   if (isLoopPaused(id.path, id.slug)) {
@@ -870,7 +887,6 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
         }
       : {}),
   });
-  const allowedCards = parseAllowedCardsEnv();
   const ports =
     allowedCards === undefined
       ? basePorts

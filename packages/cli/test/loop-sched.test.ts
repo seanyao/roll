@@ -352,6 +352,31 @@ describe("v3 loop runner — EXECUTION in a sandbox (the contract that matters)"
     expect(events).toContain('"reason":"go_session_lock"');
   });
 
+  it("FIX-1040: directory go.lock from loop go also makes scheduled ticks yield", () => {
+    const proj = tmp("go-lock-dir");
+    const lockDir = join(proj, ".roll", "loop", "go.lock");
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(
+      join(lockDir, "meta.json"),
+      `${JSON.stringify({
+        pid: process.pid,
+        hostname: "",
+        startedAt: Math.floor(Date.now() / 1000),
+        cycleId: "goal-20260629151450-69149",
+      })}\n`,
+    );
+
+    const { status, argvLog } = runScript(proj, "s1", "12");
+
+    expect(status).toBe(0);
+    expect(existsSync(argvLog)).toBe(false);
+    const events = readFileSync(join(proj, ".roll", "loop", "events.ndjson"), "utf8");
+    expect(events).toContain('"type":"goal:tick_skipped"');
+    expect(events).toContain('"reason":"go_session_lock"');
+    const log = readFileSync(join(proj, ".roll", "loop", "cron.log"), "utf8");
+    expect(log).toContain("goal go session lock held by pid");
+  });
+
   // ─── FIX-393: cycle inflight lock execution tests ─────────────────────────
 
   it("FIX-393 AC1: live cycle-inflight.lock → tick yields with event, no run-once", () => {

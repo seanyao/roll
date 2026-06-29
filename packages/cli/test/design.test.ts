@@ -328,4 +328,17 @@ describe("roll design", () => {
     expect(d.calls).toHaveLength(1);
     expect(d.calls[0]?.args[0]).toContain("Design requirement: build a login system");
   });
+
+  it("--from-file and positional requirement text are mutually exclusive", () => {
+    const proj = freshProj();
+    dirs.push(proj);
+    const req = join(proj, "req.md");
+    writeFileSync(req, "# Requirement\n", "utf8");
+    makeAgent(bin, "claude");
+    writeConfig(home, "lang: en\nai_claude: ~/.claude\n");
+    const d = makeDeps(proj, bin);
+    const code = designCommand(["--from-file", "req.md", "extra target"], d);
+    expect(code).toBe(1);
+    expect(d.calls).toHaveLength(0);
+  });
 });

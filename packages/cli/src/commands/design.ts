@@ -195,6 +195,10 @@ export function designCommand(args: string[], deps: Partial<DesignCommandDeps> =
     process.stderr.write(`${t(v3Catalog, l, "design.usage")}\n`);
     return 1;
   }
+  if (fromFile !== undefined && rest.length > 0) {
+    process.stderr.write(`${t(v3Catalog, l, "design.usage")}\n`);
+    return 1;
+  }
 
   if (!isRollProject(d.cwd)) {
     emit(t(v3Catalog, l, "design.not_roll_project"));

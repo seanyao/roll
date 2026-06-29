@@ -509,8 +509,8 @@ describe("US-OBS-034 — Execution Cast in attest report", () => {
       builderSessionId: "ses-001",
       roles: [
         { role: "builder" as const, agent: "pi", model: "claude-4", state: "accepted" as const, acceptedByGate: false, ts: 1000, logPath: "logs/pi.log" },
-        { role: "peer_reviewer" as const, agent: "reasonix", state: "accepted" as const, verdict: "refine", findings: 2, acceptedByGate: true, ts: 1200 },
-        { role: "evaluator" as const, agent: "deepseek", state: "accepted" as const, score: 8, verdict: "ok", acceptedByGate: true, ts: 1400 },
+        { role: "peer_reviewer" as const, agent: "reasonix", state: "accepted" as const, verdict: "refine", findings: 2, artifactPath: "/tmp/peer/cycle-001.pair.json", acceptedByGate: true, ts: 1200 },
+        { role: "evaluator" as const, agent: "deepseek", state: "accepted" as const, score: 8, verdict: "ok", artifactPath: "/tmp/peer/cycle-001.score.pair.json", acceptedByGate: true, ts: 1400 },
         { role: "attest_gate" as const, agent: null, state: "accepted" as const, verdict: "produced", acceptedByGate: false, ts: 1500 },
       ],
       gates: { peerGate: "consulted", attestGate: "produced", delivery: "PR #1 merged" },
@@ -521,7 +521,13 @@ describe("US-OBS-034 — Execution Cast in attest report", () => {
       items: [item({ evidence: [{ kind: "test-pass", label: "suite green" }] })],
       cycleRoleSummary: summary,
       cycleRoleSummaryHref: "summary.json",
+      cycleRoleArtifactHrefs: {
+        "logs/pi.log": "logs/pi.log",
+        "/tmp/peer/cycle-001.pair.json": "peer/cycle-001.pair.json",
+        "/tmp/peer/cycle-001.score.pair.json": "peer/cycle-001.score.pair.json",
+      },
     });
+    expect(html).toContain('id="execution-cast"');
     expect(html).toContain("Execution Cast");
     expect(html).toContain("执行阵容");
     expect(html).toContain("pi");          // builder agent
@@ -529,6 +535,10 @@ describe("US-OBS-034 — Execution Cast in attest report", () => {
     expect(html).toContain("deepseek");    // evaluator
     expect(html).toContain("produced");    // attest gate verdict
     expect(html).toContain("summary.json"); // artifact link
+    expect(html).toContain("summary.md"); // markdown artifact link
+    expect(html).toContain("accepted peer artifact");
+    expect(html).toContain("accepted evaluator artifact");
+    expect(html).toContain("peer/cycle-001.pair.json");
     expect(html).toContain("cycle-001");
   });
 
@@ -566,5 +576,32 @@ describe("US-OBS-034 — Execution Cast in attest report", () => {
     expect(html).toContain("agent-a");
     expect(html).toContain("agent-b");
     expect(html).toContain("score parsing error");
+  });
+
+  it("escapes Execution Cast dynamic fields", () => {
+    const summary = {
+      schema: "cycle-role-summary.v1" as const,
+      cycleId: "cycle-003",
+      storyId: "US-X-003",
+      executionProfile: "verified" as const,
+      generatedAt: "2026-06-29T12:00:00Z",
+      roles: [
+        { role: "builder" as const, agent: "pi<script>alert(1)</script>", model: "model<img>", state: "accepted" as const, acceptedByGate: false, ts: 1000 },
+        { role: "evaluator" as const, agent: "scorebot", state: "failed" as const, cause: "bad <score>", acceptedByGate: false, ts: 1300 },
+      ],
+      gates: { attestGate: "produced<script>" },
+      sources: [],
+    };
+    const html = renderReport({
+      ...BASE,
+      items: [item({ evidence: [{ kind: "test-pass", label: "suite green" }] })],
+      cycleRoleSummary: summary,
+    });
+    expect(html).not.toContain("pi<script>alert(1)</script>");
+    expect(html).not.toContain("model<img>");
+    expect(html).not.toContain("bad <score>");
+    expect(html).toContain("pi&lt;script&gt;alert(1)&lt;/script&gt;");
+    expect(html).toContain("model&lt;img&gt;");
+    expect(html).toContain("bad &lt;score&gt;");
   });
 });

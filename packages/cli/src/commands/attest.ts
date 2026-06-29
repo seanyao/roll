@@ -28,6 +28,7 @@ import {
   parseBacklog,
   renderReport,
   ansiPre,
+  buildExecutionCastProjection,
   boundTranscript,
   EventBus,
   extractCycleSignals,
@@ -1111,12 +1112,17 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   const cycleId = processArchive?.cycleId;
   const cycleRoleSummary = cycleId !== undefined ? readCycleRoleSummary(projectPath, cycleId) : undefined;
   let cycleRoleSummaryHref: string | undefined;
+  let cycleRoleArtifactHrefs: Record<string, string> | undefined;
   if (cycleRoleSummary !== undefined && cycleId !== undefined) {
     try {
       const summaryPath = join(projectPath, '.roll', 'loop', 'cycle-logs', cycleId, 'summary.json');
       cycleRoleSummaryHref = relative(realpathSync(runDir), realpathSync(summaryPath));
     } catch {
       cycleRoleSummaryHref = undefined;
+    }
+    cycleRoleArtifactHrefs = {};
+    for (const link of buildExecutionCastProjection(cycleRoleSummary).artifactLinks) {
+      cycleRoleArtifactHrefs[link.path] = relative(runDir, link.path);
     }
   }
   const html = renderReport({
@@ -1129,7 +1135,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     ...(beforeAfter.length > 0 ? { beforeAfter } : {}),
     ...(afterOnly.length > 0 ? { afterOnly: afterOnly.map((a) => a.shot) } : {}),
     ...(processArchive !== undefined ? { process: processArchive } : {}),
-    ...(cycleRoleSummary !== undefined ? { cycleRoleSummary, cycleRoleSummaryHref } : {}),
+    ...(cycleRoleSummary !== undefined ? { cycleRoleSummary, cycleRoleSummaryHref, cycleRoleArtifactHrefs } : {}),
     ...(docGap !== undefined ? { docGap } : {}),
     ...(reviewScores.length > 0 ? { reviewScores } : {}),
     ...(reviewScoreTrend !== undefined ? { reviewScoreTrend } : {}),

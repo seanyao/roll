@@ -14,11 +14,11 @@
  * `roll index` sweeps. Both wear the same chrome; the dossier is the
  * data-complete form.
  */
-import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
-import { type CycleRoleSummary, type CycleRoleAttempt, type CycleRoleName, type CycleRoleAttemptState, type DeliveryLadder, parseEventLine, type StoryEvidenceFlags } from "@roll/spec";
+import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi, buildExecutionCastProjection, type ExecutionCastRow } from "@roll/core";
+import { type CycleRoleSummary, type CycleRoleName, type CycleRoleAttemptState, type DeliveryLadder, parseEventLine, type StoryEvidenceFlags } from "@roll/spec";
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join as joinPath, resolve as resolvePath, sep } from "node:path";
+import { join as joinPath, relative as relativePath, resolve as resolvePath, sep } from "node:path";
 import { type DossierStory } from "./archive.js";
 import { rowDelivered } from "./truth-adapter.js";
 import { DOSSIER_CSS } from "./dossier-css.js";
@@ -195,6 +195,10 @@ export interface StoryDossierInput {
   screenshotFiles?: string[];
   /** US-OBS-034 — cycle role summary (Execution Cast) for the dossier page. */
   cycleRoleSummary?: CycleRoleSummary;
+  /** Relative href from the story dossier root to `summary.json`. */
+  cycleRoleSummaryHref?: string;
+  /** Hrefs keyed by CycleRoleAttempt artifact/log paths. */
+  cycleRoleArtifactHrefs?: Record<string, string>;
 }
 
 /**
@@ -840,15 +844,13 @@ function acBlocksHtml(rows: readonly AcRow[], screenshotFiles: readonly string[]
 }
 
 /** US-OBS-034 — Execution Cast block for the story dossier page. */
-function dossierExecutionCastBlock(summary: CycleRoleSummary | undefined): string {
+function dossierExecutionCastBlock(
+  summary: CycleRoleSummary | undefined,
+  summaryHref: string | undefined,
+  artifactHrefs: Record<string, string> | undefined,
+): string {
   if (summary === undefined) return "";
-
-  const byRole = new Map<CycleRoleName, CycleRoleAttempt[]>();
-  for (const r of summary.roles) {
-    const lst = byRole.get(r.role) ?? [];
-    lst.push(r);
-    byRole.set(r.role, lst);
-  }
+  const projection = buildExecutionCastProjection(summary);
 
   const stateBadge = (state: CycleRoleAttemptState): string => {
     switch (state) {
@@ -864,7 +866,7 @@ function dossierExecutionCastBlock(summary: CycleRoleSummary | undefined): strin
     }
   };
 
-  const roleLabel = (role: CycleRoleName, state: CycleRoleAttemptState, agent: string | null): string => {
+  const roleLabel = (role: CycleRoleName, state: CycleRoleAttemptState): string => {
     if (role === "builder") return bi("Builder", "构建者");
     if (role === "peer_reviewer") return bi("Peer Reviewer", "同行评审");
     if (role === "evaluator") return state === "accepted" ? bi("Evaluator", "评审员") : bi("Evaluator (failed)", "评审失败");
@@ -873,45 +875,46 @@ function dossierExecutionCastBlock(summary: CycleRoleSummary | undefined): strin
     return role;
   };
 
-  const rows: string[] = [];
-  const makeRow = (role: CycleRoleName, state: CycleRoleAttemptState, agent: string | null, extra: string): string => {
-    const agentHtml = agent !== null ? `<code>${esc(agent)}</code>` : `<span class="text-muted">${bi("none", "无")}</span>`;
-    return `<div class="dc-row"><span class="dc-role">${roleLabel(role, state, agent)}</span>` +
-      `<span class="dc-agent">${agentHtml}${extra !== "" ? ` <span class="text-muted">${extra}</span>` : ""}</span>` +
-      `<span class="dc-state">${stateBadge(state)}</span></div>`;
+  const makeRow = (row: ExecutionCastRow): string => {
+    const agentHtml = row.agent !== null ? `<code>${esc(row.agent)}</code>` : `<span class="text-muted">${bi("none", "无")}</span>`;
+    const extra: string[] = [];
+    if (row.model !== undefined) extra.push(row.model);
+    if (row.score !== undefined) extra.push(`${row.score}/10`);
+    if (row.verdict !== undefined) extra.push(row.verdict);
+    if (row.findings !== undefined) extra.push(`${row.findings} ${bi("findings", "意见")}`);
+    if (row.cause !== undefined) extra.push(row.cause);
+    const extraHtml = extra.length > 0 ? ` <span class="text-muted">${esc(extra.join(" · "))}</span>` : "";
+    return `<div class="dc-row"><span class="dc-role">${roleLabel(row.role, row.state)}</span>` +
+      `<span class="dc-agent">${agentHtml}${extraHtml}</span>` +
+      `<span class="dc-state">${stateBadge(row.state)}</span></div>`;
   };
 
-  // Builder
-  for (const b of (byRole.get("builder") ?? []).filter((r) => r.agent !== null)) {
-    const extra = b.model ? `${b.model}` : "";
-    rows.push(makeRow("builder", b.state, b.agent, extra));
-  }
+  const summaryLinks = summaryHref !== undefined
+    ? `<p class="text-muted cast-footnote">📄 <a href="${esc(summaryHref)}">summary.json</a> · <a href="${esc(summaryHref.replace(/\.json$/, ".md"))}">summary.md</a></p>`
+    : "";
+  const artifactLinks = projection.artifactLinks
+    .map((a) => {
+      const href = artifactHrefs?.[a.path];
+      return href === undefined || href === "" ? "" : `<a href="${esc(href)}">${esc(a.label)}</a>`;
+    })
+    .filter((x) => x !== "")
+    .join(" · ");
+  const artifacts = artifactLinks !== "" ? `<p class="text-muted cast-footnote">🔗 ${artifactLinks}</p>` : "";
 
-  // Peer Reviewers
-  for (const r of (byRole.get("peer_reviewer") ?? [])) {
-    const extra = r.verdict ? `${r.verdict}` : r.cause ? r.cause : "";
-    rows.push(makeRow("peer_reviewer", r.state, r.agent, extra));
-  }
-
-  // Evaluators: accepted first, then failures
-  for (const e of (byRole.get("evaluator") ?? []).filter((r) => r.state === "accepted")) {
-    const extra = e.score !== undefined ? `${e.score}/10 ${e.verdict ?? ""}` : e.verdict ?? "";
-    rows.push(makeRow("evaluator", e.state, e.agent, extra.trim()));
-  }
-  for (const e of (byRole.get("evaluator") ?? []).filter((r) => r.state !== "accepted")) {
-    const extra = e.cause ?? "";
-    rows.push(makeRow("evaluator", e.state, e.agent, extra));
-  }
-
-  // Attest Gate
-  for (const g of (byRole.get("attest_gate") ?? [])) {
-    rows.push(makeRow("attest_gate", g.state, null, g.verdict ?? ""));
-  }
-
-  return `<details class="execution-cast-dossier"><summary>🎭 ${bi("Execution Cast", "执行阵容")} · ${byRole.get("builder")?.[0]?.agent ?? "—"}</summary>
-<div class="dc-grid">${rows.join("")}</div>
+  return `<details id="execution-cast" class="execution-cast-dossier"><summary>🎭 ${bi("Execution Cast", "执行阵容")} · ${esc(projection.builderAgent ?? "—")}</summary>
+<div class="dc-grid">${projection.rows.map(makeRow).join("")}</div>
 <p class="text-muted cast-footnote">${bi("Cycle", "周期")} <code>${esc(summary.cycleId)}</code> · ${esc(summary.executionProfile)}</p>
+${summaryLinks}
+${artifacts}
 </details>`;
+}
+
+function cycleRoleArtifactHrefsFrom(fromDir: string, summary: CycleRoleSummary): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const link of buildExecutionCastProjection(summary).artifactLinks) {
+    out[link.path] = relativePath(fromDir, link.path);
+  }
+  return out;
 }
 
 
@@ -970,7 +973,7 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     hasDeliveryEvidence(d.deliveryEvidence) ||
     hasDynamicEvidence(d.dynamicEvidence);
   const delivery = hasDeliveryBody
-    ? banner + dossierExecutionCastBlock(d.cycleRoleSummary) + deliveryEvidenceHtml(d.deliveryEvidence) + dynamicEvidenceHtml(d.dynamicEvidence) + acBlocks
+    ? banner + dossierExecutionCastBlock(d.cycleRoleSummary, d.cycleRoleSummaryHref, d.cycleRoleArtifactHrefs) + deliveryEvidenceHtml(d.deliveryEvidence) + dynamicEvidenceHtml(d.dynamicEvidence) + acBlocks
     : `<p class="empty">${bi("Not yet delivered", "尚未交付")}</p>`;
   const corrections = correctionTraceHtml(d.correctionActions);
   const retroContent = scoreBlockHtml(d.reviewScore, d.reviewScoreTrend, d.retro);
@@ -1409,24 +1412,38 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
   try {
     const cycleLogsDir = joinPath(projectPath, '.roll', 'loop', 'cycle-logs');
     if (existsSync(cycleLogsDir)) {
+      const candidates: Array<{ summary: CycleRoleSummary; summaryPath: string; cycleName: string; sortKey: number }> = [];
       const cycleDirs = readdirSync(cycleLogsDir, { withFileTypes: true })
         .filter((d) => d.isDirectory());
-      // Scan in reverse (newest first) and break on first match
-      for (let i = cycleDirs.length - 1; i >= 0; i -= 1) {
-        const entry = cycleDirs[i];
-        if (entry === undefined) continue;
+      for (const entry of cycleDirs) {
         const summaryPath = joinPath(cycleLogsDir, entry.name, 'summary.json');
         if (!existsSync(summaryPath)) continue;
         try {
           const raw = readFileSync(summaryPath, 'utf8');
           const summary = JSON.parse(raw) as CycleRoleSummary;
           if (summary.storyId === story.id) {
-            out.cycleRoleSummary = summary;
-            break;
+            const generatedAt = Date.parse(summary.generatedAt);
+            const stat = statSync(summaryPath);
+            candidates.push({
+              summary,
+              summaryPath,
+              cycleName: entry.name,
+              sortKey: Number.isFinite(generatedAt) ? generatedAt : stat.mtimeMs,
+            });
           }
         } catch {
           // unparseable — skip this summary
         }
+      }
+      candidates.sort((a, b) => {
+        if (b.sortKey !== a.sortKey) return b.sortKey - a.sortKey;
+        return b.cycleName.localeCompare(a.cycleName);
+      });
+      const selected = candidates[0];
+      if (selected !== undefined) {
+        out.cycleRoleSummary = selected.summary;
+        out.cycleRoleSummaryHref = relativePath(dir, selected.summaryPath);
+        out.cycleRoleArtifactHrefs = cycleRoleArtifactHrefsFrom(dir, selected.summary);
       }
     }
   } catch {

@@ -4,7 +4,7 @@
  * never implementing a Story or marking one Done.
  */
 import { afterAll, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gatherSupervisorInput, supervisorCommand } from "../src/commands/supervisor.js";
@@ -39,6 +39,45 @@ function run(cwd: string, args: string[]): { code: number; out: string } {
     process.stdout.write = realOut;
   }
   return { code, out: chunks.join("") };
+}
+
+function installFakeGh(cwd: string, opts: { number?: number; headRefName?: string; title?: string; body?: string } = {}): string {
+  const bin = join(cwd, "bin");
+  mkdirSync(bin, { recursive: true });
+  const ghPath = join(bin, "gh");
+  const number = opts.number ?? 42;
+  const headRefName = opts.headRefName ?? "loop/US-1-manual";
+  const title = opts.title ?? "US-1 manual merge";
+  const body = opts.body ?? "delivery\\n\\n[roll:manual-merge]";
+  writeFileSync(
+    ghPath,
+    [
+      "#!/bin/sh",
+      "if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"list\" ]; then",
+      `  printf '%s\\n' '[{"number":${number},"headRefName":"${headRefName}","title":"${title}"}]'`,
+      "  exit 0",
+      "fi",
+      "if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"view\" ]; then",
+      `  printf '%s\\n' '{"body":"${body}","labels":[],"reviews":[{"authorAssociation":"APP","state":"APPROVED"}],"mergeStateStatus":"CLEAN","statusCheckRollup":[{"conclusion":"SUCCESS"}],"isDraft":false}'`,
+      "  exit 0",
+      "fi",
+      "exit 1",
+      "",
+    ].join("\n"),
+  );
+  chmodSync(ghPath, 0o755);
+  return bin;
+}
+
+function withPath<T>(prefix: string, fn: () => T): T {
+  const previous = process.env["PATH"];
+  process.env["PATH"] = `${prefix}:${previous ?? ""}`;
+  try {
+    return fn();
+  } finally {
+    if (previous === undefined) delete process.env["PATH"];
+    else process.env["PATH"] = previous;
+  }
 }
 
 const BACKLOG = `# Backlog
@@ -161,8 +200,15 @@ describe("supervisorCommand", () => {
         JSON.stringify({ type: "pr:merge", prNumber: 1, storyId: "FIX-1", ts: 1 }),
         JSON.stringify({ type: "cycle:start", cycleId: "C1", storyId: "US-1", agent: "reasonix", model: "m", ts: 2 }),
         JSON.stringify({ type: "execution:profile", cycleId: "C1", storyId: "US-1", profile: "verified", reason: "verified: user-visible", ts: 3 }),
-        JSON.stringify({ type: "pair:selected", cycleId: "C1", workingAgent: "reasonix", peer: "codex", stage: "score", ts: 4 }),
-        JSON.stringify({ type: "pair:score", cycleId: "C1", peer: "codex", score: 10, verdict: "good", cost: 0, stage: "score", ts: 5 }),
+        JSON.stringify({ type: "pair:selected", cycleId: "C1", workingAgent: "reasonix", peer: "kimi", stage: "review", ts: 4 }),
+        JSON.stringify({ type: "pair:selected", cycleId: "C1", workingAgent: "reasonix", peer: "codex", stage: "review", ts: 5 }),
+        JSON.stringify({ type: "pair:consult", cycleId: "C1", peer: "kimi", durationMs: 100, outcome: "reviewed", ts: 6 }),
+        JSON.stringify({ type: "pair:verdict", cycleId: "C1", peer: "codex", verdict: "refine", findings: 2, stage: "review", ts: 7 }),
+        JSON.stringify({ type: "peer:gate", cycleId: "C1", verdict: "consulted", reasons: [], ts: 8 }),
+        JSON.stringify({ type: "pair:selected", cycleId: "C1", workingAgent: "reasonix", peer: "pi", stage: "score", ts: 9 }),
+        JSON.stringify({ type: "pair:score-failure", cycleId: "C1", peer: "pi", cause: "unparseable", detail: "SCORE without protocol", stage: "score", ts: 10 }),
+        JSON.stringify({ type: "pair:selected", cycleId: "C1", workingAgent: "reasonix", peer: "codex", stage: "score", ts: 11 }),
+        JSON.stringify({ type: "pair:score", cycleId: "C1", peer: "codex", score: 10, verdict: "good", cost: 0, stage: "score", ts: 12 }),
       ],
     });
     const r = run(cwd, ["status"]);
@@ -170,8 +216,77 @@ describe("supervisorCommand", () => {
     expect(r.out).toContain("scope: live non-Hold FIX/US/REFACTOR");
     expect(r.out).toContain("selected: US-1");
     expect(r.out).toContain("cast: C1 · US-1 · builder=reasonix · evaluator=codex");
+    expect(r.out).toContain("cast detail:");
+    expect(r.out).toContain("reviewers=kimi:returned, codex:accepted/refine");
+    expect(r.out).toContain("evaluators=pi:failed/unparseable");
+    expect(r.out).toContain("codex:accepted/10");
     expect(r.out).toContain("gate: active");
     expect(r.out).toContain(".roll meta:");
+  });
+
+  it("US-V4-021: manual-merge PRs are visible gates before new cards", () => {
+    const cwd = project(`# Backlog
+
+| ID | Description | Status |
+| --- | --- | --- |
+| US-1 | manual merge delivery | 📋 Todo |
+| US-2 | next story | 📋 Todo |
+`, {
+      events: [JSON.stringify({ type: "pr:open", prNumber: 42, storyId: "US-1", ts: 1 })],
+    });
+    const fakeBin = installFakeGh(cwd);
+    const r = withPath(fakeBin, () => run(cwd, ["next"]));
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("Supervisor — next: US-1");
+    expect(r.out).toContain("manual merge: PR #42:US-1:manual_merge_required");
+    expect(r.out).toContain("manual merge gate on PR #42");
+    expect(r.out).toContain("do not start another card until the manual-merge PR is merged");
+
+    const json = withPath(fakeBin, () => JSON.parse(run(cwd, ["next", "--json"]).out));
+    expect(json.next.kind).toBe("manual_merge_gate");
+    expect(json.runbook.truth.manualMergeGates[0].prNumber).toBe(42);
+    expect(json.manualMerge).toContain("PR #42:US-1");
+  });
+
+  it("US-V4-021: manual-merge PRs are visible even when the local pr:open event is missing", () => {
+    const cwd = project(`# Backlog
+
+| ID | Description | Status |
+| --- | --- | --- |
+| US-1 | manual merge delivery | 📋 Todo |
+| US-2 | next story | 📋 Todo |
+`);
+    const fakeBin = installFakeGh(cwd);
+    const r = withPath(fakeBin, () => run(cwd, ["why"]));
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("manual merge gate on PR #42");
+    expect(r.out).toContain("manual merge: PR #42:US-1:manual_merge_required");
+    expect(r.out).toContain("do not start another card until the manual-merge PR is merged");
+
+    const json = withPath(fakeBin, () => JSON.parse(run(cwd, ["why", "--json"]).out));
+    expect(json.runbook.next.kind).toBe("manual_merge_gate");
+    expect(json.runbook.next.storyId).toBe("US-1");
+    expect(json.runbook.truth.manualMergeGates[0].source).toBe("gh pr view 42");
+  });
+
+  it("US-V4-021: manual-merge story matching does not confuse prefix IDs", () => {
+    const cwd = project(`# Backlog
+
+| ID | Description | Status |
+| --- | --- | --- |
+| FIX-103 | older fix | 📋 Todo |
+| FIX-1032 | manual merge fix | 📋 Todo |
+`);
+    const fakeBin = installFakeGh(cwd, {
+      number: 77,
+      headRefName: "loop/FIX-1032-manual-merge",
+      title: "manual merge delivery",
+    });
+    const json = withPath(fakeBin, () => JSON.parse(run(cwd, ["next", "--json"]).out));
+    expect(json.runbook.next.kind).toBe("manual_merge_gate");
+    expect(json.runbook.next.storyId).toBe("FIX-1032");
+    expect(json.runbook.truth.manualMergeGates[0].storyId).toBe("FIX-1032");
+    expect(JSON.stringify(json.runbook.next)).not.toContain("FIX-103\"");
   });
 
   it("US-V4-021: why diagnoses repeated failure before another run command", () => {

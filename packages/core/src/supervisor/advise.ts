@@ -40,9 +40,10 @@ export interface SupervisorRunbookState {
     readonly coverage: "complete" | "partial";
     readonly drift: readonly string[];
     readonly openPrCount: number;
+    readonly manualMergeGates: readonly NonNullable<SupervisorInput["manualMergeGates"]>[number][];
   };
   readonly next: {
-    readonly kind: "run_card" | "diagnose_failure" | "no_work";
+    readonly kind: "run_card" | "manual_merge_gate" | "diagnose_failure" | "no_work";
     readonly storyId: string | null;
     readonly reason: string;
     readonly ownerAction: string;
@@ -105,6 +106,7 @@ export function buildSupervisorRunbookState(input: SupervisorInput): SupervisorR
   const todoByFamily = emptyFamilyCounts();
   const excluded: string[] = [];
   const blockedCards: SupervisorBlockedCard[] = [];
+  const manualMergeGates = input.manualMergeGates ?? [];
   const { deliveredSet, openPrSet, stuckSet } = blockingDetails(input);
   const confirmedDelivered = new Set(input.delivered);
   const truthDrift = input.backlog
@@ -138,6 +140,28 @@ export function buildSupervisorRunbookState(input: SupervisorInput): SupervisorR
     if (status === "todo") todoByFamily[family] += 1;
   }
 
+  const manualMerge = manualMergeGates.find((gate) => liveScopeIds.has(gate.storyId) || openPrSet.has(gate.storyId));
+  if (manualMerge !== undefined) {
+    blockedCards.push(blocker(manualMerge.storyId, "open_pr", `PR #${manualMerge.prNumber} requires manual merge reconciliation`));
+    return {
+      scope: { label: "live non-Hold FIX/US/REFACTOR", families: SUPERVISOR_FAMILIES, remainingByFamily, todoByFamily, excluded },
+      truth: {
+        coverage: truthDrift.length > 0 ? "partial" : "complete",
+        drift: truthDrift,
+        openPrCount: input.openPrStories.length,
+        manualMergeGates,
+      },
+      next: {
+        kind: "manual_merge_gate",
+        storyId: manualMerge.storyId,
+        reason: `manual merge gate on PR #${manualMerge.prNumber} for ${manualMerge.storyId}: ${manualMerge.detail}`,
+        ownerAction: `review PR #${manualMerge.prNumber}; merge only after CI=${manualMerge.ciState}, evaluator=${manualMerge.reviewState}, merge=${manualMerge.mergeable} are acceptable`,
+        schedulerAction: "do not start another card until the manual-merge PR is merged, closed, or explicitly deferred",
+      },
+      blockedCards,
+    };
+  }
+
   const stuck = input.recentFailures.find((f) => f.consecutiveFailures >= 2 && liveScopeIds.has(f.storyId));
   if (stuck !== undefined) {
     blockedCards.push(blocker(stuck.storyId, "repeated_failure", `${stuck.consecutiveFailures} consecutive failures; diagnose before retry`));
@@ -147,6 +171,7 @@ export function buildSupervisorRunbookState(input: SupervisorInput): SupervisorR
         coverage: truthDrift.length > 0 ? "partial" : "complete",
         drift: truthDrift,
         openPrCount: input.openPrStories.length,
+        manualMergeGates,
       },
       next: {
         kind: "diagnose_failure",
@@ -201,10 +226,11 @@ export function buildSupervisorRunbookState(input: SupervisorInput): SupervisorR
       return {
         scope: { label: "live non-Hold FIX/US/REFACTOR", families: SUPERVISOR_FAMILIES, remainingByFamily, todoByFamily, excluded },
         truth: {
-          coverage: truthDrift.length > 0 ? "partial" : "complete",
-          drift: truthDrift,
-          openPrCount: input.openPrStories.length,
-        },
+        coverage: truthDrift.length > 0 ? "partial" : "complete",
+        drift: truthDrift,
+        openPrCount: input.openPrStories.length,
+        manualMergeGates,
+      },
         next: {
           kind: "run_card",
           storyId: row.id,
@@ -219,7 +245,12 @@ export function buildSupervisorRunbookState(input: SupervisorInput): SupervisorR
 
   return {
     scope: { label: "live non-Hold FIX/US/REFACTOR", families: SUPERVISOR_FAMILIES, remainingByFamily, todoByFamily, excluded },
-    truth: { coverage: truthDrift.length > 0 ? "partial" : "complete", drift: truthDrift, openPrCount: input.openPrStories.length },
+    truth: {
+      coverage: truthDrift.length > 0 ? "partial" : "complete",
+      drift: truthDrift,
+      openPrCount: input.openPrStories.length,
+      manualMergeGates,
+    },
     next: {
       kind: "no_work",
       storyId: null,

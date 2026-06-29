@@ -134,6 +134,20 @@ export interface SupervisorInput {
     readonly detail: string;
     readonly files?: readonly string[];
   };
+  /** Open PRs that intentionally require an owner/manual merge decision. */
+  readonly manualMergeGates?: readonly SupervisorManualMergeGate[];
+}
+
+/** A surfaced open PR gate that must be reconciled before starting new work. */
+export interface SupervisorManualMergeGate {
+  readonly storyId: string;
+  readonly prNumber: number;
+  readonly ciState: string;
+  readonly reviewState: string;
+  readonly mergeable: string;
+  readonly action: string;
+  readonly detail: string;
+  readonly source: string;
 }
 
 /** US-V4-009 — an in-flight or candidate cycle for the parallel scheduler. */

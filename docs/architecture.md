@@ -267,6 +267,8 @@ v4 把"一张 Story 怎么交付"和"项目级怎么协调"分成两层。
 
 Supervisor **绝不**：实现具体 Story、写 Story 的评估报告、覆盖 Evaluator 裁定、绕过 attest 闸、直接标记 Story 为 Done、用指标静默改写路由/策略。v4.0 的 Supervisor 是 observe/advise（`roll supervisor`）：先用确定性 selector 把事实结构化，再（必要时）让 agent 措辞建议；历史 Done 缺少结构化 DeliveryRecord 只作为 truth coverage/backfill 提醒，发布是否阻塞以显式 release blockers / release consistency 为准；持久化策略变更一律需 owner 确认。安全并行调度（`max_parallel_cycles`、文件冲突串行化、合并队列/预算暂停）的决策逻辑已就位，活体并行交付留待 v4.1。
 
+Backlog-clearing 模式下，Supervisor 的默认 scope 是所有 live 且非 Hold 的 `FIX-*`、`US-*`、`REFACTOR-*` 行。它先对账 backlog、依赖、open PR、CI、Evaluator/Scorer、manual-merge gate、近期 cycle 终态、preserved worktree 和 `.roll` meta，再选择下一张卡。每张卡独立 cast Builder；执行剖面需要时独立 cast Evaluator/Scorer。`gave_up`、zero TCR、缺少 PR/CI/evaluator 证据、解析失败、auth/permission block、`[roll:manual-merge]` PR 或 `.roll` meta drift 都是停止继续调度并要求 owner/根因动作的信号。产品 repo 的 PR/CI/main truth 与 `.roll` meta truth 分开对账和提交。
+
 > 命名：只用 **Supervisor Agent / Story Execution Unit / Agent Scope / Role / Binding / Agent / Model**。核心角色是 `supervise` / `execute` / `evaluate`；旧路由配置术语只在迁移/兼容说明中出现，不作为新的用户面模型。
 
 ### 上下文协作

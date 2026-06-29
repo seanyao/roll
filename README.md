@@ -65,6 +65,18 @@ Roll V4 separates project coordination from story delivery:
 - **Skills remain** the capability layer. Roles invoke `$roll-design`, `$roll-build`, `$roll-fix`, `$roll-peer`, `$roll-.qa`, and related skills instead of rewriting those contracts into TypeScript.
 - **Fallback is fail-loud**. If a requested agent or rig is unavailable, Roll records that unavailability and pauses or asks for owner action; it does not silently pretend another agent was used.
 
+### Supervisor backlog-clearing standard
+
+When the owner asks Roll to clear a backlog, Supervisor treats the scope as every
+live non-Hold `FIX-*`, `US-*`, and `REFACTOR-*` row unless the owner narrows it.
+Before scheduling another card it reconciles backlog status, open PRs, recent
+cycle endings, CI/evaluator gates, manual-merge PRs, and `.roll` meta state.
+Each card gets its own Builder and, when required by the execution profile, an
+independent Evaluator/Scorer selected from the current Agent roster. Repeated
+failure, zero TCR, missing PR/CI/evaluator evidence, parser failures, auth
+blocks, permission blocks, and `[roll:manual-merge]` PRs stop new scheduling and
+surface an owner action through `roll supervisor status/next/why`.
+
 ### Operating modes
 
 Roll has two product modes over the same backlog, truth, route profile, execution

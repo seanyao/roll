@@ -19,6 +19,7 @@ import {
   EventBus,
   adviseProject,
   buildSupervisorRunbookState,
+  buildCycleRoleSummary,
   buildSupervisorLiveBoard,
   ensureDeliveriesFresh,
   explainStuck,
@@ -30,11 +31,12 @@ import {
   recommendNext,
   type FreshnessPort,
 } from "@roll/core";
-import type { RollEvent, SupervisorInput } from "@roll/spec";
+import type { CycleRoleSummary, RollEvent, SupervisorInput } from "@roll/spec";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { formatOperatingMode, resolveOperatingMode, suggestedGuidedRun } from "../lib/operating-mode.js";
+import { reducePrView } from "./loop-pr-inbox.js";
 
 export const SUPERVISOR_USAGE = [
   "Usage: roll supervisor [status|observe|advise|next|why|live] [--json]",
@@ -109,6 +111,97 @@ function readRollMetaState(projectPath: string): NonNullable<SupervisorInput["ro
     : { state: "dirty", detail: `${files.length} dirty roll-meta file(s)`, files };
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function hasStoryIdToken(value: string, storyId: string): boolean {
+  return new RegExp(`(^|[^A-Za-z0-9])${escapeRegExp(storyId)}($|[^A-Za-z0-9])`).test(value);
+}
+
+function extractStoryId(knownStoryIds: readonly string[], ...values: readonly string[]): string | undefined {
+  const known = [...new Set(knownStoryIds)].sort((a, b) => b.length - a.length);
+  for (const value of values) {
+    const knownMatch = known.find((id) => hasStoryIdToken(value, id));
+    if (knownMatch !== undefined) return knownMatch;
+    const match = /\b(?:US|FIX|REFACTOR)-[A-Za-z0-9_-]+\b/.exec(value);
+    if (match !== null) return match[0];
+  }
+  return undefined;
+}
+
+function parseJsonArray(text: string): unknown[] {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function actionForManualMerge(facts: { bot: string; ciState: string; mergeable: string; isDraft?: boolean }): string {
+  if (facts.isDraft === true) {
+    if (facts.bot === "APPROVED" && facts.ciState === "success" && facts.mergeable === "CLEAN") return "ready_to_promote_and_merge";
+    return "draft_manual_merge_waiting";
+  }
+  if (facts.bot === "APPROVED" && facts.ciState === "success" && facts.mergeable === "CLEAN") return "manual_merge_required";
+  if (facts.ciState === "failure") return "ci_red_before_manual_merge";
+  if (facts.mergeable === "BEHIND" || facts.mergeable === "DIRTY" || facts.mergeable === "CONFLICTING") return "rebase_or_conflict_before_manual_merge";
+  return "manual_merge_waiting";
+}
+
+export function readManualMergeGates(
+  projectPath: string,
+  events: readonly RollEvent[],
+  port: ExecPort = quietExecPort,
+  knownStoryIds: readonly string[] = [],
+): NonNullable<SupervisorInput["manualMergeGates"]> {
+  const list = port.run("gh", ["pr", "list", "--state", "open", "--json", "number,headRefName,title"]);
+  const prs = list.code === 0 ? parseJsonArray(list.stdout) : [];
+  if (prs.length === 0) return [];
+
+  const prStory = new Map<number, string>();
+  for (const ev of events) {
+    if (ev.type === "pr:open") prStory.set(ev.prNumber, ev.storyId);
+  }
+
+  const gates: Array<NonNullable<SupervisorInput["manualMergeGates"]>[number]> = [];
+  for (const item of prs) {
+    const pr = item as { number?: number; headRefName?: string; title?: string };
+    if (typeof pr.number !== "number") continue;
+    const view = port.run("gh", [
+      "pr",
+      "view",
+      String(pr.number),
+      "--json",
+      "reviews,mergeStateStatus,statusCheckRollup,body,labels,isDraft",
+    ]);
+    if (view.code !== 0) continue;
+    let raw: unknown;
+    try {
+      raw = JSON.parse(view.stdout) as unknown;
+    } catch {
+      continue;
+    }
+    const body = typeof (raw as { body?: unknown }).body === "string" ? ((raw as { body?: string }).body ?? "") : "";
+    const facts = reducePrView(raw as Parameters<typeof reducePrView>[0]);
+    if (facts.manualMerge !== true) continue;
+    const storyId = prStory.get(pr.number) ?? extractStoryId(knownStoryIds, pr.headRefName ?? "", pr.title ?? "", body) ?? `PR-${pr.number}`;
+    const action = actionForManualMerge(facts);
+    gates.push({
+      storyId,
+      prNumber: pr.number,
+      ciState: facts.ciState || "unknown",
+      reviewState: facts.bot || "none",
+      mergeable: facts.mergeable || "unknown",
+      action,
+      detail: `ci=${facts.ciState || "unknown"} evaluator=${facts.bot || "none"} merge=${facts.mergeable || "unknown"} action=${action}`,
+      source: `gh pr view ${pr.number}`,
+    });
+  }
+  return gates;
+}
+
 /** Gather the Supervisor's structured input from project state (deterministic). */
 export function gatherSupervisorInput(projectPath: string): SupervisorInput {
   const backlogPath = join(projectPath, ".roll", "backlog.md");
@@ -168,6 +261,7 @@ export function gatherSupervisorInput(projectPath: string): SupervisorInput {
     routeConfigErrors,
     releaseBlockers: [],
     rollMeta: readRollMetaState(projectPath),
+    manualMergeGates: readManualMergeGates(projectPath, events, quietExecPort, backlog.map((row) => row.id)),
   };
 }
 
@@ -176,9 +270,25 @@ function remainingLine(input: SupervisorInput): string {
   return `FIX ${s.FIX} · US ${s.US} · REFACTOR ${s.REFACTOR}`;
 }
 
-function latestCastSummary(events: readonly RollEvent[]): string {
+function latestCycleStart(events: readonly RollEvent[]): Extract<RollEvent, { type: "cycle:start" }> | undefined {
   const starts = events.filter((ev): ev is Extract<RollEvent, { type: "cycle:start" }> => ev.type === "cycle:start").sort((a, b) => b.ts - a.ts);
-  const latest = starts[0];
+  return starts[0];
+}
+
+function latestExecutionCast(projectPath: string, events: readonly RollEvent[]): CycleRoleSummary | undefined {
+  const latest = latestCycleStart(events);
+  if (latest === undefined) return undefined;
+  return buildCycleRoleSummary({
+    cycleId: latest.cycleId,
+    events,
+    eventsPath: join(projectPath, ".roll", "loop", "events.ndjson"),
+    peerDir: join(projectPath, ".roll", "loop", "peer"),
+    cycleLogDir: join(projectPath, ".roll", "loop", "cycle-logs"),
+  });
+}
+
+function latestCastSummary(events: readonly RollEvent[]): string {
+  const latest = latestCycleStart(events);
   if (latest === undefined) return "none";
   const cycleEvents = events.filter((ev) => "cycleId" in ev && ev.cycleId === latest.cycleId);
   const score = [...cycleEvents]
@@ -194,6 +304,27 @@ function latestCastSummary(events: readonly RollEvent[]): string {
   return `${latest.cycleId} · ${latest.storyId} · builder=${latest.agent} · evaluator=${evaluator}`;
 }
 
+function describeRole(role: CycleRoleSummary["roles"][number]): string {
+  const agent = role.agent ?? "-";
+  const result = role.score !== undefined ? `${role.state}/${role.score}` : role.verdict !== undefined ? `${role.state}/${role.verdict}` : role.state;
+  const cause = role.cause !== undefined ? `/${role.cause}` : "";
+  return `${agent}:${result}${cause}`;
+}
+
+function latestCastDetail(projectPath: string, events: readonly RollEvent[]): string {
+  const cast = latestExecutionCast(projectPath, events);
+  if (cast === undefined) return "none";
+  const reviewers = cast.roles.filter((r) => r.role === "peer_reviewer").map(describeRole);
+  const evaluators = cast.roles.filter((r) => r.role === "evaluator").map(describeRole);
+  const gates = [
+    cast.gates.peerGate !== undefined ? `peer=${cast.gates.peerGate}` : undefined,
+    cast.gates.attestGate !== undefined ? `attest=${cast.gates.attestGate}` : undefined,
+    cast.gates.delivery !== undefined ? `delivery=${cast.gates.delivery}` : undefined,
+  ].filter((v): v is string => v !== undefined);
+  const sources = cast.sources.length === 0 ? "none" : summarizeList(cast.sources, 3);
+  return `reviewers=${reviewers.length === 0 ? "none" : reviewers.join(", ")} · evaluators=${evaluators.length === 0 ? "none" : evaluators.join(", ")} · gates=${gates.length === 0 ? "none" : gates.join(", ")} · sources=${sources}`;
+}
+
 function latestGateState(events: readonly RollEvent[]): string {
   const board = buildSupervisorLiveBoard(events, { recentLimit: 1 });
   const row = board.rows[0];
@@ -201,11 +332,31 @@ function latestGateState(events: readonly RollEvent[]): string {
   return row.status;
 }
 
-function supervisorContext(input: SupervisorInput, events: readonly RollEvent[]): { cast: string; gate: string; rollMeta: NonNullable<SupervisorInput["rollMeta"]> } {
+function manualMergeLine(input: SupervisorInput): string {
+  const gates = input.manualMergeGates ?? [];
+  if (gates.length === 0) return "none";
+  return summarizeList(gates.map((g) => `PR #${g.prNumber}:${g.storyId}:${g.action} (${g.detail})`), 3);
+}
+
+function supervisorContext(
+  projectPath: string,
+  input: SupervisorInput,
+  events: readonly RollEvent[],
+): {
+  cast: string;
+  castDetail: string;
+  executionCast: CycleRoleSummary | null;
+  gate: string;
+  rollMeta: NonNullable<SupervisorInput["rollMeta"]>;
+  manualMerge: string;
+} {
   return {
     cast: latestCastSummary(events),
+    castDetail: latestCastDetail(projectPath, events),
+    executionCast: latestExecutionCast(projectPath, events) ?? null,
     gate: latestGateState(events),
     rollMeta: input.rollMeta ?? { state: "unknown", detail: "not gathered" },
+    manualMerge: manualMergeLine(input),
   };
 }
 
@@ -213,7 +364,7 @@ function fmtFacts(input: SupervisorInput, events: readonly RollEvent[] = []): st
   const f = observeProject(input);
   const runbook = buildSupervisorRunbookState(input);
   const liveStuck = runbook.blockedCards.filter((b) => b.reason === "repeated_failure").map((b) => b.storyId);
-  const ctx = supervisorContext(input, events);
+  const ctx = supervisorContext(process.cwd(), input, events);
   const mode = resolveOperatingMode(process.cwd());
   const truthCoverage =
     f.truthDrift.length === 0
@@ -228,7 +379,9 @@ function fmtFacts(input: SupervisorInput, events: readonly RollEvent[] = []): st
     `    selected: ${runbook.next.storyId ?? "(nothing ready)"} — ${runbook.next.kind}`,
     `    blocked: ${runbook.blockedCards.length === 0 ? "none" : summarizeList(runbook.blockedCards.map((b) => `${b.storyId}:${b.reason}`))}`,
     `    cast: ${ctx.cast}`,
+    `    cast detail: ${ctx.castDetail}`,
     `    gate: ${ctx.gate}`,
+    `    manual merge: ${ctx.manualMerge}`,
     `    .roll meta: ${ctx.rollMeta.state} — ${ctx.rollMeta.detail}`,
     `    backlog: ${f.counts.todo} todo · ${f.counts.inProgress} in-progress · ${f.counts.blocked} blocked · ${f.counts.done} done`,
     `    open PRs: ${f.openPrCount}`,
@@ -326,7 +479,7 @@ export function supervisorCommand(args: string[]): number {
     const mode = resolveOperatingMode(projectPath);
     const events = readSupervisorEvents(projectPath);
     const runbook = buildSupervisorRunbookState(input);
-    const ctx = supervisorContext(input, events);
+    const ctx = supervisorContext(projectPath, input, events);
     const out =
       sub === "advise"
         ? { mode, decisions: supervisorDecisions(input), runbook, ...ctx }
@@ -351,7 +504,7 @@ export function supervisorCommand(args: string[]): number {
     const state = buildSupervisorRunbookState(input);
     const n = recommendNext(input);
     const mode = resolveOperatingMode(projectPath);
-    const ctx = supervisorContext(input, readSupervisorEvents(projectPath));
+    const ctx = supervisorContext(projectPath, input, readSupervisorEvents(projectPath));
     const action =
       state.next.kind === "run_card" && mode.mode === "guided"
         ? suggestedGuidedRun(n.storyId)
@@ -359,7 +512,7 @@ export function supervisorCommand(args: string[]): number {
           ? mode.ownerAction
           : state.next.ownerAction;
     process.stdout.write(
-      `\n  Supervisor — next: ${n.storyId ?? "(nothing ready)"}\n  scope: ${state.scope.label}\n  remaining: ${remainingLine(input)}\n  cast: ${ctx.cast}\n  gate: ${ctx.gate}\n  .roll meta: ${ctx.rollMeta.state} — ${ctx.rollMeta.detail}\n  ${n.reason}\n  ${formatOperatingMode(mode)}\n  owner action: ${action}\n  scheduler: ${state.next.schedulerAction}\n\n`,
+      `\n  Supervisor — next: ${n.storyId ?? "(nothing ready)"}\n  scope: ${state.scope.label}\n  remaining: ${remainingLine(input)}\n  cast: ${ctx.cast}\n  cast detail: ${ctx.castDetail}\n  gate: ${ctx.gate}\n  manual merge: ${ctx.manualMerge}\n  .roll meta: ${ctx.rollMeta.state} — ${ctx.rollMeta.detail}\n  ${n.reason}\n  ${formatOperatingMode(mode)}\n  owner action: ${action}\n  scheduler: ${state.next.schedulerAction}\n\n`,
     );
     return 0;
   }
@@ -367,9 +520,12 @@ export function supervisorCommand(args: string[]): number {
     const mode = resolveOperatingMode(projectPath);
     const state = buildSupervisorRunbookState(input);
     const why = runbookWhy(state, facts);
-    const ctx = supervisorContext(input, readSupervisorEvents(projectPath));
+    const ctx = supervisorContext(projectPath, input, readSupervisorEvents(projectPath));
+    const ownerAction = state.next.kind === "diagnose_failure" || state.next.kind === "manual_merge_gate" ? state.next.ownerAction : mode.ownerAction;
+    const schedulerAction =
+      state.next.kind === "diagnose_failure" || state.next.kind === "manual_merge_gate" ? state.next.schedulerAction : mode.schedulerAction;
     process.stdout.write(
-      `\n  Supervisor — why stuck: ${why}\n  cast: ${ctx.cast}\n  gate: ${ctx.gate}\n  .roll meta: ${ctx.rollMeta.state} — ${ctx.rollMeta.detail}\n  ${formatOperatingMode(mode)}\n  owner action: ${state.next.kind === "diagnose_failure" ? state.next.ownerAction : mode.ownerAction}\n  scheduler: ${state.next.kind === "diagnose_failure" ? state.next.schedulerAction : mode.schedulerAction}\n\n`,
+      `\n  Supervisor — why stuck: ${why}\n  cast: ${ctx.cast}\n  cast detail: ${ctx.castDetail}\n  gate: ${ctx.gate}\n  manual merge: ${ctx.manualMerge}\n  .roll meta: ${ctx.rollMeta.state} — ${ctx.rollMeta.detail}\n  ${formatOperatingMode(mode)}\n  owner action: ${ownerAction}\n  scheduler: ${schedulerAction}\n\n`,
     );
     return 0;
   }

@@ -218,6 +218,35 @@ describe("recommendNext — what should Roll do next?", () => {
     expect(state.next.ownerAction).toContain("root-cause");
   });
 
+  it("US-V4-021: surfaces manual-merge PRs before starting new backlog work", () => {
+    const state = buildSupervisorRunbookState(
+      input({
+        backlog: [
+          { id: "US-1", status: "📋 Todo" },
+          { id: "US-2", status: "📋 Todo" },
+        ],
+        openPrStories: ["US-1"],
+        manualMergeGates: [
+          {
+            storyId: "US-1",
+            prNumber: 42,
+            ciState: "success",
+            reviewState: "APPROVED",
+            mergeable: "CLEAN",
+            action: "manual_merge_required",
+            detail: "ci=success evaluator=APPROVED merge=CLEAN action=manual_merge_required",
+            source: "gh pr view 42",
+          },
+        ],
+      }),
+    );
+    expect(state.next.kind).toBe("manual_merge_gate");
+    expect(state.next.storyId).toBe("US-1");
+    expect(state.next.ownerAction).toContain("PR #42");
+    expect(state.next.schedulerAction).toContain("do not start another card");
+    expect(state.truth.manualMergeGates).toHaveLength(1);
+  });
+
   it("US-V4-021: ignores historical repeated failures outside the live scope", () => {
     const state = buildSupervisorRunbookState(
       input({

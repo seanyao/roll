@@ -31,6 +31,15 @@ const GRACE_SEC = 3600;
 
 /** A lenient runs row — the adapter owns the field-name knowledge. */
 export type TruthRunRow = Record<string, unknown>;
+export type DeliveryGateDiagnosticKind = "ci_red_after_merge" | "pr_loop_unavailable";
+
+export interface DeliveryGateDiagnostic {
+  kind: DeliveryGateDiagnosticKind;
+  cycleId: string;
+  storyId: string;
+  prUrl?: string;
+  ciRunUrl?: string;
+}
 
 function str(row: TruthRunRow, k: string): string {
   const v = row[k];
@@ -75,6 +84,41 @@ export function cycleTruthFromRow(
 export function rowDelivered(row: TruthRunRow, nowSec: number = Math.floor(Date.now() / 1000)): boolean {
   const t = cycleTruthFromRow(row, { nowSec });
   return t.outcome === "delivered" || t.outcome === "published_pending_merge";
+}
+
+function rowList(rows: Record<string, TruthRunRow> | Iterable<TruthRunRow>): TruthRunRow[] {
+  return Symbol.iterator in Object(rows) ? [...(rows as Iterable<TruthRunRow>)] : Object.values(rows as Record<string, TruthRunRow>);
+}
+
+function gateKind(outcome: CycleTruth["outcome"]): DeliveryGateDiagnosticKind | null {
+  return outcome === "ci_red_after_merge" || outcome === "pr_loop_unavailable" ? outcome : null;
+}
+
+export function deliveryGateDiagnosticsFromRows(
+  rows: Record<string, TruthRunRow> | Iterable<TruthRunRow>,
+  opts: { nowSec?: number; maxAgeSec?: number; limit?: number } = {},
+): DeliveryGateDiagnostic[] {
+  const nowSec = opts.nowSec ?? Math.floor(Date.now() / 1000);
+  const maxAgeSec = opts.maxAgeSec ?? 86_400;
+  const limit = opts.limit ?? 3;
+  const out: DeliveryGateDiagnostic[] = [];
+  for (const row of rowList(rows)) {
+    const rowTs = tsSec(row);
+    if (rowTs !== null && nowSec - rowTs > maxAgeSec) continue;
+    const truth = cycleTruthFromRow(row, { nowSec });
+    const kind = gateKind(truth.outcome);
+    if (kind === null) continue;
+    const cycleId = str(row, "cycle_id") || str(row, "run_id") || truth.cycleId;
+    const storyId = str(row, "story_id") || str(row, "storyId") || cycleId;
+    const diagnostic: DeliveryGateDiagnostic = { kind, cycleId, storyId };
+    const prUrl = str(row, "pr_url") || str(row, "prUrl");
+    const ciRunUrl = str(row, "ci_run_url") || str(row, "ciRunUrl");
+    if (prUrl !== "") diagnostic.prUrl = prUrl;
+    if (ciRunUrl !== "") diagnostic.ciRunUrl = ciRunUrl;
+    out.push(diagnostic);
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 /** Story truth for presentation consumers. The caller owns evidence gathering;

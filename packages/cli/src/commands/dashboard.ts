@@ -40,7 +40,7 @@ import {
 } from "@roll/infra";
 import { getAgentSpec } from "@roll/core";
 import { computeListCost, currencyFor } from "./prices-cost.js";
-import { TRUTH_SCHEMA_EPOCH_SEC, cycleTruthFromRow, outcomeToPanel } from "../lib/truth-adapter.js";
+import { TRUTH_SCHEMA_EPOCH_SEC, cycleTruthFromRow, deliveryGateDiagnosticsFromRows, outcomeToPanel, type DeliveryGateDiagnostic } from "../lib/truth-adapter.js";
 import { collectToolEvidenceFromEventsPath, formatToolCostSummary } from "../lib/tool-display.js";
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1472,34 +1472,13 @@ function tickAgeLine(loopType: string, now: Date): string | null {
   return `${loopType}: tick ${ageStr} ago`;
 }
 
-/**
- * FIX-1032b AC2/AC3: read pre-loaded runs records for delivery-gate-blocked
- * outcomes (ci_red_after_merge / pr_loop_unavailable) and return diagnostic lines.
- * Returns an empty array when nothing is blocked.
- */
-function deliveryGateDiagnostics(runs: Record<string, RunRecord>): string[] {
-  const out: string[] = [];
-  const now = Date.now();
-  // Check recent cycles (within last 24h) for delivery gate blocks
-  for (const [cycleId, row] of Object.entries(runs)) {
-    const outcome = typeof row["outcome"] === "string" ? (row["outcome"] as string) : "";
-    if (outcome !== "ci_red_after_merge" && outcome !== "pr_loop_unavailable") continue;
-    // Check age: skip rows older than 24h
-    const ts = typeof row.ts === "string" ? new Date(row.ts).getTime() : 0;
-    if (ts > 0 && now - ts > 86400000) continue;
-    const prUrl = typeof row.pr_url === "string" ? (row.pr_url as string) : "";
-    const ciUrl = typeof row.ci_run_url === "string" ? (row.ci_run_url as string) : "";
-    const storyId = typeof row.story_id === "string" ? (row.story_id as string) : cycleId;
-    if (outcome === "ci_red_after_merge") {
-      const ci = ciUrl ? ` · ${ciUrl}` : "";
-      out.push(c("red", "⚠ main CI red") + c("dim", `  ${storyId}${ci}`));
-    } else {
-      const pr = prUrl ? ` · ${prUrl}` : "";
-      out.push(c("amber", "⚠ PR loop absent") + c("dim", `  ${storyId}${pr}`));
-    }
+function deliveryGateDiagnosticLine(diagnostic: DeliveryGateDiagnostic): string {
+  if (diagnostic.kind === "ci_red_after_merge") {
+    const ci = diagnostic.ciRunUrl !== undefined ? ` · ${diagnostic.ciRunUrl}` : "";
+    return c("red", "⚠ main CI red") + c("dim", `  ${diagnostic.storyId}${ci}`);
   }
-  // Limit to 3 lines to avoid clutter
-  return out.slice(0, 3);
+  const pr = diagnostic.prUrl !== undefined ? ` · ${diagnostic.prUrl}` : "";
+  return c("amber", "⚠ PR loop absent") + c("dim", `  ${diagnostic.storyId}${pr}`);
 }
 
 type LoopPlistSchedule =
@@ -1903,8 +1882,8 @@ function render(
   // FIX-1032b AC2/AC3: delivery gate diagnostics — read runs for recent
   // delivery-blocked cycles (ci_red_after_merge, pr_loop_unavailable).
   if (args.projectSlug !== null) {
-    const dtLines = deliveryGateDiagnostics(args.runs);
-    for (const line of dtLines) out.push("  " + line);
+    const dt = deliveryGateDiagnosticsFromRows(args.runs, { nowSec: Math.floor(args.now.getTime() / 1000) });
+    for (const diagnostic of dt) out.push("  " + deliveryGateDiagnosticLine(diagnostic));
   }
   out.push("");
 

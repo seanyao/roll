@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { parsePeerReviewTranscript } from "@roll/core";
 import { parseGoalYaml } from "@roll/spec";
-import { loopGoCommand, planGoTmuxCommands, spawnFinalReviewAgent, type LoopGoDeps } from "../src/commands/loop-go.js";
+import { deliveryGateStopDetails, loopGoCommand, planGoTmuxCommands, spawnFinalReviewAgent, type LoopGoDeps } from "../src/commands/loop-go.js";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -1330,6 +1330,52 @@ describe("FIX-333 — published_pending_merge cards are not re-picked (no double
     // The breaker never tripped — a delivery is progress, not a stall.
     const events = readEvents(p);
     expect(events.some((e) => e.type === "goal:gate_tripped" && e.gate === "progress")).toBe(false);
+  });
+
+  it("FIX-1032b: scope_in_flight stop reason includes gate diagnostic URL", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [FIX-308](.roll/features/goal-mode/FIX-308/spec.md) | flaky card | 📋 Todo |",
+    ]);
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_020_000 + calls,
+      nowIso: () => `2026-06-13T09:20:0${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async ({ projectPath }) => {
+        calls += 1;
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "runs.jsonl"),
+          `${JSON.stringify({
+            story_id: "FIX-308",
+            cycle_id: `cycle-${calls}`,
+            ts: `2026-06-13T09:20:0${calls}Z`,
+            agent: "reasonix",
+            status: "published",
+            outcome: "pr_loop_unavailable",
+            tcr_count: 1,
+            pr_url: "https://github.com/o/r/pull/759",
+          })}\n`,
+          { flag: "a" },
+        );
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "FIX-308", "--max-cycles", "10"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(1);
+    expect(deliveryGateStopDetails(p, 1_780_020_010)).toEqual([
+      "pr_loop_unavailable:FIX-308:https://github.com/o/r/pull/759",
+    ]);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.lastDecisionReason).toContain("scope_in_flight:pr_loop_unavailable:FIX-308:https://github.com/o/r/pull/759");
+    const end = readEvents(p).find((e) => e.type === "goal:session_end");
+    expect(end).toMatchObject({ reason: "scope_in_flight:pr_loop_unavailable:FIX-308:https://github.com/o/r/pull/759" });
   });
 
   it("still advances to the next scope card after the first delivers in-flight", async () => {

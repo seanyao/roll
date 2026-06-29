@@ -163,6 +163,10 @@ export interface CycleTruth {
 }
 
 const TERMINAL_OUTCOME_SET: ReadonlySet<string> = new Set<string>(TERMINAL_OUTCOMES);
+const DELIVERY_GATE_OUTCOMES: ReadonlySet<string> = new Set<string>([
+  "ci_red_after_merge",
+  "pr_loop_unavailable",
+]);
 
 // Historical runs-row boundary only. New row writes already carry TerminalOutcome
 // in `outcome` and must pass through before this table is consulted.
@@ -192,6 +196,13 @@ const ROW_TO_TERMINAL: Record<string, TerminalOutcome> = {
 
 export function deriveCycleTruth(input: CycleTruthInput): CycleTruth {
   const pre = input.tsSec !== null && input.tsSec < input.schemaEpochSec;
+  const runTerminalOutcome = TERMINAL_OUTCOME_SET.has(input.runOutcome)
+    ? (input.runOutcome as TerminalOutcome)
+    : undefined;
+
+  if (runTerminalOutcome !== undefined && DELIVERY_GATE_OUTCOMES.has(runTerminalOutcome)) {
+    return { cycleId: input.cycleId, outcome: runTerminalOutcome, state: "truth", reason: "terminal_self_reported" };
+  }
 
   // The branch's MERGED evidence outranks the row terminal (anchor arbitration).
   if (!input.hasMergeStamp && input.branchEvidence?.state === "MERGED") {
@@ -230,12 +241,9 @@ export function deriveCycleTruth(input: CycleTruthInput): CycleTruth {
   }
 
   const mappedStatus = ROW_TO_TERMINAL[input.runStatus];
-  const terminalOutcome = TERMINAL_OUTCOME_SET.has(input.runOutcome)
-    ? (input.runOutcome as TerminalOutcome)
-    : undefined;
-  const outcome = terminalOutcome === undefined || (mappedStatus !== undefined && terminalOutcome !== mappedStatus)
+  const outcome = runTerminalOutcome === undefined || (mappedStatus !== undefined && runTerminalOutcome !== mappedStatus)
     ? mappedStatus ?? ROW_TO_TERMINAL[input.runOutcome] ?? "unknown"
-    : terminalOutcome;
+    : runTerminalOutcome;
   if (input.hasCost === false && outcome === "delivered" && !pre) {
     return { cycleId: input.cycleId, outcome, state: "warn", reason: "usage_missing" };
   }

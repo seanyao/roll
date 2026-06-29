@@ -230,6 +230,34 @@ describe("deriveCycleTruth — runs row + branch evidence + terminal twin", () =
     expect(t).toMatchObject({ outcome: "published_pending_merge", state: "truth" });
   });
 
+  it("FIX-1032b AC2/AC3: delivery gate outcomes outrank legacy status mapping", () => {
+    const ciRed = deriveCycleTruth({
+      cycleId: "C-CI-RED",
+      runStatus: "merged",
+      runOutcome: "ci_red_after_merge",
+      hasMergeStamp: true,
+      terminalOutcome: "published_pending_merge",
+      tsSec: EPOCH + 100,
+      nowSec: NOW,
+      graceSec: GRACE,
+      schemaEpochSec: EPOCH,
+    });
+    expect(ciRed).toMatchObject({ outcome: "ci_red_after_merge", state: "truth" });
+
+    const prLoopAbsent = deriveCycleTruth({
+      cycleId: "C-NO-PR-LOOP",
+      runStatus: "published",
+      runOutcome: "pr_loop_unavailable",
+      hasMergeStamp: false,
+      terminalOutcome: "published_pending_merge",
+      tsSec: EPOCH + 100,
+      nowSec: NOW,
+      graceSec: GRACE,
+      schemaEpochSec: EPOCH,
+    });
+    expect(prLoopAbsent).toMatchObject({ outcome: "pr_loop_unavailable", state: "truth" });
+  });
+
   it("AC5 squash merge: failed row + MERGED branch evidence → delivered (phantom corrected), fail-state drift on the row", () => {
     const t = deriveCycleTruth({
       cycleId: "20260610-212711-40684",

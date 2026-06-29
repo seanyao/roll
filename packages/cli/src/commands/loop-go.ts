@@ -19,11 +19,10 @@ import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
-import os from "node:os";
 import { GOAL_ALLOWED_CARDS_ENV, runAttemptFromRow } from "../lib/goal-progress.js";
 import { projectAgent } from "./agent-list.js";
 import { cardArchiveDir } from "../lib/archive.js";
-import { storyTruthFromBacklog } from "../lib/truth-adapter.js";
+import { deliveryGateDiagnosticsFromRows, storyTruthFromBacklog, type DeliveryGateDiagnostic, type TruthRunRow } from "../lib/truth-adapter.js";
 import { runPeerReview, spawnPeerReviewAgent, type SpawnPeerReviewResult } from "./peer.js";
 import { guideExternalToolSetup, silentPreinstallChromium } from "../lib/external-tools.js";
 
@@ -728,43 +727,36 @@ function allScopeCardsSkipped(projectPath: string, goal: RollGoal, progress: Pro
   return rows.length > 0 && rows.every((row) => progress.skippedCards.has(row.id));
 }
 
-/**
- * FIX-1032b AC4: check runs.jsonl for delivery-gate-blocked outcomes on recent
- * cycles. Returns short diagnostic strings like "pr_loop_unavailable" or
- * "ci_red_after_merge", or empty array when nothing is blocked.
- */
-function deliveryGateStopDetails(projectPath: string, slug: string): string[] {
-  const out: string[] = [];
-  // Try per-project runtime first, then shared root (~/.roll)
-  const localPath = join(projectPath, ".roll", "loop", "runs.jsonl");
-  const homeRoll = join(os.homedir(), ".roll");
-  const sharedPath = join(homeRoll, "loop", "runs.jsonl");
-  const runsPath = existsSync(localPath) ? localPath : (existsSync(sharedPath) ? sharedPath : null);
-  if (runsPath === null) return out;
-  let content: string;
+function readRunRows(projectPath: string): TruthRunRow[] {
+  const runsPath = join(projectPath, ".roll", "loop", "runs.jsonl");
+  let content = "";
   try {
     content = readFileSync(runsPath, "utf8");
   } catch {
-    return out;
+    return [];
   }
-  const now = Date.now();
+  const rows: TruthRunRow[] = [];
   for (const line of content.split("\n")) {
     const trimmed = line.trim();
     if (trimmed === "") continue;
-    let rec: Record<string, unknown>;
-    try { rec = JSON.parse(trimmed) as Record<string, unknown>; } catch { continue; }
-    const outcome = typeof rec["outcome"] === "string" ? (rec["outcome"] as string) : "";
-    if (outcome !== "ci_red_after_merge" && outcome !== "pr_loop_unavailable") continue;
-    const ts = typeof rec.ts === "string" ? new Date(rec.ts).getTime() : 0;
-    if (ts > 0 && now - ts > 86400000) continue;
-    const storyId = typeof rec.story_id === "string" ? (rec.story_id as string) : "";
-    if (outcome === "ci_red_after_merge") {
-      out.push(`ci_red_after_merge:${storyId}`);
-    } else {
-      out.push(`pr_loop_unavailable:${storyId}`);
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) rows.push(parsed as TruthRunRow);
+    } catch {
+      /* ignore malformed historical rows */
     }
   }
-  return out.slice(0, 3);
+  return rows;
+}
+
+function deliveryGateStopDetail(diagnostic: DeliveryGateDiagnostic): string {
+  const url = diagnostic.kind === "ci_red_after_merge" ? diagnostic.ciRunUrl : diagnostic.prUrl;
+  const suffix = url !== undefined ? `:${url}` : "";
+  return `${diagnostic.kind}:${diagnostic.storyId}${suffix}`;
+}
+
+export function deliveryGateStopDetails(projectPath: string, nowSec: number): string[] {
+  return deliveryGateDiagnosticsFromRows(readRunRows(projectPath), { nowSec }).map(deliveryGateStopDetail);
 }
 
 /**
@@ -1793,7 +1785,7 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
       // scope_in_flight, so the operator sees why cards are stuck (PR loop
       // absent or CI red) instead of the generic reason alone.
       if (allScopeCardsSettled(id.path, goal, progress)) {
-        const dgLines = deliveryGateStopDetails(id.path, id.slug);
+        const dgLines = deliveryGateStopDetails(id.path, deps.nowSec());
         stopReason = dgLines.length > 0 ? `scope_in_flight:${dgLines[0]}` : "scope_in_flight";
         break;
       }

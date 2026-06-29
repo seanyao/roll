@@ -154,6 +154,7 @@ export function lifecycleFromFacts(
   // gives the owner a recovery path; the backlog story stays retryable.
   if (terminalOutcome === "handoff_without_tcr") return "failed";
   if (terminalOutcome === "orphan_timeout") return "blocked";
+  if (terminalOutcome === "pr_loop_unavailable") return "blocked";
 
   // ── Unknown ────────────────────────────────────────────────────────
   // A cycle that started but has no known outcome → building (best guess)

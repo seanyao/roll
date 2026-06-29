@@ -13,7 +13,7 @@ import type { CycleCommand, CycleContext, RollEvent, WarmSessionEntry } from "@r
 import { AGENTS } from "../../core/src/agent/specs.js";
 import { classifyComplexity } from "@roll/core";
 import { AWAITING_REVIEW_STATUS_MARKER } from "@roll/spec";
-import { agentWritableRoots, recordExecutionProfile, writeEvaluatorArtifact, runPlannerStage } from "../src/runner/executor.js";
+import { agentWritableRoots, checkMainDirty, recordExecutionProfile, writeEvaluatorArtifact, runPlannerStage } from "../src/runner/executor.js";
 import { evaluateReviewScoreGate, readLatestStoryPeerScore } from "../src/lib/review-score.js";
 import {
   AGENT_ARGV_TODO,
@@ -854,6 +854,18 @@ async function withMissingReasonixCredentials<T>(fn: (home: string) => Promise<T
   }
 }
 
+function initCleanGitRepo(prefix: string): string {
+  const repo = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+  execDirs.push(repo);
+  execFileSync("git", ["init", "-b", "main"], { cwd: repo });
+  execFileSync("git", ["config", "user.email", "roll-test@example.test"], { cwd: repo });
+  execFileSync("git", ["config", "user.name", "Roll Test"], { cwd: repo });
+  writeFileSync(join(repo, "README.md"), "# test\n");
+  execFileSync("git", ["add", "README.md"], { cwd: repo });
+  execFileSync("git", ["commit", "-m", "init"], { cwd: repo });
+  return repo;
+}
+
 describe("executeCommand — command → executor mapping", () => {
   it("create_worktree code 0 → worktree_created; non-zero → worktree_failed", async () => {
     const ok = fakePorts();
@@ -1011,6 +1023,24 @@ describe("executeCommand — command → executor mapping", () => {
     // A merged branch is not "resumable but skipped" → no conflict ALERT.
     const alert = (calls["alert"] ?? []).map((a) => (a as unknown[])[1]).join("\n");
     expect(alert).not.toContain("resume-prior-work");
+  });
+
+  it("FIX-1037: a prior branch whose PR is CLOSED is not resumed", async () => {
+    delete process.env[RESUME_DISABLED_ENV];
+    const base = resumePorts();
+    const { ports, calls } = resumePorts({
+      github: {
+        ...base.ports.github,
+        prState: vi.fn(async () => "CLOSED"),
+      },
+    });
+    const r = await executeCommand({ kind: "resume_worktree", storyId: "US-RUN-001" }, ports, CTX);
+    expect(r.event).toBeUndefined();
+    expect(ports.git.resetWorktreeHard).not.toHaveBeenCalled();
+    expect(ports.git.branchCleanlyRebasesOntoMain).not.toHaveBeenCalled();
+    const alert = (calls["alert"] ?? []).map((a) => (a as unknown[])[1]).join("\n");
+    expect(alert).toContain("skips prior branch loop/cycle-20260614-195600-25595 because its PR is CLOSED");
+    expect(alert).toContain("origin/main");
   });
 
   it("resume: a failed re-point (reset --hard non-zero) leaves the cycle fresh on origin/main + an ALERT", async () => {
@@ -1349,6 +1379,77 @@ describe("executeCommand — command → executor mapping", () => {
     const { ports } = fakePorts();
     const r = await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);
     expect(r.event).toEqual({ type: "agent_exited", exit: 0, timedOut: false });
+  });
+
+  it("FIX-1037: checkMainDirty ignores .roll metadata dirt but reports product checkout dirt", async () => {
+    const repo = initCleanGitRepo("roll-main-dirty-probe-");
+    mkdirSync(join(repo, ".roll", "loop"), { recursive: true });
+    writeFileSync(join(repo, ".roll", "loop", "events.ndjson"), "{}\n");
+    writeFileSync(join(repo, "leaked-product.ts"), "export const leaked = true;\n");
+
+    await expect(checkMainDirty(repo)).resolves.toEqual(["leaked-product.ts"]);
+  });
+
+  it("FIX-1037: spawn_agent blocks before builder when main checkout is already dirty", async () => {
+    const repo = initCleanGitRepo("roll-main-dirty-pre-");
+    mkdirSync(join(repo, ".roll", "loop"), { recursive: true });
+    writeFileSync(join(repo, "pre-spawn-leak.ts"), "export const dirty = true;\n");
+    const wt = join(repo, ".roll", "loop", "wt");
+    mkdirSync(wt);
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      paths: {
+        ...base.ports.paths,
+        worktreePath: wt,
+        eventsPath: join(repo, ".roll", "loop", "events.ndjson"),
+        alertsPath: join(repo, ".roll", "loop", "alerts.log"),
+      },
+      agentSpawn: vi.fn(async () => {
+        throw new Error("builder must not start when main is dirty");
+      }),
+    });
+
+    const r = await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);
+
+    expect(r.event).toEqual({ type: "agent_exited", exit: 1, timedOut: false });
+    expect(r.ctxPatch).toMatchObject({ mainDirty: true });
+    expect(ports.agentSpawn).not.toHaveBeenCalled();
+    const dirty = (calls["event"] ?? [])
+      .map((a) => (a as unknown[])[1] as { type?: string; phase?: string; files?: string[] })
+      .find((e) => e.type === "sandbox:main_dirty");
+    expect(dirty).toMatchObject({ phase: "pre-spawn", files: ["pre-spawn-leak.ts"] });
+    expect((calls["alert"] ?? []).map((a) => (a as unknown[])[1]).join("\n")).toContain("main checkout dirty at pre-spawn");
+  });
+
+  it("FIX-1037: spawn_agent records post-spawn main checkout pollution as sandbox dirt", async () => {
+    const repo = initCleanGitRepo("roll-main-dirty-post-");
+    mkdirSync(join(repo, ".roll", "loop"), { recursive: true });
+    const wt = join(repo, ".roll", "loop", "wt");
+    mkdirSync(wt);
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      paths: {
+        ...base.ports.paths,
+        worktreePath: wt,
+        eventsPath: join(repo, ".roll", "loop", "events.ndjson"),
+        alertsPath: join(repo, ".roll", "loop", "alerts.log"),
+      },
+      agentSpawn: vi.fn(async () => {
+        writeFileSync(join(repo, "post-spawn-leak.ts"), "export const dirty = true;\n");
+        return { stdout: "done", stderr: "", exitCode: 0, timedOut: false };
+      }),
+    });
+
+    const r = await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);
+
+    expect(r.event).toEqual({ type: "agent_exited", exit: 0, timedOut: false });
+    expect(r.ctxPatch).toMatchObject({ mainDirty: true });
+    const dirty = (calls["event"] ?? [])
+      .map((a) => (a as unknown[])[1] as { type?: string; phase?: string; files?: string[] })
+      .find((e) => e.type === "sandbox:main_dirty");
+    expect(dirty).toMatchObject({ phase: "post-spawn", files: ["post-spawn-leak.ts"] });
   });
 
   it("US-OBS-028: spawn_agent persists normalized pi tool signals for replay", async () => {
@@ -1841,6 +1942,13 @@ describe("executeCommand — command → executor mapping", () => {
     const { ports } = fakePorts();
     const r = await executeCommand({ kind: "capture_facts" }, ports, CTX);
     expect(r.event).toMatchObject({ type: "facts_captured", facts: { commitsAhead: 3, usedWorktree: true } });
+  });
+
+  it("FIX-1037: capture_facts carries mainDirty into captured facts", async () => {
+    const { ports } = fakePorts();
+    const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, mainDirty: true });
+    expect(r.event).toMatchObject({ type: "facts_captured", facts: { commitsAhead: 3, mainDirty: true } });
+    expect(r.ctxPatch).toMatchObject({ mainDirty: true });
   });
 
   it("FIX-252: capture_facts records local main drift so zero branch commits cannot become idle", async () => {
@@ -3538,6 +3646,12 @@ describe("agentWritableRoots — FIX-326: a sandboxed agent can write the git-in
     // The git-common-dir is the FIX-326 grant; it always exists in any git repo
     // (incl. CI's fresh clone, where .roll/ is absent — so don't assert on .roll).
     expect(roots).toContain(common);
+  });
+
+  it("FIX-1037: excludes the repo root while allowing only .roll, alert dir, and git common-dir", () => {
+    const repo = realpathSync(execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim());
+    const roots = agentWritableRoots(repo, join(repo, ".roll", "loop", "alerts", "x.md"));
+    expect(roots).not.toContain(repo);
   });
 });
 

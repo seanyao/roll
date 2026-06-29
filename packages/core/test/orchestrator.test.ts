@@ -133,6 +133,21 @@ describe("FIX-244 — phantom-failure classification (published terminal)", () =
       classifyCaptured({ usedWorktree: true, agentExit: 1, timedOut: false, commitsAhead: 3, prState: "OPEN" }),
     ).toBe("published");
   });
+  it("FIX-1037: mainDirty blocks non-zero + commits + OPEN PR before phantom-publish credit", () => {
+    expect(
+      classifyCaptured({ usedWorktree: true, agentExit: 1, timedOut: false, commitsAhead: 3, prState: "OPEN", mainDirty: true }),
+    ).toBe("failed");
+  });
+  it("FIX-1037: mainDirty blocks gateBlocked + commits + existing PR before publish credit", () => {
+    expect(
+      classifyCaptured({ usedWorktree: true, agentExit: 0, gateBlocked: true, timedOut: false, commitsAhead: 3, prState: "MERGED", mainDirty: true }),
+    ).toBe("failed");
+  });
+  it("FIX-1037: mainDirty blocks successful commit work before the publish ladder", () => {
+    expect(
+      classifyCaptured({ usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 3, mainDirty: true }),
+    ).toBe("failed");
+  });
   it("non-zero exit + commits + already-MERGED PR → published (backfill credits it)", () => {
     expect(
       classifyCaptured({ usedWorktree: true, agentExit: 1, timedOut: false, commitsAhead: 3, prState: "MERGED" }),

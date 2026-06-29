@@ -226,6 +226,8 @@ export interface CapturedFacts {
   commitsAhead: number;
   /** FIX-252: commits on local main that are not on origin/main. */
   mainAhead?: number;
+  /** FIX-1037: main checkout has uncommitted/untracked product-code dirt. */
+  mainDirty?: boolean;
   /** FIX-244: PR state for the cycle branch ("OPEN"/"MERGED"/...), probed by the
    *  capture step ONLY when the exit is non-zero with commits ahead — the
    *  phantom-failure check. Absent = not probed / no PR. */
@@ -251,6 +253,10 @@ export interface CapturedFacts {
 export function classifyCaptured(facts: CapturedFacts): V2CycleStatus {
   if (facts.timedOut) return "blocked";
   if (!facts.usedWorktree) return "failed";
+  // FIX-1037: main checkout pollution is a sandbox/runner boundary breach. It
+  // must fail before any "agent did real work" or "existing PR" branch can
+  // publish, otherwise an escaped builder can both dirty main and still ship.
+  if (facts.mainDirty === true) return "failed";
   // Gate-blocked cycles (attest/peer policy rejection) are always failures —
   // the agent's work was withheld by policy, not by a code defect. They MUST
   // NOT enter the publish ladder.
@@ -676,6 +682,8 @@ export interface CycleContext {
    *  Set by the executor before the publish phase. When false, the published PR
    *  has no merge guardian and the cycle must NOT write delivered. */
   prLoopHealthy?: boolean;
+  /** FIX-1037: runner observed dirty main checkout before/after builder spawn. */
+  mainDirty?: boolean;
 }
 
 /** Minimal context for building a terminal cycle:end event + runs row. */

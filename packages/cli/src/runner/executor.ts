@@ -1799,10 +1799,14 @@ export async function executeCommand(
         }
         return cause;
       };
+      const rawArtifactAttempts = new Map<string, number>();
       const savePeerRawOutput = (peer: string, stage: "score" | "review", stdout: string, stderr: string): string => {
+        const key = `${peer}:${stage}`;
+        const attempt = (rawArtifactAttempts.get(key) ?? 0) + 1;
+        rawArtifactAttempts.set(key, attempt);
         const peerDir = join(dirname(ports.paths.eventsPath), "cycle-logs", ctx.cycleId ?? "cycle", "peer");
         mkdirSync(peerDir, { recursive: true });
-        const artifactPath = join(peerDir, `${peer}.${stage}.raw.txt`);
+        const artifactPath = join(peerDir, `${peer}.${stage}.attempt-${attempt}.raw.txt`);
         writeFileSync(artifactPath, `--- stdout ---\n${stdout}\n--- stderr ---\n${stderr}\n`);
         return artifactPath;
       };
@@ -1897,14 +1901,14 @@ export async function executeCommand(
           const raw = res !== null ? `${res.stdout}\n${res.stderr}` : "";
           const artifactPath = res !== null ? savePeerRawOutput(peer, "review", res.stdout, res.stderr) : undefined;
           const cause = await attributeBlockCause(peer, "timeout", raw, "review");
-          emitConsult("timeout", cause ?? undefined, raw, artifactPath);
+          emitConsult("timeout", cause ?? undefined, artifactPath !== undefined ? "timeout; raw output saved" : "timeout", artifactPath);
           return null;
         }
         if (res.exitCode !== 0) {
           const raw = `${res.stdout}\n${res.stderr}`;
           const artifactPath = savePeerRawOutput(peer, "review", res.stdout, res.stderr);
           const cause = await attributeBlockCause(peer, "error", raw, "review");
-          emitConsult("error", cause ?? undefined, raw, artifactPath);
+          emitConsult("error", cause ?? undefined, `exit code ${res.exitCode}; raw output saved`, artifactPath);
           return null;
         }
         const vm = /VERDICT:\s*(agree|refine|object)/i.exec(res.stdout);
@@ -2139,12 +2143,13 @@ export async function executeCommand(
             return { outcome: "auth-block", detail };
           }
           if (res === null || res.timedOut) {
-            const detail = res !== null ? `${res.stdout}\n${res.stderr}` : "";
+            const raw = res !== null ? `${res.stdout}\n${res.stderr}` : "";
             let artifactPath: string | undefined;
             if (res !== null) {
               artifactPath = savePeerRawOutput(peer, "score", res.stdout, res.stderr);
             }
-            const blockCause = await attributeBlockCause(peer, "timeout", detail, "score");
+            const blockCause = await attributeBlockCause(peer, "timeout", raw, "score");
+            const detail = artifactPath !== undefined ? "timeout; raw output saved" : "timeout";
             // external block (auth/network) surfaced by attributeBlockCause → auth-block;
             // genuine slowness with no block signature → timeout.
             return blockCause === "auth" || blockCause === "network"
@@ -2152,9 +2157,10 @@ export async function executeCommand(
               : { outcome: "timeout", detail, artifactPath };
           }
           if (res.exitCode !== 0) {
-            const detail = `${res.stdout}\n${res.stderr}`;
+            const raw = `${res.stdout}\n${res.stderr}`;
             const artifactPath = savePeerRawOutput(peer, "score", res.stdout, res.stderr);
-            const blockCause = await attributeBlockCause(peer, "error", detail, "score");
+            const blockCause = await attributeBlockCause(peer, "error", raw, "score");
+            const detail = `exit code ${res.exitCode}; raw output saved`;
             return blockCause === "auth" || blockCause === "network"
               ? { outcome: "auth-block", detail, artifactPath }
               : { outcome: "exit-error", detail, artifactPath };
@@ -2165,7 +2171,7 @@ export async function executeCommand(
             // SCORE:/VERDICT:/RATIONALE: protocol — this is unparseable, NOT a
             // timeout/error. Previously silently discarded; now observable.
             const artifactPath = savePeerRawOutput(peer, "score", res.stdout, res.stderr);
-            return { outcome: "unparseable", detail: res.stdout.slice(0, 500), artifactPath };
+            return { outcome: "unparseable", detail: "unparseable score protocol", artifactPath };
           }
           return { outcome: "parsed", parsed: { ...parsed, cost: peerReviewCost(peer, res.stdout) } };
         };

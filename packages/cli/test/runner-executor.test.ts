@@ -3745,6 +3745,56 @@ describe("V4 fair pool — prior auth failures do not exclude peers", () => {
     expect(events.some((e) => e.type === "pair:excluded")).toBe(false);
   });
 
+  it("US-OBS-035: wrong-order score output is a failed returned attempt with raw artifact", async () => {
+    const wt = scoreWorktree();
+    const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-obs035-score-rt-")));
+    execDirs.push(rt);
+    const eventsPath = join(rt, "events.ndjson");
+    writeFileSync(eventsPath, "", "utf8");
+    let spawnCount = 0;
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      repoCwd: rt,
+      paths: { ...base.ports.paths, worktreePath: wt, eventsPath, alertsPath: join(rt, "alerts.log") },
+      installedAgents: () => ["claude", "pi"],
+      agentSpawn: vi.fn(async () => {
+        spawnCount += 1;
+        if (spawnCount === 1) {
+          return { stdout: "VERDICT: good\nRATIONALE: clean\nSCORE: 8\n", stderr: "", exitCode: 0, timedOut: false };
+        }
+        return { stdout: "SCORE: 8\nVERDICT: good\nRATIONALE: corrected order\n", stderr: "", exitCode: 0, timedOut: false };
+      }),
+      events: {
+        ...base.ports.events,
+        appendEvent: vi.fn((_path: string, event: RollEvent) => {
+          writeFileSync(eventsPath, `${JSON.stringify(event)}\n`, { flag: "a" });
+        }),
+      },
+    });
+
+    await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, agent: "claude", startSec: 1 });
+
+    const events = readFileSync(eventsPath, "utf8")
+      .split("\n")
+      .filter((l) => l.trim() !== "")
+      .map((l) => JSON.parse(l) as RollEvent);
+    const scoreFailure = events.find((e) => e.type === "pair:score-failure") as Extract<RollEvent, { type: "pair:score-failure" }> | undefined;
+    expect(scoreFailure).toEqual(expect.objectContaining({
+      peer: "pi",
+      cause: "unparseable",
+      detail: "unparseable score protocol",
+      stage: "score",
+    }));
+    expect(scoreFailure?.artifactPath).toContain("pi.score.attempt-1.raw.txt");
+    expect(readFileSync(scoreFailure?.artifactPath ?? "", "utf8")).toContain("VERDICT: good\nRATIONALE: clean\nSCORE: 8");
+    expect(events).not.toContainEqual(expect.objectContaining({
+      type: "pair:score",
+      peer: "pi",
+      score: 8,
+      stage: "score",
+    }));
+  });
+
   it("FIX-404: score credential gate skips a missing-key scorer before spawn and lets another scorer win", async () => {
     const wt = scoreWorktree();
     const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-404-score-rt-")));

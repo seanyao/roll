@@ -261,10 +261,10 @@ function appendPairEvent(e: PairEvent): void {
   }
 }
 
-function writeManualScoreRawArtifact(projectPath: string, cycleId: string, peer: string, stage: "score" | "design", stdout: string): string {
+function writeManualScoreRawArtifact(projectPath: string, cycleId: string, peer: string, stage: "score" | "design", attempt: number, stdout: string): string {
   const dir = join(projectPath, ".roll", "peer");
   mkdirSync(dir, { recursive: true });
-  const artifactPath = join(dir, `cycle-${cycleId}.${stage}.${peer}.raw.txt`);
+  const artifactPath = join(dir, `cycle-${cycleId}.${stage}.${peer}.attempt-${attempt}.raw.txt`);
   writeFileSync(artifactPath, stdout, "utf8");
   return artifactPath;
 }
@@ -364,17 +364,24 @@ export async function pairScore(rest: string[], deps: PairScoreCmdDeps = default
       }
     } catch { /* best-effort */ }
   }
+  const rawArtifactAttempts = new Map<string, number>();
+  const saveManualRawArtifact = (peer: string, stdout: string): string => {
+    const key = `${peer}:${scoreStage}`;
+    const attempt = (rawArtifactAttempts.get(key) ?? 0) + 1;
+    rawArtifactAttempts.set(key, attempt);
+    return writeManualScoreRawArtifact(process.cwd(), cycleId, peer, scoreStage, attempt, stdout);
+  };
   const scorePeer = async (peer: string, s: string, t: number) => {
     const prompt = design ? (buildDesignScorePrompt as (s: string) => string)(s) : buildPairScorePrompt(s, evalContractSummary || undefined);
     const res = await deps.spawnReviewer({ agent: peer, projectPath: process.cwd(), prompt, timeoutMs: t });
     if (res.status !== "ok") {
-      const artifactPath = res.stdout.trim() !== "" ? writeManualScoreRawArtifact(process.cwd(), cycleId, peer, scoreStage, res.stdout) : undefined;
+      const artifactPath = res.stdout.trim() !== "" ? saveManualRawArtifact(peer, res.stdout) : undefined;
       appendPairEvent({
         type: "pair:score-failure",
         cycleId,
         peer,
         cause: res.status === "timeout" ? "timeout" : "exit-error",
-        detail: res.status === "error" ? res.reason : res.stdout.slice(0, 200),
+        detail: res.status === "error" ? res.reason : artifactPath !== undefined ? "timeout; raw output saved" : "timeout",
         ...(artifactPath !== undefined ? { artifactPath } : {}),
         stage: scoreStage,
         ts: Date.now(),
@@ -383,13 +390,13 @@ export async function pairScore(rest: string[], deps: PairScoreCmdDeps = default
     }
     const parsed = parsePairScoreOutput(res.stdout);
     if (parsed === null) {
-      const artifactPath = writeManualScoreRawArtifact(process.cwd(), cycleId, peer, scoreStage, res.stdout);
+      const artifactPath = saveManualRawArtifact(peer, res.stdout);
       appendPairEvent({
         type: "pair:score-failure",
         cycleId,
         peer,
         cause: "unparseable",
-        detail: res.stdout.slice(0, 200),
+        detail: "unparseable score protocol",
         artifactPath,
         stage: scoreStage,
         ts: Date.now(),

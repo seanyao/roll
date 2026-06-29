@@ -623,3 +623,66 @@ describe("FIX-330 — release transaction is re-runnable and self-healing", () =
     expect(steps.at(-1)).toBe("tag-push");
   });
 });
+
+describe("FIX-1030 — roll release --json reports real changelog readiness", () => {
+  it("reports changelogReady=true when Unreleased has bullet entries", async () => {
+    const { deps } = fakeDeps({ readChangelog: () => "# C\n\n## Unreleased\n\n- thing one\n" });
+    let out = "";
+    const so = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((s: string) => ((out += s), true)) as typeof process.stdout.write;
+    try {
+      const code = await releaseCommand(["--json"], deps);
+      expect(code).toBe(0);
+    } finally {
+      process.stdout.write = so;
+    }
+    const parsed = JSON.parse(out);
+    expect(parsed.changelogReady).toBe(true);
+  });
+
+  it("reports changelogReady=true when the next-version section is already folded", async () => {
+    const { deps } = fakeDeps({ readChangelog: () => "# C\n\n## v3.613.1 — 2026-06-13\n\n- prewritten\n" });
+    let out = "";
+    const so = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((s: string) => ((out += s), true)) as typeof process.stdout.write;
+    try {
+      const code = await releaseCommand(["--json"], deps);
+      expect(code).toBe(0);
+    } finally {
+      process.stdout.write = so;
+    }
+    const parsed = JSON.parse(out);
+    expect(parsed.nextVersion).toBe("3.613.1");
+    expect(parsed.changelogReady).toBe(true);
+  });
+
+  it("reports changelogReady=false when Unreleased is empty", async () => {
+    const { deps } = fakeDeps({ readChangelog: () => "# C\n\n## Unreleased\n\n## v1 — d\n\n- old\n" });
+    let out = "";
+    const so = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((s: string) => ((out += s), true)) as typeof process.stdout.write;
+    try {
+      const code = await releaseCommand(["--json"], deps);
+      expect(code).toBe(0);
+    } finally {
+      process.stdout.write = so;
+    }
+    const parsed = JSON.parse(out);
+    expect(parsed.changelogReady).toBe(false);
+  });
+
+  it("reports changelogReady=false when changelog is unreadable", async () => {
+    const { deps } = fakeDeps({ readChangelog: () => { throw new Error("ENOENT"); } });
+    let out = "";
+    const so = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((s: string) => ((out += s), true)) as typeof process.stdout.write;
+    try {
+      const code = await releaseCommand(["--json"], deps);
+      expect(code).toBe(0);
+    } finally {
+      process.stdout.write = so;
+    }
+    const parsed = JSON.parse(out);
+    expect(parsed.changelogReady).toBe(false);
+  });
+});

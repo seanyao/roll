@@ -42,7 +42,7 @@ import {
   type RunRow,
   type ReviewScoreReportEntry,
 } from "@roll/core";
-import { classifyStatus, type RollEvent } from "@roll/spec";
+import { classifyStatus, type RollEvent, type CycleRoleSummary } from "@roll/spec";
 import {
   captureScreenshot,
   collectEvidence,
@@ -233,6 +233,25 @@ export function buildProcessArchive(storyId: string, readers: ProcessReaders): P
   if (missing.length > 0) archive.missing = missing;
   return archive;
 }
+
+
+/**
+ * US-OBS-034 — read the cached CycleRoleSummary (summary.json) from a cycle's
+ * log directory. Returns undefined when the file is absent or unparseable, so
+ * the attest report gracefully degrades.
+ */
+export function readCycleRoleSummary(projectPath: string, cycleId: string): CycleRoleSummary | undefined {
+  const rt = join(projectPath, '.roll', 'loop');
+  const summaryPath = join(rt, 'cycle-logs', cycleId, 'summary.json');
+  try {
+    if (!existsSync(summaryPath)) return undefined;
+    const raw = readFileSync(summaryPath, 'utf8');
+    return JSON.parse(raw) as CycleRoleSummary;
+  } catch {
+    return undefined;
+  }
+}
+
 
 const STATUSES: readonly AcStatus[] = ["pass", "readonly", "partial", "fail", "blocked", "claimed", "missing"];
 const execFileAsync = promisify(execFile);
@@ -1089,6 +1108,17 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     warn("process archive build failed — report omits the process trace");
     processArchive = undefined;
   }
+  const cycleId = processArchive?.cycleId;
+  const cycleRoleSummary = cycleId !== undefined ? readCycleRoleSummary(projectPath, cycleId) : undefined;
+  let cycleRoleSummaryHref: string | undefined;
+  if (cycleRoleSummary !== undefined && cycleId !== undefined) {
+    try {
+      const summaryPath = join(projectPath, '.roll', 'loop', 'cycle-logs', cycleId, 'summary.json');
+      cycleRoleSummaryHref = relative(realpathSync(runDir), realpathSync(summaryPath));
+    } catch {
+      cycleRoleSummaryHref = undefined;
+    }
+  }
   const html = renderReport({
     storyId,
     title: `${storyId} — Acceptance Evidence`,
@@ -1099,6 +1129,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     ...(beforeAfter.length > 0 ? { beforeAfter } : {}),
     ...(afterOnly.length > 0 ? { afterOnly: afterOnly.map((a) => a.shot) } : {}),
     ...(processArchive !== undefined ? { process: processArchive } : {}),
+    ...(cycleRoleSummary !== undefined ? { cycleRoleSummary, cycleRoleSummaryHref } : {}),
     ...(docGap !== undefined ? { docGap } : {}),
     ...(reviewScores.length > 0 ? { reviewScores } : {}),
     ...(reviewScoreTrend !== undefined ? { reviewScoreTrend } : {}),

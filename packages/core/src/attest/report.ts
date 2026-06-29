@@ -20,6 +20,7 @@
  * Deletion-not-placeholder: the screenshot <figure> renders ONLY when a
  * screenshot evidence ref exists (no placeholder image, no warning text — D6).
  */
+import { type CycleRoleSummary, type CycleRoleAttempt, type CycleRoleName, type CycleRoleAttemptState } from "@roll/spec";
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "../html/chrome.js";
 import { ANSI_CSS } from "./ansi-html.js";
 
@@ -173,6 +174,10 @@ export interface ReportInput {
   /** US-ATTEST-014 — the cycle process archive (timeline + signal layer +
    *  folded transcript). Absent ⇒ section trimmed; `manual` delivery degrades. */
   process?: ProcessArchive;
+  /** US-OBS-034 — cycle role summary (Execution Cast). Absent ⇒ block trimmed. */
+  cycleRoleSummary?: CycleRoleSummary;
+  /** Relative href to summary.json artifact (for artifact links in the Execution Cast block). */
+  cycleRoleSummaryHref?: string;
   /** US-META-010 — doc/code/product alignment shadow warning. */
   docGap?: DocGapWarning;
   /** US-ATTEST-011 — screenshots an unattended cycle's Gate produced for itself
@@ -512,6 +517,131 @@ function reviewScoreBlock(entries: ReportInput["reviewScores"], trend: string | 
   return `<details class="reviewscore"><summary>${bi("Review Score", "评审分")}（${entries.length}）</summary>\n${trendLine}<ul>\n${li}\n</ul>\n</details>`;
 }
 
+
+
+/**
+ * US-OBS-034 — Execution Cast: render the cycle role chain as an HTML block.
+ * Shows Builder, Peer Reviewer(s), accepted Evaluator/Scorer, parse failures,
+ * and Attest Gate. Degrades gracefully when no summary is available.
+ * Links to summary.json / summary.md when artifact paths are available.
+ */
+function executionCastBlock(cycleRoleSummary: CycleRoleSummary | undefined, summaryHref?: string): string {
+  if (cycleRoleSummary === undefined) {
+    return `<section class="execution-cast"><h2>🎭 ${bi("Execution Cast", "执行阵容")}</h2>
+<p class="text-muted">${bi("Role summary unavailable — cycle did not produce a role cast.", "角色摘要不可用——cycle 未产生角色阵容。")}</p></section>`;
+  }
+
+  const byRole = new Map<CycleRoleName, CycleRoleAttempt[]>();
+  for (const r of cycleRoleSummary.roles) {
+    const list = byRole.get(r.role) ?? [];
+    list.push(r);
+    byRole.set(r.role, list);
+  }
+
+  const roleLabel = (role: CycleRoleName): string => {
+    switch (role) {
+      case "builder": return bi("Builder", "构建者");
+      case "peer_reviewer": return bi("Peer Reviewer", "同行评审");
+      case "evaluator": return bi("Evaluator", "评审员");
+      case "attest_gate": return bi("Attest Gate", "验收门禁");
+      case "planner": return bi("Planner", "规划者");
+    }
+  };
+
+  const stateBadge = (state: CycleRoleAttemptState): string => {
+    switch (state) {
+      case "accepted": return `<span class="cast-badge cast-ok">✅ ${bi("Accepted", "已通过")}</span>`;
+      case "rejected": return `<span class="cast-badge cast-fail">❌ ${bi("Rejected", "已拒绝")}</span>`;
+      case "failed": return `<span class="cast-badge cast-fail">❌ ${bi("Failed", "失败")}</span>`;
+      case "returned": return `<span class="cast-badge cast-warn">🔄 ${bi("Returned", "已退回")}</span>`;
+      case "selected": return `<span class="cast-badge cast-pending">⏳ ${bi("Selected", "已选中")}</span>`;
+      case "started": return `<span class="cast-badge cast-pending">▶️ ${bi("Started", "已开始")}</span>`;
+      case "parsed": return `<span class="cast-badge cast-ok">📋 ${bi("Parsed", "已解析")}</span>`;
+      case "not_required": return `<span class="cast-badge cast-muted">— ${bi("Not required", "无需")}</span>`;
+      case "not_available": return `<span class="cast-badge cast-fail">⛔ ${bi("Not available", "不可用")}</span>`;
+    }
+  };
+
+  const rows: string[] = [];
+
+  // Builder (always first)
+  const builders = (byRole.get("builder") ?? []).filter((r) => r.agent !== null);
+  for (const b of builders) {
+    const agent = esc(b.agent ?? "—");
+    const model = b.model ? ` · <span class="text-muted">${esc(b.model)}</span>` : "";
+    rows.push(
+      `<div class="cast-row cast-builder"><span class="cast-role-label">${roleLabel("builder")}</span>` +
+      `<span class="cast-agent"><code>${agent}</code>${model}</span>` +
+      `<span class="cast-state">${stateBadge(b.state)}</span></div>`,
+    );
+  }
+
+  // Peer Reviewers
+  const reviewers = byRole.get("peer_reviewer") ?? [];
+  for (const r of reviewers) {
+    const agent = r.agent !== null ? `<code>${esc(r.agent)}</code>` : `<span class="text-muted">${bi("none", "无")}</span>`;
+    const detail: string[] = [];
+    if (r.verdict) detail.push(esc(r.verdict));
+    if (r.findings !== undefined) detail.push(`${r.findings} ${bi("findings", "意见")}`);
+    if (r.cause) detail.push(esc(r.cause));
+    const detailHtml = detail.length > 0 ? ` · <span class="cast-verdict">${detail.join(" · ")}</span>` : "";
+    rows.push(
+      `<div class="cast-row cast-peer"><span class="cast-role-label">${roleLabel("peer_reviewer")}</span>` +
+      `<span class="cast-agent">${agent}${detailHtml}</span>` +
+      `<span class="cast-state">${stateBadge(r.state)}</span></div>`,
+    );
+  }
+
+  // Evaluators: accepted first, then failed
+  const evaluators = byRole.get("evaluator") ?? [];
+  const acceptedEval = evaluators.filter((e) => e.state === "accepted");
+  const failedEval = evaluators.filter((e) => e.state !== "accepted");
+  for (const e of acceptedEval) {
+    const agent = e.agent !== null ? `<code>${esc(e.agent)}</code>` : `<span class="text-muted">—</span>`;
+    const score = e.score !== undefined ? ` · <strong>${e.score}/10</strong>` : "";
+    const verdict = e.verdict ? ` · ${esc(e.verdict)}` : "";
+    rows.push(
+      `<div class="cast-row cast-evaluator"><span class="cast-role-label">${roleLabel("evaluator")}</span>` +
+      `<span class="cast-agent">${agent}${score}${verdict}</span>` +
+      `<span class="cast-state">${stateBadge(e.state)}</span></div>`,
+    );
+  }
+  for (const e of failedEval) {
+    const agent = e.agent !== null ? `<code>${esc(e.agent)}</code>` : `<span class="text-muted">—</span>`;
+    const cause = e.cause ? ` · <span class="cast-fail-text">${esc(e.cause)}</span>` : "";
+    rows.push(
+      `<div class="cast-row cast-evaluator cast-failed"><span class="cast-role-label">${bi("Evaluator (parse failure)", "评审解析失败")}</span>` +
+      `<span class="cast-agent">${agent}${cause}</span>` +
+      `<span class="cast-state">${stateBadge(e.state)}</span></div>`,
+    );
+  }
+
+  // Attest Gate
+  const gates = byRole.get("attest_gate") ?? [];
+  for (const g of gates) {
+    const verdict = g.verdict ? esc(g.verdict) : "—";
+    const detail = g.detail ? ` · <span class="text-muted">${esc(g.detail)}</span>` : "";
+    rows.push(
+      `<div class="cast-row cast-gate"><span class="cast-role-label">${roleLabel("attest_gate")}</span>` +
+      `<span class="cast-agent"><code>${verdict}</code>${detail}</span>` +
+      `<span class="cast-state">${stateBadge(g.state)}</span></div>`,
+    );
+  }
+
+  // Summary artifact links
+  const sourcesHtml = summaryHref
+    ? `<p class="cast-links text-muted">📄 <a href="${esc(summaryHref)}">summary.json</a> · <a href="${esc(summaryHref.replace(/\.json$/, ".md"))}">summary.md</a></p>`
+    : "";
+
+  return `<section class="execution-cast"><h2>🎭 ${bi("Execution Cast", "执行阵容")}</h2>
+<p class="text-muted">${bi("Cycle", "周期")} <code>${esc(cycleRoleSummary.cycleId)}</code> · ${bi("Profile", "画像")}: ${esc(cycleRoleSummary.executionProfile)}</p>
+<div class="cast-grid">
+${rows.join("\n")}
+</div>
+${sourcesHtml}
+</section>`;
+}
+
 /** Render the single-file report. Pure: same input → same bytes. */
 export function renderReport(input: ReportInput): string {
   const enforced = input.items.map(enforceRedLine);
@@ -622,6 +752,20 @@ details.transcript { margin-top:8px; border:1px solid var(--line); border-radius
 details.transcript summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
 details.transcript .orig-path { font-size:12.5px; color:var(--muted); margin:6px 0; }
 section.closing { margin-top:32px; border:none; background:none; border-radius:0; padding:8px 0 0; border-top:3px double var(--line); }
+section.execution-cast { margin-top:24px; padding:6px 18px 12px; border:1px solid var(--line); border-radius:8px; background:var(--bg-raise); }
+section.execution-cast h2 { margin:0 0 4px; font-size:15px; }
+.cast-grid { display:grid; grid-template-columns:auto 1fr auto; gap:6px 12px; font-size:13.5px; }
+.cast-row { display:contents; }
+.cast-row > * { padding:3px 0; }
+.cast-role-label { color:var(--muted); font-weight:600; font-size:12.5px; white-space:nowrap; }
+.cast-agent { font-size:13px; }
+.cast-state { text-align:right; white-space:nowrap; }
+.cast-badge { display:inline-block; padding:1px 6px; border-radius:4px; font-size:12px; line-height:1.4; }
+.cast-ok { color:var(--pass); } .cast-fail { color:var(--fail); } .cast-warn { color:var(--warn); }
+.cast-pending { color:var(--info); } .cast-muted { color:var(--muted); }
+.cast-fail-text { color:var(--fail); font-size:12.5px; }
+.cast-links { margin:8px 0 0; font-size:12.5px; }
+.cast-links a { color:var(--accent); }
 ${ANSI_CSS}
 </style>
 ${CHROME_SCRIPT}
@@ -635,6 +779,7 @@ ${CHROME_CONTROLS}
 <div class="seal" aria-hidden="true"><span>ROLL</span>验讫</div>
 </header>
 ${cardContextBlock(input.context)}
+${executionCastBlock(input.cycleRoleSummary, input.cycleRoleSummaryHref)}
 <p>${summary}</p>
 ${items.map(acSection).join("\n")}
 ${beforeAfterBlock(input.beforeAfter, input.afterOnly)}

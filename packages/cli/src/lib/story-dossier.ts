@@ -15,7 +15,7 @@
  * data-complete form.
  */
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
-import { type DeliveryLadder, parseEventLine, type StoryEvidenceFlags } from "@roll/spec";
+import { type CycleRoleSummary, type CycleRoleAttempt, type CycleRoleName, type CycleRoleAttemptState, type DeliveryLadder, parseEventLine, type StoryEvidenceFlags } from "@roll/spec";
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join as joinPath, resolve as resolvePath, sep } from "node:path";
@@ -193,6 +193,8 @@ export interface StoryDossierInput {
    *  hrefs). Backs the per-AC evidence thumbnail + observable-gap detection so
    *  an observable AC with captured pixels is never falsely flagged a gap. */
   screenshotFiles?: string[];
+  /** US-OBS-034 — cycle role summary (Execution Cast) for the dossier page. */
+  cycleRoleSummary?: CycleRoleSummary;
 }
 
 /**
@@ -837,6 +839,82 @@ function acBlocksHtml(rows: readonly AcRow[], screenshotFiles: readonly string[]
   return `<div class="ac-blocks">${rows.map((r) => acBlockHtml(r, screenshotFiles)).join("")}</div>`;
 }
 
+/** US-OBS-034 — Execution Cast block for the story dossier page. */
+function dossierExecutionCastBlock(summary: CycleRoleSummary | undefined): string {
+  if (summary === undefined) return "";
+
+  const byRole = new Map<CycleRoleName, CycleRoleAttempt[]>();
+  for (const r of summary.roles) {
+    const lst = byRole.get(r.role) ?? [];
+    lst.push(r);
+    byRole.set(r.role, lst);
+  }
+
+  const stateBadge = (state: CycleRoleAttemptState): string => {
+    switch (state) {
+      case "accepted": return `<span class="cast-badge cast-ok">✔</span>`;
+      case "rejected": return `<span class="cast-badge cast-fail">✗</span>`;
+      case "failed": return `<span class="cast-badge cast-fail">✗</span>`;
+      case "returned": return `<span class="cast-badge cast-warn">↺</span>`;
+      case "selected": return `<span class="cast-badge cast-pending">◷</span>`;
+      case "started": return `<span class="cast-badge cast-pending">▶</span>`;
+      case "parsed": return `<span class="cast-badge cast-ok">✓</span>`;
+      case "not_required": return `<span class="cast-badge cast-muted">—</span>`;
+      case "not_available": return `<span class="cast-badge cast-fail">⛔</span>`;
+    }
+  };
+
+  const roleLabel = (role: CycleRoleName, state: CycleRoleAttemptState, agent: string | null): string => {
+    if (role === "builder") return bi("Builder", "构建者");
+    if (role === "peer_reviewer") return bi("Peer Reviewer", "同行评审");
+    if (role === "evaluator") return state === "accepted" ? bi("Evaluator", "评审员") : bi("Evaluator (failed)", "评审失败");
+    if (role === "attest_gate") return bi("Attest Gate", "验收门禁");
+    if (role === "planner") return bi("Planner", "规划者");
+    return role;
+  };
+
+  const rows: string[] = [];
+  const makeRow = (role: CycleRoleName, state: CycleRoleAttemptState, agent: string | null, extra: string): string => {
+    const agentHtml = agent !== null ? `<code>${esc(agent)}</code>` : `<span class="text-muted">${bi("none", "无")}</span>`;
+    return `<div class="dc-row"><span class="dc-role">${roleLabel(role, state, agent)}</span>` +
+      `<span class="dc-agent">${agentHtml}${extra !== "" ? ` <span class="text-muted">${extra}</span>` : ""}</span>` +
+      `<span class="dc-state">${stateBadge(state)}</span></div>`;
+  };
+
+  // Builder
+  for (const b of (byRole.get("builder") ?? []).filter((r) => r.agent !== null)) {
+    const extra = b.model ? `${b.model}` : "";
+    rows.push(makeRow("builder", b.state, b.agent, extra));
+  }
+
+  // Peer Reviewers
+  for (const r of (byRole.get("peer_reviewer") ?? [])) {
+    const extra = r.verdict ? `${r.verdict}` : r.cause ? r.cause : "";
+    rows.push(makeRow("peer_reviewer", r.state, r.agent, extra));
+  }
+
+  // Evaluators: accepted first, then failures
+  for (const e of (byRole.get("evaluator") ?? []).filter((r) => r.state === "accepted")) {
+    const extra = e.score !== undefined ? `${e.score}/10 ${e.verdict ?? ""}` : e.verdict ?? "";
+    rows.push(makeRow("evaluator", e.state, e.agent, extra.trim()));
+  }
+  for (const e of (byRole.get("evaluator") ?? []).filter((r) => r.state !== "accepted")) {
+    const extra = e.cause ?? "";
+    rows.push(makeRow("evaluator", e.state, e.agent, extra));
+  }
+
+  // Attest Gate
+  for (const g of (byRole.get("attest_gate") ?? [])) {
+    rows.push(makeRow("attest_gate", g.state, null, g.verdict ?? ""));
+  }
+
+  return `<details class="execution-cast-dossier"><summary>🎭 ${bi("Execution Cast", "执行阵容")} · ${byRole.get("builder")?.[0]?.agent ?? "—"}</summary>
+<div class="dc-grid">${rows.join("")}</div>
+<p class="text-muted cast-footnote">${bi("Cycle", "周期")} <code>${esc(summary.cycleId)}</code> · ${esc(summary.executionProfile)}</p>
+</details>`;
+}
+
+
 /** Render the dossier page. */
 export function renderStoryDossier(d: StoryDossierInput): string {
   const s = d.story;
@@ -892,7 +970,7 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     hasDeliveryEvidence(d.deliveryEvidence) ||
     hasDynamicEvidence(d.dynamicEvidence);
   const delivery = hasDeliveryBody
-    ? banner + deliveryEvidenceHtml(d.deliveryEvidence) + dynamicEvidenceHtml(d.dynamicEvidence) + acBlocks
+    ? banner + dossierExecutionCastBlock(d.cycleRoleSummary) + deliveryEvidenceHtml(d.deliveryEvidence) + dynamicEvidenceHtml(d.dynamicEvidence) + acBlocks
     : `<p class="empty">${bi("Not yet delivered", "尚未交付")}</p>`;
   const corrections = correctionTraceHtml(d.correctionActions);
   const retroContent = scoreBlockHtml(d.reviewScore, d.reviewScoreTrend, d.retro);
@@ -903,6 +981,19 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
     `<title>${esc(s.id)}${s.title !== undefined ? ` — ${esc(s.title)}` : ""}</title>\n` +
     `<style>\n${CHROME_CSS}${DOSSIER_CSS}` +
+    `.execution-cast-dossier { margin:12px 0; border:1px solid var(--line); border-radius:8px; padding:8px 14px; background:var(--bg-raise); }\n` +
+    `.execution-cast-dossier summary { cursor:pointer; font-weight:600; font-size:14px; }\n` +
+    `.dc-grid { display:grid; grid-template-columns:auto 1fr auto; gap:4px 10px; margin:8px 0 0; }\n` +
+    `.dc-row { display:contents; }\n` +
+    `.dc-row > * { padding:2px 0; font-size:13px; }\n` +
+    `.dc-role { color:var(--muted); font-weight:600; font-size:12.5px; white-space:nowrap; }\n` +
+    `.dc-agent { font-size:13px; }\n` +
+    `.dc-state { text-align:right; }\n` +
+    `.cast-badge { display:inline-block; width:18px; text-align:center; }\n` +
+    `.cast-ok { color:var(--pass); } .cast-fail { color:var(--fail); } .cast-warn { color:var(--warn); }\n` +
+    `.cast-pending { color:var(--info); } .cast-muted { color:var(--muted); }\n` +
+    `.cast-footnote { font-size:12px; margin:6px 0 0; }\n` +
+
     `.phase-done { border-left:4px solid var(--pass); } .phase-pending { border-left:4px solid var(--line); }\n` +
     // US-DOSSIER-023: the three delivery rungs on the lifecycle spine — claimed
     // (hatched/hollow, a wish not yet truth) → merged (solid attest-pending teal,
@@ -1312,6 +1403,35 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
   const evidence = storyEvidenceFlags(projectPath, story);
   out.evidence = evidence;
   out.ladder = deriveDeliveryLadder(story, evidence);
+
+  // US-OBS-034 — best-effort read the CycleRoleSummary for this story by
+  // scanning cycle-logs directories for summary.json files that match storyId.
+  try {
+    const cycleLogsDir = joinPath(projectPath, '.roll', 'loop', 'cycle-logs');
+    if (existsSync(cycleLogsDir)) {
+      const cycleDirs = readdirSync(cycleLogsDir, { withFileTypes: true })
+        .filter((d) => d.isDirectory());
+      // Scan in reverse (newest first) and break on first match
+      for (let i = cycleDirs.length - 1; i >= 0; i -= 1) {
+        const entry = cycleDirs[i];
+        if (entry === undefined) continue;
+        const summaryPath = joinPath(cycleLogsDir, entry.name, 'summary.json');
+        if (!existsSync(summaryPath)) continue;
+        try {
+          const raw = readFileSync(summaryPath, 'utf8');
+          const summary = JSON.parse(raw) as CycleRoleSummary;
+          if (summary.storyId === story.id) {
+            out.cycleRoleSummary = summary;
+            break;
+          }
+        } catch {
+          // unparseable — skip this summary
+        }
+      }
+    }
+  } catch {
+    // cycle-logs unavailable — degrade gracefully
+  }
 
   return out;
 }

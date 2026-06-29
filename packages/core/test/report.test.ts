@@ -497,3 +497,74 @@ describe("US-ATTEST-014 — process trace inline", () => {
     expect(html).toContain("&lt;script&gt;");
   });
 });
+
+describe("US-OBS-034 — Execution Cast in attest report", () => {
+  it("includes Execution Cast section when cycleRoleSummary is provided", () => {
+    const summary = {
+      schema: "cycle-role-summary.v1" as const,
+      cycleId: "cycle-001",
+      storyId: "US-X-001",
+      executionProfile: "verified" as const,
+      generatedAt: "2026-06-29T12:00:00Z",
+      builderSessionId: "ses-001",
+      roles: [
+        { role: "builder" as const, agent: "pi", model: "claude-4", state: "accepted" as const, acceptedByGate: false, ts: 1000, logPath: "logs/pi.log" },
+        { role: "peer_reviewer" as const, agent: "reasonix", state: "accepted" as const, verdict: "refine", findings: 2, acceptedByGate: true, ts: 1200 },
+        { role: "evaluator" as const, agent: "deepseek", state: "accepted" as const, score: 8, verdict: "ok", acceptedByGate: true, ts: 1400 },
+        { role: "attest_gate" as const, agent: null, state: "accepted" as const, verdict: "produced", acceptedByGate: false, ts: 1500 },
+      ],
+      gates: { peerGate: "consulted", attestGate: "produced", delivery: "PR #1 merged" },
+      sources: ["events.ndjson", "cycle-logs/cycle-001"],
+    };
+    const html = renderReport({
+      ...BASE,
+      items: [item({ evidence: [{ kind: "test-pass", label: "suite green" }] })],
+      cycleRoleSummary: summary,
+      cycleRoleSummaryHref: "summary.json",
+    });
+    expect(html).toContain("Execution Cast");
+    expect(html).toContain("执行阵容");
+    expect(html).toContain("pi");          // builder agent
+    expect(html).toContain("reasonix");    // peer reviewer
+    expect(html).toContain("deepseek");    // evaluator
+    expect(html).toContain("produced");    // attest gate verdict
+    expect(html).toContain("summary.json"); // artifact link
+    expect(html).toContain("cycle-001");
+  });
+
+  it("degrades gracefully when no cycleRoleSummary is provided", () => {
+    const html = renderReport({
+      ...BASE,
+      items: [item({ evidence: [{ kind: "test-pass", label: "suite green" }] })],
+    });
+    // Should show a degraded message, not crash or omit the section entirely
+    expect(html).toContain("Role summary unavailable");
+  });
+
+  it("shows failed evaluator attempts as parse failures", () => {
+    const summary = {
+      schema: "cycle-role-summary.v1" as const,
+      cycleId: "cycle-002",
+      storyId: "US-X-002",
+      executionProfile: "verified" as const,
+      generatedAt: "2026-06-29T12:00:00Z",
+      roles: [
+        { role: "builder" as const, agent: "pi", state: "accepted" as const, acceptedByGate: false, ts: 1000 },
+        { role: "evaluator" as const, agent: "agent-a", state: "failed" as const, cause: "score parsing error", acceptedByGate: false, ts: 1300 },
+        { role: "evaluator" as const, agent: "agent-b", state: "accepted" as const, score: 7, verdict: "ok", acceptedByGate: true, ts: 1400 },
+        { role: "attest_gate" as const, agent: null, state: "accepted" as const, verdict: "produced", acceptedByGate: false, ts: 1500 },
+      ],
+      gates: { attestGate: "produced" },
+      sources: [],
+    };
+    const html = renderReport({
+      ...BASE,
+      items: [item({ evidence: [{ kind: "test-pass", label: "suite green" }] })],
+      cycleRoleSummary: summary,
+    });
+    expect(html).toContain("parse failure");
+    expect(html).toContain("agent-a");
+    expect(html).toContain("agent-b");
+    expect(html).toContain("score parsing error");
+  });
+});

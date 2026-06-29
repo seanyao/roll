@@ -167,6 +167,7 @@ import {
   type CaptureMarker,
   type ScreenshotResult,
 } from "@roll/infra";
+import { writeCycleRoleSummaryBestEffort } from "./cycle-role-artifact-writer.js";
 import { execFile, execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -2814,6 +2815,11 @@ export async function executeCommand(
       // state exists. A push failure is surfaced as an ALERT (never a silent
       // false-success); a clean tree no-ops without noise.
       await commitRollMetadata(ports, ctx);
+      // US-OBS-032: best-effort cycle role summary from the event stream
+      if (ctx.cycleId !== undefined) {
+        const cycleLogDir = join(dirname(ports.paths.eventsPath), "cycle-logs");
+        writeCycleRoleSummaryBestEffort(ctx.cycleId, ports.paths.eventsPath, cycleLogDir);
+      }
       return {};
     }
 

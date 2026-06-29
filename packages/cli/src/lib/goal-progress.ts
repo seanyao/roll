@@ -1,3 +1,5 @@
+import { classifyStatus } from "@roll/spec";
+
 export const GOAL_ALLOWED_CARDS_ENV = "ROLL_LOOP_GO_ALLOWED_CARDS";
 
 const DELIVERY_STATUSES = new Set(["built", "published", "done", "merged"]);
@@ -24,6 +26,28 @@ export function parseAllowedCardsEnv(env: NodeJS.ProcessEnv = process.env): Set<
 export function filterByAllowedCards<T extends { id: string }>(items: T[], allowed: Set<string> | undefined): T[] {
   if (allowed === undefined) return items;
   return items.filter((item) => allowed.has(item.id));
+}
+
+const OUT_OF_SCOPE_STATUS = "🚫 Hold (outside goal scope)";
+
+/**
+ * Scope the picker to the goal's allowed cards without erasing dependency truth.
+ *
+ * `pickStory` builds its depends-on done index from the same rows it scans. A
+ * hard filter to only allowed cards makes `--cards CHILD` unable to prove
+ * `depends-on:PARENT` is Done, so the cycle idles as all_blocked_by_deps. Keep
+ * every row visible for dependency lookup, but make non-allowed rows unpickable.
+ */
+export function scopeBacklogForAllowedCards<T extends { id: string; status: string }>(
+  items: T[],
+  allowed: Set<string> | undefined,
+): T[] {
+  if (allowed === undefined) return items;
+  return items.map((item) => {
+    if (allowed.has(item.id)) return item;
+    if (classifyStatus(item.status) === "done") return item;
+    return { ...item, status: OUT_OF_SCOPE_STATUS };
+  });
 }
 
 export function runAttemptFromRow(row: Record<string, unknown>): GoalRunAttempt | undefined {

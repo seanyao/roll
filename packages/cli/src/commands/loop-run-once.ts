@@ -35,7 +35,7 @@ import { realAgentEnv } from "./agent-list.js";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
 import { readLatestResizeSignal } from "../lib/review-score.js";
 import { loopReviewResizeCommand } from "./loop-review-resize.js";
-import { filterByAllowedCards, parseAllowedCardsEnv } from "../lib/goal-progress.js";
+import { parseAllowedCardsEnv, scopeBacklogForAllowedCards } from "../lib/goal-progress.js";
 import { writeLatestMorningReport } from "../lib/morning-report.js";
 import { backfillMergedRuns } from "../lib/runs-backfill.js";
 import { requireNetwork, tcpConnect } from "../lib/require-network.js";
@@ -879,7 +879,7 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
           backlog: {
             ...basePorts.backlog,
             read(projectCwd: string) {
-              return filterByAllowedCards(basePorts.backlog.read(projectCwd), allowedCards);
+              return scopeBacklogForAllowedCards(basePorts.backlog.read(projectCwd), allowedCards);
             },
           },
         };

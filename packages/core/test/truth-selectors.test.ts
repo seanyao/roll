@@ -195,6 +195,69 @@ describe("US-TRUTH-017 AC1 — deriveStoryTruth with structured deliveryTruth", 
 });
 
 describe("deriveCycleTruth — runs row + branch evidence + terminal twin", () => {
+  // ── FIX-1032b AC1: contradictory input resolution ─────────────────────
+  it("FIX-1032b AC1: published_pending_merge terminal + merged row delivered → delivered wins (merge stamp)", () => {
+    // The terminal event says published_pending_merge, but the runs row has been
+    // backfilled with hasMergeStamp and outcome "delivered" (reconcileMergeEvidence
+    // checked the delivery gate). The merge-stamped verdict must win.
+    const t = deriveCycleTruth({
+      cycleId: "C-CONTRADICT",
+      runStatus: "merged",
+      runOutcome: "delivered",
+      hasMergeStamp: true,
+      terminalOutcome: "published_pending_merge",
+      tsSec: EPOCH + 100,
+      nowSec: NOW,
+      graceSec: GRACE,
+      schemaEpochSec: EPOCH,
+    });
+    expect(t).toMatchObject({ outcome: "delivered", state: "truth", reason: "merge_evidence_confirms" });
+  });
+
+  it("FIX-1032b AC1: published_pending_merge + delivered WITHOUT merge stamp → terminal wins (backfill not yet done)", () => {
+    // No merge stamp yet → the terminal event is still the source of truth.
+    const t = deriveCycleTruth({
+      cycleId: "C-NO-STAMP",
+      runStatus: "published",
+      runOutcome: "published_pending_merge",
+      hasMergeStamp: false,
+      terminalOutcome: "published_pending_merge",
+      tsSec: EPOCH + 100,
+      nowSec: NOW,
+      graceSec: GRACE,
+      schemaEpochSec: EPOCH,
+    });
+    expect(t).toMatchObject({ outcome: "published_pending_merge", state: "truth" });
+  });
+
+  it("FIX-1032b AC2/AC3: delivery gate outcomes outrank legacy status mapping", () => {
+    const ciRed = deriveCycleTruth({
+      cycleId: "C-CI-RED",
+      runStatus: "merged",
+      runOutcome: "ci_red_after_merge",
+      hasMergeStamp: true,
+      terminalOutcome: "published_pending_merge",
+      tsSec: EPOCH + 100,
+      nowSec: NOW,
+      graceSec: GRACE,
+      schemaEpochSec: EPOCH,
+    });
+    expect(ciRed).toMatchObject({ outcome: "ci_red_after_merge", state: "truth" });
+
+    const prLoopAbsent = deriveCycleTruth({
+      cycleId: "C-NO-PR-LOOP",
+      runStatus: "published",
+      runOutcome: "pr_loop_unavailable",
+      hasMergeStamp: false,
+      terminalOutcome: "published_pending_merge",
+      tsSec: EPOCH + 100,
+      nowSec: NOW,
+      graceSec: GRACE,
+      schemaEpochSec: EPOCH,
+    });
+    expect(prLoopAbsent).toMatchObject({ outcome: "pr_loop_unavailable", state: "truth" });
+  });
+
   it("AC5 squash merge: failed row + MERGED branch evidence → delivered (phantom corrected), fail-state drift on the row", () => {
     const t = deriveCycleTruth({
       cycleId: "20260610-212711-40684",

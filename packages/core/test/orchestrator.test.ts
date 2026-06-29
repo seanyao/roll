@@ -261,6 +261,42 @@ describe("FIX-244 — phantom-failure classification (published terminal)", () =
   });
 });
 
+describe("FIX-1032b — published cycle writes delivery-gate terminal outcomes", () => {
+  it("published + unhealthy PR loop emits pr_loop_unavailable in cycle:end and runs row", () => {
+    const ctx: CycleContext = {
+      ...CTX,
+      prLoopHealthy: false,
+      prUrl: "https://github.com/o/r/pull/759",
+    };
+    let state = initialCycleState(ctx);
+    const commands: CycleCommand[] = [];
+    for (const ev of [
+      { type: "start", ctx },
+      { type: "preflight_done" },
+      { type: "worktree_created" },
+      { type: "story_picked", storyId: "FIX-308" },
+      { type: "route_resolved", agent: "reasonix", model: "deepseek-v4-pro" },
+      { type: "agent_exited", exit: 0, timedOut: false },
+      { type: "facts_captured", facts: { usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 1 } },
+      { type: "published", result: { status: 0 } },
+    ] satisfies CycleEvent[]) {
+      const r = cycleStep(state, ev);
+      state = r.state;
+      commands.push(...r.commands);
+    }
+
+    expect(state.terminal).toBe("published");
+    const run = commands.find((c) => c.kind === "append_run");
+    expect(run).toMatchObject({ status: "published", outcome: "pr_loop_unavailable" });
+    const end = commands.find((c): c is Extract<CycleCommand, { kind: "emit_event" }> =>
+      c.kind === "emit_event" && c.event.type === "cycle:end",
+    );
+    expect(end?.event).toMatchObject({ type: "cycle:end", outcome: "pr_loop_unavailable" });
+    const alert = commands.find((c) => c.kind === "append_alert");
+    expect(alert).toMatchObject({ message: expect.stringContaining("PR loop not installed") });
+  });
+});
+
 describe("classifyPublish — publish ladder refines built (bin/roll:9239-9356)", () => {
   it("FIX-244: status 0 → published (PR open, merge pending — done ≡ merged, I4)", () => {
     expect(classifyPublish({ status: 0 })).toBe("published");

@@ -786,11 +786,16 @@ const EVENT_VALID_PHASES: Record<Exclude<CycleEvent["type"], "start">, CyclePhas
 };
 
 /** Build a cycle:end RollEvent for a terminal status. */
-export function cycleEndEvent(ctx: TerminalContext, outcome: V2CycleStatus, ts = 0): RollEvent {
+export function cycleEndEvent(
+  ctx: TerminalContext,
+  status: V2CycleStatus,
+  ts = 0,
+  outcome: TerminalOutcome = mapV2Status(status),
+): RollEvent {
   return {
     type: "cycle:end",
     cycleId: ctx.cycleId,
-    outcome: mapV2Status(outcome),
+    outcome,
     cost: zeroCost(ctx),
     ts,
   };
@@ -830,12 +835,13 @@ function terminate(
   state: CycleState,
   status: V2CycleStatus,
   extra: CycleCommand[] = [],
+  outcome: TerminalOutcome = mapV2Status(status),
 ): StepResult {
   const tctx = terminalCtx(state);
   const commands: CycleCommand[] = [
     ...extra,
-    { kind: "emit_event", event: cycleEndEvent(tctx, status) },
-    { kind: "append_run", status, outcome: mapV2Status(status), cycleId: state.ctx.cycleId },
+    { kind: "emit_event", event: cycleEndEvent(tctx, status, 0, outcome) },
+    { kind: "append_run", status, outcome, cycleId: state.ctx.cycleId },
   ];
   return {
     state: { ...state, phase: "cleanup", terminal: status, done: true },
@@ -1075,6 +1081,7 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
           });
           if (gate.verdict === "pr_loop_unavailable") {
             extra.push({ kind: "append_alert", message: gate.alert });
+            return terminate({ ...state, phase: "cleanup" }, status, extra, gate.verdict);
           }
         }
         return terminate({ ...state, phase: "cleanup" }, status, extra);

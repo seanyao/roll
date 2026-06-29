@@ -5,7 +5,10 @@
 export {
   TRUTH_SCHEMA_EPOCH_SEC,
   type TruthRunRow,
+  type DeliveryGateDiagnostic,
+  type DeliveryGateDiagnosticKind,
   cycleTruthFromRow,
+  deliveryGateDiagnosticsFromRows,
   rowDelivered,
   storyTruthFromBacklog,
   evidenceTruth,

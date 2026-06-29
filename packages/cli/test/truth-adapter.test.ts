@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import {
   TRUTH_SCHEMA_EPOCH_SEC,
   cycleTruthFromRow,
+  deliveryGateDiagnosticsFromRows,
   outcomeToPanel,
   rowDelivered,
 } from "../src/lib/truth-adapter.js";
@@ -50,6 +51,42 @@ describe("cycleTruthFromRow / outcomeToPanel — selector-backed classification"
     expect(oldRow.outcome).toBe("published_pending_merge");
     expect(newRow.outcome).toBe("published_pending_merge");
     expect(outcomeToPanel(oldRow.outcome, oldRow.state)).toBe(outcomeToPanel(newRow.outcome, newRow.state));
+  });
+
+  it("FIX-1032b: delivery gate diagnostics come from the selector-backed adapter", () => {
+    const diagnostics = deliveryGateDiagnosticsFromRows([
+      {
+        run_id: "C-PR",
+        story_id: "FIX-PR",
+        status: "published",
+        outcome: "pr_loop_unavailable",
+        ts: iso(NOW - 100),
+        pr_url: "https://github.com/o/r/pull/1",
+      },
+      {
+        run_id: "C-CI",
+        story_id: "FIX-CI",
+        status: "merged",
+        outcome: "ci_red_after_merge",
+        ts: iso(NOW - 90),
+        ci_run_url: "https://github.com/o/r/actions/runs/2",
+      },
+    ], { nowSec: NOW });
+
+    expect(diagnostics).toEqual([
+      {
+        kind: "pr_loop_unavailable",
+        cycleId: "C-PR",
+        storyId: "FIX-PR",
+        prUrl: "https://github.com/o/r/pull/1",
+      },
+      {
+        kind: "ci_red_after_merge",
+        cycleId: "C-CI",
+        storyId: "FIX-CI",
+        ciRunUrl: "https://github.com/o/r/actions/runs/2",
+      },
+    ]);
   });
 });
 
@@ -125,5 +162,71 @@ describe("AC4 — unknown renders as unknown, never as success", () => {
     const out = chunks.join("");
     expect(out).toContain("?"); // the ghost cycle reads unknown…
     expect(out).not.toMatch(/GHOST.*✓/); // …never success
+  });
+
+  it("FIX-1032b: roll loop status prints gate diagnostics with URLs", () => {
+    const rt = mkdtempSync(join(tmpdir(), "roll-1032b-rt-"));
+    writeFileSync(
+      join(rt, "runs.jsonl"),
+      [
+        {
+          run_id: "C-PR",
+          story_id: "FIX-PR",
+          status: "published",
+          outcome: "pr_loop_unavailable",
+          ts: iso(NOW - 100),
+          pr_url: "https://github.com/o/r/pull/1",
+        },
+        {
+          run_id: "C-CI",
+          story_id: "FIX-CI",
+          status: "merged",
+          outcome: "ci_red_after_merge",
+          ts: iso(NOW - 90),
+          ci_run_url: "https://github.com/o/r/actions/runs/2",
+        },
+      ].map((row) => JSON.stringify(row)).join("\n") + "\n",
+    );
+    writeFileSync(join(rt, "events.ndjson"), "");
+    const proj = mkdtempSync(join(tmpdir(), "roll-1032b-proj-"));
+    mkdirSync(join(proj, ".roll"), { recursive: true });
+    writeFileSync(join(proj, ".roll", "backlog.md"), "| ID | D | Status |\n|--|--|--|\n");
+    const home = mkdtempSync(join(tmpdir(), "roll-1032b-home-"));
+    const save: Record<string, string | undefined> = {};
+    const env: Record<string, string> = {
+      HOME: home,
+      ROLL_PROJECT_RUNTIME_DIR: rt,
+      ROLL_SHARED_ROOT: mkdtempSync(join(tmpdir(), "roll-1032b-shared-")),
+      ROLL_MAIN_SLUG: "test-1032b",
+      ROLL_MAIN_PROJECT: proj,
+      ROLL_RENDER_NOW: iso(NOW),
+      _LAUNCHD_DIR: join(home, "la"),
+    };
+    for (const [k, v] of Object.entries(env)) {
+      save[k] = process.env[k];
+      process.env[k] = v;
+    }
+    const prevCwd = process.cwd();
+    process.chdir(proj);
+    const chunks: string[] = [];
+    const realWrite = process.stdout.write.bind(process.stdout);
+    // @ts-expect-error capture-only
+    process.stdout.write = (c: string | Uint8Array): boolean => (chunks.push(String(c)), true);
+    try {
+      dashboardCommand(["--no-color", "--en"]);
+    } finally {
+      process.stdout.write = realWrite;
+      renderState.useColor = true;
+      process.chdir(prevCwd);
+      for (const [k, v] of Object.entries(save)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+    const out = chunks.join("");
+    expect(out).toContain("PR loop absent");
+    expect(out).toContain("https://github.com/o/r/pull/1");
+    expect(out).toContain("main CI red");
+    expect(out).toContain("https://github.com/o/r/actions/runs/2");
   });
 });

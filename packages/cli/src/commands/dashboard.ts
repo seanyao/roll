@@ -40,7 +40,7 @@ import {
 } from "@roll/infra";
 import { getAgentSpec } from "@roll/core";
 import { computeListCost, currencyFor } from "./prices-cost.js";
-import { TRUTH_SCHEMA_EPOCH_SEC, cycleTruthFromRow, outcomeToPanel } from "../lib/truth-adapter.js";
+import { TRUTH_SCHEMA_EPOCH_SEC, cycleTruthFromRow, deliveryGateDiagnosticsFromRows, outcomeToPanel, type DeliveryGateDiagnostic } from "../lib/truth-adapter.js";
 import { collectToolEvidenceFromEventsPath, formatToolCostSummary } from "../lib/tool-display.js";
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1472,6 +1472,15 @@ function tickAgeLine(loopType: string, now: Date): string | null {
   return `${loopType}: tick ${ageStr} ago`;
 }
 
+function deliveryGateDiagnosticLine(diagnostic: DeliveryGateDiagnostic): string {
+  if (diagnostic.kind === "ci_red_after_merge") {
+    const ci = diagnostic.ciRunUrl !== undefined ? ` · ${diagnostic.ciRunUrl}` : "";
+    return c("red", "⚠ main CI red") + c("dim", `  ${diagnostic.storyId}${ci}`);
+  }
+  const pr = diagnostic.prUrl !== undefined ? ` · ${diagnostic.prUrl}` : "";
+  return c("amber", "⚠ PR loop absent") + c("dim", `  ${diagnostic.storyId}${pr}`);
+}
+
 type LoopPlistSchedule =
   | { mode: "calendar"; minutes: number[] }
   | { mode: "interval"; intervalSec: number };
@@ -1869,6 +1878,12 @@ function render(
   for (const loop of ["pr"]) {
     const tl = tickAgeLine(loop, now);
     if (tl) out.push("  " + c("dim", tl));
+  }
+  // FIX-1032b AC2/AC3: delivery gate diagnostics — read runs for recent
+  // delivery-blocked cycles (ci_red_after_merge, pr_loop_unavailable).
+  if (args.projectSlug !== null) {
+    const dt = deliveryGateDiagnosticsFromRows(args.runs, { nowSec: Math.floor(args.now.getTime() / 1000) });
+    for (const diagnostic of dt) out.push("  " + deliveryGateDiagnosticLine(diagnostic));
   }
   out.push("");
 

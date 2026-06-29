@@ -132,6 +132,9 @@ describe("US-TRUTH-013 AC3 — lifecycleFromFacts deterministic mappings", () =>
     // handoff_without_tcr → failed (FIX-1039: recoverable but not delivered)
     ["handoff_without_tcr", "none", "failed"],
 
+    // pr_loop_unavailable → blocked (FIX-1032b: published PR has no merge guardian)
+    ["pr_loop_unavailable", "none", "blocked"],
+
     // orphan_timeout → blocked
     ["orphan_timeout", "none", "blocked"],
 
@@ -145,8 +148,9 @@ describe("US-TRUTH-013 AC3 — lifecycleFromFacts deterministic mappings", () =>
     });
   }
 
-  it("PR merged always wins — overrides any terminal outcome to done", () => {
-    // Exhaustively test every terminal outcome with PR merged → done
+  it("PR merged wins except delivery-gate blocking outcomes", () => {
+    // Exhaustively test every terminal outcome with PR merged → done, except
+    // structural delivery gates that explicitly mean "never record delivered".
     const allOutcomes: TerminalOutcome[] = [
       "delivered",
       "published_pending_merge",
@@ -161,12 +165,13 @@ describe("US-TRUTH-013 AC3 — lifecycleFromFacts deterministic mappings", () =>
       "dormant_entered",
       "unpublished",
       "needs_review",
-      "ci_red_after_merge",
       "unknown",
     ];
     for (const o of allOutcomes) {
       expect(lifecycleFromFacts(o, "merged")).toBe("done");
     }
+    expect(lifecycleFromFacts("ci_red_after_merge", "merged")).toBe("ci_red");
+    expect(lifecycleFromFacts("pr_loop_unavailable", "merged")).toBe("blocked");
   });
 });
 

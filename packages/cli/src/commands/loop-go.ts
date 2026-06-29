@@ -22,7 +22,7 @@ import { createInterface } from "node:readline";
 import { GOAL_ALLOWED_CARDS_ENV, runAttemptFromRow } from "../lib/goal-progress.js";
 import { projectAgent } from "./agent-list.js";
 import { cardArchiveDir } from "../lib/archive.js";
-import { storyTruthFromBacklog } from "../lib/truth-adapter.js";
+import { deliveryGateDiagnosticsFromRows, storyTruthFromBacklog, type DeliveryGateDiagnostic, type TruthRunRow } from "../lib/truth-adapter.js";
 import { runPeerReview, spawnPeerReviewAgent, type SpawnPeerReviewResult } from "./peer.js";
 import { guideExternalToolSetup, silentPreinstallChromium } from "../lib/external-tools.js";
 
@@ -725,6 +725,38 @@ function allowedCardsForScope(projectPath: string, goal: RollGoal, progress: Pro
 function allScopeCardsSkipped(projectPath: string, goal: RollGoal, progress: ProgressState): boolean {
   const rows = rowsForScope(projectPath, goal.scope);
   return rows.length > 0 && rows.every((row) => progress.skippedCards.has(row.id));
+}
+
+function readRunRows(projectPath: string): TruthRunRow[] {
+  const runsPath = join(projectPath, ".roll", "loop", "runs.jsonl");
+  let content = "";
+  try {
+    content = readFileSync(runsPath, "utf8");
+  } catch {
+    return [];
+  }
+  const rows: TruthRunRow[] = [];
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "") continue;
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) rows.push(parsed as TruthRunRow);
+    } catch {
+      /* ignore malformed historical rows */
+    }
+  }
+  return rows;
+}
+
+function deliveryGateStopDetail(diagnostic: DeliveryGateDiagnostic): string {
+  const url = diagnostic.kind === "ci_red_after_merge" ? diagnostic.ciRunUrl : diagnostic.prUrl;
+  const suffix = url !== undefined ? `:${url}` : "";
+  return `${diagnostic.kind}:${diagnostic.storyId}${suffix}`;
+}
+
+export function deliveryGateStopDetails(projectPath: string, nowSec: number): string[] {
+  return deliveryGateDiagnosticsFromRows(readRunRows(projectPath), { nowSec }).map(deliveryGateStopDetail);
 }
 
 /**
@@ -1749,8 +1781,12 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
       // scope card is now settled for this session (delivered in-flight and/or
       // skipped). End CLEANLY rather than loop back and re-pick a card we already
       // shipped — re-delivering it would open a SECOND PR for the same work.
+      // FIX-1032b AC4: include delivery gate diagnostics when stopping for
+      // scope_in_flight, so the operator sees why cards are stuck (PR loop
+      // absent or CI red) instead of the generic reason alone.
       if (allScopeCardsSettled(id.path, goal, progress)) {
-        stopReason = "scope_in_flight";
+        const dgLines = deliveryGateStopDetails(id.path, deps.nowSec());
+        stopReason = dgLines.length > 0 ? `scope_in_flight:${dgLines[0]}` : "scope_in_flight";
         break;
       }
       const timeboxGate = applyTimeboxGate(id.path, bus, sid, goal, deps, deadlineSec);

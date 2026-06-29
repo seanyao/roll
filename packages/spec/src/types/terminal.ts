@@ -63,6 +63,10 @@ export const TERMINAL_OUTCOMES = [
   // — the code is broken per CI evidence. Distinct from `delivered` (CI green)
   // and `failed` (no merge occurred). The CI run URL is recorded for diagnostics.
   "ci_red_after_merge",
+  // FIX-1032b — a cycle published a PR but the project PR loop is absent or
+  // unhealthy, so the PR has no merge guardian. The work is in GitHub but the
+  // delivery cannot be trusted as handed off to automation.
+  "pr_loop_unavailable",
   // FIX-1039 — a builder exited with code 0 and left changes in the worktree
   // but did not create a TCR commit. The work is real but uncommitted; the
   // worktree is PRESERVED so the owner can inspect or rescue it. Distinct

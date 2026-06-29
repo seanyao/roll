@@ -67,6 +67,27 @@ export function findFeatureFile(projectPath: string, storyId: string): string | 
   return findFeatureFiles(projectPath, storyId)[0] ?? null;
 }
 
+/** Resolve an existing card folder even when a partial cycle worktree carries
+ *  only `.roll/features/<epic>/<ID>/` artifacts and no spec/index/backlog. */
+function liveCardDirEpicOf(projectPath: string, storyId: string): string | null {
+  const root = join(projectPath, ".roll", "features");
+  let epics: string[] = [];
+  try {
+    for (const e of readdirSync(root, { withFileTypes: true })) {
+      if (!e.isDirectory()) continue;
+      try {
+        readdirSync(join(root, e.name, storyId), { withFileTypes: true });
+        epics = [...epics, e.name];
+      } catch {
+        /* no card dir for this epic */
+      }
+    }
+  } catch {
+    return null;
+  }
+  return epics.length === 1 ? (epics[0] ?? null) : null;
+}
+
 /** The card's report filename — carries the ID so a tab/download/share is
  *  self-identifying (owner 2026-06-06): `<ID>-report.html`. */
 export function reportFileName(storyId: string): string {
@@ -101,6 +122,8 @@ export function epicFromFeaturePath(featureFile: string): string | null {
  * parent — falls back to `uncategorized` at the call site.
  */
 export function liveEpicOf(projectPath: string, storyId: string): string | null {
+  const cardDirEpic = liveCardDirEpicOf(projectPath, storyId);
+  if (cardDirEpic !== null) return cardDirEpic;
   const file = findFeatureFile(projectPath, storyId);
   if (file === null) return null;
   return epicFromFeaturePath(file);
@@ -140,6 +163,34 @@ export function bulkLiveEpics(projectPath: string, ids: readonly string[]): Map<
     if (existsSync(root)) walk(root);
   } catch {
     /* unreadable tree → every id resolves null, same as the per-ID walk */
+  }
+  // Pass 0: live card directories. Partial loop worktrees may carry
+  // `features/<epic>/<ID>/ac-map.json` and evidence without spec.md or index.json;
+  // that directory is still the story's live home. Only a unique directory owner
+  // is accepted; duplicates stay unresolved for the later fail-loud paths.
+  const dirOwners = new Map<string, string[]>();
+  try {
+    if (existsSync(root)) {
+      for (const epic of readdirSync(root, { withFileTypes: true })) {
+        if (!epic.isDirectory()) continue;
+        for (const id of remaining) {
+          try {
+            readdirSync(join(root, epic.name, id), { withFileTypes: true });
+            const owners = dirOwners.get(id) ?? [];
+            dirOwners.set(id, [...owners, epic.name]);
+          } catch {
+            /* no card dir for this id under this epic */
+          }
+        }
+      }
+    }
+  } catch {
+    /* fall through to markdown-based resolution */
+  }
+  for (const [id, owners] of dirOwners) {
+    if (owners.length !== 1) continue;
+    result.set(id, owners[0] ?? null);
+    remaining.delete(id);
   }
   // Pass 1: ID-owned files. Overwriting per walk order reproduces "later owner
   // wins" (each unshift put the newest owner at the head).

@@ -267,7 +267,21 @@ v4 把"一张 Story 怎么交付"和"项目级怎么协调"分成两层。
 
 Supervisor **绝不**：实现具体 Story、写 Story 的评估报告、覆盖 Evaluator 裁定、绕过 attest 闸、直接标记 Story 为 Done、用指标静默改写路由/策略。v4.0 的 Supervisor 是 observe/advise（`roll supervisor`）：先用确定性 selector 把事实结构化，再（必要时）让 agent 措辞建议；历史 Done 缺少结构化 DeliveryRecord 只作为 truth coverage/backfill 提醒，发布是否阻塞以显式 release blockers / release consistency 为准；持久化策略变更一律需 owner 确认。安全并行调度（`max_parallel_cycles`、文件冲突串行化、合并队列/预算暂停）的决策逻辑已就位，活体并行交付留待 v4.1。
 
-Backlog-clearing 模式下，Supervisor 的默认 scope 是所有 live 且非 Hold 的 `FIX-*`、`US-*`、`REFACTOR-*` 行。它先对账 backlog、依赖、open PR、CI、Evaluator/Scorer、manual-merge gate、近期 cycle 终态、preserved worktree 和 `.roll` meta，再选择下一张卡。每张卡独立 cast Builder；执行剖面需要时独立 cast Evaluator/Scorer。`gave_up`、zero TCR、缺少 PR/CI/evaluator 证据、解析失败、auth/permission block、`[roll:manual-merge]` PR 或 `.roll` meta drift 都是停止继续调度并要求 owner/根因动作的信号。产品 repo 的 PR/CI/main truth 与 `.roll` meta truth 分开对账和提交。
+Backlog-clearing 模式下，Supervisor 的默认 scope 是所有 live 且非 Hold 的 `FIX-*`、`US-*`、`REFACTOR-*` 行；不是只扫缺陷修复。`IDEA-*` 只有被 owner 提升为 Story/Fix/Refactor 后才进入执行池。Supervisor 先对账 backlog、依赖、open PR、CI、Evaluator/Scorer、manual-merge gate、近期 cycle 终态、preserved worktree 和 `.roll` meta，再选择下一张卡。每张卡独立 cast Builder；执行剖面需要时独立 cast Evaluator/Scorer。`gave_up`、zero TCR、缺少 PR/CI/evaluator 证据、解析失败、auth/permission block、`[roll:manual-merge]` PR 或 `.roll` meta drift 都是停止继续调度并要求 owner/根因动作的信号。产品 repo 的 PR/CI/main truth 与 `.roll` meta truth 分开对账和提交。
+
+#### Supervisor Backlog-Clearing Runbook
+
+这是 Supervisor Agent 的项目级操作契约，目标是清空当前 scope 内所有非 Hold 卡，而不是完成某一种卡型。
+
+1. **Scope gate**：每轮开始先重读 live backlog，只纳入 `📋 Todo` / 可执行状态的 `FIX-*`、`US-*`、`REFACTOR-*`；排除 `🚫 Hold`、`✅ Done`、`IDEA-*`、已有 open PR 或 active cycle 的卡。
+2. **Truth preflight**：启动下一张卡前必须确认上一轮没有未处理的 PR、红 CI、manual-merge gate、缺失 delivery record、缺失 evaluator/score、`.roll` meta dirty 或 preserved worktree。任一存在就先处理事实差异，不继续派新卡。
+3. **One card, one cast**：每张卡 fresh 选择 Builder；`verified` / `planned` 剖面必须 fresh 选择 Evaluator/Scorer。Builder、Peer Reviewer、Evaluator 可以来自同一 agent pool，但不能共享同一会话；角色链必须写入可读摘要和结构化事件。
+4. **Observe while running**：Supervisor 观察 cycle 心跳、TCR 数、builder stdout、peer/score 事件、PR/CI、attest gate 和 role summary；它只监督与分流，不在 Builder 会话里补实现，也不替 Evaluator 改 verdict。
+5. **Failure triage before retry**：同一卡失败后先分类根因，再决定下一步。`gave_up`、zero TCR、auth/permission block、解析失败、缺报告、PR/CI 缺席、CI 红、路径/元数据误路由属于 supervisor-blocking，不允许盲目重跑；需要先建卡/修基础设施/换 agent/补权限/人工合并。实现缺口则保留 worktree 证据，换 fresh Builder 或 owner 指定 Builder 继续。
+6. **Merge and metadata closeout**：一张卡只有在 PR merged to `main`、CI green、attest/report/role evidence 存在、backlog/spec 状态一致、`.roll` meta 已单独提交并推送后，才算可从 scope 移除。
+7. **Continue condition**：只有当上一步 closeout 干净、没有 structural blocker、预算/并行/文件冲突闸允许时，Supervisor 才选择下一张卡。否则进入 guided pause，并给 owner 一个具体下一步命令或待确认动作。
+
+这套 runbook 是 `roll supervisor next/why/live` 的产品标准：CLI 输出应能解释当前卡、当前 cast、为什么继续、为什么停止，以及下一步需要谁做什么。
 
 > 命名：只用 **Supervisor Agent / Story Execution Unit / Agent Scope / Role / Binding / Agent / Model**。核心角色是 `supervise` / `execute` / `evaluate`；旧路由配置术语只在迁移/兼容说明中出现，不作为新的用户面模型。
 

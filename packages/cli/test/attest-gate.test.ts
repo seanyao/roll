@@ -31,6 +31,7 @@ import {
   storySpecPath,
   verificationReportFresh,
   verificationReportHasContent,
+  verificationReportPath,
   violatesMustDeclareSurface,
   webCaptureTargetForStory,
   webCaptureTargetsForStory,
@@ -77,6 +78,24 @@ function withReport(
   writeFileSync(join(storyDir, "ac-map.json"), JSON.stringify(acMap, null, 2) + "\n");
   const p = join(dir, `${storyId}-report.html`);
   writeFileSync(p, `<html><body><section class="ac s-pass" id="${storyId}:AC1">${body}</section></body></html>\n`);
+  if (mtimeSec !== undefined) utimesSync(p, mtimeSec, mtimeSec);
+  return wt;
+}
+
+/** A report under a real epic card directory, with no spec.md/index/backlog.
+ *  This mirrors partial cycle worktrees that carry only card artifacts. */
+function withPartialEpicReport(storyId: string, epic: string, mtimeSec?: number): string {
+  const wt = tmp("partial-epic");
+  const storyDir = join(wt, ".roll", "features", epic, storyId);
+  const dir = join(storyDir, "latest");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(storyDir, "ac-map.json"),
+    JSON.stringify([{ ac: `${storyId}:AC1`, status: "pass", evidence: [{ kind: "screenshot", href: "screenshots/p.png" }] }], null, 2) +
+      "\n",
+  );
+  const p = join(dir, `${storyId}-report.html`);
+  writeFileSync(p, `<html><body><section class="ac s-pass" id="${storyId}:AC1">proof</section></body></html>\n`);
   if (mtimeSec !== undefined) utimesSync(p, mtimeSec, mtimeSec);
   return wt;
 }
@@ -194,6 +213,14 @@ describe("verificationReportFresh", () => {
     expect(verificationReportFresh(wt, "FIX-300")).toBe(true); // no bound → existence
     expect(verificationReportFresh(wt, "FIX-301", 1000)).toBe(false); // other story absent
     expect(verificationReportFresh(tmp("empty"), "FIX-300", 1000)).toBe(false);
+  });
+
+  it("finds reports in a live epic card directory even when spec/index are absent", () => {
+    const wt = withPartialEpicReport("US-OBS-035", "loop-observability", 2000);
+    expect(verificationReportPath(wt, "US-OBS-035")).toBe(
+      join(wt, ".roll", "features", "loop-observability", "US-OBS-035", "latest", "US-OBS-035-report.html"),
+    );
+    expect(verificationReportFresh(wt, "US-OBS-035", 1000)).toBe(true);
   });
 
   it("stale report (mtime before cycle start) → not fresh", () => {

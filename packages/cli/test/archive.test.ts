@@ -87,6 +87,13 @@ describe("liveEpicOf", () => {
     const proj = project(["| US-A-1 | x | 📋 Todo |"], [["alpha/US-A-1.md", "# US-A-1\n"]]);
     expect(liveEpicOf(proj, "US-A-1")).toBe("alpha");
   });
+  it("resolves the epic from a live card directory even when spec/index are absent", () => {
+    const proj = project(["| US-OBS-035 | x | 📋 Todo |"]);
+    const cardDir = join(proj, ".roll", "features", "loop-observability", "US-OBS-035");
+    mkdirSync(cardDir, { recursive: true });
+    writeFileSync(join(cardDir, "ac-map.json"), "[]\n");
+    expect(liveEpicOf(proj, "US-OBS-035")).toBe("loop-observability");
+  });
   it("returns null when no feature file exists (→ uncategorized at call site)", () => {
     const proj = project(["| US-A-1 | x | 📋 Todo |"]);
     expect(liveEpicOf(proj, "US-A-1")).toBeNull();
@@ -106,6 +113,12 @@ describe("generateIndex", () => {
     const onDisk2 = readFileSync(join(proj, ".roll", "index.json"), "utf8");
     expect(onDisk2).toBe(onDisk1); // idempotent
     expect(readIndex(proj)).toEqual({ "US-A-1": "alpha", "FIX-B-2": "beta" });
+  });
+
+  it("records a backlog story whose live card directory exists without spec.md", () => {
+    const proj = project(["| US-OBS-035 | x | 📋 Todo |"]);
+    mkdirSync(join(proj, ".roll", "features", "loop-observability", "US-OBS-035"), { recursive: true });
+    expect(generateIndex(proj)).toEqual({ "US-OBS-035": "loop-observability" });
   });
 });
 
@@ -134,6 +147,13 @@ describe("cardArchiveDir", () => {
   it("places a resolved story under features/<epic>/<ID>", () => {
     const proj = project(["| US-A-1 | x | 📋 Todo |"], [["alpha/US-A-1.md", "# US-A-1\n"]]);
     expect(cardArchiveDir(proj, "US-A-1")).toBe(join(proj, ".roll", "features", "alpha", "US-A-1"));
+  });
+  it("uses the live card directory as the write/read home when spec.md is absent", () => {
+    const proj = project(["| US-OBS-035 | x | 📋 Todo |"]);
+    mkdirSync(join(proj, ".roll", "features", "loop-observability", "US-OBS-035"), { recursive: true });
+    expect(cardArchiveDir(proj, "US-OBS-035")).toBe(
+      join(proj, ".roll", "features", "loop-observability", "US-OBS-035"),
+    );
   });
   it("falls back to features/uncategorized/<ID> when no epic resolves (never blocks)", () => {
     const proj = project(["| US-A-1 | x | 📋 Todo |"]);
@@ -225,6 +245,7 @@ describe("FIX-275 — bulkLiveEpics equivalence", () => {
         "| US-C-3 | content mention only | 📋 Todo |",
         "| US-D-4 | multiple owners | 📋 Todo |",
         "| US-E-5 | no trace anywhere | 📋 Todo |",
+        "| US-F-6 | directory-only owner | 📋 Todo |",
         "| US-C-30 | id prefix sibling | 📋 Todo |",
       ],
       [
@@ -235,7 +256,9 @@ describe("FIX-275 — bulkLiveEpics equivalence", () => {
         ["zeta/US-D-4/spec.md", "# US-D-4 second owner\n"],
       ],
     );
+    mkdirSync(join(proj, ".roll", "features", "omega", "US-F-6"), { recursive: true });
     const ids = ["US-A-1", "US-B-2", "US-C-3", "US-D-4", "US-E-5", "US-C-30"];
+    ids.push("US-F-6");
     const bulk = bulkLiveEpics(proj, ids);
     for (const id of ids) {
       expect(bulk.get(id) ?? null, id).toBe(liveEpicOf(proj, id));

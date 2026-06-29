@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Agent 管理
+
+- **Agent 配置收敛成 Scope → Role → Binding → Agent → Model**：机器级和项目级 Agent 域现在只写 `~/.roll/agents.yaml` / `.roll/agents.yaml`，`roll agent` 展示 Machine Scope、Project Scope、继承来源、resolved role、Agent pool health 和 legacy compatibility；`roll agent migrate` 可以把旧的 primary/local/pairing/route 配置迁到新模型，迁移默认不删除旧文件。(US-V4-015, US-V4-016, US-V4-017, US-V4-019, US-V4-020, #1073) `[autonomous-evolution]`
+- **评审/打分回到公平候选池**：peer review 和 score 现在优先通过 evaluation Role binding 解析候选，历史上的 headless auth、VPN、账号状态不再变成静态排除；临时不可用只作为本次 runtime health skip 记录，异构评审和自评防线保持不变。(US-V4-018, #1073) `[autonomous-evolution]`
+
+### 自动化流水线
+
+- **Supervisor 成为 V4 操作入口**：`roll supervisor status/next/why/live` 会说明 guided/autonomous 模式、下一步 owner action、Planner/Builder/Evaluator 角色状态和不可用原因；旧 Dossier Web / daemon 产品面退场，story-scoped attest report 和 CLI-first observability 继续作为验收与观察入口。(US-V4-011, US-V4-013, US-V4-014, #1072, #1073) `[autonomous-evolution]`
+
 ## v4.629.1 — 2026-06-29
 
 ### 自动化流水线

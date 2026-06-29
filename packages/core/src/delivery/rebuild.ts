@@ -446,6 +446,10 @@ export function rebuildDeliveriesFromFacts(
 
     if (outcome === "published_pending_merge") {
       lifecycle = "pending_merge";
+    } else if (outcome === "ci_red_after_merge") {
+      lifecycle = "ci_red";
+    } else if (outcome === "pr_loop_unavailable") {
+      lifecycle = "blocked";
     } else if (outcome === "failed") {
       lifecycle = "failed";
     } else if (outcome === "blocked") {

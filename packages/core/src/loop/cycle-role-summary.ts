@@ -114,6 +114,7 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
     peer: string;
     cause: string;
     detail?: string;
+    artifactPath?: string;
     stage: string;
     ts: number;
   }>;
@@ -123,6 +124,9 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
     cycleId: string;
     peer: string;
     outcome: string;
+    cause?: string;
+    detail?: string;
+    artifactPath?: string;
     ts: number;
   }>;
 
@@ -180,6 +184,20 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
         ts: verdict.ts,
       });
     } else if (consult) {
+      if (consult.outcome !== "reviewed") {
+        roles.push({
+          role: "peer_reviewer",
+          agent: peer,
+          stage: "review",
+          state: "failed",
+          cause: consult.cause ?? (consult.detail?.startsWith("unparseable") === true ? "unparseable" : consult.outcome),
+          detail: consult.detail,
+          artifactPath: consult.artifactPath ?? peerArtifactPath,
+          acceptedByGate: false,
+          ts: consult.ts,
+        });
+        continue;
+      }
       // Returned but no structured verdict — always "returned", never "accepted"
       // (only pair:verdict produces "accepted" per the plan's mapping rules).
       roles.push({
@@ -187,8 +205,8 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
         agent: peer,
         stage: "review",
         state: "returned",
-        detail: consult.outcome === "reviewed" ? "reviewed, no structured verdict accepted" : consult.outcome,
-        artifactPath: peerArtifactPath,
+        detail: consult.detail ?? "reviewed, no structured verdict accepted",
+        artifactPath: consult.artifactPath ?? peerArtifactPath,
         acceptedByGate: false,
         ts: consult.ts,
       });
@@ -226,6 +244,7 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
           ts: failure.ts,
           cause: failure.cause,
           detail: failure.detail,
+          artifactPath: failure.artifactPath,
         })),
       ...scores
         .filter((s) => s.peer === peer && s.ts >= sel.ts && s.ts < nextSelectionTs)
@@ -268,6 +287,7 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
           ts: event.ts,
         });
       } else {
+        const failureArtifactPath = "artifactPath" in event ? (event as { artifactPath?: string }).artifactPath : undefined;
         roles.push({
           role: "evaluator",
           agent: peer,
@@ -275,7 +295,7 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
           state: "failed",
           cause: event.cause,
           detail: event.detail,
-          artifactPath: scoreArtifactPath,
+          artifactPath: failureArtifactPath ?? scoreArtifactPath,
           acceptedByGate: false,
           ts: event.ts,
         });
@@ -297,7 +317,7 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
         state: "failed",
         cause: fail.cause,
         detail: fail.detail,
-        artifactPath: scoreArtifactPath,
+        artifactPath: fail.artifactPath ?? scoreArtifactPath,
         acceptedByGate: false,
         ts: fail.ts,
       });
@@ -440,8 +460,12 @@ export function renderCycleRoleSummaryMarkdown(summary: CycleRoleSummary): strin
       let detail = r.state;
       if (r.state === "accepted" && r.verdict) detail += ` verdict=${r.verdict}`;
       if (r.findings !== undefined) detail += ` findings=${r.findings}`;
+      if (r.cause) detail += ` ${r.cause}`;
       if (r.detail) detail += ` (${r.detail})`;
       lines.push(`- ${agent}: ${detail}`);
+      if (r.state === "failed" && r.artifactPath) {
+        lines.push(`  - raw artifact: ${r.artifactPath}`);
+      }
     }
     lines.push("");
   } else {
@@ -464,6 +488,9 @@ export function renderCycleRoleSummaryMarkdown(summary: CycleRoleSummary): strin
       if (e.cause) detail += ` ${e.cause}`;
       if (e.detail) detail += ` (${e.detail})`;
       lines.push(`- ${agent}: ${detail}`);
+      if (e.state === "failed" && e.artifactPath) {
+        lines.push(`  - raw artifact: ${e.artifactPath}`);
+      }
     }
     lines.push("");
   } else {

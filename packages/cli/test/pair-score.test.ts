@@ -5,7 +5,7 @@
  * FAIL-LOUD (no peer = no Review Score, exit non-zero), not a self-grade fallback.
  * Injected reviewer spawn — tests never launch a real agent.
  */
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -102,6 +102,9 @@ describe("roll pair score — US-PAIR-010", () => {
     expect(r.err).toContain("No Review Score produced");
     // No note is synthesized when the peer can't score.
     expect(readStoryReviewScores(p, "US-T-001")).toHaveLength(0);
+    const rawFiles = readdirSync(join(p, ".roll", "peer")).filter((name) => name.endsWith(".raw.txt"));
+    expect(rawFiles.length).toBeGreaterThan(0);
+    expect(readFileSync(join(p, ".roll", "peer", rawFiles[0] ?? ""), "utf8")).toContain("no protocol lines here");
   });
 
   it("usage failures: missing story id / unknown flag exit non-zero", async () => {

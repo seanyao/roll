@@ -147,7 +147,7 @@ export type PairEvent =
    *  from a scorer is now diagnosed (unparseable / timeout / auth-block /
    *  exit-error) and emitted so the loop can observe WHY a pool failed;
    *  no more silently swallowed nulls. */
-  | { type: "pair:score-failure"; cycleId: string; peer: string; cause: "unparseable" | "timeout" | "auth-block" | "exit-error"; detail?: string; stage: "score" | "design"; ts: number };
+  | { type: "pair:score-failure"; cycleId: string; peer: string; cause: "unparseable" | "timeout" | "auth-block" | "exit-error"; detail?: string; artifactPath?: string; stage: "score" | "design"; ts: number };
 
 export interface RunPairingDeps {
   /** Installed agents (canonical), e.g. agentsInstalled(realAgentEnv()). */

@@ -1799,6 +1799,13 @@ export async function executeCommand(
         }
         return cause;
       };
+      const savePeerRawOutput = (peer: string, stage: "score" | "review", stdout: string, stderr: string): string => {
+        const peerDir = join(dirname(ports.paths.eventsPath), "cycle-logs", ctx.cycleId ?? "cycle", "peer");
+        mkdirSync(peerDir, { recursive: true });
+        const artifactPath = join(peerDir, `${peer}.${stage}.raw.txt`);
+        writeFileSync(artifactPath, `--- stdout ---\n${stdout}\n--- stderr ---\n${stderr}\n`);
+        return artifactPath;
+      };
       // V4 fairness: historical auth failures are observability, not static pool
       // policy. We still fold the stream so diagnostics can explain auth streaks,
       // but the returned exclusion set is intentionally empty. Current runtime
@@ -1840,7 +1847,12 @@ export async function executeCommand(
         // FIX-319: record EVERY consult's real wall-clock + outcome (pair:consult)
         // so the 120s hard timeout can be tuned from data, not guessed.
         const t0 = Date.now();
-        const emitConsult = (outcome: "reviewed" | "timeout" | "error", cause?: "auth" | "network"): void =>
+        const emitConsult = (
+          outcome: "reviewed" | "timeout" | "error",
+          cause?: "auth" | "network",
+          detail?: string,
+          artifactPath?: string,
+        ): void =>
           ports.events.appendEvent(ports.paths.eventsPath, {
             type: "pair:consult",
             cycleId: ctx.cycleId ?? "",
@@ -1848,11 +1860,14 @@ export async function executeCommand(
             durationMs: Date.now() - t0,
             outcome,
             ...(cause !== undefined ? { cause } : {}),
+            ...(detail !== undefined ? { detail: detail.slice(0, 200) } : {}),
+            ...(artifactPath !== undefined ? { artifactPath } : {}),
             ts: eventTs(ports),
           });
         let res;
-        if (blockIfAgentCredentialsMissing(peer, "review", ports, ctx) !== null) {
-          emitConsult("error", "auth");
+        const credentialBlock = blockIfAgentCredentialsMissing(peer, "review", ports, ctx);
+        if (credentialBlock !== null) {
+          emitConsult("error", "auth", credentialBlock);
           return null;
         }
         try {
@@ -1870,8 +1885,9 @@ export async function executeCommand(
             new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs).unref()),
           ]);
         } catch (e) {
-          const cause = await attributeBlockCause(peer, "error", e instanceof Error ? e.message : String(e), "review");
-          emitConsult("error", cause ?? undefined);
+          const detail = e instanceof Error ? e.message : String(e);
+          const cause = await attributeBlockCause(peer, "error", detail, "review");
+          emitConsult("error", cause ?? undefined, detail);
           return null;
         }
         if (res === null || res.timedOut) {
@@ -1879,16 +1895,24 @@ export async function executeCommand(
           // hang with no output spends ONE cheap reachability probe to tell a
           // blocked agent (re-login / VPN) from a genuinely slow one.
           const raw = res !== null ? `${res.stdout}\n${res.stderr}` : "";
+          const artifactPath = res !== null ? savePeerRawOutput(peer, "review", res.stdout, res.stderr) : undefined;
           const cause = await attributeBlockCause(peer, "timeout", raw, "review");
-          emitConsult("timeout", cause ?? undefined);
+          emitConsult("timeout", cause ?? undefined, raw, artifactPath);
           return null;
         }
         if (res.exitCode !== 0) {
-          const cause = await attributeBlockCause(peer, "error", `${res.stdout}\n${res.stderr}`, "review");
-          emitConsult("error", cause ?? undefined);
+          const raw = `${res.stdout}\n${res.stderr}`;
+          const artifactPath = savePeerRawOutput(peer, "review", res.stdout, res.stderr);
+          const cause = await attributeBlockCause(peer, "error", raw, "review");
+          emitConsult("error", cause ?? undefined, raw, artifactPath);
           return null;
         }
         const vm = /VERDICT:\s*(agree|refine|object)/i.exec(res.stdout);
+        if (vm === null) {
+          const artifactPath = savePeerRawOutput(peer, "review", res.stdout, res.stderr);
+          emitConsult("error", undefined, "unparseable: missing or invalid VERDICT line", artifactPath);
+          return null;
+        }
         const verdict = (vm?.[1]?.toLowerCase() ?? "agree") as PairReview["verdict"];
         const findings = [...res.stdout.matchAll(/^\s*FINDING:\s*(.+)$/gim)].map((m) => (m[1] ?? "").trim());
         // US-PAIR-006 cost observability (owner's top priority "至少知道花了多少钱"):
@@ -2070,13 +2094,14 @@ export async function executeCommand(
         // FIX-910 — emit a per-attempt score-stage failure event so every null
         // return from a scorer is OBSERVABLE (no more silently swallowed nulls).
         // The cause distinguishes unparseable / timeout / auth-block / exit-error.
-        const emitScoreFailure = (peer: string, cause: "unparseable" | "timeout" | "auth-block" | "exit-error", detail?: string): void => {
+        const emitScoreFailure = (peer: string, cause: "unparseable" | "timeout" | "auth-block" | "exit-error", detail?: string, artifactPath?: string): void => {
           ports.events.appendEvent(ports.paths.eventsPath, {
             type: "pair:score-failure",
             cycleId: ctx.cycleId ?? "",
             peer,
             cause,
             ...(detail !== undefined ? { detail: detail.slice(0, 200) } : {}),
+            ...(artifactPath !== undefined ? { artifactPath } : {}),
             stage: "score",
             ts: eventTs(ports),
           });
@@ -2090,10 +2115,10 @@ export async function executeCommand(
           timeoutMs: number,
         ): Promise<
           | { outcome: "parsed"; parsed: import("./pairing-gate.js").PairScore }
-          | { outcome: "unparseable"; detail: string }
-          | { outcome: "timeout"; detail: string }
-          | { outcome: "auth-block"; detail: string }
-          | { outcome: "exit-error"; detail: string }
+          | { outcome: "unparseable"; detail: string; artifactPath: string }
+          | { outcome: "timeout"; detail: string; artifactPath?: string }
+          | { outcome: "auth-block"; detail: string; artifactPath?: string }
+          | { outcome: "exit-error"; detail: string; artifactPath: string }
         > => {
           const credentialBlock = blockIfAgentCredentialsMissing(peer, "score", ports, ctx);
           if (credentialBlock !== null) return { outcome: "auth-block", detail: credentialBlock };
@@ -2115,26 +2140,32 @@ export async function executeCommand(
           }
           if (res === null || res.timedOut) {
             const detail = res !== null ? `${res.stdout}\n${res.stderr}` : "";
+            let artifactPath: string | undefined;
+            if (res !== null) {
+              artifactPath = savePeerRawOutput(peer, "score", res.stdout, res.stderr);
+            }
             const blockCause = await attributeBlockCause(peer, "timeout", detail, "score");
             // external block (auth/network) surfaced by attributeBlockCause → auth-block;
             // genuine slowness with no block signature → timeout.
             return blockCause === "auth" || blockCause === "network"
-              ? { outcome: "auth-block", detail }
-              : { outcome: "timeout", detail };
+              ? { outcome: "auth-block", detail, artifactPath }
+              : { outcome: "timeout", detail, artifactPath };
           }
           if (res.exitCode !== 0) {
             const detail = `${res.stdout}\n${res.stderr}`;
+            const artifactPath = savePeerRawOutput(peer, "score", res.stdout, res.stderr);
             const blockCause = await attributeBlockCause(peer, "error", detail, "score");
             return blockCause === "auth" || blockCause === "network"
-              ? { outcome: "auth-block", detail }
-              : { outcome: "exit-error", detail };
+              ? { outcome: "auth-block", detail, artifactPath }
+              : { outcome: "exit-error", detail, artifactPath };
           }
           const parsed = parsePairScoreOutput(res.stdout);
           if (parsed === null) {
             // The reviewer ANSWERED but the format didn't match the strict
             // SCORE:/VERDICT:/RATIONALE: protocol — this is unparseable, NOT a
             // timeout/error. Previously silently discarded; now observable.
-            return { outcome: "unparseable", detail: res.stdout.slice(0, 500) };
+            const artifactPath = savePeerRawOutput(peer, "score", res.stdout, res.stderr);
+            return { outcome: "unparseable", detail: res.stdout.slice(0, 500), artifactPath };
           }
           return { outcome: "parsed", parsed: { ...parsed, cost: peerReviewCost(peer, res.stdout) } };
         };
@@ -2143,7 +2174,7 @@ export async function executeCommand(
           // First attempt
           const first = await tryScoreOnce(peer, prompt, timeoutMs);
           if (first.outcome === "parsed") return first.parsed;
-          emitScoreFailure(peer, first.outcome, first.detail);
+          emitScoreFailure(peer, first.outcome, first.detail, first.artifactPath);
           // FIX-910 unparseable rescue: the reviewer ANSWERED but the format was
           // off. Give ONE retry with a stricter format reminder — the reviewer
           // already did the cognitive work; the harness just needs a parseable
@@ -2154,7 +2185,7 @@ export async function executeCommand(
               "\n\n你上次回复缺/错了 SCORE/VERDICT/RATIONALE 行，请严格只回这三行。";
             const retry = await tryScoreOnce(peer, retryPrompt, timeoutMs);
             if (retry.outcome === "parsed") return retry.parsed;
-            emitScoreFailure(peer, retry.outcome, retry.detail);
+            emitScoreFailure(peer, retry.outcome, retry.detail, retry.artifactPath);
           }
           return null;
         };

@@ -43,6 +43,7 @@ export * from "./supervisor/observe.js";
 export * from "./supervisor/advise.js";
 export * from "./supervisor/scheduler.js";
 export * from "./supervisor/live-board.js";
+export * from "./loop/cycle-role-summary.js";
 export * from "./loop/morning-report.js";
 export * from "./loop/pr-loop.js";
 export * from "./loop/quality-gate.js";

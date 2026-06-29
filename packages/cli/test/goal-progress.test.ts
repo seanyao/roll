@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { GOAL_ALLOWED_CARDS_ENV, filterByAllowedCards, parseAllowedCardsEnv, runAttemptFromRow } from "../src/lib/goal-progress.js";
+import { parseBacklog, pickStory } from "@roll/core";
+import {
+  GOAL_ALLOWED_CARDS_ENV,
+  filterByAllowedCards,
+  parseAllowedCardsEnv,
+  runAttemptFromRow,
+  scopeBacklogForAllowedCards,
+} from "../src/lib/goal-progress.js";
 
 describe("goal progress helpers", () => {
   it("parses an explicitly empty allowed-card env as no eligible cards", () => {
@@ -12,6 +19,22 @@ describe("goal progress helpers", () => {
     expect(filterByAllowedCards(rows, undefined)).toEqual(rows);
     expect(filterByAllowedCards(rows, new Set(["US-B"]))).toEqual([{ id: "US-B" }]);
     expect(filterByAllowedCards(rows, new Set())).toEqual([]);
+  });
+
+  it("scopes pickable cards without erasing Done dependency rows", () => {
+    const rows = parseBacklog(
+      [
+        "| ID | Description | Status |",
+        "|---|---|---|",
+        "| [FIX-1032a](x) | delivery gate | ✅ Done (PR#1079 · merged 00df763) |",
+        "| [FIX-OTHER](x) | unrelated ready fix | 📋 Todo |",
+        "| [FIX-1032b](x) | display truth depends-on:FIX-1032a chain_depth:1 | 📋 Todo |",
+        "",
+      ].join("\n"),
+    );
+
+    expect(pickStory(filterByAllowedCards(rows, new Set(["FIX-1032b"])))).toBeUndefined();
+    expect(pickStory(scopeBacklogForAllowedCards(rows, new Set(["FIX-1032b"])))?.id).toBe("FIX-1032b");
   });
 
   it("detects zero-delivery attempts only when tcr_count is known and no delivery evidence exists", () => {

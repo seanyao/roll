@@ -129,6 +129,128 @@ describe("supervisorCommand", () => {
     expect(r.out).toContain("scheduler:");
   });
 
+  it("US-V4-021: next uses whole backlog scope and does not recommend historical Done noise", () => {
+    const cwd = project(`# Backlog
+
+| ID | Description | Status |
+| --- | --- | --- |
+| FIX-301 | historical truth-coverage row | ✅ Done |
+| US-OBS-032 | role summary | 📋 Todo |
+| REFACTOR-054 | terminology cleanup | 📋 Todo |
+`, { events: [JSON.stringify({ type: "pr:merge", prNumber: 301, storyId: "FIX-301", ts: 1 })] });
+    const r = run(cwd, ["next"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("US-OBS-032");
+    expect(r.out).toContain("scope: live non-Hold FIX/US/REFACTOR");
+    expect(r.out).toContain("remaining: FIX 0 · US 1 · REFACTOR 1");
+    expect(r.out).toContain("cast: none");
+    expect(r.out).toContain("gate: no active/recent cycle");
+    expect(r.out).toContain(".roll meta:");
+    expect(r.out).not.toContain("next: FIX-301");
+  });
+
+  it("US-V4-021: status exposes scope, selected card, cast, gate state, and roll-meta state", () => {
+    const cwd = project(`# Backlog
+
+| ID | Description | Status |
+| --- | --- | --- |
+| FIX-1 | fixed | ✅ Done |
+| US-1 | next story | 📋 Todo |
+`, {
+      events: [
+        JSON.stringify({ type: "pr:merge", prNumber: 1, storyId: "FIX-1", ts: 1 }),
+        JSON.stringify({ type: "cycle:start", cycleId: "C1", storyId: "US-1", agent: "reasonix", model: "m", ts: 2 }),
+        JSON.stringify({ type: "execution:profile", cycleId: "C1", storyId: "US-1", profile: "verified", reason: "verified: user-visible", ts: 3 }),
+        JSON.stringify({ type: "pair:selected", cycleId: "C1", workingAgent: "reasonix", peer: "codex", stage: "score", ts: 4 }),
+        JSON.stringify({ type: "pair:score", cycleId: "C1", peer: "codex", score: 10, verdict: "good", cost: 0, stage: "score", ts: 5 }),
+      ],
+    });
+    const r = run(cwd, ["status"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("scope: live non-Hold FIX/US/REFACTOR");
+    expect(r.out).toContain("selected: US-1");
+    expect(r.out).toContain("cast: C1 · US-1 · builder=reasonix · evaluator=codex");
+    expect(r.out).toContain("gate: active");
+    expect(r.out).toContain(".roll meta:");
+  });
+
+  it("US-V4-021: why diagnoses repeated failure before another run command", () => {
+    const cwd = project(`# Backlog
+
+| ID | Description | Status |
+| --- | --- | --- |
+| US-1 | repeated failure | 📋 Todo |
+`, {
+      events: [
+        JSON.stringify({ type: "cycle:start", cycleId: "C1", storyId: "US-1", agent: "pi", model: "m", ts: 1 }),
+        JSON.stringify({ type: "cycle:end", cycleId: "C1", outcome: "gave_up", cost: {}, ts: 2 }),
+        JSON.stringify({ type: "cycle:start", cycleId: "C2", storyId: "US-1", agent: "reasonix", model: "m", ts: 3 }),
+        JSON.stringify({ type: "cycle:end", cycleId: "C2", outcome: "failed", cost: {}, ts: 4 }),
+      ],
+    });
+    const r = run(cwd, ["why"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("diagnose repeated failure");
+    expect(r.out).toContain("do not retry blindly");
+    expect(r.out).toContain("cast: C2 · US-1 · builder=reasonix · evaluator=-");
+    expect(r.out).toContain("gate: failed");
+    expect(r.out).toContain(".roll meta:");
+    expect(r.out).not.toContain("roll loop go --cards US-1");
+  });
+
+  it("US-V4-021: why ignores historical repeated failures when no live scoped card exists", () => {
+    const cwd = project(`# Backlog
+
+| ID | Description | Status |
+| --- | --- | --- |
+| FIX-382 | historical failure already delivered | ✅ Done |
+`, {
+      events: [
+        JSON.stringify({ type: "pr:merge", prNumber: 382, storyId: "FIX-382", ts: 1 }),
+        JSON.stringify({ type: "cycle:start", cycleId: "C1", storyId: "FIX-382", agent: "pi", model: "m", ts: 2 }),
+        JSON.stringify({ type: "cycle:end", cycleId: "C1", outcome: "failed", cost: {}, ts: 3 }),
+        JSON.stringify({ type: "cycle:start", cycleId: "C2", storyId: "FIX-382", agent: "reasonix", model: "m", ts: 4 }),
+        JSON.stringify({ type: "cycle:end", cycleId: "C2", outcome: "failed", cost: {}, ts: 5 }),
+      ],
+    });
+    const why = run(cwd, ["why"]);
+    expect(why.out).toContain("no ready live non-Hold FIX/US/REFACTOR card");
+    expect(why.out).not.toContain("diagnose repeated failure");
+
+    const status = run(cwd, ["status"]);
+    expect(status.out).toContain("stuck stories: none in live scope");
+    expect(status.out).not.toContain("stuck stories (repeated failures): FIX-382");
+
+    const json = JSON.parse(run(cwd, ["--json"]).out);
+    expect(JSON.stringify(json.decisions)).not.toContain("FIX-382");
+    expect(JSON.stringify(json.decisions)).not.toContain("stuck stories");
+  });
+
+  it("US-V4-021: next/why json includes runbook context plus cast, gate, and meta", () => {
+    const cwd = project(`# Backlog
+
+| ID | Description | Status |
+| --- | --- | --- |
+| US-1 | next story | 📋 Todo |
+`, {
+      events: [
+        JSON.stringify({ type: "cycle:start", cycleId: "C1", storyId: "US-1", agent: "reasonix", model: "m", ts: 1 }),
+        JSON.stringify({ type: "pair:score", cycleId: "C1", peer: "codex", score: 10, verdict: "good", cost: 0, stage: "score", ts: 2 }),
+      ],
+    });
+    const next = JSON.parse(run(cwd, ["next", "--json"]).out);
+    expect(next.next.storyId).toBe("US-1");
+    expect(next.cast).toBe("C1 · US-1 · builder=reasonix · evaluator=codex");
+    expect(next.gate).toBe("active");
+    expect(next.rollMeta.state).toBeDefined();
+
+    const why = JSON.parse(run(cwd, ["why", "--json"]).out);
+    expect(why.why).toContain("not stuck");
+    expect(why.cast).toBe("C1 · US-1 · builder=reasonix · evaluator=codex");
+    expect(why.gate).toBe("active");
+    expect(why.rollMeta.state).toBeDefined();
+  });
+
   it("--json emits machine-readable facts + decisions", () => {
     const cwd = project(BACKLOG);
     const r = run(cwd, ["--json"]);

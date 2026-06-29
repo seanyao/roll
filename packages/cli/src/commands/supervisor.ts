@@ -18,6 +18,7 @@
 import {
   EventBus,
   adviseProject,
+  buildSupervisorRunbookState,
   buildSupervisorLiveBoard,
   ensureDeliveriesFresh,
   explainStuck,
@@ -94,6 +95,20 @@ function summarizeList(items: readonly string[], limit = 5): string {
   return remaining > 0 ? `${shown}, … +${remaining} more` : shown;
 }
 
+function readRollMetaState(projectPath: string): NonNullable<SupervisorInput["rollMeta"]> {
+  const rollDir = join(projectPath, ".roll");
+  if (!existsSync(rollDir)) return { state: "unknown", detail: ".roll directory is missing" };
+  const res = quietExecPort.run("git", ["-C", rollDir, "status", "--short"]);
+  if (res.code !== 0) return { state: "unknown", detail: ".roll is not a readable git repo" };
+  const files = res.stdout
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter((s) => s !== "");
+  return files.length === 0
+    ? { state: "clean", detail: "roll-meta clean", files: [] }
+    : { state: "dirty", detail: `${files.length} dirty roll-meta file(s)`, files };
+}
+
 /** Gather the Supervisor's structured input from project state (deterministic). */
 export function gatherSupervisorInput(projectPath: string): SupervisorInput {
   const backlogPath = join(projectPath, ".roll", "backlog.md");
@@ -152,11 +167,53 @@ export function gatherSupervisorInput(projectPath: string): SupervisorInput {
     recentFailures,
     routeConfigErrors,
     releaseBlockers: [],
+    rollMeta: readRollMetaState(projectPath),
   };
 }
 
-function fmtFacts(input: SupervisorInput): string {
+function remainingLine(input: SupervisorInput): string {
+  const s = buildSupervisorRunbookState(input).scope.remainingByFamily;
+  return `FIX ${s.FIX} · US ${s.US} · REFACTOR ${s.REFACTOR}`;
+}
+
+function latestCastSummary(events: readonly RollEvent[]): string {
+  const starts = events.filter((ev): ev is Extract<RollEvent, { type: "cycle:start" }> => ev.type === "cycle:start").sort((a, b) => b.ts - a.ts);
+  const latest = starts[0];
+  if (latest === undefined) return "none";
+  const cycleEvents = events.filter((ev) => "cycleId" in ev && ev.cycleId === latest.cycleId);
+  const score = [...cycleEvents]
+    .reverse()
+    .find((ev): ev is Extract<RollEvent, { type: "pair:score" }> => ev.type === "pair:score");
+  const verdict = [...cycleEvents]
+    .reverse()
+    .find((ev): ev is Extract<RollEvent, { type: "pair:verdict" }> => ev.type === "pair:verdict");
+  const selectedScore = [...cycleEvents]
+    .reverse()
+    .find((ev): ev is Extract<RollEvent, { type: "pair:selected" }> => ev.type === "pair:selected" && ev.stage === "score");
+  const evaluator = score?.peer ?? verdict?.peer ?? selectedScore?.peer ?? "-";
+  return `${latest.cycleId} · ${latest.storyId} · builder=${latest.agent} · evaluator=${evaluator}`;
+}
+
+function latestGateState(events: readonly RollEvent[]): string {
+  const board = buildSupervisorLiveBoard(events, { recentLimit: 1 });
+  const row = board.rows[0];
+  if (row === undefined) return "no active/recent cycle";
+  return row.status;
+}
+
+function supervisorContext(input: SupervisorInput, events: readonly RollEvent[]): { cast: string; gate: string; rollMeta: NonNullable<SupervisorInput["rollMeta"]> } {
+  return {
+    cast: latestCastSummary(events),
+    gate: latestGateState(events),
+    rollMeta: input.rollMeta ?? { state: "unknown", detail: "not gathered" },
+  };
+}
+
+function fmtFacts(input: SupervisorInput, events: readonly RollEvent[] = []): string {
   const f = observeProject(input);
+  const runbook = buildSupervisorRunbookState(input);
+  const liveStuck = runbook.blockedCards.filter((b) => b.reason === "repeated_failure").map((b) => b.storyId);
+  const ctx = supervisorContext(input, events);
   const mode = resolveOperatingMode(process.cwd());
   const truthCoverage =
     f.truthDrift.length === 0
@@ -166,10 +223,17 @@ function fmtFacts(input: SupervisorInput): string {
     "",
     "  Supervisor Agent — project facts (observe)",
     "",
+    `    scope: ${runbook.scope.label}`,
+    `    remaining: ${remainingLine(input)}`,
+    `    selected: ${runbook.next.storyId ?? "(nothing ready)"} — ${runbook.next.kind}`,
+    `    blocked: ${runbook.blockedCards.length === 0 ? "none" : summarizeList(runbook.blockedCards.map((b) => `${b.storyId}:${b.reason}`))}`,
+    `    cast: ${ctx.cast}`,
+    `    gate: ${ctx.gate}`,
+    `    .roll meta: ${ctx.rollMeta.state} — ${ctx.rollMeta.detail}`,
     `    backlog: ${f.counts.todo} todo · ${f.counts.inProgress} in-progress · ${f.counts.blocked} blocked · ${f.counts.done} done`,
     `    open PRs: ${f.openPrCount}`,
     `    truth coverage: ${truthCoverage}`,
-    `    stuck stories: ${summarizeList(f.stuckStories)}`,
+    `    stuck stories: ${liveStuck.length === 0 ? "none in live scope" : summarizeList(liveStuck)}`,
     `    route config: ${f.routeConfigErrors.length === 0 ? "ok" : summarizeList(f.routeConfigErrors)}`,
     `    release: ${f.releaseReadiness.ready ? "ready" : "blocked — " + summarizeList(f.releaseReadiness.blockers)}`,
     `    budget: ${f.budgetHealth.note}`,
@@ -181,10 +245,22 @@ function fmtFacts(input: SupervisorInput): string {
 }
 
 function fmtAdvice(input: SupervisorInput): string {
-  const decisions = adviseProject(observeProject(input));
+  const decisions = supervisorDecisions(input);
   if (decisions.length === 0) return "\n  Supervisor Agent — no advisory decisions (project healthy)\n\n";
   const rows = decisions.map((d) => `    [${d.kind}]${d.requiresOwner ? " (owner confirmation required)" : ""} ${d.reason}`);
   return ["", "  Supervisor Agent — advisory decisions", "", ...rows, ""].join("\n") + "\n";
+}
+
+function supervisorDecisions(input: SupervisorInput): ReturnType<typeof adviseProject> {
+  const runbook = buildSupervisorRunbookState(input);
+  const hasLiveStuck = runbook.blockedCards.some((b) => b.reason === "repeated_failure");
+  return adviseProject(observeProject(input)).filter((d) => hasLiveStuck || !d.reason.startsWith("stuck stories"));
+}
+
+function runbookWhy(state: ReturnType<typeof buildSupervisorRunbookState>, facts: ReturnType<typeof observeProject>): string {
+  if (state.next.kind === "diagnose_failure") return state.next.reason;
+  if (state.next.kind === "run_card") return `not stuck: next live card is ${state.next.storyId}`;
+  return state.next.reason;
 }
 
 function readSupervisorEvents(projectPath: string): RollEvent[] {
@@ -248,20 +324,23 @@ export function supervisorCommand(args: string[]): number {
 
   if (json) {
     const mode = resolveOperatingMode(projectPath);
+    const events = readSupervisorEvents(projectPath);
+    const runbook = buildSupervisorRunbookState(input);
+    const ctx = supervisorContext(input, events);
     const out =
       sub === "advise"
-        ? { mode, decisions: adviseProject(facts) }
+        ? { mode, decisions: supervisorDecisions(input), runbook, ...ctx }
         : sub === "next"
-          ? { mode, next: recommendNext(input) }
+          ? { mode, next: runbook.next, runbook, ...ctx }
           : sub === "why"
-            ? { mode, why: explainStuck(facts) }
-            : { mode, facts, decisions: adviseProject(facts), next: recommendNext(input) };
+            ? { mode, why: runbookWhy(runbook, facts), runbook, ...ctx }
+            : { mode, facts, decisions: supervisorDecisions(input), next: runbook.next, runbook, ...ctx };
     process.stdout.write(JSON.stringify(out, null, 2) + "\n");
     return 0;
   }
 
   if (sub === "observe") {
-    process.stdout.write(fmtFacts(input));
+    process.stdout.write(fmtFacts(input, readSupervisorEvents(projectPath)));
     return 0;
   }
   if (sub === "advise") {
@@ -269,22 +348,32 @@ export function supervisorCommand(args: string[]): number {
     return 0;
   }
   if (sub === "next") {
+    const state = buildSupervisorRunbookState(input);
     const n = recommendNext(input);
     const mode = resolveOperatingMode(projectPath);
-    const action = mode.mode === "guided" ? suggestedGuidedRun(n.storyId) : mode.ownerAction;
+    const ctx = supervisorContext(input, readSupervisorEvents(projectPath));
+    const action =
+      state.next.kind === "run_card" && mode.mode === "guided"
+        ? suggestedGuidedRun(n.storyId)
+        : state.next.kind === "run_card"
+          ? mode.ownerAction
+          : state.next.ownerAction;
     process.stdout.write(
-      `\n  Supervisor — next: ${n.storyId ?? "(nothing ready)"}\n  ${n.reason}\n  ${formatOperatingMode(mode)}\n  owner action: ${action}\n  scheduler: ${mode.schedulerAction}\n\n`,
+      `\n  Supervisor — next: ${n.storyId ?? "(nothing ready)"}\n  scope: ${state.scope.label}\n  remaining: ${remainingLine(input)}\n  cast: ${ctx.cast}\n  gate: ${ctx.gate}\n  .roll meta: ${ctx.rollMeta.state} — ${ctx.rollMeta.detail}\n  ${n.reason}\n  ${formatOperatingMode(mode)}\n  owner action: ${action}\n  scheduler: ${state.next.schedulerAction}\n\n`,
     );
     return 0;
   }
   if (sub === "why") {
     const mode = resolveOperatingMode(projectPath);
+    const state = buildSupervisorRunbookState(input);
+    const why = runbookWhy(state, facts);
+    const ctx = supervisorContext(input, readSupervisorEvents(projectPath));
     process.stdout.write(
-      `\n  Supervisor — why stuck: ${explainStuck(facts)}\n  ${formatOperatingMode(mode)}\n  owner action: ${mode.ownerAction}\n  scheduler: ${mode.schedulerAction}\n\n`,
+      `\n  Supervisor — why stuck: ${why}\n  cast: ${ctx.cast}\n  gate: ${ctx.gate}\n  .roll meta: ${ctx.rollMeta.state} — ${ctx.rollMeta.detail}\n  ${formatOperatingMode(mode)}\n  owner action: ${state.next.kind === "diagnose_failure" ? state.next.ownerAction : mode.ownerAction}\n  scheduler: ${state.next.kind === "diagnose_failure" ? state.next.schedulerAction : mode.schedulerAction}\n\n`,
     );
     return 0;
   }
   // default: observe + advise
-  process.stdout.write(fmtFacts(input) + fmtAdvice(input));
+  process.stdout.write(fmtFacts(input, readSupervisorEvents(projectPath)) + fmtAdvice(input));
   return 0;
 }

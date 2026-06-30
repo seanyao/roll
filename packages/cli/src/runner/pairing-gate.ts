@@ -147,7 +147,7 @@ export type PairEvent =
    *  from a scorer is now diagnosed (unparseable / timeout / auth-block /
    *  exit-error) and emitted so the loop can observe WHY a pool failed;
    *  no more silently swallowed nulls. */
-  | { type: "pair:score-failure"; cycleId: string; peer: string; cause: "unparseable" | "timeout" | "auth-block" | "exit-error"; detail?: string; stage: "score" | "design"; ts: number };
+  | { type: "pair:score-failure"; cycleId: string; peer: string; cause: "unparseable" | "timeout" | "auth-block" | "exit-error"; detail?: string; artifactPath?: string; stage: "score" | "design"; ts: number };
 
 export interface RunPairingDeps {
   /** Installed agents (canonical), e.g. agentsInstalled(realAgentEnv()). */
@@ -650,19 +650,31 @@ export async function runScorePairing(
  * treats it as no-score; a peer that can't follow the protocol never writes a note).
  */
 export function parsePairScoreOutput(stdout: string): Omit<PairScore, "cost"> | null {
-  const sm = /^\s*SCORE:\s*(\d{1,2})\s*$/im.exec(stdout);
-  const vm = /^\s*VERDICT:\s*(good|ok|regression)\s*$/im.exec(stdout);
-  const rm = /^\s*RATIONALE:\s*(.+)$/im.exec(stdout);
-  if (sm?.[1] === undefined || vm?.[1] === undefined || rm?.[1] === undefined) return null;
-  const score = Number(sm[1]);
+  const lines = stdout.split(/\r?\n/);
+  const scoreLines = lines
+    .map((line, index) => ({ index, match: /^\s*SCORE:\s*(\d{1,2})\s*$/i.exec(line) }))
+    .filter((entry): entry is { index: number; match: RegExpExecArray } => entry.match !== null);
+  const verdictLines = lines
+    .map((line, index) => ({ index, match: /^\s*VERDICT:\s*(good|ok|regression)\s*$/i.exec(line) }))
+    .filter((entry): entry is { index: number; match: RegExpExecArray } => entry.match !== null);
+  const rationaleLines = lines
+    .map((line, index) => ({ index, match: /^\s*RATIONALE:\s*(.+)$/i.exec(line) }))
+    .filter((entry): entry is { index: number; match: RegExpExecArray } => entry.match !== null);
+  if (scoreLines.length !== 1 || verdictLines.length !== 1 || rationaleLines.length !== 1) return null;
+  const sm = scoreLines[0]!;
+  const vm = verdictLines[0]!;
+  const rm = rationaleLines[0]!;
+  if (!(sm.index < vm.index && vm.index < rm.index)) return null;
+  if (sm.match[1] === undefined || vm.match[1] === undefined || rm.match[1] === undefined) return null;
+  const score = Number(sm.match[1]);
   if (!Number.isInteger(score) || score < 1 || score > 10) return null;
   // US-AGENT-041: capture an optional RESIZE/GAPS signal (scope-too-large). The
   // low-score floor is applied later by `shouldResize`; here we just carry it.
   const resize = parseResizeSignal(stdout);
   return {
     score,
-    verdict: vm[1].toLowerCase() as PairScore["verdict"],
-    rationale: rm[1].trim(),
+    verdict: vm.match[1].toLowerCase() as PairScore["verdict"],
+    rationale: rm.match[1].trim(),
     ...(resize !== null ? { resize } : {}),
   };
 }

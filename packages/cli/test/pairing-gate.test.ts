@@ -898,6 +898,8 @@ describe("parsePairScoreOutput — US-PAIR-009", () => {
     expect(parsePairScoreOutput("SCORE: 12\nVERDICT: good\nRATIONALE: x")).toBeNull(); // out of range
     expect(parsePairScoreOutput("SCORE: 7\nVERDICT: great\nRATIONALE: x")).toBeNull(); // bad verdict
     expect(parsePairScoreOutput("SCORE: 7\nVERDICT: ok")).toBeNull(); // no rationale
+    expect(parsePairScoreOutput("VERDICT: good\nRATIONALE: clean\nSCORE: 8")).toBeNull(); // wrong order
+    expect(parsePairScoreOutput("SCORE: 8\nVERDICT: good\nSCORE: 7\nRATIONALE: clean")).toBeNull(); // duplicate field
   });
   it("FIX-910: still rejects unparseable text that WOULD trigger rescue (parse is never relaxed)", () => {
     // These are real-world-ish unparseable outputs that the rescue path would retry.

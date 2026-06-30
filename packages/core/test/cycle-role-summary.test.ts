@@ -68,7 +68,9 @@ const fixtureEvents: RollEvent[] = [
     cycleId: CYCLE_ID,
     peer: "codex",
     durationMs: 52000,
-    outcome: "reviewed",
+    outcome: "error",
+    detail: "unparseable: missing or invalid VERDICT line",
+    artifactPath: ".roll/loop/cycle-logs/obs-035-test/peer/codex.review.raw.txt",
     ts: 1220,
   },
   {
@@ -95,6 +97,7 @@ const fixtureEvents: RollEvent[] = [
     peer: "agy",
     cause: "unparseable",
     detail: "control characters before SCORE",
+    artifactPath: ".roll/loop/cycle-logs/obs-035-test/peer/agy.score.raw.txt",
     stage: "score",
     ts: 1410,
   },
@@ -173,6 +176,12 @@ describe("cycle-role-summary", () => {
       expect(kimiReviewer).toBeDefined();
       expect(kimiReviewer!.state).toBe("returned");
       expect(kimiReviewer!.detail).toContain("no structured verdict");
+
+      const codexReviewer = reviewers.find((r) => r.agent === "codex");
+      expect(codexReviewer).toBeDefined();
+      expect(codexReviewer!.state).toBe("failed");
+      expect(codexReviewer!.cause).toBe("unparseable");
+      expect(codexReviewer!.artifactPath).toBe(".roll/loop/cycle-logs/obs-035-test/peer/codex.review.raw.txt");
 
       const evaluators = summary.roles.filter((r) => r.role === "evaluator");
       expect(evaluators.length).toBeGreaterThanOrEqual(2);
@@ -324,6 +333,7 @@ describe("cycle-role-summary", () => {
           peer: "pi",
           cause: "unparseable",
           detail: "missing SCORE line",
+          artifactPath: ".roll/loop/cycle-logs/SCORE-RETRY/peer/pi.score.raw.txt",
           stage: "score",
           ts: 300,
         },
@@ -392,6 +402,21 @@ describe("cycle-role-summary", () => {
       expect(md).toContain("agy: failed unparseable");
       expect(md).toContain("kimi: returned");
       expect(md).toContain("## Gates");
+    });
+
+    it("renders raw artifact path for failed evaluators (US-OBS-035)", () => {
+      const summary = buildCycleRoleSummary(fixtureInput);
+      const md = renderCycleRoleSummaryMarkdown(summary);
+
+      // agy has a pair:score-failure with artifactPath
+      expect(md).toContain("agy: failed unparseable");
+      expect(md).toContain("raw artifact: .roll/loop/cycle-logs/obs-035-test/peer/agy.score.raw.txt");
+      expect(md).toContain("codex: failed unparseable");
+      expect(md).toContain("raw artifact: .roll/loop/cycle-logs/obs-035-test/peer/codex.review.raw.txt");
+
+      // kimi returned but didn't fail — no raw artifact line
+      expect(md).toContain("kimi: returned");
+      expect(md).not.toContain("kimi: raw artifact");
     });
 
     it("renders minimal summary gracefully", () => {

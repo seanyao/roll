@@ -190,7 +190,7 @@ import { recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
 import { validateStoryVisualEvidence } from "../lib/design-visual-evidence.js";
 import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, autoAttachScreenshotToAcMap, buildAcMapRemediationPrompt, generateAcMapDraft, needsAcMapRemediation, writeAcMapDraftEvidenceFiles, type DraftEvidence } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
-import { buildPairScorePrompt, buildReviewPrompt, enabledPairingStages, parsePairScoreOutput, retryPeerConsult, runPairing, runScorePairing, type PairEvent, type PairReview } from "./pairing-gate.js";
+import { buildPairScorePrompt, buildReviewPrompt, diagnosePairScoreOutput, enabledPairingStages, retryPeerConsult, runPairing, runScorePairing, type PairEvent, type PairReview } from "./pairing-gate.js";
 import { realAgentEnv } from "../commands/agent-list.js";
 import { attestCommand } from "../commands/attest.js";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
@@ -2165,15 +2165,22 @@ export async function executeCommand(
               ? { outcome: "auth-block", detail, artifactPath }
               : { outcome: "exit-error", detail, artifactPath };
           }
-          const parsed = parsePairScoreOutput(res.stdout);
-          if (parsed === null) {
+          const diag = diagnosePairScoreOutput(res.stdout);
+          if (!diag.ok) {
             // The reviewer ANSWERED but the format didn't match the strict
             // SCORE:/VERDICT:/RATIONALE: protocol — this is unparseable, NOT a
             // timeout/error. Previously silently discarded; now observable.
+            // FIX-1045: carry the SPECIFIC reason + category so the role summary
+            // can tell "returned score-like text but not accepted" from "no score
+            // content returned" (beyond the generic "unparseable").
             const artifactPath = savePeerRawOutput(peer, "score", res.stdout, res.stderr);
-            return { outcome: "unparseable", detail: "unparseable score protocol", artifactPath };
+            const detail =
+              diag.category === "no-score-content"
+                ? `no score content returned: ${diag.reason}`
+                : `returned score-like text but not accepted: ${diag.reason}`;
+            return { outcome: "unparseable", detail, artifactPath };
           }
-          return { outcome: "parsed", parsed: { ...parsed, cost: peerReviewCost(peer, res.stdout) } };
+          return { outcome: "parsed", parsed: { ...diag.score, cost: peerReviewCost(peer, res.stdout) } };
         };
         const scorePeer = async (peer: string, summary: string, timeoutMs: number): Promise<import("./pairing-gate.js").PairScore | null> => {
           const prompt = buildPairScorePrompt(summary, evalContractFormatted);

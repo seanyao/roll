@@ -401,7 +401,7 @@ defaults:
 // ── US-PAIR-009: score stage — heterogeneous peer scores the cycle ───────────
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { normalizeScoreStdout, parsePairScoreOutput, runScorePairing, type RunScorePairingDeps } from "../src/runner/pairing-gate.js";
+import { diagnosePairScoreOutput, normalizeScoreStdout, parsePairScoreOutput, runScorePairing, type RunScorePairingDeps } from "../src/runner/pairing-gate.js";
 import { readStoryReviewScores } from "../src/lib/review-score.js";
 
 const FIX1044_FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "score");
@@ -985,6 +985,116 @@ describe("parsePairScoreOutput — FIX-1044 real-agent raw output normalization"
     expect(parsePairScoreOutput('{"type":"result","result":"I score it SCORE: 7 with VERDICT: ok and RATIONALE: fine"}')).toBeNull();
     // duplicate SCORE field survives normalization rejection
     expect(parsePairScoreOutput('{"type":"result","result":"SCORE: 8\\nVERDICT: good\\nSCORE: 7\\nRATIONALE: x"}')).toBeNull();
+  });
+});
+
+describe("diagnosePairScoreOutput — FIX-1045 reasonix/kimi compatibility + diagnostics", () => {
+  // AC1: reasonix repaints its TUI, so the SAME final block appears twice (a
+  // redraw, not a disagreement). The pre-fix parser rejected it for having >1 of
+  // each marker line; now the resolved final block is isolated and accepted.
+  it("AC1: reasonix TUI-redraw duplicate block (real artifact) → parses the resolved final block", () => {
+    const raw = readScoreFixture("reasonix-redraw.stdout.txt");
+    // Pre-fix behavior the spec recorded: this returned null.
+    const d = diagnosePairScoreOutput(raw);
+    expect(d.ok).toBe(true);
+    if (d.ok) {
+      expect(d.score.score).toBe(9);
+      expect(d.score.verdict).toBe("good");
+      expect(d.score.rationale).toContain("Delivery cleanly achieves the stated goal");
+    }
+    expect(parsePairScoreOutput(raw)?.score).toBe(9);
+  });
+
+  // AC2: kimi prints the reply TEMPLATE (with `<placeholder>` rationale), then a
+  // long analysis transcript, then its REAL block last. The template echo and the
+  // analysis prose must not block isolating the real final block.
+  it("AC2: kimi template-echo + analysis transcript + final block (real artifact) → parses the final block", () => {
+    const raw = readScoreFixture("kimi-template-echo.stdout.txt");
+    const d = diagnosePairScoreOutput(raw);
+    expect(d.ok).toBe(true);
+    if (d.ok) {
+      expect(d.score.score).toBe(9);
+      expect(d.score.verdict).toBe("good");
+      expect(d.score.rationale).toContain("bounded normalization");
+    }
+    expect(parsePairScoreOutput(raw)?.score).toBe(9);
+  });
+
+  // AC4: agy returned no protocol content at all — a distinct diagnostic from
+  // "returned score-like text but not accepted".
+  it("AC4: agy empty/no-protocol output → category=no-score-content with a specific reason", () => {
+    const d = diagnosePairScoreOutput(readScoreFixture("agy-empty.stdout.txt"));
+    expect(d.ok).toBe(false);
+    if (!d.ok) {
+      expect(d.category).toBe("no-score-content");
+      expect(d.reason).not.toBe("");
+      expect(d.reason.toLowerCase()).toContain("no");
+    }
+  });
+
+  // AC3: compatibility does NOT loosen validation — each rejection still fails,
+  // now with a SPECIFIC, observable reason (never a generic "unparseable").
+  it("AC3: template-echo-only reply → rejected-score-like (placeholder rationale does not count)", () => {
+    const d = diagnosePairScoreOutput("SCORE: <integer 1..10>\nVERDICT: good|ok|regression\nRATIONALE: <one sentence>");
+    expect(d.ok).toBe(false);
+    if (!d.ok) {
+      expect(d.category).toBe("rejected-score-like");
+      // no valid SCORE (placeholder) and a templated verdict → reported precisely
+      expect(d.reason).toMatch(/SCORE|VERDICT|RATIONALE/);
+    }
+  });
+
+  it("AC3: genuinely conflicting duplicate score blocks → rejected with the conflict named", () => {
+    const d = diagnosePairScoreOutput("SCORE: 8\nVERDICT: good\nRATIONALE: first\nSCORE: 3\nVERDICT: regression\nRATIONALE: second");
+    expect(d.ok).toBe(false);
+    if (!d.ok) {
+      expect(d.category).toBe("rejected-score-like");
+      expect(d.reason).toContain("conflicting");
+      expect(d.reason).toMatch(/8.*3|3.*8/);
+    }
+  });
+
+  it("AC3: identical repeated block (redraw) is accepted, but differing rationale only does not change the resolved score", () => {
+    // Two blocks, SAME score+verdict, different rationale text → resolved → accept.
+    const d = diagnosePairScoreOutput("SCORE: 7\nVERDICT: ok\nRATIONALE: full reason here\nSCORE: 7\nVERDICT: ok\nRATIONALE: short");
+    expect(d.ok).toBe(true);
+    if (d.ok) expect(d.score.score).toBe(7);
+  });
+
+  it("AC3: out-of-range score is distinguished from a missing score", () => {
+    const oor = diagnosePairScoreOutput("SCORE: 12\nVERDICT: good\nRATIONALE: x");
+    expect(oor.ok).toBe(false);
+    if (!oor.ok) {
+      expect(oor.category).toBe("rejected-score-like");
+      expect(oor.reason).toContain("out of range");
+    }
+    const missing = diagnosePairScoreOutput("VERDICT: good\nRATIONALE: x");
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.reason).toContain("SCORE");
+  });
+
+  it("AC3: bad verdict and missing rationale each get their own reason", () => {
+    const badVerdict = diagnosePairScoreOutput("SCORE: 7\nVERDICT: amazing\nRATIONALE: x");
+    expect(badVerdict.ok).toBe(false);
+    if (!badVerdict.ok) expect(badVerdict.reason).toContain("VERDICT");
+    const noRationale = diagnosePairScoreOutput("SCORE: 7\nVERDICT: ok");
+    expect(noRationale.ok).toBe(false);
+    if (!noRationale.ok) expect(noRationale.reason).toContain("RATIONALE");
+  });
+
+  it("AC3: arbitrary prose with no markers → no-score-content (not score-like)", () => {
+    const d = diagnosePairScoreOutput("I think this delivery is a solid 8 out of 10, nicely done.");
+    expect(d.ok).toBe(false);
+    if (!d.ok) expect(d.category).toBe("no-score-content");
+  });
+
+  it("a clean single block still parses (regression)", () => {
+    const d = diagnosePairScoreOutput("noise\nSCORE: 8\nVERDICT: good\nRATIONALE: tight TCR, ACs covered\nmore noise");
+    expect(d.ok).toBe(true);
+    if (d.ok) {
+      expect(d.score.score).toBe(8);
+      expect(d.score.verdict).toBe("good");
+    }
   });
 });
 

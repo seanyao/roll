@@ -35,8 +35,7 @@ warning: skill "skill-audit-summary" at /Users/seanyao/.reasonix/skills/reports/
 [2m  ▎ thinking[0m
 SCORE: 9  
 VERDICT: good  
-RATIONALE: Delivery cleanly achieves the stated goal: bounded normalization normalizes real agent output (JSONL, ANSI, backspacing, bullets) before strict extraction without relaxing validation, and the Builder is excluded from self-scoring when independent agents exist, with real-world fixtures and regression tests covering all ACs.
-[6A[0JSCORE: 9
+RATIONALE: Delivery cleanly achieves the stated goal: bounded normalization normalizes real agent output (JSONL, ANSI, backspacing, bullets) before strict extraction without relaxing validation, and the Builder is excluded from self-scoring when independent agents exist, with real-world fixtures and regression tests covering all ACs.[6A[0JSCORE: 9
 VERDICT: good
 RATIONALE: Delivery cleanly achieves the stated goal: bounded normalization
 normalizes real agent output (JSONL, ANSI, backspacing, bullets) before strict

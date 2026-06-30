@@ -1020,6 +1020,29 @@ describe("diagnosePairScoreOutput — FIX-1045 reasonix/kimi compatibility + dia
     expect(parsePairScoreOutput(raw)?.score).toBe(9);
   });
 
+  // AC1: reasonix soft-wraps a long rationale with a bare CR (U+000D) that the
+  // line scan (split on \r?\n) does not break on, so the wrapped RATIONALE was
+  // invisible and the block mis-rejected as "missing RATIONALE". The normalizer
+  // now folds bare CR / Unicode line separators to \n so the block parses.
+  it("AC1: reasonix CR-wrapped rationale (real artifact) → parses the final block", () => {
+    const raw = readScoreFixture("reasonix-cr-wrap.stdout.txt");
+    expect(raw.includes("\r")).toBe(true); // the fixture really carries a bare CR
+    const d = diagnosePairScoreOutput(raw);
+    expect(d.ok).toBe(true);
+    if (d.ok) {
+      expect(d.score.score).toBe(9);
+      expect(d.score.verdict).toBe("good");
+      expect(d.score.rationale).toContain("normalization");
+    }
+  });
+
+  it("normalizeScoreStdout folds bare CR and Unicode line separators to newlines", () => {
+    expect(normalizeScoreStdout("RATIONALE: part one\rpart two")).toBe("RATIONALE: part one\npart two");
+    expect(normalizeScoreStdout("a\u2028b\u2029c")).toBe("a\nb\nc");
+    // CRLF must not become a double newline
+    expect(normalizeScoreStdout("SCORE: 8\r\nVERDICT: good")).toBe("SCORE: 8\nVERDICT: good");
+  });
+
   // AC4: agy returned no protocol content at all — a distinct diagnostic from
   // "returned score-like text but not accepted".
   it("AC4: agy empty/no-protocol output → category=no-score-content with a specific reason", () => {

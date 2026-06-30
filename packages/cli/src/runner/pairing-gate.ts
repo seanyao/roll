@@ -730,7 +730,14 @@ export function normalizeScoreStdout(stdout: string): string {
   return applyBackspaces(text)
     .replace(SCORE_ANSI_RE, "")
     // residual C0 control bytes (NUL..BS, VT, FF, SO..US, DEL) — keep TAB/LF/CR
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
+    // FIX-1045: normalize ALL line breaks to \n so the line scan sees every
+    // protocol line. A TUI soft-wraps a long rationale with a bare CR (U+000D)
+    // or a Unicode line/paragraph separator (U+2028/U+2029); the scan splits on
+    // \r?\n only, so without this the wrapped RATIONALE text is invisible and a
+    // valid final block is mis-rejected as "missing RATIONALE".
+    .replace(/\r\n/g, "\n")
+    .replace(/[\r\u2028\u2029]/g, "\n");
 }
 
 /** Strip leading bullet/markdown decoration (`**`, `•`, `-`, `#`, `>`, spaces)

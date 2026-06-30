@@ -227,3 +227,50 @@ export function readDeliveries(
   // position — which is equivalent to the last-wins semantics).
   return [...map.values()];
 }
+
+/**
+ * Read all delivery records from `deliveries.jsonl` WITHOUT deduplication.
+ *
+ * Unlike {@link readDeliveries}, this returns every valid record in append
+ * order, including records that would be shadowed by a later record with the
+ * same `(storyId, cycleId)`. Use this when you need to see the full history —
+ * e.g. finding pending records that may already have a later `done` record.
+ *
+ * Rules:
+ *   - Each line is parsed as JSON and validated against {@link DeliveryRecord}.
+ *   - Torn (incomplete JSON) and illegal (schema-invalid) lines are SKIPPED.
+ *   - NO deduplication — every valid line is returned.
+ *   - Pure read — never writes, never modifies the file.
+ *
+ * @param store - Filesystem port (inject for testing).
+ * @param projectRoot - Project root directory.
+ * @returns All valid records in append order (may contain duplicate keys).
+ */
+export function readDeliveriesRaw(
+  store: DeliveryStoreInterface,
+  projectRoot: string,
+): DeliveryRecord[] {
+  const path = deliveriesPath(projectRoot);
+  const text = store.readText(path);
+  if (text.trim() === "") return [];
+
+  const records: DeliveryRecord[] = [];
+  const lines = text.split("\n");
+
+  for (const raw of lines) {
+    if (raw.trim() === "") continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      // Torn / illegal JSON — skip silently.
+      continue;
+    }
+    const record = validateDeliveryRecord(parsed);
+    if (record === null) continue; // Schema-invalid — skip silently.
+
+    records.push(record);
+  }
+
+  return records;
+}

@@ -472,4 +472,63 @@ describe("supervisorCommand", () => {
     const cwd = project(BACKLOG);
     expect(run(cwd, ["bogus"]).code).toBe(1);
   });
+
+  it("FIX-1047: route prints the Builder trace when a scoped agents.yaml is present", () => {
+    const cwd = project(BACKLOG, {
+      agents: [
+        "schema: roll-agents/v1",
+        "scope: project",
+        "agents:",
+        "  claude:",
+        "    capabilities: [supervise, execute, evaluate]",
+        "  codex:",
+        "    capabilities: [supervise, execute, evaluate]",
+        "roles:",
+        "  supervise:",
+        "    kind: fixed",
+        "    agent: codex",
+        "defaults:",
+        "  story:",
+        "    roles:",
+        "      execute:",
+        "        kind: select",
+        "        from: [claude, codex]",
+        "        require: [execute]",
+        "        avoid: [supervise]",
+        "        strategy: first-available",
+        "",
+      ].join("\n"),
+    });
+    const saveHome = process.env["ROLL_HOME"];
+    // Point ROLL_HOME at the project so the only layer is the project agents.yaml;
+    // mark all agents installed so resolution is deterministic across machines.
+    process.env["ROLL_HOME"] = join(cwd, "no-machine");
+    try {
+      const r = run(cwd, ["route", "--json"]);
+      // realAgentEnv reports whichever agents are actually installed on the host,
+      // so the resolved Builder / skip reasons are environment-dependent. Assert
+      // only the env-independent trace shape here; identity-based skipping and
+      // fair rotation are proven deterministically in scoped-route.test.ts.
+      const parsed = JSON.parse(r.out) as { role: string; candidates: string[] };
+      expect(parsed.role).toBe("execute");
+      expect(parsed.candidates).toEqual(["claude", "codex"]);
+    } finally {
+      if (saveHome === undefined) delete process.env["ROLL_HOME"];
+      else process.env["ROLL_HOME"] = saveHome;
+    }
+  });
+
+  it("FIX-1047: route reports legacy routing when no scoped agents.yaml exists", () => {
+    const cwd = project(BACKLOG);
+    const saveHome = process.env["ROLL_HOME"];
+    process.env["ROLL_HOME"] = join(cwd, "no-machine");
+    try {
+      const r = run(cwd, ["route"]);
+      expect(r.code).toBe(0);
+      expect(r.out).toContain("legacy tier routing");
+    } finally {
+      if (saveHome === undefined) delete process.env["ROLL_HOME"];
+      else process.env["ROLL_HOME"] = saveHome;
+    }
+  });
 });

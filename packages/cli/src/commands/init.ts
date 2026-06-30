@@ -705,10 +705,15 @@ defaults:
   story:
     roles:
       execute:
-        kind: inherit
+        kind: select
+        from: [claude, agy, kimi, pi, reasonix, codex]
+        require: [execute]
+        avoid: [supervise]
+        strategy: least-recent
       evaluate:
         kind: select
         require: [evaluate]
+        avoid: [execute]
         strategy: seeded-random
 `;
 

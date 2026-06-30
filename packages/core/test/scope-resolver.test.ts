@@ -228,6 +228,72 @@ defaults:
     }
   });
 
+  it("FIX-1047: avoid:[supervise] excludes only the assigned Prime, not every supervise-capable agent", () => {
+    // claude, agy, and codex all DECLARE supervise capability; only codex is the
+    // assigned Prime. avoid must skip codex by identity and keep claude/agy eligible.
+    const project = cfg(`schema: roll-agents/v1
+scope: project
+agents:
+  claude:
+    capabilities: [supervise, execute, evaluate]
+  agy:
+    capabilities: [supervise, execute, evaluate]
+  codex:
+    capabilities: [supervise, execute, evaluate]
+defaults:
+  story:
+    roles:
+      execute:
+        kind: select
+        from: [claude, agy, codex]
+        require: [execute]
+        avoid: [supervise]
+        strategy: first-available
+`, ".roll/agents.yaml");
+    const resolved = resolveAgentScopeRole({
+      scope: "story",
+      role: "execute",
+      layers: [project],
+      assignedRoles: { supervise: "codex" },
+    });
+    expect(resolved.ok).toBe(true);
+    if (resolved.ok) {
+      // claude is first-available and supervise-capable but NOT the Prime → eligible.
+      expect(resolved.resolved.agent).toBe("claude");
+      expect(resolved.resolved.candidates).toEqual(["claude", "agy", "codex"]);
+      // Only the assigned Prime (codex) is skipped, and by assignment not capability.
+      expect(resolved.resolved.skipped).toEqual([
+        { agent: "codex", reason: "assigned-to-avoided-role: supervise" },
+      ]);
+    }
+  });
+
+  it("FIX-1047: with no supervise assignment, avoid:[supervise] is a no-op and the Prime-capable agent is eligible", () => {
+    const project = cfg(`schema: roll-agents/v1
+scope: project
+agents:
+  codex:
+    capabilities: [supervise, execute, evaluate]
+  pi:
+    capabilities: [supervise, execute, evaluate]
+defaults:
+  story:
+    roles:
+      execute:
+        kind: select
+        from: [codex, pi]
+        require: [execute]
+        avoid: [supervise]
+        strategy: first-available
+`, ".roll/agents.yaml");
+    const resolved = resolveAgentScopeRole({ scope: "story", role: "execute", layers: [project] });
+    expect(resolved.ok).toBe(true);
+    if (resolved.ok) {
+      expect(resolved.resolved.agent).toBe("codex");
+      expect(resolved.resolved.skipped).toEqual([]);
+    }
+  });
+
   it("select without from uses the declared agent pool", () => {
     const project = cfg(`schema: roll-agents/v1
 scope: project

@@ -38,6 +38,7 @@ import { dirname, join } from "node:path";
 import { formatOperatingMode, resolveOperatingMode, suggestedGuidedRun } from "../lib/operating-mode.js";
 import { reducePrView } from "./loop-pr-inbox.js";
 import { readPendingPublish } from "../runner/pending-publish.js";
+import { renderScopedExecuteRoute, resolveScopedStoryExecute, scopedExecuteRouteTrace } from "../runner/scoped-route.js";
 
 const EXEC_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 
@@ -49,6 +50,7 @@ export const SUPERVISOR_USAGE = [
   "  next             what should Roll do next?",
   "  why              why is the project stuck?",
   "  live             read-only Prime Agent live board with Planner/Builder/Evaluator panes",
+  "  route            Builder (story.execute) route trace: candidates, skipped reasons, selected",
 ].join("\n");
 
 function depsOf(desc: string): string[] {
@@ -489,11 +491,23 @@ export function supervisorCommand(args: string[]): number {
   let sub = args.find((a) => !a.startsWith("-"));
   // `status` is an alias for the default observe + advise summary.
   if (sub === "status") sub = undefined;
-  if (sub !== undefined && !["observe", "advise", "next", "why", "live"].includes(sub)) {
+  if (sub !== undefined && !["observe", "advise", "next", "why", "live", "route"].includes(sub)) {
     process.stderr.write(SUPERVISOR_USAGE + "\n");
     return 1;
   }
   const projectPath = process.cwd();
+  if (sub === "route") {
+    const route = resolveScopedStoryExecute(projectPath);
+    if (route === null) {
+      if (json) process.stdout.write(JSON.stringify({ role: "execute", scoped: false }, null, 2) + "\n");
+      else process.stdout.write("\n  Builder route — story.execute\n  (no scoped agents.yaml; legacy tier routing in effect)\n\n");
+      return 0;
+    }
+    const trace = scopedExecuteRouteTrace(route);
+    if (json) process.stdout.write(JSON.stringify(trace, null, 2) + "\n");
+    else process.stdout.write(renderScopedExecuteRoute(trace));
+    return 0;
+  }
   if (sub === "live") {
     const board = buildSupervisorLiveBoard(readSupervisorEvents(projectPath));
     if (json) process.stdout.write(JSON.stringify(board, null, 2) + "\n");

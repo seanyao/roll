@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 import {
   extractRunFact,
+  nodeExecPort,
   parseMergeCommitLog,
   parseMergeCommitMessages,
   parseStoryIdsFromSubject,
@@ -1307,6 +1308,19 @@ describe("ensureDeliveriesFresh", () => {
     expect(result[0].mergeCommit).toEqual({ present: true, value: "9efd807189ca538ccde38bfb55f461b2a5e614c9" });
     expect(result[0].prNumber).toEqual({ present: true, value: 883 });
     expect(result[0].prUrl).toEqual({ present: true, value: "https://github.com/seanyao/roll/pull/883" });
+  });
+});
+
+describe("nodeExecPort", () => {
+  it("captures command output larger than Node's default execFileSync buffer", () => {
+    const bytes = 2 * 1024 * 1024;
+    const result = nodeExecPort.run(process.execPath, [
+      "-e",
+      `process.stdout.write("x".repeat(${bytes}))`,
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toHaveLength(bytes);
   });
 });
 

@@ -14,7 +14,7 @@
  * card ids.
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -48,7 +48,14 @@ function makeProject(opts: ProjectOpts): string {
   git("commit", "-q", "-m", "init");
   git("tag", "v1.0.0");
   for (const subject of opts.deltaSubjects) {
-    git("commit", "-q", "--allow-empty", "-m", subject);
+    if (subject.length > 100_000) {
+      const messageFile = join(dir, `commit-message-${opts.deltaSubjects.indexOf(subject)}.txt`);
+      writeFileSync(messageFile, subject);
+      git("commit", "-q", "--allow-empty", "-F", messageFile);
+      unlinkSync(messageFile);
+    } else {
+      git("commit", "-q", "--allow-empty", "-m", subject);
+    }
   }
 
   if (opts.backlog !== undefined) {
@@ -149,6 +156,17 @@ describe("checkTruthLive — structured delivery truth release gate (FIX-391)", 
     });
     const r = checkTruthLive(dir);
     expect(r.status).toBe("fail");
+    expect(r.gaps.join("\n")).toContain("no backlog row");
+  });
+
+  it("does not silently skip truth-live when release-delta git log exceeds Node's default buffer", () => {
+    const dir = makeProject({
+      deltaSubjects: [`Fix: FIX-1041 large release delta\n\n${"x".repeat(2 * 1024 * 1024)}`],
+      backlog: "| [FIX-OTHER](x) | thing | ✅ Done · [PR#1](https://github.com/o/r/pull/1) |\n",
+    });
+    const r = checkTruthLive(dir);
+    expect(r.status).toBe("fail");
+    expect(r.gaps.join("\n")).toContain("FIX-1041");
     expect(r.gaps.join("\n")).toContain("no backlog row");
   });
 

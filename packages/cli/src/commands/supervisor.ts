@@ -38,6 +38,8 @@ import { dirname, join } from "node:path";
 import { formatOperatingMode, resolveOperatingMode, suggestedGuidedRun } from "../lib/operating-mode.js";
 import { reducePrView } from "./loop-pr-inbox.js";
 
+const EXEC_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
+
 export const SUPERVISOR_USAGE = [
   "Usage: roll supervisor [status|observe|advise|next|why|live] [--json]",
   "  status           observe + advise summary (alias for no subcommand)",
@@ -79,6 +81,7 @@ const quietExecPort: ExecPort = {
     try {
       const stdout = execFileSync(tool, [...argv], {
         encoding: "utf8",
+        maxBuffer: EXEC_MAX_BUFFER_BYTES,
         stdio: ["ignore", "pipe", "ignore"],
       });
       return { stdout: stdout.trim(), code: 0 };

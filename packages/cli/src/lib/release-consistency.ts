@@ -27,6 +27,8 @@ import { resolveLang, STATUS_MARKER, t, v2Catalog, type Lang } from "@roll/spec"
 import { c, renderState, strw, trunc } from "../render.js";
 import { consistencyAuditCommand } from "./consistency-audit.js";
 
+const EXEC_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
+
 // US-DOSSIER-022/FIX-391: the gate report reads the SAME seven-dimension vocabulary the
 // web panel does (CONSISTENCY_DIMENSIONS from @roll/core: code-backlog · cards ·
 // docs · tests · bilingual · site · truth-live). No more local `['code',…,'i18n',…]` table —
@@ -229,6 +231,7 @@ function gitCapture(projectDir: string, args: string[]): string | null {
   try {
     return execFileSync("git", ["-C", projectDir, ...args], {
       encoding: "utf8",
+      maxBuffer: EXEC_MAX_BUFFER_BYTES,
       stdio: ["ignore", "pipe", "ignore"],
     });
   } catch {
@@ -297,6 +300,7 @@ const quietExecPort: ExecPort = {
     try {
       const stdout = execFileSync(tool, [...argv], {
         encoding: "utf8",
+        maxBuffer: EXEC_MAX_BUFFER_BYTES,
         stdio: ["ignore", "pipe", "ignore"],
       });
       return { stdout: stdout.trim(), code: 0 };

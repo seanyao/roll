@@ -10,6 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveLang } from "@roll/spec";
 import { networkNeeds, requireNetwork } from "./lib/require-network.js";
+import { publicCommands } from "./lib/command-surface.js";
 import { renderFrontDoor } from "./lib/front-door.js";
 import { isSnapshotStale, loadTruthSnapshot, renderNowMs } from "./lib/truth-read.js";
 import { renderState } from "./render.js";
@@ -77,10 +78,13 @@ export interface RunResult {
   status: number;
 }
 
-/** Top-level usage — TS-native (no bash). Lists the visible registered
- *  commands (hidden aliases/manual entry points stay callable, unlisted). */
+/** Top-level usage — TS-native (no bash). REFACTOR-056: the command list is
+ *  projected from the ONE command-surface truth source (the approved public
+ *  top-level commands), NOT from ad hoc ported-command enumeration. Nested,
+ *  internal, and removed surfaces stay callable as registered but are never
+ *  listed here. */
 export function usage(): string {
-  const cmds = portedCommands().filter((c) => !c.startsWith("-") && !hidden.has(c)).join(", ");
+  const cmds = publicCommands().join(", ");
   return (
     `roll <command> [args]\n\n` +
     `Commands: ${cmds}\n\n` +

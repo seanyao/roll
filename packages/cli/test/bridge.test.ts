@@ -62,14 +62,18 @@ describe("ported routing (no bash fallback)", () => {
       const res = await dispatch([command]);
       expect(res.status).toBe(1);
     }
+    // REFACTOR-056: prices stays CALLABLE (this card moves no behavior) but it is
+    // a nested cost-config surface, so it is no longer listed in `roll --help`.
     expect(isPorted("prices")).toBe(true);
-    expect(usage()).toMatch(/\bprices\b/);
+    expect(usage()).not.toMatch(/\bprices\b/);
   });
 
-  it("FIX-255: peer is a first-class TS command, not an unknown bash fallback", () => {
+  it("FIX-255 / REFACTOR-056: peer stays a callable TS command but is NOT a public top-level surface", () => {
     registerAll();
+    // peer remains ported (review/scoring process boundary); REFACTOR-056 classes
+    // it `remove` from the public surface, so it must not appear in `roll --help`.
     expect(isPorted("peer")).toBe(true);
-    expect(usage()).toMatch(/\bpeer\b/);
+    expect(usage()).not.toMatch(/\bpeer\b/);
   });
 
   it("FIX-255: bridge-enforced peer help exposes the full command surface", async () => {
@@ -154,11 +158,18 @@ describe("ported routing (no bash fallback)", () => {
     expect(res.status).toBe(1);
   });
 
-  it("usage() lists the registered commands", () => {
+  it("REFACTOR-056: usage() projects the public command-surface list, NOT raw registrations", () => {
+    // A freshly-registered command that is not in the command-surface registry
+    // must NOT leak into help — the list comes from the truth source, not from
+    // ported-command enumeration.
     registerPorted("__usage_cmd", () => 0);
     const u = usage();
-    expect(u).toContain("__usage_cmd");
+    expect(u).not.toContain("__usage_cmd");
     expect(u).toContain("roll <command>");
+    const listed = u.split("Commands:")[1] ?? "";
+    expect(listed.trim()).toMatch(
+      /^agent, backlog, config, design, doctor, help, idea, init, loop, next, release, setup, status, test, update$/m,
+    );
   });
 });
 

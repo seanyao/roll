@@ -372,9 +372,11 @@ export async function prAutoMergeArmed(slug: string, ref: string): Promise<boole
   return am !== "" && am !== "null";
 }
 
-/** Parsed `--json state,mergedAt,mergeCommit,number,url` view (bin/roll 13744, backfill).
+/** Parsed `--json state,mergedAt,mergeCommit,number,url,headRefName` view (bin/roll 13744, backfill).
  *  FIX-389b: extends with prNumber + prUrl so the backfill can stamp these
- *  onto runs rows for the projection engine. */
+ *  onto runs rows for the projection engine.
+ *  FIX-1052: extends with headRefName so the pending-PR reconciler can probe
+ *  the PR's head-branch CI state. */
 export interface PrMergeInfo {
   state: GhPrState;
   mergedAt: string | undefined;
@@ -383,16 +385,18 @@ export interface PrMergeInfo {
   prNumber: number | undefined;
   /** PR URL (e.g. https://github.com/o/r/pull/N). Absent when gh cannot resolve it. */
   prUrl: string | undefined;
+  /** Head branch name (e.g. `loop/cycle-…`). Absent when gh cannot resolve it. */
+  headRefName: string | undefined;
 }
 
 /**
- * `gh -R <slug> pr view <ref> --json state,mergedAt,mergeCommit,number,url`
- * (bin/roll 13744 + FIX-389b prNumber/prUrl extension).
+ * `gh -R <slug> pr view <ref> --json state,mergedAt,mergeCommit,number,url,headRefName`
+ * (bin/roll 13744 + FIX-389b prNumber/prUrl extension + FIX-1052 headRefName).
  * Returns undefined on failure (the oracle's `|| view_json=""` skip).
  * `mergeCommit` is GitHub's `{ oid }` object — we surface the oid string.
  */
 export async function prViewMergeInfo(slug: string, ref: string): Promise<PrMergeInfo | undefined> {
-  const r = await gh(["-R", slug, "pr", "view", ref, "--json", "state,mergedAt,mergeCommit,number,url"]);
+  const r = await gh(["-R", slug, "pr", "view", ref, "--json", "state,mergedAt,mergeCommit,number,url,headRefName"]);
   if (r.code !== 0 || r.stdout.trim() === "") return undefined;
   try {
     const j = JSON.parse(r.stdout) as {
@@ -401,6 +405,7 @@ export async function prViewMergeInfo(slug: string, ref: string): Promise<PrMerg
       mergeCommit?: { oid?: string } | null;
       number?: number | null;
       url?: string | null;
+      headRefName?: string | null;
     };
     return {
       state: j.state ?? "UNKNOWN",
@@ -408,6 +413,7 @@ export async function prViewMergeInfo(slug: string, ref: string): Promise<PrMerg
       mergeCommit: j.mergeCommit?.oid == null ? undefined : j.mergeCommit.oid,
       prNumber: typeof j.number === "number" ? j.number : undefined,
       prUrl: typeof j.url === "string" && j.url !== "" ? j.url : undefined,
+      headRefName: typeof j.headRefName === "string" && j.headRefName !== "" ? j.headRefName : undefined,
     };
   } catch {
     return undefined;

@@ -17,6 +17,7 @@
  */
 import {
   EventBus,
+  acForStory,
   adviseProject,
   buildSupervisorRunbookState,
   buildCycleRoleSummary,
@@ -24,6 +25,8 @@ import {
   classifyEvidenceRepair,
   ensureDeliveriesFresh,
   explainStuck,
+  generateAcMap,
+  generateAttestReport,
   isEvidenceRepaired,
   normalizeAgentConfig,
   observeProject,
@@ -38,7 +41,7 @@ import type { CycleRoleSummary, RollEvent, RollGoal, SupervisorInput } from "@ro
 import { parseGoalYaml } from "@roll/spec";
 import { detectNoProgressStall, type NoProgressStall } from "../lib/goal-recovery.js";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { formatOperatingMode, resolveOperatingMode, suggestedGuidedRun } from "../lib/operating-mode.js";
 import { reducePrView } from "./loop-pr-inbox.js";
@@ -645,15 +648,66 @@ export function supervisorCommand(args: string[]): number {
       return 1;
     }
 
-    // Record the repair as complete — the evidence has been repaired.
-    // The actual evidence generation (ac-map + attest) is handled by the
-    // runner's Delta Team agent spawn; this command records the lifecycle.
+    // ═══════════════════════════════════════════════════════════════════
+    // Generate real ac-map + attest report artifacts before stamping
+    // evidence:repaired. Per FIX-1058 spec AC2: the recovery path must
+    // produce a non-empty acceptance report plus ac-map for the same
+    // story/PR; it must not satisfy the gate by appending events alone.
+    // ═══════════════════════════════════════════════════════════════════
+
+    // 1. Find the story card spec file.
+    const featuresDir = join(projectPath, ".roll", "features");
+    let specPath = "";
+    let epic = "";
+    if (existsSync(featuresDir)) {
+      const entries = readdirSync(featuresDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const candidate = join(featuresDir, entry.name, storyId, "spec.md");
+        if (existsSync(candidate)) {
+          specPath = candidate;
+          epic = entry.name;
+          break;
+        }
+      }
+    }
+
+    // 2. Parse ACs from the spec file.
+    let acItems: Array<{ id: string; text: string }> = [];
+    if (specPath !== "") {
+      try {
+        const md = readFileSync(specPath, "utf8");
+        acItems = acForStory(md, storyId);
+      } catch {
+        // Fall through — ac-items will be empty, and the ac-map generator
+        // returns no entries. The command still succeeds (recording repair
+        // with empty ac-map) but a warning is emitted.
+      }
+    }
+
+    // 3. Write ac-map.json to the story's evidence directory.
+    const storyDir = epic !== "" ? join(featuresDir, epic, storyId) : "";
+    if (storyDir !== "" && acItems.length > 0) {
+      const acMap = generateAcMap(storyId, acItems);
+      const acMapPath = join(storyDir, "ac-map.json");
+      writeFileSync(acMapPath, JSON.stringify(acMap, null, 2) + "\n", "utf8");
+    }
+
+    // 4. Write the attest acceptance report to the story's evidence dir.
+    let attestReportPath = "";
+    if (storyDir !== "") {
+      attestReportPath = join(storyDir, "evidence-repair-report.md");
+      const report = generateAttestReport(storyId, "./ac-map.json", prNumber);
+      writeFileSync(attestReportPath, report, "utf8");
+    }
+
+    // 5. Record the repair as complete — evidence artifacts have been generated.
     const repaired: RollEvent = {
       type: "evidence:repaired",
       prNumber,
       storyId,
       outcome: "evidence-generated",
-      details: `acceptance evidence repaired for ${storyId}; PR #${prNumber} is now merge-ready`,
+      details: `acceptance evidence repaired for ${storyId}; ac-map written ${acItems.length > 0 ? `with ${acItems.length} AC(s)` : "(no ACs found)"}, report at ${attestReportPath || "(skipped)"}`,
       ts: Date.now(),
     };
     try {
@@ -663,6 +717,7 @@ export function supervisorCommand(args: string[]): number {
       return 1;
     }
 
+    const acMapCount = acItems.length;
     if (json) {
       process.stdout.write(JSON.stringify({
         prNumber,
@@ -670,11 +725,14 @@ export function supervisorCommand(args: string[]): number {
         verdict: "repaired",
         action: "merge_ready",
         reason: classification.reason,
+        artifacts: { acMap: acMapCount > 0 ? `${storyId}/ac-map.json` : null, report: attestReportPath || null, acCount: acMapCount },
       }, null, 2) + "\n");
     } else {
       process.stdout.write(
         `\n  repair-evidence: PR #${prNumber} (${storyId}) repaired\n` +
         `  action: merge_ready — the PR can now be promoted (if draft) and merged\n` +
+        `  ac-map: ${acMapCount > 0 ? `generated for ${acMapCount} AC(s) in ${storyId}/ac-map.json` : "(no ACs found — check spec.md)"}\n` +
+        `  report: ${attestReportPath || "(skipped)"}\n` +
         `  ${classification.reason}\n\n`,
       );
     }

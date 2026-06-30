@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   classifyEvidenceRepair,
+  generateAcMap,
+  generateAttestReport,
   isEvidenceRepaired,
   repairedPrNumbers,
   type EvidenceRepairInput,
@@ -136,5 +138,83 @@ describe("isEvidenceRepaired", () => {
   it("returns false for empty set", () => {
     const set = new Set<number>();
     expect(isEvidenceRepaired(1116, set)).toBe(false);
+  });
+});
+
+describe("generateAcMap", () => {
+  const acItems = [
+    { id: "FIX-1058:AC1", text: "When a loop PR is CI green and has an accepted evaluator result but lacks a fresh acceptance report, Roll exposes a scoped recovery command" },
+    { id: "FIX-1058:AC2", text: "The recovery path must invoke or reuse the real attest/report generation path and produce a non-empty acceptance report plus ac-map" },
+    { id: "FIX-1058:AC3", text: "The recovery path must not modify product code unless the evidence repair proves the delivered code no longer matches the spec" },
+  ];
+
+  it("returns one entry per AC item", () => {
+    const map = generateAcMap("FIX-1058", acItems);
+    expect(map).toHaveLength(3);
+  });
+
+  it("sets status to claimed for every entry (never pass)", () => {
+    const map = generateAcMap("FIX-1058", acItems);
+    for (const entry of map) {
+      expect(entry.status).toBe("claimed");
+    }
+  });
+
+  it("uses the AC id as the ac field", () => {
+    const map = generateAcMap("FIX-1058", acItems);
+    expect(map[0]!.ac).toBe("FIX-1058:AC1");
+    expect(map[1]!.ac).toBe("FIX-1058:AC2");
+  });
+
+  it("attaches caller-supplied evidence refs that textually match AC text", () => {
+    const refs = [
+      { kind: "text", label: "cli-repair-evidence: recovery command validates PR eligibility" },
+      { kind: "text", label: "test-output: vitest passes for all classification variants" },
+    ];
+    const map = generateAcMap("FIX-1058", [acItems[0]!], refs);
+    expect(map[0]!.evidence.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("provides a fallback evidence entry when no refs match", () => {
+    const map = generateAcMap("FIX-1058", [acItems[0]!]);
+    expect(map[0]!.evidence.length).toBeGreaterThanOrEqual(1);
+    expect(map[0]!.evidence[0]!.label).toContain("repair");
+  });
+
+  it("returns empty array for empty acItems", () => {
+    const map = generateAcMap("FIX-1058", []);
+    expect(map).toHaveLength(0);
+  });
+
+  it("produces stable JSON-serializable output", () => {
+    const map = generateAcMap("FIX-1058", acItems);
+    const json = JSON.stringify(map);
+    const parsed = JSON.parse(json);
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed).toHaveLength(3);
+  });
+});
+
+describe("generateAttestReport", () => {
+  it("contains the story ID and PR number", () => {
+    const report = generateAttestReport("FIX-1058", "./ac-map.json", 1116);
+    expect(report).toContain("FIX-1058");
+    expect(report).toContain("#1116");
+  });
+
+  it("mentions the ac-map path", () => {
+    const report = generateAttestReport("FIX-1058", "./ac-map.json", 1116);
+    expect(report).toContain("ac-map.json");
+  });
+
+  it("states that status is claimed (repaired evidence)", () => {
+    const report = generateAttestReport("FIX-1058", "./ac-map.json", 1116);
+    expect(report).toContain("claimed");
+    expect(report).toContain("repaired evidence");
+  });
+
+  it("includes evidence repair method description", () => {
+    const report = generateAttestReport("FIX-1058", "./ac-map.json", 1116);
+    expect(report).toContain("evidence repair");
   });
 });

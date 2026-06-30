@@ -270,6 +270,12 @@ export type RollEvent =
   // Evidence lifecycle (US-EVID-001) — the runner opened the per-cycle evidence
   // frame before spawning an agent, so later phases have a durable run dir.
   | { type: "evidence:frame-opened"; cycleId: string; storyId: string; runDir: string; ts: number }
+  // FIX-1058 — evidence-repair recovery for green PRs missing acceptance reports.
+  // The repair is scoped: it only generates delivery evidence (ac-map + attest
+  // report); it must not modify product code unless the evidence proves the
+  // delivered code no longer matches spec (recorded as a refinement).
+  | { type: "evidence:repair_requested"; prNumber: number; storyId: string; reason: string; ts: number }
+  | { type: "evidence:repaired"; prNumber: number; storyId: string; outcome: "evidence-generated" | "refinement-needed"; details: string; ts: number }
   // Morning report (US-EVID-016) — one fixed human-readable page is rebuilt from
   // events/runs and linked from the dossier front page.
   | { type: "report:morning"; path: string; windowStart: number; windowEnd: number; cycles: number; corrections: number; paused: boolean; ts: number }

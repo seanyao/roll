@@ -146,9 +146,14 @@ export function buildSupervisorRunbookState(input: SupervisorInput): SupervisorR
     if (status === "todo") todoByFamily[family] += 1;
   }
 
-  const manualMerge = manualMergeGates.find((gate) => liveScopeIds.has(gate.storyId) || openPrSet.has(gate.storyId));
-  if (manualMerge !== undefined) {
-    blockedCards.push(blocker(manualMerge.storyId, "open_pr", `PR #${manualMerge.prNumber} requires manual merge reconciliation`));
+  // FIX-1058 — distinguish blocking manual merge gates from evidence-repaired
+  // merge_ready PRs. A merge_ready PR has evidence repaired and is safe to
+  // merge; it does not block the supervisor from proceeding.
+  const blockingMerge = manualMergeGates.find(
+    (gate) => (liveScopeIds.has(gate.storyId) || openPrSet.has(gate.storyId)) && gate.action !== "merge_ready",
+  );
+  if (blockingMerge !== undefined) {
+    blockedCards.push(blocker(blockingMerge.storyId, "open_pr", `PR #${blockingMerge.prNumber} requires manual merge reconciliation`));
     return {
       scope: { label: "live non-Hold FIX/US/REFACTOR", families: SUPERVISOR_FAMILIES, remainingByFamily, todoByFamily, excluded },
       truth: {
@@ -160,9 +165,9 @@ export function buildSupervisorRunbookState(input: SupervisorInput): SupervisorR
       },
       next: {
         kind: "manual_merge_gate",
-        storyId: manualMerge.storyId,
-        reason: `manual merge gate on PR #${manualMerge.prNumber} for ${manualMerge.storyId}: ${manualMerge.detail}`,
-        ownerAction: `review PR #${manualMerge.prNumber}; merge only after CI=${manualMerge.ciState}, evaluator=${manualMerge.reviewState}, merge=${manualMerge.mergeable} are acceptable`,
+        storyId: blockingMerge.storyId,
+        reason: `manual merge gate on PR #${blockingMerge.prNumber} for ${blockingMerge.storyId}: ${blockingMerge.detail}`,
+        ownerAction: `review PR #${blockingMerge.prNumber}; merge only after CI=${blockingMerge.ciState}, evaluator=${blockingMerge.reviewState}, merge=${blockingMerge.mergeable} are acceptable`,
         schedulerAction: "do not start another card until the manual-merge PR is merged, closed, or explicitly deferred",
       },
       blockedCards,

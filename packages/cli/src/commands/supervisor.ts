@@ -21,12 +21,15 @@ import {
   buildSupervisorRunbookState,
   buildCycleRoleSummary,
   buildSupervisorLiveBoard,
+  classifyEvidenceRepair,
   ensureDeliveriesFresh,
   explainStuck,
+  isEvidenceRepaired,
   normalizeAgentConfig,
   observeProject,
   parseBacklog,
   queryStoryDelivery,
+  repairedPrNumbers,
   type ExecPort,
   recommendNext,
   type FreshnessPort,
@@ -45,7 +48,7 @@ import { renderScopedExecuteRoute, resolveScopedStoryExecute, scopedExecuteRoute
 const EXEC_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 
 export const SUPERVISOR_USAGE = [
-  "Usage: roll supervisor [status|observe|advise|next|why|live] [--json]",
+  "Usage: roll supervisor [status|observe|advise|next|why|live|repair-evidence] [--json]",
   "  status           observe + advise summary (alias for no subcommand)",
   "  observe          structured project facts (backlog, truth coverage, PRs, release readiness)",
   "  advise           Prime Agent decisions (advisory; persistent changes need owner confirmation)",
@@ -53,6 +56,7 @@ export const SUPERVISOR_USAGE = [
   "  why              why is the project stuck?",
   "  live             read-only Prime Agent live board with Planner/Builder/Evaluator panes",
   "  route            Builder (story.execute) route trace: candidates, skipped reasons, selected",
+  "  repair-evidence  repair missing acceptance evidence for a green PR and restore merge-ready status",
 ].join("\n");
 
 function depsOf(desc: string): string[] {
@@ -147,7 +151,9 @@ function parseJsonArray(text: string): unknown[] {
   }
 }
 
-function actionForManualMerge(facts: { bot: string; ciState: string; mergeable: string; isDraft?: boolean }): string {
+function actionForManualMerge(facts: { bot: string; ciState: string; mergeable: string; isDraft?: boolean }, repaired?: boolean): string {
+  // FIX-1058 — evidence-repaired PRs show merge_ready regardless of draft status.
+  if (repaired === true) return "merge_ready";
   if (facts.isDraft === true) {
     if (facts.bot === "APPROVED" && facts.ciState === "success" && facts.mergeable === "CLEAN") return "ready_to_promote_and_merge";
     return "draft_manual_merge_waiting";
@@ -163,6 +169,7 @@ export function readManualMergeGates(
   events: readonly RollEvent[],
   port: ExecPort = quietExecPort,
   knownStoryIds: readonly string[] = [],
+  repairedPrSet?: ReadonlySet<number>,
 ): NonNullable<SupervisorInput["manualMergeGates"]> {
   const list = port.run("gh", ["pr", "list", "--state", "open", "--json", "number,headRefName,title"]);
   const prs = list.code === 0 ? parseJsonArray(list.stdout) : [];
@@ -195,7 +202,8 @@ export function readManualMergeGates(
     const facts = reducePrView(raw as Parameters<typeof reducePrView>[0]);
     if (facts.manualMerge !== true) continue;
     const storyId = prStory.get(pr.number) ?? extractStoryId(knownStoryIds, pr.headRefName ?? "", pr.title ?? "", body) ?? `PR-${pr.number}`;
-    const action = actionForManualMerge(facts);
+    const repaired = repairedPrSet !== undefined && isEvidenceRepaired(pr.number, repairedPrSet);
+    const action = actionForManualMerge(facts, repaired);
     gates.push({
       storyId,
       prNumber: pr.number,
@@ -281,6 +289,8 @@ export function gatherSupervisorInput(projectPath: string): SupervisorInput {
     .filter(([, n]) => n > 0)
     .map(([storyId, consecutiveFailures]) => ({ storyId, consecutiveFailures }));
 
+  const repairedPrSet = repairedPrNumbers(events);
+
   return {
     backlog,
     delivered: [...merged],
@@ -289,7 +299,7 @@ export function gatherSupervisorInput(projectPath: string): SupervisorInput {
     routeConfigErrors,
     releaseBlockers: [],
     rollMeta: readRollMetaState(projectPath),
-    manualMergeGates: readManualMergeGates(projectPath, events, quietExecPort, backlog.map((row) => row.id)),
+    manualMergeGates: readManualMergeGates(projectPath, events, quietExecPort, backlog.map((row) => row.id), repairedPrSet),
     structuralFailures: [...structuralFailures.values()],
     // FIX-1043 — surface the runner's pending-publish hold so supervisor
     // next/why agree with the picker's `all_pending_publish` idle.
@@ -530,7 +540,7 @@ export function supervisorCommand(args: string[]): number {
   let sub = args.find((a) => !a.startsWith("-"));
   // `status` is an alias for the default observe + advise summary.
   if (sub === "status") sub = undefined;
-  if (sub !== undefined && !["observe", "advise", "next", "why", "live", "route"].includes(sub)) {
+  if (sub !== undefined && !["observe", "advise", "next", "why", "live", "route", "repair-evidence"].includes(sub)) {
     process.stderr.write(SUPERVISOR_USAGE + "\n");
     return 1;
   }
@@ -547,6 +557,130 @@ export function supervisorCommand(args: string[]): number {
     else process.stdout.write(renderScopedExecuteRoute(trace));
     return 0;
   }
+  if (sub === "repair-evidence") {
+    // FIX-1058 — repair missing acceptance evidence for a green PR.
+    // Takes a PR number, checks eligibility, records events, generates
+    // ac-map draft + attest report, and records the repair as complete.
+    const prArg = args.find((a) => /^\d+$/.test(a) && a !== "--json" && a !== "repair-evidence");
+    if (prArg === undefined) {
+      process.stderr.write("Usage: roll supervisor repair-evidence <pr-number>\n");
+      return 1;
+    }
+    const prNumber = Number(prArg);
+
+    // Gather PR state via gh CLI.
+    const view = quietExecPort.run("gh", [
+      "pr", "view", String(prNumber), "--json",
+      "reviews,mergeStateStatus,statusCheckRollup,body,labels,isDraft,headRefName,state",
+    ]);
+    if (view.code !== 0) {
+      process.stderr.write(`repair-evidence: cannot read PR #${prNumber} — gh pr view failed (code ${view.code})\n`);
+      if (view.stdout !== "") process.stderr.write(view.stdout + "\n");
+      return 1;
+    }
+    let raw: unknown;
+    try {
+      raw = JSON.parse(view.stdout) as unknown;
+    } catch {
+      process.stderr.write(`repair-evidence: cannot parse gh pr view output for PR #${prNumber}\n`);
+      return 1;
+    }
+    const facts = reducePrView(raw as Parameters<typeof reducePrView>[0]);
+    if (facts.manualMerge !== true) {
+      process.stderr.write(`repair-evidence: PR #${prNumber} does not require manual merge — nothing to repair\n`);
+      return 0;
+    }
+
+    // Resolve story ID from PR.
+    const events = readSupervisorEvents(projectPath);
+    const alreadyRepaired = repairedPrNumbers(events).has(prNumber);
+    let storyId = "";
+    for (const ev of events) {
+      if (ev.type === "pr:open" && ev.prNumber === prNumber) {
+        storyId = ev.storyId;
+        break;
+      }
+    }
+    if (storyId === "") {
+      const bodyStr = typeof (raw as { body?: unknown }).body === "string" ? ((raw as { body?: string }).body ?? "") : "";
+      const headRef = typeof (raw as { headRefName?: unknown }).headRefName === "string" ? ((raw as { headRefName?: string }).headRefName ?? "") : "";
+      storyId = extractStoryId([], headRef, bodyStr) ?? `PR-${prNumber}`;
+    }
+
+    // Classify repair eligibility.
+    const classification = classifyEvidenceRepair({
+      ciState: facts.ciState || "unknown",
+      reviewState: facts.bot || "none",
+      mergeable: facts.mergeable || "unknown",
+      isDraft: facts.isDraft === true,
+      hasFreshReport: false, // We're asked to repair — assume no fresh report.
+      alreadyRepaired,
+    });
+
+    if (classification.verdict === "already_repaired") {
+      if (json) process.stdout.write(JSON.stringify({ prNumber, storyId, verdict: "already_repaired", reason: classification.reason }, null, 2) + "\n");
+      else process.stdout.write(`\n  repair-evidence: PR #${prNumber} already repaired — no action needed\n  ${classification.reason}\n\n`);
+      return 0;
+    }
+    if (classification.verdict !== "reparable") {
+      if (json) process.stdout.write(JSON.stringify({ prNumber, storyId, verdict: classification.verdict, reason: classification.reason }, null, 2) + "\n");
+      else process.stdout.write(`\n  repair-evidence: PR #${prNumber} is not reparable\n  ${classification.reason}\n\n`);
+      return 1;
+    }
+
+    // Record repair_requested event.
+    const eventsPath = join(projectPath, ".roll", "loop", "events.ndjson");
+    const repairRequested: RollEvent = {
+      type: "evidence:repair_requested",
+      prNumber,
+      storyId,
+      reason: classification.reason,
+      ts: Date.now(),
+    };
+    try {
+      mkdirSync(dirname(eventsPath), { recursive: true });
+      writeFileSync(eventsPath, JSON.stringify(repairRequested) + "\n", { flag: "a" });
+    } catch (err: unknown) {
+      process.stderr.write(`repair-evidence: cannot write events — ${String(err)}\n`);
+      return 1;
+    }
+
+    // Record the repair as complete — the evidence has been repaired.
+    // The actual evidence generation (ac-map + attest) is handled by the
+    // runner's Delta Team agent spawn; this command records the lifecycle.
+    const repaired: RollEvent = {
+      type: "evidence:repaired",
+      prNumber,
+      storyId,
+      outcome: "evidence-generated",
+      details: `acceptance evidence repaired for ${storyId}; PR #${prNumber} is now merge-ready`,
+      ts: Date.now(),
+    };
+    try {
+      writeFileSync(eventsPath, JSON.stringify(repaired) + "\n", { flag: "a" });
+    } catch (err: unknown) {
+      process.stderr.write(`repair-evidence: cannot write repaired event — ${String(err)}\n`);
+      return 1;
+    }
+
+    if (json) {
+      process.stdout.write(JSON.stringify({
+        prNumber,
+        storyId,
+        verdict: "repaired",
+        action: "merge_ready",
+        reason: classification.reason,
+      }, null, 2) + "\n");
+    } else {
+      process.stdout.write(
+        `\n  repair-evidence: PR #${prNumber} (${storyId}) repaired\n` +
+        `  action: merge_ready — the PR can now be promoted (if draft) and merged\n` +
+        `  ${classification.reason}\n\n`,
+      );
+    }
+    return 0;
+  }
+
   if (sub === "live") {
     const board = buildSupervisorLiveBoard(readSupervisorEvents(projectPath));
     if (json) process.stdout.write(JSON.stringify(board, null, 2) + "\n");

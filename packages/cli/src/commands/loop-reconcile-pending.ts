@@ -12,9 +12,10 @@
  * The command is safe to run repeatedly: already-delivered records are skipped.
  */
 import { join } from "node:path";
-import { resolveLang, present } from "@roll/spec";
+import { resolveLang, present, STATUS_MARKER } from "@roll/spec";
 import type { DeliveryRecord } from "@roll/spec";
 import {
+  BacklogStore,
   nodeDeliveryStore,
   nodeExecPort,
   readDeliveries,
@@ -198,6 +199,19 @@ export async function loopReconcilePendingCommand(
           storyId: record.storyId,
           ts: now,
         });
+
+        // Flip the backlog row from 🔨 In Progress to ✅ Done so the
+        // supervisor no longer treats this delivered card as blocking.
+        try {
+          const backlogPath = join(cwd, ".roll", "backlog.md");
+          const store = new BacklogStore();
+          const snap = store.readBacklog(backlogPath);
+          store.mark(backlogPath, snap.hash, record.storyId, STATUS_MARKER.done);
+        } catch {
+          // Best-effort: the delivery record is the truth; backlog update is
+          // a convenience signal for the supervisor. Non-fatal on failure.
+        }
+
         updated += 1;
         deps.stdout.write(
           lang === "zh"

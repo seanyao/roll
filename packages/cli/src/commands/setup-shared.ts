@@ -66,6 +66,45 @@ export function rollPkgConventions(): string {
   return join(rollPkgDir(), "conventions");
 }
 
+// ─── auxiliary skill-tree directories (FIX-1042) ─────────────────────────────
+/**
+ * The Roll skills package ships a few directories that are NOT routable skills:
+ * shared docs, generated reports, helper scripts, route-case fixtures, and
+ * tests. They are mirrored into `~/.roll/skills` alongside the real `roll-*`
+ * skills, but they must never be symlinked into an agent's `skills/` root —
+ * agents such as Reasonix scan every entry there as a skill and warn that the
+ * Markdown files have no `description:` frontmatter (FIX-1042).
+ *
+ * This is the single source of truth for the auxiliary-directory policy; setup
+ * (skip + prune) and doctor (pollution report) both consult it so the policy
+ * cannot drift between the two.
+ */
+export const AUXILIARY_SKILL_TREE_DIRS: readonly string[] = [
+  "docs",
+  "reports",
+  "scripts",
+  "route-cases",
+  "tests",
+];
+
+/** Is `name` an auxiliary (non-skill) Roll skill-tree directory? */
+export function isAuxiliarySkillTreeDir(name: string): boolean {
+  return AUXILIARY_SKILL_TREE_DIRS.includes(name);
+}
+
+/**
+ * Does `target` (a symlink target) point at a Roll-owned auxiliary skill-tree
+ * directory directly under `homeSkillsDir` (i.e. `~/.roll/skills`)? Uses
+ * path-boundary-safe component matching — the final path segment must equal an
+ * auxiliary name AND its parent must be exactly `homeSkillsDir` — so loose
+ * names like `docs-internal` or unrelated roots are never misclassified.
+ */
+export function isRollAuxiliarySkillTarget(target: string, homeSkillsDir: string): boolean {
+  if (target === "") return false;
+  const normalized = target.endsWith("/") ? target.slice(0, -1) : target;
+  return dirname(normalized) === homeSkillsDir && isAuxiliarySkillTreeDir(basename(normalized));
+}
+
 // ─── _get_ai_tools (823) — ai_* entries with ~ expanded ──────────────────────
 export function getAiTools(): string[] {
   const cfg = rollConfig();
@@ -523,10 +562,13 @@ function linkSkills(): void {
     ) {
       continue;
     }
-    // Prune stale roll-* symlinks pointing into ~/.roll/skills no longer present.
-    const homeSkillsPrefix = `${join(rollHome(), "skills")}/`;
+    // Prune stale roll-* symlinks pointing into ~/.roll/skills no longer
+    // present, and remove auxiliary-directory pollution mounted by older setup
+    // (FIX-1042) — symlinks like `skills/docs → ~/.roll/skills/docs/` that
+    // agents misread as undescribed skills.
+    const homeSkills = join(rollHome(), "skills");
+    const homeSkillsPrefix = `${homeSkills}/`;
     for (const name of listDirEntries(skillsDir)) {
-      if (!name.startsWith("roll-")) continue;
       const link = join(skillsDir, name);
       if (lstatType(link) !== "link") continue;
       let target = "";
@@ -535,13 +577,21 @@ function linkSkills(): void {
       } catch {
         target = "";
       }
-      if (target.startsWith(homeSkillsPrefix) && !existsSync(link)) {
+      if (name.startsWith("roll-")) {
+        if (target.startsWith(homeSkillsPrefix) && !existsSync(link)) {
+          rmSync(link, { force: true });
+        }
+        continue;
+      }
+      // Non-skill entry: remove it when it is a Roll-owned auxiliary mount.
+      if (isRollAuxiliarySkillTarget(target, homeSkills)) {
         rmSync(link, { force: true });
       }
     }
-    // Create/repair per-skill symlinks.
-    const homeSkills = join(rollHome(), "skills");
+    // Create/repair per-skill symlinks — auxiliary skill-tree directories are
+    // never mounted into an agent skills root (FIX-1042).
     for (const skillName of listDirEntries(homeSkills)) {
+      if (isAuxiliarySkillTreeDir(skillName)) continue;
       const skillDir = `${join(homeSkills, skillName)}/`;
       try {
         if (!statSync(join(homeSkills, skillName)).isDirectory()) continue;

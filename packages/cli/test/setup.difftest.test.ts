@@ -16,6 +16,7 @@ import {
   readFileSync,
   readlinkSync,
   realpathSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -46,6 +47,12 @@ beforeAll(() => {
     join(pkgDir, "skills", "roll-alpha", "references", "full-contract.md"),
     "# roll-alpha full contract\n",
   );
+  // FIX-1042: auxiliary skill-tree directories ship alongside real skills but
+  // must never be mounted into an agent skills root.
+  for (const aux of ["docs", "reports", "scripts", "route-cases", "tests"]) {
+    mkdirSync(join(pkgDir, "skills", aux), { recursive: true });
+    writeFileSync(join(pkgDir, "skills", aux, "skill-authoring.md"), `# ${aux}\n`);
+  }
 });
 
 afterAll(() => {
@@ -154,6 +161,14 @@ function assertFreshSideEffects(fx: Fixture): void {
   expect(readlinkSync(skillLink)).toBe(`${join(fx.home, ".roll", "skills", "roll-alpha")}/`);
   expect(readFileSync(join(skillLink, "references", "full-contract.md"), "utf8")).toBe("# roll-alpha full contract\n");
   expect(existsSync(join(fx.home, ".roll", ".peer-state", "logs"))).toBe(true);
+  // FIX-1042: auxiliary skill-tree dirs are mirrored into ~/.roll/skills but
+  // never symlinked into an agent skills root, so agents do not scan them.
+  for (const aux of ["docs", "reports", "scripts", "route-cases", "tests"]) {
+    expect(existsSync(join(fx.home, ".roll", "skills", aux))).toBe(true);
+    expect(existsSync(join(fx.home, ".claude", "skills", aux))).toBe(false);
+  }
+  // Real skills still mount.
+  expect(lstatSync(join(fx.home, ".claude", "skills", "roll-beta")).isSymbolicLink()).toBe(true);
 }
 
 describe("frozen: roll setup", () => {
@@ -375,6 +390,41 @@ describe("frozen: roll setup", () => {
       }
     `);
     assertFreshSideEffects(fx);
+  });
+
+  it("FIX-1042: reasonix skill root mounts skills but filters auxiliary dirs", () => {
+    const fx = freshFixture();
+    mkdirSync(join(fx.home, ".reasonix"), { recursive: true });
+    tsSetup(fx, [], { ROLL_LANG: "en" });
+    const rxSkills = join(fx.home, ".reasonix", "skills");
+    // Real skills are mounted as symlinks.
+    expect(lstatSync(join(rxSkills, "roll-alpha")).isSymbolicLink()).toBe(true);
+    expect(lstatSync(join(rxSkills, "roll-beta")).isSymbolicLink()).toBe(true);
+    // Auxiliary skill-tree directories are NOT mounted — Reasonix would have
+    // scanned them as undescribed skills and warned (FIX-1042).
+    for (const aux of ["docs", "reports", "scripts", "route-cases", "tests"]) {
+      expect(existsSync(join(rxSkills, aux))).toBe(false);
+    }
+  });
+
+  it("FIX-1042: re-run removes stale auxiliary pollution, preserves real & lookalike skills", () => {
+    const fx = freshFixture();
+    mkdirSync(join(fx.home, ".reasonix"), { recursive: true });
+    tsSetup(fx, [], { ROLL_LANG: "en" });
+    const rxSkills = join(fx.home, ".reasonix", "skills");
+    // Simulate an older setup that mounted an auxiliary dir and a lookalike.
+    const stale = join(rxSkills, "docs");
+    symlinkSync(`${join(fx.home, ".roll", "skills", "docs")}/`, stale);
+    const lookalike = join(rxSkills, "docs-internal");
+    symlinkSync(`${join(fx.home, ".roll", "skills", "docs-internal")}/`, lookalike);
+    expect(lstatSync(stale).isSymbolicLink()).toBe(true);
+    // Re-run setup.
+    tsSetup(fx, [], { ROLL_LANG: "en" });
+    // Auxiliary pollution is removed; the path-boundary-safe match leaves the
+    // `docs-internal` lookalike untouched, and real skills survive.
+    expect(existsSync(stale)).toBe(false);
+    expect(lstatSync(lookalike).isSymbolicLink()).toBe(true);
+    expect(lstatSync(join(rxSkills, "roll-alpha")).isSymbolicLink()).toBe(true);
   });
 
   it("missing conventions source is owned by TS without bash fallback", () => {

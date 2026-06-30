@@ -1660,8 +1660,8 @@ export async function executeCommand(
       // Best-effort: a miss on every lane leaves cost absent (n/a, never a fake
       // zero) — usage accounting must never fail the cycle.
       let costPatch: CycleCost | undefined;
+      const agentName = ctx.agent ?? cmd.agent;
       try {
-        const agentName = ctx.agent ?? cmd.agent;
         const lines = res.stdout.split("\n");
         const usageSpec = getAgentSpec(agentName)?.usage;
         let usage = usageSpec?.stdoutExtractor === "claude-stream" ? extractUsage(agentName, lines) : null;
@@ -1696,6 +1696,19 @@ export async function executeCommand(
       } catch {
         /* usage parse is best-effort */
       }
+      // FIX-1050: when usage is genuinely absent, record an agent-specific reason
+      // so debug/detail output can distinguish parser failure from agents whose
+      // stdout simply carries no usage (agy/gemini). The terminal event keeps the
+      // closed `no_parseable_usage` reason; the runs row carries the finer-grained
+      // diagnostic.
+      const usageUnknownReason: string | undefined =
+        costPatch === undefined
+          ? agentName === "agy"
+            ? "agy_stdout_no_usage"
+            : agentName === "reasonix"
+              ? "reasonix_footer_unmatched"
+              : "no_parseable_usage"
+          : undefined;
       return {
         event: { type: "agent_exited", exit: res.exitCode, timedOut: res.timedOut },
         // FIX-343 (step ①): persist the builder session id on the cycle context so
@@ -1705,6 +1718,7 @@ export async function executeCommand(
           builderSessionId,
           ...(postSpawnDirty.length > 0 ? { mainDirty: true } : {}),
           ...(costPatch !== undefined ? { cost: costPatch } : {}),
+          ...(usageUnknownReason !== undefined ? { usageUnknownReason } : {}),
         },
       };
     }
@@ -2998,6 +3012,12 @@ export function buildRunRow(
     // an unknown marker instead of a misleading "$0.00 · 0/0". model + duration
     // above are still present (failure ≠ empty record).
     row["usage_unknown"] = true;
+    // FIX-1050: preserve the agent-specific diagnostic reason (e.g. agy_stdout_no_usage)
+    // on the runs row so `roll cycles --json` / ledger detail can distinguish
+    // parser failure from genuinely missing agent usage output.
+    if (ctx.usageUnknownReason !== undefined && ctx.usageUnknownReason !== "") {
+      row["usage_unknown_reason"] = ctx.usageUnknownReason;
+    }
   }
   // FIX-389b: write pr_number + pr_url onto the runs row from the publish
   // context so the projection engine (FIX-389a) can rebuild deliveries from

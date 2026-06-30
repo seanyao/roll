@@ -72,6 +72,9 @@ export interface CycleLedgerRow {
    *  `(#N)` but does NOT name the story-id (e.g. FIX-287 / PR #773). undefined
    *  when the cycle never opened a PR or predates the terminal-event twin. */
   prNumber?: number;
+  /** FIX-1050: agent-specific reason why usage is unknown (e.g.
+   *  `agy_stdout_no_usage`), surfaced in --json / debug output. */
+  usageUnknownReason?: string;
 }
 
 /** The CLI's verdict vocabulary (AC4): delivered / reverted / failed / blocked. */
@@ -447,6 +450,7 @@ export function collectCycleLedger(projectPath: string): CycleLedgerRow[] {
     // FIX-290 AC3: a cycle whose usage was unreadable (usage_credentials_missing)
     // carries `usage_unknown:true` — its tokens/cost are UNKNOWN ("?"), not 0/—.
     const usageUnknown = row["usage_unknown"] === true;
+    const usageUnknownReason = typeof row["usage_unknown_reason"] === "string" ? (row["usage_unknown_reason"] as string) : undefined;
     const ev = byCycle.get(cycleId);
     const toolCosts = toolEvidence.costsByCycle.get(cycleId) ?? [];
     const prNumber = storyId !== "" ? prMergedBy.get(storyId) : undefined;
@@ -474,6 +478,8 @@ export function collectCycleLedger(projectPath: string): CycleLedgerRow[] {
       // FIX-348: the cycle's own PR number (cycle:terminal twin), falling back to
       // the merged/open PR event keyed by story when the terminal twin is absent.
       prNumber: ownPrNumber,
+      // FIX-1050: agent-specific diagnostic reason for unknown usage.
+      ...(usageUnknownReason !== undefined ? { usageUnknownReason } : {}),
     });
   }
   // De-dupe duplicate cycle ids (kimi pair-review): the LAST row wins — runs.jsonl

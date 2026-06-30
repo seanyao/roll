@@ -180,6 +180,27 @@ describe("collectCycleLedger", () => {
     expect(r.cost).toBe("?"); // AC3: unknown, NOT "$0.00"
   });
 
+  it("FIX-1050: usage_unknown_reason is surfaced on the ledger row for debug/detail", () => {
+    const p = project([
+      {
+        cycle_id: "agy-no-usage",
+        status: "failed",
+        outcome: "failed",
+        story_id: "REFACTOR-055",
+        agent: "agy",
+        model: "gemini-2.5-pro",
+        ts: "2026-06-12T00:57:00Z",
+        duration_sec: 300,
+        usage_unknown: true,
+        usage_unknown_reason: "agy_stdout_no_usage",
+      },
+    ]);
+    const r = collectCycleLedger(p)[0]!;
+    expect(r.tokens).toBe("?");
+    expect(r.cost).toBe("?");
+    expect(r.usageUnknownReason).toBe("agy_stdout_no_usage");
+  });
+
   it("FIX-290 AC3: a real 0-token cycle is '—' (TRUE-0), distinct from '?' (UNKNOWN)", () => {
     // A real cycle (story picked) whose parsed usage genuinely summed to 0 — kept
     // (it is a cycle, not an idle heartbeat) and rendered "—", not "?".

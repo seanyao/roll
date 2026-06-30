@@ -10,9 +10,11 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  agyExtract,
   extractUsage,
   kimiExtract,
   piExtract,
+  reasonixExtract,
   sumKimiWire,
   sumPiSession,
   type Extractor,
@@ -33,6 +35,31 @@ const STDOUT_FIXTURES: Array<{ agent: string; ex: Extractor; lines: string[]; ex
   },
   { agent: "kimi", ex: kimiExtract, lines: ["hello, world", "nothing useful here"], expected: null },
   { agent: "kimi", ex: kimiExtract, lines: [], expected: null },
+  // FIX-1050: reasonix footer from cycle 20260630-202133-24278.
+  {
+    agent: "reasonix", ex: reasonixExtract,
+    lines: ["some build output", "  · 166604 tok · in 165907 (165760 cached / 147 new) · out 697 (14 reasoning) · ¥0.0049"],
+    expected: { model: "deepseek-flash", input_tokens: 165907, output_tokens: 697, cost_list_usd: 0.0049, currency: "CNY", duration_ms: null },
+  },
+  // FIX-1050: reasonix footer without per-direction split falls back to total→input.
+  {
+    agent: "reasonix", ex: reasonixExtract,
+    lines: ["· 1000 tok · in 0 · out 0 · ¥0.0001"],
+    expected: { model: "deepseek-flash", input_tokens: 1000, output_tokens: 0, cost_list_usd: 0.0001, currency: "CNY", duration_ms: null },
+  },
+  // FIX-1050: multiple reasonix footers → the LAST one is the cycle total.
+  {
+    agent: "reasonix", ex: reasonixExtract,
+    lines: [
+      "· 14641 tok · in 14314 (384 cached / 13930 new) · out 327 (155 reasoning) · ¥0.0146",
+      "· 166604 tok · in 165907 (165760 cached / 147 new) · out 697 (14 reasoning) · ¥0.0049",
+    ],
+    expected: { model: "deepseek-flash", input_tokens: 165907, output_tokens: 697, cost_list_usd: 0.0049, currency: "CNY", duration_ms: null },
+  },
+  { agent: "reasonix", ex: reasonixExtract, lines: ["no footer here"], expected: null },
+  // FIX-1050: agy/gemini stdout carries no usage footer → explicit null.
+  { agent: "agy", ex: agyExtract, lines: ["^D\b\b", "some output"], expected: null },
+  { agent: "agy", ex: agyExtract, lines: [], expected: null },
 ];
 
 /** Compare a TS usage object to the frozen expected, with cost tolerance. */
@@ -48,6 +75,9 @@ function expectUsageEqual(ts: Usage, expected: Usage): void {
   expect(t["output_tokens"]).toBe(expected["output_tokens"]);
   if (expected["cost_list_usd"] !== undefined) {
     expect(t["cost_list_usd"] as number).toBeCloseTo(expected["cost_list_usd"] as number, 6);
+  }
+  if (expected["currency"] !== undefined) {
+    expect(t["currency"]).toBe(expected["currency"]);
   }
 }
 
@@ -68,6 +98,19 @@ describe("frozen: stdout-scrape extractors == python adapters", () => {
     const u = extractUsage("kimi", ["Model: kimi-k2", "input=10 output=5"]);
     expect(u).not.toBeNull();
     expect(u?.model).toBe("kimi-k2");
+  });
+
+  it("FIX-1050: extractUsage routes reasonix to its footer parser", () => {
+    const u = extractUsage("reasonix", ["  · 166604 tok · in 165907 (165760 cached / 147 new) · out 697 (14 reasoning) · ¥0.0049"]);
+    expect(u).not.toBeNull();
+    expect(u?.model).toBe("deepseek-flash");
+    expect(u?.input_tokens).toBe(165907);
+    expect(u?.output_tokens).toBe(697);
+    expect(u?.cost_list_usd as number).toBeCloseTo(0.0049, 6);
+  });
+
+  it("FIX-1050: extractUsage routes agy to its explicit no-usage stub", () => {
+    expect(extractUsage("agy", ["anything", "^D\b\b"])).toBeNull();
   });
 });
 

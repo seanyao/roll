@@ -53,10 +53,15 @@ describe("AgentSpec registry — FIX-313", () => {
       cliBin: ["reasonix"],
       canReviewHeadless: true,
       normalizer: "generic",
-      usage: { stdoutExtractor: "generic" },
+      usage: { stdoutExtractor: "reasonix" },
       smokeCommand: 'reasonix run --max-steps 1 "Reply with a single word: hello"',
     });
     expect(agentSmokeCommand("reasonix")).toBe('reasonix run --max-steps 1 "Reply with a single word: hello"');
+  });
+
+  it("FIX-1050: agy uses its explicit no-usage extractor instead of the missing gemini adapter", () => {
+    expect(getAgentSpec("agy")?.usage.stdoutExtractor).toBe("agy");
+    expect(getAgentSpec("antigravity")?.usage.stdoutExtractor).toBe("agy");
   });
 
   it("lets downstream support a new agent by registry-only extension", () => {

@@ -3,7 +3,7 @@
 // the orchestrated agent POOL (see registry.ts). So "claude"/"claude-stream"
 // remain in these unions as harness kinds.
 export type AgentNormalizerKind = "claude" | "codex" | "kimi" | "pi" | "generic";
-export type UsageExtractorKind = "claude-stream" | "openai" | "gemini" | "kimi" | "qwen" | "pi" | "generic";
+export type UsageExtractorKind = "claude-stream" | "openai" | "gemini" | "kimi" | "qwen" | "pi" | "reasonix" | "agy" | "generic";
 export type SessionRecoveryKind = "pi" | "kimi" | "codex";
 export type SessionBackfillKind = "claude-projects";
 /** lever-4: how (if at all) an agent's prior session is REUSED across the next
@@ -98,7 +98,7 @@ export const AGENTS: readonly AgentSpec[] = [
     cliBin: ["agy", "gemini"],
     canReviewHeadless: true,
     normalizer: "generic",
-    usage: { stdoutExtractor: "gemini" },
+    usage: { stdoutExtractor: "agy" },
     smokeCommand: 'agy -p "Reply with a single word: hello"',
   },
   {
@@ -108,7 +108,7 @@ export const AGENTS: readonly AgentSpec[] = [
     cliBin: ["reasonix"],
     canReviewHeadless: true,
     normalizer: "generic",
-    usage: { stdoutExtractor: "generic" },
+    usage: { stdoutExtractor: "reasonix" },
     smokeCommand: 'reasonix run --max-steps 1 "Reply with a single word: hello"',
   },
 ];

@@ -100,6 +100,45 @@ describe("roll cycles — US-CLI-012", () => {
     expect(parsed.cycles).toBe(5);
   });
 
+  it("FIX-1050: --json exposes usageUnknownReason when the runs row carries one", async () => {
+    const p = mkdtempSync(join(tmpdir(), "roll-cycles-"));
+    dirs.push(p);
+    mkdirSync(join(p, ".roll", "loop"), { recursive: true });
+    writeFileSync(
+      join(p, ".roll", "loop", "runs.jsonl"),
+      JSON.stringify({
+        cycle_id: "20260630-191612-76188",
+        status: "failed",
+        outcome: "failed",
+        story_id: "REFACTOR-055",
+        agent: "agy",
+        model: "gemini-2.5-pro",
+        ts: "2026-06-30T19:16:12Z",
+        duration_sec: 120,
+        usage_unknown: true,
+        usage_unknown_reason: "agy_stdout_no_usage",
+      }) + "\n",
+    );
+    const save = process.cwd();
+    process.chdir(p);
+    const out: string[] = [];
+    const so = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((s: string) => (out.push(s), true)) as typeof process.stdout.write;
+    let status: number;
+    try {
+      status = cyclesCommand(["--since", "all", "--json", "--no-color"]);
+    } finally {
+      process.stdout.write = so;
+      process.chdir(save);
+    }
+    expect(status).toBe(0);
+    const parsed = JSON.parse(out.join("")) as { rows: Array<{ usageUnknownReason?: string; cost: string; tokens: string }> };
+    const row = parsed.rows[0];
+    expect(row.cost).toBe("?");
+    expect(row.tokens).toBe("?");
+    expect(row.usageUnknownReason).toBe("agy_stdout_no_usage");
+  });
+
   it("US-LOOP-076: --detail needs a cycle id (loud fail)", async () => {
     const save = process.cwd();
     process.chdir(project());

@@ -502,4 +502,14 @@ export const v3Catalog: Catalog = {
     en: "Not a git repository — `roll loop` needs a git repo with a pushable GitHub remote.",
     zh: "不是 git 仓库 — `roll loop` 需要一个带有可推送 GitHub remote 的 git 仓库。",
   },
+
+  // FIX-1042: agent skill-root pollution (auxiliary dirs mounted as skills)
+  "doctor.skill_root_pollution": {
+    en: "Polluted agent skill roots (auxiliary directories mounted as skills)",
+    zh: "受污染的 agent skill 根目录（辅助目录被当作 skill 挂载）",
+  },
+  "doctor.skill_root_pollution_hint": {
+    en: "These are Roll docs/reports, not skills — re-run `roll setup` to remove them so agents stop warning about missing descriptions.",
+    zh: "这些是 Roll 文档/报告，不是 skill —— 重新运行 `roll setup` 即可移除，agent 将不再报告缺少 description 的警告。",
+  },
 };

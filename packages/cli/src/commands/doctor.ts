@@ -13,13 +13,14 @@
  * EN line then the ZH line of the same key, regardless of locale.
  */
 import { execFileSync } from "node:child_process";
-import { accessSync, constants, existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { agentInstalledByName as coreAgentInstalledByName, agentIsKnown, canonicalAgentName, type AgentEnv } from "@roll/core";
 import { resolveLang, t, v2Catalog, v3Catalog, type Lang } from "@roll/spec";
 import { repoRoot } from "../bridge.js";
 import { generateCatalog } from "./skills.js";
+import { isRollAuxiliarySkillTarget } from "./setup-shared.js";
 import { collectExternalTools, renderExternalToolDoctorSection, type ExternalToolState } from "../lib/external-tools.js";
 import { collectToolReadinessDoctorRows, renderToolReadinessDoctorSection } from "../lib/tool-readiness-doctor.js";
 import { detectDesignHandoff, renderDesignNudge } from "../lib/onboard-nudge.js";
@@ -299,6 +300,81 @@ function skillsCatalogSection(lang: Lang): void {
   emit(`  ${t(v2Catalog, lang, drift ? "skills.doctor_drift" : "skills.doctor_ok")}`);
 }
 
+// ── FIX-1042: agent skill-root pollution (auxiliary dirs mounted as skills) ──
+function rollHomeDir(): string {
+  return process.env["ROLL_HOME"] ?? join(homedir(), ".roll");
+}
+
+export interface SkillRootPollution {
+  agent: string;
+  /** The polluting symlink path inside the agent's skills/ root. */
+  link: string;
+  /** Its target — a Roll-owned auxiliary skill-tree directory. */
+  target: string;
+}
+
+/**
+ * Scan each configured agent's `skills/` root for auxiliary-directory pollution
+ * — symlinks that point at Roll-owned auxiliary skill-tree directories under
+ * `~/.roll/skills` (e.g. `docs`, `reports`). These are NOT auth/network
+ * failures: the agent is installed and reachable; its skill root just carries
+ * non-skill mounts an older `roll setup` created. Reuses the shared
+ * setup-shared predicate so the auxiliary-dir policy never drifts.
+ */
+export function detectSkillRootPollution(configText: string, home: string): SkillRootPollution[] {
+  const homeSkills = join(rollHomeDir(), "skills");
+  const found: SkillRootPollution[] = [];
+  for (const line of configText.split("\n")) {
+    const idx = line.indexOf(":");
+    if (idx === -1) continue;
+    const key = line.slice(0, idx);
+    if (!/^ai_/.test(key)) continue;
+    const rawName = key.slice("ai_".length);
+    if (rawName === "kimi_code") continue; // dedupe (matches agentSection)
+    if (!agentIsKnown(rawName)) continue;
+    const name = canonicalAgentName(rawName);
+    let dir = (line.slice(idx + 1).split("|")[0] ?? "").replace(/^ /, "");
+    if (dir.startsWith("~")) dir = home + dir.slice(1);
+    const skillsDir = join(dir, "skills");
+    let entries: string[];
+    try {
+      entries = readdirSync(skillsDir);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const link = join(skillsDir, entry);
+      let target = "";
+      try {
+        if (!lstatSync(link).isSymbolicLink()) continue;
+        target = readlinkSync(link);
+      } catch {
+        continue;
+      }
+      if (isRollAuxiliarySkillTarget(target, homeSkills)) {
+        found.push({ agent: name, link, target });
+      }
+    }
+  }
+  return found;
+}
+
+function skillRootPollutionSection(lang: Lang): void {
+  const cfg = rollConfigPath();
+  if (!existsSync(cfg)) return;
+  const polluted = detectSkillRootPollution(readFileSync(cfg, "utf8"), homedir());
+  if (polluted.length === 0) return;
+  emit("");
+  emit(t(v3Catalog, "en", "doctor.skill_root_pollution"));
+  emit(t(v3Catalog, "zh", "doctor.skill_root_pollution"));
+  emit("");
+  for (const { agent, link, target } of polluted) {
+    emit(`  ⚠ ${agent}: ${link} → ${target}`);
+  }
+  emit("");
+  emit(`  ${t(v3Catalog, lang, "doctor.skill_root_pollution_hint")}`);
+}
+
 // ── FIX-234 AC3: all com.roll.* lanes — target path + load state, stale red ──
 export interface LaneProbe {
   /** `launchctl list <label>` last-exit, or null when the job is not loaded. */
@@ -513,6 +589,7 @@ export function doctorCommand(args: string[], deps: DoctorDeps = {}): number {
 
   if (!toolsOnly) {
     agentSection(p);
+    skillRootPollutionSection(lang);
     prSection(lang);
     skillsCatalogSection(lang);
     lanesSection(lang, realLaneProbe());

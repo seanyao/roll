@@ -14,7 +14,7 @@
 [![npm version](https://img.shields.io/npm/v/@seanyao/roll.svg)](https://www.npmjs.com/package/@seanyao/roll)
 [![CI](https://github.com/seanyao/roll/actions/workflows/ci.yml/badge.svg)](https://github.com/seanyao/roll/actions/workflows/ci.yml)
 
-Roll — a Supervisor-led CLI harness that routes AI agents through story-scoped planning, building, evaluation, git, CI, and acceptance evidence. Works with Claude, Cursor, Codex, Kimi, Pi, Reasonix, and other local rigs when they are available.
+Roll — a Prime Agent-led CLI harness that routes AI agents through story-scoped planning, building, evaluation, git, CI, and acceptance evidence. Works with Claude, Cursor, Codex, Kimi, Pi, Reasonix, and other local rigs when they are available.
 
 ## Install
 
@@ -55,19 +55,19 @@ brief, onboard plan, backlog, and Roll markers, then prints one best next
 command instead of a menu.
 First time through? Start with [Getting started](guide/en/getting-started.md).
 
-## V4 Supervisor Execution
+## V4 Prime Agent Execution
 
 Roll V4 separates project coordination from story delivery:
 
-- **Supervisor Agent** coordinates at project level: backlog order, cross-Story context, route advice, repeated failures, release readiness, budget, and owner escalation. It observes and advises; it does not implement a Story or override evidence gates.
-- **Story Execution Unit** delivers one Story through scoped roles: `execute` performs the Story work, `evaluate` reviews/scores evidence, and `supervise` coordinates above the Story boundary.
+- **Prime Agent** coordinates at project level: backlog order, cross-Story context, route advice, repeated failures, release readiness, budget, and owner escalation. It observes and advises; it does not implement a Story or override evidence gates.
+- **Delta Unit** delivers one Story through scoped roles: `execute` performs the Story work, `evaluate` reviews/scores evidence, and `supervise` coordinates above the Story boundary.
 - **supervise / execute / evaluate roles** are stable contracts. The concrete `agent` and optional `model` are resolved through the Agent Scope model: `Scope -> Role -> Binding -> Agent -> Model`.
 - **Skills remain** the capability layer. Roles invoke `$roll-design`, `$roll-build`, `$roll-fix`, `$roll-peer`, `$roll-.qa`, and related skills instead of rewriting those contracts into TypeScript.
 - **Fallback is fail-loud**. If a requested agent or rig is unavailable, Roll records that unavailability and pauses or asks for owner action; it does not silently pretend another agent was used.
 
-### Supervisor backlog-clearing standard
+### Prime Agent backlog-clearing standard
 
-When the owner asks Roll to clear a backlog, Supervisor treats the scope as every
+When the owner asks Roll to clear a backlog, Prime Agent treats the scope as every
 live non-Hold `FIX-*`, `US-*`, and `REFACTOR-*` row unless the owner narrows it.
 Before scheduling another card it reconciles backlog status, open PRs, recent
 cycle endings, CI/evaluator gates, manual-merge PRs, and `.roll` meta state.
@@ -133,7 +133,7 @@ roll design --from-file .roll/brief.md
 roll loop on
 ```
 
-Roll explains the next design step instead of inventing fake work. The Supervisor turns the requirement into Stories, resolves `execute` and optional `evaluate` roles per Story, and the owner reviews story-scoped attest evidence.
+Roll explains the next design step instead of inventing fake work. The Prime Agent turns the requirement into Stories, resolves `execute` and optional `evaluate` roles per Story, and the owner reviews story-scoped attest evidence.
 
 **Existing project**
 
@@ -145,7 +145,7 @@ roll init --apply        # after reviewing the generated onboard plan
 roll loop on
 ```
 
-Roll diagnoses the repository without destructive migration, writes or updates Roll metadata only after review, and then lets the Supervisor reason over existing backlog, docs, context, open PRs, and scoped role bindings. Current state is visible through CLI-first observability: `roll status`, `roll loop watch`, `roll loop runs`, `roll cycle <id>`, `roll loop alert`, and story reports.
+Roll diagnoses the repository without destructive migration, writes or updates Roll metadata only after review, and then lets the Prime Agent reason over existing backlog, docs, context, open PRs, and scoped role bindings. Current state is visible through CLI-first observability: `roll status`, `roll loop watch`, `roll loop runs`, `roll cycle <id>`, `roll loop alert`, and story reports.
 
 ## Quick start for new projects
 
@@ -178,7 +178,7 @@ with `roll loop resume` when ready.
 | `roll backlog [sync\|block\|defer\|lint\|…]` | View, manage, and sync (from GitHub Issues) pending tasks |
 | `roll loop alert [list\|ack\|resolve\|log]` | View / clear loop alerts |
 | `roll status` | Verdict-first truth summary read from the ONE snapshot — LOOP · CYCLE · RELEASE · STORY, with the STORY line's attest-coverage % (`done ≡ merged ∧ attested`) — then convention/AI-client sync health |
-| `roll supervisor [status\|observe\|advise\|next\|why\|live] [--json]` | Project-level Supervisor Agent: observes project truth, explains guided/autonomous mode and next owner action, advises next steps, and renders a read-only live role board with Planner / Builder / Evaluator panes. Cross-Story coordination only — never implements a Story; persistent policy changes need owner confirmation |
+| `roll supervisor [status\|observe\|advise\|next\|why\|live] [--json]` | Project-level Prime Agent: observes project truth, explains guided/autonomous mode and next owner action, advises next steps, and renders a read-only live role board with Planner / Builder / Evaluator panes. Cross-Story coordination only — never implements a Story; persistent policy changes need owner confirmation |
 | `roll pulse [--json]` | Today's delivery pulse: cycles in window, merged count, attested count, plus an ASCII sparkline from the story spectrum. Bilingual EN/中. `--json` for machine-readable output |
 | `roll doctor [skills\|--tools]` | Environment + install diagnosis; `roll doctor --tools` shows focused tool and screenshot readiness, including Terminal.app Screen Recording |
 | `roll tune [reset]` | Suggest-only self-tuning from loop trends — read-only, never auto-applies |
@@ -230,7 +230,7 @@ it is not the active delivery truth surface.
 - Missing facts render as `?`. A visible `0` means a known zero, not unknown.
 
 `roll supervisor live` is the shipped CLI-first multi-role board. A browser/TUI
-Supervisor Live Console remains future work and must reuse the same view model.
+Prime Agent Live Console remains future work and must reuse the same view model.
 
 ## Repository layout
 

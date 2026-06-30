@@ -148,7 +148,7 @@ export function registerAll(): void {
   registerPorted("cycles", cyclesCommand, { help: CYCLES_USAGE });
   // `cycle`: one cycle's trace tape (US-CLI-013) — the `roll cycles` tail hint target.
   registerPorted("cycle", cycleCommand, { help: CYCLE_USAGE });
-  // US-V4-008: `supervisor` — the project-level Supervisor Agent (observe/advise).
+  // US-V4-008: `supervisor` — the project-level Prime Agent (observe/advise).
   // Cross-Story coordination, never Story implementation.
   registerPorted("supervisor", supervisorCommand, { help: SUPERVISOR_USAGE });
   // FIX-343 (AC1): the agent-facing self-grade command is REMOVED. The working

@@ -1,5 +1,5 @@
 /**
- * US-V4-008 — Supervisor Agent v0 (observe + advise) deterministic selectors.
+ * US-V4-008 — Prime Agent v0 (observe + advise) deterministic selectors.
  * Covers truth-drift detection, stuck-story detection, route-config + release
  * readiness, budget health, advisory decisions (with owner-confirmation), and the
  * "what next / why stuck" answers.
@@ -334,7 +334,7 @@ describe("recommendNext — what should Roll do next?", () => {
 
 describe("FIX-1043 — supervisor and runner picker agree on pending-publish eligibility", () => {
   // The FIX-1042 shape: a still-Todo card whose prior unpublished cycle left it
-  // in the runner's pending-publish hold. Supervisor MUST NOT advertise it as
+  // in the runner's pending-publish hold. Prime Agent MUST NOT advertise it as
   // runnable while the picker idles `all_pending_publish` (the observed bug).
   it("blocks a pending-publish card (next=no_work) instead of selecting it", () => {
     const state = buildSupervisorRunbookState(

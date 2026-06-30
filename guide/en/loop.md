@@ -354,9 +354,9 @@ user-facing "team shapes"** — they are risk/ROI tiers:
 Roles hand off through artifacts only (planner contract, builder evidence,
 eval-report) — never a shared raw session. Project-level coordination across
 Stories (ordering, conflicts, budget, release readiness) belongs to the
-**Supervisor Agent** (`roll supervisor`), not to any single Story's execution.
+**Prime Agent** (`roll supervisor`), not to any single Story's execution.
 
-When the owner asks to clear the backlog, Supervisor uses a backlog-clearing
+When the owner asks to clear the backlog, Prime Agent uses a backlog-clearing
 standard rather than a fix-only queue. The default scope is every live non-Hold
 `FIX-*`, `US-*`, and `REFACTOR-*` row. Before starting another card it reconciles
 backlog truth, open PRs, CI/evaluator gates, recent cycle endings, manual-merge

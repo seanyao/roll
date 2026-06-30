@@ -1,6 +1,6 @@
 # Roll — Overview
 
-Roll is a Supervisor-led delivery harness. Write a goal, let Roll turn it into Stories, and route each Story through scoped `supervise`, `execute`, and `evaluate` roles.
+Roll is a Prime Agent-led delivery harness. Write a goal, let Roll turn it into Stories, and route each Story through scoped `supervise`, `execute`, and `evaluate` roles.
 
 ## Quick Start
 
@@ -18,10 +18,10 @@ roll loop watch     # optional: CLI-first live view of the current cycle
 
 ## How It Works
 
-Roll runs as a V4 Supervisor execution system:
+Roll runs as a V4 Prime Agent execution system:
 
-- **Supervisor Agent** — project-level observe/advise role. It reads backlog, merge truth, open PRs, scoped role bindings, repeated failures, release readiness, and owner questions. It coordinates across Stories; it never implements a Story or overrides evidence gates.
-- **Story Execution Unit** — one Story delivered through `execute` and, when configured, `evaluate`.
+- **Prime Agent** — project-level observe/advise role. It reads backlog, merge truth, open PRs, scoped role bindings, repeated failures, release readiness, and owner questions. It coordinates across Stories; it never implements a Story or overrides evidence gates.
+- **Delta Unit** — one Story delivered through `execute` and, when configured, `evaluate`.
 - **Roles and bindings** — `supervise`, `execute`, and `evaluate` are stable roles. The concrete agent and optional model are resolved from `Scope -> Role -> Binding -> Agent -> Model`. If a requested binding is unavailable, Roll records that and fails loud instead of pretending another agent was used.
 - **Loop** — on a configurable schedule, picks the top story from BACKLOG and executes it in an isolated worktree. CI must pass before anything lands on `main`.
 - **Dream** — at 3am, scans the codebase for dead code, doc gaps, and architectural drift. Queues `REFACTOR-NNN` entries for loop to pick up.
@@ -51,7 +51,7 @@ roll design --from-file .roll/brief.md
 roll loop on
 ```
 
-Start with a short requirement, PRD, or notes. Roll explains the next design step instead of silently creating fake work; Planner/design creates the backlog, Supervisor picks execution profiles per Story, roles execute, and the owner reviews story-scoped attest evidence.
+Start with a short requirement, PRD, or notes. Roll explains the next design step instead of silently creating fake work; Planner/design creates the backlog, Prime Agent picks execution profiles per Story, roles execute, and the owner reviews story-scoped attest evidence.
 
 **Existing project**
 
@@ -124,7 +124,7 @@ Runtime availability is explicit. Unavailable agents are recorded as unavailable
 
 The current product is CLI-first. `roll status`, `roll loop watch`, `roll loop runs`, `roll cycle <id>`, `roll pulse`, alerts, and story-scoped attest reports are the active truth surfaces. `roll index` is an on-demand static archive/repair renderer, useful for CI artifacts and migration reconciliation; it is not the current truth surface.
 
-The three-state delivery ladder still matters: **claimed -> merged -> attested**. A backlog row that says done is only `claimed`; it becomes `merged` when the PR lands on `main`, and `attested` when story-scoped evidence is on file. Use `roll supervisor live` for the CLI-first multi-role board; browser/TUI Supervisor Live Console remains future work.
+The three-state delivery ladder still matters: **claimed -> merged -> attested**. A backlog row that says done is only `claimed`; it becomes `merged` when the PR lands on `main`, and `attested` when story-scoped evidence is on file. Use `roll supervisor live` for the CLI-first multi-role board; browser/TUI Prime Agent Live Console remains future work.
 
 ### On-Demand Skills
 

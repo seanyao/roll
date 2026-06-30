@@ -199,6 +199,38 @@ export function reconcilePendingMergeVerdicts(
 }
 
 /**
+ * FIX-1046 — reconcile `unpublished` cycles whose story was later delivered.
+ * A cycle that ended `unpublished` (status `local` / outcome `unpublished` — gates
+ * passed, work committed locally, publish didn't land) whose story was later
+ * delivered shows as `delivered`, not a stale `unpublished`. The cycle's work DID
+ * ship (the story is Done ≡ merged), so the cycle ledger must reflect that.
+ *
+ * Same pattern as {@link reconcilePendingMergeVerdicts}: pure function with the
+ * is-story-delivered probe injected. Only `unpublished` rows are eligible;
+ * genuinely unmerged unpublished rows (story not delivered) stay `unpublished`.
+ *
+ * AC: delivered-truth override is deterministic and scoped — a story that was
+ * NOT delivered keeps its `unpublished` verdict.
+ */
+export function reconcileDeliveredUnpublishedVerdicts(
+  rows: readonly CycleLedgerRow[],
+  isStoryDelivered: (storyId: string) => boolean,
+): CycleLedgerRow[] {
+  return rows.map((r) => {
+    if (r.verdict !== "unpublished") return r;
+    if (r.storyId === "" || !isStoryDelivered(r.storyId)) return r;
+    return {
+      ...r,
+      verdict: "delivered",
+      tape: r.tape.map((seg) => {
+        if (seg.key === "end") return { ...seg, detail: "delivered", state: "pass" };
+        return seg;
+      }),
+    };
+  });
+}
+
+/**
  * FIX-337 (AC3) — reconcile cycles whose story was delivered ELSEWHERE (manually,
  * or by another PR/cycle) against the canonical ledger at RENDER time. A
  * `failed`/`blocked`/`reverted`/`pending_merge` cycle whose story is ALREADY

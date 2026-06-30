@@ -206,24 +206,37 @@ function mergeFactFromCommitMessage(
 
   const subject = message.split(/\r?\n/, 1)[0]?.trim() ?? "";
 
-  // "Merge pull request #N …"
-  let prNum: number | undefined;
-  const mergeMatch = /^Merge pull request #(\d+)/i.exec(subject);
-  if (mergeMatch) {
-    prNum = Number(mergeMatch[1]);
-  } else {
-    // Squash-merge "(#N)" in the subject. Body-only PR references are not PR identity.
-    const squashMatch = /\(#(\d+)\)/.exec(subject);
-    if (squashMatch) prNum = Number(squashMatch[1]);
-  }
-
+  // Determine story-ids FIRST — needed to gate the body-PR search.
   // FIX-923 + FIX-1024: parse story-ids scope depends on commit format.
   //   - merge-button ("Merge pull request #N"): body carries PR title → full message
   //   - squash ("(#N)" in subject):     body is narrative/changelog → subject only
   //   - other:                          subject only
+  const mergeMatch = /^Merge pull request #(\d+)/i.exec(subject);
   const isMergeButton = mergeMatch !== null;
   const parseSource = isMergeButton ? message : subject;
   const storyIds = parseStoryIdsFromSubject(parseSource);
+
+  // "Merge pull request #N …"
+  let prNum: number | undefined;
+  if (mergeMatch) {
+    prNum = Number(mergeMatch[1]);
+  } else {
+    // Squash-merge "(#N)" in the subject.
+    const squashMatch = /\(#(\d+)\)/.exec(subject);
+    if (squashMatch) {
+      prNum = Number(squashMatch[1]);
+    } else if (storyIds.length > 0) {
+      // FIX-1046: when the subject names a story-id but lacks a (#N) PR
+      // reference, search the body for (#N). A squash-merge that carries the
+      // PR number only in the narrative body is common. Only do this when the
+      // commit is already recognized as story-bearing (has story-ids), so a
+      // random body (#N) reference on a non-story commit is not mistaken for
+      // PR identity.
+      const bodyMatch = /\(#(\d+)\)/.exec(message);
+      if (bodyMatch) prNum = Number(bodyMatch[1]);
+    }
+  }
+
   if (prNum !== undefined && (!Number.isFinite(prNum) || prNum <= 0)) return null;
   if (prNum === undefined && storyIds.length === 0) return null;
 

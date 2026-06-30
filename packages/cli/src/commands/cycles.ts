@@ -14,6 +14,7 @@ import {
   collectCycleLedger,
   CYCLE_VERDICTS,
   ledgerFailedCount,
+  reconcileDeliveredUnpublishedVerdicts,
   reconcilePendingMergeVerdicts,
   reconcileSupersededVerdicts,
   type CycleLedgerRow,
@@ -67,7 +68,11 @@ function buildIsStorySuperseded(cwd: string, git: GitDossierFacts | null): (stor
  */
 export function reconciledLedger(cwd: string): CycleLedgerRow[] {
   const git = collectGitDossierFacts(cwd);
-  const merged = reconcilePendingMergeVerdicts(collectCycleLedger(cwd), cycleMergeTruth(git));
+  const collected = collectCycleLedger(cwd);
+  // FIX-1046: unpublished cycles whose story was later delivered must show
+  // `delivered` — the work DID ship, the stale unpublished row is misleading.
+  const unpublishedDelivered = reconcileDeliveredUnpublishedVerdicts(collected, buildIsStorySuperseded(cwd, git));
+  const merged = reconcilePendingMergeVerdicts(unpublishedDelivered, cycleMergeTruth(git));
   return reconcileSupersededVerdicts(merged, buildIsStorySuperseded(cwd, git));
 }
 import { c, renderState, stripAnsi } from "../render.js";

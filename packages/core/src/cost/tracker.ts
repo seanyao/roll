@@ -96,26 +96,15 @@ export function reasonixExtract(lines: readonly string[]): AgentUsage | null {
     const tout = toInt(m[3]);
     const cost = Number.parseFloat(m[4]);
     if (!Number.isFinite(cost)) continue;
-    if (tin + tout === 0 && total > 0) {
+    last = {
+      model: defaultModel,
       // No per-direction split — attribute the whole total to input.
-      last = {
-        model: defaultModel,
-        input_tokens: total,
-        output_tokens: 0,
-        cost_list_usd: cost,
-        currency: "CNY",
-        duration_ms: null,
-      };
-    } else {
-      last = {
-        model: defaultModel,
-        input_tokens: tin,
-        output_tokens: tout,
-        cost_list_usd: cost,
-        currency: "CNY",
-        duration_ms: null,
-      };
-    }
+      input_tokens: tin + tout === 0 && total > 0 ? total : tin,
+      output_tokens: tin + tout === 0 && total > 0 ? 0 : tout,
+      cost_list_usd: cost,
+      currency: "CNY",
+      duration_ms: null,
+    };
   }
   return last;
 }

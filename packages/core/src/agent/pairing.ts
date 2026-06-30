@@ -594,16 +594,30 @@ export function selectPairingCandidates(input: SelectInput): string[] {
   // the enabled/stage/capability gating unchanged (independence by vendor is a
   // HARD requirement there, not merely preferred).
   if (stage === "score") {
-    const scorers = basePool.filter((a) => isAvailable(a));
-    if (scorers.length === 0) return [];
+    // FIX-1044: the BUILDER's own agent is NOT an independent Evaluator and must
+    // not become a score fallback for its OWN cycle (AC3). Whenever ANY other
+    // agent is installed, the builder is excluded from the score pool entirely —
+    // a delivery is graded by an independent Evaluator or it fails loud (AC4),
+    // never self-graded. The ONLY exception is a TRUE single-agent install (the
+    // builder is the only installed known agent): there the builder's own type
+    // remains the minimum-independence scorer (a fresh, separately-spawned
+    // session), preserving FIX-343's single-vendor anti-deadlock guarantee
+    // WITHOUT re-opening builder self-scoring as a multi-agent fallback.
+    // (Independence is still verified downstream by SESSION id, never by vendor
+    // name — so this never re-creates the FIX-342 same-vendor-fresh deadlock.)
+    const builderIsSoleInstalledAgent = working !== "" && basePool.every((a) => a === working);
+    const eligible = basePool.filter((a) => isAvailable(a) && (builderIsSoleInstalledAgent || a !== working));
+    if (eligible.length === 0) return [];
     // Split into heterogeneous (different vendor than the builder) and
-    // same-vendor (incl. the builder's own type) pools. A round-robin seed
-    // rotates WITHIN each pool so we don't fixate on one peer over time, yet stay
-    // replayable. Then concatenate hetero-first, same-vendor-fallback: the set is
-    // never trimmed (reachability preserved — a failed hetero scorer still falls
-    // back to a same-vendor fresh session), only the head order is ranked.
-    const hetero = scorers.filter((a) => working !== "" && isHeterogeneous(a, working));
-    const sameVendor = scorers.filter((a) => working === "" || !isHeterogeneous(a, working));
+    // same-vendor pools. A round-robin seed rotates WITHIN each pool so we don't
+    // fixate on one peer over time, yet stay replayable. Then concatenate
+    // hetero-first, same-vendor-fallback: the set is never trimmed (reachability
+    // preserved), only the head order is ranked. In a multi-agent install the
+    // same-vendor pool is empty (the builder — the only same-vendor candidate —
+    // is excluded above), so scoring is hetero-only; the same-vendor pool is
+    // non-empty ONLY for the sole-installed-agent exception.
+    const hetero = eligible.filter((a) => working !== "" && isHeterogeneous(a, working));
+    const sameVendor = eligible.filter((a) => working === "" || !isHeterogeneous(a, working));
     const rotate = (pool: string[]): string[] => {
       if (pool.length === 0) return pool;
       const start = seedOf(cycleId) % pool.length;

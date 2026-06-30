@@ -1,0 +1,7 @@
+rationale covers both strengths and the evidence note.
+
+• SCORE: 8
+  VERDICT: good
+  RATIONALE: The delivery cleanly removes auxiliary-dir mounts via a single shared policy.
+
+To resume this session: kimi -r session_b6978e8c

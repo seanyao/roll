@@ -495,9 +495,25 @@ export async function runScorePairing(
       // FIX-935: respect project-config agent allowlist.
       ...(selectionAllowedAgents !== undefined ? { allowedAgents: selectionAllowedAgents } : {}),
     });
-    if (candidates.length === 0) {
-      // Fail-loud: no scorer to spawn a fresh session of → BLOCK (no fallback).
-      deps.event({ type: "pair:none-available", cycleId, stage: scoreStage, reason: "no scorer available to spawn a fresh review session", ts: deps.now() });
+    // FIX-1044 (AC3/AC4): the escalation universe — installed, known, allowlisted
+    // agents that are NOT the builder. The builder is never an independent
+    // Evaluator (unless it is the sole installed agent, handled by the selector's
+    // same-vendor round), so it is excluded here too. Computed up front so the
+    // none-available short-circuit can tell "no independent scorer EXISTS at all"
+    // (fail-loud, never self-score) from "the initial probe pool was empty but a
+    // probe-missed independent can still be rescued by escalation" (FIX-911).
+    const builderCanonical = canonicalAgentName(workingAgent);
+    const escalationAllowedSet = selectionAllowedAgents === undefined ? undefined : new Set([...selectionAllowedAgents].map(canonicalAgentName));
+    const escalationUniverse = deps.installed
+      .map(canonicalAgentName)
+      .filter((a, i, arr) => arr.indexOf(a) === i)
+      .filter((a) => agentIsKnown(a))
+      .filter((a) => escalationAllowedSet === undefined || escalationAllowedSet.has(a))
+      .filter((a) => workingAgent.trim() === "" || a !== builderCanonical);
+    if (candidates.length === 0 && escalationUniverse.length === 0) {
+      // Fail-loud: no INDEPENDENT scorer exists to spawn a fresh session of, and
+      // the builder is not an eligible fallback → BLOCK (no self-score, AC4).
+      deps.event({ type: "pair:none-available", cycleId, stage: scoreStage, reason: "no independent scorer available to spawn a fresh review session", ts: deps.now() });
       return { status: "none-available" };
     }
 
@@ -577,14 +593,12 @@ export async function runScorePairing(
       // escalation gives them one more chance with a hard budget cap to avoid
       // death-spiralling on genuinely dead peers.
       const triedPeers = new Set([...heteroPool, ...sameVendorPool].map(canonicalAgentName));
-      const allowedSet = selectionAllowedAgents === undefined ? undefined : new Set([...selectionAllowedAgents].map(canonicalAgentName));
-      const allKnown = deps.installed
-        .map(canonicalAgentName)
-        .filter((a, i, arr) => arr.indexOf(a) === i)
-        .filter((a) => agentIsKnown(a))
-        // FIX-935: escalation must also respect the project-config allowlist.
-        .filter((a) => allowedSet === undefined || allowedSet.has(a));
-      const escalationPool = allKnown.filter((a) => !triedPeers.has(a));
+      // FIX-1044: the escalation universe (installed, known, allowlisted, NON-builder)
+      // was computed up front. The builder is never resurrected as a last-resort
+      // scorer for its own cycle (AC3) — without this exclusion the builder,
+      // already dropped by the probe, slipped back in as a self-score fallback
+      // (the FIX-1042 cycle: builder=claude → escalated claude->claude).
+      const escalationPool = escalationUniverse.filter((a) => !triedPeers.has(a));
       if (escalationPool.length > 0) {
         // Serial dispatch — we are budget-conscious and only need ONE score.
         // Parallel firstValid here would burn all candidates at once with no
@@ -643,22 +657,103 @@ export async function runScorePairing(
   }
 }
 
+// ── FIX-1044: tolerant score-output normalization ───────────────────────────
+// Real Evaluator stdout wraps the SCORE/VERDICT/RATIONALE protocol in noise that
+// the old strict line scan rejected even when a valid block was present:
+//   • pi prints a terminal overstrike (`^D` then two backspaces erase it) before SCORE,
+//   • reasonix prints startup warnings + an ANSI TUI transcript above the block,
+//   • claude emits JSONL stream events whose FINAL {"type":"result",...,"result":"…"}
+//     object carries the protocol text (escaped newlines, not real lines),
+//   • kimi prefixes the block with a "• " bullet.
+// We NORMALIZE — unwrap JSONL → apply backspaces → strip ANSI/control bytes —
+// BEFORE the STRICT extraction. Validation is NEVER relaxed: a single complete
+// in-order SCORE/VERDICT/RATIONALE block with an in-range score and a supported
+// verdict is still required after normalization (so arbitrary prose, duplicate
+// fields, out-of-range scores, and unsupported verdicts still parse to null).
+
+// CSI/OSC escape sequences (shared shape with watch-status/watch-render).
+const SCORE_ANSI_RE =
+  /[\u001b\u009b][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[a-zA-Z\d]*)*)?\u0007)|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]))/g;
+
+/** Apply terminal backspace (0x08) semantics: each BS erases the preceding
+ *  character on its line (the overstrike pattern `X\b` renders as nothing). A BS
+ *  with nothing before it on the line is dropped; a newline is a hard boundary.
+ *  Turns pi's `^D\b\bSCORE` into `SCORE`. */
+function applyBackspaces(text: string): string {
+  if (!text.includes("\b")) return text;
+  const out: string[] = [];
+  for (const ch of text) {
+    if (ch === "\b") {
+      const last = out[out.length - 1];
+      if (last !== undefined && last !== "\n" && last !== "\r") out.pop();
+    } else {
+      out.push(ch);
+    }
+  }
+  return out.join("");
+}
+
+/** Stream-json stdout: each line is a JSON event; the agent's actual reply lives
+ *  in the LAST object carrying a string `result` field ({"type":"result",…}).
+ *  JSON.parse turns its escaped `\n` into real newlines. null when stdout is not
+ *  JSONL-wrapped (plain-text agents) → the caller parses the raw text. */
+function unwrapJsonlResult(stdout: string): string | null {
+  let payload: string | null = null;
+  for (const line of stdout.split(/\r?\n/)) {
+    const t = line.trim();
+    if (t === "" || t[0] !== "{") continue;
+    try {
+      const obj = JSON.parse(t) as { result?: unknown };
+      if (typeof obj.result === "string") payload = obj.result; // keep the LAST result
+    } catch {
+      /* not a JSON event line — ignore */
+    }
+  }
+  return payload;
+}
+
+/** Normalize raw Evaluator stdout to the plain protocol text: unwrap JSONL,
+ *  collapse backspaces, strip ANSI escapes, then drop residual C0 control bytes
+ *  (keeping TAB/LF/CR). Bounded and lossless for the protocol lines themselves. */
+export function normalizeScoreStdout(stdout: string): string {
+  const text = unwrapJsonlResult(stdout) ?? stdout;
+  return applyBackspaces(text)
+    .replace(SCORE_ANSI_RE, "")
+    // residual C0 control bytes (NUL..BS, VT, FF, SO..US, DEL) — keep TAB/LF/CR
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
+}
+
+/** Strip leading bullet/markdown decoration (`**`, `•`, `-`, `#`, `>`, spaces)
+ *  and trailing markdown/space so a decorated marker line (`**SCORE: 10**`,
+ *  `• SCORE: 8`) still matches the STRICT protocol regex. Only leading
+ *  non-content punctuation is removed — `SCORE:`/`VERDICT:`/`RATIONALE:` itself,
+ *  the score digits, and the verdict word are untouched. */
+function stripScoreLineDecoration(line: string): string {
+  return line.replace(/^[\s>*#•‣◦⁃·▪⁃-]+/, "").replace(/[\s*]+$/, "");
+}
+
 /**
  * Parse a peer's score reply (the executor/manual command's stdout contract):
  * one `SCORE: <1..10>` line, one `VERDICT: good|ok|regression` line, one
  * `RATIONALE: <text>` line — anything missing/malformed → null (the round
  * treats it as no-score; a peer that can't follow the protocol never writes a note).
+ *
+ * FIX-1044: the input is NORMALIZED first ({@link normalizeScoreStdout}) so real
+ * agent output (terminal overstrike, ANSI banners, JSONL wrappers, bullet
+ * prefixes) reaches the strict scan as clean protocol lines. The validation
+ * itself is unchanged — exactly one in-order block, score 1..10, supported verdict.
  */
 export function parsePairScoreOutput(stdout: string): Omit<PairScore, "cost"> | null {
-  const lines = stdout.split(/\r?\n/);
+  const normalized = normalizeScoreStdout(stdout);
+  const lines = normalized.split(/\r?\n/).map(stripScoreLineDecoration);
   const scoreLines = lines
-    .map((line, index) => ({ index, match: /^\s*SCORE:\s*(\d{1,2})\s*$/i.exec(line) }))
+    .map((line, index) => ({ index, match: /^SCORE:\s*(\d{1,2})$/i.exec(line) }))
     .filter((entry): entry is { index: number; match: RegExpExecArray } => entry.match !== null);
   const verdictLines = lines
-    .map((line, index) => ({ index, match: /^\s*VERDICT:\s*(good|ok|regression)\s*$/i.exec(line) }))
+    .map((line, index) => ({ index, match: /^VERDICT:\s*(good|ok|regression)$/i.exec(line) }))
     .filter((entry): entry is { index: number; match: RegExpExecArray } => entry.match !== null);
   const rationaleLines = lines
-    .map((line, index) => ({ index, match: /^\s*RATIONALE:\s*(.+)$/i.exec(line) }))
+    .map((line, index) => ({ index, match: /^RATIONALE:\s*(.+)$/i.exec(line) }))
     .filter((entry): entry is { index: number; match: RegExpExecArray } => entry.match !== null);
   if (scoreLines.length !== 1 || verdictLines.length !== 1 || rationaleLines.length !== 1) return null;
   const sm = scoreLines[0]!;
@@ -670,7 +765,7 @@ export function parsePairScoreOutput(stdout: string): Omit<PairScore, "cost"> | 
   if (!Number.isInteger(score) || score < 1 || score > 10) return null;
   // US-AGENT-041: capture an optional RESIZE/GAPS signal (scope-too-large). The
   // low-score floor is applied later by `shouldResize`; here we just carry it.
-  const resize = parseResizeSignal(stdout);
+  const resize = parseResizeSignal(normalized);
   return {
     score,
     verdict: vm.match[1].toLowerCase() as PairScore["verdict"],

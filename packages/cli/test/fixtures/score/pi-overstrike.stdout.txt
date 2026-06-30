@@ -1,0 +1,4 @@
+^DSCORE: 8  
+VERDICT: good  
+RATIONALE: One shared auxiliary-dir policy with path-boundary-safe matching, doctor pollution detector separate from auth probes, Reasonix-specific test evidence for mount filtering and idempotent cleanup, though the Reasonix startup/smoke evidence from the evaluation contract is absent (untestable per Roll's no-external-engine-spawn policy).
+

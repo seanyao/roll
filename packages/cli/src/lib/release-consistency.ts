@@ -231,6 +231,7 @@ function gitCapture(projectDir: string, args: string[]): string | null {
   try {
     return execFileSync("git", ["-C", projectDir, ...args], {
       encoding: "utf8",
+      maxBuffer: EXEC_MAX_BUFFER_BYTES,
       stdio: ["ignore", "pipe", "ignore"],
     });
   } catch {

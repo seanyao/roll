@@ -16,6 +16,7 @@ import {
   readFileSync,
   readlinkSync,
   realpathSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -46,6 +47,11 @@ beforeAll(() => {
     join(pkgDir, "skills", "roll-alpha", "references", "full-contract.md"),
     "# roll-alpha full contract\n",
   );
+  // FIX-1042: add auxiliary (non-skill) directories to exercise filtering.
+  for (const aux of ["docs", "reports", "scripts", "route-cases", "tests"]) {
+    mkdirSync(join(pkgDir, "skills", aux), { recursive: true });
+    writeFileSync(join(pkgDir, "skills", aux, "README.md"), `# ${aux}\n`);
+  }
 });
 
 afterAll(() => {
@@ -391,5 +397,45 @@ describe("frozen: roll setup", () => {
         "stdout": "",
       }
     `);
+  });
+
+  // FIX-1042: auxiliary (non-skill) directories must NOT be symlinked into
+  // agent skill roots, and real roll-* skills must still be linked.
+  it("FIX-1042: auxiliary dirs are filtered from agent skill root", () => {
+    const fx = freshFixture();
+    tsSetup(fx, [], { ROLL_LANG: "en" });
+    const agentSkills = join(fx.home, ".claude", "skills");
+    // Real skills are still present.
+    expect(readlinkSync(join(agentSkills, "roll-alpha"))).toBe(`${join(fx.home, ".roll", "skills", "roll-alpha")}/`);
+    expect(readlinkSync(join(agentSkills, "roll-beta"))).toBe(`${join(fx.home, ".roll", "skills", "roll-beta")}/`);
+    // Auxiliary dirs are NOT symlinked.
+    for (const aux of ["docs", "reports", "scripts", "route-cases", "tests"]) {
+      expect(existsSync(join(agentSkills, aux))).toBe(false);
+    }
+  });
+
+  // FIX-1042: re-running setup cleans stale auxiliary symlinks.
+  it("FIX-1042: stale aux symlinks are removed on re-run", () => {
+    const fx = freshFixture();
+    // First run: clean.
+    tsSetup(fx, [], { ROLL_LANG: "en" });
+    // Manually plant stale auxiliary symlinks (simulating pre-pollution).
+    const agentSkills = join(fx.home, ".claude", "skills");
+    for (const aux of ["docs", "reports"]) {
+      const link = join(agentSkills, aux);
+      if (!existsSync(link)) {
+        symlinkSync(`${join(fx.home, ".roll", "skills", aux)}/`, link);
+      }
+    }
+    // Verify stale symlinks are present before re-run.
+    expect(lstatSync(join(agentSkills, "docs")).isSymbolicLink()).toBe(true);
+    expect(lstatSync(join(agentSkills, "reports")).isSymbolicLink()).toBe(true);
+    // Re-run setup — should clean the stale aux symlinks.
+    tsSetup(fx, [], { ROLL_LANG: "en" });
+    for (const aux of ["docs", "reports"]) {
+      expect(existsSync(join(agentSkills, aux))).toBe(false);
+    }
+    // Real skills survive.
+    expect(existsSync(join(agentSkills, "roll-alpha"))).toBe(true);
   });
 });

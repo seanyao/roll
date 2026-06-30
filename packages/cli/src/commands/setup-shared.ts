@@ -459,6 +459,18 @@ export function syncConventions(force: boolean): void {
   }
 }
 
+/**
+ * Directories under skills/ that are NOT routable Roll skills — auxiliary
+ * content that produces no Playbook/SKILL.md description and should NOT be
+ * symlinked into any AI tool's skills root (FIX-1042).
+ */
+const SKILL_AUX_DIRS = new Set(["docs", "reports", "scripts", "route-cases", "tests"]);
+
+/** True when the directory name is a recognized auxiliary (non-skill) dir. */
+export function isSkillAuxDir(name: string): boolean {
+  return SKILL_AUX_DIRS.has(name);
+}
+
 // ─── _link_skills (1145) / _sync_skills (1306) ────────────────────────────────
 function lstatType(p: string): "link" | "file" | "dir" | "none" {
   try {
@@ -523,7 +535,8 @@ function linkSkills(): void {
     ) {
       continue;
     }
-    // Prune stale roll-* symlinks pointing into ~/.roll/skills no longer present.
+    // Prune stale roll-* symlinks pointing into ~/.roll/skills no longer present,
+    // AND remove symlinks to auxiliary (non-skill) directories (FIX-1042).
     const homeSkillsPrefix = `${join(rollHome(), "skills")}/`;
     for (const name of listDirEntries(skillsDir)) {
       if (!name.startsWith("roll-")) continue;
@@ -539,9 +552,28 @@ function linkSkills(): void {
         rmSync(link, { force: true });
       }
     }
+    // FIX-1042: remove stale symlinks pointing to recognized auxiliary dirs
+    // (docs, reports, scripts, route-cases, tests) even if they don't start
+    // with "roll-".
+    for (const name of listDirEntries(skillsDir)) {
+      if (!isSkillAuxDir(name)) continue;
+      const link = join(skillsDir, name);
+      if (lstatType(link) !== "link") continue;
+      let target = "";
+      try {
+        target = readlinkSync(link);
+      } catch {
+        target = "";
+      }
+      if (target.startsWith(homeSkillsPrefix)) {
+        rmSync(link, { force: true });
+      }
+    }
     // Create/repair per-skill symlinks.
     const homeSkills = join(rollHome(), "skills");
     for (const skillName of listDirEntries(homeSkills)) {
+      // FIX-1042: skip auxiliary (non-skill) directories — they are not routable skills.
+      if (isSkillAuxDir(skillName)) continue;
       const skillDir = `${join(homeSkills, skillName)}/`;
       try {
         if (!statSync(join(homeSkills, skillName)).isDirectory()) continue;

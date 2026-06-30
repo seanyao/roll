@@ -206,6 +206,16 @@ export const v3Catalog: Catalog = {
     zh: "代理变量已设置但目标不可达 — 已关闭的代理软件可能毒化了 launchd。请清理：",
   },
 
+  // FIX-1042: polluted agent skill root detection
+  "doctor.polluted_skill_root": {
+    en: "Polluted agent skill roots (non-skill auxiliary dirs mounted)",
+    zh: "Agent 技能目录含有辅助目录（非技能挂载）",
+  },
+  "doctor.polluted_skill_root_repair": {
+    en: "Re-run \x60roll setup\x60 to clean up auxiliary symlinks",
+    zh: "重新运行 \x60roll setup\x60 清理辅助目录符号链接",
+  },
+
   // FIX-232 AC2: loop egress pre-check messages
   "loop.egress_blocked": {
     en: "egress blocked (proxy?): network pre-check failed — cycle %s refused to start",

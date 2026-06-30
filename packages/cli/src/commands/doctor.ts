@@ -13,7 +13,7 @@
  * EN line then the ZH line of the same key, regardless of locale.
  */
 import { execFileSync } from "node:child_process";
-import { accessSync, constants, existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { agentInstalledByName as coreAgentInstalledByName, agentIsKnown, canonicalAgentName, type AgentEnv } from "@roll/core";
@@ -504,6 +504,62 @@ function readWorkingDirectory(plist: string): string {
   return "";
 }
 
+/** Non-skill auxiliary directory names that should NOT be symlinked under
+ * any AI tool's skills root (FIX-1042). Mirrors SKILL_AUX_DIRS in
+ * setup-shared.ts. */
+const DOCTOR_SKILL_AUX_DIRS = new Set(["docs", "reports", "scripts", "route-cases", "tests"]);
+
+/** FIX-1042 AC4: detect polluted agent skill roots and report them without
+ *  treating the agent as auth-blocked. Scans every ai_* tool's skills/ dir
+ *  for symlinks targeting recognized auxiliary (non-skill) directories. */
+function pollutedSkillRootSection(lang: Lang): void {
+  const cfg = rollConfigPath();
+  if (!existsSync(cfg)) return;
+  const home = homedir();
+  const rollSkillsDir = join(home, ".roll", "skills");
+  let found = false;
+  for (const line of readFileSync(cfg, "utf8").split("\n")) {
+    const idx = line.indexOf(":");
+    if (idx === -1) continue;
+    const key = line.slice(0, idx);
+    if (!/^ai_/.test(key)) continue;
+    let dir = (line.slice(idx + 1).split("|")[0] ?? "").replace(/^ /, "");
+    if (dir.startsWith("~")) dir = home + dir.slice(1);
+    const aiSkillsDir = join(dir, "skills");
+    if (!safeIsDir(aiSkillsDir)) continue;
+    const entries = readdirSync(aiSkillsDir);
+    const polluted: string[] = [];
+    for (const name of entries) {
+      if (!DOCTOR_SKILL_AUX_DIRS.has(name)) continue;
+      const linkPath = join(aiSkillsDir, name);
+      let target = "";
+      try {
+        if (lstatSync(linkPath).isSymbolicLink()) target = readlinkSync(linkPath);
+      } catch {
+        target = "";
+      }
+      if (target.startsWith(join(rollSkillsDir, name))) {
+        polluted.push(name);
+      }
+    }
+    if (polluted.length > 0) {
+      if (!found) {
+        emit("");
+        emit(t(v3Catalog, "en", "doctor.polluted_skill_root"));
+        emit(t(v3Catalog, "zh", "doctor.polluted_skill_root"));
+        emit("");
+        found = true;
+      }
+      const agentName = key.replace(/^ai_/, "");
+      emit(`  ⚠ ${agentName} → ${join(dir, "skills")}`);
+      for (const name of polluted) {
+        emit(`    ${name} → ${join(rollSkillsDir, name)}/`);
+      }
+      emit(`    ${t(v3Catalog, lang, "doctor.polluted_skill_root_repair")}`);
+    }
+  }
+}
+
 export function doctorCommand(args: string[], deps: DoctorDeps = {}): number {
   out.lines = [];
   const p = palette();
@@ -518,6 +574,7 @@ export function doctorCommand(args: string[], deps: DoctorDeps = {}): number {
     lanesSection(lang, realLaneProbe());
     launchdStaleSection(lang);
     launchdProxySection(lang);
+    pollutedSkillRootSection(lang);
   }
   for (const l of renderToolReadinessDoctorSection(collectToolReadinessDoctorRows(process.cwd()))) emit(l);
   for (const l of renderExternalToolDoctorSection(externalTools)) emit(l);

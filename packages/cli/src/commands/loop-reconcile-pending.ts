@@ -11,18 +11,16 @@
  *
  * The command is safe to run repeatedly: already-delivered records are skipped.
  */
-import { existsSync, readFileSync, statSync, writeFileSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { resolveLang, present } from "@roll/spec";
 import type { DeliveryRecord } from "@roll/spec";
 import {
   nodeDeliveryStore,
   nodeExecPort,
   readDeliveries,
-  ensureDeliveriesFresh,
+  readDeliveriesRaw,
   appendDelivery,
   EventBus,
-  type FreshnessPort,
   type PrStatusProvider,
 } from "@roll/core";
 import { GitHubPrStatusProvider } from "@roll/infra";
@@ -31,29 +29,6 @@ export const RECONCILE_PENDING_USAGE =
   "Usage: roll loop reconcile-pending [--dry-run]\n" +
   "  Poll pending-merge PRs and reconcile delivery truth.\n" +
   "  轮询待合并 PR 并调和交付真相。";
-
-// ── Node-backed ports ─────────────────────────────────────────────────────────
-
-const nodeFreshnessPort: FreshnessPort = {
-  mtimeMs(absPath: string): number | undefined {
-    try {
-      return statSync(absPath).mtimeMs;
-    } catch {
-      return undefined;
-    }
-  },
-  readText(absPath: string): string {
-    try {
-      return readFileSync(absPath, "utf8");
-    } catch {
-      return "";
-    }
-  },
-  writeText(absPath: string, text: string): void {
-    mkdirSync(dirname(absPath), { recursive: true });
-    writeFileSync(absPath, text, "utf8");
-  },
-};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -75,7 +50,10 @@ function resolveRepoSlug(projectPath: string): string | undefined {
 }
 
 function findPendingRecords(projectPath: string): DeliveryRecord[] {
-  return readDeliveries(nodeDeliveryStore, projectPath).filter(
+  // Use readDeliveriesRaw (no dedup) so pending records are not shadowed by
+  // later "done" records for the same (storyId, cycleId). The caller handles
+  // already-delivered filtering via isAlreadyDelivered against the deduped view.
+  return readDeliveriesRaw(nodeDeliveryStore, projectPath).filter(
     (r) =>
       (r.lifecycleState === "pending_merge" || r.lifecycleState === "ci_red") &&
       r.prNumber.present &&
@@ -197,9 +175,11 @@ export async function loopReconcilePendingCommand(
       const state = await provider.pollPrStatus(slug, prNumber);
 
       if (state.kind === "merged") {
-        // Fetch origin/main so the projection rebuild sees the merge commit.
+        // Fetch origin/main so future operations (e.g. cycles view rebuild)
+        // see the merge commit. We do NOT call ensureDeliveriesFresh here
+        // because it would rebuild the entire cache from runs+git facts,
+        // wiping the pending record before we can append the done record.
         nodeExecPort.run("git", ["-C", cwd, "fetch", "origin", "main", "--quiet"]);
-        ensureDeliveriesFresh(cwd, nodeFreshnessPort, nodeExecPort);
 
         const newRecord: DeliveryRecord = {
           storyId: record.storyId,

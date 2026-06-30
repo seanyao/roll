@@ -12,6 +12,7 @@ import {
   appendDelivery,
   deliveriesPath,
   readDeliveries,
+  readDeliveriesRaw,
   validateDeliveryRecord,
   type DeliveryStoreInterface,
 } from "../src/index.js";
@@ -395,5 +396,65 @@ describe("US-TRUTH-014 round-trip", () => {
     if (got.prNumber.present) expect(got.prNumber.value).toBe(99);
     if (got.mergedAt.present) expect(got.mergedAt.value).toBe(3000);
     if (got.mergeCommit.present) expect(got.mergeCommit.value).toBe("abc123def");
+  });
+});
+
+// ── readDeliveriesRaw: no-dedup reader ──────────────────────────────────────
+
+describe("readDeliveriesRaw — no dedup, returns all valid records", () => {
+  it("returns all distinct records in append order", () => {
+    const store = new FakeDeliveryStore();
+    appendDelivery(store, PROJ, makeRecord({ storyId: "US-A", cycleId: "c1", recordedAt: 1000 }));
+    appendDelivery(store, PROJ, makeRecord({ storyId: "US-B", cycleId: "c2", recordedAt: 2000 }));
+
+    const records = readDeliveriesRaw(store, PROJ);
+    expect(records).toHaveLength(2);
+    expect(records[0]!.storyId).toBe("US-A");
+    expect(records[1]!.storyId).toBe("US-B");
+  });
+
+  it("returns ALL records for same (storyId, cycleId) — no dedup", () => {
+    const store = new FakeDeliveryStore();
+    appendDelivery(store, PROJ, makeRecord({ storyId: "US-A", cycleId: "c1", lifecycleState: "pending_merge", recordedAt: 1000 }));
+    appendDelivery(store, PROJ, makeRecord({ storyId: "US-A", cycleId: "c1", lifecycleState: "done", recordedAt: 2000 }));
+
+    const records = readDeliveriesRaw(store, PROJ);
+    expect(records).toHaveLength(2);
+    expect(records[0]!.lifecycleState).toBe("pending_merge");
+    expect(records[1]!.lifecycleState).toBe("done");
+  });
+
+  it("returns [] for empty file", () => {
+    const store = new FakeDeliveryStore();
+    expect(readDeliveriesRaw(store, PROJ)).toEqual([]);
+  });
+
+  it("skips torn and illegal lines", () => {
+    const store = new FakeDeliveryStore();
+    const path = deliveriesPath(PROJ);
+    store.ensureFile(path);
+    store.appendLine(path, "not json at all\n");
+    store.appendLine(path, '{ "storyId": "bad" }\n');
+    appendDelivery(store, PROJ, makeRecord({ storyId: "US-OK", cycleId: "c1" }));
+
+    const records = readDeliveriesRaw(store, PROJ);
+    expect(records).toHaveLength(1);
+    expect(records[0]!.storyId).toBe("US-OK");
+  });
+
+  it("preserves append order even with duplicates", () => {
+    const store = new FakeDeliveryStore();
+    appendDelivery(store, PROJ, makeRecord({ storyId: "US-X", cycleId: "cy", lifecycleState: "building", recordedAt: 1 }));
+    appendDelivery(store, PROJ, makeRecord({ storyId: "US-Y", cycleId: "cy2", lifecycleState: "pending_merge", recordedAt: 2 }));
+    appendDelivery(store, PROJ, makeRecord({ storyId: "US-X", cycleId: "cy", lifecycleState: "pending_merge", recordedAt: 3 }));
+    appendDelivery(store, PROJ, makeRecord({ storyId: "US-X", cycleId: "cy", lifecycleState: "done", recordedAt: 4 }));
+
+    const records = readDeliveriesRaw(store, PROJ);
+    // Raw: all 4 records survive, including the 3 for US-X/cy.
+    expect(records).toHaveLength(4);
+    expect(records[0]!.lifecycleState).toBe("building");
+    expect(records[1]!.lifecycleState).toBe("pending_merge");
+    expect(records[2]!.lifecycleState).toBe("pending_merge");
+    expect(records[3]!.lifecycleState).toBe("done");
   });
 });

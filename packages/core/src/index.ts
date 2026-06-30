@@ -22,7 +22,7 @@ export * from "./delivery/infra-default.js";
 export * from "./delivery/gate.js";
 export * from "./delivery/pr.js";
 export * from "./delivery/pr-reconcile.js";
-export * from "./delivery/store.js";
+export { deliveriesPath, validateDeliveryRecord, appendDelivery, readDeliveries, readDeliveriesRaw, nodeDeliveryStore, type DeliveryStoreInterface } from "./delivery/store.js";
 export * from "./delivery/tcr.js";
 export * from "./delivery/rebuild.js";
 export * from "./evals/candidates.js";

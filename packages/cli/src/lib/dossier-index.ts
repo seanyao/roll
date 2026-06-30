@@ -119,7 +119,8 @@ const STAGE_KEYS = SPINE_STAGES.map((s) => s.key);
 // TruthBoard types — re-exported from @roll/core (US-OBS-016)
 
 export interface RenderFeaturesIndexOptions {
-  morningReportHref?: string;
+  /** FIX-1048: href to the always-on loop digest (was `morningReportHref`). */
+  loopDigestHref?: string;
   truth?: TruthBoardInput;
   /** US-DOSSIER-010: the EXACT serialized TruthSnapshot written to truth.json —
    *  embedded verbatim so page data and the machine file cannot diverge. */
@@ -541,8 +542,8 @@ export function renderFeaturesIndex(epics: DossierEpic[], opts: RenderFeaturesIn
     `</div>\n` +
     renderTruthBoard(epics, opts.truth) +
     overview(epics) +
-    (opts.morningReportHref !== undefined
-      ? `<p class="ops-link"><a href="${esc(opts.morningReportHref)}">${bi("Morning report", "夜间运行晨报")}</a></p>\n`
+    (opts.loopDigestHref !== undefined
+      ? `<p class="ops-link"><a href="${esc(opts.loopDigestHref)}">${bi("Loop digest", "循环摘要")}</a></p>\n`
       : "") +
     toolbarFilter() +
     group("Shipping to main", "交付中", shipping) +

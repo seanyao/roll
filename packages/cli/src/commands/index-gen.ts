@@ -39,7 +39,7 @@ import { collectGitHooks, defaultGitHooksDeps, type GitHooksVM } from "../lib/gi
 import { launchAgentsDir } from "./loop-sched.js";
 import { projectSlug } from "./dashboard.js";
 import { formatStream } from "./loop-fmt.js";
-import { morningReportHref } from "../lib/morning-report.js";
+import { loopDigestHref } from "../lib/morning-report.js";
 import { renderEpicPage } from "../lib/epic-page.js";
 import { buildDossierRunCache, collectStoryDossierInput, renderStoryDossier, stationsDone, storyEvidenceFlags, storyHasMergeEvidence, storyHasSpecPrMergeEvidence, type StoryDossierInput } from "../lib/story-dossier.js";
 import { renderMarkdown } from "../lib/markdown.js";

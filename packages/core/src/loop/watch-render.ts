@@ -218,11 +218,12 @@ export function watchRenderEventFromRollEvent(ev: RollEvent, mode: WatchMode = "
         detail: [ev.outcome, ev.agent, ev.model].filter((v) => v !== "").join(" · "),
         severity: ev.outcome === "delivered" ? "good" : ev.outcome === "failed" || ev.outcome === "blocked" ? "bad" : "warn",
       };
+    case "report:loop":
     case "report:morning":
       return {
         kind: "raw",
         observedAt: eventTs(ev),
-        summary: "report:morning",
+        summary: ev.type,
         detail: [ev.path, ev.paused ? "paused" : ""].filter((v) => v !== "").join(" · "),
         severity: "muted",
       };

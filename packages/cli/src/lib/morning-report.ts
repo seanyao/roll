@@ -59,11 +59,11 @@ export function renderMorningReportHtml(model: MorningReportModel): string {
   return (
     `<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n` +
     `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
-    `<title>Roll · Morning Report</title>\n<style>\n${CHROME_CSS}` +
+    `<title>Roll · Loop Digest</title>\n<style>\n${CHROME_CSS}` +
     `body{max-width:960px}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:20px 0}.tile{border:1px solid var(--line);border-radius:8px;padding:14px;background:var(--bg-raise)}.num{font:700 28px/1 var(--mono);color:var(--pass)}.muted{color:var(--muted)}.pause{color:${model.paused ? "var(--fail)" : "var(--pass)"};font-weight:700}.section{border-top:1px solid var(--line);padding-top:18px;margin-top:18px}code{margin-right:6px}ul{padding-left:22px}</style>\n` +
     `${CHROME_SCRIPT}\n</head>\n<body>\n${CHROME_CONTROLS}\n` +
-    `<p class="crumb"><a href="../../features/index.html">Features Index</a> / Morning Report</p>\n` +
-    `<div class="masthead"><p class="kicker">Roll · Morning Report · 夜间运行晨报</p>` +
+    `<p class="crumb"><a href="../../features/index.html">Features Index</a> / Loop Digest</p>\n` +
+    `<div class="masthead"><p class="kicker">Roll · Loop Digest</p>` +
     `<h1>Unattended Loop Summary</h1>` +
     `<p class="lede">${esc(iso(model.windowStart))} → ${esc(iso(model.windowEnd))}</p></div>\n` +
     `<div class="grid">` +
@@ -82,9 +82,28 @@ export function renderMorningReportHtml(model: MorningReportModel): string {
   );
 }
 
-export function morningReportHref(projectPath: string): string | undefined {
-  const report = join(projectPath, ".roll", "reports", "morning", "latest.html");
-  return existsSync(report) ? "../reports/morning/latest.html" : undefined;
+// FIX-1048: prefer the neutral loop-digest path; fall back to the legacy
+// morning path so dossiers generated before a fresh digest write still link.
+export function loopDigestHref(projectPath: string): string | undefined {
+  const loop = join(projectPath, ".roll", "reports", "loop", "latest.html");
+  if (existsSync(loop)) return "../reports/loop/latest.html";
+  const morning = join(projectPath, ".roll", "reports", "morning", "latest.html");
+  return existsSync(morning) ? "../reports/morning/latest.html" : undefined;
+}
+
+/** @deprecated FIX-1048 — use {@link loopDigestHref}. Kept as a compatibility alias. */
+export const morningReportHref = loopDigestHref;
+
+// FIX-1048: the morning page that links back to the neutral loop digest, so any
+// reader landing on a bookmarked `reports/morning/latest.html` finds the new path.
+function morningCompatRedirectHtml(): string {
+  return (
+    `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8">\n` +
+    `<meta http-equiv="refresh" content="0; url=../loop/latest.html">\n` +
+    `<title>Roll · Loop Digest</title>\n</head>\n<body>\n` +
+    `<p>The morning report moved to the always-on <a href="../loop/latest.html">Loop Digest</a>.</p>\n` +
+    `</body>\n</html>\n`
+  );
 }
 
 export function writeLatestMorningReport(
@@ -100,20 +119,32 @@ export function writeLatestMorningReport(
     windowEnd,
     runDelivered: (row, now) => rowDelivered(row, now),
   });
-  const dir = join(projectPath, ".roll", "reports", "morning");
-  const latest = join(dir, "latest.html");
-  const dated = join(dir, `${new Date(nowSec * 1000).toISOString().slice(0, 10)}.html`);
-  mkdirSync(dir, { recursive: true });
+  const day = new Date(nowSec * 1000).toISOString().slice(0, 10);
+  const loopDir = join(projectPath, ".roll", "reports", "loop");
+  const latest = join(loopDir, "latest.html");
+  const dated = join(loopDir, `${day}.html`);
+  mkdirSync(loopDir, { recursive: true });
   const html = renderMorningReportHtml(model);
   writeFileSync(latest, html, "utf8");
   writeFileSync(dated, html, "utf8");
+
+  // Compatibility window: keep `reports/morning/latest.html` alive as a redirect
+  // to the neutral path so existing links degrade gracefully (no abrupt 404).
+  try {
+    const morningDir = join(projectPath, ".roll", "reports", "morning");
+    mkdirSync(morningDir, { recursive: true });
+    writeFileSync(join(morningDir, "latest.html"), morningCompatRedirectHtml(), "utf8");
+  } catch {
+    /* compatibility alias is best-effort; the loop digest is the primary artifact */
+  }
+
   try {
     mkdirSync(dirname(eventsPath), { recursive: true });
     appendFileSync(
       eventsPath,
       `${JSON.stringify({
-        type: "report:morning",
-        path: ".roll/reports/morning/latest.html",
+        type: "report:loop",
+        path: ".roll/reports/loop/latest.html",
         windowStart,
         windowEnd,
         cycles: model.cycles,

@@ -250,8 +250,11 @@ export type RollEvent =
   // Evidence lifecycle (US-EVID-001) — the runner opened the per-cycle evidence
   // frame before spawning an agent, so later phases have a durable run dir.
   | { type: "evidence:frame-opened"; cycleId: string; storyId: string; runDir: string; ts: number }
-  // Morning report (US-EVID-016) — one fixed human-readable page is rebuilt from
-  // events/runs and linked from the dossier front page.
+  // Loop digest (US-EVID-016, FIX-1048) — one fixed human-readable page is rebuilt
+  // from events/runs after every cycle and linked from the dossier front page.
+  // `report:loop` is the neutral always-on name; `report:morning` is kept only so
+  // historical event lines still parse — new writes emit `report:loop`.
+  | { type: "report:loop"; path: string; windowStart: number; windowEnd: number; cycles: number; corrections: number; paused: boolean; ts: number }
   | { type: "report:morning"; path: string; windowStart: number; windowEnd: number; cycles: number; corrections: number; paused: boolean; ts: number }
   // Policy (BC6) — governance decisions as facts
   | { type: "policy:auto_merge"; prNumber: number; rule: string; ts: number }

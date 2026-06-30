@@ -32,14 +32,16 @@ describe("US-EVID-016 morning report renderer", () => {
       totalCostUsd: 0.25,
       alerts: ["paused"],
     });
-    expect(html).toContain("Morning Report");
-    expect(html).toContain("夜间运行晨报");
+    // FIX-1048: neutral always-on wording, no morning/night naming.
+    expect(html).toContain("Loop Digest");
+    expect(html).not.toContain("Morning Report");
+    expect(html).not.toContain("夜间运行晨报");
     expect(html).toContain("US-A");
     expect(html).toContain("PAUSED");
     expect(html).toContain("$0.2500");
   });
 
-  it("writes latest + dated reports and appends a report:morning event", () => {
+  it("FIX-1048: writes the neutral loop digest + dated file and a report:loop event", () => {
     const p = tempProject();
     const base = Date.parse("2026-06-08T10:00:00Z") / 1000;
     writeEvents(p.events, [
@@ -54,11 +56,27 @@ describe("US-EVID-016 morning report renderer", () => {
     ]);
     writeFileSync(p.runs, "", "utf8");
     const latest = writeLatestMorningReport(p.root, p.events, p.runs, Date.parse("2026-06-08T12:00:00Z") / 1000);
-    expect(latest).toBe(join(p.root, ".roll", "reports", "morning", "latest.html"));
+    // Primary projection path is the neutral loop digest, not reports/morning.
+    expect(latest).toBe(join(p.root, ".roll", "reports", "loop", "latest.html"));
     expect(existsSync(latest)).toBe(true);
-    expect(existsSync(join(p.root, ".roll", "reports", "morning", "2026-06-08.html"))).toBe(true);
+    expect(existsSync(join(p.root, ".roll", "reports", "loop", "2026-06-08.html"))).toBe(true);
     expect(readFileSync(latest, "utf8")).toContain("US-A");
-    expect(readFileSync(p.events, "utf8")).toContain('"type":"report:morning"');
+    // New writes emit the neutral event type.
+    expect(readFileSync(p.events, "utf8")).toContain('"type":"report:loop"');
+    expect(readFileSync(p.events, "utf8")).not.toContain('"type":"report:morning"');
+  });
+
+  it("FIX-1048: keeps reports/morning/latest.html as a redirect to the loop digest", () => {
+    const p = tempProject();
+    const base = Date.parse("2026-06-08T10:00:00Z") / 1000;
+    writeEvents(p.events, []);
+    writeFileSync(p.runs, "", "utf8");
+    writeLatestMorningReport(p.root, p.events, p.runs, base);
+    const morning = join(p.root, ".roll", "reports", "morning", "latest.html");
+    expect(existsSync(morning)).toBe(true);
+    const compat = readFileSync(morning, "utf8");
+    expect(compat).toContain("../loop/latest.html");
+    expect(compat).toContain("http-equiv=\"refresh\"");
   });
 
   it("US-TRUTH-010: normal run rows still render delivered through the truth adapter", () => {

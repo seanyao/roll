@@ -10,6 +10,8 @@
  */
 import { execFileSync } from "node:child_process";
 
+const EXEC_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
+
 /** Result of running one command: captured stdout + the exit status. */
 export interface ExecResult {
   /** Trimmed stdout (the oracle reads `gh`/git stdout as single values). */
@@ -32,7 +34,10 @@ export interface ExecPort {
 export const nodeExecPort: ExecPort = {
   run(tool: string, argv: readonly string[]): ExecResult {
     try {
-      const stdout = execFileSync(tool, [...argv], { encoding: "utf8" });
+      const stdout = execFileSync(tool, [...argv], {
+        encoding: "utf8",
+        maxBuffer: EXEC_MAX_BUFFER_BYTES,
+      });
       return { stdout: stdout.trim(), code: 0 };
     } catch (err: unknown) {
       const e = err as { stdout?: Buffer | string; status?: number | null };

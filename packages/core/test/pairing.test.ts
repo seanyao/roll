@@ -264,6 +264,8 @@ describe("defaultPairingConfig + renderPairingConfig (legacy pairing scaffold)",
   });
   it("FIX-328: score candidates exclude installed profile-less agents", () => {
     // Worker is kimi. Profile-less agents are excluded from the score pool.
+    // FIX-1044: the builder (kimi) is ALSO excluded — another known agent (pi) is
+    // installed, so the independent Evaluator pi scores, never the builder itself.
     const picked = selectPairingCandidates({
       installed: ["kimi", "made-up-a", "made-up-b", "pi"],
       isAvailable: () => true,
@@ -272,7 +274,7 @@ describe("defaultPairingConfig + renderPairingConfig (legacy pairing scaffold)",
       cfg: cfg({ enabled: false, stages: [], capability: {} }),
       cycleId: "c1",
     });
-    expect(picked).toContain("kimi");
+    expect(picked).not.toContain("kimi"); // FIX-1044: builder never self-scores when an independent peer exists
     expect(picked).toContain("pi");
     expect(picked).not.toContain("made-up-a");
     expect(picked).not.toContain("made-up-b");
@@ -290,10 +292,12 @@ describe("defaultPairingConfig + renderPairingConfig (legacy pairing scaffold)",
     // Empty allowlist → no heterogeneous peer available.
     expect(heteroAvailable(["kimi", "pi"], "kimi", [])).toBe(false);
   });
-  it("FIX-343: the score stage is same-vendor-friendly — a fresh instance of the BUILDER'S OWN type qualifies", () => {
-    // Independence = another assigned fresh session, NOT vendor heterogeneity:
-    // the score stage drops the isHeterogeneous filter and INCLUDES the builder's
-    // own canonical type (spawned as a fresh subprocess).
+  it("FIX-1044: in a multi-agent install the BUILDER is EXCLUDED from the score pool (no self-score fallback)", () => {
+    // Supersedes the FIX-343 "builder's own type qualifies" behaviour: when an
+    // independent Evaluator is installed, a delivery is graded by that peer or it
+    // fails loud — the builder never grades its own cycle (AC3). Independence is
+    // still verified by SESSION id downstream, so the single-agent anti-deadlock
+    // guarantee (next test) is untouched.
     const picked = selectPairingCandidates({
       installed: ["kimi", "pi", "reasonix"],
       isAvailable: () => true,
@@ -302,10 +306,25 @@ describe("defaultPairingConfig + renderPairingConfig (legacy pairing scaffold)",
       cfg: cfg({ stages: ["score"], capability: { pi: ["score"], reasonix: ["score"] } }),
       cycleId: "c1",
     });
-    expect(picked.length).toBe(3);
-    expect(picked).toContain("kimi"); // builder's own type — a fresh session is independent
+    expect(picked.length).toBe(2);
+    expect(picked).not.toContain("kimi"); // builder excluded — not an independent Evaluator
     expect(picked).toContain("pi");
     expect(picked).toContain("reasonix");
+  });
+
+  it("FIX-1044: independents installed but ALL unavailable → empty pool (fail loud, never self-score)", () => {
+    // The builder (kimi) is available, but the only other installed agent (pi) is
+    // down. The builder must NOT be picked as a fallback — the pool is empty and
+    // the cycle fails loud (AC4) rather than self-scoring.
+    const picked = selectPairingCandidates({
+      installed: ["kimi", "pi"],
+      isAvailable: (a) => a === "kimi", // builder up, independent peer down
+      workingAgent: "kimi",
+      stage: "score",
+      cfg: cfg({ stages: ["score"], capability: { pi: ["score"] } }),
+      cycleId: "c1",
+    });
+    expect(picked).toEqual([]); // independent peer installed but unavailable → no self-score fallback
   });
 
   it("FIX-343: the score stage is MANDATORY — qualifies even when pairing is disabled / no score stage / no capability", () => {

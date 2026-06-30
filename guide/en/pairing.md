@@ -121,11 +121,23 @@ self-score):
   correctness, domain/spec consistency) — not code. It stamps the score
   `stage=design`. The designing agent triggers but never grades its own work;
   no peer available → honest unscored (fail-loud), never a self-grade.
-- **Independence is by rig and session**: a fresh same-vendor session is the
-  minimum acceptable; a different `agent × model × session` rig (non-sub-agent)
-  is encouraged.
+- **The builder's own agent never scores its own cycle when an independent peer
+  exists**: whenever any other agent is installed, the builder is excluded from
+  the score pool entirely — an independent Evaluator grades the delivery or the
+  cycle fails loud (no self-score fallback, even from a fresh same-vendor
+  session). The builder's own agent is the scorer **only** in a true
+  single-agent install, where a fresh same-vendor session is the minimum
+  acceptable independence. Independence is still verified by session id (a
+  different `agent × model × session` rig is encouraged), so the single-agent
+  case never deadlocks.
   A score sharing the builder's session — including any sub-agent of it — is
-  rejected as a self-score. No heterogeneous candidate, a timeout, or a
+  rejected as a self-score. No independent candidate, a timeout, or a
   protocol miss does **not** fall back to a self-score; the absence is audited
   via a `pair:none-available` event and the story owes a fresh-session Review
   Score before it can attest (`review_score_missing`).
+- **Real agent output is normalized before scoring**: an Evaluator's reply is
+  accepted even when its stdout carries terminal control bytes, ANSI startup
+  banners, a JSONL stream-json wrapper, or a bullet/markdown prefix — the parser
+  normalizes these away, then still requires one complete, in-order
+  `SCORE`/`VERDICT`/`RATIONALE` block (score 1..10, supported verdict). Prose
+  that merely mentions the markers is still rejected.

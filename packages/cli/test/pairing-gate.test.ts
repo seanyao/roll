@@ -399,8 +399,13 @@ defaults:
 });
 
 // ── US-PAIR-009: score stage — heterogeneous peer scores the cycle ───────────
-import { parsePairScoreOutput, runScorePairing, type RunScorePairingDeps } from "../src/runner/pairing-gate.js";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { normalizeScoreStdout, parsePairScoreOutput, runScorePairing, type RunScorePairingDeps } from "../src/runner/pairing-gate.js";
 import { readStoryReviewScores } from "../src/lib/review-score.js";
+
+const FIX1044_FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "score");
+const readScoreFixture = (name: string): string => readFileSync(join(FIX1044_FIXTURES, name), "utf8");
 
 // This fixture keeps the declared-capable scorers narrow on purpose; supported
 // agents outside the fixture may still be used by runtime escalation.
@@ -630,25 +635,28 @@ defaults:
     expect(readStoryReviewScores(dir, "US-X-001")[0]?.scoredBy).not.toBe("kimi");
   });
 
-  it("FIX-343 (②): hetero pool ALL-FAILS within budget → FALLS BACK to same-vendor-fresh", async () => {
-    // builder=kimi; hetero = pi,reasonix (both flake null across the bounded
-    // retry); same-vendor = kimi (scores). The gate must still produce a
-    // Review Score via the same-vendor-fresh fallback — never block on a dead hetero pool.
+  it("FIX-1044: hetero pool ALL-FAILS in a multi-agent install → BLOCK, never self-score the builder", async () => {
+    // Supersedes the FIX-343② "fall back to same-vendor-fresh" behaviour:
+    // builder=kimi; hetero = pi,reasonix (both flake null). The builder (kimi) is
+    // EXCLUDED — it is not an independent Evaluator when peers are installed — so a
+    // dead hetero pool BLOCKS (timeout) rather than letting the builder grade its
+    // own cycle (AC3/AC4). The builder's scorePeer would score, but it is never
+    // asked.
     const { dir, rt } = project(SCORE_CFG);
     const tried: string[] = [];
     const { d } = scoreDeps({
       installed: ["kimi", "pi", "reasonix"],
       scorePeer: async (peer: string) => {
         tried.push(peer);
-        return peer === "kimi" ? { score: 8, verdict: "good" as const, rationale: "same-vendor fresh session scored", cost: 0.01 } : null;
+        return peer === "kimi" ? { score: 8, verdict: "good" as const, rationale: "builder would self-score — must NOT be asked", cost: 0.01 } : null;
       },
     });
     const r = await runScorePairing(dir, rt, "c1", "kimi", "US-X-001", "roll-build", "s", d);
-    expect(r.status).toBe("scored");
-    expect(r.peer).toBe("kimi"); // same-vendor fallback won after hetero failed
-    expect(tried).toContain("pi"); // hetero round was attempted first
+    expect(r.status).toBe("timeout"); // independents failed → fail loud, no self-score
+    expect(tried).toContain("pi"); // hetero peers were attempted
     expect(tried).toContain("reasonix");
-    expect(readStoryReviewScores(dir, "US-X-001")[0]?.scoredBy).toBe("kimi");
+    expect(tried).not.toContain("kimi"); // builder is NEVER asked to score its own cycle
+    expect(readStoryReviewScores(dir, "US-X-001")).toHaveLength(0); // no self-score note
   });
 
   it("FIX-343 (②): SINGLE-VENDOR install → same-vendor immediately, no hetero wait/hang", async () => {
@@ -811,12 +819,13 @@ describe("FIX-910 — unparseable rescue and failure attribution", () => {
       },
     });
     const r = await runScorePairing(dir, rt, "c1", "claude", "US-X-911", "roll-build", "summary", d);
-    // Hetero pi fails twice, then same-vendor claude fresh-session fallback fails
-    // twice → timeout status (whole pool failed), NO note written.
+    // FIX-1044: builder=claude is EXCLUDED (pi is an installed independent), so
+    // only pi is asked — it fails twice → timeout (whole independent pool failed),
+    // NO note written. The builder's claude fresh-session is never tried (AC3).
     expect(r.status).toBe("timeout");
-    // Four unparseable events were emitted (two per attempted scorer).
+    // Two unparseable events were emitted (two attempts on the one independent peer pi).
     const failures = events.filter((e) => e.type === "pair:score-failure");
-    expect(failures).toHaveLength(4);
+    expect(failures).toHaveLength(2);
     expect(failures.every((f) => (f as { cause: string }).cause === "unparseable")).toBe(true);
     // No score note was written — no fake score
     expect(readStoryReviewScores(dir, "US-X-911")).toHaveLength(0);
@@ -916,6 +925,66 @@ describe("parsePairScoreOutput — US-PAIR-009", () => {
     expect(parsePairScoreOutput(
       "After reviewing the delivery, I'd give it a SCORE: 7. The VERDICT: is ok. My RATIONALE: the tests cover the seams."
     )).toBeNull();
+  });
+});
+
+describe("parsePairScoreOutput — FIX-1044 real-agent raw output normalization", () => {
+  // AC1: real raw outputs that contained a VALID final SCORE/VERDICT/RATIONALE
+  // block but were rejected pre-fix as unparseable/timeout. Fixtures are the
+  // exact stdout the parser receives (no `--- stdout ---` artifact wrapper) —
+  // pi/claude are verbatim from the failed FIX-1042 cycle; reasonix/kimi are
+  // distilled per the spec's builder_notes (warning banner / bullet prefix kept).
+  it("pi: terminal overstrike (^D + backspaces) before SCORE parses", () => {
+    const out = parsePairScoreOutput(readScoreFixture("pi-overstrike.stdout.txt"));
+    expect(out).not.toBeNull();
+    expect(out?.score).toBe(8);
+    expect(out?.verdict).toBe("good");
+    expect(out?.rationale).toContain("auxiliary-dir policy");
+  });
+
+  it("claude: JSONL stream-json wrapper — final result block parses", () => {
+    const out = parsePairScoreOutput(readScoreFixture("claude-jsonl.stdout.txt"));
+    expect(out).not.toBeNull();
+    expect(out?.score).toBe(9);
+    expect(out?.verdict).toBe("good");
+    expect(out?.rationale).toContain("root-cause fix");
+  });
+
+  it("reasonix: startup warnings + ANSI banner above the block parse", () => {
+    const out = parsePairScoreOutput(readScoreFixture("reasonix-warnings.stdout.txt"));
+    expect(out).not.toBeNull();
+    expect(out?.score).toBe(10);
+    expect(out?.verdict).toBe("good");
+    expect(out?.rationale).toContain("单一策略");
+  });
+
+  it("kimi: bullet-prefixed block with a trailing resume banner parses", () => {
+    const out = parsePairScoreOutput(readScoreFixture("kimi-bullet.stdout.txt"));
+    expect(out).not.toBeNull();
+    expect(out?.score).toBe(8);
+    expect(out?.verdict).toBe("good");
+  });
+
+  it("normalizeScoreStdout collapses overstrike, ANSI, and JSONL to clean protocol lines", () => {
+    // \x04 control + ^D\b\b overstrike → erased; CSI escape stripped.
+    expect(normalizeScoreStdout("\x1b[2mfoo\x1b[0m^D\b\bSCORE: 7")).toBe("fooSCORE: 7");
+    // JSONL result field unwrapped (escaped \n become real lines).
+    expect(normalizeScoreStdout('{"type":"result","result":"SCORE: 9\\nVERDICT: good"}')).toBe("SCORE: 9\nVERDICT: good");
+  });
+
+  // AC2: validation is NOT relaxed by normalization — malformed/incomplete blocks
+  // and protocol-looking prose inside a JSONL/ANSI wrapper still parse to null.
+  it("AC2: normalization does NOT loosen strict validation", () => {
+    // out-of-range score inside a JSONL wrapper → still null
+    expect(parsePairScoreOutput('{"type":"result","result":"SCORE: 12\\nVERDICT: good\\nRATIONALE: x"}')).toBeNull();
+    // unsupported verdict after ANSI strip → still null
+    expect(parsePairScoreOutput("\x1b[2mSCORE: 8\nVERDICT: amazing\nRATIONALE: x\x1b[0m")).toBeNull();
+    // missing rationale, even with overstrike noise → still null
+    expect(parsePairScoreOutput("^D\b\bSCORE: 8\nVERDICT: ok")).toBeNull();
+    // prose embedding the markers in a JSONL result → still null (not a real block)
+    expect(parsePairScoreOutput('{"type":"result","result":"I score it SCORE: 7 with VERDICT: ok and RATIONALE: fine"}')).toBeNull();
+    // duplicate SCORE field survives normalization rejection
+    expect(parsePairScoreOutput('{"type":"result","result":"SCORE: 8\\nVERDICT: good\\nSCORE: 7\\nRATIONALE: x"}')).toBeNull();
   });
 });
 
@@ -1325,10 +1394,12 @@ describe("runScorePairing — FIX-911 pool-level escalation", () => {
     const r = await runScorePairing(dir, rt, "c-escalate", "kimi", "US-X-911a", "roll-build", "summary", d);
     expect(r.status).toBe("scored");
     expect(r.peer).toBe("pi"); // the escalated peer won
-    // pi was tried AFTER hetero and same-vendor rounds had exhausted
+    // FIX-1044: builder=kimi is EXCLUDED from both the candidate pool and the
+    // escalation, so only the independent peers are tried: reasonix (hetero round)
+    // first, then the probe-missed pi via escalation. kimi is NEVER asked.
     expect(tried).toContain("reasonix"); // hetero round ran first
-    expect(tried).toContain("kimi"); // same-vendor fallback ran second
-    expect(tried.indexOf("pi")).toBeGreaterThan(tried.indexOf("kimi")); // escalation ran last
+    expect(tried).not.toContain("kimi"); // builder never self-scores (AC3)
+    expect(tried.indexOf("pi")).toBeGreaterThan(tried.indexOf("reasonix")); // escalation ran last
     // still a valid pair score — all independence invariants hold
     const notes = readStoryReviewScores(dir, "US-X-911a");
     expect(notes).toHaveLength(1);
@@ -1341,28 +1412,30 @@ describe("runScorePairing — FIX-911 pool-level escalation", () => {
     expect(events.some((e) => e.type === "pair:score")).toBe(true);
   });
 
-  // FIX-397 shape: hetero [reasonix] timeout, same-vendor [kimi] timeout,
-  // but escalation pool has pi (was excluded by probe) → pi scores = rescue.
-  it("AC1 (FIX-397 shape): codex-auth and kimi-timeout pattern → escalation rescues", async () => {
+  // FIX-397 shape: the only probe-available agent is the BUILDER itself; the
+  // independents (pi, reasonix) were excluded by the probe. FIX-1044: the builder
+  // is NOT a scorer, so the initial pool is empty — but escalation still rescues a
+  // probe-missed independent (pi), so the cycle scores WITHOUT self-scoring.
+  it("AC1 (FIX-397 shape, FIX-1044): only builder probe-available → escalation rescues an independent, builder never scores", async () => {
     const { dir, rt } = project(SCORE_CFG);
     const tried: string[] = [];
     const { d } = scoreDeps({
       installed: ["kimi", "pi", "reasonix"],
-      // Only kimi passes the probe — pi and reasonix are excluded
+      // Only kimi (the BUILDER) passes the probe — pi and reasonix are excluded.
       isAvailable: (a) => a === "kimi",
       scorePeer: async (peer: string) => {
         tried.push(peer);
-        // kimi (only candidate) → null (timeout); pi (escalation) → scores; reasonix → null
-        if (peer === "pi") return { score: 8, verdict: "good" as const, rationale: "escalation rescue after kimi timeout", cost: 0.03 };
+        // pi (escalation) → scores; reasonix → null. kimi must never be asked.
+        if (peer === "pi") return { score: 8, verdict: "good" as const, rationale: "escalation rescued a probe-missed independent", cost: 0.03 };
         return null;
       },
     });
     const r = await runScorePairing(dir, rt, "c-fix397", "kimi", "US-X-911b", "roll-build", "summary", d);
     expect(r.status).toBe("scored");
     expect(r.peer).toBe("pi");
-    // Progression: same-vendor [kimi] ran first (only candidate, up to 2 attempts),
-    // then escalation pi (which scores)
-    expect(tried[0]).toBe("kimi");
+    // FIX-1044: the builder (kimi) is NEVER asked — the escalation skips it and
+    // rescues the independent pi instead.
+    expect(tried).not.toContain("kimi");
     expect(tried).toContain("pi"); // escalation tried and scored
     expect(readStoryReviewScores(dir, "US-X-911b")[0]?.score).toBe(8);
   });

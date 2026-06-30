@@ -103,7 +103,13 @@ agent 给自己的交付打分是利益冲突，所以质量评分（**Review Sc
   触发同一个全新会话的 Reviewer 评**设计**质量（INVEST 拆分、可视 AC 完整、`deliverable_url`
   正确、领域/spec 一致），而非代码；记为 `stage=design`。设计 agent 只触发、绝不给自己打分；
   无可用评审则诚实标记未评审（fail-loud），绝不合成自评。
-- **独立性看 rig 和会话**：同厂全新会话是最低可接受档；不同 `agent × model × session`
-  rig（非子 agent）更鼓励。任何与 builder 共享会话的打分——包括其子 agent——都被判为自评而拒收。
-  无异构候选、超时或协议不符时**不会**回落成自评；缺席通过 `pair:none-available`
+- **只要装了别的 agent，builder 的本体 agent 绝不给自己的 cycle 打分**：此时 builder 被
+  整个排除出打分池——要么由独立 Evaluator 评分，要么 fail-loud（即便同厂全新会话也不回落成自评）。
+  只有真正的单 agent 安装里，builder 的本体 agent 才是评分者，此时同厂全新会话是最低可接受档。
+  独立性仍按 session id 核验（更鼓励不同 `agent × model × session` rig），所以单 agent 场景不会死锁。
+  任何与 builder 共享会话的打分——包括其子 agent——都被判为自评而拒收。
+  无独立候选、超时或协议不符时**不会**回落成自评；缺席通过 `pair:none-available`
   事件留痕，该 story 仍欠一份全新会话的 Review Score 才能 attest（`review_score_missing`）。
+- **真实 agent 输出会先归一化再评分**：Evaluator 回复中夹带终端控制字节、ANSI 启动横幅、
+  JSONL stream-json 外壳或 bullet/markdown 前缀都能被接受——解析器先归一化，再严格要求一段完整、
+  有序的 `SCORE`/`VERDICT`/`RATIONALE` 块（分数 1..10、合法 verdict）。仅在散文里提到这些标记的仍会被拒。

@@ -37,6 +37,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { dirname, join } from "node:path";
 import { formatOperatingMode, resolveOperatingMode, suggestedGuidedRun } from "../lib/operating-mode.js";
 import { reducePrView } from "./loop-pr-inbox.js";
+import { readPendingPublish } from "../runner/pending-publish.js";
 
 const EXEC_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 
@@ -286,6 +287,9 @@ export function gatherSupervisorInput(projectPath: string): SupervisorInput {
     rollMeta: readRollMetaState(projectPath),
     manualMergeGates: readManualMergeGates(projectPath, events, quietExecPort, backlog.map((row) => row.id)),
     structuralFailures: [...structuralFailures.values()],
+    // FIX-1043 — surface the runner's pending-publish hold so supervisor
+    // next/why agree with the picker's `all_pending_publish` idle.
+    pendingPublish: [...readPendingPublish(join(projectPath, ".roll", "loop"))],
   };
 }
 

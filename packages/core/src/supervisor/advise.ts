@@ -25,6 +25,7 @@ export interface SupervisorBlockedCard {
     | "unmet_dependency"
     | "repeated_failure"
     | "structural_failure"
+    | "pending_publish"
     | "unknown_status";
   readonly detail: string;
 }
@@ -95,11 +96,13 @@ function blockingDetails(input: SupervisorInput): {
   readonly deliveredSet: Set<string>;
   readonly openPrSet: Set<string>;
   readonly stuckSet: Set<string>;
+  readonly pendingPublishSet: Set<string>;
 } {
   return {
     deliveredSet: buildDoneSet(input),
     openPrSet: new Set(input.openPrStories),
     stuckSet: new Set(input.recentFailures.filter((f) => f.consecutiveFailures >= 2).map((f) => f.storyId)),
+    pendingPublishSet: new Set(input.pendingPublish ?? []),
   };
 }
 
@@ -110,7 +113,7 @@ export function buildSupervisorRunbookState(input: SupervisorInput): SupervisorR
   const blockedCards: SupervisorBlockedCard[] = [];
   const manualMergeGates = input.manualMergeGates ?? [];
   const structuralFailures = input.structuralFailures ?? [];
-  const { deliveredSet, openPrSet, stuckSet } = blockingDetails(input);
+  const { deliveredSet, openPrSet, stuckSet, pendingPublishSet } = blockingDetails(input);
   const confirmedDelivered = new Set(input.delivered);
   const truthDrift = input.backlog
     .filter((row) => statusOf(row.status) === "done" && !confirmedDelivered.has(row.id))
@@ -251,6 +254,16 @@ export function buildSupervisorRunbookState(input: SupervisorInput): SupervisorR
       }
       if (stuckSet.has(row.id)) {
         blockedCards.push(blocker(row.id, "repeated_failure", "repeated failure must be diagnosed before retry"));
+        continue;
+      }
+      // FIX-1043 — locally-committed work that failed to publish. The runner's
+      // picker holds this card (`all_pending_publish` idle); the Supervisor must
+      // agree it is blocked, NOT advertise it as runnable. A scoped retry
+      // (`roll loop go --cards <id>`) clears the marker so both see it runnable.
+      if (pendingPublishSet.has(row.id)) {
+        blockedCards.push(
+          blocker(row.id, "pending_publish", "locally-committed work failed to publish; clear the publish blocker or run a scoped retry"),
+        );
         continue;
       }
       return {

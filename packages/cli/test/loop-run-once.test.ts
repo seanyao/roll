@@ -9,6 +9,8 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { dispatch, isPorted, registerAll } from "../src/index.js";
 import { RUN_ONCE_USAGE, buildLoopRouteDeps, idleCounterPath, incrementConsecutiveIdle, loopRunOnceCommand, readExternalBlock, readSkillBody, resetConsecutiveIdle, shouldSuppressGoalChildFailureCounter } from "../src/commands/loop-run-once.js";
+import { GOAL_ALLOWED_CARDS_ENV } from "../src/lib/goal-progress.js";
+import { readPendingPublish } from "../src/runner/pending-publish.js";
 import { resolveRoute } from "@roll/core";
 import { realAgentSpawn } from "../src/runner/index.js";
 
@@ -896,5 +898,53 @@ describe("US-LOOP-079h1 — consecutive-idle counter", () => {
     // Should not throw if the file does not exist yet.
     expect(() => resetConsecutiveIdle(p, "default")).not.toThrow();
     expect(() => resetConsecutiveIdle(p, "default")).not.toThrow();
+  });
+});
+
+describe("FIX-1043 — scoped retry clears pending-publish so the picker does not idle", () => {
+  it("ROLL_LOOP_GO_ALLOWED_CARDS removes pending-publish markers before the cycle runs", async () => {
+    const p = tmp("pending-clear");
+    mkdirSync(join(p, ".roll"), { recursive: true });
+    // A Todo card that a prior unpublished cycle left in pending-publish.
+    writeFileSync(
+      join(p, ".roll", "backlog.md"),
+      [
+        "| ID | Description | Status |",
+        "|---|---|---|",
+        "| [FIX-1042](.roll/features/loop-engine/FIX-1042/spec.md) | failed unpublished cycle | 📋 Todo |",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    mkdirSync(join(p, ".roll", "skills", "roll-loop"), { recursive: true });
+    writeFileSync(join(p, ".roll", "skills", "roll-loop", "SKILL.md"), "# loop\n", "utf8");
+
+    const rt = join(p, ".roll", "loop");
+    mkdirSync(rt, { recursive: true });
+    writeFileSync(join(rt, "pending-publish.json"), JSON.stringify(["FIX-1042"]), "utf8");
+
+    const prevCwd = process.cwd();
+    const prevRt = process.env["ROLL_PROJECT_RUNTIME_DIR"];
+    const prevSlug = process.env["ROLL_MAIN_SLUG"];
+    const prevAllowed = process.env[GOAL_ALLOWED_CARDS_ENV];
+    try {
+      process.chdir(p);
+      process.env["ROLL_PROJECT_RUNTIME_DIR"] = rt;
+      process.env["ROLL_MAIN_SLUG"] = "proj-abc123";
+      process.env[GOAL_ALLOWED_CARDS_ENV] = "FIX-1042";
+      // No git remote → repo pushable check fails fast after pending-publish is cleared.
+      await loopRunOnceCommand([]);
+    } finally {
+      process.chdir(prevCwd);
+      if (prevRt === undefined) delete process.env["ROLL_PROJECT_RUNTIME_DIR"];
+      else process.env["ROLL_PROJECT_RUNTIME_DIR"] = prevRt;
+      if (prevSlug === undefined) delete process.env["ROLL_MAIN_SLUG"];
+      else process.env["ROLL_MAIN_SLUG"] = prevSlug;
+      if (prevAllowed === undefined) delete process.env[GOAL_ALLOWED_CARDS_ENV];
+      else process.env[GOAL_ALLOWED_CARDS_ENV] = prevAllowed;
+    }
+
+    // The scoped retry intent must clear the marker so a later cycle can pick it.
+    expect(readPendingPublish(rt).has("FIX-1042")).toBe(false);
   });
 });

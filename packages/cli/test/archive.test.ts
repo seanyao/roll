@@ -4,7 +4,7 @@
  * and the old-layout read compat resolver.
  */
 import { execSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -97,6 +97,31 @@ describe("liveEpicOf", () => {
   it("returns null when no feature file exists (→ uncategorized at call site)", () => {
     const proj = project(["| US-A-1 | x | 📋 Todo |"]);
     expect(liveEpicOf(proj, "US-A-1")).toBeNull();
+  });
+});
+
+describe("bulkLiveEpics — FIX-1059 symlinked feature files", () => {
+  it("resolves a story whose flat <ID>.md is a symlink to the real spec", () => {
+    const proj = mkdtempSync(join(tmpdir(), "roll-archive-symlink-"));
+    dirs.push(proj);
+    // The real spec lives OUTSIDE the features tree (the main checkout); the only
+    // in-tree reference is a symlinked flat <ID>.md under an epic. No card
+    // subdirectory, so the directory-owner pass cannot resolve it — only the
+    // symlink-aware file pass can place the story under its epic.
+    const realSpec = join(proj, "persistent-FIX-1057.md");
+    writeFileSync(realSpec, "# FIX-1057\n");
+    const linkDir = join(proj, ".roll", "features", "beta");
+    mkdirSync(linkDir, { recursive: true });
+    symlinkSync(realSpec, join(linkDir, "FIX-1057.md"));
+    expect(bulkLiveEpics(proj, ["FIX-1057"]).get("FIX-1057")).toBe("beta");
+  });
+  it("ignores a broken symlinked feature file (story → null)", () => {
+    const proj = mkdtempSync(join(tmpdir(), "roll-archive-broken-"));
+    dirs.push(proj);
+    const epicDir = join(proj, ".roll", "features", "alpha");
+    mkdirSync(epicDir, { recursive: true });
+    symlinkSync(join(proj, ".roll", "features", "gone.md"), join(epicDir, "FIX-1058.md"));
+    expect(bulkLiveEpics(proj, ["FIX-1058"]).get("FIX-1058")).toBeNull();
   });
 });
 

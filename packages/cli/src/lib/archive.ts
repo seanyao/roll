@@ -14,11 +14,36 @@
  */
 import { parseBacklog } from "@roll/core";
 import { markPhaseDone } from "./story-page.js";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import type { Dirent } from "node:fs";
 
 /** The uncategorized epic slug — the never-block fallback bucket. */
 export const UNCATEGORIZED = "uncategorized";
+
+/**
+ * FIX-1059 — is this directory entry a markdown FILE we should treat as a story
+ * candidate? A real `.md` file qualifies directly; a SYMLINK whose name ends in
+ * `.md` qualifies only when it resolves (stat follows the link) to a real
+ * regular file. Loop worktrees link `features/<epic>/<ID>/spec.md` to the
+ * persistent `.roll` spec, so the linked card file must be discoverable just like
+ * a physical one — otherwise `roll attest` mis-reports the story as not found.
+ *
+ * Safety (AC3): a broken symlink makes `statSync` throw → false; a symlink to a
+ * directory is `isFile() === false` → false (never followed as a file, so no
+ * directory loop). Directory-symlink walking is already excluded upstream because
+ * `Dirent.isDirectory()` is false for a symlink, so the walker never descends it.
+ */
+export function isMarkdownStoryEntry(path: string, entry: Dirent): boolean {
+  if (!entry.name.endsWith(".md")) return false;
+  if (entry.isFile()) return true;
+  if (!entry.isSymbolicLink()) return false;
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false; // broken symlink — ignored safely
+  }
+}
 
 /** Every feature markdown that could define a story, in resolution priority:
  *  ID-named owners (the legacy flat `<storyId>.md` and the card-folder
@@ -39,7 +64,7 @@ export function findFeatureFiles(projectPath: string, storyId: string): string[]
         if (e.name === "notes" || e.name === "evidence" || e.name === "screenshots" || e.name === "latest") continue;
         if (/^\d{4}-\d{2}-\d{2}T/.test(e.name) || e.name.startsWith("cycle-") || e.name === "pre-evidence-backfill") continue;
         walk(p);
-      } else if (e.isFile() && e.name.endsWith(".md")) {
+      } else if (isMarkdownStoryEntry(p, e)) {
         const idOwned =
           e.name === `${storyId}.md` || (e.name === "spec.md" && basename(dir) === storyId);
         if (idOwned) hits.unshift(p); // ID-named owner wins
@@ -154,7 +179,7 @@ export function bulkLiveEpics(projectPath: string, ids: readonly string[]): Map<
         if (e.name === "notes" || e.name === "evidence" || e.name === "screenshots" || e.name === "latest") continue;
         if (/^\d{4}-\d{2}-\d{2}T/.test(e.name) || e.name.startsWith("cycle-") || e.name === "pre-evidence-backfill") continue;
         walk(p);
-      } else if (e.isFile() && e.name.endsWith(".md")) {
+      } else if (isMarkdownStoryEntry(p, e)) {
         files.push({ path: p, name: e.name, dirName: basename(dir) });
       }
     }

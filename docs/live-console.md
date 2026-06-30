@@ -140,6 +140,22 @@ CLI watch 是最低层实时路径——终端开着就能看。`roll supervisor
 
 **"no event stream"**：项目还没初始化 loop runtime dir（`.roll/loop/`）。跑一次 `roll setup`。
 
+**unparseable score/review（无法解析的评分/评审）**：当某个 evaluator/scorer 或
+peer reviewer 的输出无法解析（如 `SCORE` 行前有控制字符、缺 `VERDICT` 行）时，
+它不会让整个 cycle 静默假绿。在 `roll cycle <id> --roles` 的执行阵容里，该 agent
+那一行显示 `failed`，带 `cause`（如 `unparseable`）和一个 `raw artifact:` 指针。
+原始尝试被捕获在 `.roll/loop/peer/` 下——直接打开那个文件看 agent 到底吐了什么。
+关键：**即便有 agent 解析失败，也只有一个被采纳（`accepted`）的 score 决定 gate**；
+读 `accepted` 那一行（及 `accepted evaluator` 产物链接）拿真正算数的判定。完整读法见
+[Cycle Role Visibility](../guide/en/loop.md#cycle-role-visibility) /
+[Cycle 角色可观测](../guide/zh/loop.md#cycle-角色可观测)。
+
+**unparseable score/review (English)**: when an evaluator/scorer or peer
+reviewer emits output that cannot be parsed, the cycle does not silently turn
+green. The agent's row in `roll cycle <id> --roles` shows `failed` with a
+`cause` and a `raw artifact:` pointer under `.roll/loop/peer/`. Only the one
+`accepted` score gates the delivery — read that row, not the failed attempts.
+
 ## 相关
 
 - `docs/architecture.md` §BC7 — 三流契约与 CLI-first 架构

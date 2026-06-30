@@ -39,6 +39,14 @@ Roll uses three core Agent-domain roles:
 - `execute` — builds or fixes a story through the selected skill workflow.
 - `evaluate` — reviews, scores, or checks the delivery in a fresh session.
 
+**Who played each role in a finished cycle?** After a cycle runs, the resolved
+roles are not a mystery you have to reconstruct from logs. Run
+`roll cycle <id> --roles` to see exactly who was Builder and who was Evaluator,
+which peers were consulted, and which single score the gate accepted. The same
+cast is written to `summary.md` / `summary.json` and embedded in the story's
+Execution Cast report block. See
+[Cycle Role Visibility](./loop.md#cycle-role-visibility) for the full surface.
+
 Project defaults normally bind story roles:
 
 ```yaml

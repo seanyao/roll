@@ -59,6 +59,16 @@ verdict 行缺失或出现多行时，adapter 保守判为 `REQUEST_CHANGES`。
 findings、timeout/error 状态、耗时、transcript 路径和 evidence 路径。
 goal-mode 终审会在 `goal:final_review` 事件上写入同一组事实字段。
 
+### 解析失败与原始产物
+
+当某个 reviewer 或 scorer 在 autonomous cycle 里跑了，但输出**无法解析**
+（如 `SCORE` 行前有控制字符，或缺少 `VERDICT` 行）时，这次尝试不会被悄悄丢弃。
+原始尝试会被捕获到 `.roll/loop/peer/` 下，该 agent 在 cycle 角色阵容里那一行显示
+`failed`，带一个 `cause`（如 `unparseable`）和一个指向该文件的 `raw artifact:`
+指针。这让失败可审计，而非隐形——读法见
+[Cycle 角色可观测](./loop.md#cycle-角色可观测)，排障步骤见
+[排障：无法解析的 score/review](../../docs/live-console.md#故障排查)。
+
 ## 外部 reviewer 与辅助 subagent
 
 `roll peer` 面向外部 provider reviewer CLI。Codex 内部 subagent 可以辅助并行分析，

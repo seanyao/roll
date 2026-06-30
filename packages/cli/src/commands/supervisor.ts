@@ -281,6 +281,10 @@ export function gatherSupervisorInput(projectPath: string): SupervisorInput {
     .filter(([, n]) => n > 0)
     .map(([storyId, consecutiveFailures]) => ({ storyId, consecutiveFailures }));
 
+  const evidenceRepairs: NonNullable<SupervisorInput["evidenceRepairs"]> = events
+    .filter((ev): ev is Extract<RollEvent, { type: "evidence:repair" }> => ev.type === "evidence:repair")
+    .map((ev) => ({ prNumber: ev.prNumber, storyId: ev.storyId, agent: ev.agent, outcome: ev.outcome, ts: ev.ts }));
+
   return {
     backlog,
     delivered: [...merged],
@@ -290,6 +294,7 @@ export function gatherSupervisorInput(projectPath: string): SupervisorInput {
     releaseBlockers: [],
     rollMeta: readRollMetaState(projectPath),
     manualMergeGates: readManualMergeGates(projectPath, events, quietExecPort, backlog.map((row) => row.id)),
+    evidenceRepairs,
     structuralFailures: [...structuralFailures.values()],
     // FIX-1043 — surface the runner's pending-publish hold so supervisor
     // next/why agree with the picker's `all_pending_publish` idle.
@@ -445,6 +450,7 @@ function supervisorDecisions(input: SupervisorInput): ReturnType<typeof advisePr
 function runbookWhy(state: ReturnType<typeof buildSupervisorRunbookState>, facts: ReturnType<typeof observeProject>): string {
   if (state.next.kind === "diagnose_failure") return state.next.reason;
   if (state.next.kind === "run_card") return `not stuck: next live card is ${state.next.storyId}`;
+  if (state.next.kind === "merge_ready") return `not stuck: ${state.next.reason}`;
   return state.next.reason;
 }
 
@@ -604,9 +610,14 @@ export function supervisorCommand(args: string[]): number {
     const events = readSupervisorEvents(projectPath);
     const ctx = supervisorContext(projectPath, input, events);
     const stall = readNoProgressStall(projectPath, events);
-    const ownerAction = state.next.kind === "diagnose_failure" || state.next.kind === "manual_merge_gate" ? state.next.ownerAction : mode.ownerAction;
+    const ownerAction =
+      state.next.kind === "diagnose_failure" || state.next.kind === "manual_merge_gate" || state.next.kind === "merge_ready"
+        ? state.next.ownerAction
+        : mode.ownerAction;
     const schedulerAction =
-      state.next.kind === "diagnose_failure" || state.next.kind === "manual_merge_gate" ? state.next.schedulerAction : mode.schedulerAction;
+      state.next.kind === "diagnose_failure" || state.next.kind === "manual_merge_gate" || state.next.kind === "merge_ready"
+        ? state.next.schedulerAction
+        : mode.schedulerAction;
     const recoveryBlock = stall !== undefined ? `\n${fmtNoProgressRecovery(stall)}` : "";
     process.stdout.write(
       `\n  Prime Agent — why stuck: ${why}\n  cast: ${ctx.cast}\n  cast detail: ${ctx.castDetail}\n  gate: ${ctx.gate}\n  manual merge: ${ctx.manualMerge}\n  .roll meta: ${ctx.rollMeta.state} — ${ctx.rollMeta.detail}${recoveryBlock}\n  ${formatOperatingMode(mode)}\n  owner action: ${ownerAction}\n  scheduler: ${schedulerAction}\n\n`,

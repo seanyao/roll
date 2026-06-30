@@ -270,6 +270,12 @@ export type RollEvent =
   // Evidence lifecycle (US-EVID-001) — the runner opened the per-cycle evidence
   // frame before spawning an agent, so later phases have a durable run dir.
   | { type: "evidence:frame-opened"; cycleId: string; storyId: string; runDir: string; ts: number }
+  // FIX-1058 — a Delta Team agent repaired delivery evidence (ac-map, report,
+  // screenshots) on a green PR that was blocked only by missing acceptance
+  // evidence. The event records WHO repaired, WHICH PR/story, and the outcome,
+  // so supervisor and the PR loop can distinguish original Builder, repair
+  // Builder, Evaluator, CI state, and final attest result.
+  | { type: "evidence:repair"; prNumber: number; storyId: string; agent: string; outcome: "started" | "committed" | "failed"; ts: number }
   // Morning report (US-EVID-016) — one fixed human-readable page is rebuilt from
   // events/runs and linked from the dossier front page.
   | { type: "report:morning"; path: string; windowStart: number; windowEnd: number; cycles: number; corrections: number; paused: boolean; ts: number }

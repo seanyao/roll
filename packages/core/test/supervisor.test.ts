@@ -248,6 +248,35 @@ describe("recommendNext — what should Roll do next?", () => {
     expect(state.truth.manualMergeGates).toHaveLength(1);
   });
 
+  it("FIX-1058: a green manual-merge PR with committed evidence repair becomes merge_ready", () => {
+    const state = buildSupervisorRunbookState(
+      input({
+        backlog: [
+          { id: "FIX-1057", status: "📋 Todo" },
+          { id: "US-2", status: "📋 Todo" },
+        ],
+        openPrStories: ["FIX-1057"],
+        manualMergeGates: [
+          {
+            storyId: "FIX-1057",
+            prNumber: 1116,
+            ciState: "success",
+            reviewState: "APPROVED",
+            mergeable: "CLEAN",
+            action: "manual_merge_required",
+            detail: "ci=success evaluator=APPROVED merge=CLEAN action=manual_merge_required",
+            source: "gh pr view 1116",
+          },
+        ],
+        evidenceRepairs: [{ prNumber: 1116, storyId: "FIX-1057", agent: "delta", outcome: "committed", ts: 5 }],
+      }),
+    );
+    expect(state.next.kind).toBe("merge_ready");
+    expect(state.next.storyId).toBe("FIX-1057");
+    expect(state.next.ownerAction).toContain("merge PR #1116");
+    expect(state.blockedCards[0]).toMatchObject({ storyId: "FIX-1057", reason: "open_pr" });
+  });
+
   it("US-V4-021: diagnoses zero-TCR dirty-worktree handoff before retrying", () => {
     const state = buildSupervisorRunbookState(
       input({

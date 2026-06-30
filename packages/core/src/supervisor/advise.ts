@@ -8,7 +8,14 @@
  * rewrites routing/policy or marks a Story Done (the metrics-don't-mutate-policy
  * invariant).
  */
-import { classifyStatus, type SupervisorDecision, type SupervisorFacts, type SupervisorInput, type StoryStatus } from "@roll/spec";
+import {
+  classifyStatus,
+  type SupervisorDecision,
+  type SupervisorEvidenceRepair,
+  type SupervisorFacts,
+  type SupervisorInput,
+  type StoryStatus,
+} from "@roll/spec";
 
 export type SupervisorBacklogFamily = "FIX" | "US" | "REFACTOR";
 
@@ -46,7 +53,7 @@ export interface SupervisorRunbookState {
     readonly structuralFailures: readonly NonNullable<SupervisorInput["structuralFailures"]>[number][];
   };
   readonly next: {
-    readonly kind: "run_card" | "manual_merge_gate" | "diagnose_failure" | "no_work";
+    readonly kind: "run_card" | "manual_merge_gate" | "merge_ready" | "diagnose_failure" | "no_work";
     readonly storyId: string | null;
     readonly reason: string;
     readonly ownerAction: string;
@@ -66,6 +73,21 @@ function familyOf(id: string): SupervisorBacklogFamily | null {
 
 function emptyFamilyCounts(): Record<SupervisorBacklogFamily, number> {
   return { FIX: 0, US: 0, REFACTOR: 0 };
+}
+
+/** FIX-1058 — find the latest evidence-repair outcome for a PR/story pair. */
+function latestEvidenceRepair(
+  repairs: readonly SupervisorEvidenceRepair[] | undefined,
+  prNumber: number,
+  storyId: string,
+): SupervisorEvidenceRepair | undefined {
+  if (repairs === undefined) return undefined;
+  let best: SupervisorEvidenceRepair | undefined;
+  for (const r of repairs) {
+    if (r.prNumber !== prNumber || r.storyId !== storyId) continue;
+    if (best === undefined || r.ts > best.ts) best = r;
+  }
+  return best;
 }
 
 function statusOf(status: string): StoryStatus | null {
@@ -148,6 +170,30 @@ export function buildSupervisorRunbookState(input: SupervisorInput): SupervisorR
 
   const manualMerge = manualMergeGates.find((gate) => liveScopeIds.has(gate.storyId) || openPrSet.has(gate.storyId));
   if (manualMerge !== undefined) {
+    const repair = latestEvidenceRepair(input.evidenceRepairs, manualMerge.prNumber, manualMerge.storyId);
+    const isRepaired = repair?.outcome === "committed";
+    const ciGreen = manualMerge.ciState === "success";
+    if (isRepaired && ciGreen) {
+      blockedCards.push(blocker(manualMerge.storyId, "open_pr", `PR #${manualMerge.prNumber} evidence repaired; awaiting merge`));
+      return {
+        scope: { label: "live non-Hold FIX/US/REFACTOR", families: SUPERVISOR_FAMILIES, remainingByFamily, todoByFamily, excluded },
+        truth: {
+          coverage: truthDrift.length > 0 ? "partial" : "complete",
+          drift: truthDrift,
+          openPrCount: input.openPrStories.length,
+          manualMergeGates,
+          structuralFailures,
+        },
+        next: {
+          kind: "merge_ready",
+          storyId: manualMerge.storyId,
+          reason: `PR #${manualMerge.prNumber} for ${manualMerge.storyId} is green and delivery evidence has been repaired`,
+          ownerAction: `merge PR #${manualMerge.prNumber} (CI=${manualMerge.ciState}, evaluator=${manualMerge.reviewState}, merge=${manualMerge.mergeable})`,
+          schedulerAction: "PR loop will merge the repaired PR on its next tick; do not start another card for this story",
+        },
+        blockedCards,
+      };
+    }
     blockedCards.push(blocker(manualMerge.storyId, "open_pr", `PR #${manualMerge.prNumber} requires manual merge reconciliation`));
     return {
       scope: { label: "live non-Hold FIX/US/REFACTOR", families: SUPERVISOR_FAMILIES, remainingByFamily, todoByFamily, excluded },

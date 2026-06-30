@@ -136,6 +136,8 @@ export interface SupervisorInput {
   };
   /** Open PRs that intentionally require an owner/manual merge decision. */
   readonly manualMergeGates?: readonly SupervisorManualMergeGate[];
+  /** FIX-1058 — delivery-evidence repair attempts on open manual-merge PRs. */
+  readonly evidenceRepairs?: readonly SupervisorEvidenceRepair[];
   /** Structural execution-boundary failures that must be diagnosed before retry. */
   readonly structuralFailures?: readonly SupervisorStructuralFailure[];
   /**
@@ -157,6 +159,15 @@ export interface SupervisorManualMergeGate {
   readonly action: string;
   readonly detail: string;
   readonly source: string;
+}
+
+/** FIX-1058 — a delivery-evidence repair attempt on a green manual-merge PR. */
+export interface SupervisorEvidenceRepair {
+  readonly prNumber: number;
+  readonly storyId: string;
+  readonly agent: string;
+  readonly outcome: "started" | "committed" | "failed";
+  readonly ts: number;
 }
 
 /** A non-ordinary cycle failure that points to runner/worktree/gate structure. */

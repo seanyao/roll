@@ -289,6 +289,61 @@ describe("supervisorCommand", () => {
     expect(JSON.stringify(json.runbook.next)).not.toContain("FIX-103\"");
   });
 
+  it("FIX-1058: a green manual-merge PR blocked only by missing evidence stays a manual merge gate", () => {
+    const cwd = project(`# Backlog
+
+| ID | Description | Status |
+| --- | --- | --- |
+| FIX-1057 | reconciliation fix | 📋 Todo |
+| US-2 | next story | 📋 Todo |
+`, {
+      events: [
+        JSON.stringify({ type: "pr:open", prNumber: 1116, storyId: "FIX-1057", ts: 1 }),
+        JSON.stringify({ type: "cycle:start", cycleId: "C1", storyId: "FIX-1057", agent: "kimi", model: "m", ts: 2 }),
+        JSON.stringify({ type: "pair:score", cycleId: "C1", peer: "pi", score: 9, verdict: "good", cost: 0, stage: "score", ts: 3 }),
+        JSON.stringify({ type: "attest:gate", cycleId: "C1", verdict: "skipped", reasons: ["no fresh acceptance report"], ts: 4 }),
+      ],
+    });
+    const fakeBin = installFakeGh(cwd, {
+      number: 1116,
+      headRefName: "loop/FIX-1057",
+      title: "FIX-1057",
+      body: "loop cycle C1 — FIX-1057\\n\\n[roll:manual-merge]",
+    });
+    const json = withPath(fakeBin, () => JSON.parse(run(cwd, ["next", "--json"]).out));
+    expect(json.next.kind).toBe("manual_merge_gate");
+    expect(json.next.storyId).toBe("FIX-1057");
+    expect(json.manualMerge).toContain("PR #1116:FIX-1057:manual_merge_required");
+  });
+
+  it("FIX-1058: after evidence repair, supervisor next reports merge_ready for the same PR", () => {
+    const cwd = project(`# Backlog
+
+| ID | Description | Status |
+| --- | --- | --- |
+| FIX-1057 | reconciliation fix | 📋 Todo |
+| US-2 | next story | 📋 Todo |
+`, {
+      events: [
+        JSON.stringify({ type: "pr:open", prNumber: 1116, storyId: "FIX-1057", ts: 1 }),
+        JSON.stringify({ type: "cycle:start", cycleId: "C1", storyId: "FIX-1057", agent: "kimi", model: "m", ts: 2 }),
+        JSON.stringify({ type: "pair:score", cycleId: "C1", peer: "pi", score: 9, verdict: "good", cost: 0, stage: "score", ts: 3 }),
+        JSON.stringify({ type: "attest:gate", cycleId: "C1", verdict: "skipped", reasons: ["no fresh acceptance report"], ts: 4 }),
+        JSON.stringify({ type: "evidence:repair", prNumber: 1116, storyId: "FIX-1057", agent: "delta", outcome: "committed", ts: 5 }),
+      ],
+    });
+    const fakeBin = installFakeGh(cwd, {
+      number: 1116,
+      headRefName: "loop/FIX-1057",
+      title: "FIX-1057",
+      body: "loop cycle C1 — FIX-1057\\n\\n[roll:manual-merge]",
+    });
+    const json = withPath(fakeBin, () => JSON.parse(run(cwd, ["next", "--json"]).out));
+    expect(json.next.kind).toBe("merge_ready");
+    expect(json.next.storyId).toBe("FIX-1057");
+    expect(json.manualMerge).toContain("PR #1116:FIX-1057");
+  });
+
   it("US-V4-021: why diagnoses repeated failure before another run command", () => {
     const cwd = project(`# Backlog
 

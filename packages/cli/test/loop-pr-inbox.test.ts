@@ -6,6 +6,9 @@
  * gh/git/fs deps.
  */
 import { describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { PrTick } from "@roll/core";
 import {
   type PrInboxDeps,
@@ -337,5 +340,73 @@ describe("runPrInbox — stale → rebase circuit → recheck → merge", () => 
     await runPrInbox(deps);
     expect(rec.rebased).toEqual(["22"]);
     expect(rec.merged).toEqual([]);
+  });
+});
+
+describe("runPrInbox — FIX-1058 evidence-repair unblocks manual-merge PRs", () => {
+  let runtimeDir: string | undefined;
+
+  function withEvidenceRepair(storyId: string, prNumber: number, fn: () => Promise<void>): Promise<void> {
+    const d = mkdtempSync(join(tmpdir(), "roll-pr-inbox-"));
+    runtimeDir = d;
+    mkdirSync(join(d, "loop"), { recursive: true });
+    const previous = process.env["ROLL_PROJECT_RUNTIME_DIR"];
+    process.env["ROLL_PROJECT_RUNTIME_DIR"] = join(d, "loop");
+    writeFileSync(
+      join(d, "loop", "events.ndjson"),
+      JSON.stringify({ type: "evidence:repair", prNumber, storyId, agent: "delta", outcome: "committed", ts: 1 }) + "\n",
+    );
+    return fn().finally(() => {
+      if (previous === undefined) delete process.env["ROLL_PROJECT_RUNTIME_DIR"];
+      else process.env["ROLL_PROJECT_RUNTIME_DIR"] = previous;
+      rmSync(d, { recursive: true, force: true });
+    });
+  }
+
+  it("manual-merge PR with committed evidence:repair → merge", async () => {
+    await withEvidenceRepair("FIX-1057", 1116, async () => {
+      const { deps, rec } = harness({
+        listOpenPrs: listOf([{ number: 1116, headRefName: "loop/FIX-1057" }]),
+        viewPr: async () => ({ bot: "APPROVED", ciState: "success", mergeable: "CLEAN", manualMerge: true }),
+      });
+      await runPrInbox(deps);
+      expect(rec.merged).toEqual(["1116"]);
+      expect(rec.mergedRecorded).toEqual([{ num: "1116", headRef: "loop/FIX-1057" }]);
+    });
+  });
+
+  it("manual-merge PR without evidence:repair stays unmerged", async () => {
+    const d = mkdtempSync(join(tmpdir(), "roll-pr-inbox-"));
+    mkdirSync(join(d, "loop"), { recursive: true });
+    const previous = process.env["ROLL_PROJECT_RUNTIME_DIR"];
+    process.env["ROLL_PROJECT_RUNTIME_DIR"] = join(d, "loop");
+    try {
+      const { deps, rec } = harness({
+        listOpenPrs: listOf([{ number: 1117, headRefName: "loop/FIX-1057" }]),
+        viewPr: async () => ({ bot: "APPROVED", ciState: "success", mergeable: "CLEAN", manualMerge: true }),
+      });
+      await runPrInbox(deps);
+      expect(rec.merged).toEqual([]);
+    } finally {
+      if (previous === undefined) delete process.env["ROLL_PROJECT_RUNTIME_DIR"];
+      else process.env["ROLL_PROJECT_RUNTIME_DIR"] = previous;
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it("evidence:repair also unblocks a stale manual-merge PR after rebase", async () => {
+    await withEvidenceRepair("FIX-1057", 1116, async () => {
+      const { deps, rec } = harness({
+        listOpenPrs: listOf([{ number: 1116, headRefName: "loop/FIX-1057" }]),
+        viewPr: async () => ({ bot: "", ciState: "pending", mergeable: "BEHIND", manualMerge: true }),
+        rebaseStale: async (num) => {
+          rec.rebased.push(num);
+          return { bot: "", ciState: "success", mergeable: "CLEAN", manualMerge: true };
+        },
+      });
+      await runPrInbox(deps);
+      expect(rec.rebased).toEqual(["1116"]);
+      expect(rec.merged).toEqual(["1116"]);
+    });
   });
 });

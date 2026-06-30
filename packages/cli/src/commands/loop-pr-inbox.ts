@@ -51,8 +51,10 @@ import {
   selectPrAction,
   DEAD_TICK_NOTES,
   deadTickVerdict,
+  EventBus,
 } from "@roll/core";
 import { gh, ghAvailable, ghRepoSlug, prMerge, prReady, remoteUrl } from "@roll/infra";
+import type { RollEvent } from "@roll/spec";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { prHealSelf, prRebaseStale } from "./loop-pr-heal.js";
@@ -182,9 +184,16 @@ export async function runPrInbox(deps: PrInboxDeps): Promise<PrTick> {
     const facts = await deps.viewPr(slug, num);
     if (facts === undefined) continue; // bash: view failure → i++; continue.
 
+    // FIX-1058 — a green manual-merge PR whose delivery evidence has been repaired
+    // is no longer blocked by the manual-merge gate; let the normal merge-eligible
+    // path run. The repair event is the source of truth.
+    const prNum = Number(num);
+    const evidenceRepaired = facts.manualMerge === true && !Number.isNaN(prNum) && hasCommittedEvidenceRepair(prNum);
+    const effectiveManualMerge = evidenceRepaired ? false : facts.manualMerge;
+
     const promote = promoteDraftAction({
       isDraft: facts.isDraft === true,
-      manualMerge: facts.manualMerge === true,
+      manualMerge: effectiveManualMerge === true,
       botReview: facts.bot,
       ciState: facts.ciState,
       mergeable: facts.mergeable,
@@ -195,7 +204,7 @@ export async function runPrInbox(deps: PrInboxDeps): Promise<PrTick> {
       continue;
     }
 
-    const action = selectPrAction(facts);
+    const action = selectPrAction({ ...facts, manualMerge: effectiveManualMerge });
     switch (action.kind) {
       case "merge":
         await doMerge(deps, slug, num, headRef);
@@ -210,7 +219,10 @@ export async function runPrInbox(deps: PrInboxDeps): Promise<PrTick> {
         if (!deps.rebaseCircuitAllowed(num)) break; // tripped → ALERT written, skip.
         const rechecked = await deps.rebaseStale(num, headRef, slug);
         if (rechecked !== undefined) {
-          const re = rebaseRecheckAction(rechecked.ciState, rechecked.mergeable, rechecked.manualMerge === true);
+          // FIX-1058: honor the evidence-repair override even after a rebase;
+          // the PR body may still carry the manual-merge marker, but the repair
+          // event is the source of truth.
+          const re = rebaseRecheckAction(rechecked.ciState, rechecked.mergeable, effectiveManualMerge === true);
           if (re.kind === "merge") await doMerge(deps, slug, num, headRef);
         }
         break;
@@ -266,6 +278,26 @@ function statePath(): string {
 }
 function tickPath(): string {
   return join(runtimeDir(), "pr-tick.jsonl");
+}
+
+function eventsPath(): string {
+  return join(runtimeDir(), "events.ndjson");
+}
+
+/** FIX-1058 — whether a manual-merge PR has a committed evidence:repair event. */
+function hasCommittedEvidenceRepair(prNumber: number): boolean {
+  let events: RollEvent[] = [];
+  try {
+    events = new EventBus().readEvents(eventsPath());
+  } catch {
+    return false;
+  }
+  let best: Extract<RollEvent, { type: "evidence:repair" }> | undefined;
+  for (const ev of events) {
+    if (ev.type !== "evidence:repair" || ev.prNumber !== prNumber) continue;
+    if (best === undefined || ev.ts > best.ts) best = ev;
+  }
+  return best?.outcome === "committed";
 }
 
 function pal(): { yellow: string; nc: string } {

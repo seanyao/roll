@@ -40,6 +40,7 @@ import { loopLogCommand } from "./loop-log.js";
 import { loopGoalCommand } from "./loop-goal.js";
 import { loopGoCommand } from "./loop-go.js";
 import { loopRecoverCommand } from "./loop-recover.js";
+import { loopRepairEvidenceCommand } from "./loop-repair-evidence.js";
 import { loopEventsCommand } from "./loop-events.js";
 import { loopAttachRetired, loopBranchesRetired, loopMonitorRetired } from "./loop-retired.js";
 import { doctorCommand } from "./doctor.js";
@@ -363,6 +364,12 @@ export function registerAll(): void {
     // denies + explains when no alternate Builder exists. Never bypasses the
     // breaker silently — records a `goal:recovery` event either way.
     if (args[0] === "recover") return loopRecoverCommand(args.slice(1));
+    // `loop repair-evidence <story-id> [--apply]`: FIX-1058 recovery path for a
+    // green manual-merge PR blocked only by missing delivery evidence. Dry-run
+    // surfaces the original Builder, accepted Evaluator, last attest gate, and
+    // PR state; --apply records an `evidence:repair` event so supervisor and the
+    // PR loop can treat the PR as merge-ready.
+    if (args[0] === "repair-evidence") return loopRepairEvidenceCommand(args.slice(1));
     if (args[0] === "signals") return loopSignalsCommand(args.slice(1));
     // `loop log` / `loop events`: residual pure-read viewers (US-PORT-022) over
     // .roll/cycle-logs and the shared events ndjson. No bash fallback.

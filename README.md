@@ -75,7 +75,10 @@ Each card gets its own Builder and, when required by the execution profile, an
 independent Evaluator/Scorer selected from the current Agent roster. Repeated
 failure, zero TCR, missing PR/CI/evaluator evidence, parser failures, auth
 blocks, permission blocks, and `[roll:manual-merge]` PRs stop new scheduling and
-surface an owner action through `roll supervisor status/next/why`.
+surface an owner action through `roll supervisor status/next/why`. A green
+manual-merge PR that is blocked only by missing delivery evidence can be
+recovered with `roll loop repair-evidence <story-id> --apply`, which records an
+`evidence:repair` event and lets the PR loop merge it.
 
 ### Operating modes
 

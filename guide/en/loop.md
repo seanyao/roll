@@ -189,6 +189,9 @@ roll loop gc --keep-days 14   # Override retention (also: loop_gc.retention_days
 roll loop events      # Show last 20 cycle events
 roll loop events 50   # Show last 50 events
 
+roll loop repair-evidence <story-id>          # Dry-run: show recovery facts for a green manual-merge PR blocked by missing evidence
+roll loop repair-evidence <story-id> --apply  # Record an evidence:repair event so the PR can merge
+
 roll agent                           # Show scopes, roles, agent pool, and legacy inputs
 roll agent list                      # Show agents installed on this machine
 ```
@@ -364,7 +367,11 @@ PRs, and `.roll` meta state. Each card gets a fresh Builder and, when its
 execution profile requires it, an independent Evaluator/Scorer from the current
 Agent roster. Repeated failure, zero TCR, missing evidence, parser failure,
 auth/permission blocks, or `[roll:manual-merge]` PRs stop scheduling until the
-owner action shown by `roll supervisor status/next/why` is resolved.
+owner action shown by `roll supervisor status/next/why` is resolved. A green
+manual-merge PR that is blocked only by missing delivery evidence can be
+recovered with `roll loop repair-evidence <story-id> --apply`; this records an
+`evidence:repair` event so `roll supervisor next` reports `merge_ready` and the
+PR loop merges it.
 
 ## Cycle Role Visibility
 

@@ -141,3 +141,15 @@ self-score):
   normalizes these away, then still requires one complete, in-order
   `SCORE`/`VERDICT`/`RATIONALE` block (score 1..10, supported verdict). Prose
   that merely mentions the markers is still rejected.
+- **Repeated final blocks are tolerated when they agree**: some Evaluators repaint
+  their terminal (so the final block appears twice) or print the reply template and
+  their analysis before the real block. The parser isolates the **final usable
+  block** and accepts it when every valid `SCORE` line agrees and every valid
+  `VERDICT` line agrees — a redraw is a resolved answer. Genuinely conflicting
+  duplicate blocks (different scores or verdicts), template `<placeholder>` echoes,
+  out-of-range scores, and unsupported verdicts are still rejected.
+- **Rejections are observable, not generic**: when a reply is not accepted, the
+  cycle records a specific reason instead of a bare "unparseable". `roll cycle
+  <id> --roles` distinguishes an Evaluator that **returned score-like text but was
+  not accepted** (e.g. conflicting duplicate blocks, a missing field) from one that
+  **returned no score content** at all, with the precise reason on the role line.

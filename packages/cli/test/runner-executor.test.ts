@@ -3782,9 +3782,12 @@ describe("V4 fair pool — prior auth failures do not exclude peers", () => {
     expect(scoreFailure).toEqual(expect.objectContaining({
       peer: "pi",
       cause: "unparseable",
-      detail: "unparseable score protocol",
+      // FIX-1045: the detail now carries a specific, observable reason + category
+      // (the first attempt's SCORE/VERDICT/RATIONALE lines are out of order).
+      detail: expect.stringContaining("returned score-like text but not accepted"),
       stage: "score",
     }));
+    expect(scoreFailure?.detail).toContain("in-order");
     expect(scoreFailure?.artifactPath).toContain("pi.score.attempt-1.raw.txt");
     expect(readFileSync(scoreFailure?.artifactPath ?? "", "utf8")).toContain("VERDICT: good\nRATIONALE: clean\nSCORE: 8");
     expect(events).not.toContainEqual(expect.objectContaining({

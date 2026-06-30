@@ -20,7 +20,7 @@ import {
 } from "@roll/core";
 import { parseEventLine, type RollEvent } from "@roll/spec";
 import { peerReviewCost } from "@roll/core";
-import { buildDesignScorePrompt, buildPairScorePrompt, parsePairScoreOutput, runScorePairing, type PairEvent } from "../runner/pairing-gate.js";
+import { buildDesignScorePrompt, buildPairScorePrompt, diagnosePairScoreOutput, runScorePairing, type PairEvent } from "../runner/pairing-gate.js";
 import { formatEvaluationContractForScorer, parseEvaluationContract } from "../lib/evaluation-contract.js";
 import { cardArchiveDir } from "../lib/archive.js";
 import { projectAgent, realAgentEnv } from "./agent-list.js";
@@ -388,22 +388,26 @@ export async function pairScore(rest: string[], deps: PairScoreCmdDeps = default
       });
       return null;
     }
-    const parsed = parsePairScoreOutput(res.stdout);
-    if (parsed === null) {
+    const diag = diagnosePairScoreOutput(res.stdout);
+    if (!diag.ok) {
       const artifactPath = saveManualRawArtifact(peer, res.stdout);
       appendPairEvent({
         type: "pair:score-failure",
         cycleId,
         peer,
         cause: "unparseable",
-        detail: "unparseable score protocol",
+        // FIX-1045: specific reason + category instead of a generic message.
+        detail:
+          diag.category === "no-score-content"
+            ? `no score content returned: ${diag.reason}`
+            : `returned score-like text but not accepted: ${diag.reason}`,
         artifactPath,
         stage: scoreStage,
         ts: Date.now(),
       });
       return null;
     }
-    return { ...parsed, cost: peerReviewCost(peer, res.stdout) };
+    return { ...diag.score, cost: peerReviewCost(peer, res.stdout) };
   };
 
   // --worker pins the agent that actually delivered the cycle (codex

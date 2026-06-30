@@ -580,4 +580,49 @@ describe("cycle-role-summary", () => {
       expect(evaluators.some((r) => r.state === "accepted")).toBe(false);
     });
   });
+
+  describe("FIX-1045: role summary distinguishes returned-but-not-accepted from no-score-content", () => {
+    const C = "20260630-145639-99908";
+    const builder = "claude";
+    // The executor/pair commands now write a category-prefixed detail on a
+    // score-parse failure. The role summary must carry it through so a reader can
+    // tell "returned score-like text but not accepted" from "no score content".
+    const events: RollEvent[] = [
+      { type: "cycle:start", cycleId: C, storyId: "FIX-1045", agent: builder, model: "", ts: 1000 },
+      { type: "pair:selected", cycleId: C, workingAgent: builder, peer: "reasonix", stage: "score", ts: 2000 },
+      {
+        type: "pair:score-failure",
+        cycleId: C,
+        peer: "reasonix",
+        cause: "unparseable",
+        detail: "returned score-like text but not accepted: conflicting duplicate score blocks (SCORE 9 vs 3)",
+        stage: "score",
+        ts: 2005,
+      },
+      { type: "pair:selected", cycleId: C, workingAgent: builder, peer: "agy", stage: "score", ts: 2100 },
+      {
+        type: "pair:score-failure",
+        cycleId: C,
+        peer: "agy",
+        cause: "unparseable",
+        detail: "no score content returned: no SCORE/VERDICT/RATIONALE content returned",
+        stage: "score",
+        ts: 2105,
+      },
+    ];
+    const summary = buildCycleRoleSummary({ cycleId: C, events, peerDir: "", cycleLogDir: "" });
+
+    it("preserves the distinguishing detail on each failed evaluator role", () => {
+      const reasonix = summary.roles.find((r) => r.role === "evaluator" && r.agent === "reasonix");
+      const agy = summary.roles.find((r) => r.role === "evaluator" && r.agent === "agy");
+      expect(reasonix?.detail).toContain("returned score-like text but not accepted");
+      expect(agy?.detail).toContain("no score content returned");
+    });
+
+    it("renders both distinctions in the markdown summary", () => {
+      const md = renderCycleRoleSummaryMarkdown(summary);
+      expect(md).toContain("returned score-like text but not accepted");
+      expect(md).toContain("no score content returned");
+    });
+  });
 });

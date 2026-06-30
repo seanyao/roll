@@ -377,6 +377,16 @@ export interface PairScore {
   resize?: ResizeSignal;
 }
 
+/**
+ * FIX-1045: the outcome of parsing a peer's raw score reply. On failure it
+ * carries a SPECIFIC reason (never a generic "unparseable") plus a category that
+ * lets the role summary distinguish "returned score-like text but not accepted"
+ * (`rejected-score-like`) from "no score content returned" (`no-score-content`).
+ */
+export type ScoreParseDiagnosis =
+  | { ok: true; score: Omit<PairScore, "cost"> }
+  | { ok: false; category: "no-score-content" | "rejected-score-like"; reason: string };
+
 export interface RunScorePairingDeps {
   /** Installed agents (canonical). */
   installed: string[];
@@ -720,7 +730,14 @@ export function normalizeScoreStdout(stdout: string): string {
   return applyBackspaces(text)
     .replace(SCORE_ANSI_RE, "")
     // residual C0 control bytes (NUL..BS, VT, FF, SO..US, DEL) — keep TAB/LF/CR
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
+    // FIX-1045: normalize ALL line breaks to \n so the line scan sees every
+    // protocol line. A TUI soft-wraps a long rationale with a bare CR (U+000D)
+    // or a Unicode line/paragraph separator (U+2028/U+2029); the scan splits on
+    // \r?\n only, so without this the wrapped RATIONALE text is invisible and a
+    // valid final block is mis-rejected as "missing RATIONALE".
+    .replace(/\r\n/g, "\n")
+    .replace(/[\r\u2028\u2029]/g, "\n");
 }
 
 /** Strip leading bullet/markdown decoration (`**`, `•`, `-`, `#`, `>`, spaces)
@@ -732,46 +749,128 @@ function stripScoreLineDecoration(line: string): string {
   return line.replace(/^[\s>*#•‣◦⁃·▪⁃-]+/, "").replace(/[\s*]+$/, "");
 }
 
+/** A RATIONALE value that is only a `<placeholder>` echo of the reply template
+ *  (`RATIONALE: <one sentence>`) or empty — NOT a real rationale. Used to drop
+ *  template-echo blocks (kimi prints the contract template before its real reply)
+ *  so they never count as the final usable block. */
+function isPlaceholderRationale(text: string): boolean {
+  const t = text.trim();
+  return t === "" || /^<[^>]*>$/.test(t);
+}
+
+/**
+ * FIX-1045: the diagnostic core of score parsing. Returns the parsed block on
+ * success, or a precise failure reason (never a generic "unparseable") split
+ * into two observable categories so the role summary can tell apart:
+ *   - `no-score-content`     — the reply has NO SCORE/VERDICT/RATIONALE markers
+ *                              at all (e.g. agy returned prose / an empty TUI).
+ *   - `rejected-score-like`  — the reply DID return score-like text but it is not
+ *                              acceptable (template echo, conflicting duplicate
+ *                              blocks, missing field, out-of-range score,
+ *                              unsupported verdict, no in-order final block).
+ *
+ * Compatibility (the FIX-1045 gap): real agents emit the SAME final block more
+ * than once. reasonix repaints its TUI so the `SCORE/VERDICT/RATIONALE` block
+ * appears twice (the redraw); kimi prints the reply template, then its analysis,
+ * then the real block last. The old parser required EXACTLY ONE of each marker
+ * line, so both returned null even though a single final block could be cleanly
+ * isolated. We now isolate the FINAL in-order block and accept it WHEN the
+ * score-bearing blocks RESOLVE to one answer (every valid SCORE line agrees, every
+ * valid VERDICT line agrees) — a redraw is resolved, a genuine disagreement is not.
+ * Validation is NOT relaxed: arbitrary prose, template echoes, conflicting blocks,
+ * out-of-range scores, and unsupported verdicts still fail.
+ */
+export function diagnosePairScoreOutput(stdout: string): ScoreParseDiagnosis {
+  const normalized = normalizeScoreStdout(stdout);
+  const lines = normalized.split(/\r?\n/).map(stripScoreLineDecoration);
+
+  // Any line that even LOOKS like a protocol marker (incl. template echoes /
+  // out-of-range / bad verdicts). Distinguishes "returned score-like text but not
+  // accepted" from "no score content returned".
+  const hasScoreLike = lines.some((line) => /^(SCORE|VERDICT|RATIONALE):/i.test(line));
+  if (!hasScoreLike) {
+    return { ok: false, category: "no-score-content", reason: "no SCORE/VERDICT/RATIONALE content returned" };
+  }
+
+  // A SCORE line with a numeric value, regardless of range (used to tell an
+  // out-of-range score apart from a missing one).
+  const numericScoreLines = lines.filter((line) => /^SCORE:\s*\d{1,2}$/i.test(line));
+  const scoreMarks = lines
+    .map((line, index) => ({ index, match: /^SCORE:\s*(\d{1,2})$/i.exec(line) }))
+    .filter((entry): entry is { index: number; match: RegExpExecArray } => entry.match !== null)
+    .filter((entry) => {
+      const v = Number(entry.match[1]);
+      return Number.isInteger(v) && v >= 1 && v <= 10;
+    });
+  const verdictMarks = lines
+    .map((line, index) => ({ index, match: /^VERDICT:\s*(good|ok|regression)$/i.exec(line) }))
+    .filter((entry): entry is { index: number; match: RegExpExecArray } => entry.match !== null);
+  const rationaleMarks = lines
+    .map((line, index) => ({ index, match: /^RATIONALE:\s*(.+)$/i.exec(line) }))
+    .filter((entry): entry is { index: number; match: RegExpExecArray } => entry.match !== null)
+    .filter((entry) => !isPlaceholderRationale(entry.match[1]!));
+
+  if (scoreMarks.length === 0) {
+    return numericScoreLines.length > 0
+      ? { ok: false, category: "rejected-score-like", reason: "SCORE value out of range (must be 1..10)" }
+      : { ok: false, category: "rejected-score-like", reason: "no valid SCORE line (need `SCORE: <1..10>`)" };
+  }
+  if (verdictMarks.length === 0) {
+    return { ok: false, category: "rejected-score-like", reason: "no supported VERDICT line (need good|ok|regression)" };
+  }
+  if (rationaleMarks.length === 0) {
+    return { ok: false, category: "rejected-score-like", reason: "missing RATIONALE line (template/placeholder echoes do not count)" };
+  }
+
+  // Duplicate UNRESOLVED blocks: a redraw repeats the SAME answer (one distinct
+  // score, one distinct verdict) and is accepted; genuinely conflicting blocks
+  // (different scores or verdicts) are ambiguous and rejected.
+  const distinctScores = [...new Set(scoreMarks.map((m) => m.match[1]))];
+  const distinctVerdicts = [...new Set(verdictMarks.map((m) => m.match[1]!.toLowerCase()))];
+  if (distinctScores.length > 1) {
+    return { ok: false, category: "rejected-score-like", reason: `conflicting duplicate score blocks (SCORE ${distinctScores.join(" vs ")})` };
+  }
+  if (distinctVerdicts.length > 1) {
+    return { ok: false, category: "rejected-score-like", reason: `conflicting duplicate verdict blocks (VERDICT ${distinctVerdicts.join(" vs ")})` };
+  }
+
+  // Isolate the FINAL block: the last marker of each kind, in protocol order.
+  const sm = scoreMarks[scoreMarks.length - 1]!;
+  const vm = verdictMarks[verdictMarks.length - 1]!;
+  const rm = rationaleMarks[rationaleMarks.length - 1]!;
+  if (!(sm.index < vm.index && vm.index < rm.index)) {
+    return { ok: false, category: "rejected-score-like", reason: "no in-order final SCORE→VERDICT→RATIONALE block" };
+  }
+
+  // US-AGENT-041: capture an optional RESIZE/GAPS signal (scope-too-large). The
+  // low-score floor is applied later by `shouldResize`; here we just carry it.
+  const resize = parseResizeSignal(normalized);
+  return {
+    ok: true,
+    score: {
+      score: Number(sm.match[1]),
+      verdict: vm.match[1]!.toLowerCase() as PairScore["verdict"],
+      rationale: rm.match[1]!.trim(),
+      ...(resize !== null ? { resize } : {}),
+    },
+  };
+}
+
 /**
  * Parse a peer's score reply (the executor/manual command's stdout contract):
  * one `SCORE: <1..10>` line, one `VERDICT: good|ok|regression` line, one
  * `RATIONALE: <text>` line — anything missing/malformed → null (the round
  * treats it as no-score; a peer that can't follow the protocol never writes a note).
  *
- * FIX-1044: the input is NORMALIZED first ({@link normalizeScoreStdout}) so real
- * agent output (terminal overstrike, ANSI banners, JSONL wrappers, bullet
- * prefixes) reaches the strict scan as clean protocol lines. The validation
- * itself is unchanged — exactly one in-order block, score 1..10, supported verdict.
+ * Thin wrapper over {@link diagnosePairScoreOutput} (which carries the precise
+ * failure reason for observability). The input is NORMALIZED first
+ * ({@link normalizeScoreStdout}) so real agent output (terminal overstrike, ANSI
+ * banners, JSONL wrappers, bullet prefixes, TUI redraws, template echoes) reaches
+ * the strict scan as clean protocol lines; validation itself is never relaxed.
  */
 export function parsePairScoreOutput(stdout: string): Omit<PairScore, "cost"> | null {
-  const normalized = normalizeScoreStdout(stdout);
-  const lines = normalized.split(/\r?\n/).map(stripScoreLineDecoration);
-  const scoreLines = lines
-    .map((line, index) => ({ index, match: /^SCORE:\s*(\d{1,2})$/i.exec(line) }))
-    .filter((entry): entry is { index: number; match: RegExpExecArray } => entry.match !== null);
-  const verdictLines = lines
-    .map((line, index) => ({ index, match: /^VERDICT:\s*(good|ok|regression)$/i.exec(line) }))
-    .filter((entry): entry is { index: number; match: RegExpExecArray } => entry.match !== null);
-  const rationaleLines = lines
-    .map((line, index) => ({ index, match: /^RATIONALE:\s*(.+)$/i.exec(line) }))
-    .filter((entry): entry is { index: number; match: RegExpExecArray } => entry.match !== null);
-  if (scoreLines.length !== 1 || verdictLines.length !== 1 || rationaleLines.length !== 1) return null;
-  const sm = scoreLines[0]!;
-  const vm = verdictLines[0]!;
-  const rm = rationaleLines[0]!;
-  if (!(sm.index < vm.index && vm.index < rm.index)) return null;
-  if (sm.match[1] === undefined || vm.match[1] === undefined || rm.match[1] === undefined) return null;
-  const score = Number(sm.match[1]);
-  if (!Number.isInteger(score) || score < 1 || score > 10) return null;
-  // US-AGENT-041: capture an optional RESIZE/GAPS signal (scope-too-large). The
-  // low-score floor is applied later by `shouldResize`; here we just carry it.
-  const resize = parseResizeSignal(normalized);
-  return {
-    score,
-    verdict: vm.match[1].toLowerCase() as PairScore["verdict"],
-    rationale: rm.match[1].trim(),
-    ...(resize !== null ? { resize } : {}),
-  };
+  const d = diagnosePairScoreOutput(stdout);
+  return d.ok ? d.score : null;
 }
 
 // ── FIX-293: the peer-gate retry consult ─────────────────────────────────────

@@ -217,12 +217,11 @@ function recoveryEvent(
   reason: string,
   ts: number,
 ): Extract<RollEvent, { type: "goal:recovery" }> {
-  const storyId = decision.decision === "allowed" ? decision.storyId : decision.storyId;
   return {
     type: "goal:recovery",
     decision: decision.decision,
     actor,
-    ...(storyId !== undefined ? { storyId } : {}),
+    ...(decision.storyId !== undefined ? { storyId: decision.storyId } : {}),
     reason: decision.decision === "denied" ? decision.reason : reason,
     ...(stall.lastBuilder !== undefined ? { lastBuilder: stall.lastBuilder } : {}),
     ...(decision.decision === "allowed" ? { nextBuilder: decision.nextBuilder } : {}),

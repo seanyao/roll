@@ -106,8 +106,6 @@ import {
   explainExecutionProfile,
   applyExecutionPolicy,
   normalizeAgentConfig,
-  normalizeAgentScopeConfig,
-  resolveAgentScopeRole,
   assembleEvalReport,
   renderEvalReport,
   validateEvaluatorArtifact,
@@ -192,6 +190,7 @@ import { ACMAP_REMEDIATION_TIMEOUT_MS, acMapPath, autoAttachScreenshotToAcMap, b
 import { applyCorrectionAction } from "./correction-actuator.js";
 import { buildPairScorePrompt, buildReviewPrompt, diagnosePairScoreOutput, enabledPairingStages, retryPeerConsult, runPairing, runScorePairing, type PairEvent, type PairReview } from "./pairing-gate.js";
 import { realAgentEnv } from "../commands/agent-list.js";
+import { readScopedAgentLayer, resolveScopedStoryExecute } from "./scoped-route.js";
 import { attestCommand } from "../commands/attest.js";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
 import { formatEvaluationContractForScorer, parseEvaluationContract } from "../lib/evaluation-contract.js";
@@ -4661,36 +4660,10 @@ export async function bootstrapWorktreeSkills(
 
 // ── Node-backed Ports wiring (real infra) ─────────────────────────────────────
 
-function readScopedAgentLayer(path: string): { config: AgentScopeConfig; path: string } | null {
-  if (!existsSync(path)) return null;
-  const text = readFileSync(path, "utf8");
-  if (!text.includes("roll-agents/v1")) return null;
-  const parsed = normalizeAgentScopeConfig(text);
-  if (parsed.config === null || parsed.errors.length > 0) return null;
-  return { config: parsed.config, path };
-}
-
 function scopedStoryExecuteRoute(repoCwd: string): { agent: string; model: string } | null {
-  const rollHome = process.env["ROLL_HOME"] ?? join(homedir(), ".roll");
-  const layers = [
-    readScopedAgentLayer(join(rollHome, "agents.yaml")),
-    readScopedAgentLayer(join(repoCwd, ".roll", "agents.yaml")),
-  ].filter((layer): layer is { config: AgentScopeConfig; path: string } => layer !== null);
-  if (layers.length === 0) return null;
-
-  const installed = new Set(agentsInstalled(realAgentEnv()).map((name) => canonicalAgentName(name)));
-  const runtimeHealth = Object.fromEntries(
-    AGENT_REGISTRY_NAMES.map((agent) => [
-      agent,
-      installed.has(agent) ? { available: true } : { available: false, reason: "not-installed" },
-    ]),
-  ) as Partial<Record<AgentName, { available: boolean; reason?: string }>>;
-  const resolution = resolveAgentScopeRole({
-    scope: "story",
-    role: "execute",
-    layers,
-    runtimeHealth,
-  });
+  const scoped = resolveScopedStoryExecute(repoCwd);
+  if (scoped === null) return null;
+  const { resolution } = scoped;
   if (resolution.ok) {
     return {
       agent: resolution.resolved.agent,

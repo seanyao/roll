@@ -115,8 +115,12 @@ Machine Scope 写在 `~/.roll/agents.yaml`，声明本机 Agent Pool、能力和
 candidates 和 skipped runtime health。
 
 **公平候选池**：静态配置列出公平候选，不因历史 auth/VPN/account/network 事故永久排除
-支持的 agent。运行时探活只影响当前 resolution：不可用候选被记录为 skipped，静态池不被
-悄悄改写。
+支持的 agent。`story.execute`（Builder）默认池涵盖所有装好且具 `execute` 能力的 agent；
+`avoid: [supervise]` 按身份排除当前被指派为 `supervise` 的 Prime agent（先解析 Prime 再解析
+Builder），而不是排除所有具 `supervise` 能力的 agent。`least-recent` 读 `runs.jsonl` 的近期
+Builder 使用记录公平轮换，避免反复落到同一个 agent。运行时探活只影响当前 resolution：不可用
+候选被记录为 skipped，静态池不被悄悄改写。`roll supervisor route [--json]` 暴露这条 Builder
+路由 trace：候选池、skipped 候选及原因、策略、近期使用输入、最终 Builder 和 source 配置路径。
 
 **反规则**：不因历史表现自动改写角色绑定。不做失败后的静默跨 agent 重试。指标可以*建议*
 策略变更，但绝不绕过 human-on-the-loop。

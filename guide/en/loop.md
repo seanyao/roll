@@ -366,6 +366,109 @@ Agent roster. Repeated failure, zero TCR, missing evidence, parser failure,
 auth/permission blocks, or `[roll:manual-merge]` PRs stop scheduling until the
 owner action shown by `roll supervisor status/next/why` is resolved.
 
+## Cycle Role Visibility
+
+A v4 cycle is a multi-agent collaboration: a Builder writes the code, one or
+more Peer Reviewers re-check the risky diff, an Evaluator/Scorer judges the
+delivery, and the Attest Gate decides whether the result is admissible. The
+underlying truth lives in `events.ndjson` and the peer/evidence artifacts, but
+you should never have to grep those by hand to answer the first-run question:
+**who was Builder and who was Evaluator?**
+
+Three surfaces answer that question.
+
+### `roll cycle <id> --roles`
+
+```bash
+roll cycle <id> --roles          # human-readable execution cast for one cycle
+roll cycle <id> --roles --json   # the same facts as cycle-role-summary.v1 JSON
+```
+
+The roles view renders the full role chain — Builder, Peer Review,
+Evaluator / Score, and Gates — for a single cycle:
+
+```text
+# Cycle Role Summary — 20260629-112437-39253
+
+Story: US-TASK-001
+Execution profile: standard
+
+## Builder
+- pi / deepseek-v4-pro
+  - log: .roll/loop/cycle-logs/20260629-112437-39253.agent.log
+
+## Peer Review
+- reasonix: accepted verdict=refine findings=0
+- kimi: returned reviewed, no structured verdict accepted
+- codex: returned reviewed, no structured verdict accepted
+
+## Evaluator / Score
+- reasonix: accepted score=10 verdict=good
+- agy: failed unparseable (control characters before SCORE)
+- kimi: selected, no accepted score
+
+## Gates
+- peer: consulted
+- attest: produced
+```
+
+The command reads the cached summary artifact first and rebuilds from
+`events.ndjson` when it is missing or corrupt, so it works for both fresh and
+archived cycles.
+
+### The `summary.md` / `summary.json` artifacts
+
+Every cycle writes the same role cast to disk so a delivery report or a teammate
+can read it without re-running the CLI:
+
+```text
+.roll/loop/cycle-logs/<cycle-id>/summary.md     # the markdown shown above
+.roll/loop/cycle-logs/<cycle-id>/summary.json   # cycle-role-summary.v1, machine-readable
+```
+
+`summary.json` carries one `CycleRoleAttempt` per agent participation, each with
+its role, agent, model, session id, stage, state, and (when relevant) verdict,
+score, findings, parse-failure cause, and artifact path.
+
+### The Execution Cast report block
+
+The story attest report embeds an **Execution Cast** block (🎭) that projects
+the same summary into the delivery view, so the role chain travels with the
+evidence. When no role summary exists the block degrades gracefully to "Role
+summary unavailable". Accepted artifacts are linked directly — e.g. the
+`accepted evaluator artifact` link points at the scorer output the gate actually
+used.
+
+### Selected vs returned vs accepted
+
+The per-agent `state` is the key to reading the cast correctly. The states form
+a ladder, and **being selected or returning output is not the same as being
+accepted by the gate**:
+
+| State | Meaning |
+|-------|---------|
+| `selected` | The agent was chosen for the stage but produced no accepted result. |
+| `started` | The agent began the stage. |
+| `returned` | The reviewer returned output, but no structured verdict was accepted. |
+| `parsed` | Structured output was parsed. |
+| `accepted` | The gate accepted this attempt — the verdict/score that counts. |
+| `rejected` / `failed` | Rejected, errored, or produced unparseable output. |
+| `not_required` / `not_available` | The role was not needed (e.g. `standard` profile) or had no candidate. |
+
+**Only one evaluator/scorer is gate-accepted, even when several agents were
+consulted.** A cycle may select reasonix, kimi, and codex for review and ask
+reasonix and agy to score, but exactly one score is `accepted` and stamped into
+the Attest Gate. The others show as `returned`, `selected`, or `failed` — they
+are recorded for transparency, not because they all gate the delivery. When you
+need the verdict that actually decided the cycle, read the `accepted` row (and
+the `accepted evaluator` artifact link), not whichever agent happens to be
+listed first.
+
+When a reviewer or scorer produced unparseable output, its row is `failed` with
+a `cause` (e.g. `unparseable`) and a `raw artifact:` pointer to the captured
+attempt under `.roll/loop/peer/` — see
+[Troubleshooting unparseable score/review](../../docs/live-console.md#故障排查).
+
 ## Status Dashboard
 
 `roll loop status` prints a compact dashboard with per-cycle rows and daily rollup totals.

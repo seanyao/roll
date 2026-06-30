@@ -8,7 +8,7 @@
 |------|-------|----------|---------------|
 | AGENTS.md | Roll Project — Internal Conventions | convention | 2026-05-28 |
 | CONTRIBUTING.md | Contributing to Roll | convention | 2026-05-23 |
-| guide/en/ai-agents.md | Roll — AI Agent Support | guide | 2026-05-28 |
+| guide/en/ai-agents.md | Roll — AI Agent Support | guide | 2026-06-30 |
 | guide/en/acceptance-evidence.md | Acceptance Evidence — roll attest / Evidence lifecycle | guide | 2026-06-08 |
 | guide/en/changelog.md | Roll — Changelog | guide | 2026-05-21 |
 | guide/en/configuration.md | Roll — Configuration | guide | 2026-05-27 |
@@ -19,7 +19,7 @@
 | guide/en/installation.md | Roll — Installation & Updates | guide | 2026-05-19 |
 | guide/en/legacy-onboarding.md | Existing Codebase Onboarding | guide | 2026-05-20 |
 | guide/en/loop-driven-architecture.md | Loop-Driven Agent Architecture | guide | 2026-05-27 |
-| guide/en/loop.md | roll loop — Autonomous BACKLOG Executor | guide | 2026-05-28 |
+| guide/en/loop.md | roll loop — Autonomous BACKLOG Executor | guide | 2026-06-30 |
 | guide/en/methodology.md | Roll Engineering Methodology | guide | 2026-05-25 |
 | guide/en/migration-2.0.md | Migrating to Roll 2.0 | guide | 2026-05-19 |
 | guide/en/overview.md | Roll — Overview | guide | 2026-06-13 |
@@ -28,7 +28,7 @@
 | guide/en/patterns/replant-pattern.md | Replant Pattern | guide | 2026-05-19 |
 | guide/en/patterns/seed-pattern.md | Seed Pattern | guide | 2026-05-19 |
 | guide/en/pairing.md | Cross-Agent Pairing — heterogeneous second eyes | guide | 2026-06-08 |
-| guide/en/peer.md | roll peer — Cross-Agent Code Review | guide | 2026-05-27 |
+| guide/en/peer.md | roll peer — Cross-Agent Code Review | guide | 2026-06-30 |
 | guide/en/pr-review.md | Roll — PR Review | guide | 2026-05-19 |
 | guide/en/practices/engineering-common-sense.md | Roll Engineering Common Sense Checklist | guide | 2026-05-27 |
 | guide/en/pricing.md | Pricing — Cost Visibility & Price Snapshots | guide | 2026-05-24 |
@@ -38,7 +38,7 @@
 | guide/en/tools.md | Roll — Tools & Policy | guide | 2026-06-19 |
 | guide/en/testing.md | Roll — Testing Workflow | guide | 2026-05-23 |
 | guide/en/testing/quality-rubric.md | Test Quality Rubric | guide | 2026-05-23 |
-| guide/zh/ai-agents.md | Roll — AI Agent 支持 | guide | 2026-05-28 |
+| guide/zh/ai-agents.md | Roll — AI Agent 支持 | guide | 2026-06-30 |
 | guide/zh/changelog.md | Roll — Changelog (中文) | guide | 2026-05-21 |
 | guide/zh/configuration.md | Roll — 配置 | guide | 2026-05-27 |
 | guide/zh/conventions.md | Roll — 约定与 AGENTS.md | guide | 2026-05-19 |
@@ -49,7 +49,7 @@
 | guide/zh/legacy-onboarding.md | 已有代码库接入 Roll | guide | 2026-05-20 |
 | guide/zh/loop-driven-architecture.md | Loop 驱动的 Agent 架构 | guide | 2026-05-27 |
 | guide/zh/acceptance-evidence.md | 验收证据 — roll attest / 证据生命周期 | guide | 2026-06-08 |
-| guide/zh/loop.md | roll loop — 自主 BACKLOG 执行器 | guide | 2026-05-28 |
+| guide/zh/loop.md | roll loop — 自主 BACKLOG 执行器 | guide | 2026-06-30 |
 | guide/zh/methodology.md | Roll 工程方法论 | guide | 2026-05-25 |
 | guide/zh/migration-2.0.md | 迁移到 Roll 2.0 | guide | 2026-05-19 |
 | guide/zh/overview.md | Roll — 概述 | guide | 2026-06-13 |
@@ -59,7 +59,7 @@
 | guide/zh/patterns/replant-pattern.md | Replant Pattern（翻种路径）| guide | 2026-05-19 |
 | guide/zh/patterns/seed-pattern.md | Seed Pattern（播种路径）| guide | 2026-05-19 |
 | guide/zh/pairing.md | 跨 Agent 结对 — 异构的第二双眼睛 | guide | 2026-06-08 |
-| guide/zh/peer.md | roll peer — 跨 Agent 代码评审 | guide | 2026-05-27 |
+| guide/zh/peer.md | roll peer — 跨 Agent 代码评审 | guide | 2026-06-30 |
 | guide/zh/pr-review.md | Roll — PR 评审 | guide | 2026-05-19 |
 | guide/zh/pricing.md | Pricing — 成本可见性与价格快照 | guide | 2026-05-24 |
 | guide/zh/project-setup.md | Roll — 项目初始化 | guide | 2026-05-28 |

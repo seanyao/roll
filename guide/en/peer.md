@@ -60,6 +60,18 @@ The recorded fact includes reviewer agent, provider, command family, verdict,
 reason, findings, timeout/error state, duration, transcript path, and evidence
 path. Goal-mode final review emits the same fact fields on `goal:final_review`.
 
+### Parse failures and raw artifacts
+
+When a reviewer or scorer runs inside an autonomous cycle but its output is
+**unparseable** (e.g. control characters before the `SCORE` line, or a missing
+`VERDICT` line), the attempt is not silently dropped. The raw attempt is
+captured under `.roll/loop/peer/` and the agent's row in the cycle role cast
+shows `failed` with a `cause` (such as `unparseable`) and a `raw artifact:`
+pointer to that file. This keeps the failure auditable rather than invisible —
+see [Cycle Role Visibility](./loop.md#cycle-role-visibility) for how to read it,
+and [Troubleshooting unparseable score/review](../../docs/live-console.md#故障排查)
+for the recovery steps.
+
 ## External Reviewers vs Auxiliary Subagents
 
 `roll peer` is for external-provider reviewer CLIs. Codex-internal subagents are

@@ -319,6 +319,99 @@ manual-merge PR 和 `.roll` meta 状态。每张卡单独选择 fresh Builder；
 解析失败、auth/permission block 或 `[roll:manual-merge]` PR 都会停止继续调度，直到
 owner 处理 `roll supervisor status/next/why` 给出的行动。
 
+## Cycle 角色可观测
+
+一个 v4 cycle 是多 agent 协作：Builder 写代码，一个或多个 Peer Reviewer 复检
+有风险的 diff，Evaluator/Scorer 给交付打分，Attest Gate 决定结果是否可被采纳。
+底层真相在 `events.ndjson` 和 peer/证据产物里，但你不该靠手工 grep 才能回答首跑
+最关心的那个问题：**谁是 Builder，谁是 Evaluator？**
+
+有三个面回答这个问题。
+
+### `roll cycle <id> --roles`
+
+```bash
+roll cycle <id> --roles          # 单个 cycle 的人类可读执行阵容
+roll cycle <id> --roles --json   # 同样的事实，输出 cycle-role-summary.v1 JSON
+```
+
+roles 视图渲染单个 cycle 的完整角色链——Builder、Peer Review、
+Evaluator / Score、Gates：
+
+```text
+# Cycle Role Summary — 20260629-112437-39253
+
+Story: US-TASK-001
+Execution profile: standard
+
+## Builder
+- pi / deepseek-v4-pro
+  - log: .roll/loop/cycle-logs/20260629-112437-39253.agent.log
+
+## Peer Review
+- reasonix: accepted verdict=refine findings=0
+- kimi: returned reviewed, no structured verdict accepted
+- codex: returned reviewed, no structured verdict accepted
+
+## Evaluator / Score
+- reasonix: accepted score=10 verdict=good
+- agy: failed unparseable (control characters before SCORE)
+- kimi: selected, no accepted score
+
+## Gates
+- peer: consulted
+- attest: produced
+```
+
+命令先读缓存的 summary 产物，缺失或损坏时从 `events.ndjson` 重建，所以对新 cycle
+和归档 cycle 都能用。
+
+### `summary.md` / `summary.json` 产物
+
+每个 cycle 都把同一份角色阵容写到磁盘，让交付报告或同事不必重跑 CLI 就能读：
+
+```text
+.roll/loop/cycle-logs/<cycle-id>/summary.md     # 上面那份 markdown
+.roll/loop/cycle-logs/<cycle-id>/summary.json   # cycle-role-summary.v1，机器可读
+```
+
+`summary.json` 为每次 agent 参与记一条 `CycleRoleAttempt`，含角色、agent、model、
+session id、stage、state，以及（相关时）verdict、score、findings、解析失败原因和
+产物路径。
+
+### Execution Cast 报告块
+
+故事的 attest 报告内嵌一个 **Execution Cast**（执行阵容，🎭）块，把同一份 summary
+投影进交付视图，让角色链随证据一起流动。没有角色 summary 时该块优雅降级为
+"角色摘要不可用"。被采纳的产物会直接链接——例如 `accepted evaluator artifact`
+链接指向 gate 实际采用的那份 scorer 输出。
+
+### selected vs returned vs accepted
+
+每个 agent 的 `state` 是正确读阵容的关键。这些状态形成一条阶梯，
+**被选中或返回了输出，并不等于被 gate 采纳**：
+
+| 状态 | 含义 |
+|------|------|
+| `selected` | agent 被选中参与该 stage，但没有产出被采纳的结果。 |
+| `started` | agent 开始了该 stage。 |
+| `returned` | reviewer 返回了输出，但没有结构化 verdict 被采纳。 |
+| `parsed` | 结构化输出被解析。 |
+| `accepted` | gate 采纳了这次尝试——这才是算数的 verdict/score。 |
+| `rejected` / `failed` | 被拒、出错或输出无法解析。 |
+| `not_required` / `not_available` | 该角色不需要（如 `standard` 剖面）或无候选。 |
+
+**即便咨询了多个 agent，也只有一位 evaluator/scorer 会被 gate 采纳。** 一个 cycle
+可能为评审选了 reasonix、kimi、codex，让 reasonix 和 agy 打分，但恰好只有一个 score
+是 `accepted` 并盖进 Attest Gate。其余显示为 `returned`、`selected` 或 `failed`——
+它们为透明而记录，并非都对交付把关。要找真正决定该 cycle 的 verdict，读 `accepted`
+那一行（以及 `accepted evaluator` 产物链接），而不是恰好排在最前的那个 agent。
+
+当某个 reviewer 或 scorer 输出无法解析时，它那一行是 `failed`，带一个 `cause`
+（如 `unparseable`）和一个 `raw artifact:` 指针，指向 `.roll/loop/peer/` 下捕获的
+那次尝试——见
+[排障：无法解析的 score/review](../../docs/live-console.md#故障排查)。
+
 ## Status Dashboard（状态仪表盘）
 
 `roll loop status` 输出一个紧凑的仪表盘，包含每个 cycle 的行记录和每日汇总。

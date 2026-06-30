@@ -5,6 +5,10 @@
 ### 自动化流水线
 
 - **Reasonix builder 可以在 linked worktree 里正常提交了**：loop 现在会给每个 Reasonix cycle 生成临时本地 sandbox 配置，把已计算出的 git common dir 写入允许写目录；不需要永久放宽 `~/.reasonix/config.toml`，也不会把 API key 写进 argv 或配置文件。(FIX-1036) `[loop-engine]`
+- **Loop 交付不会再误报完成**：PR、CI 或验收链路缺证时，Roll 会停在可恢复状态，不再把没真正上线的卡记成已交付。(FIX-1032a, FIX-1032c, FIX-1039) `[loop-engine]`
+- **Scoped `roll loop go` 更守边界**：单卡运行不会被旧计数或定时 tick 带到下一张卡，适合人工盯一张关键修复。(FIX-1034, FIX-1040) `[goal-mode]`
+- **Agent auth 诊断更准**：日志里的 `403` 卡号不再被误判成登录失效，真正的鉴权失败仍会明确阻塞。(FIX-1033) `[loop-engine]`
+- **发版前检查更可信**：`roll release --json` 和一致性闸现在会真实读取待发布内容，旧交付缓存不会再误拦或误放。(FIX-1030, FIX-1041) `[release-management]`
 
 ### 新功能
 
@@ -13,6 +17,8 @@
 ### 可见性
 
 - 验收报告和故事档案开始显示执行阵容（Execution Cast），每位 Builder、Peer Reviewer、Evaluator 和验收门禁在交付页面上一眼可见（US-OBS-034）`[loop]`
+- **Cycle 角色链可直接查看**：`roll cycle --roles` 会展示 Builder、Peer Reviewer、Evaluator 和采信结果，不用再翻事件流。(US-OBS-033) `[loop]`
+- **评审解析失败不再消失**：有返回但格式不对的 reviewer/scorer 会显示原因和原始产物位置。(US-OBS-035) `[loop]`
 
 ## v4.629.2 — 2026-06-29
 

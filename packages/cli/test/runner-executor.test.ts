@@ -565,6 +565,17 @@ describe("buildRunRow — v2 runs.jsonl shape", () => {
     expect(row["ts"]).toBe("2026-06-05T19:34:42Z"); // duration/time still present
   });
 
+  it("FIX-1050: an agy cycle records an agent-specific no-usage reason on the runs row", () => {
+    const row = buildRunRow(
+      { kind: "append_run", status: "failed", outcome: "failed", cycleId: CTX.cycleId },
+      { ...CTX, agent: "agy", model: "gemini-2.5-pro", usageUnknownReason: "agy_stdout_no_usage" },
+      1780688082,
+    );
+    expect(row["usage_unknown"]).toBe(true);
+    expect(row["usage_unknown_reason"]).toBe("agy_stdout_no_usage");
+    expect(row["model"]).toBe("gemini-2.5-pro");
+  });
+
   it("FIX-290 AC2: model falls back to the agent id when the router left model empty (claude default)", () => {
     const row = buildRunRow(
       { kind: "append_run", status: "idle", outcome: "idle_no_work", cycleId: CTX.cycleId },
@@ -1893,19 +1904,23 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r.ctxPatch?.cost).toBeUndefined();
   });
 
-  // FIX-249 — the two missing adapter lanes: stdout-scrape agents that print a
-  // usage footer (the generic-scrape lane, kept for reasonix) and pi (no stdout
-  // usage at all — recovered from its session store, scoped to the cycle worktree
-  // + window).
-  it("FIX-249: spawn_agent scrapes a stdout-footer agent (reasonix/generic) → ctxPatch.cost", async () => {
-    const stdout = ["model: gpt-5.2", "input tokens: 1,200", "output tokens: 300", "total: 1,500", "cost: $0.07"].join("\n");
+  // FIX-249 / FIX-1050 — the stdout-scrape lane for reasonix parses its
+  // distinctive "tok · in X · out Y · ¥Z" footer (the generic-scrape fallback
+  // still covers unknown agents).
+  it("FIX-1050: spawn_agent scrapes a reasonix stdout footer → ctxPatch.cost", async () => {
+    const stdout = [
+      "some build output",
+      "  · 166604 tok · in 165907 (165760 cached / 147 new) · out 697 (14 reasoning) · ¥0.0049",
+    ].join("\n");
     const { ports } = fakePorts({
       agentSpawn: vi.fn(async () => ({ stdout, stderr: "", exitCode: 0, timedOut: false })),
     });
     const r = await executeCommand({ kind: "spawn_agent", agent: "reasonix", attempt: 1 }, ports, { ...CTX, agent: "reasonix" });
-    expect(r.ctxPatch?.cost?.tokensIn).toBe(1200);
-    expect(r.ctxPatch?.cost?.tokensOut).toBe(300);
-    expect(r.ctxPatch?.cost?.model).toBe("gpt-5.2");
+    expect(r.ctxPatch?.cost?.tokensIn).toBe(165907);
+    expect(r.ctxPatch?.cost?.tokensOut).toBe(697);
+    expect(r.ctxPatch?.cost?.model).toBe("deepseek-flash");
+    expect(r.ctxPatch?.cost?.currency).toBe("CNY");
+    expect(r.ctxPatch?.cost?.estimatedCost).toBeCloseTo(0.0049, 6);
   });
 
   it("FIX-249: spawn_agent recovers pi usage from the session store (cwd-scoped)", async () => {

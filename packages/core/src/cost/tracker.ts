@@ -43,6 +43,10 @@ export interface AgentUsage {
   output_tokens: number;
   /** Present on stdout-scrape adapters (computed list cost). */
   cost_list_usd?: number;
+  /** FIX-1050: optional native currency override for adapters that know the
+   *  currency of their parsed cost (e.g. reasonix ¥ footer). When absent,
+   *  toCycleCost falls back to the model's configured currency. */
+  currency?: string;
   /** Present on session-file adapters (pi/kimi cache split). */
   cache_creation_tokens?: number;
   cache_read_tokens?: number;
@@ -54,7 +58,7 @@ export interface AgentUsage {
 /** An adapter: parse stdout lines → usage, or null when unrecognised. */
 export type Extractor = (lines: readonly string[]) => AgentUsage | null;
 
-// ── Stdout-scrape adapters (openai / gemini / kimi / qwen) ───────────────────
+// ── Stdout-scrape adapters (openai / gemini / kimi / qwen / reasonix / agy) ──
 
 // Regexes ported verbatim from the adapter modules. The "openai" TOTAL flavour
 // also accepts "tokens used"; the generic flavour (kimi + the generic fallback)
@@ -65,6 +69,61 @@ const OUTPUT_RE = /output(?:\s+tokens)?\s*[:=]\s*([\d,]+)/i;
 const COST_RE = /cost\s*[:=]?\s*\$?\s*([\d.]+)\s*(?:usd)?/i;
 const TOTAL_RE_OPENAI = /(?:tokens\s+used|total)\s*[:=]\s*([\d,]+)/i;
 const TOTAL_RE_GENERIC = /total(?:\s+tokens)?\s*[:=]\s*([\d,]+)/i;
+
+// FIX-1050: reasonix footer uses a distinctive "tok · in X · out Y · ¥Z" shape
+// (e.g. "· 166604 tok · in 165907 (165760 cached / 147 new) · out 697
+// (14 reasoning) · ¥0.0049"). The total/in/out/cost figures are all on one line.
+const REASONIX_FOOTER_RE =
+  /(?:^|\s)[·•]\s*(\d+)\s+tok\b.*\bin\s+(\d+).*\bout\s+(\d+).*¥\s*([\d.]+)/i;
+
+/** FIX-1050: parse the reasonix usage footer when present; otherwise null.
+ *  The model defaults to the agent's configured default (deepseek-flash) because
+ *  the footer only reports token/cost figures, not the model name.
+ *
+ *  reasonix emits a running footer after every step; the LAST footer in the
+ *  stdout is the cycle total, so we scan all lines and return the final match. */
+export function reasonixExtract(lines: readonly string[]): AgentUsage | null {
+  if (lines.length === 0) return null;
+  const defaultModel = "deepseek-flash";
+  let last: AgentUsage | null = null;
+  for (const raw of lines) {
+    const line = raw.replace(/\n+$/, "");
+    const m = REASONIX_FOOTER_RE.exec(line);
+    if (m === null || m[1] === undefined || m[2] === undefined || m[3] === undefined || m[4] === undefined)
+      continue;
+    const total = toInt(m[1]);
+    const tin = toInt(m[2]);
+    const tout = toInt(m[3]);
+    const cost = Number.parseFloat(m[4]);
+    if (!Number.isFinite(cost)) continue;
+    if (tin + tout === 0 && total > 0) {
+      // No per-direction split — attribute the whole total to input.
+      last = {
+        model: defaultModel,
+        input_tokens: total,
+        output_tokens: 0,
+        cost_list_usd: cost,
+        currency: "CNY",
+        duration_ms: null,
+      };
+    } else {
+      last = {
+        model: defaultModel,
+        input_tokens: tin,
+        output_tokens: tout,
+        cost_list_usd: cost,
+        currency: "CNY",
+        duration_ms: null,
+      };
+    }
+  }
+  return last;
+}
+
+/** FIX-1050: agy/gemini `-p` stdout carries no parseable usage footer. Register
+ *  an explicit always-null extractor so the runner can record an agent-specific
+ *  no-usage reason instead of a generic "unknown". */
+export const agyExtract: Extractor = (): AgentUsage | null => null;
 
 /** Parse a token count tolerating thousands separators (python `_to_int`). */
 function toInt(s: string): number {
@@ -156,12 +215,15 @@ export const kimiExtract: Extractor = makeStdoutExtractor(
 /** pi `extract()` stub: text-mode stdout carries no usage → always null. */
 export const piExtract: Extractor = (): AgentUsage | null => null;
 
-/** The stdout-scrape registry (pi maps to its always-null stub). `claude-stream`
- *  is harness-only — claude is not a pool agent but powers harness cost tracking. */
+/** The stdout-scrape registry (pi/agy map to their always-null stubs).
+ *  `claude-stream` is harness-only — claude is not a pool agent but powers
+ *  harness cost tracking. */
 export const REGISTRY: Record<string, Extractor> = {
   "claude-stream": sumClaudeStream,
   pi: piExtract,
   kimi: kimiExtract,
+  reasonix: reasonixExtract,
+  agy: agyExtract,
   generic: makeStdoutExtractor({ defaultModel: "generic", totalKind: "generic" }),
 };
 
@@ -449,7 +511,9 @@ export function toCycleCost(usage: AgentUsage, facts: CycleFacts): CycleCost {
   const reverts = Math.max(0, Math.trunc(facts.revertCount));
   const effectiveCost = estimatedCost * (reverts + 1);
   // FIX-361: currency from model's price config (¥ for domestic models, $ for USD-billed).
-  const cur = cycleCurrency(usage.model);
+  // FIX-1050: adapters that parsed an explicit currency (e.g. reasonix ¥ footer)
+  // override the model-configured currency so the ledger shows the right unit.
+  const cur = usage.currency ?? cycleCurrency(usage.model);
   return {
     cycleId: facts.cycleId,
     agent: facts.agent,

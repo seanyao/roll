@@ -198,6 +198,7 @@ export function cyclesLedgerJson(rows: CycleLedgerRow[], sinceLabel: string, now
       tokens: tokensTotal(r.tokens),
       cost: r.cost,
       duration: r.duration,
+      ...(r.usageUnknownReason !== undefined ? { usageUnknownReason: r.usageUnknownReason } : {}),
     })),
   };
 }

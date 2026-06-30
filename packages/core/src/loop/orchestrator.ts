@@ -706,6 +706,10 @@ export interface CycleContext {
   prLoopHealthy?: boolean;
   /** FIX-1037: runner observed dirty main checkout before/after builder spawn. */
   mainDirty?: boolean;
+  /** FIX-1050: agent-specific reason why usage could not be parsed (e.g.
+   *  `agy_stdout_no_usage`). Recorded on the runs row so debug/detail output can
+   *  distinguish parser failure from genuinely missing agent usage output. */
+  usageUnknownReason?: string;
 }
 
 /** Minimal context for building a terminal cycle:end event + runs row. */

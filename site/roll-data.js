@@ -36,9 +36,9 @@ window.RollData = (function () {
       footerTag: "Agents, roll out.",
     },
     HERO: {
-      version: "v4 Supervisor execution",
+      version: "v4 Prime Agent execution",
       tagline: "It just works.",
-      sub2: "Write a goal. Route it through Supervisor-led Story execution.",
+      sub2: "Write a goal. Route it through Prime Agent-led Story execution.",
       sub: "Roll diagnoses the project, turns intent into Stories, chooses an execution profile, routes Planner / Builder / Evaluator roles to available rigs, opens PRs, waits for green CI, and records story-scoped evidence. You stay on the loop, not in it.",
       install: "npm install -g @seanyao/roll",
       ctas: [
@@ -82,17 +82,17 @@ window.RollData = (function () {
       quote: "Roll gives every AI tool the same work standards, so output quality is consistent — regardless of who's driving.",
     },
     HOW: {
-      label: "Supervisor execution",
-      title: "Humans set goals.\nSupervisor routes Story execution.",
+      label: "Prime Agent execution",
+      title: "Humans set goals.\nPrime Agent routes Story execution.",
       sub: "Roll separates project coordination from Story delivery. You sign off on what to ship and when; the system chooses profiles, roles, and evidence lanes.",
       layers: [
         { glyph: "human", name: "Human", sub: "On the loop, not in it.",
           body: "You set goals in Backlog, review PRs that the system opens, and approve releases. The system never ships to production without human sign-off.",
           owns: ["Backlog", "Release approval", "Architectural calls"] },
-        { glyph: "loop",  name: "Supervisor Agent",  sub: "Project-level coordination.",
+        { glyph: "loop",  name: "Prime Agent",  sub: "Project-level coordination.",
           body: "Reads backlog, merge truth, route profile, open PRs and repeated failures. Advises execution profiles and escalates to the owner without implementing a Story.",
           owns: ["Profile advice", "Route advice", "Escalation"] },
-        { glyph: "dream", name: "Story Execution Unit", sub: "standard · verified · planned",
+        { glyph: "dream", name: "Delta Unit", sub: "standard · verified · planned",
           body: "Delivers one Story through Builder, Builder→Evaluator, or Planner→Builder→Evaluator. Roles invoke existing skills and produce story-scoped evidence.",
           owns: ["Planner / Builder / Evaluator", "TCR + CI", "Attest evidence"] },
       ],
@@ -112,7 +112,7 @@ window.RollData = (function () {
         { name: "Existing codebase onboarding plan", desc: "Existing codebase adoption remains plan-first: diagnose without destructive migration, review, then roll init --apply shows an operation checkpoint before writing Roll metadata; roll next continues after apply.", badges: ["new", "highlight"] },
       ]},
       { id: "autonomous", title: "Autonomous Execution", blurb: "Run while you sleep.", features: [
-        { name: "roll loop on",        mono: true, desc: "Supervisor picks Stories from Backlog and runs isolated Story Execution Units.", badges: ["core"] },
+        { name: "roll loop on",        mono: true, desc: "Prime Agent picks Stories from Backlog and runs isolated Delta Units.", badges: ["core"] },
         { name: "roll loop go",        mono: true, desc: "Manual goal mode for a scoped backlog run; scheduled ticks yield while the goal lock is held.", badges: ["new", "highlight"] },
         { name: "roll loop status",    mono: true, desc: "Scheduler snapshot for loop / pr / dream service status, queues, alerts and recent runs.", badges: ["core"] },
         { name: "tmux attach -t roll-loop-<slug>", mono: true, desc: "Attach to the live tmux session and watch AI work in real time.", badges: ["highlight"] },
@@ -138,7 +138,7 @@ window.RollData = (function () {
       ]},
       { id: "observability", title: "Observability", blurb: "Always know what it's doing.", features: [
         { name: "roll status",     mono: true, desc: "Verdict-first truth summary — LOOP · CYCLE · RELEASE · STORY with attest coverage — then convention sync health.", badges: ["core"] },
-        { name: "roll loop watch", mono: true, desc: "CLI-first live ActivitySignal stream for the current cycle. Full Supervisor Live Console and multi-role board are next work.", badges: ["new"] },
+        { name: "roll loop watch", mono: true, desc: "CLI-first live ActivitySignal stream for the current cycle. Full Prime Agent Live Console and multi-role board are next work.", badges: ["new"] },
         { name: "roll loop runs",  mono: true, desc: "Per-cycle TerminalOutcome history with TCR count and duration.", badges: [] },
         { name: "roll loop story", mono: true, desc: "Per-story rollup: cycles, span, duration, tokens, cost, PRs.", badges: [] },
         { name: "roll loop alert", mono: true, desc: "View, acknowledge and clear loop alerts from one place.", badges: [] },
@@ -206,7 +206,7 @@ window.RollData = (function () {
       title: "Read the manual.",
       sub: "Start with Overview if you've never run roll before; Migration 2.0 if you're upgrading from 1.x.",
       tiles: [
-        { name: "Overview",         path: "guide/en/overview.md",          desc: "Quick start, Supervisor execution model, onboarding samples, feature list." },
+        { name: "Overview",         path: "guide/en/overview.md",          desc: "Quick start, Prime Agent execution model, onboarding samples, feature list." },
         { name: "Methodology",      path: "guide/en/methodology.md",       desc: "Markdown-as-code, INVEST stories, two-tier .roll/backlog.md index." },
         { name: "Loop",             path: "guide/en/loop.md",              desc: "Scheduling, subcommands, tmux visibility, PR inbox." },
         { name: "Dream",            path: "guide/en/dream.md",             desc: "Nightly code health scan and REFACTOR generation." },
@@ -241,9 +241,9 @@ window.RollData = (function () {
       footerTag: "Agents, roll out.",
     },
     HERO: {
-      version: "v4 Supervisor execution",
+      version: "v4 Prime Agent execution",
       tagline: "It just works.",
-      sub2: "把目标写下来。交给 Supervisor-led Story 执行。",
+      sub2: "把目标写下来。交给 Prime Agent-led Story 执行。",
       sub: "Roll 诊断项目、把意图变成 Stories、选择执行剖面，把 Planner / Builder / Evaluator 角色路由到可用 rig，开 PR、等 CI 绿，并记录按 Story 收口的证据。你掌舵，不掌桨。",
       install: "npm install -g @seanyao/roll",
       ctas: [
@@ -288,17 +288,17 @@ window.RollData = (function () {
       quote: "Roll 给每一个 AI 工具同样的工作标准,所以无论谁在驾驶,产出质量都一致。",
     },
     HOW: {
-      label: "Supervisor 执行",
-      title: "人定目标。\nSupervisor 路由 Story 执行。",
+      label: "Prime Agent 执行",
+      title: "人定目标。\nPrime Agent 路由 Story 执行。",
       sub: "Roll 把项目协调与 Story 交付分开。「发什么、什么时候发」你拍板；系统选择剖面、角色和证据通道。",
       layers: [
         { glyph: "human", name: "Human", sub: "掌舵,不掌桨。",
           body: "你在 Backlog 写目标、审系统开出的 PR、批准发布。没有人点头之前,任何东西都不会上生产。",
           owns: ["Backlog", "发布批准", "架构决策"] },
-        { glyph: "loop",  name: "Supervisor Agent",  sub: "项目级协调。",
+        { glyph: "loop",  name: "Prime Agent",  sub: "项目级协调。",
           body: "读取 backlog、merge truth、route profile、open PR 与重复失败。建议执行剖面和路由，并升级给 owner；不实现具体 Story。",
           owns: ["剖面建议", "路由建议", "升级"] },
-        { glyph: "dream", name: "Story Execution Unit", sub: "standard · verified · planned",
+        { glyph: "dream", name: "Delta Unit", sub: "standard · verified · planned",
           body: "一张 Story 通过 Builder、Builder→Evaluator 或 Planner→Builder→Evaluator 交付。角色调用既有 skills，并产出按 Story 收口的证据。",
           owns: ["Planner / Builder / Evaluator", "TCR + CI", "Attest 证据"] },
       ],
@@ -318,7 +318,7 @@ window.RollData = (function () {
         { name: "已有代码库接入计划", desc: "现有代码库仍然先出计划:无破坏诊断、review,再由 roll init --apply 展示操作检查点并等待确认,然后写入 Roll metadata。", badges: ["new", "highlight"] },
       ]},
       { id: "autonomous", title: "自主执行", blurb: "你睡觉时它在跑。", features: [
-        { name: "roll loop on",        mono: true, desc: "Supervisor 从 Backlog 领取 Story，并运行隔离的 Story Execution Unit。", badges: ["core"] },
+        { name: "roll loop on",        mono: true, desc: "Prime Agent 从 Backlog 领取 Story，并运行隔离的 Delta Unit。", badges: ["core"] },
         { name: "roll loop go",        mono: true, desc: "手动 goal mode，用于限定范围的 backlog 连跑；持有 goal lock 时定时 tick 会让路。", badges: ["new", "highlight"] },
         { name: "roll loop status",    mono: true, desc: "调度快照:loop / pr / dream 服务状态、队列、告警、最近执行。", badges: ["core"] },
         { name: "tmux attach -t roll-loop-<slug>", mono: true, desc: "接入实时 tmux 会话,观看 AI 现场工作。", badges: ["highlight"] },
@@ -344,7 +344,7 @@ window.RollData = (function () {
       ]},
       { id: "observability", title: "可观测性", blurb: "永远知道它在干什么。", features: [
         { name: "roll status",     mono: true, desc: "判定优先的真相摘要——LOOP · CYCLE · RELEASE · STORY，含 attest 验收覆盖率——其后是约定同步健康。", badges: ["core"] },
-        { name: "roll loop watch", mono: true, desc: "当前 cycle 的 CLI-first 实时 ActivitySignal 流。完整 Supervisor Live Console 与多角色看板是下一阶段工作。", badges: ["new"] },
+        { name: "roll loop watch", mono: true, desc: "当前 cycle 的 CLI-first 实时 ActivitySignal 流。完整 Prime Agent Live Console 与多角色看板是下一阶段工作。", badges: ["new"] },
         { name: "roll loop runs",  mono: true, desc: "每轮 TerminalOutcome 历史,含 TCR 次数和耗时。", badges: [] },
         { name: "roll loop story", mono: true, desc: "按故事汇总:cycle 数、跨度、耗时、token、成本、PR 列表。", badges: [] },
         { name: "roll loop alert", mono: true, desc: "在一处查看、确认、清除 loop 告警。", badges: [] },
@@ -412,7 +412,7 @@ window.RollData = (function () {
       title: "去看说明书。",
       sub: "第一次跑 Roll 从「概述」开始；从 1.x 升级看「Migration 2.0」。",
       tiles: [
-        { name: "概述",        path: "guide/zh/overview.md",          desc: "快速开始、Supervisor 执行模型、接入样例、功能列表。" },
+        { name: "概述",        path: "guide/zh/overview.md",          desc: "快速开始、Prime Agent 执行模型、接入样例、功能列表。" },
         { name: "方法论",       path: "guide/zh/methodology.md",       desc: "Markdown 即代码、INVEST 故事、.roll/backlog.md 两层索引。" },
         { name: "Loop",       path: "guide/zh/loop.md",              desc: "调度、子命令、tmux 可见性、PR 收件箱。" },
         { name: "Dream",      path: "guide/zh/dream.md",             desc: "夜间代码健康巡检与 REFACTOR 生成。" },

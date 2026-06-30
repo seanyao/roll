@@ -1,7 +1,7 @@
 /**
- * US-V4-008 — Supervisor Agent v0: OBSERVE.
+ * US-V4-008 — Prime Agent v0: OBSERVE.
  *
- * The Supervisor Agent is the project-level coordinator for work not owned by one
+ * The Prime Agent is the project-level coordinator for work not owned by one
  * concrete Story (cross-Story/Epic context, routing advice, budget, release
  * readiness, truth drift, owner escalation). v0 is observe + advise only — it
  * NEVER implements a Story, writes a Story eval report, bypasses a gate, or marks
@@ -27,7 +27,7 @@ function statusBucket(status: string): "todo" | "inProgress" | "blocked" | "done
   return "other";
 }
 
-/** Build the Supervisor's structured projection from gathered facts. Pure. */
+/** Build the Prime Agent's structured projection from gathered facts. Pure. */
 export function observeProject(input: SupervisorInput): SupervisorFacts {
   const counts = { todo: 0, inProgress: 0, blocked: 0, done: 0 };
   const deliveredSet = new Set(input.delivered);

@@ -5,7 +5,7 @@
 # a CLEAN, SCOPED demo project (so the output is small + truthful), then shows the
 # story-scoped attest report on a real US-V4 story in this repo.
 #
-#   1. Supervisor Agent is the project-level observe / advise entry
+#   1. Prime Agent is the project-level observe / advise entry
 #   2. execution profile has entered the event/state stream
 #   3. default agent vs project route profile is a clear, separate mental model
 #   4. story-scoped attest report is the acceptance entry
@@ -73,7 +73,7 @@ printf '%s\n' \
 
 cd "$DEMO"
 
-# 1 · Supervisor Agent — project-level observe + advise
+# 1 · Prime Agent — project-level observe + advise
 hr "1. roll supervisor status   (project-level observe + advise)"
 $ROLL_BIN supervisor status
 hr "   roll supervisor next   (what should Roll do next?)"

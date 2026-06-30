@@ -51,11 +51,11 @@ export type RigRef = string;
 export const ROUTE_SLOTS = ["easy", "default", "hard", "fallback"] as const;
 export type RouteSlot = (typeof ROUTE_SLOTS)[number];
 
-/** The story-level role pipeline a Story Execution Unit runs. */
+/** The story-level role pipeline a Delta Unit runs. */
 export const EXECUTION_PROFILES = ["standard", "verified", "planned"] as const;
 export type ExecutionProfile = (typeof EXECUTION_PROFILES)[number];
 
-/** The roles a Story Execution Unit can run, in pipeline order. */
+/** The roles a Delta Unit can run, in pipeline order. */
 export const ROLE_NAMES = ["planner", "builder", "evaluator"] as const;
 export type RoleName = (typeof ROLE_NAMES)[number];
 
@@ -94,7 +94,7 @@ export interface ArtifactManifest {
   readonly createdAt: string;
 }
 
-/** One role execution within a Story Execution Unit. */
+/** One role execution within a Delta Unit. */
 export interface RoleRun {
   readonly role: RoleName;
   readonly rig: Rig;
@@ -110,7 +110,7 @@ export interface StoryExecutionRun {
   readonly roles: readonly RoleRun[];
 }
 
-/** US-V4-008 — the structured facts the Supervisor Agent reads, gathered by
+/** US-V4-008 — the structured facts the Prime Agent reads, gathered by
  *  DETERMINISTIC selectors (no agent call needed to build them). Project-level
  *  only — never a single Story's implementation. */
 export interface SupervisorInput {
@@ -140,7 +140,7 @@ export interface SupervisorInput {
   readonly structuralFailures?: readonly SupervisorStructuralFailure[];
   /**
    * FIX-1043 — story ids the runner's picker is holding in pending-publish
-   * (locally-committed work that failed to publish). The Supervisor surfaces
+   * (locally-committed work that failed to publish). The Prime Agent surfaces
    * these as a `pending_publish` block so `next`/`why` agree with the runner's
    * `all_pending_publish` idle instead of advertising the card as runnable.
    */
@@ -174,7 +174,7 @@ export interface SchedulableCycle {
   readonly files?: readonly string[];
 }
 
-/** US-V4-009 — inputs to the (pure) Supervisor parallel-cycle scheduler. */
+/** US-V4-009 — inputs to the (pure) Prime Agent parallel-cycle scheduler. */
 export interface ScheduleInput {
   readonly maxParallelCycles: number;
   readonly active: readonly SchedulableCycle[];
@@ -193,7 +193,7 @@ export interface ScheduleDecision {
   readonly wait: readonly { readonly storyId: string; readonly reason: string }[];
 }
 
-/** US-V4-008 — the Supervisor's projection over {@link SupervisorInput}. */
+/** US-V4-008 — the Prime Agent's projection over {@link SupervisorInput}. */
 export interface SupervisorFacts {
   readonly counts: { readonly todo: number; readonly inProgress: number; readonly blocked: number; readonly done: number };
   /** Stories the backlog claims Done that main truth does NOT confirm. */
@@ -206,7 +206,7 @@ export interface SupervisorFacts {
   readonly budgetHealth: { readonly ok: boolean; readonly note: string };
 }
 
-/** A Supervisor Agent decision record — project-level coordination, never Story
+/** A Prime Agent decision record — project-level coordination, never Story
  *  implementation. `requiresOwner` gates persistent policy changes. */
 export interface SupervisorDecision {
   readonly kind:
@@ -229,7 +229,7 @@ export interface ExecutionPolicy {
   readonly defaultProfile: ExecutionProfile;
 }
 
-/** Supervisor config (disabled by default in v4.0). */
+/** Prime Agent config (disabled by default in v4.0). */
 export interface SupervisorConfig {
   readonly enabled: boolean;
   readonly mode: "observe" | "advise" | "schedule";

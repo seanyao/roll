@@ -39,6 +39,7 @@ import { loopSignalsCommand } from "./loop-signals.js";
 import { loopLogCommand } from "./loop-log.js";
 import { loopGoalCommand } from "./loop-goal.js";
 import { loopGoCommand } from "./loop-go.js";
+import { loopRecoverCommand } from "./loop-recover.js";
 import { loopEventsCommand } from "./loop-events.js";
 import { loopAttachRetired, loopBranchesRetired, loopMonitorRetired } from "./loop-retired.js";
 import { doctorCommand } from "./doctor.js";
@@ -354,6 +355,13 @@ export function registerAll(): void {
     if (args[0] === "runs") return loopRunsCommand(args.slice(1));
     if (args[0] === "goal") return loopGoalCommand(args.slice(1));
     if (args[0] === "go") return loopGoCommand(args.slice(1));
+    // `loop recover [<story-id>] [--apply]`: the supervised recovery path out of
+    // a no-progress STOP (FIX-1049). Without --apply it prints the auditable
+    // stall facts (blocked card, streak, last/next Builder, handoff to inspect);
+    // with --apply it clears the stall for ONE retry by a DIFFERENT Builder, or
+    // denies + explains when no alternate Builder exists. Never bypasses the
+    // breaker silently — records a `goal:recovery` event either way.
+    if (args[0] === "recover") return loopRecoverCommand(args.slice(1));
     if (args[0] === "signals") return loopSignalsCommand(args.slice(1));
     // `loop log` / `loop events`: residual pure-read viewers (US-PORT-022) over
     // .roll/cycle-logs and the shared events ndjson. No bash fallback.

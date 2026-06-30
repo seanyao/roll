@@ -104,6 +104,26 @@ export type RollEvent =
   | { type: "goal:waiting_inner_lock"; sessionId: string; heldByPid: number; ts: number }
   | { type: "goal:evaluated"; sessionId: string; status: "continue" | "complete"; total: number; delivered: number; reason: string; blockers: string[]; ts: number }
   | { type: "goal:card_skipped"; sessionId: string; storyId: string; reason: "zero_delivery_streak" | "no_progress_streak"; zeroDeliveries: number; cycleId?: string; ts: number }
+  // FIX-1049 — supervised recovery from a no-progress stop. The supervisor (a
+  // human/agent on the loop) inspected a goal the dead-loop breaker stopped and
+  // either cleared the stall for ONE more attempt by the next eligible Builder
+  // (`decision: "allowed"`) or could not (`decision: "denied"`, e.g. no alternate
+  // Builder to rotate to). Recording WHO resumed, which Builder last failed,
+  // which is selected next, and WHY the retry is allowed keeps the breaker
+  // auditable — recovery never silently bypasses it.
+  | {
+      type: "goal:recovery";
+      decision: "allowed" | "denied";
+      actor: GoalTransitionActor;
+      storyId?: string;
+      reason: string;
+      lastBuilder?: string;
+      nextBuilder?: string;
+      skippedBuilders?: string[];
+      noProgressCycles?: number;
+      handoff?: { cycleId: string; kind: string; detail: string };
+      ts: number;
+    }
   | {
       type: "goal:gate_tripped";
       sessionId: string;

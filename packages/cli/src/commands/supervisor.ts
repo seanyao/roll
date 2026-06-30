@@ -31,7 +31,9 @@ import {
   recommendNext,
   type FreshnessPort,
 } from "@roll/core";
-import type { CycleRoleSummary, RollEvent, SupervisorInput } from "@roll/spec";
+import type { CycleRoleSummary, RollEvent, RollGoal, SupervisorInput } from "@roll/spec";
+import { parseGoalYaml } from "@roll/spec";
+import { detectNoProgressStall, type NoProgressStall } from "../lib/goal-recovery.js";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -446,6 +448,43 @@ function runbookWhy(state: ReturnType<typeof buildSupervisorRunbookState>, facts
   return state.next.reason;
 }
 
+/**
+ * FIX-1049 — read the persisted goal and, when the no-progress breaker stopped
+ * it, project the supervised-recovery facts. Returns `undefined` for any other
+ * state so `why` only surfaces the recovery block when there is a stall to act on.
+ */
+function readNoProgressStall(projectPath: string, events: readonly RollEvent[]): NoProgressStall | undefined {
+  const goalPath = join(projectPath, ".roll", "loop", "goal.yaml");
+  if (!existsSync(goalPath)) return undefined;
+  let goal: RollGoal | undefined;
+  try {
+    goal = parseGoalYaml(readFileSync(goalPath, "utf8"));
+  } catch {
+    return undefined;
+  }
+  return detectNoProgressStall(goal, events);
+}
+
+/** Render the no-progress recovery facts (AC1) — blocked card, streak, last/next
+ *  Builder, handoff to inspect, and the recovery command. */
+function fmtNoProgressRecovery(stall: NoProgressStall): string {
+  const streaks = Object.entries(stall.zeroStreaks);
+  const streakLine = streaks.length === 0 ? "none recorded" : streaks.map(([id, n]) => `${id}=${n}`).join(", ");
+  const target = stall.blockedCards[0] ?? "<story-id>";
+  const lines = [
+    "  no-progress recovery:",
+    `    stopped by: ${stall.reason}`,
+    `    blocked cards: ${stall.blockedCards.length === 0 ? "(whole-goal breaker)" : stall.blockedCards.join(", ")}`,
+    `    zero-delivery streak: ${streakLine} · whole-goal no-progress cycles: ${stall.noProgressCycles}`,
+    `    last failed Builder: ${stall.lastBuilder ?? "(unknown)"}`,
+  ];
+  if (stall.handoff !== undefined) {
+    lines.push(`    handoff: cycle ${stall.handoff.cycleId} — ${stall.handoff.detail} (roll loop log ${stall.handoff.cycleId})`);
+  }
+  lines.push(`    recover: roll loop recover ${target} (preview) · roll loop recover ${target} --apply --reason "<why>"`);
+  return lines.join("\n");
+}
+
 function readSupervisorEvents(projectPath: string): RollEvent[] {
   const eventsPath = join(projectPath, ".roll", "loop", "events.ndjson");
   try {
@@ -528,7 +567,7 @@ export function supervisorCommand(args: string[]): number {
         : sub === "next"
           ? { mode, next: runbook.next, runbook, ...ctx }
           : sub === "why"
-            ? { mode, why: runbookWhy(runbook, facts), runbook, ...ctx }
+            ? { mode, why: runbookWhy(runbook, facts), noProgressRecovery: readNoProgressStall(projectPath, events) ?? null, runbook, ...ctx }
             : { mode, facts, decisions: supervisorDecisions(input), next: runbook.next, runbook, ...ctx };
     process.stdout.write(JSON.stringify(out, null, 2) + "\n");
     return 0;
@@ -562,12 +601,15 @@ export function supervisorCommand(args: string[]): number {
     const mode = resolveOperatingMode(projectPath);
     const state = buildSupervisorRunbookState(input);
     const why = runbookWhy(state, facts);
-    const ctx = supervisorContext(projectPath, input, readSupervisorEvents(projectPath));
+    const events = readSupervisorEvents(projectPath);
+    const ctx = supervisorContext(projectPath, input, events);
+    const stall = readNoProgressStall(projectPath, events);
     const ownerAction = state.next.kind === "diagnose_failure" || state.next.kind === "manual_merge_gate" ? state.next.ownerAction : mode.ownerAction;
     const schedulerAction =
       state.next.kind === "diagnose_failure" || state.next.kind === "manual_merge_gate" ? state.next.schedulerAction : mode.schedulerAction;
+    const recoveryBlock = stall !== undefined ? `\n${fmtNoProgressRecovery(stall)}` : "";
     process.stdout.write(
-      `\n  Prime Agent — why stuck: ${why}\n  cast: ${ctx.cast}\n  cast detail: ${ctx.castDetail}\n  gate: ${ctx.gate}\n  manual merge: ${ctx.manualMerge}\n  .roll meta: ${ctx.rollMeta.state} — ${ctx.rollMeta.detail}\n  ${formatOperatingMode(mode)}\n  owner action: ${ownerAction}\n  scheduler: ${schedulerAction}\n\n`,
+      `\n  Prime Agent — why stuck: ${why}\n  cast: ${ctx.cast}\n  cast detail: ${ctx.castDetail}\n  gate: ${ctx.gate}\n  manual merge: ${ctx.manualMerge}\n  .roll meta: ${ctx.rollMeta.state} — ${ctx.rollMeta.detail}${recoveryBlock}\n  ${formatOperatingMode(mode)}\n  owner action: ${ownerAction}\n  scheduler: ${schedulerAction}\n\n`,
     );
     return 0;
   }

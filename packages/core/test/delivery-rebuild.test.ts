@@ -792,6 +792,45 @@ describe("parseMergeCommitLog — FIX-923 full commit messages", () => {
     expect(facts.map((fact) => fact.mergeCommit)).toEqual(["newsha043", "oldsha923"]);
     expect(facts.flatMap((fact) => fact.storyIds)).toEqual(["US-AGENT-043", "FIX-923"]);
   });
+
+  it("FIX-1046: recovers PR number from body when subject has story-id but no (#N)", () => {
+    // Simulates a squash-merge whose subject names FIX-1044 but whose PR
+    // reference (#1103) only appears in the body narrative.
+    const text = [
+      rs,
+      "7cf70efa56802f49deef01b1c244b379e51bff87",
+      fs,
+      "1782235000",
+      fs,
+      "FIX-1044: delivered truth overrides stale unpublished cycles\n\n",
+      "(#1103)",
+    ].join("");
+
+    const facts = parseMergeCommitLog(text);
+
+    expect(facts).toHaveLength(1);
+    expect(facts[0].prNumber).toBe(1103); // recovered from body
+    expect(facts[0].mergeCommit).toBe("7cf70efa56802f49deef01b1c244b379e51bff87");
+    expect(facts[0].storyIds).toEqual(["FIX-1044"]);
+  });
+
+  it("FIX-1046: body (#N) is NOT used when subject already has (#N)", () => {
+    // When subject has (#1111) and body has (#2222), the subject wins.
+    const text = [
+      rs,
+      "abc123",
+      fs,
+      "1782235000",
+      fs,
+      "Fix: some story (#1111)\n\n",
+      "See also (#2222)",
+    ].join("");
+
+    const facts = parseMergeCommitLog(text);
+
+    expect(facts).toHaveLength(1);
+    expect(facts[0].prNumber).toBe(1111); // subject wins, not body
+  });
 });
 
 // ── FIX-1024: squash commits only parse subject, not body ───────────────────

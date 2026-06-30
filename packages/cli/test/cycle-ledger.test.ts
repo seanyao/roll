@@ -9,6 +9,7 @@ import {
   CYCLE_VERDICTS,
   ledgerFailedCount,
   ledgerVerdict,
+  reconcileDeliveredUnpublishedVerdicts,
   reconcilePendingMergeVerdicts,
   reconcileSupersededVerdicts,
   type CycleLedgerRow,
@@ -701,6 +702,86 @@ describe("FIX-337 (AC3) — reconcileSupersededVerdicts: a card delivered elsewh
   it("an empty story-id has nothing to match on → left untouched even if the probe says true", () => {
     const out = reconcileSupersededVerdicts([row("failed", "")], () => true);
     expect(out[0]!.verdict).toBe("failed");
+  });
+});
+
+describe("FIX-1046 — reconcileDeliveredUnpublishedVerdicts: unpublished → delivered when story later delivered", () => {
+  function unpublishedRow(storyId: string): CycleLedgerRow {
+    return {
+      cycleId: `c-${storyId}`,
+      tsSec: 1781230000,
+      verdict: "unpublished",
+      storyId,
+      agent: "claude",
+      model: "claude",
+      tokens: "—",
+      cost: "—",
+      toolSummary: "",
+      toolCosts: [],
+      toolTimeline: [],
+      duration: "10m",
+      tape: [
+        { key: "cycle", detail: "2026-06-30T14:56:39Z", state: "pass" },
+        { key: "story", detail: storyId, state: "pass" },
+        { key: "build", detail: "3 commits", state: "pass" },
+        { key: "peer", detail: "—", state: "unknown" },
+        { key: "ci", detail: "—", state: "unknown" },
+        { key: "pr", detail: "—", state: "unknown" },
+        { key: "end", detail: "unpublished", state: "idle" },
+      ],
+      evidence: [],
+    };
+  }
+
+  it("an UNPUBLISHED cycle whose story was delivered → `delivered` (green end)", () => {
+    const rows = [unpublishedRow("FIX-1044")];
+    const out = reconcileDeliveredUnpublishedVerdicts(rows, (id) => id === "FIX-1044");
+    expect(out[0]!.verdict).toBe("delivered");
+    expect(out[0]!.tape.find((s) => s.key === "end")?.state).toBe("pass"); // green, not idle
+    expect(out[0]!.tape.find((s) => s.key === "end")?.detail).toBe("delivered");
+  });
+
+  it("an UNPUBLISHED cycle whose story was NOT delivered stays `unpublished` (idle end)", () => {
+    const rows = [unpublishedRow("FIX-PENDING")];
+    const out = reconcileDeliveredUnpublishedVerdicts(rows, (id) => id === "FIX-1044");
+    expect(out[0]!.verdict).toBe("unpublished");
+    expect(out[0]!.tape.find((s) => s.key === "end")?.state).toBe("idle");
+  });
+
+  it("only touches `unpublished` rows; delivered/failed/pending_merge are left alone", () => {
+    const rows = [
+      unpublishedRow("FIX-1044"),
+      { ...unpublishedRow("US-OK"), verdict: "delivered" as const, storyId: "US-OK" },
+      { ...unpublishedRow("FIX-FAIL"), verdict: "failed" as const, storyId: "FIX-FAIL" },
+    ];
+    const out = reconcileDeliveredUnpublishedVerdicts(rows, () => true);
+    const byStory = new Map(out.map((r) => [r.storyId, r.verdict]));
+    expect(byStory.get("FIX-1044")).toBe("delivered"); // unpublished → delivered
+    expect(byStory.get("US-OK")).toBe("delivered"); // already delivered, untouched
+    expect(byStory.get("FIX-FAIL")).toBe("failed"); // failed, not touched
+  });
+
+  it("an empty story-id has nothing to match on → stays unpublished", () => {
+    const r = unpublishedRow("");
+    const out = reconcileDeliveredUnpublishedVerdicts([r], () => true);
+    expect(out[0]!.verdict).toBe("unpublished");
+  });
+
+  it("FIX-1044 reproduced: unpublished cycle with delivery truth → delivered label, deterministic", () => {
+    // The exact shape from the spec: cycle 20260630-145639-99908 for FIX-1044,
+    // status=local / outcome=unpublished. Delivery truth says FIX-1044 is done.
+    // The cycle ledger must show `delivered`, not `unpublished`.
+    const r = unpublishedRow("FIX-1044");
+    r.cycleId = "20260630-145639-99908";
+    // First pass: without delivery truth → stays unpublished
+    const before = reconcileDeliveredUnpublishedVerdicts([r], () => false);
+    expect(before[0]!.verdict).toBe("unpublished");
+    // Second pass: with delivery truth (story is delivered) → flips to delivered
+    const after = reconcileDeliveredUnpublishedVerdicts([r], (id) => id === "FIX-1044");
+    expect(after[0]!.verdict).toBe("delivered");
+    // Deterministic: same input → same output
+    const again = reconcileDeliveredUnpublishedVerdicts([r], (id) => id === "FIX-1044");
+    expect(again[0]!.verdict).toBe("delivered");
   });
 });
 

@@ -89,6 +89,67 @@ describe("findFeatureFile", () => {
     writeFileSync(join(proj, ".roll", "features", "demo", "FIX-400", "spec.md"), "# FIX-400\n\n**AC:**\n- [ ] x\n");
     expect(findFeatureFile(proj, "FIX-400")).toContain(join("demo", "FIX-400", "spec.md"));
   });
+  it("FIX-1059: a card whose spec.md is a symlink to the real spec is found", () => {
+    const proj = project();
+    // The persistent spec lives OUTSIDE the walked features tree (the main
+    // checkout's .roll); the only in-tree reference is the card's symlinked
+    // spec.md — the loop worktree layout. Content-mention resolution can't see
+    // the target, so the symlink is the sole path to the story.
+    const realSpec = join(proj, "main-checkout-spec.md");
+    writeFileSync(realSpec, "# FIX-1057\n\n**AC:**\n- [ ] x\n");
+    const cardDir = join(proj, ".roll", "features", "uncategorized", "FIX-1057");
+    mkdirSync(cardDir, { recursive: true });
+    const linked = join(cardDir, "spec.md");
+    symlinkSync(realSpec, linked);
+    expect(findFeatureFile(proj, "FIX-1057")).toBe(linked);
+  });
+  it("FIX-1059: a broken symlinked spec.md is ignored safely (story → null)", () => {
+    const proj = project();
+    mkdirSync(join(proj, ".roll", "features", "uncategorized", "FIX-1058"), { recursive: true });
+    symlinkSync(
+      join(proj, ".roll", "features", "does-not-exist.md"),
+      join(proj, ".roll", "features", "uncategorized", "FIX-1058", "spec.md"),
+    );
+    expect(findFeatureFile(proj, "FIX-1058")).toBeNull();
+  });
+  it("FIX-1059: a symlinked directory named like a card is not followed as a file", () => {
+    const proj = project();
+    // A symlink to a DIRECTORY whose name ends in .md must never be read as a file.
+    mkdirSync(join(proj, ".roll", "features", "real-dir"), { recursive: true });
+    symlinkSync(
+      join(proj, ".roll", "features", "real-dir"),
+      join(proj, ".roll", "features", "demo", "loop.md"),
+    );
+    expect(findFeatureFile(proj, "FIX-9999")).toBeNull();
+  });
+});
+
+describe("FIX-1059 — attest finds a symlinked card spec (FIX-1057 worktree shape)", () => {
+  it("writes <ID>-report.html instead of exiting story-not-found", async () => {
+    const proj = project();
+    // Reproduce the worktree layout: features/<epic>/<ID>/spec.md is a symlink to
+    // a persistent spec OUTSIDE the walked features tree (the main checkout's
+    // .roll). Without symlink-aware lookup, the story resolves as not-found.
+    const realSpec = join(proj, "persistent-FIX-1057-spec.md");
+    writeFileSync(
+      realSpec,
+      ["# FIX-1057 — linked spec", "", "**AC:**", "- [ ] 第一条验收", "- [ ] 第二条验收", ""].join("\n"),
+    );
+    const cardDir = join(proj, ".roll", "features", "uncategorized", "FIX-1057");
+    mkdirSync(cardDir, { recursive: true });
+    symlinkSync(realSpec, join(cardDir, "spec.md"));
+    const runDir = join(cardDir, "2026-06-06T01-02-03");
+    mkdirSync(runDir, { recursive: true });
+    const code = await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["FIX-1057", "--run-dir", runDir], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) }),
+      ),
+    );
+    expect(code).toBe(0);
+    expect(existsSync(join(runDir, "FIX-1057-report.html"))).toBe(true);
+    // The AC block from the linked spec is rendered (story resolved, not skipped).
+    expect(readFileSync(join(runDir, "FIX-1057-report.html"), "utf8")).toContain("第一条验收");
+  });
 });
 
 describe("US-META-010 doc-gap shadow check", () => {

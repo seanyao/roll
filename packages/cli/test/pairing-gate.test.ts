@@ -399,8 +399,13 @@ defaults:
 });
 
 // ── US-PAIR-009: score stage — heterogeneous peer scores the cycle ───────────
-import { parsePairScoreOutput, runScorePairing, type RunScorePairingDeps } from "../src/runner/pairing-gate.js";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { normalizeScoreStdout, parsePairScoreOutput, runScorePairing, type RunScorePairingDeps } from "../src/runner/pairing-gate.js";
 import { readStoryReviewScores } from "../src/lib/review-score.js";
+
+const FIX1044_FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "score");
+const readScoreFixture = (name: string): string => readFileSync(join(FIX1044_FIXTURES, name), "utf8");
 
 // This fixture keeps the declared-capable scorers narrow on purpose; supported
 // agents outside the fixture may still be used by runtime escalation.
@@ -920,6 +925,66 @@ describe("parsePairScoreOutput — US-PAIR-009", () => {
     expect(parsePairScoreOutput(
       "After reviewing the delivery, I'd give it a SCORE: 7. The VERDICT: is ok. My RATIONALE: the tests cover the seams."
     )).toBeNull();
+  });
+});
+
+describe("parsePairScoreOutput — FIX-1044 real-agent raw output normalization", () => {
+  // AC1: real raw outputs that contained a VALID final SCORE/VERDICT/RATIONALE
+  // block but were rejected pre-fix as unparseable/timeout. Fixtures are the
+  // exact stdout the parser receives (no `--- stdout ---` artifact wrapper) —
+  // pi/claude are verbatim from the failed FIX-1042 cycle; reasonix/kimi are
+  // distilled per the spec's builder_notes (warning banner / bullet prefix kept).
+  it("pi: terminal overstrike (^D + backspaces) before SCORE parses", () => {
+    const out = parsePairScoreOutput(readScoreFixture("pi-overstrike.stdout.txt"));
+    expect(out).not.toBeNull();
+    expect(out?.score).toBe(8);
+    expect(out?.verdict).toBe("good");
+    expect(out?.rationale).toContain("auxiliary-dir policy");
+  });
+
+  it("claude: JSONL stream-json wrapper — final result block parses", () => {
+    const out = parsePairScoreOutput(readScoreFixture("claude-jsonl.stdout.txt"));
+    expect(out).not.toBeNull();
+    expect(out?.score).toBe(9);
+    expect(out?.verdict).toBe("good");
+    expect(out?.rationale).toContain("root-cause fix");
+  });
+
+  it("reasonix: startup warnings + ANSI banner above the block parse", () => {
+    const out = parsePairScoreOutput(readScoreFixture("reasonix-warnings.stdout.txt"));
+    expect(out).not.toBeNull();
+    expect(out?.score).toBe(10);
+    expect(out?.verdict).toBe("good");
+    expect(out?.rationale).toContain("单一策略");
+  });
+
+  it("kimi: bullet-prefixed block with a trailing resume banner parses", () => {
+    const out = parsePairScoreOutput(readScoreFixture("kimi-bullet.stdout.txt"));
+    expect(out).not.toBeNull();
+    expect(out?.score).toBe(8);
+    expect(out?.verdict).toBe("good");
+  });
+
+  it("normalizeScoreStdout collapses overstrike, ANSI, and JSONL to clean protocol lines", () => {
+    // \x04 control + ^D\b\b overstrike → erased; CSI escape stripped.
+    expect(normalizeScoreStdout("\x1b[2mfoo\x1b[0m^D\b\bSCORE: 7")).toBe("fooSCORE: 7");
+    // JSONL result field unwrapped (escaped \n become real lines).
+    expect(normalizeScoreStdout('{"type":"result","result":"SCORE: 9\\nVERDICT: good"}')).toBe("SCORE: 9\nVERDICT: good");
+  });
+
+  // AC2: validation is NOT relaxed by normalization — malformed/incomplete blocks
+  // and protocol-looking prose inside a JSONL/ANSI wrapper still parse to null.
+  it("AC2: normalization does NOT loosen strict validation", () => {
+    // out-of-range score inside a JSONL wrapper → still null
+    expect(parsePairScoreOutput('{"type":"result","result":"SCORE: 12\\nVERDICT: good\\nRATIONALE: x"}')).toBeNull();
+    // unsupported verdict after ANSI strip → still null
+    expect(parsePairScoreOutput("\x1b[2mSCORE: 8\nVERDICT: amazing\nRATIONALE: x\x1b[0m")).toBeNull();
+    // missing rationale, even with overstrike noise → still null
+    expect(parsePairScoreOutput("^D\b\bSCORE: 8\nVERDICT: ok")).toBeNull();
+    // prose embedding the markers in a JSONL result → still null (not a real block)
+    expect(parsePairScoreOutput('{"type":"result","result":"I score it SCORE: 7 with VERDICT: ok and RATIONALE: fine"}')).toBeNull();
+    // duplicate SCORE field survives normalization rejection
+    expect(parsePairScoreOutput('{"type":"result","result":"SCORE: 8\\nVERDICT: good\\nSCORE: 7\\nRATIONALE: x"}')).toBeNull();
   });
 });
 

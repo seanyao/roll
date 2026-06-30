@@ -538,4 +538,46 @@ describe("cycle-role-summary", () => {
       expect(summary.executionProfile).toBe("verified");
     });
   });
+
+  // FIX-1044 (AC5): the failed FIX-1042 cycle shape — builder=claude, four
+  // INDEPENDENT score candidates (reasonix/kimi/pi/agy) all fail, NO pair:score
+  // accepted. The summary must attribute the independent Evaluator failures and
+  // must NOT show the builder (claude) accepted as a self-score fallback.
+  describe("FIX-1044: independent Evaluator failures, no builder self-score", () => {
+    const C = "20260630-143218-14937";
+    const builder = "claude";
+    const failedScoreEvents: RollEvent[] = [
+      { type: "cycle:start", cycleId: C, storyId: "FIX-1042", agent: builder, model: "", ts: 1000 },
+      ...(["reasonix", "kimi", "pi", "agy"] as const).flatMap((peer, i): RollEvent[] => [
+        { type: "pair:selected", cycleId: C, workingAgent: builder, peer, stage: "score", ts: 2000 + i * 10 },
+        {
+          type: "pair:score-failure",
+          cycleId: C,
+          peer,
+          cause: peer === "agy" ? "timeout" : "unparseable",
+          detail: `${peer} score attempt failed`,
+          stage: "score",
+          ts: 2005 + i * 10,
+        },
+      ]),
+    ];
+
+    const summary = buildCycleRoleSummary({ cycleId: C, events: failedScoreEvents, peerDir: "", cycleLogDir: "" });
+    const evaluators = summary.roles.filter((r) => r.role === "evaluator");
+
+    it("attributes each independent Evaluator as failed, none accepted by the gate", () => {
+      for (const peer of ["reasonix", "kimi", "pi", "agy"]) {
+        const role = evaluators.find((r) => r.agent === peer);
+        expect(role, `evaluator role for ${peer}`).toBeDefined();
+        expect(role?.state).toBe("failed");
+        expect(role?.acceptedByGate).toBe(false);
+      }
+    });
+
+    it("NEVER shows the builder accepted as a self-score fallback (AC3/AC5)", () => {
+      // No evaluator is the builder agent, and certainly none accepted.
+      expect(evaluators.some((r) => r.agent === builder)).toBe(false);
+      expect(evaluators.some((r) => r.state === "accepted")).toBe(false);
+    });
+  });
 });

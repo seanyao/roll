@@ -31,34 +31,93 @@ describe("resetSpecTruthText", () => {
     expect(text).toContain("- [ ] AC3");
   });
 
-  it("removes agent-added delivery claim sections (Fixed/Problem/Root Cause/Solution)", () => {
+  it("always strips delivery-stamp sections (Fixed) regardless of baseline", () => {
     const before = [
       "# FIX-1042 ✅",
       "",
       "**Fixed**: 2026-06-30",
-      "",
-      "**Problem**: Something went wrong.",
-      "More problem detail.",
-      "",
-      "**Root Cause**: A bug.",
-      "",
-      "**Solution**:",
-      "1. Fix it.",
-      "2. Test it.",
+      "the fix landed",
       "",
       "**Files:**",
       "- `src/bug.ts`",
     ].join("\n");
+    // No baseline → narrative sections are preserved, but the Fixed delivery
+    // stamp is a planner-never-authors marker, so it is always removed.
     const { text, changed } = resetSpecTruthText(before);
     expect(changed).toBe(true);
     expect(text).not.toContain("**Fixed**: 2026-06-30");
-    expect(text).not.toContain("**Problem**:");
-    expect(text).not.toContain("**Root Cause**:");
-    expect(text).not.toContain("**Solution**:");
-    expect(text).not.toContain("More problem detail.");
-    expect(text).not.toContain("1. Fix it.");
+    expect(text).not.toContain("the fix landed");
+    expect(text).not.toContain("# FIX-1042 ✅");
     expect(text).toContain("**Files:**");
     expect(text).toContain("- `src/bug.ts`");
+  });
+
+  it("FIX-1043: strips ONLY narrative sections the failed cycle added (absent from baseline)", () => {
+    // Planner baseline already authored Problem + Root Cause. The failed cycle
+    // ADDED a Solution section and a Fixed stamp.
+    const baseline = [
+      "# FIX-1042",
+      "",
+      "**Problem**: Planner-described problem.",
+      "with planner detail.",
+      "",
+      "**Root Cause**: Planner root cause.",
+      "",
+      "**Files:**",
+      "- `src/bug.ts`",
+    ].join("\n");
+    const before = [
+      "# FIX-1042 ✅",
+      "",
+      "**Problem**: Planner-described problem.",
+      "with planner detail.",
+      "",
+      "**Root Cause**: Planner root cause.",
+      "",
+      "**Solution**:",
+      "1. agent-added step.",
+      "",
+      "**Fixed**: 2026-06-30",
+      "",
+      "**Files:**",
+      "- `src/bug.ts`",
+    ].join("\n");
+    const { text, changed } = resetSpecTruthText(before, baseline);
+    expect(changed).toBe(true);
+    // Planner-authored narrative sections survive.
+    expect(text).toContain("**Problem**: Planner-described problem.");
+    expect(text).toContain("with planner detail.");
+    expect(text).toContain("**Root Cause**: Planner root cause.");
+    // Agent-added Solution + Fixed stamp are stripped.
+    expect(text).not.toContain("**Solution**:");
+    expect(text).not.toContain("1. agent-added step.");
+    expect(text).not.toContain("**Fixed**: 2026-06-30");
+    expect(text).toContain("**Files:**");
+  });
+
+  it("FIX-1043: preserves planner-authored Problem/Root Cause/Solution when no baseline is available", () => {
+    // A genuine Todo fix spec authored entirely by the planner. Without a
+    // baseline the reset must NOT destroy this legitimate content.
+    const before = [
+      "# FIX-2000",
+      "",
+      "**Status**: 📋 Todo",
+      "",
+      "**Problem**: The widget crashes on empty input.",
+      "Reproduced on 2026-06-30.",
+      "",
+      "**Root Cause**: Missing null guard.",
+      "",
+      "**Solution**:",
+      "1. Add the guard.",
+      "2. Cover with a test.",
+      "",
+      "**Files:**",
+      "- `src/widget.ts`",
+    ].join("\n");
+    const { text, changed } = resetSpecTruthText(before);
+    expect(changed).toBe(false);
+    expect(text).toBe(before);
   });
 
   it("removes Delivery notes / Delivery sections", () => {

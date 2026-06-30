@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { observeProject, SUPERVISOR_STUCK_THRESHOLD } from "../src/supervisor/observe.js";
 import { adviseProject, buildSupervisorRunbookState, explainStuck, recommendNext } from "../src/supervisor/advise.js";
+import { assessBacklog, type BacklogItem } from "../src/index.js";
 import type { SupervisorInput } from "@roll/spec";
 
 function input(over: Partial<SupervisorInput> = {}): SupervisorInput {
@@ -328,6 +329,69 @@ describe("recommendNext — what should Roll do next?", () => {
     expect(state.scope.remainingByFamily).toEqual({ FIX: 1, US: 1, REFACTOR: 1 });
     expect(state.scope.excluded).toContain("IDEA-1: outside supervisor backlog-clearing scope");
     expect(state.scope.excluded).toContain("FIX-2: hold");
+  });
+});
+
+describe("FIX-1043 — supervisor and runner picker agree on pending-publish eligibility", () => {
+  // The FIX-1042 shape: a still-Todo card whose prior unpublished cycle left it
+  // in the runner's pending-publish hold. Supervisor MUST NOT advertise it as
+  // runnable while the picker idles `all_pending_publish` (the observed bug).
+  it("blocks a pending-publish card (next=no_work) instead of selecting it", () => {
+    const state = buildSupervisorRunbookState(
+      input({
+        backlog: [{ id: "FIX-1042", status: "📋 Todo" }],
+        pendingPublish: ["FIX-1042"],
+      }),
+    );
+    expect(state.next.kind).toBe("no_work");
+    expect(state.next.storyId).toBeNull();
+    expect(state.blockedCards).toContainEqual({
+      storyId: "FIX-1042",
+      reason: "pending_publish",
+      detail: "locally-committed work failed to publish; clear the publish blocker or run a scoped retry",
+    });
+  });
+
+  it("supervisor next agrees with the picker assessBacklog verdict (blocked, then runnable after clear)", () => {
+    const items: BacklogItem[] = [{ id: "FIX-1042", status: "📋 Todo", desc: "" }];
+    const pending = new Set<string>(["FIX-1042"]);
+
+    // BLOCKED: both the runner's picker and the supervisor see no runnable card.
+    const pickerBlocked = assessBacklog(items, { hasPendingPublish: (id) => pending.has(id) });
+    const supervisorBlocked = buildSupervisorRunbookState(
+      input({ backlog: [{ id: "FIX-1042", status: "📋 Todo" }], pendingPublish: [...pending] }),
+    );
+    expect(pickerBlocked).toEqual({ hasWork: false, reason: "all_pending_publish" });
+    expect(supervisorBlocked.next.kind).toBe("no_work");
+
+    // RUNNABLE: a scoped retry clears the marker → both agree the card is runnable.
+    pending.delete("FIX-1042");
+    const pickerRunnable = assessBacklog(items, { hasPendingPublish: (id) => pending.has(id) });
+    const supervisorRunnable = buildSupervisorRunbookState(
+      input({ backlog: [{ id: "FIX-1042", status: "📋 Todo" }], pendingPublish: [...pending] }),
+    );
+    expect(pickerRunnable.hasWork).toBe(true);
+    expect(supervisorRunnable.next.kind).toBe("run_card");
+    expect(supervisorRunnable.next.storyId).toBe("FIX-1042");
+  });
+
+  it("still selects another runnable card when only one of several is pending-publish", () => {
+    const state = buildSupervisorRunbookState(
+      input({
+        backlog: [
+          { id: "FIX-1042", status: "📋 Todo" },
+          { id: "FIX-1050", status: "📋 Todo" },
+        ],
+        pendingPublish: ["FIX-1042"],
+      }),
+    );
+    expect(state.next.kind).toBe("run_card");
+    expect(state.next.storyId).toBe("FIX-1050");
+    expect(state.blockedCards).toContainEqual({
+      storyId: "FIX-1042",
+      reason: "pending_publish",
+      detail: "locally-committed work failed to publish; clear the publish blocker or run a scoped retry",
+    });
   });
 });
 

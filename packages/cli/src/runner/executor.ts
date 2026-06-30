@@ -3278,20 +3278,35 @@ export function revertPrematureDone(ports: Ports, storyId: string, preCycleStatu
  *   - the H1 title's trailing "✅" tick (e.g. `# FIX-167 ✅`) is dropped;
  *   - a `**Status**: ✅ Done` / `✅ Fixed` line is reset to `📋 Todo`;
  *   - every checked AC checkbox `- [x]` / `- [X]` is reset to `- [ ]`;
- *   - agent-added delivery claim sections (`**Fixed**`, `**Problem**`,
- *     `**Root Cause**`, `**Solution**`, `**Delivery notes**`, `**Delivery:**`,
- *     `## Delivery notes`) are stripped so a failed/unpublished cycle cannot
- *     leave a spec that looks completed.
+ *   - unambiguous delivery-stamp sections (`**Fixed**`, `**Delivery notes**`,
+ *     `**Delivery:**`, `## Delivery notes`) — which a planner never authors — are
+ *     always stripped so a failed/unpublished cycle cannot leave a spec that
+ *     looks completed.
+ *
+ * FIX-1043 — narrative sections (`**Problem**`, `**Root Cause**`, `**Solution**`)
+ * are ALSO standard planner-authored fix-spec content, so they are NOT stripped
+ * by label. They are removed ONLY when a pre-cycle `baseline` proves the failed
+ * cycle ADDED them (the same header label is absent from the baseline). Without a
+ * baseline they are PRESERVED: erasing legitimate Problem/Root Cause/Solution
+ * spec content is strictly worse than leaving an agent-added narrative, which
+ * satisfies no Done/release/delivery-truth gate (those key off the ✅ tick, the
+ * Status line, the `[x]` checkboxes, and the evidence artifacts — all handled
+ * here and by {@link cleanStaleEvidence}).
+ *
  * Idempotent: a spec with no ticks/checks/delivery sections is returned
  * unchanged (so the caller can skip a no-op commit). Pure string→string —
  * unit-tested directly.
  */
-export function resetSpecTruthText(text: string): { text: string; changed: boolean } {
+export function resetSpecTruthText(text: string, baseline?: string): { text: string; changed: boolean } {
   let changed = false;
   const lines = text.split("\n");
-  // Agent-added delivery sections that claim completion on a non-merged cycle.
-  const deliverySectionRe =
-    /^(?:\s*>\s*)?(?:\*\*(?:Fixed|Problem|Root Cause|Solution|Delivery(?:\s+notes)?)\b[^*]*\*\*|##\s+Delivery\s+notes\b)/i;
+  // Unambiguous delivery stamps a planner never writes — always removable.
+  const deliveryStampRe =
+    /^(?:\s*>\s*)?(?:\*\*(?:Fixed|Delivery(?:\s+notes)?)\b[^*]*\*\*|##\s+Delivery\s+notes\b)/i;
+  // Narrative sections that double as legitimate planner spec content. Only
+  // removable when proven agent-added against the pre-cycle baseline.
+  const narrativeLabelRe = /^(?:\s*>\s*)?(?:\*\*|##\s+)(Problem|Root Cause|Solution)\b/i;
+  const baselineNarrativeLabels = collectNarrativeLabels(baseline, narrativeLabelRe);
   // A removable section ends at the next markdown heading or bold-label line.
   // Bold labels are recognized whether the colon sits inside (`**Files:**`) or
   // outside (`**Fixed**:`) the markers so legitimate spec sections are preserved.
@@ -3310,10 +3325,23 @@ export function resetSpecTruthText(text: string): { text: string; changed: boole
       }
     }
 
-    if (deliverySectionRe.test(line)) {
+    if (deliveryStampRe.test(line)) {
       inRemovableSection = true;
       changed = true;
       continue;
+    }
+
+    // Narrative section: strip ONLY when the baseline proves the failed cycle
+    // added it (its label is not present in the pre-cycle baseline). With no
+    // baseline, or when the planner already authored this section, preserve it.
+    const narrativeMatch = narrativeLabelRe.exec(line);
+    if (narrativeMatch !== null && narrativeMatch[1] !== undefined) {
+      const label = narrativeMatch[1].toLowerCase();
+      if (baseline !== undefined && !baselineNarrativeLabels.has(label)) {
+        inRemovableSection = true;
+        changed = true;
+        continue;
+      }
     }
 
     // H1 title trailing tick: `# <ID> ✅` → `# <ID>`.
@@ -3341,6 +3369,50 @@ export function resetSpecTruthText(text: string): { text: string; changed: boole
 }
 
 /**
+ * FIX-1043 — collect the set of lowercased narrative-section labels
+ * (`problem`, `root cause`, `solution`) present in a pre-cycle spec baseline, so
+ * {@link resetSpecTruthText} can tell planner-authored sections (preserve) from
+ * failed-cycle-added ones (strip). Returns an empty set when no baseline.
+ */
+function collectNarrativeLabels(baseline: string | undefined, labelRe: RegExp): Set<string> {
+  const labels = new Set<string>();
+  if (baseline === undefined) return labels;
+  for (const line of baseline.split("\n")) {
+    const m = labelRe.exec(line);
+    if (m !== null && m[1] !== undefined) labels.add(m[1].toLowerCase());
+  }
+  return labels;
+}
+
+/**
+ * FIX-1043 — read the pre-cycle committed baseline of a card's spec.md from the
+ * roll-meta repo (`git show HEAD:<relpath>`). Used to distinguish planner-authored
+ * narrative sections from failed-cycle-added ones. Best-effort: returns undefined
+ * when the path is untracked / git is unavailable, in which case
+ * {@link resetSpecTruthText} preserves narrative sections rather than risk
+ * destroying legitimate spec content.
+ */
+function readSpecBaseline(specPath: string): string | undefined {
+  try {
+    const dir = dirname(specPath);
+    const top = execFileSync("git", ["-C", dir, "rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (top === "") return undefined;
+    let rel = specPath.startsWith(top) ? specPath.slice(top.length) : specPath;
+    rel = rel.replace(/^[/\\]+/, "");
+    const out = execFileSync("git", ["-C", top, "show", `HEAD:${rel}`], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Hook 3 — apply {@link resetSpecTruthText} to the card's spec.md on disk (read
  * via the symlinked .roll inside the worktree → the REAL .roll). Best-effort: a
  * missing/unreadable spec or a no-op (no stale claim) leaves the tree untouched;
@@ -3351,7 +3423,8 @@ export function resetStaleSpecTruth(ports: Ports, storyId: string): void {
     const specPath = join(cardArchiveDir(ports.repoCwd, storyId), "spec.md");
     if (!existsSync(specPath)) return;
     const before = readFileSync(specPath, "utf8");
-    const { text, changed } = resetSpecTruthText(before);
+    const baseline = readSpecBaseline(specPath);
+    const { text, changed } = resetSpecTruthText(before, baseline);
     if (!changed) return;
     writeFileSync(specPath, text);
     ports.events.appendAlert(

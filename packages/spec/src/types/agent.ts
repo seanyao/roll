@@ -138,6 +138,13 @@ export interface SupervisorInput {
   readonly manualMergeGates?: readonly SupervisorManualMergeGate[];
   /** Structural execution-boundary failures that must be diagnosed before retry. */
   readonly structuralFailures?: readonly SupervisorStructuralFailure[];
+  /**
+   * FIX-1043 — story ids the runner's picker is holding in pending-publish
+   * (locally-committed work that failed to publish). The Supervisor surfaces
+   * these as a `pending_publish` block so `next`/`why` agree with the runner's
+   * `all_pending_publish` idle instead of advertising the card as runnable.
+   */
+  readonly pendingPublish?: readonly string[];
 }
 
 /** A surfaced open PR gate that must be reconciled before starting new work. */

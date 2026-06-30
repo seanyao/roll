@@ -15,6 +15,7 @@ import { isSnapshotStale, loadTruthSnapshot, renderNowMs } from "./lib/truth-rea
 import { renderState } from "./render.js";
 import { treeVersion } from "./commands/version.js";
 import { type WakeDeps, tryWakeOnRoll, buildProductionWakeDeps, createProductionWakeDeps } from "./lib/wake-hook.js";
+import { publicCommands } from "./lib/command-surface.js";
 export { buildProductionWakeDeps, createProductionWakeDeps };
 
 /** A ported subcommand: receives args after the subcommand, returns exit code. */
@@ -77,10 +78,10 @@ export interface RunResult {
   status: number;
 }
 
-/** Top-level usage — TS-native (no bash). Lists the visible registered
- *  commands (hidden aliases/manual entry points stay callable, unlisted). */
+/** Top-level usage — TS-native (no bash). Lists only the approved public
+ *  top-level commands from the command-surface registry (REFACTOR-056). */
 export function usage(): string {
-  const cmds = portedCommands().filter((c) => !c.startsWith("-") && !hidden.has(c)).join(", ");
+  const cmds = publicCommands().join(", ");
   return (
     `roll <command> [args]\n\n` +
     `Commands: ${cmds}\n\n` +

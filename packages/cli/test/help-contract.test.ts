@@ -14,9 +14,10 @@
  * deeper flags.
  */
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { dispatch, registeredHelp } from "../src/bridge.js";
+import { dispatch, registeredHelp, usage } from "../src/bridge.js";
 import { registerAll } from "../src/commands/index.js";
 import { loopUnknownSubcommand } from "../src/commands/loop-cycle-gates.js";
+import { publicCommands, requireAllClassified, COMMAND_SURFACE } from "../src/lib/command-surface.js";
 
 let out = "";
 let err = "";
@@ -121,6 +122,86 @@ describe("FIX-240 — loop usage advertises only live subcommands", () => {
     expect(captured).not.toContain("attach");
     for (const live of ["on", "off", "now", "status", "runs", "eval", "signals", "pause", "resume", "gc"]) {
       expect(captured).toContain(live);
+    }
+  });
+});
+
+// ── REFACTOR-056: command-surface truth source ─────────────────────────
+
+describe("REFACTOR-056 — command-surface truth source", () => {
+  it("public command list matches the approved contract", () => {
+    const expected = [
+      "agent",
+      "backlog",
+      "config",
+      "design",
+      "doctor",
+      "help",
+      "idea",
+      "init",
+      "loop",
+      "next",
+      "release",
+      "setup",
+      "status",
+      "test",
+      "update",
+    ];
+    expect(publicCommands()).toEqual(expected);
+  });
+
+  it("roll --help lists only the approved public commands from the registry", () => {
+    const helpText = usage();
+    const cmdLine = helpText.split("\n").find((l) => l.startsWith("Commands:"));
+    expect(cmdLine).toBeDefined();
+    const cmds = cmdLine!
+      .replace("Commands: ", "")
+      .split(", ")
+      .map((c) => c.trim())
+      .filter(Boolean);
+    expect(cmds).toEqual(publicCommands());
+  });
+
+  it("non-public commands do not leak into roll --help", () => {
+    const helpText = usage();
+    const cmdLine = helpText.split("\n").find((l) => l.startsWith("Commands:"));
+    expect(cmdLine).toBeDefined();
+    const displayed = new Set(
+      cmdLine!
+        .replace("Commands: ", "")
+        .split(", ")
+        .map((c) => c.trim())
+        .filter(Boolean),
+    );
+    const nonPublic = ["doc", "attest", "truth", "story", "gc", "dream", "version",
+      "cast", "ci", "cycle", "cycles", "ls", "offboard", "pair", "peer",
+      "prices", "pulse", "showcase", "skills", "supervisor", "tool", "tune",
+      "alert", "index"];
+    for (const cmd of nonPublic) {
+      expect(displayed.has(cmd), `${cmd} must not appear in roll --help`).toBe(false);
+    }
+  });
+
+  it("every ported command is classified in the registry", () => {
+    const ported = ["agent", "alert", "attest", "backlog", "cast", "ci", "config", "cycle", "cycles",
+      "design", "doc", "doctor", "dream", "gc", "idea", "index", "init", "loop", "ls", "next",
+      "offboard", "pair", "peer", "prices", "pulse", "release", "setup", "showcase", "skills",
+      "status", "story", "supervisor", "test", "tool", "truth", "tune", "update", "version"];
+    expect(() => requireAllClassified(ported)).not.toThrow();
+  });
+
+  it("registry has all expected command-surface decisions", () => {
+    const entries = COMMAND_SURFACE.map((d) => d.current);
+    expect(entries).toContain("agent");
+    expect(entries).toContain("help");
+    expect(entries).toContain("doc");
+    for (const entry of COMMAND_SURFACE) {
+      expect(entry.current).toBeTruthy();
+      expect(entry.owner).toBeTruthy();
+      expect(entry.disposition).toBeTruthy();
+      expect(entry.rationale).toBeTruthy();
+      expect(["public", "nested", "internal", "remove"]).toContain(entry.disposition);
+      expect(["human", "internal", "hidden"]).toContain(entry.audience);
     }
   });
 });

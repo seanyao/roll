@@ -771,6 +771,16 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     }
   }
 
+  // FIX-1043: a scoped retry (`--cards` / ROLL_LOOP_GO_ALLOWED_CARDS) is explicit
+  // intent to re-run those specific cards. Clear any pending-publish marker so the
+  // picker does not idle with an empty storyId on a still-Todo scoped card whose
+  // prior cycle exited unpublished.
+  if (allowedCards !== undefined) {
+    for (const storyId of allowedCards) {
+      removePendingPublish(rt, storyId);
+    }
+  }
+
   // FIX-1019: if a prior goal session (or the user) paused the loop, launchd
   // ticks must ALSO respect the PAUSE marker. Exit 0 so cron does not retry.
   if (isLoopPaused(id.path, id.slug)) {

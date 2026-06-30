@@ -169,7 +169,7 @@ import {
 } from "@roll/infra";
 import { writeCycleRoleSummaryBestEffort } from "./cycle-role-artifact-writer.js";
 import { execFile, execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, rmdirSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -193,7 +193,7 @@ import { applyCorrectionAction } from "./correction-actuator.js";
 import { buildPairScorePrompt, buildReviewPrompt, enabledPairingStages, parsePairScoreOutput, retryPeerConsult, runPairing, runScorePairing, type PairEvent, type PairReview } from "./pairing-gate.js";
 import { realAgentEnv } from "../commands/agent-list.js";
 import { attestCommand } from "../commands/attest.js";
-import { cardArchiveDir } from "../lib/archive.js";
+import { cardArchiveDir, reportFileName } from "../lib/archive.js";
 import { formatEvaluationContractForScorer, parseEvaluationContract } from "../lib/evaluation-contract.js";
 import { readLatestStoryReviewScore, REVIEW_SCORE_LOW_THRESHOLD, type ReviewScoreEntry } from "../lib/review-score.js";
 
@@ -2826,7 +2826,7 @@ export async function executeCommand(
         }
       }
       // Hook 3 (spec-truth reconciliation): on ANY non-merged terminal
-      // (idle/gave_up/failed/blocked/aborted/orphan) reset a stale "✅ Fixed/Done"
+      // (idle/gave_up/failed/blocked/aborted/orphan/local) reset a stale "✅ Fixed/Done"
       // tick and the "[x]" AC checkboxes in the card's spec.md back to unchecked.
       // The agent commits a false "done" spec into the symlinked .roll on a cycle
       // whose product work never merged (FIX-284/285); FIX-304 only fixed the
@@ -2836,6 +2836,11 @@ export async function executeCommand(
       // CAN deliver. A genuinely MERGED Done spec is left untouched.
       if (!terminalMerged && terminalStoryId !== "") {
         resetStaleSpecTruth(ports, terminalStoryId);
+        // FIX-1043: also move authoritative-looking delivery evidence (report,
+        // ac-map, latest symlink) out of the gate-visible paths so a failed /
+        // skipped-attest / unpublished cycle cannot leave roll-meta looking
+        // delivered. Diagnostics are preserved under failed-diagnostics/.
+        cleanStaleEvidence(ports.repoCwd, terminalStoryId, ctx.cycleId ?? "");
       }
       // US-V4-001: a cycle terminal no longer refreshes the global dossier
       // aggregate pages as a side effect. Cycle facts are durable events
@@ -3272,32 +3277,66 @@ export function revertPrematureDone(ports: Ports, storyId: string, preCycleStatu
  * undo a STALE "done" claim so a re-run reads an honest, workable spec:
  *   - the H1 title's trailing "✅" tick (e.g. `# FIX-167 ✅`) is dropped;
  *   - a `**Status**: ✅ Done` / `✅ Fixed` line is reset to `📋 Todo`;
- *   - every checked AC checkbox `- [x]` / `- [X]` is reset to `- [ ]`.
- * Idempotent: a spec with no ticks/checks is returned unchanged (so the caller
- * can skip a no-op commit). Pure string→string — unit-tested directly.
+ *   - every checked AC checkbox `- [x]` / `- [X]` is reset to `- [ ]`;
+ *   - agent-added delivery claim sections (`**Fixed**`, `**Problem**`,
+ *     `**Root Cause**`, `**Solution**`, `**Delivery notes**`, `**Delivery:**`,
+ *     `## Delivery notes`) are stripped so a failed/unpublished cycle cannot
+ *     leave a spec that looks completed.
+ * Idempotent: a spec with no ticks/checks/delivery sections is returned
+ * unchanged (so the caller can skip a no-op commit). Pure string→string —
+ * unit-tested directly.
  */
 export function resetSpecTruthText(text: string): { text: string; changed: boolean } {
   let changed = false;
   const lines = text.split("\n");
-  const out = lines.map((line) => {
+  // Agent-added delivery sections that claim completion on a non-merged cycle.
+  const deliverySectionRe =
+    /^(?:\s*>\s*)?(?:\*\*(?:Fixed|Problem|Root Cause|Solution|Delivery(?:\s+notes)?)\b[^*]*\*\*|##\s+Delivery\s+notes\b)/i;
+  // A removable section ends at the next markdown heading or bold-label line.
+  // Bold labels are recognized whether the colon sits inside (`**Files:**`) or
+  // outside (`**Fixed**:`) the markers so legitimate spec sections are preserved.
+  const boundaryRe = /^(?:\s*>\s*)?(?:\*\*[^*]+(?:\*\*\s*[:：]|:\*\*)|#{1,2}\s)/;
+  let inRemovableSection = false;
+  const out: string[] = [];
+
+  for (const line of lines) {
+    if (inRemovableSection) {
+      if (boundaryRe.test(line)) {
+        inRemovableSection = false;
+        // fall through to process the boundary line normally
+      } else {
+        changed = true;
+        continue;
+      }
+    }
+
+    if (deliverySectionRe.test(line)) {
+      inRemovableSection = true;
+      changed = true;
+      continue;
+    }
+
     // H1 title trailing tick: `# <ID> ✅` → `# <ID>`.
     if (/^#\s/.test(line) && /[✅✔]\s*$/.test(line)) {
       changed = true;
-      return line.replace(/\s*[✅✔]\s*$/, "");
+      out.push(line.replace(/\s*[✅✔]\s*$/, ""));
+      continue;
     }
     // Status line claiming done/fixed → reset to Todo (preserve any trailer text
     // after the marker, e.g. parenthetical PR notes, by dropping the false claim).
     if (/^\*\*Status\*\*\s*:/.test(line) && /[✅✔]\s*(Done|Fixed|Fix)\b/i.test(line)) {
       changed = true;
-      return "**Status**: 📋 Todo";
+      out.push("**Status**: 📋 Todo");
+      continue;
     }
     // Checked AC checkbox → unchecked.
     if (/^(\s*[-*]\s+)\[[xX]\]/.test(line)) {
       changed = true;
-      return line.replace(/^(\s*[-*]\s+)\[[xX]\]/, "$1[ ]");
+      out.push(line.replace(/^(\s*[-*]\s+)\[[xX]\]/, "$1[ ]"));
+      continue;
     }
-    return line;
-  });
+    out.push(line);
+  }
   return { text: out.join("\n"), changed };
 }
 
@@ -3321,6 +3360,67 @@ export function resetStaleSpecTruth(ports: Ports, storyId: string): void {
     );
   } catch {
     /* best-effort: a spec read/write blip must never fail the cycle terminal */
+  }
+}
+
+/**
+ * FIX-1043 — on a non-merged terminal, move any authoritative-looking delivery
+ * evidence out of the paths the attest / consistency / release gates inspect,
+ * so a failed/skipped-attest/unpublished cycle cannot poison roll-meta as if it
+ * had delivered. Diagnostic artifacts are preserved under
+ * `<cardArchiveDir>/failed-diagnostics/` with a clear label; they do NOT satisfy
+ * Done, release, or delivery-truth gates.
+ *
+ * Targets:
+ *   - `ac-map.json` at the card root (the attest gate reads this as acceptance
+ *     intent).
+ *   - `<ID>-report.html` reachable via the `latest/` symlink (the consistency
+ *     audit and announceReport treat this as delivered evidence).
+ *
+ * The `latest/` symlink itself is removed so the gate's primary candidate path
+ * no longer resolves.
+ */
+export function cleanStaleEvidence(projectCwd: string, storyId: string, cycleId: string): void {
+  try {
+    const cardDir = cardArchiveDir(projectCwd, storyId);
+    if (!existsSync(cardDir)) return;
+
+    const diagDir = join(cardDir, "failed-diagnostics");
+    mkdirSync(diagDir, { recursive: true });
+
+    const reportName = reportFileName(storyId);
+    const latestReport = join(cardDir, "latest", reportName);
+    if (existsSync(latestReport)) {
+      renameSync(latestReport, join(diagDir, reportName));
+    }
+
+    const acMap = join(cardDir, "ac-map.json");
+    if (existsSync(acMap)) {
+      renameSync(acMap, join(diagDir, "ac-map.json"));
+    }
+
+    const latestLink = join(cardDir, "latest");
+    if (existsSync(latestLink)) {
+      const st = lstatSync(latestLink);
+      if (st.isSymbolicLink() || st.isDirectory()) {
+        rmSync(latestLink, { recursive: true, force: true });
+      }
+    }
+
+    const readme = join(diagDir, "README.md");
+    if (!existsSync(readme)) {
+      writeFileSync(
+        readme,
+        `# Failed-cycle diagnostics\n\n` +
+          `Artifacts in this directory were produced by a cycle that did NOT merge to main. ` +
+          `They are retained for debugging only and MUST NOT be treated as delivery evidence.\n\n` +
+          `- cycle: ${cycleId}\n` +
+          `- story: ${storyId}\n`,
+        "utf8",
+      );
+    }
+  } catch {
+    /* best-effort: evidence cleanup must never fail the cycle terminal */
   }
 }
 

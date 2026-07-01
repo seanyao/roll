@@ -188,7 +188,7 @@ with `roll loop resume` when ready.
 | **Project · per repo** | |
 | `roll init` | Diagnose this directory and route to fresh scaffold, PRD/design handoff, existing-codebase onboard, repair, migration, or `roll status` |
 | `roll next` | Continue the init/onboard journey with one best next command: design, apply, repair, migrate, loop, or status |
-| `roll design [--from-file <path>] [--agent <name>]` | Launch `$roll-design` interactively; `--from-file` binds a PRD/brief as the design input |
+| `roll design [--from-file <path>] [--agent <name>] [--verbose|--raw]` | Launch `$roll-design` interactively; `--from-file` binds a PRD/brief as the design input; `--raw` dumps the full transcript |
 | `roll offboard` | Remove Roll from this project |
 | `roll test [--where] [--reset]` | Run the test suite (routes through the isolation adapter; unknown types fail loud) |
 | `roll ci [--wait]` | Show or wait for current commit's CI status |

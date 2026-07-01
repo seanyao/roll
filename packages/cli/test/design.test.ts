@@ -4,7 +4,7 @@
  * All agent selection and spawn behaviour is verified through an injected spawn
  * adapter and a temporary ROLL_HOME/PATH; no real agent is launched.
  */
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -341,5 +341,183 @@ describe("roll design", () => {
     const code = designCommand(["--from-file", "req.md", "extra target"], d);
     expect(code).toBe(1);
     expect(d.calls).toHaveLength(0);
+  });
+});
+
+function captureStderr(fn: () => number): string {
+  const out: string[] = [];
+  const original = process.stderr.write;
+  process.stderr.write = ((s: unknown) => {
+    out.push(String(s));
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    fn();
+  } finally {
+    process.stderr.write = original;
+  }
+  return out.join("");
+}
+
+function claudeStreamFixture(longPrompt: string): string {
+  return [
+    JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: longPrompt }] } }),
+    JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", name: "Bash", input: { command: "echo 'loaded roll-design contract'" } }] } }),
+    JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "tool_result", content: "loaded roll-design contract" }] } }),
+    JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", name: "Edit", input: { file_path: ".roll/features/acceptance-evidence/IDEA-066/spec.md" } }] } }),
+    JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "tool_result", content: "" }] } }),
+  ].join("\n");
+}
+
+describe("roll design bounded progress and handoff", () => {
+  let home: string;
+  let bin: string;
+  const dirs: string[] = [];
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    const f = freshHome();
+    home = f.home;
+    bin = f.bin;
+    dirs.push(home, bin);
+    savedEnv["ROLL_HOME"] = process.env["ROLL_HOME"];
+    savedEnv["ROLL_PKG_DIR"] = process.env["ROLL_PKG_DIR"];
+    savedEnv["ROLL_DESIGN_AGENT"] = process.env["ROLL_DESIGN_AGENT"];
+    savedEnv["ROLL_LANG"] = process.env["ROLL_LANG"];
+    process.env["ROLL_HOME"] = home;
+    process.env["ROLL_PKG_DIR"] = REPO;
+    process.env["ROLL_LANG"] = "en";
+    delete process.env["ROLL_DESIGN_AGENT"];
+  });
+
+  afterEach(() => {
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+    dirs.length = 0;
+    for (const [k, v] of Object.entries(savedEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  it("prints a start block before launching the agent", () => {
+    const proj = freshProj();
+    dirs.push(proj);
+    makeAgent(bin, "claude");
+    writeConfig(home, "lang: en\nai_claude: ~/.claude\n");
+    const d = makeDeps(proj, bin);
+    const out = captureStderr(() => designCommand(["IDEA-066"], d));
+    expect(out).toContain("Design run started");
+    expect(out).toContain("target: IDEA-066");
+    expect(out).toContain("agent: claude");
+    expect(out).toContain("raw transcript:");
+  });
+
+  it("handoff for an IDEA target lists the design artifact, html, zero cards, and sign-off status", () => {
+    const proj = freshProj();
+    dirs.push(proj);
+    writeFileSync(join(proj, ".roll", "index.json"), JSON.stringify({ stories: { "IDEA-066": "acceptance-evidence" } }), "utf8");
+    makeAgent(bin, "claude");
+    writeConfig(home, "lang: en\nai_claude: ~/.claude\n");
+    const d = makeDeps(proj, bin);
+    d.spawn = (binName, args, opts) => {
+      d.calls.push({ bin: binName, args, opts: { cwd: String(opts.cwd ?? "") } });
+      const feat = join(proj, ".roll", "features", "acceptance-evidence", "IDEA-066");
+      mkdirSync(feat, { recursive: true });
+      writeFileSync(join(feat, "spec.md"), "# IDEA-066\n\n## Detailed design\n", "utf8");
+      writeFileSync(join(feat, "spec.html"), "<html></html>", "utf8");
+      return { status: 0, signal: null, stdout: "", stderr: "" };
+    };
+    const out = captureStderr(() => designCommand(["IDEA-066"], d));
+    expect(out).toContain("Design handoff");
+    expect(out).toContain("design: .roll/features/acceptance-evidence/IDEA-066/spec.md#detailed-design");
+    expect(out).toContain("html: .roll/features/acceptance-evidence/IDEA-066/spec.html");
+    expect(out).toContain("cards: 0");
+    expect(out).toContain("status: awaiting owner sign-off");
+    expect(out).toContain("next:");
+  });
+
+  it("suppresses the raw prompt firehose by default but shows progress tool lines", () => {
+    const proj = freshProj();
+    dirs.push(proj);
+    makeAgent(bin, "claude");
+    writeConfig(home, "lang: en\nai_claude: ~/.claude\n");
+    const longPrompt = "You are a helpful assistant. ".repeat(50);
+    const raw = claudeStreamFixture(longPrompt);
+    const d = makeDeps(proj, bin);
+    d.spawn = () => ({ status: 0, signal: null, stdout: raw, stderr: "" });
+    const out = captureStderr(() => designCommand(["build a thing"], d));
+    expect(out).not.toContain(longPrompt);
+    expect(out).toContain("loaded roll-design contract");
+    expect(out).toContain("spec.md");
+  });
+
+  it("--verbose exposes tier-C assistant text", () => {
+    const proj = freshProj();
+    dirs.push(proj);
+    makeAgent(bin, "claude");
+    writeConfig(home, "lang: en\nai_claude: ~/.claude\n");
+    const reasoning = "Detailed design reasoning that should stay hidden in default mode";
+    const raw = claudeStreamFixture(reasoning);
+    const d = makeDeps(proj, bin);
+    d.spawn = () => ({ status: 0, signal: null, stdout: raw, stderr: "" });
+    const defaultOut = captureStderr(() => designCommand(["IDEA-066"], d));
+    const verboseOut = captureStderr(() => designCommand(["--verbose", "IDEA-066"], d));
+    expect(defaultOut).not.toContain(reasoning);
+    expect(verboseOut).toContain(reasoning);
+  });
+
+  it("--raw dumps the captured transcript", () => {
+    const proj = freshProj();
+    dirs.push(proj);
+    makeAgent(bin, "claude");
+    writeConfig(home, "lang: en\nai_claude: ~/.claude\n");
+    const raw = "raw agent line 1\nraw agent line 2\n";
+    const d = makeDeps(proj, bin);
+    d.spawn = () => ({ status: 0, signal: null, stdout: raw, stderr: "" });
+    const out = captureStderr(() => designCommand(["--raw", "IDEA-066"], d));
+    expect(out).toContain("raw agent line 1");
+    expect(out).toContain("raw agent line 2");
+  });
+
+  it("still prints a handoff and transcript path when the agent exits non-zero", () => {
+    const proj = freshProj();
+    dirs.push(proj);
+    makeAgent(bin, "claude");
+    writeConfig(home, "lang: en\nai_claude: ~/.claude\n");
+    const d = makeDeps(proj, bin);
+    d.spawn = () => ({ status: 7, signal: null, stdout: "partial output\n", stderr: "" });
+    const out = captureStderr(() => designCommand(["IDEA-066"], d));
+    expect(out).toContain("Design handoff");
+    expect(out).toContain("status: agent exited with code 7");
+    expect(out).toContain("transcript:");
+  });
+
+  it("writes the raw transcript to disk before returning", () => {
+    const proj = freshProj();
+    dirs.push(proj);
+    makeAgent(bin, "claude");
+    writeConfig(home, "lang: en\nai_claude: ~/.claude\n");
+    const raw = "captured raw output\n";
+    const d = makeDeps(proj, bin);
+    d.spawn = () => ({ status: 0, signal: null, stdout: raw, stderr: "" });
+    designCommand(["IDEA-066"], d);
+    const runsDir = join(proj, ".roll", "runs", "design");
+    expect(existsSync(runsDir)).toBe(true);
+    const entries = readdirSync(runsDir);
+    expect(entries.length).toBe(1);
+    const transcript = readFileSync(join(runsDir, entries[0] ?? "x", "transcript.log"), "utf8");
+    expect(transcript).toContain("captured raw output");
+  });
+
+  it("uses Chinese strings when ROLL_LANG=zh", () => {
+    const proj = freshProj();
+    dirs.push(proj);
+    process.env["ROLL_LANG"] = "zh";
+    makeAgent(bin, "claude");
+    writeConfig(home, "lang: zh\nai_claude: ~/.claude\n");
+    const d = makeDeps(proj, bin);
+    const out = captureStderr(() => designCommand(["IDEA-066"], d));
+    expect(out).toContain("设计运行开始");
+    expect(out).not.toContain("Design run started");
   });
 });

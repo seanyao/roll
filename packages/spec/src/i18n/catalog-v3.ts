@@ -272,11 +272,11 @@ export const v3Catalog: Catalog = {
     zh: "运行 %s — 检测到需求文档但待办为空。将其转化为领域模型 + INVEST 待办列表，然后 roll loop。",
   },
 
-  // `design.*` — explicit `roll design` entry point (US-ONBOARD-NUDGE-004).
+  // `design.*` — explicit `roll design` entry point (US-ONBOARD-NUDGE-004 / FIX-1055).
   // Thin wrapper that launches the existing $roll-design skill interactively.
   "design.usage": {
-    en: "Usage: roll design [--from-file <path> | \"<requirement>\"] [--agent <name>]\n  Launch the $roll-design skill in an interactive agent conversation.\n  `--from-file` binds a PRD/brief file as the design input.\n  `\"<requirement>\"` binds a free-text design target; it cannot be combined with `--from-file`.\n  `--agent` and `ROLL_DESIGN_AGENT` override only this design session; scoped roles live in ~/.roll/agents.yaml and .roll/agents.yaml.\n  Unlike `roll init`, this command runs an LLM — run it only when you want to design.",
-    zh: "用法：roll design [--from-file <path> | \"<requirement>\"] [--agent <name>]\n  在交互式 agent 对话中启动 $roll-design skill。\n  `--from-file` 会把 PRD/brief 文件绑定为设计输入。\n  `\"<requirement>\"` 会绑定自由文本设计目标；不能与 `--from-file` 混用。\n  `--agent` 与 `ROLL_DESIGN_AGENT` 只覆盖本次 design session；scoped roles 位于 ~/.roll/agents.yaml 和 .roll/agents.yaml。\n  与 `roll init` 不同，本命令会运行 LLM——只在需要设计时执行。",
+    en: "Usage: roll design [--from-file <path> | \"<requirement>\"] [--agent <name>] [--verbose|--raw]\n  Launch the $roll-design skill in an interactive agent conversation.\n  `--from-file` binds a PRD/brief file as the design input.\n  `\"<requirement>\"` binds a free-text design target; it cannot be combined with `--from-file`.\n  `--agent` and `ROLL_DESIGN_AGENT` override only this design session; scoped roles live in ~/.roll/agents.yaml and .roll/agents.yaml.\n  `--verbose` shows tier-C assistant text; `--raw` dumps the full transcript.\n  Unlike `roll init`, this command runs an LLM — run it only when you want to design.",
+    zh: "用法：roll design [--from-file <path> | \"<requirement>\"] [--agent <name>] [--verbose|--raw]\n  在交互式 agent 对话中启动 $roll-design skill。\n  `--from-file` 会把 PRD/brief 文件绑定为设计输入。\n  `\"<requirement>\"` 会绑定自由文本设计目标；不能与 `--from-file` 混用。\n  `--agent` 与 `ROLL_DESIGN_AGENT` 只覆盖本次 design session；scoped roles 位于 ~/.roll/agents.yaml 和 .roll/agents.yaml。\n  `--verbose` 显示 tier-C assistant 文本；`--raw` 输出完整原始记录。\n  与 `roll init` 不同，本命令会运行 LLM——只在需要设计时执行。",
   },
   "design.not_roll_project": {
     en: "This directory is not a Roll project (no .roll/). Run `roll init` first.",
@@ -305,6 +305,50 @@ export const v3Catalog: Catalog = {
   "design.bare_backlog_help": {
     en: "No design target given. This project already has a backlog with work items.\n  Provide a target to scope the design session:\n    roll design --from-file <path>    — design from a PRD/brief/requirement file\n    roll design \"<requirement>\"       — one-shot design from a free-text requirement\n    roll supervisor next              — pick the next item from the backlog\n    roll loop go --cards <id>         — dispatch a backlog card directly\n  Run `roll design --help` for full usage.",
     zh: "未指定设计目标。该项目已有待办事项。\n  请指定目标以限定设计范围：\n    roll design --from-file <path>    — 从 PRD/brief/需求文件开始设计\n    roll design \"<requirement>\"       — 从自由文本需求开始一次性设计\n    roll supervisor next              — 从待办中选择下一项\n    roll loop go --cards <id>         — 直接分派待办卡\n  执行 `roll design --help` 查看完整用法。",
+  },
+
+  // FIX-1055: bounded progress view + final artifact handoff.
+  "design.run_started": { en: "Design run started", zh: "设计运行开始" },
+  "design.target": { en: "target: %s", zh: "目标：%s" },
+  "design.target_from_file": { en: "target: from-file %s", zh: "目标：from-file %s" },
+  "design.target_none": { en: "target: none", zh: "目标：无" },
+  "design.target_none_label": { en: "none", zh: "无" },
+  "design.mode_design_only": { en: "mode: design-only", zh: "模式：design-only" },
+  "design.mode_from_file": { en: "mode: from-file · %s", zh: "模式：from-file · %s" },
+  "design.mode_design_only_idea": {
+    en: "mode: design-only · IDEA cards require owner sign-off before story split",
+    zh: "模式：design-only · IDEA 卡片在拆分为实现卡前需要负责人签批",
+  },
+  "design.agent": { en: "agent: %s", zh: "agent：%s" },
+  "design.raw_transcript": { en: "raw transcript: %s", zh: "原始记录：%s" },
+  "design.handoff": { en: "Design handoff", zh: "设计交付" },
+  "design.status_label": { en: "status: %s", zh: "状态：%s" },
+  "design.design_label": { en: "design: %s", zh: "设计产物：%s" },
+  "design.html_label": { en: "html: %s", zh: "HTML：%s" },
+  "design.cards_label": { en: "cards: %d", zh: "卡片数：%d" },
+  "design.why_label": { en: "why: %s", zh: "原因：%s" },
+  "design.next_label": { en: "next: %s", zh: "下一步：%s" },
+  "design.transcript_label": { en: "transcript: %s", zh: "记录：%s" },
+  "design.empty_transcript": { en: "transcript is empty", zh: "记录为空" },
+  "design.status.awaiting_signoff": { en: "awaiting owner sign-off", zh: "等待负责人签批" },
+  "design.status.cards_created": { en: "%d card(s) created", zh: "已创建 %d 张卡片" },
+  "design.status.no_cards": { en: "no cards created", zh: "未创建卡片" },
+  "design.status.agent_failed": { en: "agent exited with code %s", zh: "agent 退出码 %s" },
+  "design.why.idea_signoff": {
+    en: "IDEA cards require owner sign-off before story split",
+    zh: "IDEA 卡片在拆分前需要负责人签批",
+  },
+  "design.next.cards_created": {
+    en: "review the created cards and run `roll loop go --cards <id>` to dispatch them",
+    zh: "审阅已创建的卡片并运行 `roll loop go --cards <id>` 进行分派",
+  },
+  "design.next.review_and_split": {
+    en: "review the design, then ask `roll design` to split %s into implementation cards",
+    zh: "审阅设计，然后让 `roll design` 把 %s 拆成实现卡",
+  },
+  "design.next.no_cards": {
+    en: "scope is design-only; no implementation cards were created for %s",
+    zh: "本次为纯设计；未为 %s 创建实现卡",
   },
 
   // `setup.*` — legacy setup agent selection (compatibility only).

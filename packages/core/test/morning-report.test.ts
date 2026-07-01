@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { buildMorningReportModel } from "../src/index.js";
+import { buildLoopDigestModel, buildMorningReportModel } from "../src/index.js";
 import type { RollEvent } from "@roll/spec";
 
 describe("US-EVID-016 morning report model", () => {
+  it("buildLoopDigestModel and buildMorningReportModel are the same function", () => {
+    expect(buildLoopDigestModel).toBe(buildMorningReportModel);
+  });
+
   it("summarizes cycles, delivered cards, corrections, pauses, alerts, and cost", () => {
     const events: RollEvent[] = [
       { type: "cycle:start", cycleId: "c1", storyId: "US-A", agent: "claude", model: "sonnet", ts: 10 },
@@ -18,7 +22,7 @@ describe("US-EVID-016 morning report model", () => {
       { type: "policy:safety_pause", loop: "ci", reason: "oscillation", ts: 41 },
       { type: "alert:notify", channel: "correction-circuit", message: "oscillation", ts: 42 },
     ];
-    const model = buildMorningReportModel(events, [], { windowStart: 0, windowEnd: 100 });
+    const model = buildLoopDigestModel(events, [], { windowStart: 0, windowEnd: 100 });
     expect(model).toMatchObject({
       cycles: 1,
       deliveredStories: ["US-A"],
@@ -32,7 +36,7 @@ describe("US-EVID-016 morning report model", () => {
   });
 
   it("uses the injected runs-row projection as a fallback when event story links are absent", () => {
-    const model = buildMorningReportModel([], [{ story_id: "US-RUN", status: "done", cost_usd: 0.1, ts: "2026-06-08T10:00:00Z" }], {
+    const model = buildLoopDigestModel([], [{ story_id: "US-RUN", status: "done", cost_usd: 0.1, ts: "2026-06-08T10:00:00Z" }], {
       windowStart: Date.parse("2026-06-08T00:00:00Z") / 1000,
       windowEnd: Date.parse("2026-06-08T12:00:00Z") / 1000,
       runDelivered: (row) => row.status === "done",
@@ -52,6 +56,6 @@ describe("US-EVID-016 morning report model", () => {
         ts: 20,
       },
     ];
-    expect(buildMorningReportModel(events, [], { windowStart: 0, windowEnd: 100 }).deliveredStories).toEqual([]);
+    expect(buildLoopDigestModel(events, [], { windowStart: 0, windowEnd: 100 }).deliveredStories).toEqual([]);
   });
 });

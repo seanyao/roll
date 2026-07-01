@@ -10,7 +10,7 @@ export interface MorningRunRow {
   ts?: unknown;
 }
 
-export interface MorningReportModel {
+export interface LoopDigestModel {
   windowStart: number;
   windowEnd: number;
   cycles: number;
@@ -23,11 +23,17 @@ export interface MorningReportModel {
   alerts: string[];
 }
 
-export interface MorningReportOptions {
+/** @deprecated Use LoopDigestModel instead. */
+export type MorningReportModel = LoopDigestModel;
+
+export interface LoopDigestOptions {
   windowStart: number;
   windowEnd: number;
   runDelivered?: (row: MorningRunRow, nowSec: number) => boolean;
 }
+
+/** @deprecated Use LoopDigestOptions instead. */
+export type MorningReportOptions = LoopDigestOptions;
 
 function storyFromRun(row: MorningRunRow): string | undefined {
   if (typeof row.story_id === "string" && row.story_id !== "") return row.story_id;
@@ -50,11 +56,11 @@ function uniq(xs: Iterable<string>): string[] {
   return [...new Set([...xs].filter((x) => x.trim() !== ""))].sort();
 }
 
-export function buildMorningReportModel(
+export function buildLoopDigestModel(
   events: readonly RollEvent[],
   runs: readonly MorningRunRow[],
-  opts: MorningReportOptions,
-): MorningReportModel {
+  opts: LoopDigestOptions,
+): LoopDigestModel {
   const inWindow = events.filter((ev) => ev.ts >= opts.windowStart && ev.ts <= opts.windowEnd);
   const hasCycleEnd = inWindow.some((ev) => ev.type === "cycle:end");
   const stories = cycleStoryMap(events);
@@ -110,3 +116,6 @@ export function buildMorningReportModel(
     alerts: alerts.slice(-8),
   };
 }
+
+/** @deprecated Use buildLoopDigestModel instead. */
+export const buildMorningReportModel = buildLoopDigestModel;

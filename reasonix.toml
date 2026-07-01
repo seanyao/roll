@@ -1,0 +1,4 @@
+[sandbox]
+bash = "enforce"
+network = true
+allow_write = ["/Users/seanyao/Workspace/roll/.roll", "/Users/seanyao/Workspace/roll/.roll/loop", "/Users/seanyao/Workspace/roll/.git"]

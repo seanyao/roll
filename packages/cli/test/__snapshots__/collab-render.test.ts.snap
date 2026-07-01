@@ -1,0 +1,71 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`E2E — \`roll cycle --legend\` > matches the approved CLI snapshot 1`] = `
+"Layer A · Collab Protocol Legend
+
+  🧭 supervise/plan   🔨 build   🔎 peer   🎯 score   🔬 diagnose
+  🚦 gates       attest · truth
+  → handoff    pass the baton
+  ⤴ escalate  baton returns to supervisor
+
+🧭 supervisor + planner
+┌───────────────────────────────────────────┐
+│  SUPERVISOR  set goals · pick cards · watch ·兜底  │
+│  PLANNER     too big → split · scope · route       │
+└───────────────┬───────────────────────────┘
+                │ ① assign roles (builder ≠ evaluator)
+      ┌─────────┴──────────┐
+      ▼                    ▼
+  🔨 BUILDER            🔎🎯 EVALUATOR
+  execute pool          evaluate pool (avoid:execute)
+  TCR produces diff     independent peer review + score
+      │ ② hand off diff   │ ③ independent verdict
+      └────────►───────────┘
+                ▼
+          🚦 GATES  attest · truth   ④ decide
+                │
+      delivered ✅ ──────┤
+      bounced back ⤴ ────┤
+                │
+  ⑤ stuck/bounced/tool-broken → escalate to 🧭 → diagnose · fix · reassign
+"
+`;
+
+exports[`renderCallout > matches the approved escalation snapshot 1`] = `
+"┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ ⤴ escalation   baton returns to supervisor                     ┃
+┃ 🔬 diagnose → harness issue → open FIX-1036                    ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+"
+`;
+
+exports[`renderLegend > matches the approved snapshot (structure-stable, color-scrubbed) 1`] = `
+"Layer A · Collab Protocol Legend
+
+  🧭 supervise/plan   🔨 build   🔎 peer   🎯 score   🔬 diagnose
+  🚦 gates       attest · truth
+  → handoff    pass the baton
+  ⤴ escalate  baton returns to supervisor
+
+🧭 supervisor + planner
+┌───────────────────────────────────────────┐
+│  SUPERVISOR  set goals · pick cards · watch ·兜底  │
+│  PLANNER     too big → split · scope · route       │
+└───────────────┬───────────────────────────┘
+                │ ① assign roles (builder ≠ evaluator)
+      ┌─────────┴──────────┐
+      ▼                    ▼
+  🔨 BUILDER            🔎🎯 EVALUATOR
+  execute pool          evaluate pool (avoid:execute)
+  TCR produces diff     independent peer review + score
+      │ ② hand off diff   │ ③ independent verdict
+      └────────►───────────┘
+                ▼
+          🚦 GATES  attest · truth   ④ decide
+                │
+      delivered ✅ ──────┤
+      bounced back ⤴ ────┤
+                │
+  ⑤ stuck/bounced/tool-broken → escalate to 🧭 → diagnose · fix · reassign
+"
+`;

@@ -23,15 +23,19 @@ import { cycleNo } from "./cycles.js";
 import { c, renderState } from "../render.js";
 import { formatToolCostSummary, formatToolTimelineRow } from "../lib/tool-display.js";
 import { renderSignal } from "./loop-fmt.js";
+import { renderLegend } from "../lib/collab-render.js";
 
 export const CYCLE_USAGE =
   "Usage: roll cycle <id>\n" +
   "       roll cycle <id> --roles [--json]\n" +
+  "       roll cycle --legend\n" +
   "       roll cycle watch [<id>] [--once] [--since <lines>] [--json]\n" +
   "  One cycle's full trace tape, or a read-only ActivitySignal watch window.\n" +
-  "  --roles  Show the execution cast (builder, reviewers, evaluators, gates).\n" +
+  "  --roles   Show the execution cast (builder, reviewers, evaluators, gates).\n" +
+  "  --legend  Print the Layer A collab protocol legend.\n" +
   "单个 cycle 的完整轨迹带，或只读 ActivitySignal 实时窗口。\n" +
-  "  --roles  显示执行选角（构建者、评审人、评估者、门禁）。";
+  "  --roles   显示执行选角（构建者、评审人、评估者、门禁）。\n" +
+  "  --legend  打印 Layer A 协同协议读法头。";
 
 const CYCLE_WATCH_USAGE =
   "Usage: roll cycle watch [<id>] [--once] [--since <lines>] [--json]\n" +
@@ -464,10 +468,14 @@ export function cycleCommand(args: string[]): number | Promise<number> {
     process.stdout.write(`${CYCLE_USAGE}\n`);
     return args.length === 0 ? 1 : 0;
   }
+  if (args.includes("--legend")) {
+    process.stdout.write(renderLegend({ color: !noColor, fold: true, tz: "epoch" }));
+    return 0;
+  }
   const roles = args.includes("--roles");
   const json = args.includes("--json");
   // kimi pair-review: reject unknown flags like `roll cycles` does.
-  const unknown = args.filter((a) => a.startsWith("-") && a !== "--no-color" && a !== "--help" && a !== "-h" && a !== "--json" && a !== "--roles");
+  const unknown = args.filter((a) => a.startsWith("-") && a !== "--no-color" && a !== "--help" && a !== "-h" && a !== "--json" && a !== "--roles" && a !== "--legend");
   if (unknown.length > 0) {
     process.stderr.write(`[roll] unknown flag: ${unknown[0]}\n${CYCLE_USAGE}\n`);
     return 1;

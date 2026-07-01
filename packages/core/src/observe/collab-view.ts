@@ -20,12 +20,6 @@ import {
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
-export interface ProjectCollabCycleInput {
-  readonly summary: CycleRoleSummary;
-  readonly events: readonly RollEvent[];
-  readonly supervisorAgent?: string;
-}
-
 export function projectCollabCycle(
   summary: CycleRoleSummary,
   events: readonly RollEvent[],
@@ -62,9 +56,6 @@ export function projectCollabCycle(
   // Assign handoff: execution:profile + cycle:start.
   const startEvent = cycleEvents.find((e) => e.type === "cycle:start") as
     | { type: "cycle:start"; storyId: string; agent: string; ts: number }
-    | undefined;
-  const profileEvent = cycleEvents.find((e) => e.type === "execution:profile") as
-    | { type: "execution:profile"; storyId: string; profile: string; ts: number }
     | undefined;
 
   if (startEvent) {

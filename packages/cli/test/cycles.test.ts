@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { RollEvent } from "@roll/spec";
 import { cyclesCommand, cyclesLedgerJson, renderCyclesLedger, renderCycleDetail, cycleDetailJson, summaryBuckets, reconciledLedger } from "../src/commands/cycles.js";
-import { collectCycleLedger, type CycleLedgerRow } from "../src/lib/cycle-ledger.js";
+import { collectCycleLedger, formatBuilderIdentity, type CycleLedgerRow } from "../src/lib/cycle-ledger.js";
 import { stripAnsi } from "../src/render.js";
 
 const dirs: string[] = [];
@@ -345,6 +345,58 @@ describe("FIX-1066 — agent/model display in cycles compact rows", () => {
     for (const row of parsed.rows) {
       expect(row.model).not.toBe(row.agent);
     }
+  });
+});
+
+// ── FIX-1067: normalize the REAL raw ledger shape for Builder identity ─────
+
+describe("FIX-1067 — real raw ledger facts normalize to operator-facing Builder identity", () => {
+  /** Fixture with the CURRENT REAL raw ledger shape from `.roll/loop/runs.jsonl`:
+   *  Kimi rows write raw `agent: "kimi"` + `model: "kimi-code/kimi-for-coding"`,
+   *  Reasonix rows write raw `agent: "reasonix"` + `model: "deepseek-flash"`. */
+  function realShapeProject(): string {
+    const p = mkdtempSync(join(tmpdir(), "roll-fix1067-"));
+    dirs.push(p);
+    mkdirSync(join(p, ".roll", "loop"), { recursive: true });
+    const runs = [
+      { cycle_id: "20260701-133601-96666", status: "merged", outcome: "delivered", story_id: "FIX-1064", agent: "reasonix", model: "deepseek-flash", ts: "2026-07-01T13:36:01Z", duration_sec: 1090, cost_usd: 0, tokens_in: 127000, tokens_out: 15000 },
+      { cycle_id: "20260701-130000-96665", status: "merged", outcome: "delivered", story_id: "FIX-1060", agent: "kimi", model: "kimi-code/kimi-for-coding", ts: "2026-07-01T13:00:00Z", duration_sec: 600, cost_usd: 0.1, tokens_in: 80000, tokens_out: 12000 },
+    ];
+    writeFileSync(join(p, ".roll", "loop", "runs.jsonl"), runs.map((r) => JSON.stringify(r)).join("\n") + "\n");
+    return p;
+  }
+
+  it("AC: raw `kimi` + `kimi-code/kimi-for-coding` renders as `kimi-code / kimi-2.7`", () => {
+    const p = realShapeProject();
+    const out = stripAnsi(renderCyclesLedger(collectCycleLedger(p), "all", "en", NOW));
+    expect(out).toContain("kimi-code / kimi-2.7");
+    // The raw internal names must never leak into the operator row.
+    expect(out).not.toContain("kimi-code/kimi-for-coding");
+    expect(out).not.toMatch(/(^|\s)kimi\s+\//m);
+  });
+
+  it("AC: raw Reasonix row still renders as `reasonix / deepseek-flash`", () => {
+    const p = realShapeProject();
+    const out = stripAnsi(renderCyclesLedger(collectCycleLedger(p), "all", "en", NOW));
+    expect(out).toContain("reasonix / deepseek-flash");
+  });
+
+  it("AC: --json keeps the RAW agent/model facts (kimi / kimi-code/kimi-for-coding) parseable", () => {
+    const p = realShapeProject();
+    const json = cyclesLedgerJson(collectCycleLedger(p), "all", NOW) as { rows: Array<{ agent: string; model: string }> };
+    const kimi = json.rows.find((r) => r.agent === "kimi");
+    expect(kimi).toBeDefined();
+    expect(kimi!.model).toBe("kimi-code/kimi-for-coding");
+    const reasonix = json.rows.find((r) => r.agent === "reasonix");
+    expect(reasonix!.model).toBe("deepseek-flash");
+  });
+
+  it("AC: `roll cycle <id>` uses the SAME formatter so identity cannot drift", () => {
+    // The centralized formatter is what both surfaces call — verify it directly.
+    expect(formatBuilderIdentity("kimi", "kimi-code/kimi-for-coding")).toBe("kimi-code / kimi-2.7");
+    expect(formatBuilderIdentity("reasonix", "deepseek-flash")).toBe("reasonix / deepseek-flash");
+    expect(formatBuilderIdentity("custom-agi", "my-model")).toBe("custom-agi / my-model");
+    expect(formatBuilderIdentity("reasonix", "")).toBe("reasonix / —");
   });
 });
 

@@ -62,7 +62,7 @@ export function findCycle(rows: CycleLedgerRow[], raw: string): CycleLedgerRow |
 export function renderCycleTrace(row: CycleLedgerRow, lang: "en" | "zh", slug?: string): string {
   const lines: string[] = [];
   lines.push(
-    `#${cycleNo(row.cycleId)} · ${c(row.verdict === "delivered" ? "green" : row.verdict === "idle" || row.verdict === "unpublished" ? "muted" : "red", row.verdict)} · ${row.model} · ${row.tokens} · ${row.cost} · ${row.duration}`,
+    `#${cycleNo(row.cycleId)} · ${c(row.verdict === "delivered" ? "green" : row.verdict === "idle" || row.verdict === "unpublished" ? "muted" : "red", row.verdict)} · ${row.model ? `${row.agent} / ${row.model}` : row.agent} · ${row.tokens} · ${row.cost} · ${row.duration}`,
   );
   lines.push(lang === "zh" ? `story ${row.storyId === "" ? "—（无故事）" : row.storyId}` : `story ${row.storyId === "" ? "— (no story)" : row.storyId}`);
   if (row.toolSummary !== "") lines.push(`cost ${row.cost} · tools ${formatToolCostSummary(row.toolCosts, " ")}`);
@@ -111,6 +111,7 @@ export function cycleTraceJson(row: CycleLedgerRow, slug: string | undefined): u
     cycleId: row.cycleId,
     verdict: row.verdict,
     storyId: row.storyId,
+    agent: row.agent,
     model: row.model,
     tokens: row.tokens,
     cost: row.cost,

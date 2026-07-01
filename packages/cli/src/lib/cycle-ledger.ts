@@ -537,7 +537,7 @@ export function collectCycleLedger(projectPath: string): CycleLedgerRow[] {
       verdict,
       storyId,
       agent: String(row["agent"] ?? ""),
-      model: typeof row["model"] === "string" && row["model"] !== "" ? (row["model"] as string) : String(row["agent"] ?? "—") || "—",
+      model: typeof row["model"] === "string" && row["model"] !== "" ? (row["model"] as string) : "",
       tokens: fmtTokens(row["tokens_in"], row["tokens_out"], usageUnknown),
       cost: cost !== undefined ? `${curSymbol}${cost.toFixed(2)}` : usageUnknown ? "?" : "—",
       toolSummary: formatToolCostSummary(toolCosts),

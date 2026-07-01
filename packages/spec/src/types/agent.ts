@@ -145,6 +145,12 @@ export interface SupervisorInput {
    * `all_pending_publish` idle instead of advertising the card as runnable.
    */
   readonly pendingPublish?: readonly string[];
+  /**
+   * US-V4-022 — classified agent toolchain health issues observed in the event
+   * stream (auth block, network block, setup/skill-root pollution, worktree
+   * permission failure). Supervisor uses these for routing advice only.
+   */
+  readonly agentHealthIssues?: readonly AgentHealthIssue[];
 }
 
 /** A surfaced open PR gate that must be reconciled before starting new work. */

@@ -3,12 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { RollEvent } from "@roll/spec";
-import { buildMorningReportModel } from "@roll/core";
-import { renderMorningReportHtml, writeLatestMorningReport } from "../src/lib/morning-report.js";
+import { buildLoopDigestModel, buildMorningReportModel } from "@roll/core";
+import { renderLoopDigestHtml, renderMorningReportHtml, writeLatestLoopDigest, writeLatestMorningReport } from "../src/lib/morning-report.js";
 import { cycleTruthFromRow, outcomeToPanel, rowDelivered } from "../src/lib/truth-adapter.js";
 
 function tempProject(): { root: string; events: string; runs: string } {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-morning-report-")));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-loop-digest-")));
   const loop = join(root, ".roll", "loop");
   mkdirSync(loop, { recursive: true });
   return { root, events: join(loop, "events.ndjson"), runs: join(loop, "runs.jsonl") };
@@ -19,8 +19,8 @@ function writeEvents(path: string, events: RollEvent[]): void {
 }
 
 describe("US-EVID-016 morning report renderer", () => {
-  it("renders a one-screen bilingual operational summary", () => {
-    const html = renderMorningReportHtml({
+  it("renders a one-screen bilingual operational summary with neutral Loop Digest wording", () => {
+    const html = renderLoopDigestHtml({
       windowStart: 10,
       windowEnd: 20,
       cycles: 2,
@@ -32,14 +32,23 @@ describe("US-EVID-016 morning report renderer", () => {
       totalCostUsd: 0.25,
       alerts: ["paused"],
     });
-    expect(html).toContain("Morning Report");
-    expect(html).toContain("夜间运行晨报");
+    expect(html).toContain("Loop Digest");
+    expect(html).not.toContain("Morning Report");
+    expect(html).not.toContain("夜间运行晨报");
     expect(html).toContain("US-A");
     expect(html).toContain("PAUSED");
     expect(html).toContain("$0.2500");
   });
 
-  it("writes latest + dated reports and appends a report:morning event", () => {
+  it("renderMorningReportHtml is the same function as renderLoopDigestHtml", () => {
+    expect(renderMorningReportHtml).toBe(renderLoopDigestHtml);
+  });
+
+  it("writeLatestMorningReport is the same function as writeLatestLoopDigest", () => {
+    expect(writeLatestMorningReport).toBe(writeLatestLoopDigest);
+  });
+
+  it("writes primary loop digest + compatibility alias and appends a report:loop-digest event", () => {
     const p = tempProject();
     const base = Date.parse("2026-06-08T10:00:00Z") / 1000;
     writeEvents(p.events, [
@@ -53,12 +62,15 @@ describe("US-EVID-016 morning report renderer", () => {
       },
     ]);
     writeFileSync(p.runs, "", "utf8");
-    const latest = writeLatestMorningReport(p.root, p.events, p.runs, Date.parse("2026-06-08T12:00:00Z") / 1000);
-    expect(latest).toBe(join(p.root, ".roll", "reports", "morning", "latest.html"));
+    const latest = writeLatestLoopDigest(p.root, p.events, p.runs, Date.parse("2026-06-08T12:00:00Z") / 1000);
+    expect(latest).toBe(join(p.root, ".roll", "reports", "loop", "latest.html"));
     expect(existsSync(latest)).toBe(true);
-    expect(existsSync(join(p.root, ".roll", "reports", "morning", "2026-06-08.html"))).toBe(true);
+    expect(existsSync(join(p.root, ".roll", "reports", "loop", "2026-06-08.html"))).toBe(true);
+    // Compatibility: legacy morning path also written
+    expect(existsSync(join(p.root, ".roll", "reports", "morning", "latest.html"))).toBe(true);
     expect(readFileSync(latest, "utf8")).toContain("US-A");
-    expect(readFileSync(p.events, "utf8")).toContain('"type":"report:morning"');
+    expect(readFileSync(latest, "utf8")).toContain("Loop Digest");
+    expect(readFileSync(p.events, "utf8")).toContain('"type":"report:loop-digest"');
   });
 
   it("US-TRUTH-010: normal run rows still render delivered through the truth adapter", () => {
@@ -71,7 +83,7 @@ describe("US-EVID-016 morning report renderer", () => {
       "utf8",
     );
 
-    const latest = writeLatestMorningReport(p.root, p.events, p.runs, base + 7200);
+    const latest = writeLatestLoopDigest(p.root, p.events, p.runs, base + 7200);
     const html = readFileSync(latest, "utf8");
     expect(html).toContain("US-DONE");
     expect(html).toContain("$0.0300");
@@ -87,7 +99,7 @@ describe("US-EVID-016 morning report renderer", () => {
       cost_usd: 0.02,
       ts: "2026-06-08T10:10:00Z",
     };
-    const model = buildMorningReportModel([], [run], {
+    const model = buildLoopDigestModel([], [run], {
       windowStart: base,
       windowEnd: base + 7200,
       runDelivered: (row, nowSec) => {
@@ -101,6 +113,6 @@ describe("US-EVID-016 morning report renderer", () => {
 
     expect(rowDelivered(run, base + 7200)).toBe(false);
     expect(model.deliveredStories).toEqual(["US-MERGED"]);
-    expect(renderMorningReportHtml(model)).toContain("US-MERGED");
+    expect(renderLoopDigestHtml(model)).toContain("US-MERGED");
   });
 });

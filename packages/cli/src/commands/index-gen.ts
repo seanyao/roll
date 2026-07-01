@@ -39,7 +39,7 @@ import { collectGitHooks, defaultGitHooksDeps, type GitHooksVM } from "../lib/gi
 import { launchAgentsDir } from "./loop-sched.js";
 import { projectSlug } from "./dashboard.js";
 import { formatStream } from "./loop-fmt.js";
-import { morningReportHref } from "../lib/morning-report.js";
+import { loopDigestHref } from "../lib/morning-report.js";
 import { renderEpicPage } from "../lib/epic-page.js";
 import { buildDossierRunCache, collectStoryDossierInput, renderStoryDossier, stationsDone, storyEvidenceFlags, storyHasMergeEvidence, storyHasSpecPrMergeEvidence, type StoryDossierInput } from "../lib/story-dossier.js";
 import { renderMarkdown } from "../lib/markdown.js";
@@ -609,6 +609,8 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
         // `roll loop watch` follows. The generated snapshot is folded through
         // loop-fmt's ActivitySignal renderer; browser polling reads only.
         liveFeed: slotData(snapshot.panels?.liveFeed, pausedLiveFeed(cwd, renderNowSec())),
+        // FIX-1048: wire the always-on loop digest into the Truth Console.
+        loopDigestHref: loopDigestHref(cwd),
         // US-OBS-019: project switcher rows now come from collectDossierState,
         // where the reachable filter runs at the shared read-side selector.
         projects: snapshot.projects,

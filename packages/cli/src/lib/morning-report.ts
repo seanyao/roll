@@ -1,4 +1,4 @@
-import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, buildMorningReportModel, type MorningReportModel, type MorningRunRow } from "@roll/core";
+import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, buildLoopDigestModel, type LoopDigestModel, type MorningRunRow } from "@roll/core";
 import { parseEventLine, type RollEvent } from "@roll/spec";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -51,7 +51,7 @@ function list(xs: string[], empty: string): string {
   return xs.length === 0 ? `<span class="muted">${esc(empty)}</span>` : xs.map((x) => `<code>${esc(x)}</code>`).join(" ");
 }
 
-export function renderMorningReportHtml(model: MorningReportModel): string {
+export function renderLoopDigestHtml(model: LoopDigestModel): string {
   const money = `$${model.totalCostUsd.toFixed(4)}`;
   const alertItems = model.alerts.length === 0
     ? `<li><span class="muted">No active alert in this window · 本窗口无 ALERT</span></li>`
@@ -59,11 +59,11 @@ export function renderMorningReportHtml(model: MorningReportModel): string {
   return (
     `<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n` +
     `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
-    `<title>Roll · Morning Report</title>\n<style>\n${CHROME_CSS}` +
+    `<title>Roll · Loop Digest</title>\n<style>\n${CHROME_CSS}` +
     `body{max-width:960px}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:20px 0}.tile{border:1px solid var(--line);border-radius:8px;padding:14px;background:var(--bg-raise)}.num{font:700 28px/1 var(--mono);color:var(--pass)}.muted{color:var(--muted)}.pause{color:${model.paused ? "var(--fail)" : "var(--pass)"};font-weight:700}.section{border-top:1px solid var(--line);padding-top:18px;margin-top:18px}code{margin-right:6px}ul{padding-left:22px}</style>\n` +
     `${CHROME_SCRIPT}\n</head>\n<body>\n${CHROME_CONTROLS}\n` +
-    `<p class="crumb"><a href="../../features/index.html">Features Index</a> / Morning Report</p>\n` +
-    `<div class="masthead"><p class="kicker">Roll · Morning Report · 夜间运行晨报</p>` +
+    `<p class="crumb"><a href="../../features/index.html">Features Index</a> / Loop Digest</p>\n` +
+    `<div class="masthead"><p class="kicker">Roll · Loop Digest</p>` +
     `<h1>Unattended Loop Summary</h1>` +
     `<p class="lede">${esc(iso(model.windowStart))} → ${esc(iso(model.windowEnd))}</p></div>\n` +
     `<div class="grid">` +
@@ -82,12 +82,21 @@ export function renderMorningReportHtml(model: MorningReportModel): string {
   );
 }
 
-export function morningReportHref(projectPath: string): string | undefined {
-  const report = join(projectPath, ".roll", "reports", "morning", "latest.html");
-  return existsSync(report) ? "../reports/morning/latest.html" : undefined;
+/** @deprecated Use renderLoopDigestHtml instead. */
+export const renderMorningReportHtml = renderLoopDigestHtml;
+
+export function loopDigestHref(projectPath: string): string | undefined {
+  const report = join(projectPath, ".roll", "reports", "loop", "latest.html");
+  if (existsSync(report)) return "../reports/loop/latest.html";
+  // Compatibility: fall back to legacy morning path if loop digest hasn't been written yet
+  const legacy = join(projectPath, ".roll", "reports", "morning", "latest.html");
+  return existsSync(legacy) ? "../reports/morning/latest.html" : undefined;
 }
 
-export function writeLatestMorningReport(
+/** @deprecated Use loopDigestHref instead. */
+export const morningReportHref = loopDigestHref;
+
+export function writeLatestLoopDigest(
   projectPath: string,
   eventsPath: string,
   runsPath: string,
@@ -95,25 +104,34 @@ export function writeLatestMorningReport(
 ): string {
   const windowEnd = nowSec;
   const windowStart = nowSec - 12 * 60 * 60;
-  const model = buildMorningReportModel(readEvents(eventsPath), readRuns(runsPath), {
+  const model = buildLoopDigestModel(readEvents(eventsPath), readRuns(runsPath), {
     windowStart,
     windowEnd,
     runDelivered: (row, now) => rowDelivered(row, now),
   });
-  const dir = join(projectPath, ".roll", "reports", "morning");
-  const latest = join(dir, "latest.html");
-  const dated = join(dir, `${new Date(nowSec * 1000).toISOString().slice(0, 10)}.html`);
-  mkdirSync(dir, { recursive: true });
-  const html = renderMorningReportHtml(model);
+  // Primary path: neutral loop digest
+  const primaryDir = join(projectPath, ".roll", "reports", "loop");
+  const latest = join(primaryDir, "latest.html");
+  const dated = join(primaryDir, `${new Date(nowSec * 1000).toISOString().slice(0, 10)}.html`);
+  mkdirSync(primaryDir, { recursive: true });
+  const html = renderLoopDigestHtml(model);
   writeFileSync(latest, html, "utf8");
   writeFileSync(dated, html, "utf8");
+  // Compatibility: also write to legacy morning path so existing links don't break
+  try {
+    const legacyDir = join(projectPath, ".roll", "reports", "morning");
+    mkdirSync(legacyDir, { recursive: true });
+    writeFileSync(join(legacyDir, "latest.html"), html, "utf8");
+  } catch {
+    /* best-effort compatibility alias */
+  }
   try {
     mkdirSync(dirname(eventsPath), { recursive: true });
     appendFileSync(
       eventsPath,
       `${JSON.stringify({
-        type: "report:morning",
-        path: ".roll/reports/morning/latest.html",
+        type: "report:loop-digest",
+        path: ".roll/reports/loop/latest.html",
         windowStart,
         windowEnd,
         cycles: model.cycles,
@@ -128,3 +146,6 @@ export function writeLatestMorningReport(
   }
   return latest;
 }
+
+/** @deprecated Use writeLatestLoopDigest instead. */
+export const writeLatestMorningReport = writeLatestLoopDigest;

@@ -278,6 +278,32 @@ describe("cycle-role-summary", () => {
       expect(summary.sources).toContain(".roll/loop/peer/cycle-CODE-STAGE.pair.json");
     });
 
+    it("FIX-1054: serial-skipped candidates surface as `skipped` role attempts (not zero-cost peers)", () => {
+      const events: RollEvent[] = [
+        { type: "cycle:start", cycleId: "SERIAL", storyId: "FIX-1054", agent: "reasonix", model: "m", ts: 100 },
+        // pi is selected+accepted; kimi + claude were never spawned (policy skip).
+        { type: "pair:selected", cycleId: "SERIAL", workingAgent: "reasonix", peer: "pi", stage: "score", attempt: 1, reason: "ranked_candidate", ts: 200 },
+        { type: "pair:score", cycleId: "SERIAL", peer: "pi", score: 9, verdict: "good", cost: 0.02, stage: "score", ts: 300 },
+        { type: "pair:skipped", cycleId: "SERIAL", peers: ["kimi", "claude"], reason: "accepted_score", stage: "score", ts: 400 },
+      ];
+      const summary = buildCycleRoleSummary({
+        cycleId: "SERIAL",
+        events,
+        eventsPath: ".roll/loop/events.ndjson",
+        peerDir: ".roll/loop/peer",
+        cycleLogDir: ".roll/loop/cycle-logs",
+      });
+      // the accepted evaluator is present and accepted
+      const accepted = summary.roles.find((r) => r.role === "evaluator" && r.agent === "pi");
+      expect(accepted?.state).toBe("accepted");
+      // the two untried candidates are visible AS skipped-by-policy, not spent
+      const kimi = summary.roles.find((r) => r.role === "evaluator" && r.agent === "kimi");
+      const claude = summary.roles.find((r) => r.role === "evaluator" && r.agent === "claude");
+      expect(kimi?.state).toBe("skipped");
+      expect(kimi?.detail).toBe("accepted_score");
+      expect(claude?.state).toBe("skipped");
+    });
+
     it("selects only events for the targeted cycle", () => {
       const noisy: RollEvent[] = [
         ...fixtureEvents,

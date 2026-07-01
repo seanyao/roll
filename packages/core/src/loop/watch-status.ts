@@ -12,6 +12,9 @@ export interface WatchStatusSummary {
   tcrCount: number;
   lastSignal?: string;
   lastSignalAt?: number;
+  acceptedScore?: { peer: string; score: number; verdict: string };
+  attest?: { verdict: string; scoreReason?: string };
+  lastPr?: { type: string; prNumber: number };
   outcome?: string;
   hasEnd: boolean;
 }
@@ -47,6 +50,8 @@ function signalLabel(ev: RollEvent): string | undefined {
     case "cycle:first_edit":
       return `first edit ${shortHash(ev.commitHash)}`;
     case "cycle:end":
+      return `cycle ${ev.outcome}`;
+    case "cycle:terminal":
       return `cycle ${ev.outcome}`;
     case "visual:gate":
       return `visual ${ev.verdict}`;
@@ -102,6 +107,10 @@ function signalLabel(ev: RollEvent): string | undefined {
   }
 }
 
+function scoreReason(reasons: readonly string[]): string | undefined {
+  return reasons.find((r) => /score/i.test(r));
+}
+
 export function summarizeWatchEvents(lines: readonly string[], durableLookup?: DurableCycleLookup): WatchStatusSummary | null {
   const summary: WatchStatusSummary = { tcrCount: 0, hasEnd: false };
   let seen = false;
@@ -117,19 +126,34 @@ export function summarizeWatchEvents(lines: readonly string[], durableLookup?: D
       summary.tcrCount = 0;
       summary.outcome = undefined;
       summary.hasEnd = false;
+      summary.acceptedScore = undefined;
+      summary.attest = undefined;
+      summary.lastPr = undefined;
     } else if (ev.type === "cycle:phase") {
       summary.cycleId = ev.cycleId;
       summary.phase = ev.phase;
     } else if (ev.type === "cycle:tcr") {
       summary.cycleId = ev.cycleId;
       summary.tcrCount += 1;
-    } else if (ev.type === "cycle:end") {
+    } else if (ev.type === "cycle:end" || ev.type === "cycle:terminal") {
       summary.cycleId = ev.cycleId;
       summary.outcome = ev.outcome;
       summary.hasEnd = true;
     }
+
+    if (ev.type === "pair:score") {
+      summary.acceptedScore = { peer: ev.peer, score: ev.score, verdict: ev.verdict };
+    } else if (ev.type === "attest:gate") {
+      summary.attest = { verdict: ev.verdict, scoreReason: scoreReason(ev.reasons) };
+    } else if (ev.type === "pr:open" || ev.type === "pr:merge" || ev.type === "pr:close" || ev.type === "pr:rebase") {
+      summary.lastPr = { type: ev.type, prNumber: ev.prNumber };
+    }
+
+    // US-OBS-045: accepted evaluator score and attest gate are surfaced as
+    // dedicated summary segments; don't let them overwrite the latest
+    // non-accepted signal (e.g. a later pair:consult or pr:open).
     const label = signalLabel(ev);
-    if (label !== undefined) {
+    if (label !== undefined && ev.type !== "pair:score" && ev.type !== "attest:gate") {
       summary.lastSignal = label;
       summary.lastSignalAt = ev.ts;
     }
@@ -161,15 +185,54 @@ function quietText(summary: WatchStatusSummary, nowMs: number): string {
   return `quiet ${min}m`;
 }
 
+function prStateLabel(type: string): string {
+  switch (type) {
+    case "pr:open":
+      return "open";
+    case "pr:merge":
+      return "merged";
+    case "pr:close":
+      return "closed";
+    case "pr:rebase":
+      return "rebase";
+    default:
+      return type;
+  }
+}
+
 export function renderWatchStatusSummary(summary: WatchStatusSummary, nowMs: number): string {
   const cycle = summary.cycleId !== undefined ? `cycle ${shortCycle(summary.cycleId)}` : "cycle unknown";
   const story = summary.storyId !== undefined && summary.storyId !== "" ? summary.storyId : "story unknown";
   const agent = summary.agent !== undefined && summary.agent !== "" ? summary.agent : "agent unknown";
   const phase = summary.phase !== undefined ? `phase ${summary.phase}` : "phase unknown";
   const tcr = `${summary.tcrCount} TCR`;
-  const last = summary.lastSignal !== undefined ? `last ${clean(summary.lastSignal)}` : "last signal unknown";
-  const outcome = summary.hasEnd ? `outcome ${summary.outcome ?? "unknown"}` : "outcome unknown/no end event";
-  return `status  ${phase} · ${quietText(summary, nowMs)} · ${story} · ${agent} · ${cycle} · ${tcr} · ${last} · ${outcome}`;
+
+  const parts: string[] = [`status  ${phase}`, quietText(summary, nowMs), story, agent, cycle, tcr];
+
+  if (summary.acceptedScore !== undefined) {
+    parts.push(`score ${clean(summary.acceptedScore.peer)} ${summary.acceptedScore.score}/${summary.acceptedScore.verdict}`);
+  }
+  if (summary.attest !== undefined) {
+    const attest = `attest ${summary.attest.verdict}`;
+    parts.push(summary.attest.scoreReason !== undefined ? `${attest} · ${summary.attest.scoreReason}` : attest);
+  }
+
+  if (summary.lastSignal !== undefined) {
+    parts.push(`last ${clean(summary.lastSignal)}`);
+  }
+
+  if (summary.hasEnd) {
+    const outcome = `outcome ${summary.outcome ?? "unknown"}`;
+    if (summary.lastPr !== undefined) {
+      parts.push(`${outcome} · PR #${summary.lastPr.prNumber} ${prStateLabel(summary.lastPr.type)}`);
+    } else {
+      parts.push(outcome);
+    }
+  } else {
+    parts.push("outcome unknown/no end event");
+  }
+
+  return parts.join(" · ");
 }
 
 export function renderWatchStatusFromEventLines(lines: readonly string[], nowMs: number, durableLookup?: DurableCycleLookup): string | null {

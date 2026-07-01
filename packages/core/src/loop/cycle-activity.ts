@@ -11,7 +11,7 @@ function segmentForMarker(marker: string): Segment {
   if (marker === "cycle:start") return "cycle";
   if (marker === "cycle:end") return "end";
   if (marker.startsWith("phase:") || marker === "tcr" || marker === "first-edit" || marker === "build:heartbeat") return "build";
-  if (marker.startsWith("peer")) return "peer";
+  if (marker.startsWith("peer") || marker.startsWith("pair:")) return "peer";
   if (marker.startsWith("ci:") || marker === "attest:gate" || marker === "visual:gate" || marker === "evidence:frame-opened") return "ci";
   if (marker.startsWith("pr:")) return "pr";
   if (marker === "alert") return "end";
@@ -22,7 +22,7 @@ function kindForMarker(marker: string): ActivityKind {
   if (marker === "tcr") return "tcr";
   if (marker === "build:heartbeat") return "heartbeat";
   if (marker.startsWith("pr:")) return "pr";
-  if (marker.startsWith("ci:") || marker.endsWith(":gate") || marker === "evidence:frame-opened") return "gate";
+  if (marker.startsWith("ci:") || marker.endsWith(":gate") || marker.startsWith("pair:") || marker === "evidence:frame-opened") return "gate";
   if (marker === "alert") return "alert";
   return "lifecycle";
 }

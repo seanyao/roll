@@ -120,7 +120,7 @@ describe("watch-status — durable cycle lookup (FIX-382)", () => {
     expect(rendered).toContain("last pair kimi refine (3 findings)");
   });
 
-  it("shows pair:score as last signal", () => {
+  it("renders accepted pair:score as a dedicated score segment", () => {
     const rendered = renderWatchStatusFromEventLines(
       [
         line({ type: "cycle:start", cycleId: "c1", storyId: "US-X", agent: "codex", model: "m", ts: 1_000 }),
@@ -128,7 +128,77 @@ describe("watch-status — durable cycle lookup (FIX-382)", () => {
       ],
       3_000,
     );
-    expect(rendered).toContain("last pair kimi 8 good");
+    expect(rendered).toContain("score kimi 8/good");
+  });
+
+  it("keeps accepted score visible when a later pair:consult arrives", () => {
+    const rendered = renderWatchStatusFromEventLines(
+      [
+        line({ type: "cycle:start", cycleId: "c1", storyId: "FIX-1050", agent: "kimi", model: "m", ts: 1_000 }),
+        line({ type: "pair:score", cycleId: "c1", peer: "pi", score: 9, verdict: "good", cost: 0.05, stage: "score", ts: 2_000 }),
+        line({ type: "pair:consult", cycleId: "c1", peer: "claude", durationMs: 45_000, outcome: "reviewed", ts: 3_000 }),
+      ],
+      4_000,
+    );
+    expect(rendered).toContain("score pi 9/good");
+    expect(rendered).toContain("last pair claude reviewed 45.0s");
+  });
+
+  it("renders attest:gate verdict and the score-related reason", () => {
+    const rendered = renderWatchStatusFromEventLines(
+      [
+        line({ type: "cycle:start", cycleId: "c1", storyId: "FIX-1050", agent: "kimi", model: "m", ts: 1_000 }),
+        line({ type: "pair:score", cycleId: "c1", peer: "pi", score: 9, verdict: "good", cost: 0.05, stage: "score", ts: 2_000 }),
+        line({
+          type: "attest:gate",
+          cycleId: "c1",
+          verdict: "produced",
+          reasons: ["fresh acceptance report present", "review-score good 9/10 present"],
+          ts: 3_000,
+        }),
+      ],
+      4_000,
+    );
+    expect(rendered).toContain("attest produced");
+    expect(rendered).toContain("review-score good 9/10 present");
+    expect(rendered).toContain("score pi 9/good");
+  });
+
+  it("shows score failures as last signal, distinct from accepted score", () => {
+    const rendered = renderWatchStatusFromEventLines(
+      [
+        line({ type: "cycle:start", cycleId: "c1", storyId: "US-X", agent: "codex", model: "m", ts: 1_000 }),
+        line({ type: "pair:score-failure", cycleId: "c1", peer: "claude", cause: "unparseable", stage: "score", ts: 2_000 }),
+      ],
+      3_000,
+    );
+    expect(rendered).toContain("last pair claude unparseable");
+    expect(rendered).not.toContain("score claude");
+  });
+
+  it("replaces unknown outcome with terminal outcome and PR state when cycle:end arrives", () => {
+    const rendered = renderWatchStatusFromEventLines(
+      [
+        line({ type: "cycle:start", cycleId: "c1", storyId: "FIX-1050", agent: "kimi", model: "m", ts: 1_000 }),
+        line({ type: "pr:open", prNumber: 1111, storyId: "FIX-1050", ts: 2_000 }),
+        line({ type: "cycle:end", cycleId: "c1", outcome: "published_pending_merge", cost: { cycleId: "c1", agent: "kimi", model: "m", tokensIn: 0, tokensOut: 0, estimatedCost: 0, revertCount: 0, effectiveCost: 0 }, ts: 3_000 }),
+      ],
+      4_000,
+    );
+    expect(rendered).toContain("outcome published_pending_merge");
+    expect(rendered).toContain("PR #1111 open");
+    expect(rendered).not.toContain("outcome unknown/no end event");
+  });
+
+  it("recognizes cycle:terminal as a terminal outcome", () => {
+    const rendered = renderWatchStatusFromEventLines(
+      [
+        line({ type: "cycle:start", cycleId: "c1", storyId: "US-X", agent: "codex", model: "m", ts: 1_000 }),
+        line({ type: "cycle:terminal", schema: 1, cycleId: "c1", storyId: "US-X", agent: "codex", model: "m", startedAt: 1_000, endedAt: 2_000, outcome: "delivered", pr: { present: false, reason: "not_applicable" }, branch: { present: false, reason: "not_applicable" }, commit: { present: false, reason: "not_applicable" }, tcr: { present: true, value: 1 }, attest: { present: false, reason: "not_applicable" }, usage: { present: false, reason: "not_applicable" }, cost: { present: true, value: { estimatedUsd: 0.1, effectiveUsd: 0.1 } }, ts: 2_000 }),
+      ],
+      3_000,
+    );
+    expect(rendered).toContain("outcome delivered");
   });
 
   it("shows pair:consult as last signal", () => {

@@ -581,6 +581,42 @@ describe("authCooldownExclusions (FIX-1056 same-envelope auth cooldown)", () => 
     expect(cd.has("reasonix")).toBe(false);
     expect(cd.has("claude")).toBe(false);
   });
+
+  // The executor turns the cooldown Map into the `isAvailable` predicate the
+  // pairing selector consults. This proves the end-to-end selection contract:
+  // a genuinely auth-blocked agy is excluded and the NEXT eligible candidate is
+  // chosen, while a passing (no-streak) agy stays fully eligible.
+  const installed = ["reasonix", "agy", "kimi"];
+  const cfg = defaultPairingConfig(installed);
+  const availableExcept = (cd: Map<string, number>) => (a: string): boolean => !cd.has(a);
+
+  it("agy stays eligible when it has NOT hit the auth-failure threshold (readiness passes)", () => {
+    const cd = authCooldownExclusions([agyReviewBlock()]); // one blip — no cooldown
+    const got = selectPairingCandidates({
+      installed,
+      isAvailable: availableExcept(cd),
+      workingAgent: "reasonix",
+      stage: "code",
+      cfg,
+      cycleId: "c-eligible",
+    });
+    expect(got).toContain("agy");
+  });
+
+  it("a cooled-down agy is excluded and the next eligible candidate is chosen", () => {
+    const cd = authCooldownExclusions([agyReviewBlock(), agyScoreBlock()]); // streak=2 → cooldown
+    const got = selectPairingCandidates({
+      installed,
+      isAvailable: availableExcept(cd),
+      workingAgent: "reasonix",
+      stage: "code",
+      cfg,
+      cycleId: "c-cooled",
+    });
+    expect(got).not.toContain("agy");
+    expect(got.length).toBeGreaterThan(0); // a heterogeneous peer is still chosen (kimi)
+    expect(got).toContain("kimi");
+  });
 });
 
 describe("aggregatePairingCost — pair:excluded (FIX-346)", () => {

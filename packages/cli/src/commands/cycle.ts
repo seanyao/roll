@@ -7,11 +7,13 @@
  */
 import { parseEventLine, resolveLang, type CycleRoleSummary, type RollEvent } from "@roll/spec";
 import {
+  analyzeCycleActivity,
   buildCycleRoleSummary,
   cycleActivitySignalsFromEvents,
   projectCollabCycle,
   renderCycleRolesForTerminal,
   type ActivitySignal,
+  type CycleActivityAnalysis,
 } from "@roll/core";
 import { existsSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
@@ -28,19 +30,22 @@ import { renderCollabCycle, renderLegend, type CollabRenderNoise } from "../lib/
 
 export const CYCLE_USAGE =
   "Usage: roll cycle <id>\n" +
+  "       roll cycle <id> --activity [--json]\n" +
   "       roll cycle <id> --roles [--json]\n" +
   "       roll cycle <id> --collab [--json] [--no-color]\n" +
   "       roll cycle --legend [--no-color]\n" +
   "       roll cycle watch [<id>] [--once] [--since <lines>] [--json]\n" +
-  "  One cycle's full trace tape, a read-only ActivitySignal watch window, or a\n" +
-  "  collaboration relay view.\n" +
-  "  --roles   Show the execution cast (builder, reviewers, evaluators, gates).\n" +
-  "  --collab  Show the cycle as a protocol relay (assign → build → peer → score → gate).\n" +
-  "  --legend  Print the Layer A collaboration protocol legend.\n" +
-  "单个 cycle 的完整轨迹带、只读 ActivitySignal 实时窗口或协同协议链视图。\n" +
-  "  --roles   显示执行选角（构建者、评审人、评估者、门禁）。\n" +
-  "  --collab  以协议链形式展示 cycle（指派 → 建造 → 评审 → 打分 → 闸门）。\n" +
-  "  --legend  打印 Layer A 协同协议读法头。";
+  "  One cycle's full trace tape, a read-only ActivitySignal watch window, a\n" +
+  "  supervisor-facing activity explanation, or a collaboration relay view.\n" +
+  "  --activity  Explain why this cycle is active, silent, or advisory (US-OBS-042).\n" +
+  "  --roles     Show the execution cast (builder, reviewers, evaluators, gates).\n" +
+  "  --collab    Show the cycle as a protocol relay (assign → build → peer → score → gate).\n" +
+  "  --legend    Print the Layer A collaboration protocol legend.\n" +
+  "单个 cycle 的完整轨迹带、只读 ActivitySignal 实时窗口、督导活动说明或协同协议链视图。\n" +
+  "  --activity  解释本 cycle 为何活跃/静默/有何 advisory 状态（US-OBS-042）。\n" +
+  "  --roles     显示执行选角（构建者、评审人、评估者、门禁）。\n" +
+  "  --collab    以协议链形式展示 cycle（指派 → 建造 → 评审 → 打分 → 闸门）。\n" +
+  "  --legend    打印 Layer A 协同协议读法头。";
 
 const CYCLE_WATCH_USAGE =
   "Usage: roll cycle watch [<id>] [--once] [--since <lines>] [--json]\n" +
@@ -538,6 +543,53 @@ function cycleCollabCommand(handle: string, cycleId: string, json: boolean, noCo
   return 0;
 }
 
+/** US-OBS-042 — supervisor-facing activity explanation for one cycle. */
+function renderCycleActivity(analysis: CycleActivityAnalysis, json: boolean): string {
+  if (json) return JSON.stringify(analysis, null, 2) + "\n";
+  const lines: string[] = [];
+  lines.push(`cycle ${analysis.cycleId}`);
+  lines.push(`classification ${analysis.classification}`);
+  lines.push(`quiet ${analysis.quietSec}s · ${analysis.tcrCount} TCR`);
+  if (analysis.microStep !== undefined) {
+    lines.push(`micro-step ${analysis.microStep.actionId}: ${analysis.microStep.summary}`);
+    lines.push(`  evidence: ${analysis.microStep.expectedEvidence}`);
+    lines.push(`  scope: ${analysis.microStep.fileAreaScope.join(", ")}`);
+  }
+  if (analysis.testTransition !== undefined) {
+    lines.push(
+      `test:${analysis.testTransition.state} at +${Math.floor(analysis.testTransition.at / 1000)}s (${analysis.testTransition.source})`,
+    );
+  }
+  if (analysis.greenUncommitted !== undefined) {
+    lines.push(`green-uncommitted ${analysis.greenUncommitted.durationSec}s (advisory)`);
+  }
+  if (analysis.oversizedAction !== undefined) {
+    lines.push(
+      `action oversized · ${analysis.oversizedAction.filesTouched} files / ${analysis.oversizedAction.contractAreas} areas (advisory)`,
+    );
+  }
+  return lines.join("\n") + "\n";
+}
+
+function cycleActivityCommand(handle: string, json: boolean): number {
+  const rt = runtimeDir(process.cwd());
+  const eventsPath = join(rt, "events.ndjson");
+  const events = readEvents(eventsPath);
+  const rows = collectCycleLedger(process.cwd());
+  const cycleId =
+    findCycle(rows, handle)?.cycleId ?? (events.some((ev) => cycleEventId(ev) === handle) ? handle : undefined);
+  if (cycleId === undefined) {
+    process.stderr.write(`[roll] no cycle matches ${handle} (try roll cycles --since all)\n`);
+    return 1;
+  }
+  // Test seam: ROLL_CYCLE_ACTIVITY_NOW_MS pins the analysis clock.
+  const nowMsRaw = (process.env["ROLL_CYCLE_ACTIVITY_NOW_MS"] ?? "").trim();
+  const nowMs = nowMsRaw !== "" ? Number(nowMsRaw) : Date.now();
+  const analysis = analyzeCycleActivity(events, cycleId, nowMs);
+  process.stdout.write(renderCycleActivity(analysis, json));
+  return 0;
+}
+
 export function cycleCommand(args: string[]): number | Promise<number> {
   const noColor = args.includes("--no-color") || !process.stdout.isTTY || (process.env["NO_COLOR"] ?? "") !== "";
   renderState.useColor = !noColor;
@@ -553,11 +605,12 @@ export function cycleCommand(args: string[]): number | Promise<number> {
     process.stdout.write(renderLegend({ color: !noColor, fold: true }) + "\n");
     return 0;
   }
+  const activity = args.includes("--activity");
   const roles = args.includes("--roles");
   const collab = args.includes("--collab");
   const json = args.includes("--json");
   // kimi pair-review: reject unknown flags like `roll cycles` does.
-  const unknown = args.filter((a) => a.startsWith("-") && a !== "--no-color" && a !== "--help" && a !== "-h" && a !== "--json" && a !== "--roles" && a !== "--collab" && a !== "--legend");
+  const unknown = args.filter((a) => a.startsWith("-") && a !== "--no-color" && a !== "--help" && a !== "-h" && a !== "--json" && a !== "--roles" && a !== "--collab" && a !== "--legend" && a !== "--activity");
   if (unknown.length > 0) {
     process.stderr.write(`[roll] unknown flag: ${unknown[0]}\n${CYCLE_USAGE}\n`);
     return 1;
@@ -566,6 +619,9 @@ export function cycleCommand(args: string[]): number | Promise<number> {
   if (handle === undefined) {
     process.stderr.write(`${CYCLE_USAGE}\n`);
     return 1;
+  }
+  if (activity) {
+    return cycleActivityCommand(handle, json);
   }
   const rows = collectCycleLedger(process.cwd());
   const row = findCycle(rows, handle);

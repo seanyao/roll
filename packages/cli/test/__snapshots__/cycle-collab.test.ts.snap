@@ -1,0 +1,11 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`renderCollabCycle > snapshot: color and no-color structures match 1`] = `
+"▌ 00:00:01  FIX-1034
+   🧭 → 🔨  assign builder = pi
+      🔨  build → TCR ×1
+   🔨 → 🔎  handoff diff → reasonix   ▸agree
+      🎯  score   ▸good/8
+      🚦  gate   ▸produced
+───────────────────────────────────────────────── walked full protocol ✓"
+`;

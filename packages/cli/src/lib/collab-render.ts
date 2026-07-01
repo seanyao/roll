@@ -6,7 +6,8 @@
  * timestamps are epoch-ms values supplied by the caller.
  */
 
-import { c, stripAnsi } from "../render.js";
+import type { CollabCycleView, CollabEscalation } from "@roll/spec";
+import { c, stripAnsi, strw } from "../render.js";
 
 /** Layer A render options. */
 export interface RenderOpt {
@@ -16,6 +17,8 @@ export interface RenderOpt {
   fold: boolean;
   /** Terminal width used for box drawing. */
   width?: number;
+  /** Output language for role/action labels. */
+  lang?: "en" | "zh";
 }
 
 /** Canonical role glyphs from the Layer A protocol. */
@@ -154,5 +157,155 @@ export function renderLegend(opt: RenderOpt): string {
     verdictLine,
     terminusLine,
   ];
+  return lines.join("\n");
+}
+
+// ── US-OBS-039: single-cycle collaboration view ───────────────────────────────
+
+const LABELS = {
+  en: {
+    assign: "assign builder =",
+    build: "build → TCR",
+    handoffDiff: "handoff diff →",
+    review: "peer review",
+    score: "score",
+    gate: "gate",
+    escalation: "escalation",
+    batonReturned: "baton returned from",
+    toSupervisor: "to supervisor",
+    walkedFull: "walked full protocol",
+    split: "split",
+    escalated: "escalated",
+    supervisorFix: "supervisor fix",
+    incomplete: "incomplete",
+    scoreFailures: "score-failure folded",
+    peerConsults: "peer consult folded",
+  },
+  zh: {
+    assign: "指派 builder =",
+    build: "建造 → TCR",
+    handoffDiff: "交 diff →",
+    review: "peer 评审",
+    score: "打分",
+    gate: "闸门",
+    escalation: "升级",
+    batonReturned: "棒子从",
+    toSupervisor: "退回 supervisor",
+    walkedFull: "走完整条协议链",
+    split: "拆分",
+    escalated: "升级",
+    supervisorFix: "兜底亲建",
+    incomplete: "未完结",
+    scoreFailures: "score-failure 已折叠",
+    peerConsults: "peer consult 已折叠",
+  },
+};
+
+function mapFromRole(role: string): RoleKey {
+  if (role === "build") return "build";
+  if (role === "score") return "score";
+  if (role === "review" || role === "peer") return "peer";
+  return "supervise";
+}
+
+function terminusParts(terminus: CollabCycleView["terminus"], labels: (typeof LABELS)["en"]): [string, string] {
+  switch (terminus) {
+    case "walked_full":
+      return [TERMINUS_GLYPH.walked_full, labels.walkedFull];
+    case "escalated":
+      return [TERMINUS_GLYPH.escalated, labels.escalated];
+    case "split":
+      return [TERMINUS_GLYPH.split, labels.split];
+    case "supervisor_fix":
+      return [TERMINUS_GLYPH.supervisor_fix, labels.supervisorFix];
+    default:
+      return ["", labels.incomplete];
+  }
+}
+
+function escalationLines(
+  e: CollabEscalation,
+  supervisor: string,
+  opt: RenderOpt,
+  labels: (typeof LABELS)["en"],
+): string[] {
+  const fromRoleKey = mapFromRole(e.fromRole);
+  const fromGlyph = renderRole(fromRoleKey, opt);
+  const supGlyph = renderRole("supervise", opt);
+  const header = `${labels.batonReturned} ${fromGlyph} ${e.fromRole} ${labels.toSupervisor} ${supGlyph}`;
+  const detail = e.detail ? ` (${e.detail})` : "";
+  const actionLine = `${renderRole("diagnose", opt)} ${supervisor} ${e.supervisorAction}${detail}`;
+  return [header, actionLine];
+}
+
+/** Optional noise counters shown as folded pointers. */
+export interface CollabRenderNoise {
+  scoreFailures?: number;
+  peerConsults?: number;
+}
+
+/** Render a single cycle as a protocol relay with handoffs and escalation. */
+export function renderCollabCycle(
+  view: CollabCycleView,
+  opt: RenderOpt,
+  noise?: CollabRenderNoise,
+): string {
+  const lang = opt.lang ?? "en";
+  const labels = LABELS[lang];
+  const lines: string[] = [];
+
+  lines.push(`▌ ${formatTimeSpine(view.startedAtMs, opt)}  ${view.storyId}`);
+
+  if (view.stance && view.stance.level !== "supervise") {
+    const roleGlyph = renderRole("supervise", opt);
+    const levelText = view.stance.level === "plan" ? "planner" : "supervisor fix";
+    lines.push(`   ${roleGlyph}  ${levelText}${view.stance.note ? ` — ${view.stance.note}` : ""}`);
+  }
+
+  for (const h of view.handoffs) {
+    switch (h.kind) {
+      case "assign": {
+        lines.push(`   ${renderHandoff("supervise", "build", opt)}  ${labels.assign} ${h.agent ?? "?"}`);
+        break;
+      }
+      case "build": {
+        lines.push(`      ${renderRole("build", opt)}  ${labels.build} ×${h.folded ?? 1}`);
+        break;
+      }
+      case "review": {
+        const peers = view.cast.peers.length > 0 ? view.cast.peers.join(" · ") : (h.agent ?? "?");
+        const verdict = h.verdict ? withColor(opt, "green", `▸${h.verdict}`) : "";
+        lines.push(`   ${renderHandoff("build", "peer", opt)}  ${labels.handoffDiff} ${peers}   ${verdict}`);
+        break;
+      }
+      case "score": {
+        const verdict = h.verdict ? withColor(opt, "green", `▸${h.verdict}`) : "";
+        lines.push(`      ${renderRole("score", opt)}  ${labels.score}   ${verdict}`);
+        break;
+      }
+      case "gate": {
+        const verdict = h.verdict ? withColor(opt, "green", `▸${h.verdict}`) : "";
+        lines.push(`      ${GATE_GLYPH}  ${labels.gate}   ${verdict}`);
+        break;
+      }
+    }
+  }
+
+  if (view.escalation) {
+    lines.push(renderEscalationCallout(escalationLines(view.escalation, view.cast.supervise, opt, labels), opt));
+  }
+
+  if (noise?.scoreFailures && noise.scoreFailures > 0) {
+    lines.push(`   (+${noise.scoreFailures} ${labels.scoreFailures})`);
+  }
+  if (noise?.peerConsults && noise.peerConsults > 0) {
+    lines.push(`   (+${noise.peerConsults} ${labels.peerConsults})`);
+  }
+
+  const [termGlyph, termLabel] = terminusParts(view.terminus, labels);
+  const termText = `${termLabel} ${termGlyph}`;
+  const ruleWidth = Math.max(2, boxWidth(opt) - strw(termText) - 1);
+  lines.push(`${"─".repeat(ruleWidth)} ${termText}`);
+
   return lines.join("\n");
 }

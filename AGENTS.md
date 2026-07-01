@@ -71,3 +71,15 @@ skills 是 markdown + shell，在独立仓 `seanyao/roll-skills`（submodule 挂
 ## 9. Where to Look
 
 - 领域上下文与真相边界见 `.roll/domain/context-map.md`。
+
+## 10. Prime (supervise role)
+
+If you are coordinating the backlog as **Prime** (project-level `supervise` role),
+not implementing a Story as Builder:
+
+1. Load the **`roll-prime`** skill (`skills/roll-prime/SKILL.md`).
+2. Read project overlay **`.roll/prime.local.md`** when present (roll-meta).
+3. Prefer **`roll supervisor next/why --json`** and event-backed facts over intuition.
+4. Pair with **`roll-loop`** for scheduler mechanics only; Prime owns reconcile,
+   dispatch, watch, and meta reconciliation discipline.
+5. Do not mix Prime coordination with default Builder work on the same card.

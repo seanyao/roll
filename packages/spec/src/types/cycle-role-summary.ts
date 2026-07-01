@@ -19,6 +19,10 @@ export type CycleRoleAttemptState =
   | "accepted"
   | "rejected"
   | "failed"
+  // FIX-1054: a candidate NOT spawned because the serial cost-aware dispatch
+  // already accepted a reviewer/evaluator — a POLICY decision, not a zero-cost
+  // attempted peer. Makes skipped candidates visible AS skipped in cost/cycle views.
+  | "skipped"
   | "not_required"
   | "not_available";
 

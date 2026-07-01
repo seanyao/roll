@@ -227,14 +227,37 @@ export function watchRenderEventFromRollEvent(ev: RollEvent, mode: WatchMode = "
         severity: "muted",
       };
     // ── FIX-934: pair:* event rendering ────────────────────────────────────
-    case "pair:selected":
+    case "pair:selected": {
+      // FIX-1054: a fallback selection (attempt ≥ 2) carries its reason so the
+      // ledger shows WHY a later candidate was chosen.
+      const attemptTag = ev.attempt !== undefined && ev.attempt > 1 ? ` · attempt ${ev.attempt}${ev.reason !== undefined ? ` (${text(ev.reason)})` : ""}` : "";
       return {
         kind: "gate",
         observedAt: eventTs(ev),
         cycleId: ev.cycleId,
         summary: "pair:selected",
-        detail: `${text(ev.workingAgent)} → ${text(ev.peer)} (${text(ev.stage)})`,
+        detail: `${text(ev.workingAgent)} → ${text(ev.peer)} (${text(ev.stage)})${attemptTag}`,
         severity: "normal",
+      };
+    }
+    // FIX-1054 — serial-dispatch policy events.
+    case "pair:skipped":
+      return {
+        kind: "gate",
+        observedAt: eventTs(ev),
+        cycleId: ev.cycleId,
+        summary: "pair:skipped",
+        detail: `${ev.peers.map(text).join(", ")} · ${text(ev.reason)} · ${text(ev.stage)}`,
+        severity: "normal",
+      };
+    case "pair:fanout":
+      return {
+        kind: "gate",
+        observedAt: eventTs(ev),
+        cycleId: ev.cycleId,
+        summary: "pair:fanout",
+        detail: `${text(ev.stage)} · ${text(ev.reason)} · limit ${ev.limit} · ${ev.peers.map(text).join(", ")}`,
+        severity: "warn",
       };
     case "pair:verdict":
       return {

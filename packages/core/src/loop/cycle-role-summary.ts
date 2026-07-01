@@ -147,6 +147,18 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
     ts: number;
   }>;
 
+  // FIX-1054: candidates the serial dispatch SKIPPED after accepting a
+  // reviewer/evaluator — recorded as a policy decision so cost/cycle views show
+  // them AS skipped, not as zero-cost attempted peers.
+  const skippedEvents = cycleEvents.filter((e) => e.type === "pair:skipped") as Array<{
+    type: "pair:skipped";
+    cycleId: string;
+    peers: string[];
+    reason: string;
+    stage: string;
+    ts: number;
+  }>;
+
   // Peer Reviewers
   for (const sel of selectedReviewers) {
     const peer = sel.peer;
@@ -334,6 +346,29 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
         state: "not_available",
         acceptedByGate: false,
         ts: na.ts,
+      });
+    }
+  }
+
+  // FIX-1054: skipped-by-policy candidates → one role attempt per skipped peer,
+  // stamped `skipped`, so the operator sees they were deliberately NOT spent (a
+  // cost decision), distinct from peers that failed or were never available.
+  for (const skip of skippedEvents) {
+    const isScore = skip.stage === "score" || skip.stage === "design";
+    for (const peer of skip.peers) {
+      // Don't double-count a peer that was actually spawned in this cycle.
+      const alreadySpawned = roles.some(
+        (r) => r.agent === peer && ((isScore && r.role === "evaluator") || (!isScore && r.role === "peer_reviewer")),
+      );
+      if (alreadySpawned) continue;
+      roles.push({
+        role: isScore ? "evaluator" : "peer_reviewer",
+        agent: peer,
+        stage: isScore ? "score" : "review",
+        state: "skipped",
+        detail: skip.reason,
+        acceptedByGate: false,
+        ts: skip.ts,
       });
     }
   }

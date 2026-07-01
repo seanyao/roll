@@ -93,6 +93,7 @@ describe("detectNoProgressStall", () => {
       cycleId: "c2",
       kind: "zero_tcr_dirty_worktree",
       detail: "the failed cycle left a preserved worktree with no TCR commit; inspect it before the retry",
+      worktreePath: ".roll/loop/worktrees/cycle-c2",
     });
   });
 });

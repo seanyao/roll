@@ -9,6 +9,7 @@ import type { GoalReviewMode, GoalSafetyGate, GoalScope, GoalStatus, GoalTransit
 import type { LoopType } from "./loop.js";
 import type { TerminalEvent, TerminalOutcome } from "./terminal.js";
 import type { TaskLevel } from "./story.js";
+import type { BuilderFinalizationFacts, BuilderFinalizationVerdict } from "./builder.js";
 
 export type RollEvent =
   // Loop lifecycle (BC2)
@@ -51,6 +52,37 @@ export type RollEvent =
   // already dirty before spawn. This is a sandbox/execution-boundary failure,
   // distinct from agent auth/network blocks.
   | { type: "sandbox:main_dirty"; cycleId: string; phase: "pre-spawn" | "post-spawn" | "capture"; files: string[]; ts: number }
+  // FIX-1068 — Builder finalization hard gate: one adapter-agnostic verdict before
+  // peer review / scoring / attest / PR creation / cleanup. Emitted on every exit
+  // so recovery surfaces can read structured facts instead of parsing logs.
+  | {
+      type: "builder:finalized";
+      cycleId: string;
+      storyId: string;
+      agent: string;
+      verdict: BuilderFinalizationVerdict;
+      facts: BuilderFinalizationFacts;
+      ts: number;
+    }
+  | {
+      type: "builder:handoff_required";
+      cycleId: string;
+      storyId: string;
+      agent: string;
+      kind: string;
+      worktreePath: string;
+      ts: number;
+    }
+  | {
+      type: "builder:boundary_violation";
+      cycleId: string;
+      storyId: string;
+      agent: string;
+      kind: "main_checkout_dirty";
+      files: string[];
+      worktreePath: string;
+      ts: number;
+    }
   | {
       type: "warm-session:resume-selected";
       cycleId: string;

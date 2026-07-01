@@ -50,6 +50,7 @@ export * from "./loop/morning-report.js";
 export * from "./loop/pr-loop.js";
 export * from "./loop/quality-gate.js";
 export * from "./loop/orchestrator.js";
+export * from "./loop/builder-finalization.js";
 export * from "./loop/recovery.js";
 export * from "./loop/review-resize.js";
 export * from "./loop/self-downgrade.js";

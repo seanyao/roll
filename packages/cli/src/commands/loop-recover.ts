@@ -152,6 +152,8 @@ function fmtStall(stall: NoProgressStall, nextBuilder: string | undefined, story
   if (stall.handoff !== undefined) {
     lines.push(
       `    handoff: cycle ${stall.handoff.cycleId} — ${stall.handoff.detail}`,
+      `      kind: ${stall.handoff.kind}`,
+      `      worktree: ${stall.handoff.worktreePath}`,
       `      inspect: roll loop log ${stall.handoff.cycleId}`,
     );
   }

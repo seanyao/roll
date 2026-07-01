@@ -159,6 +159,16 @@ describe("roll loop recover", () => {
     const ev = events().find((e) => e["type"] === "goal:recovery")!;
     expect((ev["handoff"] as Record<string, unknown>)["cycleId"]).toBe("c2");
     expect((ev["handoff"] as Record<string, unknown>)["kind"]).toBe("zero_tcr_dirty_worktree");
+    expect((ev["handoff"] as Record<string, unknown>)["worktreePath"]).toBe(".roll/loop/worktrees/cycle-c2");
+  });
+
+  it("preview surfaces the preserved worktree path for a zero-TCR handoff", () => {
+    seedGoal({ ...STALLED });
+    seedEvents([cs("c2", "REFACTOR-055", "pi", 3), ce("c2", "handoff_without_tcr", 4)]);
+    const r = run([], depsWith("reasonix"));
+    expect(r.code).toBe(0);
+    expect(r.out).toMatch(/kind: zero_tcr_dirty_worktree/);
+    expect(r.out).toMatch(/worktree: \.roll\/loop\/worktrees\/cycle-c2/);
   });
 
   it("DENIES + explains when no eligible Builder is available, leaving the goal paused", () => {

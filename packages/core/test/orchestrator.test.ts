@@ -31,6 +31,9 @@ import {
   watchdogVerdict,
   cycleTimeoutVerdict,
   stallVerdict,
+  finalizeBuilder,
+  handoffKindFor,
+  type BuilderFinalizationFacts,
   MAX_AGENT_ATTEMPTS,
   RETRY_BASE_BACKOFF_SEC,
   CYCLE_TIMEOUT_SEC,
@@ -497,6 +500,7 @@ describe("happy-path phase walk → done", () => {
       "emit_event", // cycle:start (FIX-382: now emitted at route_resolved with real storyId+agent)
       "spawn_agent",
       "capture_facts",
+      "emit_event", // FIX-1068: builder finalization gate verdict before peer/attest/PR/cleanup
       "publish_pr",
       "cleanup_worktree",
       "emit_event", // cycle:end (published — merge pending, FIX-244)
@@ -533,7 +537,36 @@ describe("happy-path phase walk → done", () => {
       },
     );
     expect(r.state.phase).toBe("publish");
-    expect(r.commands).toEqual([{ kind: "publish_pr", branch: "loop/cycle-x", docOnly: false, manualMerge: true, draft: true }]);
+    expect(r.commands).toEqual([
+      {
+        kind: "emit_event",
+        event: {
+          type: "builder:finalized",
+          cycleId: "20260605-013000-12345",
+          storyId: "FIX-909",
+          agent: "",
+          verdict: "ready_for_peer_and_attest",
+          facts: {
+            storyId: "FIX-909",
+            cycleId: "20260605-013000-12345",
+            agent: "",
+            worktreePath: ".roll/loop/worktrees/cycle-20260605-013000-12345",
+            expectedProjectPath: "",
+            processExited: true,
+            exitCode: 0,
+            commitsAhead: 2,
+            tcrCount: 0,
+            worktreeDirty: false,
+            mainCheckoutDirty: false,
+            prUrl: null,
+            attestReportPath: null,
+            recentActivity: false,
+          },
+          ts: 0,
+        },
+      },
+      { kind: "publish_pr", branch: "loop/cycle-x", docOnly: false, manualMerge: true, draft: true },
+    ]);
   });
 });
 
@@ -985,5 +1018,99 @@ describe("event-sourcing round-trip (I8)", () => {
     const rebuilt = roundTrip(emitted);
     expect(rebuilt.ended).toBe(true);
     expect(rebuilt.outcome).toBe("published_pending_merge");
+  });
+});
+
+// ── FIX-1068 — Builder finalization hard gate (adapter-agnostic) ───────────────
+
+describe("FIX-1068 — finalizeBuilder verdict mapping", () => {
+  const base: BuilderFinalizationFacts = {
+    storyId: "FIX-1063",
+    cycleId: "20260701-165024-67168",
+    agent: "reasonix",
+    worktreePath: ".roll/loop/worktrees/cycle-20260701-165024-67168",
+    expectedProjectPath: "",
+    processExited: true,
+    exitCode: 0,
+    commitsAhead: 0,
+    tcrCount: 0,
+    worktreeDirty: false,
+    mainCheckoutDirty: false,
+    prUrl: null,
+    attestReportPath: null,
+    recentActivity: false,
+  };
+
+  it("Reasonix-style: dirty worktree + zero TCR + no PR → handoff_without_tcr", () => {
+    const verdict = finalizeBuilder({ ...base, worktreeDirty: true });
+    expect(verdict).toBe("handoff_without_tcr");
+    expect(handoffKindFor(verdict)).toBe("zero_tcr_dirty_worktree");
+  });
+
+  it("Pi-style: main checkout dirty → boundary_violation", () => {
+    const verdict = finalizeBuilder({ ...base, mainCheckoutDirty: true });
+    expect(verdict).toBe("boundary_violation");
+  });
+
+  it("Kimi-style: still running + recent activity → no_progress_still_running", () => {
+    const verdict = finalizeBuilder({ ...base, processExited: false, recentActivity: true });
+    expect(verdict).toBe("no_progress_still_running");
+  });
+
+  it("clean exit + no work → gave_up_clean", () => {
+    expect(finalizeBuilder(base)).toBe("gave_up_clean");
+  });
+
+  it("TCR commit present → ready_for_peer_and_attest", () => {
+    expect(finalizeBuilder({ ...base, tcrCount: 1 })).toBe("ready_for_peer_and_attest");
+  });
+});
+
+describe("FIX-1068 — facts_captured emits builder finalization event", () => {
+  it("handoff_without_tcr emits builder:handoff_required and preserves worktree", () => {
+    const { state, commands } = walk([
+      { type: "start", ctx: CTX },
+      { type: "preflight_done" },
+      { type: "worktree_created" },
+      { type: "story_picked", storyId: "FIX-1063" },
+      { type: "route_resolved", agent: "reasonix", model: "deepseek-v4-pro" },
+      { type: "agent_exited", exit: 0, timedOut: false },
+      { type: "facts_captured", facts: { usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 0, worktreeDirty: true } },
+    ]);
+    expect(state.terminal).toBe("handoff_without_tcr");
+    const handoff = commands.find((c): c is Extract<CycleCommand, { kind: "emit_event" }> =>
+      c.kind === "emit_event" && c.event.type === "builder:handoff_required"
+    );
+    expect(handoff).toBeDefined();
+    expect(handoff?.event).toMatchObject({
+      type: "builder:handoff_required",
+      storyId: "FIX-1063",
+      agent: "reasonix",
+      kind: "zero_tcr_dirty_worktree",
+      worktreePath: `.roll/loop/worktrees/cycle-${CTX.cycleId}`,
+    });
+  });
+
+  it("main checkout dirty emits builder:boundary_violation and fails", () => {
+    const { state, commands } = walk([
+      { type: "start", ctx: CTX },
+      { type: "preflight_done" },
+      { type: "worktree_created" },
+      { type: "story_picked", storyId: "FIX-1063" },
+      { type: "route_resolved", agent: "pi", model: "k2" },
+      { type: "agent_exited", exit: 0, timedOut: false },
+      { type: "facts_captured", facts: { usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 0, mainDirty: true } },
+    ]);
+    expect(state.terminal).toBe("failed");
+    const violation = commands.find((c): c is Extract<CycleCommand, { kind: "emit_event" }> =>
+      c.kind === "emit_event" && c.event.type === "builder:boundary_violation"
+    );
+    expect(violation).toBeDefined();
+    expect(violation?.event).toMatchObject({
+      type: "builder:boundary_violation",
+      storyId: "FIX-1063",
+      agent: "pi",
+      kind: "main_checkout_dirty",
+    });
   });
 });

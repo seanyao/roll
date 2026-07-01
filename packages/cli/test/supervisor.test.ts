@@ -331,6 +331,7 @@ describe("supervisorCommand", () => {
     expect(r.out).toContain("diagnose structural failure on US-1");
     expect(r.out).toContain("zero TCR with dirty preserved worktree");
     expect(r.out).toContain("do not retry this card");
+    expect(r.out).toContain("worktree: .roll/loop/worktrees/cycle-C-zero");
     expect(r.out).not.toContain("roll loop go --cards US-2");
 
     const json = JSON.parse(run(cwd, ["why", "--json"]).out);
@@ -339,6 +340,7 @@ describe("supervisorCommand", () => {
       storyId: "US-1",
       kind: "zero_tcr_dirty_worktree",
       source: "cycle:end/C-zero",
+      worktreePath: ".roll/loop/worktrees/cycle-C-zero",
     });
   });
 

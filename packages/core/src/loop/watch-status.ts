@@ -1,4 +1,5 @@
 import { parseEventLine, type RollEvent } from "@roll/spec";
+import { analyzeCycleActivity, type CycleActivityAnalysis } from "./cycle-activity.js";
 
 /** FIX-382: durable cycle→story/agent lookup from runs.jsonl, used as fallback
  *  when the in-window events don't contain a cycle:start. */
@@ -17,6 +18,16 @@ export interface WatchStatusSummary {
   lastPr?: { type: string; prNumber: number };
   outcome?: string;
   hasEnd: boolean;
+  /** US-OBS-042: active / silent / ended classification derived from recent events. */
+  classification?: CycleActivityAnalysis["classification"];
+  /** US-OBS-042: parsed bounded micro-step plan, if emitted by the builder. */
+  microStep?: CycleActivityAnalysis["microStep"];
+  /** US-OBS-042: last detected test:red or test:green transition. */
+  testTransition?: CycleActivityAnalysis["testTransition"];
+  /** US-OBS-042: advisory green-without-commit state. */
+  greenUncommitted?: CycleActivityAnalysis["greenUncommitted"];
+  /** US-OBS-042: advisory oversized-action state. */
+  oversizedAction?: CycleActivityAnalysis["oversizedAction"];
 }
 
 const ANSI_PATTERN =
@@ -111,12 +122,14 @@ function scoreReason(reasons: readonly string[]): string | undefined {
   return reasons.find((r) => /score/i.test(r));
 }
 
-export function summarizeWatchEvents(lines: readonly string[], durableLookup?: DurableCycleLookup): WatchStatusSummary | null {
+export function summarizeWatchEvents(lines: readonly string[], durableLookup?: DurableCycleLookup, nowMs?: number): WatchStatusSummary | null {
   const summary: WatchStatusSummary = { tcrCount: 0, hasEnd: false };
+  const events: RollEvent[] = [];
   let seen = false;
   for (const line of lines) {
     const ev = parseEventLine(line);
     if (ev === null) continue;
+    events.push(ev);
     seen = true;
     if (ev.type === "cycle:start") {
       summary.cycleId = ev.cycleId;
@@ -170,6 +183,15 @@ export function summarizeWatchEvents(lines: readonly string[], durableLookup?: D
       if (dur !== undefined) summary.agent = dur.agent;
     }
   }
+  // US-OBS-042: enrich with the activity analyzer when a timestamp is supplied.
+  if (seen && summary.cycleId !== undefined && nowMs !== undefined) {
+    const analysis = analyzeCycleActivity(events, summary.cycleId, nowMs);
+    summary.classification = analysis.classification;
+    if (analysis.microStep !== undefined) summary.microStep = analysis.microStep;
+    if (analysis.testTransition !== undefined) summary.testTransition = analysis.testTransition;
+    if (analysis.greenUncommitted !== undefined) summary.greenUncommitted = analysis.greenUncommitted;
+    if (analysis.oversizedAction !== undefined) summary.oversizedAction = analysis.oversizedAction;
+  }
   return seen ? summary : null;
 }
 
@@ -205,9 +227,30 @@ export function renderWatchStatusSummary(summary: WatchStatusSummary, nowMs: num
   const story = summary.storyId !== undefined && summary.storyId !== "" ? summary.storyId : "story unknown";
   const agent = summary.agent !== undefined && summary.agent !== "" ? summary.agent : "agent unknown";
   const phase = summary.phase !== undefined ? `phase ${summary.phase}` : "phase unknown";
+  const classification = summary.classification !== undefined ? summary.classification : "active";
   const tcr = `${summary.tcrCount} TCR`;
 
-  const parts: string[] = [`status  ${phase}`, quietText(summary, nowMs), story, agent, cycle, tcr];
+  const parts: string[] = [`status  ${phase}`, classification, quietText(summary, nowMs), story, agent, cycle];
+
+  if (summary.microStep !== undefined) {
+    parts.push(`action ${summary.microStep.actionId} ${summary.microStep.summary}`);
+  }
+  if (summary.testTransition !== undefined) {
+    parts.push(`test:${summary.testTransition.state}`);
+  }
+
+  parts.push(tcr);
+
+  if (summary.greenUncommitted !== undefined) {
+    const min = Math.floor(summary.greenUncommitted.durationSec / 60);
+    const duration = min < 1 ? "<1m" : `${min}m`;
+    parts.push(`green-uncommitted ${duration}`);
+  }
+  if (summary.oversizedAction !== undefined) {
+    parts.push(
+      `action oversized · ${summary.oversizedAction.filesTouched} files / ${summary.oversizedAction.contractAreas} areas`,
+    );
+  }
 
   if (summary.acceptedScore !== undefined) {
     parts.push(`score ${clean(summary.acceptedScore.peer)} ${summary.acceptedScore.score}/${summary.acceptedScore.verdict}`);
@@ -236,7 +279,7 @@ export function renderWatchStatusSummary(summary: WatchStatusSummary, nowMs: num
 }
 
 export function renderWatchStatusFromEventLines(lines: readonly string[], nowMs: number, durableLookup?: DurableCycleLookup): string | null {
-  const summary = summarizeWatchEvents(lines, durableLookup);
+  const summary = summarizeWatchEvents(lines, durableLookup, nowMs);
   return summary === null ? null : renderWatchStatusSummary(summary, nowMs);
 }
 

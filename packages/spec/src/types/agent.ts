@@ -417,6 +417,48 @@ export interface EvalReport {
   readonly recommendation: EvalRecommendation;
 }
 
+/** US-V4-022 — a single observed agent toolchain signal (warning, auth/network
+ *  block, setup/skill-root pollution, worktree permission failure). */
+export interface AgentToolchainSignal {
+  readonly agent: AgentId;
+  readonly message: string;
+  readonly source: string;
+  readonly severity?: "warning" | "error";
+  readonly context?: {
+    readonly skillRoot?: string;
+    readonly worktreePath?: string;
+    readonly exitCode?: number;
+  };
+}
+
+/** US-V4-022 — classified category for an agent toolchain signal. */
+export type AgentToolchainClassification =
+  | "auth_block"
+  | "network_block"
+  | "setup_skill_root_pollution"
+  | "worktree_permission_failure"
+  | "unknown_warning";
+
+/** US-V4-022 — operational action class a Supervisor recommendation can carry. */
+export type AgentHealthAction =
+  | "continue"
+  | "quarantine_for_current_card"
+  | "run_doctor_setup"
+  | "create_fix"
+  | "pause_for_owner";
+
+/** US-V4-022 — a routed, classified agent health issue ready for display or backlog routing. */
+export interface AgentHealthIssue {
+  readonly agent: AgentId;
+  readonly classification: AgentToolchainClassification;
+  readonly severity: "warning" | "error";
+  readonly action: AgentHealthAction;
+  readonly reason: string;
+  readonly detail: string;
+  readonly source: string;
+  readonly routing: "delta_team" | "owner" | "none";
+}
+
 /** US-V4-004 — the risk signals that drive execution-profile selection (arch §12).
  *  All fields are derivable from a story's spec + facts; none require running it. */
 export interface StoryRiskInput {

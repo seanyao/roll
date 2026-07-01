@@ -3,7 +3,7 @@
  * events.ndjson; all state is rebuilt from this stream, no separate cache.
  * Schema per specs/architecture §3 (v2-aligned).
  */
-import type { AgentId, ExecutionProfile } from "./agent.js";
+import type { AgentId, AgentToolchainClassification, ExecutionProfile } from "./agent.js";
 import type { CycleCost, CyclePhase } from "./cycle.js";
 import type { GoalReviewMode, GoalSafetyGate, GoalScope, GoalStatus, GoalTransitionActor } from "./goal.js";
 import type { LoopType } from "./loop.js";
@@ -268,6 +268,21 @@ export type RollEvent =
   // re-marks the story Todo and routes the NEXT untried agent (excluding the one
   // that just gave up). `attempt` is the 1-based self-heal attempt for the story.
   | { type: "agent:retry"; cycleId: string; storyId: string; fromAgent: string; toAgent: string; attempt: number; reason: "zero-tcr" | "stall"; ts: number }
+  // US-V4-022 — agent toolchain health signal classified by Supervisor. Emitted
+  // when setup/doctor/loop logs detect a warning, auth/network block, polluted
+  // skill root, stale setup sync, or worktree permission failure. The supervisor
+  // owns classification and routing; cleanup belongs to a dedicated repair card.
+  | {
+      type: "agent:toolchain_issue";
+      agent: AgentId;
+      classification: AgentToolchainClassification;
+      severity: "warning" | "error";
+      detail: string;
+      source: string;
+      storyId?: string;
+      ts: number;
+    }
+  | { type: "agent:quarantined"; agent: AgentId; storyId: string; reason: string; ts: number }
   // Attest gate (FIX-207) — every actual delivery records whether a fresh
   // acceptance report was produced ("produced") or silently skipped ("skipped").
   | { type: "attest:gate"; cycleId: string; verdict: "produced" | "skipped"; reasons: string[]; ts: number }

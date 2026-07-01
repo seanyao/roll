@@ -23,6 +23,7 @@ import {
   buildCycleRoleSummary,
   buildSupervisorLiveBoard,
   classifyEvidenceRepair,
+  projectCollabStream,
   cycleIdFromBranch,
   ensureDeliveriesFresh,
   explainStuck,
@@ -41,13 +42,16 @@ import {
   recommendNext,
   type FreshnessPort,
 } from "@roll/core";
-import type { CycleRoleSummary, RollEvent, RollGoal, SupervisorInput } from "@roll/spec";
-import { parseGoalYaml } from "@roll/spec";
+import type { CycleRoleSummary, EventSource, RollEvent, RollGoal, SupervisorInput } from "@roll/spec";
+import { parseEventLine, parseGoalYaml, resolveLang, type GoalScope } from "@roll/spec";
 import { detectNoProgressStall, type NoProgressStall } from "../lib/goal-recovery.js";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { createInterface } from "node:readline";
+import type { Readable } from "node:stream";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { formatOperatingMode, resolveOperatingMode, suggestedGuidedRun } from "../lib/operating-mode.js";
+import { renderCollabCycleRow, renderCollabStream, renderStreamHeader, type RenderOpt } from "../lib/collab-render.js";
 import { reducePrView } from "./loop-pr-inbox.js";
 import { readPendingPublish } from "../runner/pending-publish.js";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
@@ -62,7 +66,7 @@ export const SUPERVISOR_USAGE = [
   "  advise           Prime Agent decisions (advisory; persistent changes need owner confirmation)",
   "  next             what should Roll do next?",
   "  why              why is the project stuck?",
-  "  live             read-only Prime Agent live board with Planner/Builder/Evaluator panes",
+  "  live [--collab] [--once] [--json]  read-only Prime Agent live board; --collab shows the collaboration stream view",
   "  route            Builder (story.execute) route trace: candidates, skipped reasons, selected",
   "  repair-evidence  repair missing acceptance evidence for a green PR and restore merge-ready status",
 ].join("\n");
@@ -637,7 +641,194 @@ function fmtLive(projectPath: string): string {
   return lines.join("\n") + "\n";
 }
 
-export function supervisorCommand(args: string[]): number {
+// ── US-OBS-040: roll supervisor live --collab ─────────────────────────────────
+
+function runtimeDir(projectPath: string): string {
+  const env = (process.env["ROLL_PROJECT_RUNTIME_DIR"] ?? "").trim();
+  return env !== "" ? env : join(projectPath, ".roll", "loop");
+}
+
+function readEventsLocal(eventsPath: string): RollEvent[] {
+  try {
+    if (existsSync(eventsPath)) return new EventBus().readEvents(eventsPath);
+  } catch {
+    /* torn lines or missing file → empty stream */
+  }
+  return [];
+}
+
+function supervisorAgent(): string {
+  return process.env["ROLL_SUPERVISOR_AGENT"] ?? "codex";
+}
+
+function scopeLabel(scope: GoalScope): string {
+  if (scope.kind === "all") return "all backlog";
+  if (scope.kind === "epic") return `epic ${scope.epic}`;
+  return `cards ${scope.cards.join(", ")}`;
+}
+
+function readGoalScope(projectPath: string): string {
+  const goalPath = join(projectPath, ".roll", "loop", "goal.yaml");
+  if (!existsSync(goalPath)) return "unknown";
+  try {
+    const goal = parseGoalYaml(readFileSync(goalPath, "utf8"));
+    return scopeLabel(goal.scope);
+  } catch {
+    return "unknown";
+  }
+}
+
+function orderedCycleIds(events: readonly RollEvent[], cycleLogDir?: string): string[] {
+  const order: string[] = [];
+  const seen = new Set<string>();
+  for (const ev of events) {
+    const id = "cycleId" in ev && typeof (ev as { cycleId?: unknown }).cycleId === "string" ? (ev as { cycleId: string }).cycleId : undefined;
+    if (id === undefined || id === "" || seen.has(id)) continue;
+    if (ev.type === "cycle:start") {
+      order.push(id);
+      seen.add(id);
+    }
+  }
+  // Any cycle referenced without a start event appended in first-encounter order.
+  for (const ev of events) {
+    const id = "cycleId" in ev && typeof (ev as { cycleId?: unknown }).cycleId === "string" ? (ev as { cycleId: string }).cycleId : undefined;
+    if (id !== undefined && id !== "" && !seen.has(id)) {
+      order.push(id);
+      seen.add(id);
+    }
+  }
+  // Cycles that have a log directory but no events yet also belong in the stream.
+  if (cycleLogDir !== undefined && existsSync(cycleLogDir)) {
+    for (const entry of readdirSync(cycleLogDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name !== "" && !seen.has(entry.name)) {
+        order.push(entry.name);
+        seen.add(entry.name);
+      }
+    }
+  }
+  return order;
+}
+
+function makeEventSource(projectPath: string, rt: string, events: RollEvent[]): EventSource {
+  const cycleLogDir = join(rt, "cycle-logs");
+  const peerDir = join(rt, "peer");
+  const eventsPath = join(rt, "events.ndjson");
+  return {
+    readEvents: () => events,
+    readSummary: (cycleId: string) => {
+      const path = join(cycleLogDir, cycleId, "summary.json");
+      if (!existsSync(path)) return null;
+      try {
+        return JSON.parse(readFileSync(path, "utf8")) as CycleRoleSummary;
+      } catch {
+        return null;
+      }
+    },
+    rebuildSummary: (cycleId: string) => {
+      const hasEvents = events.some((e) => "cycleId" in e && (e as { cycleId: string }).cycleId === cycleId);
+      if (!hasEvents) return null;
+      return buildCycleRoleSummary({ cycleId, events, eventsPath, peerDir, cycleLogDir });
+    },
+    supervisor: () => supervisorAgent(),
+    goalScope: () => readGoalScope(projectPath),
+  };
+}
+
+async function followCollabStream(
+  eventsPath: string,
+  projectPath: string,
+  rt: string,
+  emitted: Set<string>,
+  opt: RenderOpt,
+): Promise<number> {
+  if (!existsSync(eventsPath)) {
+    process.stderr.write("[roll] no event stream to follow\n");
+    return 1;
+  }
+  const child = spawn("tail", ["-n", "0", "-F", eventsPath], { stdio: ["ignore", "pipe", "inherit"] });
+  const stop = (): void => {
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      /* already gone */
+    }
+  };
+  process.on("SIGINT", stop);
+  try {
+    const rl = createInterface({ input: child.stdout as Readable, crlfDelay: Infinity });
+    let events: RollEvent[] = readEventsLocal(eventsPath);
+    for await (const line of rl) {
+      const ev = parseEventLine(line);
+      if (ev === null) continue;
+      events.push(ev);
+      const src = makeEventSource(projectPath, rt, events);
+      const stream = projectCollabStream(orderedCycleIds(events, join(rt, "cycle-logs")), src);
+      for (const cycle of stream.cycles) {
+        if (cycle.terminus !== "" && !emitted.has(cycle.cycleId)) {
+          process.stdout.write(renderCollabCycleRow(cycle, opt) + "\n\n");
+          emitted.add(cycle.cycleId);
+        }
+      }
+    }
+    return 0;
+  } finally {
+    process.removeListener("SIGINT", stop);
+    stop();
+  }
+}
+
+async function supervisorLiveCollabCommand(
+  rest: string[],
+  projectPath: string,
+  noColor: boolean,
+  lang: "en" | "zh",
+): Promise<number> {
+  let once = false;
+  let json = false;
+  for (const arg of rest) {
+    if (arg === "--once") {
+      once = true;
+      continue;
+    }
+    if (arg === "--json") {
+      json = true;
+      continue;
+    }
+    if (arg.startsWith("-")) {
+      process.stderr.write(`[roll] unknown flag: ${arg}\nUsage: roll supervisor live --collab [--once] [--json] [--no-color]\n`);
+      return 1;
+    }
+  }
+
+  const rt = runtimeDir(projectPath);
+  const eventsPath = join(rt, "events.ndjson");
+  const events = readEventsLocal(eventsPath);
+  const cycleLogDir = join(rt, "cycle-logs");
+  const cycleIds = orderedCycleIds(events, cycleLogDir);
+  const src = makeEventSource(projectPath, rt, events);
+  const stream = projectCollabStream(cycleIds, src);
+  const opt: RenderOpt = { color: !noColor, fold: true, width: 72, lang };
+
+  if (json) {
+    process.stdout.write(JSON.stringify(stream, null, 2) + "\n");
+    return 0;
+  }
+
+  if (once) {
+    process.stdout.write(renderCollabStream(stream, opt));
+    return 0;
+  }
+
+  // Live mode: header first, then tail new events and append rows as cycles complete.
+  process.stdout.write(renderStreamHeader(stream, opt) + "\n\n");
+  const emitted = new Set<string>(stream.cycles.filter((c) => c.terminus !== "").map((c) => c.cycleId));
+  return followCollabStream(eventsPath, projectPath, rt, emitted, opt);
+}
+
+export function supervisorCommand(args: string[]): number | Promise<number> {
+  const noColor = args.includes("--no-color") || !process.stdout.isTTY || (process.env["NO_COLOR"] ?? "") !== "";
+  const lang = resolveLang({ rollLang: process.env["ROLL_LANG"], lcAll: process.env["LC_ALL"], lang: process.env["LANG"] });
   const json = args.includes("--json");
   let sub = args.find((a) => !a.startsWith("-"));
   // `status` is an alias for the default observe + advise summary.
@@ -946,6 +1137,10 @@ export function supervisorCommand(args: string[]): number {
   }
 
   if (sub === "live") {
+    if (args.includes("--collab")) {
+      const rest = args.filter((a) => a !== "--collab" && a !== "--no-color");
+      return supervisorLiveCollabCommand(rest, projectPath, noColor, lang);
+    }
     const board = buildSupervisorLiveBoard(readSupervisorEvents(projectPath));
     if (json) process.stdout.write(JSON.stringify(board, null, 2) + "\n");
     else process.stdout.write(fmtLive(projectPath));

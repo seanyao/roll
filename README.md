@@ -229,8 +229,10 @@ it is not the active delivery truth surface.
   free-form summary text.
 - Missing facts render as `?`. A visible `0` means a known zero, not unknown.
 
-`roll supervisor live` is the shipped CLI-first multi-role board. A browser/TUI
-Prime Agent Live Console remains future work and must reuse the same view model.
+`roll supervisor live` is the shipped CLI-first multi-role board; add `--collab`
+for the rolling collaboration stream where escalations pop out and same-shape
+deliveries fold. A browser/TUI Prime Agent Live Console remains future work and
+must reuse the same view model.
 
 ## Repository layout
 

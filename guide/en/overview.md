@@ -124,7 +124,7 @@ Runtime availability is explicit. Unavailable agents are recorded as unavailable
 
 The current product is CLI-first. `roll status`, `roll loop watch`, `roll loop runs`, `roll cycle <id>`, `roll pulse`, alerts, and story-scoped attest reports are the active truth surfaces. `roll index` is an on-demand static archive/repair renderer, useful for CI artifacts and migration reconciliation; it is not the current truth surface.
 
-The three-state delivery ladder still matters: **claimed -> merged -> attested**. A backlog row that says done is only `claimed`; it becomes `merged` when the PR lands on `main`, and `attested` when story-scoped evidence is on file. Use `roll supervisor live` for the CLI-first multi-role board; browser/TUI Prime Agent Live Console remains future work.
+The three-state delivery ladder still matters: **claimed -> merged -> attested**. A backlog row that says done is only `claimed`; it becomes `merged` when the PR lands on `main`, and `attested` when story-scoped evidence is on file. Use `roll supervisor live` for the CLI-first multi-role board, or `roll supervisor live --collab` for the rolling collaboration stream where escalations pop out and same-shape deliveries fold; browser/TUI Prime Agent Live Console remains future work.
 
 ### On-Demand Skills
 

@@ -1,0 +1,22 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`roll supervisor live --collab > snapshot: stream output is stable 1`] = `
+"GOAL  all backlog                                  🧭 supervisor = codex
+READ  🧭 supervise · 🧭 plan · 🔨 build
+────────────────────────────────────────────────────────────────────────
+
+▌ 00:00:01  FIX-1034   🧭 → 🔨 pi   🔎 ▸agree   🎯 ▸good/8   🚦 ▸produced   ✓
+
+▌ 00:00:02  FIX-1033   🧭 → 🔨 pi   🔎 ▸agree   🎯 ▸good/8   🚦 ▸produced   ✓
+
+▌ 00:00:03  FIX-1032a
+   🧭 → 🔨  assign builder = pi
+      🔨  build → TCR ×1
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ ⤴ escalation                                                         ┃
+┃ baton returned from 🔨 builder to supervisor 🧭                    ┃
+┃ 🔬 codex reroute (pi stalled for 601s)                             ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+──────────────────────────────────────────────────────────── escalated ⤴
+"
+`;

@@ -126,7 +126,7 @@ evidence  PR https://github.com/seanyao/roll/pull/999 · diff https://github.com
 | `roll cycle watch`（CLI） | 手动 | `tail -F` 实时跟随 | 无（纯文件跟随） |
 | `roll status` / `roll pulse` / `roll loop runs` | 手动 | 命令时刻快照 | 无 |
 
-CLI watch 是最低层实时路径——终端开着就能看。`roll supervisor live` 在它之上提供只读多角色 board；浏览器/TUI 版 Supervisor Live Console 是后续工作，必须复用同一 view model。
+CLI watch 是最低层实时路径——终端开着就能看。`roll supervisor live` 在它之上提供只读多角色 board，`roll supervisor live --collab` 则把多轮 cycle 串成向下滚动的协同流：升级事件顶出，同形交付折叠；浏览器/TUI 版 Supervisor Live Console 是后续工作，必须复用同一 view model。
 
 ## 证据按构造（方向）
 

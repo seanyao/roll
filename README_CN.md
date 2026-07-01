@@ -215,7 +215,7 @@ Roll 当前是 CLI-first 可观测。持久事实只走一条读路径：anchors
 - cycle 历史使用 TerminalOutcome 词汇，不再教旧的自由文本摘要。
 - 缺失事实显示 `?`。可见的 `0` 表示已知为零，不表示未知。
 
-`roll supervisor live` 是已交付的 CLI-first 多角色看板。浏览器/TUI 版 Prime Agent Live Console 仍是未来工作，必须复用同一 view model。
+`roll supervisor live` 是已交付的 CLI-first 多角色看板；加 `--collab` 可查看滚动协同流：升级事件顶出，同形交付折叠。浏览器/TUI 版 Prime Agent Live Console 仍是未来工作，必须复用同一 view model。
 
 ## 仓库结构
 

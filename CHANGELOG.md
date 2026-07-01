@@ -28,6 +28,8 @@
 
 ### 新功能
 
+- **`roll supervisor live --collab` 滚动协同流**：把多轮 cycle 按统一 epoch 时间脊排成向下流动的协同视图，同形 `walked_full` 交付折叠成一行，升级事件实时顶出为 callout，缺失摘要的 cycle 显示 `协同摘要不可用` 而不中断流；支持 `--once` 快照和 `--json` 输出 `collab-stream.v1`。(US-OBS-040) `[loop-observability]`
+
 - **`roll design` 现在会给出一个可读的运行摘要和产物交付块**：运行前显示目标、模式、agent 和原始记录路径；运行中默认只渲染关键进度行，原始 agent 输出保存到 `.roll/runs/design/<timestamp>-<target>/transcript.log`；结束后交付块列出设计产物（`spec.md#detailed-design`）、生成的 HTML、新建卡片数、当前状态和下一步动作。`--verbose` 可查看 assistant 详细文本，`--raw` 可输出完整记录。(FIX-1055) `[legacy-onboard]`
 
 ## v4.630.2 — 2026-06-30

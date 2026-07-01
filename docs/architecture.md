@@ -4,7 +4,7 @@
 
 roll 是 AI coding agent 的**外层控制系统**（agent harness / reliability layer）。它不进入 agent 内部（不管理 token 窗口、不压缩对话、不干预单次推理），而是在外部建立一个闭环：设定目标 → 调度执行 → 感知结果 → 修正方向。
 
-当前用户入口是 CLI-first：`roll init`、`roll supervisor`、`roll supervisor live`、`roll loop`、`roll status`、`roll cycle` 与按 Story 收口的 `roll attest` 报告。浏览器/TUI 版 Prime Agent Live Console 是下一阶段工作，不作为当前产品面承诺。安装方式：`npm install -g @seanyao/roll`。
+当前用户入口是 CLI-first：`roll init`、`roll supervisor`、`roll supervisor live`（加 `--collab` 可看滚动协同流）、`roll loop`、`roll status`、`roll cycle` 与按 Story 收口的 `roll attest` 报告。浏览器/TUI 版 Prime Agent Live Console 是下一阶段工作，不作为当前产品面承诺。安装方式：`npm install -g @seanyao/roll`。
 
 ## 为什么是分层闭环
 
@@ -205,7 +205,7 @@ Builder 使用记录公平轮换，避免反复落到同一个 agent。运行时
 
 #### Prime Agent Live Board
 
-`roll supervisor live` 是当前已交付的 CLI-first 多角色 board：读取事件流生成 Prime Agent pane 与 Planner / Builder / Evaluator role panes。未来浏览器/TUI 面应复用同一 view model，并遵守以下边界：
+`roll supervisor live` 是当前已交付的 CLI-first 多角色 board：读取事件流生成 Prime Agent pane 与 Planner / Builder / Evaluator role panes；`--collab` 视图把多轮 cycle 按统一时间脊排成向下流动的协同流，同形交付折叠成一行，升级事件用 callout 顶出。未来浏览器/TUI 面应复用同一 view model，并遵守以下边界：
 
 - **依赖方向**：浏览器可观测只读消费 `spec` 事件 schema 与 `core` 读侧选择器；loop 不依赖浏览器进程。
 - **只读隔离**：观察面不得写入 loop 状态，不得影响 Delta Unit 的 TCR、CI、merge 或 attest 闸。

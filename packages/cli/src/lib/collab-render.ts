@@ -6,7 +6,7 @@
  * timestamps are epoch-ms values supplied by the caller.
  */
 
-import type { CollabCycleView, CollabEscalation } from "@roll/spec";
+import type { CollabCycleView, CollabEscalation, CollabStreamView } from "@roll/spec";
 import { c, stripAnsi, strw } from "../render.js";
 
 /** Layer A render options. */
@@ -274,9 +274,10 @@ export function renderCollabCycle(
 
   lines.push(`▌ ${formatTimeSpine(view.startedAtMs, opt)}  ${view.storyId}`);
 
-  if (view.stance && view.stance.level !== "supervise") {
+  if (view.stance && (view.stance.level !== "supervise" || view.stance.note)) {
     const roleGlyph = renderRole("supervise", opt);
-    const levelText = view.stance.level === "plan" ? labels.rolePlanner : labels.supervisorFix;
+    const levelText =
+      view.stance.level === "plan" ? labels.rolePlanner : view.stance.level === "build" ? labels.supervisorFix : labels.roleSupervise;
     lines.push(`   ${roleGlyph}  ${levelText}${view.stance.note ? ` — ${view.stance.note}` : ""}`);
   }
 
@@ -326,4 +327,90 @@ export function renderCollabCycle(
   lines.push(`${"─".repeat(ruleWidth)} ${termText}`);
 
   return lines.join("\n");
+}
+
+// ── US-OBS-040: multi-cycle collab stream ─────────────────────────────────────
+
+const STREAM_LABELS = {
+  en: {
+    goal: "GOAL",
+    supervisor: "supervisor",
+    read: "READ",
+    levels: ["supervise", "plan", "build"],
+  },
+  zh: {
+    goal: "目标",
+    supervisor: "supervisor",
+    read: "读法",
+    levels: ["supervise", "plan", "build"],
+  },
+} as const;
+
+function streamLabels(opt: RenderOpt): (typeof STREAM_LABELS)[keyof typeof STREAM_LABELS] {
+  return STREAM_LABELS[opt.lang ?? "en"];
+}
+
+function headerRow(left: string, right: string, width: number): string {
+  const gap = Math.max(1, width - strw(left) - strw(right));
+  return left + " ".repeat(gap) + right;
+}
+
+/** Render the stream header: goal scope, supervisor, and the three intervention levels. */
+export function renderStreamHeader(view: CollabStreamView, opt: RenderOpt): string {
+  const labels = streamLabels(opt);
+  const w = boxWidth(opt);
+  const supGlyph = renderRole("supervise", opt);
+  const goalLine = headerRow(
+    `${labels.goal}  ${view.goalScope}`,
+    `${supGlyph} ${labels.supervisor} = ${view.supervisor}`,
+    w,
+  );
+  const levelLine = `${labels.read}  ${labels.levels
+    .map((level) => `${renderRole(level as RoleKey, opt)} ${level}`)
+    .join(" · ")}`;
+  const rule = "─".repeat(w);
+  return [goalLine, levelLine, rule].join("\n");
+}
+
+/** Render a single walked_full cycle as a one-line chain (noise folded). */
+export function renderCollapsedCycle(view: CollabCycleView, opt: RenderOpt): string {
+  const segments: string[] = [];
+  segments.push(`▌ ${formatTimeSpine(view.startedAtMs, opt)}  ${view.storyId}`);
+
+  const assign = view.handoffs.find((h) => h.kind === "assign");
+  if (assign) {
+    segments.push(`${renderHandoff("supervise", "build", opt)} ${assign.agent ?? "?"}`);
+  }
+
+  const review = view.handoffs.find((h) => h.kind === "review");
+  if (review && review.verdict) {
+    segments.push(`${renderRole("peer", opt)} ${withColor(opt, "green", `▸${review.verdict}`)}`);
+  }
+
+  const score = view.handoffs.find((h) => h.kind === "score");
+  if (score && score.verdict) {
+    segments.push(`${renderRole("score", opt)} ${withColor(opt, "green", `▸${score.verdict}`)}`);
+  }
+
+  const gate = view.handoffs.find((h) => h.kind === "gate");
+  if (gate && gate.verdict) {
+    segments.push(`${GATE_GLYPH} ${withColor(opt, "green", `▸${gate.verdict}`)}`);
+  }
+
+  segments.push(TERMINUS_GLYPH.walked_full);
+  return segments.join("   ");
+}
+
+/** Render one stream row: collapsed for walked_full when folding is on, else expanded. */
+export function renderCollabCycleRow(view: CollabCycleView, opt: RenderOpt): string {
+  if (opt.fold !== false && view.terminus === "walked_full") {
+    return renderCollapsedCycle(view, opt);
+  }
+  return renderCollabCycle(view, opt);
+}
+
+/** Render a CollabStreamView: header + rows, top-to-bottom on a single epoch spine. */
+export function renderCollabStream(view: CollabStreamView, opt: RenderOpt): string {
+  const rows = view.cycles.map((cycle) => renderCollabCycleRow(cycle, opt));
+  return [renderStreamHeader(view, opt), ...rows].join("\n\n") + "\n";
 }

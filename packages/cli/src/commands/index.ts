@@ -4,6 +4,7 @@ import { registerPorted } from "../bridge.js";
 import { renderState } from "../render.js";
 import { renderLoopHelp } from "../lib/loop-help.js";
 import { agentCommand } from "./agent.js";
+import { agentListCommand } from "./agent-list.js";
 import { pairCommand } from "./pair.js";
 import { PEER_HELP, peerCommand } from "./peer.js";
 import { alertCommand } from "./alert.js";
@@ -189,6 +190,7 @@ export function registerAll(): void {
   // `agent`: full surface TS (view/list/use/set/unknown). The write face owns
   // .roll/agents.yaml plus legacy .roll/local.yaml sync; no bash fallback.
   registerPorted("agent", agentCommand, { help: "Usage: roll agent [migrate [--dry-run]|list]\n  View Agent Scope roles, migrate legacy config, or list installed agents.\n查看 Agent Scope 角色、迁移旧配置，或列出已安装 agent。" });
+  registerPorted("agents", agentListCommand, { hidden: true }); // US-AGENT-048: bash-oracle `roll agents` alias for `roll agent list`
   // `pair`: v3-native Cross-Agent Pairing (US-PAIR-001). `pair init` scaffolds
   // legacy pairing compatibility commands. No bash fallback
   // (v2 had no pairing).

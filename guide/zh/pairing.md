@@ -5,8 +5,8 @@
 一个模型盲区里藏着的 bug，另一个模型往往一眼看到。
 
 Roll 把评审指派看成 scoped Agent 模型里的 `evaluate` 角色：
-`Scope -> Role -> Binding -> Agent -> optional Model`。agent 是有限的六个身份
-（`claude`、`kimi`、`codex`、`pi`、`agy`、`reasonix`）；model 是挂在该 agent 上的可选数据。
+`Scope -> Role -> Binding -> Agent -> optional Model`。agent 是有限的七个身份
+（`claude`、`kimi`、`codex`、`pi`、`agy`、`reasonix`、`cursor`）；model 是挂在该 agent 上的可选数据。
 
 结对与 [`roll peer`](peer.md) 不同：peer 是你（或 loop 风险闸）按需发起的多轮协商；
 结对是常驻的单向第二遍，接在 cycle 里，由 Project Scope 的 `evaluate` binding 管控。

@@ -7,7 +7,7 @@ bug that one model's blind spot hides, another model's catches.
 
 Roll treats reviewer assignment as the `evaluate` role in the scoped Agent
 model: `Scope -> Role -> Binding -> Agent -> optional Model`. The agent is the
-finite six-name identity (`claude`, `kimi`, `codex`, `pi`, `agy`, `reasonix`);
+finite seven-name identity (`claude`, `kimi`, `codex`, `pi`, `agy`, `reasonix`, `cursor`);
 the model is optional data carried by that agent.
 
 Pairing is distinct from [`roll peer`](peer.md): peer is an on-demand,

@@ -56,7 +56,7 @@ describe("US-AGENT-045 AC1: alias silent migration", () => {
 // ── AC2: removed agent fail-loud detection ───────────────────────────────────
 
 describe("US-AGENT-045 AC2: removed agent fail-loud detection", () => {
-  const ALL_REMOVED = ["cursor", "trae", "qwen", "opencode", "openclaw"];
+  const ALL_REMOVED = ["trae", "qwen", "opencode", "openclaw"];
 
   it("REMOVED_AGENTS list matches the agreed set", () => {
     expect([...REMOVED_AGENTS].sort()).toEqual([...ALL_REMOVED].sort());

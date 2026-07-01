@@ -127,6 +127,8 @@ export function interactiveAgentCommand(agent: string, prompt: string): { bin: s
       return { bin: "agy", args: [prompt] };
     case "reasonix":
       return { bin: "reasonix", args: [prompt] };
+    case "cursor":
+      return { bin: "cursor-agent", args: [prompt] };
     default:
       return null;
   }

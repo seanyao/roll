@@ -28,6 +28,9 @@
 
 ### 新功能
 
+- **`roll cycle --legend` 可单独打印 Layer A 协同协议读法头**：新命令输出角色、闸门、换手/升级符号和协议流程图，为 `roll cycle --collab` 和 `roll supervisor live --collab` 建立统一视觉契约。(US-OBS-037) `[loop-observability]`
+  <!-- evidence: .roll/features/loop-observability/US-OBS-037/latest/US-OBS-037-report.html -->
+
 - **`roll design` 现在会给出一个可读的运行摘要和产物交付块**：运行前显示目标、模式、agent 和原始记录路径；运行中默认只渲染关键进度行，原始 agent 输出保存到 `.roll/runs/design/<timestamp>-<target>/transcript.log`；结束后交付块列出设计产物（`spec.md#detailed-design`）、生成的 HTML、新建卡片数、当前状态和下一步动作。`--verbose` 可查看 assistant 详细文本，`--raw` 可输出完整记录。(FIX-1055) `[legacy-onboard]`
 
 ## v4.630.2 — 2026-06-30

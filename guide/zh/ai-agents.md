@@ -116,6 +116,31 @@ Agent 差异只放在一份 profile 里，不散落到下游 runner/gate：
 3. executor、attest、pairing、scoring 保持 agent-agnostic。
 4. 为 profile 与 registry 项补单测。
 
+## Agent 工具链健康（US-V4-022）
+
+Supervisor 把 agent 工具链健康当作协调工作的一部分，而不是留给 owner 的谜团。
+它会扫描警告、auth/network 状态、被污染的技能根目录、陈旧的 setup 同步以及
+worktree 权限失败，并把它们归类为以下四类之一：
+
+- **auth_block** — "403"、"please run /login"、"Unauthorized" → `pause_for_owner`
+- **network_block** — `ECONNREFUSED`、`ETIMEDOUT`、DNS 失败 → `continue`
+  （瞬态；loop 会重试或呼吸）
+- **setup_skill_root_pollution** — Reasonix 辅助目录警告、skill 缺少 description
+  → `create_fix` → 作为 FIX 路由给 delta team
+- **worktree_permission_failure** — worktree 路径上的 `EACCES` / "permission denied"
+  → `pause_for_owner`
+
+当信号是 setup/skill-root 污染时，Supervisor **不会**把它标成 auth-blocked，
+而是把修复路由到 backlog/delta team 作为 FIX，而不是让 owner 临时救火。
+Supervisor 负责协调和诊断这些问题，但它不会变成 Builder 或 Evaluator，
+也不会自动删除全局文件。
+
+```bash
+roll supervisor health             # 人类可读的健康面板
+roll supervisor health --json      # 机器可读的分类结果
+roll supervisor next               # 下一张卡 + agent health 摘要
+```
+
 ## Legacy 兼容
 
 旧项目可能还会有 `.roll/local.yaml agent`、`.roll/pairing.yaml`，或者

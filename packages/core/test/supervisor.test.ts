@@ -313,6 +313,30 @@ describe("recommendNext — what should Roll do next?", () => {
     expect(state.next.storyId).toBe("US-OBS-035");
   });
 
+  it("US-V4-022: surfaces agent toolchain health issues in the runbook state", () => {
+    const state = buildSupervisorRunbookState(
+      input({
+        backlog: [{ id: "US-1", status: "📋 Todo" }],
+        agentHealthIssues: [
+          {
+            agent: "reasonix",
+            classification: "setup_skill_root_pollution",
+            severity: "warning",
+            action: "create_fix",
+            reason: "setup skill root pollution on reasonix",
+            detail: 'skill "skill-authoring" has no description',
+            source: "setup",
+            routing: "delta_team",
+          },
+        ],
+      }),
+    );
+    expect(state.agentHealth.summary).toBe("1 active issue(s)");
+    expect(state.agentHealth.issues[0]?.classification).toBe("setup_skill_root_pollution");
+    expect(state.agentHealth.issues[0]?.action).toBe("create_fix");
+    expect(state.next.storyId).toBe("US-1");
+  });
+
   it("US-V4-021: reports the whole live backlog scope by family", () => {
     const state = buildSupervisorRunbookState(
       input({

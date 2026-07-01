@@ -8,7 +8,14 @@
  * rewrites routing/policy or marks a Story Done (the metrics-don't-mutate-policy
  * invariant).
  */
-import { classifyStatus, type SupervisorDecision, type SupervisorFacts, type SupervisorInput, type StoryStatus } from "@roll/spec";
+import {
+  classifyStatus,
+  type AgentHealthIssue,
+  type SupervisorDecision,
+  type SupervisorFacts,
+  type SupervisorInput,
+  type StoryStatus,
+} from "@roll/spec";
 
 export type SupervisorBacklogFamily = "FIX" | "US" | "REFACTOR";
 
@@ -53,6 +60,10 @@ export interface SupervisorRunbookState {
     readonly schedulerAction: string;
   };
   readonly blockedCards: readonly SupervisorBlockedCard[];
+  readonly agentHealth: {
+    readonly issues: readonly AgentHealthIssue[];
+    readonly summary: string;
+  };
 }
 
 const SUPERVISOR_FAMILIES: readonly SupervisorBacklogFamily[] = ["FIX", "US", "REFACTOR"];
@@ -118,6 +129,9 @@ export function buildSupervisorRunbookState(input: SupervisorInput): SupervisorR
   const truthDrift = input.backlog
     .filter((row) => statusOf(row.status) === "done" && !confirmedDelivered.has(row.id))
     .map((row) => row.id);
+  const healthIssues = input.agentHealthIssues ?? [];
+  const healthSummary = healthIssues.length === 0 ? "clean" : `${healthIssues.length} active issue(s)`;
+  const agentHealth = { issues: healthIssues, summary: healthSummary };
   const liveScopeIds = new Set<string>();
 
   for (const row of input.backlog) {
@@ -171,6 +185,7 @@ export function buildSupervisorRunbookState(input: SupervisorInput): SupervisorR
         schedulerAction: "do not start another card until the manual-merge PR is merged, closed, or explicitly deferred",
       },
       blockedCards,
+      agentHealth,
     };
   }
 
@@ -196,6 +211,7 @@ export function buildSupervisorRunbookState(input: SupervisorInput): SupervisorR
         schedulerAction: "do not retry this card until the structural failure is resolved or recorded as a root-cause card",
       },
       blockedCards,
+      agentHealth,
     };
   }
 
@@ -219,6 +235,7 @@ export function buildSupervisorRunbookState(input: SupervisorInput): SupervisorR
         schedulerAction: "do not run another cycle for this card until the diagnosis is recorded",
       },
       blockedCards,
+      agentHealth,
     };
   }
 
@@ -288,6 +305,7 @@ export function buildSupervisorRunbookState(input: SupervisorInput): SupervisorR
           schedulerAction: "run exactly one card, then reconcile PR/CI/main and .roll meta",
         },
         blockedCards,
+        agentHealth,
       };
     }
   }
@@ -309,6 +327,7 @@ export function buildSupervisorRunbookState(input: SupervisorInput): SupervisorR
       schedulerAction: "do not resume autonomous execution without a ready card",
     },
     blockedCards,
+    agentHealth,
   };
 }
 

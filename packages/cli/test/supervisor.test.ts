@@ -470,6 +470,82 @@ describe("supervisorCommand", () => {
     ]);
   });
 
+  it("US-V4-022: health shows clean when no toolchain events exist", () => {
+    const cwd = project(BACKLOG);
+    const r = run(cwd, ["health"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("Agent toolchain health: clean");
+  });
+
+  it("US-V4-022: health --json classifies a Reasonix skill-root pollution signal", () => {
+    const cwd = project(BACKLOG, {
+      events: [
+        JSON.stringify({
+          type: "agent:toolchain_issue",
+          agent: "reasonix",
+          classification: "setup_skill_root_pollution",
+          severity: "warning",
+          detail: 'skill "skill-authoring" at ~/.reasonix/skills/docs/skill-authoring.md has no description',
+          source: "setup",
+          ts: 1,
+        }),
+      ],
+    });
+    const parsed = JSON.parse(run(cwd, ["health", "--json"]).out);
+    expect(parsed.summary).toContain("agent toolchain issues: reasonix(1)");
+    expect(parsed.issues[0]).toMatchObject({
+      agent: "reasonix",
+      classification: "setup_skill_root_pollution",
+      severity: "warning",
+      action: "create_fix",
+      routing: "delta_team",
+    });
+  });
+
+  it("US-V4-022: health distinguishes auth block from setup pollution", () => {
+    const cwd = project(BACKLOG, {
+      events: [
+        JSON.stringify({
+          type: "agent:blocked",
+          cycleId: "C1",
+          agent: "claude",
+          cause: "auth",
+          stage: "build",
+          detail: "Please run /login",
+          ts: 1,
+        }),
+      ],
+    });
+    const parsed = JSON.parse(run(cwd, ["health", "--json"]).out);
+    expect(parsed.issues[0]).toMatchObject({
+      agent: "claude",
+      classification: "auth_block",
+      action: "pause_for_owner",
+      routing: "owner",
+    });
+  });
+
+  it("US-V4-022: next surfaces agent health summary alongside the selected card", () => {
+    const cwd = project(BACKLOG, {
+      events: [
+        JSON.stringify({ type: "pr:merge", prNumber: 1, storyId: "US-1", ts: 1 }),
+        JSON.stringify({
+          type: "agent:toolchain_issue",
+          agent: "reasonix",
+          classification: "setup_skill_root_pollution",
+          severity: "warning",
+          detail: 'skill "skill-authoring" has no description',
+          source: "setup",
+          ts: 2,
+        }),
+      ],
+    });
+    const r = run(cwd, ["next"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("agent health: 1 active issue(s)");
+    expect(r.out).toContain("US-2");
+  });
+
   it("rejects an unknown subcommand with usage", () => {
     const cwd = project(BACKLOG);
     expect(run(cwd, ["bogus"]).code).toBe(1);

@@ -311,6 +311,15 @@ binary failures skip a candidate for the current resolution and are recorded as
 runtime facts. If no candidate remains, loop pauses and writes an ALERT instead
 of silently rewriting the pool.
 
+### Agent toolchain health check (US-V4-022)
+
+Before scheduling, Supervisor also classifies agent toolchain health signals
+from the durable event stream. It distinguishes auth blocks, network blocks,
+setup/skill-root pollution, and worktree permission failures. Pollution signals
+are routed to the delta team as a FIX rather than misclassified as auth failures.
+Use `roll supervisor health` for the dedicated board, or read the summary from
+`roll supervisor next` / `roll supervisor why`.
+
 ### Agent self-downgrade (too_big verdict)
 
 The picked agent runs a **pre-flight self-check** (in `roll-build` / `roll-fix`

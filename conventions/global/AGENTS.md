@@ -3,19 +3,19 @@
 > Baseline for AI-agent-friendly projects. Extend with project-specific rules.
 
 ## 1. Communication
-- User's language. Code/Git/Comments: English. UI: Chinese.
+
+- **User's language** for owner conversation; do not append automatic translations.
+- **Code/Git/Comments: English**.
+- **UI / rendered output**: single language only, driven by the resolved locale (`en` or `zh` by default). Do not render English and Chinese on the same surface.
+- **Agent-facing contracts** (skills, conventions, specs): English, with technical IDs, commands, paths, package names, and literals kept in source spelling.
+- **Project docs**: split by locale file or directory (`guide/en/` vs `guide/zh/`), not by adjacent lines within one file.
 - Concise. No summaries/code-walking. Implementation invisible.
 - Strategy (Why) OK; Tactics (How) NO. Outcomes only.
 - **Ambiguity resolution**: When user says "explicit" in automation contexts,
   interpret as "logged/observable with clear output", NOT "requiring manual
   intervention". Confirm with one question if uncertain.
 - **Voice**: Natural, colleague-like tone — neither robotic ("Executing…") nor over-enthusiastic ("Great!"). "Done — here's what changed." instead of "Task completed successfully." Consistent warmth for success and failure alike.
-- **Bilingual output**: EN + ZH on separate lines, never inline.
-  ```
-  Processing...
-  处理中...
-  ```
-  Not: `Processing... 处理中...`
+- **No bilingual adjacent-line requirement**: multilingual resources live behind locale/catalog boundaries, not as EN/ZH pairs on consecutive lines.
 
 ## 2. Code
 - **TS**: Strict, no `any`. Functional hooks. Early returns.

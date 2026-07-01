@@ -7,11 +7,11 @@
  * generic `evaluator=none`, without bypassing red CI or a dirty merge.
  */
 import { afterAll, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExecPort } from "@roll/core";
-import { readManualMergeGates } from "../src/commands/supervisor.js";
+import { readManualMergeGates, supervisorCommand } from "../src/commands/supervisor.js";
 
 const CYCLE_ID = "20260701-020926-45747";
 const BRANCH = `loop/cycle-${CYCLE_ID}`;
@@ -21,6 +21,95 @@ const dirs: string[] = [];
 afterAll(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
 });
+
+/** Run supervisorCommand in a temp directory and capture stdout. */
+function run(cwd: string, args: string[]): { code: number; out: string } {
+  const save = process.cwd();
+  const chunks: string[] = [];
+  const realOut = process.stdout.write.bind(process.stdout);
+  // @ts-expect-error capture-only
+  process.stdout.write = (c: string | Uint8Array): boolean => (chunks.push(String(c)), true);
+  process.chdir(cwd);
+  let code = 1;
+  try {
+    code = supervisorCommand(args);
+  } finally {
+    process.chdir(save);
+    process.stdout.write = realOut;
+  }
+  return { code, out: chunks.join("") };
+}
+
+/** Create a fake `gh` binary that returns the supplied PR state. */
+function installFakeGh(
+  cwd: string,
+  opts: {
+    number?: number;
+    headRefName?: string;
+    title?: string;
+    body?: string;
+    reviews?: unknown[];
+    ci?: string;
+    merge?: string;
+    isDraft?: boolean;
+  } = {},
+): string {
+  const bin = join(cwd, "bin");
+  mkdirSync(bin, { recursive: true });
+  const ghPath = join(bin, "gh");
+  const number = opts.number ?? PR;
+  const headRefName = opts.headRefName ?? BRANCH;
+  const title = opts.title ?? "FIX-1057 delivery";
+  const body = opts.body ?? "Delivers FIX-1057.\\n\\n[roll:manual-merge]";
+  const reviews = opts.reviews ?? [];
+  const ci = opts.ci ?? "SUCCESS";
+  const merge = opts.merge ?? "CLEAN";
+  const isDraft = opts.isDraft ?? false;
+  writeFileSync(
+    ghPath,
+    [
+      "#!/bin/sh",
+      'if [ "$1" = "pr" ] && [ "$2" = "list" ]; then',
+      `  printf '%s\\n' '[{"number":${number},"headRefName":"${headRefName}","title":"${title}"}]'`,
+      "  exit 0",
+      "fi",
+      'if [ "$1" = "pr" ] && [ "$2" = "view" ]; then',
+      `  printf '%s\\n' '{"body":"${body}","labels":[],"reviews":${JSON.stringify(reviews)},"mergeStateStatus":"${merge}","statusCheckRollup":[{"conclusion":"${ci}"}],"isDraft":${isDraft},"headRefName":"${headRefName}"}'`,
+      "  exit 0",
+      "fi",
+      "exit 1",
+      "",
+    ].join("\n"),
+  );
+  chmodSync(ghPath, 0o755);
+  return bin;
+}
+
+function withPath<T>(prefix: string, fn: () => T): T {
+  const previous = process.env["PATH"];
+  process.env["PATH"] = `${prefix}:${previous ?? ""}`;
+  try {
+    return fn();
+  } finally {
+    if (previous === undefined) delete process.env["PATH"];
+    else process.env["PATH"] = previous;
+  }
+}
+
+/** FIX-1062 project fixture with optional durable events. */
+function project1062(events: string[] = []): string {
+  const d = mkdtempSync(join(tmpdir(), "roll-fix1062-"));
+  dirs.push(d);
+  mkdirSync(join(d, ".roll", "loop"), { recursive: true });
+  writeFileSync(
+    join(d, ".roll", "backlog.md"),
+    `# Backlog\n\n| ID | Description | Status |\n| --- | --- | --- |\n| FIX-1057 | delivery | 📋 Todo |\n`,
+  );
+  if (events.length > 0) {
+    writeFileSync(join(d, ".roll", "loop", "events.ndjson"), events.join("\n") + "\n");
+  }
+  return d;
+}
 
 /** A project with the PR #1116 Roll evaluator score artifact on disk. */
 function project(scoreArtifact?: unknown): string {
@@ -106,5 +195,62 @@ describe("readManualMergeGates — FIX-1061 Roll evaluator source", () => {
     // never bypasses CI state in the diagnostics.
     expect(gates[0]!.detail).toContain("roll-score");
     expect(gates[0]!.ciState).not.toBe("success");
+  });
+});
+
+describe("repair-evidence command — FIX-1062 idempotency", () => {
+  it("returns already_repaired for a PR with an evidence:repaired event and no GitHub review", () => {
+    const cwd = project1062([
+      JSON.stringify({ type: "pr:open", prNumber: PR, storyId: "FIX-1057", ts: 1 }),
+      JSON.stringify({ type: "evidence:repaired", prNumber: PR, storyId: "FIX-1057", outcome: "evidence-generated", details: "repaired", ts: 2 }),
+    ]);
+    const fakeBin = installFakeGh(cwd, { reviews: [], ci: "SUCCESS", merge: "CLEAN" });
+    const r = withPath(fakeBin, () => run(cwd, ["repair-evidence", String(PR), "--json"]));
+    expect(r.code).toBe(0);
+    const parsed = JSON.parse(r.out);
+    expect(parsed.verdict).toBe("already_repaired");
+    expect(parsed.storyId).toBe("FIX-1057");
+  });
+
+  it("preserves not_reparable for an unrepaired PR with no evaluator approval", () => {
+    const cwd = project1062([JSON.stringify({ type: "pr:open", prNumber: PR, storyId: "FIX-1057", ts: 1 })]);
+    const fakeBin = installFakeGh(cwd, { reviews: [], ci: "SUCCESS", merge: "CLEAN" });
+    const r = withPath(fakeBin, () => run(cwd, ["repair-evidence", String(PR), "--json"]));
+    expect(r.code).toBe(1);
+    const parsed = JSON.parse(r.out);
+    expect(parsed.verdict).toBe("not_reparable");
+    expect(parsed.reason).toContain("evaluator has not approved");
+  });
+});
+
+describe("supervisor why — FIX-1062 repaired evidence diagnostic", () => {
+  it("does not summarize a repaired PR as bare evaluator=none", () => {
+    const cwd = project1062([
+      JSON.stringify({ type: "pr:open", prNumber: PR, storyId: "FIX-1057", ts: 1 }),
+      JSON.stringify({ type: "evidence:repaired", prNumber: PR, storyId: "FIX-1057", outcome: "evidence-generated", details: "repaired", ts: 2 }),
+    ]);
+    const fakeBin = installFakeGh(cwd, { reviews: [], ci: "SUCCESS", merge: "CLEAN" });
+    const r = withPath(fakeBin, () => run(cwd, ["why"]));
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("manual merge:");
+    expect(r.out).toContain("merge_ready");
+    expect(r.out).not.toMatch(/evaluator=none[^)]/); // bare evaluator=none, not followed by repaired annotation
+    expect(r.out).toContain("repaired");
+  });
+
+  it("--json exposes the repaired gate detail without bare evaluator=none", () => {
+    const cwd = project1062([
+      JSON.stringify({ type: "pr:open", prNumber: PR, storyId: "FIX-1057", ts: 1 }),
+      JSON.stringify({ type: "evidence:repaired", prNumber: PR, storyId: "FIX-1057", outcome: "evidence-generated", details: "repaired", ts: 2 }),
+    ]);
+    const fakeBin = installFakeGh(cwd, { reviews: [], ci: "SUCCESS", merge: "CLEAN" });
+    const r = withPath(fakeBin, () => run(cwd, ["why", "--json"]));
+    expect(r.code).toBe(0);
+    const parsed = JSON.parse(r.out);
+    const gate = parsed.runbook.truth.manualMergeGates.find((g: { prNumber: number }) => g.prNumber === PR);
+    expect(gate).toBeDefined();
+    expect(gate.action).toBe("merge_ready");
+    expect(gate.detail).toContain("repaired");
+    expect(gate.detail).not.toBe("evaluator=none");
   });
 });

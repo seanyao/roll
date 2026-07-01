@@ -161,10 +161,24 @@ export function parseRollScoreArtifact(raw: unknown): RollEvaluatorScore | null 
  * dirty, or any other condition that means evidence alone won't make it ready.
  */
 export function classifyEvidenceRepair(input: EvidenceRepairInput): EvidenceRepairClassification {
-  // Structural preconditions: only green + approved + clean PRs are candidates.
+  // Structural preconditions: only green + clean PRs are candidates.
   if (input.ciState !== "success") {
     return { verdict: "not_reparable", reason: `CI is not green (${input.ciState}); evidence repair cannot fix CI` };
   }
+  if (input.mergeable !== "CLEAN") {
+    return { verdict: "not_reparable", reason: `merge is not clean (${input.mergeable}); evidence repair cannot resolve merge conflicts` };
+  }
+
+  // FIX-1062 — already-repaired is terminal/idempotent for a green+clean PR. A
+  // rerun must report the repaired state before falling through to the
+  // evaluator-approval failure check, because the first repair may have been
+  // approved by a Roll evaluator score (FIX-1061) that is no longer visible as a
+  // GitHub review. Structural failures (red CI / dirty merge) are still reported
+  // first — repair cannot fix those.
+  if (input.alreadyRepaired) {
+    return { verdict: "already_repaired", reason: "evidence already repaired; PR is merge-ready" };
+  }
+
   // FIX-1061 — evaluator approval comes from EITHER a GitHub review OR an accepted
   // Roll evaluator score; an empty GitHub review must not erase a valid Roll score.
   const approval = resolveEvaluatorApproval({
@@ -173,14 +187,6 @@ export function classifyEvidenceRepair(input: EvidenceRepairInput): EvidenceRepa
   });
   if (!approval.approved) {
     return { verdict: "not_reparable", reason: `evaluator has not approved (${approval.detail}); evidence repair cannot replace evaluator review` };
-  }
-  if (input.mergeable !== "CLEAN") {
-    return { verdict: "not_reparable", reason: `merge is not clean (${input.mergeable}); evidence repair cannot resolve merge conflicts` };
-  }
-
-  // Already repaired — the supervisor should show merge_ready.
-  if (input.alreadyRepaired) {
-    return { verdict: "already_repaired", reason: "evidence already repaired; PR is merge-ready" };
   }
 
   // Has fresh report — no gap to fill.

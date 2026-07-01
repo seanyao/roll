@@ -257,12 +257,20 @@ export function readManualMergeGates(
     // instead of a bare `evaluator=none` when a loop PR carries a Roll score.
     const rollScore = resolveRollEvaluatorScore(projectPath, pr.headRefName, events);
     const approval = resolveEvaluatorApproval({ reviewState: facts.bot || "none", rollEvaluatorScore: rollScore });
-    const evaluatorLabel =
+    const baseEvaluatorLabel =
       approval.source === "roll-score"
         ? `roll-score(${approval.detail})`
         : approval.source === "github-review"
           ? `github-review(${facts.bot || "none"})`
           : facts.bot || "none";
+    // FIX-1062 — when evidence has been repaired, the diagnostic must explain that
+    // merge readiness comes from repaired evidence and must not read as a bare
+    // `evaluator=none` when there is no GitHub review/Roll score approval.
+    const evaluatorLabel = repaired
+      ? approval.approved
+        ? `${baseEvaluatorLabel} · evidence-repaired`
+        : `evidence-repaired (no separate evaluator approval)`
+      : baseEvaluatorLabel;
     gates.push({
       storyId,
       prNumber: pr.number,

@@ -276,6 +276,8 @@ export type RollEvent =
   // delivered code no longer matches spec (recorded as a refinement).
   | { type: "evidence:repair_requested"; prNumber: number; storyId: string; reason: string; ts: number }
   | { type: "evidence:repaired"; prNumber: number; storyId: string; outcome: "evidence-generated" | "refinement-needed"; details: string; ts: number }
+  // FIX-1048 — neutral always-on loop digest, successor to report:morning.
+  | { type: "report:loop-digest"; path: string; windowStart: number; windowEnd: number; cycles: number; corrections: number; paused: boolean; ts: number }
   // Morning report (US-EVID-016) — one fixed human-readable page is rebuilt from
   // events/runs and linked from the dossier front page.
   | { type: "report:morning"; path: string; windowStart: number; windowEnd: number; cycles: number; corrections: number; paused: boolean; ts: number }

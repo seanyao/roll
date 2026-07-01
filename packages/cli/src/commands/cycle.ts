@@ -17,7 +17,7 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { Readable } from "node:stream";
 import { join } from "node:path";
-import { collectCycleLedger, type CycleLedgerRow, type CycleTapeSegment } from "../lib/cycle-ledger.js";
+import { collectCycleLedger, formatBuilderIdentity, type CycleLedgerRow, type CycleTapeSegment } from "../lib/cycle-ledger.js";
 import { collectGitDossierFacts } from "../lib/story-dossier.js";
 import { cycleNo } from "./cycles.js";
 import { c, renderState } from "../render.js";
@@ -62,7 +62,9 @@ export function findCycle(rows: CycleLedgerRow[], raw: string): CycleLedgerRow |
 export function renderCycleTrace(row: CycleLedgerRow, lang: "en" | "zh", slug?: string): string {
   const lines: string[] = [];
   lines.push(
-    `#${cycleNo(row.cycleId)} · ${c(row.verdict === "delivered" ? "green" : row.verdict === "idle" || row.verdict === "unpublished" ? "muted" : "red", row.verdict)} · ${row.model ? `${row.agent} / ${row.model}` : row.agent} · ${row.tokens} · ${row.cost} · ${row.duration}`,
+    // FIX-1067: the SAME shared Builder identity formatter `roll cycles` uses, so
+    // the two surfaces normalize the raw agent/model facts identically.
+    `#${cycleNo(row.cycleId)} · ${c(row.verdict === "delivered" ? "green" : row.verdict === "idle" || row.verdict === "unpublished" ? "muted" : "red", row.verdict)} · ${formatBuilderIdentity(row.agent, row.model)} · ${row.tokens} · ${row.cost} · ${row.duration}`,
   );
   lines.push(lang === "zh" ? `story ${row.storyId === "" ? "—（无故事）" : row.storyId}` : `story ${row.storyId === "" ? "— (no story)" : row.storyId}`);
   if (row.toolSummary !== "") lines.push(`cost ${row.cost} · tools ${formatToolCostSummary(row.toolCosts, " ")}`);

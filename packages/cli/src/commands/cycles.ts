@@ -12,6 +12,7 @@ import { extractCycleSignals, parseBacklog, signalKindForMarker, type TimelineEn
 import {
   bucketCounts,
   collectCycleLedger,
+  formatBuilderIdentity,
   CYCLE_VERDICTS,
   ledgerFailedCount,
   reconcileDeliveredUnpublishedVerdicts,
@@ -300,8 +301,10 @@ export function renderCyclesLedger(rows: CycleLedgerRow[], sinceLabel: string, l
   for (const r of within) {
     const color = VERDICT_COLOR[r.verdict] ?? "muted";
     // FIX-1066: always show Builder Agent and model together, never just model.
-    // Known model: "reasonix / deepseek-flash". Unknown model: "reasonix / —".
-    const agentModel = r.model ? `${r.agent} / ${r.model}` : `${r.agent} / —`;
+    // FIX-1067: normalize the RAW ledger facts to the operator-facing runnable
+    // surface via the shared formatter (`kimi` + `kimi-code/kimi-for-coding` →
+    // `kimi-code / kimi-2.7`), so this and `roll cycle <id>` cannot drift.
+    const agentModel = formatBuilderIdentity(r.agent, r.model);
     lines.push(
       [
         pad(`#${cycleNo(r.cycleId)}`, 7),

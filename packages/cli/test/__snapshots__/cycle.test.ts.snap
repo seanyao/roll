@@ -1,7 +1,7 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`renderCycleTrace > AC5: en/zh snapshots 1`] = `
-"#0311 · delivered · claude · 120k/22k · $0.05 · 8m20s
+"#0311 · delivered · claude / — · 120k/22k · $0.05 · 8m20s
 story FIX-241
 cost $0.05 · tools bash×3(21s) browser×1(3.0s)
 
@@ -26,7 +26,7 @@ evidence  PR https://github.com/seanyao/roll/pull/461 · diff https://github.com
 `;
 
 exports[`renderCycleTrace > AC5: en/zh snapshots 2`] = `
-"#0311 · delivered · claude · 120k/22k · $0.05 · 8m20s
+"#0311 · delivered · claude / — · 120k/22k · $0.05 · 8m20s
 story FIX-241
 cost $0.05 · tools bash×3(21s) browser×1(3.0s)
 

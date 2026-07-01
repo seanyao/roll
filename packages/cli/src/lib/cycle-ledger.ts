@@ -8,7 +8,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { cycleActivitySignalsFromEvents, type ActivitySignal } from "@roll/core";
+import { agentBuilderLabel, cycleActivitySignalsFromEvents, normalizeModelLabel, type ActivitySignal } from "@roll/core";
 import type { ToolCost } from "@roll/spec";
 import { parseEventLine, type RollEvent } from "@roll/spec";
 import { collectToolEvidence, formatToolCostSummary, type ToolTimelineRow } from "./tool-display.js";
@@ -79,6 +79,22 @@ export interface CycleLedgerRow {
   usageUnknownReason?: string;
   /** FIX-1051: agent-internal failure diagnostics surfaced in detail output. */
   agentInternalFailure?: { class: string; summary: string; nativeLogPath: string; conversationId?: string };
+}
+
+/**
+ * FIX-1067 — the SINGLE operator-facing Builder identity formatter shared by
+ * `roll cycles` and `roll cycle <id>`, so the two surfaces can never drift. It
+ * normalizes the RAW ledger facts (internal agent key + raw provider model) to
+ * the runnable agent surface + a canonical display model: internal `kimi` plus
+ * raw `kimi-code/kimi-for-coding` render as `kimi-code / kimi-2.7`, while
+ * `reasonix / deepseek-flash` and any unknown agent pass through unchanged. When
+ * the model is unknown it renders `<label> / —`. Raw agent/model are preserved
+ * verbatim in machine-readable output (this touches display only).
+ */
+export function formatBuilderIdentity(agent: string, model: string): string {
+  const label = agentBuilderLabel(agent);
+  const displayModel = normalizeModelLabel(model, agent);
+  return displayModel !== "" ? `${label} / ${displayModel}` : `${label} / —`;
 }
 
 /** The CLI's verdict vocabulary (AC4): delivered / reverted / failed / blocked. */

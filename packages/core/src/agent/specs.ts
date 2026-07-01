@@ -40,6 +40,12 @@ export interface AgentSpec {
   normalizer: AgentNormalizerKind;
   usage: AgentUsageSpec;
   smokeCommand: string;
+  /** FIX-1067 — raw provider model string → compact operator-facing display
+   *  label. The ledger stores the raw provider model (e.g.
+   *  `kimi-code/kimi-for-coding`); the human cycle surfaces show the canonical
+   *  short label (`kimi-2.7`). Keyed by raw model, agent-scoped so no cross-agent
+   *  collision. Raw JSON always keeps the un-normalized fact. */
+  modelDisplayAliases?: Readonly<Record<string, string>>;
 }
 
 export type AgentSpecRegistry = Readonly<Record<string, AgentSpec>>;
@@ -67,6 +73,9 @@ export const AGENTS: readonly AgentSpec[] = [
     normalizer: "kimi",
     usage: { stdoutExtractor: "kimi", sessionRecovery: "kimi" },
     smokeCommand: 'kimi -p "Reply with a single word: hello"',
+    // FIX-1067: the runner records kimi's raw provider model as
+    // `kimi-code/kimi-for-coding`; the compact operator label is `kimi-2.7`.
+    modelDisplayAliases: { "kimi-code/kimi-for-coding": "kimi-2.7" },
   },
   {
     name: "codex",
@@ -180,6 +189,35 @@ export function getAgentIdentitySpec(name: string): AgentSpec | undefined {
 
 export function agentDefaultModel(name: string, registry: AgentSpecRegistry = AGENT_SPECS): string {
   return getAgentSpec(name, registry)?.defaultModel ?? name;
+}
+
+/**
+ * FIX-1067 — the operator-facing runnable Builder label for an agent. The ledger
+ * stores the canonical internal agent key (e.g. `kimi`); operators know the agent
+ * by the CLI they run (`kimi-code`). Resolve to the primary CLI binary candidate
+ * (first {@link AgentSpec.cliBin} entry — the runnable surface), falling back to
+ * the canonical identity name for agents not in the roster (so an unknown agent
+ * is never silently rewritten). An empty name stays empty.
+ */
+export function agentBuilderLabel(name: string, registry: AgentSpecRegistry = AGENT_SPECS): string {
+  if (name.trim() === "") return "";
+  return getAgentSpec(name, registry)?.cliBin[0] ?? canonicalAgentIdentityName(name);
+}
+
+/**
+ * FIX-1067 — normalize a raw provider model string to its compact operator-facing
+ * display label. Agent-scoped via {@link AgentSpec.modelDisplayAliases} so a raw
+ * `kimi-code/kimi-for-coding` shows as `kimi-2.7` while every other model (and
+ * every other agent) is passed through unchanged. This is DISPLAY-only — the raw
+ * model fact stays intact in machine-readable output.
+ */
+export function normalizeModelLabel(rawModel: string, agentName?: string, registry: AgentSpecRegistry = AGENT_SPECS): string {
+  if (rawModel === "") return "";
+  if (agentName !== undefined) {
+    const alias = getAgentSpec(agentName, registry)?.modelDisplayAliases?.[rawModel];
+    if (alias !== undefined) return alias;
+  }
+  return rawModel;
 }
 
 export function agentNormalizerKind(name: string, registry: AgentSpecRegistry = AGENT_SPECS): AgentNormalizerKind {

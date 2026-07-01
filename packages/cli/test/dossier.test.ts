@@ -386,11 +386,19 @@ describe("renderFeaturesIndex — US-DOSSIER-001a front page", () => {
     expect(html).not.toContain("🔒"); // the legacy lock never leaks into the dossier
   });
 
-  it("US-EVID-016: links the fixed morning report when present", () => {
-    const withReport = renderFeaturesIndex(collectDossier(project()), { morningReportHref: "../reports/morning/latest.html" });
-    expect(withReport).toContain("Morning report");
-    expect(withReport).toContain("夜间运行晨报");
-    expect(withReport).toContain('href="../reports/morning/latest.html"');
+  it("US-EVID-016: links the loop digest when present with neutral wording", () => {
+    const withReport = renderFeaturesIndex(collectDossier(project()), { loopDigestHref: "../reports/loop/latest.html" });
+    expect(withReport).toContain("Loop Digest");
+    expect(withReport).toContain("循环摘要");
+    expect(withReport).not.toContain("Morning report");
+    expect(withReport).not.toContain("夜间运行晨报");
+    expect(withReport).toContain('href="../reports/loop/latest.html"');
+  });
+
+  it("FIX-1048: fallback to morningReportHref still renders as Loop Digest", () => {
+    const withLegacy = renderFeaturesIndex(collectDossier(project()), { morningReportHref: "../reports/morning/latest.html" });
+    expect(withLegacy).toContain("Loop Digest");
+    expect(withLegacy).toContain('href="../reports/morning/latest.html"');
   });
 
   it("US-TRUTH-011: truth strip and aggregate tiles freeze a drift fixture", () => {

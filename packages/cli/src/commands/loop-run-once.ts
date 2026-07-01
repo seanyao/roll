@@ -36,7 +36,7 @@ import { cardArchiveDir, reportFileName } from "../lib/archive.js";
 import { readLatestResizeSignal } from "../lib/review-score.js";
 import { loopReviewResizeCommand } from "./loop-review-resize.js";
 import { parseAllowedCardsEnv, scopeBacklogForAllowedCards } from "../lib/goal-progress.js";
-import { writeLatestMorningReport } from "../lib/morning-report.js";
+import { writeLatestLoopDigest } from "../lib/morning-report.js";
 import { backfillMergedRuns } from "../lib/runs-backfill.js";
 import { requireNetwork, tcpConnect } from "../lib/require-network.js";
 import { gcCommand } from "./gc.js";
@@ -1248,9 +1248,9 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     );
   }
   try {
-    writeLatestMorningReport(id.path, paths.eventsPath, paths.runsPath);
+    writeLatestLoopDigest(id.path, paths.eventsPath, paths.runsPath);
   } catch {
-    /* morning report must never mask the cycle terminal result */
+    /* loop digest must never mask the cycle terminal result */
   }
   // REFACTOR-049 AC3: auto-gc after each loop cycle — best-effort, never blocks.
   autoGc(id.path);

@@ -138,6 +138,8 @@ export interface TruthConsoleInput {
   gitHooks?: GitHooksVM;
   /** US-DOSSIER-044 — read-only live loop feed for the Now tab. */
   liveFeed?: LoopLiveFeedVM;
+  /** FIX-1048 — href to the always-on loop digest (.roll/reports/loop/latest.html). */
+  loopDigestHref?: string;
   /**
    * US-DOSSIER-033 — the Charter PROJECT TAB: a markdown browser over the
    * project's own charter docs (docs/*.md, the per-epic plan .md files, and the
@@ -781,7 +783,10 @@ function nowTab(input: TruthConsoleInput): string {
     `<span data-truth="total">${s.story.total} ${bi("stories", "个故事")}</span>` +
     `<span><b data-truth="merged-pct" style="color:${C.green};font-weight:600;">${mergedPct}%</b> ${bi("merged to main", "已合入主干")}</span></div>` +
     `<div style="display:flex;flex-wrap:wrap;gap:16px;margin-top:11px;${MONO}font-size:11px;color:${C.slate};">${legend}</div>` +
-    `</div></section>`;
+    `</div></section>` +
+    (input.loopDigestHref !== undefined
+      ? `<p style="margin:4px 0 0;font-size:12px;"><a href="${esc(input.loopDigestHref)}" style="color:${C.blue};">${bi("Loop Digest", "循环摘要")}</a> ${bi("· always-on loop summary", "· 持续刷新的循环摘要")}</p>\n`
+      : "");
 
   return (
     `<div id="freshness-banner" data-generated="${esc(s.generatedAt)}" style="display:none;margin:16px 0 0;padding:10px 16px;border:1px solid ${C.amber}55;border-radius:10px;background:${C.amber}0d;${MONO}font-size:12px;color:${C.amber};">` +

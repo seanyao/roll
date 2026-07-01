@@ -4,6 +4,7 @@
 
 ### 稳定性
 - `roll supervisor repair-evidence` 现在能救回卡在证据门的绿 PR，不用手动合并或重跑整张卡 `[loop]`
+- **`repair-evidence` 现在能识别 Roll evaluator 分数作为评估通过依据**：对于 loop 创建的 PR，当 GitHub review 为空时不再直接拒绝，而是从 `.score.pair.json` 获取 Roll evaluator 的 `good`/`ok` 裁决作为评估通过证据；输出和事件中明确标注评估证据来源。(FIX-1061) `[supervisor]`
 
 ### 文档与命名
 

@@ -169,6 +169,37 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
     expect(args).toEqual(["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", prompt]);
   });
 
+  it("FIX-1065: codex receives writableRoots as --add-dir flags", () => {
+    const { bin, args } = buildSpawnCommand("codex", {
+      cwd: "/wt",
+      skillBody: "DO WORK",
+      writableRoots: ["/wt", "/repo/.git/worktrees/pr-1125", "/repo/.git"],
+    });
+    expect(bin).toBe("codex");
+    expect(args).toEqual([
+      "exec",
+      "--skip-git-repo-check",
+      "--sandbox",
+      "workspace-write",
+      "--add-dir",
+      "/wt",
+      "--add-dir",
+      "/repo/.git/worktrees/pr-1125",
+      "--add-dir",
+      "/repo/.git",
+      prompt,
+    ]);
+  });
+
+  it("FIX-1065: codex ignores empty/duplicate writableRoots", () => {
+    const { args } = buildSpawnCommand("codex", {
+      cwd: "/wt",
+      skillBody: "DO WORK",
+      writableRoots: ["/wt", "  ", "/wt"],
+    });
+    expect(args).toEqual(["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--add-dir", "/wt", prompt]);
+  });
+
   it("agy: agy -p <prompt>", () => {
     const { bin, args } = buildSpawnCommand("agy", { cwd: "/wt", skillBody: "DO WORK" });
     expect(bin).toBe("agy");

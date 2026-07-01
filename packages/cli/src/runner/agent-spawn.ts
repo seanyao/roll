@@ -340,6 +340,12 @@ const AGENT_PROFILES: Readonly<Record<string, AgentProfile>> = {
     acceptance: { canReviewHeadless: getAgentSpec("codex")?.canReviewHeadless === true },
     buildSpawnCommand: (opts) => {
       const args = ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write"];
+      // FIX-1065: sandboxed PR-heal agents need write access to the linked
+      // worktree gitdir (and any other explicitly-granted roots) even though it
+      // lives outside the workspace. Pass each root as --add-dir.
+      for (const root of normalizeWritableRoots(opts.writableRoots)) {
+        args.push("--add-dir", root);
+      }
       const prompt = agentPrompt(opts);
       return { bin: opts.bin ?? "codex", args: [...args, prompt] };
     },

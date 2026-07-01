@@ -38,6 +38,12 @@ export interface RecoveryHandoff {
   /** Why the cycle is a handoff (e.g. `zero_tcr_dirty_worktree`). */
   readonly kind: string;
   readonly detail: string;
+  /** FIX-1068 — the preserved worktree path so the operator can inspect/rescue. */
+  readonly worktreePath: string;
+}
+
+function worktreePathFor(cycleId: string): string {
+  return `.roll/loop/worktrees/cycle-${cycleId}`;
 }
 
 /** Auditable facts about a goal stopped by the no-progress breaker. */
@@ -141,6 +147,7 @@ function lastCycleOnBlockedCard(events: readonly RollEvent[], blocked: ReadonlyS
               cycleId,
               kind: "zero_tcr_dirty_worktree",
               detail: "the failed cycle left a preserved worktree with no TCR commit; inspect it before the retry",
+              worktreePath: worktreePathFor(cycleId),
             },
           }
         : {}),

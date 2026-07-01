@@ -335,8 +335,33 @@ export function gatherSupervisorInput(projectPath: string): SupervisorInput {
             kind: "zero_tcr_dirty_worktree",
             detail: "zero TCR with dirty preserved worktree; owner must inspect or rescue before retry",
             source: `cycle:end/${ev.cycleId}`,
+            worktreePath: `.roll/loop/worktrees/cycle-${ev.cycleId}`,
           });
         }
+      }
+    }
+    else if (ev.type === "builder:boundary_violation") {
+      const sid = ev.storyId !== "" ? ev.storyId : cycleStory.get(ev.cycleId);
+      if (sid !== undefined) {
+        structuralFailures.set(sid, {
+          storyId: sid,
+          kind: "main_checkout_dirty",
+          detail: `main checkout dirty at finalization; files: ${ev.files.join(", ") || "unknown"}`,
+          source: `builder:boundary_violation/${ev.cycleId}`,
+          worktreePath: ev.worktreePath,
+        });
+      }
+    }
+    else if (ev.type === "builder:handoff_required") {
+      const sid = ev.storyId !== "" ? ev.storyId : cycleStory.get(ev.cycleId);
+      if (sid !== undefined) {
+        structuralFailures.set(sid, {
+          storyId: sid,
+          kind: "zero_tcr_dirty_worktree",
+          detail: "zero TCR with dirty preserved worktree; owner must inspect or rescue before retry",
+          source: `builder:handoff_required/${ev.cycleId}`,
+          worktreePath: ev.worktreePath,
+        });
       }
     }
   }
@@ -520,7 +545,13 @@ function supervisorDecisions(input: SupervisorInput): ReturnType<typeof advisePr
 }
 
 function runbookWhy(state: ReturnType<typeof buildSupervisorRunbookState>, facts: ReturnType<typeof observeProject>): string {
-  if (state.next.kind === "diagnose_failure") return state.next.reason;
+  if (state.next.kind === "diagnose_failure") {
+    const structural = state.truth.structuralFailures?.find((f) => f.storyId === state.next.storyId);
+    if (structural?.worktreePath !== undefined) {
+      return `${state.next.reason}; worktree: ${structural.worktreePath}`;
+    }
+    return state.next.reason;
+  }
   if (state.next.kind === "run_card") return `not stuck: next live card is ${state.next.storyId}`;
   return state.next.reason;
 }
@@ -556,7 +587,11 @@ function fmtNoProgressRecovery(stall: NoProgressStall): string {
     `    last failed Builder: ${stall.lastBuilder ?? "(unknown)"}`,
   ];
   if (stall.handoff !== undefined) {
-    lines.push(`    handoff: cycle ${stall.handoff.cycleId} — ${stall.handoff.detail} (roll loop log ${stall.handoff.cycleId})`);
+    lines.push(
+      `    handoff: cycle ${stall.handoff.cycleId} — ${stall.handoff.detail} (roll loop log ${stall.handoff.cycleId})`,
+      `      kind: ${stall.handoff.kind}`,
+      `      worktree: ${stall.handoff.worktreePath}`,
+    );
   }
   lines.push(`    recover: roll loop recover ${target} (preview) · roll loop recover ${target} --apply --reason "<why>"`);
   return lines.join("\n");

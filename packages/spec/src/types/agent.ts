@@ -165,6 +165,8 @@ export interface SupervisorStructuralFailure {
   readonly kind: "zero_tcr_dirty_worktree" | "main_checkout_dirty";
   readonly detail: string;
   readonly source: string;
+  /** FIX-1068 — the preserved worktree path so recovery surfaces can point at it. */
+  readonly worktreePath?: string;
 }
 
 /** US-V4-009 — an in-flight or candidate cycle for the parallel scheduler. */

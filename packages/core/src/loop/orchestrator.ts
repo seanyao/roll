@@ -101,9 +101,10 @@
  * state back in with the next observed event; the {@link CycleCommand}s name the
  * existing ports/plans so the adapter dispatches them 1:1.
  */
-import type { AgentId, CycleCost, CyclePhase, ExecutionProfile, ModelId, TerminalOutcome } from "@roll/spec";
+import type { AgentId, BuilderFinalizationFacts, CycleCost, CyclePhase, ExecutionProfile, ModelId, TerminalOutcome } from "@roll/spec";
 import { cycleCurrency } from "../cost/tracker.js";
 import type { RollEvent } from "@roll/spec";
+import { builderFinalizationReady, finalizeBuilder, handoffKindFor } from "./builder-finalization.js";
 import { nextWaitAction, type WaitAction } from "../delivery/pr.js";
 import { deliveryGate } from "../delivery/gate.js";
 
@@ -431,6 +432,31 @@ export function classifyPublish(pub: PublishResult): V2CycleStatus {
 /** Map a captured terminal straight to the closed terminal outcome vocabulary. */
 export function captureToSpecOutcome(status: V2CycleStatus): TerminalOutcome {
   return mapV2Status(status);
+}
+
+// ── FIX-1068 — Builder finalization gate (adapter-agnostic) ───────────────────
+
+/** Build the adapter-agnostic finalization facts from captured cycle state. */
+export function builderFinalizationFacts(
+  ctx: Pick<CycleContext, "cycleId" | "storyId" | "agent" | "agentExitCode" | "tcrCount" | "prUrl" | "evidenceRunDir">,
+  captured: CapturedFacts,
+): BuilderFinalizationFacts {
+  return {
+    storyId: ctx.storyId ?? "",
+    cycleId: ctx.cycleId,
+    agent: ctx.agent ?? "",
+    worktreePath: `.roll/loop/worktrees/cycle-${ctx.cycleId}`,
+    expectedProjectPath: "",
+    processExited: true,
+    exitCode: captured.agentExit,
+    commitsAhead: captured.commitsAhead,
+    tcrCount: ctx.tcrCount ?? 0,
+    worktreeDirty: captured.worktreeDirty === true,
+    mainCheckoutDirty: captured.mainDirty === true,
+    prUrl: ctx.prUrl ?? null,
+    attestReportPath: ctx.evidenceRunDir !== undefined ? `${ctx.evidenceRunDir}/latest/report.html` : null,
+    recentActivity: false,
+  };
 }
 
 // ── Hard timeout watchdog (B-group AC; mirrors bin/roll:8473 + 9044-9125) ─────
@@ -1051,11 +1077,56 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
     case "facts_captured": {
       const status = classifyCaptured(event.facts);
       const next = { ...state, phase: "reconcile" as CyclePhase, captured: event.facts };
+      const bFacts = builderFinalizationFacts(state.ctx, event.facts);
+      const verdict = finalizeBuilder(bFacts);
+      const gateEvent = ((): CycleCommand => {
+        if (verdict === "boundary_violation") {
+          return {
+            kind: "emit_event",
+            event: {
+              type: "builder:boundary_violation",
+              cycleId: state.ctx.cycleId,
+              storyId: state.ctx.storyId ?? "",
+              agent: state.ctx.agent ?? "",
+              kind: "main_checkout_dirty",
+              files: [],
+              worktreePath: bFacts.worktreePath,
+              ts: 0,
+            },
+          };
+        }
+        if (verdict === "handoff_without_tcr") {
+          return {
+            kind: "emit_event",
+            event: {
+              type: "builder:handoff_required",
+              cycleId: state.ctx.cycleId,
+              storyId: state.ctx.storyId ?? "",
+              agent: state.ctx.agent ?? "",
+              kind: handoffKindFor(verdict) ?? "unknown",
+              worktreePath: bFacts.worktreePath,
+              ts: 0,
+            },
+          };
+        }
+        return {
+          kind: "emit_event",
+          event: {
+            type: "builder:finalized",
+            cycleId: state.ctx.cycleId,
+            storyId: state.ctx.storyId ?? "",
+            agent: state.ctx.agent ?? "",
+            verdict,
+            facts: bFacts,
+            ts: 0,
+          },
+        };
+      })();
       if (status !== "built") {
         if (status === "needs_review") {
           return {
             state: { ...next, phase: "publish" },
-            commands: [{ kind: "publish_pr", branch: state.ctx.branch, docOnly: false, manualMerge: true, draft: true }],
+            commands: [gateEvent, { kind: "publish_pr", branch: state.ctx.branch, docOnly: false, manualMerge: true, draft: true }],
           };
         }
         // idle → clean + terminal; failed/blocked → terminal (no publish).
@@ -1123,12 +1194,12 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
                   },
                 ]
               : [];
-        return terminate(next, status, extra);
+        return terminate(next, status, [gateEvent, ...extra]);
       }
       // built → publish ladder.
       return {
         state: { ...next, phase: "publish" },
-        commands: [{ kind: "publish_pr", branch: state.ctx.branch, docOnly: false }],
+        commands: [gateEvent, { kind: "publish_pr", branch: state.ctx.branch, docOnly: false }],
       };
     }
 

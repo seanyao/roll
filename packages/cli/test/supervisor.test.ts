@@ -7,7 +7,9 @@ import { afterAll, describe, expect, it } from "vitest";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { RollEvent } from "@roll/spec";
 import { gatherSupervisorInput, supervisorCommand } from "../src/commands/supervisor.js";
+import { stripAnsi } from "../src/render.js";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -88,6 +90,65 @@ const BACKLOG = `# Backlog
 | US-2 | second \`depends-on:US-1\` | 📋 Todo |
 | US-3 | third | 📋 Todo |
 `;
+
+const WALKED_A = "20260701-010000-10001";
+const WALKED_B = "20260701-011000-10002";
+const ESCALATED = "20260701-012000-10003";
+
+function walkedCycle(cycleId: string, storyId: string, ts: number): RollEvent[] {
+  return [
+    { type: "cycle:start", cycleId, storyId, agent: "kimi", model: "moonshot", ts },
+    { type: "cycle:first_edit", cycleId, commitHash: `${storyId}-a`, ts: ts + 100 },
+    { type: "cycle:tcr", cycleId, commitHash: `${storyId}-b`, message: `tcr: ${storyId}`, ts: ts + 200 },
+    { type: "pair:verdict", cycleId, peer: "reasonix", verdict: "agree", findings: 0, cost: 0, stage: "review", ts: ts + 300 },
+    { type: "peer:gate", cycleId, verdict: "consulted", reasons: ["review completed"], ts: ts + 400 },
+    { type: "pair:score", cycleId, peer: "codex", score: 9, verdict: "good", cost: 0, stage: "score", ts: ts + 500 },
+    { type: "attest:gate", cycleId, verdict: "produced", reasons: ["evidence present"], ts: ts + 600 },
+    {
+      type: "cycle:terminal",
+      schema: 1,
+      cycleId,
+      storyId,
+      agent: "kimi",
+      model: "moonshot",
+      startedAt: ts,
+      endedAt: ts + 700,
+      outcome: "published_pending_merge",
+      pr: { present: false, reason: "no_publish_attempted" },
+      branch: { present: true, value: `loop/${storyId}` },
+      commit: { present: true, value: `${storyId}-b` },
+      tcr: { present: true, value: 1 },
+      attest: { present: true, value: { reportPath: ".roll/...", acMap: true } },
+      usage: { present: false, reason: "no_parseable_usage" },
+      cost: { present: false, reason: "no_parseable_usage" },
+      ts: ts + 700,
+    },
+  ];
+}
+
+const collabEvents: RollEvent[] = [
+  ...walkedCycle(WALKED_A, "US-OBS-038", 1_000),
+  ...walkedCycle(WALKED_B, "US-OBS-039", 2_000),
+  { type: "cycle:start", cycleId: ESCALATED, storyId: "US-OBS-040", agent: "pi", model: "deepseek", ts: 3_000 },
+  { type: "cycle:first_edit", cycleId: ESCALATED, commitHash: "esc-a", ts: 3_100 },
+  { type: "agent:stall", cycleId: ESCALATED, agent: "pi", idleSec: 601, thresholdSec: 600, ts: 3_700 },
+  {
+    type: "cycle:end",
+    cycleId: ESCALATED,
+    outcome: "gave_up",
+    cost: {
+      cycleId: ESCALATED,
+      agent: "pi",
+      model: "deepseek",
+      tokensIn: 0,
+      tokensOut: 0,
+      estimatedCost: 0,
+      revertCount: 0,
+      effectiveCost: 0,
+    },
+    ts: 3_800,
+  },
+];
 
 describe("gatherSupervisorInput", () => {
   it("reads backlog rows + depends-on + merge truth + route config errors", () => {
@@ -608,5 +669,59 @@ describe("supervisorCommand", () => {
       if (saveHome === undefined) delete process.env["ROLL_HOME"];
       else process.env["ROLL_HOME"] = saveHome;
     }
+  });
+
+  it("US-OBS-040: live --collab --once renders folded deliveries and expanded escalation", () => {
+    const cwd = project(BACKLOG, { events: collabEvents.map((ev) => JSON.stringify(ev)) });
+    writeFileSync(
+      join(cwd, ".roll", "loop", "runs.jsonl"),
+      JSON.stringify({
+        cycle_id: "missing-cycle",
+        status: "failed",
+        outcome: "gave_up",
+        story_id: "US-MISSING",
+        agent: "pi",
+        model: "deepseek",
+        ts: "2026-07-01T01:30:00Z",
+        duration_sec: 1,
+      }) + "\n",
+    );
+    const r = run(cwd, ["live", "--collab", "--once", "--no-color"]);
+    const out = stripAnsi(r.out);
+    expect(r.code).toBe(0);
+    expect(out).toContain("Prime Agent Live — collaboration snapshot");
+    expect(out).toContain("goal: unknown");
+    expect(out).toContain("supervisor:");
+    expect(out).toContain("interventions:");
+    expect(out).toContain("US-OBS-038 → US-OBS-039");
+    expect(out).toContain("walked full protocol ✓ ×2");
+    expect(out).toContain("US-OBS-040");
+    expect(out).toContain("⤴ escalation");
+    expect(out).toContain("escalated ⤴");
+    expect(out).toContain("协同摘要不可用");
+  });
+
+  it("US-OBS-040: live --collab --json emits collab-stream.v1 with missing-summary fallback", () => {
+    const cwd = project(BACKLOG, { events: collabEvents.map((ev) => JSON.stringify(ev)) });
+    writeFileSync(
+      join(cwd, ".roll", "loop", "runs.jsonl"),
+      JSON.stringify({
+        cycle_id: "missing-cycle",
+        status: "failed",
+        outcome: "gave_up",
+        story_id: "US-MISSING",
+        agent: "pi",
+        model: "deepseek",
+        ts: "2026-07-01T01:30:00Z",
+        duration_sec: 1,
+      }) + "\n",
+    );
+    const r = run(cwd, ["live", "--collab", "--once", "--json"]);
+    expect(r.code).toBe(0);
+    const parsed = JSON.parse(r.out) as { schema: string; cycles: Array<{ cycleId: string; stance?: { note?: string } }> };
+    expect(parsed.schema).toBe("collab-stream.v1");
+    expect(parsed.cycles.map((c) => c.cycleId)).toContain(WALKED_A);
+    expect(parsed.cycles.map((c) => c.cycleId)).toContain(ESCALATED);
+    expect(parsed.cycles.find((c) => c.cycleId === "missing-cycle")?.stance?.note).toBe("协同摘要不可用");
   });
 });

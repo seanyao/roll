@@ -6,7 +6,7 @@
  * timestamps are epoch-ms values supplied by the caller.
  */
 
-import type { CollabCycleView, CollabEscalation } from "@roll/spec";
+import type { CollabCycleView, CollabEscalation, CollabStreamView } from "@roll/spec";
 import { c, stripAnsi, strw } from "../render.js";
 
 /** Layer A render options. */
@@ -19,6 +19,10 @@ export interface RenderOpt {
   width?: number;
   /** Output language for role/action labels. */
   lang?: "en" | "zh";
+}
+
+export interface StreamRenderOpt extends RenderOpt {
+  once: boolean;
 }
 
 /** Canonical role glyphs from the Layer A protocol. */
@@ -164,6 +168,14 @@ export function renderLegend(opt: RenderOpt): string {
 
 const LABELS = {
   en: {
+    liveTitle: "Prime Agent Live — collaboration stream",
+    snapshotTitle: "Prime Agent Live — collaboration snapshot",
+    goalScope: "goal",
+    supervisor: "supervisor",
+    interventions: "interventions",
+    supervise: "supervise",
+    plan: "plan",
+    buildLevel: "build",
     assign: "assign builder =",
     build: "build → TCR",
     handoffDiff: "handoff diff →",
@@ -187,6 +199,14 @@ const LABELS = {
     rolePlanner: "planner",
   },
   zh: {
+    liveTitle: "Prime Agent Live — 协同流",
+    snapshotTitle: "Prime Agent Live — 协同快照",
+    goalScope: "目标",
+    supervisor: "supervisor",
+    interventions: "介入层级",
+    supervise: "监督",
+    plan: "规划",
+    buildLevel: "建造",
     assign: "指派 builder =",
     build: "建造 → TCR",
     handoffDiff: "交 diff →",
@@ -274,9 +294,9 @@ export function renderCollabCycle(
 
   lines.push(`▌ ${formatTimeSpine(view.startedAtMs, opt)}  ${view.storyId}`);
 
-  if (view.stance && view.stance.level !== "supervise") {
+  if (view.stance && (view.stance.level !== "supervise" || view.stance.note !== undefined)) {
     const roleGlyph = renderRole("supervise", opt);
-    const levelText = view.stance.level === "plan" ? labels.rolePlanner : labels.supervisorFix;
+    const levelText = view.stance.level === "plan" ? labels.rolePlanner : view.stance.level === "build" ? labels.supervisorFix : labels.roleSupervise;
     lines.push(`   ${roleGlyph}  ${levelText}${view.stance.note ? ` — ${view.stance.note}` : ""}`);
   }
 
@@ -326,4 +346,65 @@ export function renderCollabCycle(
   lines.push(`${"─".repeat(ruleWidth)} ${termText}`);
 
   return lines.join("\n");
+}
+
+function foldedWalkedLine(
+  views: readonly CollabCycleView[],
+  opt: RenderOpt,
+  labels: (typeof LABELS)["en"],
+): string {
+  const first = views[0]!;
+  const last = views[views.length - 1]!;
+  const stories = views.map((v) => v.storyId).join(" → ");
+  const label = views.length > 1 ? `${labels.walkedFull} ${TERMINUS_GLYPH.walked_full} ×${views.length}` : `${labels.walkedFull} ${TERMINUS_GLYPH.walked_full}`;
+  return `▌ ${formatTimeSpine(first.startedAtMs, opt)}..${formatTimeSpine(last.startedAtMs, opt)}  ${stories}\n` +
+    `   ${renderRole("supervise", opt)} ${HANDOFF_GLYPH} ${renderRole("build", opt)} ${HANDOFF_GLYPH} ${renderRole("peer", opt)} ${HANDOFF_GLYPH} ${renderRole("score", opt)} ${HANDOFF_GLYPH} ${GATE_GLYPH}  ${label}`;
+}
+
+function streamChunks(cycles: readonly CollabCycleView[], opt: StreamRenderOpt): string[] {
+  const chunks: string[] = [];
+  let walkedRun: CollabCycleView[] = [];
+
+  const flushWalked = (): void => {
+    if (walkedRun.length === 0) return;
+    const labels = LABELS[opt.lang ?? "en"];
+    chunks.push(foldedWalkedLine(walkedRun, opt, labels));
+    walkedRun = [];
+  };
+
+  for (const cycle of cycles) {
+    if (opt.fold && cycle.terminus === "walked_full" && cycle.escalation === undefined) {
+      walkedRun.push(cycle);
+      continue;
+    }
+    flushWalked();
+    chunks.push(renderCollabCycle(cycle, opt));
+  }
+  flushWalked();
+  return chunks;
+}
+
+/** Render a multi-cycle collaboration stream for `roll supervisor live --collab`. */
+export function renderCollabStream(view: CollabStreamView, opt: StreamRenderOpt): string {
+  const lang = opt.lang ?? "en";
+  const labels = LABELS[lang];
+  const title = opt.once ? labels.snapshotTitle : labels.liveTitle;
+  const lines = [
+    "",
+    `  ${title}`,
+    "",
+    `    ${labels.goalScope}: ${view.goalScope}`,
+    `    ${labels.supervisor}: ${renderRole("supervise", opt)} ${view.supervisor}`,
+    `    ${labels.interventions}: ${renderRole("supervise", opt)} ${labels.supervise} · ${renderRole("plan", opt)} ${labels.plan} · ${renderRole("build", opt)} ${labels.buildLevel}`,
+    "",
+  ];
+  const chunks = streamChunks(view.cycles, opt);
+  if (chunks.length === 0) {
+    lines.push("    no cycle rows yet");
+  } else {
+    for (const chunk of chunks) {
+      lines.push(chunk, "");
+    }
+  }
+  return lines.join("\n") + "\n";
 }

@@ -12,7 +12,7 @@
  * The handler stays thin: it resolves the project identity + runtime paths and
  * delegates the entire walk to the runner adapter (packages/cli/src/runner).
  */
-import { EventBus, assessBacklog, cycleEndEvent, firstInstalledAgent, mapV2Status, markStatus, parseBacklog, parsePolicy, readSlotFromText, shouldResize, shouldSuppressDormancy, type AgentSlot, type BacklogItem, type RouteDeps, type RouteSlot } from "@roll/core";
+import { EventBus, assessBacklog, cycleEndEvent, firstInstalledAgent, mapV2Status, markStatus, parseBacklog, parsePolicy, readSlotFromText, shouldResize, shouldSuppressDormancy, type AgentSlot, type BacklogItem, type CycleContext, type RouteDeps, type RouteSlot } from "@roll/core";
 import { STATUS_MARKER, absent, buildTerminalEvent, deriveOrphanVerdict, present, type BacklogReason } from "@roll/spec";
 import { createScheduler, isOwnerHeld, launchdLabel, projectIdentity, readLockOwner, releaseLock } from "@roll/infra";
 import { dormantMarkerPath, resolveLoopRunState, writeDormantMarker } from "./loop-sched.js";
@@ -38,6 +38,7 @@ import { loopReviewResizeCommand } from "./loop-review-resize.js";
 import { parseAllowedCardsEnv, scopeBacklogForAllowedCards } from "../lib/goal-progress.js";
 import { writeLatestLoopDigest } from "../lib/morning-report.js";
 import { backfillMergedRuns } from "../lib/runs-backfill.js";
+import { readCycleAttributionFromEvents } from "../lib/cycle-attribution.js";
 import { requireNetwork, tcpConnect } from "../lib/require-network.js";
 import { gcCommand } from "./gc.js";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
@@ -136,7 +137,17 @@ export function cycleSignalTeardown(
   }
   if (owned) {
     const bus = new EventBus();
-    const tctx = { cycleId, branch, agent: "", model: "" };
+    // FIX-1060: recover story/agent from events the cycle already wrote before
+    // the signal, so an aborted cycle is never anonymous.
+    const attr = readCycleAttributionFromEvents(paths.eventsPath, cycleId);
+    const ctx: CycleContext = {
+      cycleId,
+      branch,
+      loop: "ci" as never,
+      storyId: attr.storyId,
+      agent: attr.agent,
+    };
+    const tctx = { cycleId, branch, agent: ctx.agent ?? "", model: ctx.model ?? "" };
     const terminalSec = now();
     try {
       bus.appendEvent(paths.eventsPath, { ...cycleEndEvent(tctx, "aborted"), ts: terminalSec * 1000 });
@@ -144,15 +155,17 @@ export function cycleSignalTeardown(
       /* best-effort: the exit below still happens */
     }
     try {
-      bus.upsertRun(
-        paths.runsPath,
-        { storyId: "", cycleId },
-        buildRunRow(
-          { kind: "append_run", status: "aborted", outcome: mapV2Status("aborted"), cycleId },
-          { cycleId, branch, loop: "ci" as never },
-          terminalSec,
-        ),
+      const row = buildRunRow(
+        { kind: "append_run", status: "aborted", outcome: mapV2Status("aborted"), cycleId },
+        ctx,
+        terminalSec,
       );
+      // FIX-1060: when we know the story but the abort fired before routing,
+      // record an explicit reason instead of a silent empty agent string.
+      if ((ctx.agent ?? "") === "" && (ctx.storyId ?? "") !== "") {
+        row["agent_unknown_reason"] = "aborted_before_agent_routed";
+      }
+      bus.upsertRun(paths.runsPath, { storyId: ctx.storyId ?? "", cycleId }, row);
     } catch {
       /* best-effort */
     }
@@ -177,8 +190,8 @@ export function cycleSignalTeardown(
         paths.eventsPath,
         buildTerminalEvent({
           cycleId,
-          storyId: "",
-          agent: "",
+          storyId: ctx.storyId ?? "",
+          agent: ctx.agent ?? "",
           startedAt: terminalSec * 1000,
           endedAt: terminalSec * 1000,
           outcome: verdict,

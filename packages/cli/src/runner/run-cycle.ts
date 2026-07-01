@@ -37,6 +37,7 @@ import {
 } from "@roll/core";
 import { CYCLE_TIMEOUT_SEC } from "@roll/core";
 import { type Ports, type ProcessClock, executeCommand, buildRunRow, revertPrematureDone } from "./executor.js";
+import { readCycleAttributionFromEvents } from "../lib/cycle-attribution.js";
 
 /** Inputs for one cycle run. */
 export interface RunCycleOptions {
@@ -154,10 +155,16 @@ export async function runCycleOnce(opts: RunCycleOptions): Promise<RunCycleResul
     // `aborted` terminal directly (idempotent — the bus upsert dedupes the row).
     if (!terminalEmitted) {
       const status: V2CycleStatus = "aborted";
+      // FIX-1060: if the live context was lost (e.g. exception before the
+      // orchestrator propagated story/agent), recover the best-known attribution
+      // from events the cycle already wrote.
+      const attr = readCycleAttributionFromEvents(ports.paths.eventsPath, liveCtx.cycleId);
+      const storyId = liveCtx.storyId ?? attr.storyId ?? "";
+      const agent = liveCtx.agent ?? attr.agent ?? "";
       const tctx = {
         cycleId: liveCtx.cycleId,
         branch: liveCtx.branch,
-        agent: liveCtx.agent ?? "",
+        agent,
         model: liveCtx.model ?? "",
       };
       try {
@@ -172,10 +179,15 @@ export async function runCycleOnce(opts: RunCycleOptions): Promise<RunCycleResul
           outcome: mapV2Status(status),
           cycleId: liveCtx.cycleId,
         };
+        const rowCtx: CycleContext = { ...liveCtx, storyId, agent };
+        const row = buildRunRow(fakeAppend, rowCtx, terminalSec);
+        if (agent === "" && storyId !== "") {
+          row["agent_unknown_reason"] = "aborted_before_agent_routed";
+        }
         ports.events.upsertRun(
           ports.paths.runsPath,
-          { storyId: liveCtx.storyId ?? "", cycleId: liveCtx.cycleId },
-          buildRunRow(fakeAppend, liveCtx, terminalSec),
+          { storyId, cycleId: liveCtx.cycleId },
+          row,
         );
         // FIX-304: this aborted fallback never reached the executor's append_run,
         // so undo a premature ✅ Done HERE too. An aborted cycle did NOT merge —
@@ -183,8 +195,8 @@ export async function runCycleOnce(opts: RunCycleOptions): Promise<RunCycleResul
         // symlinked .roll backlog (FIX-204C), the false-Done would otherwise
         // persist (the next preflight reconcile only inspects 🔨 claims). Revert
         // it to the pre-cycle status so done ≡ merged holds on every exit path.
-        if ((liveCtx.storyId ?? "") !== "") {
-          revertPrematureDone(ports, liveCtx.storyId ?? "", liveCtx.preCycleStatus);
+        if (storyId !== "") {
+          revertPrematureDone(ports, storyId, liveCtx.preCycleStatus);
         }
       } catch {
         /* best-effort terminal write; never mask the original failure */

@@ -508,6 +508,77 @@ describe("FIX-204D — signal teardown keeps I8 on the kill paths", () => {
     expect(ex(p.lockPath)).toBe(false);
   });
 
+  it("FIX-1060: owned lock + pick-only events backfills story_id and marks agent unknown reason", async () => {
+    const { cycleSignalTeardown } = await import("../src/commands/loop-run-once.js");
+    const { paths: p } = teardownFixture("owned-pick-only");
+    const cycleId = "20260606-040000-9003";
+    writeFileSync(p.lockPath, `${process.pid}:1780680000\n`, "utf8");
+    writeFileSync(
+      p.eventsPath,
+      JSON.stringify({
+        type: "evidence:frame-opened",
+        cycleId,
+        storyId: "FIX-1060-PICK",
+        runDir: "/tmp",
+        ts: 1,
+      }) + "\n",
+      "utf8",
+    );
+    let exitCode = -1;
+    cycleSignalTeardown(p, cycleId, `loop/cycle-${cycleId}`, "SIGTERM", {
+      killAgents: () => 0,
+      exit: (c) => {
+        exitCode = c;
+      },
+      now: () => 1780680123,
+    });
+    expect(exitCode).toBe(143);
+    const runs = readFileSync(p.runsPath, "utf8");
+    const row = JSON.parse(runs.trimEnd().split("\n").pop() ?? "{}") as Record<string, unknown>;
+    expect(row["story_id"]).toBe("FIX-1060-PICK");
+    expect(row["agent"]).toBe("");
+    expect(row["agent_unknown_reason"]).toBe("aborted_before_agent_routed");
+    const events = readFileSync(p.eventsPath, "utf8");
+    expect(events).toContain('"storyId":"FIX-1060-PICK"');
+    expect(events).toContain('"agent":""');
+  });
+
+  it("FIX-1060: owned lock + cycle:start backfills both story_id and agent", async () => {
+    const { cycleSignalTeardown } = await import("../src/commands/loop-run-once.js");
+    const { paths: p } = teardownFixture("owned-post-spawn");
+    const cycleId = "20260606-040000-9004";
+    writeFileSync(p.lockPath, `${process.pid}:1780680000\n`, "utf8");
+    writeFileSync(
+      p.eventsPath,
+      JSON.stringify({
+        type: "cycle:start",
+        cycleId,
+        storyId: "FIX-1060-SPAWN",
+        agent: "pi",
+        model: "",
+        ts: 1,
+      }) + "\n",
+      "utf8",
+    );
+    let exitCode = -1;
+    cycleSignalTeardown(p, cycleId, `loop/cycle-${cycleId}`, "SIGTERM", {
+      killAgents: () => 0,
+      exit: (c) => {
+        exitCode = c;
+      },
+      now: () => 1780680123,
+    });
+    expect(exitCode).toBe(143);
+    const runs = readFileSync(p.runsPath, "utf8");
+    const row = JSON.parse(runs.trimEnd().split("\n").pop() ?? "{}") as Record<string, unknown>;
+    expect(row["story_id"]).toBe("FIX-1060-SPAWN");
+    expect(row["agent"]).toBe("pi");
+    expect(row["agent_unknown_reason"]).toBeUndefined();
+    const events = readFileSync(p.eventsPath, "utf8");
+    expect(events).toContain('"storyId":"FIX-1060-SPAWN"');
+    expect(events).toContain('"agent":"pi"');
+  });
+
   it("foreign lock (skip-on-contention path): touches NOTHING, still exits with the signal code", async () => {
     const { cycleSignalTeardown } = await import("../src/commands/loop-run-once.js");
     const { paths: p } = teardownFixture("foreign");

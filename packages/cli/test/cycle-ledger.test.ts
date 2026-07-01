@@ -157,6 +157,17 @@ describe("collectCycleLedger", () => {
     expect(r.verdict).toBe("failed");
   });
 
+  it("FIX-1060: aborted cycle with backfilled story/agent renders them instead of dashes", () => {
+    const p = project([
+      { cycle_id: "ab", status: "aborted", outcome: "aborted_no_delivery", story_id: "FIX-1060", agent: "pi", ts: "2026-06-12T01:00:00Z" },
+    ]);
+    const r = collectCycleLedger(p)[0]!;
+    expect(r.storyId).toBe("FIX-1060");
+    expect(r.agent).toBe("pi");
+    expect(r.tape.find((s) => s.key === "story")?.detail).toBe("FIX-1060");
+    expect(r.verdict).toBe("failed");
+  });
+
   it("FIX-290 AC3: usage_unknown renders tokens/cost as '?' (UNKNOWN), model+duration still present — never a misleading 0/$0", () => {
     // The failed-cycle record the runner writes when usage_credentials_missing:
     // model fixed by routing, duration known, tokens/cost unreadable → unknown.

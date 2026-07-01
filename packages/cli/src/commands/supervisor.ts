@@ -23,6 +23,7 @@ import {
   buildCycleRoleSummary,
   buildSupervisorLiveBoard,
   classifyEvidenceRepair,
+  cycleIdFromBranch,
   ensureDeliveriesFresh,
   explainStuck,
   generateAcMap,
@@ -30,10 +31,13 @@ import {
   normalizeAgentConfig,
   observeProject,
   parseBacklog,
+  parseRollScoreArtifact,
   queryStoryDelivery,
   renderReport,
   repairedPrNumbers,
+  resolveEvaluatorApproval,
   type ExecPort,
+  type RollEvaluatorScore,
   recommendNext,
   type FreshnessPort,
 } from "@roll/core";
@@ -168,6 +172,47 @@ function actionForManualMerge(facts: { bot: string; ciState: string; mergeable: 
   return "manual_merge_waiting";
 }
 
+/**
+ * FIX-1061 — resolve the Roll evaluator score for a manual-merge PR from Roll's
+ * own evidence. Loop PRs carry their authoritative evaluator verdict as a
+ * `cycle-<id>.score.pair.json` peer artifact (and a `pair:score` event), not as
+ * a GitHub review. The cycle id is read from the PR head branch (`loop/cycle-<id>`);
+ * the artifact file is primary, the latest matching `pair:score` event is the
+ * fallback. Returns null when no cycle or no parseable score is found (fail-loud:
+ * the caller then relies on GitHub review state alone).
+ */
+function resolveRollEvaluatorScore(
+  projectPath: string,
+  headRefName: string | undefined,
+  events: readonly RollEvent[],
+): RollEvaluatorScore | null {
+  const cycleId = cycleIdFromBranch(headRefName);
+  if (cycleId === null) return null;
+
+  // Primary: the peer score artifact written by the score stage.
+  const artifactPath = join(projectPath, ".roll", "loop", "peer", `cycle-${cycleId}.score.pair.json`);
+  if (existsSync(artifactPath)) {
+    try {
+      const parsed = parseRollScoreArtifact(JSON.parse(readFileSync(artifactPath, "utf8")));
+      if (parsed !== null) return parsed;
+    } catch {
+      // Fall through to the event fallback — an unreadable/garbled artifact is
+      // not fatal; the event stream may still carry the score.
+    }
+  }
+
+  // Fallback: the latest `pair:score` event for this cycle's score stage.
+  let latest: RollEvaluatorScore | null = null;
+  let latestTs = -1;
+  for (const ev of events) {
+    if (ev.type === "pair:score" && ev.cycleId === cycleId && ev.stage === "score" && ev.ts > latestTs) {
+      latest = { score: ev.score, verdict: ev.verdict };
+      latestTs = ev.ts;
+    }
+  }
+  return latest;
+}
+
 export function readManualMergeGates(
   projectPath: string,
   events: readonly RollEvent[],
@@ -208,6 +253,16 @@ export function readManualMergeGates(
     const storyId = prStory.get(pr.number) ?? extractStoryId(knownStoryIds, pr.headRefName ?? "", pr.title ?? "", body) ?? `PR-${pr.number}`;
     const repaired = repairedPrSet !== undefined && isEvidenceRepaired(pr.number, repairedPrSet);
     const action = actionForManualMerge(facts, repaired);
+    // FIX-1061 — name the evaluator source (GitHub review or Roll evaluator score)
+    // instead of a bare `evaluator=none` when a loop PR carries a Roll score.
+    const rollScore = resolveRollEvaluatorScore(projectPath, pr.headRefName, events);
+    const approval = resolveEvaluatorApproval({ reviewState: facts.bot || "none", rollEvaluatorScore: rollScore });
+    const evaluatorLabel =
+      approval.source === "roll-score"
+        ? `roll-score(${approval.detail})`
+        : approval.source === "github-review"
+          ? `github-review(${facts.bot || "none"})`
+          : facts.bot || "none";
     gates.push({
       storyId,
       prNumber: pr.number,
@@ -215,7 +270,7 @@ export function readManualMergeGates(
       reviewState: facts.bot || "none",
       mergeable: facts.mergeable || "unknown",
       action,
-      detail: `ci=${facts.ciState || "unknown"} evaluator=${facts.bot || "none"} merge=${facts.mergeable || "unknown"} action=${action}`,
+      detail: `ci=${facts.ciState || "unknown"} evaluator=${evaluatorLabel} merge=${facts.mergeable || "unknown"} action=${action}`,
       source: `gh pr view ${pr.number}`,
     });
   }
@@ -611,6 +666,16 @@ export function supervisorCommand(args: string[]): number {
       storyId = extractStoryId([], headRef, bodyStr) ?? `PR-${prNumber}`;
     }
 
+    // FIX-1061 — resolve the Roll evaluator score for this PR's cycle so a green
+    // loop PR with an empty GitHub review can still be repaired on its real
+    // Delta Team evaluator evidence.
+    const headRefForCycle =
+      typeof (raw as { headRefName?: unknown }).headRefName === "string"
+        ? ((raw as { headRefName?: string }).headRefName ?? "")
+        : "";
+    const rollScore = resolveRollEvaluatorScore(projectPath, headRefForCycle, events);
+    const approval = resolveEvaluatorApproval({ reviewState: facts.bot || "none", rollEvaluatorScore: rollScore });
+
     // Classify repair eligibility.
     const classification = classifyEvidenceRepair({
       ciState: facts.ciState || "unknown",
@@ -619,6 +684,7 @@ export function supervisorCommand(args: string[]): number {
       isDraft: facts.isDraft === true,
       hasFreshReport: false, // We're asked to repair — assume no fresh report.
       alreadyRepaired,
+      rollEvaluatorScore: rollScore,
     });
 
     if (classification.verdict === "already_repaired") {
@@ -707,6 +773,7 @@ export function supervisorCommand(args: string[]): number {
         `Review state: ${facts.bot || "none"}`,
         `Mergeable: ${facts.mergeable || "unknown"}`,
         `Repair verdict: ${classification.verdict}`,
+        `Evaluator source: ${approval.source} — ${approval.detail}`,
         `Classification reason: ${classification.reason}`,
         "",
         "Evidence-repair command completed. The PR was CI green + evaluator",
@@ -794,7 +861,7 @@ export function supervisorCommand(args: string[]): number {
         `acceptance evidence repaired for ${storyId}`,
         acMapCount > 0 ? `ac-map: ${acMapCount} AC(s) at readonly with real evidence refs` : "ac-map: (no ACs found)",
         htmlReportPath !== "" ? `report: ${htmlReportPath}` : "report: (skipped — no ACs)",
-        `CI: ${facts.ciState} | review: ${facts.bot} | merge: ${facts.mergeable}`,
+        `CI: ${facts.ciState} | evaluator: ${approval.source} (${approval.detail}) | merge: ${facts.mergeable}`,
       ].join("; "),
       ts: Date.now(),
     };
@@ -811,6 +878,8 @@ export function supervisorCommand(args: string[]): number {
         storyId,
         verdict: "repaired",
         action: "merge_ready",
+        evaluatorSource: approval.source,
+        evaluatorDetail: approval.detail,
         reason: classification.reason,
         artifacts: {
           acMap: acMapCount > 0 ? `${storyId}/ac-map.json` : null,
@@ -823,6 +892,7 @@ export function supervisorCommand(args: string[]): number {
       process.stdout.write(
         `\n  repair-evidence: PR #${prNumber} (${storyId}) repaired\n` +
         `  action: merge_ready — the PR can now be promoted (if draft) and merged\n` +
+        `  evaluator: ${approval.source} — ${approval.detail}\n` +
         `  ac-map: ${acMapCount > 0 ? `generated for ${acMapCount} AC(s) at readonly status in ${storyId}/ac-map.json` : "(no ACs found — check spec.md)"}\n` +
         `  report: ${htmlReportPath || "(skipped — no ACs)"}\n` +
         `  evidence: ${repairSummaryAbs || "(skipped)"}\n` +

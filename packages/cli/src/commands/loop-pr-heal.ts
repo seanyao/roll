@@ -26,14 +26,15 @@ import {
   resolveHealMax,
 } from "@roll/core";
 import { ghRepoSlug } from "@roll/infra";
-import { execFileSync, spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { projectAgent } from "./agent-list.js";
 import { stateGet, stateUpsert } from "./loop-cycle-gates.js";
 import { healDir } from "./loop-maint.js";
 import { textAgentArgv } from "../lib/text-agent-argv.js";
+import { buildSpawnCommand } from "../runner/agent-spawn.js";
 
 // ─── per-project paths (mirror loop-pr-inbox: rt = <cwd>/.roll/loop) ──────────
 function runtimeDir(): string {
@@ -193,10 +194,78 @@ function gh(args: string[]): string {
 }
 
 /**
+ * FIX-1065: compute the narrow writable-root set for a PR-heal agent so it can
+ * commit inside the throwaway linked worktree. The worktree root itself, its
+ * linked gitdir under the main repo's `.git/worktrees/pr-<num>`, and the shared
+ * git common dir must all be writable for `git add` / `git write-tree` /
+ * `git commit` to succeed. The main checkout code root is intentionally omitted.
+ */
+export function prHealWritableRoots(wt: string): string[] {
+  const roots: string[] = [];
+  const add = (p: string): void => {
+    if (p.trim() === "") return;
+    try {
+      p = realpathSync(p);
+    } catch {
+      /* use path as-is when realpath fails */
+    }
+    if (!roots.includes(p)) roots.push(p);
+  };
+  if (existsSync(wt)) add(wt);
+  try {
+    const gitDir = execFileSync("git", ["-C", wt, "rev-parse", "--path-format=absolute", "--git-dir"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (gitDir !== "") add(gitDir);
+  } catch {
+    /* best-effort: missing gitdir will surface as a sandbox commit failure */
+  }
+  try {
+    const commonDir = execFileSync("git", ["-C", wt, "rev-parse", "--path-format=absolute", "--git-common-dir"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (commonDir !== "") add(commonDir);
+  } catch {
+    /* best-effort */
+  }
+  return roots;
+}
+
+function takeHealLock(num: string): void {
+  try {
+    mkdirSync(healDir(), { recursive: true });
+    writeFileSync(lockPath(num), String(process.pid));
+  } catch {
+    /* best-effort */
+  }
+}
+
+function releaseHealLock(num: string): void {
+  try {
+    rmSync(lockPath(num), { force: true });
+  } catch {
+    /* best-effort */
+  }
+}
+
+/**
+ * FIX-1065: classify an agent-spawn failure as a sandbox/permission block when
+ * the stderr mentions the linked-worktree git internals that a sandboxed agent
+ * cannot write. This distinguishes "cannot commit" from code-test failure or
+ * auth/network failure.
+ */
+export function isSandboxCommitBlock(stderr: string): boolean {
+  return /index\.lock|Operation not permitted|Seatbelt|allow_write|sandbox.*denied|sandbox.*permission/i.test(stderr);
+}
+
+/**
  * Run the actual heal (mirrors `_loop_pr_do_heal`): capture failing-CI context
  * to /tmp, check the PR branch out in a throwaway worktree, hand the minimal-fix
  * prompt to the project agent, and push back to the same branch if it produced
- * commits. Best-effort; cleans up its worktree. Returns the exit code.
+ * commits. Best-effort; cleans up its worktree and releases the heal lock.
+ * Returns the exit code.
  */
 export function runPrHeal(num: string, headRef: string, slug: string): number {
   if (num === "" || headRef === "") return 1;
@@ -212,41 +281,72 @@ export function runPrHeal(num: string, headRef: string, slug: string): number {
 
   const tmpRoot = mkdtempSync(join(tmpdir(), "roll-heal-"));
   const wt = join(tmpRoot, `pr-${num}`);
+  let setupOk = false;
+  let lockHeld = false;
   try {
     execFileSync("git", ["fetch", "origin", headRef], { stdio: "ignore" });
     execFileSync("git", ["worktree", "add", wt, `origin/${headRef}`], { stdio: "ignore" });
-  } catch {
-    rmSync(tmpRoot, { recursive: true, force: true });
-    return 1;
-  }
+    setupOk = true;
+    takeHealLock(num);
+    lockHeld = true;
 
-  const agent = projectAgent() || "claude";
-  const prompt =
-    `[roll PR 自愈] PR #${num} (${headRef}) 的 CI 红了。失败上下文见 ${ctx}。` +
-    `请只修使 CI 转绿所需的最小改动,保持 TCR 微提交节奏,改完直接 commit。不要改无关代码,不要反问。`;
-  const argv = textAgentArgv(agent, prompt);
-  if (argv !== null) {
+    const agent = projectAgent() || "claude";
+    const prompt =
+      `[roll PR 自愈] PR #${num} (${headRef}) 的 CI 红了。失败上下文见 ${ctx}。` +
+      `请只修使 CI 转绿所需的最小改动,保持 TCR 微提交节奏,改完直接 commit。不要改无关代码,不要反问。`;
+    // FIX-1065: use the runner's agent-spawn builder so sandboxed agents (codex)
+    // receive the linked-worktree gitdir/common-dir as writable roots. Fall back
+    // to the legacy text-mode argv only when the agent is not yet ported.
+    const writableRoots = prHealWritableRoots(wt);
+    const legacyArgv = textAgentArgv(agent, prompt);
+    let spawnCmd: { bin: string; args: string[] } | undefined;
     try {
-      execFileSync(argv.bin, argv.args, { cwd: wt, stdio: "ignore" });
+      spawnCmd = buildSpawnCommand(agent, { cwd: wt, skillBody: prompt, writableRoots });
     } catch {
-      /* agent best-effort */
+      spawnCmd = legacyArgv ?? undefined;
     }
-  }
-  // Push back to the same PR branch if the agent produced commits.
-  if (git(["rev-list", `origin/${headRef}..HEAD`], wt) !== "") {
+    if (spawnCmd !== undefined) {
+      const childEnv: NodeJS.ProcessEnv = { ...process.env };
+      for (const key of ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE"]) {
+        delete childEnv[key];
+      }
+      childEnv.PWD = wt;
+      const result = spawnSync(spawnCmd.bin, spawnCmd.args, {
+        cwd: wt,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: childEnv,
+        encoding: "utf8",
+      });
+      if (result.error !== undefined || result.status !== 0) {
+        const stderr = result.stderr ?? "";
+        if (isSandboxCommitBlock(stderr)) {
+          appendFileSync(
+            alertPath(),
+            `[${nowIso()}] [TYPE:pr-heal-sandbox-blocked] PR #${num} (${headRef}): agent cannot commit in linked worktree ${wt} — ${stderr.slice(0, 200)}\n`,
+          );
+        }
+      }
+    }
+    // Push back to the same PR branch if the agent produced commits.
+    if (git(["rev-list", `origin/${headRef}..HEAD`], wt) !== "") {
+      try {
+        execFileSync("git", ["push", "origin", `HEAD:${headRef}`], { cwd: wt, stdio: "ignore" });
+      } catch {
+        /* best-effort */
+      }
+    }
+  } catch {
+    /* worktree setup failure handled below */
+  } finally {
+    if (lockHeld) releaseHealLock(num);
     try {
-      execFileSync("git", ["push", "origin", `HEAD:${headRef}`], { cwd: wt, stdio: "ignore" });
+      execFileSync("git", ["worktree", "remove", "--force", wt], { stdio: "ignore" });
     } catch {
       /* best-effort */
     }
+    rmSync(tmpRoot, { recursive: true, force: true });
   }
-  try {
-    execFileSync("git", ["worktree", "remove", "--force", wt], { stdio: "ignore" });
-  } catch {
-    /* best-effort */
-  }
-  rmSync(tmpRoot, { recursive: true, force: true });
-  return 0;
+  return setupOk ? 0 : 1;
 }
 
 // ─── rebase: prRebaseStale ────────────────────────────────────────────────────

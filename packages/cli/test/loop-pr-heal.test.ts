@@ -3,11 +3,17 @@
  * off bin/roll. The gate reuses the pure core verdict; these tests drive the
  * side-effect routing via injected deps (no git/gh/agent/fs).
  */
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   type HealDeps,
   type RebaseDeps,
+  isSandboxCommitBlock,
   prHealSelf,
+  prHealWritableRoots,
   prRebaseStale,
 } from "../src/commands/loop-pr-heal.js";
 
@@ -135,5 +141,59 @@ describe("prRebaseStale — rebase dance (US-PORT-021)", () => {
     prRebaseStale("12", "feat/x", deps);
     expect(calls).toEqual(["fetch"]); // bailed after reset failed — no rebase/push/alert
     expect(calls).not.toContain("rebase");
+  });
+});
+
+describe("FIX-1065 — PR self-heal writable roots + failure classification", () => {
+  function makeRepo(): { repo: string; wt: string; cleanup: () => void } {
+    const root = mkdtempSync(join(tmpdir(), "roll-fix1065-"));
+    const repo = join(root, "repo");
+    const wt = join(root, "wt");
+    mkdirSync(repo, { recursive: true });
+    execFileSync("git", ["init", "--bare"], { cwd: repo });
+    const clone = join(root, "clone");
+    execFileSync("git", ["clone", repo, clone], { stdio: "ignore" });
+    execFileSync("git", ["config", "user.email", "test@roll.local"], { cwd: clone });
+    execFileSync("git", ["config", "user.name", "Roll Test"], { cwd: clone });
+    writeFileSync(join(clone, "file.txt"), "hello", "utf8");
+    execFileSync("git", ["add", "."], { cwd: clone });
+    execFileSync("git", ["commit", "-m", "init"], { cwd: clone });
+    execFileSync("git", ["push", "origin", "HEAD:main"], { cwd: clone });
+    execFileSync("git", ["branch", "feat/x"], { cwd: clone });
+    execFileSync("git", ["push", "origin", "feat/x"], { cwd: clone });
+    execFileSync("git", ["worktree", "add", wt, "origin/feat/x"], { cwd: clone });
+    return {
+      repo: clone,
+      wt,
+      cleanup: () => rmSync(root, { recursive: true, force: true }),
+    };
+  }
+
+  it("prHealWritableRoots grants worktree + linked gitdir + common dir, not main checkout code", () => {
+    const { wt, repo, cleanup } = makeRepo();
+    try {
+      const roots = prHealWritableRoots(wt).map((p) => realpathSync(p));
+      const gitDir = execFileSync("git", ["-C", wt, "rev-parse", "--path-format=absolute", "--git-dir"], { encoding: "utf8" }).trim();
+      const commonDir = execFileSync("git", ["-C", wt, "rev-parse", "--path-format=absolute", "--git-common-dir"], { encoding: "utf8" }).trim();
+      expect(roots).toContain(realpathSync(wt));
+      expect(roots).toContain(realpathSync(gitDir));
+      expect(roots).toContain(realpathSync(commonDir));
+      // The main checkout code root (the clone) is intentionally NOT writable.
+      expect(roots).not.toContain(realpathSync(repo));
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("isSandboxCommitBlock recognises linked-worktree index.lock errors", () => {
+    expect(isSandboxCommitBlock("fatal: Unable to create '/repo/.git/worktrees/pr-1125/index.lock': Operation not permitted")).toBe(true);
+    expect(isSandboxCommitBlock("Seatbelt policy violation: allow_write missing /repo/.git/worktrees/pr-1125")).toBe(true);
+    expect(isSandboxCommitBlock("sandbox denied: write to /repo/.git/worktrees/pr-1125/index.lock")).toBe(true);
+  });
+
+  it("isSandboxCommitBlock does not flag ordinary test failures or auth errors", () => {
+    expect(isSandboxCommitBlock("Error: test failed with 1 failure")).toBe(false);
+    expect(isSandboxCommitBlock("gh: Authentication failed (HTTP 401)")).toBe(false);
+    expect(isSandboxCommitBlock("network error: connection refused")).toBe(false);
   });
 });

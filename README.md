@@ -109,7 +109,7 @@ defaults:
         strategy: first-available
       evaluate:
         kind: select
-        from: [claude, codex, kimi, pi, agy, reasonix]
+        from: [claude, codex, kimi, pi, agy, reasonix, cursor]
         require: [evaluate]
         avoid: [execute]
         strategy: least-recent

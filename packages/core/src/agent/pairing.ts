@@ -39,6 +39,7 @@ const AGENT_VENDOR: Readonly<Record<string, string>> = {
   pi: "pi",
   agy: "google",
   reasonix: "reasonix",
+  cursor: "cursor",
 };
 
 export function agentVendor(name: string): string {

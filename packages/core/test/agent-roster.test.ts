@@ -14,9 +14,9 @@ import {
 import { evaluateAgentRosterGate, liveAgentRosterGateInput } from "../src/agent/roster-gate.js";
 import { AGENTS, AGENT_SPECS, getAgentIdentitySpec, getAgentSpec } from "../src/agent/specs.js";
 
-const CANONICAL_ROSTER = ["claude", "kimi", "codex", "pi", "agy", "reasonix"] as const;
-const REMOVED_AGENT_TOKENS = ["openclaw", "qwen", "opencode", "cursor", "trae"] as const;
-const GUIDE_ROSTER_COMMANDS = ["claude", "kimi-code", "codex", "agy", "pi", "reasonix"] as const;
+const CANONICAL_ROSTER = ["claude", "kimi", "codex", "pi", "agy", "reasonix", "cursor"] as const;
+const REMOVED_AGENT_TOKENS = ["openclaw", "qwen", "opencode", "trae"] as const;
+const GUIDE_ROSTER_COMMANDS = ["claude", "kimi-code", "codex", "agy", "pi", "reasonix", "cursor-agent"] as const;
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
 function readProjectFile(path: string): string {
@@ -52,7 +52,7 @@ describe("US-AGENT-043 canonical agent roster", () => {
     }
   });
 
-  it("registry scans exactly the six supported agents", () => {
+  it("registry scans exactly the seven supported agents", () => {
     expect([...AGENT_REGISTRY_NAMES]).toEqual([...CANONICAL_ROSTER]);
     for (const agent of CANONICAL_ROSTER) {
       expect(agentIsKnown(agent)).toBe(true);
@@ -60,7 +60,7 @@ describe("US-AGENT-043 canonical agent roster", () => {
     }
   });
 
-  it("agent specs expose exactly six canonical entries while preserving provider aliases", () => {
+  it("agent specs expose exactly seven canonical entries while preserving provider aliases", () => {
     const canonicalSpecNames = Object.values(AGENT_SPECS)
       .filter((spec, index, all) => all.findIndex((candidate) => candidate.name === spec.name) === index)
       .map((spec) => spec.name);
@@ -92,7 +92,7 @@ describe("US-AGENT-043 canonical agent roster", () => {
     expect(firstInstalledAgent(env)).toBe("reasonix");
   });
 
-  it("US-AGENT-046: live agent guides list exactly the six supported agents", () => {
+  it("US-AGENT-046: live agent guides list exactly the seven supported agents", () => {
     expect(markdownTableCommands("guide/en/ai-agents.md")).toEqual([...GUIDE_ROSTER_COMMANDS]);
     expect(markdownTableCommands("guide/zh/ai-agents.md")).toEqual([...GUIDE_ROSTER_COMMANDS]);
   });
@@ -131,8 +131,8 @@ describe("US-AGENT-043 canonical agent roster", () => {
     }
 
     const site = readProjectFile("site/roll-data.js");
-    expect(site).toContain("Works with Claude · Antigravity · Codex · Kimi · Pi · Reasonix");
-    expect(site).toContain("支持 Claude · Antigravity · Codex · Kimi · Pi · Reasonix");
+    expect(site).toContain("Works with Claude · Antigravity · Codex · Cursor · Kimi · Pi · Reasonix");
+    expect(site).toContain("支持 Claude · Antigravity · Codex · Cursor · Kimi · Pi · Reasonix");
   });
 
   it("US-AGENT-047: structured roster gate passes the live canonical source", () => {

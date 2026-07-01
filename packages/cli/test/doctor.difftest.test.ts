@@ -179,8 +179,8 @@ describe("frozen: roll doctor", () => {
     const rendered = scrub(tsDoctor(e), e).stdout;
     expect(rendered).toContain("codex       CLI not found   config dir missing  (primary)");
     expect(rendered).toContain("pi          CLI not found   config dir missing");
+    expect(rendered).toContain("cursor      CLI not found   config dir missing");
     expect(rendered).not.toContain("qwen");
-    expect(rendered).not.toContain("cursor");
     expect(rendered).not.toContain("deepseek");
     expect(rendered).not.toContain("openai");
   });

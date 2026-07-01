@@ -344,6 +344,7 @@ const DEFAULT_AI_KEYS: Array<[string, string]> = [
   ["ai_pi", "~/.pi/agent|AGENTS.md|AGENTS.md"],
   ["ai_agy", "~/.agentrules|AGENTS.md|AGENTS.md"],
   ["ai_reasonix", "~/.reasonix|AGENTS.md|AGENTS.md"],
+  ["ai_cursor", "~/.cursor|AGENTS.md|AGENTS.md"],
 ];
 
 function ensureConfigEntries(): void {
@@ -401,6 +402,7 @@ ai_codex: ~/.codex|AGENTS.md|AGENTS.md
 ai_pi: ~/.pi/agent|AGENTS.md|AGENTS.md
 ai_agy: ~/.agentrules|AGENTS.md|AGENTS.md
 ai_reasonix: ~/.reasonix|AGENTS.md|AGENTS.md
+ai_cursor: ~/.cursor|AGENTS.md|AGENTS.md
 
 # User preferences
 default_language: zh

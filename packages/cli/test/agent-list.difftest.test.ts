@@ -93,6 +93,7 @@ describe("frozen: roll agent list render", () => {
           [0;33m✗ pi[0m  (not installed)
           [0;33m✗ antigravity (agy)[0m  (not installed)
           [0;33m✗ reasonix[0m  (not installed)
+          [0;33m✗ cursor[0m  (not installed)
 
       "
     `);
@@ -109,6 +110,7 @@ describe("frozen: roll agent list render", () => {
           [0;33m✗ pi[0m  (not installed)
           [0;33m✗ antigravity (agy)[0m  (not installed)
           [0;33m✗ reasonix[0m  (not installed)
+          [0;33m✗ cursor[0m  (not installed)
 
       "
     `);
@@ -125,6 +127,7 @@ describe("frozen: roll agent list render", () => {
           ✗ pi  (not installed)
           ✗ antigravity (agy)  (not installed)
           ✗ reasonix  (not installed)
+          ✗ cursor  (not installed)
 
       "
     `);
@@ -146,6 +149,7 @@ describe("frozen: roll agent list render", () => {
             ✗ pi  (not installed)
             ✗ antigravity (agy)  (not installed)
             ✗ reasonix  (not installed)
+            ✗ cursor  (not installed)
 
         "
       `);

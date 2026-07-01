@@ -151,6 +151,7 @@ describe("roll agent write surface (v4)", () => {
           pi          not found     runtime auth/network/account checked at spawn
           agy         not found     runtime auth/network/account checked at spawn
           reasonix    not found     runtime auth/network/account checked at spawn
+          cursor      not found     runtime auth/network/account checked at spawn
 
         Role bindings are authored in ~/.roll/agents.yaml and .roll/agents.yaml.
         roll agent migrate [--dry-run]  — convert legacy defaults/routes/pairing to roll-agents/v1
@@ -236,6 +237,7 @@ defaults:
           pi          not found     runtime auth/network/account checked at spawn
           agy         not found     runtime auth/network/account checked at spawn
           reasonix    installed     runtime auth/network/account checked at spawn
+          cursor      not found     runtime auth/network/account checked at spawn
 
         Role bindings are authored in ~/.roll/agents.yaml and .roll/agents.yaml.
         roll agent migrate [--dry-run]  — convert legacy defaults/routes/pairing to roll-agents/v1
@@ -281,6 +283,7 @@ defaults:
           pi          not found     runtime auth/network/account checked at spawn
           agy         not found     runtime auth/network/account checked at spawn
           reasonix    not found     runtime auth/network/account checked at spawn
+          cursor      not found     runtime auth/network/account checked at spawn
 
         Legacy compatibility
 
@@ -305,7 +308,7 @@ defaults:
 scope: project
 roles:
   execute:
-    use: cursor
+    use: openclaw
 `, "utf8");
       },
     });
@@ -323,7 +326,7 @@ roles:
 
           file: .roll/agents.yaml
           status: invalid roll-agents/v1
-          error: roles.execute: unknown agent 'cursor'
+          error: roles.execute: unknown agent 'openclaw'
 
         Resolved roles
 
@@ -338,6 +341,7 @@ roles:
           pi          not found     runtime auth/network/account checked at spawn
           agy         not found     runtime auth/network/account checked at spawn
           reasonix    not found     runtime auth/network/account checked at spawn
+          cursor      not found     runtime auth/network/account checked at spawn
 
         Role bindings are authored in ~/.roll/agents.yaml and .roll/agents.yaml.
         roll agent migrate [--dry-run]  — convert legacy defaults/routes/pairing to roll-agents/v1

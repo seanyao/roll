@@ -14,6 +14,7 @@ import { registerAll } from "../src/commands/index.js";
 
 /** Hidden manual/machine entry points stay callable but unlisted (REFACTOR-049/052). */
 const HIDDEN = new Set([
+  "agents",
   "alert",
   "attest",
   "changelog",

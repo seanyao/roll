@@ -114,6 +114,11 @@ export function reasonixExtract(lines: readonly string[]): AgentUsage | null {
  *  no-usage reason instead of a generic "unknown". */
 export const agyExtract: Extractor = (): AgentUsage | null => null;
 
+/** US-AGENT-048: Cursor text-mode stdout carries no parseable token/cost footer
+ *  on day one. Register an explicit always-null extractor so cycles honestly
+ *  record "?" rather than fabricating zero usage. */
+export const cursorExtract: Extractor = (): AgentUsage | null => null;
+
 /** Parse a token count tolerating thousands separators (python `_to_int`). */
 function toInt(s: string): number {
   return Number.parseInt(s.replace(/,/g, ""), 10);
@@ -213,6 +218,7 @@ export const REGISTRY: Record<string, Extractor> = {
   kimi: kimiExtract,
   reasonix: reasonixExtract,
   agy: agyExtract,
+  cursor: cursorExtract,
   generic: makeStdoutExtractor({ defaultModel: "generic", totalKind: "generic" }),
 };
 

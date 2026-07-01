@@ -105,3 +105,45 @@ describe("FIX-1056 — agy spawn envelope propagates the authenticated auth-cont
     expect(ctx.authEnvPresent).toEqual(["GEMINI_API_KEY", "GOOGLE_API_KEY"]);
   });
 });
+
+describe("US-AGENT-048 — Cursor headless Builder argv", () => {
+  it("builds the documented headless argv with --workspace (not --worktree)", () => {
+    const { bin, args } = buildSpawnCommand("cursor", { cwd: "/cycle/wt", skillBody: "DO WORK" });
+    expect(bin).toBe("cursor-agent");
+    expect(args).toEqual([
+      "--print",
+      "--trust",
+      "--force",
+      "--workspace",
+      "/cycle/wt",
+      "--output-format",
+      "text",
+      expect.stringContaining("DO WORK"),
+    ]);
+    expect(args).not.toContain("--worktree");
+  });
+
+  it("carries the story pin and autorun directive in the prompt", () => {
+    const { args } = buildSpawnCommand("cursor", {
+      cwd: "/cycle/wt",
+      skillBody: "skill body",
+      storyId: "US-AGENT-048",
+    });
+    const prompt = args[args.length - 1] ?? "";
+    expect(prompt).toContain("[roll 自主模式]");
+    expect(prompt).toContain("US-AGENT-048");
+    expect(prompt).toContain("skill body");
+  });
+
+  it("bare reviewer spawn omits the worker directive and story pin", () => {
+    const { args } = buildSpawnCommand("cursor", {
+      cwd: "/cycle/wt",
+      skillBody: "review prompt",
+      storyId: "US-AGENT-048",
+      bare: true,
+    });
+    const prompt = args[args.length - 1] ?? "";
+    expect(prompt).toBe("review prompt");
+    expect(prompt).not.toContain("[roll 自主模式]");
+  });
+});

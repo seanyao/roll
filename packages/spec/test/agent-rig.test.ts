@@ -10,7 +10,7 @@ import { AGENT_NAMES, isAgentName, rig } from "../src/types/agent.js";
 
 describe("US-AGENT-047 Rig", () => {
   it("declares the supported agent names as the Rig agent universe", () => {
-    expect([...AGENT_NAMES]).toEqual(["claude", "kimi", "codex", "pi", "agy", "reasonix"]);
+    expect([...AGENT_NAMES]).toEqual(["claude", "kimi", "codex", "pi", "agy", "reasonix", "cursor"]);
     expect(isAgentName("pi")).toBe(true);
     expect(isAgentName("deepseek")).toBe(false);
   });

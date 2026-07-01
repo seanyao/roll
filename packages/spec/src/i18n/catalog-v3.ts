@@ -11,8 +11,8 @@ import type { Catalog } from "./index.js";
 export const v3Catalog: Catalog = {
   // `agent.*` — v3-native agent roster compatibility messages (US-AGENT-045).
   "agent.use_removed_agent": {
-    en: "'%s' is no longer supported. Use one of: claude, kimi, codex, pi, agy, reasonix",
-    zh: "'%s' 已不再支持。请使用：claude, kimi, codex, pi, agy, reasonix",
+    en: "'%s' is no longer supported. Use one of: claude, kimi, codex, pi, agy, reasonix, cursor",
+    zh: "'%s' 已不再支持。请使用：claude, kimi, codex, pi, agy, reasonix, cursor",
   },
 
   // `agent.*` — v4 default-agent vs project route-profile separation (US-V4-002).
@@ -29,8 +29,8 @@ export const v3Catalog: Catalog = {
     zh: "尚未设置机器默认 agent（回退到首个已安装的 agent）",
   },
   "agent.default_unknown_agent": {
-    en: "Unknown agent '%s'. Use one of: claude, kimi, codex, pi, agy, reasonix",
-    zh: "未知 agent '%s'。可用：claude, kimi, codex, pi, agy, reasonix",
+    en: "Unknown agent '%s'. Use one of: claude, kimi, codex, pi, agy, reasonix, cursor",
+    zh: "未知 agent '%s'。可用：claude, kimi, codex, pi, agy, reasonix, cursor",
   },
   "agent.default_saved": {
     en: "Machine default agent set to %s",

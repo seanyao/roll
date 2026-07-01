@@ -3,7 +3,7 @@
 // the orchestrated agent POOL (see registry.ts). So "claude"/"claude-stream"
 // remain in these unions as harness kinds.
 export type AgentNormalizerKind = "claude" | "codex" | "kimi" | "pi" | "generic";
-export type UsageExtractorKind = "claude-stream" | "openai" | "gemini" | "kimi" | "qwen" | "pi" | "reasonix" | "agy" | "generic";
+export type UsageExtractorKind = "claude-stream" | "openai" | "gemini" | "kimi" | "qwen" | "pi" | "reasonix" | "agy" | "cursor" | "generic";
 export type SessionRecoveryKind = "pi" | "kimi" | "codex";
 export type SessionBackfillKind = "claude-projects";
 /** lever-4: how (if at all) an agent's prior session is REUSED across the next
@@ -50,9 +50,9 @@ export interface AgentSpec {
 
 export type AgentSpecRegistry = Readonly<Record<string, AgentSpec>>;
 
-// US-AGENT-043: the supported agent roster is exactly six first-class agents.
+// US-AGENT-043/048: the supported agent roster is seven first-class agents.
 // Provider/model aliases stay as aliases only (openai -> codex, deepseek -> pi);
-// removed tokens such as qwen/openclaw/opencode/cursor/trae do not get specs.
+// removed tokens such as qwen/openclaw/opencode/trae do not get specs.
 export const AGENTS: readonly AgentSpec[] = [
   {
     name: "claude",
@@ -120,6 +120,16 @@ export const AGENTS: readonly AgentSpec[] = [
     usage: { stdoutExtractor: "reasonix" },
     smokeCommand: 'reasonix run --max-steps 1 "Reply with a single word: hello"',
   },
+  {
+    name: "cursor",
+    displayName: "cursor",
+    defaultModel: "cursor-default",
+    cliBin: ["cursor-agent"],
+    canReviewHeadless: true,
+    normalizer: "generic",
+    usage: { stdoutExtractor: "cursor" },
+    smokeCommand: 'cursor-agent --print "Reply with a single word: hello"',
+  },
 ];
 
 function normalizeAgentKey(name: string): string {
@@ -172,7 +182,7 @@ export function canonicalAgentIdentityName(name: string): string {
 
 /** Agents removed from the roster in US-AGENT-043. When found in user config
  *  these trigger a fail-loud warning, never a silent fallback. */
-export const REMOVED_AGENTS: readonly string[] = ["cursor", "trae", "qwen", "opencode", "openclaw"];
+export const REMOVED_AGENTS: readonly string[] = ["trae", "qwen", "opencode", "openclaw"];
 
 /** True iff NAME is a removed agent token (checked against REMOVED_AGENTS after
  *  normalisation, BEFORE canonicalisation — so `openai` (alias→codex) returns

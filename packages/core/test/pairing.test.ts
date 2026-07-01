@@ -201,7 +201,7 @@ describe("parsePairingConfig", () => {
     expect(() => parsePairingConfig(`enabled: true\ncapability:\n  notanagent: [code]\n`)).toThrow(PairingConfigError);
   });
   it("FIX-328: fail-loud on capability for an unregistered reviewer", () => {
-    expect(() => parsePairingConfig(`enabled: true\ncapability:\n  cursor: [code]\n`)).toThrow(PairingConfigError);
+    expect(() => parsePairingConfig(`enabled: true\ncapability:\n  openclaw: [code]\n`)).toThrow(PairingConfigError);
   });
   it("absent/empty config is disabled (file-absent = off)", () => {
     expect(parsePairingConfig("").enabled).toBe(false);
@@ -428,10 +428,10 @@ scope: project
 roles:
   evaluate:
     kind: select
-    from: [cursor]
+    from: [openclaw]
     strategy: first-available
 `);
-    expect(parsed.errors).toContain("roles.evaluate.from: unknown agent 'cursor'");
+    expect(parsed.errors).toContain("roles.evaluate.from: unknown agent 'openclaw'");
   });
 });
 

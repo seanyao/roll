@@ -63,7 +63,7 @@ defaults:
         strategy: first-available
       evaluate:
         kind: select
-        from: [claude, codex, kimi, pi, agy, reasonix]
+        from: [claude, codex, kimi, pi, agy, reasonix, cursor]
         require: [evaluate]
         avoid: [execute]
         strategy: least-recent
@@ -116,6 +116,7 @@ agent sessions for the roles through the configured bindings.
 | Antigravity | `agy` | Google Antigravity agent; legacy `gemini` aliases to `agy`. |
 | Pi | `pi` | The `deepseek` alias resolves to `pi`. |
 | Reasonix | `reasonix` | DeepSeek-native coding agent; requires `DEEPSEEK_API_KEY`. |
+| Cursor | `cursor-agent` | Cursor headless agent; day-one usage is recorded as `?` until parseable token/cost output is available. |
 
 Agent-specific behavior belongs in one profile, not in downstream runner gates:
 

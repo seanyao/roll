@@ -378,7 +378,7 @@ const AGENT_PROFILES: Readonly<Record<string, AgentProfile>> = {
       const maxSteps = opts.maxSteps ?? 1000;
       // FIX-1036: write a per-cycle reasonix.toml so the Seatbelt sandbox
       // allows writes to the git common dir (outside the worktree root).
-      // The file is cleaned up via opts.cleanup after the child exits.
+      // The file is cleaned up via opts.cleanup after the child exit.
       const roots = normalizeWritableRoots(opts.writableRoots);
       if (roots.length > 0) opts.cleanup = chainCleanup(opts.cleanup, writeReasonixSandboxConfig(opts.cwd, roots));
       return {
@@ -387,6 +387,29 @@ const AGENT_PROFILES: Readonly<Record<string, AgentProfile>> = {
       };
     },
     childEnv: reasonixEnv,
+  },
+  // US-AGENT-048: Cursor headless Builder adapter. Uses `--workspace` (not
+  // Cursor's own `--worktree`) so Roll retains cycle-worktree ownership.
+  // Day-one stdout carries no parseable token/cost footer, so usage records
+  // "?" via the explicit null extractor in cost/tracker.ts.
+  cursor: {
+    name: "cursor",
+    usesWorkspaceSandbox: false,
+    ptyWhenPiped: true,
+    acceptance: { canReviewHeadless: getAgentSpec("cursor")?.canReviewHeadless === true },
+    buildSpawnCommand: (opts) => ({
+      bin: opts.bin ?? "cursor-agent",
+      args: [
+        "--print",
+        "--trust",
+        "--force",
+        "--workspace",
+        opts.cwd,
+        "--output-format",
+        "text",
+        agentPrompt(opts),
+      ],
+    }),
   },
 };
 

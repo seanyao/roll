@@ -53,6 +53,7 @@ const RUNNER_LABEL: Record<string, string> = {
   pi: "pi CLI",
   agy: "Antigravity CLI",
   reasonix: "reasonix CLI",
+  cursor: "Cursor Agent",
 };
 
 export function agentRunnerLabelNames(): string[] {

@@ -53,8 +53,8 @@ describe("identity helpers", () => {
     expect(agentIsKnown("pi")).toBe(true);
     expect(agentIsKnown("reasonix")).toBe(true);
     expect(agentIsKnown("totally-made-up")).toBe(false);
-    // Removed agents (US-AGENT-043) are NOT known.
-    expect(agentIsKnown("cursor")).toBe(false);
+    // Removed agents (US-AGENT-043/048) are NOT known.
+    expect(agentIsKnown("cursor")).toBe(true);
     expect(agentIsKnown("qwen")).toBe(false);
     expect(agentIsKnown("opencode")).toBe(false);
   });

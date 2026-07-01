@@ -5,6 +5,7 @@
 ### 稳定性
 - `roll supervisor repair-evidence` 现在能救回卡在证据门的绿 PR，不用手动合并或重跑整张卡 `[loop]`
 - `roll cycles` 不再把旧失败轮误标为 delivered `[loop]`
+- **`aborted_no_delivery` 周期不再丢失 story/agent 归属**：外部信号终止的 cycle 会从已写入的 events.ndjson 回填已知的 `story_id` 与 `agent`；如果在路由完成前被终止，`agent` 字段会保留空值并附带 `agent_unknown_reason`，避免失败匿名化，`roll cycles` 也能正确显示对应卡片与 agent。(FIX-1060) `[loop-engine]`
 
 ### 文档与命名
 - **持续刷新的 loop 摘要不再叫 "Morning Report"**：这个从 events/runs 持续重建、窗口为最近 12 小时的 digest 不管白天还是夜里都在刷新，叫 "Morning Report" 会误导白天查看的运营者。现在改叫 Loop Digest（循环摘要），主路径换成 `.roll/reports/loop/latest.html`，Truth Console 上直接露出链接。旧的 `reports/morning/latest.html` 作为兼容别名继续写一版，已有链接不会断开。(FIX-1048) `[loop-observability]`

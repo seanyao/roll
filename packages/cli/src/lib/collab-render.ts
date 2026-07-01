@@ -180,6 +180,11 @@ const LABELS = {
     incomplete: "incomplete",
     scoreFailures: "score-failure folded",
     peerConsults: "peer consult folded",
+    roleSupervise: "supervisor",
+    roleBuild: "builder",
+    rolePeer: "peer",
+    roleScore: "scorer",
+    rolePlanner: "planner",
   },
   zh: {
     assign: "指派 builder =",
@@ -198,6 +203,11 @@ const LABELS = {
     incomplete: "未完结",
     scoreFailures: "score-failure 已折叠",
     peerConsults: "peer consult 已折叠",
+    roleSupervise: "supervisor",
+    roleBuild: "builder",
+    rolePeer: "peer",
+    roleScore: "scorer",
+    rolePlanner: "planner",
   },
 };
 
@@ -206,6 +216,14 @@ function mapFromRole(role: string): RoleKey {
   if (role === "score") return "score";
   if (role === "review" || role === "peer") return "peer";
   return "supervise";
+}
+
+function roleName(role: string, labels: (typeof LABELS)["en"]): string {
+  if (role === "build") return labels.roleBuild;
+  if (role === "score") return labels.roleScore;
+  if (role === "review" || role === "peer") return labels.rolePeer;
+  if (role === "supervise" || role === "plan") return labels.roleSupervise;
+  return role;
 }
 
 function terminusParts(terminus: CollabCycleView["terminus"], labels: (typeof LABELS)["en"]): [string, string] {
@@ -232,7 +250,7 @@ function escalationLines(
   const fromRoleKey = mapFromRole(e.fromRole);
   const fromGlyph = renderRole(fromRoleKey, opt);
   const supGlyph = renderRole("supervise", opt);
-  const header = `${labels.batonReturned} ${fromGlyph} ${e.fromRole} ${labels.toSupervisor} ${supGlyph}`;
+  const header = `${labels.batonReturned} ${fromGlyph} ${roleName(e.fromRole, labels)} ${labels.toSupervisor} ${supGlyph}`;
   const detail = e.detail ? ` (${e.detail})` : "";
   const actionLine = `${renderRole("diagnose", opt)} ${supervisor} ${e.supervisorAction}${detail}`;
   return [header, actionLine];
@@ -258,7 +276,7 @@ export function renderCollabCycle(
 
   if (view.stance && view.stance.level !== "supervise") {
     const roleGlyph = renderRole("supervise", opt);
-    const levelText = view.stance.level === "plan" ? "planner" : "supervisor fix";
+    const levelText = view.stance.level === "plan" ? labels.rolePlanner : labels.supervisorFix;
     lines.push(`   ${roleGlyph}  ${levelText}${view.stance.note ? ` — ${view.stance.note}` : ""}`);
   }
 

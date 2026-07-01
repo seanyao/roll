@@ -169,6 +169,68 @@ describe("FIX-1039 — handoff_without_tcr: dirty worktree but zero TCR commits"
   });
 });
 
+describe("FIX-1051 — agent_internal_failure: agy internal tool errors surface instead of gave_up", () => {
+  const AIF = { class: "agy_grep_timeout", summary: "GREP_SEARCH timed out", nativeLogPath: "/tmp/cli.log" };
+
+  it("classifyCaptured returns agent_internal when agentInternalFailure is present", () => {
+    expect(
+      classifyCaptured({
+        usedWorktree: true,
+        agentExecuted: true,
+        agentExit: 0,
+        timedOut: false,
+        commitsAhead: 0,
+        agentInternalFailure: AIF,
+      }),
+    ).toBe("agent_internal");
+  });
+  it("agent_internal overrides gave_up but not handoff_without_tcr", () => {
+    expect(
+      classifyCaptured({
+        usedWorktree: true,
+        agentExit: 0,
+        timedOut: false,
+        commitsAhead: 0,
+        worktreeDirty: true,
+        agentInternalFailure: AIF,
+      }),
+    ).toBe("handoff_without_tcr");
+  });
+  it("mapV2Status(agent_internal) → agent_internal_failure", () => {
+    expect(mapV2Status("agent_internal")).toBe("agent_internal_failure");
+  });
+  it("agent_internal terminal cleans worktree and ALERTs with failure class/summary/log", () => {
+    const { state, kinds, commands } = walk([
+      { type: "start", ctx: CTX },
+      { type: "preflight_done" },
+      { type: "worktree_created" },
+      { type: "story_picked", storyId: "FIX-284" },
+      { type: "route_resolved", agent: "agy", model: "gemini-2.5-pro" },
+      { type: "agent_exited", exit: 0, timedOut: false },
+      {
+        type: "facts_captured",
+        facts: {
+          usedWorktree: true,
+          agentExecuted: true,
+          agentExit: 0,
+          timedOut: false,
+          commitsAhead: 0,
+          agentInternalFailure: AIF,
+        },
+      },
+    ]);
+    expect(state.terminal).toBe("agent_internal");
+    expect(kinds).toContain("cleanup_worktree");
+    const alert = commands.find((c) => c.kind === "append_alert");
+    expect(alert).toMatchObject({ message: expect.stringContaining("agent_internal") });
+    expect(alert).toMatchObject({ message: expect.stringContaining(AIF.class) });
+    expect(alert).toMatchObject({ message: expect.stringContaining(AIF.summary) });
+    expect(alert).toMatchObject({ message: expect.stringContaining(AIF.nativeLogPath) });
+    const run = commands.find((c) => c.kind === "append_run");
+    expect(run).toMatchObject({ status: "agent_internal", outcome: "agent_internal_failure" });
+  });
+});
+
 describe("FIX-244 — phantom-failure classification (published terminal)", () => {
   it("non-zero exit + commits + OPEN PR for the cycle branch → published, not failed", () => {
     expect(

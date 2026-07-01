@@ -130,7 +130,21 @@ import { deliveryGate } from "../delivery/gate.js";
  *               (bin/roll:8756).
  *   - blocked : hard-timeout breach (bin/roll:8679).
  */
-export type V2CycleStatus = "idle" | "gave_up" | "handoff_without_tcr" | "built" | "done" | "published" | "orphan" | "local" | "needs_review" | "failed" | "aborted" | "blocked" | "dormant";
+export type V2CycleStatus =
+  | "idle"
+  | "gave_up"
+  | "handoff_without_tcr"
+  | "agent_internal"
+  | "built"
+  | "done"
+  | "published"
+  | "orphan"
+  | "local"
+  | "needs_review"
+  | "failed"
+  | "aborted"
+  | "blocked"
+  | "dormant";
 
 /**
  * Bridge v2's runs.jsonl status onto the closed {@link TerminalOutcome}
@@ -166,6 +180,11 @@ export function mapV2Status(status: V2CycleStatus): TerminalOutcome {
       // PRESERVED. This is a failed-class outcome (no delivery), but distinct
       // from gave_up (agent had nothing to show) and from idle (no agent ran).
       return "handoff_without_tcr";
+    case "agent_internal":
+      // FIX-1051: agent exited cleanly but hit an internal tool error (e.g. agy
+      // GREP_SEARCH timeout → zero trajectory). The native CLI log contains the
+      // real cause; surface it instead of hiding it behind a generic gave_up.
+      return "agent_internal_failure";
     case "dormant":
       // US-LOOP-079d — 连续 N idle 后自卸;终态,此后无 idle 行.
       return "dormant_entered";
@@ -194,6 +213,19 @@ export function mapV2Status(status: V2CycleStatus): TerminalOutcome {
 }
 
 // ── Six-state classification from captured facts (mirrors bin/roll:9127-9356) ─
+
+/** FIX-1051 — diagnostic bundle for an agent that exited cleanly but hit an
+ *  internal tool error (e.g. agy GREP_SEARCH timeout → zero trajectory). */
+export interface AgentInternalFailure {
+  /** The classified failure class (e.g. `agy_grep_timeout`, `agy_zero_trajectory`). */
+  class: string;
+  /** One-line human-readable summary of the native failure. */
+  summary: string;
+  /** Absolute path to the native agent CLI log that contains the root cause. */
+  nativeLogPath: string;
+  /** Native conversation / session identifier when available. */
+  conversationId?: string;
+}
 
 /** The cycle facts captured post-agent, before publish (bin/roll:9127-9157). */
 export interface CapturedFacts {
@@ -243,6 +275,10 @@ export interface CapturedFacts {
    * the probe didn't run (defaulting to false in classifyCaptured).
    */
   worktreeDirty?: boolean;
+  /** FIX-1051: agent-internal failure diagnostics. When present, the cycle is
+   * classified as `agent_internal` (mapped to `agent_internal_failure`) instead
+   * of a generic `gave_up`. */
+  agentInternalFailure?: AgentInternalFailure;
   /** FIX-244: PR state for the cycle branch ("OPEN"/"MERGED"/...), probed by the
    *  capture step ONLY when the exit is non-zero with commits ahead — the
    *  phantom-failure check. Absent = not probed / no PR. */
@@ -258,6 +294,9 @@ export interface CapturedFacts {
  *   - exit 0, commitsAhead === 0 and local main not ahead:
  *       · worktree dirty (uncommitted files) but no TCR commit → handoff_without_tcr
  *         (FIX-1039: recoverable, the worktree is PRESERVED).
+ *       · agent-internal failure detected in native CLI log → agent_internal
+ *         (FIX-1051: e.g. agy GREP_SEARCH timeout → zero trajectory; surfaces
+ *         the real cause instead of a generic gave_up).
  *       · an agent EXECUTED (Hook 1 productivity floor) → gave_up (failed-class,
  *         alerted on cycle 1 — an agent that burned tokens/time but produced
  *         nothing is NOT a silent idle).
@@ -315,6 +354,11 @@ export function classifyCaptured(facts: CapturedFacts): V2CycleStatus {
     // a handoff contract gap, NOT a "did nothing" gave_up. The worktree is
     // PRESERVED so the owner can inspect or rescue the uncommitted work.
     if (facts.worktreeDirty === true) return "handoff_without_tcr";
+    // FIX-1051: agent exited cleanly but an internal tool error was detected in
+    // the native CLI log (e.g. agy GREP_SEARCH timeout → zero trajectory).
+    // Classify as agent_internal so the failure reason is surfaced instead of
+    // collapsing into a generic gave_up.
+    if (facts.agentInternalFailure !== undefined) return "agent_internal";
     // Hook 1 (productivity floor): split the commit-count-only idle. An agent
     // that EXECUTED but left 0 commits and no delivery gave_up (a failed-class
     // terminal); a cycle where no agent ran is a genuine idle no-op. `undefined`
@@ -710,6 +754,10 @@ export interface CycleContext {
    *  `agy_stdout_no_usage`). Recorded on the runs row so debug/detail output can
    *  distinguish parser failure from genuinely missing agent usage output. */
   usageUnknownReason?: string;
+  /** FIX-1051: agent-internal failure diagnostics. Carried from the executor's
+   *  native-log probe into capture_facts so classifyCaptured can surface the
+   *  real cause instead of a generic gave_up. */
+  agentInternalFailure?: AgentInternalFailure;
 }
 
 /** Minimal context for building a terminal cycle:end event + runs row. */
@@ -1030,6 +1078,22 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
                   {
                     kind: "append_alert",
                     message: `cycle ${state.ctx.cycleId}: agent executed but produced 0 commits and no delivery — gave_up (productivity floor); story left re-pickable, spec truth reset`,
+                  },
+                ]
+            : status === "agent_internal"
+              ? // FIX-1051: agent exited cleanly but hit an internal tool error.
+                // Clean the empty worktree and ALERT with the specific native-log
+                // failure reason so the supervisor sees the real cause.
+                [
+                  { kind: "cleanup_worktree", branch: state.ctx.branch },
+                  {
+                    kind: "append_alert",
+                    message: (() => {
+                      const diag = event.facts.agentInternalFailure;
+                      const base = `cycle ${state.ctx.cycleId}: agent ${state.ctx.agent ?? "?"} exited 0 but internal tool failure detected — agent_internal`;
+                      if (diag === undefined) return `${base}; see cycle log`;
+                      return `${base}; class=${diag.class}; summary=${diag.summary}; nativeLog=${diag.nativeLogPath}${diag.conversationId !== undefined ? `; conversation=${diag.conversationId}` : ""}`;
+                    })(),
                   },
                 ]
             : status === "handoff_without_tcr"

@@ -55,6 +55,7 @@ import {
   resolveResumeBase,
   revertPrematureDone,
   withPtyWrap,
+  detectAgyInternalFailure,
 } from "../src/runner/index.js";
 
 /** Temp dirs created by FIX-207 attest-gate executor tests; cleaned at end. */
@@ -371,6 +372,107 @@ describe("US-AGENT-001 AgentProfile factory", () => {
     writeFileSync(join(home, ".reasonix", ".env"), "DEEPSEEK_API_KEY=from-file\n");
     expect(missingAgentSecretEnv("reasonix", {}, home)).toEqual([]);
     expect(missingAgentSecretEnv("claude", {}, home)).toEqual([]);
+  });
+});
+
+describe("FIX-1051 — detectAgyInternalFailure surfaces native agy CLI errors", () => {
+  function makeLogDir(): string {
+    const d = mkdtempSync(join(tmpdir(), "roll-agy-log-"));
+    execDirs.push(d);
+    return d;
+  }
+
+  it("returns null for non-agy agents", () => {
+    const d = makeLogDir();
+    writeFileSync(join(d, "cli-20260630_191635.log"), "Grep command timed out", "utf8");
+    expect(
+      detectAgyInternalFailure({
+        agent: "claude",
+        stdout: "",
+        stderr: "",
+        exitCode: 0,
+        logDir: d,
+      }),
+    ).toBeNull();
+  });
+
+  it("returns null when agy exits non-zero", () => {
+    const d = makeLogDir();
+    writeFileSync(join(d, "cli-20260630_191635.log"), "Grep command timed out", "utf8");
+    expect(
+      detectAgyInternalFailure({
+        agent: "agy",
+        stdout: "",
+        stderr: "",
+        exitCode: 1,
+        logDir: d,
+      }),
+    ).toBeNull();
+  });
+
+  it("returns null when agy stdout carried printable content", () => {
+    const d = makeLogDir();
+    writeFileSync(join(d, "cli-20260630_191635.log"), "Grep command timed out", "utf8");
+    expect(
+      detectAgyInternalFailure({
+        agent: "agy",
+        stdout: "some real output",
+        stderr: "",
+        exitCode: 0,
+        logDir: d,
+      }),
+    ).toBeNull();
+  });
+
+  it("detects GREP_SEARCH timeout + zero trajectory", () => {
+    const d = makeLogDir();
+    const log =
+      "auth succeeded\n" +
+      "Grep command timed out due to the size of the codebase\n" +
+      "agent executor error: trajectory converted to zero chat messages\n" +
+      "conversation-id: conv-abc123\n";
+    writeFileSync(join(d, "cli-20260630_191635.log"), log, "utf8");
+    const result = detectAgyInternalFailure({
+      agent: "agy",
+      stdout: "\x04\b\b",
+      stderr: "",
+      exitCode: 0,
+      cycleStartSec: Date.parse("2026-06-30T19:16:00Z") / 1000,
+      logDir: d,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.class).toBe("agy_grep_timeout_zero_trajectory");
+    expect(result!.summary).toContain("GREP_SEARCH timed out");
+    expect(result!.nativeLogPath).toBe(join(d, "cli-20260630_191635.log"));
+    expect(result!.conversationId).toBe("conv-abc123");
+  });
+
+  it("detects standalone zero trajectory", () => {
+    const d = makeLogDir();
+    writeFileSync(join(d, "cli-20260630_191635.log"), "trajectory converted to zero chat messages\n", "utf8");
+    const result = detectAgyInternalFailure({
+      agent: "agy",
+      stdout: "",
+      stderr: "",
+      exitCode: 0,
+      logDir: d,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.class).toBe("agy_zero_trajectory");
+  });
+
+  it("returns null when the log has no known error patterns", () => {
+    const d = makeLogDir();
+    writeFileSync(join(d, "cli-20260630_191635.log"), "everything worked\n", "utf8");
+    expect(
+      detectAgyInternalFailure({
+        agent: "agy",
+        stdout: "",
+        stderr: "",
+        exitCode: 0,
+        logDir: d,
+      }),
+    ).toBeNull();
   });
 });
 

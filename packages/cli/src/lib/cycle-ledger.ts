@@ -21,6 +21,7 @@ export type CycleLedgerVerdict =
   | "reverted"
   | "failed"
   | "blocked"
+  | "agent_internal_failure"
   | "idle"
   | "unknown";
 
@@ -35,6 +36,7 @@ export const CYCLE_VERDICTS: readonly CycleLedgerVerdict[] = [
   "failed",
   "blocked",
   "reverted",
+  "agent_internal_failure",
   "idle",
   "unknown",
 ];
@@ -75,6 +77,8 @@ export interface CycleLedgerRow {
   /** FIX-1050: agent-specific reason why usage is unknown (e.g.
    *  `agy_stdout_no_usage`), surfaced in --json / debug output. */
   usageUnknownReason?: string;
+  /** FIX-1051: agent-internal failure diagnostics surfaced in detail output. */
+  agentInternalFailure?: { class: string; summary: string; nativeLogPath: string; conversationId?: string };
 }
 
 /** The CLI's verdict vocabulary (AC4): delivered / reverted / failed / blocked. */
@@ -103,6 +107,10 @@ export function ledgerVerdict(status: string, outcome: string): CycleLedgerVerdi
   // hide a real failure.
   if (outcome === "unpublished" || status === "local") return "unpublished";
   if (outcome === "blocked" || status === "blocked") return "blocked";
+  // FIX-1051: agent-internal failure is a failed-class terminal but carries its
+  // own verdict so `roll cycles` can surface the native failure class in detail
+  // output instead of hiding it behind generic `failed`.
+  if (outcome === "agent_internal_failure" || status === "agent_internal") return "agent_internal_failure";
   if (outcome === "idle_no_work" || status === "idle") return "idle";
   if (
     outcome === "failed" ||
@@ -124,9 +132,15 @@ export function ledgerVerdict(status: string, outcome: string): CycleLedgerVerdi
   return "unknown";
 }
 
-/** failed = failed + reverted + blocked (never swallowed). */
+/** failed = failed + reverted + blocked + agent_internal_failure (never swallowed). */
 export function ledgerFailedCount(rows: readonly CycleLedgerRow[]): number {
-  return rows.filter((r) => r.verdict === "failed" || r.verdict === "reverted" || r.verdict === "blocked").length;
+  return rows.filter(
+    (r) =>
+      r.verdict === "failed" ||
+      r.verdict === "reverted" ||
+      r.verdict === "blocked" ||
+      r.verdict === "agent_internal_failure",
+  ).length;
 }
 
 /**
@@ -483,6 +497,18 @@ export function collectCycleLedger(projectPath: string): CycleLedgerRow[] {
     // carries `usage_unknown:true` — its tokens/cost are UNKNOWN ("?"), not 0/—.
     const usageUnknown = row["usage_unknown"] === true;
     const usageUnknownReason = typeof row["usage_unknown_reason"] === "string" ? (row["usage_unknown_reason"] as string) : undefined;
+    const agentInternalFailure =
+      row["agent_internal_failure"] === true
+        ? {
+            class: typeof row["agent_internal_class"] === "string" ? (row["agent_internal_class"] as string) : "unknown",
+            summary: typeof row["agent_internal_summary"] === "string" ? (row["agent_internal_summary"] as string) : "",
+            nativeLogPath: typeof row["agent_internal_log_path"] === "string" ? (row["agent_internal_log_path"] as string) : "",
+            conversationId:
+              typeof row["agent_internal_conversation_id"] === "string"
+                ? (row["agent_internal_conversation_id"] as string)
+                : undefined,
+          }
+        : undefined;
     const ev = byCycle.get(cycleId);
     const toolCosts = toolEvidence.costsByCycle.get(cycleId) ?? [];
     const prNumber = storyId !== "" ? prMergedBy.get(storyId) : undefined;
@@ -512,6 +538,8 @@ export function collectCycleLedger(projectPath: string): CycleLedgerRow[] {
       prNumber: ownPrNumber,
       // FIX-1050: agent-specific diagnostic reason for unknown usage.
       ...(usageUnknownReason !== undefined ? { usageUnknownReason } : {}),
+      // FIX-1051: agent-internal failure diagnostics for detail output.
+      ...(agentInternalFailure !== undefined ? { agentInternalFailure } : {}),
     });
   }
   // De-dupe duplicate cycle ids (kimi pair-review): the LAST row wins — runs.jsonl

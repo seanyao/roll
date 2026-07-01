@@ -202,6 +202,37 @@ describe("collectCycleLedger", () => {
     expect(r.usageUnknownReason).toBe("agy_stdout_no_usage");
   });
 
+  it("FIX-1051: agent_internal_failure row is surfaced distinctly and counts as failed", () => {
+    const p = project([
+      {
+        cycle_id: "agy-internal",
+        status: "agent_internal",
+        outcome: "agent_internal_failure",
+        story_id: "FIX-284",
+        agent: "agy",
+        model: "gemini-2.5-pro",
+        ts: "2026-06-12T00:57:00Z",
+        duration_sec: 300,
+        usage_unknown: true,
+        usage_unknown_reason: "agy_stdout_no_usage",
+        agent_internal_failure: true,
+        agent_internal_class: "agy_grep_timeout_zero_trajectory",
+        agent_internal_summary: "GREP_SEARCH timed out and trajectory collapsed",
+        agent_internal_log_path: "/home/user/.gemini/antigravity-cli/log/cli-20260630_191635.log",
+        agent_internal_conversation_id: "conv-abc123",
+      },
+    ]);
+    const r = collectCycleLedger(p)[0]!;
+    expect(r.verdict).toBe("agent_internal_failure");
+    expect(r.agentInternalFailure).toEqual({
+      class: "agy_grep_timeout_zero_trajectory",
+      summary: "GREP_SEARCH timed out and trajectory collapsed",
+      nativeLogPath: "/home/user/.gemini/antigravity-cli/log/cli-20260630_191635.log",
+      conversationId: "conv-abc123",
+    });
+    expect(ledgerFailedCount([r])).toBe(1);
+  });
+
   it("FIX-290 AC3: a real 0-token cycle is '—' (TRUE-0), distinct from '?' (UNKNOWN)", () => {
     // A real cycle (story picked) whose parsed usage genuinely summed to 0 — kept
     // (it is a cycle, not an idle heartbeat) and rendered "—", not "?".

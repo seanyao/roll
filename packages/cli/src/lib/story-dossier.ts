@@ -863,6 +863,7 @@ function dossierExecutionCastBlock(
       case "parsed": return `<span class="cast-badge cast-ok">✓</span>`;
       case "not_required": return `<span class="cast-badge cast-muted">—</span>`;
       case "not_available": return `<span class="cast-badge cast-fail">⛔</span>`;
+      case "skipped": return `<span class="cast-badge cast-muted">⏭</span>`;
     }
   };
 

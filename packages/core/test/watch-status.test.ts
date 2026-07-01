@@ -153,6 +153,41 @@ describe("watch-status — durable cycle lookup (FIX-382)", () => {
     expect(rendered).toContain("last pair code none-available");
   });
 
+  // ── FIX-1054: serial-dispatch policy signals ──────────────────────────────
+
+  it("shows pair:skipped as a policy skip signal", () => {
+    const rendered = renderWatchStatusFromEventLines(
+      [
+        line({ type: "cycle:start", cycleId: "c1", storyId: "US-X", agent: "codex", model: "m", ts: 1_000 }),
+        line({ type: "pair:skipped", cycleId: "c1", peers: ["reasonix", "kimi"], reason: "accepted_score", stage: "score", ts: 2_000 }),
+      ],
+      3_000,
+    );
+    expect(rendered).toContain("last pair skipped reasonix,kimi (accepted_score)");
+  });
+
+  it("shows pair:fanout with its bounded reason and limit", () => {
+    const rendered = renderWatchStatusFromEventLines(
+      [
+        line({ type: "cycle:start", cycleId: "c1", storyId: "US-X", agent: "codex", model: "m", ts: 1_000 }),
+        line({ type: "pair:fanout", cycleId: "c1", stage: "score", reason: "high_risk_truth_or_release_gate", limit: 3, peers: ["pi", "reasonix", "kimi"], ts: 2_000 }),
+      ],
+      3_000,
+    );
+    expect(rendered).toContain("last pair fanout score high_risk_truth_or_release_gate limit=3");
+  });
+
+  it("shows a fallback pair:selected with its attempt/reason tag", () => {
+    const rendered = renderWatchStatusFromEventLines(
+      [
+        line({ type: "cycle:start", cycleId: "c1", storyId: "US-X", agent: "codex", model: "m", ts: 1_000 }),
+        line({ type: "pair:selected", cycleId: "c1", workingAgent: "codex", peer: "kimi", stage: "code", attempt: 2, reason: "fallback_after_failure", ts: 2_000 }),
+      ],
+      3_000,
+    );
+    expect(rendered).toContain("last pair codex → kimi (code) [attempt 2: fallback_after_failure]");
+  });
+
   it("shows pair:score-failure as last signal", () => {
     const rendered = renderWatchStatusFromEventLines(
       [

@@ -559,6 +559,9 @@ function executionCastBlock(
       case "parsed": return `<span class="cast-badge cast-ok">📋 ${bi("Parsed", "已解析")}</span>`;
       case "not_required": return `<span class="cast-badge cast-muted">— ${bi("Not required", "无需")}</span>`;
       case "not_available": return `<span class="cast-badge cast-fail">⛔ ${bi("Not available", "不可用")}</span>`;
+      // FIX-1054: a candidate deliberately NOT spawned (serial dispatch accepted
+      // another reviewer/evaluator first) — a cost decision, not a failure.
+      case "skipped": return `<span class="cast-badge cast-muted">⏭️ ${bi("Skipped", "已跳过")}</span>`;
     }
   };
 

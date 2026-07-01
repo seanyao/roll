@@ -75,12 +75,19 @@ describe("runPairing — US-PAIR-003", () => {
     const ev = JSON.parse(readFileSync(join(rt, "peer", "cycle-c1.pair.json"), "utf8"));
     expect(ev.peer).toBe(res.peer);
     expect(ev.verdict).toBe("refine");
-    // FIX-335 parallel: every candidate emits a selected (fired concurrently);
-    // exactly ONE verdict — the winner's — and it comes after the selecteds.
-    const selecteds = events.filter((e) => e.type === "pair:selected");
+    // FIX-1054 SERIAL: the FIRST ranked candidate returns a verdict, so exactly
+    // ONE peer is selected (the rest are never spawned) and the untried
+    // candidates surface as a policy `pair:skipped`. Exactly ONE verdict — the
+    // winner's — after the selected.
+    const selecteds = events.filter((e) => e.type === "pair:selected") as Extract<PairEvent, { type: "pair:selected" }>[];
     const verdicts = events.filter((e) => e.type === "pair:verdict") as Extract<PairEvent, { type: "pair:verdict" }>[];
-    expect(selecteds.length).toBeGreaterThanOrEqual(1);
-    expect(events.every((e) => e.type === "pair:selected" || e.type === "pair:verdict")).toBe(true);
+    const skips = events.filter((e) => e.type === "pair:skipped") as Extract<PairEvent, { type: "pair:skipped" }>[];
+    expect(selecteds).toHaveLength(1); // one selected reviewer, not the whole pool
+    expect(selecteds[0]?.attempt).toBe(1);
+    expect(selecteds[0]?.reason).toBe("ranked_candidate");
+    expect(events.every((e) => e.type === "pair:selected" || e.type === "pair:verdict" || e.type === "pair:skipped")).toBe(true);
+    expect(skips).toHaveLength(1); // the untried ranked candidates, skipped by policy
+    expect(skips[0]?.reason).toBe("accepted_verdict");
     expect(verdicts).toHaveLength(1);
     expect(verdicts[0]?.peer).toBe(res.peer);
     expect(verdicts[0]?.findings).toBe(2);
@@ -456,12 +463,13 @@ describe("runScorePairing — US-PAIR-009", () => {
     const ev = JSON.parse(readFileSync(join(rt, "peer", "cycle-c1.score.pair.json"), "utf8"));
     expect(ev.score).toBe(8);
     expect(ev.stage).toBe("score");
-    // FIX-335 parallel: each candidate emits a selected (fired concurrently);
-    // exactly ONE pair:score — the winner's.
-    const selecteds = events.filter((e) => e.type === "pair:selected");
+    // FIX-1054 SERIAL: the first ranked scorer parses, so exactly ONE scorer is
+    // selected (the rest are skipped by policy) and exactly ONE pair:score.
+    const selecteds = events.filter((e) => e.type === "pair:selected") as Extract<PairEvent, { type: "pair:selected" }>[];
     const scoreEvents = events.filter((e) => e.type === "pair:score") as Extract<PairEvent, { type: "pair:score" }>[];
-    expect(selecteds.length).toBeGreaterThanOrEqual(1);
-    expect(events.every((e) => e.type === "pair:selected" || e.type === "pair:score")).toBe(true);
+    expect(selecteds).toHaveLength(1);
+    expect(selecteds[0]?.reason).toBe("ranked_candidate");
+    expect(events.every((e) => e.type === "pair:selected" || e.type === "pair:score" || e.type === "pair:skipped")).toBe(true);
     expect(scoreEvents).toHaveLength(1);
     expect(scoreEvents[0]?.score).toBe(8);
     expect(scoreEvents[0]?.cost).toBe(0.05);
@@ -1677,5 +1685,109 @@ describe("runScorePairing — FIX-911 pool-level escalation", () => {
     expect(r.status).toBe("timeout");
     // Single agent, same-vendor round only, no escalation pool → bounded retries
     expect(calls).toBeLessThanOrEqual(2); // SCORE_MAX_ATTEMPTS
+  });
+});
+
+// ── FIX-1054: cost-aware SERIAL dispatch (default serial, explicit fan-out) ───
+
+describe("FIX-1054 — serial cost-aware code peer dispatch", () => {
+  it("AC2: any structured verdict from the FIRST peer stops dispatch (no reviewer shopping)", async () => {
+    const { dir, rt } = project(ENABLED);
+    const tried: string[] = [];
+    // refine is a VALID verdict — Roll must NOT keep shopping for an `agree`.
+    const { d, events } = deps({
+      reviewPeer: async (peer) => {
+        tried.push(peer);
+        return { verdict: "refine", findings: ["nit"], cost: 0.1 };
+      },
+    });
+    const res = await runPairing(dir, dir, rt, "c1", "kimi", "code", d);
+    expect(res.status).toBe("reviewed");
+    expect(res.verdict).toBe("refine");
+    expect(tried).toHaveLength(1); // exactly ONE peer spawned — the rest are skipped
+    const skips = events.filter((e) => e.type === "pair:skipped") as Extract<PairEvent, { type: "pair:skipped" }>[];
+    expect(skips).toHaveLength(1);
+    expect(skips[0]?.reason).toBe("accepted_verdict");
+    expect(skips[0]?.peers.length).toBeGreaterThanOrEqual(1); // the untried ranked candidate(s)
+  });
+
+  it("AC4: the first peer fails (null) → fall back to the NEXT peer, recorded as attempt=2", async () => {
+    const { dir, rt } = project(ENABLED);
+    const tried: string[] = [];
+    // The first tried candidate times out (null); the second returns a verdict.
+    const { d, events } = deps({
+      reviewPeer: async (peer) => {
+        tried.push(peer);
+        return tried.length === 1 ? null : { verdict: "agree", findings: [], cost: 0.05 };
+      },
+    });
+    const res = await runPairing(dir, dir, rt, "c1", "kimi", "code", d);
+    expect(res.status).toBe("reviewed");
+    expect(res.peer).toBe(tried[1]); // the fallback peer won
+    expect(tried).toHaveLength(2); // exactly two spawned — serial, not the whole pool at once
+    const selecteds = events.filter((e) => e.type === "pair:selected") as Extract<PairEvent, { type: "pair:selected" }>[];
+    expect(selecteds).toHaveLength(2);
+    expect(selecteds[0]?.attempt).toBe(1);
+    expect(selecteds[0]?.reason).toBe("ranked_candidate");
+    expect(selecteds[1]?.attempt).toBe(2);
+    expect(selecteds[1]?.reason).toBe("fallback_after_failure");
+  });
+
+  it("AC5: explicit high-risk fan-out fires the bounded pool in parallel with a reasoned event", async () => {
+    const { dir, rt } = project(ENABLED);
+    const tried: string[] = [];
+    const { d, events } = deps({
+      fanout: "high_risk_truth_or_release_gate",
+      reviewPeer: async (peer) => {
+        tried.push(peer);
+        return { verdict: "agree", findings: [], cost: 0.02 };
+      },
+    });
+    const res = await runPairing(dir, dir, rt, "c1", "kimi", "code", d);
+    expect(res.status).toBe("reviewed");
+    const fan = events.find((e) => e.type === "pair:fanout") as Extract<PairEvent, { type: "pair:fanout" }>;
+    expect(fan).toBeDefined();
+    expect(fan.reason).toBe("high_risk_truth_or_release_gate");
+    expect(fan.limit).toBe(3);
+    // every selected in a fan-out carries reason=fanout (not the serial reasons)
+    const selecteds = events.filter((e) => e.type === "pair:selected") as Extract<PairEvent, { type: "pair:selected" }>[];
+    expect(selecteds.length).toBeGreaterThanOrEqual(2); // multiple candidates fired at once
+    expect(selecteds.every((e) => e.reason === "fanout")).toBe(true);
+    // fan-out never spawns more than the bounded limit
+    expect(tried.length).toBeLessThanOrEqual(3);
+  });
+});
+
+describe("FIX-1054 — serial cost-aware score dispatch", () => {
+  it("AC1: the first parseable score stops dispatch — no remaining candidates spawned", async () => {
+    const { dir, rt } = project(SCORE_CFG);
+    const tried: string[] = [];
+    const { d, events } = scoreDeps({
+      scorePeer: async (peer: string) => {
+        tried.push(peer);
+        return { score: 8, verdict: "good" as const, rationale: "clean", cost: 0.03 };
+      },
+    });
+    const r = await runScorePairing(dir, rt, "c1", "kimi", "US-1054-1", "roll-build", "s", d);
+    expect(r.status).toBe("scored");
+    expect(tried).toHaveLength(1); // ONE evaluator — the rest are skipped by policy
+    const skips = events.filter((e) => e.type === "pair:skipped") as Extract<PairEvent, { type: "pair:skipped" }>[];
+    expect(skips.length).toBeGreaterThanOrEqual(1);
+    expect(skips[0]?.reason).toBe("accepted_score");
+  });
+
+  it("AC5: explicit score fan-out emits a bounded, reasoned pair:fanout event", async () => {
+    const { dir, rt } = project(SCORE_CFG);
+    const { d, events } = scoreDeps({
+      fanout: "owner_requested_quorum",
+      scorePeer: async () => ({ score: 9, verdict: "good" as const, rationale: "quorum", cost: 0.02 }),
+    });
+    const r = await runScorePairing(dir, rt, "c1", "kimi", "US-1054-2", "roll-build", "s", d);
+    expect(r.status).toBe("scored");
+    const fan = events.find((e) => e.type === "pair:fanout") as Extract<PairEvent, { type: "pair:fanout" }>;
+    expect(fan).toBeDefined();
+    expect(fan.reason).toBe("owner_requested_quorum");
+    expect(fan.stage).toBe("score");
+    expect(fan.limit).toBe(3);
   });
 });

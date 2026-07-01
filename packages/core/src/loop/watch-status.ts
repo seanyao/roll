@@ -69,8 +69,19 @@ function signalLabel(ev: RollEvent): string | undefined {
     case "alert:notify":
       return `alert ${clean(ev.message)}`;
     // ── FIX-934: pair:* signal labels ─────────────────────────────────────
-    case "pair:selected":
-      return `pair ${clean(ev.workingAgent)} → ${clean(ev.peer)} (${clean(ev.stage)})`;
+    case "pair:selected": {
+      // FIX-1054: show attempt/reason so a fallback selection is distinguishable
+      // from the first ranked pick in the operator view.
+      const tag = ev.attempt !== undefined && ev.attempt > 1 ? ` [attempt ${ev.attempt}${ev.reason !== undefined ? `: ${clean(ev.reason)}` : ""}]` : "";
+      return `pair ${clean(ev.workingAgent)} → ${clean(ev.peer)} (${clean(ev.stage)})${tag}`;
+    }
+    // FIX-1054: serial-dispatch policy signals — skipped candidates are a POLICY
+    // decision (a reviewer/scorer was accepted), and fan-out is an explicit,
+    // bounded, reasoned escalation.
+    case "pair:skipped":
+      return `pair skipped ${ev.peers.map(clean).join(",")} (${clean(ev.reason)})`;
+    case "pair:fanout":
+      return `pair fanout ${clean(ev.stage)} ${clean(ev.reason)} limit=${ev.limit}`;
     case "pair:verdict":
       return `pair ${clean(ev.peer)} ${ev.verdict} (${ev.findings} finding${ev.findings === 1 ? "" : "s"})`;
     case "pair:score":

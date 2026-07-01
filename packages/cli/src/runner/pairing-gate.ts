@@ -139,7 +139,10 @@ export interface PairReview {
 }
 
 export type PairEvent =
-  | { type: "pair:selected"; cycleId: string; workingAgent: string; peer: string; stage: string; timeoutMs?: number; ts: number }
+  | { type: "pair:selected"; cycleId: string; workingAgent: string; peer: string; stage: string; timeoutMs?: number; attempt?: number; reason?: string; ts: number }
+  // FIX-1054 — the serial-dispatch policy events (see the events.ts contract).
+  | { type: "pair:skipped"; cycleId: string; peers: string[]; reason: string; stage: string; ts: number }
+  | { type: "pair:fanout"; cycleId: string; stage: string; reason: string; limit: number; peers: string[]; ts: number }
   | { type: "pair:verdict"; cycleId: string; peer: string; verdict: PairReview["verdict"]; findings: number; cost: number; stage: string; ts: number }
   | { type: "pair:score"; cycleId: string; peer: string; score: number; verdict: PairScore["verdict"]; cost: number; stage: "score" | "design"; ts: number }
   | { type: "pair:none-available"; cycleId: string; stage: string; reason: string; ts: number }
@@ -178,6 +181,14 @@ export interface RunPairingDeps {
    * When supplied, candidates are restricted to this set.
    */
   allowedAgents?: Set<string> | readonly string[];
+  /**
+   * FIX-1054: opt into an explicit, bounded high-risk FAN-OUT (parallel take-first)
+   * instead of the serial default. Present only when the caller has a real reason
+   * (truth/release/evidence gate, security card, repeated prior failures, owner
+   * quorum); absent → the cost-aware serial policy. The reason is recorded on a
+   * `pair:fanout` event so fan-out is never a silent default.
+   */
+  fanout?: PairFanoutReason;
 }
 
 export interface RunPairingResult {
@@ -272,6 +283,59 @@ async function firstValid<T>(promises: Promise<T | null>[]): Promise<T | null> {
   });
 }
 
+// ── FIX-1054: cost-aware SERIAL dispatch policy ─────────────────────────────
+//
+// Pairing used to optimize for liveness: fire every ranked candidate at once
+// (firstValid) and accept whoever parses first. Reliable, but cost scaled with
+// pool size — an ordinary card burned kimi+pi+reasonix+claude when ONE reliable
+// reviewer/evaluator was enough. The DEFAULT is now SERIAL and bounded: try one
+// selected candidate, fall back to the next ONLY on a real failure, and once a
+// result is accepted the remaining candidates are SKIPPED (never spawned). The
+// old parallel path survives ONLY as an explicit, reasoned, bounded high-risk
+// FAN-OUT (firstValid), so the liveness escape hatch is still there when a
+// truth/release/evidence gate or a security card genuinely wants a quorum.
+
+export type PairDispatchMode = "serial" | "fanout";
+
+/** The reasons that justify an explicit high-risk fan-out. Anything else stays
+ *  serial. The reason is recorded on the `pair:fanout` event so it is auditable. */
+export type PairFanoutReason =
+  | "high_risk_truth_or_release_gate"
+  | "security_sensitive_card"
+  | "repeated_prior_failures"
+  | "owner_requested_quorum";
+
+/** FIX-1054 — the bounded fan-out cap: even an explicit high-risk fan-out never
+ *  spawns the entire installed roster. */
+export const PAIR_FANOUT_LIMIT = 3;
+
+/**
+ * FIX-1054 — SERIAL take-first: try each candidate ONE AT A TIME in ranked
+ * order. `attempt(peer, index)` fires exactly one candidate (emitting its own
+ * `pair:selected`) and returns the tagged value, or null on a real failure
+ * (timeout / auth-block / exit-error / unparseable — all surfaced as null by the
+ * injected seam). The FIRST non-null result wins and the untried candidates are
+ * returned as `skipped` so the caller can emit a policy-visible `pair:skipped`.
+ *
+ * Semantics vs {@link firstValid} (the fan-out primitive):
+ *   - a THROW is a broken probe (a defect, not a benign failure) → it propagates
+ *     to the caller's outer try/catch → status "error", matching firstValid's
+ *     terminal-round rule and the existing "broken reviewPeer → error" contract;
+ *   - all-null → winner null (caller maps to timeout/block — the whole pool
+ *     honestly failed, exactly as the parallel path did);
+ *   - cost is bounded by ACTUAL need: a first-candidate success spawns ONE agent.
+ */
+async function serialFirstValid<T>(
+  candidates: readonly string[],
+  attempt: (peer: string, index: number) => Promise<{ peer: string; value: T } | null>,
+): Promise<{ winner: { peer: string; value: T } | null; skipped: string[] }> {
+  for (let i = 0; i < candidates.length; i++) {
+    const res = await attempt(candidates[i] as string, i);
+    if (res !== null) return { winner: res, skipped: candidates.slice(i + 1) };
+  }
+  return { winner: null, skipped: [] };
+}
+
 /**
  * Run one pairing for a cycle AT A GIVEN STAGE. Returns a status (callers/tests
  * assert on it); all side-effects go through the injected event sink + evidence
@@ -325,27 +389,59 @@ export async function runPairing(
     // empty diff → nothing to review; don't waste a peer or emit a selected event (pi pair-review).
     if (diff.trim() === "") return { status: "not-required" };
 
-    // FIX-335 AC3: PARALLEL take-first. Fire every ranked candidate's review at
-    // once and use the FIRST that returns a non-null verdict; the rest are
-    // discarded. Upholds FIX-293/FIX-331 semantics (still a real hetero verdict;
-    // the WHOLE pool failing still blocks) — only the dispatch is now concurrent
-    // instead of serial, so claude+pi+kimi reviews overlap rather than stack.
+    // FIX-1054: SERIAL take-first is the DEFAULT. Try one ranked candidate at a
+    // time; ANY structured verdict (agree/refine/object comes back non-null from
+    // the seam) is accepted and stops dispatch — Roll never keeps shopping for a
+    // more convenient reviewer. Fall back to the next candidate ONLY on a real
+    // failure (timeout/auth/exit → null). Once accepted, the untried candidates
+    // are SKIPPED (never spawned) and recorded as a policy decision. FIX-335's
+    // parallel take-first survives ONLY as the explicit high-risk fan-out below.
     // FIX-363: budget scales with the diff the peer must actually read.
     const timeoutMs = deps.timeoutMs ?? reviewTimeoutMs(diff.length);
-    const probes = candidates.map(async (candidate) => {
-      const peer = candidate as string;
-      // Each candidate still emits a selected event (now possibly several in
-      // flight — acceptable per FIX-335: one selected per consult, one verdict
-      // for the winner). Tag the result with its peer so the winner is known.
-      // FIX-363: record the budget this consult was given so it stays data-tunable.
-      deps.event({ type: "pair:selected", cycleId, workingAgent, peer, stage, timeoutMs, ts: deps.now() });
-      const review = await deps.reviewPeer(peer, diff, timeoutMs);
-      return review === null ? null : { peer, review };
-    });
-    const winner = await firstValid(probes);
+    const fanout = deps.fanout;
+    let winner: { peer: string; review: PairReview } | null;
+    let skipped: string[] = [];
+    if (fanout !== undefined) {
+      // Explicit, bounded, reasoned FAN-OUT (parallel take-first): fire up to
+      // PAIR_FANOUT_LIMIT ranked candidates at once and use the first verdict.
+      const pool = candidates.slice(0, PAIR_FANOUT_LIMIT).map((c) => c as string);
+      deps.event({ type: "pair:fanout", cycleId, stage, reason: fanout, limit: PAIR_FANOUT_LIMIT, peers: pool, ts: deps.now() });
+      const probes = pool.map(async (peer) => {
+        deps.event({ type: "pair:selected", cycleId, workingAgent, peer, stage, timeoutMs, reason: "fanout", ts: deps.now() });
+        const review = await deps.reviewPeer(peer, diff, timeoutMs);
+        return review === null ? null : { peer, review };
+      });
+      winner = await firstValid(probes);
+    } else {
+      const out = await serialFirstValid<PairReview>(
+        candidates.map((c) => c as string),
+        async (peer, index) => {
+          deps.event({
+            type: "pair:selected",
+            cycleId,
+            workingAgent,
+            peer,
+            stage,
+            timeoutMs,
+            attempt: index + 1,
+            reason: index === 0 ? "ranked_candidate" : "fallback_after_failure",
+            ts: deps.now(),
+          });
+          const review = await deps.reviewPeer(peer, diff, timeoutMs);
+          return review === null ? null : { peer, value: review };
+        },
+      );
+      winner = out.winner === null ? null : { peer: out.winner.peer, review: out.winner.value };
+      skipped = out.skipped;
+    }
     if (winner === null) {
       // Whole candidate pool failed (timeout/error) → block (no real hetero verdict).
       return { status: "timeout" };
+    }
+    if (skipped.length > 0) {
+      // Cost-aware: the untried ranked candidates are a POLICY skip (a reviewer
+      // was accepted), not zero-cost attempted peers.
+      deps.event({ type: "pair:skipped", cycleId, peers: skipped, reason: "accepted_verdict", stage, ts: deps.now() });
     }
     const { peer, review } = winner;
     const path = evidencePath(runtimeDir, cycleId, stage);
@@ -419,6 +515,11 @@ export interface RunScorePairingDeps {
    * When supplied, candidates are restricted to this set.
    */
   allowedAgents?: Set<string> | readonly string[];
+  /**
+   * FIX-1054: opt into an explicit, bounded high-risk score FAN-OUT (parallel
+   * take-first) instead of the serial default. See {@link RunPairingDeps.fanout}.
+   */
+  fanout?: PairFanoutReason;
 }
 
 export interface RunScorePairingResult {
@@ -563,30 +664,65 @@ export async function runScorePairing(
     // OFF: there is nothing left to fall back to, so a broken probe stays a defect
     // (firstValid re-throws → outer catch → status "error"), per FIX-335.
     type ScoreWinner = { peer: string; scored: PairScore; sessionId: string };
+    const fanout = deps.fanout;
+    const spawnScore = async (peer: string, attempt: number): Promise<ScoreWinner | null> => {
+      // FIX-344: the session-id prefix carries the score-stage label so a design
+      // score's session is `${cycleId}:design:...` (distinguishable from a cycle's
+      // `${cycleId}:score:...`); both remain a unique, verifiably-independent
+      // fresh session id on the note.
+      const sessionId = `${cycleId}:${scoreStage}:${peer}:a${attempt}:${deps.now()}`;
+      deps.event({
+        type: "pair:selected",
+        cycleId,
+        workingAgent,
+        peer,
+        stage: scoreStage,
+        timeoutMs,
+        attempt,
+        reason: fanout !== undefined ? "fanout" : attempt > 1 ? "same_agent_or_fallback" : "ranked_candidate",
+        ts: deps.now(),
+      });
+      const scored = await deps.scorePeer(peer, summary, timeoutMs);
+      return scored === null ? null : { peer, scored, sessionId };
+    };
     const runRound = async (pool: string[], coerceThrowToNull: boolean): Promise<ScoreWinner | null> => {
       if (pool.length === 0) return null; // empty pool → no winner (no spawn, no wait)
-      let w: ScoreWinner | null = null;
-      for (let attempt = 1; attempt <= SCORE_MAX_ATTEMPTS && w === null; attempt++) {
-        const probes = pool.map(async (candidate) => {
-          const peer = candidate;
-          // FIX-344: the session-id prefix carries the score-stage label so a
-          // design score's session is `${cycleId}:design:...` (distinguishable
-          // from a cycle's `${cycleId}:score:...`); both remain a unique,
-          // verifiably-independent fresh session id on the note.
-          const sessionId = `${cycleId}:${scoreStage}:${peer}:a${attempt}:${deps.now()}`;
-          deps.event({ type: "pair:selected", cycleId, workingAgent, peer, stage: scoreStage, timeoutMs, ts: deps.now() });
-          const scored = await deps.scorePeer(peer, summary, timeoutMs);
-          return scored === null ? null : { peer, scored, sessionId };
-        });
-        if (coerceThrowToNull) {
-          try {
+      // FIX-1054: an explicit high-risk fan-out fires the round in PARALLEL
+      // (bounded to PAIR_FANOUT_LIMIT) and takes the first parseable score.
+      if (fanout !== undefined) {
+        const fpool = pool.slice(0, PAIR_FANOUT_LIMIT);
+        deps.event({ type: "pair:fanout", cycleId, stage: scoreStage, reason: fanout, limit: PAIR_FANOUT_LIMIT, peers: fpool, ts: deps.now() });
+        let w: ScoreWinner | null = null;
+        for (let attempt = 1; attempt <= SCORE_MAX_ATTEMPTS && w === null; attempt++) {
+          const probes = fpool.map((peer) => spawnScore(peer, attempt));
+          if (coerceThrowToNull) {
+            try { w = await firstValid(probes); } catch { w = null; }
+          } else {
             w = await firstValid(probes);
-          } catch {
-            w = null; // a wholly-throwing hetero round → fall through to same-vendor
           }
-        } else {
-          w = await firstValid(probes);
         }
+        return w;
+      }
+      // FIX-1054 DEFAULT: SERIAL take-first. Try each candidate one at a time;
+      // the first parseable score wins and the untried candidates are SKIPPED
+      // (never spawned). A wholly-flaking round still retries ONCE (the bounded
+      // SCORE_MAX_ATTEMPTS budget) so a transient flake doesn't false-negative.
+      let w: ScoreWinner | null = null;
+      let skipped: string[] = [];
+      for (let attempt = 1; attempt <= SCORE_MAX_ATTEMPTS && w === null; attempt++) {
+        const out = await serialFirstValid<PairScore>(pool, async (peer) => {
+          const s = await spawnScore(peer, attempt);
+          return s === null ? null : { peer: s.peer, value: s.scored };
+        });
+        if (out.winner !== null) {
+          const peer = out.winner.peer;
+          const sessionId = `${cycleId}:${scoreStage}:${peer}:a${attempt}:${deps.now()}`;
+          w = { peer, scored: out.winner.value, sessionId };
+          skipped = out.skipped;
+        }
+      }
+      if (w !== null && skipped.length > 0) {
+        deps.event({ type: "pair:skipped", cycleId, peers: skipped, reason: "accepted_score", stage: scoreStage, ts: deps.now() });
       }
       return w;
     };

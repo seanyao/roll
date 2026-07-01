@@ -39,6 +39,7 @@
 ### 可见性
 
 - **v4 角色日志入口补齐**：文档说明 Builder、Peer Reviewer、Evaluator、采信分数和解析失败原始产物分别该去哪里看，方便 supervisor 诊断多 agent 协作链路。(US-OBS-036) `[loop-observability]`
+- **协同视图数据底座就位**：新增 `collab-view.v1` 投影，从事件流和 CycleRoleSummary 派生换手、升级与 supervisor 姿态，为 `roll cycle --collab` 和 `roll supervisor live --collab` 提供类型稳定的数据契约。(US-OBS-038) `[loop-observability]`
 
 ## v4.630.1 — 2026-06-30
 

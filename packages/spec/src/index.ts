@@ -20,3 +20,4 @@ export * from "./types/config.js";
 export * from "./types/goal.js";
 export * from "./types/delivery.js";
 export * from "./types/cycle-role-summary.js";
+export * from "./types/collab-view.js";

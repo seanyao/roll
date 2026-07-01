@@ -477,6 +477,7 @@ describe("pairingPoolView — capability must overlap an enabled stage (codex pa
 import {
   excludedPeers,
   peerAuthStates,
+  authCooldownExclusions,
   DEFAULT_AUTH_EXCLUDE_THRESHOLD,
   aggregatePairingCost,
 } from "../src/index.js";
@@ -541,6 +542,44 @@ describe("peerAuthStates / excludedPeers (V4 fair pool)", () => {
   it("keys the agent name verbatim (no overseas alias collapse remains)", () => {
     const ex = excludedPeers([blocked("kimi"), blocked("kimi")]);
     expect(ex.has("kimi")).toBe(false);
+  });
+});
+
+// ── FIX-1056: same-envelope auth cooldown (regression for cycle 20260701-000657-76542)
+describe("authCooldownExclusions (FIX-1056 same-envelope auth cooldown)", () => {
+  // The observed broken cycle: agy was selected for BOTH code review and score
+  // and emitted `agent:blocked cause:auth` twice — a genuine same-envelope auth
+  // failure the loop must handle without pulling the owner into an interactive
+  // verify. One failure is a tolerated blip; the streak reaching threshold is
+  // what benches agy for this cycle's repeated attempts.
+  const agyReviewBlock = (): any => ({ ...blocked("agy"), stage: "review", detail: "Error: authentication failed or timed out" });
+  const agyScoreBlock = (): any => ({ ...blocked("agy"), stage: "score", detail: "Error: authentication failed or timed out" });
+
+  it("a single same-envelope auth failure does NOT cool down (blip tolerated)", () => {
+    const cd = authCooldownExclusions([agyReviewBlock()]);
+    expect(cd.has("agy")).toBe(false);
+  });
+
+  it("the observed 76542-shaped double auth failure cools agy down with its failure count", () => {
+    const cd = authCooldownExclusions([agyReviewBlock(), agyScoreBlock()]);
+    expect(cd.get("agy")).toBe(2);
+  });
+
+  it("a later success resets the streak — a re-authenticated agy is NOT cooled down", () => {
+    const cd = authCooldownExclusions([agyReviewBlock(), agyScoreBlock(), verdict("agy")]);
+    expect(cd.has("agy")).toBe(false);
+  });
+
+  it("network blocks NEVER cool an agent down (transient connectivity, not bad creds)", () => {
+    const cd = authCooldownExclusions([blocked("agy", "network"), blocked("agy", "network"), blocked("agy", "network")]);
+    expect(cd.has("agy")).toBe(false);
+  });
+
+  it("cools down ONLY the auth-blocked peer — every other ready agent stays eligible (fairness)", () => {
+    const cd = authCooldownExclusions([agyReviewBlock(), agyScoreBlock(), verdict("reasonix")]);
+    expect(cd.has("agy")).toBe(true);
+    expect(cd.has("reasonix")).toBe(false);
+    expect(cd.has("claude")).toBe(false);
   });
 });
 

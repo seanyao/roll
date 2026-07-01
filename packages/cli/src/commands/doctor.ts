@@ -24,6 +24,7 @@ import { isRollAuxiliarySkillTarget } from "./setup-shared.js";
 import { collectExternalTools, renderExternalToolDoctorSection, type ExternalToolState } from "../lib/external-tools.js";
 import { collectToolReadinessDoctorRows, renderToolReadinessDoctorSection } from "../lib/tool-readiness-doctor.js";
 import { detectDesignHandoff, renderDesignNudge } from "../lib/onboard-nudge.js";
+import { collectLanguageDoctorFindings, renderLanguageDoctorSection } from "../lib/language-doctor.js";
 
 interface Palette {
   GREEN: string;
@@ -578,6 +579,20 @@ function readWorkingDirectory(plist: string): string {
     }
   }
   return "";
+}
+
+export interface LanguageAuditDeps {
+  /** Override the project root (defaults to `process.cwd()`). */
+  root?: string;
+}
+
+/** US-LANG-002 — `roll doctor language` reports mixed-language policy drift. */
+export function languageAuditCommand(args: string[], deps: LanguageAuditDeps = {}): number {
+  const includeGenerated = args.includes("--include-generated");
+  const findings = collectLanguageDoctorFindings({ root: deps.root ?? process.cwd(), includeGenerated });
+  const lines = renderLanguageDoctorSection(findings, msgLang());
+  process.stdout.write(lines.join("\n") + "\n");
+  return 0;
 }
 
 export function doctorCommand(args: string[], deps: DoctorDeps = {}): number {

@@ -556,4 +556,18 @@ export const v3Catalog: Catalog = {
     en: "These are Roll docs/reports, not skills — re-run `roll setup` to remove them so agents stop warning about missing descriptions.",
     zh: "这些是 Roll 文档/报告，不是 skill —— 重新运行 `roll setup` 即可移除，agent 将不再报告缺少 description 的警告。",
   },
+
+  // US-LANG-002: language policy mechanical audit
+  "doctor.language_audit_title": {
+    en: "Language policy audit",
+    zh: "语言政策审计",
+  },
+  "doctor.language_audit_ok": {
+    en: "No mixed-language output rules found",
+    zh: "未发现混排输出规则",
+  },
+  "doctor.language_audit_findings_count": {
+    en: "policy finding(s)",
+    zh: "条政策发现",
+  },
 };

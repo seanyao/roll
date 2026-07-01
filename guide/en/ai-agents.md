@@ -125,6 +125,32 @@ Agent-specific behavior belongs in one profile, not in downstream runner gates:
 3. Keep executor, attest, pairing, and scoring code agent-agnostic.
 4. Add unit coverage for the profile and registry entry.
 
+## Agent Toolchain Health (US-V4-022)
+
+Supervisor treats agent toolchain health as part of coordination, not as an
+owner-side mystery. It scans warnings, auth/network status, polluted skill
+roots, stale setup sync, and worktree permission failures, then classifies them
+into one of four operational categories:
+
+| Classification | Typical signal | Supervisor action |
+|---|---|---|
+| `auth_block` | "403", "please run /login", "Unauthorized" | `pause_for_owner` |
+| `network_block` | `ECONNREFUSED`, `ETIMEDOUT`, DNS failure | `continue` (transient; loop retries or breathes) |
+| `setup_skill_root_pollution` | Reasonix auxiliary-dir warnings, skills with no description | `create_fix` → delta team |
+| `worktree_permission_failure` | `EACCES` / "permission denied" on a worktree path | `pause_for_owner` |
+
+When the signal is setup/skill-root pollution, Supervisor must **not** label it
+as auth-blocked. It routes the repair to the backlog/delta team as a FIX,
+instead of asking the owner to debug ad hoc. Supervisor coordinates and
+diagnoses these issues but does not become the Builder or Evaluator, and it does
+not auto-delete global files.
+
+```bash
+roll supervisor health             # human-readable health board
+roll supervisor health --json      # machine-readable classifications
+roll supervisor next               # next card + agent health summary
+```
+
 ## Legacy Compatibility
 
 Older projects may still contain `.roll/local.yaml agent`, `.roll/pairing.yaml`,

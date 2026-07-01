@@ -14,7 +14,9 @@ import {
   type AgentScopeRoleBinding,
   type AgentScopeRoleResolution,
   type AgentScopeSkippedCandidate,
+  type RoleCastRankingInput,
 } from "@roll/spec";
+import { rankRoleCandidates } from "./role-cast-ranker.js";
 
 export interface AgentScopeResolveLayer {
   readonly config: AgentScopeConfig;
@@ -36,6 +38,8 @@ export interface ResolveAgentScopeRoleInput {
   /** Already-resolved role assignments used by `avoid`. */
   readonly assignedRoles?: Readonly<Partial<Record<AgentScopeRole, AgentName>>>;
   readonly seed?: string;
+  /** US-AGENT-049 — optional health-aware ranking inputs for open-pool casting. */
+  readonly roleCastRanking?: Pick<RoleCastRankingInput, "profiles" | "health" | "recentOutcomes" | "storyRisk">;
 }
 
 interface BindingCandidate {
@@ -115,6 +119,19 @@ function hash(seed: string, agent: AgentName): number {
   return h >>> 0;
 }
 
+function castRoleForScopeRole(role: AgentScopeRole): import("@roll/spec").CastRoleName | undefined {
+  switch (role) {
+    case "execute":
+      return "builder";
+    case "evaluate":
+      return "evaluator";
+    case "supervise":
+      return "designer";
+    default:
+      return undefined;
+  }
+}
+
 function orderedAvailable(binding: Extract<AgentScopeRoleBinding, { kind: "select" }>, available: readonly AgentName[], input: ResolveAgentScopeRoleInput): AgentName[] {
   const withIndex = available.map((agent, index) => ({ agent, index }));
   if (binding.strategy === "least-recent") {
@@ -127,6 +144,22 @@ function orderedAvailable(binding: Extract<AgentScopeRoleBinding, { kind: "selec
     return withIndex
       .sort((a, b) => hash(seed, a.agent) - hash(seed, b.agent) || a.index - b.index)
       .map((x) => x.agent);
+  }
+  if (binding.strategy === "health-aware") {
+    const castRole = castRoleForScopeRole(input.role);
+    if (castRole === undefined || input.roleCastRanking === undefined) {
+      // Health-aware requested but no ranking context: fall back to pool order.
+      return available.slice();
+    }
+    const ranked = rankRoleCandidates({
+      role: castRole,
+      pool: available,
+      profiles: input.roleCastRanking.profiles,
+      health: input.roleCastRanking.health,
+      recentOutcomes: input.roleCastRanking.recentOutcomes,
+      storyRisk: input.roleCastRanking.storyRisk,
+    });
+    return ranked.map((r) => r.agent);
   }
   return available.slice();
 }

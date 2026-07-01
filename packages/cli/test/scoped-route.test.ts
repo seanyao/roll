@@ -7,6 +7,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  renderCastRoleRoute,
+  resolveCastRoleRoute,
+  castRoleRouteTrace,
   renderScopedExecuteRoute,
   resolveScopedStoryExecute,
   scopedExecuteRouteTrace,
@@ -125,5 +128,42 @@ describe("resolveScopedStoryExecute (FIX-1047)", () => {
     expect(text).toContain("strategy: least-recent");
     expect(text).toContain("codex — assigned-to-avoided-role: supervise");
     expect(text).toContain("selected: claude");
+  });
+});
+
+describe("resolveCastRoleRoute — US-AGENT-049", () => {
+  it("ranks builder candidates from the open pool with scores and reasons", () => {
+    const { rollHome, repoCwd } = fixture();
+    const route = resolveCastRoleRoute(repoCwd, "builder", "US-OBS-042", { rollHome, installed: ALL_INSTALLED });
+    expect(route).not.toBeNull();
+    expect(route!.role).toBe("builder");
+    expect(route!.storyId).toBe("US-OBS-042");
+    expect(route!.candidates.length).toBe(6);
+    const kimi = route!.candidates.find((c) => c.agent === "kimi");
+    expect(kimi?.reasons).toContain("strong builder");
+    expect(typeof kimi?.score).toBe("number");
+  });
+
+  it("does not select an auth-degraded agent ahead of healthy builders", () => {
+    const { rollHome, repoCwd } = fixture();
+    const runtimeDir = join(repoCwd, ".roll", "loop");
+    mkdirSync(runtimeDir, { recursive: true });
+    writeFileSync(
+      join(runtimeDir, "events.ndjson"),
+      JSON.stringify({ type: "agent:blocked", agent: "agy", classification: "auth_block", severity: "error", detail: "login prompt", ts: Date.now() }) + "\n",
+    );
+    const route = resolveCastRoleRoute(repoCwd, "builder", "US-OBS-042", { rollHome, installed: ALL_INSTALLED });
+    const agy = route!.candidates.find((c) => c.agent === "agy");
+    expect(agy?.eligible).toBe(false);
+    expect(route!.selected).not.toBe("agy");
+  });
+
+  it("renders the worked-sample route trace shape", () => {
+    const { rollHome, repoCwd } = fixture();
+    const route = resolveCastRoleRoute(repoCwd, "builder", "US-OBS-042", { rollHome, installed: ALL_INSTALLED });
+    const text = renderCastRoleRoute(castRoleRouteTrace(route!));
+    expect(text).toContain("builder candidates:");
+    expect(text).toContain("selected:");
+    expect(text).toMatch(/score\s+\d+/);
   });
 });

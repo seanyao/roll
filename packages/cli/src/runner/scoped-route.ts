@@ -22,12 +22,16 @@ import {
   agentsInstalled,
   canonicalAgentName,
   normalizeAgentScopeConfig,
+  rankRoleCandidates,
   resolveAgentScopeRole,
 } from "@roll/core";
 import type {
+  AgentHealthSignal,
   AgentName,
   AgentScopeConfig,
   AgentScopeRoleResolution,
+  CastRoleName,
+  RankedRoleCandidate,
 } from "@roll/spec";
 import { realAgentEnv } from "../commands/agent-list.js";
 
@@ -123,6 +127,7 @@ export function resolveScopedStoryExecute(repoCwd: string, deps: ScopedRouteDeps
   const superviseAgent = superviseResolution.ok ? superviseResolution.resolved.agent : null;
 
   const recentUse = deps.recentUse ?? readRecentUse(runtimeDirFor(repoCwd));
+  const runtimeDir = runtimeDirFor(repoCwd);
   const resolution = resolveAgentScopeRole({
     scope: "story",
     role: "execute",
@@ -130,6 +135,11 @@ export function resolveScopedStoryExecute(repoCwd: string, deps: ScopedRouteDeps
     runtimeHealth,
     recentUse,
     ...(superviseAgent !== null ? { assignedRoles: { supervise: superviseAgent } } : {}),
+    roleCastRanking: {
+      profiles: defaultCapabilityProfiles(),
+      health: healthSignalsFromEvents(runtimeDir),
+      recentOutcomes: readRecentOutcomes(runtimeDir),
+    },
   });
   return { resolution, superviseAgent, recentUse };
 }
@@ -176,6 +186,227 @@ export function scopedExecuteRouteTrace(route: ScopedExecuteRoute): ScopedExecut
     recentUse,
     error: f.errors[0] ?? "story.execute unresolved",
   };
+}
+
+/** Map a story scope role to the public casting role vocabulary. */
+function castRoleForScopeRole(role: import("@roll/spec").AgentScopeRole): CastRoleName | undefined {
+  switch (role) {
+    case "execute":
+      return "builder";
+    case "evaluate":
+      return "evaluator";
+    case "supervise":
+      return "designer";
+    default:
+      return undefined;
+  }
+}
+
+/** Read the public pool declared for a cast role from the scoped config layers. */
+function readCastPool(layers: readonly { config: AgentScopeConfig; path: string }[], role: CastRoleName): AgentName[] | null {
+  const scopeRole: import("@roll/spec").AgentScopeRole =
+    role === "builder" ? "execute" : role === "evaluator" ? "evaluate" : role === "designer" ? "supervise" : "execute";
+  // Walk project/machine layers in reverse precedence looking for a select binding.
+  for (let i = layers.length - 1; i >= 0; i -= 1) {
+    const layer = layers[i];
+    if (layer === undefined) continue;
+    const binding = layer.config.roles[scopeRole] ?? layer.config.defaults.story?.roles[scopeRole];
+    if (binding?.kind === "select") {
+      const from = binding.from !== undefined && binding.from.length > 0 ? [...binding.from] : Object.keys(layer.config.agents) as AgentName[];
+      return from;
+    }
+  }
+  return null;
+}
+
+/** US-AGENT-049 — health-aware cast role route. */
+export interface CastRoleRoute {
+  readonly role: CastRoleName;
+  readonly storyId: string | null;
+  readonly candidates: readonly RankedRoleCandidate[];
+  readonly selected: AgentName | null;
+  readonly superviseAgent: AgentName | null;
+}
+
+function readRecentOutcomes(runtimeDir: string): Partial<Record<AgentName, ("success" | "failure" | "gave_up")[]>> {
+  const out: Partial<Record<AgentName, ("success" | "failure" | "gave_up")[]>> = {};
+  const path = join(runtimeDir, "runs.jsonl");
+  if (!existsSync(path)) return out;
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    return out;
+  }
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "") continue;
+    let row: { agent?: unknown; status?: unknown };
+    try {
+      row = JSON.parse(trimmed) as { agent?: unknown; status?: unknown };
+    } catch {
+      continue;
+    }
+    if (typeof row.agent !== "string" || typeof row.status !== "string") continue;
+    const agent = canonicalAgentName(row.agent) as AgentName;
+    if (!(AGENT_REGISTRY_NAMES as readonly string[]).includes(agent)) continue;
+    const status = row.status;
+    if (status !== "success" && status !== "failure" && status !== "gave_up") continue;
+    const list = out[agent] ?? [];
+    list.push(status);
+    out[agent] = list;
+  }
+  return out;
+}
+
+function healthSignalsFromEvents(runtimeDir: string): Partial<Record<AgentName, AgentHealthSignal[]>> {
+  const out: Partial<Record<AgentName, AgentHealthSignal[]>> = {};
+  const eventsPath = join(runtimeDir, "events.ndjson");
+  if (!existsSync(eventsPath)) return out;
+  let text: string;
+  try {
+    text = readFileSync(eventsPath, "utf8");
+  } catch {
+    return out;
+  }
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "") continue;
+    let ev: { type?: unknown; agent?: unknown; classification?: unknown; severity?: unknown; detail?: unknown; ts?: unknown };
+    try {
+      ev = JSON.parse(trimmed) as typeof ev;
+    } catch {
+      continue;
+    }
+    if (typeof ev.agent !== "string") continue;
+    const agent = canonicalAgentName(ev.agent) as AgentName;
+    if (!(AGENT_REGISTRY_NAMES as readonly string[]).includes(agent)) continue;
+
+    if (ev.type === "agent:blocked" || ev.type === "agent:toolchain_issue") {
+      const classification = typeof ev.classification === "string" ? ev.classification : "";
+      const severity = ev.severity === "error" ? "error" : "warning";
+      const status: AgentHealthSignal["status"] = severity === "error" ? "degraded" : "degraded";
+      const reason: AgentHealthSignal["reason"] = classification.includes("auth")
+        ? "auth"
+        : classification.includes("network")
+          ? "timeout"
+          : classification.includes("parser")
+            ? "parser"
+            : "manual";
+      const ts = typeof ev.ts === "number" ? ev.ts : Date.now();
+      const signal: AgentHealthSignal = {
+        agent,
+        source: "cycle",
+        status,
+        reason,
+        observedAt: new Date(ts).toISOString(),
+      };
+      const list = out[agent] ?? [];
+      list.push(signal);
+      out[agent] = list;
+    }
+  }
+  return out;
+}
+
+/** Default capability profiles for the open pool (US-AGENT-049). */
+export function defaultCapabilityProfiles(): NonNullable<import("@roll/spec").RoleCastRankingInput["profiles"]> {
+  return {
+    claude: { agent: "claude", canExecute: true, canReview: true, canScore: true, strengths: ["capable generalist"], knownShortcomings: ["high cost"], costBand: "high" },
+    kimi: { agent: "kimi", canExecute: true, canReview: true, canScore: true, strengths: ["strong builder"], knownShortcomings: ["long cycles need tight scope"], costBand: "medium" },
+    codex: { agent: "codex", canExecute: true, canReview: true, canScore: true, strengths: ["fresh-session capable"], knownShortcomings: [], costBand: "medium" },
+    pi: { agent: "pi", canExecute: true, canReview: true, canScore: true, strengths: ["good evaluator/build candidate"], knownShortcomings: ["usage capture partial in older cycles"], costBand: "low" },
+    reasonix: { agent: "reasonix", canExecute: true, canReview: true, canScore: true, strengths: ["cheap"], knownShortcomings: ["weaker Builder reliability on broad UI/workflow cards"], costBand: "low" },
+    agy: { agent: "agy", canExecute: true, canReview: true, canScore: true, strengths: ["can build"], knownShortcomings: ["auth prompts in live cycles"], costBand: "medium" },
+    cursor: { agent: "cursor", canExecute: true, canReview: true, canScore: true, strengths: ["Cursor adapter"], knownShortcomings: ["recently added to roster"], costBand: "medium" },
+  };
+}
+
+/**
+ * US-AGENT-049 — resolve a public cast role (designer/builder/evaluator/peer_reviewer)
+ * using health-aware ranking over the open pool.
+ *
+ * Returns `null` when the role has no scoped pool configured.
+ */
+export function resolveCastRoleRoute(
+  repoCwd: string,
+  role: CastRoleName,
+  storyId: string | null = null,
+  deps: ScopedRouteDeps = {},
+): CastRoleRoute | null {
+  const rollHome = deps.rollHome ?? process.env["ROLL_HOME"] ?? join(homedir(), ".roll");
+  const layers = [
+    readScopedAgentLayer(join(rollHome, "agents.yaml")),
+    readScopedAgentLayer(join(repoCwd, ".roll", "agents.yaml")),
+  ].filter((layer): layer is { config: AgentScopeConfig; path: string } => layer !== null);
+  if (layers.length === 0) return null;
+
+  const pool = readCastPool(layers, role);
+  if (pool === null || pool.length === 0) return null;
+
+  const installed = deps.installed ?? new Set(agentsInstalled(realAgentEnv()).map((name) => canonicalAgentName(name)));
+  const availablePool = pool.filter((a) => installed.has(a));
+  if (availablePool.length === 0) {
+    return { role, storyId, candidates: pool.map((agent) => ({ agent, eligible: false, score: 0, reasons: [], warnings: ["not installed"] })), selected: null, superviseAgent: null };
+  }
+
+  const runtimeDir = runtimeDirFor(repoCwd);
+  const superviseResolution = resolveAgentScopeRole({ scope: "story", role: "supervise", layers, runtimeHealth: Object.fromEntries(
+    AGENT_REGISTRY_NAMES.map((agent) => [agent, installed.has(agent) ? { available: true } : { available: false, reason: "not-installed" }]),
+  ) as Partial<Record<AgentName, { available: boolean; reason?: string }>> });
+  const superviseAgent = superviseResolution.ok ? superviseResolution.resolved.agent : null;
+
+  const candidates = rankRoleCandidates({
+    role,
+    pool: availablePool,
+    profiles: defaultCapabilityProfiles(),
+    health: healthSignalsFromEvents(runtimeDir),
+    recentOutcomes: readRecentOutcomes(runtimeDir),
+  });
+
+  // A Builder cannot satisfy its own Evaluator gate through the same session.
+  // Same-brand independent sessions are allowed by the ranker; this only blocks
+  // the exact same session identity being cast into both roles.
+  const selected = candidates.find((c) => {
+    if (!c.eligible) return false;
+    if (role === "evaluator" && c.agent === superviseAgent) return false;
+    return true;
+  }) ?? null;
+
+  return { role, storyId, candidates, selected: selected?.agent ?? null, superviseAgent };
+}
+
+/** JSON-friendly trace for a cast role route. */
+export interface CastRoleRouteTrace {
+  readonly role: CastRoleName;
+  readonly storyId: string | null;
+  readonly candidates: readonly RankedRoleCandidate[];
+  readonly selected: AgentName | null;
+  readonly supervise: AgentName | null;
+}
+
+export function castRoleRouteTrace(route: CastRoleRoute): CastRoleRouteTrace {
+  return {
+    role: route.role,
+    storyId: route.storyId,
+    candidates: route.candidates,
+    selected: route.selected,
+    supervise: route.superviseAgent,
+  };
+}
+
+export function renderCastRoleRoute(trace: CastRoleRouteTrace): string {
+  const lines: string[] = ["", `  ${trace.role} candidates:`];
+  for (const c of trace.candidates) {
+    const status = c.eligible ? "eligible" : "not eligible";
+    const reasons = c.reasons.length > 0 ? c.reasons.join(" · ") : "no positive signals";
+    const warnings = c.warnings.length > 0 ? c.warnings.join(" · ") : "";
+    const suffix = warnings ? ` · ${warnings}` : "";
+    lines.push(`    ${c.agent.padEnd(9)} score ${String(c.score).padStart(3)}  ${status} · ${reasons}${suffix}`);
+  }
+  lines.push(`  selected: ${trace.selected ?? "(none eligible)"}`);
+  lines.push("");
+  return lines.join("\n");
 }
 
 /** Human-readable Builder route trace for `roll supervisor route`. */

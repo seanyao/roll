@@ -44,7 +44,7 @@ import {
   type FreshnessPort,
 } from "@roll/core";
 import type { CycleRoleSummary, RollEvent, RollGoal, SupervisorInput } from "@roll/spec";
-import { parseGoalYaml } from "@roll/spec";
+import { isCastRoleName, parseGoalYaml } from "@roll/spec";
 import { detectNoProgressStall, type NoProgressStall } from "../lib/goal-recovery.js";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
@@ -53,7 +53,14 @@ import { formatOperatingMode, resolveOperatingMode, suggestedGuidedRun } from ".
 import { reducePrView } from "./loop-pr-inbox.js";
 import { readPendingPublish } from "../runner/pending-publish.js";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
-import { renderScopedExecuteRoute, resolveScopedStoryExecute, scopedExecuteRouteTrace } from "../runner/scoped-route.js";
+import {
+  castRoleRouteTrace,
+  renderCastRoleRoute,
+  renderScopedExecuteRoute,
+  resolveCastRoleRoute,
+  resolveScopedStoryExecute,
+  scopedExecuteRouteTrace,
+} from "../runner/scoped-route.js";
 
 const EXEC_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 
@@ -664,6 +671,25 @@ export function supervisorCommand(args: string[]): number {
   }
   const projectPath = process.cwd();
   if (sub === "route") {
+    const roleArg = args[args.indexOf("--role") + 1];
+    const role = roleArg !== undefined && isCastRoleName(roleArg) ? roleArg : undefined;
+    const storyIdx = args.indexOf("--story");
+    const storyId = storyIdx >= 0 && storyIdx + 1 < args.length ? args[storyIdx + 1] ?? null : null;
+
+    if (role !== undefined) {
+      const route = resolveCastRoleRoute(projectPath, role, storyId);
+      if (route === null) {
+        const out = { role, storyId, scoped: false };
+        if (json) process.stdout.write(JSON.stringify(out, null, 2) + "\n");
+        else process.stdout.write(`\n  ${role} route\n  (no scoped agents.yaml; legacy tier routing in effect)\n\n`);
+        return 0;
+      }
+      const trace = castRoleRouteTrace(route);
+      if (json) process.stdout.write(JSON.stringify(trace, null, 2) + "\n");
+      else process.stdout.write(renderCastRoleRoute(trace));
+      return 0;
+    }
+
     const route = resolveScopedStoryExecute(projectPath);
     if (route === null) {
       if (json) process.stdout.write(JSON.stringify({ role: "execute", scoped: false }, null, 2) + "\n");

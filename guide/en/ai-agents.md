@@ -69,6 +69,8 @@ defaults:
         strategy: least-recent
 ```
 
+US-AGENT-049 adds `health-aware` as a strategy. It ranks every candidate by capability, observed health, recent outcomes, cost, and story risk, and keeps degraded agents visible instead of silently excluding them. See [Agent Pool and Role Casting](./agents.md) for details.
+
 Machine scope can declare a supervisor and the local pool:
 
 ```yaml

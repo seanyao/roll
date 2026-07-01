@@ -63,6 +63,8 @@ defaults:
         strategy: least-recent
 ```
 
+US-AGENT-049 增加了 `health-aware` 策略。它按能力、观察到的健康状态、近期结果、成本和 story 风险对所有候选 agent 排序，并让降级 agent 保持可见而不是被静默排除。详见 [Agent 池与角色选派](./agents.md)。
+
 Machine Scope 可以声明 supervisor 和本机 agent pool：
 
 ```yaml

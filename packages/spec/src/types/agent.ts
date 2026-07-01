@@ -59,6 +59,14 @@ export type ExecutionProfile = (typeof EXECUTION_PROFILES)[number];
 export const ROLE_NAMES = ["planner", "builder", "evaluator"] as const;
 export type RoleName = (typeof ROLE_NAMES)[number];
 
+/** US-AGENT-049 — the four casting roles Roll can rank and assign from one open pool. */
+export const CAST_ROLE_NAMES = ["designer", "builder", "evaluator", "peer_reviewer"] as const;
+export type CastRoleName = (typeof CAST_ROLE_NAMES)[number];
+
+export function isCastRoleName(value: string): value is CastRoleName {
+  return (CAST_ROLE_NAMES as readonly string[]).includes(value);
+}
+
 /** How a role binds to an execution identity: a named rig, a route slot, or the
  *  machine default agent. */
 export type RoleBinding =
@@ -281,8 +289,48 @@ export type AgentScopeKind = (typeof AGENT_SCOPE_KINDS)[number];
 export const AGENT_SCOPE_ROLES = ["supervise", "execute", "evaluate"] as const;
 export type AgentScopeRole = (typeof AGENT_SCOPE_ROLES)[number];
 
-export const AGENT_BINDING_STRATEGIES = ["first-available", "least-recent", "seeded-random"] as const;
+export const AGENT_BINDING_STRATEGIES = ["first-available", "least-recent", "seeded-random", "health-aware"] as const;
 export type AgentBindingStrategy = (typeof AGENT_BINDING_STRATEGIES)[number];
+
+/** US-AGENT-049 — static capability profile for an agent in the open pool. */
+export interface AgentCapabilityProfile {
+  readonly agent: AgentName;
+  readonly canExecute: boolean;
+  readonly canReview: boolean;
+  readonly canScore: boolean;
+  readonly strengths: readonly string[];
+  readonly knownShortcomings: readonly string[];
+  readonly costBand?: "low" | "medium" | "high" | "unknown";
+}
+
+/** US-AGENT-049 — observed health signal for an agent. */
+export interface AgentHealthSignal {
+  readonly agent: AgentName;
+  readonly source: "cycle" | "pair" | "score" | "probe" | "manual";
+  readonly status: "healthy" | "degraded" | "blocked" | "unknown";
+  readonly reason?: "auth" | "timeout" | "parser" | "no_tcr" | "publish" | "cost" | "manual";
+  readonly observedAt: string;
+  readonly expiresAt?: string;
+}
+
+/** US-AGENT-049 — one ranked candidate for a casting role. */
+export interface RankedRoleCandidate {
+  readonly agent: AgentName;
+  readonly eligible: boolean;
+  readonly score: number;
+  readonly reasons: readonly string[];
+  readonly warnings: readonly string[];
+}
+
+/** US-AGENT-049 — input to rank candidates for a casting role. */
+export interface RoleCastRankingInput {
+  readonly role: CastRoleName;
+  readonly pool: readonly AgentName[];
+  readonly profiles: Readonly<Partial<Record<AgentName, AgentCapabilityProfile>>>;
+  readonly health: Readonly<Partial<Record<AgentName, AgentHealthSignal[]>>>;
+  readonly recentOutcomes: Readonly<Partial<Record<AgentName, readonly ("success" | "failure" | "gave_up")[]>>>;
+  readonly storyRisk?: "low" | "medium" | "high";
+}
 
 /** Static Agent declaration inside `~/.roll/agents.yaml`. Runtime health is not
  *  encoded here; it is supplied by the resolver/spawn path. */

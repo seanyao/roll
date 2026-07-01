@@ -37,8 +37,11 @@ function project(): string {
   dirs.push(p);
   mkdirSync(join(p, ".roll", "loop"), { recursive: true });
   execSync("git init -q", { cwd: p });
-  execSync("git remote add origin https://github.com/owner/repo.git", { cwd: p });
   execSync("git config user.email test@roll.local && git config user.name Test", { cwd: p });
+  execSync("git checkout -q -b main && git commit -q --allow-empty -m init", { cwd: p });
+  execSync("git remote add origin https://github.com/owner/repo.git", { cwd: p });
+  // Make git fetch fail fast (no real remote in test env) via a dead proxy.
+  execSync("git config http.proxy http://127.0.0.1:1", { cwd: p });
   return p;
 }
 
@@ -149,8 +152,6 @@ describe("loopReconcilePendingCommand", () => {
 
   it("merged PR appends done record, emits pr:merge event, fetches origin/main", async () => {
     const p = project();
-    // Add a local main ref so fetch has something to do without network.
-    execSync("git checkout -q -b main && git commit -q --allow-empty -m init", { cwd: p });
     writeDeliveries(p, [pendingRecord(111)]);
 
     const d = deps(
@@ -172,6 +173,38 @@ describe("loopReconcilePendingCommand", () => {
 
     const ev = events(p);
     expect(ev.some((e) => e.type === "pr:merge" && e.prNumber === 111)).toBe(true);
+  });
+
+  it("merged PR flips backlog status from In Progress to Done (FIX-1057)", async () => {
+    const p = project();
+
+    // Write a backlog with the story in 🔨 In Progress status
+    const backlogPath = join(p, ".roll", "backlog.md");
+    writeFileSync(
+      backlogPath,
+      "## Epic: Test\n\n| ID | Description | Status |\n|----|----|----|\n| FIX-1050 | bug: PR merge leaves status in progress | 🔨 In Progress |\n",
+    );
+    execSync("git add .roll/backlog.md && git commit -q -m 'add backlog'", { cwd: p });
+
+    writeDeliveries(p, [pendingRecord(777)]);
+
+    const d = deps(
+      p,
+      fakeProvider({
+        777: { kind: "merged", mergeCommit: "abc7777def", mergedAt: "2026-06-30T13:36:48Z", checkedAt: "2026-06-30T13:36:48Z" },
+      }),
+    );
+    const code = await loopReconcilePendingCommand([], d);
+    expect(code).toBe(0);
+
+    // Verify delivery record was appended
+    const recs = readDeliveries(p);
+    expect(recs[recs.length - 1].lifecycleState).toBe("done");
+
+    // Verify backlog status flipped to ✅ Done
+    const backlog = readFileSync(backlogPath, "utf8");
+    expect(backlog).toContain("✅ Done");
+    expect(backlog).not.toContain("🔨 In Progress");
   });
 
   it("already-delivered record is skipped", async () => {

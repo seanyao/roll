@@ -611,10 +611,42 @@ export function supervisorCommand(args: string[]): number {
       storyId = extractStoryId([], headRef, bodyStr) ?? `PR-${prNumber}`;
     }
 
+    // FIX-1061: resolve Roll evaluator score artifact for loop-created PRs.
+    let rollEvaluatorVerdict: string | undefined;
+    if (storyId !== "" && storyId !== `PR-${prNumber}`) {
+      // Find the latest cycle that worked on this story.
+      let cycleId = "";
+      let latestTs = 0;
+      for (const ev of events) {
+        if (ev.type === "cycle:start" && ev.storyId === storyId && ev.ts > latestTs) {
+          cycleId = ev.cycleId;
+          latestTs = ev.ts;
+        }
+      }
+      if (cycleId !== "") {
+        const peerDir = join(projectPath, ".roll", "loop", "peer");
+        const scorePath = join(peerDir, `cycle-${cycleId}.score.pair.json`);
+        try {
+          if (existsSync(scorePath)) {
+            const scoreRaw = JSON.parse(readFileSync(scorePath, "utf8")) as {
+              verdict?: string;
+              score?: number;
+            };
+            if (typeof scoreRaw.verdict === "string" && (scoreRaw.verdict === "good" || scoreRaw.verdict === "ok")) {
+              rollEvaluatorVerdict = scoreRaw.verdict;
+            }
+          }
+        } catch {
+          // Score file unparseable — fall through without Roll evaluator.
+        }
+      }
+    }
+
     // Classify repair eligibility.
     const classification = classifyEvidenceRepair({
       ciState: facts.ciState || "unknown",
       reviewState: facts.bot || "none",
+      rollEvaluatorVerdict,
       mergeable: facts.mergeable || "unknown",
       isDraft: facts.isDraft === true,
       hasFreshReport: false, // We're asked to repair — assume no fresh report.
@@ -627,7 +659,13 @@ export function supervisorCommand(args: string[]): number {
       return 0;
     }
     if (classification.verdict !== "reparable") {
-      if (json) process.stdout.write(JSON.stringify({ prNumber, storyId, verdict: classification.verdict, reason: classification.reason }, null, 2) + "\n");
+      if (json) process.stdout.write(JSON.stringify({
+        prNumber,
+        storyId,
+        verdict: classification.verdict,
+        reason: classification.reason,
+        evaluatorSources: { gitHubReview: facts.bot || "none", rollEvaluatorVerdict: rollEvaluatorVerdict ?? null },
+      }, null, 2) + "\n");
       else process.stdout.write(`\n  repair-evidence: PR #${prNumber} is not reparable\n  ${classification.reason}\n\n`);
       return 1;
     }
@@ -794,7 +832,7 @@ export function supervisorCommand(args: string[]): number {
         `acceptance evidence repaired for ${storyId}`,
         acMapCount > 0 ? `ac-map: ${acMapCount} AC(s) at readonly with real evidence refs` : "ac-map: (no ACs found)",
         htmlReportPath !== "" ? `report: ${htmlReportPath}` : "report: (skipped — no ACs)",
-        `CI: ${facts.ciState} | review: ${facts.bot} | merge: ${facts.mergeable}`,
+        `CI: ${facts.ciState} | review: ${facts.bot} | merge: ${facts.mergeable}${rollEvaluatorVerdict !== undefined ? ` | roll evaluator: ${rollEvaluatorVerdict}` : ""}`,
       ].join("; "),
       ts: Date.now(),
     };
@@ -812,6 +850,7 @@ export function supervisorCommand(args: string[]): number {
         verdict: "repaired",
         action: "merge_ready",
         reason: classification.reason,
+        evaluatorSources: { gitHubReview: facts.bot || "none", rollEvaluatorVerdict: rollEvaluatorVerdict ?? null },
         artifacts: {
           acMap: acMapCount > 0 ? `${storyId}/ac-map.json` : null,
           report: htmlReportPath || null,
@@ -826,6 +865,7 @@ export function supervisorCommand(args: string[]): number {
         `  ac-map: ${acMapCount > 0 ? `generated for ${acMapCount} AC(s) at readonly status in ${storyId}/ac-map.json` : "(no ACs found — check spec.md)"}\n` +
         `  report: ${htmlReportPath || "(skipped — no ACs)"}\n` +
         `  evidence: ${repairSummaryAbs || "(skipped)"}\n` +
+        `  evaluator: ${facts.bot === "APPROVED" ? `GitHub review (${facts.bot})` : rollEvaluatorVerdict !== undefined ? `Roll evaluator (${rollEvaluatorVerdict})` : `${facts.bot || "none"}`}\n` +
         `  ${classification.reason}\n\n`,
       );
     }

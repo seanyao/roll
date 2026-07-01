@@ -24,6 +24,8 @@ export interface EvidenceRepairInput {
   ciState: string;
   /** The PR's evaluator review state — "APPROVED", "CHANGES_REQUESTED", etc. */
   reviewState: string;
+  /** Roll evaluator verdict from peer score artifact — "good", "ok", "regression", or absent. */
+  rollEvaluatorVerdict?: string;
   /** Whether the PR's merge is clean ("CLEAN", "BEHIND", "DIRTY", "CONFLICTING"). */
   mergeable: string;
   /** Whether the PR is a draft. */
@@ -39,7 +41,7 @@ export interface EvidenceRepairInput {
  *
  * A PR is REPARABLE when:
  *   - CI is green (success)
- *   - Evaluator has approved (APPROVED)
+ *   - Evaluator has approved (GitHub APPROVED or Roll evaluator good/ok verdict)
  *   - Merge is clean (CLEAN)
  *   - BUT no fresh acceptance report exists
  *   - AND repair hasn't already been done
@@ -51,14 +53,28 @@ export interface EvidenceRepairInput {
  *
  * A PR is NOT_REPARABLE when CI is red, evaluator hasn't approved, merge is
  * dirty, or any other condition that means evidence alone won't make it ready.
+ *
+ * FIX-1061: evaluator approval MAY come from a Roll peer score artifact
+ * (`rollEvaluatorVerdict`) instead of a GitHub review when the PR was created
+ * by a Roll loop cycle (manual-merge path). Accepted Roll verdicts are
+ * "good" and "ok" — the same threshold the attest gate uses.
  */
 export function classifyEvidenceRepair(input: EvidenceRepairInput): EvidenceRepairClassification {
   // Structural preconditions: only green + approved + clean PRs are candidates.
   if (input.ciState !== "success") {
     return { verdict: "not_reparable", reason: `CI is not green (${input.ciState}); evidence repair cannot fix CI` };
   }
-  if (input.reviewState !== "APPROVED") {
-    return { verdict: "not_reparable", reason: `evaluator has not approved (${input.reviewState}); evidence repair cannot replace evaluator review` };
+
+  // FIX-1061: evaluator approval from GitHub review OR Roll evaluator score.
+  const hasGitHubApproval = input.reviewState === "APPROVED";
+  const hasRollApproval =
+    input.rollEvaluatorVerdict !== undefined &&
+    (input.rollEvaluatorVerdict === "good" || input.rollEvaluatorVerdict === "ok");
+  if (!hasGitHubApproval && !hasRollApproval) {
+    const src = input.rollEvaluatorVerdict !== undefined
+      ? `Roll evaluator verdict: ${input.rollEvaluatorVerdict}`
+      : `GitHub review state: ${input.reviewState}`;
+    return { verdict: "not_reparable", reason: `evaluator has not approved (${src}); evidence repair cannot replace evaluator review` };
   }
   if (input.mergeable !== "CLEAN") {
     return { verdict: "not_reparable", reason: `merge is not clean (${input.mergeable}); evidence repair cannot resolve merge conflicts` };
@@ -75,11 +91,14 @@ export function classifyEvidenceRepair(input: EvidenceRepairInput): EvidenceRepa
   }
 
   // Reparable: green PR, approved evaluator, clean merge, but no fresh report.
+  const evaluatorSource = hasGitHubApproval
+    ? "evaluator approved"
+    : `Roll evaluator ${input.rollEvaluatorVerdict}`;
   return {
     verdict: "reparable",
     reason: input.isDraft
-      ? "draft PR is CI green + evaluator approved + merge clean but lacks a fresh acceptance report"
-      : "PR is CI green + evaluator approved + merge clean but lacks a fresh acceptance report",
+      ? `draft PR is CI green + ${evaluatorSource} + merge clean but lacks a fresh acceptance report`
+      : `PR is CI green + ${evaluatorSource} + merge clean but lacks a fresh acceptance report`,
   };
 }
 

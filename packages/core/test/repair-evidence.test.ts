@@ -84,6 +84,50 @@ describe("classifyEvidenceRepair", () => {
     const result = classifyEvidenceRepair(input({ mergeable: "DIRTY" }));
     expect(result.verdict).toBe("not_reparable");
   });
+
+  // ── FIX-1061: Roll evaluator score as alternative evaluator approval ──
+
+  it("accepts Roll evaluator good verdict when GitHub review is absent", () => {
+    const result = classifyEvidenceRepair(input({ reviewState: "none", rollEvaluatorVerdict: "good" }));
+    expect(result.verdict).toBe("reparable");
+    expect(result.reason).toContain("Roll evaluator good");
+  });
+
+  it("accepts Roll evaluator ok verdict when GitHub review is absent", () => {
+    const result = classifyEvidenceRepair(input({ reviewState: "", rollEvaluatorVerdict: "ok" }));
+    expect(result.verdict).toBe("reparable");
+    expect(result.reason).toContain("Roll evaluator ok");
+  });
+
+  it("rejects Roll evaluator regression verdict", () => {
+    const result = classifyEvidenceRepair(input({ reviewState: "none", rollEvaluatorVerdict: "regression" }));
+    expect(result.verdict).toBe("not_reparable");
+    expect(result.reason).toContain("Roll evaluator verdict: regression");
+  });
+
+  it("rejects unparseable Roll evaluator verdict (lowscore)", () => {
+    const result = classifyEvidenceRepair(input({ reviewState: "none", rollEvaluatorVerdict: "lowscore" }));
+    expect(result.verdict).toBe("not_reparable");
+  });
+
+  it("still rejects when Roll evaluator is good but CI is red", () => {
+    const result = classifyEvidenceRepair(input({ ciState: "failure", reviewState: "none", rollEvaluatorVerdict: "good" }));
+    expect(result.verdict).toBe("not_reparable");
+    expect(result.reason).toContain("CI");
+  });
+
+  it("still rejects when Roll evaluator is good but merge is dirty", () => {
+    const result = classifyEvidenceRepair(input({ reviewState: "none", rollEvaluatorVerdict: "good", mergeable: "CONFLICTING" }));
+    expect(result.verdict).toBe("not_reparable");
+    expect(result.reason).toContain("merge");
+  });
+
+  it("prefers GitHub review APPROVED over Roll evaluator for reason text", () => {
+    const result = classifyEvidenceRepair(input({ reviewState: "APPROVED", rollEvaluatorVerdict: "good" }));
+    expect(result.verdict).toBe("reparable");
+    expect(result.reason).toContain("evaluator approved");
+    expect(result.reason).not.toContain("Roll evaluator");
+  });
 });
 
 describe("repairedPrNumbers", () => {

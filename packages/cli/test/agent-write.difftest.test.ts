@@ -451,7 +451,7 @@ roles:
   it("unknown subcommand is TS-owned (v4 usage line)", () => {
     expect(run(["bogus"])).toMatchObject({
       code: 1,
-      stdout: "Usage: roll agent [migrate [--dry-run]|list]\n",
+      stdout: "Usage: roll agent [migrate [--dry-run]|list|readiness [agent]]\n",
       stderr: "[roll] Unknown subcommand: bogus\n",
     });
   });

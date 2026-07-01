@@ -350,7 +350,22 @@ const AGENT_PROFILES: Readonly<Record<string, AgentProfile>> = {
       return { bin: opts.bin ?? "codex", args: [...args, prompt] };
     },
   },
-  agy: simplePromptProfile("agy", "agy", (prompt) => ["-p", prompt]),
+  // FIX-1056: agy needs an EXPLICIT runtime adapter, not the generic
+  // simplePromptProfile — the generic profile drops the authenticated runtime
+  // context, so agy's headless (launchd) child could not see the owner's
+  // once-authenticated auth-context home and emitted `agent:blocked cause=auth`
+  // even after an interactive login. The argv shape (`agy -p <prompt>`) and PTY
+  // behaviour are unchanged; the only addition is `childEnv: agyEnv`, which
+  // resolves the SAME auth-context dir the interactive CLI uses (from the owner's
+  // real home, not launchd's sanitized $HOME) and forwards it via AGY_CONFIG_DIR.
+  agy: {
+    name: "agy",
+    usesWorkspaceSandbox: false,
+    ptyWhenPiped: true,
+    acceptance: { canReviewHeadless: getAgentSpec("agy")?.canReviewHeadless === true },
+    buildSpawnCommand: (opts) => ({ bin: opts.bin ?? "agy", args: ["-p", agentPrompt(opts)] }),
+    childEnv: agyEnv,
+  },
   reasonix: {
     name: "reasonix",
     usesWorkspaceSandbox: false,
@@ -556,6 +571,81 @@ export function reasonixEnv(home: string = homedir()): Record<string, string> {
     /* missing / unreadable ~/.reasonix/.env → no injection (best-effort) */
   }
   return {};
+}
+
+// ── FIX-1056: agy headless auth-context propagation ──────────────────────────
+
+/** The env var agy's CLI reads to locate its auth-context (OAuth/session) home.
+ *  Setting it makes the headless child resolve the SAME dir as the interactive
+ *  CLI even when launchd's `$HOME` differs from the owner's real home. */
+export const AGY_AUTH_CONTEXT_ENV = "AGY_CONFIG_DIR";
+
+/** Ambient env vars that carry an agy/gemini auth credential (name-level only —
+ *  the VALUES are NEVER read, stored, printed, or written; they ride the child's
+ *  inherited env untouched). Used by {@link agyAuthContext} to decide whether a
+ *  headless auth context exists, reporting NAMES with values redacted. */
+const AGY_AUTH_ENV_KEYS = ["GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS"] as const;
+
+/** The auth-context directory the interactive agy CLI resolves from the owner's
+ *  home. Derived from the REAL passwd home (homedir() reads getpwuid, not $HOME)
+ *  so it is stable under launchd, where $HOME may be sanitized. */
+export function agyAuthContextDir(home: string = homedir()): string {
+  return join(home, ".config", "agy");
+}
+
+/**
+ * FIX-1056 — the agy child-env hook. Forwards the owner-resolved auth-context
+ * dir to the headless child via {@link AGY_AUTH_CONTEXT_ENV} so a
+ * once-authenticated agy participates in unattended cycles without an
+ * interactive verify.
+ *
+ * SECURITY: this only FORWARDS a filesystem PATH (never a credential value). It
+ * respects an explicit owner override — if the ambient env already sets
+ * AGY_CONFIG_DIR, we never clobber it — and it sets the var ONLY when the
+ * resolved dir actually exists (an absent context is surfaced by
+ * {@link agyAuthContext}, never masked). No secret is read, stored, printed, or
+ * written to `.roll`, events, reports, or fixtures.
+ */
+export function agyEnv(home: string = homedir(), env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  if ((env[AGY_AUTH_CONTEXT_ENV] ?? "").trim() !== "") return {};
+  const dir = agyAuthContextDir(home);
+  return existsSync(dir) ? { [AGY_AUTH_CONTEXT_ENV]: dir } : {};
+}
+
+/** agy's headless auth-context readiness — a REDACTED diagnostic (names/paths
+ *  only, never credential values) shared by the readiness command and the loop
+ *  spawn envelope. `ok` when a config dir OR an auth env var is present. */
+export interface AgyAuthContextReadiness {
+  agent: "agy";
+  /** The auth-context env var + resolved dir the headless child will use. */
+  authContextEnv: string;
+  configDir: string;
+  configDirExists: boolean;
+  /** NAMES of auth env vars present (values redacted — never surfaced). */
+  authEnvPresent: string[];
+  /** Human-actionable missing boundary, or null when a context is available. */
+  missingBoundary: string | null;
+  ok: boolean;
+}
+
+/**
+ * FIX-1056 — resolve agy's headless auth-context readiness through the SAME
+ * envelope the loop spawn uses ({@link agyEnv}/{@link agyAuthContextDir}). A
+ * headless agy is ready iff its interactive auth-context dir exists OR an auth
+ * env var is set. When neither is present we return an actionable
+ * `missingBoundary` (which dir / which env vars) instead of silently excluding
+ * agy. Credential VALUES are never read or surfaced — only the presence of a
+ * name/path.
+ */
+export function agyAuthContext(home: string = homedir(), env: NodeJS.ProcessEnv = process.env): AgyAuthContextReadiness {
+  const configDir = agyAuthContextDir(home);
+  const configDirExists = existsSync(configDir);
+  const authEnvPresent = AGY_AUTH_ENV_KEYS.filter((k) => (env[k] ?? "").trim() !== "");
+  const ok = configDirExists || authEnvPresent.length > 0;
+  const missingBoundary = ok
+    ? null
+    : `no headless auth context: ${configDir} not found and none of ${AGY_AUTH_ENV_KEYS.join("/")} set — run agy login interactively, then retry`;
+  return { agent: "agy", authContextEnv: AGY_AUTH_CONTEXT_ENV, configDir, configDirExists, authEnvPresent, missingBoundary, ok };
 }
 
 function evidenceFrameEnv(runDir: string): NodeJS.ProcessEnv {

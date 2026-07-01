@@ -462,6 +462,42 @@ export function excludedPeers(
   return new Set<string>();
 }
 
+/**
+ * FIX-1056 — same-envelope auth COOLDOWN (a guardrail against repeated
+ * unattended prompts, NOT the primary fix; the primary fix is propagating the
+ * authenticated runtime context into the headless spawn envelope so a
+ * once-authenticated agent does not auth-fail in the first place).
+ *
+ * A peer enters cooldown ONLY once its CONSECUTIVE `agent:blocked cause:auth`
+ * streak reaches `threshold`. Because `agent:blocked cause:auth` is emitted only
+ * after a real same-envelope spawn/probe failure (executor + agent-liveness,
+ * both driven through the one shared {@link SelectInput.isAvailable}/spawn
+ * envelope), an entry here always reflects a genuine same-envelope auth failure —
+ * never a mere routing preference. `network` blocks NEVER count (transient
+ * connectivity, not an unrefreshable credential), and ANY later success
+ * (`pair:verdict` / `pair:score`) RESETS the streak — see {@link peerAuthStates}
+ * — so a peer the owner re-authenticated offline recovers automatically.
+ *
+ * Unlike {@link excludedPeers} (the V4 fair no-op kept for back-compat), this is
+ * an opt-in cooldown keyed on a live, refreshable auth-failure streak, so it
+ * benches ONLY the agent that is actually auth-blocked right now while every
+ * other ready agent stays fully eligible (fairness preserved). Returns each
+ * cooled-down peer with its current failure count so the caller can emit a
+ * visible `pair:excluded` event and swap in the next eligible candidate.
+ */
+export function authCooldownExclusions(
+  events: readonly RollEvent[],
+  threshold: number = DEFAULT_AUTH_EXCLUDE_THRESHOLD,
+): Map<string, number> {
+  const bar = threshold < 1 ? 1 : threshold;
+  const states = peerAuthStates(events, bar);
+  const out = new Map<string, number>();
+  for (const [peer, state] of Object.entries(states)) {
+    if (state.consecutiveAuthFailures >= bar) out.set(peer, state.consecutiveAuthFailures);
+  }
+  return out;
+}
+
 // ── US-PAIR-006: hit-rate-driven rotation ────────────────────────────────────
 
 /** One peer's pairing track record: how often it reviewed and how often it hit. */

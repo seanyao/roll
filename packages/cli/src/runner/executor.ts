@@ -74,7 +74,7 @@ import {
   toCycleCost,
   pairingHistory,
   excludedPeers,
-  peerAuthStates,
+  authCooldownExclusions,
   canonicalAgentName,
   peerReviewCost,
   captureWarmSession,
@@ -1946,21 +1946,37 @@ export async function executeCommand(
         writeFileSync(artifactPath, `--- stdout ---\n${stdout}\n--- stderr ---\n${stderr}\n`);
         return artifactPath;
       };
-      // V4 fairness: historical auth failures are observability, not static pool
-      // policy. We still fold the stream so diagnostics can explain auth streaks,
-      // but the returned exclusion set is intentionally empty. Current runtime
-      // availability is decided by the spawn/probe for this attempt.
+      // FIX-1056: enter cooldown ONLY after a genuine same-envelope auth-failure
+      // streak reaches threshold ({@link authCooldownExclusions}) — a guardrail
+      // against re-prompting a genuinely auth-blocked peer every cycle, NOT the
+      // primary fix (that is agy's auth-context envelope in agent-spawn.ts). The
+      // streak resets on ANY later success and `network` blocks never count, so a
+      // once-blocked-then-re-authenticated peer recovers automatically. Each newly
+      // cooled-down peer emits a VISIBLE `pair:excluded` (agent + cause auth +
+      // failure count) so the owner sees WHY it stopped being consulted; the next
+      // eligible candidate is swapped in by peerAvailable below. `excludedPeers`
+      // stays the V4 fair no-op — only a live auth streak benches a peer.
       const computeAuthDiagnostics = (): Set<string> => {
         try {
-          if (!existsSync(ports.paths.eventsPath)) return new Set();
+          if (!existsSync(ports.paths.eventsPath)) return excludedPeers([]);
           const events = readFileSync(ports.paths.eventsPath, "utf8")
             .split("\n")
             .map(parseEventLine)
             .filter((e): e is RollEvent => e !== null);
-          peerAuthStates(events);
-          return excludedPeers(events);
+          const cooldown = authCooldownExclusions(events);
+          for (const [peer, failures] of cooldown) {
+            ports.events.appendEvent(ports.paths.eventsPath, {
+              type: "pair:excluded",
+              cycleId: ctx.cycleId ?? "",
+              agent: peer,
+              cause: "auth",
+              failures,
+              ts: eventTs(ports),
+            });
+          }
+          return new Set(cooldown.keys());
         } catch {
-          return new Set();
+          return excludedPeers([]);
         }
       };
       const peerAvailable = (() => {

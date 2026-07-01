@@ -18,6 +18,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { dirname, join } from "node:path";
 import { t, v2Catalog, v3Catalog } from "@roll/spec";
 import { agentListCommand, currentLang, realAgentEnv } from "./agent-list.js";
+import { AGY_AUTH_CONTEXT_ENV, agyAuthContext } from "../runner/agent-spawn.js";
 
 const VALID_SLOTS: AgentSlot[] = ["easy", "default", "hard", "fallback"];
 
@@ -324,15 +325,55 @@ function migrateCommand(args: string[], deps: AgentCommandDeps): number {
   return 0;
 }
 
+/**
+ * FIX-1056 — `roll agent readiness [agent]`. Probes an agent's HEADLESS auth
+ * context through the SAME spawn envelope the loop's peer/evaluator spawn uses
+ * (agent-spawn's agyAuthContext / AGY_CONFIG_DIR), so a once-authenticated agy
+ * can be verified for unattended cycles without an interactive prompt. When the
+ * context is missing it reports the actionable boundary (which dir / which env
+ * vars) instead of silently excluding the agent. Only NAMES/PATHS are printed —
+ * credential VALUES are never read or surfaced.
+ */
+function readinessCommand(args: string[], deps: AgentCommandDeps): number {
+  const d = depsWithDefaults(deps);
+  const requested = (args[0] ?? "").trim();
+  const target = requested === "" ? "agy" : canonicalAgentName(requested);
+  if (target !== "agy") {
+    // Only agy has an explicit headless auth-context probe today; the other
+    // agents resolve auth at spawn time (no separate readiness contract).
+    process.stdout.write(`  readiness: no headless auth-context probe for '${target}' (auth resolved at spawn time)\n`);
+    return 0;
+  }
+  const ctx = agyAuthContext(d.env.home);
+  const lines: string[] = [
+    "",
+    "  Agent readiness — agy (headless auth context)",
+    "",
+    `  spawn env:        ${AGY_AUTH_CONTEXT_ENV}=${ctx.configDir}`,
+    `  auth-context dir: ${ctx.configDir} ${ctx.configDirExists ? "(present)" : "(missing)"}`,
+    `  auth env present: ${ctx.authEnvPresent.length > 0 ? ctx.authEnvPresent.join(", ") : "(none)"}`,
+    "",
+  ];
+  if (ctx.ok) {
+    lines.push("  ✓ readiness agy ok · same envelope as peer/score spawn", "");
+    process.stdout.write(lines.join("\n"));
+    return 0;
+  }
+  lines.push(`  ✗ readiness agy auth-blocked · ${ctx.missingBoundary}`, "");
+  process.stdout.write(lines.join("\n"));
+  return 1;
+}
+
 export function agentCommand(args: string[], deps: AgentCommandDeps = {}): number {
   const [sub, ...rest] = args;
   if (sub === "list") return (deps.listCommand ?? agentListCommand)(rest);
+  if (sub === "readiness") return readinessCommand(rest, deps);
   if (sub === "default") return defaultCommand(rest, deps);
   if (sub === "set") return setCommand(rest, deps);
   if (sub === "migrate") return migrateCommand(rest, deps);
   if (sub === "use") return useCommand(rest, deps); // retired — fails loud with migration guidance
   if (sub === undefined || sub === "") return viewCommand(deps);
   err(`Unknown subcommand: ${sub}`);
-  process.stdout.write("Usage: roll agent [migrate [--dry-run]|list]\n");
+  process.stdout.write("Usage: roll agent [migrate [--dry-run]|list|readiness [agent]]\n");
   return 1;
 }

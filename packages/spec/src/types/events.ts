@@ -168,7 +168,20 @@ export type RollEvent =
   | { type: "peer:gate"; cycleId: string; verdict: "consulted" | "skipped" | "self-review-allowed"; reasons: string[]; ts: number }
   // Cross-Agent Pairing (US-PAIR-003) — a heterogeneous peer one-way reviews a
   // delivery. `pair:*` is deliberately distinct from `peer:gate` (decoupled audit).
-  | { type: "pair:selected"; cycleId: string; workingAgent: string; peer: string; stage: string; ts: number }
+  // FIX-1054: `attempt` (1 = ranked candidate, ≥2 = fallback/retry) and `reason`
+  // (ranked_candidate / fallback_after_* / same_agent_retry / fanout) make the
+  // serial cost-aware dispatch auditable — the supervisor sees WHY a peer was
+  // chosen. Both optional for back-compat with the pre-FIX-1054 (parallel) logs.
+  | { type: "pair:selected"; cycleId: string; workingAgent: string; peer: string; stage: string; attempt?: number; reason?: string; ts: number }
+  // FIX-1054 — SERIAL dispatch is the default: once a peer's result is accepted,
+  // the remaining ranked candidates are SKIPPED (never spawned). This event makes
+  // the un-spent candidates visible AS a policy decision (not zero-cost attempts).
+  | { type: "pair:skipped"; cycleId: string; peers: string[]; reason: string; stage: string; ts: number }
+  // FIX-1054 — high-risk fan-out is still allowed, but ONLY through an explicit,
+  // reasoned, bounded policy decision (truth/release/evidence gate, security card,
+  // repeated prior failures, owner quorum). This records the reason + the fan-out
+  // limit + the concurrently-dispatched peers so fan-out is never a silent default.
+  | { type: "pair:fanout"; cycleId: string; stage: string; reason: string; limit: number; peers: string[]; ts: number }
   // US-PAIR-004: `stage` is optional for back-compat with PAIR-003 (code-only)
   // logs; multi-stage pairing stamps it so verdicts are distinguishable per stage.
   | { type: "pair:verdict"; cycleId: string; peer: string; verdict: "agree" | "refine" | "object"; findings: number; cost: number; stage?: string; ts: number }

@@ -75,12 +75,19 @@ describe("runPairing — US-PAIR-003", () => {
     const ev = JSON.parse(readFileSync(join(rt, "peer", "cycle-c1.pair.json"), "utf8"));
     expect(ev.peer).toBe(res.peer);
     expect(ev.verdict).toBe("refine");
-    // FIX-335 parallel: every candidate emits a selected (fired concurrently);
-    // exactly ONE verdict — the winner's — and it comes after the selecteds.
-    const selecteds = events.filter((e) => e.type === "pair:selected");
+    // FIX-1054 SERIAL: the FIRST ranked candidate returns a verdict, so exactly
+    // ONE peer is selected (the rest are never spawned) and the untried
+    // candidates surface as a policy `pair:skipped`. Exactly ONE verdict — the
+    // winner's — after the selected.
+    const selecteds = events.filter((e) => e.type === "pair:selected") as Extract<PairEvent, { type: "pair:selected" }>[];
     const verdicts = events.filter((e) => e.type === "pair:verdict") as Extract<PairEvent, { type: "pair:verdict" }>[];
-    expect(selecteds.length).toBeGreaterThanOrEqual(1);
-    expect(events.every((e) => e.type === "pair:selected" || e.type === "pair:verdict")).toBe(true);
+    const skips = events.filter((e) => e.type === "pair:skipped") as Extract<PairEvent, { type: "pair:skipped" }>[];
+    expect(selecteds).toHaveLength(1); // one selected reviewer, not the whole pool
+    expect(selecteds[0]?.attempt).toBe(1);
+    expect(selecteds[0]?.reason).toBe("ranked_candidate");
+    expect(events.every((e) => e.type === "pair:selected" || e.type === "pair:verdict" || e.type === "pair:skipped")).toBe(true);
+    expect(skips).toHaveLength(1); // the untried ranked candidates, skipped by policy
+    expect(skips[0]?.reason).toBe("accepted_verdict");
     expect(verdicts).toHaveLength(1);
     expect(verdicts[0]?.peer).toBe(res.peer);
     expect(verdicts[0]?.findings).toBe(2);
@@ -456,12 +463,13 @@ describe("runScorePairing — US-PAIR-009", () => {
     const ev = JSON.parse(readFileSync(join(rt, "peer", "cycle-c1.score.pair.json"), "utf8"));
     expect(ev.score).toBe(8);
     expect(ev.stage).toBe("score");
-    // FIX-335 parallel: each candidate emits a selected (fired concurrently);
-    // exactly ONE pair:score — the winner's.
-    const selecteds = events.filter((e) => e.type === "pair:selected");
+    // FIX-1054 SERIAL: the first ranked scorer parses, so exactly ONE scorer is
+    // selected (the rest are skipped by policy) and exactly ONE pair:score.
+    const selecteds = events.filter((e) => e.type === "pair:selected") as Extract<PairEvent, { type: "pair:selected" }>[];
     const scoreEvents = events.filter((e) => e.type === "pair:score") as Extract<PairEvent, { type: "pair:score" }>[];
-    expect(selecteds.length).toBeGreaterThanOrEqual(1);
-    expect(events.every((e) => e.type === "pair:selected" || e.type === "pair:score")).toBe(true);
+    expect(selecteds).toHaveLength(1);
+    expect(selecteds[0]?.reason).toBe("ranked_candidate");
+    expect(events.every((e) => e.type === "pair:selected" || e.type === "pair:score" || e.type === "pair:skipped")).toBe(true);
     expect(scoreEvents).toHaveLength(1);
     expect(scoreEvents[0]?.score).toBe(8);
     expect(scoreEvents[0]?.cost).toBe(0.05);

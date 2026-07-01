@@ -3803,8 +3803,8 @@ describe("agentWritableRoots — FIX-326: a sandboxed agent can write the git-in
   });
 });
 
-// ── V4 fair pool: historical auth failures are diagnostics only ──────────────
-describe("V4 fair pool — prior auth failures do not exclude peers", () => {
+// ── FIX-1056: same-envelope auth cooldown (only a genuine streak excludes) ────
+describe("FIX-1056 — same-envelope auth cooldown excludes only a genuine streak", () => {
   // A worktree with a story spec (no AC block → attest gate inert) so the score
   // stage runs (commitsAhead from the git mock is 3 + a real storyId).
   function scoreWorktree(): string {
@@ -3816,13 +3816,15 @@ describe("V4 fair pool — prior auth failures do not exclude peers", () => {
     return wt;
   }
 
-  it("a peer over the legacy auth-failure threshold no longer emits pair:excluded", async () => {
+  it("a peer with a genuine same-envelope auth streak emits pair:excluded and the NEXT eligible candidate is chosen", async () => {
     const wt = scoreWorktree();
     const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-346-rt-")));
     execDirs.push(rt);
     const eventsPath = join(rt, "events.ndjson");
-    // Pre-seed: codex already failed auth twice historically. V4 keeps this as
-    // diagnostics only; the current runtime attempt decides availability.
+    // Pre-seed: codex failed same-envelope auth twice with NO later success — the
+    // guardrail against re-prompting a genuinely auth-blocked peer every cycle.
+    // kimi is a second heterogeneous peer that is fully available (the "next
+    // eligible candidate" the score stage must swap in).
     const seed =
       JSON.stringify({ type: "agent:blocked", cycleId: "c0", agent: "codex", cause: "auth", stage: "score", detail: "Please run /login", ts: 1 }) +
       "\n" +
@@ -3832,10 +3834,10 @@ describe("V4 fair pool — prior auth failures do not exclude peers", () => {
 
     const spawned: string[] = [];
     const base = fakePorts();
-    const { ports, calls } = fakePorts({
+    const { ports } = fakePorts({
       repoCwd: rt,
       paths: { ...base.ports.paths, worktreePath: wt, eventsPath, alertsPath: join(rt, "alerts.log") },
-      installedAgents: () => ["claude", "codex"], // claude=builder; codex is the only hetero peer
+      installedAgents: () => ["claude", "codex", "kimi"], // claude=builder; codex cooled down; kimi eligible
       agentSpawn: vi.fn(async (agent: string) => {
         spawned.push(agent);
         return { stdout: "SCORE: 8\nVERDICT: good\nRATIONALE: clean\n", stderr: "", exitCode: 0, timedOut: false };
@@ -3855,8 +3857,14 @@ describe("V4 fair pool — prior auth failures do not exclude peers", () => {
       .split("\n")
       .filter((l) => l.trim() !== "")
       .map((l) => JSON.parse(l) as RollEvent);
-    const excl = events.filter((e) => e.type === "pair:excluded");
-    expect(excl.length).toBe(0);
+    const excl = events.filter((e) => e.type === "pair:excluded") as Array<{ agent: string; cause: string; failures: number }>;
+    expect(excl.length).toBeGreaterThanOrEqual(1);
+    expect(excl[0]!.agent).toBe("codex");
+    expect(excl[0]!.cause).toBe("auth");
+    expect(excl[0]!.failures).toBe(2);
+    // The cooled-down peer is NOT re-consulted; the next eligible hetero peer is.
+    expect(spawned).not.toContain("codex");
+    expect(spawned).toContain("kimi");
   });
 
   it("a single prior auth failure does NOT exclude the peer (transient blip → still consulted)", async () => {

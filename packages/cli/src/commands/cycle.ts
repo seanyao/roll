@@ -9,6 +9,7 @@ import { parseEventLine, resolveLang, type CycleRoleSummary, type RollEvent } fr
 import {
   buildCycleRoleSummary,
   cycleActivitySignalsFromEvents,
+  projectCollabCycle,
   renderCycleRolesForTerminal,
   type ActivitySignal,
 } from "@roll/core";
@@ -23,18 +24,22 @@ import { cycleNo } from "./cycles.js";
 import { c, renderState } from "../render.js";
 import { formatToolCostSummary, formatToolTimelineRow } from "../lib/tool-display.js";
 import { renderSignal } from "./loop-fmt.js";
-import { renderLegend } from "../lib/collab-render.js";
+import { renderCollabCycle, renderLegend, type CollabRenderNoise } from "../lib/collab-render.js";
 
 export const CYCLE_USAGE =
   "Usage: roll cycle <id>\n" +
   "       roll cycle <id> --roles [--json]\n" +
+  "       roll cycle <id> --collab [--json] [--no-color]\n" +
   "       roll cycle --legend [--no-color]\n" +
   "       roll cycle watch [<id>] [--once] [--since <lines>] [--json]\n" +
-  "  One cycle's full trace tape, or a read-only ActivitySignal watch window.\n" +
+  "  One cycle's full trace tape, a read-only ActivitySignal watch window, or a\n" +
+  "  collaboration relay view.\n" +
   "  --roles   Show the execution cast (builder, reviewers, evaluators, gates).\n" +
+  "  --collab  Show the cycle as a protocol relay (assign → build → peer → score → gate).\n" +
   "  --legend  Print the Layer A collaboration protocol legend.\n" +
-  "单个 cycle 的完整轨迹带，或只读 ActivitySignal 实时窗口。\n" +
+  "单个 cycle 的完整轨迹带、只读 ActivitySignal 实时窗口或协同协议链视图。\n" +
   "  --roles   显示执行选角（构建者、评审人、评估者、门禁）。\n" +
+  "  --collab  以协议链形式展示 cycle（指派 → 建造 → 评审 → 打分 → 闸门）。\n" +
   "  --legend  打印 Layer A 协同协议读法头。";
 
 const CYCLE_WATCH_USAGE =
@@ -457,6 +462,82 @@ function cycleRolesCommand(handle: string, cycleId: string, json: boolean, lang:
   return 0;
 }
 
+function collabNoiseForCycle(events: readonly RollEvent[], cycleId: string): CollabRenderNoise {
+  const inCycle = (e: RollEvent) => cycleEventId(e) === cycleId;
+  return {
+    scoreFailures: events.filter((e) => inCycle(e) && e.type === "pair:score-failure").length,
+    peerConsults: events.filter((e) => inCycle(e) && e.type === "pair:consult").length,
+  };
+}
+
+/**
+ * US-OBS-039: `roll cycle <id> --collab` — render one cycle as a protocol relay.
+ */
+function cycleCollabCommand(handle: string, cycleId: string, json: boolean, noColor: boolean, lang: "en" | "zh"): number {
+  const rt = runtimeDir(process.cwd());
+  const eventsPath = join(rt, "events.ndjson");
+  const cycleLogDir = join(rt, "cycle-logs");
+  const summaryPath = join(cycleLogDir, cycleId, "summary.json");
+
+  let summary: CycleRoleSummary | undefined;
+  if (existsSync(summaryPath)) {
+    try {
+      summary = JSON.parse(readFileSync(summaryPath, "utf8")) as CycleRoleSummary;
+    } catch {
+      summary = undefined;
+    }
+  }
+
+  let events: RollEvent[] = [];
+  if (existsSync(eventsPath)) {
+    events = readEvents(eventsPath);
+  }
+
+  if (!summary) {
+    const cycleEvents = events.filter((e) => cycleEventId(e) === cycleId);
+    if (cycleEvents.length > 0) {
+      summary = buildCycleRoleSummary({
+        cycleId,
+        events,
+        eventsPath,
+        peerDir: join(rt, "peer"),
+        cycleLogDir,
+      });
+    }
+  }
+
+  if (!summary) {
+    process.stderr.write(
+      lang === "zh"
+        ? `[roll] 周期 ${handle} 的协同摘要不可用（缺少事件与摘要）\n`
+        : `[roll] collab view unavailable for cycle ${handle} (missing events and summary)\n`,
+    );
+    return 1;
+  }
+
+  const supervisor = process.env["ROLL_SUPERVISOR_AGENT"] ?? "codex";
+  const view = projectCollabCycle(summary, events, supervisor);
+
+  if (view.terminus === "" && view.handoffs.length === 0) {
+    process.stderr.write(
+      lang === "zh"
+        ? `[roll] 周期 ${handle} 的协同摘要不可用\n`
+        : `[roll] collab view unavailable for cycle ${handle}\n`,
+    );
+    return 1;
+  }
+
+  if (json) {
+    process.stdout.write(JSON.stringify(view, null, 2) + "\n");
+    return 0;
+  }
+
+  process.stdout.write(
+    renderCollabCycle(view, { color: !noColor, fold: true, width: 72, lang }, collabNoiseForCycle(events, cycleId)) + "\n",
+  );
+  return 0;
+}
+
 export function cycleCommand(args: string[]): number | Promise<number> {
   const noColor = args.includes("--no-color") || !process.stdout.isTTY || (process.env["NO_COLOR"] ?? "") !== "";
   renderState.useColor = !noColor;
@@ -473,9 +554,10 @@ export function cycleCommand(args: string[]): number | Promise<number> {
     return 0;
   }
   const roles = args.includes("--roles");
+  const collab = args.includes("--collab");
   const json = args.includes("--json");
   // kimi pair-review: reject unknown flags like `roll cycles` does.
-  const unknown = args.filter((a) => a.startsWith("-") && a !== "--no-color" && a !== "--help" && a !== "-h" && a !== "--json" && a !== "--roles" && a !== "--legend");
+  const unknown = args.filter((a) => a.startsWith("-") && a !== "--no-color" && a !== "--help" && a !== "-h" && a !== "--json" && a !== "--roles" && a !== "--collab" && a !== "--legend");
   if (unknown.length > 0) {
     process.stderr.write(`[roll] unknown flag: ${unknown[0]}\n${CYCLE_USAGE}\n`);
     return 1;
@@ -487,12 +569,15 @@ export function cycleCommand(args: string[]): number | Promise<number> {
   }
   const rows = collectCycleLedger(process.cwd());
   const row = findCycle(rows, handle);
-  if (row === undefined && !roles) {
-    process.stderr.write(lang === "zh" ? `[roll] 找不到周期 ${handle}（试试 roll cycles --since all）\n` : `[roll] no cycle matches ${handle} (try roll cycles --since all)\n`);
-    return 1;
-  }
   if (roles) {
     return cycleRolesCommand(handle, row?.cycleId ?? handle, json, lang);
+  }
+  if (collab) {
+    return cycleCollabCommand(handle, row?.cycleId ?? handle, json, noColor, lang);
+  }
+  if (row === undefined) {
+    process.stderr.write(lang === "zh" ? `[roll] 找不到周期 ${handle}（试试 roll cycles --since all）\n` : `[roll] no cycle matches ${handle} (try roll cycles --since all)\n`);
+    return 1;
   }
   const slug = collectGitDossierFacts(process.cwd())?.slug;
   if (json) {

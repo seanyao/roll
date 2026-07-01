@@ -26,6 +26,10 @@
 - **已交付的故事不再在 cycle 账本里显示"未发布"**：当一个 story 已经合并到 main 并出现在交付记录里，但较早的 cycle 行因为当时 publish 没完成、`runs.jsonl` 里还是 `unpublished`，`roll cycles` 现在会检查交付真相、把该行标记为 `delivered`，不再让已上线的成果看起来像"没发出去"。同时，`roll truth query` 能在交付记录缺少 PR 编号时，从合并提交的正文里找回 PR 编号，不再报 `pr_number_no_publish_attempted`。(FIX-1046) `[loop-engine]`
   <!-- evidence: .roll/features/loop-engine/FIX-1046/latest/FIX-1046-report.html -->
 
+### 新功能
+
+- **`roll design` 现在会给出一个可读的运行摘要和产物交付块**：运行前显示目标、模式、agent 和原始记录路径；运行中默认只渲染关键进度行，原始 agent 输出保存到 `.roll/runs/design/<timestamp>-<target>/transcript.log`；结束后交付块列出设计产物（`spec.md#detailed-design`）、生成的 HTML、新建卡片数、当前状态和下一步动作。`--verbose` 可查看 assistant 详细文本，`--raw` 可输出完整记录。(FIX-1055) `[legacy-onboard]`
+
 ## v4.630.2 — 2026-06-30
 
 ### 自动化流水线

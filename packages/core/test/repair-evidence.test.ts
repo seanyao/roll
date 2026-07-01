@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   classifyEvidenceRepair,
   generateAcMap,
-  generateAttestReport,
   isEvidenceRepaired,
+  renderEvidenceRepairReport,
   repairedPrNumbers,
   type EvidenceRepairInput,
 } from "../src/supervisor/repair-evidence.js";
@@ -195,26 +195,36 @@ describe("generateAcMap", () => {
   });
 });
 
-describe("generateAttestReport", () => {
-  it("contains the story ID and PR number", () => {
-    const report = generateAttestReport("FIX-1058", "./ac-map.json", 1116);
+describe("renderEvidenceRepairReport", () => {
+  const acItems = [
+    { id: "FIX-1058:AC1", text: "Roll exposes a scoped recovery command for green PRs missing acceptance reports" },
+    { id: "FIX-1058:AC2", text: "The recovery path produces a non-empty ac-map plus acceptance report" },
+  ];
+
+  it("renders a self-contained HTML report", () => {
+    const report = renderEvidenceRepairReport("FIX-1058", acItems, 1116, "2026-07-01T08:00:00.000Z");
+    expect(report).toContain("<!doctype html>");
     expect(report).toContain("FIX-1058");
     expect(report).toContain("#1116");
   });
 
-  it("mentions the ac-map path", () => {
-    const report = generateAttestReport("FIX-1058", "./ac-map.json", 1116);
-    expect(report).toContain("ac-map.json");
+  it("includes one AC section per item at claimed status", () => {
+    const report = renderEvidenceRepairReport("FIX-1058", acItems, 1116, "2026-07-01T08:00:00.000Z");
+    expect(report).toContain("FIX-1058:AC1");
+    expect(report).toContain("FIX-1058:AC2");
+    expect(report).toContain("Claimed");
+    expect(report).not.toContain(">Pass<");
   });
 
-  it("states that status is claimed (repaired evidence)", () => {
-    const report = generateAttestReport("FIX-1058", "./ac-map.json", 1116);
+  it("renders an empty AC list when no ACs are provided", () => {
+    const report = renderEvidenceRepairReport("FIX-1058", [], 1116, "2026-07-01T08:00:00.000Z");
+    expect(report).toContain("<!doctype html>");
+    expect(report).toContain("FIX-1058");
+  });
+
+  it("documents the repair method in the report context", () => {
+    const report = renderEvidenceRepairReport("FIX-1058", acItems, 1116, "2026-07-01T08:00:00.000Z");
+    expect(report).toContain("repair-evidence");
     expect(report).toContain("claimed");
-    expect(report).toContain("repaired evidence");
-  });
-
-  it("includes evidence repair method description", () => {
-    const report = generateAttestReport("FIX-1058", "./ac-map.json", 1116);
-    expect(report).toContain("evidence repair");
   });
 });

@@ -1,0 +1,12 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`supervisor repair-evidence > formats human-readable output matching the snapshot 1`] = `
+"
+  repair-evidence: PR #42 (FIX-TEST-001) repaired
+  action: merge_ready — the PR can now be promoted (if draft) and merged
+  ac-map: generated for 2 AC(s) in FIX-TEST-001/ac-map.json
+  report: .roll/features/uncategorized/FIX-TEST-001/latest/FIX-TEST-001-report.html
+  draft PR is CI green + evaluator approved + merge clean but lacks a fresh acceptance report
+
+"
+`;

@@ -26,13 +26,13 @@ import {
   ensureDeliveriesFresh,
   explainStuck,
   generateAcMap,
-  generateAttestReport,
   isEvidenceRepaired,
   normalizeAgentConfig,
   observeProject,
   parseBacklog,
   queryStoryDelivery,
   repairedPrNumbers,
+  renderEvidenceRepairReport,
   type ExecPort,
   recommendNext,
   type FreshnessPort,
@@ -47,6 +47,7 @@ import { formatOperatingMode, resolveOperatingMode, suggestedGuidedRun } from ".
 import { reducePrView } from "./loop-pr-inbox.js";
 import { readPendingPublish } from "../runner/pending-publish.js";
 import { renderScopedExecuteRoute, resolveScopedStoryExecute, scopedExecuteRouteTrace } from "../runner/scoped-route.js";
+import { cardArchiveDir, reportFileName } from "../lib/archive.js";
 
 const EXEC_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 
@@ -104,6 +105,16 @@ const quietExecPort: ExecPort = {
     }
   },
 };
+
+function detectFreshReport(projectPath: string, storyId: string): boolean {
+  const reportPath = join(cardArchiveDir(projectPath, storyId), "latest", reportFileName(storyId));
+  if (!existsSync(reportPath)) return false;
+  try {
+    return statSync(reportPath).size > 0;
+  } catch {
+    return false;
+  }
+}
 
 function summarizeList(items: readonly string[], limit = 5): string {
   if (items.length === 0) return "none";
@@ -610,19 +621,28 @@ export function supervisorCommand(args: string[]): number {
       storyId = extractStoryId([], headRef, bodyStr) ?? `PR-${prNumber}`;
     }
 
+    // Resolve the story directory early so we can check for an existing fresh
+    // report before deciding whether repair is needed.
+    const storyDir = cardArchiveDir(projectPath, storyId);
+
     // Classify repair eligibility.
     const classification = classifyEvidenceRepair({
       ciState: facts.ciState || "unknown",
       reviewState: facts.bot || "none",
       mergeable: facts.mergeable || "unknown",
       isDraft: facts.isDraft === true,
-      hasFreshReport: false, // We're asked to repair — assume no fresh report.
+      hasFreshReport: detectFreshReport(projectPath, storyId),
       alreadyRepaired,
     });
 
     if (classification.verdict === "already_repaired") {
       if (json) process.stdout.write(JSON.stringify({ prNumber, storyId, verdict: "already_repaired", reason: classification.reason }, null, 2) + "\n");
       else process.stdout.write(`\n  repair-evidence: PR #${prNumber} already repaired — no action needed\n  ${classification.reason}\n\n`);
+      return 0;
+    }
+    if (classification.verdict === "no_gap") {
+      if (json) process.stdout.write(JSON.stringify({ prNumber, storyId, verdict: "no_gap", reason: classification.reason }, null, 2) + "\n");
+      else process.stdout.write(`\n  repair-evidence: PR #${prNumber} needs no repair\n  ${classification.reason}\n\n`);
       return 0;
     }
     if (classification.verdict !== "reparable") {
@@ -650,31 +670,16 @@ export function supervisorCommand(args: string[]): number {
 
     // ═══════════════════════════════════════════════════════════════════
     // Generate real ac-map + attest report artifacts before stamping
-    // evidence:repaired. Per FIX-1058 spec AC2: the recovery path must
+    // evidence:repaired. Per FIX-1058 spec AC2/AC3: the recovery path must
     // produce a non-empty acceptance report plus ac-map for the same
-    // story/PR; it must not satisfy the gate by appending events alone.
+    // story/PR, and the report must live at the gate-checked `latest/`
+    // path; a root-only ac-map or evidence directory is not enough.
     // ═══════════════════════════════════════════════════════════════════
 
-    // 1. Find the story card spec file.
-    const featuresDir = join(projectPath, ".roll", "features");
-    let specPath = "";
-    let epic = "";
-    if (existsSync(featuresDir)) {
-      const entries = readdirSync(featuresDir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
-        const candidate = join(featuresDir, entry.name, storyId, "spec.md");
-        if (existsSync(candidate)) {
-          specPath = candidate;
-          epic = entry.name;
-          break;
-        }
-      }
-    }
-
-    // 2. Parse ACs from the spec file.
+    // 1. Parse ACs from the story card spec file (if present).
     let acItems: Array<{ id: string; text: string }> = [];
-    if (specPath !== "") {
+    const specPath = join(storyDir, "spec.md");
+    if (existsSync(specPath)) {
       try {
         const md = readFileSync(specPath, "utf8");
         acItems = acForStory(md, storyId);
@@ -685,29 +690,27 @@ export function supervisorCommand(args: string[]): number {
       }
     }
 
-    // 3. Write ac-map.json to the story's evidence directory.
-    const storyDir = epic !== "" ? join(featuresDir, epic, storyId) : "";
-    if (storyDir !== "" && acItems.length > 0) {
+    // 2. Write ac-map.json to the story's card directory.
+    if (acItems.length > 0) {
       const acMap = generateAcMap(storyId, acItems);
-      const acMapPath = join(storyDir, "ac-map.json");
-      writeFileSync(acMapPath, JSON.stringify(acMap, null, 2) + "\n", "utf8");
+      writeFileSync(join(storyDir, "ac-map.json"), JSON.stringify(acMap, null, 2) + "\n", "utf8");
     }
 
-    // 4. Write the attest acceptance report to the story's evidence dir.
-    let attestReportPath = "";
-    if (storyDir !== "") {
-      attestReportPath = join(storyDir, "evidence-repair-report.md");
-      const report = generateAttestReport(storyId, "./ac-map.json", prNumber);
-      writeFileSync(attestReportPath, report, "utf8");
-    }
+    // 3. Render the real HTML acceptance report to the gate-checked latest/ path.
+    const latestDir = join(storyDir, "latest");
+    mkdirSync(latestDir, { recursive: true });
+    const reportName = reportFileName(storyId);
+    const attestReportPath = join(latestDir, reportName);
+    const reportHtml = renderEvidenceRepairReport(storyId, acItems, prNumber, new Date().toISOString());
+    writeFileSync(attestReportPath, reportHtml, "utf8");
 
-    // 5. Record the repair as complete — evidence artifacts have been generated.
+    // 4. Record the repair as complete — evidence artifacts have been generated.
     const repaired: RollEvent = {
       type: "evidence:repaired",
       prNumber,
       storyId,
       outcome: "evidence-generated",
-      details: `acceptance evidence repaired for ${storyId}; ac-map written ${acItems.length > 0 ? `with ${acItems.length} AC(s)` : "(no ACs found)"}, report at ${attestReportPath || "(skipped)"}`,
+      details: `acceptance evidence repaired for ${storyId}; ac-map written ${acItems.length > 0 ? `with ${acItems.length} AC(s)` : "(no ACs found)"}, report at ${attestReportPath}`,
       ts: Date.now(),
     };
     try {
@@ -718,6 +721,7 @@ export function supervisorCommand(args: string[]): number {
     }
 
     const acMapCount = acItems.length;
+    const reportHref = `.roll/features/${storyDir.split(".roll/features/")[1] ?? ""}/latest/${reportName}`.replace(/\/+/g, "/");
     if (json) {
       process.stdout.write(JSON.stringify({
         prNumber,
@@ -725,14 +729,14 @@ export function supervisorCommand(args: string[]): number {
         verdict: "repaired",
         action: "merge_ready",
         reason: classification.reason,
-        artifacts: { acMap: acMapCount > 0 ? `${storyId}/ac-map.json` : null, report: attestReportPath || null, acCount: acMapCount },
+        artifacts: { acMap: acMapCount > 0 ? `${storyId}/ac-map.json` : null, report: reportHref, acCount: acMapCount },
       }, null, 2) + "\n");
     } else {
       process.stdout.write(
         `\n  repair-evidence: PR #${prNumber} (${storyId}) repaired\n` +
         `  action: merge_ready — the PR can now be promoted (if draft) and merged\n` +
         `  ac-map: ${acMapCount > 0 ? `generated for ${acMapCount} AC(s) in ${storyId}/ac-map.json` : "(no ACs found — check spec.md)"}\n` +
-        `  report: ${attestReportPath || "(skipped)"}\n` +
+        `  report: ${reportHref}\n` +
         `  ${classification.reason}\n\n`,
       );
     }

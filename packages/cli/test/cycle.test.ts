@@ -11,6 +11,7 @@ const dirs: string[] = [];
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   delete process.env["ROLL_LANG"];
+  delete process.env["ROLL_CYCLE_ACTIVITY_NOW_MS"];
 });
 
 function project(): string {
@@ -323,5 +324,101 @@ describe("US-OBS-027 — roll cycle watch", () => {
       process.chdir(save);
     }
     expect(err).toContain("no running cycle");
+  });
+});
+
+function activityProject(): string {
+  const p = mkdtempSync(join(tmpdir(), "roll-cycle-activity-"));
+  dirs.push(p);
+  const rt = join(p, ".roll", "loop");
+  mkdirSync(rt, { recursive: true });
+  writeFileSync(
+    join(rt, "runs.jsonl"),
+    JSON.stringify({
+      cycle_id: "20260630-210059-58201",
+      status: "running",
+      story_id: "FIX-1050",
+      agent: "kimi",
+      ts: "2026-06-30T21:00:00Z",
+    }) + "\n",
+  );
+  return p;
+}
+
+function writeActivityEvents(p: string, events: unknown[]): void {
+  writeFileSync(join(p, ".roll", "loop", "events.ndjson"), events.map((e) => JSON.stringify(e)).join("\n") + "\n");
+}
+
+describe("US-OBS-042 — roll cycle <id> --activity", () => {
+  it("explains an active zero-TCR cycle", () => {
+    const p = activityProject();
+    writeActivityEvents(p, [
+      { type: "cycle:start", cycleId: "20260630-210059-58201", storyId: "FIX-1050", agent: "kimi", model: "k2.7", ts: 1000 },
+      { type: "cycle:stdout", cycleId: "20260630-210059-58201", data: "micro-step: A1 parser+tests · evidence: unit tests green · scope: packages/core/src/parser.ts", ts: 60_000 },
+      { type: "cycle:stdout", cycleId: "20260630-210059-58201", data: "tool_call: Edit · packages/core/src/parser.ts", ts: 130_000 },
+    ]);
+    process.env["ROLL_CYCLE_ACTIVITY_NOW_MS"] = String(200_000);
+    const save = process.cwd();
+    process.chdir(p);
+    let out = "";
+    const so = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((s: string) => ((out += s), true)) as typeof process.stdout.write;
+    try {
+      expect(cycleCommand(["20260630-210059-58201", "--activity", "--no-color"])).toBe(0);
+    } finally {
+      process.stdout.write = so;
+      process.chdir(save);
+    }
+    expect(out).toContain("cycle 20260630-210059-58201");
+    expect(out).toContain("classification active");
+    expect(out).toContain("micro-step A1");
+    expect(out).toContain("0 TCR");
+  });
+
+  it("surfaces green-uncommitted advisory state", () => {
+    const p = activityProject();
+    writeActivityEvents(p, [
+      { type: "cycle:start", cycleId: "20260630-210059-58201", storyId: "FIX-1050", agent: "kimi", model: "k2.7", ts: 1000 },
+      { type: "cycle:stdout", cycleId: "20260630-210059-58201", data: "test:green · parser tests pass", ts: 120_000 },
+    ]);
+    process.env["ROLL_CYCLE_ACTIVITY_NOW_MS"] = String(180_000);
+    const save = process.cwd();
+    process.chdir(p);
+    let out = "";
+    const so = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((s: string) => ((out += s), true)) as typeof process.stdout.write;
+    try {
+      expect(cycleCommand(["20260630-210059-58201", "--activity", "--no-color"])).toBe(0);
+    } finally {
+      process.stdout.write = so;
+      process.chdir(save);
+    }
+    expect(out).toContain("test:green");
+    expect(out).toContain("green-uncommitted");
+    expect(out).toContain("(advisory)");
+  });
+
+  it("emits machine-readable JSON with --activity --json", () => {
+    const p = activityProject();
+    writeActivityEvents(p, [
+      { type: "cycle:start", cycleId: "20260630-210059-58201", storyId: "FIX-1050", agent: "kimi", model: "k2.7", ts: 1000 },
+      { type: "cycle:stdout", cycleId: "20260630-210059-58201", data: "test:red · parser fails", ts: 120_000 },
+    ]);
+    process.env["ROLL_CYCLE_ACTIVITY_NOW_MS"] = String(180_000);
+    const save = process.cwd();
+    process.chdir(p);
+    let out = "";
+    const so = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((s: string) => ((out += s), true)) as typeof process.stdout.write;
+    try {
+      expect(cycleCommand(["20260630-210059-58201", "--activity", "--json", "--no-color"])).toBe(0);
+    } finally {
+      process.stdout.write = so;
+      process.chdir(save);
+    }
+    const parsed = JSON.parse(out) as { cycleId: string; classification: string; testTransition?: { state: string } };
+    expect(parsed.cycleId).toBe("20260630-210059-58201");
+    expect(parsed.classification).toBe("active");
+    expect(parsed.testTransition?.state).toBe("red");
   });
 });

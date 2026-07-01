@@ -263,6 +263,53 @@ describe("US-OBS-027 — roll cycle watch", () => {
     expect(stripAnsi(out)).toContain("cycle 20260624-watch-12345");
   });
 
+  it("US-OBS-045: --once surfaces accepted evaluator score from pair:score events", () => {
+    const p = mkdtempSync(join(tmpdir(), "roll-cycle-watch-score-"));
+    dirs.push(p);
+    const rt = join(p, ".roll", "loop");
+    mkdirSync(rt, { recursive: true });
+    writeFileSync(
+      join(rt, "runs.jsonl"),
+      JSON.stringify({
+        cycle_id: "20260630-210059-58201",
+        status: "delivered",
+        outcome: "delivered",
+        story_id: "FIX-1050",
+        agent: "kimi",
+        model: "deepseek-v4-pro",
+        ts: "2026-06-30T21:00:00Z",
+        duration_sec: 300,
+      }) + "\n",
+    );
+    writeFileSync(
+      join(rt, "events.ndjson"),
+      [
+        JSON.stringify({ type: "cycle:start", cycleId: "20260630-210059-58201", storyId: "FIX-1050", agent: "kimi", model: "deepseek-v4-pro", ts: 1_700_000_000 }),
+        JSON.stringify({ type: "pair:consult", cycleId: "20260630-210059-58201", peer: "claude", durationMs: 65_000, outcome: "reviewed", ts: 1_700_000_010 }),
+        JSON.stringify({ type: "pair:score", cycleId: "20260630-210059-58201", peer: "pi", score: 9, verdict: "good", cost: 0.05, stage: "score", ts: 1_700_000_020 }),
+        JSON.stringify({ type: "attest:gate", cycleId: "20260630-210059-58201", verdict: "produced", reasons: ["review-score good 9/10 present"], ts: 1_700_000_030 }),
+        JSON.stringify({ type: "pr:open", prNumber: 1111, storyId: "FIX-1050", ts: 1_700_000_040 }),
+        JSON.stringify({ type: "cycle:end", cycleId: "20260630-210059-58201", outcome: "published_pending_merge", cost: { cycleId: "20260630-210059-58201", agent: "kimi", model: "deepseek-v4-pro", tokensIn: 10, tokensOut: 5, estimatedCost: 0.01, revertCount: 0, effectiveCost: 0.01 }, ts: 1_700_000_050 }),
+      ].join("\n") + "\n",
+    );
+    const save = process.cwd();
+    process.chdir(p);
+    let out = "";
+    const so = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((s: string) => ((out += s), true)) as typeof process.stdout.write;
+    try {
+      expect(cycleCommand(["watch", "20260630-210059-58201", "--once", "--no-color"])).toBe(0);
+    } finally {
+      process.stdout.write = so;
+      process.chdir(save);
+    }
+    const text = stripAnsi(out);
+    expect(text).toContain("cycle 20260630-210059-58201");
+    expect(text).toContain("score pi 9/good");
+    expect(text).toContain("Attest gate · produced");
+    expect(text).toContain("outcome published_pending_merge");
+  });
+
   it("without a running cycle, follow mode fails with an explicit message instead of blank output", () => {
     const save = process.cwd();
     process.chdir(watchProject());

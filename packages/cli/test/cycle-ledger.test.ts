@@ -679,6 +679,19 @@ describe("kimi pair-review regressions", () => {
     expect(peer?.state).toBe("idle");
     expect(peer?.detail).toBe("skipped");
   });
+
+  it("US-OBS-045: an accepted pair:score is surfaced on the peer tape segment", () => {
+    const p = project(
+      [{ cycle_id: "c", status: "merged", outcome: "delivered", story_id: "US-OBS-045", agent: "kimi", ts: "2026-06-12T01:00:00Z" }],
+      [
+        { type: "peer:gate", cycleId: "c", verdict: "consulted", reasons: [], ts: 1 },
+        { type: "pair:score", cycleId: "c", peer: "pi", score: 9, verdict: "good", cost: 0.05, stage: "score", ts: 2 },
+      ],
+    );
+    const peer = collectCycleLedger(p)[0]?.tape.find((s) => s.key === "peer");
+    expect(peer?.detail).toContain("score pi 9/good");
+    expect(peer?.state).toBe("pass");
+  });
 });
 
 describe("FIX-337 (AC3) — reconcileSupersededVerdicts: a card delivered elsewhere stops inflating failed", () => {

@@ -37,6 +37,7 @@ import {
   appendDelivery,
   heteroAvailable,
   nodeDeliveryStore,
+  type AgentInternalFailure,
   type CapturedFacts,
   type CycleCommand,
   type CycleContext,
@@ -355,6 +356,110 @@ function epochMs(ts: number): number {
 
 function eventTs(ports: Ports): number {
   return epochMs(ports.clock());
+}
+
+/** FIX-1051 — scan agy's native CLI log for internal tool errors.
+ *
+ * Triggered only when agy exits 0 with effectively empty stdout (control chars /
+ * whitespace only) and no parseable usage. This distinguishes a genuine internal
+ * tool failure from a plain gave_up/no-output cycle.
+ *
+ * Returns `null` when:
+ *   - the agent is not agy,
+ *   - the exit code is non-zero (a crash is already `failed`),
+ *   - stdout carried printable content (the agent did produce output),
+ *   - no native log matches the cycle window, or
+ *   - the log contains none of the known internal-error patterns. */
+export function detectAgyInternalFailure(opts: {
+  agent: string;
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  cycleStartSec?: number;
+  /** Test seam: override the native log directory. */
+  logDir?: string;
+}): AgentInternalFailure | null {
+  if (opts.agent !== "agy") return null;
+  if (opts.exitCode !== 0) return null;
+  // Empty/control-only stdout: strip ASCII control chars + whitespace; anything
+  // printable means the agent produced real output.
+  const printable = opts.stdout.replace(/[\s\x00-\x1F\x7F]/g, "");
+  if (printable.length > 0) return null;
+
+  const logDir = opts.logDir ?? join(homedir(), ".gemini", "antigravity-cli", "log");
+  let files: string[];
+  try {
+    files = readdirSync(logDir)
+      .filter((f) => f.startsWith("cli-") && f.endsWith(".log"))
+      .map((f) => join(logDir, f));
+  } catch {
+    return null;
+  }
+  if (files.length === 0) return null;
+
+  // Sort newest-first by mtime.
+  files.sort((a, b) => {
+    try {
+      return statSync(b).mtimeMs - statSync(a).mtimeMs;
+    } catch {
+      return 0;
+    }
+  });
+
+  // Prefer the most recent log modified at or after cycle start (with a 60s
+  // slack in case the native log clock trails Roll's clock slightly).
+  const startMs = opts.cycleStartSec !== undefined ? opts.cycleStartSec * 1000 : undefined;
+  const candidates =
+    startMs !== undefined
+      ? files.filter((f) => {
+          try {
+            return statSync(f).mtimeMs >= startMs - 60_000;
+          } catch {
+            return false;
+          }
+        })
+      : files;
+  const logPath = candidates[0] ?? files[0];
+  if (logPath === undefined) return null;
+
+  let text: string;
+  try {
+    text = readFileSync(logPath, "utf8");
+  } catch {
+    return null;
+  }
+
+  const hasGrepTimeout = /Grep command timed out due to the size of the codebase/i.test(text);
+  const hasZeroTrajectory = /trajectory converted to zero chat messages/i.test(text);
+  const hasAgentExecutorError = /agent executor error:/i.test(text);
+
+  if (!hasGrepTimeout && !hasZeroTrajectory && !hasAgentExecutorError) return null;
+
+  let className: string;
+  let summary: string;
+  if (hasGrepTimeout && hasZeroTrajectory) {
+    className = "agy_grep_timeout_zero_trajectory";
+    summary = "GREP_SEARCH timed out and trajectory collapsed to zero messages";
+  } else if (hasGrepTimeout) {
+    className = "agy_grep_timeout";
+    summary = "GREP_SEARCH timed out due to codebase size";
+  } else if (hasZeroTrajectory) {
+    className = "agy_zero_trajectory";
+    summary = "Trajectory converted to zero chat messages";
+  } else {
+    className = "agy_agent_executor_error";
+    summary = "Agent executor error in native CLI";
+  }
+
+  const convMatch = /conversation[_-]?id[:=\s]+([a-zA-Z0-9_-]+)/i.exec(text);
+  const conversationId = convMatch?.[1];
+
+  return {
+    class: className,
+    summary,
+    nativeLogPath: logPath,
+    ...(conversationId !== undefined ? { conversationId } : {}),
+  };
 }
 
 function scopedCandidateAgents(
@@ -1709,16 +1814,34 @@ export async function executeCommand(
               ? "reasonix_footer_unmatched"
               : "no_parseable_usage"
           : undefined;
+      // FIX-1051: when agy exits 0 with no parseable usage and effectively empty
+      // stdout, scan the native antigravity CLI log for the real internal error
+      // (e.g. GREP_SEARCH timeout → zero trajectory) instead of collapsing the
+      // cycle into a generic gave_up.
+      const agentInternalFailure: AgentInternalFailure | undefined =
+        agentName === "agy" &&
+        costPatch === undefined &&
+        res.exitCode === 0 &&
+        !res.timedOut
+          ? detectAgyInternalFailure({
+              agent: agentName,
+              stdout: res.stdout,
+              stderr: res.stderr,
+              exitCode: res.exitCode,
+              cycleStartSec: ctx.startSec,
+            }) ?? undefined
+          : undefined;
       return {
         event: { type: "agent_exited", exit: res.exitCode, timedOut: res.timedOut },
         // FIX-343 (step ①): persist the builder session id on the cycle context so
-        // it survives to the attest gate (the scorer≠builder-session check). Minted
-        // once; reused across retries (the spawn reads ctx.builderSessionId first).
+        // it survives to the attest gate (the scorer≠builder-session invariant is then
+        // traceable to a recorded build-session id, not asserted).
         ctxPatch: {
           builderSessionId,
           ...(postSpawnDirty.length > 0 ? { mainDirty: true } : {}),
           ...(costPatch !== undefined ? { cost: costPatch } : {}),
           ...(usageUnknownReason !== undefined ? { usageUnknownReason } : {}),
+          ...(agentInternalFailure !== undefined ? { agentInternalFailure } : {}),
         },
       };
     }
@@ -2518,6 +2641,7 @@ export async function executeCommand(
         ...(mainAhead > 0 ? { mainAhead } : {}),
         ...(mainDirty ? { mainDirty: true } : {}),
         ...(worktreeDirty ? { worktreeDirty: true } : {}),
+        ...(ctx.agentInternalFailure !== undefined ? { agentInternalFailure: ctx.agentInternalFailure } : {}),
         ...(prState !== undefined ? { prState } : {}),
       };
       return { event: { type: "facts_captured", facts }, ctxPatch: { tcrCount, ...(mainDirty ? { mainDirty: true } : {}) } };
@@ -3027,6 +3151,18 @@ export function buildRunRow(
     const parsed = prNumberFromUrl(ctx.prUrl);
     if (parsed !== undefined) row["pr_number"] = Number(parsed);
   }
+  // FIX-1051: persist agent-internal failure diagnostics on the runs row so the
+  // ledger / `roll cycles --detail` can surface the native failure class, summary,
+  // and log path without manual spelunking.
+  if (ctx.agentInternalFailure !== undefined) {
+    row["agent_internal_failure"] = true;
+    row["agent_internal_class"] = ctx.agentInternalFailure.class;
+    row["agent_internal_summary"] = ctx.agentInternalFailure.summary;
+    row["agent_internal_log_path"] = ctx.agentInternalFailure.nativeLogPath;
+    if (ctx.agentInternalFailure.conversationId !== undefined) {
+      row["agent_internal_conversation_id"] = ctx.agentInternalFailure.conversationId;
+    }
+  }
   return row;
 }
 
@@ -3064,6 +3200,9 @@ export function buildTerminalRecord(
     // acceptance artifact is missing (no independent peer Review Score /
     // empty-shell report). Branch preserved, awaits review — NOT a failure.
     needs_review: "needs_review",
+    // FIX-1051: agent exited cleanly but hit an internal tool error (e.g. agy
+    // GREP_SEARCH timeout → zero trajectory). Failed-class terminal.
+    agent_internal: "agent_internal_failure",
     // US-LOOP-079d — dormant_entered: 连续 N idle 后自卸;终态,此后无 idle 行.
     dormant: "dormant_entered",
   };

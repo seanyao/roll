@@ -73,6 +73,11 @@ export const TERMINAL_OUTCOMES = [
   // from `gave_up` (agent ran, 0 output, nothing to preserve) and from
   // `idle_no_work` (no agent ran at all, no dirt).
   "handoff_without_tcr",
+  // FIX-1051 — an agent process exited cleanly but suffered an internal tool
+  // error (e.g. agy GREP_SEARCH timeout → zero trajectory). The native CLI log
+  // contains the real cause; Roll surfaces it instead of classifying as a
+  // generic gave_up. Failed-class terminal.
+  "agent_internal_failure",
   "unknown",
 ] as const;
 export type TerminalOutcome = (typeof TERMINAL_OUTCOMES)[number];

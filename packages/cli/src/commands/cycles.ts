@@ -101,6 +101,7 @@ const VERDICT_COLOR: Record<string, string> = {
   reverted: "yellow",
   failed: "red",
   blocked: "purple",
+  agent_internal_failure: "red", // FIX-1051: internal tool error — failed-class, red
   idle: "muted",
   unknown: "muted",
 };
@@ -117,6 +118,7 @@ const BUCKET_LABEL: Record<CycleLedgerVerdict, { en: string; zh: string }> = {
   failed: { en: "failed/reverted/blocked", zh: "失败/回滚/阻塞" },
   blocked: { en: "blocked", zh: "阻塞" },
   reverted: { en: "reverted", zh: "回滚" },
+  agent_internal_failure: { en: "agent_internal_failure", zh: "代理内部故障" },
   idle: { en: "idle", zh: "空转" },
   unknown: { en: "unknown", zh: "未知" },
 };
@@ -204,6 +206,7 @@ export function cyclesLedgerJson(rows: CycleLedgerRow[], sinceLabel: string, now
       cost: r.cost,
       duration: r.duration,
       ...(r.usageUnknownReason !== undefined ? { usageUnknownReason: r.usageUnknownReason } : {}),
+      ...(r.agentInternalFailure !== undefined ? { agentInternalFailure: r.agentInternalFailure } : {}),
     })),
   };
 }
@@ -372,9 +375,14 @@ const MARKER_COLOR: Record<string, string> = {
  * each turning point shows its mm:ss offset and the gap since the previous one.
  * The summary line surfaces the build span and TCR cadence at a glance.
  */
-export function renderCycleDetail(events: RollEvent[], cycleId: string, lang: Lang): string {
+export function renderCycleDetail(
+  events: RollEvent[],
+  cycleId: string,
+  lang: Lang,
+  agentInternalFailure?: { class: string; summary: string; nativeLogPath: string; conversationId?: string },
+): string {
   const { timeline } = extractCycleSignals(events, cycleId);
-  if (timeline.length === 0) {
+  if (timeline.length === 0 && agentInternalFailure === undefined) {
     return lang === "zh"
       ? `周期 ${cycleNo(cycleId)} 没有事件记录（build 阶段未观测到信号）\n`
       : `no events recorded for cycle ${cycleNo(cycleId)} (no build-phase signals observed)\n`;
@@ -401,11 +409,25 @@ export function renderCycleDetail(events: RollEvent[], cycleId: string, lang: La
       ? `${clock(spanSec)} 总时长 · ${tcrs.length} 个 TCR 提交 · ${beats} 次心跳`
       : `${clock(spanSec)} span · ${tcrs.length} TCR commits · ${beats} heartbeats`,
   );
+  if (agentInternalFailure !== undefined) {
+    lines.push("");
+    lines.push(c("red", lang === "zh" ? "代理内部故障 · agent internal failure" : "agent internal failure"));
+    lines.push(`  class: ${agentInternalFailure.class}`);
+    lines.push(`  summary: ${agentInternalFailure.summary}`);
+    lines.push(`  log: ${agentInternalFailure.nativeLogPath}`);
+    if (agentInternalFailure.conversationId !== undefined) {
+      lines.push(`  conversation: ${agentInternalFailure.conversationId}`);
+    }
+  }
   return `${lines.join("\n")}\n`;
 }
 
 /** Machine view of the detail timeline — the SAME reducer, fields per entry. */
-export function cycleDetailJson(events: RollEvent[], cycleId: string): unknown {
+export function cycleDetailJson(
+  events: RollEvent[],
+  cycleId: string,
+  agentInternalFailure?: { class: string; summary: string; nativeLogPath: string; conversationId?: string },
+): unknown {
   const { timeline } = extractCycleSignals(events, cycleId);
   const tcrs = timeline.filter((t: TimelineEntry) => t.marker === "tcr");
   const beats = timeline.filter((t: TimelineEntry) => t.marker === "build:heartbeat").length;
@@ -422,6 +444,7 @@ export function cycleDetailJson(events: RollEvent[], cycleId: string): unknown {
       marker: t.marker,
       label: t.label,
     })),
+    ...(agentInternalFailure !== undefined ? { agentInternalFailure } : {}),
   };
 }
 
@@ -453,12 +476,13 @@ export function cyclesCommand(args: string[]): number {
     const ledger = collectCycleLedger(cwd);
     const matched = findCycle(ledger, handle);
     const cycleId = matched?.cycleId ?? handle;
+    const agentInternalFailure = matched?.agentInternalFailure;
     const events = readAllEvents(cwd);
     if (json) {
-      process.stdout.write(JSON.stringify(cycleDetailJson(events, cycleId), null, 2) + "\n");
+      process.stdout.write(JSON.stringify(cycleDetailJson(events, cycleId, agentInternalFailure), null, 2) + "\n");
       return 0;
     }
-    process.stdout.write(renderCycleDetail(events, cycleId, lang));
+    process.stdout.write(renderCycleDetail(events, cycleId, lang, agentInternalFailure));
     return 0;
   }
 

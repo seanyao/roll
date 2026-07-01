@@ -223,16 +223,30 @@ export function reconcilePendingMergeVerdicts(
  * is-story-delivered probe injected. Only `unpublished` rows are eligible;
  * genuinely unmerged unpublished rows (story not delivered) stay `unpublished`.
  *
+ * FIX-1064: also accepts {@link deliveringCycles} — a Set of cycle IDs that have
+ * a `done` delivery record. An unpublished cycle is marked as delivered ONLY
+ * when its own cycle ID is in this set, preventing older failed/unpublished
+ * cycles from retroactively showing as delivered when a later cycle ships the
+ * same story.
+ *
  * AC: delivered-truth override is deterministic and scoped — a story that was
- * NOT delivered keeps its `unpublished` verdict.
+ * NOT delivered keeps its `unpublished` verdict. A cycle whose story delivered
+ * elsewhere via a DIFFERENT cycle keeps its `unpublished` verdict (per-cycle
+ * faithfulness, FIX-1064).
  */
 export function reconcileDeliveredUnpublishedVerdicts(
   rows: readonly CycleLedgerRow[],
   isStoryDelivered: (storyId: string) => boolean,
+  deliveringCycles?: Set<string>,
 ): CycleLedgerRow[] {
   return rows.map((r) => {
     if (r.verdict !== "unpublished") return r;
     if (r.storyId === "" || !isStoryDelivered(r.storyId)) return r;
+    // FIX-1064: only mark as delivered when THIS cycle is a known delivering
+    // cycle. Without the cycle-level check, an old unpublished cycle whose story
+    // was later delivered by a different cycle would retroactively show as
+    // delivered — a projection bug.
+    if (deliveringCycles !== undefined && !deliveringCycles.has(r.cycleId)) return r;
     return {
       ...r,
       verdict: "delivered",

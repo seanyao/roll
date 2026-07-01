@@ -8,7 +8,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveLang, type Lang, type RollEvent, parseEventLine } from "@roll/spec";
-import { extractCycleSignals, parseBacklog, signalKindForMarker, type TimelineEntry } from "@roll/core";
+import { extractCycleSignals, parseBacklog, signalKindForMarker, type TimelineEntry, readDeliveries, nodeDeliveryStore } from "@roll/core";
 import {
   bucketCounts,
   collectCycleLedger,
@@ -69,11 +69,18 @@ function buildIsStorySuperseded(cwd: string, git: GitDossierFacts | null): (stor
 export function reconciledLedger(cwd: string): CycleLedgerRow[] {
   const git = collectGitDossierFacts(cwd);
   const collected = collectCycleLedger(cwd);
-  // FIX-1046: unpublished cycles whose story was later delivered must show
-  // `delivered` — the work DID ship, the stale unpublished row is misleading.
-  const unpublishedDelivered = reconcileDeliveredUnpublishedVerdicts(collected, buildIsStorySuperseded(cwd, git));
+  // FIX-1064: read delivery records to build the set of cycle IDs that have a
+  // `done` delivery record. Only these cycles should show as `delivered` in
+  // the unpublished→delivered reconciliation — not cycles whose story merely
+  // shipped via some other cycle.
+  const deliveries = readDeliveries(nodeDeliveryStore, cwd);
+  const deliveringCycles = new Set(
+    deliveries.filter((d) => d.lifecycleState === "done").map((d) => d.cycleId),
+  );
+  const isSuperseded = buildIsStorySuperseded(cwd, git);
+  const unpublishedDelivered = reconcileDeliveredUnpublishedVerdicts(collected, isSuperseded, deliveringCycles);
   const merged = reconcilePendingMergeVerdicts(unpublishedDelivered, cycleMergeTruth(git));
-  return reconcileSupersededVerdicts(merged, buildIsStorySuperseded(cwd, git));
+  return reconcileSupersededVerdicts(merged, isSuperseded);
 }
 import { c, renderState, stripAnsi } from "../render.js";
 

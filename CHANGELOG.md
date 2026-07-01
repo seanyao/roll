@@ -7,6 +7,7 @@
 - `roll supervisor repair-evidence` 已修复的 PR 重跑不再误报无法修复 `[loop]`
   <!-- evidence: .roll/features/loop-engine/FIX-1062/latest/FIX-1062-report.html -->
 - `roll cycles` 不再把旧失败轮误标为 delivered `[loop]`
+- 等待 PR 合并的 cycle 证据不再被归档为失败诊断 `[loop]`
 - **`aborted_no_delivery` 周期不再丢失 story/agent 归属**：外部信号终止的 cycle 会从已写入的 events.ndjson 回填已知的 `story_id` 与 `agent`；如果在路由完成前被终止，`agent` 字段会保留空值并附带 `agent_unknown_reason`，避免失败匿名化，`roll cycles` 也能正确显示对应卡片与 agent。(FIX-1060) `[loop-engine]`
 
 ### 文档与命名

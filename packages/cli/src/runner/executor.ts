@@ -3000,7 +3000,16 @@ export async function executeCommand(
         // ac-map, latest symlink) out of the gate-visible paths so a failed /
         // skipped-attest / unpublished cycle cannot leave roll-meta looking
         // delivered. Diagnostics are preserved under failed-diagnostics/.
-        cleanStaleEvidence(ports.repoCwd, terminalStoryId, ctx.cycleId ?? "");
+        // FIX-1063: a published/built terminal is a gate-passing pending-merge
+        // state, NOT a failure — its evidence must stay visible in the standard
+        // latest/<ID>-report.html + ac-map.json paths until the PR actually merges.
+        const pendingMerge = cmd.status === "published" || cmd.status === "built";
+        cleanStaleEvidence(
+          ports.repoCwd,
+          terminalStoryId,
+          ctx.cycleId ?? "",
+          pendingMerge ? "published_pending_merge" : undefined,
+        );
       }
       // US-V4-001: a cycle terminal no longer refreshes the global dossier
       // aggregate pages as a side effect. Cycle facts are durable events
@@ -3625,6 +3634,11 @@ export function resetStaleSpecTruth(ports: Ports, storyId: string): void {
  * `<cardArchiveDir>/failed-diagnostics/` with a clear label; they do NOT satisfy
  * Done, release, or delivery-truth gates.
  *
+ * FIX-1063 — a `published_pending_merge` terminal is a gate-passing pending-merge
+ * state, not a failure. Its evidence must remain visible in the standard
+ * `latest/<ID>-report.html` + `ac-map.json` paths so supervisors can distinguish
+ * "waiting for PR merge" from "delivery evidence failed".
+ *
  * Targets:
  *   - `ac-map.json` at the card root (the attest gate reads this as acceptance
  *     intent).
@@ -3634,8 +3648,17 @@ export function resetStaleSpecTruth(ports: Ports, storyId: string): void {
  * The `latest/` symlink itself is removed so the gate's primary candidate path
  * no longer resolves.
  */
-export function cleanStaleEvidence(projectCwd: string, storyId: string, cycleId: string): void {
+export function cleanStaleEvidence(
+  projectCwd: string,
+  storyId: string,
+  cycleId: string,
+  outcome?: TerminalOutcome,
+): void {
   try {
+    // FIX-1063: pending-merge terminals keep their gate-passing evidence in the
+    // standard paths; do not archive it as failed diagnostics.
+    if (outcome === "published_pending_merge") return;
+
     const cardDir = cardArchiveDir(projectCwd, storyId);
     if (!existsSync(cardDir)) return;
 

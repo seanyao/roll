@@ -28,7 +28,18 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { renderCompactWatchEvent, renderWatchStatusFromEventLines, watchRenderEventFromLine, type DurableCycleLookup } from "@roll/core";
+import { parseEventLine } from "@roll/spec";
+import {
+  parseBacklog,
+  renderCompactWatchEvent,
+  renderStoryTransition,
+  renderWatchStatusSummary,
+  summarizeWatchEvents,
+  watchRenderEventFromLine,
+  type DurableCycleLookup,
+  type StoryTransitionContext,
+  type WatchStatusSummary,
+} from "@roll/core";
 import { projectIdentity } from "@roll/infra";
 import { renderState } from "../render.js";
 import { streamThroughRenderer } from "./loop-fmt.js";
@@ -317,17 +328,75 @@ function buildDurableLookup(runsPath: string, deps: LoopWatchDeps): DurableCycle
   return lookup;
 }
 
-function statusSnapshot(eventsPath: string, deps: LoopWatchDeps, durableLookup: DurableCycleLookup): string {
-  if (!deps.exists(eventsPath)) {
-    return `status  no events.ndjson yet - live.log only (${eventsPath})`;
-  }
-  const text = deps.readText(eventsPath);
-  const status = text === null ? null : renderWatchStatusFromEventLines(text.split(/\r?\n/), Date.now(), durableLookup);
-  return status ?? `status  event summary unavailable - live.log only (${eventsPath})`;
+function cleanBrief(desc: string): string {
+  return desc
+    .replace(/\bdepends-on:[A-Za-z][A-Za-z0-9,-]+\b/g, "")
+    .replace(/\bchain_depth:\d+\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-function emitStatusSnapshot(eventsPath: string, deps: LoopWatchDeps, durableLookup: DurableCycleLookup): void {
-  deps.emit(statusSnapshot(eventsPath, deps, durableLookup));
+function storyBriefResolver(backlogText: string | null): (storyId: string) => string | undefined {
+  if (backlogText === null) return () => undefined;
+  const items = parseBacklog(backlogText);
+  const map = new Map(items.map((item) => [item.id, cleanBrief(item.desc)]));
+  return (id) => {
+    const brief = map.get(id);
+    return brief === undefined || brief === "" ? undefined : brief;
+  };
+}
+
+function routeReasonResolver(eventsPath: string, deps: LoopWatchDeps): (storyId: string) => { agent: string; reason: string } | undefined {
+  return (storyId) => {
+    if (!deps.exists(eventsPath)) return undefined;
+    const text = deps.readText(eventsPath);
+    if (text === null) return undefined;
+    const resolved = new Map<string, { agent: string; reason: string }>();
+    for (const line of text.split(/\r?\n/)) {
+      if (line.trim() === "") continue;
+      const event = parseEventLine(line);
+      if (event !== null && event.type === "route:resolve") {
+        resolved.set(event.storyId, { agent: event.agent, reason: event.rule });
+      }
+    }
+    return resolved.get(storyId);
+  };
+}
+
+function actionPlanResolver(): () => string | undefined {
+  // US-OBS-044: runtime action-plan events are not yet implemented; avoid
+  // inventing a plan. The renderer will show "plan: pending" instead.
+  return () => undefined;
+}
+
+function buildStatusProvider(eventsPath: string, runsPath: string, backlogPath: string, deps: LoopWatchDeps): () => string | null {
+  const durableLookup = buildDurableLookup(runsPath, deps);
+  const backlogText = deps.exists(backlogPath) ? deps.readText(backlogPath) : null;
+  const storyBrief = storyBriefResolver(backlogText);
+  const routeReason = routeReasonResolver(eventsPath, deps);
+  const actionPlan = actionPlanResolver();
+  const ctx: StoryTransitionContext = { storyBrief, routeReason, actionPlan };
+  let previous: WatchStatusSummary | null = null;
+  return (): string | null => {
+    if (!deps.exists(eventsPath)) {
+      return `status  no events.ndjson yet - live.log only (${eventsPath})`;
+    }
+    const text = deps.readText(eventsPath);
+    if (text === null) {
+      return `status  event summary unavailable - live.log only (${eventsPath})`;
+    }
+    const summary = summarizeWatchEvents(text.split(/\r?\n/), durableLookup);
+    if (summary === null) {
+      return `status  event summary unavailable - live.log only (${eventsPath})`;
+    }
+    const transition = previous !== null ? renderStoryTransition(previous, summary, ctx) : null;
+    const statusLine = renderWatchStatusSummary(summary, Date.now());
+    previous = summary;
+    if (transition !== null && transition !== "") {
+      return `${transition}\n${statusLine}`;
+    }
+    return statusLine;
+  };
 }
 
 /** The `roll loop watch` entry. */
@@ -370,9 +439,9 @@ export async function loopWatchCommand(args: string[], deps: LoopWatchDeps = rea
   // FIX-382: build durable fallback lookup from runs.jsonl so story/agent can
   // be resolved even when cycle:start has been pushed out of the tail window.
   const runsPath = join(rt, "runs.jsonl");
-  const durableLookup = buildDurableLookup(runsPath, deps);
-  const status = !opts.events && !opts.rawEvents ? () => statusSnapshot(eventsPath, deps, durableLookup) : undefined;
-  if (status !== undefined) emitStatusSnapshot(eventsPath, deps, durableLookup);
+  const backlogPath = join(id.path, ".roll", "backlog.md");
+  const status = !opts.events && !opts.rawEvents ? buildStatusProvider(eventsPath, runsPath, backlogPath, deps) : undefined;
+  if (status !== undefined) deps.emit(status() ?? `status  event summary unavailable - live.log only (${eventsPath})`);
   const { stream, stop } = deps.follow(watchPath, opts.sinceLines);
   // Ctrl-C ends the VIEW only (read-only): stop the follow, never the loop.
   const onSigint = (): void => stop();

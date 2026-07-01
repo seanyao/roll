@@ -271,6 +271,50 @@ describe("roll loop watch — default status layer (US-LOOP-046)", () => {
   });
 });
 
+describe("roll loop watch — narrated story transitions (US-OBS-044)", () => {
+  it("emits a transition block when the active story changes between heartbeats", async () => {
+    const eventsA = [
+      JSON.stringify({ type: "cycle:start", cycleId: "c1", storyId: "FIX-1049", agent: "claude", model: "gpt-5", ts: 1_000_000_000_000 }),
+      JSON.stringify({ type: "cycle:phase", cycleId: "c1", phase: "execute", ts: 1_000_000_060_000 }),
+      JSON.stringify({ type: "cycle:end", cycleId: "c1", outcome: "published_pending_merge", ts: 1_000_000_120_000 }),
+      JSON.stringify({ type: "pr:open", prNumber: 1049, storyId: "FIX-1049", ts: 1_000_000_180_000 }),
+    ].join("\n");
+    const eventsB = [
+      eventsA,
+      JSON.stringify({ type: "cycle:start", cycleId: "c2", storyId: "FIX-1050", agent: "kimi", model: "kimi", ts: 1_100_000_000_000 }),
+      JSON.stringify({ type: "route:resolve", storyId: "FIX-1050", level: "story", agent: "kimi", model: "kimi", rule: "story agent default", ts: 1_100_000_060_000 }),
+    ].join("\n");
+    const backlog = "| [FIX-1050](...) | migrate legacy script to TS | 📋 Todo |";
+    let reads = 0;
+    const rec = makeDeps({
+      readText: (path) => {
+        if (path.endsWith("backlog.md")) return backlog;
+        if (path.endsWith("events.ndjson")) {
+          reads += 1;
+          return reads <= 1 ? eventsA : eventsB;
+        }
+        return EVENT_STREAM;
+      },
+      render: async (_input, opts) => {
+        const status = opts.status?.() ?? "";
+        rec.rendered.push(status);
+      },
+      follow: (path) => {
+        rec.followedPath = path;
+        return { stream: Readable.from([]), stop: () => { rec.followStopped = true; } };
+      },
+    });
+    const code = await loopWatchCommand([], rec.deps);
+    expect(code).toBe(0);
+    const snapshot = rec.emitted.join("\n") + "\n" + rec.rendered.join("\n");
+    expect(snapshot).toContain("↳ story transition");
+    expect(snapshot).toContain("FIX-1049");
+    expect(snapshot).toContain("FIX-1050");
+    expect(snapshot).toContain("migrate legacy script to TS");
+    expect(snapshot).toContain("story agent default");
+  });
+});
+
 describe("roll loop watch — read-only (AC2)", () => {
   it("its ONLY loop interaction is a follow READ of live.log (no write/signal seam exists)", async () => {
     const rec = makeDeps();

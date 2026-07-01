@@ -17,7 +17,7 @@ describe("watch-status — default loop watch summary", () => {
   it("summarizes current phase, quiet time, story, agent, cycle, TCR count, and last signal", () => {
     const rendered = renderWatchStatusFromEventLines(base.map(line), 1_800_000_480_000);
     expect(rendered).toBe(
-      "status  phase execute · quiet 5m · US-LOOP-046 · codex · cycle 20260619-046-a · 1 TCR · last building status layer · outcome unknown/no end event",
+      "status  phase execute · active · quiet 5m · US-LOOP-046 · codex · cycle 20260619-046-a · 1 TCR · last building status layer · outcome unknown/no end event",
     );
   });
 
@@ -31,6 +31,7 @@ describe("watch-status — default loop watch summary", () => {
     );
     expect(rendered).toContain("last cycle delivered");
     expect(rendered).toContain("outcome delivered");
+    expect(rendered).toContain("ended");
   });
 
   it("returns null for missing or fully malformed event streams", () => {
@@ -368,5 +369,67 @@ describe("renderStoryTransition — narrated story handoffs", () => {
 
   it("returns null when there is no previous summary (startup)", () => {
     expect(renderStoryTransition(null as unknown as WatchStatusSummary, next)).toBeNull();
+  });
+});
+
+// ── US-OBS-042: TCR micro-step rhythm visibility ────────────────────────────
+
+describe("watch-status — US-OBS-042 micro-step rhythm", () => {
+  const base = (ts: number) => line({ type: "cycle:start", cycleId: "c1", storyId: "FIX-1050", agent: "kimi", model: "k2.7", ts });
+
+  it("renders active-zero-TCR without marking it silent", () => {
+    const rendered = renderWatchStatusFromEventLines(
+      [
+        base(1000),
+        line({ type: "cycle:stdout", cycleId: "c1", data: "tool_call: Edit · packages/core/src/parser.ts", ts: 130_000 }),
+      ],
+      200_000,
+    );
+    expect(rendered).toContain("active");
+    expect(rendered).toContain("0 TCR");
+    expect(rendered).not.toContain("silent");
+  });
+
+  it("renders test:red and test:green transitions", () => {
+    const rendered = renderWatchStatusFromEventLines(
+      [
+        base(1000),
+        line({ type: "cycle:stdout", cycleId: "c1", data: "test:red · parser fails", ts: 120_000 }),
+      ],
+      180_000,
+    );
+    expect(rendered).toContain("test:red");
+  });
+
+  it("renders advisory green-uncommitted state", () => {
+    const rendered = renderWatchStatusFromEventLines(
+      [
+        base(1000),
+        line({ type: "cycle:stdout", cycleId: "c1", data: "test:green · parser tests pass", ts: 120_000 }),
+      ],
+      180_000,
+    );
+    expect(rendered).toContain("green-uncommitted 1m");
+  });
+
+  it("renders bounded micro-step plan when present", () => {
+    const rendered = renderWatchStatusFromEventLines(
+      [
+        base(1000),
+        line({ type: "cycle:stdout", cycleId: "c1", data: "micro-step: A1 parser+tests · evidence: unit tests green · scope: packages/core/src/parser.ts", ts: 60_000 }),
+      ],
+      120_000,
+    );
+    expect(rendered).toContain("action A1 parser+tests");
+  });
+
+  it("renders silent classification when truly quiet", () => {
+    const rendered = renderWatchStatusFromEventLines(
+      [
+        base(1000),
+      ],
+      1_000_000,
+    );
+    expect(rendered).toContain("silent");
   });
 });

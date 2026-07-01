@@ -518,11 +518,6 @@ function cycleCollabCommand(handle: string, cycleId: string, json: boolean, noCo
   const supervisor = process.env["ROLL_SUPERVISOR_AGENT"] ?? "codex";
   const view = projectCollabCycle(summary, events, supervisor);
 
-  if (json) {
-    process.stdout.write(JSON.stringify(view, null, 2) + "\n");
-    return 0;
-  }
-
   if (view.terminus === "" && view.handoffs.length === 0) {
     process.stderr.write(
       lang === "zh"
@@ -530,6 +525,11 @@ function cycleCollabCommand(handle: string, cycleId: string, json: boolean, noCo
         : `[roll] collab view unavailable for cycle ${handle}\n`,
     );
     return 1;
+  }
+
+  if (json) {
+    process.stdout.write(JSON.stringify(view, null, 2) + "\n");
+    return 0;
   }
 
   process.stdout.write(

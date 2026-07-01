@@ -132,12 +132,13 @@ owner-side mystery. It scans warnings, auth/network status, polluted skill
 roots, stale setup sync, and worktree permission failures, then classifies them
 into one of four operational categories:
 
-| Classification | Typical signal | Supervisor action |
-|---|---|---|
-| `auth_block` | "403", "please run /login", "Unauthorized" | `pause_for_owner` |
-| `network_block` | `ECONNREFUSED`, `ETIMEDOUT`, DNS failure | `continue` (transient; loop retries or breathes) |
-| `setup_skill_root_pollution` | Reasonix auxiliary-dir warnings, skills with no description | `create_fix` → delta team |
-| `worktree_permission_failure` | `EACCES` / "permission denied" on a worktree path | `pause_for_owner` |
+- **auth_block** — "403", "please run /login", "Unauthorized" → `pause_for_owner`
+- **network_block** — `ECONNREFUSED`, `ETIMEDOUT`, DNS failure → `continue`
+  (transient; loop retries or breathes)
+- **setup_skill_root_pollution** — Reasonix auxiliary-dir warnings, skills with no
+  description → `create_fix` → routed to the delta team as a FIX
+- **worktree_permission_failure** — `EACCES` / "permission denied" on a worktree
+  path → `pause_for_owner`
 
 When the signal is setup/skill-root pollution, Supervisor must **not** label it
 as auth-blocked. It routes the repair to the backlog/delta team as a FIX,

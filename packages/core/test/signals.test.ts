@@ -28,6 +28,10 @@ describe("signalKindForMarker — the shared taxonomy", () => {
     expect(signalKindForMarker("pr:close")).toBe("pr");
     expect(signalKindForMarker("pr:rebase")).toBe("pr");
     expect(signalKindForMarker("alert")).toBe("alert");
+    // US-OBS-045: accepted evaluator / consult / failure are peer-class signals.
+    expect(signalKindForMarker("pair:score")).toBe("peer");
+    expect(signalKindForMarker("pair:score-failure")).toBe("peer");
+    expect(signalKindForMarker("pair:consult")).toBe("peer");
   });
 
   it("returns null for outline / non-signal markers", () => {

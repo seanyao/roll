@@ -98,6 +98,17 @@ function toEntry(ev: RollEvent): Omit<TimelineEntry, "offsetSec" | "layer"> | nu
       return { ts: ev.ts, marker: "peer:gate", label: `Peer gate · ${ev.verdict}` };
     case "attest:gate":
       return { ts: ev.ts, marker: "attest:gate", label: `Attest gate · ${ev.verdict}` };
+    // US-OBS-045: accepted evaluator / consult / failure land on the cycle trace
+    // so `roll cycle <id>` and `roll cycle watch --once` surface them directly.
+    case "pair:score":
+      return { ts: ev.ts, marker: "pair:score", label: `score ${ev.peer} ${ev.score}/${ev.verdict}` };
+    case "pair:score-failure":
+      return { ts: ev.ts, marker: "pair:score-failure", label: `score ${ev.peer} failed · ${ev.cause}` };
+    case "pair:consult": {
+      const durSec = (ev.durationMs / 1000).toFixed(1);
+      const causeTag = ev.cause !== undefined ? ` (${ev.cause})` : "";
+      return { ts: ev.ts, marker: "pair:consult", label: `consult ${ev.peer} ${ev.outcome} ${durSec}s${causeTag}` };
+    }
     case "visual:gate":
       return { ts: ev.ts, marker: "visual:gate", label: `Visual gate · ${ev.verdict}${ev.code !== undefined ? ` · ${ev.code}` : ""}` };
     case "evidence:frame-opened":

@@ -80,6 +80,27 @@ describe("extractCycleSignals — three-layer reduction", () => {
     expect(r.timeline.find((t) => t.marker === "attest:gate")?.label).toContain("produced");
   });
 
+  it("US-OBS-045: pair:score / pair:score-failure / pair:consult appear on the timeline", () => {
+    const evs: RollEvent[] = [
+      { type: "cycle:start", cycleId: CYCLE, storyId: "US-OBS-045", agent: "kimi", model: "m", ts: 1000 },
+      { type: "pair:consult", cycleId: CYCLE, peer: "claude", durationMs: 45_000, outcome: "reviewed", ts: 2000 },
+      { type: "pair:score", cycleId: CYCLE, peer: "pi", score: 9, verdict: "good", cost: 0.05, stage: "score", ts: 3000 },
+      { type: "pair:score-failure", cycleId: CYCLE, peer: "reasonix", cause: "unparseable", stage: "score", ts: 4000 },
+      { type: "cycle:end", cycleId: CYCLE, outcome: "published_pending_merge", cost: { cycleId: CYCLE, agent: "kimi", model: "m", tokensIn: 0, tokensOut: 0, estimatedCost: 0, revertCount: 0, effectiveCost: 0 }, ts: 5000 },
+    ];
+    const r = extractCycleSignals(evs, CYCLE);
+    expect(r.timeline.map((t) => t.marker)).toEqual([
+      "cycle:start",
+      "pair:consult",
+      "pair:score",
+      "pair:score-failure",
+      "cycle:end",
+    ]);
+    expect(r.timeline.find((t) => t.marker === "pair:score")?.label).toContain("pi 9/good");
+    expect(r.timeline.find((t) => t.marker === "pair:score-failure")?.label).toContain("reasonix");
+    expect(r.timeline.find((t) => t.marker === "pair:consult")?.label).toContain("claude reviewed");
+  });
+
   it("scopes by cycleId — other cycles' lifecycle/tcr drop, cycleId-less stay", () => {
     const mixed: RollEvent[] = [
       { type: "cycle:tcr", cycleId: "OTHER", commitHash: "x", message: "tcr: foreign", ts: 1005 },

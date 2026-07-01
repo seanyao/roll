@@ -371,6 +371,7 @@ interface CycleEventFacts {
   peer?: string;
   pairVerdicts: string[];
   attest?: string;
+  acceptedScore?: { peer: string; score: number; verdict: string };
 }
 
 function readEventFacts(projectPath: string): { events: RollEvent[]; byCycle: Map<string, CycleEventFacts>; prMergedBy: Map<string, number>; prOpenBy: Map<string, number>; prByCycle: Map<string, number> } {
@@ -404,6 +405,7 @@ function readEventFacts(projectPath: string): { events: RollEvent[]; byCycle: Ma
     events.push(e);
     if (e.type === "peer:gate") facts(e.cycleId).peer = e.verdict;
     else if (e.type === "pair:verdict") facts(e.cycleId).pairVerdicts.push(e.verdict);
+    else if (e.type === "pair:score") facts(e.cycleId).acceptedScore = { peer: e.peer, score: e.score, verdict: e.verdict };
     else if (e.type === "attest:gate") facts(e.cycleId).attest = e.verdict;
     else if (e.type === "pr:merge") prMergedBy.set(e.storyId, e.prNumber);
     else if (e.type === "pr:open") prOpenBy.set(e.storyId, e.prNumber);
@@ -471,9 +473,28 @@ function rowTape(row: Record<string, unknown>, verdict: CycleLedgerVerdict, ev: 
     seg("build", tcr > 0 ? `${tcr} commits` : "—", tcr > 0 ? "pass" : verdict === "idle" ? "idle" : "unknown"),
     seg(
       "peer",
-      ev?.pairVerdicts.length ? ev.pairVerdicts.join("/") : ev?.peer === "consulted" ? "consulted" : ev?.peer === "skipped" ? "skipped" : "—",
-      // kimi pair-review: a skipped peer gate is an idle segment, not an unknown.
-      ev?.pairVerdicts.includes("object") ? "fail" : ev?.pairVerdicts.length || ev?.peer === "consulted" ? "pass" : ev?.peer === "skipped" ? "idle" : "unknown",
+      (() => {
+        const parts: string[] = [];
+        if (ev?.acceptedScore !== undefined) {
+          parts.push(`score ${ev.acceptedScore.peer} ${ev.acceptedScore.score}/${ev.acceptedScore.verdict}`);
+        }
+        if (ev?.pairVerdicts.length) {
+          parts.push(ev.pairVerdicts.join("/"));
+        }
+        if (parts.length === 0) {
+          return ev?.peer === "consulted" ? "consulted" : ev?.peer === "skipped" ? "skipped" : "—";
+        }
+        return parts.join(" · ");
+      })(),
+      // US-OBS-045: an accepted score is a peer outcome; show it as pass unless
+      // a code-stage verdict objected. A skipped peer gate is idle, not unknown.
+      ev?.pairVerdicts.includes("object")
+        ? "fail"
+        : ev?.pairVerdicts.length || ev?.acceptedScore !== undefined || ev?.peer === "consulted"
+          ? "pass"
+          : ev?.peer === "skipped"
+            ? "idle"
+            : "unknown",
     ),
     seg("ci", ev?.attest === "produced" ? "attest ✓" : ev?.attest === "skipped" ? "attest skipped" : "—", ev?.attest === "produced" ? "pass" : ev?.attest === "skipped" ? "fail" : "unknown"),
     seg(

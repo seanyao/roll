@@ -1,0 +1,11 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`renderLegend > snapshot: legend is data-independent 1`] = `
+"Collab view — how to read
+Time spine uses a single epoch-ms axis (UTC).
+
+🧭 supervise   🧭 plan   🔨 build   🔎 peer   🎯 score   🔬 diagnose
+🚦 gates (attest/truth)   → handoff   ⤴ escalation
+▸agree   ▸good   ▸produced   ▸ok
+✓ walked full protocol   ✂ split   ⤴ escalated   🧭 supervisor fix"
+`;

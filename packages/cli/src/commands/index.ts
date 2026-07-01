@@ -43,7 +43,7 @@ import { loopGoCommand } from "./loop-go.js";
 import { loopRecoverCommand } from "./loop-recover.js";
 import { loopEventsCommand } from "./loop-events.js";
 import { loopAttachRetired, loopBranchesRetired, loopMonitorRetired } from "./loop-retired.js";
-import { doctorCommand } from "./doctor.js";
+import { doctorCommand, languageAuditCommand } from "./doctor.js";
 import { dreamCommand } from "./dream.js";
 import { gcCommand } from "./gc.js";
 import { ideaCommand } from "./idea.js";
@@ -141,8 +141,11 @@ export function registerAll(): void {
       if (isHelp(rest[0])) return skillsCommand(["help"]);
       return skillsCommand(["check", ...rest]);
     }
+    if (args[0] === "language") {
+      return languageAuditCommand(args.slice(1));
+    }
     return doctorCommand(args);
-  }, { help: "Usage: roll doctor [skills|--tools]\n  Environment + install diagnosis; --tools shows focused tool, physical screenshot, and permission preflight readiness.\n环境与安装体检；--tools 只看工具、真实截图与权限预检就绪度。" });
+  }, { help: "Usage: roll doctor [skills|language|--tools]\n  Environment + install diagnosis; --tools shows focused tool, physical screenshot, and permission preflight readiness.\n环境与安装体检；--tools 只看工具、真实截图与权限预检就绪度。" });
   // `attest`: the acceptance-evidence report (US-ATTEST-006) — v3-native, no
   // bash counterpart (additive; the evidence chain is new product surface).
   registerPorted("attest", attestCommand, { hidden: true });

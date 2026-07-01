@@ -92,6 +92,9 @@ export function resolveLanguageSurfacePolicy(
   if (/(^|\/)roll\.md$/.test(norm) || /(^|\/)AGENTS\.md$/.test(norm)) {
     return policyBase("backlog_spec", "zh");
   }
+  if (/(^|\/)\.roll\/features\//.test(norm) || /(^|\/)archive\//.test(norm)) {
+    return policyBase("backlog_spec", "zh");
+  }
   return policyBase("owner_conversation", "user");
 }
 

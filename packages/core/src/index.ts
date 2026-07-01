@@ -61,6 +61,7 @@ export * from "./loop/watch-render.js";
 export * from "./loop/watch-status.js";
 export * from "./policy/engine.js";
 export * from "./policy/self-tuning.js";
+export * from "./policy/language-surface.js";
 export * from "./reconcile/engine.js";
 export * from "./release/plan.js";
 export * from "./release/flow.js";

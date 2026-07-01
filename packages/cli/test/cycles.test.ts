@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { RollEvent } from "@roll/spec";
-import { cyclesCommand, cyclesLedgerJson, renderCyclesLedger, renderCycleDetail, cycleDetailJson, summaryBuckets } from "../src/commands/cycles.js";
+import { cyclesCommand, cyclesLedgerJson, renderCyclesLedger, renderCycleDetail, cycleDetailJson, summaryBuckets, reconciledLedger } from "../src/commands/cycles.js";
 import { collectCycleLedger, type CycleLedgerRow } from "../src/lib/cycle-ledger.js";
 import { stripAnsi } from "../src/render.js";
 
@@ -152,6 +152,103 @@ describe("roll cycles — US-CLI-012", () => {
       process.chdir(save);
     }
     expect(err).toContain("--detail needs a cycle id");
+  });
+});
+
+// ── FIX-1064: delivery projection keyed by cycle ID, not story ID ─────
+
+describe("FIX-1064 — delivery projection is cycle-ID-keyed, not story-ID-keyed", () => {
+  /** Build a project with two cycles for the same story: older unpublished
+   *  cycle + newer delivered cycle. Write delivery records that only list the
+   *  newer cycle as a `done` deliverer. The older cycle must NOT show as
+   *  delivered. */
+  function dualCycleProject(): string {
+    const p = mkdtempSync(join(tmpdir(), "roll-fix1064-"));
+    dirs.push(p);
+    mkdirSync(join(p, ".roll", "loop"), { recursive: true });
+    // Two cycles for the same story: old unpublished (local), new delivered (merged)
+    const runs = [
+      { cycle_id: "20260701-083818-66315", status: "local", outcome: "unpublished", story_id: "FIX-1064-story", agent: "codex", ts: "2026-07-01T08:38:18Z", duration_sec: 120, cost_usd: 0.02, tokens_in: 40000, tokens_out: 3000 },
+      { cycle_id: "20260701-085728-49332", status: "merged", outcome: "delivered", story_id: "FIX-1064-story", agent: "claude", ts: "2026-07-01T08:57:28Z", duration_sec: 300, cost_usd: 0.05, tokens_in: 100000, tokens_out: 18000 },
+    ];
+    writeFileSync(join(p, ".roll", "loop", "runs.jsonl"), runs.map((r) => JSON.stringify(r)).join("\n") + "\n");
+    // Delivery records: only the NEWER cycle has a `done` delivery record
+    const deliveries = [
+      { storyId: "FIX-1064-story", cycleId: "20260701-085728-49332", lifecycleState: "done", prNumber: { present: false, reason: "not_recorded" }, prUrl: { present: false, reason: "not_recorded" }, mergedAt: { present: false, reason: "not_recorded" }, mergeCommit: { present: false, reason: "not_recorded" }, recordedAt: Date.parse("2026-07-01T09:00:00Z") },
+    ];
+    writeFileSync(join(p, ".roll", "loop", "deliveries.jsonl"), deliveries.map((d) => JSON.stringify(d)).join("\n") + "\n");
+    return p;
+  }
+
+  it("AC1: only the delivering cycle shows as delivered; old unpublished keeps its own verdict", () => {
+    const p = dualCycleProject();
+    // Use the full reconciliation pipeline (same as cyclesCommand)
+    const rows = reconciledLedger(p);
+    const oldCycle = rows.find((r) => r.cycleId === "20260701-083818-66315");
+    expect(oldCycle).toBeDefined();
+    expect(oldCycle!.verdict).toBe("unpublished"); // reconciled: still unpublished
+    const newCycle = rows.find((r) => r.cycleId === "20260701-085728-49332");
+    expect(newCycle).toBeDefined();
+    expect(newCycle!.verdict).toBe("delivered"); // reconciled: still delivered
+  });
+
+  it("AC2: rendered output — old cycle keeps unpublished, new shows delivered", () => {
+    const p = dualCycleProject();
+    // Use the full reconciliation pipeline (same as cyclesCommand)
+    const rows = reconciledLedger(p);
+    const out = stripAnsi(renderCyclesLedger(rows, "all", "en", NOW));
+    // New cycle is delivered
+    expect(out).toContain("delivered");
+    // Old cycle keeps unpublished (not delivered!)
+    expect(out).toContain("unpublished");
+    // Summary shows 2 cycles · 1 delivered · 0 failed · 1 unpublished
+    expect(out).toContain("2 cycles");
+    expect(out).toContain("1 delivered");
+    expect(out).toContain("1 unpublished");
+  });
+
+  it("AC3: --json exposes per-cycle verdicts unchanged after reconcile", () => {
+    const p = dualCycleProject();
+    // Use the full reconciliation pipeline (same as cyclesCommand)
+    const rows = reconciledLedger(p);
+    const json = cyclesLedgerJson(rows, "all", NOW) as {
+      cycles: number; rows: Array<{ cycleId: string; verdict: string }>;
+    };
+    expect(json.cycles).toBe(2);
+    const oldRow = json.rows.find((r) => r.cycleId === "20260701-083818-66315");
+    expect(oldRow).toBeDefined();
+    expect(oldRow!.verdict).toBe("unpublished");
+    const newRow = json.rows.find((r) => r.cycleId === "20260701-085728-49332");
+    expect(newRow).toBeDefined();
+    expect(newRow!.verdict).toBe("delivered");
+  });
+
+  it("AC4: cyclesCommand --json agrees with reconciledLedger", async () => {
+    const p = dualCycleProject();
+    const save = process.cwd();
+    process.chdir(p);
+    const out: string[] = [];
+    const so = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((s: string) => (out.push(s), true)) as typeof process.stdout.write;
+    let status: number;
+    try {
+      status = cyclesCommand(["--since", "all", "--json", "--no-color"]);
+    } finally {
+      process.stdout.write = so;
+      process.chdir(save);
+    }
+    expect(status).toBe(0);
+    const parsed = JSON.parse(out.join("")) as {
+      cycles: number;
+      rows: Array<{ cycleId: string; verdict: string }>;
+    };
+    expect(parsed.cycles).toBe(2);
+    const oldRow = parsed.rows.find((r) => r.cycleId === "20260701-083818-66315");
+    expect(oldRow).toBeDefined();
+    expect(oldRow!.verdict).toBe("unpublished");
+    const newRow = parsed.rows.find((r) => r.cycleId === "20260701-085728-49332");
+    expect(newRow).toBeDefined();
+    expect(newRow!.verdict).toBe("delivered");
   });
 });
 

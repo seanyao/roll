@@ -208,6 +208,7 @@ export function cyclesLedgerJson(rows: CycleLedgerRow[], sinceLabel: string, now
       cycleId: r.cycleId,
       verdict: r.verdict,
       storyId: r.storyId,
+      agent: r.agent,
       model: r.model,
       tokens: tokensTotal(r.tokens),
       cost: r.cost,
@@ -298,12 +299,15 @@ export function renderCyclesLedger(rows: CycleLedgerRow[], sinceLabel: string, l
   const lines: string[] = [];
   for (const r of within) {
     const color = VERDICT_COLOR[r.verdict] ?? "muted";
+    // FIX-1066: always show Builder Agent and model together, never just model.
+    // Known model: "reasonix / deepseek-flash". Unknown model: "reasonix / —".
+    const agentModel = r.model ? `${r.agent} / ${r.model}` : `${r.agent} / —`;
     lines.push(
       [
         pad(`#${cycleNo(r.cycleId)}`, 7),
         pad(c(color, r.verdict), 13), // FIX-322: fits "pending_merge" (13)
         pad(r.storyId === "" ? "—" : r.storyId, 16),
-        pad(r.model, 19),
+        pad(agentModel, 26),
         pad(tokensTotal(r.tokens), 6),
         pad(r.cost, 7),
         r.duration,

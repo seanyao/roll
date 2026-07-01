@@ -252,6 +252,102 @@ describe("FIX-1064 — delivery projection is cycle-ID-keyed, not story-ID-keyed
   });
 });
 
+// ── FIX-1066: agent/model display in compact cycles rows ─────
+
+describe("FIX-1066 — agent/model display in cycles compact rows", () => {
+  /** Fixture with explicit agent + model combos. */
+  function agentModelProject(): string {
+    const p = mkdtempSync(join(tmpdir(), "roll-fix1066-"));
+    dirs.push(p);
+    mkdirSync(join(p, ".roll", "loop"), { recursive: true });
+    const runs = [
+      // AC2: Reasonix cycle
+      { cycle_id: "20260701-133601-96666", status: "merged", outcome: "delivered", story_id: "FIX-1064", agent: "reasonix", model: "deepseek-flash", ts: "2026-07-01T13:36:01Z", duration_sec: 1090, cost_usd: 0, tokens_in: 127000, tokens_out: 15000 },
+      // AC3: Kimi cycle
+      { cycle_id: "20260701-130000-96665", status: "merged", outcome: "delivered", story_id: "FIX-1060", agent: "kimi-code", model: "kimi-2.7", ts: "2026-07-01T13:00:00Z", duration_sec: 600, cost_usd: 0.10, tokens_in: 80000, tokens_out: 12000 },
+      // Claude with model
+      { cycle_id: "20260701-120000-96664", status: "merged", outcome: "delivered", story_id: "FIX-1055", agent: "claude", model: "claude-sonnet-4", ts: "2026-07-01T12:00:00Z", duration_sec: 300, cost_usd: 0.05, tokens_in: 50000, tokens_out: 8000 },
+      // AC4: Unknown model (only agent — env var agent, no model field)
+      { cycle_id: "20260701-110000-96663", status: "local", outcome: "unpublished", story_id: "FIX-1050", agent: "reasonix", ts: "2026-07-01T11:00:00Z", duration_sec: 120, cost_usd: 0.01, tokens_in: 10000, tokens_out: 1000 },
+      // AC6: Unknown agent (agent not matching any well-known name — must still show)
+      { cycle_id: "20260701-100000-96662", status: "failed", story_id: "REFACTOR-055", agent: "custom-agi", model: "my-model", ts: "2026-07-01T10:00:00Z", duration_sec: 60, cost_usd: 0, tokens_in: 5000, tokens_out: 500 },
+    ];
+    writeFileSync(join(p, ".roll", "loop", "runs.jsonl"), runs.map((r) => JSON.stringify(r)).join("\n") + "\n");
+    return p;
+  }
+
+  it("AC2: Reasonix shows as `reasonix / deepseek-flash`, not bare `deepseek-flash`", () => {
+    const p = agentModelProject();
+    const rows = collectCycleLedger(p);
+    const out = stripAnsi(renderCyclesLedger(rows, "all", "en", NOW));
+    expect(out).toContain("reasonix / deepseek-flash");
+    // The old bare model name should NOT appear where agent was meant to be
+    expect(out).not.toMatch(/^#\S+\s+\S+\s+\S+\s+deepseek-flash\s/m);
+  });
+
+  it("AC3: Kimi shows as `kimi-code / kimi-2.7`, not bare `kimi-2.7`", () => {
+    const p = agentModelProject();
+    const rows = collectCycleLedger(p);
+    const out = stripAnsi(renderCyclesLedger(rows, "all", "en", NOW));
+    expect(out).toContain("kimi-code / kimi-2.7");
+  });
+
+  it("AC4: Missing model shows agent / —", () => {
+    const p = agentModelProject();
+    const rows = collectCycleLedger(p);
+    const out = stripAnsi(renderCyclesLedger(rows, "all", "en", NOW));
+    expect(out).toContain("reasonix / —");
+  });
+
+  it("AC6: Unknown agent (custom-agi) still shows agent+model, not silently replaced", () => {
+    const p = agentModelProject();
+    const rows = collectCycleLedger(p);
+    const out = stripAnsi(renderCyclesLedger(rows, "all", "en", NOW));
+    expect(out).toContain("custom-agi / my-model");
+  });
+
+  it("AC1: Claude with model renders `claude / claude-sonnet-4`", () => {
+    const p = agentModelProject();
+    const rows = collectCycleLedger(p);
+    const out = stripAnsi(renderCyclesLedger(rows, "all", "en", NOW));
+    expect(out).toContain("claude / claude-sonnet-4");
+    // Summary line still shows correctly
+    expect(out).toContain("5 cycles");
+    expect(out).toContain("3 delivered");
+  });
+
+  it("AC5: --json exposes agent and model separately in each row", async () => {
+    const p = agentModelProject();
+    const save = process.cwd();
+    process.chdir(p);
+    const out: string[] = [];
+    const so = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((s: string) => (out.push(s), true)) as typeof process.stdout.write;
+    let status: number;
+    try {
+      status = cyclesCommand(["--since", "all", "--json", "--no-color"]);
+    } finally {
+      process.stdout.write = so;
+      process.chdir(save);
+    }
+    expect(status).toBe(0);
+    const parsed = JSON.parse(out.join("")) as { rows: Array<{ agent: string; model: string; cycleId: string }> };
+    const reasonix = parsed.rows.find((r) => r.agent === "reasonix");
+    expect(reasonix).toBeDefined();
+    expect(reasonix!.model).toBe("deepseek-flash");
+    const kimi = parsed.rows.find((r) => r.agent === "kimi-code");
+    expect(kimi).toBeDefined();
+    expect(kimi!.model).toBe("kimi-2.7");
+    // Empty model field when model is unknown
+    const noModel = parsed.rows.find((r) => r.agent === "reasonix" && r.model === "");
+    expect(noModel).toBeDefined();
+    // No row has agent mixed into model field
+    for (const row of parsed.rows) {
+      expect(row.model).not.toBe(row.agent);
+    }
+  });
+});
+
 describe("FIX-337 (AC2) — summaryBuckets: total === sum(buckets), every non-zero bucket shown", () => {
   // A hand-built ledger that carries EVERY verdict the summary can show, so the
   // old `5 delivered · 20 failed → 25 ≠ 28` divergence (an unpublished /

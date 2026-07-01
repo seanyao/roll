@@ -6,6 +6,8 @@
 - `roll supervisor repair-evidence` 现在能救回卡在证据门的绿 PR，不用手动合并或重跑整张卡 `[loop]`
 
 ### 文档与命名
+- **持续刷新的 loop 摘要不再叫 "Morning Report"**：这个从 events/runs 持续重建、窗口为最近 12 小时的 digest 不管白天还是夜里都在刷新，叫 "Morning Report" 会误导白天查看的运营者。现在改叫 Loop Digest（循环摘要），主路径换成 `.roll/reports/loop/latest.html`，Truth Console 上直接露出链接。旧的 `reports/morning/latest.html` 作为兼容别名继续写一版，已有链接不会断开。(FIX-1048) `[loop-observability]`
+
 
 - **两个核心概念改回更好记的名字**：项目级协调者从“Supervisor Agent”改名“Prime Agent”，交付一张 Story 的角色组合（规划/构建/评估）从“Story Execution Unit”改名“Delta Unit”。CLI 输出、文档、指南、宣传站、技能说明三端统一用新名。命令 `roll supervisor` 与内部代码标识符暂时保留原名作兼容，用户面一律读作 Prime Agent，下次大版本再评估是否连命令一起改。这是对 2026-06-27 一次改名的回退，回到 owner 更喜欢的原始命名。(REFACTOR-054)
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RollEvent } from "@roll/spec";
-import { renderWatchStatusFromEventLines, summarizeWatchEvents } from "../src/loop/watch-status.js";
+import { renderStoryTransition, renderWatchStatusFromEventLines, summarizeWatchEvents, type WatchStatusSummary } from "../src/loop/watch-status.js";
 
 function line(ev: RollEvent | Record<string, unknown>): string {
   return JSON.stringify(ev);
@@ -293,5 +293,80 @@ describe("watch-status — durable cycle lookup (FIX-382)", () => {
     expect(rendered).toContain("FIX-99");
     expect(rendered).toContain("codex");
     expect(rendered).not.toContain("US-OBS-027");
+  });
+});
+
+// ── US-OBS-044: story transition blocks ───────────────────────────────────────
+
+describe("renderStoryTransition — narrated story handoffs", () => {
+  const prev: WatchStatusSummary = {
+    cycleId: "20260630-20335",
+    storyId: "FIX-1049",
+    agent: "claude",
+    phase: "publish",
+    tcrCount: 3,
+    lastSignal: "cycle published_pending_merge",
+    lastSignalAt: 1_800_000_000_000,
+    hasEnd: true,
+    outcome: "published_pending_merge",
+    lastPr: { type: "pr:open", prNumber: 1049 },
+  };
+
+  const next: WatchStatusSummary = {
+    cycleId: "20260630-21005",
+    storyId: "FIX-1050",
+    agent: "kimi",
+    phase: "execute",
+    tcrCount: 0,
+    hasEnd: false,
+  };
+
+  it("renders a framed transition block when story/cycle changes", () => {
+    const block = renderStoryTransition(prev, next, {
+      storyBrief: (id) => (id === "FIX-1050" ? "reasonix/agy usage capture parity for cycle ledger" : undefined),
+      routeReason: (id) => (id === "FIX-1050" ? { agent: "kimi", reason: "current execute pool and route policy" } : undefined),
+      actionPlan: (id) => (id === "FIX-1050" ? "A1 parser fixture → A2 wiring → A3 ledger output → A4 evidence" : undefined),
+    });
+    expect(block).not.toBeNull();
+    const text = block!;
+    expect(text).toContain("↳ story transition");
+    expect(text).toContain("FIX-1049");
+    expect(text).toContain("published_pending_merge");
+    expect(text).toContain("3 TCR");
+    expect(text).toContain("builder claude");
+    expect(text).toContain("PR #1049 open");
+    expect(text).toContain("FIX-1050");
+    expect(text).toContain("reasonix/agy usage capture parity");
+    expect(text).toContain("kimi · selected by current execute pool and route policy");
+    expect(text).toContain("A1 parser fixture → A2 wiring → A3 ledger output → A4 evidence");
+    expect(text).toMatch(/^─{20,}/m);
+  });
+
+  it("degrades missing previous outcome to an explicit reason", () => {
+    const block = renderStoryTransition({ ...prev, hasEnd: false, outcome: undefined }, next);
+    expect(block).toContain("no end event recorded");
+  });
+
+  it("degrades missing route reason to an explicit unavailable reason", () => {
+    const block = renderStoryTransition(prev, next, {
+      storyBrief: (id) => (id === "FIX-1050" ? "next story brief" : undefined),
+    });
+    expect(block).toContain("kimi · route reason unavailable");
+  });
+
+  it("shows plan: pending when no action plan is available", () => {
+    const block = renderStoryTransition(prev, next, {
+      storyBrief: (id) => (id === "FIX-1050" ? "next story brief" : undefined),
+      routeReason: (id) => (id === "FIX-1050" ? { agent: "kimi", reason: "route policy" } : undefined),
+    });
+    expect(block).toContain("plan:     pending");
+  });
+
+  it("returns null for repeated heartbeats on the same story/cycle", () => {
+    expect(renderStoryTransition(prev, { ...prev })).toBeNull();
+  });
+
+  it("returns null when there is no previous summary (startup)", () => {
+    expect(renderStoryTransition(null as unknown as WatchStatusSummary, next)).toBeNull();
   });
 });

@@ -167,7 +167,15 @@ export async function streamThroughRenderer(
     const status = opts.status?.() ?? null;
     if (status !== null) {
       if (status !== lastStatus) {
-        out.write(`${hms()}  ${status}\n`);
+        // US-OBS-044: a status payload may carry a multi-line transition block
+        // followed by the single-line status summary. Prefix only the final line
+        // with the wall-clock timestamp; leading lines (transition framing) are
+        // emitted as-is so the handoff block is visually distinct.
+        const lines = status.split("\n");
+        for (let i = 0; i < lines.length - 1; i += 1) {
+          out.write(`${lines[i]}\n`);
+        }
+        out.write(`${hms()}  ${lines[lines.length - 1]}\n`);
         lastStatus = status;
       }
       return;

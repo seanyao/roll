@@ -78,6 +78,51 @@ describe("streamThroughRenderer — status heartbeat", () => {
     expect(lines[0]).toContain("quiet 5m");
     expect(lines[1]).toContain("quiet 6m");
   });
+
+  it("emits a multi-line status block with only the final status line timestamped (US-OBS-044)", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const chunks: string[] = [];
+    output.on("data", (chunk) => chunks.push(String(chunk)));
+
+    let calls = 0;
+    const done = streamThroughRenderer(input, output, {
+      agent: "claude",
+      verbose: false,
+      gapMs: 10,
+      status: () => {
+        calls += 1;
+        if (calls === 1) return "status  phase execute · quiet 5m · FIX-1049 · claude · cycle c1 · 1 TCR";
+        return [
+          "────────────────────────────────────────────────────────",
+          "↳ story transition",
+          "  previous: FIX-1049 · published_pending_merge · 1 TCR · builder claude",
+          "  next:     FIX-1050 · next story brief",
+          "  builder:  kimi · selected by route policy",
+          "  plan:     pending",
+          "────────────────────────────────────────────────────────",
+          "status  phase execute · quiet <1m · FIX-1050 · kimi · cycle c2 · 0 TCR",
+        ].join("\n");
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 45));
+    input.end();
+    await done;
+
+    const lines = chunks.join("").trim().split("\n").filter((line) => line !== "");
+    // Transition framing lines are emitted without a leading timestamp.
+    const transitionStart = lines.findIndex((l) => l.includes("↳ story transition"));
+    expect(transitionStart).toBeGreaterThan(0);
+    expect(lines[transitionStart - 1]).toMatch(/^─+$/);
+    // The status line that follows the transition block carries the wall-clock timestamp.
+    const statusAfter = lines.slice(transitionStart).find((l) => l.includes("status  phase execute · quiet <1m · FIX-1050"));
+    expect(statusAfter).toBeDefined();
+    expect(statusAfter).toMatch(/^\d{2}:\d{2}:\d{2}  status  phase execute · quiet <1m · FIX-1050 · kimi · cycle c2 · 0 TCR/);
+    // The earlier status for FIX-1049 also has a timestamp.
+    const firstStatus = lines.find((l) => l.includes("status  phase execute · quiet 5m · FIX-1049"));
+    expect(firstStatus).toMatch(/^\d{2}:\d{2}:\d{2}  status  phase execute · quiet 5m · FIX-1049 · claude · cycle c1 · 1 TCR/);
+  });
 });
 
 describe("FIX-313 — downstream agent presentation uses AgentSpec", () => {

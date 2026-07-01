@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   classifyEvidenceRepair,
   generateAcMap,
-  generateAttestReport,
   isEvidenceRepaired,
   repairedPrNumbers,
   type EvidenceRepairInput,
@@ -153,7 +152,7 @@ describe("generateAcMap", () => {
     expect(map).toHaveLength(3);
   });
 
-  it("sets status to claimed for every entry (never pass)", () => {
+  it("sets status to claimed for every entry (never pass) by default", () => {
     const map = generateAcMap("FIX-1058", acItems);
     for (const entry of map) {
       expect(entry.status).toBe("claimed");
@@ -168,10 +167,10 @@ describe("generateAcMap", () => {
 
   it("attaches caller-supplied evidence refs that textually match AC text", () => {
     const refs = [
-      { kind: "text", label: "cli-repair-evidence: recovery command validates PR eligibility" },
-      { kind: "text", label: "test-output: vitest passes for all classification variants" },
+      { kind: "text", label: "cli-repair-evidence: recovery command validates PR eligibility", textFile: "evidence/cli.txt" },
+      { kind: "text", label: "test-output: vitest passes for all classification variants", textFile: "evidence/test.txt" },
     ];
-    const map = generateAcMap("FIX-1058", [acItems[0]!], refs);
+    const map = generateAcMap("FIX-1058", [acItems[0]!], { evidenceRefs: refs });
     expect(map[0]!.evidence.length).toBeGreaterThanOrEqual(1);
   });
 
@@ -193,28 +192,77 @@ describe("generateAcMap", () => {
     expect(Array.isArray(parsed)).toBe(true);
     expect(parsed).toHaveLength(3);
   });
+
+  it("respects status: readonly with fallbackTextFile produces textFile in evidence", () => {
+    const map = generateAcMap("FIX-1058", [acItems[0]!], {
+      status: "readonly",
+      fallbackTextFile: "evidence/repair.txt",
+    });
+    expect(map[0]!.status).toBe("readonly");
+    expect(map[0]!.evidence[0]!.textFile).toBe("evidence/repair.txt");
+    expect(map[0]!.evidence[0]!.kind).toBe("text");
+  });
+
+  it("readonly without fallbackTextFile produces bare label (content predicate will reject)", () => {
+    const map = generateAcMap("FIX-1058", [acItems[0]!], { status: "readonly" });
+    expect(map[0]!.status).toBe("readonly");
+    expect(map[0]!.evidence[0]!.textFile).toBeUndefined();
+  });
+
+  it("status readonly with matching evidenceRefs that carry textFile passes content predicate", () => {
+    const refs = [
+      { kind: "text", label: "recovery command validates PR", textFile: "evidence/cli.txt" },
+    ];
+    const map = generateAcMap("FIX-1058", [acItems[0]!], { status: "readonly", evidenceRefs: refs });
+    expect(map[0]!.status).toBe("readonly");
+    // The matching ref has a textFile — acMapEvidenceIsReal would accept it.
+    const hasRealTextEvidence = map[0]!.evidence.some(
+      (ev) => ev.kind === "text" && typeof ev.textFile === "string" && ev.textFile !== "",
+    );
+    expect(hasRealTextEvidence).toBe(true);
+  });
 });
 
-describe("generateAttestReport", () => {
-  it("contains the story ID and PR number", () => {
-    const report = generateAttestReport("FIX-1058", "./ac-map.json", 1116);
-    expect(report).toContain("FIX-1058");
-    expect(report).toContain("#1116");
+describe("generateAcMap content predicate compliance", () => {
+  // The attest gate's acMapEvidenceIsReal() requires:
+  //   - kind="text" → textFile must be a non-empty string
+  //   - kind="ci"/"commit"/"deploy"/"test-pass" → always real (structural)
+  //   - kind="cast"/"video" → href must be a non-empty string
+  //   - kind="screenshot" → always real
+  // A positive AC (pass/readonly/partial) with no real evidence entry
+  // fails the content floor and the report is an empty shell.
+
+  it("readonly AC with text+textFile evidence passes content predicate", () => {
+    const map = generateAcMap("FIX-1058", [{ id: "AC1", text: "recovery command validates PR with repair log" }], {
+      status: "readonly",
+      evidenceRefs: [{ kind: "text", label: "repair log", textFile: "evidence/log.txt" }],
+    });
+    expect(map[0]!.status).toBe("readonly");
+    expect(map[0]!.evidence[0]!.kind).toBe("text");
+    expect(map[0]!.evidence[0]!.textFile).toBe("evidence/log.txt");
   });
 
-  it("mentions the ac-map path", () => {
-    const report = generateAttestReport("FIX-1058", "./ac-map.json", 1116);
-    expect(report).toContain("ac-map.json");
+  it("readonly AC with ci evidence always passes (structural kind)", () => {
+    const map = generateAcMap("FIX-1058", [{ id: "AC1", text: "PR is CI green and passed" }], {
+      status: "readonly",
+      evidenceRefs: [{ kind: "ci", label: "CI passed", textFile: "evidence/summary.txt" }],
+    });
+    expect(map[0]!.status).toBe("readonly");
+    expect(map[0]!.evidence[0]!.kind).toBe("ci");
   });
 
-  it("states that status is claimed (repaired evidence)", () => {
-    const report = generateAttestReport("FIX-1058", "./ac-map.json", 1116);
-    expect(report).toContain("claimed");
-    expect(report).toContain("repaired evidence");
+  it("readonly AC with fallbackTextFile carries real textFile for content predicate", () => {
+    const map = generateAcMap("FIX-1058", [{ id: "AC1", text: "unmatched" }], {
+      status: "readonly",
+      fallbackTextFile: "evidence/repair-summary.txt",
+    });
+    expect(map[0]!.evidence[0]!.kind).toBe("text");
+    expect(map[0]!.evidence[0]!.textFile).toBe("evidence/repair-summary.txt");
   });
 
-  it("includes evidence repair method description", () => {
-    const report = generateAttestReport("FIX-1058", "./ac-map.json", 1116);
-    expect(report).toContain("evidence repair");
+  it("claimed AC with bare label is correct (not positive, so gate skips it)", () => {
+    const map = generateAcMap("FIX-1058", [{ id: "AC1", text: "unmatched" }]);
+    expect(map[0]!.status).toBe("claimed");
+    expect(map[0]!.evidence[0]!.textFile).toBeUndefined();
   });
 });

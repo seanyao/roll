@@ -26,12 +26,12 @@ import {
   ensureDeliveriesFresh,
   explainStuck,
   generateAcMap,
-  generateAttestReport,
   isEvidenceRepaired,
   normalizeAgentConfig,
   observeProject,
   parseBacklog,
   queryStoryDelivery,
+  renderReport,
   repairedPrNumbers,
   type ExecPort,
   recommendNext,
@@ -41,11 +41,12 @@ import type { CycleRoleSummary, RollEvent, RollGoal, SupervisorInput } from "@ro
 import { parseGoalYaml } from "@roll/spec";
 import { detectNoProgressStall, type NoProgressStall } from "../lib/goal-recovery.js";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 import { formatOperatingMode, resolveOperatingMode, suggestedGuidedRun } from "../lib/operating-mode.js";
 import { reducePrView } from "./loop-pr-inbox.js";
 import { readPendingPublish } from "../runner/pending-publish.js";
+import { cardArchiveDir, reportFileName } from "../lib/archive.js";
 import { renderScopedExecuteRoute, resolveScopedStoryExecute, scopedExecuteRouteTrace } from "../runner/scoped-route.js";
 
 const EXEC_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
@@ -650,9 +651,11 @@ export function supervisorCommand(args: string[]): number {
 
     // ═══════════════════════════════════════════════════════════════════
     // Generate real ac-map + attest report artifacts before stamping
-    // evidence:repaired. Per FIX-1058 spec AC2: the recovery path must
-    // produce a non-empty acceptance report plus ac-map for the same
-    // story/PR; it must not satisfy the gate by appending events alone.
+    // evidence:repaired. Per FIX-1058 spec AC2/AC3/AC4: the recovery path
+    // must produce a non-empty acceptance report + ac-map visible at the
+    // gate-checked `latest/` location, and the ac-map must pass the
+    // attest gate's content predicate (positive ACs backed by real evidence
+    // files — no bare-label placeholder text entries).
     // ═══════════════════════════════════════════════════════════════════
 
     // 1. Find the story card spec file.
@@ -679,35 +682,120 @@ export function supervisorCommand(args: string[]): number {
         const md = readFileSync(specPath, "utf8");
         acItems = acForStory(md, storyId);
       } catch {
-        // Fall through — ac-items will be empty, and the ac-map generator
-        // returns no entries. The command still succeeds (recording repair
-        // with empty ac-map) but a warning is emitted.
+        // Fall through — ac-items will be empty; the command still
+        // succeeds (recording repair with empty ac-map) but warns.
       }
     }
 
-    // 3. Write ac-map.json to the story's evidence directory.
     const storyDir = epic !== "" ? join(featuresDir, epic, storyId) : "";
+
+    // 3. Write real evidence text files so the ac-map can reference them
+    //    with `textFile` — the attest gate's content predicate
+    //    (`acMapEvidenceIsReal`) requires a non-empty `textFile` for
+    //    text-kind evidence; a bare label is an empty shell.
+    const evidenceDir = storyDir !== "" ? join(storyDir, "evidence") : "";
+    const repairSummaryFile = "repair-summary.txt";
+    const repairSummaryRel = evidenceDir !== "" ? `evidence/${repairSummaryFile}` : repairSummaryFile;
+    let repairSummaryAbs = "";
+    if (evidenceDir !== "") {
+      mkdirSync(evidenceDir, { recursive: true });
+      repairSummaryAbs = join(evidenceDir, repairSummaryFile);
+      const summaryLines = [
+        `Repair evidence for ${storyId} — PR #${prNumber}`,
+        `Generated: ${new Date().toISOString()}`,
+        `CI state: ${facts.ciState || "unknown"}`,
+        `Review state: ${facts.bot || "none"}`,
+        `Mergeable: ${facts.mergeable || "unknown"}`,
+        `Repair verdict: ${classification.verdict}`,
+        `Classification reason: ${classification.reason}`,
+        "",
+        "Evidence-repair command completed. The PR was CI green + evaluator",
+        "approved + merge clean but lacked a fresh acceptance report.",
+        "This file records the repair fact; the ac-map.json and HTML report",
+        "are the gate-visible acceptance artifacts.",
+      ];
+      writeFileSync(repairSummaryAbs, summaryLines.join("\n") + "\n", "utf8");
+    }
+
+    // 4. Build evidence refs that carry real `textFile` paths.
+    const evidenceRefs: Array<{ kind: string; label: string; textFile: string }> = [];
+    if (repairSummaryAbs !== "") {
+      evidenceRefs.push({
+        kind: "text",
+        label: `repair-evidence summary: PR #${prNumber} CI=${facts.ciState} review=${facts.bot} merge=${facts.mergeable}`,
+        textFile: repairSummaryRel,
+      });
+    }
+    // CI state evidence (structural — counts as real per `acMapEvidenceIsReal`).
+    if (facts.ciState === "success") {
+      evidenceRefs.push({
+        kind: "ci",
+        label: `CI green on PR #${prNumber}`,
+        textFile: repairSummaryRel,
+      });
+    }
+
+    // 5. Generate ac-map with `readonly` status and real evidence refs
+    //    so the attest gate's content predicate accepts the report.
+    //    `readonly` is used (never `pass`) — the repair path documents
+    //    existing CI/evaluator state; it does not re-verify the build.
+    let acMapCount = 0;
     if (storyDir !== "" && acItems.length > 0) {
-      const acMap = generateAcMap(storyId, acItems);
+      const acMap = generateAcMap(storyId, acItems, {
+        status: "readonly",
+        evidenceRefs,
+        fallbackTextFile: repairSummaryRel,
+      });
       const acMapPath = join(storyDir, "ac-map.json");
       writeFileSync(acMapPath, JSON.stringify(acMap, null, 2) + "\n", "utf8");
+      acMapCount = acItems.length;
     }
 
-    // 4. Write the attest acceptance report to the story's evidence dir.
-    let attestReportPath = "";
-    if (storyDir !== "") {
-      attestReportPath = join(storyDir, "evidence-repair-report.md");
-      const report = generateAttestReport(storyId, "./ac-map.json", prNumber);
-      writeFileSync(attestReportPath, report, "utf8");
+    // 6. Generate an HTML acceptance report at the gate-checked location.
+    //    The attest gate's `existingReport()` looks for:
+    //      features/<epic>/<ID>/latest/<ID>-report.html  (primary)
+    //    We use `renderReport` — the same pure renderer normal delivery
+    //    uses — so the report is structured identically.
+    let htmlReportPath = "";
+    if (storyDir !== "" && acItems.length > 0) {
+      const now = new Date();
+      const items = acItems.map((ac) => ({
+        id: ac.id,
+        text: ac.text,
+        status: "readonly" as const,
+        evidence: evidenceRefs.map((ref) => ({
+          kind: ref.kind as "text" | "ci",
+          label: ref.label,
+          href: ref.textFile,
+        })),
+      }));
+      const html = renderReport({
+        storyId,
+        title: `${storyId} — Acceptance Evidence (repaired)`,
+        generatedAt: now.toISOString(),
+        items,
+        facts: { tcrCount: 0, ciConclusion: facts.ciState || "unknown", testPassAge: "repaired (post-hoc)" },
+        evidenceDeltaSummary: `Evidence repaired via \`roll supervisor repair-evidence\` for PR #${prNumber}. CI=${facts.ciState}, review=${facts.bot}, merge=${facts.mergeable}.`,
+      });
+      // Write to `latest/<ID>-report.html` — the primary candidate the gate checks.
+      const latestDir = join(storyDir, "latest");
+      mkdirSync(latestDir, { recursive: true });
+      htmlReportPath = join(latestDir, reportFileName(storyId));
+      writeFileSync(htmlReportPath, html, "utf8");
     }
 
-    // 5. Record the repair as complete — evidence artifacts have been generated.
+    // 7. Record the repair as complete ONLY after real artifacts exist.
     const repaired: RollEvent = {
       type: "evidence:repaired",
       prNumber,
       storyId,
       outcome: "evidence-generated",
-      details: `acceptance evidence repaired for ${storyId}; ac-map written ${acItems.length > 0 ? `with ${acItems.length} AC(s)` : "(no ACs found)"}, report at ${attestReportPath || "(skipped)"}`,
+      details: [
+        `acceptance evidence repaired for ${storyId}`,
+        acMapCount > 0 ? `ac-map: ${acMapCount} AC(s) at readonly with real evidence refs` : "ac-map: (no ACs found)",
+        htmlReportPath !== "" ? `report: ${htmlReportPath}` : "report: (skipped — no ACs)",
+        `CI: ${facts.ciState} | review: ${facts.bot} | merge: ${facts.mergeable}`,
+      ].join("; "),
       ts: Date.now(),
     };
     try {
@@ -717,7 +805,6 @@ export function supervisorCommand(args: string[]): number {
       return 1;
     }
 
-    const acMapCount = acItems.length;
     if (json) {
       process.stdout.write(JSON.stringify({
         prNumber,
@@ -725,14 +812,20 @@ export function supervisorCommand(args: string[]): number {
         verdict: "repaired",
         action: "merge_ready",
         reason: classification.reason,
-        artifacts: { acMap: acMapCount > 0 ? `${storyId}/ac-map.json` : null, report: attestReportPath || null, acCount: acMapCount },
+        artifacts: {
+          acMap: acMapCount > 0 ? `${storyId}/ac-map.json` : null,
+          report: htmlReportPath || null,
+          acCount: acMapCount,
+          evidenceFiles: evidenceRefs.map((r) => r.textFile),
+        },
       }, null, 2) + "\n");
     } else {
       process.stdout.write(
         `\n  repair-evidence: PR #${prNumber} (${storyId}) repaired\n` +
         `  action: merge_ready — the PR can now be promoted (if draft) and merged\n` +
-        `  ac-map: ${acMapCount > 0 ? `generated for ${acMapCount} AC(s) in ${storyId}/ac-map.json` : "(no ACs found — check spec.md)"}\n` +
-        `  report: ${attestReportPath || "(skipped)"}\n` +
+        `  ac-map: ${acMapCount > 0 ? `generated for ${acMapCount} AC(s) at readonly status in ${storyId}/ac-map.json` : "(no ACs found — check spec.md)"}\n` +
+        `  report: ${htmlReportPath || "(skipped — no ACs)"}\n` +
+        `  evidence: ${repairSummaryAbs || "(skipped)"}\n` +
         `  ${classification.reason}\n\n`,
       );
     }

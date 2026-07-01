@@ -233,7 +233,7 @@ export function prHealWritableRoots(wt: string): string[] {
   return roots;
 }
 
-function takeHealLock(num: string): void {
+export function takeHealLock(num: string): void {
   try {
     mkdirSync(healDir(), { recursive: true });
     writeFileSync(lockPath(num), String(process.pid));
@@ -242,7 +242,7 @@ function takeHealLock(num: string): void {
   }
 }
 
-function releaseHealLock(num: string): void {
+export function releaseHealLock(num: string): void {
   try {
     rmSync(lockPath(num), { force: true });
   } catch {

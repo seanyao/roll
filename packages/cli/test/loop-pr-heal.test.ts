@@ -4,7 +4,7 @@
  * side-effect routing via injected deps (no git/gh/agent/fs).
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -15,6 +15,8 @@ import {
   prHealSelf,
   prHealWritableRoots,
   prRebaseStale,
+  releaseHealLock,
+  takeHealLock,
 } from "../src/commands/loop-pr-heal.js";
 
 function healDeps(over: Partial<HealDeps> = {}): { deps: HealDeps; calls: string[]; counts: Record<string, number> } {
@@ -195,5 +197,24 @@ describe("FIX-1065 — PR self-heal writable roots + failure classification", ()
     expect(isSandboxCommitBlock("Error: test failed with 1 failure")).toBe(false);
     expect(isSandboxCommitBlock("gh: Authentication failed (HTTP 401)")).toBe(false);
     expect(isSandboxCommitBlock("network error: connection refused")).toBe(false);
+  });
+
+  it("takeHealLock/releaseHealLock manage the per-PR lock file", () => {
+    const prev = process.env["ROLL_LOOP_DIR"];
+    const base = mkdtempSync(join(tmpdir(), "roll-heal-lock-"));
+    process.env["ROLL_LOOP_DIR"] = base;
+    try {
+      const num = "1125";
+      takeHealLock(num);
+      const p = join(base, "heal", `pr-${num}.lock`);
+      expect(existsSync(p)).toBe(true);
+      expect(readFileSync(p, "utf8").trim()).toBe(String(process.pid));
+      releaseHealLock(num);
+      expect(existsSync(p)).toBe(false);
+    } finally {
+      if (prev === undefined) delete process.env["ROLL_LOOP_DIR"];
+      else process.env["ROLL_LOOP_DIR"] = prev;
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 });

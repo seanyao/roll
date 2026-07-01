@@ -239,3 +239,106 @@ export function renderWatchStatusFromEventLines(lines: readonly string[], nowMs:
   const summary = summarizeWatchEvents(lines, durableLookup);
   return summary === null ? null : renderWatchStatusSummary(summary, nowMs);
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// US-OBS-044 — narrated story transition blocks in live loop watch.
+// ════════════════════════════════════════════════════════════════════════════
+
+/** Optional context for richer story handoffs. All resolvers are pure lookups;
+ *  when a fact is missing the renderer degrades to an explicit unavailable reason. */
+export interface StoryTransitionContext {
+  /** One-line backlog description or spec summary for a story id. */
+  storyBrief?: (storyId: string) => string | undefined;
+  /** Selected Builder + route reason for the new story. */
+  routeReason?: (storyId: string) => { agent: string; reason: string } | undefined;
+  /** Concise expected action list, if one has been planned. */
+  actionPlan?: (storyId: string) => string | undefined;
+}
+
+/** A real transition is when the active cycle or story changed. The first status
+ *  snapshot (no previous) never prints a transition block. */
+export function shouldRenderStoryTransition(
+  previous: WatchStatusSummary | null | undefined,
+  current: WatchStatusSummary,
+): boolean {
+  if (previous === null || previous === undefined) return false;
+  if (current.cycleId !== undefined && previous.cycleId !== current.cycleId) return true;
+  if (current.storyId !== undefined && previous.storyId !== current.storyId) return true;
+  return false;
+}
+
+const TRANSITION_WIDTH = 56;
+
+function transitionFrame(): string {
+  return "─".repeat(TRANSITION_WIDTH);
+}
+
+function previousTransitionLine(previous: WatchStatusSummary): string {
+  const parts: string[] = [];
+  if (previous.storyId !== undefined && previous.storyId !== "") {
+    parts.push(previous.storyId);
+  }
+  if (previous.hasEnd) {
+    parts.push(previous.outcome ?? "unknown");
+  } else {
+    parts.push("no end event recorded");
+  }
+  parts.push(`${previous.tcrCount} TCR`);
+  if (previous.agent !== undefined && previous.agent !== "") {
+    parts.push(`builder ${previous.agent}`);
+  }
+  if (previous.lastPr !== undefined) {
+    parts.push(`PR #${previous.lastPr.prNumber} ${prStateLabel(previous.lastPr.type)}`);
+  }
+  return `  previous: ${parts.join(" · ")}`;
+}
+
+function nextTransitionLine(current: WatchStatusSummary, ctx?: StoryTransitionContext): string {
+  const story = current.storyId !== undefined && current.storyId !== "" ? current.storyId : "story unknown";
+  const brief =
+    current.storyId !== undefined && current.storyId !== ""
+      ? (ctx?.storyBrief?.(current.storyId) ?? "brief unavailable")
+      : "brief unavailable";
+  return `  next:     ${story} · ${brief}`;
+}
+
+function builderTransitionLine(current: WatchStatusSummary, ctx?: StoryTransitionContext): string {
+  const route =
+    current.storyId !== undefined && current.storyId !== ""
+      ? ctx?.routeReason?.(current.storyId)
+      : undefined;
+  if (route !== undefined) {
+    return `  builder:  ${route.agent} · selected by ${route.reason}`;
+  }
+  const agent = current.agent !== undefined && current.agent !== "" ? current.agent : "agent unknown";
+  return `  builder:  ${agent} · route reason unavailable`;
+}
+
+function planTransitionLine(current: WatchStatusSummary, ctx?: StoryTransitionContext): string {
+  const plan =
+    current.storyId !== undefined && current.storyId !== ""
+      ? (ctx?.actionPlan?.(current.storyId) ?? "pending")
+      : "pending";
+  return `  plan:     ${plan}`;
+}
+
+/** Render a visually separated transition block, or `null` when there is no
+ *  real story/cycle change. Missing facts degrade to explicit unavailable reasons
+ *  rather than guesses. */
+export function renderStoryTransition(
+  previous: WatchStatusSummary,
+  current: WatchStatusSummary,
+  ctx?: StoryTransitionContext,
+): string | null {
+  if (!shouldRenderStoryTransition(previous, current)) return null;
+  const frame = transitionFrame();
+  return [
+    frame,
+    "↳ story transition",
+    previousTransitionLine(previous),
+    nextTransitionLine(current, ctx),
+    builderTransitionLine(current, ctx),
+    planTransitionLine(current, ctx),
+    frame,
+  ].join("\n");
+}

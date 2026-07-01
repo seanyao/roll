@@ -11,18 +11,34 @@
  * PR state, CI state, evaluator state, and event stream.
  */
 
+/** The evaluator source that satisfied (or failed to satisfy) the repair gate. */
+export type EvaluatorSource = "github-review" | "roll-score" | "none";
+
 /** The possible evidence-repair classifications for an open PR. */
 export type EvidenceRepairClassification =
-  | { verdict: "reparable"; reason: string }
+  | { verdict: "reparable"; reason: string; evaluatorSource: EvaluatorSource }
   | { verdict: "already_repaired"; reason: string }
   | { verdict: "not_reparable"; reason: string }
   | { verdict: "no_gap"; reason: string };
+
+/**
+ * FIX-1061 — a Roll evaluator score resolved from the loop's own evidence
+ * (peer `cycle-<id>.score.pair.json` artifact or a `pair:score` event) rather
+ * than from a GitHub review. Loop-created manual-merge PRs carry their
+ * authoritative evaluator verdict here, not as a GitHub review.
+ */
+export interface RollEvaluatorScore {
+  /** Integer 1..10 review score. */
+  score: number;
+  /** `good` | `ok` | `regression` (case-insensitive; other values are rejected). */
+  verdict: string;
+}
 
 /** Inputs for {@link classifyEvidenceRepair}. */
 export interface EvidenceRepairInput {
   /** The PR's CI status — "success", "failure", "pending", or "unknown". */
   ciState: string;
-  /** The PR's evaluator review state — "APPROVED", "CHANGES_REQUESTED", etc. */
+  /** The PR's GitHub review state — "APPROVED", "CHANGES_REQUESTED", "none", etc. */
   reviewState: string;
   /** Whether the PR's merge is clean ("CLEAN", "BEHIND", "DIRTY", "CONFLICTING"). */
   mergeable: string;
@@ -32,6 +48,98 @@ export interface EvidenceRepairInput {
   hasFreshReport: boolean;
   /** True iff an `evidence:repaired` event already exists for this PR. */
   alreadyRepaired: boolean;
+  /** FIX-1061 — Roll evaluator score for the PR's cycle, used when the GitHub
+   *  review is empty. Absent/null when no Roll evaluator evidence was found. */
+  rollEvaluatorScore?: RollEvaluatorScore | null;
+}
+
+/**
+ * FIX-1061 — the review-score low threshold the attest gate uses
+ * (`evaluateReviewScoreGate` in `@roll/cli`): a `regression` verdict is rejected,
+ * an `ok` verdict must clear this threshold, and `good` passes at any score.
+ * Duplicated as a local constant so this pure core module keeps zero deps on the
+ * CLI package; the value MUST stay in lockstep with `REVIEW_SCORE_LOW_THRESHOLD`.
+ */
+const REVIEW_SCORE_LOW_THRESHOLD = 5;
+
+/**
+ * Whether a Roll evaluator score meets the SAME acceptance bar the attest
+ * review-score gate applies: `regression` is rejected, an `ok` verdict must
+ * score above the low threshold, `good` passes at any (finite) score, and any
+ * other/unparseable verdict is conservatively rejected.
+ */
+export function isAcceptedRollScore(score: RollEvaluatorScore | null | undefined): boolean {
+  if (score === null || score === undefined) return false;
+  if (typeof score.score !== "number" || !Number.isFinite(score.score)) return false;
+  const verdict = score.verdict.trim().toLowerCase();
+  if (verdict === "regression") return false;
+  if (verdict === "good") return true;
+  if (verdict === "ok") return score.score > REVIEW_SCORE_LOW_THRESHOLD;
+  return false;
+}
+
+/** The resolved evaluator approval decision for a PR. */
+export interface EvaluatorApproval {
+  approved: boolean;
+  source: EvaluatorSource;
+  detail: string;
+}
+
+/**
+ * FIX-1061 — resolve whether a PR has evaluator approval from EITHER source:
+ * a GitHub review `APPROVED`, OR an accepted Roll evaluator score. GitHub review
+ * remains valid, but its ABSENCE must not erase a valid Roll evaluator score.
+ * The returned `source`/`detail` make the deciding evidence explicit.
+ */
+export function resolveEvaluatorApproval(input: {
+  reviewState: string;
+  rollEvaluatorScore?: RollEvaluatorScore | null;
+}): EvaluatorApproval {
+  if (input.reviewState === "APPROVED") {
+    return { approved: true, source: "github-review", detail: "GitHub review APPROVED" };
+  }
+  if (isAcceptedRollScore(input.rollEvaluatorScore)) {
+    const s = input.rollEvaluatorScore as RollEvaluatorScore;
+    return {
+      approved: true,
+      source: "roll-score",
+      detail: `Roll evaluator score ${s.score}/10 (${s.verdict})`,
+    };
+  }
+  const gh = `GitHub review=${input.reviewState || "none"}`;
+  const roll =
+    input.rollEvaluatorScore === null || input.rollEvaluatorScore === undefined
+      ? "no Roll evaluator score"
+      : `Roll evaluator score ${input.rollEvaluatorScore.score}/10 (${input.rollEvaluatorScore.verdict}) below acceptance`;
+  return { approved: false, source: "none", detail: `${gh}; ${roll}` };
+}
+
+/**
+ * FIX-1061 — extract the loop cycle id from a PR head branch name
+ * (`loop/cycle-<id>`). Returns null for a non-loop branch. This is the primary
+ * link from a manual-merge PR to its Roll evaluator score artifact.
+ */
+export function cycleIdFromBranch(headRefName: string | undefined | null): string | null {
+  if (typeof headRefName !== "string") return null;
+  const m = /^loop\/cycle-(.+)$/.exec(headRefName.trim());
+  const id = m?.[1] ?? "";
+  return id !== "" ? id : null;
+}
+
+/**
+ * FIX-1061 — parse a Roll peer score artifact (`cycle-<id>.score.pair.json`) or
+ * `pair:score` event payload into a {@link RollEvaluatorScore}. Fail-closed:
+ * returns null when the object lacks a finite numeric `score` or a non-empty
+ * string `verdict`, so an unparseable artifact never masquerades as approval.
+ */
+export function parseRollScoreArtifact(raw: unknown): RollEvaluatorScore | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const o = raw as Record<string, unknown>;
+  const score = o["score"];
+  const verdict = o["verdict"];
+  if (typeof score !== "number" || !Number.isFinite(score)) return null;
+  if (typeof verdict !== "string" || verdict.trim() === "") return null;
+  return { score, verdict };
 }
 
 /**
@@ -57,8 +165,14 @@ export function classifyEvidenceRepair(input: EvidenceRepairInput): EvidenceRepa
   if (input.ciState !== "success") {
     return { verdict: "not_reparable", reason: `CI is not green (${input.ciState}); evidence repair cannot fix CI` };
   }
-  if (input.reviewState !== "APPROVED") {
-    return { verdict: "not_reparable", reason: `evaluator has not approved (${input.reviewState}); evidence repair cannot replace evaluator review` };
+  // FIX-1061 — evaluator approval comes from EITHER a GitHub review OR an accepted
+  // Roll evaluator score; an empty GitHub review must not erase a valid Roll score.
+  const approval = resolveEvaluatorApproval({
+    reviewState: input.reviewState,
+    rollEvaluatorScore: input.rollEvaluatorScore,
+  });
+  if (!approval.approved) {
+    return { verdict: "not_reparable", reason: `evaluator has not approved (${approval.detail}); evidence repair cannot replace evaluator review` };
   }
   if (input.mergeable !== "CLEAN") {
     return { verdict: "not_reparable", reason: `merge is not clean (${input.mergeable}); evidence repair cannot resolve merge conflicts` };
@@ -74,12 +188,13 @@ export function classifyEvidenceRepair(input: EvidenceRepairInput): EvidenceRepa
     return { verdict: "no_gap", reason: "fresh acceptance report exists; no evidence gap to repair" };
   }
 
-  // Reparable: green PR, approved evaluator, clean merge, but no fresh report.
+  // Reparable: green PR, approved evaluator (GitHub review or Roll score), clean
+  // merge, but no fresh report.
+  const who = input.isDraft ? "draft PR" : "PR";
   return {
     verdict: "reparable",
-    reason: input.isDraft
-      ? "draft PR is CI green + evaluator approved + merge clean but lacks a fresh acceptance report"
-      : "PR is CI green + evaluator approved + merge clean but lacks a fresh acceptance report",
+    evaluatorSource: approval.source,
+    reason: `${who} is CI green + evaluator approved (${approval.detail}) + merge clean but lacks a fresh acceptance report`,
   };
 }
 

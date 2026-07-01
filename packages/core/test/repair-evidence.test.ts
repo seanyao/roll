@@ -1,9 +1,13 @@
 import { describe, it, expect } from "vitest";
 import {
   classifyEvidenceRepair,
+  cycleIdFromBranch,
   generateAcMap,
+  isAcceptedRollScore,
   isEvidenceRepaired,
+  parseRollScoreArtifact,
   repairedPrNumbers,
+  resolveEvaluatorApproval,
   type EvidenceRepairInput,
 } from "../src/supervisor/repair-evidence.js";
 
@@ -83,6 +87,135 @@ describe("classifyEvidenceRepair", () => {
   it("returns not_reparable when mergeable is DIRTY", () => {
     const result = classifyEvidenceRepair(input({ mergeable: "DIRTY" }));
     expect(result.verdict).toBe("not_reparable");
+  });
+
+  // ── FIX-1061: Roll evaluator score is a valid approval source ──────────────
+
+  it("PR #1116 shape: empty GitHub review + Roll score 9/good is reparable via roll-score", () => {
+    const result = classifyEvidenceRepair(
+      input({ reviewState: "none", rollEvaluatorScore: { score: 9, verdict: "good" } }),
+    );
+    expect(result.verdict).toBe("reparable");
+    if (result.verdict === "reparable") {
+      expect(result.evaluatorSource).toBe("roll-score");
+      expect(result.reason).toContain("9/10");
+    }
+  });
+
+  it("GitHub review APPROVED still wins even without a Roll score (source github-review)", () => {
+    const result = classifyEvidenceRepair(input({ reviewState: "APPROVED" }));
+    expect(result.verdict).toBe("reparable");
+    if (result.verdict === "reparable") expect(result.evaluatorSource).toBe("github-review");
+  });
+
+  it("empty GitHub review AND no Roll score remains not_reparable (fail loud)", () => {
+    const result = classifyEvidenceRepair(input({ reviewState: "none", rollEvaluatorScore: null }));
+    expect(result.verdict).toBe("not_reparable");
+    expect(result.reason).toContain("evaluator");
+  });
+
+  it("Roll regression verdict does NOT approve (stays not_reparable)", () => {
+    const result = classifyEvidenceRepair(
+      input({ reviewState: "none", rollEvaluatorScore: { score: 9, verdict: "regression" } }),
+    );
+    expect(result.verdict).toBe("not_reparable");
+  });
+
+  it("Roll ok verdict at low score (≤5) does NOT approve", () => {
+    const result = classifyEvidenceRepair(
+      input({ reviewState: "none", rollEvaluatorScore: { score: 4, verdict: "ok" } }),
+    );
+    expect(result.verdict).toBe("not_reparable");
+  });
+
+  it("Roll ok verdict above the low threshold (>5) approves", () => {
+    const result = classifyEvidenceRepair(
+      input({ reviewState: "none", rollEvaluatorScore: { score: 7, verdict: "ok" } }),
+    );
+    expect(result.verdict).toBe("reparable");
+  });
+
+  it("Roll evaluator score never bypasses red CI", () => {
+    const result = classifyEvidenceRepair(
+      input({ ciState: "failure", reviewState: "none", rollEvaluatorScore: { score: 9, verdict: "good" } }),
+    );
+    expect(result.verdict).toBe("not_reparable");
+    expect(result.reason).toContain("CI");
+  });
+
+  it("Roll evaluator score never bypasses a dirty merge", () => {
+    const result = classifyEvidenceRepair(
+      input({ mergeable: "CONFLICTING", reviewState: "none", rollEvaluatorScore: { score: 9, verdict: "good" } }),
+    );
+    expect(result.verdict).toBe("not_reparable");
+    expect(result.reason).toContain("merge");
+  });
+});
+
+describe("isAcceptedRollScore", () => {
+  it("accepts good at any finite score", () => {
+    expect(isAcceptedRollScore({ score: 1, verdict: "good" })).toBe(true);
+    expect(isAcceptedRollScore({ score: 9, verdict: "GOOD" })).toBe(true);
+  });
+  it("accepts ok only above the low threshold", () => {
+    expect(isAcceptedRollScore({ score: 6, verdict: "ok" })).toBe(true);
+    expect(isAcceptedRollScore({ score: 5, verdict: "ok" })).toBe(false);
+  });
+  it("rejects regression regardless of score", () => {
+    expect(isAcceptedRollScore({ score: 10, verdict: "regression" })).toBe(false);
+  });
+  it("rejects null/undefined/unparseable", () => {
+    expect(isAcceptedRollScore(null)).toBe(false);
+    expect(isAcceptedRollScore(undefined)).toBe(false);
+    expect(isAcceptedRollScore({ score: Number.NaN, verdict: "good" })).toBe(false);
+    expect(isAcceptedRollScore({ score: 9, verdict: "mystery" })).toBe(false);
+  });
+});
+
+describe("resolveEvaluatorApproval", () => {
+  it("prefers GitHub review APPROVED with github-review source", () => {
+    const a = resolveEvaluatorApproval({ reviewState: "APPROVED" });
+    expect(a).toEqual({ approved: true, source: "github-review", detail: "GitHub review APPROVED" });
+  });
+  it("falls back to an accepted Roll score with roll-score source", () => {
+    const a = resolveEvaluatorApproval({ reviewState: "none", rollEvaluatorScore: { score: 9, verdict: "good" } });
+    expect(a.approved).toBe(true);
+    expect(a.source).toBe("roll-score");
+    expect(a.detail).toContain("9/10");
+  });
+  it("reports not approved and names both missing sources", () => {
+    const a = resolveEvaluatorApproval({ reviewState: "none", rollEvaluatorScore: null });
+    expect(a.approved).toBe(false);
+    expect(a.source).toBe("none");
+    expect(a.detail).toContain("GitHub review=none");
+    expect(a.detail).toContain("no Roll evaluator score");
+  });
+});
+
+describe("cycleIdFromBranch", () => {
+  it("extracts the cycle id from a loop branch", () => {
+    expect(cycleIdFromBranch("loop/cycle-20260701-020926-45747")).toBe("20260701-020926-45747");
+  });
+  it("returns null for non-loop branches and bad input", () => {
+    expect(cycleIdFromBranch("main")).toBeNull();
+    expect(cycleIdFromBranch("loop/cycle-")).toBeNull();
+    expect(cycleIdFromBranch(undefined)).toBeNull();
+    expect(cycleIdFromBranch(null)).toBeNull();
+  });
+});
+
+describe("parseRollScoreArtifact", () => {
+  it("parses the PR #1116 score.pair.json shape", () => {
+    const raw = { cycleId: "20260701-020926-45747", peer: "pi", stage: "score", score: 9, verdict: "good" };
+    expect(parseRollScoreArtifact(raw)).toEqual({ score: 9, verdict: "good" });
+  });
+  it("fails closed on missing/invalid score or verdict", () => {
+    expect(parseRollScoreArtifact({ verdict: "good" })).toBeNull();
+    expect(parseRollScoreArtifact({ score: 9 })).toBeNull();
+    expect(parseRollScoreArtifact({ score: "9", verdict: "good" })).toBeNull();
+    expect(parseRollScoreArtifact({ score: 9, verdict: "" })).toBeNull();
+    expect(parseRollScoreArtifact(null)).toBeNull();
+    expect(parseRollScoreArtifact("nope")).toBeNull();
   });
 });
 

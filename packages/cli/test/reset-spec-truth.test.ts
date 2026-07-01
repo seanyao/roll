@@ -218,4 +218,40 @@ describe("cleanStaleEvidence", () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-clean-evidence-missing-")));
     expect(() => cleanStaleEvidence(root, "FIX-MISSING", "c1")).not.toThrow();
   });
+
+  it("FIX-1063: preserves standard evidence paths for a published_pending_merge terminal", () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-clean-evidence-pending-")));
+    const storyId = "FIX-1063";
+    const cardDir = join(root, ".roll", "features", "loop-engine", storyId);
+    const latestDir = join(cardDir, "latest");
+    mkdirSync(latestDir, { recursive: true });
+
+    writeFileSync(join(cardDir, "ac-map.json"), '[{"ac":"FIX-1063:AC1","status":"pass"}]', "utf8");
+    writeFileSync(join(latestDir, "FIX-1063-report.html"), "<html>passing report</html>", "utf8");
+
+    cleanStaleEvidence(root, storyId, "20260701-085728-49332", "published_pending_merge");
+
+    expect(existsSync(join(cardDir, "ac-map.json"))).toBe(true);
+    expect(existsSync(join(latestDir, "FIX-1063-report.html"))).toBe(true);
+    expect(existsSync(join(cardDir, "failed-diagnostics"))).toBe(false);
+  });
+
+  it("FIX-1063: still archives evidence as failed-diagnostics for a failed terminal", () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-clean-evidence-failed-")));
+    const storyId = "FIX-1063";
+    const cardDir = join(root, ".roll", "features", "loop-engine", storyId);
+    const latestDir = join(cardDir, "latest");
+    mkdirSync(latestDir, { recursive: true });
+
+    writeFileSync(join(cardDir, "ac-map.json"), '[{"ac":"FIX-1063:AC1","status":"claimed"}]', "utf8");
+    writeFileSync(join(latestDir, "FIX-1063-report.html"), "<html>failing report</html>", "utf8");
+
+    cleanStaleEvidence(root, storyId, "20260701-085728-49332", "failed");
+
+    expect(existsSync(join(cardDir, "ac-map.json"))).toBe(false);
+    expect(existsSync(latestDir)).toBe(false);
+    expect(existsSync(join(cardDir, "failed-diagnostics", "ac-map.json"))).toBe(true);
+    expect(existsSync(join(cardDir, "failed-diagnostics", "FIX-1063-report.html"))).toBe(true);
+    expect(readFileSync(join(cardDir, "failed-diagnostics", "README.md"), "utf8")).toContain("Failed-cycle diagnostics");
+  });
 });

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v4.702.4 — 2026-07-02
+
 ### 可见性
 - `roll design` 默认输出现在会实时显示有界进展、逐张建卡事件和静默心跳，同时继续把完整原始输出写入 transcript；`--verbose` 与 `--raw` 也改为运行中实时输出，不再等 agent 退出后回放（FIX-1071）`[legacy-onboard]`
 

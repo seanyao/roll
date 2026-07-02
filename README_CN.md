@@ -49,6 +49,21 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 backlog 和 Roll 标记，只打印一个最合适的下一步命令，而不是让用户自己猜。
 第一次跑建议从[快速上手](guide/zh/getting-started.md)开始。
 
+## 语言表面
+
+Roll 的用户表面一次只显示一种语言。`ROLL_LANG=en|zh` 固定当前进程语言，
+`roll config lang en|zh` 持久保存偏好，`roll config lang --reset` 回到系统语言探测。
+临时查看帮助可用 `roll help --lang en|zh`；`roll doctor language` 用来审计文档、约定、
+skills 与生成页面的语言漂移。
+
+Agent 契约、代码注释、git 元数据和 TypeScript 标识符属于 harness 契约层，保持英文。
+与 owner 的对话跟随 owner 使用的语言。用户文档放在 `guide/en/` 与 `guide/zh/`
+两套 locale 文件中；贡献者应更新对应 locale 文件或 i18n catalog，不要把翻译对写进同一个
+渲染表面。当前语言控制的快照证据在
+`packages/cli/test/cli-language-surface.test.ts`、
+`packages/cli/test/__snapshots__/cli-language-surface.test.ts.snap` 和
+`packages/cli/test/doctor-language.test.ts`。
+
 ## V4 Agent 执行模型
 
 Roll V4 使用同一个递归领域模型：

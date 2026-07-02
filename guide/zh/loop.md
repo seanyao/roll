@@ -55,7 +55,9 @@ roll config loop-window             # loop-window: 0-24 (from default)
 roll config dream-time              # dream-time: 03:20 (from ~/.roll/config.yaml)
 ```
 
-**范围校验（Range validation）。** 超界或非数字输入会被拒绝，报中英双行错误并以退出码 2 退出——如 `roll config loop-window 9-25` 打印 `loop-window end must be <= 24` / `loop-window 结束时间必须 ≤ 24`。
+**范围校验。** 超界或非数字输入会被拒绝，并按当前语言返回错误，退出码为 2。
+例如 `ROLL_LANG=zh roll config loop-window 9-25` 会打印
+`loop-window 结束时间必须 ≤ 24`。
 
 **`--global` vs `--project`。** 写入默认 `--project`（`.roll/local.yaml`，仅当前项目）。加 `--global` 写 `~/.roll/config.yaml`，作为所有没有项目级覆盖的项目的默认值。
 
@@ -1107,7 +1109,7 @@ Since Phase 2.0, loop state lives inside the project at `<project>/.roll/loop/`.
 ## 降级与观察
 
 - **断网**：周期在网络不可达时失败，loop 降级为**本地交付**——TCR 提交与
-  绿测试留在分支上，打印双语提示，连败计数**不**累加（断网永远不该累计触发
+  绿测试留在分支上，按当前语言打印提示，连败计数**不**累加（断网永远不该累计触发
   自动暂停），调度照常呼吸。下次联网的周期 push/PR 自然补上。
 - **每个 agent 都有实时观察窗**：非 claude agent（pi、kimi、codex 等）在
   macOS 上套伪终端运行，输出逐行流入观察窗，不再憋到进程退出；claude 走

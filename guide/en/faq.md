@@ -792,8 +792,6 @@ records the runtime fact. It does not silently rewrite the static pool.
 **Symptoms:** Backlog row shows `🚫 Hold → split to US-FOO-XXXa,US-FOO-XXXb`,
 and there's an ALERT line about `self-downgrade` or `StorySplitCapHit`.
 
-故事为什么翻成 🚫 搁置了，明明 cycle 还跑了？
-
 **Why this happens:** The agent's pre-flight self-check (in
 `roll-build` / `roll-fix` SKILL) returned `verdict: too_big` — the story's
 `est_min` exceeded the agent's capability range, OR `risk_zone` didn't match,
@@ -815,9 +813,6 @@ edit the sub-stories or flip the original back to 📋 Todo with a tighter
 Use the smallest target for the feedback: `roll idea` for the local Roll
 backlog, or `gh issue create` when it should become a GitHub issue.
 
-如何不离开终端发送反馈？本地 backlog 用 `roll idea`，公开 GitHub issue 用 `gh issue
-create`。
-
 ```bash
 roll idea "Safari login fails after redirect"
 gh issue create --title "Login fails on Safari" --body "Repro: ..."
@@ -834,28 +829,27 @@ data lives at `<project>/.roll/loop/` instead of `~/.shared/roll/loop/`. Your
 ALERT is now `<project>/.roll/loop/ALERT-<slug>.md`, state is
 `state-<slug>.yaml`, run history is `runs.jsonl`.
 
-升级后我的 loop 状态 / ALERT 跑哪去了？进了你的项目。Phase 2.0 起，项目的 loop
-运行时数据放在 `<project>/.roll/loop/`，不再在 `~/.shared/roll/loop/`。
-
 **Do I need to migrate manually?** No. The next cycle migrates legacy files
 automatically: `the legacy-path migration` copies state / ALERT / PAUSE / mute
 into the project and marks each old file `.migrated-<timestamp>`; `runs.jsonl`
 is split per project. During a 7-day window, reads fall back to the old home
 path if the new one is missing — so nothing breaks mid-upgrade.
 
-需要手动迁移吗？不需要。下一个 cycle 自动迁移，旧文件标记为 `.migrated-<时间戳>`；
-7 天窗口内读取会回退到旧家目录路径作兜底。
-
 **How do I roll back?** The legacy files survive as `<name>.migrated-<timestamp>`
 for 7 days. Rename one back (drop the suffix) and delete the project-local copy.
-
-怎么回滚？老文件以 `<name>.migrated-<时间戳>` 保留 7 天，改名回去并删掉项目本地副本
-即可。
 
 **Cleaning up debris:** `roll loop gc` retires orphan slugs (project deleted) and
 sweeps expired `.migrated-*` markers, `runs.jsonl.tmp.*`, and old backups. Use
 `roll loop gc --dry-run` to preview. Full details:
 [Loop Data Layout](loop-data-layout.md).
 
-清残骸：`roll loop gc` 退役孤儿 slug、清扫过期 `.migrated-*` 与备份；`--dry-run`
-预览。完整说明见 [Loop 数据布局](loop-data-layout.md)。
+### C11. How does Roll choose language for CLI, docs, and agents?
+
+`ROLL_LANG=en|zh` pins the current process. `roll config lang en|zh` saves a
+preference, and `roll config lang --reset` returns to locale detection.
+`roll help --lang en|zh <topic>` is a one-off override for help and guide reads.
+
+These controls apply to user-facing surfaces only. Agent contracts, code, git
+metadata, and schemas remain English. Owner conversation follows the language
+used by the owner in the current task. Run `roll doctor language` to audit docs,
+conventions, skills, and generated surfaces before release.

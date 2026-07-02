@@ -50,6 +50,22 @@ Success Criteria: <可衡量的完成标准>
 
 `$roll-design` 在新增文档和目录时维护此表。任何进入项目的 Agent 无需扫描整棵树就能导航到权威来源。
 
+## 语言表面政策
+
+Roll 把契约语言和用户可见语言分开：
+
+- Agent 契约、TypeScript 代码、git 元数据、schema 与稳定 key 保持英文。
+- 与 owner 的对话跟随当前任务中 owner 使用的语言。
+- CLI 输出、帮助、文档和 HTML 页面一次只显示一种语言，由 `ROLL_LANG`、
+  `roll config lang`、`roll help --lang` 或系统语言探测决定。
+
+用户文档写进对应 locale 文件：英文放 `guide/en/`，中文放 `guide/zh/`。CLI
+和生成 HTML 需要改 i18n catalog，不要把翻译对写进同一个输出字符串。
+当约定、帮助、文档或生成表面变化时，发版前运行 `roll doctor language`。
+这条政策由 `packages/cli/test/cli-language-surface.test.ts`、
+`packages/cli/test/__snapshots__/cli-language-surface.test.ts.snap` 和
+`packages/cli/test/doctor-language.test.ts` 覆盖。
+
 ## 已有代码库：`$roll-onboard` 与 `$roll-doc-audit`
 
 对于尚无 `.roll/` 的已有代码库，入口是 `$roll-onboard`（**graft（嫁接）**

@@ -142,7 +142,7 @@ roll story new US-PAY-001 --title "退款流程" --epic payments
 ## 静态归档 —— 归档重建
 
 归档重建 是按需的修复/归档渲染器。它把归档重建为可浏览的三层静态
-HTML（每页自包含、双语、明暗主题、可打印）：
+HTML（每页自包含、按当前语言单语显示、明暗主题、可打印）：
 
 ```
 .roll/features/index.html              ← 归档首页（Story / Cycle / Release）、

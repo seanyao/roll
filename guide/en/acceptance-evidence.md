@@ -170,8 +170,8 @@ live backlog row without a card.
 ## Static Archive — the archive rebuild
 
 the archive rebuild is an on-demand repair/archive renderer. It regenerates browsable,
-three-layer static HTML pages (every page is self-contained, bilingual,
-theme-aware, printable):
+three-layer static HTML pages (every page is self-contained, localized with one
+visible language at a time, theme-aware, printable):
 
 ```
 .roll/features/index.html              ← archive front page (Story / Cycle /

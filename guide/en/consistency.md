@@ -7,7 +7,7 @@ cycle events, and release-gate events are the facts. The dimensions are:
 `features/<epic>/<ID>/spec.md`; evidence links never dangle; card-era delivered
 stories with ACs own a `latest/<ID>-report.html`; pre-card-era Done rows are
 counted, not failed) · ③ docs (changelog / features / guide / README / --help)
-· ④ tests · ⑤ bilingual parity (guide en↔zh + i18n keys) · ⑥ site ·
+· ④ tests · ⑤ locale parity (guide en↔zh + i18n keys) · ⑥ site ·
 ⑦ truth-live (`ensureDeliveriesFresh` + `queryStoryDelivery` must prove each
 release-delta story is actually delivered, with PR refs matching the Done row
 when present).

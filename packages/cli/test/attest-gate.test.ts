@@ -1118,6 +1118,69 @@ describe("FIX-309 — screenshot baseline: default REQUIRED, rules only EXEMPT",
     expect(events[0]?.verdict).toBe("produced");
   });
 
+  it("US-QA-015: refactor_contract evidence_mode passes with tests/grep/CI evidence and no screenshots", () => {
+    const wt = withReport("REFACTOR-QA", 2000, '<div class="ev ev-text">tests, grep, CI</div>', textOnlyAcMap("REFACTOR-QA"));
+    addSpec(
+      wt,
+      "REFACTOR-QA",
+      [
+        "---",
+        "id: REFACTOR-QA",
+        "evidence_mode: refactor_contract",
+        "---",
+        "# REFACTOR-QA",
+        "",
+        "This refactor uses no screenshots because the contract is proven by tests, grep, and CI.",
+        "",
+        "**Evaluation contract:**",
+        "- expected_evidence:",
+        "  - kind: test",
+        "    target: packages/cli/test/role-taxonomy.test.ts",
+        "    proves: AC1",
+        "  - kind: diff",
+        "    target: grep no old role labels",
+        "    proves: AC2",
+        "  - kind: ci",
+        "    target: main CI",
+        "    proves: AC3",
+        "",
+        "## Acceptance Criteria",
+        "- [ ] role taxonomy contract is unchanged except the renamed labels",
+      ].join("\n"),
+    );
+    withPeerScore(wt, "REFACTOR-QA", 8, "good", "c-refactor-qa");
+
+    expect(storyRequiresScreenshot(wt, "REFACTOR-QA")).toBe(false);
+    expect(screenshotExemption(wt, "REFACTOR-QA").reason).toContain("evidence_mode (frontmatter): refactor_contract");
+    expect(verificationReportHasContent(wt, "REFACTOR-QA")).toBe(true);
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "REFACTOR-QA", "c-refactor-qa", "hard", 1000, s);
+    expect(r.verdict).toBe("produced");
+    expect(r.blocked).toBe(false);
+    expect(alerts).toHaveLength(0);
+    expect(events[0]?.verdict).toBe("produced");
+  });
+
+  it("US-QA-015: visual_ui evidence_mode still requires declared visual proof", () => {
+    const wt = withReport("VISUAL-QA", 2000, '<div class="ev ev-text">text proof only</div>', textOnlyAcMap("VISUAL-QA"));
+    addSpec(
+      wt,
+      "VISUAL-QA",
+      "---\nid: VISUAL-QA\nevidence_mode: visual_ui\ndeliverable_url: https://app.test/page\n---\n# VISUAL-QA\n\n## Acceptance Criteria\n\n- [ ] [visual-evidence] page layout renders\n",
+    );
+    withPeerScore(wt, "VISUAL-QA", 8, "good", "c-visual-qa");
+
+    expect(storyRequiresScreenshot(wt, "VISUAL-QA")).toBe(true);
+    expect(verificationReportHasContent(wt, "VISUAL-QA")).toBe(false);
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "VISUAL-QA", "c-visual-qa", "hard", 1000, s);
+    expect(r.verdict).toBe("skipped");
+    expect(r.blocked).toBe(true);
+    expect(r.reasons.join("\n")).toContain("declared deliverable_url(s) not all really captured");
+    expect(alerts[0]).toContain("BLOCKED");
+    expect(events[0]?.verdict).toBe("skipped");
+  });
+
   it("AC3: a required story with an HONEST recorded machine-skip PASSES (deletion-not-placeholder, not silent)", () => {
     // FIX-339 (AC6): the honest machine-skip lane is reserved for cards that owe
     // no REAL capture — i.e. a card with a declared deliverable_cmd whose terminal

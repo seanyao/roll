@@ -22,10 +22,68 @@ export interface EvaluationEvidenceItem {
 }
 
 export interface EvaluationContract {
+  evidence_mode?: EvidenceMode;
   expected_evidence: EvaluationEvidenceItem[];
   scorer_focus: string[];
   builder_notes: string[];
 }
+
+export type EvidenceMode = "visual_ui" | "cli_output" | "refactor_contract" | "data_state" | "docs_content";
+
+export type EvidenceModeSource = "frontmatter" | "evaluation_contract" | "derived";
+
+export interface EvidenceModeMatrix {
+  mode: EvidenceMode;
+  label: string;
+  requiredEvidence: string[];
+  screenshotPolicy: "required" | "conditional" | "not_required";
+  screenshotEscalation: string[];
+}
+
+export interface EvidenceModeDecision {
+  mode: EvidenceMode;
+  source: EvidenceModeSource;
+  matrix: EvidenceModeMatrix;
+  reason: string;
+}
+
+export const EVIDENCE_MODE_MATRIX: Record<EvidenceMode, EvidenceModeMatrix> = {
+  visual_ui: {
+    mode: "visual_ui",
+    label: "Visual UI",
+    requiredEvidence: ["rendered visual capture", "functional test or smoke check", "CI"],
+    screenshotPolicy: "required",
+    screenshotEscalation: ["visual surface changed", "AC explicitly requests visual evidence", "layout/rendering risk exposed"],
+  },
+  cli_output: {
+    mode: "cli_output",
+    label: "CLI/output",
+    requiredEvidence: ["stdout/stderr snapshot", "exit code", "command fixture or focused test", "CI"],
+    screenshotPolicy: "conditional",
+    screenshotEscalation: ["terminal/TUI visual surface changed", "AC explicitly requests visual evidence", "rendering/layout risk exposed"],
+  },
+  refactor_contract: {
+    mode: "refactor_contract",
+    label: "Refactor/contract",
+    requiredEvidence: ["focused tests", "typecheck/build", "grep/no-old-symbol check", "CI"],
+    screenshotPolicy: "not_required",
+    screenshotEscalation: ["visual surface changed", "AC explicitly requests visual evidence", "rendering/layout risk exposed"],
+  },
+  data_state: {
+    mode: "data_state",
+    label: "Data/state",
+    requiredEvidence: ["fixture replay", "event/assertion checks", "idempotency/concurrency coverage", "CI"],
+    screenshotPolicy: "not_required",
+    screenshotEscalation: ["visual surface changed", "AC explicitly requests visual evidence", "rendering/layout risk exposed"],
+  },
+  docs_content: {
+    mode: "docs_content",
+    label: "Docs/content",
+    requiredEvidence: ["rendered text check", "link check", "diff review", "CI"],
+    screenshotPolicy: "conditional",
+    screenshotEscalation: ["layout changed", "AC explicitly requests visual evidence", "rendering/layout risk exposed"],
+  },
+};
 
 /** Section header that marks the start of the evaluation contract block. */
 const EVAL_CONTRACT_HEADER = /^\*\*Evaluation contract:\*\*\s*$/;
@@ -35,6 +93,96 @@ function normKind(raw: string): string {
   const k = raw.trim();
   const known = new Set(["test", "command", "screenshot", "document", "diff", "ci", "manual"]);
   return known.has(k) ? k : k;
+}
+
+export function parseEvidenceMode(raw: string | undefined): EvidenceMode | null {
+  const value = (raw ?? "").trim();
+  if (value === "") return null;
+  return Object.prototype.hasOwnProperty.call(EVIDENCE_MODE_MATRIX, value) ? (value as EvidenceMode) : null;
+}
+
+function frontmatterValue(specText: string, key: string): string | undefined {
+  const fm = /^---\n([\s\S]*?)\n---/.exec(specText);
+  if (fm === null) return undefined;
+  const re = new RegExp(`^${key}:\\s*(.+)$`, "m");
+  const m = re.exec(fm[1] ?? "");
+  return m?.[1]?.replace(/^['"]|['"]$/g, "").trim();
+}
+
+function specHasVisualSignal(specText: string): boolean {
+  return specText
+    .split(/\r?\n/)
+    .some((line) => /^\s*-\s*\[[ xX]?\]/.test(line) && /\[visual-evidence\]|\bscreenshot\b|\bscreen shot\b|截图|截屏|视觉证据/i.test(line));
+}
+
+function deriveEvidenceMode(specText: string, contract: EvaluationContract | null): EvidenceMode {
+  const evidenceKinds = new Set((contract?.expected_evidence ?? []).map((item) => item.kind.toLowerCase()));
+  const text = specText.toLowerCase();
+  if (frontmatterValue(specText, "deliverable_url") !== undefined || frontmatterValue(specText, "screenshot_url") !== undefined || evidenceKinds.has("screenshot")) {
+    return "visual_ui";
+  }
+  if (frontmatterValue(specText, "deliverable_cmd") !== undefined || /^physical_terminal:/m.test(specText) || evidenceKinds.has("command")) {
+    return "cli_output";
+  }
+  if (evidenceKinds.has("document") || /\bdocs?\b|documentation|guide|readme|link check|rendered text/.test(text)) {
+    return "docs_content";
+  }
+  if (/\bdata\b|migration|fixture|event|idempotenc|concurrenc|state/.test(text)) {
+    return "data_state";
+  }
+  return "refactor_contract";
+}
+
+export function evidenceModeForSpec(specText: string, contract: EvaluationContract | null = parseEvaluationContract(specText)): EvidenceModeDecision {
+  const fromFrontmatter = parseEvidenceMode(frontmatterValue(specText, "evidence_mode"));
+  if (fromFrontmatter !== null) {
+    return {
+      mode: fromFrontmatter,
+      source: "frontmatter",
+      matrix: EVIDENCE_MODE_MATRIX[fromFrontmatter],
+      reason: "declared by frontmatter evidence_mode",
+    };
+  }
+  if (contract?.evidence_mode !== undefined) {
+    return {
+      mode: contract.evidence_mode,
+      source: "evaluation_contract",
+      matrix: EVIDENCE_MODE_MATRIX[contract.evidence_mode],
+      reason: "declared by Evaluation contract evidence_mode",
+    };
+  }
+  const derived = deriveEvidenceMode(specText, contract);
+  return {
+    mode: derived,
+    source: "derived",
+    matrix: EVIDENCE_MODE_MATRIX[derived],
+    reason: "derived from declared surfaces, expected evidence, and spec text",
+  };
+}
+
+export function evidenceModeExemptsScreenshot(specText: string, decision: EvidenceModeDecision = evidenceModeForSpec(specText)): boolean {
+  if (decision.source === "derived") return false;
+  if (decision.matrix.screenshotPolicy === "required") return false;
+  if (frontmatterValue(specText, "deliverable_url") !== undefined || frontmatterValue(specText, "screenshot_url") !== undefined) return false;
+  if (frontmatterValue(specText, "deliverable_cmd") !== undefined || /^physical_terminal:/m.test(specText)) return false;
+  if (specHasVisualSignal(specText)) return false;
+  return decision.matrix.screenshotPolicy === "not_required" || decision.matrix.screenshotPolicy === "conditional";
+}
+
+export function screenshotEscalationReason(
+  mode: EvidenceMode,
+  input: { visualSurfaceChanged?: boolean; acRequestsVisualEvidence?: boolean; renderingRisk?: boolean },
+): string | null {
+  if (mode === "visual_ui") return "visual_ui evidence mode requires rendered visual proof";
+  if (input.visualSurfaceChanged === true) return "visual surface changed";
+  if (input.acRequestsVisualEvidence === true) return "AC explicitly requests visual evidence";
+  if (input.renderingRisk === true) return "prior evidence exposes rendering/layout risk";
+  return null;
+}
+
+function formatEvidenceModeMatrix(mode: EvidenceMode): string {
+  const matrix = EVIDENCE_MODE_MATRIX[mode];
+  return `${mode} [${matrix.requiredEvidence.join("; ")}; screenshot=${matrix.screenshotPolicy}]`;
 }
 
 /**
@@ -81,6 +229,7 @@ export function parseEvaluationContract(specText: string): EvaluationContract | 
   const evidence: EvaluationEvidenceItem[] = [];
   const scorerFocus: string[] = [];
   const builderNotes: string[] = [];
+  let evidenceMode: EvidenceMode | undefined;
 
   let section: "expected_evidence" | "scorer_focus" | "builder_notes" | null = null;
   let currentEvidence: Partial<EvaluationEvidenceItem> | null = null;
@@ -99,6 +248,13 @@ export function parseEvaluationContract(specText: string): EvaluationContract | 
   for (const raw of block) {
     const line = raw.trim();
     if (line === "") continue;
+
+    const modeMatch = /^-\s*evidence_mode:\s*(.+)$/.exec(line);
+    if (modeMatch !== null) {
+      const parsed = parseEvidenceMode(modeMatch[1]);
+      if (parsed !== null) evidenceMode = parsed;
+      continue;
+    }
 
     // Section headers: `- expected_evidence:` / `- scorer_focus:` / `- builder_notes:`
     const secMatch = /^-\s*(expected_evidence|scorer_focus|builder_notes):\s*$/.exec(line);
@@ -148,7 +304,7 @@ export function parseEvaluationContract(specText: string): EvaluationContract | 
   // A contract with zero expected_evidence items is a trivial/internal story
   // that carries a minimal block. Accept it (return the contract with empty
   // arrays) rather than return null.
-  return { expected_evidence: evidence, scorer_focus: scorerFocus, builder_notes: builderNotes };
+  return { ...(evidenceMode !== undefined ? { evidence_mode: evidenceMode } : {}), expected_evidence: evidence, scorer_focus: scorerFocus, builder_notes: builderNotes };
 }
 
 /**
@@ -163,6 +319,9 @@ export function formatEvaluationContractForScorer(contract: EvaluationContract |
     for (const e of contract.expected_evidence) {
       parts.push(`  - ${e.kind}: ${e.target} (proves ${e.proves})`);
     }
+  }
+  if (contract.evidence_mode !== undefined) {
+    parts.push(`Evidence mode: ${formatEvidenceModeMatrix(contract.evidence_mode)}`);
   }
   if (contract.scorer_focus.length > 0) {
     parts.push("Scorer focus:");

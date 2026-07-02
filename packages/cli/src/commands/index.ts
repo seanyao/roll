@@ -95,9 +95,23 @@ const CI_USAGE =
   "Usage: roll status ci [--wait] [--timeout=N]\n" +
   "  Show GitHub Actions status for the current HEAD; --wait gates until checks finish.\n";
 
+function currentHelpLang() {
+  return resolveLang({
+    rollLang: process.env["ROLL_LANG"],
+    lcAll: process.env["LC_ALL"],
+    lang: process.env["LANG"],
+  });
+}
+
 const DOCTOR_TOOLS_USAGE =
   "Usage: roll doctor tools\n" +
   "  Show registered tools, input contracts, effective policy state, and requirement readiness.\n";
+
+function doctorUsage(): string {
+  return currentHelpLang() === "zh"
+    ? "用法：roll doctor [skills|language|--tools]\n  环境与安装体检；--tools 只看工具、真实截图与权限预检就绪度。\n"
+    : "Usage: roll doctor [skills|language|--tools]\n  Environment + install diagnosis; --tools shows focused tool, physical screenshot, and permission preflight readiness.\n";
+}
 
 function unknownTopLevel(command: string): number {
   process.stderr.write(`roll: unknown command '${command}'\n\n${usage()}`);
@@ -167,7 +181,7 @@ export function registerAll(): void {
       return languageAuditCommand(args.slice(1));
     }
     return doctorCommand(args);
-  }, { help: "Usage: roll doctor [skills|language|--tools]\n  Environment + install diagnosis; --tools shows focused tool, physical screenshot, and permission preflight readiness.\n环境与安装体检；--tools 只看工具、真实截图与权限预检就绪度。" });
+  }, { help: doctorUsage });
   // `attest`: the acceptance-evidence report (US-ATTEST-006) — v3-native, no
   // bash counterpart (additive; the evidence chain is new product surface).
   registerPorted("attest", attestCommand, { hidden: true });

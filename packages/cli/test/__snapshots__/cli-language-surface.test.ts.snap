@@ -1,0 +1,60 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`US-LANG-003 CLI language surface > config lang error output follows the selected locale 1`] = `
+{
+  "en": {
+    "status": 2,
+    "stderr": "[roll] config lang: unknown language 'bogus'
+",
+    "stdout": "  Valid values: zh, en, --reset
+",
+  },
+  "zh": {
+    "status": 2,
+    "stderr": "[roll] config lang: 未知语言 'bogus'
+",
+    "stdout": "  可选值: zh, en, --reset
+",
+  },
+}
+`;
+
+exports[`US-LANG-003 CLI language surface > doctor --help is locale-pinned and single-language 1`] = `
+{
+  "en": "Usage: roll doctor [skills|language|--tools]
+  Environment + install diagnosis; --tools shows focused tool, physical screenshot, and permission preflight readiness.
+",
+  "zh": "用法：roll doctor [skills|language|--tools]
+  环境与安装体检；--tools 只看工具、真实截图与权限预检就绪度。
+",
+}
+`;
+
+exports[`US-LANG-003 CLI language surface > loop --help is locale-pinned and single-language 1`] = `
+{
+  "en": "Usage: roll loop <subcommand>
+The autonomous delivery loop — grouped control / observe / alerts / maintain.
+
+control   on · off · now · pause · resume · reset · go · goal · recover
+observe   watch · status · runs · log · events · signals · eval
+alerts    alert list · alert ack · alert resolve · alert log
+maintain  gc · fmt · mute · unmute · pr-inbox · reconcile-pending
+internal  test · run-once · story · notify · enforce-tcr · precheck-ci · hotfix-head-context · agent-routes · pr-heal-run
+
+[38;2;88;166;255mstates    [0mACTIVE (lanes armed) · DORMANT (backlog drained → loop lane self-unloads, zero idle records) · PAUSED (you stopped it)
+[38;2;88;166;255mwake      [0ma DORMANT loop wakes on any roll command · the daily dream scan · a PR merge
+",
+  "zh": "用法：roll loop <子命令>
+自治交付循环——按作动/传感/告警/维护分组。
+
+作动      on · off · now · pause · resume · reset · go · goal · recover
+传感      watch · status · runs · log · events · signals · eval
+告警      alert list · alert ack · alert resolve · alert log
+维护      gc · fmt · mute · unmute · pr-inbox · reconcile-pending
+内部      test · run-once · story · notify · enforce-tcr · precheck-ci · hotfix-head-context · agent-routes · pr-heal-run
+
+[38;2;88;166;255m状态      [0mACTIVE 运行中(lane 就绪) · DORMANT 休眠(backlog 抽干→自卸 loop lane、不再记空转) · PAUSED 已暂停(你停的)
+[38;2;88;166;255m唤醒      [0m休眠的 loop 由以下唤醒：任意 roll 命令 · 每日 dream 扫描 · PR 合并
+",
+}
+`;

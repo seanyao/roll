@@ -207,27 +207,25 @@ describe("frozen: roll lang", () => {
     `);
   });
 
-  it("invalid arg → bilingual error, exit 1 (en)", () => {
+  it("invalid arg -> single-language error, exit 1 (en)", () => {
     expect(tsLang(["fr"], freshHome(), { ROLL_LANG: "en" })).toMatchInlineSnapshot(`
       {
         "status": 1,
         "stderr": "[roll] Unknown language: fr
       ",
         "stdout": "  Valid values: zh, en, --reset
-      Options: zh, en, --reset
       ",
       }
     `);
   });
 
-  it("invalid arg → bilingual error, exit 1 (zh)", () => {
+  it("invalid arg -> single-language error, exit 1 (zh)", () => {
     expect(tsLang(["fr"], freshHome(), { ROLL_LANG: "zh" })).toMatchInlineSnapshot(`
       {
         "status": 1,
         "stderr": "[roll] 未知语言: fr
       ",
-        "stdout": "  Valid values: zh, en, --reset
-        可选值: zh, en, --reset
+        "stdout": "  可选值: zh, en, --reset
       ",
       }
     `);

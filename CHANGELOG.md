@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v4.702.3 — 2026-07-02
+
 ### 稳定性
 - `roll init` 现在会负责提交并推送自己生成的项目约定文件，`roll loop go` 不再一开工就撞 dirty（FIX-1072）`[loop-engine]`
 - Builder 提交会被钉在 cycle worktree，不再把提交漏到主 checkout（FIX-1073）`[loop-engine]`

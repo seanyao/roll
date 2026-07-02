@@ -658,8 +658,29 @@ function rebuildCycleRoleSummary(projectPath: string, events: readonly RollEvent
   });
 }
 
-function collabGoalScope(): string {
+function fallbackCollabScope(): string {
   return "live non-Hold FIX/US/REFACTOR";
+}
+
+function formatGoalScope(scope: RollGoal["scope"]): string {
+  switch (scope.kind) {
+    case "all":
+      return "all";
+    case "epic":
+      return `epic: ${scope.epic}`;
+    case "cards":
+      return `cards: ${scope.cards.join(", ")}`;
+  }
+}
+
+function collabGoalScope(projectPath: string): string {
+  const goalPath = join(projectPath, ".roll", "loop", "goal.yaml");
+  if (!existsSync(goalPath)) return fallbackCollabScope();
+  try {
+    return formatGoalScope(parseGoalYaml(readFileSync(goalPath, "utf8")).scope);
+  } catch {
+    return fallbackCollabScope();
+  }
 }
 
 function buildCollabEventSource(projectPath: string, events: readonly RollEvent[]): EventSource {
@@ -668,7 +689,7 @@ function buildCollabEventSource(projectPath: string, events: readonly RollEvent[
     readSummary: (cycleId) => readCycleRoleSummary(projectPath, cycleId),
     rebuildSummary: (cycleId) => rebuildCycleRoleSummary(projectPath, events, cycleId),
     supervisor: () => process.env["ROLL_SUPERVISOR_AGENT"] ?? "codex",
-    goalScope: () => collabGoalScope(),
+    goalScope: () => collabGoalScope(projectPath),
   };
 }
 

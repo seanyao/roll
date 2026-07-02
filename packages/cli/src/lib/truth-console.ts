@@ -522,7 +522,7 @@ function nowPulseBadge(input: TruthConsoleInput): string {
     `<span style="${MONO}font-size:13px;color:${C.sub};">${bi("cycles", "周期")} <b style="color:${pulseColor};font-weight:700;">${cycles}</b></span>` +
     `<span style="${MONO}font-size:13px;color:${C.sub};">${bi("merged", "已合")} <b style="color:${C.green};font-weight:700;">${merged}</b></span>` +
     `<span style="${MONO}font-size:13px;color:${C.sub};">${bi("attested", "已验收")} <b style="color:${C.blue};font-weight:700;">${attested}</b></span>` +
-    `<span style="${MONO}font-size:18px;letter-spacing:1px;color:${C.dim};flex:none;" title="${bi("story spectrum distribution", "故事光谱分布")}">${esc(bars)}</span>` +
+    `<span style="${MONO}font-size:18px;letter-spacing:1px;color:${C.dim};flex:none;" title="story spectrum distribution">${esc(bars)}</span>` +
     `</div></section>`
   );
 }

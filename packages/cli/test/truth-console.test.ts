@@ -1624,6 +1624,12 @@ describe("lang/tab/section persistence + bilingual closer — US-DOSSIER-034", (
     expect(html).not.toMatch(/>Charter\s*章程</);
   });
 
+  it("US-LANG-004: accessibility attributes do not embed language span markup", () => {
+    const attrs = [...html.matchAll(/\b(?:title|aria-label)="([^"]*)"/g)].map((m) => m[1]);
+    expect(attrs.some((value) => value.includes('<span class="lang-en">') || value.includes('<span class="lang-zh">'))).toBe(false);
+    expect(html).toContain('title="story spectrum distribution"');
+  });
+
   it("AC5: EN-view vs 中-view structure is identical (lang switch is CSS, not re-render)", () => {
     // the same generated markup serves both languages — the lang attribute is set
     // by the client script, the spans are always both present in the source. So

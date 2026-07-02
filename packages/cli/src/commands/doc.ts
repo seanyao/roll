@@ -22,6 +22,7 @@ import { resolveLang } from "@roll/spec";
 import { collectCharter, defaultCharterDeps, type CharterVM, type CharterDoc } from "../lib/page-charter.js";
 import { resolveCurrent } from "./lang.js";
 import { c, hr, renderState } from "../render.js";
+import { repoRoot } from "../bridge.js";
 
 export const DOC_USAGE =
   "Usage: roll doc [--lang en|zh] [name]\n" +
@@ -155,8 +156,12 @@ export function docCommand(args: string[]): number {
   const docLang: "en" | "zh" = langFlag === "en" || langFlag === "zh" ? langFlag : resolveCurrent();
 
   // SAME collector the web Charter browser renders from — only the renderer skin
-  // differs (plain text here, HTML on the web).
-  const vm = collectCharter(defaultCharterDeps(process.cwd(), markdownToText));
+  // differs (plain text here, HTML on the web). Prefer project-local docs when
+  // present; installed npm CLIs fall back to the packaged Roll docs/guide tree.
+  let vm = collectCharter(defaultCharterDeps(process.cwd(), markdownToText));
+  if (vm.groups.length === 0) {
+    vm = collectCharter(defaultCharterDeps(repoRoot(), markdownToText));
+  }
 
   if (vm.groups.length === 0) {
     const ml = msgLang();

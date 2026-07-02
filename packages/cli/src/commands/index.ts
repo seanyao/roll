@@ -1,12 +1,10 @@
 /** Ported-command registry — one line per migrated subcommand. */
 import { resolveLang } from "@roll/spec";
-import { registerPorted } from "../bridge.js";
+import { registerPorted, usage } from "../bridge.js";
 import { renderState } from "../render.js";
 import { renderLoopHelp } from "../lib/loop-help.js";
 import { agentCommand } from "./agent.js";
 import { agentListCommand } from "./agent-list.js";
-import { pairCommand } from "./pair.js";
-import { PEER_HELP, peerCommand } from "./peer.js";
 import { alertCommand } from "./alert.js";
 import { attestCommand } from "./attest.js";
 import { backlogCommand } from "./backlog.js";
@@ -22,18 +20,16 @@ import {
   loopHotfixHeadContextCommand,
   loopNotifyCommand,
   loopPrecheckCiCommand,
-  loopTestQualityCheckRetired,
   loopUnknownSubcommand,
 } from "./loop-cycle-gates.js";
 // US-DOSSIER-037: `roll cast` (routing view) + `roll doc --lang` (Charter/guide viewer).
-import { CAST_USAGE, castCommand } from "./cast.js";
+import { castCommand } from "./cast.js";
 import { DOC_USAGE, docCommand } from "./doc.js";
 import { ciCommand, ciWaitCommand } from "./ci.js";
 import { configCommand } from "./config.js";
-import { CYCLE_USAGE, cycleCommand } from "./cycle.js";
-import { CYCLES_USAGE, cyclesCommand } from "./cycles.js";
+import { cycleCommand } from "./cycle.js";
+import { cyclesCommand } from "./cycles.js";
 import { SUPERVISOR_USAGE, supervisorCommand } from "./supervisor.js";
-import { LS_USAGE, lsCommand } from "./ls.js"; // US-DOSSIER-028
 import { dashboardCommand, loopEvalCommand, loopStoryCommand } from "./dashboard.js";
 import { loopRunsCommand } from "./loop-runs.js";
 import { loopSignalsCommand } from "./loop-signals.js";
@@ -42,10 +38,8 @@ import { loopGoalCommand } from "./loop-goal.js";
 import { loopGoCommand } from "./loop-go.js";
 import { loopRecoverCommand } from "./loop-recover.js";
 import { loopEventsCommand } from "./loop-events.js";
-import { loopAttachRetired, loopBranchesRetired, loopMonitorRetired } from "./loop-retired.js";
 import { doctorCommand, languageAuditCommand } from "./doctor.js";
 import { dreamCommand } from "./dream.js";
-import { gcCommand } from "./gc.js";
 import { ideaCommand } from "./idea.js";
 import { indexCommand } from "./index-gen.js";
 import { storyNewCommand } from "./story-new.js";
@@ -83,11 +77,11 @@ import { pricesCommand } from "./prices.js";
 import { pulseCommand } from "./pulse.js";
 import { releaseCommand } from "./release.js";
 import { setupCommand } from "./setup.js";
-import { SHOWCASE_USAGE, showcaseCommand } from "./showcase.js";
+import { showcaseCommand } from "./showcase.js";
 import { skillsCommand } from "./skills.js";
 import { statusCommand } from "./status.js";
 import { testCommand } from "./test.js";
-import { TOOL_USAGE, toolCommand } from "./tool.js";
+import { toolCommand } from "./tool.js";
 import { TRUTH_USAGE, truthCommand } from "./truth.js";
 import { tuneCommand } from "./tune.js";
 import { updateCommand } from "./update.js";
@@ -105,11 +99,13 @@ const DOCTOR_TOOLS_USAGE =
   "Usage: roll doctor tools\n" +
   "  Show registered tools, input contracts, effective policy state, and requirement readiness.\n";
 
-function redirectCommand(from: string, to: string) {
-  return (): number => {
-    process.stdout.write(`roll ${from} moved to roll ${to}\n`);
-    return 0;
-  };
+function unknownTopLevel(command: string): number {
+  process.stderr.write(`roll: unknown command '${command}'\n\n${usage()}`);
+  return 1;
+}
+
+function removedTopLevel(command: string) {
+  return (): number => unknownTopLevel(command);
 }
 
 function isHelp(arg: string | undefined): boolean {
@@ -150,19 +146,8 @@ export function registerAll(): void {
   // `sync` installs the catalog; a bare/`help` call prints the usage that names
   // both. The legacy `generate`/`check` still route through the doctor skills /
   // setup skills nests (registered below), so those redirects never break (AC2).
-  registerPorted(
-    "skills",
-    (args) =>
-      // Route to the first-class surface for audit/sync/help/bare, AND whenever
-      // `--json` is present so the fail-loud `--json`-unsupported error (AC6)
-      // fires instead of a silent redirect. Everything else keeps redirecting to
-      // the doctor skills / setup skills nests (the legacy check/generate paths).
-      args[0] === "audit" || args[0] === "sync" || args[0] === "" || args[0] === undefined || isHelp(args[0]) || args.includes("--json")
-        ? skillsCommand(args)
-        : redirectCommand("skills", "doctor skills / roll setup skills")(),
-    { hidden: true },
-  );
-  registerPorted("alert", redirectCommand("alert", "loop alert"), { hidden: true });
+  registerPorted("skills", removedTopLevel("skills"), { hidden: true });
+  registerPorted("alert", removedTopLevel("alert"), { hidden: true });
   // `doctor`: all four health sections ported TS (agent/pr/skills/launchd).
   registerPorted("doctor", (args) => {
     if (args[0] === "skills") {
@@ -188,9 +173,9 @@ export function registerAll(): void {
   registerPorted("attest", attestCommand, { hidden: true });
   // `cycles`: the cycle ledger as a first-class command (US-CLI-012) — same
   // aggregation + verdict vocabulary as the web ledger; failures never swallowed.
-  registerPorted("cycles", cyclesCommand, { help: CYCLES_USAGE });
+  registerPorted("cycles", removedTopLevel("cycles"));
   // `cycle`: one cycle's trace tape (US-CLI-013) — the `roll cycles` tail hint target.
-  registerPorted("cycle", cycleCommand, { help: CYCLE_USAGE });
+  registerPorted("cycle", removedTopLevel("cycle"));
   // US-V4-008: `supervisor` — the project-level Prime Agent (observe/advise).
   // Cross-Story coordination, never Story implementation.
   registerPorted("supervisor", supervisorCommand, { help: SUPERVISOR_USAGE });
@@ -199,11 +184,11 @@ export function registerAll(): void {
   // solely by a fresh-session peer Reviewer (runScorePairing). The only writer of
   // a score note is that Reviewer path, which always sets `scoring: 'pair'`.
   // `index`: regenerate the backlog-derived ID→epic map (US-META-001). v3-native.
-  registerPorted("index", indexCommand, { hidden: true });
+  registerPorted("index", (args) => (args[0] === "--rebuild" ? indexCommand(args) : unknownTopLevel("index")), { hidden: true });
   // `ls`: the cross-project registry listing (US-DOSSIER-028) — name·tag·verdict·path
   // from ~/.roll/projects.json; --json echoes the file verbatim. ONE registry, two
   // faces (this + the web switcher); missing/stale rows flagged, never dropped.
-  registerPorted("ls", lsCommand, { help: LS_USAGE });
+  registerPorted("ls", removedTopLevel("ls"));
   // `story new`: internal/advanced explicit card-folder minting (US-META-009).
   // REFACTOR-050: `roll idea` is now the one user-facing card-capture entry;
   // `story new` is retained for agents/skills that need explicit ID+epic control.
@@ -219,7 +204,7 @@ export function registerAll(): void {
     return args[0] === undefined || args[0] === "--help" || args[0] === "-h" ? 0 : 1;
   });
   // `gc`: age out old surplus attest runs across the archive layout (US-META-001).
-  registerPorted("gc", gcCommand, { hidden: true }); // REFACTOR-049: auto-runs per cycle; manual entry stays callable, off the usage list
+  registerPorted("gc", removedTopLevel("gc"), { hidden: true });
   // REFACTOR-048: `archive migrate` (old verification/<ID> tree port) retired —
   // that one-time migration completed (US-META-002a..c); cleanup lives in `gc`,
   // dossier reconciliation in `roll index --rebuild`.
@@ -237,11 +222,11 @@ export function registerAll(): void {
   // `pair`: v3-native Cross-Agent Pairing (US-PAIR-001). `pair init` scaffolds
   // legacy pairing compatibility commands. No bash fallback
   // (v2 had no pairing).
-  registerPorted("pair", pairCommand);
+  registerPorted("pair", removedTopLevel("pair"));
   // `peer`: v3-native one-shot heterogeneous peer review adapter (FIX-255).
   // This is a product-level command, distinct from cycle `pair` gates, and does
   // not fall back to the retired bash peer surface.
-  registerPorted("peer", peerCommand, { help: PEER_HELP });
+  registerPorted("peer", removedTopLevel("peer"));
   // `backlog`: FULLY TS as of US-PORT-019. Display + block/defer/unblock/promote
   // + lint + unstick + sync (GitHub issues→backlog) all run native; no bash
   // fallback remains.
@@ -262,13 +247,13 @@ export function registerAll(): void {
   // the static archive renders (US-DOSSIER-030 Casting grid). ONE computation, two
   // surfaces: it calls the shared `collectCasting()` view-model (no re-read of the
   // router); `--json` emits that view-model verbatim. Manual, read-only.
-  registerPorted("cast", castCommand, { help: CAST_USAGE });
+  registerPorted("cast", removedTopLevel("cast"));
   // US-DOSSIER-037: `roll doc [--lang en|zh] [name]` — view Charter/guide markdown
   // in the terminal via the SAME `collectCharter()` collector the web Charter
   // browser uses (US-DOSSIER-033), rendered as readable text. `--lang` selects the
   // guide tree, falling back to the configured language via the SAME resolver
   // `roll lang` uses; an unknown --lang exits non-zero bilingually. Read-only viewer.
-  registerPorted("doc", docCommand, { help: DOC_USAGE });
+  registerPorted("doc", removedTopLevel("doc"));
   // `idea`: v3-native deterministic backlog capture (US-PORT-003). Classifies
   // bug→FIX / idea→IDEA, auto-numbers (max suffix + 1), lint-gates the
   // description with the same rules as the bash _backlog_lint oracle, and
@@ -300,13 +285,13 @@ export function registerAll(): void {
   // (reset / casting validation / chain assembly / verdict) is the pure
   // ../lib/showcase.ts, unit-tested in the normal suite. Never touches the main
   // repo or the real ~/.roll. Release-runnable (recommended, non-hard-blocking).
-  registerPorted("showcase", showcaseCommand, { help: SHOWCASE_USAGE });
+  registerPorted("showcase", removedTopLevel("showcase"));
   // `prices`: full surface TS (show/help/unknown + refresh network write).
   // `refresh` uses the native vendor registry/parser/snapshot writer; no bash
   // fallback remains (US-PORT-017). REFACTOR-051 owner review kept this as the
   // human-operated cost-accounting source.
-  registerPorted("pulse", pulseCommand);
-  registerPorted("prices", pricesCommand);
+  registerPorted("pulse", removedTopLevel("pulse"));
+  registerPorted("prices", removedTopLevel("prices"));
   // `config`: FULLY TS now (US-PORT-006 — 整个 config 命令收口). Read surface
   // (help/--list/key read) + write surface + the three compact facades
   // (loop-window/loop-schedule/dream-time) all run native; no bash fallback.
@@ -344,7 +329,7 @@ export function registerAll(): void {
   // the old toolchain (`npx @seanyao/roll@2 migrate`) for the one-time upgrade.
   // `offboard`: full surface TS (changeset parse, cross-project guard, plan
   // print, FIX-125 in-cycle plist tripwire, --confirm apply). No bash fallback.
-  registerPorted("offboard", offboardCommand);
+  registerPorted("offboard", removedTopLevel("offboard"));
   // `setup`: full surface TS (fresh / --force / already-synced re-run,
   // unknown-argument, and no-conventions-source guard). No sub-paths on bash.
   registerPorted("setup", (args) => {
@@ -362,10 +347,7 @@ export function registerAll(): void {
   // (_ci_wait's polling loop) returns null → falls back to the frozen bash.
   registerPorted("ci", (args) => {
     if (args.includes("--wait")) return ciWaitCommand(args); // US-PORT-015: TS CI gate
-    // The non-wait read surface is fully TS; ciCommand only returns null on the
-    // --wait path (intercepted above), so the coalesce is an unreachable guard
-    // (US-PORT-021 prep: no bash fallback remains).
-    return ciCommand(args) ?? 1;
+    return unknownTopLevel("ci");
   });
   // `test`: full surface TS (arg parse, --where routing, --reset lock+dispatch,
   // the default exec path through the isolation adapter). type=none runs the
@@ -373,7 +355,7 @@ export function registerAll(): void {
   // (incl. a stale `tart` — lane removed by REFACTOR-046) errors non-zero WITHOUT a
   // silent host fallback (US-ISO-003). No sub-paths on bash.
   registerPorted("test", testCommand);
-  registerPorted("tool", toolCommand, { help: TOOL_USAGE });
+  registerPorted("tool", removedTopLevel("tool"));
   // `truth`: deterministic delivery-truth query (US-TRUTH-016). Pure read-only
   // — reads deliveries.jsonl, runs queryStoryDelivery, prints the verdict.
   // Zero markdown parse. `--json` emits the StoryDeliveryTruth verbatim.
@@ -384,7 +366,7 @@ export function registerAll(): void {
   // buildSelfTuningPlan, which emits suggest-only proposals with evidence +
   // rollback. NEVER writes policy/agents/rubric config; `tune reset` prints the
   // default rollback values without touching disk. No bash fallback (v2 had none).
-  registerPorted("tune", tuneCommand, { help: "Usage: roll tune\n  Self-tuning report from review-score samples.\n自调参报告。" });
+  registerPorted("tune", removedTopLevel("tune"));
   // `update`: full surface TS (npm + curl upgrade paths, cache invalidation, the
   // post-update `roll setup` chain, changelog). The real install is driven via
   // spawned npm/curl/tar; the curl atomic dir-swap is the one whitelisted gap.
@@ -393,7 +375,7 @@ export function registerAll(): void {
   // `version` / `--version` / `-v`: TS-native (FIX-202). Reads the install
   // tree's package.json (single source of truth), so it no longer reports the
   // fossil bin/roll VERSION= literal. No bash fallback for these.
-  registerPorted("version", versionCommand, { hidden: true }); // REFACTOR-049: alias for roll --version, off the usage list
+  registerPorted("version", removedTopLevel("version"), { hidden: true });
   registerPorted("--version", versionCommand);
   registerPorted("-v", versionCommand);
   // `loop` is FULLY TS as of US-PORT-021 prep — no subcommand falls back to bash.
@@ -424,11 +406,10 @@ export function registerAll(): void {
     if (args[0] === "log") return loopLogCommand(args.slice(1));
     if (args[0] === "events") return loopEventsCommand(args.slice(1));
     if (args[0] === "alert") return alertCommand(args.slice(1));
-    // `loop monitor` / `loop attach`: the v2 tmux-popup stream retires under the
-    // v3 self-contained runner (US-PORT-007) — TS stubs redirect, never run the
-    // bash tmux behaviour.
-    if (args[0] === "monitor") return loopMonitorRetired();
-    if (args[0] === "attach") return loopAttachRetired();
+    // `loop monitor` / `loop attach`: retired aliases are gone from dispatch;
+    // the tested stub helpers stay only as historical format fixtures.
+    if (args[0] === "monitor") return loopUnknownSubcommand(args[0]);
+    if (args[0] === "attach") return loopUnknownSubcommand(args[0]);
     if (args[0] === "run-once") return loopRunOnceCommand(args.slice(1));
     // `loop self-downgrade <story> <reason> [subs]`: park a too-big story at
     // 🚫 Hold + append its sub-stories (US-AGENT-042). The roll-build/roll-fix
@@ -480,9 +461,8 @@ export function registerAll(): void {
     // `loop test` (≠ top-level `roll test`): manual smoke gate — generates the
     // v3 test runner and runs it once with ROLL_LOOP_FORCE=1 (US-PORT-022).
     if (args[0] === "test") return loopTestCommand(args.slice(1));
-    // `loop branches`: retired (US-PORT-022) — no internal caller; prints the
-    // one-line `git ls-remote` that reproduces it. Never shells to bash.
-    if (args[0] === "branches") return loopBranchesRetired();
+    // `loop branches`: retired and no longer dispatched.
+    if (args[0] === "branches") return loopUnknownSubcommand(args[0]);
     // Cycle-gate subcommands the loop AGENT invokes per the roll-loop skill
     // (US-PORT-021 prerequisite — the last loop fallbacks, now native TS).
     if (args[0] === "notify") return loopNotifyCommand(args.slice(1));
@@ -490,7 +470,7 @@ export function registerAll(): void {
     if (args[0] === "precheck-ci") return loopPrecheckCiCommand(args.slice(1));
     if (args[0] === "hotfix-head-context") return loopHotfixHeadContextCommand(args.slice(1));
     if (args[0] === "agent-routes") return loopAgentRoutesCommand(args.slice(1));
-    if (args[0] === "test-quality-check") return loopTestQualityCheckRetired();
+    if (args[0] === "test-quality-check") return loopUnknownSubcommand(args[0]);
     // Anything else is an unknown loop subcommand — print the v2 usage, exit 1
     // (no bash fallback remains; bin/roll is being retired in US-PORT-021).
     return loopUnknownSubcommand(args[0]);

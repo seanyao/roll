@@ -15,7 +15,7 @@ import {
   validateCommandSurface,
   type CommandSurfaceDecision,
 } from "../src/lib/command-surface.js";
-import { isPorted, portedCommands, usage } from "../src/bridge.js";
+import { dispatch, isPorted, usage } from "../src/bridge.js";
 import { registerAll } from "../src/index.js";
 
 /** AC2: the approved public top-level command set, in display order. */
@@ -134,10 +134,12 @@ describe("REFACTOR-056 — registry ↔ `roll --help` agree", () => {
     }
   });
 
-  it("portedCommands() still includes nested/internal surfaces (no behavior moved this card)", () => {
+  it("REFACTOR-058: removed top-level aliases no longer execute old behavior", async () => {
     registerAll();
     for (const c of ["prices", "cast", "tool", "pulse", "cycles", "tune", "showcase", "offboard"]) {
-      expect(isPorted(c), `${c} must stay callable`).toBe(true);
+      expect(isPorted(c), `${c} retired stub is registered for drift detection`).toBe(true);
+      const res = await dispatch([c, "--help"]);
+      expect(res.status, `${c} should return normal unknown behavior`).toBe(1);
     }
   });
 });

@@ -42,7 +42,7 @@ afterEach(() => {
 describe("help contract — table-driven across registered commands", () => {
   it("registers help for every smoke-audit offender", () => {
     const helped = registeredHelp();
-    for (const cmd of ["update", "init", "setup", "backlog", "status", "doctor", "tune", "agent", "dream", "loop"]) {
+    for (const cmd of ["update", "init", "setup", "backlog", "status", "doctor", "agent", "dream", "loop"]) {
       expect(helped, `${cmd} must register bridge help`).toContain(cmd);
     }
   });

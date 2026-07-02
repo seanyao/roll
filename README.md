@@ -180,7 +180,8 @@ with `roll loop resume` when ready.
 | `roll status` | Verdict-first truth summary read from the ONE snapshot — LOOP · CYCLE · RELEASE · STORY, with the STORY line's attest-coverage % (`done ≡ merged ∧ attested`) — then convention/AI-client sync health |
 | `roll supervisor [status\|observe\|advise\|next\|why\|live] [--json]` | Project-level Prime Agent: observes project truth, explains guided/autonomous mode and next owner action, advises next steps, and renders a read-only live role board with Planner / Builder / Evaluator panes. Cross-Story coordination only — never implements a Story; persistent policy changes need owner confirmation |
 | `roll pulse [--json]` | Today's delivery pulse: cycles in window, merged count, attested count, plus an ASCII sparkline from the story spectrum. Bilingual EN/中. `--json` for machine-readable output |
-| `roll doctor [skills\|--tools]` | Environment + install diagnosis; `roll doctor --tools` shows focused tool and screenshot readiness, including Terminal.app Screen Recording |
+| `roll help [--lang en\|zh] [name]` | View the Charter / language guide markdown in the terminal; `roll --help` remains the CLI usage summary |
+| `roll doctor [skills\|tools\|--tools]` | Environment + install diagnosis; `roll doctor tools` shows registered tool policy/readiness, and `roll doctor --tools` shows focused tool and screenshot readiness, including Terminal.app Screen Recording |
 | `roll tune [reset]` | Suggest-only self-tuning from loop trends — read-only, never auto-applies |
 | **Cards & evidence** | |
 | `roll idea "<one-sentence description>"` | Capture a card: auto-classify, number, lint, infer epic, mint the full story folder — the one user entry for adding cards |

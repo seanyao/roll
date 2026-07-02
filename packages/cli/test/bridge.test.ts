@@ -135,12 +135,55 @@ describe("ported routing (no bash fallback)", () => {
     expect((await captureDispatch(["setup", "skills", "--help"])).stdout).toContain("roll setup skills");
   });
 
-  it("help / --help / -h → usage, exit 0", async () => {
-    for (const argv of [["help"], ["--help"], ["-h"]]) {
+  it("--help / -h → CLI usage, exit 0", async () => {
+    for (const argv of [["--help"], ["-h"]]) {
       const res = await captureDispatch(argv);
       expect(res.status).toBe(0);
       expect(res.stdout).toContain("roll <command>");
     }
+  });
+
+  it("REFACTOR-057: roll help is the public docs viewer while roll --help remains usage", async () => {
+    registerAll();
+    const helpHelp = await captureDispatch(["help", "--help"]);
+    expect(helpHelp.status).toBe(0);
+    expect(helpHelp.stdout).toContain("Usage: roll help");
+    expect(helpHelp.stdout).not.toContain("Usage: roll doc");
+
+    const cliHelp = await captureDispatch(["--help"]);
+    expect(cliHelp.status).toBe(0);
+    expect(cliHelp.stdout).toContain("roll <command>");
+  });
+
+  it("REFACTOR-057: retained support surfaces are reachable through owner commands", async () => {
+    registerAll();
+    const samples: Array<{ argv: string[]; stdout: RegExp }> = [
+      { argv: ["config", "prices", "--help"], stdout: /Usage: roll prices/ },
+      { argv: ["agent", "cast", "--help"], stdout: /Usage: roll cast/ },
+      { argv: ["doctor", "tools", "--help"], stdout: /Usage: roll doctor tools/ },
+      { argv: ["status", "ci", "--help"], stdout: /Usage: roll status ci/ },
+      { argv: ["loop", "cycles", "--help"], stdout: /Usage: roll cycles/ },
+      { argv: ["loop", "cycle", "--help"], stdout: /Usage: roll cycle/ },
+      { argv: ["release", "showcase", "--help"], stdout: /Usage: roll showcase/ },
+      { argv: ["setup", "offboard", "--help"], stdout: /Usage: roll offboard/ },
+    ];
+    for (const sample of samples) {
+      const res = await captureDispatch(sample.argv);
+      expect(res.status, sample.argv.join(" ")).toBe(0);
+      expect(res.stdout, sample.argv.join(" ")).toMatch(sample.stdout);
+    }
+  });
+
+  it("REFACTOR-057: config tune and status pulse nested routes reach their existing handlers", async () => {
+    registerAll();
+    const tune = await captureDispatch(["config", "tune", "--json"]);
+    expect(tune.status).toBe(0);
+    expect(tune.stdout).toContain('"mode"');
+    expect(tune.stdout).toContain('"summary"');
+
+    const pulse = await captureDispatch(["status", "pulse", "--json"]);
+    expect(pulse.status).toBe(1);
+    expect(pulse.stdout).toContain("no truth.json found");
   });
 
   it("US-DOSSIER-035: bare roll (no args) → front door, not the usage dump, exit 0", async () => {

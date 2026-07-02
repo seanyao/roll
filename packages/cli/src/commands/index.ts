@@ -95,6 +95,16 @@ import { versionCommand } from "./version.js";
 
 let registered = false;
 
+const HELP_USAGE = DOC_USAGE.replaceAll("roll doc", "roll help");
+
+const CI_USAGE =
+  "Usage: roll status ci [--wait] [--timeout=N]\n" +
+  "  Show GitHub Actions status for the current HEAD; --wait gates until checks finish.\n";
+
+const DOCTOR_TOOLS_USAGE =
+  "Usage: roll doctor tools\n" +
+  "  Show registered tools, input contracts, effective policy state, and requirement readiness.\n";
+
 function redirectCommand(from: string, to: string) {
   return (): number => {
     process.stdout.write(`roll ${from} moved to roll ${to}\n`);
@@ -109,7 +119,26 @@ function isHelp(arg: string | undefined): boolean {
 export function registerAll(): void {
   if (registered) return;
   registered = true;
-  registerPorted("status", statusCommand, { help: "Usage: roll status\n  Project health snapshot (backlog, loop, attest).\n项目健康速览。" });
+  registerPorted("help", (args) => {
+    if (isHelp(args[0])) {
+      process.stdout.write(`${HELP_USAGE}\n`);
+      return 0;
+    }
+    return docCommand(args);
+  }, { help: HELP_USAGE });
+  registerPorted("status", (args) => {
+    if (args[0] === "ci") {
+      const rest = args.slice(1);
+      if (isHelp(rest[0])) {
+        process.stdout.write(CI_USAGE);
+        return 0;
+      }
+      if (rest.includes("--wait")) return ciWaitCommand(rest);
+      return ciCommand(rest) ?? 1;
+    }
+    if (args[0] === "pulse") return pulseCommand(args.slice(1));
+    return statusCommand(args);
+  }, { help: "Usage: roll status [ci|pulse]\n  Project health snapshot, CI status, or delivery pulse.\n项目健康、CI 状态或交付脉搏速览。" });
   // REFACTOR-049: `roll lang` retired → use `roll config lang <zh|en|--reset>`.
   // REFACTOR-052: machine-only surfaces stay callable but leave the main usage.
   // Collected top-level verbs print a one-line redirect instead of behaving as
@@ -140,6 +169,14 @@ export function registerAll(): void {
       const rest = args.slice(1);
       if (isHelp(rest[0])) return skillsCommand(["help"]);
       return skillsCommand(["check", ...rest]);
+    }
+    if (args[0] === "tools") {
+      const rest = args.slice(1);
+      if (isHelp(rest[0])) {
+        process.stdout.write(DOCTOR_TOOLS_USAGE);
+        return 0;
+      }
+      return toolCommand(["status", ...rest]);
     }
     if (args[0] === "language") {
       return languageAuditCommand(args.slice(1));
@@ -192,7 +229,10 @@ export function registerAll(): void {
   registerPorted("dream", dreamCommand, { hidden: true, help: "Usage: roll dream run-once\n  Nightly self-scan (patterns, docs freshness, test quality) — run one pass now.\n夜间自检跑一遍。" });
   // `agent`: full surface TS (view/list/use/set/unknown). The write face owns
   // .roll/agents.yaml plus legacy .roll/local.yaml sync; no bash fallback.
-  registerPorted("agent", agentCommand, { help: "Usage: roll agent [migrate [--dry-run]|list]\n  View Agent Scope roles, migrate legacy config, or list installed agents.\n查看 Agent Scope 角色、迁移旧配置，或列出已安装 agent。" });
+  registerPorted("agent", (args) => {
+    if (args[0] === "cast") return castCommand(args.slice(1));
+    return agentCommand(args);
+  }, { help: "Usage: roll agent [migrate [--dry-run]|list|cast]\n  View Agent Scope roles, migrate legacy config, list installed agents, or print role casting.\n查看 Agent Scope 角色、迁移旧配置、列出 installed agent，或打印角色分工。" });
   registerPorted("agents", agentListCommand, { hidden: true }); // US-AGENT-048: bash-oracle `roll agents` alias for `roll agent list`
   // `pair`: v3-native Cross-Agent Pairing (US-PAIR-001). `pair init` scaffolds
   // legacy pairing compatibility commands. No bash fallback
@@ -247,7 +287,10 @@ export function registerAll(): void {
   // command itself; the old ship/waiver/changelog/consistency sub-routes exit
   // through the normal unknown-route error. npm publish stays the owner's
   // separate, 2FA-authenticated step.
-  registerPorted("release", releaseCommand);
+  registerPorted("release", (args) => {
+    if (args[0] === "showcase") return showcaseCommand(args.slice(1));
+    return releaseCommand(args);
+  });
   // US-SHOW-001: `roll showcase` — the golden-path standard E2E. Resets the
   // target card in a throwaway sandbox, casts a heterogeneous real-agent trio
   // (builder=kimi / reviewer=claude / scorer=pi), delivers it via `roll loop
@@ -271,7 +314,11 @@ export function registerAll(): void {
   // (apply a new schedule with `roll loop on`); CLI output stays byte-identical
   // to v2, and the v2 `_config_resolve` `set -u` crash on a missing global file
   // is fixed. See config.ts header.
-  registerPorted("config", configCommand);
+  registerPorted("config", (args) => {
+    if (args[0] === "prices") return pricesCommand(args.slice(1));
+    if (args[0] === "tune") return tuneCommand(args.slice(1));
+    return configCommand(args);
+  });
   // `changelog`: fully TS, deterministic-canonical (US-PORT-005). The v2 default
   // `generate` shelled the configured agent to AI-restyle the draft (and the
   // dispatch fell back to bash to do it); that path is RETIRED. The deterministic
@@ -306,8 +353,9 @@ export function registerAll(): void {
       if (isHelp(rest[0])) return skillsCommand(["help"]);
       return skillsCommand(["generate", ...rest]);
     }
+    if (args[0] === "offboard") return offboardCommand(args.slice(1));
     return setupCommand(args);
-  }, { help: "Usage: roll setup [skills]\n  Install roll conventions/templates for this machine.\n本机安装模板。" });
+  }, { help: "Usage: roll setup [skills|offboard]\n  Install roll conventions/templates for this machine, or remove recorded Roll artifacts.\n本机安装模板，或移除记录过的 Roll 产物。" });
   // `ci`: the READ surface is TS (no-flag / `--timeout=N` status report:
   // gh-absent warn, not-a-git-repo err, gh-run-list failure, no-runs note, and
   // the per-run "<name>: <status>/<conclusion>" listing). The `--wait` CI gate
@@ -359,6 +407,8 @@ export function registerAll(): void {
     if (args[0] === "eval") return loopEvalCommand(args.slice(1));
     if (args[0] === "story") return loopStoryCommand(args.slice(1));
     if (args[0] === "runs") return loopRunsCommand(args.slice(1));
+    if (args[0] === "cycles") return cyclesCommand(args.slice(1));
+    if (args[0] === "cycle") return cycleCommand(args.slice(1));
     if (args[0] === "goal") return loopGoalCommand(args.slice(1));
     if (args[0] === "go") return loopGoCommand(args.slice(1));
     // `loop recover [<story-id>] [--apply]`: the supervised recovery path out of

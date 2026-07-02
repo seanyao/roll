@@ -13,15 +13,16 @@
  * offline-openable, print-to-PDF clean).
  *
  * Two standard controls (fixed top-right, hidden in print):
- *  - language: full bilingual copy is embedded as `.lang-en` / `.lang-zh`
- *    spans; `html[data-lang]` shows one side. Default follows the browser
- *    locale; an explicit choice persists in localStorage (`roll-lang`).
+ *  - language: full locale resources are embedded as `.lang-en` / `.lang-zh`
+ *    spans; CSS shows one side before JavaScript runs. The script then follows
+ *    the browser locale, and an explicit choice persists in localStorage
+ *    (`roll-lang`).
  *  - theme: light/dark via `html[data-theme]` overriding prefers-color-scheme;
  *    persists in localStorage (`roll-theme`). The reference is light-first; the
  *    dark variant is a cool deep-slate (never the old warm ink).
  *
- * No-JS degrade: without the script both language spans render (legacy
- * "EN · 中" feel) and the theme follows the OS — nothing breaks.
+ * No-JS degrade: without the script the English side renders and the Chinese
+ * resource side stays hidden; the theme follows the OS.
  */
 
 /** A bilingual copy pair — exactly one side is visible once chrome JS runs. */
@@ -97,7 +98,8 @@ section { border:1px solid var(--line); border-radius:8px; padding:14px 18px; ma
 .meta, .muted { color:var(--muted); font-size:13px; }
 footer { color:var(--muted); font-size:12.5px; font-family:var(--mono); letter-spacing:.04em;
   margin-top:40px; border-top:1px solid var(--line); padding-top:12px; }
-/* language switching — both sides render until the chrome script picks one */
+/* language switching — no-JS/default renders exactly one language */
+html:not([data-lang]) .lang-zh { display:none; }
 [data-lang="en"] .lang-zh { display:none; } [data-lang="zh"] .lang-en { display:none; }
 /* chrome bar */
 .chrome { position:fixed; top:14px; right:14px; z-index:10; display:flex; gap:8px; font-family:var(--mono); }

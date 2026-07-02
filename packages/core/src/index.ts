@@ -39,7 +39,7 @@ export * from "./loop/cycle-observer.js";
 export * from "./loop/cycle-activity.js";
 export * from "./loop/execution-profile.js";
 export * from "./loop/evaluator-artifact.js";
-export * from "./loop/planner-contract.js";
+export * from "./loop/design-contract.js";
 export * from "./loop/repair-loop.js";
 export * from "./supervisor/observe.js";
 export * from "./supervisor/advise.js";

@@ -5,11 +5,11 @@
 import { describe, expect, it } from "vitest";
 import {
   designContractVsDelivered,
-  parsePlannerContract,
-  renderPlannerContract,
+  parseDesignContract,
+  renderDesignContract,
   summarizeDesignContractVsDelivered,
-  validatePlannerArtifact,
-} from "../src/loop/planner-contract.js";
+  validateDesignArtifact,
+} from "../src/loop/design-contract.js";
 import type { DesignerContract } from "@roll/spec";
 
 const FULL: DesignerContract = {
@@ -29,7 +29,7 @@ function manifest(over: Record<string, unknown> = {}): Record<string, unknown> {
     cycleId: "C-1",
     role: "designer",
     rig: { agent: "kimi" },
-    sessionId: "C-1:plan:kimi:1700",
+    sessionId: "C-1:design:kimi:1700",
     worktreeCwd: "/wt",
     scoreRepoCwd: "/repo",
     inputs: [],
@@ -41,48 +41,48 @@ function manifest(over: Record<string, unknown> = {}): Record<string, unknown> {
 
 describe("designer contract render/parse round-trip", () => {
   it("round-trips a full contract", () => {
-    expect(parsePlannerContract(renderPlannerContract(FULL), "US-9")).toEqual(FULL);
+    expect(parseDesignContract(renderDesignContract(FULL), "US-9")).toEqual(FULL);
   });
   it("round-trips with no resize guidance", () => {
     const { resizeGuidance, ...rest } = FULL;
     void resizeGuidance;
     const c = { ...rest } as DesignerContract;
-    expect(parsePlannerContract(renderPlannerContract(c), "US-9")).toEqual(c);
+    expect(parseDesignContract(renderDesignContract(c), "US-9")).toEqual(c);
   });
 });
 
-describe("parsePlannerContract — fail-closed", () => {
+describe("parseDesignContract — fail-closed", () => {
   it("returns null on empty / non-string", () => {
-    expect(parsePlannerContract("", "US-9")).toBeNull();
+    expect(parseDesignContract("", "US-9")).toBeNull();
   });
   it("returns null when required sections are missing", () => {
-    expect(parsePlannerContract("# Designer\n\nsome prose", "US-9")).toBeNull();
+    expect(parseDesignContract("# Designer\n\nsome prose", "US-9")).toBeNull();
     // scope + acceptance but no out-of-scope
-    expect(parsePlannerContract("## Scope boundary\n- x\n## Acceptance contract\n- y\n", "US-9")).toBeNull();
+    expect(parseDesignContract("## Scope boundary\n- x\n## Acceptance contract\n- y\n", "US-9")).toBeNull();
   });
 });
 
-describe("validatePlannerArtifact — fail-closed before the Builder", () => {
-  const contractMd = renderPlannerContract(FULL);
+describe("validateDesignArtifact — fail-closed before the Builder", () => {
+  const contractMd = renderDesignContract(FULL);
   it("accepts a well-formed designer artifact", () => {
-    expect(validatePlannerArtifact({ manifest: manifest(), contractMd, storyId: "US-9" })).toEqual({ ok: true, reasons: [] });
+    expect(validateDesignArtifact({ manifest: manifest(), contractMd, storyId: "US-9" })).toEqual({ ok: true, reasons: [] });
   });
   it("fails closed when the contract is missing", () => {
-    const v = validatePlannerArtifact({ manifest: manifest(), contractMd: null, storyId: "US-9" });
+    const v = validateDesignArtifact({ manifest: manifest(), contractMd: null, storyId: "US-9" });
     expect(v.ok).toBe(false);
-    expect(v.reasons.join(" ")).toContain("planner-contract.md missing or malformed");
+    expect(v.reasons.join(" ")).toContain("design-contract.md missing or malformed");
   });
   it("fails closed when the contract is malformed", () => {
-    expect(validatePlannerArtifact({ manifest: manifest(), contractMd: "garbage", storyId: "US-9" }).ok).toBe(false);
+    expect(validateDesignArtifact({ manifest: manifest(), contractMd: "garbage", storyId: "US-9" }).ok).toBe(false);
   });
   it("rejects a manifest whose role is not designer", () => {
-    const v = validatePlannerArtifact({ manifest: manifest({ role: "builder" }), contractMd, storyId: "US-9" });
+    const v = validateDesignArtifact({ manifest: manifest({ role: "builder" }), contractMd, storyId: "US-9" });
     expect(v.ok).toBe(false);
     expect(v.reasons.join(" ")).toContain('role !== "designer"');
   });
   it("rejects an empty acceptance contract (not a real contract)", () => {
-    const empty = renderPlannerContract({ ...FULL, acceptanceContract: [] });
-    const v = validatePlannerArtifact({ manifest: manifest(), contractMd: empty, storyId: "US-9" });
+    const empty = renderDesignContract({ ...FULL, acceptanceContract: [] });
+    const v = validateDesignArtifact({ manifest: manifest(), contractMd: empty, storyId: "US-9" });
     expect(v.ok).toBe(false);
     expect(v.reasons.join(" ")).toContain("no acceptance items");
   });

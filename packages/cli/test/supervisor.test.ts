@@ -8,6 +8,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gatherSupervisorInput, supervisorCommand } from "../src/commands/supervisor.js";
+import { stripAnsi } from "../src/render.js";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -88,6 +89,76 @@ const BACKLOG = `# Backlog
 | US-2 | second \`depends-on:US-1\` | 📋 Todo |
 | US-3 | third | 📋 Todo |
 `;
+
+function collabStreamEvents(): string[] {
+  const walkedOne = "C-walk-1";
+  const walkedTwo = "C-walk-2";
+  const missing = "C-missing";
+  const escalated = "C-escalated";
+  return [
+    JSON.stringify({ type: "cycle:start", cycleId: walkedOne, storyId: "FIX-1", agent: "pi", model: "m", ts: 1_000 }),
+    JSON.stringify({ type: "cycle:first_edit", cycleId: walkedOne, commitHash: "a1", ts: 1_100 }),
+    JSON.stringify({ type: "cycle:tcr", cycleId: walkedOne, commitHash: "a2", message: "tcr: first", ts: 1_200 }),
+    JSON.stringify({ type: "pair:selected", cycleId: walkedOne, workingAgent: "pi", peer: "reasonix", stage: "review", ts: 1_300 }),
+    JSON.stringify({ type: "pair:verdict", cycleId: walkedOne, peer: "reasonix", verdict: "agree", findings: 0, stage: "review", ts: 1_400 }),
+    JSON.stringify({ type: "peer:gate", cycleId: walkedOne, verdict: "consulted", reasons: [], ts: 1_500 }),
+    JSON.stringify({ type: "pair:selected", cycleId: walkedOne, workingAgent: "pi", peer: "codex", stage: "score", ts: 1_600 }),
+    JSON.stringify({ type: "pair:score", cycleId: walkedOne, peer: "codex", score: 9, verdict: "good", cost: 0, stage: "score", ts: 1_700 }),
+    JSON.stringify({ type: "attest:gate", cycleId: walkedOne, verdict: "produced", reasons: [], ts: 1_800 }),
+    JSON.stringify({
+      type: "cycle:terminal",
+      schema: 1,
+      cycleId: walkedOne,
+      storyId: "FIX-1",
+      agent: "pi",
+      model: "m",
+      startedAt: 1_000,
+      endedAt: 1_900,
+      outcome: "published_pending_merge",
+      pr: { present: false, reason: "test" },
+      branch: { present: true, value: "loop/FIX-1" },
+      commit: { present: true, value: "a2" },
+      tcr: { present: true, value: 1 },
+      attest: { present: true, value: { reportPath: ".roll/...", acMap: true } },
+      usage: { present: false, reason: "test" },
+      cost: { present: false, reason: "test" },
+      ts: 1_900,
+    }),
+    JSON.stringify({ type: "cycle:start", cycleId: walkedTwo, storyId: "FIX-2", agent: "pi", model: "m", ts: 4_000 }),
+    JSON.stringify({ type: "cycle:first_edit", cycleId: walkedTwo, commitHash: "b1", ts: 4_100 }),
+    JSON.stringify({ type: "cycle:tcr", cycleId: walkedTwo, commitHash: "b2", message: "tcr: second", ts: 4_200 }),
+    JSON.stringify({ type: "pair:selected", cycleId: walkedTwo, workingAgent: "pi", peer: "reasonix", stage: "review", ts: 4_300 }),
+    JSON.stringify({ type: "pair:verdict", cycleId: walkedTwo, peer: "reasonix", verdict: "agree", findings: 0, stage: "review", ts: 4_400 }),
+    JSON.stringify({ type: "peer:gate", cycleId: walkedTwo, verdict: "consulted", reasons: [], ts: 4_500 }),
+    JSON.stringify({ type: "pair:selected", cycleId: walkedTwo, workingAgent: "pi", peer: "codex", stage: "score", ts: 4_600 }),
+    JSON.stringify({ type: "pair:score", cycleId: walkedTwo, peer: "codex", score: 9, verdict: "good", cost: 0, stage: "score", ts: 4_700 }),
+    JSON.stringify({ type: "attest:gate", cycleId: walkedTwo, verdict: "produced", reasons: [], ts: 4_800 }),
+    JSON.stringify({
+      type: "cycle:terminal",
+      schema: 1,
+      cycleId: walkedTwo,
+      storyId: "FIX-2",
+      agent: "pi",
+      model: "m",
+      startedAt: 4_000,
+      endedAt: 4_900,
+      outcome: "published_pending_merge",
+      pr: { present: false, reason: "test" },
+      branch: { present: true, value: "loop/FIX-2" },
+      commit: { present: true, value: "b2" },
+      tcr: { present: true, value: 1 },
+      attest: { present: true, value: { reportPath: ".roll/...", acMap: true } },
+      usage: { present: false, reason: "test" },
+      cost: { present: false, reason: "test" },
+      ts: 4_900,
+    }),
+    JSON.stringify({ type: "cycle:end", cycleId: missing, outcome: "failed", cost: {}, ts: 7_000 }),
+    JSON.stringify({ type: "cycle:start", cycleId: escalated, storyId: "FIX-3", agent: "pi", model: "m", ts: 9_000 }),
+    JSON.stringify({ type: "cycle:first_edit", cycleId: escalated, commitHash: "c1", ts: 9_100 }),
+    JSON.stringify({ type: "agent:stall", cycleId: escalated, agent: "pi", idleSec: 601, thresholdSec: 600, ts: 9_500 }),
+    JSON.stringify({ type: "cycle:end", cycleId: escalated, outcome: "gave_up", cost: {}, ts: 9_600 }),
+  ];
+}
 
 describe("gatherSupervisorInput", () => {
   it("reads backlog rows + depends-on + merge truth + route config errors", () => {
@@ -468,6 +539,50 @@ describe("supervisorCommand", () => {
       ["builder", "pending"],
       ["evaluator", "not_required"],
     ]);
+  });
+
+  it("live --collab --once renders a folded multi-cycle collaboration stream", () => {
+    const cwd = project(BACKLOG, {
+      events: collabStreamEvents(),
+    });
+    const r = run(cwd, ["live", "--collab", "--once", "--no-color"]);
+    const text = stripAnsi(r.out);
+    expect(r.code).toBe(0);
+    expect(text).toContain("Collab stream — goal: live non-Hold FIX/US/REFACTOR");
+    expect(text).toContain("🧭 supervisor: codex");
+    expect(text).toContain("levels: supervise → plan → build");
+    expect(text).toContain("00:00:01  FIX-1");
+    expect(text).toContain("walked_full ×2");
+    expect(text).toContain("协同摘要不可用");
+    expect(text).toContain("00:00:09  FIX-3");
+    expect(text).toContain("⤴ escalation");
+    expect(text).toContain("escalated ⤴");
+    expect(text).toMatchSnapshot();
+  });
+
+  it("live --collab --once --json emits collab-stream.v1", () => {
+    const cwd = project(BACKLOG, {
+      events: collabStreamEvents(),
+    });
+    const r = run(cwd, ["live", "--collab", "--once", "--json"]);
+    const parsed = JSON.parse(r.out) as { schema: string; cycles: Array<{ terminus: string; stance?: { note?: string } }> };
+    expect(r.code).toBe(0);
+    expect(parsed.schema).toBe("collab-stream.v1");
+    expect(parsed.cycles.map((cycle) => cycle.terminus)).toEqual(["walked_full", "walked_full", "", "escalated"]);
+    expect(parsed.cycles[2]?.stance?.note).toBe("协同摘要不可用");
+  });
+
+  it("live without --collab keeps the existing role board output", () => {
+    const cwd = project(BACKLOG, {
+      events: [
+        JSON.stringify({ type: "cycle:start", cycleId: "C-plan", storyId: "US-2", agent: "codex", model: "gpt", ts: 1 }),
+        JSON.stringify({ type: "execution:profile", cycleId: "C-plan", storyId: "US-2", profile: "planned", reason: "planned: cross-module", ts: 2 }),
+      ],
+    });
+    const r = run(cwd, ["live"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("Prime Agent Live");
+    expect(r.out).not.toContain("Collab stream");
   });
 
   it("US-V4-022: health shows clean when no toolchain events exist", () => {

@@ -6,7 +6,7 @@
  * timestamps are epoch-ms values supplied by the caller.
  */
 
-import type { CollabCycleView, CollabEscalation } from "@roll/spec";
+import type { CollabCycleView, CollabEscalation, CollabStreamView } from "@roll/spec";
 import { c, stripAnsi, strw } from "../render.js";
 
 /** Layer A render options. */
@@ -211,6 +211,23 @@ const LABELS = {
   },
 };
 
+const STREAM_LABELS = {
+  en: {
+    title: "Collab stream",
+    goal: "goal",
+    supervisor: "supervisor",
+    levels: "levels",
+    summaryUnavailable: "协同摘要不可用",
+  },
+  zh: {
+    title: "Collab stream",
+    goal: "goal",
+    supervisor: "supervisor",
+    levels: "levels",
+    summaryUnavailable: "协同摘要不可用",
+  },
+};
+
 function mapFromRole(role: string): RoleKey {
   if (role === "build") return "build";
   if (role === "score") return "score";
@@ -324,6 +341,75 @@ export function renderCollabCycle(
   const termText = `${termLabel} ${termGlyph}`;
   const ruleWidth = Math.max(2, boxWidth(opt) - strw(termText) - 1);
   lines.push(`${"─".repeat(ruleWidth)} ${termText}`);
+
+  return lines.join("\n");
+}
+
+function isMissingCollabCycle(view: CollabCycleView): boolean {
+  return view.terminus === "" && view.handoffs.length === 0 && view.stance?.note === "协同摘要不可用";
+}
+
+function compactWalkedSummary(views: readonly CollabCycleView[], opt: RenderOpt): string {
+  const first = views[0]!;
+  const storyChain = views.map((view) => view.storyId).join(" → ");
+  const buildAgents = [...new Set(views.map((view) => view.cast.build).filter((agent): agent is string => agent !== undefined))];
+  const scoreAgents = [...new Set(views.map((view) => view.cast.scorer).filter((agent): agent is string => agent !== undefined))];
+  const cast = [
+    buildAgents.length > 0 ? `builder=${buildAgents.join("/")}` : undefined,
+    scoreAgents.length > 0 ? `score=${scoreAgents.join("/")}` : undefined,
+  ].filter((part): part is string => part !== undefined).join(" · ");
+  const castSuffix = cast === "" ? "" : ` · ${cast}`;
+  return `▌ ${formatTimeSpine(first.startedAtMs, opt)}  ${storyChain}  walked_full ×${views.length}${castSuffix}`;
+}
+
+function renderMissingCycle(view: CollabCycleView, opt: RenderOpt): string {
+  const time = view.startedAtMs > 0 ? formatTimeSpine(view.startedAtMs, opt) : withColor(opt, "muted", "n/a");
+  return `▌ ${time}  ${view.cycleId}  协同摘要不可用`;
+}
+
+/** Render a multi-cycle collaboration stream on one shared epoch-ms time spine. */
+export function renderCollabStream(view: CollabStreamView, opt: RenderOpt): string {
+  const lang = opt.lang ?? "en";
+  const labels = STREAM_LABELS[lang];
+  const lines = [
+    `${labels.title} — ${labels.goal}: ${view.goalScope}`,
+    `${renderRole("supervise", opt)} ${labels.supervisor}: ${view.supervisor}`,
+    `${labels.levels}: supervise ${HANDOFF_GLYPH} plan ${HANDOFF_GLYPH} build`,
+    "",
+  ];
+
+  let i = 0;
+  while (i < view.cycles.length) {
+    const current = view.cycles[i]!;
+    if (isMissingCollabCycle(current)) {
+      lines.push(renderMissingCycle(current, opt), "");
+      i += 1;
+      continue;
+    }
+
+    if (current.terminus === "walked_full") {
+      const group: CollabCycleView[] = [current];
+      let j = i + 1;
+      while (j < view.cycles.length && view.cycles[j]!.terminus === "walked_full") {
+        group.push(view.cycles[j]!);
+        j += 1;
+      }
+      if (group.length > 1) {
+        lines.push(compactWalkedSummary(group, opt), "");
+      } else {
+        lines.push(renderCollabCycle(current, opt), "");
+      }
+      i = j;
+      continue;
+    }
+
+    lines.push(renderCollabCycle(current, opt), "");
+    i += 1;
+  }
+
+  if (view.cycles.length === 0) {
+    lines.push(labels.summaryUnavailable, "");
+  }
 
   return lines.join("\n");
 }

@@ -5,7 +5,7 @@
  * a Cycle runs (arch §6, §12):
  *   standard — builder only            (low-risk, local, clear AC, low evidence risk)
  *   verified — builder → evaluator     (user-visible / evidence risk / weak history)
- *   planned  — planner → builder → eval (ambiguous / cross-module / truth-release /
+ *   designed — designer → builder → eval (ambiguous / cross-module / truth-release /
  *                                        agent-runtime semantics)
  *
  * Both functions are pure (no I/O). `classifyStoryRisk` derives the risk signals
@@ -16,7 +16,7 @@ import type { ExecutionProfile, StoryRiskInput } from "@roll/spec";
 
 /**
  * The exact arch §12 decision. Planning risk (doing the WRONG work) escalates to
- * `planned`; evidence/judgment risk escalates to `verified`; otherwise `standard`.
+ * `designed`; evidence/judgment risk escalates to `verified`; otherwise `standard`.
  */
 export function selectExecutionProfile(input: StoryRiskInput): ExecutionProfile {
   if (
@@ -25,7 +25,7 @@ export function selectExecutionProfile(input: StoryRiskInput): ExecutionProfile 
     input.touchesTruthOrRelease ||
     input.touchesAgentRuntime
   ) {
-    return "planned";
+    return "designed";
   }
   if (input.userVisible || input.visualEvidenceRequired || input.historicalEvidenceRisk) {
     return "verified";
@@ -37,16 +37,16 @@ export function selectExecutionProfile(input: StoryRiskInput): ExecutionProfile 
  * Apply the project's `execution_policy.mode` to a classified profile to get the
  * EFFECTIVE profile that actually executes. The default mode is `standard`
  * (including no `.roll/agents.yaml`), so a project that has not opted into
- * verified/planned execution stays Builder-only — the v4.0 no-regression
+ * verified/designed execution stays Builder-only — the v4.0 no-regression
  * guarantee (US-V4-004). A project opts in via `execution_policy.mode`:
  *   standard → always standard (opt-out);
  *   auto     → the classified profile;
- *   verified → floor at verified (planned still escalates);
- *   planned  → always the full Planner→Builder→Evaluator pipeline.
+ *   verified → floor at verified (designed still escalates);
+ *   designed → always the full Designer→Builder→Evaluator pipeline.
  */
 export function applyExecutionPolicy(
   classified: ExecutionProfile,
-  mode: "standard" | "verified" | "planned" | "auto",
+  mode: "standard" | "verified" | "designed" | "auto",
 ): ExecutionProfile {
   switch (mode) {
     case "standard":
@@ -54,21 +54,21 @@ export function applyExecutionPolicy(
     case "auto":
       return classified;
     case "verified":
-      return classified === "planned" ? "planned" : "verified";
-    case "planned":
-      return "planned";
+      return classified === "designed" ? "designed" : "verified";
+    case "designed":
+      return "designed";
   }
 }
 
 /** A short, human-readable rationale for the chosen profile (for the event +
  *  watch/status surfaces). Deterministic from the same input. */
 export function explainExecutionProfile(input: StoryRiskInput): string {
-  const planned: string[] = [];
-  if (input.acceptanceAmbiguous) planned.push("ambiguous acceptance");
-  if (input.crossModule) planned.push("cross-module");
-  if (input.touchesTruthOrRelease) planned.push("truth/release semantics");
-  if (input.touchesAgentRuntime) planned.push("agent-runtime semantics");
-  if (planned.length > 0) return `planned: ${planned.join(", ")}`;
+  const designed: string[] = [];
+  if (input.acceptanceAmbiguous) designed.push("ambiguous acceptance");
+  if (input.crossModule) designed.push("cross-module");
+  if (input.touchesTruthOrRelease) designed.push("truth/release semantics");
+  if (input.touchesAgentRuntime) designed.push("agent-runtime semantics");
+  if (designed.length > 0) return `designed: ${designed.join(", ")}`;
   const verified: string[] = [];
   if (input.userVisible) verified.push("user-visible");
   if (input.visualEvidenceRequired) verified.push("visual evidence required");
@@ -108,7 +108,7 @@ function frontmatterHas(specText: string, key: RegExp): boolean {
 
 /**
  * Derive {@link StoryRiskInput} from a story's spec text + a few facts. Pure +
- * heuristic — over-classifying toward verified/planned is safe (it only spends a
+ * heuristic — over-classifying toward verified/designed is safe (it only spends a
  * verification/planning session); the goal is to never UNDER-classify a risky
  * story to standard. `historicalEvidenceRisk` is injected by the caller (it comes
  * from prior cycle facts), defaulting false.

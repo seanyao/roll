@@ -32,9 +32,9 @@ execution_profiles:
     roles:
       builder: { routing: default }
       evaluator: { rig: reasonix-eval }
-  planned:
+  designed:
     roles:
-      planner: { rig: kimi-strong }
+      designer: { rig: kimi-strong }
       builder: { routing: default }
       evaluator: { rig: reasonix-eval }
 
@@ -63,7 +63,7 @@ describe("normalizeAgentConfig — valid v4", () => {
     // execution profiles: role bindings.
     expect(config.executionProfiles.verified.roles.evaluator).toEqual({ kind: "rig", rig: "reasonix-eval" });
     expect(config.executionProfiles.verified.roles.builder).toEqual({ kind: "routing", route: "default" });
-    expect(config.executionProfiles.planned.roles.planner).toEqual({ kind: "rig", rig: "kimi-strong" });
+    expect(config.executionProfiles.designed.roles.designer).toEqual({ kind: "rig", rig: "kimi-strong" });
     expect(config.executionPolicy).toEqual({ mode: "auto", defaultProfile: "standard" });
     expect(config.supervisor).toEqual({ enabled: false, mode: "observe", maxParallelCycles: 1, budgetPerDay: null });
   });
@@ -151,12 +151,32 @@ execution_profiles:
   it("reports an unknown route slot inside a role binding", () => {
     const text = `schema: v4
 execution_profiles:
-  planned:
+  designed:
     roles:
       builder: { routing: turbo }
 `;
     const { errors } = normalizeAgentConfig(text);
     expect(errors.some((e) => e.includes("unknown route slot 'turbo'"))).toBe(true);
+  });
+
+  it("rejects legacy planned/planner execution-profile keys instead of aliasing them", () => {
+    const text = `schema: v4
+execution_profiles:
+  planned:
+    roles:
+      planner: { rig: kimi-strong }
+      builder: { routing: default }
+execution_policy:
+  mode: planned
+  default_profile: planned
+`;
+    const { config, errors } = normalizeAgentConfig(text);
+    expect(config.executionProfiles.designed).toBeUndefined();
+    expect(config.executionPolicy).toEqual({ mode: "standard", defaultProfile: "standard" });
+    expect(errors).toContain("execution_profiles.planned: legacy profile key removed; use execution_profiles.designed");
+    expect(errors).toContain("execution_profiles.planned.roles.planner: legacy role key removed; use roles.designer");
+    expect(errors).toContain("execution_policy.mode: legacy value 'planned' removed; use 'designed'");
+    expect(errors).toContain("execution_policy.default_profile: legacy value 'planned' removed; use 'designed'");
   });
 });
 

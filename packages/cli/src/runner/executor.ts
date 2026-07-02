@@ -112,8 +112,8 @@ import {
   validateEvaluatorArtifact,
   validatePlannerArtifact,
   parsePlannerContract,
-  plannedVsDelivered,
-  summarizePlannedVsDelivered,
+  designContractVsDelivered,
+  summarizeDesignContractVsDelivered,
   decideRepair,
   initialRepairState,
   DEFAULT_MAX_REPAIR_ROUNDS,
@@ -1514,7 +1514,7 @@ export async function executeCommand(
       // route-resolve (before execute). Best-effort + never toppling routing: a
       // spec read/parse blip falls back to `standard` (builder-only, current
       // behavior). v4.0 records the profile but still executes standard only;
-      // verified/planned add evaluator/planner stages in later stories.
+      // verified/designed add evaluator/designer stages in later stories.
       const selectedProfile = recordExecutionProfile(ports, ctx.cycleId ?? "", cmd.storyId, estMin);
       return { event: { type: "route_resolved", agent: r.agent, model: r.model }, ctxPatch: { selectedProfile } };
     }
@@ -1547,15 +1547,15 @@ export async function executeCommand(
           ctxPatch: { builderSessionId },
         };
       }
-      // US-V4-006: for a `planned` cycle, run the Planner BEFORE the Builder in a
-      // fresh session and FAIL CLOSED on a missing/malformed planner contract —
-      // the Builder never starts without a valid plan. No-op for standard/verified.
-      if (ctx.selectedProfile === "planned") {
+      // US-V4-006: for a `designed` cycle, run the Designer BEFORE the Builder in a
+      // fresh session and FAIL CLOSED on a missing/malformed design contract —
+      // the Builder never starts without a valid design. No-op for standard/verified.
+      if (ctx.selectedProfile === "designed") {
         const plan = await runPlannerStage(ports, ctx, cmd.agent);
         if (plan.ran && !plan.ok) {
           ports.events.appendAlert(
             ports.paths.alertsPath,
-            `planner stage failed closed for ${ctx.storyId ?? "?"}: ${plan.reasons.join("; ")} — Builder not started (cycle ${ctx.cycleId ?? "?"})`,
+            `designer stage failed closed for ${ctx.storyId ?? "?"}: ${plan.reasons.join("; ")} — Builder not started (cycle ${ctx.cycleId ?? "?"})`,
           );
           return { event: { type: "agent_exited", exit: 1, timedOut: false }, ctxPatch: { builderSessionId } };
         }
@@ -2374,7 +2374,7 @@ export async function executeCommand(
             const title = (/^title:\s*(.+)$/m.exec(specText)?.[1] ?? "").trim();
             if (title !== "") goalLine = `Goal: ${title}\n`;
             // US-SKILL-030: pass evaluation contract to scorer so it grades against
-            // the planner's intended evidence/focus, not just generic code quality.
+            // the story's intended evidence/focus, not just generic code quality.
             evalContractFormatted = formatEvaluationContractForScorer(parseEvaluationContract(specText));
           }
         } catch {
@@ -2524,7 +2524,7 @@ export async function executeCommand(
       // Scoped to actual deliveries: an idle cycle has nothing to attest.
       let attestBlocked = false;
       // US-V4-005: capture the attest verdict + reasons so the Evaluator artifact
-      // (verified/planned) can record evidence status + blocking findings.
+      // (verified/designed) can record evidence status + blocking findings.
       let attestVerdict: "produced" | "skipped" | "unknown" = "unknown";
       let attestReasons: readonly string[] = [];
       if (commitsAhead > 0 && storyId !== "") {
@@ -2570,7 +2570,7 @@ export async function executeCommand(
         attestVerdict = res.verdict;
         attestReasons = res.reasons;
       }
-      // US-V4-005: for verified/planned profiles, write the Evaluator artifact
+      // US-V4-005: for verified/designed profiles, write the Evaluator artifact
       // (eval-report.md + artifact-manifest.json) into the run dir, ASSEMBLED from
       // the cycle's separate review/score/attest signals (never one pass/fail).
       // FAIL-CLOSED (US-V4-005): a malformed/missing evaluator artifact, or one
@@ -2580,7 +2580,7 @@ export async function executeCommand(
       // re-spawn loop that consumes a `repair` action is v4.1.
       let evaluatorBlocked = false;
       if (
-        (ctx.selectedProfile === "verified" || ctx.selectedProfile === "planned") &&
+        (ctx.selectedProfile === "verified" || ctx.selectedProfile === "designed") &&
         commitsAhead > 0 &&
         storyId !== ""
       ) {
@@ -2617,7 +2617,7 @@ export async function executeCommand(
       // an agent slot is set, and the spawn ran (its spend/duration are recorded
       // on the runs row). A defensively-empty agent slot stays idle.
       const agentExecuted = (ctx.agent ?? "").trim() !== "";
-      // US-V4-005: a verified/planned cycle with an invalid Evaluator artifact is
+      // US-V4-005: a verified/designed cycle with an invalid Evaluator artifact is
       // gate-blocked (fail-closed) alongside the attest/peer gates.
       const gateBlocked = attestBlocked || peerBlocked || evaluatorBlocked;
       // FIX-908: a gate-blocked cycle that did REAL work (≥1 commit AND ≥1 tcr:
@@ -3867,9 +3867,9 @@ export function parseEstMinFromSpec(specText: string): number | undefined {
  * `est_min:` tag (prior behavior), so routing never regresses on a parse blip.
  */
 /** US-V4-004/003 — the project's `execution_policy.mode` from `.roll/agents.yaml`
- *  (default "standard" when absent/unparseable). Gates whether verified/planned
+ *  (default "standard" when absent/unparseable). Gates whether verified/designed
  *  stages execute; standard keeps the cycle Builder-only (no regression). */
-function executionPolicyMode(repoCwd: string): "standard" | "verified" | "planned" | "auto" {
+function executionPolicyMode(repoCwd: string): "standard" | "verified" | "designed" | "auto" {
   try {
     const p = join(repoCwd, ".roll", "agents.yaml");
     if (!existsSync(p)) return "standard";
@@ -3885,7 +3885,7 @@ function executionPolicyMode(repoCwd: string): "standard" | "verified" | "planne
  * never throws (a spec read blip falls back to `standard`, the current
  * builder-only path). Returns the profile so the executor can fold it into the
  * cycle context. In v4.0 only `standard` actually executes — recording the chosen
- * profile is the foundation verified/planned execution builds on (US-V4-005/006).
+ * profile is the foundation verified/designed execution builds on (US-V4-005/006).
  */
 export function recordExecutionProfile(
   ports: Ports,
@@ -3903,7 +3903,7 @@ export function recordExecutionProfile(
       });
       const classified = selectExecutionProfile(input);
       // Apply execution_policy.mode (default "standard" — incl. no agents.yaml) so
-      // a project that has not opted into verified/planned stays Builder-only (the
+      // a project that has not opted into verified/designed stays Builder-only (the
       // v4.0 no-regression guarantee). The classification still informs the reason.
       const mode = executionPolicyMode(ports.repoCwd);
       profile = applyExecutionPolicy(classified, mode);
@@ -3929,7 +3929,7 @@ export function recordExecutionProfile(
 }
 
 /**
- * US-V4-005 — write + validate the EVALUATOR artifact for a verified/planned
+ * US-V4-005 — write + validate the EVALUATOR artifact for a verified/designed
  * cycle. The Evaluator role is not a new monolithic gate: it ASSEMBLES the three
  * separate contracts the cycle already produced in fresh sessions — the
  * independent Review Score, the blocking review/attest findings, and the attest
@@ -3941,29 +3941,29 @@ export function recordExecutionProfile(
 export function writeEvaluatorArtifact(
   ports: Ports,
   ctx: CycleContext,
-  signals: { attestStatus: "produced" | "skipped" | "unknown"; blockingFindings: readonly string[]; plannedVsDelivered?: string },
+  signals: { attestStatus: "produced" | "skipped" | "unknown"; blockingFindings: readonly string[]; designContractVsDelivered?: string },
 ): { written: boolean; valid: boolean; reasons: readonly string[] } {
   const profile = ctx.selectedProfile;
-  if (profile !== "verified" && profile !== "planned") return { written: false, valid: true, reasons: [] };
+  if (profile !== "verified" && profile !== "designed") return { written: false, valid: true, reasons: [] };
   const storyId = ctx.storyId ?? "";
   const runDir = ctx.evidenceRunDir ?? "";
   if (storyId === "" || runDir === "") return { written: false, valid: false, reasons: ["no story id / run dir for evaluator artifact"] };
   const scoreEntry = readLatestStoryReviewScore(ports.repoCwd, storyId);
   const verdict: "good" | "ok" | "regression" =
     scoreEntry?.verdict === "good" || scoreEntry?.verdict === "regression" ? scoreEntry.verdict : "ok";
-  // US-V4-006: when a planner contract exists (planned profile), the Evaluator
-  // reports planned-vs-delivered against it.
-  let plannedSummary = signals.plannedVsDelivered;
-  if (plannedSummary === undefined || plannedSummary === "") {
-    const contractPath = join(runDir, "role-artifacts", "planner", "planner-contract.md");
+  // US-V4-006: when a design contract exists (designed profile), the Evaluator
+  // reports design-contract-vs-delivered against it.
+  let designSummary = signals.designContractVsDelivered;
+  if (designSummary === undefined || designSummary === "") {
+    const contractPath = join(runDir, "role-artifacts", "designer", "planner-contract.md");
     if (existsSync(contractPath)) {
       try {
         const contract = parsePlannerContract(readFileSync(contractPath, "utf8"), storyId);
         if (contract !== null) {
-          plannedSummary = summarizePlannedVsDelivered(plannedVsDelivered(contract, deliveredAcItems(ports.repoCwd, storyId)));
+          designSummary = summarizeDesignContractVsDelivered(designContractVsDelivered(contract, deliveredAcItems(ports.repoCwd, storyId)));
         }
       } catch {
-        /* planned-vs-delivered is best-effort context for the report */
+        /* design-contract-vs-delivered is best-effort context for the report */
       }
     }
   }
@@ -3972,7 +3972,7 @@ export function writeEvaluatorArtifact(
     blockingFindings: signals.blockingFindings,
     ...(scoreEntry !== undefined ? { score: { value: scoreEntry.score, verdict } } : {}),
     attestStatus: signals.attestStatus,
-    ...(plannedSummary !== undefined && plannedSummary !== "" ? { plannedVsDelivered: plannedSummary } : {}),
+    ...(designSummary !== undefined && designSummary !== "" ? { designContractVsDelivered: designSummary } : {}),
   });
   const reportMd = renderEvalReport(report);
   const manifest: ArtifactManifest = {
@@ -4004,7 +4004,7 @@ export function writeEvaluatorArtifact(
 }
 
 /** US-V4-006 — the AC items a delivery covered (ac-map entries with a positive
- *  status), used for planned-vs-delivered mapping. Best-effort + lenient. */
+ *  status), used for design-contract-vs-delivered mapping. Best-effort + lenient. */
 function deliveredAcItems(repoCwd: string, storyId: string): string[] {
   try {
     const p = join(cardArchiveDir(repoCwd, storyId), "ac-map.json");
@@ -4022,12 +4022,12 @@ function deliveredAcItems(repoCwd: string, storyId: string): string[] {
 
 const PLANNER_TIMEOUT_MS = 20 * 60 * 1000;
 
-/** US-V4-006 — the Planner prompt (roll-design capability). TS owns the
- *  orchestration + the output contract; the skill does the planning. */
+/** US-V4-006 — the Designer prompt (roll-design capability). TS owns the
+ *  orchestration + the output contract; the skill does the designing. */
 function buildPlannerPrompt(storyId: string, contractAbsPath: string): string {
   return [
-    `You are the PLANNER for story ${storyId} in a planned execution profile.`,
-    `Read the story spec under .roll/features/**/${storyId}/spec.md and produce a planner contract.`,
+    `You are the DESIGNER for story ${storyId} in a designed execution profile.`,
+    `Read the story spec under .roll/features/**/${storyId}/spec.md and produce a design contract.`,
     `Write the contract to: ${contractAbsPath}`,
     "It MUST be markdown with these sections (use '- ' bullets):",
     "## Scope boundary",
@@ -4036,14 +4036,14 @@ function buildPlannerPrompt(storyId: string, contractAbsPath: string): string {
     "## Risks",
     "## Out of scope",
     "## Resize / split guidance   (optional prose)",
-    "Do NOT write product code — you only plan. The Builder consumes this contract next.",
+    "Do NOT write product code — you only design. The Builder consumes this contract next.",
   ].join("\n");
 }
 
 /**
- * US-V4-006 — run the Planner stage BEFORE the Builder for a `planned` cycle.
- * The Planner (roll-design capability) runs in a FRESH session and writes
- * `planner-contract.md`; the runner records the planner `artifact-manifest.json`.
+ * US-V4-006 — run the Designer stage BEFORE the Builder for a `designed` cycle.
+ * The Designer (roll-design capability) runs in a FRESH session and writes
+ * `planner-contract.md`; the runner records the designer `artifact-manifest.json`.
  * The contract is then validated FAIL-CLOSED — a missing/malformed/empty contract
  * stops the cycle before any Builder work. No-op for standard/verified. Idempotent
  * across retries (an existing valid contract is reused, not re-planned).
@@ -4053,11 +4053,11 @@ export async function runPlannerStage(
   ctx: CycleContext,
   plannerAgent: string,
 ): Promise<{ ran: boolean; ok: boolean; reasons: readonly string[] }> {
-  if (ctx.selectedProfile !== "planned") return { ran: false, ok: true, reasons: [] };
+  if (ctx.selectedProfile !== "designed") return { ran: false, ok: true, reasons: [] };
   const storyId = ctx.storyId ?? "";
   const runDir = ctx.evidenceRunDir ?? "";
-  if (storyId === "" || runDir === "") return { ran: false, ok: false, reasons: ["no story id / run dir for planner stage"] };
-  const dir = join(runDir, "role-artifacts", "planner");
+  if (storyId === "" || runDir === "") return { ran: false, ok: false, reasons: ["no story id / run dir for designer stage"] };
+  const dir = join(runDir, "role-artifacts", "designer");
   const contractPath = join(dir, "planner-contract.md");
   const manifestPath = join(dir, "artifact-manifest.json");
   const plannerSessionId = `${ctx.cycleId ?? "cycle"}:plan:${plannerAgent}:${ports.clock()}`;
@@ -4072,21 +4072,21 @@ export async function runPlannerStage(
         runDir: dir,
       });
     } catch {
-      /* a planner spawn blip → no contract → validation below fails closed */
+      /* a designer spawn blip -> no contract -> validation below fails closed */
     }
   }
-  // The runner records the planner role manifest (the skill writes the contract).
+  // The runner records the designer role manifest (the skill writes the contract).
   const manifest: ArtifactManifest = {
     schemaVersion: 1,
     storyId,
     cycleId: ctx.cycleId ?? "",
-    role: "planner",
+    role: "designer",
     rig: { agent: plannerAgent } as Rig,
     sessionId: plannerSessionId,
     worktreeCwd: ports.paths.worktreePath,
     scoreRepoCwd: ports.repoCwd,
     inputs: [{ path: `.roll/features/**/${storyId}/spec.md`, kind: "contract" }],
-    outputs: [{ path: "role-artifacts/planner/planner-contract.md", kind: "contract" }],
+    outputs: [{ path: "role-artifacts/designer/planner-contract.md", kind: "contract" }],
     createdAt: new Date(eventTs(ports)).toISOString(),
   };
   try {

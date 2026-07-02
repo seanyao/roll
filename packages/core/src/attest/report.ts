@@ -544,7 +544,7 @@ function executionCastBlock(
       case "peer_reviewer": return bi("Peer Reviewer", "同行评审");
       case "evaluator": return bi("Evaluator", "评审员");
       case "attest_gate": return bi("Attest Gate", "验收门禁");
-      case "planner": return bi("Planner", "规划者");
+      case "designer": return bi("Designer", "设计者");
     }
   };
 

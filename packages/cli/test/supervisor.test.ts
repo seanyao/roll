@@ -517,7 +517,7 @@ describe("supervisorCommand", () => {
     const cwd = project(BACKLOG, {
       events: [
         JSON.stringify({ type: "cycle:start", cycleId: "C-plan", storyId: "US-2", agent: "codex", model: "gpt", ts: 1 }),
-        JSON.stringify({ type: "execution:profile", cycleId: "C-plan", storyId: "US-2", profile: "planned", reason: "planned: cross-module", ts: 2 }),
+        JSON.stringify({ type: "execution:profile", cycleId: "C-plan", storyId: "US-2", profile: "designed", reason: "designed: cross-module", ts: 2 }),
         JSON.stringify({ type: "cycle:phase", cycleId: "C-plan", phase: "execute", ts: 3 }),
         JSON.stringify({ type: "cycle:phase", cycleId: "C-plan", phase: "publish", ts: 4 }),
         JSON.stringify({ type: "peer:gate", cycleId: "C-plan", verdict: "consulted", reasons: [], ts: 5 }),
@@ -526,11 +526,11 @@ describe("supervisorCommand", () => {
     const r = run(cwd, ["live"]);
     expect(r.code).toBe(0);
     expect(r.out).toContain("Prime Agent Live");
-    expect(r.out).toContain("C-plan · US-2 · planned");
-    expect(r.out).toContain("planner   done");
+    expect(r.out).toContain("C-plan · US-2 · designed");
+    expect(r.out).toContain("designer  done");
     expect(r.out).toContain("builder   done");
     expect(r.out).toContain("evaluator done");
-    expect(r.out).toContain("planner->builder:ready");
+    expect(r.out).toContain("designer->builder:ready");
     expect(r.out).toContain("builder->evaluator:ready");
   });
 
@@ -547,7 +547,7 @@ describe("supervisorCommand", () => {
     });
     const r = run(cwd, ["live"]);
     expect(r.out).toContain("C-std · US-3 · standard");
-    expect(r.out).toContain("planner   not_required");
+    expect(r.out).toContain("designer  not_required");
     expect(r.out).toContain("evaluator not_required");
     expect(r.out).toContain("C-eval · US-4 · verified · not_available");
     expect(r.out).toContain("evaluator not_available");
@@ -561,7 +561,7 @@ describe("supervisorCommand", () => {
     const parsed = JSON.parse(r.out);
     expect(parsed.supervisor.state).toBe("observing");
     expect(parsed.rows[0].roles.map((x: { role: string; state: string }) => [x.role, x.state])).toEqual([
-      ["planner", "not_required"],
+      ["designer", "not_required"],
       ["builder", "pending"],
       ["evaluator", "not_required"],
     ]);
@@ -645,7 +645,7 @@ describe("supervisorCommand", () => {
     const cwd = project(BACKLOG, {
       events: [
         JSON.stringify({ type: "cycle:start", cycleId: "C-plan", storyId: "US-2", agent: "codex", model: "gpt", ts: 1 }),
-        JSON.stringify({ type: "execution:profile", cycleId: "C-plan", storyId: "US-2", profile: "planned", reason: "planned: cross-module", ts: 2 }),
+        JSON.stringify({ type: "execution:profile", cycleId: "C-plan", storyId: "US-2", profile: "designed", reason: "designed: cross-module", ts: 2 }),
       ],
     });
     const r = run(cwd, ["live"]);

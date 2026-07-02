@@ -5,7 +5,7 @@
  * role chain per cycle: Builder, Peer Reviewer, Evaluator, and Attest Gate.
  */
 export type CycleRoleName =
-  | "planner"
+  | "designer"
   | "builder"
   | "peer_reviewer"
   | "evaluator"
@@ -48,7 +48,7 @@ export interface CycleRoleSummary {
   readonly schema: "cycle-role-summary.v1";
   readonly cycleId: string;
   readonly storyId: string;
-  readonly executionProfile: "standard" | "verified" | "planned";
+  readonly executionProfile: "standard" | "verified" | "designed";
   readonly generatedAt: string;
   readonly builderSessionId?: string;
   readonly roles: readonly CycleRoleAttempt[];

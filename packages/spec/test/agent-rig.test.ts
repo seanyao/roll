@@ -48,7 +48,7 @@ describe("US-V4-015 Agent Scope contracts", () => {
       errors: [],
     };
 
-    expect(AGENT_SCOPE_ROLES).toEqual(["supervise", "execute", "evaluate"]);
+    expect(AGENT_SCOPE_ROLES).toEqual(["supervise", "design", "execute", "evaluate"]);
     expect(parsed.config?.roles.execute).toEqual(binding);
     expect(resolved).toEqual({
       scope: "project",

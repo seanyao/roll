@@ -12,23 +12,23 @@ function start(cycleId: string, storyId: string, ts: number): RollEvent {
 }
 
 describe("buildSupervisorLiveBoard", () => {
-  it("renders planned profile panes and handoffs from events", () => {
+  it("renders designed profile panes and handoffs from events", () => {
     const board = buildSupervisorLiveBoard([
       start("C1", "US-1", 1),
-      { type: "execution:profile", cycleId: "C1", storyId: "US-1", profile: "planned", reason: "planned: cross-module", ts: 2 },
+      { type: "execution:profile", cycleId: "C1", storyId: "US-1", profile: "designed", reason: "designed: cross-module", ts: 2 },
       { type: "cycle:phase", cycleId: "C1", phase: "execute", ts: 3 },
       { type: "cycle:phase", cycleId: "C1", phase: "publish", ts: 4 },
       { type: "peer:gate", cycleId: "C1", verdict: "consulted", reasons: [], ts: 5 },
     ]);
     const row = board.rows[0]!;
-    expect(row.profile).toBe("planned");
+    expect(row.profile).toBe("designed");
     expect(row.roles.map((r) => [r.role, r.state])).toEqual([
-      ["planner", "done"],
+      ["designer", "done"],
       ["builder", "done"],
       ["evaluator", "done"],
     ]);
     expect(row.handoffs.map((h) => [h.from, h.to, h.state])).toEqual([
-      ["planner", "builder", "ready"],
+      ["designer", "builder", "ready"],
       ["builder", "evaluator", "ready"],
       ["evaluator", "builder", "ready"],
     ]);
@@ -37,7 +37,7 @@ describe("buildSupervisorLiveBoard", () => {
   it("shows not_required panes for a standard builder-only row", () => {
     const board = buildSupervisorLiveBoard([start("C2", "US-2", 10)]);
     expect(board.rows[0]?.roles.map((r) => [r.role, r.state])).toEqual([
-      ["planner", "not_required"],
+      ["designer", "not_required"],
       ["builder", "pending"],
       ["evaluator", "not_required"],
     ]);

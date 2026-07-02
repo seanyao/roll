@@ -192,7 +192,7 @@ const DEFAULT_STANDARD: ExecutionProfileSpec = {
 
 function defaultExecutionPolicy(): ExecutionPolicy {
   // Conservative default: behave like today (builder-only) until a project opts
-  // into `auto`/verified/planned. No regression for v3 configs.
+  // into `auto`/verified/designed. No regression for v3 configs.
   return { mode: "standard", defaultProfile: "standard" };
 }
 
@@ -272,6 +272,13 @@ export function normalizeAgentConfig(text: string): AgentConfigParse {
   } as Record<ExecutionProfile, ExecutionProfileSpec>;
   if (isMap(root["execution_profiles"])) {
     const block = root["execution_profiles"] as YamlMap;
+    if (block["planned"] !== undefined) {
+      errors.push("execution_profiles.planned: legacy profile key removed; use execution_profiles.designed");
+      const legacy = block["planned"];
+      if (isMap(legacy) && isMap(legacy["roles"]) && (legacy["roles"] as YamlMap)["planner"] !== undefined) {
+        errors.push("execution_profiles.planned.roles.planner: legacy role key removed; use roles.designer");
+      }
+    }
     for (const profile of EXECUTION_PROFILES) {
       const node = block[profile];
       if (!isMap(node)) continue;
@@ -281,6 +288,9 @@ export function normalizeAgentConfig(text: string): AgentConfigParse {
         continue;
       }
       const roles: Partial<Record<RoleName, RoleBinding>> = {};
+      if (rolesNode["planner"] !== undefined) {
+        errors.push(`execution_profiles.${profile}.roles.planner: legacy role key removed; use roles.designer`);
+      }
       for (const role of ROLE_NAMES) {
         if (rolesNode[role] === undefined) continue;
         const binding = parseRoleBinding(rolesNode[role], `execution_profiles.${profile}.roles.${role}`, errors);
@@ -296,13 +306,19 @@ export function normalizeAgentConfig(text: string): AgentConfigParse {
     const block = root["execution_policy"] as YamlMap;
     const mode = block["mode"];
     const dp = block["default_profile"];
+    if (mode === "planned") {
+      errors.push("execution_policy.mode: legacy value 'planned' removed; use 'designed'");
+    }
+    if (dp === "planned") {
+      errors.push("execution_policy.default_profile: legacy value 'planned' removed; use 'designed'");
+    }
     executionPolicy = {
       mode:
-        mode === "verified" || mode === "planned" || mode === "auto" || mode === "standard"
+        mode === "verified" || mode === "designed" || mode === "auto" || mode === "standard"
           ? mode
           : defaultExecutionPolicy().mode,
       defaultProfile:
-        dp === "verified" || dp === "planned" || dp === "standard" ? dp : defaultExecutionPolicy().defaultProfile,
+        dp === "verified" || dp === "designed" || dp === "standard" ? dp : defaultExecutionPolicy().defaultProfile,
     };
   }
 

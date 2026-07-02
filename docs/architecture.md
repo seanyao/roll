@@ -214,7 +214,7 @@ no-TCR/gave-up、成功交付、成本档位和角色能力标签排序。运行
 
 #### Supervisor Live Board
 
-`roll supervisor live` 是当前已交付的 CLI-first 多角色 board：读取事件流生成 Supervisor pane 与 Designer / Builder / Evaluator role panes。未来浏览器/TUI 面应复用同一 view model，并遵守以下边界：
+`roll supervisor live` 是当前已交付的 CLI-first 多角色 board：读取事件流生成 Supervisor pane 与 Designer / Builder / Evaluator role panes。默认模式输出一帧快照；`roll supervisor live --watch` 在交互式终端中原地重绘同一 view model，不追加重复帧，也不写任何 loop/backlog/release/evidence 状态。未来浏览器/TUI 面应复用同一 view model，并遵守以下边界：
 
 - **依赖方向**：浏览器可观测只读消费 `spec` 事件 schema 与 `core` 读侧选择器；loop 不依赖浏览器进程。
 - **只读隔离**：观察面不得写入 loop 状态，不得影响 Story delivery 的 TCR、CI、merge 或 attest 闸。

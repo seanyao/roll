@@ -430,8 +430,10 @@ describe("roll init diagnosis router", () => {
     const run = runInit(cwd, ["--auto"], { pathEntries: [gitOnlyPath()] });
 
     expect(run.status).toBe(0);
-    expect(run.stdout).toContain("Roll meta committed");
-    expect(run.stdout).toContain("Roll meta pushed: origin/main");
+    expect(run.stdout).toContain("Saved Roll setup files to git");
+    expect(run.stdout).toContain("Pushed Roll setup to origin/main");
+    // FIX-1076 (AC8): no internal "Roll meta" jargon leaks to the user.
+    expect(run.stdout).not.toContain("Roll meta");
     const committed = git(cwd, ["show", "--name-only", "--format=", "HEAD"]);
     expect(committed).toContain("AGENTS.md");
     expect(committed).toContain(".roll/backlog.md");
@@ -456,7 +458,7 @@ describe("roll init diagnosis router", () => {
     const run = runInit(child, ["--auto"], { pathEntries: [gitOnlyPath()] });
 
     expect(run.status).toBe(0);
-    expect(run.stdout).not.toContain("Roll meta committed");
+    expect(run.stdout).not.toContain("Saved Roll setup files to git");
     expect(git(parent, ["diff", "--cached", "--name-only"])).toBe("");
     expect(git(parent, ["status", "--short"])).toContain("?? nested-app/");
   });

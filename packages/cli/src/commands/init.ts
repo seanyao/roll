@@ -161,7 +161,8 @@ function finalizeRollOwnedGit(projectDir: string): void {
   }
 
   const sha = runGit(projectDir, ["rev-parse", "--short", "HEAD"]).stdout.trim();
-  ok(`Roll meta committed${sha !== "" ? `: ${sha}` : ""}`);
+  // FIX-1076 (AC8): plain language, not internal "Roll meta" jargon.
+  ok(`Saved Roll setup files to git${sha !== "" ? `: ${sha}` : ""}`);
 
   const branch = runGit(projectDir, ["rev-parse", "--abbrev-ref", "HEAD"]).stdout.trim();
   if (branch === "" || branch === "HEAD") {
@@ -178,7 +179,7 @@ function finalizeRollOwnedGit(projectDir: string): void {
     printGitFinalizeManual("git push failed", `git push -u origin ${branch}`);
     return;
   }
-  ok(`Roll meta pushed: origin/${branch}`);
+  ok(`Pushed Roll setup to origin/${branch}`);
 }
 
 // ─── bash UI helpers (bin/roll:41-56) — used only for err() here ─────────────

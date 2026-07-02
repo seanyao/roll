@@ -631,6 +631,117 @@ describe("roll design bounded progress and handoff", () => {
     }
   });
 
+  // ── FIX-1076: generic-agent (codex) live view suppresses echoed skill prompt,
+  // template examples, repeated diffs and raw peer-review shell; keeps real
+  // progress and surfaces peer review as one structured event. ──────────────
+  const NOISY_DESIGN_STREAM = [
+    // skill hub / gate / contract instruction echo
+    "This hub keeps the routing boundary, hard gates, and execution skeleton in context.",
+    "- **Evaluation contract (US-SKILL-030)**: every newly split story spec MUST carry it.",
+    "## Bounded Contexts",
+    "| Context | Boundary | Core concepts |",
+    "│ [peer] Direction Review │ ← if complexity=medium/large",
+    // template DDD teaching example from another domain
+    "- Order Context (OrderPlaced, OrderShipped, OrderCancelled)",
+    "支付失败后如何回滚库存预留？",
+    "| [US-{DOMAIN}-{N}](.roll/features/<epic>/US-{DOMAIN}-{N}/spec.md) | {one-line} | 📋 Todo |",
+    // echoed diff (first copy)
+    "diff --git a/.roll/domain/context-map.md b/.roll/domain/context-map.md",
+    "+++ b/.roll/domain/context-map.md",
+    "+# intel-radar Domain Context Map",
+    "+ published_at?: string;",
+    // raw shell / tool echo
+    `/bin/zsh -lc "sed -n '1,260p' .roll/backlog.md" in /Users/x/intel-radar[main]`,
+    // real progress
+    "This is effectively greenfield: no app source exists yet, and the backlog is empty.",
+    // echoed diff AGAIN (dedup target)
+    "diff --git a/.roll/domain/context-map.md b/.roll/domain/context-map.md",
+    "+ published_at?: string;",
+    // peer review invocations (raw shell) — surfaced as one event each, deduped
+    `/bin/zsh -lc 'claude -p '"'"'[PEER_REVIEW round=1 tool=codex→claude] ...'"'"''`,
+    `/bin/zsh -lc 'kimi -p '"'"'[PEER_REVIEW round=1 tool=codex→kimi] ...'"'"''`,
+    `/bin/zsh -lc 'claude -p '"'"'[PEER_REVIEW round=1 tool=codex→claude] ...'"'"''`,
+  ].join("\n") + "\n";
+
+  function codexProj(): string {
+    const proj = freshProj();
+    dirs.push(proj);
+    makeAgent(bin, "codex");
+    writeConfig(home, "lang: en\nai_codex: ~/.codex\n");
+    return proj;
+  }
+
+  it("codex live view drops skill prompt, template examples, diffs and raw shell", () => {
+    const proj = codexProj();
+    const d = makeDeps(proj, bin);
+    d.spawn = (_b, _a, _o, live) => {
+      live?.onStdout(NOISY_DESIGN_STREAM);
+      return { status: 0, signal: null };
+    };
+    const out = captureStderr(() => designCommand(["--agent", "codex", "design a thing"], d));
+    // real progress survives
+    expect(out).toContain("greenfield");
+    // skill prompt / contract echo gone (AC1)
+    expect(out).not.toContain("routing boundary");
+    expect(out).not.toContain("Evaluation contract");
+    expect(out).not.toContain("Bounded Contexts");
+    // template / other-domain example gone (AC2)
+    expect(out).not.toContain("Order Context");
+    expect(out).not.toContain("回滚库存");
+    expect(out).not.toContain("{DOMAIN}");
+    // echoed diff / code gone (AC1)
+    expect(out).not.toContain("diff --git");
+    expect(out).not.toContain("published_at");
+    // raw shell gone (AC4)
+    expect(out).not.toContain("/bin/zsh");
+    expect(out).not.toContain("sed -n");
+  });
+
+  it("codex live view surfaces peer review as one structured event, deduped", () => {
+    const proj = codexProj();
+    const d = makeDeps(proj, bin);
+    d.spawn = (_b, _a, _o, live) => {
+      live?.onStdout(NOISY_DESIGN_STREAM);
+      return { status: 0, signal: null };
+    };
+    const out = captureStderr(() => designCommand(["--agent", "codex", "design a thing"], d));
+    expect(out).toContain("peer review · codex → claude");
+    expect(out).toContain("peer review · codex → kimi");
+    // codex→claude appeared twice in the stream but is emitted once (AC3/AC4)
+    expect(out.match(/peer review · codex → claude/g)?.length).toBe(1);
+    // raw PEER_REVIEW payload never leaks
+    expect(out).not.toContain("[PEER_REVIEW");
+  });
+
+  it("codex live view emits a repeated diff at most once (dedup, AC3)", () => {
+    const proj = codexProj();
+    const d = makeDeps(proj, bin);
+    // A line that is NOT structural noise but repeats — must show exactly once.
+    const repeated = "analyzed: greenfield · empty backlog\n".repeat(4);
+    d.spawn = (_b, _a, _o, live) => {
+      live?.onStdout(repeated);
+      return { status: 0, signal: null };
+    };
+    const out = captureStderr(() => designCommand(["--agent", "codex", "design a thing"], d));
+    expect(out.match(/analyzed: greenfield · empty backlog/g)?.length).toBe(1);
+  });
+
+  it("codex run preserves the full raw stream in transcript.log (AC6)", () => {
+    const proj = codexProj();
+    const d = makeDeps(proj, bin);
+    d.spawn = (_b, _a, _o, live) => {
+      live?.onStdout(NOISY_DESIGN_STREAM);
+      return { status: 0, signal: null };
+    };
+    captureStderr(() => designCommand(["--agent", "codex", "design a thing"], d));
+    const transcript = readSingleTranscript(proj);
+    // everything the view dropped is still archived verbatim
+    expect(transcript).toContain("routing boundary");
+    expect(transcript).toContain("diff --git");
+    expect(transcript).toContain("[PEER_REVIEW");
+    expect(transcript).toContain("Order Context");
+  });
+
   it("--verbose and --raw stream live before the child exits", async () => {
     const proj = freshProj();
     dirs.push(proj);

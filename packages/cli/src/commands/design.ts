@@ -242,12 +242,75 @@ function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
   return typeof (value as { then?: unknown }).then === "function";
 }
 
+/**
+ * Structural noise denylist (FIX-1076). A generic-agent design run streams every
+ * raw stdout line as a tier-C `say`, so the skill prompt, template examples,
+ * echoed diffs, and raw peer-review shell all reach the view. We hide anything
+ * that is NOT this run's real progress by its SHAPE (diff / code / markdown /
+ * box-drawing / shell / template placeholder), not by design vocabulary — a diff
+ * path like `.roll/domain/context-map.md` contains "context" and would otherwise
+ * pass the keyword allowlist. The full stream still lands in transcript.log.
+ */
 function isDesignNoise(text: string): boolean {
   const s = text.trim();
   if (s === "") return true;
-  if (/^\?\?\s/.test(s)) return true;
-  if (/^\s*-\s*\[\s*\]\s+/.test(s)) return true;
-  return /\$roll-design|roll-design contract|ID generation algorithm|Who writes the data|encrypted reasoning/i.test(s);
+  if (/^\?\?\s/.test(s)) return true; // git status porcelain
+  if (/^\s*-\s*\[\s*\]\s+/.test(s)) return true; // checklist echo
+  if (/\$roll-design|roll-design contract|ID generation algorithm|Who writes the data|encrypted reasoning/i.test(s)) {
+    return true;
+  }
+
+  // Echoed diff / patch / raw code fragments (the ×12 context-map.md diff).
+  if (/^(diff --git |index [0-9a-f]{4,}|\+\+\+ |--- |@@ |[+-]{1,3}\s)/.test(s)) return true;
+  if (/^[+-]\s*\S/.test(s)) return true; // any leading +/- diff body line
+  if (/^\s*(export |import |function |const |let |return |run\()/.test(s)) return true; // code
+  if (/^\s*[A-Za-z_]\w*\??:\s.*[;,]?\s*$/.test(s) && /[;{}]|"|\?:/.test(s)) return true; // TS members
+
+  // Echoed skill prompt / spec markdown structure.
+  if (/^#{1,6}\s/.test(s)) return true; // markdown headers
+  if (/^>\s?/.test(s)) return true; // blockquotes
+  if (/^\s*\|.*\|\s*$/.test(s)) return true; // table rows
+  if (/[│├└┌┐┘─]/.test(s)) return true; // box-drawing skill diagrams
+  if (/[│｜]\s*→|→\s*\[|└──|├──/.test(s)) return true; // flow arrows in skill diagrams
+
+  // Template placeholders — never a real card / real content.
+  if (/\{[A-Z]{2,}\}|\{YYYY|\{N\}|\{one-line|\{EventName|\{Bounded|\{consumer|\{if /.test(s)) return true;
+  if (/<story>|<epic>|<context>|<path>|US-\{|features\/<epic>/.test(s)) return true;
+
+  // Skill hub / gate / contract instruction lines (static, not this run).
+  // NOTE: deliberately does NOT match bare "Bounded Context" / "Context Map" —
+  // those are legitimate design-progress vocabulary; their echoed forms are
+  // caught structurally above (markdown headers, table rows, box diagrams).
+  if (/(routing boundary|hard gates|engineering checklist|Keep this hub|Evaluation contract|Visual-evidence contract|Backlog Structure|Event Storming|Tactical Model|Ubiquitous Language)/i.test(s)) {
+    return true;
+  }
+
+  // Template DDD teaching example from another domain (e-commerce), not intel-radar.
+  if (/(Order Context|Inventory Context|Payment Context|OrderPlaced|OrderShipped|OrderCancelled|InventoryReserved|PaymentCompleted|PaymentFailed)/.test(s)) {
+    return true;
+  }
+  if (/支付失败|库存预留|扣减策略|回滚库存|买家提交/.test(s)) return true;
+
+  // Raw shell / tool invocation echo (peer review is re-emitted as one event line).
+  if (/^\/bin\/(zsh|bash|sh)\b/.test(s)) return true;
+  if (/\[PEER_REVIEW\b/.test(s)) return true;
+  if (/--no-session|--no-context-files|--tools\s/.test(s)) return true;
+  if (/\b(claude|kimi|pi|codex)\b[^\n]*\s-p\b/.test(s)) return true;
+  if (/\bsed -n\b|\bcat\b.*\|/.test(s)) return true;
+  if (/\sin\s\/.+\[.*\]$/.test(s)) return true; // "<cmd> in /path[branch]" transcript echo
+
+  return false;
+}
+
+/**
+ * If a raw line announces a peer-review invocation, synthesize a single
+ * structured event line (`peer review · A → B`); otherwise null. The renderer
+ * dedups these so three back-to-back invocations collapse to distinct edges only.
+ */
+function peerReviewEvent(text: string): string | null {
+  const m = /tool=(\w+)\s*(?:→|->|=>)\s*(\w+)/.exec(text);
+  if (m === null) return null;
+  return `peer review · ${m[1]} → ${m[2]}`;
 }
 
 function isMeaningfulDesignSay(summary: string): boolean {
@@ -317,6 +380,21 @@ function createLiveProgress(ctx: RunContext, deps: DesignCommandDeps, opts: { ra
   let sawLiveOutput = false;
   let lastPrintedTs = ctx.startTs;
   let heartbeat: NodeJS.Timeout | undefined;
+  // FIX-1076: dedup already-shown view lines (kills the ×12 repeated diff and
+  // any re-emitted identical signal). Keyed on the visible body, timestamp-free.
+  const emittedLines = new Set<string>();
+
+  const emitOnce = (ts: number, body: string): void => {
+    if (opts.verbose) {
+      lastPrintedTs = ts;
+      emit(`${fmtHhmmss(ts)}  ${body}`);
+      return;
+    }
+    if (emittedLines.has(body)) return;
+    emittedLines.add(body);
+    lastPrintedTs = ts;
+    emit(`${fmtHhmmss(ts)}  ${body}`);
+  };
 
   const scanCards = (): void => {
     if (opts.raw) return;
@@ -333,11 +411,18 @@ function createLiveProgress(ctx: RunContext, deps: DesignCommandDeps, opts: { ra
   const processLine = (line: string): void => {
     if (opts.raw) return;
     const ts = deps.now();
+    // FIX-1076: a peer-review invocation echoes as raw shell; surface it as one
+    // structured event instead of the raw command line.
+    const peer = peerReviewEvent(line);
+    if (peer !== null) {
+      emitOnce(ts, peer);
+      return;
+    }
     const signals = normalizer.normalize(line, state, ts);
     for (const sig of signals) {
       if (!shouldShowSignal(sig, opts.verbose)) continue;
-      lastPrintedTs = sig.ts;
-      emit(formatSignal(sig));
+      const body = formatSignal(sig).replace(/^\d{2}:\d{2}:\d{2}\s+/, "");
+      emitOnce(sig.ts, body);
     }
   };
 

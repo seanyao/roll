@@ -6,7 +6,7 @@
  *   - Legacy spec fallback (no block → null, no crash, no behavior change)
  *   - Minimal block (one-item expected_evidence)
  *   - Formatting for scorer prompt
- *   - Evidence delta summary (planned-vs-delivered)
+ *   - Evidence delta summary (design-contract-vs-delivered)
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -201,7 +201,7 @@ describe("formatEvaluationContractForScorer", () => {
       builder_notes: [],
     };
     const result = formatEvaluationContractForScorer(contract);
-    expect(result).toContain("Planned evidence:");
+    expect(result).toContain("Design contract evidence:");
     expect(result).toContain("test: foo.test.ts (proves AC1)");
     expect(result).toContain("screenshot: console page (proves AC2)");
     expect(result).toContain("Scorer focus:");
@@ -214,7 +214,7 @@ describe("formatEvaluationContractForScorer", () => {
 });
 
 describe("evidenceDeltaSummary", () => {
-  it("builds planned-vs-delivered mapping", () => {
+  it("builds design-contract-vs-delivered mapping", () => {
     const contract: EvaluationContract = {
       expected_evidence: [
         { kind: "test", target: "x.test.ts", proves: "AC1" },
@@ -261,7 +261,7 @@ describe("buildPairScorePrompt with evaluation contract (AC3)", () => {
     const contractSummary = formatEvaluationContractForScorer(contract);
     const prompt = buildPairScorePrompt(summary, contractSummary);
     expect(prompt).toContain("EVALUATION CONTRACT");
-    expect(prompt).toContain("planned evidence from the story spec");
+    expect(prompt).toContain("Designer contract evidence from the story spec");
     expect(prompt).toContain("test: x.test.ts (proves AC1)");
     expect(prompt).toContain("locale consistency");
     expect(prompt).toContain(summary);

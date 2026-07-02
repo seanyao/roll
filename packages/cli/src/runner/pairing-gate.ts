@@ -1158,12 +1158,12 @@ export async function retryPeerConsult(
  *
  * US-SKILL-030 — when the story's spec carries an `**Evaluation contract:**`
  * block, the caller passes its formatted summary here so the peer scorer can
- * grade the delivery against the PLANNED evidence expectations, not just the
+ * grade the delivery against the Designer contract evidence expectations, not just the
  * delivered summary. Absent (legacy stories) → no behavior change.
  */
 export function buildPairScorePrompt(summary: string, evalContractSummary?: string): string {
   const contractBlock = evalContractSummary !== undefined && evalContractSummary !== ""
-    ? `\nEVALUATION CONTRACT (planned evidence from the story spec — grade against this):\n${evalContractSummary}\n`
+    ? `\nEVALUATION CONTRACT (Designer contract evidence from the story spec — grade against this):\n${evalContractSummary}\n`
     : "";
   return (
     `You are a heterogeneous PAIRING scorer. A different agent delivered the cycle below; ` +

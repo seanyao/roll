@@ -8,7 +8,7 @@
  * The block is authored by roll-design, consumed by:
  *   - roll-build / roll-fix (read before coding, map delivered evidence back)
  *   - the peer Review Score prompt (include in scorer summary)
- *   - attest report (surface planned-vs-delivered evidence mapping)
+ *   - attest report (surface design-contract-vs-delivered evidence mapping)
  *
  * Legacy specs (no block) → null (graceful degradation, no behavior change).
  * Genuinely trivial/internal stories may carry a one-item minimal block.
@@ -159,7 +159,7 @@ export function formatEvaluationContractForScorer(contract: EvaluationContract |
   if (contract === null) return "";
   const parts: string[] = [];
   if (contract.expected_evidence.length > 0) {
-    parts.push("Planned evidence:");
+    parts.push("Design contract evidence:");
     for (const e of contract.expected_evidence) {
       parts.push(`  - ${e.kind}: ${e.target} (proves ${e.proves})`);
     }
@@ -180,7 +180,7 @@ export function formatEvaluationContractForScorer(contract: EvaluationContract |
 }
 
 /**
- * Build a planned-vs-delivered evidence summary from the evaluation contract
+ * Build a design-contract-vs-delivered evidence summary from the evaluation contract
  * and the ac-map entries, for inclusion in attest/report output.
  *
  * @param contract  The parsed evaluation contract (null → empty summary).
@@ -198,7 +198,7 @@ export function evidenceDeltaSummary(
       acStatus.set(e.ac, e.status);
     }
   }
-  const lines: string[] = ["Planned-vs-delivered evidence:"];
+  const lines: string[] = ["Design-contract-vs-delivered evidence:"];
   for (const item of contract.expected_evidence) {
     const status = acStatus.get(item.proves) ?? "missing";
     const icon = status === "pass" ? "✅" : status === "partial" ? "⚠️" : "❓";

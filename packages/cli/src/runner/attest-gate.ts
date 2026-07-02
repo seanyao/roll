@@ -875,15 +875,15 @@ function hasRenderedVisualEvidence(worktreeCwd: string, storyId: string): boolea
 }
 
 /**
- * US-SKILL-030 — planned-vs-delivered evidence mapping for the attest report.
+ * US-SKILL-030 — design-contract-vs-delivered evidence mapping for the attest report.
  * Reads the story's `**Evaluation contract:**` block (if present) and the
  * ac-map entries, then returns a human-readable delta summary showing which
- * planned evidence items were satisfied, changed, or missing.
+ * design contract evidence items were satisfied, changed, or missing.
  *
  * Returns "" when the story has no evaluation contract (legacy specs — no
  * behavior change).
  */
-export function plannedVsDeliveredEvidence(worktreeCwd: string, storyId: string): string {
+export function designContractDeliveredEvidence(worktreeCwd: string, storyId: string): string {
   const spec = storySpecPath(worktreeCwd, storyId);
   if (spec === null) return "";
   let text: string;

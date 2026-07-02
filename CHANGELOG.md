@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### 可见性
+- `roll design` 的实时进展现在只显示这次运行的真实动作，不再把技能说明、其它示例项目的模板、重复的 diff 和底层命令刷屏；完整原始输出仍然保存在 transcript 里（FIX-1076）`[cli-visual]`
+
+### 易用性
+- `roll init` 在识别到产品需求文档且 backlog 为空时，会直接问你「现在就开始设计吗？」，答 y 就接着跑 `roll design`，不用再手动复制那条命令；加 `--yes` 或 `--then design` 可在自动化里一步到位（US-INIT-010）`[init-onboard]`
+
 ## v4.702.4 — 2026-07-02
 
 ### 可见性

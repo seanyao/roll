@@ -430,8 +430,10 @@ describe("roll init diagnosis router", () => {
     const run = runInit(cwd, ["--auto"], { pathEntries: [gitOnlyPath()] });
 
     expect(run.status).toBe(0);
-    expect(run.stdout).toContain("Roll meta committed");
-    expect(run.stdout).toContain("Roll meta pushed: origin/main");
+    expect(run.stdout).toContain("Saved Roll setup files to git");
+    expect(run.stdout).toContain("Pushed Roll setup to origin/main");
+    // FIX-1076 (AC8): no internal "Roll meta" jargon leaks to the user.
+    expect(run.stdout).not.toContain("Roll meta");
     const committed = git(cwd, ["show", "--name-only", "--format=", "HEAD"]);
     expect(committed).toContain("AGENTS.md");
     expect(committed).toContain(".roll/backlog.md");
@@ -456,9 +458,79 @@ describe("roll init diagnosis router", () => {
     const run = runInit(child, ["--auto"], { pathEntries: [gitOnlyPath()] });
 
     expect(run.status).toBe(0);
-    expect(run.stdout).not.toContain("Roll meta committed");
+    expect(run.stdout).not.toContain("Saved Roll setup files to git");
     expect(git(parent, ["diff", "--cached", "--name-only"])).toBe("");
     expect(git(parent, ["status", "--short"])).toContain("?? nested-app/");
+  });
+
+  // ── US-INIT-010: init offers to continue into design (consent gate) ────────
+  function prdProject(): string {
+    const cwd = project();
+    write(cwd, "docs/PRD.md", "# Product Requirements\n\nBuild an intel radar.\n");
+    return cwd;
+  }
+
+  it("US-INIT-010: PRD + interactive 'y' continues straight into design", () => {
+    const cwd = prdProject();
+    const calls: string[][] = [];
+    // `--auto` skips the init Proceed? prompt, so readLine drives only the
+    // design continuation gate.
+    const run = withCapturedOutput(cwd, () =>
+      initCommand(["--auto"], { forceInteractive: true, readLine: () => "y", runDesign: (a) => (calls.push(a), 0) }),
+    );
+
+    expect(run.status).toBe(0);
+    expect(run.stderr).toContain("Run design now?");
+    expect(run.stdout).toContain("Detected docs/PRD.md");
+    expect(calls).toEqual([["--from-file", "docs/PRD.md"]]);
+  });
+
+  it("US-INIT-010: interactive 'n' keeps the printed NEXT hint and does not run design", () => {
+    const cwd = prdProject();
+    const calls: string[][] = [];
+    const run = withCapturedOutput(cwd, () =>
+      initCommand(["--auto"], { forceInteractive: true, readLine: () => "n", runDesign: (a) => (calls.push(a), 0) }),
+    );
+
+    expect(run.status).toBe(0);
+    expect(calls).toEqual([]); // AC2: not run
+    expect(run.stdout).toContain("roll design --from-file docs/PRD.md"); // NEXT hint intact
+  });
+
+  it("US-INIT-010: no PRD → no continuation prompt at all", () => {
+    const cwd = project(); // empty workspace, no design material
+    const calls: string[][] = [];
+    const run = withCapturedOutput(cwd, () =>
+      initCommand(["--auto"], { forceInteractive: true, readLine: () => "y", runDesign: (a) => (calls.push(a), 0) }),
+    );
+
+    expect(run.status).toBe(0);
+    expect(calls).toEqual([]); // AC3: nothing to continue into
+    expect(run.stderr).not.toContain("Run design now?");
+  });
+
+  it("US-INIT-010: --yes auto-continues without a prompt in a non-interactive run", () => {
+    const cwd = prdProject();
+    const calls: string[][] = [];
+    const run = withCapturedOutput(cwd, () =>
+      initCommand(["--yes"], { runDesign: (a) => (calls.push(a), 0) }), // no forceInteractive → non-TTY
+    );
+
+    expect(run.status).toBe(0);
+    expect(calls).toEqual([["--from-file", "docs/PRD.md"]]); // AC4: flag path
+    expect(run.stderr).not.toContain("Run design now?"); // no prompt
+  });
+
+  it("US-INIT-010: non-interactive without a flag never auto-runs design", () => {
+    const cwd = prdProject();
+    const calls: string[][] = [];
+    const run = withCapturedOutput(cwd, () =>
+      initCommand([], { runDesign: (a) => (calls.push(a), 0) }), // non-TTY, no --yes
+    );
+
+    expect(run.status).toBe(0);
+    expect(calls).toEqual([]); // AC4: no silent burn
+    expect(run.stdout).toContain("roll design --from-file docs/PRD.md"); // hint still printed
   });
 
   it("asks empty interactive workspaces what they are building and writes that brief", () => {

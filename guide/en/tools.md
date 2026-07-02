@@ -81,10 +81,10 @@ Unknown fields warn but do not reject the policy file, so newer Roll versions ca
 
 ## CLI
 
-Use `roll tool status` to inspect the registered tools, input contracts, requirement readiness, and the effective policy state for the current project.
+Use `roll doctor tools status` to inspect the registered tools, input contracts, requirement readiness, and the effective policy state for the current project.
 
 ```bash
-roll tool status
+roll doctor tools status
 ```
 
 Example output:
@@ -125,7 +125,7 @@ tools:
 2. Confirm Roll resolved the policy:
 
 ```bash
-roll tool status
+roll doctor tools status
 ```
 
 Expected rows:
@@ -148,7 +148,7 @@ During attest, Roll captures the page through `browser.screenshot`. The exposed 
 4. Inspect the evidence:
 
 ```bash
-roll cycle <cycle-id>
+roll loop cycle <cycle-id>
 ```
 
 Look for rows like:
@@ -168,6 +168,6 @@ In the story attest report and cycle views, the same event stream appears as:
 
 ## Evidence And Cost
 
-`roll loop status`, `roll cycle`, and attest reports show tool summaries from the event stream. Failed tool calls keep their error codes, and screenshot tools can link directly to captured images.
+`roll loop status`, `roll loop cycle`, and attest reports show tool summaries from the event stream. Failed tool calls keep their error codes, and screenshot tools can link directly to captured images.
 
 Tool costs preserve their native currency. USD rows stay USD. CNY/RMB rows stay CNY/RMB or `¥`. Roll does not relabel RMB-denominated tool or model costs as dollars and does not blindly add mixed currencies into one number.

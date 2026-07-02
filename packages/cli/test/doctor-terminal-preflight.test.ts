@@ -119,7 +119,7 @@ describe("US-INIT-003c Terminal.app screenshot preflight", () => {
     expect(notice).toContain("restart Terminal.app");
   });
 
-  it("documents roll doctor --tools in CLI help and README", async () => {
+  it("documents tool readiness in CLI help and README", async () => {
     registerAll();
     let stdout = "";
     const realOut = process.stdout.write.bind(process.stdout);
@@ -136,6 +136,6 @@ describe("US-INIT-003c Terminal.app screenshot preflight", () => {
     }
 
     expect(stdout).toContain("--tools");
-    expect(readFileSync(join(repoRoot, "README.md"), "utf8")).toContain("roll doctor --tools");
+    expect(readFileSync(join(repoRoot, "README.md"), "utf8")).toContain("roll doctor [skills\\|tools\\|language]");
   });
 });

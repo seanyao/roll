@@ -36,7 +36,7 @@ Roll 的 Agent 领域有三个核心角色：
 - `evaluate` — 用 fresh session 评审、打分或检查交付。
 
 **一个跑完的 cycle 里，谁演了哪个角色？** cycle 跑完后，解析出的角色不是要你
-从日志里重建的谜题。跑 `roll cycle <id> --roles` 就能看清谁是 Builder、谁是
+从日志里重建的谜题。跑 `roll loop cycle <id> --roles` 就能看清谁是 Builder、谁是
 Evaluator，咨询了哪些 peer，以及 gate 采纳了哪一个 score。同一份阵容也写进
 `summary.md` / `summary.json`，并内嵌到故事的 Execution Cast 报告块。完整的面见
 [Cycle 角色可观测](./loop.md#cycle-角色可观测)。

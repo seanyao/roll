@@ -256,7 +256,7 @@ final review gate before a goal can become `complete`. The default policy is
 `goal:review_degraded` when it must fall back to self review because every
 heterogeneous candidate failed or because only one provider is installed.
 
-Final review uses the same structured adapter as `roll peer`. The
+Final review uses the same structured adapter as `-peer` skill. The
 `goal:final_review` event records reviewer agent, provider, command family,
 verdict, findings, timeout/error state, duration, and transcript/evidence
 paths when available. A transient review crash rotates to the next ranked
@@ -386,11 +386,11 @@ you should never have to grep those by hand to answer the first-run question:
 
 Three surfaces answer that question.
 
-### `roll cycle <id> --roles`
+### `roll loop cycle <id> --roles`
 
 ```bash
-roll cycle <id> --roles          # human-readable execution cast for one cycle
-roll cycle <id> --roles --json   # the same facts as cycle-role-summary.v1 JSON
+roll loop cycle <id> --roles          # human-readable execution cast for one cycle
+roll loop cycle <id> --roles --json   # the same facts as cycle-role-summary.v1 JSON
 ```
 
 The roles view renders the full role chain — Builder, Peer Review,
@@ -481,7 +481,7 @@ attempt under `.roll/loop/peer/` — see
 ## Collaboration View
 
 US-OBS-032 writes the role cast (`summary.md` / `summary.json`), US-OBS-033
-exposes that cast with `roll cycle <id> --roles`, and the collaboration view is
+exposes that cast with `roll loop cycle <id> --roles`, and the collaboration view is
 the upper layer over CycleRoleSummary. It turns the same facts into a protocol
 relay: who designed, who built, who reviewed, who evaluated, and where the
 baton ended.
@@ -489,11 +489,11 @@ baton ended.
 Use these entry points:
 
 ```bash
-roll cycle <id> --collab          # one cycle as a protocol relay
-roll cycle <id> --collab --json   # collab-view.v1 JSON
+roll loop cycle <id> --collab          # one cycle as a protocol relay
+roll loop cycle <id> --collab --json   # collab-view.v1 JSON
 roll supervisor live --collab     # live multi-cycle collaboration stream
 roll supervisor live --collab --once
-roll cycle --legend               # Layer A protocol legend
+roll loop cycle --legend               # Layer A protocol legend
 ```
 
 Read the protocol as:

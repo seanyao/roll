@@ -14,7 +14,7 @@ in your journey with Roll:
 > **Roll has two surfaces.** Keep them straight as you read this FAQ:
 >
 > - **CLI commands** — run in your terminal: `roll init`, `roll loop on`,
->   `roll status`, `roll cycle`, etc. These manage state, scheduling, and
+>   `roll status`, `roll loop cycle`, etc. These manage state, scheduling, and
 >   observability. They do not write code themselves.
 > - **Skills** — invoked inside your AI agent (Claude Code, Cursor, Codex,
 >   Pi, etc.): `$roll-build`, `$roll-design`, `$roll-fix`, `$roll-onboard`,
@@ -262,7 +262,7 @@ any other Roll project.
 
 **Short answer:** Yes, but you lose the CI gate. TCR and PR still work locally.
 
-**Details:** `roll ci --wait` looks for GitHub Actions on the current commit.
+**Details:** `roll status ci --wait` looks for GitHub Actions on the current commit.
 If no CI is configured, Roll degrades gracefully: TCR remains the inner gate
 (tests must pass for a commit to stick), PRs are still created, but the loop
 won't wait on remote CI before marking a story done.
@@ -284,7 +284,7 @@ but pattern-by-pattern.
   are per-machine, so two people running loop in parallel won't collide on
   state but may race on the same story.
 - **Team:** treat `.roll/backlog.md` like any source file — coordinate via
-  PRs. `roll peer` exists for cross-agent review (one agent reviews another's
+  PRs. `-peer` skill exists for cross-agent review (one agent reviews another's
   PR). Multi-developer loop coordination (who picks what next) is still a
   rough edge.
 
@@ -300,7 +300,7 @@ PRs upstream like any human contributor.
 **Details:** When a loop cycle finishes, Roll writes `cost_list_usd` (the
 cost at that moment's prices) and `prices_version` (which snapshot was used)
 into the usage event. The dashboard reads the frozen value first. Vendor price
-changes, `roll prices refresh`, and Roll upgrades never rewrite historical
+changes, `roll config prices refresh`, and Roll upgrades never rewrite historical
 costs.
 
 Cycles from before this feature shipped (no `cost_list_usd` field) fall back
@@ -310,8 +310,8 @@ so you know those numbers might drift when prices change.
 **Try it:**
 
 ```bash
-roll prices show            # see current snapshot
-roll prices refresh         # fetch latest pricing, diff, snapshot if changed
+roll config prices show            # see current snapshot
+roll config prices refresh         # fetch latest pricing, diff, snapshot if changed
 roll loop status --days 7   # historical cycles use frozen costs
 ```
 
@@ -441,7 +441,7 @@ successfully (TCR commits exist) but the story isn't marked `✅ Done`.
 
 **Why this happens:** Loop marks a story `🔨 In Progress` before invoking the
 build skill, and only writes `✅ Done` after two hard gates pass: (1) TCR
-commit count > 0, (2) CI green via `roll ci --wait`. If the agent crashes mid-
+commit count > 0, (2) CI green via `roll status ci --wait`. If the agent crashes mid-
 cycle, the LOCK file goes stale, or CI fails, the story stays as-is — by
 design, to avoid false-positive completions.
 
@@ -501,7 +501,7 @@ are multiple surfaces depending on what you need.
 
 **Under the hood:** Each cycle appends a JSONL record to
 `<project>/.roll/loop/runs.jsonl` with story ID, model, TCR commit count,
-duration, outcome, and cost (public pricing). `roll status`, `roll cycle`, and
+duration, outcome, and cost (public pricing). `roll status`, `roll loop cycle`, and
 story-scoped attest reports read this — and the rest of the truth ledger — into
 human-readable surfaces. The live watch view is read-only and combines
 live activity with structured event facts; the tmux observe pane uses the same

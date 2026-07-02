@@ -2,7 +2,7 @@
 
 Roll computes per-cycle costs at **public per-token pricing** — not your
 subscription rate, but a comparable number you can track across projects and
-agents. This doc covers the `roll prices` command, snapshot mechanism, and
+agents. This doc covers the `roll config prices` command, snapshot mechanism, and
 how historical costs survive price changes.
 
 ## Where Costs Appear
@@ -25,14 +25,14 @@ Snapshots live in `lib/prices/` under your Roll install directory.
 | DeepSeek | CNY | `api-docs.deepseek.com/zh-cn/quick_start/pricing/` |
 | Kimi (Moonshot) | CNY | `platform.kimi.com/docs/pricing/chat` |
 
-## `roll prices` Command
+## `roll config prices` Command
 
 ```bash
-roll prices show        # Print the current price table (all vendors)
-roll prices refresh     # Fetch official pricing docs for all vendors, diff, write if changed
+roll config prices show        # Print the current price table (all vendors)
+roll config prices refresh     # Fetch official pricing docs for all vendors, diff, write if changed
 ```
 
-### `roll prices show`
+### `roll config prices show`
 
 Prints the active snapshots' metadata and a table of all known models with
 their per-million-token rates:
@@ -46,11 +46,11 @@ cr       Cache read tokens (billed at a deep discount)
 
 Rates are **per million tokens**, in the vendor's native currency.
 
-### `roll prices refresh`
+### `roll config prices refresh`
 
 Fetches the official pricing page from each vendor, parses the rate table,
 and diffs it against the latest local snapshot. Supports per-vendor refresh:
-`roll prices refresh anthropic|deepseek|kimi`.
+`roll config prices refresh anthropic|deepseek|kimi`.
 
 - **Rates changed** → writes a new snapshot file (`snapshot-YYYY-MM-DD.json`),
   prints a diff (red = removed, green = added), and the dashboard picks up the
@@ -97,7 +97,7 @@ If the field is missing (cycles from before this feature shipped), it falls
 back to computing with the *current* snapshot and appends a dim `[legacy]`
 marker.
 
-**Net effect:** vendor price changes, `roll prices refresh`, and Roll upgrades
+**Net effect:** vendor price changes, `roll config prices refresh`, and Roll upgrades
 never rewrite historical cycle costs. "What you actually spent" is a fact —
 it stays put.
 
@@ -108,9 +108,9 @@ No. It uses public per-token rates. If you're on a subscription (Claude Pro,
 Team, etc.) your real cost is lower. Think of it as a comparable number.
 
 **Q: What happens when prices change?**
-Run `roll prices refresh`. If rates changed, a new snapshot is written and new
+Run `roll config prices refresh`. If rates changed, a new snapshot is written and new
 cycles use it. Old cycles keep their frozen `cost_list_usd`.
 
 **Q: Can I add prices for a different vendor?**
-Yes — `roll prices refresh --vendor deepseek` (or `kimi`). The `--vendor` flag
+Yes — `roll config prices refresh --vendor deepseek` (or `kimi`). The `--vendor` flag
 tells the fetcher which vendor's pricing page to scrape.

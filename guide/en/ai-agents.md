@@ -41,7 +41,7 @@ Roll uses three core Agent-domain roles:
 
 **Who played each role in a finished cycle?** After a cycle runs, the resolved
 roles are not a mystery you have to reconstruct from logs. Run
-`roll cycle <id> --roles` to see exactly who was Builder and who was Evaluator,
+`roll loop cycle <id> --roles` to see exactly who was Builder and who was Evaluator,
 which peers were consulted, and which single score the gate accepted. The same
 cast is written to `summary.md` / `summary.json` and embedded in the story's
 Execution Cast report block. See

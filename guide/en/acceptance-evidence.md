@@ -26,7 +26,7 @@ story is accepted by opening its own report — not a global archive/index page.
 `roll attest` is story-scoped: it writes only this story's run report and the
 `latest` pointer. It does not refresh any global archive, epic, or front-page
 HTML. Those board pages, when you want them, are rendered on demand with
-`roll index`; they are a convenience/archive view, not the delivery-truth surface.
+the archive rebuild; they are a convenience/archive view, not the delivery-truth surface.
 
 ## Lifecycle in three stages
 
@@ -47,7 +47,7 @@ HTML. Those board pages, when you want them, are rendered on demand with
    deploy probe, test-pass proof), renders the report, and moves `latest` to the
    run. That is all it writes — it is story-scoped. It does not mount a story
    archive delivery section, regenerate `.roll/index.json`, or refresh any global
-   archive/epic/front page (run `roll index` on demand for those board pages).
+   archive/epic/front page (run the archive rebuild on demand for those board pages).
 
 `roll attest` also runs standalone — without an intent map every AC renders as
 🟧 Claimed, honestly.
@@ -158,7 +158,7 @@ available:
 ```bash
 roll story new US-PAY-001 --title "Refund flow" --epic payments
 # the ONE minting entry: card folder + backlog row + index refresh in one step.
-# Batch minting: add --no-index per card, finish with a single `roll index`.
+# Batch minting: add --no-index per card, finish with a single the archive rebuild.
 ```
 
 Both channels write the frontmatter'd `spec.md`, the story page skeleton,
@@ -167,9 +167,9 @@ cards are born once, then evolved by hand. Skills never hand-create card
 files; the `cards` consistency dimension fails the release gate on any
 live backlog row without a card.
 
-## Static Archive — `roll index`
+## Static Archive — the archive rebuild
 
-`roll index` is an on-demand repair/archive renderer. It regenerates browsable,
+the archive rebuild is an on-demand repair/archive renderer. It regenerates browsable,
 three-layer static HTML pages (every page is self-contained, bilingual,
 theme-aware, printable):
 
@@ -201,6 +201,6 @@ the file is missing or unreadable, the page shows an explicit unavailable state.
 
 The current delivery truth remains story-scoped attest plus CLI-first
 observability (`roll status`, `roll loop watch`, `roll loop runs`,
-`roll cycle <id>`). Use `roll index` by hand for reconciliation, archive
-export, CI artifacts, or migration repair; `--rebuild` re-renders every story
+`roll loop cycle <id>`). Use the archive rebuild by hand for reconciliation, archive
+export, CI artifacts, or migration repair; rebuild mode re-renders every story
 page from source after hand-merges or history migrations.

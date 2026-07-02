@@ -12,7 +12,7 @@ Quickly select the right skill or tool.
 | **"Fix a bug"** / **"Change some copy"** | `roll-fix` | Quick fix, no full workflow |
 | **"Plan requirements"** / **"Split into stories"** | `roll-design` | Plan only, no implementation, outputs BACKLOG.md |
 | **"Run several Actions in parallel"** | `roll-build` | Auto-determines parallelism after splitting Actions |
-| **"What shipped / what's queued?"** | `roll status` / `roll cycle` / story reports | CLI-first delivery state, cycle trace, and story-scoped evidence |
+| **"What shipped / what's queued?"** | `roll status` / `roll loop cycle` / story reports | CLI-first delivery state, cycle trace, and story-scoped evidence |
 | **"Debug this page"** | `roll-debug` | Deep diagnosis, collect logs/network/DOM |
 
 ## Support Skills

@@ -82,3 +82,45 @@ describe("US-OBS-036 — cycle role visibility docs", () => {
     }
   });
 });
+
+describe("US-OBS-041 — collaboration observability docs", () => {
+  it("loop guides document collab commands and protocol semantics (en+zh)", () => {
+    const en = doc("guide/en/loop.md");
+    expect(en).toContain("## Collaboration View");
+    expect(en).toContain("roll cycle <id> --collab");
+    expect(en).toContain("roll supervisor live --collab");
+    expect(en).toContain("roll cycle --legend");
+    expect(en).toMatch(/Supervisor\/Designer[\s\S]{0,160}Builder[\s\S]{0,160}Peer Reviewer[\s\S]{0,160}Evaluator[\s\S]{0,160}Gate/);
+    expect(en).toMatch(/observe\/advise[\s\S]{0,160}design\/split[\s\S]{0,160}Builder override/);
+    expect(en).toMatch(/session-based[\s\S]{0,220}fresh sessions[\s\S]{0,220}artifact handoff/);
+    expect(en).toMatch(/diversity[\s\S]{0,180}ranking signal[\s\S]{0,180}not a default hard exclusion/);
+    expect(en).toMatch(/handoff[\s\S]{0,180}escalation[\s\S]{0,180}terminus/);
+    expect(en).toMatch(/US-OBS-032[\s\S]{0,220}US-OBS-033[\s\S]{0,220}upper layer over CycleRoleSummary/);
+
+    const zh = doc("guide/zh/loop.md");
+    expect(zh).toContain("## 协同视图");
+    expect(zh).toContain("roll cycle <id> --collab");
+    expect(zh).toContain("roll supervisor live --collab");
+    expect(zh).toContain("roll cycle --legend");
+    expect(zh).toMatch(/Supervisor\/Designer[\s\S]{0,160}Builder[\s\S]{0,160}Peer Reviewer[\s\S]{0,160}Evaluator[\s\S]{0,160}Gate/);
+    expect(zh).toMatch(/旁观\/建议[\s\S]{0,160}设计\/拆分[\s\S]{0,160}Builder override/);
+    expect(zh).toMatch(/按 session 独立[\s\S]{0,220}fresh session[\s\S]{0,220}artifact handoff/);
+    expect(zh).toMatch(/多样性[\s\S]{0,180}排序信号[\s\S]{0,180}默认硬排除/);
+    expect(zh).toMatch(/handoff[\s\S]{0,180}escalation[\s\S]{0,180}terminus/);
+    expect(zh).toMatch(/US-OBS-032[\s\S]{0,220}US-OBS-033[\s\S]{0,220}CycleRoleSummary 的上层/);
+  });
+
+  it("README and command help expose collab and legend entries", () => {
+    const readme = doc("README.md");
+    expect(readme).toContain("roll cycle <id> --collab");
+    expect(readme).toContain("roll supervisor live --collab");
+    expect(readme).toContain("roll cycle --legend");
+
+    const cycleTs = doc("packages/cli/src/commands/cycle.ts");
+    expect(cycleTs).toContain("roll cycle <id> --collab");
+    expect(cycleTs).toContain("--legend");
+
+    const supervisorTs = doc("packages/cli/src/commands/supervisor.ts");
+    expect(supervisorTs).toContain("live --collab");
+  });
+});

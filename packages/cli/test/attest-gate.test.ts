@@ -20,7 +20,7 @@ import {
   deliverableUrlsForStory,
   findDuplicateBacklogStoryIds,
   findDuplicateStoryIds,
-  plannedVsDeliveredEvidence,
+  designContractDeliveredEvidence,
   readAttestGateMode,
   rejectedDeliverableCmdsForStory,
   runAttestGate,
@@ -1905,9 +1905,9 @@ describe("FIX-340 — backlog id uniqueness (findDuplicateBacklogStoryIds)", () 
   });
 });
 
-// ── US-SKILL-030: plannedVsDeliveredEvidence ─────────────────────────────────
+// ── US-SKILL-030: designContractDeliveredEvidence ───────────────────────────
 
-describe("plannedVsDeliveredEvidence — US-SKILL-030 (AC4)", () => {
+describe("designContractDeliveredEvidence — US-SKILL-030 (AC4)", () => {
   function tmpProject(specText: string, storyId: string, acMap?: object[]): string {
     const p = mkdtempSync(join(tmpdir(), "roll-pvd-"));
     dirs.push(p);
@@ -1938,8 +1938,8 @@ screenshot_exempt: unit test only
 `;
     const acMap = [{ ac: "AC1", status: "pass", evidence: [] }];
     const p = tmpProject(specText, "US-TEST-001", acMap);
-    const result = plannedVsDeliveredEvidence(p, "US-TEST-001");
-    expect(result).toContain("Planned-vs-delivered evidence:");
+    const result = designContractDeliveredEvidence(p, "US-TEST-001");
+    expect(result).toContain("Design-contract-vs-delivered evidence:");
     expect(result).toContain("✅ test: foo.test.ts → AC1 (pass)");
   });
 
@@ -1954,16 +1954,16 @@ screenshot_exempt: test only
 - [ ] AC1 works
 `;
     const p = tmpProject(legacySpec, "US-OLD-001");
-    expect(plannedVsDeliveredEvidence(p, "US-OLD-001")).toBe("");
+    expect(designContractDeliveredEvidence(p, "US-OLD-001")).toBe("");
   });
 
   it("returns empty string when story has no spec file", () => {
     const p = mkdtempSync(join(tmpdir(), "roll-pvd-nospec-"));
     dirs.push(p);
-    expect(plannedVsDeliveredEvidence(p, "US-NOSUCH-001")).toBe("");
+    expect(designContractDeliveredEvidence(p, "US-NOSUCH-001")).toBe("");
   });
 
-  it("marks planned evidence as missing when ac-map has no entry", () => {
+  it("marks design contract evidence as missing when ac-map has no entry", () => {
     const specText = `---
 id: US-TEST-002
 title: story with missing evidence
@@ -1979,7 +1979,7 @@ screenshot_exempt: test only
   - visual accuracy
 `;
     const p = tmpProject(specText, "US-TEST-002");
-    const result = plannedVsDeliveredEvidence(p, "US-TEST-002");
+    const result = designContractDeliveredEvidence(p, "US-TEST-002");
     expect(result).toContain("❓ screenshot: console page → AC1 (missing)");
   });
 });

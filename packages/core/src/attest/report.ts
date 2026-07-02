@@ -192,8 +192,8 @@ export interface ReportInput {
    *  placeholders and do not count as pixels; they are structured facts that
    *  explain why a screenshot could not be produced. */
   captureSkips?: CaptureSkipReportEntry[];
-  /** US-SKILL-030 — planned-vs-delivered evidence delta from the spec's
-   *  Evaluation contract block. Empty string or absent ⇒ section trimmed
+  /** US-SKILL-030 — design-contract-vs-delivered evidence delta from the spec's
+   *  Evaluation contract block. Empty string or absent => section trimmed
    *  (legacy specs degrade gracefully). */
   evidenceDeltaSummary?: string;
 }
@@ -395,7 +395,7 @@ function evidenceIndexBlock(
 
 function evidenceDeltaBlock(delta: string | undefined): string {
   if (!delta || delta.trim() === "") return "";
-  return `<section class="evidence-delta"><h2>${bi("Planned vs delivered evidence", "计划 vs 实际证据")}</h2>
+  return `<section class="evidence-delta"><h2>${bi("Design contract vs delivered evidence", "设计契约 vs 实际证据")}</h2>
 <pre>${esc(delta.trim())}</pre>
 </section>`;
 }
@@ -621,7 +621,7 @@ function executionCastRowHtml(
     r.role === "evaluator" && r.state !== "accepted" ? "cast-evaluator cast-failed" :
     r.role === "evaluator" ? "cast-evaluator" :
     r.role === "attest_gate" ? "cast-gate" :
-    "cast-planner";
+    "cast-designer";
   return `<div class="cast-row ${cls}"><span class="cast-role-label">${role}</span>` +
     `<span class="cast-agent">${agent}${detailHtml}</span>` +
     `<span class="cast-state">${stateBadge(r.state)}</span></div>`;

@@ -1496,10 +1496,10 @@ describe("buildPairScorePrompt — FIX-363 intent-aware scoring (don't misjudge 
   });
 
   it("US-SKILL-030: includes EVALUATION CONTRACT block when evalContractSummary is provided", () => {
-    const evalSummary = "Planned evidence:\n  - test: foo.test.ts (proves AC1)\nScorer focus:\n  - contract completeness";
+    const evalSummary = "Design contract evidence:\n  - test: foo.test.ts (proves AC1)\nScorer focus:\n  - contract completeness";
     const prompt = buildPairScorePrompt("Story: US-SKILL-030\nDiff stat:\n3 files", evalSummary);
     expect(prompt).toContain("EVALUATION CONTRACT");
-    expect(prompt).toContain("planned evidence from the story spec");
+    expect(prompt).toContain("Designer contract evidence from the story spec");
     expect(prompt).toContain("foo.test.ts (proves AC1)");
   });
 

@@ -735,11 +735,13 @@ function spawnAndWait(bin: string, args: string[], opts: AgentSpawnOptions, pty 
     });
     liveAgents.add(child); // FIX-204D
     let settled = false;
+    let exitDrainFallback: NodeJS.Timeout | undefined;
     const settle = (result: AgentSpawnResult): void => {
       if (settled) return;
       settled = true;
       liveAgents.delete(child); // FIX-204D
       if (timer !== undefined) clearTimeout(timer);
+      if (exitDrainFallback !== undefined) clearTimeout(exitDrainFallback);
       try {
         opts.cleanup?.();
       } catch {
@@ -753,12 +755,13 @@ function spawnAndWait(bin: string, args: string[], opts: AgentSpawnOptions, pty 
       // ladder → failed), never an abort. Parallel-verify caught this live.
       settle({ stdout, stderr: `${stderr}${String(e)}\n`, exitCode: 127, timedOut });
     });
-    // `exit` (not only `close`): a SIGKILLed agent can leave grandchildren
-    // holding the stdio pipes, so `close` may never fire — settle on process
-    // death after one tick of stream drain.
+    // `close` is the authoritative successful-drain event for stdio. `exit` is
+    // still needed as a fallback: a SIGKILLed agent can leave grandchildren
+    // holding the pipes forever, so do not wait unboundedly after process death.
     child.on("exit", (code, signal) => {
-      setImmediate(() =>
+      exitDrainFallback = setTimeout(() =>
         settle({ stdout, stderr, exitCode: code ?? (signal !== null ? 137 : 1), timedOut }),
+        100,
       );
     });
     child.on("close", (code) => {

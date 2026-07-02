@@ -398,11 +398,37 @@ describe("US-OBS-042 — roll cycle <id> --activity", () => {
     expect(out).toContain("(advisory)");
   });
 
+  it("surfaces oversized advisory state from durable events", () => {
+    const p = activityProject();
+    writeActivityEvents(p, [
+      { type: "cycle:start", cycleId: "20260630-210059-58201", storyId: "FIX-1050", agent: "kimi", model: "k2.7", ts: 1000 },
+      { type: "action:started", cycleId: "20260630-210059-58201", actionId: "A1", summary: "parser+tests", expectedEvidence: "unit tests green", fileAreaScope: ["parser"], ts: 60_000 },
+      { type: "action:oversized", cycleId: "20260630-210059-58201", actionId: "A1", filesTouched: 12, contractAreas: 4, thresholdFiles: 10, thresholdAreas: 3, ts: 190_000 },
+    ]);
+    process.env["ROLL_CYCLE_ACTIVITY_NOW_MS"] = String(200_000);
+    const save = process.cwd();
+    process.chdir(p);
+    let out = "";
+    const so = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((s: string) => ((out += s), true)) as typeof process.stdout.write;
+    try {
+      expect(cycleCommand(["20260630-210059-58201", "--activity", "--no-color"])).toBe(0);
+    } finally {
+      process.stdout.write = so;
+      process.chdir(save);
+    }
+    expect(out).toContain("action oversized");
+    expect(out).toContain("12 files / 4 areas");
+    expect(out).toContain("(advisory)");
+  });
+
   it("emits machine-readable JSON with --activity --json", () => {
     const p = activityProject();
     writeActivityEvents(p, [
       { type: "cycle:start", cycleId: "20260630-210059-58201", storyId: "FIX-1050", agent: "kimi", model: "k2.7", ts: 1000 },
       { type: "cycle:stdout", cycleId: "20260630-210059-58201", data: "test:red · parser fails", ts: 120_000 },
+      { type: "green-uncommitted", cycleId: "20260630-210059-58201", actionId: "A1", since: 120_000, durationSec: 60, ts: 180_000 },
+      { type: "action:oversized", cycleId: "20260630-210059-58201", actionId: "A1", filesTouched: 12, contractAreas: 4, thresholdFiles: 10, thresholdAreas: 3, ts: 190_000 },
     ]);
     process.env["ROLL_CYCLE_ACTIVITY_NOW_MS"] = String(180_000);
     const save = process.cwd();
@@ -416,9 +442,18 @@ describe("US-OBS-042 — roll cycle <id> --activity", () => {
       process.stdout.write = so;
       process.chdir(save);
     }
-    const parsed = JSON.parse(out) as { cycleId: string; classification: string; testTransition?: { state: string } };
+    const parsed = JSON.parse(out) as {
+      cycleId: string;
+      classification: string;
+      testTransition?: { state: string };
+      history: Array<{ type: string }>;
+      oversizedAction?: { filesTouched: number };
+    };
     expect(parsed.cycleId).toBe("20260630-210059-58201");
     expect(parsed.classification).toBe("active");
     expect(parsed.testTransition?.state).toBe("red");
+    expect(parsed.history.map((h) => h.type)).toContain("green-uncommitted");
+    expect(parsed.history.map((h) => h.type)).toContain("action:oversized");
+    expect(parsed.oversizedAction?.filesTouched).toBe(12);
   });
 });

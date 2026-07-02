@@ -31,6 +31,14 @@ export type RollEvent =
   | { type: "cycle:stdout"; cycleId: string; data: string; ts: number }
   | { type: "cycle:tcr"; cycleId: string; commitHash: string; message: string; ts: number; commitTs?: number }
   | { type: "cycle:first_edit"; cycleId: string; commitHash: string; ts: number }
+  // US-OBS-042 — observable TCR micro-step rhythm. These are advisory
+  // supervisor/evaluator facts: they make rhythm visible and reviewable, but
+  // do not terminate an active builder by themselves.
+  | { type: "action:started"; cycleId: string; actionId: string; summary: string; expectedEvidence: string; fileAreaScope: string[]; ts: number }
+  | { type: "test:red"; cycleId: string; actionId?: string; source: string; summary?: string; ts: number }
+  | { type: "test:green"; cycleId: string; actionId?: string; source: string; summary?: string; ts: number }
+  | { type: "green-uncommitted"; cycleId: string; actionId?: string; since: number; durationSec: number; ts: number }
+  | { type: "action:oversized"; cycleId: string; actionId?: string; filesTouched: number; contractAreas: number; thresholdFiles: number; thresholdAreas: number; ts: number }
   // FIX-929 — agent stall detection: the builder produced zero token output for
   // a configurable threshold (default 10 min). This is a SIGNAL, not a kill —
   // fire BEFORE the hard timeout watchdog. A 2-min startup grace prevents false

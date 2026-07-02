@@ -423,6 +423,23 @@ describe("watch-status — US-OBS-042 micro-step rhythm", () => {
     expect(rendered).toContain("action A1 parser+tests");
   });
 
+  it("renders durable test and oversized advisory events", () => {
+    const rendered = renderWatchStatusFromEventLines(
+      [
+        base(1000),
+        line({ type: "action:started", cycleId: "c1", actionId: "A1", summary: "parser+tests", expectedEvidence: "unit tests green", fileAreaScope: ["parser"], ts: 60_000 }),
+        line({ type: "test:green", cycleId: "c1", actionId: "A1", source: "vitest", summary: "parser passes", ts: 120_000 }),
+        line({ type: "green-uncommitted", cycleId: "c1", actionId: "A1", since: 120_000, durationSec: 60, ts: 180_000 }),
+        line({ type: "action:oversized", cycleId: "c1", actionId: "A1", filesTouched: 12, contractAreas: 4, thresholdFiles: 10, thresholdAreas: 3, ts: 190_000 }),
+      ],
+      200_000,
+    );
+    expect(rendered).toContain("action A1 parser+tests");
+    expect(rendered).toContain("test:green");
+    expect(rendered).toContain("green-uncommitted 1m");
+    expect(rendered).toContain("action oversized · 12 files / 4 areas");
+  });
+
   it("renders silent classification when truly quiet", () => {
     const rendered = renderWatchStatusFromEventLines(
       [

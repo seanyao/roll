@@ -585,7 +585,8 @@ function cycleActivityCommand(handle: string, json: boolean): number {
   // Test seam: ROLL_CYCLE_ACTIVITY_NOW_MS pins the analysis clock.
   const nowMsRaw = (process.env["ROLL_CYCLE_ACTIVITY_NOW_MS"] ?? "").trim();
   const nowMs = nowMsRaw !== "" ? Number(nowMsRaw) : Date.now();
-  const analysis = analyzeCycleActivity(events, cycleId, nowMs);
+  const activitySignals = readSignals(join(rt, `cycle-${cycleId}.signals.jsonl`));
+  const analysis = analyzeCycleActivity(events, cycleId, nowMs, { activitySignals });
   process.stdout.write(renderCycleActivity(analysis, json));
   return 0;
 }

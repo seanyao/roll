@@ -177,6 +177,64 @@ export function cycleActivityFromEvents(
       continue;
     }
 
+    // US-OBS-042: durable TCR rhythm facts for post-cycle evidence and watch.
+    if (ev.type === "action:started") {
+      out.push({
+        kind: "state_change",
+        cycle_id: cycleId,
+        ts: ev.ts,
+        agent,
+        payload: {
+          from: "micro-step",
+          to: "action:started",
+          reason: `${ev.actionId} ${ev.summary} · evidence: ${ev.expectedEvidence} · scope: ${ev.fileAreaScope.join(", ")}`,
+        },
+      });
+      continue;
+    }
+    if (ev.type === "test:red" || ev.type === "test:green") {
+      out.push({
+        kind: "state_change",
+        cycle_id: cycleId,
+        ts: ev.ts,
+        agent,
+        payload: {
+          from: ev.actionId ?? "action",
+          to: ev.type,
+          reason: ev.summary ?? ev.source,
+        },
+      });
+      continue;
+    }
+    if (ev.type === "green-uncommitted") {
+      out.push({
+        kind: "state_change",
+        cycle_id: cycleId,
+        ts: ev.ts,
+        agent,
+        payload: {
+          from: ev.actionId ?? "action",
+          to: "green-uncommitted",
+          reason: `${ev.durationSec}s without TCR commit`,
+        },
+      });
+      continue;
+    }
+    if (ev.type === "action:oversized") {
+      out.push({
+        kind: "state_change",
+        cycle_id: cycleId,
+        ts: ev.ts,
+        agent,
+        payload: {
+          from: ev.actionId ?? "action",
+          to: "action:oversized",
+          reason: `${ev.filesTouched} files / ${ev.contractAreas} areas`,
+        },
+      });
+      continue;
+    }
+
     // Cycle end.
     if (ev.type === "cycle:end") {
       out.push({
@@ -412,6 +470,13 @@ export interface OversizedActionState {
   thresholdAreas: number;
 }
 
+export interface CycleActivityHistoryEntry {
+  type: "action:started" | "test:red" | "test:green" | "green-uncommitted" | "action:oversized" | "cycle:tcr";
+  at: number;
+  actionId?: string;
+  summary?: string;
+}
+
 /** Result of {@link analyzeCycleActivity}. Pure: derived from events + optional diff. */
 export interface CycleActivityAnalysis {
   cycleId: string;
@@ -431,6 +496,8 @@ export interface CycleActivityAnalysis {
   greenUncommitted?: GreenUncommittedState;
   /** Advisory oversized-action state. */
   oversizedAction?: OversizedActionState;
+  /** Durable rhythm history for post-cycle evaluator evidence. */
+  history: CycleActivityHistoryEntry[];
 }
 
 /** Worktree diff snapshot supplied by the runner for oversized-action detection. */
@@ -439,6 +506,8 @@ export interface WorktreeDiffSnapshot {
   files: readonly string[];
   /** Abstract contract/area tags (e.g. "parser", "ledger", "cli"). */
   areas: readonly string[];
+  /** Epoch ms when the changed snapshot was observed. */
+  changedAt?: number;
 }
 
 function isTerminal(ev: RollEvent): boolean {
@@ -527,6 +596,7 @@ export function analyzeCycleActivity(
     noProgressSec?: number;
     worktreeDiff?: WorktreeDiffSnapshot;
     oversizedThresholds?: { files: number; areas: number };
+    activitySignals?: readonly ActivitySignal[];
   },
 ): CycleActivityAnalysis {
   const noProgressSec = opts?.noProgressSec ?? DEFAULT_NO_PROGRESS_SEC;
@@ -537,12 +607,17 @@ export function analyzeCycleActivity(
   let microStep: MicroStepPlan | undefined;
   let testTransition: TestTransition | undefined;
   let lastGreenAt: number | undefined;
+  let oversizedAction: OversizedActionState | undefined;
+  const history: CycleActivityHistoryEntry[] = [];
 
   const hasEnd = events.some((ev) => isTerminal(ev) && (ev as { cycleId?: string }).cycleId === cycleId);
 
   for (const ev of events) {
     if ((ev as { cycleId?: string }).cycleId !== cycleId) continue;
     if (ev.type === "cycle:tcr") tcrCount += 1;
+    if (ev.type === "cycle:tcr") {
+      history.push({ type: "cycle:tcr", at: ev.ts, summary: ev.message });
+    }
     if (ev.type === "cycle:stdout") {
       const data = ev.data;
       const plan = parseMicroStepPlan(data);
@@ -553,9 +628,41 @@ export function analyzeCycleActivity(
         if (tt.state === "green") lastGreenAt = tt.at;
       }
     }
+    if (ev.type === "action:started") {
+      microStep = {
+        actionId: ev.actionId,
+        summary: ev.summary,
+        expectedEvidence: ev.expectedEvidence,
+        fileAreaScope: ev.fileAreaScope,
+      };
+      history.push({ type: "action:started", at: ev.ts, actionId: ev.actionId, summary: ev.summary });
+    } else if (ev.type === "test:red" || ev.type === "test:green") {
+      const state = ev.type === "test:red" ? "red" : "green";
+      testTransition = { state, at: ev.ts, source: ev.source };
+      if (state === "green") lastGreenAt = ev.ts;
+      history.push({ type: ev.type, at: ev.ts, ...(ev.actionId !== undefined ? { actionId: ev.actionId } : {}), ...(ev.summary !== undefined ? { summary: ev.summary } : {}) });
+    } else if (ev.type === "green-uncommitted") {
+      lastGreenAt = ev.since;
+      history.push({ type: "green-uncommitted", at: ev.ts, ...(ev.actionId !== undefined ? { actionId: ev.actionId } : {}), summary: `${ev.durationSec}s` });
+    } else if (ev.type === "action:oversized") {
+      oversizedAction = {
+        filesTouched: ev.filesTouched,
+        contractAreas: ev.contractAreas,
+        thresholdFiles: ev.thresholdFiles,
+        thresholdAreas: ev.thresholdAreas,
+      };
+      history.push({ type: "action:oversized", at: ev.ts, ...(ev.actionId !== undefined ? { actionId: ev.actionId } : {}), summary: `${ev.filesTouched} files / ${ev.contractAreas} areas` });
+    }
   }
 
-  const lastAct = lastActivityAt(events, cycleId);
+  let lastAct = lastActivityAt(events, cycleId);
+  for (const sig of opts?.activitySignals ?? []) {
+    if (sig.cycleId === cycleId && sig.ts > lastAct) lastAct = sig.ts;
+  }
+  const diffChangedAt = opts?.worktreeDiff?.changedAt;
+  if (diffChangedAt !== undefined && opts?.worktreeDiff !== undefined && opts.worktreeDiff.files.length > 0 && diffChangedAt > lastAct) {
+    lastAct = diffChangedAt;
+  }
   const quietSec = lastAct > 0 ? Math.max(0, Math.floor((nowMs - lastAct) / 1000)) : Math.floor(nowMs / 1000);
 
   if (hasEnd) {
@@ -576,7 +683,6 @@ export function analyzeCycleActivity(
     greenUncommitted = { since: lastGreenAt, durationSec: Math.max(0, Math.floor((nowMs - lastGreenAt) / 1000)) };
   }
 
-  let oversizedAction: OversizedActionState | undefined;
   const diff = opts?.worktreeDiff;
   if (diff !== undefined && microStep !== undefined) {
     const filesOver = diff.files.length > thresholds.files;
@@ -601,5 +707,6 @@ export function analyzeCycleActivity(
     ...(testTransition !== undefined ? { testTransition } : {}),
     ...(greenUncommitted !== undefined ? { greenUncommitted } : {}),
     ...(oversizedAction !== undefined ? { oversizedAction } : {}),
+    history,
   };
 }

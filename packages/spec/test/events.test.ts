@@ -39,6 +39,36 @@ describe("parseEventLine (I8: readers skip bad lines, never crash)", () => {
     const a: RollEvent = { type: "evidence:frame-opened", cycleId: "c", storyId: "US-EVID-001", runDir: "/r", ts: 1 };
     expect(a.runDir).toBe("/r");
   });
+  it("types US-OBS-042 TCR rhythm activity events", () => {
+    const started: RollEvent = {
+      type: "action:started",
+      cycleId: "c1",
+      actionId: "A1",
+      summary: "parser+tests",
+      expectedEvidence: "unit tests green",
+      fileAreaScope: ["packages/core/src/parser.ts"],
+      ts: 1,
+    };
+    const red: RollEvent = { type: "test:red", cycleId: "c1", actionId: "A1", source: "vitest", summary: "parser fails", ts: 2 };
+    const green: RollEvent = { type: "test:green", cycleId: "c1", actionId: "A1", source: "vitest", summary: "parser passes", ts: 3 };
+    const advisory: RollEvent = { type: "green-uncommitted", cycleId: "c1", actionId: "A1", since: 3, durationSec: 60, ts: 4 };
+    const oversized: RollEvent = {
+      type: "action:oversized",
+      cycleId: "c1",
+      actionId: "A1",
+      filesTouched: 12,
+      contractAreas: 4,
+      thresholdFiles: 10,
+      thresholdAreas: 3,
+      ts: 5,
+    };
+    expect(started.type).toBe("action:started");
+    expect(red.type).toBe("test:red");
+    expect(green.type).toBe("test:green");
+    expect(advisory.type).toBe("green-uncommitted");
+    expect(oversized.type).toBe("action:oversized");
+    expect(parseEventLine(JSON.stringify(oversized))?.type).toBe("action:oversized");
+  });
   it("types goal lifecycle events (US-GOAL-001)", () => {
     const created: RollEvent = { type: "goal:created", schema: "goal.v1", scope: { kind: "epic", epic: "goal-mode" }, status: "active", review: "auto", ts: 1 };
     const state: RollEvent = { type: "goal:state", schema: "goal.v1", from: "active", to: "paused", actor: "system", reason: "owner_pause", ts: 2 };

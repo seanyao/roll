@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v4.702.1 — 2026-07-02
+
 ### 可见性
 - `roll cycles` 现在能看清 Builder 和模型身份，不再把内部模型名当成 agent（FIX-1066, FIX-1067）`[loop-observability]`
 - 协同视图补齐协议图例，TCR 节奏能区分活跃大步和真实停滞（US-OBS-037, US-OBS-042）`[loop-observability]`

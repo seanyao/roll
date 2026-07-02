@@ -10,12 +10,13 @@
 | `docs/difftest-freeze-paradigm.md` | 快照冻结测试范式 | testing | CLI 命令输出用 Vitest 快照冻结的行为契约测试范式与可移植性陷阱 |
 | `docs/live-console.md` | 实时控制台指南 / Live Console Guide | guide | CLI-first 实时可观测指南：`roll loop cycle watch` 用法、三流契约、静态导出 vs 实时服务、证据按构造 |
 | `docs/manifesto.md` | Roll 宣言 | product | Roll 产品宣言与愿景 |
+| `docs/migration/role-taxonomy-v4.md` | Role Taxonomy v4 Migration | migration | Breaking migration note for Supervisor / Designer / Builder / Evaluator taxonomy, designed profiles, and open-pool casting |
 | `docs/verification.md` | 验收 / Verification | process | 故事验收标准与证据规范 |
 
 ## Coverage Summary
 
-- Total docs indexed: 5
-- By category: architecture (1) / guide (1) / testing (1) / product (1) / process (1)
+- Total docs indexed: 6
+- By category: architecture (1) / guide (1) / migration (1) / testing (1) / product (1) / process (1)
 
 ## Key Architecture Chapters (US-TRUTH epic)
 

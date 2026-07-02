@@ -29,6 +29,7 @@ for _arg in "$@"; do
 done
 
 pnpm -r build
+node scripts/audit-role-taxonomy.mjs
 if [ "$SCOPE" = "affected" ]; then
   # `--changed` (no ref) = tests covering the working-tree / uncommitted change
   # — exactly a cycle's pre-commit scope. Packages already pass --passWithNoTests,

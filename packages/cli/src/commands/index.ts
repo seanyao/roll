@@ -190,7 +190,7 @@ export function registerAll(): void {
   registerPorted("cycles", removedTopLevel("cycles"));
   // `cycle`: one cycle's trace tape (US-CLI-013) — the `roll cycles` tail hint target.
   registerPorted("cycle", removedTopLevel("cycle"));
-  // US-V4-008: `supervisor` — the project-level Prime Agent (observe/advise).
+  // US-V4-008: `supervisor` — the project-level Supervisor (observe/advise).
   // Cross-Story coordination, never Story implementation.
   registerPorted("supervisor", supervisorCommand, { help: SUPERVISOR_USAGE });
   // FIX-343 (AC1): the agent-facing self-grade command is REMOVED. The working
@@ -291,7 +291,7 @@ export function registerAll(): void {
     return releaseCommand(args);
   });
   // US-SHOW-001: `roll showcase` — the golden-path standard E2E. Resets the
-  // target card in a throwaway sandbox, casts a heterogeneous real-agent trio
+  // target card in a throwaway sandbox, casts an explicit strict-diversity real-agent trio
   // (builder=kimi / reviewer=claude / scorer=pi), delivers it via `roll loop
   // go`, captures fresh CLI+web screenshots, assembles the full evidence chain,
   // and emits a pass/fail verdict. The real-agent step is the only

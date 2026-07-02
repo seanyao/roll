@@ -1,6 +1,6 @@
 /**
- * FIX-1047 — scoped `story.execute` (Builder) routing honors the Prime
- * assignment and exposes an auditable route trace.
+ * Scoped `story.execute` (Builder) routing keeps the Supervisor assignment
+ * visible and exposes an auditable route trace.
  */
 import { afterAll, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -49,7 +49,6 @@ defaults:
         kind: select
         from: [claude, agy, kimi, pi, reasonix, codex]
         require: [execute]
-        avoid: [supervise]
         strategy: least-recent
 `;
 
@@ -63,13 +62,11 @@ defaults:
         kind: select
         from: [agy, kimi, reasonix, codex]
         require: [execute]
-        avoid: [supervise]
         strategy: health-aware
       evaluate:
         kind: select
         from: [agy, kimi, reasonix, codex]
         require: [evaluate]
-        avoid: [execute]
         strategy: health-aware
 `;
 
@@ -92,21 +89,18 @@ function healthAwareFixture(): { rollHome: string; repoCwd: string } {
 
 const ALL_INSTALLED = new Set(["claude", "agy", "kimi", "pi", "reasonix", "codex"]);
 
-describe("resolveScopedStoryExecute (FIX-1047)", () => {
-  it("excludes the assigned Prime (codex) from the Builder pool by identity", () => {
+describe("resolveScopedStoryExecute", () => {
+  it("keeps the assigned Supervisor visible without excluding it from the Builder pool by default", () => {
     const { rollHome, repoCwd } = fixture();
     const route = resolveScopedStoryExecute(repoCwd, { rollHome, installed: ALL_INSTALLED, recentUse: {} });
     expect(route).not.toBeNull();
     expect(route!.superviseAgent).toBe("codex");
     expect(route!.resolution.ok).toBe(true);
     if (route!.resolution.ok) {
-      // codex is the Prime → skipped by assignment; least-recent with no recent
-      // use picks the first never-used candidate (claude).
+      // Fresh-session independence is the isolation boundary; same agent brand
+      // remains eligible unless the owner explicitly configures a strict rule.
       expect(route!.resolution.resolved.agent).toBe("claude");
-      expect(route!.resolution.resolved.skipped).toContainEqual({
-        agent: "codex",
-        reason: "assigned-to-avoided-role: supervise",
-      });
+      expect(route!.resolution.resolved.skipped).toEqual([]);
     }
   });
 
@@ -120,18 +114,16 @@ describe("resolveScopedStoryExecute (FIX-1047)", () => {
     });
     expect(route!.resolution.ok).toBe(true);
     if (route!.resolution.ok) {
-      // pi and reasonix were never used (codex is Prime, excluded) → first declared
-      // never-used wins: pi.
+      // pi/reasonix/codex were never used; first declared never-used wins: pi.
       expect(route!.resolution.resolved.agent).toBe("pi");
     }
   });
 
-  it("the never-Prime, supervise-capable agents stay eligible", () => {
+  it("all supervise-capable agents stay eligible in the open pool", () => {
     const { rollHome, repoCwd } = fixture();
     const route = resolveScopedStoryExecute(repoCwd, { rollHome, installed: ALL_INSTALLED, recentUse: {} });
     const trace = scopedExecuteRouteTrace(route!);
-    // Only codex (the Prime) is skipped despite ALL agents having supervise cap.
-    expect(trace.skipped).toEqual([{ agent: "codex", reason: "assigned-to-avoided-role: supervise" }]);
+    expect(trace.skipped).toEqual([]);
     expect(trace.candidates).toEqual(["claude", "agy", "kimi", "pi", "reasonix", "codex"]);
     expect(trace.supervise).toBe("codex");
   });
@@ -148,10 +140,10 @@ describe("resolveScopedStoryExecute (FIX-1047)", () => {
     const route = resolveScopedStoryExecute(repoCwd, { rollHome, installed: ALL_INSTALLED, recentUse: {} });
     const text = renderScopedExecuteRoute(scopedExecuteRouteTrace(route!));
     expect(text).toContain("builder route — story.execute");
-    expect(text).toContain("Prime (supervise): codex");
+    expect(text).toContain("Supervisor (supervise): codex");
     expect(text).toContain("strategy: least-recent");
     expect(text).toContain("ranked:");
-    expect(text).toContain("codex — assigned-to-avoided-role: supervise");
+    expect(text).toContain("skipped: (none)");
     expect(text).toContain("selected: claude");
   });
 
@@ -172,8 +164,7 @@ describe("resolveScopedStoryExecute (FIX-1047)", () => {
     expect(trace.candidates).toEqual(["agy", "kimi", "reasonix", "codex"]);
     expect(trace.ranked.map((r) => r.agent)).toContain("agy");
     expect(trace.ranked.find((r) => r.agent === "agy")?.warnings).toContain("health degraded:auth");
-    expect(trace.ranked.find((r) => r.agent === "codex")?.eligible).toBe(false);
-    expect(trace.ranked.find((r) => r.agent === "codex")?.reasons).toContain("skipped:assigned-to-avoided-role: supervise");
+    expect(trace.ranked.find((r) => r.agent === "codex")?.eligible).toBe(true);
     expect(trace.selected).toBe("reasonix");
   });
 

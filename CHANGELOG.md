@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Breaking changes
+- Role taxonomy is now cut over to Supervisor / Designer / Builder / Evaluator. Designed cycles use `execution_profiles.designed`, `roles.designer`, and `role-artifacts/designer/design-contract.md`; retired keys now fail loudly instead of aliasing. See `docs/migration/role-taxonomy-v4.md` for the manual config update. (REFACTOR-ROLE-001..008)
+
+### Automation pipeline
+- Default project agent routing now uses open execute/evaluate pools with capability and health-aware ranking. Fresh sessions are the review isolation boundary; agent/model diversity is a preference or explicit strict mode, not a default hard exclusion. (REFACTOR-ROLE-008, US-AGENT-049)
+
 ## v4.702.1 — 2026-07-02
 
 ### 可见性

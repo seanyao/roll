@@ -73,8 +73,8 @@ capability:
     });
     expect(plan.project.text).toContain("evaluate:");
     expect(plan.project.text).toContain("from: [kimi, pi]");
-    expect(plan.project.text).toContain("avoid: [execute]");
-    expect(plan.project.text).toContain("strategy: least-recent");
+    expect(plan.project.text).not.toContain("avoid: [execute]");
+    expect(plan.project.text).toContain("strategy: health-aware");
     expect(plan.summary.some((s) => s.includes(".roll/pairing.yaml capability -> .roll/agents.yaml defaults.story.roles.evaluate = select [kimi, pi]"))).toBe(true);
   });
 

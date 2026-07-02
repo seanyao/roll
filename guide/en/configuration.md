@@ -11,6 +11,7 @@ shared conventions.
 | `ROLL_HOME` | `~/.roll` | Per-user state root. Holds `config.yaml`, installed `skills/`, synced `conventions/`. |
 | `ROLL_CONFIG` | `$ROLL_HOME/config.yaml` | Editor, loop/dream/brief schedule hours, and per-tool (`ai_*`) config. Agent routing is **not** here — it lives in per-project `.roll/agents.yaml` (see [ai-agents.md](ai-agents.md)). |
 | `ROLL_GLOBAL` | `$ROLL_HOME/conventions/global` | Global convention files (`AGENTS.md`, `CLAUDE.md`, etc.) synced into AI tool directories. |
+| `ROLL_LANG` | unset | Per-process language override for CLI/help/HTML user surfaces. Supported values are `en` and `zh`; when unset, Roll uses the saved config preference or locale detection. |
 | `ROLL_HEARTBEAT_TIMEOUT` | `1800` (seconds) | How long without a heartbeat write before the loop runner treats an inner cycle as orphan and heals state. Raise it if your cycles can legitimately stay quiet longer than 30 minutes. |
 | `ROLL_LOOP_FORCE` | unset | When set to any non-empty value, `roll loop` bypasses the active-window check and the pause file. `roll loop now` and `roll loop test` set this internally; export it manually only when you want a cron-scheduled run to ignore quiet hours. |
 | `ROLL_LOOP_NO_HEAL` | `0` | Set to `1` to disable post-build CI self-heal and restore fail-fast behaviour. Useful for debugging or when you want to cap autonomous spend per cycle. |
@@ -49,6 +50,27 @@ Point `ROLL_CONFIG` at a one-off config file to test changes:
 ```bash
 ROLL_CONFIG=/tmp/test-config.yaml roll status
 ```
+
+## Language Selection
+
+Language has two controls:
+
+- `ROLL_LANG=en|zh` overrides the language for the current process and wins over
+  saved config.
+- `roll config lang en|zh` saves the preference in Roll config;
+  `roll config lang --reset` clears it so locale detection applies again.
+
+`roll help --lang en|zh <topic>` is a one-command override for help and guide
+reads. `roll doctor language` audits active docs, conventions, skills, and
+generated surfaces for mixed-language drift. The expected CLI language snapshots
+are maintained in `packages/cli/test/cli-language-surface.test.ts` and
+`packages/cli/test/__snapshots__/cli-language-surface.test.ts.snap`; the audit
+surface is covered by `packages/cli/test/doctor-language.test.ts`.
+
+User-facing surfaces still render one visible language at a time. Agent
+contracts, code, git metadata, and stable schema keys remain English.
+Owner-facing conversation follows the language the owner uses in the current
+task.
 
 ## Project Policy
 

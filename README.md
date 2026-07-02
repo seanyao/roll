@@ -55,6 +55,24 @@ brief, onboard plan, backlog, and Roll markers, then prints one best next
 command instead of a menu.
 First time through? Start with [Getting started](guide/en/getting-started.md).
 
+## Language Surfaces
+
+Roll renders one visible language per user surface. `ROLL_LANG=en|zh` pins the
+current process, `roll config lang en|zh` persists a preference, and
+`roll config lang --reset` returns to locale detection. `roll help --lang en|zh`
+is available for one-off guide/help reads, and `roll doctor language` audits
+docs, conventions, skills, and generated surfaces for mixed-language drift.
+
+Agent contracts, code comments, git metadata, and TypeScript identifiers stay in
+English as the harness contract layer. Owner conversation follows the owner's
+language. User docs live in separate locale files under `guide/en/` and
+`guide/zh/`; contributors should update the matching locale file or i18n catalog
+instead of placing translation pairs in the same rendered surface. Snapshot
+coverage for the current language controls lives in
+`packages/cli/test/cli-language-surface.test.ts`,
+`packages/cli/test/__snapshots__/cli-language-surface.test.ts.snap`, and
+`packages/cli/test/doctor-language.test.ts`.
+
 ## V4 Prime Agent Execution
 
 Roll V4 separates project coordination from story delivery:

@@ -68,8 +68,8 @@ roll config dream-time              # dream-time: 03:20 (from ~/.roll/config.yam
 ```
 
 **Range validation.** Out-of-range or non-numeric input is rejected with a
-bilingual error and exit code 2 — e.g. `roll config loop-window 9-25` prints
-`loop-window end must be <= 24` / `loop-window 结束时间必须 ≤ 24`.
+locale-selected error and exit code 2. For example, with `ROLL_LANG=en`,
+`roll config loop-window 9-25` prints `loop-window end must be <= 24`.
 
 **`--global` vs `--project`.** Writes default to `--project` (`.roll/local.yaml`,
 this project only). Pass `--global` to write `~/.roll/config.yaml` as the
@@ -1304,9 +1304,10 @@ attach scripts) and the global mute switch stay in `~/.shared/roll/`. See
 
 - **Offline**: when a cycle fails while the network is unreachable, the loop
   degrades to **local-only delivery** — TCR commits and green tests stay on the
-  branch, a bilingual notice is printed, the consecutive-failure counter is NOT
-  ticked (offline never accumulates into an auto-PAUSE), and the scheduler
-  keeps breathing. The next online cycle's push/PR catches up naturally.
+  branch, a locale-selected notice is printed, the consecutive-failure counter
+  is NOT ticked (offline never accumulates into an auto-PAUSE), and the
+  scheduler keeps breathing. The next online cycle's push/PR catches up
+  naturally.
 - **Live window for every agent**: non-claude agents (pi, kimi, codex, …) run
   under a pseudo-terminal on macOS so their output streams line-by-line into
   the observation window instead of buffering until exit; claude streams over

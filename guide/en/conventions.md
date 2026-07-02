@@ -57,6 +57,26 @@ and the navigation table is the single map agents need.
 Any agent entering the project can navigate to authoritative sources without
 scanning the whole tree.
 
+## Language Surface Policy
+
+Roll separates the contract language from rendered user language:
+
+- Agent contracts, TypeScript code, git metadata, schemas, and stable keys stay
+  in English.
+- Owner conversation follows the owner's language in the current task.
+- CLI output, help, docs, and HTML pages render one visible language at a time,
+  selected by `ROLL_LANG`, `roll config lang`, `roll help --lang`, or locale
+  detection.
+
+Write user documentation in the matching locale file under `guide/en/` or
+`guide/zh/`. For CLI and generated HTML, add or update i18n catalog entries
+instead of putting translation pairs into one output string. Run
+`roll doctor language` before release when conventions, help, docs, or generated
+surfaces changed. The policy is covered by
+`packages/cli/test/cli-language-surface.test.ts`,
+`packages/cli/test/__snapshots__/cli-language-surface.test.ts.snap`, and
+`packages/cli/test/doctor-language.test.ts`.
+
 ## Existing Codebases: `$roll-onboard` and `$roll-doc-audit`
 
 For an existing codebase with no `.roll/` yet, the entry point is

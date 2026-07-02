@@ -9,17 +9,17 @@
 | AGENTS.md | Roll Project — Internal Conventions | convention | 2026-05-28 |
 | CONTRIBUTING.md | Contributing to Roll | convention | 2026-05-23 |
 | guide/en/ai-agents.md | Roll — AI Agent Support | guide | 2026-06-30 |
-| guide/en/acceptance-evidence.md | Acceptance Evidence — roll attest / Evidence lifecycle | guide | 2026-06-08 |
+| guide/en/acceptance-evidence.md | Acceptance Evidence — roll attest / Evidence lifecycle | guide | 2026-07-02 |
 | guide/en/changelog.md | Roll — Changelog | guide | 2026-05-21 |
-| guide/en/configuration.md | Roll — Configuration | guide | 2026-05-27 |
-| guide/en/conventions.md | Roll — Conventions & AGENTS.md | guide | 2026-05-19 |
+| guide/en/configuration.md | Roll — Configuration | guide | 2026-07-02 |
+| guide/en/conventions.md | Roll — Conventions & AGENTS.md | guide | 2026-07-02 |
 | guide/en/dream.md | roll-.dream — Nightly Code Health Scanner | guide | 2026-05-19 |
-| guide/en/faq.md | Roll FAQ | guide | 2026-05-28 |
+| guide/en/faq.md | Roll FAQ | guide | 2026-07-02 |
 | guide/en/getting-started.md | Roll — Getting Started | guide | 2026-06-08 |
 | guide/en/installation.md | Roll — Installation & Updates | guide | 2026-05-19 |
 | guide/en/legacy-onboarding.md | Existing Codebase Onboarding | guide | 2026-05-20 |
 | guide/en/loop-driven-architecture.md | Loop-Driven Agent Architecture | guide | 2026-05-27 |
-| guide/en/loop.md | roll loop — Autonomous BACKLOG Executor | guide | 2026-06-30 |
+| guide/en/loop.md | roll loop — Autonomous BACKLOG Executor | guide | 2026-07-02 |
 | guide/en/methodology.md | Roll Engineering Methodology | guide | 2026-05-25 |
 | guide/en/migration-2.0.md | Migrating to Roll 2.0 | guide | 2026-05-19 |
 | guide/en/overview.md | Roll — Overview | guide | 2026-06-13 |
@@ -40,16 +40,16 @@
 | guide/en/testing/quality-rubric.md | Test Quality Rubric | guide | 2026-05-23 |
 | guide/zh/ai-agents.md | Roll — AI Agent 支持 | guide | 2026-06-30 |
 | guide/zh/changelog.md | Roll — Changelog (中文) | guide | 2026-05-21 |
-| guide/zh/configuration.md | Roll — 配置 | guide | 2026-05-27 |
-| guide/zh/conventions.md | Roll — 约定与 AGENTS.md | guide | 2026-05-19 |
+| guide/zh/configuration.md | Roll — 配置 | guide | 2026-07-02 |
+| guide/zh/conventions.md | Roll — 约定与 AGENTS.md | guide | 2026-07-02 |
 | guide/zh/dream.md | roll-.dream — 夜间代码健康巡检 | guide | 2026-05-19 |
-| guide/zh/faq.md | Roll 常见问题 | guide | 2026-05-28 |
+| guide/zh/faq.md | Roll 常见问题 | guide | 2026-07-02 |
 | guide/zh/getting-started.md | Roll — 快速上手 | guide | 2026-06-08 |
 | guide/zh/installation.md | Roll — 安装与更新 | guide | 2026-05-19 |
 | guide/zh/legacy-onboarding.md | 已有代码库接入 Roll | guide | 2026-05-20 |
 | guide/zh/loop-driven-architecture.md | Loop 驱动的 Agent 架构 | guide | 2026-05-27 |
-| guide/zh/acceptance-evidence.md | 验收证据 — roll attest / 证据生命周期 | guide | 2026-06-08 |
-| guide/zh/loop.md | roll loop — 自主 BACKLOG 执行器 | guide | 2026-06-30 |
+| guide/zh/acceptance-evidence.md | 验收证据 — roll attest / 证据生命周期 | guide | 2026-07-02 |
+| guide/zh/loop.md | roll loop — 自主 BACKLOG 执行器 | guide | 2026-07-02 |
 | guide/zh/methodology.md | Roll 工程方法论 | guide | 2026-05-25 |
 | guide/zh/migration-2.0.md | 迁移到 Roll 2.0 | guide | 2026-05-19 |
 | guide/zh/overview.md | Roll — 概述 | guide | 2026-06-13 |

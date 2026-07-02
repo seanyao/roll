@@ -43,7 +43,7 @@ import {
   type RunRow,
   type ReviewScoreReportEntry,
 } from "@roll/core";
-import { classifyStatus, type RollEvent, type CycleRoleSummary } from "@roll/spec";
+import { classifyStatus, type Lang, type RollEvent, type CycleRoleSummary } from "@roll/spec";
 import {
   captureScreenshot,
   collectEvidence,
@@ -73,7 +73,8 @@ import {
 import { execFile, execFileSync } from "node:child_process";
 import { basename, dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
-import { cardArchiveDir, epicFromFeaturePath, findFeatureFile, findFeatureFiles, reportFileName } from "../lib/archive.js";
+import { cardArchiveDir, epicFromFeaturePath, findFeatureFile, findFeatureFiles, reportFileName, reviewFileName } from "../lib/archive.js";
+import { currentLang } from "./agent-list.js";
 import { physicalTerminalFromSpecText } from "../lib/physical-terminal.js";
 import { designContractDeliveredEvidence } from "../runner/attest-gate.js";
 import { readReviewScoreTrend, readStoryReviewScores } from "../lib/review-score.js";
@@ -259,6 +260,25 @@ const execFileAsync = promisify(execFile);
 
 function warn(msg: string): void {
   process.stderr.write(`[roll] attest WARN: ${msg}\n`);
+}
+
+function handoffLines(lang: Lang, reviewPath: string, legacyReportPath: string): string[] {
+  if (lang === "zh") {
+    return [
+      "验收 Review Page：",
+      `  ${reviewPath}`,
+      "旧报告兼容别名：",
+      `  ${legacyReportPath}`,
+      "",
+    ];
+  }
+  return [
+    "Acceptance Review Page:",
+    `  ${reviewPath}`,
+    "legacy report alias:",
+    `  ${legacyReportPath}`,
+    "",
+  ];
 }
 
 function shellQuote(value: string): string {
@@ -1145,8 +1165,8 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
       : {}),
     ...((() => { const d = designContractDeliveredEvidence(projectPath, storyId); return d !== "" ? { evidenceDeltaSummary: d } : {}; })()),
   });
-  // US-META-001: report carries the card id (`<ID>-report.html`) so a tab /
-  // download / share is self-identifying.
+  const reviewPath = join(runDir, reviewFileName(storyId));
+  writeFileSync(reviewPath, html);
   const reportPath = join(runDir, reportFileName(storyId));
   writeFileSync(reportPath, html);
 
@@ -1164,7 +1184,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   // (unlike the never-block degrade path) a smoke failure is surfaced as a
   // NON-ZERO exit. The report file stays on disk — evidence is never discarded.
   const smoke = smokeCheckReport(html, (rel) => existsSync(join(runDir, rel)));
-  process.stdout.write(`Acceptance report written\n验收报告已生成\n  ${relative(projectPath, reportPath)}\n`);
+  process.stdout.write(handoffLines(currentLang(), relative(projectPath, reviewPath), relative(projectPath, reportPath)).join("\n"));
   // US-V4-001: attest is STORY-SCOPED. It writes only this story's immutable run
   // report (`<run-id>/<ID>-report.html`) + the `latest/` pointer above — nothing
   // else. It deliberately no longer mounts a story `index.html` delivery section,

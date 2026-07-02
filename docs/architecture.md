@@ -4,7 +4,7 @@
 
 roll 是 AI coding agent 的**外层控制系统**（agent harness / reliability layer）。它不进入 agent 内部（不管理 token 窗口、不压缩对话、不干预单次推理），而是在外部建立一个闭环：设定目标 → 调度执行 → 感知结果 → 修正方向。
 
-当前用户入口是 CLI-first：`roll init`、`roll supervisor`、`roll supervisor live`、`roll loop`、`roll status`、`roll loop cycle` 与按 Story 收口的 `roll attest` 报告。浏览器/TUI 版 Supervisor Live Console 是下一阶段工作，不作为当前产品面承诺。安装方式：`npm install -g @seanyao/roll`。
+当前用户入口是 CLI-first：`roll init`、`roll supervisor`、`roll supervisor live`、`roll loop`、`roll status`、`roll loop cycle` 与按 Story 收口的 `roll attest` 验收 Review Page。浏览器/TUI 版 Supervisor Live Console 是下一阶段工作，不作为当前产品面承诺。安装方式：`npm install -g @seanyao/roll`。
 
 ## 为什么是分层闭环
 
@@ -243,7 +243,7 @@ no-TCR/gave-up、成功交付、成本档位和角色能力标签排序。运行
 证据从 activity 流 + diff **自动起草**，不再是 builder 手动步骤：
 
 - ac-map（AC→证据映射）从 cycle 活动流（改了哪些文件、跑了哪些命令、通过了哪些闸）和 git diff 自动生成骨架
-- 报告（attest report）由 `roll attest` 从 ac-map + 截图 + 测试输出自动渲染
+- 验收 Review Page 由 `roll attest` 从 ac-map + 截图 + 测试输出自动渲染；legacy report alias 仅作迁移兼容
 - 截图由 loop runner 的 headless Playwright 自动捕获（声明了 `deliverable_url` 的卡）
 
 这是一个方向声明——US-OBS-031 的实际落地范围以它自己的 spec 为准。架构锚点是：**证据的素材源（activity stream + diff）已经在 BC7 中提供；证据生成路径不从外部另起。**

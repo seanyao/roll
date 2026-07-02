@@ -1,15 +1,16 @@
-# Acceptance Evidence — `roll attest`
+# Acceptance Review Page — `roll attest`
 
-Every delivered story can carry a **single-file acceptance report**: per-AC
+Every delivered story can carry a **single-file Acceptance Review Page**: per-AC
 verdicts with the artifacts that back them, openable offline, printable to PDF,
 readable by non-engineers.
 
-## Where reports live
+## Where Review Pages live
 
 Every story has ONE home — its card folder under the epic:
 
 ```
-.roll/features/<epic>/<id>/<run-id>/<id>-report.html  ← the report (self-contained)
+.roll/features/<epic>/<id>/<run-id>/<id>-review.html  ← Acceptance Review Page (self-contained)
+.roll/features/<epic>/<id>/<run-id>/<id>-report.html  ← legacy report alias (one release cycle)
 .roll/features/<epic>/<id>/<run-id>/evidence.json     ← collected hard facts
 .roll/features/<epic>/<id>/<run-id>/evidence/         ← raw command/test artifacts
 .roll/features/<epic>/<id>/<run-id>/screenshots/      ← visual proof, when relevant
@@ -18,12 +19,12 @@ Every story has ONE home — its card folder under the epic:
 ```
 
 Runs are timestamped and never overwritten. The backlog `✅ Done` row links to
-`latest/<id>-report.html`; CHANGELOG bullets may carry an invisible
+`latest/<id>-review.html`; CHANGELOG bullets may carry an invisible
 `<!-- evidence: ... -->` marker for traceability.
 
-**The story's `latest/<id>-report.html` is the human acceptance entry.** A
-story is accepted by opening its own report — not a global archive/index page.
-`roll attest` is story-scoped: it writes only this story's run report and the
+**The story's `latest/<id>-review.html` is the human acceptance entry.** A
+story is accepted by opening its own Acceptance Review Page — not a global archive/index page.
+`roll attest` is story-scoped: it writes only this story's Review Page, the legacy report alias, and the
 `latest` pointer. It does not refresh any global archive, epic, or front-page
 HTML. Those board pages, when you want them, are rendered on demand with
 the archive rebuild; they are a convenience/archive view, not the delivery-truth surface.
@@ -44,7 +45,7 @@ the archive rebuild; they are a convenience/archive view, not the delivery-truth
 3. Close with the hard attest gate. The runner calls
    `roll attest <story-id> --run-dir "$ROLL_RUN_DIR"` at the end of delivery.
    `roll attest` sweeps the hard facts (TCR commits, latest CI run, optional
-   deploy probe, test-pass proof), renders the report, and moves `latest` to the
+   deploy probe, test-pass proof), renders the Acceptance Review Page, and moves `latest` to the
    run. That is all it writes — it is story-scoped. It does not mount a story
    archive delivery section, regenerate `.roll/index.json`, or refresh any global
    archive/epic/front page (run the archive rebuild on demand for those board pages).

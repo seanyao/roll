@@ -67,7 +67,7 @@ diff <(v2.0-bash <cmd>) <(v3-ts <cmd>)
 - **生命周期**：loop 周期开始时先创建 `<ID>/<run-id>/` 证据框，并通过 `ROLL_RUN_DIR` 交给内层 agent；`ROLL_EVIDENCE_DIR` 与 `ROLL_SCREENSHOTS_DIR` 指向本次 run 的 `evidence/` 与 `screenshots/`。
 - **过程采集**：`roll test`、截图通道和手工证据都写入本次 run；`ac-map.json` 放在卡片根目录，声明每条 AC 由哪些证据支撑。
 - **收尾硬闸**：runner 在交付末尾调用 `roll attest <ID> --run-dir "$ROLL_RUN_DIR"`；默认 `loop_safety.attest_gate: hard`，带 AC 的交付若没有新鲜且内容充足的报告会被拦住。`attest_gate: soft` 只用于显式迁移窗口。
-- **落位**：一次验收写进 `<ID>/<run-id>/`（run-id 为时间戳，永不覆盖），`latest` 软链指向最新；报告名带卡号 `<ID>-report.html`，多标签页/下载/分享一眼识别归属。
+- **落位**：一次验收写进 `<ID>/<run-id>/`（run-id 为时间戳，永不覆盖），`latest` 软链指向最新；主入口是 `<ID>-review.html` 验收 Review Page，`<ID>-report.html` 在一个发版周期内保留为旧报告兼容别名。
 - **索引**：归档重建 从 `backlog.md` 生成 `.roll/index.json`（ID→epic，确定性、幂等）。attest 先查索引定位 epic，查不到回落 `features/uncategorized/<ID>/`；验收收尾会尽力刷新 story 交付段与 `.roll/index.json`。
 - **回收**：`roll loop gc` 按阈值清理陈旧 run（保最近 N 次 + M 天内，二者满足其一即留；只删「又旧又超额」的尾部）。阈值 `--keep-latest`（默认 10）/`--keep-days`（默认 30），`--dry-run` 预演。
 - **读取兼容**：迁移窗口内旧布局 `.roll/verification/<ID>/` 仍可读（attest gate、ac-map、报告解析都先查卡夹再回落旧树）；存量迁移与兼容代码移除由 US-META-002 收尾。

@@ -85,7 +85,7 @@ Roll V4 把项目协调和单 Story 交付拆开：
 - **`supervise` / `design` / `execute` / `evaluate` 角色**是稳定契约；具体 `agent` 和 `model` 由 scoped binding 解析。
 - **Skills 仍然存在**，是角色调用的能力层。角色调用 `$roll-design`、`$roll-build`、`$roll-fix`、`$roll-peer`、`$roll-.qa` 等技能，而不是把技能重写进 TS。
 - **运行时不可用必须响**。静态配置公平列出候选；auth、VPN、账号、网络等运行时问题只影响本次 resolution，并记录原因，不永久污染候选池。
-- **attest 与证据按 Story 收口**。验收入口是这张 Story 自己的 `latest/<id>-report.html`、AC map 和截图/测试产物。
+- **attest 与证据按 Story 收口**。验收入口是这张 Story 自己的验收 Review Page（`latest/<id>-review.html`）、AC map 和截图/测试产物；`latest/<id>-report.html` 在一个发版周期内保留为旧别名。
 
 ### 运行模式
 

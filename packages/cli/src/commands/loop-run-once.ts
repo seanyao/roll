@@ -31,8 +31,8 @@ import { rollVersion } from "./version.js";
 import { rollHome } from "./setup-shared.js";
 import { applyCorrectionCircuitBreaker } from "../runner/correction-circuit.js";
 import { readSkillBody as readSkillBodyGeneric } from "../runner/skill-body.js";
-import { realAgentEnv } from "./agent-list.js";
-import { cardArchiveDir, reportFileName } from "../lib/archive.js";
+import { currentLang, realAgentEnv } from "./agent-list.js";
+import { cardArchiveDir, reportFileName, reviewFileName } from "../lib/archive.js";
 import { readLatestResizeSignal } from "../lib/review-score.js";
 import { loopReviewResizeCommand } from "./loop-review-resize.js";
 import { parseAllowedCardsEnv, scopeBacklogForAllowedCards } from "../lib/goal-progress.js";
@@ -45,7 +45,7 @@ import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { lookup } from "node:dns/promises";
 import { resolveLang, t, v3Catalog } from "@roll/spec";
 
-/** US-PORT-011: after a delivered cycle, surface the acceptance report —
+/** US-PORT-011: after a delivered cycle, surface the Acceptance Review Page —
  *  print its path always; auto-open in the browser unless the project is
  *  muted (mute-<slug> flag, same gate as the popup). Best-effort. */
 export function announceReport(
@@ -61,10 +61,13 @@ export function announceReport(
   },
 ): string | null {
   if (storyId === "") return null;
-  // US-META-002c: the card folder is the single home for the attest report.
-  const report = join(cardArchiveDir(projectPath, storyId), "latest", reportFileName(storyId));
-  if (!existsSync(report)) return null;
-  process.stdout.write(`evidence: ${report}\n验收报告: ${report}\n`);
+  const latest = join(cardArchiveDir(projectPath, storyId), "latest");
+  const review = join(latest, reviewFileName(storyId));
+  const legacyReport = join(latest, reportFileName(storyId));
+  const report = existsSync(review) ? review : existsSync(legacyReport) ? legacyReport : null;
+  if (report === null) return null;
+  const label = currentLang() === "zh" ? "验收 Review Page" : "Acceptance Review Page";
+  process.stdout.write(`${label}: ${report}\n`);
   const muted =
     existsSync(join(projectPath, ".roll", "loop", `mute-${slug}`)) ||
     existsSync(

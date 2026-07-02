@@ -69,6 +69,25 @@ function silenced<T>(fn: () => Promise<T>): Promise<T> {
   });
 }
 
+function capturedStdout<T>(fn: () => Promise<T>): Promise<{ code: T; stdout: string }> {
+  const o = process.stdout.write.bind(process.stdout);
+  const e = process.stderr.write.bind(process.stderr);
+  let stdout = "";
+  // @ts-expect-error capture-only
+  process.stdout.write = (s: string): boolean => {
+    stdout += String(s);
+    return true;
+  };
+  // @ts-expect-error capture-only
+  process.stderr.write = (): boolean => true;
+  return fn()
+    .then((code) => ({ code, stdout }))
+    .finally(() => {
+      process.stdout.write = o;
+      process.stderr.write = e;
+    });
+}
+
 const T0 = new Date("2026-06-06T01:02:03");
 
 describe("findFeatureFile", () => {
@@ -240,6 +259,8 @@ describe("resolveStoryAcItems — FIX-226 stub-owner AC fallback", () => {
 describe("attestCommand", () => {
   it("writes evidence.json + report.html under a run dir and points latest at it", async () => {
     const proj = project();
+    const oldLang = process.env["ROLL_LANG"];
+    process.env["ROLL_LANG"] = "en";
     mkdirSync(join(proj, ".roll", "loop"), { recursive: true });
     writeFileSync(
       join(proj, ".roll", "loop", "runs.jsonl"),
@@ -252,15 +273,24 @@ describe("attestCommand", () => {
         JSON.stringify({ type: "cycle:end", cycleId: "C-TOOL", outcome: "delivered", cost: { cycleId: "C-TOOL", agent: "codex", model: "gpt-5", tokensIn: 1, tokensOut: 1, estimatedCost: 0.01, revertCount: 0, effectiveCost: 0.01, currency: "USD", toolCosts: [{ toolId: "bash", invocations: 2, durationMs: 21000, failures: 0, estimatedCost: 0, currency: "USD" }] }, ts: 2 }),
       ].join("\n") + "\n",
     );
-    const code = await silenced(() =>
+    const got = await capturedStdout(() =>
       inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
-    );
-    expect(code).toBe(0);
+    ).finally(() => {
+      if (oldLang === undefined) delete process.env["ROLL_LANG"];
+      else process.env["ROLL_LANG"] = oldLang;
+    });
+    expect(got.code).toBe(0);
+    expect(got.stdout).toContain("Acceptance Review Page");
+    expect(got.stdout).toContain("FIX-300-review.html");
+    expect(got.stdout).toContain("legacy report alias");
+    expect(got.stdout).toContain("FIX-300-report.html");
+    expect(got.stdout).not.toContain("Acceptance report written");
     const storyDir = join(proj, ".roll", "features", "demo", "FIX-300");
     const runDir = join(storyDir, "2026-06-06T01-02-03");
     expect(existsSync(join(runDir, "evidence.json"))).toBe(true);
+    expect(existsSync(join(runDir, "FIX-300-review.html"))).toBe(true);
     const html = readFileSync(join(runDir, "FIX-300-report.html"), "utf8");
-    expect(html).toContain("FIX-300 — Acceptance Evidence");
+    expect(html).toContain("FIX-300 — Acceptance Review Page");
     expect(html).toContain("Tool cost");
     expect(html).toContain("bash×2(21s)");
     expect(lstatSync(join(storyDir, "latest")).isSymbolicLink()).toBe(true);

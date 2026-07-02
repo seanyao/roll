@@ -1,5 +1,5 @@
 /**
- * US-ATTEST-005 — acceptance report renderer: ONE self-contained HTML file
+ * US-ATTEST-005 — Acceptance Review Page renderer: ONE self-contained HTML file
  * (all CSS inline, no external assets; screenshots referenced RELATIVELY as
  * `./screenshots/*.png`), offline-openable and print-to-PDF friendly.
  *
@@ -162,7 +162,7 @@ export interface ReportInput {
   beforeAfter?: BeforeAfterPair[];
   /** US-EVID-004 / US-V4-001 — after-only delivery visuals for brand-new
    *  surfaces (no `before-*` counterpart). Rendered inside the same Before/After
-   *  section so the evidence has a home in the STORY-SCOPED report now that the
+   *  section so the evidence has a home in the story-scoped Review Page now that the
    *  global dossier delivery page is retired. Empty/absent ⇒ nothing emitted. */
   afterOnly?: EvidenceRef[];
   /** Summary facts row (counts come from evidence.json). */
@@ -676,7 +676,7 @@ ${scoreIssues.length > 0 ? `<p><strong>Review-score discrepancy</strong></p><ul>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(input.storyId)} — Acceptance Evidence · 验收证据</title>
+<title>${esc(input.storyId)} — Acceptance Review Page · 验收 Review Page</title>
 <style>
 ${CHROME_CSS}
 .badge { display:inline-block; padding:2px 10px; border-radius:999px; font-size:12.5px; border:1px solid var(--line); }
@@ -758,7 +758,7 @@ ${CHROME_SCRIPT}
 <body>
 ${CHROME_CONTROLS}
 <header class="doc">
-<p class="kicker">Roll · ${bi("Acceptance Report", "验收报告")}</p>
+<p class="kicker">Roll · ${bi("Acceptance Review Page", "验收 Review Page")}</p>
 <h1>${esc(input.title)}</h1>
 <p class="meta"><code>${esc(input.storyId)}</code> · ${bi("generated", "生成于")} ${esc(input.generatedAt)} · Gate: PASS</p>
 <div class="seal" aria-hidden="true"><span>ROLL</span>验讫</div>
@@ -772,7 +772,7 @@ ${selfCaptureBlock(input.selfCaptures)}
 ${captureSkipBlock(input.captureSkips)}
 ${processTraceBlock(input.process)}
 ${closing}
-<footer>Roll · ${bi("Acceptance Evidence", "验收证据")} · <code>${esc(input.storyId)}</code></footer>
+<footer>Roll · ${bi("Acceptance Review Page", "验收 Review Page")} · <code>${esc(input.storyId)}</code></footer>
 </body>
 </html>
 `;

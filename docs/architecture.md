@@ -111,16 +111,19 @@ Machine Scope 写在 `~/.roll/agents.yaml`，声明本机 Agent Pool、能力和
 协调；Delta Unit 通过 `story.execute` 交付，通过 `story.evaluate` 评审和打分。
 
 **Binding**：角色可以固定到一个 agent，也可以从候选池选择。选择策略是显式、可审计的
-（例如 `first-available`、`least-recent`、`seeded-random`），结果记录 source、trace、
+（例如 `first-available`、`least-recent`、`seeded-random`、`health-aware`），结果记录 source、trace、
 candidates 和 skipped runtime health。
 
 **公平候选池**：静态配置列出公平候选，不因历史 auth/VPN/account/network 事故永久排除
 支持的 agent。`story.execute`（Builder）默认池涵盖所有装好且具 `execute` 能力的 agent；
 `avoid: [supervise]` 按身份排除当前被指派为 `supervise` 的 Prime agent（先解析 Prime 再解析
 Builder），而不是排除所有具 `supervise` 能力的 agent。`least-recent` 读 `runs.jsonl` 的近期
-Builder 使用记录公平轮换，避免反复落到同一个 agent。运行时探活只影响当前 resolution：不可用
-候选被记录为 skipped，静态池不被悄悄改写。`roll supervisor route [--json]` 暴露这条 Builder
-路由 trace：候选池、skipped 候选及原因、策略、近期使用输入、最终 Builder 和 source 配置路径。
+Builder 使用记录公平轮换，避免反复落到同一个 agent。`health-aware` 在 Designer、Builder、
+Evaluator、Peer Reviewer 之间保留同一个已安装 pool 的可见性，并按近期 auth block、timeout、
+parser failure、no-TCR/gave-up、成功交付、成本档位和角色能力标签排序。运行时探活只影响当前
+resolution：不可用候选被记录为 skipped，静态池不被悄悄改写。`roll supervisor route --role
+<role> --story <id> [--json]` 暴露 route trace：候选池、ranked score/reasons、warnings、skipped
+候选及原因、策略、近期使用输入、最终 agent 和 source 配置路径。
 
 **反规则**：不因历史表现自动改写角色绑定。不做失败后的静默跨 agent 重试。指标可以*建议*
 策略变更，但绝不绕过 human-on-the-loop。

@@ -199,8 +199,29 @@ defaults:
       execute:
         kind: select
         from: [reasonix]
-        strategy: roulette
+        strategy: health-aware
       evaluate: nope
+`);
+    expect(config?.defaults.story.roles.execute).toEqual({
+      kind: "select",
+      from: ["reasonix"],
+      require: [],
+      avoid: [],
+      strategy: "health-aware",
+    });
+    expect(errors).toEqual(["defaults.story.roles.evaluate: malformed binding (expected a map)"]);
+  });
+
+  it("reports unknown strategies after accepting health-aware", () => {
+    const { config, errors } = normalizeAgentScopeConfig(`schema: roll-agents/v1
+scope: project
+defaults:
+  story:
+    roles:
+      execute:
+        kind: select
+        from: [reasonix]
+        strategy: roulette
 `);
     expect(config?.defaults.story.roles.execute).toEqual({
       kind: "select",
@@ -209,9 +230,6 @@ defaults:
       avoid: [],
       strategy: "first-available",
     });
-    expect(errors).toEqual([
-      "defaults.story.roles.execute: unknown strategy 'roulette'",
-      "defaults.story.roles.evaluate: malformed binding (expected a map)",
-    ]);
+    expect(errors).toEqual(["defaults.story.roles.execute: unknown strategy 'roulette'"]);
   });
 });

@@ -89,6 +89,22 @@ roles:
 
 未知或未注册的 agent 名会在配置解析时 fail loud。
 
+`health-aware` 是开放角色 casting 的选择策略。除非 owner policy 显式收窄 pool，
+Designer、Builder、Evaluator、Peer Reviewer 都从同一个已安装候选池里可见地选择，
+再按近期健康信号、角色能力标签、成功交付、近期使用和成本档位排序。降级候选仍会显示
+并带 warning，但不会因为 least-recent 早于健康候选被选中。便宜但较弱的 agent 可以继续
+适合聚焦任务，同时在 broad 或高风险 Builder 工作中排到更低。
+
+需要看清本次 casting 时，用 route trace：
+
+```bash
+roll supervisor route --role builder --story US-123
+roll supervisor route --role evaluator --story US-123 --json
+```
+
+trace 会列出每个候选、eligibility、score reasons、warnings、skipped runtime facts、
+最终选中 agent、策略和来源 binding。
+
 ## Guided Mode 与 Autonomous Mode
 
 Guided mode 下，你可以继续留在当前 agent 窗口里工作。这个会话就是 supervisor

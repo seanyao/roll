@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   renderScopedExecuteRoute,
+  resolveScopedCastRole,
   resolveScopedStoryExecute,
   scopedExecuteRouteTrace,
 } from "../src/runner/scoped-route.js";
@@ -52,6 +53,26 @@ defaults:
         strategy: least-recent
 `;
 
+const PROJECT_HEALTH_AWARE = `schema: roll-agents/v1
+scope: project
+inherits: machine
+defaults:
+  story:
+    roles:
+      execute:
+        kind: select
+        from: [agy, kimi, reasonix, codex]
+        require: [execute]
+        avoid: [supervise]
+        strategy: health-aware
+      evaluate:
+        kind: select
+        from: [agy, kimi, reasonix, codex]
+        require: [evaluate]
+        avoid: [execute]
+        strategy: health-aware
+`;
+
 /** Build a {rollHome, repoCwd} pair seeded with the machine + project layers. */
 function fixture(): { rollHome: string; repoCwd: string } {
   const rollHome = mkdtempSync(join(tmpdir(), "roll-home-"));
@@ -61,6 +82,12 @@ function fixture(): { rollHome: string; repoCwd: string } {
   mkdirSync(join(repoCwd, ".roll"), { recursive: true });
   writeFileSync(join(repoCwd, ".roll", "agents.yaml"), PROJECT);
   return { rollHome, repoCwd };
+}
+
+function healthAwareFixture(): { rollHome: string; repoCwd: string } {
+  const fx = fixture();
+  writeFileSync(join(fx.repoCwd, ".roll", "agents.yaml"), PROJECT_HEALTH_AWARE);
+  return fx;
 }
 
 const ALL_INSTALLED = new Set(["claude", "agy", "kimi", "pi", "reasonix", "codex"]);
@@ -120,10 +147,52 @@ describe("resolveScopedStoryExecute (FIX-1047)", () => {
     const { rollHome, repoCwd } = fixture();
     const route = resolveScopedStoryExecute(repoCwd, { rollHome, installed: ALL_INSTALLED, recentUse: {} });
     const text = renderScopedExecuteRoute(scopedExecuteRouteTrace(route!));
-    expect(text).toContain("Builder route — story.execute");
+    expect(text).toContain("builder route — story.execute");
     expect(text).toContain("Prime (supervise): codex");
     expect(text).toContain("strategy: least-recent");
+    expect(text).toContain("ranked:");
     expect(text).toContain("codex — assigned-to-avoided-role: supervise");
     expect(text).toContain("selected: claude");
+  });
+
+  it("US-AGENT-049: health-aware route keeps auth-degraded AGY visible but selects a healthy Builder", () => {
+    const { rollHome, repoCwd } = healthAwareFixture();
+    const route = resolveScopedCastRole(repoCwd, "builder", {
+      rollHome,
+      installed: ALL_INSTALLED,
+      recentUse: { kimi: 20, reasonix: 10 },
+      healthSignals: [
+        { agent: "agy", source: "cycle", status: "degraded", reason: "auth", observedAt: "2026-07-01T00:00:00Z" },
+        { agent: "kimi", source: "cycle", status: "healthy", observedAt: "2026-07-01T00:01:00Z" },
+        { agent: "reasonix", source: "cycle", status: "healthy", observedAt: "2026-07-01T00:02:00Z" },
+      ],
+    });
+    expect(route).not.toBeNull();
+    const trace = scopedExecuteRouteTrace(route!);
+    expect(trace.candidates).toEqual(["agy", "kimi", "reasonix", "codex"]);
+    expect(trace.ranked.map((r) => r.agent)).toContain("agy");
+    expect(trace.ranked.find((r) => r.agent === "agy")?.warnings).toContain("health degraded:auth");
+    expect(trace.ranked.find((r) => r.agent === "codex")?.eligible).toBe(false);
+    expect(trace.ranked.find((r) => r.agent === "codex")?.reasons).toContain("skipped:assigned-to-avoided-role: supervise");
+    expect(trace.selected).toBe("reasonix");
+  });
+
+  it("US-AGENT-049: evaluator route uses the same open pool with session-based execute avoidance", () => {
+    const { rollHome, repoCwd } = healthAwareFixture();
+    const route = resolveScopedCastRole(repoCwd, "evaluator", {
+      rollHome,
+      installed: ALL_INSTALLED,
+      healthSignals: [
+        { agent: "kimi", source: "score", status: "blocked", reason: "parser", observedAt: "2026-07-01T00:00:00Z" },
+        { agent: "reasonix", source: "score", status: "healthy", observedAt: "2026-07-01T00:01:00Z" },
+      ],
+    });
+    expect(route).not.toBeNull();
+    const trace = scopedExecuteRouteTrace(route!);
+    expect(trace.role).toBe("evaluate");
+    expect(trace.castRole).toBe("evaluator");
+    expect(trace.candidates).toEqual(["agy", "kimi", "reasonix", "codex"]);
+    expect(trace.skipped).toContainEqual({ agent: "kimi", reason: "health-blocked: parser" });
+    expect(trace.ranked.find((r) => r.agent === "kimi")?.eligible).toBe(false);
   });
 });

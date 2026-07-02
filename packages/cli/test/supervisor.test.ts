@@ -3,7 +3,7 @@
  * (backlog + agents.yaml + events.ndjson) and renders observe/advise/next/why/live,
  * never implementing a Story or marking one Done.
  */
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +13,10 @@ import { stripAnsi } from "../src/render.js";
 const dirs: string[] = [];
 afterAll(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
+});
+afterEach(() => {
+  delete process.env["ROLL_SUPERVISOR_COLLAB_WATCH_INTERVAL_MS"];
+  delete process.env["ROLL_SUPERVISOR_COLLAB_WATCH_TICKS"];
 });
 
 function project(backlog: string, opts: { agents?: string; events?: string[]; goal?: string } = {}): string {
@@ -35,7 +39,28 @@ function run(cwd: string, args: string[]): { code: number; out: string } {
   process.chdir(cwd);
   let code = 1;
   try {
-    code = supervisorCommand(args);
+    const result = supervisorCommand(args);
+    if (typeof result === "object" && result !== null && "then" in result) {
+      throw new Error("run() received an async supervisor command; use runAsync()");
+    }
+    code = result;
+  } finally {
+    process.chdir(save);
+    process.stdout.write = realOut;
+  }
+  return { code, out: chunks.join("") };
+}
+
+async function runAsync(cwd: string, args: string[]): Promise<{ code: number; out: string }> {
+  const save = process.cwd();
+  const chunks: string[] = [];
+  const realOut = process.stdout.write.bind(process.stdout);
+  // @ts-expect-error capture-only
+  process.stdout.write = (c: string | Uint8Array): boolean => (chunks.push(String(c)), true);
+  process.chdir(cwd);
+  let code = 1;
+  try {
+    code = await supervisorCommand(args);
   } finally {
     process.chdir(save);
     process.stdout.write = realOut;
@@ -571,6 +596,26 @@ describe("supervisorCommand", () => {
     expect(parsed.schema).toBe("collab-stream.v1");
     expect(parsed.cycles.map((cycle) => cycle.terminus)).toEqual(["walked_full", "walked_full", "", "escalated"]);
     expect(parsed.cycles[2]?.stance?.note).toBe("协同摘要不可用");
+  });
+
+  it("live --collab follows new events and appends rows without repeating the header", async () => {
+    const events = collabStreamEvents();
+    const cwd = project(BACKLOG, {
+      events: events.slice(0, 10),
+    });
+    process.env["ROLL_SUPERVISOR_COLLAB_WATCH_INTERVAL_MS"] = "5";
+    process.env["ROLL_SUPERVISOR_COLLAB_WATCH_TICKS"] = "2";
+    setTimeout(() => {
+      writeFileSync(join(cwd, ".roll", "loop", "events.ndjson"), events.slice(0, 20).join("\n") + "\n");
+    }, 1);
+
+    const r = await runAsync(cwd, ["live", "--collab", "--no-color"]);
+    const text = stripAnsi(r.out);
+    expect(r.code).toBe(0);
+    expect(text).toContain("Collab stream — goal: live non-Hold FIX/US/REFACTOR");
+    expect(text).toContain("00:00:01  FIX-1");
+    expect(text).toContain("00:00:04  FIX-2");
+    expect(text.indexOf("Collab stream")).toBe(text.lastIndexOf("Collab stream"));
   });
 
   it("live --collab header uses the persisted goal scope when available", () => {

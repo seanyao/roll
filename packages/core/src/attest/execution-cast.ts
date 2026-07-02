@@ -45,7 +45,7 @@ export function buildExecutionCastProjection(summary: CycleRoleSummary): Executi
     ...(byRole.get("evaluator") ?? []).filter((r) => r.state === "accepted"),
     ...(byRole.get("evaluator") ?? []).filter((r) => r.state !== "accepted"),
     ...(byRole.get("attest_gate") ?? []),
-    ...(byRole.get("planner") ?? []),
+    ...(byRole.get("designer") ?? []),
   ].map((r) => ({
     role: r.role,
     agent: r.agent,

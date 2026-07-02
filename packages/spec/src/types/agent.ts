@@ -51,12 +51,12 @@ export type RigRef = string;
 export const ROUTE_SLOTS = ["easy", "default", "hard", "fallback"] as const;
 export type RouteSlot = (typeof ROUTE_SLOTS)[number];
 
-/** The story-level role pipeline a Delta Unit runs. */
-export const EXECUTION_PROFILES = ["standard", "verified", "planned"] as const;
+/** The story-level role pipeline a Story delivery runs. */
+export const EXECUTION_PROFILES = ["standard", "verified", "designed"] as const;
 export type ExecutionProfile = (typeof EXECUTION_PROFILES)[number];
 
-/** The roles a Delta Unit can run, in pipeline order. */
-export const ROLE_NAMES = ["planner", "builder", "evaluator"] as const;
+/** The roles a Story delivery can run, in pipeline order. */
+export const ROLE_NAMES = ["designer", "builder", "evaluator"] as const;
 export type RoleName = (typeof ROLE_NAMES)[number];
 
 /** How a role binds to an execution identity: a named rig, a route slot, or the
@@ -233,11 +233,11 @@ export interface SupervisorDecision {
 
 /** Execution policy: how Roll chooses a profile per story. */
 export interface ExecutionPolicy {
-  readonly mode: "standard" | "verified" | "planned" | "auto";
+  readonly mode: "standard" | "verified" | "designed" | "auto";
   readonly defaultProfile: ExecutionProfile;
 }
 
-/** Prime Agent config (disabled by default in v4.0). */
+/** Supervisor config (disabled by default in v4.0). */
 export interface SupervisorConfig {
   readonly enabled: boolean;
   readonly mode: "observe" | "advise" | "schedule";
@@ -278,7 +278,7 @@ export const AGENT_SCOPE_KINDS = ["machine", "project", "story", "skill", "revie
 export type AgentScopeKind = (typeof AGENT_SCOPE_KINDS)[number];
 
 /** Minimal Role vocabulary for the recursive Agent-domain model. */
-export const AGENT_SCOPE_ROLES = ["supervise", "execute", "evaluate"] as const;
+export const AGENT_SCOPE_ROLES = ["supervise", "design", "execute", "evaluate"] as const;
 export type AgentScopeRole = (typeof AGENT_SCOPE_ROLES)[number];
 
 export const AGENT_BINDING_STRATEGIES = ["first-available", "least-recent", "seeded-random", "health-aware"] as const;
@@ -415,10 +415,10 @@ export interface RoleCastRankingInput {
   readonly storyRisk?: "low" | "medium" | "high" | "unknown";
 }
 
-/** US-V4-006 — the Planner contract (`planner-contract.md`) a `planned` execution
- *  produces in a fresh session BEFORE the Builder. Builder consumes it via
- *  artifact refs; the Evaluator maps planned-vs-delivered against it. */
-export interface PlannerContract {
+/** Designer contract (`design-contract.md`) a `designed` execution produces in a
+ *  fresh session BEFORE the Builder. Builder consumes it via artifact refs; the
+ *  Evaluator maps design-contract-vs-delivered against it. */
+export interface DesignerContract {
   readonly storyId: string;
   /** What is in scope for this Story (the boundary the Builder must respect). */
   readonly scopeBoundary: readonly string[];
@@ -430,13 +430,13 @@ export interface PlannerContract {
   readonly risks: readonly string[];
   /** Explicit out-of-scope items (must NOT be done in this Story). */
   readonly outOfScope: readonly string[];
-  /** Resize/split guidance when the Planner judges the Story too large. */
+  /** Resize/split guidance when the Designer judges the Story too large. */
   readonly resizeGuidance?: string;
 }
 
-/** US-V4-006 — planned-vs-delivered mapping row: each acceptance item the planner
+/** Design-contract-vs-delivered mapping row: each acceptance item the Designer
  *  contracted, mapped to whether the delivery satisfied it. */
-export interface PlannedVsDeliveredRow {
+export interface DesignContractDeliveryRow {
   readonly item: string;
   readonly status: "satisfied" | "missing" | "changed";
 }
@@ -458,8 +458,8 @@ export interface EvalReport {
   readonly score?: { readonly value: number; readonly verdict: "good" | "ok" | "regression" };
   /** Whether story-scoped acceptance evidence was produced (separate contract). */
   readonly attestStatus: "produced" | "skipped" | "unknown";
-  /** Planned-vs-delivered mapping summary (present only under `planned`). */
-  readonly plannedVsDelivered?: string;
+  /** Design-contract-vs-delivered mapping summary (present only under `designed`). */
+  readonly designContractVsDelivered?: string;
   readonly recommendation: EvalRecommendation;
 }
 

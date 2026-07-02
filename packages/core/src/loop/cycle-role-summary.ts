@@ -13,6 +13,7 @@ import {
   type CycleRoleName,
   type CycleRoleAttemptState,
   type CycleRoleSummary,
+  type ExecutionProfile,
 } from "@roll/spec";
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -41,7 +42,7 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
   const cycleEvents = events.filter((e) => "cycleId" in e && (e as { cycleId: string }).cycleId === cycleId);
   const roles: CycleRoleAttempt[] = [];
   let storyId = "";
-  let executionProfile: "standard" | "verified" | "planned" = "standard";
+  let executionProfile: ExecutionProfile = "standard";
   let builderSessionId: string | undefined;
   const sources: string[] = [];
   addSource(sources, input.eventsPath);
@@ -73,7 +74,7 @@ export function buildCycleRoleSummary(input: BuildCycleRoleSummaryInput): CycleR
 
   // Execution profile
   const profileEvent = cycleEvents.find((e) => e.type === "execution:profile") as
-    | { type: "execution:profile"; profile: "standard" | "verified" | "planned" }
+    | { type: "execution:profile"; profile: ExecutionProfile }
     | undefined;
   if (profileEvent) {
     executionProfile = profileEvent.profile;

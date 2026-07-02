@@ -872,7 +872,7 @@ function dossierExecutionCastBlock(
     if (role === "peer_reviewer") return bi("Peer Reviewer", "同行评审");
     if (role === "evaluator") return state === "accepted" ? bi("Evaluator", "评审员") : bi("Evaluator (failed)", "评审失败");
     if (role === "attest_gate") return bi("Attest Gate", "验收门禁");
-    if (role === "planner") return bi("Planner", "规划者");
+    if (role === "designer") return bi("Designer", "设计者");
     return role;
   };
 

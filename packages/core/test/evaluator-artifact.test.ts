@@ -55,16 +55,16 @@ describe("eval-report render/parse round-trip", () => {
     expect(parseEvalReport(renderEvalReport(report), "US-2")).toEqual(report);
   });
 
-  it("carries a planned-vs-delivered section through", () => {
+  it("carries a design-contract-vs-delivered section through", () => {
     const report: EvalReport = {
       storyId: "US-3",
       blockingFindings: [],
       advisoryFindings: [],
       attestStatus: "produced",
-      plannedVsDelivered: "AC1 satisfied; AC2 changed (deferred screenshot)",
+      designContractVsDelivered: "AC1 satisfied; AC2 changed (deferred screenshot)",
       recommendation: "merge",
     };
-    expect(parseEvalReport(renderEvalReport(report), "US-3")?.plannedVsDelivered).toContain("AC1 satisfied");
+    expect(parseEvalReport(renderEvalReport(report), "US-3")?.designContractVsDelivered).toContain("AC1 satisfied");
   });
 });
 
@@ -150,6 +150,6 @@ describe("validateEvaluatorArtifact — fail-closed + independence", () => {
 
   it("rejects a wholly missing manifest", () => {
     expect(validateArtifactManifest(null, "evaluator").ok).toBe(false);
-    expect(validateArtifactManifest(undefined, "planner").ok).toBe(false);
+    expect(validateArtifactManifest(undefined, "designer").ok).toBe(false);
   });
 });

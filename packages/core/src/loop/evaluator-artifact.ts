@@ -1,5 +1,5 @@
 /**
- * US-V4-005 — the Evaluator artifact contract for `verified` (and `planned`)
+ * US-V4-005 — the Evaluator artifact contract for `verified` (and `designed`)
  * execution: a fresh-session Evaluator role consumes the Builder's evidence via
  * artifact refs and writes `eval-report.md` + `artifact-manifest.json`.
  *
@@ -10,7 +10,7 @@
  * spawns the session and reuses the existing review/score/attest capabilities.
  *
  * Fail-closed: a missing or malformed Evaluator artifact is NOT success. A
- * verified/planned delivery whose evaluator artifact won't parse, or whose
+ * verified/designed delivery whose evaluator artifact won't parse, or whose
  * session id equals the builder's (a self-grade), is rejected.
  */
 import type { ArtifactManifest, EvalRecommendation, EvalReport } from "@roll/spec";
@@ -20,7 +20,7 @@ const H = {
   advisory: "## Advisory findings",
   score: "## Score",
   attest: "## Attest / evidence status",
-  planned: "## Planned vs delivered",
+  designed: "## Design contract vs delivered",
   recommendation: "## Recommendation",
 } as const;
 
@@ -45,8 +45,8 @@ export function renderEvalReport(r: EvalReport): string {
     H.attest,
     `- ${r.attestStatus}\n`,
   ];
-  if (r.plannedVsDelivered !== undefined && r.plannedVsDelivered !== "") {
-    parts.push(H.planned, `${r.plannedVsDelivered}\n`);
+  if (r.designContractVsDelivered !== undefined && r.designContractVsDelivered !== "") {
+    parts.push(H.designed, `${r.designContractVsDelivered}\n`);
   }
   parts.push(H.recommendation, `- ${r.recommendation}\n`);
   return parts.join("\n");
@@ -91,14 +91,14 @@ export function parseEvalReport(md: string, storyId: string): EvalReport | null 
     const m = /(-?\d+(?:\.\d+)?)\s*\((good|ok|regression)\)/.exec(scoreBody);
     if (m !== null) score = { value: Number(m[1]), verdict: m[2] as "good" | "ok" | "regression" };
   }
-  const planned = section(md, H.planned);
+  const designed = section(md, H.designed);
   return {
     storyId,
     blockingFindings: parseBullets(section(md, H.blocking)),
     advisoryFindings: parseBullets(section(md, H.advisory)),
     ...(score !== undefined ? { score } : {}),
     attestStatus,
-    ...(planned !== null && planned !== "" ? { plannedVsDelivered: planned } : {}),
+    ...(designed !== null && designed !== "" ? { designContractVsDelivered: designed } : {}),
     recommendation,
   };
 }
@@ -116,7 +116,7 @@ export function assembleEvalReport(input: {
   advisoryFindings?: readonly string[];
   score?: { value: number; verdict: "good" | "ok" | "regression" };
   attestStatus: "produced" | "skipped" | "unknown";
-  plannedVsDelivered?: string;
+  designContractVsDelivered?: string;
 }): EvalReport {
   const blocking = input.blockingFindings.length > 0;
   const regression = input.score?.verdict === "regression";
@@ -128,8 +128,8 @@ export function assembleEvalReport(input: {
     advisoryFindings: input.advisoryFindings ?? [],
     ...(input.score !== undefined ? { score: input.score } : {}),
     attestStatus: input.attestStatus,
-    ...(input.plannedVsDelivered !== undefined && input.plannedVsDelivered !== ""
-      ? { plannedVsDelivered: input.plannedVsDelivered }
+    ...(input.designContractVsDelivered !== undefined && input.designContractVsDelivered !== ""
+      ? { designContractVsDelivered: input.designContractVsDelivered }
       : {}),
     recommendation,
   };
@@ -141,7 +141,7 @@ export interface ArtifactValidation {
 }
 
 /** Shape-check an {@link ArtifactManifest} read from disk (fail-closed on a
- *  missing/garbled manifest). `expectedRole` pins the role (evaluator/planner). */
+ *  missing/garbled manifest). `expectedRole` pins the role. */
 export function validateArtifactManifest(
   manifest: unknown,
   expectedRole: ArtifactManifest["role"],

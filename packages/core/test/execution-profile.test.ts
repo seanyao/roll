@@ -34,42 +34,42 @@ describe("selectExecutionProfile (arch §12)", () => {
     expect(selectExecutionProfile(base({ historicalEvidenceRisk: true }))).toBe("verified");
   });
 
-  it("ambiguous / cross-module / truth-release / agent-runtime → planned", () => {
-    expect(selectExecutionProfile(base({ acceptanceAmbiguous: true }))).toBe("planned");
-    expect(selectExecutionProfile(base({ crossModule: true }))).toBe("planned");
-    expect(selectExecutionProfile(base({ touchesTruthOrRelease: true }))).toBe("planned");
-    expect(selectExecutionProfile(base({ touchesAgentRuntime: true }))).toBe("planned");
+  it("ambiguous / cross-module / truth-release / agent-runtime -> designed", () => {
+    expect(selectExecutionProfile(base({ acceptanceAmbiguous: true }))).toBe("designed");
+    expect(selectExecutionProfile(base({ crossModule: true }))).toBe("designed");
+    expect(selectExecutionProfile(base({ touchesTruthOrRelease: true }))).toBe("designed");
+    expect(selectExecutionProfile(base({ touchesAgentRuntime: true }))).toBe("designed");
   });
 
-  it("planning risk dominates evidence risk (planned wins over verified)", () => {
-    expect(selectExecutionProfile(base({ userVisible: true, crossModule: true }))).toBe("planned");
+  it("design risk dominates evidence risk (designed wins over verified)", () => {
+    expect(selectExecutionProfile(base({ userVisible: true, crossModule: true }))).toBe("designed");
   });
 
   it("explain gives a deterministic rationale per tier", () => {
     expect(explainExecutionProfile(base())).toMatch(/^standard/);
     expect(explainExecutionProfile(base({ userVisible: true }))).toMatch(/^verified/);
-    expect(explainExecutionProfile(base({ touchesTruthOrRelease: true }))).toMatch(/^planned/);
+    expect(explainExecutionProfile(base({ touchesTruthOrRelease: true }))).toMatch(/^designed/);
   });
 });
 
 describe("applyExecutionPolicy (execution_policy.mode gates execution)", () => {
   it("standard mode forces standard regardless of classification (no-regression default)", () => {
-    expect(applyExecutionPolicy("planned", "standard")).toBe("standard");
+    expect(applyExecutionPolicy("designed", "standard")).toBe("standard");
     expect(applyExecutionPolicy("verified", "standard")).toBe("standard");
     expect(applyExecutionPolicy("standard", "standard")).toBe("standard");
   });
   it("auto mode uses the classified profile", () => {
-    expect(applyExecutionPolicy("planned", "auto")).toBe("planned");
+    expect(applyExecutionPolicy("designed", "auto")).toBe("designed");
     expect(applyExecutionPolicy("verified", "auto")).toBe("verified");
     expect(applyExecutionPolicy("standard", "auto")).toBe("standard");
   });
-  it("verified mode floors at verified; planned still escalates", () => {
+  it("verified mode floors at verified; designed still escalates", () => {
     expect(applyExecutionPolicy("standard", "verified")).toBe("verified");
     expect(applyExecutionPolicy("verified", "verified")).toBe("verified");
-    expect(applyExecutionPolicy("planned", "verified")).toBe("planned");
+    expect(applyExecutionPolicy("designed", "verified")).toBe("designed");
   });
-  it("planned mode forces the full pipeline", () => {
-    expect(applyExecutionPolicy("standard", "planned")).toBe("planned");
+  it("designed mode forces the full pipeline", () => {
+    expect(applyExecutionPolicy("standard", "designed")).toBe("designed");
   });
 });
 
@@ -89,29 +89,29 @@ describe("classifyStoryRisk (spec-text heuristics)", () => {
     expect(selectExecutionProfile(input)).toBe("verified");
   });
 
-  it("a truth/release story → planned", () => {
+  it("a truth/release story -> designed", () => {
     const spec = "## Context\nChange the release consistency gate and DeliveryRecord truth.\n\n## Acceptance Criteria\n- [ ] gate reads structured truth\n";
     const input = classifyStoryRisk("US-3", spec);
     expect(input.touchesTruthOrRelease).toBe(true);
-    expect(selectExecutionProfile(input)).toBe("planned");
+    expect(selectExecutionProfile(input)).toBe("designed");
   });
 
-  it("an agent-runtime story → planned", () => {
+  it("an agent-runtime story -> designed", () => {
     const spec = "## Context\nNormalize the agent routing / rig + execution profile config.\n\n## Acceptance Criteria\n- [ ] router resolves rigs\n";
-    expect(selectExecutionProfile(classifyStoryRisk("US-4", spec))).toBe("planned");
+    expect(selectExecutionProfile(classifyStoryRisk("US-4", spec))).toBe("designed");
   });
 
-  it("a story with NO acceptance criteria is ambiguous → planned", () => {
+  it("a story with NO acceptance criteria is ambiguous -> designed", () => {
     const input = classifyStoryRisk("US-5", "## Context\nDo something useful.\n");
     expect(input.acceptanceAmbiguous).toBe(true);
-    expect(selectExecutionProfile(input)).toBe("planned");
+    expect(selectExecutionProfile(input)).toBe("designed");
   });
 
-  it("a multi-package filesHint → cross-module → planned", () => {
+  it("a multi-package filesHint -> cross-module -> designed", () => {
     const spec = "## Acceptance Criteria\n- [ ] works\n";
     const input = classifyStoryRisk("US-6", spec, { filesHint: ["packages/cli/src/a.ts", "packages/core/src/b.ts"] });
     expect(input.crossModule).toBe(true);
-    expect(selectExecutionProfile(input)).toBe("planned");
+    expect(selectExecutionProfile(input)).toBe("designed");
   });
 
   it("backwards compat: a plain local story with no v4 risk signals stays standard", () => {

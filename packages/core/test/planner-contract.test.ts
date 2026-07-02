@@ -1,18 +1,18 @@
 /**
- * US-V4-006 — Planner contract: render/parse round-trip, fail-closed validation
- * (missing/malformed/empty-acceptance), and planned-vs-delivered mapping.
+ * US-V4-006 — Designer contract: render/parse round-trip, fail-closed validation
+ * (missing/malformed/empty-acceptance), and design-contract-vs-delivered mapping.
  */
 import { describe, expect, it } from "vitest";
 import {
+  designContractVsDelivered,
   parsePlannerContract,
-  plannedVsDelivered,
   renderPlannerContract,
-  summarizePlannedVsDelivered,
+  summarizeDesignContractVsDelivered,
   validatePlannerArtifact,
 } from "../src/loop/planner-contract.js";
-import type { PlannerContract } from "@roll/spec";
+import type { DesignerContract } from "@roll/spec";
 
-const FULL: PlannerContract = {
+const FULL: DesignerContract = {
   storyId: "US-9",
   scopeBoundary: ["change the picker only", "no schema migration"],
   acceptanceContract: ["picker prefers est_min", "falls back to backlog tag"],
@@ -27,7 +27,7 @@ function manifest(over: Record<string, unknown> = {}): Record<string, unknown> {
     schemaVersion: 1,
     storyId: "US-9",
     cycleId: "C-1",
-    role: "planner",
+    role: "designer",
     rig: { agent: "kimi" },
     sessionId: "C-1:plan:kimi:1700",
     worktreeCwd: "/wt",
@@ -39,14 +39,14 @@ function manifest(over: Record<string, unknown> = {}): Record<string, unknown> {
   };
 }
 
-describe("planner-contract render/parse round-trip", () => {
+describe("designer contract render/parse round-trip", () => {
   it("round-trips a full contract", () => {
     expect(parsePlannerContract(renderPlannerContract(FULL), "US-9")).toEqual(FULL);
   });
   it("round-trips with no resize guidance", () => {
     const { resizeGuidance, ...rest } = FULL;
     void resizeGuidance;
-    const c = { ...rest } as PlannerContract;
+    const c = { ...rest } as DesignerContract;
     expect(parsePlannerContract(renderPlannerContract(c), "US-9")).toEqual(c);
   });
 });
@@ -56,7 +56,7 @@ describe("parsePlannerContract — fail-closed", () => {
     expect(parsePlannerContract("", "US-9")).toBeNull();
   });
   it("returns null when required sections are missing", () => {
-    expect(parsePlannerContract("# Planner\n\nsome prose", "US-9")).toBeNull();
+    expect(parsePlannerContract("# Designer\n\nsome prose", "US-9")).toBeNull();
     // scope + acceptance but no out-of-scope
     expect(parsePlannerContract("## Scope boundary\n- x\n## Acceptance contract\n- y\n", "US-9")).toBeNull();
   });
@@ -64,7 +64,7 @@ describe("parsePlannerContract — fail-closed", () => {
 
 describe("validatePlannerArtifact — fail-closed before the Builder", () => {
   const contractMd = renderPlannerContract(FULL);
-  it("accepts a well-formed planner artifact", () => {
+  it("accepts a well-formed designer artifact", () => {
     expect(validatePlannerArtifact({ manifest: manifest(), contractMd, storyId: "US-9" })).toEqual({ ok: true, reasons: [] });
   });
   it("fails closed when the contract is missing", () => {
@@ -75,10 +75,10 @@ describe("validatePlannerArtifact — fail-closed before the Builder", () => {
   it("fails closed when the contract is malformed", () => {
     expect(validatePlannerArtifact({ manifest: manifest(), contractMd: "garbage", storyId: "US-9" }).ok).toBe(false);
   });
-  it("rejects a manifest whose role is not planner", () => {
+  it("rejects a manifest whose role is not designer", () => {
     const v = validatePlannerArtifact({ manifest: manifest({ role: "builder" }), contractMd, storyId: "US-9" });
     expect(v.ok).toBe(false);
-    expect(v.reasons.join(" ")).toContain('role !== "planner"');
+    expect(v.reasons.join(" ")).toContain('role !== "designer"');
   });
   it("rejects an empty acceptance contract (not a real contract)", () => {
     const empty = renderPlannerContract({ ...FULL, acceptanceContract: [] });
@@ -88,20 +88,20 @@ describe("validatePlannerArtifact — fail-closed before the Builder", () => {
   });
 });
 
-describe("plannedVsDelivered mapping", () => {
+describe("design-contract-vs-delivered mapping", () => {
   it("marks satisfied / changed / missing", () => {
-    const rows = plannedVsDelivered(FULL, ["picker prefers est_min", "falls back to backlog tag eventually"]);
+    const rows = designContractVsDelivered(FULL, ["picker prefers est_min", "falls back to backlog tag eventually"]);
     expect(rows.find((r) => r.item === "picker prefers est_min")?.status).toBe("satisfied");
     // fuzzy (substring) match → changed
     expect(rows.find((r) => r.item === "falls back to backlog tag")?.status).toBe("changed");
   });
   it("marks a wholly-undelivered acceptance item missing", () => {
-    const rows = plannedVsDelivered(FULL, ["something unrelated"]);
+    const rows = designContractVsDelivered(FULL, ["something unrelated"]);
     expect(rows.every((r) => r.status === "missing")).toBe(true);
   });
   it("summarizes the mapping", () => {
-    const rows = plannedVsDelivered(FULL, ["picker prefers est_min"]);
-    expect(summarizePlannedVsDelivered(rows)).toContain("satisfied");
-    expect(summarizePlannedVsDelivered(rows)).toContain("missing");
+    const rows = designContractVsDelivered(FULL, ["picker prefers est_min"]);
+    expect(summarizeDesignContractVsDelivered(rows)).toContain("satisfied");
+    expect(summarizeDesignContractVsDelivered(rows)).toContain("missing");
   });
 });

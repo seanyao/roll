@@ -79,7 +79,7 @@ const SUCCESS_OUTCOMES = new Set(["delivered", "built", "published", "success", 
 function requiredRoles(profile: ExecutionProfile): Set<RoleName> {
   if (profile === "standard") return new Set<RoleName>(["builder"]);
   if (profile === "verified") return new Set<RoleName>(["builder", "evaluator"]);
-  return new Set<RoleName>(["planner", "builder", "evaluator"]);
+  return new Set<RoleName>(["designer", "builder", "evaluator"]);
 }
 
 function terminalFailed(outcome: string): boolean {
@@ -100,16 +100,16 @@ function phaseAtOrAfter(c: MutableCycle, phase: string): boolean {
   return c.phases.some((p) => order.indexOf(p) >= want);
 }
 
-function plannerPane(c: MutableCycle, required: boolean): SupervisorLiveRolePane {
-  if (!required) return { role: "planner", state: "not_required", agent: null, reason: "profile does not require planning" };
-  const unavailable = latestUnavailable(c, "planner");
-  if (unavailable !== undefined) return { role: "planner", state: "not_available", agent: null, reason: unavailable.reason };
-  if (phaseAtOrAfter(c, "execute")) return { role: "planner", state: "done", agent: null, reason: "planner contract handed to builder" };
-  if (c.ended && c.failed) return { role: "planner", state: "failed", agent: null, reason: "cycle failed before builder handoff" };
-  return { role: "planner", state: "working", agent: null, reason: "building planner contract" };
+function designerPane(c: MutableCycle, required: boolean): SupervisorLiveRolePane {
+  if (!required) return { role: "designer", state: "not_required", agent: null, reason: "profile does not require design" };
+  const unavailable = latestUnavailable(c, "designer");
+  if (unavailable !== undefined) return { role: "designer", state: "not_available", agent: null, reason: unavailable.reason };
+  if (phaseAtOrAfter(c, "execute")) return { role: "designer", state: "done", agent: null, reason: "design contract handed to builder" };
+  if (c.ended && c.failed) return { role: "designer", state: "failed", agent: null, reason: "cycle failed before builder handoff" };
+  return { role: "designer", state: "working", agent: null, reason: "building design contract" };
 }
 
-function builderPane(c: MutableCycle, planner: SupervisorLiveRolePane): SupervisorLiveRolePane {
+function builderPane(c: MutableCycle, designer: SupervisorLiveRolePane): SupervisorLiveRolePane {
   const unavailable = latestUnavailable(c, "builder");
   if (unavailable !== undefined) return { role: "builder", state: "not_available", agent: c.agent, reason: unavailable.reason };
   if (c.ended) {
@@ -124,9 +124,9 @@ function builderPane(c: MutableCycle, planner: SupervisorLiveRolePane): Supervis
   if (phaseAtOrAfter(c, "execute")) return { role: "builder", state: "working", agent: c.agent, reason: "executing story" };
   return {
     role: "builder",
-    state: planner.state === "working" ? "waiting" : "pending",
+    state: designer.state === "working" ? "waiting" : "pending",
     agent: c.agent,
-    reason: planner.state === "working" ? "waiting for planner handoff" : "waiting to execute",
+    reason: designer.state === "working" ? "waiting for designer handoff" : "waiting to execute",
   };
 }
 
@@ -143,23 +143,23 @@ function evaluatorPane(c: MutableCycle, required: boolean, builder: SupervisorLi
 
 function rolePanes(c: MutableCycle): SupervisorLiveRolePane[] {
   const req = requiredRoles(c.profile);
-  const planner = plannerPane(c, req.has("planner"));
-  const builder = builderPane(c, planner);
+  const designer = designerPane(c, req.has("designer"));
+  const builder = builderPane(c, designer);
   const evaluator = evaluatorPane(c, req.has("evaluator"), builder);
-  return [planner, builder, evaluator];
+  return [designer, builder, evaluator];
 }
 
 function handoffs(c: MutableCycle, roles: readonly SupervisorLiveRolePane[]): SupervisorLiveHandoff[] {
   const byRole = new Map(roles.map((r) => [r.role, r]));
-  const planner = byRole.get("planner")!;
+  const designer = byRole.get("designer")!;
   const builder = byRole.get("builder")!;
   const evaluator = byRole.get("evaluator")!;
   return [
     {
-      from: "planner",
+      from: "designer",
       to: "builder",
-      state: planner.state === "not_required" ? "not_required" : planner.state === "done" ? "ready" : planner.state === "failed" || planner.state === "not_available" ? "blocked" : "pending",
-      detail: planner.state === "not_required" ? "planner not required" : "planner contract -> builder",
+      state: designer.state === "not_required" ? "not_required" : designer.state === "done" ? "ready" : designer.state === "failed" || designer.state === "not_available" ? "blocked" : "pending",
+      detail: designer.state === "not_required" ? "designer not required" : "design contract -> builder",
     },
     {
       from: "builder",

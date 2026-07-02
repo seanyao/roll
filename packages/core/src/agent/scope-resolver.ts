@@ -14,6 +14,7 @@ import {
   type AgentScopeRoleBinding,
   type AgentScopeRoleResolution,
   type AgentScopeSkippedCandidate,
+  type AgentHealthSignal,
 } from "@roll/spec";
 
 export interface AgentScopeResolveLayer {
@@ -33,6 +34,7 @@ export interface ResolveAgentScopeRoleInput {
   readonly runtimeHealth?: Readonly<Partial<Record<AgentName, AgentScopeRuntimeHealth>>>;
   /** Larger means more recently used. Missing means never used. */
   readonly recentUse?: Readonly<Partial<Record<AgentName, number>>>;
+  readonly healthSignals?: readonly AgentHealthSignal[];
   /** Already-resolved role assignments used by `avoid`. */
   readonly assignedRoles?: Readonly<Partial<Record<AgentScopeRole, AgentName>>>;
   readonly seed?: string;
@@ -105,6 +107,40 @@ function unavailableReason(input: ResolveAgentScopeRoleInput, agent: AgentName):
   return `unavailable: ${health.reason ?? "runtime-health"}`;
 }
 
+function latestHealthSignal(input: ResolveAgentScopeRoleInput, agent: AgentName): AgentHealthSignal | undefined {
+  let latest: AgentHealthSignal | undefined;
+  let latestMs = Number.NEGATIVE_INFINITY;
+  const now = Date.now();
+  for (const signal of input.healthSignals ?? []) {
+    if (signal.agent !== agent) continue;
+    if (signal.expiresAt !== undefined) {
+      const expires = Date.parse(signal.expiresAt);
+      if (!Number.isNaN(expires) && expires < now) continue;
+    }
+    const observed = Date.parse(signal.observedAt);
+    const score = Number.isNaN(observed) ? 0 : observed;
+    if (latest === undefined || score >= latestMs) {
+      latest = signal;
+      latestMs = score;
+    }
+  }
+  return latest;
+}
+
+function healthAwareSkip(input: ResolveAgentScopeRoleInput, agent: AgentName): string | null {
+  const signal = latestHealthSignal(input, agent);
+  if (signal?.status !== "blocked") return null;
+  return `health-blocked: ${signal.reason ?? "blocked"}`;
+}
+
+function healthRank(input: ResolveAgentScopeRoleInput, agent: AgentName): number {
+  const signal = latestHealthSignal(input, agent);
+  if (signal === undefined || signal.status === "unknown") return 10;
+  if (signal.status === "healthy") return 40;
+  if (signal.status === "degraded") return 0;
+  return -100;
+}
+
 function hash(seed: string, agent: AgentName): number {
   let h = 2166136261;
   const text = `${seed}:${agent}`;
@@ -126,6 +162,16 @@ function orderedAvailable(binding: Extract<AgentScopeRoleBinding, { kind: "selec
     const seed = input.seed ?? `${input.scope}:${input.role}`;
     return withIndex
       .sort((a, b) => hash(seed, a.agent) - hash(seed, b.agent) || a.index - b.index)
+      .map((x) => x.agent);
+  }
+  if (binding.strategy === "health-aware") {
+    return withIndex
+      .sort((a, b) => {
+        const health = healthRank(input, b.agent) - healthRank(input, a.agent);
+        if (health !== 0) return health;
+        const recent = (input.recentUse?.[a.agent] ?? Number.NEGATIVE_INFINITY) - (input.recentUse?.[b.agent] ?? Number.NEGATIVE_INFINITY);
+        return recent !== 0 ? recent : a.index - b.index;
+      })
       .map((x) => x.agent);
   }
   return available.slice();
@@ -185,6 +231,8 @@ function skipForAgent(
   for (const required of binding.require ?? []) {
     if (!caps.includes(required)) return `missing-required-capability: ${required}`;
   }
+  const healthBlocked = healthAwareSkip(input, agent);
+  if (healthBlocked !== null) return healthBlocked;
   return unavailableReason(input, agent);
 }
 

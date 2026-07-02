@@ -311,6 +311,12 @@ binary failures skip a candidate for the current resolution and are recorded as
 runtime facts. If no candidate remains, loop pauses and writes an ALERT instead
 of silently rewriting the pool.
 
+For open casting, `health-aware` ranks the same visible pool across Builder,
+Designer, Evaluator, and Peer Reviewer roles. `roll supervisor route --role
+builder --story <id> [--json]` exposes the trace: candidates, ranked scores,
+warnings, skipped runtime facts, selected agent, source binding, recent-use
+input, and active Prime agent avoidance.
+
 ### Agent toolchain health check (US-V4-022)
 
 Before scheduling, Supervisor also classifies agent toolchain health signals

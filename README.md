@@ -120,6 +120,11 @@ defaults:
 Runtime availability is explicit: if a candidate is not callable on the current
 machine because of auth, network, VPN, or account state, the current resolution
 records that limitation instead of rewriting the static pool.
+For open role casting, `strategy: health-aware` keeps the installed pool visible
+and ranks candidates by capability, recent health, successful deliveries, recent
+use, and cost band. Inspect a cast with
+`roll supervisor route --role builder --story <id> [--json]`; the trace lists
+every candidate, warnings, skipped facts, reasons, and the selected agent.
 
 ## Onboarding Samples
 

@@ -661,6 +661,86 @@ describe("supervisorCommand", () => {
     expect(r.out).toContain("Agent toolchain health: clean");
   });
 
+  it("US-AGENT-049: route --role exposes open-pool ranked candidates, warnings, and selected agent", () => {
+    const rollHome = mkdtempSync(join(tmpdir(), "roll-route-home-"));
+    const bin = mkdtempSync(join(tmpdir(), "roll-route-bin-"));
+    dirs.push(rollHome, bin);
+    for (const name of ["claude", "agy", "kimi", "pi", "reasonix", "codex"]) {
+      const path = join(bin, name);
+      writeFileSync(path, "#!/bin/sh\nexit 0\n");
+      chmodSync(path, 0o755);
+    }
+    writeFileSync(join(rollHome, "agents.yaml"), `schema: roll-agents/v1
+scope: machine
+agents:
+  codex:
+    capabilities: [supervise, execute, evaluate]
+  agy:
+    capabilities: [supervise, execute, evaluate]
+  kimi:
+    capabilities: [supervise, execute, evaluate]
+  reasonix:
+    capabilities: [supervise, execute, evaluate]
+roles:
+  supervise:
+    kind: fixed
+    agent: codex
+`);
+    const cwd = project(BACKLOG, {
+      agents: `schema: roll-agents/v1
+scope: project
+inherits: machine
+defaults:
+  story:
+    roles:
+      execute:
+        kind: select
+        from: [agy, kimi, reasonix, codex]
+        require: [execute]
+        avoid: [supervise]
+        strategy: health-aware
+`,
+    });
+    writeFileSync(
+      join(cwd, ".roll", "loop", "agent-health.jsonl"),
+      [
+        JSON.stringify({ agent: "agy", source: "cycle", status: "degraded", reason: "auth", observedAt: "2026-07-01T00:00:00Z" }),
+        JSON.stringify({ agent: "kimi", source: "cycle", status: "healthy", observedAt: "2026-07-01T00:01:00Z" }),
+        JSON.stringify({ agent: "reasonix", source: "cycle", status: "healthy", observedAt: "2026-07-01T00:02:00Z" }),
+        "",
+      ].join("\n"),
+    );
+    const savedRollHome = process.env["ROLL_HOME"];
+    const savedPath = process.env["PATH"];
+    process.env["ROLL_HOME"] = rollHome;
+    process.env["PATH"] = `${bin}:${savedPath ?? ""}`;
+    try {
+      const r = run(cwd, ["route", "--role", "builder", "--story", "US-OBS-042", "--json"]);
+      expect(r.code).toBe(0);
+      const parsed = JSON.parse(r.out) as {
+        castRole: string;
+        role: string;
+        story: string;
+        candidates: string[];
+        selected: string;
+        ranked: Array<{ agent: string; eligible: boolean; warnings: string[] }>;
+      };
+      expect(parsed.castRole).toBe("builder");
+      expect(parsed.role).toBe("execute");
+      expect(parsed.story).toBe("US-OBS-042");
+      expect(parsed.candidates).toEqual(["agy", "kimi", "reasonix", "codex"]);
+      expect(parsed.selected).toBe("kimi");
+      expect(parsed.ranked.find((row) => row.agent === "agy")?.warnings).toContain("health degraded:auth");
+      expect(parsed.ranked.find((row) => row.agent === "reasonix")?.eligible).toBe(true);
+      expect(parsed.ranked.findIndex((row) => row.agent === "reasonix")).toBeGreaterThan(parsed.ranked.findIndex((row) => row.agent === "kimi"));
+    } finally {
+      if (savedRollHome === undefined) delete process.env["ROLL_HOME"];
+      else process.env["ROLL_HOME"] = savedRollHome;
+      if (savedPath === undefined) delete process.env["PATH"];
+      else process.env["PATH"] = savedPath;
+    }
+  });
+
   it("US-V4-022: health --json classifies a Reasonix skill-root pollution signal", () => {
     const cwd = project(BACKLOG, {
       events: [

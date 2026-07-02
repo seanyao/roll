@@ -470,4 +470,76 @@ defaults:
       },
     });
   });
+
+  it("US-AGENT-049: health-aware strategy ranks healthy candidates before auth-degraded least-recent candidates", () => {
+    const project = cfg(`schema: roll-agents/v1
+scope: project
+agents:
+  agy:
+    capabilities: [execute]
+  kimi:
+    capabilities: [execute]
+  reasonix:
+    capabilities: [execute]
+defaults:
+  story:
+    roles:
+      execute:
+        kind: select
+        from: [agy, kimi, reasonix]
+        require: [execute]
+        strategy: health-aware
+`, ".roll/agents.yaml");
+    const resolved = resolveAgentScopeRole({
+      scope: "story",
+      role: "execute",
+      layers: [project],
+      recentUse: { kimi: 20, reasonix: 10 },
+      healthSignals: [
+        { agent: "agy", source: "cycle", status: "degraded", reason: "auth", observedAt: "2026-07-01T00:00:00Z" },
+        { agent: "kimi", source: "cycle", status: "healthy", observedAt: "2026-07-01T00:01:00Z" },
+        { agent: "reasonix", source: "cycle", status: "healthy", observedAt: "2026-07-01T00:02:00Z" },
+      ],
+    });
+    expect(resolved.ok).toBe(true);
+    if (resolved.ok) {
+      expect(resolved.resolved.agent).toBe("reasonix");
+      expect(resolved.resolved.selectedStrategy).toBe("health-aware");
+      expect(resolved.resolved.candidates).toEqual(["agy", "kimi", "reasonix"]);
+      expect(resolved.resolved.skipped).toEqual([]);
+    }
+  });
+
+  it("US-AGENT-049: health-blocked candidates remain visible as skipped and are not selected", () => {
+    const project = cfg(`schema: roll-agents/v1
+scope: project
+agents:
+  agy:
+    capabilities: [execute]
+  kimi:
+    capabilities: [execute]
+defaults:
+  story:
+    roles:
+      execute:
+        kind: select
+        from: [agy, kimi]
+        require: [execute]
+        strategy: health-aware
+`, ".roll/agents.yaml");
+    const resolved = resolveAgentScopeRole({
+      scope: "story",
+      role: "execute",
+      layers: [project],
+      healthSignals: [
+        { agent: "agy", source: "probe", status: "blocked", reason: "auth", observedAt: "2026-07-01T00:00:00Z" },
+        { agent: "kimi", source: "cycle", status: "healthy", observedAt: "2026-07-01T00:01:00Z" },
+      ],
+    });
+    expect(resolved.ok).toBe(true);
+    if (resolved.ok) {
+      expect(resolved.resolved.agent).toBe("kimi");
+      expect(resolved.resolved.skipped).toEqual([{ agent: "agy", reason: "health-blocked: auth" }]);
+    }
+  });
 });

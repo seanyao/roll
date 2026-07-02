@@ -96,6 +96,25 @@ Runtime health is checked when Roll resolves or spawns the role:
 
 Unknown or unregistered agent names fail loud during config parsing.
 
+`health-aware` is the selection strategy for open role casting. It keeps the
+same installed pool visible for Designer, Builder, Evaluator, and Peer Reviewer
+unless an owner policy narrows the pool, then ranks candidates with recent
+health signals, role capability tags, successful deliveries, recent use, and
+cost band. A degraded candidate stays visible with warnings, but a healthy
+candidate with the right capability wins. A cheap weaker agent can remain
+eligible for focused work while ranking lower for broad or high-risk Builder
+work.
+
+Use the route trace when you need to see the cast instead of guessing:
+
+```bash
+roll supervisor route --role builder --story US-123
+roll supervisor route --role evaluator --story US-123 --json
+```
+
+The trace lists every candidate, eligibility, score reasons, warnings, skipped
+runtime facts, selected agent, strategy, and source binding.
+
 ## Guided vs Autonomous Mode
 
 In guided mode, you can keep working in the current agent window. That session

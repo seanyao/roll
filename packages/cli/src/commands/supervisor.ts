@@ -44,7 +44,7 @@ import {
   summarizeAgentHealthIssues,
   type FreshnessPort,
 } from "@roll/core";
-import type { CollabStreamView, CycleRoleSummary, EventSource, RollEvent, RollGoal, SupervisorInput } from "@roll/spec";
+import type { CastRoleName, CollabStreamView, CycleRoleSummary, EventSource, RollEvent, RollGoal, SupervisorInput } from "@roll/spec";
 import { parseGoalYaml } from "@roll/spec";
 import { detectNoProgressStall, type NoProgressStall } from "../lib/goal-recovery.js";
 import { execFileSync } from "node:child_process";
@@ -54,13 +54,13 @@ import { formatOperatingMode, resolveOperatingMode, suggestedGuidedRun } from ".
 import { reducePrView } from "./loop-pr-inbox.js";
 import { readPendingPublish } from "../runner/pending-publish.js";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
-import { renderScopedExecuteRoute, resolveScopedStoryExecute, scopedExecuteRouteTrace } from "../runner/scoped-route.js";
+import { renderScopedExecuteRoute, resolveScopedCastRole, scopedExecuteRouteTrace } from "../runner/scoped-route.js";
 import { renderCollabStream } from "../lib/collab-render.js";
 
 const EXEC_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 
 export const SUPERVISOR_USAGE = [
-  "Usage: roll supervisor [status|observe|advise|next|why|live|health|repair-evidence] [--json]",
+  "Usage: roll supervisor [status|observe|advise|next|why|live|health|route|repair-evidence] [--json]",
   "  status           observe + advise summary (alias for no subcommand)",
   "  observe          structured project facts (backlog, truth coverage, PRs, release readiness)",
   "  advise           Prime Agent decisions (advisory; persistent changes need owner confirmation)",
@@ -69,7 +69,7 @@ export const SUPERVISOR_USAGE = [
   "  live             read-only Prime Agent live board with Planner/Builder/Evaluator panes",
   "  live --collab    follow the multi-cycle collaboration stream; add --once for a snapshot",
   "  health           agent toolchain health: auth/network/setup/worktree classification and routing",
-  "  route            Builder (story.execute) route trace: candidates, skipped reasons, selected",
+  "  route            Role route trace: --role builder|designer|evaluator|peer_reviewer [--story <id>]",
   "  repair-evidence  repair missing acceptance evidence for a green PR and restore merge-ready status",
 ].join("\n");
 
@@ -795,6 +795,21 @@ function fmtLive(projectPath: string): string {
   return lines.join("\n") + "\n";
 }
 
+function argValue(args: readonly string[], flag: string): string | undefined {
+  const idx = args.indexOf(flag);
+  if (idx < 0) return undefined;
+  const value = args[idx + 1];
+  return value !== undefined && !value.startsWith("-") ? value : undefined;
+}
+
+function parseCastRole(raw: string | undefined): CastRoleName | null {
+  if (raw === undefined || raw === "builder" || raw === "execute") return "builder";
+  if (raw === "designer" || raw === "design") return "designer";
+  if (raw === "evaluator" || raw === "evaluate" || raw === "score") return "evaluator";
+  if (raw === "peer_reviewer" || raw === "peer-reviewer" || raw === "peer") return "peer_reviewer";
+  return null;
+}
+
 export function supervisorCommand(args: string[]): number | Promise<number> {
   const json = args.includes("--json");
   const collab = args.includes("--collab");
@@ -809,14 +824,20 @@ export function supervisorCommand(args: string[]): number | Promise<number> {
   }
   const projectPath = process.cwd();
   if (sub === "route") {
-    const route = resolveScopedStoryExecute(projectPath);
+    const role = parseCastRole(argValue(args, "--role"));
+    if (role === null) {
+      process.stderr.write("Usage: roll supervisor route --role builder|designer|evaluator|peer_reviewer [--story <id>] [--json]\n");
+      return 1;
+    }
+    const route = resolveScopedCastRole(projectPath, role);
     if (route === null) {
-      if (json) process.stdout.write(JSON.stringify({ role: "execute", scoped: false }, null, 2) + "\n");
-      else process.stdout.write("\n  Builder route — story.execute\n  (no scoped agents.yaml; legacy tier routing in effect)\n\n");
+      if (json) process.stdout.write(JSON.stringify({ role, scoped: false, story: argValue(args, "--story") ?? null }, null, 2) + "\n");
+      else process.stdout.write(`\n  ${role} route\n  (no scoped agents.yaml; legacy tier routing in effect)\n\n`);
       return 0;
     }
     const trace = scopedExecuteRouteTrace(route);
-    if (json) process.stdout.write(JSON.stringify(trace, null, 2) + "\n");
+    const story = argValue(args, "--story") ?? null;
+    if (json) process.stdout.write(JSON.stringify({ ...trace, story }, null, 2) + "\n");
     else process.stdout.write(renderScopedExecuteRoute(trace));
     return 0;
   }

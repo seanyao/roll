@@ -281,7 +281,7 @@ export type AgentScopeKind = (typeof AGENT_SCOPE_KINDS)[number];
 export const AGENT_SCOPE_ROLES = ["supervise", "execute", "evaluate"] as const;
 export type AgentScopeRole = (typeof AGENT_SCOPE_ROLES)[number];
 
-export const AGENT_BINDING_STRATEGIES = ["first-available", "least-recent", "seeded-random"] as const;
+export const AGENT_BINDING_STRATEGIES = ["first-available", "least-recent", "seeded-random", "health-aware"] as const;
 export type AgentBindingStrategy = (typeof AGENT_BINDING_STRATEGIES)[number];
 
 /** Static Agent declaration inside `~/.roll/agents.yaml`. Runtime health is not
@@ -373,6 +373,46 @@ export interface AgentScopeConfig {
 export interface AgentScopeConfigParse {
   readonly config: AgentScopeConfig | null;
   readonly errors: readonly string[];
+}
+
+// ── US-AGENT-049: open role casting with health-aware candidate ranking ──────
+
+export type CastRoleName = "designer" | "builder" | "evaluator" | "peer_reviewer";
+
+export interface AgentCapabilityProfile {
+  readonly agent: AgentName;
+  readonly canExecute: boolean;
+  readonly canReview: boolean;
+  readonly canScore: boolean;
+  readonly strengths: readonly string[];
+  readonly knownShortcomings: readonly string[];
+  readonly costBand?: "low" | "medium" | "high" | "unknown";
+}
+
+export interface AgentHealthSignal {
+  readonly agent: AgentName;
+  readonly source: "cycle" | "pair" | "score" | "probe" | "manual";
+  readonly status: "healthy" | "degraded" | "blocked" | "unknown";
+  readonly reason?: "auth" | "timeout" | "parser" | "no_tcr" | "publish" | "cost" | "manual";
+  readonly observedAt: string;
+  readonly expiresAt?: string;
+}
+
+export interface RankedRoleCandidate {
+  readonly agent: AgentName;
+  readonly eligible: boolean;
+  readonly score: number;
+  readonly reasons: readonly string[];
+  readonly warnings: readonly string[];
+}
+
+export interface RoleCastRankingInput {
+  readonly role: CastRoleName;
+  readonly profiles: readonly AgentCapabilityProfile[];
+  readonly healthSignals: readonly AgentHealthSignal[];
+  readonly recentUse?: Readonly<Partial<Record<AgentName, number>>>;
+  readonly successfulDeliveries?: Readonly<Partial<Record<AgentName, number>>>;
+  readonly storyRisk?: "low" | "medium" | "high" | "unknown";
 }
 
 /** US-V4-006 — the Planner contract (`planner-contract.md`) a `planned` execution

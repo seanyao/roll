@@ -39,6 +39,11 @@ export type RollEvent =
   | { type: "test:green"; cycleId: string; actionId?: string; source: string; summary?: string; ts: number }
   | { type: "green-uncommitted"; cycleId: string; actionId?: string; since: number; durationSec: number; ts: number }
   | { type: "action:oversized"; cycleId: string; actionId?: string; filesTouched: number; contractAreas: number; thresholdFiles: number; thresholdAreas: number; ts: number }
+  // US-OBS-043 — dynamic action split checkpoints. Advisory only: these make
+  // expanded action scope and accepted follow-up work visible; they do not kill
+  // an active builder or mark the current Story failed.
+  | { type: "split:suggested"; cycleId: string; actionId?: string; reason: string; currentBoundary: string; followupTitle?: string; ts: number }
+  | { type: "followup:queued"; cycleId: string; actionId?: string; followupId?: string; title: string; reason: string; ts: number }
   // FIX-929 — agent stall detection: the builder produced zero token output for
   // a configurable threshold (default 10 min). This is a SIGNAL, not a kill —
   // fire BEFORE the hard timeout watchdog. A 2-min startup grace prevents false

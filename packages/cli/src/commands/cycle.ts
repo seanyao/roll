@@ -568,6 +568,19 @@ function renderCycleActivity(analysis: CycleActivityAnalysis, json: boolean): st
       `action oversized · ${analysis.oversizedAction.filesTouched} files / ${analysis.oversizedAction.contractAreas} areas (advisory)`,
     );
   }
+  if (analysis.splitSuggestion !== undefined) {
+    const action = analysis.splitSuggestion.actionId ?? "action";
+    lines.push(`split suggested ${action} · ${analysis.splitSuggestion.reason} (advisory)`);
+    lines.push(`  safe boundary: ${analysis.splitSuggestion.safeBoundary}`);
+    lines.push(`  follow-up draft: ${analysis.splitSuggestion.followupDraft.title}`);
+    lines.push("  deferred scope is not delivered by this card");
+    if (analysis.splitSuggestion.evaluatorContext !== undefined) {
+      lines.push(`  evaluator: ${analysis.splitSuggestion.evaluatorContext}`);
+    }
+  }
+  for (const followup of analysis.queuedFollowups ?? []) {
+    lines.push(`follow-up ${followup.id ?? "(queued action)"} · ${followup.title} (${followup.reason})`);
+  }
   return lines.join("\n") + "\n";
 }
 

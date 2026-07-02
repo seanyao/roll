@@ -275,3 +275,57 @@ describe("analyzeCycleActivity — green-uncommitted & oversized", () => {
     expect(projected.map((e) => e.payload).map((p) => JSON.stringify(p)).join("\n")).toContain("action:oversized");
   });
 });
+
+describe("analyzeCycleActivity — US-OBS-043 dynamic split advisory", () => {
+  it("suggests a safe split boundary when an oversized action is green and uncommitted", () => {
+    const events: RollEvent[] = [
+      { type: "cycle:start", cycleId: CYCLE_ID, storyId: "FIX-1050", agent: "kimi", model: "k2.7", ts: 1000 },
+      { type: "action:started", cycleId: CYCLE_ID, actionId: "A1", summary: "reasonix footer parser", expectedEvidence: "parser tests green", fileAreaScope: ["parser"], ts: 60_000 },
+      { type: "test:green", cycleId: CYCLE_ID, actionId: "A1", source: "vitest", summary: "parser tests pass", ts: 120_000 },
+      { type: "green-uncommitted", cycleId: CYCLE_ID, actionId: "A1", since: 120_000, durationSec: 60, ts: 180_000 },
+      { type: "action:oversized", cycleId: CYCLE_ID, actionId: "A1", filesTouched: 12, contractAreas: 4, thresholdFiles: 10, thresholdAreas: 3, ts: 190_000 },
+    ];
+    const a = analyzeCycleActivity(events, CYCLE_ID, 200_000);
+    expect(a.splitSuggestion?.actionId).toBe("A1");
+    expect(a.splitSuggestion?.advisory).toBe(true);
+    expect(a.splitSuggestion?.safeBoundary).toContain("commit current green work");
+    expect(a.splitSuggestion?.followupDraft.sourceCycleId).toBe(CYCLE_ID);
+    expect(a.splitSuggestion?.followupDraft.deliveredByCurrentCard).toBe(false);
+    expect(a.splitSuggestion?.reason).toContain("12 files / 4 areas");
+  });
+
+  it("keeps split suggestions advisory while the builder is active", () => {
+    const events: RollEvent[] = [
+      { type: "cycle:start", cycleId: CYCLE_ID, storyId: "FIX-1050", agent: "kimi", model: "k2.7", ts: 1000 },
+      { type: "action:started", cycleId: CYCLE_ID, actionId: "A1", summary: "ledger diagnostics", expectedEvidence: "watch status fixture", fileAreaScope: ["ledger"], ts: 60_000 },
+      { type: "action:oversized", cycleId: CYCLE_ID, actionId: "A1", filesTouched: 14, contractAreas: 5, thresholdFiles: 10, thresholdAreas: 3, ts: 190_000 },
+    ];
+    const a = analyzeCycleActivity(events, CYCLE_ID, 200_000);
+    expect(a.classification).toBe("active");
+    expect(a.splitSuggestion?.effect).toBe("advisory-only");
+    expect(a.splitSuggestion?.safeBoundary).toContain("next green boundary");
+  });
+
+  it("preserves queued follow-up references and repeated ignored expansion history", () => {
+    const events: RollEvent[] = [
+      { type: "cycle:start", cycleId: CYCLE_ID, storyId: "FIX-1050", agent: "kimi", model: "k2.7", ts: 1000 },
+      { type: "action:started", cycleId: CYCLE_ID, actionId: "A1", summary: "parser+ledger", expectedEvidence: "tests green", fileAreaScope: ["parser"], ts: 60_000 },
+      { type: "action:oversized", cycleId: CYCLE_ID, actionId: "A1", filesTouched: 12, contractAreas: 4, thresholdFiles: 10, thresholdAreas: 3, ts: 190_000 },
+      { type: "split:suggested", cycleId: CYCLE_ID, actionId: "A1", reason: "parser scope expanded into ledger", currentBoundary: "commit parser green", followupTitle: "Add ledger diagnostics", ts: 191_000 },
+      { type: "action:oversized", cycleId: CYCLE_ID, actionId: "A1", filesTouched: 16, contractAreas: 6, thresholdFiles: 10, thresholdAreas: 3, ts: 220_000 },
+      { type: "cycle:tcr", cycleId: CYCLE_ID, commitHash: "abc1234", message: "tcr: parser and ledger combined", ts: 240_000 },
+      { type: "followup:queued", cycleId: CYCLE_ID, actionId: "A1", followupId: "US-OBS-999", title: "Runtime action-boundary enforcement", reason: "deferred boundary enforcement", ts: 250_000 },
+    ];
+    const a = analyzeCycleActivity(events, CYCLE_ID, 260_000);
+    expect(a.splitSuggestion?.ignoredSuggestionCount).toBe(1);
+    expect(a.splitSuggestion?.evaluatorContext).toContain("large single TCR");
+    expect(a.queuedFollowups).toEqual([
+      {
+        id: "US-OBS-999",
+        actionId: "A1",
+        title: "Runtime action-boundary enforcement",
+        reason: "deferred boundary enforcement",
+      },
+    ]);
+  });
+});

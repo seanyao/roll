@@ -128,6 +128,43 @@ evidence  PR https://github.com/seanyao/roll/pull/999 · diff https://github.com
 
 CLI watch 是最低层实时路径——终端开着就能看。`roll supervisor live` 在它之上提供只读多角色 board；浏览器/TUI 版 Supervisor Live Console 是后续工作，必须复用同一 view model。
 
+## TCR 节奏与动态拆分
+
+`roll cycle <id> --activity` 是给 Supervisor 读单个 cycle 节奏的解释面。它把
+US-OBS-042 的 activity 信号重建成几类状态：active vs silent、当前 micro-step、
+`test:red` / `test:green`、`green-uncommitted`、`action oversized`。
+
+当一个 action 超出声明的文件区域、契约区域、持续时间或测试面时，US-OBS-043 会在
+同一输出中给出 advisory split suggestion。建议只在安全边界生效：测试已绿且未提交时，
+输出会提示先 commit current green work，再继续或把发现的范围拆成 follow-up。它不会杀
+掉正在编辑的 Builder，不会自动 revert，也不会把 deferred scope 计入当前卡的交付。
+
+若 Builder 或 Supervisor 接受拆分，后续卡/action 会通过现有 story/backlog 机制生成，
+并在事件流里留下 `followup:queued` 引用。Evaluator/Scorer 可以看到 split history：
+如果 Builder 忽略建议并落了一个很大的 TCR，评分可以按节奏判断，但 cycle 不会只因为慢
+而失败。
+
+## TCR Rhythm And Dynamic Splits
+
+`roll cycle <id> --activity` is the single-cycle explanation surface for the
+Supervisor. It rebuilds US-OBS-042 activity signals into active vs silent,
+micro-step plan, `test:red` / `test:green`, `green-uncommitted`, and
+`action oversized` states.
+
+When an action expands beyond its declared file area, contract area, duration
+band, or test surface, US-OBS-043 adds an advisory split suggestion to the same
+output. The checkpoint is safe-boundary oriented: when tests are green and work
+is uncommitted, the output suggests committing the current green work first,
+then continuing or splitting discovered follow-up scope. It does not kill the
+active Builder, auto-revert, or count deferred scope as delivered by the current
+card.
+
+When the Builder or Supervisor accepts a split, the follow-up card/action is
+materialized through the existing story/backlog mechanisms and the event stream
+keeps a `followup:queued` reference. Evaluator/Scorer can read the split
+history: if the Builder ignores repeated suggestions and lands one large TCR,
+the rhythm is reviewable without failing the cycle merely for being slow.
+
 ## 证据按构造（方向）
 
 证据的素材源——activity stream + diff——已经在 BC7 的标准流中。US-OBS-031 的方向是：ac-map / report / 截图引用从 activity 流 + git diff **自动起草**（不再是 builder 手动步骤 `Phase 10.6`）。实际落地范围以 US-OBS-031 的 spec 为准。

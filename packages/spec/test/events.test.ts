@@ -69,6 +69,30 @@ describe("parseEventLine (I8: readers skip bad lines, never crash)", () => {
     expect(oversized.type).toBe("action:oversized");
     expect(parseEventLine(JSON.stringify(oversized))?.type).toBe("action:oversized");
   });
+  it("types US-OBS-043 dynamic split advisory events", () => {
+    const suggested: RollEvent = {
+      type: "split:suggested",
+      cycleId: "c1",
+      actionId: "A1",
+      reason: "expanded beyond file-area scope",
+      currentBoundary: "commit current green work",
+      followupTitle: "Follow up A1 expanded ledger diagnostics",
+      ts: 6,
+    };
+    const queued: RollEvent = {
+      type: "followup:queued",
+      cycleId: "c1",
+      actionId: "A1",
+      followupId: "US-OBS-999",
+      title: "Runtime action-boundary enforcement",
+      reason: "deferred oversized action scope",
+      ts: 7,
+    };
+    expect(suggested.type).toBe("split:suggested");
+    expect(queued.type).toBe("followup:queued");
+    expect(parseEventLine(JSON.stringify(suggested))?.type).toBe("split:suggested");
+    expect(parseEventLine(JSON.stringify(queued))?.type).toBe("followup:queued");
+  });
   it("types goal lifecycle events (US-GOAL-001)", () => {
     const created: RollEvent = { type: "goal:created", schema: "goal.v1", scope: { kind: "epic", epic: "goal-mode" }, status: "active", review: "auto", ts: 1 };
     const state: RollEvent = { type: "goal:state", schema: "goal.v1", from: "active", to: "paused", actor: "system", reason: "owner_pause", ts: 2 };

@@ -335,7 +335,7 @@ export function registerAll(): void {
   // `design`: explicit thin entry point for the $roll-design skill
   // (US-ONBOARD-NUDGE-004). Loads the skill and launches the selected agent;
   // all design logic lives in the skill, not here.
-  registerPorted("design", designCommand, { help: "Usage: roll design [--from-file <path> | \"<requirement>\"] [--agent <name>] [--verbose|--raw]\n  Launch $roll-design interactively; --from-file binds a PRD/brief; quoted text binds a free-text requirement; --raw dumps the full transcript.\n交互式启动 $roll-design；--from-file 绑定 PRD/brief；引号文本绑定自由文本需求；--raw 输出完整原始记录。" });
+  registerPorted("design", designCommand, { help: "Usage: roll design [--from-file <path> | \"<requirement>\"] [--agent <name>] [--verbose|--raw]\n  Launch $roll-design interactively with bounded live progress, card-created events, quiet heartbeats, and final handoff; --verbose streams lower-priority normalized activity; --raw streams raw child output live.\n交互式启动 $roll-design；默认实时显示有界进展、建卡事件、静默心跳和最终交付；--verbose 显示更多规范化活动；--raw 实时输出原始流。" });
   // REFACTOR-048: `migrate-features` (card-skeleton backfill for pre-card-era
   // stories, US-META-007) retired — that one-time backfill completed; new cards
   // are minted via `roll story new`.

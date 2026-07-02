@@ -13,6 +13,7 @@ import { designCommand, type DesignCommandDeps } from "../src/commands/design.js
 const REPO = resolve(__dirname, "../../..");
 
 type SpawnCall = { bin: string; args: string[]; opts: { cwd: string } };
+type StderrCapture = { out: { data: string }; restore: () => void };
 
 function freshHome(): { home: string; bin: string } {
   const home = mkdtempSync(join(tmpdir(), "roll-design-home-"));
@@ -359,6 +360,32 @@ function captureStderr(fn: () => number): string {
   return out.join("");
 }
 
+function startStderrCapture(): StderrCapture {
+  const out = { data: "" };
+  const original = process.stderr.write;
+  process.stderr.write = ((s: unknown) => {
+    out.data += String(s);
+    return true;
+  }) as typeof process.stderr.write;
+  return {
+    out,
+    restore: () => {
+      process.stderr.write = original;
+    },
+  };
+}
+
+function readSingleTranscript(proj: string): string {
+  const runsDir = join(proj, ".roll", "runs", "design");
+  const entries = readdirSync(runsDir);
+  expect(entries.length).toBe(1);
+  return readFileSync(join(runsDir, entries[0] ?? "x", "transcript.log"), "utf8");
+}
+
+function claudeTextLine(text: string): string {
+  return JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text }] } });
+}
+
 function claudeStreamFixture(longPrompt: string): string {
   return [
     JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: longPrompt }] } }),
@@ -482,7 +509,7 @@ describe("roll design bounded progress and handoff", () => {
     expect(readFileSync(reviewPath, "utf8")).toContain("Design Review Page · IDEA-066");
   });
 
-  it("suppresses the raw prompt firehose by default but shows progress tool lines", () => {
+  it("suppresses the raw prompt and skill-contract firehose by default but shows artifact progress", () => {
     const proj = freshProj();
     dirs.push(proj);
     makeAgent(bin, "claude");
@@ -493,8 +520,191 @@ describe("roll design bounded progress and handoff", () => {
     d.spawn = () => ({ status: 0, signal: null, stdout: raw, stderr: "" });
     const out = captureStderr(() => designCommand(["build a thing"], d));
     expect(out).not.toContain(longPrompt);
-    expect(out).toContain("loaded roll-design contract");
+    expect(out).not.toContain("loaded roll-design contract");
     expect(out).toContain("spec.md");
+  });
+
+  it("streams default progress and transcript writes before the child exits", async () => {
+    const proj = freshProj();
+    dirs.push(proj);
+    makeAgent(bin, "claude");
+    writeConfig(home, "lang: en\nai_claude: ~/.claude\n");
+    const d = makeDeps(proj, bin);
+    let finish: (() => void) | undefined;
+    d.spawn = (_binName, _args, _opts, live) => new Promise((resolveSpawn) => {
+      live?.onStdout(`${claudeTextLine("Designing bounded contexts for the PRD")}\n`);
+      finish = () => resolveSpawn({ status: 0, signal: null });
+    });
+
+    const cap = startStderrCapture();
+    try {
+      const run = Promise.resolve(designCommand(["build a thing"], d));
+      await Promise.resolve();
+      expect(cap.out.data).toContain("Designing bounded contexts");
+      expect(cap.out.data).not.toContain("Design Review Page handoff");
+      expect(readSingleTranscript(proj)).toContain("Designing bounded contexts");
+      expect(finish).toBeTypeOf("function");
+      finish?.();
+      expect(await run).toBe(0);
+      expect(cap.out.data).toContain("Design Review Page handoff");
+    } finally {
+      cap.restore();
+    }
+  });
+
+  it("emits a live card-created event when backlog gains a new card", async () => {
+    const proj = freshProj();
+    dirs.push(proj);
+    makeAgent(bin, "claude");
+    writeConfig(home, "lang: en\nai_claude: ~/.claude\n");
+    writeFileSync(join(proj, "brief.md"), "# Brief\n", "utf8");
+    writeFileSync(join(proj, ".roll", "backlog.md"), ["| Story | Description | Status |", "|---|---|---|"].join("\n") + "\n", "utf8");
+    const d = makeDeps(proj, bin);
+    let finish: (() => void) | undefined;
+    d.spawn = (_binName, _args, _opts, live) => new Promise((resolveSpawn) => {
+      writeFileSync(
+        join(proj, ".roll", "backlog.md"),
+        [
+          "| Story | Description | Status |",
+          "|---|---|---|",
+          "| [US-CLI-001](.roll/features/cli/US-CLI-001/spec.md) | Scaffold installable CLI · solves missing operator entrypoint | 📋 Todo |",
+        ].join("\n") + "\n",
+        "utf8",
+      );
+      live?.onStdout(`${claudeTextLine("Writing the first story spec")}\n`);
+      finish = () => resolveSpawn({ status: 0, signal: null });
+    });
+
+    const cap = startStderrCapture();
+    try {
+      const run = Promise.resolve(designCommand(["--from-file", "brief.md"], d));
+      await Promise.resolve();
+      expect(cap.out.data).toContain("card created: US-CLI-001");
+      expect(cap.out.data).toContain("Scaffold installable CLI");
+      expect(cap.out.data).toContain("solves missing operator entrypoint");
+      expect(cap.out.data).not.toContain("cards: 1");
+      expect(finish).toBeTypeOf("function");
+      finish?.();
+      expect(await run).toBe(0);
+      expect(cap.out.data).toContain("cards: 1");
+    } finally {
+      cap.restore();
+    }
+  });
+
+  it("keeps the intel-radar-shaped noise out of default live progress", async () => {
+    const proj = freshProj();
+    dirs.push(proj);
+    mkdirSync(join(proj, "docs"), { recursive: true });
+    writeFileSync(join(proj, "docs", "intel-radar-PRD.md"), "# PRD\n", "utf8");
+    makeAgent(bin, "claude");
+    writeConfig(home, "lang: en\nai_claude: ~/.claude\n");
+    const noisy = [
+      '$roll-design "What approach should we use for search? Postgres FTS or Meilisearch?"',
+      "- [ ] Is the ID generation algorithm consistent?",
+      "- [ ] Who writes the data? (Producer)",
+      "?? .roll/",
+      "?? AGENTS.md",
+      claudeTextLine("Designing: bounded contexts selected for ingestion, scoring, and digest output"),
+    ].join("\n") + "\n";
+    const d = makeDeps(proj, bin);
+    let finish: (() => void) | undefined;
+    d.spawn = (_binName, _args, _opts, live) => new Promise((resolveSpawn) => {
+      live?.onStdout(noisy);
+      finish = () => resolveSpawn({ status: 0, signal: null });
+    });
+
+    const cap = startStderrCapture();
+    try {
+      const run = Promise.resolve(designCommand(["--from-file", "docs/intel-radar-PRD.md"], d));
+      await Promise.resolve();
+      expect(cap.out.data).toContain("bounded contexts selected");
+      expect(cap.out.data).not.toContain("What approach should we use for search");
+      expect(cap.out.data).not.toContain("ID generation algorithm");
+      expect(cap.out.data).not.toContain("Who writes the data");
+      expect(cap.out.data).not.toContain("?? .roll/");
+      expect(finish).toBeTypeOf("function");
+      finish?.();
+      expect(await run).toBe(0);
+    } finally {
+      cap.restore();
+    }
+  });
+
+  it("--verbose and --raw stream live before the child exits", async () => {
+    const proj = freshProj();
+    dirs.push(proj);
+    makeAgent(bin, "claude");
+    writeConfig(home, "lang: en\nai_claude: ~/.claude\n");
+    const d = makeDeps(proj, bin);
+    let finishVerbose: (() => void) | undefined;
+    d.spawn = (_binName, _args, _opts, live) => new Promise((resolveSpawn) => {
+      live?.onStdout(`${claudeTextLine("Verbose-only design reasoning")}\n`);
+      finishVerbose = () => resolveSpawn({ status: 0, signal: null });
+    });
+    const verboseCap = startStderrCapture();
+    try {
+      const run = Promise.resolve(designCommand(["--verbose", "IDEA-066"], d));
+      await Promise.resolve();
+      expect(verboseCap.out.data).toContain("Verbose-only design reasoning");
+      expect(verboseCap.out.data).not.toContain("Design Review Page handoff");
+      expect(finishVerbose).toBeTypeOf("function");
+      finishVerbose?.();
+      expect(await run).toBe(0);
+    } finally {
+      verboseCap.restore();
+    }
+
+    let finishRaw: (() => void) | undefined;
+    d.spawn = (_binName, _args, _opts, live) => new Promise((resolveSpawn) => {
+      live?.onStdout("raw live line\n");
+      finishRaw = () => resolveSpawn({ status: 0, signal: null });
+    });
+    const rawCap = startStderrCapture();
+    try {
+      const run = Promise.resolve(designCommand(["--raw", "IDEA-066"], d));
+      await Promise.resolve();
+      expect(rawCap.out.data).toContain("raw live line");
+      expect(rawCap.out.data).not.toContain("Design Review Page handoff");
+      expect(finishRaw).toBeTypeOf("function");
+      finishRaw?.();
+      expect(await run).toBe(0);
+    } finally {
+      rawCap.restore();
+    }
+  });
+
+  it("emits a quiet-period heartbeat while the child is still running", async () => {
+    vi.useFakeTimers();
+    const proj = freshProj();
+    dirs.push(proj);
+    makeAgent(bin, "claude");
+    writeConfig(home, "lang: en\nai_claude: ~/.claude\n");
+    let now = Date.UTC(2026, 6, 2, 10, 0, 0);
+    const d = { ...makeDeps(proj, bin), now: () => now, heartbeatMs: 1_000 };
+    let finish: (() => void) | undefined;
+    d.spawn = () => new Promise((resolveSpawn) => {
+      finish = () => resolveSpawn({ status: 0, signal: null });
+    });
+
+    const cap = startStderrCapture();
+    try {
+      const run = Promise.resolve(designCommand(["IDEA-066"], d));
+      await Promise.resolve();
+      expect(cap.out.data).not.toContain("heartbeat: still designing");
+      now += 1_000;
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(cap.out.data).toContain("heartbeat: still designing");
+      expect(cap.out.data).toContain("elapsed 1s");
+      expect(cap.out.data).toContain("transcript 0 B");
+      expect(cap.out.data).not.toContain("Design Review Page handoff");
+      expect(finish).toBeTypeOf("function");
+      finish?.();
+      expect(await run).toBe(0);
+    } finally {
+      cap.restore();
+      vi.useRealTimers();
+    }
   });
 
   it("--verbose exposes tier-C assistant text", () => {

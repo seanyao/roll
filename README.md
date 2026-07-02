@@ -201,7 +201,7 @@ with `roll loop resume` when ready.
 | `roll agent [migrate\|list\|cast]` | Agent Scope, installed-agent inventory, and role casting |
 | `roll backlog [sync\|block\|defer\|lint\|…]` | View, manage, lint, and sync pending tasks |
 | `roll config [lang\|prices\|tune\|…]` | Read/write configuration, model prices, and suggest-only tuning |
-| `roll design [--from-file <path>] [--agent <name>]` | Launch `$roll-design` interactively; detailed designs get a self-contained Design Review Page |
+| `roll design [--from-file <path>] [--agent <name>] [--verbose\|--raw]` | Launch `$roll-design` with bounded live progress, card-created events, quiet heartbeats, raw transcript capture, and a final handoff |
 | `roll doctor [skills\|tools\|language]` | Diagnose install health, skills, tools, permissions, and language drift |
 | `roll help [--lang en\|zh] [name]` | View built-in Charter / guide docs; `roll --help` prints CLI usage |
 | `roll idea "<one-sentence description>"` | Capture and classify a new backlog card |

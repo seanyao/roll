@@ -160,7 +160,6 @@ export function langCommand(args: string[]): number {
 
   const lang = msgLang();
   err(t(v2Catalog, lang, "lang.unknown_language", arg));
-  process.stdout.write("  Valid values: zh, en, --reset\n");
-  process.stdout.write(t(v2Catalog, lang, "lang.options_zh_en_reset") + "\n");
+  process.stdout.write(lang === "zh" ? `${t(v2Catalog, lang, "lang.options_zh_en_reset")}\n` : "  Valid values: zh, en, --reset\n");
   return 1;
 }

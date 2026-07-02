@@ -192,10 +192,13 @@ function configLangSub(value: string, _scope: Scope): number {
     ok("✓ language preference cleared (will follow locale)");
     return 0;
   }
-  err(`config lang: unknown language '${value}'`);
-  err(`config lang: 未知语言 '${value}'`);
-  process.stdout.write("  Valid values: zh, en, --reset\n");
-  process.stdout.write("  可选值: zh, en, --reset\n");
+  if (resolveCurrent() === "zh") {
+    err(`config lang: 未知语言 '${value}'`);
+    process.stdout.write("  可选值: zh, en, --reset\n");
+  } else {
+    err(`config lang: unknown language '${value}'`);
+    process.stdout.write("  Valid values: zh, en, --reset\n");
+  }
   return 2;
 }
 

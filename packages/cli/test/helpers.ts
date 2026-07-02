@@ -5,6 +5,56 @@ import { join, resolve } from "node:path";
 
 const REPO = resolve(__dirname, "../../..");
 
+const CJK_RE = /[\u4e00-\u9fff]/;
+const EN_WORD_RE = /[A-Za-z]{2,}/;
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+
+function stripStableLiterals(line: string): string {
+  return line
+    .replace(ANSI_RE, "")
+    .replace(/`[^`]*`/g, " ")
+    .replace(/"[^"]*"|'[^']*'/g, " ")
+    .replace(/\broll\s+[a-z][a-z0-9-]*(?:\s+[a-z][a-z0-9-]*)?\b/gi, " ")
+    .replace(/\bconfig\s+lang\b/gi, " ")
+    .replace(/\b[A-Z][A-Z0-9_-]+\b/g, " ")
+    .replace(/--?[a-z][a-z0-9-]*/gi, " ")
+    .replace(/\b(?:zh|en)\b/gi, " ");
+}
+
+function lineLanguage(line: string): "en" | "zh" | "mixed" | "none" {
+  const scrubbed = stripStableLiterals(line);
+  const hasCjk = CJK_RE.test(scrubbed);
+  const hasEn = EN_WORD_RE.test(scrubbed);
+  if (hasCjk && hasEn) return "mixed";
+  if (hasCjk) return "zh";
+  if (hasEn) return "en";
+  return "none";
+}
+
+export function findAdjacentBilingualPairs(output: string): readonly string[] {
+  const prose = output
+    .split("\n")
+    .map((raw, index) => ({ raw, index: index + 1, lang: lineLanguage(raw) }))
+    .filter((line) => line.raw.trim() !== "" && (line.lang === "en" || line.lang === "zh"));
+  const pairs: string[] = [];
+  for (let i = 1; i < prose.length; i++) {
+    const prev = prose[i - 1];
+    const cur = prose[i];
+    if (prev === undefined || cur === undefined) continue;
+    if (prev.lang !== cur.lang) {
+      pairs.push(`${prev.index}: ${prev.raw}\n${cur.index}: ${cur.raw}`);
+    }
+  }
+  return pairs;
+}
+
+export function expectNoAdjacentBilingualPairs(output: string): void {
+  const pairs = findAdjacentBilingualPairs(output);
+  if (pairs.length > 0) {
+    throw new Error(`Adjacent bilingual translation pairs found:\n${pairs.join("\n---\n")}`);
+  }
+}
+
 /**
  * Build a PATH whose toolchain is /usr/bin + /bin MINUS `gh` (and any other
  * excluded binaries). On macOS dev boxes `/usr/bin` has no gh so a plain

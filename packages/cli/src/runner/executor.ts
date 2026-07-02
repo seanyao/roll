@@ -110,8 +110,8 @@ import {
   assembleEvalReport,
   renderEvalReport,
   validateEvaluatorArtifact,
-  validatePlannerArtifact,
-  parsePlannerContract,
+  validateDesignArtifact,
+  parseDesignContract,
   designContractVsDelivered,
   summarizeDesignContractVsDelivered,
   decideRepair,
@@ -1551,11 +1551,11 @@ export async function executeCommand(
       // fresh session and FAIL CLOSED on a missing/malformed design contract —
       // the Builder never starts without a valid design. No-op for standard/verified.
       if (ctx.selectedProfile === "designed") {
-        const plan = await runPlannerStage(ports, ctx, cmd.agent);
-        if (plan.ran && !plan.ok) {
+        const design = await runDesignerStage(ports, ctx, cmd.agent);
+        if (design.ran && !design.ok) {
           ports.events.appendAlert(
             ports.paths.alertsPath,
-            `designer stage failed closed for ${ctx.storyId ?? "?"}: ${plan.reasons.join("; ")} — Builder not started (cycle ${ctx.cycleId ?? "?"})`,
+            `designer stage failed closed for ${ctx.storyId ?? "?"}: ${design.reasons.join("; ")} — Builder not started (cycle ${ctx.cycleId ?? "?"})`,
           );
           return { event: { type: "agent_exited", exit: 1, timedOut: false }, ctxPatch: { builderSessionId } };
         }
@@ -3955,10 +3955,10 @@ export function writeEvaluatorArtifact(
   // reports design-contract-vs-delivered against it.
   let designSummary = signals.designContractVsDelivered;
   if (designSummary === undefined || designSummary === "") {
-    const contractPath = join(runDir, "role-artifacts", "designer", "planner-contract.md");
+    const contractPath = join(runDir, "role-artifacts", "designer", "design-contract.md");
     if (existsSync(contractPath)) {
       try {
-        const contract = parsePlannerContract(readFileSync(contractPath, "utf8"), storyId);
+        const contract = parseDesignContract(readFileSync(contractPath, "utf8"), storyId);
         if (contract !== null) {
           designSummary = summarizeDesignContractVsDelivered(designContractVsDelivered(contract, deliveredAcItems(ports.repoCwd, storyId)));
         }
@@ -4020,11 +4020,11 @@ function deliveredAcItems(repoCwd: string, storyId: string): string[] {
   }
 }
 
-const PLANNER_TIMEOUT_MS = 20 * 60 * 1000;
+const DESIGNER_TIMEOUT_MS = 20 * 60 * 1000;
 
 /** US-V4-006 — the Designer prompt (roll-design capability). TS owns the
  *  orchestration + the output contract; the skill does the designing. */
-function buildPlannerPrompt(storyId: string, contractAbsPath: string): string {
+function buildDesignerPrompt(storyId: string, contractAbsPath: string): string {
   return [
     `You are the DESIGNER for story ${storyId} in a designed execution profile.`,
     `Read the story spec under .roll/features/**/${storyId}/spec.md and produce a design contract.`,
@@ -4043,32 +4043,32 @@ function buildPlannerPrompt(storyId: string, contractAbsPath: string): string {
 /**
  * US-V4-006 — run the Designer stage BEFORE the Builder for a `designed` cycle.
  * The Designer (roll-design capability) runs in a FRESH session and writes
- * `planner-contract.md`; the runner records the designer `artifact-manifest.json`.
+ * `design-contract.md`; the runner records the designer `artifact-manifest.json`.
  * The contract is then validated FAIL-CLOSED — a missing/malformed/empty contract
  * stops the cycle before any Builder work. No-op for standard/verified. Idempotent
- * across retries (an existing valid contract is reused, not re-planned).
+ * across retries (an existing valid contract is reused, not re-designed).
  */
-export async function runPlannerStage(
+export async function runDesignerStage(
   ports: Ports,
   ctx: CycleContext,
-  plannerAgent: string,
+  designerAgent: string,
 ): Promise<{ ran: boolean; ok: boolean; reasons: readonly string[] }> {
   if (ctx.selectedProfile !== "designed") return { ran: false, ok: true, reasons: [] };
   const storyId = ctx.storyId ?? "";
   const runDir = ctx.evidenceRunDir ?? "";
   if (storyId === "" || runDir === "") return { ran: false, ok: false, reasons: ["no story id / run dir for designer stage"] };
   const dir = join(runDir, "role-artifacts", "designer");
-  const contractPath = join(dir, "planner-contract.md");
+  const contractPath = join(dir, "design-contract.md");
   const manifestPath = join(dir, "artifact-manifest.json");
-  const plannerSessionId = `${ctx.cycleId ?? "cycle"}:plan:${plannerAgent}:${ports.clock()}`;
+  const designerSessionId = `${ctx.cycleId ?? "cycle"}:design:${designerAgent}:${ports.clock()}`;
   if (!existsSync(contractPath)) {
     try {
       mkdirSync(dir, { recursive: true });
-      await ports.agentSpawn(plannerAgent, {
+      await ports.agentSpawn(designerAgent, {
         cwd: ports.paths.worktreePath,
-        skillBody: buildPlannerPrompt(storyId, contractPath),
+        skillBody: buildDesignerPrompt(storyId, contractPath),
         storyId,
-        timeoutMs: PLANNER_TIMEOUT_MS,
+        timeoutMs: DESIGNER_TIMEOUT_MS,
         runDir: dir,
       });
     } catch {
@@ -4081,12 +4081,12 @@ export async function runPlannerStage(
     storyId,
     cycleId: ctx.cycleId ?? "",
     role: "designer",
-    rig: { agent: plannerAgent } as Rig,
-    sessionId: plannerSessionId,
+    rig: { agent: designerAgent } as Rig,
+    sessionId: designerSessionId,
     worktreeCwd: ports.paths.worktreePath,
     scoreRepoCwd: ports.repoCwd,
     inputs: [{ path: `.roll/features/**/${storyId}/spec.md`, kind: "contract" }],
-    outputs: [{ path: "role-artifacts/designer/planner-contract.md", kind: "contract" }],
+    outputs: [{ path: "role-artifacts/designer/design-contract.md", kind: "contract" }],
     createdAt: new Date(eventTs(ports)).toISOString(),
   };
   try {
@@ -4095,7 +4095,7 @@ export async function runPlannerStage(
     /* best-effort manifest record */
   }
   const contractMd = existsSync(contractPath) ? readFileSync(contractPath, "utf8") : null;
-  const v = validatePlannerArtifact({ manifest, contractMd, storyId });
+  const v = validateDesignArtifact({ manifest, contractMd, storyId });
   return { ran: true, ok: v.ok, reasons: v.reasons };
 }
 

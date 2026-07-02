@@ -13,7 +13,7 @@ import type { CycleCommand, CycleContext, RollEvent, WarmSessionEntry } from "@r
 import { AGENTS } from "../../core/src/agent/specs.js";
 import { classifyComplexity } from "@roll/core";
 import { AWAITING_REVIEW_STATUS_MARKER } from "@roll/spec";
-import { agentWritableRoots, checkMainDirty, recordExecutionProfile, writeEvaluatorArtifact, runPlannerStage } from "../src/runner/executor.js";
+import { agentWritableRoots, checkMainDirty, recordExecutionProfile, writeEvaluatorArtifact, runDesignerStage } from "../src/runner/executor.js";
 import { evaluateReviewScoreGate, readLatestStoryPeerScore } from "../src/lib/review-score.js";
 import {
   AGENT_ARGV_TODO,
@@ -4305,7 +4305,7 @@ describe("US-V4-004 — execution profile selection + durable recording", () => 
 
   it("NO-REGRESSION: default policy (standard / no agents.yaml) keeps a design-risk story Builder-only", () => {
     // Same truth/release spec as above, but NO agents.yaml → execution_policy.mode
-    // defaults to "standard" → the cycle stays standard (no planner/evaluator).
+    // defaults to "standard" -> the cycle stays standard (no designer/evaluator).
     const repo = repoWithSpec("US-V4D", "## Context\nChange the release consistency gate + DeliveryRecord truth.\n\n## Acceptance Criteria\n- [ ] gate reads structured truth\n");
     const { ports } = fakePorts({ repoCwd: repo });
     expect(recordExecutionProfile(ports, "C-5", "US-V4D", undefined)).toBe("standard");
@@ -4396,7 +4396,7 @@ describe("US-V4-006 — designed execution: Designer contract before the Builder
     "",
   ].join("\n");
 
-  function designedCtx(repo: string, id: string): Parameters<typeof runPlannerStage>[1] {
+  function designedCtx(repo: string, id: string): Parameters<typeof runDesignerStage>[1] {
     const runDir = join(repo, ".roll", "features", "uncategorized", id, "run-1");
     mkdirSync(runDir, { recursive: true });
     return { cycleId: "C-1", branch: "b", loop: "x", storyId: id, selectedProfile: "designed", evidenceRunDir: runDir };
@@ -4406,7 +4406,7 @@ describe("US-V4-006 — designed execution: Designer contract before the Builder
     const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-v4-006-")));
     execDirs.push(repo);
     const { ports } = fakePorts({ repoCwd: repo });
-    const r = await runPlannerStage(ports, { ...designedCtx(repo, "US-P0"), selectedProfile: "verified" }, "codex");
+    const r = await runDesignerStage(ports, { ...designedCtx(repo, "US-P0"), selectedProfile: "verified" }, "codex");
     expect(r.ran).toBe(false);
     expect(r.ok).toBe(true);
   });
@@ -4419,15 +4419,16 @@ describe("US-V4-006 — designed execution: Designer contract before the Builder
       repoCwd: repo,
       // The Designer skill writes the contract into the designer role-artifacts dir.
       agentSpawn: (async (_agent: string, opts: { runDir?: string }) => {
-        writeFileSync(join(opts.runDir as string, "planner-contract.md"), VALID_CONTRACT);
+        writeFileSync(join(opts.runDir as string, "design-contract.md"), VALID_CONTRACT);
         return { exitCode: 0, timedOut: false };
       }) as unknown as Ports["agentSpawn"],
     });
-    const r = await runPlannerStage(ports, ctx, "codex");
+    const r = await runDesignerStage(ports, ctx, "codex");
     expect(r.ran).toBe(true);
     expect(r.ok).toBe(true);
     const dir = join(ctx.evidenceRunDir as string, "role-artifacts", "designer");
-    expect(existsSync(join(dir, "planner-contract.md"))).toBe(true);
+    expect(existsSync(join(dir, "design-contract.md"))).toBe(true);
+    expect(existsSync(join(dir, "planner-contract.md"))).toBe(false);
     expect(JSON.parse(readFileSync(join(dir, "artifact-manifest.json"), "utf8")).role).toBe("designer");
   });
 
@@ -4439,10 +4440,10 @@ describe("US-V4-006 — designed execution: Designer contract before the Builder
       repoCwd: repo,
       agentSpawn: (async () => ({ exitCode: 0, timedOut: false })) as unknown as Ports["agentSpawn"], // writes nothing
     });
-    const r = await runPlannerStage(ports, ctx, "codex");
+    const r = await runDesignerStage(ports, ctx, "codex");
     expect(r.ran).toBe(true);
     expect(r.ok).toBe(false);
-    expect(r.reasons.join(" ")).toContain("planner-contract.md missing or malformed");
+    expect(r.reasons.join(" ")).toContain("design-contract.md missing or malformed");
   });
 
   it("Evaluator reports design-contract-vs-delivered when a designer contract exists", () => {
@@ -4451,7 +4452,7 @@ describe("US-V4-006 — designed execution: Designer contract before the Builder
     const id = "US-P3";
     const runDir = join(repo, ".roll", "features", "uncategorized", id, "run-1");
     mkdirSync(join(runDir, "role-artifacts", "designer"), { recursive: true });
-    writeFileSync(join(runDir, "role-artifacts", "designer", "planner-contract.md"), VALID_CONTRACT);
+    writeFileSync(join(runDir, "role-artifacts", "designer", "design-contract.md"), VALID_CONTRACT);
     // an ac-map delivering the designed acceptance item
     mkdirSync(join(repo, ".roll", "features", "uncategorized", id), { recursive: true });
     writeFileSync(join(repo, ".roll", "features", "uncategorized", id, "ac-map.json"), JSON.stringify([{ ac: "picker prefers est_min", status: "pass" }]));

@@ -3,7 +3,7 @@
  *
  * A `designed` Story writes a design artifact before execute/evaluate. The designer
  * step (`roll-design` capability, in a FRESH session before the Builder) writes
- * `planner-contract.md` + `artifact-manifest.json`. The Builder consumes the
+ * `design-contract.md` + `artifact-manifest.json`. The Builder consumes the
  * contract via artifact refs; the Evaluator maps design-contract-vs-delivered against it.
  *
  * This module owns the pure render/parse/validate logic + the design-contract-vs-delivered
@@ -27,7 +27,7 @@ function bullets(items: readonly string[]): string {
 }
 
 /** Render a {@link DesignerContract} to `design-contract.md` (round-trips). */
-export function renderPlannerContract(c: DesignerContract): string {
+export function renderDesignContract(c: DesignerContract): string {
   const parts = [
     `# Designer contract — ${c.storyId}`,
     "",
@@ -69,7 +69,7 @@ function parseBullets(body: string | null): string[] {
  * (fail-closed) when the REQUIRED sections — scope boundary, acceptance contract,
  * and out-of-scope — are absent. The renderer's output always round-trips.
  */
-export function parsePlannerContract(md: string, storyId: string): DesignerContract | null {
+export function parseDesignContract(md: string, storyId: string): DesignerContract | null {
   if (typeof md !== "string" || md.trim() === "") return null;
   if (md.indexOf(H.scope) < 0 || md.indexOf(H.acceptance) < 0 || md.indexOf(H.outOfScope) < 0) return null;
   const resize = section(md, H.resize);
@@ -85,12 +85,12 @@ export function parsePlannerContract(md: string, storyId: string): DesignerContr
 }
 
 /**
- * US-V4-006 — validate the DESIGNER artifact pair (manifest + planner-contract).
+ * US-V4-006 — validate the DESIGNER artifact pair (manifest + design-contract).
  * Fail-closed BEFORE the Builder runs: the manifest must be a well-formed designer
  * manifest and the contract must parse (required sections present) AND carry at
  * least one acceptance item (an empty contract is not a contract).
  */
-export function validatePlannerArtifact(opts: {
+export function validateDesignArtifact(opts: {
   manifest: unknown;
   contractMd: string | null;
   storyId: string;
@@ -98,9 +98,9 @@ export function validatePlannerArtifact(opts: {
   const reasons: string[] = [];
   const man = validateArtifactManifest(opts.manifest, "designer");
   reasons.push(...man.reasons);
-  const contract = opts.contractMd === null ? null : parsePlannerContract(opts.contractMd, opts.storyId);
+  const contract = opts.contractMd === null ? null : parseDesignContract(opts.contractMd, opts.storyId);
   if (contract === null) {
-    reasons.push("planner-contract.md missing or malformed");
+    reasons.push("design-contract.md missing or malformed");
   } else if (contract.acceptanceContract.length === 0) {
     reasons.push("designer contract has no acceptance items (empty contract)");
   }

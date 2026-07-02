@@ -58,6 +58,8 @@ import { renderScopedExecuteRoute, resolveScopedCastRole, scopedExecuteRouteTrac
 import { renderCollabStream } from "../lib/collab-render.js";
 
 const EXEC_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
+const SUPERVISOR_LIVE_WATCH_DEFAULT_INTERVAL_MS = 2_000;
+const SUPERVISOR_LIVE_WATCH_MIN_INTERVAL_MS = 250;
 
 export const SUPERVISOR_USAGE = [
   "Usage: roll supervisor [status|observe|advise|next|why|live|health|route|repair-evidence] [--json]",
@@ -67,6 +69,7 @@ export const SUPERVISOR_USAGE = [
   "  next             what should Roll do next?",
   "  why              why is the project stuck?",
   "  live             read-only Supervisor live board with Designer/Builder/Evaluator panes",
+  "  live --watch     redraw the role board in-place until Ctrl-C; use --interval <sec>",
   "  live --collab    follow the multi-cycle collaboration stream; add --once for a snapshot",
   "  health           agent toolchain health: auth/network/setup/worktree classification and routing",
   "  route            Role route trace: --role builder|designer|evaluator|peer_reviewer [--story <id>]",
@@ -774,9 +777,11 @@ function fmtHealth(issues: ReturnType<typeof gatherAgentToolchainIssues>): strin
   return ["", "  Agent toolchain health", "", ...rows, ""].join("\n") + "\n";
 }
 
-function fmtLive(projectPath: string): string {
+function fmtLive(projectPath: string, title = "Supervisor Live — read-only role board", subtitle?: string): string {
   const board = buildSupervisorLiveBoard(readSupervisorEvents(projectPath));
-  const lines = ["", "  Supervisor Live — read-only role board", "", `    supervisor: ${board.supervisor.state} · ${board.supervisor.summary}`, ""];
+  const lines = ["", `  ${title}`];
+  if (subtitle !== undefined) lines.push(`  ${subtitle}`);
+  lines.push("", `    supervisor: ${board.supervisor.state} · ${board.supervisor.summary}`, "");
   if (board.rows.length === 0) {
     lines.push("    no cycle rows yet", "");
     return lines.join("\n") + "\n";
@@ -793,6 +798,69 @@ function fmtLive(projectPath: string): string {
     lines.push(`      handoff ${row.handoffs.map((h) => `${h.from}->${h.to}:${h.state}`).join(" · ")}`, "");
   }
   return lines.join("\n") + "\n";
+}
+
+function formatIntervalSeconds(ms: number): string {
+  return `${Number((ms / 1000).toFixed(3))}s`;
+}
+
+function parseSupervisorLiveWatchInterval(args: readonly string[]): { ok: true; intervalMs: number } | { ok: false; message: string } {
+  const eq = args.find((a) => a.startsWith("--interval="));
+  const raw = eq !== undefined ? eq.slice("--interval=".length) : argValue(args, "--interval");
+  if (args.includes("--interval") && raw === undefined) {
+    return { ok: false, message: "roll supervisor live --watch: --interval expects seconds, for example --interval 2\n" };
+  }
+  if (raw === undefined) return { ok: true, intervalMs: SUPERVISOR_LIVE_WATCH_DEFAULT_INTERVAL_MS };
+  const seconds = Number(raw);
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return { ok: false, message: "roll supervisor live --watch: --interval expects seconds as a positive number\n" };
+  }
+  return { ok: true, intervalMs: Math.max(SUPERVISOR_LIVE_WATCH_MIN_INTERVAL_MS, Math.round(seconds * 1000)) };
+}
+
+function unknownSupervisorLiveFlag(args: readonly string[]): string | undefined {
+  const allowed = new Set(["--watch", "--json", "--collab", "--once", "--no-color", "--interval"]);
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i] ?? "";
+    if (arg === "live") continue;
+    if (args[i - 1] === "--interval") continue;
+    if (arg.startsWith("--interval=")) continue;
+    if (arg.startsWith("-") && !allowed.has(arg)) return arg;
+  }
+  return undefined;
+}
+
+function followSupervisorLiveBoard(projectPath: string, intervalMs: number): Promise<number> {
+  const tickLimit = envOptionalPositiveInt("ROLL_SUPERVISOR_LIVE_WATCH_TICKS");
+  let ticks = 0;
+
+  return new Promise((resolve) => {
+    let timer: NodeJS.Timeout | undefined;
+    let stopped = false;
+    const stop = (code: number): void => {
+      if (stopped) return;
+      stopped = true;
+      if (timer !== undefined) clearInterval(timer);
+      process.removeListener("SIGINT", onSigint);
+      process.stdout.write("\x1b[?25h");
+      resolve(code);
+    };
+    const onSigint = (): void => stop(130);
+    const tick = (): void => {
+      ticks += 1;
+      process.stdout.write(
+        "\x1b[2J\x1b[H" +
+          fmtLive(projectPath, "Supervisor Live — watch", `refresh every ${formatIntervalSeconds(intervalMs)} · Ctrl-C exits`),
+      );
+      if (tickLimit !== undefined && ticks >= tickLimit) stop(0);
+    };
+
+    process.on("SIGINT", onSigint);
+    process.stdout.write("\x1b[?25l");
+    tick();
+    if (tickLimit !== undefined && ticks >= tickLimit) return;
+    timer = setInterval(tick, intervalMs);
+  });
 }
 
 function argValue(args: readonly string[], flag: string): string | undefined {
@@ -814,6 +882,7 @@ export function supervisorCommand(args: string[]): number | Promise<number> {
   const json = args.includes("--json");
   const collab = args.includes("--collab");
   const once = args.includes("--once");
+  const watch = args.includes("--watch");
   const noColor = args.includes("--no-color") || (process.env["NO_COLOR"] ?? "") !== "";
   let sub = args.find((a) => !a.startsWith("-"));
   // `status` is an alias for the default observe + advise summary.
@@ -1128,12 +1197,41 @@ export function supervisorCommand(args: string[]): number | Promise<number> {
   }
 
   if (sub === "live") {
+    const unknownFlag = unknownSupervisorLiveFlag(args);
+    if (unknownFlag !== undefined) {
+      process.stderr.write(`roll supervisor live: unknown flag for roll supervisor live: ${unknownFlag}\n${SUPERVISOR_USAGE}\n`);
+      return 1;
+    }
+    if (watch && json) {
+      process.stderr.write("roll supervisor live --watch: cannot combine --watch with --json; use snapshot JSON without --watch\n");
+      return 1;
+    }
+    if (watch && collab) {
+      process.stderr.write("roll supervisor live --watch: --collab already follows the collaboration stream; omit --watch\n");
+      return 1;
+    }
+    if (!watch && (args.includes("--interval") || args.some((a) => a.startsWith("--interval=")))) {
+      process.stderr.write("roll supervisor live: --interval only applies with --watch\n");
+      return 1;
+    }
     if (collab) {
       const stream = buildSupervisorCollabStream(projectPath);
       if (json) process.stdout.write(JSON.stringify(stream, null, 2) + "\n");
       else if (once) process.stdout.write(fmtCollabLive(stream, noColor));
       else return followSupervisorCollabStream(projectPath, noColor);
     } else {
+      if (watch) {
+        const parsed = parseSupervisorLiveWatchInterval(args);
+        if (!parsed.ok) {
+          process.stderr.write(parsed.message);
+          return 1;
+        }
+        if ((process.stdout as NodeJS.WriteStream & { isTTY?: boolean }).isTTY !== true) {
+          process.stderr.write("roll supervisor live --watch requires an interactive terminal; use `roll supervisor live` for a snapshot in pipes/CI\n");
+          return 1;
+        }
+        return followSupervisorLiveBoard(projectPath, parsed.intervalMs);
+      }
       const board = buildSupervisorLiveBoard(readSupervisorEvents(projectPath));
       if (json) process.stdout.write(JSON.stringify(board, null, 2) + "\n");
       else process.stdout.write(fmtLive(projectPath));

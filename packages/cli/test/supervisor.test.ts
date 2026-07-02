@@ -4,7 +4,7 @@
  * never implementing a Story or marking one Done.
  */
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gatherSupervisorInput, supervisorCommand } from "../src/commands/supervisor.js";
@@ -17,6 +17,7 @@ afterAll(() => {
 afterEach(() => {
   delete process.env["ROLL_SUPERVISOR_COLLAB_WATCH_INTERVAL_MS"];
   delete process.env["ROLL_SUPERVISOR_COLLAB_WATCH_TICKS"];
+  delete process.env["ROLL_SUPERVISOR_LIVE_WATCH_TICKS"];
 });
 
 function project(backlog: string, opts: { agents?: string; events?: string[]; goal?: string } = {}): string {
@@ -66,6 +67,46 @@ async function runAsync(cwd: string, args: string[]): Promise<{ code: number; ou
     process.stdout.write = realOut;
   }
   return { code, out: chunks.join("") };
+}
+
+async function runAsyncTty(cwd: string, args: string[]): Promise<{ code: number; out: string }> {
+  const original = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+  Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
+  try {
+    return await runAsync(cwd, args);
+  } finally {
+    if (original === undefined) {
+      delete (process.stdout as { isTTY?: boolean }).isTTY;
+    } else {
+      Object.defineProperty(process.stdout, "isTTY", original);
+    }
+  }
+}
+
+function runWithErr(cwd: string, args: string[]): { code: number; out: string; err: string } {
+  const save = process.cwd();
+  const outChunks: string[] = [];
+  const errChunks: string[] = [];
+  const realOut = process.stdout.write.bind(process.stdout);
+  const realErr = process.stderr.write.bind(process.stderr);
+  // @ts-expect-error capture-only
+  process.stdout.write = (c: string | Uint8Array): boolean => (outChunks.push(String(c)), true);
+  // @ts-expect-error capture-only
+  process.stderr.write = (c: string | Uint8Array): boolean => (errChunks.push(String(c)), true);
+  process.chdir(cwd);
+  let code = 1;
+  try {
+    const result = supervisorCommand(args);
+    if (typeof result === "object" && result !== null && "then" in result) {
+      throw new Error("runWithErr() received an async supervisor command");
+    }
+    code = result;
+  } finally {
+    process.chdir(save);
+    process.stdout.write = realOut;
+    process.stderr.write = realErr;
+  }
+  return { code, out: outChunks.join(""), err: errChunks.join("") };
 }
 
 function installFakeGh(cwd: string, opts: { number?: number; headRefName?: string; title?: string; body?: string } = {}): string {
@@ -652,6 +693,86 @@ describe("supervisorCommand", () => {
     expect(r.code).toBe(0);
     expect(r.out).toContain("Supervisor Live");
     expect(r.out).not.toContain("Collab stream");
+  });
+
+  it("FIX-1035: live --watch redraws the role board in one terminal region", async () => {
+    const events = [
+      JSON.stringify({ type: "cycle:start", cycleId: "C-watch", storyId: "US-2", agent: "codex", model: "gpt", ts: 1 }),
+    ];
+    const cwd = project(BACKLOG, { events });
+    process.env["ROLL_SUPERVISOR_LIVE_WATCH_TICKS"] = "2";
+    setTimeout(() => {
+      writeFileSync(
+        join(cwd, ".roll", "loop", "events.ndjson"),
+        [
+          ...events,
+          JSON.stringify({ type: "execution:profile", cycleId: "C-watch", storyId: "US-2", profile: "verified", reason: "verified: UI", ts: 2 }),
+        ].join("\n") + "\n",
+      );
+    }, 1);
+
+    const r = await runAsyncTty(cwd, ["live", "--watch", "--interval", "0.01"]);
+    const text = stripAnsi(r.out);
+    expect(r.code).toBe(0);
+    expect(text).toContain("Supervisor Live — watch");
+    expect(text).toContain("refresh every 0.25s");
+    expect(text).toContain("C-watch · US-2 · standard");
+    expect(text).toContain("C-watch · US-2 · verified");
+    expect(r.out.match(/\x1b\[2J\x1b\[H/g)?.length).toBe(2);
+    expect(r.out).toContain("\x1b[?25l");
+    expect(r.out).toContain("\x1b[?25h");
+  });
+
+  it("FIX-1035: live --watch is read-only and leaves event files unchanged", async () => {
+    const events = [JSON.stringify({ type: "cycle:start", cycleId: "C-ro", storyId: "US-2", agent: "codex", model: "gpt", ts: 1 })];
+    const cwd = project(BACKLOG, { events });
+    const eventsPath = join(cwd, ".roll", "loop", "events.ndjson");
+    process.env["ROLL_SUPERVISOR_LIVE_WATCH_TICKS"] = "1";
+
+    const before = events.join("\n") + "\n";
+    const r = await runAsyncTty(cwd, ["live", "--watch"]);
+
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("Supervisor Live");
+    expect(readFileSync(eventsPath, "utf8")).toBe(before);
+  });
+
+  it("FIX-1035: live --watch fails loud for json, malformed intervals, unknown flags, and non-TTY output", () => {
+    const cwd = project(BACKLOG);
+
+    expect(runWithErr(cwd, ["live", "--watch", "--json"])).toMatchObject({
+      code: 1,
+      err: expect.stringContaining("cannot combine --watch with --json"),
+    });
+    expect(runWithErr(cwd, ["live", "--watch", "--interval", "soon"])).toMatchObject({
+      code: 1,
+      err: expect.stringContaining("--interval expects seconds"),
+    });
+    expect(runWithErr(cwd, ["live", "--watch", "--bogus"])).toMatchObject({
+      code: 1,
+      err: expect.stringContaining("unknown flag for roll supervisor live: --bogus"),
+    });
+    expect(runWithErr(cwd, ["live", "--interval", "1"])).toMatchObject({
+      code: 1,
+      err: expect.stringContaining("--interval only applies with --watch"),
+    });
+    expect(runWithErr(cwd, ["live", "--watch"])).toMatchObject({
+      code: 1,
+      err: expect.stringContaining("requires an interactive terminal"),
+    });
+  });
+
+  it("FIX-1035: Ctrl-C exits live --watch cleanly and restores the cursor", async () => {
+    const cwd = project(BACKLOG, {
+      events: [JSON.stringify({ type: "cycle:start", cycleId: "C-int", storyId: "US-2", agent: "codex", model: "gpt", ts: 1 })],
+    });
+    setTimeout(() => process.emit("SIGINT", "SIGINT"), 5);
+
+    const r = await runAsyncTty(cwd, ["live", "--watch", "--interval", "1"]);
+
+    expect(r.code).toBe(130);
+    expect(r.out).toContain("\x1b[?25l");
+    expect(r.out).toContain("\x1b[?25h");
   });
 
   it("US-V4-022: health shows clean when no toolchain events exist", () => {

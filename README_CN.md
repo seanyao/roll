@@ -213,7 +213,7 @@ Roll 当前是 CLI-first 可观测。持久事实只走一条读路径：anchors
 - cycle 历史使用 TerminalOutcome 词汇，不再教旧的自由文本摘要。
 - 缺失事实显示 `?`。可见的 `0` 表示已知为零，不表示未知。
 
-`roll supervisor live` 是已交付的 CLI-first 多角色看板。浏览器/TUI 版 Supervisor Live Console 仍是未来工作，必须复用同一 view model。
+`roll supervisor live` 是已交付的 CLI-first 多角色看板。它默认打印一帧快照，适合脚本和快速查看；`roll supervisor live --watch` 会让同一个看板保持打开，并从同一条事件驱动 view model 原地刷新。浏览器/TUI 版 Supervisor Live Console 仍是未来工作，必须复用这个 view model。
 
 ## 仓库结构
 

@@ -235,8 +235,11 @@ it is not the active delivery truth surface.
   free-form summary text.
 - Missing facts render as `?`. A visible `0` means a known zero, not unknown.
 
-`roll supervisor live` is the shipped CLI-first multi-role board. A browser/TUI
-Supervisor Live Console remains future work and must reuse the same view model.
+`roll supervisor live` is the shipped CLI-first multi-role board. It prints a
+one-frame snapshot for scripts and quick inspection; `roll supervisor live --watch`
+keeps the same board open and redraws it in-place from the same event-backed view
+model. A browser/TUI Supervisor Live Console remains future work and must reuse
+that view model.
 
 ## Repository layout
 

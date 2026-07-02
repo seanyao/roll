@@ -124,7 +124,7 @@ Runtime availability is explicit. Unavailable agents are recorded as unavailable
 
 The current product is CLI-first. `roll status`, `roll loop watch`, `roll loop runs`, `roll loop cycle <id>`, `roll status pulse`, alerts, and story-scoped attest reports are the active truth surfaces. the archive rebuild is an on-demand static archive/repair renderer, useful for CI artifacts and migration reconciliation; it is not the current truth surface.
 
-The three-state delivery ladder still matters: **claimed -> merged -> attested**. A backlog row that says done is only `claimed`; it becomes `merged` when the PR lands on `main`, and `attested` when story-scoped evidence is on file. Use `roll supervisor live` for the CLI-first multi-role board; browser/TUI Supervisor Live Console remains future work.
+The three-state delivery ladder still matters: **claimed -> merged -> attested**. A backlog row that says done is only `claimed`; it becomes `merged` when the PR lands on `main`, and `attested` when story-scoped evidence is on file. Use `roll supervisor live` for a one-frame CLI-first multi-role board, or `roll supervisor live --watch` to keep that board refreshing in-place; browser/TUI Supervisor Live Console remains future work.
 
 ### On-Demand Skills
 

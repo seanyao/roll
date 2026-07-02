@@ -122,7 +122,7 @@ defaults:
 
 当前产品是 CLI-first。`roll status`、`roll loop watch`、`roll loop runs`、`roll loop cycle <id>`、`roll status pulse`、告警和按 Story 收口的 attest 报告，是当前活体真相入口。归档重建 是按需静态归档/修复渲染器，适合 CI artifact 和迁移对账；它不是当前真相入口。
 
-三态交付阶梯仍然成立：**claimed -> merged -> attested**。backlog 行写了 Done 只是 `claimed`；PR 合入 `main` 后变 `merged`；Story 证据齐备后变 `attested`。使用 `roll supervisor live` 查看 CLI-first 多角色看板；浏览器/TUI 版 Supervisor Live Console 仍是未来工作。
+三态交付阶梯仍然成立：**claimed -> merged -> attested**。backlog 行写了 Done 只是 `claimed`；PR 合入 `main` 后变 `merged`；Story 证据齐备后变 `attested`。使用 `roll supervisor live` 查看一帧 CLI-first 多角色看板，或用 `roll supervisor live --watch` 让同一看板在终端原地刷新；浏览器/TUI 版 Supervisor Live Console 仍是未来工作。
 
 ### 按需技能
 

@@ -8,6 +8,9 @@
 ### Automation pipeline
 - Default project agent routing now uses open execute/evaluate pools with capability and health-aware ranking. Fresh sessions are the review isolation boundary; agent/model diversity is a preference or explicit strict mode, not a default hard exclusion. (REFACTOR-ROLE-008, US-AGENT-049)
 
+### Observability
+- `roll supervisor live --watch` keeps the Supervisor Live role board open and redraws it in-place from the same event-backed view model. Snapshot and JSON modes remain unchanged; watch mode is interactive-only and supports `--interval <sec>`. (FIX-1035)
+
 ## v4.702.1 — 2026-07-02
 
 ### 可见性

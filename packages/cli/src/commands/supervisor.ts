@@ -67,6 +67,7 @@ export const SUPERVISOR_USAGE = [
   "  next             what should Roll do next?",
   "  why              why is the project stuck?",
   "  live             read-only Prime Agent live board with Planner/Builder/Evaluator panes",
+  "  live --collab    follow the multi-cycle collaboration stream; add --once for a snapshot",
   "  health           agent toolchain health: auth/network/setup/worktree classification and routing",
   "  route            Builder (story.execute) route trace: candidates, skipped reasons, selected",
   "  repair-evidence  repair missing acceptance evidence for a green PR and restore merge-ready status",
@@ -702,6 +703,57 @@ function fmtCollabLive(stream: CollabStreamView, noColor: boolean): string {
   return renderCollabStream(stream, { color: !noColor, fold: true, width: 72, lang: "en" }) + "\n";
 }
 
+function fmtCollabAppend(stream: CollabStreamView, noColor: boolean, fromCycleIndex: number): string {
+  if (fromCycleIndex <= 0) return fmtCollabLive(stream, noColor);
+  const delta: CollabStreamView = { ...stream, cycles: stream.cycles.slice(fromCycleIndex) };
+  if (delta.cycles.length === 0) return "";
+  return renderCollabStream(delta, { color: !noColor, fold: true, width: 72, lang: "en", header: false }) + "\n";
+}
+
+function envPositiveInt(name: string, fallback: number): number {
+  const raw = (process.env[name] ?? "").trim();
+  if (raw === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+
+function envOptionalPositiveInt(name: string): number | undefined {
+  const raw = (process.env[name] ?? "").trim();
+  if (raw === "") return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined;
+}
+
+function followSupervisorCollabStream(projectPath: string, noColor: boolean): Promise<number> {
+  const intervalMs = envPositiveInt("ROLL_SUPERVISOR_COLLAB_WATCH_INTERVAL_MS", 2_000);
+  const tickLimit = envOptionalPositiveInt("ROLL_SUPERVISOR_COLLAB_WATCH_TICKS");
+  let renderedCycles = 0;
+  let ticks = 0;
+
+  return new Promise((resolve) => {
+    let timer: NodeJS.Timeout | undefined;
+    const stop = (code: number): void => {
+      if (timer !== undefined) clearInterval(timer);
+      process.removeListener("SIGINT", onSigint);
+      resolve(code);
+    };
+    const onSigint = (): void => stop(130);
+    const tick = (): void => {
+      ticks += 1;
+      const stream = buildSupervisorCollabStream(projectPath);
+      const out = fmtCollabAppend(stream, noColor, renderedCycles);
+      if (out !== "") process.stdout.write(out);
+      renderedCycles = stream.cycles.length;
+      if (tickLimit !== undefined && ticks >= tickLimit) stop(0);
+    };
+
+    process.on("SIGINT", onSigint);
+    tick();
+    if (tickLimit !== undefined && ticks >= tickLimit) return;
+    timer = setInterval(tick, intervalMs);
+  });
+}
+
 function shortTs(ts: number): string {
   if (!Number.isFinite(ts) || ts <= 0) return "n/a";
   return new Date(ts).toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -743,9 +795,10 @@ function fmtLive(projectPath: string): string {
   return lines.join("\n") + "\n";
 }
 
-export function supervisorCommand(args: string[]): number {
+export function supervisorCommand(args: string[]): number | Promise<number> {
   const json = args.includes("--json");
   const collab = args.includes("--collab");
+  const once = args.includes("--once");
   const noColor = args.includes("--no-color") || (process.env["NO_COLOR"] ?? "") !== "";
   let sub = args.find((a) => !a.startsWith("-"));
   // `status` is an alias for the default observe + advise summary.
@@ -1057,7 +1110,8 @@ export function supervisorCommand(args: string[]): number {
     if (collab) {
       const stream = buildSupervisorCollabStream(projectPath);
       if (json) process.stdout.write(JSON.stringify(stream, null, 2) + "\n");
-      else process.stdout.write(fmtCollabLive(stream, noColor));
+      else if (once) process.stdout.write(fmtCollabLive(stream, noColor));
+      else return followSupervisorCollabStream(projectPath, noColor);
     } else {
       const board = buildSupervisorLiveBoard(readSupervisorEvents(projectPath));
       if (json) process.stdout.write(JSON.stringify(board, null, 2) + "\n");

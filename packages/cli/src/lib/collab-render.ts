@@ -19,6 +19,8 @@ export interface RenderOpt {
   width?: number;
   /** Output language for role/action labels. */
   lang?: "en" | "zh";
+  /** When false, omit the stream header and render only rows. */
+  header?: boolean;
 }
 
 /** Canonical role glyphs from the Layer A protocol. */
@@ -371,12 +373,14 @@ function renderMissingCycle(view: CollabCycleView, opt: RenderOpt): string {
 export function renderCollabStream(view: CollabStreamView, opt: RenderOpt): string {
   const lang = opt.lang ?? "en";
   const labels = STREAM_LABELS[lang];
-  const lines = [
-    `${labels.title} — ${labels.goal}: ${view.goalScope}`,
-    `${renderRole("supervise", opt)} ${labels.supervisor}: ${view.supervisor}`,
-    `${labels.levels}: supervise ${HANDOFF_GLYPH} plan ${HANDOFF_GLYPH} build`,
-    "",
-  ];
+  const lines = opt.header === false
+    ? []
+    : [
+        `${labels.title} — ${labels.goal}: ${view.goalScope}`,
+        `${renderRole("supervise", opt)} ${labels.supervisor}: ${view.supervisor}`,
+        `${labels.levels}: supervise ${HANDOFF_GLYPH} plan ${HANDOFF_GLYPH} build`,
+        "",
+      ];
 
   let i = 0;
   while (i < view.cycles.length) {

@@ -14,7 +14,7 @@
 [![npm version](https://img.shields.io/npm/v/@seanyao/roll.svg)](https://www.npmjs.com/package/@seanyao/roll)
 [![CI](https://github.com/seanyao/roll/actions/workflows/ci.yml/badge.svg)](https://github.com/seanyao/roll/actions/workflows/ci.yml)
 
-Roll — a Prime Agent-led CLI harness that routes AI agents through story-scoped planning, building, evaluation, git, CI, and acceptance evidence. Works with Claude, Cursor, Codex, Kimi, Pi, Reasonix, and other local rigs when they are available.
+Roll — a Supervisor-led CLI harness that routes AI agents through story-scoped planning, building, evaluation, git, CI, and acceptance evidence. Works with Claude, Cursor, Codex, Kimi, Pi, Reasonix, and other local rigs when they are available.
 
 ## Install
 
@@ -73,19 +73,19 @@ coverage for the current language controls lives in
 `packages/cli/test/__snapshots__/cli-language-surface.test.ts.snap`, and
 `packages/cli/test/doctor-language.test.ts`.
 
-## V4 Prime Agent Execution
+## V4 Supervisor Execution
 
 Roll V4 separates project coordination from story delivery:
 
-- **Prime Agent** coordinates at project level: backlog order, cross-Story context, route advice, repeated failures, release readiness, budget, and owner escalation. It observes and advises; it does not implement a Story or override evidence gates.
-- **Delta Unit** delivers one Story through scoped roles: `execute` performs the Story work, `evaluate` reviews/scores evidence, and `supervise` coordinates above the Story boundary.
-- **supervise / execute / evaluate roles** are stable contracts. The concrete `agent` and optional `model` are resolved through the Agent Scope model: `Scope -> Role -> Binding -> Agent -> Model`.
+- **Supervisor** coordinates at project level: backlog order, cross-Story context, route advice, repeated failures, release readiness, budget, and owner escalation. It observes and advises; it does not implement a Story or override evidence gates.
+- **Delta Unit** delivers one Story through scoped roles: `design` produces the Designer contract when the profile needs it, `execute` performs the Builder work, `evaluate` reviews/scores evidence, and `supervise` coordinates above the Story boundary.
+- **supervise / design / execute / evaluate roles** are stable contracts. The concrete `agent` and optional `model` are resolved through the Agent Scope model: `Scope -> Role -> Binding -> Agent -> Model`.
 - **Skills remain** the capability layer. Roles invoke `$roll-design`, `$roll-build`, `$roll-fix`, `$roll-peer`, `$roll-.qa`, and related skills instead of rewriting those contracts into TypeScript.
 - **Fallback is fail-loud**. If a requested agent or rig is unavailable, Roll records that unavailability and pauses or asks for owner action; it does not silently pretend another agent was used.
 
-### Prime Agent backlog-clearing standard
+### Supervisor backlog-clearing standard
 
-When the owner asks Roll to clear a backlog, Prime Agent treats the scope as every
+When the owner asks Roll to clear a backlog, Supervisor treats the scope as every
 live non-Hold `FIX-*`, `US-*`, and `REFACTOR-*` row unless the owner narrows it.
 Before scheduling another card it reconciles backlog status, open PRs, recent
 cycle endings, CI/evaluator gates, manual-merge PRs, and `.roll` meta state.
@@ -131,8 +131,7 @@ defaults:
         kind: select
         from: [claude, codex, kimi, pi, agy, reasonix, cursor]
         require: [evaluate]
-        avoid: [execute]
-        strategy: least-recent
+        strategy: health-aware
 ```
 
 Runtime availability is explicit: if a candidate is not callable on the current
@@ -158,7 +157,7 @@ roll design --from-file .roll/brief.md
 roll loop on
 ```
 
-Roll explains the next design step instead of inventing fake work. The Prime Agent turns the requirement into Stories, resolves `execute` and optional `evaluate` roles per Story, and the owner reviews story-scoped attest evidence.
+Roll explains the next design step instead of inventing fake work. The Designer turns the requirement into Stories, the Supervisor chooses `standard`, `verified`, or `designed` execution, and the owner reviews story-scoped attest evidence.
 
 **Existing project**
 
@@ -170,7 +169,7 @@ roll init --apply        # after reviewing the generated onboard plan
 roll loop on
 ```
 
-Roll diagnoses the repository without destructive migration, writes or updates Roll metadata only after review, and then lets the Prime Agent reason over existing backlog, docs, context, open PRs, and scoped role bindings. Current state is visible through CLI-first observability: `roll status`, `roll loop watch`, `roll loop runs`, `roll loop cycle <id>`, `roll loop alert`, and story reports.
+Roll diagnoses the repository without destructive migration, writes or updates Roll metadata only after review, and then lets the Supervisor reason over existing backlog, docs, context, open PRs, and scoped role bindings. Current state is visible through CLI-first observability: `roll status`, `roll loop watch`, `roll loop runs`, `roll loop cycle <id>`, `roll loop alert`, and story reports.
 
 ## Quick start for new projects
 
@@ -237,7 +236,7 @@ it is not the active delivery truth surface.
 - Missing facts render as `?`. A visible `0` means a known zero, not unknown.
 
 `roll supervisor live` is the shipped CLI-first multi-role board. A browser/TUI
-Prime Agent Live Console remains future work and must reuse the same view model.
+Supervisor Live Console remains future work and must reuse the same view model.
 
 ## Repository layout
 

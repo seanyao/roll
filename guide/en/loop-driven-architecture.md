@@ -6,12 +6,12 @@
 
 ## The Mainstream Approach: DAG + Orchestration
 
-Most AI agent frameworks today follow a similar pattern. A planner decomposes a goal into a directed acyclic graph (DAG) of subtasks, assigns each node to a specialized agent, and an orchestrator drives execution in dependency order:
+Most AI agent frameworks today follow a similar pattern. A design step decomposes a goal into a directed acyclic graph (DAG) of subtasks, assigns each node to a specialized agent, and an orchestrator drives execution in dependency order:
 
 ```
 Goal: "Implement feature X"
          │
-       Planner
+     Design step
          │
     ┌────┴────┐
   Agent A   Agent B    ← parallel
@@ -67,11 +67,11 @@ The distinction matters. In **orchestration**, a central authority tells each pa
 
 | | Orchestration (DAG) | Choreography (Loop) |
 |--|--|--|
-| Coordination | Central planner | Shared artifacts |
+| Coordination | Central design step | Shared artifacts |
 | Failure domain | Whole graph | Single loop |
 | State location | Orchestrator memory | git + BACKLOG + PRs |
 | Human visibility | Abstract task graph | `git log`, PR list |
-| Human intervention | Hard — must interrupt planner | Easy — edit BACKLOG |
+| Human intervention | Hard — must interrupt the graph owner | Easy — edit BACKLOG |
 | Agent availability | All must be online simultaneously | Each runs independently |
 
 Choreography is the pattern behind Unix pipelines, microservices event buses, and distributed databases. Roll applies it to AI software delivery.
@@ -83,7 +83,7 @@ Choreography is the pattern behind Unix pipelines, microservices event buses, an
 **DAG approach** — "Add a new agent":
 
 ```
-Planner decomposes:
+Design step decomposes:
   → Agent 1: edit the CLI dispatch
   → Agent 2: update docs (EN)
   → Agent 3: update docs (ZH)      ← depends on Agent 2

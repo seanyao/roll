@@ -35,8 +35,7 @@ defaults:
         kind: select
         from: [claude, codex, kimi, pi, agy, reasonix]
         require: [evaluate]
-        avoid: [execute]
-        strategy: least-recent
+        strategy: health-aware
 ```
 
 `.roll/pairing.yaml` remains a legacy compatibility input. When both files are

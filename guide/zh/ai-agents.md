@@ -59,8 +59,7 @@ defaults:
         kind: select
         from: [claude, codex, kimi, pi, agy, reasonix, cursor]
         require: [evaluate]
-        avoid: [execute]
-        strategy: least-recent
+        strategy: health-aware
 ```
 
 Machine Scope 可以声明 supervisor 和本机 agent pool：

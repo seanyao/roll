@@ -44,3 +44,47 @@ describe("REFACTOR-ROLE-001 — canonical role taxonomy docs", () => {
     expect(executionSection).not.toMatch(/`planned` =|planner-contract\.md` \/ `execute-evidence|Prime Agent \*\*绝不\*\*/);
   });
 });
+
+describe("REFACTOR-ROLE-006 — user-facing role taxonomy surfaces", () => {
+  it("supervisor help uses Supervisor and Designer active terms", () => {
+    const supervisorSource = doc("packages/cli/src/commands/supervisor.ts");
+
+    expect(supervisorSource).toContain("Supervisor decisions");
+    expect(supervisorSource).toContain("Supervisor live board with Designer/Builder/Evaluator panes");
+    expect(supervisorSource).not.toMatch(/Prime Agent decisions|Prime Agent live board|Planner\/Builder\/Evaluator panes/);
+  });
+
+  it("README and overview docs present Supervisor and Designer as active roles", () => {
+    const activeDocs = [
+      doc("README.md"),
+      doc("README_CN.md"),
+      doc("guide/en/overview.md"),
+      doc("guide/zh/overview.md"),
+    ].join("\n");
+
+    expect(activeDocs).toMatch(/Supervisor/);
+    expect(activeDocs).toMatch(/Designer/);
+    expect(activeDocs).not.toMatch(/Prime Agent|Planner/);
+  });
+
+  it("loop docs describe standard, verified, and designed profiles", () => {
+    const loopEn = section(doc("guide/en/loop.md"), "## Execution profiles");
+    const loopZh = section(doc("guide/zh/loop.md"), "## 执行剖面");
+    const loopDocs = `${loopEn}\n${loopZh}`;
+
+    expect(loopDocs).toMatch(/standard \/ verified \/ designed/);
+    expect(loopDocs).toMatch(/`designed` = Designer -> Builder -> Evaluator/);
+    expect(loopDocs).toMatch(/design-contract-vs-delivered/);
+    expect(loopDocs).not.toMatch(/planned profile|`planned` =|planned-vs-delivered|planner contract|planner-contract/);
+    expect(loopDocs).not.toMatch(/Prime Agent/);
+  });
+
+  it("site data no longer markets Prime Agent, Planner, or planned profiles as active concepts", () => {
+    const siteData = doc("site/roll-data.js");
+
+    expect(siteData).toContain("Supervisor");
+    expect(siteData).toContain("Designer");
+    expect(siteData).toContain("standard · verified · designed");
+    expect(siteData).not.toMatch(/Prime Agent|Planner|standard · verified · planned|planned profiles|planned 剖面/);
+  });
+});

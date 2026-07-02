@@ -219,7 +219,7 @@ describe("supervisorCommand", () => {
     const cwd = project(BACKLOG, { events: [JSON.stringify({ type: "pr:merge", prNumber: 1, storyId: "US-1", ts: 1 })] });
     const r = run(cwd, []);
     expect(r.code).toBe(0);
-    expect(r.out).toContain("Prime Agent — project facts");
+    expect(r.out).toContain("Supervisor — project facts");
     expect(r.out).toContain("backlog: 2 todo");
     expect(r.out).toContain("mode: guided");
     expect(r.out).toContain("owner action:");
@@ -229,8 +229,8 @@ describe("supervisorCommand", () => {
     const cwd = project(BACKLOG, { events: [JSON.stringify({ type: "pr:merge", prNumber: 1, storyId: "US-1", ts: 1 })] });
     const r = run(cwd, ["status"]);
     expect(r.code).toBe(0);
-    expect(r.out).toContain("Prime Agent — project facts");
-    expect(r.out).toContain("Prime Agent —"); // advice block too
+    expect(r.out).toContain("Supervisor — project facts");
+    expect(r.out).toContain("Supervisor —"); // advice block too
   });
 
   it("summarizes truth coverage in advise when a Done card lacks structured proof", () => {
@@ -334,7 +334,7 @@ describe("supervisorCommand", () => {
     const fakeBin = installFakeGh(cwd);
     const r = withPath(fakeBin, () => run(cwd, ["next"]));
     expect(r.code).toBe(0);
-    expect(r.out).toContain("Prime Agent — next: US-1");
+    expect(r.out).toContain("Supervisor — next: US-1");
     expect(r.out).toContain("manual merge: PR #42:US-1:manual_merge_required");
     expect(r.out).toContain("manual merge gate on PR #42");
     expect(r.out).toContain("do not start another card until the manual-merge PR is merged");
@@ -507,7 +507,7 @@ describe("supervisorCommand", () => {
     const cwd = project(BACKLOG);
     const r = run(cwd, ["why"]);
     expect(r.code).toBe(0);
-    expect(r.out).toContain("Prime Agent — why stuck");
+    expect(r.out).toContain("Supervisor — why stuck");
     expect(r.out).toContain("mode: guided");
     expect(r.out).toContain("owner action:");
     expect(r.out).toContain("will not start long-running Story execution");
@@ -525,7 +525,7 @@ describe("supervisorCommand", () => {
     });
     const r = run(cwd, ["live"]);
     expect(r.code).toBe(0);
-    expect(r.out).toContain("Prime Agent Live");
+    expect(r.out).toContain("Supervisor Live");
     expect(r.out).toContain("C-plan · US-2 · designed");
     expect(r.out).toContain("designer  done");
     expect(r.out).toContain("builder   done");
@@ -650,7 +650,7 @@ describe("supervisorCommand", () => {
     });
     const r = run(cwd, ["live"]);
     expect(r.code).toBe(0);
-    expect(r.out).toContain("Prime Agent Live");
+    expect(r.out).toContain("Supervisor Live");
     expect(r.out).not.toContain("Collab stream");
   });
 
@@ -697,7 +697,6 @@ defaults:
         kind: select
         from: [agy, kimi, reasonix, codex]
         require: [execute]
-        avoid: [supervise]
         strategy: health-aware
 `,
     });
@@ -836,8 +835,7 @@ defaults:
         "        kind: select",
         "        from: [claude, codex]",
         "        require: [execute]",
-        "        avoid: [supervise]",
-        "        strategy: first-available",
+        "        strategy: health-aware",
         "",
       ].join("\n"),
     });

@@ -298,8 +298,7 @@ defaults:
         kind: select
         from: [claude, codex, kimi, pi, agy, reasonix]
         require: [evaluate]
-        avoid: [execute]
-        strategy: least-recent
+        strategy: health-aware
 ```
 
 `roll agent` shows the effective Machine Scope, Project Scope, resolved roles,
@@ -315,7 +314,7 @@ For open casting, `health-aware` ranks the same visible pool across Builder,
 Designer, Evaluator, and Peer Reviewer roles. `roll supervisor route --role
 builder --story <id> [--json]` exposes the trace: candidates, ranked scores,
 warnings, skipped runtime facts, selected agent, source binding, recent-use
-input, and active Prime agent avoidance.
+input, and capability/health ranking.
 
 ### Agent toolchain health check (US-V4-022)
 
@@ -344,7 +343,7 @@ The chain is capped at **2 auto re-splits**. The third would be refused and a
 `StorySplitCapHit` ALERT is written, forcing human triage instead of letting
 the chain grow indefinitely.
 
-## Execution profiles (standard / verified / planned)
+## Execution profiles (standard / verified / designed)
 
 Role resolution above chooses the concrete Agent and optional Model for the
 `execute` and `evaluate` roles. Separately, Roll chooses an **execution profile** per
@@ -359,19 +358,19 @@ user-facing "team shapes"** — they are risk/ROI tiers:
   evidence required, or a history of weak/missing evidence. An independent
   `evaluate` role (fresh session) judges the delivery; blocking review, score, and
   attest stay three separate dimensions.
-- **`planned` = plan artifact → execute → evaluate** — the risk is doing the *wrong*
+- **`designed` = Designer -> Builder -> Evaluator** — the risk is doing the *wrong*
   work: unclear requirements, cross-module change, or truth/release/routing/state
-  semantics. A plan artifact is written before `execute`; `evaluate` maps
-  planned-vs-delivered. evaluate → execute repair rounds are strictly bounded
+  semantics. A design artifact is written before `execute`; `evaluate` maps
+  design-contract-vs-delivered. evaluate → execute repair rounds are strictly bounded
   (max rounds, repeated-finding signature, budget, timeout) and escalate on a
   bound trip.
 
-Roles hand off through artifacts only (planner contract, builder evidence,
+Roles hand off through artifacts only (design contract, builder evidence,
 eval-report) — never a shared raw session. Project-level coordination across
 Stories (ordering, conflicts, budget, release readiness) belongs to the
-**Prime Agent** (`roll supervisor`), not to any single Story's execution.
+**Supervisor** (`roll supervisor`), not to any single Story's execution.
 
-When the owner asks to clear the backlog, Prime Agent uses a backlog-clearing
+When the owner asks to clear the backlog, Supervisor uses a backlog-clearing
 standard rather than a fix-only queue. The default scope is every live non-Hold
 `FIX-*`, `US-*`, and `REFACTOR-*` row. Before starting another card it reconciles
 backlog truth, open PRs, CI/evaluator gates, recent cycle endings, manual-merge
@@ -518,7 +517,7 @@ binding, and that decision must remain visible in the cast.
 Role independence is session-based, not brand-based: separate fresh sessions
 and artifact handoff are the rule. The same agent brand can serve more than
 one role only when each role runs in its own session and hands off through
-artifacts: a plan, diff, review, score, AC map, or report.
+artifacts: a design contract, diff, review, score, AC map, or report.
 A shared transcript is not an independent review. Agent diversity is useful
 evidence and a ranking signal, especially when capability or shortcoming
 profiles are visible in role summaries, but it is not a default hard exclusion

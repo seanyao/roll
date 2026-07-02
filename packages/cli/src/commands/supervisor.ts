@@ -1,5 +1,5 @@
 /**
- * US-V4-008 — `roll supervisor`: the project-level Prime Agent, v0 (observe +
+ * US-V4-008 — `roll supervisor`: the project-level Supervisor, v0 (observe +
  * advise). It reads STRUCTURED facts via deterministic selectors — backlog, merge
  * truth (pr:merge events), open PRs, route config, repeated failures, release
  * readiness — then projects {@link SupervisorFacts} and emits advisory
@@ -12,7 +12,7 @@
  *   roll supervisor advise     # decisions
  *   roll supervisor next       # "what should Roll do next?"
  *   roll supervisor why        # "why is the project stuck?"
- *   roll supervisor live       # read-only Planner/Builder/Evaluator board
+ *   roll supervisor live       # read-only Designer/Builder/Evaluator board
  *   roll supervisor --json     # machine-readable
  */
 import {
@@ -63,10 +63,10 @@ export const SUPERVISOR_USAGE = [
   "Usage: roll supervisor [status|observe|advise|next|why|live|health|route|repair-evidence] [--json]",
   "  status           observe + advise summary (alias for no subcommand)",
   "  observe          structured project facts (backlog, truth coverage, PRs, release readiness)",
-  "  advise           Prime Agent decisions (advisory; persistent changes need owner confirmation)",
+  "  advise           Supervisor decisions (advisory; persistent changes need owner confirmation)",
   "  next             what should Roll do next?",
   "  why              why is the project stuck?",
-  "  live             read-only Prime Agent live board with Planner/Builder/Evaluator panes",
+  "  live             read-only Supervisor live board with Designer/Builder/Evaluator panes",
   "  live --collab    follow the multi-cycle collaboration stream; add --once for a snapshot",
   "  health           agent toolchain health: auth/network/setup/worktree classification and routing",
   "  route            Role route trace: --role builder|designer|evaluator|peer_reviewer [--story <id>]",
@@ -291,7 +291,7 @@ export function readManualMergeGates(
   return gates;
 }
 
-/** Gather the Prime Agent's structured input from project state (deterministic). */
+/** Gather the Supervisor's structured input from project state (deterministic). */
 export function gatherSupervisorInput(projectPath: string): SupervisorInput {
   const backlogPath = join(projectPath, ".roll", "backlog.md");
   const backlog = existsSync(backlogPath)
@@ -381,7 +381,7 @@ export function gatherSupervisorInput(projectPath: string): SupervisorInput {
       if (queryStoryDelivery(row.id, deliveries).delivered) merged.add(row.id);
     }
   } catch {
-    // Keep Prime Agent observe usable in partial/non-git projects; event truth is
+    // Keep Supervisor observe usable in partial/non-git projects; event truth is
     // still consumed above, and missing delivery truth is rendered as coverage.
   }
 
@@ -516,7 +516,7 @@ function fmtFacts(input: SupervisorInput, events: readonly RollEvent[] = []): st
       : `partial — ${f.truthDrift.length} Done row(s) lack structured delivery truth (${summarizeList(f.truthDrift)}); run roll truth audit for detail`;
   const lines = [
     "",
-    "  Prime Agent — project facts (observe)",
+    "  Supervisor — project facts (observe)",
     "",
     `    scope: ${runbook.scope.label}`,
     `    remaining: ${remainingLine(input)}`,
@@ -544,9 +544,9 @@ function fmtFacts(input: SupervisorInput, events: readonly RollEvent[] = []): st
 
 function fmtAdvice(input: SupervisorInput): string {
   const decisions = supervisorDecisions(input);
-  if (decisions.length === 0) return "\n  Prime Agent — no advisory decisions (project healthy)\n\n";
+  if (decisions.length === 0) return "\n  Supervisor — no advisory decisions (project healthy)\n\n";
   const rows = decisions.map((d) => `    [${d.kind}]${d.requiresOwner ? " (owner confirmation required)" : ""} ${d.reason}`);
-  return ["", "  Prime Agent — advisory decisions", "", ...rows, ""].join("\n") + "\n";
+  return ["", "  Supervisor — advisory decisions", "", ...rows, ""].join("\n") + "\n";
 }
 
 function supervisorDecisions(input: SupervisorInput): ReturnType<typeof adviseProject> {
@@ -776,7 +776,7 @@ function fmtHealth(issues: ReturnType<typeof gatherAgentToolchainIssues>): strin
 
 function fmtLive(projectPath: string): string {
   const board = buildSupervisorLiveBoard(readSupervisorEvents(projectPath));
-  const lines = ["", "  Prime Agent Live — read-only role board", "", `    supervisor: ${board.supervisor.state} · ${board.supervisor.summary}`, ""];
+  const lines = ["", "  Supervisor Live — read-only role board", "", `    supervisor: ${board.supervisor.state} · ${board.supervisor.summary}`, ""];
   if (board.rows.length === 0) {
     lines.push("    no cycle rows yet", "");
     return lines.join("\n") + "\n";
@@ -1190,7 +1190,7 @@ export function supervisorCommand(args: string[]): number | Promise<number> {
           ? mode.ownerAction
           : state.next.ownerAction;
     process.stdout.write(
-      `\n  Prime Agent — next: ${n.storyId ?? "(nothing ready)"}\n  scope: ${state.scope.label}\n  remaining: ${remainingLine(input)}\n  cast: ${ctx.cast}\n  cast detail: ${ctx.castDetail}\n  gate: ${ctx.gate}\n  manual merge: ${ctx.manualMerge}\n  .roll meta: ${ctx.rollMeta.state} — ${ctx.rollMeta.detail}\n  agent health: ${state.agentHealth.summary}\n  ${n.reason}\n  ${formatOperatingMode(mode)}\n  owner action: ${action}\n  scheduler: ${state.next.schedulerAction}\n\n`,
+      `\n  Supervisor — next: ${n.storyId ?? "(nothing ready)"}\n  scope: ${state.scope.label}\n  remaining: ${remainingLine(input)}\n  cast: ${ctx.cast}\n  cast detail: ${ctx.castDetail}\n  gate: ${ctx.gate}\n  manual merge: ${ctx.manualMerge}\n  .roll meta: ${ctx.rollMeta.state} — ${ctx.rollMeta.detail}\n  agent health: ${state.agentHealth.summary}\n  ${n.reason}\n  ${formatOperatingMode(mode)}\n  owner action: ${action}\n  scheduler: ${state.next.schedulerAction}\n\n`,
     );
     return 0;
   }
@@ -1206,7 +1206,7 @@ export function supervisorCommand(args: string[]): number | Promise<number> {
       state.next.kind === "diagnose_failure" || state.next.kind === "manual_merge_gate" ? state.next.schedulerAction : mode.schedulerAction;
     const recoveryBlock = stall !== undefined ? `\n${fmtNoProgressRecovery(stall)}` : "";
     process.stdout.write(
-      `\n  Prime Agent — why stuck: ${why}\n  cast: ${ctx.cast}\n  cast detail: ${ctx.castDetail}\n  gate: ${ctx.gate}\n  manual merge: ${ctx.manualMerge}\n  .roll meta: ${ctx.rollMeta.state} — ${ctx.rollMeta.detail}\n  agent health: ${state.agentHealth.summary}${recoveryBlock}\n  ${formatOperatingMode(mode)}\n  owner action: ${ownerAction}\n  scheduler: ${schedulerAction}\n\n`,
+      `\n  Supervisor — why stuck: ${why}\n  cast: ${ctx.cast}\n  cast detail: ${ctx.castDetail}\n  gate: ${ctx.gate}\n  manual merge: ${ctx.manualMerge}\n  .roll meta: ${ctx.rollMeta.state} — ${ctx.rollMeta.detail}\n  agent health: ${state.agentHealth.summary}${recoveryBlock}\n  ${formatOperatingMode(mode)}\n  owner action: ${ownerAction}\n  scheduler: ${schedulerAction}\n\n`,
     );
     return 0;
   }

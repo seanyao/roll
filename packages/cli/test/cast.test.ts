@@ -68,7 +68,7 @@ describe("renderCastTable — US-DOSSIER-037", () => {
   it("AC2: the four scenario rows match the web grid (peer · PR review · spar · onboard)", () => {
     const text = stripAnsi(renderCastTable(configured, "en"));
     expect(text).toContain("Peer re-check");
-    expect(text).toContain("must differ from builder");
+    expect(text).toContain("fresh reviewer session");
     expect(text).toContain("PR review");
     expect(text).toContain("Adversarial TDD");
     expect(text).toContain("claude ⚔ kimi");
@@ -80,7 +80,7 @@ describe("renderCastTable — US-DOSSIER-037", () => {
     const text = stripAnsi(renderCastTable(configured, "zh"));
     expect(text).toContain("执行角色 · legacy easy");
     expect(text).toContain("同伴复核 peer");
-    expect(text).toContain("强制异构");
+    expect(text).toContain("fresh reviewer session");
     // header row in zh, never an inline EN+中 mix on the row
     expect(text).toContain("角色");
     expect(text).not.toContain("Role  角色");

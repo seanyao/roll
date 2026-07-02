@@ -170,7 +170,8 @@ roll loop on
 | `roll status` | 判定优先的真相摘要，读自同一份快照——LOOP · CYCLE · RELEASE · STORY，STORY 行带 attest 验收覆盖率(`done ≡ 已合并 ∧ 已验收`)——其后是约定/AI 客户端同步健康 |
 | `roll supervisor [status\|observe\|advise\|next\|why\|live] [--json]` | 项目级 Prime Agent：观察项目真相，解释 guided/autonomous 模式和下一步 owner 动作，建议下一步，并渲染只读实时角色板（Planner / Builder / Evaluator）。只做跨 Story 协调——绝不实现具体 Story；持久化策略变更需 owner 确认 |
 | `roll pulse [--json]` | 今日交付脉搏：窗口内周期数、已合 merged 数、已验收 attested 数，外加一条来自故事光谱的 ASCII 火花线。双语中/EN。`--json` 输出机读 JSON |
-| `roll doctor [skills\|--tools]` | 环境与安装体检；`roll doctor --tools` 展示工具与真实截图权限预检，包括 Terminal.app Screen Recording |
+| `roll help [--lang en\|zh] [name]` | 在终端查看 Charter / 语言指南文档；`roll --help` 仍显示 CLI usage 摘要 |
+| `roll doctor [skills\|tools\|--tools]` | 环境与安装体检；`roll doctor tools` 展示工具 policy/readiness，`roll doctor --tools` 展示工具与真实截图权限预检，包括 Terminal.app Screen Recording |
 | `roll tune [reset]` | 只建议不自动应用的自调参报告 |
 | **卡片与证据** | |
 | `roll idea "<一句话描述>"` | 收卡:自动分类、编号、lint、推断 epic、铸全套卡夹——用户加卡的唯一入口 |

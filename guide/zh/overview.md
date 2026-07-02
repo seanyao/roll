@@ -61,7 +61,7 @@ roll init --apply
 roll loop on
 ```
 
-Roll 无破坏地诊断现有代码，审阅后才创建或更新 Roll metadata，然后基于已有 backlog/docs/context 推理。当前状态通过 CLI-first 可观测入口查看：`roll status`、`roll loop watch`、`roll loop runs`、`roll cycle <id>`、告警和 Story 报告。
+Roll 无破坏地诊断现有代码，审阅后才创建或更新 Roll metadata，然后基于已有 backlog/docs/context 推理。当前状态通过 CLI-first 可观测入口查看：`roll status`、`roll loop watch`、`roll loop runs`、`roll loop cycle <id>`、告警和 Story 报告。
 
 **按 Scope 路由角色**
 
@@ -113,14 +113,14 @@ defaults:
 
 - `roll status` — 判定优先的真相摘要（LOOP · CYCLE · RELEASE · STORY，含 attest 验收覆盖率），其后是约定/AI 客户端同步健康 `[core]`
 - `roll loop watch` — 当前 cycle 的 CLI-first 实时 activity 流
-- `roll cycle <id>` — 单个 cycle 的轨迹与证据指针
+- `roll loop cycle <id>` — 单个 cycle 的轨迹与证据指针
 - `roll loop runs` — 每轮 TerminalOutcome 历史，含 TCR 次数和耗时
 - `roll loop alert` — 查看、确认、清除 loop 告警
 - Story 报告 —— Story 自己的 `latest/<id>-report.html` 是人类验收入口 `[highlight]`
 
 ### 当前可观测性
 
-当前产品是 CLI-first。`roll status`、`roll loop watch`、`roll loop runs`、`roll cycle <id>`、`roll pulse`、告警和按 Story 收口的 attest 报告，是当前活体真相入口。`roll index` 是按需静态归档/修复渲染器，适合 CI artifact 和迁移对账；它不是当前真相入口。
+当前产品是 CLI-first。`roll status`、`roll loop watch`、`roll loop runs`、`roll loop cycle <id>`、`roll status pulse`、告警和按 Story 收口的 attest 报告，是当前活体真相入口。归档重建 是按需静态归档/修复渲染器，适合 CI artifact 和迁移对账；它不是当前真相入口。
 
 三态交付阶梯仍然成立：**claimed -> merged -> attested**。backlog 行写了 Done 只是 `claimed`；PR 合入 `main` 后变 `merged`；Story 证据齐备后变 `attested`。使用 `roll supervisor live` 查看 CLI-first 多角色看板；浏览器/TUI 版 Prime Agent Live Console 仍是未来工作。
 
@@ -134,7 +134,7 @@ defaults:
 ### 多 Agent 协作
 
 - Fail-loud 路由 — 请求的 agent/model/rig 不可用 → 记录限制并暂停，或仅按显式 fallback 策略路由 `[highlight]`
-- `$roll-peer` — 多轮协商；`roll peer` 记录一次性结构化 review facts `[core]`
+- `$roll-peer` — 多轮协商；结构化 adapter 记录一次性 reviewer facts `[core]`
 - PR 收件箱 — 外部 PR 先经 AI 评审再合入；过时 PR 自动 rebase `[new]`
 - `roll review-pr` — 对任意 PR 按需发起 AI 评审，可指定 agent `[new]`
 

@@ -8,7 +8,7 @@ Roll 把评审指派看成 scoped Agent 模型里的 `evaluate` 角色：
 `Scope -> Role -> Binding -> Agent -> optional Model`。agent 是有限的七个身份
 （`claude`、`kimi`、`codex`、`pi`、`agy`、`reasonix`、`cursor`）；model 是挂在该 agent 上的可选数据。
 
-结对与 [`roll peer`](peer.md) 不同：peer 是你（或 loop 风险闸）按需发起的多轮协商；
+结对与 [`$roll-peer`](peer.md) 不同：peer 是你（或 loop 风险闸）按需发起的多轮协商；
 结对是常驻的单向第二遍，接在 cycle 里，由 Project Scope 的 `evaluate` binding 管控。
 
 ## 开启 —— 显式，绝不静默
@@ -41,12 +41,8 @@ resolution 中跳过候选。
 
 ## 看它做了什么 —— 可观测性
 
-```bash
-roll pair status
-```
-
-显示结对池（谁能结对、其厂商、被声明的能力，以及某个 agent**因何被排除**），
-外加**结对花了多少钱**：
+Loop cycle evidence 和角色视图会显示结对池（谁能结对、其厂商、被声明的能力，
+以及某个 agent**因何被排除**），外加**结对花了多少钱**：
 
 ```
   Cross-Agent Pairing — pool status / 结对池状态
@@ -98,11 +94,11 @@ agent 给自己的交付打分是利益冲突，所以质量评分（**Review Sc
 - **loop 内**：验收闸通过后，runner 拉起一个全新会话的 Reviewer 给交付打分。
   note 落在卡片 `notes/` 目录，带溯源——`scoring: pair`、`scored-by: <agent>`
   以及全新会话 id（独立性可核验）。
-- **手动**：`roll pair score <story-id> --summary "<交付摘要>"` 在一个全新会话里走同一适配器。
-- **设计产出**（`roll-design`，无 loop cycle）：`roll pair score --design <story-id> --file <设计摘要>`
-  触发同一个全新会话的 Reviewer 评**设计**质量（INVEST 拆分、可视 AC 完整、`deliverable_url`
-  正确、领域/spec 一致），而非代码；记为 `stage=design`。设计 agent 只触发、绝不给自己打分；
-  无可用评审则诚实标记未评审（fail-loud），绝不合成自评。
+- **Loop 交付**：验收闸通过后，runner 在全新会话里触发同一适配器。
+- **设计产出**（`roll-design`，无 loop cycle）：设计工作流可以触发全新会话的 Reviewer
+  评**设计**质量（INVEST 拆分、可视 AC 完整、`deliverable_url` 正确、领域/spec 一致），
+  而非代码；记为 `stage=design`。设计 agent 只触发、绝不给自己打分；无可用评审则诚实
+  标记未评审（fail-loud），绝不合成自评。
 - **只要装了别的 agent，builder 的本体 agent 绝不给自己的 cycle 打分**：此时 builder 被
   整个排除出打分池——要么由独立 Evaluator 评分，要么 fail-loud（即便同厂全新会话也不回落成自评）。
   只有真正的单 agent 安装里，builder 的本体 agent 才是评分者，此时同厂全新会话是最低可接受档。
@@ -118,5 +114,5 @@ agent 给自己的交付打分是利益冲突，所以质量评分（**Review Sc
   `VERDICT` 行一致时采信——重绘属于已确定的同一答案。真正冲突的重复块（分数或 verdict 不同）、
   模板 `<占位符>` 回声、越界分数、不支持的 verdict 仍会被拒。
 - **拒收有可观测的具体原因，而非笼统报错**：回复未被采信时，cycle 记录的是具体原因而非一句
-  “unparseable”。`roll cycle <id> --roles` 会区分 Evaluator 是**返回了类分数文本但未被采信**
+  “unparseable”。`roll loop cycle <id> --roles` 会区分 Evaluator 是**返回了类分数文本但未被采信**
   （如重复块冲突、缺字段）还是**完全没返回任何分数内容**，并在角色行上标出确切原因。

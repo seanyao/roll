@@ -36,7 +36,7 @@ roll init
    previews the repair and asks in an interactive terminal; non-interactive
    automation must use `roll init --repair --auto`. Repair only creates missing
    Roll-owned files or merges Roll-owned sections, and records the changes in
-   `.roll/onboard-changeset.yaml` so `roll offboard` can reverse them later.
+   `.roll/onboard-changeset.yaml` so `roll setup offboard` can reverse them later.
 
 After any of these paths, `roll next` is the continuation command. It reads the
 same Roll markers plus `.roll/brief.md`, `.roll/onboard-plan.yaml`, and

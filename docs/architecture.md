@@ -4,7 +4,7 @@
 
 roll 是 AI coding agent 的**外层控制系统**（agent harness / reliability layer）。它不进入 agent 内部（不管理 token 窗口、不压缩对话、不干预单次推理），而是在外部建立一个闭环：设定目标 → 调度执行 → 感知结果 → 修正方向。
 
-当前用户入口是 CLI-first：`roll init`、`roll supervisor`、`roll supervisor live`、`roll loop`、`roll status`、`roll cycle` 与按 Story 收口的 `roll attest` 报告。浏览器/TUI 版 Prime Agent Live Console 是下一阶段工作，不作为当前产品面承诺。安装方式：`npm install -g @seanyao/roll`。
+当前用户入口是 CLI-first：`roll init`、`roll supervisor`、`roll supervisor live`、`roll loop`、`roll status`、`roll loop cycle` 与按 Story 收口的 `roll attest` 报告。浏览器/TUI 版 Prime Agent Live Console 是下一阶段工作，不作为当前产品面承诺。安装方式：`npm install -g @seanyao/roll`。
 
 ## 为什么是分层闭环
 
@@ -180,9 +180,9 @@ Builder 使用记录公平轮换，避免反复落到同一个 agent。运行时
 
 **事件类型**：`cycle:start/phase/tcr/end/terminal`、`warm-session:capture/resume-selected/resume-skipped`、`pr:open/merge`、`route:resolve`、`loop:heartbeat/fire/paused`、`policy:safety_pause`、`alert`、`peer:gate`、`attest:gate`、`ci:*`。
 
-#### CLI-first 实时控制台（`roll cycle watch`）
+#### CLI-first 实时控制台（`roll loop cycle watch`）
 
-主线是 CLI：`roll cycle watch [<id>] [--once] [--since <lines>] [--json]` 提供一个进行中 cycle 的**标准 ActivitySignal 流**。不传 id 时自动跟随当前 running cycle。
+主线是 CLI：`roll loop cycle watch [<id>] [--once] [--since <lines>] [--json]` 提供一个进行中 cycle 的**标准 ActivitySignal 流**。不传 id 时自动跟随当前 running cycle。
 
 窗口显示：
 - **顶部概要**：cycle id、story id、agent、outcome
@@ -197,9 +197,9 @@ Builder 使用记录公平轮换，避免反复落到同一个 agent。运行时
 
 #### 静态导出 vs CLI-first 实时观察
 
-- **实时 CLI**（`roll cycle watch`）：直接跟随 `events.ndjson` 或 `signals.jsonl`，不经过外部进程——CLI 窗口在任何时候都是可用的一线视图。
-- **状态摘要**（`roll status` / `roll pulse` / `roll loop runs` / `roll cycle <id>`）：从同一选择器读取 backlog、merge truth、cycle history、release readiness 和 story-scoped attest 覆盖率。
-- **静态导出**（`roll index`）：按需把选择器结果渲染为 HTML archive，以 `file://` 打开。它是一次性快照，适合归档、CI artifact、历史修复和迁移对账；不是当前用户面的活体真相入口。
+- **实时 CLI**（`roll loop cycle watch`）：直接跟随 `events.ndjson` 或 `signals.jsonl`，不经过外部进程——CLI 窗口在任何时候都是可用的一线视图。
+- **状态摘要**（`roll status` / `roll status pulse` / `roll loop runs` / `roll loop cycle <id>`）：从同一选择器读取 backlog、merge truth、cycle history、release readiness 和 story-scoped attest 覆盖率。
+- **静态导出**（归档重建）：按需把选择器结果渲染为 HTML archive，以 `file://` 打开。它是一次性快照，适合归档、CI artifact、历史修复和迁移对账；不是当前用户面的活体真相入口。
 
 这些入口共享 `collectDossierState` / `cycleActivitySignalsFromEvents`，但当前产品承诺以 CLI-first 为准。
 
@@ -226,7 +226,7 @@ Builder 使用记录公平轮换，避免反复落到同一个 agent。运行时
 实时控制台（CLI watch / future browser live）和 git-snapshot 异步远程（roll-meta + GitHub 作交会点）是**同一选择器、不同发射器**的关系：
 
 - **异步路径**：`roll-meta` 私有 git 仓通过 `commitRollMetadataRepo` 提交 `.roll` 状态快照。远端 agent 读取 roll-meta + GitHub API 感知项目状态——不依赖实时连接。
-- **实时路径**：当前产品只交付 `roll cycle watch`；未来浏览器实时面必须复用同一标准流，不能重新引入旧 daemon/frame surface。
+- **实时路径**：当前产品只交付 `roll loop cycle watch`；未来浏览器实时面必须复用同一标准流，不能重新引入旧 daemon/frame surface。
 - **共存**：二者彼此独立、并行不悖。实时路径不做异步远程做的事（跨 NAT 状态同步）；异步路径不做实时路径的事（秒级活信号）。详见 `.roll/features/loop-observability/live-console-design.md` §2.3。
 
 #### 证据按构造（US-OBS-031）
@@ -352,7 +352,7 @@ Backlog-clearing 模式下，Prime Agent 的默认 scope 是所有 live 且非 H
 - **唯一读侧适配器** `packages/cli/src/lib/truth-adapter.ts`:dashboard 的周期分类、静态归档的 delivered 判定全部经它走选择器;**新增消费者必须走这里,再写一个本地解析就是本 epic 关掉的回归**。unknown 一律渲染为 `?`,绝不静默显示成功。
 - **三聚合投影**:Story 判断 backlog 声明与 `main`/验收证据是否一致;Cycle 只认 TerminalOutcome 终态事实;Release 汇总发版闸 verdict 与有效 waiver。README / guide / site 只描述这些目标态语义。
 - **claim vs truth**:backlog 的 `✅ Done` 是声明,不是事实源;`main` 合并、证据报告、终态事件、发版闸事件才是事实锚点。所有 UI 投影必须把声明和真相分开呈现。
-- **静态归档首页**:`roll index` 按需渲染 Story / Cycle / Release tiles 和真相条;未知事实显示 `?`,已知为零才显示 `0`。premature Done 会被标成 drift/fail,不会被当作已交付。它是 archive/repair renderer,不是当前活体真相入口。
+- **静态归档首页**:归档重建 按需渲染 Story / Cycle / Release tiles 和真相条;未知事实显示 `?`,已知为零才显示 `0`。premature Done 会被标成 drift/fail,不会被当作已交付。它是 archive/repair renderer,不是当前活体真相入口。
 - **影子审计**:只读漂移扫描作为 `roll release` 闸的内部模块运行,报告落 `.roll/reports/consistency/`。
 - **发版闸**:`roll release` 是唯一发版命令,事务内置一致性闸;任一维 fail 拦截发版,没有豁免路径——修掉漂移才能发。历史 release:waiver 事件仅作存档,不再有写入者。一致性闸跑在**开 PR / 合并之前**(发布分支上 bump+changelog 已提交、未合并),漂移在落 `main` 前就被拦,绝不留"已合并但没打 tag"的半成品。`main` 受 PR 保护,发版给自己也开 PR,再用 GitHub 原生 auto-merge(`gh pr merge --auto --squash`)自驱合并:不依赖 `com.roll.pr.<slug>` 看护 lane,进程中断也由 GitHub 完成合并;等待期逐轮打印进度,CI 不调度时推空提交 nudge;仓库未开 "Allow auto-merge" 则诚实报错而非静默挂死。
 - **变更点护栏** `packages/spec/src/types/truth-registry.ts`(`TRUTH_FIELD_REGISTRY`):落盘且被第二处读取的字段必须登记(绑锚点、记写者、derived-cache 必声明 rebuild);未登记字段 CI 红并指路登记——历史 v2 字段 grandfather 列单。局部变量不登记。

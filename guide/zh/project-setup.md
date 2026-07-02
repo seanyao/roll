@@ -31,7 +31,7 @@ roll init
    缺失项和仍存在的 pre-v2 旧标记。`roll init --repair` 会先预览修复计划，
    在交互终端等待确认；非交互自动化必须显式执行 `roll init --repair --auto`。
    修复只创建缺失的 Roll-owned 文件或合并 Roll-owned 区块，并写入
-   `.roll/onboard-changeset.yaml`，之后 `roll offboard` 可以反向移除这些改动。
+   `.roll/onboard-changeset.yaml`，之后 `roll setup offboard` 可以反向移除这些改动。
 
 任一路径之后，都可以用 `roll next` 接着走。它读取相同的 Roll 标记，以及
 `.roll/brief.md`、`.roll/onboard-plan.yaml`、`.roll/backlog.md`，只输出一个下一步：

@@ -13,7 +13,7 @@
 > **Roll 有两套界面。** 读这份 FAQ 时请分清：
 >
 > - **CLI 命令** —— 在终端里跑：`roll init`、`roll loop on`、`roll status`、
->   `roll cycle` 等。负责状态管理、调度、观测。**它们本身不写代码**。
+>   `roll loop cycle` 等。负责状态管理、调度、观测。**它们本身不写代码**。
 > - **Skill** —— 在你的 AI agent 里调用（Claude Code、Cursor、Codex、Pi
 >   等）：`$roll-build`、`$roll-design`、`$roll-fix`、`$roll-onboard` 等。
 >   在 Claude Code 里输入形式是 `/roll-build`；`$` 前缀是文档里跨工具的
@@ -233,7 +233,7 @@ TCR 总得有**点东西**可守，所以零测试的仓库 day-one 跑不了 lo
 
 **短答：** 能用，但失去 CI 闸门。TCR 和 PR 流程还在。
 
-**细节：** `roll ci --wait` 找当前 commit 上的 GitHub Actions。如果没配
+**细节：** `roll status ci --wait` 找当前 commit 上的 GitHub Actions。如果没配
 CI，Roll 优雅降级：TCR 仍是内层闸门（测试不过提交不留），PR 仍然创建，
 但 loop 不会等远程 CI 绿就标记 story 为 Done。
 
@@ -251,7 +251,7 @@ CI，Roll 优雅降级：TCR 仍是内层闸门（测试不过提交不留），
 - **单人**：默认。`.roll/backlog.md` 是你的私人队列。
 - **结对**：把 `.roll/` 提交进 git，搭档的 Roll 读同一份 backlog。锁是
   per-machine 的，两人都开 loop 不会撞状态，但可能抢同一条 story。
-- **团队**：`.roll/backlog.md` 当源代码对待，通过 PR 协作。`roll peer`
+- **团队**：`.roll/backlog.md` 当源代码对待，通过 PR 协作。`-peer` skill
   支持跨 agent 评审（一个 agent 评另一个 agent 的 PR）。多人 loop 的
   "谁挑下一条"协调还是个粗糙边缘。
 
@@ -265,7 +265,7 @@ CI，Roll 优雅降级：TCR 仍是内层闸门（测试不过提交不留），
 
 **细节：** loop cycle 结束时，Roll 会把 `cost_list_usd`（按当时价格算出的成本）和
 `prices_version`（用了哪个快照版本）写入 usage 事件。dashboard 优先读固化值。厂商
-调价、`roll prices refresh`、Roll 升级都不会回头改写历史数字。
+调价、`roll config prices refresh`、Roll 升级都不会回头改写历史数字。
 
 此功能上线之前的旧 cycle（没有 `cost_list_usd` 字段）会回退到用*当前*快照现算，
 行末显示浅灰色 `[legacy]` 标记 — 提醒你这个数字在调价时可能会漂移。
@@ -273,8 +273,8 @@ CI，Roll 优雅降级：TCR 仍是内层闸门（测试不过提交不留），
 **试试看：**
 
 ```bash
-roll prices show            # 查看当前价格快照
-roll prices refresh         # 拉取最新定价、对比、有变化落新快照
+roll config prices show            # 查看当前价格快照
+roll config prices refresh         # 拉取最新定价、对比、有变化落新快照
 roll loop status --days 7   # 历史 cycle 用的是固化成本
 ```
 
@@ -393,7 +393,7 @@ agent 团队（`$ralplan`、`$ralph`、`$ultragoal`）、`.omx/` 持久状态、
 
 **原因：** Loop 在调用构建 skill **之前**就把 story 标为
 `🔨 In Progress`，只有两个硬门都过了才写 `✅ Done`：(1) TCR commit 数 > 0，
-(2) `roll ci --wait` 通过。任何一个挂了，story 就保持原状 —— 这是设计如此，
+(2) `roll status ci --wait` 通过。任何一个挂了，story 就保持原状 —— 这是设计如此，
 避免假阳性的完成标记。
 
 **原理：** 每个周期获取一个项目级 LOCK
@@ -448,7 +448,7 @@ git push --force-with-lease
 
 **原理：** 每个周期向 `<project>/.roll/loop/runs.jsonl` 追加一条 JSONL，
 包含 story ID、模型、TCR commit 数、耗时、结果、成本（按公开单价）。
-`roll status`、`roll cycle` 与按 Story 收口的 attest 报告把这些——连同真相账本的其余部分——
+`roll status`、`roll loop cycle` 与按 Story 收口的 attest 报告把这些——连同真相账本的其余部分——
 聚合成人类可读界面。实时 watch 是只读视图，会把 live 活动和结构化事件事实合并展示；
 tmux 观测 pane 使用同一个 watch 入口。
 

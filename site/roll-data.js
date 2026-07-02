@@ -14,6 +14,24 @@ window.RollData = (function () {
     '{"ts":"2026-05-17T11:09:18Z","stage":"cycle_end","label":"047","detail":"2 tcr · 6m 12s","outcome":"delivered"}',
   ].join('\n');
 
+  const PUBLIC_COMMAND_SURFACE = [
+    "roll agent",
+    "roll backlog",
+    "roll config",
+    "roll design",
+    "roll doctor",
+    "roll help",
+    "roll idea",
+    "roll init",
+    "roll loop",
+    "roll next",
+    "roll release",
+    "roll setup",
+    "roll status",
+    "roll test",
+    "roll update",
+  ];
+
   // ─── EN ──────────────────────────────────────────────────────────────────
   const EN = {
     UI: {
@@ -147,7 +165,7 @@ window.RollData = (function () {
       { id: "multi-agent", title: "Multi-Agent", blurb: "One vendor doesn't own the keys.", features: [
         { name: "Fail-loud routing", desc: "Execution profiles route roles to agent/model/rig choices. Unavailable requested agents are recorded as unavailable; fallback only happens through explicit policy.", badges: ["highlight"] },
         { name: "Peer negotiation", desc: "Structured negotiation: propose → challenge → refine, up to 3 rounds.", badges: ["core"] },
-        { name: "Cross-Agent Pairing", desc: "A different-vendor agent auto-reviews each delivery for perspective diversity — rational heterogeneous selection, 30s-timeout non-blocking, cost shown in roll pair status. Scaffolded at roll init.", badges: ["new", "highlight"] },
+        { name: "Cross-Agent Pairing", desc: "A different-vendor agent auto-reviews each delivery for perspective diversity — rational heterogeneous selection, 30s-timeout non-blocking, cost shown in loop pairing evidence. Scaffolded at roll init.", badges: ["new", "highlight"] },
         { name: "PR Inbox",  desc: "External PRs get AI review before merge; stale PRs auto-rebase onto main.", badges: ["new"] },
         { name: "PR review skill", desc: "On-demand AI review for any PR, any agent, any git host.", badges: ["new"] },
       ]},
@@ -212,7 +230,7 @@ window.RollData = (function () {
         { name: "Dream",            path: "guide/en/dream.md",             desc: "Nightly code health scan and REFACTOR generation." },
         { name: "Peer",             path: "guide/en/peer.md",              desc: "Cross-agent review protocol — AGREE / REFINE / OBJECT / ESCALATE." },
         { name: "Skills",           path: "guide/en/skills.md",            desc: "Skill catalog and the decision tree for picking the right one." },
-        { name: "Tools & Policy",   path: "guide/en/tools.md",             desc: "Built-in tools (bash / browser / git / github / network / fs / mcp), their per-cycle policy guardrails, and roll tool status." },
+        { name: "Tools & Policy",   path: "guide/en/tools.md",             desc: "Built-in tools (bash / browser / git / github / network / fs / mcp), their per-cycle policy guardrails, and roll doctor tools status." },
         { name: "Migration 2.0",    path: "guide/en/migration-2.0.md",     desc: "Upgrade an existing 1.x project by pinning the old v2 toolchain for the one-time layout move." },
         { name: "Existing Codebase Onboarding", path: "guide/en/legacy-onboarding.md", desc: "Bring roll into an existing codebase via $roll-onboard — 3-minute survey, no surprise edits." },
       ],
@@ -353,7 +371,7 @@ window.RollData = (function () {
       { id: "multi-agent", title: "多 Agent", blurb: "钥匙不归一家供应商。", features: [
         { name: "Fail-loud 路由", desc: "执行剖面把角色路由到 agent/model/rig。请求的 agent 不可用会被记录为 unavailable；fallback 只按显式策略发生。", badges: ["highlight"] },
         { name: "Peer 协商", desc: "结构化协商:提案 → 挑战 → 精炼,最多三轮。", badges: ["core"] },
-        { name: "跨 Agent 结对", desc: "每次交付由一个不同厂商的 agent 自动复检换视角——理性异构选择、30秒超时不阻塞、成本在 roll pair status 可见。roll init 时即生成配置。", badges: ["new", "highlight"] },
+        { name: "跨 Agent 结对", desc: "每次交付由一个不同厂商的 agent 自动复检换视角——理性异构选择、30秒超时不阻塞、成本在 loop pairing evidence 可见。roll init 时即生成配置。", badges: ["new", "highlight"] },
         { name: "PR 收件箱",  desc: "外部 PR 先经 AI 评审再合入;过时 PR 自动 rebase。", badges: ["new"] },
         { name: "PR 评审 skill", desc: "对任意 PR 按需发起 AI 评审,任意 agent、任意 git 平台。", badges: ["new"] },
       ]},
@@ -418,12 +436,12 @@ window.RollData = (function () {
         { name: "Dream",      path: "guide/zh/dream.md",             desc: "夜间代码健康巡检与 REFACTOR 生成。" },
         { name: "Peer",       path: "guide/zh/peer.md",              desc: "跨 Agent 评审协议 — AGREE / REFINE / OBJECT / ESCALATE。" },
         { name: "技能",        path: "guide/zh/skills.md",            desc: "技能目录与选用决策树。" },
-        { name: "工具与策略",   path: "guide/zh/tools.md",             desc: "内置工具(bash / browser / git / github / network / fs / mcp)、各自的每周期策略护栏，以及 roll tool status。" },
+        { name: "工具与策略",   path: "guide/zh/tools.md",             desc: "内置工具(bash / browser / git / github / network / fs / mcp)、各自的每周期策略护栏，以及 roll doctor tools status。" },
         { name: "Migration 2.0", path: "guide/zh/migration-2.0.md",  desc: "升级 1.x 旧版布局项目：pin 旧版 v2 工具链执行一次性布局迁移。" },
         { name: "已有代码库接入", path: "guide/zh/legacy-onboarding.md", desc: "通过 $roll-onboard 把 roll 带进现有代码库——3 分钟问询，不偷改文件。" },
       ],
     },
   };
 
-  return { EN, ZH, CYCLE_NDJSON };
+  return { EN, ZH, CYCLE_NDJSON, PUBLIC_COMMAND_SURFACE };
 })();

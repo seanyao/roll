@@ -25,7 +25,7 @@
 - **同步**Roll 约定到你用的 AI 工具
 - 你得到的项目同时拥有：原来的工作流 + Roll 的项目管理能力
 
-Graft 是**完全可逆**的：跑 `roll offboard` 让 Roll 自己撤销它加进来的全部痕迹（见下文"怎么退出"）。
+Graft 是**完全可逆**的：跑 `roll setup offboard` 让 Roll 自己撤销它加进来的全部痕迹（见下文"怎么退出"）。
 
 ## 分步操作
 
@@ -137,7 +137,7 @@ Roll 只动它**自己的**文件：
 
 ## 怎么退出
 
-`roll init --apply` 会把 Roll 管理的文件、目录、合并 marker 区块、`.gitignore` 行都记到 `.roll/onboard-changeset.yaml`。重复执行同一个 plan 会保留并去重这份 metadata，不会丢掉第一次 apply 的 offboard 记录。如果 apply 中途失败，先检查 changeset，再在确认后运行 `roll offboard --confirm` 回滚 Roll 管理的产物。
+`roll init --apply` 会把 Roll 管理的文件、目录、合并 marker 区块、`.gitignore` 行都记到 `.roll/onboard-changeset.yaml`。重复执行同一个 plan 会保留并去重这份 metadata，不会丢掉第一次 apply 的 offboard 记录。如果 apply 中途失败，先检查 changeset，再在确认后运行 `roll setup offboard --confirm` 回滚 Roll 管理的产物。
 
 已有 `AGENTS.md` 会被保留。Roll 只会在稳定的 `<!-- roll:onboard:start -->` / `<!-- roll:onboard:end -->` marker 中追加自己管理的区块，之后 offboard 只剥离这些区块。
 
@@ -145,7 +145,7 @@ Roll 只动它**自己的**文件：
 
 ```bash
 cd your-project
-roll offboard
+roll setup offboard
 ```
 
 这是 dry-run，不会真的删除。输出会列出清单中记录的所有产物，以及将要从 `.gitignore` 撤销的行。
@@ -153,20 +153,20 @@ roll offboard
 **确认后执行：**
 
 ```bash
-roll offboard --confirm
+roll setup offboard --confirm
 ```
 
 Roll 不创建的文件 / 目录原封不动；已有用户文件里的 Roll marker 区块会被剥离，但文件本身不会被删除；你自己加到 `.gitignore` 的内容也保留。执行成功后，清单文件本身也会被删除。
 
 安全保障：
 
-- 找不到 `.roll/onboard-changeset.yaml`（比如较早版本的 Roll 没记录、或者这个项目从没跑过 `roll init --apply`），`roll offboard` 拒绝执行，并打印手动 `rm` 命令，不会自己猜。
-- 如果清单里的路径不在当前项目根目录下（跨项目串路径），`roll offboard` 也拒绝执行，并提示你切到正确目录再跑。
+- 找不到 `.roll/onboard-changeset.yaml`（比如较早版本的 Roll 没记录、或者这个项目从没跑过 `roll init --apply`），`roll setup offboard` 拒绝执行，并打印手动 `rm` 命令，不会自己猜。
+- 如果清单里的路径不在当前项目根目录下（跨项目串路径），`roll setup offboard` 也拒绝执行，并提示你切到正确目录再跑。
 
 **完全卸载（全机器）：**
 
 ```bash
-roll offboard --confirm
+roll setup offboard --confirm
 npm uninstall -g @seanyao/roll
 ```
 

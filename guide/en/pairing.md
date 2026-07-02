@@ -10,7 +10,7 @@ model: `Scope -> Role -> Binding -> Agent -> optional Model`. The agent is the
 finite seven-name identity (`claude`, `kimi`, `codex`, `pi`, `agy`, `reasonix`, `cursor`);
 the model is optional data carried by that agent.
 
-Pairing is distinct from [`roll peer`](peer.md): peer is an on-demand,
+Pairing is distinct from [`$roll-peer`](peer.md): peer is an on-demand,
 multi-round negotiation you (or the loop's risk gate) trigger; pairing is an
 always-available, one-way second pass wired into the cycle and governed by the
 Project Scope `evaluate` binding.
@@ -46,12 +46,9 @@ the current resolution.
 
 ## Seeing what it does — observability
 
-```bash
-roll pair status
-```
-
-shows the pool (who can pair, their vendor, declared capability, and **why** an
-agent is excluded), plus **how much pairing has cost**:
+Loop cycle evidence and role views show the pool (who can pair, their vendor,
+declared capability, and **why** an agent is excluded), plus **how much pairing
+has cost**:
 
 ```
   Cross-Agent Pairing — pool status
@@ -113,14 +110,14 @@ self-score):
   fresh-session Reviewer to score the delivery. The note lands in the card's
   `notes/` with provenance — `scoring: pair`, `scored-by: <agent>`, and the
   fresh-session id (so independence is verifiable).
-- **Manually**: `roll pair score <story-id> --summary "<delivery summary>"`
-  runs the same adapter from a fresh session.
-- **Design output** (`roll-design`, no loop cycle): `roll pair score --design
-  <story-id> --file <design-summary>` triggers the same fresh-session Reviewer to
-  grade the **design** (INVEST split, visual-AC completeness, `deliverable_url`
-  correctness, domain/spec consistency) — not code. It stamps the score
-  `stage=design`. The designing agent triggers but never grades its own work;
-  no peer available → honest unscored (fail-loud), never a self-grade.
+- **Loop delivery**: after the acceptance gate passes, the runner triggers the
+  same adapter from a fresh session.
+- **Design output** (`roll-design`, no loop cycle): the design workflow can
+  trigger a fresh-session Reviewer to grade the **design** (INVEST split,
+  visual-AC completeness, `deliverable_url` correctness, domain/spec
+  consistency) — not code. It stamps the score `stage=design`. The designing
+  agent triggers but never grades its own work; no peer available → honest
+  unscored (fail-loud), never a self-grade.
 - **The builder's own agent never scores its own cycle when an independent peer
   exists**: whenever any other agent is installed, the builder is excluded from
   the score pool entirely — an independent Evaluator grades the delivery or the
@@ -149,7 +146,7 @@ self-score):
   duplicate blocks (different scores or verdicts), template `<placeholder>` echoes,
   out-of-range scores, and unsupported verdicts are still rejected.
 - **Rejections are observable, not generic**: when a reply is not accepted, the
-  cycle records a specific reason instead of a bare "unparseable". `roll cycle
+  cycle records a specific reason instead of a bare "unparseable". `roll loop cycle
   <id> --roles` distinguishes an Evaluator that **returned score-like text but was
   not accepted** (e.g. conflicting duplicate blocks, a missing field) from one that
   **returned no score content** at all, with the precise reason on the role line.

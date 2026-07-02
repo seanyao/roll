@@ -9,7 +9,7 @@ function doc(path: string): string {
 }
 
 // US-OBS-036 — closing docs card for US-OBS-032..035. The shipped surfaces are
-// the `summary.md` / `summary.json` role artifacts, the `roll cycle <id> --roles`
+// the `summary.md` / `summary.json` role artifacts, the `roll loop cycle <id> --roles`
 // view, the Execution Cast report block, and the peer/scorer parse-failure
 // artifacts. These tests pin the user-facing docs to that reality.
 describe("US-OBS-036 — cycle role visibility docs", () => {
@@ -18,7 +18,7 @@ describe("US-OBS-036 — cycle role visibility docs", () => {
     expect(en).toContain("## Cycle Role Visibility");
     expect(en).toContain("summary.md");
     expect(en).toContain("summary.json");
-    expect(en).toContain("roll cycle <id> --roles");
+    expect(en).toContain("roll loop cycle <id> --roles");
     expect(en).toContain("Execution Cast");
     // selected vs returned vs accepted vocabulary
     expect(en).toMatch(/selected[\s\S]{0,400}returned[\s\S]{0,400}accepted/);
@@ -29,7 +29,7 @@ describe("US-OBS-036 — cycle role visibility docs", () => {
     expect(zh).toContain("## Cycle 角色可观测");
     expect(zh).toContain("summary.md");
     expect(zh).toContain("summary.json");
-    expect(zh).toContain("roll cycle <id> --roles");
+    expect(zh).toContain("roll loop cycle <id> --roles");
     expect(zh).toContain("Execution Cast");
     expect(zh).toContain("accepted evaluator");
   });
@@ -43,10 +43,10 @@ describe("US-OBS-036 — cycle role visibility docs", () => {
 
   it("ai-agents guides point each role at its visibility surface (en+zh)", () => {
     const en = doc("guide/en/ai-agents.md");
-    expect(en).toContain("roll cycle <id> --roles");
+    expect(en).toContain("roll loop cycle <id> --roles");
     expect(en).toMatch(/who was [\s\S]{0,40}Builder[\s\S]{0,80}Evaluator/i);
     const zh = doc("guide/zh/ai-agents.md");
-    expect(zh).toContain("roll cycle <id> --roles");
+    expect(zh).toContain("roll loop cycle <id> --roles");
     expect(zh).toMatch(/谁是?[\s\S]{0,40}(构建者|Builder)/);
   });
 
@@ -87,9 +87,9 @@ describe("US-OBS-041 — collaboration observability docs", () => {
   it("loop guides document collab commands and protocol semantics (en+zh)", () => {
     const en = doc("guide/en/loop.md");
     expect(en).toContain("## Collaboration View");
-    expect(en).toContain("roll cycle <id> --collab");
+    expect(en).toContain("roll loop cycle <id> --collab");
     expect(en).toContain("roll supervisor live --collab");
-    expect(en).toContain("roll cycle --legend");
+    expect(en).toContain("roll loop cycle --legend");
     expect(en).toMatch(/Supervisor\/Designer[\s\S]{0,160}Builder[\s\S]{0,160}Peer Reviewer[\s\S]{0,160}Evaluator[\s\S]{0,160}Gate/);
     expect(en).toMatch(/observe\/advise[\s\S]{0,160}design\/split[\s\S]{0,160}Builder override/);
     expect(en).toMatch(/session-based[\s\S]{0,220}fresh sessions[\s\S]{0,220}artifact handoff/);
@@ -99,9 +99,9 @@ describe("US-OBS-041 — collaboration observability docs", () => {
 
     const zh = doc("guide/zh/loop.md");
     expect(zh).toContain("## 协同视图");
-    expect(zh).toContain("roll cycle <id> --collab");
+    expect(zh).toContain("roll loop cycle <id> --collab");
     expect(zh).toContain("roll supervisor live --collab");
-    expect(zh).toContain("roll cycle --legend");
+    expect(zh).toContain("roll loop cycle --legend");
     expect(zh).toMatch(/Supervisor\/Designer[\s\S]{0,160}Builder[\s\S]{0,160}Peer Reviewer[\s\S]{0,160}Evaluator[\s\S]{0,160}Gate/);
     expect(zh).toMatch(/旁观\/建议[\s\S]{0,160}设计\/拆分[\s\S]{0,160}Builder override/);
     expect(zh).toMatch(/按 session 独立[\s\S]{0,220}fresh session[\s\S]{0,220}artifact handoff/);
@@ -112,9 +112,9 @@ describe("US-OBS-041 — collaboration observability docs", () => {
 
   it("README and command help expose collab and legend entries", () => {
     const readme = doc("README.md");
-    expect(readme).toContain("roll cycle <id> --collab");
+    expect(readme).toContain("roll loop cycle <id> --collab");
     expect(readme).toContain("roll supervisor live --collab");
-    expect(readme).toContain("roll cycle --legend");
+    expect(readme).toContain("roll loop cycle --legend");
 
     const cycleTs = doc("packages/cli/src/commands/cycle.ts");
     expect(cycleTs).toContain("roll cycle <id> --collab");

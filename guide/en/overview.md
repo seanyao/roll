@@ -63,7 +63,7 @@ roll init --apply
 roll loop on
 ```
 
-Roll diagnoses current code without destructive migration, creates or updates Roll metadata after review, and then reasons over the existing backlog/docs/context. Inspect state through CLI-first observability: `roll status`, `roll loop watch`, `roll loop runs`, `roll cycle <id>`, alerts, and story reports.
+Roll diagnoses current code without destructive migration, creates or updates Roll metadata after review, and then reasons over the existing backlog/docs/context. Inspect state through CLI-first observability: `roll status`, `roll loop watch`, `roll loop runs`, `roll loop cycle <id>`, alerts, and story reports.
 
 **Scoped role routing**
 
@@ -115,14 +115,14 @@ Runtime availability is explicit. Unavailable agents are recorded as unavailable
 
 - `roll status` — verdict-first truth summary (LOOP · CYCLE · RELEASE · STORY with attest coverage), then convention/AI-client sync health `[core]`
 - `roll loop watch` — CLI-first live activity stream for the current cycle
-- `roll cycle <id>` — one cycle's trace and evidence pointers
+- `roll loop cycle <id>` — one cycle's trace and evidence pointers
 - `roll loop runs` — per-cycle TerminalOutcome history with TCR count and duration
 - `roll loop alert` — view, acknowledge, and clear loop alerts
 - Story report — the Story's own `latest/<id>-report.html` is the human acceptance entry `[highlight]`
 
 ### Current Observability
 
-The current product is CLI-first. `roll status`, `roll loop watch`, `roll loop runs`, `roll cycle <id>`, `roll pulse`, alerts, and story-scoped attest reports are the active truth surfaces. `roll index` is an on-demand static archive/repair renderer, useful for CI artifacts and migration reconciliation; it is not the current truth surface.
+The current product is CLI-first. `roll status`, `roll loop watch`, `roll loop runs`, `roll loop cycle <id>`, `roll status pulse`, alerts, and story-scoped attest reports are the active truth surfaces. the archive rebuild is an on-demand static archive/repair renderer, useful for CI artifacts and migration reconciliation; it is not the current truth surface.
 
 The three-state delivery ladder still matters: **claimed -> merged -> attested**. A backlog row that says done is only `claimed`; it becomes `merged` when the PR lands on `main`, and `attested` when story-scoped evidence is on file. Use `roll supervisor live` for the CLI-first multi-role board; browser/TUI Prime Agent Live Console remains future work.
 
@@ -136,7 +136,7 @@ The three-state delivery ladder still matters: **claimed -> merged -> attested**
 ### Multi-Agent
 
 - Fail-loud Routing — requested agent/model/rig unavailable → record the limit and pause or route only through an explicit fallback policy `[highlight]`
-- `$roll-peer` — multi-round negotiation; `roll peer` records one-shot structured review facts `[core]`
+- `$roll-peer` — multi-round negotiation; the structured adapter records one-shot reviewer facts `[core]`
 - PR Inbox — external PRs get AI review before merge; stale PRs auto-rebase `[new]`
 - `roll review-pr` — on-demand AI review for any PR, any agent `[new]`
 

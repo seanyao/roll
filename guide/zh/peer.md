@@ -1,35 +1,17 @@
-# roll peer — 结构化外部评审
+# $roll-peer — 结构化外部评审
 
-`roll peer` 通过与 goal-mode 终审相同的结构化 adapter，运行一次外部 provider
-reviewer。它是 TS-native 命令，不会回退到已退役的 bash peer surface。
+`$roll-peer` 通过与 goal-mode 终审相同的结构化 adapter 运行外部 provider
+reviewer。旧的顶层 peer CLI 已退役；需要这个能力时，在 agent 工作流里调用 skill。
 
-需要 agent 工作流里的多轮协商协议时，用 `$roll-peer`。需要从 Claude、Codex、
-Kimi、Pi 或其它已安装外部 CLI 留下一条耐久的一次性 reviewer fact 时，用
-`roll peer`。
+需要多轮协商协议，或需要从 Claude、Codex、Kimi、Pi 等已安装外部 CLI 记录 durable
+reviewer fact 时，使用 `$roll-peer`。
 
-## 命令参考
+## Prompt 形状
 
-```bash
-roll peer --reviewer codex --prompt "Review this plan and return VERDICT/REASON/FINDING lines"
-roll peer --reviewer kimi --file /tmp/review-prompt.md --json
-roll peer --worker claude --mode hetero --file /tmp/final-review.md
-roll peer --mode self --reviewer claude --prompt "Self-check this evidence"
-roll peer --timeout-ms 300000 --reviewer pi --file /tmp/review.md
+```text
+$roll-peer
+Review this plan and return VERDICT / REASON / FINDING lines.
 ```
-
-参数：
-
-| 参数 | 含义 |
-|------|------|
-| `--reviewer <agent>` | 直接指定 reviewer。 |
-| `--worker <agent>` | 用于异构选择的工作 agent；默认取当前项目配置的 agent。 |
-| `--mode auto` | 按排序依次尝试异构 reviewer；全部异构候选失败后才降级为同 provider self review。 |
-| `--mode hetero` | 必须不同 provider；不可用时写 `ERROR` fact。 |
-| `--mode self` | 允许同 provider review。 |
-| `--prompt <text>` | 内联 prompt 文本。 |
-| `--file <path>` | 从文件读取 prompt。 |
-| `--json` | 将结构化 reviewer fact 打印为 JSON。 |
-| `--timeout-ms <ms>` | 单次 review 超时；默认 180000 ms。 |
 
 Reviewer 输出必须包含且只包含一行 verdict：
 
@@ -43,7 +25,7 @@ verdict 行缺失或出现多行时，adapter 保守判为 `REQUEST_CHANGES`。
 
 ## 记录的事实
 
-每次运行都会向这里追加一行 JSON：
+每次采信的 review 都会向这里追加一行 JSON：
 
 ```text
 .roll/peer/runs.jsonl
@@ -56,27 +38,26 @@ verdict 行缺失或出现多行时，adapter 保守判为 `REQUEST_CHANGES`。
 ```
 
 记录字段包括 reviewer agent、provider、command family、verdict、reason、
-findings、timeout/error 状态、耗时、transcript 路径和 evidence 路径。
-goal-mode 终审会在 `goal:final_review` 事件上写入同一组事实字段。
+findings、timeout/error 状态、耗时、transcript 路径和 evidence 路径。goal-mode
+终审会在 `goal:final_review` 事件上写入同一组事实字段。
 
-### 解析失败与原始产物
+## 解析失败
 
-当某个 reviewer 或 scorer 在 autonomous cycle 里跑了，但输出**无法解析**
-（如 `SCORE` 行前有控制字符，或缺少 `VERDICT` 行）时，这次尝试不会被悄悄丢弃。
-原始尝试会被捕获到 `.roll/loop/peer/` 下，该 agent 在 cycle 角色阵容里那一行显示
-`failed`，带一个 `cause`（如 `unparseable`）和一个指向该文件的 `raw artifact:`
-指针。这让失败可审计，而非隐形——读法见
-[Cycle 角色可观测](./loop.md#cycle-角色可观测)，排障步骤见
+当 reviewer 或 scorer 在 autonomous cycle 里跑了，但输出**无法解析**时，这次尝试
+不会被悄悄丢弃。原始尝试会被捕获到 `.roll/loop/peer/` 下，该 agent 在 cycle
+角色阵容里显示 `failed`，带 `cause` 和 `raw artifact:` 指针。
+
+读法见 [Cycle 角色可观测](./loop.md#cycle-角色可观测)，排障步骤见
 [排障：无法解析的 score/review](../../docs/live-console.md#故障排查)。
 
 ## 外部 reviewer 与辅助 subagent
 
-`roll peer` 面向外部 provider reviewer CLI。Codex 内部 subagent 可以辅助并行分析，
-但不等同于外部 peer review。adapter 会把 `codex-subagent:*` / `subagent:*`
-身份视为 auxiliary，排除在异构 reviewer 选择之外。
+`$roll-peer` 面向外部 provider reviewer CLI。Codex 内部 subagent 可以辅助并行分析，
+但不等同于外部 peer review。adapter 会把 `codex-subagent:*` / `subagent:*` 身份视为
+auxiliary，排除在异构 reviewer 选择之外。
 
 ## 与 pairing 的关系
 
-`roll pair` 是构建期 gate：自主 cycle 中风险较高的交付 diff 会被异构 peer 复查，
-并写入 cycle 证据。`roll peer` 是操作员命令和可复用 adapter，用于一次性结构化
-review。两者共享 provider 多样性原则，但服务的 workflow 不同。
+Loop pairing 是构建期 gate：自主 cycle 中风险较高的交付 diff 会被异构 peer 复查，
+并写入 cycle 证据。`$roll-peer` 是 agent 调用的结构化外部评审 skill。两者共享
+provider 多样性原则，但服务不同工作流。

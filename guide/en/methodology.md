@@ -40,7 +40,7 @@ graph TB
     end
 
     subgraph "Loop C: Observability & Maintenance"
-        C1["roll status / roll cycle / story reports<br/>CLI-first Truth Surface"] --> C2{"Drift or health issue?"}
+        C1["roll status / roll loop cycle / story reports<br/>CLI-first Truth Surface"] --> C2{"Drift or health issue?"}
         C2 -->|Yes| C3["$roll-debug / $roll-doc-audit / $roll-doctor<br/>Diagnostics + Root Cause Analysis"]
         C3 --> C5["$roll-fix / REFACTOR<br/>Correction filed to backlog"]
         C6["$roll-.dream<br/>Nightly Code-Health Scan"] --> C2
@@ -67,7 +67,7 @@ How the three loops interact:
 - **Loop B → Loop C**: Each delivery feeds the truth ledger, so the maintenance loop sees shipped / in-progress / queue / truth drift / release readiness as facts.
 - **Loop C → Loop A**: Drift or code-health issues surfaced by the observability surfaces become `FIX-XXX` / `REFACTOR-XXX` entries; anything beyond a quick fix escalates back to the design loop for reassessment.
 
-**Optional autonomous layer** (enabled via `roll loop on`): `roll-loop` executes pending BACKLOG items on a configurable schedule; `roll-.dream` scans code health nightly and produces `REFACTOR` entries. The human reads CLI-first surfaces (`roll status`, `roll loop watch`, `roll cycle`, alerts, and story reports). The human retains sole authority over `roll-release`. See §9 for details.
+**Optional autonomous layer** (enabled via `roll loop on`): `roll-loop` executes pending BACKLOG items on a configurable schedule; `roll-.dream` scans code health nightly and produces `REFACTOR` entries. The human reads CLI-first surfaces (`roll status`, `roll loop watch`, `roll loop cycle`, alerts, and story reports). The human retains sole authority over `roll-release`. See §9 for details.
 
 ---
 
@@ -368,7 +368,7 @@ A Roll project's CI pipeline is triggered on every push / PR:
                     # Records the run into the truth ledger
 ```
 
-Every CI run is recorded into the same truth ledger that Loop C reads from. That is the infrastructure-level unity across all three loops: Loop C's observability surfaces (`roll status`, `roll cycle`, story reports, truth signals) are projections of the same delivery facts CI produces — not a separate monitoring system bolted on top.
+Every CI run is recorded into the same truth ledger that Loop C reads from. That is the infrastructure-level unity across all three loops: Loop C's observability surfaces (`roll status`, `roll loop cycle`, story reports, truth signals) are projections of the same delivery facts CI produces — not a separate monitoring system bolted on top.
 
 **4.4.4 The CD and Verification Gate Dependency Chain**
 
@@ -390,7 +390,7 @@ Without CD there is no verifiable target, rendering the Verification Gate meanin
 
 `$roll-peer` implements bilateral negotiation-style code review across AI clients. Supports arbitrary pairing between Claude, Kimi, DeepSeek, and Codex.
 
-How it works: the initiating agent submits a change summary and diff; the receiving agent independently reviews and issues an APPROVE / REFINE / OBJECT verdict. REFINE triggers revision and re-review; OBJECT escalates to discussion. The `$roll-peer` skill owns the multi-round protocol; the `roll peer` CLI is the TS-native one-shot adapter that records structured reviewer facts in `.roll/peer/runs.jsonl` plus transcripts.
+How it works: the initiating agent submits a change summary and diff; the receiving agent independently reviews and issues an APPROVE / REFINE / OBJECT verdict. REFINE triggers revision and re-review; OBJECT escalates to discussion. The `$roll-peer` skill owns the multi-round protocol; the TS-native adapter records structured reviewer facts in `.roll/peer/runs.jsonl` plus transcripts.
 
 Automatic trigger: `$roll-design` optionally invokes `$roll-peer` during direction review and plan review phases, where a different agent challenges the chosen direction or complete plan.
 
@@ -430,7 +430,7 @@ Loop C is observability and maintenance: status, cycle trace, story reports, deb
 
 | Classical Methodology | Roll Implementation |
 |----------------------|--------------------|
-| SRE (Site Reliability Engineering) | `roll status` / `roll cycle` / story reports: delivery truth surface from a single ledger |
+| SRE (Site Reliability Engineering) | `roll status` / `roll loop cycle` / story reports: delivery truth surface from a single ledger |
 | Observability | CLI-first truth signals (`roll loop watch`, `roll loop status`, cycle traces, release readiness) |
 | Continuous maintenance | `$roll-.dream`: nightly code-health scans that file `REFACTOR-XXX` entries |
 | Digital Forensics + RCA | `$roll-debug` / `$roll-doc-audit` / `$roll-doctor`: project-owned diagnostics, documentation, and toolchain health |
@@ -445,7 +445,7 @@ Loop C is not production patrol. It is the mature delivery-control surface: it r
 |---------|--------------|
 | `roll status` | Sync status, skill links, detected AI tools, and the live delivery state |
 | `roll loop watch` | Live ActivitySignal stream for the current cycle |
-| `roll cycle <id>` | One cycle's trace tape, PR/diff pointers, and evidence links |
+| `roll loop cycle <id>` | One cycle's trace tape, PR/diff pointers, and evidence links |
 | Story attest report | The Story's own AC map, screenshots, command artifacts, and verdicts |
 | Truth signals | release readiness, `roll loop status`, and machine-readable event facts |
 
@@ -594,7 +594,7 @@ It is off by default. Enabling it requires an explicit `roll loop on`.
 
 **`roll-.dream`** — Runs nightly (03:00 local) via macOS launchd (Linux: crontab). Scans the codebase for dead code, architectural drift against `.roll/domain/`, pruning candidates, and emerging patterns. Outputs `REFACTOR-XXX` entries to BACKLOG and a log to `.roll/dream/YYYY-MM-DD.md`.
 
-**Reading delivery state** — There is no owner-brief skill. The human reads CLI-first surfaces (`roll status`, `roll loop watch`, `roll cycle <id>`, `roll loop status`, alerts, and story reports) on their own schedule. This is distinct from `roll-.changelog` (the user-facing changelog).
+**Reading delivery state** — There is no owner-brief skill. The human reads CLI-first surfaces (`roll status`, `roll loop watch`, `roll loop cycle <id>`, `roll loop status`, alerts, and story reports) on their own schedule. This is distinct from `roll-.changelog` (the user-facing changelog).
 
 ### 9.3 Why Local Scheduling, Not GitHub Actions
 
@@ -653,7 +653,7 @@ This keeps the human informed without requiring them to be present for every ste
 roll loop on|off          # enable / disable scheduled execution for this project
 roll loop now             # trigger one cycle immediately
 roll loop status          # show scheduler state + any ALERT
-roll cycle <id>           # inspect one cycle trace and evidence pointers
+roll loop cycle <id>           # inspect one cycle trace and evidence pointers
 roll agent                # inspect Machine Scope, Project Scope, roles, pool
 roll agent migrate        # convert legacy agent files to roll-agents/v1
 roll agent list           # show installed agents
@@ -676,7 +676,7 @@ roll                      # project dashboard (in project dir): loop status + su
 
 - **Multi-Agent coordination overhead**: `$roll-build` evaluates Action dependencies to determine whether to launch parallel sub-Agents, but cross-Agent state synchronization and conflict resolution currently depend on conventions rather than enforced protocols, incurring coordination overhead in high-concurrency scenarios.
 - **Framework coupling**: Skill definitions are written in Markdown and rely on AI clients' ability to interpret natural language instructions — execution precision varies across different models. Each Skill now pins a model in its frontmatter (`model:` — e.g. Opus for `roll-design`, Haiku for `roll-idea`) and declares a tool allowlist (`allowed-tools:`), mitigating precision drift and accidental tool misuse, though both fields still depend on the client honoring them.
-- **Observability is reactive**: Loop C's truth surfaces (`roll status`, `roll cycle`, story reports) and `$roll-.dream` scans surface drift and code-health issues from delivery facts and nightly analysis, but they do not continuously re-exercise shipped features the way a live regression suite would — a regression that produces no new evidence and no failing test can persist until the next acceptance run or scan touches it.
+- **Observability is reactive**: Loop C's truth surfaces (`roll status`, `roll loop cycle`, story reports) and `$roll-.dream` scans surface drift and code-health issues from delivery facts and nightly analysis, but they do not continuously re-exercise shipped features the way a live regression suite would — a regression that produces no new evidence and no failing test can persist until the next acceptance run or scan touches it.
 
 ---
 
@@ -709,7 +709,7 @@ Commands fall into two categories: bash commands run pure shell logic; agent com
 | `roll backlog` | Show all pending tasks from `.roll/backlog.md` |
 | `roll agent [migrate\|list]` | Inspect/migrate scoped agent roles in `~/.roll/agents.yaml` and `.roll/agents.yaml` |
 | `roll loop <on\|off\|now\|status\|runs\|log\|story\|events\|eval\|signals\|pause\|resume\|reset\|gc>` | 🤖 Manage the autonomous BACKLOG executor (three lanes: loop/dream/pr) |
-| `roll cycle <id>` | Show one cycle's trace tape, PR/diff pointers, and evidence links |
-| `roll pair [status\|score]` | 🤖 Pairing observability and explicit review scoring; new defaults live in `.roll/agents.yaml` |
+| `roll loop cycle <id>` | Show one cycle's trace tape, PR/diff pointers, and evidence links |
+| Loop pairing evidence | 🤖 Pairing observability and explicit review scoring; new defaults live in `.roll/agents.yaml` |
 | `roll release [ship\|waiver]` | Release guidance · gated tag push · recorded drift waiver — npm publish stays human |
 | `roll` (no args, in project dir) | Dashboard: loop status, pending count, latest summary |

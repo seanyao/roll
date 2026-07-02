@@ -25,7 +25,7 @@ This page covers **graft**. For seed vs. replant, see [adoption patterns](https:
 - **Syncs** Roll conventions to whichever AI tools you use
 - Leaves you with a project that has BOTH its original workflow AND Roll's project-management capabilities
 
-The graft is **fully reversible**: run `roll offboard` and Roll undoes exactly what it added (see [How to exit](#how-to-exit) below).
+The graft is **fully reversible**: run `roll setup offboard` and Roll undoes exactly what it added (see [How to exit](#how-to-exit) below).
 
 ## Step by step
 
@@ -139,7 +139,7 @@ If you've already got a `CONTRIBUTING.md` or a `.github/` workflow, Roll won't r
 
 ## How to exit
 
-`roll init --apply` records every Roll-owned file, directory, merged marker block, and `.gitignore` line it adds into `.roll/onboard-changeset.yaml`. Re-running the same plan keeps that metadata and deduplicates entries instead of losing the original offboard record. If apply fails midway, inspect the changeset and run `roll offboard --confirm` after review to reverse Roll-owned artifacts.
+`roll init --apply` records every Roll-owned file, directory, merged marker block, and `.gitignore` line it adds into `.roll/onboard-changeset.yaml`. Re-running the same plan keeps that metadata and deduplicates entries instead of losing the original offboard record. If apply fails midway, inspect the changeset and run `roll setup offboard --confirm` after review to reverse Roll-owned artifacts.
 
 Existing `AGENTS.md` files are preserved. Roll appends its managed sections between stable `<!-- roll:onboard:start -->` / `<!-- roll:onboard:end -->` markers so offboard can strip only those sections later.
 
@@ -147,7 +147,7 @@ Existing `AGENTS.md` files are preserved. Roll appends its managed sections betw
 
 ```bash
 cd your-project
-roll offboard
+roll setup offboard
 ```
 
 This is a dry-run — no files are removed. The output lists every artefact the changeset recorded and the `.gitignore` lines that will be reverted.
@@ -155,20 +155,20 @@ This is a dry-run — no files are removed. The output lists every artefact the 
 **Apply the rollback:**
 
 ```bash
-roll offboard --confirm
+roll setup offboard --confirm
 ```
 
 Files and directories that Roll did not create are left untouched. Marker-wrapped Roll sections are removed from existing owner files without deleting the file. Lines you added to `.gitignore` yourself are preserved. The changeset file itself is removed at the end of a successful apply.
 
 Safety:
 
-- If `.roll/onboard-changeset.yaml` is missing (e.g. you ran an earlier Roll version that didn't track it, or the project was never onboarded with `roll init --apply`), `roll offboard` refuses and prints the manual `rm` commands instead. It will never guess.
-- If the changeset names paths that resolve outside the current project (cross-project contamination), `roll offboard` refuses and tells you to run it in the right directory.
+- If `.roll/onboard-changeset.yaml` is missing (e.g. you ran an earlier Roll version that didn't track it, or the project was never onboarded with `roll init --apply`), `roll setup offboard` refuses and prints the manual `rm` commands instead. It will never guess.
+- If the changeset names paths that resolve outside the current project (cross-project contamination), `roll setup offboard` refuses and tells you to run it in the right directory.
 
 **Full uninstall (machine-wide):**
 
 ```bash
-roll offboard --confirm
+roll setup offboard --confirm
 npm uninstall -g @seanyao/roll
 ```
 

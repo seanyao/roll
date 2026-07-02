@@ -106,7 +106,7 @@ Runtime availability is explicit. Unavailable agents are recorded as unavailable
 ### Story Lifecycle
 
 - `$roll-idea` — one-liner capture: instant FIX or IDEA backlog entry `[core]`
-- `roll design` / `$roll-design` — DDD-backed planning: clarify → design → split into INVEST stories. `roll design` launches the skill in your AI agent from the command line. `[core]`
+- `roll design` / `$roll-design` — DDD-backed planning: clarify → design → split into INVEST stories. `roll design` launches the skill in your AI agent from the command line and renders detailed designs as a self-contained Design Review Page. `[core]`
 - `$roll-build` — Builder role execution: TCR story execution → worktree → PR → evidence `[core]`
 - `$roll-fix` — fast-path bug fix, same CI gate, lighter ceremony
 - Evaluator role — independent review, visual evidence checks, score/attest contracts where the execution profile requires it

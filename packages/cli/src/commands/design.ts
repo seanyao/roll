@@ -9,7 +9,7 @@
  * the design lives, and what to do next.
  */
 import { spawnSync, type SpawnSyncOptions } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { t, v2Catalog, v3Catalog, type Lang } from "@roll/spec";
 import { normalizerFor, newNormalizerState, parseBacklog, type ActivitySignal } from "@roll/core";
@@ -22,6 +22,7 @@ import {
   readPrimaryAgent,
   readSkillBody,
 } from "../lib/interactive-agent.js";
+import { renderDesignReviewPageFromMarkdown } from "../lib/review-page.js";
 
 function lang(): Lang {
   return currentLang();
@@ -184,6 +185,37 @@ function isIdeaTarget(target: string | null): boolean {
   return target !== null && /^IDEA-/i.test(target);
 }
 
+function renderDesignReviewPageForTarget(ctx: RunContext, cardsCreated: number): void {
+  if (ctx.target === null || ctx.fromFile !== undefined) return;
+  const epic = lookupEpic(ctx.target, ctx.cwd);
+  if (epic === null) return;
+  const base = join(".roll", "features", epic, ctx.target);
+  const md = join(base, "spec.md");
+  const absMd = resolve(ctx.cwd, md);
+  if (!existsSync(absMd) || !hasDetailedDesign(absMd)) return;
+  const markdown = readFileSync(absMd, "utf8");
+  const html = renderDesignReviewPageFromMarkdown({
+    id: ctx.target,
+    title: ctx.target,
+    sourceSpecPath: md,
+    status: cardsCreated > 0 ? "cards-created" : isIdeaTarget(ctx.target) ? "awaiting-signoff" : "draft",
+    generatedAt: new Date(ctx.startTs).toISOString(),
+    cardsCreated,
+    nextAction: cardsCreated > 0
+      ? t(v3Catalog, ctx.lang, "design.next.cards_created")
+      : isIdeaTarget(ctx.target)
+        ? t(v3Catalog, ctx.lang, "design.next.review_and_split", ctx.target)
+        : t(v3Catalog, ctx.lang, "design.next.no_cards", ctx.target),
+    markdown,
+    lang: ctx.lang,
+  });
+  const out = resolve(ctx.cwd, base, "design-review.html");
+  mkdirSync(dirname(out), { recursive: true });
+  const tmp = `${out}.tmp`;
+  writeFileSync(tmp, html, "utf8");
+  renameSync(tmp, out);
+}
+
 function isQuestionLike(summary: string): boolean {
   return /[?？]/.test(summary);
 }
@@ -307,6 +339,9 @@ function printStartBlock(ctx: RunContext): void {
 function printHandoff(ctx: RunContext, statusCode: number, rawTranscript: string): void {
   const l = ctx.lang;
   const epic = ctx.target !== null ? lookupEpic(ctx.target, ctx.cwd) : null;
+  const afterBacklog = readBacklogItems(ctx.cwd);
+  const newCards = afterBacklog.filter((a) => !ctx.beforeBacklog.some((b) => b.id === a.id)).length;
+  renderDesignReviewPageForTarget(ctx, newCards);
   let designPath: string | undefined;
   let reviewPagePath: string | undefined;
   if (epic !== null && ctx.target !== null) {
@@ -320,8 +355,6 @@ function printHandoff(ctx: RunContext, statusCode: number, rawTranscript: string
     if (existsSync(resolve(ctx.cwd, reviewHtml))) reviewPagePath = reviewHtml;
     else if (existsSync(resolve(ctx.cwd, html))) reviewPagePath = html;
   }
-  const afterBacklog = readBacklogItems(ctx.cwd);
-  const newCards = afterBacklog.filter((a) => !ctx.beforeBacklog.some((b) => b.id === a.id)).length;
 
   let status: string;
   let why: string | undefined;

@@ -2,7 +2,21 @@
 
 ## Unreleased
 
+### 可见性
+- `roll cycles` 现在能看清 Builder 和模型身份，不再把内部模型名当成 agent（FIX-1066, FIX-1067）`[loop-observability]`
+- 协同视图补齐协议图例，TCR 节奏能区分活跃大步和真实停滞（US-OBS-037, US-OBS-042）`[loop-observability]`
+- CLI、HTML 和文档现在按单一语言显示，并说明如何切换和审计语言表面（US-LANG-001, US-LANG-003, US-LANG-004, US-LANG-005）`[i18n]`
+
+### 自动化流水线
+- Cursor 进入正式 agent roster，角色选角也会结合能力和健康状态排序（US-AGENT-048, US-AGENT-049）`[agents]`
+- Builder 路由会避开 Prime 角色，并解释候选池、排除原因和最终选择（FIX-1047）`[loop-engine]`
+- 公开命令面有了真相源，辅助命令收入口径和帮助文档保持一致（REFACTOR-056, REFACTOR-057, REFACTOR-058, REFACTOR-059）`[cli]`
+
 ### 稳定性
+- Builder 不再能绕出 cycle worktree 留下泄漏提交，收尾前也会先过硬闸（FIX-1068, FIX-1069）`[loop-engine]`
+- PR 合并对账和补证恢复更可靠，绿 PR 不再因为缺验收页或分数识别卡住（FIX-1057, FIX-1058, FIX-1061）`[loop-engine]`
+- loop worktree 里的链接式卡片 spec 能被 attest 正常识别（FIX-1059）`[loop-engine]`
+- Reasonix setup 不再把 docs/reports 等辅助目录挂成 agent skill（FIX-1042）`[skill-ecosystem]`
 - Builder cycle 现在会把 `cd` 回主 checkout 后产生的本地 main 提交判为 sandbox boundary violation，记录泄漏提交数和 cwd 线索，并阻止它被当成 TCR 交付证据 `[loop-engine]`
 - `roll supervisor repair-evidence` 现在能救回卡在证据门的绿 PR，不用手动合并或重跑整张卡 `[loop]`
 - `roll supervisor repair-evidence` 已修复的 PR 重跑不再误报无法修复 `[loop]`

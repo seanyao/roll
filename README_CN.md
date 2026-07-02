@@ -186,7 +186,7 @@ roll loop on
 | `roll loop <on\|off\|go\|watch\|runs\|cycles\|cycle\|alert\|…>` | 运行、观察和维护自主执行循环 |
 | `roll next` | 接续 init/onboard，只给一个最合适的下一步 |
 | `roll release [--dry-run\|--showcase]` | 发版计划/流程与 golden-path showcase 支撑 |
-| `roll setup [skills\|offboard\|-f]` | 安装/同步约定，或移除 Roll 管理的项目产物 |
+| `roll setup [-f\|--force] [--reselect]` / `roll setup skills\|offboard` | 安装/同步约定，或移除 Roll 管理的项目产物 |
 | `roll status [ci\|pulse] [--json]` | 项目健康、CI 状态和交付脉搏 |
 | `roll test [--where] [--reset]` | 通过隔离适配器运行测试 |
 | `roll update` | 升级全局 Roll 并重新同步约定 |

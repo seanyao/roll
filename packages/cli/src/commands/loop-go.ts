@@ -295,6 +295,65 @@ function runsPath(projectPath: string): string {
   return join(runtimeDir(projectPath), "runs.jsonl");
 }
 
+function parsePorcelainPath(line: string): string {
+  const raw = line.length > 3 ? line.slice(3).trim() : line.trim();
+  const target = raw.includes(" -> ") ? raw.split(" -> ").at(-1) ?? raw : raw;
+  return target.replace(/^"|"$/g, "").replace(/\/$/, "");
+}
+
+function gitDirtyPaths(projectPath: string): string[] {
+  const result = spawnSync("git", ["status", "--porcelain", "--untracked-files=all"], {
+    cwd: projectPath,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (result.status !== 0) return [];
+  return String(result.stdout ?? "")
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim() !== "")
+    .map(parsePorcelainPath)
+    .filter((path) => path !== ".roll/loop" && !path.startsWith(".roll/loop/"))
+    .slice(0, 50);
+}
+
+function isBootstrapArtifactPath(path: string): boolean {
+  if (path === "AGENTS.md" || path === "CLAUDE.md" || path === ".cursor-rules" || path === "project_rules.md") return true;
+  if (path === ".roll" || path.startsWith(".roll/")) return true;
+  if (path === ".claude" || path.startsWith(".claude/")) return true;
+  return false;
+}
+
+export function classifyBootstrapArtifacts(paths: readonly string[]): { kind: "none" | "bootstrap_only" | "mixed"; files: string[] } {
+  const files = paths.filter((path) => path.trim() !== "");
+  if (files.length === 0) return { kind: "none", files: [] };
+  return files.every(isBootstrapArtifactPath) ? { kind: "bootstrap_only", files } : { kind: "mixed", files };
+}
+
+function bootstrapArtifactsMessage(files: readonly string[]): string {
+  const shown = files.slice(0, 12).join(", ");
+  const more = files.length > 12 ? `, ... +${files.length - 12} more` : "";
+  return [
+    "roll loop go: bootstrap_artifacts_unconfirmed",
+    `  files: ${shown}${more}`,
+    "  These files define project conventions/backlog metadata. Confirm their ownership before running builders:",
+    "  - commit them to the product repo if they are product truth",
+    "  - commit private Roll metadata inside .roll/roll-meta when applicable",
+    "  - ignore/externalize them by project policy",
+    "  - or clean them up and re-run init/design",
+    "  Then rerun: roll loop go",
+    "",
+    "roll loop go: bootstrap_artifacts_unconfirmed",
+    "  这些文件定义项目约定/backlog 元数据。先确认归属，再启动 builder：",
+    "  - 属于产品事实就提交到产品仓",
+    "  - 属于私有 Roll 元数据就提交到 .roll/roll-meta",
+    "  - 按项目约定 ignore/外置",
+    "  - 或清理后重跑 init/design",
+    "  然后再运行：roll loop go",
+    "",
+  ].join("\n");
+}
+
 function parseOptions(args: string[]): GoOptions {
   let scope: GoalScope = { kind: "all" };
   let maxCycles: number | undefined;
@@ -1702,6 +1761,24 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
       goal = preProgressGate.goal;
       if (preProgressGate.stopped) {
         stopReason = preProgressGate.reason;
+        break;
+      }
+
+      const bootstrap = classifyBootstrapArtifacts(gitDirtyPaths(id.path));
+      if (bootstrap.kind === "bootstrap_only") {
+        stopReason = "bootstrap_artifacts_unconfirmed";
+        appendGoalGate(
+          bus,
+          evPath,
+          sid,
+          "progress",
+          "paused",
+          stopReason,
+          { files: bootstrap.files.join(", "), count: bootstrap.files.length },
+          deps.nowSec(),
+        );
+        process.stdout.write(bootstrapArtifactsMessage(bootstrap.files));
+        goal = pauseGoal(id.path, bus, stopReason, deps.nowIso(), deps.nowSec()) ?? goal;
         break;
       }
 

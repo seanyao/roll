@@ -113,6 +113,12 @@ function signalLabel(ev: RollEvent): string | undefined {
       return `pair ${clean(ev.peer)} ${ev.cause}`;
     case "pair:excluded":
       return `pair ${clean(ev.agent)} excluded ${ev.cause} (${ev.failures})`;
+    case "agent:retry":
+      return `retry ${clean(ev.fromAgent)} → ${clean(ev.toAgent)} (${clean(ev.reason)})`;
+    case "goal:gate_tripped":
+      return `paused ${clean(ev.reason)} (${ev.gate})`;
+    case "goal:state":
+      return `goal ${clean(ev.to)} ${clean(ev.reason)}`;
     default:
       return undefined;
   }
@@ -126,32 +132,45 @@ export function summarizeWatchEvents(lines: readonly string[], durableLookup?: D
   const summary: WatchStatusSummary = { tcrCount: 0, hasEnd: false };
   const events: RollEvent[] = [];
   let seen = false;
+  const resetCycleScope = (cycleId: string): void => {
+    if (summary.cycleId === cycleId) return;
+    summary.cycleId = cycleId;
+    summary.storyId = undefined;
+    summary.agent = undefined;
+    summary.phase = undefined;
+    summary.tcrCount = 0;
+    summary.outcome = undefined;
+    summary.hasEnd = false;
+    summary.acceptedScore = undefined;
+    summary.attest = undefined;
+    summary.lastPr = undefined;
+  };
   for (const line of lines) {
     const ev = parseEventLine(line);
     if (ev === null) continue;
     events.push(ev);
     seen = true;
     if (ev.type === "cycle:start") {
-      summary.cycleId = ev.cycleId;
+      resetCycleScope(ev.cycleId);
       summary.storyId = ev.storyId;
       summary.agent = ev.agent;
-      summary.phase = undefined;
-      summary.tcrCount = 0;
-      summary.outcome = undefined;
-      summary.hasEnd = false;
-      summary.acceptedScore = undefined;
-      summary.attest = undefined;
-      summary.lastPr = undefined;
     } else if (ev.type === "cycle:phase") {
-      summary.cycleId = ev.cycleId;
+      resetCycleScope(ev.cycleId);
       summary.phase = ev.phase;
     } else if (ev.type === "cycle:tcr") {
-      summary.cycleId = ev.cycleId;
+      resetCycleScope(ev.cycleId);
       summary.tcrCount += 1;
-    } else if (ev.type === "cycle:end" || ev.type === "cycle:terminal") {
-      summary.cycleId = ev.cycleId;
+    } else if (ev.type === "cycle:end") {
+      resetCycleScope(ev.cycleId);
       summary.outcome = ev.outcome;
       summary.hasEnd = true;
+    } else if (ev.type === "cycle:terminal") {
+      resetCycleScope(ev.cycleId);
+      summary.storyId = ev.storyId;
+      summary.agent = ev.agent;
+      summary.outcome = ev.outcome;
+      summary.hasEnd = true;
+      summary.tcrCount = ev.tcr.present ? ev.tcr.value : 0;
     }
 
     if (ev.type === "pair:score") {
@@ -227,7 +246,7 @@ export function renderWatchStatusSummary(summary: WatchStatusSummary, nowMs: num
   const story = summary.storyId !== undefined && summary.storyId !== "" ? summary.storyId : "story unknown";
   const agent = summary.agent !== undefined && summary.agent !== "" ? summary.agent : "agent unknown";
   const phase = summary.phase !== undefined ? `phase ${summary.phase}` : "phase unknown";
-  const classification = summary.classification !== undefined ? summary.classification : "active";
+  const classification = summary.classification !== undefined ? summary.classification : summary.hasEnd ? "ended" : "active";
   const tcr = `${summary.tcrCount} TCR`;
 
   const parts: string[] = [`status  ${phase}`, classification, quietText(summary, nowMs), story, agent, cycle];
@@ -337,6 +356,10 @@ function previousTransitionLine(previous: WatchStatusSummary): string {
 }
 
 function nextTransitionLine(current: WatchStatusSummary, ctx?: StoryTransitionContext): string {
+  if (current.storyId === undefined || current.storyId === "") {
+    const outcome = current.hasEnd ? current.outcome ?? "unknown" : "no active story";
+    return `  next:     no runnable work · ${outcome}`;
+  }
   const story = current.storyId !== undefined && current.storyId !== "" ? current.storyId : "story unknown";
   const brief =
     current.storyId !== undefined && current.storyId !== ""
@@ -346,6 +369,9 @@ function nextTransitionLine(current: WatchStatusSummary, ctx?: StoryTransitionCo
 }
 
 function builderTransitionLine(current: WatchStatusSummary, ctx?: StoryTransitionContext): string {
+  if (current.storyId === undefined || current.storyId === "") {
+    return "  builder:  none · no story/agent selected";
+  }
   const route =
     current.storyId !== undefined && current.storyId !== ""
       ? ctx?.routeReason?.(current.storyId)

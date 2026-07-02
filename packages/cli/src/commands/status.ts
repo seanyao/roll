@@ -1,7 +1,7 @@
 /**
  * `roll status` — TS port of lib/roll-status.py (US-CLI-001).
  *
- * One-screen sync health: global conventions, AI clients table (with drift
+ * One-screen sync health: global conventions, AI clients table (with setup
  * fix hints), project templates, and this-project metrics. Byte-aligned with
  * the python oracle (fixture + live diff-tests).
  */
@@ -298,7 +298,7 @@ function renderAiClients(out: string[], clients: AiClient[]): void {
         c("dim", String(cl.skills)),
     );
     if (cl.sync === "out-of-sync" || cl.sync === "missing") {
-      out.push("       " + c("dim", "fix: ") + c("blue", `roll setup -f ${cl.name}`));
+      out.push("       " + c("dim", "fix: ") + c("blue", "roll setup -f"));
     }
   }
   out.push("", hr(), "");

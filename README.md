@@ -205,7 +205,7 @@ with `roll loop resume` when ready.
 | `roll loop <on\|off\|go\|watch\|runs\|cycles\|cycle\|alert\|…>` | Run, observe, and maintain the autonomous executor |
 | `roll next` | Continue init/onboard with one best next command |
 | `roll release [--dry-run\|--showcase]` | Release planning/flow plus golden-path showcase support |
-| `roll setup [skills\|offboard\|-f]` | Install/sync conventions or remove Roll-owned project artifacts |
+| `roll setup [-f\|--force] [--reselect]` / `roll setup skills\|offboard` | Install/sync conventions or remove Roll-owned project artifacts |
 | `roll status [ci\|pulse] [--json]` | Project health, CI state, and delivery pulse |
 | `roll test [--where] [--reset]` | Run tests through the isolation adapter |
 | `roll update` | Upgrade the global Roll install and re-sync conventions |

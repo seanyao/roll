@@ -213,6 +213,14 @@ bricked by a limit you set days ago. Scope (`--epic`/`--cards`) and `--review`
 still persist when unspecified, because they are the goal's identity, not a
 per-run safety knob.
 
+Before the first builder cycle, `roll loop go` also checks for unconfirmed
+bootstrap artifacts such as `AGENTS.md`, `.claude/`, or `.roll/` metadata. If
+those are the only dirty files, the goal pauses with
+`bootstrap_artifacts_unconfirmed` and prints the files to confirm. Commit them
+to the right repo, externalize/ignore them by policy, or clean them up; then run
+`roll loop go` again. This preflight does not start a cycle and does not count
+as no-progress.
+
 `roll loop go` enforces safety only at cycle boundaries. `--budget <usd>` uses
 the effective run cost ledger and moves the goal to `budget_limited` when the
 budget is reached. An idle or aborted cycle that ran no agent counts as a known

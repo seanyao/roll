@@ -33,7 +33,7 @@ const AGENTS: AgentPanelRow[] = [
     costUsd72h: 0,
     files: [{ path: "/home/u/.kimi/AGENTS.md", kind: "AGENTS.md", state: "stale" }],
     syncStale: true,
-    setupCmd: "roll setup -f kimi",
+    setupCmd: "roll setup -f",
   },
   {
     // not installed / not detected — AC3: gray "expected", never red.
@@ -173,7 +173,7 @@ describe("Agents machine page — acceptance criteria (US-DOSSIER-031)", () => {
     expect(html).toContain("convention stale");
     expect(html).toContain("约定过期");
     // copyable (clickable) repair chip, not a static <code>
-    expect(html).toContain('class="copy-chip" data-copy="roll setup -f kimi"');
+    expect(html).toContain('class="copy-chip" data-copy="roll setup -f"');
     // a fully in-sync agent has NO setup chip for itself (the `.copy-chip`
     // handler always lives in the shared script — assert the rendered chip element).
     const onlySync = render([AGENTS[0]!]);

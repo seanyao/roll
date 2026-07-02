@@ -3368,6 +3368,55 @@ describe("FIX-914 — builder process cwd/PWD is pinned to the cycle worktree", 
     }
     expect(coreWorktree).toBe("");
   });
+
+  it("FIX-1073: git env pins commits to the cycle worktree even when the agent runs git -C main", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-fix1073-")));
+    execDirs.push(root);
+    const main = join(root, "main");
+    const wt = join(root, "wt");
+    mkdirSync(main, { recursive: true });
+    execFileSync("git", ["init", "--initial-branch=main"], { cwd: main });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: main });
+    execFileSync("git", ["config", "user.name", "Roll Test"], { cwd: main });
+    writeFileSync(join(main, "README.md"), "base\n");
+    execFileSync("git", ["add", "README.md"], { cwd: main });
+    execFileSync("git", ["commit", "-m", "base"], { cwd: main });
+    const mainBase = execFileSync("git", ["rev-parse", "HEAD"], { cwd: main, encoding: "utf8" }).trim();
+    execFileSync("git", ["worktree", "add", "-b", "cycle", wt], { cwd: main });
+
+    const shim = join(root, "pi");
+    writeFileSync(
+      shim,
+      [
+        "#!/bin/sh",
+        "set -eu",
+        'test -n "${GIT_DIR:-}"',
+        'test -n "${GIT_WORK_TREE:-}"',
+        "printf 'probe\\n' > \"$GIT_WORK_TREE/probe.txt\"",
+        "git -C \"$MAIN_CHECKOUT\" add probe.txt",
+        "git -C \"$MAIN_CHECKOUT\" commit -m 'tcr: FIX-1073 git env probe'",
+        "printf 'top=%s\\n' \"$(git -C \"$MAIN_CHECKOUT\" rev-parse --show-toplevel)\"",
+        "printf 'worktree=%s\\n' \"$GIT_WORK_TREE\"",
+        "",
+      ].join("\n"),
+    );
+    chmodSync(shim, 0o755);
+
+    const r = await realAgentSpawn("pi", {
+      cwd: wt,
+      skillBody: "X",
+      bin: shim,
+      env: { ...process.env, MAIN_CHECKOUT: main },
+      timeoutMs: 15000,
+    });
+
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain(`top=${wt}`);
+    expect(r.stdout).toContain(`worktree=${wt}`);
+    expect(execFileSync("git", ["rev-list", "--count", "main..HEAD"], { cwd: wt }).toString().trim()).toBe("1");
+    expect(execFileSync("git", ["status", "--short"], { cwd: main }).toString().trim()).toBe("");
+    expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd: main, encoding: "utf8" }).trim()).toBe(mainBase);
+  });
 });
 
 describe("FIX-1036 — reasonix linked-worktree git common-dir sandbox grants", () => {

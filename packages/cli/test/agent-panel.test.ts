@@ -63,7 +63,7 @@ describe("collectAgentPanel", () => {
     const kimi = rows.find((r) => r.name === "kimi")!;
     expect(kimi.files[0]?.state).toBe("missing");
     expect(kimi.syncStale).toBe(true);
-    expect(kimi.setupCmd).toBe("roll setup -f kimi");
+    expect(kimi.setupCmd).toBe("roll setup -f");
   });
 
   it("installed + config entry for the same agent merge into one row", () => {

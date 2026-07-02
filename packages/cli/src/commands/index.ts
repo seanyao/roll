@@ -354,7 +354,7 @@ export function registerAll(): void {
     }
     if (args[0] === "offboard") return offboardCommand(args.slice(1));
     return setupCommand(args);
-  }, { help: "Usage: roll setup [skills|offboard]\n  Install roll conventions/templates for this machine, or remove recorded Roll artifacts.\n本机安装模板，或移除记录过的 Roll 产物。" });
+  }, { help: "Usage: roll setup [-f|--force] [--reselect]\n       roll setup skills [args...]\n       roll setup offboard [args...]\n  Install or re-sync Roll conventions/templates for this machine; use -f to force refresh.\n本机安装或重新同步 Roll 模板与约定；-f 强制刷新。" });
   // `ci`: the READ surface is TS (no-flag / `--timeout=N` status report:
   // gh-absent warn, not-a-git-repo err, gh-run-list failure, no-runs note, and
   // the per-run "<name>: <status>/<conclusion>" listing). The `--wait` CI gate

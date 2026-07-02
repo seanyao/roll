@@ -2,12 +2,11 @@
  * FIX-1047 — scoped `story.execute` (Builder) routing.
  *
  * The executor used to resolve `story.execute` WITHOUT first resolving the
- * active `supervise` (Prime) assignment, so a project's `avoid: [supervise]`
- * rule was inert — the Prime agent stayed eligible as Builder and the
- * `least-recent` strategy kept landing on the first declared candidate
- * (claude). This module resolves the Prime role first, threads it in as
- * `assignedRoles.supervise` so `avoid` excludes the Prime by identity, and
- * feeds recent Builder usage so `least-recent` fairly rotates the whole pool.
+ * active `supervise` (Supervisor) assignment, so explicit owner routing rules
+ * that reference role assignments were inert. This module resolves Supervisor
+ * first, threads it in as `assignedRoles.supervise` for explicit role-aware
+ * policies, and feeds recent Builder usage so selection can fairly rotate the
+ * open pool.
  *
  * The full {@link AgentScopeRoleResolution} (candidate pool, skipped candidates
  * with reasons, strategy, selected Builder, source path) is returned so both
@@ -41,7 +40,7 @@ export interface ScopedExecuteRoute {
   readonly resolution: AgentScopeRoleResolution;
   readonly castRole: CastRoleName;
   readonly scopeRole: AgentScopeRole;
-  /** The active Prime (`supervise`) agent honored by `avoid: [supervise]`, if any. */
+  /** The active Supervisor (`supervise`) agent, if any. */
   readonly superviseAgent: AgentName | null;
   /** Recent-use input handed to the `least-recent` strategy (epoch ms per agent). */
   readonly recentUse: Readonly<Partial<Record<AgentName, number>>>;
@@ -240,7 +239,7 @@ export interface ScopedRouteDeps {
 
 /**
  * Resolve the scoped Builder (`story.execute`) assignment, honoring the active
- * Prime binding and recent-use fairness. Returns `null` when no scoped layer is
+ * Supervisor binding and recent-use fairness. Returns `null` when no scoped layer is
  * present (the caller falls back to legacy tier routing).
  */
 export function resolveScopedStoryExecute(repoCwd: string, deps: ScopedRouteDeps = {}): ScopedExecuteRoute | null {
@@ -263,9 +262,8 @@ export function resolveScopedCastRole(repoCwd: string, castRole: CastRoleName, d
     ]),
   ) as Partial<Record<AgentName, { available: boolean; reason?: string }>>;
 
-  // Resolve the active Prime first so `avoid: [supervise]` excludes it by
-  // identity (not by capability). A supervise failure must not block Builder
-  // routing — the assignment is simply absent and `avoid` becomes a no-op.
+  // Resolve the active Supervisor first so explicit role-aware policies can see
+  // the assignment. A supervise failure must not block Builder routing.
   const superviseResolution = resolveAgentScopeRole({ scope: "story", role: "supervise", layers, runtimeHealth });
   const superviseAgent = superviseResolution.ok ? superviseResolution.resolved.agent : null;
 
@@ -349,7 +347,7 @@ export function renderScopedExecuteRoute(trace: ScopedExecuteRouteTrace): string
   lines.push("");
   lines.push(`  ${trace.castRole} route — story.${trace.role}`);
   lines.push(`  source: ${trace.source ?? "(none)"}`);
-  lines.push(`  Prime (supervise): ${trace.supervise ?? "(unassigned)"}`);
+  lines.push(`  Supervisor (supervise): ${trace.supervise ?? "(unassigned)"}`);
   lines.push(`  strategy: ${trace.strategy}`);
   lines.push(`  candidates: ${trace.candidates.length > 0 ? trace.candidates.join(", ") : "(none)"}`);
   if (trace.ranked.length > 0) {

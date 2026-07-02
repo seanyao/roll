@@ -1,10 +1,10 @@
 /**
- * US-V4-008 — Prime Agent v0: ADVISE.
+ * US-V4-008 — Supervisor v0: ADVISE.
  *
  * Turns {@link SupervisorFacts} into structured {@link SupervisorDecision}
  * records and answers system-level questions ("what should Roll do next?", "why
  * is the project stuck?"). Pure. Advisory ONLY: every decision that would change
- * persistent policy carries `requiresOwner: true` — the Prime Agent never silently
+ * persistent policy carries `requiresOwner: true` — Supervisor never silently
  * rewrites routing/policy or marks a Story Done (the metrics-don't-mutate-policy
  * invariant).
  */
@@ -279,7 +279,7 @@ export function buildSupervisorRunbookState(input: SupervisorInput): SupervisorR
         continue;
       }
       // FIX-1043 — locally-committed work that failed to publish. The runner's
-      // picker holds this card (`all_pending_publish` idle); the Prime Agent must
+      // picker holds this card (`all_pending_publish` idle); Supervisor must
       // agree it is blocked, NOT advertise it as runnable. A scoped retry
       // (`roll loop go --cards <id>`) clears the marker so both see it runnable.
       if (pendingPublishSet.has(row.id)) {
@@ -338,7 +338,7 @@ function summarizeIds(ids: readonly string[], limit = 5): string {
   return remaining > 0 ? `${shown}, … +${remaining} more` : shown;
 }
 
-/** Produce the Prime Agent's ordered advice from the project facts. Pure. */
+/** Produce Supervisor's ordered advice from the project facts. Pure. */
 export function adviseProject(facts: SupervisorFacts): SupervisorDecision[] {
   const decisions: SupervisorDecision[] = [];
   if (facts.truthDrift.length > 0) {
@@ -385,7 +385,7 @@ export function adviseProject(facts: SupervisorFacts): SupervisorDecision[] {
  * US-V4-008 — answer "what should Roll do next?". Deterministic ranking over the
  * backlog: the first un-blocked, not-in-flight, not-delivered Todo whose
  * dependencies are all delivered. Returns a human-readable recommendation; the
- * Prime Agent advises, the owner confirms.
+ * Supervisor advises, the owner confirms.
  */
 export function recommendNext(input: SupervisorInput): { storyId: string | null; reason: string } {
   const state = buildSupervisorRunbookState(input);

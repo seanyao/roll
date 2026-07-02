@@ -59,7 +59,7 @@ import {
 export const SHOWCASE_USAGE =
   "Usage: roll showcase [--card <ID>] [--builder <agent>] [--reviewer <agent>] [--scorer <agent>] [--json] [--keep-sandbox]\n" +
   "  Run roll's golden-path standard E2E in an isolated sandbox: reset the target\n" +
-  "  card, cast a heterogeneous real-agent trio (builder/reviewer/scorer), deliver\n" +
+  "  card, cast an explicit strict-diversity real-agent trio (builder/reviewer/scorer), deliver\n" +
   "  it via `roll loop go`, capture fresh CLI+web screenshots, assemble the\n" +
   "  evidence chain, and emit a pass/fail verdict. Repeatable; never touches the\n" +
   "  main repo or the real ~/.roll.\n" +

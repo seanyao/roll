@@ -25,9 +25,9 @@ import { isHeterogeneous } from "@roll/core";
 export interface ShowcaseCasting {
   /** Builds US-DEMO-001 via the standard TCR loop. */
   builder: string;
-  /** Code review / adversarial spar; MUST differ from builder. */
+  /** Code review / adversarial spar in explicit strict-diversity showcase mode. */
   reviewer: string;
-  /** Pairs the delivery score; MUST differ from builder. */
+  /** Pairs the delivery score in explicit strict-diversity showcase mode. */
   scorer: string;
 }
 
@@ -72,7 +72,7 @@ export function validateCasting(casting: ShowcaseCasting): CastingCheck {
   if (violations.length > 0) return { ok: false, violations };
 
   if (reviewer === builder) {
-    violations.push({ code: "reviewer-equals-builder", message: `reviewer (${reviewer}) must differ from builder (${builder})` });
+    violations.push({ code: "reviewer-equals-builder", message: `strict-diversity showcase requires reviewer (${reviewer}) to differ from builder (${builder})` });
   } else if (!isHeterogeneous(reviewer, builder)) {
     violations.push({
       code: "reviewer-not-hetero",
@@ -80,7 +80,7 @@ export function validateCasting(casting: ShowcaseCasting): CastingCheck {
     });
   }
   if (scorer === builder) {
-    violations.push({ code: "scorer-equals-builder", message: `scorer (${scorer}) must differ from builder (${builder})` });
+    violations.push({ code: "scorer-equals-builder", message: `strict-diversity showcase requires scorer (${scorer}) to differ from builder (${builder})` });
   } else if (!isHeterogeneous(scorer, builder)) {
     violations.push({
       code: "scorer-not-hetero",

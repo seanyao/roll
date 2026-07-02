@@ -708,13 +708,12 @@ defaults:
         kind: select
         from: [claude, agy, kimi, pi, reasonix, codex]
         require: [execute]
-        avoid: [supervise]
-        strategy: least-recent
+        strategy: health-aware
       evaluate:
         kind: select
+        from: [claude, agy, kimi, pi, reasonix, codex]
         require: [evaluate]
-        avoid: [execute]
-        strategy: seeded-random
+        strategy: health-aware
 `;
 
 function initSeedProjectAgents(projectDir: string, summary: Summary): number {

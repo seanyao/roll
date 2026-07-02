@@ -68,4 +68,4 @@ auxiliary and excludes them from heterogeneous reviewer selection.
 Loop pairing is a build-time gate: a heterogeneous peer re-checks risky delivery
 diffs during autonomous cycles and writes cycle evidence. `$roll-peer` is the
 agent-invoked negotiation skill for structured external review. They share the
-same provider-diversity principle but serve different workflows.
+same explicit-diversity principle but serve different workflows.

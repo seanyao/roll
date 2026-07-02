@@ -428,7 +428,7 @@ function loopGoHelp(): string {
     "",
     "Review modes:",
     "  auto    Default. Try heterogeneous reviewers in ranked order; degrade to self review only after every heterogeneous candidate fails or when no other provider is installed.",
-    "  hetero  Require a reviewer from a different provider than the worker agents; unavailable reviewers block completion.",
+    "  hetero  Strict-diversity mode: require an alternate-provider reviewer; unavailable reviewers block completion.",
     "  self    Allow final review by the same provider family.",
     "  off     Skip final review and record a goal:final_review SKIPPED event.",
     "",

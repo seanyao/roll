@@ -256,8 +256,7 @@ export function planAgentScopeMigration(input: AgentScopeMigrationInput): AgentS
       kind: "select",
       from: scoreAgents,
       require: ["evaluate"],
-      avoid: ["execute"],
-      strategy: "least-recent",
+      strategy: "health-aware",
     };
     summary.push(`${pairingPath} capability -> ${input.projectTargetPath} defaults.story.roles.evaluate = select [${scoreAgents.join(", ")}]`);
   }

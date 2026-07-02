@@ -515,13 +515,12 @@ function isTerminal(ev: RollEvent): boolean {
 }
 
 function isActivityEvent(ev: RollEvent, cycleId: string): boolean {
-  // Anything scoped to this cycle (or global gate/alert affecting it) counts as
-  // activity for no-progress purposes. loop:*/goal:* are intentionally excluded
-  // because they are scheduler bookkeeping, not builder output.
+  // Only facts scoped to this exact cycle count as builder activity. Global PR,
+  // CI, alert, loop, or goal bookkeeping can be recent without proving that the
+  // active builder made progress.
   if (ev.type.startsWith("loop:") || ev.type.startsWith("goal:")) return false;
   const id = (ev as { cycleId?: unknown }).cycleId;
-  if (typeof id === "string" && id !== "" && id !== cycleId) return false;
-  return true;
+  return typeof id === "string" && id === cycleId;
 }
 
 function parseMicroStepPlan(data: string): MicroStepPlan | undefined {

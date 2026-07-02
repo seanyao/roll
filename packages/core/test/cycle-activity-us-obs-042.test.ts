@@ -71,6 +71,17 @@ describe("analyzeCycleActivity — US-OBS-042 active vs silent", () => {
     expect(a.quietSec).toBeGreaterThan(900);
   });
 
+  it("does not let global delivery events mask a silent cycle", () => {
+    const events: RollEvent[] = [
+      { type: "cycle:start", cycleId: CYCLE_ID, storyId: "FIX-1050", agent: "kimi", model: "k2.7", ts: 1000 },
+      { type: "pr:open", prNumber: 123, storyId: "US-OTHER", ts: 999_000 },
+      { type: "ci:pass", prNumber: 123, ts: 999_500 },
+    ];
+    const a = analyzeCycleActivity(events, CYCLE_ID, 1_000_000);
+    expect(a.classification).toBe("silent");
+    expect(a.lastActivityAt).toBe(1000);
+  });
+
   it("classifies as ended once cycle:end is observed", () => {
     const events: RollEvent[] = [
       { type: "cycle:start", cycleId: CYCLE_ID, storyId: "FIX-1050", agent: "kimi", model: "k2.7", ts: 1000 },

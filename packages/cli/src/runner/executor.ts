@@ -2657,6 +2657,9 @@ export async function executeCommand(
         ...(mainAhead > 0 ? { mainAhead } : {}),
         ...(mainDirty ? { mainDirty: true } : {}),
         ...(worktreeDirty ? { worktreeDirty: true } : {}),
+        ...(mainAhead > 0 || mainDirty
+          ? { attemptedCwd: ports.repoCwd, expectedWorktreeCwd: ports.paths.worktreePath }
+          : {}),
         ...(ctx.agentInternalFailure !== undefined ? { agentInternalFailure: ctx.agentInternalFailure } : {}),
         ...(prState !== undefined ? { prState } : {}),
       };

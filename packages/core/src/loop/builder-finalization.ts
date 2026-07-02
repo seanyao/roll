@@ -20,7 +20,7 @@ import type { BuilderFinalizationFacts, BuilderFinalizationVerdict } from "@roll
  *   - tcrCount === 0 + clean worktree + exited → gave_up_clean
  */
 export function finalizeBuilder(facts: BuilderFinalizationFacts): BuilderFinalizationVerdict {
-  if (facts.mainCheckoutDirty) return "boundary_violation";
+  if (facts.mainCheckoutDirty || (facts.mainAhead ?? 0) > 0) return "boundary_violation";
   if (!facts.processExited && facts.recentActivity) return "no_progress_still_running";
   // FIX-1068: positive TCR count is the normal ready signal. Commits ahead with
   // no TCR prefix still represent real work that passed the existing gate, so

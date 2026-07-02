@@ -81,6 +81,9 @@ export type RollEvent =
       kind: "main_checkout_dirty";
       files: string[];
       worktreePath: string;
+      attemptedCwd?: string;
+      expectedWorktreeCwd?: string;
+      leakedCommits?: number;
       ts: number;
     }
   | {

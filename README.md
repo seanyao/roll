@@ -109,7 +109,7 @@ profiles, evidence, Evaluator, and release gates:
   be picked within the existing pause, budget, route, evidence, Evaluator, and
   release gates. `roll loop pause` / `roll loop off` return control to guided
   operation; `roll loop resume` / `roll loop on` switch back explicitly.
-- **Attest and evidence are story-scoped**. A Story is accepted through its own `latest/<id>-report.html`, AC map, and screenshots/test artifacts.
+- **Attest and evidence are story-scoped**. A Story is accepted through its own Acceptance Review Page (`latest/<id>-review.html`), AC map, and screenshots/test artifacts. `latest/<id>-report.html` remains a legacy alias for one release cycle.
 
 Agent bindings are declared in two files: `~/.roll/agents.yaml` for Machine Scope
 and `.roll/agents.yaml` for Project Scope. A Project can inherit the machine pool

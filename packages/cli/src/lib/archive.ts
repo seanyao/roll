@@ -113,8 +113,12 @@ function liveCardDirEpicOf(projectPath: string, storyId: string): string | null 
   return epics.length === 1 ? (epics[0] ?? null) : null;
 }
 
-/** The card's report filename — carries the ID so a tab/download/share is
- *  self-identifying (owner 2026-06-06): `<ID>-report.html`. */
+/** The primary human confirmation page filename: `<ID>-review.html`. */
+export function reviewFileName(storyId: string): string {
+  return `${storyId}-review.html`;
+}
+
+/** Legacy acceptance report alias retained for one release cycle. */
 export function reportFileName(storyId: string): string {
   return `${storyId}-report.html`;
 }

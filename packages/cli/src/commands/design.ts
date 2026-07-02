@@ -308,15 +308,17 @@ function printHandoff(ctx: RunContext, statusCode: number, rawTranscript: string
   const l = ctx.lang;
   const epic = ctx.target !== null ? lookupEpic(ctx.target, ctx.cwd) : null;
   let designPath: string | undefined;
-  let htmlPath: string | undefined;
+  let reviewPagePath: string | undefined;
   if (epic !== null && ctx.target !== null) {
     const base = join(".roll", "features", epic, ctx.target);
     const md = join(base, "spec.md");
+    const reviewHtml = join(base, "design-review.html");
     const html = join(base, "spec.html");
     if (existsSync(resolve(ctx.cwd, md))) {
       designPath = hasDetailedDesign(resolve(ctx.cwd, md)) ? `${md}#detailed-design` : md;
     }
-    if (existsSync(resolve(ctx.cwd, html))) htmlPath = html;
+    if (existsSync(resolve(ctx.cwd, reviewHtml))) reviewPagePath = reviewHtml;
+    else if (existsSync(resolve(ctx.cwd, html))) reviewPagePath = html;
   }
   const afterBacklog = readBacklogItems(ctx.cwd);
   const newCards = afterBacklog.filter((a) => !ctx.beforeBacklog.some((b) => b.id === a.id)).length;
@@ -342,7 +344,7 @@ function printHandoff(ctx: RunContext, statusCode: number, rawTranscript: string
   emit(t(v3Catalog, l, "design.handoff"));
   emit(t(v3Catalog, l, "design.status_label", status));
   if (designPath !== undefined) emit(t(v3Catalog, l, "design.design_label", designPath));
-  if (htmlPath !== undefined) emit(t(v3Catalog, l, "design.html_label", htmlPath));
+  if (reviewPagePath !== undefined) emit(t(v3Catalog, l, "design.review_page_label", reviewPagePath));
   emit(t(v3Catalog, l, "design.cards_label", newCards));
   if (why !== undefined) emit(t(v3Catalog, l, "design.why_label", why));
   if (next !== undefined) emit(t(v3Catalog, l, "design.next_label", next));

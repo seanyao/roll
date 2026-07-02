@@ -20,6 +20,7 @@ import {
   liveEpicOf,
   mountExecutionAtPublish,
   readIndex,
+  reviewFileName,
   reportFileName,
   serializeIndex,
 } from "../src/lib/archive.js";
@@ -77,8 +78,14 @@ describe("serializeIndex", () => {
 });
 
 describe("reportFileName", () => {
-  it("carries the card id", () => {
+  it("keeps the legacy report alias for one release cycle", () => {
     expect(reportFileName("US-META-001")).toBe("US-META-001-report.html");
+  });
+});
+
+describe("reviewFileName", () => {
+  it("is the primary Acceptance Review Page filename", () => {
+    expect(reviewFileName("US-REVIEW-001")).toBe("US-REVIEW-001-review.html");
   });
 });
 

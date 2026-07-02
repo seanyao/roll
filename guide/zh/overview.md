@@ -116,7 +116,7 @@ defaults:
 - `roll loop cycle <id>` — 单个 cycle 的轨迹与证据指针
 - `roll loop runs` — 每轮 TerminalOutcome 历史，含 TCR 次数和耗时
 - `roll loop alert` — 查看、确认、清除 loop 告警
-- Story 报告 —— Story 自己的 `latest/<id>-report.html` 是人类验收入口 `[highlight]`
+- 验收 Review Page —— Story 自己的 `latest/<id>-review.html` 是人类验收入口 `[highlight]`
 
 ### 当前可观测性
 

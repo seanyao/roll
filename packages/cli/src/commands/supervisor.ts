@@ -53,7 +53,7 @@ import { dirname, join, relative } from "node:path";
 import { formatOperatingMode, resolveOperatingMode, suggestedGuidedRun } from "../lib/operating-mode.js";
 import { reducePrView } from "./loop-pr-inbox.js";
 import { readPendingPublish } from "../runner/pending-publish.js";
-import { cardArchiveDir, reportFileName } from "../lib/archive.js";
+import { cardArchiveDir, reportFileName, reviewFileName } from "../lib/archive.js";
 import { renderScopedExecuteRoute, resolveScopedCastRole, scopedExecuteRouteTrace } from "../runner/scoped-route.js";
 import { renderCollabStream } from "../lib/collab-render.js";
 
@@ -1112,7 +1112,7 @@ export function supervisorCommand(args: string[]): number | Promise<number> {
       acMapCount = acItems.length;
     }
 
-    // 6. Generate an HTML acceptance report at the gate-checked location.
+    // 6. Generate an HTML Acceptance Review Page at the gate-checked location.
     //    The attest gate's `existingReport()` looks for:
     //      features/<epic>/<ID>/latest/<ID>-report.html  (primary)
     //    We use `renderReport` — the same pure renderer normal delivery
@@ -1132,15 +1132,15 @@ export function supervisorCommand(args: string[]): number | Promise<number> {
       }));
       const html = renderReport({
         storyId,
-        title: `${storyId} — Acceptance Evidence (repaired)`,
+        title: `${storyId} — Acceptance Review Page (repaired)`,
         generatedAt: now.toISOString(),
         items,
         facts: { tcrCount: 0, ciConclusion: facts.ciState || "unknown", testPassAge: "repaired (post-hoc)" },
         evidenceDeltaSummary: `Evidence repaired via \`roll supervisor repair-evidence\` for PR #${prNumber}. CI=${facts.ciState}, review=${facts.bot}, merge=${facts.mergeable}.`,
       });
-      // Write to `latest/<ID>-report.html` — the primary candidate the gate checks.
       const latestDir = join(storyDir, "latest");
       mkdirSync(latestDir, { recursive: true });
+      writeFileSync(join(latestDir, reviewFileName(storyId)), html, "utf8");
       htmlReportPath = join(latestDir, reportFileName(storyId));
       writeFileSync(htmlReportPath, html, "utf8");
     }

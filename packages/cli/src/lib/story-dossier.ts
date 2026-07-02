@@ -670,7 +670,7 @@ const LADDER_COLOR: Record<DeliveryLadder | "none", string> = {
 function deliveryBanner(ladder: DeliveryLadder | "none", reportHref: string | undefined): string {
   if (ladder === "none") return "";
   const link =
-    reportHref !== undefined ? ` · <a href="${esc(reportHref)}">${bi("Attestation report", "验收报告")}</a>` : "";
+    reportHref !== undefined ? ` · <a href="${esc(reportHref)}">${bi("Acceptance Review Page", "验收 Review Page")}</a>` : "";
   if (ladder === "attested") {
     return (
       `<div class="attest-banner"><span class="mark">✓</span><div>` +

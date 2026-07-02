@@ -118,7 +118,7 @@ Runtime availability is explicit. Unavailable agents are recorded as unavailable
 - `roll loop cycle <id>` — one cycle's trace and evidence pointers
 - `roll loop runs` — per-cycle TerminalOutcome history with TCR count and duration
 - `roll loop alert` — view, acknowledge, and clear loop alerts
-- Story report — the Story's own `latest/<id>-report.html` is the human acceptance entry `[highlight]`
+- Acceptance Review Page — the Story's own `latest/<id>-review.html` is the human acceptance entry `[highlight]`
 
 ### Current Observability
 

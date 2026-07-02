@@ -412,7 +412,7 @@ describe("roll design bounded progress and handoff", () => {
     expect(out).toContain("raw transcript:");
   });
 
-  it("handoff for an IDEA target lists the design artifact, html, zero cards, and sign-off status", () => {
+  it("handoff for an IDEA target lists the Design Review Page, zero cards, and sign-off status", () => {
     const proj = freshProj();
     dirs.push(proj);
     writeFileSync(join(proj, ".roll", "index.json"), JSON.stringify({ stories: { "IDEA-066": "acceptance-evidence" } }), "utf8");
@@ -424,13 +424,14 @@ describe("roll design bounded progress and handoff", () => {
       const feat = join(proj, ".roll", "features", "acceptance-evidence", "IDEA-066");
       mkdirSync(feat, { recursive: true });
       writeFileSync(join(feat, "spec.md"), "# IDEA-066\n\n## Detailed design\n", "utf8");
-      writeFileSync(join(feat, "spec.html"), "<html></html>", "utf8");
+      writeFileSync(join(feat, "design-review.html"), "<html></html>", "utf8");
       return { status: 0, signal: null, stdout: "", stderr: "" };
     };
     const out = captureStderr(() => designCommand(["IDEA-066"], d));
-    expect(out).toContain("Design handoff");
+    expect(out).toContain("Design Review Page handoff");
     expect(out).toContain("design: .roll/features/acceptance-evidence/IDEA-066/spec.md#detailed-design");
-    expect(out).toContain("html: .roll/features/acceptance-evidence/IDEA-066/spec.html");
+    expect(out).toContain("Design Review Page: .roll/features/acceptance-evidence/IDEA-066/design-review.html");
+    expect(out).not.toContain("dossier");
     expect(out).toContain("cards: 0");
     expect(out).toContain("status: awaiting owner sign-off");
     expect(out).toContain("next:");
@@ -487,7 +488,7 @@ describe("roll design bounded progress and handoff", () => {
     const d = makeDeps(proj, bin);
     d.spawn = () => ({ status: 7, signal: null, stdout: "partial output\n", stderr: "" });
     const out = captureStderr(() => designCommand(["IDEA-066"], d));
-    expect(out).toContain("Design handoff");
+    expect(out).toContain("Design Review Page handoff");
     expect(out).toContain("status: agent exited with code 7");
     expect(out).toContain("transcript:");
   });

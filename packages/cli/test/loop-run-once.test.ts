@@ -893,7 +893,7 @@ describe("announceReport — card-layout report surface (US-META-002c follow-thr
       process.stdout.write = w;
     }
     expect(got).toContain(join("features", "uncategorized", "FIX-9", "latest", "FIX-9-report.html"));
-    expect(out).toContain("验收报告");
+    expect(out).toContain("Review Page");
     expect(opened).toHaveLength(1);
   });
   it("no report anywhere → null, no announcement", async () => {

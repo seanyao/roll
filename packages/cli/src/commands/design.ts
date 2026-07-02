@@ -8,8 +8,8 @@
  * prints a final artifact handoff so the operator knows what changed, where
  * the design lives, and what to do next.
  */
-import { spawnSync, type SpawnSyncOptions } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { spawn as spawnChild, type SpawnOptions } from "node:child_process";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { t, v2Catalog, v3Catalog, type Lang } from "@roll/spec";
 import { normalizerFor, newNormalizerState, parseBacklog, type ActivitySignal } from "@roll/core";
@@ -128,6 +128,11 @@ export interface DesignSpawnResult {
   stderr?: string;
 }
 
+export interface DesignSpawnLive {
+  onStdout: (chunk: string) => void;
+  onStderr: (chunk: string) => void;
+}
+
 export interface DesignCommandDeps {
   /** Current working directory for project checks. */
   cwd: string;
@@ -136,9 +141,11 @@ export interface DesignCommandDeps {
   /** Read one interactive selection line. */
   readLine: () => string | null;
   /** Spawn the selected agent. */
-  spawn: (bin: string, args: string[], opts: SpawnSyncOptions) => DesignSpawnResult;
+  spawn: (bin: string, args: string[], opts: SpawnOptions, live?: DesignSpawnLive) => DesignSpawnResult | Promise<DesignSpawnResult>;
   /** Wall-clock epoch ms provider (used for timestamps and run folder naming). */
   now: () => number;
+  /** Quiet interval before a live heartbeat is emitted. */
+  heartbeatMs: number;
 }
 
 function formatRunFolder(ts: number, target: string | null): string {
@@ -164,10 +171,10 @@ function lookupEpic(target: string, cwd: string): string | null {
   }
 }
 
-function readBacklogItems(cwd: string): { id: string }[] {
+function readBacklogItems(cwd: string): { id: string; desc: string }[] {
   try {
     const content = readFileSync(join(cwd, ".roll", "backlog.md"), "utf8");
-    return parseBacklog(content).map((row) => ({ id: row.id }));
+    return parseBacklog(content).map((row) => ({ id: row.id, desc: row.desc }));
   } catch {
     return [];
   }
@@ -231,23 +238,167 @@ function formatSignal(sig: ActivitySignal): string {
   return `${fmtHhmmss(sig.ts)}  ${sig.summary}${detail}`.trimEnd();
 }
 
-function progressLines(agent: string, combined: string, startMs: number, verbose: boolean): string[] {
-  const normalizer = normalizerFor(agent);
-  const state = newNormalizerState();
-  const out: string[] = [];
-  const lines = combined.split("\n");
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i] ?? "";
-    const nowMs = startMs + i * 1000;
-    const signals = normalizer.normalize(line, state, nowMs);
-    for (const sig of signals) {
-      const show = verbose || sig.tier === "A" || sig.tier === "B" || (sig.kind === "say" && isQuestionLike(sig.summary));
-      if (show) {
-        out.push(formatSignal(sig));
-      }
-    }
+function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
+  return typeof (value as { then?: unknown }).then === "function";
+}
+
+function isDesignNoise(text: string): boolean {
+  const s = text.trim();
+  if (s === "") return true;
+  if (/^\?\?\s/.test(s)) return true;
+  if (/^\s*-\s*\[\s*\]\s+/.test(s)) return true;
+  return /\$roll-design|roll-design contract|ID generation algorithm|Who writes the data|encrypted reasoning/i.test(s);
+}
+
+function isMeaningfulDesignSay(summary: string): boolean {
+  return /\b(reading|planning|designing|writing|validating|recovering|handoff|backlog|spec|artifact|context|contexts|created|card)\b/i.test(summary);
+}
+
+function shouldShowSignal(sig: ActivitySignal, verbose: boolean): boolean {
+  const joined = `${sig.summary} ${sig.detail ?? ""}`;
+  if (isDesignNoise(joined)) return false;
+  if (verbose) return true;
+  if (sig.tier === "A" || sig.tier === "B") return true;
+  if (sig.kind === "say" && isMeaningfulDesignSay(sig.summary)) return true;
+  return sig.kind === "say" && isQuestionLike(sig.summary);
+}
+
+function formatDuration(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  if (m === 0) return `${s}s`;
+  return `${m}m ${String(s).padStart(2, "0")}s`;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function transcriptSize(path: string): number {
+  try {
+    return statSync(path).size;
+  } catch {
+    return 0;
   }
-  return out;
+}
+
+function splitCardDescription(desc: string): { title: string; problem: string } {
+  const clean = desc.replace(/\s+/g, " ").trim();
+  const solves = /\s+·\s+solves\s+/i.exec(clean);
+  if (solves !== null) {
+    const title = clean.slice(0, solves.index).trim();
+    const problem = clean.slice(solves.index + solves[0].length).trim();
+    return { title: title || clean, problem: problem || title || clean };
+  }
+  return { title: clean || "Untitled card", problem: clean || "the design gap" };
+}
+
+interface LiveProgress {
+  readonly sawLiveOutput: boolean;
+  readonly rawTranscript: string;
+  startHeartbeat: () => void;
+  stopHeartbeat: () => void;
+  ingestStdout: (chunk: string) => void;
+  ingestStderr: (chunk: string) => void;
+  flush: () => void;
+}
+
+function createLiveProgress(ctx: RunContext, deps: DesignCommandDeps, opts: { raw: boolean; verbose: boolean }): LiveProgress {
+  const normalizer = normalizerFor(ctx.agent);
+  const state = newNormalizerState();
+  const emittedCards = new Set<string>();
+  const knownBefore = new Set(ctx.beforeBacklog.map((row) => row.id));
+  let stdoutBuffer = "";
+  let stderrBuffer = "";
+  let rawTranscript = "";
+  let sawLiveOutput = false;
+  let lastPrintedTs = ctx.startTs;
+  let heartbeat: NodeJS.Timeout | undefined;
+
+  const scanCards = (): void => {
+    if (opts.raw) return;
+    for (const item of readBacklogItems(ctx.cwd)) {
+      if (knownBefore.has(item.id) || emittedCards.has(item.id)) continue;
+      emittedCards.add(item.id);
+      const { title, problem } = splitCardDescription(item.desc);
+      const ts = deps.now();
+      lastPrintedTs = ts;
+      emit(`${fmtHhmmss(ts)}  card created: ${item.id} — ${title} · solves ${problem}`);
+    }
+  };
+
+  const processLine = (line: string): void => {
+    if (opts.raw) return;
+    const ts = deps.now();
+    const signals = normalizer.normalize(line, state, ts);
+    for (const sig of signals) {
+      if (!shouldShowSignal(sig, opts.verbose)) continue;
+      lastPrintedTs = sig.ts;
+      emit(formatSignal(sig));
+    }
+  };
+
+  const ingest = (chunk: string, stream: "stdout" | "stderr"): void => {
+    if (chunk === "") return;
+    sawLiveOutput = true;
+    rawTranscript += chunk;
+    appendFileSync(ctx.transcriptPath, chunk, "utf8");
+    if (opts.raw) {
+      process.stderr.write(chunk);
+      return;
+    }
+    const next = (stream === "stdout" ? stdoutBuffer : stderrBuffer) + chunk;
+    const parts = next.split(/\n/);
+    const complete = parts.slice(0, -1);
+    for (const line of complete) processLine(line);
+    if (stream === "stdout") stdoutBuffer = parts[parts.length - 1] ?? "";
+    else stderrBuffer = parts[parts.length - 1] ?? "";
+    scanCards();
+  };
+
+  const emitHeartbeat = (): void => {
+    if (opts.raw) return;
+    const ts = deps.now();
+    if (ts - lastPrintedTs < deps.heartbeatMs) return;
+    lastPrintedTs = ts;
+    emit(
+      `${fmtHhmmss(ts)}  heartbeat: still designing · elapsed ${formatDuration(ts - ctx.startTs)} · ` +
+        `transcript ${formatBytes(transcriptSize(ctx.transcriptPath))} · cards observed ${emittedCards.size}`,
+    );
+  };
+
+  return {
+    get sawLiveOutput() {
+      return sawLiveOutput;
+    },
+    get rawTranscript() {
+      return rawTranscript;
+    },
+    startHeartbeat: () => {
+      if (opts.raw) return;
+      heartbeat = setInterval(emitHeartbeat, deps.heartbeatMs);
+      heartbeat.unref?.();
+    },
+    stopHeartbeat: () => {
+      if (heartbeat !== undefined) clearInterval(heartbeat);
+    },
+    ingestStdout: (chunk) => ingest(chunk, "stdout"),
+    ingestStderr: (chunk) => ingest(chunk, "stderr"),
+    flush: () => {
+      if (stdoutBuffer !== "") {
+        processLine(stdoutBuffer);
+        stdoutBuffer = "";
+      }
+      if (stderrBuffer !== "") {
+        processLine(stderrBuffer);
+        stderrBuffer = "";
+      }
+      scanCards();
+    },
+  };
 }
 
 const defaultDeps: DesignCommandDeps = {
@@ -255,14 +406,38 @@ const defaultDeps: DesignCommandDeps = {
   env: process.env,
   readLine: readLineFromStdin,
   now: () => Date.now(),
-  spawn: (bin, args, opts) => {
-    const r = spawnSync(bin, args, { ...opts, stdio: ["inherit", "pipe", "pipe"], encoding: "utf8" });
-    return {
-      status: r.status ?? null,
-      signal: r.signal ?? null,
-      stdout: typeof r.stdout === "string" ? r.stdout : "",
-      stderr: typeof r.stderr === "string" ? r.stderr : "",
-    };
+  heartbeatMs: 60_000,
+  spawn: (bin, args, opts, live) => {
+    return new Promise((resolveSpawn) => {
+      const child = spawnChild(bin, args, { ...opts, stdio: ["inherit", "pipe", "pipe"] });
+      let stdout = "";
+      let stderr = "";
+      let settled = false;
+      const finish = (result: DesignSpawnResult): void => {
+        if (settled) return;
+        settled = true;
+        resolveSpawn(result);
+      };
+      child.stdout?.setEncoding("utf8");
+      child.stderr?.setEncoding("utf8");
+      child.stdout?.on("data", (chunk: string) => {
+        stdout += chunk;
+        live?.onStdout(chunk);
+      });
+      child.stderr?.on("data", (chunk: string) => {
+        stderr += chunk;
+        live?.onStderr(chunk);
+      });
+      child.on("error", (err) => {
+        const message = `${err instanceof Error ? err.message : String(err)}\n`;
+        stderr += message;
+        live?.onStderr(message);
+        finish({ status: 1, signal: null, stdout, stderr });
+      });
+      child.on("close", (code, signal) => {
+        finish({ status: code, signal, stdout, stderr });
+      });
+    });
   },
 };
 
@@ -314,7 +489,7 @@ interface RunContext {
   agent: string;
   transcriptPath: string;
   startTs: number;
-  beforeBacklog: { id: string }[];
+  beforeBacklog: { id: string; desc: string }[];
 }
 
 function printStartBlock(ctx: RunContext): void {
@@ -387,7 +562,7 @@ function printHandoff(ctx: RunContext, statusCode: number, rawTranscript: string
   }
 }
 
-export function designCommand(args: string[], deps: Partial<DesignCommandDeps> = {}): number {
+export function designCommand(args: string[], deps: Partial<DesignCommandDeps> = {}): number | Promise<number> {
   const d: DesignCommandDeps = { ...defaultDeps, ...deps };
   const l = lang();
 
@@ -480,18 +655,37 @@ export function designCommand(args: string[], deps: Partial<DesignCommandDeps> =
 
   printStartBlock(ctx);
 
-  const result = d.spawn(cmd.bin, cmd.args, { cwd: d.cwd, env: d.env as NodeJS.ProcessEnv });
-  const rawTranscript = [result.stdout ?? "", result.stderr ?? ""].filter((s) => s !== "").join("\n");
-  writeFileSync(runTranscript, rawTranscript, "utf8");
+  const live = createLiveProgress(ctx, d, { raw: rawMode, verbose });
+  live.startHeartbeat();
 
-  if (rawMode) {
-    if (rawTranscript !== "") emit(rawTranscript);
-  } else {
-    const lines = progressLines(agent, rawTranscript, startTs, verbose);
-    for (const line of lines) emit(line);
+  const finish = (result: DesignSpawnResult): number => {
+    if (!live.sawLiveOutput) {
+      live.ingestStdout(result.stdout ?? "");
+      live.ingestStderr(result.stderr ?? "");
+    } else {
+      const stdout = result.stdout ?? "";
+      const stderr = result.stderr ?? "";
+      if (stdout !== "" && !live.rawTranscript.includes(stdout)) live.ingestStdout(stdout);
+      if (stderr !== "" && !live.rawTranscript.includes(stderr)) live.ingestStderr(stderr);
+    }
+    live.stopHeartbeat();
+    live.flush();
+    const statusCode = result.status ?? (result.signal === null ? 1 : 130);
+    printHandoff(ctx, statusCode, live.rawTranscript);
+    return statusCode;
+  };
+
+  const spawned = d.spawn(
+    cmd.bin,
+    cmd.args,
+    { cwd: d.cwd, env: d.env as NodeJS.ProcessEnv },
+    { onStdout: live.ingestStdout, onStderr: live.ingestStderr },
+  );
+  if (isPromiseLike(spawned)) {
+    return spawned.then(finish, (err: unknown) => {
+      live.ingestStderr(`${err instanceof Error ? err.message : String(err)}\n`);
+      return finish({ status: 1, signal: null });
+    });
   }
-
-  const statusCode = result.status ?? (result.signal === null ? 1 : 130);
-  printHandoff(ctx, statusCode, rawTranscript);
-  return statusCode;
+  return finish(spawned);
 }

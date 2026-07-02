@@ -20,7 +20,7 @@
  *      so the install never reaches the registry.
  *   3. Run the INSTALLED bin shim for one TS command that reads packaged data
  *      (`prices show` → lib/prices/*.json), one pure-TS command (`config
- *      --list`), and one bash-fallback command (`help`, `version`). Assert each
+ *      --list`), and one public utility command (`help`, `--version`). Assert each
  *      produces sane output — proving the repoRoot() walk resolves from the
  *      installed layout, not just from the dev checkout.
  *
@@ -84,9 +84,9 @@ describe("npm pack → install → run (release packaging)", () => {
       const bin = join(prefix, "node_modules", ".bin", "roll");
       expect(existsSync(bin), `installed bin shim missing at ${bin}`).toBe(true);
 
-      // 3a. TS-native `version` (FIX-202): prints the install tree's package.json
+      // 3a. TS-native `--version` (FIX-202): prints the install tree's package.json
       //     version (single source of truth), not the fossil bin/roll literal.
-      const version = run(bin, ["version"], prefix);
+      const version = run(bin, ["--version"], prefix);
       expect(version).toMatch(/^roll v\d+\.\d+\.\d+/);
 
       // 3b. Bash fallback: `help` renders the banner (proves spawn of bin/roll
@@ -98,10 +98,10 @@ describe("npm pack → install → run (release packaging)", () => {
       const config = run(bin, ["config", "--list"], prefix);
       expect(config).toContain("loop_active_start");
 
-      // 3d. TS handler that reads PACKAGED data: `prices show` loads the
+      // 3d. TS handler that reads PACKAGED data: `config prices show` loads the
       //     lib/prices/*.json snapshots via the repoRoot() walk from the
       //     installed dist/roll.mjs. This is the load-bearing assertion.
-      const prices = run(bin, ["prices", "show"], prefix);
+      const prices = run(bin, ["config", "prices", "show"], prefix);
       expect(prices).toMatch(/snapshots\s+\d+ loaded/);
     },
     120_000,

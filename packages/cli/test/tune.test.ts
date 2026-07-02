@@ -96,9 +96,9 @@ describe("tuneCommand — US-EVID-015", () => {
     expect(r.stdout).toContain("rubric weights: 1.0");
   });
 
-  it("registers `roll tune` as a TS command", async () => {
+  it("registers `roll config tune` as the owner-routed TS command", async () => {
     registerAll();
-    const r = await capture(() => dispatch(["tune", "reset"]).then((d) => d.status));
+    const r = await capture(() => dispatch(["config", "tune", "reset"]).then((d) => d.status));
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("self_score.low_threshold");
   });

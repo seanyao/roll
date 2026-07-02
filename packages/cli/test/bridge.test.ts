@@ -62,41 +62,36 @@ describe("ported routing (no bash fallback)", () => {
       const res = await dispatch([command]);
       expect(res.status).toBe(1);
     }
-    // REFACTOR-056: prices stays CALLABLE (this card moves no behavior) but it is
-    // a nested cost-config surface, so it is no longer listed in `roll --help`.
+    // REFACTOR-058: old public top-level aliases stay registered only so docs
+    // drift guards can recognize them; dispatch returns the standard unknown
+    // command shape until the docs sweep removes those rows.
     expect(isPorted("prices")).toBe(true);
     expect(usage()).not.toMatch(/\bprices\b/);
+    const prices = await captureDispatch(["prices"]);
+    expect(prices.status).toBe(1);
+    expect(prices.stderr).toContain("unknown command 'prices'");
   });
 
-  it("FIX-255 / REFACTOR-056: peer stays a callable TS command but is NOT a public top-level surface", () => {
+  it("FIX-255 / REFACTOR-058: peer is no longer a public top-level surface", async () => {
     registerAll();
-    // peer remains ported (review/scoring process boundary); REFACTOR-056 classes
-    // it `remove` from the public surface, so it must not appear in `roll --help`.
     expect(isPorted("peer")).toBe(true);
     expect(usage()).not.toMatch(/\bpeer\b/);
-  });
-
-  it("FIX-255: bridge-enforced peer help exposes the full command surface", async () => {
-    registerAll();
     const res = await captureDispatch(["peer", "--help"]);
-
-    expect(res.status).toBe(0);
-    expect(res.stdout).toContain("Usage: roll peer");
-    expect(res.stdout).toContain("--worker <agent>");
-    expect(res.stdout).toContain("--mode auto|hetero|self");
-    expect(res.stdout).toContain("--json");
-    expect(res.stdout).toContain("--timeout-ms <ms>");
+    expect(res.status).toBe(1);
+    expect(res.stderr).toContain("unknown command 'peer'");
   });
 
-  it("REFACTOR-049: version/gc stay callable but are hidden from the main usage; lang is gone", () => {
+  it("REFACTOR-049/058: version/gc top-level aliases are retired; lang is gone", async () => {
     registerAll();
     expect(isPorted("lang")).toBe(false); // moved into `roll config lang`
-    expect(isPorted("version")).toBe(true); // alias for --version
-    expect(isPorted("gc")).toBe(true); // emergency manual entry (auto-runs per cycle)
+    expect(isPorted("version")).toBe(true); // registered retired stub; --version remains live
+    expect(isPorted("gc")).toBe(true); // registered retired stub
     const listed = usage().split("Commands:")[1] ?? "";
     expect(listed).not.toMatch(/\bversion\b/);
     expect(listed).not.toMatch(/\bgc\b/);
     expect(listed).not.toMatch(/\blang\b/);
+    expect((await captureDispatch(["version"])).stderr).toContain("unknown command 'version'");
+    expect((await captureDispatch(["gc"])).stderr).toContain("unknown command 'gc'");
   });
 
   it("REFACTOR-052 (re-ruled by US-REL-007): machine commands stay hidden; the retired release sub-surfaces are GONE", async () => {
@@ -114,9 +109,11 @@ describe("ported routing (no bash fallback)", () => {
       expect(r.status).toBe(1);
       expect(r.stderr).toContain("unknown command");
     }
-    const r = await captureDispatch(["alert"]);
-    expect(r.status).toBe(0);
-    expect(r.stdout).toBe("roll alert moved to roll loop alert\n");
+    for (const retired of ["alert", "skills"]) {
+      const r = await captureDispatch([retired]);
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain(`unknown command '${retired}'`);
+    }
 
     expect((await captureDispatch(["loop", "alert", "log"])).status).toBe(0);
     // the retired release routes exit through the explicit removed-route error
@@ -184,6 +181,24 @@ describe("ported routing (no bash fallback)", () => {
     const pulse = await captureDispatch(["status", "pulse", "--json"]);
     expect(pulse.status).toBe(1);
     expect(pulse.stdout).toContain("no truth.json found");
+  });
+
+  it("REFACTOR-058: retired top-level aliases return the normal unknown-command response", async () => {
+    registerAll();
+    for (const command of ["doc", "prices", "cast", "tool", "pulse", "cycles", "cycle", "tune", "showcase", "offboard", "pair", "ls", "ci"]) {
+      const res = await captureDispatch([command, "--help"]);
+      expect(res.status, command).toBe(1);
+      expect(res.stdout, command).toBe("");
+      expect(res.stderr, command).toContain(`unknown command '${command}'`);
+      expect(res.stderr, command).toContain("roll <command> [args]");
+    }
+  });
+
+  it("REFACTOR-058: machine-only internal exceptions remain hidden but reachable", async () => {
+    registerAll();
+    const ci = await captureDispatch(["ci", "--wait", "--bad"]);
+    expect(ci.status).toBe(1);
+    expect(ci.stderr).toContain("Usage: roll ci [--wait] [--timeout=N]");
   });
 
   it("US-DOSSIER-035: bare roll (no args) → front door, not the usage dump, exit 0", async () => {

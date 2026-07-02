@@ -470,8 +470,35 @@ export interface OversizedActionState {
   thresholdAreas: number;
 }
 
+export interface FollowupDraft {
+  title: string;
+  sourceCycleId: string;
+  sourceActionId?: string;
+  reason: string;
+  deferredScope: string;
+  deliveredByCurrentCard: false;
+}
+
+export interface QueuedFollowup {
+  id?: string;
+  actionId?: string;
+  title: string;
+  reason: string;
+}
+
+export interface ActionSplitSuggestion {
+  actionId?: string;
+  advisory: true;
+  effect: "advisory-only";
+  reason: string;
+  safeBoundary: string;
+  followupDraft: FollowupDraft;
+  ignoredSuggestionCount: number;
+  evaluatorContext?: string;
+}
+
 export interface CycleActivityHistoryEntry {
-  type: "action:started" | "test:red" | "test:green" | "green-uncommitted" | "action:oversized" | "cycle:tcr";
+  type: "action:started" | "test:red" | "test:green" | "green-uncommitted" | "action:oversized" | "split:suggested" | "followup:queued" | "cycle:tcr";
   at: number;
   actionId?: string;
   summary?: string;
@@ -496,6 +523,10 @@ export interface CycleActivityAnalysis {
   greenUncommitted?: GreenUncommittedState;
   /** Advisory oversized-action state. */
   oversizedAction?: OversizedActionState;
+  /** Advisory dynamic split checkpoint for expanded action scope. */
+  splitSuggestion?: ActionSplitSuggestion;
+  /** Follow-up backlog card/action references accepted from a split suggestion. */
+  queuedFollowups?: QueuedFollowup[];
   /** Durable rhythm history for post-cycle evaluator evidence. */
   history: CycleActivityHistoryEntry[];
 }
@@ -607,7 +638,10 @@ export function analyzeCycleActivity(
   let testTransition: TestTransition | undefined;
   let lastGreenAt: number | undefined;
   let oversizedAction: OversizedActionState | undefined;
+  let oversizedActionId: string | undefined;
   const history: CycleActivityHistoryEntry[] = [];
+  const queuedFollowups: QueuedFollowup[] = [];
+  let splitSuggestedCount = 0;
 
   const hasEnd = events.some((ev) => isTerminal(ev) && (ev as { cycleId?: string }).cycleId === cycleId);
 
@@ -650,7 +684,19 @@ export function analyzeCycleActivity(
         thresholdFiles: ev.thresholdFiles,
         thresholdAreas: ev.thresholdAreas,
       };
+      oversizedActionId = ev.actionId;
       history.push({ type: "action:oversized", at: ev.ts, ...(ev.actionId !== undefined ? { actionId: ev.actionId } : {}), summary: `${ev.filesTouched} files / ${ev.contractAreas} areas` });
+    } else if (ev.type === "split:suggested") {
+      splitSuggestedCount += 1;
+      history.push({ type: "split:suggested", at: ev.ts, ...(ev.actionId !== undefined ? { actionId: ev.actionId } : {}), summary: ev.reason });
+    } else if (ev.type === "followup:queued") {
+      queuedFollowups.push({
+        ...(ev.followupId !== undefined ? { id: ev.followupId } : {}),
+        ...(ev.actionId !== undefined ? { actionId: ev.actionId } : {}),
+        title: ev.title,
+        reason: ev.reason,
+      });
+      history.push({ type: "followup:queued", at: ev.ts, ...(ev.actionId !== undefined ? { actionId: ev.actionId } : {}), summary: ev.title });
     }
   }
 
@@ -693,7 +739,37 @@ export function analyzeCycleActivity(
         thresholdFiles: thresholds.files,
         thresholdAreas: thresholds.areas,
       };
+      oversizedActionId = microStep.actionId;
     }
+  }
+
+  let splitSuggestion: ActionSplitSuggestion | undefined;
+  if (oversizedAction !== undefined) {
+    const actionId = oversizedActionId ?? microStep?.actionId;
+    const reason = `${oversizedAction.filesTouched} files / ${oversizedAction.contractAreas} areas exceeds ${oversizedAction.thresholdFiles} files / ${oversizedAction.thresholdAreas} areas`;
+    const safeBoundary =
+      greenUncommitted !== undefined
+        ? "commit current green work, then continue or split discovered follow-up"
+        : "continue to the next green boundary, then commit or split discovered follow-up";
+    const ignoredSuggestionCount = Math.max(0, history.filter((h) => h.type === "action:oversized").length - splitSuggestedCount);
+    const hasLargeTcrAfterExpansion = events.some((ev) => ev.type === "cycle:tcr" && ev.ts > Math.max(...history.filter((h) => h.type === "action:oversized").map((h) => h.at), 0));
+    splitSuggestion = {
+      ...(actionId !== undefined ? { actionId } : {}),
+      advisory: true,
+      effect: "advisory-only",
+      reason,
+      safeBoundary,
+      followupDraft: {
+        title: `Follow up ${actionId ?? "action"} expanded scope`,
+        sourceCycleId: cycleId,
+        ...(actionId !== undefined ? { sourceActionId: actionId } : {}),
+        reason,
+        deferredScope: "expanded file-area, contract-area, duration, or test-surface scope",
+        deliveredByCurrentCard: false,
+      },
+      ignoredSuggestionCount,
+      ...(hasLargeTcrAfterExpansion ? { evaluatorContext: "expansion history includes a large single TCR after split suggestion" } : {}),
+    };
   }
 
   return {
@@ -706,6 +782,8 @@ export function analyzeCycleActivity(
     ...(testTransition !== undefined ? { testTransition } : {}),
     ...(greenUncommitted !== undefined ? { greenUncommitted } : {}),
     ...(oversizedAction !== undefined ? { oversizedAction } : {}),
+    ...(splitSuggestion !== undefined ? { splitSuggestion } : {}),
+    ...(queuedFollowups.length > 0 ? { queuedFollowups } : {}),
     history,
   };
 }

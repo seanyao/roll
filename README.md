@@ -198,6 +198,7 @@ with `roll loop resume` when ready.
 | `roll pair [init\|status\|score]` | Cross-agent pairing: heterogeneous peer re-checks and scores deliveries |
 | `roll cycles [--since 1d\|3d\|7d\|all]` | The cycle ledger — one line per cycle, failures never swallowed |
 | `roll cycle <id>` | One cycle's full trace tape (cycle→story→build→peer→ci→pr→end); the same trace is persisted as `.roll/loop/cycle-<id>.signals.jsonl` for replay |
+| `roll cycle <id> --activity [--json]` | Supervisor-facing activity analysis: active vs silent, micro-step plan, test transitions, green-uncommitted work, oversized actions, and advisory split suggestions |
 | `roll cycle <id> --roles [--json]` | The execution cast — who was Builder and who was Evaluator, which peers were consulted, and the single accepted score; also written to `summary.md`/`summary.json` and the Execution Cast report block ([guide](guide/en/loop.md#cycle-role-visibility)) |
 | `roll cycle <id> --collab [--json]` | The collaboration relay view over the same `CycleRoleSummary`: Supervisor/Designer → Builder → Peer Reviewer/Evaluator → Gate, including handoff, escalation, and terminus |
 | `roll supervisor live --collab [--once\|--json]` | Multi-cycle collaboration stream for the Prime Agent board; `--once` captures a stable snapshot and live mode follows new cycle rows |

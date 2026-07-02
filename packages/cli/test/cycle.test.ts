@@ -422,6 +422,34 @@ describe("US-OBS-042 — roll cycle <id> --activity", () => {
     expect(out).toContain("(advisory)");
   });
 
+  it("renders dynamic split suggestion and queued follow-up references", () => {
+    const p = activityProject();
+    writeActivityEvents(p, [
+      { type: "cycle:start", cycleId: "20260630-210059-58201", storyId: "FIX-1050", agent: "kimi", model: "k2.7", ts: 1000 },
+      { type: "action:started", cycleId: "20260630-210059-58201", actionId: "A1", summary: "reasonix footer parser", expectedEvidence: "parser tests green", fileAreaScope: ["parser"], ts: 60_000 },
+      { type: "test:green", cycleId: "20260630-210059-58201", actionId: "A1", source: "vitest", summary: "parser tests pass", ts: 120_000 },
+      { type: "green-uncommitted", cycleId: "20260630-210059-58201", actionId: "A1", since: 120_000, durationSec: 60, ts: 180_000 },
+      { type: "action:oversized", cycleId: "20260630-210059-58201", actionId: "A1", filesTouched: 12, contractAreas: 4, thresholdFiles: 10, thresholdAreas: 3, ts: 190_000 },
+      { type: "followup:queued", cycleId: "20260630-210059-58201", actionId: "A1", followupId: "US-OBS-999", title: "Runtime action-boundary enforcement", reason: "deferred boundary enforcement", ts: 195_000 },
+    ]);
+    process.env["ROLL_CYCLE_ACTIVITY_NOW_MS"] = String(200_000);
+    const save = process.cwd();
+    process.chdir(p);
+    let out = "";
+    const so = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((s: string) => ((out += s), true)) as typeof process.stdout.write;
+    try {
+      expect(cycleCommand(["20260630-210059-58201", "--activity", "--no-color"])).toBe(0);
+    } finally {
+      process.stdout.write = so;
+      process.chdir(save);
+    }
+    expect(out).toContain("split suggested A1");
+    expect(out).toContain("commit current green work");
+    expect(out).toContain("follow-up US-OBS-999");
+    expect(out).toContain("deferred scope is not delivered by this card");
+  });
+
   it("emits machine-readable JSON with --activity --json", () => {
     const p = activityProject();
     writeActivityEvents(p, [

@@ -3,7 +3,9 @@
 > Project template. Customize section 5 with project-specific rules.
 
 ## 1. Communication
-- User's language. Code/Git/Comments: English. UI: Chinese.
+- User conversation follows the user's language. Code/Git/Comments: English.
+- Rendered UI/CLI/docs use one resolved language per surface; keep multilingual
+  resources behind locale files or catalogs.
 - Concise. No summaries/code-walking. Outcomes only.
 
 ## 2. Standards

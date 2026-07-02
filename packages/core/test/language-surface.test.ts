@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   auditLanguageSurfaceText,
@@ -5,6 +6,8 @@ import {
   renderLocalePair,
   resolveLanguageSurfacePolicy,
 } from "../src/index.js";
+
+const repoFile = (path: string): string => readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");
 
 describe("US-LANG-002 language surface policy", () => {
   describe("resolveLanguageSurfacePolicy", () => {
@@ -118,5 +121,36 @@ describe("US-LANG-002 language surface policy", () => {
       expect(renderLocalePair(pair, "en")).toBe("hello");
       expect(renderLocalePair(pair, "zh")).toBe("你好");
     });
+  });
+});
+
+describe("US-LANG-001 active language contracts", () => {
+  const activeContractFiles = [
+    "AGENTS.md",
+    "conventions/global/AGENTS.md",
+    "template/AGENTS.md",
+    "skills/roll-design/SKILL.md",
+    "skills/roll-design/references/full-contract.md",
+    "skills/roll-build/SKILL.md",
+    "skills/roll-build/references/full-contract.md",
+    "skills/roll-fix/SKILL.md",
+    "skills/roll-fix/references/full-contract.md",
+  ];
+  const retiredMandatoryBilingualRules = [
+    "Bilingual output",
+    "EN + ZH on separate lines",
+    "English and Chinese on **separate lines**",
+    "English line and Chinese line on separate lines",
+    "中英双轨",
+    "中英双语必需",
+  ];
+
+  it("keeps active contracts free of the retired adjacent-bilingual mandate", () => {
+    for (const path of activeContractFiles) {
+      const text = repoFile(path);
+      for (const phrase of retiredMandatoryBilingualRules) {
+        expect(text, `${path} must not contain ${phrase}`).not.toContain(phrase);
+      }
+    }
   });
 });

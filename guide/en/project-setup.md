@@ -45,6 +45,13 @@ and apply an onboard plan, repair partial markers, run the old-layout migration,
 start the loop on the next Todo card, or inspect status when nothing is
 actionable.
 
+When a path writes Roll-owned meta files inside a git worktree, `roll init`
+finishes by adding, committing, and pushing those files to `origin` when
+possible. The finalize step is scoped to Roll-owned paths such as `AGENTS.md`,
+`.claude/CLAUDE.md`, `.roll/**`, and Roll-managed `.gitignore` entries; product
+source, PRDs, and other user files are left alone. If commit or push cannot be
+completed, init prints the manual command to run.
+
 Upgrading from a pre-2.0 layout (`BACKLOG.md` at root or `docs/features/`)?
 Run `npx @seanyao/roll@2 migrate` first — see
 [migration-2.0.md](migration-2.0.md). `roll init` will refuse to scaffold on top

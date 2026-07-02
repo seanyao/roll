@@ -53,6 +53,10 @@ waits for owner confirmation before writing. Automation must use
 After any init path, `roll next` is the continuation button: it reads the same
 brief, onboard plan, backlog, and Roll markers, then prints one best next
 command instead of a menu.
+When `roll init` writes Roll-owned meta files inside a git worktree, it also
+adds, commits, and pushes those files to `origin` when possible, then prints the
+commit/push result. Product files you created yourself are not included in that
+finalization commit.
 First time through? Start with [Getting started](guide/en/getting-started.md).
 
 ## Language Surfaces

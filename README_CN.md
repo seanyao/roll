@@ -47,6 +47,9 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 `roll init --apply --auto`。
 任一路径之后，`roll next` 都是继续按钮：它读取同一份 brief、onboard plan、
 backlog 和 Roll 标记，只打印一个最合适的下一步命令，而不是让用户自己猜。
+当 `roll init` 在 git worktree 中写入 Roll-owned meta 文件时，它会尽力把这些文件
+add、commit 并 push 到 `origin`，然后打印提交/推送结果。你自己创建的产品文件不会被
+纳入这次收尾提交。
 第一次跑建议从[快速上手](guide/zh/getting-started.md)开始。
 
 ## 语言表面

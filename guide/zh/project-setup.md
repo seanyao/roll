@@ -38,6 +38,12 @@ roll init
 从 brief 进入设计、审阅并 apply onboard plan、修复 partial 标记、执行旧布局迁移、
 对下一张 Todo 开 loop，或在没有可执行项时查看 status。
 
+当某条路径在 git worktree 中写入 Roll-owned meta 文件时，`roll init` 会在收尾阶段尽力
+把这些文件 add、commit 并 push 到 `origin`。这个 finalize 只覆盖 Roll 管理的路径，例如
+`AGENTS.md`、`.claude/CLAUDE.md`、`.roll/**` 和 Roll 自己追加的 `.gitignore` 条目；
+产品源码、PRD 和其他用户文件不会被顺手提交。若 commit 或 push 无法完成，init 会打印需要
+手动执行的命令。
+
 正在从 2.0 之前的布局升级（`BACKLOG.md` 在根目录或 `docs/features/`）？
 先跑 `npx @seanyao/roll@2 migrate` —— 见
 [migration-2.0.md](migration-2.0.md)。`roll init` 会拒绝在迁移到一半的

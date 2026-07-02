@@ -15,13 +15,14 @@ afterAll(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
 });
 
-function project(backlog: string, opts: { agents?: string; events?: string[] } = {}): string {
+function project(backlog: string, opts: { agents?: string; events?: string[]; goal?: string } = {}): string {
   const d = mkdtempSync(join(tmpdir(), "roll-sup-"));
   dirs.push(d);
   mkdirSync(join(d, ".roll", "loop"), { recursive: true });
   writeFileSync(join(d, ".roll", "backlog.md"), backlog);
   if (opts.agents !== undefined) writeFileSync(join(d, ".roll", "agents.yaml"), opts.agents);
   if (opts.events !== undefined) writeFileSync(join(d, ".roll", "loop", "events.ndjson"), opts.events.join("\n") + "\n");
+  if (opts.goal !== undefined) writeFileSync(join(d, ".roll", "loop", "goal.yaml"), opts.goal);
   return d;
 }
 
@@ -570,6 +571,29 @@ describe("supervisorCommand", () => {
     expect(parsed.schema).toBe("collab-stream.v1");
     expect(parsed.cycles.map((cycle) => cycle.terminus)).toEqual(["walked_full", "walked_full", "", "escalated"]);
     expect(parsed.cycles[2]?.stance?.note).toBe("协同摘要不可用");
+  });
+
+  it("live --collab header uses the persisted goal scope when available", () => {
+    const cwd = project(BACKLOG, {
+      events: collabStreamEvents(),
+      goal: [
+        "schema: goal.v1",
+        "scope:",
+        "  kind: cards",
+        "  cards: [US-2, US-3]",
+        "review: auto",
+        "status: active",
+        "usage:",
+        "  cycles: 0",
+        "  costUsd: 0",
+        "createdAt: 2026-07-02T00:00:00Z",
+        "updatedAt: 2026-07-02T00:00:00Z",
+        "",
+      ].join("\n"),
+    });
+    const r = run(cwd, ["live", "--collab", "--once", "--no-color"]);
+    expect(r.code).toBe(0);
+    expect(stripAnsi(r.out)).toContain("Collab stream — goal: cards: US-2, US-3");
   });
 
   it("live without --collab keeps the existing role board output", () => {

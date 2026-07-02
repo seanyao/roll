@@ -33,6 +33,7 @@ import {
   observeProject,
   parseBacklog,
   parseRollScoreArtifact,
+  projectCollabStream,
   queryStoryDelivery,
   renderReport,
   repairedPrNumbers,
@@ -43,7 +44,7 @@ import {
   summarizeAgentHealthIssues,
   type FreshnessPort,
 } from "@roll/core";
-import type { CycleRoleSummary, RollEvent, RollGoal, SupervisorInput } from "@roll/spec";
+import type { CollabStreamView, CycleRoleSummary, EventSource, RollEvent, RollGoal, SupervisorInput } from "@roll/spec";
 import { parseGoalYaml } from "@roll/spec";
 import { detectNoProgressStall, type NoProgressStall } from "../lib/goal-recovery.js";
 import { execFileSync } from "node:child_process";
@@ -54,6 +55,7 @@ import { reducePrView } from "./loop-pr-inbox.js";
 import { readPendingPublish } from "../runner/pending-publish.js";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
 import { renderScopedExecuteRoute, resolveScopedStoryExecute, scopedExecuteRouteTrace } from "../runner/scoped-route.js";
+import { renderCollabStream } from "../lib/collab-render.js";
 
 const EXEC_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 
@@ -615,6 +617,70 @@ function readSupervisorEvents(projectPath: string): RollEvent[] {
   return [];
 }
 
+function cycleEventId(ev: RollEvent): string | undefined {
+  return "cycleId" in ev && typeof (ev as { cycleId?: unknown }).cycleId === "string"
+    ? (ev as { cycleId: string }).cycleId
+    : undefined;
+}
+
+function cycleStarted(events: readonly RollEvent[], cycleId: string): boolean {
+  return events.some((ev) => cycleEventId(ev) === cycleId && ev.type === "cycle:start");
+}
+
+function collabCycleIds(events: readonly RollEvent[]): string[] {
+  const firstSeen = new Map<string, number>();
+  for (const ev of events) {
+    const cycleId = cycleEventId(ev);
+    if (cycleId === undefined || firstSeen.has(cycleId)) continue;
+    firstSeen.set(cycleId, ev.ts);
+  }
+  return [...firstSeen.entries()].sort((a, b) => a[1] - b[1]).map(([cycleId]) => cycleId);
+}
+
+function readCycleRoleSummary(projectPath: string, cycleId: string): CycleRoleSummary | null {
+  const summaryPath = join(projectPath, ".roll", "loop", "cycle-logs", cycleId, "summary.json");
+  if (!existsSync(summaryPath)) return null;
+  try {
+    return JSON.parse(readFileSync(summaryPath, "utf8")) as CycleRoleSummary;
+  } catch {
+    return null;
+  }
+}
+
+function rebuildCycleRoleSummary(projectPath: string, events: readonly RollEvent[], cycleId: string): CycleRoleSummary | null {
+  if (!cycleStarted(events, cycleId)) return null;
+  return buildCycleRoleSummary({
+    cycleId,
+    events,
+    eventsPath: join(projectPath, ".roll", "loop", "events.ndjson"),
+    peerDir: join(projectPath, ".roll", "loop", "peer"),
+    cycleLogDir: join(projectPath, ".roll", "loop", "cycle-logs"),
+  });
+}
+
+function collabGoalScope(): string {
+  return "live non-Hold FIX/US/REFACTOR";
+}
+
+function buildCollabEventSource(projectPath: string, events: readonly RollEvent[]): EventSource {
+  return {
+    readEvents: () => events,
+    readSummary: (cycleId) => readCycleRoleSummary(projectPath, cycleId),
+    rebuildSummary: (cycleId) => rebuildCycleRoleSummary(projectPath, events, cycleId),
+    supervisor: () => process.env["ROLL_SUPERVISOR_AGENT"] ?? "codex",
+    goalScope: () => collabGoalScope(),
+  };
+}
+
+function buildSupervisorCollabStream(projectPath: string): CollabStreamView {
+  const events = readSupervisorEvents(projectPath);
+  return projectCollabStream(collabCycleIds(events), buildCollabEventSource(projectPath, events));
+}
+
+function fmtCollabLive(stream: CollabStreamView, noColor: boolean): string {
+  return renderCollabStream(stream, { color: !noColor, fold: true, width: 72, lang: "en" }) + "\n";
+}
+
 function shortTs(ts: number): string {
   if (!Number.isFinite(ts) || ts <= 0) return "n/a";
   return new Date(ts).toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -658,6 +724,8 @@ function fmtLive(projectPath: string): string {
 
 export function supervisorCommand(args: string[]): number {
   const json = args.includes("--json");
+  const collab = args.includes("--collab");
+  const noColor = args.includes("--no-color") || (process.env["NO_COLOR"] ?? "") !== "";
   let sub = args.find((a) => !a.startsWith("-"));
   // `status` is an alias for the default observe + advise summary.
   if (sub === "status") sub = undefined;
@@ -965,9 +1033,15 @@ export function supervisorCommand(args: string[]): number {
   }
 
   if (sub === "live") {
-    const board = buildSupervisorLiveBoard(readSupervisorEvents(projectPath));
-    if (json) process.stdout.write(JSON.stringify(board, null, 2) + "\n");
-    else process.stdout.write(fmtLive(projectPath));
+    if (collab) {
+      const stream = buildSupervisorCollabStream(projectPath);
+      if (json) process.stdout.write(JSON.stringify(stream, null, 2) + "\n");
+      else process.stdout.write(fmtCollabLive(stream, noColor));
+    } else {
+      const board = buildSupervisorLiveBoard(readSupervisorEvents(projectPath));
+      if (json) process.stdout.write(JSON.stringify(board, null, 2) + "\n");
+      else process.stdout.write(fmtLive(projectPath));
+    }
     return 0;
   }
   if (sub === "health") {

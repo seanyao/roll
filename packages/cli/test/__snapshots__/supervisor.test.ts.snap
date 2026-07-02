@@ -1,0 +1,23 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`supervisorCommand > live --collab --once renders a folded multi-cycle collaboration stream 1`] = `
+"Collab stream — goal: live non-Hold FIX/US/REFACTOR
+🧭 supervisor: codex
+levels: supervise → plan → build
+
+▌ 00:00:01  FIX-1 → FIX-2  walked_full ×2 · builder=pi · score=codex
+
+▌ n/a  C-missing  协同摘要不可用
+
+▌ 00:00:09  FIX-3
+   🧭 → 🔨  assign builder = pi
+      🔨  build → TCR ×1
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ ⤴ escalation                                                         ┃
+┃ baton returned from 🔨 builder to supervisor 🧭                    ┃
+┃ 🔬 codex reroute (pi stalled for 601s)                             ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+──────────────────────────────────────────────────────────── escalated ⤴
+
+"
+`;

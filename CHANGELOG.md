@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 稳定性
+- `roll init` 现在会负责提交并推送自己生成的项目约定文件，`roll loop go` 不再一开工就撞 dirty（FIX-1072）`[loop-engine]`
+- Builder 提交会被钉在 cycle worktree，不再把提交漏到主 checkout（FIX-1073）`[loop-engine]`
+- 状态面板给出的 AI client 修复命令现在可以直接执行，不再多带无效参数（FIX-1070）`[cli]`
+
+### 可见性
+- `roll loop watch` 不再把旧 cycle 的卡片和 agent 贴到新的空转或重试状态上（FIX-1074）`[loop-observability]`
+
 ## v4.702.2 — 2026-07-02
 
 ### Breaking changes

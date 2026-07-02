@@ -2109,7 +2109,15 @@ describe("executeCommand — command → executor mapping", () => {
       },
     });
     const r = await executeCommand({ kind: "capture_facts" }, ports, CTX);
-    expect(r.event).toMatchObject({ type: "facts_captured", facts: { commitsAhead: 0, mainAhead: 2 } });
+    expect(r.event).toMatchObject({
+      type: "facts_captured",
+      facts: {
+        commitsAhead: 0,
+        mainAhead: 2,
+        attemptedCwd: "/repo",
+        expectedWorktreeCwd: "/rt/wt",
+      },
+    });
   });
 
   it("FIX-903: rescue_leaked saves leaked main commits to a rescue ref and resets main", async () => {

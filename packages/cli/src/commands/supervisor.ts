@@ -349,7 +349,10 @@ export function gatherSupervisorInput(projectPath: string): SupervisorInput {
         structuralFailures.set(sid, {
           storyId: sid,
           kind: "main_checkout_dirty",
-          detail: `main checkout dirty at finalization; files: ${ev.files.join(", ") || "unknown"}`,
+          detail:
+            (ev.leakedCommits ?? 0) > 0
+              ? `main checkout ahead of origin/main by ${ev.leakedCommits} commit(s); attempted cwd: ${ev.attemptedCwd ?? "unknown"}; expected worktree: ${ev.expectedWorktreeCwd ?? ev.worktreePath}`
+              : `main checkout dirty at finalization; files: ${ev.files.join(", ") || "unknown"}`,
           source: `builder:boundary_violation/${ev.cycleId}`,
           worktreePath: ev.worktreePath,
         });

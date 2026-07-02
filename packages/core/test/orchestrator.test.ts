@@ -606,6 +606,18 @@ describe("failure branches", () => {
     expect(commands.find((c) => c.kind === "append_alert")).toMatchObject({
       message: expect.stringContaining("local main is ahead of origin/main"),
     });
+    const violation = commands.find((c): c is Extract<CycleCommand, { kind: "emit_event" }> =>
+      c.kind === "emit_event" && c.event.type === "builder:boundary_violation"
+    );
+    expect(violation?.event).toMatchObject({
+      type: "builder:boundary_violation",
+      storyId: "FIX-252",
+      agent: "pi",
+      kind: "main_checkout_dirty",
+      attemptedCwd: "",
+      expectedWorktreeCwd: `.roll/loop/worktrees/cycle-${CTX.cycleId}`,
+      leakedCommits: 1,
+    });
   });
 
   it("worktree setup fail → failed + tolerant worktree cleanup", () => {
@@ -1049,6 +1061,11 @@ describe("FIX-1068 — finalizeBuilder verdict mapping", () => {
 
   it("Pi-style: main checkout dirty → boundary_violation", () => {
     const verdict = finalizeBuilder({ ...base, mainCheckoutDirty: true });
+    expect(verdict).toBe("boundary_violation");
+  });
+
+  it("FIX-1069: main checkout ahead origin → boundary_violation even when clean", () => {
+    const verdict = finalizeBuilder({ ...base, mainAhead: 1 });
     expect(verdict).toBe("boundary_violation");
   });
 

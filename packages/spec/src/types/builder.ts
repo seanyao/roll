@@ -21,6 +21,8 @@ export interface BuilderFinalizationFacts {
   tcrCount: number;
   worktreeDirty: boolean;
   mainCheckoutDirty: boolean;
+  /** Local main commits ahead of origin/main; nonzero means work escaped the cycle worktree. */
+  mainAhead?: number;
   prUrl: string | null;
   attestReportPath: string | null;
   recentActivity: boolean;

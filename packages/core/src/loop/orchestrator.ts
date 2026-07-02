@@ -267,6 +267,10 @@ export interface CapturedFacts {
   mainAhead?: number;
   /** FIX-1037: main checkout has uncommitted/untracked product-code dirt. */
   mainDirty?: boolean;
+  /** CWD where leaked main-checkout work was observed, when known. */
+  attemptedCwd?: string;
+  /** CWD the Builder was expected to mutate, when known. */
+  expectedWorktreeCwd?: string;
   /**
    * FIX-1039: the cycle worktree has uncommitted/untracked files (dirty) at
    * capture time. When combined with commitsAhead === 0, this means the
@@ -445,14 +449,15 @@ export function builderFinalizationFacts(
     storyId: ctx.storyId ?? "",
     cycleId: ctx.cycleId,
     agent: ctx.agent ?? "",
-    worktreePath: `.roll/loop/worktrees/cycle-${ctx.cycleId}`,
-    expectedProjectPath: "",
+    worktreePath: captured.expectedWorktreeCwd ?? `.roll/loop/worktrees/cycle-${ctx.cycleId}`,
+    expectedProjectPath: captured.attemptedCwd ?? "",
     processExited: true,
     exitCode: captured.agentExit,
     commitsAhead: captured.commitsAhead,
     tcrCount: ctx.tcrCount ?? 0,
     worktreeDirty: captured.worktreeDirty === true,
     mainCheckoutDirty: captured.mainDirty === true,
+    ...((captured.mainAhead ?? 0) > 0 ? { mainAhead: captured.mainAhead } : {}),
     prUrl: ctx.prUrl ?? null,
     attestReportPath: ctx.evidenceRunDir !== undefined ? `${ctx.evidenceRunDir}/latest/report.html` : null,
     recentActivity: false,
@@ -1091,6 +1096,9 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
               kind: "main_checkout_dirty",
               files: [],
               worktreePath: bFacts.worktreePath,
+              attemptedCwd: bFacts.expectedProjectPath,
+              expectedWorktreeCwd: bFacts.worktreePath,
+              leakedCommits: bFacts.mainAhead ?? 0,
               ts: 0,
             },
           };

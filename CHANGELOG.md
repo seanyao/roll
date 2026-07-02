@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### 稳定性
+- Builder cycle 现在会把 `cd` 回主 checkout 后产生的本地 main 提交判为 sandbox boundary violation，记录泄漏提交数和 cwd 线索，并阻止它被当成 TCR 交付证据 `[loop-engine]`
 - `roll supervisor repair-evidence` 现在能救回卡在证据门的绿 PR，不用手动合并或重跑整张卡 `[loop]`
 - `roll supervisor repair-evidence` 已修复的 PR 重跑不再误报无法修复 `[loop]`
   <!-- evidence: .roll/features/loop-engine/FIX-1062/latest/FIX-1062-report.html -->

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { parsePeerReviewTranscript } from "@roll/core";
 import { parseGoalYaml } from "@roll/spec";
-import { deliveryGateStopDetails, loopGoCommand, planGoTmuxCommands, spawnFinalReviewAgent, type LoopGoDeps } from "../src/commands/loop-go.js";
+import { classifyBootstrapArtifacts, deliveryGateStopDetails, loopGoCommand, planGoTmuxCommands, spawnFinalReviewAgent, type LoopGoDeps } from "../src/commands/loop-go.js";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -135,6 +135,81 @@ describe("US-GOAL-002 — roll loop go", () => {
       expect(identityCalls).toBe(0);
       expect(existsSync(join(p, ".roll", "loop", "goal.yaml"))).toBe(false);
     }
+  });
+
+  it("FIX-1072: bootstrap-only dirty artifacts pause before runOnce and do not count no-progress", async () => {
+    const p = project();
+    execSync("git init -q", { cwd: p });
+    writeBacklog(p, [
+      "| [FIX-BOOT](.roll/features/loop-engine/FIX-BOOT/spec.md) | boot | 📋 Todo |",
+    ]);
+    writeFileSync(join(p, "AGENTS.md"), "# project rules\n");
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_100,
+      nowIso: () => "2026-06-11T10:01:00Z",
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async () => {
+        calls += 1;
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "FIX-BOOT", "--max-cycles", "3"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(0);
+    expect(r.out).toContain("bootstrap_artifacts_unconfirmed");
+    expect(r.out).toContain("AGENTS.md");
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("paused");
+    expect(goal.lastDecisionReason).toBe("bootstrap_artifacts_unconfirmed");
+    expect(goal.progress?.noProgressCycles).toBeUndefined();
+    const events = readEvents(p);
+    expect(events.some((e) => e.type === "cycle:start")).toBe(false);
+    expect(events.some((e) => e.type === "goal:gate_tripped" && e.reason === "bootstrap_artifacts_unconfirmed")).toBe(true);
+    expect(events.some((e) => e.type === "goal:gate_tripped" && e.reason === "no_progress_breaker")).toBe(false);
+  });
+
+  it("FIX-1072: mixed product-code dirt is not hidden behind the bootstrap-artifact preflight", async () => {
+    const p = project();
+    execSync("git init -q", { cwd: p });
+    writeBacklog(p, [
+      "| [FIX-MIXED](.roll/features/loop-engine/FIX-MIXED/spec.md) | mixed | 📋 Todo |",
+    ]);
+    writeFileSync(join(p, "AGENTS.md"), "# project rules\n");
+    mkdirSync(join(p, "src"), { recursive: true });
+    writeFileSync(join(p, "src", "app.ts"), "export const x = 1;\n");
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_200 + calls,
+      nowIso: () => `2026-06-11T10:02:0${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async () => {
+        calls += 1;
+        return 1;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "FIX-MIXED", "--max-cycles", "1"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(1);
+    expect(r.out).not.toContain("bootstrap_artifacts_unconfirmed");
+  });
+
+  it("FIX-1072: bootstrap artifact classifier is narrow", () => {
+    expect(classifyBootstrapArtifacts(["AGENTS.md", ".roll/backlog.md", ".claude/CLAUDE.md"])).toMatchObject({
+      kind: "bootstrap_only",
+    });
+    expect(classifyBootstrapArtifacts(["AGENTS.md", "src/app.ts"])).toMatchObject({ kind: "mixed" });
+    expect(classifyBootstrapArtifacts([])).toMatchObject({ kind: "none" });
   });
 
   it("runs cycles back-to-back until a pause marker, then pauses the goal at the cycle boundary", async () => {

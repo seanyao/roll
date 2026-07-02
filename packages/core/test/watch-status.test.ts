@@ -295,6 +295,67 @@ describe("watch-status — durable cycle lookup (FIX-382)", () => {
     expect(rendered).toContain("codex");
     expect(rendered).not.toContain("US-OBS-027");
   });
+
+  it("FIX-1074: empty idle cycle does not inherit story/agent from the previous gave_up cycle", () => {
+    const rendered = renderWatchStatusFromEventLines(
+      [
+        line({ type: "cycle:start", cycleId: "20260702-192933-45425", storyId: "FIX-1070", agent: "agy", model: "agy", ts: 1_000 }),
+        line({ type: "cycle:phase", cycleId: "20260702-192933-45425", phase: "execute", ts: 1_100 }),
+        line({ type: "pair:excluded", cycleId: "20260702-192933-45425", agent: "agy", cause: "auth", failures: 4, ts: 1_200 }),
+        line({ type: "cycle:end", cycleId: "20260702-192933-45425", outcome: "gave_up", cost: { cycleId: "20260702-192933-45425", agent: "agy", model: "", tokensIn: 0, tokensOut: 0, estimatedCost: 0, revertCount: 0, effectiveCost: 0 }, ts: 1_300 }),
+        line({
+          type: "cycle:terminal",
+          schema: 1,
+          cycleId: "20260702-192933-45425",
+          storyId: "FIX-1070",
+          agent: "agy",
+          model: "agy",
+          startedAt: 1_000,
+          endedAt: 1_300,
+          outcome: "gave_up",
+          pr: { present: false, reason: "no_publish_attempted" },
+          branch: { present: true, value: "loop/cycle-20260702-192933-45425" },
+          commit: { present: false, reason: "not_recorded" },
+          tcr: { present: true, value: 0 },
+          attest: { present: false, reason: "acmap_missing" },
+          usage: { present: false, reason: "no_parseable_usage" },
+          cost: { present: false, reason: "no_parseable_usage" },
+          ts: 1_400,
+        }),
+        line({ type: "agent:retry", cycleId: "20260702-192933-45425", storyId: "FIX-1070", fromAgent: "agy", toAgent: "reasonix", attempt: 1, reason: "zero-tcr", ts: 1_500 }),
+        line({ type: "cycle:end", cycleId: "20260702-193531-48924", outcome: "idle_no_work", cost: { cycleId: "20260702-193531-48924", agent: "", model: "", tokensIn: 0, tokensOut: 0, estimatedCost: 0, revertCount: 0, effectiveCost: 0 }, ts: 2_000 }),
+        line({
+          type: "cycle:terminal",
+          schema: 1,
+          cycleId: "20260702-193531-48924",
+          storyId: "",
+          agent: "",
+          model: "",
+          startedAt: 1_900,
+          endedAt: 2_000,
+          outcome: "idle_no_work",
+          pr: { present: false, reason: "no_publish_attempted" },
+          branch: { present: true, value: "loop/cycle-20260702-193531-48924" },
+          commit: { present: false, reason: "not_recorded" },
+          tcr: { present: false, reason: "not_recorded" },
+          attest: { present: false, reason: "not_applicable" },
+          usage: { present: false, reason: "no_parseable_usage" },
+          cost: { present: false, reason: "no_parseable_usage" },
+          ts: 2_100,
+        }),
+        line({ type: "goal:gate_tripped", sessionId: "goal-20260702113531-48863", gate: "progress", action: "paused", reason: "no_progress_breaker", reading: { noProgressCycles: 3, threshold: 3 }, ts: 2_200 }),
+      ],
+      2_300,
+      { "20260702-193531-48924": { storyId: "", agent: "" } },
+    );
+    expect(rendered).toContain("story unknown");
+    expect(rendered).toContain("agent unknown");
+    expect(rendered).toContain("cycle 20260702-1935");
+    expect(rendered).toContain("outcome idle_no_work");
+    expect(rendered).toContain("last paused no_progress_breaker (progress)");
+    expect(rendered).not.toContain("FIX-1070");
+    expect(rendered).not.toContain("agy");
+  });
 });
 
 // ── US-OBS-044: story transition blocks ───────────────────────────────────────
@@ -369,6 +430,26 @@ describe("renderStoryTransition — narrated story handoffs", () => {
 
   it("returns null when there is no previous summary (startup)", () => {
     expect(renderStoryTransition(null as unknown as WatchStatusSummary, next)).toBeNull();
+  });
+
+  it("FIX-1074: transition to an empty idle cycle says no runnable work, not stale story/agent", () => {
+    const empty: WatchStatusSummary = {
+      cycleId: "20260702-193531-48924",
+      storyId: "",
+      agent: "",
+      tcrCount: 0,
+      hasEnd: true,
+      outcome: "idle_no_work",
+    };
+    const block = renderStoryTransition(
+      { ...prev, storyId: "FIX-1070", agent: "agy", outcome: "gave_up", tcrCount: 0 },
+      empty,
+    );
+    expect(block).toContain("previous: FIX-1070 · gave_up · 0 TCR · builder agy");
+    expect(block).toContain("next:     no runnable work · idle_no_work");
+    expect(block).toContain("builder:  none · no story/agent selected");
+    expect(block).not.toContain("brief unavailable");
+    expect(block).not.toContain("route reason unavailable");
   });
 });
 

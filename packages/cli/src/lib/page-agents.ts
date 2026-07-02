@@ -19,7 +19,7 @@
  * AC3 hard rule: a not-installed / not-detected agent renders neutral gray
  * "expected" (version `—`, "not installed — nothing synced"), never a red
  * error. AC4: a `stale`/`missing` agent surfaces an amber `convention stale`
- * badge + a copyable `roll setup -f <agent>` repair chip; a fully in-sync agent
+ * badge + a copyable `roll setup -f` repair chip; a fully in-sync agent
  * shows neither. Conflict isolation: the renderer lives here, in a dedicated
  * file; index-gen wires it with a one-line swap of the agents stub.
  */

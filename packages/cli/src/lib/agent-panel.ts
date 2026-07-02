@@ -4,7 +4,7 @@
  * One row per known agent: runner · version · 72h cycles & spend · availability.
  * Expanding a row shows the convention-file sync truth (✓ in sync / ⟳ stale /
  * − missing) — the SAME probes `roll status` runs — plus the copyable
- * `roll setup -f <agent>` repair command when anything is stale.
+ * `roll setup -f` repair command when anything is stale.
  *
  * Window note (AC3 trade-off): the cycles/spend window is FIXED at 72h and
  * labelled on the panel — linking it to the cycle ledger's range switch would
@@ -141,7 +141,7 @@ export function collectAgentPanel(projectPath: string, deps: AgentPanelDeps = de
       costUsd72h: Number(s.cost.toFixed(4)),
       files,
       syncStale: isInstalled && stale,
-      ...(isInstalled && stale ? { setupCmd: `roll setup -f ${name}` } : {}),
+      ...(isInstalled && stale ? { setupCmd: "roll setup -f" } : {}),
     });
   }
   // installed first, then by 72h activity, then name.

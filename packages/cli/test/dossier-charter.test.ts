@@ -129,7 +129,7 @@ describe("collectAbout — US-DOSSIER-041 (pure, structured charter)", () => {
 
 const AGENTS: AgentPanelRow[] = [
   { name: "claude", display: "claude", runner: "Claude Code", version: "2.1.0", installed: true, cycles72h: 4, costUsd72h: 1, files: [], syncStale: false },
-  { name: "kimi", display: "kimi", runner: "Kimi CLI", version: "—", installed: true, cycles72h: 1, costUsd72h: 0, files: [], syncStale: true, setupCmd: "roll setup -f kimi" },
+  { name: "kimi", display: "kimi", runner: "Kimi CLI", version: "—", installed: true, cycles72h: 1, costUsd72h: 0, files: [], syncStale: true, setupCmd: "roll setup -f" },
   // pi / reasonix absent — not installed on this machine.
 ];
 

@@ -90,6 +90,97 @@ function registerProject(projectDir: string): void {
   }
 }
 
+const ROLL_OWNED_GIT_PATHS = [
+  "AGENTS.md",
+  ".claude/CLAUDE.md",
+  ".roll/.version",
+  ".roll/agents.yaml",
+  ".roll/backlog.md",
+  ".roll/brief.md",
+  ".roll/briefs",
+  ".roll/domain",
+  ".roll/domain/context-map.md",
+  ".roll/features",
+  ".roll/features.md",
+  ".roll/init-diagnosis.yaml",
+  ".roll/onboard-changeset.yaml",
+  ".roll/onboard-plan.yaml",
+  ".roll/tech-analysis.md",
+  ".roll/test-assessment.md",
+  ".gitignore",
+] as const;
+
+function runGit(projectDir: string, args: string[]): { ok: boolean; stdout: string; stderr: string } {
+  const result = spawnSync("git", args, {
+    cwd: projectDir,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  return {
+    ok: result.status === 0,
+    stdout: String(result.stdout ?? ""),
+    stderr: String(result.stderr ?? ""),
+  };
+}
+
+function existingRollOwnedPaths(projectDir: string): string[] {
+  return ROLL_OWNED_GIT_PATHS.filter((rel) => existsSync(join(projectDir, rel.replace(/\/$/, ""))));
+}
+
+function printGitFinalizeManual(reason: string, command: string): void {
+  warn(`Roll meta git finalize needs manual follow-up: ${reason}`);
+  process.stderr.write(`  ${command}\n`);
+}
+
+function finalizeRollOwnedGit(projectDir: string): void {
+  if (!runGit(projectDir, ["rev-parse", "--is-inside-work-tree"]).ok) return;
+  const topLevel = runGit(projectDir, ["rev-parse", "--show-toplevel"]);
+  if (!topLevel.ok) return;
+  if (realpathSync(projectDir) !== realpathSync(topLevel.stdout.trim())) return;
+
+  const paths = existingRollOwnedPaths(projectDir);
+  if (paths.length === 0) return;
+
+  if (!runGit(projectDir, ["diff", "--cached", "--quiet"]).ok) {
+    printGitFinalizeManual("existing staged changes; auto commit skipped", `git add -A -f -- ${paths.join(" ")} && git commit -m 'roll init: commit Roll-owned meta files'`);
+    return;
+  }
+
+  const add = runGit(projectDir, ["add", "-A", "-f", "--", ...paths]);
+  if (!add.ok) {
+    printGitFinalizeManual("git add failed", `git add -A -f -- ${paths.join(" ")}`);
+    return;
+  }
+
+  if (runGit(projectDir, ["diff", "--cached", "--quiet", "--", ...paths]).ok) return;
+
+  const commit = runGit(projectDir, ["commit", "-m", "roll init: commit Roll-owned meta files"]);
+  if (!commit.ok) {
+    printGitFinalizeManual("git commit failed", "git commit -m 'roll init: commit Roll-owned meta files' -- AGENTS.md .roll .claude .gitignore");
+    return;
+  }
+
+  const sha = runGit(projectDir, ["rev-parse", "--short", "HEAD"]).stdout.trim();
+  ok(`Roll meta committed${sha !== "" ? `: ${sha}` : ""}`);
+
+  const branch = runGit(projectDir, ["rev-parse", "--abbrev-ref", "HEAD"]).stdout.trim();
+  if (branch === "" || branch === "HEAD") {
+    printGitFinalizeManual("detached HEAD; push skipped", "git push origin HEAD");
+    return;
+  }
+  const remotes = runGit(projectDir, ["remote"]).stdout.split("\n").filter((line) => line.trim() !== "");
+  if (!remotes.includes("origin")) {
+    printGitFinalizeManual("origin remote is not configured; push skipped", `git push -u origin ${branch}`);
+    return;
+  }
+  const push = runGit(projectDir, ["push", "-u", "origin", branch]);
+  if (!push.ok) {
+    printGitFinalizeManual("git push failed", `git push -u origin ${branch}`);
+    return;
+  }
+  ok(`Roll meta pushed: origin/${branch}`);
+}
+
 // ─── bash UI helpers (bin/roll:41-56) — used only for err() here ─────────────
 function err(line: string): void {
   const { RED, NC } = pal();
@@ -1338,6 +1429,7 @@ function initRepair(
 
   printMergeSummary(summary);
   ok("Repair complete.");
+  finalizeRollOwnedGit(projectDir);
   return 0;
 }
 
@@ -1454,6 +1546,7 @@ function initApply(
 
     process.stdout.write("\n");
     ok(m("init.onboard_apply_complete_onboard"));
+    finalizeRollOwnedGit(projectDir);
     return 0;
   } catch (error) {
     err(m3("init.onboard_apply_failed"));
@@ -2361,6 +2454,8 @@ export function initCommand(args: string[], deps: InitCommandDeps = {}): number 
     repairMode ? "repair" : undefined,
     conciergeNextItems(brief, initDiagnosis),
   );
+
+  finalizeRollOwnedGit(projectDir);
 
   void err;
   return 0;

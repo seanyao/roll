@@ -53,6 +53,10 @@ waits for owner confirmation before writing. Automation must use
 After any init path, `roll next` is the continuation button: it reads the same
 brief, onboard plan, backlog, and Roll markers, then prints one best next
 command instead of a menu.
+When `roll init` writes Roll-owned meta files inside a git worktree, it also
+adds, commits, and pushes those files to `origin` when possible, then prints the
+commit/push result. Product files you created yourself are not included in that
+finalization commit.
 First time through? Start with [Getting started](guide/en/getting-started.md).
 
 ## Language Surfaces
@@ -205,7 +209,7 @@ with `roll loop resume` when ready.
 | `roll loop <on\|off\|go\|watch\|runs\|cycles\|cycle\|alert\|…>` | Run, observe, and maintain the autonomous executor |
 | `roll next` | Continue init/onboard with one best next command |
 | `roll release [--dry-run\|--showcase]` | Release planning/flow plus golden-path showcase support |
-| `roll setup [skills\|offboard\|-f]` | Install/sync conventions or remove Roll-owned project artifacts |
+| `roll setup [-f\|--force] [--reselect]` / `roll setup skills\|offboard` | Install/sync conventions or remove Roll-owned project artifacts |
 | `roll status [ci\|pulse] [--json]` | Project health, CI state, and delivery pulse |
 | `roll test [--where] [--reset]` | Run tests through the isolation adapter |
 | `roll update` | Upgrade the global Roll install and re-sync conventions |

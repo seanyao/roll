@@ -63,6 +63,13 @@ describe("help contract — table-driven across registered commands", () => {
     expect(r.status).toBe(0);
     expect(out).toMatch(/Usage/i);
   });
+
+  it("setup help documents the accepted force/reselect surface", async () => {
+    const r = await dispatch(["setup", "--help"]);
+    expect(r.status).toBe(0);
+    expect(out).toContain("roll setup [-f|--force] [--reselect]");
+    expect(out).not.toContain("roll setup [skills|offboard]");
+  });
 });
 
 describe("FIX-238 — update never upgrades on a cry for help; init/setup name the bad flag", () => {

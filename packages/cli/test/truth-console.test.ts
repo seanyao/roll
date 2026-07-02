@@ -57,7 +57,7 @@ const AGENTS = [
     name: "kimi", display: "kimi", runner: "Kimi CLI", version: "—", installed: true,
     cycles72h: 1, costUsd72h: 0.1,
     files: [{ path: "/home/u/.kimi/AGENTS.md", kind: "AGENTS.md", state: "stale" as const }],
-    syncStale: true, setupCmd: "roll setup -f kimi",
+    syncStale: true, setupCmd: "roll setup -f",
   },
   {
     name: "pi", display: "pi", runner: "pi CLI", version: "—", installed: false,

@@ -47,6 +47,9 @@ roll loop on        # 可选：让 AI 自动跑 backlog
 `roll init --apply --auto`。
 任一路径之后，`roll next` 都是继续按钮：它读取同一份 brief、onboard plan、
 backlog 和 Roll 标记，只打印一个最合适的下一步命令，而不是让用户自己猜。
+当 `roll init` 在 git worktree 中写入 Roll-owned meta 文件时，它会尽力把这些文件
+add、commit 并 push 到 `origin`，然后打印提交/推送结果。你自己创建的产品文件不会被
+纳入这次收尾提交。
 第一次跑建议从[快速上手](guide/zh/getting-started.md)开始。
 
 ## 语言表面
@@ -186,7 +189,7 @@ roll loop on
 | `roll loop <on\|off\|go\|watch\|runs\|cycles\|cycle\|alert\|…>` | 运行、观察和维护自主执行循环 |
 | `roll next` | 接续 init/onboard，只给一个最合适的下一步 |
 | `roll release [--dry-run\|--showcase]` | 发版计划/流程与 golden-path showcase 支撑 |
-| `roll setup [skills\|offboard\|-f]` | 安装/同步约定，或移除 Roll 管理的项目产物 |
+| `roll setup [-f\|--force] [--reselect]` / `roll setup skills\|offboard` | 安装/同步约定，或移除 Roll 管理的项目产物 |
 | `roll status [ci\|pulse] [--json]` | 项目健康、CI 状态和交付脉搏 |
 | `roll test [--where] [--reset]` | 通过隔离适配器运行测试 |
 | `roll update` | 升级全局 Roll 并重新同步约定 |

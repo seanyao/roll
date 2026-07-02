@@ -96,9 +96,9 @@ describe("frozen: roll status render", () => {
         ────────────────────────────────────────────────────────────────────────────────────────────────
         claude        CLAUDE.md     ✓ in sync     12
         kimi          AGENTS.md     ~ out of sync 12
-             fix: roll setup -f kimi
+             fix: roll setup -f
         pi            AGENTS.md     − missing     0
-             fix: roll setup -f pi
+             fix: roll setup -f
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -205,7 +205,7 @@ describe("frozen: roll status render", () => {
         ────────────────────────────────────────────────────────────────────────────────────────────────
         claude        CLAUDE.md     ✓ in sync     2
         kimi          AGENTS.md     − missing     0
-             fix: roll setup -f kimi
+             fix: roll setup -f
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 

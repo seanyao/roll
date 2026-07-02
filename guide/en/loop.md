@@ -478,6 +478,54 @@ a `cause` (e.g. `unparseable`) and a `raw artifact:` pointer to the captured
 attempt under `.roll/loop/peer/` — see
 [Troubleshooting unparseable score/review](../../docs/live-console.md#故障排查).
 
+## Collaboration View
+
+US-OBS-032 writes the role cast (`summary.md` / `summary.json`), US-OBS-033
+exposes that cast with `roll cycle <id> --roles`, and the collaboration view is
+the upper layer over CycleRoleSummary. It turns the same facts into a protocol
+relay: who designed, who built, who reviewed, who evaluated, and where the
+baton ended.
+
+Use these entry points:
+
+```bash
+roll cycle <id> --collab          # one cycle as a protocol relay
+roll cycle <id> --collab --json   # collab-view.v1 JSON
+roll supervisor live --collab     # live multi-cycle collaboration stream
+roll supervisor live --collab --once
+roll cycle --legend               # Layer A protocol legend
+```
+
+Read the protocol as:
+
+```text
+Supervisor/Designer -> Builder -> independent Peer Reviewer/Evaluator -> Gate
+```
+
+The Supervisor can intervene at three levels. `observe/advise` means the
+Supervisor is watching, asking for evidence, or routing owner attention without
+changing the Builder's work. `design/split` means the Supervisor turns unclear
+scope into a design artifact or smaller follow-up actions. `Builder override`
+is explicit and exceptional: the Supervisor chooses or replaces the Builder
+binding, and that decision must remain visible in the cast.
+
+Role independence is session-based, not brand-based: separate fresh sessions
+and artifact handoff are the rule. The same agent brand can serve more than
+one role only when each role runs in its own session and hands off through
+artifacts: a plan, diff, review, score, AC map, or report.
+A shared transcript is not an independent review. Agent diversity is useful
+evidence and a ranking signal, especially when capability or shortcoming
+profiles are visible in role summaries, but it is not a default hard exclusion
+rule; capability, availability, and the required role contract still decide.
+
+`handoff`, `escalation`, and `terminus` are separate reading keys. A handoff is
+the normal baton pass between roles, such as Builder -> Peer Reviewer with a diff and evidence.
+Escalation is a visible break in the normal path: the Supervisor, Gate, or owner
+needs attention because the ordinary relay could not finish cleanly. The
+`terminus` says where the baton ended, not whether the Story passed or failed:
+`walked_full`, `escalated`, `split`, and `supervisor_fix` describe the relay's
+ending point. Use the Gate and attest result for pass/fail.
+
 ## Status Dashboard
 
 `roll loop status` prints a compact dashboard with per-cycle rows and daily rollup totals.

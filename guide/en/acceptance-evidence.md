@@ -104,6 +104,30 @@ Two rules decide what the validator recognises:
   So a card that declares `deliverable_url: .roll/features/agents.html` is judged
   a **web** surface even when its AC prose mentions a `roll` command.
 
+## Evidence Modes
+
+Stories may declare `evidence_mode:` in frontmatter, or an Evaluation contract
+may declare `- evidence_mode: ...`. Roll also derives a mode for Evaluator
+prompts, but only an explicit non-visual mode changes the screenshot gate.
+That explicit mode is not a blank override: a declared URL, terminal command,
+physical terminal, or visual-evidence AC still escalates to the relevant capture
+gate.
+
+| Mode | Required proof | Screenshot policy |
+|------|----------------|-------------------|
+| `visual_ui` | rendered visual capture, functional/smoke check, CI | required |
+| `cli_output` | stdout/stderr snapshot, exit code, command fixture or focused test, CI | conditional; required for terminal/TUI visual changes |
+| `refactor_contract` | focused tests, typecheck/build, grep/no-old-symbol checks, CI | not required unless visual risk is present |
+| `data_state` | fixture replay, event assertions, idempotency/concurrency coverage, CI | not required unless visual risk is present |
+| `docs_content` | rendered text checks, link checks, diff review, CI | conditional; required for layout changes |
+
+`screenshot_exempt:` should name or imply the alternate matrix, preferably by
+pairing it with `evidence_mode: refactor_contract`, `data_state`, or
+`docs_content`. QA/Evaluator may escalate any non-visual mode back to a screenshot
+gate when a visual surface changed, an AC explicitly asks for visual evidence, or
+prior evidence exposes rendering/layout risk; the escalation reason must be
+recorded.
+
 ## External tool readiness
 
 Visual evidence uses machine-level tools that are declared explicitly and probed

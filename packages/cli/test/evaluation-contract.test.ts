@@ -10,9 +10,12 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  EVIDENCE_MODE_MATRIX,
+  evidenceModeForSpec,
   evidenceDeltaSummary,
   formatEvaluationContractForScorer,
   parseEvaluationContract,
+  screenshotEscalationReason,
   type EvaluationContract,
 } from "../src/lib/evaluation-contract.js";
 import { buildPairScorePrompt } from "../src/runner/pairing-gate.js";
@@ -23,6 +26,7 @@ title: example story
 ---
 
 **Evaluation contract:**
+- evidence_mode: visual_ui
 - expected_evidence:
   - kind: test
     target: packages/cli/test/example.test.ts
@@ -90,6 +94,7 @@ describe("parseEvaluationContract", () => {
   it("parses a full evaluation contract with all sections", () => {
     const contract = parseEvaluationContract(FULL_SPEC);
     expect(contract).not.toBeNull();
+    expect(contract!.evidence_mode).toBe("visual_ui");
     expect(contract!.expected_evidence).toHaveLength(2);
 
     expect(contract!.expected_evidence[0]).toEqual({
@@ -187,6 +192,65 @@ id: US-STOP2-001
     expect(contract).not.toBeNull();
     expect(contract!.expected_evidence).toHaveLength(1);
     expect(contract!.expected_evidence[0]!.kind).toBe("command");
+  });
+});
+
+describe("evidence mode policy", () => {
+  it("uses a declared frontmatter evidence_mode before derivation", () => {
+    const decision = evidenceModeForSpec(`---
+id: REFACTOR-X
+evidence_mode: refactor_contract
+---
+# REFACTOR-X
+
+## AC
+- [ ] old role names are gone
+`);
+
+    expect(decision.mode).toBe("refactor_contract");
+    expect(decision.source).toBe("frontmatter");
+    expect(decision.matrix.requiredEvidence).toEqual(expect.arrayContaining(["focused tests", "typecheck/build", "grep/no-old-symbol check", "CI"]));
+    expect(decision.matrix.screenshotPolicy).toBe("not_required");
+  });
+
+  it("uses Evaluation contract evidence_mode when frontmatter omits it", () => {
+    const decision = evidenceModeForSpec(`---
+id: DOCS-X
+---
+
+**Evaluation contract:**
+- evidence_mode: docs_content
+- expected_evidence:
+  - kind: document
+    target: guide/en/overview.md
+    proves: AC1
+`);
+
+    expect(decision.mode).toBe("docs_content");
+    expect(decision.source).toBe("evaluation_contract");
+    expect(EVIDENCE_MODE_MATRIX.docs_content.requiredEvidence).toContain("link check");
+  });
+
+  it("derives visual_ui from screenshot evidence and refactor_contract from tests/diff/CI", () => {
+    expect(evidenceModeForSpec("---\nid: UI-X\ndeliverable_url: https://app.test\n---\n").mode).toBe("visual_ui");
+    expect(
+      evidenceModeForSpec(`**Evaluation contract:**
+- expected_evidence:
+  - kind: test
+    target: packages/cli/test/role.test.ts
+    proves: AC1
+  - kind: diff
+    target: no old role symbols
+    proves: AC2
+`).mode,
+    ).toBe("refactor_contract");
+  });
+
+  it("records screenshot escalation reasons by mode and risk", () => {
+    expect(screenshotEscalationReason("visual_ui", {})).toBe("visual_ui evidence mode requires rendered visual proof");
+    expect(screenshotEscalationReason("refactor_contract", {})).toBeNull();
+    expect(screenshotEscalationReason("refactor_contract", { acRequestsVisualEvidence: true })).toBe("AC explicitly requests visual evidence");
+    expect(screenshotEscalationReason("docs_content", { renderingRisk: true })).toBe("prior evidence exposes rendering/layout risk");
   });
 });
 

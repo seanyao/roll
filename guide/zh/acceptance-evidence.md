@@ -91,6 +91,27 @@ soft 模式会记录缺口并发出同一类审计信号，但不阻塞本轮交
   所以声明了 `deliverable_url: .roll/features/agents.html` 的卡判为 **web** 面，
   即便其 AC 文案里提到 `roll` 命令。
 
+## 证据模式
+
+Story 可以在 frontmatter 声明 `evidence_mode:`，也可以在 Evaluation contract
+里声明 `- evidence_mode: ...`。Roll 也会为 Evaluator prompt 推导模式，但只有显式
+声明的非视觉模式会改变截图门。
+这个显式模式不是空白覆盖：已经声明 URL、终端命令、physical terminal 或
+visual-evidence AC 时，仍会升级到对应截图/采集门。
+
+| 模式 | 必需证明 | 截图策略 |
+|------|----------|----------|
+| `visual_ui` | 真实渲染截图、功能/冒烟检查、CI | 必需 |
+| `cli_output` | stdout/stderr 快照、退出码、命令 fixture 或聚焦测试、CI | 条件必需；终端/TUI 视觉变化仍要截图 |
+| `refactor_contract` | 聚焦测试、typecheck/build、grep/no-old-symbol 检查、CI | 默认不需要；有视觉风险时升级 |
+| `data_state` | fixture replay、事件断言、幂等/并发覆盖、CI | 默认不需要；有视觉风险时升级 |
+| `docs_content` | rendered text 检查、链接检查、diff review、CI | 条件必需；布局变化要截图 |
+
+`screenshot_exempt:` 应命名或明确指向替代矩阵，最好配套
+`evidence_mode: refactor_contract`、`data_state` 或 `docs_content`。QA/Evaluator
+可以在三种情况下把非视觉模式升级回截图门：改了视觉表面、AC 明确要求 visual
+evidence、已有证据暴露 rendering/layout 风险；升级原因必须记录。
+
 ## 外部工具就绪度
 
 可视证据依赖机器级工具；这些工具会被显式声明，并在启动时探测：

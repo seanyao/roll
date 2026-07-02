@@ -37,7 +37,7 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
 import { hasVisualEvidenceAc } from "../lib/design-visual-evidence.js";
-import { evidenceDeltaSummary, parseEvaluationContract } from "../lib/evaluation-contract.js";
+import { evidenceDeltaSummary, evidenceModeExemptsScreenshot, evidenceModeForSpec, parseEvaluationContract } from "../lib/evaluation-contract.js";
 import { physicalTerminalFromSpecText } from "../lib/physical-terminal.js";
 import { evaluateReviewScoreGate } from "../lib/review-score.js";
 
@@ -313,7 +313,9 @@ export function storyHasAcBlock(worktreeCwd: string, storyId: string): boolean |
  * Exemption is the ONLY rule path (see {@link screenshotExemption}):
  *   1. spec frontmatter `screenshot_exempt: <reason>` — an explicit, recorded,
  *      per-card exemption, OR
- *   2. a configurable deny-list of genuinely-non-visual epics
+ *   2. an explicit non-visual `evidence_mode` whose spec declares no URL,
+ *      terminal command, physical terminal, or visual-evidence AC, OR
+ *   3. a configurable deny-list of genuinely-non-visual epics
  *      (`acceptance.screenshot_exempt_epics:` in `.roll/policy.yaml`).
  * An exemption returns false WITH the recorded reason; everything else is
  * REQUIRED. Returns true ⇒ this story owes captured visual evidence; the attest
@@ -330,8 +332,9 @@ export function storyRequiresScreenshot(worktreeCwd: string, storyId: string): b
  * `reason` when (and only when) the story is EXPLICITLY exempted; `undefined`
  * reason ⇒ a screenshot is REQUIRED (the default for every story).
  *
- * The two recognised exemptions, both explicit and recorded:
+ * Recognised exemptions are explicit and recorded:
  *   - spec frontmatter `screenshot_exempt: <reason>` (per-card), or
+ *   - a declared non-visual `evidence_mode` with no visual/terminal surface, or
  *   - the story's epic appears in the policy deny-list
  *     `acceptance.screenshot_exempt_epics:` (genuinely-non-visual epics, e.g.
  *     pure data-migration).
@@ -347,6 +350,7 @@ export function screenshotExemption(worktreeCwd: string, storyId: string): { rea
   } catch {
     return {};
   }
+  const modeDecision = evidenceModeForSpec(text);
   // (1) per-card explicit exemption: frontmatter `screenshot_exempt: <reason>`.
   const fm = /^---\n([\s\S]*?)\n---/.exec(text);
   if (fm !== null) {
@@ -354,9 +358,12 @@ export function screenshotExemption(worktreeCwd: string, storyId: string): { rea
     if (m !== null) {
       const reason = stripQuotes((m[1] ?? "").trim());
       if (reason !== "" && !/^(false|no|0|true|yes|on|1)$/i.test(reason)) {
-        return { reason: `screenshot_exempt (spec): ${reason}` };
+        return { reason: `screenshot_exempt (spec): ${reason}; evidence_mode=${modeDecision.mode}` };
       }
     }
+  }
+  if (evidenceModeExemptsScreenshot(text, modeDecision)) {
+    return { reason: `evidence_mode (${modeDecision.source}): ${modeDecision.mode} matrix does not require screenshots` };
   }
   // (2) epic deny-list exemption: this story's epic is recorded as non-visual.
   const epic = epicForSpec(spec);

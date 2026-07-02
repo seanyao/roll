@@ -2120,6 +2120,60 @@ describe("executeCommand — command → executor mapping", () => {
     });
   });
 
+  it("FIX-1069: capture_facts catches an agent escape that cd's back to main and commits there", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-fix1069-")));
+    execDirs.push(root);
+    const remote = join(root, "remote.git");
+    const main = join(root, "main");
+    const wt = join(root, "cycle-wt");
+    execFileSync("git", ["init", "-q", "--bare", "-b", "main", remote]);
+    execFileSync("git", ["clone", "-q", remote, main]);
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: main });
+    execFileSync("git", ["config", "user.name", "Roll Test"], { cwd: main });
+    writeFileSync(join(main, "README.md"), "base\n", "utf8");
+    execFileSync("git", ["add", "README.md"], { cwd: main });
+    execFileSync("git", ["commit", "-q", "-m", "base"], { cwd: main });
+    execFileSync("git", ["push", "-q", "-u", "origin", "main"], { cwd: main });
+    execFileSync("git", ["worktree", "add", "-q", "-b", "cycle", wt], { cwd: main });
+
+    // Simulate the Builder starting in the cycle worktree, then escaping with
+    // `cd <main>` before mutating and committing.
+    writeFileSync(join(main, "escaped.txt"), "leaked\n", "utf8");
+    execFileSync("git", ["add", "escaped.txt"], { cwd: main });
+    execFileSync("git", ["commit", "-q", "-m", "tcr: leaked main checkout commit"], { cwd: main });
+
+    const base = fakePorts();
+    const count = (cwd: string, range: string): number =>
+      Number(execFileSync("git", ["rev-list", "--count", range], { cwd, encoding: "utf8" }).trim());
+    const { ports } = fakePorts({
+      repoCwd: main,
+      paths: { ...base.ports.paths, worktreePath: wt },
+      git: {
+        ...base.ports.git,
+        commitsAhead: vi.fn(async (cwd) => count(cwd, "origin/main..HEAD")),
+        mainAhead: vi.fn(async (cwd) => count(cwd, "origin/main..main")),
+        tcrCount: vi.fn(async (cwd) =>
+          execFileSync("git", ["log", "--oneline", "origin/main..HEAD"], { cwd, encoding: "utf8" })
+            .split("\n")
+            .filter((line) => line.includes(" tcr:")).length,
+        ),
+      },
+    });
+
+    const r = await executeCommand({ kind: "capture_facts" }, ports, CTX);
+    expect(r.event).toMatchObject({
+      type: "facts_captured",
+      facts: {
+        commitsAhead: 0,
+        mainAhead: 1,
+        attemptedCwd: main,
+        expectedWorktreeCwd: wt,
+      },
+    });
+    expect(execFileSync("git", ["status", "--short"], { cwd: main, encoding: "utf8" }).trim()).toBe("");
+    expect(execFileSync("git", ["rev-list", "--count", "origin/main..HEAD"], { cwd: wt, encoding: "utf8" }).trim()).toBe("0");
+  });
+
   it("FIX-903: rescue_leaked saves leaked main commits to a rescue ref and resets main", async () => {
     const { ports, calls } = fakePorts({
       git: {

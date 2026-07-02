@@ -330,7 +330,7 @@ export function registerAll(): void {
   // `init`: full surface TS (fresh/re-init scaffold, existing-codebase onboard
   // launcher, --apply plan consumption, unknown flags, and no-template guard).
   // No sub-paths on bash.
-  registerPorted("init", initCommand, { help: "Usage: roll init [--auto|--repair|--apply]\n  Diagnose this project and route to scaffold, PRD design, existing-codebase onboard, repair, migration, or roll status.\n  --auto: apply deterministic fresh-project scaffolding in non-interactive runs.\n  --repair: repair partial Roll markers only.\n  --apply: validate and apply a reviewed existing-codebase onboard plan.\n诊断项目并路由到骨架、PRD 设计、已有代码库接入、修复、迁移或 roll status。\n  --apply：校验并应用已审阅的已有代码库接入计划。" });
+  registerPorted("init", initCommand, { help: "Usage: roll init [--auto|--repair|--apply] [--yes|--then design]\n  Diagnose this project and route to scaffold, PRD design, existing-codebase onboard, repair, migration, or roll status.\n  --auto: apply deterministic fresh-project scaffolding in non-interactive runs.\n  --repair: repair partial Roll markers only.\n  --apply: validate and apply a reviewed existing-codebase onboard plan.\n  --yes / --then design: after scaffolding a PRD project, continue straight into `roll design` (skips the confirm prompt).\n诊断项目并路由到骨架、PRD 设计、已有代码库接入、修复、迁移或 roll status。\n  --apply：校验并应用已审阅的已有代码库接入计划。\n  --yes / --then design：脚手架搭好后直接续跑 `roll design`（跳过确认）。" });
   registerPorted("next", nextCommand, { help: NEXT_USAGE });
   // `design`: explicit thin entry point for the $roll-design skill
   // (US-ONBOARD-NUDGE-004). Loads the skill and launches the selected agent;

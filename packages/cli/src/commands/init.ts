@@ -66,6 +66,7 @@ import {
 import { computeInitFactsHash } from "../lib/onboard-plan.js";
 import { discoverInteractiveAgents } from "../lib/interactive-agent.js";
 import { confirmYesNo, readConfirmLine } from "../lib/tty-confirm.js";
+import { designCommand } from "./design.js";
 
 /**
  * FIX-283 (AC4): adopting roll registers the project into `~/.roll/projects.json`
@@ -1725,6 +1726,75 @@ function isStdinInteractive(): boolean {
 interface InitCommandDeps {
   readLine?: () => string;
   forceInteractive?: boolean;
+  /**
+   * US-INIT-010: seam for the design continuation. Defaults to the real
+   * `roll design` command; tests inject a spy so no agent is spawned.
+   */
+  runDesign?: (args: string[]) => number;
+}
+
+/** US-INIT-010: does the invocation ask to auto-continue into design? */
+function wantsAutoContinue(args: string[]): boolean {
+  if (args.includes("--yes") || args.includes("-y")) return true;
+  for (let i = 0; i < args.length; i += 1) {
+    const a = args[i] ?? "";
+    if (a === "--then=design") return true;
+    if (a === "--then" && (args[i + 1] ?? "") === "design") return true;
+  }
+  return false;
+}
+
+/**
+ * US-INIT-010 — after a fresh init that detected a PRD + empty backlog, offer to
+ * continue straight into `roll design` instead of making the user copy-paste the
+ * printed NEXT command. The seam:
+ *
+ * - `roll init` stays cheap + idempotent; `roll design` is a minutes-long agent
+ *   run, so we NEVER auto-fire it silently. A consent gate (`[y/N]`) mirrors
+ *   init's own `Proceed?` prompt, with a cost notice (AC6).
+ * - `--yes` / `--then design` (or a non-TTY without a flag → no) gives the
+ *   non-interactive path (AC4).
+ * - Only fires when there is a concrete design input (a `--from-file <prd>`);
+ *   a bare `roll design` handoff keeps just the printed NEXT hint.
+ */
+function maybeContinueIntoDesign(
+  brief: InitBriefResult | null,
+  args: string[],
+  deps: InitCommandDeps,
+): void {
+  if (brief === null) return;
+  const sourcePath = brief.sourcePath;
+  if (sourcePath === undefined || sourcePath === "") return; // no concrete input → hint only
+  if (!brief.nextCommand.startsWith("roll design")) return;
+
+  const auto = wantsAutoContinue(args);
+  let proceed: boolean;
+  if (auto) {
+    proceed = true;
+  } else if (!isInitInteractive(deps.forceInteractive)) {
+    return; // no TTY and no flag → do not run; keep the printed NEXT hint (AC4)
+  } else {
+    const detected = initCopy(
+      `Detected ${sourcePath} and an empty backlog.`,
+      `检测到 ${sourcePath}，且 backlog 为空。`,
+    );
+    const note = initCopy(
+      "takes a few minutes · runs an AI agent",
+      "需数分钟 · 会调用 AI agent",
+    );
+    process.stdout.write(`\n  ${c("fg", detected)}\n`);
+    const prompt = initCopy(
+      `  Run design now? [y/N]  (${note}; or later: ${brief.nextCommand})  `,
+      `  现在就跑设计吗？[y/N]  （${note}；也可稍后：${brief.nextCommand}）  `,
+    );
+    proceed = confirmYesNo(prompt, (s) => process.stderr.write(s), deps.readLine ?? readConfirmLine);
+    process.stdout.write("\n");
+  }
+  if (!proceed) return;
+
+  // AC5/AC6: equivalent to the user running `roll design --from-file <prd>`.
+  const run = deps.runDesign ?? ((a: string[]) => designCommand(a));
+  run(["--from-file", sourcePath]);
 }
 
 function isInitInteractive(forceInteractive = false): boolean {
@@ -2353,7 +2423,8 @@ export function initCommand(args: string[], deps: InitCommandDeps = {}): number 
     }
     return initApply(projectDir, { autoMode, forceInteractive: deps.forceInteractive, readLine: deps.readLine });
   }
-  const unknownFlag = args.find((a) => a.startsWith("-") && a !== "--auto" && a !== "--repair");
+  const KNOWN_INIT_FLAGS = new Set(["--auto", "--repair", "--yes", "-y", "--then", "--then=design"]);
+  const unknownFlag = args.find((a) => a.startsWith("-") && !KNOWN_INIT_FLAGS.has(a));
   if (unknownFlag !== undefined) {
     // FIX-238 AC2: name the offending flag (the empty-name message was useless).
     err(`${m("init.unknown_flag_1")}${unknownFlag}`);
@@ -2457,6 +2528,9 @@ export function initCommand(args: string[], deps: InitCommandDeps = {}): number 
   );
 
   finalizeRollOwnedGit(projectDir);
+
+  // US-INIT-010: offer to continue straight into design (consent-gated).
+  maybeContinueIntoDesign(brief, args, deps);
 
   void err;
   return 0;

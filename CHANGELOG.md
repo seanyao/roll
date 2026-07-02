@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v4.702.2 — 2026-07-02
+
 ### Breaking changes
 - Role taxonomy is now cut over to Supervisor / Designer / Builder / Evaluator. Designed cycles use `execution_profiles.designed`, `roles.designer`, and `role-artifacts/designer/design-contract.md`; retired keys now fail loudly instead of aliasing. See `docs/migration/role-taxonomy-v4.md` for the manual config update. (REFACTOR-ROLE-001..008)
 

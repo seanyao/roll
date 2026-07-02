@@ -65,8 +65,7 @@ defaults:
         kind: select
         from: [claude, codex, kimi, pi, agy, reasonix, cursor]
         require: [evaluate]
-        avoid: [execute]
-        strategy: least-recent
+        strategy: health-aware
 ```
 
 Machine scope can declare a supervisor and the local pool:

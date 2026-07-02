@@ -1,6 +1,6 @@
 # Roll — 概述
 
-Roll 是 Prime Agent-led 的交付 harness。把目标写下来，让 Roll 拆成 Story，并把每张 Story 路由进 scoped `supervise`、`execute`、`evaluate` 角色。
+Roll 是 Supervisor-led 的交付 harness。把目标写下来，让 Roll 拆成 Story，并把每张 Story 路由进 scoped `supervise`、`execute`、`evaluate` 角色。
 
 ## 快速开始
 
@@ -18,11 +18,11 @@ roll loop watch     # 可选：CLI-first 实时旁观当前 cycle
 
 ## 工作原理
 
-Roll 以 V4 Prime Agent 执行系统运行：
+Roll 以 V4 Supervisor 执行系统运行：
 
-- **Prime Agent** —— 项目级 observe/advise 角色。它读取 backlog、merge truth、open PR、scoped role bindings、重复失败、发布就绪和 owner 问题。它协调跨 Story 工作；不实现具体 Story，也不覆盖证据闸。
-- **Delta Unit** —— 一张 Story 通过 `execute` 交付，并在配置后由 `evaluate` 评审。
-- **角色与绑定** —— `supervise`、`execute`、`evaluate` 是稳定角色；具体 agent 和可选 model 由 `Scope -> Role -> Binding -> Agent -> Model` 解析。请求的绑定不可用时，Roll 记录并 fail loud，不冒充成另一个 agent。
+- **Supervisor** —— 项目级 observe/advise 角色。它读取 backlog、merge truth、open PR、scoped role bindings、重复失败、发布就绪和 owner 问题。它协调跨 Story 工作；不实现具体 Story，也不覆盖证据闸。
+- **Delta Unit** —— 一张 Story 在需要时先由 `design` 产出 Designer contract，再通过 `execute` 交付，并在配置后由 `evaluate` 评审。
+- **角色与绑定** —— `supervise`、`design`、`execute`、`evaluate` 是稳定角色；具体 agent 和可选 model 由 `Scope -> Role -> Binding -> Agent -> Model` 解析。请求的绑定不可用时，Roll 记录并 fail loud，不冒充成另一个 agent。
 - **Loop** —— 按可配置频次从 BACKLOG 摘取最高优先级故事，在隔离 worktree 里执行。CI 通过后才会落到 `main`。
 - **Dream** — 凌晨 3 点扫描代码库，发现死代码、文档缺口和架构漂移，将 `REFACTOR-NNN` 条目排队交给 loop 领取。
 - **Skills** —— 仍然是能力层。角色调用 `$roll-design`、`$roll-build`、`$roll-fix`、`$roll-peer`、`$roll-.qa` 等技能。
@@ -49,7 +49,7 @@ roll design --from-file .roll/brief.md
 roll loop on
 ```
 
-从一句需求、PRD 或几条笔记开始。Roll 说明下一步设计动作，而不是静默创建假工作；Planner/design 创建 backlog，Prime Agent 为每张 Story 选择执行剖面，角色执行，owner 查看按 Story 收口的 attest 证据。
+从一句需求、PRD 或几条笔记开始。Roll 说明下一步设计动作，而不是静默创建假工作；Designer 创建 backlog，Supervisor 为每张 Story 选择 `standard`、`verified` 或 `designed` 执行剖面，owner 查看按 Story 收口的 attest 证据。
 
 **已有项目接入**
 
@@ -122,7 +122,7 @@ defaults:
 
 当前产品是 CLI-first。`roll status`、`roll loop watch`、`roll loop runs`、`roll loop cycle <id>`、`roll status pulse`、告警和按 Story 收口的 attest 报告，是当前活体真相入口。归档重建 是按需静态归档/修复渲染器，适合 CI artifact 和迁移对账；它不是当前真相入口。
 
-三态交付阶梯仍然成立：**claimed -> merged -> attested**。backlog 行写了 Done 只是 `claimed`；PR 合入 `main` 后变 `merged`；Story 证据齐备后变 `attested`。使用 `roll supervisor live` 查看 CLI-first 多角色看板；浏览器/TUI 版 Prime Agent Live Console 仍是未来工作。
+三态交付阶梯仍然成立：**claimed -> merged -> attested**。backlog 行写了 Done 只是 `claimed`；PR 合入 `main` 后变 `merged`；Story 证据齐备后变 `attested`。使用 `roll supervisor live` 查看 CLI-first 多角色看板；浏览器/TUI 版 Supervisor Live Console 仍是未来工作。
 
 ### 按需技能
 

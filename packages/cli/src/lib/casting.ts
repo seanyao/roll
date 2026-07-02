@@ -8,9 +8,8 @@
  *     explicit em-dash, never a guessed agent.
  *   - four SCENARIO roles — peer re-check, PR review, adversarial spar, onboard
  *     — the "who plays what" view the loop dispatches across. The peer row
- *     carries the heterogeneity rule (auto-picked, MUST differ from the
- *     builder); the spar row shows the adversarial pair; onboard follows the
- *     active interactive client.
+ *     records fresh-session reviewer selection; the spar row shows the
+ *     adversarial pair; onboard follows the active interactive client.
  *
  * Purity (mirrors router Invariant I10): this collector NEVER reads the
  * filesystem / PATH / clock. Slot reads, the spar pair, the active onboard
@@ -117,7 +116,7 @@ function slotRow(
  * Row order matches the design reference exactly:
  *   story.execute legacy easy / default / hard / fallback, then peer /
  *   review-pr / spar / onboard. The peer row never resolves to a concrete agent (it is auto-picked
- *   per cycle and MUST differ from the builder); the review-pr row reuses the
+ *   per cycle from the reviewer pool with a fresh session); the review-pr row reuses the
  *   `default` slot agent (the loop dispatches PR review to it) and falls back to
  *   an em-dash when unconfigured; the spar row shows the heterogeneous pair when
  *   known; the onboard row follows the active interactive client.
@@ -131,17 +130,17 @@ export function collectCasting(deps: CastingDeps): CastingVM {
   ];
   const rows: CastingRow[] = [...complexityRows];
 
-  // peer re-check — never a fixed agent; the heterogeneity rule IS the truth.
+  // peer re-check — never a fixed agent; the fresh-session rule is the truth.
   const scenarioRoles: CastingRow[] = [{
     key: "peer",
     roleEn: "Peer re-check",
     roleZh: "同伴复核 peer",
-    agentEn: "auto-picked — must differ from builder",
-    agentZh: "自动挑选——强制异构于执行者",
+    agentEn: "auto-picked — fresh reviewer session",
+    agentZh: "自动挑选——fresh reviewer session",
     mono: false,
     empty: false,
-    noteEn: "pairing rule",
-    noteZh: "结对规则",
+    noteEn: "reviewer pool",
+    noteZh: "评审候选池",
     audit: "",
   }];
 

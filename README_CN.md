@@ -14,7 +14,7 @@
 [![npm version](https://img.shields.io/npm/v/@seanyao/roll.svg)](https://www.npmjs.com/package/@seanyao/roll)
 [![CI](https://github.com/seanyao/roll/actions/workflows/ci.yml/badge.svg)](https://github.com/seanyao/roll/actions/workflows/ci.yml)
 
-Roll 是 Prime Agent-led 的 CLI harness：把 AI agent 解析为按 Story 收口的规划、构建、评估、git、CI 与验收证据流程。支持 Claude、Codex、Kimi、Pi、Antigravity、Reasonix 等本机可用 agent。
+Roll 是 Supervisor-led 的 CLI harness：把 AI agent 解析为按 Story 收口的规划、构建、评估、git、CI 与验收证据流程。支持 Claude、Codex、Kimi、Pi、Antigravity、Reasonix 等本机可用 agent。
 
 ## 安装
 
@@ -80,9 +80,9 @@ Machine Scope 声明本机 agent pool 和 `supervise` 等机器级角色；Proje
 
 Roll V4 把项目协调和单 Story 交付拆开：
 
-- **Prime Agent** 负责项目级协调：backlog 顺序、跨 Story 上下文、重复失败、发布就绪、预算与 owner 升级。它只观察和建议，不实现具体 Story，也不覆盖证据闸。
-- **Delta Unit** 用 scoped roles 交付一张 Story：`execute` 执行交付，`evaluate` 评审证据；需要先澄清计划的 Story 会在进入 execute 前生成计划 artifact。
-- **`supervise` / `execute` / `evaluate` 角色**是稳定契约；具体 `agent` 和 `model` 由 scoped binding 解析。
+- **Supervisor** 负责项目级协调：backlog 顺序、跨 Story 上下文、重复失败、发布就绪、预算与 owner 升级。它只观察和建议，不实现具体 Story，也不覆盖证据闸。
+- **Delta Unit** 用 scoped roles 交付一张 Story：`design` 在需要时生成 Designer contract，`execute` 执行 Builder 交付，`evaluate` 评审证据。
+- **`supervise` / `design` / `execute` / `evaluate` 角色**是稳定契约；具体 `agent` 和 `model` 由 scoped binding 解析。
 - **Skills 仍然存在**，是角色调用的能力层。角色调用 `$roll-design`、`$roll-build`、`$roll-fix`、`$roll-peer`、`$roll-.qa` 等技能，而不是把技能重写进 TS。
 - **运行时不可用必须响**。静态配置公平列出候选；auth、VPN、账号、网络等运行时问题只影响本次 resolution，并记录原因，不永久污染候选池。
 - **attest 与证据按 Story 收口**。验收入口是这张 Story 自己的 `latest/<id>-report.html`、AC map 和截图/测试产物。
@@ -118,8 +118,7 @@ defaults:
         kind: select
         from: [claude, codex, kimi, pi, agy, reasonix]
         require: [evaluate]
-        avoid: [execute]
-        strategy: least-recent
+        strategy: health-aware
 ```
 
 旧的 `primary_agent`、`.roll/pairing.yaml`、`.roll/local.yaml agent` 和
@@ -140,7 +139,7 @@ roll design --from-file .roll/brief.md
 roll loop on
 ```
 
-Roll 会说明下一步设计动作，而不是静默创建假工作。Planner 把需求拆成 Stories，Prime Agent 为每张 Story 选择 `standard`、`verified` 或 `planned`，`execute`/`evaluate` 角色执行，owner 查看按 Story 收口的 attest 证据。
+Roll 会说明下一步设计动作，而不是静默创建假工作。Designer 把需求拆成 Stories，Supervisor 为每张 Story 选择 `standard`、`verified` 或 `designed`，角色通过 fresh session 执行，owner 查看按 Story 收口的 attest 证据。
 
 **已有项目接入**
 
@@ -152,7 +151,7 @@ roll init --apply        # 审阅生成的 onboard plan 后再执行
 roll loop on
 ```
 
-Roll 先无破坏地诊断仓库；只有审阅后才写入或更新 Roll metadata。随后 Prime Agent 基于已有 backlog、docs、context、open PR 与 scoped role bindings 推理。当前状态通过 CLI-first 可观测入口查看：`roll status`、`roll loop watch`、`roll loop runs`、`roll loop cycle <id>`、`roll loop alert` 和 Story 报告。
+Roll 先无破坏地诊断仓库；只有审阅后才写入或更新 Roll metadata。随后 Supervisor 基于已有 backlog、docs、context、open PR 与 scoped role bindings 推理。当前状态通过 CLI-first 可观测入口查看：`roll status`、`roll loop watch`、`roll loop runs`、`roll loop cycle <id>`、`roll loop alert` 和 Story 报告。
 
 ## 新项目快速启动
 
@@ -214,7 +213,7 @@ Roll 当前是 CLI-first 可观测。持久事实只走一条读路径：anchors
 - cycle 历史使用 TerminalOutcome 词汇，不再教旧的自由文本摘要。
 - 缺失事实显示 `?`。可见的 `0` 表示已知为零，不表示未知。
 
-`roll supervisor live` 是已交付的 CLI-first 多角色看板。浏览器/TUI 版 Prime Agent Live Console 仍是未来工作，必须复用同一 view model。
+`roll supervisor live` 是已交付的 CLI-first 多角色看板。浏览器/TUI 版 Supervisor Live Console 仍是未来工作，必须复用同一 view model。
 
 ## 仓库结构
 

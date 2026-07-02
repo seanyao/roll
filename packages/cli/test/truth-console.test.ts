@@ -922,8 +922,8 @@ describe("collectCasting — US-DOSSIER-030 (pure)", () => {
     const vm = collectCasting(deps);
     expect(vm.scenarioRoles?.map((r) => r.key)).toEqual(["peer", "review-pr", "spar", "onboard"]);
     const peer = vm.rows.find((r) => r.key === "peer");
-    expect(peer?.agentEn).toContain("must differ from builder");
-    expect(peer?.agentZh).toContain("强制异构");
+    expect(peer?.agentEn).toContain("fresh reviewer session");
+    expect(peer?.agentZh).toContain("fresh reviewer session");
     expect(peer?.mono).toBe(false); // a rule, not a fixed agent
     const spar = vm.rows.find((r) => r.key === "spar");
     expect(spar?.agentEn).toBe("claude ⚔ kimi");
@@ -1018,8 +1018,7 @@ describe("Casting tab + Loop tab IA — US-DOSSIER-030 / US-DOSSIER-040", () => 
   });
 
   it("AC2: peer differ-from-builder rule, spar pair, onboard follows the client", () => {
-    expect(html).toContain("must differ from builder");
-    expect(html).toContain("强制异构于执行者");
+    expect(html).toContain("fresh reviewer session");
     expect(html).toContain("claude ⚔ kimi");
     expect(html).toContain("follows the active client");
     expect(html).toContain("跟随当前交互客户端");
@@ -1063,7 +1062,7 @@ describe("Casting tab + Loop tab IA — US-DOSSIER-030 / US-DOSSIER-040", () => 
       ["Casting", "角色分工"],
       ["Hooks · this repo", "钩子 · 本仓"],
       ["git hooks", "git 钩子"],
-      ["pairing rule", "结对规则"],
+      ["reviewer pool", "评审候选池"],
       ["interactive", "交互式"],
     ] as const) {
       expect(html).toContain(en);
@@ -1600,7 +1599,7 @@ describe("lang/tab/section persistence + bilingual closer — US-DOSSIER-034", (
       ["Casting", "角色分工"],
       ["Hooks · this repo", "钩子 · 本仓"],
       ["story.execute · legacy easy", "执行角色 · legacy easy"],
-      ["must differ from builder", "强制异构于执行者"],
+      ["fresh reviewer session", "fresh reviewer session"],
       ["follows the active client", "跟随当前交互客户端"],
       // Charter tab (US-DOSSIER-033)
       ["Charter", "章程"],

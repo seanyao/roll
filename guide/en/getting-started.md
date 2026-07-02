@@ -42,7 +42,8 @@ roll design --from-file docs/PRD.md
 Use the exact `roll design --from-file ...` command printed by `roll init` when
 it detects a PRD. Without a file, `roll design` still launches the same
 `roll-design` skill in your AI agent. You talk through the domain model, the
-agent writes INVEST stories into `.roll/backlog.md` — and then `roll loop`
+agent writes INVEST stories into `.roll/backlog.md`, and detailed design notes
+get a self-contained `design-review.html` Design Review Page — then `roll loop`
 takes over.
 
 You can also run `$roll-design` directly inside your agent if you prefer.

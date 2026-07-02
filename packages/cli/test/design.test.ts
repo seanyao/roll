@@ -437,6 +437,51 @@ describe("roll design bounded progress and handoff", () => {
     expect(out).toContain("next:");
   });
 
+  it("renders a Design Review Page when an IDEA detailed design is written", () => {
+    const proj = freshProj();
+    dirs.push(proj);
+    writeFileSync(join(proj, ".roll", "index.json"), JSON.stringify({ stories: { "IDEA-066": "acceptance-evidence" } }), "utf8");
+    makeAgent(bin, "claude");
+    writeConfig(home, "lang: en\nai_claude: ~/.claude\n");
+    const d = makeDeps(proj, bin);
+    d.spawn = () => {
+      const feat = join(proj, ".roll", "features", "acceptance-evidence", "IDEA-066");
+      mkdirSync(feat, { recursive: true });
+      writeFileSync(
+        join(feat, "spec.md"),
+        [
+          "# IDEA-066 — Roll Capture.app",
+          "",
+          "## Detailed design",
+          "",
+          "## Architecture Map",
+          "CaptureHostClient ---- request.json ----> Roll Capture.app",
+          "",
+          "## Flow",
+          "validate evidence contract -> create capture request -> open app -> write response",
+          "",
+          "## Decision Matrix",
+          "- Roll Capture.app stable host: chosen, one Screen Recording permission owner",
+          "",
+          "## Prototype Frames",
+          "roll doctor --tools:",
+          "Capture host: Roll Capture.app",
+          "",
+          "## Sign-off",
+          "approve design -> roll design IDEA-066 --split",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      return { status: 0, signal: null, stdout: "", stderr: "" };
+    };
+
+    const out = captureStderr(() => designCommand(["IDEA-066"], d));
+    const reviewPath = join(proj, ".roll", "features", "acceptance-evidence", "IDEA-066", "design-review.html");
+    expect(out).toContain("Design Review Page: .roll/features/acceptance-evidence/IDEA-066/design-review.html");
+    expect(readFileSync(reviewPath, "utf8")).toContain("Design Review Page · IDEA-066");
+  });
+
   it("suppresses the raw prompt firehose by default but shows progress tool lines", () => {
     const proj = freshProj();
     dirs.push(proj);

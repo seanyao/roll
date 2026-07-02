@@ -178,7 +178,7 @@ roll loop on
 | `roll agent [migrate\|list\|cast]` | Agent Scope、已安装 agent 与角色分工 |
 | `roll backlog [sync\|block\|defer\|lint\|…]` | 查看、管理、lint 和同步待办 |
 | `roll config [lang\|prices\|tune\|…]` | 配置语言、价格和建议式调参 |
-| `roll design [--from-file <path>] [--agent <name>]` | 交互式启动 `$roll-design` |
+| `roll design [--from-file <path>] [--agent <name>]` | 交互式启动 `$roll-design`；详细设计会生成自包含 Design Review Page |
 | `roll doctor [skills\|tools\|language]` | 诊断安装、skills、工具、权限与语言漂移 |
 | `roll help [--lang en\|zh] [name]` | 查看内置 Charter / guide；`roll --help` 显示 CLI usage |
 | `roll idea "<一句话描述>"` | 捕获并分类一张 backlog 卡 |

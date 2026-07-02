@@ -8,6 +8,13 @@
 ### Automation pipeline
 - Default project agent routing now uses open execute/evaluate pools with capability and health-aware ranking. Fresh sessions are the review isolation boundary; agent/model diversity is a preference or explicit strict mode, not a default hard exclusion. (REFACTOR-ROLE-008, US-AGENT-049)
 
+### Acceptance evidence
+- `roll design` now writes a Design Review Page so you can inspect the plan, flow, and prototype before build starts. (US-REVIEW-001, US-REVIEW-002)
+  <!-- evidence: .roll/features/review-pages/US-REVIEW-001/latest/US-REVIEW-001-report.html -->
+  <!-- evidence: .roll/features/review-pages/US-REVIEW-002/latest/US-REVIEW-002-report.html -->
+- Acceptance gates now follow the work type: UI still needs real visual proof, while contract-heavy work can pass with tests, build, grep, and CI. (US-QA-015)
+  <!-- evidence: .roll/features/qa-testing/US-QA-015/latest/US-QA-015-report.html -->
+
 ### Observability
 - `roll supervisor live --watch` keeps the Supervisor Live role board open and redraws it in-place from the same event-backed view model. Snapshot and JSON modes remain unchanged; watch mode is interactive-only and supports `--interval <sec>`. (FIX-1035)
 

@@ -23,7 +23,6 @@ describe("collectToolPanel", () => {
       "browser.console",
       "browser.dom-query",
       "browser.screenshot",
-      "physical.screenshot",
       "filesystem.read",
       "filesystem.stat",
       "filesystem.write",
@@ -35,6 +34,7 @@ describe("collectToolPanel", () => {
       "github.pr",
       "mcp.call",
       "network.fetch",
+      "physical.screenshot",
     ]);
   });
 
@@ -47,13 +47,14 @@ describe("collectToolPanel", () => {
   it("multi-tool kinds (browser · git · github · filesystem) expand to multiple rows", () => {
     const rows = collectToolPanel();
     const byKind = (kind: string) => rows.filter((r) => r.kind === kind).map((r) => r.id);
-    expect(byKind("browser")).toEqual(["browser.console", "browser.dom-query", "browser.screenshot", "physical.screenshot"]);
+    expect(byKind("browser")).toEqual(["browser.console", "browser.dom-query", "browser.screenshot"]);
     expect(byKind("git")).toEqual(["git.commit", "git.merge", "git.push", "git.status"]);
     expect(byKind("github")).toEqual(["github.ci", "github.pr"]);
     expect(byKind("filesystem")).toEqual(["filesystem.read", "filesystem.stat", "filesystem.write"]);
     // single-tool kinds are exactly one row each
     expect(byKind("bash")).toEqual(["bash"]);
     expect(byKind("network")).toEqual(["network.fetch"]);
+    expect(byKind("physical")).toEqual(["physical.screenshot"]);
     expect(byKind("mcp")).toEqual(["mcp.call"]);
   });
 
@@ -166,7 +167,6 @@ describe("builtinToolDeclarations", () => {
       "browser.console",
       "browser.dom-query",
       "browser.screenshot",
-      "physical.screenshot",
       "filesystem.read",
       "filesystem.stat",
       "filesystem.write",
@@ -178,6 +178,7 @@ describe("builtinToolDeclarations", () => {
       "github.pr",
       "mcp.call",
       "network.fetch",
+      "physical.screenshot",
     ]);
   });
 });

@@ -31,7 +31,7 @@ describe("US-PHYSICAL-001 Roll Capture protocol contract", () => {
       provider: "roll-capture",
       protocol: "roll.capture.v1",
       platform: "darwin",
-      kind: "browser",
+      kind: "physical",
     });
   });
 

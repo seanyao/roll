@@ -70,7 +70,12 @@ describe("US-TOOL-005 BrowserTool", () => {
       "browser.dom-query",
       "physical.screenshot",
     ]);
-    expect(browserTools().every((tool) => tool.declaration.kind === "browser")).toBe(true);
+    expect(browserTools().map((tool) => [tool.declaration.id, tool.declaration.kind])).toEqual([
+      ["browser.screenshot", "browser"],
+      ["browser.console", "browser"],
+      ["browser.dom-query", "browser"],
+      ["physical.screenshot", "physical"],
+    ]);
   });
 
   it("takes a headless screenshot and writes non-empty output", async () => {

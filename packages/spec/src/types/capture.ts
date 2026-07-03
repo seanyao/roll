@@ -165,7 +165,7 @@ export const physicalScreenshotToolInputSchema: JsonSchema = {
 
 export const PHYSICAL_SCREENSHOT_TOOL_CONTRACT: ToolDeclaration = {
   id: "physical.screenshot" as ToolDeclaration["id"],
-  kind: "browser",
+  kind: "physical",
   title: "Physical Screenshot",
   description: "Request real physical screen pixels through Roll Capture.app.",
   provider: ROLL_CAPTURE_PROVIDER,

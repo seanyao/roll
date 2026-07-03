@@ -75,6 +75,7 @@ const KIND_META: Record<string, { en: string; zh: string }> = {
   github: { en: "GitHub", zh: "GitHub" },
   mcp: { en: "MCP", zh: "MCP" },
   network: { en: "Network", zh: "网络" },
+  physical: { en: "Physical Capture", zh: "物理截图" },
 };
 
 /** A small bilingual label / value pair (mono value), the agent-row cell motif. */

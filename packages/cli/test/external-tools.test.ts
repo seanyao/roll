@@ -97,6 +97,16 @@ describe("external tool detection", () => {
     expect(permission.repair?.command).toBe(permission.authorize?.command);
   });
 
+  it("resolves roll-capture-app through a platform-guarded service detector", () => {
+    const linux = resolveRequirement({ kind: "service", name: "roll-capture-app", optional: false }, deps({ platform: "linux" }));
+    expect(linux.status).toBe("stale");
+    expect(linux.detail).toBe("macOS-only requirement; not applicable on this host.");
+
+    const darwin = resolveRequirement({ kind: "service", name: "roll-capture-app", optional: false }, deps({ platform: "darwin" }));
+    expect(darwin.status).toBe("missing");
+    expect(darwin.detail).toContain("Roll Capture.app");
+  });
+
   it("keeps external-tool compatibility while exposing external requirements as the primary API", () => {
     const requirements = collectExternalRequirements(deps());
     const tools = collectExternalTools(deps());

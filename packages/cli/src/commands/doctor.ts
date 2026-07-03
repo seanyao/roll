@@ -301,6 +301,20 @@ function skillsCatalogSection(lang: Lang): void {
   emit(`  ${t(v2Catalog, lang, drift ? "skills.doctor_drift" : "skills.doctor_ok")}`);
 }
 
+const AGENT_SESSION_GITIGNORE_ENTRIES = [".roll/loop/", ".pi/", ".kimi/", ".kimi-code/", ".reasonix/"] as const;
+
+function gitignoreOwnershipSection(lang: Lang): void {
+  const gitignore = join(process.cwd(), ".gitignore");
+  if (!existsSync(gitignore)) return;
+  const current = readFileSync(gitignore, "utf8").split("\n");
+  const missing = AGENT_SESSION_GITIGNORE_ENTRIES.filter((entry) => !current.includes(entry));
+  if (missing.length === 0) return;
+  emit("");
+  emit(lang === "zh" ? "Roll 自产文件 ignore 清单" : "Roll generated-file ignore list");
+  emit("");
+  emit(`  ${lang === "zh" ? "建议补齐 .gitignore：" : "Recommended .gitignore additions:"} ${missing.join(" ")}`);
+}
+
 // ── FIX-1042: agent skill-root pollution (auxiliary dirs mounted as skills) ──
 function rollHomeDir(): string {
   return process.env["ROLL_HOME"] ?? join(homedir(), ".roll");
@@ -607,6 +621,7 @@ export function doctorCommand(args: string[], deps: DoctorDeps = {}): number {
     skillRootPollutionSection(lang);
     prSection(lang);
     skillsCatalogSection(lang);
+    gitignoreOwnershipSection(lang);
     lanesSection(lang, realLaneProbe());
     launchdStaleSection(lang);
     launchdProxySection(lang);

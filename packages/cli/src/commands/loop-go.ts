@@ -324,8 +324,35 @@ function isBootstrapArtifactPath(path: string): boolean {
   return false;
 }
 
+function isRollEvidenceRunDir(part: string): boolean {
+  return /^\d{8}-\d{6}(?:-.+)?$/.test(part) || /^\d{4}-\d{2}-\d{2}T/.test(part) || part.startsWith("cycle-");
+}
+
+function isRollGeneratedEvidenceFile(parts: readonly string[], cardRootLength: number): boolean {
+  const tail = parts[parts.length - 1] ?? "";
+  if (parts.length === cardRootLength + 1 && tail === "ac-map.json") return true;
+  const bucket = parts[cardRootLength] ?? "";
+  const isGeneratedBucket = bucket === "latest" || isRollEvidenceRunDir(bucket);
+  if (!isGeneratedBucket) return false;
+  const rel = parts.slice(cardRootLength + 1);
+  if (rel.length === 1) return ["ac-map.json", "evidence.json", "report.html", "review.html"].includes(rel[0] ?? "");
+  if (rel.length >= 2 && rel[0] === "screenshots") return true;
+  return false;
+}
+
+function isRollOwnedGeneratedPath(path: string): boolean {
+  if (path.startsWith(".roll/loop/")) return true;
+  if (path.startsWith(".roll/reports/")) return true;
+  if (path === ".roll/runs.jsonl" || path === ".roll/deliveries.jsonl") return true;
+  if (path === ".roll/loop/runs.jsonl" || path === ".roll/loop/deliveries.jsonl") return true;
+  if (!path.startsWith(".roll/features/")) return false;
+  const parts = path.split("/");
+  if (parts.length < 5) return false;
+  return isRollGeneratedEvidenceFile(parts, 4);
+}
+
 export function classifyBootstrapArtifacts(paths: readonly string[]): { kind: "none" | "bootstrap_only" | "mixed"; files: string[] } {
-  const files = paths.filter((path) => path.trim() !== "");
+  const files = paths.filter((path) => path.trim() !== "").filter((path) => !isRollOwnedGeneratedPath(path));
   if (files.length === 0) return { kind: "none", files: [] };
   return files.every(isBootstrapArtifactPath) ? { kind: "bootstrap_only", files } : { kind: "mixed", files };
 }

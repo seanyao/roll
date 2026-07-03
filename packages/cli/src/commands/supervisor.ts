@@ -976,10 +976,6 @@ export function supervisorCommand(args: string[]): number | Promise<number> {
       return 1;
     }
     const facts = reducePrView(raw as Parameters<typeof reducePrView>[0]);
-    if (facts.manualMerge !== true) {
-      process.stderr.write(`repair-evidence: PR #${prNumber} does not require manual merge — nothing to repair\n`);
-      return 0;
-    }
 
     // Resolve story ID from PR.
     const events = readSupervisorEvents(projectPath);

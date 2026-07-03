@@ -113,6 +113,15 @@ function cliFixture(): Fixture {
   return fx;
 }
 
+function isGitIgnored(cwd: string, path: string): boolean {
+  try {
+    execFileSync("git", ["check-ignore", "-q", path], { cwd });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function reinitFixture(): Fixture {
   const fx = freshFixture();
   cpSync(join(fx.home, "conventions", "global", "AGENTS.md"), join(fx.proj, "AGENTS.md"));
@@ -875,7 +884,7 @@ describe("frozen: roll init", () => {
     expect(run.stdout).toContain("[roll] Applying onboard plan...");
     expect(read(fx.proj, "AGENTS.md")).toContain("# Agent Conventions");
     expect(read(fx.proj, ".roll/backlog.md")).toContain("# Project Backlog");
-    expect(read(fx.proj, ".gitignore")).toContain(".roll/");
+    expect(read(fx.proj, ".gitignore")).toContain(".roll/loop/");
   });
 
   it("--apply consumes a valid plan and records offboard changeset", () => {
@@ -908,7 +917,7 @@ describe("frozen: roll init", () => {
         │  + created     .roll/features/               │
         │  + created     .roll/features.md             │
         └─────────────────────────────────────────────────────┘
-      [roll] Added .roll/ to .gitignore
+      [roll] Added Roll runtime ignores to .gitignore
 
       [roll] Syncing conventions to AI tools...
 
@@ -918,7 +927,7 @@ describe("frozen: roll init", () => {
     `);
     expect(read(fx.proj, ".roll/onboard-changeset.yaml")).toContain("scope_approved:");
     expect(read(fx.proj, ".roll/onboard-changeset.yaml")).toContain(".roll/backlog.md");
-    expect(read(fx.proj, ".gitignore")).toContain(".roll/");
+    expect(read(fx.proj, ".gitignore")).toContain(".roll/loop/");
     expect(read(fx.proj, "AGENTS.md")).toContain("# Agent Conventions");
     expect(read(fx.proj, ".roll/backlog.md")).toContain("# Project Backlog");
     expect(existsSync(join(fx.proj, ".roll", "features"))).toBe(true);
@@ -962,12 +971,24 @@ describe("frozen: roll init", () => {
     expect(count(agents, "## 1. Communication")).toBe(1);
 
     const gitignoreLines = read(fx.proj, ".gitignore").trimEnd().split("\n");
-    expect(gitignoreLines).toEqual(["node_modules", ".roll/"]);
+    expect(gitignoreLines).toEqual(["node_modules", ".roll/loop/", ".pi/", ".kimi/", ".kimi-code/", ".reasonix/"]);
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: fx.proj });
+    execFileSync("git", ["config", "user.email", "test@roll.local"], { cwd: fx.proj });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: fx.proj });
+    mkdirSync(join(fx.proj, ".roll", "features", "loop-engine", "FIX-1203"), { recursive: true });
+    writeFileSync(join(fx.proj, ".roll", "features", "loop-engine", "FIX-1203", "ac-map.json"), "[]\n");
+    expect(isGitIgnored(fx.proj, ".roll/features/loop-engine/FIX-1203/ac-map.json")).toBe(false);
+    execFileSync("git", ["add", ".roll/features/loop-engine/FIX-1203/ac-map.json"], { cwd: fx.proj });
+    expect(execFileSync("git", ["status", "--porcelain", "--", ".roll/features/loop-engine/FIX-1203/ac-map.json"], { cwd: fx.proj, encoding: "utf8" })).toContain("A  .roll/features/loop-engine/FIX-1203/ac-map.json");
 
     const changeset = read(fx.proj, ".roll/onboard-changeset.yaml");
     expect(count(changeset, '  - "AGENTS.md"')).toBe(1);
     expect(count(changeset, '  - ".roll/backlog.md"')).toBe(1);
-    expect(count(changeset, '  - ".roll/"')).toBe(1);
+    expect(count(changeset, '  - ".roll/loop/"')).toBe(1);
+    expect(count(changeset, '  - ".pi/"')).toBe(1);
+    expect(count(changeset, '  - ".kimi/"')).toBe(1);
+    expect(count(changeset, '  - ".kimi-code/"')).toBe(1);
+    expect(count(changeset, '  - ".reasonix/"')).toBe(1);
     expect(changeset).toContain("files_merged:");
     expect(changeset).toContain("gitignore_entries_added:");
   });
@@ -1020,7 +1041,7 @@ describe("frozen: roll init", () => {
         │  + created     .roll/features/               │
         │  + created     .roll/features.md             │
         └─────────────────────────────────────────────────────┘
-      [roll] Added .roll/ to .gitignore
+      [roll] Added Roll runtime ignores to .gitignore
 
       [roll] Syncing conventions to AI tools...
 

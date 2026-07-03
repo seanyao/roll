@@ -682,7 +682,7 @@ describe("roll init diagnosis router", () => {
     expect(stdout).toContain(".roll/backlog.md: present");
     expect(stdout).toContain(".gitignore: present");
     expect(stdout).toContain("Idempotency checks:");
-    expect(stdout).toContain(".gitignore .roll/ entries: 1");
+    expect(stdout).toContain(".gitignore .roll/loop/ entries: 1");
     expect(stdout).toContain("changeset AGENTS.md entries: 1");
     expect(stdout).toContain("changeset .claude/CLAUDE.md entries: 1");
     expect(stdout).toContain("changeset .roll/backlog.md entries: 1");

@@ -1236,12 +1236,16 @@ function renderAndSeed(projectDir: string, plan: string, changeset: OnboardChang
   }
 }
 
+const DEFAULT_GITIGNORE_ENTRIES = [".roll/loop/", ".pi/", ".kimi/", ".kimi-code/", ".reasonix/"] as const;
+
 function addRollToGitignore(projectDir: string, changeset: OnboardChangeset): void {
   const gi = join(projectDir, ".gitignore");
   const current = existsSync(gi) ? readFileSync(gi, "utf8") : "";
-  if (current.split("\n").includes(".roll/")) return;
-  writeFileAtomic(gi, current + (current === "" || current.endsWith("\n") ? "" : "\n") + ".roll/\n");
-  recordChangeset(projectDir, changeset, "gitignore_entries_added", ".roll/");
+  const existing = new Set(current.split("\n"));
+  const missing = DEFAULT_GITIGNORE_ENTRIES.filter((entry) => !existing.has(entry));
+  if (missing.length === 0) return;
+  writeFileAtomic(gi, current + (current === "" || current.endsWith("\n") ? "" : "\n") + missing.join("\n") + "\n");
+  for (const entry of missing) recordChangeset(projectDir, changeset, "gitignore_entries_added", entry);
   ok(m("init.added_roll_to_gitignore"));
 }
 
@@ -2071,14 +2075,14 @@ function runExistingCodebaseIdempotencyChecks(workspace: string): boolean {
   const changeset = existsSync(join(workspace, ".roll", "onboard-changeset.yaml"))
     ? readFileSync(join(workspace, ".roll", "onboard-changeset.yaml"), "utf8")
     : "";
-  const gitignoreRollEntries = gitignore.split("\n").filter((line) => line === ".roll/").length;
+  const gitignoreRollEntries = gitignore.split("\n").filter((line) => line === ".roll/loop/").length;
   const agentsEntries = countText(changeset, '  - "AGENTS.md"');
   const claudeEntries = countText(changeset, '  - ".claude/CLAUDE.md"');
   const backlogEntries = countText(changeset, '  - ".roll/backlog.md"');
   const ok = gitignoreRollEntries === 1 && agentsEntries === 1 && claudeEntries === 1 && backlogEntries === 1;
 
   process.stdout.write("\nIdempotency checks:\n");
-  process.stdout.write(`  .gitignore .roll/ entries: ${gitignoreRollEntries}\n`);
+  process.stdout.write(`  .gitignore .roll/loop/ entries: ${gitignoreRollEntries}\n`);
   process.stdout.write(`  changeset AGENTS.md entries: ${agentsEntries}\n`);
   process.stdout.write(`  changeset .claude/CLAUDE.md entries: ${claudeEntries}\n`);
   process.stdout.write(`  changeset .roll/backlog.md entries: ${backlogEntries}\n`);

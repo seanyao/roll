@@ -54,9 +54,9 @@ import {
 } from "@roll/core";
 import { gh, ghAvailable, ghRepoSlug, prMerge, prReady, remoteUrl } from "@roll/infra";
 import { execFileSync } from "node:child_process";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { appendFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { prHealSelf, prRebaseStale } from "./loop-pr-heal.js";
 import { backfillMergedRuns } from "../lib/runs-backfill.js";
 import { acMapCandidates, evidencePathsUnresolved } from "../runner/attest-gate.js";
@@ -108,6 +108,53 @@ function gitSucceeds(cwd: string, args: string[]): boolean {
   }
 }
 
+interface StepFailure {
+  step: string;
+  message: string;
+  stderr?: string;
+  transient: boolean;
+}
+
+function errorText(err: unknown): string {
+  if (err instanceof Error && err.message.trim() !== "") return err.message.trim();
+  return String(err);
+}
+
+function stderrText(err: unknown): string | undefined {
+  const candidate = err as { stderr?: unknown };
+  if (Buffer.isBuffer(candidate.stderr)) {
+    const text = candidate.stderr.toString("utf8").trim();
+    return text === "" ? undefined : text;
+  }
+  if (typeof candidate.stderr === "string") {
+    const text = candidate.stderr.trim();
+    return text === "" ? undefined : text;
+  }
+  return undefined;
+}
+
+function gitFailureReason(step: string, err: unknown): StepFailure {
+  const stderr = stderrText(err);
+  const detail = (stderr ?? errorText(err)).toLowerCase();
+  const permission = detail.includes("permission") || detail.includes("authentication") || detail.includes("authorization") || detail.includes("403");
+  const nonFastForward = detail.includes("non-fast-forward") || detail.includes("fetch first") || detail.includes("stale info") || detail.includes("rejected");
+  return {
+    step,
+    message: permission ? "permission denied" : nonFastForward ? "non-fast-forward push rejected" : errorText(err),
+    ...(stderr !== undefined ? { stderr } : {}),
+    transient: true,
+  };
+}
+
+function runGitStep(cwd: string, step: string, args: readonly string[]): StepFailure | undefined {
+  try {
+    execFileSync("git", [...args], { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    return undefined;
+  } catch (err) {
+    return gitFailureReason(step, err);
+  }
+}
+
 function archiveGitTree(gitCwd: string, treeish: string, targetDir: string, pathspec?: string): boolean {
   const tar = join(targetDir, "tree.tar");
   try {
@@ -145,6 +192,16 @@ export function resolvePrEvidence(projectCwd: string, headRef: string, body: str
 
     const storyId = firstStoryId(`${body}\n${headRef}`);
     if (storyId === undefined) return { ok: true, missing: [] };
+    if (headRef.trim() !== "") {
+      const branchTarget = join(tmp, "branch");
+      mkdirSync(branchTarget, { recursive: true });
+      if (archiveGitTree(projectCwd, headRef, branchTarget) || archiveGitTree(projectCwd, `origin/${headRef}`, branchTarget)) {
+        if (hasAcMap(branchTarget, storyId)) {
+          const missing = evidencePathsUnresolved(branchTarget, storyId);
+          return { ok: missing.length === 0, missing };
+        }
+      }
+    }
     if (hasAcMap(projectCwd, storyId)) {
       const missing = evidencePathsUnresolved(projectCwd, storyId);
       return { ok: missing.length === 0, missing };
@@ -225,6 +282,8 @@ export interface PrInboxDeps {
   rebaseCircuitAllowed: (num: string) => boolean;
   /** Bridged git rebase dance → re-checked facts (or undefined on any failure). */
   rebaseStale: (num: string, headRef: string, slug: string) => Promise<PrViewFacts | undefined>;
+  /** evidence_unresolvable → one bounded self-repair attempt, then re-check facts. */
+  repairEvidence?: (num: string, headRef: string, slug: string, missing: readonly string[]) => Promise<PrViewFacts | undefined>;
   /** Append one ALERT line. */
   alert: (line: string) => void;
   /** Append a pr-tick.jsonl row (with rotation). */
@@ -247,13 +306,22 @@ export async function runPrInbox(deps: PrInboxDeps): Promise<PrTick> {
   const list = await deps.listOpenPrs(slug);
   const stdout = (list.stdout ?? "").trim();
   let openCount = 0;
+  let openPrs: Array<{ number?: number; headRefName?: string }> = [];
   if (list.code === 0 && stdout !== "" && stdout !== "[]") {
     try {
       const arr = JSON.parse(stdout) as unknown;
-      openCount = Array.isArray(arr) ? arr.length : 0;
+      if (Array.isArray(arr)) {
+        openCount = arr.length;
+        openPrs = arr as Array<{ number?: number; headRefName?: string }>;
+      }
     } catch {
       openCount = 0;
     }
+  } else if (list.code === 0 && stdout === "[]") {
+    cleanupEvidenceRepairMarkers(new Set());
+  }
+  if (openPrs.length > 0) {
+    cleanupEvidenceRepairMarkers(new Set(openPrs.map((pr) => String(pr.number ?? "")).filter((num) => num !== "")));
   }
   const gate = prInboxGate({
     ghAvailable: true,
@@ -264,8 +332,7 @@ export async function runPrInbox(deps: PrInboxDeps): Promise<PrTick> {
   });
   if (gate !== undefined) return emit(deps, gate);
 
-  const prs = JSON.parse(stdout) as Array<{ number?: number; headRefName?: string }>;
-  for (const pr of prs) {
+  for (const pr of openPrs) {
     const num = String(pr.number ?? "");
     if (num === "") continue;
     const headRef = pr.headRefName ?? "";
@@ -287,7 +354,21 @@ export async function runPrInbox(deps: PrInboxDeps): Promise<PrTick> {
       continue;
     }
     if (promote.reason === "evidence_unresolvable") {
-      deps.alert(evidenceBlockedAlert(num, facts.evidenceMissing));
+      const repaired = await attemptEvidenceRepair(deps, slug, num, headRef, facts.evidenceMissing);
+      if (repaired !== undefined) {
+        const repairedPromote = promoteDraftAction({
+          isDraft: repaired.isDraft === true,
+          manualMerge: repaired.manualMerge === true,
+          botReview: repaired.bot,
+          ciState: repaired.ciState,
+          mergeable: repaired.mergeable,
+          evidenceResolvable: repaired.evidenceResolvable,
+        });
+        if (repairedPromote.kind === "promote_and_merge") {
+          if (await deps.ready(slug, num)) await doMerge(deps, slug, num, headRef);
+          else deps.warn(`PR #${num}: ready failed — left open`);
+        } else deps.alert(evidenceBlockedAlert(num, repaired.evidenceMissing));
+      }
       continue;
     }
 
@@ -308,21 +389,58 @@ export async function runPrInbox(deps: PrInboxDeps): Promise<PrTick> {
         if (rechecked !== undefined) {
           const re = rebaseRecheckAction(rechecked.ciState, rechecked.mergeable, rechecked.manualMerge === true, rechecked.evidenceResolvable !== false);
           if (re.kind === "merge") await doMerge(deps, slug, num, headRef);
-          else if (re.kind === "skip" && re.reason === "evidence_unresolvable") deps.alert(evidenceBlockedAlert(num, rechecked.evidenceMissing));
+          else if (re.kind === "skip" && re.reason === "evidence_unresolvable") {
+            const repaired = await attemptEvidenceRepair(deps, slug, num, headRef, rechecked.evidenceMissing);
+            if (repaired !== undefined) {
+              const repairedRecheck = rebaseRecheckAction(repaired.ciState, repaired.mergeable, repaired.manualMerge === true, repaired.evidenceResolvable !== false);
+              if (repairedRecheck.kind === "merge") await doMerge(deps, slug, num, headRef);
+              else deps.alert(evidenceBlockedAlert(num, repaired.evidenceMissing));
+            }
+          }
         }
         break;
       }
       case "skip":
-        if (action.reason === "evidence_unresolvable") deps.alert(evidenceBlockedAlert(num, facts.evidenceMissing));
+        if (action.reason === "evidence_unresolvable") {
+          const repaired = await attemptEvidenceRepair(deps, slug, num, headRef, facts.evidenceMissing);
+          if (repaired !== undefined) {
+            const repairedAction = selectPrAction(repaired);
+            if (repairedAction.kind === "merge") await doMerge(deps, slug, num, headRef);
+            else deps.alert(evidenceBlockedAlert(num, repaired.evidenceMissing));
+          }
+        }
         break;
     }
   }
   return emit(deps, prActedTick());
 }
 
+async function attemptEvidenceRepair(
+  deps: PrInboxDeps,
+  slug: string,
+  num: string,
+  headRef: string,
+  missing: readonly string[] | undefined,
+): Promise<PrViewFacts | undefined> {
+  const missingList = missing ?? [];
+  if (deps.repairEvidence === undefined) {
+    deps.alert(evidenceBlockedAlert(num, missingList));
+    return undefined;
+  }
+  const repaired = await deps.repairEvidence(num, headRef, slug, missingList);
+  if (repaired !== undefined && repaired.evidenceResolvable !== false) return repaired;
+  deps.alert(evidenceRepairFailedAlert(num, repaired?.evidenceMissing ?? missingList));
+  return undefined;
+}
+
 function evidenceBlockedAlert(num: string, missing: readonly string[] | undefined): string {
   const suffix = missing !== undefined && missing.length > 0 ? `: ${missing.join(", ")}` : "";
   return `PR #${num}: evidence_unresolvable — merge blocked until Roll-Evidence paths resolve${suffix}`;
+}
+
+function evidenceRepairFailedAlert(num: string, missing: readonly string[] | undefined): string {
+  const suffix = missing !== undefined && missing.length > 0 ? `: ${missing.join(", ")}` : "";
+  return `PR #${num}: evidence_repair_failed after evidence_unresolvable self-repair attempt${suffix}`;
 }
 
 function emit(deps: PrInboxDeps, tick: PrTick): PrTick {
@@ -543,6 +661,225 @@ function writeRebaseAttempts(state: string, pr: string, timestamps: readonly num
   writeFileSync(state, upsertRebaseAttempts(body, pr, renderRebaseAttempts(timestamps)));
 }
 
+function evidenceRepairMarkerPath(num: string): string {
+  return join(runtimeDir(), `.pr-evidence-repair-${num}.attempted`);
+}
+
+const EVIDENCE_REPAIR_MARKER_TTL_MS = 24 * 60 * 60 * 1000;
+
+function evidenceRepairMarkerNumber(name: string): string | undefined {
+  return /^\.pr-evidence-repair-(\d+)\.attempted$/.exec(name)?.[1];
+}
+
+export function evidenceRepairMarkerIsFresh(marker: string, nowMs = Date.now()): boolean {
+  try {
+    return nowMs - statSync(marker).mtimeMs < EVIDENCE_REPAIR_MARKER_TTL_MS;
+  } catch {
+    return false;
+  }
+}
+
+export function cleanupEvidenceRepairMarkers(openPrNumbers: ReadonlySet<string>, nowMs = Date.now()): void {
+  const dir = runtimeDir();
+  let names: string[] = [];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    const num = evidenceRepairMarkerNumber(name);
+    if (num === undefined) continue;
+    const marker = join(dir, name);
+    if (!openPrNumbers.has(num) || !evidenceRepairMarkerIsFresh(marker, nowMs)) rmSync(marker, { force: true });
+  }
+}
+
+function writeEvidenceRepairMarker(num: string, missing: readonly string[]): void {
+  const marker = evidenceRepairMarkerPath(num);
+  mkdirSync(dirname(marker), { recursive: true });
+  writeFileSync(marker, `${new Date().toISOString()} ${missing.join(", ")}\n`);
+}
+
+function appendPrEvidenceRepairEvent(
+  type: "pr:evidence_repaired" | "pr:evidence_repair_failed",
+  num: string,
+  detail: string,
+  extra: Record<string, unknown> = {},
+): void {
+  try {
+    const file = join(runtimeDir(), "events.ndjson");
+    mkdirSync(dirname(file), { recursive: true });
+    appendFileSync(file, `${JSON.stringify({ type, prNumber: Number(num), detail, ts: Date.now(), ...extra })}\n`);
+  } catch {
+    /* observability must not break the PR tick */
+  }
+}
+
+interface RepairEvidenceCommandResult {
+  verdict: "repaired" | "already_repaired" | "not_reparable" | "failed";
+  storyId?: string;
+  detail: string;
+  failure?: StepFailure;
+}
+
+function runRepairEvidenceCommand(num: string): RepairEvidenceCommandResult {
+  const entry = process.argv[1] ?? "";
+  const useNode = entry.endsWith(".js") || entry.endsWith(".mjs");
+  try {
+    const out = execFileSync(useNode ? process.execPath : "roll", [
+      ...(useNode ? [entry] : []),
+      "supervisor",
+      "repair-evidence",
+      num,
+      "--json",
+    ], { cwd: process.cwd(), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const parsed = JSON.parse(out) as { storyId?: unknown; verdict?: unknown; reason?: unknown };
+    const verdict = typeof parsed.verdict === "string" ? parsed.verdict : "";
+    const detail = typeof parsed.reason === "string" && parsed.reason !== "" ? parsed.reason : verdict;
+    if (verdict === "repaired" || verdict === "already_repaired") {
+      return {
+        verdict,
+        ...(typeof parsed.storyId === "string" && parsed.storyId !== "" ? { storyId: parsed.storyId } : {}),
+        detail,
+      };
+    }
+    return { verdict: "not_reparable", detail: detail === "" ? "supervisor repair-evidence returned no repaired verdict" : detail };
+  } catch (err) {
+    return { verdict: "failed", detail: errorText(err), failure: { step: "supervisor repair-evidence", message: errorText(err), ...(stderrText(err) !== undefined ? { stderr: stderrText(err) } : {}), transient: true } };
+  }
+}
+
+function copyIfExists(src: string, dst: string): void {
+  if (!existsSync(src)) return;
+  cpSync(src, dst, { recursive: true, force: true });
+}
+
+export interface EvidenceRepairAttachResult {
+  ok: boolean;
+  committed: boolean;
+  failure?: StepFailure;
+}
+
+function relPathInsideRepo(cwd: string, path: string): string | undefined {
+  const rel = relative(cwd, path);
+  if (rel === "" || rel.startsWith("..")) return undefined;
+  return rel;
+}
+
+function porcelainPath(line: string): string {
+  const raw = line.slice(3).trim();
+  const target = raw.includes(" -> ") ? raw.split(" -> ").at(-1) ?? raw : raw;
+  return target.replace(/^"|"$/g, "");
+}
+
+function dirtyPathsOutside(cwd: string, allowedRelRoot: string): string[] | StepFailure {
+  try {
+    const out = execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    return out
+      .split("\n")
+      .filter((line) => line.trim() !== "")
+      .map(porcelainPath)
+      .filter((path) => path !== allowedRelRoot && !path.startsWith(`${allowedRelRoot}/`));
+  } catch (err) {
+    return gitFailureReason("preflight status", err);
+  }
+}
+
+export function attachEvidenceRepairToPrBranch(storyId: string, headRef: string): EvidenceRepairAttachResult {
+  if (storyId === "" || headRef === "") return { ok: false, committed: false, failure: { step: "preflight", message: "missing storyId or headRef", transient: false } };
+  const cwd = process.cwd();
+  const acMap = acMapCandidates(cwd, storyId).find((p) => existsSync(p));
+  if (acMap === undefined) return { ok: false, committed: false, failure: { step: "preflight", message: `ac-map.json missing for ${storyId}`, transient: false } };
+  const cardRoot = dirname(acMap);
+  const relCard = relPathInsideRepo(cwd, cardRoot);
+  if (relCard === undefined) return { ok: false, committed: false, failure: { step: "preflight", message: "evidence path escapes repo", transient: false } };
+  const temp = mkdtempSync(join(tmpdir(), "roll-pr-evidence-repair-"));
+  const saved = join(temp, "card");
+  const worktree = join(temp, "worktree");
+  mkdirSync(saved, { recursive: true });
+  for (const entry of ["ac-map.json", "evidence", "latest", "screenshots"]) copyIfExists(join(cardRoot, entry), join(saved, entry));
+  let committed = false;
+  try {
+    const outsideDirty = dirtyPathsOutside(cwd, relCard);
+    if (!Array.isArray(outsideDirty)) return { ok: false, committed: false, failure: outsideDirty };
+    if (outsideDirty.length > 0) {
+      return { ok: false, committed: false, failure: { step: "preflight clean worktree", message: "refusing evidence repair with unrelated dirty worktree paths", transient: true } };
+    }
+    let failure = runGitStep(cwd, "fetch origin headRef", ["fetch", "origin", headRef]);
+    if (failure !== undefined) return { ok: false, committed: false, failure };
+    failure = runGitStep(cwd, "worktree add repair branch", ["worktree", "add", "-B", headRef, worktree, "FETCH_HEAD"]);
+    if (failure !== undefined) return { ok: false, committed: false, failure };
+    const wtCardRoot = join(worktree, relCard);
+    mkdirSync(wtCardRoot, { recursive: true });
+    for (const entry of ["ac-map.json", "evidence", "latest", "screenshots"]) copyIfExists(join(saved, entry), join(wtCardRoot, entry));
+    failure = runGitStep(worktree, "git add evidence", ["add", "-A", "-f", "--", relCard]);
+    if (failure !== undefined) return { ok: false, committed: false, failure };
+    const dirty = execFileSync("git", ["status", "--porcelain", "--", relCard], { cwd: worktree, encoding: "utf8" }).trim();
+    if (dirty !== "") {
+      failure = runGitStep(worktree, "commit evidence", ["commit", "-m", `chore: attach acceptance evidence for ${storyId}`]);
+      if (failure !== undefined) return { ok: false, committed: false, failure };
+      committed = true;
+      failure = runGitStep(worktree, "push evidence", ["push", "origin", `HEAD:${headRef}`]);
+      if (failure !== undefined) return { ok: false, committed, failure };
+    }
+    failure = runGitStep(cwd, "fetch pushed headRef", ["fetch", "origin", headRef]);
+    if (failure !== undefined) return { ok: false, committed, failure };
+    return { ok: true, committed };
+  } finally {
+    runGitStep(cwd, "worktree remove", ["worktree", "remove", "--force", worktree]);
+    rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+async function repairEvidenceOnce(num: string, headRef: string, slug: string, missing: readonly string[]): Promise<PrViewFacts | undefined> {
+  const marker = evidenceRepairMarkerPath(num);
+  if (evidenceRepairMarkerIsFresh(marker)) return undefined;
+  rmSync(marker, { force: true });
+  try {
+    const repaired = runRepairEvidenceCommand(num);
+    if (repaired.verdict === "failed") {
+      appendPrEvidenceRepairEvent("pr:evidence_repair_failed", num, repaired.detail, { step: repaired.failure?.step, transient: true, ...(repaired.failure?.stderr !== undefined ? { stderr: repaired.failure.stderr } : {}) });
+      return undefined;
+    }
+    if (repaired.verdict === "not_reparable") {
+      writeEvidenceRepairMarker(num, missing);
+      appendPrEvidenceRepairEvent("pr:evidence_repair_failed", num, repaired.detail, { step: "supervisor repair-evidence", transient: false });
+      return undefined;
+    }
+    if (repaired.storyId !== undefined) {
+      const attached = attachEvidenceRepairToPrBranch(repaired.storyId, headRef);
+      if (!attached.ok) {
+        const failure = attached.failure;
+        appendPrEvidenceRepairEvent("pr:evidence_repair_failed", num, failure?.message ?? "attach evidence failed", {
+          step: failure?.step ?? "attach evidence",
+          transient: failure?.transient ?? true,
+          ...(failure?.stderr !== undefined ? { stderr: failure.stderr } : {}),
+        });
+        if (failure?.transient === false) writeEvidenceRepairMarker(num, missing);
+        return undefined;
+      }
+    }
+    const r = await gh(["-R", slug, "pr", "view", num, "--json", "reviews,mergeStateStatus,statusCheckRollup,body,labels,isDraft"]);
+    if (r.code !== 0 || r.stdout.trim() === "") {
+      appendPrEvidenceRepairEvent("pr:evidence_repair_failed", num, r.stderr.trim() || "gh pr view failed after repair", { step: "gh pr view", transient: true, ...(r.stderr.trim() !== "" ? { stderr: r.stderr.trim() } : {}) });
+      return undefined;
+    }
+    const raw = JSON.parse(r.stdout) as PrViewRaw;
+    const facts = reducePrView(raw);
+    const evidence = resolvePrEvidence(process.cwd(), headRef, raw.body ?? "");
+    if (!evidence.ok) writeEvidenceRepairMarker(num, evidence.missing);
+    appendPrEvidenceRepairEvent(evidence.ok ? "pr:evidence_repaired" : "pr:evidence_repair_failed", num, evidence.missing.join(", "), {
+      step: "verify repaired evidence",
+      ...(evidence.ok ? {} : { transient: false }),
+    });
+    return { ...facts, evidenceResolvable: evidence.ok, evidenceMissing: evidence.missing };
+  } catch (err) {
+    appendPrEvidenceRepairEvent("pr:evidence_repair_failed", num, missing.join(", "), { step: "repairEvidenceOnce", transient: true, message: errorText(err), ...(stderrText(err) !== undefined ? { stderr: stderrText(err) } : {}) });
+    return undefined;
+  }
+}
+
 function realDeps(): PrInboxDeps {
   const { yellow, nc } = pal();
   return {
@@ -604,6 +941,7 @@ function realDeps(): PrInboxDeps {
         return undefined;
       }
     },
+    repairEvidence: (num, headRef, slug, missing) => repairEvidenceOnce(num, headRef, slug, missing),
     alert: appendAlert,
     writeTick: writeTickFile,
     info: (line) => process.stdout.write(`${yellow}[roll]${nc} ${line}\n`),

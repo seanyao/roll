@@ -25,6 +25,7 @@ import {
   type PrStatusProvider,
 } from "@roll/core";
 import { GitHubPrStatusProvider } from "@roll/infra";
+import { markDoneGuarded } from "../runner/done-guard.js";
 
 export const RECONCILE_PENDING_USAGE =
   "Usage: roll loop reconcile-pending [--dry-run]\n" +
@@ -203,10 +204,28 @@ export async function loopReconcilePendingCommand(
         // Flip the backlog row from 🔨 In Progress to ✅ Done so the
         // supervisor no longer treats this delivered card as blocking.
         try {
-          const backlogPath = join(cwd, ".roll", "backlog.md");
-          const store = new BacklogStore();
-          const snap = store.readBacklog(backlogPath);
-          store.mark(backlogPath, snap.hash, record.storyId, STATUS_MARKER.done);
+          const guarded = markDoneGuarded(cwd, record.storyId, { mergedToMain: true }, {
+            markStatus: (projectCwd, id, status) => {
+              const backlogPath = join(projectCwd, ".roll", "backlog.md");
+              const store = new BacklogStore();
+              const snap = store.readBacklog(backlogPath);
+              store.mark(backlogPath, snap.hash, id, status);
+            },
+            alert: (message) =>
+              bus.appendEvent(eventsPath, {
+                type: "loop:error",
+                loop: "pr",
+                error: message,
+                ts: now,
+              }),
+          });
+          if (!guarded.ok) {
+            deps.stdout.write(
+              lang === "zh"
+                ? `    ⚠️ Done guard 拒绝翻牌 · ${guarded.missing.join(", ")}\n`
+                : `    ⚠️ Done guard rejected status flip · ${guarded.missing.join(", ")}\n`,
+            );
+          }
         } catch {
           // Best-effort: the delivery record is the truth; backlog update is
           // a convenience signal for the supervisor. Non-fatal on failure.

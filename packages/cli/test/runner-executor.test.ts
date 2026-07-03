@@ -1314,7 +1314,7 @@ describe("executeCommand — command → executor mapping", () => {
 
     it("preflight flips an externally-merged 📋 Todo card to ✅ Done via the unified truth", async () => {
       const markStatus = vi.fn();
-      const { ports } = fakePorts({
+      const { ports, calls } = fakePorts({
         backlog: {
           read: vi.fn(() => [{ id: "FIX-EXT-1", desc: "est_min:5", status: "📋 Todo" }]),
           markStatus,
@@ -1323,9 +1323,8 @@ describe("executeCommand — command → executor mapping", () => {
       });
       const r = await executeCommand({ kind: "preflight" }, ports, CTX);
       expect(r.event).toEqual({ type: "preflight_done" });
-      // Flipped to Done even though runs.jsonl carries NO merged row for it —
-      // the structured projection (git merge) is the authoritative signal.
-      expect(markStatus).toHaveBeenCalledWith("/repo", "FIX-EXT-1", "✅ Done");
+      expect(markStatus).not.toHaveBeenCalledWith("/repo", "FIX-EXT-1", "✅ Done");
+      expect((calls["alert"] ?? []).map((a) => String((a as unknown[])[1])).join("\n")).toContain("Done guard rejected");
     });
 
     it("a loop-cycle card is NOT spuriously flipped/skipped when the unified truth says not-delivered", async () => {
@@ -3022,7 +3021,7 @@ describe("executeCommand — command → executor mapping", () => {
   // did not merge (committed-but-unmerged) leaves the card NOT Done. ───────────
   it("FIX-295 (AC-FIX1): append_run `done` flips Done ONLY when the PR is MERGED", async () => {
     const markStatus = vi.fn();
-    const { ports } = fakePorts({
+    const { ports, calls } = fakePorts({
       backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "🔨 In Progress" }]), markStatus },
       github: { ...fakePorts().ports.github, prMergeInfo: vi.fn(async () => ({ state: "MERGED", mergedAt: "2026-06-21T00:00:00Z", mergeCommit: "abc123def456" })) },
     });
@@ -3031,7 +3030,8 @@ describe("executeCommand — command → executor mapping", () => {
       ports,
       CTX,
     );
-    expect(markStatus).toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done");
+    expect(markStatus).not.toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done");
+    expect((calls["alert"] ?? []).map((a) => String((a as unknown[])[1])).join("\n")).toContain("Done guard rejected");
   });
 
   it("FIX-295 (AC-FIX1): a delivered cycle whose PR is still OPEN does NOT flip Done", async () => {
@@ -3144,7 +3144,7 @@ describe("executeCommand — command → executor mapping", () => {
 
   it("FIX-304: a genuinely MERGED `done` terminal KEEPS ✅ Done (no revert)", async () => {
     const markStatus = vi.fn();
-    const { ports } = fakePorts({
+    const { ports, calls } = fakePorts({
       backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "✅ Done" }]), markStatus },
       github: { ...fakePorts().ports.github, prMergeInfo: vi.fn(async () => ({ state: "MERGED", mergedAt: "2026-06-21T00:00:00Z", mergeCommit: "abc123def456" })) },
     });
@@ -3153,8 +3153,9 @@ describe("executeCommand — command → executor mapping", () => {
       ports,
       { ...CTX, preCycleStatus: "📋 Todo" },
     );
-    // Merged → Done is true; it is (re)affirmed, never reverted to Todo.
-    expect(markStatus).toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done");
+    // Merged alone is no longer enough; Done is guarded by parseable evidence too.
+    expect(markStatus).not.toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done");
+    expect((calls["alert"] ?? []).map((a) => String((a as unknown[])[1])).join("\n")).toContain("Done guard rejected");
     expect(markStatus).not.toHaveBeenCalledWith("/repo", "US-RUN-001", "📋 Todo");
   });
 

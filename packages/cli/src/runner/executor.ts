@@ -203,6 +203,7 @@ import { buildPairScorePrompt, buildReviewPrompt, diagnosePairScoreOutput, enabl
 import { realAgentEnv } from "../commands/agent-list.js";
 import { readScopedAgentLayer, resolveScopedStoryExecute } from "./scoped-route.js";
 import { attestCommand } from "../commands/attest.js";
+import { markDoneGuarded } from "./done-guard.js";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
 import { formatEvaluationContractForScorer, parseEvaluationContract } from "../lib/evaluation-contract.js";
 import { readLatestStoryReviewScore, REVIEW_SCORE_LOW_THRESHOLD, type ReviewScoreEntry } from "../lib/review-score.js";
@@ -1280,7 +1281,10 @@ export async function executeCommand(
         for (const r of rows) {
           if (!(r.status ?? "").includes(STATUS_MARKER.todo)) continue;
           if (mergedFromTruth(r.id)) {
-            ports.backlog.markStatus?.(ports.repoCwd, r.id, STATUS_MARKER.done);
+            markDoneGuarded(ports.repoCwd, r.id, { mergedToMain: true }, {
+              markStatus: (projectCwd, id, status) => ports.backlog.markStatus?.(projectCwd, id, status),
+              alert: (m) => ports.events.appendAlert(ports.paths.alertsPath, m),
+            });
           }
         }
         const claims = rows.filter((r) => (r.status ?? "").includes("🔨"));
@@ -1295,7 +1299,12 @@ export async function executeCommand(
                 .catch(() => undefined);
             }
             const decision = decideClaimReconcile({ hasDeliveringCycle: cycle !== undefined, prState, hasPublishedPr: runRowHasPublishedPr(runRows, claim.id) });
-            if (decision === "done") ports.backlog.markStatus?.(ports.repoCwd, claim.id, STATUS_MARKER.done);
+            if (decision === "done") {
+              markDoneGuarded(ports.repoCwd, claim.id, { mergedToMain: true }, {
+                markStatus: (projectCwd, id, status) => ports.backlog.markStatus?.(projectCwd, id, status),
+                alert: (m) => ports.events.appendAlert(ports.paths.alertsPath, m),
+              });
+            }
             else if (decision === "todo") ports.backlog.markStatus?.(ports.repoCwd, claim.id, STATUS_MARKER.todo);
             // "keep" → leave 🔨 (delivered, pending merge).
           }
@@ -2913,7 +2922,10 @@ export async function executeCommand(
               );
             }
           }
-          ports.backlog.markStatus?.(ports.repoCwd, terminalStoryId, STATUS_MARKER.done);
+          markDoneGuarded(ports.repoCwd, terminalStoryId, { mergedToMain: true }, {
+            markStatus: (projectCwd, id, status) => ports.backlog.markStatus?.(projectCwd, id, status),
+            alert: (m) => ports.events.appendAlert(ports.paths.alertsPath, m),
+          });
         } else {
           // FIX-304: done ≡ merged. The PR did NOT merge (still OPEN / closed /
           // gh down), yet the agent may have ALREADY flipped this row ✅ Done in

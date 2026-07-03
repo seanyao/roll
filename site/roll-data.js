@@ -164,7 +164,7 @@ window.RollData = (function () {
         { name: "roll loop runs",  mono: true, desc: "Per-cycle TerminalOutcome history with TCR count and duration.", badges: [] },
         { name: "roll loop story", mono: true, desc: "Per-story rollup: cycles, span, duration, tokens, cost, PRs.", badges: [] },
         { name: "roll loop alert", mono: true, desc: "View, acknowledge and clear loop alerts from one place.", badges: [] },
-        { name: "Story-scoped evidence", desc: "`Roll-Evidence` PR trailers point to each Story's evidence. Merge gates reject attest render failures, dangling ac-map paths, claimed ACs, and non-exempt visual cards without screenshots; `roll attest audit` checks evidence_debt.", badges: ["highlight"] },
+        { name: "Story-scoped evidence", desc: "`Roll-Evidence` PR trailers point to each Story's evidence. Merge gates reject attest render failures, dangling ac-map paths, claimed ACs, and non-exempt visual cards without screenshots; the acceptance evidence report audit checks evidence_debt.", badges: ["highlight"] },
       ]},
       { id: "multi-agent", title: "Multi-Agent", blurb: "One vendor doesn't own the keys.", features: [
         { name: "Fail-loud routing", desc: "Execution profiles route roles to agent/model/rig choices. Unavailable requested agents are recorded as unavailable; fallback only happens through explicit policy.", badges: ["highlight"] },
@@ -373,7 +373,7 @@ window.RollData = (function () {
         { name: "roll loop runs",  mono: true, desc: "每轮 TerminalOutcome 历史,含 TCR 次数和耗时。", badges: [] },
         { name: "roll loop story", mono: true, desc: "按故事汇总:cycle 数、跨度、耗时、token、成本、PR 列表。", badges: [] },
         { name: "roll loop alert", mono: true, desc: "在一处查看、确认、清除 loop 告警。", badges: [] },
-        { name: "按 Story 收口的证据", desc: "`Roll-Evidence` PR trailer 指向每张 Story 的证据。合并闸拒绝 attest render 失败、ac-map 悬空路径、claimed AC、无豁免视觉卡缺截图；`roll attest audit` 检查 evidence_debt。", badges: ["highlight"] },
+        { name: "按 Story 收口的证据", desc: "`Roll-Evidence` PR trailer 指向每张 Story 的证据。合并闸拒绝 attest render 失败、ac-map 悬空路径、claimed AC、无豁免视觉卡缺截图；验收证据报告的 audit 检查 evidence_debt。", badges: ["highlight"] },
       ]},
       { id: "multi-agent", title: "多 Agent", blurb: "钥匙不归一家供应商。", features: [
         { name: "Fail-loud 路由", desc: "执行剖面把角色路由到 agent/model/rig。请求的 agent 不可用会被记录为 unavailable；fallback 只按显式策略发生。", badges: ["highlight"] },

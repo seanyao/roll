@@ -55,6 +55,8 @@ import {
   bootstrapWorktreeSkills,
   commitRollMetadataRepo,
   readPrebuildDistEnabled,
+} from "./worktree-bootstrap.js";
+import {
   rescueLeakedMain,
 } from "./executor.js";
 

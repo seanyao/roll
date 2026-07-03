@@ -1097,6 +1097,46 @@ The event stream records `sandbox:write_protected` and `sandbox:quarantined`.
 surface those facts. Each quarantine manifest includes the ref, file list, and a
 one-line restore command for owner/supervisor recovery.
 
+## Post-cycle Environment Cleanup
+
+Before the cycle worktree is removed, loop runs a declarative environment
+cleanup step. It targets only transient toolchain/scratch artifacts produced
+inside the worktree — e.g. `.scratch`, `tmp`, `node_modules/.cache`, `.vite`,
+`__pycache__`, `.build` — and leaves source files and uncommitted work alone.
+
+Each rule emits a `cycle:cleanup` event to `events.ndjson`, so the cleanup is
+observable and auditable. Cleanup failures are downgraded to warning events,
+also summarized in `ALERT.md` under the independent `harness:env_cleanup` root
+cause, and never block the next cycle.
+
+You can override or extend the default rules by creating
+`.roll/loop/cleanup-manifest.yaml`:
+
+```yaml
+rules:
+  - name: my-scratch
+    kind: rm
+    paths:
+      - .my-tmp
+      - "**/roll-cleanup.log"
+  - name: my-cache
+    kind: isolate
+    paths:
+      - .my-cache
+```
+
+`kind: rm` deletes the path; `kind: isolate` moves it into a cycle-local
+`.roll-cleanup/<cycle-id>/<rule>/` directory inside the worktree (so it is
+removed along with the worktree).
+
+Supported path forms are deliberately small: literal relative paths such as
+`.my-tmp` and recursive suffix matches of the form `prefix/**/literal-suffix`,
+including `**/roll-cleanup.log` or `src/**/__pycache__`. Shell globs are not
+expanded; a `*` inside the recursive suffix, such as `**/*.log`, makes that rule
+invalid, emits a warning, and skips the rule. Use `rules: []` or
+`enabled: false` to disable cleanup explicitly. The default manifest is used
+only when no override file is present.
+
 ## Cycle phases
 
 Every cycle is sliced into seven named phases. Each phase emits a `phase_start`
@@ -1111,7 +1151,7 @@ so the tmux viewer never looks frozen.
 | 3 | `worktree_setup` | fetch origin + worktree create + meta sync | 2 – 10 s |
 | 4 | `agent_invoke` | Agent executes with up to 3 retries | 5 – 45 min |
 | 5 | `publish_push` | push branch + open PR (or doc-only merge) | 5 – 30 s |
-| 6 | `cleanup` | emit PR final state + worktree teardown | < 1 s |
+| 6 | `cleanup` | env cleanup + emit PR final state + worktree teardown | < 1 s |
 
 > **US-AUTO-044**: the main loop exits after opening the PR and **no longer waits for merge**. Merge / rebase / close is handled asynchronously by the dedicated PR Loop (`com.roll.pr.<slug>`, every 5 min); a story with an open PR is skipped by the eligibility gate, so it is neither re-opened nor falsely marked Done.
 

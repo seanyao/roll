@@ -317,6 +317,8 @@ function describeCommand(cmd: CycleCommand): string {
       return `wait_merge           → github.prState(${cmd.branch}) poll`;
     case "reconcile":
       return "reconcile            → reconcile.reconcileMergeEvidence";
+    case "cleanup_environment":
+      return "cleanup_environment  → env.cleanupCycleArtifacts()";
     case "cleanup_worktree":
       return `cleanup_worktree     → git.worktreeRemove(${cmd.branch})`;
     case "emit_event":

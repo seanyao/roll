@@ -58,6 +58,8 @@ export type RollEvent =
   // process tree was killed, the inflight lock released, and the worktree branch
   // PRESERVED (work salvageable). `elapsedSec`/`idleSec` make the trip auditable.
   | { type: "cycle:timeout"; cycleId: string; reason: "wall" | "no-progress"; elapsedSec: number; idleSec: number; ts: number }
+  // US-LOOP-088 — post-cycle environment cleanup is observable in the event stream.
+  | { type: "cycle:cleanup"; cycleId: string; rule: string; path: string; ok: boolean; warning?: string; ts: number }
   | { type: "cycle:end"; cycleId: string; outcome: TerminalOutcome; cost: CycleCost; ts: number; failure_class?: FailureClass; root_cause_key?: string }
   // FIX-903: leaked main commits were saved to a rescue ref before reset.
   | { type: "cycle:rescue"; cycleId: string; ref: string; rescuedSha: string; ts: number }

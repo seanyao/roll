@@ -207,6 +207,13 @@ import { markDoneGuarded } from "./done-guard.js";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
 import { formatEvaluationContractForScorer, parseEvaluationContract } from "../lib/evaluation-contract.js";
 import { readLatestStoryReviewScore, REVIEW_SCORE_LOW_THRESHOLD, type ReviewScoreEntry } from "../lib/review-score.js";
+import {
+  applyCleanupManifest,
+  CLEANUP_TIMEOUT_MS,
+  resolveCleanupManifest,
+  type CleanupResult,
+} from "./environment-cleanup.js";
+import { recordRootCauseFailure } from "./failure-attribution.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -380,6 +387,51 @@ async function quarantineMainCheckoutForCycle(
   });
   for (const result of results) appendQuarantineEvent(ports, result);
   return results;
+}
+
+/** US-LOOP-088 — append a `cycle:cleanup` event for one cleanup rule result. */
+function appendCleanupEvent(ports: Ports, ctx: CycleContext, result: CleanupResult): void {
+  try {
+    ports.events.appendEvent(ports.paths.eventsPath, {
+      type: "cycle:cleanup",
+      cycleId: ctx.cycleId,
+      rule: result.rule,
+      path: result.path,
+      ok: result.ok,
+      ...(result.warning !== undefined ? { warning: result.warning } : {}),
+      ts: eventTs(ports),
+    });
+  } catch {
+    /* observation is best-effort; cleanup failure must not block the terminal */
+  }
+}
+
+function cleanupGuardResult(): CleanupResult {
+  return {
+    rule: "cleanup-main-checkout-guard",
+    path: ".",
+    ok: true,
+    warning: "skipped cleanup because worktreePath resolves to repoCwd",
+  };
+}
+
+function recordCleanupFailures(ports: Ports, ctx: CycleContext, results: readonly CleanupResult[]): void {
+  const failures = results.filter((r) => !r.ok);
+  if (failures.length === 0) return;
+  const summary = failures
+    .map((r) => `${r.rule}${r.path !== "." ? ` ${r.path}` : ""}: ${r.warning ?? "cleanup failed"}`)
+    .join("; ");
+  ports.events.appendAlert(
+    ports.paths.alertsPath,
+    `cycle ${ctx.cycleId}: environment cleanup warning(s): ${summary}`,
+  );
+  recordRootCauseFailure(
+    dirname(ports.paths.eventsPath),
+    ctx.cycleId,
+    { failureClass: "harness", rootCauseKey: "harness:env_cleanup", confidence: "envelope" },
+    [],
+    Number.POSITIVE_INFINITY,
+  );
 }
 
 /** FIX-1051 — scan agy's native CLI log for internal tool errors.
@@ -2829,6 +2881,30 @@ export async function executeCommand(
     // (the six-state classification already happened); ack with reconciled.
     case "reconcile":
       return { event: { type: "reconciled" } };
+
+    // US-LOOP-088 — post-cycle environment cleanup before the worktree is removed.
+    // Side effect + observable events; no feedback into the state machine.
+    case "cleanup_environment": {
+      try {
+        if (realpathSync(ports.repoCwd) === realpathSync(ports.paths.worktreePath)) {
+          appendCleanupEvent(ports, ctx, cleanupGuardResult());
+          return {};
+        }
+      } catch {
+        /* fall through; applyCleanupManifest still enforces path boundaries */
+      }
+      const manifestPath = join(ports.repoCwd, ".roll", "loop", "cleanup-manifest.yaml");
+      const manifest = resolveCleanupManifest(ports.paths.worktreePath, manifestPath);
+      const results = applyCleanupManifest(ports.paths.worktreePath, ctx.cycleId, manifest, {
+        terminalStatus: cmd.terminalStatus,
+        maxDurationMs: CLEANUP_TIMEOUT_MS,
+      });
+      for (const r of results) {
+        appendCleanupEvent(ports, ctx, r);
+      }
+      recordCleanupFailures(ports, ctx, results);
+      return {};
+    }
 
     // _worktree_cleanup (tolerant). Side effect; no feedback (terminal path).
     // NOTE (FIX-354): the lever-4 warm-session CAPTURE used to live here, but

@@ -720,6 +720,7 @@ export type CycleCommand =
   | { kind: "rescue_leaked"; cycleId: string } // FIX-903: save leaked main commits to rescue ref.
   | { kind: "wait_merge"; branch: string; elapsedSec: number } // delivery/pr nextWaitAction.
   | { kind: "reconcile" } // reconcile/engine reconcileMergeEvidence.
+  | { kind: "cleanup_environment"; terminalStatus?: V2CycleStatus } // US-LOOP-088: post-cycle env cleanup before worktree removal.
   | { kind: "cleanup_worktree"; branch: string } // _worktree_cleanup.
   | { kind: "emit_event"; event: RollEvent } // events/bus appendEvent (I8).
   | { kind: "append_run"; status: V2CycleStatus; outcome: TerminalOutcome; cycleId: string } // events/bus upsertRun.
@@ -927,10 +928,15 @@ function terminate(
   outcome: TerminalOutcome = mapV2Status(status),
 ): StepResult {
   const tctx = terminalCtx(state);
+  const extraWithStatus = extra.map((cmd) => cmd.kind === "cleanup_environment" ? { ...cmd, terminalStatus: status } : cmd);
+  const cleanup = extraWithStatus.filter((cmd) => cmd.kind === "cleanup_environment" || cmd.kind === "cleanup_worktree");
+  const beforeTerminal = extraWithStatus.filter((cmd) => cmd.kind !== "cleanup_environment" && cmd.kind !== "cleanup_worktree");
   const commands: CycleCommand[] = [
-    ...extra,
+    ...beforeTerminal,
     { kind: "emit_event", event: cycleEndEvent(tctx, status, 0, outcome) },
     { kind: "append_run", status, outcome, cycleId: state.ctx.cycleId },
+    { kind: "release_lock" },
+    ...cleanup,
   ];
   return {
     state: { ...state, phase: "cleanup", terminal: status, done: true },
@@ -1002,13 +1008,13 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
       // is safe for both git-worktree-add failure and post-create bootstrap
       // failure; no cycle:start was emitted, but a terminal runs row is written.
       return terminate({ ...state, phase: "worktree" }, "failed", [
-        { kind: "cleanup_worktree", branch: state.ctx.branch },
+        { kind: "cleanup_environment" }, { kind: "cleanup_worktree", branch: state.ctx.branch },
       ]);
 
     case "no_story":
       // Nothing pickable → idle terminal (clean no-op; worktree reclaimed).
       return terminate({ ...state, phase: "pick" }, "idle", [
-        { kind: "cleanup_worktree", branch: state.ctx.branch },
+        { kind: "cleanup_environment" }, { kind: "cleanup_worktree", branch: state.ctx.branch },
       ]);
 
     case "story_picked":
@@ -1153,13 +1159,13 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
         // an auditable branch.
         const extra: CycleCommand[] =
           status === "idle" || status === "published"
-            ? [{ kind: "cleanup_worktree", branch: state.ctx.branch }]
+            ? [{ kind: "cleanup_environment" }, { kind: "cleanup_worktree", branch: state.ctx.branch }]
             : status === "gave_up"
               ? // Hook 1: an agent ran but produced nothing — clean the (empty)
                 // worktree AND ALERT on the FIRST occurrence (no 2-hit streak).
                 // failed-class, so the terminal runs revertPrematureDone.
                 [
-                  { kind: "cleanup_worktree", branch: state.ctx.branch },
+                  { kind: "cleanup_environment" }, { kind: "cleanup_worktree", branch: state.ctx.branch },
                   {
                     kind: "append_alert",
                     message: `cycle ${state.ctx.cycleId}: agent executed but produced 0 commits and no delivery — gave_up (productivity floor); story left re-pickable, spec truth reset`,
@@ -1170,7 +1176,7 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
                 // Clean the empty worktree and ALERT with the specific native-log
                 // failure reason so the supervisor sees the real cause.
                 [
-                  { kind: "cleanup_worktree", branch: state.ctx.branch },
+                  { kind: "cleanup_environment" }, { kind: "cleanup_worktree", branch: state.ctx.branch },
                   {
                     kind: "append_alert",
                     message: (() => {
@@ -1224,7 +1230,7 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
         // ff-merged (gh-missing tier → done) → clean worktree → terminal.
         // FIX-1032a: check delivery gate for PR loop health.
         const extra: CycleCommand[] = [
-          { kind: "cleanup_worktree", branch: state.ctx.branch },
+          { kind: "cleanup_environment" }, { kind: "cleanup_worktree", branch: state.ctx.branch },
         ];
         if (status === "published" && state.ctx.prLoopHealthy === false) {
           const gate = deliveryGate({
@@ -1242,7 +1248,7 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
       if (status === "orphan") {
         // Commits pushed for audit; worktree cleaned (bin/roll:9333).
         return terminate({ ...state, phase: "cleanup" }, "orphan", [
-          { kind: "cleanup_worktree", branch: state.ctx.branch },
+          { kind: "cleanup_environment" }, { kind: "cleanup_worktree", branch: state.ctx.branch },
           { kind: "append_alert", message: `cycle ${state.ctx.cycleId}: publish failed; orphan branch+tag pushed; worktree cleaned` },
         ]);
       }
@@ -1268,7 +1274,7 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
       if (action.kind === "merged") {
         return terminate({ ...state, phase: "reconcile" }, "done", [
           { kind: "reconcile" },
-          { kind: "cleanup_worktree", branch: state.ctx.branch },
+          { kind: "cleanup_environment" }, { kind: "cleanup_worktree", branch: state.ctx.branch },
         ]);
       }
       // closed | timeout → the PR never merged; orphan-preserve (audit).

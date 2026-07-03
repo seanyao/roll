@@ -3346,6 +3346,105 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r.lockReleased).toBe(true);
   });
 
+  it("US-LOOP-088: cleanup_environment applies the manifest and emits cycle:cleanup events", async () => {
+    const wt = mkdtempSync(join(tmpdir(), "roll-cleanup-exec-"));
+    execDirs.push(wt);
+    mkdirSync(join(wt, ".scratch"), { recursive: true });
+    writeFileSync(join(wt, ".scratch", "leftover.tmp"), "junk", "utf8");
+    const { ports, calls } = fakePorts({ paths: { ...fakePorts().ports.paths, worktreePath: wt } });
+    const r = await executeCommand({ kind: "cleanup_environment" }, ports, CTX);
+    expect(existsSync(join(wt, ".scratch"))).toBe(false);
+    expect(r.event).toBeUndefined();
+    const events = (calls["event"] ?? []) as [string, RollEvent][];
+    const cleanupEvents = events.filter(([, ev]) => ev.type === "cycle:cleanup");
+    expect(cleanupEvents.length).toBeGreaterThan(0);
+    const scratchEvent = cleanupEvents.find(([, ev]) => ev.rule === "scratch-dirs");
+    expect(scratchEvent?.[1]).toMatchObject({ type: "cycle:cleanup", cycleId: CTX.cycleId, rule: "scratch-dirs", ok: true });
+  });
+
+  it("US-LOOP-088: blocked cleanup skips heavy cache rules and records warnings", async () => {
+    const wt = mkdtempSync(join(tmpdir(), "roll-cleanup-blocked-exec-"));
+    execDirs.push(wt);
+    mkdirSync(join(wt, ".scratch"), { recursive: true });
+    writeFileSync(join(wt, ".scratch", "leftover.tmp"), "junk", "utf8");
+    mkdirSync(join(wt, "node_modules", ".cache"), { recursive: true });
+    writeFileSync(join(wt, "node_modules", ".cache", "cache.bin"), "cache", "utf8");
+    const { ports, calls } = fakePorts({ paths: { ...fakePorts().ports.paths, worktreePath: wt } });
+    await executeCommand({ kind: "cleanup_environment", terminalStatus: "blocked" }, ports, CTX);
+    expect(existsSync(join(wt, ".scratch"))).toBe(false);
+    expect(existsSync(join(wt, "node_modules", ".cache"))).toBe(true);
+    const events = (calls["event"] ?? []) as [string, RollEvent][];
+    const nodeEvent = events.find(([, ev]) => ev.type === "cycle:cleanup" && ev.rule === "node-tool-cache");
+    expect(nodeEvent?.[1]).toMatchObject({
+      type: "cycle:cleanup",
+      cycleId: CTX.cycleId,
+      rule: "node-tool-cache",
+      ok: true,
+      warning: "skipped for terminal status blocked",
+    });
+  });
+
+  it("US-LOOP-088: cleanup_environment skips when the worktree resolves to the main checkout", async () => {
+    const repo = mkdtempSync(join(tmpdir(), "roll-cleanup-main-guard-"));
+    execDirs.push(repo);
+    mkdirSync(join(repo, ".scratch"), { recursive: true });
+    writeFileSync(join(repo, ".scratch", "leftover.tmp"), "junk", "utf8");
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      paths: { ...base.ports.paths, worktreePath: repo },
+    });
+
+    await executeCommand({ kind: "cleanup_environment" }, ports, CTX);
+
+    expect(existsSync(join(repo, ".scratch", "leftover.tmp"))).toBe(true);
+    const events = (calls["event"] ?? []) as [string, RollEvent][];
+    const guardEvent = events.find(([, ev]) => ev.type === "cycle:cleanup" && ev.rule === "cleanup-main-checkout-guard");
+    expect(guardEvent?.[1]).toMatchObject({
+      type: "cycle:cleanup",
+      cycleId: CTX.cycleId,
+      ok: true,
+      warning: "skipped cleanup because worktreePath resolves to repoCwd",
+    });
+  });
+
+  it("US-LOOP-088: cleanup failures append an alert and count as harness env-cleanup observations without pausing", async () => {
+    const repo = mkdtempSync(join(tmpdir(), "roll-cleanup-alert-"));
+    const wt = join(repo, "wt");
+    const rt = join(repo, ".roll", "loop");
+    execDirs.push(repo);
+    mkdirSync(join(repo, ".roll", "loop"), { recursive: true });
+    mkdirSync(wt, { recursive: true });
+    writeFileSync(
+      join(repo, ".roll", "loop", "cleanup-manifest.yaml"),
+      "rules:\n  - name: escape\n    kind: rm\n    paths:\n      - ../outside\n",
+      "utf8",
+    );
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      paths: {
+        ...base.ports.paths,
+        worktreePath: wt,
+        eventsPath: join(rt, "events.ndjson"),
+        alertsPath: join(rt, "ALERT.md"),
+      },
+    });
+
+    await executeCommand({ kind: "cleanup_environment" }, ports, CTX);
+
+    const alerts = (calls["alert"] ?? []).map((a) => (a as unknown[])[1]).join("\n");
+    expect(alerts).toContain("environment cleanup warning");
+    expect(alerts).toContain("escape");
+    expect(alerts).toContain("outside worktree");
+    const state = JSON.parse(readFileSync(join(rt, "failure-attribution.json"), "utf8")) as {
+      causes: Record<string, { timestamps: number[]; failureClass: string }>;
+    };
+    expect(state.causes["harness:env_cleanup"]).toMatchObject({ failureClass: "harness" });
+    expect(state.causes["harness:env_cleanup"]?.timestamps).toHaveLength(1);
+    expect(existsSync(join(repo, ".roll", "loop", `PAUSE-${CTX.cycleId}`))).toBe(false);
+  });
+
   it("cleanup_worktree calls the git remove port", async () => {
     const { ports } = fakePorts();
     await executeCommand({ kind: "cleanup_worktree", branch: "b" }, ports, CTX);

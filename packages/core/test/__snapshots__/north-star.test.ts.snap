@@ -1,0 +1,355 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`north-star report schema > emits the fixed four-metric schema and passes the type guard 1`] = `
+{
+  "generatedAt": "2026-07-03T16:00:00.000Z",
+  "metrics": {
+    "attributionErrors": {
+      "context": {
+        "envHarnessCardLedgerSkips": 0,
+        "failedCycles": 1,
+        "unknownFailureClass": 0,
+      },
+      "current": 0,
+      "daily": [
+        {
+          "day": "2026-06-20",
+          "value": 0,
+        },
+        {
+          "day": "2026-06-21",
+          "value": 0,
+        },
+        {
+          "day": "2026-06-22",
+          "value": 0,
+        },
+        {
+          "day": "2026-06-23",
+          "value": 0,
+        },
+        {
+          "day": "2026-06-24",
+          "value": 0,
+        },
+        {
+          "day": "2026-06-25",
+          "value": 0,
+        },
+        {
+          "day": "2026-06-26",
+          "value": 0,
+        },
+        {
+          "day": "2026-06-27",
+          "value": 0,
+        },
+        {
+          "day": "2026-06-28",
+          "value": 0,
+        },
+        {
+          "day": "2026-06-29",
+          "value": 0,
+        },
+        {
+          "day": "2026-06-30",
+          "value": 0,
+        },
+        {
+          "day": "2026-07-01",
+          "value": 0,
+        },
+        {
+          "day": "2026-07-02",
+          "value": 0,
+        },
+        {
+          "day": "2026-07-03",
+          "value": 0,
+        },
+      ],
+      "met": true,
+      "target": {
+        "op": "=",
+        "unit": "count",
+        "value": 0,
+      },
+      "trend": "flat",
+    },
+    "autonomy": {
+      "context": {
+        "backlogEmptyExemptDays": [
+          "2026-06-20",
+          "2026-06-21",
+          "2026-06-22",
+          "2026-06-23",
+          "2026-06-24",
+          "2026-06-25",
+          "2026-06-26",
+          "2026-06-27",
+          "2026-06-28",
+          "2026-06-29",
+          "2026-06-30",
+          "2026-07-01",
+          "2026-07-02",
+          "2026-07-03",
+        ],
+        "bestHours": 336,
+        "ineffectiveDays": [],
+        "interruptions": 0,
+        "sinceMs": 1781884800000,
+      },
+      "current": 336,
+      "daily": [
+        {
+          "day": "2026-06-20",
+          "exempt": true,
+          "value": 24,
+        },
+        {
+          "day": "2026-06-21",
+          "exempt": true,
+          "value": 48,
+        },
+        {
+          "day": "2026-06-22",
+          "exempt": true,
+          "value": 72,
+        },
+        {
+          "day": "2026-06-23",
+          "exempt": true,
+          "value": 96,
+        },
+        {
+          "day": "2026-06-24",
+          "exempt": true,
+          "value": 120,
+        },
+        {
+          "day": "2026-06-25",
+          "exempt": true,
+          "value": 144,
+        },
+        {
+          "day": "2026-06-26",
+          "exempt": true,
+          "value": 168,
+        },
+        {
+          "day": "2026-06-27",
+          "exempt": true,
+          "value": 192,
+        },
+        {
+          "day": "2026-06-28",
+          "exempt": true,
+          "value": 216,
+        },
+        {
+          "day": "2026-06-29",
+          "exempt": true,
+          "value": 240,
+        },
+        {
+          "day": "2026-06-30",
+          "exempt": true,
+          "value": 264,
+        },
+        {
+          "day": "2026-07-01",
+          "exempt": true,
+          "value": 288,
+        },
+        {
+          "day": "2026-07-02",
+          "exempt": true,
+          "value": 312,
+        },
+        {
+          "day": "2026-07-03",
+          "exempt": true,
+          "value": 336,
+        },
+      ],
+      "met": true,
+      "target": {
+        "op": ">=",
+        "unit": "hours",
+        "value": 72,
+      },
+      "trend": "up",
+    },
+    "deliveryRate": {
+      "context": {
+        "blockedRate": 0,
+        "cardAgeDays": {
+          "max": 2,
+          "min": 2,
+          "p50": 2,
+        },
+        "cardTypes": {
+          "fix": 1,
+          "us": 1,
+        },
+        "deliveredCycles": 1,
+        "nonIdleCycles": 2,
+        "reopenCount": 0,
+        "skipRate": 0,
+      },
+      "current": 0.5,
+      "daily": [
+        {
+          "day": "2026-06-20",
+          "value": 0,
+        },
+        {
+          "day": "2026-06-21",
+          "value": 0,
+        },
+        {
+          "day": "2026-06-22",
+          "value": 0,
+        },
+        {
+          "day": "2026-06-23",
+          "value": 0,
+        },
+        {
+          "day": "2026-06-24",
+          "value": 0,
+        },
+        {
+          "day": "2026-06-25",
+          "value": 0,
+        },
+        {
+          "day": "2026-06-26",
+          "value": 0,
+        },
+        {
+          "day": "2026-06-27",
+          "value": 0,
+        },
+        {
+          "day": "2026-06-28",
+          "value": 0,
+        },
+        {
+          "day": "2026-06-29",
+          "value": 0,
+        },
+        {
+          "day": "2026-06-30",
+          "value": 0,
+        },
+        {
+          "day": "2026-07-01",
+          "value": 0,
+        },
+        {
+          "day": "2026-07-02",
+          "value": 0,
+        },
+        {
+          "day": "2026-07-03",
+          "value": 0.5,
+        },
+      ],
+      "met": false,
+      "target": {
+        "op": ">=",
+        "unit": "ratio",
+        "value": 0.6,
+      },
+      "trend": "up",
+    },
+    "fixTax": {
+      "context": {
+        "byClass": {
+          "docsTest": 0,
+          "harness": 0,
+          "product": 0,
+        },
+        "duplicateRootCauseCount": 0,
+        "newFixCards": 0,
+        "productDeliveries": 1,
+        "repeatedRootCauses": [],
+      },
+      "current": 0,
+      "daily": [
+        {
+          "day": "2026-06-20",
+          "value": null,
+        },
+        {
+          "day": "2026-06-21",
+          "value": null,
+        },
+        {
+          "day": "2026-06-22",
+          "value": null,
+        },
+        {
+          "day": "2026-06-23",
+          "value": null,
+        },
+        {
+          "day": "2026-06-24",
+          "value": null,
+        },
+        {
+          "day": "2026-06-25",
+          "value": null,
+        },
+        {
+          "day": "2026-06-26",
+          "value": null,
+        },
+        {
+          "day": "2026-06-27",
+          "value": null,
+        },
+        {
+          "day": "2026-06-28",
+          "value": null,
+        },
+        {
+          "day": "2026-06-29",
+          "value": null,
+        },
+        {
+          "day": "2026-06-30",
+          "value": null,
+        },
+        {
+          "day": "2026-07-01",
+          "value": null,
+        },
+        {
+          "day": "2026-07-02",
+          "value": null,
+        },
+        {
+          "day": "2026-07-03",
+          "value": 0,
+        },
+      ],
+      "met": true,
+      "target": {
+        "op": "<",
+        "unit": "ratio",
+        "value": 1,
+      },
+      "trend": "flat",
+    },
+  },
+  "schema": "roll.north.v1",
+  "window": {
+    "endDay": "2026-07-03",
+    "startDay": "2026-06-20",
+  },
+  "windowDays": 14,
+}
+`;

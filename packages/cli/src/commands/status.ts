@@ -23,6 +23,7 @@ import { c, COLS, hr, pad, renderState, row, sectionHead } from "../render.js";
 import { attestCoverage, isSnapshotStale, loadTruthSnapshot, renderNowMs, snapshotVerdict } from "../lib/truth-read.js";
 import type { TruthSnapshotCycle } from "@roll/spec";
 import { detectDesignHandoff, renderDesignNudge } from "../lib/onboard-nudge.js";
+import { loadNorthStarReport, renderNorthStatusSummary } from "./north.js";
 
 /** FIX-361: format a cycle snapshot's cost with correct currency symbols,
  *  separating by currency so ¥ and $ are never blindly summed. */
@@ -418,6 +419,7 @@ export function renderTruthSummary(
   stale: boolean,
   lang: Lang,
   _nowMs: number,
+  northSummary?: string,
 ): string {
   void _nowMs;
   const out: string[] = [];
@@ -426,6 +428,7 @@ export function renderTruthSummary(
     out.push(
       "  " + word + "  " + (lang === "zh" ? "无真相快照——运行 roll index" : "no truth snapshot — run roll index"),
     );
+    if (northSummary !== undefined) out.push(northSummary);
     out.push("", hr(), "");
     return out.join("\n");
   }
@@ -438,6 +441,7 @@ export function renderTruthSummary(
   // exit-code intent (script/CI contract): pass 0, warn/unknown 1, fail 2.
   const exit = v === "fail" ? 2 : v === "pass" ? 0 : 1;
   out.push("  " + verdictWord + "  " + reason + "   " + c("muted", `exit ${exit}`));
+  if (northSummary !== undefined) out.push(northSummary);
   out.push("");
 
   // LOOP — loop lanes + running count (the web Now tab's loop heartbeat).
@@ -583,7 +587,16 @@ export function statusCommand(args: string[]): number {
     process.stdout.write(JSON.stringify(statusTruthJson(snapshot, stale), null, 2) + "\n");
     return 0;
   }
-  const out: string[] = [renderTruthSummary(snapshot, stale, lang, nowMs)];
+  let northReport: ReturnType<typeof loadNorthStarReport> | undefined;
+  if (!fixtureMode) {
+    try {
+      northReport = loadNorthStarReport(process.cwd());
+    } catch {
+      northReport = undefined;
+    }
+  }
+  const northSummary = renderNorthStatusSummary(northReport, lang, COLS);
+  const out: string[] = [renderTruthSummary(snapshot, stale, lang, nowMs, northSummary)];
   renderHealth(out, d);
   renderGlobalConventions(out, d.conventions);
   renderAiClients(out, d.ai_clients);

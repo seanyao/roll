@@ -979,7 +979,8 @@ worktree 内部产生的临时/工具链缓存产物——例如 `.scratch`、`t
 未提交的改动。
 
 每条规则都会向 `events.ndjson` 写入一条 `cycle:cleanup` 事件，因此清理过程
-可观测、可审计。清理失败会降级为 warning 事件，不会阻塞下一轮 cycle。
+可观测、可审计。清理失败会降级为 warning 事件，同时汇总写入 `ALERT.md`，
+并按独立的 `harness:env_cleanup` 根因计数；它不会阻塞下一轮 cycle。
 
 你可以通过 `.roll/loop/cleanup-manifest.yaml` 覆盖或扩展默认规则：
 
@@ -989,7 +990,7 @@ rules:
     kind: rm
     paths:
       - .my-tmp
-      - "**/*.log"
+      - "**/roll-cleanup.log"
   - name: my-cache
     kind: isolate
     paths:
@@ -997,8 +998,13 @@ rules:
 ```
 
 `kind: rm` 删除目标；`kind: isolate` 把目标移进 worktree 内的
-`.roll-cleanup/<cycle-id>/<rule>/`（随 worktree 一起被删除）。没有覆盖文件时
-使用默认清单。
+`.roll-cleanup/<cycle-id>/<rule>/`（随 worktree 一起被删除）。
+
+支持的路径形态刻意很小：字面相对路径，例如 `.my-tmp`；以及
+`prefix/**/literal-suffix` 形式的递归后缀匹配，例如 `**/roll-cleanup.log`
+或 `src/**/__pycache__`。不会展开 shell glob；递归后缀里包含 `*`（例如
+`**/*.log`）会让该规则无效，记录 warning，并跳过该规则。用 `rules: []`
+或 `enabled: false` 可以显式关闭 cleanup。只有没有覆盖文件时才使用默认清单。
 
 ## 阶段计时（Cycle phases）
 

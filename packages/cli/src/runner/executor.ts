@@ -213,6 +213,7 @@ import {
   resolveCleanupManifest,
   type CleanupResult,
 } from "./environment-cleanup.js";
+import { recordRootCauseFailure } from "./failure-attribution.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -403,6 +404,34 @@ function appendCleanupEvent(ports: Ports, ctx: CycleContext, result: CleanupResu
   } catch {
     /* observation is best-effort; cleanup failure must not block the terminal */
   }
+}
+
+function cleanupGuardResult(): CleanupResult {
+  return {
+    rule: "cleanup-main-checkout-guard",
+    path: ".",
+    ok: true,
+    warning: "skipped cleanup because worktreePath resolves to repoCwd",
+  };
+}
+
+function recordCleanupFailures(ports: Ports, ctx: CycleContext, results: readonly CleanupResult[]): void {
+  const failures = results.filter((r) => !r.ok);
+  if (failures.length === 0) return;
+  const summary = failures
+    .map((r) => `${r.rule}${r.path !== "." ? ` ${r.path}` : ""}: ${r.warning ?? "cleanup failed"}`)
+    .join("; ");
+  ports.events.appendAlert(
+    ports.paths.alertsPath,
+    `cycle ${ctx.cycleId}: environment cleanup warning(s): ${summary}`,
+  );
+  recordRootCauseFailure(
+    dirname(ports.paths.eventsPath),
+    ctx.cycleId,
+    { failureClass: "harness", rootCauseKey: "harness:env_cleanup", confidence: "envelope" },
+    [],
+    Number.POSITIVE_INFINITY,
+  );
 }
 
 /** FIX-1051 — scan agy's native CLI log for internal tool errors.
@@ -2856,6 +2885,14 @@ export async function executeCommand(
     // US-LOOP-088 — post-cycle environment cleanup before the worktree is removed.
     // Side effect + observable events; no feedback into the state machine.
     case "cleanup_environment": {
+      try {
+        if (realpathSync(ports.repoCwd) === realpathSync(ports.paths.worktreePath)) {
+          appendCleanupEvent(ports, ctx, cleanupGuardResult());
+          return {};
+        }
+      } catch {
+        /* fall through; applyCleanupManifest still enforces path boundaries */
+      }
       const manifestPath = join(ports.repoCwd, ".roll", "loop", "cleanup-manifest.yaml");
       const manifest = resolveCleanupManifest(ports.paths.worktreePath, manifestPath);
       const results = applyCleanupManifest(ports.paths.worktreePath, ctx.cycleId, manifest, {
@@ -2865,6 +2902,7 @@ export async function executeCommand(
       for (const r of results) {
         appendCleanupEvent(ports, ctx, r);
       }
+      recordCleanupFailures(ports, ctx, results);
       return {};
     }
 

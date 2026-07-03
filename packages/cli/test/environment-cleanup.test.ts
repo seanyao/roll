@@ -97,6 +97,37 @@ rules:
   it("returns undefined for an empty manifest", () => {
     expect(parseCleanupManifest("# just a comment\n")).toBeUndefined();
   });
+
+  it("skips a recursive suffix rule that tries to use unsupported star globbing", () => {
+    const text = `
+rules:
+  - name: logs
+    kind: rm
+    paths:
+      - "**/*.log"
+`;
+    const parsed = parseCleanupManifest(text);
+    expect(parsed?.rules).toEqual([]);
+    expect(parsed?.warnings).toContainEqual(expect.objectContaining({
+      rule: "logs",
+      path: "**/*.log",
+      ok: false,
+      warning: expect.stringContaining("not supported"),
+    }));
+  });
+
+  it("parses explicit empty rules as a cleanup-disabling manifest", () => {
+    expect(parseCleanupManifest("rules: []\n")).toEqual({ version: 1, rules: [] });
+  });
+
+  it("parses enabled false as an explicit cleanup disable", () => {
+    expect(parseCleanupManifest("enabled: false\nrules:\n  - name: scratch\n    kind: rm\n    paths:\n      - .scratch\n")).toMatchObject({
+      version: 1,
+      enabled: false,
+      rules: [],
+      warnings: [expect.objectContaining({ rule: "cleanup-manifest", ok: true, warning: "cleanup disabled by manifest" })],
+    });
+  });
 });
 
 describe("applyCleanupManifest", () => {
@@ -195,6 +226,23 @@ describe("applyCleanupManifest", () => {
     expect(existsSync(join(worktree, ".my-cache"))).toBe(false);
     expect(existsSync(join(worktree, ".roll-cleanup", "c1", "isolate-cache", ".my-cache", "data.bin"))).toBe(true);
   });
+
+  it("does not apply unsupported star suffix rules", () => {
+    const log = join(worktree, "logs", "build.log");
+    touch(log);
+    const manifest = parseCleanupManifest("rules:\n  - name: logs\n    kind: rm\n    paths:\n      - \"**/*.log\"\n");
+    expect(manifest).toBeDefined();
+    const results = applyCleanupManifest(worktree, "c1", manifest as CleanupManifest);
+    expect(existsSync(log)).toBe(true);
+    expect(results).toContainEqual(expect.objectContaining({ rule: "logs", ok: false, warning: expect.stringContaining("not supported") }));
+  });
+
+  it("skips cleanup and records an observation when cleanup is disabled", () => {
+    touch(join(worktree, ".scratch", "leftover.tmp"));
+    const results = applyCleanupManifest(worktree, "c1", { version: 1, enabled: false, rules: [] });
+    expect(existsSync(join(worktree, ".scratch", "leftover.tmp"))).toBe(true);
+    expect(results).toContainEqual(expect.objectContaining({ rule: "cleanup-manifest", ok: true, warning: "cleanup disabled by manifest" }));
+  });
 });
 
 describe("resolveCleanupManifest", () => {
@@ -210,5 +258,12 @@ describe("resolveCleanupManifest", () => {
     const resolved = resolveCleanupManifest(worktree, join(worktree, "missing.yaml"));
     expect(resolved.rules.length).toBeGreaterThan(0);
     expect(resolved.rules[0]?.name).toBe(DEFAULT_CLEANUP_MANIFEST.rules[0]?.name);
+  });
+
+  it("does not fall back to defaults for an explicit empty override", () => {
+    const manifestPath = join(worktree, "cleanup-manifest.yaml");
+    writeFileSync(manifestPath, "rules: []\n", "utf8");
+    const resolved = resolveCleanupManifest(worktree, manifestPath);
+    expect(resolved.rules).toEqual([]);
   });
 });

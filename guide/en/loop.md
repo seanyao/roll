@@ -1105,8 +1105,9 @@ inside the worktree — e.g. `.scratch`, `tmp`, `node_modules/.cache`, `.vite`,
 `__pycache__`, `.build` — and leaves source files and uncommitted work alone.
 
 Each rule emits a `cycle:cleanup` event to `events.ndjson`, so the cleanup is
-observable and auditable. Cleanup failures are downgraded to warning events and
-never block the next cycle.
+observable and auditable. Cleanup failures are downgraded to warning events,
+also summarized in `ALERT.md` under the independent `harness:env_cleanup` root
+cause, and never block the next cycle.
 
 You can override or extend the default rules by creating
 `.roll/loop/cleanup-manifest.yaml`:
@@ -1117,7 +1118,7 @@ rules:
     kind: rm
     paths:
       - .my-tmp
-      - "**/*.log"
+      - "**/roll-cleanup.log"
   - name: my-cache
     kind: isolate
     paths:
@@ -1126,8 +1127,15 @@ rules:
 
 `kind: rm` deletes the path; `kind: isolate` moves it into a cycle-local
 `.roll-cleanup/<cycle-id>/<rule>/` directory inside the worktree (so it is
-removed along with the worktree). The default manifest is used when no override
-is present.
+removed along with the worktree).
+
+Supported path forms are deliberately small: literal relative paths such as
+`.my-tmp` and recursive suffix matches of the form `prefix/**/literal-suffix`,
+including `**/roll-cleanup.log` or `src/**/__pycache__`. Shell globs are not
+expanded; a `*` inside the recursive suffix, such as `**/*.log`, makes that rule
+invalid, emits a warning, and skips the rule. Use `rules: []` or
+`enabled: false` to disable cleanup explicitly. The default manifest is used
+only when no override file is present.
 
 ## Cycle phases
 

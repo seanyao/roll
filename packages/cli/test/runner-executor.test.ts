@@ -3384,6 +3384,67 @@ describe("executeCommand — command → executor mapping", () => {
     });
   });
 
+  it("US-LOOP-088: cleanup_environment skips when the worktree resolves to the main checkout", async () => {
+    const repo = mkdtempSync(join(tmpdir(), "roll-cleanup-main-guard-"));
+    execDirs.push(repo);
+    mkdirSync(join(repo, ".scratch"), { recursive: true });
+    writeFileSync(join(repo, ".scratch", "leftover.tmp"), "junk", "utf8");
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      paths: { ...base.ports.paths, worktreePath: repo },
+    });
+
+    await executeCommand({ kind: "cleanup_environment" }, ports, CTX);
+
+    expect(existsSync(join(repo, ".scratch", "leftover.tmp"))).toBe(true);
+    const events = (calls["event"] ?? []) as [string, RollEvent][];
+    const guardEvent = events.find(([, ev]) => ev.type === "cycle:cleanup" && ev.rule === "cleanup-main-checkout-guard");
+    expect(guardEvent?.[1]).toMatchObject({
+      type: "cycle:cleanup",
+      cycleId: CTX.cycleId,
+      ok: true,
+      warning: "skipped cleanup because worktreePath resolves to repoCwd",
+    });
+  });
+
+  it("US-LOOP-088: cleanup failures append an alert and count as harness env-cleanup observations without pausing", async () => {
+    const repo = mkdtempSync(join(tmpdir(), "roll-cleanup-alert-"));
+    const wt = join(repo, "wt");
+    const rt = join(repo, ".roll", "loop");
+    execDirs.push(repo);
+    mkdirSync(join(repo, ".roll", "loop"), { recursive: true });
+    mkdirSync(wt, { recursive: true });
+    writeFileSync(
+      join(repo, ".roll", "loop", "cleanup-manifest.yaml"),
+      "rules:\n  - name: escape\n    kind: rm\n    paths:\n      - ../outside\n",
+      "utf8",
+    );
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      paths: {
+        ...base.ports.paths,
+        worktreePath: wt,
+        eventsPath: join(rt, "events.ndjson"),
+        alertsPath: join(rt, "ALERT.md"),
+      },
+    });
+
+    await executeCommand({ kind: "cleanup_environment" }, ports, CTX);
+
+    const alerts = (calls["alert"] ?? []).map((a) => (a as unknown[])[1]).join("\n");
+    expect(alerts).toContain("environment cleanup warning");
+    expect(alerts).toContain("escape");
+    expect(alerts).toContain("outside worktree");
+    const state = JSON.parse(readFileSync(join(rt, "failure-attribution.json"), "utf8")) as {
+      causes: Record<string, { timestamps: number[]; failureClass: string }>;
+    };
+    expect(state.causes["harness:env_cleanup"]).toMatchObject({ failureClass: "harness" });
+    expect(state.causes["harness:env_cleanup"]?.timestamps).toHaveLength(1);
+    expect(existsSync(join(repo, ".roll", "loop", `PAUSE-${CTX.cycleId}`))).toBe(false);
+  });
+
   it("cleanup_worktree calls the git remove port", async () => {
     const { ports } = fakePorts();
     await executeCommand({ kind: "cleanup_worktree", branch: "b" }, ports, CTX);

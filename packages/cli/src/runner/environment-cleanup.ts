@@ -40,7 +40,11 @@ export interface CleanupResult {
 /** Parsed project override or default manifest. */
 export interface CleanupManifest {
   version: number;
+  /** Explicit false disables cleanup for projects that want no post-cycle cleanup. */
+  enabled?: boolean;
   rules: CleanupRule[];
+  /** Parse-time warnings that should be emitted as cleanup observations. */
+  warnings?: CleanupResult[];
 }
 
 /** Overall cleanup budget. Terminal recording and lock release must never wait longer. */
@@ -86,32 +90,76 @@ export interface CleanupOptions {
 
 /**
  * Read a project-level cleanup manifest, if present. Returns `undefined` when the
- * file is missing or unreadable so the caller can fall back to the default.
+ * file is missing so the caller can fall back to the default.
  */
 export function readCleanupManifest(manifestPath: string): CleanupManifest | undefined {
   let text: string;
   try {
     text = readFileSync(manifestPath, "utf8");
-  } catch {
-    return undefined;
+  } catch (error) {
+    const code = (error as { code?: unknown }).code;
+    if (code === "ENOENT") return undefined;
+    return {
+      version: 1,
+      enabled: false,
+      rules: [],
+      warnings: [{ rule: "cleanup-manifest", path: manifestPath, ok: false, warning: `cannot read cleanup manifest: ${String(error)}` }],
+    };
   }
-  return parseCleanupManifest(text);
+  return parseCleanupManifest(text) ?? {
+    version: 1,
+    enabled: false,
+    rules: [],
+    warnings: [{ rule: "cleanup-manifest", path: manifestPath, ok: false, warning: "cleanup manifest has no valid rules" }],
+  };
 }
 
 /** Parse a YAML-ish manifest string. Keeps the parser tiny and dependency-free. */
 export function parseCleanupManifest(text: string): CleanupManifest | undefined {
   const lines = text.split(/\r?\n/);
   const rules: CleanupRule[] = [];
+  const warnings: CleanupResult[] = [];
   let current: Partial<CleanupRule> | undefined;
   let inPaths = false;
   let inTerminalStatuses = false;
+  let enabled: boolean | undefined;
+  let explicitRules = false;
+
+  const finishRule = (): void => {
+    if (!(current?.name && current.kind && current.paths)) return;
+    const invalidPath = current.paths.find((path) => invalidGlobSuffix(path) !== undefined);
+    if (invalidPath !== undefined) {
+      warnings.push({
+        rule: current.name,
+        path: invalidPath,
+        ok: false,
+        warning: `invalid cleanup rule: '*' is not supported in recursive suffix '${invalidGlobSuffix(invalidPath) ?? ""}'`,
+      });
+      return;
+    }
+    rules.push(current as CleanupRule);
+  };
 
   for (let raw of lines) {
     const line = (raw.split("#")[0] ?? raw).trimEnd();
     const trim = line.trim();
     if (trim === "" || trim.startsWith("#")) continue;
 
+    const enabledMatch = /^enabled:\s*(true|false)$/.exec(trim);
+    if (enabledMatch) {
+      enabled = enabledMatch[1] === "true";
+      continue;
+    }
+
+    if (trim === "rules: []") {
+      explicitRules = true;
+      inPaths = false;
+      inTerminalStatuses = false;
+      continue;
+    }
+
     if (trim === "rules:") {
+      explicitRules = true;
       inPaths = false;
       inTerminalStatuses = false;
       continue;
@@ -119,9 +167,7 @@ export function parseCleanupManifest(text: string): CleanupManifest | undefined 
 
     const nameMatch = /^-\s*name:\s*(.+)$/.exec(trim);
     if (nameMatch) {
-      if (current?.name && current.kind && current.paths) {
-        rules.push(current as CleanupRule);
-      }
+      finishRule();
       current = { name: nameMatch[1]?.trim() ?? "", paths: [] };
       inPaths = false;
       inTerminalStatuses = false;
@@ -151,22 +197,46 @@ export function parseCleanupManifest(text: string): CleanupManifest | undefined 
 
     const pathItemMatch = /^\s+-\s*(.+)$/.exec(line);
     if (pathItemMatch && current && inPaths) {
-      current.paths!.push(pathItemMatch[1]?.trim() ?? "");
+      current.paths!.push(unquoteScalar(pathItemMatch[1]?.trim() ?? ""));
       continue;
     }
 
     if (pathItemMatch && current && inTerminalStatuses) {
-      const status = pathItemMatch[1]?.trim();
+      const status = unquoteScalar(pathItemMatch[1]?.trim() ?? "");
       if (isV2CycleStatus(status)) current.terminalStatuses!.push(status);
       continue;
     }
   }
 
-  if (current?.name && current.kind && current.paths) {
-    rules.push(current as CleanupRule);
+  finishRule();
+
+  if (enabled === false) {
+    return {
+      version: 1,
+      enabled: false,
+      rules: [],
+      warnings: [{ rule: "cleanup-manifest", path: ".", ok: true, warning: "cleanup disabled by manifest" }, ...warnings],
+    };
   }
 
-  return rules.length > 0 ? { version: 1, rules } : undefined;
+  if (rules.length > 0 || warnings.length > 0 || explicitRules) {
+    return { version: 1, rules, ...(warnings.length > 0 ? { warnings } : {}) };
+  }
+  return undefined;
+}
+
+function unquoteScalar(value: string): string {
+  if (value.length >= 2 && ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'")))) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
+function invalidGlobSuffix(pattern: string): string | undefined {
+  const recursiveIdx = pattern.indexOf("**");
+  if (recursiveIdx < 0) return undefined;
+  const suffix = pattern.slice(recursiveIdx + 2).replace(/^\//, "");
+  return suffix.includes("*") ? suffix : undefined;
 }
 
 function isV2CycleStatus(value: string | undefined): value is V2CycleStatus {
@@ -204,8 +274,23 @@ export function applyCleanupManifest(
   const deadline = started + maxDurationMs;
   const now = opts.nowMs ?? Date.now;
   let timedOut = false;
+  if (manifest.enabled === false || manifest.rules.length === 0) {
+    results.push(...(manifest.warnings ?? [{ rule: "cleanup-manifest", path: ".", ok: true, warning: "cleanup disabled by manifest" }]));
+    return results;
+  }
+  results.push(...(manifest.warnings ?? []));
   for (const rule of manifest.rules) {
     if (timedOut) break;
+    const invalidSuffix = rule.paths.map(invalidGlobSuffix).find((suffix): suffix is string => suffix !== undefined);
+    if (invalidSuffix !== undefined) {
+      results.push({
+        rule: rule.name,
+        path: ".",
+        ok: false,
+        warning: `invalid cleanup rule: '*' is not supported in recursive suffix '${invalidSuffix}'`,
+      });
+      continue;
+    }
     if (opts.terminalStatus !== undefined && rule.terminalStatuses !== undefined && !rule.terminalStatuses.includes(opts.terminalStatus)) {
       results.push({
         rule: rule.name,
@@ -257,9 +342,9 @@ function resolvePattern(worktreePath: string, pattern: string, deadline: number,
     return [abs];
   }
   // Minimal glob support: `prefix/**/suffix` recursively searches prefix.
-  const parts = pattern.split("**", 2);
-  const prefix = parts[0] ?? "";
-  const rest = parts[1];
+  const recursiveIdx = pattern.indexOf("**");
+  const prefix = pattern.slice(0, recursiveIdx);
+  const rest = pattern.slice(recursiveIdx + 2);
   const base = join(worktreePath, prefix);
   if (!existsSync(base)) return [];
   const suffix = rest?.replace(/^\//, "") ?? "";

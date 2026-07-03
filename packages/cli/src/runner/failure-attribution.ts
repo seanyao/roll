@@ -1,6 +1,7 @@
 import type { FailureClass } from "@roll/spec";
 import { parseEventLine, type RollEvent } from "@roll/spec";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { EventBus } from "@roll/core";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export type { FailureClass };
@@ -89,22 +90,50 @@ function hasUsage(input: FailureAttributionInput): boolean {
   return (input.tokensIn ?? 0) > 0 || (input.tokensOut ?? 0) > 0;
 }
 
-function rootForEnvSource(source: string): string | null {
-  if (source.includes("sandbox:main_dirty")) return "env:main_dirty";
-  if (source.includes("sandbox:quarantined") || source.includes("sandbox:write_protected")) return "env:sandbox";
-  if (source.includes("worktree")) return "env:worktree";
-  if (source.includes("auth") || source.includes("credential")) return "env:auth";
-  if (source.includes("network") || source.includes("vendor") || source.includes("provider")) return "env:network";
-  return null;
+interface SourceRootRule {
+  readonly match: "exact" | "prefix";
+  readonly source: string;
+  readonly failureClass: "env" | "harness";
+  readonly rootCauseKey: string;
 }
 
-function rootForHarnessSource(source: string): string | null {
-  if (source.includes("pair:score-failure") || source.includes("score")) return "harness:score_parse";
-  if (source.includes("attest")) return "harness:attest_render";
-  if (source.includes("publish") || source.includes("pr:") || source.includes("gh ")) return "harness:publish";
-  if (source.includes("rescue") || source.includes("quarantine")) return "harness:rescue";
-  if (source.includes("roll-component") || source.includes("harness-component")) return "harness:component";
-  return null;
+const SOURCE_ROOT_RULES: readonly SourceRootRule[] = [
+  // Sandbox events/flags emitted by classifyCycleFailure for main checkout guards.
+  { match: "exact", source: "sandbox:main_dirty", failureClass: "env", rootCauseKey: "env:main_dirty" },
+  { match: "exact", source: "sandbox:quarantined", failureClass: "env", rootCauseKey: "env:sandbox" },
+  { match: "exact", source: "sandbox:write_protected", failureClass: "env", rootCauseKey: "env:sandbox" },
+  // Agent block envelopes emitted from agent:blocked events.
+  { match: "exact", source: "agent:auth", failureClass: "env", rootCauseKey: "env:auth" },
+  { match: "exact", source: "agent:network", failureClass: "env", rootCauseKey: "env:network" },
+  // Legacy direct source labels accepted before stage fallback existed.
+  { match: "exact", source: "worktree", failureClass: "env", rootCauseKey: "env:worktree" },
+  { match: "prefix", source: "worktree:", failureClass: "env", rootCauseKey: "env:worktree" },
+  { match: "exact", source: "auth", failureClass: "env", rootCauseKey: "env:auth" },
+  { match: "prefix", source: "auth:", failureClass: "env", rootCauseKey: "env:auth" },
+  { match: "exact", source: "credential", failureClass: "env", rootCauseKey: "env:auth" },
+  { match: "prefix", source: "credential:", failureClass: "env", rootCauseKey: "env:auth" },
+  { match: "exact", source: "network", failureClass: "env", rootCauseKey: "env:network" },
+  { match: "prefix", source: "network:", failureClass: "env", rootCauseKey: "env:network" },
+  { match: "exact", source: "vendor", failureClass: "env", rootCauseKey: "env:network" },
+  { match: "prefix", source: "vendor:", failureClass: "env", rootCauseKey: "env:network" },
+  { match: "exact", source: "provider", failureClass: "env", rootCauseKey: "env:network" },
+  { match: "prefix", source: "provider:", failureClass: "env", rootCauseKey: "env:network" },
+  // Harness events emitted by scoring, attest, publish, rescue, and component guards.
+  { match: "exact", source: "pair:score-failure", failureClass: "harness", rootCauseKey: "harness:score_parse" },
+  { match: "exact", source: "attest", failureClass: "harness", rootCauseKey: "harness:attest_render" },
+  { match: "prefix", source: "attest:", failureClass: "harness", rootCauseKey: "harness:attest_render" },
+  { match: "exact", source: "publish", failureClass: "harness", rootCauseKey: "harness:publish" },
+  { match: "prefix", source: "publish:", failureClass: "harness", rootCauseKey: "harness:publish" },
+  { match: "prefix", source: "pr:", failureClass: "harness", rootCauseKey: "harness:publish" },
+  { match: "prefix", source: "gh ", failureClass: "harness", rootCauseKey: "harness:publish" },
+  { match: "exact", source: "cycle:rescue", failureClass: "harness", rootCauseKey: "harness:rescue" },
+  { match: "prefix", source: "roll-component:", failureClass: "harness", rootCauseKey: "harness:component" },
+  { match: "prefix", source: "harness-component:", failureClass: "harness", rootCauseKey: "harness:component" },
+];
+
+function rootForKnownSource(source: string): Pick<FailureAttribution, "failureClass" | "rootCauseKey"> | null {
+  const rule = SOURCE_ROOT_RULES.find((candidate) => (candidate.match === "exact" ? source === candidate.source : source.startsWith(candidate.source)));
+  return rule === undefined ? null : { failureClass: rule.failureClass, rootCauseKey: rule.rootCauseKey };
 }
 
 function isAgentCliSpawnFailure(input: FailureAttributionInput, source: string): boolean {
@@ -113,7 +142,8 @@ function isAgentCliSpawnFailure(input: FailureAttributionInput, source: string):
   if (input.sawAgentOutput === true) return false;
   const stderr = normalizedSource(input.stderr ?? "");
   return (
-    source.includes("agent-cli") ||
+    source === "agent-cli" ||
+    source.startsWith("agent-cli:") ||
     stderr.includes("command not found") ||
     stderr.includes("no such file") ||
     stderr.includes("permission denied") ||
@@ -123,10 +153,8 @@ function isAgentCliSpawnFailure(input: FailureAttributionInput, source: string):
 
 export function classifyFailure(input: FailureAttributionInput): FailureAttribution {
   const source = normalizedSource(input.source);
-  const envSourceRoot = rootForEnvSource(source);
-  if (envSourceRoot !== null) {
-    return { failureClass: "env", rootCauseKey: envSourceRoot, confidence: "envelope" };
-  }
+  const sourceRoot = rootForKnownSource(source);
+  if (sourceRoot !== null) return { ...sourceRoot, confidence: "envelope" };
 
   const envStageRoot = ENV_STAGE_ROOT[input.stage];
   if (envStageRoot !== undefined) {
@@ -135,11 +163,6 @@ export function classifyFailure(input: FailureAttributionInput): FailureAttribut
 
   if (isAgentCliSpawnFailure(input, source)) {
     return { failureClass: "env", rootCauseKey: "env:agent_cli_spawn", confidence: "envelope" };
-  }
-
-  const harnessSourceRoot = rootForHarnessSource(source);
-  if (harnessSourceRoot !== null) {
-    return { failureClass: "harness", rootCauseKey: harnessSourceRoot, confidence: "envelope" };
   }
 
   const harnessStageRoot = HARNESS_STAGE_ROOT[input.stage];
@@ -176,24 +199,31 @@ export function readCycleEvents(eventsPath: string, cycleId: string): RollEvent[
 
 export function classifyCycleFailure(input: CycleFailureAttributionInput): FailureAttribution {
   const events = input.events ?? [];
+  const hasAgentWorkEvidence = (input.tcrCount ?? 0) > 0 || (input.tokensIn ?? 0) > 0 || (input.tokensOut ?? 0) > 0;
   const recorded = events.find((event) => {
     const rec = event as unknown as Record<string, unknown>;
     return event.type === "cycle:end" && typeof rec["failure_class"] === "string";
   });
-  if (recorded !== undefined) {
+  const recordedAttribution = (): FailureAttribution | null => {
+    if (recorded === undefined) return null;
     const rec = recorded as unknown as Record<string, unknown>;
     const cls = rec["failure_class"];
     const root = rec["root_cause_key"];
     if ((cls === "env" || cls === "harness" || cls === "card" || cls === "unknown") && typeof root === "string") {
       return { failureClass: cls, rootCauseKey: root, confidence: cls === "unknown" ? "unknown" : "envelope" };
     }
+    return null;
+  };
+  const hasReplayEvidence = hasAgentWorkEvidence || events.some((event) => event.type !== "cycle:end");
+  if (events.some((event) => event.type === "builder:boundary_violation")) {
+    return { failureClass: "env", rootCauseKey: "env:sandbox", confidence: "envelope" };
   }
   const sandboxDirty = events.find((event) => event.type === "sandbox:main_dirty");
-  if (sandboxDirty !== undefined) {
+  if (sandboxDirty !== undefined && !hasAgentWorkEvidence) {
     return classifyFailure({ stage: sandboxDirty.phase, source: "sandbox:main_dirty", tcrCount: input.tcrCount });
   }
   const sandboxQuarantine = events.find((event) => event.type === "sandbox:quarantined");
-  if (sandboxQuarantine !== undefined) {
+  if (sandboxQuarantine !== undefined && !hasAgentWorkEvidence) {
     return classifyFailure({ stage: sandboxQuarantine.phase, source: "sandbox:quarantined", tcrCount: input.tcrCount });
   }
   const blocked = events.find((event) => event.type === "agent:blocked");
@@ -206,13 +236,7 @@ export function classifyCycleFailure(input: CycleFailureAttributionInput): Failu
   if (events.some((event) => event.type === "cycle:rescue")) {
     return classifyFailure({ stage: "rescue", source: "cycle:rescue", tcrCount: input.tcrCount });
   }
-  if (input.mainDirty === true) {
-    return classifyFailure({ stage: "preflight", source: "sandbox:main_dirty", tcrCount: input.tcrCount });
-  }
-  if (input.agentInternalFailure === true) {
-    return classifyFailure({ stage: "build", source: "harness-component:agent_internal", tcrCount: input.tcrCount });
-  }
-  if ((input.tcrCount ?? 0) > 0 || (input.tokensIn ?? 0) > 0 || (input.tokensOut ?? 0) > 0) {
+  if (hasAgentWorkEvidence) {
     return classifyFailure({
       stage: "build",
       source: "agent",
@@ -220,6 +244,16 @@ export function classifyCycleFailure(input: CycleFailureAttributionInput): Failu
       tokensIn: input.tokensIn,
       tokensOut: input.tokensOut,
     });
+  }
+  if (input.mainDirty === true) {
+    return classifyFailure({ stage: "preflight", source: "sandbox:main_dirty", tcrCount: input.tcrCount });
+  }
+  if (input.agentInternalFailure === true) {
+    return classifyFailure({ stage: "build", source: "harness-component:agent_internal", tcrCount: input.tcrCount });
+  }
+  if (!hasReplayEvidence) {
+    const fallback = recordedAttribution();
+    if (fallback !== null) return fallback;
   }
   if (input.terminal === "failed" || input.terminal === "blocked" || input.terminal === "gave_up") {
     return classifyFailure({ stage: "terminal", source: UNKNOWN_FALLBACK_SOURCE });
@@ -235,13 +269,34 @@ function diagnosticsDir(runtimeDir: string): string {
   return join(runtimeDir, "diagnostics");
 }
 
-function readRootCauseState(runtimeDir: string): RootCauseState {
+function emitFailureAttributionAlert(runtimeDir: string, message: string, nowMs = Date.now()): void {
   try {
-    if (!existsSync(statePath(runtimeDir))) return { causes: {} };
-    const parsed = JSON.parse(readFileSync(statePath(runtimeDir), "utf8")) as unknown;
-    if (parsed === null || typeof parsed !== "object") return { causes: {} };
+    mkdirSync(runtimeDir, { recursive: true });
+    new EventBus().appendEvent(join(runtimeDir, "events.ndjson"), {
+      type: "alert:notify",
+      channel: "failure-attribution",
+      message,
+      ts: Math.floor(nowMs / 1000),
+    });
+  } catch {
+    process.stderr.write(`roll failure-attribution alert failed: ${message}\n`);
+  }
+}
+
+function readRootCauseState(runtimeDir: string): RootCauseState {
+  const path = statePath(runtimeDir);
+  try {
+    if (!existsSync(path)) return { causes: {} };
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    if (parsed === null || typeof parsed !== "object") {
+      emitFailureAttributionAlert(runtimeDir, "failure-attribution state reset: invalid state object");
+      return { causes: {} };
+    }
     const causesRaw = (parsed as Record<string, unknown>)["causes"];
-    if (causesRaw === null || typeof causesRaw !== "object") return { causes: {} };
+    if (causesRaw === null || typeof causesRaw !== "object") {
+      emitFailureAttributionAlert(runtimeDir, "failure-attribution state reset: invalid causes object");
+      return { causes: {} };
+    }
 
     const causes: RootCauseState["causes"] = {};
     for (const [key, value] of Object.entries(causesRaw as Record<string, unknown>)) {
@@ -257,7 +312,9 @@ function readRootCauseState(runtimeDir: string): RootCauseState {
       causes[key] = { timestamps: validTimestamps, lastCycleId, failureClass };
     }
     return { causes };
-  } catch {
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    emitFailureAttributionAlert(runtimeDir, `failure-attribution state reset: ${reason}`);
     return { causes: {} };
   }
 }
@@ -271,11 +328,15 @@ export function clearRootCauseFailure(runtimeDir: string, rootCauseKey: string):
 }
 
 function writeRootCauseState(runtimeDir: string, state: RootCauseState): void {
+  const path = statePath(runtimeDir);
+  const tmp = join(runtimeDir, `.failure-attribution.${process.pid}.${Date.now()}.tmp`);
   try {
     mkdirSync(runtimeDir, { recursive: true });
-    writeFileSync(statePath(runtimeDir), JSON.stringify(state, null, 2), "utf8");
-  } catch {
-    /* best-effort; a missed counter just retries next cycle */
+    writeFileSync(tmp, JSON.stringify(state, null, 2), "utf8");
+    renameSync(tmp, path);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    emitFailureAttributionAlert(runtimeDir, `failure-attribution state write failed: ${reason}`);
   }
 }
 

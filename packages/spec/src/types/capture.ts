@@ -1,4 +1,5 @@
-import { isAbsolute, resolve, sep } from "node:path";
+import { realpathSync } from "node:fs";
+import { dirname, isAbsolute, resolve, sep } from "node:path";
 import type { JsonSchema } from "./json-schema.js";
 import type { ToolDeclaration } from "./tool.js";
 
@@ -113,20 +114,26 @@ export const rollCaptureRequestV1Schema: JsonSchema = objectSchema(
   ["protocol", "requestId", "kind", "target", "out", "timeoutMs", "createdAt"],
 );
 
-export const rollCaptureResponseV1Schema: JsonSchema = objectSchema(
-  {
-    protocol: { const: ROLL_CAPTURE_PROTOCOL_V1 },
-    requestId: nonEmptyStringSchema,
-    status: captureStatusSchema,
-    screenshotPath: stringSchema,
-    responsePath: nonEmptyStringSchema,
-    reason: stringSchema,
-    host: captureHostSchema,
-    startedAt: nonEmptyStringSchema,
-    finishedAt: nonEmptyStringSchema,
-  },
-  ["protocol", "requestId", "status", "responsePath", "host", "startedAt", "finishedAt"],
-);
+const captureResponseProperties = {
+  protocol: { const: ROLL_CAPTURE_PROTOCOL_V1 },
+  requestId: nonEmptyStringSchema,
+  screenshotPath: stringSchema,
+  responsePath: nonEmptyStringSchema,
+  reason: stringSchema,
+  host: captureHostSchema,
+  startedAt: nonEmptyStringSchema,
+  finishedAt: nonEmptyStringSchema,
+} satisfies Readonly<Record<string, JsonSchema>>;
+
+const captureResponseRequired = ["protocol", "requestId", "status", "responsePath", "host", "startedAt", "finishedAt"] as const;
+
+export const rollCaptureResponseV1Schema: JsonSchema = {
+  oneOf: [
+    objectSchema({ ...captureResponseProperties, status: { const: "taken" } }, [...captureResponseRequired, "screenshotPath"]),
+    objectSchema({ ...captureResponseProperties, status: { const: "skipped" } }, [...captureResponseRequired, "reason"]),
+    objectSchema({ ...captureResponseProperties, status: { const: "failed" } }, [...captureResponseRequired, "reason"]),
+  ],
+};
 
 export const captureLedgerEntrySchema: JsonSchema = objectSchema(
   {
@@ -254,6 +261,12 @@ export function validateRollCaptureResponseV1(
   if (response.requestId !== request.requestId) {
     errors.push(`response id "${response.requestId}" does not match request id "${request.requestId}"`);
   }
+  if (response.status === "taken" && (response.screenshotPath === undefined || response.screenshotPath.length === 0)) {
+    errors.push("taken response requires screenshotPath");
+  }
+  if (response.status !== "taken" && (response.reason === undefined || response.reason.length === 0)) {
+    errors.push(`${response.status} response requires reason`);
+  }
   return errors.length === 0 ? { ok: true, errors: [] } : { ok: false, errors };
 }
 
@@ -272,6 +285,9 @@ function validateTarget(target: CaptureTarget): string[] {
   if (target.type === "window" && target.appName.trim().length === 0) {
     return ["unsupported target: window target requires a non-empty appName"];
   }
+  if (target.type === "region" && (!Number.isInteger(target.x) || !Number.isInteger(target.y) || !Number.isInteger(target.width) || !Number.isInteger(target.height))) {
+    return [`unsupported target: region target requires integer x/y/width/height, got ${target.x},${target.y},${target.width},${target.height}`];
+  }
   if (target.type === "region" && (target.width <= 0 || target.height <= 0)) {
     return [`unsupported target: region target requires positive width and height, got ${target.width}x${target.height}`];
   }
@@ -282,12 +298,20 @@ function validateOutputPath(out: string, projectRoot: string): string[] {
   if (out.length === 0) return ["unsafe output path: empty"];
   if (!isAbsolute(out)) return [`unsafe output path: must be an absolute path, got "${out}"`];
   if (out.split(/[\\/]+/u).includes("..")) return ['unsafe output path: must not contain a ".." component'];
-  const rollRoot = withTrailingSeparator(resolve(projectRoot, ".roll"));
-  const candidate = withTrailingSeparator(resolve(out));
-  if (candidate !== rollRoot && !candidate.startsWith(rollRoot)) {
+  const rollRoot = withTrailingSeparator(realpathIfPossible(resolve(projectRoot, ".roll")));
+  const candidateParent = withTrailingSeparator(realpathIfPossible(dirname(resolve(out))));
+  if (candidateParent !== rollRoot && !candidateParent.startsWith(rollRoot)) {
     return [`unsafe output path: must be inside project .roll (${resolve(projectRoot, ".roll")})`];
   }
   return [];
+}
+
+function realpathIfPossible(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
 }
 
 function parseCaptureTarget(value: unknown): CaptureTarget | null {

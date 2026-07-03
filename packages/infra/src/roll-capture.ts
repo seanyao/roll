@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type { RollCaptureRequestV1, RollCaptureResponseV1 } from "@roll/spec";
@@ -25,26 +25,45 @@ export interface RollCaptureProviderPort {
 export type RollCaptureProviderOptions = {
   root?: string;
   defaultPollIntervalMs?: number;
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
 };
 
 const DEFAULT_POLL_INTERVAL_MS = 250;
+
+export type RollCaptureResponseReadProblem =
+  | { stage: "read"; error: unknown }
+  | { stage: "parse"; error: unknown }
+  | { stage: "shape"; value: unknown; request: RollCaptureRequestV1 };
+
+export type RollCaptureResponseReadProblemClassification = {
+  kind: "transient" | "terminal";
+  reason: string;
+};
 
 export class RollCaptureProvider implements RollCaptureProviderPort {
   readonly root: string;
   readonly inbox: string;
   readonly responses: string;
   private readonly defaultPollIntervalMs: number;
+  private readonly now: () => number;
+  private readonly sleep: (ms: number) => Promise<void>;
 
   constructor(options: RollCaptureProviderOptions = {}) {
     this.root = options.root ?? defaultRollCaptureRoot();
     this.inbox = join(this.root, "inbox");
     this.responses = join(this.root, "responses");
     this.defaultPollIntervalMs = options.defaultPollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+    this.now = options.now ?? Date.now;
+    this.sleep = options.sleep ?? sleep;
   }
 
   async writeRequest(request: RollCaptureRequestV1): Promise<void> {
     await this.ensureLayout();
     const path = this.requestPath(request.requestId);
+    if ((await fileExists(path)) || (await fileExists(this.responsePath(request.requestId)))) {
+      throw new Error(`duplicate_request_id: ${request.requestId}`);
+    }
     await writeAtomically(JSON.stringify(request, null, 2) + "\n", path);
   }
 
@@ -61,12 +80,12 @@ export class RollCaptureProvider implements RollCaptureProviderPort {
     try {
       value = JSON.parse(raw);
     } catch (error) {
-      throw new Error(`malformed response JSON: ${error instanceof Error ? error.message : String(error)}`);
+      throw new RollCaptureResponseReadError(classifyRollCaptureResponseReadProblem({ stage: "parse", error }));
     }
     const response = parseRollCaptureResponseV1(value);
-    if (response === null) throw new Error(responseShapeReason(value, request));
+    if (response === null) throw new RollCaptureResponseReadError(classifyRollCaptureResponseReadProblem({ stage: "shape", value, request }));
     const validation = validateRollCaptureResponseV1(response, request);
-    if (!validation.ok) throw new Error(validation.errors.join("; "));
+    if (!validation.ok) throw new RollCaptureResponseReadError({ kind: "terminal", reason: validation.errors.join("; ") });
     return response;
   }
 
@@ -74,19 +93,25 @@ export class RollCaptureProvider implements RollCaptureProviderPort {
     await this.ensureLayout();
     const timeoutMs = Math.max(0, options.timeoutMs);
     const pollIntervalMs = Math.max(1, options.pollIntervalMs ?? this.defaultPollIntervalMs);
-    const startedAt = Date.now();
+    const startedAt = this.now();
     const deadline = startedAt + timeoutMs;
 
-    while (Date.now() <= deadline) {
+    while (this.now() <= deadline) {
       try {
         const response = await this.readResponse(request);
         if (response !== null) return resultFromResponse(response);
       } catch (error) {
+        if (error instanceof RollCaptureResponseReadError && error.classification.kind === "transient") {
+          const remainingMs = deadline - this.now();
+          if (remainingMs <= 0) break;
+          await this.sleep(Math.min(pollIntervalMs, remainingMs));
+          continue;
+        }
         return { status: "failed", reason: error instanceof Error ? error.message : String(error), response: failedResponse(request, this.responsePath(request.requestId), error) };
       }
-      const remainingMs = deadline - Date.now();
+      const remainingMs = deadline - this.now();
       if (remainingMs <= 0) break;
-      await sleep(Math.min(pollIntervalMs, remainingMs));
+      await this.sleep(Math.min(pollIntervalMs, remainingMs));
     }
 
     return {
@@ -113,6 +138,42 @@ export function defaultRollCaptureRoot(home = homedir()): string {
   return join(home, "Library", "Application Support", "Roll Capture");
 }
 
+export function classifyRollCaptureResponseReadProblem(problem: RollCaptureResponseReadProblem): RollCaptureResponseReadProblemClassification {
+  if (problem.stage === "read") {
+    if (isNodeError(problem.error) && problem.error.code === "ENOENT") return { kind: "transient", reason: "response file is not ready yet" };
+    return { kind: "terminal", reason: problem.error instanceof Error ? problem.error.message : String(problem.error) };
+  }
+  if (problem.stage === "parse") {
+    return { kind: "transient", reason: `malformed response JSON: ${problem.error instanceof Error ? problem.error.message : String(problem.error)}` };
+  }
+
+  const value = problem.value;
+  if (!isRecord(value)) return { kind: "terminal", reason: "response JSON must be an object" };
+  const protocol = value["protocol"];
+  if (protocol !== problem.request.protocol) {
+    return { kind: "terminal", reason: `response protocol "${String(protocol)}" does not match request protocol "${problem.request.protocol}"` };
+  }
+  const requestId = value["requestId"];
+  if (requestId !== problem.request.requestId) {
+    return { kind: "terminal", reason: `response id "${String(requestId)}" does not match request id "${problem.request.requestId}"` };
+  }
+  const status = value["status"];
+  if (status !== "taken" && status !== "skipped" && status !== "failed") {
+    return { kind: "terminal", reason: `response status "${String(status)}" is not one of taken, skipped, failed` };
+  }
+  return { kind: "terminal", reason: "response JSON does not match roll.capture.v1 schema" };
+}
+
+class RollCaptureResponseReadError extends Error {
+  readonly classification: RollCaptureResponseReadProblemClassification;
+
+  constructor(classification: RollCaptureResponseReadProblemClassification) {
+    super(classification.reason);
+    this.name = "RollCaptureResponseReadError";
+    this.classification = classification;
+  }
+}
+
 async function writeAtomically(data: string, path: string): Promise<void> {
   const directory = dirname(path);
   await mkdir(directory, { recursive: true });
@@ -122,6 +183,16 @@ async function writeAtomically(data: string, path: string): Promise<void> {
     await rename(tempPath, path);
   } catch (error) {
     await rm(tempPath, { force: true });
+    throw error;
+  }
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") return false;
     throw error;
   }
 }
@@ -137,15 +208,6 @@ function resultFromResponse(response: RollCaptureResponseV1): RollCaptureProvide
     return { status: "skipped", reason: response.reason ?? "Roll Capture skipped without a reason", response };
   }
   return { status: "failed", reason: response.reason ?? "Roll Capture failed without a reason", response };
-}
-
-function responseShapeReason(value: unknown, request: RollCaptureRequestV1): string {
-  if (!isRecord(value)) return "response JSON must be an object";
-  const protocol = value["protocol"];
-  if (protocol !== request.protocol) return `response protocol "${String(protocol)}" does not match request protocol "${request.protocol}"`;
-  const requestId = value["requestId"];
-  if (requestId !== request.requestId) return `response id "${String(requestId)}" does not match request id "${request.requestId}"`;
-  return "response JSON does not match roll.capture.v1 schema";
 }
 
 function failedResponse(request: RollCaptureRequestV1, responsePath: string, error: unknown): RollCaptureResponseV1 {

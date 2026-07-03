@@ -218,9 +218,18 @@ describe("US-GOAL-002 — roll loop go", () => {
         ".roll/loop/runs.jsonl",
         ".roll/loop/deliveries.jsonl",
         ".roll/features/loop-engine/FIX-1203/20260703-010203-1/evidence.json",
+        ".roll/features/loop-engine/FIX-1203/20260703-010203-1/screenshots/proof.png",
         ".roll/features/loop-engine/FIX-1203/ac-map.json",
       ]),
     ).toMatchObject({ kind: "none", files: [] });
+    expect(classifyBootstrapArtifacts([".roll/features/loop-engine/FIX-1203/latest-notes.md"])).toMatchObject({
+      kind: "bootstrap_only",
+      files: [".roll/features/loop-engine/FIX-1203/latest-notes.md"],
+    });
+    expect(classifyBootstrapArtifacts([".roll/features/loop-engine/FIX-1203/20260703-010203-1/user-patch.txt"])).toMatchObject({
+      kind: "bootstrap_only",
+      files: [".roll/features/loop-engine/FIX-1203/20260703-010203-1/user-patch.txt"],
+    });
     expect(classifyBootstrapArtifacts(["AGENTS.md"])).toMatchObject({ kind: "bootstrap_only", files: ["AGENTS.md"] });
   });
 

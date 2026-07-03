@@ -552,8 +552,8 @@
   "zh": "正在应用 onboard 计划..."
  },
  "init.added_roll_to_gitignore": {
-  "en": "Added .roll/ to .gitignore",
-  "zh": "已将 .roll/ 加入 .gitignore"
+  "en": "Added Roll runtime ignores to .gitignore",
+  "zh": "已将 Roll 运行时忽略项加入 .gitignore"
  },
  "init.syncing_conventions_to_ai_tools": {
   "en": "Syncing conventions to AI tools...",

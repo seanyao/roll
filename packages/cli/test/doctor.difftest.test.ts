@@ -192,7 +192,7 @@ describe("frozen: roll doctor", () => {
     seedCatalog(e.pkg!);
     const rendered = scrub(tsDoctor(e), e).stdout;
     expect(rendered).toContain("Roll generated-file ignore list");
-    expect(rendered).toContain("Recommended .gitignore additions: .pi/ .kimi/ .kimi-code/ .reasonix/");
+    expect(rendered).toContain("Recommended .gitignore additions: .roll/loop/ .pi/ .kimi/ .kimi-code/ .reasonix/");
   });
 
   it("healthy: git repo + config + matching skills + empty launchd (en)", () => {

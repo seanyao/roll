@@ -3175,7 +3175,8 @@ describe("executeCommand — command → executor mapping", () => {
     execFileSync("git", ["config", "user.email", "test@roll.local"], { cwd: repo });
     execFileSync("git", ["config", "user.name", "Test"], { cwd: repo });
     writeFileSync(join(repo, "README.md"), "base\n");
-    execFileSync("git", ["add", "README.md"], { cwd: repo });
+    writeFileSync(join(repo, ".gitignore"), ".roll/\n");
+    execFileSync("git", ["add", "README.md", ".gitignore"], { cwd: repo });
     execFileSync("git", ["commit", "-q", "-m", "base"], { cwd: repo });
 
     const cardDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");

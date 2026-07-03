@@ -158,7 +158,7 @@ function commitInRepoEvidence(ports: Ports, ctx: CycleContext, storyId: string):
     return false;
   }
   try {
-    execFileSync("git", ["add", "-A", "--", relAcMap, relRunDir], { cwd: ports.repoCwd, stdio: "ignore" });
+    execFileSync("git", ["add", "-A", "-f", "--", relAcMap, relRunDir], { cwd: ports.repoCwd, stdio: "ignore" });
     const dirty = execFileSync("git", ["status", "--porcelain", "--", relAcMap, relRunDir], {
       cwd: ports.repoCwd,
       encoding: "utf8",

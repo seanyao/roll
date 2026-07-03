@@ -301,7 +301,7 @@ function skillsCatalogSection(lang: Lang): void {
   emit(`  ${t(v2Catalog, lang, drift ? "skills.doctor_drift" : "skills.doctor_ok")}`);
 }
 
-const AGENT_SESSION_GITIGNORE_ENTRIES = [".pi/", ".kimi/", ".kimi-code/", ".reasonix/"] as const;
+const AGENT_SESSION_GITIGNORE_ENTRIES = [".roll/loop/", ".pi/", ".kimi/", ".kimi-code/", ".reasonix/"] as const;
 
 function gitignoreOwnershipSection(lang: Lang): void {
   const gitignore = join(process.cwd(), ".gitignore");

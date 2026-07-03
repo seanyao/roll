@@ -61,6 +61,9 @@ import {
   parseClaimedIdsFromBacklog,
   parseBacklog,
   parsePolicy,
+  buildPickRankingCacheKey,
+  parsePickRankingJson,
+  rankingEntryForPicked,
   pickStory,
   planPublishDocPr,
   planPublishPr,
@@ -117,6 +120,8 @@ import {
   decideRepair,
   initialRepairState,
   DEFAULT_MAX_REPAIR_ROUNDS,
+  type BacklogItem,
+  type PickRankingEntry,
 } from "@roll/core";
 import type { AgentName, AgentScopeConfig, AgentScopeRole, AgentScopeRoleBinding, ArtifactManifest, ExecutionProfile, Rig } from "@roll/spec";
 import {
@@ -337,6 +342,208 @@ function guardRuntimeDir(ports: Ports): string {
     return primary;
   } catch {
     return join(ports.repoCwd, ".roll", "loop");
+  }
+}
+
+const PICK_RANKING_TIMEOUT_MS = 60_000;
+const PICK_RANKING_CACHE_FILE = "pick-ranking.json";
+
+interface PickRankingCacheFile {
+  schema: "pick-ranking.v1";
+  backlogHash: string;
+  candidateSetHash: string;
+  ranking: PickRankingEntry[];
+  createdAt: number;
+}
+
+function semanticRankingPolicy(projectCwd: string): "on" | "off" {
+  try {
+    const p = join(projectCwd, ".roll", "policy.yaml");
+    if (!existsSync(p)) return "on";
+    return parsePolicy(readFileSync(p, "utf8")).pick.semanticRanking;
+  } catch {
+    return "on";
+  }
+}
+
+function pickRankingCachePath(ports: Ports): string {
+  return join(dirname(ports.paths.eventsPath), PICK_RANKING_CACHE_FILE);
+}
+
+function backlogContentForRanking(projectCwd: string, items: readonly BacklogItem[]): string {
+  try {
+    const p = join(projectCwd, ".roll", "backlog.md");
+    if (existsSync(p)) return readFileSync(p, "utf8");
+  } catch {
+    /* synthetic fallback below */
+  }
+  return items.map((row) => `| [${row.id}] | ${row.desc} | ${row.status} |`).join("\n");
+}
+
+function specPathFromBacklogLine(projectCwd: string, backlogContent: string, id: string): string | undefined {
+  const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`\\[${escaped}\\]\\(([^)]+)\\)`);
+  const line = backlogContent.split("\n").find((raw) => pattern.test(raw));
+  const link = line !== undefined ? pattern.exec(line)?.[1]?.trim() : undefined;
+  if (link === undefined || link === "") return undefined;
+  return link.startsWith("/") ? link : join(projectCwd, link);
+}
+
+function readSpecFirstScreen(projectCwd: string, backlogContent: string, id: string): string {
+  const specPath = specPathFromBacklogLine(projectCwd, backlogContent, id);
+  if (specPath === undefined) return "";
+  try {
+    return readFileSync(specPath, "utf8").split("\n").slice(0, 80).join("\n").slice(0, 6_000);
+  } catch {
+    return "";
+  }
+}
+
+function pickRankingPrompt(projectCwd: string, backlogContent: string, candidates: readonly BacklogItem[]): string {
+  const sections = candidates.map((row, index) => {
+    const spec = readSpecFirstScreen(projectCwd, backlogContent, row.id);
+    const header = `${index + 1}. ${row.id} | ${row.desc} | ${row.status}`;
+    return spec === "" ? header : `${header}\nSPEC FIRST SCREEN:\n${spec}`;
+  });
+  return [
+    "Rank these Roll backlog candidates for the next automatic pick.",
+    "This is advisory only: owner controls and picker eligibility gates remain authoritative.",
+    "Score each card 0-100 using unblock effect, urgency, value density, and risk.",
+    'Return JSON only: [{"id":"US-1","score":80,"reason":"one short sentence"}].',
+    "",
+    sections.join("\n\n---\n\n"),
+  ].join("\n");
+}
+
+function candidateRowsForRanking(items: readonly BacklogItem[]): BacklogItem[] {
+  return items.filter((row) => /^(FIX|US|REFACTOR)-/.test(row.id));
+}
+
+function readPickRankingCache(path: string, key: { backlogHash: string; candidateSetHash: string }): PickRankingEntry[] | undefined {
+  try {
+    if (!existsSync(path)) return undefined;
+    const raw = JSON.parse(readFileSync(path, "utf8")) as Partial<PickRankingCacheFile>;
+    if (raw.schema !== "pick-ranking.v1") return undefined;
+    if (raw.backlogHash !== key.backlogHash || raw.candidateSetHash !== key.candidateSetHash) return undefined;
+    if (!Array.isArray(raw.ranking)) return undefined;
+    const parsed = parsePickRankingJson(JSON.stringify(raw.ranking));
+    return parsed.ok ? parsed.entries : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writePickRankingCache(path: string, key: { backlogHash: string; candidateSetHash: string }, ranking: readonly PickRankingEntry[], ts: number): void {
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    const body: PickRankingCacheFile = {
+      schema: "pick-ranking.v1",
+      backlogHash: key.backlogHash,
+      candidateSetHash: key.candidateSetHash,
+      ranking: [...ranking],
+      createdAt: ts,
+    };
+    writeFileSync(path, `${JSON.stringify(body, null, 2)}\n`, "utf8");
+  } catch {
+    /* cache is advisory */
+  }
+}
+
+function extractJsonArray(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.startsWith("[")) return trimmed;
+  const start = trimmed.indexOf("[");
+  const end = trimmed.lastIndexOf("]");
+  if (start >= 0 && end > start) return trimmed.slice(start, end + 1);
+  return trimmed;
+}
+
+function appendPickRankingFailure(ports: Ports, reason: string): void {
+  try {
+    ports.events.appendEvent(ports.paths.eventsPath, {
+      type: "harness_failure",
+      channel: "US-LOOP-090",
+      operation: "pick.semantic_ranking",
+      reason,
+      detail: "semantic ranking failed open",
+      ts: eventTs(ports),
+    });
+  } catch {
+    /* fail-open */
+  }
+}
+
+async function resolvePickRanking(
+  ports: Ports,
+  ctx: CycleContext,
+  items: readonly BacklogItem[],
+): Promise<{ ranking: PickRankingEntry[]; source: "agent" | "cache" } | undefined> {
+  void ctx;
+  if (semanticRankingPolicy(ports.repoCwd) === "off") return undefined;
+  const candidates = candidateRowsForRanking(items);
+  if (candidates.length < 2) return undefined;
+
+  const backlogContent = backlogContentForRanking(ports.repoCwd, items);
+  const key = buildPickRankingCacheKey(backlogContent, candidates);
+  const cachePath = pickRankingCachePath(ports);
+  const cached = readPickRankingCache(cachePath, key);
+  if (cached !== undefined) return { ranking: cached, source: "cache" };
+
+  const route = ports.route.resolve("PICK-RANKING", undefined);
+  const prompt = pickRankingPrompt(ports.repoCwd, backlogContent, candidates);
+  let result: Awaited<ReturnType<AgentSpawn>>;
+  try {
+    result = await ports.agentSpawn(route.agent, {
+      cwd: ports.repoCwd,
+      skillBody: prompt,
+      timeoutMs: PICK_RANKING_TIMEOUT_MS,
+      bare: true,
+      model: route.model,
+    });
+  } catch {
+    appendPickRankingFailure(ports, "spawn_failed");
+    return undefined;
+  }
+  if (result.timedOut) {
+    appendPickRankingFailure(ports, "timeout");
+    return undefined;
+  }
+  if (result.exitCode !== 0) {
+    appendPickRankingFailure(ports, "exit_nonzero");
+    return undefined;
+  }
+  const parsed = parsePickRankingJson(extractJsonArray(result.stdout), candidates);
+  if (!parsed.ok) {
+    appendPickRankingFailure(ports, parsed.reason);
+    return undefined;
+  }
+  writePickRankingCache(cachePath, key, parsed.entries, eventTs(ports));
+  return { ranking: parsed.entries, source: "agent" };
+}
+
+function appendPickRankedEvent(
+  ports: Ports,
+  ctx: CycleContext,
+  storyId: string,
+  resolved: { ranking: PickRankingEntry[]; source: "agent" | "cache" } | undefined,
+): void {
+  if (resolved === undefined) return;
+  const picked = rankingEntryForPicked(storyId, resolved.ranking);
+  if (picked === undefined) return;
+  try {
+    ports.events.appendEvent(ports.paths.eventsPath, {
+      type: "pick:ranked",
+      cycleId: ctx.cycleId,
+      picked: storyId,
+      rank: picked.rank,
+      total: picked.total,
+      reason: picked.entry.reason,
+      ranking: resolved.ranking.map((entry) => ({ id: entry.id, score: entry.score, reason: entry.reason })),
+      source: resolved.source,
+      ts: eventTs(ports),
+    });
+  } catch {
+    /* advisory event only */
   }
 }
 
@@ -1433,6 +1640,7 @@ export async function executeCommand(
       const openPrTitles = await ports.github.openPrTitles(ports.repoCwd);
       const hasOpenPr = buildHasOpenPr(openPrTitles);
       const pendingPublish = readPendingPublish(dirname(ports.paths.eventsPath));
+      const semanticRanking = await resolvePickRanking(ports, ctx, items as BacklogItem[]);
       const story = pickStory(items as never, {
         hasOpenPr,
         hasMergedDelivery: (id) =>
@@ -1440,8 +1648,10 @@ export async function executeCommand(
         shouldSkip: (id) => skipCards.has(id),
         hasPendingPublish: (id) =>
           (ports.pendingPublish?.(id) ?? false) || pendingPublish.has(id),
+        ranking: semanticRanking?.ranking,
       });
       if (story === undefined) return { event: { type: "no_story" } };
+      appendPickRankedEvent(ports, ctx, story.id, semanticRanking);
       // Hook 3 (pre-spawn spec-truth check): the picker only returns a card whose
       // backlog row is NOT ✅ Done and that has no open PR (so by construction it
       // is NOT merged). If that card's spec.md still claims "✅ Fixed/Done / [x]

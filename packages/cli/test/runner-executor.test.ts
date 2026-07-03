@@ -1281,6 +1281,132 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r2.event).toEqual({ type: "no_story" });
   });
 
+  describe("IDEA-069 — semantic pick ranking", () => {
+    it("uses default-agent ranking as advisory order and records pick:ranked", async () => {
+      const spawn = vi.fn(async () => ({
+        stdout: JSON.stringify([{ id: "US-RANK-2", score: 95, reason: "unblocks follow-up cards" }]),
+        stderr: "",
+        exitCode: 0,
+        timedOut: false,
+      }));
+      const { ports, calls } = fakePorts({
+        agentSpawn: spawn,
+        backlog: { read: () => [
+          { id: "FIX-RANK-1", desc: "small cleanup", status: "📋 Todo" },
+          { id: "US-RANK-2", desc: "valuable unblocker", status: "📋 Todo" },
+        ] },
+      });
+      const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
+      expect(r.event).toEqual({ type: "story_picked", storyId: "US-RANK-2" });
+      expect(spawn).toHaveBeenCalledTimes(1);
+      const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
+      expect(events).toContainEqual({
+        type: "pick:ranked",
+        cycleId: CTX.cycleId,
+        picked: "US-RANK-2",
+        rank: 1,
+        total: 1,
+        reason: "unblocks follow-up cards",
+        ranking: [{ id: "US-RANK-2", score: 95, reason: "unblocks follow-up cards" }],
+        source: "agent",
+        ts: 42000,
+      });
+    });
+
+    it("fail-opens to deterministic order and records harness_failure on bad JSON", async () => {
+      const spawn = vi.fn(async () => ({ stdout: "not json", stderr: "", exitCode: 0, timedOut: false }));
+      const { ports, calls } = fakePorts({
+        agentSpawn: spawn,
+        backlog: { read: () => [
+          { id: "FIX-RANK-1", desc: "deterministic first", status: "📋 Todo" },
+          { id: "US-RANK-2", desc: "would rank high", status: "📋 Todo" },
+        ] },
+      });
+      const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
+      expect(r.event).toEqual({ type: "story_picked", storyId: "FIX-RANK-1" });
+      const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
+      expect(events).toContainEqual({
+        type: "harness_failure",
+        channel: "US-LOOP-090",
+        operation: "pick.semantic_ranking",
+        reason: "bad_json",
+        detail: "semantic ranking failed open",
+        ts: 42000,
+      });
+    });
+
+    it("keeps Hold and unsatisfied depends-on cards unpickable even when ranked high", async () => {
+      const { ports } = fakePorts({
+        agentSpawn: vi.fn(async () => ({
+          stdout: JSON.stringify([
+            { id: "US-HOLD", score: 100, reason: "owner says wait" },
+            { id: "US-BLOCKED", score: 99, reason: "missing dependency" },
+          ]),
+          stderr: "",
+          exitCode: 0,
+          timedOut: false,
+        })),
+        backlog: { read: () => [
+          { id: "US-HOLD", desc: "manual wait", status: "🚫 Hold" },
+          { id: "US-BLOCKED", desc: "depends-on:US-MISSING", status: "📋 Todo" },
+          { id: "FIX-READY", desc: "ready", status: "📋 Todo" },
+        ] },
+      });
+      const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
+      expect(r.event).toEqual({ type: "story_picked", storyId: "FIX-READY" });
+    });
+
+    it("uses .roll/loop/pick-ranking.json cache on the second identical pick", async () => {
+      const rt = mkdtempSync(join(tmpdir(), "roll-pick-ranking-cache-"));
+      execDirs.push(rt);
+      const spawn = vi.fn(async () => ({
+        stdout: JSON.stringify([{ id: "US-RANK-2", score: 95, reason: "cached unblocker" }]),
+        stderr: "",
+        exitCode: 0,
+        timedOut: false,
+      }));
+      const { ports, calls } = fakePorts({
+        paths: { ...fakePorts().ports.paths, eventsPath: join(rt, "events.ndjson") },
+        agentSpawn: spawn,
+        backlog: { read: () => [
+          { id: "FIX-RANK-1", desc: "small cleanup", status: "📋 Todo" },
+          { id: "US-RANK-2", desc: "valuable unblocker", status: "📋 Todo" },
+        ] },
+      });
+      expect((await executeCommand({ kind: "pick_story" }, ports, CTX)).event).toEqual({ type: "story_picked", storyId: "US-RANK-2" });
+      expect((await executeCommand({ kind: "pick_story" }, ports, CTX)).event).toEqual({ type: "story_picked", storyId: "US-RANK-2" });
+      expect(spawn).toHaveBeenCalledTimes(1);
+      const rankedEvents = (calls["event"] ?? [])
+        .map((a) => (a as unknown[])[1] as RollEvent)
+        .filter((event) => event.type === "pick:ranked");
+      expect(rankedEvents.map((event) => event.type === "pick:ranked" ? event.source : "")).toEqual(["agent", "cache"]);
+    });
+
+    it("honors pick.semantic_ranking: off and avoids agent calls", async () => {
+      const repo = mkdtempSync(join(tmpdir(), "roll-pick-ranking-off-"));
+      execDirs.push(repo);
+      mkdirSync(join(repo, ".roll"), { recursive: true });
+      writeFileSync(join(repo, ".roll", "policy.yaml"), "pick:\n  semantic_ranking: off\n");
+      const spawn = vi.fn(async () => ({
+        stdout: JSON.stringify([{ id: "US-RANK-2", score: 95, reason: "would win if enabled" }]),
+        stderr: "",
+        exitCode: 0,
+        timedOut: false,
+      }));
+      const { ports } = fakePorts({
+        repoCwd: repo,
+        agentSpawn: spawn,
+        backlog: { read: () => [
+          { id: "FIX-RANK-1", desc: "deterministic first", status: "📋 Todo" },
+          { id: "US-RANK-2", desc: "semantic winner", status: "📋 Todo" },
+        ] },
+      });
+      const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
+      expect(r.event).toEqual({ type: "story_picked", storyId: "FIX-RANK-1" });
+      expect(spawn).not.toHaveBeenCalled();
+    });
+  });
+
   // ── FIX-906: status derivation + picker eligibility read the UNIFIED delivery
   // truth (the structured projection over runs + git merges on origin/main —
   // `mergedDelivery` port). A card merged EXTERNALLY (claude salvage / PR-lane

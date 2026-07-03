@@ -76,6 +76,7 @@
  */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import type { OpenPrReference } from "@roll/core";
 import type { ToolDeclaration, ToolInvocation, ToolResult } from "@roll/spec";
 import { invokeInfraTool } from "./tools/delegation.js";
 
@@ -614,12 +615,7 @@ export async function prListLoopBranches(slug: string): Promise<string[]> {
   return r.stdout.split("\n").filter((l) => l !== "");
 }
 
-export interface OpenPrListReference {
-  readonly number?: number;
-  readonly title: string;
-  readonly headRefName?: string;
-  readonly body?: string;
-}
+export type OpenPrListReference = OpenPrReference;
 
 function parseOpenPrReferences(text: string): OpenPrListReference[] {
   try {

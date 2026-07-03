@@ -108,13 +108,24 @@ export type HasOpenPr = ((id: string) => boolean) & {
   readonly openPrBlockReason?: (id: string) => string | undefined;
 };
 
-function openPrValues(ref: OpenPrReferenceInput): string[] {
+function openPrTextValues(ref: OpenPrReferenceInput): string[] {
   if (typeof ref === "string") return [ref];
-  return [ref.title, ref.headRefName ?? "", ref.body ?? ""].filter((value) => value !== "");
+  return [ref.title, ref.headRefName ?? ""].filter((value) => value !== "");
+}
+
+function bodyRollEvidenceReferences(id: string, body: string | undefined): boolean {
+  if (body === undefined) return false;
+  for (const line of body.split(/\r?\n/)) {
+    const match = /^Roll-Evidence:\s+(\S+)(?:\s+.*)?$/.exec(line.trim());
+    if (match?.[1] === id) return true;
+  }
+  return false;
 }
 
 function openPrReferencesStory(id: string, ref: OpenPrReferenceInput): boolean {
-  return openPrValues(ref).some((value) => prTitleReferences(id, value));
+  if (openPrTextValues(ref).some((value) => prTitleReferences(id, value))) return true;
+  if (typeof ref === "string") return false;
+  return bodyRollEvidenceReferences(id, ref.body);
 }
 
 function openPrReason(ref: OpenPrReferenceInput): string {

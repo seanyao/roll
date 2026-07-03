@@ -9,17 +9,18 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   realpathSync,
+  renameSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import type { EvidenceRun, ShotRun } from "@roll/infra";
-import type { RollCaptureProviderPort, RollCaptureProviderResult, RollCaptureWaitOptions } from "@roll/infra";
+import { RollCaptureProvider, type EvidenceRun, type ShotRun } from "@roll/infra";
 import {
   ROLL_CAPTURE_HOST_APP_NAME,
   ROLL_CAPTURE_HOST_BUNDLE_ID,
@@ -1203,7 +1204,10 @@ describe("FIX-305 — UI/dossier web self-capture lane (real screenshot, not a s
 });
 
 describe("US-PHYSICAL-004 — attest physical.screenshot provider lane", () => {
-  function physicalProject(id = "US-PHYSICAL-004A"): string {
+  function physicalProject(
+    id = "US-PHYSICAL-004A",
+    frontmatter: readonly string[] = ["physical_terminal:", "  app: Terminal.app", "  command: roll doctor --tools", "  evidence: screenshot"],
+  ): string {
     const proj = realpathSync(mkdtempSync(join(tmpdir(), "roll-attest-physical-")));
     dirs.push(proj);
     const cardDir = join(proj, ".roll", "features", "demo", id);
@@ -1213,10 +1217,7 @@ describe("US-PHYSICAL-004 — attest physical.screenshot provider lane", () => {
       [
         "---",
         `id: ${id}`,
-        "physical_terminal:",
-        "  app: Terminal.app",
-        "  command: roll doctor --tools",
-        "  evidence: screenshot",
+        ...frontmatter,
         "---",
         "",
         `# ${id} — physical screenshot`,
@@ -1229,12 +1230,17 @@ describe("US-PHYSICAL-004 — attest physical.screenshot provider lane", () => {
     return proj;
   }
 
-  function responseFor(request: RollCaptureRequestV1, status: "taken" | "skipped" | "failed", extra: Partial<RollCaptureResponseV1> = {}): RollCaptureResponseV1 {
+  function responseFor(
+    captureRoot: string,
+    request: RollCaptureRequestV1,
+    status: "taken" | "skipped" | "failed",
+    extra: Partial<RollCaptureResponseV1> = {},
+  ): RollCaptureResponseV1 {
     return {
       protocol: ROLL_CAPTURE_PROTOCOL_V1,
       requestId: request.requestId,
       status,
-      responsePath: join(dirname(request.out), `response-${request.requestId}.json`),
+      responsePath: join(captureRoot, "responses", `response-${request.requestId}.json`),
       host: { appName: ROLL_CAPTURE_HOST_APP_NAME, bundleId: ROLL_CAPTURE_HOST_BUNDLE_ID, version: "test" },
       startedAt: "2026-06-06T01:02:03.000Z",
       finishedAt: "2026-06-06T01:02:04.000Z",
@@ -1242,19 +1248,53 @@ describe("US-PHYSICAL-004 — attest physical.screenshot provider lane", () => {
     };
   }
 
-  function provider(result: (request: RollCaptureRequestV1) => RollCaptureProviderResult): { port: RollCaptureProviderPort; requests: RollCaptureRequestV1[] } {
+  function physicalProviderFixture(
+    captureRoot: string,
+    response: (request: RollCaptureRequestV1) => RollCaptureResponseV1,
+  ): { port: RollCaptureProvider; requests: RollCaptureRequestV1[] } {
     const requests: RollCaptureRequestV1[] = [];
+    let clock = 0;
     return {
       requests,
-      port: {
-        writeRequest: (request) => {
+      port: new RollCaptureProvider({
+        root: captureRoot,
+        defaultPollIntervalMs: 1,
+        now: () => clock,
+        sleep: async (ms) => {
+          clock += ms;
+          if (requests.length > 0) return;
+          const inbox = join(captureRoot, "inbox");
+          const requestFile = readdirSync(inbox).find((name) => name.startsWith("request-") && name.endsWith(".json"));
+          if (requestFile === undefined) return;
+          const request = JSON.parse(readFileSync(join(inbox, requestFile), "utf8")) as RollCaptureRequestV1;
           requests.push(request);
-          return Promise.resolve();
+          const res = response(request);
+          mkdirSync(join(captureRoot, "responses"), { recursive: true });
+          const finalPath = join(captureRoot, "responses", `response-${request.requestId}.json`);
+          const tempPath = join(captureRoot, "responses", `.response-${request.requestId}.json.tmp`);
+          writeFileSync(tempPath, JSON.stringify(res), "utf8");
+          renameSync(tempPath, finalPath);
         },
-        readResponse: () => Promise.resolve(null),
-        waitForResponse: (request, _opts: RollCaptureWaitOptions) => Promise.resolve(result(request)),
-      },
+      }),
     };
+  }
+
+  function timeoutProvider(captureRoot: string): RollCaptureProvider {
+    let clock = 0;
+    return new RollCaptureProvider({
+      root: captureRoot,
+      defaultPollIntervalMs: 1,
+      now: () => clock,
+      sleep: async (ms) => {
+        clock += ms;
+      },
+    });
+  }
+
+  function requestFiles(captureRoot: string): string[] {
+    const inbox = join(captureRoot, "inbox");
+    if (!existsSync(inbox)) return [];
+    return readdirSync(inbox).filter((name) => name.startsWith("request-") && name.endsWith(".json"));
   }
 
   const availableReadiness = {
@@ -1272,7 +1312,10 @@ describe("US-PHYSICAL-004 — attest physical.screenshot provider lane", () => {
     const captureRoot = join(proj, "roll-capture-root");
     writeFileSync(sourcePng, "PNGDATA");
     mkdirSync(captureRoot, { recursive: true });
-    const fake = provider((request) => {
+    const fake = physicalProviderFixture(captureRoot, (request) => {
+      const reportPath = join(captureRoot, "reports", `${request.requestId}.html`);
+      mkdirSync(dirname(reportPath), { recursive: true });
+      writeFileSync(reportPath, "<html>capture report</html>");
       writeFileSync(
         join(captureRoot, "ledger.jsonl"),
         JSON.stringify({
@@ -1283,17 +1326,13 @@ describe("US-PHYSICAL-004 — attest physical.screenshot provider lane", () => {
           status: "taken",
           screenshotPath: sourcePng,
           responsePath: join(captureRoot, "responses", `response-${request.requestId}.json`),
-          reportPath: join(captureRoot, "reports", `${request.requestId}.html`),
+          reportPath,
           attachedToReport: true,
           startedAt: "2026-06-06T01:02:03.000Z",
           finishedAt: "2026-06-06T01:02:04.000Z",
         }) + "\n",
       );
-      return {
-        status: "taken",
-        path: sourcePng,
-        response: responseFor(request, "taken", { screenshotPath: sourcePng }),
-      };
+      return responseFor(captureRoot, request, "taken", { screenshotPath: sourcePng });
     });
 
     const code = await silenced(() =>
@@ -1311,25 +1350,55 @@ describe("US-PHYSICAL-004 — attest physical.screenshot provider lane", () => {
     expect(fake.requests).toHaveLength(1);
     expect(fake.requests[0]).toMatchObject({ protocol: ROLL_CAPTURE_PROTOCOL_V1, kind: "physical_terminal", target: { type: "window", appName: "Terminal.app" } });
     const request = fake.requests[0] as RollCaptureRequestV1;
+    expect(readFileSync(join(captureRoot, "inbox", `request-${request.requestId}.json`), "utf8")).toContain('"kind": "physical_terminal"');
+    expect(readFileSync(join(captureRoot, "responses", `response-${request.requestId}.json`), "utf8")).toContain('"status":"taken"');
     const runDir = dirname(dirname(request.out));
     expect(readFileSync(join(runDir, "screenshots", "physical.png"), "utf8")).toBe("PNGDATA");
     const html = readFileSync(join(runDir, "US-PHYSICAL-004A-report.html"), "utf8");
     expect(html).toContain("physical.screenshot");
     expect(html).toContain("requested → taken → attached");
     expect(html).toContain('<img src="screenshots/physical.png"');
+    expect(html).toContain(">request</a>");
+    expect(html).toContain(">response</a>");
     expect(html).toContain("ledger response");
     expect(html).toContain("ledger report");
+    expect(html).not.toContain(`href="${captureRoot}`);
     const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
       captures?: Array<{ kind?: string; taken?: boolean; out?: string }>;
     };
     expect(evidence.captures).toContainEqual({ kind: "physical_terminal", out: join(runDir, "screenshots", "physical.png"), taken: true });
   });
 
+  it("honors an evidence_profile physical request even without physical_terminal frontmatter", async () => {
+    const proj = physicalProject("US-PHYSICAL-004D", ["evidence_profile: physical"]);
+    const captureRoot = join(proj, "roll-capture-root");
+    const sourcePng = join(proj, "captured-display.png");
+    writeFileSync(sourcePng, "DISPLAYPNG");
+    const fake = physicalProviderFixture(captureRoot, (request) => responseFor(captureRoot, request, "taken", { screenshotPath: sourcePng }));
+
+    await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["US-PHYSICAL-004D"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          rollCapture: { readiness: () => availableReadiness, provider: fake.port, root: captureRoot },
+        }),
+      ),
+    );
+
+    expect(fake.requests).toHaveLength(1);
+    expect(fake.requests[0]).toMatchObject({ kind: "display", target: { type: "display" } });
+    const runDir = join(proj, ".roll", "features", "demo", "US-PHYSICAL-004D", "2026-06-06T01-02-03");
+    expect(readFileSync(join(runDir, "screenshots", "physical.png"), "utf8")).toBe("DISPLAYPNG");
+    const html = readFileSync(join(runDir, "US-PHYSICAL-004D-report.html"), "utf8");
+    expect(html).toContain("requested → taken → attached");
+  });
+
   it("records readiness skip with reason and leaves existing non-physical attest unchanged", async () => {
     const proj = physicalProject("US-PHYSICAL-004B");
-    const fake = provider(() => {
-      throw new Error("provider should not run when readiness skips");
-    });
+    const captureRoot = join(proj, "roll-capture-root");
+    const provider = new RollCaptureProvider({ root: captureRoot });
 
     await silenced(() =>
       inDir(proj, () =>
@@ -1343,38 +1412,38 @@ describe("US-PHYSICAL-004 — attest physical.screenshot provider lane", () => {
               status: "skip",
               detailLines: ["skipped — Roll Capture.app is a macOS-only physical screenshot host."],
             }),
-            provider: fake.port,
+            provider,
+            root: captureRoot,
           },
         }),
       ),
     );
 
     const runDir = join(proj, ".roll", "features", "demo", "US-PHYSICAL-004B", "2026-06-06T01-02-03");
-    expect(fake.requests).toHaveLength(0);
+    expect(requestFiles(captureRoot)).toHaveLength(0);
     const html = readFileSync(join(runDir, "US-PHYSICAL-004B-report.html"), "utf8");
     expect(html).toContain("requested → skipped → not-attached");
     expect(html).toContain("Roll Capture.app is a macOS-only physical screenshot host");
 
     const plain = project();
-    const plainFake = provider(() => {
-      throw new Error("plain attest should not invoke physical provider");
-    });
+    const plainCaptureRoot = join(plain, "roll-capture-root");
+    const plainProvider = new RollCaptureProvider({ root: plainCaptureRoot });
     await silenced(() =>
       inDir(plain, () =>
         attestCommand(["FIX-300"], {
           now: () => T0,
           run: quietRun,
           ghProbe: () => Promise.resolve(false),
-          rollCapture: { readiness: () => availableReadiness, provider: plainFake.port },
+          rollCapture: { readiness: () => availableReadiness, provider: plainProvider, root: plainCaptureRoot },
         }),
       ),
     );
-    expect(plainFake.requests).toHaveLength(0);
+    expect(requestFiles(plainCaptureRoot)).toHaveLength(0);
   });
 
   it("surfaces provider timeout as a distinct capture failure reason", async () => {
     const proj = physicalProject("US-PHYSICAL-004C");
-    const fake = provider(() => ({ status: "timeout", reason: "timed out after 60000ms waiting for response" }));
+    const captureRoot = join(proj, "roll-capture-root");
 
     await silenced(() =>
       inDir(proj, () =>
@@ -1382,7 +1451,7 @@ describe("US-PHYSICAL-004 — attest physical.screenshot provider lane", () => {
           now: () => T0,
           run: quietRun,
           ghProbe: () => Promise.resolve(false),
-          rollCapture: { readiness: () => availableReadiness, provider: fake.port },
+          rollCapture: { readiness: () => availableReadiness, provider: timeoutProvider(captureRoot), root: captureRoot, timeoutMs: 5 },
         }),
       ),
     );
@@ -1390,7 +1459,7 @@ describe("US-PHYSICAL-004 — attest physical.screenshot provider lane", () => {
     const runDir = join(proj, ".roll", "features", "demo", "US-PHYSICAL-004C", "2026-06-06T01-02-03");
     const html = readFileSync(join(runDir, "US-PHYSICAL-004C-report.html"), "utf8");
     expect(html).toContain("requested → timeout → not-attached");
-    expect(html).toContain("timed out after 60000ms");
+    expect(html).toContain("timed out after 5ms");
     const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
       captures?: Array<{ kind?: string; taken?: boolean; skipped?: string }>;
     };
@@ -1398,7 +1467,7 @@ describe("US-PHYSICAL-004 — attest physical.screenshot provider lane", () => {
       kind: "physical_terminal",
       out: join(runDir, "screenshots", "physical.png"),
       taken: false,
-      skipped: "timeout: timed out after 60000ms waiting for response",
+      skipped: `timeout: timed out after 5ms waiting for ${join(captureRoot, "responses", "response-US-PHYSICAL-004C-2026-06-06T01-02-03-physical.json")}`,
     });
   });
 });

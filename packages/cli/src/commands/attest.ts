@@ -686,21 +686,23 @@ async function runPhysicalScreenshotLane(
     return physicalLaneResult(request, ["requested", "skipped", "not-attached"], reason, undefined, readCaptureLedgerEntries(ledgerRoot, request.requestId));
   }
 
+  const requestPath = join(ledgerRoot, "inbox", `request-${request.requestId}.json`);
   try {
     await provider.writeRequest(request);
     const result = await provider.waitForResponse(request, { timeoutMs: request.timeoutMs });
     const ledger = readCaptureLedgerEntries(ledgerRoot, request.requestId);
+    const responsePath = result.status === "timeout" ? undefined : result.response.responsePath;
     if (result.status === "taken") {
       const attached = attachPhysicalScreenshot(result.path, request.out);
       if (attached.ok) {
-        return physicalLaneResult(request, ["requested", "taken", "attached"], undefined, `screenshots/${basename(request.out)}`, ledger);
+        return physicalLaneResult(request, ["requested", "taken", "attached"], undefined, `screenshots/${basename(request.out)}`, ledger, requestPath, responsePath);
       }
-      return physicalLaneResult(request, ["requested", "taken", "not-attached"], attached.reason, undefined, ledger);
+      return physicalLaneResult(request, ["requested", "taken", "not-attached"], attached.reason, undefined, ledger, requestPath, responsePath);
     }
     if (result.status === "timeout") {
-      return physicalLaneResult(request, ["requested", "timeout", "not-attached"], `timeout: ${result.reason}`, undefined, ledger);
+      return physicalLaneResult(request, ["requested", "timeout", "not-attached"], `timeout: ${result.reason}`, undefined, ledger, requestPath);
     }
-    return physicalLaneResult(request, ["requested", result.status, "not-attached"], result.reason, undefined, ledger);
+    return physicalLaneResult(request, ["requested", result.status, "not-attached"], result.reason, undefined, ledger, requestPath, responsePath);
   } catch (error) {
     return physicalLaneResult(
       request,
@@ -708,6 +710,7 @@ async function runPhysicalScreenshotLane(
       error instanceof Error ? error.message : String(error),
       undefined,
       readCaptureLedgerEntries(ledgerRoot, request.requestId),
+      requestPath,
     );
   }
 }
@@ -718,7 +721,10 @@ function physicalLaneResult(
   reason: string | undefined,
   screenshotHref: string | undefined,
   ledger: readonly CaptureLedgerEntry[],
+  requestPath?: string,
+  responsePath?: string,
 ): PhysicalCaptureLane {
+  const runDir = dirname(dirname(request.out));
   const attached = screenshotHref !== undefined;
   const screenshot: EvidenceRef | undefined = attached
     ? { kind: "screenshot", label: "physical.screenshot", href: screenshotHref }
@@ -730,7 +736,9 @@ function physicalLaneResult(
       statusChain,
       ...(reason !== undefined && reason !== "" ? { reason } : {}),
       ...(screenshot !== undefined ? { screenshot } : {}),
-      ...(ledger.length > 0 ? { ledgerLinks: ledgerLinksForReport(ledger) } : {}),
+      ...(requestPath !== undefined ? { requestPath: reportHref(runDir, requestPath) } : {}),
+      ...(responsePath !== undefined ? { responsePath: reportHref(runDir, responsePath) } : {}),
+      ...(ledger.length > 0 ? { ledgerLinks: ledgerLinksForReport(runDir, ledger) } : {}),
     },
     fact: {
       kind: request.kind,
@@ -740,6 +748,10 @@ function physicalLaneResult(
     },
     ...(screenshot !== undefined ? { selfCapture: screenshot } : {}),
   };
+}
+
+function reportHref(runDir: string, path: string): string {
+  return relativeFromPhysical(runDir, path);
 }
 
 function attachPhysicalScreenshot(source: string, out: string): { ok: true } | { ok: false; reason: string } {
@@ -786,12 +798,12 @@ function isCaptureLedgerEntry(value: unknown): value is CaptureLedgerEntry {
   );
 }
 
-function ledgerLinksForReport(entries: readonly CaptureLedgerEntry[]): Array<{ label: string; href: string }> {
+function ledgerLinksForReport(runDir: string, entries: readonly CaptureLedgerEntry[]): Array<{ label: string; href: string }> {
   return entries.flatMap((entry, index) => {
     const n = entries.length === 1 ? "" : ` ${index + 1}`;
     return [
-      { label: `ledger response${n}`, href: entry.responsePath },
-      ...(entry.reportPath !== undefined && entry.reportPath !== "" ? [{ label: `ledger report${n}`, href: entry.reportPath }] : []),
+      { label: `ledger response${n}`, href: reportHref(runDir, entry.responsePath) },
+      ...(entry.reportPath !== undefined && entry.reportPath !== "" ? [{ label: `ledger report${n}`, href: reportHref(runDir, entry.reportPath) }] : []),
     ];
   });
 }

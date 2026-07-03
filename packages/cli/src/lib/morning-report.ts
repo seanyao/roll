@@ -1,7 +1,7 @@
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, buildLoopDigestModel, type LoopDigestModel, type MorningRunRow } from "@roll/core";
 import { parseEventLine, type RollEvent } from "@roll/spec";
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { rowDelivered } from "./truth-adapter.js";
 
@@ -72,8 +72,9 @@ function readDegradedStateHash(path: string): string | undefined {
 }
 
 function writeDegradedStateHash(path: string, reasons: readonly string[], nowSec: number): void {
+  const tmp = `${path}.tmp`;
   writeFileSync(
-    path,
+    tmp,
     `${JSON.stringify(
       {
         reasonsHash: degradationHash(reasons),
@@ -85,6 +86,7 @@ function writeDegradedStateHash(path: string, reasons: readonly string[], nowSec
     )}\n`,
     "utf8",
   );
+  renameSync(tmp, path);
 }
 
 export function renderLoopDigestHtml(model: LoopDigestModel): string {

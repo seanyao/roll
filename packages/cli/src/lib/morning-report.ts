@@ -1,5 +1,6 @@
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, buildLoopDigestModel, type LoopDigestModel, type MorningRunRow } from "@roll/core";
 import { parseEventLine, type RollEvent } from "@roll/spec";
+import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { rowDelivered } from "./truth-adapter.js";
@@ -53,6 +54,37 @@ function list(xs: string[], empty: string): string {
 
 function degradationMessage(model: LoopDigestModel): string {
   return `loop digest degraded: ${model.degradedReasons.join("; ")}`;
+}
+
+function degradationHash(reasons: readonly string[]): string {
+  return `sha256:${createHash("sha256").update(JSON.stringify([...reasons].sort()), "utf8").digest("hex")}`;
+}
+
+function readDegradedStateHash(path: string): string | undefined {
+  try {
+    const raw = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    if (typeof raw !== "object" || raw === null) return undefined;
+    const hash = (raw as { reasonsHash?: unknown }).reasonsHash;
+    return typeof hash === "string" && hash !== "" ? hash : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeDegradedStateHash(path: string, reasons: readonly string[], nowSec: number): void {
+  writeFileSync(
+    path,
+    `${JSON.stringify(
+      {
+        reasonsHash: degradationHash(reasons),
+        reasons: [...reasons].sort(),
+        updatedAt: iso(nowSec),
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
 }
 
 export function renderLoopDigestHtml(model: LoopDigestModel): string {
@@ -121,6 +153,7 @@ export function writeLatestLoopDigest(
   const primaryDir = join(projectPath, ".roll", "reports", "loop");
   const latest = join(primaryDir, "latest.html");
   const dated = join(primaryDir, `${new Date(nowSec * 1000).toISOString().slice(0, 10)}.html`);
+  const degradedState = join(primaryDir, "degraded-state.json");
   mkdirSync(primaryDir, { recursive: true });
   const html = renderLoopDigestHtml(model);
   writeFileSync(latest, html, "utf8");
@@ -133,9 +166,12 @@ export function writeLatestLoopDigest(
   } catch {
     /* best-effort compatibility alias */
   }
+  const currentDegradedHash = degradationHash(model.degradedReasons);
+  const previousDegradedHash = readDegradedStateHash(degradedState);
+  const shouldNotifyDegraded = model.degraded && currentDegradedHash !== previousDegradedHash;
   try {
     mkdirSync(dirname(eventsPath), { recursive: true });
-    if (model.degraded) {
+    if (shouldNotifyDegraded) {
       appendFileSync(
         eventsPath,
         `${JSON.stringify({
@@ -147,6 +183,7 @@ export function writeLatestLoopDigest(
         "utf8",
       );
     }
+    writeDegradedStateHash(degradedState, model.degradedReasons, nowSec);
     appendFileSync(
       eventsPath,
       `${JSON.stringify({

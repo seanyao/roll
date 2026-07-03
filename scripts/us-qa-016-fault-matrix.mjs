@@ -40,7 +40,14 @@ const matrix = [
     title: "pardoned card reschedule",
     summary: "clearing a false skip re-arms the card and allows a normal delivery cycle",
   },
+  {
+    id: "FI-08",
+    title: "hung builder timeout",
+    summary: "a no-progress hung builder is killed, blocks terminal, releases the lock, and preserves the branch",
+  },
 ];
+
+const EXPECTED_FI_IDS = matrix.map((row) => row.id);
 
 function argValue(name) {
   const i = process.argv.indexOf(name);
@@ -65,10 +72,12 @@ const command = [
 
 const run = spawnSync(command[0], command.slice(1), { encoding: "utf8" });
 let vitest = {};
+let parseError = null;
 try {
   vitest = JSON.parse(readFileSync(reportPath, "utf8"));
-} catch {
+} catch (e) {
   vitest = {};
+  parseError = e instanceof Error ? e.message : String(e);
 }
 
 const assertions = [];
@@ -77,6 +86,38 @@ for (const suite of Array.isArray(vitest.testResults) ? vitest.testResults : [])
     assertions.push(assertion);
   }
 }
+
+const titleIds = [];
+const unparsedTitles = [];
+for (const assertion of assertions) {
+  const title = typeof assertion.title === "string"
+    ? assertion.title
+    : typeof assertion.fullName === "string"
+      ? assertion.fullName
+      : "";
+  if (title === "") {
+    unparsedTitles.push("<missing title>");
+    continue;
+  }
+  const matches = [...title.matchAll(/\[(FI-\d{2})\]/g)].map((m) => m[1]);
+  if (matches.length !== 1) {
+    unparsedTitles.push(title);
+    continue;
+  }
+  titleIds.push(matches[0]);
+}
+
+const actualIds = [...new Set(titleIds)].sort();
+const duplicateIds = [...new Set(titleIds.filter((id, idx) => titleIds.indexOf(id) !== idx))].sort();
+const missingIds = EXPECTED_FI_IDS.filter((id) => !actualIds.includes(id));
+const extraIds = actualIds.filter((id) => !EXPECTED_FI_IDS.includes(id));
+const reconciliationErrors = [
+  ...(parseError !== null ? [`vitest json parse failed: ${parseError}`] : []),
+  ...(missingIds.length > 0 ? [`missing FI test titles: ${missingIds.join(", ")}`] : []),
+  ...(extraIds.length > 0 ? [`unexpected FI test titles: ${extraIds.join(", ")}`] : []),
+  ...(duplicateIds.length > 0 ? [`duplicate FI test titles: ${duplicateIds.join(", ")}`] : []),
+  ...(unparsedTitles.length > 0 ? [`unparseable test titles: ${unparsedTitles.join(" | ")}`] : []),
+];
 
 const results = matrix.map((row) => {
   const assertion = assertions.find((a) => typeof a.title === "string" && a.title.includes(`[${row.id}]`));
@@ -103,6 +144,11 @@ const payload = {
     passed: vitest.numPassedTests ?? results.filter((r) => r.status === "pass").length,
     total: vitest.numTotalTests ?? results.length,
   },
+  reconciliation: {
+    expectedFiIds: EXPECTED_FI_IDS,
+    actualFiIds: actualIds,
+    errors: reconciliationErrors,
+  },
   results,
 };
 
@@ -110,4 +156,4 @@ const body = `${JSON.stringify(payload, null, 2)}\n`;
 if (outPath !== undefined && outPath.trim() !== "") writeFileSync(outPath, body, "utf8");
 process.stdout.write(body);
 rmSync(tmp, { recursive: true, force: true });
-process.exit(run.status ?? 1);
+process.exit(reconciliationErrors.length > 0 ? 1 : (run.status ?? 1));

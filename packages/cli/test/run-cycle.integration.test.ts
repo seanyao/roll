@@ -441,8 +441,10 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
     expect(result2.terminal).toBe("published"); // FIX-244
   });
 
-  // CI has observed this real-timer watchdog case flake at the default 30s budget;
-  // keep the assertion intact but give the polling path enough headroom.
+  // CI has observed this real-timer watchdog case flake at the default 30s budget.
+  // The wall-time assertion below is the regression gate: the no-progress watchdog
+  // must return well before the original 30s window would hang the suite. The
+  // 60s Vitest timeout is only a last-resort harness guard, not the behavior check.
   it("FIX-907 hung builder (no-progress timeout): agent killed mid-spawn → blocked, lock released, branch PRESERVED, cycle:timeout recorded", async () => {
     const { repo } = makeFixture("hang907");
     const rt = tmp("hang907-rt");
@@ -480,14 +482,17 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
     try {
       const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps, clock: fc.clock });
       const ports: Ports = { ...base, agentSpawn: hungBuilder, github: fakeGithub(0) };
+      const startedWallMs = Date.now();
       const result = await runCycleOnce({
         ports,
         ctx: { cycleId, branch, loop: "ci" as never },
       });
+      const elapsedWallMs = Date.now() - startedWallMs;
 
       expect(result.ran).toBe(true);
       // AC1: the no-progress hard timeout drove the cycle to a blocked terminal.
       expect(result.terminal).toBe("blocked");
+      expect(elapsedWallMs).toBeLessThan(35_000);
 
       const events = readFileSync(p.eventsPath, "utf8")
         .split("\n")

@@ -1,19 +1,21 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { RouteDeps } from "@roll/core";
 import { scheduleParallelCycles } from "@roll/core";
+import type { RollEvent } from "@roll/spec";
 import {
   type AgentSpawn,
   type AgentSpawnResult,
   type Ports,
   type RunnerPaths,
   nodePorts,
+  realAgentSpawn,
   runCycleOnce,
 } from "../src/runner/index.js";
-import { quarantineMainCheckout, checkMainDirty } from "../src/runner/main-checkout-guard.js";
+import { checkMainDirty } from "../src/runner/main-checkout-guard.js";
 import { runAttestGate } from "../src/runner/attest-gate.js";
 import { classifyFailure, recordRootCauseFailure } from "../src/runner/failure-attribution.js";
 import { clearCardFailure, readSkipCards, recordCardFailure } from "../src/runner/skip-cards.js";
@@ -34,6 +36,13 @@ const GIT_ID = ["-c", "user.email=t@t", "-c", "user.name=t"];
 
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+}
+
+function readEvents(path: string): RollEvent[] {
+  return readFileSync(path, "utf8")
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => JSON.parse(line) as RollEvent);
 }
 
 const BACKLOG = [
@@ -167,14 +176,22 @@ function fakeGithub(status: 0 | 1 | 2, prState = "MERGED"): Ports["github"] {
   };
 }
 
-async function runFixtureCycle(tag: string, cycleId: string): Promise<{ repo: string; result: Awaited<ReturnType<typeof runCycleOnce>> }> {
-  const { repo } = makeFixture(tag, cycleId);
-  const rt = tmp(`${tag}-rt`);
+async function runFixtureCycle(
+  tag: string,
+  cycleId: string,
+  opts: { runtimeDir?: string; repo?: string; agentSpawn?: AgentSpawn; github?: Ports["github"]; routeDeps?: RouteDeps } = {},
+): Promise<{ repo: string; result: Awaited<ReturnType<typeof runCycleOnce>>; paths: RunnerPaths; runtimeDir: string }> {
+  const repo = opts.repo ?? makeFixture(tag, cycleId).repo;
+  const rt = opts.runtimeDir ?? tmp(`${tag}-rt`);
   const p = paths(rt, cycleId);
-  const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
-  const ports: Ports = { ...base, agentSpawn: shimAgentTcr, github: fakeGithub(0) };
+  const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps: opts.routeDeps ?? routeDeps });
+  const ports: Ports = { ...base, agentSpawn: opts.agentSpawn ?? shimAgentTcr, github: opts.github ?? fakeGithub(0) };
   const result = await runCycleOnce({ ports, ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never } });
-  return { repo, result };
+  return { repo, result, paths: p, runtimeDir: rt };
+}
+
+function fixtureSleepAgent(scriptPath: string): AgentSpawn {
+  return (_agent, opts) => realAgentSpawn("claude", { ...opts, bin: scriptPath });
 }
 
 function attestSinks(): {
@@ -226,15 +243,9 @@ describe("US-QA-016 fault injection matrix", () => {
   it("[FI-01] shared checkout pollution is quarantined, restored, and dispatch continues", async () => {
     const cycleId = "20260703-010101-fi01";
     const { repo } = makeFixture("fi01", cycleId);
-    const runtimeDir = join(repo, ".roll", "loop");
-    mkdirSync(runtimeDir, { recursive: true });
     writeFileSync(join(repo, "app.txt"), "leaked product edit\n", "utf8");
     writeFileSync(join(repo, "leak.txt"), "untracked leak\n", "utf8");
-
-    const quarantined = await quarantineMainCheckout({ repoCwd: repo, runtimeDir, cycleId, storyId: "US-RUN-001", phase: "pre-spawn", nowMs: () => 1_780_000_000_000 });
-    expect(quarantined).toHaveLength(1);
-    expect(quarantined[0]).toMatchObject({ type: "sandbox:quarantined", reason: "dirty", files: ["app.txt", "leak.txt"] });
-    expect(git(repo, ["status", "--porcelain", "--", "app.txt", "leak.txt"])).toBe("");
+    expect(git(repo, ["status", "--porcelain", "--", "app.txt", "leak.txt"])).toContain("app.txt");
 
     const rt = tmp("fi01-rt");
     const p = paths(rt, cycleId);
@@ -243,6 +254,20 @@ describe("US-QA-016 fault injection matrix", () => {
       ports: { ...base, agentSpawn: shimAgentTcr, github: fakeGithub(0) },
       ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
     });
+
+    const events = readEvents(p.eventsPath);
+    const quarantine = events.find((e) => e.type === "sandbox:quarantined");
+    expect(quarantine).toMatchObject({
+      type: "sandbox:quarantined",
+      cycleId,
+      storyId: "US-RUN-001",
+      phase: "pre-spawn",
+      reason: "dirty",
+      files: ["app.txt", "leak.txt"],
+    });
+    expect(git(repo, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe("main");
+    expect(git(repo, ["status", "--porcelain", "--", ".", ":(exclude).roll"])).toBe("");
+    expect(git(repo, ["status", "--porcelain", "--", "app.txt", "leak.txt"])).toBe("");
     expect(result.terminal).toBe("published");
   });
 
@@ -253,6 +278,8 @@ describe("US-QA-016 fault injection matrix", () => {
     writeAttestCard(wt, storyId, [{ ac: `${storyId}:AC1`, status: "pass", evidence: [{ kind: "text", textFile: "evidence/proof.txt" }] }], cycleId);
     const { alerts, events, s } = attestSinks();
 
+    // 1000ms matches the low test timeout used by attest rendering unit coverage:
+    // it is long enough for a good fixture and short enough to expose a wedged render.
     const r = runAttestGate(wt, storyId, cycleId, "hard", 1000, s, wt, "builder-session", 7);
 
     expect(r).toMatchObject({ verdict: "skipped", blocked: true });
@@ -283,8 +310,26 @@ describe("US-QA-016 fault injection matrix", () => {
     expect(auth).toMatchObject({ failureClass: "env", rootCauseKey: "env:auth" });
     expect(ci).toMatchObject({ failureClass: "harness", rootCauseKey: "harness:publish" });
 
-    const authPause = recordRootCauseFailure(rt, "c-fi04-auth", auth, [{ type: "agent:blocked", cycleId: "c-fi04-auth", stage: "build", cause: "auth", agent: "reasonix", ts: 1 } as never], 1);
-    const ciPause = recordRootCauseFailure(rt, "c-fi04-ci", ci, [{ type: "cycle:end", cycleId: "c-fi04-ci", outcome: "failed", ts: 2 } as never], 1);
+    const authEvent: RollEvent = { type: "agent:blocked", cycleId: "c-fi04-auth", stage: "build", cause: "auth", agent: "reasonix", ts: 1 };
+    const ciEvent: RollEvent = {
+      type: "cycle:end",
+      cycleId: "c-fi04-ci",
+      outcome: "failed",
+      cost: {
+        cycleId: "c-fi04-ci",
+        agent: "reasonix",
+        model: "fixture",
+        tokensIn: 0,
+        tokensOut: 0,
+        estimatedCost: 0,
+        revertCount: 0,
+        effectiveCost: 0,
+        currency: "USD",
+      },
+      ts: 2,
+    };
+    const authPause = recordRootCauseFailure(rt, "c-fi04-auth", auth, [authEvent], 1);
+    const ciPause = recordRootCauseFailure(rt, "c-fi04-ci", ci, [ciEvent], 1);
 
     expect(authPause).toMatchObject({ paused: true, rootCauseKey: "env:auth" });
     expect(ciPause).toMatchObject({ paused: true, rootCauseKey: "harness:publish" });
@@ -339,11 +384,61 @@ describe("US-QA-016 fault injection matrix", () => {
     expect(recordCardFailure(rt, "US-RUN-001", 1, "card")).toEqual({ count: 1, nowSkipped: true });
     expect(readSkipCards(rt).has("US-RUN-001")).toBe(true);
 
+    const blocked = await runFixtureCycle("fi07-blocked", "20260703-070706-fi07", { runtimeDir: rt });
+    expect(blocked.result.ran).toBe(true);
+    expect(blocked.result.terminal).toBe("idle");
+    expect(readEvents(blocked.paths.eventsPath).some((e) => e.type === "cycle:start")).toBe(false);
+
     clearCardFailure(rt, "US-RUN-001");
     expect(readSkipCards(rt).has("US-RUN-001")).toBe(false);
 
-    const { result } = await runFixtureCycle("fi07", "20260703-070707-fi07");
+    const { result } = await runFixtureCycle("fi07", "20260703-070707-fi07", { runtimeDir: rt });
     expect(result.ran).toBe(true);
     expect(result.terminal).toBe("published");
   });
+
+  it("[FI-08] hung builder no-progress watchdog kills spawn, blocks terminal, releases lock, and preserves branch", async () => {
+    const cycleId = "20260703-080808-fi08";
+    const branch = `loop/cycle-${cycleId}`;
+    const rt = tmp("fi08-rt");
+    const p = paths(rt, cycleId);
+    const script = join(tmp("fi08-agent"), "sleep-agent.sh");
+    writeFileSync(script, "#!/bin/sh\nsleep 30\n", "utf8");
+    chmodSync(script, 0o755);
+
+    const savedPoll = process.env["ROLL_TIMEOUT_POLL_MS"];
+    const savedNp = process.env["ROLL_CYCLE_NO_PROGRESS_SEC"];
+    const savedWall = process.env["ROLL_CYCLE_WALL_TIMEOUT_SEC"];
+    process.env["ROLL_TIMEOUT_POLL_MS"] = "20";
+    process.env["ROLL_CYCLE_NO_PROGRESS_SEC"] = "1";
+    process.env["ROLL_CYCLE_WALL_TIMEOUT_SEC"] = "100000";
+
+    try {
+      const started = Date.now();
+      const { repo, result } = await runFixtureCycle("fi08", cycleId, {
+        runtimeDir: rt,
+        agentSpawn: fixtureSleepAgent(script),
+        routeDeps: { readSlot: () => "claude", firstInstalled: () => "claude" },
+      });
+      const elapsedMs = Date.now() - started;
+
+      expect(elapsedMs).toBeLessThan(5_000);
+      expect(result.ran).toBe(true);
+      expect(result.terminal).toBe("blocked");
+      expect(existsSync(p.lockPath)).toBe(false);
+      expect(() => git(repo, ["rev-parse", "--verify", branch])).not.toThrow();
+
+      const events = readEvents(p.eventsPath);
+      expect(events.find((e) => e.type === "cycle:timeout")).toMatchObject({ type: "cycle:timeout", cycleId, reason: "no-progress" });
+      expect(events.find((e) => e.type === "cycle:end")).toMatchObject({ type: "cycle:end", cycleId, outcome: "blocked" });
+    } finally {
+      const restore = (k: string, v: string | undefined): void => {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      };
+      restore("ROLL_TIMEOUT_POLL_MS", savedPoll);
+      restore("ROLL_CYCLE_NO_PROGRESS_SEC", savedNp);
+      restore("ROLL_CYCLE_WALL_TIMEOUT_SEC", savedWall);
+    }
+  }, 10_000);
 });

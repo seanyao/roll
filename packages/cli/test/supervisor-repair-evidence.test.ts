@@ -221,6 +221,21 @@ describe("repair-evidence command — FIX-1062 idempotency", () => {
     expect(parsed.verdict).toBe("not_reparable");
     expect(parsed.reason).toContain("evaluator has not approved");
   });
+
+  it("FIX-1204: repairs a non-manual green approved PR instead of saying nothing to repair", () => {
+    const cwd = project1062([JSON.stringify({ type: "pr:open", prNumber: PR, storyId: "FIX-1057", ts: 1 })]);
+    const fakeBin = installFakeGh(cwd, {
+      body: "Delivers FIX-1057.",
+      reviews: [{ authorAssociation: "BOT", state: "APPROVED" }],
+      ci: "SUCCESS",
+      merge: "CLEAN",
+    });
+    const r = withPath(fakeBin, () => run(cwd, ["repair-evidence", String(PR), "--json"]));
+    expect(r.code).toBe(0);
+    const parsed = JSON.parse(r.out);
+    expect(parsed.verdict).toBe("repaired");
+    expect(parsed.storyId).toBe("FIX-1057");
+  });
 });
 
 describe("supervisor why — FIX-1062 repaired evidence diagnostic", () => {

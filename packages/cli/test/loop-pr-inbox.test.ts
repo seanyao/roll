@@ -6,6 +6,7 @@
  * gh/git/fs deps.
  */
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -28,13 +29,14 @@ interface Recorder {
   merged: string[];
   healed: string[];
   rebased: string[];
+  repaired: string[];
   circuitCalls: string[];
   /** FIX-367: (num, headRef) pairs the durable merge-record hook saw. */
   mergedRecorded: Array<{ num: string; headRef: string }>;
 }
 
 function harness(overrides: Partial<PrInboxDeps> = {}): { deps: PrInboxDeps; rec: Recorder } {
-  const rec: Recorder = { ticks: [], alerts: [], readied: [], merged: [], healed: [], rebased: [], circuitCalls: [], mergedRecorded: [] };
+  const rec: Recorder = { ticks: [], alerts: [], readied: [], merged: [], healed: [], rebased: [], repaired: [], circuitCalls: [], mergedRecorded: [] };
   const deps: PrInboxDeps = {
     ghAvailable: async () => true,
     resolveSlug: async () => "owner/repo",
@@ -61,6 +63,10 @@ function harness(overrides: Partial<PrInboxDeps> = {}): { deps: PrInboxDeps; rec
     rebaseStale: async (num) => {
       rec.rebased.push(num);
       return { bot: "", ciState: "success", mergeable: "CLEAN" };
+    },
+    repairEvidence: async (num) => {
+      rec.repaired.push(num);
+      return undefined;
     },
     alert: (line) => rec.alerts.push(line),
     writeTick: (t) => rec.ticks.push(t),
@@ -125,6 +131,22 @@ describe("reducePrView — last BOT/APP review + rollup reduction (bin/roll 1199
     const project = tmpProject();
     writeLocalEvidence(project, "US-EVID-019");
     expect(resolvePrEvidence(project, "loop/US-EVID-019", "no trailer")).toEqual({ ok: true, missing: [] });
+  });
+  it("FIX-1204: missing trailer resolves in-repo evidence from the PR head branch", () => {
+    const project = tmpProject();
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: project });
+    execFileSync("git", ["config", "user.email", "test@roll.local"], { cwd: project });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: project });
+    writeFileSync(join(project, "README.md"), "base\n");
+    execFileSync("git", ["add", "README.md"], { cwd: project });
+    execFileSync("git", ["commit", "-q", "-m", "base"], { cwd: project });
+    execFileSync("git", ["checkout", "-q", "-b", "loop/evidence"], { cwd: project });
+    writeLocalEvidence(project, "FIX-1204");
+    execFileSync("git", ["add", ".roll"], { cwd: project });
+    execFileSync("git", ["commit", "-q", "-m", "evidence"], { cwd: project });
+    execFileSync("git", ["checkout", "-q", "main"], { cwd: project });
+
+    expect(resolvePrEvidence(project, "loop/evidence", "Delivers FIX-1204")).toEqual({ ok: true, missing: [] });
   });
   it("US-EVID-019 R2: PRs without a story id are outside the evidence gate", () => {
     const project = tmpProject();
@@ -222,7 +244,54 @@ describe("runPrInbox — per-PR action dispatch", () => {
     });
     await runPrInbox(deps);
     expect(rec.merged).toEqual([]);
+    expect(rec.repaired).toEqual(["81"]);
     expect(rec.alerts[0]).toContain("evidence_unresolvable");
+  });
+  it("FIX-1204: evidence_unresolvable repairs local evidence and then eager-merges", async () => {
+    const { deps, rec } = harness({
+      listOpenPrs: listOf([{ number: 1204, headRefName: "loop/cycle-20260703-1204" }]),
+      viewPr: async () => ({
+        bot: "",
+        ciState: "success",
+        mergeable: "CLEAN",
+        evidenceResolvable: false,
+        evidenceMissing: ["features/loop-engine/FIX-1204/ac-map.json"],
+      }),
+      repairEvidence: async (num, _headRef, _slug, missing) => {
+        rec.repaired.push(`${num}:${missing.join("|")}`);
+        return { bot: "", ciState: "success", mergeable: "CLEAN", evidenceResolvable: true, evidenceMissing: [] };
+      },
+    });
+
+    await runPrInbox(deps);
+
+    expect(rec.repaired).toEqual(["1204:features/loop-engine/FIX-1204/ac-map.json"]);
+    expect(rec.merged).toEqual(["1204"]);
+    expect(rec.alerts).toEqual([]);
+  });
+  it("FIX-1204: failed evidence repair alerts once with the remaining missing evidence", async () => {
+    const { deps, rec } = harness({
+      listOpenPrs: listOf([{ number: 1205, headRefName: "loop/cycle-20260703-1205" }]),
+      viewPr: async () => ({
+        bot: "",
+        ciState: "success",
+        mergeable: "CLEAN",
+        evidenceResolvable: false,
+        evidenceMissing: ["local ac-map unavailable"],
+      }),
+      repairEvidence: async (num) => {
+        rec.repaired.push(num);
+        return undefined;
+      },
+    });
+
+    await runPrInbox(deps);
+
+    expect(rec.repaired).toEqual(["1205"]);
+    expect(rec.merged).toEqual([]);
+    expect(rec.alerts).toHaveLength(1);
+    expect(rec.alerts[0]).toContain("evidence_repair_failed");
+    expect(rec.alerts[0]).toContain("local ac-map unavailable");
   });
   it("US-EVID-019: evidence block alert includes missing paths", async () => {
     const { deps, rec } = harness({

@@ -54,9 +54,9 @@ import {
 } from "@roll/core";
 import { gh, ghAvailable, ghRepoSlug, prMerge, prReady, remoteUrl } from "@roll/infra";
 import { execFileSync } from "node:child_process";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { appendFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { prHealSelf, prRebaseStale } from "./loop-pr-heal.js";
 import { backfillMergedRuns } from "../lib/runs-backfill.js";
 import { acMapCandidates, evidencePathsUnresolved } from "../runner/attest-gate.js";
@@ -145,6 +145,16 @@ export function resolvePrEvidence(projectCwd: string, headRef: string, body: str
 
     const storyId = firstStoryId(`${body}\n${headRef}`);
     if (storyId === undefined) return { ok: true, missing: [] };
+    if (headRef.trim() !== "") {
+      const branchTarget = join(tmp, "branch");
+      mkdirSync(branchTarget, { recursive: true });
+      if (archiveGitTree(projectCwd, headRef, branchTarget) || archiveGitTree(projectCwd, `origin/${headRef}`, branchTarget)) {
+        if (hasAcMap(branchTarget, storyId)) {
+          const missing = evidencePathsUnresolved(branchTarget, storyId);
+          return { ok: missing.length === 0, missing };
+        }
+      }
+    }
     if (hasAcMap(projectCwd, storyId)) {
       const missing = evidencePathsUnresolved(projectCwd, storyId);
       return { ok: missing.length === 0, missing };
@@ -225,6 +235,8 @@ export interface PrInboxDeps {
   rebaseCircuitAllowed: (num: string) => boolean;
   /** Bridged git rebase dance → re-checked facts (or undefined on any failure). */
   rebaseStale: (num: string, headRef: string, slug: string) => Promise<PrViewFacts | undefined>;
+  /** evidence_unresolvable → one bounded self-repair attempt, then re-check facts. */
+  repairEvidence?: (num: string, headRef: string, slug: string, missing: readonly string[]) => Promise<PrViewFacts | undefined>;
   /** Append one ALERT line. */
   alert: (line: string) => void;
   /** Append a pr-tick.jsonl row (with rotation). */
@@ -287,7 +299,21 @@ export async function runPrInbox(deps: PrInboxDeps): Promise<PrTick> {
       continue;
     }
     if (promote.reason === "evidence_unresolvable") {
-      deps.alert(evidenceBlockedAlert(num, facts.evidenceMissing));
+      const repaired = await attemptEvidenceRepair(deps, slug, num, headRef, facts.evidenceMissing);
+      if (repaired !== undefined) {
+        const repairedPromote = promoteDraftAction({
+          isDraft: repaired.isDraft === true,
+          manualMerge: repaired.manualMerge === true,
+          botReview: repaired.bot,
+          ciState: repaired.ciState,
+          mergeable: repaired.mergeable,
+          evidenceResolvable: repaired.evidenceResolvable,
+        });
+        if (repairedPromote.kind === "promote_and_merge") {
+          if (await deps.ready(slug, num)) await doMerge(deps, slug, num, headRef);
+          else deps.warn(`PR #${num}: ready failed — left open`);
+        } else deps.alert(evidenceBlockedAlert(num, repaired.evidenceMissing));
+      }
       continue;
     }
 
@@ -308,21 +334,58 @@ export async function runPrInbox(deps: PrInboxDeps): Promise<PrTick> {
         if (rechecked !== undefined) {
           const re = rebaseRecheckAction(rechecked.ciState, rechecked.mergeable, rechecked.manualMerge === true, rechecked.evidenceResolvable !== false);
           if (re.kind === "merge") await doMerge(deps, slug, num, headRef);
-          else if (re.kind === "skip" && re.reason === "evidence_unresolvable") deps.alert(evidenceBlockedAlert(num, rechecked.evidenceMissing));
+          else if (re.kind === "skip" && re.reason === "evidence_unresolvable") {
+            const repaired = await attemptEvidenceRepair(deps, slug, num, headRef, rechecked.evidenceMissing);
+            if (repaired !== undefined) {
+              const repairedRecheck = rebaseRecheckAction(repaired.ciState, repaired.mergeable, repaired.manualMerge === true, repaired.evidenceResolvable !== false);
+              if (repairedRecheck.kind === "merge") await doMerge(deps, slug, num, headRef);
+              else deps.alert(evidenceBlockedAlert(num, repaired.evidenceMissing));
+            }
+          }
         }
         break;
       }
       case "skip":
-        if (action.reason === "evidence_unresolvable") deps.alert(evidenceBlockedAlert(num, facts.evidenceMissing));
+        if (action.reason === "evidence_unresolvable") {
+          const repaired = await attemptEvidenceRepair(deps, slug, num, headRef, facts.evidenceMissing);
+          if (repaired !== undefined) {
+            const repairedAction = selectPrAction(repaired);
+            if (repairedAction.kind === "merge") await doMerge(deps, slug, num, headRef);
+            else deps.alert(evidenceBlockedAlert(num, repaired.evidenceMissing));
+          }
+        }
         break;
     }
   }
   return emit(deps, prActedTick());
 }
 
+async function attemptEvidenceRepair(
+  deps: PrInboxDeps,
+  slug: string,
+  num: string,
+  headRef: string,
+  missing: readonly string[] | undefined,
+): Promise<PrViewFacts | undefined> {
+  const missingList = missing ?? [];
+  if (deps.repairEvidence === undefined) {
+    deps.alert(evidenceBlockedAlert(num, missingList));
+    return undefined;
+  }
+  const repaired = await deps.repairEvidence(num, headRef, slug, missingList);
+  if (repaired !== undefined && repaired.evidenceResolvable !== false) return repaired;
+  deps.alert(evidenceRepairFailedAlert(num, repaired?.evidenceMissing ?? missingList));
+  return undefined;
+}
+
 function evidenceBlockedAlert(num: string, missing: readonly string[] | undefined): string {
   const suffix = missing !== undefined && missing.length > 0 ? `: ${missing.join(", ")}` : "";
   return `PR #${num}: evidence_unresolvable — merge blocked until Roll-Evidence paths resolve${suffix}`;
+}
+
+function evidenceRepairFailedAlert(num: string, missing: readonly string[] | undefined): string {
+  const suffix = missing !== undefined && missing.length > 0 ? `: ${missing.join(", ")}` : "";
+  return `PR #${num}: evidence_repair_failed after evidence_unresolvable self-repair attempt${suffix}`;
 }
 
 function emit(deps: PrInboxDeps, tick: PrTick): PrTick {
@@ -543,6 +606,98 @@ function writeRebaseAttempts(state: string, pr: string, timestamps: readonly num
   writeFileSync(state, upsertRebaseAttempts(body, pr, renderRebaseAttempts(timestamps)));
 }
 
+function evidenceRepairMarkerPath(num: string): string {
+  return join(runtimeDir(), `.pr-evidence-repair-${num}.attempted`);
+}
+
+function appendPrEvidenceRepairEvent(type: "pr:evidence_repaired" | "pr:evidence_repair_failed", num: string, detail: string): void {
+  try {
+    const file = join(runtimeDir(), "events.ndjson");
+    mkdirSync(dirname(file), { recursive: true });
+    appendFileSync(file, `${JSON.stringify({ type, prNumber: Number(num), detail, ts: Date.now() })}\n`);
+  } catch {
+    /* observability must not break the PR tick */
+  }
+}
+
+function runRepairEvidenceCommand(num: string): { storyId: string } | undefined {
+  const entry = process.argv[1] ?? "";
+  const useNode = entry.endsWith(".js") || entry.endsWith(".mjs");
+  const out = execFileSync(useNode ? process.execPath : "roll", [
+    ...(useNode ? [entry] : []),
+    "supervisor",
+    "repair-evidence",
+    num,
+    "--json",
+  ], { cwd: process.cwd(), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const parsed = JSON.parse(out) as { storyId?: unknown; verdict?: unknown };
+  if (parsed.verdict !== "repaired" && parsed.verdict !== "already_repaired") return undefined;
+  return typeof parsed.storyId === "string" && parsed.storyId !== "" ? { storyId: parsed.storyId } : undefined;
+}
+
+function copyIfExists(src: string, dst: string): void {
+  if (!existsSync(src)) return;
+  cpSync(src, dst, { recursive: true, force: true });
+}
+
+function attachEvidenceRepairToPrBranch(storyId: string, headRef: string): void {
+  if (storyId === "" || headRef === "") return;
+  const cwd = process.cwd();
+  const acMap = acMapCandidates(cwd, storyId).find((p) => existsSync(p));
+  if (acMap === undefined) return;
+  const cardRoot = dirname(acMap);
+  const relCard = relative(cwd, cardRoot);
+  if (relCard === "" || relCard.startsWith("..")) return;
+  const temp = mkdtempSync(join(tmpdir(), "roll-pr-evidence-repair-"));
+  const saved = join(temp, "card");
+  mkdirSync(saved, { recursive: true });
+  for (const entry of ["ac-map.json", "evidence", "latest", "screenshots"]) copyIfExists(join(cardRoot, entry), join(saved, entry));
+  let current = "";
+  try {
+    current = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd, encoding: "utf8" }).trim();
+    execFileSync("git", ["fetch", "origin", headRef], { cwd, stdio: "ignore" });
+    execFileSync("git", ["checkout", "-B", headRef, "FETCH_HEAD"], { cwd, stdio: "ignore" });
+    mkdirSync(cardRoot, { recursive: true });
+    for (const entry of ["ac-map.json", "evidence", "latest", "screenshots"]) copyIfExists(join(saved, entry), join(cardRoot, entry));
+    execFileSync("git", ["add", "-A", "--", relCard], { cwd, stdio: "ignore" });
+    const dirty = execFileSync("git", ["status", "--porcelain", "--", relCard], { cwd, encoding: "utf8" }).trim();
+    if (dirty !== "") {
+      execFileSync("git", ["commit", "-m", `chore: attach acceptance evidence for ${storyId}`], { cwd, stdio: "ignore" });
+      execFileSync("git", ["push", "origin", `HEAD:${headRef}`], { cwd, stdio: "ignore" });
+    }
+  } finally {
+    if (current !== "" && current !== "HEAD") {
+      try {
+        execFileSync("git", ["checkout", current], { cwd, stdio: "ignore" });
+      } catch {
+        /* best-effort restore */
+      }
+    }
+    rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+async function repairEvidenceOnce(num: string, headRef: string, slug: string, missing: readonly string[]): Promise<PrViewFacts | undefined> {
+  const marker = evidenceRepairMarkerPath(num);
+  if (existsSync(marker)) return undefined;
+  mkdirSync(dirname(marker), { recursive: true });
+  writeFileSync(marker, `${new Date().toISOString()} ${missing.join(", ")}\n`);
+  try {
+    const repaired = runRepairEvidenceCommand(num);
+    if (repaired !== undefined) attachEvidenceRepairToPrBranch(repaired.storyId, headRef);
+    const r = await gh(["-R", slug, "pr", "view", num, "--json", "reviews,mergeStateStatus,statusCheckRollup,body,labels,isDraft"]);
+    if (r.code !== 0 || r.stdout.trim() === "") return undefined;
+    const raw = JSON.parse(r.stdout) as PrViewRaw;
+    const facts = reducePrView(raw);
+    const evidence = resolvePrEvidence(process.cwd(), headRef, raw.body ?? "");
+    appendPrEvidenceRepairEvent(evidence.ok ? "pr:evidence_repaired" : "pr:evidence_repair_failed", num, evidence.missing.join(", "));
+    return { ...facts, evidenceResolvable: evidence.ok, evidenceMissing: evidence.missing };
+  } catch {
+    appendPrEvidenceRepairEvent("pr:evidence_repair_failed", num, missing.join(", "));
+    return undefined;
+  }
+}
+
 function realDeps(): PrInboxDeps {
   const { yellow, nc } = pal();
   return {
@@ -604,6 +759,7 @@ function realDeps(): PrInboxDeps {
         return undefined;
       }
     },
+    repairEvidence: (num, headRef, slug, missing) => repairEvidenceOnce(num, headRef, slug, missing),
     alert: appendAlert,
     writeTick: writeTickFile,
     info: (line) => process.stdout.write(`${yellow}[roll]${nc} ${line}\n`),

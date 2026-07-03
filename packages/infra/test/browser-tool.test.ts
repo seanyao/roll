@@ -193,7 +193,21 @@ describe("US-TOOL-005 BrowserTool", () => {
   it("physical.screenshot writes a Roll Capture request and never falls back to browser lanes", async () => {
     const dir = mkdtempSync(join(tmpdir(), "roll-physical-tool-"));
     const screenshotPath = join(dir, "physical.png");
-    const provider = new RollCaptureProvider({ root: dir, defaultPollIntervalMs: 1 });
+    let now = 0;
+    let responseWritten = false;
+    const provider = new RollCaptureProvider({
+      root: dir,
+      defaultPollIntervalMs: 1,
+      now: () => now,
+      sleep: async (ms) => {
+        now += ms;
+        if (!responseWritten) {
+          mkdirSync(join(dir, "responses"), { recursive: true });
+          writeFileSync(join(dir, "responses", `response-${request.requestId}.json`), JSON.stringify(response), "utf8");
+          responseWritten = true;
+        }
+      },
+    });
     const request: RollCaptureRequestV1 = {
       protocol: ROLL_CAPTURE_PROTOCOL_V1,
       requestId: "US-TOOL-005-physical-terminal",
@@ -214,8 +228,6 @@ describe("US-TOOL-005 BrowserTool", () => {
       startedAt: "2026-07-03T11:35:01.100+08:00",
       finishedAt: "2026-07-03T11:35:01.820+08:00",
     };
-    mkdirSync(join(dir, "responses"), { recursive: true });
-    writeFileSync(join(dir, "responses", `response-${request.requestId}.json`), JSON.stringify(response), "utf8");
     const deps = fakeDeps((command) => {
       return { exitCode: 1, stdout: "", stderr: "unexpected", timedOut: false };
     });

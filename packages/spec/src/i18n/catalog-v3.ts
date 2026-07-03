@@ -35,6 +35,22 @@ export const v3Catalog: Catalog = {
     en: "attribution errors",
     zh: "归因错误",
   },
+  "north.metric_short.autonomy": {
+    en: "auto",
+    zh: "自主",
+  },
+  "north.metric_short.deliveryRate": {
+    en: "delivery",
+    zh: "交付",
+  },
+  "north.metric_short.fixTax": {
+    en: "fix",
+    zh: "修复",
+  },
+  "north.metric_short.attributionErrors": {
+    en: "attr",
+    zh: "归因",
+  },
   "north.no_data": {
     en: "no data",
     zh: "暂无数据",

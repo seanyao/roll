@@ -64,6 +64,7 @@ describe("frozen: roll status render", () => {
     const ts = tsStatus({ ROLL_RENDER_FIXTURE: "1" }, fixProj).split(basename(fixProj)).join("<PROJECT>");
     expect(ts.trimStart().split("\n")[0]).toContain("WARN");
     expect(ts.trimStart().split("\n")[1]).toContain("North");
+    expect(ts.trimStart().split("\n")[1]).not.toContain("…");
     expect(ts).toMatchInlineSnapshot(`
       "  WARN    main reconciled vs backlog   exit 1
         North  no data
@@ -185,9 +186,10 @@ describe("frozen: roll status render", () => {
       .join("<PROJ>");
     expect(ts.trimStart().split("\n")[0]).toContain("UNKNOWN");
     expect(ts.trimStart().split("\n")[1]).toContain("North");
+    expect(ts.trimStart().split("\n")[1]).not.toContain("…");
     expect(ts).toMatchInlineSnapshot(`
       "  UNKNOWN  no truth snapshot — run roll index
-        North  autonomy no data ● · delivery rate no data ● · fix tax no data ● · attribution errors no d…
+        North  auto no data ● · delivery no data ● · fix no data ● · attr no data ●
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 

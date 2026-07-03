@@ -267,6 +267,10 @@ function metricName(key: MetricKey, lang: Lang): string {
   return t(v3Catalog, lang, `north.metric.${key}`);
 }
 
+function metricShortName(key: MetricKey, lang: Lang): string {
+  return t(v3Catalog, lang, `north.metric_short.${key}`);
+}
+
 function reasonText(reason: string | undefined, lang: Lang): string {
   if (reason === undefined || reason === "") return t(v3Catalog, lang, "north.reason.unknown");
   return t(v3Catalog, lang, `north.reason.${reason}`);
@@ -348,7 +352,7 @@ export function renderNorthStatusSummary(report: NorthStarReport | undefined, la
   const parts = METRIC_KEYS.map((key) => {
     const metric = report.metrics[key];
     const value = metric.current === null ? t(v3Catalog, lang, "north.no_data") : metricValue(key, metric.current, metric.target.unit);
-    return `${metricName(key, lang)} ${value} ${c(statusColor(renderStatus(metric)), "●")}`;
+    return `${metricShortName(key, lang)} ${value} ${c(statusColor(renderStatus(metric)), "●")}`;
   });
   return trunc(`  ${t(v3Catalog, lang, "north.status_title")}  ${parts.join(c("muted", " · "))}`, width);
 }

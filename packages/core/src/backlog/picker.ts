@@ -78,6 +78,7 @@ export interface PickOptions {
 
 /** First occurrence of a depends-on tag, mirroring the bash regex. */
 const DEPENDS_ON_RE = /depends-on:([A-Za-z][A-Za-z0-9,-]+)/;
+const STORY_ID_TOKEN_RE = /^(?:US|FIX|REFACTOR|IDEA)(?:-[A-Z0-9]+)*-\d+[a-z]?$/;
 
 /** Token-bounded id reference, mirroring bash gate 2 `${id}([^0-9A-Za-z]|$)`. */
 export function prTitleReferences(id: string, title: string): boolean {
@@ -117,7 +118,8 @@ function bodyRollEvidenceReferences(id: string, body: string | undefined): boole
   if (body === undefined) return false;
   for (const line of body.split(/\r?\n/)) {
     const match = /^Roll-Evidence:\s+(\S+)(?:\s+.*)?$/.exec(line.trim());
-    if (match?.[1] === id) return true;
+    const storyId = match?.[1];
+    if (storyId !== undefined && STORY_ID_TOKEN_RE.test(storyId) && storyId === id) return true;
   }
   return false;
 }

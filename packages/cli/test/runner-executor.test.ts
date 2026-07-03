@@ -1338,7 +1338,7 @@ describe("executeCommand — command → executor mapping", () => {
     });
   });
 
-  it("FIX-1205: delivery truth pending_merge blocks a repick even when gh has no matching PR", async () => {
+  it("FIX-1205: stale delivery pending_merge does not block when no open PR references the card", async () => {
     const { ports, calls } = fakePorts({
       backlog: { read: () => [
         { id: "US-CAPTURE-006", desc: "est_min:5", status: "📋 Todo" },
@@ -1347,15 +1347,9 @@ describe("executeCommand — command → executor mapping", () => {
       pendingMergeDelivery: (id) => (id === "US-CAPTURE-006" ? { prNumber: 6 } : undefined),
     });
     const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
-    expect(r.event).toEqual({ type: "story_picked", storyId: "US-CAPTURE-007" });
+    expect(r.event).toEqual({ type: "story_picked", storyId: "US-CAPTURE-006" });
     const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1]);
-    expect(events).toContainEqual({
-      type: "pick:skipped",
-      cycleId: CTX.cycleId,
-      storyId: "US-CAPTURE-006",
-      reason: "awaiting merge of PR #6",
-      ts: 42000,
-    });
+    expect(events).not.toContainEqual(expect.objectContaining({ type: "pick:skipped", storyId: "US-CAPTURE-006" }));
   });
 
   it("FIX-1205: only scoped card pending merge idles instead of re-picking", async () => {

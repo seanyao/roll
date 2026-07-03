@@ -372,6 +372,19 @@ describe("buildHasOpenPr — predicate from open PR titles", () => {
     expect(hasOpenPr("US-CAPTURE-007")).toBe(true);
   });
 
+  it("FIX-1205: ignores Roll-Evidence trailers whose captured token is not a story id", () => {
+    const hasOpenPr = buildHasOpenPr([
+      {
+        number: 6,
+        title: "loop cycle cycle-21303",
+        headRefName: "loop/cycle-21303",
+        body: "Roll-Evidence: comment e.g. US-CAPTURE-006 is referenced in prose\n",
+      },
+    ]);
+    expect(hasOpenPr("comment")).toBe(false);
+    expect(hasOpenPr("US-CAPTURE-006")).toBe(false);
+  });
+
   // AC3 fixture: all todos have open PRs → assessBacklog reason=all_awaiting_merge
   it("AC3: all todos blocked by open PR → all_awaiting_merge in assessBacklog", () => {
     const items = [

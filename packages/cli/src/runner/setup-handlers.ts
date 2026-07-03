@@ -225,11 +225,16 @@ export async function executeSetupCommand(
       const pendingMergeReason = (id: string): string | undefined => {
         const pendingMerge = ports.pendingMergeDelivery?.(id);
         if (pendingMerge === undefined) return undefined;
+        if (!githubHasOpenPr(id)) return undefined;
         return pendingMerge.prNumber === undefined ? "awaiting merge of open PR" : `awaiting merge of PR #${pendingMerge.prNumber}`;
       };
-      const hasOpenPr = ((id: string): boolean => githubHasOpenPr(id) || pendingMergeReason(id) !== undefined) as HasOpenPr;
+      const hasOpenPr = ((id: string): boolean => githubHasOpenPr(id)) as HasOpenPr;
       Object.defineProperty(hasOpenPr, "openPrBlockReason", {
-        value: (id: string): string | undefined => openPrBlockReason(id, githubHasOpenPr) ?? pendingMergeReason(id),
+        value: (id: string): string | undefined => {
+          const githubReason = openPrBlockReason(id, githubHasOpenPr);
+          if (githubReason !== "awaiting merge of open PR") return githubReason ?? pendingMergeReason(id);
+          return pendingMergeReason(id) ?? githubReason;
+        },
       });
       const pendingPublish = readPendingPublish(dirname(ports.paths.eventsPath));
       const eligibility: PickOptions = {

@@ -1314,7 +1314,7 @@ describe("executeCommand — command → executor mapping", () => {
 
     it("preflight flips an externally-merged 📋 Todo card to ✅ Done via the unified truth", async () => {
       const markStatus = vi.fn();
-      const { ports } = fakePorts({
+      const { ports, calls } = fakePorts({
         backlog: {
           read: vi.fn(() => [{ id: "FIX-EXT-1", desc: "est_min:5", status: "📋 Todo" }]),
           markStatus,
@@ -1323,9 +1323,9 @@ describe("executeCommand — command → executor mapping", () => {
       });
       const r = await executeCommand({ kind: "preflight" }, ports, CTX);
       expect(r.event).toEqual({ type: "preflight_done" });
-      // Flipped to Done even though runs.jsonl carries NO merged row for it —
-      // the structured projection (git merge) is the authoritative signal.
-      expect(markStatus).toHaveBeenCalledWith("/repo", "FIX-EXT-1", "✅ Done");
+      expect(markStatus).not.toHaveBeenCalledWith("/repo", "FIX-EXT-1", "✅ Done");
+      expect(markStatus).toHaveBeenCalledWith("/repo", "FIX-EXT-1", "✅ Done · evidence_debt");
+      expect((calls["alert"] ?? []).map((a) => String((a as unknown[])[1])).join("\n")).toContain("evidence_debt");
     });
 
     it("a loop-cycle card is NOT spuriously flipped/skipped when the unified truth says not-delivered", async () => {
@@ -1625,7 +1625,7 @@ describe("executeCommand — command → executor mapping", () => {
     const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-signals-")));
     execDirs.push(rt);
     const base = fakePorts();
-    const { ports } = fakePorts({
+    const { ports, calls } = fakePorts({
       paths: {
         ...base.ports.paths,
         eventsPath: join(rt, "events.ndjson"),
@@ -1779,7 +1779,7 @@ describe("executeCommand — command → executor mapping", () => {
     const wt = join(repo, "wt");
     mkdirSync(wt, { recursive: true });
     const base = fakePorts();
-    const { ports } = fakePorts({
+    const { ports, calls } = fakePorts({
       repoCwd: repo,
       paths: {
         ...base.ports.paths,
@@ -2296,6 +2296,19 @@ describe("executeCommand — command → executor mapping", () => {
     const { ports } = fakePorts();
     await executeCommand({ kind: "capture_facts" }, ports, CTX);
     expect(ports.attest.render).not.toHaveBeenCalled();
+  });
+
+  it("US-EVID-019: attest render failure hard-blocks capture_facts", async () => {
+    const { ports, calls } = fakePorts({
+      attest: { render: vi.fn(async () => 2) },
+    });
+    const r = await executeCommand(
+      { kind: "capture_facts" },
+      ports,
+      { ...CTX, evidenceRunDir: "/frame", startSec: 1 },
+    );
+    expect(r.event).toMatchObject({ type: "facts_captured", facts: { gateBlocked: true } });
+    expect((calls["alert"] ?? []).map((a) => String((a as unknown[])[1])).join("\n")).toContain("attest render failed");
   });
 
   // FIX-207 — attest gate is wired into capture_facts (delivery without a fresh
@@ -2871,31 +2884,115 @@ describe("executeCommand — command → executor mapping", () => {
         runPublishPlan: vi.fn(async () => ({ status: 0 as const, prUrl: "https://github.com/o/r/pull/42", ok: true })),
       },
     });
-    const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
+    const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, { ...CTX, storyId: undefined });
     expect(r.ctxPatch).toMatchObject({ prUrl: "https://github.com/o/r/pull/42" });
   });
 
   it("publish_pr with a slug runs the publish plan → published(status 0)", async () => {
     const { ports } = fakePorts();
-    const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
+    const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, { ...CTX, storyId: undefined });
     expect(r.event).toEqual({ type: "published", result: { status: 0, manualMerge: false } });
+  });
+
+  it("US-EVID-019: publish_pr appends Roll-Evidence trailer for nested roll-meta evidence", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-publish-evidence-")));
+    execDirs.push(repo);
+    const remote = realpathSync(mkdtempSync(join(tmpdir(), "roll-publish-evidence-remote-")));
+    execDirs.push(remote);
+    execFileSync("git", ["init", "-q", "--bare"], { cwd: remote });
+    const cardDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
+    mkdirSync(cardDir, { recursive: true });
+    writeFileSync(join(cardDir, "ac-map.json"), "[]\n");
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["config", "user.email", "test@roll.local"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["remote", "add", "origin", remote], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["add", "-A"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["commit", "-q", "-m", "evidence"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["push", "-q", "-u", "origin", "main"], { cwd: join(repo, ".roll") });
+
+    let body = "";
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      metadata: { commit: vi.fn(async () => ({ committed: false, pushed: false, nothingToCommit: true })) },
+      github: {
+        ...fakePorts().ports.github,
+        prState: vi.fn(async () => "UNKNOWN"),
+        runPublishPlan: vi.fn(async (plan: Array<{ kind: string; argv: string[] }>) => {
+          const create = plan.find((step) => step.kind === "gh-pr-create");
+          const bodyFlag = create?.argv.indexOf("--body") ?? -1;
+          body = bodyFlag >= 0 ? (create?.argv[bodyFlag + 1] ?? "") : "";
+          return { status: 0 as const, prUrl: "https://github.com/o/r/pull/44", ok: true };
+        }),
+      },
+    });
+    await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
+    expect((calls["alert"] ?? []).map((a) => String((a as unknown[])[1])).join("\n")).toBe("");
+    expect(body).toContain("Roll-Evidence: US-RUN-001 roll-meta@");
+    expect(body).toContain("features/uncategorized/US-RUN-001/ac-map.json");
+  });
+
+  it("US-EVID-019 R2: publish_pr blocks when roll-meta HEAD is not reachable on origin", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-publish-unpushed-")));
+    execDirs.push(repo);
+    const remote = realpathSync(mkdtempSync(join(tmpdir(), "roll-publish-unpushed-remote-")));
+    execDirs.push(remote);
+    execFileSync("git", ["init", "-q", "--bare"], { cwd: remote });
+    const cardDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
+    mkdirSync(cardDir, { recursive: true });
+    writeFileSync(join(cardDir, "ac-map.json"), "[]\n");
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["config", "user.email", "test@roll.local"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["remote", "add", "origin", remote], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["add", "-A"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["commit", "-q", "-m", "evidence"], { cwd: join(repo, ".roll") });
+
+    const runPublishPlan = vi.fn(async () => ({ status: 0 as const, prUrl: "https://github.com/o/r/pull/45", ok: true }));
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      metadata: { commit: vi.fn(async () => ({ committed: false, pushed: false, nothingToCommit: true })) },
+      github: {
+        ...fakePorts().ports.github,
+        prState: vi.fn(async () => "UNKNOWN"),
+        runPublishPlan,
+      },
+    });
+    const result = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
+    expect(result.event).toEqual({ type: "published", result: { status: 1, manualMerge: false } });
+    expect(runPublishPlan).not.toHaveBeenCalled();
+    const alerts = (calls["alert"] ?? []).map((a) => String((a as unknown[])[1])).join("\n");
+    expect(alerts).toContain("Roll-Evidence");
+    expect(alerts).toContain("origin");
   });
 
   it("FIX-909: needs-review publish opens a draft manual PR", async () => {
     const { ports } = fakePorts();
-    const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false, manualMerge: true, draft: true }, ports, CTX);
+    const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false, manualMerge: true, draft: true }, ports, { ...CTX, storyId: undefined });
     expect(r.event).toEqual({ type: "published", result: { status: 0, manualMerge: true, draft: true } });
   });
 
   it("US-V4-001: publish_pr does NOT mount an execution section onto a story index.html", async () => {
     const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-exec-mount-")));
     execDirs.push(repo);
+    const remote = realpathSync(mkdtempSync(join(tmpdir(), "roll-exec-mount-remote-")));
+    execDirs.push(remote);
+    execFileSync("git", ["init", "-q", "--bare"], { cwd: remote });
     const dir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
     mkdirSync(dir, { recursive: true });
     const skeleton = '<html><section class="phase phase-pending" data-phase="execution"><h2>x</h2><p>e</p></section></html>';
     writeFileSync(join(dir, "index.html"), skeleton, "utf8");
+    writeFileSync(join(dir, "ac-map.json"), "[]\n");
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["config", "user.email", "test@roll.local"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["remote", "add", "origin", remote], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["add", "-A"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["commit", "-q", "-m", "evidence"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["push", "-q", "-u", "origin", "main"], { cwd: join(repo, ".roll") });
     const { ports } = fakePorts({
       repoCwd: repo,
+      metadata: { commit: vi.fn(async () => ({ committed: false, pushed: false, nothingToCommit: true })) },
       github: {
         ...fakePorts().ports.github,
         prState: vi.fn(async () => "UNKNOWN"), // fresh branch (FIX-245 probe)
@@ -3022,7 +3119,7 @@ describe("executeCommand — command → executor mapping", () => {
   // did not merge (committed-but-unmerged) leaves the card NOT Done. ───────────
   it("FIX-295 (AC-FIX1): append_run `done` flips Done ONLY when the PR is MERGED", async () => {
     const markStatus = vi.fn();
-    const { ports } = fakePorts({
+    const { ports, calls } = fakePorts({
       backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "🔨 In Progress" }]), markStatus },
       github: { ...fakePorts().ports.github, prMergeInfo: vi.fn(async () => ({ state: "MERGED", mergedAt: "2026-06-21T00:00:00Z", mergeCommit: "abc123def456" })) },
     });
@@ -3031,7 +3128,9 @@ describe("executeCommand — command → executor mapping", () => {
       ports,
       CTX,
     );
-    expect(markStatus).toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done");
+    expect(markStatus).not.toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done");
+    expect(markStatus).toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done · evidence_debt");
+    expect((calls["alert"] ?? []).map((a) => String((a as unknown[])[1])).join("\n")).toContain("evidence_debt");
   });
 
   it("FIX-295 (AC-FIX1): a delivered cycle whose PR is still OPEN does NOT flip Done", async () => {
@@ -3144,7 +3243,7 @@ describe("executeCommand — command → executor mapping", () => {
 
   it("FIX-304: a genuinely MERGED `done` terminal KEEPS ✅ Done (no revert)", async () => {
     const markStatus = vi.fn();
-    const { ports } = fakePorts({
+    const { ports, calls } = fakePorts({
       backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "✅ Done" }]), markStatus },
       github: { ...fakePorts().ports.github, prMergeInfo: vi.fn(async () => ({ state: "MERGED", mergedAt: "2026-06-21T00:00:00Z", mergeCommit: "abc123def456" })) },
     });
@@ -3153,8 +3252,10 @@ describe("executeCommand — command → executor mapping", () => {
       ports,
       { ...CTX, preCycleStatus: "📋 Todo" },
     );
-    // Merged → Done is true; it is (re)affirmed, never reverted to Todo.
-    expect(markStatus).toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done");
+    // Legacy merged rows with no evidence directory are allowed but explicitly marked as debt.
+    expect(markStatus).not.toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done");
+    expect(markStatus).toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done · evidence_debt");
+    expect((calls["alert"] ?? []).map((a) => String((a as unknown[])[1])).join("\n")).toContain("evidence_debt");
     expect(markStatus).not.toHaveBeenCalledWith("/repo", "US-RUN-001", "📋 Todo");
   });
 

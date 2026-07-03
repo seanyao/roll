@@ -121,6 +121,16 @@ describe("selectPrAction — composed inbox body (bin/roll 12003-12048)", () => 
       reason: "bot_approved",
     });
   });
+  it("unresolvable evidence blocks eager and bot-approved merges", () => {
+    expect(selectPrAction({ bot: "APPROVED", ciState: "success", mergeable: "CLEAN", evidenceResolvable: false })).toEqual({
+      kind: "skip",
+      reason: "evidence_unresolvable",
+    });
+    expect(selectPrAction({ bot: "", ciState: "success", mergeable: "CLEAN", evidenceResolvable: false })).toEqual({
+      kind: "skip",
+      reason: "evidence_unresolvable",
+    });
+  });
   it("manualMerge blocks bot-approved and eager merges", () => {
     expect(selectPrAction({ bot: "APPROVED", ciState: "success", mergeable: "CLEAN", manualMerge: true })).toEqual({
       kind: "skip",
@@ -176,6 +186,19 @@ describe("promoteDraftAction — FIX-1027 manual review draft promotion", () => 
     ).toEqual({ kind: "promote_and_merge" });
   });
 
+  it("unresolvable evidence blocks manual draft promotion", () => {
+    expect(
+      promoteDraftAction({
+        isDraft: true,
+        manualMerge: true,
+        botReview: "APPROVED",
+        ciState: "success",
+        mergeable: "CLEAN",
+        evidenceResolvable: false,
+      }),
+    ).toEqual({ kind: "skip", reason: "evidence_unresolvable" });
+  });
+
   it("CI green without bot APPROVED preserves the FIX-909 review gate", () => {
     expect(
       promoteDraftAction({
@@ -225,6 +248,9 @@ describe("promoteDraftAction — FIX-1027 manual review draft promotion", () => 
 describe("rebaseRecheckAction (bin/roll 12030-12043)", () => {
   it("clean after rebase → merge eager_after_rebase", () => {
     expect(rebaseRecheckAction("success", "CLEAN")).toEqual({ kind: "merge", reason: "eager_after_rebase" });
+  });
+  it("unresolvable evidence stays open after rebase", () => {
+    expect(rebaseRecheckAction("success", "CLEAN", false, false)).toEqual({ kind: "skip", reason: "evidence_unresolvable" });
   });
   it("manualMerge stays open after rebase", () => {
     expect(rebaseRecheckAction("success", "CLEAN", true)).toEqual({ kind: "skip", reason: "manual_merge_required" });

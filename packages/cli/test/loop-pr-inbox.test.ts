@@ -5,12 +5,17 @@
  * rebase circuit→recheck→merge chain, and the terminal tick — all with faked
  * gh/git/fs deps.
  */
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { PrTick } from "@roll/core";
 import {
   type PrInboxDeps,
   type PrViewFacts,
+  parseRollEvidenceTrailer,
   reducePrView,
+  resolvePrEvidence,
   runPrInbox,
   upsertRebaseAttempts,
 } from "../src/commands/loop-pr-inbox.js";
@@ -70,6 +75,22 @@ function listOf(prs: Array<{ number: number; headRefName: string }>): PrInboxDep
   return async () => ({ code: 0, stdout: JSON.stringify(prs) });
 }
 
+function tmpProject(): string {
+  return realpathSync(mkdtempSync(join(tmpdir(), "roll-pr-inbox-")));
+}
+
+function writeLocalEvidence(project: string, storyId: string): void {
+  const card = join(project, ".roll", "features", "uncategorized", storyId);
+  mkdirSync(join(card, "latest"), { recursive: true });
+  mkdirSync(join(card, "screenshots"), { recursive: true });
+  writeFileSync(join(card, "screenshots", "proof.png"), "png\n");
+  writeFileSync(
+    join(card, "ac-map.json"),
+    JSON.stringify([{ ac: `${storyId}:AC1`, status: "pass", evidence: [{ kind: "screenshot", href: "screenshots/proof.png" }] }], null, 2) + "\n",
+  );
+  writeFileSync(join(card, "latest", `${storyId}-report.html`), "<html>proof</html>\n");
+}
+
 describe("reducePrView — last BOT/APP review + rollup reduction (bin/roll 11996-12007)", () => {
   it("picks the LAST bot/app review state", () => {
     const f = reducePrView({
@@ -90,6 +111,31 @@ describe("reducePrView — last BOT/APP review + rollup reduction (bin/roll 1199
   it("detects manual-merge marker from PR body or labels", () => {
     expect(reducePrView({ body: "fix\n\n[roll:manual-merge]" }).manualMerge).toBe(true);
     expect(reducePrView({ labels: [{ name: "manual-merge" }] }).manualMerge).toBe(true);
+  });
+  it("US-EVID-019: parses the Roll-Evidence trailer", () => {
+    expect(parseRollEvidenceTrailer("body\n\nRoll-Evidence: US-EVID-019 roll-meta@abcdef123456 features/e/US/ac-map.json\n")).toEqual({
+      storyId: "US-EVID-019",
+      repo: "roll-meta",
+      sha: "abcdef123456",
+      acMapPath: "features/e/US/ac-map.json",
+    });
+    expect(parseRollEvidenceTrailer("no trailer")).toBeNull();
+  });
+  it("US-EVID-019 R2: missing trailer falls back to local roll-meta disk evidence", () => {
+    const project = tmpProject();
+    writeLocalEvidence(project, "US-EVID-019");
+    expect(resolvePrEvidence(project, "loop/US-EVID-019", "no trailer")).toEqual({ ok: true, missing: [] });
+  });
+  it("US-EVID-019 R2: PRs without a story id are outside the evidence gate", () => {
+    const project = tmpProject();
+    expect(resolvePrEvidence(project, "renovate/typescript", "dependency maintenance")).toEqual({ ok: true, missing: [] });
+  });
+  it("US-EVID-019 R2: story PRs without trailer or local evidence are unresolvable with remediation", () => {
+    const project = tmpProject();
+    const result = resolvePrEvidence(project, "loop/US-EVID-019", "no trailer");
+    expect(result.ok).toBe(false);
+    expect(result.missing.join("\n")).toContain("remediation");
+    expect(result.missing.join("\n")).toContain("US-EVID-019");
   });
   it("any FAILURE → failure ci", () => {
     const f = reducePrView({ statusCheckRollup: [{ conclusion: "SUCCESS" }, { conclusion: "FAILURE" }] });
@@ -169,6 +215,30 @@ describe("runPrInbox — per-PR action dispatch", () => {
     await runPrInbox(deps);
     expect(rec.merged).toEqual(["8"]);
   });
+  it("US-EVID-019: unresolvable evidence blocks eager auto-merge", async () => {
+    const { deps, rec } = harness({
+      listOpenPrs: listOf([{ number: 81, headRefName: "loop/missing-evidence" }]),
+      viewPr: async () => ({ bot: "", ciState: "success", mergeable: "CLEAN", evidenceResolvable: false }),
+    });
+    await runPrInbox(deps);
+    expect(rec.merged).toEqual([]);
+    expect(rec.alerts[0]).toContain("evidence_unresolvable");
+  });
+  it("US-EVID-019: evidence block alert includes missing paths", async () => {
+    const { deps, rec } = harness({
+      listOpenPrs: listOf([{ number: 83, headRefName: "loop/missing-list" }]),
+      viewPr: async () => ({
+        bot: "APPROVED",
+        ciState: "success",
+        mergeable: "CLEAN",
+        evidenceResolvable: false,
+        evidenceMissing: ["US-EVID-019:AC1 screenshots/missing.png"],
+      }),
+    });
+    await runPrInbox(deps);
+    expect(rec.merged).toEqual([]);
+    expect(rec.alerts[0]).toContain("screenshots/missing.png");
+  });
   it("FIX-1027: manual draft + bot APPROVED + clean → ready first, then merge", async () => {
     const { deps, rec } = harness({
       listOpenPrs: listOf([{ number: 30, headRefName: "loop/manual-review" }]),
@@ -199,6 +269,23 @@ describe("runPrInbox — per-PR action dispatch", () => {
     await runPrInbox(deps);
     expect(rec.readied).toEqual([]);
     expect(rec.merged).toEqual([]);
+  });
+  it("US-EVID-019: unresolvable evidence blocks manual draft promotion", async () => {
+    const { deps, rec } = harness({
+      listOpenPrs: listOf([{ number: 82, headRefName: "loop/manual-missing-evidence" }]),
+      viewPr: async () => ({
+        bot: "APPROVED",
+        ciState: "success",
+        mergeable: "CLEAN",
+        manualMerge: true,
+        isDraft: true,
+        evidenceResolvable: false,
+      }),
+    });
+    await runPrInbox(deps);
+    expect(rec.readied).toEqual([]);
+    expect(rec.merged).toEqual([]);
+    expect(rec.alerts[0]).toContain("evidence_unresolvable");
   });
   it("FIX-1027 guard: failed ready leaves the PR unmerged for the next tick", async () => {
     const { deps, rec } = harness({
@@ -309,6 +396,21 @@ describe("runPrInbox — stale → rebase circuit → recheck → merge", () => 
     expect(rec.merged).toEqual(["20"]);
     // FIX-367: the post-rebase merge path also records merge truth durably.
     expect(rec.mergedRecorded).toEqual([{ num: "20", headRef: "loop/r" }]);
+  });
+
+  it("US-EVID-019: unresolvable evidence blocks post-rebase eager merge", async () => {
+    const { deps, rec } = harness({
+      listOpenPrs: listOf([{ number: 23, headRefName: "loop/u" }]),
+      viewPr: async () => staleView,
+      rebaseStale: async (num) => {
+        rec.rebased.push(num);
+        return { bot: "", ciState: "success", mergeable: "CLEAN", evidenceResolvable: false };
+      },
+    });
+    await runPrInbox(deps);
+    expect(rec.rebased).toEqual(["23"]);
+    expect(rec.merged).toEqual([]);
+    expect(rec.alerts[0]).toContain("evidence_unresolvable");
   });
 
   it("circuit TRIPPED → no rebase, no merge (honors the verdict)", async () => {

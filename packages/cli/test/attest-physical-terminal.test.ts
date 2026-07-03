@@ -255,6 +255,8 @@ describe("Attest gate: physical_terminal evidence validation", () => {
     const cardDir = join(wt, ".roll", "features", "init-onboard", storyId);
     const latestDir = join(cardDir, "latest");
     mkdirSync(latestDir, { recursive: true });
+    mkdirSync(join(cardDir, "screenshots"), { recursive: true });
+    writeFileSync(join(cardDir, "screenshots", "pt.png"), "png\n");
     writeFileSync(join(latestDir, `evidence.json`), JSON.stringify({ captures }));
     writeFileSync(
       join(latestDir, `${storyId}-report.html`),

@@ -83,10 +83,25 @@ function seedFeatureCard(root: string, storyId: string, title: string = "Runner 
       {
         ac: `${storyId}:AC1`,
         status: "pass",
-        evidence: [{ kind: "test-pass", label: `${storyId} green path` }],
+        evidence: [{ kind: "screenshot", label: `${storyId} terminal proof`, href: "screenshots/proof.png" }],
       },
     ]),
   );
+  mkdirSync(join(storyDir, "screenshots"), { recursive: true });
+  writeFileSync(join(storyDir, "screenshots", "proof.png"), "png\n");
+  mkdirSync(join(storyDir, "latest"), { recursive: true });
+  writeFileSync(join(storyDir, "latest", `${storyId}-report.html`), `<html><body>${storyId} report</body></html>\n`);
+}
+
+function initRollMetaOrigin(root: string, tag: string): void {
+  const rollDir = join(root, ".roll");
+  const remote = tmp(`${tag}-roll-meta-remote`);
+  git(remote, ["init", "-q", "--bare", "-b", "main"]);
+  git(rollDir, ["init", "-q", "-b", "main"]);
+  git(rollDir, ["remote", "add", "origin", remote]);
+  git(rollDir, [...GIT_ID, "add", "-A"]);
+  git(rollDir, [...GIT_ID, "commit", "-q", "-m", "seed roll-meta"]);
+  git(rollDir, ["push", "-q", "-u", "origin", "main"]);
 }
 
 /**
@@ -598,6 +613,7 @@ function makeGitignoredFixture(tag: string): { repo: string } {
   mkdirSync(join(repo, ".roll"), { recursive: true });
   writeFileSync(join(repo, ".roll", "backlog.md"), BACKLOG, "utf8");
   seedFeatureCard(repo, "US-RUN-001");
+  initRollMetaOrigin(repo, tag);
   return { repo };
 }
 

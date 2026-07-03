@@ -53,10 +53,13 @@ import {
   deadTickVerdict,
 } from "@roll/core";
 import { gh, ghAvailable, ghRepoSlug, prMerge, prReady, remoteUrl } from "@roll/infra";
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { prHealSelf, prRebaseStale } from "./loop-pr-heal.js";
 import { backfillMergedRuns } from "../lib/runs-backfill.js";
+import { acMapCandidates, evidencePathsUnresolved } from "../runner/attest-gate.js";
 
 // ─── reduced per-PR facts (the bash jq at bin/roll 11996-12007) ──────────────
 
@@ -67,6 +70,94 @@ export interface PrViewFacts {
   mergeable: MergeStateStatus;
   manualMerge?: boolean;
   isDraft?: boolean;
+  evidenceResolvable?: boolean;
+  evidenceMissing?: string[];
+}
+
+export interface RollEvidenceTrailer {
+  storyId: string;
+  repo: string;
+  sha: string;
+  acMapPath: string;
+}
+
+export function parseRollEvidenceTrailer(body: string): RollEvidenceTrailer | null {
+  for (const line of body.split(/\r?\n/)) {
+    const m = /^Roll-Evidence:\s+(\S+)\s+([^@\s]+)@([0-9a-fA-F]{7,64})\s+(\S+)\s*$/.exec(line.trim());
+    if (m === null) continue;
+    return { storyId: m[1] ?? "", repo: m[2] ?? "", sha: m[3] ?? "", acMapPath: (m[4] ?? "").replace(/^\.roll\//, "") };
+  }
+  return null;
+}
+
+export interface EvidenceResolution {
+  ok: boolean;
+  missing: string[];
+}
+
+function firstStoryId(text: string): string | undefined {
+  return /\b(?:US|FIX|REFACTOR|IDEA)-[A-Z0-9]+(?:-[0-9A-Za-z]+)*\b/.exec(text)?.[0];
+}
+
+function gitSucceeds(cwd: string, args: string[]): boolean {
+  try {
+    execFileSync("git", args, { cwd, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function archiveGitTree(gitCwd: string, treeish: string, targetDir: string, pathspec?: string): boolean {
+  const tar = join(targetDir, "tree.tar");
+  try {
+    execFileSync("git", ["archive", "--format=tar", `--output=${tar}`, treeish, ...(pathspec !== undefined ? [pathspec] : [])], {
+      cwd: gitCwd,
+      stdio: "ignore",
+    });
+    execFileSync("tar", ["-xf", tar, "-C", targetDir], { stdio: "ignore" });
+    rmSync(tar, { force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function hasAcMap(projectCwd: string, storyId: string): boolean {
+  return acMapCandidates(projectCwd, storyId).some((p) => existsSync(p));
+}
+
+export function resolvePrEvidence(projectCwd: string, headRef: string, body: string): EvidenceResolution {
+  const trailer = parseRollEvidenceTrailer(body);
+  const tmp = mkdtempSync(join(tmpdir(), "roll-pr-evidence-"));
+  try {
+    if (trailer !== null) {
+      const rollDir = join(projectCwd, ".roll");
+      if (!existsSync(rollDir)) return { ok: false, missing: [".roll git repo missing for Roll-Evidence trailer"] };
+      const acPath = trailer.acMapPath.replace(/^\.roll\//, "");
+      if (!gitSucceeds(rollDir, ["cat-file", "-e", `${trailer.sha}:${acPath}`])) return { ok: false, missing: [acPath] };
+      const rollTarget = join(tmp, ".roll");
+      mkdirSync(rollTarget, { recursive: true });
+      if (!archiveGitTree(rollDir, trailer.sha, rollTarget)) return { ok: false, missing: [`roll-meta@${trailer.sha}`] };
+      const missing = evidencePathsUnresolved(tmp, trailer.storyId);
+      return { ok: missing.length === 0, missing };
+    }
+
+    const storyId = firstStoryId(`${body}\n${headRef}`);
+    if (storyId === undefined) return { ok: true, missing: [] };
+    if (hasAcMap(projectCwd, storyId)) {
+      const missing = evidencePathsUnresolved(projectCwd, storyId);
+      return { ok: missing.length === 0, missing };
+    }
+    return {
+      ok: false,
+      missing: [
+        `Roll-Evidence trailer missing and local roll-meta evidence missing for ${storyId}; remediation: run roll attest ${storyId}, commit/push roll-meta, and republish with a Roll-Evidence trailer`,
+      ],
+    };
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 }
 
 /** The raw `gh pr view --json reviews,mergeStateStatus,statusCheckRollup,body,labels` shape. */
@@ -112,7 +203,7 @@ export interface PrInboxDeps {
   /** `gh -R <slug> pr list --state open --json number,headRefName,author,title`. */
   listOpenPrs: (slug: string) => Promise<{ code: number; stdout: string; stderr?: string }>;
   /** `gh -R <slug> pr view <num> --json …` → reduced facts, or undefined on failure (skip). */
-  viewPr: (slug: string, num: string) => Promise<PrViewFacts | undefined>;
+  viewPr: (slug: string, num: string, headRef: string) => Promise<PrViewFacts | undefined>;
   /** `gh -R <slug> pr ready <num>` → true on success. */
   ready: (slug: string, num: string) => Promise<boolean>;
   /** `gh -R <slug> pr merge <num> --squash --delete-branch` → true on success. */
@@ -179,7 +270,7 @@ export async function runPrInbox(deps: PrInboxDeps): Promise<PrTick> {
     if (num === "") continue;
     const headRef = pr.headRefName ?? "";
 
-    const facts = await deps.viewPr(slug, num);
+    const facts = await deps.viewPr(slug, num, headRef);
     if (facts === undefined) continue; // bash: view failure → i++; continue.
 
     const promote = promoteDraftAction({
@@ -188,10 +279,15 @@ export async function runPrInbox(deps: PrInboxDeps): Promise<PrTick> {
       botReview: facts.bot,
       ciState: facts.ciState,
       mergeable: facts.mergeable,
+      evidenceResolvable: facts.evidenceResolvable,
     });
     if (promote.kind === "promote_and_merge") {
       if (await deps.ready(slug, num)) await doMerge(deps, slug, num, headRef);
       else deps.warn(`PR #${num}: ready failed — left open`);
+      continue;
+    }
+    if (promote.reason === "evidence_unresolvable") {
+      deps.alert(evidenceBlockedAlert(num, facts.evidenceMissing));
       continue;
     }
 
@@ -210,16 +306,23 @@ export async function runPrInbox(deps: PrInboxDeps): Promise<PrTick> {
         if (!deps.rebaseCircuitAllowed(num)) break; // tripped → ALERT written, skip.
         const rechecked = await deps.rebaseStale(num, headRef, slug);
         if (rechecked !== undefined) {
-          const re = rebaseRecheckAction(rechecked.ciState, rechecked.mergeable, rechecked.manualMerge === true);
+          const re = rebaseRecheckAction(rechecked.ciState, rechecked.mergeable, rechecked.manualMerge === true, rechecked.evidenceResolvable !== false);
           if (re.kind === "merge") await doMerge(deps, slug, num, headRef);
+          else if (re.kind === "skip" && re.reason === "evidence_unresolvable") deps.alert(evidenceBlockedAlert(num, rechecked.evidenceMissing));
         }
         break;
       }
       case "skip":
+        if (action.reason === "evidence_unresolvable") deps.alert(evidenceBlockedAlert(num, facts.evidenceMissing));
         break;
     }
   }
   return emit(deps, prActedTick());
+}
+
+function evidenceBlockedAlert(num: string, missing: readonly string[] | undefined): string {
+  const suffix = missing !== undefined && missing.length > 0 ? `: ${missing.join(", ")}` : "";
+  return `PR #${num}: evidence_unresolvable — merge blocked until Roll-Evidence paths resolve${suffix}`;
 }
 
 function emit(deps: PrInboxDeps, tick: PrTick): PrTick {
@@ -456,14 +559,17 @@ function realDeps(): PrInboxDeps {
       ]);
       return { code: r.code, stdout: r.stdout, stderr: r.stderr };
     },
-    viewPr: async (slug, num) => {
+    viewPr: async (slug, num, headRef) => {
       const r = await gh([
         "-R", slug, "pr", "view", num,
         "--json", "reviews,mergeStateStatus,statusCheckRollup,body,labels,isDraft",
       ]);
       if (r.code !== 0 || r.stdout.trim() === "") return undefined;
       try {
-        return reducePrView(JSON.parse(r.stdout) as PrViewRaw);
+        const raw = JSON.parse(r.stdout) as PrViewRaw;
+        const facts = reducePrView(raw);
+        const evidence = resolvePrEvidence(process.cwd(), headRef, raw.body ?? "");
+        return { ...facts, evidenceResolvable: evidence.ok, evidenceMissing: evidence.missing };
       } catch {
         return undefined;
       }
@@ -490,7 +596,10 @@ function realDeps(): PrInboxDeps {
       const r = await gh(["-R", slug, "pr", "view", num, "--json", "mergeStateStatus,statusCheckRollup,body,labels,isDraft"]);
       if (r.code !== 0 || r.stdout.trim() === "") return undefined;
       try {
-        return reducePrView(JSON.parse(r.stdout) as PrViewRaw);
+        const raw = JSON.parse(r.stdout) as PrViewRaw;
+        const facts = reducePrView(raw);
+        const evidence = resolvePrEvidence(process.cwd(), headRef, raw.body ?? "");
+        return { ...facts, evidenceResolvable: evidence.ok, evidenceMissing: evidence.missing };
       } catch {
         return undefined;
       }

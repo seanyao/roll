@@ -170,7 +170,7 @@ import { writeCycleRoleSummaryBestEffort } from "./cycle-role-artifact-writer.js
 import { execFile, execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, rmdirSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
 import {
   agentCredentialReadiness,
@@ -203,6 +203,7 @@ import { buildPairScorePrompt, buildReviewPrompt, diagnosePairScoreOutput, enabl
 import { realAgentEnv } from "../commands/agent-list.js";
 import { readScopedAgentLayer, resolveScopedStoryExecute } from "./scoped-route.js";
 import { attestCommand } from "../commands/attest.js";
+import { markDoneGuarded } from "./done-guard.js";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
 import { formatEvaluationContractForScorer, parseEvaluationContract } from "../lib/evaluation-contract.js";
 import { readLatestStoryReviewScore, REVIEW_SCORE_LOW_THRESHOLD, type ReviewScoreEntry } from "../lib/review-score.js";
@@ -1280,7 +1281,10 @@ export async function executeCommand(
         for (const r of rows) {
           if (!(r.status ?? "").includes(STATUS_MARKER.todo)) continue;
           if (mergedFromTruth(r.id)) {
-            ports.backlog.markStatus?.(ports.repoCwd, r.id, STATUS_MARKER.done);
+            markDoneGuarded(ports.repoCwd, r.id, { mergedToMain: true }, {
+              markStatus: (projectCwd, id, status) => ports.backlog.markStatus?.(projectCwd, id, status),
+              alert: (m) => ports.events.appendAlert(ports.paths.alertsPath, m),
+            });
           }
         }
         const claims = rows.filter((r) => (r.status ?? "").includes("🔨"));
@@ -1295,7 +1299,12 @@ export async function executeCommand(
                 .catch(() => undefined);
             }
             const decision = decideClaimReconcile({ hasDeliveringCycle: cycle !== undefined, prState, hasPublishedPr: runRowHasPublishedPr(runRows, claim.id) });
-            if (decision === "done") ports.backlog.markStatus?.(ports.repoCwd, claim.id, STATUS_MARKER.done);
+            if (decision === "done") {
+              markDoneGuarded(ports.repoCwd, claim.id, { mergedToMain: true }, {
+                markStatus: (projectCwd, id, status) => ports.backlog.markStatus?.(projectCwd, id, status),
+                alert: (m) => ports.events.appendAlert(ports.paths.alertsPath, m),
+              });
+            }
             else if (decision === "todo") ports.backlog.markStatus?.(ports.repoCwd, claim.id, STATUS_MARKER.todo);
             // "keep" → leave 🔨 (delivered, pending merge).
           }
@@ -2429,6 +2438,7 @@ export async function executeCommand(
         });
         scoreStatus = scoreResult.status;
       }
+      let attestRenderExitCode = 0;
       if (commitsAhead > 0 && storyId !== "" && ctx.evidenceRunDir !== undefined && ctx.evidenceRunDir !== "") {
         // FIX-912: auto-generate ac-map DRAFT from cycle evidence BEFORE the
         // FIX-246 remediation. The draft has full AC structure + evidence chain
@@ -2534,6 +2544,7 @@ export async function executeCommand(
           }
         }
         if (rc !== 0) {
+          attestRenderExitCode = rc;
           ports.events.appendAlert(
             ports.paths.alertsPath,
             `attest render failed for ${storyId} in cycle ${ctx.cycleId ?? ""} (exit ${rc})`,
@@ -2579,6 +2590,7 @@ export async function executeCommand(
           // vendor-name comparison is gone — a same-vendor fresh session is valid.
           ports.repoCwd,
           ctx.builderSessionId ?? "",
+          attestRenderExitCode,
         );
         if (res.verdict === "skipped") {
           applyCorrectionAction({
@@ -2713,9 +2725,14 @@ export async function executeCommand(
         const pub: PublishResult = { status: 0, manualMerge, ...(cmd.draft === true ? { draft: true } : {}) };
         return { event: { type: "published", result: pub } };
       }
+      const body = await publishBodyWithEvidenceTrailer(ports, ctx);
+      if (body === null) {
+        const pub: PublishResult = { status: 1, manualMerge, ...(cmd.draft === true ? { draft: true } : {}) };
+        return { event: { type: "published", result: pub } };
+      }
       const plan = cmd.docOnly
-        ? planPublishDocPr({ branch: cmd.branch, slug, body: publishBody(ctx), manualMerge, draft: cmd.draft })
-        : planPublishPr({ branch: cmd.branch, slug, body: publishBody(ctx), manualMerge, draft: cmd.draft });
+        ? planPublishDocPr({ branch: cmd.branch, slug, body, manualMerge, draft: cmd.draft })
+        : planPublishPr({ branch: cmd.branch, slug, body, manualMerge, draft: cmd.draft });
       const r = await ports.github.runPublishPlan(plan);
       // US-V4-001: publish no longer mounts a PR link onto a story `index.html`
       // dossier page — the global dossier/story-page refresh is not a v4 delivery
@@ -2913,7 +2930,10 @@ export async function executeCommand(
               );
             }
           }
-          ports.backlog.markStatus?.(ports.repoCwd, terminalStoryId, STATUS_MARKER.done);
+          markDoneGuarded(ports.repoCwd, terminalStoryId, { mergedToMain: true }, {
+            markStatus: (projectCwd, id, status) => ports.backlog.markStatus?.(projectCwd, id, status),
+            alert: (m) => ports.events.appendAlert(ports.paths.alertsPath, m),
+          });
         } else {
           // FIX-304: done ≡ merged. The PR did NOT merge (still OPEN / closed /
           // gh down), yet the agent may have ALREADY flipped this row ✅ Done in
@@ -3847,6 +3867,52 @@ export function runVisualEvidencePreflight(ports: Ports, storyId: string, cycleI
 /** Compose the gh pr-create body (commit-count-style; kept simple + pure). */
 function publishBody(ctx: CycleContext): string {
   return `loop cycle ${ctx.cycleId}${ctx.storyId !== undefined ? ` — ${ctx.storyId}` : ""}`;
+}
+
+function rollMetaShaReachableOnOrigin(rollDir: string, sha: string): boolean {
+  try {
+    const out = execFileSync("git", ["-C", rollDir, "ls-remote", "origin"], { encoding: "utf8" });
+    return out.split(/\r?\n/).some((line) => line.startsWith(`${sha}\t`));
+  } catch {
+    return false;
+  }
+}
+
+async function publishBodyWithEvidenceTrailer(ports: Ports, ctx: CycleContext): Promise<string | null> {
+  const base = publishBody(ctx);
+  const storyId = ctx.storyId ?? "";
+  if (storyId === "") return base;
+  const message = `chore: loop cycle ${ctx.cycleId}${storyId !== "" ? ` ${storyId}` : ""} evidence`;
+  try {
+    const committed = await ports.metadata.commit(ports.repoCwd, message);
+    if (!committed.nothingToCommit && !committed.pushed) {
+      ports.events.appendAlert(
+        ports.paths.alertsPath,
+        `.roll evidence push FAILED before publish for cycle ${ctx.cycleId}${committed.committed ? " (committed locally, not pushed)" : ""} — ${committed.error ?? "unknown error"}`,
+      );
+      return null;
+    }
+    const rollDir = join(ports.repoCwd, ".roll");
+    if (!existsSync(rollDir)) {
+      ports.events.appendAlert(ports.paths.alertsPath, `Roll-Evidence publish blocked for ${storyId}: .roll git repo missing`);
+      return null;
+    }
+    const rollReal = realpathSync(rollDir);
+    const sha = execFileSync("git", ["-C", rollReal, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    const map = relative(rollReal, acMapPath(ports.repoCwd, storyId));
+    if (sha === "" || map === "" || map.startsWith("..")) {
+      ports.events.appendAlert(ports.paths.alertsPath, `Roll-Evidence publish blocked for ${storyId}: ac-map path is not inside roll-meta`);
+      return null;
+    }
+    if (!rollMetaShaReachableOnOrigin(rollReal, sha)) {
+      ports.events.appendAlert(ports.paths.alertsPath, `Roll-Evidence publish blocked for ${storyId}: roll-meta sha ${sha} is not reachable from origin`);
+      return null;
+    }
+    return `${base}\n\nRoll-Evidence: ${storyId} roll-meta@${sha} ${map}`;
+  } catch (e) {
+    ports.events.appendAlert(ports.paths.alertsPath, `.roll evidence trailer failed for cycle ${ctx.cycleId} — ${String(e)}`);
+    return null;
+  }
 }
 
 function storyRequiresManualMerge(repoCwd: string, storyId: string | undefined): boolean {

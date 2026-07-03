@@ -143,6 +143,54 @@ describe("findFeatureFile", () => {
   });
 });
 
+describe("roll attest audit", () => {
+  it("lists dangling evidence refs for Done cards", async () => {
+    const proj = project();
+    writeFileSync(
+      join(proj, ".roll", "backlog.md"),
+      "| ID | Description | Status |\n|----|----|----|\n| FIX-300 | demo | ✅ Done |\n",
+    );
+    const cardDir = join(proj, ".roll", "features", "demo", "FIX-300");
+    mkdirSync(join(cardDir, "latest"), { recursive: true });
+    writeFileSync(join(cardDir, "latest", "FIX-300-report.html"), "<html>report</html>\n");
+    writeFileSync(
+      join(cardDir, "ac-map.json"),
+      JSON.stringify([{ ac: "FIX-300:AC1", status: "pass", evidence: [{ kind: "screenshot", href: "screenshots/missing.png" }] }], null, 2) + "\n",
+    );
+
+    const text = await inDir(proj, () => capturedStdout(() => attestCommand(["audit"])));
+    expect(text.code).toBe(1);
+    expect(text.stdout).toContain("FIX-300");
+    expect(text.stdout).toContain("screenshots/missing.png");
+
+    const json = await inDir(proj, () => capturedStdout(() => attestCommand(["audit", "--json"])));
+    expect(JSON.parse(json.stdout)).toEqual({
+      issues: [{ storyId: "FIX-300", missing: ["FIX-300:AC1 screenshots/missing.png"] }],
+      debts: [],
+    });
+  });
+
+  it("US-EVID-019 R2: lists evidence_debt Done cards separately", async () => {
+    const proj = project();
+    writeFileSync(
+      join(proj, ".roll", "backlog.md"),
+      "| ID | Description | Status |\n|----|----|----|\n| US-LEGACY-1 | old delivery | ✅ Done · evidence_debt |\n",
+    );
+
+    const text = await inDir(proj, () => capturedStdout(() => attestCommand(["audit"])));
+    expect(text.code).toBe(1);
+    expect(text.stdout).toContain("attest audit: evidence debt");
+    expect(text.stdout).toContain("US-LEGACY-1");
+    expect(text.stdout).not.toContain("dangling evidence references\n- US-LEGACY-1");
+
+    const json = await inDir(proj, () => capturedStdout(() => attestCommand(["audit", "--json"])));
+    expect(JSON.parse(json.stdout)).toEqual({
+      issues: [],
+      debts: [{ storyId: "US-LEGACY-1", reason: "legacy Done row has evidence_debt" }],
+    });
+  });
+});
+
 describe("FIX-1059 — attest finds a symlinked card spec (FIX-1057 worktree shape)", () => {
   it("writes <ID>-report.html instead of exiting story-not-found", async () => {
     const proj = project();

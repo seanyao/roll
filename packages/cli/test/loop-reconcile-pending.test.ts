@@ -50,6 +50,18 @@ function writeDeliveries(p: string, records: DeliveryRecord[]): void {
   writeFileSync(path, records.map((r) => JSON.stringify(r)).join("\n") + (records.length ? "\n" : ""));
 }
 
+function writeAcceptanceEvidence(p: string, id: string): void {
+  const cardDir = join(p, ".roll", "features", "uncategorized", id);
+  mkdirSync(join(cardDir, "latest"), { recursive: true });
+  mkdirSync(join(cardDir, "screenshots"), { recursive: true });
+  writeFileSync(join(cardDir, "screenshots", "proof.png"), "png\n");
+  writeFileSync(
+    join(cardDir, "ac-map.json"),
+    JSON.stringify([{ ac: `${id}:AC1`, status: "pass", evidence: [{ kind: "screenshot", href: "screenshots/proof.png" }] }], null, 2) + "\n",
+  );
+  writeFileSync(join(cardDir, "latest", `${id}-report.html`), "<html>report</html>\n");
+}
+
 function readDeliveries(p: string): DeliveryRecord[] {
   const path = join(p, ".roll", "loop", "deliveries.jsonl");
   return readFileSync(path, "utf8")
@@ -187,6 +199,7 @@ describe("loopReconcilePendingCommand", () => {
     execSync("git add .roll/backlog.md && git commit -q -m 'add backlog'", { cwd: p });
 
     writeDeliveries(p, [pendingRecord(777)]);
+    writeAcceptanceEvidence(p, "FIX-1050");
 
     const d = deps(
       p,

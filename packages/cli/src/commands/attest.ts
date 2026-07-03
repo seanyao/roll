@@ -79,6 +79,7 @@ import { physicalTerminalFromSpecText } from "../lib/physical-terminal.js";
 import { designContractDeliveredEvidence } from "../runner/attest-gate.js";
 import { readReviewScoreTrend, readStoryReviewScores } from "../lib/review-score.js";
 import { collectToolEvidenceFromEventsPath, formatToolCostSummary } from "../lib/tool-display.js";
+import { attestAuditCommand } from "./attest-audit.js";
 
 // Re-export so existing importers (tests, callers) keep their entry point.
 export { findFeatureFile } from "../lib/archive.js";
@@ -820,6 +821,7 @@ export function resolveStoryAcItems(projectPath: string, storyId: string): Retur
 
 /** `roll attest <story-id> [--deploy-url <url>] [--capture-tmux <s> | --capture-command <c>]` */
 export async function attestCommand(args: string[], deps: AttestDeps = {}): Promise<number> {
+  if (args[0] === "audit") return attestAuditCommand(args.slice(1));
   // FIX-329 — the `attest backfill` loophole is removed. Acceptance evidence is
   // produced DURING delivery (the loop's HARD attest:gate renders the report
   // in-cycle; manual deliveries run attest as their Phase 10.6 step), never

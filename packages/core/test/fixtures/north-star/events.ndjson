@@ -1,0 +1,160 @@
+{"type":"loop:resumed","loop":"ci","ts":1781931897000}
+{"type":"correction:circuit_breaker","storyId":"FIX-378,US-DEMO-001,US-OBS-016","signal":"empty_acceptance_report","count":5,"threshold":3,"reason":"failure signal repeated: \"empty_acceptance_report\" 5 times in 43200s >= 3","ts":1781937338}
+{"type":"policy:safety_pause","loop":"ci","reason":"failure signal repeated: \"empty_acceptance_report\" 5 times in 43200s >= 3","ts":1781937338}
+{"type":"loop:resumed","loop":"ci","ts":1781946337000}
+{"type":"policy:safety_pause","loop":"ci","reason":"consecutive failures 3 >= 3","ts":1781955157067}
+{"type":"loop:resumed","loop":"ci","ts":1781959295000}
+{"type":"policy:safety_pause","loop":"ci","reason":"reviewer auth block: pi","ts":1781972740838}
+{"type":"loop:resumed","loop":"ci","ts":1781972992000}
+{"type":"correction:circuit_breaker","storyId":"US-TRUTH-014,US-TRUTH-015,US-TRUTH-017","signal":"review_score_regression","count":3,"threshold":3,"reason":"failure signal repeated: \"review_score_regression\" 3 times in 43200s >= 3","ts":1782004173}
+{"type":"policy:safety_pause","loop":"ci","reason":"failure signal repeated: \"review_score_regression\" 3 times in 43200s >= 3","ts":1782004173}
+{"type":"loop:resumed","loop":"ci","ts":1782027218000}
+{"type":"loop:resumed","loop":"ci","ts":1782053391000}
+{"type":"loop:resumed","loop":"ci","ts":1782063065000}
+{"type":"loop:resumed","loop":"ci","ts":1782072175000}
+{"type":"cycle:rescue","cycleId":"20260622-051647-48281","ref":"rescue/leaked-20260622-051647-48281","rescuedSha":"0fd22d1f8da2411c16fc4002e5759cac3bea33d2","ts":1782077311000}
+{"type":"policy:safety_pause","loop":"ci","reason":"reviewer auth block: codex","ts":1782109555643}
+{"type":"loop:resumed","loop":"ci","ts":1782121246000}
+{"type":"correction:circuit_breaker","storyId":"FIX-397,US-OBS-022,US-OBS-023","signal":"unknown_failure","count":3,"threshold":3,"reason":"failure signal repeated: \"unknown_failure\" 3 times in 43200s >= 3","ts":1782140636}
+{"type":"policy:safety_pause","loop":"ci","reason":"failure signal repeated: \"unknown_failure\" 3 times in 43200s >= 3","ts":1782140636}
+{"type":"loop:resumed","loop":"ci","ts":1782183425000}
+{"type":"policy:safety_pause","loop":"ci","reason":"reviewer auth block: codex","ts":1782188369114}
+{"type":"loop:resumed","loop":"ci","ts":1782189767000}
+{"type":"policy:safety_pause","loop":"ci","reason":"reviewer auth block: codex","ts":1782191133040}
+{"type":"cycle:rescue","cycleId":"20260624-004717-89539","ref":"rescue/leaked-20260624-004717-89539","rescuedSha":"523bbd90b2fb452c00c5f132eabe3d5caf112168","ts":1782233340000}
+{"type":"cycle:rescue","cycleId":"20260624-021717-85464","ref":"rescue/leaked-20260624-021717-85464","rescuedSha":"ec69f7dbe917bb5da27937b6d57e6332707f8938","ts":1782238975000}
+{"type":"policy:safety_pause","loop":"ci","reason":"reviewer auth block: pi","ts":1782277357937}
+{"type":"loop:resumed","loop":"ci","ts":1782292100000}
+{"type":"cycle:rescue","cycleId":"20260624-170840-37952","ref":"rescue/leaked-20260624-170840-37952","rescuedSha":"62e0134fd6db34f5d2a256e72221de8e550f36d8","ts":1782292470000}
+{"type":"cycle:rescue","cycleId":"20260624-194718-31919","ref":"rescue/leaked-20260624-194718-31919","rescuedSha":"ff00b3b0a4cc4ab492cf809869e61217fab9a8d0","ts":1782302326000}
+{"type":"loop:resumed","loop":"ci","ts":1782386148000}
+{"type":"loop:resumed","loop":"ci","ts":1782386468000}
+{"type":"cycle:rescue","cycleId":"20260625-205106-44904","ref":"rescue/leaked-20260625-205106-44904","rescuedSha":"20d391d946e2588af62c20163ce00aec4f36baf5","ts":1782392252000}
+{"type":"cycle:rescue","cycleId":"20260625-222106-86595","ref":"rescue/leaked-20260625-222106-86595","rescuedSha":"39e98255f11ce4f11f8885b889403a68413224c7","ts":1782398153000}
+{"type":"loop:resumed","loop":"ci","ts":1782444652000}
+{"type":"loop:resumed","loop":"ci","ts":1782449099000}
+{"type":"loop:resumed","loop":"ci","ts":1782456289000}
+{"type":"policy:safety_pause","loop":"ci","reason":"agent auth block: kimi","ts":1782529829923}
+{"type":"loop:resumed","loop":"ci","ts":1782710865000}
+{"type":"loop:resumed","loop":"ci","ts":1782713056000}
+{"type":"loop:resumed","loop":"ci","ts":1782714508000}
+{"type":"loop:resumed","loop":"ci","ts":1782715675000}
+{"type":"loop:resumed","loop":"ci","ts":1782716522000}
+{"type":"loop:resumed","loop":"ci","ts":1782716828000}
+{"type":"loop:resumed","loop":"ci","ts":1782717209000}
+{"type":"loop:resumed","loop":"ci","ts":1782719512000}
+{"type":"loop:resumed","loop":"ci","ts":1782721669000}
+{"type":"loop:resumed","loop":"ci","ts":1782722246000}
+{"type":"loop:resumed","loop":"ci","ts":1782731177000}
+{"type":"policy:safety_pause","loop":"ci","reason":"agent auth block: claude","ts":1782731979741}
+{"type":"loop:resumed","loop":"ci","ts":1782732112000}
+{"type":"loop:resumed","loop":"ci","ts":1782733768000}
+{"type":"loop:resumed","loop":"ci","ts":1782736435000}
+{"type":"loop:resumed","loop":"ci","ts":1782737652000}
+{"type":"loop:resumed","loop":"ci","ts":1782740656000}
+{"type":"loop:resumed","loop":"ci","ts":1782742887000}
+{"type":"loop:resumed","loop":"ci","ts":1782746083000}
+{"type":"loop:resumed","loop":"ci","ts":1782749522000}
+{"type":"loop:resumed","loop":"ci","ts":1782751965000}
+{"type":"loop:resumed","loop":"ci","ts":1782753694000}
+{"type":"correction:circuit_breaker","storyId":"FIX-1031,US-OBS-033,US-OBS-034","signal":"empty_acceptance_report","count":3,"threshold":3,"reason":"failure signal repeated: \"empty_acceptance_report\" 3 times in 43200s >= 3","ts":1782754825}
+{"type":"policy:safety_pause","loop":"ci","reason":"failure signal repeated: \"empty_acceptance_report\" 3 times in 43200s >= 3","ts":1782754825}
+{"type":"loop:resumed","loop":"ci","ts":1782760926000}
+{"type":"loop:resumed","loop":"ci","ts":1782786940000}
+{"type":"correction:circuit_breaker","storyId":"US-OBS-032,US-OBS-035,US-V4-021","signal":"missing_acceptance_report","count":3,"threshold":3,"reason":"failure signal repeated: \"missing_acceptance_report\" 3 times in 43200s >= 3","ts":1782789027}
+{"type":"policy:safety_pause","loop":"ci","reason":"failure signal repeated: \"missing_acceptance_report\" 3 times in 43200s >= 3","ts":1782789027}
+{"type":"loop:resumed","loop":"ci","ts":1782793254000}
+{"type":"correction:circuit_breaker","storyId":"FIX-1042,US-OBS-033,US-OBS-034","signal":"empty_acceptance_report","count":3,"threshold":3,"reason":"failure signal repeated: \"empty_acceptance_report\" 3 times in 43200s >= 3","ts":1782794030}
+{"type":"policy:safety_pause","loop":"ci","reason":"failure signal repeated: \"empty_acceptance_report\" 3 times in 43200s >= 3","ts":1782794030}
+{"type":"loop:resumed","loop":"ci","ts":1782794371000}
+{"type":"loop:resumed","loop":"ci","ts":1782795330000}
+{"type":"loop:resumed","loop":"ci","ts":1782796489000}
+{"type":"loop:resumed","loop":"ci","ts":1782798023000}
+{"type":"loop:resumed","loop":"ci","ts":1782799238000}
+{"type":"loop:resumed","loop":"ci","ts":1782800807000}
+{"type":"loop:resumed","loop":"ci","ts":1782801134000}
+{"type":"loop:resumed","loop":"ci","ts":1782802598000}
+{"type":"loop:resumed","loop":"ci","ts":1782810801000}
+{"type":"loop:resumed","loop":"ci","ts":1782811546000}
+{"type":"loop:resumed","loop":"ci","ts":1782813404000}
+{"type":"loop:resumed","loop":"ci","ts":1782814891000}
+{"type":"correction:circuit_breaker","storyId":"FIX-1042,FIX-1044,FIX-1048","signal":"unknown_failure","count":3,"threshold":3,"reason":"failure signal repeated: \"unknown_failure\" 3 times in 43200s >= 3","ts":1782815995}
+{"type":"policy:safety_pause","loop":"ci","reason":"failure signal repeated: \"unknown_failure\" 3 times in 43200s >= 3","ts":1782815995}
+{"type":"loop:resumed","loop":"ci","ts":1782816348000}
+{"type":"loop:resumed","loop":"ci","ts":1782818163000}
+{"type":"loop:resumed","loop":"ci","ts":1782820677000}
+{"type":"goal:card_skipped","sessionId":"goal-20260630115805-63586","storyId":"REFACTOR-055","reason":"no_progress_streak","zeroDeliveries":2,"cycleId":"20260630-195805-63714","ts":1782821619000}
+{"type":"loop:resumed","loop":"ci","ts":1782821775000}
+{"type":"loop:resumed","loop":"ci","ts":1782822087000}
+{"type":"loop:resumed","loop":"ci","ts":1782822832000}
+{"type":"loop:resumed","loop":"ci","ts":1782830521000}
+{"type":"goal:recovery","decision":"allowed","actor":"owner","storyId":"REFACTOR-056","reason":"supervisor split REFACTOR-055 into bounded cards; start first slice","lastBuilder":"pi","nextBuilder":"reasonix","skippedBuilders":["pi"],"noProgressCycles":0,"ts":1782835588228}
+{"type":"loop:resumed","loop":"ci","ts":1782835616000}
+{"type":"policy:safety_pause","loop":"ci","reason":"agent auth block: agy","ts":1782836604140}
+{"type":"goal:recovery","decision":"allowed","actor":"owner","storyId":"REFACTOR-056","reason":"PR #1113 CI failed in packages/cli/test/bridge.test.ts after command-surface refactor; retry with next Builder to fix-forward usage registry tests and attest evidence","lastBuilder":"reasonix","nextBuilder":"claude","skippedBuilders":["reasonix"],"noProgressCycles":0,"ts":1782838297550}
+{"type":"loop:resumed","loop":"ci","ts":1782838347000}
+{"type":"policy:safety_pause","loop":"ci","reason":"agent auth block: agy","ts":1782838973178}
+{"type":"loop:resumed","loop":"ci","ts":1782839424000}
+{"type":"goal:recovery","decision":"allowed","actor":"owner","storyId":"FIX-1052","reason":"Evaluator rejected Kimi delivery with review-score regression 5/10; retry with next eligible Builder after AGY quarantine","lastBuilder":"kimi","nextBuilder":"pi","skippedBuilders":["kimi"],"noProgressCycles":0,"ts":1782841317788}
+{"type":"loop:resumed","loop":"ci","ts":1782846271000}
+{"type":"goal:recovery","decision":"allowed","actor":"owner","storyId":"FIX-1058","reason":"FIX-1058 passed peer/score/attest but exited unpublished with no PR; re-arm with next Builder to publish or repair the pending-publish handoff","lastBuilder":"kimi","nextBuilder":"pi","skippedBuilders":["kimi"],"noProgressCycles":0,"ts":1782849584916}
+{"type":"goal:recovery","decision":"allowed","actor":"owner","storyId":"FIX-1058","reason":"FIX-1058 spec corrected after evaluator rejected event-only evidence repair; rerun with real attest/report generation required","lastBuilder":"pi","nextBuilder":"reasonix","skippedBuilders":["pi"],"noProgressCycles":0,"ts":1782850553626}
+{"type":"goal:recovery","decision":"allowed","actor":"owner","storyId":"FIX-1058","reason":"Reasonix fixed the event-only regression in code but failed attest confirmation: no latest report/ac-map reached the gate. Continue from that branch with the next Builder to produce real acceptance report/ac-map and pass attest.","lastBuilder":"reasonix","nextBuilder":"claude","skippedBuilders":["reasonix"],"noProgressCycles":0,"ts":1782851530033}
+{"type":"goal:recovery","decision":"allowed","actor":"owner","storyId":"FIX-1058","reason":"Previous Claude retry did not reach Builder work: main workspace was dirty before spawn. Supervisor preserved those files in git stash and is rerunning the focused FIX-1058 recovery so a Builder can produce real acceptance report/ac-map instead of event-only repair.","lastBuilder":"claude","nextBuilder":"kimi","skippedBuilders":["claude"],"noProgressCycles":1,"ts":1782851896271}
+{"type":"loop:resumed","loop":"ci","ts":1782851925000}
+{"type":"goal:recovery","decision":"denied","actor":"owner","storyId":"FIX-1051","reason":"only Builder 'pi' is eligible and it already failed this card; no alternate Builder to rotate to","lastBuilder":"pi","noProgressCycles":1,"ts":1782853822055}
+{"type":"cycle:rescue","cycleId":"20260701-050926-98957","ref":"rescue/leaked-20260701-050926-98957","rescuedSha":"b3fab88ced36a60335daf6bedf7736d27ef36c05","ts":1782854565000}
+{"type":"goal:recovery","decision":"allowed","actor":"owner","storyId":"FIX-1051","reason":"Kimi produced a dirty worktree and Pi rescue produced four TCR commits outside the accepted cycle branch; continue with reasonix using rescue/leaked-20260701-050926-98957 and the preserved Kimi worktree as evidence, and deliver through normal TCR/peer/attest/PR gates.","lastBuilder":"pi","nextBuilder":"reasonix","skippedBuilders":["pi"],"noProgressCycles":1,"ts":1782855068794}
+{"type":"goal:recovery","decision":"allowed","actor":"owner","storyId":"FIX-1058","reason":"PR #1116 is still blocked by missing fresh acceptance report/ac-map. Continue FIX-1058 with reasonix to produce real Review Page and ac-map through the normal attest/report path; do not merge or bypass the manual gate without evidence.","lastBuilder":"pi","nextBuilder":"reasonix","skippedBuilders":["pi"],"noProgressCycles":0,"ts":1782855233047}
+{"type":"loop:resumed","loop":"ci","ts":1782855241000}
+{"type":"loop:resumed","loop":"ci","ts":1782855478000}
+{"type":"loop:resumed","loop":"ci","ts":1782855575000}
+{"type":"policy:safety_pause","loop":"ci","reason":"agent auth block: claude","ts":1782857507261}
+{"type":"goal:recovery","decision":"allowed","actor":"owner","storyId":"FIX-1058","reason":"PR #1118 was closed as an invalid evidence repair: it produced ac-map/evidence but not the gate-visible latest/FIX-1058-report.html Review Page. FIX-1058 spec now names the exact latest/ report path. Rerun the same card with the next eligible Builder; do not merge #1116 until a real latest Review Page and ac-map pass attest.","lastBuilder":"claude","nextBuilder":"kimi","skippedBuilders":["claude"],"noProgressCycles":1,"ts":1782863790099}
+{"type":"loop:resumed","loop":"ci","ts":1782863802000}
+{"type":"correction:circuit_breaker","storyId":"FIX-1058,REFACTOR-056","signal":"empty_acceptance_report","count":3,"threshold":3,"reason":"failure signal repeated: \"empty_acceptance_report\" 3 times in 43200s >= 3","ts":1782864554}
+{"type":"policy:safety_pause","loop":"ci","reason":"failure signal repeated: \"empty_acceptance_report\" 3 times in 43200s >= 3","ts":1782864554}
+{"type":"goal:recovery","decision":"allowed","actor":"owner","storyId":"FIX-1058","reason":"PR #1119 was closed as another invalid evidence repair. CI was green and Pi scored 9/good, but attest still rejected empty_acceptance_report because generated ac-map used positive text evidence without a real textFile. FIX-1058 spec now names the content-predicate mismatch. Rerun only to align repair-evidence output with the same acceptance-content predicate used by attest gate; do not solve unrelated PR/CI/publish issues.","lastBuilder":"kimi","nextBuilder":"pi","skippedBuilders":["kimi"],"noProgressCycles":0,"ts":1782864978565}
+{"type":"loop:resumed","loop":"ci","ts":1782864987000}
+{"type":"loop:resumed","loop":"ci","ts":1782866298000}
+{"type":"correction:circuit_breaker","storyId":"FIX-1058,FIX-1061,REFACTOR-056","signal":"empty_acceptance_report","count":4,"threshold":3,"reason":"failure signal repeated: \"empty_acceptance_report\" 4 times in 43200s >= 3","ts":1782867038}
+{"type":"policy:safety_pause","loop":"ci","reason":"failure signal repeated: \"empty_acceptance_report\" 4 times in 43200s >= 3","ts":1782867038}
+{"type":"goal:recovery","decision":"allowed","actor":"owner","storyId":"FIX-1061","reason":"PR #1121 was closed as invalid: CI was green but attest skipped because FIX-1061 did not produce the standard gate-visible Review Page/ac-map, and sidecar ac-confirmation-FIX-1061.md is not acceptable evidence. Rerun only FIX-1061 with the tightened spec requiring normal Review Page/ac-map output.","lastBuilder":"reasonix","nextBuilder":"claude","skippedBuilders":["reasonix"],"noProgressCycles":0,"ts":1782867422481}
+{"type":"loop:resumed","loop":"ci","ts":1782867441000}
+{"type":"goal:recovery","decision":"allowed","actor":"owner","storyId":"FIX-1051","reason":"Supervisor inspected FIX-1051: Kimi left candidate work without TCR, Pi saved rescue/leaked-20260701-050926-98957 with four TCR commits, Claude later failed auth before evaluating. Spec now records the recovery handoff; retry once through normal TCR/peer/attest/PR gates.","lastBuilder":"claude","nextBuilder":"kimi","skippedBuilders":["claude"],"noProgressCycles":0,"ts":1782870016768}
+{"type":"loop:resumed","loop":"ci","ts":1782870025000}
+{"type":"goal:recovery","decision":"allowed","actor":"owner","storyId":"FIX-1048","reason":"Cycle 20260701-100842-66186 with Pi failed sandbox isolation: implementation leaked into main checkout, runner recorded sandbox:main_dirty, 0 TCR, no attest, no PR. Main leaked diff was preserved in stash for reference and spec now records the recovery handoff. Retry FIX-1048 with the next eligible Builder through normal cycle worktree, TCR, peer/evaluator, attest, and PR gates.","lastBuilder":"pi","nextBuilder":"reasonix","skippedBuilders":["pi"],"noProgressCycles":1,"ts":1782872580527}
+{"type":"correction:circuit_breaker","storyId":"FIX-1048,FIX-1058,FIX-1061,REFACTOR-056","signal":"empty_acceptance_report","count":5,"threshold":3,"reason":"failure signal repeated: \"empty_acceptance_report\" 5 times in 43200s >= 3","ts":1782874225}
+{"type":"policy:safety_pause","loop":"ci","reason":"failure signal repeated: \"empty_acceptance_report\" 5 times in 43200s >= 3","ts":1782874225}
+{"type":"loop:resumed","loop":"ci","ts":1782875925000}
+{"type":"correction:circuit_breaker","storyId":"FIX-1048,FIX-1058,FIX-1061","signal":"empty_acceptance_report","count":4,"threshold":3,"reason":"failure signal repeated: \"empty_acceptance_report\" 4 times in 43200s >= 3","ts":1782883930}
+{"type":"policy:safety_pause","loop":"ci","reason":"failure signal repeated: \"empty_acceptance_report\" 4 times in 43200s >= 3","ts":1782883930}
+{"type":"loop:resumed","loop":"ci","ts":1782884160000}
+{"type":"loop:resumed","loop":"ci","ts":1782890178000}
+{"type":"policy:safety_pause","loop":"ci","reason":"agent auth block: claude","ts":1782895345656}
+{"type":"loop:resumed","loop":"ci","ts":1782895816000}
+{"type":"goal:recovery","decision":"allowed","actor":"owner","storyId":"FIX-1063","reason":"Reasonix left a preserved dirty worktree with no TCR/no PR on cycle 20260701-165024-67168; retry with the next Builder, using that worktree only as diagnostic context, and deliver FIX-1063 through normal TCR, peer/evaluator, attest, and PR gates.","lastBuilder":"reasonix","nextBuilder":"kimi","skippedBuilders":["reasonix"],"noProgressCycles":1,"handoff":{"cycleId":"20260701-165024-67168","kind":"zero_tcr_dirty_worktree","detail":"the failed cycle left a preserved worktree with no TCR commit; inspect it before the retry"},"ts":1782897494783}
+{"type":"goal:recovery","decision":"allowed","actor":"owner","storyId":"FIX-1068","reason":"Pi wrote FIX-1068 changes into the main checkout instead of the cycle worktree; supervisor stopped the polluted cycle, stashed the misplaced diff, and is retrying with the next Builder through normal gates.","lastBuilder":"pi","nextBuilder":"kimi","skippedBuilders":["pi"],"noProgressCycles":1,"ts":1782899432400}
+{"type":"loop:resumed","loop":"ci","ts":1782899713000}
+{"type":"goal:recovery","decision":"allowed","actor":"owner","storyId":"FIX-1055","reason":"Pi wrote FIX-1055 implementation changes into the main checkout while the cycle worktree stayed clean; supervisor aborted the polluted cycle, stashed the leaked diff, and is retrying with the next Builder through normal TCR, peer/evaluator, attest, and PR gates.","lastBuilder":"pi","nextBuilder":"kimi","skippedBuilders":["pi"],"noProgressCycles":1,"ts":1782901936980}
+{"type":"loop:resumed","loop":"ci","ts":1782901942000}
+{"type":"correction:circuit_breaker","storyId":"FIX-1048,FIX-1058,FIX-1061,US-OBS-037","signal":"empty_acceptance_report","count":4,"threshold":3,"reason":"failure signal repeated: \"empty_acceptance_report\" 4 times in 43200s >= 3","ts":1782904325}
+{"type":"policy:safety_pause","loop":"ci","reason":"failure signal repeated: \"empty_acceptance_report\" 4 times in 43200s >= 3","ts":1782904325}
+{"type":"loop:resumed","loop":"ci","ts":1782904569000}
+{"type":"correction:circuit_breaker","storyId":"FIX-1048,FIX-1061,US-OBS-037","signal":"empty_acceptance_report","count":3,"threshold":3,"reason":"failure signal repeated: \"empty_acceptance_report\" 3 times in 43200s >= 3","ts":1782908715}
+{"type":"policy:safety_pause","loop":"ci","reason":"failure signal repeated: \"empty_acceptance_report\" 3 times in 43200s >= 3","ts":1782908715}
+{"type":"loop:resumed","loop":"ci","ts":1782909172000}
+{"type":"loop:resumed","loop":"ci","ts":1782914132000}
+{"type":"correction:circuit_breaker","storyId":"FIX-1067,US-OBS-040,US-OBS-042","signal":"review_score_regression","count":3,"threshold":3,"reason":"failure signal repeated: \"review_score_regression\" 3 times in 43200s >= 3","ts":1782915760}
+{"type":"policy:safety_pause","loop":"ci","reason":"failure signal repeated: \"review_score_regression\" 3 times in 43200s >= 3","ts":1782915760}
+{"type":"loop:resumed","loop":"ci","ts":1782916731000}
+{"type":"loop:resumed","loop":"ci","ts":1782918971000}
+{"type":"correction:circuit_breaker","storyId":"FIX-1067,US-LANG-001,US-OBS-040,US-OBS-042","signal":"review_score_regression","count":4,"threshold":3,"reason":"failure signal repeated: \"review_score_regression\" 4 times in 43200s >= 3","ts":1782927328}
+{"type":"policy:safety_pause","loop":"ci","reason":"failure signal repeated: \"review_score_regression\" 4 times in 43200s >= 3","ts":1782927328}
+{"type":"loop:resumed","loop":"ci","ts":1782933970000}
+{"type":"correction:circuit_breaker","storyId":"US-OBS-037,US-OBS-040,US-V4-022","signal":"empty_acceptance_report","count":3,"threshold":3,"reason":"failure signal repeated: \"empty_acceptance_report\" 3 times in 43200s >= 3","ts":1782934893}
+{"type":"policy:safety_pause","loop":"ci","reason":"failure signal repeated: \"empty_acceptance_report\" 3 times in 43200s >= 3","ts":1782934893}
+{"type":"loop:resumed","loop":"ci","ts":1782935805000}
+{"type":"loop:resumed","loop":"ci","ts":1782939250000}
+{"type":"loop:resumed","loop":"ci","ts":1782989968000}
+{"type":"policy:safety_pause","loop":"ci","reason":"consecutive failures 3 >= 3","ts":1783041451601}

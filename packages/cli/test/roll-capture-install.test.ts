@@ -111,6 +111,35 @@ describe("US-PHYSICAL-005 Roll Capture installer", () => {
     expect(renderRollCaptureInstallResult(result, "en")).toContain("newer release v0.2.0 is available");
   });
 
+  it("ignores Spotlight hits outside canonical install locations when deciding whether to install", async () => {
+    const home = tmp("spotlight-build-home");
+    const buildArtifact = join(home, "src", "roll-capture", "build", "Roll Capture.app");
+    mkdirSync(join(buildArtifact, "Contents"), { recursive: true });
+    writeFileSync(join(buildArtifact, "Contents", "Info.plist"), plist("0.1.0"));
+    let downloads = 0;
+
+    const result = await installRollCapture(
+      deps({
+        home,
+        exists: (path) => existsSync(path),
+        execFile: (cmd) => {
+          if (cmd === "mdfind") return { code: 0, stdout: `${buildArtifact}\n`, stderr: "" };
+          return { code: 0, stdout: "", stderr: "" };
+        },
+        downloadAsset: async () => {
+          downloads += 1;
+          return Buffer.from("ZIP!");
+        },
+      }),
+    );
+
+    const appPath = join(home, "Applications", "Roll Capture.app");
+    expect(result.status).toBe("installed");
+    expect(result.appPath).toBe(appPath);
+    expect(downloads).toBe(1);
+    expect(existsSync(appPath)).toBe(true);
+  });
+
   it("falls back to manual guidance when the latest release has no app zip asset", async () => {
     const result = await installRollCapture(
       deps({

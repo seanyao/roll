@@ -14,7 +14,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveLang, type Lang } from "@roll/spec";
-import { detectRollCaptureInstall, invalidateRollCaptureReadinessCache } from "./roll-capture-readiness.js";
+import { detectCanonicalRollCaptureInstall, invalidateRollCaptureReadinessCache } from "./roll-capture-readiness.js";
 
 const RELEASE_API = "https://api.github.com/repos/seanyao/roll-capture/releases/latest";
 const ASSET_NAME = "Roll-Capture.app.zip";
@@ -86,7 +86,7 @@ export async function installRollCapture(deps: RollCaptureInstallDeps = defaultR
   const gate = installGate(deps);
   if (gate !== null) return gate;
 
-  const installed = detectRollCaptureInstall(deps);
+  const installed = detectCanonicalRollCaptureInstall(deps);
   if (installed.status === "installed") {
     const appPath = installed.path;
     invalidateRollCaptureReadinessCache(deps);

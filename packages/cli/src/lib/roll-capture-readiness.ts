@@ -170,10 +170,10 @@ function skipped(inboxPath: string, detail: string): RollCaptureReadiness {
 }
 
 export function detectRollCaptureInstall(deps: Pick<RollCaptureReadinessDeps, "env" | "home" | "exists" | "execFile">): RollCaptureReadiness["installed"] {
+  const canonical = detectCanonicalRollCaptureInstall(deps);
+  if (canonical.status === "installed") return canonical;
   const candidates = [
     deps.env["ROLL_CAPTURE_APP"],
-    join(deps.home, "Applications", APP_NAME),
-    join("/Applications", APP_NAME),
   ].filter((path): path is string => path !== undefined && path.trim() !== "");
   for (const candidate of candidates) {
     if (deps.exists(candidate)) return { status: "installed", path: candidate };
@@ -182,6 +182,13 @@ export function detectRollCaptureInstall(deps: Pick<RollCaptureReadinessDeps, "e
   if (mdfind.code === 0) {
     const found = mdfind.stdout.split("\n").map((line) => line.trim()).find((line) => line.endsWith(APP_NAME));
     if (found !== undefined && deps.exists(found)) return { status: "installed", path: found };
+  }
+  return { status: "missing" };
+}
+
+export function detectCanonicalRollCaptureInstall(deps: Pick<RollCaptureReadinessDeps, "home" | "exists">): RollCaptureReadiness["installed"] {
+  for (const candidate of [join(deps.home, "Applications", APP_NAME), join("/Applications", APP_NAME)]) {
+    if (deps.exists(candidate)) return { status: "installed", path: candidate };
   }
   return { status: "missing" };
 }

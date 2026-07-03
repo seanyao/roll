@@ -52,7 +52,12 @@ import {
 } from "../lib/interactive-agent.js";
 import { collectExternalTools, defaultExternalToolDeps, resolveRequirement, type ExternalToolState } from "../lib/external-tools.js";
 import { installRollCapture, renderRollCaptureInstallResult } from "../lib/roll-capture-install.js";
-import { collectRollCaptureReadiness, defaultRollCaptureReadinessDeps, renderRollCaptureSetupGuidance } from "../lib/roll-capture-readiness.js";
+import {
+  collectRollCaptureReadiness,
+  defaultRollCaptureReadinessDeps,
+  detectCanonicalRollCaptureInstall,
+  renderRollCaptureSetupGuidance,
+} from "../lib/roll-capture-readiness.js";
 
 // ─── bash UI helpers (bin/roll:41-56) — err only ─────────────────────────────
 function err(line: string): void {
@@ -412,8 +417,10 @@ export async function setupCommand(args: string[]): Promise<number> {
   const screenRecordingNotice = renderScreenRecordingSetupNotice(collectExternalTools());
   if (screenRecordingNotice !== null) process.stdout.write(screenRecordingNotice);
 
-  let rollCaptureReadiness = collectRollCaptureReadiness({ ...defaultRollCaptureReadinessDeps(), refreshCache: force });
-  if (!noCaptureInstall && rollCaptureReadiness.status === "degraded" && rollCaptureReadiness.installed.status === "missing") {
+  const rollCaptureReadinessDeps = defaultRollCaptureReadinessDeps();
+  let rollCaptureReadiness = collectRollCaptureReadiness({ ...rollCaptureReadinessDeps, refreshCache: force });
+  const canonicalRollCaptureInstall = detectCanonicalRollCaptureInstall(rollCaptureReadinessDeps);
+  if (!noCaptureInstall && canonicalRollCaptureInstall.status === "missing") {
     const result = await installRollCapture();
     if (result.status !== "skipped") process.stdout.write(`\n  ${renderRollCaptureInstallResult(result, msgLang())}\n`);
     rollCaptureReadiness = collectRollCaptureReadiness({ ...defaultRollCaptureReadinessDeps(), refreshCache: true });

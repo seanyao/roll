@@ -17,8 +17,9 @@
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { FailureClass } from "./failure-attribution.js";
 
-interface SkipState {
+export interface SkipState {
   /** Per-card cumulative failure tally. */
   fails: Record<string, number>;
   /** Card ids the picker must skip (crossed the failure threshold). */
@@ -41,6 +42,14 @@ function read(runtimeDir: string): SkipState {
   } catch {
     return { fails: {}, skip: [] };
   }
+}
+
+export function readSkipState(runtimeDir: string): SkipState {
+  return read(runtimeDir);
+}
+
+export function writeSkipState(runtimeDir: string, s: SkipState): void {
+  write(runtimeDir, s);
 }
 
 function write(runtimeDir: string, s: SkipState): void {
@@ -66,7 +75,9 @@ export function recordCardFailure(
   runtimeDir: string,
   storyId: string,
   threshold: number,
+  failureClass: FailureClass = "card",
 ): { count: number; nowSkipped: boolean } {
+  if (failureClass !== "card") return { count: 0, nowSkipped: false };
   if (storyId === "") return { count: 0, nowSkipped: false };
   const s = read(runtimeDir);
   const count = (s.fails[storyId] ?? 0) + 1;

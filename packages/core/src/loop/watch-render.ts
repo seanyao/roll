@@ -140,7 +140,7 @@ export function watchRenderEventFromRollEvent(ev: RollEvent, mode: WatchMode = "
         observedAt: eventTs(ev),
         cycleId: ev.cycleId,
         summary: "cycle:end",
-        detail: ev.outcome,
+        detail: [ev.outcome, ev.failure_class, ev.root_cause_key].filter((v) => v !== undefined && v !== "").join(" · "),
         severity: ev.outcome === "delivered" ? "good" : ev.outcome === "failed" || ev.outcome === "blocked" ? "bad" : "warn",
       };
     case "visual:gate":
@@ -234,7 +234,7 @@ export function watchRenderEventFromRollEvent(ev: RollEvent, mode: WatchMode = "
         cycleId: ev.cycleId,
         storyId: ev.storyId,
         summary: "cycle:terminal",
-        detail: [ev.outcome, ev.agent, ev.model].filter((v) => v !== "").join(" · "),
+        detail: [ev.outcome, ev.failure_class, ev.root_cause_key, ev.agent, ev.model].filter((v) => v !== undefined && v !== "").join(" · "),
         severity: ev.outcome === "delivered" ? "good" : ev.outcome === "failed" || ev.outcome === "blocked" ? "bad" : "warn",
       };
     case "report:morning":

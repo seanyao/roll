@@ -40,6 +40,7 @@ import {
   type LoopRunState,
   type DormantMarkerBody,
 } from "../src/commands/loop-sched.js";
+import { recordRootCauseFailure } from "../src/runner/failure-attribution.js";
 import type { LaunchctlResult } from "@roll/infra";
 import { parseGoalYaml } from "@roll/spec";
 
@@ -712,6 +713,61 @@ describe("loop pause/resume (marker file)", () => {
     const stateAfter = readFileSync(stateFile, "utf8");
     expect(stateAfter).not.toContain("heal_count_head_");
     expect(stateAfter).toContain("status: paused"); // non-heal lines preserved
+  });
+
+  it("resume clears the root-cause counter that triggered the PAUSE marker", async () => {
+    const proj = tmp("proj-root-cause-resume");
+    const { deps } = fakeDeps(proj, tmp("sh-root-cause-resume"), tmp("ld-root-cause-resume"));
+    const rt = join(proj, ".roll", "loop");
+    const marker = join(rt, "PAUSE-proj-abc123");
+    mkdirSync(rt, { recursive: true });
+
+    writeFileSync(
+      marker,
+      "# ALERT — loop auto-paused on env failure\n\n**Root cause**: env:main_dirty\n**Count**: 3\n",
+      "utf8",
+    );
+    writeFileSync(
+      join(rt, "failure-attribution.json"),
+      JSON.stringify(
+        {
+          causes: {
+            "env:main_dirty": {
+              timestamps: [1, 2, 3],
+              lastCycleId: "cycle-3",
+              failureClass: "env",
+            },
+            "harness:score_parse": {
+              timestamps: [4],
+              lastCycleId: "cycle-4",
+              failureClass: "harness",
+            },
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const r = await captureStdout(() => loopResumeCommand([], deps));
+    expect(r.code).toBe(0);
+
+    const stateAfter = JSON.parse(readFileSync(join(rt, "failure-attribution.json"), "utf8")) as {
+      causes: Record<string, unknown>;
+    };
+    expect(stateAfter.causes["env:main_dirty"]).toBeUndefined();
+    expect(stateAfter.causes["harness:score_parse"]).toBeDefined();
+
+    const postResume = recordRootCauseFailure(
+      rt,
+      "cycle-after-resume",
+      { failureClass: "env", rootCauseKey: "env:main_dirty", confidence: "envelope" },
+      [],
+      3,
+      { nowMs: 5 },
+    );
+    expect(postResume).toMatchObject({ count: 1, paused: false, rootCauseKey: "env:main_dirty" });
   });
 
   // US-LOOP-079h1 AC4: resume must clear the consecutive-idle counter.

@@ -30,6 +30,7 @@ import { warnIfBinaryStale } from "../runner/binary-staleness.js";
 import { rollVersion } from "./version.js";
 import { rollHome } from "./setup-shared.js";
 import { applyCorrectionCircuitBreaker } from "../runner/correction-circuit.js";
+import { classifyCycleFailure, playbookForFailure, readCycleEvents, recordRootCauseFailure, type FailureAttribution } from "../runner/failure-attribution.js";
 import { readSkillBody as readSkillBodyGeneric } from "../runner/skill-body.js";
 import { currentLang, realAgentEnv } from "./agent-list.js";
 import { cardArchiveDir, reportFileName, reviewFileName } from "../lib/archive.js";
@@ -369,6 +370,86 @@ function incrementConsecutiveFails(
     `loop run-once: auto-PAUSED after ${count} consecutive failures — PAUSE marker written\n` +
       `loop run-once: 连续 ${count} 次失败后自动暂停 — 已写 PAUSE 标记\n`,
   );
+}
+
+function writeRootCausePause(
+  projectPath: string,
+  slug: string,
+  alertsPath: string,
+  eventsPath: string,
+  cycleId: string,
+  attribution: FailureAttribution,
+  count: number,
+  snapshotPath: string | undefined,
+): void {
+  const pauseMarker = join(projectPath, ".roll", "loop", `PAUSE-${slug}`);
+  if (existsSync(pauseMarker)) return;
+  const playbook = playbookForFailure(attribution.failureClass, attribution.rootCauseKey);
+  const alertMsg =
+    `# ALERT — loop auto-paused on ${attribution.failureClass} failure\n\n` +
+    `**Cycle**: ${cycleId}\n` +
+    `**Failure class**: ${attribution.failureClass}\n` +
+    `**Root cause**: ${attribution.rootCauseKey}\n` +
+    `**Count**: ${count}\n` +
+    `**Diagnostic snapshot**: ${snapshotPath ?? "(snapshot unavailable)"}\n` +
+    `**Action**: ${playbook}\n` +
+    `**Card accounting**: no card failure was recorded for this cycle.\n`;
+  try {
+    writeFileSync(pauseMarker, alertMsg, "utf8");
+    appendFileSync(alertsPath, `${alertMsg}\n`, "utf8");
+    const ts = Date.now();
+    const bus = new EventBus();
+    bus.appendEvent(eventsPath, {
+      type: "policy:safety_pause",
+      loop: "ci",
+      reason: `${attribution.failureClass} root cause ${attribution.rootCauseKey} repeated ${count}x`,
+      ts,
+    });
+    bus.appendEvent(eventsPath, {
+      type: "alert:notify",
+      channel: "loop-safety",
+      message: `${attribution.failureClass} failure ${attribution.rootCauseKey} repeated ${count}x — paused for environment/harness repair`,
+      ts,
+    });
+  } catch {
+    /* best-effort */
+  }
+  process.stderr.write(
+    `loop run-once: ${attribution.failureClass} failure ${attribution.rootCauseKey} repeated ${count}× — PAUSE marker written\n`,
+  );
+}
+
+function handleNonCardFailure(
+  projectPath: string,
+  slug: string,
+  alertsPath: string,
+  eventsPath: string,
+  runtimeDirPath: string,
+  cycleId: string,
+  attribution: FailureAttribution,
+): boolean {
+  if (attribution.failureClass === "card") return false;
+  const events = readCycleEvents(eventsPath, cycleId);
+  const root = recordRootCauseFailure(runtimeDirPath, cycleId, attribution, events, PAUSE_THRESHOLD);
+  const playbook = playbookForFailure(attribution.failureClass, attribution.rootCauseKey);
+  try {
+    appendFileSync(
+      alertsPath,
+      `# ALERT — ${attribution.failureClass} failure attributed outside card accounting\n\n` +
+        `**Cycle**: ${cycleId}\n` +
+        `**Root cause**: ${attribution.rootCauseKey}\n` +
+        `**Count**: ${root.count}\n` +
+        `**Action**: ${playbook}\n` +
+        `**Card accounting**: skip-cards unchanged; do not split or swap the card for this failure.\n\n`,
+      "utf8",
+    );
+  } catch {
+    /* best-effort */
+  }
+  if (root.paused) {
+    writeRootCausePause(projectPath, slug, alertsPath, eventsPath, cycleId, attribution, root.count, root.snapshotPath);
+  }
+  return true;
 }
 
 function readFailurePauseThreshold(projectPath: string): number {
@@ -1103,6 +1184,20 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   // post-processing — the failure-counter path below is skipped.
   const externalBlock = readExternalBlock(paths.eventsPath, cycleId);
   const isFail = result.terminal === "failed" || result.terminal === "blocked";
+  const failureAttribution =
+    isFail || result.terminal === "gave_up"
+      ? classifyCycleFailure({
+          cycleId,
+          terminal: result.terminal,
+          tcrCount: result.state?.ctx?.tcrCount,
+          tokensIn: result.state?.ctx?.cost?.tokensIn,
+          tokensOut: result.state?.ctx?.cost?.tokensOut,
+          agentExecuted: (result.state?.ctx?.agent ?? "") !== "",
+          mainDirty: result.state?.ctx?.mainDirty,
+          agentInternalFailure: result.state?.ctx?.agentInternalFailure !== undefined,
+          events: readCycleEvents(paths.eventsPath, cycleId),
+        })
+      : undefined;
   if (externalBlock !== null) {
     // FIX-366: surface an explicit auth_blocked / network_blocked outcome — a
     // RECOVERABLE block, distinct from a code `failed`.
@@ -1180,7 +1275,11 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
       // The skip-list floor is the fail-fast isolation that holds whether or not
       // auto-recovery is enabled — it predates FIX-928.
       if (result.terminal === "gave_up") {
-        const card = recordCardFailure(runtimeDir(id.path), sid, CARD_SKIP_THRESHOLD);
+        const handledNonCard = failureAttribution !== undefined
+          ? handleNonCardFailure(id.path, id.slug, alertsPath, paths.eventsPath, runtimeDir(id.path), cycleId, failureAttribution)
+          : false;
+        if (handledNonCard) return 1;
+        const card = recordCardFailure(runtimeDir(id.path), sid, CARD_SKIP_THRESHOLD, failureAttribution?.failureClass ?? "card");
         if (card.nowSkipped) {
           writeCardSkipAlert(alertsPath, paths.eventsPath, cycleId, sid, card.count);
           resetConsecutiveFails(id.path);
@@ -1218,12 +1317,16 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     });
     if (!suppressGoalZeroDelivery) {
       const storyId = (result.state?.ctx?.storyId ?? "").trim();
+      if (failureAttribution !== undefined) {
+        const handledNonCard = handleNonCardFailure(id.path, id.slug, alertsPath, paths.eventsPath, runtimeDir(id.path), cycleId, failureAttribution);
+        if (handledNonCard) return 1;
+      }
       // FIX-363 (loop resilience): isolate a poison pill. After K failures of
       // the SAME card, skip-list it (the picker skips it next cycle) + alert +
       // RESET the global counter, so the loop keeps delivering OTHER cards
       // instead of auto-PAUSING the whole loop. The global PAUSE is now reserved
       // for genuinely SYSTEMIC failure (different cards failing in a row).
-      const card = recordCardFailure(runtimeDir(id.path), storyId, CARD_SKIP_THRESHOLD);
+      const card = recordCardFailure(runtimeDir(id.path), storyId, CARD_SKIP_THRESHOLD, failureAttribution?.failureClass ?? "card");
       if (card.nowSkipped) {
         writeCardSkipAlert(alertsPath, paths.eventsPath, cycleId, storyId, card.count);
         resetConsecutiveFails(id.path);

@@ -709,6 +709,15 @@ describe("buildRunRow — v2 runs.jsonl shape", () => {
     expect(row["model"]).toBe("gemini-2.5-pro");
   });
 
+  it("US-LOOP-090: failed runs rows carry failure attribution when classified", () => {
+    const row = buildRunRow(
+      { kind: "append_run", status: "failed", outcome: "failed", cycleId: CTX.cycleId },
+      { ...CTX, failureClass: "env", rootCauseKey: "env:main_dirty" },
+    );
+    expect(row["failure_class"]).toBe("env");
+    expect(row["root_cause_key"]).toBe("env:main_dirty");
+  });
+
   it("FIX-290 AC2: model falls back to the agent id when the router left model empty (claude default)", () => {
     const row = buildRunRow(
       { kind: "append_run", status: "idle", outcome: "idle_no_work", cycleId: CTX.cycleId },
@@ -807,6 +816,17 @@ describe("buildTerminalRecord — the cycle:terminal twin (US-TRUTH-001 + FIX-29
     // FIX-290 distinction preserved: usage is reasoned-absent, not a faked 0.
     expect(ev.usage).toEqual({ present: false, reason: "no_parseable_usage" });
     expect(ev.cost).toEqual({ present: false, reason: "no_parseable_usage" });
+  });
+
+  it("US-LOOP-090: failed cycle:terminal records failure attribution", () => {
+    const ev = buildTerminalRecord(
+      { kind: "append_run", status: "failed", outcome: "failed", cycleId: CTX.cycleId },
+      { ...CTX, failureClass: "env", rootCauseKey: "env:main_dirty" },
+      "/wt",
+      1780688082,
+    );
+    expect(ev.failure_class).toBe("env");
+    expect(ev.root_cause_key).toBe("env:main_dirty");
   });
 
   it("FIX-294: model falls back to the agent id when the router left model empty (claude default)", () => {

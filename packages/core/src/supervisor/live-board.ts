@@ -47,6 +47,7 @@ export interface SupervisorLiveBoard {
   readonly supervisor: {
     readonly state: "observing";
     readonly summary: string;
+    readonly failureDistribution: Record<"env" | "harness" | "card" | "unknown", number>;
   };
   readonly rows: readonly SupervisorLiveCycleRow[];
 }
@@ -72,6 +73,7 @@ interface MutableCycle {
   evaluatorDone: boolean;
   evaluatorFailed: boolean;
   unavailable: UnavailableRole[];
+  failureClass?: "env" | "harness" | "card" | "unknown";
 }
 
 const SUCCESS_OUTCOMES = new Set(["delivered", "built", "published", "success", "merged"]);
@@ -193,6 +195,7 @@ function applyEvent(c: MutableCycle, ev: RollEvent): void {
   } else if (ev.type === "cycle:end") {
     c.ended = true;
     c.failed = terminalFailed(ev.outcome);
+    c.failureClass = ev.failure_class ?? (c.failed ? "unknown" : undefined);
     if (!c.failed) {
       c.builderDone = true;
       c.evaluatorDone = c.profile !== "standard";
@@ -270,10 +273,15 @@ export function buildSupervisorLiveBoard(
       };
     });
   const active = rows.filter((r) => r.status === "active" || r.status === "not_available").length;
+  const failureDistribution = { env: 0, harness: 0, card: 0, unknown: 0 };
+  for (const c of cycles.values()) {
+    if (c.failed) failureDistribution[c.failureClass ?? "unknown"] += 1;
+  }
   return {
     supervisor: {
       state: "observing",
-      summary: `${active} active/recent attention row(s), ${rows.length} row(s) rendered`,
+      summary: `${active} active/recent attention row(s), ${rows.length} row(s) rendered; failures env=${failureDistribution.env} harness=${failureDistribution.harness} card=${failureDistribution.card} unknown=${failureDistribution.unknown}`,
+      failureDistribution,
     },
     rows,
   };

@@ -101,7 +101,7 @@
  * state back in with the next observed event; the {@link CycleCommand}s name the
  * existing ports/plans so the adapter dispatches them 1:1.
  */
-import type { AgentId, BuilderFinalizationFacts, CycleCost, CyclePhase, ExecutionProfile, ModelId, TerminalOutcome } from "@roll/spec";
+import type { AgentId, BuilderFinalizationFacts, CycleCost, CyclePhase, ExecutionProfile, FailureClass, ModelId, TerminalOutcome } from "@roll/spec";
 import { cycleCurrency } from "../cost/tracker.js";
 import type { RollEvent } from "@roll/spec";
 import { builderFinalizationReady, finalizeBuilder, handoffKindFor } from "./builder-finalization.js";
@@ -789,6 +789,8 @@ export interface CycleContext {
    *  native-log probe into capture_facts so classifyCaptured can surface the
    *  real cause instead of a generic gave_up. */
   agentInternalFailure?: AgentInternalFailure;
+  failureClass?: FailureClass;
+  rootCauseKey?: string;
 }
 
 /** Minimal context for building a terminal cycle:end event + runs row. */
@@ -798,6 +800,8 @@ export interface TerminalContext {
   agent: AgentId;
   model: ModelId;
   toolCosts?: CycleCost["toolCosts"];
+  failureClass?: FailureClass;
+  rootCauseKey?: string;
 }
 
 /**
@@ -880,6 +884,8 @@ export function cycleEndEvent(
     cycleId: ctx.cycleId,
     outcome,
     cost: zeroCost(ctx),
+    ...(ctx.failureClass !== undefined ? { failure_class: ctx.failureClass } : {}),
+    ...(ctx.rootCauseKey !== undefined ? { root_cause_key: ctx.rootCauseKey } : {}),
     ts,
   };
 }

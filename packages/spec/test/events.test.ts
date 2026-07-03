@@ -9,6 +9,18 @@ describe("parseEventLine (I8: readers skip bad lines, never crash)", () => {
     expect(e).not.toBeNull();
     expect(e?.type).toBe("cycle:start");
   });
+  it("types failure attribution fields on cycle:end and cycle:terminal", () => {
+    const end: RollEvent = {
+      type: "cycle:end",
+      cycleId: "c1",
+      outcome: "failed",
+      cost: {} as never,
+      failure_class: "env",
+      root_cause_key: "env:main_dirty",
+      ts: 1,
+    };
+    expect(parseEventLine(JSON.stringify(end))).toMatchObject({ type: "cycle:end", failure_class: "env" });
+  });
   it("returns null for blank, malformed, and shapeless lines", () => {
     expect(parseEventLine("")).toBeNull();
     expect(parseEventLine("   ")).toBeNull();

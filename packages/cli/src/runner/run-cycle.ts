@@ -38,6 +38,7 @@ import {
 import { CYCLE_TIMEOUT_SEC } from "@roll/core";
 import { type Ports, type ProcessClock, executeCommand, buildRunRow, revertPrematureDone } from "./executor.js";
 import { readCycleAttributionFromEvents } from "../lib/cycle-attribution.js";
+import { classifyCycleFailure, readCycleEvents } from "./failure-attribution.js";
 
 /** Inputs for one cycle run. */
 export interface RunCycleOptions {
@@ -124,6 +125,9 @@ export async function runCycleOnce(opts: RunCycleOptions): Promise<RunCycleResul
       state = next;
       liveCtx = mergeCtx(liveCtx, next.ctx);
       noteTerminal(commands);
+      if (commands.some((c) => c.kind === "emit_event" && c.event.type === "cycle:end")) {
+        liveCtx = attachFailureAttribution(liveCtx, state.terminal, ports);
+      }
 
       // Refresh heartbeat each step (liveness during a long execute phase).
       ports.process.writeHeartbeat(ports.paths.heartbeatPath);
@@ -155,6 +159,7 @@ export async function runCycleOnce(opts: RunCycleOptions): Promise<RunCycleResul
     // `aborted` terminal directly (idempotent — the bus upsert dedupes the row).
     if (!terminalEmitted) {
       const status: V2CycleStatus = "aborted";
+      liveCtx = attachFailureAttribution(liveCtx, status, ports);
       // FIX-1060: if the live context was lost (e.g. exception before the
       // orchestrator propagated story/agent), recover the best-known attribution
       // from events the cycle already wrote.
@@ -166,6 +171,8 @@ export async function runCycleOnce(opts: RunCycleOptions): Promise<RunCycleResul
         branch: liveCtx.branch,
         agent,
         model: liveCtx.model ?? "",
+        failureClass: liveCtx.failureClass,
+        rootCauseKey: liveCtx.rootCauseKey,
       };
       try {
         const terminalSec = ports.clock();
@@ -213,6 +220,23 @@ export async function runCycleOnce(opts: RunCycleOptions): Promise<RunCycleResul
   return { ran: true, terminal: state.terminal, state };
 }
 
+function attachFailureAttribution(ctx: CycleContext, terminal: V2CycleStatus | undefined, ports: Ports): CycleContext {
+  if (terminal !== "failed" && terminal !== "blocked" && terminal !== "gave_up" && terminal !== "aborted") return ctx;
+  if (ctx.failureClass !== undefined && ctx.rootCauseKey !== undefined) return ctx;
+  const attribution = classifyCycleFailure({
+    cycleId: ctx.cycleId,
+    terminal,
+    tcrCount: ctx.tcrCount,
+    tokensIn: ctx.cost?.tokensIn,
+    tokensOut: ctx.cost?.tokensOut,
+    agentExecuted: (ctx.agent ?? "") !== "",
+    mainDirty: ctx.mainDirty,
+    agentInternalFailure: ctx.agentInternalFailure !== undefined,
+    events: readCycleEvents(ports.paths.eventsPath, ctx.cycleId),
+  });
+  return { ...ctx, failureClass: attribution.failureClass, rootCauseKey: attribution.rootCauseKey };
+}
+
 /** Merge orchestrator-updated ctx fields (agent/model/storyId) into the live ctx. */
 function mergeCtx(live: CycleContext, next: CycleContext): CycleContext {
   return {
@@ -221,6 +245,8 @@ function mergeCtx(live: CycleContext, next: CycleContext): CycleContext {
     agent: next.agent ?? live.agent,
     model: next.model ?? live.model,
     evidenceRunDir: next.evidenceRunDir ?? live.evidenceRunDir,
+    failureClass: next.failureClass ?? live.failureClass,
+    rootCauseKey: next.rootCauseKey ?? live.rootCauseKey,
   };
 }
 

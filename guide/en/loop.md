@@ -1013,6 +1013,20 @@ This keeps `git worktree list` clean and prevents `.claude/worktrees/` from
 accumulating old entries over time. Active worktrees (branches ahead of `main`)
 are left untouched.
 
+## Main Checkout Guard
+
+During the Builder process, Roll makes the shared main checkout read-only at the
+filesystem boundary while leaving the cycle worktree writable. If a previous
+cycle left product files dirty or local commits ahead of `origin/main`, Roll
+moves that pollution to a `rescue/leaked-*` ref plus a
+`.roll/loop/quarantine/*.json` manifest, restores main to the trusted state, and
+continues the cycle.
+
+The event stream records `sandbox:write_protected` and `sandbox:quarantined`.
+`roll loop watch --events`, `roll loop cycle <id> --activity`, and supervisor output
+surface those facts. Each quarantine manifest includes the ref, file list, and a
+one-line restore command for owner/supervisor recovery.
+
 ## Cycle phases
 
 Every cycle is sliced into seven named phases. Each phase emits a `phase_start`

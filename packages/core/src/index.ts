@@ -15,6 +15,7 @@ export * from "./agent/final-review.js";
 export * from "./backlog/github-sync.js";
 export * from "./backlog/idea.js";
 export * from "./backlog/infra-default.js";
+export * from "./backlog/pick-ranking.js";
 export * from "./backlog/picker.js";
 export * from "./backlog/store.js";
 export * from "./cost/prices.js";

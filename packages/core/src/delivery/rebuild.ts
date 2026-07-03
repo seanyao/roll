@@ -344,17 +344,19 @@ export function rebuildDeliveriesFromFacts(
   // Index merges by prNumber AND by mergeCommit SHA for cross-reference
   const mergeByPr = new Map<number, MergeFact>();
   const mergeBySha = new Map<string, MergeFact>();
-  // FIX-904: index merges by story-id parsed from the commit subject — the
+  // FIX-1206: index merges by story-id parsed from the commit subject — the
   // authoritative `done` signal that does NOT depend on any loop run having
   // recorded a PR number (manual salvage, PR-lane direct merge, …).
-  // First occurrence wins: input is reverse-chronological, so the newest
-  // merge that names a story is the one we keep.
+  // Last occurrence wins: input is reverse-chronological (newest first), so
+  // the oldest merge that names a story wins. This prevents a later
+  // changelog/docs-only PR from overriding the original code-change PR's
+  // delivery attribution (FIX-1206).
   const mergeByStoryId = new Map<string, MergeFact>();
   for (const m of merges) {
     mergeByPr.set(m.prNumber, m);
     mergeBySha.set(m.mergeCommit, m);
     for (const sid of m.storyIds) {
-      if (!mergeByStoryId.has(sid)) mergeByStoryId.set(sid, m);
+      mergeByStoryId.set(sid, m); // overwrite: oldest wins (reverse-chrono input)
     }
   }
 

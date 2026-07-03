@@ -651,8 +651,8 @@ export const v3Catalog: Catalog = {
     zh: "安装 Roll Capture.app：将它放到 ~/Applications 或 /Applications，然后打开一次。",
   },
   "setup.roll_capture_permission": {
-    en: "Grant Screen Recording: System Settings > Privacy & Security > Screen Recording, allow Roll Capture.app.",
-    zh: "授权屏幕录制：System Settings > Privacy & Security > Screen Recording，允许 Roll Capture.app。",
+    en: "Host permission proxy: doctor checks the current terminal host only; Roll Capture.app manages its own Screen Recording permission on first capture.",
+    zh: "宿主权限代理：doctor 只检查当前终端宿主；Roll Capture.app 首次捕获时会自行管理屏幕录制权限。",
   },
   "setup.roll_capture_inbox": {
     en: "inbox: %s",

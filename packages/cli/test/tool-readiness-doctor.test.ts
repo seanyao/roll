@@ -15,7 +15,7 @@ describe("US-TOOL-020 doctor tool readiness", () => {
     const rows = collectToolReadinessDoctorRows("/repo", fakeResolver, {
       status: "available",
       installed: { status: "installed", path: "/Applications/Roll Capture.app" },
-      permission: { status: "granted", detail: "CGPreflightScreenCaptureAccess returned true." },
+      hostPermission: { status: "granted", detail: "host permission proxy: current host process passed." },
       inbox: {
         status: "writable",
         path: "/Users/test/Library/Application Support/Roll Capture/inbox",
@@ -23,7 +23,8 @@ describe("US-TOOL-020 doctor tool readiness", () => {
       },
       detailLines: [
         "installed=installed (/Applications/Roll Capture.app)",
-        "permission=granted — CGPreflightScreenCaptureAccess returned true.",
+        "hostPermission=granted — host permission proxy: current host process passed.",
+        "hostPermission.zh=granted — 宿主权限代理：当前宿主进程已通过。",
         "inbox=writable (/Users/test/Library/Application Support/Roll Capture/inbox) — temp-file atomic write succeeded.",
       ],
       repairCommands: [],
@@ -41,9 +42,9 @@ describe("US-TOOL-020 doctor tool readiness", () => {
     expect(text).toContain("fix: brew install gh");
     expect(text).toContain("browser.screenshot (browser) — degraded");
     expect(text).toContain("fix: npx playwright install chromium");
-    expect(text).toContain("physical.screenshot (browser) — available");
+    expect(text).toContain("physical.screenshot (physical) — available");
     expect(text).toContain("installed=installed (/Applications/Roll Capture.app)");
-    expect(text).toContain("permission=granted");
+    expect(text).toContain("hostPermission=granted");
     expect(text).toContain("inbox=writable");
   });
 
@@ -51,7 +52,7 @@ describe("US-TOOL-020 doctor tool readiness", () => {
     const rows = collectToolReadinessDoctorRows("/repo", fakeResolver, {
       status: "degraded",
       installed: { status: "missing" },
-      permission: { status: "denied", detail: "CGPreflightScreenCaptureAccess returned false for the active permission host." },
+      hostPermission: { status: "denied", detail: "host permission proxy: current host process failed." },
       inbox: {
         status: "blocked",
         path: "/Users/test/Library/Application Support/Roll Capture/inbox",
@@ -59,7 +60,8 @@ describe("US-TOOL-020 doctor tool readiness", () => {
       },
       detailLines: [
         "installed=missing",
-        "permission=denied — CGPreflightScreenCaptureAccess returned false for the active permission host.",
+        "hostPermission=denied — host permission proxy: current host process failed.",
+        "hostPermission.zh=denied — 宿主权限代理：当前宿主进程未通过。",
         "inbox=blocked (/Users/test/Library/Application Support/Roll Capture/inbox) — EACCES",
       ],
       repairCommands: [
@@ -70,9 +72,9 @@ describe("US-TOOL-020 doctor tool readiness", () => {
     const text = renderToolReadinessDoctorSection(rows).join("\n");
 
     expect(rows.find((row) => row.id === "physical.screenshot")?.status).toBe("degraded");
-    expect(text).toContain("~ physical.screenshot (browser) — degraded");
+    expect(text).toContain("~ physical.screenshot (physical) — degraded");
     expect(text).toContain("installed=missing");
-    expect(text).toContain("permission=denied");
+    expect(text).toContain("hostPermission=denied");
     expect(text).toContain("inbox=blocked");
     expect(text).toContain("fix: install Roll Capture.app");
     expect(text).toContain("fix: open x-apple.systempreferences");

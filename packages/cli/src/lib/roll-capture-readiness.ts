@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { t, v3Catalog, type Lang } from "@roll/spec";
 
 export type RollCaptureOverallStatus = "available" | "degraded" | "skip";
@@ -17,12 +17,15 @@ export interface RollCaptureReadinessDeps {
   hasAquaGUI?: boolean;
   exists: (path: string) => boolean;
   execFile: (cmd: string, args: readonly string[]) => { code: number; stdout: string; stderr: string };
+  cacheReadiness?: boolean;
+  refreshCache?: boolean;
+  nowMs?: () => number;
 }
 
 export interface RollCaptureReadiness {
   status: RollCaptureOverallStatus;
   installed: { status: RollCaptureInstallStatus; path?: string };
-  permission: { status: RollCapturePermissionStatus; detail: string };
+  hostPermission: { status: RollCapturePermissionStatus; detail: string };
   inbox: { status: RollCaptureInboxStatus; path: string; detail: string };
   detailLines: readonly string[];
   repairCommands: readonly string[];
@@ -31,6 +34,7 @@ export interface RollCaptureReadiness {
 const APP_NAME = "Roll Capture.app";
 const BUNDLE_ID = "com.seanyao.roll.capture";
 const SYSTEM_SETTINGS_SCREEN_CAPTURE = "open x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
+const ROLL_CAPTURE_READINESS_TTL_MS = 30 * 60 * 1000;
 
 export function defaultRollCaptureReadinessDeps(): RollCaptureReadinessDeps {
   const platform = externalPlatformOverride(process.env["_ROLL_EXTERNAL_TOOLS_PLATFORM"]) ?? process.platform;
@@ -54,6 +58,8 @@ export function defaultRollCaptureReadinessDeps(): RollCaptureReadinessDeps {
       }
     },
     execFile,
+    cacheReadiness: true,
+    nowMs: () => Date.now(),
   };
 }
 
@@ -69,28 +75,37 @@ export function collectRollCaptureReadiness(deps: RollCaptureReadinessDeps = def
     return skipped(inboxPath, "No macOS GUI session (Aqua) is available; Roll Capture probe skipped.");
   }
 
+  const cacheKey = rollCaptureReadinessCacheKey(deps, inboxPath);
+  if (deps.cacheReadiness === true && deps.refreshCache !== true) {
+    const cached = readRollCaptureReadinessCache(deps, cacheKey);
+    if (cached !== null) return cached;
+  }
+
   const installed = detectInstalled(deps);
-  const permission = preflightScreenCaptureAccess(deps);
+  const hostPermission = preflightScreenCaptureAccess(deps);
   const inbox = probeInboxWritable(inboxPath);
-  const degraded = installed.status !== "installed" || permission.status !== "granted" || inbox.status !== "writable";
+  const degraded = installed.status !== "installed" || hostPermission.status !== "granted" || inbox.status !== "writable";
   const detailLines = [
     `installed=${installed.status}${installed.path !== undefined ? ` (${installed.path})` : ""}`,
-    `permission=${permission.status} — ${permission.detail}`,
+    `hostPermission=${hostPermission.status} — ${hostPermission.detail}`,
+    `hostPermission.zh=${hostPermission.status} — ${hostPermissionZhDetail(hostPermission.status)}`,
     `inbox=${inbox.status} (${inbox.path}) — ${inbox.detail}`,
   ];
   const repairCommands = [
     ...(installed.status === "missing" ? ["install Roll Capture.app to ~/Applications or /Applications"] : []),
-    ...(permission.status === "denied" ? [SYSTEM_SETTINGS_SCREEN_CAPTURE] : []),
+    ...(hostPermission.status === "denied" ? [SYSTEM_SETTINGS_SCREEN_CAPTURE] : []),
   ];
 
-  return {
+  const readiness: RollCaptureReadiness = {
     status: degraded ? "degraded" : "available",
     installed,
-    permission,
+    hostPermission,
     inbox,
     detailLines,
     repairCommands,
   };
+  if (deps.cacheReadiness === true) writeRollCaptureReadinessCache(deps, cacheKey, readiness);
+  return readiness;
 }
 
 export function renderRollCaptureSetupGuidance(readiness: RollCaptureReadiness, lang: Lang): string | null {
@@ -130,8 +145,8 @@ const ROLL_CAPTURE_SETUP_FALLBACK = {
   },
   "setup.roll_capture_permission": {
     text: {
-      en: "Grant Screen Recording: System Settings > Privacy & Security > Screen Recording, allow Roll Capture.app.",
-      zh: "授权屏幕录制：System Settings > Privacy & Security > Screen Recording，允许 Roll Capture.app。",
+      en: "Host permission proxy: doctor checks the current terminal host only; Roll Capture.app manages its own Screen Recording permission on first capture.",
+      zh: "宿主权限代理：doctor 只检查当前终端宿主；Roll Capture.app 首次捕获时会自行管理屏幕录制权限。",
     },
   },
   "setup.roll_capture_inbox": {
@@ -146,7 +161,7 @@ function skipped(inboxPath: string, detail: string): RollCaptureReadiness {
   return {
     status: "skip",
     installed: { status: "missing" },
-    permission: { status: "skipped", detail },
+    hostPermission: { status: "skipped", detail },
     inbox: { status: "skipped", path: inboxPath, detail },
     detailLines: [`skipped — ${detail}`],
     repairCommands: [],
@@ -165,24 +180,40 @@ function detectInstalled(deps: RollCaptureReadinessDeps): RollCaptureReadiness["
   const mdfind = deps.execFile("mdfind", [`kMDItemCFBundleIdentifier == '${BUNDLE_ID}'`]);
   if (mdfind.code === 0) {
     const found = mdfind.stdout.split("\n").map((line) => line.trim()).find((line) => line.endsWith(APP_NAME));
-    if (found !== undefined) return { status: "installed", path: found };
+    if (found !== undefined && deps.exists(found)) return { status: "installed", path: found };
   }
   return { status: "missing" };
 }
 
-function preflightScreenCaptureAccess(deps: RollCaptureReadinessDeps): RollCaptureReadiness["permission"] {
+function preflightScreenCaptureAccess(deps: RollCaptureReadinessDeps): RollCaptureReadiness["hostPermission"] {
   const script = "import CoreGraphics; print(CGPreflightScreenCaptureAccess() ? \"true\" : \"false\")";
   const r = deps.execFile("swift", ["-e", script]);
   if (r.code !== 0) {
-    return { status: "unknown", detail: "CGPreflightScreenCaptureAccess probe could not run." };
+    return {
+      status: "unknown",
+      detail:
+        "host permission proxy: CGPreflightScreenCaptureAccess could not run for the current host process; Roll Capture.app manages its own Screen Recording permission on first capture.",
+    };
   }
   return r.stdout.trim() === "true"
-    ? { status: "granted", detail: "CGPreflightScreenCaptureAccess returned true." }
-    : { status: "denied", detail: "CGPreflightScreenCaptureAccess returned false for the active permission host." };
+    ? {
+        status: "granted",
+        detail:
+          "host permission proxy: CGPreflightScreenCaptureAccess returned true for the current host process; Roll Capture.app manages its own Screen Recording permission on first capture.",
+      }
+    : {
+        status: "denied",
+        detail:
+          "host permission proxy: CGPreflightScreenCaptureAccess returned false for the current host process; Roll Capture.app manages its own Screen Recording permission on first capture.",
+      };
 }
 
 function probeInboxWritable(path: string): RollCaptureReadiness["inbox"] {
   try {
+    // Synchronous file IO can still hang on a pathological filesystem. We keep
+    // this probe simple because the inbox lives on the local Application Support
+    // path and adding timeout machinery would make the common path noisier than
+    // the rare failure it mitigates.
     mkdirSync(path, { recursive: true });
     const requestId = `probe-${process.pid}-${Date.now()}`;
     const finalPath = join(path, `request-${requestId}.json`);
@@ -226,5 +257,90 @@ function externalPlatformOverride(raw: string | undefined): NodeJS.Platform | un
 }
 
 function isCi(env: NodeJS.ProcessEnv): boolean {
-  return (env["CI"] ?? "").trim() !== "";
+  return (
+    (env["CI"] ?? "").trim() !== "" ||
+    (env["GITHUB_ACTIONS"] ?? "").trim() !== "" ||
+    (env["GITLAB_CI"] ?? "").trim() !== "" ||
+    (env["JENKINS_HOME"] ?? "").trim() !== ""
+  );
+}
+
+function hostPermissionZhDetail(status: RollCapturePermissionStatus): string {
+  const result = status === "granted" ? "true" : status === "denied" ? "false" : "unknown";
+  return `宿主权限代理：CGPreflightScreenCaptureAccess 对当前宿主进程返回 ${result}；Roll Capture.app 首次捕获时会自行管理屏幕录制权限。`;
+}
+
+function rollCaptureReadinessCachePath(deps: RollCaptureReadinessDeps): string {
+  const rollHome = (deps.env["ROLL_HOME"] ?? "").trim() || join(deps.home, ".roll");
+  return join(rollHome, "cache", "roll-capture-readiness.json");
+}
+
+function rollCaptureReadinessCacheKey(deps: RollCaptureReadinessDeps, inboxPath: string): string {
+  return JSON.stringify({
+    platform: deps.platform,
+    home: deps.home,
+    app: deps.env["ROLL_CAPTURE_APP"] ?? "",
+    captureHome: deps.env["ROLL_CAPTURE_HOME"] ?? "",
+    inboxPath,
+  });
+}
+
+function nowMs(deps: RollCaptureReadinessDeps): number {
+  return deps.nowMs?.() ?? Date.now();
+}
+
+function readRollCaptureReadinessCache(deps: RollCaptureReadinessDeps, cacheKey: string): RollCaptureReadiness | null {
+  try {
+    const parsed = JSON.parse(readFileSync(rollCaptureReadinessCachePath(deps), "utf8")) as unknown;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+    const row = parsed as Record<string, unknown>;
+    if (row["version"] !== 1 || row["cacheKey"] !== cacheKey) return null;
+    const checkedAtMs = row["checkedAtMs"];
+    if (typeof checkedAtMs !== "number" || nowMs(deps) - checkedAtMs < 0 || nowMs(deps) - checkedAtMs >= ROLL_CAPTURE_READINESS_TTL_MS) return null;
+    const readiness = row["readiness"];
+    if (!isRollCaptureReadiness(readiness)) return null;
+    return readiness;
+  } catch {
+    return null;
+  }
+}
+
+function writeRollCaptureReadinessCache(deps: RollCaptureReadinessDeps, cacheKey: string, readiness: RollCaptureReadiness): void {
+  const path = rollCaptureReadinessCachePath(deps);
+  const tmpPath = `${path}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(
+      tmpPath,
+      JSON.stringify(
+        {
+          version: 1,
+          cacheKey,
+          checkedAtMs: nowMs(deps),
+          readiness,
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+    renameSync(tmpPath, path);
+  } catch {
+    try {
+      rmSync(tmpPath, { force: true });
+    } catch {
+      /* ignore cleanup failures */
+    }
+  }
+}
+
+function isRollCaptureReadiness(value: unknown): value is RollCaptureReadiness {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  if (row["status"] !== "available" && row["status"] !== "degraded" && row["status"] !== "skip") return false;
+  if (!isRecord(row["installed"]) || !isRecord(row["hostPermission"]) || !isRecord(row["inbox"])) return false;
+  return Array.isArray(row["detailLines"]) && Array.isArray(row["repairCommands"]);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

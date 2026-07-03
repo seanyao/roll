@@ -44,7 +44,7 @@ describe("collectToolPanel", () => {
     expect(new Set(rows.map((r) => r.id)).size).toBe(rows.length);
   });
 
-  it("multi-tool kinds (browser · git · github · filesystem) expand to multiple rows", () => {
+  it("multi-tool kinds (browser · physical · git · github · filesystem) expand to multiple rows", () => {
     const rows = collectToolPanel();
     const byKind = (kind: string) => rows.filter((r) => r.kind === kind).map((r) => r.id);
     expect(byKind("browser")).toEqual(["browser.console", "browser.dom-query", "browser.screenshot"]);

@@ -87,6 +87,8 @@ function seedFeatureCard(root: string, storyId: string, title: string = "Runner 
       },
     ]),
   );
+  mkdirSync(join(storyDir, "latest"), { recursive: true });
+  writeFileSync(join(storyDir, "latest", `${storyId}-report.html`), `<html><body>${storyId} report</body></html>\n`);
 }
 
 /**

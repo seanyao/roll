@@ -43,6 +43,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync,
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { agentSecretEnvNames } from "../runner/agent-spawn.js";
+import { clearRootCauseFailure } from "../runner/failure-attribution.js";
 
 // ─── injectable deps (tests fake launchd + identity + paths) ─────────────────
 export interface LoopSchedDeps {
@@ -900,6 +901,7 @@ export async function loopResumeCommand(_args: string[], deps: LoopSchedDeps = r
   const id = await deps.identity();
   const marker = pauseMarkerPath(id.path, id.slug);
   const existed = existsSync(marker);
+  const pauseBody = existed ? readPauseMarker(marker) : "";
   rmSync(marker, { force: true });
 
   // FIX-251: resume must clear the consecutive-failure counter so the first
@@ -921,6 +923,11 @@ export async function loopResumeCommand(_args: string[], deps: LoopSchedDeps = r
     } catch {
       /* best-effort */
     }
+  }
+
+  const rootCauseKey = rootCauseKeyFromPauseMarker(pauseBody);
+  if (rootCauseKey !== null) {
+    clearRootCauseFailure(rt, rootCauseKey);
   }
 
   // Clear per-HEAD heal counters from the state file (heal_count_head_*).
@@ -971,6 +978,19 @@ export async function loopResumeCommand(_args: string[], deps: LoopSchedDeps = r
     "mode: autonomous — scheduler can pick eligible Todo within pause/budget/route/evidence/Evaluator/release gates\n",
   );
   return 0;
+}
+
+function rootCauseKeyFromPauseMarker(body: string): string | null {
+  const match = /^\*\*Root cause\*\*:\s*(\S+)\s*$/m.exec(body);
+  return match?.[1] ?? null;
+}
+
+function readPauseMarker(marker: string): string {
+  try {
+    return readFileSync(marker, "utf8");
+  } catch {
+    return "";
+  }
 }
 
 // ─── FIX-197: loop now + legacy-runner self-heal ──────────────────────────────

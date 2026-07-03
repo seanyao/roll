@@ -50,7 +50,7 @@ export interface CycleFailureAttributionInput {
 }
 
 interface RootCauseState {
-  readonly causes: Record<string, { count: number; lastCycleId: string; failureClass: FailureClass }>;
+  readonly causes: Record<string, { timestamps: readonly number[]; lastCycleId: string; failureClass: FailureClass }>;
 }
 
 export interface RootCauseFailureResult {
@@ -59,6 +59,9 @@ export interface RootCauseFailureResult {
   readonly rootCauseKey: string;
   readonly snapshotPath?: string;
 }
+
+export const DEFAULT_ROOT_CAUSE_WINDOW_MS = 24 * 60 * 60 * 1000;
+const UNKNOWN_FALLBACK_SOURCE = "fallback:no_evidence";
 
 const ENV_STAGE_ROOT: Partial<Record<FailureAttributionInput["stage"], string>> = {
   "pre-spawn": "env:pre_spawn",
@@ -219,9 +222,9 @@ export function classifyCycleFailure(input: CycleFailureAttributionInput): Failu
     });
   }
   if (input.terminal === "failed" || input.terminal === "blocked" || input.terminal === "gave_up") {
-    return classifyFailure({ stage: "terminal", source: "terminal" });
+    return classifyFailure({ stage: "terminal", source: UNKNOWN_FALLBACK_SOURCE });
   }
-  return classifyFailure({ stage: "terminal", source: "terminal" });
+  return classifyFailure({ stage: "terminal", source: UNKNOWN_FALLBACK_SOURCE });
 }
 
 function statePath(runtimeDir: string): string {
@@ -235,11 +238,36 @@ function diagnosticsDir(runtimeDir: string): string {
 function readRootCauseState(runtimeDir: string): RootCauseState {
   try {
     if (!existsSync(statePath(runtimeDir))) return { causes: {} };
-    const parsed = JSON.parse(readFileSync(statePath(runtimeDir), "utf8")) as Partial<RootCauseState>;
-    return { causes: parsed.causes !== undefined && typeof parsed.causes === "object" ? parsed.causes : {} };
+    const parsed = JSON.parse(readFileSync(statePath(runtimeDir), "utf8")) as unknown;
+    if (parsed === null || typeof parsed !== "object") return { causes: {} };
+    const causesRaw = (parsed as Record<string, unknown>)["causes"];
+    if (causesRaw === null || typeof causesRaw !== "object") return { causes: {} };
+
+    const causes: RootCauseState["causes"] = {};
+    for (const [key, value] of Object.entries(causesRaw as Record<string, unknown>)) {
+      if (value === null || typeof value !== "object") continue;
+      const rec = value as Record<string, unknown>;
+      const failureClass = rec["failureClass"];
+      const lastCycleId = rec["lastCycleId"];
+      const timestamps = rec["timestamps"];
+      if (failureClass !== "env" && failureClass !== "harness" && failureClass !== "unknown") continue;
+      if (typeof lastCycleId !== "string") continue;
+      if (!Array.isArray(timestamps)) continue;
+      const validTimestamps = timestamps.filter((ts): ts is number => typeof ts === "number" && Number.isFinite(ts));
+      causes[key] = { timestamps: validTimestamps, lastCycleId, failureClass };
+    }
+    return { causes };
   } catch {
     return { causes: {} };
   }
+}
+
+export function clearRootCauseFailure(runtimeDir: string, rootCauseKey: string): void {
+  const state = readRootCauseState(runtimeDir);
+  if (state.causes[rootCauseKey] === undefined) return;
+  const nextCauses = { ...state.causes };
+  delete nextCauses[rootCauseKey];
+  writeRootCauseState(runtimeDir, { causes: nextCauses });
 }
 
 function writeRootCauseState(runtimeDir: string, state: RootCauseState): void {
@@ -306,15 +334,20 @@ export function recordRootCauseFailure(
   attribution: FailureAttribution,
   events: readonly RollEvent[],
   threshold = 3,
+  options: { readonly nowMs?: number; readonly windowMs?: number } = {},
 ): RootCauseFailureResult {
   if (attribution.failureClass === "card") {
     return { count: 0, paused: false, rootCauseKey: attribution.rootCauseKey };
   }
   const state = readRootCauseState(runtimeDir);
   const prior = state.causes[attribution.rootCauseKey];
-  const count = (prior?.count ?? 0) + 1;
-  state.causes[attribution.rootCauseKey] = { count, lastCycleId: cycleId, failureClass: attribution.failureClass };
-  writeRootCauseState(runtimeDir, state);
+  const nowMs = options.nowMs ?? Date.now();
+  const windowMs = options.windowMs ?? DEFAULT_ROOT_CAUSE_WINDOW_MS;
+  const cutoffMs = nowMs - windowMs;
+  const timestamps = [...(prior?.timestamps ?? []).filter((ts) => ts >= cutoffMs), nowMs];
+  state.causes[attribution.rootCauseKey] = { timestamps, lastCycleId: cycleId, failureClass: attribution.failureClass };
+  writeRootCauseState(runtimeDir, { causes: state.causes });
+  const count = timestamps.length;
   const paused = count >= threshold;
   const snapshotPath = paused ? writeDiagnosticSnapshot(runtimeDir, cycleId, attribution, events) : undefined;
   return { count, paused, rootCauseKey: attribution.rootCauseKey, ...(snapshotPath !== undefined ? { snapshotPath } : {}) };

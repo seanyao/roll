@@ -66,11 +66,11 @@ describe("failure attribution envelopes", () => {
     ).toMatchObject({ failureClass: "card", rootCauseKey: "card:agent_after_build" });
   });
 
-  it("keeps unenveloped failures unknown instead of guessing from terminal alone", () => {
+  it("keeps unenveloped failures unknown with a no-evidence fallback source", () => {
     expect(
       classifyFailure({
         stage: "terminal",
-        source: "runner",
+        source: "fallback:no_evidence",
       }),
     ).toMatchObject({ failureClass: "unknown", rootCauseKey: "unknown:unclassified" });
   });
@@ -87,6 +87,35 @@ describe("failure attribution envelopes", () => {
     expect(snapshot).toContain("env:main_dirty");
     expect(snapshot).toContain("main checkout");
     expect(snapshot).not.toContain("split the card");
+  });
+
+  it("ignores root-cause failures outside the rolling window", () => {
+    const dir = mkdtempSync(join(tmpdir(), "roll-root-cause-window-"));
+    const attribution = { failureClass: "env" as const, rootCauseKey: "env:main_dirty", confidence: "envelope" as const };
+    const hour = 60 * 60 * 1000;
+
+    expect(recordRootCauseFailure(dir, "cycle-old-1", attribution, [], 3, { nowMs: 0, windowMs: 24 * hour })).toMatchObject({ count: 1, paused: false });
+    expect(recordRootCauseFailure(dir, "cycle-old-2", attribution, [], 3, { nowMs: hour, windowMs: 24 * hour })).toMatchObject({ count: 2, paused: false });
+    const fresh = recordRootCauseFailure(dir, "cycle-fresh", attribution, [], 3, { nowMs: 26 * hour, windowMs: 24 * hour });
+
+    expect(fresh).toMatchObject({ count: 1, paused: false, rootCauseKey: "env:main_dirty" });
+    const state = JSON.parse(readFileSync(join(dir, "failure-attribution.json"), "utf8")) as {
+      causes: { "env:main_dirty": { timestamps?: unknown; count?: unknown } };
+    };
+    expect(state.causes["env:main_dirty"].timestamps).toEqual([26 * hour]);
+    expect(state.causes["env:main_dirty"].count).toBeUndefined();
+  });
+
+  it("still pauses when root-cause failures repeat inside the rolling window", () => {
+    const dir = mkdtempSync(join(tmpdir(), "roll-root-cause-window-pause-"));
+    const attribution = { failureClass: "harness" as const, rootCauseKey: "harness:score_parse", confidence: "envelope" as const };
+    const hour = 60 * 60 * 1000;
+
+    recordRootCauseFailure(dir, "cycle-1", attribution, [], 3, { nowMs: 0, windowMs: 24 * hour });
+    recordRootCauseFailure(dir, "cycle-2", attribution, [], 3, { nowMs: hour, windowMs: 24 * hour });
+    const third = recordRootCauseFailure(dir, "cycle-3", attribution, [], 3, { nowMs: 2 * hour, windowMs: 24 * hour });
+
+    expect(third).toMatchObject({ count: 3, paused: true, rootCauseKey: "harness:score_parse" });
   });
 
   it("replays roll-capture-style pre-spawn dirty failures without poisoning card accounting", () => {

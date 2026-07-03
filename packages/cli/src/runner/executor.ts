@@ -179,6 +179,7 @@ import { dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
 import {
   agentCredentialReadiness,
+  agentSpawnSupportsPurpose,
   agentSpawnEnvironment,
   type AgentSpawn,
   killLiveAgents,
@@ -370,6 +371,16 @@ function pickRankingCachePath(ports: Ports): string {
   return join(dirname(ports.paths.eventsPath), PICK_RANKING_CACHE_FILE);
 }
 
+function pickRankingCwd(ports: Ports): string {
+  const dir = join(dirname(ports.paths.eventsPath), "pick-ranking-cwd");
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch {
+    /* spawn will fail open if the runtime cwd cannot be prepared */
+  }
+  return dir;
+}
+
 function backlogContentForRanking(projectCwd: string, items: readonly BacklogItem[]): string {
   try {
     const p = join(projectCwd, ".roll", "backlog.md");
@@ -490,11 +501,16 @@ async function resolvePickRanking(
   if (cached !== undefined) return { ranking: cached, source: "cache" };
 
   const route = ports.route.resolve("PICK-RANKING", undefined);
+  if (!agentSpawnSupportsPurpose(ports.agentSpawn, "pick_ranking")) {
+    appendPickRankingFailure(ports, "unsupported_purpose");
+    return undefined;
+  }
   const prompt = pickRankingPrompt(ports.repoCwd, backlogContent, candidates);
   let result: Awaited<ReturnType<AgentSpawn>>;
   try {
     result = await ports.agentSpawn(route.agent, {
-      cwd: ports.paths.worktreePath,
+      purpose: "pick_ranking",
+      cwd: pickRankingCwd(ports),
       skillBody: prompt,
       timeoutMs: PICK_RANKING_TIMEOUT_MS,
       bare: true,
@@ -1894,6 +1910,7 @@ export async function executeCommand(
           }),
         );
         res = await ports.agentSpawn(cmd.agent, {
+          purpose: "builder",
           cwd: ports.paths.worktreePath,
           skillBody: finalSkillBody,
           ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),

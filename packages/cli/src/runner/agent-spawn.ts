@@ -471,8 +471,12 @@ export function missingAgentSecretEnv(
   return agentCredentialReadiness(agent, env, home).missingEnv;
 }
 
+export type AgentSpawnPurpose = "builder" | "pick_ranking";
+
 /** Options for an {@link AgentSpawn} call. */
 export interface AgentSpawnOptions {
+  /** Explicit call-site intent so harness-only spawns are distinguishable from builder work. */
+  purpose?: AgentSpawnPurpose;
   /** US-PORT-011: live sink — called with every raw stdout/stderr chunk as it
    *  arrives (the observation window tails the file this feeds). */
   onChunk?: (chunk: Buffer) => void;
@@ -525,10 +529,17 @@ export interface AgentSpawnResult {
 
 /** The injectable agent-spawn port. Real impl below; tests pass a fake that
  *  fabricates a tcr commit in the worktree fixture without any real agent. */
-export type AgentSpawn = (
+export type AgentSpawn = ((
   agent: string,
   opts: AgentSpawnOptions,
-) => Promise<AgentSpawnResult>;
+) => Promise<AgentSpawnResult>) & {
+  /** Optional capability declaration. Missing means only legacy builder semantics are known. */
+  supportedPurposes?: readonly AgentSpawnPurpose[];
+};
+
+export function agentSpawnSupportsPurpose(spawn: AgentSpawn, purpose: AgentSpawnPurpose): boolean {
+  return spawn.supportedPurposes?.includes(purpose) === true;
+}
 
 /**
  * Real agent spawn: build the argv for the resolved agent and run it via
@@ -790,3 +801,4 @@ export const realAgentSpawn: AgentSpawn = (agent, opts) => {
   const { bin, args, pty } = withPtyWrap(buildSpawnCommand(agent, opts), agent);
   return spawnAndWait(bin, args, withAgentProfileEnv(agent, opts), pty);
 };
+realAgentSpawn.supportedPurposes = ["pick_ranking"];

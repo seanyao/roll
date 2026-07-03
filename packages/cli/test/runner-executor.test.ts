@@ -1289,6 +1289,7 @@ describe("executeCommand — command → executor mapping", () => {
         exitCode: 0,
         timedOut: false,
       }));
+      spawn.supportedPurposes = ["pick_ranking"] as const;
       const { ports, calls } = fakePorts({
         agentSpawn: spawn,
         backlog: { read: () => [
@@ -1299,7 +1300,7 @@ describe("executeCommand — command → executor mapping", () => {
       const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
       expect(r.event).toEqual({ type: "story_picked", storyId: "US-RANK-2" });
       expect(spawn).toHaveBeenCalledTimes(1);
-      expect(spawn.mock.calls[0]?.[1]).toMatchObject({ cwd: "/rt/wt", bare: true, timeoutMs: 60000 });
+      expect(spawn.mock.calls[0]?.[1]).toMatchObject({ cwd: "/rt/pick-ranking-cwd", bare: true, timeoutMs: 60000, purpose: "pick_ranking" });
       const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
       expect(events).toContainEqual({
         type: "pick:ranked",
@@ -1316,6 +1317,7 @@ describe("executeCommand — command → executor mapping", () => {
 
     it("fail-opens to deterministic order and records harness_failure on bad JSON", async () => {
       const spawn = vi.fn(async () => ({ stdout: "not json", stderr: "", exitCode: 0, timedOut: false }));
+      spawn.supportedPurposes = ["pick_ranking"] as const;
       const { ports, calls } = fakePorts({
         agentSpawn: spawn,
         backlog: { read: () => [
@@ -1336,9 +1338,34 @@ describe("executeCommand — command → executor mapping", () => {
       });
     });
 
+    it("treats old spawn ports without pick_ranking support as unavailable before calling them", async () => {
+      const spawn = vi.fn(async (_agent: string, opts: AgentSpawnOptions) => {
+        if (opts.purpose === "pick_ranking") throw new Error("old shim must not receive ranking spawns");
+        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+      });
+      const { ports, calls } = fakePorts({
+        agentSpawn: spawn,
+        backlog: { read: () => [
+          { id: "FIX-RANK-1", desc: "deterministic first", status: "📋 Todo" },
+          { id: "US-RANK-2", desc: "semantic winner if ranking were available", status: "📋 Todo" },
+        ] },
+      });
+      const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
+      expect(r.event).toEqual({ type: "story_picked", storyId: "FIX-RANK-1" });
+      expect(spawn).not.toHaveBeenCalled();
+      const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
+      expect(events).toContainEqual({
+        type: "harness_failure",
+        channel: "US-LOOP-090",
+        operation: "pick.semantic_ranking",
+        reason: "unsupported_purpose",
+        detail: "semantic ranking failed open",
+        ts: 42000,
+      });
+    });
+
     it("keeps Hold and unsatisfied depends-on cards unpickable even when ranked high", async () => {
-      const { ports } = fakePorts({
-        agentSpawn: vi.fn(async () => ({
+      const spawn = vi.fn(async () => ({
           stdout: JSON.stringify([
             { id: "US-HOLD", score: 100, reason: "owner says wait" },
             { id: "US-BLOCKED", score: 99, reason: "missing dependency" },
@@ -1346,7 +1373,10 @@ describe("executeCommand — command → executor mapping", () => {
           stderr: "",
           exitCode: 0,
           timedOut: false,
-        })),
+        }));
+      spawn.supportedPurposes = ["pick_ranking"] as const;
+      const { ports } = fakePorts({
+        agentSpawn: spawn,
         backlog: { read: () => [
           { id: "US-HOLD", desc: "manual wait", status: "🚫 Hold" },
           { id: "US-BLOCKED", desc: "depends-on:US-MISSING", status: "📋 Todo" },
@@ -1366,6 +1396,7 @@ describe("executeCommand — command → executor mapping", () => {
         exitCode: 0,
         timedOut: false,
       }));
+      spawn.supportedPurposes = ["pick_ranking"] as const;
       const { ports, calls } = fakePorts({
         paths: { ...fakePorts().ports.paths, eventsPath: join(rt, "events.ndjson") },
         agentSpawn: spawn,

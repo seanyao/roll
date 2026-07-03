@@ -33,3 +33,24 @@ export function dayKeyOffset(d: Date, deltaDays: number): string {
   );
   return `${shifted.getUTCFullYear()}-${pad2(shifted.getUTCMonth() + 1)}-${pad2(shifted.getUTCDate())}`;
 }
+
+export function shDayStartMs(dayKey: string): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayKey);
+  if (m === null) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
+  return Date.UTC(year, month - 1, day) - TZ_OFFSET_MS;
+}
+
+export function shWindowDays(now: Date, count = 14): Array<{ key: string; startMs: number; endMs: number }> {
+  const endKey = shDayKey(now);
+  const endStart = shDayStartMs(endKey);
+  if (endStart === null) return [];
+  return Array.from({ length: count }, (_, index) => {
+    const startMs = endStart - (count - 1 - index) * 24 * 3600 * 1000;
+    const key = shDayKey(new Date(startMs));
+    return { key, startMs, endMs: startMs + 24 * 3600 * 1000 };
+  });
+}

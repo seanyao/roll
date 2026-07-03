@@ -581,6 +581,9 @@ function renderCycleActivity(analysis: CycleActivityAnalysis, json: boolean): st
   for (const followup of analysis.queuedFollowups ?? []) {
     lines.push(`follow-up ${followup.id ?? "(queued action)"} · ${followup.title} (${followup.reason})`);
   }
+  for (const sandbox of analysis.sandboxEvents ?? []) {
+    lines.push(`sandbox ${sandbox.type} · ${sandbox.summary}`);
+  }
   return lines.join("\n") + "\n";
 }
 

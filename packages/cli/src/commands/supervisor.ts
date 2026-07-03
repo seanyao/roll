@@ -333,6 +333,17 @@ export function gatherSupervisorInput(projectPath: string): SupervisorInput {
         });
       }
     }
+    else if (ev.type === "sandbox:quarantined") {
+      const sid = ev.storyId ?? cycleStory.get(ev.cycleId);
+      if (sid !== undefined) {
+        structuralFailures.set(sid, {
+          storyId: sid,
+          kind: "main_checkout_dirty",
+          detail: `main checkout ${ev.reason} quarantined at ${ev.phase}; ref ${ev.ref}; manifest ${ev.manifestPath}`,
+          source: `sandbox:quarantined/${ev.cycleId}`,
+        });
+      }
+    }
     else if (ev.type === "cycle:end") {
       const sid = cycleStory.get(ev.cycleId);
       if (sid !== undefined) {

@@ -115,6 +115,25 @@ export function watchRenderEventFromRollEvent(ev: RollEvent, mode: WatchMode = "
         detail: `${shortHash(ev.commitHash)} · ${text(ev.message)}`,
         severity: "good",
       };
+    case "sandbox:write_protected":
+      return {
+        kind: "gate",
+        observedAt: eventTs(ev),
+        cycleId: ev.cycleId,
+        summary: "sandbox:write_protected",
+        detail: `${ev.status} · ${ev.paths} path${ev.paths === 1 ? "" : "s"}`,
+        severity: ev.status === "released" ? "muted" : "normal",
+      };
+    case "sandbox:quarantined":
+      return {
+        kind: "gate",
+        observedAt: eventTs(ev),
+        cycleId: ev.cycleId,
+        storyId: ev.storyId,
+        summary: "sandbox:quarantined",
+        detail: `${ev.phase} · ${ev.reason} · ${ev.ref} · ${ev.files.length} item${ev.files.length === 1 ? "" : "s"}`,
+        severity: "warn",
+      };
     case "cycle:end":
       return {
         kind: "cycle",

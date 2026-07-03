@@ -27,13 +27,14 @@
  * Runtime: a few seconds (incremental tsc + a local-tarball install). The
  * generous `it` timeout is headroom for a cold CI build, not the expected cost.
  */
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
 const REPO_ROOT = resolve(__dirname, "../../..");
+const NPM_CACHE = join(tmpdir(), "roll-pack-npm-cache");
 
 const tmpDirs: string[] = [];
 function tmp(tag: string): string {
@@ -59,8 +60,31 @@ function run(cmd: string, args: string[], cwd: string): string {
     stdio: ["ignore", "pipe", "pipe"],
     // The bash fallback's async update-checker would otherwise spray GitHub
     // fetch noise; point ROLL_HOME at a throwaway dir to keep it quiet/offline.
-    env: { ...process.env, ROLL_HOME: join(cwd, ".roll-home") },
+    env: envFor(cwd),
   });
+}
+
+function runCapture(cmd: string, args: string[], cwd: string): { code: number; stdout: string; stderr: string } {
+  const result = spawnSync(cmd, args, {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    env: envFor(cwd),
+  });
+  return {
+    code: result.status ?? 1,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+  };
+}
+
+function envFor(cwd: string): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    ROLL_HOME: join(cwd, ".roll-home"),
+    ROLL_SKIP_CAPTURE_INSTALL: "1",
+    npm_config_cache: NPM_CACHE,
+  };
 }
 
 describe("npm pack → install → run (release packaging)", () => {
@@ -82,7 +106,16 @@ describe("npm pack → install → run (release packaging)", () => {
       run("npm", ["install", "--prefix", prefix, "--offline", "--no-audit", "--no-fund", tarball], prefix);
 
       const bin = join(prefix, "node_modules", ".bin", "roll");
+      const pkgRoot = join(prefix, "node_modules", "@seanyao", "roll");
       expect(existsSync(bin), `installed bin shim missing at ${bin}`).toBe(true);
+      expect(existsSync(join(pkgRoot, "dist", "postinstall.mjs")), "postinstall bundle missing from package").toBe(true);
+      expect(existsSync(join(pkgRoot, "scripts", "postinstall-roll-capture.mjs")), "postinstall wrapper missing from package").toBe(true);
+
+      const postinstallBundle = join(pkgRoot, "dist", "postinstall.mjs");
+      renameSync(postinstallBundle, `${postinstallBundle}.missing`);
+      const postinstall = runCapture("node", [join(pkgRoot, "scripts", "postinstall-roll-capture.mjs")], prefix);
+      expect(postinstall.code).toBe(0);
+      expect(postinstall.stdout + postinstall.stderr).toContain("postinstall skipped:");
 
       // 3a. TS-native `--version` (FIX-202): prints the install tree's package.json
       //     version (single source of truth), not the fossil bin/roll literal.

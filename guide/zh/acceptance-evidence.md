@@ -153,6 +153,9 @@ evidence、已有证据暴露 rendering/layout 风险；升级原因必须记录
 - `Roll Capture.app` / `physical.screenshot` —— 物理截图请求的 provider 通道。
   就绪度不可用时，`roll attest` 记录带设置原因的 honest skip，不阻断报告生成；
   provider 超时时，报告把 timeout 作为独立失败原因展示。
+  macOS npm 安装会尝试从 `seanyao/roll-capture` 最新 Release 安装 app 到
+  `~/Applications`；`roll setup` 可重试这条修复路径，除非传入
+  `--no-capture-install`。
 - `Playwright Chromium` —— 可选的 headless web 截图工具，用于 `roll attest`
   和归档截图。安装命令是 `npx playwright install chromium`。
 

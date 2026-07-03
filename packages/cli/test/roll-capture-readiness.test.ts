@@ -84,6 +84,25 @@ describe("US-PHYSICAL-003 Roll Capture readiness", () => {
     expect(readiness.installed.status).toBe("missing");
   });
 
+  it("uses Spotlight as a readiness-only fallback for existing non-canonical app paths", () => {
+    const home = tmp("spotlight-home");
+    const buildArtifact = join(home, "src", "roll-capture", "build", "Roll Capture.app");
+    mkdirSync(buildArtifact, { recursive: true });
+    const readiness = collectRollCaptureReadiness(
+      deps({
+        home,
+        exists: (path) => path === buildArtifact,
+        execFile: (cmd) => {
+          if (cmd === "mdfind") return { code: 0, stdout: `${buildArtifact}\n`, stderr: "" };
+          return { code: 0, stdout: "true\n", stderr: "" };
+        },
+      }),
+    );
+
+    expect(readiness.installed).toEqual({ status: "installed", path: buildArtifact });
+    expect(readiness.detailLines.join("\n")).toContain(`installed=installed (${buildArtifact})`);
+  });
+
   it("verifies inbox writability via a sibling temp file and atomic rename", () => {
     const home = tmp("readonly-home");
     const calls: string[][] = [];

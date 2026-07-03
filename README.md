@@ -27,6 +27,17 @@ npm install -g @seanyao/roll
 ```
 
 Requirements: Node.js ≥ 22. Roll is a self-contained TypeScript CLI — no runtime engine beyond node.
+On macOS, npm installation also tries to install `Roll Capture.app` from the
+latest `seanyao/roll-capture` GitHub Release into `~/Applications` so physical
+screenshots can run. If the release is private, the installer first tries
+anonymous GitHub access, then retries with `GITHUB_TOKEN`/`GH_TOKEN` or
+`gh auth token` when available; credentials are used only in request headers.
+GitHub requests respect `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` when Node exposes
+the matching fetch dispatcher. CI, headless sessions, non-macOS hosts,
+sudo/root shells, offline downloads, or `ROLL_SKIP_CAPTURE_INSTALL=1` skip this
+step without failing install; when skipped under sudo/root, re-run `roll setup`
+as a regular user so the app installs into that user's `~/Applications`.
+`roll setup` and `roll doctor tools` report the same readiness and repair path.
 
 ## Use
 
@@ -210,7 +221,7 @@ with `roll loop resume` when ready.
 | `roll next` | Continue init/onboard with one best next command |
 | `roll north [--json] [--no-color]` | North-star terminal panel for autonomy, delivery rate, fix tax, and attribution errors |
 | `roll release [--dry-run\|--showcase]` | Release planning/flow plus golden-path showcase support |
-| `roll setup [-f\|--force] [--reselect]` / `roll setup skills\|offboard` | Install/sync conventions or remove Roll-owned project artifacts |
+| `roll setup [-f\|--force] [--reselect] [--no-capture-install]` / `roll setup skills\|offboard` | Install/sync conventions, repair Roll Capture.app readiness, or remove Roll-owned project artifacts |
 | `roll status [ci\|pulse] [--json]` | Project health, CI state, and delivery pulse |
 | `roll test [--where] [--reset]` | Run tests through the isolation adapter |
 | `roll update` | Upgrade the global Roll install and re-sync conventions |

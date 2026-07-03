@@ -10,6 +10,7 @@
     "test:e2e": "pnpm -r build && pnpm --filter @roll/cli exec vitest run test/critical-flows.e2e.test.ts",
     "test:cov": "pnpm -r exec vitest run --coverage.enabled --coverage.provider=v8 --coverage.include='src/**' --coverage.reporter=text-summary --coverage.reporter=text",
     "bundle": "node scripts/bundle.mjs",
+    "postinstall": "node scripts/postinstall-roll-capture.mjs",
     "prepack": "pnpm -r build && pnpm bundle"
   },
   "keywords": [
@@ -35,6 +36,7 @@
     "docs/",
     "guide/",
     "lib/",
+    "scripts/postinstall-roll-capture.mjs",
     "skills/",
     "template/",
     "README.md",

@@ -109,7 +109,10 @@ roll attest audit --json
     产品页,就该截 web 图；
   - 声明了 `physical_terminal:` ⇒ **terminal**，但合同更严格——报告必须包含从 macOS
     `Terminal.app` 真实屏幕像素截下来的图。headless stdout、transcript 渲染图、
-    HTML replay 图都不能满足这个合同；
+    HTML replay 图都不能满足这个合同。`roll attest` 会在可用时请求
+    `physical.screenshot` provider，把返回的 PNG 复制进本 story 的 run 目录，
+    并在报告里展示 `requested -> taken/skipped/failed/timeout -> attached/not-attached`
+    状态链；
   - 否则声明了 `deliverable_cmd:` ⇒ **terminal**——走终端截屏通道的 CLI 交付；
   - 否则由 AC 文本判定（web / terminal / 含糊）。
 
@@ -147,6 +150,9 @@ evidence、已有证据暴露 rendering/layout 风险；升级原因必须记录
   复现图都不算截图证据。交互式 `Terminal.app` 授权探针一旦成功，会缓存在
   `ROLL_HOME` 下，后续 `roll doctor` / setup 检查不会反复触发 macOS 权限弹窗；
   如果刚刚授权，先重启 Terminal.app 再信任缓存。
+- `Roll Capture.app` / `physical.screenshot` —— 物理截图请求的 provider 通道。
+  就绪度不可用时，`roll attest` 记录带设置原因的 honest skip，不阻断报告生成；
+  provider 超时时，报告把 timeout 作为独立失败原因展示。
 - `Playwright Chromium` —— 可选的 headless web 截图工具，用于 `roll attest`
   和归档截图。安装命令是 `npx playwright install chromium`。
 

@@ -10,32 +10,48 @@ export type PhysicalTerminalParseResult =
   | { kind: "ok"; spec: PhysicalTerminalSpec };
 
 function frontmatter(specText: string): string | null {
-  const m = /^---\n([\s\S]*?)\n---/.exec(specText);
+  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(specText);
   return m === null ? null : (m[1] ?? "");
 }
 
-function stripQuotes(value: string): string {
-  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-    return value.slice(1, -1);
+function stripInlineComment(value: string): string {
+  let quote: "'" | '"' | null = null;
+  for (let i = 0; i < value.length; i += 1) {
+    const ch = value[i];
+    if ((ch === "'" || ch === '"') && (i === 0 || value[i - 1] !== "\\")) {
+      quote = quote === ch ? null : quote === null ? ch : quote;
+      continue;
+    }
+    if (ch === "#" && quote === null && (i === 0 || /\s/.test(value[i - 1] ?? ""))) {
+      return value.slice(0, i).trimEnd();
+    }
   }
-  return value;
+  return value.trimEnd();
+}
+
+function stripQuotes(value: string): string {
+  const stripped = stripInlineComment(value.trim());
+  if ((stripped.startsWith('"') && stripped.endsWith('"')) || (stripped.startsWith("'") && stripped.endsWith("'"))) {
+    return stripped.slice(1, -1);
+  }
+  return stripped;
 }
 
 export function parsePhysicalTerminalSpec(specText: string): PhysicalTerminalParseResult {
   const fm = frontmatter(specText);
   if (fm === null) return { kind: "absent" };
   const lines = fm.split(/\r?\n/);
-  const start = lines.findIndex((line) => /^physical_terminal:\s*$/.test(line));
+  const start = lines.findIndex((line) => /^physical_terminal:\s*(?:#.*)?$/.test(line));
   if (start === -1) return { kind: "absent" };
 
   const fields = new Map<string, string>();
   for (const line of lines.slice(start + 1)) {
     if (line.trim() === "") continue;
     if (/^\S/.test(line)) break;
-    const m = /^\s+(app|command|evidence):\s*(.+?)\s*$/.exec(line);
+    const m = /^\s+(?:-\s*)?(app|command|evidence):\s*(.+?)\s*$/.exec(line);
     if (m === null) continue;
     const key = m[1] ?? "";
-    const value = stripQuotes((m[2] ?? "").trim());
+    const value = stripQuotes(m[2] ?? "");
     if (value !== "") fields.set(key, value);
   }
 

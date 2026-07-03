@@ -9,16 +9,26 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   realpathSync,
+  renameSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import type { EvidenceRun, ShotRun } from "@roll/infra";
+import { RollCaptureProvider, type EvidenceRun, type ShotRun } from "@roll/infra";
+import {
+  ROLL_CAPTURE_HOST_APP_NAME,
+  ROLL_CAPTURE_HOST_BUNDLE_ID,
+  ROLL_CAPTURE_PROTOCOL_V1,
+  type RollCaptureRequestV1,
+  type RollCaptureResponseV1,
+} from "@roll/spec";
 import { bi } from "@roll/core";
 import {
   assessDocGapFromFiles,
@@ -1191,6 +1201,467 @@ describe("FIX-305 — UI/dossier web self-capture lane (real screenshot, not a s
     expect(calls.some((c) => c.startsWith("npx "))).toBe(false);
     const runDir = join(proj, ".roll", "features", "demo", "FIX-WEB", "2026-06-06T01-02-03");
     expect(existsSync(join(runDir, "screenshots", "web.png"))).toBe(false);
+  });
+});
+
+describe("US-PHYSICAL-004 — attest physical.screenshot provider lane", () => {
+  function physicalProject(
+    id = "US-PHYSICAL-004A",
+    frontmatter: readonly string[] = ["physical_terminal:", "  app: Terminal.app", "  command: roll doctor --tools", "  evidence: screenshot"],
+  ): string {
+    const proj = realpathSync(mkdtempSync(join(tmpdir(), "roll-attest-physical-")));
+    dirs.push(proj);
+    const cardDir = join(proj, ".roll", "features", "demo", id);
+    mkdirSync(cardDir, { recursive: true });
+    writeFileSync(
+      join(cardDir, "spec.md"),
+      [
+        "---",
+        `id: ${id}`,
+        ...frontmatter,
+        "---",
+        "",
+        `# ${id} — physical screenshot`,
+        "",
+        "**AC:**",
+        "- [ ] [visual-evidence] physical screenshot proves the terminal output",
+        "",
+      ].join("\n"),
+    );
+    return proj;
+  }
+
+  function responseFor(
+    captureRoot: string,
+    request: RollCaptureRequestV1,
+    status: "taken" | "skipped" | "failed",
+    extra: Partial<RollCaptureResponseV1> = {},
+  ): RollCaptureResponseV1 {
+    return {
+      protocol: ROLL_CAPTURE_PROTOCOL_V1,
+      requestId: request.requestId,
+      status,
+      responsePath: join(captureRoot, "responses", `response-${request.requestId}.json`),
+      host: { appName: ROLL_CAPTURE_HOST_APP_NAME, bundleId: ROLL_CAPTURE_HOST_BUNDLE_ID, version: "test" },
+      startedAt: "2026-06-06T01:02:03.000Z",
+      finishedAt: "2026-06-06T01:02:04.000Z",
+      ...extra,
+    };
+  }
+
+  function physicalProviderFixture(
+    captureRoot: string,
+    response: (request: RollCaptureRequestV1) => RollCaptureResponseV1,
+  ): { port: RollCaptureProvider; requests: RollCaptureRequestV1[] } {
+    const requests: RollCaptureRequestV1[] = [];
+    let clock = 0;
+    return {
+      requests,
+      port: new RollCaptureProvider({
+        root: captureRoot,
+        defaultPollIntervalMs: 1,
+        now: () => clock,
+        sleep: async (ms) => {
+          clock += ms;
+          const inbox = join(captureRoot, "inbox");
+          if (!existsSync(inbox)) return;
+          const requestFiles = readdirSync(inbox).filter((name) => name.startsWith("request-") && name.endsWith(".json"));
+          for (const requestFile of requestFiles) {
+            const requestPath = join(inbox, requestFile);
+            const request = JSON.parse(readFileSync(requestPath, "utf8")) as RollCaptureRequestV1;
+            if (requests.some((seen) => seen.requestId === request.requestId)) continue;
+            requests.push(request);
+            const res = response(request);
+            mkdirSync(join(captureRoot, "responses"), { recursive: true });
+            const finalPath = join(captureRoot, "responses", `response-${request.requestId}.json`);
+            const tempPath = join(captureRoot, "responses", `.response-${request.requestId}.json.tmp`);
+            writeFileSync(tempPath, JSON.stringify(res), "utf8");
+            renameSync(tempPath, finalPath);
+            writeFileSync(
+              join(captureRoot, "ledger.jsonl"),
+              JSON.stringify({
+                requestId: request.requestId,
+                storyId: request.storyId,
+                runId: request.runId,
+                kind: request.kind,
+                status: res.status,
+                screenshotPath: res.screenshotPath,
+                responsePath: res.responsePath,
+                attachedToReport: false,
+                ...(res.reason !== undefined ? { reason: res.reason } : {}),
+                startedAt: res.startedAt,
+                finishedAt: res.finishedAt,
+              }) + "\n",
+              { flag: "a" },
+            );
+            rmSync(requestPath, { force: true });
+          }
+        },
+      }),
+    };
+  }
+
+  function timeoutProvider(captureRoot: string): RollCaptureProvider {
+    let clock = 0;
+    return new RollCaptureProvider({
+      root: captureRoot,
+      defaultPollIntervalMs: 1,
+      now: () => clock,
+      sleep: async (ms) => {
+        clock += ms;
+      },
+    });
+  }
+
+  function requestFiles(captureRoot: string): string[] {
+    const inbox = join(captureRoot, "inbox");
+    if (!existsSync(inbox)) return [];
+    return readdirSync(inbox).filter((name) => name.startsWith("request-") && name.endsWith(".json"));
+  }
+
+  const availableReadiness = {
+    status: "available" as const,
+    installed: { status: "installed" as const, path: "/Applications/Roll Capture.app" },
+    hostPermission: { status: "granted" as const, detail: "screen recording available" },
+    inbox: { status: "writable" as const, path: "/tmp/roll-capture/inbox", detail: "ok" },
+    detailLines: ["installed=installed", "hostPermission=granted", "inbox=writable"],
+    repairCommands: [],
+  };
+
+  it("invokes physical.screenshot, copies the PNG into the story run, and links it in the report", async () => {
+    const proj = physicalProject();
+    const sourcePng = join(proj, "captured-by-app.png");
+    const captureRoot = join(proj, "roll-capture-root");
+    writeFileSync(sourcePng, "PNGDATA");
+    mkdirSync(captureRoot, { recursive: true });
+    const fake = physicalProviderFixture(captureRoot, (request) => {
+      const reportPath = join(captureRoot, "reports", `${request.requestId}.html`);
+      mkdirSync(dirname(reportPath), { recursive: true });
+      writeFileSync(reportPath, "<html>capture report</html>");
+      return responseFor(captureRoot, request, "taken", { screenshotPath: sourcePng });
+    });
+
+    const code = await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["US-PHYSICAL-004A"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          rollCapture: { readiness: () => availableReadiness, provider: fake.port, root: captureRoot },
+        }),
+      ),
+    );
+
+    expect(code).toBe(0);
+    expect(fake.requests).toHaveLength(1);
+    expect(fake.requests[0]).toMatchObject({ protocol: ROLL_CAPTURE_PROTOCOL_V1, kind: "physical_terminal", target: { type: "window", appName: "Terminal.app" } });
+    const request = fake.requests[0] as RollCaptureRequestV1;
+    expect(existsSync(join(captureRoot, "inbox", `request-${request.requestId}.json`))).toBe(false);
+    expect(readFileSync(join(captureRoot, "responses", `response-${request.requestId}.json`), "utf8")).toContain('"status":"taken"');
+    const runDir = dirname(dirname(request.out));
+    expect(readFileSync(join(runDir, "screenshots", "physical.png"), "utf8")).toBe("PNGDATA");
+    const html = readFileSync(join(runDir, "US-PHYSICAL-004A-report.html"), "utf8");
+    expect(html).toContain("physical.screenshot");
+    expect(html).toContain("requested → taken → attached");
+    expect(html).toContain('<img src="screenshots/physical.png"');
+    expect(html).toContain("ledger response");
+    expect(html).toContain("attachedToReport=false");
+    expect(html).not.toContain(`href="${captureRoot}`);
+    expect(html).not.toContain(`href="../`);
+    const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
+      captures?: Array<{ kind?: string; taken?: boolean; out?: string }>;
+    };
+    expect(evidence.captures).toContainEqual({ kind: "physical_terminal", out: join(runDir, "screenshots", "physical.png"), taken: true });
+  });
+
+  it("does not trigger physical.screenshot from comments, AC text, or URLs containing the token", async () => {
+    const proj = physicalProject("US-PHYSICAL-004TEXT", [
+      "# evidence_profile: physical",
+      "deliverable_url: https://example.test/docs/physical.screenshot",
+    ]);
+    const captureRoot = join(proj, "roll-capture-root");
+    const fake = physicalProviderFixture(captureRoot, (request) => responseFor(captureRoot, request, "failed", { reason: "should not run" }));
+    const spec = join(proj, ".roll", "features", "demo", "US-PHYSICAL-004TEXT", "spec.md");
+    writeFileSync(
+      spec,
+      [
+        "---",
+        "id: US-PHYSICAL-004TEXT",
+        "# evidence_profile: physical",
+        "deliverable_url: https://example.test/docs/physical.screenshot",
+        "---",
+        "",
+        "# US-PHYSICAL-004TEXT",
+        "",
+        "**AC:**",
+        "- [ ] Documentation may mention physical.screenshot without requesting capture",
+        "",
+      ].join("\n"),
+    );
+
+    await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["US-PHYSICAL-004TEXT"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          rollCapture: { readiness: () => availableReadiness, provider: fake.port, root: captureRoot },
+        }),
+      ),
+    );
+
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it("recognizes physical_terminal with an inline comment and nested list syntax", async () => {
+    const proj = physicalProject("US-PHYSICAL-004INLINE", [
+      "physical_terminal: # real Terminal.app capture required",
+      "  - app: Terminal.app",
+      "    command: roll doctor --tools",
+      "    evidence: screenshot",
+    ]);
+    const captureRoot = join(proj, "roll-capture-root");
+    const sourcePng = join(proj, "inline.png");
+    writeFileSync(sourcePng, "INLINEPNG");
+    const fake = physicalProviderFixture(captureRoot, (request) => responseFor(captureRoot, request, "taken", { screenshotPath: sourcePng }));
+
+    await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["US-PHYSICAL-004INLINE"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          rollCapture: { readiness: () => availableReadiness, provider: fake.port, root: captureRoot },
+        }),
+      ),
+    );
+
+    expect(fake.requests).toHaveLength(1);
+    expect(fake.requests[0]).toMatchObject({ kind: "physical_terminal", target: { type: "window", appName: "Terminal.app" } });
+  });
+
+  it("honors an evidence_profile physical request even without physical_terminal frontmatter", async () => {
+    const proj = physicalProject("US-PHYSICAL-004D", ["evidence_profile: physical"]);
+    const captureRoot = join(proj, "roll-capture-root");
+    const sourcePng = join(proj, "captured-display.png");
+    writeFileSync(sourcePng, "DISPLAYPNG");
+    const fake = physicalProviderFixture(captureRoot, (request) => responseFor(captureRoot, request, "taken", { screenshotPath: sourcePng }));
+
+    await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["US-PHYSICAL-004D"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          rollCapture: { readiness: () => availableReadiness, provider: fake.port, root: captureRoot },
+        }),
+      ),
+    );
+
+    expect(fake.requests).toHaveLength(1);
+    expect(fake.requests[0]).toMatchObject({ kind: "display", target: { type: "display" } });
+    const runDir = join(proj, ".roll", "features", "demo", "US-PHYSICAL-004D", "2026-06-06T01-02-03");
+    expect(readFileSync(join(runDir, "screenshots", "physical.png"), "utf8")).toBe("DISPLAYPNG");
+    const html = readFileSync(join(runDir, "US-PHYSICAL-004D-report.html"), "utf8");
+    expect(html).toContain("requested → taken → attached");
+  });
+
+  it("does not treat commented evidence_profile or non-physical profile values as physical requests", async () => {
+    for (const [id, frontmatter] of [
+      ["US-PHYSICAL-004COMMENT", ["# evidence_profile: physical"]],
+      ["US-PHYSICAL-004NONPHYS", ["evidence_profile: cli_output"]],
+    ] as const) {
+      const proj = physicalProject(id, frontmatter);
+      const captureRoot = join(proj, "roll-capture-root");
+      const fake = physicalProviderFixture(captureRoot, (request) => responseFor(captureRoot, request, "failed", { reason: "should not run" }));
+
+      await silenced(() =>
+        inDir(proj, () =>
+          attestCommand([id], {
+            now: () => T0,
+            run: quietRun,
+            ghProbe: () => Promise.resolve(false),
+            rollCapture: { readiness: () => availableReadiness, provider: fake.port, root: captureRoot },
+          }),
+        ),
+      );
+
+      expect(fake.requests).toHaveLength(0);
+    }
+  });
+
+  it("records not-attached, clears a stale output, and never links an external source when PNG attachment fails", async () => {
+    const proj = physicalProject("US-PHYSICAL-004COPYFAIL");
+    const captureRoot = join(proj, "roll-capture-root");
+    const fake = physicalProviderFixture(captureRoot, (request) => {
+      mkdirSync(dirname(request.out), { recursive: true });
+      writeFileSync(request.out, "STALE-PARTIAL");
+      return responseFor(captureRoot, request, "taken", { screenshotPath: join(proj, "missing-source.png") });
+    });
+
+    await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["US-PHYSICAL-004COPYFAIL"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          rollCapture: { readiness: () => availableReadiness, provider: fake.port, root: captureRoot },
+        }),
+      ),
+    );
+
+    const request = fake.requests[0] as RollCaptureRequestV1;
+    const runDir = dirname(dirname(request.out));
+    expect(existsSync(request.out)).toBe(false);
+    const html = readFileSync(join(runDir, "US-PHYSICAL-004COPYFAIL-report.html"), "utf8");
+    expect(html).toContain("requested → taken → not-attached");
+    expect(html).not.toContain('<img src="');
+    expect(html).toContain("missing-source.png");
+    expect(html).not.toContain(`href="${join(proj, "missing-source.png")}`);
+    const ledger = readFileSync(join(captureRoot, "ledger.jsonl"), "utf8");
+    expect(ledger).toContain('"attachedToReport":false');
+  });
+
+  it("lets --capture-command own physical_terminal capture and does not also request physical.screenshot", async () => {
+    const proj = physicalProject("US-PHYSICAL-004DEDUP");
+    const captureRoot = join(proj, "roll-capture-root");
+    const fake = physicalProviderFixture(captureRoot, (request) => responseFor(captureRoot, request, "failed", { reason: "duplicate lane" }));
+    const shotRun: ShotRun = (cmd, argv) => {
+      if (cmd === "sh" && String(argv[1] ?? "").includes("lsappinfo")) return Promise.resolve({ code: 0, stdout: '"LSDisplayName"="Terminal"\n', stderr: "" });
+      if (cmd === "sh") return Promise.resolve({ code: 0, stdout: "doctor ok\n", stderr: "" });
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "osascript" && String(argv[1] ?? "").includes("bounds of w")) return Promise.resolve({ code: 0, stdout: "0, 0, 1280, 800\n", stderr: "" });
+      if (cmd === "screencapture") writeFileSync(String(argv[argv.length - 1]), "TERMINALPNG");
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+
+    await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["US-PHYSICAL-004DEDUP", "--capture-command", "roll doctor --tools"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          capture: { run: shotRun, platform: "darwin", env: {} },
+          rollCapture: { readiness: () => availableReadiness, provider: fake.port, root: captureRoot },
+        }),
+      ),
+    );
+
+    expect(fake.requests).toHaveLength(0);
+    const runDir = join(proj, ".roll", "features", "demo", "US-PHYSICAL-004DEDUP", "2026-06-06T01-02-03");
+    const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
+      captures?: Array<{ kind?: string; taken?: boolean; out?: string }>;
+    };
+    expect(evidence.captures?.filter((capture) => capture.kind === "physical_terminal")).toHaveLength(1);
+  });
+
+  it("records readiness skip with reason and leaves existing non-physical attest unchanged", async () => {
+    const proj = physicalProject("US-PHYSICAL-004B");
+    const captureRoot = join(proj, "roll-capture-root");
+    const provider = new RollCaptureProvider({ root: captureRoot });
+
+    await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["US-PHYSICAL-004B"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          rollCapture: {
+            readiness: () => ({
+              ...availableReadiness,
+              status: "skip",
+              detailLines: ["skipped — Roll Capture.app is a macOS-only physical screenshot host."],
+            }),
+            provider,
+            root: captureRoot,
+          },
+        }),
+      ),
+    );
+
+    const runDir = join(proj, ".roll", "features", "demo", "US-PHYSICAL-004B", "2026-06-06T01-02-03");
+    expect(requestFiles(captureRoot)).toHaveLength(0);
+    const html = readFileSync(join(runDir, "US-PHYSICAL-004B-report.html"), "utf8");
+    expect(html).toContain("requested → skipped → not-attached");
+    expect(html).toContain("Roll Capture.app is a macOS-only physical screenshot host");
+
+    const plain = project();
+    const plainCaptureRoot = join(plain, "roll-capture-root");
+    const plainProvider = new RollCaptureProvider({ root: plainCaptureRoot });
+    await silenced(() =>
+      inDir(plain, () =>
+        attestCommand(["FIX-300"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          rollCapture: { readiness: () => availableReadiness, provider: plainProvider, root: plainCaptureRoot },
+        }),
+      ),
+    );
+    expect(requestFiles(plainCaptureRoot)).toHaveLength(0);
+  });
+
+  it("records provider failed responses with their reason", async () => {
+    const proj = physicalProject("US-PHYSICAL-004E");
+    const captureRoot = join(proj, "roll-capture-root");
+    const fake = physicalProviderFixture(captureRoot, (request) => responseFor(captureRoot, request, "failed", { reason: "screen recording permission denied" }));
+
+    await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["US-PHYSICAL-004E"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          rollCapture: { readiness: () => availableReadiness, provider: fake.port, root: captureRoot },
+        }),
+      ),
+    );
+
+    expect(fake.requests).toHaveLength(1);
+    const runDir = join(proj, ".roll", "features", "demo", "US-PHYSICAL-004E", "2026-06-06T01-02-03");
+    const html = readFileSync(join(runDir, "US-PHYSICAL-004E-report.html"), "utf8");
+    expect(html).toContain("requested → failed → not-attached");
+    expect(html).toContain("screen recording permission denied");
+    const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
+      captures?: Array<{ kind?: string; taken?: boolean; skipped?: string }>;
+    };
+    expect(evidence.captures).toContainEqual({
+      kind: "physical_terminal",
+      out: join(runDir, "screenshots", "physical.png"),
+      taken: false,
+      skipped: "screen recording permission denied",
+    });
+  });
+
+  it("surfaces provider timeout as a distinct capture failure reason", async () => {
+    const proj = physicalProject("US-PHYSICAL-004C");
+    const captureRoot = join(proj, "roll-capture-root");
+
+    await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["US-PHYSICAL-004C"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          rollCapture: { readiness: () => availableReadiness, provider: timeoutProvider(captureRoot), root: captureRoot, timeoutMs: 5 },
+        }),
+      ),
+    );
+
+    const runDir = join(proj, ".roll", "features", "demo", "US-PHYSICAL-004C", "2026-06-06T01-02-03");
+    const html = readFileSync(join(runDir, "US-PHYSICAL-004C-report.html"), "utf8");
+    expect(html).toContain("requested → timeout → not-attached");
+    expect(html).toContain("timed out after 5ms");
+    expect(requestFiles(captureRoot)).toEqual([]);
+    const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
+      captures?: Array<{ kind?: string; taken?: boolean; skipped?: string }>;
+    };
+    expect(evidence.captures).toContainEqual({
+      kind: "physical_terminal",
+      out: join(runDir, "screenshots", "physical.png"),
+      taken: false,
+      skipped: `timeout: timed out after 5ms waiting for ${join(captureRoot, "responses", "response-US-PHYSICAL-004C-2026-06-06T01-02-03-physical.json")}`,
+    });
   });
 });
 

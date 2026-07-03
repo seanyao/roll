@@ -39,27 +39,42 @@ import {
   type CardContext,
   type DocGapWarning,
   type EvidenceRef,
+  type PhysicalCaptureReportEntry,
   type ProcessArchive,
   type RunRow,
   type ReviewScoreReportEntry,
 } from "@roll/core";
-import { classifyStatus, type Lang, type RollEvent, type CycleRoleSummary } from "@roll/spec";
+import {
+  ROLL_CAPTURE_PROTOCOL_V1,
+  classifyStatus,
+  type CaptureKind,
+  type CaptureLedgerEntry,
+  type CaptureTarget,
+  type Lang,
+  type RollCaptureRequestV1,
+  type RollEvent,
+  type CycleRoleSummary,
+} from "@roll/spec";
 import {
   captureScreenshot,
   collectEvidence,
   containsSecret,
+  defaultRollCaptureRoot,
   openEvidenceFrame,
   redactSecrets,
+  RollCaptureProvider,
   screenshotEvidenceRef,
   writeEvidenceJson,
   type CaptureCommandFact,
   type CaptureFact,
   type EvidenceRun,
   type RunOut,
+  type RollCaptureProviderPort,
   type ScreenshotDeps,
   type ScreenshotResult,
 } from "@roll/infra";
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -76,6 +91,7 @@ import { promisify } from "node:util";
 import { cardArchiveDir, epicFromFeaturePath, findFeatureFile, findFeatureFiles, reportFileName, reviewFileName } from "../lib/archive.js";
 import { currentLang } from "./agent-list.js";
 import { physicalTerminalFromSpecText } from "../lib/physical-terminal.js";
+import { collectRollCaptureReadiness, type RollCaptureReadiness } from "../lib/roll-capture-readiness.js";
 import { designContractDeliveredEvidence } from "../runner/attest-gate.js";
 import { readReviewScoreTrend, readStoryReviewScores } from "../lib/review-score.js";
 import { collectToolEvidenceFromEventsPath, formatToolCostSummary } from "../lib/tool-display.js";
@@ -90,6 +106,13 @@ export interface AttestDeps {
   ghProbe?: () => Promise<boolean>;
   /** US-ATTEST-011 — seams for the terminal self-capture lane (run/env/platform). */
   capture?: ScreenshotDeps;
+  /** US-PHYSICAL-004 — injectable Roll Capture.app provider/readiness seams. */
+  rollCapture?: {
+    provider?: RollCaptureProviderPort;
+    readiness?: () => RollCaptureReadiness;
+    root?: string;
+    timeoutMs?: number;
+  };
   /** US-ATTEST-014 — injectable seam for the cycle process archive sources. */
   process?: ProcessReaders;
 }
@@ -609,6 +632,248 @@ function relativeFromPhysical(fromDir: string, toPath: string): string {
   }
 }
 
+function frontmatterBlock(specText: string): string | null {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(specText);
+  return m === null ? null : (m[1] ?? "");
+}
+
+function stripYamlInlineComment(value: string): string {
+  let quote: "'" | '"' | null = null;
+  for (let i = 0; i < value.length; i += 1) {
+    const ch = value[i];
+    if ((ch === "'" || ch === '"') && (i === 0 || value[i - 1] !== "\\")) {
+      quote = quote === ch ? null : quote === null ? ch : quote;
+      continue;
+    }
+    if (ch === "#" && quote === null && (i === 0 || /\s/.test(value[i - 1] ?? ""))) {
+      return value.slice(0, i).trimEnd();
+    }
+  }
+  return value.trimEnd();
+}
+
+function frontmatterScalar(specText: string, key: string): string | null {
+  const fm = frontmatterBlock(specText);
+  if (fm === null) return null;
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`^${escaped}:\\s*(.*?)\\s*$`, "m");
+  const m = re.exec(fm);
+  if (m === null) return null;
+  const raw = stripYamlInlineComment(m[1] ?? "").trim();
+  if (raw === "") return "";
+  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) return raw.slice(1, -1).trim();
+  return raw;
+}
+
+function declaresPhysicalEvidenceProfile(specText: string): boolean {
+  return frontmatterScalar(specText, "evidence_profile") === "physical";
+}
+
+function hrefInsideRunDir(runDir: string, path: string): string | undefined {
+  const rel = relativeFromPhysical(runDir, path);
+  return rel !== "" && !rel.startsWith("..") && !rel.startsWith("/") ? rel : undefined;
+}
+
+interface PhysicalCaptureLane {
+  report: PhysicalCaptureReportEntry;
+  fact: CaptureFact;
+  selfCapture?: EvidenceRef;
+}
+
+function physicalScreenshotRequest(
+  specText: string,
+  storyId: string,
+  runId: string,
+  runDir: string,
+  createdAt: string,
+  timeoutMs: number,
+  skipPhysicalTerminalProvider: boolean,
+): RollCaptureRequestV1 | null {
+  const physicalTerminal = physicalTerminalFromSpecText(specText);
+  if (physicalTerminal !== null && skipPhysicalTerminalProvider) return null;
+  const explicitPhysical = physicalTerminal !== null || declaresPhysicalEvidenceProfile(specText);
+  if (!explicitPhysical) return null;
+
+  const kind: CaptureKind = physicalTerminal !== null ? "physical_terminal" : "display";
+  const target: CaptureTarget =
+    physicalTerminal !== null ? { type: "window", appName: physicalTerminal.app } : { type: "display" };
+  const requestId = safeCaptureRequestId(`${storyId}-${runId}-physical`);
+  return {
+    protocol: ROLL_CAPTURE_PROTOCOL_V1,
+    requestId,
+    storyId,
+    runId,
+    kind,
+    target,
+    out: join(runDir, "screenshots", "physical.png"),
+    timeoutMs,
+    createdAt,
+  };
+}
+
+function safeCaptureRequestId(raw: string): string {
+  return raw.replace(/[^A-Za-z0-9._-]/g, "-").replace(/-+/g, "-");
+}
+
+async function runPhysicalScreenshotLane(
+  request: RollCaptureRequestV1,
+  readiness: RollCaptureReadiness,
+  provider: RollCaptureProviderPort,
+  ledgerRoot: string,
+): Promise<PhysicalCaptureLane> {
+  mkdirSync(dirname(request.out), { recursive: true });
+  if (readiness.status !== "available") {
+    const reason = readiness.detailLines.join("; ") || "Roll Capture.app is not ready";
+    return physicalLaneResult(request, ["requested", "skipped", "not-attached"], reason, undefined, readCaptureLedgerEntries(ledgerRoot, request.requestId));
+  }
+
+  const requestPath = join(ledgerRoot, "inbox", `request-${request.requestId}.json`);
+  try {
+    await provider.writeRequest(request);
+    const result = await provider.waitForResponse(request, { timeoutMs: request.timeoutMs });
+    const ledger = readCaptureLedgerEntries(ledgerRoot, request.requestId);
+    const responsePath = result.status === "timeout" ? undefined : result.response.responsePath;
+    if (result.status === "taken") {
+      const attached = attachPhysicalScreenshot(result.path, request.out);
+      if (attached.ok) {
+        return physicalLaneResult(request, ["requested", "taken", "attached"], undefined, `screenshots/${basename(request.out)}`, ledger, requestPath, responsePath);
+      }
+      return physicalLaneResult(request, ["requested", "taken", "not-attached"], attached.reason, undefined, ledger, requestPath, responsePath);
+    }
+    if (result.status === "timeout") {
+      return physicalLaneResult(request, ["requested", "timeout", "not-attached"], `timeout: ${result.reason}`, undefined, ledger, requestPath);
+    }
+    return physicalLaneResult(request, ["requested", result.status, "not-attached"], result.reason, undefined, ledger, requestPath, responsePath);
+  } catch (error) {
+    return physicalLaneResult(
+      request,
+      ["requested", "failed", "not-attached"],
+      error instanceof Error ? error.message : String(error),
+      undefined,
+      readCaptureLedgerEntries(ledgerRoot, request.requestId),
+      requestPath,
+    );
+  } finally {
+    rmSync(requestPath, { force: true });
+  }
+}
+
+function physicalLaneResult(
+  request: RollCaptureRequestV1,
+  statusChain: readonly string[],
+  reason: string | undefined,
+  screenshotHref: string | undefined,
+  ledger: readonly CaptureLedgerEntry[],
+  requestPath?: string,
+  responsePath?: string,
+): PhysicalCaptureLane {
+  const runDir = dirname(dirname(request.out));
+  const attached = screenshotHref !== undefined;
+  const screenshot: EvidenceRef | undefined = attached
+    ? { kind: "screenshot", label: "physical.screenshot", href: screenshotHref }
+    : undefined;
+  return {
+    report: {
+      provider: "physical.screenshot",
+      kind: request.kind,
+      statusChain,
+      ...(reason !== undefined && reason !== "" ? { reason } : {}),
+      ...(screenshot !== undefined ? { screenshot } : {}),
+      ...reportPathField(runDir, "requestPath", requestPath),
+      ...reportPathField(runDir, "responsePath", responsePath),
+      ...(ledger.length > 0 ? { ledgerLinks: ledgerLinksForReport(runDir, ledger) } : {}),
+      ...(ledger.length > 0 ? { ledgerDetails: ledgerDetailsForReport(ledger) } : {}),
+    },
+    fact: {
+      kind: request.kind,
+      out: request.out,
+      taken: attached,
+      ...(!attached && reason !== undefined && reason !== "" ? { skipped: reason } : {}),
+    },
+    ...(screenshot !== undefined ? { selfCapture: screenshot } : {}),
+  };
+}
+
+function reportPathField(
+  runDir: string,
+  key: "requestPath" | "responsePath",
+  path: string | undefined,
+): Pick<PhysicalCaptureReportEntry, "requestPath" | "responsePath"> {
+  if (path === undefined) return {};
+  const href = hrefInsideRunDir(runDir, path);
+  return href === undefined ? {} : { [key]: href };
+}
+
+function attachPhysicalScreenshot(source: string, out: string): { ok: true } | { ok: false; reason: string } {
+  try {
+    if (source !== out) copyFileSync(source, out);
+    if (!existsSync(out)) return { ok: false, reason: "physical.screenshot did not produce an attached PNG" };
+    return { ok: true };
+  } catch (error) {
+    rmSync(out, { force: true });
+    return { ok: false, reason: `attach failed: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
+function readCaptureLedgerEntries(root: string, requestId: string): CaptureLedgerEntry[] {
+  const out: CaptureLedgerEntry[] = [];
+  for (const path of [join(root, "ledger.jsonl"), join(root, "ledger.ndjson"), join(root, "capture-ledger.jsonl"), join(root, "ledger.json")]) {
+    if (!existsSync(path)) continue;
+    try {
+      const raw = readFileSync(path, "utf8").trim();
+      if (raw === "") continue;
+      const values = path.endsWith(".json")
+        ? (JSON.parse(raw) as unknown)
+        : raw.split(/\r?\n/).filter((line) => line.trim() !== "").map((line) => JSON.parse(line) as unknown);
+      const rows = Array.isArray(values) ? values : [values];
+      for (const row of rows) {
+        if (isCaptureLedgerEntry(row) && row.requestId === requestId) out.push(row);
+      }
+    } catch {
+      /* malformed ledger: ignore, provider response remains authoritative */
+    }
+  }
+  return out;
+}
+
+function isCaptureLedgerEntry(value: unknown): value is CaptureLedgerEntry {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row["requestId"] === "string" &&
+    typeof row["status"] === "string" &&
+    typeof row["responsePath"] === "string" &&
+    typeof row["attachedToReport"] === "boolean" &&
+    typeof row["startedAt"] === "string" &&
+    typeof row["finishedAt"] === "string"
+  );
+}
+
+function ledgerLinksForReport(runDir: string, entries: readonly CaptureLedgerEntry[]): Array<{ label: string; href: string }> {
+  return entries.flatMap((entry, index) => {
+    const n = entries.length === 1 ? "" : ` ${index + 1}`;
+    return [
+      ...ledgerLink(runDir, `ledger response${n}`, entry.responsePath),
+      ...(entry.reportPath !== undefined && entry.reportPath !== "" ? ledgerLink(runDir, `ledger report${n}`, entry.reportPath) : []),
+    ];
+  });
+}
+
+function ledgerLink(runDir: string, label: string, path: string): Array<{ label: string; href: string }> {
+  const href = hrefInsideRunDir(runDir, path);
+  return href === undefined ? [] : [{ label, href }];
+}
+
+function ledgerDetailsForReport(entries: readonly CaptureLedgerEntry[]): string[] {
+  return entries.flatMap((entry, index) => {
+    const n = entries.length === 1 ? "" : ` ${index + 1}`;
+    const details = [`ledger response${n}: ${entry.responsePath}`, `attachedToReport=${String(entry.attachedToReport)}`];
+    if (entry.screenshotPath !== undefined && entry.screenshotPath !== "") details.push(`ledger screenshot${n}: ${entry.screenshotPath}`);
+    if (entry.reportPath !== undefined && entry.reportPath !== "") details.push(`ledger report${n}: ${entry.reportPath}`);
+    return details;
+  });
+}
+
 /**
  * US-ATTEST-009 — same-story Review Score entries from `.roll/notes/`:
  * `YYYY-MM-DD-<skill>-<STORY>-<ts>.md` with YAML frontmatter
@@ -910,6 +1175,12 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     process.stderr.write(`[roll] attest：在 .roll/features/ 下找不到 ${storyId}\n`);
     return 1;
   }
+  let featureText = "";
+  try {
+    featureText = readFileSync(featureFile, "utf8");
+  } catch {
+    featureText = "";
+  }
 
   // AC extraction (FIX-226): walk past a content-free stub owner — the ID-owned
   // card file may be a migrate-features `spec.md` (US-META-007) with no `**AC:**`
@@ -942,11 +1213,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   // US-INIT-003b: detect physical_terminal cards — they use kind: "physical_terminal"
   // and NEVER fall back to headless text artifacts.
   const isPhysicalTerminal = ((): boolean => {
-    try {
-      return physicalTerminalFromSpecText(readFileSync(featureFile, "utf8")) !== null;
-    } catch {
-      return false;
-    }
+    return physicalTerminalFromSpecText(featureText) !== null;
   })();
   const terminalCaptureKind: "terminal" | "physical_terminal" = isPhysicalTerminal ? "physical_terminal" : "terminal";
 
@@ -1070,6 +1337,28 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     warn(`web self-capture skipped: ${captureWebSkip}`);
   }
 
+  const physicalCaptureReports: PhysicalCaptureReportEntry[] = [];
+  const physicalTimeoutMs = deps.rollCapture?.timeoutMs ?? 60_000;
+  const physicalRequest = physicalScreenshotRequest(
+    featureText,
+    storyId,
+    basename(runDir),
+    runDir,
+    now.toISOString(),
+    physicalTimeoutMs,
+    isPhysicalTerminal && captureCommands.length > 0,
+  );
+  if (physicalRequest !== null) {
+    const captureRoot = deps.rollCapture?.root ?? process.env["ROLL_CAPTURE_HOME"] ?? defaultRollCaptureRoot();
+    const readiness = deps.rollCapture?.readiness?.() ?? collectRollCaptureReadiness();
+    const provider = deps.rollCapture?.provider ?? new RollCaptureProvider({ root: captureRoot });
+    const physical = await runPhysicalScreenshotLane(physicalRequest, readiness, provider, captureRoot);
+    captureFacts.push(physical.fact);
+    physicalCaptureReports.push(physical.report);
+    if (physical.selfCapture !== undefined) selfCaptures.push(physical.selfCapture);
+    if (!physical.fact.taken) warn(`physical.screenshot ${physical.report.statusChain.join(" → ")}: ${physical.fact.skipped ?? "unknown"}`);
+  }
+
   // hard facts.
   const manifest = await collectEvidence({
     storyId,
@@ -1162,6 +1451,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     ...(reviewScores.length > 0 ? { reviewScores } : {}),
     ...(reviewScoreTrend !== undefined ? { reviewScoreTrend } : {}),
     ...(selfCaptures.length > 0 ? { selfCaptures } : {}),
+    ...(physicalCaptureReports.length > 0 ? { physicalCaptures: physicalCaptureReports } : {}),
     ...(captureFacts.some((x) => !x.taken && x.skipped !== undefined)
       ? { captureSkips: captureFacts.filter((x) => !x.taken && x.skipped !== undefined).map((x) => ({ kind: x.kind, out: x.out, skipped: x.skipped ?? "" })) }
       : {}),

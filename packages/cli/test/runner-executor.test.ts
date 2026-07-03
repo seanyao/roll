@@ -1299,6 +1299,7 @@ describe("executeCommand — command → executor mapping", () => {
       const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
       expect(r.event).toEqual({ type: "story_picked", storyId: "US-RANK-2" });
       expect(spawn).toHaveBeenCalledTimes(1);
+      expect(spawn.mock.calls[0]?.[1]).toMatchObject({ cwd: "/rt/wt", bare: true, timeoutMs: 60000 });
       const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
       expect(events).toContainEqual({
         type: "pick:ranked",

@@ -494,7 +494,7 @@ async function resolvePickRanking(
   let result: Awaited<ReturnType<AgentSpawn>>;
   try {
     result = await ports.agentSpawn(route.agent, {
-      cwd: ports.repoCwd,
+      cwd: ports.paths.worktreePath,
       skillBody: prompt,
       timeoutMs: PICK_RANKING_TIMEOUT_MS,
       bare: true,

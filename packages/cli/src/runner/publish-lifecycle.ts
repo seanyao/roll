@@ -125,10 +125,63 @@ function rollMetaShaReachableOnOrigin(rollDir: string, sha: string): boolean {
   }
 }
 
+type RollEvidenceLayout = "missing" | "nested" | "in-repo";
+
+function rollEvidenceLayout(repoCwd: string): RollEvidenceLayout {
+  const rollDir = join(repoCwd, ".roll");
+  if (!existsSync(rollDir)) return "missing";
+  try {
+    const top = execFileSync("git", ["-C", rollDir, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+    if (top === "") return "missing";
+    return realpathSync(top) === realpathSync(rollDir) ? "nested" : "in-repo";
+  } catch {
+    return "missing";
+  }
+}
+
+function commitInRepoEvidence(ports: Ports, ctx: CycleContext, storyId: string): boolean {
+  const cardDir = cardArchiveDir(ports.repoCwd, storyId);
+  const acMap = acMapPath(ports.repoCwd, storyId);
+  const runDir = ctx.cycleId !== "" ? join(cardDir, ctx.cycleId) : "";
+  if (!existsSync(acMap)) {
+    ports.events.appendAlert(ports.paths.alertsPath, `Roll-Evidence publish blocked for ${storyId}: ac-map.json missing after remediation`);
+    return false;
+  }
+  if (runDir === "" || !existsSync(runDir)) {
+    ports.events.appendAlert(ports.paths.alertsPath, `Roll-Evidence publish blocked for ${storyId}: cycle run-dir missing for ${ctx.cycleId}`);
+    return false;
+  }
+  const relAcMap = relative(ports.repoCwd, acMap);
+  const relRunDir = relative(ports.repoCwd, runDir);
+  if (relAcMap === "" || relRunDir === "" || relAcMap.startsWith("..") || relRunDir.startsWith("..")) {
+    ports.events.appendAlert(ports.paths.alertsPath, `Roll-Evidence publish blocked for ${storyId}: evidence path escapes repo`);
+    return false;
+  }
+  try {
+    execFileSync("git", ["add", "-A", "--", relAcMap, relRunDir], { cwd: ports.repoCwd, stdio: "ignore" });
+    const dirty = execFileSync("git", ["status", "--porcelain", "--", relAcMap, relRunDir], {
+      cwd: ports.repoCwd,
+      encoding: "utf8",
+    }).trim();
+    if (dirty === "") return true;
+    execFileSync("git", ["commit", "-m", `chore: attach acceptance evidence for ${storyId}`], {
+      cwd: ports.repoCwd,
+      stdio: "ignore",
+    });
+    return true;
+  } catch (e) {
+    ports.events.appendAlert(ports.paths.alertsPath, `Roll-Evidence publish blocked for ${storyId}: in-repo evidence commit failed — ${String(e)}`);
+    return false;
+  }
+}
+
 export async function publishBodyWithEvidenceTrailer(ports: Ports, ctx: CycleContext): Promise<string | null> {
   const base = publishBody(ctx);
   const storyId = ctx.storyId ?? "";
   if (storyId === "") return base;
+  if (rollEvidenceLayout(ports.repoCwd) === "in-repo") {
+    return commitInRepoEvidence(ports, ctx, storyId) ? base : null;
+  }
   const message = `chore: loop cycle ${ctx.cycleId}${storyId !== "" ? ` ${storyId}` : ""} evidence`;
   try {
     const committed = await ports.metadata.commit(ports.repoCwd, message);

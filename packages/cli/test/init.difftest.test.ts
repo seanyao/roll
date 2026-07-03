@@ -962,12 +962,16 @@ describe("frozen: roll init", () => {
     expect(count(agents, "## 1. Communication")).toBe(1);
 
     const gitignoreLines = read(fx.proj, ".gitignore").trimEnd().split("\n");
-    expect(gitignoreLines).toEqual(["node_modules", ".roll/"]);
+    expect(gitignoreLines).toEqual(["node_modules", ".roll/", ".pi/", ".kimi/", ".kimi-code/", ".reasonix/"]);
 
     const changeset = read(fx.proj, ".roll/onboard-changeset.yaml");
     expect(count(changeset, '  - "AGENTS.md"')).toBe(1);
     expect(count(changeset, '  - ".roll/backlog.md"')).toBe(1);
     expect(count(changeset, '  - ".roll/"')).toBe(1);
+    expect(count(changeset, '  - ".pi/"')).toBe(1);
+    expect(count(changeset, '  - ".kimi/"')).toBe(1);
+    expect(count(changeset, '  - ".kimi-code/"')).toBe(1);
+    expect(count(changeset, '  - ".reasonix/"')).toBe(1);
     expect(changeset).toContain("files_merged:");
     expect(changeset).toContain("gitignore_entries_added:");
   });

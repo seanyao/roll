@@ -3168,6 +3168,83 @@ describe("executeCommand — command → executor mapping", () => {
     expect(body).toContain("features/uncategorized/US-RUN-001/ac-map.json");
   });
 
+  it("FIX-1203: in-repo publish commits this cycle's evidence into the PR branch", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-publish-inrepo-evidence-")));
+    execDirs.push(repo);
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "test@roll.local"], { cwd: repo });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: repo });
+    writeFileSync(join(repo, "README.md"), "base\n");
+    execFileSync("git", ["add", "README.md"], { cwd: repo });
+    execFileSync("git", ["commit", "-q", "-m", "base"], { cwd: repo });
+
+    const cardDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
+    const runDir = join(cardDir, CTX.cycleId);
+    mkdirSync(join(runDir, "screenshots"), { recursive: true });
+    writeFileSync(join(cardDir, "ac-map.json"), "[]\n");
+    writeFileSync(join(runDir, "evidence.json"), "{\"captures\":[]}\n");
+    writeFileSync(join(runDir, "screenshots", "terminal.png"), "png\n");
+
+    let body = "";
+    const runPublishPlan = vi.fn(async (plan: Array<{ kind: string; argv: string[] }>) => {
+      const create = plan.find((step) => step.kind === "gh-pr-create");
+      const bodyFlag = create?.argv.indexOf("--body") ?? -1;
+      body = bodyFlag >= 0 ? (create?.argv[bodyFlag + 1] ?? "") : "";
+      return { status: 0 as const, prUrl: "https://github.com/o/r/pull/1203", ok: true };
+    });
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      metadata: { commit: vi.fn(async () => ({ committed: false, pushed: false, nothingToCommit: true })) },
+      github: {
+        ...fakePorts().ports.github,
+        prState: vi.fn(async () => "UNKNOWN"),
+        runPublishPlan,
+      },
+    });
+
+    await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
+
+    expect(runPublishPlan).toHaveBeenCalledOnce();
+    expect(body).not.toContain("Roll-Evidence:");
+    expect(execFileSync("git", ["log", "-1", "--pretty=%s"], { cwd: repo, encoding: "utf8" }).trim()).toBe(
+      "chore: attach acceptance evidence for US-RUN-001",
+    );
+    expect(execFileSync("git", ["show", "--name-only", "--pretty=", "HEAD"], { cwd: repo, encoding: "utf8" })).toContain(
+      ".roll/features/uncategorized/US-RUN-001/ac-map.json",
+    );
+    expect(execFileSync("git", ["status", "--porcelain", "--", ":!.roll/loop"], { cwd: repo, encoding: "utf8" }).trim()).toBe("");
+    expect((calls["alert"] ?? []).map((a) => String((a as unknown[])[1])).join("\n")).toBe("");
+  });
+
+  it("FIX-1203: in-repo publish blocks instead of creating a PR with missing ac-map evidence", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-publish-inrepo-missing-acmap-")));
+    execDirs.push(repo);
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "test@roll.local"], { cwd: repo });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: repo });
+    writeFileSync(join(repo, "README.md"), "base\n");
+    execFileSync("git", ["add", "README.md"], { cwd: repo });
+    execFileSync("git", ["commit", "-q", "-m", "base"], { cwd: repo });
+    mkdirSync(join(repo, ".roll", "features", "uncategorized", "US-RUN-001", CTX.cycleId), { recursive: true });
+
+    const runPublishPlan = vi.fn(async () => ({ status: 0 as const, prUrl: "https://github.com/o/r/pull/1203", ok: true }));
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      metadata: { commit: vi.fn(async () => ({ committed: false, pushed: false, nothingToCommit: true })) },
+      github: {
+        ...fakePorts().ports.github,
+        prState: vi.fn(async () => "UNKNOWN"),
+        runPublishPlan,
+      },
+    });
+
+    const result = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
+
+    expect(result.event).toEqual({ type: "published", result: { status: 1, manualMerge: false } });
+    expect(runPublishPlan).not.toHaveBeenCalled();
+    expect((calls["alert"] ?? []).map((a) => String((a as unknown[])[1])).join("\n")).toContain("ac-map.json missing");
+  });
+
   it("US-EVID-019 R2: publish_pr blocks when roll-meta HEAD is not reachable on origin", async () => {
     const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-publish-unpushed-")));
     execDirs.push(repo);

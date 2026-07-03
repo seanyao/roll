@@ -324,8 +324,21 @@ function isBootstrapArtifactPath(path: string): boolean {
   return false;
 }
 
+function isRollOwnedGeneratedPath(path: string): boolean {
+  if (path.startsWith(".roll/loop/")) return true;
+  if (path.startsWith(".roll/reports/")) return true;
+  if (path === ".roll/runs.jsonl" || path === ".roll/deliveries.jsonl") return true;
+  if (path === ".roll/loop/runs.jsonl" || path === ".roll/loop/deliveries.jsonl") return true;
+  if (!path.startsWith(".roll/features/")) return false;
+  const parts = path.split("/");
+  const tail = parts[parts.length - 1] ?? "";
+  if (tail === "ac-map.json" || tail === "evidence.json") return true;
+  if (parts.includes("latest") || parts.includes("evidence") || parts.includes("screenshots")) return true;
+  return parts.some((part) => /^\d{8}-\d{6}-/.test(part) || /^\d{4}-\d{2}-\d{2}T/.test(part) || part.startsWith("cycle-"));
+}
+
 export function classifyBootstrapArtifacts(paths: readonly string[]): { kind: "none" | "bootstrap_only" | "mixed"; files: string[] } {
-  const files = paths.filter((path) => path.trim() !== "");
+  const files = paths.filter((path) => path.trim() !== "").filter((path) => !isRollOwnedGeneratedPath(path));
   if (files.length === 0) return { kind: "none", files: [] };
   return files.every(isBootstrapArtifactPath) ? { kind: "bootstrap_only", files } : { kind: "mixed", files };
 }

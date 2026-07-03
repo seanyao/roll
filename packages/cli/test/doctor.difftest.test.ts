@@ -185,6 +185,16 @@ describe("frozen: roll doctor", () => {
     expect(rendered).not.toContain("openai");
   });
 
+  it("FIX-1203: reports missing agent-session .gitignore entries for existing projects", () => {
+    const cwd = makeGitRepo();
+    writeFileSync(join(cwd, ".gitignore"), ".roll/\n");
+    const e: Env = { home: freshHome(CONFIG), cwd, pkg: freshPkg(), launchd: emptyLaunchd(), lang: "en" };
+    seedCatalog(e.pkg!);
+    const rendered = scrub(tsDoctor(e), e).stdout;
+    expect(rendered).toContain("Roll generated-file ignore list");
+    expect(rendered).toContain("Recommended .gitignore additions: .pi/ .kimi/ .kimi-code/ .reasonix/");
+  });
+
   it("healthy: git repo + config + matching skills + empty launchd (en)", () => {
     const pkg = freshPkg();
     seedCatalog(pkg);

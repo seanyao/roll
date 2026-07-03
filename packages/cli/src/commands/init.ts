@@ -1236,12 +1236,16 @@ function renderAndSeed(projectDir: string, plan: string, changeset: OnboardChang
   }
 }
 
+const DEFAULT_GITIGNORE_ENTRIES = [".roll/", ".pi/", ".kimi/", ".kimi-code/", ".reasonix/"] as const;
+
 function addRollToGitignore(projectDir: string, changeset: OnboardChangeset): void {
   const gi = join(projectDir, ".gitignore");
   const current = existsSync(gi) ? readFileSync(gi, "utf8") : "";
-  if (current.split("\n").includes(".roll/")) return;
-  writeFileAtomic(gi, current + (current === "" || current.endsWith("\n") ? "" : "\n") + ".roll/\n");
-  recordChangeset(projectDir, changeset, "gitignore_entries_added", ".roll/");
+  const existing = new Set(current.split("\n"));
+  const missing = DEFAULT_GITIGNORE_ENTRIES.filter((entry) => !existing.has(entry));
+  if (missing.length === 0) return;
+  writeFileAtomic(gi, current + (current === "" || current.endsWith("\n") ? "" : "\n") + missing.join("\n") + "\n");
+  for (const entry of missing) recordChangeset(projectDir, changeset, "gitignore_entries_added", entry);
   ok(m("init.added_roll_to_gitignore"));
 }
 

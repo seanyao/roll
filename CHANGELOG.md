@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### 易用性
+- 安装 roll 时顺手装好 Roll Capture:`npm i -g` 的 postinstall 会自动从 GitHub Release 下载 Roll Capture.app 装到 ~/Applications(macOS;CI/无网/sudo 场景优雅跳过,失败给手动指引绝不让安装失败);`roll setup` 可随时修复重装(US-PHYSICAL-005)`[capture-tool]`
+
 ## v4.704.1 — 2026-07-04
 
 ### 稳定性（今晚 roll-capture 实战暴露的三个自愈缺口）

@@ -450,6 +450,48 @@ describe("US-OBS-042 — roll cycle <id> --activity", () => {
     expect(out).toContain("deferred scope is not delivered by this card");
   });
 
+  it("surfaces main-checkout sandbox protection and quarantine events", () => {
+    const p = activityProject();
+    writeActivityEvents(p, [
+      { type: "cycle:start", cycleId: "20260630-210059-58201", storyId: "US-LOOP-089", agent: "kimi", model: "k2.7", ts: 1000 },
+      {
+        type: "sandbox:write_protected",
+        cycleId: "20260630-210059-58201",
+        status: "applied",
+        repoCwd: p,
+        markerPath: `${p}/.roll/loop/main-checkout-protection.json`,
+        paths: 10,
+        ts: 120_000,
+      },
+      {
+        type: "sandbox:quarantined",
+        cycleId: "20260630-210059-58201",
+        storyId: "US-LOOP-089",
+        phase: "pre-spawn",
+        reason: "dirty",
+        ref: "rescue/leaked-1",
+        files: ["tracked.ts"],
+        manifestPath: `${p}/.roll/loop/quarantine/leaked-1.json`,
+        restoreCommand: "git stash apply rescue/leaked-1",
+        ts: 130_000,
+      },
+    ]);
+    process.env["ROLL_CYCLE_ACTIVITY_NOW_MS"] = String(180_000);
+    const save = process.cwd();
+    process.chdir(p);
+    let out = "";
+    const so = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((s: string) => ((out += s), true)) as typeof process.stdout.write;
+    try {
+      expect(cycleCommand(["20260630-210059-58201", "--activity", "--no-color"])).toBe(0);
+    } finally {
+      process.stdout.write = so;
+      process.chdir(save);
+    }
+    expect(out).toContain("sandbox write_protected · applied · 10 paths");
+    expect(out).toContain("sandbox quarantined · pre-spawn · dirty · rescue/leaked-1");
+  });
+
   it("emits machine-readable JSON with --activity --json", () => {
     const p = activityProject();
     writeActivityEvents(p, [

@@ -498,10 +498,16 @@ export interface ActionSplitSuggestion {
 }
 
 export interface CycleActivityHistoryEntry {
-  type: "action:started" | "test:red" | "test:green" | "green-uncommitted" | "action:oversized" | "split:suggested" | "followup:queued" | "cycle:tcr";
+  type: "action:started" | "test:red" | "test:green" | "green-uncommitted" | "action:oversized" | "split:suggested" | "followup:queued" | "cycle:tcr" | "sandbox:write_protected" | "sandbox:quarantined";
   at: number;
   actionId?: string;
   summary?: string;
+}
+
+export interface SandboxActivity {
+  type: "write_protected" | "quarantined";
+  at: number;
+  summary: string;
 }
 
 /** Result of {@link analyzeCycleActivity}. Pure: derived from events + optional diff. */
@@ -527,6 +533,8 @@ export interface CycleActivityAnalysis {
   splitSuggestion?: ActionSplitSuggestion;
   /** Follow-up backlog card/action references accepted from a split suggestion. */
   queuedFollowups?: QueuedFollowup[];
+  /** Main-checkout isolation/quarantine events visible to supervisor activity. */
+  sandboxEvents?: SandboxActivity[];
   /** Durable rhythm history for post-cycle evaluator evidence. */
   history: CycleActivityHistoryEntry[];
 }
@@ -641,6 +649,7 @@ export function analyzeCycleActivity(
   let oversizedActionId: string | undefined;
   const history: CycleActivityHistoryEntry[] = [];
   const queuedFollowups: QueuedFollowup[] = [];
+  const sandboxEvents: SandboxActivity[] = [];
   let splitSuggestedCount = 0;
 
   const hasEnd = events.some((ev) => isTerminal(ev) && (ev as { cycleId?: string }).cycleId === cycleId);
@@ -697,6 +706,14 @@ export function analyzeCycleActivity(
         reason: ev.reason,
       });
       history.push({ type: "followup:queued", at: ev.ts, ...(ev.actionId !== undefined ? { actionId: ev.actionId } : {}), summary: ev.title });
+    } else if (ev.type === "sandbox:write_protected") {
+      const summary = `${ev.status} · ${ev.paths} path${ev.paths === 1 ? "" : "s"}`;
+      sandboxEvents.push({ type: "write_protected", at: ev.ts, summary });
+      history.push({ type: "sandbox:write_protected", at: ev.ts, summary });
+    } else if (ev.type === "sandbox:quarantined") {
+      const summary = `${ev.phase} · ${ev.reason} · ${ev.ref}`;
+      sandboxEvents.push({ type: "quarantined", at: ev.ts, summary });
+      history.push({ type: "sandbox:quarantined", at: ev.ts, summary });
     }
   }
 
@@ -784,6 +801,7 @@ export function analyzeCycleActivity(
     ...(oversizedAction !== undefined ? { oversizedAction } : {}),
     ...(splitSuggestion !== undefined ? { splitSuggestion } : {}),
     ...(queuedFollowups.length > 0 ? { queuedFollowups } : {}),
+    ...(sandboxEvents.length > 0 ? { sandboxEvents } : {}),
     history,
   };
 }

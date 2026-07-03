@@ -897,6 +897,19 @@ API key secret — 你配置的 agent 对应的那个。
 这样可以保持 `git worktree list` 干净，防止 `.claude/worktrees/` 随时间积累。
 分支仍领先于 `main` 的活跃 worktree 不受影响。
 
+## 主 checkout 保护
+
+Builder 进程运行期间，Roll 会在文件系统边界把共享主 checkout 设为只读，
+同时保持 cycle worktree 可写。如果上一轮 cycle 把产品文件留脏，或让本地
+`main` 领先 `origin/main`，Roll 会把污染物移入 `rescue/leaked-*` ref 和
+`.roll/loop/quarantine/*.json` 清单，随后把主 checkout 恢复到可信状态并继续
+本轮 cycle。
+
+事件流会记录 `sandbox:write_protected` 和 `sandbox:quarantined`。
+`roll loop watch --events`、`roll loop cycle <id> --activity` 和 supervisor 输出都会
+展示这些事实。每个 quarantine 清单都包含 ref、文件列表，以及供 owner /
+supervisor 认领恢复的一行命令。
+
 ## 阶段计时（Cycle phases）
 
 每轮 cycle 在内部切成七个命名阶段。每个阶段进入时 emit `phase_start`，

@@ -65,6 +65,24 @@ export type RollEvent =
   // already dirty before spawn. This is a sandbox/execution-boundary failure,
   // distinct from agent auth/network blocks.
   | { type: "sandbox:main_dirty"; cycleId: string; phase: "pre-spawn" | "post-spawn" | "capture"; files: string[]; ts: number }
+  // US-LOOP-089: builder process lifetime OS write protection for the shared
+  // main checkout. recovered means a stale marker from a crashed prior cycle was
+  // restored before applying protection for the new cycle.
+  | { type: "sandbox:write_protected"; cycleId: string; status: "applied" | "released" | "recovered"; repoCwd: string; markerPath: string; paths: number; ts: number }
+  // US-LOOP-089: main checkout pollution was moved to an auditable rescue ref
+  // and quarantine manifest, then the checkout was restored before continuing.
+  | {
+      type: "sandbox:quarantined";
+      cycleId: string;
+      storyId?: string;
+      phase: "pre-spawn" | "post-spawn" | "post-cycle" | "capture";
+      reason: "dirty" | "ahead";
+      ref: string;
+      files: string[];
+      manifestPath: string;
+      restoreCommand: string;
+      ts: number;
+    }
   // FIX-1068 — Builder finalization hard gate: one adapter-agnostic verdict before
   // peer review / scoring / attest / PR creation / cleanup. Emitted on every exit
   // so recovery surfaces can read structured facts instead of parsing logs.

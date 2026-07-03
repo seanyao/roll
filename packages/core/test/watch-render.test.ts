@@ -498,6 +498,43 @@ describe("watch-render — compact RollEvent observation model", () => {
     expect(ev!.detail).toBe("pi · auth · 1 failure");
   });
 
+  it("renders US-LOOP-089 sandbox write protection and quarantine events", () => {
+    const protectedEv = watchRenderEventFromRollEvent({
+      type: "sandbox:write_protected",
+      cycleId: "c1",
+      status: "applied",
+      repoCwd: "/repo",
+      markerPath: "/repo/.roll/loop/main-checkout-protection.json",
+      paths: 12,
+      ts: 800,
+    });
+    expect(protectedEv).toMatchObject({
+      kind: "gate",
+      summary: "sandbox:write_protected",
+      detail: "applied · 12 paths",
+      severity: "normal",
+    });
+    const quarantineEv = watchRenderEventFromRollEvent({
+      type: "sandbox:quarantined",
+      cycleId: "c1",
+      storyId: "US-LOOP-089",
+      phase: "pre-spawn",
+      reason: "dirty",
+      ref: "rescue/leaked-1",
+      files: ["tracked.ts"],
+      manifestPath: "/repo/.roll/loop/quarantine/leaked-1.json",
+      restoreCommand: "git stash apply rescue/leaked-1",
+      ts: 801,
+    });
+    expect(quarantineEv).toMatchObject({
+      kind: "gate",
+      summary: "sandbox:quarantined",
+      detail: "pre-spawn · dirty · rescue/leaked-1 · 1 item",
+      severity: "warn",
+    });
+    expect(renderCompactWatchEvent(quarantineEv!)).toContain("sandbox:quarantined");
+  });
+
   it("renders all pair:* events in compact output", () => {
     const lines = [
       line({ type: "pair:selected", cycleId: "c1", workingAgent: "codex", peer: "kimi", stage: "code", ts: 100 }),

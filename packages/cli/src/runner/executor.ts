@@ -183,6 +183,16 @@ import { classifyBlockSignature, probeAgentReachable, type ReachResult } from ".
 import { readSkipCards } from "./skip-cards.js";
 import { readPendingPublish } from "./pending-publish.js";
 import { readSelfHeal } from "./selfheal-budget.js";
+import {
+  applyMainCheckoutWriteProtection,
+  checkMainDirty,
+  quarantineEventToRollEvent,
+  quarantineMainCheckout,
+  releaseMainCheckoutWriteProtection,
+  worktreeGitEnv,
+  type QuarantineResult,
+  type WriteProtectionResult,
+} from "./main-checkout-guard.js";
 import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, runPeerGate } from "./peer-gate.js";
 import { declaresAnySurface, deliverableCmdsForStory, readAttestGateMode, rejectedDeliverableCmdsForStory, runAttestGate, screenshotExemption, storyRequiresScreenshot, storySpecPath, verificationReportHasContent, verificationReportPath, webCaptureTargetsForStory } from "./attest-gate.js";
 import { recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
@@ -199,46 +209,7 @@ import { readLatestStoryReviewScore, REVIEW_SCORE_LOW_THRESHOLD, type ReviewScor
 
 const execFileAsync = promisify(execFile);
 
-type MainDirtyPhase = Extract<RollEvent, { type: "sandbox:main_dirty" }>["phase"];
-
-function parsePorcelainPath(line: string): string {
-  const raw = line.length > 3 ? line.slice(3).trim() : line.trim();
-  const target = raw.includes(" -> ") ? raw.split(" -> ").at(-1) ?? raw : raw;
-  return target.replace(/^"|"$/g, "");
-}
-
-export async function checkMainDirty(repoCwd: string): Promise<string[]> {
-  try {
-    const { stdout } = await execFileAsync("git", ["status", "--porcelain", "--untracked-files=all"], {
-      cwd: repoCwd,
-      encoding: "utf8",
-    });
-    return stdout
-      .split("\n")
-      .map((line) => line.trimEnd())
-      .filter((line) => line.trim() !== "")
-      .map(parsePorcelainPath)
-      .filter((path) => path !== ".roll" && !path.startsWith(".roll/"))
-      .slice(0, 50);
-  } catch {
-    return [];
-  }
-}
-
-function recordMainDirty(ports: Ports, ctx: CycleContext, phase: MainDirtyPhase, files: readonly string[]): void {
-  const visible = files.slice(0, 20);
-  ports.events.appendEvent(ports.paths.eventsPath, {
-    type: "sandbox:main_dirty",
-    cycleId: ctx.cycleId ?? "",
-    phase,
-    files: visible,
-    ts: eventTs(ports),
-  });
-  ports.events.appendAlert(
-    ports.paths.alertsPath,
-    `cycle ${ctx.cycleId ?? "?"}: main checkout dirty at ${phase}; builder work must stay in the cycle worktree. Files: ${visible.join(", ")}`,
-  );
-}
+export { checkMainDirty };
 
 export async function rescueLeakedMain(
   repoCwd: string,
@@ -356,6 +327,58 @@ function epochMs(ts: number): number {
 
 function eventTs(ports: Ports): number {
   return epochMs(ports.clock());
+}
+
+function guardRuntimeDir(ports: Ports): string {
+  const primary = dirname(ports.paths.eventsPath);
+  try {
+    mkdirSync(primary, { recursive: true });
+    return primary;
+  } catch {
+    return join(ports.repoCwd, ".roll", "loop");
+  }
+}
+
+function appendWriteProtectionEvent(ports: Ports, result: WriteProtectionResult): void {
+  ports.events.appendEvent(ports.paths.eventsPath, {
+    type: "sandbox:write_protected",
+    cycleId: result.cycleId,
+    status: result.status,
+    repoCwd: result.repoCwd,
+    markerPath: result.markerPath,
+    paths: result.paths,
+    ts: result.ts,
+  });
+}
+
+function appendQuarantineEvent(ports: Ports, result: QuarantineResult): void {
+  ports.events.appendEvent(ports.paths.eventsPath, quarantineEventToRollEvent(result));
+  ports.events.appendAlert(
+    ports.paths.alertsPath,
+    `cycle ${result.cycleId}: quarantined main checkout ${result.reason} at ${result.phase}; ref ${result.ref}; manifest ${result.manifestPath}`,
+  );
+}
+
+async function quarantineMainCheckoutForCycle(
+  ports: Ports,
+  ctx: CycleContext,
+  phase: QuarantineResult["phase"],
+): Promise<QuarantineResult[]> {
+  try {
+    if (realpathSync(ports.repoCwd) === realpathSync(ports.paths.worktreePath)) return [];
+  } catch {
+    /* fall through to the guard; it handles unreadable paths as no-op */
+  }
+  const results = await quarantineMainCheckout({
+    repoCwd: ports.repoCwd,
+    runtimeDir: guardRuntimeDir(ports),
+    cycleId: ctx.cycleId ?? "",
+    ...(ctx.storyId !== undefined ? { storyId: ctx.storyId } : {}),
+    phase,
+    nowMs: () => eventTs(ports),
+  });
+  for (const result of results) appendQuarantineEvent(ports, result);
+  return results;
 }
 
 /** FIX-1051 — scan agy's native CLI log for internal tool errors.
@@ -1533,14 +1556,7 @@ export async function executeCommand(
         ctx.builderSessionId !== undefined && ctx.builderSessionId !== ""
           ? ctx.builderSessionId
           : `${ctx.cycleId ?? "cycle"}:build:${cmd.agent}:${ports.clock()}`;
-      const preSpawnDirty = await checkMainDirty(ports.repoCwd);
-      if (preSpawnDirty.length > 0) {
-        recordMainDirty(ports, ctx, "pre-spawn", preSpawnDirty);
-        return {
-          event: { type: "agent_exited", exit: 1, timedOut: false },
-          ctxPatch: { builderSessionId, mainDirty: true },
-        };
-      }
+      await quarantineMainCheckoutForCycle(ports, ctx, "pre-spawn");
       if (blockIfAgentCredentialsMissing(cmd.agent, "build", ports, ctx) !== null) {
         return {
           event: { type: "agent_exited", exit: 1, timedOut: false },
@@ -1649,6 +1665,15 @@ export async function executeCommand(
       let res: Awaited<ReturnType<typeof ports.agentSpawn>>;
       let timeoutFired: "wall" | "no-progress" | null = null;
       try {
+        appendWriteProtectionEvent(
+          ports,
+          applyMainCheckoutWriteProtection({
+            repoCwd: ports.repoCwd,
+            runtimeDir: guardRuntimeDir(ports),
+            cycleId: ctx.cycleId ?? "",
+            nowMs: () => eventTs(ports),
+          }),
+        );
         res = await ports.agentSpawn(cmd.agent, {
           cwd: ports.paths.worktreePath,
           skillBody: finalSkillBody,
@@ -1658,6 +1683,7 @@ export async function executeCommand(
           env: {
             ...process.env,
             ROLL_LOOP_ALERT: ports.paths.alertsPath,
+            ...worktreeGitEnv(ports.paths.worktreePath, ports.repoCwd),
             ...agentSpawnEnvironment(cmd.agent),
           },
           // FIX-204B: pin the executor-picked story into the agent prompt — the
@@ -1680,6 +1706,15 @@ export async function executeCommand(
           },
         });
       } finally {
+        appendWriteProtectionEvent(
+          ports,
+          releaseMainCheckoutWriteProtection({
+            repoCwd: ports.repoCwd,
+            runtimeDir: guardRuntimeDir(ports),
+            cycleId: ctx.cycleId ?? "",
+            nowMs: () => eventTs(ports),
+          }),
+        );
         signalRecorder.flush();
         // Stop the timer AND take one final synchronous-await snapshot so the LAST
         // TCR commits (landed between the last tick and agent exit) are not lost.
@@ -1695,10 +1730,7 @@ export async function executeCommand(
       if (timeoutFired !== null) res = { ...res, timedOut: true };
       await captureSink?.flush();
       persistWorktreeAlerts(ports.paths.worktreePath, ports.paths.alertsPath, ports.events);
-      const postSpawnDirty = await checkMainDirty(ports.repoCwd);
-      if (postSpawnDirty.length > 0) {
-        recordMainDirty(ports, ctx, "post-spawn", postSpawnDirty);
-      }
+      await quarantineMainCheckoutForCycle(ports, ctx, "post-spawn");
       // FIX-366 — BUILDER auth/network fast-fail (extends FIX-363's taxonomy from
       // reviewer/scorer to the main working agent). An UNAUTHENTICATED builder does
       // not silently burn the whole cycle: it prints a 403 / "Please run /login" in
@@ -1838,7 +1870,6 @@ export async function executeCommand(
         // traceable to a recorded build-session id, not asserted).
         ctxPatch: {
           builderSessionId,
-          ...(postSpawnDirty.length > 0 ? { mainDirty: true } : {}),
           ...(costPatch !== undefined ? { cost: costPatch } : {}),
           ...(usageUnknownReason !== undefined ? { usageUnknownReason } : {}),
           ...(agentInternalFailure !== undefined ? { agentInternalFailure } : {}),
@@ -1863,6 +1894,7 @@ export async function executeCommand(
     // tracks it), commits ahead from git. timedOut is false here (timeout path
     // short-circuits before capture).
     case "capture_facts": {
+      await quarantineMainCheckoutForCycle(ports, ctx, "capture");
       const commitsAhead = await ports.git.commitsAhead(ports.paths.worktreePath);
       let mainAhead = 0;
       try {
@@ -1870,14 +1902,7 @@ export async function executeCommand(
       } catch {
         /* drift probe is best-effort */
       }
-      let mainDirty = ctx.mainDirty === true;
-      if (!mainDirty) {
-        const dirtyFiles = await checkMainDirty(ports.repoCwd);
-        if (dirtyFiles.length > 0) {
-          mainDirty = true;
-          recordMainDirty(ports, ctx, "capture", dirtyFiles);
-        }
-      }
+      const mainDirty = (await checkMainDirty(ports.repoCwd)).length > 0;
       // FIX-208: count real `tcr:` commits while the worktree is still alive
       // (the done/cleanup path removes it before the runs row is written). Folded
       // into liveCtx so buildRunRow stops hardcoding 0. Best-effort → 0 on error.

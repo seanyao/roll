@@ -208,6 +208,7 @@ with `roll loop resume` when ready.
 | `roll init` | Diagnose this directory and route setup/onboarding |
 | `roll loop <on\|off\|go\|watch\|runs\|cycles\|cycle\|alert\|…>` | Run, observe, and maintain the autonomous executor |
 | `roll next` | Continue init/onboard with one best next command |
+| `roll north [--json] [--no-color]` | North-star terminal panel: current values, targets, 14-day sparklines, trends, and status |
 | `roll release [--dry-run\|--showcase]` | Release planning/flow plus golden-path showcase support |
 | `roll setup [-f\|--force] [--reselect]` / `roll setup skills\|offboard` | Install/sync conventions or remove Roll-owned project artifacts |
 | `roll status [ci\|pulse] [--json]` | Project health, CI state, and delivery pulse |

@@ -62,8 +62,12 @@ describe("frozen: roll status render", () => {
     const fixProj = mkdtempSync(join(tmpdir(), "roll-status-fixproj-"));
     dirs.push(fixProj);
     const ts = tsStatus({ ROLL_RENDER_FIXTURE: "1" }, fixProj).split(basename(fixProj)).join("<PROJECT>");
+    expect(ts.trimStart().split("\n")[0]).toContain("WARN");
+    expect(ts.trimStart().split("\n")[1]).toContain("North");
+    expect(ts.trimStart().split("\n")[1]).not.toContain("…");
     expect(ts).toMatchInlineSnapshot(`
       "  WARN    main reconciled vs backlog   exit 1
+        North  no data
 
         LOOP      2 loops · 1 running   next 08:55Z
         CYCLE     17 / 3d   12 failed · $0.59
@@ -180,8 +184,12 @@ describe("frozen: roll status render", () => {
       .join("<HOME>")
       .split(basename(proj))
       .join("<PROJ>");
+    expect(ts.trimStart().split("\n")[0]).toContain("UNKNOWN");
+    expect(ts.trimStart().split("\n")[1]).toContain("North");
+    expect(ts.trimStart().split("\n")[1]).not.toContain("…");
     expect(ts).toMatchInlineSnapshot(`
       "  UNKNOWN  no truth snapshot — run roll index
+        North  auto no data ● · delivery no data ● · fix no data ● · attr no data ●
 
       ────────────────────────────────────────────────────────────────────────────────────────────────────
 

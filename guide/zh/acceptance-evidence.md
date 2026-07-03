@@ -59,6 +59,31 @@ loop_safety:
 soft 模式会记录缺口并发出同一类审计信号，但不阻塞本轮交付。它是临时兼容口，
 不是默认行为。
 
+合并闸读取结构化证据，不读口头说明。出现以下事实时，交付可能被拒合：
+
+- `attest render` 退出码非零；
+- `ac-map.json` 引用的路径无法在本次 story run 或卡片归档下解析，除非是本仓允许的
+  GitHub PR/commit/check URL；
+- AC 仍是 `claimed`，表示 Builder 只有完成声明，没有 pass/fail 证据；
+- positive AC 没有真实证据引用；
+- 无豁免的可视卡没有截图，也没有记录化的机器采集 skip；
+- 声明了 `deliverable_url`、`deliverable_cmd` 或 `physical_terminal`，但对应
+  surface 没有真实采集；
+- AC 是 `fail`，表示检查执行过并变红。
+
+PR body 会带 `Roll-Evidence` trailer，指向这张 Story 的证据入口。人工评审从这里开始：
+打开验收 Review Page，再沿 AC map 和引用文件检查。
+
+发版前或发现 Done 行可疑时，运行审计命令：
+
+```bash
+roll attest audit
+roll attest audit --json
+```
+
+它会扫描 Done stories，查缺失报告、缺失或空的 `ac-map.json`、悬空证据引用和
+`evidence_debt` 行。无问题退出 0；发现问题退出 1，并列出 story ID 与缺失引用。
+
 ## 红线
 
 **零证据**的 AC 永远不能是 `pass`：渲染层强制降级为 🟧 仅声明，并列入

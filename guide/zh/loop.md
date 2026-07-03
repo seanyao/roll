@@ -20,6 +20,67 @@ autonomous，不改变 agent binding。
 Loop 在名为 **`roll-loop-<project-slug>`** 的 **tmux session** 里运行。
 未静音时，终端窗口会自动弹出，你可以实时旁观 AI 干活。
 
+## 北极星读数
+
+`roll status` 顶部先显示一行北极星摘要，让 owner 在读完整健康面板前先看到系统趋势。
+这行是 `roll north` 的压缩版：自主运行时长、交付率、修复税、归因错误。每个值后面
+有状态点；需要目标、趋势和原因时运行 `roll north`。
+
+`roll north [--json]` 读取最近 14 天的 runs、events、backlog、卡片元数据与交付真相。
+四项目标如下：
+
+| 指标 | 目标 | 防应试口径 | `null` 含义 |
+|------|------|------------|-------------|
+| 自主运行时长 | ≥72 小时 | 有效自主日需要至少 6 次非 idle 尝试；backlog 空的日期只停表，不计为未达标时间。 | 暂无足够合格运行历史，或窗口内 backlog 为空。 |
+| 交付率 | ≥60% | 交付按 merge truth 统计，不按 cycle 自报退出码。 | 暂无可作为分母的交付样本。 |
+| 修复税 | <1x | 分母仅统计 US 卡；FIX 工作不能改善自己的比值。 | 窗口内没有 US 卡分母。 |
+| 归因错误 | =0 | `unknown` 不猜成 env、harness 或 card；缺失 envelope 保持可见。 | 暂无归因样本。 |
+
+脚本消费用 `roll north --json`，它输出 `roll.north.v1`，字段与终端面板使用的当前值、
+目标、原因和每日序列一致。
+
+## 失败归因与暂停
+
+每个失败 cycle 都归到四类之一：
+
+| 类别 | 含义 | owner 动作 |
+|------|------|------------|
+| `env` | 机器、checkout、auth、network、sandbox 或 worktree 条件。 | 修复点名的环境问题，再恢复派工。 |
+| `harness` | Roll 组件失败，例如 score 解析、attest render、publish 或 rescue。 | 检查对应组件，必要时开聚焦 FIX。 |
+| `card` | Builder 已进入 story，并在真实卡片工作中失败。 | 读证据后调查 story、拆卡或调整路由。 |
+| `unknown` | 没有足够 envelope 证据诚实归因给卡片。 | 先补确定性失败 envelope，再考虑归因。 |
+
+根因计数按 `root_cause_key`，不是按卡片。同一个 `env`、`harness` 或 `unknown`
+根因反复出现时，Roll 会暂停派工，并在 `.roll/loop/diagnostics/` 写诊断快照。
+终端提示派工暂停时，先打开快照：里面有归因类别、根因、最近事件和 playbook。
+修复点名的机器或 Roll 组件后，再运行 `roll loop resume`。
+
+如果早先的 env/harness 失败把卡片错误推入 skip list，可以从持久证据重建：
+
+```bash
+roll loop pardon-skip-list --dry-run
+roll loop pardon-skip-list
+roll loop pardon-skip-list --include-unknown  # 同时平反 unknown/no-evidence 行
+```
+
+`--include-unknown` 只应在读过记录后使用；较早的零用量 `gave_up` 行可能是真实 card 失败。
+
+## Builder 隔离与救援区
+
+Builder 执行期间，主 checkout 会被物理写保护。Builder 在自己的 cycle worktree 中工作；
+共享 checkout 是传感器，不是草稿区。cycle 退出时 Roll 会释放写保护。
+
+如果 dirty 或 ahead 改动仍然出现在主 checkout，Roll 会先隔离再继续：
+
+- dirty 文件写成 `rescue/leaked-*` ref，可按 manifest 里的
+  `git stash apply <ref>` 还原；
+- ahead commits 写成 `rescue/leaked-*` 分支，可按 manifest 里的
+  `git cherry-pick <ref>` 还原；
+- manifest 写在 `.roll/loop/quarantine/`，记录 cycle、story、phase、文件列表、
+  ref 和精确还原命令。
+
+按 manifest 认领隔离内容，然后把主 checkout 恢复干净，再恢复 loop。
+
 ## 调度配置
 
 Loop 通过 **launchd**（macOS）调度。默认每小时在一个根据项目路径推导出的分钟触发

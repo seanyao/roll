@@ -4,6 +4,10 @@ import { parseBacklog } from "@roll/core";
 import { STATUS_MARKER } from "@roll/spec";
 import { evidencePathsUnresolved, readAcMapEntries, verificationReportPath } from "../runner/attest-gate.js";
 
+export const ATTEST_AUDIT_USAGE =
+  "Usage: roll attest audit [--json]\n" +
+  "  Audit Done stories for dangling evidence references, missing ac-map entries, and evidence_debt rows.\n";
+
 export interface AttestAuditIssue {
   storyId: string;
   missing: string[];
@@ -45,6 +49,10 @@ export function auditAcceptanceEvidenceDetailed(projectCwd: string): AttestAudit
 }
 
 export async function attestAuditCommand(args: string[], cwd = process.cwd()): Promise<number> {
+  if (args[0] === "--help" || args[0] === "-h") {
+    process.stdout.write(ATTEST_AUDIT_USAGE);
+    return 0;
+  }
   const json = args.includes("--json");
   const { issues, debts } = auditAcceptanceEvidenceDetailed(cwd);
   if (json) {

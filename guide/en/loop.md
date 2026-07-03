@@ -22,6 +22,76 @@ agent bindings.
 Loop runs inside a **tmux session** named `roll-loop-<project-slug>`.
 When not muted, a terminal window pops up automatically so you can watch in real time.
 
+## North Star Readings
+
+`roll status` starts with a one-line North Star summary so the owner can see the
+system trend before reading the rest of the health panel. The row is the compact
+form of `roll north`: autonomy, delivery rate, fix tax, and attribution errors.
+Each value is followed by a status dot; run `roll north` when you need the
+target, trend, and reason text.
+
+`roll north [--json]` reads the last 14 days of runs, events, backlog, card
+metadata, and delivery truth. The four targets are:
+
+| Metric | Target | Anti-gaming rule | `null` means |
+|--------|--------|------------------|--------------|
+| Autonomy | >=72h autonomous runtime | An effective autonomous day needs at least 6 non-idle attempts; backlog-empty days pause the clock and do not count as missed time. | There is not enough qualifying run history yet, or the backlog was empty for the window. |
+| Delivery rate | >=60% | Delivery is counted from merge truth, not self-reported cycle exits. | No eligible delivery denominator exists yet. |
+| Fix tax | <1x | The denominator is US cards only; FIX work is not allowed to improve its own ratio. | There is no US-card denominator in the window. |
+| Attribution errors | =0 | `unknown` is not guessed into env, harness, or card; missing envelopes stay visible. | No attribution sample exists yet. |
+
+Machine consumers should use `roll north --json`, which emits
+`roll.north.v1` with the same current values, targets, reasons, and daily
+series used by the terminal panel.
+
+## Failure Attribution and Pauses
+
+Every failed cycle is assigned one of four classes:
+
+| Class | Meaning | Owner action |
+|-------|---------|--------------|
+| `env` | Machine, checkout, auth, network, sandbox, or worktree condition. | Repair the named environment problem, then resume dispatch. |
+| `harness` | A Roll component failed, such as score parsing, attest render, publish, or rescue. | Inspect the component and open a focused FIX when needed. |
+| `card` | The Builder reached the story and failed during actual card work. | Investigate the story, split it, or change routing after reading evidence. |
+| `unknown` | There is not enough envelope evidence to charge a card honestly. | Add a deterministic failure envelope before blaming the card. |
+
+Root-cause counting is by `root_cause_key`, not by card. Repeated `env`,
+`harness`, or `unknown` causes pause dispatch and write a diagnostic snapshot
+under `.roll/loop/diagnostics/`. When the terminal says dispatch is paused,
+open that snapshot first: it includes the class, root cause, recent events, and
+playbook. Fix the named machine or Roll component, then run `roll loop resume`.
+
+If earlier env/harness failures pushed a card into the skip list, rebuild that
+state from the durable evidence:
+
+```bash
+roll loop pardon-skip-list --dry-run
+roll loop pardon-skip-list
+roll loop pardon-skip-list --include-unknown  # also pardons unknown/no-evidence rows
+```
+
+Use `--include-unknown` only after reading the rows; older zero-usage `gave_up`
+entries may be real card failures.
+
+## Builder Isolation and Rescue
+
+During Builder execution the main checkout is physically write-protected. The
+Builder works in its cycle worktree; the shared checkout is treated as a sensor,
+not a scratchpad. Roll releases the write protection when the cycle exits.
+
+If dirty or ahead changes appear in the main checkout anyway, Roll quarantines
+them before continuing:
+
+- dirty files become a `rescue/leaked-*` ref that can be restored with the
+  manifest's `git stash apply <ref>` command;
+- ahead commits become a `rescue/leaked-*` branch that can be restored with the
+  manifest's `git cherry-pick <ref>` command;
+- the manifest is written under `.roll/loop/quarantine/` and records the cycle,
+  story, phase, files, ref, and exact restore command.
+
+Claim the rescued work from the manifest, then reset or resume the loop from a
+clean main checkout.
+
 ## Scheduling
 
 Loop is scheduled via **launchd** (macOS). By default, every hour at a

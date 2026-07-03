@@ -208,7 +208,7 @@ with `roll loop resume` when ready.
 | `roll init` | Diagnose this directory and route setup/onboarding |
 | `roll loop <on\|off\|go\|watch\|runs\|cycles\|cycle\|alert\|…>` | Run, observe, and maintain the autonomous executor |
 | `roll next` | Continue init/onboard with one best next command |
-| `roll north [--json] [--no-color]` | North-star terminal panel: current values, targets, 14-day sparklines, trends, and status |
+| `roll north [--json] [--no-color]` | North-star terminal panel for autonomy, delivery rate, fix tax, and attribution errors |
 | `roll release [--dry-run\|--showcase]` | Release planning/flow plus golden-path showcase support |
 | `roll setup [-f\|--force] [--reselect]` / `roll setup skills\|offboard` | Install/sync conventions or remove Roll-owned project artifacts |
 | `roll status [ci\|pulse] [--json]` | Project health, CI state, and delivery pulse |
@@ -234,11 +234,41 @@ and the Execution Cast report block expose selected/returned/accepted role outco
 The archive rebuild is an on-demand archive and repair renderer for static HTML pages;
 it is not the active delivery truth surface.
 
+- `roll status` starts with a compact North Star line. Read it as the same four
+  `roll north` metrics in one row: autonomous runtime, delivery rate, fix tax,
+  and attribution errors. A dot shows each metric's current state.
+- `roll north` expands those readings into a 14-day panel. Targets are
+  autonomous runtime >=72h, delivery rate >=60%, fix tax <1x, and attribution
+  errors =0. The anti-gaming rules are part of the metric: an effective
+  autonomous day needs at least 6 non-idle attempts, backlog-empty days pause
+  the autonomy clock instead of counting against it, fix tax divides FIX work
+  by US delivery only, and `unknown` attribution is not guessed. `null` means no
+  usable data yet; the panel prints the reason.
 - A backlog row is a claim; merge evidence on `main` and recorded acceptance
   evidence are truth. A premature `✅ Done` claim is shown as drift.
+- Failures are attributed as `env`, `harness`, `card`, or `unknown`. Repeated
+  non-card root causes pause dispatch by root cause and write a diagnostic
+  snapshot with a playbook. When you see dispatch paused, read the snapshot,
+  repair the environment or Roll component named there, then resume. If a card
+  was parked because old env/harness failures polluted skip accounting, use
+  `roll loop pardon-skip-list [--dry-run] [--include-unknown]` to rebuild the
+  skip list from runs and events.
+- Builder cycles keep the main checkout physically read-only while the Builder
+  runs. Dirty or ahead changes that leak into the main checkout are quarantined
+  onto `rescue/leaked-*` refs with a manifest under `.roll/loop/quarantine/`.
+  The manifest names the files and includes the restore command to claim the
+  rescued work.
 - Cycle history is read through the TerminalOutcome vocabulary, not legacy
   free-form summary text.
 - Missing facts render as `?`. A visible `0` means a known zero, not unknown.
+
+Evidence gates are strict for merge. `attest render` failure, dangling
+`ac-map.json` paths, `claimed` AC statuses, and a non-exempt visual card with no
+captured screenshot can block merge. PR bodies carry a `Roll-Evidence` trailer
+so reviewers can jump to the story evidence. Run `roll attest audit [--json]`
+to find dangling evidence references and `evidence_debt` rows. See
+[Acceptance evidence](guide/en/acceptance-evidence.md) and
+[Loop failure handling](guide/en/loop.md#failure-attribution-and-pauses).
 
 `roll supervisor live` is the shipped CLI-first multi-role board. It prints a
 one-frame snapshot for scripts and quick inspection; `roll supervisor live --watch`

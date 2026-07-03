@@ -188,7 +188,7 @@ roll loop on
 | `roll init` | 诊断当前目录并路由 setup/onboard |
 | `roll loop <on\|off\|go\|watch\|runs\|cycles\|cycle\|alert\|…>` | 运行、观察和维护自主执行循环 |
 | `roll next` | 接续 init/onboard，只给一个最合适的下一步 |
-| `roll north [--json] [--no-color]` | 北极星终端面板：当前值、目标、14 天趋势条、趋势箭头和达标状态 |
+| `roll north [--json] [--no-color]` | 北极星终端面板：自主运行时长、交付率、修复税和归因错误 |
 | `roll release [--dry-run\|--showcase]` | 发版计划/流程与 golden-path showcase 支撑 |
 | `roll setup [-f\|--force] [--reselect]` / `roll setup skills\|offboard` | 安装/同步约定，或移除 Roll 管理的项目产物 |
 | `roll status [ci\|pulse] [--json]` | 项目健康、CI 状态和交付脉搏 |
@@ -212,10 +212,30 @@ Roll 当前是 CLI-first 可观测。持久事实只走一条读路径：anchors
 `roll loop cycle <id> --collab`、`roll loop cycle --legend`、`roll supervisor live --collab`，以及 Execution Cast
 报告区块，会展示 selected/returned/accepted 角色结果。
 
+- `roll status` 顶部有一行北极星摘要。它把 `roll north` 的四项指标压成一行：
+  自主运行时长、交付率、修复税、归因错误；每项后面的点表示当前状态。
+- `roll north` 展开 14 天面板。目标是自主运行时长 ≥72 小时、交付率 ≥60%、
+  修复税 <1x、归因错误 =0。防应试口径直接属于指标定义：有效自主日需要至少
+  6 次非 idle 尝试；backlog 空的日期只停表不计时；修复税只用 US 卡作为分母；
+  `unknown` 不猜。`null` 表示暂无可用数据，面板会给出原因。
 - backlog 行是声明；`main` 上的 merge 证据和记录化验收证据才是真相。过早写
   `✅ Done` 会显示成漂移。
+- 失败归因为 `env`、`harness`、`card` 或 `unknown`。同一非 card 根因反复出现时，
+  系统会按根因暂停派工，并写入带 playbook 的诊断快照。看到派工暂停时，先读快照，
+  修复其中点名的环境或 Roll 组件，再 resume。如果旧的 env/harness 失败污染了卡片
+  skip 账本，用 `roll loop pardon-skip-list [--dry-run] [--include-unknown]`
+  从 runs/events 重新计算并平反。
+- Builder 周期中主 checkout 会被物理设为只读。若 dirty 或 ahead 改动漏进主
+  checkout，会被隔离到 `rescue/leaked-*` ref，并在 `.roll/loop/quarantine/`
+  写 manifest。manifest 记录文件列表和还原命令，用它来认领或恢复隔离内容。
 - cycle 历史使用 TerminalOutcome 词汇，不再教旧的自由文本摘要。
 - 缺失事实显示 `?`。可见的 `0` 表示已知为零，不表示未知。
+
+合并证据闸会严格执行：`attest render` 失败、`ac-map.json` 悬空路径、`claimed`
+AC 状态、无豁免可视卡缺截图，都会拒合。PR body 里的 `Roll-Evidence` trailer
+指向这张 Story 的证据入口。用 `roll attest audit [--json]` 查悬空证据引用与
+`evidence_debt` 行。详见[验收证据](guide/zh/acceptance-evidence.md)和
+[Loop 失败处理](guide/zh/loop.md#失败归因与暂停)。
 
 `roll supervisor live` 是已交付的 CLI-first 多角色看板。它默认打印一帧快照，适合脚本和快速查看；`roll supervisor live --watch` 会让同一个看板保持打开，并从同一条事件驱动 view model 原地刷新。浏览器/TUI 版 Supervisor Live Console 仍是未来工作，必须复用这个 view model。
 

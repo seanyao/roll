@@ -9,7 +9,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
-import { repoRoot, usage } from "../src/bridge.js";
+import { dispatch, repoRoot, usage } from "../src/bridge.js";
 import { registerAll } from "../src/commands/index.js";
 import { publicCommands } from "../src/lib/command-surface.js";
 
@@ -93,5 +93,77 @@ describe("FIX-241 — README command tables track the live registry", () => {
       }
     }
     expect(hits).toEqual([]);
+  });
+
+  it("US-DOC-022 documents stability sprint surfaces across README, guide, site, and help", async () => {
+    const docs = new Map([
+      ["README.md", en],
+      ["README_CN.md", cn],
+      ["guide/en/loop.md", readFileSync(join(root, "guide/en/loop.md"), "utf8")],
+      ["guide/zh/loop.md", readFileSync(join(root, "guide/zh/loop.md"), "utf8")],
+      ["guide/en/acceptance-evidence.md", readFileSync(join(root, "guide/en/acceptance-evidence.md"), "utf8")],
+      ["guide/zh/acceptance-evidence.md", readFileSync(join(root, "guide/zh/acceptance-evidence.md"), "utf8")],
+      ["site/roll-data.js", readFileSync(join(root, "site/roll-data.js"), "utf8")],
+    ]);
+
+    const combined = [...docs.values()].join("\n");
+    const required = [
+      /72h|72 小时/,
+      /60%/,
+      /fix tax|修复税/,
+      /attribution errors|归因错误/,
+      /backlog-empty|backlog 空/,
+      /non-idle|非 idle/,
+      /unknown.*not guessed|unknown 不猜|unknown.*不猜/,
+      /roll status/,
+      /env\/harness\/card\/unknown|env\/harness\/card/,
+      /pardon-skip-list/,
+      /diagnostic snapshot|诊断快照/,
+      /roll attest audit/,
+      /evidence_debt/,
+      /Roll-Evidence/,
+      /claimed/,
+      /rescue\/leaked-|rescue\/leaked-/,
+      /\.roll\/loop\/quarantine/,
+    ];
+    for (const pattern of required) {
+      expect(combined, `missing stability-sprint doc pattern: ${pattern}`).toMatch(pattern);
+    }
+
+    for (const [name, body] of docs) {
+      expect(body, `${name} must not carry historical-baggage phrasing`).not.toMatch(/原为|已拆除|删除线|~~/);
+    }
+
+    const savedLang = process.env["ROLL_LANG"];
+    process.env["ROLL_LANG"] = "en";
+    let out = "";
+    let err = "";
+    const ow = process.stdout.write.bind(process.stdout);
+    const oe = process.stderr.write.bind(process.stderr);
+    // @ts-expect-error capture
+    process.stdout.write = (s: string): boolean => ((out += String(s)), true);
+    // @ts-expect-error capture
+    process.stderr.write = (s: string): boolean => ((err += String(s)), true);
+    try {
+      const north = await dispatch(["north", "--help"]);
+      expect(north.status).toBe(0);
+      expect(out).toContain("Metrics: autonomy, delivery rate, fix tax, and attribution errors");
+      expect(out).toContain("null means no data yet");
+      expect(out).not.toMatch(/渲染|北极星|暂无数据/);
+      expect(err).toBe("");
+
+      out = "";
+      err = "";
+      const audit = await dispatch(["attest", "audit", "--help"]);
+      expect(audit.status).toBe(0);
+      expect(out).toContain("Usage: roll attest audit [--json]");
+      expect(out).toContain("evidence_debt");
+      expect(err).toBe("");
+    } finally {
+      process.stdout.write = ow;
+      process.stderr.write = oe;
+      if (savedLang === undefined) delete process.env["ROLL_LANG"];
+      else process.env["ROLL_LANG"] = savedLang;
+    }
   });
 });

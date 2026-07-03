@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -21,7 +22,8 @@ const ASSET_NAME = "Roll-Capture.app.zip";
 const APP_NAME = "Roll Capture.app";
 const DOWNLOAD_TIMEOUT_MS = 60_000;
 const UPDATE_HINT_TIMEOUT_MS = 1_500;
-const GH_AUTH_TOKEN_TIMEOUT_MS = 1_500;
+const GH_AUTH_TOKEN_TIMEOUT_MS = 5_000;
+const ROOT_INSTALL_SKIP_REASON = "run roll setup as a regular user to install Roll Capture.app";
 
 export interface RollCaptureReleaseAsset {
   name: string;
@@ -50,8 +52,10 @@ export interface RollCaptureInstallDeps {
   platform: NodeJS.Platform;
   env: NodeJS.ProcessEnv;
   home: string;
+  uid?: number;
   hasAquaGUI?: boolean;
   exists: (path: string) => boolean;
+  renamePath?: (from: string, to: string) => void;
   execFile: (cmd: string, args: readonly string[], opts?: { cwd?: string; timeoutMs?: number }) => { code: number; stdout: string; stderr: string };
   fetchLatestRelease: (timeoutMs: number) => Promise<RollCaptureRelease>;
   downloadAsset: (asset: RollCaptureReleaseAsset, timeoutMs: number) => Promise<Uint8Array>;
@@ -73,10 +77,12 @@ export function defaultRollCaptureInstallDeps(): RollCaptureInstallDeps {
     platform,
     env: process.env,
     home: homedir(),
+    uid: typeof process.getuid === "function" ? process.getuid() : undefined,
     ...(platform === "darwin" && !isCi(process.env) && process.env["ROLL_SKIP_CAPTURE_INSTALL"] !== "1"
       ? { hasAquaGUI: macosHasAquaGUI(execFile) }
       : {}),
     exists: existsSync,
+    renamePath: renameSync,
     execFile,
     fetchLatestRelease: (timeoutMs) => defaultFetchLatestRelease(timeoutMs, process.env, execFile),
     downloadAsset: (asset, timeoutMs) => defaultDownloadAsset(asset, timeoutMs, process.env, execFile),
@@ -143,8 +149,7 @@ export async function installRollCapture(deps: RollCaptureInstallDeps = defaultR
     const executable = findBundleExecutable(app);
     if (executable === null) return manual("Roll Capture.app has no executable in Contents/MacOS", release.tagName);
     chmodSync(executable, statSync(executable).mode | 0o111);
-    rmSync(targetApp, { recursive: true, force: true });
-    renameSync(app, targetApp);
+    replaceAppAtomically(app, targetApp, deps);
     invalidateRollCaptureReadinessCache(deps);
     // TODO: once Roll Capture is signed/notarized, verify the Developer ID
     // certificate here before moving the bundle into place.
@@ -177,7 +182,9 @@ export async function runRollCapturePostinstall(opts?: {
   return 0;
 }
 
-type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
+type FetchRequestInit = RequestInit & { dispatcher?: unknown };
+type FetchLike = (url: string, init?: FetchRequestInit) => Promise<Response>;
+type ProxyDispatcherFactory = (env: NodeJS.ProcessEnv) => Promise<unknown> | unknown;
 
 interface RollCaptureCredential {
   token: string;
@@ -188,19 +195,34 @@ async function defaultFetchLatestRelease(
   env: NodeJS.ProcessEnv,
   execFile: RollCaptureInstallDeps["execFile"],
   fetchImpl: FetchLike = fetch,
+  createProxyDispatcher: ProxyDispatcherFactory = defaultProxyDispatcher,
 ): Promise<RollCaptureRelease> {
-  const response = await fetchImpl(RELEASE_API, {
-    headers: { Accept: "application/vnd.github+json", "User-Agent": "@seanyao/roll" },
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+  const response = await fetchImpl(
+    RELEASE_API,
+    await withProxyDispatcher(
+      {
+        headers: { Accept: "application/vnd.github+json", "User-Agent": "@seanyao/roll" },
+        signal: AbortSignal.timeout(timeoutMs),
+      },
+      env,
+      createProxyDispatcher,
+    ),
+  );
   if (response.ok) return parseRelease(await response.json());
   if (!isAuthRetryableStatus(response.status)) throw new Error(`GitHub release API returned ${response.status}`);
 
   for (const credential of credentialFallbacks(env, execFile)) {
-    const authed = await fetchImpl(RELEASE_API, {
-      headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${credential.token}`, "User-Agent": "@seanyao/roll" },
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    const authed = await fetchImpl(
+      RELEASE_API,
+      await withProxyDispatcher(
+        {
+          headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${credential.token}`, "User-Agent": "@seanyao/roll" },
+          signal: AbortSignal.timeout(timeoutMs),
+        },
+        env,
+        createProxyDispatcher,
+      ),
+    );
     if (authed.ok) return parseRelease(await authed.json());
     if (!isAuthRetryableStatus(authed.status)) throw new Error(`GitHub release API returned ${authed.status}`);
   }
@@ -214,22 +236,37 @@ async function defaultDownloadAsset(
   env: NodeJS.ProcessEnv,
   execFile: RollCaptureInstallDeps["execFile"],
   fetchImpl: FetchLike = fetch,
+  createProxyDispatcher: ProxyDispatcherFactory = defaultProxyDispatcher,
 ): Promise<Uint8Array> {
-  const response = await fetchImpl(asset.browserDownloadUrl, {
-    headers: { "User-Agent": "@seanyao/roll" },
-    redirect: "follow",
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+  const response = await fetchImpl(
+    asset.browserDownloadUrl,
+    await withProxyDispatcher(
+      {
+        headers: { "User-Agent": "@seanyao/roll" },
+        redirect: "follow",
+        signal: AbortSignal.timeout(timeoutMs),
+      },
+      env,
+      createProxyDispatcher,
+    ),
+  );
   if (response.ok) return new Uint8Array(await response.arrayBuffer());
   if (!isAuthRetryableStatus(response.status)) throw new Error(`asset download returned ${response.status}`);
   if (asset.apiUrl === undefined || asset.apiUrl === "") throw new Error("asset API URL missing for authenticated download");
 
   for (const credential of credentialFallbacks(env, execFile)) {
-    const authed = await fetchImpl(asset.apiUrl, {
-      headers: { Accept: "application/octet-stream", Authorization: `Bearer ${credential.token}`, "User-Agent": "@seanyao/roll" },
-      redirect: "follow",
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    const authed = await fetchImpl(
+      asset.apiUrl,
+      await withProxyDispatcher(
+        {
+          headers: { Accept: "application/octet-stream", Authorization: `Bearer ${credential.token}`, "User-Agent": "@seanyao/roll" },
+          redirect: "follow",
+          signal: AbortSignal.timeout(timeoutMs),
+        },
+        env,
+        createProxyDispatcher,
+      ),
+    );
     if (authed.ok) return new Uint8Array(await authed.arrayBuffer());
     if (!isAuthRetryableStatus(authed.status)) throw new Error(`asset download returned ${authed.status}`);
   }
@@ -277,10 +314,14 @@ function ghAuthToken(execFile: RollCaptureInstallDeps["execFile"]): string | nul
   try {
     const result = execFile("gh", ["auth", "token"], { timeoutMs: GH_AUTH_TOKEN_TIMEOUT_MS });
     const token = result.code === 0 ? result.stdout.trim() : "";
-    return token === "" ? null : token;
+    return isUsableGhAuthToken(token) ? token : null;
   } catch {
     return null;
   }
+}
+
+function isUsableGhAuthToken(token: string): boolean {
+  return token.length >= 20 && token.length <= 512 && !/\s/.test(token);
 }
 
 async function extractZip(
@@ -300,6 +341,9 @@ async function extractZip(
 function installGate(deps: RollCaptureInstallDeps): RollCaptureInstallResult | null {
   if (deps.platform !== "darwin") return { status: "skipped", reason: "non-darwin" };
   if (skipInstallEnv(deps.env)) return { status: "skipped", reason: "disabled" };
+  if (deps.uid === 0 || (deps.env["SUDO_USER"] ?? "").trim() !== "") {
+    return { status: "skipped", reason: ROOT_INSTALL_SKIP_REASON };
+  }
   if (isCi(deps.env)) return { status: "skipped", reason: "ci" };
   if (deps.hasAquaGUI === false) return { status: "skipped", reason: "headless" };
   return null;
@@ -331,7 +375,8 @@ function findExtractedApp(dir: string): string | null {
   try {
     for (const name of readdirSync(dir)) {
       const candidate = join(dir, name);
-      const st = statSync(candidate);
+      const st = lstatSync(candidate);
+      if (st.isSymbolicLink()) continue;
       if (st.isDirectory() && name === APP_NAME) return candidate;
       if (st.isDirectory()) {
         const nested = findExtractedApp(candidate);
@@ -349,13 +394,94 @@ function findBundleExecutable(appPath: string): string | null {
   try {
     for (const name of readdirSync(macosDir)) {
       const candidate = join(macosDir, name);
-      const st = statSync(candidate);
+      const st = lstatSync(candidate);
+      if (st.isSymbolicLink()) continue;
       if (st.isFile()) return candidate;
     }
   } catch {
     return null;
   }
   return null;
+}
+
+function replaceAppAtomically(app: string, targetApp: string, deps: RollCaptureInstallDeps): void {
+  const renamePath = deps.renamePath ?? renameSync;
+  const backupApp = `${targetApp}.bak`;
+  const hadExisting = lstatExists(targetApp);
+  rmSync(backupApp, { recursive: true, force: true });
+  if (!hadExisting) {
+    renamePath(app, targetApp);
+    return;
+  }
+
+  let backupCreated = false;
+  let targetReplaced = false;
+  try {
+    renamePath(targetApp, backupApp);
+    backupCreated = true;
+    renamePath(app, targetApp);
+    targetReplaced = true;
+    rmSync(backupApp, { recursive: true, force: true });
+  } catch (error) {
+    if (targetReplaced) rmSync(targetApp, { recursive: true, force: true });
+    if (backupCreated) {
+      try {
+        renamePath(backupApp, targetApp);
+      } catch {
+        /* preserve original install error */
+      }
+    }
+    throw error;
+  }
+}
+
+function lstatExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function withProxyDispatcher(
+  init: FetchRequestInit,
+  env: NodeJS.ProcessEnv,
+  createProxyDispatcher: ProxyDispatcherFactory,
+): Promise<FetchRequestInit> {
+  if (!hasProxyEnv(env)) return init;
+  const dispatcher = await createProxyDispatcher(env);
+  return dispatcher === undefined || dispatcher === null ? init : { ...init, dispatcher };
+}
+
+function hasProxyEnv(env: NodeJS.ProcessEnv): boolean {
+  return ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"].some((key) => (env[key] ?? "").trim() !== "");
+}
+
+async function defaultProxyDispatcher(_env: NodeJS.ProcessEnv): Promise<unknown> {
+  try {
+    const imported = (await optionalImport("undici")) as { EnvHttpProxyAgent?: new () => unknown };
+    if (typeof imported.EnvHttpProxyAgent === "function") return new imported.EnvHttpProxyAgent();
+    enableNodeGlobalProxyFromEnv(_env);
+    return undefined;
+  } catch {
+    enableNodeGlobalProxyFromEnv(_env);
+    return undefined;
+  }
+}
+
+const optionalImport = new Function("specifier", "return import(specifier)") as (specifier: string) => Promise<unknown>;
+
+function enableNodeGlobalProxyFromEnv(env: NodeJS.ProcessEnv): void {
+  const getBuiltinModule = (process as typeof process & { getBuiltinModule?: (name: string) => unknown }).getBuiltinModule;
+  const http = getBuiltinModule?.("node:http") ?? getBuiltinModule?.("http");
+  const setGlobalProxyFromEnv = isRecord(http) ? http["setGlobalProxyFromEnv"] : undefined;
+  if (typeof setGlobalProxyFromEnv !== "function") return;
+  try {
+    setGlobalProxyFromEnv(env);
+  } catch {
+    /* proxy remains best-effort; fetch still reports network failures normally */
+  }
 }
 
 function readInstalledVersion(appPath: string, deps: RollCaptureInstallDeps): string | undefined {
@@ -417,12 +543,21 @@ function renderZh(result: RollCaptureInstallResult): string {
     const update = result.updateAvailable === true && result.releaseTag !== undefined ? `；有新版 ${result.releaseTag} 可用` : "";
     return `Roll Capture.app 已安装：${result.appPath ?? "已检测到"}${update}。`;
   }
-  if (result.status === "skipped") return `Roll Capture.app 安装已跳过（${result.reason}）。`;
+  if (result.status === "skipped") return `Roll Capture.app 安装已跳过（${renderZhReason(result.reason)}）。`;
   return `Roll Capture.app 自动安装失败（${result.reason}）；请手动安装，打开一次并授予屏幕录制权限。`;
+}
+
+function renderZhReason(reason: string): string {
+  if (reason === ROOT_INSTALL_SKIP_REASON) return "请以普通用户运行 roll setup 安装";
+  return reason;
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function externalPlatformOverride(raw: string | undefined): NodeJS.Platform | undefined {

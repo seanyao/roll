@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -244,6 +244,70 @@ describe("US-PHYSICAL-005 Roll Capture installer", () => {
     expect(existsSync(join(home, "Applications", "Roll Capture.app"))).toBe(false);
   });
 
+  it("skips zip entries that are symbolic links instead of following them", async () => {
+    const home = tmp("symlink-home");
+    const outside = join(home, "outside");
+    const result = await installRollCapture(
+      deps({
+        home,
+        extractZip: async (_zipPath, destination) => {
+          const realApp = join(outside, "Roll Capture.app");
+          const macos = join(realApp, "Contents", "MacOS");
+          mkdirSync(macos, { recursive: true });
+          writeFileSync(join(macos, "Roll Capture"), "#!/bin/sh\n", { mode: 0o755 });
+          symlinkSync(realApp, join(destination, "Roll Capture.app"));
+          return { ok: true };
+        },
+      }),
+    );
+
+    expect(result.status).toBe("manual");
+    expect(result.reason).toBe("zip did not contain Roll Capture.app");
+    expect(lstatSync(join(home, "outside", "Roll Capture.app")).isDirectory()).toBe(true);
+    expect(existsSync(join(home, "Applications", "Roll Capture.app"))).toBe(false);
+  });
+
+  it("skips automatic install when running as sudo or root", async () => {
+    const rootResult = await installRollCapture(deps({ uid: 0 }));
+    expect(rootResult).toMatchObject({
+      status: "skipped",
+      reason: "run roll setup as a regular user to install Roll Capture.app",
+    });
+    expect(renderRollCaptureInstallResult(rootResult, "zh")).toContain("请以普通用户运行 roll setup 安装");
+    await expect(installRollCapture(deps({ env: { SUDO_USER: "sean" } }))).resolves.toMatchObject({
+      status: "skipped",
+      reason: "run roll setup as a regular user to install Roll Capture.app",
+    });
+  });
+
+  it("restores the previous app when replacing it fails after backup", async () => {
+    const home = tmp("atomic-home");
+    const oldApp = join(home, "Applications", "Roll Capture.app");
+    mkdirSync(join(oldApp, "Contents"), { recursive: true });
+    writeFileSync(join(oldApp, "Contents", "Info.plist"), plist("0.1.0"));
+    let newAppMoveSeen = false;
+
+    const result = await installRollCapture(
+      deps({
+        home,
+        exists: () => false,
+        renamePath: (from, to) => {
+          if (from.endsWith("Roll Capture.app") && to === oldApp) {
+            newAppMoveSeen = true;
+            throw new Error("simulated replace failure");
+          }
+          renamePathForTest(from, to);
+        },
+      }),
+    );
+
+    expect(newAppMoveSeen).toBe(true);
+    expect(result.status).toBe("manual");
+    expect(result.reason).toContain("simulated replace failure");
+    expect(readFileSync(join(oldApp, "Contents", "Info.plist"), "utf8")).toContain("0.1.0");
+    expect(existsSync(`${oldApp}.bak`)).toBe(false);
+  });
+
   it("default downloader succeeds anonymously without probing credentials", async () => {
     const execFile = vi.fn(() => ({ code: 0, stdout: "secret-from-gh\n", stderr: "" }));
     const calls: Array<{ url: string; authorization?: string }> = [];
@@ -278,7 +342,7 @@ describe("US-PHYSICAL-005 Roll Capture installer", () => {
 
   it("default downloader retries anonymous 404 with an env token and downloads private assets through the API endpoint", async () => {
     const calls: Array<{ url: string; accept?: string; authorization?: string }> = [];
-    const execFile = vi.fn(() => ({ code: 0, stdout: "gh-secret\n", stderr: "" }));
+    const execFile = vi.fn(() => ({ code: 0, stdout: "ghp_" + "a".repeat(36) + "\n", stderr: "" }));
     const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
       const headers = new Headers(init?.headers);
       calls.push({
@@ -341,7 +405,8 @@ describe("US-PHYSICAL-005 Roll Capture installer", () => {
 
   it("default downloader exhausts anonymous, env, and gh release attempts without leaking tokens", async () => {
     const calls: Array<{ authorization?: string }> = [];
-    const execFile = vi.fn(() => ({ code: 0, stdout: "gh-secret\n", stderr: "" }));
+    const ghToken = "ghp_" + "b".repeat(36);
+    const execFile = vi.fn(() => ({ code: 0, stdout: `${ghToken}\n`, stderr: "" }));
     const fetchImpl = vi.fn(async (_url: string | URL, init?: RequestInit) => {
       calls.push({ authorization: new Headers(init?.headers).get("Authorization") ?? undefined });
       return new Response("private", { status: 404 });
@@ -351,8 +416,43 @@ describe("US-PHYSICAL-005 Roll Capture installer", () => {
       rollCaptureInstallInternals.fetchLatestRelease(1_000, { GITHUB_TOKEN: "env-secret" }, execFile, fetchImpl),
     ).rejects.toThrow("GitHub release API returned 404");
 
-    expect(execFile).toHaveBeenCalledWith("gh", ["auth", "token"], { timeoutMs: 1_500 });
-    expect(calls).toEqual([{ authorization: undefined }, { authorization: "Bearer env-secret" }, { authorization: "Bearer gh-secret" }]);
+    expect(execFile).toHaveBeenCalledWith("gh", ["auth", "token"], { timeoutMs: 5_000 });
+    expect(calls).toEqual([{ authorization: undefined }, { authorization: "Bearer env-secret" }, { authorization: `Bearer ${ghToken}` }]);
+  });
+
+  it("discards malformed gh auth token output and keeps falling back without leaking it", async () => {
+    const calls: Array<{ authorization?: string }> = [];
+    const execFile = vi.fn(() => ({ code: 0, stdout: "not a token\nwith spaces\n", stderr: "" }));
+    const fetchImpl = vi.fn(async (_url: string | URL, init?: RequestInit) => {
+      calls.push({ authorization: new Headers(init?.headers).get("Authorization") ?? undefined });
+      return new Response("private", { status: 404 });
+    });
+
+    await expect(rollCaptureInstallInternals.fetchLatestRelease(1_000, {}, execFile, fetchImpl)).rejects.toThrow(
+      "GitHub release API returned 404",
+    );
+
+    expect(execFile).toHaveBeenCalledWith("gh", ["auth", "token"], { timeoutMs: 5_000 });
+    expect(calls).toEqual([{ authorization: undefined }]);
+  });
+
+  it("passes a proxy dispatcher to fetch when proxy environment variables are present", async () => {
+    const dispatcher = { proxy: true };
+    const calls: Array<{ dispatcher?: unknown }> = [];
+    const fetchImpl = vi.fn(async (_url: string | URL, init?: RequestInit & { dispatcher?: unknown }) => {
+      calls.push({ dispatcher: init?.dispatcher });
+      return Response.json({ tag_name: "v0.2.0", assets: [] });
+    });
+
+    await rollCaptureInstallInternals.fetchLatestRelease(
+      1_000,
+      { HTTPS_PROXY: "http://127.0.0.1:7890", NO_PROXY: "localhost" },
+      vi.fn(),
+      fetchImpl,
+      () => dispatcher,
+    );
+
+    expect(calls).toEqual([{ dispatcher }]);
   });
 
   it("postinstall exits 0 with manual guidance after anonymous, env, and gh credential download attempts fail", async () => {
@@ -384,3 +484,7 @@ describe("US-PHYSICAL-005 Roll Capture installer", () => {
     ]);
   });
 });
+
+function renamePathForTest(from: string, to: string): void {
+  renameSync(from, to);
+}

@@ -1624,7 +1624,7 @@ describe("executeCommand — command → executor mapping", () => {
     const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-signals-")));
     execDirs.push(rt);
     const base = fakePorts();
-    const { ports } = fakePorts({
+    const { ports, calls } = fakePorts({
       paths: {
         ...base.ports.paths,
         eventsPath: join(rt, "events.ndjson"),
@@ -1778,7 +1778,7 @@ describe("executeCommand — command → executor mapping", () => {
     const wt = join(repo, "wt");
     mkdirSync(wt, { recursive: true });
     const base = fakePorts();
-    const { ports } = fakePorts({
+    const { ports, calls } = fakePorts({
       repoCwd: repo,
       paths: {
         ...base.ports.paths,
@@ -2295,6 +2295,19 @@ describe("executeCommand — command → executor mapping", () => {
     const { ports } = fakePorts();
     await executeCommand({ kind: "capture_facts" }, ports, CTX);
     expect(ports.attest.render).not.toHaveBeenCalled();
+  });
+
+  it("US-EVID-019: attest render failure hard-blocks capture_facts", async () => {
+    const { ports, calls } = fakePorts({
+      attest: { render: vi.fn(async () => 2) },
+    });
+    const r = await executeCommand(
+      { kind: "capture_facts" },
+      ports,
+      { ...CTX, evidenceRunDir: "/frame", startSec: 1 },
+    );
+    expect(r.event).toMatchObject({ type: "facts_captured", facts: { gateBlocked: true } });
+    expect((calls["alert"] ?? []).map((a) => String((a as unknown[])[1])).join("\n")).toContain("attest render failed");
   });
 
   // FIX-207 — attest gate is wired into capture_facts (delivery without a fresh
@@ -2878,6 +2891,39 @@ describe("executeCommand — command → executor mapping", () => {
     const { ports } = fakePorts();
     const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
     expect(r.event).toEqual({ type: "published", result: { status: 0, manualMerge: false } });
+  });
+
+  it("US-EVID-019: publish_pr appends Roll-Evidence trailer for nested roll-meta evidence", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-publish-evidence-")));
+    execDirs.push(repo);
+    const cardDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
+    mkdirSync(cardDir, { recursive: true });
+    writeFileSync(join(cardDir, "ac-map.json"), "[]\n");
+    execFileSync("git", ["init", "-q"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["config", "user.email", "test@roll.local"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["add", "-A"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["commit", "-q", "-m", "evidence"], { cwd: join(repo, ".roll") });
+
+    let body = "";
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      metadata: { commit: vi.fn(async () => ({ committed: false, pushed: false, nothingToCommit: true })) },
+      github: {
+        ...fakePorts().ports.github,
+        prState: vi.fn(async () => "UNKNOWN"),
+        runPublishPlan: vi.fn(async (plan: Array<{ kind: string; argv: string[] }>) => {
+          const create = plan.find((step) => step.kind === "gh-pr-create");
+          const bodyFlag = create?.argv.indexOf("--body") ?? -1;
+          body = bodyFlag >= 0 ? (create?.argv[bodyFlag + 1] ?? "") : "";
+          return { status: 0 as const, prUrl: "https://github.com/o/r/pull/44", ok: true };
+        }),
+      },
+    });
+    await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
+    expect((calls["alert"] ?? []).map((a) => String((a as unknown[])[1])).join("\n")).toBe("");
+    expect(body).toContain("Roll-Evidence: US-RUN-001 roll-meta@");
+    expect(body).toContain("features/uncategorized/US-RUN-001/ac-map.json");
   });
 
   it("FIX-909: needs-review publish opens a draft manual PR", async () => {

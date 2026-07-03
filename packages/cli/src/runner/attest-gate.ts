@@ -1336,6 +1336,7 @@ export function runAttestGate(
   // `sessionId` is NOT the builder's own session — never the vendor name.
   scoreRepoCwd: string = worktreeCwd,
   builderSessionId = "",
+  renderExitCode = 0,
 ): AttestGateResult {
   // FIX-343 (step ②): a missing PEER score must surface as a blocking
   // skipped/blocked verdict — the bottom blanket catch below must NOT soft-fail
@@ -1357,6 +1358,16 @@ export function runAttestGate(
       const blocked = mode === "hard";
       sinks.alert(
         `attest gate (${mode}): deliverable_cmd outside the roll read-only allowlist (${storyId}) — refused: ${rejectedCmds.join(", ")} — cycle ${cycleId}` +
+          (blocked ? " — BLOCKED (hard mode); story not marked Done" : ""),
+      );
+      sinks.event({ cycleId, verdict: "skipped", reasons });
+      return { verdict: "skipped", mode, reasons, blocked };
+    }
+    if (renderExitCode !== 0) {
+      const reasons = [`attest render failed for ${storyId} (exit ${renderExitCode})`];
+      const blocked = mode === "hard";
+      sinks.alert(
+        `attest gate (${mode}): attest render failed (${storyId}) — exit ${renderExitCode} — cycle ${cycleId}` +
           (blocked ? " — BLOCKED (hard mode); story not marked Done" : ""),
       );
       sinks.event({ cycleId, verdict: "skipped", reasons });

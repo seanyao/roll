@@ -170,7 +170,7 @@ import { writeCycleRoleSummaryBestEffort } from "./cycle-role-artifact-writer.js
 import { execFile, execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, rmdirSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
 import {
   agentCredentialReadiness,
@@ -2438,6 +2438,7 @@ export async function executeCommand(
         });
         scoreStatus = scoreResult.status;
       }
+      let attestRenderExitCode = 0;
       if (commitsAhead > 0 && storyId !== "" && ctx.evidenceRunDir !== undefined && ctx.evidenceRunDir !== "") {
         // FIX-912: auto-generate ac-map DRAFT from cycle evidence BEFORE the
         // FIX-246 remediation. The draft has full AC structure + evidence chain
@@ -2543,6 +2544,7 @@ export async function executeCommand(
           }
         }
         if (rc !== 0) {
+          attestRenderExitCode = rc;
           ports.events.appendAlert(
             ports.paths.alertsPath,
             `attest render failed for ${storyId} in cycle ${ctx.cycleId ?? ""} (exit ${rc})`,
@@ -2588,6 +2590,7 @@ export async function executeCommand(
           // vendor-name comparison is gone — a same-vendor fresh session is valid.
           ports.repoCwd,
           ctx.builderSessionId ?? "",
+          attestRenderExitCode,
         );
         if (res.verdict === "skipped") {
           applyCorrectionAction({
@@ -2722,9 +2725,10 @@ export async function executeCommand(
         const pub: PublishResult = { status: 0, manualMerge, ...(cmd.draft === true ? { draft: true } : {}) };
         return { event: { type: "published", result: pub } };
       }
+      const body = await publishBodyWithEvidenceTrailer(ports, ctx);
       const plan = cmd.docOnly
-        ? planPublishDocPr({ branch: cmd.branch, slug, body: publishBody(ctx), manualMerge, draft: cmd.draft })
-        : planPublishPr({ branch: cmd.branch, slug, body: publishBody(ctx), manualMerge, draft: cmd.draft });
+        ? planPublishDocPr({ branch: cmd.branch, slug, body, manualMerge, draft: cmd.draft })
+        : planPublishPr({ branch: cmd.branch, slug, body, manualMerge, draft: cmd.draft });
       const r = await ports.github.runPublishPlan(plan);
       // US-V4-001: publish no longer mounts a PR link onto a story `index.html`
       // dossier page — the global dossier/story-page refresh is not a v4 delivery
@@ -3859,6 +3863,33 @@ export function runVisualEvidencePreflight(ports: Ports, storyId: string, cycleI
 /** Compose the gh pr-create body (commit-count-style; kept simple + pure). */
 function publishBody(ctx: CycleContext): string {
   return `loop cycle ${ctx.cycleId}${ctx.storyId !== undefined ? ` — ${ctx.storyId}` : ""}`;
+}
+
+async function publishBodyWithEvidenceTrailer(ports: Ports, ctx: CycleContext): Promise<string> {
+  const base = publishBody(ctx);
+  const storyId = ctx.storyId ?? "";
+  if (storyId === "") return base;
+  const message = `chore: loop cycle ${ctx.cycleId}${storyId !== "" ? ` ${storyId}` : ""} evidence`;
+  try {
+    const committed = await ports.metadata.commit(ports.repoCwd, message);
+    if (!committed.nothingToCommit && !committed.pushed) {
+      ports.events.appendAlert(
+        ports.paths.alertsPath,
+        `.roll evidence push FAILED before publish for cycle ${ctx.cycleId}${committed.committed ? " (committed locally, not pushed)" : ""} — ${committed.error ?? "unknown error"}`,
+      );
+      return base;
+    }
+    const rollDir = join(ports.repoCwd, ".roll");
+    if (!existsSync(rollDir)) return base;
+    const rollReal = realpathSync(rollDir);
+    const sha = execFileSync("git", ["-C", rollReal, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    const map = relative(rollReal, acMapPath(ports.repoCwd, storyId));
+    if (sha === "" || map === "" || map.startsWith("..")) return base;
+    return `${base}\n\nRoll-Evidence: ${storyId} roll-meta@${sha} ${map}`;
+  } catch (e) {
+    ports.events.appendAlert(ports.paths.alertsPath, `.roll evidence trailer failed for cycle ${ctx.cycleId} — ${String(e)}`);
+    return base;
+  }
 }
 
 function storyRequiresManualMerge(repoCwd: string, storyId: string | undefined): boolean {

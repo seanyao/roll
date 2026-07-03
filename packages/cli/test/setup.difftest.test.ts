@@ -90,9 +90,9 @@ function freshFixture(): Fixture {
   return { home, proj };
 }
 
-function syncedFixture(): Fixture {
+async function syncedFixture(): Promise<Fixture> {
   const fx = freshFixture();
-  tsSetup(fx, [], { ROLL_LANG: "en" });
+  await tsSetup(fx, [], { ROLL_LANG: "en" });
   return fx;
 }
 
@@ -113,7 +113,7 @@ const ENV_KEYS = [
   "PATH", "HOME", "ROLL_HOME", "ROLL_PKG_DIR", "NO_COLOR", "ROLL_LANG", "LC_ALL", "LANG", "PWD",
 ];
 
-function tsSetup(fx: Fixture, args: string[], extra: Record<string, string>): Run {
+async function tsSetup(fx: Fixture, args: string[], extra: Record<string, string>): Promise<Run> {
   const target = { ...envBase(fx, extra), PWD: fx.proj };
   const save: Record<string, string | undefined> = {};
   for (const k of ENV_KEYS) save[k] = process.env[k];
@@ -131,7 +131,7 @@ function tsSetup(fx: Fixture, args: string[], extra: Record<string, string>): Ru
   process.stderr.write = (cnk: string | Uint8Array): boolean => (errChunks.push(String(cnk)), true);
   let status: number;
   try {
-    status = setupCommand(args);
+    status = await setupCommand(args);
   } finally {
     process.stdout.write = realOut;
     process.stderr.write = realErr;
@@ -172,9 +172,9 @@ function assertFreshSideEffects(fx: Fixture): void {
 }
 
 describe("frozen: roll setup", () => {
-  it("fresh setup → install + sync, all ok (en)", () => {
+  it("fresh setup → install + sync, all ok (en)", async () => {
     const fx = freshFixture();
-    expect(tsSetup(fx, [], { ROLL_LANG: "en" })).toMatchInlineSnapshot(`
+    await expect(tsSetup(fx, [], { ROLL_LANG: "en" })).resolves.toMatchInlineSnapshot(`
       {
         "status": 0,
         "stderr": "",
@@ -205,9 +205,9 @@ describe("frozen: roll setup", () => {
     assertFreshSideEffects(fx);
   });
 
-  it("fresh setup → install + sync, all ok (zh)", () => {
+  it("fresh setup → install + sync, all ok (zh)", async () => {
     const fx = freshFixture();
-    expect(tsSetup(fx, [], { ROLL_LANG: "zh" })).toMatchInlineSnapshot(`
+    await expect(tsSetup(fx, [], { ROLL_LANG: "zh" })).resolves.toMatchInlineSnapshot(`
       {
         "status": 0,
         "stderr": "",
@@ -238,9 +238,9 @@ describe("frozen: roll setup", () => {
     assertFreshSideEffects(fx);
   });
 
-  it("--force fresh setup → forced markers (en)", () => {
+  it("--force fresh setup → forced markers (en)", async () => {
     const fx = freshFixture();
-    expect(tsSetup(fx, ["--force"], { ROLL_LANG: "en" })).toMatchInlineSnapshot(`
+    await expect(tsSetup(fx, ["--force"], { ROLL_LANG: "en" })).resolves.toMatchInlineSnapshot(`
       {
         "status": 0,
         "stderr": "",
@@ -271,9 +271,9 @@ describe("frozen: roll setup", () => {
     assertFreshSideEffects(fx);
   });
 
-  it("--force fresh setup → forced markers (zh)", () => {
+  it("--force fresh setup → forced markers (zh)", async () => {
     const fx = freshFixture();
-    expect(tsSetup(fx, ["--force"], { ROLL_LANG: "zh" })).toMatchInlineSnapshot(`
+    await expect(tsSetup(fx, ["--force"], { ROLL_LANG: "zh" })).resolves.toMatchInlineSnapshot(`
       {
         "status": 0,
         "stderr": "",
@@ -304,8 +304,8 @@ describe("frozen: roll setup", () => {
     assertFreshSideEffects(fx);
   });
 
-  it("unknown argument → err + exit 1 (en)", () => {
-    expect(tsSetup(freshFixture(), ["--bogus"], { ROLL_LANG: "en" })).toMatchInlineSnapshot(`
+  it("unknown argument → err + exit 1 (en)", async () => {
+    await expect(tsSetup(freshFixture(), ["--bogus"], { ROLL_LANG: "en" })).resolves.toMatchInlineSnapshot(`
       {
         "status": 1,
         "stderr": "[roll] Unknown argument: --bogus
@@ -315,8 +315,8 @@ describe("frozen: roll setup", () => {
     `);
   });
 
-  it("unknown argument → err + exit 1 (zh)", () => {
-    expect(tsSetup(freshFixture(), ["--bogus"], { ROLL_LANG: "zh" })).toMatchInlineSnapshot(`
+  it("unknown argument → err + exit 1 (zh)", async () => {
+    await expect(tsSetup(freshFixture(), ["--bogus"], { ROLL_LANG: "zh" })).resolves.toMatchInlineSnapshot(`
       {
         "status": 1,
         "stderr": "[roll] 未知参数: --bogus
@@ -326,9 +326,9 @@ describe("frozen: roll setup", () => {
     `);
   });
 
-  it("already-synced re-run → all skip (no changes)", () => {
-    const fx = syncedFixture();
-    expect(tsSetup(fx, [], { ROLL_LANG: "en" })).toMatchInlineSnapshot(`
+  it("already-synced re-run → all skip (no changes)", async () => {
+    const fx = await syncedFixture();
+    await expect(tsSetup(fx, [], { ROLL_LANG: "en" })).resolves.toMatchInlineSnapshot(`
       {
         "status": 0,
         "stderr": "",
@@ -359,9 +359,9 @@ describe("frozen: roll setup", () => {
     assertFreshSideEffects(fx);
   });
 
-  it("already-synced --force re-run keeps content stable", () => {
-    const fx = syncedFixture();
-    expect(tsSetup(fx, ["--force"], { ROLL_LANG: "en" })).toMatchInlineSnapshot(`
+  it("already-synced --force re-run keeps content stable", async () => {
+    const fx = await syncedFixture();
+    await expect(tsSetup(fx, ["--force"], { ROLL_LANG: "en" })).resolves.toMatchInlineSnapshot(`
       {
         "status": 0,
         "stderr": "",
@@ -392,10 +392,10 @@ describe("frozen: roll setup", () => {
     assertFreshSideEffects(fx);
   });
 
-  it("FIX-1042: reasonix skill root mounts skills but filters auxiliary dirs", () => {
+  it("FIX-1042: reasonix skill root mounts skills but filters auxiliary dirs", async () => {
     const fx = freshFixture();
     mkdirSync(join(fx.home, ".reasonix"), { recursive: true });
-    tsSetup(fx, [], { ROLL_LANG: "en" });
+    await tsSetup(fx, [], { ROLL_LANG: "en" });
     const rxSkills = join(fx.home, ".reasonix", "skills");
     // Real skills are mounted as symlinks.
     expect(lstatSync(join(rxSkills, "roll-alpha")).isSymbolicLink()).toBe(true);
@@ -407,10 +407,10 @@ describe("frozen: roll setup", () => {
     }
   });
 
-  it("FIX-1042: re-run removes stale auxiliary pollution, preserves real & lookalike skills", () => {
+  it("FIX-1042: re-run removes stale auxiliary pollution, preserves real & lookalike skills", async () => {
     const fx = freshFixture();
     mkdirSync(join(fx.home, ".reasonix"), { recursive: true });
-    tsSetup(fx, [], { ROLL_LANG: "en" });
+    await tsSetup(fx, [], { ROLL_LANG: "en" });
     const rxSkills = join(fx.home, ".reasonix", "skills");
     // Simulate an older setup that mounted an auxiliary dir and a lookalike.
     const stale = join(rxSkills, "docs");
@@ -419,7 +419,7 @@ describe("frozen: roll setup", () => {
     symlinkSync(`${join(fx.home, ".roll", "skills", "docs-internal")}/`, lookalike);
     expect(lstatSync(stale).isSymbolicLink()).toBe(true);
     // Re-run setup.
-    tsSetup(fx, [], { ROLL_LANG: "en" });
+    await tsSetup(fx, [], { ROLL_LANG: "en" });
     // Auxiliary pollution is removed; the path-boundary-safe match leaves the
     // `docs-internal` lookalike untouched, and real skills survive.
     expect(existsSync(stale)).toBe(false);
@@ -427,10 +427,10 @@ describe("frozen: roll setup", () => {
     expect(lstatSync(join(rxSkills, "roll-alpha")).isSymbolicLink()).toBe(true);
   });
 
-  it("missing conventions source is owned by TS without bash fallback", () => {
+  it("missing conventions source is owned by TS without bash fallback", async () => {
     const missingPkg = realpathSync(mkdtempSync(join(tmpdir(), "roll-setup-missing-pkg-")));
     dirs.push(missingPkg);
-    const run = tsSetup(freshFixture(), [], { ROLL_LANG: "en", ROLL_PKG_DIR: missingPkg });
+    const run = await tsSetup(freshFixture(), [], { ROLL_LANG: "en", ROLL_PKG_DIR: missingPkg });
     expect({ ...run, stderr: run.stderr.replace(`${missingPkg}/conventions`, "<pkg>/conventions") })
       .toMatchInlineSnapshot(`
       {

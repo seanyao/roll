@@ -27,8 +27,7 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
-await build({
-  entryPoints: [join(repoRoot, "packages", "cli", "bin", "roll.js")],
+const common = {
   bundle: true,
   platform: "node",
   format: "esm",
@@ -43,7 +42,19 @@ await build({
       "const __dirname = __rollDirname(__filename);",
     ].join("\n"),
   },
+};
+
+await build({
+  ...common,
+  entryPoints: [join(repoRoot, "packages", "cli", "bin", "roll.js")],
   outfile: join(repoRoot, "dist", "roll.mjs"),
 });
 
+await build({
+  ...common,
+  entryPoints: [join(repoRoot, "packages", "cli", "bin", "postinstall.js")],
+  outfile: join(repoRoot, "dist", "postinstall.mjs"),
+});
+
 console.log("✓ bundled dist/roll.mjs");
+console.log("✓ bundled dist/postinstall.mjs");

@@ -22,13 +22,22 @@ curl -fsSL https://seanyao.github.io/roll/install | ROLL_VERSION=v3.610.1 bash
 npm install -g @seanyao/roll
 ```
 
-需要 Node.js 16+。
+需要 Node.js 22+。
+
+macOS 上，npm 包会在 postinstall 中尽力从 `seanyao/roll-capture` 最新 GitHub
+Release 下载 `Roll-Capture.app.zip`，校验后安装 `Roll Capture.app` 到
+`~/Applications`。使用物理截图前，请打开一次应用并授予 Screen Recording 权限。
+CI、headless、非 macOS、离线失败以及 `ROLL_SKIP_CAPTURE_INSTALL=1` 都会跳过 app
+安装，且不会让 npm 安装失败。
 
 无论哪种方式安装，完成后运行 setup 将约定和技能同步到你的 AI 工具：
 
 ```bash
 roll setup
 ```
+
+`roll setup --no-capture-install` 会禁止 setup 尝试同一套 Roll Capture.app 修复。
+`roll doctor tools` 会报告 app、权限代理和 inbox 是否就绪。
 
 ## 验证
 

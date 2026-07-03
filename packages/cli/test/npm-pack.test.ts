@@ -34,6 +34,7 @@ import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
 const REPO_ROOT = resolve(__dirname, "../../..");
+const NPM_CACHE = join(tmpdir(), "roll-pack-npm-cache");
 
 const tmpDirs: string[] = [];
 function tmp(tag: string): string {
@@ -59,7 +60,12 @@ function run(cmd: string, args: string[], cwd: string): string {
     stdio: ["ignore", "pipe", "pipe"],
     // The bash fallback's async update-checker would otherwise spray GitHub
     // fetch noise; point ROLL_HOME at a throwaway dir to keep it quiet/offline.
-    env: { ...process.env, ROLL_HOME: join(cwd, ".roll-home") },
+    env: {
+      ...process.env,
+      ROLL_HOME: join(cwd, ".roll-home"),
+      ROLL_SKIP_CAPTURE_INSTALL: "1",
+      npm_config_cache: NPM_CACHE,
+    },
   });
 }
 
@@ -82,7 +88,10 @@ describe("npm pack → install → run (release packaging)", () => {
       run("npm", ["install", "--prefix", prefix, "--offline", "--no-audit", "--no-fund", tarball], prefix);
 
       const bin = join(prefix, "node_modules", ".bin", "roll");
+      const pkgRoot = join(prefix, "node_modules", "@seanyao", "roll");
       expect(existsSync(bin), `installed bin shim missing at ${bin}`).toBe(true);
+      expect(existsSync(join(pkgRoot, "dist", "postinstall.mjs")), "postinstall bundle missing from package").toBe(true);
+      expect(existsSync(join(pkgRoot, "scripts", "postinstall-roll-capture.mjs")), "postinstall wrapper missing from package").toBe(true);
 
       // 3a. TS-native `--version` (FIX-202): prints the install tree's package.json
       //     version (single source of truth), not the fossil bin/roll literal.

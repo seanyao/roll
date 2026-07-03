@@ -213,7 +213,7 @@ const ENV_KEYS = [
   "PWD", "ROLL_VERSION", "ROLL_FAIL_CURL",
 ];
 
-function tsUp(fx: Fixture, extra: Record<string, string>): Run {
+async function tsUp(fx: Fixture, extra: Record<string, string>): Promise<Run> {
   setInstallMethod(fx.installMethod);
   const target = { ...envBase(fx, extra), PWD: fx.proj };
   const save: Record<string, string | undefined> = {};
@@ -232,7 +232,7 @@ function tsUp(fx: Fixture, extra: Record<string, string>): Run {
   process.stderr.write = (cnk: string | Uint8Array): boolean => (errChunks.push(String(cnk)), true);
   let status: number;
   try {
-    status = updateCommand([]);
+    status = await updateCommand([]);
   } finally {
     process.stdout.write = realOut;
     process.stderr.write = realErr;
@@ -248,20 +248,20 @@ function tsUp(fx: Fixture, extra: Record<string, string>): Run {
 
 describe("diff-test: roll update == bash oracle", () => {
   for (const lang of ["en", "zh"]) {
-    it(`npm happy path → upgrade + setup + changelog (${lang})`, () => {
+    it(`npm happy path → upgrade + setup + changelog (${lang})`, async () => {
       const tf = buildFixture("npm");
-      expect(scrub(tsUp(tf, { ROLL_LANG: lang }))).toMatchSnapshot();
+      expect(scrub(await tsUp(tf, { ROLL_LANG: lang }))).toMatchSnapshot();
     });
 
-    it(`curl version-resolve failure → exit 1 (${lang})`, () => {
+    it(`curl version-resolve failure → exit 1 (${lang})`, async () => {
       const tf = buildFixture("curl");
-      expect(scrub(tsUp(tf, { ROLL_LANG: lang, ROLL_FAIL_CURL: "1" }))).toMatchSnapshot();
+      expect(scrub(await tsUp(tf, { ROLL_LANG: lang, ROLL_FAIL_CURL: "1" }))).toMatchSnapshot();
     });
   }
 
-  it("curl happy path → download/extract + setup + changelog, curl argv frozen", () => {
+  it("curl happy path → download/extract + setup + changelog, curl argv frozen", async () => {
     const tf = buildFixture("curl");
-    const t = tsUp(tf, { ROLL_VERSION: "v9.9.9" });
+    const t = await tsUp(tf, { ROLL_VERSION: "v9.9.9" });
     const tLog = readCurlLog();
     expect(scrub(t)).toMatchSnapshot();
     // The recorded `-o <tmp>/roll.tar.gz` target uses a per-run mkdtemp dir;

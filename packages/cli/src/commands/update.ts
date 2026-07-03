@@ -191,7 +191,7 @@ function showChangelog(): void {
 }
 
 // ─── cmd_update (1967) ────────────────────────────────────────────────────────
-export function updateCommand(args: string[]): number {
+export async function updateCommand(args: string[]): Promise<number> {
   // FIX-238 AC1: update has side effects (network + global writes). ANY
   // argument — help or unknown — prints usage and never starts the upgrade.
   if (args.length > 0) {
@@ -235,7 +235,7 @@ export function updateCommand(args: string[]): number {
   process.stdout.write("\n");
   info(m("update.re_syncing_to_ai_tools"));
   process.stdout.write("\n");
-  setupCommand([]);
+  await setupCommand([]);
 
   process.stdout.write("\n");
   showChangelog();

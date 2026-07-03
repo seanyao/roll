@@ -179,6 +179,9 @@ at startup:
   screenshot requests. If readiness is unavailable, `roll attest` records an
   honest skip with the setup reason instead of blocking report generation; if
   the provider times out, the report surfaces timeout as its own failure reason.
+  On macOS npm installs, Roll tries to install the app from the latest
+  `seanyao/roll-capture` Release into `~/Applications`; `roll setup` can retry
+  that repair unless `--no-capture-install` is set.
 - `Playwright Chromium` — optional headless web capture for `roll attest` and
   archive screenshots. Install with `npx playwright install chromium`.
 

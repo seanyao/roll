@@ -51,6 +51,7 @@ import {
   selectPrimaryAgent,
 } from "../lib/interactive-agent.js";
 import { collectExternalTools, defaultExternalToolDeps, resolveRequirement, type ExternalToolState } from "../lib/external-tools.js";
+import { installRollCapture, renderRollCaptureInstallResult } from "../lib/roll-capture-install.js";
 import { collectRollCaptureReadiness, defaultRollCaptureReadinessDeps, renderRollCaptureSetupGuidance } from "../lib/roll-capture-readiness.js";
 
 // ─── bash UI helpers (bin/roll:41-56) — err only ─────────────────────────────
@@ -316,12 +317,14 @@ function emitSetupUi(steps: Step[]): void {
 /**
  * Returns the exit code for the fully ported setup surface.
  */
-export function setupCommand(args: string[]): number {
+export async function setupCommand(args: string[]): Promise<number> {
   let force = false;
   let reselect = false;
+  let noCaptureInstall = false;
   for (const a of args) {
     if (a === "--force" || a === "-f") force = true;
     else if (a === "--reselect") reselect = true;
+    else if (a === "--no-capture-install") noCaptureInstall = true;
     else {
       // FIX-238 AC2: name the offending argument (the v2 oracle quirk that
       // dropped it is retired — an empty-name error was useless).
@@ -409,7 +412,13 @@ export function setupCommand(args: string[]): number {
   const screenRecordingNotice = renderScreenRecordingSetupNotice(collectExternalTools());
   if (screenRecordingNotice !== null) process.stdout.write(screenRecordingNotice);
 
-  const rollCaptureGuidance = renderRollCaptureSetupGuidance(collectRollCaptureReadiness({ ...defaultRollCaptureReadinessDeps(), refreshCache: force }), msgLang());
+  let rollCaptureReadiness = collectRollCaptureReadiness({ ...defaultRollCaptureReadinessDeps(), refreshCache: force });
+  if (!noCaptureInstall && rollCaptureReadiness.status === "degraded" && rollCaptureReadiness.installed.status === "missing") {
+    const result = await installRollCapture();
+    if (result.status !== "skipped") process.stdout.write(`\n  ${renderRollCaptureInstallResult(result, msgLang())}\n`);
+    rollCaptureReadiness = collectRollCaptureReadiness({ ...defaultRollCaptureReadinessDeps(), refreshCache: true });
+  }
+  const rollCaptureGuidance = renderRollCaptureSetupGuidance(rollCaptureReadiness, msgLang());
   if (rollCaptureGuidance !== null) process.stdout.write(rollCaptureGuidance);
 
   // FIX-288 AC5: `roll release` drives the merge via GitHub-native auto-merge

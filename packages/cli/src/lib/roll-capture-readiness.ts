@@ -82,7 +82,7 @@ export function collectRollCaptureReadiness(deps: RollCaptureReadinessDeps = def
     if (cached !== null) return cached;
   }
 
-  const installed = detectInstalled(deps);
+  const installed = detectRollCaptureInstall(deps);
   const hostPermission = preflightScreenCaptureAccess(deps);
   const inbox = probeInboxWritable(inboxPath);
   const degraded = installed.status !== "installed" || hostPermission.status !== "granted" || inbox.status !== "writable";
@@ -169,7 +169,7 @@ function skipped(inboxPath: string, detail: string): RollCaptureReadiness {
   };
 }
 
-function detectInstalled(deps: RollCaptureReadinessDeps): RollCaptureReadiness["installed"] {
+export function detectRollCaptureInstall(deps: Pick<RollCaptureReadinessDeps, "env" | "home" | "exists" | "execFile">): RollCaptureReadiness["installed"] {
   const candidates = [
     deps.env["ROLL_CAPTURE_APP"],
     join(deps.home, "Applications", APP_NAME),
@@ -271,9 +271,13 @@ function hostPermissionZhDetail(status: RollCapturePermissionStatus): string {
   return `宿主权限代理：CGPreflightScreenCaptureAccess 对当前宿主进程返回 ${result}；Roll Capture.app 首次捕获时会自行管理屏幕录制权限。`;
 }
 
-function rollCaptureReadinessCachePath(deps: RollCaptureReadinessDeps): string {
+function rollCaptureReadinessCachePath(deps: Pick<RollCaptureReadinessDeps, "env" | "home">): string {
   const rollHome = (deps.env["ROLL_HOME"] ?? "").trim() || join(deps.home, ".roll");
   return join(rollHome, "cache", "roll-capture-readiness.json");
+}
+
+export function invalidateRollCaptureReadinessCache(deps: Pick<RollCaptureReadinessDeps, "env" | "home">): void {
+  rmSync(rollCaptureReadinessCachePath(deps), { force: true });
 }
 
 function rollCaptureReadinessCacheKey(deps: RollCaptureReadinessDeps, inboxPath: string): string {

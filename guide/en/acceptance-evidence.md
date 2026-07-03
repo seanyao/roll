@@ -67,6 +67,36 @@ loop_safety:
 Soft mode records the gap and raises the same audit signal, but it does not
 block the delivery cycle. Treat it as temporary compatibility, not the default.
 
+The merge gate reads structured evidence, not prose. A delivery can be refused
+when any of these facts are true:
+
+- `attest render` exits non-zero;
+- `ac-map.json` references a path that does not resolve under the story run or
+  card archive, except allowed GitHub PR/commit/check URLs for this repository;
+- an AC remains `claimed`, which means the Builder asserted completion without
+  pass/fail evidence;
+- a positive AC has no real evidence reference;
+- a non-exempt visual card has no captured screenshot or recorded machine
+  capture skip;
+- a declared `deliverable_url`, `deliverable_cmd`, or `physical_terminal`
+  surface was not really captured;
+- an AC is `fail`, which means a check ran and went red.
+
+The PR body carries a `Roll-Evidence` trailer that points reviewers to the
+story-scoped evidence. Treat that trailer as the entry point for human review:
+open the Acceptance Review Page, then follow the AC map and referenced files.
+
+Use the audit command before release or when a Done row looks suspicious:
+
+```bash
+roll attest audit
+roll attest audit --json
+```
+
+It scans Done stories for missing reports, missing or empty `ac-map.json`,
+dangling evidence references, and `evidence_debt` rows. A clean audit exits 0;
+any issue exits 1 and lists the story IDs and missing references.
+
 ## The red line
 
 An AC with **zero evidence** can never claim `pass`: the renderer forces it

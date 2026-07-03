@@ -334,7 +334,12 @@ export function registerAll(): void {
   // No sub-paths on bash.
   registerPorted("init", initCommand, { help: "Usage: roll init [--auto|--repair|--apply] [--yes|--then design]\n  Diagnose this project and route to scaffold, PRD design, existing-codebase onboard, repair, migration, or roll status.\n  --auto: apply deterministic fresh-project scaffolding in non-interactive runs.\n  --repair: repair partial Roll markers only.\n  --apply: validate and apply a reviewed existing-codebase onboard plan.\n  --yes / --then design: after scaffolding a PRD project, continue straight into `roll design` (skips the confirm prompt).\n诊断项目并路由到骨架、PRD 设计、已有代码库接入、修复、迁移或 roll status。\n  --apply：校验并应用已审阅的已有代码库接入计划。\n  --yes / --then design：脚手架搭好后直接续跑 `roll design`（跳过确认）。" });
   registerPorted("next", nextCommand, { help: NEXT_USAGE });
-  registerPorted("north", northCommand, { help: "Usage: roll north [--json] [--no-color]\n  Render the north-star terminal panel, or emit the raw roll.north.v1 metrics JSON.\n  Shows current value, target, 14-day sparkline, trend arrow, and status for autonomy, delivery rate, fix tax, and attribution errors.\n渲染北极星终端面板，或输出原始 roll.north.v1 指标 JSON；展示当前值、目标、14 天趋势条、趋势箭头和达标状态。" });
+  registerPorted("north", northCommand, {
+    help: () =>
+      currentHelpLang() === "zh"
+        ? "用法：roll north [--json] [--no-color]\n  渲染北极星终端面板，或输出原始 roll.north.v1 指标 JSON。\n  四项指标：自主运行时长、交付率、修复税、归因错误；显示当前值、目标、14 天趋势条、趋势箭头和状态。\n  null 表示暂无数据，面板会给出原因。\n"
+        : "Usage: roll north [--json] [--no-color]\n  Render the north-star terminal panel, or emit the raw roll.north.v1 metrics JSON.\n  Metrics: autonomy, delivery rate, fix tax, and attribution errors; each shows current value, target, 14-day sparkline, trend arrow, and status.\n  null means no data yet; the panel prints the reason.\n",
+  });
   // `design`: explicit thin entry point for the $roll-design skill
   // (US-ONBOARD-NUDGE-004). Loads the skill and launches the selected agent;
   // all design logic lives in the skill, not here.

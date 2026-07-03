@@ -10,6 +10,7 @@ import type { PrTick } from "@roll/core";
 import {
   type PrInboxDeps,
   type PrViewFacts,
+  parseRollEvidenceTrailer,
   reducePrView,
   runPrInbox,
   upsertRebaseAttempts,
@@ -91,6 +92,15 @@ describe("reducePrView — last BOT/APP review + rollup reduction (bin/roll 1199
     expect(reducePrView({ body: "fix\n\n[roll:manual-merge]" }).manualMerge).toBe(true);
     expect(reducePrView({ labels: [{ name: "manual-merge" }] }).manualMerge).toBe(true);
   });
+  it("US-EVID-019: parses the Roll-Evidence trailer", () => {
+    expect(parseRollEvidenceTrailer("body\n\nRoll-Evidence: US-EVID-019 roll-meta@abcdef123456 features/e/US/ac-map.json\n")).toEqual({
+      storyId: "US-EVID-019",
+      repo: "roll-meta",
+      sha: "abcdef123456",
+      acMapPath: "features/e/US/ac-map.json",
+    });
+    expect(parseRollEvidenceTrailer("no trailer")).toBeNull();
+  });
   it("any FAILURE → failure ci", () => {
     const f = reducePrView({ statusCheckRollup: [{ conclusion: "SUCCESS" }, { conclusion: "FAILURE" }] });
     expect(f.ciState).toBe("failure");
@@ -169,6 +179,30 @@ describe("runPrInbox — per-PR action dispatch", () => {
     await runPrInbox(deps);
     expect(rec.merged).toEqual(["8"]);
   });
+  it("US-EVID-019: unresolvable evidence blocks eager auto-merge", async () => {
+    const { deps, rec } = harness({
+      listOpenPrs: listOf([{ number: 81, headRefName: "loop/missing-evidence" }]),
+      viewPr: async () => ({ bot: "", ciState: "success", mergeable: "CLEAN", evidenceResolvable: false }),
+    });
+    await runPrInbox(deps);
+    expect(rec.merged).toEqual([]);
+    expect(rec.alerts[0]).toContain("evidence_unresolvable");
+  });
+  it("US-EVID-019: evidence block alert includes missing paths", async () => {
+    const { deps, rec } = harness({
+      listOpenPrs: listOf([{ number: 83, headRefName: "loop/missing-list" }]),
+      viewPr: async () => ({
+        bot: "APPROVED",
+        ciState: "success",
+        mergeable: "CLEAN",
+        evidenceResolvable: false,
+        evidenceMissing: ["US-EVID-019:AC1 screenshots/missing.png"],
+      }),
+    });
+    await runPrInbox(deps);
+    expect(rec.merged).toEqual([]);
+    expect(rec.alerts[0]).toContain("screenshots/missing.png");
+  });
   it("FIX-1027: manual draft + bot APPROVED + clean → ready first, then merge", async () => {
     const { deps, rec } = harness({
       listOpenPrs: listOf([{ number: 30, headRefName: "loop/manual-review" }]),
@@ -199,6 +233,23 @@ describe("runPrInbox — per-PR action dispatch", () => {
     await runPrInbox(deps);
     expect(rec.readied).toEqual([]);
     expect(rec.merged).toEqual([]);
+  });
+  it("US-EVID-019: unresolvable evidence blocks manual draft promotion", async () => {
+    const { deps, rec } = harness({
+      listOpenPrs: listOf([{ number: 82, headRefName: "loop/manual-missing-evidence" }]),
+      viewPr: async () => ({
+        bot: "APPROVED",
+        ciState: "success",
+        mergeable: "CLEAN",
+        manualMerge: true,
+        isDraft: true,
+        evidenceResolvable: false,
+      }),
+    });
+    await runPrInbox(deps);
+    expect(rec.readied).toEqual([]);
+    expect(rec.merged).toEqual([]);
+    expect(rec.alerts[0]).toContain("evidence_unresolvable");
   });
   it("FIX-1027 guard: failed ready leaves the PR unmerged for the next tick", async () => {
     const { deps, rec } = harness({
@@ -309,6 +360,21 @@ describe("runPrInbox — stale → rebase circuit → recheck → merge", () => 
     expect(rec.merged).toEqual(["20"]);
     // FIX-367: the post-rebase merge path also records merge truth durably.
     expect(rec.mergedRecorded).toEqual([{ num: "20", headRef: "loop/r" }]);
+  });
+
+  it("US-EVID-019: unresolvable evidence blocks post-rebase eager merge", async () => {
+    const { deps, rec } = harness({
+      listOpenPrs: listOf([{ number: 23, headRefName: "loop/u" }]),
+      viewPr: async () => staleView,
+      rebaseStale: async (num) => {
+        rec.rebased.push(num);
+        return { bot: "", ciState: "success", mergeable: "CLEAN", evidenceResolvable: false };
+      },
+    });
+    await runPrInbox(deps);
+    expect(rec.rebased).toEqual(["23"]);
+    expect(rec.merged).toEqual([]);
+    expect(rec.alerts[0]).toContain("evidence_unresolvable");
   });
 
   it("circuit TRIPPED → no rebase, no merge (honors the verdict)", async () => {

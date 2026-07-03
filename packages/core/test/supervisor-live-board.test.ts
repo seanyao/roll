@@ -68,4 +68,15 @@ describe("buildSupervisorLiveBoard", () => {
     expect(board.rows[0]?.status).toBe("failed");
     expect(board.rows[0]?.roles.find((r) => r.role === "builder")?.state).toBe("failed");
   });
+
+  it("surfaces failure-class distribution for supervisor triage", () => {
+    const board = buildSupervisorLiveBoard([
+      start("C5", "US-5", 40),
+      { type: "cycle:end", cycleId: "C5", outcome: "failed", cost, failure_class: "env", root_cause_key: "env:main_dirty", ts: 41 },
+      start("C6", "US-6", 42),
+      { type: "cycle:end", cycleId: "C6", outcome: "failed", cost, failure_class: "card", root_cause_key: "card:agent_after_build", ts: 43 },
+    ]);
+    expect(board.supervisor.failureDistribution).toEqual({ env: 1, harness: 0, card: 1, unknown: 0 });
+    expect(board.supervisor.summary).toContain("failures env=1 harness=0 card=1 unknown=0");
+  });
 });

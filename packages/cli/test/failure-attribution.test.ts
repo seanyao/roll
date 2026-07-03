@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { classifyFailure } from "../src/runner/failure-attribution.js";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { classifyFailure, recordRootCauseFailure } from "../src/runner/failure-attribution.js";
+import { readSkipCards, recordCardFailure } from "../src/runner/skip-cards.js";
 
 describe("failure attribution envelopes", () => {
   it("classifies pre-spawn sandbox dirty as env using phase + source, with zero tokens only corroborating", () => {
@@ -69,5 +73,29 @@ describe("failure attribution envelopes", () => {
         source: "runner",
       }),
     ).toMatchObject({ failureClass: "unknown", rootCauseKey: "unknown:unclassified" });
+  });
+
+  it("aggregates env/harness failures by root cause and writes a diagnostic snapshot at threshold", () => {
+    const dir = mkdtempSync(join(tmpdir(), "roll-root-cause-"));
+    const attribution = { failureClass: "env" as const, rootCauseKey: "env:main_dirty", confidence: "envelope" as const };
+    expect(recordRootCauseFailure(dir, "cycle-1", attribution, [], 3).paused).toBe(false);
+    expect(recordRootCauseFailure(dir, "cycle-2", attribution, [], 3).paused).toBe(false);
+    const third = recordRootCauseFailure(dir, "cycle-3", attribution, [{ type: "sandbox:main_dirty", cycleId: "cycle-3", phase: "pre-spawn", files: ["x"], ts: 3 } as never], 3);
+    expect(third).toMatchObject({ paused: true, count: 3, rootCauseKey: "env:main_dirty" });
+    expect(existsSync(third.snapshotPath ?? "")).toBe(true);
+    const snapshot = readFileSync(third.snapshotPath ?? "", "utf8");
+    expect(snapshot).toContain("env:main_dirty");
+    expect(snapshot).toContain("main checkout");
+    expect(snapshot).not.toContain("split the card");
+  });
+
+  it("replays roll-capture-style pre-spawn dirty failures without poisoning card accounting", () => {
+    const dir = mkdtempSync(join(tmpdir(), "roll-capture-replay-"));
+    const attribution = { failureClass: "env" as const, rootCauseKey: "env:main_dirty", confidence: "envelope" as const };
+    for (const storyId of ["US-CAPTURE-005", "US-CAPTURE-006", "US-CAPTURE-007", "US-CAPTURE-005", "US-CAPTURE-006", "US-CAPTURE-007", "US-CAPTURE-006", "US-CAPTURE-007"]) {
+      recordRootCauseFailure(dir, `cycle-${storyId}`, attribution, [], 3);
+      recordCardFailure(dir, storyId, 3, attribution.failureClass);
+    }
+    expect(readSkipCards(dir).size).toBe(0);
   });
 });

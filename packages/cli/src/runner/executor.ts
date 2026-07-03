@@ -3120,8 +3120,13 @@ function stampTs(event: RollEvent, ts: number): RollEvent {
  *  folded into liveCtx after spawn_agent. Non-cycle:end events pass through; a
  *  cycle with no parsed usage (`ctx.cost` absent) keeps the placeholder. */
 function withRealCost(event: RollEvent, ctx: CycleContext): RollEvent {
-  if (event.type !== "cycle:end" || ctx.cost === undefined) return event;
-  return { ...event, cost: ctx.cost };
+  if (event.type !== "cycle:end") return event;
+  return {
+    ...event,
+    ...(ctx.cost !== undefined ? { cost: ctx.cost } : {}),
+    ...(ctx.failureClass !== undefined ? { failure_class: ctx.failureClass } : {}),
+    ...(ctx.rootCauseKey !== undefined ? { root_cause_key: ctx.rootCauseKey } : {}),
+  };
 }
 
 /** Build the v2-shaped runs.jsonl row (keys verified against the dashboard
@@ -3215,6 +3220,12 @@ export function buildRunRow(
     if (ctx.agentInternalFailure.conversationId !== undefined) {
       row["agent_internal_conversation_id"] = ctx.agentInternalFailure.conversationId;
     }
+  }
+  if (ctx.failureClass !== undefined) {
+    row["failure_class"] = ctx.failureClass;
+  }
+  if (ctx.rootCauseKey !== undefined) {
+    row["root_cause_key"] = ctx.rootCauseKey;
   }
   return row;
 }
@@ -3314,6 +3325,8 @@ export function buildTerminalRecord(
       ctx.cost !== undefined
         ? present({ estimatedUsd: ctx.cost.estimatedCost, effectiveUsd: ctx.cost.effectiveCost })
         : absent("no_parseable_usage"),
+    failure_class: ctx.failureClass,
+    root_cause_key: ctx.rootCauseKey,
   });
 }
 

@@ -37,6 +37,7 @@ import { loopLogCommand } from "./loop-log.js";
 import { loopGoalCommand } from "./loop-goal.js";
 import { loopGoCommand } from "./loop-go.js";
 import { loopRecoverCommand } from "./loop-recover.js";
+import { loopPardonSkipListCommand } from "./loop-pardon-skip-list.js";
 import { loopEventsCommand } from "./loop-events.js";
 import { doctorCommand, languageAuditCommand } from "./doctor.js";
 import { dreamCommand } from "./dream.js";
@@ -414,6 +415,7 @@ export function registerAll(): void {
     // denies + explains when no alternate Builder exists. Never bypasses the
     // breaker silently — records a `goal:recovery` event either way.
     if (args[0] === "recover") return loopRecoverCommand(args.slice(1));
+    if (args[0] === "pardon-skip-list") return loopPardonSkipListCommand(args.slice(1));
     if (args[0] === "signals") return loopSignalsCommand(args.slice(1));
     // `loop log` / `loop events`: residual pure-read viewers (US-PORT-022) over
     // .roll/cycle-logs and the shared events ndjson. No bash fallback.

@@ -7,7 +7,7 @@ import type { AgentId, AgentToolchainClassification, ExecutionProfile } from "./
 import type { CycleCost, CyclePhase } from "./cycle.js";
 import type { GoalReviewMode, GoalSafetyGate, GoalScope, GoalStatus, GoalTransitionActor } from "./goal.js";
 import type { LoopType } from "./loop.js";
-import type { TerminalEvent, TerminalOutcome } from "./terminal.js";
+import type { FailureClass, TerminalEvent, TerminalOutcome } from "./terminal.js";
 import type { TaskLevel } from "./story.js";
 import type { BuilderFinalizationFacts, BuilderFinalizationVerdict } from "./builder.js";
 
@@ -58,7 +58,7 @@ export type RollEvent =
   // process tree was killed, the inflight lock released, and the worktree branch
   // PRESERVED (work salvageable). `elapsedSec`/`idleSec` make the trip auditable.
   | { type: "cycle:timeout"; cycleId: string; reason: "wall" | "no-progress"; elapsedSec: number; idleSec: number; ts: number }
-  | { type: "cycle:end"; cycleId: string; outcome: TerminalOutcome; cost: CycleCost; ts: number }
+  | { type: "cycle:end"; cycleId: string; outcome: TerminalOutcome; cost: CycleCost; ts: number; failure_class?: FailureClass; root_cause_key?: string }
   // FIX-903: leaked main commits were saved to a rescue ref before reset.
   | { type: "cycle:rescue"; cycleId: string; ref: string; rescuedSha: string; ts: number }
   // FIX-1037: a builder escaped the cycle worktree or the main checkout was

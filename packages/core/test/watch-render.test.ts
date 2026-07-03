@@ -127,6 +127,20 @@ describe("watch-render — compact RollEvent observation model", () => {
     `);
   });
 
+  it("renders failure class on failed cycle:end", () => {
+    const rendered = watchRenderEventFromRollEvent({
+      type: "cycle:end",
+      cycleId: "C-env",
+      outcome: "failed",
+      cost: {} as never,
+      failure_class: "env",
+      root_cause_key: "env:main_dirty",
+      ts: 1,
+    });
+    expect(rendered?.detail).toBe("failed · env · env:main_dirty");
+    expect(rendered?.severity).toBe("bad");
+  });
+
   it("renders stable compact one-line output", () => {
     expect(scrubTime(renderCompactWatchLines(events.map(line)))).toMatchInlineSnapshot(`
       [

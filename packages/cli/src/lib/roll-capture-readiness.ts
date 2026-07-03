@@ -34,7 +34,8 @@ export interface RollCaptureReadiness {
 const APP_NAME = "Roll Capture.app";
 const BUNDLE_ID = "com.seanyao.roll.capture";
 const SYSTEM_SETTINGS_SCREEN_CAPTURE = "open x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
-const ROLL_CAPTURE_READINESS_TTL_MS = 30 * 60 * 1000;
+const ROLL_CAPTURE_POSITIVE_READINESS_TTL_MS = 30 * 60 * 1000;
+const ROLL_CAPTURE_NEGATIVE_READINESS_TTL_MS = 60 * 1000;
 
 export function defaultRollCaptureReadinessDeps(): RollCaptureReadinessDeps {
   const platform = externalPlatformOverride(process.env["_ROLL_EXTERNAL_TOOLS_PLATFORM"]) ?? process.platform;
@@ -296,9 +297,14 @@ function readRollCaptureReadinessCache(deps: RollCaptureReadinessDeps, cacheKey:
     const row = parsed as Record<string, unknown>;
     if (row["version"] !== 1 || row["cacheKey"] !== cacheKey) return null;
     const checkedAtMs = row["checkedAtMs"];
-    if (typeof checkedAtMs !== "number" || nowMs(deps) - checkedAtMs < 0 || nowMs(deps) - checkedAtMs >= ROLL_CAPTURE_READINESS_TTL_MS) return null;
     const readiness = row["readiness"];
     if (!isRollCaptureReadiness(readiness)) return null;
+    const ageMs = typeof checkedAtMs === "number" ? nowMs(deps) - checkedAtMs : Number.NaN;
+    // Negative states (missing/denied/blocked/unknown) get a short TTL so a
+    // newly granted permission or install becomes visible quickly. Positive
+    // states keep a long TTL to avoid repeated probes and macOS permission UI.
+    const ttlMs = readiness.status === "available" ? ROLL_CAPTURE_POSITIVE_READINESS_TTL_MS : ROLL_CAPTURE_NEGATIVE_READINESS_TTL_MS;
+    if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs >= ttlMs) return null;
     return readiness;
   } catch {
     return null;

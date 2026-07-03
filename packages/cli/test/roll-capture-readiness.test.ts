@@ -150,6 +150,44 @@ describe("US-PHYSICAL-003 Roll Capture readiness", () => {
     expect(execCalls).toBe(2);
   });
 
+  it("refreshes negative readiness after 61s but keeps positive readiness cached", () => {
+    const home = tmp("asymmetric-cache-home");
+    const rollHome = join(home, ".roll");
+    const appPath = join(home, "Applications", "Roll Capture.app");
+    mkdirSync(appPath, { recursive: true });
+    let now = 1_000;
+    let installed = false;
+    let permissionGranted = false;
+    let execCalls = 0;
+    const cachedDeps = deps({
+      home,
+      env: { ROLL_HOME: rollHome },
+      cacheReadiness: true,
+      nowMs: () => now,
+      exists: (path) => installed && path === appPath,
+      execFile: (cmd) => {
+        execCalls += 1;
+        if (cmd === "mdfind") return { code: 0, stdout: installed ? `${appPath}\n` : "", stderr: "" };
+        return { code: 0, stdout: permissionGranted ? "true\n" : "false\n", stderr: "" };
+      },
+    });
+
+    expect(collectRollCaptureReadiness(cachedDeps).status).toBe("degraded");
+    expect(execCalls).toBe(2);
+
+    now += 61_000;
+    installed = true;
+    permissionGranted = true;
+    expect(collectRollCaptureReadiness(cachedDeps).status).toBe("available");
+    expect(execCalls).toBe(3);
+
+    now += 61_000;
+    installed = false;
+    permissionGranted = false;
+    expect(collectRollCaptureReadiness(cachedDeps).status).toBe("available");
+    expect(execCalls).toBe(3);
+  });
+
   it("bypasses the Roll Capture readiness cache when refresh is requested", () => {
     const home = tmp("refresh-home");
     const appPath = join(home, "Applications", "Roll Capture.app");

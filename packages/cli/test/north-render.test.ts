@@ -149,6 +149,33 @@ describe("north-star terminal rendering", () => {
     expect(out).not.toContain("[▁");
   });
 
+  it("renders near thresholds on the non-met side of each target direction", () => {
+    const report = reportWithDaily([0, 1, 2, 3, 4, 5, 6, 7]);
+    report.metrics.fixTax.current = 1.19;
+    let out = stripAnsi(renderNorthPanel(report, "en", 100));
+    expect(out).toContain("fix tax                1.19x →<1.00x");
+    expect(out).toContain("↓ ● near");
+
+    report.metrics.fixTax.current = 1.21;
+    out = stripAnsi(renderNorthPanel(report, "en", 100));
+    expect(out).toContain("fix tax                1.21x →<1.00x");
+    expect(out).toContain("↓ ● miss");
+
+    report.metrics.autonomy.current = 57.6;
+    report.metrics.autonomy.met = false;
+    out = stripAnsi(renderNorthPanel(report, "en", 100));
+    expect(out).toContain("autonomy               57.6h →≥72h");
+    expect(out).toContain("↑ ● near");
+  });
+
+  it("falls back to unknown reason text when a reason key is absent from the catalog", () => {
+    const report = buildNorthStarReport({ nowMs: Date.parse("2026-07-03T16:00:00Z"), days: [], runs: [], events: [], cards: [], backlog: [], deliveries: [] });
+    report.metrics.autonomy.reason = "catalog_gap";
+    const out = stripAnsi(renderNorthPanel(report, "en", 80));
+    expect(out).toContain("autonomy             no data · unknown reason");
+    expect(out).not.toContain("north.reason.catalog_gap");
+  });
+
   it("roll north renders human output and updates after new event data", async () => {
     registerAll();
     const project = mkdtempSync(join(tmpdir(), "roll-north-render-"));

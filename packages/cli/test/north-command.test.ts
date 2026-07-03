@@ -113,6 +113,32 @@ describe("roll north --json", () => {
     expect(json.metrics.attributionErrors.context.unknownFailureClass).toBe(0);
   });
 
+  it("renders a deterministic no-data panel when loop data is damaged", async () => {
+    registerAll();
+    const project = mkdtempSync(join(tmpdir(), "roll-north-damaged-"));
+    const rollMeta = join(project, ".roll");
+    const damagedLoop = join(rollMeta, "loop");
+    mkdirSync(rollMeta, { recursive: true });
+    writeFileSync(damagedLoop, "not a directory\n");
+
+    const result = await withEnvCwd(
+      {
+        ROLL_MAIN_PROJECT: project,
+        ROLL_PROJECT_RUNTIME_DIR: damagedLoop,
+        ROLL_NORTH_NOW: "2026-07-03T16:00:00Z",
+        NO_COLOR: "1",
+        ROLL_LANG: "en",
+      },
+      project,
+      () => captureStdout(() => dispatch(["north"], async () => ({ ok: true }))),
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("North Star · 14d · 2026-06-21..2026-07-04");
+    expect(result.stdout).toContain("autonomy             no data · no history");
+    expect(result.stdout).toContain("fix tax              no data · no history");
+  });
+
   it("discovers all rotated event segments and falls back to git-created FIX dates in one meta scan", async () => {
     registerAll();
     const project = mkdtempSync(join(tmpdir(), "roll-north-rotated-"));

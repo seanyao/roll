@@ -273,14 +273,16 @@ function metricShortName(key: MetricKey, lang: Lang): string {
 
 function reasonText(reason: string | undefined, lang: Lang): string {
   if (reason === undefined || reason === "") return t(v3Catalog, lang, "north.reason.unknown");
-  return t(v3Catalog, lang, `north.reason.${reason}`);
+  const key = `north.reason.${reason}`;
+  const rendered = t(v3Catalog, lang, key);
+  return rendered === key ? t(v3Catalog, lang, "north.reason.unknown") : rendered;
 }
 
 function metricValue(key: MetricKey, value: number, unit: string | undefined): string {
   if (unit === "hours") return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)}h`;
   if (unit === "count") return String(Math.trunc(value));
   if (unit === "ratio" && key === "deliveryRate") return `${Math.round(value * 100)}%`;
-  if (unit === "ratio") return `${value.toFixed(1)}x`;
+  if (unit === "ratio") return `${value.toFixed(2)}x`;
   return Number.isInteger(value) ? value.toFixed(0) : value.toFixed(2);
 }
 
@@ -301,9 +303,9 @@ function renderStatus(metric: NorthStarMetric<unknown>): RenderStatus {
   const current = metric.current;
   if (metric.met) return "met";
   if (current === null) return "miss";
-  // "Near" is a render-only affordance: within 80% of the target line.
+  // "Near" is a render-only affordance: within 20% on the non-met side of the target line.
   if (metric.target.op === ">=") return current >= metric.target.value * 0.8 ? "near" : "miss";
-  if (metric.target.op === "<") return current < metric.target.value / 0.8 ? "near" : "miss";
+  if (metric.target.op === "<") return current <= metric.target.value * 1.2 ? "near" : "miss";
   return Math.abs(current - metric.target.value) <= Math.max(1, Math.abs(metric.target.value) * 0.2) ? "near" : "miss";
 }
 
@@ -373,7 +375,20 @@ export function northCommand(args: string[]): number {
   });
   const root = projectRoot();
   const now = nowForNorth();
-  const report = loadNorthStarReport(root, now);
+  let report: NorthStarReport;
+  try {
+    report = loadNorthStarReport(root, now);
+  } catch {
+    report = buildNorthStarReport({
+      nowMs: now.getTime(),
+      days: shWindowDays(now, 14),
+      runs: [],
+      events: [],
+      cards: [],
+      backlog: [],
+      deliveries: [],
+    });
+  }
   if (json) process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   else process.stdout.write(`${renderNorthPanel(report, lang, terminalWidth())}\n`);
   return 0;

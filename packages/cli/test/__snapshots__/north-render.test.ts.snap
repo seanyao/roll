@@ -5,7 +5,7 @@ exports[`north-star terminal rendering > renders EN and ZH panels with one metri
 
   autonomy                 80h →≥72h [▁▂▃▄▅▆▇█] ↑ ● met
   delivery rate            50% →≥60% [▁▂▃▄▅▆▇█] → ● near
-  fix tax                 1.1x →<1.0x [▁▂▃▄▅▆▇█] ↓ ● near
+  fix tax                1.10x →<1.00x [▁▂▃▄▅▆▇█] ↓ ● near
   attribution errors         0 →=0 [▁▂▃▄▅▆▇█] → ● met"
 `;
 
@@ -14,7 +14,7 @@ exports[`north-star terminal rendering > renders EN and ZH panels with one metri
 
   自主运行             80h →≥72h [▁▂▃▄▅▆▇█] ↑ ● 达标
   交付率               50% →≥60% [▁▂▃▄▅▆▇█] → ● 接近
-  修复税              1.1x →<1.0x [▁▂▃▄▅▆▇█] ↓ ● 接近
+  修复税             1.10x →<1.00x [▁▂▃▄▅▆▇█] ↓ ● 接近
   归因错误               0 →=0 [▁▂▃▄▅▆▇█] → ● 达标"
 `;
 
@@ -23,7 +23,7 @@ exports[`north-star terminal rendering > renders a NO_COLOR panel snapshot with 
 
   autonomy                 80h →≥72h [▁▂▃▄▅▆▇█] ↑ ● met
   delivery rate            50% →≥60% [▁▂▃▄▅▆▇█] → ● near
-  fix tax                 1.1x →<1.0x [▁▂▃▄▅▆▇█] ↓ ● near
+  fix tax                1.10x →<1.00x [▁▂▃▄▅▆▇█] ↓ ● near
   attribution errors         0 →=0 [▁▂▃▄▅▆▇█] → ● met"
 `;
 

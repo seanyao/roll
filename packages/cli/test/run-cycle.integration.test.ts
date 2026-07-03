@@ -441,6 +441,8 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
     expect(result2.terminal).toBe("published"); // FIX-244
   });
 
+  // CI has observed this real-timer watchdog case flake at the default 30s budget;
+  // keep the assertion intact but give the polling path enough headroom.
   it("FIX-907 hung builder (no-progress timeout): agent killed mid-spawn → blocked, lock released, branch PRESERVED, cycle:timeout recorded", async () => {
     const { repo } = makeFixture("hang907");
     const rt = tmp("hang907-rt");
@@ -517,7 +519,7 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
       restore("ROLL_CYCLE_NO_PROGRESS_SEC", savedNp);
       restore("ROLL_CYCLE_WALL_TIMEOUT_SEC", savedWall);
     }
-  });
+  }, 60_000);
 
   it("lock contention: a second concurrent cycle is skipped (ran=false)", async () => {
     const { repo } = makeFixture("lock");

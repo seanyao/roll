@@ -583,7 +583,7 @@ describe("failure branches", () => {
     ]);
     expect(state.terminal).toBe("idle");
     expect(mapV2Status(state.terminal!)).toBe("idle_no_work");
-    expect(kinds.slice(-3)).toEqual(["cleanup_worktree", "emit_event", "append_run"]);
+    expect(kinds.slice(-4)).toEqual(["cleanup_environment", "cleanup_worktree", "emit_event", "append_run"]);
   });
 
   it("FIX-252: local-main drift fails loud, saves rescue ref, leaves worktree, and writes an alert", () => {
@@ -628,7 +628,7 @@ describe("failure branches", () => {
       { type: "worktree_failed" },
     ]);
     expect(state.terminal).toBe("failed");
-    expect(kinds.slice(-3)).toEqual(["cleanup_worktree", "emit_event", "append_run"]);
+    expect(kinds.slice(-4)).toEqual(["cleanup_environment", "cleanup_worktree", "emit_event", "append_run"]);
   });
 
   it("agent fail after retry budget → failed + ALERT (I6, no agent-swap)", () => {

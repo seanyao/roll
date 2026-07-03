@@ -166,6 +166,27 @@ describe("roll attest audit", () => {
     const json = await inDir(proj, () => capturedStdout(() => attestCommand(["audit", "--json"])));
     expect(JSON.parse(json.stdout)).toEqual({
       issues: [{ storyId: "FIX-300", missing: ["FIX-300:AC1 screenshots/missing.png"] }],
+      debts: [],
+    });
+  });
+
+  it("US-EVID-019 R2: lists evidence_debt Done cards separately", async () => {
+    const proj = project();
+    writeFileSync(
+      join(proj, ".roll", "backlog.md"),
+      "| ID | Description | Status |\n|----|----|----|\n| US-LEGACY-1 | old delivery | ✅ Done · evidence_debt |\n",
+    );
+
+    const text = await inDir(proj, () => capturedStdout(() => attestCommand(["audit"])));
+    expect(text.code).toBe(1);
+    expect(text.stdout).toContain("attest audit: evidence debt");
+    expect(text.stdout).toContain("US-LEGACY-1");
+    expect(text.stdout).not.toContain("dangling evidence references\n- US-LEGACY-1");
+
+    const json = await inDir(proj, () => capturedStdout(() => attestCommand(["audit", "--json"])));
+    expect(JSON.parse(json.stdout)).toEqual({
+      issues: [],
+      debts: [{ storyId: "US-LEGACY-1", reason: "legacy Done row has evidence_debt" }],
     });
   });
 });

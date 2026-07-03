@@ -2726,6 +2726,10 @@ export async function executeCommand(
         return { event: { type: "published", result: pub } };
       }
       const body = await publishBodyWithEvidenceTrailer(ports, ctx);
+      if (body === null) {
+        const pub: PublishResult = { status: 1, manualMerge, ...(cmd.draft === true ? { draft: true } : {}) };
+        return { event: { type: "published", result: pub } };
+      }
       const plan = cmd.docOnly
         ? planPublishDocPr({ branch: cmd.branch, slug, body, manualMerge, draft: cmd.draft })
         : planPublishPr({ branch: cmd.branch, slug, body, manualMerge, draft: cmd.draft });
@@ -3865,7 +3869,16 @@ function publishBody(ctx: CycleContext): string {
   return `loop cycle ${ctx.cycleId}${ctx.storyId !== undefined ? ` — ${ctx.storyId}` : ""}`;
 }
 
-async function publishBodyWithEvidenceTrailer(ports: Ports, ctx: CycleContext): Promise<string> {
+function rollMetaShaReachableOnOrigin(rollDir: string, sha: string): boolean {
+  try {
+    const out = execFileSync("git", ["-C", rollDir, "ls-remote", "origin"], { encoding: "utf8" });
+    return out.split(/\r?\n/).some((line) => line.startsWith(`${sha}\t`));
+  } catch {
+    return false;
+  }
+}
+
+async function publishBodyWithEvidenceTrailer(ports: Ports, ctx: CycleContext): Promise<string | null> {
   const base = publishBody(ctx);
   const storyId = ctx.storyId ?? "";
   if (storyId === "") return base;
@@ -3877,18 +3890,28 @@ async function publishBodyWithEvidenceTrailer(ports: Ports, ctx: CycleContext): 
         ports.paths.alertsPath,
         `.roll evidence push FAILED before publish for cycle ${ctx.cycleId}${committed.committed ? " (committed locally, not pushed)" : ""} — ${committed.error ?? "unknown error"}`,
       );
-      return base;
+      return null;
     }
     const rollDir = join(ports.repoCwd, ".roll");
-    if (!existsSync(rollDir)) return base;
+    if (!existsSync(rollDir)) {
+      ports.events.appendAlert(ports.paths.alertsPath, `Roll-Evidence publish blocked for ${storyId}: .roll git repo missing`);
+      return null;
+    }
     const rollReal = realpathSync(rollDir);
     const sha = execFileSync("git", ["-C", rollReal, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
     const map = relative(rollReal, acMapPath(ports.repoCwd, storyId));
-    if (sha === "" || map === "" || map.startsWith("..")) return base;
+    if (sha === "" || map === "" || map.startsWith("..")) {
+      ports.events.appendAlert(ports.paths.alertsPath, `Roll-Evidence publish blocked for ${storyId}: ac-map path is not inside roll-meta`);
+      return null;
+    }
+    if (!rollMetaShaReachableOnOrigin(rollReal, sha)) {
+      ports.events.appendAlert(ports.paths.alertsPath, `Roll-Evidence publish blocked for ${storyId}: roll-meta sha ${sha} is not reachable from origin`);
+      return null;
+    }
     return `${base}\n\nRoll-Evidence: ${storyId} roll-meta@${sha} ${map}`;
   } catch (e) {
     ports.events.appendAlert(ports.paths.alertsPath, `.roll evidence trailer failed for cycle ${ctx.cycleId} — ${String(e)}`);
-    return base;
+    return null;
   }
 }
 

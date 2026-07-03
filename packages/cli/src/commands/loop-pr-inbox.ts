@@ -144,15 +144,17 @@ export function resolvePrEvidence(projectCwd: string, headRef: string, body: str
     }
 
     const storyId = firstStoryId(`${body}\n${headRef}`);
-    if (storyId === undefined) return { ok: false, missing: ["Roll-Evidence trailer missing and story id not inferable"] };
-    for (const ref of [headRef, `origin/${headRef}`]) {
-      rmSync(join(tmp, ".roll"), { recursive: true, force: true });
-      if (!archiveGitTree(projectCwd, ref, tmp, ".roll")) continue;
-      if (!hasAcMap(tmp, storyId)) return { ok: false, missing: [`${storyId} ac-map.json`] };
-      const missing = evidencePathsUnresolved(tmp, storyId);
+    if (storyId === undefined) return { ok: true, missing: [] };
+    if (hasAcMap(projectCwd, storyId)) {
+      const missing = evidencePathsUnresolved(projectCwd, storyId);
       return { ok: missing.length === 0, missing };
     }
-    return { ok: false, missing: ["Roll-Evidence trailer missing and .roll evidence tree not present in PR"] };
+    return {
+      ok: false,
+      missing: [
+        `Roll-Evidence trailer missing and local roll-meta evidence missing for ${storyId}; remediation: run roll attest ${storyId}, commit/push roll-meta, and republish with a Roll-Evidence trailer`,
+      ],
+    };
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

@@ -32,6 +32,7 @@
  * waivable as before.
  */
 import { acForStory, parsePolicy } from "@roll/core";
+import { execFileSync } from "node:child_process";
 import { type Dirent, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -840,6 +841,39 @@ function isHttpUrl(ref: string): boolean {
   return /^https?:\/\//i.test(ref);
 }
 
+function githubSlugFromRemoteUrl(url: string): string | null {
+  const trimmed = url.trim();
+  const https = /^https:\/\/github\.com\/([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i.exec(trimmed);
+  if (https !== null) return `${https[1]}/${https[2]}`;
+  const ssh = /^git@github\.com:([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i.exec(trimmed);
+  if (ssh !== null) return `${ssh[1]}/${ssh[2]}`;
+  return null;
+}
+
+function originGithubSlug(worktreeCwd: string): string | null {
+  try {
+    return githubSlugFromRemoteUrl(execFileSync("git", ["remote", "get-url", "origin"], { cwd: worktreeCwd, encoding: "utf8" }));
+  } catch {
+    return null;
+  }
+}
+
+function githubEvidenceUrlAllowed(worktreeCwd: string, ref: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(ref);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:" || url.hostname !== "github.com") return false;
+  const slug = originGithubSlug(worktreeCwd);
+  if (slug === null) return false;
+  const [owner, repo, kind, tail] = url.pathname.split("/").filter((part) => part !== "");
+  if (owner === undefined || repo === undefined || kind === undefined || tail === undefined) return false;
+  if (`${owner}/${repo}` !== slug) return false;
+  return kind === "pull" || kind === "commit" || kind === "checks";
+}
+
 function inside(parent: string, child: string): boolean {
   const rel = relative(resolve(parent), resolve(child));
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
@@ -847,7 +881,7 @@ function inside(parent: string, child: string): boolean {
 
 function evidenceRefResolves(worktreeCwd: string, storyId: string, ref: string): boolean {
   if (ref === "") return false;
-  if (isHttpUrl(ref)) return true;
+  if (isHttpUrl(ref)) return githubEvidenceUrlAllowed(worktreeCwd, ref);
   if (/^[a-z]+:/i.test(ref) || isAbsolute(ref)) return false;
   const cardDir = cardArchiveDir(worktreeCwd, storyId);
   const report = existingReport(worktreeCwd, storyId);

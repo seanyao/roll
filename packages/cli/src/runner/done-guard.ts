@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { STATUS_MARKER } from "@roll/spec";
-import { evidencePathsUnresolved, readAcMapEntries, verificationReportPath } from "./attest-gate.js";
+import { cardArchiveDir } from "../lib/archive.js";
+import { evidencePathsUnresolved, readAcMapEntries, verificationReportHasContent, verificationReportPath } from "./attest-gate.js";
 
 export interface DoneGuardEvidence {
   mergedToMain: boolean;
@@ -14,6 +15,7 @@ export interface DoneGuardDeps {
 export interface DoneGuardResult {
   ok: boolean;
   missing: string[];
+  debt?: boolean;
 }
 
 export function acceptanceEvidenceGaps(projectCwd: string, id: string): string[] {
@@ -26,8 +28,11 @@ export function acceptanceEvidenceGaps(projectCwd: string, id: string): string[]
   } else {
     const claimed = entries.filter((entry) => entry.status === "claimed").map((entry) => entry.ac ?? "?");
     if (claimed.length > 0) gaps.push(`claimed evidence status: ${claimed.join(", ")}`);
+    const failed = entries.filter((entry) => entry.status === "fail").map((entry) => entry.ac ?? "?");
+    if (failed.length > 0) gaps.push(`failed evidence status: ${failed.join(", ")}`);
   }
   gaps.push(...evidencePathsUnresolved(projectCwd, id));
+  if (existsSync(report) && !verificationReportHasContent(projectCwd, id)) gaps.push("report content floor failed");
   return gaps;
 }
 
@@ -37,6 +42,11 @@ export function markDoneGuarded(
   evidence: DoneGuardEvidence,
   deps: DoneGuardDeps,
 ): DoneGuardResult {
+  if (evidence.mergedToMain && !existsSync(cardArchiveDir(projectCwd, id))) {
+    deps.alert?.(`Done guard evidence_debt ${id}: legacy merged card has no acceptance evidence directory`);
+    deps.markStatus(projectCwd, id, `${STATUS_MARKER.done} · evidence_debt`);
+    return { ok: true, missing: [], debt: true };
+  }
   const missing = [
     ...(evidence.mergedToMain ? [] : ["merge not confirmed on main"]),
     ...acceptanceEvidenceGaps(projectCwd, id),

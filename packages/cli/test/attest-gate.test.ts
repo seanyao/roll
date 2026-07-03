@@ -282,11 +282,23 @@ describe("verificationReportHasContent (US-ATTEST-012 content floor)", () => {
     expect(verificationReportHasContent(wt, "US-EVID-MISS")).toBe(false);
   });
 
-  it("US-EVID-019: http evidence links are allowed without local stat", () => {
+  it("US-EVID-019 R2: arbitrary http evidence links are unresolved", () => {
     const wt = withReport("US-EVID-HTTP", 2000, '<div class="ev ev-ci">ci</div>', [
       { ac: "US-EVID-HTTP:AC1", status: "pass", evidence: [{ kind: "ci", label: "CI", href: "https://ci.example.test/run/1" }] },
     ]);
-    expect(evidencePathsUnresolved(wt, "US-EVID-HTTP")).toEqual([]);
+    expect(evidencePathsUnresolved(wt, "US-EVID-HTTP")).toEqual(["US-EVID-HTTP:AC1 https://ci.example.test/run/1"]);
+  });
+
+  it("US-EVID-019 R2: this repo's GitHub pull/commit/checks URLs are resolvable", () => {
+    const wt = withReport("US-EVID-GH", 2000, '<div class="ev ev-ci">ci</div>', [
+      { ac: "US-EVID-GH:AC1", status: "pass", evidence: [
+        { kind: "ci", label: "PR", href: "https://github.com/owner/repo/pull/1189" },
+        { kind: "commit", label: "commit", href: "https://github.com/owner/repo/commit/abcdef123456" },
+        { kind: "ci", label: "checks", href: "https://github.com/owner/repo/checks/123" },
+      ] },
+    ]);
+    execSync("git init -q && git remote add origin https://github.com/owner/repo.git", { cwd: wt });
+    expect(evidencePathsUnresolved(wt, "US-EVID-GH")).toEqual([]);
   });
 
   it("empty shell (parseable but zero AC, no ac-map) → NO content (FIX-214)", () => {

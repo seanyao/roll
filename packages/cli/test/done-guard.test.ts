@@ -19,6 +19,31 @@ function writeEvidence(project: string, id: string, acMap: unknown): void {
 }
 
 describe("markDoneGuarded", () => {
+  it("US-EVID-019 R2: legacy merged cards with no evidence directory mark Done with evidence_debt", () => {
+    const project = tmp();
+    const calls: string[][] = [];
+    const alerts: string[] = [];
+    const result = markDoneGuarded(project, "US-LEGACY-1", { mergedToMain: true }, {
+      markStatus: (...args) => calls.push(args),
+      alert: (msg) => alerts.push(msg),
+    });
+    expect(result).toEqual({ ok: true, missing: [], debt: true });
+    expect(calls).toEqual([[project, "US-LEGACY-1", "✅ Done · evidence_debt"]]);
+    expect(alerts.join("\n")).toContain("evidence_debt");
+  });
+
+  it("US-EVID-019 R2: new delivery cards with an evidence directory still reject missing evidence", () => {
+    const project = tmp();
+    mkdirSync(join(project, ".roll", "features", "uncategorized", "US-NEW-1"), { recursive: true });
+    const calls: string[][] = [];
+    const result = markDoneGuarded(project, "US-NEW-1", { mergedToMain: true }, {
+      markStatus: (...args) => calls.push(args),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.missing.join("\n")).toContain("ac-map.json");
+    expect(calls).toEqual([]);
+  });
+
   it("rejects Done when merge is not confirmed", () => {
     const project = tmp();
     writeEvidence(project, "US-DONE-1", [
@@ -52,6 +77,33 @@ describe("markDoneGuarded", () => {
     expect(result.ok).toBe(false);
     expect(result.missing.join("\n")).toContain("screenshots/missing.png");
     expect(calls).toEqual([]);
+  });
+
+  it("US-EVID-019 R2: rejects Done when any AC is fail", () => {
+    const project = tmp();
+    writeEvidence(project, "US-DONE-FAIL", [
+      { ac: "US-DONE-FAIL:AC1", status: "fail", evidence: [{ kind: "screenshot", href: "screenshots/proof.png" }] },
+    ]);
+    const calls: string[][] = [];
+    const result = markDoneGuarded(project, "US-DONE-FAIL", { mergedToMain: true }, {
+      markStatus: (...args) => calls.push(args),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.missing.join("\n")).toContain("failed evidence status");
+    expect(calls).toEqual([]);
+  });
+
+  it("US-EVID-019 R2: rejects Done when the report exists but fails the content floor", () => {
+    const project = tmp();
+    const cardDir = join(project, ".roll", "features", "uncategorized", "US-DONE-EMPTY");
+    mkdirSync(join(cardDir, "latest"), { recursive: true });
+    writeFileSync(join(cardDir, "ac-map.json"), JSON.stringify([{ ac: "US-DONE-EMPTY:AC1", status: "claimed" }]));
+    writeFileSync(join(cardDir, "latest", "US-DONE-EMPTY-report.html"), "<html>empty</html>\n");
+    const result = markDoneGuarded(project, "US-DONE-EMPTY", { mergedToMain: true }, {
+      markStatus: () => {},
+    });
+    expect(result.ok).toBe(false);
+    expect(result.missing.join("\n")).toContain("report content floor failed");
   });
 
   it("marks Done when merge and evidence are both resolvable", () => {

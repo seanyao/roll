@@ -1324,7 +1324,8 @@ describe("executeCommand — command → executor mapping", () => {
       const r = await executeCommand({ kind: "preflight" }, ports, CTX);
       expect(r.event).toEqual({ type: "preflight_done" });
       expect(markStatus).not.toHaveBeenCalledWith("/repo", "FIX-EXT-1", "✅ Done");
-      expect((calls["alert"] ?? []).map((a) => String((a as unknown[])[1])).join("\n")).toContain("Done guard rejected");
+      expect(markStatus).toHaveBeenCalledWith("/repo", "FIX-EXT-1", "✅ Done · evidence_debt");
+      expect((calls["alert"] ?? []).map((a) => String((a as unknown[])[1])).join("\n")).toContain("evidence_debt");
     });
 
     it("a loop-cycle card is NOT spuriously flipped/skipped when the unified truth says not-delivered", async () => {
@@ -2883,27 +2884,32 @@ describe("executeCommand — command → executor mapping", () => {
         runPublishPlan: vi.fn(async () => ({ status: 0 as const, prUrl: "https://github.com/o/r/pull/42", ok: true })),
       },
     });
-    const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
+    const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, { ...CTX, storyId: undefined });
     expect(r.ctxPatch).toMatchObject({ prUrl: "https://github.com/o/r/pull/42" });
   });
 
   it("publish_pr with a slug runs the publish plan → published(status 0)", async () => {
     const { ports } = fakePorts();
-    const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
+    const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, { ...CTX, storyId: undefined });
     expect(r.event).toEqual({ type: "published", result: { status: 0, manualMerge: false } });
   });
 
   it("US-EVID-019: publish_pr appends Roll-Evidence trailer for nested roll-meta evidence", async () => {
     const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-publish-evidence-")));
     execDirs.push(repo);
+    const remote = realpathSync(mkdtempSync(join(tmpdir(), "roll-publish-evidence-remote-")));
+    execDirs.push(remote);
+    execFileSync("git", ["init", "-q", "--bare"], { cwd: remote });
     const cardDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
     mkdirSync(cardDir, { recursive: true });
     writeFileSync(join(cardDir, "ac-map.json"), "[]\n");
-    execFileSync("git", ["init", "-q"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: join(repo, ".roll") });
     execFileSync("git", ["config", "user.email", "test@roll.local"], { cwd: join(repo, ".roll") });
     execFileSync("git", ["config", "user.name", "Test"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["remote", "add", "origin", remote], { cwd: join(repo, ".roll") });
     execFileSync("git", ["add", "-A"], { cwd: join(repo, ".roll") });
     execFileSync("git", ["commit", "-q", "-m", "evidence"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["push", "-q", "-u", "origin", "main"], { cwd: join(repo, ".roll") });
 
     let body = "";
     const { ports, calls } = fakePorts({
@@ -2926,21 +2932,67 @@ describe("executeCommand — command → executor mapping", () => {
     expect(body).toContain("features/uncategorized/US-RUN-001/ac-map.json");
   });
 
+  it("US-EVID-019 R2: publish_pr blocks when roll-meta HEAD is not reachable on origin", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-publish-unpushed-")));
+    execDirs.push(repo);
+    const remote = realpathSync(mkdtempSync(join(tmpdir(), "roll-publish-unpushed-remote-")));
+    execDirs.push(remote);
+    execFileSync("git", ["init", "-q", "--bare"], { cwd: remote });
+    const cardDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
+    mkdirSync(cardDir, { recursive: true });
+    writeFileSync(join(cardDir, "ac-map.json"), "[]\n");
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["config", "user.email", "test@roll.local"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["remote", "add", "origin", remote], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["add", "-A"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["commit", "-q", "-m", "evidence"], { cwd: join(repo, ".roll") });
+
+    const runPublishPlan = vi.fn(async () => ({ status: 0 as const, prUrl: "https://github.com/o/r/pull/45", ok: true }));
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      metadata: { commit: vi.fn(async () => ({ committed: false, pushed: false, nothingToCommit: true })) },
+      github: {
+        ...fakePorts().ports.github,
+        prState: vi.fn(async () => "UNKNOWN"),
+        runPublishPlan,
+      },
+    });
+    const result = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
+    expect(result.event).toEqual({ type: "published", result: { status: 1, manualMerge: false } });
+    expect(runPublishPlan).not.toHaveBeenCalled();
+    const alerts = (calls["alert"] ?? []).map((a) => String((a as unknown[])[1])).join("\n");
+    expect(alerts).toContain("Roll-Evidence");
+    expect(alerts).toContain("origin");
+  });
+
   it("FIX-909: needs-review publish opens a draft manual PR", async () => {
     const { ports } = fakePorts();
-    const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false, manualMerge: true, draft: true }, ports, CTX);
+    const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false, manualMerge: true, draft: true }, ports, { ...CTX, storyId: undefined });
     expect(r.event).toEqual({ type: "published", result: { status: 0, manualMerge: true, draft: true } });
   });
 
   it("US-V4-001: publish_pr does NOT mount an execution section onto a story index.html", async () => {
     const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-exec-mount-")));
     execDirs.push(repo);
+    const remote = realpathSync(mkdtempSync(join(tmpdir(), "roll-exec-mount-remote-")));
+    execDirs.push(remote);
+    execFileSync("git", ["init", "-q", "--bare"], { cwd: remote });
     const dir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
     mkdirSync(dir, { recursive: true });
     const skeleton = '<html><section class="phase phase-pending" data-phase="execution"><h2>x</h2><p>e</p></section></html>';
     writeFileSync(join(dir, "index.html"), skeleton, "utf8");
+    writeFileSync(join(dir, "ac-map.json"), "[]\n");
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["config", "user.email", "test@roll.local"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["remote", "add", "origin", remote], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["add", "-A"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["commit", "-q", "-m", "evidence"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["push", "-q", "-u", "origin", "main"], { cwd: join(repo, ".roll") });
     const { ports } = fakePorts({
       repoCwd: repo,
+      metadata: { commit: vi.fn(async () => ({ committed: false, pushed: false, nothingToCommit: true })) },
       github: {
         ...fakePorts().ports.github,
         prState: vi.fn(async () => "UNKNOWN"), // fresh branch (FIX-245 probe)
@@ -3077,7 +3129,8 @@ describe("executeCommand — command → executor mapping", () => {
       CTX,
     );
     expect(markStatus).not.toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done");
-    expect((calls["alert"] ?? []).map((a) => String((a as unknown[])[1])).join("\n")).toContain("Done guard rejected");
+    expect(markStatus).toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done · evidence_debt");
+    expect((calls["alert"] ?? []).map((a) => String((a as unknown[])[1])).join("\n")).toContain("evidence_debt");
   });
 
   it("FIX-295 (AC-FIX1): a delivered cycle whose PR is still OPEN does NOT flip Done", async () => {
@@ -3199,9 +3252,10 @@ describe("executeCommand — command → executor mapping", () => {
       ports,
       { ...CTX, preCycleStatus: "📋 Todo" },
     );
-    // Merged alone is no longer enough; Done is guarded by parseable evidence too.
+    // Legacy merged rows with no evidence directory are allowed but explicitly marked as debt.
     expect(markStatus).not.toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done");
-    expect((calls["alert"] ?? []).map((a) => String((a as unknown[])[1])).join("\n")).toContain("Done guard rejected");
+    expect(markStatus).toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done · evidence_debt");
+    expect((calls["alert"] ?? []).map((a) => String((a as unknown[])[1])).join("\n")).toContain("evidence_debt");
     expect(markStatus).not.toHaveBeenCalledWith("/repo", "US-RUN-001", "📋 Todo");
   });
 

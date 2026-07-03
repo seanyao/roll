@@ -31,6 +31,8 @@ describe("US-EVID-016 morning report renderer", () => {
       paused: true,
       totalCostUsd: 0.25,
       alerts: ["paused"],
+      degraded: false,
+      degradedReasons: [],
     });
     expect(html).toContain("Loop Digest");
     expect(html).not.toContain("Morning Report");
@@ -76,10 +78,18 @@ describe("US-EVID-016 morning report renderer", () => {
   it("US-TRUTH-010: normal run rows still render delivered through the truth adapter", () => {
     const p = tempProject();
     const base = Date.parse("2026-06-08T10:00:00Z") / 1000;
-    writeEvents(p.events, []);
+    writeEvents(p.events, [
+      {
+        type: "cycle:end",
+        cycleId: "C-DONE",
+        outcome: "delivered",
+        cost: { cycleId: "C-DONE", agent: "claude", model: "sonnet", tokensIn: 1, tokensOut: 1, estimatedCost: 0.03, revertCount: 0, effectiveCost: 0.03 },
+        ts: base + 120,
+      },
+    ]);
     writeFileSync(
       p.runs,
-      `${JSON.stringify({ story_id: "US-DONE", status: "done", outcome: "delivered", cost_usd: 0.03, ts: "2026-06-08T10:10:00Z" })}\n`,
+      `${JSON.stringify({ cycle_id: "C-DONE", story_id: "US-DONE", status: "done", outcome: "delivered", cost_usd: 0.03, ts: "2026-06-08T10:10:00Z" })}\n`,
       "utf8",
     );
 
@@ -112,7 +122,29 @@ describe("US-EVID-016 morning report renderer", () => {
     });
 
     expect(rowDelivered(run, base + 7200)).toBe(false);
-    expect(model.deliveredStories).toEqual(["US-MERGED"]);
-    expect(renderLoopDigestHtml(model)).toContain("US-MERGED");
+    expect(model.deliveredStories).toEqual([]);
+    expect(model.degraded).toBe(true);
+    expect(renderLoopDigestHtml(model)).toContain("DEGRADED");
+  });
+
+  it("FIX-1202: renders degraded digest state and appends an alert event for contradictory data", () => {
+    const p = tempProject();
+    const base = Date.parse("2026-07-03T12:00:00Z") / 1000;
+    writeEvents(p.events, []);
+    writeFileSync(
+      p.runs,
+      `${JSON.stringify({ cycle_id: "C-ORPHAN", story_id: "FIX-1202", status: "done", outcome: "delivered", ts: "2026-07-03T10:00:00Z" })}\n`,
+      "utf8",
+    );
+
+    const latest = writeLatestLoopDigest(p.root, p.events, p.runs, base);
+    const html = readFileSync(latest, "utf8");
+    const events = readFileSync(p.events, "utf8");
+
+    expect(html).toContain("DEGRADED");
+    expect(html).toContain("delivered_without_cycle:FIX-1202");
+    expect(html).toContain("<span class=\"muted\">None</span>");
+    expect(events).toContain('"type":"alert:notify"');
+    expect(events).toContain('"channel":"loop-digest"');
   });
 });

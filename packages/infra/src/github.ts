@@ -76,6 +76,7 @@
  */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import type { OpenPrReference } from "@roll/core";
 import type { ToolDeclaration, ToolInvocation, ToolResult } from "@roll/spec";
 import { invokeInfraTool } from "./tools/delegation.js";
 
@@ -614,16 +615,44 @@ export async function prListLoopBranches(slug: string): Promise<string[]> {
   return r.stdout.split("\n").filter((l) => l !== "");
 }
 
+export type OpenPrListReference = OpenPrReference;
+
+function parseOpenPrReferences(text: string): OpenPrListReference[] {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    const out: OpenPrListReference[] = [];
+    for (const row of parsed) {
+      if (typeof row !== "object" || row === null) continue;
+      const rec = row as Record<string, unknown>;
+      const title = typeof rec["title"] === "string" ? rec["title"] : "";
+      if (title === "") continue;
+      const number = typeof rec["number"] === "number" ? rec["number"] : undefined;
+      const headRefName = typeof rec["headRefName"] === "string" ? rec["headRefName"] : undefined;
+      const body = typeof rec["body"] === "string" ? rec["body"] : undefined;
+      out.push({
+        ...(number !== undefined ? { number } : {}),
+        title,
+        ...(headRefName !== undefined ? { headRefName } : {}),
+        ...(body !== undefined ? { body } : {}),
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 /**
- * `gh -R <slug> pr list --state open --json title --jq '.[].title'`
- * (bin/roll 13139). Returns the open PR titles (blanks dropped), [] on failure.
+ * `gh -R <slug> pr list --state open --json number,title,headRefName,body`.
+ * Returns open PR references for picker de-duplication, [] on failure.
  */
-export async function prListOpenTitles(slug: string): Promise<string[]> {
+export async function prListOpenTitles(slug: string): Promise<OpenPrListReference[]> {
   const r = await gh([
-    "-R", slug, "pr", "list", "--state", "open", "--json", "title", "--jq", ".[].title",
+    "-R", slug, "pr", "list", "--state", "open", "--json", "number,title,headRefName,body",
   ]);
   if (r.code !== 0) return [];
-  return r.stdout.split("\n").filter((l) => l !== "");
+  return parseOpenPrReferences(r.stdout);
 }
 
 // ─── gh run (CI) wrappers ─────────────────────────────────────────────────────

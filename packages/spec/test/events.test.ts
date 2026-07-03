@@ -66,6 +66,20 @@ describe("parseEventLine (I8: readers skip bad lines, never crash)", () => {
     };
     expect(parseEventLine(JSON.stringify(e))).toMatchObject({ type: "pick:ranked", picked: "US-2" });
   });
+  it("types and parses pick:skipped events", () => {
+    const e: RollEvent = {
+      type: "pick:skipped",
+      cycleId: "c1",
+      storyId: "US-CAPTURE-006",
+      reason: "awaiting merge of PR #6",
+      ts: 2,
+    };
+    expect(parseEventLine(JSON.stringify(e))).toMatchObject({
+      type: "pick:skipped",
+      storyId: "US-CAPTURE-006",
+      reason: "awaiting merge of PR #6",
+    });
+  });
   it("types and parses harness_failure events for semantic ranking fail-open", () => {
     const e: RollEvent = {
       type: "harness_failure",

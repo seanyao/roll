@@ -165,6 +165,7 @@ export type RollEvent =
       source: "agent" | "cache";
       ts: number;
     }
+  | { type: "pick:skipped"; cycleId: string; storyId: string; reason: string; ts: number }
   | {
       type: "harness_failure";
       channel: "US-LOOP-090";

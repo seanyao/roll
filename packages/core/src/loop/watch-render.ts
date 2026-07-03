@@ -125,6 +125,16 @@ export function watchRenderEventFromRollEvent(ev: RollEvent, mode: WatchMode = "
         detail: `picked ${text(ev.picked)} (rank ${ev.rank}/${ev.total}: ${text(ev.reason)})`,
         severity: "normal",
       };
+    case "pick:skipped":
+      return {
+        kind: "phase",
+        observedAt: eventTs(ev),
+        cycleId: ev.cycleId,
+        storyId: ev.storyId,
+        summary: "pick:skipped",
+        detail: `${text(ev.storyId)} · ${text(ev.reason)}`,
+        severity: "warn",
+      };
     case "sandbox:write_protected":
       return {
         kind: "gate",

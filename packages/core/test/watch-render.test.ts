@@ -413,6 +413,20 @@ describe("watch-render — compact RollEvent observation model", () => {
     expect(renderCompactWatchEvent(ev!)).toContain("picked US-RANK-2 (rank 1/3: unblocks follow-up cards)");
   });
 
+  it("renders pick:skipped with awaiting-merge reason", () => {
+    const ev = watchRenderEventFromRollEvent({
+      type: "pick:skipped",
+      cycleId: "c1",
+      storyId: "US-CAPTURE-006",
+      reason: "awaiting merge of PR #6",
+      ts: 303,
+    });
+    expect(ev).not.toBeNull();
+    expect(ev!.summary).toBe("pick:skipped");
+    expect(ev!.detail).toBe("US-CAPTURE-006 · awaiting merge of PR #6");
+    expect(renderCompactWatchEvent(ev!)).toContain("US-CAPTURE-006 · awaiting merge of PR #6");
+  });
+
   it("renders pair:consult with peer + outcome + durationMs", () => {
     const ev = watchRenderEventFromRollEvent({
       type: "pair:consult",

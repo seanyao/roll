@@ -16,6 +16,7 @@ import {
   type FreshnessPort,
   type ObservedCommit,
   type RouteDeps,
+  type StoryDeliveryTruth,
   type Tier,
 } from "@roll/core";
 import { absent, present } from "@roll/spec";
@@ -124,25 +125,28 @@ export function nodePorts(opts: {
       writeFileSync(absPath, text, "utf8");
     },
   };
-  let deliveredCache: Set<string> | undefined;
-  const mergedDelivery = (storyId: string): boolean => {
-    if (deliveredCache === undefined) {
+  let deliveryTruthCache: Map<string, StoryDeliveryTruth> | undefined;
+  const deliveryTruth = (): Map<string, StoryDeliveryTruth> => {
+    if (deliveryTruthCache === undefined) {
       try {
         const deliveries = ensureDeliveriesFresh(opts.repoCwd, deliveryFreshness, nodeExecPort);
         // Derive `delivered` per story via the single deterministic query so the
         // verdict matches `roll truth query` exactly (FIX-906: one truth, all
         // consumers). Group by storyId first to avoid re-querying the same id.
-        const set = new Set<string>();
+        const map = new Map<string, StoryDeliveryTruth>();
         const ids = new Set(deliveries.map((d) => d.storyId));
         for (const id of ids) {
-          if (queryStoryDelivery(id, deliveries).delivered) set.add(id);
+          map.set(id, queryStoryDelivery(id, deliveries));
         }
-        deliveredCache = set;
+        deliveryTruthCache = map;
       } catch {
-        deliveredCache = new Set<string>(); // best-effort: empty → fall back to runs-only
+        deliveryTruthCache = new Map<string, StoryDeliveryTruth>(); // best-effort: empty → fall back to runs-only
       }
     }
-    return deliveredCache.has(storyId);
+    return deliveryTruthCache;
+  };
+  const mergedDelivery = (storyId: string): boolean => {
+    return deliveryTruth().get(storyId)?.delivered === true;
   };
 
   return {
@@ -157,6 +161,12 @@ export function nodePorts(opts: {
     // FIX-1018: skip stories that already have locally-committed-but-unpublished
     // work from a prior cycle. The executor reads the runtime file at pick time.
     pendingPublish: (storyId) => readPendingPublish(dirname(opts.paths.eventsPath)).has(storyId),
+    pendingMergeDelivery: (storyId) => {
+      const truth = deliveryTruth().get(storyId);
+      if (truth === undefined) return undefined;
+      if (truth.lifecycleState !== "pending_merge" && truth.lifecycleState !== "ci_red") return undefined;
+      return truth.prNumber === undefined ? {} : { prNumber: truth.prNumber };
+    },
     // FIX-363: the real connectivity probe reuses the same spawn the reviews use.
     agentReachable: (agent) => probeAgentReachable(agent, spawn, { cwd: opts.repoCwd }),
     git: {

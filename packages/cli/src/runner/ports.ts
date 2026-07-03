@@ -1,4 +1,4 @@
-import type { CycleContext, CycleEvent, ObservedCommit, RouteDeps, RunKey } from "@roll/core";
+import type { CycleContext, CycleEvent, ObservedCommit, OpenPrReferenceInput, RouteDeps, RunKey } from "@roll/core";
 import type { RollEvent } from "@roll/spec";
 import type { CaptureMarker, Clock, ScreenshotResult } from "@roll/infra";
 import type { AgentSpawn } from "./agent-spawn.js";
@@ -74,8 +74,8 @@ export interface GithubPort {
   prState(repoCwd: string, branch: string): Promise<string>;
   /** Poll a PR's full merge info (state, mergedAt, mergeCommit). Returns undefined on gh failure. */
   prMergeInfo(repoCwd: string, branch: string): Promise<{ state: string; mergedAt?: string; mergeCommit?: string } | undefined>;
-  /** Fetch open PR titles (US-LOOP-079c). Returns [] on gh failure / no open PRs. */
-  openPrTitles(repoCwd: string): Promise<string[]>;
+  /** Fetch open PR references for picker de-duplication. Returns [] on gh failure / no open PRs. */
+  openPrTitles(repoCwd: string): Promise<OpenPrReferenceInput[]>;
 }
 
 /** Process facet — lock + heartbeat (infra/process.ts). */
@@ -227,6 +227,12 @@ export interface Ports {
    * cycle exits unpublished and cleared on delivery.
    */
   pendingPublish?: (storyId: string) => boolean;
+  /**
+   * True-ish iff structured delivery truth says this story is already published
+   * and awaiting PR merge. This is the primary durable source for same-session
+   * de-duplication when the GitHub PR title/branch does not carry the story id.
+   */
+  pendingMergeDelivery?: (storyId: string) => { prNumber?: number } | undefined;
   clock: ProcessClock;
   /** Runtime paths the executor writes to. */
   paths: RunnerPaths;

@@ -51,21 +51,29 @@ function list(xs: string[], empty: string): string {
   return xs.length === 0 ? `<span class="muted">${esc(empty)}</span>` : xs.map((x) => `<code>${esc(x)}</code>`).join(" ");
 }
 
+function degradationMessage(model: LoopDigestModel): string {
+  return `loop digest degraded: ${model.degradedReasons.join("; ")}`;
+}
+
 export function renderLoopDigestHtml(model: LoopDigestModel): string {
   const money = `$${model.totalCostUsd.toFixed(4)}`;
   const alertItems = model.alerts.length === 0
     ? `<li><span class="muted">No active alert in this window · 本窗口无 ALERT</span></li>`
     : model.alerts.map((a) => `<li>${esc(a)}</li>`).join("");
+  const degradedBlock = model.degraded
+    ? `<div class="degraded"><strong>DEGRADED · 数据降级</strong><p>${esc(model.degradedReasons.join("; "))}</p></div>\n`
+    : "";
   return (
     `<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n` +
     `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
     `<title>Roll · Loop Digest</title>\n<style>\n${CHROME_CSS}` +
-    `body{max-width:960px}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:20px 0}.tile{border:1px solid var(--line);border-radius:8px;padding:14px;background:var(--bg-raise)}.num{font:700 28px/1 var(--mono);color:var(--pass)}.muted{color:var(--muted)}.pause{color:${model.paused ? "var(--fail)" : "var(--pass)"};font-weight:700}.section{border-top:1px solid var(--line);padding-top:18px;margin-top:18px}code{margin-right:6px}ul{padding-left:22px}</style>\n` +
+    `body{max-width:960px}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:20px 0}.tile{border:1px solid var(--line);border-radius:8px;padding:14px;background:var(--bg-raise)}.num{font:700 28px/1 var(--mono);color:var(--pass)}.muted{color:var(--muted)}.pause{color:${model.paused ? "var(--fail)" : "var(--pass)"};font-weight:700}.degraded{border:1px solid var(--warn);border-radius:8px;padding:12px 14px;background:color-mix(in srgb,var(--warn) 9%,transparent);color:var(--fg)}.degraded strong{color:var(--warn)}.degraded p{margin:6px 0 0}.section{border-top:1px solid var(--line);padding-top:18px;margin-top:18px}code{margin-right:6px}ul{padding-left:22px}</style>\n` +
     `${CHROME_SCRIPT}\n</head>\n<body>\n${CHROME_CONTROLS}\n` +
     `<p class="crumb"><a href="../../features/index.html">Features Index</a> / Loop Digest</p>\n` +
     `<div class="masthead"><p class="kicker">Roll · Loop Digest</p>` +
     `<h1>Unattended Loop Summary</h1>` +
     `<p class="lede">${esc(iso(model.windowStart))} → ${esc(iso(model.windowEnd))}</p></div>\n` +
+    degradedBlock +
     `<div class="grid">` +
     `<div class="tile"><div class="num">${model.cycles}</div><div>cycles · 周期</div></div>` +
     `<div class="tile"><div class="num">${model.deliveredStories.length}</div><div>delivered · 交付</div></div>` +
@@ -127,6 +135,18 @@ export function writeLatestLoopDigest(
   }
   try {
     mkdirSync(dirname(eventsPath), { recursive: true });
+    if (model.degraded) {
+      appendFileSync(
+        eventsPath,
+        `${JSON.stringify({
+          type: "alert:notify",
+          channel: "loop-digest",
+          message: degradationMessage(model),
+          ts: nowSec,
+        } satisfies RollEvent)}\n`,
+        "utf8",
+      );
+    }
     appendFileSync(
       eventsPath,
       `${JSON.stringify({

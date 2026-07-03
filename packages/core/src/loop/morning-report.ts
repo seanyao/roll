@@ -2,6 +2,7 @@ import type { RollEvent } from "@roll/spec";
 
 export interface MorningRunRow {
   [key: string]: unknown;
+  cycle_id?: unknown;
   story_id?: unknown;
   built?: unknown;
   status?: unknown;
@@ -21,6 +22,8 @@ export interface LoopDigestModel {
   paused: boolean;
   totalCostUsd: number;
   alerts: string[];
+  degraded: boolean;
+  degradedReasons: string[];
 }
 
 /** @deprecated Use LoopDigestModel instead. */
@@ -42,6 +45,16 @@ function storyFromRun(row: MorningRunRow): string | undefined {
     if (first !== undefined) return first;
   }
   return undefined;
+}
+
+function cycleFromRun(row: MorningRunRow): string | undefined {
+  return typeof row.cycle_id === "string" && row.cycle_id.trim() !== "" ? row.cycle_id : undefined;
+}
+
+function parseRunTs(row: MorningRunRow): number | undefined {
+  if (typeof row.ts !== "string") return undefined;
+  const ts = Date.parse(row.ts) / 1000;
+  return Number.isFinite(ts) ? ts : undefined;
 }
 
 function cycleStoryMap(events: readonly RollEvent[]): Map<string, string> {
@@ -72,6 +85,7 @@ export function buildLoopDigestModel(
   let paused = false;
   let totalCostUsd = 0;
   const alerts: string[] = [];
+  const degradedReasons: string[] = [];
 
   for (const ev of inWindow) {
     if ("cycleId" in ev && typeof ev.cycleId === "string") cycleIds.add(ev.cycleId);
@@ -95,12 +109,26 @@ export function buildLoopDigestModel(
   }
 
   for (const row of runs) {
-    const ts = typeof row.ts === "string" ? Date.parse(row.ts) / 1000 : undefined;
-    if (ts !== undefined && Number.isFinite(ts) && (ts < opts.windowStart || ts > opts.windowEnd)) continue;
+    const ts = parseRunTs(row);
+    if (ts === undefined || ts < opts.windowStart || ts > opts.windowEnd) continue;
     const story = storyFromRun(row);
-    if (story === undefined) continue;
-    if (opts.runDelivered?.(row, opts.windowEnd) === true) delivered.add(story);
-    if (!hasCycleEnd && typeof row.cost_usd === "number" && Number.isFinite(row.cost_usd)) totalCostUsd += row.cost_usd;
+    const cycleId = cycleFromRun(row);
+    const rowInCurrentCycle = cycleId !== undefined && cycleIds.has(cycleId);
+    if (story !== undefined && opts.runDelivered?.(row, opts.windowEnd) === true) {
+      if (cycleIds.size === 0) {
+        degradedReasons.push(`delivered_without_cycle:${story}`);
+      } else if (!rowInCurrentCycle) {
+        degradedReasons.push(`delivered_outside_cycle_window:${story}`);
+      } else {
+        delivered.add(story);
+      }
+    }
+    if (!hasCycleEnd && rowInCurrentCycle && typeof row.cost_usd === "number" && Number.isFinite(row.cost_usd)) totalCostUsd += row.cost_usd;
+  }
+
+  if (cycleIds.size === 0 && delivered.size > 0) {
+    delivered.clear();
+    degradedReasons.push("cycles_zero_with_delivered");
   }
 
   return {
@@ -114,6 +142,8 @@ export function buildLoopDigestModel(
     paused,
     totalCostUsd,
     alerts: alerts.slice(-8),
+    degraded: degradedReasons.length > 0,
+    degradedReasons: uniq(degradedReasons),
   };
 }
 

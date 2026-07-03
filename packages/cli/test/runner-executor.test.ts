@@ -1534,7 +1534,7 @@ describe("executeCommand — command → executor mapping", () => {
     await expect(checkMainDirty(repo)).resolves.toEqual(["leaked-product.ts"]);
   });
 
-  it("FIX-1037: spawn_agent blocks before builder when main checkout is already dirty", async () => {
+  it("US-LOOP-089: spawn_agent quarantines pre-spawn main dirt and still starts the builder", async () => {
     const repo = initCleanGitRepo("roll-main-dirty-pre-");
     mkdirSync(join(repo, ".roll", "loop"), { recursive: true });
     writeFileSync(join(repo, "pre-spawn-leak.ts"), "export const dirty = true;\n");
@@ -1549,24 +1549,23 @@ describe("executeCommand — command → executor mapping", () => {
         eventsPath: join(repo, ".roll", "loop", "events.ndjson"),
         alertsPath: join(repo, ".roll", "loop", "alerts.log"),
       },
-      agentSpawn: vi.fn(async () => {
-        throw new Error("builder must not start when main is dirty");
-      }),
+      agentSpawn: vi.fn(async () => ({ stdout: "done", stderr: "", exitCode: 0, timedOut: false })),
     });
 
     const r = await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);
 
-    expect(r.event).toEqual({ type: "agent_exited", exit: 1, timedOut: false });
-    expect(r.ctxPatch).toMatchObject({ mainDirty: true });
-    expect(ports.agentSpawn).not.toHaveBeenCalled();
-    const dirty = (calls["event"] ?? [])
-      .map((a) => (a as unknown[])[1] as { type?: string; phase?: string; files?: string[] })
-      .find((e) => e.type === "sandbox:main_dirty");
-    expect(dirty).toMatchObject({ phase: "pre-spawn", files: ["pre-spawn-leak.ts"] });
-    expect((calls["alert"] ?? []).map((a) => (a as unknown[])[1]).join("\n")).toContain("main checkout dirty at pre-spawn");
+    expect(r.event).toEqual({ type: "agent_exited", exit: 0, timedOut: false });
+    expect(r.ctxPatch).not.toMatchObject({ mainDirty: true });
+    expect(ports.agentSpawn).toHaveBeenCalledTimes(1);
+    const quarantined = (calls["event"] ?? [])
+      .map((a) => (a as unknown[])[1] as RollEvent)
+      .find((e) => e.type === "sandbox:quarantined");
+    expect(quarantined).toMatchObject({ phase: "pre-spawn", reason: "dirty", files: ["pre-spawn-leak.ts"] });
+    expect(execFileSync("git", ["status", "--porcelain", "--", "pre-spawn-leak.ts"], { cwd: repo, encoding: "utf8" }).trim()).toBe("");
+    expect((calls["alert"] ?? []).map((a) => (a as unknown[])[1]).join("\n")).toContain("quarantined main checkout dirty at pre-spawn");
   });
 
-  it("FIX-1037: spawn_agent records post-spawn main checkout pollution as sandbox dirt", async () => {
+  it("US-LOOP-089: spawn_agent physically rejects post-spawn main checkout writes", async () => {
     const repo = initCleanGitRepo("roll-main-dirty-post-");
     mkdirSync(join(repo, ".roll", "loop"), { recursive: true });
     const wt = join(repo, ".roll", "loop", "wt");
@@ -1581,19 +1580,25 @@ describe("executeCommand — command → executor mapping", () => {
         alertsPath: join(repo, ".roll", "loop", "alerts.log"),
       },
       agentSpawn: vi.fn(async () => {
-        writeFileSync(join(repo, "post-spawn-leak.ts"), "export const dirty = true;\n");
-        return { stdout: "done", stderr: "", exitCode: 0, timedOut: false };
+        let blocked = false;
+        try {
+          writeFileSync(join(repo, "post-spawn-leak.ts"), "export const dirty = true;\n");
+        } catch {
+          blocked = true;
+        }
+        return { stdout: blocked ? "blocked" : "not blocked", stderr: "", exitCode: 0, timedOut: false };
       }),
     });
 
     const r = await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);
 
     expect(r.event).toEqual({ type: "agent_exited", exit: 0, timedOut: false });
-    expect(r.ctxPatch).toMatchObject({ mainDirty: true });
-    const dirty = (calls["event"] ?? [])
-      .map((a) => (a as unknown[])[1] as { type?: string; phase?: string; files?: string[] })
-      .find((e) => e.type === "sandbox:main_dirty");
-    expect(dirty).toMatchObject({ phase: "post-spawn", files: ["post-spawn-leak.ts"] });
+    expect(r.ctxPatch).not.toMatchObject({ mainDirty: true });
+    expect(existsSync(join(repo, "post-spawn-leak.ts"))).toBe(false);
+    const protection = (calls["event"] ?? [])
+      .map((a) => (a as unknown[])[1] as RollEvent)
+      .filter((e) => e.type === "sandbox:write_protected");
+    expect(protection.map((e) => e.status)).toEqual(["applied", "released"]);
   });
 
   it("US-OBS-028: spawn_agent persists normalized pi tool signals for replay", async () => {
@@ -2092,11 +2097,12 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r.event).toMatchObject({ type: "facts_captured", facts: { commitsAhead: 3, usedWorktree: true } });
   });
 
-  it("FIX-1037: capture_facts carries mainDirty into captured facts", async () => {
+  it("US-LOOP-089: capture_facts does not carry stale mainDirty after the self-heal boundary", async () => {
     const { ports } = fakePorts();
     const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, mainDirty: true });
-    expect(r.event).toMatchObject({ type: "facts_captured", facts: { commitsAhead: 3, mainDirty: true } });
-    expect(r.ctxPatch).toMatchObject({ mainDirty: true });
+    expect(r.event).toMatchObject({ type: "facts_captured", facts: { commitsAhead: 3 } });
+    expect((r.event as { facts: { mainDirty?: boolean } }).facts.mainDirty).toBeUndefined();
+    expect(r.ctxPatch).not.toMatchObject({ mainDirty: true });
   });
 
   it("FIX-252: capture_facts records local main drift so zero branch commits cannot become idle", async () => {
@@ -2145,7 +2151,7 @@ describe("executeCommand — command → executor mapping", () => {
     const base = fakePorts();
     const count = (cwd: string, range: string): number =>
       Number(execFileSync("git", ["rev-list", "--count", range], { cwd, encoding: "utf8" }).trim());
-    const { ports } = fakePorts({
+    const { ports, calls } = fakePorts({
       repoCwd: main,
       paths: { ...base.ports.paths, worktreePath: wt },
       git: {
@@ -2165,12 +2171,15 @@ describe("executeCommand — command → executor mapping", () => {
       type: "facts_captured",
       facts: {
         commitsAhead: 0,
-        mainAhead: 1,
-        attemptedCwd: main,
-        expectedWorktreeCwd: wt,
       },
     });
-    expect(execFileSync("git", ["status", "--short"], { cwd: main, encoding: "utf8" }).trim()).toBe("");
+    expect((r.event as { facts: { mainAhead?: number } }).facts.mainAhead ?? 0).toBe(0);
+    const quarantined = (calls["event"] ?? [])
+      .map((a) => (a as unknown[])[1] as RollEvent)
+      .find((e) => e.type === "sandbox:quarantined");
+    expect(quarantined).toMatchObject({ phase: "capture", reason: "ahead", files: ["<commit>:tcr: leaked main checkout commit"] });
+    expect(execFileSync("git", ["status", "--short", "--", "."], { cwd: main, encoding: "utf8" }).trim()).toBe("?? .roll/");
+    expect(execFileSync("git", ["status", "--porcelain", "--", "escaped.txt", "README.md"], { cwd: main, encoding: "utf8" }).trim()).toBe("");
     expect(execFileSync("git", ["rev-list", "--count", "origin/main..HEAD"], { cwd: wt, encoding: "utf8" }).trim()).toBe("0");
   });
 

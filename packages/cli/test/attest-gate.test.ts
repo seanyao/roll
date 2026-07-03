@@ -21,6 +21,7 @@ import {
   findDuplicateBacklogStoryIds,
   findDuplicateStoryIds,
   designContractDeliveredEvidence,
+  evidencePathsUnresolved,
   readAttestGateMode,
   rejectedDeliverableCmdsForStory,
   runAttestGate,
@@ -76,6 +77,7 @@ function withReport(
   const dir = join(storyDir, "latest");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(storyDir, "ac-map.json"), JSON.stringify(acMap, null, 2) + "\n");
+  writeReferencedEvidenceFiles(storyDir, dir, acMap);
   const p = join(dir, `${storyId}-report.html`);
   writeFileSync(p, `<html><body><section class="ac s-pass" id="${storyId}:AC1">${body}</section></body></html>\n`);
   if (mtimeSec !== undefined) utimesSync(p, mtimeSec, mtimeSec);
@@ -112,11 +114,32 @@ function claimedAcMap(storyId: string): unknown {
 }
 
 function writeAcMap(wt: string, storyId: string, body: unknown): void {
-  writeFileSync(join(wt, ".roll", "features", "uncategorized", storyId, "ac-map.json"), JSON.stringify(body, null, 2) + "\n");
+  const storyDir = join(wt, ".roll", "features", "uncategorized", storyId);
+  const runDir = join(storyDir, "latest");
+  writeFileSync(join(storyDir, "ac-map.json"), JSON.stringify(body, null, 2) + "\n");
+  writeReferencedEvidenceFiles(storyDir, runDir, body);
 }
 
 function writeEvidenceJson(wt: string, storyId: string, body: unknown): void {
   writeFileSync(join(wt, ".roll", "features", "uncategorized", storyId, "latest", "evidence.json"), JSON.stringify(body, null, 2) + "\n");
+}
+
+function writeReferencedEvidenceFiles(storyDir: string, runDir: string, acMap: unknown): void {
+  if (!Array.isArray(acMap)) return;
+  for (const entry of acMap) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const evidence = (entry as { evidence?: unknown }).evidence;
+    if (!Array.isArray(evidence)) continue;
+    for (const ev of evidence) {
+      if (typeof ev !== "object" || ev === null) continue;
+      const row = ev as { href?: unknown; textFile?: unknown };
+      const ref = typeof row.textFile === "string" ? row.textFile : typeof row.href === "string" ? row.href : "";
+      if (ref === "" || /^https?:\/\//i.test(ref)) continue;
+      const target = join(ref.startsWith("../") ? runDir : storyDir, ref);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, "evidence\n");
+    }
+  }
 }
 
 /**
@@ -237,6 +260,33 @@ describe("verificationReportHasContent (US-ATTEST-012 content floor)", () => {
   it("report with ≥1 positive AC section + ac-map + evidence ref → has content", () => {
     const wt = withReport("FIX-320", 2000);
     expect(verificationReportHasContent(wt, "FIX-320")).toBe(true);
+  });
+
+  it("US-EVID-019: positive AC evidence must resolve to files in the evidence tree", () => {
+    const wt = withReport("US-EVID-MISS", 2000);
+    writeFileSync(
+      join(wt, ".roll", "features", "uncategorized", "US-EVID-MISS", "ac-map.json"),
+      JSON.stringify(
+        [
+          {
+            ac: "US-EVID-MISS:AC1",
+            status: "pass",
+            evidence: [{ kind: "screenshot", label: "missing shot", href: "screenshots/missing.png" }],
+          },
+        ],
+        null,
+        2,
+      ) + "\n",
+    );
+    expect(evidencePathsUnresolved(wt, "US-EVID-MISS")).toEqual(["US-EVID-MISS:AC1 screenshots/missing.png"]);
+    expect(verificationReportHasContent(wt, "US-EVID-MISS")).toBe(false);
+  });
+
+  it("US-EVID-019: http evidence links are allowed without local stat", () => {
+    const wt = withReport("US-EVID-HTTP", 2000, '<div class="ev ev-ci">ci</div>', [
+      { ac: "US-EVID-HTTP:AC1", status: "pass", evidence: [{ kind: "ci", label: "CI", href: "https://ci.example.test/run/1" }] },
+    ]);
+    expect(evidencePathsUnresolved(wt, "US-EVID-HTTP")).toEqual([]);
   });
 
   it("empty shell (parseable but zero AC, no ac-map) → NO content (FIX-214)", () => {
@@ -461,9 +511,12 @@ function writeRunDirReport(
 }
 
 function withRunDirAcMap(wt: string, storyId: string, runDirName: string, body: unknown): void {
-  const p = join(wt, ".roll", "features", "uncategorized", storyId, runDirName, "ac-map.json");
+  const storyDir = join(wt, ".roll", "features", "uncategorized", storyId);
+  const runDir = join(storyDir, runDirName);
+  const p = join(runDir, "ac-map.json");
   mkdirSync(dirname(p), { recursive: true });
   writeFileSync(p, JSON.stringify(body, null, 2) + "\n");
+  writeReferencedEvidenceFiles(storyDir, runDir, body);
 }
 
 describe("FIX-400 — run-dir fallback for report / ac-map candidates", () => {
@@ -790,11 +843,12 @@ describe("runAttestGate (three paths: produced / skipped-soft / skipped-hard)", 
   });
 
   it("US-EVID-005: a fresh all-claimed report is skipped and hard-blocked", () => {
-    const wt = withReport("FIX-315", 2000, "claimed only");
+    const wt = withReport("FIX-315", 2000, "claimed only", claimedAcMap("FIX-315"));
     const { alerts, events, s } = sinks();
     const r = runAttestGate(wt, "FIX-315", "c-6", "hard", 1000, s);
     expect(r.verdict).toBe("skipped");
     expect(r.blocked).toBe(true);
+    expect(r.reasons.join("\n")).toContain("claimed");
     expect(alerts[0]).toContain("BLOCKED");
     expect(events[0]?.verdict).toBe("skipped");
   });

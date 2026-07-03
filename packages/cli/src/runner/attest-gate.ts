@@ -33,7 +33,7 @@
  */
 import { acForStory, parsePolicy } from "@roll/core";
 import { type Dirent, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
 import { hasVisualEvidenceAc } from "../lib/design-visual-evidence.js";
@@ -91,7 +91,7 @@ function reportCandidates(worktreeCwd: string, storyId: string): string[] {
  * ac-map candidates — PRIMARY is the card root (`ac-map.json`); FALLBACK is
  * the newest timestamped run directory (same rationale as reportCandidates).
  */
-function acMapCandidates(worktreeCwd: string, storyId: string): string[] {
+export function acMapCandidates(worktreeCwd: string, storyId: string): string[] {
   const cardDir = cardArchiveDir(worktreeCwd, storyId);
   const candidates = [join(cardDir, "ac-map.json")];
   const newest = findNewestRunDir(cardDir);
@@ -815,7 +815,7 @@ interface EvidenceManifestLike {
   captures?: unknown;
 }
 
-function readAcMapEntries(worktreeCwd: string, storyId: string): AcMapEntry[] | null {
+function readAcMap(worktreeCwd: string, storyId: string): { path: string; entries: AcMapEntry[] } | null {
   // US-V4-001: read whichever ac-map.json candidate exists (card root first, then
   // the newest run dir) so the structured-truth gate works regardless of which
   // story-scoped location the skill wrote it to.
@@ -823,13 +823,61 @@ function readAcMapEntries(worktreeCwd: string, storyId: string): AcMapEntry[] | 
     if (path === undefined || !existsSync(path)) continue;
     try {
       const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
-      if (Array.isArray(parsed)) return parsed.filter((x) => typeof x === "object" && x !== null) as AcMapEntry[];
+      if (Array.isArray(parsed)) return { path, entries: parsed.filter((x) => typeof x === "object" && x !== null) as AcMapEntry[] };
       return null;
     } catch {
       return null;
     }
   }
   return null;
+}
+
+export function readAcMapEntries(worktreeCwd: string, storyId: string): AcMapEntry[] | null {
+  return readAcMap(worktreeCwd, storyId)?.entries ?? null;
+}
+
+function isHttpUrl(ref: string): boolean {
+  return /^https?:\/\//i.test(ref);
+}
+
+function inside(parent: string, child: string): boolean {
+  const rel = relative(resolve(parent), resolve(child));
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+function evidenceRefResolves(worktreeCwd: string, storyId: string, ref: string): boolean {
+  if (ref === "") return false;
+  if (isHttpUrl(ref)) return true;
+  if (/^[a-z]+:/i.test(ref) || isAbsolute(ref)) return false;
+  const cardDir = cardArchiveDir(worktreeCwd, storyId);
+  const report = existingReport(worktreeCwd, storyId);
+  const runDir = report === null ? join(cardDir, "latest") : dirname(report);
+  const bases = [runDir, cardDir];
+  for (const base of bases) {
+    const candidate = resolve(base, ref);
+    if (!inside(worktreeCwd, candidate)) continue;
+    try {
+      if (statSync(candidate).isFile()) return true;
+    } catch {
+      /* try next base */
+    }
+  }
+  return false;
+}
+
+export function evidencePathsUnresolved(worktreeCwd: string, storyId: string): string[] {
+  const acMap = readAcMap(worktreeCwd, storyId);
+  if (acMap === null) return [];
+  const missing: string[] = [];
+  for (const entry of acMap.entries) {
+    for (const ev of entry.evidence ?? []) {
+      for (const ref of [ev.textFile, ev.href]) {
+        if (typeof ref !== "string") continue;
+        if (!evidenceRefResolves(worktreeCwd, storyId, ref)) missing.push(`${entry.ac ?? "?"} ${ref}`);
+      }
+    }
+  }
+  return missing;
 }
 
 /**
@@ -1146,6 +1194,12 @@ function redAcFailures(worktreeCwd: string, storyId: string): string[] {
   return entries.filter((e) => e.status === "fail").map((e) => e.ac ?? "?");
 }
 
+function claimedAcs(worktreeCwd: string, storyId: string): string[] {
+  const entries = readAcMapEntries(worktreeCwd, storyId);
+  if (entries === null) return [];
+  return entries.filter((e) => e.status === "claimed").map((e) => e.ac ?? "?");
+}
+
 /** The acceptance report a delivered story must produce (skill step 10.6) —
  *  the existing selected report path when present, otherwise the canonical
  *  NEW-layout path used for messaging. */
@@ -1220,6 +1274,7 @@ function verificationReportHasAcceptanceContent(worktreeCwd: string, storyId: st
   if (existingReport(worktreeCwd, storyId) === null) return false;
   const entries = readAcMapEntries(worktreeCwd, storyId);
   if (entries === null || entries.length === 0) return false;
+  if (evidencePathsUnresolved(worktreeCwd, storyId).length > 0) return false;
   let positiveWithEvidence = 0;
   for (const e of entries) {
     if (e.status !== "pass" && e.status !== "partial" && e.status !== "readonly") continue;
@@ -1344,6 +1399,28 @@ export function runAttestGate(
       const blocked = mode === "hard";
       sinks.alert(
         `attest gate (${mode}): acceptance check failed (${storyId}) — ${redAcs.join(", ")} went red; a red check is a regression and is never waived as environmental — cycle ${cycleId}` +
+          (blocked ? " — BLOCKED (hard mode); story not marked Done" : ""),
+      );
+      sinks.event({ cycleId, verdict: "skipped", reasons });
+      return { verdict: "skipped", mode, reasons, blocked };
+    }
+    const claimed = claimedAcs(worktreeCwd, storyId);
+    if (claimed.length > 0) {
+      const reasons = [`claimed acceptance evidence is not mergeable for ${storyId}: ${claimed.join(", ")}`];
+      const blocked = mode === "hard";
+      sinks.alert(
+        `attest gate (${mode}): claimed acceptance evidence (${storyId}) — ${claimed.join(", ")} must be pass/fail evidence, not claimed — cycle ${cycleId}` +
+          (blocked ? " — BLOCKED (hard mode); story not marked Done" : ""),
+      );
+      sinks.event({ cycleId, verdict: "skipped", reasons });
+      return { verdict: "skipped", mode, reasons, blocked };
+    }
+    const unresolved = evidencePathsUnresolved(worktreeCwd, storyId);
+    if (unresolved.length > 0) {
+      const reasons = [`unresolved acceptance evidence path(s) for ${storyId}: ${unresolved.join(", ")}`];
+      const blocked = mode === "hard";
+      sinks.alert(
+        `attest gate (${mode}): unresolved acceptance evidence (${storyId}) — ${unresolved.join(", ")} — cycle ${cycleId}` +
           (blocked ? " — BLOCKED (hard mode); story not marked Done" : ""),
       );
       sinks.event({ cycleId, verdict: "skipped", reasons });

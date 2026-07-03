@@ -224,6 +224,7 @@ import {
 } from "./environment-cleanup.js";
 import { recordRootCauseFailure } from "./failure-attribution.js";
 import { epochMs, eventTs, guardRuntimeDir } from "./runner-time.js";
+import type { CapturePort, DepsExec, EventsPort, ExecuteResult, MetadataCommitResult, Ports, ProcessClock, RunnerPaths } from "./ports.js";
 import {
   buildRunRow,
   buildTerminalRecord,
@@ -237,6 +238,7 @@ const execFileAsync = promisify(execFile);
 
 export { checkMainDirty };
 export { buildRunRow, buildTerminalRecord } from "./run-records.js";
+export type { DepsExec, EventsPort, ExecuteResult, GitPort, GithubPort, MetadataCommitResult, Ports, ProcessClock, RunnerPaths } from "./ports.js";
 
 export async function rescueLeakedMain(
   repoCwd: string,
@@ -344,9 +346,6 @@ class ActivitySignalRecorder {
     }
   }
 }
-
-/** The injectable wall clock (epoch seconds) — infra's {@link Clock}. */
-export type ProcessClock = Clock;
 
 const PICK_RANKING_TIMEOUT_MS = 60_000;
 const PICK_RANKING_CACHE_FILE = "pick-ranking.json";
@@ -866,257 +865,6 @@ function projectAllowedAgents(repoCwd: string): Set<string> | undefined {
     ["easy", "default", "hard", "fallback"].some((slot) => parsed.config.routing[slot as keyof typeof parsed.config.routing]?.rig.agent === agent),
   );
   return legacyAgents.length > 0 ? new Set(legacyAgents) : undefined;
-}
-
-// ── Ports bundle (the injectable execution surface) ───────────────────────────
-
-/**
- * Git operations the executor needs — a thin facet of @roll/infra's git module
- * so tests can fake worktree create/cleanup, push, and the rev-list count behind
- * an in-memory double without spawning git.
- */
-export interface GitPort {
-  /** FIX-209: `_worktree_fetch_origin` — refresh `origin/<branch>` before the
-   *  cycle branches its worktree off it, so a just-merged PR is visible locally.
-   *  LENIENT: never throws; `fetched:false` on a network blip / missing remote
-   *  so the cycle proceeds on the (stale) baseline rather than toppling. */
-  fetchOrigin(repoCwd: string, branch: string): Promise<{ fetched: boolean }>;
-  /** `_worktree_create` — STRICT add (exit code propagated). */
-  worktreeAdd(repoCwd: string, path: string, branch: string, base: string): Promise<{ code: number }>;
-  /** FIX-302: `_worktree_submodule_init` — `git submodule update --init
-   *  --recursive` in the worktree. A fresh git worktree carries NO submodule
-   *  contents (notably `skills/` is empty), so the full test can never run.
-   *  STRICT: exit code propagated so the runner can fail the setup honestly. */
-  worktreeSubmoduleInit(worktreePath: string): Promise<{ code: number }>;
-  /** `_worktree_cleanup` — tolerant remove (always code 0). */
-  worktreeRemove(repoCwd: string, path: string, branch: string): Promise<{ code: number }>;
-  /** `git push origin <branch>` (orphan push safety net). */
-  push(repoCwd: string, branch: string): Promise<{ code: number }>;
-  /** `git rev-list --count origin/main..HEAD` in the worktree → commits ahead. */
-  commitsAhead(worktreeCwd: string): Promise<number>;
-  /** FIX-252: `git rev-list --count origin/main..main` in the main checkout. */
-  mainAhead(repoCwd: string): Promise<number>;
-  /** FIX-903: save the current main HEAD as a rescue ref (`rescue/leaked-<cycleId>`),
-   *  then reset main to origin/main. Returns the rescued SHA and exit code. */
-  rescueLeaked(repoCwd: string, refName: string): Promise<{ code: number; rescuedSha: string }>;
-  /** FIX-208: count `tcr:` commits ahead of origin/main (v2口径:
-   *  `git log --oneline origin/main..HEAD | grep -c ' tcr:'`) in the worktree. */
-  tcrCount(worktreeCwd: string): Promise<number>;
-  /** US-LOOP-076: the runner's OWN observation of commits on the cycle branch —
-   *  `git log --format=%H%x09%ct%x09%s origin/main..HEAD` (oldest-first) in the
-   *  worktree. Feeds the agent-agnostic cycle observer so the build/TCR phase
-   *  emits standard signals for EVERY agent, never by parsing agent stdout.
-   *  LENIENT: returns [] on any git error (observation must never fail a cycle). */
-  recentCommits(worktreeCwd: string): Promise<ObservedCommit[]>;
-  /** RESUME-PRIOR-WORK: fetch a candidate prior-cycle branch from origin so its
-   *  ref resolves locally. LENIENT — `fetched:false` on a missing branch. */
-  fetchRemoteBranch(repoCwd: string, branch: string): Promise<{ fetched: boolean }>;
-  /** RESUME-PRIOR-WORK condition (a): is `origin/<branch>` already merged into
-   *  origin/main? A merged branch has nothing to resume. */
-  branchMergedIntoMain(repoCwd: string, branch: string): Promise<boolean>;
-  /** RESUME-PRIOR-WORK condition (b): does `origin/<branch>` cleanly merge with
-   *  origin/main (no conflicts)? Non-mutating `merge-tree` dry-run. */
-  branchCleanlyRebasesOntoMain(repoCwd: string, branch: string): Promise<boolean>;
-  /** RESUME-PRIOR-WORK re-point: fetch `<branch>` into the worktree and
-   *  `git reset --hard <ref>` so the worktree's tracked tree moves onto the
-   *  resume branch (called AFTER the story is picked — see `resume_worktree`).
-   *  `code !== 0` ⇒ the re-point failed; the caller leaves the worktree on
-   *  origin/main rather than topple the cycle. */
-  resetWorktreeHard(worktreeCwd: string, ref: string, branch?: string): Promise<{ code: number }>;
-}
-
-/** GitHub facet — the publish-plan executor + slug resolution. */
-export interface GithubPort {
-  /** Resolve `owner/repo` from the repo's origin remote (undefined ⇒ no gh). */
-  repoSlug(repoCwd: string): Promise<string | undefined>;
-  /** Execute a publish PLAN (core planPublishPr/DocPr) → publish status. */
-  runPublishPlan(
-    plan: ReadonlyArray<{ kind: string; tool: "git" | "gh"; argv: string[] }>,
-  ): Promise<{ status: 0 | 1 | 2; prUrl: string; ok: boolean }>;
-  /** Poll a PR's merge state (sync merge-wait). Returns the gh state string. */
-  prState(repoCwd: string, branch: string): Promise<string>;
-  /** Poll a PR's full merge info (state, mergedAt, mergeCommit). Returns undefined on gh failure. */
-  prMergeInfo(repoCwd: string, branch: string): Promise<{ state: string; mergedAt?: string; mergeCommit?: string } | undefined>;
-  /** Fetch open PR titles (US-LOOP-079c). Returns [] on gh failure / no open PRs. */
-  openPrTitles(repoCwd: string): Promise<string[]>;
-}
-
-/** Process facet — lock + heartbeat (infra/process.ts). */
-export interface ProcessPort {
-  acquireLock(
-    lockPath: string,
-    opts?: { staleSec?: number; cycleId?: string },
-  ): { acquired: boolean; heldByPid: number | undefined };
-  releaseLock(lockPath: string): void;
-  writeHeartbeat(path: string): void;
-}
-
-/** Events facet — append + upsert (events/bus.ts). */
-export interface EventsPort {
-  ensureEventFiles(eventsPath: string, runsPath: string): void;
-  appendEvent(eventsPath: string, event: RollEvent): void;
-  upsertRun(runsPath: string, key: RunKey, row: Record<string, unknown>): void;
-  appendAlert(alertsPath: string, message: string): void;
-}
-
-/** Backlog facet — read the project backlog and pick a story (picker.ts). */
-export interface BacklogPort {
-  /** Read backlog rows from the worktree's `.roll/backlog.md`. */
-  read(worktreeCwd: string): { id: string; desc: string; status: string }[];
-  /** Mark a story id to a status (e.g. 🔨 In Progress) in the worktree backlog. */
-  /**
-   * Flip a story row's status in the MAIN project's backlog (`<projectCwd>/
-   * .roll/backlog.md`). FIX-198: state lives in the main checkout — ordinary
-   * projects gitignore `.roll/` so a cycle worktree carries NO copy at all;
-   * any worktree-anchored write lands in the void (the owner-observed "stuck
-   * red" / "never Done" pair). For roll itself the main checkout's `.roll` IS
-   * the nested meta repo — same path, both layouts correct.
-   */
-  markStatus?(projectCwd: string, id: string, status: string): void;
-}
-
-/** Outcome of a runner-side `.roll` metadata commit. */
-export interface MetadataCommitResult {
-  /** A commit was created (there were staged changes). */
-  committed: boolean;
-  /** The commit (if any) was pushed to the metadata remote. */
-  pushed: boolean;
-  /** The `.roll` working tree was clean — nothing to commit (clean no-op). */
-  nothingToCommit: boolean;
-  /** A human-readable failure reason when a commit or push did not succeed. */
-  error?: string;
-}
-
-/**
- * Metadata facet (FIX-306) — commit + push the project's `.roll` metadata repo.
- *
- * Why the RUNNER owns this, never the agent: the loop's worktree agent writes
- * `.roll` FILES (acceptance reports, evidence, ac-map, backlog marks) into the
- * symlinked `.roll`, but the GIT commit of that nested repo must be the runner's
- * job. A sandboxed agent (codex runs under `--sandbox workspace-write` with the
- * `.roll` dir passed via `--add-dir`) can write those files yet CANNOT
- * `git -C .roll commit`: the `.roll` repo's git-internal dir
- * (`.git/worktrees/roll-meta-v3/index.lock`) lives OUTSIDE the sandbox writable
- * roots, so `git add -A` fails and the cycle ends `failed` (meta-commit-blocked).
- * The runner runs unsandboxed with full FS access, so it commits uniformly for
- * EVERY agent — no per-agent special-casing (roll's normalize-agents thesis).
- */
-export interface MetadataPort {
-  /** Stage, commit, and push `<projectCwd>/.roll`. No-op cleanly when clean;
-   *  reports a failure reason (never a silent false-success) on push failure. */
-  commit(projectCwd: string, message: string): Promise<MetadataCommitResult>;
-}
-
-/** Routing facet — resolve tier→agent for a story (router.ts). */
-export interface RoutePort {
-  resolve(storyId: string, estMin: number | undefined): { agent: string; model: string };
-}
-
-/** Evidence frame facet — opens `.roll/features/<epic>/<ID>/<run-id>/`. */
-export interface EvidencePort {
-  openFrame(projectCwd: string, storyId: string, runId: string): string;
-}
-
-/** Screenshot marker facet — executes agent-emitted capture requests. */
-export interface CapturePort {
-  fromMarker(marker: CaptureMarker, runDir: string): Promise<ScreenshotResult>;
-}
-
-/** Acceptance evidence facet — renders the final report into a run frame. */
-export interface AttestPort {
-  render(projectCwd: string, storyId: string, runDir: string): Promise<number>;
-}
-
-/**
- * The full injectable Ports bundle. The runtime wiring ({@link nodePorts})
- * binds these to the real infra; tests pass fakes for every facet so NO real
- * network / agent / PR side effects occur (PATH shims + file:// remotes only).
- */
-export interface Ports {
-  git: GitPort;
-  github: GithubPort;
-  process: ProcessPort;
-  events: EventsPort;
-  backlog: BacklogPort;
-  /** FIX-306: the runner-owned `.roll` metadata commit (never the sandboxed agent). */
-  metadata: MetadataPort;
-  route: RoutePort;
-  evidence: EvidencePort;
-  capture: CapturePort;
-  attest: AttestPort;
-  agentSpawn: AgentSpawn;
-  /** Test seam for credential readiness checks; production uses process.env. */
-  agentCredentialEnv?: NodeJS.ProcessEnv;
-  /** Test seam for agent profile dotfile readers; production uses the OS home dir. */
-  agentEnvHome?: string;
-  /** FIX-363: connectivity/auth probe for a reviewer agent. Used ONLY on the
-   *  review-failure path (a silent timeout with no block signature) to tell a
-   *  BLOCKED agent (not logged in / network down) from a SLOW one, so the loop
-   *  acts on the real cause instead of burning the budget on a doomed call.
-   *  Optional + injectable: unset (the test default) → no probe, no spawn, the
-   *  pre-FIX-363 behaviour; {@link nodePorts} wires the real {@link probeAgentReachable}. */
-  agentReachable?: (agent: string) => Promise<ReachResult>;
-  /** Canonical installed agents — the heterogeneous-peer pool for the peer-gate
-   *  retry (FIX-293) and the opt-in pairing stages. Injectable so tests can pin
-   *  a deterministic peer pool; defaults to {@link agentsInstalled} over the real
-   *  environment probe. */
-  installedAgents?: () => string[];
-  depsExec?: DepsExec;
-  /**
-   * FIX-906: unified delivery-truth predicate — true iff this story has a
-   * MERGED delivery according to the single structured projection
-   * (`ensureDeliveriesFresh` → `queryStoryDelivery(id).delivered`), which reads
-   * BOTH runs.jsonl AND git merges on origin/main (FIX-904/905). This sees
-   * EXTERNAL / manual merges (claude salvage, PR-lane direct merge of a
-   * non-loop-cycle PR) that the runs-only {@link hasMergedDelivery} is blind to.
-   *
-   * The picker's done eligibility and the preflight done-flip both consult this
-   * so the loop never re-picks a card that already shipped on main, regardless of
-   * HOW it merged. Injectable + optional: unset (the test default) → no unified
-   * probe, falling back to the runs-only signal; {@link nodePorts} wires the real
-   * projection. The implementation memoizes the projection per cycle so the
-   * `git log` it shells out to runs at most once.
-   */
-  mergedDelivery?: (storyId: string) => boolean;
-  /**
-   * FIX-1018: true iff this story already has locally-committed-but-unpublished
-   * work from a prior cycle. The runtime pending-publish set is written when a
-   * cycle exits unpublished and cleared on delivery.
-   */
-  pendingPublish?: (storyId: string) => boolean;
-  clock: ProcessClock;
-  /** Runtime paths the executor writes to. */
-  paths: RunnerPaths;
-  /** The repo (main tree) the worktree commands run against. */
-  repoCwd: string;
-  /** The skill body the agent runs (the loop hands the agent SKILL.md). */
-  skillBody: string;
-}
-
-/** Resolved runtime file paths under `<project>/.roll/loop/`. */
-export interface RunnerPaths {
-  eventsPath: string;
-  runsPath: string;
-  alertsPath: string;
-  lockPath: string;
-  heartbeatPath: string;
-  /** The cycle worktree path. */
-  worktreePath: string;
-}
-
-// ── Command dispatch ──────────────────────────────────────────────────────────
-
-/** What {@link executeCommand} returns: an optional feedback event for the next
- *  step, plus side-effect flags the driver needs (lock released, terminal). */
-export interface ExecuteResult {
-  /** Event to feed back into the orchestrator (undefined ⇒ pure side effect). */
-  event?: CycleEvent;
-  /** True iff this command released the inner lock (driver stops re-releasing). */
-  lockReleased?: boolean;
-  /** FIX-208: live-context enrichment the orchestrator never owns (it is pure
-   *  and clock/spawn-free) — real tcr count + parsed cost. The driver folds
-   *  this into liveCtx so the later append_run / cycle:end carry truthful data. */
-  ctxPatch?: Partial<CycleContext>;
 }
 
 type AgentBlockedStage = Extract<RollEvent, { type: "agent:blocked" }>["stage"];
@@ -4545,12 +4293,6 @@ async function rebaseRollMetaOntoUpstream(rollDir: string, branch: string): Prom
 
 /** Ceiling for the worktree dependency install (cold pnpm store on first run). */
 export const DEPS_BOOTSTRAP_TIMEOUT_MS = 600_000;
-
-type DepsExec = (
-  cmd: string,
-  args: string[],
-  opts: { cwd: string; timeout: number; maxBuffer: number },
-) => Promise<unknown>;
 
 /**
  * Install dependencies into a fresh cycle worktree BEFORE the agent spawns.

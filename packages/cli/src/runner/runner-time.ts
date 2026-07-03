@@ -1,6 +1,6 @@
 import { dirname, join } from "node:path";
 import { mkdirSync } from "node:fs";
-import type { Ports } from "./executor.js";
+import type { Ports } from "./ports.js";
 
 export function epochMs(ts: number): number {
   return ts >= 1_000_000_000_000 ? ts : ts * 1000;

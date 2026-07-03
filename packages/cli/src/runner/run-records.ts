@@ -15,7 +15,7 @@ import {
 import { prNumberFromUrl } from "@roll/infra";
 import { acMapPath } from "./attest-remediation.js";
 import { verificationReportPath } from "./attest-gate.js";
-import type { MetadataCommitResult, Ports } from "./executor.js";
+import type { MetadataCommitResult, Ports } from "./ports.js";
 import { epochMs } from "./runner-time.js";
 
 /**

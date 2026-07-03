@@ -1,8 +1,8 @@
 import { join } from "node:path";
 import { PHYSICAL_SCREENSHOT_TOOL_CONTRACT } from "@roll/spec";
-import type { ExecResult, ToolDeclaration, ToolDeps, ToolErrorCode, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
+import type { ExecResult, RollCaptureRequestV1, RollCaptureResponseV1, ToolDeclaration, ToolDeps, ToolErrorCode, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
 import { PLAYWRIGHT_PIN } from "../playwright-pin.js";
-import { captureScreenshot } from "../screenshot.js";
+import { RollCaptureProvider, type RollCaptureProviderPort } from "../roll-capture.js";
 import {
   browserConsoleInputSchema,
   browserConsoleOutputSchema,
@@ -61,8 +61,16 @@ export interface BrowserDomQueryOutput {
   statusCode: number | null;
 }
 
-type BrowserInput = BrowserScreenshotInput | BrowserConsoleInput | BrowserDomQueryInput;
-type BrowserOutput = BrowserScreenshotOutput | BrowserConsoleOutput | BrowserDomQueryOutput;
+export interface PhysicalScreenshotOutput {
+  status: "taken" | "skipped" | "failed" | "timeout";
+  path?: string;
+  reason?: string;
+  response?: RollCaptureResponseV1;
+}
+
+type BrowserWebInput = BrowserScreenshotInput | BrowserConsoleInput | BrowserDomQueryInput;
+type BrowserInput = BrowserWebInput | RollCaptureRequestV1;
+type BrowserOutput = BrowserScreenshotOutput | BrowserConsoleOutput | BrowserDomQueryOutput | PhysicalScreenshotOutput;
 
 class BrowserToolState {
   queue: Promise<unknown> = Promise.resolve();
@@ -88,6 +96,7 @@ export class BrowserTool {
   constructor(
     private readonly id: BrowserToolId,
     private readonly state = new BrowserToolState(),
+    private readonly rollCaptureProvider: RollCaptureProviderPort = new RollCaptureProvider(),
   ) {
     this.declaration = id === "physical.screenshot" ? PHYSICAL_SCREENSHOT_TOOL_CONTRACT : {
       id: id as ToolDeclaration["id"],
@@ -123,14 +132,18 @@ export class BrowserTool {
 
   private async executeQueued(invocation: ToolInvocation<BrowserInput>, deps: ToolDeps): Promise<ToolResult<BrowserOutput>> {
     const startedAt = deps.now();
-    const input = invocation.input;
+    if (this.id === "physical.screenshot") {
+      const result = await this.executePhysicalScreenshot(invocation as ToolInvocation<RollCaptureRequestV1>, deps, startedAt);
+      return result as ToolResult<BrowserOutput>;
+    }
+    const input = invocation.input as BrowserWebInput;
     const origin = originOf(input.url);
     if (origin === undefined) return fail(invocation, startedAt, deps.now(), "invalid_input", `invalid URL: ${deps.redact(input.url)}`, false);
     if (!originAllowed(origin, invocation.policy.sandbox?.allowedOrigins)) {
       return fail(invocation, startedAt, deps.now(), "sandbox_denied", `origin is outside allowedOrigins: ${origin}`, false);
     }
 
-    if (this.id === "browser.screenshot" || this.id === "physical.screenshot") {
+    if (this.id === "browser.screenshot") {
       const result = await this.executeScreenshot(invocation as ToolInvocation<BrowserScreenshotInput>, deps, startedAt);
       return result as ToolResult<BrowserOutput>;
     }
@@ -149,7 +162,6 @@ export class BrowserTool {
   ): Promise<ToolResult<BrowserScreenshotOutput>> {
     const input = invocation.input;
     const screenshotPath = input.screenshotPath ?? join(process.cwd(), ".roll", "tool-dumps", `${invocation.invocationId}.png`);
-    if (this.id === "physical.screenshot") return this.executePhysicalScreenshot(invocation, deps, screenshotPath, startedAt);
     if (shouldUseHeadless(invocation)) return this.executeHeadlessScreenshot(invocation, deps, screenshotPath, startedAt);
 
     const aqua = await hasAquaSession(deps, invocation.policy.timeoutMs);
@@ -216,44 +228,30 @@ export class BrowserTool {
   }
 
   private async executePhysicalScreenshot(
-    invocation: ToolInvocation<BrowserScreenshotInput>,
+    invocation: ToolInvocation<RollCaptureRequestV1>,
     deps: ToolDeps,
-    screenshotPath: string,
     startedAt: number,
-  ): Promise<ToolResult<BrowserScreenshotOutput>> {
-    const input = invocation.input;
-    const shot = await captureScreenshot(
-      { kind: "web", url: input.url, out: screenshotPath },
-      {
-        // US-INIT-003e: physical.screenshot is the *physical* browser lane. It
-        // must never fold into headless Chromium, even when the CI fixture sets
-        // ROLL_ATTEST_HEADLESS=1 to disable ordinary browser.screenshot fallback.
-        env: { ...process.env, ROLL_ATTEST_HEADLESS: undefined },
-        platform: toolPlatform(),
-        run: async (command, args) => {
-          const result = await deps.execFile(command, args, {
-            timeoutMs: invocation.policy.timeoutMs,
-            maxOutputBytes: invocation.policy.sandbox?.maxOutputBytes,
-          });
-          return {
-            code: result.timedOut ? 124 : result.exitCode,
-            stdout: deps.redact(result.stdout),
-            stderr: deps.redact(result.stderr),
-          };
-        },
-      },
-    );
-    if (!shot.taken) {
-      return fail(invocation, startedAt, deps.now(), "adapter_error", `physical screenshot unavailable: ${shot.skipped ?? "unknown"}`, true);
+  ): Promise<ToolResult<PhysicalScreenshotOutput>> {
+    try {
+      await this.rollCaptureProvider.writeRequest(invocation.input);
+      const result = await this.rollCaptureProvider.waitForResponse(invocation.input, { timeoutMs: invocation.policy.timeoutMs ?? invocation.input.timeoutMs });
+      if (result.status === "taken") {
+        return {
+          ok: true,
+          output: { status: "taken", path: result.path, response: result.response },
+          meta: meta(invocation, startedAt, deps.now()),
+        };
+      }
+      if (result.status === "timeout") {
+        return fail(invocation, startedAt, deps.now(), "timeout", deps.redact(result.reason), true);
+      }
+      return fail(invocation, startedAt, deps.now(), "adapter_error", deps.redact(result.reason), result.status === "failed");
+    } catch (error) {
+      return fail(invocation, startedAt, deps.now(), "adapter_error", error instanceof Error ? deps.redact(error.message) : "Roll Capture request failed", true);
     }
-    return {
-      ok: true,
-      output: { screenshotPath, finalUrl: input.url, statusCode: null },
-      meta: meta(invocation, startedAt, deps.now()),
-    };
   }
 
-  private async executeHeadlessJson<I extends BrowserInput, O extends BrowserOutput>(
+  private async executeHeadlessJson<I extends BrowserWebInput, O extends BrowserOutput>(
     invocation: ToolInvocation<I>,
     deps: ToolDeps,
     action: "console" | "dom-query",
@@ -317,29 +315,6 @@ export function browserTools(): BrowserTool[] {
 
 function shouldUseHeadless(invocation: ToolInvocation<BrowserInput>): boolean {
   return invocation.policy.sandbox?.headlessOnly === true || process.env.CI === "true" || process.env.CI === "1";
-}
-
-function toolPlatform(): NodeJS.Platform {
-  return externalToolPlatform(process.env["_ROLL_EXTERNAL_TOOLS_PLATFORM"]) ?? process.platform;
-}
-
-function externalToolPlatform(raw: string | undefined): NodeJS.Platform | undefined {
-  if (
-    raw === "aix" ||
-    raw === "android" ||
-    raw === "darwin" ||
-    raw === "freebsd" ||
-    raw === "haiku" ||
-    raw === "linux" ||
-    raw === "openbsd" ||
-    raw === "sunos" ||
-    raw === "win32" ||
-    raw === "cygwin" ||
-    raw === "netbsd"
-  ) {
-    return raw;
-  }
-  return undefined;
 }
 
 function headlessArgs(

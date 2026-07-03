@@ -39,6 +39,31 @@ describe("parseEventLine (I8: readers skip bad lines, never crash)", () => {
     const a: RollEvent = { type: "evidence:frame-opened", cycleId: "c", storyId: "US-EVID-001", runDir: "/r", ts: 1 };
     expect(a.runDir).toBe("/r");
   });
+  it("types and parses US-LOOP-089 sandbox protection/quarantine events", () => {
+    const protectedEvent: RollEvent = {
+      type: "sandbox:write_protected",
+      cycleId: "C-1",
+      status: "applied",
+      repoCwd: "/repo",
+      markerPath: "/repo/.roll/loop/main-checkout-protection.json",
+      paths: 42,
+      ts: 10,
+    };
+    const quarantined: RollEvent = {
+      type: "sandbox:quarantined",
+      cycleId: "C-1",
+      storyId: "US-LOOP-089",
+      phase: "pre-spawn",
+      reason: "dirty",
+      ref: "rescue/leaked-1",
+      files: ["tracked.ts"],
+      manifestPath: "/repo/.roll/loop/quarantine/leaked-1.json",
+      restoreCommand: "git stash apply rescue/leaked-1",
+      ts: 11,
+    };
+    expect(parseEventLine(JSON.stringify(protectedEvent))?.type).toBe("sandbox:write_protected");
+    expect(parseEventLine(JSON.stringify(quarantined))?.type).toBe("sandbox:quarantined");
+  });
   it("types US-OBS-042 TCR rhythm activity events", () => {
     const started: RollEvent = {
       type: "action:started",

@@ -1028,15 +1028,30 @@ describe("rebuildDeliveriesFromFacts — FIX-904: merge subject = authoritative 
     });
   });
 
-  it("first (newest) merge wins when two subjects name the same story", () => {
+  it("oldest merge wins when two subjects name the same story (FIX-1206)", () => {
     const merges = parseMergeCommitMessages([
-      "newsha1234567 1719000200 FIX-700: redo (#702)",
-      "oldsha1234567 1719000100 FIX-700: first (#701)",
+      "newsha1234567 1719000200 FIX-700: redo (#702)",  // newer merge
+      "oldsha1234567 1719000100 FIX-700: first (#701)", // older, original code PR
     ]);
     const result = rebuildDeliveriesFromFacts([], merges);
     expect(result).toHaveLength(1);
-    expect(result[0].mergeCommit).toEqual({ present: true, value: "newsha1234567" });
+    // oldest merge should win — original code delivery, not a later mention
+    expect(result[0].mergeCommit).toEqual({ present: true, value: "oldsha1234567" });
+    expect(result[0].prNumber).toEqual({ present: true, value: 701 });
+  });
+
+  it("changelog PR does not override code PR delivery attribution (FIX-1206)", () => {
+    // Realistic scenario: code PR first (older), changelog PR later (newer)
+    const merges = parseMergeCommitMessages([
+      "abCdef1234 1719000300 Changelog: update docs for FIX-1206 (#703)",
+      "9a8b7c6d5e 1719000200 FIX-1206: fix delivery projection (#702)",
+    ]);
+    const result = rebuildDeliveriesFromFacts([], merges);
+    expect(result).toHaveLength(1);
+    // The code PR (older) should be the delivery projection, not the changelog PR
+    expect(result[0].mergeCommit).toEqual({ present: true, value: "9a8b7c6d5e" });
     expect(result[0].prNumber).toEqual({ present: true, value: 702 });
+    expect(result[0].storyId).toBe("FIX-1206");
   });
 
   it("merge-only done records are deterministic", () => {

@@ -21,10 +21,12 @@ const ASSET_NAME = "Roll-Capture.app.zip";
 const APP_NAME = "Roll Capture.app";
 const DOWNLOAD_TIMEOUT_MS = 60_000;
 const UPDATE_HINT_TIMEOUT_MS = 1_500;
+const GH_AUTH_TOKEN_TIMEOUT_MS = 1_500;
 
 export interface RollCaptureReleaseAsset {
   name: string;
   size: number;
+  apiUrl?: string;
   browserDownloadUrl: string;
 }
 
@@ -52,7 +54,7 @@ export interface RollCaptureInstallDeps {
   exists: (path: string) => boolean;
   execFile: (cmd: string, args: readonly string[], opts?: { cwd?: string; timeoutMs?: number }) => { code: number; stdout: string; stderr: string };
   fetchLatestRelease: (timeoutMs: number) => Promise<RollCaptureRelease>;
-  downloadAsset: (url: string, timeoutMs: number) => Promise<Uint8Array>;
+  downloadAsset: (asset: RollCaptureReleaseAsset, timeoutMs: number) => Promise<Uint8Array>;
   extractZip: (zipPath: string, destination: string, timeoutMs: number) => Promise<{ ok: true } | { ok: false; detail: string }>;
 }
 
@@ -76,8 +78,8 @@ export function defaultRollCaptureInstallDeps(): RollCaptureInstallDeps {
       : {}),
     exists: existsSync,
     execFile,
-    fetchLatestRelease: defaultFetchLatestRelease,
-    downloadAsset: defaultDownloadAsset,
+    fetchLatestRelease: (timeoutMs) => defaultFetchLatestRelease(timeoutMs, process.env, execFile),
+    downloadAsset: (asset, timeoutMs) => defaultDownloadAsset(asset, timeoutMs, process.env, execFile),
     extractZip: async (zipPath, destination, timeoutMs) => extractZip(zipPath, destination, execFile, timeoutMs),
   };
 }
@@ -117,7 +119,7 @@ export async function installRollCapture(deps: RollCaptureInstallDeps = defaultR
 
   let bytes: Uint8Array;
   try {
-    bytes = await deps.downloadAsset(asset.browserDownloadUrl, remainingMs());
+    bytes = await deps.downloadAsset(asset, remainingMs());
   } catch (error) {
     return manual(`download failed: ${errorMessage(error)}`, release.tagName);
   }
@@ -175,23 +177,64 @@ export async function runRollCapturePostinstall(opts?: {
   return 0;
 }
 
-async function defaultFetchLatestRelease(timeoutMs: number): Promise<RollCaptureRelease> {
-  const response = await fetch(RELEASE_API, {
+type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
+
+interface RollCaptureCredential {
+  token: string;
+}
+
+async function defaultFetchLatestRelease(
+  timeoutMs: number,
+  env: NodeJS.ProcessEnv,
+  execFile: RollCaptureInstallDeps["execFile"],
+  fetchImpl: FetchLike = fetch,
+): Promise<RollCaptureRelease> {
+  const response = await fetchImpl(RELEASE_API, {
     headers: { Accept: "application/vnd.github+json", "User-Agent": "@seanyao/roll" },
     signal: AbortSignal.timeout(timeoutMs),
   });
-  if (!response.ok) throw new Error(`GitHub release API returned ${response.status}`);
-  return parseRelease(await response.json());
+  if (response.ok) return parseRelease(await response.json());
+  if (!isAuthRetryableStatus(response.status)) throw new Error(`GitHub release API returned ${response.status}`);
+
+  for (const credential of credentialFallbacks(env, execFile)) {
+    const authed = await fetchImpl(RELEASE_API, {
+      headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${credential.token}`, "User-Agent": "@seanyao/roll" },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (authed.ok) return parseRelease(await authed.json());
+    if (!isAuthRetryableStatus(authed.status)) throw new Error(`GitHub release API returned ${authed.status}`);
+  }
+
+  throw new Error(`GitHub release API returned ${response.status}`);
 }
 
-async function defaultDownloadAsset(url: string, timeoutMs: number): Promise<Uint8Array> {
-  const response = await fetch(url, {
+async function defaultDownloadAsset(
+  asset: RollCaptureReleaseAsset,
+  timeoutMs: number,
+  env: NodeJS.ProcessEnv,
+  execFile: RollCaptureInstallDeps["execFile"],
+  fetchImpl: FetchLike = fetch,
+): Promise<Uint8Array> {
+  const response = await fetchImpl(asset.browserDownloadUrl, {
     headers: { "User-Agent": "@seanyao/roll" },
     redirect: "follow",
     signal: AbortSignal.timeout(timeoutMs),
   });
-  if (!response.ok) throw new Error(`asset download returned ${response.status}`);
-  return new Uint8Array(await response.arrayBuffer());
+  if (response.ok) return new Uint8Array(await response.arrayBuffer());
+  if (!isAuthRetryableStatus(response.status)) throw new Error(`asset download returned ${response.status}`);
+  if (asset.apiUrl === undefined || asset.apiUrl === "") throw new Error("asset API URL missing for authenticated download");
+
+  for (const credential of credentialFallbacks(env, execFile)) {
+    const authed = await fetchImpl(asset.apiUrl, {
+      headers: { Accept: "application/octet-stream", Authorization: `Bearer ${credential.token}`, "User-Agent": "@seanyao/roll" },
+      redirect: "follow",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (authed.ok) return new Uint8Array(await authed.arrayBuffer());
+    if (!isAuthRetryableStatus(authed.status)) throw new Error(`asset download returned ${authed.status}`);
+  }
+
+  throw new Error(`asset download returned ${response.status}`);
 }
 
 function parseRelease(value: unknown): RollCaptureRelease {
@@ -203,11 +246,41 @@ function parseRelease(value: unknown): RollCaptureRelease {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return [];
     const asset = raw as Record<string, unknown>;
     const name = typeof asset["name"] === "string" ? asset["name"] : "";
+    const apiUrl = typeof asset["url"] === "string" ? asset["url"] : "";
     const browserDownloadUrl = typeof asset["browser_download_url"] === "string" ? asset["browser_download_url"] : "";
     const size = typeof asset["size"] === "number" ? asset["size"] : Number.NaN;
-    return name !== "" && browserDownloadUrl !== "" && Number.isFinite(size) ? [{ name, browserDownloadUrl, size }] : [];
+    return name !== "" && browserDownloadUrl !== "" && Number.isFinite(size)
+      ? [{ name, browserDownloadUrl, size, ...(apiUrl !== "" ? { apiUrl } : {}) }]
+      : [];
   });
   return { tagName, assets };
+}
+
+function isAuthRetryableStatus(status: number): boolean {
+  return status === 401 || status === 404;
+}
+
+function* credentialFallbacks(env: NodeJS.ProcessEnv, execFile: RollCaptureInstallDeps["execFile"]): Generator<RollCaptureCredential> {
+  const seen = new Set<string>();
+  for (const key of ["GITHUB_TOKEN", "GH_TOKEN"] as const) {
+    const token = (env[key] ?? "").trim();
+    if (token !== "" && !seen.has(token)) {
+      seen.add(token);
+      yield { token };
+    }
+  }
+  const gh = ghAuthToken(execFile);
+  if (gh !== null && !seen.has(gh)) yield { token: gh };
+}
+
+function ghAuthToken(execFile: RollCaptureInstallDeps["execFile"]): string | null {
+  try {
+    const result = execFile("gh", ["auth", "token"], { timeoutMs: GH_AUTH_TOKEN_TIMEOUT_MS });
+    const token = result.code === 0 ? result.stdout.trim() : "";
+    return token === "" ? null : token;
+  } catch {
+    return null;
+  }
 }
 
 async function extractZip(
@@ -375,5 +448,7 @@ export const rollCaptureInstallInternals = {
   ASSET_NAME,
   APP_NAME,
   RELEASE_API,
+  downloadAsset: defaultDownloadAsset,
+  fetchLatestRelease: defaultFetchLatestRelease,
   parseRelease,
 };

@@ -29,9 +29,12 @@ npm install -g @seanyao/roll
 Requirements: Node.js ≥ 22. Roll is a self-contained TypeScript CLI — no runtime engine beyond node.
 On macOS, npm installation also tries to install `Roll Capture.app` from the
 latest `seanyao/roll-capture` GitHub Release into `~/Applications` so physical
-screenshots can run. CI, headless sessions, non-macOS hosts, offline downloads,
-or `ROLL_SKIP_CAPTURE_INSTALL=1` skip this step without failing install; `roll
-setup` and `roll doctor tools` report the same readiness and repair path.
+screenshots can run. If the release is private, the installer first tries
+anonymous GitHub access, then retries with `GITHUB_TOKEN`/`GH_TOKEN` or
+`gh auth token` when available; credentials are used only in request headers.
+CI, headless sessions, non-macOS hosts, offline downloads, or
+`ROLL_SKIP_CAPTURE_INSTALL=1` skip this step without failing install; `roll setup`
+and `roll doctor tools` report the same readiness and repair path.
 
 ## Use
 

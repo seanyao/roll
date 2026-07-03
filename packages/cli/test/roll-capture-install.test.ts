@@ -1,12 +1,13 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import {
   installRollCapture,
   renderRollCaptureInstallResult,
   runRollCapturePostinstall,
   type RollCaptureInstallDeps,
+  rollCaptureInstallInternals,
 } from "../src/lib/roll-capture-install.js";
 
 const dirs: string[] = [];
@@ -32,7 +33,14 @@ function deps(overrides: Partial<RollCaptureInstallDeps> = {}): RollCaptureInsta
     execFile: () => ({ code: 0, stdout: "", stderr: "" }),
     fetchLatestRelease: async () => ({
       tagName: "v0.2.0",
-      assets: [{ name: "Roll-Capture.app.zip", size: 4, browserDownloadUrl: "https://example.test/Roll-Capture.app.zip" }],
+      assets: [
+        {
+          name: "Roll-Capture.app.zip",
+          size: 4,
+          apiUrl: "https://api.github.com/repos/seanyao/roll-capture/releases/assets/1",
+          browserDownloadUrl: "https://example.test/Roll-Capture.app.zip",
+        },
+      ],
     }),
     downloadAsset: async () => Buffer.from("ZIP!"),
     extractZip: async (_zipPath, destination) => {
@@ -62,8 +70,8 @@ describe("US-PHYSICAL-005 Roll Capture installer", () => {
     const result = await installRollCapture(
       deps({
         home,
-        downloadAsset: async (url) => {
-          calls.push(url);
+        downloadAsset: async (asset) => {
+          calls.push(asset.browserDownloadUrl);
           return Buffer.from("ZIP!");
         },
       }),
@@ -234,5 +242,145 @@ describe("US-PHYSICAL-005 Roll Capture installer", () => {
     expect(result.status).toBe("manual");
     expect(result.reason).toContain("size mismatch");
     expect(existsSync(join(home, "Applications", "Roll Capture.app"))).toBe(false);
+  });
+
+  it("default downloader succeeds anonymously without probing credentials", async () => {
+    const execFile = vi.fn(() => ({ code: 0, stdout: "secret-from-gh\n", stderr: "" }));
+    const calls: Array<{ url: string; authorization?: string }> = [];
+    const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      calls.push({ url: String(url), authorization: new Headers(init?.headers).get("Authorization") ?? undefined });
+      if (String(url).endsWith("/releases/latest")) {
+        return Response.json({
+          tag_name: "v0.2.0",
+          assets: [
+            {
+              name: "Roll-Capture.app.zip",
+              size: 4,
+              url: "https://api.github.com/repos/seanyao/roll-capture/releases/assets/1",
+              browser_download_url: "https://github.com/seanyao/roll-capture/releases/download/v0.2.0/Roll-Capture.app.zip",
+            },
+          ],
+        });
+      }
+      return new Response("ZIP!");
+    });
+
+    const release = await rollCaptureInstallInternals.fetchLatestRelease(1_000, {}, execFile, fetchImpl);
+    const bytes = await rollCaptureInstallInternals.downloadAsset(release.assets[0], 1_000, {}, execFile, fetchImpl);
+
+    expect(Buffer.from(bytes).toString("utf8")).toBe("ZIP!");
+    expect(execFile).not.toHaveBeenCalledWith("gh", ["auth", "token"], expect.anything());
+    expect(calls).toEqual([
+      { url: "https://api.github.com/repos/seanyao/roll-capture/releases/latest", authorization: undefined },
+      { url: "https://github.com/seanyao/roll-capture/releases/download/v0.2.0/Roll-Capture.app.zip", authorization: undefined },
+    ]);
+  });
+
+  it("default downloader retries anonymous 404 with an env token and downloads private assets through the API endpoint", async () => {
+    const calls: Array<{ url: string; accept?: string; authorization?: string }> = [];
+    const execFile = vi.fn(() => ({ code: 0, stdout: "gh-secret\n", stderr: "" }));
+    const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      calls.push({
+        url: String(url),
+        accept: headers.get("Accept") ?? undefined,
+        authorization: headers.get("Authorization") ?? undefined,
+      });
+      if (String(url).endsWith("/releases/latest")) {
+        if (headers.get("Authorization") === null) return new Response("missing", { status: 404 });
+        return Response.json({
+          tag_name: "v0.2.0",
+          assets: [
+            {
+              name: "Roll-Capture.app.zip",
+              size: 4,
+              url: "https://api.github.com/repos/seanyao/roll-capture/releases/assets/1",
+              browser_download_url: "https://github.com/seanyao/roll-capture/releases/download/v0.2.0/Roll-Capture.app.zip",
+            },
+          ],
+        });
+      }
+      if (String(url).includes("/releases/download/")) return new Response("private", { status: 404 });
+      return new Response("ZIP!");
+    });
+
+    const release = await rollCaptureInstallInternals.fetchLatestRelease(1_000, { GITHUB_TOKEN: "env-secret" }, execFile, fetchImpl);
+    const bytes = await rollCaptureInstallInternals.downloadAsset(
+      release.assets[0],
+      1_000,
+      { GITHUB_TOKEN: "env-secret" },
+      execFile,
+      fetchImpl,
+    );
+
+    expect(Buffer.from(bytes).toString("utf8")).toBe("ZIP!");
+    expect(execFile).not.toHaveBeenCalled();
+    expect(calls).toEqual([
+      {
+        url: "https://api.github.com/repos/seanyao/roll-capture/releases/latest",
+        accept: "application/vnd.github+json",
+        authorization: undefined,
+      },
+      {
+        url: "https://api.github.com/repos/seanyao/roll-capture/releases/latest",
+        accept: "application/vnd.github+json",
+        authorization: "Bearer env-secret",
+      },
+      {
+        url: "https://github.com/seanyao/roll-capture/releases/download/v0.2.0/Roll-Capture.app.zip",
+        accept: undefined,
+        authorization: undefined,
+      },
+      {
+        url: "https://api.github.com/repos/seanyao/roll-capture/releases/assets/1",
+        accept: "application/octet-stream",
+        authorization: "Bearer env-secret",
+      },
+    ]);
+  });
+
+  it("default downloader exhausts anonymous, env, and gh release attempts without leaking tokens", async () => {
+    const calls: Array<{ authorization?: string }> = [];
+    const execFile = vi.fn(() => ({ code: 0, stdout: "gh-secret\n", stderr: "" }));
+    const fetchImpl = vi.fn(async (_url: string | URL, init?: RequestInit) => {
+      calls.push({ authorization: new Headers(init?.headers).get("Authorization") ?? undefined });
+      return new Response("private", { status: 404 });
+    });
+
+    await expect(
+      rollCaptureInstallInternals.fetchLatestRelease(1_000, { GITHUB_TOKEN: "env-secret" }, execFile, fetchImpl),
+    ).rejects.toThrow("GitHub release API returned 404");
+
+    expect(execFile).toHaveBeenCalledWith("gh", ["auth", "token"], { timeoutMs: 1_500 });
+    expect(calls).toEqual([{ authorization: undefined }, { authorization: "Bearer env-secret" }, { authorization: "Bearer gh-secret" }]);
+  });
+
+  it("postinstall exits 0 with manual guidance after anonymous, env, and gh credential download attempts fail", async () => {
+    const lines: string[] = [];
+    const status = await runRollCapturePostinstall({
+      deps: deps({
+        fetchLatestRelease: async () => ({
+          tagName: "v0.2.0",
+          assets: [
+            {
+              name: "Roll-Capture.app.zip",
+              size: 4,
+              apiUrl: "https://api.github.com/repos/seanyao/roll-capture/releases/assets/1",
+              browserDownloadUrl: "https://github.com/seanyao/roll-capture/releases/download/v0.2.0/Roll-Capture.app.zip",
+            },
+          ],
+        }),
+        downloadAsset: async () => {
+          throw new Error("asset download returned 404");
+        },
+      }),
+      writeLine: (line) => lines.push(line),
+      lang: "en",
+    });
+
+    expect(status).toBe(0);
+    expect(lines).toEqual([
+      "Roll Capture.app automatic install failed (download failed: asset download returned 404); install it manually, then open it once and grant Screen Recording permission.",
+    ]);
   });
 });

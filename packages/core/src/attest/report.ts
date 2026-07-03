@@ -150,6 +150,17 @@ export interface CaptureSkipReportEntry {
   skipped: string;
 }
 
+export interface PhysicalCaptureReportEntry {
+  provider: string;
+  kind: string;
+  statusChain: readonly string[];
+  reason?: string;
+  screenshot?: EvidenceRef;
+  requestPath?: string;
+  responsePath?: string;
+  ledgerLinks?: Array<{ label: string; href: string }>;
+}
+
 export interface ReportInput {
   storyId: string;
   title: string;
@@ -192,6 +203,8 @@ export interface ReportInput {
    *  placeholders and do not count as pixels; they are structured facts that
    *  explain why a screenshot could not be produced. */
   captureSkips?: CaptureSkipReportEntry[];
+  /** US-PHYSICAL-004 — physical.screenshot provider status chain. */
+  physicalCaptures?: PhysicalCaptureReportEntry[];
   /** US-SKILL-030 — design-contract-vs-delivered evidence delta from the spec's
    *  Evaluation contract block. Empty string or absent => section trimmed
    *  (legacy specs degrade gracefully). */
@@ -360,6 +373,29 @@ function captureSkipBlock(skips: ReportInput["captureSkips"]): string {
     })
     .join("\n");
   return `<section class="capture-skips"><h2>${bi("Capture skip", "截图跳过")}</h2>\n${rows}\n</section>`;
+}
+
+function physicalCaptureBlock(entries: ReportInput["physicalCaptures"]): string {
+  if (entries === undefined || entries.length === 0) return "";
+  const rows = entries
+    .map((entry) => {
+      const shot = entry.screenshot !== undefined ? evidenceCard(entry.screenshot) : "";
+      const reason = entry.reason !== undefined && entry.reason !== "" ? `<p class="note">${esc(entry.reason)}</p>` : "";
+      const links: string[] = [];
+      if (entry.requestPath !== undefined && entry.requestPath !== "") {
+        links.push(`<a href="${esc(entry.requestPath)}">request</a>`);
+      }
+      if (entry.responsePath !== undefined && entry.responsePath !== "") {
+        links.push(`<a href="${esc(entry.responsePath)}">response</a>`);
+      }
+      for (const link of entry.ledgerLinks ?? []) {
+        links.push(`<a href="${esc(link.href)}">${esc(link.label)}</a>`);
+      }
+      const linked = links.length > 0 ? `<p class="physical-links">${links.join(" · ")}</p>` : "";
+      return `<details class="physical-capture" open><summary>${esc(entry.provider)} · ${esc(entry.kind)} · ${esc(entry.statusChain.join(" → "))}</summary>${reason}${shot}${linked}</details>`;
+    })
+    .join("\n");
+  return `<section class="physical-captures"><h2>physical.screenshot</h2>\n${rows}\n</section>`;
 }
 
 /**
@@ -711,6 +747,9 @@ details.reviewscore ul { margin:8px 0 4px; padding-left:18px; }
 .capture-skip { margin:8px 0; border:1px solid var(--line); border-radius:6px; padding:6px 12px; background:color-mix(in srgb, var(--fg) 3%, transparent); }
 .capture-skip summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
 .capture-skip pre { white-space:pre-wrap; font-size:12px; }
+.physical-capture { margin:8px 0; border:1px solid var(--line); border-radius:6px; padding:6px 12px; background:color-mix(in srgb, var(--fg) 3%, transparent); }
+.physical-capture summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
+.physical-links { font-size:12.5px; color:var(--muted); }
 details.tech { margin:8px 0 2px; border:1px solid var(--line); border-radius:6px; padding:6px 12px; background:color-mix(in srgb, var(--fg) 3%, transparent); }
 details.tech summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
 details.tech[open] summary { margin-bottom:6px; }
@@ -769,6 +808,7 @@ ${executionCastBlock(input.cycleRoleSummary, input.cycleRoleSummaryHref, input.c
 ${items.map(acSection).join("\n")}
 ${beforeAfterBlock(input.beforeAfter, input.afterOnly)}
 ${selfCaptureBlock(input.selfCaptures)}
+${physicalCaptureBlock(input.physicalCaptures)}
 ${captureSkipBlock(input.captureSkips)}
 ${processTraceBlock(input.process)}
 ${closing}

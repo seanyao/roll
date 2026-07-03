@@ -126,7 +126,10 @@ Two rules decide what the validator recognises:
   - a declared `physical_terminal:` ⇒ **terminal** with a stricter contract — the
     report must contain a real macOS `Terminal.app` screenshot captured from
     screen pixels. Headless stdout, transcript-rendered images, and HTML replays
-    are rejected for this contract;
+    are rejected for this contract. `roll attest` also asks the
+    `physical.screenshot` provider for this evidence when available, copies the
+    returned PNG into the story run, and shows the status chain
+    `requested -> taken/skipped/failed/timeout -> attached/not-attached`;
   - else a declared `deliverable_cmd:` ⇒ **terminal** — a CLI deliverable that
     rides the terminal-capture lane;
   - else the AC text decides (web / terminal / ambiguous).
@@ -172,6 +175,10 @@ at startup:
   repeated `roll doctor` / setup checks do not keep re-triggering the macOS
   prompt; if permission was just granted, restart Terminal.app before trusting
   the cache.
+- `Roll Capture.app` / `physical.screenshot` — the provider path for physical
+  screenshot requests. If readiness is unavailable, `roll attest` records an
+  honest skip with the setup reason instead of blocking report generation; if
+  the provider times out, the report surfaces timeout as its own failure reason.
 - `Playwright Chromium` — optional headless web capture for `roll attest` and
   archive screenshots. Install with `npx playwright install chromium`.
 

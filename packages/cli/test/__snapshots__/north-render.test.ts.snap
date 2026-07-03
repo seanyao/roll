@@ -1,0 +1,28 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`north-star terminal rendering > renders EN and ZH panels with one metric per line and 80-column safety 1`] = `
+"North Star · 14d · 2026-06-20..2026-07-04
+
+  autonomy                 80h →≥72h [▁▂▃▄▅▆▇█] ↑ ● met
+  delivery rate            50% →≥60% [▁▂▃▄▅▆▇█] → ● near
+  fix tax                 1.1x →<1.0x [▁▂▃▄▅▆▇█] ↓ ● near
+  attribution errors         0 →=0 [▁▂▃▄▅▆▇█] → ● met"
+`;
+
+exports[`north-star terminal rendering > renders EN and ZH panels with one metric per line and 80-column safety 2`] = `
+"北极星 · 14d · 2026-06-20..2026-07-04
+
+  自主运行             80h →≥72h [▁▂▃▄▅▆▇█] ↑ ● 达标
+  交付率               50% →≥60% [▁▂▃▄▅▆▇█] → ● 接近
+  修复税              1.1x →<1.0x [▁▂▃▄▅▆▇█] ↓ ● 接近
+  归因错误               0 →=0 [▁▂▃▄▅▆▇█] → ● 达标"
+`;
+
+exports[`north-star terminal rendering > renders null metrics as no data with a reason and no fake trend 1`] = `
+"North Star · 14d · ..
+
+  autonomy             no data · no history
+  delivery rate        no data · no history
+  fix tax              no data · no history
+  attribution errors   no data · no history"
+`;

@@ -3,16 +3,20 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   buildNorthStarReport,
+  type NorthStarMetric,
+  type NorthStarReport,
   type NorthStarBacklogEntry,
   type NorthStarCardMeta,
   type NorthStarDelivery,
   type NorthStarEvent,
   type NorthStarRun,
 } from "@roll/core";
+import { resolveLang, t, type Lang, v3Catalog } from "@roll/spec";
 import { shWindowDays } from "../lib/sh-time.js";
+import { c, pad, renderState, sparkline, trunc } from "../render.js";
 
 const USAGE =
-  "Usage: roll north --json\n  Emit the north-star metrics JSON. Read-only.\n  autonomy.context.disruptions counts true owner/safety disruptions, including denied owner goal:recovery; segmentBoundaries also includes deduplicated loop:resumed boundaries.\n";
+  "Usage: roll north [--json] [--no-color]\n  Render the north-star terminal panel, or emit the raw roll.north.v1 metrics JSON.\n";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -242,15 +246,9 @@ function nowForNorth(): Date {
   return new Date();
 }
 
-export function northCommand(args: string[]): number {
-  if (args[0] !== "--json") {
-    process.stderr.write(USAGE);
-    return 1;
-  }
-  const root = projectRoot();
+export function loadNorthStarReport(root = projectRoot(), now = nowForNorth()): NorthStarReport {
   const dir = loopDir(root);
-  const now = nowForNorth();
-  const report = buildNorthStarReport({
+  return buildNorthStarReport({
     nowMs: now.getTime(),
     days: shWindowDays(now, 14),
     runs: readRuns(dir),
@@ -259,6 +257,120 @@ export function northCommand(args: string[]): number {
     backlog: readBacklog(root),
     deliveries: readDeliveries(dir),
   });
-  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+}
+
+type MetricKey = keyof NorthStarReport["metrics"];
+
+const METRIC_KEYS = ["autonomy", "deliveryRate", "fixTax", "attributionErrors"] as const satisfies readonly MetricKey[];
+
+function metricName(key: MetricKey, lang: Lang): string {
+  return t(v3Catalog, lang, `north.metric.${key}`);
+}
+
+function reasonText(reason: string | undefined, lang: Lang): string {
+  if (reason === undefined || reason === "") return t(v3Catalog, lang, "north.reason.unknown");
+  return t(v3Catalog, lang, `north.reason.${reason}`);
+}
+
+function metricValue(key: MetricKey, value: number, unit: string | undefined): string {
+  if (unit === "hours") return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)}h`;
+  if (unit === "count") return String(Math.trunc(value));
+  if (unit === "ratio" && key === "deliveryRate") return `${Math.round(value * 100)}%`;
+  if (unit === "ratio") return `${value.toFixed(1)}x`;
+  return Number.isInteger(value) ? value.toFixed(0) : value.toFixed(2);
+}
+
+function targetValue(key: MetricKey, metric: NorthStarMetric<unknown>): string {
+  const op = metric.target.op === ">=" ? "≥" : metric.target.op;
+  return `${op}${metricValue(key, metric.target.value, metric.target.unit)}`;
+}
+
+function trendArrow(metric: NorthStarMetric<unknown>, lang: Lang): string {
+  if (metric.trend === "up") return t(v3Catalog, lang, "north.trend.up");
+  if (metric.trend === "down") return t(v3Catalog, lang, "north.trend.down");
+  return t(v3Catalog, lang, "north.trend.flat");
+}
+
+type RenderStatus = "met" | "near" | "miss";
+
+function renderStatus(metric: NorthStarMetric<unknown>): RenderStatus {
+  const current = metric.current;
+  if (metric.met) return "met";
+  if (current === null) return "miss";
+  // "Near" is a render-only affordance: within 80% of the target line.
+  if (metric.target.op === ">=") return current >= metric.target.value * 0.8 ? "near" : "miss";
+  if (metric.target.op === "<") return current < metric.target.value / 0.8 ? "near" : "miss";
+  return Math.abs(current - metric.target.value) <= Math.max(1, Math.abs(metric.target.value) * 0.2) ? "near" : "miss";
+}
+
+function statusColor(status: RenderStatus): string {
+  if (status === "met") return "green";
+  if (status === "near") return "amber";
+  return "red";
+}
+
+function statusDot(status: RenderStatus, lang: Lang): string {
+  return `${c(statusColor(status), "●")} ${t(v3Catalog, lang, `north.status.${status}`)}`;
+}
+
+function terminalWidth(fallback = 100): number {
+  const cols = process.stdout.columns;
+  return typeof cols === "number" && cols > 0 ? cols : fallback;
+}
+
+function metricLine(key: MetricKey, metric: NorthStarMetric<unknown>, lang: Lang, width: number): string {
+  const name = trunc(metricName(key, lang), lang === "zh" ? 16 : 20);
+  const nameWidth = lang === "zh" ? 16 : 20;
+  const label = pad(name, nameWidth);
+  if (metric.current === null) {
+    return trunc(`  ${label} ${t(v3Catalog, lang, "north.no_data")} · ${reasonText(metric.reason ?? metric.daily.find((d) => d.reason !== undefined)?.reason, lang)}`, width);
+  }
+  const current = pad(metricValue(key, metric.current, metric.target.unit), 7, "r");
+  const target = targetValue(key, metric);
+  const spark = sparkline(metric.daily.map((d) => d.value));
+  const line = `  ${label} ${current} →${target} [${spark}] ${trendArrow(metric, lang)} ${statusDot(renderStatus(metric), lang)}`;
+  return trunc(line, width);
+}
+
+export function renderNorthPanel(report: NorthStarReport, lang: Lang, width = terminalWidth()): string {
+  const safeWidth = Math.max(48, width);
+  const out: string[] = [];
+  const title = `${t(v3Catalog, lang, "north.title")} ${c("muted", `· ${report.windowDays}d · ${report.window.startDay}..${report.window.endDay}`)}`;
+  out.push(trunc(title, safeWidth), "");
+  for (const key of METRIC_KEYS) {
+    out.push(metricLine(key, report.metrics[key], lang, safeWidth));
+  }
+  return out.join("\n");
+}
+
+export function renderNorthStatusSummary(report: NorthStarReport | undefined, lang: Lang, width = terminalWidth()): string {
+  if (report === undefined) return trunc(`  ${t(v3Catalog, lang, "north.status_title")}  ${t(v3Catalog, lang, "north.no_data")}`, width);
+  const parts = METRIC_KEYS.map((key) => {
+    const metric = report.metrics[key];
+    const value = metric.current === null ? t(v3Catalog, lang, "north.no_data") : metricValue(key, metric.current, metric.target.unit);
+    return `${metricName(key, lang)} ${value} ${c(statusColor(renderStatus(metric)), "●")}`;
+  });
+  return trunc(`  ${t(v3Catalog, lang, "north.status_title")}  ${parts.join(c("muted", " · "))}`, width);
+}
+
+export function northCommand(args: string[]): number {
+  const json = args.includes("--json");
+  const noColor = args.includes("--no-color");
+  const unknown = args.filter((arg) => arg !== "--json" && arg !== "--no-color");
+  if (unknown.length > 0) {
+    process.stderr.write(USAGE);
+    return 1;
+  }
+  if (noColor || (process.env["NO_COLOR"] ?? "") !== "" || !process.stdout.isTTY) renderState.useColor = false;
+  const lang = resolveLang({
+    rollLang: process.env["ROLL_LANG"],
+    lcAll: process.env["LC_ALL"],
+    lang: process.env["LANG"],
+  });
+  const root = projectRoot();
+  const now = nowForNorth();
+  const report = loadNorthStarReport(root, now);
+  if (json) process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  else process.stdout.write(`${renderNorthPanel(report, lang, terminalWidth())}\n`);
   return 0;
 }

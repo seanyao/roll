@@ -119,6 +119,24 @@ export function trunc(s: string, n: number): string {
   return out;
 }
 
+const SPARK_BLOCKS = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"] as const;
+
+export function sparkline(values: readonly (number | null)[]): string {
+  const nums = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  if (values.length === 0) return "";
+  if (nums.length === 0) return values.map(() => "·").join("");
+  const min = Math.min(...nums);
+  const max = Math.max(...nums);
+  if (Math.abs(max - min) < 1e-9) {
+    return values.map((value) => (value === null ? "·" : SPARK_BLOCKS[0])).join("");
+  }
+  return values.map((value) => {
+    if (value === null || !Number.isFinite(value)) return "·";
+    const bucket = Math.min(SPARK_BLOCKS.length - 1, Math.max(0, Math.floor(((value - min) / (max - min)) * (SPARK_BLOCKS.length - 1))));
+    return SPARK_BLOCKS[bucket] ?? SPARK_BLOCKS[0];
+  }).join("");
+}
+
 /** Raw RESET escape (exported for background-row rendering parity). */
 export const RESET_RAW = "\x1b[0m";
 

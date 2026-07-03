@@ -9,6 +9,73 @@
 import type { Catalog } from "./index.js";
 
 export const v3Catalog: Catalog = {
+  // `north.*` — terminal north-star panel (US-OBS-047). The calculation stays
+  // in @roll/core; these strings only label the shared roll.north.v1 report.
+  "north.title": {
+    en: "North Star",
+    zh: "北极星",
+  },
+  "north.status_title": {
+    en: "North",
+    zh: "北极星",
+  },
+  "north.metric.autonomy": {
+    en: "autonomy",
+    zh: "自主运行",
+  },
+  "north.metric.deliveryRate": {
+    en: "delivery rate",
+    zh: "交付率",
+  },
+  "north.metric.fixTax": {
+    en: "fix tax",
+    zh: "修复税",
+  },
+  "north.metric.attributionErrors": {
+    en: "attribution errors",
+    zh: "归因错误",
+  },
+  "north.no_data": {
+    en: "no data",
+    zh: "暂无数据",
+  },
+  "north.reason.no_history": {
+    en: "no history",
+    zh: "暂无历史",
+  },
+  "north.reason.no_product_deliveries": {
+    en: "no product deliveries",
+    zh: "暂无产品交付",
+  },
+  "north.reason.unknown": {
+    en: "unknown reason",
+    zh: "原因未知",
+  },
+  "north.trend.up": {
+    en: "↑",
+    zh: "↑",
+  },
+  "north.trend.down": {
+    en: "↓",
+    zh: "↓",
+  },
+  "north.trend.flat": {
+    en: "→",
+    zh: "→",
+  },
+  "north.status.met": {
+    en: "met",
+    zh: "达标",
+  },
+  "north.status.near": {
+    en: "near",
+    zh: "接近",
+  },
+  "north.status.miss": {
+    en: "miss",
+    zh: "未达标",
+  },
+
   // `agent.*` — v3-native agent roster compatibility messages (US-AGENT-045).
   "agent.use_removed_agent": {
     en: "'%s' is no longer supported. Use one of: claude, kimi, codex, pi, agy, reasonix, cursor",

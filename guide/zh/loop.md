@@ -971,6 +971,35 @@ Builder 进程运行期间，Roll 会在文件系统边界把共享主 checkout 
 展示这些事实。每个 quarantine 清单都包含 ref、文件列表，以及供 owner /
 supervisor 认领恢复的一行命令。
 
+## Cycle 结束后环境清理
+
+在拆除 cycle worktree 之前，loop 会先执行一次声明式的环境清理。它只清理
+worktree 内部产生的临时/工具链缓存产物——例如 `.scratch`、`tmp`、
+`node_modules/.cache`、`.vite`、`__pycache__`、`.build`——不会触碰源码和
+未提交的改动。
+
+每条规则都会向 `events.ndjson` 写入一条 `cycle:cleanup` 事件，因此清理过程
+可观测、可审计。清理失败会降级为 warning 事件，不会阻塞下一轮 cycle。
+
+你可以通过 `.roll/loop/cleanup-manifest.yaml` 覆盖或扩展默认规则：
+
+```yaml
+rules:
+  - name: my-scratch
+    kind: rm
+    paths:
+      - .my-tmp
+      - "**/*.log"
+  - name: my-cache
+    kind: isolate
+    paths:
+      - .my-cache
+```
+
+`kind: rm` 删除目标；`kind: isolate` 把目标移进 worktree 内的
+`.roll-cleanup/<cycle-id>/<rule>/`（随 worktree 一起被删除）。没有覆盖文件时
+使用默认清单。
+
 ## 阶段计时（Cycle phases）
 
 每轮 cycle 在内部切成七个命名阶段。每个阶段进入时 emit `phase_start`，
@@ -984,7 +1013,7 @@ PR 等合并）每 30–60s 还会 emit 一次 `phase_tick` 心跳，tmux 不再
 | 3 | `worktree_setup` | fetch origin + 建 worktree + 同步 meta | 2 – 10 秒 |
 | 4 | `agent_invoke` | 调起 agent（最多三次重试） | 5 – 45 分钟 |
 | 5 | `publish_push` | push 分支 + 建 PR（doc-only 直接合） | 5 – 30 秒 |
-| 6 | `cleanup` | 落 PR 终态 + 拆 worktree | < 1 秒 |
+| 6 | `cleanup` | 环境清理 + 落 PR 终态 + 拆 worktree | < 1 秒 |
 
 > **US-AUTO-044**:主 loop 开完 PR 即退,**不再等合并**。合并 / rebase / 关 PR 交给专职 PR Loop（`com.roll.pr.<slug>`,每 5 分钟）异步处理;有 open PR 的 story 由资格闸跳过,不会重复开,也不会假 Done。
 

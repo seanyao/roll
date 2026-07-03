@@ -3346,6 +3346,22 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r.lockReleased).toBe(true);
   });
 
+  it("US-LOOP-088: cleanup_environment applies the manifest and emits cycle:cleanup events", async () => {
+    const wt = mkdtempSync(join(tmpdir(), "roll-cleanup-exec-"));
+    execDirs.push(wt);
+    mkdirSync(join(wt, ".scratch"), { recursive: true });
+    writeFileSync(join(wt, ".scratch", "leftover.tmp"), "junk", "utf8");
+    const { ports, calls } = fakePorts({ paths: { ...fakePorts().ports.paths, worktreePath: wt } });
+    const r = await executeCommand({ kind: "cleanup_environment" }, ports, CTX);
+    expect(existsSync(join(wt, ".scratch"))).toBe(false);
+    expect(r.event).toBeUndefined();
+    const events = (calls["event"] ?? []) as [string, RollEvent][];
+    const cleanupEvents = events.filter(([, ev]) => ev.type === "cycle:cleanup");
+    expect(cleanupEvents.length).toBeGreaterThan(0);
+    const scratchEvent = cleanupEvents.find(([, ev]) => ev.rule === "scratch-dirs");
+    expect(scratchEvent?.[1]).toMatchObject({ type: "cycle:cleanup", cycleId: CTX.cycleId, rule: "scratch-dirs", ok: true });
+  });
+
   it("cleanup_worktree calls the git remove port", async () => {
     const { ports } = fakePorts();
     await executeCommand({ kind: "cleanup_worktree", branch: "b" }, ports, CTX);

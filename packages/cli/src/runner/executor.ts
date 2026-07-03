@@ -207,6 +207,11 @@ import { markDoneGuarded } from "./done-guard.js";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
 import { formatEvaluationContractForScorer, parseEvaluationContract } from "../lib/evaluation-contract.js";
 import { readLatestStoryReviewScore, REVIEW_SCORE_LOW_THRESHOLD, type ReviewScoreEntry } from "../lib/review-score.js";
+import {
+  applyCleanupManifest,
+  resolveCleanupManifest,
+  type CleanupResult,
+} from "./environment-cleanup.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -380,6 +385,23 @@ async function quarantineMainCheckoutForCycle(
   });
   for (const result of results) appendQuarantineEvent(ports, result);
   return results;
+}
+
+/** US-LOOP-088 — append a `cycle:cleanup` event for one cleanup rule result. */
+function appendCleanupEvent(ports: Ports, ctx: CycleContext, result: CleanupResult): void {
+  try {
+    ports.events.appendEvent(ports.paths.eventsPath, {
+      type: "cycle:cleanup",
+      cycleId: ctx.cycleId,
+      rule: result.rule,
+      path: result.path,
+      ok: result.ok,
+      ...(result.warning !== undefined ? { warning: result.warning } : {}),
+      ts: eventTs(ports),
+    });
+  } catch {
+    /* observation is best-effort; cleanup failure must not block the terminal */
+  }
 }
 
 /** FIX-1051 — scan agy's native CLI log for internal tool errors.
@@ -2829,6 +2851,18 @@ export async function executeCommand(
     // (the six-state classification already happened); ack with reconciled.
     case "reconcile":
       return { event: { type: "reconciled" } };
+
+    // US-LOOP-088 — post-cycle environment cleanup before the worktree is removed.
+    // Side effect + observable events; no feedback into the state machine.
+    case "cleanup_environment": {
+      const manifestPath = join(ports.repoCwd, ".roll", "loop", "cleanup-manifest.yaml");
+      const manifest = resolveCleanupManifest(ports.paths.worktreePath, manifestPath);
+      const results = applyCleanupManifest(ports.paths.worktreePath, ctx.cycleId, manifest);
+      for (const r of results) {
+        appendCleanupEvent(ports, ctx, r);
+      }
+      return {};
+    }
 
     // _worktree_cleanup (tolerant). Side effect; no feedback (terminal path).
     // NOTE (FIX-354): the lever-4 warm-session CAPTURE used to live here, but

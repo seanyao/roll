@@ -21,6 +21,22 @@ describe("parseEventLine (I8: readers skip bad lines, never crash)", () => {
     };
     expect(parseEventLine(JSON.stringify(end))).toMatchObject({ type: "cycle:end", failure_class: "env" });
   });
+  it("types and parses cycle:cleanup events (US-LOOP-088)", () => {
+    const cleanup: RollEvent = {
+      type: "cycle:cleanup",
+      cycleId: "c1",
+      rule: "scratch-dirs",
+      path: ".scratch",
+      ok: false,
+      warning: "permission denied",
+      ts: 2,
+    };
+    expect(parseEventLine(JSON.stringify(cleanup))).toMatchObject({
+      type: "cycle:cleanup",
+      rule: "scratch-dirs",
+      warning: "permission denied",
+    });
+  });
   it("returns null for blank, malformed, and shapeless lines", () => {
     expect(parseEventLine("")).toBeNull();
     expect(parseEventLine("   ")).toBeNull();

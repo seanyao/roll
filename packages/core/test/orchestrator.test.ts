@@ -502,6 +502,7 @@ describe("happy-path phase walk → done", () => {
       "capture_facts",
       "emit_event", // FIX-1068: builder finalization gate verdict before peer/attest/PR/cleanup
       "publish_pr",
+      "cleanup_environment", // US-LOOP-088: env cleanup before worktree removal
       "cleanup_worktree",
       "emit_event", // cycle:end (published — merge pending, FIX-244)
       "append_run",

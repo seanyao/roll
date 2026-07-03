@@ -69,7 +69,7 @@ describe("US-TOOL-015 roll tool status", () => {
       github.pr           github      yes      unavailable  60000    -      oneOf                                          -
       mcp.call            mcp         yes      available    30000    -      arguments?, serverName, toolName               network=restricted
       network.fetch       network     yes      available    30000    -      body?, headers?, method?, timeoutMs?, url      network=restricted
-      physical.screenshot browser     yes      available    60000    -      screenshotPath?, url, viewport?, waitFor?      headlessOnly=false,maxOutputBytes=2097152
+      physical.screenshot browser     yes      available    60000    -      oneOf                                          maxOutputBytes=2097152
       "
     `);
   });

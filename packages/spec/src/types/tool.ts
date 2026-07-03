@@ -75,6 +75,9 @@ export type ToolDeclaration = {
   kind: ToolKind;
   title: string;
   description?: string;
+  provider?: string;
+  protocol?: string;
+  platform?: NodeJS.Platform;
   emitsEvents?: boolean;
   defaults?: ToolDefaults;
   requirements?: readonly ToolRequirement[];

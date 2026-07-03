@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { PHYSICAL_SCREENSHOT_TOOL_CONTRACT } from "@roll/spec";
 import type { ExecResult, ToolDeclaration, ToolDeps, ToolErrorCode, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
 import { PLAYWRIGHT_PIN } from "../playwright-pin.js";
 import { captureScreenshot } from "../screenshot.js";
@@ -88,24 +89,20 @@ export class BrowserTool {
     private readonly id: BrowserToolId,
     private readonly state = new BrowserToolState(),
   ) {
-    this.declaration = {
+    this.declaration = id === "physical.screenshot" ? PHYSICAL_SCREENSHOT_TOOL_CONTRACT : {
       id: id as ToolDeclaration["id"],
       kind: "browser",
       title: TOOL_TITLES[id],
-      description: id === "physical.screenshot"
-        ? "Capture only real physical browser-window pixels through macOS screencapture."
-        : "Open URLs through the governed browser adapter.",
+      description: "Open URLs through the governed browser adapter.",
       defaults: {
         enabled: true,
         timeoutMs: 60_000,
         sandbox: {
-          headlessOnly: id !== "physical.screenshot",
+          headlessOnly: true,
           maxOutputBytes: 2 * 1024 * 1024,
         },
       },
-      requirements: id === "physical.screenshot"
-        ? [{ kind: "executable", name: "screencapture", optional: false }]
-        : [{ kind: "executable", name: "playwright-chromium", optional: true }],
+      requirements: [{ kind: "executable", name: "playwright-chromium", optional: true }],
       inputSchema: browserInputSchema(id),
       outputSchema: browserOutputSchema(id),
     };

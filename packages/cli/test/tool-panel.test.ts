@@ -100,7 +100,7 @@ describe("collectToolPanel", () => {
     const rows = collectToolPanel();
     expect(row(rows, "bash").requirements).toEqual(["system-shell"]);
     expect(row(rows, "browser.screenshot").requirements).toEqual(["playwright-chromium (optional)"]);
-    expect(row(rows, "physical.screenshot").requirements).toEqual(["screencapture"]);
+    expect(row(rows, "physical.screenshot").requirements).toEqual(["roll-capture-app (service)"]);
     expect(row(rows, "git.commit").requirements).toEqual(["git"]);
     expect(row(rows, "github.pr").requirements).toEqual(["gh"]);
     // network / filesystem / mcp declare no requirements → [].
@@ -118,7 +118,7 @@ describe("collectToolPanel", () => {
       expect.objectContaining({ name: "playwright-chromium", label: "playwright-chromium (optional)", optional: true }),
     ]);
     expect(row(rows, "physical.screenshot").requirementDetails).toEqual([
-      expect.objectContaining({ name: "screencapture", label: "screencapture", optional: false }),
+      expect.objectContaining({ name: "roll-capture-app", label: "roll-capture-app (service)", optional: false }),
     ]);
     expect(row(rows, "github.pr").requirementDetails).toEqual([
       expect.objectContaining({ name: "gh", label: "gh", optional: false }),
@@ -130,7 +130,7 @@ describe("collectToolPanel", () => {
     const rows = collectToolPanel();
     expect(row(rows, "bash").readiness).toBe("available");
     expect(["available", "degraded"]).toContain(row(rows, "browser.screenshot").readiness);
-    expect(["available", "unavailable"]).toContain(row(rows, "physical.screenshot").readiness);
+    expect(row(rows, "physical.screenshot").readiness).toBe("unavailable");
     expect(["available", "unavailable"]).toContain(row(rows, "github.pr").readiness);
   });
 

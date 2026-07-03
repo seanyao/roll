@@ -267,8 +267,8 @@ describe("frozen: roll doctor", () => {
           fix: brew install gh
         ✓ mcp.call (mcp) — available
         ✓ network.fetch (network) — available
-        − physical.screenshot (physical) — unavailable
-          macOS-only requirement; not applicable on this host.
+        ~ physical.screenshot (physical) — degraded
+          skipped — Roll Capture.app is a macOS-only physical screenshot host.
 
       External requirements
       外部依赖
@@ -368,8 +368,8 @@ describe("frozen: roll doctor", () => {
           fix: brew install gh
         ✓ mcp.call (mcp) — available
         ✓ network.fetch (network) — available
-        − physical.screenshot (physical) — unavailable
-          macOS-only requirement; not applicable on this host.
+        ~ physical.screenshot (physical) — degraded
+          skipped — Roll Capture.app is a macOS-only physical screenshot host.
 
       External requirements
       外部依赖
@@ -432,8 +432,8 @@ describe("frozen: roll doctor", () => {
           fix: brew install gh
         ✓ mcp.call (mcp) — available
         ✓ network.fetch (network) — available
-        − physical.screenshot (physical) — unavailable
-          macOS-only requirement; not applicable on this host.
+        ~ physical.screenshot (physical) — degraded
+          skipped — Roll Capture.app is a macOS-only physical screenshot host.
 
       External requirements
       外部依赖
@@ -495,8 +495,8 @@ describe("frozen: roll doctor", () => {
           fix: brew install gh
         ✓ mcp.call (mcp) — available
         ✓ network.fetch (network) — available
-        − physical.screenshot (physical) — unavailable
-          macOS-only requirement; not applicable on this host.
+        ~ physical.screenshot (physical) — degraded
+          skipped — Roll Capture.app is a macOS-only physical screenshot host.
 
       External requirements
       外部依赖
@@ -557,8 +557,8 @@ describe("frozen: roll doctor", () => {
           fix: brew install gh
         ✓ mcp.call (mcp) — available
         ✓ network.fetch (network) — available
-        − physical.screenshot (physical) — unavailable
-          macOS-only requirement; not applicable on this host.
+        ~ physical.screenshot (physical) — degraded
+          skipped — Roll Capture.app is a macOS-only physical screenshot host.
 
       External requirements
       外部依赖
@@ -618,8 +618,8 @@ describe("frozen: roll doctor", () => {
           fix: brew install gh
         ✓ mcp.call (mcp) — available
         ✓ network.fetch (network) — available
-        − physical.screenshot (physical) — unavailable
-          macOS-only requirement; not applicable on this host.
+        ~ physical.screenshot (physical) — degraded
+          skipped — Roll Capture.app is a macOS-only physical screenshot host.
 
       External requirements
       外部依赖
@@ -700,8 +700,8 @@ describe("frozen: roll doctor", () => {
           fix: brew install gh
         ✓ mcp.call (mcp) — available
         ✓ network.fetch (network) — available
-        − physical.screenshot (physical) — unavailable
-          macOS-only requirement; not applicable on this host.
+        ~ physical.screenshot (physical) — degraded
+          skipped — Roll Capture.app is a macOS-only physical screenshot host.
 
       External requirements
       外部依赖

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { classifyFailure, recordRootCauseFailure } from "../src/runner/failure-attribution.js";
+import { classifyCycleFailure, classifyFailure, recordRootCauseFailure } from "../src/runner/failure-attribution.js";
 import { readSkipCards, recordCardFailure } from "../src/runner/skip-cards.js";
 
 describe("failure attribution envelopes", () => {
@@ -44,6 +44,15 @@ describe("failure attribution envelopes", () => {
     ).toMatchObject({ failureClass: "harness", rootCauseKey: "harness:score_parse" });
   });
 
+  it("does not classify loose source substrings like scoreboard as score parser failures", () => {
+    expect(
+      classifyFailure({
+        stage: "terminal",
+        source: "scoreboard:render",
+      }),
+    ).toMatchObject({ failureClass: "unknown", rootCauseKey: "unknown:unclassified" });
+  });
+
   it("classifies post-build failures with tokens as card failures when no higher envelope matches", () => {
     expect(
       classifyFailure({
@@ -61,6 +70,17 @@ describe("failure attribution envelopes", () => {
       classifyFailure({
         stage: "build",
         source: "agent",
+        tcrCount: 1,
+      }),
+    ).toMatchObject({ failureClass: "card", rootCauseKey: "card:agent_after_build" });
+  });
+
+  it("attributes cycles with TCR evidence and only a mainDirty flag to the card", () => {
+    expect(
+      classifyCycleFailure({
+        cycleId: "cycle-main-dirty-after-work",
+        terminal: "failed",
+        mainDirty: true,
         tcrCount: 1,
       }),
     ).toMatchObject({ failureClass: "card", rootCauseKey: "card:agent_after_build" });
@@ -87,6 +107,32 @@ describe("failure attribution envelopes", () => {
     expect(snapshot).toContain("env:main_dirty");
     expect(snapshot).toContain("main checkout");
     expect(snapshot).not.toContain("split the card");
+  });
+
+  it("resets corrupt root-cause state and emits an alert event", () => {
+    const dir = mkdtempSync(join(tmpdir(), "roll-root-cause-corrupt-"));
+    writeFileSync(join(dir, "failure-attribution.json"), "{bad json", "utf8");
+    const attribution = { failureClass: "env" as const, rootCauseKey: "env:main_dirty", confidence: "envelope" as const };
+
+    const result = recordRootCauseFailure(dir, "cycle-corrupt", attribution, [], 3, { nowMs: 1000 });
+
+    expect(result).toMatchObject({ count: 1, paused: false, rootCauseKey: "env:main_dirty" });
+    const events = readFileSync(join(dir, "events.ndjson"), "utf8");
+    expect(events).toContain('"type":"alert:notify"');
+    expect(events).toContain("failure-attribution state reset");
+  });
+
+  it("emits an alert event when root-cause state cannot be written", () => {
+    const dir = mkdtempSync(join(tmpdir(), "roll-root-cause-write-fail-"));
+    mkdirSync(join(dir, "failure-attribution.json"));
+    const attribution = { failureClass: "env" as const, rootCauseKey: "env:main_dirty", confidence: "envelope" as const };
+
+    const result = recordRootCauseFailure(dir, "cycle-write-fail", attribution, [], 3, { nowMs: 1000 });
+
+    expect(result).toMatchObject({ count: 1, paused: false, rootCauseKey: "env:main_dirty" });
+    const events = readFileSync(join(dir, "events.ndjson"), "utf8");
+    expect(events).toContain('"type":"alert:notify"');
+    expect(events).toContain("failure-attribution state write failed");
   });
 
   it("ignores root-cause failures outside the rolling window", () => {

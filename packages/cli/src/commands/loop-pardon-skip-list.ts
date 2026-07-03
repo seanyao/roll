@@ -6,8 +6,9 @@ import { classifyCycleFailure } from "../runner/failure-attribution.js";
 import { readSkipState, writeSkipState } from "../runner/skip-cards.js";
 
 export const LOOP_PARDON_SKIP_LIST_USAGE =
-  "Usage: roll loop pardon-skip-list [--dry-run]\n" +
-  "  Rebuild skip-cards from runs/events, removing env/harness/unknown pollution while keeping real card failures.\n";
+  "Usage: roll loop pardon-skip-list [--dry-run] [--include-unknown]\n" +
+  "  Rebuild skip-cards from runs/events, removing env/harness pollution while keeping real card failures.\n" +
+  "  --include-unknown also pardons unknown/no-evidence failures; risky because old zero-usage gave_up rows may be real card failures.\n";
 
 interface RunRow {
   readonly story_id?: string;
@@ -64,6 +65,7 @@ export function rebuildSkipStateFromEvidence(input: {
   readonly rows: readonly RunRow[];
   readonly events: readonly RollEvent[];
   readonly threshold: number;
+  readonly includeUnknown?: boolean;
 }): { fails: Record<string, number>; skip: string[]; pardoned: string[]; kept: string[] } {
   const affected = new Set([...Object.keys(input.currentFails), ...input.currentSkip]);
   const nextFails: Record<string, number> = {};
@@ -72,19 +74,28 @@ export function rebuildSkipStateFromEvidence(input: {
     const cycleId = (row.cycle_id ?? row.run_id ?? "").trim();
     if (storyId === "" || cycleId === "" || !affected.has(storyId) || !failedRow(row)) continue;
     const rowClass = row.failure_class;
+    const cycleEvents = input.events.filter((event) => (event as unknown as Record<string, unknown>)["cycleId"] === cycleId);
+    const hasReplayEvidence =
+      (row.tcr_count ?? 0) > 0 ||
+      (row.tokens_in ?? 0) > 0 ||
+      (row.tokens_out ?? 0) > 0 ||
+      cycleEvents.some((event) => event.type !== "cycle:end");
     const attribution =
-      rowClass === "env" || rowClass === "harness" || rowClass === "card" || rowClass === "unknown"
-        ? { failureClass: rowClass, rootCauseKey: row.root_cause_key ?? `${rowClass}:unknown`, confidence: rowClass === "unknown" ? "unknown" as const : "envelope" as const }
-        : classifyCycleFailure({
+      hasReplayEvidence || (rowClass !== "env" && rowClass !== "harness" && rowClass !== "card" && rowClass !== "unknown")
+        ? classifyCycleFailure({
             cycleId,
-            terminal: row.status,
+            terminal: row.status ?? row.outcome,
             tcrCount: row.tcr_count,
             tokensIn: row.tokens_in,
             tokensOut: row.tokens_out,
-            events: input.events.filter((event) => (event as unknown as Record<string, unknown>)["cycleId"] === cycleId),
-          });
+            events: cycleEvents,
+          })
+        : { failureClass: rowClass, rootCauseKey: row.root_cause_key ?? `${rowClass}:unknown`, confidence: rowClass === "unknown" ? "unknown" as const : "envelope" as const };
     if (attribution.failureClass === "card") {
       nextFails[storyId] = (nextFails[storyId] ?? 0) + 1;
+    } else if (attribution.failureClass === "unknown" && input.includeUnknown !== true) {
+      const preserved = input.currentFails[storyId] ?? (input.currentSkip.includes(storyId) ? input.threshold : 1);
+      nextFails[storyId] = Math.max(nextFails[storyId] ?? 0, preserved);
     }
   }
   const nextSkip = Object.entries(nextFails)
@@ -102,6 +113,7 @@ export async function loopPardonSkipListCommand(args: string[]): Promise<number>
     return 0;
   }
   const dryRun = args.includes("--dry-run");
+  const includeUnknown = args.includes("--include-unknown");
   const id = await projectIdentity();
   const rt = runtimeDir(id.path);
   const current = readSkipState(rt);
@@ -111,6 +123,7 @@ export async function loopPardonSkipListCommand(args: string[]): Promise<number>
     rows: readRows(join(rt, "runs.jsonl")),
     events: readEvents(join(rt, "events.ndjson")),
     threshold: 3,
+    includeUnknown,
   });
   if (!dryRun) writeSkipState(rt, { fails: rebuilt.fails, skip: rebuilt.skip });
   process.stdout.write(

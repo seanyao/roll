@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### 稳定性（backlog 清仓批次 · 2026-07-03）
+- 每个工作周期结束后会自动清理这一轮留下的构建缓存、临时文件和环境残留，下一轮从干净环境起跑，"本机绿 CI 红"这类脏环境问题少一大类（US-LOOP-088）`[loop-engine]`
+- 新增八项故障注入演练：主仓被污染、验收报告损坏、证据悬空、认证挂掉、元仓脏、并发抢卡、冤枉卡平反、builder 挂死——每项都有可重复夹具证明系统按新契约自愈或明确暂停（US-QA-016 矩阵部分）`[qa-testing]`
+
+### 智能
+- 自动选卡前，默认 agent 会先对候选卡做一次语义排序（哪张更解堵、更紧急），排序只是建议——Hold/依赖/毒丸这些铁律照旧；评估结果带缓存，backlog 没变就不花钱（IDEA-069）`[loop-engine]`
+
+### 物理截图（roll ↔ Roll Capture.app 全链路打通）
+- `physical.screenshot` 正式成为 Roll 管理的工具：协议契约与 Roll Capture.app 的实现逐字段对齐（US-PHYSICAL-001, US-PHYSICAL-002）`[capture-tool]`
+- `roll doctor --tools` 和 `roll setup` 能检测 Roll Capture.app 装没装、有没有录屏权限、收件箱可不可写，并诚实说明权限测的是当前终端宿主（US-PHYSICAL-003）`[capture-tool]`
+- 需要物理截图证据的卡，`roll attest` 会自动请 Roll Capture.app 拍图、把 PNG 收进证据目录并在报告里展示完整拍摄状态链（US-PHYSICAL-004）`[capture-tool]`
+
+### 内部工程
+- 五千多行的循环执行器巨石文件拆成二十多个职责模块（行为零变化，有行数防回归测试守着），后续修 bug 不再牵一发动全身（REFACTOR-060）`[loop-engine]`
+
 ## v4.703.1 — 2026-07-03
 
 ### 稳定性（北极星冲刺 · 2026-07-03 第一性诊断产物）

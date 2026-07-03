@@ -58,4 +58,14 @@ describe("skip-cards — FIX-363 poison-pill isolation", () => {
     expect(recordCardFailure(dir, "", 3)).toEqual({ count: 0, nowSkipped: false });
     expect(readSkipCards(dir).size).toBe(0);
   });
+
+  it("ignores env, harness, and unknown failures so only real card attempts enter card accounting", () => {
+    const dir = rt();
+    expect(recordCardFailure(dir, "US-CAPTURE-006", 3, "env")).toEqual({ count: 0, nowSkipped: false });
+    expect(recordCardFailure(dir, "US-CAPTURE-006", 3, "harness")).toEqual({ count: 0, nowSkipped: false });
+    expect(recordCardFailure(dir, "US-CAPTURE-006", 3, "unknown")).toEqual({ count: 0, nowSkipped: false });
+    expect(readSkipCards(dir).size).toBe(0);
+
+    expect(recordCardFailure(dir, "US-CAPTURE-006", 3, "card")).toEqual({ count: 1, nowSkipped: false });
+  });
 });

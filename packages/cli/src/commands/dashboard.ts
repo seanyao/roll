@@ -42,44 +42,7 @@ import { getAgentSpec } from "@roll/core";
 import { computeListCost, currencyFor } from "./prices-cost.js";
 import { TRUTH_SCHEMA_EPOCH_SEC, cycleTruthFromRow, deliveryGateDiagnosticsFromRows, outcomeToPanel, type DeliveryGateDiagnostic } from "../lib/truth-adapter.js";
 import { collectToolEvidenceFromEventsPath, formatToolCostSummary } from "../lib/tool-display.js";
-
-// ════════════════════════════════════════════════════════════════════════════
-// Display-time helpers — fixed UTC+8, no DST.
-// ════════════════════════════════════════════════════════════════════════════
-const TZ_OFFSET_MS = 8 * 3600 * 1000;
-
-/** A UTC Date shifted into UTC+8 wall-clock, exposed via getUTC* accessors. */
-function toShanghai(d: Date): Date {
-  return new Date(d.getTime() + TZ_OFFSET_MS);
-}
-
-function pad2(n: number): string {
-  return n < 10 ? `0${n}` : String(n);
-}
-
-function shHHMM(d: Date): string {
-  const s = toShanghai(d);
-  return `${pad2(s.getUTCHours())}:${pad2(s.getUTCMinutes())}`;
-}
-
-function shDayKey(d: Date): string {
-  const s = toShanghai(d);
-  return `${s.getUTCFullYear()}-${pad2(s.getUTCMonth() + 1)}-${pad2(s.getUTCDate())}`;
-}
-
-function shYmdHm(d: Date): string {
-  const s = toShanghai(d);
-  return `${s.getUTCFullYear()}-${pad2(s.getUTCMonth() + 1)}-${pad2(s.getUTCDate())} ${pad2(s.getUTCHours())}:${pad2(s.getUTCMinutes())}`;
-}
-
-/** YYYY-MM-DD shifted by `deltaDays` from a given day key (display TZ). */
-function dayKeyOffset(d: Date, deltaDays: number): string {
-  const s = toShanghai(d);
-  const shifted = new Date(
-    Date.UTC(s.getUTCFullYear(), s.getUTCMonth(), s.getUTCDate() + deltaDays),
-  );
-  return `${shifted.getUTCFullYear()}-${pad2(shifted.getUTCMonth() + 1)}-${pad2(shifted.getUTCDate())}`;
-}
+import { TZ_OFFSET_MS, dayKeyOffset, pad2, shDayKey, shHHMM, shYmdHm, toShanghai } from "../lib/sh-time.js";
 
 function parseTs(ts: string): Date {
   return new Date(ts.replace("Z", "+00:00"));

@@ -28,7 +28,7 @@ function shDays(endDay: string, count = 14): NorthStarDay[] {
   });
 }
 
-function run(id: string, ts: string, status = "failed", extra: Partial<NorthStarRun> = {}): NorthStarRun {
+function run(id: string, ts: string | number, status = "failed", extra: Partial<NorthStarRun> = {}): NorthStarRun {
   return {
     cycleId: id,
     runId: id,
@@ -90,8 +90,40 @@ describe("north-star report schema", () => {
     expect(isNorthStarReport(report)).toBe(true);
     expect(Object.keys(report.metrics)).toEqual(["autonomy", "deliveryRate", "fixTax", "attributionErrors"]);
     expect(report.metrics.autonomy.daily).toHaveLength(14);
+    expect(report.metrics.autonomy.context).toHaveProperty("disruptions");
+    expect(report.metrics.autonomy.context).toHaveProperty("segmentBoundaries");
+    expect(report.metrics.autonomy.context).not.toHaveProperty("interruptions");
     expect(report.metrics.deliveryRate.target).toMatchObject({ op: ">=", value: 0.6 });
     expect(report).toMatchSnapshot();
+  });
+
+  it("accepts compatible roll.north schema extensions without pinning windowDays", () => {
+    const report = buildNorthStarReport({
+      nowMs: ms("2026-07-03T16:00:00Z"),
+      days: shDays("2026-07-03"),
+      runs: [run("1", "2026-07-03T01:00:00Z", "merged", { storyId: "US-A" })],
+      events: [],
+      cards: [],
+      backlog: [{ id: "US-A", status: "Done" }],
+      deliveries: [],
+    });
+
+    const extended = {
+      ...report,
+      schema: "roll.north.v2",
+      windowDays: 30,
+      extra: { tolerated: true },
+      metrics: {
+        ...report.metrics,
+        autonomy: {
+          ...report.metrics.autonomy,
+          daily: report.metrics.autonomy.daily.slice(0, 2),
+          extraMetricField: true,
+        },
+      },
+    };
+
+    expect(isNorthStarReport(extended)).toBe(true);
   });
 
   it("returns null plus reasons for a new project with no history", () => {
@@ -115,17 +147,16 @@ describe("north-star report schema", () => {
 });
 
 describe("M1 autonomy", () => {
-  const interruptionTypes: NorthStarEvent["type"][] = [
+  const disruptionTypes: NorthStarEvent["type"][] = [
     "policy:safety_pause",
     "correction:circuit_breaker",
-    "loop:resumed",
     "cycle:rescue",
     "goal:recovery",
     "sandbox:quarantined",
   ];
 
-  for (const type of interruptionTypes) {
-    it(`resets current autonomy on ${type}`, () => {
+  for (const type of disruptionTypes) {
+    it(`counts and segments autonomy on ${type}`, () => {
       const report = buildNorthStarReport({
         nowMs: ms("2026-07-03T12:00:00Z"),
         days: shDays("2026-07-03"),
@@ -137,9 +168,45 @@ describe("M1 autonomy", () => {
       });
 
       expect(report.metrics.autonomy.current).toBe(2);
-      expect(report.metrics.autonomy.context.interruptions).toBe(1);
+      expect(report.metrics.autonomy.context.disruptions).toBe(1);
+      expect(report.metrics.autonomy.context.segmentBoundaries).toBe(1);
     });
   }
+
+  it("keeps denied owner goal recovery in disruptions because the owner intervened", () => {
+    const report = buildNorthStarReport({
+      nowMs: ms("2026-07-03T12:00:00Z"),
+      days: shDays("2026-07-03"),
+      runs: Array.from({ length: 6 }, (_, i) => run(`D${i}`, `2026-07-03T0${i}:00:00Z`)),
+      events: [interruption("goal:recovery", "2026-07-03T10:00:00Z", { actor: "owner" })],
+      cards: [],
+      backlog: [{ id: "US-A", status: "Todo" }],
+      deliveries: [],
+    });
+
+    expect(report.metrics.autonomy.current).toBe(2);
+    expect(report.metrics.autonomy.context.disruptions).toBe(1);
+  });
+
+  it("uses loop:resumed only as a deduplicated segment boundary", () => {
+    const report = buildNorthStarReport({
+      nowMs: ms("2026-07-03T12:00:00Z"),
+      days: shDays("2026-07-03"),
+      runs: Array.from({ length: 6 }, (_, i) => run(`R${i}`, `2026-07-03T0${i}:00:00Z`)),
+      events: [
+        interruption("loop:resumed", "2026-07-03T08:00:00Z"),
+        interruption("loop:resumed", "2026-07-03T09:00:00Z"),
+        interruption("loop:resumed", "2026-07-03T10:00:00Z"),
+      ],
+      cards: [],
+      backlog: [{ id: "US-A", status: "Todo" }],
+      deliveries: [],
+    });
+
+    expect(report.metrics.autonomy.current).toBe(4);
+    expect(report.metrics.autonomy.context.disruptions).toBe(0);
+    expect(report.metrics.autonomy.context.segmentBoundaries).toBe(1);
+  });
 
   it("does not grow through two stopped days with fewer than six non-idle attempts", () => {
     const report = buildNorthStarReport({
@@ -159,9 +226,79 @@ describe("M1 autonomy", () => {
     expect(report.metrics.autonomy.current).toBe(0);
     expect(report.metrics.autonomy.context.ineffectiveDays).toContain("2026-07-02");
   });
+
+  it("assigns an effective cycle crossing +8 midnight to both Shanghai days", () => {
+    const report = buildNorthStarReport({
+      nowMs: ms("2026-07-03T18:00:00Z"),
+      days: shDays("2026-07-04"),
+      runs: [
+        ...[
+          "2026-07-03T10:00:00Z",
+          "2026-07-03T11:00:00Z",
+          "2026-07-03T12:00:00Z",
+          "2026-07-03T13:00:00Z",
+          "2026-07-03T14:00:00Z",
+          "2026-07-03T15:00:00Z",
+        ].map((ts, i) => run(`pre-${i}`, ts)),
+        ...[
+          "2026-07-03T16:00:00Z",
+          "2026-07-03T17:00:00Z",
+          "2026-07-03T18:00:00Z",
+          "2026-07-03T19:00:00Z",
+          "2026-07-03T20:00:00Z",
+          "2026-07-03T21:00:00Z",
+        ].map((ts, i) => run(`post-${i}`, ts)),
+      ],
+      events: [interruption("policy:safety_pause", "2026-07-03T14:00:00Z")],
+      cards: [],
+      backlog: [{ id: "US-A", status: "Todo" }],
+      deliveries: [],
+    });
+
+    expect(report.metrics.autonomy.context.ineffectiveDays).not.toContain("2026-07-03");
+    expect(report.metrics.autonomy.context.ineffectiveDays).not.toContain("2026-07-04");
+    expect(report.metrics.autonomy.current).toBe(4);
+  });
+
+  it("pauses the autonomy clock on backlog-empty exempt days without accruing hours", () => {
+    const report = buildNorthStarReport({
+      nowMs: ms("2026-07-03T16:00:00Z"),
+      days: shDays("2026-07-03"),
+      runs: [run("done", "2026-07-03T01:00:00Z", "merged", { storyId: "US-DONE" })],
+      events: [],
+      cards: [],
+      backlog: [],
+      deliveries: [],
+    });
+
+    expect(report.metrics.autonomy.current).toBe(0);
+    expect(report.metrics.autonomy.context.bestHours).toBe(0);
+    expect(report.metrics.autonomy.context.backlogEmptyExemptDays).toContain("2026-07-03");
+    expect(report.metrics.autonomy.daily.find((d) => d.day === "2026-07-03")).toMatchObject({ exempt: true, value: 0 });
+  });
 });
 
 describe("M2/M3/M4 anti-gaming contexts", () => {
+  it("counts numeric run timestamps across M2, M3, and M4", () => {
+    const report = buildNorthStarReport({
+      nowMs: ms("2026-07-03T16:00:00Z"),
+      days: shDays("2026-07-03"),
+      runs: [
+        run("numeric-delivered", Math.floor(ms("2026-07-03T01:00:00Z") / 1000), "merged", { storyId: "US-NUMERIC" }),
+        run("numeric-failed", ms("2026-07-03T02:00:00Z"), "failed", { storyId: "US-FAILED" }),
+      ],
+      events: [{ type: "goal:card_skipped", ts: ms("2026-07-03T03:00:00Z"), storyId: "US-FAILED", failureClass: "env" }],
+      cards: [{ id: "FIX-NUMERIC", type: "fix", epic: "loop-harness", created: "2026-07-03" }],
+      backlog: [{ id: "US-A", status: "Todo" }],
+      deliveries: [],
+    });
+
+    expect(report.metrics.deliveryRate.context.nonIdleCycles).toBe(2);
+    expect(report.metrics.deliveryRate.current).toBe(0.5);
+    expect(report.metrics.fixTax.current).toBe(1);
+    expect(report.metrics.attributionErrors.context.failedCycles).toBe(1);
+  });
+
   it("exposes abnormal skip rate and card type mix when easy cards are selected", () => {
     const report = buildNorthStarReport({
       nowMs: ms("2026-07-03T16:00:00Z"),
@@ -211,6 +348,29 @@ describe("M2/M3/M4 anti-gaming contexts", () => {
     expect(report.metrics.fixTax.context.byClass.harness).toBe(5);
   });
 
+  it("uses only US deliveries as the fix-tax denominator and exposes REFACTOR deliveries as context", () => {
+    const report = buildNorthStarReport({
+      nowMs: ms("2026-07-03T16:00:00Z"),
+      days: shDays("2026-07-03"),
+      runs: [
+        run("us", "2026-07-03T00:00:00Z", "merged", { storyId: "US-DONE" }),
+        run("refactor", "2026-07-03T01:00:00Z", "merged", { storyId: "REFACTOR-DONE" }),
+      ],
+      events: [],
+      cards: [
+        { id: "FIX-1", type: "fix", epic: "loop-harness", created: "2026-07-03" },
+        { id: "US-DONE", type: "us", epic: "product", created: "2026-07-01" },
+        { id: "REFACTOR-DONE", type: "refactor", epic: "product", created: "2026-07-01" },
+      ],
+      backlog: [],
+      deliveries: [],
+    });
+
+    expect(report.metrics.fixTax.current).toBe(1);
+    expect(report.metrics.fixTax.context.productDeliveries).toBe(1);
+    expect(report.metrics.fixTax.context.refactorDeliveries).toBe(1);
+  });
+
   it("counts missing failure_class as unknown and env/harness skips as attribution errors", () => {
     const report = buildNorthStarReport({
       nowMs: ms("2026-07-03T16:00:00Z"),
@@ -258,7 +418,9 @@ describe("real-history replay for 2026-06-20..2026-07-03", () => {
     // Manual audit notes for the committed fixture:
     // - Window: Shanghai days 2026-06-20..2026-07-03, fixed at
     //   2026-07-03T15:59:59Z (23:59:59 UTC+8).
-    // - M1: 159 recognized interruption events. The latest safety pause is on
+    // - M1: 71 true disruption events and 108 deduplicated segment boundaries.
+    //   loop:resumed starts a new segment but is not itself a disruption.
+    //   The latest safety pause is on
     //   2026-07-03, and 2026-07-03 has fewer than six non-idle attempts, so the
     //   current anti-gaming autonomy counter is 0h. The longest valid segment is
     //   26.29h.
@@ -276,7 +438,8 @@ describe("real-history replay for 2026-06-20..2026-07-03", () => {
 
     expect(report.metrics.autonomy.current).toBe(0);
     expect(report.metrics.autonomy.context.bestHours).toBe(26.29);
-    expect(report.metrics.autonomy.context.interruptions).toBe(159);
+    expect(report.metrics.autonomy.context.disruptions).toBe(71);
+    expect(report.metrics.autonomy.context.segmentBoundaries).toBe(108);
     expect(report.metrics.deliveryRate.current).toBe(113 / 304);
     expect(report.metrics.deliveryRate.context.nonIdleCycles).toBe(304);
     expect(report.metrics.deliveryRate.context.deliveredCycles).toBe(113);

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -110,5 +111,46 @@ describe("roll north --json", () => {
     expect(json.metrics.fixTax.context.newFixCards).toBe(1);
     expect(json.metrics.attributionErrors.current).toBe(1);
     expect(json.metrics.attributionErrors.context.unknownFailureClass).toBe(0);
+  });
+
+  it("discovers all rotated event segments and falls back to git-created FIX dates in one meta scan", async () => {
+    registerAll();
+    const project = mkdtempSync(join(tmpdir(), "roll-north-rotated-"));
+    const rollMeta = join(project, ".roll");
+    const loop = join(rollMeta, "loop");
+    const fixOne = join(rollMeta, "features", "loop-harness", "FIX-1");
+    const fixTwo = join(rollMeta, "features", "loop-harness", "FIX-2");
+    mkdirSync(loop, { recursive: true });
+    mkdirSync(fixOne, { recursive: true });
+    mkdirSync(fixTwo, { recursive: true });
+    writeFileSync(join(loop, "runs.jsonl"), `${JSON.stringify({ run_id: "c1", status: "merged", outcome: "delivered", ts: 1783040400, story_id: "US-1" })}\n`);
+    writeFileSync(join(loop, "events.ndjson.7"), `${JSON.stringify({ type: "policy:safety_pause", ts: 1783044000000 })}\n`);
+    writeFileSync(join(loop, "events.ndjson.12"), `${JSON.stringify({ type: "loop:resumed", ts: 1783047600000 })}\n`);
+    writeFileSync(join(rollMeta, "backlog.md"), "| ID | Title | Status |\n|---|---|---|\n| [US-1](x) | active | 📋 Todo |\n");
+    writeFileSync(join(fixOne, "spec.md"), "---\nid: FIX-1\ntype: fix\nepic: loop-harness\n---\n# FIX-1\n");
+    writeFileSync(join(fixTwo, "spec.md"), "---\nid: FIX-2\ntype: fix\nepic: loop-harness\n---\n# FIX-2\n");
+    execFileSync("git", ["-C", rollMeta, "init"], { stdio: "ignore" });
+    execFileSync("git", ["-C", rollMeta, "config", "user.email", "roll@example.test"], { stdio: "ignore" });
+    execFileSync("git", ["-C", rollMeta, "config", "user.name", "Roll Test"], { stdio: "ignore" });
+    execFileSync("git", ["-C", rollMeta, "add", "features/loop-harness/FIX-1/spec.md", "features/loop-harness/FIX-2/spec.md"], { stdio: "ignore" });
+    execFileSync("git", ["-C", rollMeta, "commit", "-m", "add fix cards", "--date", "2026-07-03T00:00:00Z"], {
+      env: { ...process.env, GIT_AUTHOR_DATE: "2026-07-03T00:00:00Z", GIT_COMMITTER_DATE: "2026-07-03T00:00:00Z" },
+      stdio: "ignore",
+    });
+
+    const result = await withEnvCwd({ ROLL_MAIN_PROJECT: project, ROLL_PROJECT_RUNTIME_DIR: loop, ROLL_NORTH_NOW: "2026-07-03T16:00:00Z" }, project, () =>
+      captureStdout(() => dispatch(["north", "--json"], async () => ({ ok: true }))),
+    );
+
+    expect(result.status).toBe(0);
+    const json = JSON.parse(result.stdout) as {
+      metrics: {
+        autonomy: { context: { disruptions: number; segmentBoundaries: number } };
+        fixTax: { context: { newFixCards: number } };
+      };
+    };
+    expect(json.metrics.autonomy.context.disruptions).toBe(1);
+    expect(json.metrics.autonomy.context.segmentBoundaries).toBe(2);
+    expect(json.metrics.fixTax.context.newFixCards).toBe(2);
   });
 });

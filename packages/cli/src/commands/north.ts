@@ -11,7 +11,8 @@ import {
 } from "@roll/core";
 import { shWindowDays } from "../lib/sh-time.js";
 
-const USAGE = "Usage: roll north --json\n  Emit the north-star metrics JSON. Read-only.\n";
+const USAGE =
+  "Usage: roll north --json\n  Emit the north-star metrics JSON. Read-only.\n  autonomy.context.disruptions counts true owner/safety disruptions, including denied owner goal:recovery; segmentBoundaries also includes deduplicated loop:resumed boundaries.\n";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -39,6 +40,7 @@ function jsonlObjects(paths: readonly string[]): Record<string, unknown>[] {
     if (!existsSync(path)) continue;
     let text: string;
     try {
+      // Rotation keeps each segment bounded (<=10MiB), so sync reads remain deterministic and small.
       text = readFileSync(path, "utf8");
     } catch {
       continue;
@@ -59,9 +61,16 @@ function jsonlObjects(paths: readonly string[]): Record<string, unknown>[] {
 }
 
 function rotatedPaths(dir: string, base: string): string[] {
-  const paths = [join(dir, base)];
-  for (let i = 1; i < 5; i++) paths.push(join(dir, `${base}.${i}`));
-  return paths;
+  if (!existsSync(dir)) return [];
+  const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`^${escaped}(?:\\.(\\d+))?$`);
+  return readdirSync(dir)
+    .flatMap((entry) => {
+      const match = pattern.exec(entry);
+      return match === null ? [] : [{ path: join(dir, entry), index: match[1] === undefined ? 0 : Number(match[1]) }];
+    })
+    .sort((a, b) => a.index - b.index || a.path.localeCompare(b.path))
+    .map((entry) => entry.path);
 }
 
 function projectRoot(): string {
@@ -169,25 +178,36 @@ function frontmatter(text: string): Record<string, string> {
   return meta;
 }
 
-function gitCreatedFallback(root: string, specPath: string): string | undefined {
+function gitCreatedMap(root: string): Map<string, string> {
   const metaRoot = join(root, ".roll");
-  if (!existsSync(metaRoot)) return undefined;
+  const dates = new Map<string, string>();
+  if (!existsSync(metaRoot)) return dates;
   try {
-    const out = execFileSync("git", ["-C", metaRoot, "log", "--diff-filter=A", "--format=%ct", "--", specPath.slice(metaRoot.length + 1)], {
+    const out = execFileSync("git", ["-C", metaRoot, "log", "--diff-filter=A", "--name-only", "--format=%ct"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
-    }).trim().split("\n").filter((line) => line !== "").at(-1);
-    if (out === undefined) return undefined;
-    const seconds = Number(out);
-    return Number.isFinite(seconds) ? new Date(seconds * 1000).toISOString().slice(0, 10) : undefined;
+    });
+    let currentDate: string | undefined;
+    for (const rawLine of out.split("\n")) {
+      const line = rawLine.trim();
+      if (line === "") continue;
+      const seconds = Number(line);
+      if (Number.isFinite(seconds)) {
+        currentDate = new Date(seconds * 1000).toISOString().slice(0, 10);
+      } else if (currentDate !== undefined && !dates.has(line)) {
+        dates.set(line, currentDate);
+      }
+    }
   } catch {
-    return undefined;
+    return dates;
   }
+  return dates;
 }
 
 function readCards(root: string): NorthStarCardMeta[] {
   const featuresRoot = join(root, ".roll", "features");
   const cards: NorthStarCardMeta[] = [];
+  const createdByPath = gitCreatedMap(root);
   for (const path of walkFiles(featuresRoot).filter((item) => item.endsWith("spec.md"))) {
     let text = "";
     try {
@@ -201,7 +221,8 @@ function readCards(root: string): NorthStarCardMeta[] {
     const card: NorthStarCardMeta = { id };
     const type = fm["type"] ?? id.split("-")[0]?.toLowerCase();
     const epic = fm["epic"] ?? path.slice(featuresRoot.length + 1).split("/")[0];
-    const created = fm["created"] ?? (/^FIX-/i.test(id) ? gitCreatedFallback(root, path) : undefined);
+    const metaRelativePath = path.slice(join(root, ".roll").length + 1);
+    const created = fm["created"] ?? (/^FIX-/i.test(id) ? createdByPath.get(metaRelativePath) : undefined);
     const rootCauseKey = fm["root_cause_key"] ?? fm["rootCauseKey"];
     if (type !== undefined && type !== "") card.type = type;
     if (epic !== undefined && epic !== "") card.epic = epic;

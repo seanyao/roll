@@ -74,7 +74,10 @@ export interface NorthStarReport {
 export interface AutonomyContext {
   bestHours: number | null;
   sinceMs: number | null;
-  interruptions: number;
+  /** True owner/safety disruptions. Owner goal:recovery counts even when denied because the owner intervened. */
+  disruptions: number;
+  /** Segment reset boundaries, including deduplicated loop:resumed events. */
+  segmentBoundaries: number;
   ineffectiveDays: string[];
   backlogEmptyExemptDays: string[];
 }
@@ -92,6 +95,7 @@ export interface DeliveryContext {
 export interface FixTaxContext {
   newFixCards: number;
   productDeliveries: number;
+  refactorDeliveries: number;
   byClass: Record<"harness" | "product" | "docsTest", number>;
   duplicateRootCauseCount: number;
   repeatedRootCauses: Array<{ key: string; count: number }>;
@@ -126,9 +130,7 @@ export function normalizeEventTimestampMs(ts: string | number | undefined): numb
 }
 
 function parseRunTimestampMs(ts: string | number | undefined): number | null {
-  if (typeof ts !== "string" || ts.trim() === "") return null;
-  const parsed = Date.parse(ts);
-  return Number.isFinite(parsed) ? parsed : null;
+  return normalizeEventTimestampMs(ts);
 }
 
 function inWindow(ms: number, days: readonly NorthStarDay[]): boolean {
@@ -197,8 +199,12 @@ function storyType(storyId: string | undefined, cardsById: ReadonlyMap<string, N
   return prefix === undefined || prefix === "" ? "unknown" : prefix;
 }
 
-function isProductStory(storyId: string | undefined): boolean {
-  return storyId !== undefined && (/^US-/i.test(storyId) || /^REFACTOR-/i.test(storyId));
+function isUsStory(storyId: string | undefined): boolean {
+  return storyId !== undefined && /^US-/i.test(storyId);
+}
+
+function isRefactorStory(storyId: string | undefined): boolean {
+  return storyId !== undefined && /^REFACTOR-/i.test(storyId);
 }
 
 function metricMet(current: number | null, op: TargetOp, target: number): boolean {
@@ -211,29 +217,37 @@ function metricMet(current: number | null, op: TargetOp, target: number): boolea
 const INTERRUPTION_TYPES = new Set([
   "policy:safety_pause",
   "correction:circuit_breaker",
-  "loop:resumed",
   "cycle:rescue",
   "sandbox:quarantined",
 ]);
 
-function isInterruption(event: NorthStarEvent): boolean {
+function isDisruption(event: NorthStarEvent): boolean {
   if (event.type === "goal:recovery") return event.actor === "owner";
   return event.type !== undefined && INTERRUPTION_TYPES.has(event.type);
 }
 
+function isSegmentBoundary(event: NorthStarEvent): boolean {
+  return event.type === "loop:resumed" || isDisruption(event);
+}
+
 function buildAutonomy(input: BuildNorthStarInput, windowRuns: Array<{ run: NorthStarRun; tsMs: number }>): NorthStarMetric<AutonomyContext> {
   const target = { op: ">=" as const, value: 72, unit: "hours" };
-  const interruptions = input.events
+  const disruptions = input.events
     .map((event) => ({ event, tsMs: normalizeEventTimestampMs(event.ts) }))
-    .filter((item): item is { event: NorthStarEvent; tsMs: number } => item.tsMs !== null && isInterruption(item.event))
+    .filter((item): item is { event: NorthStarEvent; tsMs: number } => item.tsMs !== null && isDisruption(item.event))
+    .sort((a, b) => a.tsMs - b.tsMs);
+  const segmentBoundaries = input.events
+    .map((event) => ({ event, tsMs: normalizeEventTimestampMs(event.ts) }))
+    .filter((item): item is { event: NorthStarEvent; tsMs: number } => item.tsMs !== null && isSegmentBoundary(item.event))
     .sort((a, b) => a.tsMs - b.tsMs);
   const first = input.days[0];
   const last = input.days[input.days.length - 1];
-  if (first === undefined || last === undefined || (windowRuns.length === 0 && interruptions.length === 0)) {
+  if (first === undefined || last === undefined || (windowRuns.length === 0 && segmentBoundaries.length === 0)) {
     return noHistoryMetric(target, input.days, {
       bestHours: null,
       sinceMs: null,
-      interruptions: 0,
+      disruptions: 0,
+      segmentBoundaries: 0,
       ineffectiveDays: [],
       backlogEmptyExemptDays: [],
     });
@@ -254,15 +268,24 @@ function buildAutonomy(input: BuildNorthStarInput, windowRuns: Array<{ run: Nort
     if (attempts >= REQUIRED_NON_IDLE_ATTEMPTS) {
       effectiveDays.add(d.key);
     } else if (backlogEmpty) {
-      effectiveDays.add(d.key);
       exemptDays.push(d.key);
     } else {
       ineffectiveDays.push(d.key);
     }
   }
 
-  const interruptionTimes = interruptions.map((i) => i.tsMs);
-  const latestInterruption = interruptionTimes.filter((ts) => ts <= input.nowMs).at(-1) ?? first.startMs;
+  const boundaryTimes: number[] = [];
+  let previousWasResume = false;
+  for (const boundary of segmentBoundaries) {
+    if (boundary.event.type === "loop:resumed") {
+      if (previousWasResume) continue;
+      previousWasResume = true;
+    } else {
+      previousWasResume = false;
+    }
+    boundaryTimes.push(boundary.tsMs);
+  }
+  const latestBoundary = boundaryTimes.filter((ts) => ts <= input.nowMs).at(-1) ?? first.startMs;
   const effectiveHoursBetween = (startMs: number, endMs: number): number => {
     let total = 0;
     for (const d of input.days) {
@@ -273,14 +296,14 @@ function buildAutonomy(input: BuildNorthStarInput, windowRuns: Array<{ run: Nort
     }
     return Math.round(total * 100) / 100;
   };
-  const current = effectiveHoursBetween(latestInterruption, input.nowMs);
-  const segmentBounds = [first.startMs, ...interruptionTimes.filter((ts) => inWindow(ts, input.days)), Math.min(input.nowMs, last.endMs)];
+  const current = effectiveHoursBetween(latestBoundary, input.nowMs);
+  const segmentBounds = [first.startMs, ...boundaryTimes.filter((ts) => inWindow(ts, input.days)), Math.min(input.nowMs, last.endMs)];
   let best = 0;
   for (let i = 0; i < segmentBounds.length - 1; i++) {
     best = Math.max(best, effectiveHoursBetween(segmentBounds[i] ?? first.startMs, segmentBounds[i + 1] ?? input.nowMs));
   }
   const daily = input.days.map((d) => {
-    const latestBeforeDayEnd = interruptionTimes.filter((ts) => ts <= d.endMs).at(-1) ?? first.startMs;
+    const latestBeforeDayEnd = boundaryTimes.filter((ts) => ts <= d.endMs).at(-1) ?? first.startMs;
     const value = effectiveHoursBetween(latestBeforeDayEnd, Math.min(d.endMs, input.nowMs));
     return {
       day: d.key,
@@ -296,8 +319,9 @@ function buildAutonomy(input: BuildNorthStarInput, windowRuns: Array<{ run: Nort
     met: metricMet(current, target.op, target.value),
     context: {
       bestHours: Math.round(best * 100) / 100,
-      sinceMs: latestInterruption,
-      interruptions: interruptions.length,
+      sinceMs: latestBoundary,
+      disruptions: disruptions.length,
+      segmentBoundaries: boundaryTimes.filter((ts) => inWindow(ts, input.days)).length,
       ineffectiveDays,
       backlogEmptyExemptDays: exemptDays,
     },
@@ -394,6 +418,7 @@ function buildFixTax(
     return noHistoryMetric(target, input.days, {
       newFixCards: 0,
       productDeliveries: 0,
+      refactorDeliveries: 0,
       byClass: { harness: 0, product: 0, docsTest: 0 },
       duplicateRootCauseCount: 0,
       repeatedRootCauses: [],
@@ -402,7 +427,8 @@ function buildFixTax(
   const fixCards = input.cards.filter((card) => /^FIX-/i.test(card.id) && card.created !== undefined && inWindow(Date.parse(card.created), input.days));
   const byClass: Record<"harness" | "product" | "docsTest", number> = { harness: 0, product: 0, docsTest: 0 };
   for (const card of fixCards) byClass[classifyFix(card)] += 1;
-  const productDeliveries = windowRuns.filter(({ run }) => delivered(run) && isProductStory(run.storyId)).length;
+  const productDeliveries = windowRuns.filter(({ run }) => delivered(run) && isUsStory(run.storyId)).length;
+  const refactorDeliveries = windowRuns.filter(({ run }) => delivered(run) && isRefactorStory(run.storyId)).length;
   const rootCounts = new Map<string, number>();
   for (const { run } of windowRuns) {
     if (!/^FIX-/i.test(run.storyId ?? "")) continue;
@@ -420,7 +446,7 @@ function buildFixTax(
       const createdMs = Date.parse(card.created ?? "");
       return createdMs >= d.startMs && createdMs < d.endMs;
     }).length;
-    const productCount = windowRuns.filter(({ run, tsMs }) => tsMs >= d.startMs && tsMs < d.endMs && delivered(run) && isProductStory(run.storyId)).length;
+    const productCount = windowRuns.filter(({ run, tsMs }) => tsMs >= d.startMs && tsMs < d.endMs && delivered(run) && isUsStory(run.storyId)).length;
     return { day: d.key, value: productCount === 0 ? null : fixCount / productCount };
   });
   return {
@@ -433,6 +459,7 @@ function buildFixTax(
     context: {
       newFixCards: fixCards.length,
       productDeliveries,
+      refactorDeliveries,
       byClass,
       duplicateRootCauseCount,
       repeatedRootCauses,
@@ -505,19 +532,21 @@ export function buildNorthStarReport(input: BuildNorthStarInput): NorthStarRepor
 export function isNorthStarReport(value: unknown): value is NorthStarReport {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
   const report = value as Partial<NorthStarReport>;
-  if (report.schema !== "roll.north.v1" || report.windowDays !== 14) return false;
+  if (typeof report.schema !== "string" || !report.schema.startsWith("roll.north.")) return false;
   const metrics = report.metrics;
   if (metrics === undefined || typeof metrics !== "object") return false;
   const required = ["autonomy", "deliveryRate", "fixTax", "attributionErrors"] as const;
   return required.every((key) => {
-    const metric = metrics[key];
+    const metric = (metrics as Record<string, unknown>)[key];
+    if (metric === null || typeof metric !== "object" || Array.isArray(metric)) return false;
+    const row = metric as Partial<NorthStarMetric>;
     return (
-      metric !== undefined &&
-      (typeof metric.current === "number" || metric.current === null) &&
-      Array.isArray(metric.daily) &&
-      metric.daily.length === 14 &&
-      (metric.trend === "up" || metric.trend === "down" || metric.trend === "flat") &&
-      typeof metric.met === "boolean"
+      (typeof row.current === "number" || row.current === null) &&
+      row.target !== undefined &&
+      Array.isArray(row.daily) &&
+      (row.trend === "up" || row.trend === "down" || row.trend === "flat") &&
+      typeof row.met === "boolean" &&
+      row.context !== undefined
     );
   });
 }

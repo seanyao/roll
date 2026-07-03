@@ -395,6 +395,24 @@ describe("watch-render — compact RollEvent observation model", () => {
     expect(ev!.detail).toBe("claude · 3 · regression");
   });
 
+  it("renders pick:ranked with picked id, rank, and reason", () => {
+    const ev = watchRenderEventFromRollEvent({
+      type: "pick:ranked",
+      cycleId: "c1",
+      picked: "US-RANK-2",
+      rank: 1,
+      total: 3,
+      reason: "unblocks follow-up cards",
+      ranking: [{ id: "US-RANK-2", score: 95, reason: "unblocks follow-up cards" }],
+      source: "agent",
+      ts: 302,
+    });
+    expect(ev).not.toBeNull();
+    expect(ev!.summary).toBe("pick:ranked");
+    expect(ev!.detail).toBe("picked US-RANK-2 (rank 1/3: unblocks follow-up cards)");
+    expect(renderCompactWatchEvent(ev!)).toContain("picked US-RANK-2 (rank 1/3: unblocks follow-up cards)");
+  });
+
   it("renders pair:consult with peer + outcome + durationMs", () => {
     const ev = watchRenderEventFromRollEvent({
       type: "pair:consult",

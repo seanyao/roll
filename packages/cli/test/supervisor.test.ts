@@ -386,6 +386,38 @@ describe("supervisorCommand", () => {
     expect(json.manualMerge).toContain("PR #42:US-1");
   });
 
+  it("IDEA-069: next shows latest semantic ranking top3 and reasons", () => {
+    const cwd = project(BACKLOG, {
+      events: [
+        JSON.stringify({
+          type: "pick:ranked",
+          cycleId: "C-rank",
+          picked: "US-3",
+          rank: 1,
+          total: 3,
+          reason: "unblocks follow-up work",
+          ranking: [
+            { id: "US-3", score: 95, reason: "unblocks follow-up work" },
+            { id: "US-2", score: 80, reason: "dependency is already clear" },
+            { id: "FIX-1", score: 20, reason: "already done" },
+          ],
+          source: "agent",
+          ts: 10,
+        }),
+      ],
+    });
+    const r = run(cwd, ["next"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("semantic ranking: 1. US-3 95 — unblocks follow-up work; 2. US-2 80 — dependency is already clear; 3. FIX-1 20 — already done");
+    const json = JSON.parse(run(cwd, ["next", "--json"]).out);
+    expect(json.pickRanking.top3).toEqual([
+      { id: "US-3", score: 95, reason: "unblocks follow-up work" },
+      { id: "US-2", score: 80, reason: "dependency is already clear" },
+      { id: "FIX-1", score: 20, reason: "already done" },
+    ]);
+    expect(json.pickRanking.source).toBe("agent");
+  });
+
   it("US-V4-021: manual-merge PRs are visible even when the local pr:open event is missing", () => {
     const cwd = project(`# Backlog
 

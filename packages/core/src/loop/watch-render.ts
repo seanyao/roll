@@ -115,6 +115,16 @@ export function watchRenderEventFromRollEvent(ev: RollEvent, mode: WatchMode = "
         detail: `${shortHash(ev.commitHash)} · ${text(ev.message)}`,
         severity: "good",
       };
+    case "pick:ranked":
+      return {
+        kind: "phase",
+        observedAt: eventTs(ev),
+        cycleId: ev.cycleId,
+        storyId: ev.picked,
+        summary: "pick:ranked",
+        detail: `picked ${text(ev.picked)} (rank ${ev.rank}/${ev.total}: ${text(ev.reason)})`,
+        severity: "normal",
+      };
     case "sandbox:write_protected":
       return {
         kind: "gate",

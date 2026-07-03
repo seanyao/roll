@@ -496,6 +496,30 @@ function manualMergeLine(input: SupervisorInput): string {
   return summarizeList(gates.map((g) => `PR #${g.prNumber}:${g.storyId}:${g.action} (${g.detail})`), 3);
 }
 
+interface PickRankingSummary {
+  source: "agent" | "cache";
+  picked: string;
+  top3: Array<{ id: string; score: number; reason: string }>;
+  line: string;
+}
+
+function latestPickRanking(events: readonly RollEvent[]): PickRankingSummary | null {
+  let latest: Extract<RollEvent, { type: "pick:ranked" }> | undefined;
+  for (const ev of events) {
+    if (ev.type !== "pick:ranked") continue;
+    if (latest === undefined || ev.ts >= latest.ts) latest = ev;
+  }
+  if (latest === undefined) return null;
+  const top3 = [...latest.ranking]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+    .map((row) => ({ id: row.id, score: row.score, reason: row.reason }));
+  const line = top3.length === 0
+    ? "none"
+    : top3.map((row, index) => `${index + 1}. ${row.id} ${row.score} — ${row.reason}`).join("; ");
+  return { source: latest.source, picked: latest.picked, top3, line };
+}
+
 function supervisorContext(
   projectPath: string,
   input: SupervisorInput,
@@ -507,6 +531,7 @@ function supervisorContext(
   gate: string;
   rollMeta: NonNullable<SupervisorInput["rollMeta"]>;
   manualMerge: string;
+  pickRanking: PickRankingSummary | null;
 } {
   return {
     cast: latestCastSummary(events),
@@ -515,6 +540,7 @@ function supervisorContext(
     gate: latestGateState(events),
     rollMeta: input.rollMeta ?? { state: "unknown", detail: "not gathered" },
     manualMerge: manualMergeLine(input),
+    pickRanking: latestPickRanking(events),
   };
 }
 
@@ -1299,7 +1325,7 @@ export function supervisorCommand(args: string[]): number | Promise<number> {
           ? mode.ownerAction
           : state.next.ownerAction;
     process.stdout.write(
-      `\n  Supervisor — next: ${n.storyId ?? "(nothing ready)"}\n  scope: ${state.scope.label}\n  remaining: ${remainingLine(input)}\n  cast: ${ctx.cast}\n  cast detail: ${ctx.castDetail}\n  gate: ${ctx.gate}\n  manual merge: ${ctx.manualMerge}\n  .roll meta: ${ctx.rollMeta.state} — ${ctx.rollMeta.detail}\n  agent health: ${state.agentHealth.summary}\n  ${n.reason}\n  ${formatOperatingMode(mode)}\n  owner action: ${action}\n  scheduler: ${state.next.schedulerAction}\n\n`,
+      `\n  Supervisor — next: ${n.storyId ?? "(nothing ready)"}\n  scope: ${state.scope.label}\n  remaining: ${remainingLine(input)}\n  cast: ${ctx.cast}\n  cast detail: ${ctx.castDetail}\n  gate: ${ctx.gate}\n  manual merge: ${ctx.manualMerge}\n  semantic ranking: ${ctx.pickRanking?.line ?? "none"}\n  .roll meta: ${ctx.rollMeta.state} — ${ctx.rollMeta.detail}\n  agent health: ${state.agentHealth.summary}\n  ${n.reason}\n  ${formatOperatingMode(mode)}\n  owner action: ${action}\n  scheduler: ${state.next.schedulerAction}\n\n`,
     );
     return 0;
   }

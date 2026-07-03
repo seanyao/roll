@@ -233,6 +233,12 @@ roll agent                           # 查看 scope、role、agent pool 与 lega
 roll agent list                      # 查看本机已装的 agent
 ```
 
+开启语义选卡排序时，`roll loop watch --events` 会显示 `pick:ranked` 行，例如
+`picked US-123 (rank 1/5: unblocks the release lane)`。`roll supervisor next` 和
+`roll supervisor next --json` 会展示最近一次 top3 排序建议与理由。该排序只作建议；
+Hold、Cut、未满足依赖、skip-list、open PR、已合并交付和 pending-publish gate 仍决定
+卡片是否可选。
+
 ### Goal Mode 与定时模式
 
 `roll loop go` 是手动 goal session，不是 launchd 定时 tick。运行期间 Roll 会持有

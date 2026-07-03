@@ -263,6 +263,13 @@ roll agent                           # Show scopes, roles, agent pool, and legac
 roll agent list                      # Show agents installed on this machine
 ```
 
+When semantic pick ranking is enabled, `roll loop watch --events` includes a
+`pick:ranked` line such as `picked US-123 (rank 1/5: unblocks the release lane)`.
+`roll supervisor next` and `roll supervisor next --json` show the latest top
+three ranking suggestions and reasons. The ranking is advisory only; Hold, Cut,
+unsatisfied dependencies, skip-list, open PR, merged-delivery, and pending-publish
+gates still decide eligibility.
+
 ### Goal Mode vs Scheduled Mode
 
 `roll loop go` is a manual goal session, not a launchd scheduler tick. While it

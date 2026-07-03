@@ -219,6 +219,11 @@ function normalizeWritableRoots(roots: readonly string[] | undefined): string[] 
   return out;
 }
 
+function writableRootsForSpawn(opts: AgentSpawnOptions): string[] {
+  if (opts.purpose === "pick_ranking") return [];
+  return normalizeWritableRoots(opts.writableRoots);
+}
+
 function realpathSafe(path: string): string {
   try {
     return realpathSync(path);
@@ -343,7 +348,7 @@ const AGENT_PROFILES: Readonly<Record<string, AgentProfile>> = {
       // FIX-1065: sandboxed PR-heal agents need write access to the linked
       // worktree gitdir (and any other explicitly-granted roots) even though it
       // lives outside the workspace. Pass each root as --add-dir.
-      for (const root of normalizeWritableRoots(opts.writableRoots)) {
+      for (const root of writableRootsForSpawn(opts)) {
         args.push("--add-dir", root);
       }
       const prompt = agentPrompt(opts);
@@ -379,7 +384,7 @@ const AGENT_PROFILES: Readonly<Record<string, AgentProfile>> = {
       // FIX-1036: write a per-cycle reasonix.toml so the Seatbelt sandbox
       // allows writes to the git common dir (outside the worktree root).
       // The file is cleaned up via opts.cleanup after the child exit.
-      const roots = normalizeWritableRoots(opts.writableRoots);
+      const roots = writableRootsForSpawn(opts);
       if (roots.length > 0) opts.cleanup = chainCleanup(opts.cleanup, writeReasonixSandboxConfig(opts.cwd, roots));
       return {
         bin: opts.bin ?? "reasonix",

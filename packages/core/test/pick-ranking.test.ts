@@ -37,6 +37,17 @@ describe("pick semantic ranking — parser", () => {
     expect(parsePickRankingJson('[{"id":"US-1","score":101,"reason":"x"}]', candidates).ok).toBe(false);
     expect(parsePickRankingJson('[{"id":"US-1","score":50,"reason":""}]', candidates).ok).toBe(false);
   });
+
+  it("accepts text noise around the first valid JSON array", () => {
+    const parsed = parsePickRankingJson(
+      'ignore range [0-100]\n[{"id":"US-1","score":80,"reason":"ready now"}]\ntrailing text',
+      [item("US-1")],
+    );
+    expect(parsed).toEqual({
+      ok: true,
+      entries: [{ id: "US-1", score: 80, reason: "ready now" }],
+    });
+  });
 });
 
 describe("pick semantic ranking — cache key", () => {

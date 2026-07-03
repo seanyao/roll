@@ -37,12 +37,30 @@ export function parsePickRankingJson(
   text: string,
   candidates: readonly BacklogItem[] = [],
 ): PickRankingParseResult {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(text);
-  } catch {
-    return { ok: false, reason: "bad_json" };
+  let firstInvalid: PickRankingParseResult | undefined;
+  for (const candidate of jsonArrayCandidates(text)) {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(candidate);
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(raw)) {
+      firstInvalid ??= { ok: false, reason: "not_array" };
+      continue;
+    }
+    const parsed = parsePickRankingArray(raw, candidates);
+    if (parsed.ok) return parsed;
+    firstInvalid ??= parsed;
   }
+  if (firstInvalid !== undefined) return firstInvalid;
+  return { ok: false, reason: "bad_json" };
+}
+
+function parsePickRankingArray(
+  raw: unknown[],
+  candidates: readonly BacklogItem[],
+): PickRankingParseResult {
   if (!Array.isArray(raw)) return { ok: false, reason: "not_array" };
   const candidateIds = new Set(candidates.map((row) => row.id));
   const seen = new Set<string>();
@@ -64,6 +82,43 @@ export function parsePickRankingJson(
     entries.push({ id, score, reason });
   }
   return { ok: true, entries };
+}
+
+function* jsonArrayCandidates(text: string): Iterable<string> {
+  const trimmed = text.trim();
+  if (trimmed === "") return;
+  yield trimmed;
+
+  for (let i = 0; i < trimmed.length; i += 1) {
+    if (trimmed[i] !== "[") continue;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let j = i; j < trimmed.length; j += 1) {
+      const ch = trimmed[j];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (ch === "\\") {
+          escaped = true;
+        } else if (ch === "\"") {
+          inString = false;
+        }
+        continue;
+      }
+      if (ch === "\"") {
+        inString = true;
+      } else if (ch === "[") {
+        depth += 1;
+      } else if (ch === "]") {
+        depth -= 1;
+        if (depth === 0) {
+          yield trimmed.slice(i, j + 1);
+          break;
+        }
+      }
+    }
+  }
 }
 
 export function advisoryRankItems(

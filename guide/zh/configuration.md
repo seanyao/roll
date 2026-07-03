@@ -76,6 +76,17 @@ loop_safety:
 只有显式迁移窗口才应使用 `attest_gate: soft`。soft 模式保留审计记录和告警，
 但不阻塞本轮交付。
 
+自动选卡还有一层 advisory 语义排序。它默认开启，也可以显式关闭：
+
+```yaml
+pick:
+  semantic_ranking: off
+```
+
+开启后，Roll 只在 backlog / candidate hash 变化时让默认 agent 排序一次，并把结果
+缓存到 `.roll/loop/pick-ranking.json`；最终仍由既有 picker gates 决定能不能选。
+如果 agent 超时或返回坏 JSON，Roll 记录 `harness_failure` 并回落到确定性顺序。
+
 ## 验证
 
 `roll status` 会打印解析后的路径，便于确认覆盖是否生效；

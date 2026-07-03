@@ -49,6 +49,34 @@ describe("parseEventLine (I8: readers skip bad lines, never crash)", () => {
     const e: RollEvent = { type: "loop:fire", loop: "main", ts: 0 };
     expect(e.ts).toBe(0);
   });
+  it("types and parses pick:ranked advisory events", () => {
+    const e: RollEvent = {
+      type: "pick:ranked",
+      cycleId: "c1",
+      picked: "US-2",
+      rank: 1,
+      total: 2,
+      reason: "unblocks the release lane",
+      ranking: [
+        { id: "US-2", score: 95, reason: "unblocks the release lane" },
+        { id: "FIX-1", score: 20, reason: "small cleanup" },
+      ],
+      source: "agent",
+      ts: 1,
+    };
+    expect(parseEventLine(JSON.stringify(e))).toMatchObject({ type: "pick:ranked", picked: "US-2" });
+  });
+  it("types and parses harness_failure events for semantic ranking fail-open", () => {
+    const e: RollEvent = {
+      type: "harness_failure",
+      channel: "US-LOOP-090",
+      operation: "pick.semantic_ranking",
+      reason: "bad_json",
+      detail: "agent output was not parseable",
+      ts: 2,
+    };
+    expect(parseEventLine(JSON.stringify(e))).toMatchObject({ type: "harness_failure", operation: "pick.semantic_ranking" });
+  });
   it("parses an attest:gate line (FIX-207)", () => {
     const e = parseEventLine(
       '{"type":"attest:gate","cycleId":"c1","verdict":"skipped","reasons":["no fresh report"],"ts":2}',

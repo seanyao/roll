@@ -219,6 +219,11 @@ function normalizeWritableRoots(roots: readonly string[] | undefined): string[] 
   return out;
 }
 
+function writableRootsForSpawn(opts: AgentSpawnOptions): string[] {
+  if (opts.purpose === "pick_ranking") return [];
+  return normalizeWritableRoots(opts.writableRoots);
+}
+
 function realpathSafe(path: string): string {
   try {
     return realpathSync(path);
@@ -343,7 +348,7 @@ const AGENT_PROFILES: Readonly<Record<string, AgentProfile>> = {
       // FIX-1065: sandboxed PR-heal agents need write access to the linked
       // worktree gitdir (and any other explicitly-granted roots) even though it
       // lives outside the workspace. Pass each root as --add-dir.
-      for (const root of normalizeWritableRoots(opts.writableRoots)) {
+      for (const root of writableRootsForSpawn(opts)) {
         args.push("--add-dir", root);
       }
       const prompt = agentPrompt(opts);
@@ -379,7 +384,7 @@ const AGENT_PROFILES: Readonly<Record<string, AgentProfile>> = {
       // FIX-1036: write a per-cycle reasonix.toml so the Seatbelt sandbox
       // allows writes to the git common dir (outside the worktree root).
       // The file is cleaned up via opts.cleanup after the child exit.
-      const roots = normalizeWritableRoots(opts.writableRoots);
+      const roots = writableRootsForSpawn(opts);
       if (roots.length > 0) opts.cleanup = chainCleanup(opts.cleanup, writeReasonixSandboxConfig(opts.cwd, roots));
       return {
         bin: opts.bin ?? "reasonix",
@@ -471,8 +476,12 @@ export function missingAgentSecretEnv(
   return agentCredentialReadiness(agent, env, home).missingEnv;
 }
 
+export type AgentSpawnPurpose = "builder" | "pick_ranking";
+
 /** Options for an {@link AgentSpawn} call. */
 export interface AgentSpawnOptions {
+  /** Explicit call-site intent so harness-only spawns are distinguishable from builder work. */
+  purpose?: AgentSpawnPurpose;
   /** US-PORT-011: live sink — called with every raw stdout/stderr chunk as it
    *  arrives (the observation window tails the file this feeds). */
   onChunk?: (chunk: Buffer) => void;
@@ -525,10 +534,17 @@ export interface AgentSpawnResult {
 
 /** The injectable agent-spawn port. Real impl below; tests pass a fake that
  *  fabricates a tcr commit in the worktree fixture without any real agent. */
-export type AgentSpawn = (
+export type AgentSpawn = ((
   agent: string,
   opts: AgentSpawnOptions,
-) => Promise<AgentSpawnResult>;
+) => Promise<AgentSpawnResult>) & {
+  /** Optional capability declaration. Missing means only legacy builder semantics are known. */
+  supportedPurposes?: readonly AgentSpawnPurpose[];
+};
+
+export function agentSpawnSupportsPurpose(spawn: AgentSpawn, purpose: AgentSpawnPurpose): boolean {
+  return spawn.supportedPurposes?.includes(purpose) === true;
+}
 
 /**
  * Real agent spawn: build the argv for the resolved agent and run it via
@@ -790,3 +806,4 @@ export const realAgentSpawn: AgentSpawn = (agent, opts) => {
   const { bin, args, pty } = withPtyWrap(buildSpawnCommand(agent, opts), agent);
   return spawnAndWait(bin, args, withAgentProfileEnv(agent, opts), pty);
 };
+realAgentSpawn.supportedPurposes = ["pick_ranking"];

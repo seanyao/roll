@@ -103,6 +103,30 @@ describe("pickStory — type priority and file order", () => {
     const items = [item("FIX-1", "🚫 Hold"), item("REFACTOR-1", TODO), item("US-1", TODO)];
     expect(pickStory(items)?.id).toBe("US-1");
   });
+
+  it("uses advisory semantic ranking before deterministic prefix/file order when provided", () => {
+    const items = [item("FIX-1", TODO), item("US-1", TODO), item("US-2", TODO)];
+    expect(
+      pickStory(items, {
+        ranking: [
+          { id: "US-2", score: 95, reason: "unblocks more follow-up work" },
+          { id: "FIX-1", score: 20, reason: "less urgent" },
+        ],
+      })?.id,
+    ).toBe("US-2");
+  });
+
+  it("still applies eligibility gates after advisory ranking", () => {
+    const items = [item("US-HOLD", "🚫 Hold"), item("US-BLOCKED", TODO, "depends-on:US-MISSING"), item("FIX-1", TODO)];
+    expect(
+      pickStory(items, {
+        ranking: [
+          { id: "US-HOLD", score: 100, reason: "owner hold must still win" },
+          { id: "US-BLOCKED", score: 99, reason: "blocked must still wait" },
+        ],
+      })?.id,
+    ).toBe("FIX-1");
+  });
 });
 
 describe("pickStory — depends-on chains", () => {

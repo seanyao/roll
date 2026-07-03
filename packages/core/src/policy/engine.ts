@@ -141,6 +141,12 @@ export interface LoopSafetyConfig {
 export interface Policy {
   modelRouting: PolicyRoutingRule[];
   loopSafety: LoopSafetyConfig;
+  pick: PickPolicyConfig;
+}
+
+export interface PickPolicyConfig {
+  /** IDEA-069 semantic ranking is advisory and default-on unless explicitly off. */
+  semanticRanking: "on" | "off";
 }
 
 /** Defaults mirroring the only v2 numbers (US-LOOP-057 strike count = 3). */
@@ -269,6 +275,7 @@ export function parsePolicy(yaml: string): Policy {
     cycleWallTimeoutSec: DEFAULT_CYCLE_WALL_TIMEOUT_SEC,
     cycleNoProgressSec: DEFAULT_CYCLE_NO_PROGRESS_SEC,
   };
+  let pick: PickPolicyConfig = { semanticRanking: "on" };
 
   for (let i = 0; i < lines.length; i++) {
     const ln = lines[i];
@@ -280,9 +287,13 @@ export function parsePolicy(yaml: string): Policy {
       const [next, safety] = parseLoopSafety(lines, i + 1);
       loopSafety = safety;
       i = next - 1;
+    } else if (ln.text.startsWith("pick:")) {
+      const [next, parsedPick] = parsePickPolicy(lines, i + 1);
+      pick = parsedPick;
+      i = next - 1;
     }
   }
-  return { modelRouting, loopSafety };
+  return { modelRouting, loopSafety, pick };
 }
 
 /** Parse the `model_routing:` list starting at `start`; append rules; return the
@@ -423,6 +434,23 @@ function parseLoopSafety(lines: PreLine[], start: number): [number, LoopSafetyCo
     ...(flat["resume_scope"] === "same-story" ? { resumeScope: "same-story" as const } : {}),
   };
   return [i, cfg];
+}
+
+function parsePickPolicy(lines: PreLine[], start: number): [number, PickPolicyConfig] {
+  const flat: Record<string, string> = {};
+  let i = start;
+  for (; i < lines.length; i++) {
+    const ln = lines[i];
+    if (ln === undefined) break;
+    if (ln.indent === 0) break;
+    const text = ln.text.trim();
+    const idx = text.indexOf(":");
+    if (idx < 0) continue;
+    const key = text.slice(0, idx).trim();
+    const val = text.slice(idx + 1).trim();
+    if (val !== "") flat[key] = unquote(val);
+  }
+  return [i, { semanticRanking: flat["semantic_ranking"] === "off" ? "off" : "on" }];
 }
 
 

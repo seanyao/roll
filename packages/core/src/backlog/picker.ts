@@ -28,6 +28,7 @@
 import { classifyStatus, STATUS_MARKER } from "@roll/spec";
 import type { BacklogReason } from "@roll/spec";
 import type { BacklogItem } from "./store.js";
+import { advisoryRankItems, type PickRankingEntry } from "./pick-ranking.js";
 
 /** Substring the oracle greps for to decide a dependency is satisfied. */
 const DONE = STATUS_MARKER.done;
@@ -68,6 +69,11 @@ export interface PickOptions {
    * delivery. Optional; defaults to "nothing pending".
    */
   hasPendingPublish?: (id: string) => boolean;
+  /**
+   * IDEA-069: advisory semantic ranking. When present, the picker scans this
+   * suggested order first, but every existing eligibility gate still applies.
+   */
+  ranking?: readonly PickRankingEntry[];
 }
 
 /** First occurrence of a depends-on tag, mirroring the bash regex. */
@@ -174,6 +180,14 @@ export function isEligible(
  */
 export function pickStory(items: BacklogItem[], opts: PickOptions = {}): BacklogItem | undefined {
   const isDone = buildDoneIndex(items);
+
+  if (opts.ranking !== undefined && opts.ranking.length > 0) {
+    for (const it of advisoryRankItems(items, opts.ranking)) {
+      if (!/^(FIX|US|REFACTOR)-/.test(it.id)) continue;
+      if (isEligible(it, isDone, opts)) return it;
+    }
+    return undefined;
+  }
 
   for (const prefix of PREFIXES) {
     for (const it of items) {

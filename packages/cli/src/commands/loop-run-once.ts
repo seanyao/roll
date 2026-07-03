@@ -18,7 +18,7 @@ import { createScheduler, isOwnerHeld, launchdLabel, projectIdentity, readLockOw
 import { dormantMarkerPath, resolveLoopRunState, writeDormantMarker } from "./loop-sched.js";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { type RunnerPaths, buildRunRow, dryRunPlan, killLiveAgents, nodePorts, realAgentSpawn, runCycleOnce } from "../runner/index.js";
+import { type AgentSpawn, type RunnerPaths, buildRunRow, dryRunPlan, killLiveAgents, nodePorts, realAgentSpawn, runCycleOnce } from "../runner/index.js";
 import { clearCardFailure, recordCardFailure } from "../runner/skip-cards.js";
 import { addPendingPublish, removePendingPublish } from "../runner/pending-publish.js";
 import { autoRecoverEnabled, clearSelfHeal, selfHealBudget } from "../runner/selfheal-budget.js";
@@ -981,18 +981,18 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   // terminal — strip --verbose and --output-format stream-json so the user sees
   // readable text instead of a JSON flood.
   const isInteractive = (process.env["ROLL_LOOP_FORCE"] ?? "").trim() !== "";
+  let interactiveAgentSpawn: AgentSpawn | undefined;
+  if (isInteractive) {
+    interactiveAgentSpawn = (agent, opts) => realAgentSpawn(agent, { ...opts, interactive: true });
+    interactiveAgentSpawn.supportedPurposes = realAgentSpawn.supportedPurposes;
+  }
 
   const basePorts = nodePorts({
     repoCwd: id.path,
     paths,
     skillBody,
     routeDeps,
-    ...(isInteractive
-      ? {
-          agentSpawn: (agent: string, opts: Parameters<typeof realAgentSpawn>[1]) =>
-            realAgentSpawn(agent, { ...opts, interactive: true }),
-        }
-      : {}),
+    ...(interactiveAgentSpawn !== undefined ? { agentSpawn: interactiveAgentSpawn } : {}),
   });
   const ports =
     allowedCards === undefined

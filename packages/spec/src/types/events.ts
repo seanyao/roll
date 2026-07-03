@@ -152,6 +152,27 @@ export type RollEvent =
     }
   // Routing (BC3) — auditable, reproducible (I10)
   | { type: "route:resolve"; storyId: string; level: TaskLevel; agent: AgentId; model: string; rule: string; ts: number }
+  // IDEA-069 — advisory semantic backlog ranking. This is explanatory only:
+  // picker eligibility gates remain authoritative.
+  | {
+      type: "pick:ranked";
+      cycleId: string;
+      picked: string;
+      rank: number;
+      total: number;
+      reason: string;
+      ranking: Array<{ id: string; score: number; reason: string }>;
+      source: "agent" | "cache";
+      ts: number;
+    }
+  | {
+      type: "harness_failure";
+      channel: "US-LOOP-090";
+      operation: string;
+      reason: string;
+      detail: string;
+      ts: number;
+    }
   // Delivery (BC4)
   | { type: "pr:open"; prNumber: number; storyId: string; ts: number }
   | { type: "pr:merge"; prNumber: number; storyId: string; ts: number }

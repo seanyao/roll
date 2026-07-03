@@ -86,6 +86,20 @@ loop_safety:
 Use `attest_gate: soft` only for an explicit migration window. Soft mode keeps
 the audit trail and alert, but it does not block the delivery cycle.
 
+Automatic card picking also has an advisory semantic ranking layer. It is on by
+default and can be disabled explicitly:
+
+```yaml
+pick:
+  semantic_ranking: off
+```
+
+When enabled, Roll asks the default agent to rank the current candidate backlog
+only when the backlog/candidate hash changes, caches the result in
+`.roll/loop/pick-ranking.json`, and then still applies the normal picker gates.
+If the agent times out or returns bad JSON, Roll records `harness_failure` and
+falls back to the deterministic order.
+
 ## Verifying
 
 `roll status` prints the resolved paths so you can confirm overrides took

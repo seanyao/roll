@@ -113,6 +113,13 @@ describe("parsePolicy — v3 spec shape round-trip", () => {
       cycleWallTimeoutSec: 2700,
       cycleNoProgressSec: 900,
     });
+    expect(p.pick.semanticRanking).toBe("on");
+  });
+
+  it("parses pick.semantic_ranking with default-on semantics", () => {
+    expect(parsePolicy("pick:\n  semantic_ranking: off\n").pick.semanticRanking).toBe("off");
+    expect(parsePolicy("pick:\n  semantic_ranking: on\n").pick.semanticRanking).toBe("on");
+    expect(parsePolicy("pick:\n  semantic_ranking: maybe\n").pick.semanticRanking).toBe("on");
   });
 
   it("FIX-907: parses loop_safety cycle timeout thresholds; absent ⇒ 45min wall / 15min no-progress", () => {

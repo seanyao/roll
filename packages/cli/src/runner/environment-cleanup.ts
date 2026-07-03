@@ -15,6 +15,7 @@
  */
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
+import type { V2CycleStatus } from "@roll/core";
 
 /** A single cleanup rule. */
 export interface CleanupRule {
@@ -24,6 +25,8 @@ export interface CleanupRule {
   kind: "rm" | "isolate";
   /** Glob-ish paths relative to the worktree root. `**` is supported for directories. */
   paths: string[];
+  /** Optional terminal statuses where this rule is allowed to run. Omitted means all terminals. */
+  terminalStatuses?: V2CycleStatus[];
 }
 
 /** Result of applying one path target. */
@@ -40,6 +43,11 @@ export interface CleanupManifest {
   rules: CleanupRule[];
 }
 
+/** Overall cleanup budget. Terminal recording and lock release must never wait longer. */
+export const CLEANUP_TIMEOUT_MS = 10_000;
+
+const HEAVY_CLEANUP_TERMINALS: V2CycleStatus[] = ["idle", "done", "published", "orphan"];
+
 /** Default manifest — keeps the harness honest without touching source. */
 export const DEFAULT_CLEANUP_MANIFEST: CleanupManifest = {
   version: 1,
@@ -53,19 +61,28 @@ export const DEFAULT_CLEANUP_MANIFEST: CleanupManifest = {
       name: "node-tool-cache",
       kind: "rm",
       paths: ["node_modules/.cache", ".vite", ".vitest-cache"],
+      terminalStatuses: HEAVY_CLEANUP_TERMINALS,
     },
     {
       name: "python-cache",
       kind: "rm",
       paths: ["**/__pycache__"],
+      terminalStatuses: HEAVY_CLEANUP_TERMINALS,
     },
     {
       name: "swift-build-cache",
       kind: "rm",
       paths: [".build"],
+      terminalStatuses: HEAVY_CLEANUP_TERMINALS,
     },
   ],
 };
+
+export interface CleanupOptions {
+  terminalStatus?: V2CycleStatus;
+  maxDurationMs?: number;
+  nowMs?: () => number;
+}
 
 /**
  * Read a project-level cleanup manifest, if present. Returns `undefined` when the
@@ -87,6 +104,7 @@ export function parseCleanupManifest(text: string): CleanupManifest | undefined 
   const rules: CleanupRule[] = [];
   let current: Partial<CleanupRule> | undefined;
   let inPaths = false;
+  let inTerminalStatuses = false;
 
   for (let raw of lines) {
     const line = (raw.split("#")[0] ?? raw).trimEnd();
@@ -95,6 +113,7 @@ export function parseCleanupManifest(text: string): CleanupManifest | undefined 
 
     if (trim === "rules:") {
       inPaths = false;
+      inTerminalStatuses = false;
       continue;
     }
 
@@ -105,6 +124,7 @@ export function parseCleanupManifest(text: string): CleanupManifest | undefined 
       }
       current = { name: nameMatch[1]?.trim() ?? "", paths: [] };
       inPaths = false;
+      inTerminalStatuses = false;
       continue;
     }
 
@@ -117,12 +137,27 @@ export function parseCleanupManifest(text: string): CleanupManifest | undefined 
     const pathsMatch = /^\s+paths:\s*$/.exec(line);
     if (pathsMatch && current) {
       inPaths = true;
+      inTerminalStatuses = false;
+      continue;
+    }
+
+    const terminalStatusesMatch = /^\s+terminal_statuses:\s*$/.exec(line);
+    if (terminalStatusesMatch && current) {
+      current.terminalStatuses = [];
+      inPaths = false;
+      inTerminalStatuses = true;
       continue;
     }
 
     const pathItemMatch = /^\s+-\s*(.+)$/.exec(line);
     if (pathItemMatch && current && inPaths) {
       current.paths!.push(pathItemMatch[1]?.trim() ?? "");
+      continue;
+    }
+
+    if (pathItemMatch && current && inTerminalStatuses) {
+      const status = pathItemMatch[1]?.trim();
+      if (isV2CycleStatus(status)) current.terminalStatuses!.push(status);
       continue;
     }
   }
@@ -134,6 +169,25 @@ export function parseCleanupManifest(text: string): CleanupManifest | undefined 
   return rules.length > 0 ? { version: 1, rules } : undefined;
 }
 
+function isV2CycleStatus(value: string | undefined): value is V2CycleStatus {
+  return (
+    value === "idle" ||
+    value === "gave_up" ||
+    value === "handoff_without_tcr" ||
+    value === "agent_internal" ||
+    value === "built" ||
+    value === "done" ||
+    value === "published" ||
+    value === "orphan" ||
+    value === "local" ||
+    value === "needs_review" ||
+    value === "failed" ||
+    value === "aborted" ||
+    value === "blocked" ||
+    value === "dormant"
+  );
+}
+
 /**
  * Apply the manifest to a worktree. Returns one result row per matched path.
  * Never throws — every failure is captured as a result with `ok: false`.
@@ -142,19 +196,60 @@ export function applyCleanupManifest(
   worktreePath: string,
   cycleId: string,
   manifest: CleanupManifest,
+  opts: CleanupOptions = {},
 ): CleanupResult[] {
   const results: CleanupResult[] = [];
+  const started = (opts.nowMs ?? Date.now)();
+  const maxDurationMs = opts.maxDurationMs ?? CLEANUP_TIMEOUT_MS;
+  const deadline = started + maxDurationMs;
+  const now = opts.nowMs ?? Date.now;
+  let timedOut = false;
   for (const rule of manifest.rules) {
+    if (timedOut) break;
+    if (opts.terminalStatus !== undefined && rule.terminalStatuses !== undefined && !rule.terminalStatuses.includes(opts.terminalStatus)) {
+      results.push({
+        rule: rule.name,
+        path: ".",
+        ok: true,
+        warning: `skipped for terminal status ${opts.terminalStatus}`,
+      });
+      continue;
+    }
+    if (now() >= deadline) {
+      results.push(cleanupTimeoutResult(maxDurationMs));
+      timedOut = true;
+      break;
+    }
     for (const pattern of rule.paths) {
-      for (const target of resolvePattern(worktreePath, pattern)) {
+      if (now() >= deadline) {
+        results.push(cleanupTimeoutResult(maxDurationMs));
+        timedOut = true;
+        break;
+      }
+      for (const target of resolvePattern(worktreePath, pattern, deadline, now)) {
+        if (now() >= deadline) {
+          results.push(cleanupTimeoutResult(maxDurationMs));
+          timedOut = true;
+          break;
+        }
         results.push(applyRule(worktreePath, cycleId, rule, target));
       }
+      if (timedOut) break;
     }
   }
   return results;
 }
 
-function resolvePattern(worktreePath: string, pattern: string): string[] {
+function cleanupTimeoutResult(maxDurationMs: number): CleanupResult {
+  return {
+    rule: "cleanup-timebox",
+    path: ".",
+    ok: false,
+    warning: `cleanup exceeded ${maxDurationMs}ms; remaining rules skipped`,
+  };
+}
+
+function resolvePattern(worktreePath: string, pattern: string, deadline: number, now: () => number): string[] {
   if (!pattern.includes("**")) {
     const abs = join(worktreePath, pattern);
     // Always return literal paths so applyRule can enforce the worktree boundary
@@ -169,11 +264,12 @@ function resolvePattern(worktreePath: string, pattern: string): string[] {
   if (!existsSync(base)) return [];
   const suffix = rest?.replace(/^\//, "") ?? "";
   const matches: string[] = [];
-  walkRecursive(base, worktreePath, suffix, matches);
+  walkRecursive(base, worktreePath, suffix, matches, deadline, now);
   return matches;
 }
 
-function walkRecursive(dir: string, worktreePath: string, suffix: string, out: string[]): void {
+function walkRecursive(dir: string, worktreePath: string, suffix: string, out: string[], deadline: number, now: () => number): void {
+  if (now() >= deadline) return;
   let entries: string[];
   try {
     entries = readdirSync(dir);
@@ -181,6 +277,7 @@ function walkRecursive(dir: string, worktreePath: string, suffix: string, out: s
     return;
   }
   for (const entry of entries) {
+    if (now() >= deadline) return;
     const abs = join(dir, entry);
     const rel = relative(worktreePath, abs);
     if (suffix && rel.endsWith(suffix)) {
@@ -188,7 +285,7 @@ function walkRecursive(dir: string, worktreePath: string, suffix: string, out: s
     }
     try {
       if (lstatSync(abs).isDirectory()) {
-        walkRecursive(abs, worktreePath, suffix, out);
+        walkRecursive(abs, worktreePath, suffix, out, deadline, now);
       }
     } catch {
       // ignore unreadable entries

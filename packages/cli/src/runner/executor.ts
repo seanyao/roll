@@ -209,6 +209,7 @@ import { formatEvaluationContractForScorer, parseEvaluationContract } from "../l
 import { readLatestStoryReviewScore, REVIEW_SCORE_LOW_THRESHOLD, type ReviewScoreEntry } from "../lib/review-score.js";
 import {
   applyCleanupManifest,
+  CLEANUP_TIMEOUT_MS,
   resolveCleanupManifest,
   type CleanupResult,
 } from "./environment-cleanup.js";
@@ -2857,7 +2858,10 @@ export async function executeCommand(
     case "cleanup_environment": {
       const manifestPath = join(ports.repoCwd, ".roll", "loop", "cleanup-manifest.yaml");
       const manifest = resolveCleanupManifest(ports.paths.worktreePath, manifestPath);
-      const results = applyCleanupManifest(ports.paths.worktreePath, ctx.cycleId, manifest);
+      const results = applyCleanupManifest(ports.paths.worktreePath, ctx.cycleId, manifest, {
+        terminalStatus: cmd.terminalStatus,
+        maxDurationMs: CLEANUP_TIMEOUT_MS,
+      });
       for (const r of results) {
         appendCleanupEvent(ports, ctx, r);
       }

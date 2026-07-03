@@ -720,7 +720,7 @@ export type CycleCommand =
   | { kind: "rescue_leaked"; cycleId: string } // FIX-903: save leaked main commits to rescue ref.
   | { kind: "wait_merge"; branch: string; elapsedSec: number } // delivery/pr nextWaitAction.
   | { kind: "reconcile" } // reconcile/engine reconcileMergeEvidence.
-  | { kind: "cleanup_environment" } // US-LOOP-088: post-cycle env cleanup before worktree removal.
+  | { kind: "cleanup_environment"; terminalStatus?: V2CycleStatus } // US-LOOP-088: post-cycle env cleanup before worktree removal.
   | { kind: "cleanup_worktree"; branch: string } // _worktree_cleanup.
   | { kind: "emit_event"; event: RollEvent } // events/bus appendEvent (I8).
   | { kind: "append_run"; status: V2CycleStatus; outcome: TerminalOutcome; cycleId: string } // events/bus upsertRun.
@@ -928,10 +928,15 @@ function terminate(
   outcome: TerminalOutcome = mapV2Status(status),
 ): StepResult {
   const tctx = terminalCtx(state);
+  const extraWithStatus = extra.map((cmd) => cmd.kind === "cleanup_environment" ? { ...cmd, terminalStatus: status } : cmd);
+  const cleanup = extraWithStatus.filter((cmd) => cmd.kind === "cleanup_environment" || cmd.kind === "cleanup_worktree");
+  const beforeTerminal = extraWithStatus.filter((cmd) => cmd.kind !== "cleanup_environment" && cmd.kind !== "cleanup_worktree");
   const commands: CycleCommand[] = [
-    ...extra,
+    ...beforeTerminal,
     { kind: "emit_event", event: cycleEndEvent(tctx, status, 0, outcome) },
     { kind: "append_run", status, outcome, cycleId: state.ctx.cycleId },
+    { kind: "release_lock" },
+    ...cleanup,
   ];
   return {
     state: { ...state, phase: "cleanup", terminal: status, done: true },

@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   applyCleanupManifest,
+  CLEANUP_TIMEOUT_MS,
   DEFAULT_CLEANUP_MANIFEST,
   parseCleanupManifest,
   resolveCleanupManifest,
@@ -70,6 +71,26 @@ rules:
     expect(parsed).toEqual({
       version: 1,
       rules: [{ name: "custom-scratch", kind: "rm", paths: [".custom-scratch", ".cache"] }],
+    });
+  });
+
+  it("parses terminal-scoped cleanup rules", () => {
+    const text = `
+rules:
+  - name: heavy-cache
+    kind: rm
+    paths:
+      - .heavy
+    terminal_statuses:
+      - done
+      - published
+`;
+    const parsed = parseCleanupManifest(text);
+    expect(parsed?.rules[0]).toEqual({
+      name: "heavy-cache",
+      kind: "rm",
+      paths: [".heavy"],
+      terminalStatuses: ["done", "published"],
     });
   });
 
@@ -129,6 +150,38 @@ describe("applyCleanupManifest", () => {
     expect(existsSync(source)).toBe(true);
     expect(existsSync(uncommitted)).toBe(true);
     expect(existsSync(join(worktree, ".scratch"))).toBe(false);
+  });
+
+  it("blocked terminal runs only lightweight cleanup and skips heavy cache rules", () => {
+    touch(join(worktree, ".scratch", "leftover.tmp"));
+    touch(join(worktree, "node_modules", ".cache", "esbuild", "abc"));
+    touch(join(worktree, "src", "lib", "__pycache__", "mod.cpython-312.pyc"));
+    const results = applyCleanupManifest(worktree, "c1", DEFAULT_CLEANUP_MANIFEST, { terminalStatus: "blocked" });
+    expect(existsSync(join(worktree, ".scratch"))).toBe(false);
+    expect(existsSync(join(worktree, "node_modules", ".cache"))).toBe(true);
+    expect(existsSync(join(worktree, "src", "lib", "__pycache__"))).toBe(true);
+    expect(results).toContainEqual(expect.objectContaining({ rule: "node-tool-cache", ok: true, warning: "skipped for terminal status blocked" }));
+    expect(results).toContainEqual(expect.objectContaining({ rule: "python-cache", ok: true, warning: "skipped for terminal status blocked" }));
+  });
+
+  it("stops cleanup when the overall timebox is exhausted", () => {
+    touch(join(worktree, ".scratch", "leftover.tmp"));
+    touch(join(worktree, "tmp", "build.log"));
+    let now = 0;
+    const results = applyCleanupManifest(worktree, "c1", DEFAULT_CLEANUP_MANIFEST, {
+      maxDurationMs: 5,
+      nowMs: () => {
+        now += 10;
+        return now;
+      },
+    });
+    expect(results).toContainEqual({
+      rule: "cleanup-timebox",
+      path: ".",
+      ok: false,
+      warning: "cleanup exceeded 5ms; remaining rules skipped",
+    });
+    expect(CLEANUP_TIMEOUT_MS).toBeLessThanOrEqual(10_000);
   });
 
   it("isolates a cache dir into the cycle-local cleanup root", () => {

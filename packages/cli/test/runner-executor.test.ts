@@ -3362,6 +3362,28 @@ describe("executeCommand — command → executor mapping", () => {
     expect(scratchEvent?.[1]).toMatchObject({ type: "cycle:cleanup", cycleId: CTX.cycleId, rule: "scratch-dirs", ok: true });
   });
 
+  it("US-LOOP-088: blocked cleanup skips heavy cache rules and records warnings", async () => {
+    const wt = mkdtempSync(join(tmpdir(), "roll-cleanup-blocked-exec-"));
+    execDirs.push(wt);
+    mkdirSync(join(wt, ".scratch"), { recursive: true });
+    writeFileSync(join(wt, ".scratch", "leftover.tmp"), "junk", "utf8");
+    mkdirSync(join(wt, "node_modules", ".cache"), { recursive: true });
+    writeFileSync(join(wt, "node_modules", ".cache", "cache.bin"), "cache", "utf8");
+    const { ports, calls } = fakePorts({ paths: { ...fakePorts().ports.paths, worktreePath: wt } });
+    await executeCommand({ kind: "cleanup_environment", terminalStatus: "blocked" }, ports, CTX);
+    expect(existsSync(join(wt, ".scratch"))).toBe(false);
+    expect(existsSync(join(wt, "node_modules", ".cache"))).toBe(true);
+    const events = (calls["event"] ?? []) as [string, RollEvent][];
+    const nodeEvent = events.find(([, ev]) => ev.type === "cycle:cleanup" && ev.rule === "node-tool-cache");
+    expect(nodeEvent?.[1]).toMatchObject({
+      type: "cycle:cleanup",
+      cycleId: CTX.cycleId,
+      rule: "node-tool-cache",
+      ok: true,
+      warning: "skipped for terminal status blocked",
+    });
+  });
+
   it("cleanup_worktree calls the git remove port", async () => {
     const { ports } = fakePorts();
     await executeCommand({ kind: "cleanup_worktree", branch: "b" }, ports, CTX);

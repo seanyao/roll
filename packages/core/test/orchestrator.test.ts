@@ -502,10 +502,11 @@ describe("happy-path phase walk → done", () => {
       "capture_facts",
       "emit_event", // FIX-1068: builder finalization gate verdict before peer/attest/PR/cleanup
       "publish_pr",
-      "cleanup_environment", // US-LOOP-088: env cleanup before worktree removal
-      "cleanup_worktree",
       "emit_event", // cycle:end (published — merge pending, FIX-244)
       "append_run",
+      "release_lock",
+      "cleanup_environment", // US-LOOP-088: best-effort after terminal record + lock release
+      "cleanup_worktree",
     ]);
     expect(state.done).toBe(true);
     expect(state.terminal).toBe("published");
@@ -583,7 +584,7 @@ describe("failure branches", () => {
     ]);
     expect(state.terminal).toBe("idle");
     expect(mapV2Status(state.terminal!)).toBe("idle_no_work");
-    expect(kinds.slice(-4)).toEqual(["cleanup_environment", "cleanup_worktree", "emit_event", "append_run"]);
+    expect(kinds.slice(-5)).toEqual(["emit_event", "append_run", "release_lock", "cleanup_environment", "cleanup_worktree"]);
   });
 
   it("FIX-252: local-main drift fails loud, saves rescue ref, leaves worktree, and writes an alert", () => {
@@ -599,7 +600,7 @@ describe("failure branches", () => {
     expect(state.terminal).toBe("failed");
     expect(kinds).not.toContain("cleanup_worktree");
     // FIX-903: rescue_leaked saves commits before alert + terminal
-    expect(kinds.slice(-4)).toEqual(["rescue_leaked", "append_alert", "emit_event", "append_run"]);
+    expect(kinds.slice(-5)).toEqual(["rescue_leaked", "append_alert", "emit_event", "append_run", "release_lock"]);
     expect(commands.find((c) => c.kind === "rescue_leaked")).toMatchObject({
       kind: "rescue_leaked",
       cycleId: CTX.cycleId,
@@ -628,7 +629,7 @@ describe("failure branches", () => {
       { type: "worktree_failed" },
     ]);
     expect(state.terminal).toBe("failed");
-    expect(kinds.slice(-4)).toEqual(["cleanup_environment", "cleanup_worktree", "emit_event", "append_run"]);
+    expect(kinds.slice(-5)).toEqual(["emit_event", "append_run", "release_lock", "cleanup_environment", "cleanup_worktree"]);
   });
 
   it("agent fail after retry budget → failed + ALERT (I6, no agent-swap)", () => {
@@ -653,7 +654,7 @@ describe("failure branches", () => {
     // attempt 3 fails → exhausted → failed terminal + alert
     cmds = drive({ type: "agent_exited", exit: 1, timedOut: false });
     expect(state.terminal).toBe("failed");
-    expect(cmds.map((c) => c.kind)).toEqual(["append_alert", "emit_event", "append_run"]);
+    expect(cmds.map((c) => c.kind)).toEqual(["append_alert", "emit_event", "append_run", "release_lock"]);
     // I6: no spawn_agent / no route-swap among the terminal commands.
     expect(cmds.some((c) => c.kind === "spawn_agent")).toBe(false);
   });

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   buildNorthStarReport,
@@ -38,6 +40,24 @@ function run(id: string, ts: string, status = "failed", extra: Partial<NorthStar
     failureClass: extra.failureClass,
     rootCauseKey: extra.rootCauseKey,
   };
+}
+
+function readJsonlFixture(file: string): Record<string, unknown>[] {
+  return readFileSync(join(__dirname, "fixtures", "north-star", file), "utf8")
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => JSON.parse(line) as unknown)
+    .filter((row): row is Record<string, unknown> => row !== null && typeof row === "object" && !Array.isArray(row));
+}
+
+function str(row: Record<string, unknown>, key: string): string | undefined {
+  const value = row[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function num(row: Record<string, unknown>, key: string): number | undefined {
+  const value = row[key];
+  return typeof value === "number" ? value : undefined;
 }
 
 function interruption(type: NorthStarEvent["type"], ts: string, extra: Partial<NorthStarEvent> = {}): NorthStarEvent {
@@ -210,35 +230,79 @@ describe("M2/M3/M4 anti-gaming contexts", () => {
   });
 });
 
-describe("real-history replay shape for 2026-06-20..2026-07-03", () => {
-  it("matches a manually audited slice for M1 and M2", () => {
+describe("real-history replay for 2026-06-20..2026-07-03", () => {
+  it("matches the audited real-data slice for M1 and M2", () => {
     const days = shDays("2026-07-03");
-    const runs: NorthStarRun[] = [];
-    for (let d = 0; d < 14; d++) {
-      const dayStart = days[d]?.startMs ?? 0;
-      for (let i = 0; i < 6; i++) {
-        runs.push(run(`real-${d}-${i}`, new Date(dayStart + i * hour).toISOString(), i < 3 ? "merged" : "failed", {
-          storyId: i < 3 ? `US-REAL-${d}-${i}` : `FIX-REAL-${d}-${i}`,
-        }));
-      }
-    }
-    // Manual audit for this fixture:
-    // - Each of 14 Shanghai days has exactly 6 non-idle attempts, so every day
-    //   is effective for M1.
-    // - A safety pause at 2026-07-01 00:00Z resets autonomy; from then to
-    //   2026-07-03 16:00Z is exactly 64 hours.
-    // - M2 has 42 delivered rows / 84 non-idle rows = 0.5.
+    const runs = readJsonlFixture("runs.jsonl").map((row): NorthStarRun => ({
+      runId: str(row, "run_id"),
+      cycleId: str(row, "cycle_id"),
+      status: str(row, "status"),
+      outcome: str(row, "outcome"),
+      ts: str(row, "ts") ?? num(row, "ts"),
+      storyId: str(row, "story_id"),
+      failureClass: str(row, "failure_class"),
+      rootCauseKey: str(row, "root_cause_key"),
+    }));
+    const events = readJsonlFixture("events.ndjson").map((row): NorthStarEvent => ({
+      type: str(row, "type"),
+      ts: str(row, "ts") ?? num(row, "ts"),
+      storyId: str(row, "storyId") ?? str(row, "story_id"),
+      actor: str(row, "actor"),
+      failureClass: str(row, "failure_class") ?? str(row, "failureClass"),
+    }));
+    const deliveries = readJsonlFixture("deliveries.jsonl").map((row) => ({
+      storyId: str(row, "storyId") ?? "",
+      lifecycleState: str(row, "lifecycleState"),
+      recordedAt: num(row, "recordedAt"),
+    }));
+    // Manual audit notes for the committed fixture:
+    // - Window: Shanghai days 2026-06-20..2026-07-03, fixed at
+    //   2026-07-03T15:59:59Z (23:59:59 UTC+8).
+    // - M1: 159 recognized interruption events. The latest safety pause is on
+    //   2026-07-03, and 2026-07-03 has fewer than six non-idle attempts, so the
+    //   current anti-gaming autonomy counter is 0h. The longest valid segment is
+    //   26.29h.
+    // - M2: 304 non-idle runs and 113 delivered/merged/done/published runs,
+    //   so delivery rate = 113 / 304 = 0.3717105263157895.
     const report = buildNorthStarReport({
-      nowMs: ms("2026-07-03T16:00:00Z"),
+      nowMs: ms("2026-07-03T15:59:59Z"),
       days,
       runs,
-      events: [interruption("policy:safety_pause", "2026-07-01T00:00:00Z")],
+      events,
       cards: [],
-      backlog: [],
-      deliveries: [],
+      backlog: [{ id: "US-ACTIVE", status: "Todo" }],
+      deliveries,
     });
 
-    expect(report.metrics.autonomy.current).toBe(64);
-    expect(report.metrics.deliveryRate.current).toBe(0.5);
+    expect(report.metrics.autonomy.current).toBe(0);
+    expect(report.metrics.autonomy.context.bestHours).toBe(26.29);
+    expect(report.metrics.autonomy.context.interruptions).toBe(159);
+    expect(report.metrics.deliveryRate.current).toBe(113 / 304);
+    expect(report.metrics.deliveryRate.context.nonIdleCycles).toBe(304);
+    expect(report.metrics.deliveryRate.context.deliveredCycles).toBe(113);
+  });
+
+  it("computes current-scale event volumes under the performance budget", () => {
+    const days = shDays("2026-07-03");
+    const baseEvents = readJsonlFixture("events.ndjson").map((row): NorthStarEvent => ({
+      type: str(row, "type"),
+      ts: str(row, "ts") ?? num(row, "ts"),
+      storyId: str(row, "storyId") ?? str(row, "story_id"),
+      actor: str(row, "actor"),
+      failureClass: str(row, "failure_class") ?? str(row, "failureClass"),
+    }));
+    const events = Array.from({ length: 13_018 }, (_, index) => baseEvents[index % baseEvents.length] ?? { type: "noop", ts: ms("2026-07-03T00:00:00Z") });
+    const start = performance.now();
+    buildNorthStarReport({
+      nowMs: ms("2026-07-03T15:59:59Z"),
+      days,
+      runs: [run("p1", "2026-07-03T01:00:00Z", "merged", { storyId: "US-PERF" })],
+      events,
+      cards: [],
+      backlog: [{ id: "US-ACTIVE", status: "Todo" }],
+      deliveries: [],
+    });
+    const elapsedMs = performance.now() - start;
+    expect(elapsedMs).toBeLessThan(5000);
   });
 });

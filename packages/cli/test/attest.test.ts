@@ -1441,6 +1441,38 @@ describe("US-PHYSICAL-004 — attest physical.screenshot provider lane", () => {
     expect(requestFiles(plainCaptureRoot)).toHaveLength(0);
   });
 
+  it("records provider failed responses with their reason", async () => {
+    const proj = physicalProject("US-PHYSICAL-004E");
+    const captureRoot = join(proj, "roll-capture-root");
+    const fake = physicalProviderFixture(captureRoot, (request) => responseFor(captureRoot, request, "failed", { reason: "screen recording permission denied" }));
+
+    await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["US-PHYSICAL-004E"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          rollCapture: { readiness: () => availableReadiness, provider: fake.port, root: captureRoot },
+        }),
+      ),
+    );
+
+    expect(fake.requests).toHaveLength(1);
+    const runDir = join(proj, ".roll", "features", "demo", "US-PHYSICAL-004E", "2026-06-06T01-02-03");
+    const html = readFileSync(join(runDir, "US-PHYSICAL-004E-report.html"), "utf8");
+    expect(html).toContain("requested → failed → not-attached");
+    expect(html).toContain("screen recording permission denied");
+    const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
+      captures?: Array<{ kind?: string; taken?: boolean; skipped?: string }>;
+    };
+    expect(evidence.captures).toContainEqual({
+      kind: "physical_terminal",
+      out: join(runDir, "screenshots", "physical.png"),
+      taken: false,
+      skipped: "screen recording permission denied",
+    });
+  });
+
   it("surfaces provider timeout as a distinct capture failure reason", async () => {
     const proj = physicalProject("US-PHYSICAL-004C");
     const captureRoot = join(proj, "roll-capture-root");

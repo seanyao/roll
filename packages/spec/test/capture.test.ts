@@ -164,6 +164,26 @@ describe("US-PHYSICAL-001 Roll Capture protocol contract", () => {
     }
   });
 
+  it("rejects nested output paths below a symlink even when the immediate parent does not exist", () => {
+    const root = mkdtempSync(join(tmpdir(), "roll-capture-spec-"));
+    try {
+      const outside = join(root, "outside");
+      const project = join(root, "project");
+      mkdirSync(join(project, ".roll"), { recursive: true });
+      mkdirSync(outside, { recursive: true });
+      symlinkSync(outside, join(project, ".roll", "screenshots"));
+
+      const result = validateRollCaptureRequestV1(validRequest({ out: join(project, ".roll", "screenshots", "missing-parent", "terminal.png") }), {
+        projectRoot: project,
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.errors.join("\n")).toContain("unsafe output path");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("declares response schema variants that require screenshotPath only for taken and reason for non-taken", () => {
     expect(rollCaptureResponseV1Schema).toMatchObject({
       oneOf: [

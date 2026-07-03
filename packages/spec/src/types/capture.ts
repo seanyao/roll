@@ -1,5 +1,5 @@
 import { realpathSync } from "node:fs";
-import { dirname, isAbsolute, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, resolve, sep } from "node:path";
 import type { JsonSchema } from "./json-schema.js";
 import type { ToolDeclaration } from "./tool.js";
 
@@ -307,10 +307,17 @@ function validateOutputPath(out: string, projectRoot: string): string[] {
 }
 
 function realpathIfPossible(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    return resolve(path);
+  const missingParts: string[] = [];
+  let cursor = resolve(path);
+  while (true) {
+    try {
+      return resolve(realpathSync(cursor), ...missingParts.reverse());
+    } catch {
+      const parent = dirname(cursor);
+      if (parent === cursor) return resolve(path);
+      missingParts.push(basename(cursor));
+      cursor = parent;
+    }
   }
 }
 

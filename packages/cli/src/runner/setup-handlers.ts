@@ -3,15 +3,17 @@ import {
   decideClaimReconcile,
   hasMergedDelivery,
   latestDeliveringCycle,
+  openPrBlockReason,
   pickStory,
   reconcileBranchName,
   runRowHasPublishedPr,
   type BacklogItem,
   type CycleCommand,
   type CycleContext,
+  type HasOpenPr,
   type PickOptions,
 } from "@roll/core";
-import { STATUS_MARKER } from "@roll/spec";
+import { classifyStatus, STATUS_MARKER } from "@roll/spec";
 import { dirname } from "node:path";
 import { markDoneGuarded } from "./done-guard.js";
 import { eventTs } from "./runner-time.js";
@@ -215,10 +217,20 @@ export async function executeSetupCommand(
       // delivering the rest. Runtime overlay (.roll/loop/skip-cards.json); backlog
       // truth is untouched.
       const skipCards = readSkipCards(dirname(ports.paths.eventsPath));
-      // US-LOOP-079c: wire the real hasOpenPr predicate — same data source as
-      // delivery/pr.ts (open PR titles from gh, no second truth source).
+      // FIX-1205: de-dup from both GitHub PR references and durable delivery
+      // truth. Loop PR titles may be only `loop cycle cycle-<id>`, so body
+      // trailers and published-pending delivery records must also block a pick.
       const openPrTitles = await ports.github.openPrTitles(ports.repoCwd);
-      const hasOpenPr = buildHasOpenPr(openPrTitles);
+      const githubHasOpenPr = buildHasOpenPr(openPrTitles);
+      const pendingMergeReason = (id: string): string | undefined => {
+        const pendingMerge = ports.pendingMergeDelivery?.(id);
+        if (pendingMerge === undefined) return undefined;
+        return pendingMerge.prNumber === undefined ? "awaiting merge of open PR" : `awaiting merge of PR #${pendingMerge.prNumber}`;
+      };
+      const hasOpenPr = ((id: string): boolean => githubHasOpenPr(id) || pendingMergeReason(id) !== undefined) as HasOpenPr;
+      Object.defineProperty(hasOpenPr, "openPrBlockReason", {
+        value: (id: string): string | undefined => openPrBlockReason(id, githubHasOpenPr) ?? pendingMergeReason(id),
+      });
       const pendingPublish = readPendingPublish(dirname(ports.paths.eventsPath));
       const eligibility: PickOptions = {
         hasOpenPr,
@@ -228,6 +240,18 @@ export async function executeSetupCommand(
         hasPendingPublish: (id) =>
           (ports.pendingPublish?.(id) ?? false) || pendingPublish.has(id),
       };
+      for (const item of items) {
+        if (classifyStatus(item.status) !== "todo") continue;
+        const reason = openPrBlockReason(item.id, hasOpenPr);
+        if (reason === undefined) continue;
+        ports.events.appendEvent(ports.paths.eventsPath, {
+          type: "pick:skipped",
+          cycleId: ctx.cycleId,
+          storyId: item.id,
+          reason,
+          ts: eventTs(ports),
+        });
+      }
       const semanticRanking = await resolvePickRanking(ports, ctx, items as BacklogItem[], eligibility);
       const story = pickStory(items as never, {
         ...eligibility,

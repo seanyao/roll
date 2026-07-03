@@ -81,20 +81,71 @@ const DEPENDS_ON_RE = /depends-on:([A-Za-z][A-Za-z0-9,-]+)/;
 
 /** Token-bounded id reference, mirroring bash gate 2 `${id}([^0-9A-Za-z]|$)`. */
 export function prTitleReferences(id: string, title: string): boolean {
-  const idx = title.indexOf(id);
-  if (idx < 0) return false;
-  const after = title.charAt(idx + id.length);
-  return after === "" || !/[0-9A-Za-z]/.test(after);
+  let from = 0;
+  while (from < title.length) {
+    const idx = title.indexOf(id, from);
+    if (idx < 0) return false;
+    const before = idx === 0 ? "" : title.charAt(idx - 1);
+    const after = title.charAt(idx + id.length);
+    if ((before === "" || !/[0-9A-Za-z]/.test(before)) && (after === "" || !/[0-9A-Za-z]/.test(after))) {
+      return true;
+    }
+    from = idx + id.length;
+  }
+  return false;
+}
+
+export interface OpenPrReference {
+  readonly number?: number;
+  readonly title: string;
+  readonly headRefName?: string;
+  readonly body?: string;
+}
+
+export type OpenPrReferenceInput = string | OpenPrReference;
+
+export type HasOpenPr = ((id: string) => boolean) & {
+  readonly openPrBlockReason?: (id: string) => string | undefined;
+};
+
+function openPrValues(ref: OpenPrReferenceInput): string[] {
+  if (typeof ref === "string") return [ref];
+  return [ref.title, ref.headRefName ?? "", ref.body ?? ""].filter((value) => value !== "");
+}
+
+function openPrReferencesStory(id: string, ref: OpenPrReferenceInput): boolean {
+  return openPrValues(ref).some((value) => prTitleReferences(id, value));
+}
+
+function openPrReason(ref: OpenPrReferenceInput): string {
+  if (typeof ref !== "string" && ref.number !== undefined && Number.isFinite(ref.number)) {
+    return `awaiting merge of PR #${ref.number}`;
+  }
+  return "awaiting merge of open PR";
 }
 
 /**
- * Build a `hasOpenPr` predicate from the list of open PR titles (the SAME data
- * source as {@link prListOpenTitles} in delivery/pr.ts — no second truth source,
- * US-LOOP-079c AC1). The returned predicate is true for a story id iff any open
- * PR title contains a token-bounded reference to that id.
+ * Build a `hasOpenPr` predicate from the list of open PR references. The legacy
+ * input is a title string; richer callers may include head branch and body so
+ * loop-created PRs titled `loop cycle cycle-<id>` are still tied to their card
+ * via the Roll-Evidence trailer.
  */
-export function buildHasOpenPr(openPrTitles: readonly string[]): (id: string) => boolean {
-  return (id: string): boolean => openPrTitles.some((title) => prTitleReferences(id, title));
+export function buildHasOpenPr(openPrRefs: readonly OpenPrReferenceInput[]): HasOpenPr {
+  const hasOpenPr = ((id: string): boolean => openPrRefs.some((ref) => openPrReferencesStory(id, ref))) as HasOpenPr;
+  Object.defineProperty(hasOpenPr, "openPrBlockReason", {
+    value: (id: string): string | undefined => {
+      const ref = openPrRefs.find((candidate) => openPrReferencesStory(id, candidate));
+      return ref === undefined ? undefined : openPrReason(ref);
+    },
+  });
+  return hasOpenPr;
+}
+
+export function openPrBlockReason(id: string, hasOpenPr: (id: string) => boolean): string | undefined {
+  const withReason = hasOpenPr as HasOpenPr;
+  const reason = withReason.openPrBlockReason?.(id);
+  if (reason !== undefined) return reason;
+  return hasOpenPr(id) ? "awaiting merge of open PR" : undefined;
 }
 
 /** Parse a row's depends-on ids (first tag only); empty when none. */

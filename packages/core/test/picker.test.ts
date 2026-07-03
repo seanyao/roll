@@ -5,7 +5,16 @@
  */
 import { describe, expect, it } from "vitest";
 import { AWAITING_REVIEW_STATUS_MARKER } from "@roll/spec";
-import { assessBacklog, buildHasOpenPr, parseDependsOn, pickStory, prTitleReferences, shouldSuppressDormancy, type BacklogItem } from "../src/index.js";
+import {
+  assessBacklog,
+  buildHasOpenPr,
+  openPrBlockReason,
+  parseDependsOn,
+  pickStory,
+  prTitleReferences,
+  shouldSuppressDormancy,
+  type BacklogItem,
+} from "../src/index.js";
 
 /** Terse fixture row builder. */
 function item(id: string, status: string, desc = ""): BacklogItem {
@@ -297,6 +306,51 @@ describe("buildHasOpenPr — predicate from open PR titles", () => {
     expect(hasOpenPr("US-1")).toBe(true);
   });
 
+  it("FIX-1205 AC1: published-pending card is skipped and the next scoped Todo is picked", () => {
+    const items = [
+      item("US-CAPTURE-006", "📋 Todo"),
+      item("US-CAPTURE-007", "📋 Todo"),
+    ];
+    const hasOpenPr = buildHasOpenPr([
+      {
+        number: 6,
+        title: "loop cycle cycle-21303",
+        headRefName: "loop/cycle-21303",
+        body: "Roll-Evidence:\nstoryId: US-CAPTURE-006\ncycleId: cycle-21303\n",
+      },
+    ]);
+    expect(pickStory(items, { hasOpenPr })?.id).toBe("US-CAPTURE-007");
+    expect(openPrBlockReason("US-CAPTURE-006", hasOpenPr)).toBe("awaiting merge of PR #6");
+  });
+
+  it("FIX-1205 AC2: the only scoped card pending merge idles with an awaiting-merge reason", () => {
+    const items = [item("US-CAPTURE-006", "📋 Todo")];
+    const hasOpenPr = buildHasOpenPr([
+      {
+        number: 6,
+        title: "loop cycle cycle-21303",
+        headRefName: "loop/cycle-21303",
+        body: "Roll-Evidence trailer\nstory_id: US-CAPTURE-006\n",
+      },
+    ]);
+    expect(pickStory(items, { hasOpenPr })).toBeUndefined();
+    expect(assessBacklog(items, { hasOpenPr })).toEqual({ hasWork: false, reason: "all_awaiting_merge" });
+    expect(openPrBlockReason("US-CAPTURE-006", hasOpenPr)).toBe("awaiting merge of PR #6");
+  });
+
+  it("FIX-1205 AC3: loop-named PRs without card ids in title or branch match body trailers", () => {
+    const hasOpenPr = buildHasOpenPr([
+      {
+        number: 6,
+        title: "loop cycle cycle-21303",
+        headRefName: "loop/cycle-21303",
+        body: "Roll-Evidence\nCard: US-CAPTURE-006\n",
+      },
+    ]);
+    expect(hasOpenPr("US-CAPTURE-006")).toBe(true);
+    expect(hasOpenPr("US-CAPTURE-007")).toBe(false);
+  });
+
   // AC3 fixture: all todos have open PRs → assessBacklog reason=all_awaiting_merge
   it("AC3: all todos blocked by open PR → all_awaiting_merge in assessBacklog", () => {
     const items = [
@@ -317,6 +371,19 @@ describe("buildHasOpenPr — predicate from open PR titles", () => {
     const hasOpenPr = buildHasOpenPr([]);
     // No open PRs → FIX has priority, FIX-42 picked
     expect(pickStory(items, { hasOpenPr })?.id).toBe("FIX-42");
+  });
+
+  it("FIX-1205 AC4: Todo cards with no matching PR remain pickable", () => {
+    const items = [item("US-CAPTURE-007", "📋 Todo")];
+    const hasOpenPr = buildHasOpenPr([
+      {
+        number: 6,
+        title: "loop cycle cycle-21303",
+        headRefName: "loop/cycle-21303",
+        body: "storyId: US-CAPTURE-006",
+      },
+    ]);
+    expect(pickStory(items, { hasOpenPr })?.id).toBe("US-CAPTURE-007");
   });
 });
 

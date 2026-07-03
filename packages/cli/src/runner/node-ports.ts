@@ -56,9 +56,7 @@ import {
   commitRollMetadataRepo,
   readPrebuildDistEnabled,
 } from "./worktree-bootstrap.js";
-import {
-  rescueLeakedMain,
-} from "./executor.js";
+import { rescueLeakedMain } from "./sandbox-boundary.js";
 
 const execFileAsync = promisify(execFile);
 

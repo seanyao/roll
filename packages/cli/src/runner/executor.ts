@@ -287,6 +287,13 @@ import {
   startSpawnTimeoutWatchdog,
   startStallDetector,
 } from "./spawn-observers.js";
+import {
+  appendCleanupEvent,
+  appendWriteProtectionEvent,
+  cleanupGuardResult,
+  quarantineMainCheckoutForCycle,
+  recordCleanupFailures,
+} from "./sandbox-boundary.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -353,153 +360,16 @@ export {
   startSpawnTimeoutWatchdog,
   startStallDetector,
 } from "./spawn-observers.js";
+export {
+  appendCleanupEvent,
+  appendWriteProtectionEvent,
+  cleanupGuardResult,
+  quarantineMainCheckoutForCycle,
+  recordCleanupFailures,
+  rescueLeakedMain,
+} from "./sandbox-boundary.js";
 export type { DepsExec, EventsPort, ExecuteResult, GitPort, GithubPort, MetadataCommitResult, Ports, ProcessClock, RunnerPaths } from "./ports.js";
 
-export async function rescueLeakedMain(
-  repoCwd: string,
-  refName: string,
-): Promise<{ code: number; rescuedSha: string }> {
-  // FIX-903: capture the current main HEAD SHA, then create a rescue branch
-  // and reset main to origin/main so the leaked commits are reachable via
-  // the rescue ref but main is clean again.
-  let rescuedSha = "";
-  try {
-    const headR = await execFileAsync("git", ["rev-parse", "HEAD"], {
-      cwd: repoCwd,
-      encoding: "utf8",
-    });
-    rescuedSha = (headR.stdout ?? "").trim();
-  } catch {
-    return { code: 1, rescuedSha: "" };
-  }
-  let code = 0;
-  try {
-    await execFileAsync("git", ["branch", refName], {
-      cwd: repoCwd,
-      encoding: "utf8",
-    });
-  } catch {
-    code = 1;
-  }
-  let backlogWorktreeContent: string | undefined;
-  const backlogPath = join(repoCwd, ".roll", "backlog.md");
-  try {
-    const status = await execFileAsync("git", ["status", "--porcelain", "--", ".roll/backlog.md"], {
-      cwd: repoCwd,
-      encoding: "utf8",
-    });
-    if ((status.stdout ?? "").trim() !== "") {
-      backlogWorktreeContent = readFileSync(backlogPath, "utf8");
-    }
-  } catch {
-    backlogWorktreeContent = undefined;
-  }
-  try {
-    await execFileAsync("git", ["reset", "--hard", "origin/main"], {
-      cwd: repoCwd,
-      encoding: "utf8",
-    });
-  } catch {
-    code = 1;
-  }
-  if (backlogWorktreeContent !== undefined) {
-    try {
-      mkdirSync(dirname(backlogPath), { recursive: true });
-      writeFileSync(backlogPath, backlogWorktreeContent, "utf8");
-    } catch {
-      code = 1;
-    }
-  }
-  return { code, rescuedSha };
-}
-
-
-function appendWriteProtectionEvent(ports: Ports, result: WriteProtectionResult): void {
-  ports.events.appendEvent(ports.paths.eventsPath, {
-    type: "sandbox:write_protected",
-    cycleId: result.cycleId,
-    status: result.status,
-    repoCwd: result.repoCwd,
-    markerPath: result.markerPath,
-    paths: result.paths,
-    ts: result.ts,
-  });
-}
-
-function appendQuarantineEvent(ports: Ports, result: QuarantineResult): void {
-  ports.events.appendEvent(ports.paths.eventsPath, quarantineEventToRollEvent(result));
-  ports.events.appendAlert(
-    ports.paths.alertsPath,
-    `cycle ${result.cycleId}: quarantined main checkout ${result.reason} at ${result.phase}; ref ${result.ref}; manifest ${result.manifestPath}`,
-  );
-}
-
-async function quarantineMainCheckoutForCycle(
-  ports: Ports,
-  ctx: CycleContext,
-  phase: QuarantineResult["phase"],
-): Promise<QuarantineResult[]> {
-  try {
-    if (realpathSync(ports.repoCwd) === realpathSync(ports.paths.worktreePath)) return [];
-  } catch {
-    /* fall through to the guard; it handles unreadable paths as no-op */
-  }
-  const results = await quarantineMainCheckout({
-    repoCwd: ports.repoCwd,
-    runtimeDir: guardRuntimeDir(ports),
-    cycleId: ctx.cycleId ?? "",
-    ...(ctx.storyId !== undefined ? { storyId: ctx.storyId } : {}),
-    phase,
-    nowMs: () => eventTs(ports),
-  });
-  for (const result of results) appendQuarantineEvent(ports, result);
-  return results;
-}
-
-/** US-LOOP-088 — append a `cycle:cleanup` event for one cleanup rule result. */
-function appendCleanupEvent(ports: Ports, ctx: CycleContext, result: CleanupResult): void {
-  try {
-    ports.events.appendEvent(ports.paths.eventsPath, {
-      type: "cycle:cleanup",
-      cycleId: ctx.cycleId,
-      rule: result.rule,
-      path: result.path,
-      ok: result.ok,
-      ...(result.warning !== undefined ? { warning: result.warning } : {}),
-      ts: eventTs(ports),
-    });
-  } catch {
-    /* observation is best-effort; cleanup failure must not block the terminal */
-  }
-}
-
-function cleanupGuardResult(): CleanupResult {
-  return {
-    rule: "cleanup-main-checkout-guard",
-    path: ".",
-    ok: true,
-    warning: "skipped cleanup because worktreePath resolves to repoCwd",
-  };
-}
-
-function recordCleanupFailures(ports: Ports, ctx: CycleContext, results: readonly CleanupResult[]): void {
-  const failures = results.filter((r) => !r.ok);
-  if (failures.length === 0) return;
-  const summary = failures
-    .map((r) => `${r.rule}${r.path !== "." ? ` ${r.path}` : ""}: ${r.warning ?? "cleanup failed"}`)
-    .join("; ");
-  ports.events.appendAlert(
-    ports.paths.alertsPath,
-    `cycle ${ctx.cycleId}: environment cleanup warning(s): ${summary}`,
-  );
-  recordRootCauseFailure(
-    dirname(ports.paths.eventsPath),
-    ctx.cycleId,
-    { failureClass: "harness", rootCauseKey: "harness:env_cleanup", confidence: "envelope" },
-    [],
-    Number.POSITIVE_INFINITY,
-  );
-}
 
 /** FIX-1051 — scan agy's native CLI log for internal tool errors.
  *

@@ -234,11 +234,27 @@ import {
   withRealCost,
 } from "./run-records.js";
 import { appendPickRankedEvent, resolvePickRanking } from "./pick-ranking.js";
+import {
+  parseEstMin,
+  parseEstMinFromSpec,
+  recordExecutionProfile,
+  routerEstMin,
+  runDesignerStage,
+  writeEvaluatorArtifact,
+} from "./execution-profile.js";
 
 const execFileAsync = promisify(execFile);
 
 export { checkMainDirty };
 export { buildRunRow, buildTerminalRecord } from "./run-records.js";
+export {
+  parseEstMin,
+  parseEstMinFromSpec,
+  recordExecutionProfile,
+  routerEstMin,
+  runDesignerStage,
+  writeEvaluatorArtifact,
+} from "./execution-profile.js";
 export type { DepsExec, EventsPort, ExecuteResult, GitPort, GithubPort, MetadataCommitResult, Ports, ProcessClock, RunnerPaths } from "./ports.js";
 
 export async function rescueLeakedMain(
@@ -3480,286 +3496,6 @@ function storyRequiresManualMerge(repoCwd: string, storyId: string | undefined):
   } catch {
     return false;
   }
-}
-
-/** Parse an `est_min:<n>` tag from a backlog desc (router input). */
-export function parseEstMin(desc: string): number | undefined {
-  const m = /est[_-]?min:\s*(\d+)/i.exec(desc);
-  return m === null ? undefined : Number(m[1]);
-}
-
-/**
- * FIX-1026 — parse `est_min:<n>` from a STORY SPEC's YAML frontmatter.
- *
- * The agents.yaml tier→rig contract (easy ≤8, default 8–20, hard >20) is driven
- * by `est_min`, and the documented escalation lever is "bump est_min to send a
- * stuck card to a harder tier". That lever lives in the spec frontmatter, which
- * was never read by the router — only the backlog row's `est_min:` tag was. A
- * spec declaring `est_min: 24` therefore still ran on the `default` tier.
- *
- * This reads ONLY the leading `--- … ---` frontmatter block (so a stray
- * `est_min:` mention in the prose body cannot hijack routing) and returns the
- * first `est_min:` integer there, or undefined when absent/unparseable. The
- * resolve_route handler prefers this over the backlog row so the spec is the
- * single source of truth for sizing.
- */
-export function parseEstMinFromSpec(specText: string): number | undefined {
-  const fm = /^---\n([\s\S]*?)\n---/.exec(specText);
-  if (fm === null) return undefined;
-  const m = /^\s*est[_-]?min:\s*(\d+)/im.exec(fm[1] ?? "");
-  return m === null ? undefined : Number(m[1]);
-}
-
-/**
- * FIX-1026 — the router's est_min for a story, spec frontmatter taking
- * precedence over the backlog row. Reading the spec is best-effort: a missing,
- * unreadable, or frontmatter-less spec falls back to the backlog row's
- * `est_min:` tag (prior behavior), so routing never regresses on a parse blip.
- */
-/** US-V4-004/003 — the project's `execution_policy.mode` from `.roll/agents.yaml`
- *  (default "standard" when absent/unparseable). Gates whether verified/designed
- *  stages execute; standard keeps the cycle Builder-only (no regression). */
-function executionPolicyMode(repoCwd: string): "standard" | "verified" | "designed" | "auto" {
-  try {
-    const p = join(repoCwd, ".roll", "agents.yaml");
-    if (!existsSync(p)) return "standard";
-    return normalizeAgentConfig(readFileSync(p, "utf8")).config.executionPolicy.mode;
-  } catch {
-    return "standard";
-  }
-}
-
-/**
- * US-V4-004 — select the Story execution profile from the spec's risk signals and
- * RECORD it in a durable `execution:profile` event. Pure-decision + one append;
- * never throws (a spec read blip falls back to `standard`, the current
- * builder-only path). Returns the profile so the executor can fold it into the
- * cycle context. In v4.0 only `standard` actually executes — recording the chosen
- * profile is the foundation verified/designed execution builds on (US-V4-005/006).
- */
-export function recordExecutionProfile(
-  ports: Ports,
-  cycleId: string,
-  storyId: string,
-  estMin: number | undefined,
-): ExecutionProfile {
-  let profile: ExecutionProfile = "standard";
-  let reason = "standard: spec unavailable";
-  try {
-    const specPath = storySpecPath(ports.repoCwd, storyId);
-    if (specPath !== null && existsSync(specPath)) {
-      const input = classifyStoryRisk(storyId, readFileSync(specPath, "utf8"), {
-        ...(estMin !== undefined ? { estimatedMinutes: estMin } : {}),
-      });
-      const classified = selectExecutionProfile(input);
-      // Apply execution_policy.mode (default "standard" — incl. no agents.yaml) so
-      // a project that has not opted into verified/designed stays Builder-only (the
-      // v4.0 no-regression guarantee). The classification still informs the reason.
-      const mode = executionPolicyMode(ports.repoCwd);
-      profile = applyExecutionPolicy(classified, mode);
-      reason = `${explainExecutionProfile(input)} [policy:${mode} → ${profile}]`;
-    }
-  } catch {
-    profile = "standard";
-    reason = "standard: profile selection failed (fell back)";
-  }
-  try {
-    ports.events.appendEvent(ports.paths.eventsPath, {
-      type: "execution:profile",
-      cycleId,
-      storyId,
-      profile,
-      reason,
-      ts: eventTs(ports),
-    });
-  } catch {
-    /* recording is best-effort; never topple routing on an event-append blip */
-  }
-  return profile;
-}
-
-/**
- * US-V4-005 — write + validate the EVALUATOR artifact for a verified/designed
- * cycle. The Evaluator role is not a new monolithic gate: it ASSEMBLES the three
- * separate contracts the cycle already produced in fresh sessions — the
- * independent Review Score, the blocking review/attest findings, and the attest
- * evidence status — into `eval-report.md` + `artifact-manifest.json` under the
- * run dir, then validates fail-closed (manifest well-formed, evaluator session ≠
- * builder session). Best-effort writer: a write blip returns `valid:false` with
- * reasons; the existing attest/peer gates remain the actual cycle blockers.
- */
-export function writeEvaluatorArtifact(
-  ports: Ports,
-  ctx: CycleContext,
-  signals: { attestStatus: "produced" | "skipped" | "unknown"; blockingFindings: readonly string[]; designContractVsDelivered?: string },
-): { written: boolean; valid: boolean; reasons: readonly string[] } {
-  const profile = ctx.selectedProfile;
-  if (profile !== "verified" && profile !== "designed") return { written: false, valid: true, reasons: [] };
-  const storyId = ctx.storyId ?? "";
-  const runDir = ctx.evidenceRunDir ?? "";
-  if (storyId === "" || runDir === "") return { written: false, valid: false, reasons: ["no story id / run dir for evaluator artifact"] };
-  const scoreEntry = readLatestStoryReviewScore(ports.repoCwd, storyId);
-  const verdict: "good" | "ok" | "regression" =
-    scoreEntry?.verdict === "good" || scoreEntry?.verdict === "regression" ? scoreEntry.verdict : "ok";
-  // US-V4-006: when a design contract exists (designed profile), the Evaluator
-  // reports design-contract-vs-delivered against it.
-  let designSummary = signals.designContractVsDelivered;
-  if (designSummary === undefined || designSummary === "") {
-    const contractPath = join(runDir, "role-artifacts", "designer", "design-contract.md");
-    if (existsSync(contractPath)) {
-      try {
-        const contract = parseDesignContract(readFileSync(contractPath, "utf8"), storyId);
-        if (contract !== null) {
-          designSummary = summarizeDesignContractVsDelivered(designContractVsDelivered(contract, deliveredAcItems(ports.repoCwd, storyId)));
-        }
-      } catch {
-        /* design-contract-vs-delivered is best-effort context for the report */
-      }
-    }
-  }
-  const report = assembleEvalReport({
-    storyId,
-    blockingFindings: signals.blockingFindings,
-    ...(scoreEntry !== undefined ? { score: { value: scoreEntry.score, verdict } } : {}),
-    attestStatus: signals.attestStatus,
-    ...(designSummary !== undefined && designSummary !== "" ? { designContractVsDelivered: designSummary } : {}),
-  });
-  const reportMd = renderEvalReport(report);
-  const manifest: ArtifactManifest = {
-    schemaVersion: 1,
-    storyId,
-    cycleId: ctx.cycleId ?? "",
-    role: "evaluator",
-    rig: { agent: (scoreEntry?.scoredBy ?? "reasonix") } as Rig,
-    sessionId: scoreEntry?.sessionId ?? "",
-    worktreeCwd: ports.paths.worktreePath,
-    scoreRepoCwd: ports.repoCwd,
-    inputs: [
-      { path: `${storyId}-report.html`, kind: "report" },
-      { path: "ac-map.json", kind: "evidence" },
-    ],
-    outputs: [{ path: "role-artifacts/evaluator/eval-report.md", kind: "report" }],
-    createdAt: new Date(eventTs(ports)).toISOString(),
-  };
-  const dir = join(runDir, "role-artifacts", "evaluator");
-  try {
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "eval-report.md"), reportMd);
-    writeFileSync(join(dir, "artifact-manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
-  } catch {
-    return { written: false, valid: false, reasons: ["failed to write evaluator artifact files"] };
-  }
-  const v = validateEvaluatorArtifact({ manifest, reportMd, storyId, builderSessionId: ctx.builderSessionId ?? "" });
-  return { written: true, valid: v.ok, reasons: v.reasons };
-}
-
-/** US-V4-006 — the AC items a delivery covered (ac-map entries with a positive
- *  status), used for design-contract-vs-delivered mapping. Best-effort + lenient. */
-function deliveredAcItems(repoCwd: string, storyId: string): string[] {
-  try {
-    const p = join(cardArchiveDir(repoCwd, storyId), "ac-map.json");
-    if (!existsSync(p)) return [];
-    const arr = JSON.parse(readFileSync(p, "utf8")) as Array<{ ac?: string; status?: string }>;
-    if (!Array.isArray(arr)) return [];
-    return arr
-      .filter((e) => e.status === "pass" || e.status === "partial" || e.status === "readonly")
-      .map((e) => e.ac ?? "")
-      .filter((a) => a !== "");
-  } catch {
-    return [];
-  }
-}
-
-const DESIGNER_TIMEOUT_MS = 20 * 60 * 1000;
-
-/** US-V4-006 — the Designer prompt (roll-design capability). TS owns the
- *  orchestration + the output contract; the skill does the designing. */
-function buildDesignerPrompt(storyId: string, contractAbsPath: string): string {
-  return [
-    `You are the DESIGNER for story ${storyId} in a designed execution profile.`,
-    `Read the story spec under .roll/features/**/${storyId}/spec.md and produce a design contract.`,
-    `Write the contract to: ${contractAbsPath}`,
-    "It MUST be markdown with these sections (use '- ' bullets):",
-    "## Scope boundary",
-    "## Acceptance contract",
-    "## Expected evidence",
-    "## Risks",
-    "## Out of scope",
-    "## Resize / split guidance   (optional prose)",
-    "Do NOT write product code — you only design. The Builder consumes this contract next.",
-  ].join("\n");
-}
-
-/**
- * US-V4-006 — run the Designer stage BEFORE the Builder for a `designed` cycle.
- * The Designer (roll-design capability) runs in a FRESH session and writes
- * `design-contract.md`; the runner records the designer `artifact-manifest.json`.
- * The contract is then validated FAIL-CLOSED — a missing/malformed/empty contract
- * stops the cycle before any Builder work. No-op for standard/verified. Idempotent
- * across retries (an existing valid contract is reused, not re-designed).
- */
-export async function runDesignerStage(
-  ports: Ports,
-  ctx: CycleContext,
-  designerAgent: string,
-): Promise<{ ran: boolean; ok: boolean; reasons: readonly string[] }> {
-  if (ctx.selectedProfile !== "designed") return { ran: false, ok: true, reasons: [] };
-  const storyId = ctx.storyId ?? "";
-  const runDir = ctx.evidenceRunDir ?? "";
-  if (storyId === "" || runDir === "") return { ran: false, ok: false, reasons: ["no story id / run dir for designer stage"] };
-  const dir = join(runDir, "role-artifacts", "designer");
-  const contractPath = join(dir, "design-contract.md");
-  const manifestPath = join(dir, "artifact-manifest.json");
-  const designerSessionId = `${ctx.cycleId ?? "cycle"}:design:${designerAgent}:${ports.clock()}`;
-  if (!existsSync(contractPath)) {
-    try {
-      mkdirSync(dir, { recursive: true });
-      await ports.agentSpawn(designerAgent, {
-        cwd: ports.paths.worktreePath,
-        skillBody: buildDesignerPrompt(storyId, contractPath),
-        storyId,
-        timeoutMs: DESIGNER_TIMEOUT_MS,
-        runDir: dir,
-      });
-    } catch {
-      /* a designer spawn blip -> no contract -> validation below fails closed */
-    }
-  }
-  // The runner records the designer role manifest (the skill writes the contract).
-  const manifest: ArtifactManifest = {
-    schemaVersion: 1,
-    storyId,
-    cycleId: ctx.cycleId ?? "",
-    role: "designer",
-    rig: { agent: designerAgent } as Rig,
-    sessionId: designerSessionId,
-    worktreeCwd: ports.paths.worktreePath,
-    scoreRepoCwd: ports.repoCwd,
-    inputs: [{ path: `.roll/features/**/${storyId}/spec.md`, kind: "contract" }],
-    outputs: [{ path: "role-artifacts/designer/design-contract.md", kind: "contract" }],
-    createdAt: new Date(eventTs(ports)).toISOString(),
-  };
-  try {
-    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
-  } catch {
-    /* best-effort manifest record */
-  }
-  const contractMd = existsSync(contractPath) ? readFileSync(contractPath, "utf8") : null;
-  const v = validateDesignArtifact({ manifest, contractMd, storyId });
-  return { ran: true, ok: v.ok, reasons: v.reasons };
-}
-
-export function routerEstMin(worktreeCwd: string, storyId: string, backlogDesc: string): number | undefined {
-  try {
-    const specPath = storySpecPath(worktreeCwd, storyId);
-    if (specPath !== null && existsSync(specPath)) {
-      const fromSpec = parseEstMinFromSpec(readFileSync(specPath, "utf8"));
-      if (fromSpec !== undefined) return fromSpec;
-    }
-  } catch {
-    /* spec read/parse is an optimization — never topple routing on it */
-  }
-  return parseEstMin(backlogDesc);
 }
 
 function sleep(ms: number): Promise<void> {

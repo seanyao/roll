@@ -632,6 +632,48 @@ function relativeFromPhysical(fromDir: string, toPath: string): string {
   }
 }
 
+function frontmatterBlock(specText: string): string | null {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(specText);
+  return m === null ? null : (m[1] ?? "");
+}
+
+function stripYamlInlineComment(value: string): string {
+  let quote: "'" | '"' | null = null;
+  for (let i = 0; i < value.length; i += 1) {
+    const ch = value[i];
+    if ((ch === "'" || ch === '"') && (i === 0 || value[i - 1] !== "\\")) {
+      quote = quote === ch ? null : quote === null ? ch : quote;
+      continue;
+    }
+    if (ch === "#" && quote === null && (i === 0 || /\s/.test(value[i - 1] ?? ""))) {
+      return value.slice(0, i).trimEnd();
+    }
+  }
+  return value.trimEnd();
+}
+
+function frontmatterScalar(specText: string, key: string): string | null {
+  const fm = frontmatterBlock(specText);
+  if (fm === null) return null;
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`^${escaped}:\\s*(.*?)\\s*$`, "m");
+  const m = re.exec(fm);
+  if (m === null) return null;
+  const raw = stripYamlInlineComment(m[1] ?? "").trim();
+  if (raw === "") return "";
+  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) return raw.slice(1, -1).trim();
+  return raw;
+}
+
+function declaresPhysicalEvidenceProfile(specText: string): boolean {
+  return frontmatterScalar(specText, "evidence_profile") === "physical";
+}
+
+function hrefInsideRunDir(runDir: string, path: string): string | undefined {
+  const rel = relativeFromPhysical(runDir, path);
+  return rel !== "" && !rel.startsWith("..") && !rel.startsWith("/") ? rel : undefined;
+}
+
 interface PhysicalCaptureLane {
   report: PhysicalCaptureReportEntry;
   fact: CaptureFact;
@@ -645,12 +687,11 @@ function physicalScreenshotRequest(
   runDir: string,
   createdAt: string,
   timeoutMs: number,
+  skipPhysicalTerminalProvider: boolean,
 ): RollCaptureRequestV1 | null {
   const physicalTerminal = physicalTerminalFromSpecText(specText);
-  const explicitPhysical =
-    physicalTerminal !== null ||
-    /^\s*(evidence_profile|evidence_provider|physical_screenshot):\s*(physical|physical_screenshot|true|required)\s*$/im.test(specText) ||
-    /\bphysical\.screenshot\b/i.test(specText);
+  if (physicalTerminal !== null && skipPhysicalTerminalProvider) return null;
+  const explicitPhysical = physicalTerminal !== null || declaresPhysicalEvidenceProfile(specText);
   if (!explicitPhysical) return null;
 
   const kind: CaptureKind = physicalTerminal !== null ? "physical_terminal" : "display";
@@ -712,6 +753,8 @@ async function runPhysicalScreenshotLane(
       readCaptureLedgerEntries(ledgerRoot, request.requestId),
       requestPath,
     );
+  } finally {
+    rmSync(requestPath, { force: true });
   }
 }
 
@@ -736,9 +779,10 @@ function physicalLaneResult(
       statusChain,
       ...(reason !== undefined && reason !== "" ? { reason } : {}),
       ...(screenshot !== undefined ? { screenshot } : {}),
-      ...(requestPath !== undefined ? { requestPath: reportHref(runDir, requestPath) } : {}),
-      ...(responsePath !== undefined ? { responsePath: reportHref(runDir, responsePath) } : {}),
+      ...reportPathField(runDir, "requestPath", requestPath),
+      ...reportPathField(runDir, "responsePath", responsePath),
       ...(ledger.length > 0 ? { ledgerLinks: ledgerLinksForReport(runDir, ledger) } : {}),
+      ...(ledger.length > 0 ? { ledgerDetails: ledgerDetailsForReport(ledger) } : {}),
     },
     fact: {
       kind: request.kind,
@@ -750,8 +794,14 @@ function physicalLaneResult(
   };
 }
 
-function reportHref(runDir: string, path: string): string {
-  return relativeFromPhysical(runDir, path);
+function reportPathField(
+  runDir: string,
+  key: "requestPath" | "responsePath",
+  path: string | undefined,
+): Pick<PhysicalCaptureReportEntry, "requestPath" | "responsePath"> {
+  if (path === undefined) return {};
+  const href = hrefInsideRunDir(runDir, path);
+  return href === undefined ? {} : { [key]: href };
 }
 
 function attachPhysicalScreenshot(source: string, out: string): { ok: true } | { ok: false; reason: string } {
@@ -760,6 +810,7 @@ function attachPhysicalScreenshot(source: string, out: string): { ok: true } | {
     if (!existsSync(out)) return { ok: false, reason: "physical.screenshot did not produce an attached PNG" };
     return { ok: true };
   } catch (error) {
+    rmSync(out, { force: true });
     return { ok: false, reason: `attach failed: ${error instanceof Error ? error.message : String(error)}` };
   }
 }
@@ -802,9 +853,24 @@ function ledgerLinksForReport(runDir: string, entries: readonly CaptureLedgerEnt
   return entries.flatMap((entry, index) => {
     const n = entries.length === 1 ? "" : ` ${index + 1}`;
     return [
-      { label: `ledger response${n}`, href: reportHref(runDir, entry.responsePath) },
-      ...(entry.reportPath !== undefined && entry.reportPath !== "" ? [{ label: `ledger report${n}`, href: reportHref(runDir, entry.reportPath) }] : []),
+      ...ledgerLink(runDir, `ledger response${n}`, entry.responsePath),
+      ...(entry.reportPath !== undefined && entry.reportPath !== "" ? ledgerLink(runDir, `ledger report${n}`, entry.reportPath) : []),
     ];
+  });
+}
+
+function ledgerLink(runDir: string, label: string, path: string): Array<{ label: string; href: string }> {
+  const href = hrefInsideRunDir(runDir, path);
+  return href === undefined ? [] : [{ label, href }];
+}
+
+function ledgerDetailsForReport(entries: readonly CaptureLedgerEntry[]): string[] {
+  return entries.flatMap((entry, index) => {
+    const n = entries.length === 1 ? "" : ` ${index + 1}`;
+    const details = [`ledger response${n}: ${entry.responsePath}`, `attachedToReport=${String(entry.attachedToReport)}`];
+    if (entry.screenshotPath !== undefined && entry.screenshotPath !== "") details.push(`ledger screenshot${n}: ${entry.screenshotPath}`);
+    if (entry.reportPath !== undefined && entry.reportPath !== "") details.push(`ledger report${n}: ${entry.reportPath}`);
+    return details;
   });
 }
 
@@ -1273,7 +1339,15 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
 
   const physicalCaptureReports: PhysicalCaptureReportEntry[] = [];
   const physicalTimeoutMs = deps.rollCapture?.timeoutMs ?? 60_000;
-  const physicalRequest = physicalScreenshotRequest(featureText, storyId, basename(runDir), runDir, now.toISOString(), physicalTimeoutMs);
+  const physicalRequest = physicalScreenshotRequest(
+    featureText,
+    storyId,
+    basename(runDir),
+    runDir,
+    now.toISOString(),
+    physicalTimeoutMs,
+    isPhysicalTerminal && captureCommands.length > 0,
+  );
   if (physicalRequest !== null) {
     const captureRoot = deps.rollCapture?.root ?? process.env["ROLL_CAPTURE_HOME"] ?? defaultRollCaptureRoot();
     const readiness = deps.rollCapture?.readiness?.() ?? collectRollCaptureReadiness();

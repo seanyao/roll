@@ -159,6 +159,7 @@ export interface PhysicalCaptureReportEntry {
   requestPath?: string;
   responsePath?: string;
   ledgerLinks?: Array<{ label: string; href: string }>;
+  ledgerDetails?: string[];
 }
 
 export interface ReportInput {
@@ -392,7 +393,11 @@ function physicalCaptureBlock(entries: ReportInput["physicalCaptures"]): string 
         links.push(`<a href="${esc(link.href)}">${esc(link.label)}</a>`);
       }
       const linked = links.length > 0 ? `<p class="physical-links">${links.join(" · ")}</p>` : "";
-      return `<details class="physical-capture" open><summary>${esc(entry.provider)} · ${esc(entry.kind)} · ${esc(entry.statusChain.join(" → "))}</summary>${reason}${shot}${linked}</details>`;
+      const details =
+        entry.ledgerDetails !== undefined && entry.ledgerDetails.length > 0
+          ? `<ul class="physical-links">${entry.ledgerDetails.map((detail) => `<li>${esc(detail)}</li>`).join("")}</ul>`
+          : "";
+      return `<details class="physical-capture" open><summary>${esc(entry.provider)} · ${esc(entry.kind)} · ${esc(entry.statusChain.join(" → "))}</summary>${reason}${shot}${linked}${details}</details>`;
     })
     .join("\n");
   return `<section class="physical-captures"><h2>physical.screenshot</h2>\n${rows}\n</section>`;

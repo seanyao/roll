@@ -7,7 +7,7 @@ import type { NorthStarReport } from "@roll/core";
 import { dispatch } from "../src/bridge.js";
 import { registerAll } from "../src/commands/index.js";
 import { renderNorthPanel } from "../src/commands/north.js";
-import { sparkline, stripAnsi, strw } from "../src/render.js";
+import { renderState, sparkline, stripAnsi, strw } from "../src/render.js";
 
 function captureStdout(fn: () => Promise<{ status: number }>): Promise<{ status: number; stdout: string }> {
   const chunks: string[] = [];
@@ -129,6 +129,16 @@ describe("north-star terminal rendering", () => {
     expect(zh).toMatchSnapshot();
     for (const line of en.split("\n")) expect(strw(line)).toBeLessThanOrEqual(80);
     for (const line of zh.split("\n")) expect(strw(line)).toBeLessThanOrEqual(80);
+  });
+
+  it("renders a NO_COLOR panel snapshot with plain text status symbols", () => {
+    const previous = renderState.useColor;
+    renderState.useColor = false;
+    try {
+      expect(renderNorthPanel(reportWithDaily([0, 1, 2, 3, 4, 5, 6, 7]), "en", 80)).toMatchSnapshot();
+    } finally {
+      renderState.useColor = previous;
+    }
   });
 
   it("renders null metrics as no data with a reason and no fake trend", () => {

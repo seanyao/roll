@@ -18,6 +18,15 @@ exports[`north-star terminal rendering > renders EN and ZH panels with one metri
   归因错误               0 →=0 [▁▂▃▄▅▆▇█] → ● 达标"
 `;
 
+exports[`north-star terminal rendering > renders a NO_COLOR panel snapshot with plain text status symbols 1`] = `
+"North Star · 14d · 2026-06-20..2026-07-04
+
+  autonomy                 80h →≥72h [▁▂▃▄▅▆▇█] ↑ ● met
+  delivery rate            50% →≥60% [▁▂▃▄▅▆▇█] → ● near
+  fix tax                 1.1x →<1.0x [▁▂▃▄▅▆▇█] ↓ ● near
+  attribution errors         0 →=0 [▁▂▃▄▅▆▇█] → ● met"
+`;
+
 exports[`north-star terminal rendering > renders null metrics as no data with a reason and no fake trend 1`] = `
 "North Star · 14d · ..
 

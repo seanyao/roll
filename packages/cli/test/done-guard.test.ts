@@ -34,7 +34,7 @@ describe("markDoneGuarded", () => {
 
   it("US-EVID-019 R2: new delivery cards with an evidence directory still reject missing evidence", () => {
     const project = tmp();
-    mkdirSync(join(project, ".roll", "features", "uncategorized", "US-NEW-1"), { recursive: true });
+    mkdirSync(join(project, ".roll", "features", "uncategorized", "US-NEW-1", "latest"), { recursive: true });
     const calls: string[][] = [];
     const result = markDoneGuarded(project, "US-NEW-1", { mergedToMain: true }, {
       markStatus: (...args) => calls.push(args),

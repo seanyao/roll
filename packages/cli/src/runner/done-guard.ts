@@ -36,13 +36,18 @@ export function acceptanceEvidenceGaps(projectCwd: string, id: string): string[]
   return gaps;
 }
 
+function hasAcceptanceEvidenceDirectory(projectCwd: string, id: string): boolean {
+  const cardDir = cardArchiveDir(projectCwd, id);
+  return ["latest", "evidence", "screenshots", "ac-map.json"].some((name) => existsSync(`${cardDir}/${name}`));
+}
+
 export function markDoneGuarded(
   projectCwd: string,
   id: string,
   evidence: DoneGuardEvidence,
   deps: DoneGuardDeps,
 ): DoneGuardResult {
-  if (evidence.mergedToMain && !existsSync(cardArchiveDir(projectCwd, id))) {
+  if (evidence.mergedToMain && !hasAcceptanceEvidenceDirectory(projectCwd, id)) {
     deps.alert?.(`Done guard evidence_debt ${id}: legacy merged card has no acceptance evidence directory`);
     deps.markStatus(projectCwd, id, `${STATUS_MARKER.done} · evidence_debt`);
     return { ok: true, missing: [], debt: true };

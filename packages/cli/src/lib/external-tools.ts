@@ -184,6 +184,9 @@ export function resolveRequirement(requirement: ToolRequirement, deps: ExternalT
       ? { requirement, status: "ok", detail: `${requirement.name} is set.` }
       : { requirement, status: "missing", detail: `${requirement.name} is not set.` };
   }
+  if (requirement.kind === "service" && requirement.name === "roll-capture-app") {
+    return rollCaptureAppResolution(requirement, deps);
+  }
   return {
     requirement,
     status: "stale",
@@ -311,6 +314,17 @@ function screencaptureResolution(requirement: ToolRequirement, deps: ExternalToo
       };
     }
   }
+}
+
+function rollCaptureAppResolution(requirement: ToolRequirement, deps: ExternalToolDeps): ToolRequirementResolution {
+  if (deps.platform !== "darwin") {
+    return { requirement, status: "stale", detail: "macOS-only requirement; not applicable on this host." };
+  }
+  return {
+    requirement,
+    status: "missing",
+    detail: "Roll Capture.app is not detected; install or start the capture service before requesting physical screenshots.",
+  };
 }
 
 function fileNonEmpty(path: string): boolean {

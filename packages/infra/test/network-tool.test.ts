@@ -10,6 +10,8 @@ import {
 
 const originalEnv = { ...process.env };
 const servers: Server[] = [];
+const localTcpAvailable = await canListenOnLocalhost();
+const tcpIt = localTcpAvailable ? it : it.skip;
 
 beforeEach(() => {
   for (const key of ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]) delete process.env[key];
@@ -27,6 +29,16 @@ async function serve(handler: (req: IncomingMessage, res: ServerResponse) => voi
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("server did not bind to TCP");
   return `http://127.0.0.1:${address.port}`;
+}
+
+async function canListenOnLocalhost(): Promise<boolean> {
+  const server = createServer();
+  return new Promise<boolean>((resolve) => {
+    server.once("error", () => resolve(false));
+    server.listen(0, "127.0.0.1", () => {
+      server.close(() => resolve(true));
+    });
+  });
 }
 
 function deps(): ToolDeps {
@@ -69,7 +81,7 @@ describe("US-TOOL-009 NetworkTool", () => {
     expect(tools[0]?.declaration.kind).toBe("network");
   });
 
-  it("fetches GET 200 responses with headers and body", async () => {
+  tcpIt("fetches GET 200 responses with headers and body", async () => {
     const base = await serve((_req, res) => {
       res.setHeader("x-roll", "ok");
       res.end("hello SECRET");
@@ -87,7 +99,7 @@ describe("US-TOOL-009 NetworkTool", () => {
     }
   });
 
-  it("returns ok:true for GET 404 with the status code in output", async () => {
+  tcpIt("returns ok:true for GET 404 with the status code in output", async () => {
     const base = await serve((_req, res) => {
       res.statusCode = 404;
       res.end("missing");
@@ -98,7 +110,7 @@ describe("US-TOOL-009 NetworkTool", () => {
     expect(result).toMatchObject({ ok: true, output: { statusCode: 404, body: "missing" } });
   });
 
-  it("times out and retries according to policy", async () => {
+  tcpIt("times out and retries according to policy", async () => {
     let calls = 0;
     const base = await serve((_req, res) => {
       calls += 1;
@@ -115,7 +127,7 @@ describe("US-TOOL-009 NetworkTool", () => {
     expect(calls).toBe(2);
   });
 
-  it("rejects hosts outside allowedOrigins", async () => {
+  tcpIt("rejects hosts outside allowedOrigins", async () => {
     const base = await serve((_req, res) => res.end("blocked"));
 
     const result = await new NetworkTool().execute(
@@ -137,7 +149,7 @@ describe("US-TOOL-009 NetworkTool", () => {
     if (!result.ok) expect(result.error.code).toBe("policy_denied");
   });
 
-  it("follows redirects", async () => {
+  tcpIt("follows redirects", async () => {
     const base = await serve((req, res) => {
       if (req.url === "/start") {
         res.statusCode = 302;
@@ -153,7 +165,7 @@ describe("US-TOOL-009 NetworkTool", () => {
     expect(result).toMatchObject({ ok: true, output: { statusCode: 200, body: "redirected" } });
   });
 
-  it("uses HTTP_PROXY for http targets", async () => {
+  tcpIt("uses HTTP_PROXY for http targets", async () => {
     let proxySawFullUrl = "";
     const target = await serve((_req, res) => res.end("direct"));
     const proxy = await serve((req, res) => {

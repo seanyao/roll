@@ -1,13 +1,16 @@
-import type { ExecOpts, ExecResult, MinimalFs, ToolDeps, ToolInvocation, ToolPolicy } from "@roll/spec";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import type { ExecOpts, ExecResult, MinimalFs, RollCaptureRequestV1, RollCaptureResponseV1, ToolDeps, ToolInvocation, ToolPolicy } from "@roll/spec";
+import { ROLL_CAPTURE_PROTOCOL_V1 } from "@roll/spec";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   BrowserTool,
+  RollCaptureProvider,
   browserTools,
   type BrowserConsoleOutput,
   type BrowserDomQueryOutput,
+  type PhysicalScreenshotOutput,
   type BrowserScreenshotOutput,
   type BrowserToolId,
 } from "../src/index.js";
@@ -67,7 +70,12 @@ describe("US-TOOL-005 BrowserTool", () => {
       "browser.dom-query",
       "physical.screenshot",
     ]);
-    expect(browserTools().every((tool) => tool.declaration.kind === "browser")).toBe(true);
+    expect(browserTools().map((tool) => [tool.declaration.id, tool.declaration.kind])).toEqual([
+      ["browser.screenshot", "browser"],
+      ["browser.console", "browser"],
+      ["browser.dom-query", "browser"],
+      ["physical.screenshot", "physical"],
+    ]);
   });
 
   it("takes a headless screenshot and writes non-empty output", async () => {
@@ -182,38 +190,59 @@ describe("US-TOOL-005 BrowserTool", () => {
     else process.env.CI = originalCi;
   });
 
-  it("physical.screenshot always uses the GUI lane and never falls back to headless", async () => {
-    const originalPlatform = process.env["_ROLL_EXTERNAL_TOOLS_PLATFORM"];
-    process.env["_ROLL_EXTERNAL_TOOLS_PLATFORM"] = "darwin";
+  it("physical.screenshot writes a Roll Capture request and never falls back to browser lanes", async () => {
     const dir = mkdtempSync(join(tmpdir(), "roll-physical-tool-"));
     const screenshotPath = join(dir, "physical.png");
-    const deps = fakeDeps((command, args) => {
-      const script = String(args[1] ?? "");
-      if (command === "launchctl") return { exitCode: 0, stdout: "Aqua\n", stderr: "", timedOut: false };
-      if (command === "osascript" && script.includes("bounds of front window")) return { exitCode: 0, stdout: "10, 20, 810, 620\n", stderr: "", timedOut: false };
-      if (command === "osascript") return { exitCode: 0, stdout: "", stderr: "", timedOut: false };
-      if (command === "sh" && script.includes("lsappinfo")) return { exitCode: 0, stdout: '"LSDisplayName"="Google Chrome"\n', stderr: "", timedOut: false };
-      if (command === "screencapture") {
-        writeFileSync(String(args[args.length - 1]), "PNGDATA");
-        return { exitCode: 0, stdout: "", stderr: "", timedOut: false };
-      }
-      if (command === "npx") return { exitCode: 0, stdout: JSON.stringify({ finalUrl: "https://example.com/app", statusCode: 200, png: "HEADLESS" }), stderr: "", timedOut: false };
+    let now = 0;
+    let responseWritten = false;
+    const provider = new RollCaptureProvider({
+      root: dir,
+      defaultPollIntervalMs: 1,
+      now: () => now,
+      sleep: async (ms) => {
+        now += ms;
+        if (!responseWritten) {
+          mkdirSync(join(dir, "responses"), { recursive: true });
+          writeFileSync(join(dir, "responses", `response-${request.requestId}.json`), JSON.stringify(response), "utf8");
+          responseWritten = true;
+        }
+      },
+    });
+    const request: RollCaptureRequestV1 = {
+      protocol: ROLL_CAPTURE_PROTOCOL_V1,
+      requestId: "US-TOOL-005-physical-terminal",
+      storyId: "US-TOOL-005",
+      kind: "physical_terminal",
+      target: { type: "window", appName: "Terminal", windowTitle: "roll attest US-TOOL-005" },
+      out: screenshotPath,
+      timeoutMs: 1000,
+      createdAt: "2026-07-03T11:35:00.000+08:00",
+    };
+    const response: RollCaptureResponseV1 = {
+      protocol: ROLL_CAPTURE_PROTOCOL_V1,
+      requestId: request.requestId,
+      status: "taken",
+      screenshotPath,
+      responsePath: join(dir, "responses", `response-${request.requestId}.json`),
+      host: { appName: "Roll Capture.app", bundleId: "com.seanyao.roll.capture", version: "0.1.0" },
+      startedAt: "2026-07-03T11:35:01.100+08:00",
+      finishedAt: "2026-07-03T11:35:01.820+08:00",
+    };
+    const deps = fakeDeps((command) => {
       return { exitCode: 1, stdout: "", stderr: "unexpected", timedOut: false };
     });
 
     try {
-      const result = await new BrowserTool("physical.screenshot").execute(
-        invocation("physical.screenshot", { url: "https://example.com/app", screenshotPath }, { headlessOnly: true }),
+      const result = await new BrowserTool("physical.screenshot", undefined, provider).execute(
+        invocation("physical.screenshot", request, { headlessOnly: true }),
         deps,
       );
 
       expect(result.ok).toBe(true);
-      expect(deps.calls.map((call) => call.command)).toEqual(["launchctl", "osascript", "osascript", "sh", "screencapture", "osascript"]);
-      expect(deps.calls.some((call) => call.command === "npx")).toBe(false);
-      expect(deps.calls.find((call) => call.command === "screencapture")?.args.join(" ")).toContain("-R 10,20,800,600");
+      if (result.ok) expect((result.output as PhysicalScreenshotOutput)).toMatchObject({ status: "taken", path: screenshotPath });
+      expect(JSON.parse(readFileSync(join(dir, "inbox", `request-${request.requestId}.json`), "utf8"))).toEqual(request);
+      expect(deps.calls).toEqual([]);
     } finally {
-      if (originalPlatform === undefined) delete process.env["_ROLL_EXTERNAL_TOOLS_PLATFORM"];
-      else process.env["_ROLL_EXTERNAL_TOOLS_PLATFORM"] = originalPlatform;
       rmSync(dir, { recursive: true, force: true });
     }
   });

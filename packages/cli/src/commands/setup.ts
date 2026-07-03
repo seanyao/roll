@@ -51,6 +51,7 @@ import {
   selectPrimaryAgent,
 } from "../lib/interactive-agent.js";
 import { collectExternalTools, defaultExternalToolDeps, resolveRequirement, type ExternalToolState } from "../lib/external-tools.js";
+import { collectRollCaptureReadiness, renderRollCaptureSetupGuidance } from "../lib/roll-capture-readiness.js";
 
 // ─── bash UI helpers (bin/roll:41-56) — err only ─────────────────────────────
 function err(line: string): void {
@@ -407,6 +408,9 @@ export function setupCommand(args: string[]): number {
 
   const screenRecordingNotice = renderScreenRecordingSetupNotice(collectExternalTools());
   if (screenRecordingNotice !== null) process.stdout.write(screenRecordingNotice);
+
+  const rollCaptureGuidance = renderRollCaptureSetupGuidance(collectRollCaptureReadiness(), msgLang());
+  if (rollCaptureGuidance !== null) process.stdout.write(rollCaptureGuidance);
 
   // FIX-288 AC5: `roll release` drives the merge via GitHub-native auto-merge
   // (`gh pr merge --auto --squash`). That needs "Allow auto-merge" enabled on

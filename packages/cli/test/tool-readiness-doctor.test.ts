@@ -12,12 +12,28 @@ function fakeResolver(requirement: ToolRequirement): ToolRequirementResolution {
 
 describe("US-TOOL-020 doctor tool readiness", () => {
   it("renders per-tool readiness from requirement resolution", () => {
-    const rows = collectToolReadinessDoctorRows("/repo", fakeResolver);
+    const rows = collectToolReadinessDoctorRows("/repo", fakeResolver, {
+      status: "available",
+      installed: { status: "installed", path: "/Applications/Roll Capture.app" },
+      permission: { status: "granted", detail: "CGPreflightScreenCaptureAccess returned true." },
+      inbox: {
+        status: "writable",
+        path: "/Users/test/Library/Application Support/Roll Capture/inbox",
+        detail: "temp-file atomic write succeeded.",
+      },
+      detailLines: [
+        "installed=installed (/Applications/Roll Capture.app)",
+        "permission=granted — CGPreflightScreenCaptureAccess returned true.",
+        "inbox=writable (/Users/test/Library/Application Support/Roll Capture/inbox) — temp-file atomic write succeeded.",
+      ],
+      repairCommands: [],
+    });
     const row = (id: string) => rows.find((candidate) => candidate.id === id);
 
     expect(row("bash")?.status).toBe("available");
     expect(row("browser.screenshot")?.status).toBe("degraded");
     expect(row("github.pr")?.status).toBe("unavailable");
+    expect(row("physical.screenshot")?.status).toBe("available");
 
     const text = renderToolReadinessDoctorSection(rows).join("\n");
     expect(text).toContain("Tool readiness");
@@ -25,5 +41,40 @@ describe("US-TOOL-020 doctor tool readiness", () => {
     expect(text).toContain("fix: brew install gh");
     expect(text).toContain("browser.screenshot (browser) — degraded");
     expect(text).toContain("fix: npx playwright install chromium");
+    expect(text).toContain("physical.screenshot (browser) — available");
+    expect(text).toContain("installed=installed (/Applications/Roll Capture.app)");
+    expect(text).toContain("permission=granted");
+    expect(text).toContain("inbox=writable");
+  });
+
+  it("keeps missing app or denied permission as warnings, not doctor failures", () => {
+    const rows = collectToolReadinessDoctorRows("/repo", fakeResolver, {
+      status: "degraded",
+      installed: { status: "missing" },
+      permission: { status: "denied", detail: "CGPreflightScreenCaptureAccess returned false for the active permission host." },
+      inbox: {
+        status: "blocked",
+        path: "/Users/test/Library/Application Support/Roll Capture/inbox",
+        detail: "EACCES",
+      },
+      detailLines: [
+        "installed=missing",
+        "permission=denied — CGPreflightScreenCaptureAccess returned false for the active permission host.",
+        "inbox=blocked (/Users/test/Library/Application Support/Roll Capture/inbox) — EACCES",
+      ],
+      repairCommands: [
+        "install Roll Capture.app to ~/Applications or /Applications",
+        "open x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+      ],
+    });
+    const text = renderToolReadinessDoctorSection(rows).join("\n");
+
+    expect(rows.find((row) => row.id === "physical.screenshot")?.status).toBe("degraded");
+    expect(text).toContain("~ physical.screenshot (browser) — degraded");
+    expect(text).toContain("installed=missing");
+    expect(text).toContain("permission=denied");
+    expect(text).toContain("inbox=blocked");
+    expect(text).toContain("fix: install Roll Capture.app");
+    expect(text).toContain("fix: open x-apple.systempreferences");
   });
 });

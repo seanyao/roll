@@ -641,6 +641,24 @@ export const v3Catalog: Catalog = {
     zh: "这些是 Roll 文档/报告，不是 skill —— 重新运行 `roll setup` 即可移除，agent 将不再报告缺少 description 的警告。",
   },
 
+  // US-PHYSICAL-003: Roll Capture.app setup/doctor readiness guidance
+  "setup.roll_capture_not_ready": {
+    en: "Roll Capture.app is not ready; physical screenshots will honestly skip at capture time.",
+    zh: "Roll Capture.app 尚未就绪，物理截图会在捕获时降级为明确跳过。",
+  },
+  "setup.roll_capture_install": {
+    en: "Install Roll Capture.app: place it in ~/Applications or /Applications, then open it once.",
+    zh: "安装 Roll Capture.app：将它放到 ~/Applications 或 /Applications，然后打开一次。",
+  },
+  "setup.roll_capture_permission": {
+    en: "Grant Screen Recording: System Settings > Privacy & Security > Screen Recording, allow Roll Capture.app.",
+    zh: "授权屏幕录制：System Settings > Privacy & Security > Screen Recording，允许 Roll Capture.app。",
+  },
+  "setup.roll_capture_inbox": {
+    en: "inbox: %s",
+    zh: "inbox：%s",
+  },
+
   // US-LANG-002: language policy mechanical audit
   "doctor.language_audit_title": {
     en: "Language policy audit",

@@ -122,8 +122,9 @@ describe("US-EVID-016 morning report renderer", () => {
     });
 
     expect(rowDelivered(run, base + 7200)).toBe(false);
-    expect(model.deliveredStories).toEqual([]);
+    expect(model.deliveredStories).toEqual(["US-MERGED"]);
     expect(model.degraded).toBe(true);
+    expect(model.degradedReasons).toEqual(["cycles_zero_with_delivered"]);
     expect(renderLoopDigestHtml(model)).toContain("DEGRADED");
   });
 
@@ -142,9 +143,28 @@ describe("US-EVID-016 morning report renderer", () => {
     const events = readFileSync(p.events, "utf8");
 
     expect(html).toContain("DEGRADED");
-    expect(html).toContain("delivered_without_cycle:FIX-1202");
-    expect(html).toContain("<span class=\"muted\">None</span>");
+    expect(html).toContain("cycles_zero_with_delivered");
+    expect(html).toContain("FIX-1202");
     expect(events).toContain('"type":"alert:notify"');
     expect(events).toContain('"channel":"loop-digest"');
+  });
+
+  it("FIX-1202: does not append duplicate degraded alerts for unchanged reasons", () => {
+    const p = tempProject();
+    const base = Date.parse("2026-07-03T12:00:00Z") / 1000;
+    writeEvents(p.events, []);
+    writeFileSync(
+      p.runs,
+      `${JSON.stringify({ cycle_id: "C-ORPHAN", story_id: "FIX-1202", status: "done", outcome: "delivered", ts: "2026-07-03T10:00:00Z" })}\n`,
+      "utf8",
+    );
+
+    writeLatestLoopDigest(p.root, p.events, p.runs, base);
+    writeLatestLoopDigest(p.root, p.events, p.runs, base + 60);
+    const events = readFileSync(p.events, "utf8");
+
+    expect((events.match(/"type":"alert:notify"/g) ?? []).length).toBe(1);
+    expect((events.match(/"type":"report:loop-digest"/g) ?? []).length).toBe(2);
+    expect(existsSync(join(p.root, ".roll", "reports", "loop", "degraded-state.json"))).toBe(true);
   });
 });

@@ -70,7 +70,7 @@ describe("US-EVID-016 morning report model", () => {
     expect(model.degraded).toBe(false);
   });
 
-  it("FIX-1202: marks contradictory zero-cycle delivered rows as degraded and suppresses the orphan delivery", () => {
+  it("FIX-1202: degrades the contradictory case of zero cycles with delivered rows", () => {
     const base = Date.parse("2026-07-03T12:00:00Z") / 1000;
     const model = buildLoopDigestModel([], [{ cycle_id: "c-orphan", story_id: "FIX-1202", status: "done", ts: "2026-07-03T10:00:00Z" }], {
       windowStart: base - 12 * 60 * 60,
@@ -79,12 +79,12 @@ describe("US-EVID-016 morning report model", () => {
     });
 
     expect(model.cycles).toBe(0);
-    expect(model.deliveredStories).toEqual([]);
+    expect(model.deliveredStories).toEqual(["FIX-1202"]);
     expect(model.degraded).toBe(true);
-    expect(model.degradedReasons).toContain("delivered_without_cycle:FIX-1202");
+    expect(model.degradedReasons).toEqual(["cycles_zero_with_delivered"]);
   });
 
-  it("FIX-1202: delivered run rows must belong to a cycle in the digest window", () => {
+  it("FIX-1202: counts delivered run rows by their own in-window timestamp, not cycle membership", () => {
     const base = Date.parse("2026-07-03T12:00:00Z") / 1000;
     const events: RollEvent[] = [
       { type: "cycle:start", cycleId: "c-current", storyId: "US-CURRENT", agent: "claude", model: "sonnet", ts: base - 120 },
@@ -96,12 +96,45 @@ describe("US-EVID-016 morning report model", () => {
     });
 
     expect(model.cycles).toBe(1);
-    expect(model.deliveredStories).toEqual([]);
-    expect(model.degraded).toBe(true);
-    expect(model.degradedReasons).toContain("delivered_outside_cycle_window:FIX-OLD");
+    expect(model.deliveredStories).toEqual(["FIX-OLD"]);
+    expect(model.degraded).toBe(false);
   });
 
-  it("FIX-1202: handles an idle-only day as a clean empty digest", () => {
+  it("FIX-1202: aggregates run-row cost by timestamp when no cycle:end cost exists", () => {
+    const base = Date.parse("2026-07-03T12:00:00Z") / 1000;
+    const model = buildLoopDigestModel([], [{ cycle_id: "c-cost", story_id: "FIX-COST", status: "failed", cost_usd: 0.42, ts: "2026-07-03T10:00:00Z" }], {
+      windowStart: base - 12 * 60 * 60,
+      windowEnd: base,
+      runDelivered: (row) => row.status === "done",
+    });
+
+    expect(model.cycles).toBe(0);
+    expect(model.deliveredStories).toEqual([]);
+    expect(model.totalCostUsd).toBe(0.42);
+    expect(model.degraded).toBe(false);
+  });
+
+  it("FIX-1202: accepts numeric epoch run timestamps in seconds and milliseconds", () => {
+    const base = Date.parse("2026-07-03T12:00:00Z") / 1000;
+    const model = buildLoopDigestModel(
+      [{ type: "cycle:start", cycleId: "c-current", storyId: "US-CURRENT", agent: "claude", model: "sonnet", ts: base - 120 }],
+      [
+        { cycle_id: "c-sec", story_id: "FIX-SEC", status: "done", cost_usd: 0.1, ts: base - 60 },
+        { cycle_id: "c-ms", story_id: "FIX-MS", status: "done", cost_usd: 0.2, ts: (base - 30) * 1000 },
+      ],
+      {
+        windowStart: base - 12 * 60 * 60,
+        windowEnd: base,
+        runDelivered: (row) => row.status === "done",
+      },
+    );
+
+    expect(model.deliveredStories).toEqual(["FIX-MS", "FIX-SEC"]);
+    expect(model.totalCostUsd).toBeCloseTo(0.3);
+    expect(model.degraded).toBe(false);
+  });
+
+  it("FIX-1202: handles an idle-only day as a clean digest with run-row cost", () => {
     const base = Date.parse("2026-07-03T12:00:00Z") / 1000;
     const model = buildLoopDigestModel([], [{ story_id: "IDLE", status: "idle", cost_usd: 0.2, ts: "2026-07-03T10:00:00Z" }], {
       windowStart: base - 12 * 60 * 60,
@@ -111,7 +144,7 @@ describe("US-EVID-016 morning report model", () => {
 
     expect(model.cycles).toBe(0);
     expect(model.deliveredStories).toEqual([]);
-    expect(model.totalCostUsd).toBe(0);
+    expect(model.totalCostUsd).toBe(0.2);
     expect(model.degraded).toBe(false);
   });
 

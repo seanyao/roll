@@ -47,11 +47,11 @@ function storyFromRun(row: MorningRunRow): string | undefined {
   return undefined;
 }
 
-function cycleFromRun(row: MorningRunRow): string | undefined {
-  return typeof row.cycle_id === "string" && row.cycle_id.trim() !== "" ? row.cycle_id : undefined;
-}
-
 function parseRunTs(row: MorningRunRow): number | undefined {
+  if (typeof row.ts === "number") {
+    if (!Number.isFinite(row.ts)) return undefined;
+    return row.ts > 10_000_000_000 ? row.ts / 1000 : row.ts;
+  }
   if (typeof row.ts !== "string") return undefined;
   const ts = Date.parse(row.ts) / 1000;
   return Number.isFinite(ts) ? ts : undefined;
@@ -112,22 +112,13 @@ export function buildLoopDigestModel(
     const ts = parseRunTs(row);
     if (ts === undefined || ts < opts.windowStart || ts > opts.windowEnd) continue;
     const story = storyFromRun(row);
-    const cycleId = cycleFromRun(row);
-    const rowInCurrentCycle = cycleId !== undefined && cycleIds.has(cycleId);
     if (story !== undefined && opts.runDelivered?.(row, opts.windowEnd) === true) {
-      if (cycleIds.size === 0) {
-        degradedReasons.push(`delivered_without_cycle:${story}`);
-      } else if (!rowInCurrentCycle) {
-        degradedReasons.push(`delivered_outside_cycle_window:${story}`);
-      } else {
-        delivered.add(story);
-      }
+      delivered.add(story);
     }
-    if (!hasCycleEnd && rowInCurrentCycle && typeof row.cost_usd === "number" && Number.isFinite(row.cost_usd)) totalCostUsd += row.cost_usd;
+    if (!hasCycleEnd && typeof row.cost_usd === "number" && Number.isFinite(row.cost_usd)) totalCostUsd += row.cost_usd;
   }
 
   if (cycleIds.size === 0 && delivered.size > 0) {
-    delivered.clear();
     degradedReasons.push("cycles_zero_with_delivered");
   }
 

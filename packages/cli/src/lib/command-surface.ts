@@ -23,7 +23,7 @@ export type CommandAudience = "human" | "internal" | "hidden";
 export type CommandDisposition = "public" | "nested" | "internal" | "remove";
 
 /**
- * The fifteen approved public top-level commands. Every decision's `owner` is
+ * The sixteen approved public top-level commands. Every decision's `owner` is
  * one of these — a nested/internal/removed surface names the public command it
  * belongs under; a public surface owns itself.
  */
@@ -38,6 +38,7 @@ export type CommandOwner =
   | "init"
   | "loop"
   | "next"
+  | "north"
   | "release"
   | "setup"
   | "status"
@@ -74,6 +75,7 @@ export const COMMAND_SURFACE: readonly CommandSurfaceDecision[] = [
   { current: "init", owner: "init", audience: "human", disposition: "public", rationale: "Diagnose-and-route project bootstrap." },
   { current: "loop", owner: "loop", audience: "human", disposition: "public", rationale: "Autonomous backlog execution domain root." },
   { current: "next", owner: "next", audience: "human", disposition: "public", rationale: "What to work on next; a core workflow verb." },
+  { current: "north", owner: "north", audience: "human", disposition: "public", rationale: "North-star terminal metrics panel for loop observability." },
   { current: "release", owner: "release", audience: "human", disposition: "public", rationale: "Release cut + consistency domain root." },
   { current: "setup", owner: "setup", audience: "human", disposition: "public", rationale: "Project/tooling setup lifecycle root." },
   { current: "status", owner: "status", audience: "human", disposition: "public", rationale: "Project health snapshot." },

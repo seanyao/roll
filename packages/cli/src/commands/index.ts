@@ -334,7 +334,7 @@ export function registerAll(): void {
   // No sub-paths on bash.
   registerPorted("init", initCommand, { help: "Usage: roll init [--auto|--repair|--apply] [--yes|--then design]\n  Diagnose this project and route to scaffold, PRD design, existing-codebase onboard, repair, migration, or roll status.\n  --auto: apply deterministic fresh-project scaffolding in non-interactive runs.\n  --repair: repair partial Roll markers only.\n  --apply: validate and apply a reviewed existing-codebase onboard plan.\n  --yes / --then design: after scaffolding a PRD project, continue straight into `roll design` (skips the confirm prompt).\n诊断项目并路由到骨架、PRD 设计、已有代码库接入、修复、迁移或 roll status。\n  --apply：校验并应用已审阅的已有代码库接入计划。\n  --yes / --then design：脚手架搭好后直接续跑 `roll design`（跳过确认）。" });
   registerPorted("next", nextCommand, { help: NEXT_USAGE });
-  registerPorted("north", northCommand, { hidden: true });
+  registerPorted("north", northCommand, { help: "Usage: roll north [--json] [--no-color]\n  Render the north-star terminal panel, or emit the raw roll.north.v1 metrics JSON.\n  Shows current value, target, 14-day sparkline, trend arrow, and status for autonomy, delivery rate, fix tax, and attribution errors.\n渲染北极星终端面板，或输出原始 roll.north.v1 指标 JSON；展示当前值、目标、14 天趋势条、趋势箭头和达标状态。" });
   // `design`: explicit thin entry point for the $roll-design skill
   // (US-ONBOARD-NUDGE-004). Loads the skill and launches the selected agent;
   // all design logic lives in the skill, not here.

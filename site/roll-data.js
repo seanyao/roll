@@ -25,6 +25,7 @@ window.RollData = (function () {
     "roll init",
     "roll loop",
     "roll next",
+    "roll north",
     "roll release",
     "roll setup",
     "roll status",
@@ -156,6 +157,7 @@ window.RollData = (function () {
       ]},
       { id: "observability", title: "Observability", blurb: "Always know what it's doing.", features: [
         { name: "roll status",     mono: true, desc: "Verdict-first truth summary — LOOP · CYCLE · RELEASE · STORY with attest coverage — then convention sync health.", badges: ["core"] },
+        { name: "roll north",      mono: true, desc: "North-star terminal panel with current values, targets, 14-day sparklines, trend arrows and status.", badges: ["new", "core"] },
         { name: "roll loop watch", mono: true, desc: "CLI-first live ActivitySignal stream for the current cycle. Full Supervisor Live Console and multi-role board are next work.", badges: ["new"] },
         { name: "roll loop runs",  mono: true, desc: "Per-cycle TerminalOutcome history with TCR count and duration.", badges: [] },
         { name: "roll loop story", mono: true, desc: "Per-story rollup: cycles, span, duration, tokens, cost, PRs.", badges: [] },
@@ -362,6 +364,7 @@ window.RollData = (function () {
       ]},
       { id: "observability", title: "可观测性", blurb: "永远知道它在干什么。", features: [
         { name: "roll status",     mono: true, desc: "判定优先的真相摘要——LOOP · CYCLE · RELEASE · STORY，含 attest 验收覆盖率——其后是约定同步健康。", badges: ["core"] },
+        { name: "roll north",      mono: true, desc: "北极星终端面板，展示当前值、目标、14 天趋势条、趋势箭头和达标状态。", badges: ["new", "core"] },
         { name: "roll loop watch", mono: true, desc: "当前 cycle 的 CLI-first 实时 ActivitySignal 流。完整 Supervisor Live Console 与多角色看板是下一阶段工作。", badges: ["new"] },
         { name: "roll loop runs",  mono: true, desc: "每轮 TerminalOutcome 历史,含 TCR 次数和耗时。", badges: [] },
         { name: "roll loop story", mono: true, desc: "按故事汇总:cycle 数、跨度、耗时、token、成本、PR 列表。", badges: [] },

@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join, relative } from "node:path";
 import { parseBacklog, type CycleContext } from "@roll/core";
+import { checkImageEvidenceAllowed, imageEvidencePathsInWorkingTree } from "@roll/infra";
 import { cardArchiveDir } from "../lib/archive.js";
 import { validateStoryVisualEvidence } from "../lib/design-visual-evidence.js";
 import { acMapPath } from "./attest-remediation.js";
@@ -139,7 +140,7 @@ function rollEvidenceLayout(repoCwd: string): RollEvidenceLayout {
   }
 }
 
-function commitInRepoEvidence(ports: Ports, ctx: CycleContext, storyId: string): boolean {
+async function commitInRepoEvidence(ports: Ports, ctx: CycleContext, storyId: string): Promise<boolean> {
   const cardDir = cardArchiveDir(ports.repoCwd, storyId);
   const acMap = acMapPath(ports.repoCwd, storyId);
   const runDir = ctx.cycleId !== "" ? join(cardDir, ctx.cycleId) : "";
@@ -156,6 +157,19 @@ function commitInRepoEvidence(ports: Ports, ctx: CycleContext, storyId: string):
   if (relAcMap === "" || relRunDir === "" || relAcMap.startsWith("..") || relRunDir.startsWith("..")) {
     ports.events.appendAlert(ports.paths.alertsPath, `Roll-Evidence publish blocked for ${storyId}: evidence path escapes repo`);
     return false;
+  }
+  // US-PHYSICAL-008: for in-repo .roll layouts, the main repo remote governs
+  // visibility. Block image evidence on public/unknown remotes unless waived.
+  const imagePaths = imageEvidencePathsInWorkingTree(ports.repoCwd);
+  if (imagePaths.length > 0) {
+    const check = await checkImageEvidenceAllowed(ports.repoCwd, ports.repoCwd);
+    if (!check.allowed) {
+      ports.events.appendAlert(
+        ports.paths.alertsPath,
+        `Roll-Evidence publish blocked for ${storyId}: ${check.reason}`,
+      );
+      return false;
+    }
   }
   try {
     execFileSync("git", ["add", "-A", "-f", "--", relAcMap, relRunDir], { cwd: ports.repoCwd, stdio: "ignore" });
@@ -180,7 +194,7 @@ export async function publishBodyWithEvidenceTrailer(ports: Ports, ctx: CycleCon
   const storyId = ctx.storyId ?? "";
   if (storyId === "") return base;
   if (rollEvidenceLayout(ports.repoCwd) === "in-repo") {
-    return commitInRepoEvidence(ports, ctx, storyId) ? base : null;
+    return (await commitInRepoEvidence(ports, ctx, storyId)) ? base : null;
   }
   const message = `chore: loop cycle ${ctx.cycleId}${storyId !== "" ? ` ${storyId}` : ""} evidence`;
   try {

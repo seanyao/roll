@@ -31,7 +31,18 @@ function tmp(tag: string): string {
 
 const GIT_ID = ["-c", "user.email=t@t", "-c", "user.name=t"];
 function git(cwd: string, args: string[]): string {
-  return execFileSync("git", [...args], { cwd, encoding: "utf8" });
+  // US-PHYSICAL-008 test isolation: the Bash tooling may inject GIT_DIR/GIT_WORK_TREE
+  // for the project worktree; temp fixture repos must be addressed by cwd only.
+  return execFileSync("git", [...args], {
+    cwd,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GIT_DIR: undefined,
+      GIT_WORK_TREE: undefined,
+      GIT_CEILING_DIRECTORIES: undefined,
+    },
+  });
 }
 
 /**
@@ -220,6 +231,42 @@ describe("FIX-306 commitRollMetadataRepo — runner owns the .roll commit", () =
       expect(String(res.error)).toContain("push");
       // The commit is real and local even though the push failed.
       expect(git(roll, ["log", "-1", "--pretty=%s"]).trim()).toBe("chore: commit lands, push fails");
+    })();
+  });
+
+  // ── US-PHYSICAL-008: image evidence must not land in a public/unknown remote ───
+
+  it("blocks image evidence when the roll-meta remote visibility is public/unknown", () => {
+    return (async () => {
+      const { project, roll } = makeRollRepo("vis-block");
+      // A bare file:// remote is non-GitHub and reachable → visibility unknown,
+      // which the guard treats as public (conservative).
+      mkdirSync(join(roll, "features", "capture-tool", "US-PHYSICAL-008", "screenshots"), { recursive: true });
+      writeFileSync(join(roll, "features", "capture-tool", "US-PHYSICAL-008", "screenshots", "x.png"), "fake", "utf8");
+
+      const res = await commitRollMetadataRepo(project, "chore: loop cycle X metadata");
+
+      expect(res.committed).toBe(false);
+      expect(res.pushed).toBe(false);
+      expect(res.nothingToCommit).toBe(false);
+      expect(String(res.error)).toContain("image evidence blocked");
+    })();
+  });
+
+  it("allows image evidence when the owner records a public-visibility waiver", () => {
+    return (async () => {
+      const { project, roll, remote } = makeRollRepo("vis-waiver");
+      mkdirSync(join(roll, "features", "capture-tool", "US-PHYSICAL-008", "screenshots"), { recursive: true });
+      writeFileSync(join(roll, "features", "capture-tool", "US-PHYSICAL-008", "screenshots", "x.png"), "fake", "utf8");
+      // Waiver lives in the project-level config (inside .roll for nested layout).
+      writeFileSync(join(project, ".roll", "local.yaml"), "evidence_public_waiver: true\n", "utf8");
+
+      const res = await commitRollMetadataRepo(project, "chore: loop cycle X metadata");
+
+      expect(res).toEqual({ committed: true, pushed: true, nothingToCommit: false });
+      expect(git(remote, ["ls-tree", "-r", "--name-only", "main"])).toContain(
+        "features/capture-tool/US-PHYSICAL-008/screenshots/x.png",
+      );
     })();
   });
 });

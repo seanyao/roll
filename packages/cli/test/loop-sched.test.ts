@@ -200,6 +200,10 @@ describe("v3 loop runner template", () => {
     expect(script).toContain("caffeinate");
   });
 
+  it("FIX-1209: exports ROLL_MAIN_SLUG as identity fuse", () => {
+    expect(script).toContain('export ROLL_MAIN_SLUG="proj-abc123"');
+  });
+
   it("resolves the roll binary from PATH with a brew fallback", () => {
     expect(script).toMatch(/command -v roll/);
   });

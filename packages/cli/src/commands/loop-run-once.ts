@@ -812,8 +812,46 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     return 0;
   }
   const dryRun = args.includes("--dry-run");
+
+  // FIX-1209: preflight — detect and heal core.worktree contamination BEFORE
+  // resolving project identity. The harness systematically writes core.worktree
+  // into the shared main checkout's git config every cycle (FIX-914 family),
+  // causing `rev-parse --show-toplevel` to return a cycle worktree path — making
+  // projectIdentity() resolve to the wrong checkout. Detect and unset before
+  // any identity-dependent code runs. Also stores the healing detail so an ALERT
+  // can be written once `alertsPath` is available.
+  const coreWorktreeHeal = checkCoreWorktreeContamination(process.cwd());
+
   const id = await projectIdentity();
   const cycleId = makeCycleId();
+
+  // FIX-1209: identity assertion — if the resolved project path contains a cycle
+  // worktree marker, identity has drifted despite the preflight guard. Refuse
+  // execution with an explicit error (never silently idle/paused).
+  const WORKTREE_MARKER = "/.roll/loop/worktrees";
+  if (id.path.includes(WORKTREE_MARKER)) {
+    const cwd = process.cwd();
+    const msg =
+      `[${new Date().toISOString()}] ALERT FIX-1209: identity drift — resolved path "${id.path}" contains worktree marker` +
+      ` (cwd="${cwd}", slug="${id.slug}")` +
+      ` — refusing execution`;
+    try {
+      // Write the ALERT to a stable location: derive the main checkout path by
+      // stripping worktree suffix from the contaminated path. On macOS, the
+      // worktree lives under <main>/.roll/loop/worktrees/cycle-<id>, so
+      // <main> = id.path.split('/.roll/loop/worktrees/')[0].
+      const markerIdx = id.path.indexOf(WORKTREE_MARKER);
+      const stableProjectPath = markerIdx !== -1 ? id.path.slice(0, markerIdx) : cwd;
+      const stableRt = join(stableProjectPath, ".roll", "loop");
+      mkdirSync(dirname(stableRt), { recursive: true });
+      appendFileSync(join(stableRt, `ALERT-${id.slug}.md`), `${msg}\n`, "utf8");
+    } catch {
+      /* best-effort — stderr below still fires */
+    }
+    process.stderr.write(`loop run-once: ${msg}\n`);
+    return 1;
+  }
+
   const branch = `loop/cycle-${cycleId}`;
   const ctx = { cycleId, branch, loop: "ci" as never };
 
@@ -842,6 +880,23 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   // The old `alerts.log` was a siloed file no consumer could find.
   const alertsPath = join(rt, `ALERT-${id.slug}.md`);
   mkdirSync(dirname(alertsPath), { recursive: true });
+
+  // FIX-1209: if preflight healed core.worktree contamination, write an ALERT
+  // documenting the incident for operator visibility.
+  if (coreWorktreeHeal.healed) {
+    try {
+      appendFileSync(
+        alertsPath,
+        `[${new Date().toISOString()}] ALERT FIX-1209: core.worktree was pointing to "${coreWorktreeHeal.detail}" — auto-unset before project identity resolution\n`,
+        "utf8",
+      );
+    } catch {
+      /* best-effort — stderr below still fires */
+    }
+    process.stderr.write(
+      `loop run-once: FIX-1209 healed core.worktree contamination (was "${coreWorktreeHeal.detail}") — auto-unset\n`,
+    );
+  }
 
   const paths: RunnerPaths = {
     eventsPath: join(rt, "events.ndjson"),
@@ -1565,4 +1620,57 @@ function writeRepoAlert(
   } catch {
     /* best-effort */
   }
+}
+
+// ─── FIX-1209: core.worktree contamination guard ──────────────────────────────
+
+export interface CoreWorktreeCheckResult {
+  healed: boolean;
+  detail: string;
+}
+
+/**
+ * FIX-1209: detect and heal core.worktree contamination on the shared main
+ * checkout. The harness systematically writes `core.worktree` into the main
+ * checkout's git config every cycle (FIX-914 family), causing `git rev-parse
+ * --show-toplevel` to return a cycle worktree path — identity drift.
+ *
+ * Runs synchronously via spawnSync (like checkRepoPushable) so it can fire
+ * BEFORE projectIdentity() resolves. Uses --local scope to only affect the
+ * current repository's config, never global/system.
+ */
+export function checkCoreWorktreeContamination(cwd: string): CoreWorktreeCheckResult {
+  // Strip inherited worktree env vars from process.env so ALL subsequent git
+  // operations (projectIdentity, canonicalProjectPath etc.) read the ACTUAL
+  // local repo config, not the cycle worktree's overrides.
+  delete process.env["GIT_DIR"];
+  delete process.env["GIT_WORK_TREE"];
+
+  // Also build a private env for this function's own spawnSync calls.
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  delete env["GIT_DIR"];
+  delete env["GIT_WORK_TREE"];
+
+  const git = (args: string[]): { code: number; stdout: string; stderr: string } => {
+    const r = spawnSync("git", args, { cwd, env, encoding: "utf8" });
+    return { code: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+  };
+
+  // Check if core.worktree is set (contamination) — MUST use --local scope
+  // so we only check the repo at cwd, not global/system config.
+  const get = git(["config", "--local", "--get", "core.worktree"]);
+  if (get.code !== 0 || get.stdout.trim() === "") {
+    return { healed: false, detail: "" };
+  }
+
+  const poisoned = get.stdout.trim();
+
+  // Unset the contamination — scope is implied --local by --unset.
+  const unset = git(["config", "--local", "--unset", "core.worktree"]);
+  if (unset.code !== 0) {
+    // Failed to unset — still report the contamination
+    return { healed: false, detail: `detected but failed to unset: ${poisoned}` };
+  }
+
+  return { healed: true, detail: poisoned };
 }

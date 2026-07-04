@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { dispatch, isPorted, registerAll } from "../src/index.js";
-import { RUN_ONCE_USAGE, buildLoopRouteDeps, idleCounterPath, incrementConsecutiveIdle, loopRunOnceCommand, readExternalBlock, readSkillBody, resetConsecutiveIdle, shouldSuppressGoalChildFailureCounter } from "../src/commands/loop-run-once.js";
+import { RUN_ONCE_USAGE, buildLoopRouteDeps, checkCoreWorktreeContamination, idleCounterPath, incrementConsecutiveIdle, loopRunOnceCommand, readExternalBlock, readSkillBody, resetConsecutiveIdle, shouldSuppressGoalChildFailureCounter } from "../src/commands/loop-run-once.js";
 import { GOAL_ALLOWED_CARDS_ENV } from "../src/lib/goal-progress.js";
 import { readPendingPublish } from "../src/runner/pending-publish.js";
 import { resolveRoute } from "@roll/core";
@@ -1017,5 +1017,98 @@ describe("FIX-1043 — scoped retry clears pending-publish so the picker does no
 
     // The scoped retry intent must clear the marker so a later cycle can pick it.
     expect(readPendingPublish(rt).has("FIX-1042")).toBe(false);
+  });
+});
+
+describe("FIX-1209: core.worktree contamination guard", () => {
+  it("detects and heals a poisoned core.worktree", () => {
+    const repo = tmp("core-worktree");
+    execFileSync("git", ["init", repo]);
+    execFileSync("git", ["config", "user.name", "test"], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "test@test"], { cwd: repo });
+    execFileSync("git", ["config", "--local", "core.worktree", "/tmp/fake-worktree"], { cwd: repo });
+
+    // Confirm contamination is present
+    const before = execFileSync("git", ["config", "--get", "core.worktree"], { cwd: repo, encoding: "utf8" });
+    expect(before.trim()).toBe("/tmp/fake-worktree");
+
+    const result = checkCoreWorktreeContamination(repo);
+
+    expect(result.healed).toBe(true);
+    expect(result.detail).toBe("/tmp/fake-worktree");
+
+    // Confirm contamination is gone
+    try {
+      execFileSync("git", ["config", "--get", "core.worktree"], { cwd: repo, encoding: "utf8" });
+      // Should not reach here
+      expect(true).toBe(false);
+    } catch {
+      // Expected — core.worktree is no longer set
+    }
+  });
+
+  it("returns healed=false when no contamination exists", () => {
+    const repo = tmp("core-worktree-clean");
+    execFileSync("git", ["init", repo]);
+    execFileSync("git", ["config", "user.name", "test"], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "test@test"], { cwd: repo });
+
+    const result = checkCoreWorktreeContamination(repo);
+
+    expect(result.healed).toBe(false);
+    expect(result.detail).toBe("");
+  });
+
+  it("IDENTITY: resolved path containing worktree marker triggers assertion", async () => {
+    // This test uses a worktree-like path to verify the identity assertion in
+    // loopRunOnceCommand rejects it.
+    const repo = tmp("identity-drift");
+    execFileSync("git", ["init", repo]);
+    execFileSync("git", ["config", "user.name", "test"], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "test@test"], { cwd: repo });
+    execFileSync("git", ["commit", "--allow-empty", "-m", "root"], { cwd: repo });
+
+    // Create a path that looks like a cycle worktree (containing .roll/loop/worktrees)
+    const fakeWt = join(tmp("fake-wt"), ".roll", "loop", "worktrees", "cycle-fake");
+    mkdirSync(fakeWt, { recursive: true });
+    execFileSync("git", ["init", fakeWt]);
+    execFileSync("git", ["config", "user.name", "test"], { cwd: fakeWt });
+    execFileSync("git", ["config", "user.email", "test@test"], { cwd: fakeWt });
+    execFileSync("git", ["commit", "--allow-empty", "-m", "fake"], { cwd: fakeWt });
+
+    // Mock ROLL_PROJECT_RUNTIME_DIR to avoid polluting real loop dirs
+    const prevSlug = process.env["ROLL_MAIN_SLUG"];
+    const prevRt = process.env["ROLL_PROJECT_RUNTIME_DIR"];
+    const prevCwd = process.cwd();
+    try {
+      process.env["ROLL_MAIN_SLUG"] = "test-identity";
+      process.env["ROLL_PROJECT_RUNTIME_DIR"] = join(repo, ".roll", "loop");
+      process.chdir(fakeWt);
+
+      // run-once resolves identity from cwd; since we're inside a repo with
+      // "worktrees" in its path, the identity assertion should fire.
+      const write = process.stderr.write.bind(process.stderr);
+      let stderr = "";
+      process.stderr.write = ((s: string) => {
+        stderr += s;
+        return true;
+      }) as typeof process.stderr.write;
+      try {
+        const r = await loopRunOnceCommand([]);
+        // We may not reach here if identity assertion exits early
+        // Just verify there's an error in stderr
+        expect(r).toBe(1);
+      } finally {
+        process.stderr.write = write;
+      }
+      expect(stderr).toContain("FIX-1209");
+      expect(stderr).toContain("identity drift");
+    } finally {
+      process.chdir(prevCwd);
+      if (prevRt === undefined) delete process.env["ROLL_PROJECT_RUNTIME_DIR"];
+      else process.env["ROLL_PROJECT_RUNTIME_DIR"] = prevRt;
+      if (prevSlug === undefined) delete process.env["ROLL_MAIN_SLUG"];
+      else process.env["ROLL_MAIN_SLUG"] = prevSlug;
+    }
   });
 });

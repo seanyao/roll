@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### 稳定性
+- `roll release --yes` 不再在 bump/changelog 提交步被自己的 60 秒测试新鲜度闸拦下：提交前自动重写 `.roll/last-test-pass` 证明并校验树匹配，一键发版全程无需人工垫步；测试后改文件的恶意场景仍会被拒绝（FIX-1207）`[release-management]`
+
 ## v4.704.2 — 2026-07-04
 
 ### 易用性

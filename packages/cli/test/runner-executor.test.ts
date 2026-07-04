@@ -1471,12 +1471,12 @@ describe("executeCommand — command → executor mapping", () => {
       expect(alerts.some((m) => m.includes("reclaim FIX-1211") && m.includes("dead"))).toBe(true);
     });
 
-    it("preserves an In Progress row with no lease (unknown provenance)", async () => {
+    it("reclaims an In Progress row with no lease once reconcile classifies it as a dead claim", async () => {
       const { ports, calls } = tempLeasePorts([{ id: "FIX-1211", desc: "lease aware", status: "🔨 In Progress" }]);
       await executeCommand({ kind: "preflight" }, ports, CTX);
-      expect(ports.backlog.markStatus).not.toHaveBeenCalled();
+      expect(ports.backlog.markStatus).toHaveBeenCalledWith(ports.repoCwd, "FIX-1211", STATUS_MARKER.todo);
       const alerts = (calls["alert"] ?? []).map((a) => String((a as unknown[])[1]));
-      expect(alerts.some((m) => m.includes("preserve FIX-1211") && m.includes("no lease"))).toBe(true);
+      expect(alerts.some((m) => m.includes("reclaim FIX-1211") && m.includes("no lease"))).toBe(true);
     });
 
     it("writes a cycle lease on pick_story and removes it on append_run terminal", async () => {

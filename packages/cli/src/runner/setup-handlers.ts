@@ -53,9 +53,10 @@ function decideInProgressReclaim(
   storyId: string,
 ): { action: "reclaim" | "keep"; reason: string } {
   if (entry === undefined) {
-    // No lease at all → treat as a human/external preemption (the observed bug).
-    // Conservatively preserve it; we cannot know when it was claimed.
-    return { action: "keep", reason: `no lease for ${storyId} — preserving human/external claim` };
+    // No lease plus a `todo` reconcile decision means there is no recorded
+    // delivering cycle / PR to protect. Preserve explicit human/supervisor
+    // leases below, but keep the original dead-claim recovery for legacy rows.
+    return { action: "reclaim", reason: `no lease for ${storyId} and no live delivery evidence` };
   }
   if (entry.source === "cycle") {
     if (entry.pid !== undefined && isLeaseAlive(entry)) {

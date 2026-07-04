@@ -1,4 +1,4 @@
-import { execFile, execFileSync } from "node:child_process";
+import { execFile, execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -209,12 +209,18 @@ export function applyMainCheckoutWriteProtection(opts: MainCheckoutGuardOptions)
       /* chmod failures are surfaced by the following write attempts/tests */
     }
   }
+  // FIX-1210: block config writes at the source — a read-only config.lock
+  // sentinel prevents git init's lock-then-rename from landing core.worktree
+  // on the shared config.
+  blockConfigWrites(opts.repoCwd);
   return protectionEvent(opts, recovered ? "recovered" : "applied", entries.length);
 }
 
 export function releaseMainCheckoutWriteProtection(opts: MainCheckoutGuardOptions): WriteProtectionResult {
   if (!existsSync(opts.repoCwd)) return protectionEvent(opts, "released", 0);
   const restored = restoreMarker(markerPath(opts.runtimeDir));
+  // FIX-1210: release the config-write block alongside the file protection.
+  unblockConfigWrites(opts.repoCwd);
   return protectionEvent(opts, "released", restored);
 }
 
@@ -379,5 +385,95 @@ export function worktreeGitEnv(worktreePath: string, repoCwd: string): NodeJS.Pr
       GIT_WORK_TREE: worktreePath,
       GIT_CEILING_DIRECTORIES: dirname(repoCwd),
     };
+  }
+}
+
+// ─── FIX-1210: core.worktree contamination repair + write-source blocking ─────
+
+export interface CoreWorktreeRepairResult {
+  healed: boolean;
+  detail: string;
+}
+
+/**
+ * FIX-1210 (shared logic with FIX-1209): detect and heal core.worktree
+ * contamination on the shared main checkout. Strips inherited
+ * GIT_DIR/GIT_WORK_TREE/GIT_CEILING_DIRECTORIES, reads local config,
+ * and unsets core.worktree.
+ *
+ * Returns the repair result; caller decides whether to emit events/ALERTs.
+ */
+export function repairCoreWorktreeContamination(repoCwd: string): CoreWorktreeRepairResult {
+  // Build a clean env — strip inherited worktree vars so git reads the ACTUAL
+  // local repo config, not cycle worktree overrides.
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  delete env["GIT_DIR"];
+  delete env["GIT_WORK_TREE"];
+  delete env["GIT_CEILING_DIRECTORIES"];
+
+  const git = (args: string[]): { code: number; stdout: string } => {
+    const r = spawnSync("git", args, { cwd: repoCwd, env, encoding: "utf8", timeout: 10_000 });
+    return { code: r.status ?? 1, stdout: (r.stdout ?? "").trim() };
+  };
+
+  const get = git(["config", "--local", "--get", "core.worktree"]);
+  if (get.code !== 0 || get.stdout === "") {
+    return { healed: false, detail: "" };
+  }
+
+  const poisoned = get.stdout;
+  const unset = git(["config", "--local", "--unset", "core.worktree"]);
+  if (unset.code !== 0) {
+    return { healed: false, detail: `detected but failed to unset: ${poisoned}` };
+  }
+
+  return { healed: true, detail: poisoned };
+}
+
+/**
+ * FIX-1210: create a read-only `.git/config.lock` sentinel that blocks nested
+ * `git init` from writing `core.worktree` into the shared config. Normal commit
+ * operations (refs/objects/index/logs) are unaffected — only git config's
+ * atomic rename (rename+link) is blocked.
+ *
+ * Best-effort: failures are silent (the write-protection layer below is the
+ * primary gate; this is a defence-in-depth addition).
+ */
+function blockConfigWrites(repoCwd: string): void {
+  const lockPath = join(repoCwd, ".git", "config.lock");
+  // If the lock already exists, it's likely a stale lock from a prior cycle.
+  // Remove it first (it may already be read-only and blocking itself).
+  try {
+    if (existsSync(lockPath)) {
+      // Force writable first so we can remove it
+      try { chmodSync(lockPath, 0o644); } catch { /* ok */ }
+      rmSync(lockPath, { force: true });
+    }
+  } catch {
+    /* best-effort */
+  }
+  try {
+    // Create a zero-byte file, then make it read-only. git config's
+    // lock-then-rename pattern will fail because rename(2) can't overwrite
+    // a read-only destination's directory entry.
+    writeFileSync(lockPath, "", "utf8");
+    chmodSync(lockPath, 0o444);
+  } catch {
+    /* best-effort: the write-protection layer is the primary gate */
+  }
+}
+
+/**
+ * FIX-1210: remove the `.git/config.lock` sentinel on write-protection release.
+ */
+function unblockConfigWrites(repoCwd: string): void {
+  const lockPath = join(repoCwd, ".git", "config.lock");
+  try {
+    if (existsSync(lockPath)) {
+      try { chmodSync(lockPath, 0o644); } catch { /* ok */ }
+      rmSync(lockPath, { force: true });
+    }
+  } catch {
+    /* best-effort */
   }
 }

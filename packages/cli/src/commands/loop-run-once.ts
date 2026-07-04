@@ -29,6 +29,7 @@ import { readBacklogRow } from "./attest.js";
 import { warnIfBinaryStale } from "../runner/binary-staleness.js";
 import { rollVersion } from "./version.js";
 import { rollHome } from "./setup-shared.js";
+import { repairCoreWorktreeContamination } from "../runner/main-checkout-guard.js";
 import { applyCorrectionCircuitBreaker } from "../runner/correction-circuit.js";
 import { classifyCycleFailure, playbookForFailure, readCycleEvents, recordRootCauseFailure, type FailureAttribution } from "../runner/failure-attribution.js";
 import { readSkillBody as readSkillBodyGeneric } from "../runner/skill-body.js";
@@ -1630,14 +1631,13 @@ export interface CoreWorktreeCheckResult {
 }
 
 /**
- * FIX-1209: detect and heal core.worktree contamination on the shared main
- * checkout. The harness systematically writes `core.worktree` into the main
- * checkout's git config every cycle (FIX-914 family), causing `git rev-parse
- * --show-toplevel` to return a cycle worktree path — identity drift.
+ * FIX-1209/FIX-1210: detect and heal core.worktree contamination on the shared
+ * main checkout. Strips inherited worktree env vars from process.env, then
+ * delegates to the shared {@link repairCoreWorktreeContamination} (FIX-1210)
+ * so the same logic serves both the preflight guard and the terminal cleanup.
  *
  * Runs synchronously via spawnSync (like checkRepoPushable) so it can fire
- * BEFORE projectIdentity() resolves. Uses --local scope to only affect the
- * current repository's config, never global/system.
+ * BEFORE projectIdentity() resolves.
  */
 export function checkCoreWorktreeContamination(cwd: string): CoreWorktreeCheckResult {
   // Strip inherited worktree env vars from process.env so ALL subsequent git
@@ -1645,32 +1645,7 @@ export function checkCoreWorktreeContamination(cwd: string): CoreWorktreeCheckRe
   // local repo config, not the cycle worktree's overrides.
   delete process.env["GIT_DIR"];
   delete process.env["GIT_WORK_TREE"];
+  delete process.env["GIT_CEILING_DIRECTORIES"];
 
-  // Also build a private env for this function's own spawnSync calls.
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  delete env["GIT_DIR"];
-  delete env["GIT_WORK_TREE"];
-
-  const git = (args: string[]): { code: number; stdout: string; stderr: string } => {
-    const r = spawnSync("git", args, { cwd, env, encoding: "utf8" });
-    return { code: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
-  };
-
-  // Check if core.worktree is set (contamination) — MUST use --local scope
-  // so we only check the repo at cwd, not global/system config.
-  const get = git(["config", "--local", "--get", "core.worktree"]);
-  if (get.code !== 0 || get.stdout.trim() === "") {
-    return { healed: false, detail: "" };
-  }
-
-  const poisoned = get.stdout.trim();
-
-  // Unset the contamination — scope is implied --local by --unset.
-  const unset = git(["config", "--local", "--unset", "core.worktree"]);
-  if (unset.code !== 0) {
-    // Failed to unset — still report the contamination
-    return { healed: false, detail: `detected but failed to unset: ${poisoned}` };
-  }
-
-  return { healed: true, detail: poisoned };
+  return repairCoreWorktreeContamination(cwd);
 }

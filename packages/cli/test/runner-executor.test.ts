@@ -745,6 +745,15 @@ describe("buildRunRow — v2 runs.jsonl shape", () => {
     expect(row["root_cause_key"]).toBe("env:main_dirty");
   });
 
+  it("REFACTOR-070: every terminal runs row carries failure attribution keys, null when neutral", () => {
+    const row = buildRunRow(
+      { kind: "append_run", status: "published", outcome: "published_pending_merge", cycleId: CTX.cycleId },
+      CTX,
+    );
+    expect(row).toHaveProperty("failure_class", null);
+    expect(row).toHaveProperty("root_cause_key", null);
+  });
+
   it("FIX-290 AC2: model falls back to the agent id when the router left model empty (claude default)", () => {
     const row = buildRunRow(
       { kind: "append_run", status: "idle", outcome: "idle_no_work", cycleId: CTX.cycleId },
@@ -854,6 +863,17 @@ describe("buildTerminalRecord — the cycle:terminal twin (US-TRUTH-001 + FIX-29
     );
     expect(ev.failure_class).toBe("env");
     expect(ev.root_cause_key).toBe("env:main_dirty");
+  });
+
+  it("REFACTOR-070: neutral cycle:terminal records null attribution keys", () => {
+    const ev = buildTerminalRecord(
+      { kind: "append_run", status: "published", outcome: "published_pending_merge", cycleId: CTX.cycleId },
+      CTX,
+      "/wt",
+      1780688082,
+    );
+    expect(ev).toHaveProperty("failure_class", null);
+    expect(ev).toHaveProperty("root_cause_key", null);
   });
 
   it("FIX-294: model falls back to the agent id when the router left model empty (claude default)", () => {

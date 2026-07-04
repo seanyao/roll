@@ -356,7 +356,12 @@ describe("FIX-1032b — published cycle writes delivery-gate terminal outcomes",
     const end = commands.find((c): c is Extract<CycleCommand, { kind: "emit_event" }> =>
       c.kind === "emit_event" && c.event.type === "cycle:end",
     );
-    expect(end?.event).toMatchObject({ type: "cycle:end", outcome: "pr_loop_unavailable" });
+    expect(end?.event).toMatchObject({
+      type: "cycle:end",
+      outcome: "pr_loop_unavailable",
+      failure_class: "env",
+      root_cause_key: "env:pr_loop",
+    });
     const alert = commands.find((c) => c.kind === "append_alert");
     expect(alert).toMatchObject({ message: expect.stringContaining("PR loop not installed") });
   });

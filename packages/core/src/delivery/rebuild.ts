@@ -17,7 +17,7 @@
  * AC4: no separate backfill script needed; first rebuild covers all history.
  * AC7: genuinely not-delivered cards stay todo (no false positives).
  */
-import type { DeliveryRecord, FactOr, TerminalOutcome } from "@roll/spec";
+import type { DeliveryRecord, FactOr, FailureClass, TerminalOutcome } from "@roll/spec";
 import { present, absent, lifecycleFromFacts } from "@roll/spec";
 import type { RunRow } from "../events/bus.js";
 import type { ExecPort } from "./infra-default.js";
@@ -43,8 +43,8 @@ export interface RunFact {
   mergedAt?: number;
   /** When this run was recorded (epoch ms). */
   recordedAt: number;
-  /** REFACTOR-070: failure attribution class (env|harness|card|unknown). */
-  failureClass?: string;
+  /** REFACTOR-070: generalized failure attribution (env|harness|card|unknown). */
+  failureClass?: FailureClass;
   /** REFACTOR-070: deterministic root-cause key (e.g. env:pr_loop). */
   rootCauseKey?: string;
 }
@@ -105,6 +105,19 @@ function terminalOutcomeFromRun(outcome: string): TerminalOutcome | undefined {
 
 function isDeliveryGateBlockingOutcome(outcome: string): outcome is "ci_red_after_merge" | "pr_loop_unavailable" {
   return outcome === "ci_red_after_merge" || outcome === "pr_loop_unavailable";
+}
+
+function failureClassFromRow(row: RunRow): FailureClass | undefined {
+  const value = row["failure_class"];
+  return value === "env" || value === "harness" || value === "card" || value === "unknown"
+    ? value
+    : undefined;
+}
+
+function isPrLoopUnavailableRun(run: RunFact): boolean {
+  return run.outcome === "pr_loop_unavailable" ||
+    (run.outcome === "published_pending_merge" && run.failureClass === "env" &&
+      (run.rootCauseKey ?? "").startsWith("env:pr_loop"));
 }
 
 /**
@@ -207,7 +220,7 @@ export function extractRunFact(row: RunRow): RunFact | null {
     mergeCommit: typeof mergeCommit === "string" && mergeCommit !== "" ? mergeCommit : undefined,
     mergedAt,
     recordedAt,
-    failureClass: typeof row["failure_class"] === "string" ? row["failure_class"] : undefined,
+    failureClass: failureClassFromRow(row),
     rootCauseKey: typeof row["root_cause_key"] === "string" ? row["root_cause_key"] : undefined,
   };
 }
@@ -463,7 +476,9 @@ export function rebuildDeliveriesFromFacts(
         ? `https://github.com/${repoSlug}/pull/${effectivePr}`
         : undefined;
       const terminalOutcome = terminalOutcomeFromRun(latest.outcome);
-      const lifecycleState = isDeliveryGateBlockingOutcome(latest.outcome) && terminalOutcome !== undefined
+      const lifecycleState = isPrLoopUnavailableRun(latest)
+        ? "blocked"
+        : isDeliveryGateBlockingOutcome(latest.outcome) && terminalOutcome !== undefined
         ? lifecycleFromFacts(terminalOutcome, "merged")
         : "done";
       result.push({
@@ -487,14 +502,12 @@ export function rebuildDeliveriesFromFacts(
     const outcome = latest.outcome;
     let lifecycle: DeliveryRecord["lifecycleState"];
 
-    if (outcome === "published_pending_merge") {
+    if (isPrLoopUnavailableRun(latest)) {
       // REFACTOR-070: published_pending_merge + failure_class=env(root=env:pr_loop)
       // → blocked (PR loop absent — published PR has no merge guardian).
-      if (latest.failureClass === "env" && (latest.rootCauseKey ?? "").startsWith("env:pr_loop")) {
-        lifecycle = "blocked";
-      } else {
-        lifecycle = "pending_merge";
-      }
+      lifecycle = "blocked";
+    } else if (outcome === "published_pending_merge") {
+      lifecycle = "pending_merge";
     } else if (outcome === "ci_red_after_merge") {
       lifecycle = "ci_red";
     } else if (outcome === "pr_loop_unavailable") {

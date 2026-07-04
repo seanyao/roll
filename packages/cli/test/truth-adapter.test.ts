@@ -88,6 +88,30 @@ describe("cycleTruthFromRow / outcomeToPanel — selector-backed classification"
       },
     ]);
   });
+
+  it("REFACTOR-070: delivery gate diagnostics recognize env:pr_loop on published_pending_merge", () => {
+    const diagnostics = deliveryGateDiagnosticsFromRows([
+      {
+        run_id: "C-PR-NEW",
+        story_id: "FIX-PR-NEW",
+        status: "published",
+        outcome: "published_pending_merge",
+        failure_class: "env",
+        root_cause_key: "env:pr_loop",
+        ts: iso(NOW - 100),
+        pr_url: "https://github.com/o/r/pull/3",
+      },
+    ], { nowSec: NOW });
+
+    expect(diagnostics).toEqual([
+      {
+        kind: "pr_loop_unavailable",
+        cycleId: "C-PR-NEW",
+        storyId: "FIX-PR-NEW",
+        prUrl: "https://github.com/o/r/pull/3",
+      },
+    ]);
+  });
 });
 
 describe("AC4 — unknown renders as unknown, never as success", () => {

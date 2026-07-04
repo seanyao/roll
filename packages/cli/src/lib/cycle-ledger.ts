@@ -152,6 +152,11 @@ export function ledgerVerdict(status: string, outcome: string): CycleLedgerVerdi
   return "unknown";
 }
 
+function isAgentInternalAttribution(row: Record<string, unknown>): boolean {
+  return typeof row["failure_class"] === "string" &&
+    row["root_cause_key"] === "harness:agent_internal";
+}
+
 /** failed = failed + reverted + blocked + agent_internal_failure (never swallowed). */
 export function ledgerFailedCount(rows: readonly CycleLedgerRow[]): number {
   return rows.filter(
@@ -535,7 +540,7 @@ export function collectCycleLedger(projectPath: string): CycleLedgerRow[] {
     if (cycleId === "") continue;
     const status = String(row["status"] ?? "");
     const outcome = String(row["outcome"] ?? "");
-    const verdict = ledgerVerdict(status, outcome);
+    const verdict = isAgentInternalAttribution(row) ? "agent_internal_failure" : ledgerVerdict(status, outcome);
     // FIX-297: idle no-op heartbeats are loop liveness, not cycles — exclude them
     // from the ledger here at the collection point (they stay in runs.jsonl).
     if (isIdleHeartbeat(row, verdict)) continue;
@@ -553,10 +558,10 @@ export function collectCycleLedger(projectPath: string): CycleLedgerRow[] {
     const usageUnknown = row["usage_unknown"] === true;
     const usageUnknownReason = typeof row["usage_unknown_reason"] === "string" ? (row["usage_unknown_reason"] as string) : undefined;
     const agentInternalFailure =
-      row["agent_internal_failure"] === true
+      row["agent_internal_failure"] === true || isAgentInternalAttribution(row)
         ? {
-            class: typeof row["agent_internal_class"] === "string" ? (row["agent_internal_class"] as string) : "unknown",
-            summary: typeof row["agent_internal_summary"] === "string" ? (row["agent_internal_summary"] as string) : "",
+            class: typeof row["agent_internal_class"] === "string" ? (row["agent_internal_class"] as string) : "harness:agent_internal",
+            summary: typeof row["agent_internal_summary"] === "string" ? (row["agent_internal_summary"] as string) : String(row["root_cause_key"] ?? ""),
             nativeLogPath: typeof row["agent_internal_log_path"] === "string" ? (row["agent_internal_log_path"] as string) : "",
             conversationId:
               typeof row["agent_internal_conversation_id"] === "string"

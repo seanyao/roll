@@ -160,8 +160,8 @@ export interface TerminalEvent {
   attest: FactOr<TerminalAttestFact>;
   usage: FactOr<TerminalUsageFact>;
   cost: FactOr<TerminalCostFact>;
-  failure_class?: FailureClass;
-  root_cause_key?: string;
+  failure_class: FailureClass | null;
+  root_cause_key: string | null;
   /** RollEvent stream timestamp (epoch milliseconds) — equals endedAt by default. */
   ts: number;
 }
@@ -187,8 +187,8 @@ export interface TerminalEventInput {
   attest: FactOr<TerminalAttestFact>;
   usage: FactOr<TerminalUsageFact>;
   cost: FactOr<TerminalCostFact>;
-  failure_class?: FailureClass;
-  root_cause_key?: string;
+  failure_class?: FailureClass | null;
+  root_cause_key?: string | null;
   ts?: number;
 }
 
@@ -217,8 +217,8 @@ export function buildTerminalEvent(input: TerminalEventInput): TerminalEvent {
     attest: input.attest,
     usage: input.usage,
     cost: input.cost,
-    ...(input.failure_class !== undefined ? { failure_class: input.failure_class } : {}),
-    ...(input.root_cause_key !== undefined ? { root_cause_key: input.root_cause_key } : {}),
+    failure_class: input.failure_class ?? null,
+    root_cause_key: input.root_cause_key ?? null,
     ts: input.ts !== undefined ? epochMs(input.ts) : endedAt,
   };
 }

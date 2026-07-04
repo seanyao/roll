@@ -32,8 +32,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { acForStory, draftAcMap } from "@roll/core";
-import type { CycleActivityEvent } from "@roll/spec";
+import type { CycleActivityEvent, RollEvent } from "@roll/spec";
 import { cardArchiveDir } from "../lib/archive.js";
+import type { AgentSpawn } from "./agent-spawn.js";
 import { storyHasAcBlock, storyRequiresScreenshot, storySpecPath } from "./attest-gate.js";
 
 /** Hard wall-clock cap for the remediation spawn — writing one JSON file from
@@ -307,6 +308,107 @@ export function writeAcMapDraftEvidenceFiles(
       "",
     ].join("\n"),
   );
+}
+
+export interface AcMapSelfHealOptions {
+  worktreeCwd: string;
+  storyId: string;
+  runDir: string;
+  cycleId: string;
+  agent: string;
+  collectDraftEvidence: () => Promise<DraftEvidence>;
+  collectCycleSignals: () => CycleActivityEvent[] | undefined;
+  canSpawnRemediation: () => boolean;
+  agentSpawn: AgentSpawn;
+  renderAttest: () => Promise<number>;
+  appendEvent: (event: RollEvent) => void;
+  now: () => number;
+}
+
+export interface AcMapSelfHealResult {
+  renderExitCode: number;
+}
+
+/**
+ * REFACTOR-066 — the single ac-map self-heal pipeline.
+ *
+ * Damage classes preserved:
+ *   1. absent / malformed / empty ac-map -> draft if possible, then narrow spawn;
+ *   2. harness draft left unconfirmed -> narrow spawn asks the same agent to confirm;
+ *   3. real screenshot captured but not referenced by pass ACs -> attach, then rerender.
+ */
+export async function runAcMapSelfHeal(opts: AcMapSelfHealOptions): Promise<AcMapSelfHealResult> {
+  if (opts.storyId === "" || opts.runDir === "") {
+    return { renderExitCode: 0 };
+  }
+
+  if (needsAcMapRemediation(opts.worktreeCwd, opts.storyId)) {
+    try {
+      const specPath = storySpecPath(opts.worktreeCwd, opts.storyId);
+      if (specPath !== null) {
+        const specText = readFileSync(specPath, "utf8");
+        const gitEvidence = await opts.collectDraftEvidence();
+        const draftJson = generateAcMapDraft(specText, opts.storyId, gitEvidence, opts.collectCycleSignals());
+        if (draftJson !== null) {
+          writeAcMapDraftEvidenceFiles(opts.worktreeCwd, opts.storyId, gitEvidence);
+          writeFileSync(acMapPath(opts.worktreeCwd, opts.storyId), draftJson);
+          opts.appendEvent({
+            type: "attest:draft-generated",
+            cycleId: opts.cycleId,
+            storyId: opts.storyId,
+            ts: opts.now(),
+          });
+        }
+      }
+    } catch {
+      // Draft generation is best-effort; the narrowed spawn below remains the fallback.
+    }
+  }
+
+  if (needsAcMapRemediation(opts.worktreeCwd, opts.storyId)) {
+    let outcome: "written" | "still-missing" | "spawn-failed";
+    try {
+      if (!opts.canSpawnRemediation()) {
+        outcome = "spawn-failed";
+      } else {
+        await opts.agentSpawn(opts.agent, {
+          cwd: opts.worktreeCwd,
+          skillBody: buildAcMapRemediationPrompt(opts.worktreeCwd, opts.storyId, opts.runDir),
+          storyId: opts.storyId,
+          timeoutMs: ACMAP_REMEDIATION_TIMEOUT_MS,
+          runDir: opts.runDir,
+        });
+        outcome = needsAcMapRemediation(opts.worktreeCwd, opts.storyId) ? "still-missing" : "written";
+      }
+    } catch {
+      outcome = "spawn-failed";
+    }
+    opts.appendEvent({
+      type: "attest:remediation",
+      cycleId: opts.cycleId,
+      storyId: opts.storyId,
+      agent: opts.agent,
+      outcome,
+      ts: opts.now(),
+    });
+  }
+
+  let renderExitCode = await opts.renderAttest();
+  if (renderExitCode === 0) {
+    const attached = autoAttachScreenshotToAcMap(opts.worktreeCwd, opts.storyId, opts.runDir);
+    if (attached !== null) {
+      opts.appendEvent({
+        type: "attest:auto-attach",
+        cycleId: opts.cycleId,
+        storyId: opts.storyId,
+        href: attached.href,
+        attachedCount: attached.count,
+        ts: opts.now(),
+      });
+      renderExitCode = await opts.renderAttest();
+    }
+  }
+  return { renderExitCode };
 }
 
 /**

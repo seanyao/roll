@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildDesignScorePrompt, buildPairScorePrompt, buildReviewPrompt, enabledPairingStages, reviewTimeoutMs, runPairing, type PairEvent, type RunPairingDeps } from "../src/runner/pairing-gate.js";
+import { buildDesignScorePrompt, buildPairScorePrompt, buildReviewPrompt, enabledPairingStages, pairingDispatch, reviewTimeoutMs, runPairing, type PairEvent, type RunPairingDeps } from "../src/runner/pairing-gate.js";
 
 function project(yaml: string | null): { dir: string; rt: string } {
   const dir = mkdtempSync(join(tmpdir(), "roll-pair-"));
@@ -44,6 +44,94 @@ function deps(over: Partial<RunPairingDeps> = {}): { d: RunPairingDeps; events: 
   };
   return { d, events };
 }
+
+describe("pairingDispatch — REFACTOR-065 unified review dispatch", () => {
+  it("serial take-first stops after the first structured review and records skipped peers", async () => {
+    const events: PairEvent[] = [];
+    const tried: string[] = [];
+    const result = await pairingDispatch({
+      cycleId: "c-dispatch-serial",
+      workingAgent: "kimi",
+      stage: "code",
+      candidates: ["pi", "reasonix"],
+      sameTypeFallback: { allowed: false },
+      fallbackPolicy: "none",
+      mode: "serial-take-first",
+      blockOnNoWinner: false,
+      diff: "diff",
+      timeoutMs: 10,
+      event: (e) => events.push(e),
+      now: () => 1234,
+      reviewPeer: async (peer) => {
+        tried.push(peer);
+        return { verdict: "refine", findings: ["nit"], cost: 0.01 };
+      },
+    });
+
+    expect(result.status).toBe("reviewed");
+    expect(result.peer).toBe("pi");
+    expect(result.blocked).toBe(false);
+    expect(tried).toEqual(["pi"]);
+    expect(result.skipped).toEqual(["reasonix"]);
+  });
+
+  it("parallel firstValid waits past nulls and returns the first valid review", async () => {
+    const events: PairEvent[] = [];
+    const tried: string[] = [];
+    const result = await pairingDispatch({
+      cycleId: "c-dispatch-parallel",
+      workingAgent: "kimi",
+      stage: "code",
+      candidates: ["reasonix", "pi"],
+      sameTypeFallback: { allowed: false },
+      fallbackPolicy: "none",
+      mode: "parallel-first-valid",
+      blockOnNoWinner: true,
+      diff: "diff",
+      timeoutMs: 10,
+      event: (e) => events.push(e),
+      now: () => 1234,
+      reviewPeer: async (peer) => {
+        tried.push(peer);
+        return peer === "pi" ? { verdict: "agree", findings: [], cost: 0.02 } : null;
+      },
+    });
+
+    expect(result.status).toBe("reviewed");
+    expect(result.peer).toBe("pi");
+    expect(result.blocked).toBe(false);
+    expect(tried.sort()).toEqual(["pi", "reasonix"]);
+    expect(events.filter((e) => e.type === "pair:selected")).toHaveLength(2);
+  });
+
+  it("sameTypeFallback is a hard gate: primary peer failure never degrades to same-type", async () => {
+    const events: PairEvent[] = [];
+    const tried: string[] = [];
+    const result = await pairingDispatch({
+      cycleId: "c-dispatch-same-gate",
+      workingAgent: "kimi",
+      stage: "code",
+      candidates: ["pi"],
+      sameTypeFallback: { allowed: true, peer: "kimi" },
+      fallbackPolicy: "same-type-when-primary-empty",
+      mode: "parallel-first-valid",
+      blockOnNoWinner: true,
+      diff: "diff",
+      timeoutMs: 10,
+      event: (e) => events.push(e),
+      now: () => 1234,
+      reviewPeer: async (peer) => {
+        tried.push(peer);
+        return peer === "kimi" ? { verdict: "agree", findings: [], cost: 0.02 } : null;
+      },
+    });
+
+    expect(result.status).toBe("timeout");
+    expect(result.blocked).toBe(true);
+    expect(result.sameTypeFallback).toBe(false);
+    expect(tried).toEqual(["pi"]);
+  });
+});
 
 describe("runPairing — US-PAIR-003", () => {
   it("file absent = off (never silent magic)", async () => {

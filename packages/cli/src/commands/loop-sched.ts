@@ -247,6 +247,8 @@ fi
 # script(1)+tmux PTY (isTTY===true), so the explicit kill-switch is required.
 export ROLL_ATTEST_NO_TERMINAL="\${ROLL_ATTEST_NO_TERMINAL:-1}"
 export ROLL_NO_SCREENCAP="\${ROLL_NO_SCREENCAP:-1}"
+# FIX-1209: fuse — pin the expected slug so run-once can detect identity drift.
+export ROLL_MAIN_SLUG="${input.slug}"
 # Acquire the cycle inflight lock so the next launchd tick yields (FIX-393).
 printf '%s:%s\\n' "$$" "$(date -u +%s)" > "$CYCLE_LOCK"
 trap 'rm -f "$CYCLE_LOCK"' EXIT

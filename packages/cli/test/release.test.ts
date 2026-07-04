@@ -3,8 +3,10 @@
  * step order, every gate's abort, the removed routes' rejection, and the
  * no-stray-surface cleanup guard.
  */
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { ReleaseStep } from "@roll/core";
 import {
@@ -16,8 +18,6 @@ import {
   type ReleaseFlowDeps,
 } from "../src/commands/release.js";
 
-/** De-dupe a step trace to its first-seen order — the wait-merge poll feedback
- *  re-emits its own step name once per poll, so the trace can repeat it. */
 function uniqueInOrder(steps: ReleaseStep[]): ReleaseStep[] {
   const seen = new Set<ReleaseStep>();
   const out: ReleaseStep[] = [];
@@ -338,29 +338,50 @@ describe("FIX-277 — throwing dependencies become orderly aborts", () => {
 describe("FIX-277 review fixes — gate-aware commitPush helper and step marks", () => {
   function fakeExec() {
     const calls = [];
+    const cwd = join(tmpdir(), `roll-release-test-${randomUUID()}`);
+    const tree = "deadbeef1234567890abcdef1234567890abcdef";
     return {
       calls,
+      cwd,
+      tree,
       exec: (cmd, args) => {
         calls.push([cmd, ...args].join(" "));
+        if (cmd === "git" && args[0] === "rev-parse" && args[1] === "--show-toplevel") return `${cwd}\n`;
+        if (cmd === "git" && args[0] === "write-tree") return `${tree}\n`;
         if (cmd === "git" && args[0] === "rev-parse") return "main\n";
         return "";
+      },
+      cleanup: () => {
+        try {
+          rmSync(cwd, { recursive: true, force: true });
+        } catch {
+          /* ignore cleanup failures */
+        }
       },
     };
   }
 
   it("roll-managed repo refreshes the test proof BEFORE committing — no error-message sniffing", () => {
-    const { calls, exec } = fakeExec();
-    commitPushWithGate({ branch: "release/v1", message: "Release: v1", rollManaged: true, exec });
-    const testIdx = calls.findIndex((c) => c === "roll test");
-    const commitIdx = calls.findIndex((c) => c.startsWith("git commit"));
-    expect(testIdx).toBeGreaterThan(-1);
-    expect(commitIdx).toBeGreaterThan(testIdx);
+    const { calls, exec, cleanup } = fakeExec();
+    try {
+      commitPushWithGate({ branch: "release/v1", message: "Release: v1", rollManaged: true, exec });
+      const testIdx = calls.findIndex((c) => c === "roll test");
+      const commitIdx = calls.findIndex((c) => c.startsWith("git commit"));
+      expect(testIdx).toBeGreaterThan(-1);
+      expect(commitIdx).toBeGreaterThan(testIdx);
+    } finally {
+      cleanup();
+    }
   });
 
   it("non-roll repo never runs roll test", () => {
-    const { calls, exec } = fakeExec();
-    commitPushWithGate({ branch: "release/v1", message: "Release: v1", rollManaged: false, exec });
-    expect(calls.some((c) => c.startsWith("roll "))).toBe(false);
+    const { calls, exec, cleanup } = fakeExec();
+    try {
+      commitPushWithGate({ branch: "release/v1", message: "Release: v1", rollManaged: false, exec });
+      expect(calls.some((c) => c.startsWith("roll "))).toBe(false);
+    } finally {
+      cleanup();
+    }
   });
 
   it("a failing commit rolls the release branch back (no stray local branch) and rethrows", () => {
@@ -395,6 +416,103 @@ describe("FIX-277 review fixes — gate-aware commitPush helper and step marks",
       expect(res.status).toBe("aborted");
       expect(res.step).toBe(expectedStep);
       expect(res.reason).toContain("exploded");
+    }
+  });
+});
+
+// ─── FIX-1207: release --yes must not self-hit the 60s test-proof gate ───────
+
+describe("FIX-1207 — release commit refreshes the test-pass proof", () => {
+  function proofExec(staleProof?: { ts: number; tree: string }) {
+    const calls: string[][] = [];
+    const cwd = join(tmpdir(), `roll-release-test-${randomUUID()}`);
+    const tree = "deadbeef1234567890abcdef1234567890abcdef";
+    mkdirSync(join(cwd, ".roll"), { recursive: true });
+    if (staleProof !== undefined) {
+      writeFileSync(
+        join(cwd, ".roll", "last-test-pass"),
+        JSON.stringify({ ...staleProof, mode: "vitest", scope: "affected" }),
+        "utf8",
+      );
+    }
+    const exec = (cmd: string, args: string[]): string => {
+      calls.push([cmd, ...args]);
+      if (cmd === "git" && args[0] === "rev-parse" && args[1] === "--show-toplevel") return `${cwd}\n`;
+      if (cmd === "git" && args[0] === "write-tree") return `${tree}\n`;
+      if (cmd === "git" && args[0] === "rev-parse" && args[1] === "--abbrev-ref") return "main\n";
+      if (cmd === "git" && args[0] === "rev-parse") return "main\n";
+      return "";
+    };
+    return {
+      calls,
+      exec,
+      cwd,
+      tree,
+      cleanup: () => {
+        try {
+          rmSync(cwd, { recursive: true, force: true });
+        } catch {
+          /* ignore cleanup failures */
+        }
+      },
+    };
+  }
+
+  it("writes a fresh proof after roll test so the commit gate passes", () => {
+    const { exec, cwd, tree, cleanup } = proofExec({
+      ts: Math.floor(Date.now() / 1000) - 3600,
+      tree: "staletree1234567890abcdef1234567890abcdef",
+    });
+    try {
+      commitPushWithGate({ branch: "release/v1", message: "Release: v1", rollManaged: true, exec });
+      const proof = JSON.parse(readFileSync(join(cwd, ".roll", "last-test-pass"), "utf8"));
+      expect(proof.tree).toBe(tree);
+      expect(proof.mode).toBe("release");
+      expect(Math.floor(Date.now() / 1000) - proof.ts).toBeLessThanOrEqual(5);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("aborts cleanly when the staged tree changes after the test (malicious scenario)", () => {
+    const { exec, cleanup } = proofExec();
+    let writeTreeCalls = 0;
+    const execWithTreeFlip = (cmd: string, args: string[]): string => {
+      const out = exec(cmd, args);
+      if (cmd === "git" && args[0] === "write-tree") {
+        writeTreeCalls += 1;
+        // First call writes the proof; second call verifies it. Simulate a
+        // change between proof-write and commit by returning a different tree.
+        return writeTreeCalls === 1 ? "prooftree1234567890abcdef1234567890abc\n" : "differenttree1234567890abcdef1234567890abc\n";
+      }
+      return out;
+    };
+    try {
+      expect(() =>
+        commitPushWithGate({ branch: "release/v1", message: "Release: v1", rollManaged: true, exec: execWithTreeFlip }),
+      ).toThrow("code changed since last test run");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("aborts cleanly when roll test fails before the proof can be refreshed", () => {
+    const { exec, cleanup } = proofExec({
+      ts: Math.floor(Date.now() / 1000) - 3600,
+      tree: "staletree1234567890abcdef1234567890abcdef",
+    });
+    const execFailingTest = (cmd: string, args: string[]): string => {
+      if (cmd === "roll" && args[0] === "test") {
+        throw new Error("roll test failed: some suite is red");
+      }
+      return exec(cmd, args);
+    };
+    try {
+      expect(() =>
+        commitPushWithGate({ branch: "release/v1", message: "Release: v1", rollManaged: true, exec: execFailingTest }),
+      ).toThrow("roll test failed");
+    } finally {
+      cleanup();
     }
   });
 });
@@ -546,18 +664,34 @@ describe("FIX-330 — release transaction is re-runnable and self-healing", () =
   /** A scriptable synchronous exec for testing commitPushWithGate. */
   function scriptExec(responses: Record<string, { stdout?: string; throw?: string }>) {
     const calls: string[][] = [];
+    const cwd = join(tmpdir(), `roll-release-test-${randomUUID()}`);
+    const tree = "deadbeef1234567890abcdef1234567890abcdef";
+    const baseResponses: Record<string, { stdout?: string; throw?: string }> = {
+      "git rev-parse --show-toplevel": { stdout: `${cwd}\n` },
+      "git write-tree": { stdout: `${tree}\n` },
+    };
     const exec = (cmd: string, args: string[]): string => {
       calls.push([cmd, ...args]);
       const key = [cmd, ...args].join(" ");
-      const r = responses[key];
+      const r = responses[key] ?? baseResponses[key];
       if (r?.throw !== undefined) throw new Error(r.throw);
       return r?.stdout ?? "";
     };
-    return { calls, exec };
+    return {
+      calls,
+      exec,
+      cleanup: () => {
+        try {
+          rmSync(cwd, { recursive: true, force: true });
+        } catch {
+          /* ignore cleanup failures */
+        }
+      },
+    };
   }
 
   it("commitPushWithGate reuses an existing local release branch", () => {
-    const { calls, exec } = scriptExec({
+    const { calls, exec, cleanup } = scriptExec({
       "git rev-parse --abbrev-ref HEAD": { stdout: "main\n" },
       "git rev-parse --verify refs/heads/release/v1": { stdout: "abc123\n" },
       "git checkout release/v1": { stdout: "" },
@@ -567,13 +701,17 @@ describe("FIX-330 — release transaction is re-runnable and self-healing", () =
       "git commit -m Release: v1": { stdout: "" },
       "git push -u origin release/v1": { stdout: "" },
     });
-    commitPushWithGate({ branch: "release/v1", message: "Release: v1", rollManaged: true, exec });
-    expect(calls.some((c) => c.join(" ") === "git checkout -b release/v1")).toBe(false);
-    expect(calls.some((c) => c.join(" ") === "git checkout release/v1")).toBe(true);
+    try {
+      commitPushWithGate({ branch: "release/v1", message: "Release: v1", rollManaged: true, exec });
+      expect(calls.some((c) => c.join(" ") === "git checkout -b release/v1")).toBe(false);
+      expect(calls.some((c) => c.join(" ") === "git checkout release/v1")).toBe(true);
+    } finally {
+      cleanup();
+    }
   });
 
   it("commitPushWithGate skips commit when the release commit already exists", () => {
-    const { calls, exec } = scriptExec({
+    const { calls, exec, cleanup } = scriptExec({
       "git rev-parse --abbrev-ref HEAD": { stdout: "main\n" },
       "git rev-parse --verify refs/heads/release/v1": { stdout: "abc123\n" },
       "git checkout release/v1": { stdout: "" },
@@ -581,14 +719,18 @@ describe("FIX-330 — release transaction is re-runnable and self-healing", () =
       "git log release/v1 --grep Release: v1 --oneline -n 1": { stdout: "abc123 Release: v1\n" },
       "git push -u origin release/v1": { stdout: "" },
     });
-    commitPushWithGate({ branch: "release/v1", message: "Release: v1", rollManaged: true, exec });
-    expect(calls.some((c) => c[0] === "roll" && c[1] === "test")).toBe(false);
-    expect(calls.some((c) => c[0] === "git" && c[1] === "commit")).toBe(false);
-    expect(calls.some((c) => c.join(" ") === "git push -u origin release/v1")).toBe(true);
+    try {
+      commitPushWithGate({ branch: "release/v1", message: "Release: v1", rollManaged: true, exec });
+      expect(calls.some((c) => c[0] === "roll" && c[1] === "test")).toBe(false);
+      expect(calls.some((c) => c[0] === "git" && c[1] === "commit")).toBe(false);
+      expect(calls.some((c) => c.join(" ") === "git push -u origin release/v1")).toBe(true);
+    } finally {
+      cleanup();
+    }
   });
 
   it("commitPushWithGate fetches and reuses an existing remote release branch", () => {
-    const { calls, exec } = scriptExec({
+    const { calls, exec, cleanup } = scriptExec({
       "git rev-parse --abbrev-ref HEAD": { stdout: "main\n" },
       "git rev-parse --verify refs/heads/release/v1": { throw: "fatal: Needed a single revision" },
       "git ls-remote --heads origin release/v1": { stdout: "abc123\trefs/heads/release/v1\n" },
@@ -600,9 +742,13 @@ describe("FIX-330 — release transaction is re-runnable and self-healing", () =
       "git commit -m Release: v1": { stdout: "" },
       "git push -u origin release/v1": { stdout: "" },
     });
-    commitPushWithGate({ branch: "release/v1", message: "Release: v1", rollManaged: true, exec });
-    expect(calls.some((c) => c.join(" ") === "git checkout -b release/v1")).toBe(false);
-    expect(calls.some((c) => c.join(" ") === "git fetch origin release/v1:release/v1")).toBe(true);
+    try {
+      commitPushWithGate({ branch: "release/v1", message: "Release: v1", rollManaged: true, exec });
+      expect(calls.some((c) => c.join(" ") === "git checkout -b release/v1")).toBe(false);
+      expect(calls.some((c) => c.join(" ") === "git fetch origin release/v1:release/v1")).toBe(true);
+    } finally {
+      cleanup();
+    }
   });
 
   it("runReleaseFlow reaches released even when the branch/PR are reused leftovers", async () => {

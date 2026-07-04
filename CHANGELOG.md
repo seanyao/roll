@@ -5,6 +5,9 @@
 ### 稳定性
 - `roll release --yes` 不再在 bump/changelog 提交步被自己的 60 秒测试新鲜度闸拦下：提交前自动重写 `.roll/last-test-pass` 证明并校验树匹配，一键发版全程无需人工垫步；测试后改文件的恶意场景仍会被拒绝（FIX-1207）`[release-management]`
 
+### 物理截图
+- 截图证据不再误提交到公开仓库：入库前自动校验 remote 可见性，public/不可判定仓一律拒绝并告警，私有仓正常放行；owner 可显式豁免（US-PHYSICAL-008）`[capture-tool]`
+
 ## v4.704.2 — 2026-07-04
 
 ### 易用性

@@ -1365,6 +1365,96 @@ describe("ensureDeliveriesFresh", () => {
   });
 });
 
+// ── REFACTOR-070: failure_class/root_cause_key projection ─────────────────
+
+describe("rebuildDeliveriesFromFacts — REFACTOR-070: failure_class → blocked projection", () => {
+  it("published_pending_merge + failure_class=env + root=env:pr_loop → blocked", () => {
+    const runs = [makeRun({
+      storyId: "US-NOPRLOOP",
+      outcome: "published_pending_merge",
+      prNumber: 99,
+      failureClass: "env",
+      rootCauseKey: "env:pr_loop",
+      recordedAt: 200,
+    })];
+    const result = rebuildDeliveriesFromFacts(runs, [], "o/r");
+    expect(result).toHaveLength(1);
+    expect(result[0].lifecycleState).toBe("blocked");
+    expect(result[0].prNumber).toEqual({ present: true, value: 99 });
+  });
+
+  it("published_pending_merge + failure_class=card → stays pending_merge", () => {
+    const runs = [makeRun({
+      storyId: "US-CARDFAIL",
+      outcome: "published_pending_merge",
+      prNumber: 100,
+      failureClass: "card",
+      rootCauseKey: "card:agent_after_build",
+      recordedAt: 200,
+    })];
+    const result = rebuildDeliveriesFromFacts(runs, [], "o/r");
+    expect(result).toHaveLength(1);
+    expect(result[0].lifecycleState).toBe("pending_merge");
+  });
+
+  it("published_pending_merge without failure_class stays pending_merge (back-compat)", () => {
+    const runs = [makeRun({
+      storyId: "US-OLDROW",
+      outcome: "published_pending_merge",
+      prNumber: 101,
+      recordedAt: 200,
+    })];
+    const result = rebuildDeliveriesFromFacts(runs, [], "o/r");
+    expect(result).toHaveLength(1);
+    expect(result[0].lifecycleState).toBe("pending_merge");
+  });
+
+  it("published_pending_merge + failure_class=env + non-pr_loop root → pending_merge", () => {
+    const runs = [makeRun({
+      storyId: "US-ENVAUTH",
+      outcome: "published_pending_merge",
+      prNumber: 102,
+      failureClass: "env",
+      rootCauseKey: "env:auth",
+      recordedAt: 200,
+    })];
+    const result = rebuildDeliveriesFromFacts(runs, [], "o/r");
+    expect(result).toHaveLength(1);
+    expect(result[0].lifecycleState).toBe("pending_merge");
+  });
+});
+
+describe("extractRunFact — REFACTOR-070: reads failure_class/root_cause_key", () => {
+  it("extracts failure_class and root_cause_key from runs row", () => {
+    const row: Record<string, unknown> = {
+      story_id: "US-ATTR",
+      cycle_id: "c1",
+      status: "published",
+      outcome: "published_pending_merge",
+      failure_class: "env",
+      root_cause_key: "env:pr_loop",
+      ts: "2026-01-01T00:00:00Z",
+    };
+    const f = extractRunFact(row);
+    expect(f).not.toBeNull();
+    expect(f!.failureClass).toBe("env");
+    expect(f!.rootCauseKey).toBe("env:pr_loop");
+  });
+
+  it("failure_class/root_cause_key absent → undefined (back-compat)", () => {
+    const row: Record<string, unknown> = {
+      story_id: "US-NOATTR",
+      cycle_id: "c1",
+      status: "built",
+      ts: "2026-01-01T00:00:00Z",
+    };
+    const f = extractRunFact(row);
+    expect(f).not.toBeNull();
+    expect(f!.failureClass).toBeUndefined();
+    expect(f!.rootCauseKey).toBeUndefined();
+  });
+});
+
 describe("nodeExecPort", () => {
   it("captures command output larger than Node's default execFileSync buffer", () => {
     const bytes = 2 * 1024 * 1024;

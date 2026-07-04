@@ -79,6 +79,10 @@ export interface CycleLedgerRow {
   usageUnknownReason?: string;
   /** FIX-1051: agent-internal failure diagnostics surfaced in detail output. */
   agentInternalFailure?: { class: string; summary: string; nativeLogPath: string; conversationId?: string };
+  /** REFACTOR-070: failure attribution class (env|harness|card|unknown). */
+  failureClass?: string;
+  /** REFACTOR-070: deterministic root-cause key (e.g. env:pr_loop). */
+  rootCauseKey?: string;
 }
 
 /**
@@ -560,6 +564,16 @@ export function collectCycleLedger(projectPath: string): CycleLedgerRow[] {
                 : undefined,
           }
         : undefined;
+    // REFACTOR-070: read failure_class/root_cause_key from runs row for ledger
+    // diagnostic rendering (verdict detail enrichment, empty-bucket prevention).
+    const failureClass =
+      typeof row["failure_class"] === "string" && row["failure_class"] !== ""
+        ? (row["failure_class"] as string)
+        : undefined;
+    const rootCauseKey =
+      typeof row["root_cause_key"] === "string" && row["root_cause_key"] !== ""
+        ? (row["root_cause_key"] as string)
+        : undefined;
     const ev = byCycle.get(cycleId);
     const toolCosts = toolEvidence.costsByCycle.get(cycleId) ?? [];
     const prNumber = storyId !== "" ? prMergedBy.get(storyId) : undefined;
@@ -591,6 +605,9 @@ export function collectCycleLedger(projectPath: string): CycleLedgerRow[] {
       ...(usageUnknownReason !== undefined ? { usageUnknownReason } : {}),
       // FIX-1051: agent-internal failure diagnostics for detail output.
       ...(agentInternalFailure !== undefined ? { agentInternalFailure } : {}),
+      // REFACTOR-070: failure attribution fields for diagnostic rendering.
+      ...(failureClass !== undefined ? { failureClass } : {}),
+      ...(rootCauseKey !== undefined ? { rootCauseKey } : {}),
     });
   }
   // De-dupe duplicate cycle ids (kimi pair-review): the LAST row wins — runs.jsonl

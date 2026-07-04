@@ -252,6 +252,7 @@ function attachFailureAttribution(ctx: CycleContext, terminal: V2CycleStatus | u
     agentExecuted: (ctx.agent ?? "") !== "",
     mainDirty: ctx.mainDirty,
     agentInternalFailure: ctx.agentInternalFailure !== undefined,
+    agentTimedOut: ctx.agentTimedOut,
     events: readCycleEvents(ports.paths.eventsPath, ctx.cycleId),
   });
   return { ...ctx, failureClass: attribution.failureClass, rootCauseKey: attribution.rootCauseKey };
@@ -267,6 +268,7 @@ function mergeCtx(live: CycleContext, next: CycleContext): CycleContext {
     evidenceRunDir: next.evidenceRunDir ?? live.evidenceRunDir,
     failureClass: next.failureClass ?? live.failureClass,
     rootCauseKey: next.rootCauseKey ?? live.rootCauseKey,
+    agentTimedOut: next.agentTimedOut ?? live.agentTimedOut,
   };
 }
 

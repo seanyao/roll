@@ -30,6 +30,8 @@ export interface FailureAttributionInput {
   readonly tokensIn?: number;
   readonly tokensOut?: number;
   readonly tcrCount?: number;
+  /** True iff the agent timed out with zero output — vendor stall (FIX-1213). */
+  readonly agentTimedOut?: boolean;
 }
 
 export interface FailureAttribution {
@@ -47,6 +49,7 @@ export interface CycleFailureAttributionInput {
   readonly agentExecuted?: boolean;
   readonly mainDirty?: boolean;
   readonly agentInternalFailure?: boolean;
+  readonly agentTimedOut?: boolean;
   readonly events?: readonly RollEvent[];
 }
 
@@ -171,6 +174,11 @@ export function classifyFailure(input: FailureAttributionInput): FailureAttribut
   }
 
   if (input.stage === "build" && (hasUsage(input) || (input.tcrCount ?? 0) > 0)) {
+    // FIX-1213: zero-output timeout is env:agent_stall, not card.
+    const buildOutputZero = (input.tcrCount ?? 0) === 0 && (input.tokensOut ?? 0) === 0;
+    if (buildOutputZero && input.agentTimedOut === true) {
+      return { failureClass: "env", rootCauseKey: "env:agent_stall", confidence: "corroborated" };
+    }
     return { failureClass: "card", rootCauseKey: "card:agent_after_build", confidence: "corroborated" };
   }
 
@@ -236,6 +244,12 @@ export function classifyCycleFailure(input: CycleFailureAttributionInput): Failu
   if (events.some((event) => event.type === "cycle:rescue")) {
     return classifyFailure({ stage: "rescue", source: "cycle:rescue", tcrCount: input.tcrCount });
   }
+  // FIX-1213: zero-output timed-out build is a vendor stall, not a card failure.
+  // Agent consumed prompt tokens but produced NO output — the vendor is silent.
+  const outputZero = (input.tcrCount ?? 0) === 0 && (input.tokensOut ?? 0) === 0;
+  if (hasAgentWorkEvidence && outputZero && input.agentTimedOut === true) {
+    return { failureClass: "env", rootCauseKey: "env:agent_stall", confidence: "corroborated" };
+  }
   if (hasAgentWorkEvidence) {
     return classifyFailure({
       stage: "build",
@@ -243,6 +257,7 @@ export function classifyCycleFailure(input: CycleFailureAttributionInput): Failu
       tcrCount: input.tcrCount,
       tokensIn: input.tokensIn,
       tokensOut: input.tokensOut,
+      agentTimedOut: input.agentTimedOut,
     });
   }
   if (input.mainDirty === true) {

@@ -740,6 +740,10 @@ export interface CycleContext {
   /** The last agent process exit code (set when agent_exited is accepted,
    *  so the executor can read it back in capture_facts). */
   agentExitCode?: number;
+  /** True iff the last agent_exited event carried timedOut:true. Used by
+   *  failure-attribution to distinguish zero-output vendor stalls from genuine
+   *  card failures (FIX-1213). */
+  agentTimedOut?: boolean;
   /** Cycle start (epoch seconds) — set by the driver; used by the attest gate
    *  (FIX-207) to decide whether an acceptance report was produced THIS cycle. */
   startSec?: number;
@@ -1062,7 +1066,7 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
       if (plan.action === "abort_timeout") {
         // Watchdog breach → clean teardown (worktree PRESERVED, bin/roll:9122).
         return {
-          state: { ...state, phase: "execute", terminal: "blocked", done: true },
+          state: { ...state, phase: "execute", terminal: "blocked", done: true, ctx: { ...state.ctx, agentExitCode: event.exit, agentTimedOut: event.timedOut } },
           commands: timeoutTeardownCommands(terminalCtx(state)),
         };
       }
@@ -1077,17 +1081,18 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
       }
       if (plan.action === "exhausted") {
         // Retry budget spent → failed (NEVER agent-swap, I6).
-        return terminate({ ...state, phase: "execute" }, "failed", [
+        return terminate({ ...state, phase: "execute", ctx: { ...state.ctx, agentExitCode: event.exit, agentTimedOut: event.timedOut } }, "failed", [
           { kind: "append_alert", message: `cycle ${state.ctx.cycleId}: agent exited ${event.exit} after retries; worktree preserved` },
         ]);
       }
-      // accept → capture facts before publish. Store the exit code in ctx
-      // so the executor can read it back when building CapturedFacts.
+      // accept → capture facts before publish. Store the exit code + timedOut
+      // in ctx so the executor can read them back when building CapturedFacts
+      // and failure-attribution can detect zero-output vendor stalls (FIX-1213).
       return {
         state: {
           ...state,
           phase: "reconcile",
-          ctx: { ...state.ctx, agentExitCode: event.exit },
+          ctx: { ...state.ctx, agentExitCode: event.exit, agentTimedOut: event.timedOut },
         },
         commands: [{ kind: "capture_facts" }],
       };

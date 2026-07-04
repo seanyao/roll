@@ -14,13 +14,15 @@ import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
+import type { RollEvent } from "@roll/spec";
 import {
   acMapPath,
   autoAttachScreenshotToAcMap,
   buildAcMapRemediationPrompt,
   capturedScreenshotRef,
   needsAcMapRemediation,
+  runAcMapSelfHeal,
 } from "../src/runner/attest-remediation.js";
 
 const dirs: string[] = [];
@@ -411,5 +413,113 @@ describe("FIX-912 generateAcMapDraft", () => {
       expect(labels.some((l) => l.includes("node_modules"))).toBe(false);
       expect(labels.some((l) => l.includes("attest-remediation.ts"))).toBe(true);
     }
+  });
+});
+
+// ── REFACTOR-066: unified ac-map self-heal path ─────────────────────────────
+
+function selfHealEvents(): RollEvent[] {
+  return [];
+}
+
+describe("REFACTOR-066 runAcMapSelfHeal", () => {
+  it("self-heals missing ac-map by drafting, spawning the same agent to confirm, then rendering", async () => {
+    const wt = withStory("FIX-915", FIX_912_SPEC.replaceAll("FIX-912", "FIX-915"));
+    const rd = withRunDir(wt, "FIX-915", [], []);
+    const events = selfHealEvents();
+    const order: string[] = [];
+    const renderAttest = vi.fn(async () => {
+      order.push("render");
+      return 0;
+    });
+    const agentSpawn = vi.fn(async () => {
+      order.push("spawn");
+      writeFileSync(acMapPath(wt, "FIX-915"), JSON.stringify([{ ac: "FIX-915:AC1", status: "pass" }]) + "\n");
+      return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+    });
+
+    const result = await runAcMapSelfHeal({
+      worktreeCwd: wt,
+      storyId: "FIX-915",
+      runDir: rd,
+      cycleId: "cycle-915",
+      agent: "claude",
+      collectDraftEvidence: async () => ({
+        commitLines: ["abc1234 tcr: cover AC1"],
+        diffStatLines: [],
+        changedFilenames: ["packages/cli/test/fix-915-ac1.test.ts"],
+      }),
+      collectCycleSignals: () => undefined,
+      canSpawnRemediation: () => true,
+      agentSpawn,
+      renderAttest,
+      appendEvent: (event) => events.push(event),
+      now: () => 123,
+    });
+
+    expect(result.renderExitCode).toBe(0);
+    expect(agentSpawn).toHaveBeenCalledTimes(1);
+    expect(renderAttest).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["spawn", "render"]);
+    expect(events.map((e) => e.type)).toEqual(["attest:draft-generated", "attest:remediation"]);
+    expect(events.some((e) => e.type === "attest:remediation" && e.outcome === "written")).toBe(true);
+  });
+
+  it("self-heals an existing harness draft by confirming through the same narrow spawn", async () => {
+    const wt = withStory("FIX-916");
+    const rd = withRunDir(wt, "FIX-916", [], []);
+    writeFileSync(acMapPath(wt, "FIX-916"), JSON.stringify([{ ac: "FIX-916:AC1", status: ACMAP_DRAFT_STATUS }]) + "\n");
+    const events = selfHealEvents();
+    const agentSpawn = vi.fn(async () => {
+      writeFileSync(acMapPath(wt, "FIX-916"), JSON.stringify([{ ac: "FIX-916:AC1", status: "claimed" }]) + "\n");
+      return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+    });
+
+    await runAcMapSelfHeal({
+      worktreeCwd: wt,
+      storyId: "FIX-916",
+      runDir: rd,
+      cycleId: "cycle-916",
+      agent: "claude",
+      collectDraftEvidence: async () => emptyEvidence,
+      collectCycleSignals: () => undefined,
+      canSpawnRemediation: () => true,
+      agentSpawn,
+      renderAttest: async () => 0,
+      appendEvent: (event) => events.push(event),
+      now: () => 124,
+    });
+
+    expect(agentSpawn).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(readFileSync(acMapPath(wt, "FIX-916"), "utf8"))[0].status).toBe("claimed");
+    expect(events.some((e) => e.type === "attest:remediation" && e.outcome === "written")).toBe(true);
+  });
+
+  it("self-heals text-only pass ACs by attaching a captured screenshot and rerendering", async () => {
+    const wt = withStory("FIX-917");
+    writeFileSync(acMapPath(wt, "FIX-917"), JSON.stringify([textAc("FIX-917:AC1", "pass")]));
+    const rd = withRunDir(wt, "FIX-917", [{ out: "x/web.png", taken: true }], ["web.png"]);
+    const events = selfHealEvents();
+    const renderAttest = vi.fn(async () => 0);
+
+    await runAcMapSelfHeal({
+      worktreeCwd: wt,
+      storyId: "FIX-917",
+      runDir: rd,
+      cycleId: "cycle-917",
+      agent: "claude",
+      collectDraftEvidence: async () => emptyEvidence,
+      collectCycleSignals: () => undefined,
+      canSpawnRemediation: () => true,
+      agentSpawn: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0, timedOut: false })),
+      renderAttest,
+      appendEvent: (event) => events.push(event),
+      now: () => 125,
+    });
+
+    const map = JSON.parse(readFileSync(acMapPath(wt, "FIX-917"), "utf8")) as Array<{ evidence: Array<{ kind: string; href?: string }> }>;
+    expect(renderAttest).toHaveBeenCalledTimes(2);
+    expect(map[0].evidence.some((ev) => ev.kind === "screenshot" && ev.href === "screenshots/web.png")).toBe(true);
+    expect(events.some((e) => e.type === "attest:auto-attach" && e.attachedCount === 1)).toBe(true);
   });
 });

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -16,20 +16,15 @@ import {
   type CycleCommand,
   type CycleContext,
 } from "@roll/core";
-import { parseEventLine, type CycleActivityEvent, type RollEvent } from "@roll/spec";
+import { parseEventLine, type RollEvent } from "@roll/spec";
 import { realAgentEnv } from "../commands/agent-list.js";
 import { cardArchiveDir } from "../lib/archive.js";
 import { formatEvaluationContractForScorer, parseEvaluationContract } from "../lib/evaluation-contract.js";
 import { blockIfAgentCredentialsMissing, projectAllowedAgents } from "./agent-routing.js";
-import { readAttestGateMode, runAttestGate, storySpecPath, verificationReportHasContent } from "./attest-gate.js";
+import { readAttestGateMode, runAttestGate, verificationReportHasContent } from "./attest-gate.js";
 import {
-  ACMAP_REMEDIATION_TIMEOUT_MS,
   acMapPath,
-  autoAttachScreenshotToAcMap,
-  buildAcMapRemediationPrompt,
-  generateAcMapDraft,
-  needsAcMapRemediation,
-  writeAcMapDraftEvidenceFiles,
+  runAcMapSelfHeal,
   type DraftEvidence,
 } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
@@ -412,114 +407,37 @@ export async function executeCaptureFactsCommand(
       }
       let attestRenderExitCode = 0;
       if (commitsAhead > 0 && storyId !== "" && ctx.evidenceRunDir !== undefined && ctx.evidenceRunDir !== "") {
-        // FIX-912: auto-generate ac-map DRAFT from cycle evidence BEFORE the
-        // FIX-246 remediation. The draft has full AC structure + evidence chain
-        // (commits, test files, changed files) with CONSERVATIVE statuses:
-        // "pass-with-evidence" only when a test file named after the AC exists;
-        // otherwise "needs-confirmation". The honesty red line is untouched —
-        // the harness NEVER auto-writes a bare "pass" without clear proof.
-        if (needsAcMapRemediation(ports.paths.worktreePath, storyId)) {
-          try {
-            const specPath = storySpecPath(ports.paths.worktreePath, storyId);
-            if (specPath !== null) {
-              const specText = readFileSync(specPath, "utf8");
-              // Collect git evidence (cheap — max a few hundred lines for
-              // a single cycle's worth of commits + diff).
-              const gitEvidence = await collectDraftEvidence(ports.paths.worktreePath);
-              // US-OBS-031: also collect activity signals from the event stream
-              // for richer evidence drafting (TCR commits, gate results, tool calls).
-              let cycleSignals: CycleActivityEvent[] | undefined;
-              try {
-                const bus = new EventBus();
-                const events = bus.readEvents(ports.paths.eventsPath);
-                const cycleEvents = events.filter(
-                  (e) => "cycleId" in e && (e as { cycleId?: string }).cycleId === ctx.cycleId,
-                );
-                if (cycleEvents.length > 0) {
-                  cycleSignals = cycleActivityFromEvents(cycleEvents, ctx.cycleId ?? "");
-                }
-              } catch {
-                // Signal collection is best-effort — never fail the cycle on a read blip.
-              }
-              const draftJson = generateAcMapDraft(specText, storyId, gitEvidence, cycleSignals);
-              if (draftJson !== null) {
-                writeAcMapDraftEvidenceFiles(ports.paths.worktreePath, storyId, gitEvidence);
-                writeFileSync(acMapPath(ports.paths.worktreePath, storyId), draftJson);
-                ports.events.appendEvent(ports.paths.eventsPath, {
-                  type: "attest:draft-generated",
-                  cycleId: ctx.cycleId ?? "",
-                  storyId,
-                  ts: eventTs(ports),
-                });
-              }
+        const remediationAgent = ctx.agent ?? "claude";
+        const selfHeal = await runAcMapSelfHeal({
+          worktreeCwd: ports.paths.worktreePath,
+          storyId,
+          runDir: ctx.evidenceRunDir,
+          cycleId: ctx.cycleId ?? "",
+          agent: remediationAgent,
+          collectDraftEvidence: () => collectDraftEvidence(ports.paths.worktreePath),
+          collectCycleSignals: () => {
+            try {
+              const bus = new EventBus();
+              const events = bus.readEvents(ports.paths.eventsPath);
+              const cycleEvents = events.filter(
+                (e) => "cycleId" in e && (e as { cycleId?: string }).cycleId === ctx.cycleId,
+              );
+              return cycleEvents.length > 0 ? cycleActivityFromEvents(cycleEvents, ctx.cycleId ?? "") : undefined;
+            } catch {
+              return undefined;
             }
-          } catch {
-            // Draft generation is best-effort — a spec-read / git blip must
-            // never fail the cycle. The FIX-246 remediation still runs below.
-          }
-        }
-        // FIX-246: ac-map omission remediation. Agents deliver real work yet
-        // consistently skip skill step 10.6 (write ac-map.json) — the hard gate
-        // then kills every cycle as an empty shell. Before rendering, give the
-        // SAME agent ONE surgical second pass to CONFIRM/CORRECT the ac-map
-        // (the harness already wrote a draft; the agent only adjusts statuses).
-        // Honest statuses only — the prompt and the render-layer red line both
-        // forbid fabricated passes. One retry structurally: capture runs once.
-        if (needsAcMapRemediation(ports.paths.worktreePath, storyId)) {
-          let outcome: "written" | "still-missing" | "spawn-failed";
-          const remediationAgent = ctx.agent ?? "claude";
-          try {
-            if (blockIfAgentCredentialsMissing(remediationAgent, "build", ports, ctx) !== null) {
-              outcome = "spawn-failed";
-            } else {
-              await ports.agentSpawn(remediationAgent, {
-                cwd: ports.paths.worktreePath,
-                skillBody: buildAcMapRemediationPrompt(ports.paths.worktreePath, storyId, ctx.evidenceRunDir),
-                storyId,
-                timeoutMs: ACMAP_REMEDIATION_TIMEOUT_MS,
-                runDir: ctx.evidenceRunDir,
-              });
-              outcome = needsAcMapRemediation(ports.paths.worktreePath, storyId) ? "still-missing" : "written";
-            }
-          } catch {
-            outcome = "spawn-failed";
-          }
-          ports.events.appendEvent(ports.paths.eventsPath, {
-            type: "attest:remediation",
-            cycleId: ctx.cycleId ?? "",
-            storyId,
-            agent: remediationAgent,
-            outcome,
-            ts: eventTs(ports),
-          });
-        }
-        // render#1 captures the screenshot + writes evidence.json + builds the
-        // per-AC report from the ac-map. FIX-317: the agent wires text-only
-        // evidence, so the visual floor (passAcVisualFloor) rejects pass ACs that
-        // lack a per-AC screenshot ref even though a REAL screenshot was captured.
-        // Bridge it in the harness — attach the captured screenshot to the pass
-        // ACs (honest: only a screenshot that exists this cycle), then re-render so
-        // the per-AC <figure> appears. Best-effort; never fails the cycle.
-        let rc = await ports.attest.render(ports.paths.worktreePath, storyId, ctx.evidenceRunDir);
-        if (rc === 0) {
-          const attached = autoAttachScreenshotToAcMap(ports.paths.worktreePath, storyId, ctx.evidenceRunDir);
-          if (attached !== null) {
-            ports.events.appendEvent(ports.paths.eventsPath, {
-              type: "attest:auto-attach",
-              cycleId: ctx.cycleId ?? "",
-              storyId,
-              href: attached.href,
-              attachedCount: attached.count,
-              ts: eventTs(ports),
-            });
-            rc = await ports.attest.render(ports.paths.worktreePath, storyId, ctx.evidenceRunDir);
-          }
-        }
-        if (rc !== 0) {
-          attestRenderExitCode = rc;
+          },
+          canSpawnRemediation: () => blockIfAgentCredentialsMissing(remediationAgent, "build", ports, ctx) === null,
+          agentSpawn: ports.agentSpawn,
+          renderAttest: () => ports.attest.render(ports.paths.worktreePath, storyId, ctx.evidenceRunDir ?? ""),
+          appendEvent: (event) => ports.events.appendEvent(ports.paths.eventsPath, event),
+          now: () => eventTs(ports),
+        });
+        if (selfHeal.renderExitCode !== 0) {
+          attestRenderExitCode = selfHeal.renderExitCode;
           ports.events.appendAlert(
             ports.paths.alertsPath,
-            `attest render failed for ${storyId} in cycle ${ctx.cycleId ?? ""} (exit ${rc})`,
+            `attest render failed for ${storyId} in cycle ${ctx.cycleId ?? ""} (exit ${selfHeal.renderExitCode})`,
           );
         }
       }

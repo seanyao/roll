@@ -2,7 +2,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { git as gitRun, commit as gitCommit, push as gitPush } from "@roll/infra";
+import { git as gitRun, commit as gitCommit, push as gitPush, checkImageEvidenceAllowed, imageEvidencePathsInWorkingTree } from "@roll/infra";
 import { parsePolicy } from "@roll/core";
 import type { DepsExec, EventsPort, MetadataCommitResult } from "./ports.js";
 
@@ -163,6 +163,21 @@ export async function commitRollMetadataRepo(
     return { committed: false, pushed: false, nothingToCommit: true };
   }
   if (topReal !== rollReal) return { committed: false, pushed: false, nothingToCommit: true };
+  // US-PHYSICAL-008: before staging image evidence, verify the roll-meta remote
+  // is private. Public or undetermined remotes block images (conservative). The
+  // owner can waive this with `evidence_public_waiver: true` in `.roll/local.yaml`.
+  const imagePaths = imageEvidencePathsInWorkingTree(rollDir);
+  if (imagePaths.length > 0) {
+    const check = await checkImageEvidenceAllowed(projectCwd, rollDir);
+    if (!check.allowed) {
+      return {
+        committed: false,
+        pushed: false,
+        nothingToCommit: false,
+        error: `image evidence blocked: ${check.reason}`,
+      };
+    }
+  }
   // Stage everything the agent + runner wrote (reports, evidence, ac-map, backlog
   // marks, dossier aggregates). `add -A` is the runner's privilege — the failing
   // step inside the sandboxed agent.

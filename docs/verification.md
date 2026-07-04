@@ -73,6 +73,26 @@ diff <(v2.0-bash <cmd>) <(v3-ts <cmd>)
 - **回收**：`roll loop gc` 按阈值清理陈旧 run（保最近 N 次 + M 天内，二者满足其一即留；只删「又旧又超额」的尾部）。阈值 `--keep-latest`（默认 10）/`--keep-days`（默认 30），`--dry-run` 预演。
 - **读取兼容**：迁移窗口内旧布局 `.roll/verification/<ID>/` 仍可读（attest gate、ac-map、报告解析都先查卡夹再回落旧树）；存量迁移与兼容代码移除由 US-META-002 收尾。
 
+## 证据可见性模型（US-PHYSICAL-008）
+
+截图/图片类证据涉及隐私，因此在 `git add` 之前必须确认目标仓库的远程可见性：
+
+| 布局 | 目标仓库 | 判定策略 | 图片证据 |
+|------|----------|----------|----------|
+| 独立 roll-meta | `.roll` 自身所在的私有仓 | `gh api repos/<slug>` 或 `git ls-remote`；判定为 private 则放行 | 私有仓放行 |
+| 公开产品仓 + 独立 roll-meta | 产品仓本身不接收 `.roll` 证据；证据进私有 roll-meta | 同 roll-meta | 私有仓放行 |
+| in-repo `.roll` | 产品主仓（`.roll` 随代码一起 tracked） | 检查主仓 remote 可见性 | public / 未知 一律拒绝 |
+
+保守规则：判定失败（无 remote、`gh` 不可用、API 失败、非 GitHub 且无法推断可见性）一律按 **public** 处理，拒绝图片证据并触发 ALERT。
+
+逃生口：owner 可在 `.roll/local.yaml` 中显式声明
+
+```yaml
+evidence_public_waiver: true
+```
+
+放行公开仓的图片证据，同时留下审计痕迹。in-repo 项目首次成功判定后会把 `evidence_visibility` + `evidence_remote` 写入同一文件；remote URL 变化时自动重判。
+
 ## 门
 
 | 门 | 条件 | 频率 |

@@ -30,8 +30,8 @@
  *   --json         print the computed plan as JSON
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { EventBus, EVENTS_FILE, foldUnreleased, isChangelogReady, planRelease, type ReleaseDate, type ReleaseStep } from "@roll/core";
 import { isTransientGhError } from "@roll/infra";
 import { type Lang, resolveLang, t, v2Catalog, v3Catalog } from "@roll/spec";
@@ -275,10 +275,57 @@ export function enableAutoMergeResilient(opts: {
 // — no error-message sniffing. Any failure rolls the release branch back so an
 // orderly abort leaves no stray branch behind.
 //
+// FIX-1207: the release commit must carry a fresh, matching test-pass proof
+// without manual intervention. After `roll test` succeeds we explicitly write
+// the proof against the staged tree, then verify it, so a stale prior proof or
+// a partial test-run can never leave the gate blocking the release commit.
+// The gate semantics are preserved: the proof is only written after a green
+// test run, and it is checked against the exact tree being committed.
+//
 // FIX-330: the release transaction must be re-runnable. If the release branch
 // already exists (locally or on origin from a previous interrupted run), reuse
 // it instead of failing with `git checkout -b`. If the release commit already
 // exists on the branch, skip the commit/push (push is a noop when up to date).
+
+/** Write a fresh `.roll/last-test-pass` proof for the staged tree. Mirrors
+ *  scripts/test-ts.sh's JSON shape; `mode: release` marks it as written by the
+ *  release flow so a reader can distinguish it from an ordinary TCR proof.
+ *  Only call this after the test suite has actually passed on this tree. */
+function writeReleaseTestProof(exec: (cmd: string, args: string[]) => string): void {
+  const cwd = exec("git", ["rev-parse", "--show-toplevel"]).trim();
+  const tree = exec("git", ["write-tree"]).trim();
+  const ts = Math.floor(Date.now() / 1000);
+  const proofPath = join(cwd, ".roll", "last-test-pass");
+  mkdirSync(dirname(proofPath), { recursive: true });
+  writeFileSync(proofPath, JSON.stringify({ ts, tree, mode: "release", scope: "affected" }), "utf8");
+}
+
+/** Verify a fresh, matching proof exists for the staged tree. Throws an
+ *  actionable error if the gate would block the upcoming commit. */
+function assertTestProofFresh(exec: (cmd: string, args: string[]) => string): void {
+  const cwd = exec("git", ["rev-parse", "--show-toplevel"]).trim();
+  const proofPath = join(cwd, ".roll", "last-test-pass");
+  if (!existsSync(proofPath)) {
+    throw new Error("test-pass proof missing — run `roll test` before committing");
+  }
+  const body = readFileSync(proofPath, "utf8");
+  const tsMatch = /"ts":(\d+)/.exec(body);
+  const treeMatch = /"tree":"([^"]*)"/.exec(body);
+  const ts = tsMatch ? Number(tsMatch[1]) : NaN;
+  const proofTree = treeMatch ? (treeMatch[1] ?? "") : "";
+  if (!Number.isFinite(ts) || proofTree === "") {
+    throw new Error("test-pass proof is malformed — run `roll test` to regenerate it");
+  }
+  const now = Math.floor(Date.now() / 1000);
+  if (now - ts > 60) {
+    throw new Error("test-pass proof is stale (>60s) — run `roll test` to refresh it");
+  }
+  const currentTree = exec("git", ["write-tree"]).trim();
+  if (proofTree !== currentTree) {
+    throw new Error("code changed since last test run — run `roll test` on the current staged tree");
+  }
+}
+
 export function commitPushWithGate(opts: {
   branch: string;
   message: string;
@@ -332,7 +379,14 @@ export function commitPushWithGate(opts: {
     if (alreadyCommitted) {
       exec("git", ["push", "-u", "origin", branch]);
     } else {
-      if (rollManaged) exec("roll", ["test"]);
+      if (rollManaged) {
+        // FIX-1207: run tests, then explicitly re-write the proof against the
+        // staged tree and verify it. This guarantees the upcoming commit passes
+        // the 60s freshness gate without a manual `roll test && git commit` step.
+        exec("roll", ["test"]);
+        writeReleaseTestProof(exec);
+        assertTestProofFresh(exec);
+      }
       exec("git", ["commit", "-m", message]);
       exec("git", ["push", "-u", "origin", branch]);
     }

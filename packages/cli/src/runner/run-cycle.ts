@@ -221,8 +221,28 @@ export async function runCycleOnce(opts: RunCycleOptions): Promise<RunCycleResul
 }
 
 function attachFailureAttribution(ctx: CycleContext, terminal: V2CycleStatus | undefined, ports: Ports): CycleContext {
-  if (terminal !== "failed" && terminal !== "blocked" && terminal !== "gave_up" && terminal !== "aborted") return ctx;
+  // REFACTOR-070: expand coverage to ALL failure-class terminals, not just the
+  // original four. agent_internal and published (when pr_loop unhealthy) must
+  // also carry failure_class/root_cause_key into TerminalEvent + runs rows.
+  if (
+    terminal !== "failed" &&
+    terminal !== "blocked" &&
+    terminal !== "gave_up" &&
+    terminal !== "aborted" &&
+    terminal !== "agent_internal" &&
+    terminal !== "published"
+  ) {
+    return ctx;
+  }
   if (ctx.failureClass !== undefined && ctx.rootCauseKey !== undefined) return ctx;
+
+  // REFACTOR-070: published + pr_loop_unavailable → env:pr_loop.
+  // The orchestrator already decided the outcome is pr_loop_unavailable; this
+  // stamps the attribution so rebuild can project it as blocked.
+  if (terminal === "published" && ctx.prLoopHealthy === false) {
+    return { ...ctx, failureClass: "env", rootCauseKey: "env:pr_loop" };
+  }
+
   const attribution = classifyCycleFailure({
     cycleId: ctx.cycleId,
     terminal,

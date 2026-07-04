@@ -43,6 +43,10 @@ export interface RunFact {
   mergedAt?: number;
   /** When this run was recorded (epoch ms). */
   recordedAt: number;
+  /** REFACTOR-070: failure attribution class (env|harness|card|unknown). */
+  failureClass?: string;
+  /** REFACTOR-070: deterministic root-cause key (e.g. env:pr_loop). */
+  rootCauseKey?: string;
 }
 
 /** One PR merge on main, extracted from git log. */
@@ -189,6 +193,8 @@ export function extractRunFact(row: RunRow): RunFact | null {
     mergeCommit: typeof mergeCommit === "string" && mergeCommit !== "" ? mergeCommit : undefined,
     mergedAt,
     recordedAt,
+    failureClass: typeof row["failure_class"] === "string" ? row["failure_class"] : undefined,
+    rootCauseKey: typeof row["root_cause_key"] === "string" ? row["root_cause_key"] : undefined,
   };
 }
 
@@ -460,7 +466,13 @@ export function rebuildDeliveriesFromFacts(
     let lifecycle: DeliveryRecord["lifecycleState"];
 
     if (outcome === "published_pending_merge") {
-      lifecycle = "pending_merge";
+      // REFACTOR-070: published_pending_merge + failure_class=env(root=env:pr_loop)
+      // → blocked (PR loop absent — published PR has no merge guardian).
+      if (latest.failureClass === "env" && (latest.rootCauseKey ?? "").startsWith("env:pr_loop")) {
+        lifecycle = "blocked";
+      } else {
+        lifecycle = "pending_merge";
+      }
     } else if (outcome === "ci_red_after_merge") {
       lifecycle = "ci_red";
     } else if (outcome === "pr_loop_unavailable") {

@@ -124,7 +124,7 @@ export function buildSupervisorRunbookState(input: SupervisorInput): SupervisorR
   const blockedCards: SupervisorBlockedCard[] = [];
   const manualMergeGates = input.manualMergeGates ?? [];
   const structuralFailures = input.structuralFailures ?? [];
-  const { deliveredSet, openPrSet, stuckSet, pendingPublishSet } = blockingDetails(input);
+  const { deliveredSet, openPrSet, stuckSet } = blockingDetails(input);
   const confirmedDelivered = new Set(input.delivered);
   const truthDrift = input.backlog
     .filter((row) => statusOf(row.status) === "done" && !confirmedDelivered.has(row.id))
@@ -278,16 +278,10 @@ export function buildSupervisorRunbookState(input: SupervisorInput): SupervisorR
         blockedCards.push(blocker(row.id, "repeated_failure", "repeated failure must be diagnosed before retry"));
         continue;
       }
-      // FIX-1043 — locally-committed work that failed to publish. The runner's
-      // picker holds this card (`all_pending_publish` idle); Supervisor must
-      // agree it is blocked, NOT advertise it as runnable. A scoped retry
-      // (`roll loop go --cards <id>`) clears the marker so both see it runnable.
-      if (pendingPublishSet.has(row.id)) {
-        blockedCards.push(
-          blocker(row.id, "pending_publish", "locally-committed work failed to publish; clear the publish blocker or run a scoped retry"),
-        );
-        continue;
-      }
+      // FIX-1212: pending-publish WITHOUT an open PR is a stale marker — the card
+      // is NOT blocked. With an open PR the open PR gate (above) already catches
+      // re-dispatch protection. The supervisor no longer independently blocks on
+      // pending-publish; stale markers must not prevent re-picking.
       return {
         scope: { label: "live non-Hold FIX/US/REFACTOR", families: SUPERVISOR_FAMILIES, remainingByFamily, todoByFamily, excluded },
         truth: {

@@ -139,10 +139,9 @@ export interface SupervisorInput {
   /** Structural execution-boundary failures that must be diagnosed before retry. */
   readonly structuralFailures?: readonly SupervisorStructuralFailure[];
   /**
-   * FIX-1043 — story ids the runner's picker is holding in pending-publish
-   * (locally-committed work that failed to publish). Supervisor surfaces
-   * these as a `pending_publish` block so `next`/`why` agree with the runner's
-   * `all_pending_publish` idle instead of advertising the card as runnable.
+   * Story ids the runner's picker was holding in pending-publish (deprecated
+   * by FIX-1212 — stale markers without an open PR no longer block re-picking).
+   * Kept for backwards compat; supervisor ignores it for blocking decisions.
    */
   readonly pendingPublish?: readonly string[];
   /**

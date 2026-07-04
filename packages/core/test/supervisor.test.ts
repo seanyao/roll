@@ -356,40 +356,27 @@ describe("recommendNext — what should Roll do next?", () => {
   });
 });
 
-describe("FIX-1043 — supervisor and runner picker agree on pending-publish eligibility", () => {
-  // The FIX-1042 shape: a still-Todo card whose prior unpublished cycle left it
-  // in the runner's pending-publish hold. Prime Agent MUST NOT advertise it as
-  // runnable while the picker idles `all_pending_publish` (the observed bug).
-  it("blocks a pending-publish card (next=no_work) instead of selecting it", () => {
+describe("FIX-1212 — pending-publish without open PR is stale, supervisor agrees with picker", () => {
+  it("does NOT block a stale pending-publish card (no open PR) — card is runnable", () => {
+    // FIX-1212: pending-publish without an open PR is a stale marker.
+    // The supervisor must NOT block the card — it should be advertised as runnable.
     const state = buildSupervisorRunbookState(
       input({
         backlog: [{ id: "FIX-1042", status: "📋 Todo" }],
         pendingPublish: ["FIX-1042"],
       }),
     );
-    expect(state.next.kind).toBe("no_work");
-    expect(state.next.storyId).toBeNull();
-    expect(state.blockedCards).toContainEqual({
-      storyId: "FIX-1042",
-      reason: "pending_publish",
-      detail: "locally-committed work failed to publish; clear the publish blocker or run a scoped retry",
-    });
+    expect(state.next.kind).toBe("run_card");
+    expect(state.next.storyId).toBe("FIX-1042");
+    // The card should NOT appear in blockedCards for pending-publish reason.
+    expect(state.blockedCards.filter((c) => c.storyId === "FIX-1042" && c.reason === "pending_publish")).toEqual([]);
   });
 
-  it("supervisor next agrees with the picker assessBacklog verdict (blocked, then runnable after clear)", () => {
+  it("supervisor next agrees with the picker assessBacklog verdict (stale → runnable)", () => {
     const items: BacklogItem[] = [{ id: "FIX-1042", status: "📋 Todo", desc: "" }];
     const pending = new Set<string>(["FIX-1042"]);
 
-    // BLOCKED: both the runner's picker and the supervisor see no runnable card.
-    const pickerBlocked = assessBacklog(items, { hasPendingPublish: (id) => pending.has(id) });
-    const supervisorBlocked = buildSupervisorRunbookState(
-      input({ backlog: [{ id: "FIX-1042", status: "📋 Todo" }], pendingPublish: [...pending] }),
-    );
-    expect(pickerBlocked).toEqual({ hasWork: false, reason: "all_pending_publish" });
-    expect(supervisorBlocked.next.kind).toBe("no_work");
-
-    // RUNNABLE: a scoped retry clears the marker → both agree the card is runnable.
-    pending.delete("FIX-1042");
+    // STALE: pending-publish without open PR → both agree the card is runnable.
     const pickerRunnable = assessBacklog(items, { hasPendingPublish: (id) => pending.has(id) });
     const supervisorRunnable = buildSupervisorRunbookState(
       input({ backlog: [{ id: "FIX-1042", status: "📋 Todo" }], pendingPublish: [...pending] }),
@@ -397,9 +384,21 @@ describe("FIX-1043 — supervisor and runner picker agree on pending-publish eli
     expect(pickerRunnable.hasWork).toBe(true);
     expect(supervisorRunnable.next.kind).toBe("run_card");
     expect(supervisorRunnable.next.storyId).toBe("FIX-1042");
+
+    // CLEARED: same as stale marker — card is runnable either way.
+    pending.delete("FIX-1042");
+    const pickerCleared = assessBacklog(items, { hasPendingPublish: (id) => pending.has(id) });
+    const supervisorCleared = buildSupervisorRunbookState(
+      input({ backlog: [{ id: "FIX-1042", status: "📋 Todo" }], pendingPublish: [...pending] }),
+    );
+    expect(pickerCleared.hasWork).toBe(true);
+    expect(supervisorCleared.next.kind).toBe("run_card");
+    expect(supervisorCleared.next.storyId).toBe("FIX-1042");
   });
 
-  it("still selects another runnable card when only one of several is pending-publish", () => {
+  it("still selects another runnable card when only one of several is stale pending-publish", () => {
+    // FIX-1212: stale pending-publish should not block; other cards are still
+    // selected first by type/file order priority.
     const state = buildSupervisorRunbookState(
       input({
         backlog: [
@@ -410,11 +409,28 @@ describe("FIX-1043 — supervisor and runner picker agree on pending-publish eli
       }),
     );
     expect(state.next.kind).toBe("run_card");
-    expect(state.next.storyId).toBe("FIX-1050");
+    expect(state.next.storyId).toBe("FIX-1042"); // first by file order, stale marker doesn't block
+    // None of the blocked cards should be for pending-publish reason.
+    expect(state.blockedCards.filter((c) => c.reason === "pending_publish")).toEqual([]);
+  });
+
+  it("blocks a card with BOTH pending-publish AND open PR (open PR gate catches it)", () => {
+    // FIX-1212 AC2: real open PR still blocks re-dispatch. The open PR gate
+    // (not pending-publish) is what stops re-picking.
+    const state = buildSupervisorRunbookState(
+      input({
+        backlog: [{ id: "FIX-1042", status: "📋 Todo" }],
+        pendingPublish: ["FIX-1042"],
+        openPrStories: ["FIX-1042"],
+      }),
+    );
+    expect(state.next.kind).toBe("no_work");
+    expect(state.next.storyId).toBeNull();
+    // Blocked by open PR gate, not pending-publish.
     expect(state.blockedCards).toContainEqual({
       storyId: "FIX-1042",
-      reason: "pending_publish",
-      detail: "locally-committed work failed to publish; clear the publish blocker or run a scoped retry",
+      reason: "open_pr",
+      detail: "open PR already exists",
     });
   });
 });

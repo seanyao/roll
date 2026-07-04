@@ -74,21 +74,52 @@ describe("pickStory — status skip rules", () => {
     expect(pickStory(items, { shouldSkip: (id) => id === "FIX-1" })).toBeUndefined();
   });
 
-  it("FIX-1018: skips a story with pending unpublished local work, takes the next Todo", () => {
+  it("FIX-1018+FIX-1212: skips a story with pending unpublished local work ONLY when an open PR also exists", () => {
     const items = [item("US-1", TODO), item("US-2", TODO)];
     const pending = new Set(["US-1"]);
-    expect(pickStory(items, { hasPendingPublish: (id) => pending.has(id) })?.id).toBe("US-2");
-    // clearing the runtime marker re-arms the story (backlog truth unchanged).
-    expect(pickStory(items)?.id).toBe("US-1");
+    const hasOpenPr = buildHasOpenPr(["FIX-1212 work for US-1"]);
+    // With pending-publish + open PR → blocked by combined gate; US-2 gets picked.
+    expect(pickStory(items, { hasPendingPublish: (id) => pending.has(id), hasOpenPr })?.id).toBe("US-2");
+    // Without open PR → marker is stale (FIX-1212); US-1 is pickable.
+    expect(pickStory(items, { hasPendingPublish: (id) => pending.has(id) })?.id).toBe("US-1");
   });
 
-  it("FIX-1018: when every Todo is pending-publish, the loop idles", () => {
+  it("FIX-1212: pending-publish without open PR does NOT block — stale marker", () => {
+    const items = [item("FIX-1", TODO), item("FIX-2", TODO)];
+    const pending = new Set(["FIX-1"]);
+    // Without an open PR, the pending-publish marker is stale → card IS pickable.
+    expect(pickStory(items, { hasPendingPublish: (id) => pending.has(id) })?.id).toBe("FIX-1");
+  });
+
+  it("FIX-1212: pending-publish WITH open PR blocks (stale marker detection)", () => {
+    const items = [item("FIX-1", TODO), item("FIX-2", TODO)];
+    const pending = new Set(["FIX-1"]);
+    const hasOpenPr = buildHasOpenPr(["PR for FIX-1"]);
+    // With an open PR, pending-publish blocks the card → picks FIX-2 instead.
+    expect(pickStory(items, { hasPendingPublish: (id) => pending.has(id), hasOpenPr })?.id).toBe("FIX-2");
+  });
+
+  it("FIX-1018+FIX-1212: when every Todo is pending-publish WITH open PR, assessBacklog reports all_awaiting_merge (open PR gate fires first)", () => {
     const items = [item("US-1", TODO), item("US-2", TODO)];
     const pending = new Set(["US-1", "US-2"]);
-    expect(pickStory(items, { hasPendingPublish: (id) => pending.has(id) })).toBeUndefined();
-    expect(assessBacklog(items, { hasPendingPublish: (id) => pending.has(id) })).toEqual({
+    const hasOpenPr = buildHasOpenPr(["US-1 PR", "US-2 PR"]);
+    expect(pickStory(items, { hasPendingPublish: (id) => pending.has(id), hasOpenPr })).toBeUndefined();
+    const assessment = assessBacklog(items, { hasPendingPublish: (id) => pending.has(id), hasOpenPr });
+    // FIX-1212: cards with both pending-publish AND open PR are caught by the
+    // open PR gate first (priority chain: deps > PR > merged > skip > pending).
+    expect(assessment).toEqual({
       hasWork: false,
-      reason: "all_pending_publish",
+      reason: "all_awaiting_merge",
+    });
+  });
+
+  it("FIX-1212: pending-publish without open PR, assessBacklog reports has_work (not idle)", () => {
+    const items = [item("US-1", TODO), item("US-2", TODO)];
+    const pending = new Set(["US-1"]);
+    // Without open PR, all markers are stale → there IS work.
+    expect(assessBacklog(items, { hasPendingPublish: (id) => pending.has(id) })).toEqual({
+      hasWork: true,
+      reason: "has_work",
     });
   });
 });

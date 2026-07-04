@@ -1153,9 +1153,11 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   // prior streak and never accrue toward an auto-PAUSE), and exit 0.
   if (result.terminal === "local") {
     const storyId = (result.state?.ctx?.storyId ?? "").trim();
-    // FIX-1018: remember that this story has sound but unpublished local work so
-    // the next cycle does not re-implement it from scratch.
-    if (storyId !== "") addPendingPublish(runtimeDir(id.path), storyId);
+    // FIX-1212: an unpublished cycle should NOT leave a pending-publish marker —
+    // the card must remain pickable so the next cycle can re-pick and retry.
+    // Only successful publish (done/published) warrants blocking re-pick.
+    // FIX-1018 (replaced): remembering unpublished work caused perpetual starvation.
+    if (storyId !== "") removePendingPublish(runtimeDir(id.path), storyId);
     announceReport(id.path, id.slug, storyId);
     resetConsecutiveFails(id.path);
     resetConsecutiveIdle(id.path, id.slug); // US-LOOP-079h1: delivered locally → reset idle counter

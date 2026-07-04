@@ -64,6 +64,20 @@ export interface MergeFact {
    * Subjects with no story-id (e.g. `loop cycle cycle-… (#892)`) yield `[]`.
    */
   storyIds: string[];
+  /**
+   * Whether the commit touches product code (any path outside `.roll/`).
+   *
+   * FIX-1208: in-repo `.roll` projects can have card-creation / docs-only
+   * commits whose subject happens to mention a story-id. Those commits only
+   * touch meta paths (`.roll/...`) and must NOT be treated as deliveries,
+   * otherwise a card that was only created becomes falsely `done` and is
+   * never picked up again.
+   *
+   * `true` / omitted for backwards compatibility: a MergeFact without this
+   * field is assumed to touch product code, so existing callers and tests
+   * keep their current behavior.
+   */
+  touchesProductCode?: boolean;
 }
 
 function terminalOutcomeFromRun(outcome: string): TerminalOutcome | undefined {
@@ -351,10 +365,18 @@ export function rebuildDeliveriesFromFacts(
   // the oldest merge that names a story wins. This prevents a later
   // changelog/docs-only PR from overriding the original code-change PR's
   // delivery attribution (FIX-1206).
+  //
+  // FIX-1208: subject-based attribution is further gated on the commit
+  // touching product code (any path outside `.roll/`). In-repo `.roll`
+  // projects can have card-creation / docs-only commits whose subject
+  // mentions a story-id; those commits only touch meta paths and must not be
+  // treated as deliveries. `touchesProductCode !== false` preserves backwards
+  // compatibility for MergeFacts that omit the field.
   const mergeByStoryId = new Map<string, MergeFact>();
   for (const m of merges) {
     mergeByPr.set(m.prNumber, m);
     mergeBySha.set(m.mergeCommit, m);
+    if (m.touchesProductCode === false) continue;
     for (const sid of m.storyIds) {
       mergeByStoryId.set(sid, m); // overwrite: oldest wins (reverse-chrono input)
     }
@@ -556,6 +578,42 @@ export function collectRunFacts(runsJsonlText: string): RunFact[] {
   return facts;
 }
 
+// ── Product-code gate for in-repo .roll projects (FIX-1208) ─────────────────
+
+/**
+ * Return `true` when the commit at `sha` touches at least one path outside
+ * `.roll/` (i.e. genuine product code), `false` when it only touches `.roll/`
+ * meta paths.
+ *
+ * Card-creation / docs-only commits in in-repo `.roll` projects can mention a
+ * story-id in their subject. Without this gate, the subject-only `done`
+ * attribution in `rebuildDeliveriesFromFacts` would falsely mark those cards
+ * as delivered. Commits that only touch meta paths are therefore excluded from
+ * story-id attribution.
+ *
+ * Fail-open: if `git diff-tree` fails or returns nothing, assume the commit
+ * touches product code. Losing a real delivery is worse than keeping a
+ * card-creation false positive, and the diff-tree call failing is itself a
+ * signal we should not silently drop evidence.
+ */
+function commitTouchesProductCode(
+  projectRoot: string,
+  sha: string,
+  exec: ExecPort,
+): boolean {
+  const result = exec.run("git", [
+    "-C", projectRoot,
+    "diff-tree", "--no-commit-id", "--name-only", "-r", sha,
+  ]);
+  if (result.code !== 0) return true;
+  const paths = result.stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+  if (paths.length === 0) return true;
+  return paths.some((path) => !path.startsWith(".roll/"));
+}
+
 // ── Freshness gate + rebuild orchestration ───────────────────────────────────
 
 /**
@@ -750,17 +808,27 @@ export function ensureDeliveriesFresh(
     }
   }
 
-  // 4c. Derive repo slug
+  // 4c. Annotate story-bearing merges with whether they touch product code.
+  // FIX-1208: in-repo `.roll` projects may have card-creation / docs-only
+  // commits whose subject names a story-id. Those commits only touch `.roll/`
+  // paths and must not be treated as deliveries, so we exclude them from
+  // subject-based attribution below.
+  for (const m of merges) {
+    if (m.storyIds.length === 0) continue;
+    m.touchesProductCode = commitTouchesProductCode(projectRoot, m.mergeCommit, exec);
+  }
+
+  // 4d. Derive repo slug
   let repoSlug: string | undefined;
   const remote = exec.run("git", ["-C", projectRoot, "remote", "get-url", "origin"]);
   if (remote.code === 0 && remote.stdout !== "") {
     repoSlug = ghRepoSlugFromUrl(remote.stdout);
   }
 
-  // 4d. Project
+  // 4e. Project
   const records = rebuildDeliveriesFromFacts(runs, merges, repoSlug);
 
-  // 4e. Persist cache + the SHA it was built from (FIX-905 staleness gate).
+  // 4f. Persist cache + the SHA it was built from (FIX-905 staleness gate).
   const output = records.map((r) => JSON.stringify(r)).join("\n") + "\n";
   freshness.writeText(delPath, output);
   if (mainSha !== undefined) {

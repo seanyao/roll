@@ -219,6 +219,7 @@ function makeMerge(overrides: Partial<MergeFact> = {}): MergeFact {
     mergeCommit: "abc123def456",
     mergedAt: 2000,
     storyIds: [],
+    touchesProductCode: true,
     ...overrides,
   };
 }
@@ -1064,6 +1065,82 @@ describe("rebuildDeliveriesFromFacts — FIX-904: merge subject = authoritative 
   });
 });
 
+// ── FIX-1208: in-repo .roll-only commits must not falsely deliver ────────────
+
+describe("rebuildDeliveriesFromFacts — FIX-1208: meta-only subject attribution", () => {
+  it("does NOT mark a story done when the merge only touches .roll paths", () => {
+    // Simulates an in-repo .roll project where creating the card produced a
+    // commit whose subject mentions the story-id but changed only meta files.
+    const merges = [makeMerge({
+      prNumber: 0,
+      mergeCommit: "rollonlysha1234",
+      mergedAt: 3000,
+      storyIds: ["FIX-1208"],
+      touchesProductCode: false,
+    })];
+    const result = rebuildDeliveriesFromFacts([], merges);
+    // No record at all: the .roll-only commit is not authoritative delivery
+    // evidence, and there is no run for FIX-1208 either.
+    expect(result).toHaveLength(0);
+  });
+
+  it("still marks a story done when the merge touches product code", () => {
+    const merges = [makeMerge({
+      prNumber: 0,
+      mergeCommit: "codesha12345678",
+      mergedAt: 3000,
+      storyIds: ["FIX-1208"],
+      touchesProductCode: true,
+    })];
+    const result = rebuildDeliveriesFromFacts([], merges, "seanyao/roll");
+    expect(result).toHaveLength(1);
+    expect(result[0].storyId).toBe("FIX-1208");
+    expect(result[0].lifecycleState).toBe("done");
+    expect(result[0].mergeCommit).toEqual({
+      present: true,
+      value: "codesha12345678",
+    });
+  });
+
+  it("defaults to product-code attribution when touchesProductCode is omitted", () => {
+    const merges: MergeFact[] = [{
+      prNumber: 0,
+      mergeCommit: "legacysha123456",
+      mergedAt: 3000,
+      storyIds: ["FIX-1208"],
+      // touchesProductCode intentionally omitted
+    }];
+    const result = rebuildDeliveriesFromFacts([], merges);
+    expect(result).toHaveLength(1);
+    expect(result[0].storyId).toBe("FIX-1208");
+    expect(result[0].lifecycleState).toBe("done");
+  });
+
+  it("keeps PR-based merge matching even when the merge is meta-only", () => {
+    // A real loop run published a PR and that PR merged. Even if the merge
+    // commit's diff is somehow classified as meta-only, the run-based PR match
+    // should still win because the run recorded the actual delivery intent.
+    const runs = [makeRun({
+      storyId: "FIX-1208",
+      outcome: "published_pending_merge",
+      prNumber: 1000,
+      recordedAt: 100,
+    })];
+    const merges = [makeMerge({
+      prNumber: 1000,
+      mergeCommit: "prmerge12345678",
+      mergedAt: 3000,
+      storyIds: ["FIX-1208"],
+      touchesProductCode: false,
+    })];
+    const result = rebuildDeliveriesFromFacts(runs, merges);
+    expect(result).toHaveLength(1);
+    expect(result[0].storyId).toBe("FIX-1208");
+    expect(result[0].lifecycleState).toBe("done");
+    expect(result[0].prNumber).toEqual({ present: true, value: 1000 });
+  });
+});
+
 // ── collectRunFacts ──────────────────────────────────────────────────────────
 
 describe("collectRunFacts", () => {
@@ -1321,6 +1398,10 @@ describe("ensureDeliveriesFresh", () => {
         stdout: "9efd807189ca538ccde38bfb55f461b2a5e614c9 1718885251 tcr: US-TRUTH-016 — CLI truth query command + alignment tests (#883)",
         code: 0,
       },
+      [`-C ${PROJ} diff-tree --no-commit-id --name-only -r 9efd807189ca538ccde38bfb55f461b2a5e614c9`]: {
+        stdout: "packages/core/src/delivery/rebuild.ts",
+        code: 0,
+      },
       [`-C ${PROJ} remote get-url origin`]: { stdout: "git@github.com:seanyao/roll.git", code: 0 },
     });
 
@@ -1340,6 +1421,53 @@ describe("ensureDeliveriesFresh", () => {
     expect(truth!.cycleId).toBe("merge:9efd807");
   });
 
+  it("FIX-1208: ignores squash merge whose subject names a card but only touches .roll paths", () => {
+    const freshness = fakeFreshnessPort({
+      [RUNS]: { text: "", mtime: 2000 },
+    });
+    const exec = fakeExecPort({
+      [`-C ${PROJ} log --first-parent main --merges --format=%H %ct %s`]: { stdout: "", code: 0 },
+      [`-C ${PROJ} log --first-parent main --format=%H %ct %s`]: {
+        stdout: "rollonlysha00000000000000000000000000000000 1719000000 docs: create FIX-1208 card (#1000)",
+        code: 0,
+      },
+      [`-C ${PROJ} diff-tree --no-commit-id --name-only -r rollonlysha00000000000000000000000000000000`]: {
+        stdout: ".roll/features/loop-engine/FIX-1208/spec.md",
+        code: 0,
+      },
+      [`-C ${PROJ} remote get-url origin`]: { stdout: "", code: 128 },
+    });
+
+    const result = ensureDeliveriesFresh(PROJ, freshness, exec);
+    // The commit's subject names FIX-1208, but it only touched a `.roll/`
+    // path (card creation). No delivery record should be emitted.
+    expect(result).toHaveLength(0);
+  });
+
+  it("FIX-1208: keeps real delivery when squash merge touches product code", () => {
+    const freshness = fakeFreshnessPort({
+      [RUNS]: { text: "", mtime: 2000 },
+    });
+    const exec = fakeExecPort({
+      [`-C ${PROJ} log --first-parent main --merges --format=%H %ct %s`]: { stdout: "", code: 0 },
+      [`-C ${PROJ} log --first-parent main --format=%H %ct %s`]: {
+        stdout: "codesha0000000000000000000000000000000000 1719000000 fix: repair projection for FIX-1208 (#1001)",
+        code: 0,
+      },
+      [`-C ${PROJ} diff-tree --no-commit-id --name-only -r codesha0000000000000000000000000000000000`]: {
+        stdout: "packages/core/src/delivery/rebuild.ts\n.roll/backlog.md",
+        code: 0,
+      },
+      [`-C ${PROJ} remote get-url origin`]: { stdout: "", code: 128 },
+    });
+
+    const result = ensureDeliveriesFresh(PROJ, freshness, exec);
+    expect(result).toHaveLength(1);
+    expect(result[0].storyId).toBe("FIX-1208");
+    expect(result[0].lifecycleState).toBe("done");
+    expect(result[0].prNumber).toEqual({ present: true, value: 1001 });
+  });
+
   it("squash-merge + run with backfill mergeCommit → done", () => {
     const freshness = fakeFreshnessPort({
       [RUNS]: { text: [
@@ -1350,6 +1478,10 @@ describe("ensureDeliveriesFresh", () => {
       [`-C ${PROJ} log --first-parent main --merges --format=%H %ct %s`]: { stdout: "", code: 0 },
       [`-C ${PROJ} log --first-parent main --format=%H %ct %s`]: {
         stdout: "9efd807189ca538ccde38bfb55f461b2a5e614c9 1718885251 tcr: US-TRUTH-016 — CLI truth query (#883)",
+        code: 0,
+      },
+      [`-C ${PROJ} diff-tree --no-commit-id --name-only -r 9efd807189ca538ccde38bfb55f461b2a5e614c9`]: {
+        stdout: "packages/core/src/delivery/rebuild.ts",
         code: 0,
       },
       [`-C ${PROJ} remote get-url origin`]: { stdout: "git@github.com:seanyao/roll.git", code: 0 },
@@ -1456,6 +1588,14 @@ describe("ensureDeliveriesFresh — FIX-905: origin/main is authoritative", () =
           "US-AGENT-045: migrate removed agent config compatibility\n\n",
           "Co-authored-by: Roll Test <test@example.com>",
         ].join(""),
+        code: 0,
+      },
+      [`-C ${PROJ} diff-tree --no-commit-id --name-only -r oldzero0000000000000000000000000000000000`]: {
+        stdout: "packages/core/src/agent/config.ts",
+        code: 0,
+      },
+      [`-C ${PROJ} diff-tree --no-commit-id --name-only -r dcbf2b3fee6571c723be6349d675e9641cf88bf7`]: {
+        stdout: "packages/core/src/agent/roster.ts",
         code: 0,
       },
       [`-C ${PROJ} remote get-url origin`]: { stdout: "git@github.com:seanyao/roll.git", code: 0 },

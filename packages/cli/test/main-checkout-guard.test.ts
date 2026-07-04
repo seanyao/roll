@@ -9,6 +9,7 @@ import {
   quarantineMainCheckout,
   releaseMainCheckoutWriteProtection,
   withMainCheckoutWriteProtection,
+  worktreeGitEnv,
 } from "../src/runner/main-checkout-guard.js";
 
 const dirs: string[] = [];
@@ -193,5 +194,25 @@ describe("main checkout guard — US-LOOP-089", () => {
     writeFileSync(join(repo, "product.ts"), "leak\n", "utf8");
 
     await expect(checkMainDirty(repo)).resolves.toEqual(["product.ts"]);
+  });
+
+  it("pins spawned worktree git discovery below the main checkout parent", () => {
+    const repo = cleanRepo("roll-main-gitenv-ceiling-");
+    const wt = worktreeFrom(repo);
+
+    expect(worktreeGitEnv(wt, repo)).toMatchObject({
+      GIT_WORK_TREE: wt,
+      GIT_CEILING_DIRECTORIES: tmpdir(),
+    });
+  });
+
+  it("does not fabricate GIT_DIR when git cannot resolve the worktree", () => {
+    const repo = cleanRepo("roll-main-gitenv-fail-");
+    const missing = join(repo, "missing-worktree");
+
+    expect(worktreeGitEnv(missing, repo)).toEqual({
+      GIT_WORK_TREE: missing,
+      GIT_CEILING_DIRECTORIES: tmpdir(),
+    });
   });
 });

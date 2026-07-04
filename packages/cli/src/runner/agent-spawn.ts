@@ -39,9 +39,10 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import type { Rig } from "@roll/spec";
 import { getAgentSpec } from "@roll/core";
+import { worktreeGitEnv } from "./main-checkout-guard.js";
 
 /**
  * FIX-204D — live-children registry. The signal teardown must kill an
@@ -697,27 +698,12 @@ function evidenceFrameEnv(runDir: string): NodeJS.ProcessEnv {
 
 const INHERITED_GIT_ENV_KEYS = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE"] as const;
 
-function worktreeGitEnv(cwd: string): NodeJS.ProcessEnv {
-  const gitPath = join(cwd, ".git");
-  if (!existsSync(gitPath)) return {};
-  try {
-    const text = readFileSync(gitPath, "utf8");
-    const match = /^gitdir:\s*(.+)\s*$/m.exec(text);
-    if (match?.[1] !== undefined && match[1].trim() !== "") {
-      return { GIT_DIR: resolve(cwd, match[1].trim()), GIT_WORK_TREE: cwd };
-    }
-  } catch {
-    return { GIT_DIR: gitPath, GIT_WORK_TREE: cwd };
-  }
-  return {};
-}
-
 function childEnv(opts: AgentSpawnOptions): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...(opts.env ?? process.env) };
   for (const key of INHERITED_GIT_ENV_KEYS) delete env[key];
   env.PWD = opts.cwd;
   delete env.OLDPWD;
-  Object.assign(env, worktreeGitEnv(opts.cwd));
+  Object.assign(env, worktreeGitEnv(opts.cwd, opts.cwd));
   return opts.runDir !== undefined && opts.runDir !== "" ? { ...env, ...evidenceFrameEnv(opts.runDir) } : env;
 }
 

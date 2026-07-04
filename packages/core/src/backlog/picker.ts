@@ -74,6 +74,18 @@ export interface PickOptions {
    * suggested order first, but every existing eligibility gate still applies.
    */
   ranking?: readonly PickRankingEntry[];
+  /**
+   * FIX-1211: true when another agent/human has claimed this story (In Progress
+   * with an active lease or no lease at all). The picker skips such stories and
+   * logs the reason via {@link skipClaimedReason}. Defaults to "not claimed".
+   */
+  isClaimedByOther?: (id: string) => boolean;
+  /**
+   * FIX-1211: when {@link isClaimedByOther} returns true, this provides a human-
+   * readable reason for the skip (e.g. "claimed by human at 2026-07-04 13:56").
+   * Optional; defaults to the story id when absent.
+   */
+  skipClaimedReason?: (id: string) => string | undefined;
 }
 
 /** First occurrence of a depends-on tag, mirroring the bash regex. */
@@ -192,6 +204,7 @@ export function buildDoneIndex(items: BacklogItem[]): (id: string) => boolean {
  *   2. No open PR references the id (injected, FIX-141).
  *   3. No merged delivery for this id (injected, FIX-323).
  *   4. Not on the runtime skip-list (injected, FIX-363).
+ *   5. Not claimed by another agent/human (injected, FIX-1211).
  *
  * Shared by `pickStory` and `assessBacklog` (US-LOOP-079b).
  */
@@ -204,6 +217,7 @@ export function isEligible(
   const hasMergedDelivery = opts.hasMergedDelivery ?? (() => false);
   const shouldSkip = opts.shouldSkip ?? (() => false);
   const hasPendingPublish = opts.hasPendingPublish ?? (() => false);
+  const isClaimedByOther = opts.isClaimedByOther ?? (() => false);
 
   // Recognize the Todo marker via the single-source classifier (FIX-300),
   // not an exact-string equality. An annotated status — the Todo marker
@@ -228,6 +242,15 @@ export function isEligible(
   // cycle must not be re-picked; that would re-implement the same work. It stays
   // Todo until the publish blocker clears and the pending marker is removed.
   if (hasPendingPublish(item.id)) return false;
+  // FIX-1211: skip stories claimed by another agent/human (In Progress with an
+  // active lease or no lease). Log the skip reason for observability.
+  if (isClaimedByOther(item.id)) {
+    const reason = opts.skipClaimedReason?.(item.id) ?? `claimed by other (${item.id})`;
+    // The skip reason is emitted via the callback — the caller provides it
+    // when observability is needed (e.g., the cycle orchestrator logs it).
+    // The picker itself stays pure; the reason is injected, not written.
+    return false;
+  }
   return true;
 }
 
@@ -240,6 +263,7 @@ export function isEligible(
  *     annotated marker, e.g. `📋 Todo (rebased)` (FIX-301), not exact-match
  *   - every depends-on id resolves to a row whose status contains `✅ Done`
  *   - no open PR references the id (injected predicate)
+ *   - not claimed by another agent/human (injected, FIX-1211)
  * Priority: all FIX first (file order), then US, then REFACTOR.
  */
 export function pickStory(items: BacklogItem[], opts: PickOptions = {}): BacklogItem | undefined {

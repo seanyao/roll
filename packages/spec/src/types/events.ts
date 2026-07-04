@@ -3,7 +3,7 @@
  * events.ndjson; all state is rebuilt from this stream, no separate cache.
  * Schema per specs/architecture §3 (v2-aligned).
  */
-import type { AgentId, AgentToolchainClassification, ExecutionProfile } from "./agent.js";
+import type { AgentId, AgentToolchainClassification, ArtifactRef, ExecutionProfile } from "./agent.js";
 import type { CycleCost, CyclePhase } from "./cycle.js";
 import type { GoalReviewMode, GoalSafetyGate, GoalScope, GoalStatus, GoalTransitionActor } from "./goal.js";
 import type { LoopType } from "./loop.js";
@@ -184,6 +184,18 @@ export type RollEvent =
   | { type: "ci:rerun"; prNumber: number; ts: number }
   // Alert (BC2/BC6)
   | { type: "alert:notify"; channel: string; message: string; ts: number }
+  // Supervisor journal (US-OBS-048) — structured narrative of decisions,
+  // verifications, and rescues so supervisor reasoning survives the chat session.
+  | {
+      type: "supervisor:journal";
+      ts: number;
+      actor: string;
+      action: SupervisorJournalAction;
+      storyId?: string;
+      cycleId?: string;
+      note?: string;
+      evidence?: ArtifactRef[];
+    }
   // Goal mode (US-GOAL-001) — the durable goal state machine facts.
   | { type: "goal:created"; schema: "goal.v1"; scope: GoalScope; status: "active"; review: GoalReviewMode; ts: number }
   | { type: "goal:state"; schema: "goal.v1"; from: GoalStatus; to: GoalStatus; actor: GoalTransitionActor; reason: string; ts: number }
@@ -430,6 +442,10 @@ export type RollEvent =
   // cycle from schema v1 on; events older than the switch are GRANDFATHERED
   // (read under legacy rules, never retro-rewritten).
   | TerminalEvent;
+
+/** Supervisor journal action kinds (US-OBS-048). */
+export const SUPERVISOR_JOURNAL_ACTIONS = ["decide", "verify", "rescue", "escalate", "note"] as const;
+export type SupervisorJournalAction = (typeof SUPERVISOR_JOURNAL_ACTIONS)[number];
 
 export type RollEventType = RollEvent["type"];
 

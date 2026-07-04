@@ -488,6 +488,28 @@ describe("parseEventLine (I8: readers skip bad lines, never crash)", () => {
     expect(failed?.type).toBe("loop:dormant_failed");
   });
 
+  it("types and parses supervisor:journal events (US-OBS-048)", () => {
+    const journal: RollEvent = {
+      type: "supervisor:journal",
+      ts: 1_780_000_000,
+      actor: "owner",
+      action: "rescue",
+      storyId: "US-OBS-048",
+      cycleId: "cycle-1",
+      note: "paused cycle and rerouted to codex",
+      evidence: [{ path: ".roll/loop/cycle-1/evidence/rescue.txt", kind: "log" }],
+    };
+    const parsed = parseEventLine(JSON.stringify(journal));
+    expect(parsed).not.toBeNull();
+    expect(parsed?.type).toBe("supervisor:journal");
+    if (parsed?.type === "supervisor:journal") {
+      expect(parsed.actor).toBe("owner");
+      expect(parsed.action).toBe("rescue");
+      expect(parsed.storyId).toBe("US-OBS-048");
+      expect(parsed.evidence).toHaveLength(1);
+    }
+  });
+
   it("parseEventLine rejects malformed loop:dormant/woke/dormant_failed lines (US-LOOP-079e)", () => {
     // missing ts
     expect(parseEventLine('{"type":"loop:dormant","loop":"main","reason":"x","since":1}')).toBeNull();

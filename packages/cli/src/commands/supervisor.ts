@@ -50,6 +50,7 @@ import { detectNoProgressStall, type NoProgressStall } from "../lib/goal-recover
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
+import { supervisorJournalCommand } from "./supervisor-journal.js";
 import { formatOperatingMode, resolveOperatingMode, suggestedGuidedRun } from "../lib/operating-mode.js";
 import { reducePrView } from "./loop-pr-inbox.js";
 import { readPendingPublish } from "../runner/pending-publish.js";
@@ -62,7 +63,7 @@ const SUPERVISOR_LIVE_WATCH_DEFAULT_INTERVAL_MS = 2_000;
 const SUPERVISOR_LIVE_WATCH_MIN_INTERVAL_MS = 250;
 
 export const SUPERVISOR_USAGE = [
-  "Usage: roll supervisor [status|observe|advise|next|why|live|health|route|repair-evidence] [--json]",
+  "Usage: roll supervisor [status|observe|advise|next|why|live|journal|health|route|repair-evidence] [--json]",
   "  status           observe + advise summary (alias for no subcommand)",
   "  observe          structured project facts (backlog, truth coverage, PRs, release readiness)",
   "  advise           Supervisor decisions (advisory; persistent changes need owner confirmation)",
@@ -71,6 +72,7 @@ export const SUPERVISOR_USAGE = [
   "  live             read-only Supervisor live board with Designer/Builder/Evaluator panes",
   "  live --watch     redraw the role board in-place until Ctrl-C; use --interval <sec>",
   "  live --collab    follow the multi-cycle collaboration stream; add --once for a snapshot",
+  "  journal          structured supervisor narrative stream: list/record decisions, verifications, rescues",
   "  health           agent toolchain health: auth/network/setup/worktree classification and routing",
   "  route            Role route trace: --role builder|designer|evaluator|peer_reviewer [--story <id>]",
   "  repair-evidence  repair missing acceptance evidence for a green PR and restore merge-ready status",
@@ -924,11 +926,14 @@ export function supervisorCommand(args: string[]): number | Promise<number> {
   let sub = args.find((a) => !a.startsWith("-"));
   // `status` is an alias for the default observe + advise summary.
   if (sub === "status") sub = undefined;
-  if (sub !== undefined && !["observe", "advise", "next", "why", "live", "health", "route", "repair-evidence"].includes(sub)) {
+  if (sub !== undefined && !["observe", "advise", "next", "why", "live", "journal", "health", "route", "repair-evidence"].includes(sub)) {
     process.stderr.write(SUPERVISOR_USAGE + "\n");
     return 1;
   }
   const projectPath = process.cwd();
+  if (sub === "journal") {
+    return supervisorJournalCommand(args, projectPath);
+  }
   if (sub === "route") {
     const role = parseCastRole(argValue(args, "--role"));
     if (role === null) {

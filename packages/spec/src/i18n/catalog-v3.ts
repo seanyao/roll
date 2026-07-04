@@ -92,6 +92,44 @@ export const v3Catalog: Catalog = {
     zh: "未达标",
   },
 
+  // `supervisor.journal.*` — structured supervisor narrative stream (US-OBS-048).
+  "supervisor.journal.title": {
+    en: "Supervisor journal",
+    zh: "督导日志",
+  },
+  "supervisor.journal.empty": {
+    en: "no journal entries",
+    zh: "暂无日志条目",
+  },
+  "supervisor.journal.summary": {
+    en: "journal: %d entries",
+    zh: "督导日志：%d 条",
+  },
+  "supervisor.journal.latest": {
+    en: "latest: %s by %s · %s",
+    zh: "最新：%s · 操作者 %s · %s",
+  },
+  "supervisor.journal.header": {
+    en: "Time · Actor · Action · Story · Note",
+    zh: "时间 · 操作者 · 动作 · 卡片 · 备注",
+  },
+  "supervisor.journal.recorded": {
+    en: "Recorded supervisor journal entry %s",
+    zh: "已记录督导日志条目 %s",
+  },
+  "supervisor.journal.invalid_action": {
+    en: "Invalid action '%s'. Use: decide, verify, rescue, escalate, note",
+    zh: "无效动作 '%s'。可用：decide、verify、rescue、escalate、note",
+  },
+  "supervisor.journal.missing_action": {
+    en: "--action is required",
+    zh: "需要提供 --action",
+  },
+  "supervisor.journal.usage": {
+    en: "Usage: roll supervisor journal [list|record] [--limit N] [--story ID] [--action ACTION] [--note TEXT] [--evidence PATH] [--json]\n  list    view recent journal entries (default)\n  record  append a structured supervisor decision/verification/rescue note\n",
+    zh: "用法：roll supervisor journal [list|record] [--limit N] [--story ID] [--action ACTION] [--note TEXT] [--evidence PATH] [--json]\n  list    查看近期督导日志条目（默认）\n  record  追加一条结构化督导决策/验证/救场记录\n",
+  },
+
   // `agent.*` — v3-native agent roster compatibility messages (US-AGENT-045).
   "agent.use_removed_agent": {
     en: "'%s' is no longer supported. Use one of: claude, kimi, codex, pi, agy, reasonix, cursor",

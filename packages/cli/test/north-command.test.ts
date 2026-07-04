@@ -139,6 +139,29 @@ describe("roll north --json", () => {
     expect(result.stdout).toContain("fix tax              no data · no history");
   });
 
+  it("includes a recent supervisor journal summary line when journal events exist", async () => {
+    registerAll();
+    const project = mkdtempSync(join(tmpdir(), "roll-north-journal-"));
+    const loop = join(project, ".roll", "loop");
+    mkdirSync(loop, { recursive: true });
+    writeFileSync(
+      join(loop, "events.ndjson"),
+      [
+        { type: "supervisor:journal", ts: Date.parse("2026-07-04T12:00:00Z"), actor: "owner", action: "rescue", storyId: "US-OBS-048", note: "rerouted" },
+      ].map((row) => JSON.stringify(row)).join("\n") + "\n",
+    );
+
+    const result = await withEnvCwd(
+      { ROLL_MAIN_PROJECT: project, ROLL_PROJECT_RUNTIME_DIR: loop, ROLL_NORTH_NOW: "2026-07-04T16:00:00Z", NO_COLOR: "1", ROLL_LANG: "en" },
+      project,
+      () => captureStdout(() => dispatch(["north"], async () => ({ ok: true }))),
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("journal: 1 entries");
+    expect(result.stdout).toContain("latest: rescue by owner");
+  });
+
   it("discovers all rotated event segments and falls back to git-created FIX dates in one meta scan", async () => {
     registerAll();
     const project = mkdtempSync(join(tmpdir(), "roll-north-rotated-"));

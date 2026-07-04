@@ -3,6 +3,9 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   buildNorthStarReport,
+  countJournalEntries,
+  EventBus,
+  latestJournalEntry,
   type NorthStarMetric,
   type NorthStarReport,
   type NorthStarBacklogEntry,
@@ -11,7 +14,7 @@ import {
   type NorthStarEvent,
   type NorthStarRun,
 } from "@roll/core";
-import { resolveLang, t, type Lang, v3Catalog } from "@roll/spec";
+import { resolveLang, t, type Lang, type RollEvent, v3Catalog } from "@roll/spec";
 import { shWindowDays } from "../lib/sh-time.js";
 import { c, pad, renderState, sparkline, trunc } from "../render.js";
 
@@ -128,6 +131,16 @@ function readDeliveries(dir: string): NorthStarDelivery[] {
     }
     return delivery;
   }).filter((delivery) => delivery.storyId !== "");
+}
+
+function readJournalEvents(dir: string): RollEvent[] {
+  const path = join(dir, "events.ndjson");
+  if (!existsSync(path)) return [];
+  try {
+    return new EventBus().readEvents(path);
+  } catch {
+    return [];
+  }
 }
 
 function readBacklog(root: string): NorthStarBacklogEntry[] {
@@ -349,6 +362,23 @@ export function renderNorthPanel(report: NorthStarReport, lang: Lang, width = te
   return out.join("\n");
 }
 
+function isoTime(ts: number): string {
+  try {
+    return new Date(ts).toISOString().replace(/\.\d{3}Z$/, "Z");
+  } catch {
+    return String(ts);
+  }
+}
+
+function renderJournalSummary(events: RollEvent[], lang: Lang, width = terminalWidth()): string {
+  const count = countJournalEntries(events);
+  if (count === 0) return "";
+  const latest = latestJournalEntry(events);
+  if (latest === undefined) return "";
+  const line = `  ${t(v3Catalog, lang, "supervisor.journal.summary", count)} · ${t(v3Catalog, lang, "supervisor.journal.latest", latest.action, latest.actor, isoTime(latest.ts))}`;
+  return trunc(line, width);
+}
+
 export function renderNorthStatusSummary(report: NorthStarReport | undefined, lang: Lang, width = terminalWidth()): string {
   if (report === undefined) return trunc(`  ${t(v3Catalog, lang, "north.status_title")}  ${t(v3Catalog, lang, "north.no_data")}`, width);
   const parts = METRIC_KEYS.map((key) => {
@@ -389,7 +419,13 @@ export function northCommand(args: string[]): number {
       deliveries: [],
     });
   }
-  if (json) process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-  else process.stdout.write(`${renderNorthPanel(report, lang, terminalWidth())}\n`);
+  if (json) {
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  } else {
+    const width = terminalWidth();
+    const panel = renderNorthPanel(report, lang, width);
+    const journal = renderJournalSummary(readJournalEvents(loopDir(root)), lang, width);
+    process.stdout.write(journal === "" ? `${panel}\n` : `${panel}\n${journal}\n`);
+  }
   return 0;
 }

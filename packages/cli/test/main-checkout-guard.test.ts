@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   applyMainCheckoutWriteProtection,
@@ -9,6 +9,7 @@ import {
   quarantineMainCheckout,
   releaseMainCheckoutWriteProtection,
   withMainCheckoutWriteProtection,
+  worktreeGitEnv,
 } from "../src/runner/main-checkout-guard.js";
 
 const dirs: string[] = [];
@@ -193,5 +194,33 @@ describe("main checkout guard — US-LOOP-089", () => {
     writeFileSync(join(repo, "product.ts"), "leak\n", "utf8");
 
     await expect(checkMainDirty(repo)).resolves.toEqual(["product.ts"]);
+  });
+
+  it("pins spawned worktree git discovery below the main checkout parent", () => {
+    const repo = cleanRepo("roll-main-gitenv-ceiling-");
+    // Nested (non-sibling) worktree layout: dirname(wt) !== dirname(repo), so this
+    // proves the ceiling pins to the MAIN checkout's parent, not the worktree's own
+    // parent — a sibling layout cannot distinguish the two (kimi review finding).
+    const nest = join(repo, "nested");
+    mkdirSync(nest, { recursive: true });
+    const wt = join(nest, "cycle-wt");
+    git(repo, ["worktree", "add", "-q", "-b", "cycle/nested-test", wt, "origin/main"]);
+
+    const env = worktreeGitEnv(wt, repo);
+    expect(env).toMatchObject({
+      GIT_WORK_TREE: wt,
+      GIT_CEILING_DIRECTORIES: dirname(repo),
+    });
+    expect(env.GIT_CEILING_DIRECTORIES).not.toBe(dirname(wt));
+  });
+
+  it("does not fabricate GIT_DIR when git cannot resolve the worktree", () => {
+    const repo = cleanRepo("roll-main-gitenv-fail-");
+    const missing = join(repo, "missing-worktree");
+
+    expect(worktreeGitEnv(missing, repo)).toEqual({
+      GIT_WORK_TREE: missing,
+      GIT_CEILING_DIRECTORIES: tmpdir(),
+    });
   });
 });

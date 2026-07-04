@@ -4,7 +4,7 @@
  * dispatch (every CycleCommand kind, via fully faked Ports), the v2-shaped runs
  * row builder, and the dry-run plan. No real git / gh / agent — pure fakes.
  */
-import { execFileSync, execSync } from "node:child_process";
+import { execFileSync, execSync, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -12,7 +12,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import type { CycleCommand, CycleContext, RollEvent, WarmSessionEntry } from "@roll/core";
 import { AGENTS } from "../../core/src/agent/specs.js";
 import { classifyComplexity } from "@roll/core";
-import { AWAITING_REVIEW_STATUS_MARKER } from "@roll/spec";
+import { AWAITING_REVIEW_STATUS_MARKER, STATUS_MARKER } from "@roll/spec";
 import { agentWritableRoots, checkMainDirty, recordExecutionProfile, writeEvaluatorArtifact, runDesignerStage } from "../src/runner/executor.js";
 import { evaluateReviewScoreGate, readLatestStoryPeerScore } from "../src/lib/review-score.js";
 import {
@@ -1396,6 +1396,115 @@ describe("executeCommand — command → executor mapping", () => {
       storyId: "US-CAPTURE-006",
       reason: "awaiting merge of PR #6",
       ts: 42000,
+    });
+  });
+
+  describe("FIX-1211: lease-aware In Progress handling", () => {
+    function tempLeasePorts(
+      backlogRows: { id: string; desc: string; status: string }[],
+      leaseContent?: Record<string, unknown>,
+    ): { ports: ReturnType<typeof fakePorts>["ports"]; calls: ReturnType<typeof fakePorts>["calls"]; dir: string } {
+      const dir = mkdtempSync(join(tmpdir(), "roll-fix1211-"));
+      execDirs.push(dir);
+      const eventsPath = join(dir, "events.ndjson");
+      const markStatus = vi.fn();
+      const { ports, calls } = fakePorts({
+        paths: {
+          ...fakePorts().ports.paths,
+          eventsPath,
+        },
+        backlog: {
+          read: () => backlogRows,
+          markStatus,
+        },
+      });
+      if (leaseContent !== undefined) {
+        writeFileSync(join(dir, "story-leases.json"), JSON.stringify(leaseContent, null, 2) + "\n", "utf8");
+      }
+      return { ports, calls, dir };
+    }
+
+    it("preserves an In Progress row with a fresh human soft lease", async () => {
+      const { ports, calls } = tempLeasePorts(
+        [{ id: "FIX-1211", desc: "lease aware", status: "🔨 In Progress" }],
+        { "FIX-1211": { source: "human", claimedAt: Date.now() } },
+      );
+      const r = await executeCommand({ kind: "preflight" }, ports, CTX);
+      expect(r.event).toEqual({ type: "preflight_done" });
+      expect(ports.backlog.markStatus).not.toHaveBeenCalled();
+      const alerts = (calls["alert"] ?? []).map((a) => String((a as unknown[])[1]));
+      expect(alerts.some((m) => m.includes("preserve FIX-1211") && m.includes("human lease"))).toBe(true);
+    });
+
+    it("preserves an In Progress row with a fresh supervisor soft lease", async () => {
+      const { ports, calls } = tempLeasePorts(
+        [{ id: "FIX-1211", desc: "lease aware", status: "🔨 In Progress" }],
+        { "FIX-1211": { source: "supervisor", claimedAt: Date.now() } },
+      );
+      await executeCommand({ kind: "preflight" }, ports, CTX);
+      expect(ports.backlog.markStatus).not.toHaveBeenCalled();
+      const alerts = (calls["alert"] ?? []).map((a) => String((a as unknown[])[1]));
+      expect(alerts.some((m) => m.includes("preserve FIX-1211") && m.includes("supervisor lease"))).toBe(true);
+    });
+
+    it("reclaims an In Progress row when the human soft lease has expired", async () => {
+      const { ports, calls } = tempLeasePorts(
+        [{ id: "FIX-1211", desc: "lease aware", status: "🔨 In Progress" }],
+        { "FIX-1211": { source: "human", claimedAt: Date.now() - 25 * 3600 * 1000 } },
+      );
+      await executeCommand({ kind: "preflight" }, ports, CTX);
+      expect(ports.backlog.markStatus).toHaveBeenCalledWith(ports.repoCwd, "FIX-1211", STATUS_MARKER.todo);
+      const alerts = (calls["alert"] ?? []).map((a) => String((a as unknown[])[1]));
+      expect(alerts.some((m) => m.includes("reclaim FIX-1211") && m.includes("expired"))).toBe(true);
+    });
+
+    it("reclaims an In Progress row when the cycle lease PID is dead", async () => {
+      const child = spawnSync(process.execPath, ["-e", ""]);
+      const deadPid = child.pid ?? 999999;
+      const { ports, calls } = tempLeasePorts(
+        [{ id: "FIX-1211", desc: "lease aware", status: "🔨 In Progress" }],
+        { "FIX-1211": { source: "cycle", pid: deadPid, claimedAt: Date.now() - 3600_000 } },
+      );
+      await executeCommand({ kind: "preflight" }, ports, CTX);
+      expect(ports.backlog.markStatus).toHaveBeenCalledWith(ports.repoCwd, "FIX-1211", STATUS_MARKER.todo);
+      const alerts = (calls["alert"] ?? []).map((a) => String((a as unknown[])[1]));
+      expect(alerts.some((m) => m.includes("reclaim FIX-1211") && m.includes("dead"))).toBe(true);
+    });
+
+    it("preserves an In Progress row with no lease (unknown provenance)", async () => {
+      const { ports, calls } = tempLeasePorts([{ id: "FIX-1211", desc: "lease aware", status: "🔨 In Progress" }]);
+      await executeCommand({ kind: "preflight" }, ports, CTX);
+      expect(ports.backlog.markStatus).not.toHaveBeenCalled();
+      const alerts = (calls["alert"] ?? []).map((a) => String((a as unknown[])[1]));
+      expect(alerts.some((m) => m.includes("preserve FIX-1211") && m.includes("no lease"))).toBe(true);
+    });
+
+    it("writes a cycle lease on pick_story and removes it on append_run terminal", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "roll-fix1211-lifecycle-"));
+      execDirs.push(dir);
+      const eventsPath = join(dir, "events.ndjson");
+      const markStatus = vi.fn();
+      const { ports } = fakePorts({
+        paths: {
+          ...fakePorts().ports.paths,
+          eventsPath,
+        },
+        backlog: {
+          read: () => [{ id: "US-RUN-001", desc: "est_min:5", status: "📋 Todo" }],
+          markStatus,
+        },
+      });
+      const pick = await executeCommand({ kind: "pick_story" }, ports, CTX);
+      expect(pick.event).toEqual({ type: "story_picked", storyId: "US-RUN-001" });
+      const leasePath = join(dir, "story-leases.json");
+      expect(existsSync(leasePath)).toBe(true);
+      const lease = JSON.parse(readFileSync(leasePath, "utf8"));
+      expect(lease["US-RUN-001"]).toMatchObject({ source: "cycle", pid: process.pid });
+      expect(typeof lease["US-RUN-001"].claimedAt).toBe("number");
+
+      const terminal = await executeCommand({ kind: "append_run", cycleId: CTX.cycleId, status: "idle" }, ports, CTX);
+      expect(terminal.event).toBeUndefined();
+      expect(existsSync(leasePath)).toBe(false);
     });
   });
 

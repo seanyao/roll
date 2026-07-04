@@ -2,19 +2,24 @@ import {
   buildHasOpenPr,
   decideClaimReconcile,
   hasMergedDelivery,
+  isHumanSoftLeaseActive,
+  isLeaseAlive,
   latestDeliveringCycle,
   openPrBlockReason,
   pickStory,
+  readLeases,
   reconcileBranchName,
   runRowHasPublishedPr,
+  setLease,
   type BacklogItem,
   type CycleCommand,
   type CycleContext,
   type HasOpenPr,
+  type LeaseEntry,
   type PickOptions,
 } from "@roll/core";
 import { classifyStatus, STATUS_MARKER } from "@roll/spec";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { markDoneGuarded } from "./done-guard.js";
 import { eventTs } from "./runner-time.js";
 import { readSkipCards } from "./skip-cards.js";
@@ -34,6 +39,38 @@ type SetupCommand = Extract<CycleCommand, { kind:
   | "resume_worktree"
   | "resolve_route"
 }>;
+
+/** FIX-1211: lease file lives next to the events ledger (a gitignored runtime file). */
+function storyLeasePath(ports: Ports): string {
+  return join(dirname(ports.paths.eventsPath), "story-leases.json");
+}
+
+/** FIX-1211: decide whether a 🔨 In Progress row can be reclaimed to 📋 Todo.
+ *  Returns the action + a human-readable reason for observability. */
+function decideInProgressReclaim(
+  entry: LeaseEntry | undefined,
+  nowMs: number,
+  storyId: string,
+): { action: "reclaim" | "keep"; reason: string } {
+  if (entry === undefined) {
+    // No lease at all → treat as a human/external preemption (the observed bug).
+    // Conservatively preserve it; we cannot know when it was claimed.
+    return { action: "keep", reason: `no lease for ${storyId} — preserving human/external claim` };
+  }
+  if (entry.source === "cycle") {
+    if (entry.pid !== undefined && isLeaseAlive(entry)) {
+      return { action: "keep", reason: `cycle lease ${entry.pid} is alive for ${storyId}` };
+    }
+    return { action: "reclaim", reason: `cycle lease for ${storyId} is dead (pid ${entry.pid})` };
+  }
+  if (entry.source === "human" || entry.source === "supervisor") {
+    if (isHumanSoftLeaseActive(entry, nowMs)) {
+      return { action: "keep", reason: `${entry.source} lease for ${storyId} is within 24h soft window` };
+    }
+    return { action: "reclaim", reason: `${entry.source} lease for ${storyId} expired (${Math.round((nowMs - entry.claimedAt) / 3_600_000)}h)` };
+  }
+  return { action: "keep", reason: `unknown lease source ${entry.source} for ${storyId} — preserving` };
+}
 
 export async function executeSetupCommand(
   cmd: SetupCommand,
@@ -79,6 +116,8 @@ export async function executeSetupCommand(
         const claims = rows.filter((r) => (r.status ?? "").includes("🔨"));
         if (claims.length > 0) {
           const slug = await ports.github.repoSlug(ports.repoCwd).catch(() => undefined);
+          const leases = readLeases(storyLeasePath(ports));
+          const nowMs = Date.now();
           for (const claim of claims) {
             const cycle = latestDeliveringCycle(runRows, claim.id);
             let prState: string | undefined;
@@ -94,7 +133,18 @@ export async function executeSetupCommand(
                 alert: (m) => ports.events.appendAlert(ports.paths.alertsPath, m),
               });
             }
-            else if (decision === "todo") ports.backlog.markStatus?.(ports.repoCwd, claim.id, STATUS_MARKER.todo);
+            else if (decision === "todo") {
+              // FIX-1211: a dead-looking claim is NOT always reclaimable. A human/
+              // supervisor preemption has a 24h soft lease; a live cycle lease is
+              // respected; only a dead cycle lease or expired soft lease reclaims.
+              const { action, reason } = decideInProgressReclaim(leases[claim.id], nowMs, claim.id);
+              if (action === "reclaim") {
+                ports.backlog.markStatus?.(ports.repoCwd, claim.id, STATUS_MARKER.todo);
+                ports.events.appendAlert(ports.paths.alertsPath, `[FIX-1211] reclaim ${claim.id}: ${reason}`);
+              } else {
+                ports.events.appendAlert(ports.paths.alertsPath, `[FIX-1211] preserve ${claim.id}: ${reason}`);
+              }
+            }
             // "keep" → leave 🔨 (delivered, pending merge).
           }
         }
@@ -300,6 +350,18 @@ export async function executeSetupCommand(
       // the moment the story is taken (owner观察: 行一直红着不动 = 此处之前
       // 写在 worktree 的虚空里，且真实 ports 从未绑定 markStatus).
       ports.backlog.markStatus?.(ports.repoCwd, story.id, STATUS_MARKER.in_progress);
+      // FIX-1211: stamp a live cycle lease so another loop instance (or a later
+      // preflight after a crash) can tell this claim is owned by a running cycle
+      // and not reclaim it until the cycle ends or the PID is proven dead.
+      try {
+        setLease(storyLeasePath(ports), story.id, {
+          pid: process.pid,
+          source: "cycle",
+          claimedAt: Date.now(),
+        });
+      } catch {
+        /* lease is observability-only; a write failure must not block the pick */
+      }
       const evidenceRunDir = ports.evidence.openFrame(ports.repoCwd, story.id, ctx.cycleId);
       ports.events.appendEvent(ports.paths.eventsPath, {
         type: "evidence:frame-opened",

@@ -13,7 +13,7 @@
  * Leases live at `.roll/loop/story-leases.json`, a gitignored runtime file.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 
 /** How long a human-preempted (leaseless) In Progress row is respected. */
 export const HUMAN_SOFT_LEASE_HOURS = 24;
@@ -67,7 +67,15 @@ export function removeLease(path: string, storyId: string): boolean {
   const leases = readLeases(path);
   if (!(storyId in leases)) return false;
   delete leases[storyId];
-  writeLeases(path, leases);
+  if (Object.keys(leases).length === 0) {
+    try {
+      if (existsSync(path)) unlinkSync(path);
+    } catch {
+      /* best-effort cleanup — never block terminal on lease tidy */
+    }
+  } else {
+    writeLeases(path, leases);
+  }
   return true;
 }
 

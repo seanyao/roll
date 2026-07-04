@@ -297,6 +297,45 @@ async function firstValid<T>(promises: Promise<T | null>[]): Promise<T | null> {
 
 export type PairDispatchMode = "serial" | "fanout";
 
+export type PairingDispatchMode = "serial-take-first" | "parallel-first-valid";
+export type PairingFallbackPolicy = "none" | "same-type-when-primary-empty";
+
+export interface PairingDispatchDeps {
+  cycleId: string;
+  workingAgent: string;
+  stage: PairingStage;
+  candidates: readonly string[];
+  mode: PairingDispatchMode;
+  fallbackPolicy: PairingFallbackPolicy;
+  sameTypeFallback: { allowed: boolean; peer?: string };
+  blockOnNoWinner: boolean;
+  diff: string;
+  timeoutMs: number;
+  reviewPeer: (peer: string, diff: string, timeoutMs: number) => Promise<PairReview | null>;
+  event: (e: PairEvent) => void;
+  now: () => number;
+  fanoutReason?: PairFanoutReason;
+  fanoutLimit?: number;
+}
+
+export type PairingDispatchResult =
+  | {
+      status: "none-available" | "timeout";
+      blocked: boolean;
+      peer?: undefined;
+      review?: undefined;
+      sameTypeFallback: boolean;
+      skipped: string[];
+    }
+  | {
+      status: "reviewed";
+      blocked: false;
+      peer: string;
+      review: PairReview;
+      sameTypeFallback: boolean;
+      skipped: string[];
+    };
+
 /** The reasons that justify an explicit high-risk fan-out. Anything else stays
  *  serial. The reason is recorded on the `pair:fanout` event so it is auditable. */
 export type PairFanoutReason =
@@ -334,6 +373,88 @@ async function serialFirstValid<T>(
     if (res !== null) return { winner: res, skipped: candidates.slice(i + 1) };
   }
   return { winner: null, skipped: [] };
+}
+
+function pairingDispatchPool(deps: PairingDispatchDeps): { peers: string[]; sameTypeFallback: boolean } {
+  const primary = deps.candidates.map((c) => c as string);
+  if (primary.length > 0) return { peers: primary, sameTypeFallback: false };
+  if (
+    deps.fallbackPolicy === "same-type-when-primary-empty" &&
+    deps.sameTypeFallback.allowed &&
+    deps.sameTypeFallback.peer !== undefined &&
+    deps.sameTypeFallback.peer.trim() !== ""
+  ) {
+    return { peers: [deps.sameTypeFallback.peer], sameTypeFallback: true };
+  }
+  return { peers: [], sameTypeFallback: false };
+}
+
+export async function pairingDispatch(deps: PairingDispatchDeps): Promise<PairingDispatchResult> {
+  const poolInfo = pairingDispatchPool(deps);
+  if (poolInfo.peers.length === 0) {
+    return { status: "none-available", blocked: deps.blockOnNoWinner, sameTypeFallback: false, skipped: [] };
+  }
+
+  if (deps.mode === "parallel-first-valid") {
+    const pool = poolInfo.peers.slice(0, deps.fanoutLimit ?? poolInfo.peers.length);
+    const reason = deps.fanoutReason;
+    if (reason !== undefined) {
+      deps.event({ type: "pair:fanout", cycleId: deps.cycleId, stage: deps.stage, reason, limit: deps.fanoutLimit ?? pool.length, peers: pool, ts: deps.now() });
+    }
+    const probes = pool.map(async (peer) => {
+      deps.event({
+        type: "pair:selected",
+        cycleId: deps.cycleId,
+        workingAgent: deps.workingAgent,
+        peer,
+        stage: deps.stage,
+        timeoutMs: deps.timeoutMs,
+        ...(reason !== undefined ? { reason: "fanout" } : {}),
+        ts: deps.now(),
+      });
+      const review = await deps.reviewPeer(peer, deps.diff, deps.timeoutMs);
+      return review === null ? null : { peer, sameTypeFallback: poolInfo.sameTypeFallback, review };
+    });
+    const winner = await firstValid(probes);
+    if (winner === null) {
+      return { status: "timeout", blocked: deps.blockOnNoWinner, sameTypeFallback: poolInfo.sameTypeFallback, skipped: [] };
+    }
+    return {
+      status: "reviewed",
+      blocked: false,
+      peer: winner.peer,
+      review: winner.review,
+      sameTypeFallback: winner.sameTypeFallback,
+      skipped: [],
+    };
+  }
+
+  const out = await serialFirstValid<PairReview>(poolInfo.peers, async (peer, index) => {
+    deps.event({
+      type: "pair:selected",
+      cycleId: deps.cycleId,
+      workingAgent: deps.workingAgent,
+      peer,
+      stage: deps.stage,
+      timeoutMs: deps.timeoutMs,
+      attempt: index + 1,
+      reason: index === 0 ? "ranked_candidate" : "fallback_after_failure",
+      ts: deps.now(),
+    });
+    const review = await deps.reviewPeer(peer, deps.diff, deps.timeoutMs);
+    return review === null ? null : { peer, value: review };
+  });
+  if (out.winner === null) {
+    return { status: "timeout", blocked: deps.blockOnNoWinner, sameTypeFallback: poolInfo.sameTypeFallback, skipped: [] };
+  }
+  return {
+    status: "reviewed",
+    blocked: false,
+    peer: out.winner.peer,
+    review: out.winner.value,
+    sameTypeFallback: poolInfo.sameTypeFallback,
+    skipped: out.skipped,
+  };
 }
 
 /**
@@ -398,52 +519,32 @@ export async function runPairing(
     // parallel take-first survives ONLY as the explicit high-risk fan-out below.
     // FIX-363: budget scales with the diff the peer must actually read.
     const timeoutMs = deps.timeoutMs ?? reviewTimeoutMs(diff.length);
-    const fanout = deps.fanout;
-    let winner: { peer: string; review: PairReview } | null;
-    let skipped: string[] = [];
-    if (fanout !== undefined) {
-      // Explicit, bounded, reasoned FAN-OUT (parallel take-first): fire up to
-      // PAIR_FANOUT_LIMIT ranked candidates at once and use the first verdict.
-      const pool = candidates.slice(0, PAIR_FANOUT_LIMIT).map((c) => c as string);
-      deps.event({ type: "pair:fanout", cycleId, stage, reason: fanout, limit: PAIR_FANOUT_LIMIT, peers: pool, ts: deps.now() });
-      const probes = pool.map(async (peer) => {
-        deps.event({ type: "pair:selected", cycleId, workingAgent, peer, stage, timeoutMs, reason: "fanout", ts: deps.now() });
-        const review = await deps.reviewPeer(peer, diff, timeoutMs);
-        return review === null ? null : { peer, review };
-      });
-      winner = await firstValid(probes);
-    } else {
-      const out = await serialFirstValid<PairReview>(
-        candidates.map((c) => c as string),
-        async (peer, index) => {
-          deps.event({
-            type: "pair:selected",
-            cycleId,
-            workingAgent,
-            peer,
-            stage,
-            timeoutMs,
-            attempt: index + 1,
-            reason: index === 0 ? "ranked_candidate" : "fallback_after_failure",
-            ts: deps.now(),
-          });
-          const review = await deps.reviewPeer(peer, diff, timeoutMs);
-          return review === null ? null : { peer, value: review };
-        },
-      );
-      winner = out.winner === null ? null : { peer: out.winner.peer, review: out.winner.value };
-      skipped = out.skipped;
-    }
-    if (winner === null) {
+    const dispatched = await pairingDispatch({
+      cycleId,
+      workingAgent,
+      stage,
+      candidates: candidates.map((c) => c as string),
+      mode: deps.fanout === undefined ? "serial-take-first" : "parallel-first-valid",
+      fallbackPolicy: "none",
+      sameTypeFallback: { allowed: false },
+      blockOnNoWinner: false,
+      diff,
+      timeoutMs,
+      reviewPeer: deps.reviewPeer,
+      event: deps.event,
+      now: deps.now,
+      ...(deps.fanout !== undefined ? { fanoutReason: deps.fanout, fanoutLimit: PAIR_FANOUT_LIMIT } : {}),
+    });
+    if (dispatched.status !== "reviewed") {
       // Whole candidate pool failed (timeout/error) → block (no real hetero verdict).
       return { status: "timeout" };
     }
-    if (skipped.length > 0) {
+    if (dispatched.skipped.length > 0) {
       // Cost-aware: the untried ranked candidates are a POLICY skip (a reviewer
       // was accepted), not zero-cost attempted peers.
-      deps.event({ type: "pair:skipped", cycleId, peers: skipped, reason: "accepted_verdict", stage, ts: deps.now() });
+      deps.event({ type: "pair:skipped", cycleId, peers: dispatched.skipped, reason: "accepted_verdict", stage, ts: deps.now() });
     }
-    const { peer, review } = winner;
+    const { peer, review } = dispatched;
     const path = evidencePath(runtimeDir, cycleId, stage);
     mkdirSync(join(runtimeDir, "peer"), { recursive: true });
     writeFileSync(
@@ -1103,17 +1204,12 @@ export async function retryPeerConsult(
     //     are installed (single-vendor env — FIX-293's "not permanently blocked"):
     //     still a fresh distinct subprocess, never the builder's own session.
     const heteroPeers = distinct.filter((a) => a !== working && isHeterogeneous(a, working));
-    const tryOrder: { peer: string; sameTypeFallback: boolean }[] =
-      heteroPeers.length > 0
-        ? heteroPeers.map((p) => ({ peer: p, sameTypeFallback: false }))
-        : working !== ""
-          ? [{ peer: working, sameTypeFallback: true }]
-          : [];
+    const canSpawnSameType = working !== "" && distinct.includes(working);
     // The only true "no peer to consult" case: we don't even know the working
     // agent's type (no installed agent AND no working-agent name) — there is
     // nothing to spawn a separate session of. This is now rare (it is NOT "only
     // one vendor installed"); audited as a fail-loud absence.
-    if (tryOrder.length === 0) {
+    if (heteroPeers.length === 0 && !canSpawnSameType) {
       deps.event({ type: "pair:none-available", cycleId, stage: "code", reason: "peer-gate retry: no peer could be consulted (no agent to spawn a separate-session review)", ts: deps.now() });
       return { status: "none-available" };
     }
@@ -1131,18 +1227,30 @@ export async function retryPeerConsult(
     // FIX-363: the peer-gate retry reads the SAME full diff as the pairing review,
     // so it gets the SAME diff-scaled budget (the FIX-356b block fired here too).
     const timeoutMs = deps.timeoutMs ?? reviewTimeoutMs(diff.length);
-    const poolSameType = tryOrder.every((c) => c.sameTypeFallback);
-    const probes = tryOrder.map(async ({ peer, sameTypeFallback }) => {
-      deps.event({ type: "pair:selected", cycleId, workingAgent: working, peer, stage: "code", timeoutMs, ts: deps.now() });
-      const review = await deps.reviewPeer(peer, diff, timeoutMs);
-      return review === null ? null : { peer, sameTypeFallback, review };
+    const dispatched = await pairingDispatch({
+      cycleId,
+      workingAgent: working,
+      stage: "code",
+      candidates: heteroPeers,
+      mode: "parallel-first-valid",
+      fallbackPolicy: "same-type-when-primary-empty",
+      sameTypeFallback: { allowed: canSpawnSameType, peer: working },
+      blockOnNoWinner: true,
+      diff,
+      timeoutMs,
+      reviewPeer: deps.reviewPeer,
+      event: deps.event,
+      now: deps.now,
     });
-    const winner = await firstValid(probes);
-    if (winner === null) {
+    if (dispatched.status !== "reviewed") {
+      if (dispatched.status === "none-available") {
+        deps.event({ type: "pair:none-available", cycleId, stage: "code", reason: "peer-gate retry: no peer could be consulted (no agent to spawn a separate-session review)", ts: deps.now() });
+        return { status: "none-available" };
+      }
       // Whole ordered pool failed (timeout/error) → stays blocked, no death-spiral.
-      return { status: "timeout", sameTypeFallback: poolSameType };
+      return { status: "timeout", sameTypeFallback: dispatched.sameTypeFallback };
     }
-    const { peer, sameTypeFallback, review } = winner;
+    const { peer, sameTypeFallback, review } = dispatched;
     const path = evidencePath(runtimeDir, cycleId, "code");
     mkdirSync(join(runtimeDir, "peer"), { recursive: true });
     writeFileSync(path, JSON.stringify({ cycleId, workingAgent: working, peer, stage: "code", sameTypeFallback, ...review }, null, 2), "utf8");

@@ -915,6 +915,8 @@ function terminalCtx(state: CycleState): TerminalContext {
     branch: state.ctx.branch,
     agent: state.ctx.agent ?? "",
     model: state.ctx.model ?? "",
+    failureClass: state.ctx.failureClass,
+    rootCauseKey: state.ctx.rootCauseKey,
   };
 }
 
@@ -1240,7 +1242,11 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
           });
           if (gate.verdict === "pr_loop_unavailable") {
             extra.push({ kind: "append_alert", message: gate.alert });
-            return terminate({ ...state, phase: "cleanup" }, status, extra, gate.verdict);
+            return terminate({
+              ...state,
+              ctx: { ...state.ctx, failureClass: "env", rootCauseKey: "env:pr_loop" },
+              phase: "cleanup",
+            }, status, extra, gate.verdict);
           }
         }
         return terminate({ ...state, phase: "cleanup" }, status, extra);

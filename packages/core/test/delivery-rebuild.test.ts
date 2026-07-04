@@ -336,6 +336,25 @@ describe("rebuildDeliveriesFromFacts — AC1: other outcomes", () => {
     });
   });
 
+  it("REFACTOR-070: published_pending_merge + env:pr_loop keeps blocked lifecycle projection", () => {
+    const runs = [makeRun({
+      storyId: "US-NOGUARD-NEW",
+      outcome: "published_pending_merge",
+      prNumber: 81,
+      recordedAt: 200,
+      failureClass: "env",
+      rootCauseKey: "env:pr_loop",
+    })];
+    const result = rebuildDeliveriesFromFacts(runs, [], "o/r");
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      storyId: "US-NOGUARD-NEW",
+      lifecycleState: "blocked",
+      prNumber: { present: true, value: 81 },
+      prUrl: { present: true, value: "https://github.com/o/r/pull/81" },
+    });
+  });
+
   it("FIX-1032b: ci_red_after_merge without merge evidence stays ci_red", () => {
     const runs = [makeRun({
       storyId: "US-RED-NOMERGE",

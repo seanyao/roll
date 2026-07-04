@@ -44,6 +44,39 @@ describe("US-TRUTH-001 AC1/AC2 — versioned schema, closed outcome enum", () =>
     expect(e.type).toBe("cycle:terminal");
     expect(e.cycleId).toBe(BASE.cycleId);
     expect(e.outcome).toBe("delivered");
+    expect(e).toHaveProperty("failure_class", null);
+    expect(e).toHaveProperty("root_cause_key", null);
+  });
+
+  it("failure attribution keys are part of every terminal-event shape", () => {
+    const neutral = buildTerminalEvent({
+      ...BASE,
+      outcome: "published_pending_merge",
+      pr: present({ url: "https://github.com/o/r/pull/1", state: "OPEN" }),
+      branch: present("loop/cycle-x"),
+      commit: present("abc123"),
+      tcr: present(1),
+      attest: present({ reportPath: "r.html", acMap: true }),
+      usage: absent("no_parseable_usage"),
+      cost: absent("no_parseable_usage"),
+    });
+    const attributed = buildTerminalEvent({
+      ...BASE,
+      outcome: "published_pending_merge",
+      pr: present({ url: "https://github.com/o/r/pull/1", state: "OPEN" }),
+      branch: present("loop/cycle-x"),
+      commit: present("abc123"),
+      tcr: present(1),
+      attest: present({ reportPath: "r.html", acMap: true }),
+      usage: absent("no_parseable_usage"),
+      cost: absent("no_parseable_usage"),
+      failure_class: "env",
+      root_cause_key: "env:pr_loop",
+    });
+    expect(neutral.failure_class).toBeNull();
+    expect(neutral.root_cause_key).toBeNull();
+    expect(attributed.failure_class).toBe("env");
+    expect(attributed.root_cause_key).toBe("env:pr_loop");
   });
 
   it("the outcome enum is closed and covers the required classes", () => {

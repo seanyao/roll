@@ -244,6 +244,35 @@ describe("collectCycleLedger", () => {
     expect(ledgerFailedCount([r])).toBe(1);
   });
 
+  it("REFACTOR-070: failure_class-driven agent internal rows keep the diagnostic bucket and detail", () => {
+    const p = project([
+      {
+        cycle_id: "agy-internal-new",
+        status: "gave_up",
+        outcome: "gave_up",
+        story_id: "FIX-284",
+        agent: "agy",
+        model: "gemini-2.5-pro",
+        ts: "2026-06-12T00:57:00Z",
+        duration_sec: 300,
+        usage_unknown: true,
+        failure_class: "harness",
+        root_cause_key: "harness:agent_internal",
+        agent_internal_class: "agy_grep_timeout_zero_trajectory",
+        agent_internal_summary: "GREP_SEARCH timed out and trajectory collapsed",
+        agent_internal_log_path: "/home/user/.gemini/antigravity-cli/log/cli-20260630_191635.log",
+      },
+    ]);
+    const r = collectCycleLedger(p)[0]!;
+    expect(r.verdict).toBe("agent_internal_failure");
+    expect(r.agentInternalFailure).toEqual({
+      class: "agy_grep_timeout_zero_trajectory",
+      summary: "GREP_SEARCH timed out and trajectory collapsed",
+      nativeLogPath: "/home/user/.gemini/antigravity-cli/log/cli-20260630_191635.log",
+    });
+    expect(ledgerFailedCount([r])).toBe(1);
+  });
+
   it("FIX-290 AC3: a real 0-token cycle is '—' (TRUE-0), distinct from '?' (UNKNOWN)", () => {
     // A real cycle (story picked) whose parsed usage genuinely summed to 0 — kept
     // (it is a cycle, not an idle heartbeat) and rendered "—", not "?".

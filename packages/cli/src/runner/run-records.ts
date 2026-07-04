@@ -156,12 +156,8 @@ export function buildRunRow(
       row["agent_internal_conversation_id"] = ctx.agentInternalFailure.conversationId;
     }
   }
-  if (ctx.failureClass !== undefined) {
-    row["failure_class"] = ctx.failureClass;
-  }
-  if (ctx.rootCauseKey !== undefined) {
-    row["root_cause_key"] = ctx.rootCauseKey;
-  }
+  row["failure_class"] = ctx.failureClass ?? null;
+  row["root_cause_key"] = ctx.rootCauseKey ?? null;
   return row;
 }
 

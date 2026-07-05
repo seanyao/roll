@@ -386,6 +386,10 @@ export interface PublishResult {
   mergedBack?: boolean;
   /** Did the orphan branch+tag push succeed? (bin/roll:9303-9305 etc). */
   orphanPushed?: boolean;
+  /** FIX-1214: branch pushed but transient GitHub API fault prevented PR open/merge. */
+  degraded?: boolean;
+  /** Machine-readable root-cause tag when {@link degraded} is true. */
+  rootCauseKey?: string;
 }
 
 /**

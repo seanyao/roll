@@ -53,6 +53,7 @@ import {
   deadTickVerdict,
 } from "@roll/core";
 import { gh, ghAvailable, ghRepoSlug, prMerge, prReady, remoteUrl } from "@roll/infra";
+import { openPendingPrCreates, pendingPrCreatePath } from "../runner/pending-pr-create.js";
 import { execFileSync } from "node:child_process";
 import { appendFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -290,6 +291,11 @@ export interface PrInboxDeps {
   writeTick: (tick: PrTick) => void;
   info: (line: string) => void;
   warn: (line: string) => void;
+  /**
+   * FIX-1214: drain the pending-pr-create queue after walking open PRs.
+   * Defaults to the real gh-backed drain; tests inject a fake.
+   */
+  drainPendingPrCreates?: (slug: string, openHeadRefs: ReadonlySet<string>) => Promise<void>;
 }
 
 // ─── the walk (decisions from pr-loop.ts; effects via deps) ───────────────────
@@ -331,6 +337,8 @@ export async function runPrInbox(deps: PrInboxDeps): Promise<PrTick> {
     ...(list.stderr !== undefined ? { listStderr: list.stderr } : {}),
   });
   if (gate !== undefined) return emit(deps, gate);
+
+  const openHeadRefs = new Set(openPrs.map((pr) => pr.headRefName ?? "").filter((ref) => ref !== ""));
 
   for (const pr of openPrs) {
     const num = String(pr.number ?? "");
@@ -412,7 +420,34 @@ export async function runPrInbox(deps: PrInboxDeps): Promise<PrTick> {
         break;
     }
   }
+
+  // FIX-1214: retry PRs that were deferred because of a transient GitHub API
+  // fault during the cycle's publish step. Skip branches that already have an
+  // open PR (the queue entry is stale and gets cleaned up inside the drain).
+  try {
+    const drain = deps.drainPendingPrCreates ?? defaultDrainPendingPrCreates;
+    await drain(slug, openHeadRefs);
+  } catch {
+    /* best-effort: a queue drain failure must not break the regular inbox walk */
+  }
+
   return emit(deps, prActedTick());
+}
+
+/** FIX-1214: default production drain for the pending-pr-create queue. */
+function defaultDrainPendingPrCreates(slug: string, openHeadRefs: ReadonlySet<string>): Promise<void> {
+  return openPendingPrCreates(
+    {
+      gh: (args) => gh(args),
+      nowMs: () => Date.now(),
+      runtimeDir: runtimeDir(),
+      projectCwd: process.cwd(),
+      alert: appendAlert,
+      info: (line) => process.stdout.write(`${pal().yellow}[roll]${pal().nc} ${line}\n`),
+    },
+    slug,
+    openHeadRefs,
+  );
 }
 
 async function attemptEvidenceRepair(

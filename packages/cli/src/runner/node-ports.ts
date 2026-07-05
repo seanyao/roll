@@ -259,7 +259,13 @@ export function nodePorts(opts: {
       },
       async runPublishPlan(plan) {
         const r = await runPublishPlan(plan);
-        return { status: r.status, prUrl: r.prUrl, ok: r.ok };
+        return {
+          status: r.status,
+          prUrl: r.prUrl,
+          ok: r.ok,
+          degraded: r.degraded,
+          rootCauseKey: r.rootCauseKey,
+        };
       },
       async prState(repoCwd, branch) {
         const slug = ghRepoSlug(await remoteUrl(repoCwd));

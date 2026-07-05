@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### 稳定性
+- 长寿 PR 分支掉进 CI 事件黑洞（push/sync 事件 GitHub 不投递、零 check-run、合并永远被保护规则卡死）时，pr-loop 自动检测并通过 workflow_dispatch 定向拉起 CI，同时以 ALERT 记录静默场景（FIX-1217）`[loop-engine]`
+
 ### 护栏
 - 赦免名单（`loop pardon-skip-list`）收编进 `roll doctor pardon` 诊断子命令，旧命令保留为过渡别名（REFACTOR-073）`[loop-engine]`
 

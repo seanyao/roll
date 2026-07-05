@@ -21,11 +21,11 @@ exports[`US-LANG-003 CLI language surface > config lang error output follows the
 
 exports[`US-LANG-003 CLI language surface > doctor --help is locale-pinned and single-language 1`] = `
 {
-  "en": "Usage: roll doctor [skills|language|--tools]
-  Environment + install diagnosis; --tools shows focused tool, physical screenshot, and permission preflight readiness.
+  "en": "Usage: roll doctor [skills|language|pardon|--tools]
+  Environment + install diagnosis; --tools shows focused tool, physical screenshot, and permission preflight readiness; pardon diagnoses/resets the skip-list.
 ",
-  "zh": "用法：roll doctor [skills|language|--tools]
-  环境与安装体检；--tools 只看工具、真实截图与权限预检就绪度。
+  "zh": "用法：roll doctor [skills|language|pardon|--tools]
+  环境与安装体检；--tools 只看工具、真实截图与权限预检就绪度；pardon 诊断/重置跳过名单。
 ",
 }
 `;
@@ -38,7 +38,7 @@ The autonomous delivery loop — grouped control / observe / alerts / maintain.
 control   on · off · now · pause · resume · reset · go · goal · recover
 observe   watch · status · runs · log · events · signals · eval
 alerts    alert list · alert ack · alert resolve · alert log
-maintain  gc · fmt · mute · unmute · pr-inbox · reconcile-pending · pardon-skip-list
+maintain  gc · fmt · mute · unmute · pr-inbox · reconcile-pending
 internal  test · run-once · story · notify · enforce-tcr · precheck-ci · hotfix-head-context · agent-routes · pr-heal-run
 
 [38;2;88;166;255mstates    [0mACTIVE (lanes armed) · DORMANT (backlog drained → loop lane self-unloads, zero idle records) · PAUSED (you stopped it)
@@ -50,7 +50,7 @@ internal  test · run-once · story · notify · enforce-tcr · precheck-ci · h
 作动      on · off · now · pause · resume · reset · go · goal · recover
 传感      watch · status · runs · log · events · signals · eval
 告警      alert list · alert ack · alert resolve · alert log
-维护      gc · fmt · mute · unmute · pr-inbox · reconcile-pending · pardon-skip-list
+维护      gc · fmt · mute · unmute · pr-inbox · reconcile-pending
 内部      test · run-once · story · notify · enforce-tcr · precheck-ci · hotfix-head-context · agent-routes · pr-heal-run
 
 [38;2;88;166;255m状态      [0mACTIVE 运行中(lane 就绪) · DORMANT 休眠(backlog 抽干→自卸 loop lane、不再记空转) · PAUSED 已暂停(你停的)

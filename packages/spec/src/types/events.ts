@@ -7,7 +7,7 @@ import type { AgentId, AgentToolchainClassification, ArtifactRef, ExecutionProfi
 import type { CycleCost, CyclePhase } from "./cycle.js";
 import type { GoalReviewMode, GoalSafetyGate, GoalScope, GoalStatus, GoalTransitionActor } from "./goal.js";
 import type { LoopType } from "./loop.js";
-import type { FailureClass, TerminalEvent, TerminalOutcome } from "./terminal.js";
+import type { BlockCause, FailureClass, TerminalEvent, TerminalOutcome } from "./terminal.js";
 import type { TaskLevel } from "./story.js";
 import type { BuilderFinalizationFacts, BuilderFinalizationVerdict } from "./builder.js";
 
@@ -333,7 +333,7 @@ export type RollEvent =
   // seconds, so the spawn output is signature-matched the same way and folds into
   // the same isolate-from-counter + PAUSE(auth)/breathe(network) path — one block
   // taxonomy for builder/reviewer/scorer (no new precheck, no probe, no cache).
-  | { type: "agent:blocked"; cycleId: string; agent: string; cause: "auth" | "network"; stage: "build" | "review" | "score"; detail: string; ts: number }
+  | { type: "agent:blocked"; cycleId: string; agent: string; cause: BlockCause; stage: "build" | "review" | "score"; detail: string; ts: number }
   // FIX-930 — failure-driven agent swap on a zero-TCR/stalled cycle: the loop
   // re-marks the story Todo and routes the NEXT untried agent (excluding the one
   // that just gave up). `attempt` is the 1-based self-heal attempt for the story.

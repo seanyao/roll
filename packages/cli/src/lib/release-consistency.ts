@@ -15,6 +15,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import type { Dirent } from "node:fs";
 import { dirname, join } from "node:path";
 import {
+  acForStory,
   CONSISTENCY_DIMENSIONS,
   CONSISTENCY_DIMENSION_LABELS,
   ensureDeliveriesFresh,
@@ -476,13 +477,16 @@ function checkCards(projectDir: string): DimResult {
 
   const hasAcBlock = (epic: string, id: string): boolean => {
     try {
-      return /\*\*AC:\*\*[\s\S]*?-\s+\[[ xX]\]\s+/.test(readText(join(featuresDir, epic, id, "spec.md")));
+      const text = readText(join(featuresDir, epic, id, "spec.md"));
+      return acForStory(text, id, { fileOwned: true }).length > 0;
     } catch {
       return true;
     }
   };
 
   const gaps: string[] = [];
+  /** FIX-1216: track exempt card IDs for observability. */
+  const exemptCards: string[] = [];
   let doneNoReportNoAc = 0;
   let doneNoFolder = 0;
   for (const line of readText(backlog).split("\n")) {
@@ -511,6 +515,7 @@ function checkCards(projectDir: string): DimResult {
           gaps.push(`Done backlog row ${id} has ACs but no attest report`);
         } else {
           doneNoReportNoAc += 1;
+          exemptCards.push(id);
         }
       }
     }
@@ -518,7 +523,7 @@ function checkCards(projectDir: string): DimResult {
   const result: DimResult = { status: gaps.length === 0 ? "pass" : "fail", gaps };
   const notes: string[] = [];
   if (doneNoFolder > 0) notes.push(`${doneNoFolder} pre-card-era Done rows without a card folder`);
-  if (doneNoReportNoAc > 0) notes.push(`${doneNoReportNoAc} Done rows without AC blocks exempt from attest report`);
+  if (doneNoReportNoAc > 0) notes.push(`${doneNoReportNoAc} Done rows without AC blocks exempt from attest report: ${exemptCards.join(", ")}`);
   if (notes.length > 0) result.note = `${notes.join("; ")} (informational)`;
   return result;
 }

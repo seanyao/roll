@@ -92,4 +92,16 @@ describe("consistency cards dimension", () => {
     expect(r.dimensions["cards"]?.status).toBe("pass");
     expect(r.dimensions["cards"]?.note).toContain("without AC blocks exempt");
   });
+
+  it("FIX-1216: Done with folder + `## AC` format (modern) still detected as having ACs", () => {
+    const p = mkdtempSync(join(tmpdir(), "roll-cards-"));
+    dirs.push(p);
+    mkdirSync(join(p, ".roll", "features", "e", "FIX-1217"), { recursive: true });
+    writeFileSync(join(p, ".roll", "features", "e", "FIX-1217", "spec.md"), `# FIX-1217\n\n## AC\n\n- [ ] Modern AC format is recognized\n`);
+    writeFileSync(join(p, ".roll", "backlog.md"), ["| ID | D | S |", "|---|---|---|", "| FIX-1217 | z | ✅ Done |", ""].join("\n"));
+    const r = runJson(p);
+    // has AC block but no report → fail
+    expect(r.dimensions["cards"]?.status).toBe("fail");
+    expect(r.dimensions["cards"]?.gaps[0]).toContain("has ACs but no attest report");
+  });
 });

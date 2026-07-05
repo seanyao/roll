@@ -118,3 +118,19 @@ export function seedUpdateCheckCache(rollHome: string): void {
   const v = binRollVersion();
   writeFileSync(join(rollHome, ".update-check"), `${Math.floor(Date.now() / 1000)} ${v} ${v}\n`);
 }
+
+/**
+ * REFACTOR-072: pre-seed the loop binary-staleness cache inside a fabricated
+ * ROLL_HOME so `roll doctor` renders a deterministic up-to-date readout in
+ * difftests, without touching the network. The cache format matches
+ * {@link packages/cli/src/runner/binary-staleness.ts}.
+ */
+export function seedBinaryStalenessCache(rollHome: string): void {
+  mkdirSync(rollHome, { recursive: true });
+  const v = binRollVersion();
+  writeFileSync(
+    join(rollHome, ".loop-version-check"),
+    JSON.stringify({ latest: `v${v}`, fetchedAtMs: Date.now() }),
+    "utf8",
+  );
+}

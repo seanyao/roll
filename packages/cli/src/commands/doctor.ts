@@ -25,6 +25,8 @@ import { collectExternalTools, renderExternalToolDoctorSection, type ExternalToo
 import { collectToolReadinessDoctorRows, renderToolReadinessDoctorSection } from "../lib/tool-readiness-doctor.js";
 import { detectDesignHandoff, renderDesignNudge } from "../lib/onboard-nudge.js";
 import { collectLanguageDoctorFindings, renderLanguageDoctorSection } from "../lib/language-doctor.js";
+import { resolveBinaryStalenessReadout } from "../runner/binary-staleness.js";
+import { rollVersion } from "./version.js";
 
 interface Palette {
   GREEN: string;
@@ -595,6 +597,22 @@ function readWorkingDirectory(plist: string): string {
   return "";
 }
 
+// ── REFACTOR-072: loop binary staleness readout (observation only) ─────────────
+function binaryStalenessSection(lang: Lang): void {
+  const { stale, latest, current } = resolveBinaryStalenessReadout(rollHomeDir(), rollVersion());
+  emit("");
+  emit(t(v3Catalog, "en", "doctor.binary_staleness_title"));
+  emit(t(v3Catalog, "zh", "doctor.binary_staleness_title"));
+  emit("");
+  if (latest === "") {
+    emit(`  ? ${t(v3Catalog, lang, "doctor.binary_staleness_unknown")}`);
+  } else if (stale) {
+    emit(`  ✗ ${t(v3Catalog, lang, "doctor.binary_staleness_stale", current, latest)}`);
+  } else {
+    emit(`  ✓ ${t(v3Catalog, lang, "doctor.binary_staleness_ok", current, latest)}`);
+  }
+}
+
 export interface LanguageAuditDeps {
   /** Override the project root (defaults to `process.cwd()`). */
   root?: string;
@@ -625,6 +643,7 @@ export function doctorCommand(args: string[], deps: DoctorDeps = {}): number {
     lanesSection(lang, realLaneProbe());
     launchdStaleSection(lang);
     launchdProxySection(lang);
+    binaryStalenessSection(lang);
   }
   for (const l of renderToolReadinessDoctorSection(collectToolReadinessDoctorRows(process.cwd()))) emit(l);
   for (const l of renderExternalToolDoctorSection(externalTools)) emit(l);

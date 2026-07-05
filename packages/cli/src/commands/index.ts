@@ -9,6 +9,7 @@ import { alertCommand } from "./alert.js";
 import { attestCommand } from "./attest.js";
 import { backlogCommand } from "./backlog.js";
 import {
+  backlogClaimCommand,
   backlogLintCommand,
   backlogSetStatusCommand,
   backlogUnstickCommand,
@@ -254,6 +255,7 @@ export function registerAll(): void {
     if (sub === "block" || sub === "defer" || sub === "unblock" || sub === "promote") {
       return backlogSetStatusCommand(sub, args.slice(1));
     }
+    if (sub === "claim") return backlogClaimCommand(args.slice(1));
     if (sub === "lint") return backlogLintCommand(args.slice(1));
     if (sub === "unstick") return backlogUnstickCommand(args.slice(1));
     if (sub === "sync") return backlogSyncCommand(args.slice(1));

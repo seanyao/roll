@@ -19,9 +19,11 @@ import {
 import { resolveLang, STATUS_MARKER, t, v2Catalog, type Lang } from "@roll/spec";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { setLease, type LeaseSource } from "@roll/core";
 import { projectSlug, sharedRoot } from "./dashboard.js";
 
 const BACKLOG_PATH = ".roll/backlog.md";
+const LEASE_PATH = ".roll/loop/story-leases.json";
 
 function lang(): Lang {
   return resolveLang({
@@ -88,6 +90,49 @@ export function backlogSetStatusCommand(
     // the global dossier/epic pages as a side effect — `roll index` renders them
     // on demand. Delivery truth comes from main + structured truth, not the board.
   }
+  return 0;
+}
+
+export interface ClaimDeps {
+  nowMs: () => number;
+}
+
+function realClaimDeps(): ClaimDeps {
+  return { nowMs: () => Date.now() };
+}
+
+/** `roll backlog claim <card> [--source human|supervisor]` — manual soft lease writer. */
+export function backlogClaimCommand(args: string[], deps: ClaimDeps = realClaimDeps(), store: BacklogStore = new BacklogStore()): number {
+  const pattern = args[0] ?? "";
+  let source: LeaseSource = "human";
+  for (let i = 1; i < args.length; i++) {
+    if (args[i] === "--source") {
+      const raw = args[i + 1] ?? "";
+      if (raw === "human" || raw === "supervisor") source = raw;
+      else {
+        errLine("usage: roll backlog claim <card> [--source human|supervisor]");
+        return 1;
+      }
+      i++;
+    }
+  }
+  if (pattern === "") {
+    errLine("usage: roll backlog claim <card> [--source human|supervisor]");
+    return 1;
+  }
+  if (!existsSync(BACKLOG_PATH)) {
+    errLine(`[roll] ${msg("backlog.roll_backlog_md_not_found_run")}`);
+    return 1;
+  }
+  const snap = store.readBacklog(BACKLOG_PATH);
+  const { count } = store.mark(BACKLOG_PATH, snap.hash, pattern, STATUS_MARKER.in_progress);
+  if (count === 0) {
+    out(msg("backlog.no_items_matched", pattern));
+    return 0;
+  }
+  mkdirSync(dirname(LEASE_PATH), { recursive: true });
+  setLease(LEASE_PATH, pattern, { source, claimedAt: deps.nowMs() });
+  out(`claimed ${pattern} (${source} lease)`);
   return 0;
 }
 

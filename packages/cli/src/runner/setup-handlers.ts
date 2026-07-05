@@ -3,20 +3,25 @@ import {
   buildHasOpenPr,
   decideClaimReconcile,
   hasMergedDelivery,
+  isHumanSoftLeaseActive,
+  isLeaseAlive,
   latestDeliveringCycle,
   openPrBlockReason,
   pickStory,
+  readLeases,
   reconcileBranchName,
   runRowHasPublishedPr,
+  setLease,
   type BacklogItem,
   type CycleCommand,
   type CycleContext,
   type HasOpenPr,
+  type LeaseEntry,
   type OpenPrReferenceInput,
   type PickOptions,
 } from "@roll/core";
 import { classifyStatus, STATUS_MARKER } from "@roll/spec";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { markDoneGuarded } from "./done-guard.js";
 import { eventTs } from "./runner-time.js";
 import { readSkipCards } from "./skip-cards.js";
@@ -36,6 +41,62 @@ type SetupCommand = Extract<CycleCommand, { kind:
   | "resume_worktree"
   | "resolve_route"
 }>;
+
+/** FIX-1211: lease file lives next to the events ledger (a gitignored runtime file). */
+function storyLeasePath(ports: Ports): string {
+  return join(dirname(ports.paths.eventsPath), "story-leases.json");
+}
+
+const LEGACY_SOFT_LEASE_HOURS = 24;
+const HOUR_MS = 3_600_000;
+
+function parseLegacyClaimTimestamp(row: { desc?: string; status?: string }): number | undefined {
+  const text = `${row.status ?? ""} ${row.desc ?? ""}`;
+  const iso = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z\b/.exec(text)?.[0];
+  if (iso !== undefined) {
+    const parsed = Date.parse(iso);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  const loose = /\b(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(?::\d{2})?\b/.exec(text);
+  if (loose !== null) {
+    const parsed = Date.parse(`${loose[1]}T${loose[2]}:00`);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+/** FIX-1211: decide whether a 🔨 In Progress row can be reclaimed to 📋 Todo.
+ *  Returns the action + a human-readable reason for observability. */
+function decideInProgressReclaim(
+  entry: LeaseEntry | undefined,
+  nowMs: number,
+  storyId: string,
+  annotatedClaimedAt?: number,
+): { action: "reclaim" | "keep"; reason: string } {
+  if (entry === undefined) {
+    if (annotatedClaimedAt === undefined) {
+      return { action: "reclaim", reason: `no lease for ${storyId} and no live delivery evidence` };
+    }
+    const ageHours = (nowMs - annotatedClaimedAt) / HOUR_MS;
+    if (ageHours < LEGACY_SOFT_LEASE_HOURS) {
+      return { action: "keep", reason: `annotated soft lease for ${storyId} is within 24h window (${Math.max(0, Math.round(ageHours))}h)` };
+    }
+    return { action: "reclaim", reason: `annotated soft lease expired for ${storyId} (${Math.round(ageHours)}h, no lease file entry)` };
+  }
+  if (entry.source === "cycle") {
+    if (entry.pid !== undefined && isLeaseAlive(entry)) {
+      return { action: "keep", reason: `cycle lease ${entry.pid} is alive for ${storyId}` };
+    }
+    return { action: "reclaim", reason: `cycle lease for ${storyId} is dead (pid ${entry.pid})` };
+  }
+  if (entry.source === "human" || entry.source === "supervisor") {
+    if (isHumanSoftLeaseActive(entry, nowMs)) {
+      return { action: "keep", reason: `${entry.source} lease for ${storyId} is within 24h soft window` };
+    }
+    return { action: "reclaim", reason: `${entry.source} lease for ${storyId} expired (${Math.round((nowMs - entry.claimedAt) / 3_600_000)}h)` };
+  }
+  return { action: "keep", reason: `unknown lease source ${entry.source} for ${storyId} — preserving` };
+}
 
 export async function executeSetupCommand(
   cmd: SetupCommand,
@@ -81,6 +142,8 @@ export async function executeSetupCommand(
         const claims = rows.filter((r) => (r.status ?? "").includes("🔨"));
         if (claims.length > 0) {
           const slug = await ports.github.repoSlug(ports.repoCwd).catch(() => undefined);
+          const leases = readLeases(storyLeasePath(ports));
+          const nowMs = Date.now();
           for (const claim of claims) {
             const cycle = latestDeliveringCycle(runRows, claim.id);
             let prState: string | undefined;
@@ -96,7 +159,18 @@ export async function executeSetupCommand(
                 alert: (m) => ports.events.appendAlert(ports.paths.alertsPath, m),
               });
             }
-            else if (decision === "todo") ports.backlog.markStatus?.(ports.repoCwd, claim.id, STATUS_MARKER.todo);
+            else if (decision === "todo") {
+              // Dead claims stay immediately recoverable. Soft leases only
+              // protect explicit human/supervisor claims: a lease-file entry or
+              // a backlog row carrying a claim timestamp.
+              const { action, reason } = decideInProgressReclaim(leases[claim.id], nowMs, claim.id, parseLegacyClaimTimestamp(claim));
+              if (action === "reclaim") {
+                ports.backlog.markStatus?.(ports.repoCwd, claim.id, STATUS_MARKER.todo);
+                ports.events.appendAlert(ports.paths.alertsPath, `[FIX-1211] reclaim ${claim.id}: ${reason}`);
+              } else {
+                ports.events.appendAlert(ports.paths.alertsPath, `[FIX-1211] preserve ${claim.id}: ${reason}`);
+              }
+            }
             // "keep" → leave 🔨 (delivered, pending merge).
           }
         }
@@ -348,6 +422,18 @@ export async function executeSetupCommand(
       // the moment the story is taken (owner观察: 行一直红着不动 = 此处之前
       // 写在 worktree 的虚空里，且真实 ports 从未绑定 markStatus).
       ports.backlog.markStatus?.(ports.repoCwd, story.id, STATUS_MARKER.in_progress);
+      // FIX-1211: stamp a live cycle lease so another loop instance (or a later
+      // preflight after a crash) can tell this claim is owned by a running cycle
+      // and not reclaim it until the cycle ends or the PID is proven dead.
+      try {
+        setLease(storyLeasePath(ports), story.id, {
+          pid: process.pid,
+          source: "cycle",
+          claimedAt: Date.now(),
+        });
+      } catch {
+        /* lease is observability-only; a write failure must not block the pick */
+      }
       const evidenceRunDir = ports.evidence.openFrame(ports.repoCwd, story.id, ctx.cycleId);
       ports.events.appendEvent(ports.paths.eventsPath, {
         type: "evidence:frame-opened",

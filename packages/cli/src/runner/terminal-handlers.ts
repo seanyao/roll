@@ -5,6 +5,7 @@ import {
   nodeDeliveryStore,
   planPublishDocPr,
   planPublishPr,
+  removeLease,
   type CycleCommand,
   type CycleContext,
   type PublishResult,
@@ -329,6 +330,17 @@ export async function executeTerminalCommand(
       // loop merges. The runs row keeps `done` for v2/dashboard parity — only
       // the backlog flip waits for the merge evidence.
       const terminalStoryId = ctx.storyId ?? "";
+      // FIX-1211: the cycle that owned this claim is ending — drop its lease so
+      // the next preflight can recycle a legitimately dead claim. Best-effort.
+      // Scoped to source="cycle": a human claim that preempted mid-flight must
+      // keep its soft-lease protection past this cycle's terminal (kimi review).
+      if (terminalStoryId !== "") {
+        try {
+          removeLease(join(dirname(ports.paths.eventsPath), "story-leases.json"), terminalStoryId, "cycle");
+        } catch {
+          /* lease cleanup must never block terminal */
+        }
+      }
       let terminalMerged = false;
       if ((cmd.status === "done" || cmd.status === "published") && terminalStoryId !== "") {
         // US-TRUTH-015 AC2: use prMergeInfo for both the state check AND the

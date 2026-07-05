@@ -605,3 +605,47 @@ export function applyStuckReverts(backlogContent: string, reverts: readonly Stuc
   });
   return out.join("\n");
 }
+
+// ─── FIX-1211: human-claim expiry ────────────────────────────────────────────
+
+/** Inputs for {@link reconcileExpiredClaims}. */
+export interface ExpiredClaimInput {
+  /** In-progress backlog rows. */
+  inProgress: readonly { id: string }[];
+  /** Lease map from `.roll/loop/story-leases.json` (empty map when absent). */
+  leases: Record<string, { pid?: number; claimedAt: number; source: string }>;
+  /** Current wall-clock, epoch ms. */
+  now: number;
+}
+
+/** A claim whose 24h soft lease has expired. */
+export interface ExpiredClaim {
+  storyId: string;
+  /** Hours since the claim was made (based on lease entry). */
+  ageHours: number;
+}
+
+/**
+ * Detect human-claimed (leaseless or supervisor/human source) In Progress
+ * stories whose 24h soft lease has expired. These are candidates for auto-
+ * downgrade to Todo.
+ *
+ * Only stories WITH a lease entry (source !== "cycle" or no pid) are checked;
+ * stories without any lease entry are conservatively left alone (we lack the
+ * claim timestamp). The caller resolves missing lease timestamps externally.
+ */
+export function reconcileExpiredClaims(input: ExpiredClaimInput): ExpiredClaim[] {
+  const expired: ExpiredClaim[] = [];
+  for (const { id } of input.inProgress) {
+    const entry = input.leases[id];
+    if (entry === undefined) continue; // no lease data -> conservative skip
+    // Only expire non-cycle claims (human or supervisor preemption).
+    // Cycle claims are handled by detectStuckStories (death recovery).
+    if (entry.source === "cycle" && entry.pid !== undefined) continue;
+    const ageHours = (input.now - entry.claimedAt) / 3_600_000;
+    if (ageHours >= 24) {
+      expired.push({ storyId: id, ageHours });
+    }
+  }
+  return expired;
+}

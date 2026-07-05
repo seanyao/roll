@@ -18,6 +18,7 @@ import {
   reconcileMergeEvidence,
   reconcileStuckBacklog,
   resumeCandidateBranches,
+  reconcileExpiredClaims,
   runRowHasPublishedPr,
   runRowPrNumber,
 } from "../src/index.js";
@@ -491,5 +492,70 @@ describe("resumeCandidateBranches — map a card to its un-merged cycle branches
 
   it("returns [] for a story with no recorded cycles", () => {
     expect(resumeCandidateBranches([], "US-404")).toEqual([]);
+  });
+});
+
+// ─── FIX-1211: reconcileExpiredClaims — 24h soft lease expiry ──────────────
+
+describe("reconcileExpiredClaims (FIX-1211)", () => {
+  const NOW = 1_700_000_000_000;
+
+  it("returns empty when there are no in-progress stories", () => {
+    const result = reconcileExpiredClaims({ inProgress: [], leases: {}, now: NOW });
+    expect(result).toEqual([]);
+  });
+
+  it("skips stories with no lease entry (conservative)", () => {
+    const inProgress = [{ id: "FIX-1" }, { id: "US-1" }];
+    const result = reconcileExpiredClaims({ inProgress, leases: {}, now: NOW });
+    expect(result).toEqual([]);
+  });
+
+  it("skips cycle-claimed stories (handled by detectStuckStories)", () => {
+    const inProgress = [{ id: "FIX-1" }];
+    const leases = { "FIX-1": { pid: 12345, claimedAt: NOW - 48 * 3600_000, source: "cycle" as const } };
+    const result = reconcileExpiredClaims({ inProgress, leases, now: NOW });
+    expect(result).toEqual([]);
+  });
+
+  it("returns expired human-claimed stories older than 24h", () => {
+    const inProgress = [{ id: "FIX-1" }];
+    const leases = { "FIX-1": { claimedAt: NOW - 25 * 3600_000, source: "human" as const } };
+    const result = reconcileExpiredClaims({ inProgress, leases, now: NOW });
+    expect(result).toHaveLength(1);
+    expect(result[0].storyId).toBe("FIX-1");
+    expect(result[0].ageHours).toBeGreaterThan(24);
+  });
+
+  it("does NOT return human-claimed stories under 24h", () => {
+    const inProgress = [{ id: "FIX-1" }];
+    const leases = { "FIX-1": { claimedAt: NOW - 12 * 3600_000, source: "human" as const } };
+    const result = reconcileExpiredClaims({ inProgress, leases, now: NOW });
+    expect(result).toEqual([]);
+  });
+
+  it("handles supervisor-claimed stories (treated as non-cycle)", () => {
+    const inProgress = [{ id: "FIX-1" }];
+    const leases = { "FIX-1": { claimedAt: NOW - 48 * 3600_000, source: "supervisor" as const } };
+    const result = reconcileExpiredClaims({ inProgress, leases, now: NOW });
+    expect(result).toHaveLength(1);
+    expect(result[0].storyId).toBe("FIX-1");
+  });
+
+  it("mixed: only returns expired non-cycle claims", () => {
+    const inProgress = [
+      { id: "FIX-1" }, // cycle claim, 48h old -> skip
+      { id: "FIX-2" }, // human claim, 12h old -> skip
+      { id: "FIX-3" }, // human claim, 48h old -> expired
+      { id: "FIX-4" }, // no lease -> skip
+    ];
+    const leases = {
+      "FIX-1": { pid: 12345, claimedAt: NOW - 48 * 3600_000, source: "cycle" as const },
+      "FIX-2": { claimedAt: NOW - 12 * 3600_000, source: "human" as const },
+      "FIX-3": { claimedAt: NOW - 48 * 3600_000, source: "human" as const },
+    };
+    const result = reconcileExpiredClaims({ inProgress, leases, now: NOW });
+    expect(result).toHaveLength(1);
+    expect(result[0].storyId).toBe("FIX-3");
   });
 });

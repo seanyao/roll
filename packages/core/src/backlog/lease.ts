@@ -64,10 +64,17 @@ export function setLease(path: string, storyId: string, entry: LeaseEntry): void
   writeLeases(path, leases);
 }
 
-/** Remove a single lease. Returns true when the key existed. */
-export function removeLease(path: string, storyId: string): boolean {
+/**
+ * Remove a single lease. Returns true when the key existed (and matched).
+ *
+ * `onlySource` scopes the removal: a terminating cycle passes "cycle" so it
+ * can never wipe a HUMAN/supervisor claim that preempted the story mid-flight
+ * — the soft-lease protection must survive the original cycle's terminal.
+ */
+export function removeLease(path: string, storyId: string, onlySource?: LeaseSource): boolean {
   const leases = readLeases(path);
   if (!(storyId in leases)) return false;
+  if (onlySource !== undefined && leases[storyId]?.source !== onlySource) return false;
   delete leases[storyId];
   if (Object.keys(leases).length === 0) {
     try {

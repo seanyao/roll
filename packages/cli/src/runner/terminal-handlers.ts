@@ -259,9 +259,11 @@ export async function executeTerminalCommand(
       const terminalStoryId = ctx.storyId ?? "";
       // FIX-1211: the cycle that owned this claim is ending — drop its lease so
       // the next preflight can recycle a legitimately dead claim. Best-effort.
+      // Scoped to source="cycle": a human claim that preempted mid-flight must
+      // keep its soft-lease protection past this cycle's terminal (kimi review).
       if (terminalStoryId !== "") {
         try {
-          removeLease(join(dirname(ports.paths.eventsPath), "story-leases.json"), terminalStoryId);
+          removeLease(join(dirname(ports.paths.eventsPath), "story-leases.json"), terminalStoryId, "cycle");
         } catch {
           /* lease cleanup must never block terminal */
         }

@@ -247,3 +247,23 @@ describe("reconcileExpiredClaims (FIX-1211 AC1)", () => {
     expect(r[0].storyId).toBe("FIX-3");
   });
 });
+
+describe("removeLease onlySource scoping (kimi review: cycle terminal must not wipe human claims)", () => {
+  it("cycle-scoped removal skips a human lease and removes a cycle lease", () => {
+    const path = join(mkdtempSync(join(tmpdir(), "lease-scope-")), "leases.json");
+    setLease(path, "US-X-1", { claimedAt: 1000, source: "human" });
+    setLease(path, "US-X-2", { pid: 4242, claimedAt: 1000, source: "cycle" });
+
+    expect(removeLease(path, "US-X-1", "cycle")).toBe(false);
+    expect(readLeases(path)["US-X-1"]?.source).toBe("human");
+
+    expect(removeLease(path, "US-X-2", "cycle")).toBe(true);
+    expect(readLeases(path)["US-X-2"]).toBeUndefined();
+  });
+
+  it("unscoped removal still removes any source (explicit pardon path)", () => {
+    const path = join(mkdtempSync(join(tmpdir(), "lease-scope2-")), "leases.json");
+    setLease(path, "US-X-3", { claimedAt: 1000, source: "human" });
+    expect(removeLease(path, "US-X-3")).toBe(true);
+  });
+});

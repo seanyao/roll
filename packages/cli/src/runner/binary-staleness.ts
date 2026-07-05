@@ -142,3 +142,24 @@ export async function warnIfBinaryStale(
     alert: appendAlert,
   });
 }
+
+/** Pure read-out of the cached staleness state, suitable for observation surfaces
+ *  like `roll doctor`. NEVER fetches the network and NEVER writes the cache — it
+ *  only reflects whatever the loop run-once pre-check (or a prior run) already
+ *  deposited. Returns `latest: ""` when no fresh cache exists. */
+export function resolveBinaryStalenessReadout(
+  rollHomeDir: string,
+  runningVersion: string,
+): { stale: boolean; latest: string; current: string; checkedAtMs: number | null } {
+  const cachePath = join(rollHomeDir, ".loop-version-check");
+  const cache = readCache(cachePath, Date.now());
+  if (cache === null) {
+    return { stale: false, latest: "", current: runningVersion, checkedAtMs: null };
+  }
+  return {
+    stale: isOlderThan(runningVersion, cache.latest),
+    latest: cache.latest,
+    current: runningVersion,
+    checkedAtMs: cache.fetchedAtMs,
+  };
+}

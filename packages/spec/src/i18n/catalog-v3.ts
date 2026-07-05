@@ -710,4 +710,22 @@ export const v3Catalog: Catalog = {
     en: "policy finding(s)",
     zh: "条政策发现",
   },
+
+  // REFACTOR-072: binary staleness surfaced in doctor (loop run-once side effect preserved)
+  "doctor.binary_staleness_title": {
+    en: "Loop binary version",
+    zh: "Loop 程序版本",
+  },
+  "doctor.binary_staleness_unknown": {
+    en: "No recent version check — run `roll loop run-once` to populate.",
+    zh: "暂无近期版本检查记录 — 运行一次 `roll loop run-once` 后将显示。",
+  },
+  "doctor.binary_staleness_ok": {
+    en: "running v%s, up to date (latest %s)",
+    zh: "当前 v%s，已是最新 %s",
+  },
+  "doctor.binary_staleness_stale": {
+    en: "running v%s, latest %s — run `roll update`",
+    zh: "当前 v%s，最新 %s — 建议运行 `roll update`",
+  },
 };

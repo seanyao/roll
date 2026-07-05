@@ -27,7 +27,7 @@ import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { doctorCommand } from "../src/commands/doctor.js";
 import { generateCatalog } from "../src/commands/skills.js";
-import { seedUpdateCheckCache, pathWithout } from "./helpers.js";
+import { seedUpdateCheckCache, seedBinaryStalenessCache, pathWithout } from "./helpers.js";
 
 const REPO = resolve(__dirname, "../../..");
 const dirs: string[] = [];
@@ -40,6 +40,7 @@ function freshHome(config?: string): string {
   dirs.push(home);
   mkdirSync(join(home, ".roll"), { recursive: true });
   seedUpdateCheckCache(join(home, ".roll"));
+  seedBinaryStalenessCache(join(home, ".roll"));
   if (config !== undefined) writeFileSync(join(home, ".roll", "config.yaml"), config);
   return home;
 }
@@ -249,6 +250,11 @@ describe("frozen: roll doctor", () => {
       技能清单
         ✅ guide/skills.md matches skills/*/SKILL.md
 
+      Loop binary version
+      Loop 程序版本
+
+        ✓ running v4.704.2, up to date (latest v4.704.2)
+
       Tool readiness
       工具就绪度
 
@@ -350,6 +356,11 @@ describe("frozen: roll doctor", () => {
       技能清单
         ✅ guide/skills.md 与 skills/*/SKILL.md 一致
 
+      Loop binary version
+      Loop 程序版本
+
+        ✓ 当前 v4.704.2，已是最新 v4.704.2
+
       Tool readiness
       工具就绪度
 
@@ -414,6 +425,11 @@ describe("frozen: roll doctor", () => {
       技能清单
         ⚠️  guide/skills.md is stale — run 'roll setup skills'
 
+      Loop binary version
+      Loop 程序版本
+
+        ✓ running v4.704.2, up to date (latest v4.704.2)
+
       Tool readiness
       工具就绪度
 
@@ -477,6 +493,11 @@ describe("frozen: roll doctor", () => {
       技能清单
         ⚠️  guide/skills.md 已过期 — 请运行 'roll setup skills'
 
+      Loop binary version
+      Loop 程序版本
+
+        ✓ 当前 v4.704.2，已是最新 v4.704.2
+
       Tool readiness
       工具就绪度
 
@@ -539,6 +560,11 @@ describe("frozen: roll doctor", () => {
       技能清单
         ⚠️  guide/skills.md is stale — run 'roll setup skills'
 
+      Loop binary version
+      Loop 程序版本
+
+        ✓ running v4.704.2, up to date (latest v4.704.2)
+
       Tool readiness
       工具就绪度
 
@@ -599,6 +625,11 @@ describe("frozen: roll doctor", () => {
       Skill catalog
       技能清单
         ⚠️  guide/skills.md 已过期 — 请运行 'roll setup skills'
+
+      Loop binary version
+      Loop 程序版本
+
+        ✓ 当前 v4.704.2，已是最新 v4.704.2
 
       Tool readiness
       工具就绪度
@@ -681,6 +712,11 @@ describe("frozen: roll doctor", () => {
         ⚠ com.roll.loop.demo
           WorkingDirectory missing: /tmp/roll-doctor-this-dir-does-not-exist-xyz
           Path is stale, clean up with: launchctl bootout gui/<UID>/com.roll.loop.demo; rm '<LAUNCHD>/com.roll.loop.demo.plist'
+
+      Loop binary version
+      Loop 程序版本
+
+        ✓ running v4.704.2, up to date (latest v4.704.2)
 
       Tool readiness
       工具就绪度
@@ -793,5 +829,48 @@ describe("frozen: roll doctor", () => {
     const run = tsDoctor(e);
     expect(run.status).toBe(0); // exit code unchanged
     expect(run.stdout).toContain("$roll-design"); // nudge present
+  });
+
+  // ── REFACTOR-072: binary staleness surfaced in doctor ─────────────────────────
+
+  it("REFACTOR-072 AC1: doctor shows an up-to-date binary readout", () => {
+    const pkg = freshPkg();
+    seedCatalog(pkg);
+    const e: Env = { home: freshHome(CONFIG), cwd: makeGitRepo(), pkg, launchd: emptyLaunchd(), lang: "en" };
+    const rendered = scrub(tsDoctor(e), e).stdout;
+    expect(rendered).toContain("Loop binary version");
+    expect(rendered).toContain("Loop 程序版本");
+    expect(rendered).toMatch(/running v[\d.]+, up to date \(latest v[\d.]+\)/);
+  });
+
+  it("REFACTOR-072 AC1: doctor shows a stale binary readout", () => {
+    const home = freshHome(CONFIG);
+    // Override the freshly-seeded cache with a far-future release.
+    writeFileSync(
+      join(home, ".roll", ".loop-version-check"),
+      JSON.stringify({ latest: "v999.999.999", fetchedAtMs: Date.now() }),
+      "utf8",
+    );
+    const pkg = freshPkg();
+    seedCatalog(pkg);
+    const e: Env = { home, cwd: makeGitRepo(), pkg, launchd: emptyLaunchd(), lang: "en" };
+    const rendered = scrub(tsDoctor(e), e).stdout;
+    expect(rendered).toContain("Loop binary version");
+    expect(rendered).toContain("roll update");
+    expect(rendered).toMatch(/running v[\d.]+, latest v999\.999\.999/);
+  });
+
+  it("REFACTOR-072 AC1: doctor shows unknown when no staleness cache exists", () => {
+    const home = mkdtempSync(join(tmpdir(), "roll-doctor-staleness-unknown-"));
+    dirs.push(home);
+    mkdirSync(join(home, ".roll"), { recursive: true });
+    seedUpdateCheckCache(join(home, ".roll"));
+    // Intentionally NOT seeding .loop-version-check.
+    const pkg = freshPkg();
+    seedCatalog(pkg);
+    const e: Env = { home, cwd: makeGitRepo(), pkg, launchd: emptyLaunchd(), lang: "en" };
+    const rendered = scrub(tsDoctor(e), e).stdout;
+    expect(rendered).toContain("Loop binary version");
+    expect(rendered).toContain("No recent version check");
   });
 });

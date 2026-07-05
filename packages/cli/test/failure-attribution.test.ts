@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { classifyCycleFailure, classifyFailure, recordRootCauseFailure } from "../src/runner/failure-attribution.js";
+import { classifyCorrectionFailure, classifyCycleFailure, classifyFailure, recordRootCauseFailure } from "../src/runner/failure-attribution.js";
 import { readSkipCards, recordCardFailure } from "../src/runner/skip-cards.js";
 
 describe("failure attribution envelopes", () => {
@@ -228,5 +228,49 @@ describe("failure attribution envelopes", () => {
       recordCardFailure(dir, storyId, 3, attribution.failureClass);
     }
     expect(readSkipCards(dir).size).toBe(0);
+  });
+});
+
+describe("REFACTOR-068 classifyCorrectionFailure — unified correction → failure attribution", () => {
+  it("maps review_score_regression to card:review_score_regression", () => {
+    expect(classifyCorrectionFailure("review_score_regression")).toEqual({
+      failureClass: "card",
+      rootCauseKey: "card:review_score_regression",
+    });
+  });
+
+  it("maps empty_acceptance_report to card:empty_acceptance", () => {
+    expect(classifyCorrectionFailure("empty_acceptance_report")).toEqual({
+      failureClass: "card",
+      rootCauseKey: "card:empty_acceptance",
+    });
+  });
+
+  it("maps missing_acceptance_report to card:missing_acceptance", () => {
+    expect(classifyCorrectionFailure("missing_acceptance_report")).toEqual({
+      failureClass: "card",
+      rootCauseKey: "card:missing_acceptance",
+    });
+  });
+
+  it("maps ci_failed to harness:ci_red", () => {
+    expect(classifyCorrectionFailure("ci_failed")).toEqual({
+      failureClass: "harness",
+      rootCauseKey: "harness:ci_red",
+    });
+  });
+
+  it("maps unknown signals to unknown:unclassified", () => {
+    expect(classifyCorrectionFailure("some_new_signal")).toEqual({
+      failureClass: "unknown",
+      rootCauseKey: "unknown:unclassified",
+    });
+  });
+
+  it("maps empty string to unknown:unclassified", () => {
+    expect(classifyCorrectionFailure("")).toEqual({
+      failureClass: "unknown",
+      rootCauseKey: "unknown:unclassified",
+    });
   });
 });

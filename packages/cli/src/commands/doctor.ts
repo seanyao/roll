@@ -25,6 +25,8 @@ import { collectExternalTools, renderExternalToolDoctorSection, type ExternalToo
 import { collectToolReadinessDoctorRows, renderToolReadinessDoctorSection } from "../lib/tool-readiness-doctor.js";
 import { detectDesignHandoff, renderDesignNudge } from "../lib/onboard-nudge.js";
 import { collectLanguageDoctorFindings, renderLanguageDoctorSection } from "../lib/language-doctor.js";
+import { rebuildSkipStateFromEvidence, readRows, readEvents, runtimeDir as pardonRuntimeDir } from "../lib/pardon-skip-list.js";
+import { readSkipState, writeSkipState } from "../runner/skip-cards.js";
 import { resolveBinaryStalenessReadout } from "../runner/binary-staleness.js";
 import { rollVersion } from "./version.js";
 
@@ -624,6 +626,35 @@ export function languageAuditCommand(args: string[], deps: LanguageAuditDeps = {
   const findings = collectLanguageDoctorFindings({ root: deps.root ?? process.cwd(), includeGenerated });
   const lines = renderLanguageDoctorSection(findings, msgLang());
   process.stdout.write(lines.join("\n") + "\n");
+  return 0;
+}
+
+/** REFACTOR-073 — `roll doctor pardon` — diagnostic pardon-skip-list surface. */
+export function doctorPardonCommand(args: string[]): number {
+  if (args[0] === "--help" || args[0] === "-h") {
+    process.stdout.write(
+      "Usage: roll doctor pardon [--dry-run] [--include-unknown]\n" +
+      "  Rebuild skip-cards from runs/events, removing env/harness pollution while keeping real card failures.\n" +
+      "  --include-unknown also pardons unknown/no-evidence failures; risky because old zero-usage gave_up rows may be real card failures.\n",
+    );
+    return 0;
+  }
+  const dryRun = args.includes("--dry-run");
+  const includeUnknown = args.includes("--include-unknown");
+  const rt = pardonRuntimeDir(process.cwd());
+  const current = readSkipState(rt);
+  const rebuilt = rebuildSkipStateFromEvidence({
+    currentFails: current.fails,
+    currentSkip: current.skip,
+    rows: readRows(join(rt, "runs.jsonl")),
+    events: readEvents(join(rt, "events.ndjson")),
+    threshold: 3,
+    includeUnknown,
+  });
+  if (!dryRun) writeSkipState(rt, { fails: rebuilt.fails, skip: rebuilt.skip });
+  process.stdout.write(
+    `${dryRun ? "dry-run: " : ""}pardon skip-list: pardoned=${rebuilt.pardoned.join(",") || "-"} kept=${rebuilt.kept.join(",") || "-"}\n`,
+  );
   return 0;
 }
 

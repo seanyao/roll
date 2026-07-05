@@ -39,7 +39,7 @@ import { loopGoCommand } from "./loop-go.js";
 import { loopRecoverCommand } from "./loop-recover.js";
 import { loopPardonSkipListCommand } from "./loop-pardon-skip-list.js";
 import { loopEventsCommand } from "./loop-events.js";
-import { doctorCommand, languageAuditCommand } from "./doctor.js";
+import { doctorCommand, languageAuditCommand, doctorPardonCommand } from "./doctor.js";
 import { dreamCommand } from "./dream.js";
 import { ideaCommand } from "./idea.js";
 import { indexCommand } from "./index-gen.js";
@@ -111,8 +111,8 @@ const DOCTOR_TOOLS_USAGE =
 
 function doctorUsage(): string {
   return currentHelpLang() === "zh"
-    ? "用法：roll doctor [skills|language|--tools]\n  环境与安装体检；--tools 只看工具、真实截图与权限预检就绪度。\n"
-    : "Usage: roll doctor [skills|language|--tools]\n  Environment + install diagnosis; --tools shows focused tool, physical screenshot, and permission preflight readiness.\n";
+    ? "用法：roll doctor [skills|language|pardon|--tools]\n  环境与安装体检；--tools 只看工具、真实截图与权限预检就绪度；pardon 诊断/重置跳过名单。\n"
+    : "Usage: roll doctor [skills|language|pardon|--tools]\n  Environment + install diagnosis; --tools shows focused tool, physical screenshot, and permission preflight readiness; pardon diagnoses/resets the skip-list.\n";
 }
 
 function unknownTopLevel(command: string): number {
@@ -181,6 +181,9 @@ export function registerAll(): void {
     }
     if (args[0] === "language") {
       return languageAuditCommand(args.slice(1));
+    }
+    if (args[0] === "pardon") {
+      return doctorPardonCommand(args.slice(1));
     }
     return doctorCommand(args);
   }, { help: doctorUsage });

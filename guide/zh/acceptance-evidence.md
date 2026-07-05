@@ -156,6 +156,12 @@ evidence、已有证据暴露 rendering/layout 风险；升级原因必须记录
   macOS npm 安装会尝试从 `seanyao/roll-capture` 最新 Release 安装 app 到
   `~/Applications`；`roll setup` 可重试这条修复路径，除非传入
   `--no-capture-install`。
+
+  **截图默认策略 (US-PHYSICAL-006)：** 物理截图请求默认使用**窗口级**截取——
+  只截被测应用的窗口（终端/CLI 证据截 Terminal.app，网页证据截 Google Chrome），
+  不再默认全屏。全屏截图必须在卡片 spec 中显式声明 `capture_fullscreen: true`。
+  这个隐私优先的设计防止证据链夹带屏幕上无关的隐私内容（聊天记录、邮件、其他项目）。
+  如果目标窗口找不到，Roll Capture.app 会返回带有原因的降级记录——不允许静默扩大截取范围。
 - `Playwright Chromium` —— 可选的 headless web 截图工具，用于 `roll attest`
   和归档截图。安装命令是 `npx playwright install chromium`。
 

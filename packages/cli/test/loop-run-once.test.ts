@@ -508,6 +508,45 @@ describe("FIX-204D — signal teardown keeps I8 on the kill paths", () => {
     expect(ex(p.lockPath)).toBe(false);
   });
 
+  it("FIX-1210: owned signal teardown releases config.lock sentinel", async () => {
+    const { cycleSignalTeardown } = await import("../src/commands/loop-run-once.js");
+    const { applyMainCheckoutWriteProtection } = await import("../src/runner/main-checkout-guard.js");
+    const repo = tmp("sig-config-lock-repo");
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "test@roll.local"], { cwd: repo });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: repo });
+    writeFileSync(join(repo, "README.md"), "base\n", "utf8");
+    execFileSync("git", ["add", "README.md"], { cwd: repo });
+    execFileSync("git", ["commit", "-q", "-m", "base"], { cwd: repo });
+
+    const rt = join(repo, ".roll", "loop");
+    mkdirSync(rt, { recursive: true });
+    const paths = {
+      eventsPath: join(rt, "events.ndjson"),
+      runsPath: join(rt, "runs.jsonl"),
+      lockPath: join(rt, "inner.lock"),
+    };
+    applyMainCheckoutWriteProtection({ repoCwd: repo, runtimeDir: rt, cycleId: "C-sig-lock", nowMs: () => 1000 });
+    const lockPath = join(repo, ".git", "config.lock");
+    expect(existsSync(lockPath)).toBe(true);
+    writeFileSync(paths.lockPath, `${process.pid}:1780680000\n`, "utf8");
+
+    let exitCode = -1;
+    cycleSignalTeardown(paths, "C-sig-lock", "loop/cycle-C-sig-lock", "SIGTERM", {
+      killAgents: () => 0,
+      exit: (c) => {
+        exitCode = c;
+      },
+      now: () => 1780680123,
+      repoCwd: repo,
+      runtimeDir: rt,
+    });
+
+    expect(exitCode).toBe(143);
+    expect(existsSync(paths.lockPath)).toBe(false);
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
   it("FIX-1060: owned lock + pick-only events backfills story_id and marks agent unknown reason", async () => {
     const { cycleSignalTeardown } = await import("../src/commands/loop-run-once.js");
     const { paths: p } = teardownFixture("owned-pick-only");

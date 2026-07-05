@@ -17,6 +17,7 @@ import { markDoneGuarded } from "./done-guard.js";
 import { addPendingPrCreate } from "./pending-pr-create.js";
 import { applyCleanupManifest, CLEANUP_TIMEOUT_MS, resolveCleanupManifest } from "./environment-cleanup.js";
 import type { ExecuteResult, Ports } from "./ports.js";
+import { repairCoreWorktreeContamination } from "./main-checkout-guard.js";
 import { publishBodyWithEvidenceTrailer, storyRequiresManualMerge } from "./publish-lifecycle.js";
 import { buildRunRow, buildTerminalRecord, commitRollMetadata, stampTs, withRealCost } from "./run-records.js";
 import { eventTs } from "./runner-time.js";
@@ -280,6 +281,25 @@ export async function executeTerminalCommand(
 
     // events/bus upsertRun — the dashboard terminal record (v2 runs.jsonl shape).
     case "append_run": {
+      // FIX-1210: repair core.worktree contamination at cycle end BEFORE writing
+      // terminal records, so sibling worktrees never see a poisoned config.
+      // Covers ALL terminal outcomes (done/published/failed/idle/gave_up/blocked).
+      const repair = repairCoreWorktreeContamination(ports.repoCwd);
+      if (repair.healed) {
+        ports.events.appendEvent(ports.paths.eventsPath, {
+          type: "cycle:cleanup",
+          cycleId: cmd.cycleId,
+          rule: "core.worktree",
+          path: repair.detail,
+          ok: true,
+          ts: eventTs(ports),
+        });
+        ports.events.appendAlert(
+          ports.paths.alertsPath,
+          `FIX-1210: cycle ${cmd.cycleId} — core.worktree was pointing to "${repair.detail}" — auto-unset at terminal`,
+        );
+      }
+
       const key: RunKey = { storyId: ctx.storyId ?? "", cycleId: cmd.cycleId };
       ports.events.upsertRun(ports.paths.runsPath, key, buildRunRow(cmd, ctx, ports.clock()));
       // US-TRUTH-001: the versioned complete-or-reasoned terminal record —

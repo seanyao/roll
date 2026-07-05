@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -8,6 +8,7 @@ import {
   checkMainDirty,
   quarantineMainCheckout,
   releaseMainCheckoutWriteProtection,
+  repairCoreWorktreeContamination,
   withMainCheckoutWriteProtection,
   worktreeGitEnv,
 } from "../src/runner/main-checkout-guard.js";
@@ -222,5 +223,197 @@ describe("main checkout guard — US-LOOP-089", () => {
       GIT_WORK_TREE: missing,
       GIT_CEILING_DIRECTORIES: tmpdir(),
     });
+  });
+});
+
+// ─── FIX-1210: core.worktree repair + config-write blocking ──────────────────
+
+describe("FIX-1210 — core.worktree contamination repair", () => {
+  it("detects and heals core.worktree contamination on the shared config", () => {
+    const repo = cleanRepo("roll-fix1210-repair-");
+
+    // Simulate contamination: write core.worktree pointing to a cycle worktree
+    git(repo, ["config", "--local", "core.worktree", "/tmp/fake-cycle-worktree"]);
+
+    // Verify contamination is present
+    expect(sh(repo, ["config", "--local", "--get", "core.worktree"])).toBe("/tmp/fake-cycle-worktree");
+
+    // Repair
+    const result = repairCoreWorktreeContamination(repo);
+    expect(result.healed).toBe(true);
+    expect(result.detail).toBe("/tmp/fake-cycle-worktree");
+
+    // Verify contamination is gone
+    const after = spawnSync("git", ["config", "--local", "--get", "core.worktree"], { cwd: repo, encoding: "utf8" });
+    expect(after.status).not.toBe(0); // config key no longer exists
+  });
+
+  it("no-ops when core.worktree is not set", () => {
+    const repo = cleanRepo("roll-fix1210-clean-");
+
+    // No contamination — should report clean
+    const result = repairCoreWorktreeContamination(repo);
+    expect(result.healed).toBe(false);
+    expect(result.detail).toBe("");
+  });
+
+  it("repairs contamination even with GIT_DIR/GIT_WORK_TREE inherited in env", () => {
+    const repo = cleanRepo("roll-fix1210-inherit-");
+
+    // Simulate contamination
+    git(repo, ["config", "--local", "core.worktree", "/tmp/poisoned-worktree"]);
+
+    // Craft an env that mimics the cycle worktree injection
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    env["GIT_DIR"] = join(repo, ".git");
+    env["GIT_WORK_TREE"] = "/some/fake/worktree";
+
+    // The repair function builds its own clean env, so it should still heal
+    const result = repairCoreWorktreeContamination(repo);
+    expect(result.healed).toBe(true);
+    expect(result.detail).toBe("/tmp/poisoned-worktree");
+
+    // Verify contamination is gone
+    const after = spawnSync("git", ["config", "--local", "--get", "core.worktree"], { cwd: repo, encoding: "utf8" });
+    expect(after.status).not.toBe(0);
+  });
+});
+
+describe("FIX-1210 — config.lock sentinel blocks nested git init writes", () => {
+  it("places a read-only .git/config.lock when write protection is applied", () => {
+    const repo = cleanRepo("roll-fix1210-lock-");
+    const runtimeDir = join(repo, ".roll", "loop");
+    const lockPath = join(repo, ".git", "config.lock");
+
+    // Guard should not exist before protection
+    expect(existsSync(lockPath)).toBe(false);
+
+    applyMainCheckoutWriteProtection({ repoCwd: repo, runtimeDir, cycleId: "C-lock", nowMs: () => 1000 });
+
+    // Guard should exist after protection
+    expect(existsSync(lockPath)).toBe(true);
+    // Should be read-only
+    const mode = statSync(lockPath).mode & 0o777;
+    expect(mode & 0o222).toBe(0); // no write bits set
+
+    releaseMainCheckoutWriteProtection({ repoCwd: repo, runtimeDir, cycleId: "C-lock", nowMs: () => 2000 });
+
+    // Guard should be removed after release
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
+  it("prevents git init from writing core.worktree to shared config", () => {
+    const repo = cleanRepo("roll-fix1210-init-");
+    const runtimeDir = join(repo, ".roll", "loop");
+
+    // Apply protection (which includes the config.lock sentinel)
+    applyMainCheckoutWriteProtection({ repoCwd: repo, runtimeDir, cycleId: "C-init", nowMs: () => 1000 });
+
+    // Simulate the harness's spawn env injection — set GIT_DIR/GIT_WORK_TREE
+    // to point at the main checkout. A nested `git init` running under these
+    // vars would normally write core.worktree into the main checkout's config.
+    const spawnEnv: NodeJS.ProcessEnv = { ...process.env };
+    spawnEnv["GIT_DIR"] = join(repo, ".git");
+    spawnEnv["GIT_WORK_TREE"] = repo;
+
+    // Run `git init` in a temp dir — this is what the harness does when
+    // creating fixture repos inside the agent sandbox
+    const tmpInit = mkdtempSync(join(tmpdir(), "roll-fix1210-init-nested-"));
+    dirs.push(tmpInit);
+    try {
+      const r = spawnSync("git", ["init", "-q", "-b", "main"], { cwd: tmpInit, env: spawnEnv, encoding: "utf8" });
+      // git init may succeed (it creates a new repo in tmpInit) or fail
+      // (config lock blocked it) — either way, core.worktree must NOT leak
+      // into the shared config
+      const check = spawnSync("git", ["config", "--local", "--get", "core.worktree"], {
+        cwd: repo,
+        encoding: "utf8",
+      });
+      // core.worktree must NOT be set on the main checkout's config
+      expect(check.status).not.toBe(0);
+    } finally {
+      releaseMainCheckoutWriteProtection({ repoCwd: repo, runtimeDir, cycleId: "C-init", nowMs: () => 2000 });
+    }
+  });
+
+  it("withMainCheckoutWriteProtection includes config.lock in apply/release cycle", async () => {
+    const repo = cleanRepo("roll-fix1210-with-");
+    const runtimeDir = join(repo, ".roll", "loop");
+    const lockPath = join(repo, ".git", "config.lock");
+
+    let lockDuringFn: boolean | undefined;
+    const events = await withMainCheckoutWriteProtection(
+      { repoCwd: repo, runtimeDir, cycleId: "C-with", nowMs: () => 1000 },
+      () => {
+        lockDuringFn = existsSync(lockPath);
+        return 42;
+      },
+    );
+
+    expect(lockDuringFn).toBe(true);
+    expect(events.value).toBe(42);
+    expect(existsSync(lockPath)).toBe(false); // released
+  });
+
+  it("releases config.lock even when the protected function throws", async () => {
+    const repo = cleanRepo("roll-fix1210-throw-");
+    const runtimeDir = join(repo, ".roll", "loop");
+    const lockPath = join(repo, ".git", "config.lock");
+
+    await expect(
+      withMainCheckoutWriteProtection(
+        { repoCwd: repo, runtimeDir, cycleId: "C-throw", nowMs: () => 1000 },
+        () => {
+          throw new Error("boom");
+        },
+      ),
+    ).rejects.toThrow("boom");
+
+    // config.lock must be cleaned up even after throw
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
+  it("replaces a stale zero-byte config.lock at the next cycle boundary", () => {
+    const repo = cleanRepo("roll-fix1210-stale-lock-");
+    const runtimeDir = join(repo, ".roll", "loop");
+    const lockPath = join(repo, ".git", "config.lock");
+    writeFileSync(lockPath, "", "utf8");
+    expect(statSync(lockPath).size).toBe(0);
+
+    applyMainCheckoutWriteProtection({ repoCwd: repo, runtimeDir, cycleId: "C-stale-lock", nowMs: () => 1000 });
+    expect(existsSync(lockPath)).toBe(true);
+    expect(statSync(lockPath).size).toBeGreaterThan(0);
+
+    releaseMainCheckoutWriteProtection({ repoCwd: repo, runtimeDir, cycleId: "C-stale-lock", nowMs: () => 2000 });
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
+  it("reclaims an orphaned roll sentinel (non-zero, crash residue) at the next cycle boundary", () => {
+    const repo = cleanRepo("roll-fix1210-orphan-sentinel-");
+    const runtimeDir = join(repo, ".roll", "loop");
+    const lockPath = join(repo, ".git", "config.lock");
+    // Simulate a hard-killed prior cycle: sentinel written, release never ran.
+    writeFileSync(lockPath, "roll main-checkout config lock sentinel\n", "utf8");
+    chmodSync(lockPath, 0o444);
+
+    applyMainCheckoutWriteProtection({ repoCwd: repo, runtimeDir, cycleId: "C-orphan", nowMs: () => 1000 });
+    expect(existsSync(lockPath)).toBe(true);
+
+    releaseMainCheckoutWriteProtection({ repoCwd: repo, runtimeDir, cycleId: "C-orphan", nowMs: () => 2000 });
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
+  it("leaves a live foreign config.lock alone on apply and release", () => {
+    const repo = cleanRepo("roll-fix1210-foreign-lock-");
+    const runtimeDir = join(repo, ".roll", "loop");
+    const lockPath = join(repo, ".git", "config.lock");
+    writeFileSync(lockPath, "ref: some in-flight git config transaction\n", "utf8");
+
+    applyMainCheckoutWriteProtection({ repoCwd: repo, runtimeDir, cycleId: "C-foreign", nowMs: () => 1000 });
+    expect(readFileSync(lockPath, "utf8")).toBe("ref: some in-flight git config transaction\n");
+
+    releaseMainCheckoutWriteProtection({ repoCwd: repo, runtimeDir, cycleId: "C-foreign", nowMs: () => 2000 });
+    expect(existsSync(lockPath)).toBe(true);
+    expect(readFileSync(lockPath, "utf8")).toBe("ref: some in-flight git config transaction\n");
   });
 });

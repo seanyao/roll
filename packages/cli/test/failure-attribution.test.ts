@@ -95,6 +95,62 @@ describe("failure attribution envelopes", () => {
     ).toMatchObject({ failureClass: "unknown", rootCauseKey: "unknown:unclassified" });
   });
 
+  it("classifies zero-output timed-out build as env:agent_stall instead of card (FIX-1213)", () => {
+    // Agent consumed prompt tokens but produced ZERO output — vendor stall, not card fault.
+    expect(
+      classifyCycleFailure({
+        cycleId: "cycle-stall",
+        terminal: "blocked",
+        tokensIn: 4500,
+        tokensOut: 0,
+        tcrCount: 0,
+        agentExecuted: true,
+        agentTimedOut: true,
+      }),
+    ).toMatchObject({ failureClass: "env", rootCauseKey: "env:agent_stall" });
+  });
+
+  it("classifies timed-out build WITH output as card (agent genuinely struggled)", () => {
+    expect(
+      classifyCycleFailure({
+        cycleId: "cycle-real-work",
+        terminal: "blocked",
+        tokensIn: 4500,
+        tokensOut: 120,
+        tcrCount: 0,
+        agentExecuted: true,
+        agentTimedOut: true,
+      }),
+    ).toMatchObject({ failureClass: "card", rootCauseKey: "card:agent_after_build" });
+  });
+
+  it("classifies build failure with no output but NOT timed-out as card", () => {
+    expect(
+      classifyCycleFailure({
+        cycleId: "cycle-no-output-no-timeout",
+        terminal: "failed",
+        tokensIn: 4500,
+        tokensOut: 0,
+        tcrCount: 0,
+        agentExecuted: true,
+        agentTimedOut: false,
+      }),
+    ).toMatchObject({ failureClass: "card", rootCauseKey: "card:agent_after_build" });
+  });
+
+  it("classifies zero-output timed-out via classifyFailure directly", () => {
+    expect(
+      classifyFailure({
+        stage: "build",
+        source: "agent",
+        tokensIn: 100,
+        tokensOut: 0,
+        tcrCount: 0,
+        agentTimedOut: true,
+      }),
+    ).toMatchObject({ failureClass: "env", rootCauseKey: "env:agent_stall" });
+  });
+
   it("aggregates env/harness failures by root cause and writes a diagnostic snapshot at threshold", () => {
     const dir = mkdtempSync(join(tmpdir(), "roll-root-cause-"));
     const attribution = { failureClass: "env" as const, rootCauseKey: "env:main_dirty", confidence: "envelope" as const };

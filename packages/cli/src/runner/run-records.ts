@@ -195,9 +195,9 @@ export function buildTerminalRecord(
     // acceptance artifact is missing (no independent peer Review Score /
     // empty-shell report). Branch preserved, awaits review — NOT a failure.
     needs_review: "needs_review",
-    // FIX-1051: agent exited cleanly but hit an internal tool error (e.g. agy
-    // GREP_SEARCH timeout → zero trajectory). Failed-class terminal.
-    agent_internal: "agent_internal_failure",
+    // REFACTOR-071: agent-internal failures write the gave_up terminal outcome;
+    // failure_class/root_cause_key carry harness:agent_internal.
+    agent_internal: "gave_up",
     // US-LOOP-079d — dormant_entered: 连续 N idle 后自卸;终态,此后无 idle 行.
     dormant: "dormant_entered",
   };

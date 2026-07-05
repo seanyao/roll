@@ -15,7 +15,7 @@
  * Lifecycle is DERIVED from TerminalOutcome + PR state via lifecycleFromFacts(),
  * never hand-set — no second vocabulary.
  */
-import type { TerminalOutcome } from "./terminal.js";
+import type { HistoricalTerminalOutcome } from "./terminal.js";
 import type { FactOr } from "./terminal.js";
 
 // ── LifecycleState (AC2) ─────────────────────────────────────────────────────
@@ -107,7 +107,7 @@ export interface CiRedSubState {
  * @returns The derived LifecycleState — never hand-set.
  */
 export function lifecycleFromFacts(
-  terminalOutcome: TerminalOutcome,
+  terminalOutcome: HistoricalTerminalOutcome,
   prState: PrState,
 ): LifecycleState {
   // Delivery gate outcomes are structural blocks. They intentionally outrank
@@ -142,6 +142,7 @@ export function lifecycleFromFacts(
 
   // ── Failed cluster ─────────────────────────────────────────────────
   if (terminalOutcome === "failed") return "failed";
+  if (terminalOutcome === "agent_internal_failure") return "failed";
   if (terminalOutcome === "blocked") return "blocked";
 
   // ── Aborted cluster ────────────────────────────────────────────────

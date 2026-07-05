@@ -735,6 +735,55 @@ export async function apiContentsRaw(
   return r.stdout;
 }
 
+// ─── FIX-1217: CI blackhole dispatch helpers ──────────────────────────────────
+
+/**
+ * Trigger a workflow_dispatch for the CI workflow on a specific branch.
+ *
+ * Equivalent: `gh workflow run ci.yml -R <slug> --ref <branch>`
+ * (the repo has a workflow_dispatch trigger on ci.yml).
+ *
+ * @returns GhResult — code 0 on success, non-zero on failure.
+ */
+export async function workflowDispatch(
+  slug: string,
+  workflowFile: string,
+  ref: string,
+): Promise<GhResult> {
+  return gh(["-R", slug, "workflow", "run", workflowFile, "--ref", ref]);
+}
+
+/**
+ * Count check-runs on a PR's head commit.
+ *
+ * Equivalent: `gh api repos/<slug>/pulls/<pr>/commits --jq '.[-1].sha'`
+ * then `gh api repos/<slug>/commits/<sha>/check-runs --jq '.total_count'`.
+ *
+ * Returns the total_count (integer), or -1 on failure.
+ */
+export async function prHeadCheckRunCount(
+  slug: string,
+  prNumber: number,
+): Promise<number> {
+  // Get the head sha via the PR's commits list.
+  const commitsR = await gh([
+    "-R", slug, "api",
+    `repos/${slug}/pulls/${prNumber}/commits`,
+    "--jq", ".[-1].sha",
+  ]);
+  if (commitsR.code !== 0 || commitsR.stdout.trim() === "") return -1;
+  const headSha = commitsR.stdout.trim();
+
+  const checksR = await gh([
+    "-R", slug, "api",
+    `repos/${slug}/commits/${headSha}/check-runs`,
+    "--jq", ".total_count",
+  ]);
+  if (checksR.code !== 0) return -1;
+  const n = Number(checksR.stdout.trim());
+  return Number.isFinite(n) ? n : -1;
+}
+
 /** Inputs for {@link issueCreate} — mirrors `gh issue create` argv. */
 export interface IssueCreateInput {
   repo: string;

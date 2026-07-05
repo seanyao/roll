@@ -157,23 +157,41 @@ export type MergeStateStatus =
   | string;
 
 /** The classify verdict — picks the per-class action in the inbox. */
-export type PrClass = "ci_red" | "stale" | "ready";
+export type PrClass = "ci_red" | "stale" | "ready" | "ci_blackhole";
+
+/** Default threshold (minutes) before a PR with zero check-runs is flagged as a CI blackhole. */
+export const CI_BLACKHOLE_THRESHOLD_MIN = 15;
 
 /**
- * Pure routing decision — mirrors `_loop_pr_classify` (bin/roll 11748-11763).
+ * Pure routing decision — mirrors `_loop_pr_classify` (bin/roll 11748-11763),
+ * extended with CI-blackhole detection (FIX-1217).
  * Check order is load-bearing:
  *   1. mergeable ∈ {BEHIND, DIRTY, CONFLICTING}  → "stale" (rebase needed FIRST).
  *   2. ci_state == "failure"                      → "ci_red" (heal).
- *   3. else                                       → "ready" (merge).
+ *   3. ci_state == "" AND prAgeMinutes >= threshold → "ci_blackhole" (FIX-1217).
+ *   4. else                                       → "ready" (merge).
  * Human review is intentionally IRRELEVANT — CI is the only gate (oracle
  * comment 11746-11747). The 2nd positional arg (`human_review`) is unused by
  * the oracle too; omitted here.
+ *
+ * @param prAgeMinutes  minutes since PR creation; only checked when ciState
+ *   is "" (no check-runs at all). Omit to skip blackhole detection.
+ * @param thresholdMinutes  override default {@link CI_BLACKHOLE_THRESHOLD_MIN}.
  */
-export function classifyPr(ciState: CiRollupState, mergeable: MergeStateStatus): PrClass {
+export function classifyPr(
+  ciState: CiRollupState,
+  mergeable: MergeStateStatus,
+  prAgeMinutes?: number,
+  thresholdMinutes?: number,
+): PrClass {
   if (mergeable === "BEHIND" || mergeable === "DIRTY" || mergeable === "CONFLICTING") {
     return "stale";
   }
   if (ciState === "failure") return "ci_red";
+  if (ciState === "" && prAgeMinutes !== undefined) {
+    const t = thresholdMinutes ?? CI_BLACKHOLE_THRESHOLD_MIN;
+    if (prAgeMinutes >= t) return "ci_blackhole";
+  }
   return "ready";
 }
 
@@ -261,6 +279,7 @@ export type PrAction =
   | { kind: "merge"; reason: "bot_approved" | "eager_ready" | "eager_after_rebase" }
   | { kind: "heal" } // ci_red → hand to the CI heal path (ci-loop.ts).
   | { kind: "rebase" } // stale → rebase-circuit + rebase + re-check.
+  | { kind: "dispatch_ci"; reason: "ci_event_blackhole" } // FIX-1217: zero check-runs timeout.
   | { kind: "alert"; reason: "bot_changes_requested" }
   | { kind: "skip"; reason: string };
 
@@ -272,6 +291,10 @@ export interface PrFacts {
   /** US-EVID-016: safety-created repair PRs must stay open for human merge. */
   manualMerge?: boolean;
   evidenceResolvable?: boolean;
+  /** FIX-1217: minutes since PR creation (for CI-blackhole detection). */
+  prAgeMinutes?: number;
+  /** FIX-1217: override default CI-blackhole threshold. */
+  ciBlackholeThresholdMin?: number;
 }
 
 /**
@@ -298,9 +321,10 @@ export function selectPrAction(f: PrFacts): PrAction {
   if (bot.kind === "alert_changes_requested") {
     return { kind: "alert", reason: "bot_changes_requested" };
   }
-  const verdict = classifyPr(f.ciState, f.mergeable);
+  const verdict = classifyPr(f.ciState, f.mergeable, f.prAgeMinutes, f.ciBlackholeThresholdMin);
   if (verdict === "ci_red") return { kind: "heal" };
   if (verdict === "stale") return { kind: "rebase" };
+  if (verdict === "ci_blackhole") return { kind: "dispatch_ci", reason: "ci_event_blackhole" };
   if (f.manualMerge === true) return { kind: "skip", reason: "manual_merge_required" };
   if (f.evidenceResolvable === false) return { kind: "skip", reason: "evidence_unresolvable" };
   return eagerMergeEligible(f.ciState, f.mergeable)
@@ -461,6 +485,42 @@ export interface DeadTickStreakInput {
  *   - last tick healthy after an alerted streak → "recovered"
  *   - otherwise → null (no action)
  */
+/**
+ * FIX-1217 — detect whether a PR has fallen into a CI event blackhole.
+ *
+ * A blackhole is: PR is open, its head has zero check-runs (ciState is ""),
+ * AND the PR has been open long enough that normal push/sync events should
+ * have fired. GitHub occasionally stops delivering pull_request events to
+ * long-lived branches (observed 10-24h window). This is a pure decision;
+ * the adapter owns the dispatch and ALERT I/O.
+ *
+ * @returns true when the PR should be auto-dispatched.
+ */
+export function detectCiBlackhole(
+  ciState: CiRollupState,
+  prAgeMinutes: number,
+  thresholdMinutes?: number,
+): boolean {
+  if (ciState !== "") return false;
+  const t = thresholdMinutes ?? CI_BLACKHOLE_THRESHOLD_MIN;
+  return prAgeMinutes >= t;
+}
+
+/**
+ * FIX-1217 — generate an ALERT message for a CI-blackhole dispatch.
+ * Pure string builder; the adapter writes the ALERT.
+ */
+export function ciBlackholeAlert(prNumber: number, branch: string, prAgeMinutes: number): string {
+  return [
+    `PR #${prNumber} (${branch}) — CI event blackhole detected`,
+    `  age: ${prAgeMinutes}min (threshold: ${CI_BLACKHOLE_THRESHOLD_MIN}min)`,
+    `  action: auto workflow_dispatch triggered`,
+    `  root: GitHub pull_request events not delivered to long-lived branch;`,
+    `        head check-runs == 0 despite pushes.`,
+    `  next: monitor dispatched CI; if check-runs still zero, consider branch rebuild.`,
+  ].join("\n");
+}
+
 export function deadTickVerdict(input: DeadTickStreakInput): "alert" | "recovered" | null {
   const n = input.threshold ?? 5;
   const tail = input.recentNotes.slice(-n);

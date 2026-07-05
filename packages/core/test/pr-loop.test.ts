@@ -2,12 +2,16 @@
  * Unit tests for the PR-loop pure decision layer (pr-loop.ts).
  * Covers: idle-gate ladder, CI rollup reduction, classify, eager-merge gate,
  * bot-review gate, per-PR action selection (+ rebase re-check), the 24h rebase
- * circuit breaker, attempts_at parse/render, fork rebaseability, fallback re-export.
+ * circuit breaker, attempts_at parse/render, fork rebaseability, fallback re-export,
+ * CI-blackhole detection (FIX-1217).
  */
 import { describe, expect, it } from "vitest";
 import {
+  CI_BLACKHOLE_THRESHOLD_MIN,
+  ciBlackholeAlert,
   classifyPr,
   decidePublishOutcome,
+  detectCiBlackhole,
   eagerMergeEligible,
   botReviewAction,
   parseRebaseAttempts,
@@ -336,6 +340,110 @@ describe("rebaseable — fork guard (bin/roll 11891)", () => {
   });
   it("same-repo → rebaseable", () => {
     expect(rebaseable(false)).toBe(true);
+  });
+});
+
+// ── FIX-1217: CI blackhole detection and dispatch ────────────────────────────
+
+describe("CI_BLACKHOLE_THRESHOLD_MIN constant", () => {
+  it("default threshold is 15 minutes", () => {
+    expect(CI_BLACKHOLE_THRESHOLD_MIN).toBe(15);
+  });
+});
+
+describe("detectCiBlackhole (FIX-1217)", () => {
+  it("non-empty ciState → false (no blackhole)", () => {
+    expect(detectCiBlackhole("success", 60)).toBe(false);
+    expect(detectCiBlackhole("pending", 60)).toBe(false);
+    expect(detectCiBlackhole("failure", 60)).toBe(false);
+  });
+  it("empty ciState but PR too young → false", () => {
+    expect(detectCiBlackhole("", 10)).toBe(false); // 10 < 15
+    expect(detectCiBlackhole("", 0)).toBe(false);
+  });
+  it("empty ciState + old enough → true (blackhole)", () => {
+    expect(detectCiBlackhole("", 15)).toBe(true);
+    expect(detectCiBlackhole("", 100)).toBe(true);
+  });
+  it("custom threshold overrides default", () => {
+    expect(detectCiBlackhole("", 10, 10)).toBe(true);
+    expect(detectCiBlackhole("", 9, 10)).toBe(false);
+    expect(detectCiBlackhole("", 30, 60)).toBe(false);
+  });
+});
+
+describe("classifyPr — CI blackhole (FIX-1217)", () => {
+  it("no age info → old behavior (ready when clean)", () => {
+    // backward-compatible: when prAgeMinutes is not passed, no blackhole check
+    expect(classifyPr("", "CLEAN")).toBe("ready");
+  });
+  it("ciState='' with prAgeMinutes > threshold → ci_blackhole", () => {
+    expect(classifyPr("", "CLEAN", 20)).toBe("ci_blackhole");
+    expect(classifyPr("", "CLEAN", 15)).toBe("ci_blackhole");
+  });
+  it("ciState='' with prAgeMinutes < threshold → ready (not yet blackhole)", () => {
+    expect(classifyPr("", "CLEAN", 10)).toBe("ready");
+    expect(classifyPr("", "CLEAN", 0)).toBe("ready");
+  });
+  it("stale still wins over blackhole (order: mergeable first)", () => {
+    expect(classifyPr("", "BEHIND", 100)).toBe("stale");
+    expect(classifyPr("", "CONFLICTING", 100)).toBe("stale");
+  });
+  it("ci_red still wins over blackhole (order: failure before blackhole)", () => {
+    expect(classifyPr("failure", "CLEAN", 100)).toBe("ci_red");
+  });
+  it("custom threshold", () => {
+    expect(classifyPr("", "CLEAN", 5, 5)).toBe("ci_blackhole");
+    expect(classifyPr("", "CLEAN", 4, 5)).toBe("ready");
+  });
+});
+
+describe("selectPrAction — dispatch_ci (FIX-1217)", () => {
+  it("ci_blackhole verdict → dispatch_ci action", () => {
+    expect(selectPrAction({
+      bot: "",
+      ciState: "",
+      mergeable: "CLEAN",
+      prAgeMinutes: 30,
+    })).toEqual({ kind: "dispatch_ci", reason: "ci_event_blackhole" });
+  });
+  it("dispatch_ci not emitted when age is below threshold", () => {
+    expect(selectPrAction({
+      bot: "",
+      ciState: "",
+      mergeable: "CLEAN",
+      prAgeMinutes: 5,
+    })).toEqual({ kind: "skip", reason: "ready_not_mergeable" });
+  });
+  it("dispatch_ci not emitted when ciState is non-empty", () => {
+    expect(selectPrAction({
+      bot: "",
+      ciState: "pending",
+      mergeable: "CLEAN",
+      prAgeMinutes: 30,
+    })).toEqual({ kind: "skip", reason: "ready_not_mergeable" });
+  });
+  it("manualMerge with blackhole → still dispatch (blackhole trumps manualMerge)", () => {
+    // A manual-merge PR in a CI blackhole can't be merged anyway — dispatch CI first.
+    expect(selectPrAction({
+      bot: "",
+      ciState: "",
+      mergeable: "CLEAN",
+      manualMerge: true,
+      prAgeMinutes: 30,
+    })).toEqual({ kind: "dispatch_ci", reason: "ci_event_blackhole" });
+  });
+});
+
+describe("ciBlackholeAlert (FIX-1217)", () => {
+  it("produces ALERT message with PR details", () => {
+    const alert = ciBlackholeAlert(1224, "loop/cycle-test", 45);
+    expect(alert).toContain("PR #1224");
+    expect(alert).toContain("loop/cycle-test");
+    expect(alert).toContain("CI event blackhole detected");
+    expect(alert).toContain("age: 45min");
+    expect(alert).toContain("auto workflow_dispatch triggered");
+    expect(alert).toContain("head check-runs == 0");
   });
 });
 

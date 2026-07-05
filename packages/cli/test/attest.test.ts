@@ -1459,7 +1459,8 @@ describe("US-PHYSICAL-004 — attest physical.screenshot provider lane", () => {
     );
 
     expect(fake.requests).toHaveLength(1);
-    expect(fake.requests[0]).toMatchObject({ kind: "display", target: { type: "display" } });
+    // US-PHYSICAL-006: evidence_profile:physical without capture_fullscreen defaults to window-level
+    expect(fake.requests[0]).toMatchObject({ kind: "display", target: { type: "window", appName: "Terminal.app" } });
     const runDir = join(proj, ".roll", "features", "demo", "US-PHYSICAL-004D", "2026-06-06T01-02-03");
     expect(readFileSync(join(runDir, "screenshots", "physical.png"), "utf8")).toBe("DISPLAYPNG");
     const html = readFileSync(join(runDir, "US-PHYSICAL-004D-report.html"), "utf8");

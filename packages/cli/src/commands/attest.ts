@@ -688,6 +688,7 @@ function physicalScreenshotRequest(
   createdAt: string,
   timeoutMs: number,
   skipPhysicalTerminalProvider: boolean,
+  captureFullscreen: boolean,
 ): RollCaptureRequestV1 | null {
   const physicalTerminal = physicalTerminalFromSpecText(specText);
   if (physicalTerminal !== null && skipPhysicalTerminalProvider) return null;
@@ -695,8 +696,17 @@ function physicalScreenshotRequest(
   if (!explicitPhysical) return null;
 
   const kind: CaptureKind = physicalTerminal !== null ? "physical_terminal" : "display";
-  const target: CaptureTarget =
-    physicalTerminal !== null ? { type: "window", appName: physicalTerminal.app } : { type: "display" };
+  let target: CaptureTarget;
+  if (physicalTerminal !== null) {
+    target = { type: "window", appName: physicalTerminal.app };
+  } else if (captureFullscreen) {
+    // US-PHYSICAL-006: full-screen only when explicitly declared
+    target = { type: "display" };
+  } else {
+    // US-PHYSICAL-006: default to window-level, derive app from evidence type
+    const appName = derivePhysicalScreenshotApp(specText);
+    target = { type: "window", appName };
+  }
   const requestId = safeCaptureRequestId(`${storyId}-${runId}-physical`);
   return {
     protocol: ROLL_CAPTURE_PROTOCOL_V1,
@@ -709,6 +719,22 @@ function physicalScreenshotRequest(
     timeoutMs,
     createdAt,
   };
+}
+
+/**
+ * Derive the default application name for a physical screenshot window target
+ * from the card spec. For web-evidence cards (deliverable_url / screenshot_url)
+ * we target the browser; for all others (terminal/cmd cards) we target Terminal.app.
+ * US-PHYSICAL-006 — privacy-first default: window-level, never full-screen.
+ */
+function derivePhysicalScreenshotApp(specText: string): string {
+  if (
+    frontmatterScalar(specText, "deliverable_url") !== null ||
+    frontmatterScalar(specText, "screenshot_url") !== null
+  ) {
+    return "Google Chrome";
+  }
+  return "Terminal.app";
 }
 
 function safeCaptureRequestId(raw: string): string {
@@ -1339,6 +1365,8 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
 
   const physicalCaptureReports: PhysicalCaptureReportEntry[] = [];
   const physicalTimeoutMs = deps.rollCapture?.timeoutMs ?? 60_000;
+  // US-PHYSICAL-006: capture_fullscreen: true in spec frontmatter explicitly requests display capture
+  const captureFullscreen = frontmatterScalar(featureText, "capture_fullscreen") === "true";
   const physicalRequest = physicalScreenshotRequest(
     featureText,
     storyId,
@@ -1347,6 +1375,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     now.toISOString(),
     physicalTimeoutMs,
     isPhysicalTerminal && captureCommands.length > 0,
+    captureFullscreen,
   );
   if (physicalRequest !== null) {
     const captureRoot = deps.rollCapture?.root ?? process.env["ROLL_CAPTURE_HOME"] ?? defaultRollCaptureRoot();

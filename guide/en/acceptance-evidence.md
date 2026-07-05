@@ -182,6 +182,16 @@ at startup:
   On macOS npm installs, Roll tries to install the app from the latest
   `seanyao/roll-capture` Release into `~/Applications`; `roll setup` can retry
   that repair unless `--no-capture-install` is set.
+
+  **Capture default strategy (US-PHYSICAL-006):** Physical screenshot requests
+  default to **window-level** capture — they only capture the tested application's
+  window (Terminal.app for terminal/CLI evidence, Google Chrome for web evidence),
+  not the full screen. Full-screen capture requires an explicit
+  `capture_fullscreen: true` frontmatter declaration in the card spec. This
+  privacy-first design prevents evidence chains from including irrelevant on-screen
+  content (chat, email, other projects). If the target window is not found, Roll
+  Capture.app returns a documented fallback with the reason recorded in the
+  response and evidence ledger — no silent expansion of capture scope.
 - `Playwright Chromium` — optional headless web capture for `roll attest` and
   archive screenshots. Install with `npx playwright install chromium`.
 

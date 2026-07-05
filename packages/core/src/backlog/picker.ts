@@ -227,7 +227,10 @@ export function isEligible(
   // FIX-1018: a story with already-committed-but-unpublished work from a prior
   // cycle must not be re-picked; that would re-implement the same work. It stays
   // Todo until the publish blocker clears and the pending marker is removed.
-  if (hasPendingPublish(item.id)) return false;
+  // FIX-1212: pending-publish only blocks when the card ALSO has an open PR.
+  // Without an open PR the marker is stale (prior cycle's unpublished work did not
+  // result in a PR) — the card must remain pickable to prevent loop starvation.
+  if (hasPendingPublish(item.id) && hasOpenPr(item.id)) return false;
   return true;
 }
 
@@ -341,12 +344,15 @@ export function assessBacklog(
       if (!blockedByDeps && hasOpenPr(it.id)) blockedByPr = true;
       if (!blockedByDeps && !blockedByPr && hasMergedDelivery(it.id)) blockedByMerged = true;
       if (!blockedByDeps && !blockedByPr && !blockedByMerged && shouldSkip(it.id)) blockedBySkip = true;
+      // FIX-1212: pending-publish blocks only when card also has an open PR
+      // (stale marker without PR does not block — prevents starvation).
       if (
         !blockedByDeps &&
         !blockedByPr &&
         !blockedByMerged &&
         !blockedBySkip &&
-        hasPendingPublish(it.id)
+        hasPendingPublish(it.id) &&
+        hasOpenPr(it.id)
       )
         blockedByPendingPublish = true;
 

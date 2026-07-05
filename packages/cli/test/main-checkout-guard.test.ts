@@ -372,4 +372,19 @@ describe("FIX-1210 — config.lock sentinel blocks nested git init writes", () =
     // config.lock must be cleaned up even after throw
     expect(existsSync(lockPath)).toBe(false);
   });
+
+  it("replaces a stale zero-byte config.lock at the next cycle boundary", () => {
+    const repo = cleanRepo("roll-fix1210-stale-lock-");
+    const runtimeDir = join(repo, ".roll", "loop");
+    const lockPath = join(repo, ".git", "config.lock");
+    writeFileSync(lockPath, "", "utf8");
+    expect(statSync(lockPath).size).toBe(0);
+
+    applyMainCheckoutWriteProtection({ repoCwd: repo, runtimeDir, cycleId: "C-stale-lock", nowMs: () => 1000 });
+    expect(existsSync(lockPath)).toBe(true);
+    expect(statSync(lockPath).size).toBeGreaterThan(0);
+
+    releaseMainCheckoutWriteProtection({ repoCwd: repo, runtimeDir, cycleId: "C-stale-lock", nowMs: () => 2000 });
+    expect(existsSync(lockPath)).toBe(false);
+  });
 });

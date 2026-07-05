@@ -214,10 +214,16 @@ function configLockPath(repoCwd: string): string {
 function createConfigLockSentinel(repoCwd: string): void {
   try {
     const lockPath = configLockPath(repoCwd);
-    if (!existsSync(lockPath)) {
-      writeFileSync(lockPath, "", "utf8");
-      chmodSync(lockPath, 0o444);
+    if (existsSync(lockPath)) {
+      if (statSync(lockPath).size === 0) {
+        chmodSync(lockPath, 0o644);
+        rmSync(lockPath, { force: true });
+      } else {
+        return;
+      }
     }
+    writeFileSync(lockPath, "roll main-checkout config lock sentinel\n", "utf8");
+    chmodSync(lockPath, 0o444);
   } catch {
     /* best-effort; the sentinel is a defense-in-depth measure */
   }

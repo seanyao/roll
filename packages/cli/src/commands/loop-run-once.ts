@@ -29,7 +29,7 @@ import { readBacklogRow } from "./attest.js";
 import { warnIfBinaryStale } from "../runner/binary-staleness.js";
 import { rollVersion } from "./version.js";
 import { rollHome } from "./setup-shared.js";
-import { repairCoreWorktreeContamination } from "../runner/main-checkout-guard.js";
+import { releaseMainCheckoutWriteProtection, repairCoreWorktreeContamination } from "../runner/main-checkout-guard.js";
 import { applyCorrectionCircuitBreaker } from "../runner/correction-circuit.js";
 import { classifyCycleFailure, playbookForFailure, readCycleEvents, recordRootCauseFailure, type FailureAttribution } from "../runner/failure-attribution.js";
 import { readSkillBody as readSkillBodyGeneric } from "../runner/skill-body.js";
@@ -98,6 +98,8 @@ export interface SignalTeardownDeps {
   exit?: (code: number) => void;
   pid?: number;
   now?: () => number;
+  repoCwd?: string;
+  runtimeDir?: string;
 }
 
 const SIGNUM: Record<string, number> = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 };
@@ -217,6 +219,18 @@ export function cycleSignalTeardown(
     } catch {
       /* best-effort */
     }
+    if (deps.repoCwd !== undefined && deps.runtimeDir !== undefined) {
+      try {
+        releaseMainCheckoutWriteProtection({
+          repoCwd: deps.repoCwd,
+          runtimeDir: deps.runtimeDir,
+          cycleId,
+          nowMs: () => terminalSec * 1000,
+        });
+      } catch {
+        /* best-effort; signal teardown must still exit */
+      }
+    }
   }
   process.stderr.write(
     `loop run-once: ${sig} — aborted terminal recorded, lock released, agent killed\n` +
@@ -230,11 +244,16 @@ export function installCycleSignalTeardown(
   paths: Pick<RunnerPaths, "eventsPath" | "runsPath" | "lockPath">,
   cycleId: string,
   branch: string,
+  repoCwd?: string,
+  runtimeDirPath?: string,
 ): () => void {
   const sigs: NodeJS.Signals[] = ["SIGTERM", "SIGINT", "SIGHUP"];
   const handlers = new Map<NodeJS.Signals, () => void>();
   for (const sig of sigs) {
-    const h = (): void => cycleSignalTeardown(paths, cycleId, branch, sig);
+    const h = (): void => cycleSignalTeardown(paths, cycleId, branch, sig, {
+      ...(repoCwd !== undefined ? { repoCwd } : {}),
+      ...(runtimeDirPath !== undefined ? { runtimeDir: runtimeDirPath } : {}),
+    });
     handlers.set(sig, h);
     process.on(sig, h);
   }
@@ -1087,7 +1106,7 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
 
   // FIX-204D: between here and the walk's own finally, signals get a clean
   // teardown instead of a half-state corpse.
-  const disposeSignals = installCycleSignalTeardown(paths, cycleId, branch);
+  const disposeSignals = installCycleSignalTeardown(paths, cycleId, branch, id.path, rt);
   let result;
   try {
     result = await runCycleOnce({ ports, ctx });

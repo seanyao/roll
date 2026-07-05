@@ -1406,9 +1406,12 @@ describe("executeCommand — command → executor mapping", () => {
     ): { ports: ReturnType<typeof fakePorts>["ports"]; calls: ReturnType<typeof fakePorts>["calls"]; dir: string } {
       const dir = mkdtempSync(join(tmpdir(), "roll-fix1211-"));
       execDirs.push(dir);
+      const repo = join(dir, "repo");
+      mkdirSync(repo, { recursive: true });
       const eventsPath = join(dir, "events.ndjson");
       const markStatus = vi.fn();
       const { ports, calls } = fakePorts({
+        repoCwd: repo,
         paths: {
           ...fakePorts().ports.paths,
           eventsPath,
@@ -1471,12 +1474,30 @@ describe("executeCommand — command → executor mapping", () => {
       expect(alerts.some((m) => m.includes("reclaim FIX-1211") && m.includes("dead"))).toBe(true);
     });
 
-    it("reclaims an In Progress row with no lease once reconcile classifies it as a dead claim", async () => {
+    it("reclaims an In Progress row with no lease and no claim timestamp", async () => {
       const { ports, calls } = tempLeasePorts([{ id: "FIX-1211", desc: "lease aware", status: "🔨 In Progress" }]);
       await executeCommand({ kind: "preflight" }, ports, CTX);
       expect(ports.backlog.markStatus).toHaveBeenCalledWith(ports.repoCwd, "FIX-1211", STATUS_MARKER.todo);
       const alerts = (calls["alert"] ?? []).map((a) => String((a as unknown[])[1]));
       expect(alerts.some((m) => m.includes("reclaim FIX-1211") && m.includes("no lease"))).toBe(true);
+    });
+
+    it("preserves an In Progress row with a fresh annotated soft lease", async () => {
+      const claimedAt = new Date(Date.now()).toISOString();
+      const { ports, calls } = tempLeasePorts([{ id: "FIX-1211", desc: `lease aware claimed ${claimedAt}`, status: "🔨 In Progress" }]);
+      await executeCommand({ kind: "preflight" }, ports, CTX);
+      expect(ports.backlog.markStatus).not.toHaveBeenCalled();
+      const alerts = (calls["alert"] ?? []).map((a) => String((a as unknown[])[1]));
+      expect(alerts.some((m) => m.includes("preserve FIX-1211") && m.includes("annotated soft lease"))).toBe(true);
+    });
+
+    it("reclaims an In Progress row when the annotated soft lease expires", async () => {
+      const claimedAt = new Date(Date.now() - 25 * 3600_000).toISOString();
+      const { ports, calls } = tempLeasePorts([{ id: "FIX-1211", desc: `lease aware claimed ${claimedAt}`, status: "🔨 In Progress" }]);
+      await executeCommand({ kind: "preflight" }, ports, CTX);
+      expect(ports.backlog.markStatus).toHaveBeenCalledWith(ports.repoCwd, "FIX-1211", STATUS_MARKER.todo);
+      const alerts = (calls["alert"] ?? []).map((a) => String((a as unknown[])[1]));
+      expect(alerts.some((m) => m.includes("reclaim FIX-1211") && m.includes("annotated soft lease expired"))).toBe(true);
     });
 
     it("writes a cycle lease on pick_story and removes it on append_run terminal", async () => {

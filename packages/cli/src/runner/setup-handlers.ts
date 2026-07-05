@@ -45,18 +45,41 @@ function storyLeasePath(ports: Ports): string {
   return join(dirname(ports.paths.eventsPath), "story-leases.json");
 }
 
+const LEGACY_SOFT_LEASE_HOURS = 24;
+const HOUR_MS = 3_600_000;
+
+function parseLegacyClaimTimestamp(row: { desc?: string; status?: string }): number | undefined {
+  const text = `${row.status ?? ""} ${row.desc ?? ""}`;
+  const iso = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z\b/.exec(text)?.[0];
+  if (iso !== undefined) {
+    const parsed = Date.parse(iso);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  const loose = /\b(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(?::\d{2})?\b/.exec(text);
+  if (loose !== null) {
+    const parsed = Date.parse(`${loose[1]}T${loose[2]}:00`);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
 /** FIX-1211: decide whether a 🔨 In Progress row can be reclaimed to 📋 Todo.
  *  Returns the action + a human-readable reason for observability. */
 function decideInProgressReclaim(
   entry: LeaseEntry | undefined,
   nowMs: number,
   storyId: string,
+  annotatedClaimedAt?: number,
 ): { action: "reclaim" | "keep"; reason: string } {
   if (entry === undefined) {
-    // No lease plus a `todo` reconcile decision means there is no recorded
-    // delivering cycle / PR to protect. Preserve explicit human/supervisor
-    // leases below, but keep the original dead-claim recovery for legacy rows.
-    return { action: "reclaim", reason: `no lease for ${storyId} and no live delivery evidence` };
+    if (annotatedClaimedAt === undefined) {
+      return { action: "reclaim", reason: `no lease for ${storyId} and no live delivery evidence` };
+    }
+    const ageHours = (nowMs - annotatedClaimedAt) / HOUR_MS;
+    if (ageHours < LEGACY_SOFT_LEASE_HOURS) {
+      return { action: "keep", reason: `annotated soft lease for ${storyId} is within 24h window (${Math.max(0, Math.round(ageHours))}h)` };
+    }
+    return { action: "reclaim", reason: `annotated soft lease expired for ${storyId} (${Math.round(ageHours)}h, no lease file entry)` };
   }
   if (entry.source === "cycle") {
     if (entry.pid !== undefined && isLeaseAlive(entry)) {
@@ -135,10 +158,10 @@ export async function executeSetupCommand(
               });
             }
             else if (decision === "todo") {
-              // FIX-1211: a dead-looking claim is NOT always reclaimable. A human/
-              // supervisor preemption has a 24h soft lease; a live cycle lease is
-              // respected; only a dead cycle lease or expired soft lease reclaims.
-              const { action, reason } = decideInProgressReclaim(leases[claim.id], nowMs, claim.id);
+              // Dead claims stay immediately recoverable. Soft leases only
+              // protect explicit human/supervisor claims: a lease-file entry or
+              // a backlog row carrying a claim timestamp.
+              const { action, reason } = decideInProgressReclaim(leases[claim.id], nowMs, claim.id, parseLegacyClaimTimestamp(claim));
               if (action === "reclaim") {
                 ports.backlog.markStatus?.(ports.repoCwd, claim.id, STATUS_MARKER.todo);
                 ports.events.appendAlert(ports.paths.alertsPath, `[FIX-1211] reclaim ${claim.id}: ${reason}`);

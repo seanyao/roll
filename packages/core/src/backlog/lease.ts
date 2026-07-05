@@ -7,15 +7,17 @@
  *
  *   1. A story WITH a loop lease and a dead PID -> eligible for death-recovery
  *      (the original starvation-prevention semantics).
- *   2. A story WITHOUT any lease -> human-preempted. The picker rejects it for
- *      24h (soft lease), after which an expiry reconcile may downgrade to Todo.
+ *   2. A human/supervisor preemption is explicit: either this file carries a
+ *      human-style lease, or legacy backlog text carries a claim timestamp.
+ *      A story WITHOUT any lease or annotation is still a dead-claim candidate
+ *      during preflight reclaim.
  *
  * Leases live at `.roll/loop/story-leases.json`, a gitignored runtime file.
  */
 
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 
-/** How long a human-preempted (leaseless) In Progress row is respected. */
+/** How long an explicit human/supervisor In Progress claim is respected. */
 export const HUMAN_SOFT_LEASE_HOURS = 24;
 
 /** Recognised claim sources. */

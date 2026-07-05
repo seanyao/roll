@@ -1237,6 +1237,10 @@ describe("US-PHYSICAL-004 — attest physical.screenshot provider lane", () => {
     status: "taken" | "skipped" | "failed",
     extra: Partial<RollCaptureResponseV1> = {},
   ): RollCaptureResponseV1 {
+    const defaults: Partial<RollCaptureResponseV1> =
+      status === "taken" && extra.imageWidth === undefined && extra.imageHeight === undefined
+        ? { imageWidth: 800, imageHeight: 600 }
+        : {};
     return {
       protocol: ROLL_CAPTURE_PROTOCOL_V1,
       requestId: request.requestId,
@@ -1245,6 +1249,7 @@ describe("US-PHYSICAL-004 — attest physical.screenshot provider lane", () => {
       host: { appName: ROLL_CAPTURE_HOST_APP_NAME, bundleId: ROLL_CAPTURE_HOST_BUNDLE_ID, version: "test" },
       startedAt: "2026-06-06T01:02:03.000Z",
       finishedAt: "2026-06-06T01:02:04.000Z",
+      ...defaults,
       ...extra,
     };
   }

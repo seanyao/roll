@@ -150,6 +150,13 @@ export interface CaptureSkipReportEntry {
   skipped: string;
 }
 
+export interface CaptureAnnotation {
+  target: string;
+  requestedBy: string;
+  capturedAt: string;
+  declaredFullscreen: boolean;
+}
+
 export interface PhysicalCaptureReportEntry {
   provider: string;
   kind: string;
@@ -160,6 +167,8 @@ export interface PhysicalCaptureReportEntry {
   responsePath?: string;
   ledgerLinks?: Array<{ label: string; href: string }>;
   ledgerDetails?: string[];
+  /** US-PHYSICAL-007 — visible provenance for every accepted physical screenshot. */
+  annotation?: CaptureAnnotation;
 }
 
 export interface ReportInput {
@@ -397,7 +406,15 @@ function physicalCaptureBlock(entries: ReportInput["physicalCaptures"]): string 
         entry.ledgerDetails !== undefined && entry.ledgerDetails.length > 0
           ? `<ul class="physical-links">${entry.ledgerDetails.map((detail) => `<li>${esc(detail)}</li>`).join("")}</ul>`
           : "";
-      return `<details class="physical-capture" open><summary>${esc(entry.provider)} · ${esc(entry.kind)} · ${esc(entry.statusChain.join(" → "))}</summary>${reason}${shot}${linked}${details}</details>`;
+      const annotation = entry.annotation;
+      const annotationHtml =
+        annotation !== undefined
+          ? `<dl class="physical-links"><dt>${bi("Target", "目标")}</dt><dd>${esc(annotation.target)}</dd>` +
+            `<dt>${bi("Requested by", "请求方")}</dt><dd>${esc(annotation.requestedBy)}</dd>` +
+            `<dt>${bi("Captured at", "拍摄于")}</dt><dd>${esc(annotation.capturedAt)}</dd>` +
+            `<dt>${bi("Declared fullscreen", "显式声明全屏")}</dt><dd>${annotation.declaredFullscreen ? bi("yes", "是") : bi("no", "否")}</dd></dl>`
+          : "";
+      return `<details class="physical-capture" open><summary>${esc(entry.provider)} · ${esc(entry.kind)} · ${esc(entry.statusChain.join(" → "))}</summary>${reason}${shot}${linked}${annotationHtml}${details}</details>`;
     })
     .join("\n");
   return `<section class="physical-captures"><h2>physical.screenshot</h2>\n${rows}\n</section>`;

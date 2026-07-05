@@ -268,6 +268,18 @@ export async function executeSetupCommand(
         hasPendingPublish: (id) =>
           (ports.pendingPublish?.(id) ?? false) || pendingPublish.has(id),
       };
+      for (const item of items) {
+        if (classifyStatus(item.status) !== "todo") continue;
+        const reason = openPrBlockReason(item.id, hasOpenPr);
+        if (reason === undefined) continue;
+        ports.events.appendEvent(ports.paths.eventsPath, {
+          type: "pick:skipped",
+          cycleId: ctx.cycleId,
+          storyId: item.id,
+          reason,
+          ts: eventTs(ports),
+        });
+      }
       // FIX-1215: emit pick:blocked events for ALL eligible-but-skipped cards
       // so idle output shows WHICH cards are blocked and WHY (not just open PR).
       const blockedCards = assessBacklog(items as BacklogItem[], eligibility).blockedCards;

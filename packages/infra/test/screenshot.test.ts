@@ -344,8 +344,17 @@ describe("mobile-ios", () => {
     const r1 = await captureScreenshot({ kind: "mobile-ios", out: outPath() }, { run: none.run, platform: "darwin" });
     expect(r1.skipped).toBe("no booted simulator");
 
-    const booted = fake({ xcrun: { code: 0, stdout: "iPhone 16 (ABC) (Booted)", writes: true } });
-    const r2 = await captureScreenshot({ kind: "mobile-ios", out: outPath() }, { run: booted.run, platform: "darwin" });
+    const bootedRun: ShotRun = (cmd, argv) => {
+      if (cmd === "xcrun" && argv.join(" ") === "simctl list devices booted") {
+        return Promise.resolve({ code: 0, stdout: "iPhone 16 (ABC) (Booted)", stderr: "" });
+      }
+      if (cmd === "xcrun" && argv.slice(0, 4).join(" ") === "simctl io booted screenshot") {
+        writeFileSync(String(argv[argv.length - 1]), "PNG");
+        return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+      }
+      return Promise.resolve({ code: 1, stdout: "", stderr: "" });
+    };
+    const r2 = await captureScreenshot({ kind: "mobile-ios", out: outPath() }, { run: bootedRun, platform: "darwin" });
     expect(r2.taken).toBe(true);
   });
 });
@@ -658,15 +667,20 @@ describe("terminal", () => {
       return Promise.resolve({ code: 0, stdout: "", stderr: "" });
     };
 
+    const cwd = process.cwd();
+    const sandbox = realpathSync(mkdtempSync(join(tmpdir(), "roll-shot-cwd-")));
+    dirs.push(sandbox);
+    process.chdir(sandbox);
     const rel = "rel-shots/terminal.png";
     mkdirSync("rel-shots", { recursive: true });
     try {
       await captureScreenshot({ kind: "terminal", command: "roll status", out: rel }, { run, env: {}, platform: "darwin" });
       const doScript = calls.find((c) => c.includes("do script")) ?? "";
       const wait = calls.find((c) => c.startsWith("sh -lc ")) ?? "";
-      expect(doScript).toContain(`'${process.cwd()}/rel-shots/terminal.png.done'`); // writer side absolute
-      expect(wait).toContain(`'${process.cwd()}/rel-shots/terminal.png.done'`); // waiter side absolute
+      expect(doScript).toContain(`'${sandbox}/rel-shots/terminal.png.done'`); // writer side absolute
+      expect(wait).toContain(`'${sandbox}/rel-shots/terminal.png.done'`); // waiter side absolute
     } finally {
+      process.chdir(cwd);
       rmSync("rel-shots", { recursive: true, force: true });
     }
   });

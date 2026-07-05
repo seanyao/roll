@@ -18,6 +18,7 @@ export * from "./backlog/infra-default.js";
 export * from "./backlog/pick-ranking.js";
 export * from "./backlog/picker.js";
 export * from "./backlog/store.js";
+export * from "./backlog/lease.js";
 export * from "./cost/prices.js";
 export * from "./cost/tracker.js";
 export * from "./delivery/infra-default.js";

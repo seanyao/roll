@@ -1,5 +1,5 @@
 import type { FailureClass } from "@roll/spec";
-import { parseEventLine, type RollEvent } from "@roll/spec";
+import { blockCauseRootKey, parseEventLine, type RollEvent } from "@roll/spec";
 import { EventBus } from "@roll/core";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -236,7 +236,8 @@ export function classifyCycleFailure(input: CycleFailureAttributionInput): Failu
   }
   const blocked = events.find((event) => event.type === "agent:blocked");
   if (blocked !== undefined) {
-    return classifyFailure({ stage: blocked.cause, source: `agent:${blocked.cause}`, tcrCount: input.tcrCount });
+    // REFACTOR-067: use shared spec taxonomy instead of indirect stage→rules path.
+    return { failureClass: "env", rootCauseKey: blockCauseRootKey(blocked.cause), confidence: "envelope" };
   }
   if (events.some((event) => event.type === "pair:score-failure")) {
     return classifyFailure({ stage: "score", source: "pair:score-failure", tcrCount: input.tcrCount });

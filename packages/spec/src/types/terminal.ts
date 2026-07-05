@@ -168,6 +168,19 @@ export interface TerminalEvent {
 
 export type FailureClass = "env" | "harness" | "card" | "unknown";
 
+/**
+ * REFACTOR-067 — shared external block cause taxonomy, used by both the
+ * `agent:blocked` event type and the env attribution classifiers.
+ */
+export type BlockCause = "auth" | "network";
+
+/**
+ * REFACTOR-067 — map a BlockCause to its root cause key string.
+ */
+export function blockCauseRootKey(cause: BlockCause): string {
+  return `env:${cause}`;
+}
+
 export interface TerminalEventInput {
   cycleId: string;
   storyId: string;

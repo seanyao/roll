@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { CycleCommand, CycleContext, RollEvent, WarmSessionEntry } from "@roll/core";
 import { AGENTS } from "../../core/src/agent/specs.js";
-import { classifyComplexity } from "@roll/core";
+import { classifyComplexity, mapV2Status } from "@roll/core";
 import { AWAITING_REVIEW_STATUS_MARKER } from "@roll/spec";
 import { agentWritableRoots, checkMainDirty, recordExecutionProfile, writeEvaluatorArtifact, runDesignerStage } from "../src/runner/executor.js";
 import { evaluateReviewScoreGate, readLatestStoryPeerScore } from "../src/lib/review-score.js";
@@ -3499,6 +3499,41 @@ describe("executeCommand — command → executor mapping", () => {
     const args = calls["run"]?.[0] as unknown[];
     expect(args[1]).toEqual({ storyId: "US-RUN-001", cycleId: CTX.cycleId });
     expect((args[2] as Record<string, unknown>)["status"]).toBe("done");
+  });
+
+  it("FIX-1210: append_run terminal path repairs core.worktree for failed-class outcomes", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-terminal-cleanup-")));
+    execDirs.push(repo);
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "test@roll.local"], { cwd: repo });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: repo });
+    writeFileSync(join(repo, "README.md"), "base\n", "utf8");
+    execFileSync("git", ["add", "README.md"], { cwd: repo });
+    execFileSync("git", ["commit", "-q", "-m", "base"], { cwd: repo });
+
+    const statuses: Array<Extract<CycleCommand, { kind: "append_run" }>["status"]> = ["failed", "gave_up", "blocked"];
+    for (const status of statuses) {
+      const poisoned = `/tmp/fake-cycle-${status}`;
+      execFileSync("git", ["config", "--local", "core.worktree", poisoned], { cwd: repo });
+      const { ports, calls } = fakePorts({ repoCwd: repo });
+      await executeCommand(
+        { kind: "append_run", status, outcome: mapV2Status(status), cycleId: `${CTX.cycleId}-${status}` },
+        ports,
+        { ...CTX, cycleId: `${CTX.cycleId}-${status}` },
+      );
+
+      expect(() => execFileSync("git", ["config", "--local", "--get", "core.worktree"], { cwd: repo })).toThrow();
+      const cleanup = (calls["event"] ?? [])
+        .map((a) => (a as unknown[])[1] as RollEvent)
+        .find((e) => e.type === "cycle:cleanup");
+      expect(cleanup).toMatchObject({
+        type: "cycle:cleanup",
+        cycleId: `${CTX.cycleId}-${status}`,
+        rule: "core.worktree",
+        path: poisoned,
+        ok: true,
+      });
+    }
   });
 
   it("FIX-352: terminal event timestamps are epoch ms while the runs row keeps second-based duration", async () => {

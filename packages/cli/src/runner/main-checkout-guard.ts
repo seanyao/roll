@@ -1,4 +1,4 @@
-import { execFile, execFileSync } from "node:child_process";
+import { execFile, execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -193,6 +193,119 @@ function protectionEvent(opts: MainCheckoutGuardOptions, status: WriteProtection
   };
 }
 
+// ─── FIX-1210: config.lock sentinel ──────────────────────────────────────────
+
+/**
+ * The `.git/config.lock` sentinel prevents `git config --local` writes
+ * (including nested `git init` that writes `core.worktree` to the shared
+ * config) by occupying the lock file that git's atomic rename mechanism uses.
+ * Normal read operations (commit, add, status) are unaffected because they
+ * use refs/objects/index directly, not the config lock.
+ *
+ * The sentinel is created as mode 0o444 (read-only for everyone) so that even
+ * if a child process inherits our uid, the rename-to-target fails with EACCES.
+ */
+const CONFIG_LOCK_REL = ".git/config.lock";
+const CONFIG_LOCK_SENTINEL_TEXT = "roll main-checkout config lock sentinel\n";
+
+function configLockPath(repoCwd: string): string {
+  return join(repoCwd, CONFIG_LOCK_REL);
+}
+
+/**
+ * A lock we may take over: zero-byte (crashed git process) or carrying OUR
+ * sentinel text (a roll sentinel orphaned by a hard-killed cycle — its release
+ * never ran).  Anything else is a live foreign git lock and must be left alone.
+ */
+function isReclaimableConfigLock(lockPath: string): boolean {
+  try {
+    if (statSync(lockPath).size === 0) return true;
+    return readFileSync(lockPath, "utf8") === CONFIG_LOCK_SENTINEL_TEXT;
+  } catch {
+    return false;
+  }
+}
+
+function createConfigLockSentinel(repoCwd: string): void {
+  try {
+    const lockPath = configLockPath(repoCwd);
+    if (existsSync(lockPath)) {
+      if (!isReclaimableConfigLock(lockPath)) return;
+      chmodSync(lockPath, 0o644);
+      rmSync(lockPath, { force: true });
+    }
+    writeFileSync(lockPath, CONFIG_LOCK_SENTINEL_TEXT, "utf8");
+    chmodSync(lockPath, 0o444);
+  } catch {
+    /* best-effort; the sentinel is a defense-in-depth measure */
+  }
+}
+
+function removeConfigLockSentinel(repoCwd: string): void {
+  try {
+    const lockPath = configLockPath(repoCwd);
+    if (existsSync(lockPath) && isReclaimableConfigLock(lockPath)) {
+      // Restore write permission so we can delete it, then remove.  A foreign
+      // (non-sentinel, non-empty) lock belongs to a live git process — leave it.
+      chmodSync(lockPath, 0o644);
+      rmSync(lockPath, { force: true });
+    }
+  } catch {
+    /* best-effort */
+  }
+}
+
+// ─── FIX-1210: core.worktree contamination repair ────────────────────────────
+
+export interface RepairContaminationResult {
+  healed: boolean;
+  detail: string;
+}
+
+/**
+ * FIX-1210: Shared implementation that strips injected GIT_* env vars and
+ * removes `core.worktree` from the local git config.  Designed to be called
+ * from both the pre-check (loop-run-once) and the terminal (append_run) so
+ * the clean-up logic lives in one place.
+ *
+ * Returns `{ healed: true, detail: <poisoned-value> }` when a contamination
+ * was found and removed; `{ healed: false, detail: "" }` when clean.
+ */
+export function repairCoreWorktreeContamination(repoCwd: string): RepairContaminationResult {
+  // Strip ALL inherited git env vars so every subsequent git operation reads
+  // the ACTUAL local repo config, not the cycle worktree's overrides.
+  delete process.env["GIT_DIR"];
+  delete process.env["GIT_WORK_TREE"];
+  delete process.env["GIT_CEILING_DIRECTORIES"];
+
+  // Private env for this function's own execFileSync calls.
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  delete env["GIT_DIR"];
+  delete env["GIT_WORK_TREE"];
+  delete env["GIT_CEILING_DIRECTORIES"];
+
+  const git = (args: string[]): { code: number; stdout: string; stderr: string } => {
+    const r = spawnSync("git", args, { cwd: repoCwd, env, encoding: "utf8" });
+    return { code: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+  };
+
+  // Check if core.worktree is set (contamination) — MUST use --local scope.
+  const get = git(["config", "--local", "--get", "core.worktree"]);
+  if (get.code !== 0 || get.stdout.trim() === "") {
+    return { healed: false, detail: "" };
+  }
+
+  const poisoned = get.stdout.trim();
+
+  // Unset the contamination.
+  const unset = git(["config", "--local", "--unset", "core.worktree"]);
+  if (unset.code !== 0) {
+    return { healed: false, detail: `detected but failed to unset: ${poisoned}` };
+  }
+
+  return { healed: true, detail: poisoned };
+}
+
 export function applyMainCheckoutWriteProtection(opts: MainCheckoutGuardOptions): WriteProtectionResult {
   if (!existsSync(opts.repoCwd)) return protectionEvent(opts, "applied", 0);
   const path = markerPath(opts.runtimeDir);
@@ -209,11 +322,15 @@ export function applyMainCheckoutWriteProtection(opts: MainCheckoutGuardOptions)
       /* chmod failures are surfaced by the following write attempts/tests */
     }
   }
+  // FIX-1210: add .git/config.lock sentinel to block nested git init config writes
+  createConfigLockSentinel(opts.repoCwd);
   return protectionEvent(opts, recovered ? "recovered" : "applied", entries.length);
 }
 
 export function releaseMainCheckoutWriteProtection(opts: MainCheckoutGuardOptions): WriteProtectionResult {
   if (!existsSync(opts.repoCwd)) return protectionEvent(opts, "released", 0);
+  // FIX-1210: remove .git/config.lock sentinel
+  removeConfigLockSentinel(opts.repoCwd);
   const restored = restoreMarker(markerPath(opts.runtimeDir));
   return protectionEvent(opts, "released", restored);
 }
@@ -363,6 +480,8 @@ export function quarantineEventToRollEvent(result: QuarantineResult): Extract<Ro
     ts: result.ts,
   };
 }
+
+// ─── FIX-1210: worktree env helper ──────────────────────────────────────────
 
 export function worktreeGitEnv(worktreePath: string, repoCwd: string): NodeJS.ProcessEnv {
   try {

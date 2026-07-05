@@ -31,7 +31,7 @@ const HOLD = "🚫 Hold";
 describe("assessBacklog — truth table (AC4)", () => {
   it("[] → backlog_empty", () => {
     const r = assessBacklog([]);
-    expect(r).toEqual({ hasWork: false, reason: "backlog_empty" });
+    expect(r).toMatchObject({ hasWork: false, reason: "backlog_empty" });
   });
 
   it("all Done → all_done", () => {
@@ -39,7 +39,7 @@ describe("assessBacklog — truth table (AC4)", () => {
       item("US-1", DONE),
       item("FIX-2", "✔️ Done"),
     ]);
-    expect(r).toEqual({ hasWork: false, reason: "all_done" });
+    expect(r).toMatchObject({ hasWork: false, reason: "all_done" });
   });
 
   it("in_progress rows, no todo → all_in_progress", () => {
@@ -48,7 +48,7 @@ describe("assessBacklog — truth table (AC4)", () => {
       item("US-2", IN_PROGRESS),
       item("US-3", DONE),
     ]);
-    expect(r).toEqual({ hasWork: false, reason: "all_in_progress" });
+    expect(r).toMatchObject({ hasWork: false, reason: "all_in_progress" });
   });
 
   it("hold rows, no todo → all_in_progress", () => {
@@ -56,12 +56,12 @@ describe("assessBacklog — truth table (AC4)", () => {
       item("US-1", HOLD),
       item("US-2", DONE),
     ]);
-    expect(r).toEqual({ hasWork: false, reason: "all_in_progress" });
+    expect(r).toMatchObject({ hasWork: false, reason: "all_in_progress" });
   });
 
   it("≥1 passes all 5 gates → has_work", () => {
     const r = assessBacklog([item("US-1", TODO)]);
-    expect(r).toEqual({ hasWork: true, reason: "has_work" });
+    expect(r).toMatchObject({ hasWork: true, reason: "has_work" });
   });
 
   it("mixed: some done, one todo → has_work", () => {
@@ -70,12 +70,12 @@ describe("assessBacklog — truth table (AC4)", () => {
       item("US-2", TODO),
       item("US-3", IN_PROGRESS),
     ]);
-    expect(r).toEqual({ hasWork: true, reason: "has_work" });
+    expect(r).toMatchObject({ hasWork: true, reason: "has_work" });
   });
 
   it("only cut rows → all_done (cut is non-actionable)", () => {
     const r = assessBacklog([item("US-1", "🗑️ Cut")]);
-    expect(r).toEqual({ hasWork: false, reason: "all_done" });
+    expect(r).toMatchObject({ hasWork: false, reason: "all_done" });
   });
 });
 
@@ -115,7 +115,7 @@ describe("assessBacklog — priority chain (AC3)", () => {
       item("US-1", TODO),
       item("US-2", TODO, "depends-on:US-MISSING"),
     ]);
-    expect(r).toEqual({ hasWork: true, reason: "has_work" });
+    expect(r).toMatchObject({ hasWork: true, reason: "has_work" });
   });
 
   it("all_blocked_by_deps > all_awaiting_merge", () => {
@@ -293,7 +293,7 @@ describe("assessBacklog — mixed scenarios (AC6)", () => {
       ],
       { shouldSkip: (id) => id === "US-1" },
     );
-    expect(r).toEqual({ hasWork: false, reason: "all_skip_listed" });
+    expect(r).toMatchObject({ hasWork: false, reason: "all_skip_listed" });
   });
 
   it("openPR + done: hasOpenPr blocks todo → all_awaiting_merge", () => {
@@ -304,7 +304,7 @@ describe("assessBacklog — mixed scenarios (AC6)", () => {
       ],
       { hasOpenPr: (id) => id === "US-1" },
     );
-    expect(r).toEqual({ hasWork: false, reason: "all_awaiting_merge" });
+    expect(r).toMatchObject({ hasWork: false, reason: "all_awaiting_merge" });
   });
 
   it("mergedPending + skip: priority merged > skip", () => {
@@ -345,7 +345,7 @@ describe("assessBacklog — mixed scenarios (AC6)", () => {
       item("US-C", TODO, "depends-on:US-MISSING"),
     ]);
     // US-B passes all gates (dep satisfied) → has_work
-    expect(r).toEqual({ hasWork: true, reason: "has_work" });
+    expect(r).toMatchObject({ hasWork: true, reason: "has_work" });
   });
 
   it("one todo eligible, one skip-listed → has_work", () => {
@@ -356,7 +356,7 @@ describe("assessBacklog — mixed scenarios (AC6)", () => {
       ],
       { shouldSkip: (id) => id === "US-2" },
     );
-    expect(r).toEqual({ hasWork: true, reason: "has_work" });
+    expect(r).toMatchObject({ hasWork: true, reason: "has_work" });
   });
 });
 
@@ -368,7 +368,7 @@ describe("assessBacklog — all_awaiting_merge gate (AC7)", () => {
       [item("US-1", TODO), item("US-2", TODO)],
       { hasOpenPr: () => true },
     );
-    expect(r).toEqual({ hasWork: false, reason: "all_awaiting_merge" });
+    expect(r).toMatchObject({ hasWork: false, reason: "all_awaiting_merge" });
   });
 
   it("default () => false never triggers all_awaiting_merge", () => {
@@ -385,7 +385,7 @@ describe("assessBacklog — all_awaiting_merge gate (AC7)", () => {
     const r = assessBacklog(
       Array.from({ length: 10 }, (_, i) => item(`US-${i}`, TODO)),
     );
-    expect(r).toEqual({ hasWork: true, reason: "has_work" });
+    expect(r).toMatchObject({ hasWork: true, reason: "has_work" });
   });
 });
 
@@ -398,7 +398,7 @@ describe("assessBacklog — edge cases", () => {
       item("US-B", TODO, "depends-on:US-A,US-C"),
     ]);
     // US-C is missing → blocked by deps
-    expect(r).toEqual({ hasWork: false, reason: "all_blocked_by_deps" });
+    expect(r).toMatchObject({ hasWork: false, reason: "all_blocked_by_deps" });
   });
 
   it("all_merged_pending: todo but merged delivery exists", () => {
@@ -406,7 +406,7 @@ describe("assessBacklog — edge cases", () => {
       [item("US-1", TODO), item("US-2", DONE)],
       { hasMergedDelivery: (id) => id === "US-1" },
     );
-    expect(r).toEqual({ hasWork: false, reason: "all_merged_pending" });
+    expect(r).toMatchObject({ hasWork: false, reason: "all_merged_pending" });
   });
 
   it("empty items with opts → backlog_empty", () => {
@@ -415,7 +415,7 @@ describe("assessBacklog — edge cases", () => {
       hasMergedDelivery: () => true,
       shouldSkip: () => true,
     });
-    expect(r).toEqual({ hasWork: false, reason: "backlog_empty" });
+    expect(r).toMatchObject({ hasWork: false, reason: "backlog_empty" });
   });
 
   it("single todo passes gates even with truthy opts not matching it", () => {
@@ -427,7 +427,7 @@ describe("assessBacklog — edge cases", () => {
         shouldSkip: (id) => id === "US-999",
       },
     );
-    expect(r).toEqual({ hasWork: true, reason: "has_work" });
+    expect(r).toMatchObject({ hasWork: true, reason: "has_work" });
   });
 
   it("backlog with only hold rows → all_in_progress", () => {
@@ -435,7 +435,7 @@ describe("assessBacklog — edge cases", () => {
       item("US-1", HOLD),
       item("FIX-1", "🔒 Blocked"),
     ]);
-    expect(r).toEqual({ hasWork: false, reason: "all_in_progress" });
+    expect(r).toMatchObject({ hasWork: false, reason: "all_in_progress" });
   });
 
   it("backlog with in_progress + hold, no todo → all_in_progress", () => {
@@ -444,7 +444,7 @@ describe("assessBacklog — edge cases", () => {
       item("FIX-1", HOLD),
       item("US-2", DONE),
     ]);
-    expect(r).toEqual({ hasWork: false, reason: "all_in_progress" });
+    expect(r).toMatchObject({ hasWork: false, reason: "all_in_progress" });
   });
 
   it("all_done with multiple done+cut rows", () => {
@@ -453,7 +453,7 @@ describe("assessBacklog — edge cases", () => {
       item("US-2", "🗑️ Cut"),
       item("FIX-1", "✔️ Done"),
     ]);
-    expect(r).toEqual({ hasWork: false, reason: "all_done" });
+    expect(r).toMatchObject({ hasWork: false, reason: "all_done" });
   });
 });
 

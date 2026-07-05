@@ -166,6 +166,10 @@ export type RollEvent =
       ts: number;
     }
   | { type: "pick:skipped"; cycleId: string; storyId: string; reason: string; ts: number }
+  // FIX-1215: blocked-card detail for idle observability + gh failure resilience
+  | { type: "pick:blocked"; cycleId: string; storyId: string; reason: string; ts: number }
+  | { type: "pick:gh_error"; cycleId: string; reason: string; ts: number }
+  | { type: "pick:gh_degraded"; cycleId: string; reason: string; ts: number }
   | {
       type: "harness_failure";
       channel: "US-LOOP-090";

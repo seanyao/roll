@@ -11,8 +11,8 @@
  *     story id (`US-…`, `FIX-…`, `REFACTOR-…`, lowercase suffix allowed) and
  *     runs until the next heading of the same-or-higher level.
  *   - An AC BLOCK starts at a line that is exactly `**AC:**` (trailing spaces
- *     tolerated) or at a modern story-card heading `## Acceptance Criteria` /
- *     `## 验收标准`. Near-misses like `**AC refreshed**: …` or
+ *     tolerated) or at a heading `## Acceptance Criteria` / `## 验收标准` /
+ *     `## AC` (any heading level). Near-misses like `**AC refreshed**: …` or
  *     `**AC(note)**` are NOT blocks — the colon-inside-bold form remains the
  *     legacy contract.
  *   - Items are markdown task-list lines `- [ ] …` / `- [x] …`; an indented
@@ -43,7 +43,7 @@ export interface AcSection {
 const HEADING = /^(#{2,3})\s+(.*)$/;
 const STORY_ID = /\b((?:US|FIX|REFACTOR)-[A-Z0-9]+(?:-[A-Z0-9]+)*?-?\d+[a-z]?)\b/;
 const AC_OPEN = /^\*\*AC:\*\*\s*$/;
-const AC_HEADING = /^#{2,4}\s+(?:Acceptance Criteria|验收标准)\s*$/i;
+const AC_HEADING = /^#{2,4}\s+(?:Acceptance Criteria|验收标准|AC)\s*$/i;
 const ITEM = /^- \[([ xX])\]\s?(.*)$/;
 const CONTINUATION = /^\s{2,}(\S.*)$/;
 

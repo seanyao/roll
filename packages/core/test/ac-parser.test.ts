@@ -109,6 +109,24 @@ describe("parseAcBlocks", () => {
     ]);
     expect(sections[0]!.items[1]!.checked).toBe(true);
   });
+
+  it("FIX-1216: `## AC` heading starts an AC block (modern template format)", () => {
+    const doc = `# FIX-1216 — hasAcBlock blindspot
+
+## AC
+
+- [ ] "## AC" format spec AC block is correctly recognized
+- [x] AC2 done state preserved
+`;
+    const sections = parseAcBlocks(doc);
+    expect(sections).toHaveLength(1);
+    expect(sections[0]!.storyId).toBe("");
+    expect(sections[0]!.items.map((item) => item.text)).toEqual([
+      '"## AC" format spec AC block is correctly recognized',
+      "AC2 done state preserved",
+    ]);
+    expect(sections[0]!.items[1]!.checked).toBe(true);
+  });
 });
 
 describe("grouped AC blocks (corpus tolerance)", () => {
@@ -153,6 +171,14 @@ describe("acForStory", () => {
   it("FIX-261: modern card AC headings feed acForStory with stable ids", () => {
     const items = acForStory(MODERN_CARD, "FIX-261", { fileOwned: true });
     expect(items.map((item) => item.id)).toEqual(["FIX-261:AC1", "FIX-261:AC2"]);
+  });
+
+  it("FIX-1216: `## AC` heading feeds acForStory with stable ids", () => {
+    const doc = `# FIX-1216\n\n## AC\n\n- [ ] AC1 recognized\n- [x] AC2 done\n`;
+    const items = acForStory(doc, "FIX-1216", { fileOwned: true });
+    expect(items.map((item) => item.id)).toEqual(["FIX-1216:AC1", "FIX-1216:AC2"]);
+    expect(items[0]!.text).toBe("AC1 recognized");
+    expect(items[1]!.checked).toBe(true);
   });
 
   it("no AC anywhere → empty list (caller renders the Claimed ladder)", () => {

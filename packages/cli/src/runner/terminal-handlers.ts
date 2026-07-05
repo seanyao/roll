@@ -14,6 +14,7 @@ import { AWAITING_REVIEW_STATUS_MARKER, STATUS_MARKER, absent, present } from "@
 import { prNumberFromUrl } from "@roll/infra";
 import { writeCycleRoleSummaryBestEffort } from "./cycle-role-artifact-writer.js";
 import { markDoneGuarded } from "./done-guard.js";
+import { addPendingPrCreate } from "./pending-pr-create.js";
 import { applyCleanupManifest, CLEANUP_TIMEOUT_MS, resolveCleanupManifest } from "./environment-cleanup.js";
 import type { ExecuteResult, Ports } from "./ports.js";
 import { publishBodyWithEvidenceTrailer, storyRequiresManualMerge } from "./publish-lifecycle.js";
@@ -107,7 +108,59 @@ export async function executeTerminalCommand(
           );
         }
       }
-      const pub: PublishResult = { status: r.status, manualMerge, ...(cmd.draft === true ? { draft: true } : {}) };
+      // FIX-1214: the branch was pushed but a transient GitHub API fault kept us
+      // from opening the PR. Queue the hand-off so the PR loop can retry, alert,
+      // and treat the cycle as published rather than failed.
+      if (r.degraded === true && r.status === 0 && ctx.storyId !== undefined && ctx.cycleId !== undefined) {
+        const runtimeDir = dirname(ports.paths.eventsPath);
+        addPendingPrCreate(runtimeDir, {
+          storyId: ctx.storyId,
+          cycleId: ctx.cycleId,
+          branch: cmd.branch,
+          slug,
+          body,
+          draft: cmd.draft === true,
+          manualMerge,
+          createdAt: ports.clock() * 1000,
+        });
+        ports.events.appendAlert(
+          ports.paths.alertsPath,
+          `FIX-1214: publish degraded for ${cmd.branch} (${ctx.storyId}) — PR create/merge blocked by transient GitHub API fault; queued for PR-loop retry`,
+        );
+        try {
+          ports.events.appendEvent(ports.paths.eventsPath, {
+            type: "alert:notify",
+            channel: "publish-degraded",
+            message: `publish degraded: ${ctx.storyId} ${cmd.branch} — env:gh_api`,
+            ts: ports.clock() * 1000,
+          });
+        } catch {
+          /* best-effort observability */
+        }
+        try {
+          appendDelivery(nodeDeliveryStore, ports.repoCwd, {
+            storyId: ctx.storyId,
+            cycleId: ctx.cycleId,
+            lifecycleState: "pending_merge",
+            prNumber: absent("not_recorded"),
+            prUrl: absent("not_recorded"),
+            mergedAt: absent("not_recorded"),
+            mergeCommit: absent("not_recorded"),
+            recordedAt: ports.clock(),
+          });
+        } catch {
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `FIX-1214: appendDelivery failed for degraded publish ${ctx.storyId} (cycle ${ctx.cycleId})`,
+          );
+        }
+      }
+      const pub: PublishResult = {
+        status: r.status,
+        manualMerge,
+        ...(cmd.draft === true ? { draft: true } : {}),
+        ...(r.degraded === true ? { degraded: true, rootCauseKey: r.rootCauseKey ?? "env:gh_api" } : {}),
+      };
       return {
         event: { type: "published", result: pub },
         // US-TRUTH-001: thread the PR url into the cycle context so the

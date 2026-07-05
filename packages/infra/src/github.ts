@@ -808,6 +808,12 @@ export interface RunPublishResult {
   /** Exit-class for the caller's tier ladder: 0 ok / 1 push|create fail /
    *  2 gh-missing. Mirrors `_loop_publish_pr`'s documented exit codes. */
   status: 0 | 1 | 2;
+  /** FIX-1214: the branch was pushed but a transient GitHub API fault prevented
+   *  opening/merging the PR. The cycle is classified `published` and handed to
+   *  the PR loop via the pending-pr-create queue instead of failing. */
+  degraded?: boolean;
+  /** Machine-readable root-cause tag when {@link degraded} is true. */
+  rootCauseKey?: string;
 }
 
 /**
@@ -857,26 +863,30 @@ export async function runPublishPlan(
   opts: {
     ghAvailable?: () => Promise<boolean>;
     run?: RunStep;
-    /** FIX-353: injected backoff between retry attempts (instant in tests). */
+    /** FIX-1214: injected backoff between retry attempts (instant in tests). */
     sleep?: (ms: number) => Promise<void>;
-    /** FIX-353: retries before the REST fallback (default 2 → 3 gh tries). */
+    /** FIX-1214: retries before the REST fallback (default 4 → 5 gh tries). */
     retries?: number;
   } = {},
 ): Promise<RunPublishResult> {
   const isAvailable = opts.ghAvailable ?? ghAvailable;
   const run = opts.run ?? defaultRunStep;
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const retries = opts.retries ?? 2;
+  const retries = opts.retries ?? 4;
 
-  // FIX-353: run a `gh` step through bounded retries on a transient EOF/5xx
+  // FIX-1214: run a `gh` step through bounded retries on a transient EOF/5xx
   // hiccup. Routes through the injected `run` so tests mock the same layer.
+  // Backoff: 15s / 30s / 60s / 120s between the five attempts.
   const runGhResilient = async (argv: readonly string[]): Promise<GhResult> => {
     let last: GhResult = { code: 1, stdout: "", stderr: "" };
     for (let attempt = 0; attempt <= retries; attempt++) {
       last = await run("gh", argv);
       if (last.code === 0) return last;
       if (!isTransientGhError(last.stderr)) return last;
-      if (attempt < retries) await sleep(250 * (attempt + 1));
+      if (attempt < retries) {
+        const delayMs = Math.min(15_000 * 2 ** attempt, 120_000);
+        await sleep(delayMs);
+      }
     }
     return last;
   };
@@ -922,7 +932,15 @@ export async function runPublishPlan(
       const reprobe = await run(view.tool, view.argv);
       if (reprobe.code === 0) prUrl = reprobe.stdout.trim();
     }
-    if (prUrl === "") return { prUrl: "", ok: false, status: 1 };
+    if (prUrl === "") {
+      // FIX-1214: if the branch was pushed but `gh pr create` kept failing on a
+      // transient API fault (even after retry + REST fallback), degrade instead
+      // of failing the cycle. The PR loop will open the PR from the queue.
+      if (push !== undefined && isTransientGhError(r.stderr)) {
+        return { prUrl: "", ok: false, status: 0, degraded: true, rootCauseKey: "env:gh_api" };
+      }
+      return { prUrl: "", ok: false, status: 1 };
+    }
   }
 
   if (merge !== undefined) {
@@ -936,8 +954,12 @@ export async function runPublishPlan(
         if (rest.code === 0) r = rest;
       }
     }
-    // admin-merge failure is fatal (doc-pr); auto-merge failure is not.
+    // admin-merge failure is fatal (doc-pr) UNLESS it is a transient GitHub API
+    // fault — then degrade to `published` and let the PR loop retry the merge.
     if (merge.kind === "gh-pr-merge-admin" && r.code !== 0) {
+      if (isTransientGhError(r.stderr)) {
+        return { prUrl, ok: false, status: 0, degraded: true, rootCauseKey: "env:gh_api" };
+      }
       return { prUrl, ok: false, status: 1 };
     }
   }

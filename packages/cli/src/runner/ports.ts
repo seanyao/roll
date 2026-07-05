@@ -69,7 +69,7 @@ export interface GithubPort {
   /** Execute a publish PLAN (core planPublishPr/DocPr) → publish status. */
   runPublishPlan(
     plan: ReadonlyArray<{ kind: string; tool: "git" | "gh"; argv: string[] }>,
-  ): Promise<{ status: 0 | 1 | 2; prUrl: string; ok: boolean }>;
+  ): Promise<{ status: 0 | 1 | 2; prUrl: string; ok: boolean; degraded?: boolean; rootCauseKey?: string }>;
   /** Poll a PR's merge state (sync merge-wait). Returns the gh state string. */
   prState(repoCwd: string, branch: string): Promise<string>;
   /** Poll a PR's full merge info (state, mergedAt, mergeCommit). Returns undefined on gh failure. */

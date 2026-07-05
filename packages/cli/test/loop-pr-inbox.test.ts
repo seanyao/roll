@@ -580,4 +580,34 @@ describe("runPrInbox — stale → rebase circuit → recheck → merge", () => 
     expect(rec.rebased).toEqual(["22"]);
     expect(rec.merged).toEqual([]);
   });
+
+  it("FIX-1214: drains the pending-pr-create queue after walking open PRs", async () => {
+    const drained: Array<{ slug: string; openHeadRefs: string[] }> = [];
+    const { deps } = harness({
+      listOpenPrs: listOf([
+        { number: 1, headRefName: "loop/already-open" },
+        { number: 2, headRefName: "loop/other" },
+      ]),
+      drainPendingPrCreates: async (slug, openHeadRefs) => {
+        drained.push({ slug, openHeadRefs: [...openHeadRefs] });
+      },
+    });
+    await runPrInbox(deps);
+    expect(drained).toEqual([
+      { slug: "owner/repo", openHeadRefs: ["loop/already-open", "loop/other"] },
+    ]);
+  });
+
+  it("FIX-1214: a drain failure does not break the regular inbox tick", async () => {
+    const { deps, rec } = harness({
+      listOpenPrs: listOf([{ number: 3, headRefName: "loop/ok" }]),
+      viewPr: async () => ({ bot: "", ciState: "success", mergeable: "CLEAN" }),
+      drainPendingPrCreates: async () => {
+        throw new Error("queue drain boom");
+      },
+    });
+    await runPrInbox(deps);
+    expect(rec.merged).toEqual(["3"]);
+    expect(rec.ticks[rec.ticks.length - 1]?.note).toBe("inbox_done");
+  });
 });

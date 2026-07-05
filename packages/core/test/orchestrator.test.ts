@@ -371,6 +371,9 @@ describe("classifyPublish — publish ladder refines built (bin/roll:9239-9356)"
   it("FIX-244: status 0 → published (PR open, merge pending — done ≡ merged, I4)", () => {
     expect(classifyPublish({ status: 0 })).toBe("published");
   });
+  it("FIX-1214: degraded status 0 (transient gh API fault) still → published so the PR loop retries", () => {
+    expect(classifyPublish({ status: 0, degraded: true, rootCauseKey: "env:gh_api" })).toBe("published");
+  });
   it("FIX-909: status 0 + draft manual review stays needs_review", () => {
     expect(classifyPublish({ status: 0, manualMerge: true, draft: true })).toBe("needs_review");
   });

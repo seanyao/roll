@@ -107,7 +107,7 @@ describe("pickStory — status skip rules", () => {
     const assessment = assessBacklog(items, { hasPendingPublish: (id) => pending.has(id), hasOpenPr });
     // FIX-1212: cards with both pending-publish AND open PR are caught by the
     // open PR gate first (priority chain: deps > PR > merged > skip > pending).
-    expect(assessment).toEqual({
+    expect(assessment).toMatchObject({
       hasWork: false,
       reason: "all_awaiting_merge",
     });
@@ -117,10 +117,76 @@ describe("pickStory — status skip rules", () => {
     const items = [item("US-1", TODO), item("US-2", TODO)];
     const pending = new Set(["US-1"]);
     // Without open PR, all markers are stale → there IS work.
-    expect(assessBacklog(items, { hasPendingPublish: (id) => pending.has(id) })).toEqual({
+    expect(assessBacklog(items, { hasPendingPublish: (id) => pending.has(id) })).toMatchObject({
       hasWork: true,
       reason: "has_work",
     });
+  });
+
+  // ─── FIX-1215: gh query failure resilience + idle output observability ───
+
+  it("FIX-1215 AC1: pending-publish + no open PR + empty PR list (simulating gh failure) → card IS pickable", () => {
+    // Simulate gh pr list returning [] (network failure fail-open).
+    const items = [item("FIX-4", TODO), item("FIX-5", TODO), item("REFACTOR-1", TODO)];
+    const pending = new Set(["FIX-4", "FIX-5", "REFACTOR-1"]);
+    // hasOpenPr built from empty list → returns false for everything.
+    const hasOpenPr = buildHasOpenPr([]);
+    // All three should be pickable — pending-publish without open PR is stale.
+    expect(pickStory(items, { hasPendingPublish: (id) => pending.has(id), hasOpenPr })?.id).toBe("FIX-4");
+  });
+
+  it("FIX-1215 AC1: assessBacklog reports has_work when gh returns empty (fail-open)", () => {
+    const items = [item("FIX-4", TODO), item("FIX-5", TODO)];
+    const pending = new Set(["FIX-4", "FIX-5"]);
+    const hasOpenPr = buildHasOpenPr([]); // gh failure → empty list
+    const assessment = assessBacklog(items, { hasPendingPublish: (id) => pending.has(id), hasOpenPr });
+    expect(assessment).toMatchObject({ hasWork: true, reason: "has_work" });
+  });
+
+  it("FIX-1215 AC2: blockedCards lists each blocked card with reason", () => {
+    const items = [item("US-1", TODO), item("US-2", TODO)];
+    const hasOpenPr = buildHasOpenPr(["US-1 PR", "US-2 PR"]);
+    const assessment = assessBacklog(items, { hasOpenPr });
+    expect(assessment.hasWork).toBe(false);
+    expect(assessment.reason).toBe("all_awaiting_merge");
+    expect(assessment.blockedCards).toBeDefined();
+    expect(assessment.blockedCards!.length).toBe(2);
+    expect(assessment.blockedCards![0].id).toBe("US-1");
+    expect(assessment.blockedCards![0].reason).toContain("PR");
+    expect(assessment.blockedCards![1].id).toBe("US-2");
+  });
+
+  it("FIX-1215 AC2: blockedCards lists unmet dependency reason", () => {
+    const items = [item("US-1", TODO, "depends-on:US-DEP"), item("US-2", TODO)];
+    // US-DEP is not done → US-1 blocked by deps.
+    const assessment = assessBacklog(items, { hasOpenPr: buildHasOpenPr([]) });
+    expect(assessment).toMatchObject({ hasWork: true, reason: "has_work" }); // US-2 is pickable
+    // But we can check blockedCards if hasWork is false with only US-1
+    const singleItem = [item("US-1", TODO, "depends-on:US-DEP")];
+    const singleAssessment = assessBacklog(singleItem, { hasOpenPr: buildHasOpenPr([]) });
+    expect(singleAssessment).toMatchObject({ hasWork: false, reason: "all_blocked_by_deps" });
+    expect(singleAssessment.blockedCards).toBeDefined();
+    expect(singleAssessment.blockedCards![0].reason).toContain("US-DEP");
+  });
+
+  it("FIX-1215 AC3: open PR still blocks re-dispatch (regression guard)", () => {
+    // Cards with pending-publish AND open PR must still be blocked.
+    const items = [item("FIX-1", TODO), item("FIX-2", TODO)];
+    const pending = new Set(["FIX-1"]);
+    const hasOpenPr = buildHasOpenPr(["PR for FIX-1"]);
+    // FIX-1 has pending-publish + open PR → blocked. FIX-2 picked instead.
+    expect(pickStory(items, { hasPendingPublish: (id) => pending.has(id), hasOpenPr })?.id).toBe("FIX-2");
+  });
+
+  it("FIX-1215 AC3: assessBacklog reports all_awaiting_merge when all cards have pending-publish + open PR", () => {
+    const items = [item("US-1", TODO), item("US-2", TODO)];
+    const pending = new Set(["US-1", "US-2"]);
+    const hasOpenPr = buildHasOpenPr(["US-1 PR", "US-2 PR"]);
+    const assessment = assessBacklog(items, { hasPendingPublish: (id) => pending.has(id), hasOpenPr });
+    expect(assessment).toMatchObject({ hasWork: false, reason: "all_awaiting_merge" });
+    // Blocked cards should include both with PR reasons
+    expect(assessment.blockedCards!.length).toBe(2);
+    expect(assessment.blockedCards!.every((bc) => bc.reason.includes("PR"))).toBe(true);
   });
 });
 
@@ -373,7 +439,7 @@ describe("buildHasOpenPr — predicate from open PR titles", () => {
       },
     ]);
     expect(pickStory(items, { hasOpenPr })).toBeUndefined();
-    expect(assessBacklog(items, { hasOpenPr })).toEqual({ hasWork: false, reason: "all_awaiting_merge" });
+    expect(assessBacklog(items, { hasOpenPr })).toMatchObject({ hasWork: false, reason: "all_awaiting_merge" });
     expect(openPrBlockReason("US-CAPTURE-006", hasOpenPr)).toBe("awaiting merge of PR #6");
   });
 
@@ -427,7 +493,7 @@ describe("buildHasOpenPr — predicate from open PR titles", () => {
       "US-2: add feature",
     ]);
     const result = assessBacklog(items, { hasOpenPr });
-    expect(result).toEqual({ hasWork: false, reason: "all_awaiting_merge" });
+    expect(result).toMatchObject({ hasWork: false, reason: "all_awaiting_merge" });
   });
 
   // AC4: cards without open PR → pickStory unchanged

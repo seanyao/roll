@@ -265,6 +265,21 @@ export function pickStory(items: BacklogItem[], opts: PickOptions = {}): Backlog
   return undefined;
 }
 
+/** A single blocked card with the reason it wasn't picked. */
+export interface BlockedCard {
+  readonly id: string;
+  readonly reason: string;
+}
+
+/** The assessment result returned by {@link assessBacklog}. */
+export interface BacklogAssessment {
+  hasWork: boolean;
+  reason: BacklogReason;
+  /** FIX-1215: card-level blocking detail — which cards are blocked and why.
+   *  Present only when `hasWork` is false; empty when no todo rows exist. */
+  blockedCards?: readonly BlockedCard[];
+}
+
 /**
  * Assess the whole backlog by scanning EVERY row's classified status (a full
  * histogram) — NOT just the eligibility gate. Without the histogram, a backlog
@@ -283,7 +298,7 @@ export function pickStory(items: BacklogItem[], opts: PickOptions = {}): Backlog
 export function assessBacklog(
   items: BacklogItem[],
   opts: PickOptions = {},
-): { hasWork: boolean; reason: BacklogReason } {
+): BacklogAssessment {
   const isDone = buildDoneIndex(items);
 
   // --- histogram over ALL rows (AC2) ----------------------------------------
@@ -364,12 +379,62 @@ export function assessBacklog(
     }
   }
 
+  // --- FIX-1215: collect blocked-card details for idle output observability ---
+  const blockedCards: BlockedCard[] = [];
+  if (todoCount > 0) {
+    const hasOpenPr = opts.hasOpenPr ?? (() => false);
+    const hasMergedDelivery = opts.hasMergedDelivery ?? (() => false);
+    const shouldSkip = opts.shouldSkip ?? (() => false);
+    const hasPendingPublish = opts.hasPendingPublish ?? (() => false);
+
+    for (const it of items) {
+      if (classifyStatus(it.status) !== "todo") continue;
+      // Collect blocking reason per card (mirrors the isEligible gate order).
+      let blockedByDeps = false;
+      let unmetDeps: string[] = [];
+      for (const dep of parseDependsOn(it.desc)) {
+        if (!isDone(dep)) {
+          blockedByDeps = true;
+          unmetDeps.push(dep);
+        }
+      }
+      if (blockedByDeps) {
+        blockedCards.push({ id: it.id, reason: `unmet dependency: ${unmetDeps.join(", ")}` });
+        hasBlockedByDeps = true;
+        continue;
+      }
+      if (hasOpenPr(it.id)) {
+        const prReason = openPrBlockReason(it.id, hasOpenPr) ?? "awaiting merge of open PR";
+        blockedCards.push({ id: it.id, reason: prReason });
+        hasBlockedByPr = true;
+        continue;
+      }
+      if (hasMergedDelivery(it.id)) {
+        blockedCards.push({ id: it.id, reason: "already merged to main" });
+        hasBlockedByMerged = true;
+        continue;
+      }
+      if (shouldSkip(it.id)) {
+        blockedCards.push({ id: it.id, reason: "runtime skip-list (poison pill)" });
+        hasBlockedBySkip = true;
+        continue;
+      }
+      // FIX-1212: pending-publish blocks only when card also has an open PR.
+      // Without an open PR the marker is stale — card remains pickable.
+      if (hasPendingPublish(it.id) && hasOpenPr(it.id)) {
+        blockedCards.push({ id: it.id, reason: "pending-publish with open PR" });
+        hasBlockedByPendingPublish = true;
+        continue;
+      }
+    }
+  }
+
   // --- priority chain: first match wins (AC3) -------------------------------
-  if (hasBlockedByDeps) return { hasWork: false, reason: "all_blocked_by_deps" };
-  if (hasBlockedByPr) return { hasWork: false, reason: "all_awaiting_merge" };
-  if (hasBlockedByMerged) return { hasWork: false, reason: "all_merged_pending" };
-  if (hasBlockedBySkip) return { hasWork: false, reason: "all_skip_listed" };
-  if (hasBlockedByPendingPublish) return { hasWork: false, reason: "all_pending_publish" };
+  if (hasBlockedByDeps) return { hasWork: false, reason: "all_blocked_by_deps", blockedCards };
+  if (hasBlockedByPr) return { hasWork: false, reason: "all_awaiting_merge", blockedCards };
+  if (hasBlockedByMerged) return { hasWork: false, reason: "all_merged_pending", blockedCards };
+  if (hasBlockedBySkip) return { hasWork: false, reason: "all_skip_listed", blockedCards };
+  if (hasBlockedByPendingPublish) return { hasWork: false, reason: "all_pending_publish", blockedCards };
 
   if (inProgressCount > 0 || holdCount > 0) {
     return { hasWork: false, reason: "all_in_progress" };

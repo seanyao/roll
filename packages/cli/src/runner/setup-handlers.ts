@@ -1,4 +1,5 @@
 import {
+  assessBacklog,
   buildHasOpenPr,
   decideClaimReconcile,
   hasMergedDelivery,
@@ -11,6 +12,7 @@ import {
   type CycleCommand,
   type CycleContext,
   type HasOpenPr,
+  type OpenPrReferenceInput,
   type PickOptions,
 } from "@roll/core";
 import { classifyStatus, STATUS_MARKER } from "@roll/spec";
@@ -220,7 +222,28 @@ export async function executeSetupCommand(
       // FIX-1205: de-dup from both GitHub PR references and durable delivery
       // truth. Loop PR titles may be only `loop cycle cycle-<id>`, so body
       // trailers and published-pending delivery records must also block a pick.
-      const openPrTitles = await ports.github.openPrTitles(ports.repoCwd);
+      // FIX-1215: fail-OPEN on gh query failure — a network blip must not
+      // silently block every card (fail-closed = starvation). Log the blip and
+      // proceed with an empty PR list so the picker stays honest.
+      let openPrTitles: OpenPrReferenceInput[];
+      let ghError = false;
+      try {
+        openPrTitles = await ports.github.openPrTitles(ports.repoCwd);
+      } catch (err) {
+        ghError = true;
+        openPrTitles = [];
+        const msg = err instanceof Error ? err.message : String(err);
+        ports.events.appendAlert(
+          ports.paths.alertsPath,
+          `[WARN] cycle ${ctx.cycleId}: gh pr list failed (${msg.slice(0, 120)}); proceeding with empty PR list — cards with pending-publish markers remain pickable`,
+        );
+        ports.events.appendEvent(ports.paths.eventsPath, {
+          type: "pick:gh_error",
+          cycleId: ctx.cycleId,
+          reason: msg.slice(0, 200),
+          ts: eventTs(ports),
+        });
+      }
       const githubHasOpenPr = buildHasOpenPr(openPrTitles);
       const pendingMergeReason = (id: string): string | undefined => {
         const pendingMerge = ports.pendingMergeDelivery?.(id);
@@ -245,15 +268,28 @@ export async function executeSetupCommand(
         hasPendingPublish: (id) =>
           (ports.pendingPublish?.(id) ?? false) || pendingPublish.has(id),
       };
-      for (const item of items) {
-        if (classifyStatus(item.status) !== "todo") continue;
-        const reason = openPrBlockReason(item.id, hasOpenPr);
-        if (reason === undefined) continue;
+      // FIX-1215: emit pick:blocked events for ALL eligible-but-skipped cards
+      // so idle output shows WHICH cards are blocked and WHY (not just open PR).
+      const blockedCards = assessBacklog(items as BacklogItem[], eligibility).blockedCards;
+      if (blockedCards !== undefined && blockedCards.length > 0) {
+        for (const bc of blockedCards) {
+          ports.events.appendEvent(ports.paths.eventsPath, {
+            type: "pick:blocked",
+            cycleId: ctx.cycleId,
+            storyId: bc.id,
+            reason: bc.reason,
+            ts: eventTs(ports),
+          });
+        }
+      }
+      // Also emit pick:skipped for the gh-error case (FIX-1215 AC1): when gh
+      // failed but there is eligible work, we want the loop to know it proceeded
+      // despite the blip.
+      if (ghError) {
         ports.events.appendEvent(ports.paths.eventsPath, {
-          type: "pick:skipped",
+          type: "pick:gh_degraded",
           cycleId: ctx.cycleId,
-          storyId: item.id,
-          reason,
+          reason: "gh pr list failed; proceeding without open-PR de-duplication",
           ts: eventTs(ports),
         });
       }

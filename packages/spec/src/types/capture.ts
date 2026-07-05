@@ -42,6 +42,10 @@ export type RollCaptureResponseV1 = {
   screenshotPath?: string;
   responsePath: string;
   reason?: string;
+  /** US-PHYSICAL-007 — captured image dimensions, supplied by the host when available. */
+  imageWidth?: number;
+  /** US-PHYSICAL-007 — captured image dimensions, supplied by the host when available. */
+  imageHeight?: number;
   host: CaptureHost;
   startedAt: string;
   finishedAt: string;
@@ -120,6 +124,8 @@ const captureResponseProperties = {
   screenshotPath: stringSchema,
   responsePath: nonEmptyStringSchema,
   reason: stringSchema,
+  imageWidth: integerSchema,
+  imageHeight: integerSchema,
   host: captureHostSchema,
   startedAt: nonEmptyStringSchema,
   finishedAt: nonEmptyStringSchema,
@@ -220,6 +226,8 @@ export function parseRollCaptureResponseV1(value: unknown): RollCaptureResponseV
   const host = parseCaptureHost(value["host"]);
   if (host === null) return null;
   if (typeof value["startedAt"] !== "string" || typeof value["finishedAt"] !== "string") return null;
+  const imageWidth = parseOptionalInteger(value["imageWidth"]);
+  const imageHeight = parseOptionalInteger(value["imageHeight"]);
   return {
     protocol: ROLL_CAPTURE_PROTOCOL_V1,
     requestId: value["requestId"],
@@ -227,6 +235,8 @@ export function parseRollCaptureResponseV1(value: unknown): RollCaptureResponseV
     ...(typeof value["screenshotPath"] === "string" ? { screenshotPath: value["screenshotPath"] } : {}),
     responsePath: value["responsePath"],
     ...(typeof value["reason"] === "string" ? { reason: value["reason"] } : {}),
+    ...(imageWidth !== undefined ? { imageWidth } : {}),
+    ...(imageHeight !== undefined ? { imageHeight } : {}),
     host,
     startedAt: value["startedAt"],
     finishedAt: value["finishedAt"],
@@ -266,6 +276,12 @@ export function validateRollCaptureResponseV1(
   }
   if (response.status !== "taken" && (response.reason === undefined || response.reason.length === 0)) {
     errors.push(`${response.status} response requires reason`);
+  }
+  if (response.imageWidth !== undefined && (!Number.isInteger(response.imageWidth) || response.imageWidth <= 0)) {
+    errors.push(`invalid imageWidth: ${String(response.imageWidth)}`);
+  }
+  if (response.imageHeight !== undefined && (!Number.isInteger(response.imageHeight) || response.imageHeight <= 0)) {
+    errors.push(`invalid imageHeight: ${String(response.imageHeight)}`);
   }
   return errors.length === 0 ? { ok: true, errors: [] } : { ok: false, errors };
 }
@@ -319,6 +335,12 @@ function realpathIfPossible(path: string): string {
       cursor = parent;
     }
   }
+}
+
+function parseOptionalInteger(value: unknown): number | undefined {
+  if (typeof value !== "number") return undefined;
+  if (!Number.isInteger(value)) return undefined;
+  return value;
 }
 
 function parseCaptureTarget(value: unknown): CaptureTarget | null {

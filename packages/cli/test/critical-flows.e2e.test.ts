@@ -378,6 +378,51 @@ describe("critical CLI E2E", () => {
     expect(evidence.captures?.[0]?.skipped).toContain("ROLL_NO_SCREENCAP");
   });
 
+  it("cards can declare fullscreen capture and attest degrades gracefully without Roll Capture.app", () => {
+    const project = tmpProject("fullscreen-declare");
+    const storyDir = join(project, ".roll", "features", "capture-tool", "US-PHYS-007-E2E");
+    mkdirSync(storyDir, { recursive: true });
+    writeFileSync(
+      join(storyDir, "spec.md"),
+      [
+        "---",
+        "id: US-PHYS-007-E2E",
+        "title: fullscreen declaration e2e",
+        "type: us",
+        "epic: capture-tool",
+        "created: 2026-07-05",
+        "evidence_profile: physical",
+        "capture_fullscreen: true",
+        "deliverable_cmd: roll status",
+        "---",
+        "",
+        "# US-PHYS-007-E2E — fullscreen declaration e2e",
+        "",
+        "## Acceptance Criteria",
+        "",
+        "- [ ] [visual-evidence] fullscreen screenshot is declared explicitly",
+        "",
+      ].join("\n"),
+    );
+
+    const validate = runRoll(project, ["story", "validate", "US-PHYS-007-E2E"]);
+    expect(validate.code).toBe(0);
+    expect(validate.out).toContain("visual-evidence: ok");
+
+    const attest = runRoll(project, ["attest", "US-PHYS-007-E2E"], {
+      ROLL_NO_SCREENCAP: "1",
+    });
+    expect(attest.code).toBe(0);
+    const latest = join(storyDir, "latest");
+    const evidence = JSON.parse(readFileSync(join(latest, "evidence.json"), "utf8")) as {
+      captures?: Array<{ kind?: string; taken?: boolean; skipped?: string }>;
+    };
+    const capture = evidence.captures?.find((c) => c.kind === "display");
+    expect(capture).toBeDefined();
+    expect(capture!.taken).toBe(false);
+    expect(capture!.skipped).toBeDefined();
+  });
+
   it("roll doctor --tools is a focused tool and screenshot-readiness smoke", () => {
     const project = tmpProject("doctor-tools");
     const result = runRoll(project, ["doctor", "--tools"], {

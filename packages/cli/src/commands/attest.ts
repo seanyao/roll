@@ -57,6 +57,7 @@ import {
 } from "@roll/spec";
 import {
   captureScreenshot,
+  checkCapturePrivacy,
   collectEvidence,
   containsSecret,
   defaultRollCaptureRoot,
@@ -67,6 +68,7 @@ import {
   writeEvidenceJson,
   type CaptureCommandFact,
   type CaptureFact,
+  type CapturePrivacyOptions,
   type EvidenceRun,
   type RunOut,
   type RollCaptureProviderPort,
@@ -746,6 +748,7 @@ async function runPhysicalScreenshotLane(
   readiness: RollCaptureReadiness,
   provider: RollCaptureProviderPort,
   ledgerRoot: string,
+  captureFullscreen: boolean,
 ): Promise<PhysicalCaptureLane> {
   mkdirSync(dirname(request.out), { recursive: true });
   if (readiness.status !== "available") {
@@ -760,9 +763,33 @@ async function runPhysicalScreenshotLane(
     const ledger = readCaptureLedgerEntries(ledgerRoot, request.requestId);
     const responsePath = result.status === "timeout" ? undefined : result.response.responsePath;
     if (result.status === "taken") {
+      // US-PHYSICAL-007 — privacy check before the image enters the evidence chain.
+      const privacyOptions: CapturePrivacyOptions = { declaredFullscreen: captureFullscreen };
+      const privacy = checkCapturePrivacy(request, result.response, privacyOptions);
+      if (!privacy.ok) {
+        return physicalLaneResult(
+          request,
+          ["requested", "taken", "privacy-rejected"],
+          privacy.reason,
+          undefined,
+          ledger,
+          requestPath,
+          responsePath,
+          privacy.annotation,
+        );
+      }
       const attached = attachPhysicalScreenshot(result.path, request.out);
       if (attached.ok) {
-        return physicalLaneResult(request, ["requested", "taken", "attached"], undefined, `screenshots/${basename(request.out)}`, ledger, requestPath, responsePath);
+        return physicalLaneResult(
+          request,
+          ["requested", "taken", "attached"],
+          undefined,
+          `screenshots/${basename(request.out)}`,
+          ledger,
+          requestPath,
+          responsePath,
+          privacy.annotation,
+        );
       }
       return physicalLaneResult(request, ["requested", "taken", "not-attached"], attached.reason, undefined, ledger, requestPath, responsePath);
     }
@@ -792,6 +819,7 @@ function physicalLaneResult(
   ledger: readonly CaptureLedgerEntry[],
   requestPath?: string,
   responsePath?: string,
+  annotation?: import("@roll/core").CaptureAnnotation,
 ): PhysicalCaptureLane {
   const runDir = dirname(dirname(request.out));
   const attached = screenshotHref !== undefined;
@@ -809,6 +837,7 @@ function physicalLaneResult(
       ...reportPathField(runDir, "responsePath", responsePath),
       ...(ledger.length > 0 ? { ledgerLinks: ledgerLinksForReport(runDir, ledger) } : {}),
       ...(ledger.length > 0 ? { ledgerDetails: ledgerDetailsForReport(ledger) } : {}),
+      ...(annotation !== undefined ? { annotation } : {}),
     },
     fact: {
       kind: request.kind,
@@ -1381,7 +1410,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     const captureRoot = deps.rollCapture?.root ?? process.env["ROLL_CAPTURE_HOME"] ?? defaultRollCaptureRoot();
     const readiness = deps.rollCapture?.readiness?.() ?? collectRollCaptureReadiness();
     const provider = deps.rollCapture?.provider ?? new RollCaptureProvider({ root: captureRoot });
-    const physical = await runPhysicalScreenshotLane(physicalRequest, readiness, provider, captureRoot);
+    const physical = await runPhysicalScreenshotLane(physicalRequest, readiness, provider, captureRoot, captureFullscreen);
     captureFacts.push(physical.fact);
     physicalCaptureReports.push(physical.report);
     if (physical.selfCapture !== undefined) selfCaptures.push(physical.selfCapture);

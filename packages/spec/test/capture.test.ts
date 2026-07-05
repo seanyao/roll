@@ -212,6 +212,25 @@ describe("US-PHYSICAL-001 Roll Capture protocol contract", () => {
     expect(result.errors.join("\n")).toContain("taken response requires screenshotPath");
   });
 
+  it("accepts optional imageWidth/imageHeight on taken responses and rejects invalid values", () => {
+    const req = validRequest();
+    const base: RollCaptureResponseV1 = {
+      protocol: ROLL_CAPTURE_PROTOCOL_V1,
+      requestId: req.requestId,
+      status: "taken",
+      screenshotPath: req.out,
+      responsePath: "/Users/seanyao/Library/Application Support/Roll Capture/responses/response-US-PHYSICAL-001-physical-terminal.json",
+      host: { appName: "Roll Capture.app", bundleId: "com.seanyao.roll.capture", version: "0.1.0" },
+      startedAt: "2026-07-03T11:35:01.100+08:00",
+      finishedAt: "2026-07-03T11:35:01.820+08:00",
+    };
+
+    expect(validateRollCaptureResponseV1({ ...base, imageWidth: 1280, imageHeight: 800 }, req)).toEqual({ ok: true, errors: [] });
+    expect(validateRollCaptureResponseV1({ ...base, imageWidth: 0, imageHeight: 800 }, req).errors.join("\n")).toContain("invalid imageWidth");
+    expect(validateRollCaptureResponseV1({ ...base, imageWidth: 1280, imageHeight: -1 }, req).errors.join("\n")).toContain("invalid imageHeight");
+    expect(validateRollCaptureResponseV1({ ...base, imageWidth: 1280.5, imageHeight: 800 }, req).errors.join("\n")).toContain("invalid imageWidth");
+  });
+
   it("validates that skipped and failed responses include reason", () => {
     const req = validRequest();
     const base = {

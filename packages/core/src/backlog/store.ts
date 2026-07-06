@@ -170,6 +170,24 @@ export function appendBacklogRow(
   return { content: lines.join("\n"), appended: true };
 }
 
+/**
+ * Extract trailing annotation from a Done status cell.
+ * Returns the annotation text (trimmed) or undefined.
+ *
+ * Examples:
+ *   "✅ Done (PR#1238 · merged abc123)" → "(PR#1238 · merged abc123)"
+ *   "✅ Done · evidence_debt"          → "· evidence_debt"
+ *   "✅ Done"                          → undefined
+ *   "🔨 In Progress"                   → undefined
+ */
+export function extractAnnotation(cell: string): string | undefined {
+  const canonical = cell.match(/^✅\s*Done\s+(.+)$/);
+  if (canonical?.[1]?.trim()) return canonical[1].trim();
+  const legacy = cell.match(/^✔️\s*Done\s+(.+)$/);
+  if (legacy?.[1]?.trim()) return legacy[1].trim();
+  return undefined;
+}
+
 export function markStatus(content: string, pattern: string, newStatus: string): MarkResult {
   let count = 0;
   const lines = content.split("\n");
@@ -185,7 +203,20 @@ export function markStatus(content: string, pattern: string, newStatus: string):
     // divergence from the oracle is ID-token anchoring (FIX-106).
     const id = stripLink((parts[1] ?? "").trim());
     if (!idMatchesPattern(id, pattern)) return raw;
-    parts[parts.length - 2] = ` ${newStatus} `;
+    const currentCell = (parts[parts.length - 2] ?? "").trim();
+    // FIX-1219: preserve annotation text when rewriting Done status.
+    // When the current cell already has a Done marker with trailing annotation
+    // (e.g. "✅ Done (PR#1238 · merged abc1234)") and the new status is also
+    // a Done marker, preserve the annotation so the supervisor's merge ref
+    // annotations are not silently stripped.
+    let finalStatus = newStatus;
+    if (newStatus.includes("✅") || newStatus.includes("✔️")) {
+      const annotation = extractAnnotation(currentCell);
+      if (annotation) {
+        finalStatus = `${newStatus} ${annotation}`;
+      }
+    }
+    parts[parts.length - 2] = ` ${finalStatus} `;
     count += 1;
     const rebuilt = parts.join("|");
     return hasCr ? `${rebuilt}\r` : rebuilt;

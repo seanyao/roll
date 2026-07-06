@@ -110,6 +110,17 @@ describe("failure attribution envelopes", () => {
     ).toMatchObject({ failureClass: "env", rootCauseKey: "env:agent_stall" });
   });
 
+  // FIX-1218: builder:boundary_violation → env:main_dirty instead of generic env:sandbox
+  it("classifies builder:boundary_violation as env:main_dirty with playbook", () => {
+    const result = classifyCycleFailure({
+      cycleId: "cycle-boundary",
+      terminal: "failed",
+      tcrCount: 0,
+      events: [{ type: "builder:boundary_violation", cycleId: "cycle-boundary", storyId: "FIX-1218", agent: "pi", kind: "main_checkout_dirty", files: [], ts: 0, worktreePath: "." }],
+    });
+    expect(result).toMatchObject({ failureClass: "env", rootCauseKey: "env:main_dirty" });
+  });
+
   it("classifies timed-out build WITH output as card (agent genuinely struggled)", () => {
     expect(
       classifyCycleFailure({

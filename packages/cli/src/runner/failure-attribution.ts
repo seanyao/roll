@@ -224,7 +224,7 @@ export function classifyCycleFailure(input: CycleFailureAttributionInput): Failu
   };
   const hasReplayEvidence = hasAgentWorkEvidence || events.some((event) => event.type !== "cycle:end");
   if (events.some((event) => event.type === "builder:boundary_violation")) {
-    return { failureClass: "env", rootCauseKey: "env:sandbox", confidence: "envelope" };
+    return { failureClass: "env", rootCauseKey: "env:main_dirty", confidence: "envelope" };
   }
   const sandboxDirty = events.find((event) => event.type === "sandbox:main_dirty");
   if (sandboxDirty !== undefined && !hasAgentWorkEvidence) {

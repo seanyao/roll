@@ -197,6 +197,27 @@ describe("main checkout guard — US-LOOP-089", () => {
     await expect(checkMainDirty(repo)).resolves.toEqual(["product.ts"]);
   });
 
+  // FIX-1218: staged (index-layer) changes in protected paths ARE included
+  // because someone explicitly staged them — they must be visible in the
+  // diagnostic file list and count toward the dirty boolean.
+  it("FIX-1218: checkMainDirty includes staged changes in skills/ or .roll/", async () => {
+    const repo = cleanRepo("roll-main-dirty-staged-");
+    // Staged deletion of skills submodule gitlink (simulated by git rm --cached)
+    git(repo, ["rm", "--cached", "-q", "skills/README.md"]);
+    // Also a regular working-tree change to a product file
+    writeFileSync(join(repo, "product.ts"), "leak\n", "utf8");
+
+    const files = await checkMainDirty(repo);
+    // Staged deletion "skills/README.md" MUST be in the list
+    expect(files).toContain("skills/README.md");
+    // Product file still included
+    expect(files).toContain("product.ts");
+    // Non-staged working-tree changes in .roll/ are still excluded
+    writeFileSync(join(repo, ".roll", "scratch.txt"), "runtime\n", "utf8");
+    const files2 = await checkMainDirty(repo);
+    expect(files2).not.toContain(".roll/scratch.txt");
+  });
+
   it("pins spawned worktree git discovery below the main checkout parent", () => {
     const repo = cleanRepo("roll-main-gitenv-ceiling-");
     // Nested (non-sibling) worktree layout: dirname(wt) !== dirname(repo), so this

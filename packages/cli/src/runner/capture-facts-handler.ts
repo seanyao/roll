@@ -64,7 +64,8 @@ export async function executeCaptureFactsCommand(
       } catch {
         /* drift probe is best-effort */
       }
-      const mainDirty = (await checkMainDirty(ports.repoCwd)).length > 0;
+      const mainDirtyFiles = await checkMainDirty(ports.repoCwd);
+      const mainDirty = mainDirtyFiles.length > 0;
       // FIX-208: count real `tcr:` commits while the worktree is still alive
       // (the done/cleanup path removes it before the runs row is written). Folded
       // into liveCtx so buildRunRow stops hardcoding 0. Best-effort → 0 on error.
@@ -582,7 +583,7 @@ export async function executeCaptureFactsCommand(
         ...(gateBlocked ? { gateBlocked: true } : {}),
         ...(needsReview ? { needsReview: true } : {}),
         ...(mainAhead > 0 ? { mainAhead } : {}),
-        ...(mainDirty ? { mainDirty: true } : {}),
+        ...(mainDirty ? { mainDirty: true, mainDirtyFiles } : {}),
         ...(worktreeDirty ? { worktreeDirty: true } : {}),
         ...(mainAhead > 0 || mainDirty
           ? { attemptedCwd: ports.repoCwd, expectedWorktreeCwd: ports.paths.worktreePath }

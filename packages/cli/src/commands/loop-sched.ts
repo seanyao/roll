@@ -39,7 +39,7 @@ import { EventBus } from "@roll/core";
 import { GOAL_SCHEMA_VERSION, parseGoalYaml, renderGoalYaml, transitionGoal } from "@roll/spec";
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { agentSecretEnvNames } from "../runner/agent-spawn.js";
@@ -59,6 +59,19 @@ export interface LoopSchedDeps {
   hasTmux?: () => boolean;
   /** FIX-204E: inline observation — tail live.log for the cycle's duration. */
   observe?: (runtimeDir: string) => Promise<void>;
+  /** FIX-1225: terminate repo-scoped loop helper processes when the owner disables the loop. */
+  cleanupHelpers?: (projectPath: string, slug: string) => Promise<LoopHelperCleanupResult> | LoopHelperCleanupResult;
+}
+
+export interface LoopHelperProcess {
+  pid: number;
+  command: string;
+  cwd?: string;
+}
+
+export interface LoopHelperCleanupResult {
+  processCount: number;
+  tmuxSessionKilled: boolean;
 }
 
 function realDeps(): LoopSchedDeps {
@@ -117,7 +130,103 @@ function realDeps(): LoopSchedDeps {
           finish();
         });
       }),
+    cleanupHelpers: cleanupLoopHelpers,
   };
+}
+
+function normalizePath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
+function isSameOrInsidePath(candidate: string, root: string): boolean {
+  const c = normalizePath(candidate).replace(/\/+$/, "");
+  const r = normalizePath(root).replace(/\/+$/, "");
+  return c === r || c.startsWith(`${r}/`);
+}
+
+function isLoopHelperCommand(command: string): boolean {
+  return /\bloop\s+(?:go|watch|run-once|pr-inbox)\b/.test(command);
+}
+
+export function loopHelperPidsToTerminate(
+  projectPath: string,
+  slug: string,
+  processes: readonly LoopHelperProcess[],
+  currentPid = process.pid,
+): number[] {
+  const session = `roll-loop-${slug}`;
+  return processes
+    .filter((proc) => proc.pid !== currentPid)
+    .filter((proc) => isLoopHelperCommand(proc.command))
+    .filter((proc) => {
+      if (proc.cwd !== undefined && isSameOrInsidePath(proc.cwd, projectPath)) return true;
+      if (proc.command.includes(projectPath)) return true;
+      return proc.command.includes(session);
+    })
+    .map((proc) => proc.pid)
+    .sort((a, b) => a - b);
+}
+
+function listSystemProcesses(): LoopHelperProcess[] {
+  const out = spawnSync("ps", ["-axo", "pid=,command="], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  if (out.status !== 0) return [];
+  return out.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+    .map((line) => {
+      const m = /^(\d+)\s+(.+)$/.exec(line);
+      if (m === null) return undefined;
+      const pid = Number(m[1]);
+      const command = m[2] ?? "";
+      if (!Number.isFinite(pid) || !isLoopHelperCommand(command)) return undefined;
+      const cwd = processCwd(pid);
+      return cwd === undefined ? { pid, command } : { pid, command, cwd };
+    })
+    .filter((proc): proc is LoopHelperProcess => proc !== undefined);
+}
+
+function processCwd(pid: number): string | undefined {
+  try {
+    return realpathSync(`/proc/${pid}/cwd`);
+  } catch {
+    /* macOS has no /proc cwd link. */
+  }
+  const out = spawnSync("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (out.status !== 0) return undefined;
+  const pathLine = out.stdout.split(/\r?\n/).find((line) => line.startsWith("n"));
+  return pathLine === undefined ? undefined : pathLine.slice(1);
+}
+
+function killTmuxSession(slug: string): boolean {
+  const session = `roll-loop-${slug}`;
+  try {
+    return spawnSync("tmux", ["kill-session", "-t", session], { stdio: "ignore" }).status === 0;
+  } catch {
+    return false;
+  }
+}
+
+export function cleanupLoopHelpers(projectPath: string, slug: string): LoopHelperCleanupResult {
+  const tmuxSessionKilled = killTmuxSession(slug);
+  const pids = loopHelperPidsToTerminate(projectPath, slug, listSystemProcesses());
+  let processCount = 0;
+  for (const pid of pids) {
+    try {
+      process.kill(pid, "SIGTERM");
+      processCount += 1;
+    } catch {
+      /* already gone or not owned by us */
+    }
+  }
+  return { processCount, tmuxSessionKilled };
 }
 
 // ─── templates ────────────────────────────────────────────────────────────────
@@ -853,6 +962,14 @@ export async function loopOffCommand(_args: string[], deps: LoopSchedDeps = real
       /* best-effort */
     }
     process.stdout.write(`  swept zombie lane: ${label}\n`);
+  }
+  const cleanup = await deps.cleanupHelpers?.(id.path, id.slug);
+  if (cleanup !== undefined && (cleanup.processCount > 0 || cleanup.tmuxSessionKilled)) {
+    const parts = [
+      cleanup.tmuxSessionKilled ? `tmux session roll-loop-${id.slug}` : undefined,
+      cleanup.processCount > 0 ? `${cleanup.processCount} helper process(es)` : undefined,
+    ].filter((part): part is string => part !== undefined);
+    process.stdout.write(`  stopped ${parts.join(" and ")}\n`);
   }
   process.stdout.write(
     `Loop disabled (loop/dream/pr booted out)\n` +

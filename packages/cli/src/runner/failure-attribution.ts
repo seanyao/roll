@@ -245,6 +245,9 @@ export function classifyCycleFailure(input: CycleFailureAttributionInput): Failu
   if (events.some((event) => event.type === "cycle:rescue")) {
     return classifyFailure({ stage: "rescue", source: "cycle:rescue", tcrCount: input.tcrCount });
   }
+  if (input.agentInternalFailure === true) {
+    return classifyFailure({ stage: "build", source: "harness-component:agent_internal", tcrCount: input.tcrCount });
+  }
   // FIX-1213: zero-output timed-out build is a vendor stall, not a card failure.
   // Agent consumed prompt tokens but produced NO output — the vendor is silent.
   const outputZero = (input.tcrCount ?? 0) === 0 && (input.tokensOut ?? 0) === 0;
@@ -263,9 +266,6 @@ export function classifyCycleFailure(input: CycleFailureAttributionInput): Failu
   }
   if (input.mainDirty === true) {
     return classifyFailure({ stage: "preflight", source: "sandbox:main_dirty", tcrCount: input.tcrCount });
-  }
-  if (input.agentInternalFailure === true) {
-    return classifyFailure({ stage: "build", source: "harness-component:agent_internal", tcrCount: input.tcrCount });
   }
   if (!hasReplayEvidence) {
     const fallback = recordedAttribution();

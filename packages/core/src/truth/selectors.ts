@@ -17,7 +17,7 @@
  * grandfathered. `unknown` is a legal state (gh down, convergence window);
  * `grandfathered` marks pre-epoch history that is listed, never judged.
  */
-import { TERMINAL_OUTCOMES, type TerminalOutcome } from "@roll/spec";
+import { LEGACY_TERMINAL_OUTCOMES, TERMINAL_OUTCOMES, type HistoricalTerminalOutcome, type TerminalOutcome } from "@roll/spec";
 import type { AuditPrEvidence } from "../consistency/audit.js";
 import type { StoryDeliveryTruth } from "./query.js";
 
@@ -156,13 +156,16 @@ export interface CycleTruthInput {
 
 export interface CycleTruth {
   cycleId: string;
-  /** The derived outcome in the US-TRUTH-001 vocabulary (best knowledge). */
-  outcome: TerminalOutcome | "";
+  /** The derived outcome in the current or legacy terminal vocabulary (best knowledge). */
+  outcome: HistoricalTerminalOutcome | "";
   state: TruthState;
   reason: TruthReason;
 }
 
-const TERMINAL_OUTCOME_SET: ReadonlySet<string> = new Set<string>(TERMINAL_OUTCOMES);
+const TERMINAL_OUTCOME_SET: ReadonlySet<string> = new Set<string>([
+  ...TERMINAL_OUTCOMES,
+  ...LEGACY_TERMINAL_OUTCOMES,
+]);
 const DELIVERY_GATE_OUTCOMES: ReadonlySet<string> = new Set<string>([
   "ci_red_after_merge",
   "pr_loop_unavailable",
@@ -197,7 +200,7 @@ const ROW_TO_TERMINAL: Record<string, TerminalOutcome> = {
 export function deriveCycleTruth(input: CycleTruthInput): CycleTruth {
   const pre = input.tsSec !== null && input.tsSec < input.schemaEpochSec;
   const runTerminalOutcome = TERMINAL_OUTCOME_SET.has(input.runOutcome)
-    ? (input.runOutcome as TerminalOutcome)
+    ? (input.runOutcome as HistoricalTerminalOutcome)
     : undefined;
 
   if (runTerminalOutcome !== undefined && DELIVERY_GATE_OUTCOMES.has(runTerminalOutcome)) {

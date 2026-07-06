@@ -16,8 +16,7 @@ import {
   absent,
   present,
 } from "../src/index.js";
-import type { DeliveryRecord, LifecycleState, PrState } from "../src/index.js";
-import type { TerminalOutcome } from "../src/index.js";
+import type { DeliveryRecord, HistoricalTerminalOutcome, LifecycleState, PrState } from "../src/index.js";
 
 describe("US-TRUTH-013 AC2 — LifecycleState enum", () => {
   it("is a closed set of 9 states", () => {
@@ -81,7 +80,7 @@ describe("US-TRUTH-013 AC1 — DeliveryRecord type shape", () => {
 });
 
 describe("US-TRUTH-013 AC3 — lifecycleFromFacts deterministic mappings", () => {
-  type Case = [TerminalOutcome, PrState, LifecycleState];
+  type Case = [HistoricalTerminalOutcome, PrState, LifecycleState];
 
   const cases: Case[] = [
     // published_pending_merge + PR open → in_flight (the classic case)
@@ -134,6 +133,9 @@ describe("US-TRUTH-013 AC3 — lifecycleFromFacts deterministic mappings", () =>
 
     // pr_loop_unavailable → blocked (FIX-1032b: published PR has no merge guardian)
     ["pr_loop_unavailable", "none", "blocked"],
+
+    // agent_internal_failure → failed (legacy REFACTOR-071 read-side compatibility)
+    ["agent_internal_failure", "none", "failed"],
 
     // orphan_timeout → blocked
     ["orphan_timeout", "none", "blocked"],

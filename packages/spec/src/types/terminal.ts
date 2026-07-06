@@ -63,24 +63,27 @@ export const TERMINAL_OUTCOMES = [
   // — the code is broken per CI evidence. Distinct from `delivered` (CI green)
   // and `failed` (no merge occurred). The CI run URL is recorded for diagnostics.
   "ci_red_after_merge",
-  // FIX-1032b — a cycle published a PR but the project PR loop is absent or
-  // unhealthy, so the PR has no merge guardian. The work is in GitHub but the
-  // delivery cannot be trusted as handed off to automation.
-  "pr_loop_unavailable",
   // FIX-1039 — a builder exited with code 0 and left changes in the worktree
   // but did not create a TCR commit. The work is real but uncommitted; the
   // worktree is PRESERVED so the owner can inspect or rescue it. Distinct
   // from `gave_up` (agent ran, 0 output, nothing to preserve) and from
   // `idle_no_work` (no agent ran at all, no dirt).
   "handoff_without_tcr",
-  // FIX-1051 — an agent process exited cleanly but suffered an internal tool
-  // error (e.g. agy GREP_SEARCH timeout → zero trajectory). The native CLI log
-  // contains the real cause; Roll surfaces it instead of classifying as a
-  // generic gave_up. Failed-class terminal.
-  "agent_internal_failure",
   "unknown",
 ] as const;
 export type TerminalOutcome = (typeof TERMINAL_OUTCOMES)[number];
+
+/**
+ * REFACTOR-071 — read-side compatibility for historical terminal outcomes that
+ * new writers no longer produce. These remain accepted by rebuild/adapters, but
+ * are not part of the closed write-side TerminalOutcome vocabulary.
+ */
+export const LEGACY_TERMINAL_OUTCOMES = [
+  "pr_loop_unavailable",
+  "agent_internal_failure",
+] as const;
+export type LegacyTerminalOutcome = (typeof LEGACY_TERMINAL_OUTCOMES)[number];
+export type HistoricalTerminalOutcome = TerminalOutcome | LegacyTerminalOutcome;
 
 /** AC3 — why a fact field has no value. Closed enum; "we don't know" is a
  *  reason, never a zero. */

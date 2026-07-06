@@ -182,10 +182,10 @@ export function mapV2Status(status: V2CycleStatus): TerminalOutcome {
       // from gave_up (agent had nothing to show) and from idle (no agent ran).
       return "handoff_without_tcr";
     case "agent_internal":
-      // FIX-1051: agent exited cleanly but hit an internal tool error (e.g. agy
-      // GREP_SEARCH timeout → zero trajectory). The native CLI log contains the
-      // real cause; surface it instead of hiding it behind a generic gave_up.
-      return "agent_internal_failure";
+      // REFACTOR-071: the terminal vocabulary no longer carries a dedicated
+      // agent-internal outcome. The status stays diagnostic; failure attribution
+      // (harness:agent_internal) carries the reason.
+      return "gave_up";
     case "dormant":
       // US-LOOP-079d — 连续 N idle 后自卸;终态,此后无 idle 行.
       return "dormant_entered";
@@ -730,7 +730,7 @@ export type CycleCommand =
   | { kind: "cleanup_environment"; terminalStatus?: V2CycleStatus } // US-LOOP-088: post-cycle env cleanup before worktree removal.
   | { kind: "cleanup_worktree"; branch: string } // _worktree_cleanup.
   | { kind: "emit_event"; event: RollEvent } // events/bus appendEvent (I8).
-  | { kind: "append_run"; status: V2CycleStatus; outcome: TerminalOutcome; cycleId: string } // events/bus upsertRun.
+  | { kind: "append_run"; status: V2CycleStatus; outcome: TerminalOutcome; cycleId: string; failure_class?: FailureClass; root_cause_key?: string } // events/bus upsertRun.
   | { kind: "append_alert"; message: string } // _worktree_alert.
   | { kind: "release_lock" }; // infra/process releaseLock.
 
@@ -947,7 +947,14 @@ function terminate(
   const commands: CycleCommand[] = [
     ...beforeTerminal,
     { kind: "emit_event", event: cycleEndEvent(tctx, status, 0, outcome) },
-    { kind: "append_run", status, outcome, cycleId: state.ctx.cycleId },
+    {
+      kind: "append_run",
+      status,
+      outcome,
+      cycleId: state.ctx.cycleId,
+      ...(tctx.failureClass !== undefined ? { failure_class: tctx.failureClass } : {}),
+      ...(tctx.rootCauseKey !== undefined ? { root_cause_key: tctx.rootCauseKey } : {}),
+    },
     { kind: "release_lock" },
     ...cleanup,
   ];
@@ -1107,7 +1114,15 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
 
     case "facts_captured": {
       const status = classifyCaptured(event.facts);
-      const next = { ...state, phase: "reconcile" as CyclePhase, captured: event.facts };
+      const nextCtx: CycleContext = status === "agent_internal"
+        ? {
+            ...state.ctx,
+            agentInternalFailure: event.facts.agentInternalFailure,
+            failureClass: "harness",
+            rootCauseKey: "harness:agent_internal",
+          }
+        : state.ctx;
+      const next = { ...state, phase: "reconcile" as CyclePhase, captured: event.facts, ctx: nextCtx };
       const bFacts = builderFinalizationFacts(state.ctx, event.facts);
       const verdict = finalizeBuilder(bFacts);
       const gateEvent = ((): CycleCommand => {
@@ -1260,7 +1275,7 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
               ...state,
               ctx: { ...state.ctx, failureClass: "env", rootCauseKey: "env:pr_loop" },
               phase: "cleanup",
-            }, status, extra, gate.verdict);
+            }, status, extra);
           }
         }
         return terminate({ ...state, phase: "cleanup" }, status, extra);

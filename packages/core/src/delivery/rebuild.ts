@@ -17,7 +17,7 @@
  * AC4: no separate backfill script needed; first rebuild covers all history.
  * AC7: genuinely not-delivered cards stay todo (no false positives).
  */
-import type { DeliveryRecord, FactOr, FailureClass, TerminalOutcome } from "@roll/spec";
+import type { DeliveryRecord, FactOr, FailureClass, HistoricalTerminalOutcome } from "@roll/spec";
 import { present, absent, lifecycleFromFacts } from "@roll/spec";
 import type { RunRow } from "../events/bus.js";
 import type { ExecPort } from "./infra-default.js";
@@ -84,7 +84,7 @@ export interface MergeFact {
   touchesProductCode?: boolean;
 }
 
-function terminalOutcomeFromRun(outcome: string): TerminalOutcome | undefined {
+function terminalOutcomeFromRun(outcome: string): HistoricalTerminalOutcome | undefined {
   if (outcome === "ci_red_after_merge" || outcome === "pr_loop_unavailable") return outcome;
   if (outcome === "published_pending_merge") return outcome;
   if (outcome === "delivered") return outcome;
@@ -92,6 +92,7 @@ function terminalOutcomeFromRun(outcome: string): TerminalOutcome | undefined {
   if (outcome === "blocked") return outcome;
   if (outcome === "aborted_no_delivery") return outcome;
   if (outcome === "gave_up") return outcome;
+  if (outcome === "agent_internal_failure") return outcome;
   if (outcome === "handoff_without_tcr") return outcome;
   if (outcome === "orphan_timeout") return outcome;
   if (outcome === "idle_no_work") return outcome;

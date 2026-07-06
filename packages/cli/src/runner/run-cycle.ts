@@ -236,9 +236,9 @@ function attachFailureAttribution(ctx: CycleContext, terminal: V2CycleStatus | u
   }
   if (ctx.failureClass !== undefined && ctx.rootCauseKey !== undefined) return ctx;
 
-  // REFACTOR-070: published + pr_loop_unavailable → env:pr_loop.
-  // The orchestrator already decided the outcome is pr_loop_unavailable; this
-  // stamps the attribution so rebuild can project it as blocked.
+  // REFACTOR-071: published + missing PR loop writes published_pending_merge
+  // plus env:pr_loop attribution, so rebuild can project it as blocked without
+  // producing the legacy pr_loop_unavailable terminal outcome.
   if (terminal === "published" && ctx.prLoopHealthy === false) {
     return { ...ctx, failureClass: "env", rootCauseKey: "env:pr_loop" };
   }

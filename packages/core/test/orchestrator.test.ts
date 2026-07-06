@@ -172,7 +172,7 @@ describe("FIX-1039 — handoff_without_tcr: dirty worktree but zero TCR commits"
   });
 });
 
-describe("FIX-1051 — agent_internal_failure: agy internal tool errors surface instead of gave_up", () => {
+describe("FIX-1051/REFACTOR-071 — agent_internal: agy internal tool errors surface via attribution", () => {
   const AIF = { class: "agy_grep_timeout", summary: "GREP_SEARCH timed out", nativeLogPath: "/tmp/cli.log" };
 
   it("classifyCaptured returns agent_internal when agentInternalFailure is present", () => {
@@ -199,8 +199,8 @@ describe("FIX-1051 — agent_internal_failure: agy internal tool errors surface 
       }),
     ).toBe("handoff_without_tcr");
   });
-  it("mapV2Status(agent_internal) → agent_internal_failure", () => {
-    expect(mapV2Status("agent_internal")).toBe("agent_internal_failure");
+  it("mapV2Status(agent_internal) → gave_up", () => {
+    expect(mapV2Status("agent_internal")).toBe("gave_up");
   });
   it("agent_internal terminal cleans worktree and ALERTs with failure class/summary/log", () => {
     const { state, kinds, commands } = walk([
@@ -230,7 +230,12 @@ describe("FIX-1051 — agent_internal_failure: agy internal tool errors surface 
     expect(alert).toMatchObject({ message: expect.stringContaining(AIF.summary) });
     expect(alert).toMatchObject({ message: expect.stringContaining(AIF.nativeLogPath) });
     const run = commands.find((c) => c.kind === "append_run");
-    expect(run).toMatchObject({ status: "agent_internal", outcome: "agent_internal_failure" });
+    expect(run).toMatchObject({
+      status: "agent_internal",
+      outcome: "gave_up",
+      failure_class: "harness",
+      root_cause_key: "harness:agent_internal",
+    });
   });
 });
 
@@ -326,8 +331,8 @@ describe("FIX-244 — phantom-failure classification (published terminal)", () =
   });
 });
 
-describe("FIX-1032b — published cycle writes delivery-gate terminal outcomes", () => {
-  it("published + unhealthy PR loop emits pr_loop_unavailable in cycle:end and runs row", () => {
+describe("FIX-1032b/REFACTOR-071 — published cycle writes PR-loop attribution", () => {
+  it("published + unhealthy PR loop emits published_pending_merge + env:pr_loop", () => {
     const ctx: CycleContext = {
       ...CTX,
       prLoopHealthy: false,
@@ -352,13 +357,18 @@ describe("FIX-1032b — published cycle writes delivery-gate terminal outcomes",
 
     expect(state.terminal).toBe("published");
     const run = commands.find((c) => c.kind === "append_run");
-    expect(run).toMatchObject({ status: "published", outcome: "pr_loop_unavailable" });
+    expect(run).toMatchObject({
+      status: "published",
+      outcome: "published_pending_merge",
+      failure_class: "env",
+      root_cause_key: "env:pr_loop",
+    });
     const end = commands.find((c): c is Extract<CycleCommand, { kind: "emit_event" }> =>
       c.kind === "emit_event" && c.event.type === "cycle:end",
     );
     expect(end?.event).toMatchObject({
       type: "cycle:end",
-      outcome: "pr_loop_unavailable",
+      outcome: "published_pending_merge",
       failure_class: "env",
       root_cause_key: "env:pr_loop",
     });

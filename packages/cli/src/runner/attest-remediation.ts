@@ -316,6 +316,7 @@ export interface AcMapSelfHealOptions {
   runDir: string;
   cycleId: string;
   agent: string;
+  writableRoots?: string[];
   collectDraftEvidence: () => Promise<DraftEvidence>;
   collectCycleSignals: () => CycleActivityEvent[] | undefined;
   canSpawnRemediation: () => boolean;
@@ -377,6 +378,7 @@ export async function runAcMapSelfHeal(opts: AcMapSelfHealOptions): Promise<AcMa
           storyId: opts.storyId,
           timeoutMs: ACMAP_REMEDIATION_TIMEOUT_MS,
           runDir: opts.runDir,
+          ...(opts.writableRoots !== undefined ? { writableRoots: opts.writableRoots } : {}),
         });
         outcome = needsAcMapRemediation(opts.worktreeCwd, opts.storyId) ? "still-missing" : "written";
       }

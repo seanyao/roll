@@ -45,6 +45,7 @@ import { createCapturePeerHelpers } from "./capture-peer-helpers.js";
 import type { ExecuteResult, Ports } from "./ports.js";
 import { eventTs } from "./runner-time.js";
 import { quarantineMainCheckoutForCycle } from "./sandbox-boundary.js";
+import { agentWritableRoots } from "./worktree-bootstrap.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -430,6 +431,7 @@ export async function executeCaptureFactsCommand(
           },
           canSpawnRemediation: () => blockIfAgentCredentialsMissing(remediationAgent, "build", ports, ctx) === null,
           agentSpawn: ports.agentSpawn,
+          writableRoots: agentWritableRoots(ports.repoCwd, ports.paths.alertsPath),
           renderAttest: () => ports.attest.render(ports.paths.worktreePath, storyId, ctx.evidenceRunDir ?? ""),
           appendEvent: (event) => ports.events.appendEvent(ports.paths.eventsPath, event),
           now: () => eventTs(ports),

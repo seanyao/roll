@@ -37,18 +37,28 @@ describe("loop run-once CLI wiring", () => {
   });
 
   it("--dry-run prints the command plan without executing (exit 0)", async () => {
+    const p = tmp("dry-run-project");
+    execFileSync("git", ["init", "-q", p]);
     registerAll();
     const write = process.stdout.write.bind(process.stdout);
+    const prevMain = process.env["ROLL_MAIN_PROJECT"];
+    const prevSlug = process.env["ROLL_MAIN_SLUG"];
     let out = "";
     process.stdout.write = ((s: string) => {
       out += s;
       return true;
     }) as typeof process.stdout.write;
     try {
+      process.env["ROLL_MAIN_PROJECT"] = p;
+      process.env["ROLL_MAIN_SLUG"] = "dry-run-project";
       const r = await dispatch(["loop", "run-once", "--dry-run"]);
       expect(r.status).toBe(0);
     } finally {
       process.stdout.write = write;
+      if (prevMain === undefined) delete process.env["ROLL_MAIN_PROJECT"];
+      else process.env["ROLL_MAIN_PROJECT"] = prevMain;
+      if (prevSlug === undefined) delete process.env["ROLL_MAIN_SLUG"];
+      else process.env["ROLL_MAIN_SLUG"] = prevSlug;
     }
     expect(out).toContain("command plan (orchestrator → executor)");
     expect(out).toContain("spawn_agent");
@@ -1105,7 +1115,6 @@ describe("FIX-1209: core.worktree contamination guard", () => {
     execFileSync("git", ["init", repo]);
     execFileSync("git", ["config", "user.name", "test"], { cwd: repo });
     execFileSync("git", ["config", "user.email", "test@test"], { cwd: repo });
-    execFileSync("git", ["commit", "--allow-empty", "-m", "root"], { cwd: repo });
 
     // Create a path that looks like a cycle worktree (containing .roll/loop/worktrees)
     const fakeWt = join(tmp("fake-wt"), ".roll", "loop", "worktrees", "cycle-fake");
@@ -1113,7 +1122,6 @@ describe("FIX-1209: core.worktree contamination guard", () => {
     execFileSync("git", ["init", fakeWt]);
     execFileSync("git", ["config", "user.name", "test"], { cwd: fakeWt });
     execFileSync("git", ["config", "user.email", "test@test"], { cwd: fakeWt });
-    execFileSync("git", ["commit", "--allow-empty", "-m", "fake"], { cwd: fakeWt });
 
     // Mock ROLL_PROJECT_RUNTIME_DIR to avoid polluting real loop dirs
     const prevSlug = process.env["ROLL_MAIN_SLUG"];
@@ -1146,6 +1154,60 @@ describe("FIX-1209: core.worktree contamination guard", () => {
       process.chdir(prevCwd);
       if (prevRt === undefined) delete process.env["ROLL_PROJECT_RUNTIME_DIR"];
       else process.env["ROLL_PROJECT_RUNTIME_DIR"] = prevRt;
+      if (prevSlug === undefined) delete process.env["ROLL_MAIN_SLUG"];
+      else process.env["ROLL_MAIN_SLUG"] = prevSlug;
+    }
+  });
+
+  it("FIX-1226: cycle worktree self-check uses ROLL_MAIN_PROJECT and is not misclassified as drift", async () => {
+    const repo = tmp("identity-main-anchor");
+    execFileSync("git", ["init", repo]);
+    execFileSync("git", ["config", "user.name", "test"], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "test@test"], { cwd: repo });
+
+    const cycleWt = join(repo, ".roll", "loop", "worktrees", "cycle-self-check");
+    mkdirSync(cycleWt, { recursive: true });
+    execFileSync("git", ["init", cycleWt]);
+    execFileSync("git", ["config", "user.name", "test"], { cwd: cycleWt });
+    execFileSync("git", ["config", "user.email", "test@test"], { cwd: cycleWt });
+
+    const prevSlug = process.env["ROLL_MAIN_SLUG"];
+    const prevMain = process.env["ROLL_MAIN_PROJECT"];
+    const prevRt = process.env["ROLL_PROJECT_RUNTIME_DIR"];
+    const prevCwd = process.cwd();
+    const stdoutWrite = process.stdout.write.bind(process.stdout);
+    const stderrWrite = process.stderr.write.bind(process.stderr);
+    let out = "";
+    let stderr = "";
+    try {
+      process.env["ROLL_MAIN_SLUG"] = "test-identity";
+      process.env["ROLL_MAIN_PROJECT"] = repo;
+      process.env["ROLL_PROJECT_RUNTIME_DIR"] = join(repo, ".roll", "loop");
+      process.chdir(cycleWt);
+      process.stdout.write = ((s: string) => {
+        out += s;
+        return true;
+      }) as typeof process.stdout.write;
+      process.stderr.write = ((s: string) => {
+        stderr += s;
+        return true;
+      }) as typeof process.stderr.write;
+
+      const r = await loopRunOnceCommand(["--dry-run"]);
+
+      expect(r).toBe(0);
+      expect(out).toContain("# roll loop run-once --dry-run");
+      expect(out).toContain("# project: test-identity");
+      expect(stderr).not.toContain("identity drift");
+      expect(stderr).not.toContain("refusing execution");
+    } finally {
+      process.stdout.write = stdoutWrite;
+      process.stderr.write = stderrWrite;
+      process.chdir(prevCwd);
+      if (prevRt === undefined) delete process.env["ROLL_PROJECT_RUNTIME_DIR"];
+      else process.env["ROLL_PROJECT_RUNTIME_DIR"] = prevRt;
+      if (prevMain === undefined) delete process.env["ROLL_MAIN_PROJECT"];
+      else process.env["ROLL_MAIN_PROJECT"] = prevMain;
       if (prevSlug === undefined) delete process.env["ROLL_MAIN_SLUG"];
       else process.env["ROLL_MAIN_SLUG"] = prevSlug;
     }

@@ -52,9 +52,18 @@ function runWithProj(
   args: string[],
   backlog: string,
 ): { status: number; stdout: string; stderr: string; backlog: string | null; proj: string } {
+  return runWithProjSetup(args, backlog);
+}
+
+function runWithProjSetup(
+  args: string[],
+  backlog: string,
+  setup?: (proj: string) => void,
+): { status: number; stdout: string; stderr: string; backlog: string | null; proj: string } {
   const proj = mkdtempSync(join(tmpdir(), "roll-idea-proj-"));
   mkdirSync(join(proj, ".roll"), { recursive: true });
   mkdirSync(join(proj, ".roll", "features"), { recursive: true });
+  setup?.(proj);
   const path = join(proj, ".roll", "backlog.md");
   writeFileSync(path, backlog, "utf8");
   const save = { NO_COLOR: process.env["NO_COLOR"], ROLL_LANG: process.env["ROLL_LANG"] };
@@ -216,5 +225,32 @@ describe("ideaCommand (E2E golden path)", () => {
     expect(existsSync(spec2Path)).toBe(true);
     rmSync(r.proj, { recursive: true, force: true });
     rmSync(r2.proj, { recursive: true, force: true });
+  });
+
+  it("allocates around existing card folders that are absent from backlog — FIX-1222", () => {
+    const r = runWithProjSetup(["bug", "hidden", "folder", "collision"], EMPTY, (proj) => {
+      const hiddenCard = join(proj, ".roll", "features", "loop-engine", "FIX-001");
+      mkdirSync(hiddenCard, { recursive: true });
+      writeFileSync(
+        join(hiddenCard, "spec.md"),
+        [
+          "---",
+          "id: FIX-001",
+          "title: hidden existing card",
+          "type: fix",
+          "epic: loop-engine",
+          "---",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("FIX-002");
+    const items = parseBacklog(r.backlog ?? "");
+    expect(items.find((i) => i.id === "FIX-001")).toBeUndefined();
+    expect(items.find((i) => i.id === "FIX-002")).toBeDefined();
+    expect(existsSync(join(r.proj, ".roll", "features", "uncategorized", "FIX-002", "spec.md"))).toBe(true);
+    rmSync(r.proj, { recursive: true, force: true });
   });
 });

@@ -412,6 +412,7 @@ export async function executeCaptureFactsCommand(
         const remediationAgent = ctx.agent ?? "claude";
         const selfHeal = await runAcMapSelfHeal({
           worktreeCwd: ports.paths.worktreePath,
+          archiveCwd: ports.repoCwd,
           storyId,
           runDir: ctx.evidenceRunDir,
           cycleId: ctx.cycleId ?? "",

@@ -2965,6 +2965,7 @@ describe("executeCommand — command → executor mapping", () => {
 
   it("FIX-246: delivery with AC block and NO ac-map → one remediation spawn before render + attest:remediation event", async () => {
     const wt = remediationFixture();
+    const repo = remediationFixture();
     const order: string[] = [];
     const spawn = vi.fn(async () => {
       order.push("remediation:spawn");
@@ -2972,6 +2973,7 @@ describe("executeCommand — command → executor mapping", () => {
     });
     const base = fakePorts();
     const { ports, calls } = fakePorts({
+      repoCwd: repo,
       paths: { ...base.ports.paths, worktreePath: wt },
       agentSpawn: spawn,
       attest: {
@@ -2988,7 +2990,8 @@ describe("executeCommand — command → executor mapping", () => {
     expect(opts.cwd).toBe(wt);
     expect(opts.runDir).toBe("/frame");
     expect(opts.skillBody).toContain("ac-map.json");
-    expect(opts.skillBody).toContain(join(wt, ".roll", "features", "uncategorized", "US-RUN-001", "ac-map.json"));
+    expect(opts.skillBody).toContain(join(repo, ".roll", "features", "uncategorized", "US-RUN-001", "ac-map.json"));
+    expect(opts.skillBody).not.toContain(join(wt, ".roll", "features", "uncategorized", "US-RUN-001", "ac-map.json"));
     expect(order.indexOf("remediation:spawn")).toBeLessThan(order.indexOf("attest:render")); // remediate, THEN render once
     const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
     expect(events.some((e) => e.type === "attest:remediation" && e.outcome === "still-missing")).toBe(true);
@@ -2996,13 +2999,15 @@ describe("executeCommand — command → executor mapping", () => {
 
   it("FIX-246: remediation agent writes the ac-map → event outcome 'written'", async () => {
     const wt = remediationFixture();
+    const repo = remediationFixture();
     const base = fakePorts();
     const { ports, calls } = fakePorts({
+      repoCwd: repo,
       paths: { ...base.ports.paths, worktreePath: wt },
       agentSpawn: vi.fn(async () => {
         // FIX-912: write a CONFIRMED ac-map (real statuses, not draft/empty).
         // The harness may have auto-generated a draft first; the agent confirms it.
-        writeFileSync(join(wt, ".roll", "features", "uncategorized", "US-RUN-001", "ac-map.json"), JSON.stringify([{ ac: "US-RUN-001:AC1", status: "pass" }]) + "\n");
+        writeFileSync(join(repo, ".roll", "features", "uncategorized", "US-RUN-001", "ac-map.json"), JSON.stringify([{ ac: "US-RUN-001:AC1", status: "pass" }]) + "\n");
         return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
       }),
     });
@@ -3013,24 +3018,28 @@ describe("executeCommand — command → executor mapping", () => {
 
   it("FIX-246: ac-map already present → no remediation spawn", async () => {
     const wt = remediationFixture({ withAcMap: true });
+    const repo = remediationFixture({ withAcMap: true });
     const base = fakePorts();
-    const { ports } = fakePorts({ paths: { ...base.ports.paths, worktreePath: wt } });
+    const { ports } = fakePorts({ repoCwd: repo, paths: { ...base.ports.paths, worktreePath: wt } });
     await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1, evidenceRunDir: "/frame" });
     expect(ports.agentSpawn).not.toHaveBeenCalled();
   });
 
   it("FIX-246: story without AC block → no remediation spawn", async () => {
     const wt = remediationFixture({ withAcBlock: false });
+    const repo = remediationFixture({ withAcBlock: false });
     const base = fakePorts();
-    const { ports } = fakePorts({ paths: { ...base.ports.paths, worktreePath: wt } });
+    const { ports } = fakePorts({ repoCwd: repo, paths: { ...base.ports.paths, worktreePath: wt } });
     await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1, evidenceRunDir: "/frame" });
     expect(ports.agentSpawn).not.toHaveBeenCalled();
   });
 
   it("FIX-246: remediation spawn throws → outcome 'spawn-failed', capture still completes", async () => {
     const wt = remediationFixture();
+    const repo = remediationFixture();
     const base = fakePorts();
     const { ports, calls } = fakePorts({
+      repoCwd: repo,
       paths: { ...base.ports.paths, worktreePath: wt },
       agentSpawn: vi.fn(async () => {
         throw new Error("agent unavailable");

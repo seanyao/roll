@@ -11,7 +11,7 @@
  *
  * Intent hook (the AI layer's contract, consumed when present):
  *   `.roll/verification/<id>/ac-map.json` —
- *     [{ "ac": "<acId>", "status": "pass|readonly|partial|fail|blocked|claimed|missing",
+ *     [{ "ac": "<acId>", "status": "pass|pass-with-evidence|readonly|partial|fail|blocked|claimed|missing",
  *        "evidence": [{kind,label,href?,textFile?}], "note": "…" }]
  *   Written by the attest skill during the Gate session (US-ATTEST-007 wiring).
  *   ABSENT map ⇒ every AC renders honestly as 🟧 Claimed (the render-layer red
@@ -281,7 +281,7 @@ export function readCycleRoleSummary(projectPath: string, cycleId: string): Cycl
 }
 
 
-const STATUSES: readonly AcStatus[] = ["pass", "readonly", "partial", "fail", "blocked", "claimed", "missing"];
+const STATUSES: readonly AcStatus[] = ["pass", "pass-with-evidence", "readonly", "partial", "fail", "blocked", "claimed", "missing"];
 const execFileAsync = promisify(execFile);
 
 function warn(msg: string): void {

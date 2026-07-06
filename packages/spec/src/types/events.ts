@@ -377,7 +377,7 @@ export type RollEvent =
   // ac-map remediation (FIX-246) — a real delivery that skipped skill step 10.6
   // (no ac-map.json) gets ONE surgical same-agent second pass before attest
   // renders. The outcome is auditable; honest statuses only — never a bypass.
-  | { type: "attest:remediation"; cycleId: string; storyId: string; agent: string; outcome: "written" | "still-missing" | "spawn-failed"; ts: number }
+  | { type: "attest:remediation"; cycleId: string; storyId: string; agent: string; outcome: "written" | "still-missing" | "spawn-failed"; reason?: string; transcript?: string; ts: number }
   // FIX-912 — ac-map draft auto-generation. The harness wrote an ac-map.json
   // DRAFT from cycle evidence (commits, test files, changed files) BEFORE the
   // FIX-246 remediation ran. The draft has full AC structure + evidence chain

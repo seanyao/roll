@@ -1164,7 +1164,7 @@ function passAcVisualFloor(worktreeCwd: string, storyId: string): { ok: boolean;
   if (!storyRequiresScreenshot(worktreeCwd, storyId)) return { ok: true, reason: "screenshot-exempt: pass ACs owe no captured visual evidence" };
   const entries = readAcMapEntries(worktreeCwd, storyId);
   if (entries === null) return { ok: true };
-  const pass = entries.filter((e) => e.status === "pass");
+  const pass = entries.filter((e) => e.status === "pass" || e.status === "pass-with-evidence");
   if (pass.length === 0) return { ok: true };
   const missing = pass.filter((e) => !(e.evidence ?? []).some((ev) => ev.kind === "screenshot" && typeof ev.href === "string" && ev.href !== ""));
   if (missing.length === 0) return { ok: true };
@@ -1287,7 +1287,7 @@ export function verificationReportHasContent(worktreeCwd: string, storyId: strin
 /**
  * US-V4-001 — the content floor reads STRUCTURED truth (the `ac-map.json` the
  * skill writes), never the rendered HTML. A real delivery's report carries an
- * ac-map with ≥1 positive AC (`pass`/`partial`/`readonly`) and EVERY positive AC
+ * ac-map with ≥1 positive AC (`pass`/`pass-with-evidence`/`partial`/`readonly`) and EVERY positive AC
  * is backed by real evidence (the empty-shell red line: a positive AC with no
  * evidence fails). The rendered report is the same data passed through the pure
  * renderer, so reading the ac-map is faithful to the old HTML-section scan while
@@ -1301,7 +1301,7 @@ function verificationReportHasAcceptanceContent(worktreeCwd: string, storyId: st
   if (evidencePathsUnresolved(worktreeCwd, storyId).length > 0) return false;
   let positiveWithEvidence = 0;
   for (const e of entries) {
-    if (e.status !== "pass" && e.status !== "partial" && e.status !== "readonly") continue;
+    if (e.status !== "pass" && e.status !== "pass-with-evidence" && e.status !== "partial" && e.status !== "readonly") continue;
     if (!(e.evidence ?? []).some((ev) => acMapEvidenceIsReal(ev))) return false;
     positiveWithEvidence += 1;
   }

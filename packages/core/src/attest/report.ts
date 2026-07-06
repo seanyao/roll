@@ -5,6 +5,7 @@
  *
  * Status ladder (design D5 + US-ATTEST-012 状态口径补全):
  *   ✅ pass      live evidence from this session (command output / shot / curl)
+ *   🟩 pass-with-evidence  harness-confirmed from strong on-disk evidence
  *   🟦 readonly  boundary observation (config visible, log line exists)
  *   🟨 partial   partly satisfied — note MUST say which sub-condition is open
  *   ❌ fail      verified AND failed — 验证过且失败 ≠ 缺证据 (not a positive claim)
@@ -25,7 +26,7 @@ import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "../html/chrome.j
 import { ANSI_CSS } from "./ansi-html.js";
 import { buildExecutionCastProjection, type ExecutionCastRow } from "./execution-cast.js";
 
-export type AcStatus = "pass" | "readonly" | "partial" | "fail" | "blocked" | "claimed" | "missing";
+export type AcStatus = "pass" | "pass-with-evidence" | "readonly" | "partial" | "fail" | "blocked" | "claimed" | "missing";
 
 export interface EvidenceRef {
   kind: "screenshot" | "text" | "commit" | "ci" | "deploy" | "test-pass" | "cast" | "video";
@@ -223,6 +224,7 @@ export interface ReportInput {
 
 const BADGE: Record<AcStatus, { icon: string; en: string; zh: string; cls: string }> = {
   pass: { icon: "✅", en: "Pass", zh: "通过", cls: "s-pass" },
+  "pass-with-evidence": { icon: "🟩", en: "Pass with Evidence", zh: "证据通过", cls: "s-pass" },
   readonly: { icon: "🟦", en: "Read-only Pass", zh: "只读通过", cls: "s-readonly" },
   partial: { icon: "🟨", en: "Partial", zh: "部分满足", cls: "s-partial" },
   fail: { icon: "❌", en: "Fail", zh: "未通过", cls: "s-fail" },
@@ -237,12 +239,12 @@ function esc(s: string): string {
 
 /**
  * The red line: a POSITIVE claim with no evidence ⇒ at best `claimed`. Only the
- * three positive verdicts (pass/readonly/partial) are downgraded — `fail` and
+ * positive verdicts (pass/pass-with-evidence/readonly/partial) are downgraded — `fail` and
  * `blocked` are NOT positive claims (US-ATTEST-012: 验证过且失败 ≠ 缺证据), so a
  * fail/blocked with zero refs stays itself and never surfaces as a discrepancy;
  * `claimed`/`missing` are already at/below the floor.
  */
-const POSITIVE: ReadonlySet<AcStatus> = new Set<AcStatus>(["pass", "readonly", "partial"]);
+const POSITIVE: ReadonlySet<AcStatus> = new Set<AcStatus>(["pass", "pass-with-evidence", "readonly", "partial"]);
 export function enforceRedLine(item: AcReportItem): { item: AcReportItem; downgraded: boolean } {
   if (item.evidence.length === 0 && POSITIVE.has(item.status)) {
     return { item: { ...item, status: "claimed" }, downgraded: true };

@@ -1108,6 +1108,20 @@ describe("FIX-1209: core.worktree contamination guard", () => {
     expect(result.detail).toBe("");
   });
 
+  it("FIX-1224: detects and heals core.worktree contamination in nested roll-meta", () => {
+    const repo = tmp("core-worktree-roll-meta");
+    mkdirSync(join(repo, ".roll"), { recursive: true });
+    execFileSync("git", ["init", repo]);
+    execFileSync("git", ["init", "-q"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["config", "--local", "core.worktree", "/tmp/fake-ranking-cwd"], { cwd: join(repo, ".roll") });
+
+    const result = checkCoreWorktreeContamination(repo);
+
+    expect(result.healed).toBe(true);
+    expect(result.detail).toContain("/tmp/fake-ranking-cwd");
+    expect(() => execFileSync("git", ["config", "--local", "--get", "core.worktree"], { cwd: join(repo, ".roll") })).toThrow();
+  });
+
   it("IDENTITY: resolved path containing worktree marker triggers assertion", async () => {
     // This test uses a worktree-like path to verify the identity assertion in
     // loopRunOnceCommand rejects it.

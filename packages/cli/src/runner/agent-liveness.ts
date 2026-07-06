@@ -36,10 +36,26 @@
  * a diff that happens to mention "login" or "network".
  */
 import type { AgentSpawn } from "./agent-spawn.js";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 /** Why an agent could not be reached. `unknown` = hung/failed with no signature
  *  we can attribute (treated as soft — never drives the all-blocked alert). */
-export type BlockCause = "auth" | "network" | "unknown";
+export type BlockCause = "quota" | "auth" | "network" | "unknown";
+
+export type RigSuspendCause = "quota" | "auth" | "network" | "agent_stall";
+
+export interface RigLifecycleEntry {
+  readonly status: "active" | "suspended";
+  readonly cause?: RigSuspendCause;
+  readonly detail?: string;
+  readonly suspendedAt?: number;
+  readonly nextProbeAt?: number;
+}
+
+export interface RigLifecycleState {
+  readonly rigs: Record<string, RigLifecycleEntry>;
+}
 
 export interface ReachResult {
   agent: string;
@@ -49,6 +65,15 @@ export interface ReachResult {
 }
 
 // Auth-block signatures: the agent ran but is not authenticated.
+const QUOTA_SIGNATURES: RegExp[] = [
+  /\bquota\b/i,
+  /\brate\s*limit/i,
+  /\b429\b.{0,60}\b(limit|quota|too many requests)\b/i,
+  /\b(insufficient|exceeded|exhausted|out of)\b.{0,40}\b(quota|credits?|balance|tokens?)\b/i,
+  /\b(quota|credits?|balance|tokens?)\b.{0,40}\b(insufficient|exceeded|exhausted|used up)\b/i,
+  /额度(不足|已用完|耗尽|超限)|配额(不足|已用完|耗尽|超限)|余额不足|限流/,
+];
+
 const AUTH_SIGNATURES: RegExp[] = [
   /\/login\b/i,
   /\bplease\s+run\s+\/?login\b/i,
@@ -96,8 +121,9 @@ const NETWORK_SIGNATURES: RegExp[] = [
  * over NETWORK when both match (a 403 behind a working proxy is still an auth
  * problem). Returns null when nothing matches → treat as live/slow.
  */
-export function classifyBlockSignature(text: string): "auth" | "network" | null {
+export function classifyBlockSignature(text: string): "quota" | "auth" | "network" | null {
   if (text === "") return null;
+  if (QUOTA_SIGNATURES.some((r) => r.test(text))) return "quota";
   if (AUTH_SIGNATURES.some((r) => r.test(text))) return "auth";
   if (NETWORK_SIGNATURES.some((r) => r.test(text))) return "network";
   return null;
@@ -163,4 +189,118 @@ export async function probeAgentReachable(
 
 function firstLine(s: string): string {
   return (s.split("\n").find((l) => l.trim() !== "") ?? "").trim().slice(0, 200);
+}
+
+export const DEFAULT_RIG_RECOVERY_PROBE_MS = 30 * 60 * 1000;
+
+export function rigLifecycleStatePath(runtimeDir: string): string {
+  return join(runtimeDir, "rig-lifecycle.json");
+}
+
+export function readRigLifecycleState(runtimeDir: string): RigLifecycleState {
+  const path = rigLifecycleStatePath(runtimeDir);
+  try {
+    if (!existsSync(path)) return { rigs: {} };
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    if (parsed === null || typeof parsed !== "object") return { rigs: {} };
+    const raw = (parsed as Record<string, unknown>)["rigs"];
+    if (raw === null || typeof raw !== "object") return { rigs: {} };
+    const rigs: Record<string, RigLifecycleEntry> = {};
+    for (const [agent, value] of Object.entries(raw as Record<string, unknown>)) {
+      if (value === null || typeof value !== "object") continue;
+      const rec = value as Record<string, unknown>;
+      const status = rec["status"];
+      if (status !== "active" && status !== "suspended") continue;
+      const cause = rec["cause"];
+      const validCause = cause === "quota" || cause === "auth" || cause === "network" || cause === "agent_stall";
+      rigs[agent] = {
+        status,
+        ...(validCause ? { cause } : {}),
+        ...(typeof rec["detail"] === "string" ? { detail: rec["detail"] } : {}),
+        ...(typeof rec["suspendedAt"] === "number" ? { suspendedAt: rec["suspendedAt"] } : {}),
+        ...(typeof rec["nextProbeAt"] === "number" ? { nextProbeAt: rec["nextProbeAt"] } : {}),
+      };
+    }
+    return { rigs };
+  } catch {
+    return { rigs: {} };
+  }
+}
+
+export function writeRigLifecycleState(runtimeDir: string, state: RigLifecycleState): void {
+  mkdirSync(runtimeDir, { recursive: true });
+  const path = rigLifecycleStatePath(runtimeDir);
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`);
+  renameSync(tmp, path);
+}
+
+export function suspendRig(
+  runtimeDir: string,
+  agent: string,
+  cause: RigSuspendCause,
+  detail: string,
+  nowMs = Date.now(),
+  probeAfterMs = DEFAULT_RIG_RECOVERY_PROBE_MS,
+): RigLifecycleEntry {
+  const state = readRigLifecycleState(runtimeDir);
+  const entry: RigLifecycleEntry = {
+    status: "suspended",
+    cause,
+    detail,
+    suspendedAt: nowMs,
+    nextProbeAt: nowMs + probeAfterMs,
+  };
+  try {
+    writeRigLifecycleState(runtimeDir, { rigs: { ...state.rigs, [agent]: entry } });
+  } catch {
+    /* runtime lifecycle is best-effort; event stream still carries the signal */
+  }
+  return entry;
+}
+
+export function recoverRig(runtimeDir: string, agent: string): RigLifecycleEntry {
+  const state = readRigLifecycleState(runtimeDir);
+  const entry: RigLifecycleEntry = { status: "active" };
+  try {
+    writeRigLifecycleState(runtimeDir, { rigs: { ...state.rigs, [agent]: entry } });
+  } catch {
+    /* runtime lifecycle is best-effort; event stream still carries the signal */
+  }
+  return entry;
+}
+
+export function activeRigs(agents: readonly string[], state: RigLifecycleState): string[] {
+  return agents.filter((agent) => state.rigs[agent]?.status !== "suspended");
+}
+
+export function suspendedRigs(agents: readonly string[], state: RigLifecycleState): Array<{ agent: string; entry: RigLifecycleEntry }> {
+  return agents
+    .map((agent) => ({ agent, entry: state.rigs[agent] }))
+    .filter((item): item is { agent: string; entry: RigLifecycleEntry } => item.entry?.status === "suspended");
+}
+
+export async function probeDueSuspendedRigs(opts: {
+  runtimeDir: string;
+  agents: readonly string[];
+  nowMs: number;
+  probe: (agent: string) => Promise<ReachResult>;
+  onProbe?: (result: { agent: string; recovered: boolean; entry: RigLifecycleEntry; detail: string }) => void;
+}): Promise<RigLifecycleState> {
+  let state = readRigLifecycleState(opts.runtimeDir);
+  for (const { agent, entry } of suspendedRigs(opts.agents, state)) {
+    if ((entry.nextProbeAt ?? 0) > opts.nowMs) continue;
+    const reach = await opts.probe(agent);
+    if (reach.reachable) {
+      recoverRig(opts.runtimeDir, agent);
+      state = readRigLifecycleState(opts.runtimeDir);
+      opts.onProbe?.({ agent, recovered: true, entry: { status: "active" }, detail: reach.detail });
+      continue;
+    }
+    const cause = entry.cause ?? (reach.cause === "quota" || reach.cause === "auth" || reach.cause === "network" ? reach.cause : "agent_stall");
+    const next = suspendRig(opts.runtimeDir, agent, cause, reach.detail, opts.nowMs);
+    state = readRigLifecycleState(opts.runtimeDir);
+    opts.onProbe?.({ agent, recovered: false, entry: next, detail: reach.detail });
+  }
+  return state;
 }

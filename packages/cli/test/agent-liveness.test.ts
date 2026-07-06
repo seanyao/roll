@@ -3,9 +3,20 @@
  * down) from a SLOW one, so a "timeout" is attributed to the real cause instead
  * of burning the review budget on a doomed call.
  */
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AgentSpawnResult } from "../src/runner/agent-spawn.js";
-import { classifyBlockSignature, probeAgentReachable } from "../src/runner/agent-liveness.js";
+import {
+  activeRigs,
+  classifyBlockSignature,
+  probeAgentReachable,
+  probeDueSuspendedRigs,
+  readRigLifecycleState,
+  recoverRig,
+  suspendRig,
+} from "../src/runner/agent-liveness.js";
 
 const ok = (stdout: string): AgentSpawnResult => ({ stdout, stderr: "", exitCode: 0, timedOut: false });
 const fail = (stderr: string, exitCode = 1): AgentSpawnResult => ({ stdout: "", stderr, exitCode, timedOut: false });
@@ -18,6 +29,12 @@ describe("classifyBlockSignature — FIX-363 cause heuristics", () => {
     expect(classifyBlockSignature("401 Unauthorized")).toBe("auth");
     expect(classifyBlockSignature("invalid api key")).toBe("auth");
     expect(classifyBlockSignature("请登录后重试")).toBe("auth");
+  });
+
+  it("quota signatures classify separately from auth", () => {
+    expect(classifyBlockSignature("HTTP 429 quota exceeded")).toBe("quota");
+    expect(classifyBlockSignature("insufficient credits for this request")).toBe("quota");
+    expect(classifyBlockSignature("额度不足，请稍后重试")).toBe("quota");
   });
 
   it("network signatures (VPN/proxy/DNS/TLS down)", () => {
@@ -72,6 +89,64 @@ describe("classifyBlockSignature — FIX-363 cause heuristics", () => {
   it("auth still wins over network when both 403 proxy appear", () => {
     expect(classifyBlockSignature("403 via proxy")).toBe("auth");
     expect(classifyBlockSignature("HTTP 403 connection reset via proxy")).toBe("auth");
+  });
+});
+
+describe("rig lifecycle state — US-LOOP-091 runtime suspend/recovery", () => {
+  it("suspends a rig at runtime without changing the configured pool", () => {
+    const runtimeDir = mkdtempSync(join(tmpdir(), "roll-rig-lifecycle-"));
+    suspendRig(runtimeDir, "kimi", "quota", "quota exhausted", 1_000, 30_000);
+
+    const state = readRigLifecycleState(runtimeDir);
+    expect(state.rigs.kimi).toMatchObject({
+      status: "suspended",
+      cause: "quota",
+      detail: "quota exhausted",
+      suspendedAt: 1_000,
+      nextProbeAt: 31_000,
+    });
+    expect(activeRigs(["kimi", "pi"], state)).toEqual(["pi"]);
+  });
+
+  it("probeDueSuspendedRigs recovers a live rig back into the active pool", async () => {
+    const runtimeDir = mkdtempSync(join(tmpdir(), "roll-rig-recover-"));
+    suspendRig(runtimeDir, "kimi", "auth", "login expired", 1_000, 30_000);
+
+    const state = await probeDueSuspendedRigs({
+      runtimeDir,
+      agents: ["kimi"],
+      nowMs: 31_000,
+      probe: async () => ({ agent: "kimi", reachable: true, cause: "live", detail: "ok" }),
+    });
+
+    expect(state.rigs.kimi).toEqual({ status: "active" });
+    expect(activeRigs(["kimi"], state)).toEqual(["kimi"]);
+  });
+
+  it("not-yet-due suspended rigs stay suspended without a probe", async () => {
+    const runtimeDir = mkdtempSync(join(tmpdir(), "roll-rig-not-due-"));
+    suspendRig(runtimeDir, "pi", "agent_stall", "silent timeout", 1_000, 30_000);
+    let probes = 0;
+
+    const state = await probeDueSuspendedRigs({
+      runtimeDir,
+      agents: ["pi"],
+      nowMs: 30_999,
+      probe: async () => {
+        probes += 1;
+        return { agent: "pi", reachable: true, cause: "live", detail: "ok" };
+      },
+    });
+
+    expect(probes).toBe(0);
+    expect(state.rigs.pi?.status).toBe("suspended");
+  });
+
+  it("recoverRig explicitly returns a suspended rig to active", () => {
+    const runtimeDir = mkdtempSync(join(tmpdir(), "roll-rig-manual-recover-"));
+    suspendRig(runtimeDir, "claude", "auth", "login expired", 1_000, 30_000);
+    recoverRig(runtimeDir, "claude");
+    expect(readRigLifecycleState(runtimeDir).rigs.claude).toEqual({ status: "active" });
   });
 });
 

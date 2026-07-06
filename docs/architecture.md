@@ -131,6 +131,11 @@ no-TCR/gave-up、成功交付、成本档位和角色能力标签排序。运行
 [--json]` 暴露 route trace：候选池、ranked score/reasons、warnings、skipped 候选及原因、策略、
 近期使用输入、最终 agent 和 source 配置路径。
 
+**Rig lifecycle**：quota、auth、network 和 agent stall 是运行级状态，不回写
+`agents.yaml`。loop 把不可用 rig 写入 runtime lifecycle 文件并发出 `rig:suspended` /
+`rig:recovered` 事件；挂起 rig 按恢复窗口轻量探活，恢复后自动回到候选池。若当前池全挂起，
+cycle 写 `loop:pending`，只做恢复探测，不启动 Builder、不把卡记失败、不触发全局熔断。
+
 **反规则**：不因历史表现自动改写角色绑定。不做失败后的静默跨 agent 重试。指标可以*建议*
 策略变更，但绝不绕过 human-on-the-loop。
 

@@ -142,6 +142,7 @@ export type V2CycleStatus =
   | "orphan"
   | "local"
   | "needs_review"
+  | "pending_rig_recovery"
   | "failed"
   | "aborted"
   | "blocked"
@@ -204,6 +205,8 @@ export function mapV2Status(status: V2CycleStatus): TerminalOutcome {
       // blocked Done; the branch is preserved. NOT a `failed` (no code defect) —
       // a distinct "awaits review" terminal so the completed work is not orphaned.
       return "needs_review";
+    case "pending_rig_recovery":
+      return "idle_no_work";
     case "failed":
       return "failed";
     case "aborted":
@@ -850,6 +853,7 @@ export type CycleEvent =
   | { type: "story_picked"; storyId: string }
   | { type: "no_story" } // picker returned nothing → idle (bin/roll:9180-class).
   | { type: "route_resolved"; agent: AgentId; model: ModelId }
+  | { type: "route_pending"; reason: string }
   | { type: "agent_exited"; exit: number; timedOut: boolean }
   | { type: "facts_captured"; facts: CapturedFacts }
   | { type: "published"; result: PublishResult }
@@ -876,6 +880,7 @@ const EVENT_VALID_PHASES: Record<Exclude<CycleEvent["type"], "start">, CyclePhas
   story_picked: ["pick"],
   no_story: ["pick"],
   route_resolved: ["route"],
+  route_pending: ["route"],
   agent_exited: ["execute"],
   facts_captured: ["reconcile"],
   published: ["publish"],
@@ -1074,6 +1079,11 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
           { kind: "spawn_agent", agent: event.agent, attempt: 1 },
         ],
       };
+
+    case "route_pending":
+      return terminate({ ...state, phase: "route" }, "pending_rig_recovery", [
+        { kind: "cleanup_environment" }, { kind: "cleanup_worktree", branch: state.ctx.branch },
+      ]);
 
     case "agent_exited": {
       const plan = retryPlan({ attempt: state.attempt, exit: event.exit, timedOut: event.timedOut });

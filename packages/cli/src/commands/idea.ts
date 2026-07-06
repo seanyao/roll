@@ -25,8 +25,9 @@
  *
  * Output follows the resolved locale (single-language).
  */
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { BacklogItem } from "@roll/core";
 import { BacklogStore, ConflictError, IDEA_SECTIONS, appendIdea, inferEpic, planIdea } from "@roll/core";
 import { type Lang, resolveLang, t, v2Catalog, v3Catalog } from "@roll/spec";
 import { generateIndex } from "../lib/archive.js";
@@ -35,11 +36,36 @@ import { renderSpecMd, renderStoryPage } from "../lib/story-page.js";
 import { c, renderState } from "../render.js";
 
 const BACKLOG_PATH = ".roll/backlog.md";
+const STORY_ID_DIR_RE = /^(?:US-[A-Z]+-\d+[a-z]?|FIX-\d+[a-z]?|REFACTOR-\d+[a-z]?|IDEA-\d+[a-z]?|BUG-\d+[a-z]?)$/;
 
 /** Locale label, single-language: v3 keys fall back to v2 keys then the key. */
 function label(lang: Lang, key: string, ...args: ReadonlyArray<string | number>): string {
   if (v3Catalog[key] !== undefined) return t(v3Catalog, lang, key, ...args);
   return t(v2Catalog, lang, key, ...args);
+}
+
+function readCardFolderIds(projectPath: string): string[] {
+  const featuresDir = join(projectPath, ".roll", "features");
+  try {
+    const epics = readdirSync(featuresDir, { withFileTypes: true });
+    const ids: string[] = [];
+    for (const epic of epics) {
+      if (!epic.isDirectory()) continue;
+      const epicDir = join(featuresDir, epic.name);
+      for (const card of readdirSync(epicDir, { withFileTypes: true })) {
+        if (!card.isDirectory()) continue;
+        if (!STORY_ID_DIR_RE.test(card.name)) continue;
+        if (existsSync(join(epicDir, card.name, "spec.md"))) ids.push(card.name);
+      }
+    }
+    return ids;
+  } catch {
+    return [];
+  }
+}
+
+function cardIdsAsBacklogItems(ids: readonly string[]): BacklogItem[] {
+  return ids.map((id) => ({ id, desc: "", status: "" }));
 }
 
 export function ideaCommand(args: string[]): number {
@@ -74,7 +100,10 @@ export function ideaCommand(args: string[]): number {
 
   const store = new BacklogStore();
   const snap = store.readBacklog(BACKLOG_PATH);
-  const plan = planIdea(snap.items, text);
+  const projectPath = process.cwd();
+  const occupiedCardItems = cardIdsAsBacklogItems(readCardFolderIds(projectPath));
+  const extraOccupiedIds: string[] = [];
+  let plan = planIdea([...snap.items, ...occupiedCardItems], text);
 
   if (plan.violations.length > 0) {
     process.stderr.write(
@@ -82,6 +111,16 @@ export function ideaCommand(args: string[]): number {
     );
     process.stderr.write(`  ${c("dim", label(lang, "ideav3.lint_hint"))}\n`);
     return 1;
+  }
+
+  // REFACTOR-050 AC1/AC3: create the full story card folder, same as `story new`.
+  // Epic is inferred from the description text; falls back to "uncategorized".
+  const epic = inferEpic(text) ?? UNCATEGORIZED;
+  let cardDir = join(projectPath, ".roll", "features", epic, plan.id);
+  while (existsSync(join(cardDir, "spec.md"))) {
+    extraOccupiedIds.push(plan.id);
+    plan = planIdea([...snap.items, ...occupiedCardItems, ...cardIdsAsBacklogItems(extraOccupiedIds)], text);
+    cardDir = join(projectPath, ".roll", "features", epic, plan.id);
   }
 
   try {
@@ -105,32 +144,20 @@ export function ideaCommand(args: string[]): number {
   process.stdout.write(`  ${c("dim", label(lang, "ideav3.section") + ":")} ${section}\n`);
   process.stdout.write(`  ${c("dim", label(lang, "ideav3.text") + ":")}    ${text}\n\n`);
 
-  // REFACTOR-050 AC1/AC3: create the full story card folder, same as `story new`.
-  // Epic is inferred from the description text; falls back to "uncategorized".
-  const epic = inferEpic(text) ?? UNCATEGORIZED;
-  const projectPath = process.cwd();
-  const cardDir = join(projectPath, ".roll", "features", epic, plan.id);
   try {
-    // Never overwrite an existing spec (cards are born once, same guard as `story new`).
-    if (existsSync(join(cardDir, "spec.md"))) {
-      process.stdout.write(
-        `${c("dim", label(lang, "ideav3.card_exists", epic, plan.id))}\n`,
-      );
-    } else {
-      mkdirSync(cardDir, { recursive: true });
-      const card = {
-        id: plan.id,
-        title: text,
-        type: plan.kind,
-        epic: epic !== UNCATEGORIZED ? epic : undefined,
-        created: new Date().toISOString().slice(0, 10),
-      };
-      writeFileSync(join(cardDir, "spec.md"), renderSpecMd(card), "utf8");
-      writeFileSync(join(cardDir, "index.html"), renderStoryPage(card), "utf8");
-      process.stdout.write(
-        `  ${c("dim", label(lang, "ideav3.card_created", epic))}\n`,
-      );
-    }
+    mkdirSync(cardDir, { recursive: true });
+    const card = {
+      id: plan.id,
+      title: text,
+      type: plan.kind,
+      epic: epic !== UNCATEGORIZED ? epic : undefined,
+      created: new Date().toISOString().slice(0, 10),
+    };
+    writeFileSync(join(cardDir, "spec.md"), renderSpecMd(card), "utf8");
+    writeFileSync(join(cardDir, "index.html"), renderStoryPage(card), "utf8");
+    process.stdout.write(
+      `  ${c("dim", label(lang, "ideav3.card_created", epic))}\n`,
+    );
   } catch {
     /* best-effort: folder creation is non-blocking */
   }

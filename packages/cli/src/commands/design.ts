@@ -11,9 +11,10 @@
 import { spawn as spawnChild, type SpawnOptions } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { t, v2Catalog, v3Catalog, type Lang } from "@roll/spec";
+import { classifyStatus, t, v2Catalog, v3Catalog, type Lang } from "@roll/spec";
 import { normalizerFor, newNormalizerState, parseBacklog, type ActivitySignal } from "@roll/core";
 import { currentLang } from "./agent-list.js";
+import { loopGoCommand } from "./loop-go.js";
 import {
   agentEnvFromEnv,
   discoverInteractiveAgents,
@@ -23,6 +24,7 @@ import {
   readSkillBody,
 } from "../lib/interactive-agent.js";
 import { renderDesignReviewPageFromMarkdown } from "../lib/review-page.js";
+import { readRigLifecycleState } from "../runner/agent-liveness.js";
 
 function lang(): Lang {
   return currentLang();
@@ -110,12 +112,12 @@ function isRegularFile(path: string): boolean {
   }
 }
 
-/** True when `.roll/backlog.md` has at least one parseable card row. */
-function hasNonEmptyBacklog(cwd: string): boolean {
+/** True when `.roll/backlog.md` has at least one Todo card row. */
+function hasTodoBacklog(cwd: string): boolean {
   const bp = join(cwd, ".roll", "backlog.md");
   try {
     const content = readFileSync(bp, "utf8");
-    return parseBacklog(content).length > 0;
+    return parseBacklog(content).some((row) => classifyStatus(row.status) === "todo");
   } catch {
     return false;
   }
@@ -142,6 +144,8 @@ export interface DesignCommandDeps {
   readLine: () => string | null;
   /** Spawn the selected agent. */
   spawn: (bin: string, args: string[], opts: SpawnOptions, live?: DesignSpawnLive) => DesignSpawnResult | Promise<DesignSpawnResult>;
+  /** Start the autonomous loop after owner confirmation. */
+  runLoopGo: (args: string[]) => number | Promise<number>;
   /** Wall-clock epoch ms provider (used for timestamps and run folder naming). */
   now: () => number;
   /** Quiet interval before a live heartbeat is emitted. */
@@ -171,10 +175,10 @@ function lookupEpic(target: string, cwd: string): string | null {
   }
 }
 
-function readBacklogItems(cwd: string): { id: string; desc: string }[] {
+function readBacklogItems(cwd: string): { id: string; desc: string; status: string }[] {
   try {
     const content = readFileSync(join(cwd, ".roll", "backlog.md"), "utf8");
-    return parseBacklog(content).map((row) => ({ id: row.id, desc: row.desc }));
+    return parseBacklog(content).map((row) => ({ id: row.id, desc: row.desc, status: row.status }));
   } catch {
     return [];
   }
@@ -490,6 +494,7 @@ const defaultDeps: DesignCommandDeps = {
   cwd: process.cwd(),
   env: process.env,
   readLine: readLineFromStdin,
+  runLoopGo: loopGoCommand,
   now: () => Date.now(),
   heartbeatMs: 60_000,
   spawn: (bin, args, opts, live) => {
@@ -572,9 +577,10 @@ interface RunContext {
   target: string | null;
   fromFile: string | undefined;
   agent: string;
+  installedAgents: string[];
   transcriptPath: string;
   startTs: number;
-  beforeBacklog: { id: string; desc: string }[];
+  beforeBacklog: { id: string; desc: string; status: string }[];
 }
 
 function printStartBlock(ctx: RunContext): void {
@@ -647,6 +653,46 @@ function printHandoff(ctx: RunContext, statusCode: number, rawTranscript: string
   }
 }
 
+function newTodoCards(ctx: RunContext): { id: string; desc: string; status: string }[] {
+  const beforeIds = new Set(ctx.beforeBacklog.map((b) => b.id));
+  return readBacklogItems(ctx.cwd).filter((row) => !beforeIds.has(row.id) && classifyStatus(row.status) === "todo");
+}
+
+function runtimeDir(cwd: string): string {
+  return join(cwd, ".roll", "loop");
+}
+
+function printAgentPoolSummary(ctx: RunContext): void {
+  const state = readRigLifecycleState(runtimeDir(ctx.cwd));
+  const suspended = ctx.installedAgents
+    .map((agent) => ({ agent, entry: state.rigs[agent] }))
+    .filter((item) => item.entry?.status === "suspended");
+  const active = Math.max(0, ctx.installedAgents.length - suspended.length);
+  emit(t(v3Catalog, ctx.lang, "design.loop.agent_pool", active, suspended.length));
+  for (const { agent, entry } of suspended) {
+    emit(t(v3Catalog, ctx.lang, "design.loop.suspended_agent", agent, entry?.cause ?? "unknown"));
+  }
+}
+
+function maybeStartLoopAfterDesign(
+  ctx: RunContext,
+  d: DesignCommandDeps,
+  statusCode: number,
+): number | Promise<number> {
+  if (statusCode !== 0) return statusCode;
+  if (newTodoCards(ctx).length === 0) return statusCode;
+  printAgentPoolSummary(ctx);
+  emit(t(v3Catalog, ctx.lang, "design.loop.prompt"));
+  const answer = (d.readLine() ?? "").trim().toLowerCase();
+  if (answer === "y" || answer === "yes") {
+    const started = d.runLoopGo(["--review", "auto"]);
+    if (isPromiseLike(started)) return started.then((loopStatus) => (loopStatus === 0 ? statusCode : loopStatus));
+    return started === 0 ? statusCode : started;
+  }
+  emit(t(v3Catalog, ctx.lang, "design.loop.manual_next"));
+  return statusCode;
+}
+
 export function designCommand(args: string[], deps: Partial<DesignCommandDeps> = {}): number | Promise<number> {
   const d: DesignCommandDeps = { ...defaultDeps, ...deps };
   const l = lang();
@@ -680,9 +726,9 @@ export function designCommand(args: string[], deps: Partial<DesignCommandDeps> =
     return 1;
   }
 
-  // Bound bare design: no target and non-empty backlog → bounded help, no spawn.
+  // Bound bare design: no target and Todo backlog → bounded help, no spawn.
   if (fromFile === undefined && rest.length === 0) {
-    if (hasNonEmptyBacklog(d.cwd)) {
+    if (hasTodoBacklog(d.cwd)) {
       process.stdout.write(`${t(v3Catalog, l, "design.bare_backlog_help")}\n`);
       return 0;
     }
@@ -733,6 +779,7 @@ export function designCommand(args: string[], deps: Partial<DesignCommandDeps> =
     target,
     fromFile,
     agent,
+    installedAgents: installed,
     transcriptPath: runTranscript,
     startTs,
     beforeBacklog: readBacklogItems(d.cwd),
@@ -743,7 +790,7 @@ export function designCommand(args: string[], deps: Partial<DesignCommandDeps> =
   const live = createLiveProgress(ctx, d, { raw: rawMode, verbose });
   live.startHeartbeat();
 
-  const finish = (result: DesignSpawnResult): number => {
+  const finish = (result: DesignSpawnResult): number | Promise<number> => {
     if (!live.sawLiveOutput) {
       live.ingestStdout(result.stdout ?? "");
       live.ingestStderr(result.stderr ?? "");
@@ -757,7 +804,7 @@ export function designCommand(args: string[], deps: Partial<DesignCommandDeps> =
     live.flush();
     const statusCode = result.status ?? (result.signal === null ? 1 : 130);
     printHandoff(ctx, statusCode, live.rawTranscript);
-    return statusCode;
+    return maybeStartLoopAfterDesign(ctx, d, statusCode);
   };
 
   const spawned = d.spawn(

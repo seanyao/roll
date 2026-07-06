@@ -163,6 +163,7 @@ describe("US-GOAL-002 — roll loop go", () => {
     expect(r.code).toBe(0);
     expect(calls).toBe(0);
     expect(r.out).toContain("bootstrap_artifacts_unconfirmed");
+    expect(r.out).toContain("ALERT reason: bootstrap_artifacts_unconfirmed");
     expect(r.out).toContain("AGENTS.md");
     const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
     expect(goal.status).toBe("paused");
@@ -170,8 +171,56 @@ describe("US-GOAL-002 — roll loop go", () => {
     expect(goal.progress?.noProgressCycles).toBeUndefined();
     const events = readEvents(p);
     expect(events.some((e) => e.type === "cycle:start")).toBe(false);
-    expect(events.some((e) => e.type === "goal:gate_tripped" && e.reason === "bootstrap_artifacts_unconfirmed")).toBe(true);
+    expect(
+      events.some(
+        (e) =>
+          e.type === "goal:gate_tripped" &&
+          e.reason === "bootstrap_artifacts_unconfirmed" &&
+          typeof (e.reading as Record<string, unknown> | undefined)?.reasonLine === "string" &&
+          String((e.reading as Record<string, unknown>).reasonLine).includes("ALERT reason: bootstrap_artifacts_unconfirmed"),
+      ),
+    ).toBe(true);
     expect(events.some((e) => e.type === "goal:gate_tripped" && e.reason === "no_progress_breaker")).toBe(false);
+  });
+
+  it("FIX-1221: tracked cycle writeback files do not trip the bootstrap preflight", async () => {
+    const p = project();
+    execSync("git init -q", { cwd: p });
+    mkdirSync(join(p, ".roll", "features", "loop-engine", "FIX-1221"), { recursive: true });
+    writeBacklog(p, [
+      "| [FIX-1221](.roll/features/loop-engine/FIX-1221/spec.md) | writeback | 📋 Todo |",
+    ]);
+    writeFileSync(join(p, ".roll", "features.md"), "# Features\n\n- FIX-1221 Todo\n");
+    writeFileSync(join(p, ".roll", "features", "loop-engine", "FIX-1221", "spec.md"), "# FIX-1221\n\n- [ ] AC\n");
+    execSync("git add .roll/backlog.md .roll/features.md .roll/features/loop-engine/FIX-1221/spec.md && git commit -qm init", {
+      cwd: p,
+      env: { ...process.env, GIT_AUTHOR_NAME: "Test", GIT_AUTHOR_EMAIL: "test@example.com", GIT_COMMITTER_NAME: "Test", GIT_COMMITTER_EMAIL: "test@example.com" },
+    });
+    writeBacklog(p, [
+      "| [FIX-1221](.roll/features/loop-engine/FIX-1221/spec.md) | writeback | ✅ Done |",
+    ]);
+    writeFileSync(join(p, ".roll", "features.md"), "# Features\n\n- FIX-1221 Done\n");
+    writeFileSync(join(p, ".roll", "features", "loop-engine", "FIX-1221", "spec.md"), "# FIX-1221\n\n- [x] AC\n");
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_250 + calls,
+      nowIso: () => `2026-06-11T10:02:5${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async () => {
+        calls += 1;
+        return 1;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "FIX-1221", "--max-cycles", "1"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(1);
+    expect(r.out).not.toContain("bootstrap_artifacts_unconfirmed");
+    expect(readEvents(p).some((e) => e.type === "goal:gate_tripped" && e.reason === "bootstrap_artifacts_unconfirmed")).toBe(false);
   });
 
   it("FIX-1072: mixed product-code dirt is not hidden behind the bootstrap-artifact preflight", async () => {
@@ -231,6 +280,26 @@ describe("US-GOAL-002 — roll loop go", () => {
       files: [".roll/features/loop-engine/FIX-1203/20260703-010203-1/user-patch.txt"],
     });
     expect(classifyBootstrapArtifacts(["AGENTS.md"])).toMatchObject({ kind: "bootstrap_only", files: ["AGENTS.md"] });
+  });
+
+  it("FIX-1221: bootstrap classifier ignores modified cycle writeback paths but keeps untracked convention files gated", () => {
+    expect(
+      classifyBootstrapArtifacts([
+        { status: " M", path: ".roll/features/loop-engine/FIX-1221/spec.md" },
+        { status: " M", path: ".roll/backlog.md" },
+        { status: " M", path: ".roll/features.md" },
+      ]),
+    ).toMatchObject({ kind: "none", files: [] });
+    expect(
+      classifyBootstrapArtifacts([
+        { status: "??", path: ".roll/features/loop-engine/FIX-1221/spec.md" },
+        { status: "??", path: ".roll/backlog.md" },
+        { status: "??", path: ".roll/features.md" },
+      ]),
+    ).toMatchObject({
+      kind: "bootstrap_only",
+      files: [".roll/features/loop-engine/FIX-1221/spec.md", ".roll/backlog.md", ".roll/features.md"],
+    });
   });
 
   it("runs cycles back-to-back until a pause marker, then pauses the goal at the cycle boundary", async () => {

@@ -7,6 +7,7 @@ import {
 import { parseEventLine, type RollEvent } from "@roll/spec";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { classifyCorrectionFailure, playbookForFailure } from "./failure-attribution.js";
 
 export type CorrectionCircuitApplyResult =
   | { status: "continue" }
@@ -62,14 +63,19 @@ export function applyCorrectionCircuitBreaker(
   if (verdict.action === "continue") return { status: "continue" };
   if (alreadyTripped(events, verdict)) return { status: "already_tripped", verdict };
 
+  const failure = classifyCorrectionFailure(verdict.signal);
+  const playbook = playbookForFailure(failure.failureClass, failure.rootCauseKey);
   const pauseMarker = join(projectPath, ".roll", "loop", `PAUSE-${slug}`);
   const pauseWritten = !existsSync(pauseMarker);
   const alertMsg =
     `# ALERT — correction circuit breaker tripped\n\n` +
     `**Reason**: ${verdict.reason}\n` +
     `**Signal**: ${verdict.signal}\n` +
+    `**Failure class**: ${failure.failureClass}\n` +
+    `**Root cause**: ${failure.rootCauseKey}\n` +
     `**Count**: ${verdict.count}/${verdict.threshold}\n` +
     (verdict.storyId !== undefined ? `**Story**: ${verdict.storyId}\n` : "") +
+    `**Playbook**: ${playbook}\n` +
     `**Action**: loop paused to prevent unattended correction oscillation. Resume manually with \`roll loop resume\`.\n`;
   try {
     mkdirSync(dirname(pauseMarker), { recursive: true });
@@ -83,6 +89,8 @@ export function applyCorrectionCircuitBreaker(
       count: verdict.count,
       threshold: verdict.threshold,
       reason: verdict.reason,
+      failureClass: failure.failureClass,
+      rootCauseKey: failure.rootCauseKey,
       ts: nowSec,
     });
     appendEvent(eventsPath, { type: "policy:safety_pause", loop: "ci", reason: verdict.reason, ts: nowSec });

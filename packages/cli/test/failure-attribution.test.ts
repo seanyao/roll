@@ -239,6 +239,17 @@ describe("REFACTOR-068 classifyCorrectionFailure — unified correction → fail
     });
   });
 
+  it("aliases legacy correction signal text before classification", () => {
+    expect(classifyCorrectionFailure(" review-score regression ")).toEqual({
+      failureClass: "card",
+      rootCauseKey: "card:review_score_regression",
+    });
+    expect(classifyCorrectionFailure("CI failed")).toEqual({
+      failureClass: "harness",
+      rootCauseKey: "harness:ci_red",
+    });
+  });
+
   it("maps empty_acceptance_report to card:empty_acceptance", () => {
     expect(classifyCorrectionFailure("empty_acceptance_report")).toEqual({
       failureClass: "card",

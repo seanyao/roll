@@ -360,7 +360,8 @@ function writeRootCauseState(runtimeDir: string, state: RootCauseState): void {
  *  map through the single failure taxonomy instead of carrying independent
  *  failureClass/rootCauseKey. */
 export function classifyCorrectionFailure(signal: string): Pick<FailureAttribution, "failureClass" | "rootCauseKey"> {
-  switch (signal) {
+  const normalizedSignal = signal.trim().toLowerCase().replace(/[-\s]+/g, "_");
+  switch (normalizedSignal) {
     case "review_score_regression":
       return { failureClass: "card", rootCauseKey: "card:review_score_regression" };
     case "empty_acceptance_report":

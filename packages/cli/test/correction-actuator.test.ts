@@ -54,6 +54,8 @@ describe("US-EVID-014 correction actuator runner adapter", () => {
     expect(events).toContain('"type":"correction:action"');
     expect(events).toContain('"action":"alert_only"');
     expect(events).toContain('"plannedAction":"open_fix"');
+    expect(events).toContain('"failureClass":"card"');
+    expect(events).toContain('"rootCauseKey":"card:missing_acceptance"');
   });
 
   it("auto mode opens one idempotent manual-merge FIX card with attribution", () => {

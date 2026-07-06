@@ -178,6 +178,56 @@ describe("main checkout guard — US-LOOP-089", () => {
     expect(manifest.files).toEqual(["tracked.txt", "untracked.txt"]);
   });
 
+  it("FIX-1228: restores private agent timestamp state without quarantining the story", async () => {
+    const repo = cleanRepo("roll-main-private-state-");
+    const runtimeDir = join(repo, ".roll", "loop");
+    mkdirSync(join(repo, ".pi", "workflows"), { recursive: true });
+    writeFileSync(join(repo, ".pi", "workflows", "index.json"), JSON.stringify({ schemaVersion: 1, updatedAt: "2026-07-05T16:06:15.979Z", runs: [] }, null, 2) + "\n");
+    git(repo, ["add", ".pi/workflows/index.json"]);
+    git(repo, ["commit", "-q", "-m", "seed pi state"]);
+    git(repo, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    writeFileSync(join(repo, ".pi", "workflows", "index.json"), JSON.stringify({ schemaVersion: 1, updatedAt: "2026-07-06T14:59:22.574Z", runs: [] }, null, 2) + "\n");
+
+    const results = await quarantineMainCheckout({
+      repoCwd: repo,
+      runtimeDir,
+      cycleId: "C-private-state",
+      storyId: "US-LOOP-091",
+      phase: "pre-spawn",
+      nowMs: () => 1_500,
+    });
+
+    expect(results).toEqual([]);
+    expect(sh(repo, ["status", "--porcelain"])).toBe("");
+    expect(readFileSync(join(repo, ".pi", "workflows", "index.json"), "utf8")).toContain("2026-07-05T16:06:15.979Z");
+  });
+
+  it("FIX-1228: still quarantines real product dirt after restoring private agent timestamp state", async () => {
+    const repo = cleanRepo("roll-main-private-plus-product-");
+    const runtimeDir = join(repo, ".roll", "loop");
+    mkdirSync(join(repo, ".pi", "workflows"), { recursive: true });
+    writeFileSync(join(repo, ".pi", "workflows", "index.json"), JSON.stringify({ schemaVersion: 1, updatedAt: "2026-07-05T16:06:15.979Z", runs: [] }, null, 2) + "\n");
+    git(repo, ["add", ".pi/workflows/index.json"]);
+    git(repo, ["commit", "-q", "-m", "seed pi state"]);
+    git(repo, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    writeFileSync(join(repo, ".pi", "workflows", "index.json"), JSON.stringify({ schemaVersion: 1, updatedAt: "2026-07-06T14:59:22.574Z", runs: [] }, null, 2) + "\n");
+    writeFileSync(join(repo, "tracked.txt"), "real leak\n", "utf8");
+
+    const results = await quarantineMainCheckout({
+      repoCwd: repo,
+      runtimeDir,
+      cycleId: "C-private-plus-product",
+      storyId: "US-LOOP-091",
+      phase: "pre-spawn",
+      nowMs: () => 1_600,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]?.files).toEqual(["tracked.txt"]);
+    expect(sh(repo, ["status", "--porcelain", "--", "tracked.txt", ".pi/workflows/index.json"])).toBe("");
+    expect(readFileSync(join(repo, ".pi", "workflows", "index.json"), "utf8")).toContain("2026-07-05T16:06:15.979Z");
+  });
+
   it("quarantines ahead commits into a rescue branch and resets main to origin/main", async () => {
     const repo = cleanRepo("roll-main-quarantine-ahead-");
     const runtimeDir = join(repo, ".roll", "loop");

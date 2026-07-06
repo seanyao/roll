@@ -64,10 +64,6 @@ export interface LoopSafetyConfig {
   maxConsecutiveFailures: number;
   /** Action when the consecutive-failure ceiling trips. */
   actionOnBreach: string;
-  /** Same-story failures before permanent hold (C5; default 3). */
-  maxStoryFailures: number;
-  /** Action when the per-story ceiling trips. */
-  actionOnStoryBreach: string;
   /** FIX-207 acceptance-report gate escalation. Absent ⇒ soft (record-only);
    *  `hard` makes a delivery with no fresh acceptance report fail the cycle. */
   attestGate?: "soft" | "hard";
@@ -149,9 +145,7 @@ export interface PickPolicyConfig {
 
 /** Defaults mirroring the only v2 numbers (US-LOOP-057 strike count = 3). */
 export const DEFAULT_MAX_CONSECUTIVE_FAILURES = 3;
-export const DEFAULT_MAX_STORY_FAILURES = 3;
 export const DEFAULT_ACTION_ON_BREACH = "pause_and_notify";
-export const DEFAULT_ACTION_ON_STORY_BREACH = "hold";
 export const DEFAULT_CORRECTION_SIGNAL_THRESHOLD = 3;
 export const DEFAULT_CORRECTION_SIGNAL_WINDOW_SEC = 12 * 60 * 60;
 export const DEFAULT_CORRECTION_ACTUATOR = "conservative";
@@ -263,8 +257,6 @@ export function parsePolicy(yaml: string): Policy {
   let loopSafety: LoopSafetyConfig = {
     maxConsecutiveFailures: DEFAULT_MAX_CONSECUTIVE_FAILURES,
     actionOnBreach: DEFAULT_ACTION_ON_BREACH,
-    maxStoryFailures: DEFAULT_MAX_STORY_FAILURES,
-    actionOnStoryBreach: DEFAULT_ACTION_ON_STORY_BREACH,
     correctionSignalThreshold: DEFAULT_CORRECTION_SIGNAL_THRESHOLD,
     correctionSignalWindowSec: DEFAULT_CORRECTION_SIGNAL_WINDOW_SEC,
     correctionActuator: DEFAULT_CORRECTION_ACTUATOR,
@@ -377,8 +369,6 @@ function parseLoopSafety(lines: PreLine[], start: number): [number, LoopSafetyCo
   const cfg: LoopSafetyConfig = {
     maxConsecutiveFailures: numOr(flat["max_consecutive_failures"], DEFAULT_MAX_CONSECUTIVE_FAILURES),
     actionOnBreach: flat["action_on_breach"] ?? DEFAULT_ACTION_ON_BREACH,
-    maxStoryFailures: numOr(flat["max_story_failures"], DEFAULT_MAX_STORY_FAILURES),
-    actionOnStoryBreach: flat["action_on_story_breach"] ?? DEFAULT_ACTION_ON_STORY_BREACH,
     correctionSignalThreshold: numOr(flat["correction_signal_threshold"], DEFAULT_CORRECTION_SIGNAL_THRESHOLD),
     correctionSignalWindowSec: numOr(flat["correction_signal_window_sec"], DEFAULT_CORRECTION_SIGNAL_WINDOW_SEC),
     correctionActuator: flat["correction_actuator"] === "auto" ? "auto" : DEFAULT_CORRECTION_ACTUATOR,
@@ -502,49 +492,6 @@ export function resolvePolicyRoute(policy: Policy, query: RouteQuery): ResolvedR
     };
   }
   return null;
-}
-
-// ── Safety thresholds ────────────────────────────────────────────────────────
-
-/** A safety-gate decision off the consecutive-failure counter (C6). */
-export type SafetyVerdict =
-  | { action: "continue" }
-  | { action: string; reason: string; count: number; threshold: number };
-
-/**
- * Decide whether the consecutive-failure ceiling tripped. `count` is the current
- * run of consecutive failures (the caller maintains it; v2's only such counter
- * is US-LOOP-057's 3-strike meta-sync count). `count >= maxConsecutiveFailures`
- * → the configured breach action (default pause_and_notify); else continue.
- */
-export function consecutiveFailureVerdict(safety: LoopSafetyConfig, count: number): SafetyVerdict {
-  if (count >= safety.maxConsecutiveFailures) {
-    return {
-      action: safety.actionOnBreach,
-      reason: `consecutive failures ${count} >= ${safety.maxConsecutiveFailures}`,
-      count,
-      threshold: safety.maxConsecutiveFailures,
-    };
-  }
-  return { action: "continue" };
-}
-
-/**
- * Decide whether a single story's failure ceiling tripped (C5 permanent hold).
- * `storyFailures >= maxStoryFailures` → the configured story-breach action
- * (default hold); else continue. This is the v3 strengthening so a failing story
- * is HELD rather than retried forever by the unstick TTL revert.
- */
-export function storyFailureVerdict(safety: LoopSafetyConfig, storyFailures: number): SafetyVerdict {
-  if (storyFailures >= safety.maxStoryFailures) {
-    return {
-      action: safety.actionOnStoryBreach,
-      reason: `story failures ${storyFailures} >= ${safety.maxStoryFailures}`,
-      count: storyFailures,
-      threshold: safety.maxStoryFailures,
-    };
-  }
-  return { action: "continue" };
 }
 
 // ── Repo compliance verdict (NEW v3 AC — 防误伤非本项目仓) ─────────────────────

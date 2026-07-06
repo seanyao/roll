@@ -15,11 +15,9 @@
 import { describe, expect, it } from "vitest";
 import {
   type Policy,
-  consecutiveFailureVerdict,
   parsePolicy,
   repoComplianceVerdict,
   resolvePolicyRoute,
-  storyFailureVerdict,
 } from "../src/index.js";
 
 // architecture.md §5.1 + §6.1 example, verbatim.
@@ -87,11 +85,11 @@ describe("parsePolicy — v3 spec shape round-trip", () => {
   it("parses loop_safety and IGNORES a stale nested budget block (cost gate removed)", () => {
     expect(policy.loopSafety.maxConsecutiveFailures).toBe(3);
     expect(policy.loopSafety.actionOnBreach).toBe("pause_and_notify");
-    expect(policy.loopSafety.maxStoryFailures).toBe(3);
-    expect(policy.loopSafety.actionOnStoryBreach).toBe("hold");
     expect(policy.loopSafety.correctionSignalThreshold).toBe(4);
     expect(policy.loopSafety.correctionSignalWindowSec).toBe(21600);
     expect(policy.loopSafety.correctionActuator).toBe("auto");
+    expect((policy.loopSafety as Record<string, unknown>)["maxStoryFailures"]).toBeUndefined();
+    expect((policy.loopSafety as Record<string, unknown>)["actionOnStoryBreach"]).toBeUndefined();
     // The retired budget ceiling is no longer parsed — a stale `budget:` block in
     // a user policy.yaml is silently ignored (forward-compatible), never surfaced.
     expect((policy.loopSafety as Record<string, unknown>)["budget"]).toBeUndefined();
@@ -103,8 +101,6 @@ describe("parsePolicy — v3 spec shape round-trip", () => {
     expect(p.loopSafety).toEqual({
       maxConsecutiveFailures: 3,
       actionOnBreach: "pause_and_notify",
-      maxStoryFailures: 3,
-      actionOnStoryBreach: "hold",
       correctionSignalThreshold: 3,
       correctionSignalWindowSec: 43200,
       correctionActuator: "conservative",
@@ -360,21 +356,6 @@ describe("resolvePolicyRoute — first-match precedence (D1/I10)", () => {
     const a = resolvePolicyRoute(policy, { level: "story", type: "US-1" });
     const b = resolvePolicyRoute(policy, { level: "story", type: "US-1" });
     expect(a).toEqual(b);
-  });
-});
-
-describe("safety thresholds", () => {
-  const { loopSafety } = parsePolicy(SPEC_POLICY);
-
-  it("consecutive failures < threshold → continue", () => {
-    expect(consecutiveFailureVerdict(loopSafety, 2)).toEqual({ action: "continue" });
-  });
-  it("consecutive failures >= threshold → pause_and_notify", () => {
-    expect(consecutiveFailureVerdict(loopSafety, 3)).toMatchObject({ action: "pause_and_notify", threshold: 3 });
-  });
-  it("story failures >= threshold → hold (C5)", () => {
-    expect(storyFailureVerdict(loopSafety, 3)).toMatchObject({ action: "hold", threshold: 3 });
-    expect(storyFailureVerdict(loopSafety, 1)).toEqual({ action: "continue" });
   });
 });
 

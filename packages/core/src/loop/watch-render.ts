@@ -171,7 +171,7 @@ export function watchRenderEventFromRollEvent(ev: RollEvent, mode: WatchMode = "
         storyId: ev.storyId,
         summary: "visual:gate",
         detail: [ev.verdict, ev.code, ev.surface].filter((v) => v !== undefined && v !== "").join(" · "),
-        severity: ev.verdict === "ok" ? "good" : "warn",
+        severity: ev.verdict === "ok" ? "good" : ev.verdict === "diagnostic" ? "normal" : "warn",
       };
     case "evidence:frame-opened":
       return {

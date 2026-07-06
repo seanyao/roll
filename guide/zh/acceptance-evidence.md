@@ -93,7 +93,11 @@ roll attest audit --json
 ## 设计期声明可视证据
 
 `roll story validate` 在设计期就检查一张卡是否**生而诚实**——带可视证据 AC，
-且 web 面要声明可截的产品页。校验器靠两条规则识别：
+且 web 面要声明可截的产品页。若卡有可视证据 AC，但没有声明任何交付面
+（`deliverable_url`、`deliverable_cmd`、`physical_terminal` 或
+`screenshot_exempt`），validate 只打印 must-declare 软警告，仍以 0 退出。
+运行时 gate 也只把同一信号作为诊断携带，不会仅因此阻断或把交付标成 skipped。
+校验器靠两条规则识别：
 
 - **`[visual-evidence]` 标记即定论。** 以字面 `[visual-evidence]` 标记开头的 AC
   条目**本身**就是可视证据 AC，无论后面写什么词——不必再额外写"截图 / screenshot"：

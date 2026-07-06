@@ -365,10 +365,11 @@ export type RollEvent =
   // against the design-phase visual-evidence contract. `ok` ⇒ the spec can
   // satisfy the screenshot floor; `flagged` ⇒ a CONFIDENT problem (a web-surface
   // card with no declared deliverable_url, or no visual-evidence AC and no
-  // exemption) — recorded loud so it is caught at the cheapest moment. NEVER
-  // blocks the cycle (FIX-309 is the hard backstop at delivery); ambiguous /
-  // terminal surfaces are never flagged here.
-  | { type: "visual:gate"; cycleId: string; storyId: string; verdict: "ok" | "flagged"; code?: string; surface?: string; reasons: string[]; ts: number }
+  // exemption) — recorded loud so it is caught at the cheapest moment; `diagnostic`
+  // records a non-control-flow structural observation. NEVER blocks the cycle
+  // (FIX-309 is the hard backstop at delivery); ambiguous / terminal surfaces are
+  // never flagged here.
+  | { type: "visual:gate"; cycleId: string; storyId: string; verdict: "ok" | "flagged" | "diagnostic"; code?: string; surface?: string; reasons: string[]; ts: number }
   // ac-map remediation (FIX-246) — a real delivery that skipped skill step 10.6
   // (no ac-map.json) gets ONE surgical same-agent second pass before attest
   // renders. The outcome is auditable; honest statuses only — never a bypass.

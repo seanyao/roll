@@ -107,6 +107,11 @@ down to 🟧 Claimed and lists it under **Discrepancies**. Verbal completion
 
 `roll story validate` checks, at design time, that a spec is *born* with a
 visual-evidence AC (and, for a web surface, a declared product page to capture).
+If the spec has a visual-evidence AC but no declared surface
+(`deliverable_url`, `deliverable_cmd`, `physical_terminal`, or
+`screenshot_exempt`), validation prints a soft must-declare warning and still
+exits 0. Runtime gates carry the same must-declare signal as a diagnostic only;
+they do not block or mark the delivery skipped for that reason alone.
 Two rules decide what the validator recognises:
 
 - **The `[visual-evidence]` marker is authoritative.** An AC item that opens with

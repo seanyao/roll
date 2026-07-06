@@ -1253,7 +1253,8 @@ describe("FIX-309 — screenshot baseline: default REQUIRED, rules only EXEMPT",
     // capture honestly skipped is NOT enough (a declared surface owes a real shot),
     // so the honest-skip-passes case is a card with NO declared web/cmd surface but
     // an explicit screenshot_exempt reason (the recorded "no capturable surface"
-    // path). A card that declares nothing at all is now must-declare-blocked.
+    // path). A card that declares nothing at all now only carries a must-declare
+    // diagnostic; it still needs some real evidence to pass the visual floor.
     const wt = withReport("FIX-SKIP309", 2000, '<div class="ev ev-text">{"taken":false,"skipped":"no GUI session"}</div>');
     addSpec(
       wt,
@@ -1446,25 +1447,25 @@ describe("FIX-309 — declared deliverable_url demands a REAL capture (堵 284 �
     expect(events[0]?.verdict).toBe("produced");
   });
 
-  it("(FIX-339 AC6) a required card that declares NO surface at all is MUST-DECLARE blocked (hard)", () => {
-    // The hardened must-declare floor: a non-exempt card WITH a visual-evidence AC
+  it("(REFACTOR-076) a required card that declares NO surface is diagnostic-only at runtime", () => {
+    // The shifted must-declare floor: a non-exempt card WITH a visual-evidence AC
     // ("screenshot") but NO deliverable_url / deliverable_cmd / screenshot_exempt
-    // can never produce a real capture → hard FAIL with the canonical must-declare
-    // reason, even with a fresh content report + a good review-score.
+    // records the canonical must-declare reason as a diagnostic, but does not
+    // change the attest control flow.
     // FIX-933: this only applies when the card HAS a visual AC — a pure back-end
-    // card with no visual AC is NOT must-declare-blocked (it has nothing to capture).
+    // card with no visual AC is NOT a must-declare diagnostic (it has nothing to capture).
     const wt = withReport("FIX-309NODECL", 2000, '<figure class="shot"><img src="screenshots/web.png"></figure>');
     addSpec(wt, "FIX-309NODECL", "# FIX-309NODECL — Casting redesign\n\n## Acceptance Criteria\n\n- [ ] screenshot of the casting layout\n");
     withPeerScore(wt, "FIX-309NODECL", 8, "good", "c-309nodecl");
     expect(storyRequiresScreenshot(wt, "FIX-309NODECL")).toBe(true);
-    expect(verificationReportHasContent(wt, "FIX-309NODECL")).toBe(false);
+    expect(verificationReportHasContent(wt, "FIX-309NODECL")).toBe(true);
     const { alerts, events, s } = sinks();
     const r = runAttestGate(wt, "FIX-309NODECL", "c-309nodecl", "hard", 1000, s);
-    expect(r.verdict).toBe("skipped");
-    expect(r.blocked).toBe(true);
-    expect(alerts[0]).toContain("no deliverable surface declared");
-    expect(alerts[0]).toContain("BLOCKED");
-    expect(events[0]?.verdict).toBe("skipped");
+    expect(r.verdict).toBe("produced");
+    expect(r.blocked).toBe(false);
+    expect(r.reasons).toContain(MUST_DECLARE_FAIL_REASON);
+    expect(alerts).toHaveLength(0);
+    expect(events[0]?.verdict).toBe("produced");
   });
 });
 
@@ -1659,8 +1660,8 @@ describe("FIX-339 — multi-surface deliverables (web list + deliverable_cmd) + 
     expect(declaresAnySurface("---\nid: A\nepic: foo\n---\n# A\n")).toBe(false);
   });
 
-  // ── AC6: must-declare HARD floor (violatesMustDeclareSurface + the gate FAIL) ─
-  describe("AC6: must-declare hard floor", () => {
+  // ── AC6: must-declare diagnostic floor (violatesMustDeclareSurface + no gate block) ─
+  describe("AC6: must-declare diagnostic floor", () => {
     it("violatesMustDeclareSurface — non-exempt + declares nothing + HAS visual AC ⇒ true; declared/exempt ⇒ false", () => {
       // Card HAS a visual-evidence AC ("screenshot") but declares NO surface → violates.
       const noDecl = withSpec("FIX-MD1", "# FIX-MD1 — redesign\n\n## Acceptance Criteria\n\n- [ ] screenshot of the dashboard\n");
@@ -1704,30 +1705,32 @@ describe("FIX-339 — multi-surface deliverables (web list + deliverable_cmd) + 
       expect(violatesMustDeclareSurface(wt, "FIX-MD5")).toBe(false);
     });
 
-    it("runAttestGate hard-blocks a no-surface non-exempt card with the canonical reason", () => {
-      // Card HAS a visual-evidence AC ("screenshot") but declares NO surface → blocked.
+    it("REFACTOR-076: runAttestGate records a no-surface non-exempt card as diagnostic-only", () => {
+      // Card HAS a visual-evidence AC ("screenshot") but declares NO surface → diagnostic.
       const wt = withReport("FIX-MD6", 2000, '<figure class="shot"><img src="screenshots/web.png"></figure>');
       addSpec(wt, "FIX-MD6", "# FIX-MD6 — Casting redesign\n\n## Acceptance Criteria\n\n- [ ] screenshot of dashboard\n");
       withPeerScore(wt, "FIX-MD6", 8, "good", "c-md6");
       const { alerts, events, s } = sinks();
       const r = runAttestGate(wt, "FIX-MD6", "c-md6", "hard", 1000, s);
-      expect(r.verdict).toBe("skipped");
-      expect(r.blocked).toBe(true);
-      expect(r.reasons[0]).toBe(MUST_DECLARE_FAIL_REASON);
-      expect(alerts[0]).toContain("no deliverable surface declared");
-      expect(events[0]?.verdict).toBe("skipped");
+      expect(r.verdict).toBe("produced");
+      expect(r.blocked).toBe(false);
+      expect(r.reasons).toContain(MUST_DECLARE_FAIL_REASON);
+      expect(alerts).toHaveLength(0);
+      expect(events[0]?.verdict).toBe("produced");
     });
 
-    it("soft mode warns but does NOT block a no-surface card", () => {
+    it("soft mode also records diagnostic-only for a no-surface card", () => {
       // Card HAS a visual-evidence AC ("screenshot") but declares NO surface.
       const wt = withReport("FIX-MD7", 2000, '<figure class="shot"><img src="screenshots/web.png"></figure>');
       addSpec(wt, "FIX-MD7", "# FIX-MD7 — redesign\n\n## Acceptance Criteria\n\n- [ ] screenshot of page\n");
       withPeerScore(wt, "FIX-MD7", 8, "good", "c-md7");
-      const { alerts, s } = sinks();
+      const { alerts, events, s } = sinks();
       const r = runAttestGate(wt, "FIX-MD7", "c-md7", "soft", 1000, s);
-      expect(r.verdict).toBe("skipped");
+      expect(r.verdict).toBe("produced");
       expect(r.blocked).toBe(false);
-      expect(alerts[0]).not.toContain("BLOCKED");
+      expect(r.reasons).toContain(MUST_DECLARE_FAIL_REASON);
+      expect(alerts).toHaveLength(0);
+      expect(events[0]?.verdict).toBe("produced");
     });
 
     it("FIX-933: attest gate does NOT block a pure backend card (has AC block but no visual AC)", () => {

@@ -1,7 +1,7 @@
 /**
  * FIX-339 (AC7) — `roll story validate <ID>`: the command-side self-check of the
  * must-declare + visual-evidence contract (the AC6 hard闸 prefilled for roll-design).
- * Exit 0 = ok / exempt; non-zero = not ok (缺声明面 / 缺可视 AC).
+ * Exit 0 = ok / exempt / must-declare soft warning; non-zero = not ok (缺可视 AC).
  */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
@@ -75,13 +75,14 @@ describe("roll story validate — FIX-339 AC7", () => {
     expect(r.out).toContain("✓");
   });
 
-  it("a non-exempt card declaring NO surface ⇒ FAIL (exit 1, 缺声明面)", () => {
-    const p = project("FIX-V3", "cli-visual", "# FIX-V3 — redesign\n\n## Acceptance Criteria\n\n- [ ] casting renders\n");
+  it("REFACTOR-076: a non-exempt terminal card declaring NO surface ⇒ WARN only (exit 0)", () => {
+    const p = project("FIX-V3", "cli-visual", "# FIX-V3 — CLI polish\n\n## Acceptance Criteria\n\n- [ ] terminal screenshot of `roll status` shows the new summary line\n");
     const r = run(p, ["FIX-V3"]);
-    expect(r.code).toBe(1);
-    expect(r.out).toContain("✗");
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("✓");
     expect(r.out).toContain("缺声明面");
     expect(r.out).toContain("no deliverable surface declared");
+    expect(r.out).toContain("warning");
   });
 
   it("a card with a declared web url but NO visual-evidence AC ⇒ FAIL (缺可视 AC)", () => {

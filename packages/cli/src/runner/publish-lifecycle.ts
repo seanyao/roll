@@ -19,9 +19,7 @@ import { eventTs } from "./runner-time.js";
  *
  * CONSERVATIVE BY CONTRACT (owner red line: 误杀 CLI/后端卡 = 阻断 loop, 绝不可):
  *   - It NEVER alters control flow — the caller's `story_picked` still returns
- *     regardless. A false positive can therefore NOT topple a CLI/back-end card;
- *     it only raises a visible, auditable signal (an ALERT + a `visual:gate`
- *     event).
+ *     regardless. A false positive can therefore NOT topple a CLI/back-end card.
  *   - It fails-loud ONLY when CONFIDENT (the verdict's `ok` is false): a clear
  *     WEB-surface card with no declared `deliverable_url`
  *     (`web-surface-without-deliverable-url`), or a card with NO visual-evidence
@@ -50,14 +48,13 @@ export function runVisualEvidencePreflight(ports: Ports, storyId: string, cycleI
         reasons: v.exemptReason !== undefined ? [`exempt: ${v.exemptReason}`] : [],
         ts: eventTs(ports),
       });
-      // FIX-339 (AC6) — must-declare STRUCTURAL check (WARN-only this round).
+      // FIX-339 (AC6) / REFACTOR-076 — must-declare STRUCTURAL check.
       // Fires ONLY on a card that the surface-aware validator already passed
       // (`ok`) yet declares NONE of {deliverable_url, deliverable_cmd,
       // screenshot_exempt} — i.e. a previously-SILENT card (a terminal/ambiguous
       // visual AC with no concrete capturable surface) that will honest-skip
-      // forever and the future hard闸 will catch. It is a SUPPLEMENTARY signal,
-      // never a duplicate of an existing validate flag, and NEVER blocks the
-      // cycle (the structural hard闸 is held for a separate round post-backfill).
+      // forever. It is a SUPPLEMENTARY diagnostic, never a duplicate of an
+      // existing validate flag, and NEVER blocks or alerts during runtime.
       // FIX-339 (复核 #5) — declaresAnySurface is PURE (specText only): it sees a
       // per-card `screenshot_exempt:` but NOT the policy epic deny-list
       // (acceptance.screenshot_exempt_epics). A card whose EPIC is recorded as
@@ -70,19 +67,12 @@ export function runVisualEvidencePreflight(ports: Ports, storyId: string, cycleI
           type: "visual:gate",
           cycleId,
           storyId,
-          verdict: "flagged",
+          verdict: "diagnostic",
           code: "no-surface-declared",
           surface: v.surface,
           reasons: ["spec declares no deliverable_url, deliverable_cmd, or screenshot_exempt — no surface to capture"],
           ts: eventTs(ports),
         });
-        ports.events.appendAlert(
-          ports.paths.alertsPath,
-          `[WARN] visual-evidence preflight (${storyId}): no-surface-declared — the spec declares none of ` +
-            `\`deliverable_url:\` / \`deliverable_cmd:\` / \`screenshot_exempt: <reason>\` — cycle ${cycleId}. ` +
-            `Declare a deliverable surface (web url or CLI command) or a recorded exemption. ` +
-            `NOT blocked this round — structural闸 will harden after backfill; FIX-309 still enforces declared surfaces at delivery.`,
-        );
       }
       return;
     }

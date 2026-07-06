@@ -748,9 +748,9 @@ export function declaresAnySurface(specText: string): boolean {
 }
 
 /**
- * FIX-339 (AC6) — the must-declare HARD-GATE predicate (this round HARDENED from
- * the FIX-339 WARN). A delivery VIOLATES must-declare iff it is a story that owes
- * acceptance evidence yet declares NO deliverable surface AT ALL:
+ * FIX-339 (AC6) / REFACTOR-076 — the must-declare diagnostic predicate. A
+ * delivery VIOLATES must-declare iff it is a story that owes acceptance evidence
+ * yet declares NO deliverable surface AT ALL:
  *
  *   non-exempt (epic-aware {@link screenshotExemption})  AND
  *   {@link declaresAnySurface}(spec) === false  (no deliverable_url / deliverable_cmd / screenshot_exempt)
@@ -769,12 +769,9 @@ export function declaresAnySurface(specText: string): boolean {
  * line (误杀 exempt / back-end / declared cards = 阻断 loop) is honoured by
  * construction.
  *
- * Reached ONLY from the visual floor ({@link passAcVisualFloor} /
- * {@link verificationReportHasContent}), which `runAttestGate` calls AFTER the
- * `storyHasAcBlock === false` early-return — so a no-AC card (an IDEA note, a
- * pure data card) is never subjected to must-declare. Returns false on any read
- * blip (fail open here; the gate's own control flow stays the single failure
- * surface). Exported for direct unit testing + `roll story validate`.
+ * Used only as a diagnostic signal after REFACTOR-076; it does not decide attest
+ * control flow. Returns false on any read blip. Exported for direct unit testing
+ * + `roll story validate`.
  */
 export function violatesMustDeclareSurface(worktreeCwd: string, storyId: string): boolean {
   if (screenshotExemption(worktreeCwd, storyId).reason !== undefined) return false; // exempt → owes nothing
@@ -793,9 +790,8 @@ export function violatesMustDeclareSurface(worktreeCwd: string, storyId: string)
   return !declaresAnySurface(text);
 }
 
-/** FIX-339 (AC6) — the canonical must-declare FAIL reason (shared by the gate and
- *  `roll story validate`), so the runtime闸 and the design self-check speak with
- *  one voice. */
+/** FIX-339 (AC6) / REFACTOR-076 — the canonical must-declare diagnostic reason
+ *  shared by runtime diagnostics and `roll story validate`. */
 export const MUST_DECLARE_FAIL_REASON =
   "no deliverable surface declared — 必须声明 deliverable_url/deliverable_cmd 或 screenshot_exempt";
 
@@ -1151,13 +1147,7 @@ function declaredSurfaceCaptureFloor(worktreeCwd: string, storyId: string): { ok
 }
 
 function passAcVisualFloor(worktreeCwd: string, storyId: string): { ok: boolean; reason?: string } {
-  // FIX-339 (AC6) — must-declare HARD floor. A non-exempt card that declares NO
-  // deliverable surface (no url / cmd / exempt) can NEVER produce a real capture;
-  // it would honest-skip forever. Reached only after the storyHasAcBlock early
-  // return, so it never touches a no-AC card. Structural, not a classifier guess.
-  if (violatesMustDeclareSurface(worktreeCwd, storyId)) {
-    return { ok: false, reason: MUST_DECLARE_FAIL_REASON };
-  }
+  // REFACTOR-076: must-declare is now a diagnostic, not a visual-floor blocker.
   // FIX-345 — a `screenshot_exempt` card owes NO captured visual evidence by
   // definition (per-card frontmatter or the policy non-visual epic deny-list),
   // so its pass ACs legitimately discharge with text-only evidence. The
@@ -1412,24 +1402,7 @@ export function runAttestGate(
       sinks.event({ cycleId, verdict: "produced", reasons });
       return { verdict: "produced", mode, reasons, blocked: false };
     }
-    // FIX-339 (AC6) — must-declare HARD闸. A non-exempt card WITH an AC block that
-    // declares NO deliverable surface (no deliverable_url / deliverable_cmd /
-    // screenshot_exempt) can never produce a real capture and would honest-skip
-    // forever. This is a STRUCTURAL design defect, not an "environment" miss —
-    // surfaced loud here (ahead of the freshness/content checks) with its own
-    // canonical reason rather than masquerading as an "empty shell". Exempt cards
-    // (per-card OR epic-deny-list) and any card that declared a url/cmd are
-    // untouched (owner red line: 误杀 exempt/back-end/declared = 阻断 loop).
-    if (violatesMustDeclareSurface(worktreeCwd, storyId)) {
-      const reasons = [MUST_DECLARE_FAIL_REASON];
-      const blocked = mode === "hard";
-      sinks.alert(
-        `attest gate (${mode}): ${MUST_DECLARE_FAIL_REASON} (${storyId}) — cycle ${cycleId}` +
-          (blocked ? " — BLOCKED (hard mode); story not marked Done" : ""),
-      );
-      sinks.event({ cycleId, verdict: "skipped", reasons });
-      return { verdict: "skipped", mode, reasons, blocked };
-    }
+    const diagnostics = violatesMustDeclareSurface(worktreeCwd, storyId) ? [MUST_DECLARE_FAIL_REASON] : [];
     // FIX-295 (AC-FIX2/AC-FIX3): a red assertion is a regression, never an
     // "environmental" exception. A `fail` AC (a check that ran and went red) on
     // a cycle branch can only be the cycle's own regression — main is always
@@ -1497,7 +1470,7 @@ export function runAttestGate(
           sinks.event({ cycleId, verdict: "skipped", reasons });
           return { verdict: "skipped", mode, reasons, blocked };
         }
-        const reasons = ["fresh acceptance report present", score.reason, ...(visual.reason !== undefined ? [visual.reason] : [])];
+        const reasons = ["fresh acceptance report present", score.reason, ...(visual.reason !== undefined ? [visual.reason] : []), ...diagnostics];
         sinks.event({ cycleId, verdict: "produced", reasons });
         return { verdict: "produced", mode, reasons, blocked: false };
       }

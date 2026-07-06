@@ -7,16 +7,16 @@
  *
  * Two checks, both surfaced with their reason:
  *   1. MUST-DECLARE (epic-aware {@link screenshotExemption} + {@link declaresAnySurface}):
- *      a non-exempt card MUST declare at least one deliverable surface
+ *      a non-exempt card SHOULD declare at least one deliverable surface
  *      (`deliverable_url` / `deliverable_cmd`) OR a recorded
- *      `screenshot_exempt: <reason>`. None ⇒ FAIL (the AC6 hard闸 would block it).
+ *      `screenshot_exempt: <reason>`. None ⇒ WARN (shift-left only; no control-flow block).
  *   2. VISUAL-EVIDENCE AC ({@link validateStoryVisualEvidence}): the spec carries
  *      an AC that captures a user-visible surface (web/CLI/TUI), and a WEB-surface
  *      AC declares its `deliverable_url`. Missing ⇒ FAIL.
  *
- * Exit code: 0 when the card passes BOTH (or is exempt), non-zero otherwise — so
- * a skill / CI step can gate on it. An exempt card passes (the contract is waived,
- * with its reason shown). A spec that cannot be found ⇒ exit 2 (caller error).
+ * Exit code: 0 when the card passes the visual-evidence contract (or is exempt),
+ * non-zero otherwise — so a skill / CI step can gate on objective evidence only.
+ * Must-declare is a soft warning. A spec that cannot be found ⇒ exit 2 (caller error).
  */
 import { readFileSync } from "node:fs";
 import { c, renderState } from "../render.js";
@@ -26,13 +26,15 @@ import { validateStoryVisualEvidence } from "../lib/design-visual-evidence.js";
 
 const green = (s: string): string => c("green", s);
 const red = (s: string): string => c("red", s);
+const amber = (s: string): string => c("amber", s);
 
 export const STORY_VALIDATE_USAGE =
   "Usage: roll story validate <ID>\n" +
   "  Self-check a card's spec against the visual-evidence contract (FIX-339):\n" +
-  "  must-declare a deliverable surface (deliverable_url / deliverable_cmd /\n" +
-  "  screenshot_exempt) AND carry a visual-evidence AC. Exit 0 = ok, non-zero = not ok.\n" +
-  "  自检卡片是否满足可视证据契约:必须声明交付面 + 带可视证据 AC;合格退出 0,不合格非 0。\n";
+  "  warn when no deliverable surface is declared (deliverable_url /\n" +
+  "  deliverable_cmd / screenshot_exempt) and require a visual-evidence AC.\n" +
+  "  Exit 0 = ok or warning-only, non-zero = not ok.\n" +
+  "  自检卡片是否满足可视证据契约:缺交付面只警告;缺可视证据 AC 才非 0。\n";
 
 export function storyValidateCommand(args: string[]): number {
   if (args[0] === "--help" || args[0] === "-h" || args[0] === undefined) {
@@ -94,8 +96,9 @@ export function storyValidateCommand(args: string[]): number {
   const visual = validateStoryVisualEvidence(specText);
 
   const fails: string[] = [];
+  const warnings: string[] = [];
   if (!mustDeclareOk) {
-    fails.push(
+    warnings.push(
       "no deliverable surface declared — must declare `deliverable_url:` / `deliverable_cmd:` or a recorded `screenshot_exempt: <reason>`",
     );
   }
@@ -121,9 +124,10 @@ export function storyValidateCommand(args: string[]): number {
   if (exempt) {
     lines.push(`  must-declare:    ${green("ok")} (exempt — ${exemption.reason})`);
   } else {
-    lines.push(`  must-declare:    ${mark(declares)}${declares ? "" : " — 缺声明面 (deliverable_url/cmd/exempt)"}`);
+    lines.push(`  must-declare:    ${declares ? green("ok") : amber("warning")}${declares ? "" : " — 缺声明面 (deliverable_url/cmd/exempt)"}`);
     lines.push(`  visual-evidence: ${mark(visual.ok)}${visual.ok ? ` (surface: ${visual.surface})` : ` — 缺可视 AC: ${visual.code ?? "flagged"}`}`);
   }
+  for (const w of warnings) lines.push(`  • warning: ${w}`);
   for (const f of fails) lines.push(`  • ${f}`);
   process.stdout.write(`${lines.join("\n")}\n`);
   return ok ? 0 : 1;

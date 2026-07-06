@@ -43,6 +43,22 @@ function cleanRepo(prefix: string): string {
   return repo;
 }
 
+function cleanRepoWithSkillsGitlink(prefix: string): string {
+  const repo = mkdtempSync(join(tmpdir(), prefix));
+  dirs.push(repo);
+  git(repo, ["init", "-q", "-b", "main"]);
+  git(repo, ["config", "user.email", "t@example.test"]);
+  git(repo, ["config", "user.name", "Test User"]);
+  writeFileSync(join(repo, "tracked.txt"), "base\n", "utf8");
+  git(repo, ["add", "tracked.txt"]);
+  git(repo, ["commit", "-q", "-m", "seed"]);
+  const gitlinkSha = sh(repo, ["rev-parse", "HEAD"]);
+  git(repo, ["update-index", "--add", "--cacheinfo", "160000", gitlinkSha, "skills"]);
+  git(repo, ["commit", "-q", "-m", "add skills gitlink"]);
+  git(repo, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
+  return repo;
+}
+
 function worktreeFrom(repo: string): string {
   const wt = `${repo}-wt`;
   dirs.push(wt);
@@ -216,6 +232,13 @@ describe("main checkout guard — US-LOOP-089", () => {
     writeFileSync(join(repo, ".roll", "scratch.txt"), "runtime\n", "utf8");
     const files2 = await checkMainDirty(repo);
     expect(files2).not.toContain(".roll/scratch.txt");
+  });
+
+  it("FIX-1218: checkMainDirty includes staged skills gitlink deletion", async () => {
+    const repo = cleanRepoWithSkillsGitlink("roll-main-dirty-gitlink-");
+    git(repo, ["rm", "--cached", "-q", "skills"]);
+
+    await expect(checkMainDirty(repo)).resolves.toContain("skills");
   });
 
   it("pins spawned worktree git discovery below the main checkout parent", () => {

@@ -413,6 +413,38 @@ function refName(id: string): string {
   return `rescue/${id}`;
 }
 
+const AGENT_PRIVATE_TIMESTAMP_STATE_FILES = new Set([".pi/workflows/index.json"]);
+
+function changedDiffLines(repoCwd: string, relPath: string): string[] {
+  try {
+    return execFileSync("git", ["diff", "--", relPath], {
+      cwd: repoCwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+      .split("\n")
+      .filter((line) => (line.startsWith("+") || line.startsWith("-")) && !line.startsWith("+++") && !line.startsWith("---"));
+  } catch {
+    return [];
+  }
+}
+
+function isAgentPrivateTimestampOnlyDirty(repoCwd: string, relPath: string): boolean {
+  if (!AGENT_PRIVATE_TIMESTAMP_STATE_FILES.has(relPath)) return false;
+  const lines = changedDiffLines(repoCwd, relPath);
+  if (lines.length === 0) return false;
+  return lines.every((line) => /^[-+]\s*"updatedAt":\s*"[^"]+",?\s*$/.test(line));
+}
+
+function restoreIgnorableAgentPrivateState(repoCwd: string, files: string[]): string[] {
+  const remaining: string[] = [];
+  for (const file of files) {
+    if (isAgentPrivateTimestampOnlyDirty(repoCwd, file) && gitQuiet(repoCwd, ["restore", "--", file])) continue;
+    remaining.push(file);
+  }
+  return remaining;
+}
+
 function toEvent(opts: QuarantineOptions, reason: QuarantineReason, ref: string, files: string[], path: string, restoreCommand: string): QuarantineResult {
   return {
     type: "sandbox:quarantined",
@@ -481,7 +513,7 @@ async function quarantineAhead(opts: QuarantineOptions): Promise<QuarantineResul
 export async function quarantineMainCheckout(opts: QuarantineOptions): Promise<QuarantineResult[]> {
   if (!existsSync(opts.repoCwd)) return [];
   const results: QuarantineResult[] = [];
-  const dirty = await checkMainDirty(opts.repoCwd);
+  const dirty = restoreIgnorableAgentPrivateState(opts.repoCwd, await checkMainDirty(opts.repoCwd));
   const dirtyResult = await quarantineDirty(opts, dirty);
   if (dirtyResult !== null) results.push(dirtyResult);
   const aheadResult = await quarantineAhead(opts);

@@ -13,7 +13,7 @@
  * delegates the entire walk to the runner adapter (packages/cli/src/runner).
  */
 import { EventBus, assessBacklog, cycleEndEvent, firstInstalledAgent, mapV2Status, markStatus, parseBacklog, parsePolicy, readSlotFromText, shouldResize, shouldSuppressDormancy, type AgentSlot, type BacklogItem, type CycleContext, type RouteDeps, type RouteSlot } from "@roll/core";
-import { STATUS_MARKER, absent, buildTerminalEvent, deriveOrphanVerdict, present, type BacklogReason, type BlockCause } from "@roll/spec";
+import { STATUS_MARKER, absent, buildTerminalEvent, deriveOrphanVerdict, present, type BacklogReason } from "@roll/spec";
 import { createScheduler, isOwnerHeld, launchdLabel, projectIdentity, readLockOwner, releaseLock } from "@roll/infra";
 import { dormantMarkerPath, resolveLoopRunState, writeDormantMarker } from "./loop-sched.js";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -649,7 +649,7 @@ export function shouldSuppressGoalChildFailureCounter(input: {
 export function readExternalBlock(
   eventsPath: string,
   cycleId: string,
-): { cause: BlockCause; agents: string[]; details: string[] } | null {
+): { cause: "auth" | "network"; agents: string[]; details: string[] } | null {
   const auth: string[] = [];
   const network: string[] = [];
   const authDetails: string[] = [];

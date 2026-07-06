@@ -343,9 +343,10 @@ defaults:
 以及 legacy compatibility 输入。用 `roll agent migrate --dry-run` 预览旧 agent
 文件迁移。
 
-运行时健康不是静态策略。auth、网络、VPN、账号或 binary 缺失只会让候选在本次
-resolution 中被跳过，并记录为运行时事实。若没有候选可用，loop 会 PAUSE + ALERT，
-而不是悄悄改写静态 pool。
+运行时健康不是静态策略。quota、auth、网络、VPN、账号、stall 或 binary 缺失只会
+挂起运行态 rig，并记录为运行时事实；Roll 不回写 `agents.yaml`。挂起 rig 按恢复窗口
+轻量探活，恢复后自动回到候选池。若没有候选可用，cycle 记录 `loop:pending`，只做
+恢复探测，不启动 Builder、不记入卡的失败账，也不悄悄改写静态 pool。
 
 ### Agent 工具链健康检查（US-V4-022）
 

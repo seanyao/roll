@@ -20,7 +20,7 @@ import {
   type OpenPrReferenceInput,
   type PickOptions,
 } from "@roll/core";
-import { classifyStatus, STATUS_MARKER } from "@roll/spec";
+import { classifyStatus, STATUS_MARKER, type LoopType } from "@roll/spec";
 import { dirname, join } from "node:path";
 import { markDoneGuarded } from "./done-guard.js";
 import { eventTs } from "./runner-time.js";
@@ -33,6 +33,7 @@ import { runVisualEvidencePreflight } from "./publish-lifecycle.js";
 import { bootstrapWorktreeDeps, bootstrapWorktreePrebuild, bootstrapWorktreeSkills, linkRollIntoWorktree, readPrebuildDistEnabled } from "./worktree-bootstrap.js";
 import { recordExecutionProfile, routerEstMin } from "./execution-profile.js";
 import type { ExecuteResult, Ports } from "./ports.js";
+import { activeRigs, probeDueSuspendedRigs, readRigLifecycleState, suspendedRigs } from "./agent-liveness.js";
 
 type SetupCommand = Extract<CycleCommand, { kind:
   | "preflight"
@@ -498,13 +499,78 @@ export async function executeSetupCommand(
       // lever) drives tier selection, falling back to the backlog row's tag.
       const estMin = routerEstMin(ports.repoCwd, cmd.storyId, story?.desc ?? "");
       const r = ports.route.resolve(cmd.storyId, estMin);
+      const runtimeDir = dirname(ports.paths.eventsPath);
+      const candidateAgents = (() => {
+        const installed = ports.installedAgents?.() ?? [];
+        return installed.length > 0 ? installed : [r.agent];
+      })();
+      const nowMs = eventTs(ports);
+      const stateAfterProbes = ports.agentReachable === undefined
+        ? readRigLifecycleState(runtimeDir)
+        : await probeDueSuspendedRigs({
+            runtimeDir,
+            agents: candidateAgents,
+            nowMs,
+            probe: ports.agentReachable,
+            onProbe: ({ agent, recovered, entry, detail }) => {
+              if (recovered) {
+                ports.events.appendEvent(ports.paths.eventsPath, {
+                  type: "rig:recovered",
+                  cycleId: ctx.cycleId,
+                  agent,
+                  detail,
+                  ts: eventTs(ports),
+                });
+                ports.events.appendEvent(ports.paths.eventsPath, {
+                  type: "rig:probe",
+                  cycleId: ctx.cycleId,
+                  agent,
+                  outcome: "live",
+                  detail,
+                  ts: eventTs(ports),
+                });
+                return;
+              }
+              ports.events.appendEvent(ports.paths.eventsPath, {
+                type: "rig:probe",
+                cycleId: ctx.cycleId,
+                agent,
+                outcome: "still_suspended",
+                cause: entry.cause,
+                detail,
+                nextProbeAt: entry.nextProbeAt,
+                ts: eventTs(ports),
+              });
+            },
+          });
+      const active = activeRigs(candidateAgents, stateAfterProbes);
+      if (active.length === 0) {
+        const suspended = suspendedRigs(candidateAgents, stateAfterProbes).map(({ agent, entry }) => ({
+          agent,
+          cause: entry.cause ?? "unknown",
+          ...(entry.detail !== undefined ? { detail: entry.detail } : {}),
+        }));
+        const reason = `all rigs suspended: ${suspended.map((s) => `${s.agent}:${s.cause}`).join(", ")}`;
+        ports.events.appendEvent(ports.paths.eventsPath, {
+          type: "loop:pending",
+          loop: (ctx.loop === "" ? "main" : ctx.loop) as LoopType,
+          cycleId: ctx.cycleId,
+          reason,
+          suspended,
+          ts: eventTs(ports),
+        });
+        ports.events.appendAlert(ports.paths.alertsPath, `loop pending: ${reason}`);
+        return { event: { type: "route_pending", reason } };
+      }
+      const selectedAgent = active.includes(r.agent) ? r.agent : active[0] ?? r.agent;
+      const selectedModel = selectedAgent === r.agent ? r.model : "";
       // US-V4-004: select + RECORD the Story execution profile once, here at
       // route-resolve (before execute). Best-effort + never toppling routing: a
       // spec read/parse blip falls back to `standard` (builder-only, current
       // behavior). v4.0 records the profile but still executes standard only;
       // verified/designed add evaluator/designer stages in later stories.
       const selectedProfile = recordExecutionProfile(ports, ctx.cycleId ?? "", cmd.storyId, estMin);
-      return { event: { type: "route_resolved", agent: r.agent, model: r.model }, ctxPatch: { selectedProfile } };
+      return { event: { type: "route_resolved", agent: selectedAgent, model: selectedModel }, ctxPatch: { selectedProfile } };
     }
 
     // execute: spawn the agent (TCR commits happen inside the worktree). The

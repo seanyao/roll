@@ -57,6 +57,7 @@ import {
   withPtyWrap,
   detectAgyInternalFailure,
 } from "../src/runner/index.js";
+import { suspendRig } from "../src/runner/agent-liveness.js";
 
 /** Temp dirs created by FIX-207 attest-gate executor tests; cleaned at end. */
 const execDirs: string[] = [];
@@ -1078,6 +1079,52 @@ function initCleanGitRepo(prefix: string): string {
 }
 
 describe("executeCommand — command → executor mapping", () => {
+  it("US-LOOP-091: all suspended rigs make route pending instead of spawning a builder", async () => {
+    const rt = mkdtempSync(join(tmpdir(), "roll-rig-pending-"));
+    execDirs.push(rt);
+    suspendRig(rt, "kimi", "quota", "quota exhausted", 1_000, 30_000);
+    suspendRig(rt, "pi", "auth", "login expired", 1_000, 30_000);
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      paths: { ...base.ports.paths, eventsPath: join(rt, "events.ndjson"), alertsPath: join(rt, "alerts.log") },
+      clock: () => 10,
+      installedAgents: () => ["kimi", "pi"],
+      route: { resolve: vi.fn(() => ({ agent: "kimi", model: "" })) },
+    });
+
+    const result = await executeCommand({ kind: "resolve_route", storyId: "US-RUN-001" }, ports, CTX);
+
+    expect(result.event).toEqual({
+      type: "route_pending",
+      reason: "all rigs suspended: kimi:quota, pi:auth",
+    });
+    expect(calls.event).toContainEqual([
+      ports.paths.eventsPath,
+      expect.objectContaining({
+        type: "loop:pending",
+        cycleId: CTX.cycleId,
+        reason: "all rigs suspended: kimi:quota, pi:auth",
+      }),
+    ]);
+  });
+
+  it("US-LOOP-091: suspended routed rig falls back to an active rig without carrying the suspended rig model", async () => {
+    const rt = mkdtempSync(join(tmpdir(), "roll-rig-fallback-"));
+    execDirs.push(rt);
+    suspendRig(rt, "kimi", "quota", "quota exhausted", 1_000, 30_000);
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      paths: { ...base.ports.paths, eventsPath: join(rt, "events.ndjson"), alertsPath: join(rt, "alerts.log") },
+      clock: () => 10,
+      installedAgents: () => ["kimi", "pi"],
+      route: { resolve: vi.fn(() => ({ agent: "kimi", model: "kimi-code/kimi-for-coding" })) },
+    });
+
+    const result = await executeCommand({ kind: "resolve_route", storyId: "US-RUN-001" }, ports, CTX);
+
+    expect(result.event).toEqual({ type: "route_resolved", agent: "pi", model: "" });
+  });
+
   it("create_worktree code 0 → worktree_created; non-zero → worktree_failed", async () => {
     const ok = fakePorts();
     const r1 = await executeCommand({ kind: "create_worktree", branch: "b" }, ok.ports, CTX);

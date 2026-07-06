@@ -32,6 +32,7 @@ import {
   loopOffCommand,
   loopPauseCommand,
   loopResumeCommand,
+  loopHelperPidsToTerminate,
   dormantMarkerPath,
   writeDormantMarker,
   readDormantMarker,
@@ -606,6 +607,45 @@ describe("loop on/off (injected launchd)", () => {
     expect(calls).toContain("dormant com.roll.dream.proj-abc123");
     expect(calls).toContain("dormant com.roll.pr.proj-abc123");
     expect(out).toContain("mode: guided");
+  });
+
+  it("FIX-1225: off terminates repo-scoped helper processes after unloading lanes", async () => {
+    const proj = tmp("proj2-off-cleanup");
+    const killed: Array<{ projectPath: string; slug: string }> = [];
+    const { deps, calls } = fakeDeps(proj, tmp("sh2-off-cleanup"), tmp("ld2-off-cleanup"));
+    deps.cleanupHelpers = (projectPath, slug) => {
+      killed.push({ projectPath, slug });
+      return { processCount: 3, tmuxSessionKilled: true };
+    };
+
+    const { code, out } = await captureStdout(() => loopOffCommand([], deps));
+    expect(code).toBe(0);
+    expect(calls).toContain("dormant com.roll.loop.proj-abc123");
+    expect(calls).toContain("dormant com.roll.dream.proj-abc123");
+    expect(calls).toContain("dormant com.roll.pr.proj-abc123");
+    expect(killed).toEqual([{ projectPath: proj, slug: "proj-abc123" }]);
+    expect(out).toContain("stopped tmux session roll-loop-proj-abc123 and 3 helper process(es)");
+  });
+
+  it("FIX-1225: helper cleanup is scoped by cwd/project path/session slug", () => {
+    const proj = tmp("proj2-helper-scope");
+    const other = tmp("proj2-helper-other");
+    const pids = loopHelperPidsToTerminate(
+      proj,
+      "proj-abc123",
+      [
+        { pid: 101, command: "node /bin/roll loop watch --since all", cwd: proj },
+        { pid: 102, command: "node /bin/roll loop run-once", cwd: join(proj, "packages", "cli") },
+        { pid: 103, command: `tmux new-session -s roll-loop-proj-abc123 roll loop go --attach` },
+        { pid: 104, command: `node /bin/roll loop pr-inbox --project ${proj}` },
+        { pid: 105, command: "node /bin/roll loop watch --since all", cwd: other },
+        { pid: 106, command: "node /bin/roll loop off", cwd: proj },
+        { pid: 107, command: "node /bin/roll loop status", cwd: proj },
+      ],
+      104,
+    );
+
+    expect(pids).toEqual([101, 102, 103]);
   });
 });
 

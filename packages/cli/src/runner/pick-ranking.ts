@@ -1,5 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { createHash } from "node:crypto";
+import { tmpdir } from "node:os";
+import { dirname, join, sep } from "node:path";
 import {
   buildDoneIndex,
   buildPickRankingCacheKey,
@@ -42,7 +44,12 @@ function pickRankingCachePath(ports: Ports): string {
 }
 
 function pickRankingCwd(ports: Ports): string {
-  const dir = join(dirname(ports.paths.eventsPath), "pick-ranking-cwd");
+  const key = createHash("sha256").update(dirname(ports.paths.eventsPath)).digest("hex").slice(0, 16);
+  let dir = join(tmpdir(), "roll-pick-ranking-cwd", key);
+  const repoPrefix = ports.repoCwd.endsWith(sep) ? ports.repoCwd : `${ports.repoCwd}${sep}`;
+  if (dir === ports.repoCwd || dir.startsWith(repoPrefix)) {
+    dir = join(dirname(ports.repoCwd), `.roll-pick-ranking-cwd-${key}`);
+  }
   try {
     mkdirSync(dir, { recursive: true });
   } catch {

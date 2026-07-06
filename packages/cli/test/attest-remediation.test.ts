@@ -11,11 +11,12 @@
  * without real evidence; the render layer still downgrades fabricated passes.
  */
 import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { RollEvent } from "@roll/spec";
+import type { AgentSpawn } from "../src/runner/agent-spawn.js";
 import {
   acMapPath,
   autoAttachScreenshotToAcMap,
@@ -493,6 +494,43 @@ describe("REFACTOR-066 runAcMapSelfHeal", () => {
     expect(agentSpawn).toHaveBeenCalledTimes(1);
     expect(JSON.parse(readFileSync(acMapPath(wt, "FIX-916"), "utf8"))[0].status).toBe("claimed");
     expect(events.some((e) => e.type === "attest:remediation" && e.outcome === "written")).toBe(true);
+  });
+
+  it("FIX-1227: forwards writable roots so symlinked .roll ac-map can be confirmed inside the sandbox", async () => {
+    const wt = tmp("wt-symlink-roll");
+    const meta = tmp("meta");
+    symlinkSync(meta, join(wt, ".roll"));
+    const storyDir = join(meta, "features", "uncategorized", "FIX-1227");
+    mkdirSync(storyDir, { recursive: true });
+    writeFileSync(join(storyDir, "spec.md"), "# FIX-1227\n\n## AC\n\n- [ ] AC1 confirms draft\n");
+    writeFileSync(acMapPath(wt, "FIX-1227"), JSON.stringify([{ ac: "FIX-1227:AC1", status: ACMAP_DRAFT_STATUS }]) + "\n");
+    const rd = join(storyDir, "20260706-000000");
+    mkdirSync(rd, { recursive: true });
+    const metaRoot = realpathSync(meta);
+    const agentSpawn: AgentSpawn = vi.fn(async (_agent, opts) => {
+      expect(opts.writableRoots).toContain(metaRoot);
+      writeFileSync(acMapPath(wt, "FIX-1227"), JSON.stringify([{ ac: "FIX-1227:AC1", status: "claimed" }]) + "\n");
+      return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+    });
+
+    await runAcMapSelfHeal({
+      worktreeCwd: wt,
+      storyId: "FIX-1227",
+      runDir: rd,
+      cycleId: "cycle-1227",
+      agent: "codex",
+      writableRoots: [metaRoot],
+      collectDraftEvidence: async () => emptyEvidence,
+      collectCycleSignals: () => undefined,
+      canSpawnRemediation: () => true,
+      agentSpawn,
+      renderAttest: async () => 0,
+      appendEvent: () => undefined,
+      now: () => 127,
+    });
+
+    expect(agentSpawn).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(readFileSync(acMapPath(wt, "FIX-1227"), "utf8"))[0].status).toBe("claimed");
   });
 
   it("self-heals text-only pass ACs by attaching a captured screenshot and rerendering", async () => {

@@ -396,8 +396,8 @@ export const v3Catalog: Catalog = {
   // `design.*` — explicit `roll design` entry point (US-ONBOARD-NUDGE-004 / FIX-1055).
   // Thin wrapper that launches the existing $roll-design skill interactively.
   "design.usage": {
-    en: "Usage: roll design [--from-file <path> | \"<requirement>\"] [--agent <name>] [--verbose|--raw]\n  Launch the $roll-design skill in an interactive agent conversation.\n  Default output streams bounded live progress, card-created events, quiet heartbeats, and the final handoff while preserving the raw transcript.\n  `--from-file` binds a PRD/brief file as the design input.\n  `\"<requirement>\"` binds a free-text design target; it cannot be combined with `--from-file`.\n  `--agent` and `ROLL_DESIGN_AGENT` override only this design session; scoped roles live in ~/.roll/agents.yaml and .roll/agents.yaml.\n  `--verbose` streams lower-priority normalized activity; `--raw` streams the raw child output live.\n  Unlike `roll init`, this command runs an LLM — run it only when you want to design.",
-    zh: "用法：roll design [--from-file <path> | \"<requirement>\"] [--agent <name>] [--verbose|--raw]\n  在交互式 agent 对话中启动 $roll-design skill。\n  默认输出会实时显示有界进展、建卡事件、静默心跳和最终交付，同时保留完整原始记录。\n  `--from-file` 会把 PRD/brief 文件绑定为设计输入。\n  `\"<requirement>\"` 会绑定自由文本设计目标；不能与 `--from-file` 混用。\n  `--agent` 与 `ROLL_DESIGN_AGENT` 只覆盖本次 design session；scoped roles 位于 ~/.roll/agents.yaml 和 .roll/agents.yaml。\n  `--verbose` 实时显示较低优先级的规范化活动；`--raw` 实时输出子进程原始流。\n  与 `roll init` 不同，本命令会运行 LLM——只在需要设计时执行。",
+    en: "Usage: roll design [--from-file <path> | \"<requirement>\"] [--agent <name>] [--verbose|--raw]\n  Launch the $roll-design skill in an interactive agent conversation.\n  Default output streams bounded live progress, card-created events, quiet heartbeats, and the final handoff while preserving the raw transcript.\n  When a successful design creates new Todo cards, roll prints agent-pool health and asks whether to start `roll loop go --review auto`.\n  `--from-file` binds a PRD/brief file as the design input.\n  `\"<requirement>\"` binds a free-text design target; it cannot be combined with `--from-file`.\n  `--agent` and `ROLL_DESIGN_AGENT` override only this design session; scoped roles live in ~/.roll/agents.yaml and .roll/agents.yaml.\n  `--verbose` streams lower-priority normalized activity; `--raw` streams the raw child output live.\n  Unlike `roll init`, this command runs an LLM — run it only when you want to design.",
+    zh: "用法：roll design [--from-file <path> | \"<requirement>\"] [--agent <name>] [--verbose|--raw]\n  在交互式 agent 对话中启动 $roll-design skill。\n  默认输出会实时显示有界进展、建卡事件、静默心跳和最终交付，同时保留完整原始记录。\n  当成功设计产出新的 Todo 卡时，roll 会打印 agent 池健康概况，并询问是否启动 `roll loop go --review auto`。\n  `--from-file` 会把 PRD/brief 文件绑定为设计输入。\n  `\"<requirement>\"` 会绑定自由文本设计目标；不能与 `--from-file` 混用。\n  `--agent` 与 `ROLL_DESIGN_AGENT` 只覆盖本次 design session；scoped roles 位于 ~/.roll/agents.yaml 和 .roll/agents.yaml。\n  `--verbose` 实时显示较低优先级的规范化活动；`--raw` 实时输出子进程原始流。\n  与 `roll init` 不同，本命令会运行 LLM——只在需要设计时执行。",
   },
   "design.not_roll_project": {
     en: "This directory is not a Roll project (no .roll/). Run `roll init` first.",
@@ -471,6 +471,22 @@ export const v3Catalog: Catalog = {
   "design.next.no_cards": {
     en: "scope is design-only; no implementation cards were created for %s",
     zh: "本次为纯设计；未为 %s 创建实现卡",
+  },
+  "design.loop.agent_pool": {
+    en: "Agent pool: %d active, %d suspended",
+    zh: "Agent 池：%d 个可用，%d 个已挂起",
+  },
+  "design.loop.suspended_agent": {
+    en: "suspended: %s (%s)",
+    zh: "已挂起：%s（%s）",
+  },
+  "design.loop.prompt": {
+    en: "Start loop now? [y/N]",
+    zh: "现在启动 loop 吗？[y/N]",
+  },
+  "design.loop.manual_next": {
+    en: "Next: roll loop go --review auto",
+    zh: "下一步：roll loop go --review auto",
   },
 
   // `setup.*` — legacy setup agent selection (compatibility only).

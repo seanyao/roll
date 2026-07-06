@@ -13,6 +13,7 @@ import { designCommand, type DesignCommandDeps } from "../src/commands/design.js
 const REPO = resolve(__dirname, "../../..");
 
 type SpawnCall = { bin: string; args: string[]; opts: { cwd: string } };
+type LoopGoCall = { args: string[] };
 type StderrCapture = { out: { data: string }; restore: () => void };
 
 function freshHome(): { home: string; bin: string } {
@@ -38,8 +39,9 @@ function makeAgent(bin: string, name: string): void {
   chmodSync(path, 0o755);
 }
 
-function makeDeps(proj: string, bin: string): DesignCommandDeps & { calls: SpawnCall[] } {
+function makeDeps(proj: string, bin: string): DesignCommandDeps & { calls: SpawnCall[]; loopGoCalls: LoopGoCall[] } {
   const calls: SpawnCall[] = [];
+  const loopGoCalls: LoopGoCall[] = [];
   return {
     cwd: proj,
     env: { ...process.env, PATH: `${bin}:${process.env["PATH"] ?? ""}` },
@@ -48,7 +50,12 @@ function makeDeps(proj: string, bin: string): DesignCommandDeps & { calls: Spawn
       calls.push({ bin: binName, args, opts: { cwd: String(opts.cwd ?? "") } });
       return { status: 0, signal: null };
     },
+    runLoopGo: (args) => {
+      loopGoCalls.push({ args });
+      return 0;
+    },
     calls,
+    loopGoCalls,
   };
 }
 
@@ -317,6 +324,26 @@ describe("roll design", () => {
     expect(code).toBe(0);
     expect(d.calls).toHaveLength(1);
     expect(d.calls[0]?.bin).toBe("claude");
+  });
+
+  it("bare design with only done backlog rows still spawns agent (onboarding path)", () => {
+    const proj = freshProj();
+    dirs.push(proj);
+    writeFileSync(
+      join(proj, ".roll", "backlog.md"),
+      [
+        "| Story | Description | Status |",
+        "|-------|-------------|--------|",
+        "| [US-DONE-001](.roll/features/test/US-DONE-001/spec.md) | Delivered item | ✅ Done |",
+      ].join("\n") + "\n",
+      "utf8",
+    );
+    makeAgent(bin, "claude");
+    writeConfig(home, "lang: en\nai_claude: ~/.claude\n");
+    const d = makeDeps(proj, bin);
+    const code = designCommand([], d);
+    expect(code).toBe(0);
+    expect(d.calls).toHaveLength(1);
   });
 
   it("design with positional requirement text includes it in the prompt", () => {
@@ -590,6 +617,109 @@ describe("roll design bounded progress and handoff", () => {
     } finally {
       cap.restore();
     }
+  });
+
+  it("offers loop go after a successful design creates a Todo card and default decline keeps manual command", () => {
+    const proj = freshProj();
+    dirs.push(proj);
+    makeAgent(bin, "claude");
+    makeAgent(bin, "pi");
+    writeConfig(home, "lang: en\nai_claude: ~/.claude\nai_pi: ~/.pi\n");
+    writeFileSync(join(proj, "brief.md"), "# Brief\n", "utf8");
+    writeFileSync(join(proj, ".roll", "backlog.md"), ["| Story | Description | Status |", "|---|---|---|"].join("\n") + "\n", "utf8");
+    mkdirSync(join(proj, ".roll", "loop"), { recursive: true });
+    writeFileSync(
+      join(proj, ".roll", "loop", "rig-lifecycle.json"),
+      JSON.stringify({ rigs: { pi: { status: "suspended", cause: "quota", detail: "quota exceeded" } } }),
+      "utf8",
+    );
+    const d = makeDeps(proj, bin);
+    d.spawn = () => {
+      writeFileSync(
+        join(proj, ".roll", "backlog.md"),
+        [
+          "| Story | Description | Status |",
+          "|---|---|---|",
+          "| [US-CLI-001](.roll/features/cli/US-CLI-001/spec.md) | Scaffold installable CLI | 📋 Todo |",
+        ].join("\n") + "\n",
+        "utf8",
+      );
+      return { status: 0, signal: null, stdout: "", stderr: "" };
+    };
+    const out = captureStderr(() => designCommand(["--agent", "claude", "--from-file", "brief.md"], d));
+    expect(out).toContain("Agent pool: 1 active, 1 suspended");
+    expect(out).toContain("suspended: pi (quota)");
+    expect(out).toContain("Start loop now? [y/N]");
+    expect(out).toContain("Next: roll loop go --review auto");
+    expect(d.loopGoCalls).toHaveLength(0);
+  });
+
+  it("starts loop go with auto review when the post-design prompt is accepted", async () => {
+    const proj = freshProj();
+    dirs.push(proj);
+    makeAgent(bin, "claude");
+    writeConfig(home, "lang: en\nai_claude: ~/.claude\n");
+    writeFileSync(join(proj, "brief.md"), "# Brief\n", "utf8");
+    writeFileSync(join(proj, ".roll", "backlog.md"), ["| Story | Description | Status |", "|---|---|---|"].join("\n") + "\n", "utf8");
+    const d = makeDeps(proj, bin);
+    d.readLine = () => "y";
+    d.spawn = () => {
+      writeFileSync(
+        join(proj, ".roll", "backlog.md"),
+        [
+          "| Story | Description | Status |",
+          "|---|---|---|",
+          "| [US-CLI-001](.roll/features/cli/US-CLI-001/spec.md) | Scaffold installable CLI | 📋 Todo |",
+        ].join("\n") + "\n",
+        "utf8",
+      );
+      return { status: 0, signal: null, stdout: "", stderr: "" };
+    };
+    const code = await Promise.resolve(designCommand(["--from-file", "brief.md"], d));
+    expect(code).toBe(0);
+    expect(d.loopGoCalls).toEqual([{ args: ["--review", "auto"] }]);
+  });
+
+  it("returns the loop go exit code when accepted startup fails", async () => {
+    const proj = freshProj();
+    dirs.push(proj);
+    makeAgent(bin, "claude");
+    writeConfig(home, "lang: en\nai_claude: ~/.claude\n");
+    writeFileSync(join(proj, "brief.md"), "# Brief\n", "utf8");
+    writeFileSync(join(proj, ".roll", "backlog.md"), ["| Story | Description | Status |", "|---|---|---|"].join("\n") + "\n", "utf8");
+    const d = makeDeps(proj, bin);
+    d.readLine = () => "y";
+    d.runLoopGo = (args) => {
+      d.loopGoCalls.push({ args });
+      return 23;
+    };
+    d.spawn = () => {
+      writeFileSync(
+        join(proj, ".roll", "backlog.md"),
+        [
+          "| Story | Description | Status |",
+          "|---|---|---|",
+          "| [US-CLI-001](.roll/features/cli/US-CLI-001/spec.md) | Scaffold installable CLI | 📋 Todo |",
+        ].join("\n") + "\n",
+        "utf8",
+      );
+      return { status: 0, signal: null, stdout: "", stderr: "" };
+    };
+    const code = await Promise.resolve(designCommand(["--from-file", "brief.md"], d));
+    expect(code).toBe(23);
+    expect(d.loopGoCalls).toEqual([{ args: ["--review", "auto"] }]);
+  });
+
+  it("does not offer loop go when design fails or creates no Todo card", () => {
+    const proj = freshProj();
+    dirs.push(proj);
+    makeAgent(bin, "claude");
+    writeConfig(home, "lang: en\nai_claude: ~/.claude\n");
+    const d = makeDeps(proj, bin);
+    d.spawn = () => ({ status: 1, signal: null, stdout: "", stderr: "" });
+    const out = captureStderr(() => designCommand(["build a thing"], d));
+    expect(out).not.toContain("Start loop now?");
+    expect(d.loopGoCalls).toHaveLength(0);
   });
 
   it("keeps the intel-radar-shaped noise out of default live progress", async () => {

@@ -567,6 +567,45 @@ describe("supervisorCommand", () => {
     expect(why.rollMeta.state).toBeDefined();
   });
 
+  it("FIX-1229: next/why --json stays parseable and compact with large agent-health diagnostics", () => {
+    const longDetail = "auth hook stderr ".repeat(500);
+    const noisyEvents = Array.from({ length: 80 }, (_, index) =>
+      JSON.stringify({
+        type: "agent:blocked",
+        cycleId: `C-noisy-${index}`,
+        agent: index % 2 === 0 ? "codex" : "reasonix",
+        cause: "auth",
+        stage: "score",
+        detail: `${longDetail}${index}`,
+        ts: index + 1,
+      }),
+    );
+    const cwd = project(`# Backlog
+
+| ID | Description | Status |
+| --- | --- | --- |
+| FIX-1229 | json compactness bug | 📋 Todo |
+`, { events: noisyEvents });
+
+    const nextRaw = run(cwd, ["next", "--json"]).out;
+    const next = JSON.parse(nextRaw);
+    expect(next.next.storyId).toBe("FIX-1229");
+    expect(next.runbook.next.storyId).toBe("FIX-1229");
+    expect(next.runbook.agentHealth.summary).toContain("active issue");
+    expect(next.runbook.agentHealth.issues).toBeUndefined();
+    expect(next.runbook.scope.excluded).toBeUndefined();
+    expect(next.executionCast).toBeUndefined();
+    expect(nextRaw).not.toContain(longDetail);
+    expect(nextRaw.length).toBeLessThan(20_000);
+
+    const whyRaw = run(cwd, ["why", "--json"]).out;
+    const why = JSON.parse(whyRaw);
+    expect(why.runbook.next.storyId).toBe("FIX-1229");
+    expect(why.runbook.agentHealth.issues).toBeUndefined();
+    expect(whyRaw).not.toContain(longDetail);
+    expect(whyRaw.length).toBeLessThan(20_000);
+  });
+
   it("--json emits machine-readable facts + decisions", () => {
     const cwd = project(BACKLOG);
     const r = run(cwd, ["--json"]);

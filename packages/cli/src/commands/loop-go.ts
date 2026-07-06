@@ -301,7 +301,13 @@ function parsePorcelainPath(line: string): string {
   return target.replace(/^"|"$/g, "").replace(/\/$/, "");
 }
 
-function gitDirtyPaths(projectPath: string): string[] {
+type BootstrapArtifactInput = string | { status: string; path: string };
+
+function parsePorcelainEntry(line: string): { status: string; path: string } {
+  return { status: line.slice(0, 2), path: parsePorcelainPath(line) };
+}
+
+function gitDirtyPaths(projectPath: string): BootstrapArtifactInput[] {
   const result = spawnSync("git", ["status", "--porcelain", "--untracked-files=all"], {
     cwd: projectPath,
     encoding: "utf8",
@@ -312,8 +318,8 @@ function gitDirtyPaths(projectPath: string): string[] {
     .split("\n")
     .map((line) => line.trimEnd())
     .filter((line) => line.trim() !== "")
-    .map(parsePorcelainPath)
-    .filter((path) => path !== ".roll/loop" && !path.startsWith(".roll/loop/"))
+    .map(parsePorcelainEntry)
+    .filter((entry) => entry.path !== ".roll/loop" && !entry.path.startsWith(".roll/loop/"))
     .slice(0, 50);
 }
 
@@ -351,8 +357,32 @@ function isRollOwnedGeneratedPath(path: string): boolean {
   return isRollGeneratedEvidenceFile(parts, 4);
 }
 
-export function classifyBootstrapArtifacts(paths: readonly string[]): { kind: "none" | "bootstrap_only" | "mixed"; files: string[] } {
-  const files = paths.filter((path) => path.trim() !== "").filter((path) => !isRollOwnedGeneratedPath(path));
+function bootstrapArtifactPath(input: BootstrapArtifactInput): string {
+  return typeof input === "string" ? input : input.path;
+}
+
+function bootstrapArtifactStatus(input: BootstrapArtifactInput): string | undefined {
+  return typeof input === "string" ? undefined : input.status;
+}
+
+function isCycleWritebackPath(path: string): boolean {
+  if (path === ".roll/backlog.md" || path === ".roll/features.md") return true;
+  return path.startsWith(".roll/features/") && path.endsWith("/spec.md");
+}
+
+function isModifiedCycleWriteback(input: BootstrapArtifactInput): boolean {
+  const status = bootstrapArtifactStatus(input);
+  if (status === undefined) return false;
+  if (!isCycleWritebackPath(bootstrapArtifactPath(input))) return false;
+  return status.includes("M") && !/[?ADRCU]/.test(status);
+}
+
+export function classifyBootstrapArtifacts(paths: readonly BootstrapArtifactInput[]): { kind: "none" | "bootstrap_only" | "mixed"; files: string[] } {
+  const files = paths
+    .filter((input) => bootstrapArtifactPath(input).trim() !== "")
+    .filter((input) => !isRollOwnedGeneratedPath(bootstrapArtifactPath(input)))
+    .filter((input) => !isModifiedCycleWriteback(input))
+    .map(bootstrapArtifactPath);
   if (files.length === 0) return { kind: "none", files: [] };
   return files.every(isBootstrapArtifactPath) ? { kind: "bootstrap_only", files } : { kind: "mixed", files };
 }
@@ -360,8 +390,10 @@ export function classifyBootstrapArtifacts(paths: readonly string[]): { kind: "n
 function bootstrapArtifactsMessage(files: readonly string[]): string {
   const shown = files.slice(0, 12).join(", ");
   const more = files.length > 12 ? `, ... +${files.length - 12} more` : "";
+  const reasonLine = `ALERT reason: bootstrap_artifacts_unconfirmed (${files.length} unconfirmed bootstrap artifact${files.length === 1 ? "" : "s"})`;
   return [
     "roll loop go: bootstrap_artifacts_unconfirmed",
+    `  ${reasonLine}`,
     `  files: ${shown}${more}`,
     "  These files define project conventions/backlog metadata. Confirm their ownership before running builders:",
     "  - commit them to the product repo if they are product truth",
@@ -371,6 +403,7 @@ function bootstrapArtifactsMessage(files: readonly string[]): string {
     "  Then rerun: roll loop go",
     "",
     "roll loop go: bootstrap_artifacts_unconfirmed",
+    `  ${reasonLine}`,
     "  这些文件定义项目约定/backlog 元数据。先确认归属，再启动 builder：",
     "  - 属于产品事实就提交到产品仓",
     "  - 属于私有 Roll 元数据就提交到 .roll/roll-meta",
@@ -1794,6 +1827,7 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
       const bootstrap = classifyBootstrapArtifacts(gitDirtyPaths(id.path));
       if (bootstrap.kind === "bootstrap_only") {
         stopReason = "bootstrap_artifacts_unconfirmed";
+        const reasonLine = `ALERT reason: bootstrap_artifacts_unconfirmed (${bootstrap.files.length} unconfirmed bootstrap artifact${bootstrap.files.length === 1 ? "" : "s"})`;
         appendGoalGate(
           bus,
           evPath,
@@ -1801,7 +1835,7 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
           "progress",
           "paused",
           stopReason,
-          { files: bootstrap.files.join(", "), count: bootstrap.files.length },
+          { reasonLine, files: bootstrap.files.join(", "), count: bootstrap.files.length },
           deps.nowSec(),
         );
         process.stdout.write(bootstrapArtifactsMessage(bootstrap.files));

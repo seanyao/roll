@@ -546,6 +546,19 @@ function supervisorContext(
   };
 }
 
+type SupervisorContext = ReturnType<typeof supervisorContext>;
+
+function compactContextForJson(ctx: SupervisorContext): Omit<SupervisorContext, "executionCast"> {
+  return {
+    cast: ctx.cast,
+    castDetail: ctx.castDetail,
+    gate: ctx.gate,
+    rollMeta: ctx.rollMeta,
+    manualMerge: ctx.manualMerge,
+    pickRanking: ctx.pickRanking,
+  };
+}
+
 function fmtFacts(input: SupervisorInput, events: readonly RollEvent[] = []): string {
   const f = observeProject(input);
   const runbook = buildSupervisorRunbookState(input);
@@ -595,6 +608,40 @@ function supervisorDecisions(input: SupervisorInput): ReturnType<typeof advisePr
   const runbook = buildSupervisorRunbookState(input);
   const hasLiveStuck = runbook.blockedCards.some((b) => b.reason === "repeated_failure");
   return adviseProject(observeProject(input)).filter((d) => hasLiveStuck || !d.reason.startsWith("stuck stories"));
+}
+
+type SupervisorRunbookState = ReturnType<typeof buildSupervisorRunbookState>;
+
+function compactRunbookForJson(runbook: SupervisorRunbookState): {
+  scope: {
+    label: string;
+    families: readonly string[];
+    remainingByFamily: SupervisorRunbookState["scope"]["remainingByFamily"];
+    todoByFamily: SupervisorRunbookState["scope"]["todoByFamily"];
+  };
+  next: SupervisorRunbookState["next"];
+  blockedCards: SupervisorRunbookState["blockedCards"];
+  truth: {
+    manualMergeGates: SupervisorRunbookState["truth"]["manualMergeGates"];
+    structuralFailures: SupervisorRunbookState["truth"]["structuralFailures"];
+  };
+  agentHealth: { summary: string };
+} {
+  return {
+    scope: {
+      label: runbook.scope.label,
+      families: runbook.scope.families,
+      remainingByFamily: runbook.scope.remainingByFamily,
+      todoByFamily: runbook.scope.todoByFamily,
+    },
+    next: runbook.next,
+    blockedCards: runbook.blockedCards,
+    truth: {
+      manualMergeGates: runbook.truth.manualMergeGates,
+      structuralFailures: runbook.truth.structuralFailures,
+    },
+    agentHealth: { summary: runbook.agentHealth.summary },
+  };
 }
 
 function runbookWhy(state: ReturnType<typeof buildSupervisorRunbookState>, facts: ReturnType<typeof observeProject>): string {
@@ -1293,14 +1340,16 @@ export function supervisorCommand(args: string[]): number | Promise<number> {
     const mode = resolveOperatingMode(projectPath);
     const events = readSupervisorEvents(projectPath);
     const runbook = buildSupervisorRunbookState(input);
+    const compactRunbook = compactRunbookForJson(runbook);
     const ctx = supervisorContext(projectPath, input, events);
+    const compactCtx = compactContextForJson(ctx);
     const out =
       sub === "advise"
         ? { mode, decisions: supervisorDecisions(input), runbook, ...ctx }
         : sub === "next"
-          ? { mode, next: runbook.next, runbook, ...ctx }
+          ? { mode, next: runbook.next, runbook: compactRunbook, ...compactCtx }
           : sub === "why"
-            ? { mode, why: runbookWhy(runbook, facts), noProgressRecovery: readNoProgressStall(projectPath, events) ?? null, runbook, ...ctx }
+            ? { mode, why: runbookWhy(runbook, facts), noProgressRecovery: readNoProgressStall(projectPath, events) ?? null, runbook: compactRunbook, ...compactCtx }
             : { mode, facts, decisions: supervisorDecisions(input), next: runbook.next, runbook, ...ctx };
     process.stdout.write(JSON.stringify(out, null, 2) + "\n");
     return 0;

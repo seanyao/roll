@@ -13,6 +13,4 @@ export interface RoutingRule {
 export interface LoopSafetyPolicy {
   /** Consecutive failures before PAUSE + ALERT + human decision (I6). */
   maxConsecutiveFailures: number;
-  /** Same-story failures before permanent hold (I5). */
-  maxStoryFailures: number;
 }

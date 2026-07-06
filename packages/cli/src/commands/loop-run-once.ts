@@ -1669,5 +1669,9 @@ export function checkCoreWorktreeContamination(cwd: string): CoreWorktreeCheckRe
   delete process.env["GIT_WORK_TREE"];
   delete process.env["GIT_CEILING_DIRECTORIES"];
 
-  return repairCoreWorktreeContamination(cwd);
+  const main = repairCoreWorktreeContamination(cwd);
+  if (main.healed) return main;
+
+  const meta = repairCoreWorktreeContamination(join(cwd, ".roll"));
+  return meta.healed ? { healed: true, detail: `roll-meta: ${meta.detail}` } : meta;
 }

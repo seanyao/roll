@@ -3679,6 +3679,34 @@ describe("executeCommand — command → executor mapping", () => {
     }
   });
 
+  it("FIX-1224: append_run terminal path repairs core.worktree in nested roll-meta", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-terminal-meta-cleanup-")));
+    execDirs.push(repo);
+    mkdirSync(join(repo, ".roll"), { recursive: true });
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: repo });
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: join(repo, ".roll") });
+    execFileSync("git", ["config", "--local", "core.worktree", "/tmp/fake-ranking-cwd"], { cwd: join(repo, ".roll") });
+
+    const { ports, calls } = fakePorts({ repoCwd: repo });
+    await executeCommand(
+      { kind: "append_run", status: "failed", outcome: "failed", cycleId: `${CTX.cycleId}-meta` },
+      ports,
+      { ...CTX, cycleId: `${CTX.cycleId}-meta` },
+    );
+
+    expect(() => execFileSync("git", ["config", "--local", "--get", "core.worktree"], { cwd: join(repo, ".roll") })).toThrow();
+    const cleanup = (calls["event"] ?? [])
+      .map((a) => (a as unknown[])[1] as RollEvent)
+      .find((e) => e.type === "cycle:cleanup" && e.rule === "roll-meta.core-worktree");
+    expect(cleanup).toMatchObject({
+      type: "cycle:cleanup",
+      cycleId: `${CTX.cycleId}-meta`,
+      rule: "roll-meta.core-worktree",
+      path: "/tmp/fake-ranking-cwd",
+      ok: true,
+    });
+  });
+
   it("FIX-352: terminal event timestamps are epoch ms while the runs row keeps second-based duration", async () => {
     const { ports, calls } = fakePorts({ clock: () => 1_780_688_082 });
     await executeCommand(

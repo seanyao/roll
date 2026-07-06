@@ -300,6 +300,21 @@ export async function executeTerminalCommand(
           `FIX-1210: cycle ${cmd.cycleId} — core.worktree was pointing to "${repair.detail}" — auto-unset at terminal`,
         );
       }
+      const metaRepair = repairCoreWorktreeContamination(join(ports.repoCwd, ".roll"));
+      if (metaRepair.healed) {
+        ports.events.appendEvent(ports.paths.eventsPath, {
+          type: "cycle:cleanup",
+          cycleId: cmd.cycleId,
+          rule: "roll-meta.core-worktree",
+          path: metaRepair.detail,
+          ok: true,
+          ts: eventTs(ports),
+        });
+        ports.events.appendAlert(
+          ports.paths.alertsPath,
+          `FIX-1224: cycle ${cmd.cycleId} — roll-meta core.worktree was pointing to "${metaRepair.detail}" — auto-unset at terminal`,
+        );
+      }
 
       const key: RunKey = { storyId: ctx.storyId ?? "", cycleId: cmd.cycleId };
       ports.events.upsertRun(ports.paths.runsPath, key, buildRunRow(cmd, ctx, ports.clock()));

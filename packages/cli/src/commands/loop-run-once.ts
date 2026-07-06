@@ -840,9 +840,10 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   // projectIdentity() resolve to the wrong checkout. Detect and unset before
   // any identity-dependent code runs. Also stores the healing detail so an ALERT
   // can be written once `alertsPath` is available.
-  const coreWorktreeHeal = checkCoreWorktreeContamination(process.cwd());
+  const identityRoot = (process.env["ROLL_MAIN_PROJECT"] ?? "").trim() || process.cwd();
+  const coreWorktreeHeal = checkCoreWorktreeContamination(identityRoot);
 
-  const id = await projectIdentity();
+  const id = await projectIdentity(identityRoot);
   const cycleId = makeCycleId();
 
   // FIX-1209: identity assertion — if the resolved project path contains a cycle

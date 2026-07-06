@@ -40,8 +40,8 @@ the archive rebuild; they are a convenience/archive view, not the delivery-truth
    into `ROLL_EVIDENCE_DIR`; visual lanes write screenshots into
    `ROLL_SCREENSHOTS_DIR` when the surface requires inspection. The agent keeps
    `ac-map.json` in the story card root, mapping each AC to the evidence files
-   that support it, with a status per AC: `pass` · `readonly` · `partial` ·
-   `claimed` · `missing`.
+   that support it, with a status per AC: `pass` · `pass-with-evidence` ·
+   `readonly` · `partial` · `claimed` · `missing`.
 3. Close with the hard attest gate. The runner calls
    `roll attest <story-id> --run-dir "$ROLL_RUN_DIR"` at the end of delivery.
    `roll attest` sweeps the hard facts (TCR commits, latest CI run, optional
@@ -75,7 +75,10 @@ when any of these facts are true:
   card archive, except allowed GitHub PR/commit/check URLs for this repository;
 - an AC remains `claimed`, which means the Builder asserted completion without
   pass/fail evidence;
-- a positive AC has no real evidence reference;
+- an AC remains `needs-confirmation`, which means the harness draft still needs
+  Builder review;
+- a positive AC (`pass`, `pass-with-evidence`, `readonly`, or `partial`) has no
+  real evidence reference;
 - a non-exempt visual card has no captured screenshot or recorded machine
   capture skip;
 - a declared `deliverable_url`, `deliverable_cmd`, or `physical_terminal`
@@ -99,9 +102,11 @@ any issue exits 1 and lists the story IDs and missing references.
 
 ## The red line
 
-An AC with **zero evidence** can never claim `pass`: the renderer forces it
-down to 🟧 Claimed and lists it under **Discrepancies**. Verbal completion
-("I confirmed it works") is exactly what this rules out.
+An AC with **zero evidence** can never claim `pass` or `pass-with-evidence`: the
+renderer forces it down to 🟧 Claimed and lists it under **Discrepancies**.
+`pass-with-evidence` is a harness-confirmed status backed by strong on-disk
+evidence; it is explicitly not the same as an agent-confirmed `pass`. Verbal
+completion ("I confirmed it works") is exactly what this rules out.
 
 ## Declaring visual evidence at design time
 

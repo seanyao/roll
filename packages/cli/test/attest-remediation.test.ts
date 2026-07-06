@@ -62,6 +62,33 @@ describe("needsAcMapRemediation", () => {
     expect(needsAcMapRemediation(wt, "FIX-901")).toBe(false);
   });
 
+  it("FIX-1230: pass-with-evidence is an honest harness confirmation, not an unconfirmed draft", () => {
+    const wt = withStory("FIX-1230P");
+    writeFileSync(
+      acMapPath(wt, "FIX-1230P"),
+      JSON.stringify([
+        {
+          ac: "FIX-1230P:AC1",
+          status: "pass-with-evidence",
+          evidence: [{ kind: "text", label: "test", textFile: "../evidence/test-output-FIX-1230P.txt" }],
+        },
+      ]) + "\n",
+    );
+    expect(needsAcMapRemediation(wt, "FIX-1230P")).toBe(false);
+  });
+
+  it("FIX-1230: needs-confirmation remains a draft blocker", () => {
+    const wt = withStory("FIX-1230N");
+    writeFileSync(
+      acMapPath(wt, "FIX-1230N"),
+      JSON.stringify([
+        { ac: "FIX-1230N:AC1", status: "pass-with-evidence" },
+        { ac: "FIX-1230N:AC2", status: "needs-confirmation" },
+      ]) + "\n",
+    );
+    expect(needsAcMapRemediation(wt, "FIX-1230N")).toBe(true);
+  });
+
   it("story without an AC block → nothing to map, no remediation", () => {
     const wt = withStory("FIX-902", "# FIX-902\n\njust prose, no acceptance criteria\n");
     expect(needsAcMapRemediation(wt, "FIX-902")).toBe(false);
@@ -466,6 +493,36 @@ describe("REFACTOR-066 runAcMapSelfHeal", () => {
     expect(events.some((e) => e.type === "attest:remediation" && e.outcome === "written")).toBe(true);
   });
 
+  it("FIX-1230: records a transcript and classified reason when remediation leaves the draft unconfirmed", async () => {
+    const wt = withStory("FIX-1230C");
+    const rd = withRunDir(wt, "FIX-1230C", [], []);
+    const events = selfHealEvents();
+
+    await runAcMapSelfHeal({
+      worktreeCwd: wt,
+      storyId: "FIX-1230C",
+      runDir: rd,
+      cycleId: "cycle-1230C",
+      agent: "claude",
+      collectDraftEvidence: async () => emptyEvidence,
+      collectCycleSignals: () => undefined,
+      canSpawnRemediation: () => true,
+      agentSpawn: vi.fn(async () => ({ stdout: "looked but did not edit", stderr: "", exitCode: 0, timedOut: false })),
+      renderAttest: async () => 0,
+      appendEvent: (event) => events.push(event),
+      now: () => 132,
+    });
+
+    const remediation = events.find((e) => e.type === "attest:remediation");
+    expect(remediation).toMatchObject({
+      type: "attest:remediation",
+      outcome: "still-missing",
+      reason: "draft-unconfirmed",
+      transcript: "remediation-132.log",
+    });
+    expect(readFileSync(join(rd, "remediation-132.log"), "utf8")).toContain("reason=draft-unconfirmed");
+  });
+
   it("self-heals an existing harness draft by confirming through the same narrow spawn", async () => {
     const wt = withStory("FIX-916");
     const rd = withRunDir(wt, "FIX-916", [], []);
@@ -531,6 +588,98 @@ describe("REFACTOR-066 runAcMapSelfHeal", () => {
 
     expect(agentSpawn).toHaveBeenCalledTimes(1);
     expect(JSON.parse(readFileSync(acMapPath(wt, "FIX-1227"), "utf8"))[0].status).toBe("claimed");
+  });
+
+  it("FIX-1230: writes and verifies the ac-map in persistent repo .roll while the agent cwd stays the worktree", async () => {
+    const repo = withStory("FIX-1230A");
+    const wt = tmp("wt-copy-roll");
+    mkdirSync(join(wt, ".roll", "features", "uncategorized", "FIX-1230A"), { recursive: true });
+    writeFileSync(
+      join(wt, ".roll", "features", "uncategorized", "FIX-1230A", "spec.md"),
+      "# FIX-1230A\n\n## AC\n\n- [ ] AC1 confirms persistent archive\n",
+    );
+    const rd = join(repo, ".roll", "features", "uncategorized", "FIX-1230A", "20260707-000000");
+    mkdirSync(rd, { recursive: true });
+    const agentSpawn: AgentSpawn = vi.fn(async (_agent, opts) => {
+      expect(opts.cwd).toBe(wt);
+      expect(opts.skillBody).toContain(acMapPath(repo, "FIX-1230A"));
+      expect(opts.skillBody).not.toContain(acMapPath(wt, "FIX-1230A"));
+      expect(opts.skillBody).toContain(`in ${wt}`);
+      writeFileSync(acMapPath(repo, "FIX-1230A"), JSON.stringify([{ ac: "FIX-1230A:AC1", status: "claimed" }]) + "\n");
+      return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+    });
+    const events = selfHealEvents();
+
+    await runAcMapSelfHeal({
+      worktreeCwd: wt,
+      archiveCwd: repo,
+      storyId: "FIX-1230A",
+      runDir: rd,
+      cycleId: "cycle-1230A",
+      agent: "codex",
+      writableRoots: [join(repo, ".roll")],
+      collectDraftEvidence: async () => emptyEvidence,
+      collectCycleSignals: () => undefined,
+      canSpawnRemediation: () => true,
+      agentSpawn,
+      renderAttest: async () => 0,
+      appendEvent: (event) => events.push(event),
+      now: () => 130,
+    });
+
+    expect(agentSpawn).toHaveBeenCalledTimes(1);
+    expect(existsSync(acMapPath(repo, "FIX-1230A"))).toBe(true);
+    expect(existsSync(acMapPath(wt, "FIX-1230A"))).toBe(false);
+    expect(
+      events.some(
+        (e) =>
+          e.type === "attest:remediation" &&
+          e.outcome === "written" &&
+          e.reason === "written" &&
+          e.transcript === "remediation-130.log",
+      ),
+    ).toBe(true);
+    expect(readFileSync(join(rd, "remediation-130.log"), "utf8")).toContain(`target=${acMapPath(repo, "FIX-1230A")}`);
+  });
+
+  it("FIX-1230: nested roll-meta layout uses the real .roll target as archive home", async () => {
+    const repo = tmp("repo-nested-roll");
+    const meta = tmp("meta-nested-roll");
+    symlinkSync(meta, join(repo, ".roll"));
+    const wt = tmp("wt-nested-roll");
+    symlinkSync(meta, join(wt, ".roll"));
+    const storyDir = join(meta, "features", "loop-engine", "FIX-1230B");
+    mkdirSync(storyDir, { recursive: true });
+    writeFileSync(join(storyDir, "spec.md"), "# FIX-1230B\n\n**AC:**\n- [ ] AC1 confirms nested meta\n");
+    const rd = join(storyDir, "20260707-000000");
+    mkdirSync(rd, { recursive: true });
+    const agentSpawn: AgentSpawn = vi.fn(async (_agent, opts) => {
+      expect(opts.cwd).toBe(wt);
+      expect(opts.writableRoots).toContain(realpathSync(meta));
+      expect(opts.skillBody).toContain(acMapPath(repo, "FIX-1230B"));
+      writeFileSync(acMapPath(repo, "FIX-1230B"), JSON.stringify([{ ac: "FIX-1230B:AC1", status: "claimed" }]) + "\n");
+      return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+    });
+
+    await runAcMapSelfHeal({
+      worktreeCwd: wt,
+      archiveCwd: repo,
+      storyId: "FIX-1230B",
+      runDir: rd,
+      cycleId: "cycle-1230B",
+      agent: "codex",
+      writableRoots: [realpathSync(meta)],
+      collectDraftEvidence: async () => emptyEvidence,
+      collectCycleSignals: () => undefined,
+      canSpawnRemediation: () => true,
+      agentSpawn,
+      renderAttest: async () => 0,
+      appendEvent: () => undefined,
+      now: () => 131,
+    });
+
+    expect(agentSpawn).toHaveBeenCalledTimes(1);
+    expect(existsSync(join(meta, "features", "loop-engine", "FIX-1230B", "ac-map.json"))).toBe(true);
   });
 
   it("self-heals text-only pass ACs by attaching a captured screenshot and rerendering", async () => {

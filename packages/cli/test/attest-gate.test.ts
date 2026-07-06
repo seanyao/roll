@@ -262,6 +262,17 @@ describe("verificationReportHasContent (US-ATTEST-012 content floor)", () => {
     expect(verificationReportHasContent(wt, "FIX-320")).toBe(true);
   });
 
+  it("FIX-1230: pass-with-evidence is content-bearing when its evidence resolves", () => {
+    const wt = withReport("FIX-1230P", 2000, "<!-- structured truth wins -->", [
+      {
+        ac: "FIX-1230P:AC1",
+        status: "pass-with-evidence",
+        evidence: [{ kind: "screenshot", label: "harness evidence", href: "screenshots/p.png" }],
+      },
+    ]);
+    expect(verificationReportHasContent(wt, "FIX-1230P")).toBe(true);
+  });
+
   it("US-EVID-019: positive AC evidence must resolve to files in the evidence tree", () => {
     const wt = withReport("US-EVID-MISS", 2000);
     writeFileSync(

@@ -30,11 +30,11 @@
  * structure + evidence chain is already done.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, join, relative } from "node:path";
 import { acForStory, draftAcMap } from "@roll/core";
 import type { CycleActivityEvent, RollEvent } from "@roll/spec";
 import { cardArchiveDir } from "../lib/archive.js";
-import type { AgentSpawn } from "./agent-spawn.js";
+import type { AgentSpawn, AgentSpawnResult } from "./agent-spawn.js";
 import { storyHasAcBlock, storyRequiresScreenshot, storySpecPath } from "./attest-gate.js";
 
 /** Hard wall-clock cap for the remediation spawn — writing one JSON file from
@@ -48,39 +48,37 @@ export function acMapPath(worktreeCwd: string, storyId: string): string {
 }
 
 /**
- * Remediation fires ONLY when the ac-map is absent OR is a harness-generated
- * DRAFT (all statuses are "needs-confirmation" / "pass-with-evidence" — the
- * harness put structure+evidence but the agent has NOT yet confirmed).
+ * Remediation fires ONLY when the ac-map is absent OR still has
+ * `needs-confirmation` rows from a harness-generated draft. `pass-with-evidence`
+ * is an honest harness-confirmed status: not a fabricated `pass`, but enough to
+ * keep strong on-disk evidence from blocking forever when the agent leaves it.
  *
  * A story without an AC block passes the gate without a report; an
  * existing CONFIRMED ac-map (real statuses: pass/partial/claimed/missing)
  * means step 10.6 was already honored.
  *
- * FIX-912: the new draft path — when the harness wrote a draft ac-map but
- * the agent has not confirmed it yet, this still returns true so the FIX-246
- * remediation fires with the draft-confirmation prompt (agent only adjusts
- * statuses). Once the agent confirms (no draft statuses remain), this returns
- * false — the ac-map is real.
+ * FIX-912/FIX-1230: when the harness wrote a draft with unresolved
+ * `needs-confirmation` rows, this still returns true so the FIX-246 remediation
+ * fires with the draft-confirmation prompt. Once no row needs confirmation,
+ * this returns false — the ac-map is usable.
  */
 export function needsAcMapRemediation(worktreeCwd: string, storyId: string): boolean {
   if (storyId === "") return false;
   if (storyHasAcBlock(worktreeCwd, storyId) !== true) return false;
   const p = acMapPath(worktreeCwd, storyId);
   if (!existsSync(p)) return true; // absent → remediation needed
-  // FIX-912: the harness may have written a draft. If ALL statuses are draft
-  // statuses (needs-confirmation / pass-with-evidence), the agent hasn't
-  // confirmed yet → remediation needed (with the draft-confirm prompt).
+  // FIX-1230: `pass-with-evidence` is an honest harness-confirmed status.
+  // Only `needs-confirmation` remains a draft blocker.
   try {
     const entries = JSON.parse(readFileSync(p, "utf8")) as unknown;
     if (!Array.isArray(entries) || entries.length === 0) return true;
-    const allDraft = entries.every(
+    const hasUnconfirmed = entries.some(
       (e: unknown) =>
         typeof e === "object" &&
         e !== null &&
-        ((e as Record<string, unknown>)["status"] === ACMAP_DRAFT_STATUS ||
-          (e as Record<string, unknown>)["status"] === ACMAP_PASS_WITH_EVIDENCE),
+        (e as Record<string, unknown>)["status"] === ACMAP_DRAFT_STATUS,
     );
-    return allDraft; // all draft → agent hasn't confirmed → remediation needed
+    return hasUnconfirmed;
   } catch {
     return true; // malformed ac-map → remediation needed
   }
@@ -312,6 +310,7 @@ export function writeAcMapDraftEvidenceFiles(
 
 export interface AcMapSelfHealOptions {
   worktreeCwd: string;
+  archiveCwd?: string;
   storyId: string;
   runDir: string;
   cycleId: string;
@@ -330,6 +329,78 @@ export interface AcMapSelfHealResult {
   renderExitCode: number;
 }
 
+export type AcMapRemediationReason =
+  | "written"
+  | "spawn-unavailable"
+  | "spawn-threw"
+  | "timeout"
+  | "nonzero-exit"
+  | "target-missing"
+  | "target-empty"
+  | "draft-unconfirmed"
+  | "malformed"
+  | "unknown";
+
+function acMapRemediationReason(archiveCwd: string, storyId: string): AcMapRemediationReason {
+  const p = acMapPath(archiveCwd, storyId);
+  if (!existsSync(p)) return "target-missing";
+  try {
+    const entries = JSON.parse(readFileSync(p, "utf8")) as unknown;
+    if (!Array.isArray(entries) || entries.length === 0) return "target-empty";
+    const hasDraft = entries.some(
+      (e: unknown) =>
+        typeof e === "object" &&
+        e !== null &&
+        (e as Record<string, unknown>)["status"] === ACMAP_DRAFT_STATUS,
+    );
+    return hasDraft ? "draft-unconfirmed" : "written";
+  } catch {
+    return "malformed";
+  }
+}
+
+function writeAcMapRemediationTranscript(input: {
+  runDir: string;
+  ts: number;
+  agent: string;
+  storyId: string;
+  cwd: string;
+  archiveCwd: string;
+  target: string;
+  outcome: "written" | "still-missing" | "spawn-failed";
+  reason: AcMapRemediationReason;
+  result?: AgentSpawnResult;
+  error?: unknown;
+}): string | undefined {
+  try {
+    mkdirSync(input.runDir, { recursive: true });
+    const path = join(input.runDir, `remediation-${input.ts}.log`);
+    const body = [
+      `agent=${input.agent}`,
+      `story=${input.storyId}`,
+      `outcome=${input.outcome}`,
+      `reason=${input.reason}`,
+      `cwd=${input.cwd}`,
+      `archiveCwd=${input.archiveCwd}`,
+      `target=${input.target}`,
+      input.result !== undefined ? `exitCode=${input.result.exitCode}` : "exitCode=",
+      input.result !== undefined ? `timedOut=${input.result.timedOut}` : "timedOut=",
+      "",
+      "--- stdout ---",
+      input.result?.stdout ?? "",
+      "--- stderr ---",
+      input.result?.stderr ?? "",
+      ...(input.error !== undefined ? ["--- error ---", input.error instanceof Error ? input.error.message : String(input.error)] : []),
+      "",
+    ].join("\n");
+    writeFileSync(path, body);
+    const rel = relative(input.runDir, path);
+    return rel === "" || rel.startsWith("..") ? path : rel;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * REFACTOR-066 — the single ac-map self-heal pipeline.
  *
@@ -343,16 +414,18 @@ export async function runAcMapSelfHeal(opts: AcMapSelfHealOptions): Promise<AcMa
     return { renderExitCode: 0 };
   }
 
-  if (needsAcMapRemediation(opts.worktreeCwd, opts.storyId)) {
+  const archiveCwd = opts.archiveCwd ?? opts.worktreeCwd;
+
+  if (needsAcMapRemediation(archiveCwd, opts.storyId)) {
     try {
-      const specPath = storySpecPath(opts.worktreeCwd, opts.storyId);
+      const specPath = storySpecPath(archiveCwd, opts.storyId);
       if (specPath !== null) {
         const specText = readFileSync(specPath, "utf8");
         const gitEvidence = await opts.collectDraftEvidence();
         const draftJson = generateAcMapDraft(specText, opts.storyId, gitEvidence, opts.collectCycleSignals());
         if (draftJson !== null) {
-          writeAcMapDraftEvidenceFiles(opts.worktreeCwd, opts.storyId, gitEvidence);
-          writeFileSync(acMapPath(opts.worktreeCwd, opts.storyId), draftJson);
+          writeAcMapDraftEvidenceFiles(archiveCwd, opts.storyId, gitEvidence);
+          writeFileSync(acMapPath(archiveCwd, opts.storyId), draftJson);
           opts.appendEvent({
             type: "attest:draft-generated",
             cycleId: opts.cycleId,
@@ -366,38 +439,69 @@ export async function runAcMapSelfHeal(opts: AcMapSelfHealOptions): Promise<AcMa
     }
   }
 
-  if (needsAcMapRemediation(opts.worktreeCwd, opts.storyId)) {
+  if (needsAcMapRemediation(archiveCwd, opts.storyId)) {
     let outcome: "written" | "still-missing" | "spawn-failed";
+    let reason: AcMapRemediationReason = "unknown";
+    let result: AgentSpawnResult | undefined;
+    let error: unknown;
     try {
       if (!opts.canSpawnRemediation()) {
         outcome = "spawn-failed";
+        reason = "spawn-unavailable";
       } else {
-        await opts.agentSpawn(opts.agent, {
+        result = await opts.agentSpawn(opts.agent, {
           cwd: opts.worktreeCwd,
-          skillBody: buildAcMapRemediationPrompt(opts.worktreeCwd, opts.storyId, opts.runDir),
+          skillBody: buildAcMapRemediationPrompt(archiveCwd, opts.storyId, opts.runDir, opts.worktreeCwd),
           storyId: opts.storyId,
           timeoutMs: ACMAP_REMEDIATION_TIMEOUT_MS,
           runDir: opts.runDir,
           ...(opts.writableRoots !== undefined ? { writableRoots: opts.writableRoots } : {}),
         });
-        outcome = needsAcMapRemediation(opts.worktreeCwd, opts.storyId) ? "still-missing" : "written";
+        if (result.timedOut) {
+          outcome = "spawn-failed";
+          reason = "timeout";
+        } else if (result.exitCode !== 0) {
+          outcome = "spawn-failed";
+          reason = "nonzero-exit";
+        } else {
+          reason = acMapRemediationReason(archiveCwd, opts.storyId);
+          outcome = reason === "written" ? "written" : "still-missing";
+        }
       }
-    } catch {
+    } catch (e) {
       outcome = "spawn-failed";
+      reason = "spawn-threw";
+      error = e;
     }
+    const ts = opts.now();
+    const transcript = writeAcMapRemediationTranscript({
+      runDir: opts.runDir,
+      ts,
+      agent: opts.agent,
+      storyId: opts.storyId,
+      cwd: opts.worktreeCwd,
+      archiveCwd,
+      target: acMapPath(archiveCwd, opts.storyId),
+      outcome,
+      reason,
+      ...(result !== undefined ? { result } : {}),
+      ...(error !== undefined ? { error } : {}),
+    });
     opts.appendEvent({
       type: "attest:remediation",
       cycleId: opts.cycleId,
       storyId: opts.storyId,
       agent: opts.agent,
       outcome,
-      ts: opts.now(),
+      reason,
+      ...(transcript !== undefined ? { transcript } : {}),
+      ts,
     });
   }
 
   let renderExitCode = await opts.renderAttest();
   if (renderExitCode === 0) {
-    const attached = autoAttachScreenshotToAcMap(opts.worktreeCwd, opts.storyId, opts.runDir);
+    const attached = autoAttachScreenshotToAcMap(archiveCwd, opts.storyId, opts.runDir);
     if (attached !== null) {
       opts.appendEvent({
         type: "attest:auto-attach",
@@ -425,12 +529,13 @@ export async function runAcMapSelfHeal(opts: AcMapSelfHealOptions): Promise<AcMa
  * ac-map evidence hrefs are relative to it.
  */
 export function buildAcMapRemediationPrompt(
-  worktreeCwd: string,
+  archiveCwd: string,
   storyId: string,
   runDir: string,
+  deliveryCwd = archiveCwd,
 ): string {
-  const target = acMapPath(worktreeCwd, storyId);
-  const storyDir = join(cardArchiveDir(worktreeCwd, storyId));
+  const target = acMapPath(archiveCwd, storyId);
+  const storyDir = join(cardArchiveDir(archiveCwd, storyId));
   const draftExists = existsSync(target);
 
   if (draftExists) {
@@ -442,18 +547,19 @@ export function buildAcMapRemediationPrompt(
       ``,
       `1. Read the draft at: ${target}`,
       `   - Every AC from the spec has a row with pre-filled evidence chain.`,
-      `   - Statuses: "pass-with-evidence" (harness found supporting test files) or "needs-confirmation" (insufficient evidence).`,
-      `2. Review what you actually did this cycle: \`git log --oneline origin/main..HEAD\` and \`git diff origin/main...HEAD --stat\` in ${worktreeCwd}.`,
+      `   - Statuses: "pass-with-evidence" (harness found strong supporting evidence; honest non-agent confirmation) or "needs-confirmation" (insufficient evidence).`,
+      `2. Review what you actually did this cycle: \`git log --oneline origin/main..HEAD\` and \`git diff origin/main...HEAD --stat\` in ${deliveryCwd}.`,
       `3. For each AC, set the TRUE status based on what you delivered:`,
       `   - "pass" — you verified this AC and it is satisfied.`,
       `   - "partial" — partially done.`,
       `   - "claimed" — you believe it passes but have no hard evidence.`,
       `   - "missing" — not addressed this cycle.`,
-      `   - Do NOT leave any row as "pass-with-evidence" or "needs-confirmation" — those are harness drafts, not final statuses.`,
+      `   - Do NOT leave any row as "needs-confirmation"; set it to a real agent status.`,
+      `   - You MAY leave "pass-with-evidence" only when the existing evidence really supports the AC; this is explicitly harness-confirmed, not agent-confirmed pass.`,
       `4. Where useful, save REAL command output from this cycle as text evidence under ${join(storyDir, "evidence")}/.`,
       `5. Edit ${target} — update ONLY the status fields (and optionally add real evidence). Keep the existing evidence chain.`,
       ``,
-      `Proof that you updated: \`node -e 'const a=JSON.parse(require("fs").readFileSync("${target}","utf8")); const bad=a.filter(e=>e.status==="pass-with-evidence"||e.status==="needs-confirmation"); if(bad.length>0) throw new Error(bad.length+" ACs still have draft status"); console.log("ok "+a.length+" ACs confirmed")'\``,
+      `Proof that you updated: \`node -e 'const a=JSON.parse(require("fs").readFileSync("${target}","utf8")); const bad=a.filter(e=>e.status==="needs-confirmation"); if(bad.length>0) throw new Error(bad.length+" ACs still need confirmation"); console.log("ok "+a.length+" ACs resolved")'\``,
       `6. Do NOT change product code, do NOT commit, do not open a PR. Exit after confirming.`,
     ].join("\n");
   }
@@ -464,7 +570,7 @@ export function buildAcMapRemediationPrompt(
     `You delivered ${storyId} this cycle but skipped the acceptance intent map (skill step 10.6). Without it the attest gate fails the whole delivery. Do ONLY the following:`,
     ``,
     `1. Read the story spec and its AC list: ${join(storyDir, "spec.md")}`,
-    `2. Review what you actually did this cycle: \`git log --oneline origin/main..HEAD\` and \`git diff origin/main...HEAD --stat\` in ${worktreeCwd}.`,
+    `2. Review what you actually did this cycle: \`git log --oneline origin/main..HEAD\` and \`git diff origin/main...HEAD --stat\` in ${deliveryCwd}.`,
     `3. Where useful, save REAL command output from this cycle as text evidence under ${join(storyDir, "evidence")}/ (create the dir if absent).`,
     `4. Write ${target} — a JSON array with EXACTLY one entry per AC:`,
     ``,

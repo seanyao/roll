@@ -8,6 +8,7 @@ import {
   BacklogStore,
   ConflictError,
   type FileStore,
+  extractAnnotation,
   idMatchesPattern,
   markStatus,
   parseBacklog,
@@ -126,6 +127,76 @@ describe("markStatus", () => {
     const content = "| US-X | x | 📋 Todo |\r\n| US-Y | y | 📋 Todo |\r\n";
     const r = markStatus(content, "US-X", DONE);
     expect(r.content).toBe("| US-X | x | ✅ Done |\r\n| US-Y | y | 📋 Todo |\r\n");
+  });
+
+  describe("extractAnnotation (FIX-1219)", () => {
+    it("extracts parenthesized annotation", () => {
+      expect(extractAnnotation("✅ Done (PR#1238 · merged abc1234 · description)")).toBe(
+        "(PR#1238 · merged abc1234 · description)",
+      );
+    });
+    it("extracts evidence_debt annotation", () => {
+      expect(extractAnnotation("✅ Done · evidence_debt")).toBe("· evidence_debt");
+    });
+    it("returns undefined for bare Done", () => {
+      expect(extractAnnotation("✅ Done")).toBeUndefined();
+    });
+    it("returns undefined for non-Done status", () => {
+      expect(extractAnnotation("🔨 In Progress")).toBeUndefined();
+      expect(extractAnnotation("📋 Todo")).toBeUndefined();
+    });
+    it("handles legacy Done marker", () => {
+      expect(extractAnnotation("✔️ Done (PR#42 · merged deadbeef)")).toBe(
+        "(PR#42 · merged deadbeef)",
+      );
+    });
+  });
+
+  describe("markStatus annotation preservation (FIX-1219)", () => {
+    it("preserves existing annotation when rewriting Done status", () => {
+      const content = [
+        "| FIX-101 | a bug | ✅ Done (PR#100 · merged abc123) |",
+        "| FIX-102 | another | 📋 Todo |",
+      ].join("\n");
+      const r = markStatus(content, "FIX-101", DONE);
+      expect(r.count).toBe(1);
+      expect(r.content).toContain(
+        "| FIX-101 | a bug | ✅ Done (PR#100 · merged abc123) |",
+      );
+    });
+    it("bare Done (no annotation) stays bare when rewriting", () => {
+      const content = [
+        "| FIX-103 | simple | ✅ Done |",
+        "| FIX-104 | todo | 📋 Todo |",
+      ].join("\n");
+      const r = markStatus(content, "FIX-103", DONE);
+      expect(r.count).toBe(1);
+      expect(r.content).toContain("| FIX-103 | simple | ✅ Done |");
+    });
+    it("annotation preserved even when flipping an already-annotated row", () => {
+      // Simulates a second call to markStatus on the same row — the
+      // annotation from the current cell carries forward.
+      const content = [
+        "| US-X | task | ✅ Done (PR#1 · merged a1b2c3) |",
+      ].join("\n");
+      const r = markStatus(content, "US-X", "✅ Done");
+      expect(r.count).toBe(1);
+      expect(r.content).toContain(
+        "| US-X | task | ✅ Done (PR#1 · merged a1b2c3) |",
+      );
+    });
+    it("new Done status with its own annotation is not clobbered when current cell is non-Done", () => {
+      // When the new status already carries annotation (e.g. evidence_debt)
+      // and the current cell has no annotation, the new status is used as-is.
+      const content = [
+        "| US-Y | task | 🔨 In Progress |",
+      ].join("\n");
+      const r = markStatus(content, "US-Y", "✅ Done · evidence_debt");
+      expect(r.count).toBe(1);
+      expect(r.content).toContain(
+        "| US-Y | task | ✅ Done · evidence_debt |",
+      );
+    });
   });
 });
 

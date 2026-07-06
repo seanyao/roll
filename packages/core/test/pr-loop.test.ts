@@ -353,22 +353,26 @@ describe("CI_BLACKHOLE_THRESHOLD_MIN constant", () => {
 
 describe("detectCiBlackhole (FIX-1217)", () => {
   it("non-empty ciState → false (no blackhole)", () => {
-    expect(detectCiBlackhole("success", 60)).toBe(false);
-    expect(detectCiBlackhole("pending", 60)).toBe(false);
-    expect(detectCiBlackhole("failure", 60)).toBe(false);
+    expect(detectCiBlackhole("success", 60, 0)).toBe(false);
+    expect(detectCiBlackhole("pending", 60, 0)).toBe(false);
+    expect(detectCiBlackhole("failure", 60, 0)).toBe(false);
   });
   it("empty ciState but PR too young → false", () => {
-    expect(detectCiBlackhole("", 10)).toBe(false); // 10 < 15
-    expect(detectCiBlackhole("", 0)).toBe(false);
+    expect(detectCiBlackhole("", 10, 0)).toBe(false); // 10 < 15
+    expect(detectCiBlackhole("", 0, 0)).toBe(false);
   });
   it("empty ciState + old enough → true (blackhole)", () => {
-    expect(detectCiBlackhole("", 15)).toBe(true);
-    expect(detectCiBlackhole("", 100)).toBe(true);
+    expect(detectCiBlackhole("", 15, 0)).toBe(true);
+    expect(detectCiBlackhole("", 100, 0)).toBe(true);
+  });
+  it("empty ciState + old enough but head check-runs non-zero/unknown → false", () => {
+    expect(detectCiBlackhole("", 100, 1)).toBe(false);
+    expect(detectCiBlackhole("", 100, -1)).toBe(false);
   });
   it("custom threshold overrides default", () => {
-    expect(detectCiBlackhole("", 10, 10)).toBe(true);
-    expect(detectCiBlackhole("", 9, 10)).toBe(false);
-    expect(detectCiBlackhole("", 30, 60)).toBe(false);
+    expect(detectCiBlackhole("", 10, 0, 10)).toBe(true);
+    expect(detectCiBlackhole("", 9, 0, 10)).toBe(false);
+    expect(detectCiBlackhole("", 30, 0, 60)).toBe(false);
   });
 });
 
@@ -378,23 +382,27 @@ describe("classifyPr — CI blackhole (FIX-1217)", () => {
     expect(classifyPr("", "CLEAN")).toBe("ready");
   });
   it("ciState='' with prAgeMinutes > threshold → ci_blackhole", () => {
-    expect(classifyPr("", "CLEAN", 20)).toBe("ci_blackhole");
-    expect(classifyPr("", "CLEAN", 15)).toBe("ci_blackhole");
+    expect(classifyPr("", "CLEAN", 20, undefined, 0)).toBe("ci_blackhole");
+    expect(classifyPr("", "CLEAN", 15, undefined, 0)).toBe("ci_blackhole");
   });
   it("ciState='' with prAgeMinutes < threshold → ready (not yet blackhole)", () => {
-    expect(classifyPr("", "CLEAN", 10)).toBe("ready");
-    expect(classifyPr("", "CLEAN", 0)).toBe("ready");
+    expect(classifyPr("", "CLEAN", 10, undefined, 0)).toBe("ready");
+    expect(classifyPr("", "CLEAN", 0, undefined, 0)).toBe("ready");
+  });
+  it("ciState='' with unknown or non-zero head check-runs → ready (not blackhole)", () => {
+    expect(classifyPr("", "CLEAN", 30)).toBe("ready");
+    expect(classifyPr("", "CLEAN", 30, undefined, 2)).toBe("ready");
   });
   it("stale still wins over blackhole (order: mergeable first)", () => {
-    expect(classifyPr("", "BEHIND", 100)).toBe("stale");
-    expect(classifyPr("", "CONFLICTING", 100)).toBe("stale");
+    expect(classifyPr("", "BEHIND", 100, undefined, 0)).toBe("stale");
+    expect(classifyPr("", "CONFLICTING", 100, undefined, 0)).toBe("stale");
   });
   it("ci_red still wins over blackhole (order: failure before blackhole)", () => {
     expect(classifyPr("failure", "CLEAN", 100)).toBe("ci_red");
   });
   it("custom threshold", () => {
-    expect(classifyPr("", "CLEAN", 5, 5)).toBe("ci_blackhole");
-    expect(classifyPr("", "CLEAN", 4, 5)).toBe("ready");
+    expect(classifyPr("", "CLEAN", 5, 5, 0)).toBe("ci_blackhole");
+    expect(classifyPr("", "CLEAN", 4, 5, 0)).toBe("ready");
   });
 });
 
@@ -405,6 +413,7 @@ describe("selectPrAction — dispatch_ci (FIX-1217)", () => {
       ciState: "",
       mergeable: "CLEAN",
       prAgeMinutes: 30,
+      headCheckRunCount: 0,
     })).toEqual({ kind: "dispatch_ci", reason: "ci_event_blackhole" });
   });
   it("dispatch_ci not emitted when age is below threshold", () => {
@@ -413,6 +422,7 @@ describe("selectPrAction — dispatch_ci (FIX-1217)", () => {
       ciState: "",
       mergeable: "CLEAN",
       prAgeMinutes: 5,
+      headCheckRunCount: 0,
     })).toEqual({ kind: "skip", reason: "ready_not_mergeable" });
   });
   it("dispatch_ci not emitted when ciState is non-empty", () => {
@@ -421,6 +431,22 @@ describe("selectPrAction — dispatch_ci (FIX-1217)", () => {
       ciState: "pending",
       mergeable: "CLEAN",
       prAgeMinutes: 30,
+      headCheckRunCount: 0,
+    })).toEqual({ kind: "skip", reason: "ready_not_mergeable" });
+  });
+  it("dispatch_ci not emitted when head check-runs are unknown/non-zero", () => {
+    expect(selectPrAction({
+      bot: "",
+      ciState: "",
+      mergeable: "CLEAN",
+      prAgeMinutes: 30,
+    })).toEqual({ kind: "skip", reason: "ready_not_mergeable" });
+    expect(selectPrAction({
+      bot: "",
+      ciState: "",
+      mergeable: "CLEAN",
+      prAgeMinutes: 30,
+      headCheckRunCount: 1,
     })).toEqual({ kind: "skip", reason: "ready_not_mergeable" });
   });
   it("manualMerge with blackhole → still dispatch (blackhole trumps manualMerge)", () => {
@@ -431,6 +457,7 @@ describe("selectPrAction — dispatch_ci (FIX-1217)", () => {
       mergeable: "CLEAN",
       manualMerge: true,
       prAgeMinutes: 30,
+      headCheckRunCount: 0,
     })).toEqual({ kind: "dispatch_ci", reason: "ci_event_blackhole" });
   });
 });

@@ -31,6 +31,7 @@ interface Recorder {
   readied: string[];
   merged: string[];
   healed: string[];
+  dispatchedCi: Array<{ num: string; headRef: string; slug: string }>;
   rebased: string[];
   repaired: string[];
   circuitCalls: string[];
@@ -39,7 +40,18 @@ interface Recorder {
 }
 
 function harness(overrides: Partial<PrInboxDeps> = {}): { deps: PrInboxDeps; rec: Recorder } {
-  const rec: Recorder = { ticks: [], alerts: [], readied: [], merged: [], healed: [], rebased: [], repaired: [], circuitCalls: [], mergedRecorded: [] };
+  const rec: Recorder = {
+    ticks: [],
+    alerts: [],
+    readied: [],
+    merged: [],
+    healed: [],
+    dispatchedCi: [],
+    rebased: [],
+    repaired: [],
+    circuitCalls: [],
+    mergedRecorded: [],
+  };
   const deps: PrInboxDeps = {
     ghAvailable: async () => true,
     resolveSlug: async () => "owner/repo",
@@ -58,6 +70,10 @@ function harness(overrides: Partial<PrInboxDeps> = {}): { deps: PrInboxDeps; rec
     },
     heal: async (num) => {
       rec.healed.push(num);
+    },
+    dispatchCi: async (num, headRef, slug) => {
+      rec.dispatchedCi.push({ num, headRef, slug });
+      return true;
     },
     rebaseCircuitAllowed: (num) => {
       rec.circuitCalls.push(num);
@@ -464,6 +480,29 @@ describe("runPrInbox — per-PR action dispatch", () => {
     await runPrInbox(deps);
     expect(rec.healed).toEqual(["10"]);
     expect(rec.merged).toEqual([]);
+  });
+  it("FIX-1217: zero head check-runs after threshold → workflow_dispatch and ALERT", async () => {
+    const { deps, rec } = harness({
+      listOpenPrs: listOf([{ number: 1217, headRefName: "loop/cycle-20260706-1217" }]),
+      viewPr: async () => ({
+        bot: "",
+        ciState: "",
+        mergeable: "CLEAN",
+        prAgeMinutes: 30,
+        headCheckRunCount: 0,
+      }),
+    });
+
+    await runPrInbox(deps);
+
+    expect(rec.dispatchedCi).toEqual([
+      { num: "1217", headRef: "loop/cycle-20260706-1217", slug: "owner/repo" },
+    ]);
+    expect(rec.alerts).toHaveLength(1);
+    expect(rec.alerts[0]).toContain("PR #1217");
+    expect(rec.alerts[0]).toContain("CI event blackhole detected");
+    expect(rec.merged).toEqual([]);
+    expect(rec.healed).toEqual([]);
   });
   it("ready but not mergeable → skip (no merge)", async () => {
     const { deps, rec } = harness({

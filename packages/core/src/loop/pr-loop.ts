@@ -168,7 +168,8 @@ export const CI_BLACKHOLE_THRESHOLD_MIN = 15;
  * Check order is load-bearing:
  *   1. mergeable ∈ {BEHIND, DIRTY, CONFLICTING}  → "stale" (rebase needed FIRST).
  *   2. ci_state == "failure"                      → "ci_red" (heal).
- *   3. ci_state == "" AND prAgeMinutes >= threshold → "ci_blackhole" (FIX-1217).
+ *   3. ci_state == "" AND head check-runs == 0 AND prAgeMinutes >= threshold
+ *      → "ci_blackhole" (FIX-1217).
  *   4. else                                       → "ready" (merge).
  * Human review is intentionally IRRELEVANT — CI is the only gate (oracle
  * comment 11746-11747). The 2nd positional arg (`human_review`) is unused by
@@ -177,18 +178,21 @@ export const CI_BLACKHOLE_THRESHOLD_MIN = 15;
  * @param prAgeMinutes  minutes since PR creation; only checked when ciState
  *   is "" (no check-runs at all). Omit to skip blackhole detection.
  * @param thresholdMinutes  override default {@link CI_BLACKHOLE_THRESHOLD_MIN}.
+ * @param headCheckRunCount  check-run count on the PR head commit; must be
+ *   exactly 0 to avoid dispatching when the API probe failed.
  */
 export function classifyPr(
   ciState: CiRollupState,
   mergeable: MergeStateStatus,
   prAgeMinutes?: number,
   thresholdMinutes?: number,
+  headCheckRunCount?: number,
 ): PrClass {
   if (mergeable === "BEHIND" || mergeable === "DIRTY" || mergeable === "CONFLICTING") {
     return "stale";
   }
   if (ciState === "failure") return "ci_red";
-  if (ciState === "" && prAgeMinutes !== undefined) {
+  if (ciState === "" && prAgeMinutes !== undefined && headCheckRunCount === 0) {
     const t = thresholdMinutes ?? CI_BLACKHOLE_THRESHOLD_MIN;
     if (prAgeMinutes >= t) return "ci_blackhole";
   }
@@ -293,6 +297,8 @@ export interface PrFacts {
   evidenceResolvable?: boolean;
   /** FIX-1217: minutes since PR creation (for CI-blackhole detection). */
   prAgeMinutes?: number;
+  /** FIX-1217: check-run count on the PR head commit. */
+  headCheckRunCount?: number;
   /** FIX-1217: override default CI-blackhole threshold. */
   ciBlackholeThresholdMin?: number;
 }
@@ -321,7 +327,7 @@ export function selectPrAction(f: PrFacts): PrAction {
   if (bot.kind === "alert_changes_requested") {
     return { kind: "alert", reason: "bot_changes_requested" };
   }
-  const verdict = classifyPr(f.ciState, f.mergeable, f.prAgeMinutes, f.ciBlackholeThresholdMin);
+  const verdict = classifyPr(f.ciState, f.mergeable, f.prAgeMinutes, f.ciBlackholeThresholdMin, f.headCheckRunCount);
   if (verdict === "ci_red") return { kind: "heal" };
   if (verdict === "stale") return { kind: "rebase" };
   if (verdict === "ci_blackhole") return { kind: "dispatch_ci", reason: "ci_event_blackhole" };
@@ -499,9 +505,11 @@ export interface DeadTickStreakInput {
 export function detectCiBlackhole(
   ciState: CiRollupState,
   prAgeMinutes: number,
+  headCheckRunCount: number,
   thresholdMinutes?: number,
 ): boolean {
   if (ciState !== "") return false;
+  if (headCheckRunCount !== 0) return false;
   const t = thresholdMinutes ?? CI_BLACKHOLE_THRESHOLD_MIN;
   return prAgeMinutes >= t;
 }

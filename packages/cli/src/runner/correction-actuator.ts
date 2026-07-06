@@ -36,6 +36,13 @@ export interface ApplyCorrectionResult extends CorrectionDecision {
   fixId?: string;
 }
 
+interface CorrectionConsensus {
+  allowed: boolean;
+  reason: string;
+}
+
+type PairVerdictEvent = Extract<RollEvent, { type: "pair:verdict" }>;
+
 function readMode(projectPath: string): CorrectionActuatorMode {
   try {
     const path = join(projectPath, ".roll", "policy.yaml");
@@ -55,6 +62,27 @@ function readEvents(eventsPath: string): RollEvent[] {
   } catch {
     return [];
   }
+}
+
+function reviewConsensus(events: readonly RollEvent[], cycleId: string | undefined): CorrectionConsensus {
+  if (cycleId === undefined || cycleId === "") {
+    return { allowed: false, reason: "missing cycle id" };
+  }
+  const verdicts = events.filter((ev): ev is PairVerdictEvent => {
+    if (ev.type !== "pair:verdict") return false;
+    if (ev.cycleId !== cycleId) return false;
+    return ev.stage === undefined || ev.stage === "review";
+  });
+  if (verdicts.length === 0) return { allowed: false, reason: "no review consensus" };
+  const peers = Array.from(new Set(verdicts.map((ev) => ev.peer)));
+  if (peers.length < 2) {
+    return { allowed: false, reason: `insufficient heterogeneous review peers: ${peers.join(", ")}` };
+  }
+  const nonAgree = verdicts.filter((ev) => ev.verdict !== "agree");
+  if (nonAgree.length > 0) {
+    return { allowed: false, reason: `review disagreement: ${nonAgree.map((ev) => `${ev.peer}:${ev.verdict}`).join(", ")}` };
+  }
+  return { allowed: true, reason: `all review peers agree: ${peers.join(", ")}` };
 }
 
 function appendEvent(eventsPath: string, event: RollEvent): void {
@@ -231,21 +259,27 @@ function mutationForAction(projectPath: string, decision: CorrectionDecision): {
 
 export function applyCorrectionAction(input: ApplyCorrectionInput): ApplyCorrectionResult {
   const now = input.nowSec ?? Math.floor(Date.now() / 1000);
+  const events = readEvents(input.eventsPath);
   const decision = decideCorrectionAction({
     storyId: input.storyId,
     ...(input.cycleId !== undefined ? { cycleId: input.cycleId } : {}),
     reasons: input.reasons,
     mode: readMode(input.projectPath),
-    events: readEvents(input.eventsPath),
+    events,
   });
+  const consensus = reviewConsensus(events, input.cycleId);
+  const effectiveDecision: CorrectionDecision =
+    decision.mode === "auto" && decision.action !== "alert_only" && !consensus.allowed
+      ? { ...decision, action: "alert_only" }
+      : decision;
   const failure = classifyCorrectionFailure(decision.signal);
-  const mutation = mutationForAction(input.projectPath, decision);
+  const mutation = mutationForAction(input.projectPath, effectiveDecision);
   const targetId = mutation.fixId;
   appendEvent(input.eventsPath, {
     type: "correction:action",
     ...(input.cycleId !== undefined ? { cycleId: input.cycleId } : {}),
     storyId: input.storyId,
-    action: decision.action,
+    action: effectiveDecision.action,
     plannedAction: decision.plannedAction,
     signal: decision.signal,
     reason: decision.reason,
@@ -258,10 +292,13 @@ export function applyCorrectionAction(input: ApplyCorrectionInput): ApplyCorrect
   });
   appendAlert(
     input.alertsPath,
-    `correction actuator: ${decision.mode}/${decision.action} for ${input.storyId} ` +
+    `correction actuator: ${decision.mode}/${effectiveDecision.action} for ${input.storyId} ` +
       `signal=${decision.signal} mutation=${mutation.mutation}` +
       (targetId !== undefined ? ` target=${targetId}` : "") +
+      (decision.mode === "auto" && decision.action !== "alert_only"
+        ? ` consensus=${consensus.allowed ? "allowed" : "denied"} (${consensus.reason})`
+        : "") +
       ` reason=${decision.reason}`,
   );
-  return { ...decision, mutation: mutation.mutation, ...(targetId !== undefined ? { fixId: targetId } : {}) };
+  return { ...decision, action: effectiveDecision.action, mutation: mutation.mutation, ...(targetId !== undefined ? { fixId: targetId } : {}) };
 }

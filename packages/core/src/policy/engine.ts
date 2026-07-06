@@ -75,9 +75,7 @@ export interface LoopSafetyConfig {
    *  high-complexity work without peer evidence is blocked + retried, not self-
    *  scored); set `soft` to keep the old record-only behaviour explicitly. */
   peerGate?: "soft" | "hard";
-  /** US-EVID-016: same-story correction returns/reroutes before PAUSE. */
-  correctionOscillationThreshold: number;
-  /** US-EVID-016: same failure signal repetitions before PAUSE. */
+  /** US-EVID-016: same failure signal repetitions before PAUSE (single-card oscillation folded in via REFACTOR-069). */
   correctionSignalThreshold: number;
   /** US-EVID-016: seconds in the repeated-signal window. */
   correctionSignalWindowSec: number;
@@ -154,7 +152,6 @@ export const DEFAULT_MAX_CONSECUTIVE_FAILURES = 3;
 export const DEFAULT_MAX_STORY_FAILURES = 3;
 export const DEFAULT_ACTION_ON_BREACH = "pause_and_notify";
 export const DEFAULT_ACTION_ON_STORY_BREACH = "hold";
-export const DEFAULT_CORRECTION_OSCILLATION_THRESHOLD = 3;
 export const DEFAULT_CORRECTION_SIGNAL_THRESHOLD = 3;
 export const DEFAULT_CORRECTION_SIGNAL_WINDOW_SEC = 12 * 60 * 60;
 export const DEFAULT_CORRECTION_ACTUATOR = "conservative";
@@ -268,7 +265,6 @@ export function parsePolicy(yaml: string): Policy {
     actionOnBreach: DEFAULT_ACTION_ON_BREACH,
     maxStoryFailures: DEFAULT_MAX_STORY_FAILURES,
     actionOnStoryBreach: DEFAULT_ACTION_ON_STORY_BREACH,
-    correctionOscillationThreshold: DEFAULT_CORRECTION_OSCILLATION_THRESHOLD,
     correctionSignalThreshold: DEFAULT_CORRECTION_SIGNAL_THRESHOLD,
     correctionSignalWindowSec: DEFAULT_CORRECTION_SIGNAL_WINDOW_SEC,
     correctionActuator: DEFAULT_CORRECTION_ACTUATOR,
@@ -383,10 +379,6 @@ function parseLoopSafety(lines: PreLine[], start: number): [number, LoopSafetyCo
     actionOnBreach: flat["action_on_breach"] ?? DEFAULT_ACTION_ON_BREACH,
     maxStoryFailures: numOr(flat["max_story_failures"], DEFAULT_MAX_STORY_FAILURES),
     actionOnStoryBreach: flat["action_on_story_breach"] ?? DEFAULT_ACTION_ON_STORY_BREACH,
-    correctionOscillationThreshold: numOr(
-      flat["correction_oscillation_threshold"],
-      DEFAULT_CORRECTION_OSCILLATION_THRESHOLD,
-    ),
     correctionSignalThreshold: numOr(flat["correction_signal_threshold"], DEFAULT_CORRECTION_SIGNAL_THRESHOLD),
     correctionSignalWindowSec: numOr(flat["correction_signal_window_sec"], DEFAULT_CORRECTION_SIGNAL_WINDOW_SEC),
     correctionActuator: flat["correction_actuator"] === "auto" ? "auto" : DEFAULT_CORRECTION_ACTUATOR,

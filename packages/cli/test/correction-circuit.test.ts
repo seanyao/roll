@@ -69,7 +69,7 @@ describe("US-EVID-016 correction circuit runner adapter", () => {
 
   it("honors policy.yaml thresholds", () => {
     const p = project();
-    writeFileSync(join(p.root, ".roll", "policy.yaml"), "loop_safety:\n  correction_oscillation_threshold: 4\n");
+    writeFileSync(join(p.root, ".roll", "policy.yaml"), "loop_safety:\n  correction_signal_threshold: 4\n");
     writeEvents(p.events, [
       { type: "correction:action", storyId: "US-A", action: "return_story", signal: "regression", reason: "r1", ts: 10 },
       { type: "correction:action", storyId: "US-A", action: "route_adjust", signal: "regression", reason: "r2", ts: 20 },

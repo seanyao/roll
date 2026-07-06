@@ -175,7 +175,7 @@ export type FailureClass = "env" | "harness" | "card" | "unknown";
  * REFACTOR-067 — shared external block cause taxonomy, used by both the
  * `agent:blocked` event type and the env attribution classifiers.
  */
-export type BlockCause = "auth" | "network";
+export type BlockCause = "auth" | "network" | "quota";
 
 /**
  * REFACTOR-067 — map a BlockCause to its root cause key string.

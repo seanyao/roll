@@ -228,6 +228,22 @@ describe("loop run-once CLI wiring", () => {
     appendFileSync(ev2, `${JSON.stringify({ type: "agent:blocked", cycleId: "b2", agent: "codex", cause: "network", stage: "build", detail: "ENOTFOUND", ts: 1 })}\n`, "utf8");
     expect(readExternalBlock(ev2, "b2")?.cause).toBe("network");
   });
+
+  it("readExternalBlock — US-LOOP-091: a BUILDER quota block is recoverable external state", () => {
+    const dir = mkdtempSync(join(tmpdir(), "roll-extblock-quota-"));
+    const ev = join(dir, "events.ndjson");
+    const w = (o: object): void => appendFileSync(ev, `${JSON.stringify(o)}\n`, "utf8");
+    writeFileSync(ev, "", "utf8");
+
+    w({ type: "agent:blocked", cycleId: "q1", agent: "kimi", cause: "quota", stage: "build", detail: "quota exhausted", ts: 1 });
+    const quota = readExternalBlock(ev, "q1");
+    expect(quota?.cause).toBe("quota");
+    expect(quota?.agents).toEqual(["kimi"]);
+    expect(quota?.details).toEqual(["quota exhausted"]);
+
+    w({ type: "agent:blocked", cycleId: "q1", agent: "claude", cause: "auth", stage: "score", detail: "Please run /login", ts: 2 });
+    expect(readExternalBlock(ev, "q1")?.cause).toBe("auth");
+  });
 });
 
 describe("realAgentSpawn child-process path (PATH shim, no real claude)", () => {

@@ -390,10 +390,13 @@ defaults:
 candidate pool, runtime health notes, and any legacy compatibility inputs. Use
 `roll agent migrate --dry-run` to preview conversion from old agent files.
 
-Runtime health is not static policy. Auth, network, VPN, account, or missing
-binary failures skip a candidate for the current resolution and are recorded as
-runtime facts. If no candidate remains, loop pauses and writes an ALERT instead
-of silently rewriting the pool.
+Runtime health is not static policy. Quota, auth, network, VPN, account, stall,
+or missing binary failures suspend only the runtime rig and are recorded as
+runtime facts; Roll does not rewrite `agents.yaml`. Suspended rigs are probed on
+the recovery interval and return to the pool automatically when reachable. If no
+candidate remains, the cycle records `loop:pending` and only runs recovery probes
+instead of starting a Builder, charging the card's failure budget, or silently
+rewriting the pool.
 
 For open casting, `health-aware` ranks the same visible pool across Builder,
 Designer, Evaluator, and Peer Reviewer roles. `roll supervisor route --role

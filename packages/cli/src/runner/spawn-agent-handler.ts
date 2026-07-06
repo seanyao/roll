@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { extractUsage, getAgentSpec, toCycleCost, type AgentInternalFailure, type CycleCommand, type CycleContext } from "@roll/core";
 import type { CycleCost } from "@roll/spec";
 import { agentSpawnEnvironment } from "./agent-spawn.js";
-import { classifyBlockSignature } from "./agent-liveness.js";
+import { classifyBlockSignature, suspendRig } from "./agent-liveness.js";
 import { applyMainCheckoutWriteProtection, releaseMainCheckoutWriteProtection, worktreeGitEnv } from "./main-checkout-guard.js";
 import { recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
 import { blockIfAgentCredentialsMissing, detectAgyInternalFailure } from "./agent-routing.js";
@@ -37,7 +37,18 @@ export async function executeSpawnAgentCommand(
           ? ctx.builderSessionId
           : `${ctx.cycleId ?? "cycle"}:build:${cmd.agent}:${ports.clock()}`;
       await quarantineMainCheckoutForCycle(ports, ctx, "pre-spawn");
-      if (blockIfAgentCredentialsMissing(cmd.agent, "build", ports, ctx) !== null) {
+      const credentialBlock = blockIfAgentCredentialsMissing(cmd.agent, "build", ports, ctx);
+      if (credentialBlock !== null) {
+        const suspended = suspendRig(guardRuntimeDir(ports), cmd.agent, "auth", credentialBlock, eventTs(ports));
+        ports.events.appendEvent(ports.paths.eventsPath, {
+          type: "rig:suspended",
+          cycleId: ctx.cycleId,
+          agent: cmd.agent,
+          cause: "auth",
+          detail: credentialBlock,
+          nextProbeAt: suspended.nextProbeAt ?? eventTs(ports),
+          ts: eventTs(ports),
+        });
         return {
           event: { type: "agent_exited", exit: 1, timedOut: false },
           ctxPatch: { builderSessionId },
@@ -231,14 +242,37 @@ export async function executeSpawnAgentCommand(
       // auth blocks and global PAUSEs after real deliveries.
       const builderBlock =
         res.exitCode !== 0 || res.timedOut ? classifyBlockSignature(`${res.stdout}\n${res.stderr}`) : null;
-      if (builderBlock === "auth" || builderBlock === "network") {
+      if (builderBlock === "quota" || builderBlock === "auth" || builderBlock === "network") {
+        const detail = (`${res.stdout}\n${res.stderr}`.split("\n").find((l) => l.trim() !== "") ?? "").slice(0, 200);
         ports.events.appendEvent(ports.paths.eventsPath, {
           type: "agent:blocked",
           cycleId: ctx.cycleId ?? "",
           agent: cmd.agent,
           cause: builderBlock,
           stage: "build",
-          detail: (`${res.stdout}\n${res.stderr}`.split("\n").find((l) => l.trim() !== "") ?? "").slice(0, 200),
+          detail,
+          ts: eventTs(ports),
+        });
+        const suspended = suspendRig(guardRuntimeDir(ports), cmd.agent, builderBlock, detail, eventTs(ports));
+        ports.events.appendEvent(ports.paths.eventsPath, {
+          type: "rig:suspended",
+          cycleId: ctx.cycleId,
+          agent: cmd.agent,
+          cause: builderBlock,
+          detail,
+          nextProbeAt: suspended.nextProbeAt ?? eventTs(ports),
+          ts: eventTs(ports),
+        });
+      } else if (res.timedOut) {
+        const detail = "agent timed out with no progress";
+        const suspended = suspendRig(guardRuntimeDir(ports), cmd.agent, "agent_stall", detail, eventTs(ports));
+        ports.events.appendEvent(ports.paths.eventsPath, {
+          type: "rig:suspended",
+          cycleId: ctx.cycleId,
+          agent: cmd.agent,
+          cause: "agent_stall",
+          detail,
+          nextProbeAt: suspended.nextProbeAt ?? eventTs(ports),
           ts: eventTs(ports),
         });
       }

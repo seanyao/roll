@@ -18,6 +18,7 @@ export type RollEvent =
   | { type: "loop:error"; loop: LoopType; error: string; ts: number }
   | { type: "loop:paused"; loop: LoopType; ts: number }
   | { type: "loop:resumed"; loop: LoopType; ts: number }
+  | { type: "loop:pending"; loop: LoopType; cycleId: string; reason: string; suspended: Array<{ agent: string; cause: string; detail?: string }>; ts: number }
   // US-LOOP-079e: dormant/wake/failed state transitions
   | { type: "loop:dormant"; loop: LoopType; ts: number; reason: string; since: number }
   | { type: "loop:woke"; loop: LoopType; ts: number; trigger: "roll-cmd" | "dream" | "pr" | "manual"; picked?: string; wakeEpoch: number }
@@ -338,6 +339,9 @@ export type RollEvent =
   // the same isolate-from-counter + PAUSE(auth)/breathe(network) path — one block
   // taxonomy for builder/reviewer/scorer (no new precheck, no probe, no cache).
   | { type: "agent:blocked"; cycleId: string; agent: string; cause: BlockCause; stage: "build" | "review" | "score"; detail: string; ts: number }
+  | { type: "rig:suspended"; cycleId?: string; agent: string; cause: "quota" | "auth" | "network" | "agent_stall"; detail?: string; nextProbeAt: number; ts: number }
+  | { type: "rig:recovered"; cycleId?: string; agent: string; detail?: string; ts: number }
+  | { type: "rig:probe"; cycleId?: string; agent: string; outcome: "live" | "still_suspended"; cause?: "quota" | "auth" | "network" | "agent_stall"; detail?: string; nextProbeAt?: number; ts: number }
   // FIX-930 — failure-driven agent swap on a zero-TCR/stalled cycle: the loop
   // re-marks the story Todo and routes the NEXT untried agent (excluding the one
   // that just gave up). `attempt` is the 1-based self-heal attempt for the story.

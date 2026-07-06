@@ -53,7 +53,8 @@ export function createCapturePeerHelpers(params: {
     rawOutput: string,
     stage: PeerStage,
   ): Promise<BlockCause | null> => {
-    let cause = classifyBlockSignature(rawOutput);
+    const initialCause = classifyBlockSignature(rawOutput);
+    let cause: BlockCause | null = initialCause === "auth" || initialCause === "network" ? initialCause : null;
     if (cause === null && outcome === "timeout" && ports.agentReachable !== undefined) {
       try {
         const reach = await ports.agentReachable(peer);

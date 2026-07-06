@@ -380,6 +380,7 @@ export function playbookForFailure(failureClass: FailureClass, rootCauseKey: str
     if (rootCauseKey === "env:main_dirty") {
       return "Environment repair: inspect the shared main checkout, preserve/quarantine leaked files, restore it to origin/main, then run roll loop resume.";
     }
+    if (rootCauseKey.startsWith("env:quota")) return "Environment repair: wait for quota/credits to recover or switch the configured rig; the card should not be split.";
     if (rootCauseKey.startsWith("env:auth")) return "Environment repair: refresh agent credentials or provider login, then run roll loop resume.";
     if (rootCauseKey.startsWith("env:network")) return "Environment repair: restore network/VPN/proxy or provider reachability; the card should not be split.";
     return "Environment repair: fix the harness runtime or worktree environment, then resume dispatch.";

@@ -13,7 +13,7 @@
  * delegates the entire walk to the runner adapter (packages/cli/src/runner).
  */
 import { EventBus, assessBacklog, cycleEndEvent, firstInstalledAgent, mapV2Status, markStatus, parseBacklog, parsePolicy, readSlotFromText, shouldResize, shouldSuppressDormancy, type AgentSlot, type BacklogItem, type CycleContext, type RouteDeps, type RouteSlot } from "@roll/core";
-import { STATUS_MARKER, absent, buildTerminalEvent, deriveOrphanVerdict, present, type BacklogReason, type BlockCause } from "@roll/spec";
+import { STATUS_MARKER, absent, buildTerminalEvent, deriveOrphanVerdict, present, type BacklogReason } from "@roll/spec";
 import { createScheduler, isOwnerHeld, launchdLabel, projectIdentity, readLockOwner, releaseLock } from "@roll/infra";
 import { dormantMarkerPath, resolveLoopRunState, writeDormantMarker } from "./loop-sched.js";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -649,9 +649,11 @@ export function shouldSuppressGoalChildFailureCounter(input: {
 export function readExternalBlock(
   eventsPath: string,
   cycleId: string,
-): { cause: BlockCause; agents: string[]; details: string[] } | null {
+): { cause: "quota" | "auth" | "network"; agents: string[]; details: string[] } | null {
+  const quota: string[] = [];
   const auth: string[] = [];
   const network: string[] = [];
+  const quotaDetails: string[] = [];
   const authDetails: string[] = [];
   const networkDetails: string[] = [];
   try {
@@ -665,7 +667,10 @@ export function readExternalBlock(
         continue;
       }
       if (e.type !== "agent:blocked" || e.cycleId !== cycleId || e.agent === undefined) continue;
-      if (e.cause === "auth") {
+      if (e.cause === "quota") {
+        quota.push(e.agent);
+        if (e.detail !== undefined && e.detail.trim() !== "") quotaDetails.push(e.detail.trim());
+      } else if (e.cause === "auth") {
         auth.push(e.agent);
         if (e.detail !== undefined && e.detail.trim() !== "") authDetails.push(e.detail.trim());
       } else if (e.cause === "network") {
@@ -678,6 +683,7 @@ export function readExternalBlock(
   }
   const uniq = (xs: string[]): string[] => [...new Set(xs)];
   if (auth.length > 0) return { cause: "auth", agents: uniq(auth), details: uniq(authDetails) };
+  if (quota.length > 0) return { cause: "quota", agents: uniq(quota), details: uniq(quotaDetails) };
   if (network.length > 0) return { cause: "network", agents: uniq(network), details: uniq(networkDetails) };
   return null;
 }
@@ -697,17 +703,21 @@ function writeReviewerBlockedAlert(
   alertsPath: string,
   eventsPath: string,
   cycleId: string,
-  block: { cause: "auth" | "network"; agents: string[]; details?: string[] },
+  block: { cause: "quota" | "auth" | "network"; agents: string[]; details?: string[] },
 ): void {
   const agents = block.agents.join(", ");
   const details = (block.details ?? []).filter((d) => d.trim() !== "");
   const fix =
     block.cause === "auth"
       ? `Re-login the blocked agent(s): ${agents} (run each agent once interactively to re-authenticate), then: \`roll loop resume\``
-      : `Check network / VPN / proxy (HTTP(S)_PROXY) — agent(s) ${agents} could not reach their API. The loop keeps breathing and recovers automatically once connectivity returns.`;
+      : block.cause === "quota"
+        ? `Wait for quota/credits to recover or switch the configured rig(s): ${agents}. The loop keeps breathing and probes recovery before routing more work.`
+        : `Check network / VPN / proxy (HTTP(S)_PROXY) — agent(s) ${agents} could not reach their API. The loop keeps breathing and recovers automatically once connectivity returns.`;
   const title =
     block.cause === "auth"
       ? "loop paused — agent credential/auth block (not a code bug)"
+      : block.cause === "quota"
+        ? "agent quota-blocked (not a code bug) — loop pending/recovery probe"
       : "agent network-blocked (not a code bug) — loop still breathing";
   const msg =
     `# ALERT — ${title}\n\n` +
@@ -1279,9 +1289,15 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   if (externalBlock !== null) {
     // FIX-366: surface an explicit auth_blocked / network_blocked outcome — a
     // RECOVERABLE block, distinct from a code `failed`.
+    const recoveryHint =
+      externalBlock.cause === "auth"
+        ? "re-login then resume"
+        : externalBlock.cause === "quota"
+          ? "wait for quota/credits or switch rig"
+          : "self-heals on reconnect";
     process.stdout.write(
-      `loop run-once: cycle ${cycleId} → ${externalBlock.cause}_blocked (recoverable; ${externalBlock.cause === "auth" ? "re-login then resume" : "self-heals on reconnect"})\n` +
-        `loop run-once: cycle ${cycleId} → ${externalBlock.cause}_blocked(可恢复阻塞;${externalBlock.cause === "auth" ? "重登录后 resume" : "联网后自愈"})\n`,
+      `loop run-once: cycle ${cycleId} → ${externalBlock.cause}_blocked (recoverable; ${recoveryHint})\n` +
+        `loop run-once: cycle ${cycleId} → ${externalBlock.cause}_blocked(可恢复阻塞;${externalBlock.cause === "auth" ? "重登录后 resume" : externalBlock.cause === "quota" ? "等额度恢复或换 rig" : "联网后自愈"})\n`,
     );
     writeReviewerBlockedAlert(id.path, id.slug, alertsPath, paths.eventsPath, cycleId, externalBlock);
     // An auth block PAUSES (re-login needed); a network block breathes. Neither is

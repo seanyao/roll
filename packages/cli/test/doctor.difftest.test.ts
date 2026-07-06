@@ -27,7 +27,7 @@ import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { doctorCommand } from "../src/commands/doctor.js";
 import { generateCatalog } from "../src/commands/skills.js";
-import { seedUpdateCheckCache, seedBinaryStalenessCache, pathWithout } from "./helpers.js";
+import { binRollVersion, seedUpdateCheckCache, seedBinaryStalenessCache, pathWithout } from "./helpers.js";
 
 const REPO = resolve(__dirname, "../../..");
 const dirs: string[] = [];
@@ -157,10 +157,15 @@ function seedCatalog(pkg: string): void {
 /** Scrub the random fixture paths + the launchd `$(id -u)` → portable. */
 function scrub(r: Run, e: Env): Run {
   const uid = String(process.getuid?.() ?? 0);
+  // The staleness readout renders the RUNNING tree's version; scrub it so a
+  // release bump (fold+bump happens before the release-flow test run) cannot
+  // explode every frozen snapshot (REFACTOR-072 baked literals — release landmine).
+  const ver = `v${binRollVersion()}`;
   const s = (x: string): string => {
     let out = x;
     if (e.pkg !== undefined) out = out.split(e.pkg).join("<PKG>");
     out = out.split(e.home).join("<HOME>").split(e.cwd).join("<CWD>").split(e.launchd).join("<LAUNCHD>");
+    out = out.split(ver).join("<VER>");
     return out.split(`/${uid}/`).join("/<UID>/");
   };
   return { status: r.status, stdout: s(r.stdout), stderr: s(r.stderr) };
@@ -253,7 +258,7 @@ describe("frozen: roll doctor", () => {
       Loop binary version
       Loop 程序版本
 
-        ✓ running v4.704.2, up to date (latest v4.704.2)
+        ✓ running <VER>, up to date (latest <VER>)
 
       Tool readiness
       工具就绪度
@@ -359,7 +364,7 @@ describe("frozen: roll doctor", () => {
       Loop binary version
       Loop 程序版本
 
-        ✓ 当前 v4.704.2，已是最新 v4.704.2
+        ✓ 当前 <VER>，已是最新 <VER>
 
       Tool readiness
       工具就绪度
@@ -428,7 +433,7 @@ describe("frozen: roll doctor", () => {
       Loop binary version
       Loop 程序版本
 
-        ✓ running v4.704.2, up to date (latest v4.704.2)
+        ✓ running <VER>, up to date (latest <VER>)
 
       Tool readiness
       工具就绪度
@@ -496,7 +501,7 @@ describe("frozen: roll doctor", () => {
       Loop binary version
       Loop 程序版本
 
-        ✓ 当前 v4.704.2，已是最新 v4.704.2
+        ✓ 当前 <VER>，已是最新 <VER>
 
       Tool readiness
       工具就绪度
@@ -563,7 +568,7 @@ describe("frozen: roll doctor", () => {
       Loop binary version
       Loop 程序版本
 
-        ✓ running v4.704.2, up to date (latest v4.704.2)
+        ✓ running <VER>, up to date (latest <VER>)
 
       Tool readiness
       工具就绪度
@@ -629,7 +634,7 @@ describe("frozen: roll doctor", () => {
       Loop binary version
       Loop 程序版本
 
-        ✓ 当前 v4.704.2，已是最新 v4.704.2
+        ✓ 当前 <VER>，已是最新 <VER>
 
       Tool readiness
       工具就绪度
@@ -716,7 +721,7 @@ describe("frozen: roll doctor", () => {
       Loop binary version
       Loop 程序版本
 
-        ✓ running v4.704.2, up to date (latest v4.704.2)
+        ✓ running <VER>, up to date (latest <VER>)
 
       Tool readiness
       工具就绪度
@@ -840,7 +845,7 @@ describe("frozen: roll doctor", () => {
     const rendered = scrub(tsDoctor(e), e).stdout;
     expect(rendered).toContain("Loop binary version");
     expect(rendered).toContain("Loop 程序版本");
-    expect(rendered).toMatch(/running v[\d.]+, up to date \(latest v[\d.]+\)/);
+    expect(rendered).toContain("running <VER>, up to date (latest <VER>)");
   });
 
   it("REFACTOR-072 AC1: doctor shows a stale binary readout", () => {
@@ -857,7 +862,7 @@ describe("frozen: roll doctor", () => {
     const rendered = scrub(tsDoctor(e), e).stdout;
     expect(rendered).toContain("Loop binary version");
     expect(rendered).toContain("roll update");
-    expect(rendered).toMatch(/running v[\d.]+, latest v999\.999\.999/);
+    expect(rendered).toContain("running <VER>, latest v999.999.999");
   });
 
   it("REFACTOR-072 AC1: doctor shows unknown when no staleness cache exists", () => {

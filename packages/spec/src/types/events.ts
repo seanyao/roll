@@ -397,10 +397,22 @@ export type RollEvent =
       reason: string;
       mode?: string;
       source?: string;
+      failureClass?: FailureClass;
+      rootCauseKey?: string;
       targetId?: string;
       ts: number;
     }
-  | { type: "correction:circuit_breaker"; storyId?: string; signal: string; count: number; threshold: number; reason: string; ts: number }
+  | {
+      type: "correction:circuit_breaker";
+      storyId?: string;
+      signal: string;
+      count: number;
+      threshold: number;
+      reason: string;
+      failureClass?: FailureClass;
+      rootCauseKey?: string;
+      ts: number;
+    }
   // Evidence lifecycle (US-EVID-001) — the runner opened the per-cycle evidence
   // frame before spawning an agent, so later phases have a durable run dir.
   | { type: "evidence:frame-opened"; cycleId: string; storyId: string; runDir: string; ts: number }

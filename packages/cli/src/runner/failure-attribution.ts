@@ -356,6 +356,25 @@ function writeRootCauseState(runtimeDir: string, state: RootCauseState): void {
   }
 }
 
+/** REFACTOR-068: unified correction→failure attribution — correction signals
+ *  map through the single failure taxonomy instead of carrying independent
+ *  failureClass/rootCauseKey. */
+export function classifyCorrectionFailure(signal: string): Pick<FailureAttribution, "failureClass" | "rootCauseKey"> {
+  const normalizedSignal = signal.trim().toLowerCase().replace(/[-\s]+/g, "_");
+  switch (normalizedSignal) {
+    case "review_score_regression":
+      return { failureClass: "card", rootCauseKey: "card:review_score_regression" };
+    case "empty_acceptance_report":
+      return { failureClass: "card", rootCauseKey: "card:empty_acceptance" };
+    case "missing_acceptance_report":
+      return { failureClass: "card", rootCauseKey: "card:missing_acceptance" };
+    case "ci_failed":
+      return { failureClass: "harness", rootCauseKey: "harness:ci_red" };
+    default:
+      return { failureClass: "unknown", rootCauseKey: "unknown:unclassified" };
+  }
+}
+
 export function playbookForFailure(failureClass: FailureClass, rootCauseKey: string): string {
   if (failureClass === "env") {
     if (rootCauseKey === "env:main_dirty") {

@@ -11,6 +11,7 @@ import {
 import { classifyStatus, parseEventLine, STATUS_MARKER, type RollEvent } from "@roll/spec";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { classifyCorrectionFailure } from "./failure-attribution.js";
 
 export interface ApplyCorrectionInput {
   projectPath: string;
@@ -237,6 +238,7 @@ export function applyCorrectionAction(input: ApplyCorrectionInput): ApplyCorrect
     mode: readMode(input.projectPath),
     events: readEvents(input.eventsPath),
   });
+  const failure = classifyCorrectionFailure(decision.signal);
   const mutation = mutationForAction(input.projectPath, decision);
   const targetId = mutation.fixId;
   appendEvent(input.eventsPath, {
@@ -249,6 +251,8 @@ export function applyCorrectionAction(input: ApplyCorrectionInput): ApplyCorrect
     reason: decision.reason,
     mode: decision.mode,
     source: decision.source,
+    failureClass: failure.failureClass,
+    rootCauseKey: failure.rootCauseKey,
     ...(targetId !== undefined ? { targetId } : {}),
     ts: now,
   });

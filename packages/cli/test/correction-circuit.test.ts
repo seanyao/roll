@@ -35,6 +35,25 @@ describe("US-EVID-016 correction circuit runner adapter", () => {
     expect(text).toContain('"type":"alert:notify"');
   });
 
+  it("attributes tripped correction signals through failure-attribution taxonomy", () => {
+    const p = project();
+    writeEvents(p.events, [
+      { type: "correction:action", storyId: "US-A", action: "open_fix", signal: "ci_failed", reason: "r1", ts: 10 },
+      { type: "correction:action", storyId: "US-B", action: "open_fix", signal: "ci_failed", reason: "r2", ts: 20 },
+      { type: "correction:action", storyId: "US-C", action: "open_fix", signal: "ci_failed", reason: "r3", ts: 30 },
+    ]);
+
+    const result = applyCorrectionCircuitBreaker(p.root, "test", p.events, p.alerts, 40);
+
+    expect(result).toMatchObject({ status: "paused", verdict: { signal: "ci_failed" } });
+    expect(readFileSync(p.alerts, "utf8")).toContain("**Failure class**: harness");
+    expect(readFileSync(p.alerts, "utf8")).toContain("**Root cause**: harness:ci_red");
+    const text = readFileSync(p.events, "utf8");
+    expect(text).toContain('"type":"correction:circuit_breaker"');
+    expect(text).toContain('"failureClass":"harness"');
+    expect(text).toContain('"rootCauseKey":"harness:ci_red"');
+  });
+
   it("is idempotent for the same tripped signal", () => {
     const p = project();
     writeEvents(p.events, [

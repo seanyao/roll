@@ -1737,6 +1737,13 @@ interface InitCommandDeps {
   runDesign?: (args: string[]) => number;
 }
 
+function runDesignSync(args: string[]): number {
+  const result = designCommand(args);
+  if (typeof result === "number") return result;
+  process.stderr.write("roll design failed during init handoff: async design continuation is unsupported in init\n");
+  return 1;
+}
+
 /** US-INIT-010: does the invocation ask to auto-continue into design? */
 function wantsAutoContinue(args: string[]): boolean {
   if (args.includes("--yes") || args.includes("-y")) return true;
@@ -1765,18 +1772,18 @@ function maybeContinueIntoDesign(
   brief: InitBriefResult | null,
   args: string[],
   deps: InitCommandDeps,
-): void {
-  if (brief === null) return;
+): number {
+  if (brief === null) return 0;
   const sourcePath = brief.sourcePath;
-  if (sourcePath === undefined || sourcePath === "") return; // no concrete input → hint only
-  if (!brief.nextCommand.startsWith("roll design")) return;
+  if (sourcePath === undefined || sourcePath === "") return 0; // no concrete input → hint only
+  if (!brief.nextCommand.startsWith("roll design")) return 0;
 
   const auto = wantsAutoContinue(args);
   let proceed: boolean;
   if (auto) {
     proceed = true;
   } else if (!isInitInteractive(deps.forceInteractive)) {
-    return; // no TTY and no flag → do not run; keep the printed NEXT hint (AC4)
+    return 0; // no TTY and no flag → do not run; keep the printed NEXT hint (AC4)
   } else {
     const detected = initCopy(
       `Detected ${sourcePath} and an empty backlog.`,
@@ -1794,11 +1801,16 @@ function maybeContinueIntoDesign(
     proceed = confirmYesNo(prompt, (s) => process.stderr.write(s), deps.readLine ?? readConfirmLine);
     process.stdout.write("\n");
   }
-  if (!proceed) return;
+  if (!proceed) return 0;
 
   // AC5/AC6: equivalent to the user running `roll design --from-file <prd>`.
-  const run = deps.runDesign ?? ((a: string[]) => designCommand(a));
-  run(["--from-file", sourcePath]);
+  const run = deps.runDesign ?? runDesignSync;
+  const status = run(["--from-file", sourcePath]);
+  if (status !== 0) {
+    const retry = `roll design --from-file ${sourcePath}`;
+    process.stderr.write(`roll design failed during init handoff (exit ${status}). Retry manually: ${retry}\n`);
+  }
+  return status;
 }
 
 function isInitInteractive(forceInteractive = false): boolean {
@@ -2534,7 +2546,8 @@ export function initCommand(args: string[], deps: InitCommandDeps = {}): number 
   finalizeRollOwnedGit(projectDir);
 
   // US-INIT-010: offer to continue straight into design (consent-gated).
-  maybeContinueIntoDesign(brief, args, deps);
+  const designStatus = maybeContinueIntoDesign(brief, args, deps);
+  if (designStatus !== 0) return designStatus;
 
   void err;
   return 0;

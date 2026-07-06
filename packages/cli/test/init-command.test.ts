@@ -23,6 +23,14 @@ function project(): string {
   return dir;
 }
 
+function projectWithName(name: string): string {
+  const root = mkdtempSync(join(tmpdir(), "roll-init-parent-"));
+  dirs.push(root);
+  const dir = join(root, name);
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 function write(root: string, rel: string, text = "x\n"): void {
   const path = join(root, rel);
   mkdirSync(dirname(path), { recursive: true });
@@ -519,6 +527,32 @@ describe("roll init diagnosis router", () => {
     expect(run.status).toBe(0);
     expect(calls).toEqual([["--from-file", "docs/PRD.md"]]); // AC4: flag path
     expect(run.stderr).not.toContain("Run design now?"); // no prompt
+  });
+
+  it("FIX-1220: chained design uses argv semantics when the project path contains glob characters", () => {
+    const cwd = projectWithName("intel-radar[main] app");
+    write(cwd, "docs/PRD.md", "# Product Requirements\n\nBuild an intel radar.\n");
+    const calls: string[][] = [];
+
+    const run = withCapturedOutput(cwd, () => initCommand(["--yes"], { runDesign: (a) => (calls.push(a), 0) }));
+
+    expect(run.status).toBe(0);
+    expect(calls).toEqual([["--from-file", "docs/PRD.md"]]);
+    expect(run.stdout).toContain("roll design --from-file docs/PRD.md");
+  });
+
+  it("FIX-1220: chained design failure is visible and returns non-zero with the manual retry command", () => {
+    const cwd = prdProject();
+    const run = withCapturedOutput(cwd, () =>
+      initCommand(["--yes"], {
+        runDesign: () => 1,
+      }),
+    );
+
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain("roll design --from-file docs/PRD.md");
+    expect(run.stderr).toContain("roll design failed");
+    expect(run.stderr).toContain("roll design --from-file docs/PRD.md");
   });
 
   it("US-INIT-010: non-interactive without a flag never auto-runs design", () => {

@@ -1126,7 +1126,7 @@ describe("FIX-1068 — facts_captured emits builder finalization event", () => {
       { type: "story_picked", storyId: "FIX-1063" },
       { type: "route_resolved", agent: "pi", model: "k2" },
       { type: "agent_exited", exit: 0, timedOut: false },
-      { type: "facts_captured", facts: { usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 0, mainDirty: true } },
+      { type: "facts_captured", facts: { usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 0, mainDirty: true, mainDirtyFiles: ["skills/README.md", "product.ts"] } },
     ]);
     expect(state.terminal).toBe("failed");
     const violation = commands.find((c): c is Extract<CycleCommand, { kind: "emit_event" }> =>
@@ -1139,5 +1139,9 @@ describe("FIX-1068 — facts_captured emits builder finalization event", () => {
       agent: "pi",
       kind: "main_checkout_dirty",
     });
+    // FIX-1218: verify the actual dirty file list is carried (not hardcoded [])
+    if (violation?.event.type === "builder:boundary_violation") {
+      expect(violation.event.files).toEqual(["skills/README.md", "product.ts"]);
+    }
   });
 });

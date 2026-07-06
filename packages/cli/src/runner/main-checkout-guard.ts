@@ -86,6 +86,22 @@ function parsePorcelainPath(line: string): string {
   return target.replace(/^"|"$/g, "");
 }
 
+/** FIX-1218: is this line a staged (index-layer) change? */
+function isStagedChange(line: string): boolean {
+  // First column of porcelain output = index status
+  // ' ' = unchanged, '?' = untracked (no index state)
+  // Anything else = staged change
+  const idx = line.length > 0 ? line[0] ?? " " : " ";
+  return idx !== " " && idx !== "?";
+}
+
+/** FIX-1218: is this line a working-tree (unstaged) change? */
+function isWorkingChange(line: string): boolean {
+  // Second column of porcelain output = worktree status
+  const wt = line.length > 1 ? line[1] ?? " " : " ";
+  return wt !== " " && wt !== "?";
+}
+
 function protectedPath(rel: string): boolean {
   return rel !== ".roll" && !rel.startsWith(".roll/") && rel !== "skills" && !rel.startsWith("skills/");
 }
@@ -105,13 +121,20 @@ export async function checkMainDirty(repoCwd: string): Promise<string[]> {
       cwd: repoCwd,
       encoding: "utf8",
     });
-    return stdout
-      .split("\n")
-      .map((line) => line.trimEnd())
-      .filter((line) => line.trim() !== "")
-      .map(parsePorcelainPath)
-      .filter(protectedPath)
-      .slice(0, 50);
+    const dirty: string[] = [];
+    for (const line of stdout.split("\n")) {
+      const trimmed = line.trimEnd();
+      if (trimmed === "") continue;
+      const path = parsePorcelainPath(trimmed);
+      // FIX-1218: staged (index-layer) changes are always included even in
+      // protected paths like skills/ — someone explicitly staged them and they
+      // must be listed for diagnostics.  Working-tree-only changes in protected
+      // paths are still excluded (they're expected transient submodule noise).
+      if (isStagedChange(trimmed) || protectedPath(path)) {
+        dirty.push(path);
+      }
+    }
+    return dirty.slice(0, 50);
   } catch {
     return [];
   }

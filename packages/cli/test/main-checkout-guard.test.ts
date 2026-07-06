@@ -43,6 +43,22 @@ function cleanRepo(prefix: string): string {
   return repo;
 }
 
+function cleanRepoWithSkillsGitlink(prefix: string): string {
+  const repo = mkdtempSync(join(tmpdir(), prefix));
+  dirs.push(repo);
+  git(repo, ["init", "-q", "-b", "main"]);
+  git(repo, ["config", "user.email", "t@example.test"]);
+  git(repo, ["config", "user.name", "Test User"]);
+  writeFileSync(join(repo, "tracked.txt"), "base\n", "utf8");
+  git(repo, ["add", "tracked.txt"]);
+  git(repo, ["commit", "-q", "-m", "seed"]);
+  const gitlinkSha = sh(repo, ["rev-parse", "HEAD"]);
+  git(repo, ["update-index", "--add", "--cacheinfo", "160000", gitlinkSha, "skills"]);
+  git(repo, ["commit", "-q", "-m", "add skills gitlink"]);
+  git(repo, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
+  return repo;
+}
+
 function worktreeFrom(repo: string): string {
   const wt = `${repo}-wt`;
   dirs.push(wt);
@@ -195,6 +211,34 @@ describe("main checkout guard — US-LOOP-089", () => {
     writeFileSync(join(repo, "product.ts"), "leak\n", "utf8");
 
     await expect(checkMainDirty(repo)).resolves.toEqual(["product.ts"]);
+  });
+
+  // FIX-1218: staged (index-layer) changes in protected paths ARE included
+  // because someone explicitly staged them — they must be visible in the
+  // diagnostic file list and count toward the dirty boolean.
+  it("FIX-1218: checkMainDirty includes staged changes in skills/ or .roll/", async () => {
+    const repo = cleanRepo("roll-main-dirty-staged-");
+    // Staged deletion of skills submodule gitlink (simulated by git rm --cached)
+    git(repo, ["rm", "--cached", "-q", "skills/README.md"]);
+    // Also a regular working-tree change to a product file
+    writeFileSync(join(repo, "product.ts"), "leak\n", "utf8");
+
+    const files = await checkMainDirty(repo);
+    // Staged deletion "skills/README.md" MUST be in the list
+    expect(files).toContain("skills/README.md");
+    // Product file still included
+    expect(files).toContain("product.ts");
+    // Non-staged working-tree changes in .roll/ are still excluded
+    writeFileSync(join(repo, ".roll", "scratch.txt"), "runtime\n", "utf8");
+    const files2 = await checkMainDirty(repo);
+    expect(files2).not.toContain(".roll/scratch.txt");
+  });
+
+  it("FIX-1218: checkMainDirty includes staged skills gitlink deletion", async () => {
+    const repo = cleanRepoWithSkillsGitlink("roll-main-dirty-gitlink-");
+    git(repo, ["rm", "--cached", "-q", "skills"]);
+
+    await expect(checkMainDirty(repo)).resolves.toContain("skills");
   });
 
   it("pins spawned worktree git discovery below the main checkout parent", () => {

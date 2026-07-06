@@ -267,6 +267,9 @@ export interface CapturedFacts {
   mainAhead?: number;
   /** FIX-1037: main checkout has uncommitted/untracked product-code dirt. */
   mainDirty?: boolean;
+  /** FIX-1218: the actual dirty file list from checkMainDirty, for diagnostic
+   *  inclusion in the boundary_violation event. Absent when mainDirty is false. */
+  mainDirtyFiles?: string[];
   /** CWD where leaked main-checkout work was observed, when known. */
   attemptedCwd?: string;
   /** CWD the Builder was expected to mutate, when known. */
@@ -1117,7 +1120,9 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
               storyId: state.ctx.storyId ?? "",
               agent: state.ctx.agent ?? "",
               kind: "main_checkout_dirty",
-              files: [],
+              // FIX-1218: include the actual dirty file list for diagnostics
+              // instead of hardcoding []. Falls back to [] if not captured.
+              files: event.facts.mainDirtyFiles ?? [],
               worktreePath: bFacts.worktreePath,
               attemptedCwd: bFacts.expectedProjectPath,
               expectedWorktreeCwd: bFacts.worktreePath,

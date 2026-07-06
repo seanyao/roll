@@ -5,28 +5,47 @@ import type { RollEvent } from "@roll/spec";
 const safety = parsePolicy("").loopSafety;
 
 describe("US-EVID-016 correction circuit breaker", () => {
-  it("pauses on three consecutive same-story correction returns", () => {
+  it("pauses on three same-story repeated signals (merged into signal_repeat)", () => {
+    // REFACTOR-069: same-card oscillation (C④) merged into signal_repeat (C⑤).
+    // Same story, same signal, repeated 3+ times → trips as signal_repeat.
     const events: RollEvent[] = [
       { type: "correction:action", storyId: "US-A", action: "return_story", signal: "review-score regression", reason: "r1", ts: 10 },
       { type: "correction:action", storyId: "US-A", action: "route_adjust", signal: "review-score regression", reason: "r2", ts: 20 },
       { type: "correction:action", storyId: "US-A", action: "return_story", signal: "review-score regression", reason: "r3", ts: 30 },
     ];
-    expect(correctionCircuitVerdict(events, safety)).toMatchObject({
+    expect(correctionCircuitVerdict(events, safety, 30)).toMatchObject({
       action: "pause_and_notify",
-      kind: "story_oscillation",
+      kind: "signal_repeat",
       storyId: "US-A",
+      signal: "review-score regression",
       count: 3,
-      threshold: 3,
     });
   });
 
-  it("does not count another story inside the same-story consecutive streak", () => {
+  it("different signals across stories do not falsely trip", () => {
+    // Each story has a DIFFERENT signal — none repeats ≥3 times.
     const events: RollEvent[] = [
       { type: "correction:action", storyId: "US-A", action: "return_story", signal: "x", reason: "r1", ts: 10 },
       { type: "correction:action", storyId: "US-B", action: "return_story", signal: "y", reason: "r2", ts: 20 },
       { type: "correction:action", storyId: "US-A", action: "return_story", signal: "z", reason: "r3", ts: 30 },
     ];
-    expect(correctionCircuitVerdict(events, safety)).toEqual({ action: "continue" });
+    expect(correctionCircuitVerdict(events, safety, 30)).toEqual({ action: "continue" });
+  });
+
+  it("single-card signal repeat trips the breaker (oscillation merged into signal_repeat)", () => {
+    // REFACTOR-069: single-card signal_repeat should trip just like multi-card.
+    const events: RollEvent[] = [
+      { type: "correction:action", storyId: "US-A", action: "open_fix", signal: "missing ac-map", reason: "r1", ts: 10 },
+      { type: "correction:action", storyId: "US-A", action: "open_fix", signal: "missing ac-map", reason: "r2", ts: 20 },
+      { type: "correction:action", storyId: "US-A", action: "open_fix", signal: "missing ac-map", reason: "r3", ts: 30 },
+    ];
+    expect(correctionCircuitVerdict(events, safety, 30)).toMatchObject({
+      action: "pause_and_notify",
+      kind: "signal_repeat",
+      storyId: "US-A",
+      signal: "missing ac-map",
+      count: 3,
+    });
   });
 
   it("pauses when the same failure signal repeats across stories in the window", () => {

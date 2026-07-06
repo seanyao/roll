@@ -89,7 +89,6 @@ describe("parsePolicy — v3 spec shape round-trip", () => {
     expect(policy.loopSafety.actionOnBreach).toBe("pause_and_notify");
     expect(policy.loopSafety.maxStoryFailures).toBe(3);
     expect(policy.loopSafety.actionOnStoryBreach).toBe("hold");
-    expect(policy.loopSafety.correctionOscillationThreshold).toBe(3);
     expect(policy.loopSafety.correctionSignalThreshold).toBe(4);
     expect(policy.loopSafety.correctionSignalWindowSec).toBe(21600);
     expect(policy.loopSafety.correctionActuator).toBe("auto");
@@ -106,7 +105,6 @@ describe("parsePolicy — v3 spec shape round-trip", () => {
       actionOnBreach: "pause_and_notify",
       maxStoryFailures: 3,
       actionOnStoryBreach: "hold",
-      correctionOscillationThreshold: 3,
       correctionSignalThreshold: 3,
       correctionSignalWindowSec: 43200,
       correctionActuator: "conservative",

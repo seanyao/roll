@@ -1530,15 +1530,28 @@ describe("executeCommand — command → executor mapping", () => {
   });
 
   describe("IDEA-069 — semantic pick ranking", () => {
-    it("uses default-agent ranking as advisory order and records pick:ranked", async () => {
-      const spawn = vi.fn(async () => ({
-        stdout: JSON.stringify([{ id: "US-RANK-2", score: 95, reason: "unblocks follow-up cards" }]),
-        stderr: "",
-        exitCode: 0,
-        timedOut: false,
-      }));
+    it("FIX-1224: uses default-agent ranking from outside roll-meta and records pick:ranked", async () => {
+      const repo = mkdtempSync(join(tmpdir(), "roll-pick-ranking-repo-"));
+      execDirs.push(repo);
+      mkdirSync(join(repo, ".roll", "loop"), { recursive: true });
+      execSync("git init -q", { cwd: join(repo, ".roll") });
+      const spawn = vi.fn(async (_agent: string, opts: AgentSpawnOptions) => {
+        try {
+          execSync("git config core.worktree pick-ranking-cwd", { cwd: opts.cwd, stdio: "ignore" });
+        } catch {
+          /* A ranking cwd outside any git repo is the expected isolation boundary. */
+        }
+        return {
+          stdout: JSON.stringify([{ id: "US-RANK-2", score: 95, reason: "unblocks follow-up cards" }]),
+          stderr: "",
+          exitCode: 0,
+          timedOut: false,
+        };
+      });
       spawn.supportedPurposes = ["pick_ranking"] as const;
       const { ports, calls } = fakePorts({
+        repoCwd: repo,
+        paths: { ...fakePorts().ports.paths, eventsPath: join(repo, ".roll", "loop", "events.ndjson") },
         agentSpawn: spawn,
         backlog: { read: () => [
           { id: "FIX-RANK-1", desc: "small cleanup", status: "📋 Todo" },
@@ -1548,9 +1561,12 @@ describe("executeCommand — command → executor mapping", () => {
       const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
       expect(r.event).toEqual({ type: "story_picked", storyId: "US-RANK-2" });
       expect(spawn).toHaveBeenCalledTimes(1);
-      expect(spawn.mock.calls[0]?.[1]).toMatchObject({ cwd: "/rt/pick-ranking-cwd", bare: true, timeoutMs: 60000, purpose: "pick_ranking" });
-      expect(spawn.mock.calls[0]?.[1].cwd).not.toBe(ports.paths.worktreePath);
+      expect(spawn.mock.calls[0]?.[1]).toMatchObject({ bare: true, timeoutMs: 60000, purpose: "pick_ranking" });
+      const rankingCwd = spawn.mock.calls[0]?.[1].cwd ?? "";
+      expect(rankingCwd).not.toBe(ports.paths.worktreePath);
+      expect(rankingCwd).not.toContain(`${repo}/.roll/`);
       expect(spawn.mock.calls[0]?.[1].writableRoots ?? []).not.toContain(ports.paths.worktreePath);
+      expect(() => execSync("git config --local --get core.worktree", { cwd: join(repo, ".roll"), encoding: "utf8" })).toThrow();
       const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
       expect(events).toContainEqual({
         type: "pick:ranked",

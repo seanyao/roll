@@ -16,6 +16,7 @@ import {
   gh,
   ghAvailable,
   issueCreate,
+  prHeadCheckRunCount,
   prAutoMergeArmed,
   prCreate,
   prDiffNameOnly,
@@ -28,6 +29,7 @@ import {
   prViewState,
   prViewUrl,
   runList,
+  workflowDispatch,
 } from "../src/github.js";
 
 const dirs: string[] = [];
@@ -55,6 +57,10 @@ case "$*" in
   *"pr list"*"--json number,title,headRefName"*) echo '[{"number":5,"title":"x","headRefName":"loop/cycle-1"}]' ;;
   *"pr review"*)                   exit 0 ;;
   *"run list"*"--json status,conclusion"*) echo '[{"status":"completed","conclusion":"success"}]' ;;
+  *"workflow run"*)                 exit 0 ;;
+  *"api repos/"*"pulls/404/commits"*) exit 1 ;;
+  *"api repos/"*"pulls/"*"commits"*) printf 'abc123\\n' ;;
+  *"api repos/"*"commits/"*"check-runs"*) printf '0\\n' ;;
   *"api repos/"*"contents/"*)      printf '| US-X | 🔨 In Progress |\\n' ;;
   *"issue create"*)                echo "https://github.com/o/r/issues/3" ;;
   --version)                       echo "gh version 2.0.0 (fake)" ;;
@@ -199,6 +205,29 @@ describe("gh exec wiring: argv byte-exact vs oracle + parse of fabricated output
     expect(rows).toEqual([{ status: "completed", conclusion: "success" }]);
     expect(readCalls()[0]).toEqual([
       "-R", "o/r", "run", "list", "--commit", "deadbeef", "--json", "status,conclusion",
+    ]);
+  });
+
+  it("workflowDispatch → gh workflow run <file> --ref <branch> (FIX-1217)", async () => {
+    writeFileSync(argvLog, "");
+    expect((await workflowDispatch("o/r", "ci.yml", "loop/cycle-x")).code).toBe(0);
+    expect(readCalls()[0]).toEqual(["-R", "o/r", "workflow", "run", "ci.yml", "--ref", "loop/cycle-x"]);
+  });
+
+  it("prHeadCheckRunCount → pulls head sha then check-runs total_count (FIX-1217)", async () => {
+    writeFileSync(argvLog, "");
+    expect(await prHeadCheckRunCount("o/r", 42)).toBe(0);
+    expect(readCalls()).toEqual([
+      ["-R", "o/r", "api", "repos/o/r/pulls/42/commits", "--jq", ".[-1].sha"],
+      ["-R", "o/r", "api", "repos/o/r/commits/abc123/check-runs", "--jq", ".total_count"],
+    ]);
+  });
+
+  it("prHeadCheckRunCount → -1 when the head sha lookup fails (FIX-1217)", async () => {
+    writeFileSync(argvLog, "");
+    expect(await prHeadCheckRunCount("o/r", 404)).toBe(-1);
+    expect(readCalls()).toEqual([
+      ["-R", "o/r", "api", "repos/o/r/pulls/404/commits", "--jq", ".[-1].sha"],
     ]);
   });
 

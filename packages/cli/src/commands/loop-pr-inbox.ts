@@ -39,6 +39,7 @@ import {
   type CiRollupState,
   type MergeStateStatus,
   type PrTick,
+  ciBlackholeAlert,
   prActedTick,
   prIdleTick,
   prInboxGate,
@@ -52,7 +53,7 @@ import {
   DEAD_TICK_NOTES,
   deadTickVerdict,
 } from "@roll/core";
-import { gh, ghAvailable, ghRepoSlug, prMerge, prReady, remoteUrl } from "@roll/infra";
+import { gh, ghAvailable, ghRepoSlug, prHeadCheckRunCount, prMerge, prReady, remoteUrl, workflowDispatch } from "@roll/infra";
 import { openPendingPrCreates, pendingPrCreatePath } from "../runner/pending-pr-create.js";
 import { execFileSync } from "node:child_process";
 import { appendFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync, existsSync, rmSync } from "node:fs";
@@ -73,6 +74,8 @@ export interface PrViewFacts {
   isDraft?: boolean;
   evidenceResolvable?: boolean;
   evidenceMissing?: string[];
+  prAgeMinutes?: number;
+  headCheckRunCount?: number;
 }
 
 export interface RollEvidenceTrailer {
@@ -226,6 +229,14 @@ interface PrViewRaw {
   body?: string;
   labels?: Array<{ name?: string }>;
   isDraft?: boolean;
+  createdAt?: string;
+}
+
+function prAgeMinutes(createdAt: string | undefined, nowMs = Date.now()): number | undefined {
+  if (createdAt === undefined || createdAt.trim() === "") return undefined;
+  const createdMs = Date.parse(createdAt);
+  if (!Number.isFinite(createdMs)) return undefined;
+  return Math.max(0, Math.floor((nowMs - createdMs) / 60000));
 }
 
 /**
@@ -279,6 +290,8 @@ export interface PrInboxDeps {
   onMerged?: (slug: string, num: string, headRef: string) => Promise<void>;
   /** ci_red → hand to the (bash) heal helper; background, best-effort. */
   heal: (num: string, headRef: string, slug: string) => Promise<void>;
+  /** FIX-1217: CI event blackhole → trigger workflow_dispatch for this branch. */
+  dispatchCi: (num: string, headRef: string, slug: string) => Promise<boolean>;
   /** 24h rebase circuit (pure verdict + state persistence + trip ALERT). */
   rebaseCircuitAllowed: (num: string) => boolean;
   /** Bridged git rebase dance → re-checked facts (or undefined on any failure). */
@@ -390,6 +403,13 @@ export async function runPrInbox(deps: PrInboxDeps): Promise<PrTick> {
         break;
       case "heal":
         await deps.heal(num, headRef, slug);
+        break;
+      case "dispatch_ci":
+        if (await deps.dispatchCi(num, headRef, slug)) {
+          deps.alert(ciBlackholeAlert(Number(num), headRef, facts.prAgeMinutes ?? 0));
+        } else {
+          deps.alert(`PR #${num} (${headRef}) — CI event blackhole detected, but workflow_dispatch failed`);
+        }
         break;
       case "rebase": {
         if (!deps.rebaseCircuitAllowed(num)) break; // tripped → ALERT written, skip.
@@ -934,14 +954,21 @@ function realDeps(): PrInboxDeps {
     viewPr: async (slug, num, headRef) => {
       const r = await gh([
         "-R", slug, "pr", "view", num,
-        "--json", "reviews,mergeStateStatus,statusCheckRollup,body,labels,isDraft",
+        "--json", "reviews,mergeStateStatus,statusCheckRollup,body,labels,isDraft,createdAt",
       ]);
       if (r.code !== 0 || r.stdout.trim() === "") return undefined;
       try {
         const raw = JSON.parse(r.stdout) as PrViewRaw;
         const facts = reducePrView(raw);
         const evidence = resolvePrEvidence(process.cwd(), headRef, raw.body ?? "");
-        return { ...facts, evidenceResolvable: evidence.ok, evidenceMissing: evidence.missing };
+        const headCheckRunCount = await prHeadCheckRunCount(slug, Number(num));
+        return {
+          ...facts,
+          evidenceResolvable: evidence.ok,
+          evidenceMissing: evidence.missing,
+          prAgeMinutes: prAgeMinutes(raw.createdAt),
+          headCheckRunCount,
+        };
       } catch {
         return undefined;
       }
@@ -961,6 +988,7 @@ function realDeps(): PrInboxDeps {
       // US-PORT-021: native TS gate; dispatches the heal detached, never blocks.
       prHealSelf(num, headRef, slug);
     },
+    dispatchCi: async (_num, headRef, slug) => (await workflowDispatch(slug, "ci.yml", headRef)).code === 0,
     rebaseCircuitAllowed,
     rebaseStale: async (num, headRef, slug) => {
       prRebaseStale(num, headRef); // US-PORT-021: native TS rebase (was bridged bash)

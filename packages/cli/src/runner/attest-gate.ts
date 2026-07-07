@@ -1062,8 +1062,8 @@ function owesTerminalCapture(worktreeCwd: string, storyId: string): boolean {
 }
 
 /** Count the REAL, taken captures of a given kind in the evidence manifest. */
-function takenCaptureCount(worktreeCwd: string, storyId: string, kind: string): number {
-  const manifest = evidenceManifest(worktreeCwd, storyId);
+function takenCaptureCount(worktreeCwd: string, storyId: string, kind: string, persistentCwd?: string): number {
+  const manifest = evidenceManifest(worktreeCwd, storyId, persistentCwd);
   if (manifest === null || !Array.isArray(manifest.captures)) return 0;
   return manifest.captures.filter((raw) => {
     if (typeof raw !== "object" || raw === null) return false;
@@ -1094,18 +1094,18 @@ function webCaptureNeed(worktreeCwd: string, storyId: string): number {
  * card. With a single declared url this is exactly the old "≥1 taken web shot".
  * Under a deploy/env override the need folds to 1 ({@link webCaptureNeed}).
  */
-function hasRealWebCapture(worktreeCwd: string, storyId: string): boolean {
-  return takenCaptureCount(worktreeCwd, storyId, "web") >= webCaptureNeed(worktreeCwd, storyId);
+function hasRealWebCapture(worktreeCwd: string, storyId: string, persistentCwd?: string): boolean {
+  return takenCaptureCount(worktreeCwd, storyId, "web", persistentCwd) >= webCaptureNeed(worktreeCwd, storyId);
 }
 
 /**
  * FIX-339 (AC2) — EVERY declared deliverable_cmd is REALLY captured: ≥N
  * taken:true terminal captures for N declared commands.
  */
-function hasRealTerminalCapture(worktreeCwd: string, storyId: string): boolean {
+function hasRealTerminalCapture(worktreeCwd: string, storyId: string, persistentCwd?: string): boolean {
   const need = deliverableCmdsForStory(worktreeCwd, storyId).length;
   if (need === 0) return false;
-  return takenCaptureCount(worktreeCwd, storyId, "terminal") >= need;
+  return takenCaptureCount(worktreeCwd, storyId, "terminal", persistentCwd) >= need;
 }
 
 /**
@@ -1127,8 +1127,8 @@ export function owesPhysicalTerminalCapture(worktreeCwd: string, storyId: string
  * US-INIT-003b — the physical_terminal capture is REAL: ≥1 taken:true capture
  * with kind "physical_terminal" in the evidence manifest.
  */
-export function hasPhysicalTerminalCapture(worktreeCwd: string, storyId: string): boolean {
-  return takenCaptureCount(worktreeCwd, storyId, "physical_terminal") >= 1;
+export function hasPhysicalTerminalCapture(worktreeCwd: string, storyId: string, persistentCwd?: string): boolean {
+  return takenCaptureCount(worktreeCwd, storyId, "physical_terminal", persistentCwd) >= 1;
 }
 
 /**
@@ -1137,9 +1137,9 @@ export function hasPhysicalTerminalCapture(worktreeCwd: string, storyId: string)
  * instead of kind: "physical_terminal"). A physical_terminal AC cannot be
  * satisfied by a headless terminal capture.
  */
-export function hasRejectedTerminalForPhysical(worktreeCwd: string, storyId: string): boolean {
+export function hasRejectedTerminalForPhysical(worktreeCwd: string, storyId: string, persistentCwd?: string): boolean {
   if (!owesPhysicalTerminalCapture(worktreeCwd, storyId)) return false;
-  const manifest = evidenceManifest(worktreeCwd, storyId);
+  const manifest = evidenceManifest(worktreeCwd, storyId, persistentCwd);
   if (manifest === null || !Array.isArray(manifest.captures)) return false;
   // A physical_terminal card has REJECTED evidence if any capture has
   // kind: "terminal" — the card declared physical_terminal: so only
@@ -1151,22 +1151,22 @@ export function hasRejectedTerminalForPhysical(worktreeCwd: string, storyId: str
   });
 }
 
-function declaredSurfaceCaptureFloor(worktreeCwd: string, storyId: string): { ok: boolean; reason?: string } {
+function declaredSurfaceCaptureFloor(worktreeCwd: string, storyId: string, persistentCwd?: string): { ok: boolean; reason?: string } {
   const owesWeb = owesRealWebCapture(worktreeCwd, storyId);
   const owesTerm = owesTerminalCapture(worktreeCwd, storyId);
   const owesPhys = owesPhysicalTerminalCapture(worktreeCwd, storyId);
   if (!owesWeb && !owesTerm && !owesPhys) return { ok: true };
   const gaps: string[] = [];
-  if (owesWeb && !hasRealWebCapture(worktreeCwd, storyId)) {
+  if (owesWeb && !hasRealWebCapture(worktreeCwd, storyId, persistentCwd)) {
     gaps.push(`declared deliverable_url(s) not all really captured (need ${webCaptureNeed(worktreeCwd, storyId)} taken web shots)`);
   }
-  if (owesTerm && !hasRealTerminalCapture(worktreeCwd, storyId)) {
+  if (owesTerm && !hasRealTerminalCapture(worktreeCwd, storyId, persistentCwd)) {
     gaps.push(`declared deliverable_cmd(s) not all really captured (need ${deliverableCmdsForStory(worktreeCwd, storyId).length} taken terminal shots)`);
   }
-  if (owesPhys && !hasPhysicalTerminalCapture(worktreeCwd, storyId)) {
+  if (owesPhys && !hasPhysicalTerminalCapture(worktreeCwd, storyId, persistentCwd)) {
     gaps.push(`physical_terminal declared but no kind:"physical_terminal" capture taken — physical Terminal.app evidence required`);
   }
-  if (owesPhys && hasRejectedTerminalForPhysical(worktreeCwd, storyId)) {
+  if (owesPhys && hasRejectedTerminalForPhysical(worktreeCwd, storyId, persistentCwd)) {
     gaps.push(`physical_terminal card carries kind:"terminal" capture — physical evidence must be kind:"physical_terminal", not a headless terminal fallback`);
   }
   if (gaps.length === 0) return { ok: true, reason: "all declared surfaces really captured" };
@@ -1198,7 +1198,7 @@ function passAcVisualFloor(worktreeCwd: string, storyId: string, persistentCwd?:
   // FIX-339 (AC3): per-surface enforcement. A card may declare web surfaces, CLI
   // commands, or both; EACH declared surface owes a REAL capture and an
   // honest-skip no longer discharges a DECLARED surface.
-  const declared = declaredSurfaceCaptureFloor(worktreeCwd, storyId);
+  const declared = declaredSurfaceCaptureFloor(worktreeCwd, storyId, persistentCwd);
   if (declared.reason !== undefined) {
     if (declared.ok) return declared;
     const ids = missing.map((e) => e.ac ?? "?").join(", ");
@@ -1213,7 +1213,7 @@ function visualEvidenceFloor(worktreeCwd: string, storyId: string, persistentCwd
   const passAc = passAcVisualFloor(worktreeCwd, storyId, persistentCwd);
   if (!passAc.ok) return passAc;
   if (!storyRequiresScreenshot(worktreeCwd, storyId)) return passAc;
-  const declared = declaredSurfaceCaptureFloor(worktreeCwd, storyId);
+  const declared = declaredSurfaceCaptureFloor(worktreeCwd, storyId, persistentCwd);
   if (!declared.ok) return declared;
   if (declared.reason !== undefined) return declared;
   // US-V4-001: judge visual evidence from STRUCTURED truth (ac-map screenshot

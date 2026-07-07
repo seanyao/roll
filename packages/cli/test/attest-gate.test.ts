@@ -2168,6 +2168,30 @@ describe("FIX-1233 — cross-tree evidence roots (in-repo .roll: worktree ≠ pe
     expect(verificationReportHasContent(wt, "US-X-004", wt)).toBe(true);
   });
 
+  it("declared-surface capture floor reads the persistent-tree manifest (pi review finding)", () => {
+    // A card declaring a deliverable_cmd owes a taken:true terminal capture;
+    // when evidence.json lives ONLY in the persistent tree the floor must see it.
+    const storyId = "US-X-006";
+    const persistent = withReport(storyId);
+    const wt = tmp("xtree-wt6");
+    const wtCard = join(wt, ".roll", "features", "uncategorized", storyId);
+    mkdirSync(wtCard, { recursive: true });
+    // spec in the WORKTREE (specs are tracked there) declaring a cmd surface.
+    writeFileSync(
+      join(wtCard, "spec.md"),
+      `---\nid: ${storyId}\ndeliverable_cmd: roll loop status\n---\n# ${storyId}\n**AC:**\n- [ ] a\n`,
+    );
+    // taken terminal capture recorded in the PERSISTENT run dir's evidence.json.
+    const runDir = join(persistent, ".roll", "features", "uncategorized", storyId, "latest");
+    writeFileSync(
+      join(runDir, "evidence.json"),
+      JSON.stringify({ captures: [{ kind: "terminal", taken: true }, { kind: "web", taken: false }] }, null, 2),
+    );
+    // single-root read misses the manifest → floor fails; two-root read passes.
+    expect(verificationReportHasContent(wt, storyId)).toBe(false);
+    expect(verificationReportHasContent(wt, storyId, persistent)).toBe(true);
+  });
+
   it("runAttestGate produces (not empty-shell) when evidence sits in the persistent tree", () => {
     const { wt, persistent } = crossTree("US-X-005");
     // fresh-session peer score note in the persistent .roll, as runScorePairing writes it.

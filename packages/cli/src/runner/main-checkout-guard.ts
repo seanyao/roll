@@ -38,7 +38,7 @@ export interface QuarantineResult {
   type: "sandbox:quarantined";
   cycleId: string;
   storyId?: string;
-  phase: "pre-spawn" | "post-cycle" | "post-spawn" | "capture";
+  phase: "pre-spawn" | "active-spawn" | "post-cycle" | "post-spawn" | "capture";
   reason: QuarantineReason;
   ref: string;
   files: string[];

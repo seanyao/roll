@@ -2138,6 +2138,51 @@ describe("executeCommand — command → executor mapping", () => {
     expect(protection.map((e) => e.status)).toEqual(["applied", "released"]);
   });
 
+  it("FIX-1236: spawn_agent detects main checkout writes while the builder is still active and fails loud", async () => {
+    const repo = initCleanGitRepo("roll-main-leak-active-");
+    mkdirSync(join(repo, ".roll", "loop"), { recursive: true });
+    const wt = join(repo, ".roll", "loop", "wt");
+    mkdirSync(wt);
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      paths: {
+        ...base.ports.paths,
+        worktreePath: wt,
+        eventsPath: join(repo, ".roll", "loop", "events.ndjson"),
+        alertsPath: join(repo, ".roll", "loop", "alerts.log"),
+      },
+      agentSpawn: vi.fn(async () => {
+        setTimeout(() => {
+          chmodSync(repo, 0o755);
+          writeFileSync(join(repo, "active-main-leak.ts"), "export const dirty = true;\n");
+        }, 10);
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        return { stdout: "agent claimed success", stderr: "", exitCode: 0, timedOut: false };
+      }),
+    });
+    const previousPoll = process.env["ROLL_MAIN_LEAK_POLL_MS"];
+    process.env["ROLL_MAIN_LEAK_POLL_MS"] = "5";
+    try {
+      const r = await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);
+
+      expect(r.event).toEqual({ type: "agent_exited", exit: 1, timedOut: true });
+      const mainDirty = (calls["event"] ?? [])
+        .map((a) => (a as unknown[])[1] as RollEvent)
+        .find((e) => e.type === "sandbox:main_dirty");
+      expect(mainDirty).toMatchObject({ phase: "active-spawn", files: ["active-main-leak.ts"] });
+      const quarantined = (calls["event"] ?? [])
+        .map((a) => (a as unknown[])[1] as RollEvent)
+        .find((e) => e.type === "sandbox:quarantined");
+      expect(quarantined).toMatchObject({ phase: "active-spawn", reason: "dirty", files: ["active-main-leak.ts"] });
+      expect(execFileSync("git", ["status", "--porcelain", "--", "active-main-leak.ts"], { cwd: repo, encoding: "utf8" }).trim()).toBe("");
+      expect((calls["alert"] ?? []).map((a) => (a as unknown[])[1]).join("\n")).toContain("detected main checkout write while builder was active");
+    } finally {
+      if (previousPoll === undefined) delete process.env["ROLL_MAIN_LEAK_POLL_MS"];
+      else process.env["ROLL_MAIN_LEAK_POLL_MS"] = previousPoll;
+    }
+  });
+
   it("US-OBS-028: spawn_agent persists normalized pi tool signals for replay", async () => {
     const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-signals-")));
     execDirs.push(rt);

@@ -9,6 +9,7 @@ export type { FailureClass };
 export interface FailureAttributionInput {
   readonly stage:
     | "pre-spawn"
+    | "active-spawn"
     | "post-spawn"
     | "post-cycle"
     | "preflight"
@@ -69,6 +70,7 @@ const UNKNOWN_FALLBACK_SOURCE = "fallback:no_evidence";
 
 const ENV_STAGE_ROOT: Partial<Record<FailureAttributionInput["stage"], string>> = {
   "pre-spawn": "env:pre_spawn",
+  "active-spawn": "env:sandbox",
   "post-spawn": "env:sandbox",
   "post-cycle": "env:sandbox",
   preflight: "env:preflight",

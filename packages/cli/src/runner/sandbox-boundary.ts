@@ -3,7 +3,8 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { CycleContext } from "@roll/core";
-import { quarantineEventToRollEvent, quarantineMainCheckout, type QuarantineResult, type WriteProtectionResult } from "./main-checkout-guard.js";
+import { killLiveAgents } from "./agent-spawn.js";
+import { checkMainDirty, quarantineEventToRollEvent, quarantineMainCheckout, type QuarantineResult, type WriteProtectionResult } from "./main-checkout-guard.js";
 import type { CleanupResult } from "./environment-cleanup.js";
 import { recordRootCauseFailure } from "./failure-attribution.js";
 import type { Ports } from "./ports.js";
@@ -110,6 +111,75 @@ export async function quarantineMainCheckoutForCycle(
   });
   for (const result of results) appendQuarantineEvent(ports, result);
   return results;
+}
+
+export interface MainCheckoutLeakWatchdog {
+  stop(): Promise<{ detected: boolean; files: string[] }>;
+}
+
+export function startMainCheckoutLeakWatchdog(
+  ports: Ports,
+  ctx: CycleContext,
+  opts: { pollMs?: number; kill?: () => number } = {},
+): MainCheckoutLeakWatchdog {
+  try {
+    if (realpathSync(ports.repoCwd) === realpathSync(ports.paths.worktreePath)) {
+      return { stop: async () => ({ detected: false, files: [] }) };
+    }
+  } catch {
+    /* fall through; checkMainDirty handles unreadable paths as clean */
+  }
+  const pollMs = opts.pollMs ?? (Number((process.env["ROLL_MAIN_LEAK_POLL_MS"] ?? "").trim()) || 2_000);
+  const kill = opts.kill ?? ((): number => killLiveAgents("SIGKILL"));
+  let detected = false;
+  let files: string[] = [];
+  let running = false;
+  let stopped = false;
+  let inFlight: Promise<void> | null = null;
+
+  const tick = async (): Promise<void> => {
+    if (running || stopped || detected) return;
+    running = true;
+    try {
+      const dirty = await checkMainDirty(ports.repoCwd);
+      if (dirty.length === 0) return;
+      detected = true;
+      files = dirty;
+      clearInterval(timer);
+      ports.events.appendEvent(ports.paths.eventsPath, {
+        type: "sandbox:main_dirty",
+        cycleId: ctx.cycleId ?? "",
+        phase: "active-spawn",
+        files: dirty,
+        ts: eventTs(ports),
+      });
+      ports.events.appendAlert(
+        ports.paths.alertsPath,
+        `cycle ${ctx.cycleId ?? "?"}: detected main checkout write while builder was active; killing agent; files: ${dirty.join(", ")}`,
+      );
+      kill();
+    } catch {
+      /* best-effort guard; post-spawn quarantine still runs */
+    } finally {
+      running = false;
+    }
+  };
+
+  const timer = setInterval(() => {
+    inFlight = tick().finally(() => {
+      inFlight = null;
+    });
+  }, pollMs);
+  timer.unref?.();
+
+  return {
+    stop: async () => {
+      stopped = true;
+      clearInterval(timer);
+      if (inFlight !== null) await inFlight;
+      return { detected, files };
+    },
+  };
 }
 
 /** US-LOOP-088 — append a `cycle:cleanup` event for one cleanup rule result. */

@@ -114,6 +114,38 @@ export function isHumanSoftLeaseActive(entry: LeaseEntry, now: number): boolean 
 }
 
 /**
+ * Clean dead PID leases from the lease file.
+ *
+ * A lease whose pid is set but the process is no longer alive is stale — the
+ * cycle that claimed it crashed or was killed without running its terminal
+ * cleanup. Remove the lease so the story is not permanently blocked.
+ *
+ * Returns the list of storyIds whose dead leases were cleaned (for alerting).
+ */
+export function cleanDeadLeases(path: string): string[] {
+  const leases = readLeases(path);
+  const cleaned: string[] = [];
+  for (const [id, entry] of Object.entries(leases)) {
+    if (entry.pid !== undefined && !isPidAlive(entry.pid)) {
+      delete leases[id];
+      cleaned.push(id);
+    }
+  }
+  if (cleaned.length > 0) {
+    if (Object.keys(leases).length === 0) {
+      try {
+        if (existsSync(path)) unlinkSync(path);
+      } catch {
+        /* best-effort cleanup — never block pick on lease tidy */
+      }
+    } else {
+      writeLeases(path, leases);
+    }
+  }
+  return cleaned;
+}
+
+/**
  * Build a "claimed by other?" predicate from the lease map for the picker.
  *
  * A story whose sole claimer is this PID with a live process is NOT claimed.

@@ -37,8 +37,8 @@
  * agent ever runs in tests.
  */
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { existsSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Rig } from "@roll/spec";
 import { getAgentSpec } from "@roll/core";
@@ -738,17 +738,13 @@ function spawnAndWait(bin: string, args: string[], opts: AgentSpawnOptions, pty 
   // Operational trace (v2 logs its agent cmd too): goes to the runner's stderr,
   // which leg/cycle logs capture — argv mismatches become diagnosable.
   process.stderr.write(`[runner] spawn ${bin} argv=${JSON.stringify(args.map((a) => (a.length > 80 ? `${a.slice(0, 77)}...` : a)))}\n`);
-  // FIX-1231: for isolateGit agents (codex), create an empty temp CODEX_HOME so
-  // codex's internal curated-sync finds no prior state to sync into the host repo.
-  if (profile?.isolateGit) {
-    const homeDir = mkdtempSync(join(tmpdir(), "roll-codex-"));
-    const cleanupDir = () => { try { rmSync(homeDir, { recursive: true, force: true }); } catch { /* best-effort */ } };
-    opts = {
-      ...opts,
-      env: { ...(opts.env ?? {}), CODEX_HOME: homeDir },
-      cleanup: chainCleanup(opts.cleanup, cleanupDir),
-    };
-  }
+  // FIX-1235: do NOT create an empty CODEX_HOME for isolateGit agents — the
+  // git-level isolation (GIT_* stripping + GIT_CEILING_DIRECTORIES in childEnv)
+  // prevents host-repo poisoning, and an empty CODEX_HOME strips the agent's
+  // auth credentials (login stored in real CODEX_HOME), causing every spawn to
+  // fail with env:auth. The isolateGit flag is kept; only the CODEX_HOME
+  // override is removed (FIX-1231 regression covered by existing isolateGit
+  // profile tests).
   return new Promise<AgentSpawnResult>((resolve) => {
     const child = spawn(bin, args, {
       cwd: opts.cwd,

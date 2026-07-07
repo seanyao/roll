@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { join, relative } from "node:path";
 import { parseBacklog, type CycleContext } from "@roll/core";
 import { checkImageEvidenceAllowed, imageEvidencePathsInWorkingTree } from "@roll/infra";
@@ -162,13 +162,30 @@ async function commitInRepoEvidence(ports: Ports, ctx: CycleContext, storyId: st
     }
   }
   try {
-    execFileSync("git", ["add", "-A", "-f", "--", relAcMap, relRunDir], { cwd: ports.repoCwd, stdio: "ignore" });
-    const dirty = execFileSync("git", ["status", "--porcelain", "--", relAcMap, relRunDir], {
+    // FIX-1238: target the WORKTREE git (delivery branch), not the main checkout.
+    const evidenceCwd = ports.paths?.worktreePath ?? ports.repoCwd;
+    // FIX-1238: only use --git-dir targeting when .git is a FILE (worktree)
+    // not a directory (bare/main checkout). readFileSync on a dir would throw.
+    const worktreeGitFile = join(evidenceCwd, ".git");
+    let worktreeGitDir: string | undefined;
+    let isWorktreeTarget = false;
+    if (ports.paths?.worktreePath !== undefined && existsSync(worktreeGitFile) && lstatSync(worktreeGitFile).isFile()) {
+      const gitContent = readFileSync(worktreeGitFile, "utf8").trim();
+      const m = gitContent.match(/^gitdir:\s*(.+)$/m);
+      if (m && m[1]) { worktreeGitDir = m[1].trim(); isWorktreeTarget = true; }
+    }
+    const gitTarget = worktreeGitDir !== undefined && isWorktreeTarget
+      ? ["--git-dir", worktreeGitDir, "--work-tree", ports.paths.worktreePath]
+      : [];
+    // FIX-1238: also include backlog.md so the status flip rides the PR branch.
+    const relBacklog = relative(ports.repoCwd, join(ports.repoCwd, ".roll", "backlog.md"));
+    execFileSync("git", [...gitTarget, "add", "-A", "-f", "--", relAcMap, relRunDir, relBacklog], { cwd: ports.repoCwd, stdio: "ignore" });
+    const dirty = execFileSync("git", [...gitTarget, "status", "--porcelain", "--", relAcMap, relRunDir, relBacklog], {
       cwd: ports.repoCwd,
       encoding: "utf8",
     }).trim();
     if (dirty === "") return true;
-    execFileSync("git", ["commit", "-m", `chore: attach acceptance evidence for ${storyId}`], {
+    execFileSync("git", [...gitTarget, "commit", "-m", `chore: attach acceptance evidence for ${storyId}`], {
       cwd: ports.repoCwd,
       stdio: "ignore",
     });

@@ -3212,6 +3212,37 @@ describe("executeCommand — command → executor mapping", () => {
     expect(alerts.some((m) => m.includes("peer gate (hard)") && m.includes("BLOCKED"))).toBe(true);
   });
 
+  it("FIX-1234: policy peer_on_pool_timeout=degrade → pool timeout downgrades to recorded self-review (NOT blocked) with peer_unavailable evidence", async () => {
+    // The explicit per-project opt-in for small/flaky pools (intel-radar
+    // 2026-07-07: the only hetero peer timed out on EVERY cycle and the whole
+    // delivery chain deadlocked). Default policy (absent) keeps the FIX-312
+    // block — covered by the violation test above.
+    const wt = highComplexityWorktree();
+    const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-1234-degrade-")));
+    execDirs.push(rt);
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-1234-repo-")));
+    execDirs.push(repo);
+    mkdirSync(join(repo, ".roll"), { recursive: true });
+    writeFileSync(join(repo, ".roll", "policy.yaml"), "loop_safety:\n  peer_on_pool_timeout: degrade\n");
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      paths: { ...base.ports.paths, worktreePath: wt, eventsPath: join(rt, "events.ndjson"), alertsPath: join(rt, "alerts.log") },
+      installedAgents: () => ["claude", "pi"], // hetero IS available…
+      agentSpawn: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 1, timedOut: true })), // …but the pool times out
+    });
+    const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1 });
+    // NOT peer-blocked: downgraded to the recorded self-review fallback.
+    const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
+    expect(events.some((e) => e.type === "peer:unavailable")).toBe(true);
+    const alerts = (calls["alert"] ?? []).map((a) => (a as unknown[])[1] as string);
+    expect(alerts.some((m) => m.includes("downgraded to recorded self-review fallback"))).toBe(true);
+    expect(alerts.some((m) => m.includes("BLOCKED; story not marked Done") && m.includes("peer gate"))).toBe(false);
+    // first-class evidence file for audit/release gates.
+    expect(existsSync(join(rt, "peer-unavailable", `cycle-${CTX.cycleId}.json`))).toBe(true);
+    void r;
+  });
+
   it("FIX-293 AC-H4: policy peer_gate=soft → high-complexity + no review records but does NOT block", async () => {
     const wt = highComplexityWorktree();
     const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-293-rt3-")));

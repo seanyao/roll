@@ -13,6 +13,7 @@ import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import {
   DuplicateStoryIdError,
+  acMapCandidates,
   MUST_DECLARE_FAIL_REASON,
   allowedDeliverableCmd,
   declaresAnySurface,
@@ -2124,5 +2125,98 @@ screenshot_exempt: test only
     const p = tmpProject(specText, "US-TEST-002");
     const result = designContractDeliveredEvidence(p, "US-TEST-002");
     expect(result).toContain("❓ screenshot: console page → AC1 (missing)");
+  });
+});
+
+describe("FIX-1233 — cross-tree evidence roots (in-repo .roll: worktree ≠ persistent)", () => {
+  /** Persistent-root fixture: report + ac-map + evidence live ONLY in the
+   *  PERSISTENT tree (repoCwd), the worktree card dir has just a spec-less
+   *  shell — the intel-radar layout where attest-remediation (FIX-1230)
+   *  archived into repoCwd while the gate read only the worktree. */
+  function crossTree(storyId: string): { wt: string; persistent: string } {
+    const persistent = withReport(storyId);
+    const wt = tmp("xtree-wt");
+    // worktree card dir exists but carries NO report / ac-map (fresh checkout).
+    mkdirSync(join(wt, ".roll", "features", "uncategorized", storyId), { recursive: true });
+    return { wt, persistent };
+  }
+
+  it("verificationReportHasContent finds persistent-tree evidence via persistentCwd", () => {
+    const { wt, persistent } = crossTree("US-X-001");
+    // the historical bug: worktree-only read says empty shell…
+    expect(verificationReportHasContent(wt, "US-X-001")).toBe(false);
+    // …the two-root read sees the real delivery.
+    expect(verificationReportHasContent(wt, "US-X-001", persistent)).toBe(true);
+  });
+
+  it("acMapCandidates appends persistent-root candidates (worktree first)", () => {
+    const { wt, persistent } = crossTree("US-X-002");
+    const cands = acMapCandidates(wt, "US-X-002", persistent);
+    expect(cands.some((p) => p.startsWith(join(wt, ".roll")))).toBe(true);
+    expect(cands.some((p) => p.startsWith(join(persistent, ".roll")))).toBe(true);
+    expect(cands[0]?.startsWith(join(wt, ".roll"))).toBe(true);
+  });
+
+  it("verificationReportFresh honors the persistent root", () => {
+    const { wt, persistent } = crossTree("US-X-003");
+    expect(verificationReportFresh(wt, "US-X-003", undefined, persistent)).toBe(true);
+    expect(verificationReportFresh(wt, "US-X-003")).toBe(false);
+  });
+
+  it("same-root call (persistentCwd === worktreeCwd) is unchanged behaviour", () => {
+    const wt = withReport("US-X-004");
+    expect(verificationReportHasContent(wt, "US-X-004", wt)).toBe(true);
+  });
+
+  it("declared-surface capture floor reads the persistent-tree manifest (pi review finding)", () => {
+    // A card declaring a deliverable_cmd owes a taken:true terminal capture;
+    // when evidence.json lives ONLY in the persistent tree the floor must see it.
+    const storyId = "US-X-006";
+    const persistent = withReport(storyId);
+    const wt = tmp("xtree-wt6");
+    const wtCard = join(wt, ".roll", "features", "uncategorized", storyId);
+    mkdirSync(wtCard, { recursive: true });
+    // spec in the WORKTREE (specs are tracked there) declaring a cmd surface.
+    writeFileSync(
+      join(wtCard, "spec.md"),
+      `---\nid: ${storyId}\ndeliverable_cmd: roll loop status\n---\n# ${storyId}\n**AC:**\n- [ ] a\n`,
+    );
+    // taken terminal capture recorded in the PERSISTENT run dir's evidence.json.
+    const runDir = join(persistent, ".roll", "features", "uncategorized", storyId, "latest");
+    writeFileSync(
+      join(runDir, "evidence.json"),
+      JSON.stringify({ captures: [{ kind: "terminal", taken: true }, { kind: "web", taken: false }] }, null, 2),
+    );
+    // single-root read misses the manifest → floor fails; two-root read passes.
+    expect(verificationReportHasContent(wt, storyId)).toBe(false);
+    expect(verificationReportHasContent(wt, storyId, persistent)).toBe(true);
+  });
+
+  it("runAttestGate produces (not empty-shell) when evidence sits in the persistent tree", () => {
+    const { wt, persistent } = crossTree("US-X-005");
+    // fresh-session peer score note in the persistent .roll, as runScorePairing writes it.
+    const noteDir = join(persistent, ".roll", "features", "uncategorized", "US-X-005", "notes");
+    mkdirSync(noteDir, { recursive: true });
+    writeFileSync(
+      join(noteDir, "review-score.json"),
+      JSON.stringify({ score: 9, sessionId: "cycle-1:score:peer", cycleId: "cycle-1" }, null, 2),
+    );
+    const alerts: string[] = [];
+    const events: Array<{ verdict: string }> = [];
+    const res = runAttestGate(
+      wt,
+      "US-X-005",
+      "cycle-1",
+      "hard",
+      undefined,
+      { alert: (m) => alerts.push(m), event: (p) => events.push(p) },
+      persistent,
+      "builder-session",
+    );
+    // The empty-shell false-negative is the regression under test: the verdict
+    // must not be a "no AC content / no ac-map" skip. (Score-note shape may
+    // still legitimately skip — assert on the reason, not the verdict.)
+    expect(res.reasons.join(" ")).not.toContain("empty shell");
+    expect(res.reasons.join(" ")).not.toContain("no fresh acceptance report");
   });
 });

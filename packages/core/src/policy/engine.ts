@@ -71,6 +71,15 @@ export interface LoopSafetyConfig {
    *  high-complexity work without peer evidence is blocked + retried, not self-
    *  scored); set `soft` to keep the old record-only behaviour explicitly. */
   peerGate?: "soft" | "hard";
+  /** FIX-1234 — what a HARD peer gate does when the retry consult finds the
+   *  whole peer pool unable to answer (timeout-class pool failure). Absent ⇒
+   *  `block` (FIX-312 owner ruling unchanged: no evidence ⇒ NOT-Done). Set
+   *  `degrade` on projects with a small/flaky pool: the cycle records a
+   *  first-class `peer_unavailable` evidence file + ALERT and falls back to the
+   *  recorded self-review verdict instead of deadlocking every delivery
+   *  (intel-radar 2026-07-07: the only hetero peer timed out on every cycle).
+   *  The Review Score gate still applies — quality floor is not waived. */
+  peerOnPoolTimeout?: "block" | "degrade";
   /** US-EVID-016: same failure signal repetitions before PAUSE (single-card oscillation folded in via REFACTOR-069). */
   correctionSignalThreshold: number;
   /** US-EVID-016: seconds in the repeated-signal window. */
@@ -383,6 +392,11 @@ function parseLoopSafety(lines: PreLine[], start: number): [number, LoopSafetyCo
       : {}),
     ...(flat["peer_gate"] === "hard" || flat["peer_gate"] === "soft"
       ? { peerGate: flat["peer_gate"] as "soft" | "hard" }
+      : {}),
+    // FIX-1234: opt-in downgrade when the peer POOL cannot answer (timeout
+    // class). Default (absent) keeps the FIX-312 hard block.
+    ...(flat["peer_on_pool_timeout"] === "degrade" || flat["peer_on_pool_timeout"] === "block"
+      ? { peerOnPoolTimeout: flat["peer_on_pool_timeout"] as "block" | "degrade" }
       : {}),
     // FIX-298: the network-guard recovery hook. A non-empty string is the shell
     // command the guard runs to enable connectivity before re-checking.

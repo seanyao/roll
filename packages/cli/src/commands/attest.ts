@@ -1432,10 +1432,16 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   writeEvidenceJson(manifest, runDir);
 
   // intent map (AI layer) → report items; absent ⇒ honest all-Claimed.
-  // Read-compat (US-META-001): prefer the card folder, fall back to the legacy
-  // `verification/<ID>/` dir so a card whose Gate still writes there is honoured
-  // until US-META-002 migrates the write side of the skill.
-  const acMap = readAcMap(storyDir) ?? readAcMap(join(projectPath, ".roll", "verification", storyId));
+  // Read-compat (US-META-001): prefer the card folder under the worktree, then
+  // fall back to the legacy `verification/<ID>/` dir. FIX-1233: for in-repo .roll
+  // (user projects tracking .roll in their main repo), the attest-remediation
+  // writes the ac-map under repoCwd (dirname(runDir)), which may differ from the
+  // worktree's storyDir. Try dirname(runDir) as an additional fallback so the
+  // ac-map is visible to attest regardless of .roll layout.
+  const acMap =
+    readAcMap(storyDir) ??
+    readAcMap(join(projectPath, ".roll", "verification", storyId)) ??
+    readAcMap(dirname(runDir));
   const siblingBases = runDirHasEvidence(runDir) ? [] : siblingRunDirs(storyDir, runDir);
   const items: AcReportItem[] = acItems.map((ac) => {
     const mapped = acMap?.get(ac.id);
@@ -1519,6 +1525,12 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   writeFileSync(reviewPath, html);
   const reportPath = join(runDir, reportFileName(storyId));
   writeFileSync(reportPath, html);
+
+  // FIX-1233: an empty render (zero AC items, no ac-map) is NOT failed here —
+  // a stub spec with no AC block is legitimate (US-META-007) and the attest
+  // gate already exempts it (storyHasAcBlock === false ⇒ produced). Failing the
+  // render would block that exemption path. The 1246 warn plus the gate's
+  // structured content floor (now reading BOTH evidence roots) carry the signal.
 
   // latest symlink (replace — rm is force-tolerant of absence).
   const latest = join(storyDir, "latest");

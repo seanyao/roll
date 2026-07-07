@@ -42,6 +42,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Rig } from "@roll/spec";
 import { getAgentSpec } from "@roll/core";
+import { worktreeGitEnv } from "./main-checkout-guard.js";
 
 /**
  * FIX-204D — live-children registry. The signal teardown must kill an
@@ -704,18 +705,21 @@ function evidenceFrameEnv(runDir: string): NodeJS.ProcessEnv {
   };
 }
 
-function childEnv(opts: AgentSpawnOptions, _profile?: AgentProfile): NodeJS.ProcessEnv {
+function childEnv(opts: AgentSpawnOptions, profile?: AgentProfile): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...(opts.env ?? process.env) };
   // FIX-1237: strip ALL inherited GIT_* env vars for EVERY spawned agent
   // (not just codex), so no agent can poison the shared config via
-  // inherited git environment variables.  GIT_CEILING_DIRECTORIES alone
-  // is sufficient for worktree-local git operations — with
-  // extensions.worktreeConfig enabled at worktree creation time (infra/git.ts)
-  // the agent's CWD within the worktree is its own git boundary.
+  // inherited git environment variables. Non-isolated agents then receive the
+  // runner-computed worktree git env so `git -C main` still lands in the cycle
+  // worktree instead of the shared checkout (FIX-1073).
   for (const key of Object.keys(env)) {
     if (key.startsWith("GIT_")) delete env[key];
   }
-  env["GIT_CEILING_DIRECTORIES"] = dirname(opts.cwd);
+  if (profile?.isolateGit) {
+    env["GIT_CEILING_DIRECTORIES"] = dirname(opts.cwd);
+  } else {
+    Object.assign(env, worktreeGitEnv(opts.cwd, opts.cwd));
+  }
   env.PWD = opts.cwd;
   delete env.OLDPWD;
   return opts.runDir !== undefined && opts.runDir !== "" ? { ...env, ...evidenceFrameEnv(opts.runDir) } : env;

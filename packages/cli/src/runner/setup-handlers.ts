@@ -1,6 +1,7 @@
 import {
   assessBacklog,
   buildHasOpenPr,
+  cleanDeadLeases,
   decideClaimReconcile,
   hasMergedDelivery,
   isHumanSoftLeaseActive,
@@ -335,6 +336,17 @@ export async function executeSetupCommand(
         },
       });
       const pendingPublish = readPendingPublish(dirname(ports.paths.eventsPath));
+      // FIX-1232: clean dead PID leases from the lease file before the picker
+      // runs. A crashed cycle leaves a stale cycle-lease that accumulates in the
+      // file — harmless to the picker (isClaimedByOther is not wired) but noise
+      // for diagnostics and the preflight reclaim step.
+      const deadLeases = cleanDeadLeases(storyLeasePath(ports));
+      if (deadLeases.length > 0) {
+        ports.events.appendAlert(
+          ports.paths.alertsPath,
+          `[FIX-1232] cleaned ${deadLeases.length} dead lease(s): ${deadLeases.join(", ")}`,
+        );
+      }
       const eligibility: PickOptions = {
         hasOpenPr,
         hasMergedDelivery: (id) =>

@@ -408,27 +408,33 @@ export async function executeTerminalCommand(
           // (decideClaimReconcile) flips it once the PR actually merges.
           revertPrematureDone(ports, terminalStoryId, ctx.preCycleStatus);
         }
-      } else if ((cmd.status === "idle" || cmd.status === "gave_up") && terminalStoryId !== "") {
-        // idle / gave_up never merged → the row goes back to 📋 Todo (re-pickable)
-        // — UNLESS this cycle deliberately parked it at 🚫 Hold via self-downgrade
-        // (US-AGENT-042). A too-big card runs `roll loop self-downgrade`, which
-        // flips the parent to Hold and appends sub-stories, then exits with NO TCR
-        // commits → an idle terminal. Blindly flipping it back to Todo would
-        // clobber the authoritative Hold and re-pick the too-big card forever (the
-        // harness-systemic failure FIX-364 was opened to prevent). A Hold at the
-        // terminal is a deliberate park (self-downgrade or a manual hold), never a
-        // premature claim to release — leave it.
+      } else if ((cmd.status === "idle" || cmd.status === "gave_up" || cmd.status === "local") && terminalStoryId !== "") {
+        // idle / gave_up / local never merged → the row goes back to 📋 Todo
+        // (re-pickable) — UNLESS this cycle deliberately parked it at 🚫 Hold
+        // via self-downgrade (US-AGENT-042). A too-big card runs
+        // `roll loop self-downgrade`, which flips the parent to Hold and
+        // appends sub-stories, then exits with NO TCR commits → an idle
+        // terminal. Blindly flipping it back to Todo would clobber the
+        // authoritative Hold and re-pick the too-big card forever (the
+        // harness-systemic failure FIX-364 was opened to prevent). A Hold at
+        // the terminal is a deliberate park (self-downgrade or a manual hold),
+        // never a premature claim to release — leave it.
+        // FIX-1232: `local` (unpublished) — gates passed but publish could
+        // not land (FIX-351). The work is sound and committed, not a failure,
+        // but the story must be re-pickable so the loop does not stall.
         if (!isParkedAtHold(ports, terminalStoryId)) {
           ports.backlog.markStatus?.(ports.repoCwd, terminalStoryId, STATUS_MARKER.todo);
         }
-        // US-TRUTH-015 AC2: write a failed DeliveryRecord when the cycle gave up
-        // or idled without merging. The reason is the terminal status.
+        // US-TRUTH-015 AC2: write a delivery record when the cycle finished
+        // without merging. The lifecycle reflects the terminal outcome:
+        // idle/gave_up → "failed", local (unpublished, work committed) →
+        // "abandoned".
         if (ctx.cycleId !== undefined) {
           try {
             appendDelivery(nodeDeliveryStore, ports.repoCwd, {
               storyId: terminalStoryId,
               cycleId: ctx.cycleId,
-              lifecycleState: "failed",
+              lifecycleState: cmd.status === "local" ? "abandoned" : "failed",
               prNumber: ctx.prUrl !== undefined
                 ? present(Number(prNumberFromUrl(ctx.prUrl) ?? 0))
                 : absent("no_publish_attempted"),

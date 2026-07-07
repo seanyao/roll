@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildClaimedByOther,
+  cleanDeadLeases,
   isHumanSoftLeaseActive,
   isLeaseAlive,
   isPidAlive,
@@ -265,5 +266,60 @@ describe("removeLease onlySource scoping (kimi review: cycle terminal must not w
     const path = join(mkdtempSync(join(tmpdir(), "lease-scope2-")), "leases.json");
     setLease(path, "US-X-3", { claimedAt: 1000, source: "human" });
     expect(removeLease(path, "US-X-3")).toBe(true);
+  });
+});
+
+describe("cleanDeadLeases (FIX-1232)", () => {
+  it("removes dead PID entries and keeps live ones", () => {
+    const dir = mkdtempSync(join(tmpdir(), "clean-dead-"));
+    const path = join(dir, "leases.json");
+    try {
+      setLease(path, "FIX-DEAD", { pid: 999999999, claimedAt: 1000, source: "cycle" });
+      setLease(path, "FIX-LIVE", { pid: process.pid, claimedAt: 2000, source: "cycle" });
+      const cleaned = cleanDeadLeases(path);
+      expect(cleaned).toEqual(["FIX-DEAD"]);
+      const remaining = readLeases(path);
+      expect(remaining["FIX-DEAD"]).toBeUndefined();
+      expect(remaining["FIX-LIVE"]).toBeDefined();
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("removes all entries and deletes the file when none survive", () => {
+    const dir = mkdtempSync(join(tmpdir(), "clean-dead-all-"));
+    const path = join(dir, "leases.json");
+    try {
+      setLease(path, "FIX-1", { pid: 999999999, claimedAt: 1000, source: "cycle" });
+      setLease(path, "FIX-2", { pid: 999999998, claimedAt: 2000, source: "cycle" });
+      const cleaned = cleanDeadLeases(path);
+      expect(cleaned.sort()).toEqual(["FIX-1", "FIX-2"]);
+      // File should be deleted
+      const { existsSync } = require("fs");
+      expect(existsSync(path)).toBe(false);
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("skips human/supervisor leases (no pid)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "clean-skip-human-"));
+    const path = join(dir, "leases.json");
+    try {
+      setLease(path, "FIX-HUMAN", { claimedAt: 1000, source: "human" });
+      setLease(path, "FIX-DEAD", { pid: 999999999, claimedAt: 2000, source: "cycle" });
+      const cleaned = cleanDeadLeases(path);
+      expect(cleaned).toEqual(["FIX-DEAD"]);
+      const remaining = readLeases(path);
+      expect(remaining["FIX-HUMAN"]).toBeDefined();
+      expect(remaining["FIX-DEAD"]).toBeUndefined();
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("returns empty array for missing or empty file", () => {
+    expect(cleanDeadLeases("/nonexistent/path/file.json")).toEqual([]);
+    expect(cleanDeadLeases("/dev/null")).toEqual([]);
   });
 });

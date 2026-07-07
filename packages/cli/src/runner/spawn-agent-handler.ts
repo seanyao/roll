@@ -9,7 +9,7 @@ import { recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
 import { blockIfAgentCredentialsMissing, detectAgyInternalFailure } from "./agent-routing.js";
 import { buildLowScoreFixForwardPrompt, maybeInjectProjectMap } from "./project-map.js";
 import { readProjectMapEnabled } from "./runner-policy.js";
-import { appendWriteProtectionEvent, quarantineMainCheckoutForCycle } from "./sandbox-boundary.js";
+import { appendWriteProtectionEvent, quarantineMainCheckoutForCycle, startMainCheckoutLeakWatchdog } from "./sandbox-boundary.js";
 import { ActivitySignalRecorder, createCaptureMarkerSink, readCycleTimeoutThresholds, readStallThreshold, startCycleObserver, startSpawnTimeoutWatchdog, startStallDetector } from "./spawn-observers.js";
 import { persistWorktreeAlerts, agentWritableRoots } from "./worktree-bootstrap.js";
 import { runDesignerStage } from "./execution-profile.js";
@@ -155,6 +155,8 @@ export async function executeSpawnAgentCommand(
       // re-introduces this as registry-driven, agent-agnostic logic.
       let res: Awaited<ReturnType<typeof ports.agentSpawn>>;
       let timeoutFired: "wall" | "no-progress" | null = null;
+      let activeMainLeak: { detected: boolean; files: string[] } = { detected: false, files: [] };
+      let mainLeakWatchdog: ReturnType<typeof startMainCheckoutLeakWatchdog> | undefined;
       try {
         appendWriteProtectionEvent(
           ports,
@@ -165,6 +167,7 @@ export async function executeSpawnAgentCommand(
             nowMs: () => eventTs(ports),
           }),
         );
+        mainLeakWatchdog = startMainCheckoutLeakWatchdog(ports, ctx);
         res = await ports.agentSpawn(cmd.agent, {
           purpose: "builder",
           cwd: ports.paths.worktreePath,
@@ -198,6 +201,9 @@ export async function executeSpawnAgentCommand(
           },
         });
       } finally {
+        if (mainLeakWatchdog !== undefined) {
+          activeMainLeak = await mainLeakWatchdog.stop();
+        }
         appendWriteProtectionEvent(
           ports,
           releaseMainCheckoutWriteProtection({
@@ -222,7 +228,12 @@ export async function executeSpawnAgentCommand(
       if (timeoutFired !== null) res = { ...res, timedOut: true };
       await captureSink?.flush();
       persistWorktreeAlerts(ports.paths.worktreePath, ports.paths.alertsPath, ports.events);
-      await quarantineMainCheckoutForCycle(ports, ctx, "post-spawn");
+      if (activeMainLeak.detected) {
+        await quarantineMainCheckoutForCycle(ports, ctx, "active-spawn");
+        res = { ...res, exitCode: res.exitCode === 0 ? 1 : res.exitCode, timedOut: true };
+      } else {
+        await quarantineMainCheckoutForCycle(ports, ctx, "post-spawn");
+      }
       // FIX-366 — BUILDER auth/network fast-fail (extends FIX-363's taxonomy from
       // reviewer/scorer to the main working agent). An UNAUTHENTICATED builder does
       // not silently burn the whole cycle: it prints a 403 / "Please run /login" in

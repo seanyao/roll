@@ -67,7 +67,7 @@ export type RollEvent =
   // FIX-1037: a builder escaped the cycle worktree or the main checkout was
   // already dirty before spawn. This is a sandbox/execution-boundary failure,
   // distinct from agent auth/network blocks.
-  | { type: "sandbox:main_dirty"; cycleId: string; phase: "pre-spawn" | "post-spawn" | "capture"; files: string[]; ts: number }
+  | { type: "sandbox:main_dirty"; cycleId: string; phase: "pre-spawn" | "active-spawn" | "post-spawn" | "capture"; files: string[]; ts: number }
   // US-LOOP-089: builder process lifetime OS write protection for the shared
   // main checkout. recovered means a stale marker from a crashed prior cycle was
   // restored before applying protection for the new cycle.
@@ -78,7 +78,7 @@ export type RollEvent =
       type: "sandbox:quarantined";
       cycleId: string;
       storyId?: string;
-      phase: "pre-spawn" | "post-spawn" | "post-cycle" | "capture";
+      phase: "pre-spawn" | "active-spawn" | "post-spawn" | "post-cycle" | "capture";
       reason: "dirty" | "ahead";
       ref: string;
       files: string[];

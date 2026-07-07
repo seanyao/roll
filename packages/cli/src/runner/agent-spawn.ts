@@ -705,21 +705,23 @@ function evidenceFrameEnv(runDir: string): NodeJS.ProcessEnv {
   };
 }
 
-const INHERITED_GIT_ENV_KEYS = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE"] as const;
-
 function childEnv(opts: AgentSpawnOptions, profile?: AgentProfile): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...(opts.env ?? process.env) };
-  for (const key of INHERITED_GIT_ENV_KEYS) delete env[key];
-  env.PWD = opts.cwd;
-  delete env.OLDPWD;
+  // FIX-1237: strip ALL inherited GIT_* env vars for EVERY spawned agent
+  // (not just codex), so no agent can poison the shared config via
+  // inherited git environment variables. Non-isolated agents then receive the
+  // runner-computed worktree git env so `git -C main` still lands in the cycle
+  // worktree instead of the shared checkout (FIX-1073).
+  for (const key of Object.keys(env)) {
+    if (key.startsWith("GIT_")) delete env[key];
+  }
   if (profile?.isolateGit) {
-    for (const key of Object.keys(env)) {
-      if (key.startsWith("GIT_")) delete env[key];
-    }
     env["GIT_CEILING_DIRECTORIES"] = dirname(opts.cwd);
   } else {
     Object.assign(env, worktreeGitEnv(opts.cwd, opts.cwd));
   }
+  env.PWD = opts.cwd;
+  delete env.OLDPWD;
   return opts.runDir !== undefined && opts.runDir !== "" ? { ...env, ...evidenceFrameEnv(opts.runDir) } : env;
 }
 

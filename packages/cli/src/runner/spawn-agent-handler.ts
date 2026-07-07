@@ -4,7 +4,7 @@ import { extractUsage, getAgentSpec, toCycleCost, type AgentInternalFailure, typ
 import type { CycleCost } from "@roll/spec";
 import { agentSpawnEnvironment } from "./agent-spawn.js";
 import { classifyBlockSignature, suspendRig } from "./agent-liveness.js";
-import { applyMainCheckoutWriteProtection, releaseMainCheckoutWriteProtection, worktreeGitEnv } from "./main-checkout-guard.js";
+import { applyMainCheckoutWriteProtection, releaseMainCheckoutWriteProtection, repairCoreWorktreeContamination, worktreeGitEnv } from "./main-checkout-guard.js";
 import { recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
 import { blockIfAgentCredentialsMissing, detectAgyInternalFailure } from "./agent-routing.js";
 import { buildLowScoreFixForwardPrompt, maybeInjectProjectMap } from "./project-map.js";
@@ -234,6 +234,44 @@ export async function executeSpawnAgentCommand(
       } else {
         await quarantineMainCheckoutForCycle(ports, ctx, "post-spawn");
       }
+
+      // FIX-1237: heal-at-every-boundary — repair core.worktree contamination
+      // immediately after EVERY agent spawn completes, not just at pre-init
+      // and terminal.  Catches any poisoning the agent did during its run so
+      // sibling worktrees never see a poisoned config before the next step.
+      {
+        const repair = repairCoreWorktreeContamination(ports.repoCwd);
+        if (repair.healed) {
+          ports.events.appendEvent(ports.paths.eventsPath, {
+            type: "cycle:cleanup",
+            cycleId: ctx.cycleId ?? "",
+            rule: "core.worktree",
+            path: repair.detail,
+            ok: true,
+            ts: eventTs(ports),
+          });
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `FIX-1237: cycle ${ctx.cycleId ?? "?"} — core.worktree was pointing to "${repair.detail}" — auto-unset at post-spawn boundary`,
+          );
+        }
+        const metaRepair = repairCoreWorktreeContamination(join(ports.repoCwd, ".roll"));
+        if (metaRepair.healed) {
+          ports.events.appendEvent(ports.paths.eventsPath, {
+            type: "cycle:cleanup",
+            cycleId: ctx.cycleId ?? "",
+            rule: "roll-meta.core-worktree",
+            path: metaRepair.detail,
+            ok: true,
+            ts: eventTs(ports),
+          });
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `FIX-1237: cycle ${ctx.cycleId ?? "?"} — roll-meta core.worktree was pointing to "${metaRepair.detail}" — auto-unset at post-spawn boundary`,
+          );
+        }
+      }
+
       // FIX-366 — BUILDER auth/network fast-fail (extends FIX-363's taxonomy from
       // reviewer/scorer to the main working agent). An UNAUTHENTICATED builder does
       // not silently burn the whole cycle: it prints a 403 / "Please run /login" in

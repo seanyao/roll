@@ -1432,10 +1432,16 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   writeEvidenceJson(manifest, runDir);
 
   // intent map (AI layer) → report items; absent ⇒ honest all-Claimed.
-  // Read-compat (US-META-001): prefer the card folder, fall back to the legacy
-  // `verification/<ID>/` dir so a card whose Gate still writes there is honoured
-  // until US-META-002 migrates the write side of the skill.
-  const acMap = readAcMap(storyDir) ?? readAcMap(join(projectPath, ".roll", "verification", storyId));
+  // Read-compat (US-META-001): prefer the card folder under the worktree, then
+  // fall back to the legacy `verification/<ID>/` dir. FIX-1233: for in-repo .roll
+  // (user projects tracking .roll in their main repo), the attest-remediation
+  // writes the ac-map under repoCwd (dirname(runDir)), which may differ from the
+  // worktree's storyDir. Try dirname(runDir) as an additional fallback so the
+  // ac-map is visible to attest regardless of .roll layout.
+  const acMap =
+    readAcMap(storyDir) ??
+    readAcMap(join(projectPath, ".roll", "verification", storyId)) ??
+    readAcMap(dirname(runDir));
   const siblingBases = runDirHasEvidence(runDir) ? [] : siblingRunDirs(storyDir, runDir);
   const items: AcReportItem[] = acItems.map((ac) => {
     const mapped = acMap?.get(ac.id);
@@ -1519,6 +1525,24 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   writeFileSync(reviewPath, html);
   const reportPath = join(runDir, reportFileName(storyId));
   writeFileSync(reportPath, html);
+
+  // FIX-1233 AC2: loud-fail when the render produced an empty shell (no AC
+  // content and no ac-map). A facts-only report with zero AC items is a
+  // delivery defect, not a valid attest — the downstream gate would block it,
+  // but the signal is clearer if we fail AT render time with a specific reason.
+  const hasAcContent =
+    items.length > 0 ||
+    acMap !== null;
+  if (!hasAcContent) {
+    process.stderr.write(
+      `[roll] attest: ${storyId} — render produced empty report (zero AC items and no ac-map.json)\n` +
+        `[roll] attest：${storyId} — 渲染产空报告(无验收项且无 ac-map.json)。\n` +
+        `[roll] attest: Check the story spec at ${featureFile} for AC blocks ("**AC:**" or "## Acceptance Criteria") and\n` +
+        `[roll] attest: verify that spec.md has checklist items. The report was NOT written to disk.\n`,
+    );
+    // Don't write the latest symlink — there is no valid report to point to.
+    return 4; // distinct exit code: empty render
+  }
 
   // latest symlink (replace — rm is force-tolerant of absence).
   const latest = join(storyDir, "latest");

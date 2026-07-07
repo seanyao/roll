@@ -147,3 +147,34 @@ describe("US-AGENT-048 — Cursor headless Builder argv", () => {
     expect(prompt).not.toContain("[roll 自主模式]");
   });
 });
+
+describe("FIX-1231 — codex git isolation", () => {
+  it("codex profile declares isolateGit:true", () => {
+    const profile = agentProfile("codex");
+    expect(profile.isolateGit).toBe(true);
+  });
+
+  it("non-codex agents do NOT declare isolateGit", () => {
+    for (const agent of ["claude", "pi", "kimi", "reasonix", "agy", "cursor"]) {
+      const profile = agentProfile(agent);
+      expect(profile.isolateGit, `${agent} should not isolate git`).toBeFalsy();
+    }
+  });
+
+  it("codex spawn command still builds correctly with isolateGit", () => {
+    const { bin, args } = buildSpawnCommand("codex", {
+      cwd: "/cycle/wt",
+      skillBody: "DO WORK",
+      storyId: "FIX-1231",
+      writableRoots: ["/repo/.roll"],
+    });
+    expect(bin).toBe("codex");
+    expect(args).toContain("exec");
+    expect(args).toContain("--skip-git-repo-check");
+    expect(args).toContain("--sandbox");
+    expect(args).toContain("workspace-write");
+    const prompt = args[args.length - 1] ?? "";
+    expect(prompt).toContain("DO WORK");
+    expect(prompt).toContain("FIX-1231");
+  });
+});

@@ -157,6 +157,22 @@ export function readPeerGateMode(repoCwd: string): PeerGateMode {
   }
 }
 
+/** FIX-1234 — `loop_safety.peer_on_pool_timeout` from `<repoCwd>/.roll/policy.yaml`.
+ *  Default `block` (FIX-312 owner ruling: hetero available + no evidence ⇒
+ *  NOT-Done). `degrade` is the explicit per-project opt-in for small/flaky
+ *  pools where a timeout-class pool failure would otherwise deadlock every
+ *  delivery: the cycle records `peer_unavailable` evidence and falls back to
+ *  the recorded self-review verdict. Fail-closed on unreadable policy. */
+export function readPeerOnPoolTimeout(repoCwd: string): "block" | "degrade" {
+  try {
+    const p = join(repoCwd, ".roll", "policy.yaml");
+    if (!existsSync(p)) return "block";
+    return parsePolicy(readFileSync(p, "utf8")).loopSafety.peerOnPoolTimeout === "degrade" ? "degrade" : "block";
+  } catch {
+    return "block";
+  }
+}
+
 /**
  * Run the gate for one cycle. Pure decision + sink side-effects; never throws.
  * Returns the verdict + `blocked` so callers/tests can assert without the sinks.

@@ -80,23 +80,44 @@ function findNewestRunDir(cardDir: string): string | null {
  * the latest/ symlink is a best-effort post-write step that can silently fail).
  * The legacy `verification/<ID>/` read-compat window closed with US-META-002c.
  */
-function reportCandidates(worktreeCwd: string, storyId: string): string[] {
-  const cardDir = cardArchiveDir(worktreeCwd, storyId);
-  const candidates = [join(cardDir, "latest", reportFileName(storyId))];
-  const newest = findNewestRunDir(cardDir);
-  if (newest !== null) candidates.push(join(cardDir, newest, reportFileName(storyId)));
+function reportCandidates(worktreeCwd: string, storyId: string, persistentCwd?: string): string[] {
+  const candidates: string[] = [];
+  for (const root of evidenceRoots(worktreeCwd, persistentCwd)) {
+    const cardDir = cardArchiveDir(root, storyId);
+    candidates.push(join(cardDir, "latest", reportFileName(storyId)));
+    const newest = findNewestRunDir(cardDir);
+    if (newest !== null) candidates.push(join(cardDir, newest, reportFileName(storyId)));
+  }
   return candidates;
+}
+
+/**
+ * FIX-1233 — the evidence roots a gate reader must consider, worktree first.
+ * For in-repo .roll layouts the cycle worktree carries a PHYSICALLY SEPARATE
+ * .roll checkout while attest-remediation (FIX-1230) archives the ac-map and
+ * the render writes the report into the PERSISTENT tree (repoCwd) — a gate
+ * that reads only the worktree tree false-negatives every such delivery as an
+ * "empty shell" (intel-radar 2026-07-07: zero autonomous publishes, cycles
+ * looped blocked→quarantine forever). Readers accept BOTH roots; the worktree
+ * stays first so cycle-local truth wins when both exist.
+ */
+function evidenceRoots(worktreeCwd: string, persistentCwd?: string): string[] {
+  if (persistentCwd === undefined || persistentCwd === "" || persistentCwd === worktreeCwd) return [worktreeCwd];
+  return [worktreeCwd, persistentCwd];
 }
 
 /**
  * ac-map candidates — PRIMARY is the card root (`ac-map.json`); FALLBACK is
  * the newest timestamped run directory (same rationale as reportCandidates).
  */
-export function acMapCandidates(worktreeCwd: string, storyId: string): string[] {
-  const cardDir = cardArchiveDir(worktreeCwd, storyId);
-  const candidates = [join(cardDir, "ac-map.json")];
-  const newest = findNewestRunDir(cardDir);
-  if (newest !== null) candidates.push(join(cardDir, newest, "ac-map.json"));
+export function acMapCandidates(worktreeCwd: string, storyId: string, persistentCwd?: string): string[] {
+  const candidates: string[] = [];
+  for (const root of evidenceRoots(worktreeCwd, persistentCwd)) {
+    const cardDir = cardArchiveDir(root, storyId);
+    candidates.push(join(cardDir, "ac-map.json"));
+    const newest = findNewestRunDir(cardDir);
+    if (newest !== null) candidates.push(join(cardDir, newest, "ac-map.json"));
+  }
   return candidates;
 }
 
@@ -812,11 +833,11 @@ interface EvidenceManifestLike {
   captures?: unknown;
 }
 
-function readAcMap(worktreeCwd: string, storyId: string): { path: string; entries: AcMapEntry[] } | null {
+function readAcMap(worktreeCwd: string, storyId: string, persistentCwd?: string): { path: string; entries: AcMapEntry[] } | null {
   // US-V4-001: read whichever ac-map.json candidate exists (card root first, then
   // the newest run dir) so the structured-truth gate works regardless of which
   // story-scoped location the skill wrote it to.
-  for (const path of acMapCandidates(worktreeCwd, storyId)) {
+  for (const path of acMapCandidates(worktreeCwd, storyId, persistentCwd)) {
     if (path === undefined || !existsSync(path)) continue;
     try {
       const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
@@ -829,8 +850,8 @@ function readAcMap(worktreeCwd: string, storyId: string): { path: string; entrie
   return null;
 }
 
-export function readAcMapEntries(worktreeCwd: string, storyId: string): AcMapEntry[] | null {
-  return readAcMap(worktreeCwd, storyId)?.entries ?? null;
+export function readAcMapEntries(worktreeCwd: string, storyId: string, persistentCwd?: string): AcMapEntry[] | null {
+  return readAcMap(worktreeCwd, storyId, persistentCwd)?.entries ?? null;
 }
 
 function isHttpUrl(ref: string): boolean {
@@ -875,17 +896,23 @@ function inside(parent: string, child: string): boolean {
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
-function evidenceRefResolves(worktreeCwd: string, storyId: string, ref: string): boolean {
+function evidenceRefResolves(worktreeCwd: string, storyId: string, ref: string, persistentCwd?: string): boolean {
   if (ref === "") return false;
   if (isHttpUrl(ref)) return githubEvidenceUrlAllowed(worktreeCwd, ref);
   if (/^[a-z]+:/i.test(ref) || isAbsolute(ref)) return false;
-  const cardDir = cardArchiveDir(worktreeCwd, storyId);
-  const report = existingReport(worktreeCwd, storyId);
-  const runDir = report === null ? join(cardDir, "latest") : dirname(report);
-  const bases = [runDir, cardDir];
+  const roots = evidenceRoots(worktreeCwd, persistentCwd);
+  const report = existingReport(worktreeCwd, storyId, persistentCwd);
+  const bases: string[] = [];
+  for (const root of roots) {
+    const cardDir = cardArchiveDir(root, storyId);
+    if (report === null) bases.push(join(cardDir, "latest"));
+    bases.push(cardDir);
+  }
+  if (report !== null) bases.unshift(dirname(report));
   for (const base of bases) {
     const candidate = resolve(base, ref);
-    if (!inside(worktreeCwd, candidate)) continue;
+    // FIX-1233: evidence may live in EITHER tree (worktree or persistent .roll).
+    if (!roots.some((root) => inside(root, candidate))) continue;
     try {
       if (statSync(candidate).isFile()) return true;
     } catch {
@@ -895,15 +922,15 @@ function evidenceRefResolves(worktreeCwd: string, storyId: string, ref: string):
   return false;
 }
 
-export function evidencePathsUnresolved(worktreeCwd: string, storyId: string): string[] {
-  const acMap = readAcMap(worktreeCwd, storyId);
+export function evidencePathsUnresolved(worktreeCwd: string, storyId: string, persistentCwd?: string): string[] {
+  const acMap = readAcMap(worktreeCwd, storyId, persistentCwd);
   if (acMap === null) return [];
   const missing: string[] = [];
   for (const entry of acMap.entries) {
     for (const ev of entry.evidence ?? []) {
       for (const ref of [ev.textFile, ev.href]) {
         if (typeof ref !== "string") continue;
-        if (!evidenceRefResolves(worktreeCwd, storyId, ref)) missing.push(`${entry.ac ?? "?"} ${ref}`);
+        if (!evidenceRefResolves(worktreeCwd, storyId, ref, persistentCwd)) missing.push(`${entry.ac ?? "?"} ${ref}`);
       }
     }
   }
@@ -931,8 +958,8 @@ function acMapEvidenceIsReal(ev: AcMapEvidence): boolean {
  * a real `taken:true` capture in evidence.json, or an actual image file under the
  * report's run-dir `screenshots/`. No HTML is parsed.
  */
-function hasRenderedVisualEvidence(worktreeCwd: string, storyId: string): boolean {
-  const entries = readAcMapEntries(worktreeCwd, storyId) ?? [];
+function hasRenderedVisualEvidence(worktreeCwd: string, storyId: string, persistentCwd?: string): boolean {
+  const entries = readAcMapEntries(worktreeCwd, storyId, persistentCwd) ?? [];
   if (
     entries.some((e) =>
       (e.evidence ?? []).some((ev) => ev.kind === "screenshot" && typeof ev.href === "string" && ev.href !== ""),
@@ -940,7 +967,7 @@ function hasRenderedVisualEvidence(worktreeCwd: string, storyId: string): boolea
   ) {
     return true;
   }
-  const manifest = evidenceManifest(worktreeCwd, storyId);
+  const manifest = evidenceManifest(worktreeCwd, storyId, persistentCwd);
   if (
     manifest !== null &&
     Array.isArray(manifest.captures) &&
@@ -948,7 +975,7 @@ function hasRenderedVisualEvidence(worktreeCwd: string, storyId: string): boolea
   ) {
     return true;
   }
-  const report = existingReport(worktreeCwd, storyId);
+  const report = existingReport(worktreeCwd, storyId, persistentCwd);
   if (report !== null) {
     try {
       if (readdirSync(join(dirname(report), "screenshots")).some((f) => /\.(png|jpe?g|webp)$/i.test(f))) return true;
@@ -983,8 +1010,8 @@ export function designContractDeliveredEvidence(worktreeCwd: string, storyId: st
   return evidenceDeltaSummary(contract, acMap);
 }
 
-function evidenceManifest(worktreeCwd: string, storyId: string): EvidenceManifestLike | null {
-  const report = existingReport(worktreeCwd, storyId);
+function evidenceManifest(worktreeCwd: string, storyId: string, persistentCwd?: string): EvidenceManifestLike | null {
+  const report = existingReport(worktreeCwd, storyId, persistentCwd);
   if (report === null) return null;
   const path = join(dirname(report), "evidence.json");
   if (!existsSync(path)) return null;
@@ -996,8 +1023,8 @@ function evidenceManifest(worktreeCwd: string, storyId: string): EvidenceManifes
   }
 }
 
-function hasMachineCaptureSkip(worktreeCwd: string, storyId: string): boolean {
-  const manifest = evidenceManifest(worktreeCwd, storyId);
+function hasMachineCaptureSkip(worktreeCwd: string, storyId: string, persistentCwd?: string): boolean {
+  const manifest = evidenceManifest(worktreeCwd, storyId, persistentCwd);
   if (manifest === null || !Array.isArray(manifest.captures)) return false;
   return manifest.captures.some((raw) => {
     if (typeof raw !== "object" || raw === null) return false;
@@ -1146,7 +1173,7 @@ function declaredSurfaceCaptureFloor(worktreeCwd: string, storyId: string): { ok
   return { ok: false, reason: `declared surface capture missing: ${gaps.join("; ")}` };
 }
 
-function passAcVisualFloor(worktreeCwd: string, storyId: string): { ok: boolean; reason?: string } {
+function passAcVisualFloor(worktreeCwd: string, storyId: string, persistentCwd?: string): { ok: boolean; reason?: string } {
   // REFACTOR-076: must-declare is now a diagnostic, not a visual-floor blocker.
   // FIX-345 — a `screenshot_exempt` card owes NO captured visual evidence by
   // definition (per-card frontmatter or the policy non-visual epic deny-list),
@@ -1162,7 +1189,7 @@ function passAcVisualFloor(worktreeCwd: string, storyId: string): { ok: boolean;
   // upstream in verificationReportHasContent (zero sections / no ac-map), and a
   // NON-exempt card still owes its captured evidence (the branches below).
   if (!storyRequiresScreenshot(worktreeCwd, storyId)) return { ok: true, reason: "screenshot-exempt: pass ACs owe no captured visual evidence" };
-  const entries = readAcMapEntries(worktreeCwd, storyId);
+  const entries = readAcMapEntries(worktreeCwd, storyId, persistentCwd);
   if (entries === null) return { ok: true };
   const pass = entries.filter((e) => e.status === "pass" || e.status === "pass-with-evidence");
   if (pass.length === 0) return { ok: true };
@@ -1177,13 +1204,13 @@ function passAcVisualFloor(worktreeCwd: string, storyId: string): { ok: boolean;
     const ids = missing.map((e) => e.ac ?? "?").join(", ");
     return { ok: false, reason: `pass AC(s) lack screenshot evidence and a declared surface was never really captured (honest-skip does not satisfy a declared surface): ${declared.reason} [${ids}]` };
   }
-  if (hasMachineCaptureSkip(worktreeCwd, storyId)) return { ok: true, reason: "machine capture skip present" };
+  if (hasMachineCaptureSkip(worktreeCwd, storyId, persistentCwd)) return { ok: true, reason: "machine capture skip present" };
   const ids = missing.map((e) => e.ac ?? "?").join(", ");
   return { ok: false, reason: `pass AC(s) lack screenshot evidence or machine capture skip: ${ids}` };
 }
 
-function visualEvidenceFloor(worktreeCwd: string, storyId: string): { ok: boolean; reason?: string } {
-  const passAc = passAcVisualFloor(worktreeCwd, storyId);
+function visualEvidenceFloor(worktreeCwd: string, storyId: string, persistentCwd?: string): { ok: boolean; reason?: string } {
+  const passAc = passAcVisualFloor(worktreeCwd, storyId, persistentCwd);
   if (!passAc.ok) return passAc;
   if (!storyRequiresScreenshot(worktreeCwd, storyId)) return passAc;
   const declared = declaredSurfaceCaptureFloor(worktreeCwd, storyId);
@@ -1192,8 +1219,8 @@ function visualEvidenceFloor(worktreeCwd: string, storyId: string): { ok: boolea
   // US-V4-001: judge visual evidence from STRUCTURED truth (ac-map screenshot
   // refs + evidence.json captures + on-disk screenshots), never by scanning the
   // rendered report HTML.
-  if (hasRenderedVisualEvidence(worktreeCwd, storyId)) return { ok: true };
-  if (hasMachineCaptureSkip(worktreeCwd, storyId)) return { ok: true, reason: "machine capture skip present" };
+  if (hasRenderedVisualEvidence(worktreeCwd, storyId, persistentCwd)) return { ok: true };
+  if (hasMachineCaptureSkip(worktreeCwd, storyId, persistentCwd)) return { ok: true, reason: "machine capture skip present" };
   return { ok: false, reason: "visual evidence missing: no screenshot reference or machine capture skip" };
 }
 
@@ -1212,14 +1239,14 @@ function visualEvidenceFloor(worktreeCwd: string, storyId: string): { ok: boolea
  * delivery carrying any of these MUST be blocked — a red assertion is a
  * regression, full stop.
  */
-function redAcFailures(worktreeCwd: string, storyId: string): string[] {
-  const entries = readAcMapEntries(worktreeCwd, storyId);
+function redAcFailures(worktreeCwd: string, storyId: string, persistentCwd?: string): string[] {
+  const entries = readAcMapEntries(worktreeCwd, storyId, persistentCwd);
   if (entries === null) return [];
   return entries.filter((e) => e.status === "fail").map((e) => e.ac ?? "?");
 }
 
-function claimedAcs(worktreeCwd: string, storyId: string): string[] {
-  const entries = readAcMapEntries(worktreeCwd, storyId);
+function claimedAcs(worktreeCwd: string, storyId: string, persistentCwd?: string): string[] {
+  const entries = readAcMapEntries(worktreeCwd, storyId, persistentCwd);
   if (entries === null) return [];
   return entries.filter((e) => e.status === "claimed").map((e) => e.ac ?? "?");
 }
@@ -1227,15 +1254,15 @@ function claimedAcs(worktreeCwd: string, storyId: string): string[] {
 /** The acceptance report a delivered story must produce (skill step 10.6) —
  *  the existing selected report path when present, otherwise the canonical
  *  NEW-layout path used for messaging. */
-export function verificationReportPath(worktreeCwd: string, storyId: string): string {
-  const existing = existingReport(worktreeCwd, storyId);
+export function verificationReportPath(worktreeCwd: string, storyId: string, persistentCwd?: string): string {
+  const existing = existingReport(worktreeCwd, storyId, persistentCwd);
   if (existing !== null) return existing;
-  return reportCandidates(worktreeCwd, storyId)[0] as string;
+  return reportCandidates(worktreeCwd, storyId, persistentCwd)[0] as string;
 }
 
 /** First candidate report that exists on disk, or null. */
-function existingReport(worktreeCwd: string, storyId: string): string | null {
-  for (const p of reportCandidates(worktreeCwd, storyId)) {
+function existingReport(worktreeCwd: string, storyId: string, persistentCwd?: string): string | null {
+  for (const p of reportCandidates(worktreeCwd, storyId, persistentCwd)) {
     try {
       if (statSync(p).isFile()) return p;
     } catch {
@@ -1255,9 +1282,10 @@ export function verificationReportFresh(
   worktreeCwd: string,
   storyId: string,
   sinceSec?: number,
+  persistentCwd?: string,
 ): boolean {
   if (storyId === "") return false;
-  const p = existingReport(worktreeCwd, storyId);
+  const p = existingReport(worktreeCwd, storyId, persistentCwd);
   if (p === null) return false;
   try {
     const st = statSync(p);
@@ -1277,11 +1305,11 @@ export function verificationReportFresh(
  * skill writes for every real delivery). Missing either ⇒ no content. Either
  * archive layout counts (US-META-001 read-compat).
  */
-export function verificationReportHasContent(worktreeCwd: string, storyId: string): boolean {
+export function verificationReportHasContent(worktreeCwd: string, storyId: string, persistentCwd?: string): boolean {
   if (storyId === "") return false;
   // A rendered report must EXIST (existence check — not parsed).
-  if (existingReport(worktreeCwd, storyId) === null) return false;
-  return verificationReportHasAcceptanceContent(worktreeCwd, storyId) && visualEvidenceFloor(worktreeCwd, storyId).ok;
+  if (existingReport(worktreeCwd, storyId, persistentCwd) === null) return false;
+  return verificationReportHasAcceptanceContent(worktreeCwd, storyId, persistentCwd) && visualEvidenceFloor(worktreeCwd, storyId, persistentCwd).ok;
 }
 
 /**
@@ -1293,12 +1321,12 @@ export function verificationReportHasContent(worktreeCwd: string, storyId: strin
  * renderer, so reading the ac-map is faithful to the old HTML-section scan while
  * keeping the gate a machine decision over structured facts (no HTML parsing).
  */
-function verificationReportHasAcceptanceContent(worktreeCwd: string, storyId: string): boolean {
+function verificationReportHasAcceptanceContent(worktreeCwd: string, storyId: string, persistentCwd?: string): boolean {
   if (storyId === "") return false;
-  if (existingReport(worktreeCwd, storyId) === null) return false;
-  const entries = readAcMapEntries(worktreeCwd, storyId);
+  if (existingReport(worktreeCwd, storyId, persistentCwd) === null) return false;
+  const entries = readAcMapEntries(worktreeCwd, storyId, persistentCwd);
   if (entries === null || entries.length === 0) return false;
-  if (evidencePathsUnresolved(worktreeCwd, storyId).length > 0) return false;
+  if (evidencePathsUnresolved(worktreeCwd, storyId, persistentCwd).length > 0) return false;
   let positiveWithEvidence = 0;
   for (const e of entries) {
     if (e.status !== "pass" && e.status !== "pass-with-evidence" && e.status !== "partial" && e.status !== "readonly") continue;
@@ -1409,7 +1437,7 @@ export function runAttestGate(
     // green — so it blocks the delivery and the story is NOT marked Done. The
     // only honest non-pass an env exception covers is a check that COULD NOT RUN
     // (`blocked` / a machine capture skip), which is not a `fail`.
-    const redAcs = redAcFailures(worktreeCwd, storyId);
+    const redAcs = redAcFailures(worktreeCwd, storyId, scoreRepoCwd);
     if (redAcs.length > 0) {
       const reasons = [
         `acceptance check failed for ${storyId}: ${redAcs.join(", ")} went red — a failing check is a regression, not an environment issue, so it cannot be waived`,
@@ -1422,7 +1450,7 @@ export function runAttestGate(
       sinks.event({ cycleId, verdict: "skipped", reasons });
       return { verdict: "skipped", mode, reasons, blocked };
     }
-    const claimed = claimedAcs(worktreeCwd, storyId);
+    const claimed = claimedAcs(worktreeCwd, storyId, scoreRepoCwd);
     if (claimed.length > 0) {
       const reasons = [`claimed acceptance evidence is not mergeable for ${storyId}: ${claimed.join(", ")}`];
       const blocked = mode === "hard";
@@ -1433,7 +1461,7 @@ export function runAttestGate(
       sinks.event({ cycleId, verdict: "skipped", reasons });
       return { verdict: "skipped", mode, reasons, blocked };
     }
-    const unresolved = evidencePathsUnresolved(worktreeCwd, storyId);
+    const unresolved = evidencePathsUnresolved(worktreeCwd, storyId, scoreRepoCwd);
     if (unresolved.length > 0) {
       const reasons = [`unresolved acceptance evidence path(s) for ${storyId}: ${unresolved.join(", ")}`];
       const blocked = mode === "hard";
@@ -1444,10 +1472,10 @@ export function runAttestGate(
       sinks.event({ cycleId, verdict: "skipped", reasons });
       return { verdict: "skipped", mode, reasons, blocked };
     }
-    const fresh = verificationReportFresh(worktreeCwd, storyId, sinceSec);
+    const fresh = verificationReportFresh(worktreeCwd, storyId, sinceSec, scoreRepoCwd);
     // US-ATTEST-012: freshness alone is "存在性" — a fresh empty shell (zero AC /
     // no ac-map, the FIX-214 case) does NOT count as a produced report.
-    if (fresh && verificationReportHasAcceptanceContent(worktreeCwd, storyId)) {
+    if (fresh && verificationReportHasAcceptanceContent(worktreeCwd, storyId, scoreRepoCwd)) {
       // FIX-343 (step ③): honor ONLY an INDEPENDENT fresh-session peer score from
       // the PERSISTENT .roll (scoreRepoCwd) — its recorded `sessionId` must be
       // present AND ≠ the builder's session id. A self / legacy / no-sessionId /
@@ -1459,7 +1487,7 @@ export function runAttestGate(
       // branch) no longer soft-passes this cycle's gate.
       const score = evaluateReviewScoreGate(scoreRepoCwd, storyId, builderSessionId, cycleId);
       if (score.status === "pass") {
-        const visual = visualEvidenceFloor(worktreeCwd, storyId);
+        const visual = visualEvidenceFloor(worktreeCwd, storyId, scoreRepoCwd);
         if (!visual.ok) {
           const reasons = [visual.reason ?? "visual evidence gate failed"];
           const blocked = mode === "hard";
@@ -1483,7 +1511,7 @@ export function runAttestGate(
       sinks.event({ cycleId, verdict: "skipped", reasons });
       return { verdict: "skipped", mode, reasons, blocked };
     }
-    const reportPath = verificationReportPath(worktreeCwd, storyId);
+    const reportPath = verificationReportPath(worktreeCwd, storyId, scoreRepoCwd);
     const reasons = [
       fresh
         ? `acceptance report at ${reportPath} is an empty shell (no AC content / no ac-map)`

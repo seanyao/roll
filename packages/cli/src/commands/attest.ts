@@ -1526,23 +1526,11 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   const reportPath = join(runDir, reportFileName(storyId));
   writeFileSync(reportPath, html);
 
-  // FIX-1233 AC2: loud-fail when the render produced an empty shell (no AC
-  // content and no ac-map). A facts-only report with zero AC items is a
-  // delivery defect, not a valid attest — the downstream gate would block it,
-  // but the signal is clearer if we fail AT render time with a specific reason.
-  const hasAcContent =
-    items.length > 0 ||
-    acMap !== null;
-  if (!hasAcContent) {
-    process.stderr.write(
-      `[roll] attest: ${storyId} — render produced empty report (zero AC items and no ac-map.json)\n` +
-        `[roll] attest：${storyId} — 渲染产空报告(无验收项且无 ac-map.json)。\n` +
-        `[roll] attest: Check the story spec at ${featureFile} for AC blocks ("**AC:**" or "## Acceptance Criteria") and\n` +
-        `[roll] attest: verify that spec.md has checklist items. The report was NOT written to disk.\n`,
-    );
-    // Don't write the latest symlink — there is no valid report to point to.
-    return 4; // distinct exit code: empty render
-  }
+  // FIX-1233: an empty render (zero AC items, no ac-map) is NOT failed here —
+  // a stub spec with no AC block is legitimate (US-META-007) and the attest
+  // gate already exempts it (storyHasAcBlock === false ⇒ produced). Failing the
+  // render would block that exemption path. The 1246 warn plus the gate's
+  // structured content floor (now reading BOTH evidence roots) carry the signal.
 
   // latest symlink (replace — rm is force-tolerant of absence).
   const latest = join(storyDir, "latest");

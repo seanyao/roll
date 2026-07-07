@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { parseBacklog, type CycleContext } from "@roll/core";
 import { checkImageEvidenceAllowed, imageEvidencePathsInWorkingTree } from "@roll/infra";
 import { cardArchiveDir } from "../lib/archive.js";
@@ -172,15 +172,23 @@ async function commitInRepoEvidence(ports: Ports, ctx: CycleContext, storyId: st
     if (ports.paths?.worktreePath !== undefined && existsSync(worktreeGitFile) && lstatSync(worktreeGitFile).isFile()) {
       const gitContent = readFileSync(worktreeGitFile, "utf8").trim();
       const m = gitContent.match(/^gitdir:\s*(.+)$/m);
-      if (m && m[1]) { worktreeGitDir = m[1].trim(); isWorktreeTarget = true; }
+      if (m && m[1]) {
+        const parsedGitDir = m[1].trim();
+        worktreeGitDir = resolve(evidenceCwd, parsedGitDir);
+        isWorktreeTarget = true;
+      }
     }
     const gitTarget = worktreeGitDir !== undefined && isWorktreeTarget
       ? ["--git-dir", worktreeGitDir, "--work-tree", ports.paths.worktreePath]
       : [];
     // FIX-1238: also include backlog.md so the status flip rides the PR branch.
-    const relBacklog = relative(ports.repoCwd, join(ports.repoCwd, ".roll", "backlog.md"));
-    execFileSync("git", [...gitTarget, "add", "-A", "-f", "--", relAcMap, relRunDir, relBacklog], { cwd: ports.repoCwd, stdio: "ignore" });
-    const dirty = execFileSync("git", [...gitTarget, "status", "--porcelain", "--", relAcMap, relRunDir, relBacklog], {
+    const backlogPath = join(ports.repoCwd, ".roll", "backlog.md");
+    const trackedPaths = [relAcMap, relRunDir];
+    if (existsSync(backlogPath)) {
+      trackedPaths.push(relative(ports.repoCwd, backlogPath));
+    }
+    execFileSync("git", [...gitTarget, "add", "-A", "-f", "--", ...trackedPaths], { cwd: ports.repoCwd, stdio: "ignore" });
+    const dirty = execFileSync("git", [...gitTarget, "status", "--porcelain", "--", ...trackedPaths], {
       cwd: ports.repoCwd,
       encoding: "utf8",
     }).trim();

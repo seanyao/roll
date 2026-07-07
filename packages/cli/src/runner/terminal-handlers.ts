@@ -613,6 +613,7 @@ async function commitInRepoBacklog(
   const msg = `chore: ${storyId} status update (cycle ${ctx.cycleId})`;
   const backlogRel = join(".roll", "backlog.md");
   try {
+    if (!existsSync(join(ports.repoCwd, backlogRel))) return;
     execFileSync("git", ["add", "--", backlogRel], { cwd: ports.repoCwd, stdio: "ignore" });
     const dirty = execFileSync("git", ["status", "--porcelain", "--", backlogRel], {
       cwd: ports.repoCwd,

@@ -37,9 +37,9 @@
  * agent ever runs in tests.
  */
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import type { Rig } from "@roll/spec";
 import { getAgentSpec } from "@roll/core";
 import { worktreeGitEnv } from "./main-checkout-guard.js";
@@ -115,6 +115,11 @@ export interface AgentProfile {
   };
   secretEnv?: readonly string[];
   childEnv?(home?: string): Record<string, string>;
+  /** FIX-1231: when true, the child gets NO git env vars (GIT_DIR/GIT_WORK_TREE
+   *  etc.) and GIT_CEILING_DIRECTORIES is set to block git repo discovery from
+   *  the CWD. Use for agents (codex) whose internal git mechanisms write refs and
+   *  config to the host repo, poisoning the shared checkout. */
+  isolateGit?: boolean;
 }
 
 /**
@@ -344,6 +349,10 @@ const AGENT_PROFILES: Readonly<Record<string, AgentProfile>> = {
     usesWorkspaceSandbox: true,
     ptyWhenPiped: false,
     acceptance: { canReviewHeadless: getAgentSpec("codex")?.canReviewHeadless === true },
+    /** FIX-1231: codex's internal curated-sync / turn-diffs mechanism writes
+     *  refs (refs/codex/*) and git config (core.worktree) to the CWD's git
+     *  repo, poisoning the host checkout. Isolate its git access. */
+    isolateGit: true,
     buildSpawnCommand: (opts) => {
       const args = ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write"];
       // FIX-1065: sandboxed PR-heal agents need write access to the linked
@@ -698,12 +707,19 @@ function evidenceFrameEnv(runDir: string): NodeJS.ProcessEnv {
 
 const INHERITED_GIT_ENV_KEYS = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE"] as const;
 
-function childEnv(opts: AgentSpawnOptions): NodeJS.ProcessEnv {
+function childEnv(opts: AgentSpawnOptions, profile?: AgentProfile): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...(opts.env ?? process.env) };
   for (const key of INHERITED_GIT_ENV_KEYS) delete env[key];
   env.PWD = opts.cwd;
   delete env.OLDPWD;
-  Object.assign(env, worktreeGitEnv(opts.cwd, opts.cwd));
+  if (profile?.isolateGit) {
+    for (const key of Object.keys(env)) {
+      if (key.startsWith("GIT_")) delete env[key];
+    }
+    env["GIT_CEILING_DIRECTORIES"] = dirname(opts.cwd);
+  } else {
+    Object.assign(env, worktreeGitEnv(opts.cwd, opts.cwd));
+  }
   return opts.runDir !== undefined && opts.runDir !== "" ? { ...env, ...evidenceFrameEnv(opts.runDir) } : env;
 }
 
@@ -718,14 +734,25 @@ function withAgentProfileEnv(agent: string, opts: AgentSpawnOptions): AgentSpawn
   };
 }
 
-function spawnAndWait(bin: string, args: string[], opts: AgentSpawnOptions, pty = false): Promise<AgentSpawnResult> {
+function spawnAndWait(bin: string, args: string[], opts: AgentSpawnOptions, pty = false, profile?: AgentProfile): Promise<AgentSpawnResult> {
   // Operational trace (v2 logs its agent cmd too): goes to the runner's stderr,
   // which leg/cycle logs capture — argv mismatches become diagnosable.
   process.stderr.write(`[runner] spawn ${bin} argv=${JSON.stringify(args.map((a) => (a.length > 80 ? `${a.slice(0, 77)}...` : a)))}\n`);
+  // FIX-1231: for isolateGit agents (codex), create an empty temp CODEX_HOME so
+  // codex's internal curated-sync finds no prior state to sync into the host repo.
+  if (profile?.isolateGit) {
+    const homeDir = mkdtempSync(join(tmpdir(), "roll-codex-"));
+    const cleanupDir = () => { try { rmSync(homeDir, { recursive: true, force: true }); } catch { /* best-effort */ } };
+    opts = {
+      ...opts,
+      env: { ...(opts.env ?? {}), CODEX_HOME: homeDir },
+      cleanup: chainCleanup(opts.cleanup, cleanupDir),
+    };
+  }
   return new Promise<AgentSpawnResult>((resolve) => {
     const child = spawn(bin, args, {
       cwd: opts.cwd,
-      env: childEnv(opts),
+      env: childEnv(opts, profile),
       stdio: ["ignore", "pipe", "pipe"],
       // FIX-224: the PTY-wrapped `script` leads its own process group so the
       // timeout/teardown can reap script AND the agent under it (killHard).
@@ -789,7 +816,8 @@ function spawnAndWait(bin: string, args: string[], opts: AgentSpawnOptions, pty 
 }
 
 export const realAgentSpawn: AgentSpawn = (agent, opts) => {
-  const { bin, args, pty } = withPtyWrap(buildSpawnCommand(agent, opts), agent);
-  return spawnAndWait(bin, args, withAgentProfileEnv(agent, opts), pty);
+  const profile = agentProfile(agent);
+  const { bin, args, pty } = withPtyWrap(profile.buildSpawnCommand(opts), agent);
+  return spawnAndWait(bin, args, withAgentProfileEnv(agent, opts), pty, profile);
 };
 realAgentSpawn.supportedPurposes = ["pick_ranking"];

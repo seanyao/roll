@@ -170,7 +170,19 @@ export async function worktreeAdd(
   if (ref.code === 0) {
     await git(["branch", "-D", branch], repoCwd); // lenient (FIX-114)
   }
-  return git(["worktree", "add", path, "-b", branch, base], repoCwd);
+  const result = await git(["worktree", "add", path, "-b", branch, base], repoCwd);
+  // FIX-1231: enable extensions.worktreeConfig on the new worktree so
+  // `git config core.worktree` writes land in the worktree-specific config
+  // file, not the shared .git/config. Best-effort: failures here must never
+  // topple the worktree creation — the agent-spawn layer also isolates codex.
+  if (result.code === 0) {
+    try {
+      await git(["config", "extensions.worktreeConfig", "true"], path);
+    } catch {
+      /* best-effort defense-in-depth */
+    }
+  }
+  return result;
 }
 
 /**

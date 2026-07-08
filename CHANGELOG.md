@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### 稳定性
+- 用户项目自主发布不再卡在空验收报告或复检超时,会按真实证据继续推进(FIX-1233、FIX-1234) `[loop-engine]`
+- codex 恢复参与派工,隔离不再剥掉登录凭据(FIX-1235) `[loop-engine]`
+  <!-- evidence: .roll/features/loop-engine/FIX-1235/latest/FIX-1235-report.html -->
+- loop 发现 agent 写回主仓会立即硬停并隔离现场,不再暂停后继续污染主仓(FIX-1236) `[loop-engine]`
+  <!-- evidence: .roll/features/loop-engine/FIX-1236/latest/FIX-1236-report.html -->
+- `loop now --cards` 不再启动旧版全局 runner,本地安全修复不会被绕过(FIX-1239) `[loop-engine]`
+- 交付对账不再丢 PR 信息,已合并卡不会反复制造未提交变更(FIX-1240) `[loop-engine]`
+
 ## v4.707.1 — 2026-07-07
 
 ### 稳定性

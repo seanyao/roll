@@ -44,6 +44,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { agentSecretEnvNames } from "../runner/agent-spawn.js";
 import { clearRootCauseFailure } from "../runner/failure-attribution.js";
+import { loopControlRunnerReadout, staleLoopRunnerMessage } from "./loop-runner-readout.js";
 
 // ─── injectable deps (tests fake launchd + identity + paths) ─────────────────
 export interface LoopSchedDeps {
@@ -54,7 +55,7 @@ export interface LoopSchedDeps {
   /** US-LOOP-079f1: Scheduler seam — replaces raw launchd ops. */
   scheduler: Scheduler;
   /** Run the generated loop runner once, FORCE env set (loop now). */
-  execRunner?: (runnerPath: string) => Promise<number>;
+  execRunner?: (runnerPath: string, opts?: { allowedCards?: string[] }) => Promise<number>;
   /** FIX-204E: is tmux available? Decides the `loop now` UX branch. */
   hasTmux?: () => boolean;
   /** FIX-204E: inline observation — tail live.log for the cycle's duration. */
@@ -81,14 +82,18 @@ function realDeps(): LoopSchedDeps {
     sharedRoot: () => process.env["ROLL_SHARED_ROOT"] || join(homedir(), ".shared", "roll"),
     launchdDir: () => join(homedir(), "Library", "LaunchAgents"),
     scheduler: createScheduler(process.platform, { uid: process.getuid?.() ?? 501 }),
-    execRunner: (runner) =>
+    execRunner: (runner, opts) =>
       new Promise((resolve) => {
         // FIX-204E: run the GENERATED runner — it self-wraps the cycle into
         // the tmux session and returns immediately (fallback: direct run).
         // The cycle must never be a child of the invoking session again.
         const child = spawn("bash", [runner], {
           stdio: "inherit",
-          env: { ...process.env, ROLL_LOOP_FORCE: "1" },
+          env: {
+            ...process.env,
+            ROLL_LOOP_FORCE: "1",
+            ...(opts?.allowedCards !== undefined ? { ROLL_LOOP_GO_ALLOWED_CARDS: opts.allowedCards.join(",") } : {}),
+          },
         });
         child.on("exit", (code) => resolve(code ?? 1));
         child.on("error", () => resolve(1));
@@ -1018,6 +1023,12 @@ export async function loopPauseCommand(_args: string[], deps: LoopSchedDeps = re
 /** `roll loop resume` — remove the PAUSE marker, reset failure/heal counters. */
 export async function loopResumeCommand(_args: string[], deps: LoopSchedDeps = realDeps()): Promise<number> {
   const id = await deps.identity();
+  const runner = loopControlRunnerReadout(id.path);
+  process.stdout.write(`roll loop resume: runner ${runner.bin} v${runner.runningVersion}\n`);
+  if (runner.projectNewer) {
+    process.stderr.write(staleLoopRunnerMessage("roll loop resume", runner));
+    return 1;
+  }
   const marker = pauseMarkerPath(id.path, id.slug);
   const existed = existsSync(marker);
   const pauseBody = existed ? readPauseMarker(marker) : "";
@@ -1128,6 +1139,26 @@ export function isLegacyRunner(text: string): boolean {
   return !text.includes("ROLL_TMUX_WRAPPED");
 }
 
+function parseNowCards(args: string[]): string[] | undefined {
+  const cards: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i] ?? "";
+    if (arg === "--cards") {
+      cards.push(...parseCardList(args[++i] ?? ""));
+    } else if (arg.startsWith("--cards=")) {
+      cards.push(...parseCardList(arg.slice("--cards=".length)));
+    }
+  }
+  return cards.length === 0 ? undefined : [...new Set(cards)];
+}
+
+function parseCardList(raw: string): string[] {
+  return raw
+    .split(/[,\s]+/)
+    .map((card) => card.trim())
+    .filter((card) => card !== "");
+}
+
 /**
  * `roll loop now` — force one cycle immediately (FIX-197 self-heal included):
  * a missing or v2-legacy runner is regenerated via `loop on` first (with a
@@ -1135,9 +1166,16 @@ export function isLegacyRunner(text: string): boolean {
  * DELIBERATE divergence from v2: no tmux popup — output streams inline and the
  * cycle transcript lands in .roll/loop/cron.log (same whitelist as US-LOOP-009).
  */
-export async function loopNowCommand(_args: string[], deps: LoopSchedDeps = realDeps()): Promise<number> {
+export async function loopNowCommand(args: string[], deps: LoopSchedDeps = realDeps()): Promise<number> {
   const id = await deps.identity();
+  const allowedCards = parseNowCards(args);
   const runner = join(deps.sharedRoot(), "loop", `run-${id.slug}.sh`);
+  const readout = loopControlRunnerReadout(id.path);
+  process.stdout.write(`roll loop now: runner ${readout.bin} v${readout.runningVersion}\n`);
+  if (readout.projectNewer) {
+    process.stderr.write(staleLoopRunnerMessage("roll loop now", readout));
+    return 1;
+  }
 
   let legacy = false;
   if (existsSync(runner)) {
@@ -1171,12 +1209,15 @@ export async function loopNowCommand(_args: string[], deps: LoopSchedDeps = real
         `实时转录如下 — Ctrl-C 只退出观察,不影响周期\n\n`
       : `Starting one loop cycle (no tmux — runs inline)\n强制启动一个 loop 周期(无 tmux — 内联运行)\n\n`,
   );
+  if (allowedCards !== undefined) {
+    process.stdout.write(`scope: cards ${allowedCards.join(", ")}\n`);
+  }
   const exec = deps.execRunner;
   if (exec === undefined) {
     process.stderr.write("loop now: no runner executor available\n");
     return 1;
   }
-  const rc = await exec(runner);
+  const rc = await exec(runner, allowedCards === undefined ? undefined : { allowedCards });
   if (rc === 0 && useTmux && deps.observe !== undefined) {
     await deps.observe(join(id.path, ".roll", "loop"));
     process.stdout.write(

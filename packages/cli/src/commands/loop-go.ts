@@ -25,6 +25,7 @@ import { cardArchiveDir } from "../lib/archive.js";
 import { deliveryGateDiagnosticsFromRows, storyTruthFromBacklog, type DeliveryGateDiagnostic, type TruthRunRow } from "../lib/truth-adapter.js";
 import { runPeerReview, spawnPeerReviewAgent, type SpawnPeerReviewResult } from "./peer.js";
 import { guideExternalToolSetup, silentPreinstallChromium } from "../lib/external-tools.js";
+import { loopControlRunnerReadout, rollBin, staleLoopRunnerMessage } from "./loop-runner-readout.js";
 
 /**
  * FIX-906: node fs-backed {@link FreshnessPort} for `ensureDeliveriesFresh`.
@@ -603,10 +604,6 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-function rollBin(): string {
-  return (process.env["ROLL_BIN"] ?? "").trim() || process.argv[1] || "roll";
-}
-
 /** tmux session name for a project slug. */
 function goSessionName(slug: string): string {
   return `roll-loop-${slug}`;
@@ -929,6 +926,28 @@ function appendReviewAlert(projectPath: string, slug: string, session: string, r
   const path = alertPath(projectPath, slug);
   mkdirSync(dirname(path), { recursive: true });
   appendFileSync(path, `[${at}] ALERT goal final review failed: session=${session} reason=${reason.replace(/\s+/g, " ").slice(0, 200)}\n`, "utf8");
+}
+
+function appendScopeMismatchAlert(projectPath: string, slug: string, expected: readonly string[], actual: readonly string[], at: string): void {
+  const path = alertPath(projectPath, slug);
+  mkdirSync(dirname(path), { recursive: true });
+  appendFileSync(
+    path,
+    `[${at}] ALERT goal scope mismatch: run-once picked out-of-scope card ${actual.join(", ")}; expected only ${expected.join(", ")}\n`,
+    "utf8",
+  );
+}
+
+function outOfScopeStoryIds(rows: readonly Record<string, unknown>[], allowedCards: readonly string[] | undefined): string[] {
+  if (allowedCards === undefined || allowedCards.length === 0) return [];
+  const allowed = new Set(allowedCards);
+  return [
+    ...new Set(
+      rows
+        .map((row) => row["story_id"])
+        .filter((storyId): storyId is string => typeof storyId === "string" && storyId !== "" && !allowed.has(storyId)),
+    ),
+  ].sort();
 }
 
 /**
@@ -1733,6 +1752,12 @@ export async function loopGoCommand(args: string[], deps: LoopGoDeps = realDeps(
 async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Promise<number> {
   const rt = runtimeDir(id.path);
   mkdirSync(rt, { recursive: true });
+  const runner = loopControlRunnerReadout(id.path);
+  process.stdout.write(`roll loop go: runner ${runner.bin} v${runner.runningVersion}\n`);
+  if (runner.projectNewer) {
+    process.stderr.write(staleLoopRunnerMessage("roll loop go", runner));
+    return 1;
+  }
   const bus = new EventBus();
   const evPath = eventsPath(id.path);
   const lockPath = goLockPath(id.path);
@@ -1876,6 +1901,22 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
       writeGoal(gPath, goal);
       const after = readRunSnapshot(runsPath(id.path));
       const appendedRows = after.rows.slice(before.rows.length);
+      const mismatchedStories = outOfScopeStoryIds(appendedRows, allowedCards);
+      if (mismatchedStories.length > 0) {
+        stopReason = `scope_mismatch:${mismatchedStories.join(",")} not in ${allowedCards.join(",")}`;
+        appendGoalGate(
+          bus,
+          evPath,
+          sid,
+          "progress",
+          "paused",
+          "scope_mismatch",
+          { expected: allowedCards.join(","), actual: mismatchedStories.join(",") },
+          deps.nowSec(),
+        );
+        appendScopeMismatchAlert(id.path, id.slug, allowedCards, mismatchedStories, deps.nowIso());
+        break;
+      }
       workerAgents = uniqueStrings([...workerAgents, ...workerAgentsFromRunRows(appendedRows)]);
       updateProgressFromRows(id.path, id.slug, sid, appendedRows, progress, deps, bus);
       // Hook 2: persist the no-progress accounting onto the goal so the breaker

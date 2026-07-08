@@ -206,6 +206,7 @@ roll loop on          # Install launchd scheduler (loop + pr + dream)
 roll loop off         # Remove launchd scheduler
 
 roll loop now         # Run one cycle immediately (same as launchd fires)
+roll loop now --cards US-1,FIX-2  # Run one immediate cycle scoped to selected cards
 roll loop test        # Quick smoke test: verify tmux/popup/stream chain works
 
 roll loop status      # Show scheduler state and current loop state
@@ -275,6 +276,8 @@ gates still decide eligibility.
 `roll loop go` is a manual goal session, not a launchd scheduler tick. While it
 runs, Roll holds `.roll/loop/go.lock`; scheduled ticks yield when they see that
 lock, record `goal:tick_skipped`, and do not start another `roll loop run-once`.
+`roll loop now --cards <ids>` uses the same card allow-list for its one-shot
+runner, so a manual tick cannot silently pick a different backlog card.
 
 Goal mode can run when the scheduler is off because it starts its own session
 and does not depend on launchd. For paused projects, run `roll loop resume`
@@ -297,6 +300,12 @@ Roll-owned files; if a historical or manual path still leaves only those files
 dirty, the goal pauses with `bootstrap_artifacts_unconfirmed` and prints the
 files to confirm. Commit or clean them, then run `roll loop go` again. This
 preflight does not start a cycle and does not count as no-progress.
+
+For the Roll repository itself, `roll loop go`, `roll loop resume`, and
+`roll loop now` print the runner binary and version before starting autonomous
+work. They fail loud with `runner_stale_for_repo` if the repo-local
+`@seanyao/roll` package version is newer than the running runner; install or
+publish the local build before resuming autonomous work.
 
 `roll loop go` enforces safety only at cycle boundaries. `--budget <usd>` uses
 the effective run cost ledger and moves the goal to `budget_limited` when the

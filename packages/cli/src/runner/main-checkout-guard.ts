@@ -21,6 +21,21 @@ export interface WriteProtectionEvent {
 
 export interface WriteProtectionResult extends WriteProtectionEvent {}
 
+export interface MainCheckoutWriteProtectionResidue {
+  markerPath: string;
+  configLockPath: string;
+  markerPresent: boolean;
+  configLockPresent: boolean;
+  reclaimableConfigLock: boolean;
+  foreignConfigLock: boolean;
+}
+
+export interface MainCheckoutWriteProtectionRecovery extends MainCheckoutWriteProtectionResidue {
+  restoredPaths: number;
+  markerRemoved: boolean;
+  configLockRemoved: boolean;
+}
+
 interface ProtectionEntry {
   path: string;
   mode: number;
@@ -182,12 +197,39 @@ function writeMarker(path: string, marker: ProtectionMarker): void {
   writeFileSync(path, `${JSON.stringify(marker, null, 2)}\n`, "utf8");
 }
 
+function protectionEntryFrom(value: unknown): ProtectionEntry | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  return typeof record["path"] === "string" && typeof record["mode"] === "number"
+    ? { path: record["path"], mode: record["mode"] }
+    : undefined;
+}
+
+function parseProtectionMarker(raw: string): ProtectionMarker | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (parsed === null || typeof parsed !== "object") return undefined;
+  const record = parsed as Record<string, unknown>;
+  if (typeof record["repoCwd"] !== "string" || typeof record["cycleId"] !== "string" || !Array.isArray(record["entries"])) {
+    return undefined;
+  }
+  const entries: ProtectionEntry[] = [];
+  for (const value of record["entries"]) {
+    const entry = protectionEntryFrom(value);
+    if (entry === undefined) return undefined;
+    entries.push(entry);
+  }
+  return { repoCwd: record["repoCwd"], cycleId: record["cycleId"], entries };
+}
+
 function restoreMarker(path: string): number {
   if (!existsSync(path)) return 0;
-  let marker: ProtectionMarker;
-  try {
-    marker = JSON.parse(readFileSync(path, "utf8")) as ProtectionMarker;
-  } catch {
+  const marker = parseProtectionMarker(readFileSync(path, "utf8"));
+  if (marker === undefined) {
     rmSync(path, { force: true });
     return 0;
   }
@@ -276,6 +318,33 @@ function removeConfigLockSentinel(repoCwd: string): void {
   } catch {
     /* best-effort */
   }
+}
+
+export function detectMainCheckoutWriteProtectionResidue(repoCwd: string, runtimeDir: string): MainCheckoutWriteProtectionResidue {
+  const lockPath = configLockPath(repoCwd);
+  const configLockPresent = existsSync(lockPath);
+  const reclaimableConfigLock = configLockPresent && isReclaimableConfigLock(lockPath);
+  return {
+    markerPath: markerPath(runtimeDir),
+    configLockPath: lockPath,
+    markerPresent: existsSync(markerPath(runtimeDir)),
+    configLockPresent,
+    reclaimableConfigLock,
+    foreignConfigLock: configLockPresent && !reclaimableConfigLock,
+  };
+}
+
+export function recoverMainCheckoutWriteProtectionResidue(repoCwd: string, runtimeDir: string): MainCheckoutWriteProtectionRecovery {
+  const before = detectMainCheckoutWriteProtectionResidue(repoCwd, runtimeDir);
+  const restoredPaths = restoreMarker(before.markerPath);
+  if (before.reclaimableConfigLock) removeConfigLockSentinel(repoCwd);
+  const after = detectMainCheckoutWriteProtectionResidue(repoCwd, runtimeDir);
+  return {
+    ...after,
+    restoredPaths,
+    markerRemoved: before.markerPresent && !after.markerPresent,
+    configLockRemoved: before.reclaimableConfigLock && !after.configLockPresent,
+  };
 }
 
 // ─── FIX-1210: core.worktree contamination repair ────────────────────────────

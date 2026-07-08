@@ -123,7 +123,9 @@ profiles, evidence, Evaluator, and release gates:
 - **autonomous** — `roll loop on` installs the scheduler; eligible Stories may
   be picked within the existing pause, budget, route, evidence, Evaluator, and
   release gates. `roll loop pause` / `roll loop off` return control to guided
-  operation; `roll loop resume` / `roll loop on` switch back explicitly.
+  operation; `roll loop off --all` is the machine-wide emergency stop for every
+  local `com.roll.*` LaunchAgent; `roll loop resume` / `roll loop on` switch
+  back explicitly.
 - **Attest and evidence are story-scoped**. A Story is accepted through its own Acceptance Review Page (`latest/<id>-review.html`), AC map, and screenshots/test artifacts. `latest/<id>-report.html` remains a legacy alias for one release cycle.
 
 Agent bindings are declared in two files: `~/.roll/agents.yaml` for Machine Scope
@@ -213,11 +215,11 @@ with `roll loop resume` when ready.
 | `roll backlog [sync\|block\|defer\|lint\|…]` | View, manage, lint, and sync pending tasks |
 | `roll config [lang\|prices\|tune\|…]` | Read/write configuration, model prices, and suggest-only tuning |
 | `roll design [--from-file <path>] [--agent <name>] [--verbose\|--raw]` | Launch `$roll-design` with bounded live progress, handoff, and an optional `roll loop go --review auto` continuation when new Todo cards are created |
-| `roll doctor [skills\|tools\|language]` | Diagnose install health, skills, tools, permissions, and language drift |
+| `roll doctor [skills\|tools\|language\|repair-protection]` | Diagnose install health, skills, tools, permissions, language drift, and stale main-checkout write protection |
 | `roll help [--lang en\|zh] [name]` | View built-in Charter / guide docs; `roll --help` prints CLI usage |
 | `roll idea "<one-sentence description>"` | Capture and classify a new backlog card |
 | `roll init` | Diagnose this directory and route setup/onboarding |
-| `roll loop <on\|off\|go\|watch\|runs\|cycles\|cycle\|alert\|…>` | Run, observe, and maintain the autonomous executor |
+| `roll loop <on\|off [--all]\|go\|watch\|runs\|cycles\|cycle\|alert\|…>` | Run, observe, stop, and maintain the autonomous executor |
 | `roll next` | Continue init/onboard with one best next command |
 | `roll north [--json] [--no-color]` | North-star terminal panel for autonomy, delivery rate, fix tax, and attribution errors |
 | `roll release [--dry-run\|--showcase]` | Release planning/flow plus golden-path showcase support |

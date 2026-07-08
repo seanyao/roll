@@ -598,15 +598,58 @@ describe("loop on/off (injected launchd)", () => {
     expect(out).toContain("pause/budget/route/evidence/Evaluator/release gates");
   });
 
-  it("off: boots out loop+dream+pr labels", async () => {
+  it("off: boots out loop+dream+pr labels and removes their plists", async () => {
     const proj = tmp("proj2");
-    const { deps, calls } = fakeDeps(proj, tmp("sh2"), tmp("ld2"));
-    const { code, out } = await captureStdout(() => loopOffCommand([], deps));
-    expect(code).toBe(0);
-    expect(calls).toContain("dormant com.roll.loop.proj-abc123");
-    expect(calls).toContain("dormant com.roll.dream.proj-abc123");
-    expect(calls).toContain("dormant com.roll.pr.proj-abc123");
-    expect(out).toContain("mode: guided");
+    const ld = tmp("ld2");
+    const prev = process.env["_LAUNCHD_DIR"];
+    process.env["_LAUNCHD_DIR"] = ld;
+    const labels = ["com.roll.loop.proj-abc123", "com.roll.dream.proj-abc123", "com.roll.pr.proj-abc123"];
+    for (const label of labels) writeFileSync(join(ld, `${label}.plist`), "<plist />\n");
+    try {
+      const { deps, calls } = fakeDeps(proj, tmp("sh2"), ld);
+      const { code, out } = await captureStdout(() => loopOffCommand([], deps));
+      expect(code).toBe(0);
+      expect(calls).toContain("dormant com.roll.loop.proj-abc123");
+      expect(calls).toContain("dormant com.roll.dream.proj-abc123");
+      expect(calls).toContain("dormant com.roll.pr.proj-abc123");
+      for (const label of labels) expect(existsSync(join(ld, `${label}.plist`))).toBe(false);
+      expect(out).toContain("mode: guided");
+    } finally {
+      if (prev === undefined) delete process.env["_LAUNCHD_DIR"];
+      else process.env["_LAUNCHD_DIR"] = prev;
+    }
+  });
+
+  it("off --all: boots out every Roll launchd label without project identity", async () => {
+    const ld = tmp("ld-all");
+    const prev = process.env["_LAUNCHD_DIR"];
+    process.env["_LAUNCHD_DIR"] = ld;
+    const labels = [
+      "com.roll.loop.alpha-111111",
+      "com.roll.dream.alpha-111111",
+      "com.roll.pr.beta-222222",
+      "com.roll.legacy.gamma-333333",
+    ];
+    for (const label of labels) writeFileSync(join(ld, `${label}.plist`), "<plist />\n");
+    writeFileSync(join(ld, "com.apple.not-roll.plist"), "<plist />\n");
+    try {
+      const { deps, calls } = fakeDeps(tmp("proj-all"), tmp("sh-all"), ld);
+      deps.identity = () => {
+        throw new Error("off --all must not need project identity");
+      };
+
+      const { code, out } = await captureStdout(() => loopOffCommand(["--all"], deps));
+      expect(code).toBe(0);
+      const sortedLabels = [...labels].sort();
+      expect(calls).toEqual(sortedLabels.map((label) => `dormant ${label}`));
+      for (const label of labels) expect(existsSync(join(ld, `${label}.plist`))).toBe(false);
+      expect(existsSync(join(ld, "com.apple.not-roll.plist"))).toBe(true);
+      expect(out).toContain("Loop disabled for all projects (4 Roll launchd job(s) removed)");
+      expect(out).toContain("mode: guided");
+    } finally {
+      if (prev === undefined) delete process.env["_LAUNCHD_DIR"];
+      else process.env["_LAUNCHD_DIR"] = prev;
+    }
   });
 
   it("FIX-1225: off terminates repo-scoped helper processes after unloading lanes", async () => {

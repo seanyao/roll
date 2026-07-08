@@ -51,6 +51,17 @@ function emptyLaunchd(): string {
   return d;
 }
 
+function fakeLaunchctlBin(): string {
+  const bin = mkdtempSync(join(tmpdir(), "roll-doctor-bin-"));
+  dirs.push(bin);
+  writeFileSync(
+    join(bin, "launchctl"),
+    "#!/bin/sh\ncase \"$1\" in\n  getenv) exit 0 ;;\n  list) exit 1 ;;\n  *) exit 0 ;;\nesac\n",
+    { mode: 0o755 },
+  );
+  return bin;
+}
+
 /** A fixture ROLL_PKG_DIR: real lib/conventions symlinked + custom skills/guide. */
 function freshPkg(): string {
   const pkg = mkdtempSync(join(tmpdir(), "roll-doctor-pkg-"));
@@ -108,7 +119,7 @@ function tsDoctor(e: Env): Run {
   const save: Record<string, string | undefined> = {};
   for (const k of keys) save[k] = process.env[k];
   for (const k of keys) delete process.env[k];
-  process.env["PATH"] = NOGH_PATH;
+  process.env["PATH"] = `${fakeLaunchctlBin()}:${NOGH_PATH}`;
   process.env["HOME"] = e.home;
   process.env["ROLL_HOME"] = join(e.home, ".roll");
   process.env["_LAUNCHD_DIR"] = e.launchd;

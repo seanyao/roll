@@ -15,7 +15,7 @@
  *     the same self-contained shape (PATH bootstrap, PAUSE marker, then `roll
  *     dream run-once`), retiring the v2 zombie runner that bare-called unsourced
  *     engine funcs. Daily schedule (infra scheduleXml daily path). `loop off`
- *     still boots it out alongside loop + pr.
+ *     still boots it out and removes its plist alongside loop + pr.
  *
  * KEPT contracts (so status/dashboard/brief keep reading the same world):
  *   - runner path  : <shared>/loop/run-<slug>.sh   (pr: <shared>/pr/run-<slug>.sh)
@@ -945,10 +945,18 @@ export async function loopOnCommand(_args: string[], deps: LoopSchedDeps = realD
 }
 
 /** `roll loop off` — boot out every roll service for this project. */
-export async function loopOffCommand(_args: string[], deps: LoopSchedDeps = realDeps()): Promise<number> {
+export async function loopOffCommand(args: string[], deps: LoopSchedDeps = realDeps()): Promise<number> {
+  if (args.includes("--all")) return loopOffAllCommand(deps);
+
   const id = await deps.identity();
   for (const svc of LOOP_SERVICES) {
-    await deps.scheduler.dormant(launchdLabel(svc, id.slug));
+    const label = launchdLabel(svc, id.slug);
+    await deps.scheduler.dormant(label);
+    try {
+      rmSync(join(launchAgentsDir(), `${label}.plist`), { force: true });
+    } catch {
+      /* best-effort */
+    }
   }
   // FIX-234 AC2: off owns the FULL lane set — retired shapes (ci/alert/brief
   // from older versions) left zombie jobs pointing at deleted engines; sweep
@@ -979,21 +987,50 @@ export async function loopOffCommand(_args: string[], deps: LoopSchedDeps = real
   return 0;
 }
 
+/** `roll loop off --all` — machine emergency stop for every Roll launchd lane. */
+async function loopOffAllCommand(deps: LoopSchedDeps): Promise<number> {
+  const labels = listAllRollLaneLabels();
+  for (const label of labels) {
+    await deps.scheduler.dormant(label);
+    try {
+      rmSync(join(launchAgentsDir(), `${label}.plist`), { force: true });
+    } catch {
+      /* best-effort */
+    }
+  }
+  process.stdout.write(
+    `Loop disabled for all projects (${labels.length} Roll launchd job(s) removed)\n` +
+    `已停用全部项目的 Roll 排程(${labels.length} 个 launchd 任务已移除)\n` +
+    `mode: guided — scheduler disabled machine-wide; owner drives explicit work\n`,
+  );
+  return 0;
+}
+
 /** The user LaunchAgents dir (test override via _LAUNCHD_DIR). */
 export function launchAgentsDir(): string {
   return process.env["_LAUNCHD_DIR"] ?? join(homedir(), "Library", "LaunchAgents");
 }
 
-/** All com.roll.* lane labels for a slug found on disk (FIX-234). */
-export function listRollLaneLabels(slug: string): string[] {
+function listRollLaneLabelsByFilter(filter: (name: string) => boolean): string[] {
   try {
     return readdirSync(launchAgentsDir())
-      .filter((n) => n.startsWith("com.roll.") && n.endsWith(`.${slug}.plist`))
+      .filter((n) => n.startsWith("com.roll.") && n.endsWith(".plist"))
+      .filter(filter)
       .map((n) => n.replace(/\.plist$/, ""))
       .sort();
   } catch {
     return [];
   }
+}
+
+/** All com.roll.* lane labels for a slug found on disk (FIX-234). */
+export function listRollLaneLabels(slug: string): string[] {
+  return listRollLaneLabelsByFilter((n) => n.endsWith(`.${slug}.plist`));
+}
+
+/** Every com.roll.* launchd lane label found on this machine. */
+export function listAllRollLaneLabels(): string[] {
+  return listRollLaneLabelsByFilter(() => true);
 }
 
 /** `roll loop pause` — write the PAUSE marker the runner honors. */

@@ -28,6 +28,7 @@ import { collectLanguageDoctorFindings, renderLanguageDoctorSection } from "../l
 import { rebuildSkipStateFromEvidence, readRows, readEvents, runtimeDir as pardonRuntimeDir } from "../lib/pardon-skip-list.js";
 import { readSkipState, writeSkipState } from "../runner/skip-cards.js";
 import { resolveBinaryStalenessReadout } from "../runner/binary-staleness.js";
+import { detectMainCheckoutWriteProtectionResidue, recoverMainCheckoutWriteProtectionResidue } from "../runner/main-checkout-guard.js";
 import { rollVersion } from "./version.js";
 
 interface Palette {
@@ -462,6 +463,44 @@ function launchdStaleSection(lang: Lang): void {
     emit(`    ${t(v2Catalog, lang, "doctor.stale_plists_cleanup")}: launchctl bootout gui/${process.getuid?.() ?? 0}/${label}; rm '${plist}'`);
   }
 }
+
+function mainCheckoutProtectionRuntimeDir(root: string): string {
+  return join(root, ".roll", "loop");
+}
+
+function mainCheckoutWriteProtectionSection(lang: Lang): void {
+  const root = process.cwd();
+  const residue = detectMainCheckoutWriteProtectionResidue(root, mainCheckoutProtectionRuntimeDir(root));
+  if (!residue.markerPresent && !residue.reclaimableConfigLock) return;
+  emit("");
+  emit(lang === "zh" ? "主 checkout 写保护残留" : "Main checkout write-protection residue");
+  emit("");
+  if (residue.markerPresent) emit(`  ⚠ marker: ${residue.markerPath}`);
+  if (residue.reclaimableConfigLock) emit(`  ⚠ config lock sentinel: ${residue.configLockPath}`);
+  if (residue.foreignConfigLock) emit(`  ! foreign config.lock present; repair will leave it untouched: ${residue.configLockPath}`);
+  emit(`    fix: roll doctor repair-protection`);
+}
+
+function doctorRepairProtectionCommand(): number {
+  const root = process.cwd();
+  const result = recoverMainCheckoutWriteProtectionResidue(root, mainCheckoutProtectionRuntimeDir(root));
+  process.stdout.write(
+    [
+      "Main checkout write-protection repair",
+      "主 checkout 写保护修复",
+      "",
+      `  restored paths: ${result.restoredPaths}`,
+      `  marker: ${result.markerRemoved ? "removed" : result.markerPresent ? "still present" : "not present"}`,
+      result.configLockRemoved
+        ? `  config lock: removed`
+        : result.foreignConfigLock
+          ? `  config lock: foreign lock left untouched (${result.configLockPath})`
+          : `  config lock: not present`,
+      "",
+    ].join("\n"),
+  );
+  return result.markerPresent || result.foreignConfigLock ? 1 : 0;
+}
 /** Real lane probe — `launchctl list <label>` parses "LastExitStatus" (Darwin). */
 function realLaneProbe(): LaneProbe {
   return {
@@ -659,6 +698,8 @@ export function doctorPardonCommand(args: string[]): number {
 }
 
 export function doctorCommand(args: string[], deps: DoctorDeps = {}): number {
+  if (args[0] === "repair-protection") return doctorRepairProtectionCommand();
+
   out.lines = [];
   const p = palette();
   const lang = msgLang();
@@ -673,6 +714,7 @@ export function doctorCommand(args: string[], deps: DoctorDeps = {}): number {
     gitignoreOwnershipSection(lang);
     lanesSection(lang, realLaneProbe());
     launchdStaleSection(lang);
+    mainCheckoutWriteProtectionSection(lang);
     launchdProxySection(lang);
     binaryStalenessSection(lang);
   }

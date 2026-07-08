@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -133,8 +133,9 @@ function gitOnlyPath(): string {
   expect(git).not.toBe("");
   const bin = mkdtempSync(join(tmpdir(), "roll-init-git-only-bin-"));
   dirs.push(bin);
-  symlinkSync(git, join(bin, "git"));
-  return bin;
+  const quotedGit = git.replace(/'/g, "'\\''");
+  writeFileSync(join(bin, "git"), `#!/bin/sh\nexec '${quotedGit}' -c core.hooksPath=/dev/null "$@"\n`, { mode: 0o755 });
+  return [bin, "/usr/bin", "/bin"].join(":");
 }
 
 function git(cwd: string, args: string[]): string {

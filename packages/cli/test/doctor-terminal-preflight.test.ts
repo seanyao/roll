@@ -136,6 +136,6 @@ describe("US-INIT-003c Terminal.app screenshot preflight", () => {
     }
 
     expect(stdout).toContain("--tools");
-    expect(readFileSync(join(repoRoot, "README.md"), "utf8")).toContain("roll doctor [skills\\|tools\\|language]");
+    expect(readFileSync(join(repoRoot, "README.md"), "utf8")).toContain("roll doctor [skills\\|tools\\|language\\|repair-protection]");
   });
 });

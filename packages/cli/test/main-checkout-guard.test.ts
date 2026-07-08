@@ -6,7 +6,9 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   applyMainCheckoutWriteProtection,
   checkMainDirty,
+  detectMainCheckoutWriteProtectionResidue,
   quarantineMainCheckout,
+  recoverMainCheckoutWriteProtectionResidue,
   releaseMainCheckoutWriteProtection,
   repairCoreWorktreeContamination,
   withMainCheckoutWriteProtection,
@@ -509,5 +511,48 @@ describe("FIX-1210 — config.lock sentinel blocks nested git init writes", () =
     releaseMainCheckoutWriteProtection({ repoCwd: repo, runtimeDir, cycleId: "C-foreign", nowMs: () => 2000 });
     expect(existsSync(lockPath)).toBe(true);
     expect(readFileSync(lockPath, "utf8")).toBe("ref: some in-flight git config transaction\n");
+  });
+
+  it("recovers stale write-protection marker and orphaned Roll config.lock", () => {
+    const repo = cleanRepo("roll-fix1210-recover-residue-");
+    const runtimeDir = join(repo, ".roll", "loop");
+    const markerPath = join(runtimeDir, "main-checkout-protection.json");
+    const tracked = join(repo, "tracked.txt");
+    const lockPath = join(repo, ".git", "config.lock");
+    chmodSync(tracked, 0o444);
+    writeFileSync(
+      markerPath,
+      JSON.stringify({ repoCwd: repo, cycleId: "C-residue", entries: [{ path: tracked, mode: 0o644 }] }, null, 2),
+      "utf8",
+    );
+    writeFileSync(lockPath, "roll main-checkout config lock sentinel\n", "utf8");
+    chmodSync(lockPath, 0o444);
+
+    const before = detectMainCheckoutWriteProtectionResidue(repo, runtimeDir);
+    expect(before.markerPresent).toBe(true);
+    expect(before.reclaimableConfigLock).toBe(true);
+
+    const recovered = recoverMainCheckoutWriteProtectionResidue(repo, runtimeDir);
+    expect(recovered.restoredPaths).toBe(1);
+    expect(recovered.markerRemoved).toBe(true);
+    expect(recovered.configLockRemoved).toBe(true);
+    expect(existsSync(markerPath)).toBe(false);
+    expect(existsSync(lockPath)).toBe(false);
+    expect(statSync(tracked).mode & 0o200).toBe(0o200);
+  });
+
+  it("leaves foreign config.lock untouched during residue recovery", () => {
+    const repo = cleanRepo("roll-fix1210-recover-foreign-");
+    const runtimeDir = join(repo, ".roll", "loop");
+    const markerPath = join(runtimeDir, "main-checkout-protection.json");
+    const lockPath = join(repo, ".git", "config.lock");
+    writeFileSync(markerPath, JSON.stringify({ repoCwd: repo, cycleId: "C-foreign", entries: [] }, null, 2), "utf8");
+    writeFileSync(lockPath, "foreign git config transaction\n", "utf8");
+
+    const recovered = recoverMainCheckoutWriteProtectionResidue(repo, runtimeDir);
+    expect(recovered.markerRemoved).toBe(true);
+    expect(recovered.configLockRemoved).toBe(false);
+    expect(recovered.foreignConfigLock).toBe(true);
+    expect(readFileSync(lockPath, "utf8")).toBe("foreign git config transaction\n");
   });
 });

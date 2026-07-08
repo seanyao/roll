@@ -37,7 +37,7 @@ describe("roll loop --help groups — US-DOSSIER-035", () => {
 
   it("AC5: the design verbs sit in their assigned band", () => {
     const out = help("en");
-    expect(out).toMatch(/control\s+on · off · now · pause · resume · reset · go · goal/);
+    expect(out).toMatch(/control\s+on · off \[--all\] · now · pause · resume · reset · go · goal/);
     expect(out).toMatch(/observe\s+watch · status · runs · log · events · signals · eval/);
     expect(out).toMatch(/alerts\s+alert list · alert ack · alert resolve · alert log/);
     expect(out).toMatch(/maintain\s+gc · fmt · mute · unmute · pr-inbox · reconcile-pending/);

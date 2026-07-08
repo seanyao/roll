@@ -21,11 +21,11 @@ exports[`US-LANG-003 CLI language surface > config lang error output follows the
 
 exports[`US-LANG-003 CLI language surface > doctor --help is locale-pinned and single-language 1`] = `
 {
-  "en": "Usage: roll doctor [skills|language|pardon|--tools]
-  Environment + install diagnosis; --tools shows focused tool, physical screenshot, and permission preflight readiness; pardon diagnoses/resets the skip-list.
+  "en": "Usage: roll doctor [skills|language|pardon|repair-protection|--tools]
+  Environment + install diagnosis; --tools shows focused tool, physical screenshot, and permission preflight readiness; repair-protection clears stale main-checkout write protection; pardon diagnoses/resets the skip-list.
 ",
-  "zh": "用法：roll doctor [skills|language|pardon|--tools]
-  环境与安装体检；--tools 只看工具、真实截图与权限预检就绪度；pardon 诊断/重置跳过名单。
+  "zh": "用法：roll doctor [skills|language|pardon|repair-protection|--tools]
+  环境与安装体检；--tools 只看工具、真实截图与权限预检就绪度；repair-protection 修复残留主 checkout 写保护；pardon 诊断/重置跳过名单。
 ",
 }
 `;
@@ -35,7 +35,7 @@ exports[`US-LANG-003 CLI language surface > loop --help is locale-pinned and sin
   "en": "Usage: roll loop <subcommand>
 The autonomous delivery loop — grouped control / observe / alerts / maintain.
 
-control   on · off · now · pause · resume · reset · go · goal · recover
+control   on · off [--all] · now · pause · resume · reset · go · goal · recover
 observe   watch · status · runs · log · events · signals · eval
 alerts    alert list · alert ack · alert resolve · alert log
 maintain  gc · fmt · mute · unmute · pr-inbox · reconcile-pending
@@ -47,7 +47,7 @@ internal  test · run-once · story · notify · enforce-tcr · precheck-ci · h
   "zh": "用法：roll loop <子命令>
 自治交付循环——按作动/传感/告警/维护分组。
 
-作动      on · off · now · pause · resume · reset · go · goal · recover
+作动      on · off [--all] · now · pause · resume · reset · go · goal · recover
 传感      watch · status · runs · log · events · signals · eval
 告警      alert list · alert ack · alert resolve · alert log
 维护      gc · fmt · mute · unmute · pr-inbox · reconcile-pending

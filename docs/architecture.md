@@ -266,7 +266,7 @@ cycle 写 `loop:pending`，只做恢复探测，不启动 Builder、不把卡记
 Roll 的运行模式只有两个：`guided` 和 `autonomous`。它们不是两套 agent 配置，而是同一套 backlog、truth、route profile、execution profile、attest evidence、Evaluator 和 release gates 之上的两种触发方式。
 
 - `guided`：owner 通过 `roll supervisor status/next/why` 理解状态和下一步，再显式运行 `roll loop go --cards <id>` 等命令。guided 模式不会静默启动长时间 Story 执行。
-- `autonomous`：`roll loop on` 安装 scheduler；scheduler 可以在 pause、budget、route、evidence、Evaluator 和 release gates 内领取合格 Todo。`roll loop pause` / `roll loop off` 回到 guided；`roll loop resume` / `roll loop on` 显式切回 autonomous。
+- `autonomous`：`roll loop on` 安装 scheduler；scheduler 可以在 pause、budget、route、evidence、Evaluator 和 release gates 内领取合格 Todo。`roll loop pause` / `roll loop off` 回到 guided；`roll loop off --all` 是本机所有 `com.roll.*` LaunchAgent 的急停；`roll loop resume` / `roll loop on` 显式切回 autonomous。
 - 持久化来源只使用已有 loop/supervisor 状态：launchd plist、PAUSE/DORMANT marker、events/runs/backlog。不得新增独立 `mode.yaml` 之类的第二真相。
 
 ### BC9 · Supervisor 与执行剖面（v4）

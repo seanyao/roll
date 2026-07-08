@@ -637,6 +637,74 @@ describe("US-GOAL-004 — no-progress suppression", () => {
     expect(allowed[1]).toEqual(["US-STUCK", "US-NEXT"]);
     expect(allowed[2]).toEqual(["US-NEXT"]);
   });
+
+  it("FIX-1239: stops when run-once ignores --cards and records a different story", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [FIX-1235](.roll/features/loop-engine/FIX-1235/spec.md) | requested | 📋 Todo |",
+      "| [FIX-1237](.roll/features/loop-engine/FIX-1237/spec.md) | wrong | 📋 Todo |",
+    ]);
+    let calls = 0;
+    const allowed: Array<string[] | undefined> = [];
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_300 + calls,
+      nowIso: () => `2026-06-11T10:03:0${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async ({ projectPath, allowedCards }) => {
+        calls += 1;
+        allowed.push(allowedCards);
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "runs.jsonl"),
+          `${JSON.stringify({ story_id: "FIX-1237", cycle_id: "cycle-wrong", ts: "2026-06-11T10:03:01Z", status: "failed", tcr_count: 0 })}\n`,
+          { flag: "a" },
+        );
+        return 1;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "FIX-1235", "--max-cycles", "5"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(1);
+    expect(allowed).toEqual([["FIX-1235"]]);
+    expect(r.out).toContain("scope_mismatch");
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.status).toBe("paused");
+    expect(goal.lastDecisionReason).toContain("scope_mismatch");
+    expect(goal.lastDecisionReason).toContain("FIX-1237");
+    const events = readEvents(p);
+    expect(events.some((e) => e.type === "goal:gate_tripped" && e.reason === "scope_mismatch")).toBe(true);
+    expect(readFileSync(join(p, ".roll", "loop", "ALERT-proj-abc123.md"), "utf8")).toContain("picked out-of-scope card FIX-1237");
+  });
+
+  it("FIX-1239: refuses autonomous work when the repo-local roll package is newer than the running runner", async () => {
+    const p = project();
+    writeFileSync(join(p, "package.json"), JSON.stringify({ name: "@seanyao/roll", version: "99.0.0" }) + "\n");
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_350,
+      nowIso: () => "2026-06-11T10:03:50Z",
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async () => {
+        calls += 1;
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "FIX-1235"], deps));
+
+    expect(r.code).toBe(1);
+    expect(calls).toBe(0);
+    expect(r.out).toContain("roll loop go: runner");
+    expect(r.err).toContain("runner_stale_for_repo");
+    expect(existsSync(join(p, ".roll", "loop", "goal.yaml"))).toBe(false);
+  });
 });
 
 describe("US-GOAL-005 — goal session gates (progress, scope-resume, timebox)", () => {

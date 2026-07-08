@@ -554,7 +554,8 @@ function parseProxyTarget(raw: string): { host: string; port: number } | undefin
  *  exact signature of a poisoned launchd environment from a closed
  *  proxy app. */
 function launchdProxySection(lang: Lang): void {
-  if (process.platform !== "darwin") return;
+  const platform = process.env["_ROLL_EXTERNAL_TOOLS_PLATFORM"] ?? process.platform;
+  if (platform !== "darwin") return;
   // Read all proxy-family launchctl env vars.
   const stale: { name: string; value: string; target: string }[] = [];
   for (const name of PROXY_ENV_NAMES) {

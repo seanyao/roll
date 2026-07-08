@@ -729,6 +729,21 @@ describe("loop pause/resume (marker file)", () => {
     expect(r2.code).toBe(0); // idempotent
   });
 
+  it("FIX-1239: resume refuses autonomous scheduling when the repo-local roll package is newer than the runner", async () => {
+    const proj = tmp("proj-resume-stale");
+    writeFileSync(join(proj, "package.json"), JSON.stringify({ name: "@seanyao/roll", version: "99.0.0" }) + "\n");
+    const { deps } = fakeDeps(proj, tmp("sh-resume-stale"), tmp("ld-resume-stale"));
+    const marker = join(proj, ".roll", "loop", "PAUSE-proj-abc123");
+    mkdirSync(join(proj, ".roll", "loop"), { recursive: true });
+    writeFileSync(marker, "2026-06-11T10:00:00Z\n");
+
+    const r = await captureBoth(() => loopResumeCommand([], deps));
+
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("runner_stale_for_repo");
+    expect(existsSync(marker)).toBe(true);
+  });
+
   // FIX-251: resume must clear the consecutive-failure counter, heal counters,
   // and emit a loop:resumed event so the post-resume cycle does not immediately
   // re-trip the auto-pause.
@@ -956,6 +971,47 @@ describe("FIX-197 — loop now legacy self-heal", async () => {
     expect(code).toBe(7);
     expect(out).not.toContain("FIX-197");
     expect(calls).toHaveLength(0);
+  });
+
+  it("FIX-1239: forwards --cards to the one-shot runner as an allow-list", async () => {
+    const proj = tmp("nowproj3");
+    const shared = tmp("nowshared3");
+    const { deps } = fakeDeps(proj, shared, tmp("nowld3"));
+    const seen: Array<string[] | undefined> = [];
+    deps.execRunner = (_runner, opts): Promise<number> => {
+      seen.push(opts?.allowedCards);
+      return Promise.resolve(0);
+    };
+    const runner = join(shared, "loop", "run-proj-abc123.sh");
+    mkdirSync(join(shared, "loop"), { recursive: true });
+    writeFileSync(runner, buildLoopRunnerScript({ projectPath: proj, slug: "proj-abc123", activeStart: 0, activeEnd: 24 }), { mode: 0o755 });
+
+    const { code, out } = await captureStdout(() => loopNowCommand(["--cards", "FIX-1235,FIX-1239"], deps));
+
+    expect(code).toBe(0);
+    expect(out).toContain("scope: cards FIX-1235, FIX-1239");
+    expect(seen).toEqual([["FIX-1235", "FIX-1239"]]);
+  });
+
+  it("FIX-1239: loop now refuses to execute a stale runner for this repo", async () => {
+    const proj = tmp("nowproj-stale");
+    writeFileSync(join(proj, "package.json"), JSON.stringify({ name: "@seanyao/roll", version: "99.0.0" }) + "\n");
+    const shared = tmp("nowshared-stale");
+    const { deps } = fakeDeps(proj, shared, tmp("nowld-stale"));
+    let calls = 0;
+    deps.execRunner = (): Promise<number> => {
+      calls += 1;
+      return Promise.resolve(0);
+    };
+    const runner = join(shared, "loop", "run-proj-abc123.sh");
+    mkdirSync(join(shared, "loop"), { recursive: true });
+    writeFileSync(runner, buildLoopRunnerScript({ projectPath: proj, slug: "proj-abc123", activeStart: 0, activeEnd: 24 }), { mode: 0o755 });
+
+    const r = await captureBoth(() => loopNowCommand(["--cards", "FIX-1235"], deps));
+
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("runner_stale_for_repo");
+    expect(calls).toBe(0);
   });
 });
 

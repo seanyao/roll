@@ -187,7 +187,7 @@ describe("loopReconcilePendingCommand", () => {
     expect(ev.some((e) => e.type === "pr:merge" && e.prNumber === 111)).toBe(true);
   });
 
-  it("merged PR flips backlog status from In Progress to Done (FIX-1057)", async () => {
+  it("merged PR flips backlog status from In Progress to annotated Done (FIX-1057, FIX-1240)", async () => {
     const p = project();
 
     // Write a backlog with the story in 🔨 In Progress status
@@ -214,9 +214,9 @@ describe("loopReconcilePendingCommand", () => {
     const recs = readDeliveries(p);
     expect(recs[recs.length - 1].lifecycleState).toBe("done");
 
-    // Verify backlog status flipped to ✅ Done
+    // Verify backlog status flipped to ✅ Done and keeps delivery tracking.
     const backlog = readFileSync(backlogPath, "utf8");
-    expect(backlog).toContain("✅ Done");
+    expect(backlog).toContain("✅ Done · PR#777 · merged abc7777");
     expect(backlog).not.toContain("🔨 In Progress");
   });
 

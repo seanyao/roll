@@ -71,6 +71,13 @@ function prNumberFromRecord(r: DeliveryRecord): number | undefined {
   return r.prNumber.present && r.prNumber.value > 0 ? r.prNumber.value : undefined;
 }
 
+function doneStatusWithDeliveryRef(status: string, prNumber: number, mergeCommit: string): string {
+  if (!status.includes(STATUS_MARKER.done)) return status;
+  const sha = mergeCommit.trim().slice(0, 7);
+  const debtSuffix = status.includes("evidence_debt") ? " · evidence_debt" : "";
+  return `${STATUS_MARKER.done} · PR#${prNumber} · merged ${sha}${debtSuffix}`;
+}
+
 // ── Injectable deps for tests ─────────────────────────────────────────────────
 
 /** Dependencies the command needs so tests can fake filesystem/provider/events. */
@@ -209,7 +216,7 @@ export async function loopReconcilePendingCommand(
               const backlogPath = join(projectCwd, ".roll", "backlog.md");
               const store = new BacklogStore();
               const snap = store.readBacklog(backlogPath);
-              store.mark(backlogPath, snap.hash, id, status);
+              store.mark(backlogPath, snap.hash, id, doneStatusWithDeliveryRef(status, prNumber, state.mergeCommit));
             },
             alert: (message) =>
               bus.appendEvent(eventsPath, {

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### 新功能
+- `roll worktree audit` — 先盘清哪些 worktree 可回收、哪些要保留(US-LOOP-093) `[loop-engine]`
+  <!-- evidence: .roll/features/loop-engine/US-LOOP-093/latest/US-LOOP-093-report.html -->
+
 ## v4.708.1 — 2026-07-08
 
 ### 稳定性

@@ -89,6 +89,7 @@ import { TRUTH_USAGE, truthCommand } from "./truth.js";
 import { tuneCommand } from "./tune.js";
 import { updateCommand } from "./update.js";
 import { versionCommand } from "./version.js";
+import { worktreeAuditCommand } from "./worktree-audit.js";
 
 let registered = false;
 
@@ -405,6 +406,12 @@ export function registerAll(): void {
   registerPorted("version", removedTopLevel("version"), { hidden: true });
   registerPorted("--version", versionCommand);
   registerPorted("-v", versionCommand);
+  // US-LOOP-093: `worktree audit` — read-only worktree lifecycle audit
+  registerPorted("worktree", (args) => {
+    if (args[0] === "audit") return worktreeAuditCommand(args.slice(1));
+    process.stderr.write("roll worktree: unknown subcommand. Try 'roll worktree audit'.\n");
+    return 1;
+  }, { help: "Usage: roll worktree audit [--json]\n  Read-only audit of all git worktrees: classify ownership, dirt, merge evidence, and disposition.\n只读审计所有 git worktree：分类归属、脏状态、合并证据与处置建议。" });
   // `loop` is FULLY TS as of US-PORT-021 prep — no subcommand falls back to bash.
   // `on` generates the v3 self-contained runner (DELIBERATE divergence from the
   // v2 tmux outer/inner pair, whitelisted in AGENTS.md). Bare `roll loop`

@@ -7,12 +7,10 @@ import { describe, expect, it } from "vitest";
 import {
   branchTitleSuffix,
   cycleBranchName,
-  cycleBranchStatus,
   cycleId,
   decidePublishOutcome,
   dedupeSortedIds,
   isEphemeralBranch,
-  isStaleCycleBranch,
   nextWaitAction,
   parseClaimedIdsFromBacklog,
   planPublishDocPr,
@@ -198,14 +196,5 @@ describe("stale cycle-branch GC predicate", () => {
     expect(isEphemeralBranch("claude/foo")).toBe(true);
     expect(isEphemeralBranch("main")).toBe(false);
     expect(isEphemeralBranch("feature/x")).toBe(false);
-  });
-  it("cycleBranchStatus maps ancestry to merged/open", () => {
-    expect(cycleBranchStatus(true)).toBe("merged");
-    expect(cycleBranchStatus(false)).toBe("open");
-  });
-  it("isStaleCycleBranch = ephemeral AND merged", () => {
-    expect(isStaleCycleBranch("loop/cycle-x", true)).toBe(true);
-    expect(isStaleCycleBranch("loop/cycle-x", false)).toBe(false);
-    expect(isStaleCycleBranch("main", true)).toBe(false);
   });
 });

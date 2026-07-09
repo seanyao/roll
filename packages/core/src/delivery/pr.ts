@@ -37,11 +37,10 @@
  *     Progress ids. The open-PR dedup the picker (US-CORE-004, FIX-141/146)
  *     consumes. {@link parseClaimedIdsFromBacklog} ports the awk id extraction;
  *     the orchestration (multiple gh calls) is the injected adapter's job.
- *   - `_loop_cleanup_stale_cycle_branches`          (bin/roll:13012-13041) and
- *     `_loop_branches`                              (bin/roll:13048-13076):
- *     GC / list ephemeral branches whose tip is an ancestor of origin/main.
- *     {@link isStaleCycleBranch} ports the merged-ness predicate; the ls-remote
- *     fan-out is the adapter's job.
+ *   - ephemeral-branch recognition: {@link isEphemeralBranch} /
+ *     {@link EPHEMERAL_BRANCH_PREFIXES}. (US-LOOP-096 removed the old
+ *     ancestry-based staleness predicate — remote GC uses PR state, not
+ *     `merge-base --is-ancestor`; see US-LOOP-097.)
  *
  * documented-not-difftested (entangled with worktree/event side effects, ported
  * as behaviour from a careful reading — NOT byte-diffed against bash):
@@ -308,30 +307,19 @@ export function dedupeSortedIds(ids: readonly string[]): string[] {
   return [...new Set(ids.filter((s) => s !== ""))].sort();
 }
 
-// ── Stale cycle-branch GC predicate (mirrors _loop_cleanup_stale_cycle_branches)
+// ── Ephemeral branch prefixes ────────────────────────────────────────────────
 
-/** The ephemeral branch prefixes the loop GCs / lists (bin/roll:13017-13019,
- *  13053-13055). A branch outside these prefixes is never auto-deleted. */
+/** The ephemeral branch prefixes the loop creates / GCs. A branch outside these
+ *  prefixes is never auto-deleted. Consumed by the branch canary (US-LOOP-096).
+ *
+ *  US-LOOP-096: the old ancestry-based staleness predicates (`cycleBranchStatus`
+ *  / `isStaleCycleBranch`, keyed on `merge-base --is-ancestor origin/main`) were
+ *  removed — they had NO runtime caller and mis-judged squash merges (a squashed
+ *  branch tip is not an ancestor of main). Merged-ness for remote GC is decided
+ *  by PR state instead (US-LOOP-097), not ancestry. */
 export const EPHEMERAL_BRANCH_PREFIXES = ["loop/cycle-", "worktree-agent-", "claude/"] as const;
 
 /** True iff `branch` carries one of the ephemeral prefixes the GC scans. */
 export function isEphemeralBranch(branch: string): boolean {
   return EPHEMERAL_BRANCH_PREFIXES.some((p) => branch.startsWith(p));
-}
-
-/**
- * Decide whether a cycle branch is stale and safe to delete. Mirrors
- * `_loop_cleanup_stale_cycle_branches` (bin/roll:13031-13039): a branch is
- * deletable iff it is an ANCESTOR of origin/main (already merged) — i.e.
- * `git merge-base --is-ancestor <branch> origin/main` succeeds. The
- * merged-ness verdict is injected (the adapter runs the git probe). Returns the
- * same "merged" / "open" label `_loop_branches` prints (bin/roll:13069-13072).
- */
-export function cycleBranchStatus(isAncestorOfMain: boolean): "merged" | "open" {
-  return isAncestorOfMain ? "merged" : "open";
-}
-
-/** Whether to delete a branch in the GC pass: ephemeral AND merged into main. */
-export function isStaleCycleBranch(branch: string, isAncestorOfMain: boolean): boolean {
-  return isEphemeralBranch(branch) && isAncestorOfMain;
 }

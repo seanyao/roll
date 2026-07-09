@@ -12,11 +12,11 @@
  * The handler stays thin: it resolves the project identity + runtime paths and
  * delegates the entire walk to the runner adapter (packages/cli/src/runner).
  */
-import { EventBus, assessBacklog, cycleEndEvent, firstInstalledAgent, mapV2Status, markStatus, parseBacklog, parsePolicy, readSlotFromText, shouldResize, shouldSuppressDormancy, type AgentSlot, type BacklogItem, type CycleContext, type RouteDeps, type RouteSlot } from "@roll/core";
+import { EventBus, assessBacklog, branchCanaryVerdict, cycleEndEvent, DEFAULT_BRANCH_CANARY_MAX, firstInstalledAgent, isEphemeralBranch, mapV2Status, markStatus, parseBacklog, parsePolicy, readSlotFromText, shouldResize, shouldSuppressDormancy, type AgentSlot, type BacklogItem, type CycleContext, type RouteDeps, type RouteSlot } from "@roll/core";
 import { STATUS_MARKER, absent, buildTerminalEvent, deriveOrphanVerdict, present, type BacklogReason } from "@roll/spec";
 import { createScheduler, isOwnerHeld, launchdLabel, projectIdentity, readLockOwner, releaseLock } from "@roll/infra";
 import { dormantMarkerPath, resolveLoopRunState, writeDormantMarker } from "./loop-sched.js";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type AgentSpawn, type RunnerPaths, buildRunRow, dryRunPlan, killLiveAgents, nodePorts, realAgentSpawn, runCycleOnce } from "../runner/index.js";
 import { clearCardFailure, recordCardFailure } from "../runner/skip-cards.js";
@@ -1115,6 +1115,14 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     /* the staleness nudge must never topple or delay the cycle */
   }
 
+  // US-LOOP-096: branch-leak canary circuit breaker — if ephemeral branches /
+  // worktrees have piled up (cleanup contract broke), refuse to start a new
+  // cycle (it would only add more), write a PAUSE + ALERT, and skip this tick.
+  if (branchCanaryTrips(id.path, id.slug, rt, alertsPath)) {
+    process.stdout.write("loop run-once: branch-leak canary tripped — loop paused (see ALERT); skipped\n");
+    return 0;
+  }
+
   // FIX-204D: between here and the walk's own finally, signals get a clean
   // teardown instead of a half-state corpse.
   const disposeSignals = installCycleSignalTeardown(paths, cycleId, branch, id.path, rt);
@@ -1579,6 +1587,58 @@ export async function egressBlocked(
 /** True iff a PAUSE marker exists for this project/slug. */
 function isLoopPaused(projectPath: string, slug: string): boolean {
   return existsSync(join(projectPath, ".roll", "loop", `PAUSE-${slug}`));
+}
+
+/**
+ * US-LOOP-096 branch-leak canary (circuit breaker). Counts ephemeral local
+ * branches + live loop worktree dirs; if the total exceeds the threshold
+ * (ROLL_BRANCH_CANARY_MAX, default {@link DEFAULT_BRANCH_CANARY_MAX}) it writes
+ * a PAUSE marker + ALERT (idempotent) and returns true so the caller SKIPS this
+ * tick — starting another cycle would only pile on more. Healthy steady state
+ * after US-LOOP-094/095 is 0-1 worktrees + 0 ephemeral branches.
+ */
+function branchCanaryTrips(projectPath: string, slug: string, rt: string, alertsPath: string): boolean {
+  let ephemeralBranchCount = 0;
+  try {
+    const out = execFileSync("git", ["-C", projectPath, "branch", "--format=%(refname:short)"], { encoding: "utf8" });
+    ephemeralBranchCount = out.split("\n").map((s) => s.trim()).filter((b) => b !== "" && isEphemeralBranch(b)).length;
+  } catch {
+    /* best-effort — a git hiccup must not block the cycle */
+  }
+  let worktreeCount = 0;
+  try {
+    worktreeCount = readdirSync(join(rt, "worktrees")).length;
+  } catch {
+    /* no worktrees dir yet → 0 */
+  }
+  const parsed = parseInt(process.env["ROLL_BRANCH_CANARY_MAX"] ?? "", 10);
+  const threshold = Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_BRANCH_CANARY_MAX;
+  const verdict = branchCanaryVerdict({
+    ephemeralBranchCount,
+    worktreeCount,
+    threshold,
+    alreadyPaused: isLoopPaused(projectPath, slug),
+  });
+  if (verdict.shouldPause) {
+    const pauseMarker = join(projectPath, ".roll", "loop", `PAUSE-${slug}`);
+    const msg =
+      `# ALERT — loop auto-paused: branch/worktree leak canary tripped (US-LOOP-096)\n\n` +
+      `**Leak count**: ${verdict.total} (ephemeral branches ${ephemeralBranchCount} + worktrees ${worktreeCount}) > threshold ${threshold}\n` +
+      `**Action**: the branch-GC contract appears broken — loop paused to stop piling up.\n` +
+      `  Inspect \`git branch\` / \`git worktree list\`, clean up, then: \`roll loop resume\`\n`;
+    try {
+      mkdirSync(dirname(pauseMarker), { recursive: true });
+      writeFileSync(pauseMarker, msg, "utf8");
+    } catch {
+      /* best-effort */
+    }
+    try {
+      appendFileSync(alertsPath, `${msg}\n`, "utf8");
+    } catch {
+      /* best-effort */
+    }
+  }
+  return verdict.tripped;
 }
 
 export interface RepoPushableResult {

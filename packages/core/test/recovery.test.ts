@@ -15,7 +15,6 @@ import {
   gcRetentionVerdict,
   healStatePlan,
   isEphemeralBranch,
-  isStaleCycleBranch,
   orphanPostPublishPlan,
   orphanPostRebasePlan,
   orphanWorktreePlan,
@@ -122,22 +121,17 @@ describe("recoveredOutcome — terminal mapping (8738/8752)", () => {
 
 // ── (3) GC predicates (bin/roll 13019-13048 / 10577-10646) ───────────────────
 
-// NB: the ephemeral-prefix + merged-ancestry GC predicate is owned by
-// delivery/pr.ts (isEphemeralBranch / isStaleCycleBranch) — recovery.ts reuses
-// it rather than duplicating. We re-pin it here from the recovery angle.
-describe("isStaleCycleBranch — ephemeral + merged (FIX-104, 13038-13045)", () => {
+// NB: the ephemeral-prefix predicate is owned by delivery/pr.ts
+// (isEphemeralBranch). US-LOOP-096 removed the old ancestry-based staleness
+// predicate (isStaleCycleBranch) — it had no runtime caller and mis-judged
+// squash merges; remote GC now uses PR state (US-LOOP-097), not ancestry.
+describe("isEphemeralBranch — ephemeral prefix recognition", () => {
   it("ephemeral prefixes recognized (13024-13026)", () => {
     expect(isEphemeralBranch("loop/cycle-1")).toBe(true);
     expect(isEphemeralBranch("worktree-agent-x")).toBe(true);
     expect(isEphemeralBranch("claude/foo")).toBe(true);
     expect(isEphemeralBranch("main")).toBe(false);
     expect(isEphemeralBranch("feat/keep")).toBe(false);
-  });
-
-  it("deletable iff ephemeral AND ancestor-of-main", () => {
-    expect(isStaleCycleBranch("loop/cycle-1", true)).toBe(true);
-    expect(isStaleCycleBranch("loop/cycle-1", false)).toBe(false); // unmerged → keep
-    expect(isStaleCycleBranch("feat/x", true)).toBe(false); // not ephemeral → keep
   });
 });
 

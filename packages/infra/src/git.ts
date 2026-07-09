@@ -168,6 +168,9 @@ export async function worktreeAdd(
   exists: (p: string) => boolean = defaultExists,
 ): Promise<GitResult> {
   mkdirSync(dirname(path), { recursive: true });
+  // US-LOOP-096: clear stale worktree admin metadata a crashed prior cycle left
+  // behind (git's default prune expiry is 3 months) BEFORE creating this one.
+  await git(["worktree", "prune", "--expire", "now"], repoCwd); // lenient
   if (exists(path)) {
     await git(["worktree", "remove", "--force", path], repoCwd); // lenient
     rmSyncQuiet(path);

@@ -70,11 +70,32 @@ describe("needsAcMapRemediation", () => {
         {
           ac: "FIX-1230P:AC1",
           status: "pass-with-evidence",
-          evidence: [{ kind: "text", label: "test", textFile: "../evidence/test-output-FIX-1230P.txt" }],
+          // self-standing test-pass evidence (no referenced file to dangle) — isolates
+          // the FIX-1230 status-logic intent from US-EVID-024's path-resolution check.
+          evidence: [{ kind: "test-pass", label: "ac1 test" }],
         },
       ]) + "\n",
     );
     expect(needsAcMapRemediation(wt, "FIX-1230P")).toBe(false);
+  });
+
+  it("US-EVID-024: pass-with-evidence whose referenced file does NOT resolve still needs remediation (A-class empty shell)", () => {
+    // The exact empty-shell A-class: ac-map present, status confirmed pass, but the
+    // referenced evidence file was never created. FIX-1230 exempts the pass-with-evidence
+    // STATUS from draft-remediation; it must NOT exempt a confirmation whose evidence is
+    // dangling — that is a hollow pass, precisely what remediation should re-run.
+    const wt = withStory("EVID-024D");
+    writeFileSync(
+      acMapPath(wt, "EVID-024D"),
+      JSON.stringify([
+        {
+          ac: "EVID-024D:AC1",
+          status: "pass-with-evidence",
+          evidence: [{ kind: "text", label: "test", textFile: "../evidence/never-created.txt" }],
+        },
+      ]) + "\n",
+    );
+    expect(needsAcMapRemediation(wt, "EVID-024D")).toBe(true);
   });
 
   it("FIX-1230: needs-confirmation remains a draft blocker", () => {

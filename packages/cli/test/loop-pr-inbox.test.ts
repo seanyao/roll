@@ -316,6 +316,23 @@ describe("runPrInbox — per-PR action dispatch", () => {
     expect(rec.merged).toEqual(["7"]);
     expect(t).toEqual({ loop: "pr", outcome: "acted", note: "inbox_done" });
   });
+  it("US-LOOP-097: sweeps remote branches AFTER draining, with the open-PR heads", async () => {
+    const order: string[] = [];
+    let sweepHeads: string[] = [];
+    const { deps } = harness({
+      listOpenPrs: listOf([{ number: 7, headRefName: "loop/cycle-1" }]),
+      drainPendingPrCreates: async () => {
+        order.push("drain");
+      },
+      sweepRemoteBranches: async (_slug, heads) => {
+        order.push("sweep");
+        sweepHeads = [...heads];
+      },
+    });
+    await runPrInbox(deps);
+    expect(order).toEqual(["drain", "sweep"]); // GC runs strictly after the drain
+    expect(sweepHeads).toContain("loop/cycle-1"); // so it can exclude open-PR heads
+  });
   it("bot APPROVED + clean → merge", async () => {
     const { deps, rec } = harness({
       listOpenPrs: listOf([{ number: 8, headRefName: "feat/y" }]),

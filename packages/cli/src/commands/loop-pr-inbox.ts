@@ -54,7 +54,9 @@ import {
   deadTickVerdict,
 } from "@roll/core";
 import { gh, ghAvailable, ghRepoSlug, prHeadCheckRunCount, prMerge, prReady, remoteUrl, workflowDispatch } from "@roll/infra";
-import { openPendingPrCreates, pendingPrCreatePath } from "../runner/pending-pr-create.js";
+import { DEFAULT_REMOTE_GC_GRACE_MIN, selectDeletableRemoteBranches } from "@roll/core";
+import { openPendingPrCreates, pendingPrCreatePath, readPendingPrCreates } from "../runner/pending-pr-create.js";
+import { readRunsRows } from "../runner/run-records.js";
 import { execFileSync } from "node:child_process";
 import { appendFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -309,6 +311,12 @@ export interface PrInboxDeps {
    * Defaults to the real gh-backed drain; tests inject a fake.
    */
   drainPendingPrCreates?: (slug: string, openHeadRefs: ReadonlySet<string>) => Promise<void>;
+  /**
+   * US-LOOP-097: after the drain, GC stranded `loop/cycle-*` remote branches
+   * (narrow — see {@link selectDeletableRemoteBranches}). Defaults to the real
+   * git/gh-backed sweep; tests inject a fake.
+   */
+  sweepRemoteBranches?: (slug: string, openHeadRefs: ReadonlySet<string>) => Promise<void>;
 }
 
 // ─── the walk (decisions from pr-loop.ts; effects via deps) ───────────────────
@@ -451,7 +459,73 @@ export async function runPrInbox(deps: PrInboxDeps): Promise<PrTick> {
     /* best-effort: a queue drain failure must not break the regular inbox walk */
   }
 
+  // US-LOOP-097: AFTER the drain (so a just-drained branch is now an open PR /
+  // out of the pending queue), sweep stranded loop/cycle-* remote branches.
+  try {
+    const sweep = deps.sweepRemoteBranches ?? defaultSweepRemoteBranches;
+    await sweep(slug, openHeadRefs);
+  } catch {
+    /* best-effort: remote GC must never break the inbox walk */
+  }
+
   return emit(deps, prActedTick());
+}
+
+/** US-LOOP-097 default remote GC: gather the guard sets and delete only the
+ *  loop/cycle branches that clear every one (narrow). */
+async function defaultSweepRemoteBranches(slug: string, openHeadRefs: ReadonlySet<string>): Promise<void> {
+  const rt = runtimeDir();
+  // Candidate remote branches (ls-remote → refs/heads short names).
+  let remoteBranches: string[] = [];
+  try {
+    const out = execFileSync("git", ["ls-remote", "--heads", "origin"], { encoding: "utf8" });
+    remoteBranches = out
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l !== "")
+      .map((l) => l.replace(/^\S+\s+refs\/heads\//, ""));
+  } catch {
+    return; // no remote / offline → nothing to do
+  }
+  // Pending-pr-create queue (FIX-1214) — must not delete.
+  const pendingBranches = new Set<string>();
+  try {
+    for (const e of readPendingPrCreates(rt)) pendingBranches.add(e.branch);
+  } catch {
+    /* best-effort */
+  }
+  // Runs-ledger branches still parked on the remote (orphan/local/published/built)
+  // — pushed but not confirmed merged; keep.
+  const PROTECT = new Set(["orphan", "local", "published", "built", "pending_merge"]);
+  const activeRunBranches = new Set<string>();
+  try {
+    for (const row of readRunsRows(join(rt, "runs.jsonl"))) {
+      const cid = typeof row["cycle_id"] === "string" ? row["cycle_id"] : "";
+      const status = typeof row.status === "string" ? row.status : "";
+      if (cid !== "" && PROTECT.has(status)) activeRunBranches.add(`loop/cycle-${cid}`);
+    }
+  } catch {
+    /* best-effort */
+  }
+  const graceParsed = parseInt(process.env["ROLL_REMOTE_GC_GRACE_MIN"] ?? "", 10);
+  const graceMin = Number.isFinite(graceParsed) && graceParsed > 0 ? graceParsed : DEFAULT_REMOTE_GC_GRACE_MIN;
+  const deletable = selectDeletableRemoteBranches({
+    remoteBranches,
+    openPrHeads: openHeadRefs,
+    pendingBranches,
+    activeRunBranches,
+    graceMs: graceMin * 60_000,
+    nowMs: Date.now(),
+  });
+  if (deletable.length === 0) return;
+  for (const b of deletable) {
+    try {
+      execFileSync("git", ["push", "origin", "--delete", b], { stdio: "ignore" });
+    } catch {
+      /* a protected/already-gone branch is fine to skip */
+    }
+  }
+  appendAlert(`US-LOOP-097: remote GC deleted ${deletable.length} stranded loop/cycle branch(es) on ${slug}`);
 }
 
 /** FIX-1214: default production drain for the pending-pr-create queue. */

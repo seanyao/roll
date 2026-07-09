@@ -57,6 +57,30 @@ describe("contractProjection", () => {
     const withUrl = BASE.replace("deliverable_cmd: roll cycles", "screenshot_url: https://app.test/x#y");
     expect(contractProjection(withUrl, STORY).deliverableUrl).toBe("https://app.test/x#y");
   });
+
+  it("strips a whitespace-preceded YAML comment but keeps an unspaced '#' (URL fragment)", () => {
+    const commented = BASE.replace("deliverable_cmd: roll cycles", "deliverable_cmd: roll cycles # note");
+    expect(contractProjection(commented, STORY).deliverableCmd).toBe("roll cycles");
+    const frag = BASE.replace("deliverable_cmd: roll cycles", "deliverable_url: .roll/features/index.html#loop");
+    expect(contractProjection(frag, STORY).deliverableUrl).toBe(".roll/features/index.html#loop");
+  });
+
+  it("unwraps surrounding quotes on a scalar value", () => {
+    const quoted = BASE.replace("deliverable_cmd: roll cycles", 'deliverable_cmd: "roll cycles"');
+    expect(contractProjection(quoted, STORY).deliverableCmd).toBe("roll cycles");
+  });
+
+  it("parses a CRLF spec identically to LF (no silent null frontmatter)", () => {
+    expect(contractProjectionHash(BASE.replace(/\n/g, "\r\n"), STORY)).toBe(contractProjectionHash(BASE, STORY));
+  });
+
+  it("treats AC texts as a true set (duplicate criterion lines dedupe)", () => {
+    const dup = BASE.replace(
+      "- [ ] AC2 checkbox state / status / narrative changes do not move the hash\n",
+      "- [ ] AC2 checkbox state / status / narrative changes do not move the hash\n- [ ] AC1 projection captures the evidence frontmatter and AC set\n",
+    );
+    expect(contractProjection(dup, STORY).acTexts).toEqual(contractProjection(BASE, STORY).acTexts);
+  });
 });
 
 describe("contractProjectionHash — EXCLUDED completion claims keep the hash stable", () => {

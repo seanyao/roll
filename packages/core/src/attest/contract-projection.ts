@@ -36,19 +36,40 @@ export interface ContractProjection {
   acTexts: readonly string[];
 }
 
+/** Normalize line endings so a CRLF spec parses identically to an LF one. */
+function normalizeText(specText: string): string {
+  return specText.replace(/\r\n?/g, "\n");
+}
+
 /** The spec frontmatter block body (between the leading `---` fences), or null. */
-function frontmatterBlock(specText: string): string | null {
-  const m = /^---\n([\s\S]*?)\n---/.exec(specText);
+function frontmatterBlock(normalizedSpec: string): string | null {
+  const m = /^---\n([\s\S]*?)\n---/.exec(normalizedSpec);
   return m === null ? null : (m[1] ?? "");
 }
 
-/** A single frontmatter scalar value (trimmed), or null when absent/empty. */
-function frontmatterValue(specText: string, key: string): string | null {
-  const fm = frontmatterBlock(specText);
+/**
+ * A single frontmatter scalar value, normalized to match how a YAML reader (and
+ * the attest gate) sees it, or null when absent/empty. Handles the quirks a
+ * naive `.*` capture gets wrong:
+ *   - strips a trailing YAML comment — but ONLY a whitespace-preceded `#`, since
+ *     an unspaced `#` is a value char (e.g. a URL fragment `index.html#loop`);
+ *   - unwraps matching surrounding single/double quotes;
+ *   - NFC-normalizes so encoding differences are not false drift.
+ * `normalizedSpec` must already be line-ending normalized.
+ */
+function frontmatterValue(normalizedSpec: string, key: string): string | null {
+  const fm = frontmatterBlock(normalizedSpec);
   if (fm === null) return null;
   const m = new RegExp(`^${key}:[ \\t]*(.*)$`, "m").exec(fm);
   if (m === null) return null;
-  const value = (m[1] ?? "").trim();
+  let value = (m[1] ?? "").replace(/\s+#.*$/, "").trim();
+  if (
+    value.length >= 2 &&
+    ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))
+  ) {
+    value = value.slice(1, -1);
+  }
+  value = value.normalize("NFC");
   return value === "" ? null : value;
 }
 
@@ -58,15 +79,21 @@ function frontmatterValue(specText: string, key: string): string | null {
  * one-card FIX/US file with a file-level AC block is read the same way.
  */
 export function contractProjection(specText: string, storyId: string): ContractProjection {
-  const acTexts = acForStory(specText, storyId, { fileOwned: true })
-    .map((it) => it.text.trim())
-    .filter((text) => text !== "")
-    .sort();
+  const text = normalizeText(specText);
+  // A true SET (deduped) of NFC-normalized AC texts, sorted so identity is
+  // order-independent. Uses only AcItem.text — never `.checked` — so a checkbox
+  // flip is not part of the contract.
+  const acTexts = [
+    ...new Set(
+      acForStory(text, storyId, { fileOwned: true })
+        .map((it) => it.text.trim().normalize("NFC"))
+        .filter((t) => t !== ""),
+    ),
+  ].sort();
   return {
-    deliverableUrl:
-      frontmatterValue(specText, "deliverable_url") ?? frontmatterValue(specText, "screenshot_url"),
-    deliverableCmd: frontmatterValue(specText, "deliverable_cmd"),
-    screenshotExempt: frontmatterValue(specText, "screenshot_exempt"),
+    deliverableUrl: frontmatterValue(text, "deliverable_url") ?? frontmatterValue(text, "screenshot_url"),
+    deliverableCmd: frontmatterValue(text, "deliverable_cmd"),
+    screenshotExempt: frontmatterValue(text, "screenshot_exempt"),
     acTexts,
   };
 }

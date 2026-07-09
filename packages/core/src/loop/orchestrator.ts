@@ -731,7 +731,7 @@ export type CycleCommand =
   | { kind: "wait_merge"; branch: string; elapsedSec: number } // delivery/pr nextWaitAction.
   | { kind: "reconcile" } // reconcile/engine reconcileMergeEvidence.
   | { kind: "cleanup_environment"; terminalStatus?: V2CycleStatus } // US-LOOP-088: post-cycle env cleanup before worktree removal.
-  | { kind: "cleanup_worktree"; branch: string } // _worktree_cleanup.
+  | { kind: "cleanup_worktree"; branch: string; bundleUnpushed?: boolean } // _worktree_cleanup. US-LOOP-095: bundleUnpushed=false when work is already on the remote (published/orphan) to skip the quarantine-bundle safety net.
   | { kind: "emit_event"; event: RollEvent } // events/bus appendEvent (I8).
   | { kind: "append_run"; status: V2CycleStatus; outcome: TerminalOutcome; cycleId: string; failure_class?: FailureClass; root_cause_key?: string } // events/bus upsertRun.
   | { kind: "append_alert"; message: string } // _worktree_alert.
@@ -1200,7 +1200,9 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
         // an auditable branch.
         const extra: CycleCommand[] =
           status === "idle" || status === "published"
-            ? [{ kind: "cleanup_environment" }, { kind: "cleanup_worktree", branch: state.ctx.branch }]
+            // published: work is on the remote branch already → skip the bundle
+            // (US-LOOP-095 AC3, no noise). idle: no commits, bundle is a no-op.
+            ? [{ kind: "cleanup_environment" }, { kind: "cleanup_worktree", branch: state.ctx.branch, bundleUnpushed: status !== "published" }]
             : status === "gave_up"
               ? // Hook 1: an agent ran but produced nothing — clean the (empty)
                 // worktree AND ALERT on the FIRST occurrence (no 2-hit streak).
@@ -1243,7 +1245,7 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
                   { kind: "rescue_leaked", cycleId: state.ctx.cycleId },
                   {
                     kind: "append_alert",
-                    message: `cycle ${state.ctx.cycleId}: local main is ahead of origin/main by ${event.facts.mainAhead} commit(s) while cycle branch has ${event.facts.commitsAhead} commit(s) — leaked commits saved to rescue/leaked-${state.ctx.cycleId} ref; main reset to origin/main (FIX-903)`,
+                    message: `cycle ${state.ctx.cycleId}: local main is ahead of origin/main by ${event.facts.mainAhead} commit(s) while cycle branch has ${event.facts.commitsAhead} commit(s) — leaked commits saved to quarantine bundle rescue-leaked-${state.ctx.cycleId}.bundle; main reset to origin/main (FIX-903/US-LOOP-095)`,
                   },
                 ]
             : status === "failed" && event.facts.commitsAhead > 0
@@ -1271,7 +1273,8 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
         // ff-merged (gh-missing tier → done) → clean worktree → terminal.
         // FIX-1032a: check delivery gate for PR loop health.
         const extra: CycleCommand[] = [
-          { kind: "cleanup_environment" }, { kind: "cleanup_worktree", branch: state.ctx.branch },
+          // published/done: work is on the remote (or ff-merged) → skip the bundle.
+          { kind: "cleanup_environment" }, { kind: "cleanup_worktree", branch: state.ctx.branch, bundleUnpushed: false },
         ];
         if (status === "published" && state.ctx.prLoopHealthy === false) {
           const gate = deliveryGate({
@@ -1293,7 +1296,8 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
       if (status === "orphan") {
         // Commits pushed for audit; worktree cleaned (bin/roll:9333).
         return terminate({ ...state, phase: "cleanup" }, "orphan", [
-          { kind: "cleanup_environment" }, { kind: "cleanup_worktree", branch: state.ctx.branch },
+          // orphan: commits were pushed to the remote for audit → skip the bundle.
+          { kind: "cleanup_environment" }, { kind: "cleanup_worktree", branch: state.ctx.branch, bundleUnpushed: false },
           { kind: "append_alert", message: `cycle ${state.ctx.cycleId}: publish failed; orphan branch+tag pushed; worktree cleaned` },
         ]);
       }

@@ -44,7 +44,7 @@
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { realpath } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import {
   type ProjectIdentityInputs,
@@ -197,10 +197,32 @@ export async function worktreeRemove(
   repoCwd: string,
   path: string,
   branch: string,
+  bundleUnpushed = true,
 ): Promise<GitResult> {
+  // US-LOOP-095: the cycle worktree is DETACHED (US-LOOP-094) — its commits are
+  // pinned ONLY by the worktree HEAD, so removing the worktree would make any
+  // UNPUSHED work unreachable (no branch holds it). Before removing, if HEAD has
+  // commits not on any remote-tracking ref, save them to a quarantine bundle so
+  // "push failed / crashed / swept" never loses work. Recover with
+  // `git bundle unbundle <f>` / `git fetch <f> <sha>`. The bundle lives under the
+  // existing file-retention dir (loop_gc) — no branch pollution. Callers pass
+  // bundleUnpushed=false on paths where the work is already on the remote
+  // (published/orphan) to avoid noise (AC3).
+  if (bundleUnpushed) {
+    const unpushed = await git(["rev-list", "HEAD", "--not", "--remotes"], path); // in-worktree
+    if (unpushed.code === 0 && unpushed.stdout.trim() !== "") {
+      const quarantineDir = join(repoCwd, ".roll", "loop", "quarantine");
+      mkdirSync(quarantineDir, { recursive: true });
+      const safe = branch.replace(/[^A-Za-z0-9._-]/g, "-");
+      const bundlePath = join(quarantineDir, `leaked-${safe}.bundle`);
+      await git(["bundle", "create", bundlePath, "HEAD"], path); // absolute path — cwd is about to be removed
+    }
+  }
   const r = await git(["worktree", "remove", "--force", path], repoCwd); // lenient
   rmSyncQuiet(path);
-  await git(["branch", "-D", branch], repoCwd); // lenient
+  // US-LOOP-095: reclaim the worktree admin metadata immediately (git's default
+  // prune expiry is 3 months). No `git branch -D` — detached, there is no branch.
+  await git(["worktree", "prune", "--expire", "now"], repoCwd); // lenient
   return { code: 0, stdout: r.stdout, stderr: r.stderr };
 }
 

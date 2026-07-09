@@ -212,7 +212,7 @@ export async function executeTerminalCommand(
       const r = await ports.git.rescueLeaked(ports.repoCwd, refName);
       ports.events.appendAlert(
         ports.paths.alertsPath,
-        `rescue_leaked ${cmd.cycleId}: saved ${r.rescuedSha.slice(0, 8)} to ${refName} ref; main reset ${r.code === 0 ? "ok" : "failed"}`,
+        `rescue_leaked ${cmd.cycleId}: saved ${r.rescuedSha.slice(0, 8)} to quarantine bundle ${refName}.bundle; main reset ${r.code === 0 ? "ok" : "failed"}`,
       );
       // FIX-903 AC3: emit an audit event so the rescue is observable.
       ports.events.appendEvent(ports.paths.eventsPath, {
@@ -277,7 +277,9 @@ export async function executeTerminalCommand(
       } catch {
         /* tolerant cleanup, mirrors _worktree_cleanup */
       }
-      await ports.git.worktreeRemove(ports.repoCwd, ports.paths.worktreePath, cmd.branch);
+      // US-LOOP-095: worktreeRemove bundles unpushed detached work unless the
+      // caller marks it already-on-remote (bundleUnpushed=false).
+      await ports.git.worktreeRemove(ports.repoCwd, ports.paths.worktreePath, cmd.branch, cmd.bundleUnpushed);
       return {};
 
     // events/bus appendEvent (I8 — terminal event written unconditionally).

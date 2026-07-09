@@ -2814,7 +2814,12 @@ describe("executeCommand — command → executor mapping", () => {
     expect(res.code).toBe(0);
     expect(res.rescuedSha).toBe(leakedHead);
     expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim()).toBe(originHead);
-    expect(execFileSync("git", ["rev-parse", "rescue/leaked-FIX-402"], { cwd: repo, encoding: "utf8" }).trim()).toBe(leakedHead);
+    // US-LOOP-095: leaked commits are saved to a quarantine BUNDLE (not a
+    // rescue/leaked-* branch), holding rescuedSha; no local branch is created.
+    const bundlePath = join(repo, ".roll", "loop", "quarantine", "rescue-leaked-FIX-402.bundle");
+    expect(existsSync(bundlePath)).toBe(true);
+    expect(execFileSync("git", ["bundle", "list-heads", bundlePath], { cwd: repo, encoding: "utf8" })).toContain(leakedHead);
+    expect(execFileSync("git", ["branch", "--list", "rescue/leaked-FIX-402"], { cwd: repo, encoding: "utf8" }).trim()).toBe("");
     expect(readFileSync(join(repo, ".roll", "backlog.md"), "utf8")).toContain("✅ Done");
     expect(execFileSync("git", ["status", "--porcelain", "--", ".roll/backlog.md"], { cwd: repo, encoding: "utf8" })).toContain("M .roll/backlog.md");
   });

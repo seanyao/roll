@@ -196,6 +196,17 @@ export async function worktreeAdd(
  * Returns the streams of the `worktree remove` for diagnostics, but `code` is
  * forced to 0 to match the oracle's `return 0`.
  */
+/**
+ * US-LOOP-095/097: the absolute path of a quarantine bundle for a leaked/unpushed
+ * ref, under the repo's loop-gc retention dir (`.roll/loop/quarantine`). `stem`
+ * is sanitized to a safe filename. Single source of truth for the quarantine
+ * location + name convention (shared by worktreeRemove and rescueLeakedMain).
+ */
+export function quarantineBundlePath(repoCwd: string, stem: string): string {
+  const safe = stem.replace(/[^A-Za-z0-9._-]/g, "-");
+  return join(repoCwd, ".roll", "loop", "quarantine", `${safe}.bundle`);
+}
+
 export async function worktreeRemove(
   repoCwd: string,
   path: string,
@@ -214,10 +225,8 @@ export async function worktreeRemove(
   if (bundleUnpushed) {
     const unpushed = await git(["rev-list", "HEAD", "--not", "--remotes"], path); // in-worktree
     if (unpushed.code === 0 && unpushed.stdout.trim() !== "") {
-      const quarantineDir = join(repoCwd, ".roll", "loop", "quarantine");
-      mkdirSync(quarantineDir, { recursive: true });
-      const safe = branch.replace(/[^A-Za-z0-9._-]/g, "-");
-      const bundlePath = join(quarantineDir, `leaked-${safe}.bundle`);
+      const bundlePath = quarantineBundlePath(repoCwd, `leaked-${branch}`);
+      mkdirSync(dirname(bundlePath), { recursive: true });
       await git(["bundle", "create", bundlePath, "HEAD"], path); // absolute path — cwd is about to be removed
     }
   }

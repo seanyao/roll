@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { CycleContext } from "@roll/core";
+import { quarantineBundlePath } from "@roll/infra";
 import { killLiveAgents } from "./agent-spawn.js";
 import { checkMainDirty, quarantineEventToRollEvent, quarantineMainCheckout, type QuarantineResult, type WriteProtectionResult } from "./main-checkout-guard.js";
 import type { CleanupResult } from "./environment-cleanup.js";
@@ -35,10 +36,8 @@ export async function rescueLeakedMain(
   // (retro: 51 local); the bundle holds `rescuedSha`, lands in the existing
   // file-retention dir (loop_gc), and is recovered with `git bundle unbundle`.
   try {
-    const quarantineDir = join(repoCwd, ".roll", "loop", "quarantine");
-    mkdirSync(quarantineDir, { recursive: true });
-    const safe = refName.replace(/[^A-Za-z0-9._-]/g, "-");
-    const bundlePath = join(quarantineDir, `${safe}.bundle`);
+    const bundlePath = quarantineBundlePath(repoCwd, refName);
+    mkdirSync(dirname(bundlePath), { recursive: true });
     // Bundle HEAD (still the leaked commit here — the reset below happens after);
     // `git bundle` needs a ref, not a bare SHA, or it refuses an "empty" bundle.
     await execFileAsync("git", ["bundle", "create", bundlePath, "HEAD"], {

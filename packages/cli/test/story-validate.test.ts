@@ -100,7 +100,7 @@ describe("roll story validate — FIX-339 AC7", () => {
     const p = project(
       "FIX-V5",
       "cli-visual",
-      "---\nid: FIX-V5\nscreenshot_exempt: pure data migration; no rendered surface\n---\n# FIX-V5\n\n## Acceptance Criteria\n\n- [ ] rows migrate\n",
+      "---\nid: FIX-V5\nscreenshot_exempt: pure data migration; no rendered surface; substitute evidence = migration checksum tests\n---\n# FIX-V5\n\n## Acceptance Criteria\n\n- [ ] rows migrate\n",
     );
     const r = run(p, ["FIX-V5"]);
     expect(r.code).toBe(0);

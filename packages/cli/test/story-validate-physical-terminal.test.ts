@@ -208,7 +208,7 @@ describe("US-INIT-003a — roll story validate recognizes physical_terminal", ()
     const spec = [
       "---",
       "id: US-EXEMPT-OK",
-      "screenshot_exempt: pure data migration, no visible surface",
+      "screenshot_exempt: pure data migration, no visible surface; substitute evidence = migration checksum tests",
       "---",
       "",
       "# US-EXEMPT-OK",

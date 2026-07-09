@@ -35,7 +35,7 @@ import { acForStory, draftAcMap } from "@roll/core";
 import type { CycleActivityEvent, RollEvent } from "@roll/spec";
 import { cardArchiveDir } from "../lib/archive.js";
 import type { AgentSpawn, AgentSpawnResult } from "./agent-spawn.js";
-import { storyHasAcBlock, storyRequiresScreenshot, storySpecPath } from "./attest-gate.js";
+import { evidencePathsUnresolved, storyHasAcBlock, storyRequiresScreenshot, storySpecPath } from "./attest-gate.js";
 import { capturedEvidenceRefs, type CapturedRef } from "./captured-evidence.js";
 
 /** Hard wall-clock cap for the remediation spawn — writing one JSON file from
@@ -63,7 +63,7 @@ export function acMapPath(worktreeCwd: string, storyId: string): string {
  * fires with the draft-confirmation prompt. Once no row needs confirmation,
  * this returns false — the ac-map is usable.
  */
-export function needsAcMapRemediation(worktreeCwd: string, storyId: string): boolean {
+function needsAcMapDraftSeed(worktreeCwd: string, storyId: string): boolean {
   if (storyId === "") return false;
   if (storyHasAcBlock(worktreeCwd, storyId) !== true) return false;
   const p = acMapPath(worktreeCwd, storyId);
@@ -83,6 +83,11 @@ export function needsAcMapRemediation(worktreeCwd: string, storyId: string): boo
   } catch {
     return true; // malformed ac-map → remediation needed
   }
+}
+
+export function needsAcMapRemediation(worktreeCwd: string, storyId: string): boolean {
+  if (needsAcMapDraftSeed(worktreeCwd, storyId)) return true;
+  return evidencePathsUnresolved(worktreeCwd, storyId).length > 0;
 }
 
 /**
@@ -429,7 +434,7 @@ export async function runAcMapSelfHeal(opts: AcMapSelfHealOptions): Promise<AcMa
 
   const archiveCwd = opts.archiveCwd ?? opts.worktreeCwd;
 
-  if (needsAcMapRemediation(archiveCwd, opts.storyId)) {
+  if (needsAcMapDraftSeed(archiveCwd, opts.storyId)) {
     try {
       const specPath = storySpecPath(archiveCwd, opts.storyId);
       if (specPath !== null) {

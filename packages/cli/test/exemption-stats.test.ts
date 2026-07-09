@@ -118,4 +118,17 @@ describe("renderExemptionSignal (US-EVID-026 dashboard smell signal)", () => {
     });
     expect(lines.some((l) => l.includes("tiny"))).toBe(false);
   });
+
+  it("single-epic corpus with no rest still flags when itself heavily exempt (restRate=0 guard)", () => {
+    // The only epic holds the whole corpus; restTotal=0 ⇒ restRate=0, so a
+    // heavily-exempt sole epic (>= 3 cards) is still a real signal, not a divide-by-zero.
+    const lines = renderExemptionSignal({
+      total: 5,
+      exempt: 5,
+      rate: 1,
+      byEpic: [{ epic: "only", total: 5, exempt: 5 }],
+    });
+    expect(lines[0]).toBe("screenshot_exempt: 100% (5/5)");
+    expect(lines.some((l) => l.includes("only") && l.includes("100%"))).toBe(true);
+  });
 });

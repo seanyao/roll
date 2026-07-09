@@ -107,6 +107,16 @@ export function exemptionSummaryLine(stats: ExemptionStats): string {
   return `screenshot_exempt: ${pct}% (${stats.exempt}/${stats.total})`;
 }
 
+/**
+ * Dashboard smell-signal lines: the overall summary, then one ⚠ line per epic
+ * whose exemption is a HIGH OUTLIER. An epic is compared against the rest of the
+ * corpus (leave-one-out) — not the all-in overall — so a large, heavily-exempt
+ * epic cannot hide by inflating the very baseline it is measured against.
+ * Two guards keep it a signal rather than noise: `epic.total >= 3` (one 100%
+ * card is not a trend) and a `>= 0.25` (25 percentage-point) gap over the rest
+ * (a materiality floor, tuned to flag the ~27% legacy epics without crying wolf
+ * on small drifts). Observe-only — the caller renders these; nothing gates on them.
+ */
 export function renderExemptionSignal(stats: ExemptionStats): string[] {
   if (stats.total === 0) return [];
 

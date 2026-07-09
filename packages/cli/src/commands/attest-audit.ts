@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { parseBacklog } from "@roll/core";
 import { STATUS_MARKER } from "@roll/spec";
 import { evidencePathsUnresolved, readAcMapEntries, verificationReportPath } from "../runner/attest-gate.js";
+import { exemptionAudit, renderExemptionAudit } from "../runner/exemption-audit.js";
 
 export const ATTEST_AUDIT_USAGE =
   "Usage: roll attest audit [--json]\n" +
@@ -55,12 +56,16 @@ export async function attestAuditCommand(args: string[], cwd = process.cwd()): P
   }
   const json = args.includes("--json");
   const { issues, debts } = auditAcceptanceEvidenceDetailed(cwd);
+  const exemption = exemptionAudit(cwd);
   if (json) {
-    process.stdout.write(`${JSON.stringify({ issues, debts }, null, 2)}\n`);
+    const hasExemptions = exemption.cards.length > 0 || exemption.blanketEpics.length > 0;
+    const payload = hasExemptions ? { issues, debts, exemptions: exemption } : { issues, debts };
+    process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
     return issues.length === 0 && debts.length === 0 ? 0 : 1;
   }
   if (issues.length === 0 && debts.length === 0) {
     process.stdout.write("attest audit: no dangling evidence references found\n");
+    process.stdout.write(`${renderExemptionAudit(exemption)}\n`);
     return 0;
   }
   if (issues.length > 0) {
@@ -77,5 +82,6 @@ export async function attestAuditCommand(args: string[], cwd = process.cwd()): P
       process.stdout.write(`  - ${debt.reason}\n`);
     }
   }
+  process.stdout.write(`${renderExemptionAudit(exemption)}\n`);
   return 1;
 }

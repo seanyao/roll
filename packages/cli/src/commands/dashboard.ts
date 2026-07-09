@@ -40,6 +40,7 @@ import {
 } from "@roll/infra";
 import { getAgentSpec } from "@roll/core";
 import { computeListCost, currencyFor } from "./prices-cost.js";
+import { exemptionStats, renderExemptionSignal } from "../runner/exemption-stats.js";
 import { TRUTH_SCHEMA_EPOCH_SEC, cycleTruthFromRow, deliveryGateDiagnosticsFromRows, outcomeToPanel, type DeliveryGateDiagnostic } from "../lib/truth-adapter.js";
 import { collectToolEvidenceFromEventsPath, formatToolCostSummary } from "../lib/tool-display.js";
 import { TZ_OFFSET_MS, dayKeyOffset, pad2, shDayKey, shHHMM, shYmdHm, toShanghai } from "../lib/sh-time.js";
@@ -2520,6 +2521,11 @@ export function dashboardCommand(argv: string[]): number {
     now,
     rtDir: useFixture || slug === null ? null : loopRuntimeDir(slug),
   });
+  if (!useFixture) {
+    const corpusRoot = (process.env["ROLL_MAIN_PROJECT"] ?? "").trim() || process.cwd();
+    const sig = renderExemptionSignal(exemptionStats(corpusRoot));
+    if (sig.length > 0) out.push("", ...sig);
+  }
   process.stdout.write(out.join("\n") + "\n");
   return 0;
 }

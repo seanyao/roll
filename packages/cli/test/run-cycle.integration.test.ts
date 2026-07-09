@@ -63,6 +63,28 @@ function git(cwd: string, args: string[]): string {
   return execFileSync("git", [...args], { cwd, encoding: "utf8" });
 }
 
+function gitSucceeds(cwd: string, args: string[]): boolean {
+  try {
+    execFileSync("git", [...args], { cwd, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function localLoopCycleBranches(repo: string): string[] {
+  const out = git(repo, ["branch", "--list", "loop/cycle-*"]).trim();
+  return out === "" ? [] : out.split("\n").map((line) => line.replace(/^\*\s*/, "").trim());
+}
+
+function bareRemoteHasRef(remote: string, branch: string): boolean {
+  return gitSucceeds(remote, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`]);
+}
+
+function currentGitBranch(cwd: string): string {
+  return git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
+}
+
 const BACKLOG = [
   "| ID | Description | Status |",
   "|----|-------------|--------|",
@@ -156,15 +178,19 @@ const CLAUDE_STREAM_JSON = [
 const shimAgentTcr: AgentSpawn = async (_agent, opts): Promise<AgentSpawnResult> => {
   const wt = opts.cwd;
   const storyId = opts.storyId ?? "US-RUN-001";
+  const cycleIdFromRunDir = opts.runDir?.split(/[\\/]/).filter((part) => part !== "").pop();
+  const cycleIdFromWorktree = /cycle-([^/\\]+)$/.exec(wt)?.[1];
+  const scoreSessionId = `${cycleIdFromRunDir ?? cycleIdFromWorktree ?? "integration-cycle"}:score:pi:shim:1`;
   const notesDir = join(wt, ".roll", "features", "uncategorized", storyId, "notes");
   mkdirSync(notesDir, { recursive: true });
   // FIX-343 (step ③, B-decision): the attest gate honors ONLY an INDEPENDENT
   // fresh-session PEER score (`scoring: pair` + a `scored-by` + a `session-id`
   // that is NOT the builder's session id). The shim simulates the score stage's
   // peer note landing in the persistent .roll (the worktree's .roll is symlinked
-  // to the repo's). Its session-id is a fixed fresh-session token that can NEVER
-  // equal the builder's minted `<cycleId>:build:claude:<clock>` id, so the note
-  // qualifies as an independent fresh session and the delivery reaches PASS.
+  // to the repo's). Its session-id is minted under THIS cycle's score namespace
+  // (`<cycleId>:score:...`) and can NEVER equal the builder's
+  // `<cycleId>:build:claude:<clock>` id, so the note qualifies as an independent
+  // fresh-session score and the delivery reaches PASS.
   writeFileSync(
     join(notesDir, `2026-06-08-roll-build-${storyId}-shim.md`),
     [
@@ -176,7 +202,7 @@ const shimAgentTcr: AgentSpawn = async (_agent, opts): Promise<AgentSpawnResult>
       "ts: 2026-06-08T00:00:00Z",
       "scoring: pair",
       "scored-by: pi",
-      "session-id: integration-fresh-score-session-001",
+      `session-id: ${scoreSessionId}`,
       "---",
       "",
       "Shim delivery wrote the required peer review score note.",
@@ -222,6 +248,120 @@ function fixedClock(start: number): { clock: () => number; set: (v: number) => v
 }
 
 describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
+  it("US-LOOP-098 proves detached cycle branch governance against real git refs", async () => {
+    const { repo, remote } = makeGitignoredFixture("branch-gov");
+    // CI runners carry no global git identity; the cycle's own commits (worktree
+    // product commit, .roll evidence/metadata push) run with ambient git, so pin
+    // a persistent identity in the repo (shared by its worktrees) AND the nested
+    // .roll repo — otherwise publish aborts with "Author identity unknown".
+    for (const dir of [repo, join(repo, ".roll")]) {
+      git(dir, ["config", "user.email", "t@t"]);
+      git(dir, ["config", "user.name", "t"]);
+    }
+    writeFileSync(join(repo, ".roll", "policy.yaml"), "loop_safety:\n  attest_gate: soft\n  peer_gate: soft\n", "utf8");
+    const rt = tmp("branch-gov-rt");
+    const cycleId = "20260709-010203-4098";
+    const branch = `loop/cycle-${cycleId}`;
+    const p = paths(rt, cycleId);
+    const observedStages: string[] = [];
+    let mergeDeletedRemoteRef = false;
+
+    const expectMainHasNoLocalLoopBranches = (stage: string): void => {
+      expect(localLoopCycleBranches(repo), stage).toEqual([]);
+      observedStages.push(stage);
+    };
+    const expectWorktreeDetached = (stage: string): void => {
+      expect(currentGitBranch(p.worktreePath), stage).toBe("HEAD");
+    };
+
+    const shim: AgentSpawn = async (agent, opts) => {
+      const r = await shimAgentTcr(agent, opts);
+      expectMainHasNoLocalLoopBranches("after-agent-commit");
+      expectWorktreeDetached("after-agent-commit");
+      return r;
+    };
+
+    const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
+    const ports: Ports = {
+      ...base,
+      agentSpawn: shim,
+      installedAgents: () => ["claude"],
+      attest: {
+        async render() {
+          return 0;
+        },
+      },
+      git: {
+        ...base.git,
+        async worktreeAdd(repoCwd, path, branchName, baseRef) {
+          const r = await base.git.worktreeAdd(repoCwd, path, branchName, baseRef);
+          expect(r.code).toBe(0);
+          expectMainHasNoLocalLoopBranches("after-worktree-creation");
+          expectWorktreeDetached("after-worktree-creation");
+          return r;
+        },
+        async worktreeRemove(repoCwd, path, branchName, bundleUnpushed) {
+          const r = await base.git.worktreeRemove(repoCwd, path, branchName, bundleUnpushed);
+          expectMainHasNoLocalLoopBranches("after-cleanup");
+          return r;
+        },
+      },
+      github: {
+        async repoSlug() {
+          return "fixture/runner";
+        },
+        async runPublishPlan(plan) {
+          expectMainHasNoLocalLoopBranches("after-refspec-push");
+          expectWorktreeDetached("after-refspec-push");
+          expect(bareRemoteHasRef(remote, branch), "remote branch exists after refspec push").toBe(true);
+
+          for (const step of plan) {
+            if (step.kind === "gh-pr-merge-auto" || step.kind === "gh-pr-merge-admin") {
+              git(remote, ["update-ref", "-d", `refs/heads/${branch}`]);
+              mergeDeletedRemoteRef = true;
+              expect(bareRemoteHasRef(remote, branch), "remote branch deleted by simulated --delete-branch merge").toBe(false);
+            }
+          }
+
+          expect(mergeDeletedRemoteRef, "fake gh pr merge must simulate --delete-branch on the bare remote").toBe(true);
+          expectMainHasNoLocalLoopBranches("after-publish");
+          expectWorktreeDetached("after-publish");
+          return { status: 0, prUrl: "https://example/pr/4098", ok: true };
+        },
+        async prState() {
+          return "UNKNOWN";
+        },
+        async prMergeInfo() {
+          return mergeDeletedRemoteRef
+            ? { state: "MERGED", mergedAt: "2026-07-09T00:00:00Z", mergeCommit: "branchgov098" }
+            : { state: "UNKNOWN" };
+        },
+        async openPrTitles() {
+          return [];
+        },
+      },
+    };
+
+    const result = await runCycleOnce({
+      ports,
+      ctx: { cycleId, branch, loop: "ci" as never },
+    });
+
+    expect(result.ran).toBe(true);
+    const failureContext = existsSync(p.alertsPath) ? readFileSync(p.alertsPath, "utf8") : "";
+    expect(result.terminal, failureContext).toBe("published");
+    expect(observedStages).toEqual([
+      "after-worktree-creation",
+      "after-agent-commit",
+      "after-refspec-push",
+      "after-publish",
+      "after-cleanup",
+    ]);
+    expect(localLoopCycleBranches(repo)).toEqual([]);
+    expect(bareRemoteHasRef(remote, branch)).toBe(false);
+    expect(existsSync(p.worktreePath)).toBe(false);
+  });
+
   it("drives pick→route→worktree→execute→publish→done, writes events/runs, releases lock", async () => {
     const { repo } = makeFixture("e2e");
     const rt = tmp("e2e-rt");
@@ -606,7 +746,7 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
  *   4. a dead claim left by a killed cycle is recycled to 📋 Todo at the next
  *      cycle's preflight (the inner lock guarantees single-flight).
  */
-function makeGitignoredFixture(tag: string): { repo: string } {
+function makeGitignoredFixture(tag: string): { repo: string; remote: string } {
   const remote = tmp(`${tag}-remote`);
   git(remote, ["init", "-q", "--bare", "-b", "main"]);
   const seed = tmp(`${tag}-seed`);
@@ -623,7 +763,7 @@ function makeGitignoredFixture(tag: string): { repo: string } {
   writeFileSync(join(repo, ".roll", "backlog.md"), BACKLOG, "utf8");
   seedFeatureCard(repo, "US-RUN-001");
   initRollMetaOrigin(repo, tag);
-  return { repo };
+  return { repo, remote };
 }
 
 /**

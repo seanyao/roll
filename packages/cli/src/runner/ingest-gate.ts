@@ -9,7 +9,7 @@
  * cards). Runtime `pick_story` stays non-blocking (owner red line: a false
  * positive must never stall the loop). Phased: metric → alert → block-on-ingest.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { acForStory } from "@roll/core";
 import { declaresAnySurface } from "./attest-gate.js";
@@ -50,7 +50,10 @@ export function ingestSurfaceReadiness(specText: string, storyId: string): Inges
 export function ingestGateMode(repoCwd: string): IngestGateMode {
   try {
     const raw = readFileSync(join(repoCwd, ".roll", "policy.yaml"), "utf8");
-    const m = /^\s*ingest_gate:\s*(\w+)/m.exec(raw);
+    // Require an INDENTED key (nested under a parent such as `loop_safety:`),
+    // never a top-level `ingest_gate:`. Conservative default + exact alert/block
+    // match keep a stray match harmless, but scoping avoids the loosest reads.
+    const m = /^[ \t]+ingest_gate:[ \t]*(\w+)/m.exec(raw);
     const v = (m?.[1] ?? "").toLowerCase();
     return v === "alert" || v === "block" ? v : "metric";
   } catch {
@@ -72,7 +75,13 @@ function holdPath(runtimeDir: string): string {
 export function readIngestHolds(runtimeDir: string): IngestHold[] {
   try {
     const arr = JSON.parse(readFileSync(holdPath(runtimeDir), "utf8")) as unknown;
-    return Array.isArray(arr) ? (arr as IngestHold[]) : [];
+    if (!Array.isArray(arr)) return [];
+    // Per-element validation — a hand-edited/corrupt file must not yield `null`
+    // or string entries that crash callers reading `.storyId`.
+    return arr.filter(
+      (e): e is IngestHold =>
+        typeof e === "object" && e !== null && typeof (e as IngestHold).storyId === "string",
+    );
   } catch {
     return [];
   }

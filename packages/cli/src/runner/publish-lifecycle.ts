@@ -7,7 +7,7 @@ import { cardArchiveDir } from "../lib/archive.js";
 import { validateStoryVisualEvidence } from "../lib/design-visual-evidence.js";
 import { acMapPath } from "./attest-remediation.js";
 import { declaresAnySurface, screenshotExemption } from "./attest-gate.js";
-import { ingestGateMode, recordIngestHold } from "./ingest-gate.js";
+import { ingestGateMode, ingestSurfaceReadiness, recordIngestHold } from "./ingest-gate.js";
 import type { Ports } from "./ports.js";
 import { eventTs } from "./runner-time.js";
 
@@ -81,7 +81,12 @@ export function runVisualEvidencePreflight(ports: Ports, storyId: string, cycleI
         // positive must never stall the loop); `block` means "held for an
         // authoring fix", never "crash ingest".
         const ingestMode = ingestGateMode(ports.repoCwd);
-        if (ingestMode === "alert" || ingestMode === "block") {
+        // US-EVID-022: gate the hold on the canonical structural classifier so
+        // the AC-block guard applies — a placeholder card with no AC block (and
+        // no surface) is NOT held (nothing to gate), unlike the raw
+        // declaresAnySurface check above which the pre-existing diagnostic uses.
+        const needsHold = ingestSurfaceReadiness(specText, storyId).needsHold;
+        if (needsHold && (ingestMode === "alert" || ingestMode === "block")) {
           recordIngestHold(
             dirname(ports.paths.eventsPath),
             storyId,

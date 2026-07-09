@@ -6,6 +6,7 @@
 
 | Path | Title | Category | Description |
 |------|-------|----------|-------------|
+| `docs/acceptance-contract.md` | 验收契约权属 / Acceptance Contract Ownership | process | 契约是设计层拥有的冻结产物(cycle 起始快照+漂移检测)、证据分类(web/cmd/roll-capture/named-tests)、能力天花板(存在性/绑定/权属 vs evaluator 判内容) |
 | `docs/architecture.md` | 系统设计 / System Architecture | architecture | 产品定位、设计原则、系统架构、领域模型、行为合同、事实来源 (US-TRUTH)、结构化交付真相、唯一查询入口、存储裁定、消费者契约 |
 | `docs/difftest-freeze-paradigm.md` | 快照冻结测试范式 | testing | CLI 命令输出用 Vitest 快照冻结的行为契约测试范式与可移植性陷阱 |
 | `docs/live-console.md` | 实时控制台指南 / Live Console Guide | guide | CLI-first 实时可观测指南：`roll loop cycle watch` 用法、三流契约、静态导出 vs 实时服务、证据按构造 |
@@ -15,8 +16,8 @@
 
 ## Coverage Summary
 
-- Total docs indexed: 6
-- By category: architecture (1) / guide (1) / migration (1) / testing (1) / product (1) / process (1)
+- Total docs indexed: 7
+- By category: architecture (1) / guide (1) / migration (1) / testing (1) / product (1) / process (2)
 
 ## Key Architecture Chapters (US-TRUTH epic)
 

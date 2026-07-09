@@ -12,13 +12,10 @@
  *   - the `${branch#loop/}` title-suffix expansion vs {@link branchTitleSuffix}.
  *   - the `_loop_emit_pr_final` state→outcome `case` (bin/roll:13564-13569) vs
  *     {@link prStateToOutcome}.
- *   - the cycle-branch merged/open label (`_loop_branches`, bin/roll:13069-13072)
- *     — a pure mapping of the ancestry boolean — vs {@link cycleBranchStatus}.
  */
 import { describe, expect, it } from "vitest";
 import {
   branchTitleSuffix,
-  cycleBranchStatus,
   dedupeSortedIds,
   parseClaimedIdsFromBacklog,
   prStateToOutcome,
@@ -83,11 +80,3 @@ describe("frozen: prStateToOutcome == _loop_emit_pr_final case", () => {
   }
 });
 
-describe("frozen: cycleBranchStatus == git merge-base --is-ancestor label", () => {
-  it("ancestor of main → merged", () => {
-    expect(cycleBranchStatus(true)).toBe("merged");
-  });
-  it("not an ancestor → open", () => {
-    expect(cycleBranchStatus(false)).toBe("open");
-  });
-});

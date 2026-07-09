@@ -2814,7 +2814,12 @@ describe("executeCommand — command → executor mapping", () => {
     expect(res.code).toBe(0);
     expect(res.rescuedSha).toBe(leakedHead);
     expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim()).toBe(originHead);
-    expect(execFileSync("git", ["rev-parse", "rescue/leaked-FIX-402"], { cwd: repo, encoding: "utf8" }).trim()).toBe(leakedHead);
+    // US-LOOP-095: leaked commits are saved to a quarantine BUNDLE (not a
+    // rescue/leaked-* branch), holding rescuedSha; no local branch is created.
+    const bundlePath = join(repo, ".roll", "loop", "quarantine", "rescue-leaked-FIX-402.bundle");
+    expect(existsSync(bundlePath)).toBe(true);
+    expect(execFileSync("git", ["bundle", "list-heads", bundlePath], { cwd: repo, encoding: "utf8" })).toContain(leakedHead);
+    expect(execFileSync("git", ["branch", "--list", "rescue/leaked-FIX-402"], { cwd: repo, encoding: "utf8" }).trim()).toBe("");
     expect(readFileSync(join(repo, ".roll", "backlog.md"), "utf8")).toContain("✅ Done");
     expect(execFileSync("git", ["status", "--porcelain", "--", ".roll/backlog.md"], { cwd: repo, encoding: "utf8" })).toContain("M .roll/backlog.md");
   });
@@ -3494,6 +3499,38 @@ describe("executeCommand — command → executor mapping", () => {
     const { ports } = fakePorts();
     const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, { ...CTX, storyId: undefined });
     expect(r.event).toEqual({ type: "published", result: { status: 0, manualMerge: false } });
+  });
+
+  it("US-LOOP-094: publish_pr pushes worktree HEAD via refspec, FROM the worktree cwd", async () => {
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      github: {
+        ...base.ports.github,
+        prState: vi.fn(async () => "UNKNOWN"), // no pre-existing PR → full publish path
+        runPublishPlan: vi.fn(async () => ({ status: 0 as const, prUrl: "https://github.com/o/r/pull/7", ok: true })),
+      },
+    });
+    await executeCommand({ kind: "publish_pr", branch: "loop/cycle-x", docOnly: false }, ports, { ...CTX, storyId: undefined });
+    // detached worktree → push HEAD to the remote ref, cwd = worktreePath ("/rt/wt").
+    expect(ports.git.push).toHaveBeenCalledWith("/rt/wt", "HEAD:refs/heads/loop/cycle-x");
+  });
+
+  it("US-LOOP-094: publish_pr push failure → status 1, PR steps never run", async () => {
+    const base = fakePorts();
+    const runPublishPlan = vi.fn(async () => ({ status: 0 as const, prUrl: "u", ok: true }));
+    const { ports } = fakePorts({
+      git: { ...base.ports.git, push: vi.fn(async () => ({ code: 1 })) },
+      github: { ...base.ports.github, prState: vi.fn(async () => "UNKNOWN"), runPublishPlan },
+    });
+    const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, { ...CTX, storyId: undefined });
+    expect(r.event).toEqual({ type: "published", result: { status: 1, manualMerge: false } });
+    expect(runPublishPlan).not.toHaveBeenCalled();
+  });
+
+  it("US-LOOP-094: push_orphan pushes worktree HEAD via refspec, FROM the worktree cwd", async () => {
+    const { ports } = fakePorts();
+    await executeCommand({ kind: "push_orphan", branch: "loop/cycle-x" }, ports, CTX);
+    expect(ports.git.push).toHaveBeenCalledWith("/rt/wt", "HEAD:refs/heads/loop/cycle-x");
   });
 
   it("US-EVID-019: publish_pr appends Roll-Evidence trailer for nested roll-meta evidence", async () => {

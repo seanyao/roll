@@ -30,8 +30,18 @@ export async function rescueLeakedMain(
     return { code: 1, rescuedSha: "" };
   }
   let code = 0;
+  // US-LOOP-095: save the leaked commits to a quarantine BUNDLE instead of a
+  // `rescue/leaked-*` branch. Those branches accumulated and were never GC'd
+  // (retro: 51 local); the bundle holds `rescuedSha`, lands in the existing
+  // file-retention dir (loop_gc), and is recovered with `git bundle unbundle`.
   try {
-    await execFileAsync("git", ["branch", refName], {
+    const quarantineDir = join(repoCwd, ".roll", "loop", "quarantine");
+    mkdirSync(quarantineDir, { recursive: true });
+    const safe = refName.replace(/[^A-Za-z0-9._-]/g, "-");
+    const bundlePath = join(quarantineDir, `${safe}.bundle`);
+    // Bundle HEAD (still the leaked commit here — the reset below happens after);
+    // `git bundle` needs a ref, not a bare SHA, or it refuses an "empty" bundle.
+    await execFileAsync("git", ["bundle", "create", bundlePath, "HEAD"], {
       cwd: repoCwd,
       encoding: "utf8",
     });

@@ -69,6 +69,15 @@ export async function executeTerminalCommand(
         const pub: PublishResult = { status: 0, manualMerge, ...(cmd.draft === true ? { draft: true } : {}) };
         return { event: { type: "published", result: pub } };
       }
+      // US-LOOP-094: the cycle worktree is DETACHED (no local branch). Push its
+      // HEAD to the remote ref explicitly, FROM THE WORKTREE CWD — this replaces
+      // the git-push step formerly in planPublishPr. Same short-circuit as
+      // before: a push failure is a status-1 publish (PR steps never run).
+      const pushed = await ports.git.push(ports.paths.worktreePath, `HEAD:refs/heads/${cmd.branch}`);
+      if (pushed.code !== 0) {
+        const pub: PublishResult = { status: 1, manualMerge, ...(cmd.draft === true ? { draft: true } : {}) };
+        return { event: { type: "published", result: pub } };
+      }
       const body = await publishBodyWithEvidenceTrailer(ports, ctx);
       if (body === null) {
         const pub: PublishResult = { status: 1, manualMerge, ...(cmd.draft === true ? { draft: true } : {}) };
@@ -187,7 +196,9 @@ export async function executeTerminalCommand(
 
     // FIX-039 orphan branch+tag push (audit safety net, C2).
     case "push_orphan": {
-      const r = await ports.git.push(ports.repoCwd, cmd.branch);
+      // US-LOOP-094: detached worktree → the orphan commits live on the
+      // worktree's detached HEAD; push HEAD to the remote ref from the worktree.
+      const r = await ports.git.push(ports.paths.worktreePath, `HEAD:refs/heads/${cmd.branch}`);
       ports.events.appendAlert(
         ports.paths.alertsPath,
         `orphan push ${cmd.branch}: ${r.code === 0 ? "ok" : "failed"}`,
@@ -201,7 +212,7 @@ export async function executeTerminalCommand(
       const r = await ports.git.rescueLeaked(ports.repoCwd, refName);
       ports.events.appendAlert(
         ports.paths.alertsPath,
-        `rescue_leaked ${cmd.cycleId}: saved ${r.rescuedSha.slice(0, 8)} to ${refName} ref; main reset ${r.code === 0 ? "ok" : "failed"}`,
+        `rescue_leaked ${cmd.cycleId}: saved ${r.rescuedSha.slice(0, 8)} to quarantine bundle ${refName}.bundle; main reset ${r.code === 0 ? "ok" : "failed"}`,
       );
       // FIX-903 AC3: emit an audit event so the rescue is observable.
       ports.events.appendEvent(ports.paths.eventsPath, {
@@ -266,7 +277,9 @@ export async function executeTerminalCommand(
       } catch {
         /* tolerant cleanup, mirrors _worktree_cleanup */
       }
-      await ports.git.worktreeRemove(ports.repoCwd, ports.paths.worktreePath, cmd.branch);
+      // US-LOOP-095: worktreeRemove bundles unpushed detached work unless the
+      // caller marks it already-on-remote (bundleUnpushed=false).
+      await ports.git.worktreeRemove(ports.repoCwd, ports.paths.worktreePath, cmd.branch, cmd.bundleUnpushed);
       return {};
 
     // events/bus appendEvent (I8 — terminal event written unconditionally).

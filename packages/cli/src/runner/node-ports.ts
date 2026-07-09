@@ -180,8 +180,8 @@ export function nodePorts(opts: {
       async worktreeSubmoduleInit(worktreePath) {
         return worktreeSubmoduleInit(worktreePath);
       },
-      async worktreeRemove(repoCwd, path, branch) {
-        return worktreeRemove(repoCwd, path, branch);
+      async worktreeRemove(repoCwd, path, branch, bundleUnpushed) {
+        return worktreeRemove(repoCwd, path, branch, bundleUnpushed);
       },
       async push(repoCwd, branch) {
         return gitPush(repoCwd, branch);

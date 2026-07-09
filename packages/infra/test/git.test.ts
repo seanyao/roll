@@ -51,32 +51,35 @@ function initRepo(tag: string): string {
 }
 
 describe("worktree lifecycle", () => {
-  it("worktreeAdd creates a worktree on a new branch, worktreeRemove tears it down", async () => {
+  it("US-LOOP-094: worktreeAdd creates a DETACHED worktree — no local branch", async () => {
     const repo = initRepo("wt");
     const wtParent = tmp("wtside");
     const wt = join(wtParent, "wt");
-    const add = await worktreeAdd(repo, wt, "feat-1", "main");
+    const add = await worktreeAdd(repo, wt, "loop/cycle-x", "main");
     expect(add.code).toBe(0);
     expect(existsSync(wt)).toBe(true);
-    expect((await currentBranch(wt))).toBe("feat-1");
+    // Detached: no branch is checked out; abbrev-ref HEAD reads "HEAD".
+    expect(await currentBranch(wt)).toBe("HEAD");
+    // The intended remote-ref name never becomes a LOCAL branch.
+    const refs = execFileSync("git", ["branch", "--list", "loop/cycle-x"], { cwd: repo, encoding: "utf8" });
+    expect(refs.trim()).toBe("");
 
-    const rm = await worktreeRemove(repo, wt, "feat-1");
+    const rm = await worktreeRemove(repo, wt, "loop/cycle-x");
     expect(rm.code).toBe(0);
     expect(existsSync(wt)).toBe(false);
-    // branch deleted too
-    const refs = execFileSync("git", ["branch", "--list", "feat-1"], { cwd: repo, encoding: "utf8" });
-    expect(refs.trim()).toBe("");
   });
 
-  it("FIX-114: worktreeAdd succeeds even when the branch already exists (deletes it first)", async () => {
-    const repo = initRepo("fix114");
-    // Pre-create a stale branch (as a prior failed run would leave behind).
+  it("US-LOOP-094: detached add does NOT clobber an existing same-named branch", async () => {
+    const repo = initRepo("nostomp");
+    // A branch with the SAME name exists (e.g. a resumable prior-cycle ref).
     expect((await branchCreate(repo, "feat-stale", "main")).code).toBe(0);
-    const wt = join(tmp("fix114wt"), "wt");
+    const wt = join(tmp("nostompwt"), "wt");
     const add = await worktreeAdd(repo, wt, "feat-stale", "main");
     expect(add.code).toBe(0);
-    expect(existsSync(wt)).toBe(true);
-    expect(await currentBranch(wt)).toBe("feat-stale");
+    expect(await currentBranch(wt)).toBe("HEAD"); // detached, not on feat-stale
+    // The pre-existing branch is untouched (old FIX-114 deleted it; detached must not).
+    const refs = execFileSync("git", ["branch", "--list", "feat-stale"], { cwd: repo, encoding: "utf8" });
+    expect(refs).toContain("feat-stale");
     await worktreeRemove(repo, wt, "feat-stale");
   });
 
@@ -84,11 +87,37 @@ describe("worktree lifecycle", () => {
     const repo = initRepo("idem");
     const wt = join(tmp("idemwt"), "wt");
     expect((await worktreeAdd(repo, wt, "b1", "main")).code).toBe(0);
-    // Second add to the SAME path with a new branch: the existing worktree is
-    // removed first, so this still succeeds.
+    // Second add to the SAME path: the existing worktree is removed first, so
+    // this still succeeds (now detached).
     expect((await worktreeAdd(repo, wt, "b2", "main")).code).toBe(0);
-    expect(await currentBranch(wt)).toBe("b2");
+    expect(await currentBranch(wt)).toBe("HEAD");
     await worktreeRemove(repo, wt, "b2");
+  });
+
+  it("US-LOOP-095: worktreeRemove bundles UNPUSHED detached work before teardown", async () => {
+    const repo = initRepo("bundle");
+    const wt = join(tmp("bundlewt"), "wt");
+    expect((await worktreeAdd(repo, wt, "loop/cycle-b", "main")).code).toBe(0);
+    // Commit on the detached HEAD → work no remote holds (initRepo has none).
+    execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "cycle work"], { cwd: wt });
+    const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: wt, encoding: "utf8" }).trim();
+
+    const rm = await worktreeRemove(repo, wt, "loop/cycle-b"); // bundleUnpushed defaults true
+    expect(rm.code).toBe(0);
+    expect(existsSync(wt)).toBe(false);
+    const bundle = join(repo, ".roll", "loop", "quarantine", "leaked-loop-cycle-b.bundle");
+    expect(existsSync(bundle)).toBe(true);
+    expect(execFileSync("git", ["bundle", "list-heads", bundle], { cwd: repo, encoding: "utf8" })).toContain(head);
+  });
+
+  it("US-LOOP-095: worktreeRemove(bundleUnpushed=false) skips the bundle (work already on remote)", async () => {
+    const repo = initRepo("nobundle");
+    const wt = join(tmp("nobundlewt"), "wt");
+    expect((await worktreeAdd(repo, wt, "loop/cycle-n", "main")).code).toBe(0);
+    execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "cycle work"], { cwd: wt });
+    await worktreeRemove(repo, wt, "loop/cycle-n", false);
+    expect(existsSync(wt)).toBe(false);
+    expect(existsSync(join(repo, ".roll", "loop", "quarantine", "leaked-loop-cycle-n.bundle"))).toBe(false);
   });
 });
 

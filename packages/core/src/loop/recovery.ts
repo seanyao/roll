@@ -231,12 +231,12 @@ function cleanupActions(wt: OrphanWorktree, branch: string): OrphanAction[] {
   return out;
 }
 
-// ── (3a) stale-cycle-branch GC predicate ─────────────────────────────────────
-// The ephemeral-prefix + merged-ancestry GC predicate (FIX-104, bin/roll
-// 13019-13048) is ALREADY ported by delivery/pr.ts (isEphemeralBranch /
-// isStaleCycleBranch / EPHEMERAL_BRANCH_PREFIXES) — the card says "consume those
-// shapes, don't duplicate". We do NOT re-declare it here; recovery callers
-// import it directly from delivery/pr.ts. Only the loop-DIR retention rules
+// ── (3a) ephemeral-branch recognition ────────────────────────────────────────
+// The ephemeral-prefix predicate lives in delivery/pr.ts (isEphemeralBranch /
+// EPHEMERAL_BRANCH_PREFIXES) — consume that, don't duplicate. US-LOOP-096
+// removed the old merged-ancestry staleness predicate (no runtime caller +
+// squash-merge mis-judgement); remote GC decides merged-ness by PR state
+// (US-LOOP-097). Only the loop-DIR retention rules
 // below (a distinct FIX-143 concern with no existing port) live here.
 
 // ── (3b) loop-dir GC retention (bin/roll 10577-10646, FIX-143) ───────────────

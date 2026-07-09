@@ -26,7 +26,7 @@ export interface GitPort {
    *  STRICT: exit code propagated so the runner can fail the setup honestly. */
   worktreeSubmoduleInit(worktreePath: string): Promise<{ code: number }>;
   /** `_worktree_cleanup` — tolerant remove (always code 0). */
-  worktreeRemove(repoCwd: string, path: string, branch: string): Promise<{ code: number }>;
+  worktreeRemove(repoCwd: string, path: string, branch: string, bundleUnpushed?: boolean): Promise<{ code: number }>;
   /** `git push origin <branch>` (orphan push safety net). */
   push(repoCwd: string, branch: string): Promise<{ code: number }>;
   /** `git rev-list --count origin/main..HEAD` in the worktree → commits ahead. */

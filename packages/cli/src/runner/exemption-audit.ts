@@ -8,7 +8,7 @@
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { specIsExempt } from "./exemption-stats.js";
+import { readExemption } from "./exemption-stats.js";
 
 export interface ExemptCard {
   id: string;
@@ -23,25 +23,42 @@ export interface ExemptionAudit {
   blanketEpics: string[];
 }
 
-function exemptReason(specText: string): string {
-  const fm = /^---\n([\s\S]*?)\n---/.exec(specText.replace(/\r\n?/g, "\n"));
-  const m = /^screenshot_exempt:[ \t]*(.+)$/m.exec(fm?.[1] ?? "");
-  return (m?.[1] ?? "").replace(/\s+#.*$/, "").trim().replace(/^["']|["']$/g, "");
-}
-
-/** Epics listed under `acceptance.screenshot_exempt_epics:` in policy.yaml. */
+/**
+ * Epics under `acceptance.screenshot_exempt_epics:` — best-effort, supporting
+ * both YAML forms: inline flow `[a, b]` AND a block sequence (`- a` lines that
+ * follow the key). Parse failure ⇒ [] (never throws).
+ */
 export function blanketExemptEpics(repoCwd: string): string[] {
+  let raw: string;
   try {
-    const raw = readFileSync(join(repoCwd, ".roll", "policy.yaml"), "utf8").replace(/\r\n?/g, "\n");
-    const m = /^\s*screenshot_exempt_epics:\s*\[([^\]]*)\]/m.exec(raw);
-    if (m === null) return [];
-    return (m[1] ?? "")
-      .split(",")
-      .map((s) => s.trim().replace(/^["']|["']$/g, ""))
-      .filter((s) => s !== "");
+    raw = readFileSync(join(repoCwd, ".roll", "policy.yaml"), "utf8").replace(/\r\n?/g, "\n");
   } catch {
     return [];
   }
+  const clean = (s: string): string => s.trim().replace(/\s+#.*$/, "").trim().replace(/^["']|["']$/g, "");
+  const key = /^([ \t]*)screenshot_exempt_epics:[ \t]*(.*)$/m.exec(raw);
+  if (key === null) return [];
+  const inline = (key[2] ?? "").trim();
+  const flow = /^\[([^\]]*)\]/.exec(inline);
+  if (flow !== null) {
+    return (flow[1] ?? "").split(",").map(clean).filter((s) => s !== "");
+  }
+  if (inline !== "" && inline !== "|" && inline !== ">") return [clean(inline)].filter((s) => s !== "");
+  // Block sequence: `- item` lines following the key, more-indented than it.
+  const keyIndent = (key[1] ?? "").length;
+  const rest = raw.slice((key.index ?? 0) + key[0].length).split("\n");
+  const out: string[] = [];
+  for (const line of rest) {
+    if (line.trim() === "") continue;
+    const item = /^([ \t]*)-[ \t]+(.*)$/.exec(line);
+    if (item !== null && (item[1] ?? "").length > keyIndent) {
+      const v = clean(item[2] ?? "");
+      if (v !== "") out.push(v);
+      continue;
+    }
+    break; // dedented / non-list line ends the block
+  }
+  return out;
 }
 
 /** Enumerate all per-card exemptions + policy blanket-exempt epics. Read-only. */
@@ -68,7 +85,8 @@ export function exemptionAudit(repoCwd: string): ExemptionAudit {
       } catch {
         continue;
       }
-      if (specIsExempt(spec)) cards.push({ id, epic, reason: exemptReason(spec) });
+      const ex = readExemption(spec);
+      if (ex.exempt) cards.push({ id, epic, reason: ex.reason });
     }
   }
   cards.sort((a, b) => (a.epic === b.epic ? a.id.localeCompare(b.id) : a.epic.localeCompare(b.epic)));

@@ -58,10 +58,10 @@ only kind:
 | Library / pure backend | named test-pass references | builder (non-captured) |
 
 For **captured** artifacts (the first three), the harness — which knows what it
-captured — owns the ac-map binding; the builder does not type or confirm those
-paths. The builder's ac-map covers only **non-captured** evidence (named tests,
-manual verification notes). "No screenshot" therefore still requires a declared
-`deliverable_cmd` or named tests — not silence.
+captured — is the intended owner of the ac-map binding, so the builder does not
+type or confirm those paths; the builder's ac-map covers only **non-captured**
+evidence (named tests, manual verification notes). "No screenshot" therefore
+still requires a declared `deliverable_cmd` or named tests — not silence.
 
 ## 3. 能力天花板 / What this guarantees — and what it does not
 
@@ -80,3 +80,24 @@ criterion is the Evaluator's semantic job** — read the content, score it — a
 is out of scope for the existence/binding/ownership guarantees above. The
 harness makes tampering hard and evidence necessarily present and correctly
 bound; it does not replace the reviewer reading the proof.
+
+## 4. 现状 / Implementation status (honest, not target-washed)
+
+This model is delivered incrementally; the doc describes the intended contract,
+and this section states what is LIVE vs DESIGNED so nothing above is read as
+more-enforced than it is.
+
+- **Live** (US-EVID-020/021/022): the contract PROJECTION + cycle-start frozen
+  snapshot (`contract-projection.ts`, `contract-snapshot.ts`); the attest gate's
+  worktree-vs-snapshot **drift alert** (`attest-gate.ts`, alert-only); the
+  **shift-left ingest** surface check + hold list (`ingest-gate.ts`), phased and
+  **default observe-only** (`metric`) — `alert`/`block` are opt-in via policy.
+- **Live** (US-EVID-026/027): exemption-rate observability (`exemption-stats.ts`)
+  and the read-only exemption audit (`exemption-audit.ts`).
+- **Designed / in progress**: harness-owned binding of captured artifacts into
+  the ac-map (US-EVID-023 — the read primitive exists; the draft-generator
+  wiring + capture-failure surfacing are not yet wired); the confirmed-ac-map
+  dangling-evidence remediation trigger (US-EVID-024); design-time hetero-
+  consensus confirmation of exemptions + the enforced substitute-evidence
+  requirement (US-EVID-025). Until those land, "no give-nothing path" and
+  "harness owns the binding" are the DESIGN intent, not a runtime guarantee.

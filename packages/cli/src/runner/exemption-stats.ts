@@ -23,14 +23,32 @@ export interface ExemptionStats {
   byEpic: EpicExemption[];
 }
 
+/** The spec frontmatter body, tolerant of a BOM, leading blank lines, and
+ *  trailing spaces on the `---` fences. Returns null when there is no block. */
+function frontmatter(specText: string): string | null {
+  const t = specText.replace(/^﻿/, "").replace(/\r\n?/g, "\n");
+  const m = /^\s*---[ \t]*\n([\s\S]*?)\n[ \t]*---[ \t]*(?:\n|$)/.exec(t);
+  return m === null ? null : (m[1] ?? "");
+}
+
+/**
+ * Single source of truth for reading a card's exemption. A REAL exemption is
+ * `screenshot_exempt:` with a non-empty, non-boolean reason (a naked
+ * true/false/yes/no is NOT a valid exemption). Comments and quotes are stripped.
+ */
+export function readExemption(specText: string): { exempt: boolean; reason: string } {
+  const fm = frontmatter(specText);
+  if (fm === null) return { exempt: false, reason: "" };
+  const m = /^screenshot_exempt:[ \t]*(.+)$/m.exec(fm);
+  if (m === null) return { exempt: false, reason: "" };
+  const reason = (m[1] ?? "").replace(/\s+#.*$/, "").trim().replace(/^["']|["']$/g, "");
+  const exempt = reason !== "" && !/^(false|no|0|true|yes|on|1)$/i.test(reason);
+  return { exempt, reason: exempt ? reason : "" };
+}
+
 /** A card carries a REAL exemption iff `screenshot_exempt:` has a non-boolean reason. */
 export function specIsExempt(specText: string): boolean {
-  const fm = /^---\n([\s\S]*?)\n---/.exec(specText.replace(/\r\n?/g, "\n"));
-  if (fm === null) return false;
-  const m = /^screenshot_exempt:[ \t]*(.+)$/m.exec(fm[1] ?? "");
-  if (m === null) return false;
-  const reason = (m[1] ?? "").replace(/\s+#.*$/, "").trim().replace(/^["']|["']$/g, "");
-  return reason !== "" && !/^(false|no|0|true|yes|on|1)$/i.test(reason);
+  return readExemption(specText).exempt;
 }
 
 /**

@@ -39,11 +39,15 @@ describe("exemptionAudit", () => {
     ]);
   });
 
-  it("reads policy blanket-exempt epics", () => {
+  it("reads policy blanket-exempt epics — inline flow AND block sequence", () => {
     expect(blanketExemptEpics(project([], "acceptance:\n  screenshot_exempt_epics: [feedback-truth-alignment, x]\n"))).toEqual([
       "feedback-truth-alignment",
       "x",
     ]);
+    // block sequence form (the case the old regex missed)
+    expect(
+      blanketExemptEpics(project([], "acceptance:\n  screenshot_exempt_epics:\n    - feedback-truth-alignment\n    - y  # note\n  other: z\n")),
+    ).toEqual(["feedback-truth-alignment", "y"]);
     expect(blanketExemptEpics(project([]))).toEqual([]);
   });
 

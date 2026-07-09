@@ -31,7 +31,7 @@
  * exceptions (a `blocked` AC, a machine capture skip) are NOT failures and stay
  * waivable as before.
  */
-import { acForStory, parsePolicy } from "@roll/core";
+import { acForStory, contractMatchesSnapshot, parsePolicy, type ContractSnapshot } from "@roll/core";
 import { execFileSync } from "node:child_process";
 import { type Dirent, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -1396,6 +1396,31 @@ export function runAttestGate(
   // thrown error in the score read is fail-closed (blocked in hard mode), and
   // its result is reused inside the main path below.
   try {
+    // US-EVID-021: alert (never block) when the worktree contract drifted from
+    // the cycle-start frozen snapshot — a builder AC/`screenshot_exempt` edit
+    // after the freeze. The snapshot is written from design truth under the
+    // persistent .roll (scoreRepoCwd, FIX-343's persistent root); the verdict
+    // below is judged the same as before — drift is a VISIBLE SIGNAL ONLY, never
+    // a block, honouring the owner red line (a false positive must not stall).
+    try {
+      const snapPath = join(cardArchiveDir(scoreRepoCwd, storyId), "contract-snapshot.json");
+      const worktreeSpec = storySpecPath(worktreeCwd, storyId);
+      if (existsSync(snapPath) && worktreeSpec !== null) {
+        const snap = JSON.parse(readFileSync(snapPath, "utf8")) as ContractSnapshot;
+        if (
+          typeof snap.hash === "string" &&
+          snap.hash !== "" &&
+          !contractMatchesSnapshot(snap, readFileSync(worktreeSpec, "utf8"))
+        ) {
+          sinks.alert(
+            `attest: contract drift for ${storyId} — worktree spec no longer matches the cycle-start ` +
+              `frozen contract (${snap.hash.slice(0, 12)}…); judged against the frozen contract — cycle ${cycleId}`,
+          );
+        }
+      }
+    } catch {
+      /* drift alert is best-effort; it never affects the verdict */
+    }
     // FIX-339 (复核 #1) — a deliverable_cmd outside the roll read-only allowlist
     // is rejected BEFORE anything else: the spec asked the attest lane to run a
     // non-roll command or a state-changing roll subcommand (agent-controlled

@@ -250,6 +250,14 @@ function fixedClock(start: number): { clock: () => number; set: (v: number) => v
 describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
   it("US-LOOP-098 proves detached cycle branch governance against real git refs", async () => {
     const { repo, remote } = makeGitignoredFixture("branch-gov");
+    // CI runners carry no global git identity; the cycle's own commits (worktree
+    // product commit, .roll evidence/metadata push) run with ambient git, so pin
+    // a persistent identity in the repo (shared by its worktrees) AND the nested
+    // .roll repo — otherwise publish aborts with "Author identity unknown".
+    for (const dir of [repo, join(repo, ".roll")]) {
+      git(dir, ["config", "user.email", "t@t"]);
+      git(dir, ["config", "user.name", "t"]);
+    }
     writeFileSync(join(repo, ".roll", "policy.yaml"), "loop_safety:\n  attest_gate: soft\n  peer_gate: soft\n", "utf8");
     const rt = tmp("branch-gov-rt");
     const cycleId = "20260709-010203-4098";

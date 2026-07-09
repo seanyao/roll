@@ -131,6 +131,34 @@ describe("collectEvidence", () => {
     expect(m.screenshots).toEqual(["screenshots/a.png", "screenshots/b.png"]);
     expect(m.texts).toEqual(["evidence/curl.txt"]);
   });
+
+  it("passes capture failed/error metadata through to the manifest", async () => {
+    const { run } = fakeRun({ git: { code: 0, stdout: "", stderr: "" } });
+    const m = await collectEvidence({
+      storyId: "US-EVID-023",
+      projectPath: tmp("p"),
+      runDir: tmp("r"),
+      now: () => NOW,
+      run,
+      ghProbe: () => Promise.resolve(false),
+      captures: [
+        {
+          kind: "web",
+          out: "screenshots/web.png",
+          taken: false,
+          skipped: "capture errored: headless timeout",
+          failed: true,
+          error: "headless timeout",
+        },
+      ],
+    });
+    expect(m.captures[0]).toMatchObject({
+      taken: false,
+      skipped: "capture errored: headless timeout",
+      failed: true,
+      error: "headless timeout",
+    });
+  });
 });
 
 describe("writeEvidenceJson", () => {

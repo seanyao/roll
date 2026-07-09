@@ -376,6 +376,18 @@ async function captureCommandFact(projectPath: string, command: string, deps: Sc
   };
 }
 
+export function captureFactFromShot(shot: ScreenshotResult, forcedError?: string): CaptureFact {
+  const failed = !shot.taken && shot.failed === true;
+  const error = failed ? forcedError ?? shot.error ?? shot.skipped : undefined;
+  return {
+    kind: shot.kind,
+    out: shot.out,
+    taken: shot.taken,
+    ...(shot.skipped !== undefined ? { skipped: shot.skipped } : {}),
+    ...(error !== undefined && error !== "" ? { failed: true, error } : {}),
+  };
+}
+
 const DOC_ALIGNMENT_PATTERNS: readonly RegExp[] = [
   /^README(?:_[A-Z]+)?\.md$/,
   /^AGENTS\.md$/,
@@ -823,6 +835,7 @@ function physicalLaneResult(
 ): PhysicalCaptureLane {
   const runDir = dirname(dirname(request.out));
   const attached = screenshotHref !== undefined;
+  const failed = !attached && physicalCaptureFailed(statusChain);
   const screenshot: EvidenceRef | undefined = attached
     ? { kind: "screenshot", label: "physical.screenshot", href: screenshotHref }
     : undefined;
@@ -844,9 +857,15 @@ function physicalLaneResult(
       out: request.out,
       taken: attached,
       ...(!attached && reason !== undefined && reason !== "" ? { skipped: reason } : {}),
+      ...(failed && reason !== undefined && reason !== "" ? { failed: true, error: reason } : {}),
     },
     ...(screenshot !== undefined ? { selfCapture: screenshot } : {}),
   };
+}
+
+function physicalCaptureFailed(statusChain: readonly string[]): boolean {
+  if (statusChain.includes("failed") || statusChain.includes("timeout") || statusChain.includes("privacy-rejected")) return true;
+  return statusChain.includes("taken") && statusChain.includes("not-attached");
 }
 
 function reportPathField(
@@ -1300,7 +1319,14 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
       }
       let shot: ScreenshotResult =
         fact !== null && fact.exitCode !== 0
-          ? { kind: terminalCaptureKind, out, taken: false, skipped: `capture command exited ${fact.exitCode}` }
+          ? {
+              kind: terminalCaptureKind,
+              out,
+              taken: false,
+              skipped: `capture command exited ${fact.exitCode}`,
+              failed: true,
+              error: `capture command exited ${fact.exitCode}${fact.stderrTail !== "" ? `: ${fact.stderrTail}` : ""}`,
+            }
           : await captureScreenshot(
               {
                 kind: terminalCaptureKind,
@@ -1325,12 +1351,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
         writeFileSync(txtOut, fact.stdoutTail, "utf8");
         shot = { kind: "terminal", out: txtOut, taken: true };
       }
-      captureFacts.push({
-        kind: shot.kind,
-        out: shot.out,
-        taken: shot.taken,
-        ...(shot.skipped !== undefined ? { skipped: shot.skipped } : {}),
-      });
+      captureFacts.push(captureFactFromShot(shot));
       const ref = screenshotEvidenceRef(shot, `screenshots/${refStem}`);
       if (ref !== null) selfCaptures.push(ref);
       else warn(`terminal self-capture skipped (${refStem}): ${shot.skipped ?? "unknown"}`);
@@ -1374,12 +1395,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
         },
         deps.capture ?? {},
       );
-      captureFacts.push({
-        kind: shot.kind,
-        out: shot.out,
-        taken: shot.taken,
-        ...(shot.skipped !== undefined ? { skipped: shot.skipped } : {}),
-      });
+      captureFacts.push(captureFactFromShot(shot));
       const ref = screenshotEvidenceRef(shot, `screenshots/${stem}`);
       if (ref !== null) selfCaptures.push(ref);
       else warn(`web self-capture skipped (${stem}): ${shot.skipped ?? "unknown"}`);

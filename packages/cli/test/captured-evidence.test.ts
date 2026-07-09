@@ -7,7 +7,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { capturedEvidenceRefs } from "../src/runner/captured-evidence.js";
+import { capturedEvidenceRefs, captureFailures } from "../src/runner/captured-evidence.js";
 
 function runDir(manifest: unknown, screenshots: string[] = []): string {
   const dir = mkdtempSync(join(tmpdir(), "roll-evid023-"));
@@ -56,5 +56,48 @@ describe("capturedEvidenceRefs — real harness artifacts only", () => {
   it("an HONEST machine-skip (taken:false + skipped) is NOT bound as a captured ref", () => {
     const dir = runDir({ captures: [{ taken: false, skipped: "no visual surface", label: "x" }] });
     expect(capturedEvidenceRefs(dir)).toEqual([]);
+  });
+});
+
+describe("captureFailures — declared-but-FAILED captures surface (not honest skips)", () => {
+  it("returns a capture that was ATTEMPTED and FAILED (failed:true), never an honest skip", () => {
+    const dir = runDir({
+      captures: [
+        { taken: true, kind: "screenshot", href: "screenshots/web.png" }, // success — not a failure
+        { taken: false, skipped: "no visual surface" }, // honest machine-skip — PASSES, not a failure
+        { taken: false, failed: true, error: "headless timeout", kind: "screenshot", label: "web" }, // real failure
+      ],
+    });
+    const fails = captureFailures(dir);
+    expect(fails.length).toBe(1);
+    expect(fails[0]?.error).toContain("headless timeout");
+    expect(fails[0]?.label).toBe("web");
+  });
+
+  it("no evidence.json ⇒ [] (never throws)", () => {
+    expect(captureFailures(mkdtempSync(join(tmpdir(), "roll-evid023-nof-")))).toEqual([]);
+  });
+
+  it("a pure honest-skip corpus yields no failures (skip is not fail)", () => {
+    const dir = runDir({ captures: [{ taken: false, skipped: "roll-capture unavailable" }] });
+    expect(captureFailures(dir)).toEqual([]);
+  });
+
+  it("a SUCCEEDED capture (taken:true) is never a failure even if a stray failed flag rides along", () => {
+    // taken:true means the artifact was produced — a stray failed:true must not
+    // raise a false alarm on a good capture.
+    const dir = runDir({ captures: [{ taken: true, failed: true, href: "screenshots/web.png", label: "web" }] });
+    expect(captureFailures(dir)).toEqual([]);
+  });
+
+  it("preserves every real failure, in manifest order", () => {
+    const dir = runDir({
+      captures: [
+        { taken: false, failed: true, error: "roll-capture crashed", label: "hud" },
+        { taken: false, skipped: "no surface" }, // honest skip between failures — dropped
+        { taken: false, failed: true, error: "headless timeout", label: "web" },
+      ],
+    });
+    expect(captureFailures(dir).map((f) => f.label)).toEqual(["hud", "web"]);
   });
 });

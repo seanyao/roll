@@ -1031,7 +1031,7 @@ describe("US-ATTEST-011 — Gate terminal self-capture lane", () => {
     const runDir = join(proj, ".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03");
     const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
       capture_command?: { exitCode?: number; stdoutTail?: string; stderrTail?: string };
-      captures?: Array<{ taken?: boolean; skipped?: string }>;
+      captures?: Array<{ taken?: boolean; skipped?: string; failed?: boolean; error?: string }>;
     };
     expect(code).toBe(3);
     expect(calls.some((x) => x.startsWith("sh -lc "))).toBe(true);
@@ -1040,6 +1040,45 @@ describe("US-ATTEST-011 — Gate terminal self-capture lane", () => {
     expect(evidence.capture_command?.stderrTail).toContain("ERR_MODULE_NOT_FOUND");
     expect(evidence.captures?.[0]?.taken).toBe(false);
     expect(evidence.captures?.[0]?.skipped).toContain("capture command exited 2");
+    expect(evidence.captures?.[0]?.failed).toBe(true);
+    expect(evidence.captures?.[0]?.error).toContain("ERR_MODULE_NOT_FOUND");
+  });
+
+  it("US-EVID-023: attempted web capture errors are marked failed, not honest skips", async () => {
+    const proj = project();
+    let osascriptCalls = 0;
+    const shotRun: ShotRun = (cmd, argv) => {
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Aqua\n", stderr: "" });
+      if (cmd === "osascript") {
+        osascriptCalls += 1;
+        return Promise.resolve({ code: 0, stdout: osascriptCalls === 2 ? "0,0,100,100\n" : "", stderr: "" });
+      }
+      if (cmd === "sh") return Promise.resolve({ code: 0, stdout: "Google Chrome\n", stderr: "" });
+      if (cmd === "screencapture") return Promise.resolve({ code: 1, stdout: "", stderr: "Screen Recording denied" });
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
+
+    await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["FIX-300", "--capture-web", "https://app.test"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          capture: { run: shotRun, platform: "darwin", env: {} },
+        }),
+      ),
+    );
+
+    const runDir = join(proj, ".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03");
+    const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
+      captures?: Array<{ kind?: string; taken?: boolean; skipped?: string; failed?: boolean; error?: string }>;
+    };
+    expect(evidence.captures?.[0]).toMatchObject({
+      kind: "web",
+      taken: false,
+      failed: true,
+    });
+    expect(evidence.captures?.[0]?.error).toContain("screencapture failed");
   });
 
   // ── FIX-339 复核 #2: secret protection on the headless command lane ──────────
@@ -1147,7 +1186,7 @@ describe("FIX-305 — UI/dossier web self-capture lane (real screenshot, not a s
     const html = readFileSync(join(runDir, "FIX-WEB-report.html"), "utf8");
     expect(html).not.toContain('<img src="screenshots/web.png"');
     const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
-      captures?: Array<{ kind?: string; taken?: boolean; skipped?: string }>;
+      captures?: Array<{ kind?: string; taken?: boolean; skipped?: string; failed?: boolean; error?: string }>;
     };
     expect(evidence.captures).toContainEqual({
       kind: "web",
@@ -1636,6 +1675,8 @@ describe("US-PHYSICAL-004 — attest physical.screenshot provider lane", () => {
       out: join(runDir, "screenshots", "physical.png"),
       taken: false,
       skipped: "screen recording permission denied",
+      failed: true,
+      error: "screen recording permission denied",
     });
   });
 
@@ -1660,13 +1701,15 @@ describe("US-PHYSICAL-004 — attest physical.screenshot provider lane", () => {
     expect(html).toContain("timed out after 5ms");
     expect(requestFiles(captureRoot)).toEqual([]);
     const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
-      captures?: Array<{ kind?: string; taken?: boolean; skipped?: string }>;
+      captures?: Array<{ kind?: string; taken?: boolean; skipped?: string; failed?: boolean; error?: string }>;
     };
     expect(evidence.captures).toContainEqual({
       kind: "physical_terminal",
       out: join(runDir, "screenshots", "physical.png"),
       taken: false,
       skipped: `timeout: timed out after 5ms waiting for ${join(captureRoot, "responses", "response-US-PHYSICAL-004C-2026-06-06T01-02-03-physical.json")}`,
+      failed: true,
+      error: `timeout: timed out after 5ms waiting for ${join(captureRoot, "responses", "response-US-PHYSICAL-004C-2026-06-06T01-02-03-physical.json")}`,
     });
   });
 });
@@ -1864,13 +1907,15 @@ describe("FIX-392 — terminal deliverable_cmd headless fallback", () => {
     );
     const runDir = join(proj, ".roll", "features", "demo", "FIX-CMD", "2026-06-06T01-02-03");
     const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
-      captures?: Array<{ kind?: string; taken?: boolean; skipped?: string }>;
+      captures?: Array<{ kind?: string; taken?: boolean; skipped?: string; failed?: boolean; error?: string }>;
       capture_command?: { exitCode?: number };
     };
     // Command failed → not promoted
     expect(evidence.capture_command?.exitCode).toBe(1);
     expect(evidence.captures?.[0]?.taken).toBe(false);
     expect(evidence.captures?.[0]?.skipped).toContain("capture command exited");
+    expect(evidence.captures?.[0]?.failed).toBe(true);
+    expect(evidence.captures?.[0]?.error).toContain("command not found");
     expect(code).toBe(3);
     // No headless txt file
     expect(existsSync(join(runDir, "screenshots", "terminal-headless.txt"))).toBe(false);

@@ -466,6 +466,8 @@ export function createCaptureMarkerSink(runDir: string, capture: CapturePort): {
             out: join(runDir, "screenshots", `${marker.phase}-${marker.stem}.png`),
             taken: false,
             skipped: `capture errored: ${String(e)}`,
+            failed: true,
+            error: String(e),
           }),
         ),
     );

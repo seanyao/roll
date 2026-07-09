@@ -82,6 +82,10 @@ export interface ScreenshotResult {
   taken: boolean;
   /** Human skip/fail reason when not taken (drives the deletion contract). */
   skipped?: string;
+  /** True when capture was attempted and failed, distinct from an honest machine skip. */
+  failed?: boolean;
+  /** Human-readable failure detail when failed is true. */
+  error?: string;
 }
 
 export interface ScreenshotDeps {
@@ -520,6 +524,14 @@ export async function captureScreenshot(
   const env = deps.env ?? process.env;
   const platform = deps.platform ?? process.platform;
   const skip = (reason: string): ScreenshotResult => ({ kind: req.kind, out: req.out, taken: false, skipped: reason });
+  const fail = (reason: string, error = reason): ScreenshotResult => ({
+    kind: req.kind,
+    out: req.out,
+    taken: false,
+    skipped: reason,
+    failed: true,
+    error,
+  });
   // FIX-1022: the master "never touch the screen" switch the loop sets — read
   // once; the web lane folds it into forceHeadless, the terminal lane gates on it.
   const noScreencap = (env["ROLL_NO_SCREENCAP"] ?? "") === "1";
@@ -533,13 +545,13 @@ export async function captureScreenshot(
       if (platform !== "darwin") return skip("physical browser screenshots require macOS");
       if (!(await hasGuiSession(run))) return skip("no GUI session");
       const reason = await captureWebViaBrowser(req, run);
-      if (reason !== null) return skip(`GUI browser capture: ${reason}`);
+      if (reason !== null) return fail(`GUI browser capture: ${reason}`, reason);
     } else if (req.kind === "mobile-ios") {
       if (platform !== "darwin") return skip("not macOS");
       const booted = await run("xcrun", ["simctl", "list", "devices", "booted"]);
       if (booted.code !== 0 || !booted.stdout.includes("(Booted)")) return skip("no booted simulator");
       const r = await run("xcrun", ["simctl", "io", "booted", "screenshot", req.out]);
-      if (r.code !== 0) return skip("simctl screenshot failed");
+      if (r.code !== 0) return fail("simctl screenshot failed");
     } else if (req.kind === "mobile-android") {
       const devices = await run("adb", ["devices"]);
       const connected = devices.stdout
@@ -549,7 +561,7 @@ export async function captureScreenshot(
       if (devices.code !== 0 || !connected) return skip("no adb device connected");
       // binary stdout → shell redirect through the same seam.
       const r = await run("sh", ["-c", `adb exec-out screencap -p > '${req.out}'`]);
-      if (r.code !== 0) return skip("screencap failed");
+      if (r.code !== 0) return fail("screencap failed");
     } else if (req.kind === "physical_terminal") {
       // physical_terminal lane (US-INIT-003b): REAL physical Terminal.app capture
       // only. NEVER falls back to headless text artifacts — physical evidence
@@ -573,9 +585,9 @@ export async function captureScreenshot(
       const physLine = physDoneFile !== undefined ? terminalCommandWithDoneFile(physRawLine, physDoneFile) : physRawLine;
       const physTitle = terminalWindowTitle(req.out);
       const physOpened = await run("osascript", ["-e", terminalOpenScript(physLine, physRect, physTitle)]);
-      if (physOpened.code !== 0) return skip("physical_terminal: osascript Terminal open failed");
+      if (physOpened.code !== 0) return fail("physical_terminal: osascript Terminal open failed");
       if (physDoneFile !== undefined && !(await waitForTerminalCommandExit(physDoneFile, run))) {
-        return skip("physical_terminal: command still running; window left open");
+        return fail("physical_terminal: command still running; window left open");
       }
       const physLiveRect = await resolveWindowRect(physTitle, run);
       if (physLiveRect !== null) {
@@ -587,19 +599,19 @@ export async function captureScreenshot(
       }
       if (physLiveRect === null) {
         if (!(await teardownCaptureWindow(physTitle, physDoneFile !== undefined, run))) {
-          return skip("physical_terminal: capture window not found; Terminal close failed");
+          return fail("physical_terminal: capture window not found; Terminal close failed");
         }
         return skip("physical_terminal: capture window not found — refusing a blind-region shot");
       }
       const physShot = await run("screencapture", ["-x", "-R", `${physLiveRect.x},${physLiveRect.y},${physLiveRect.w},${physLiveRect.h}`, req.out]);
       if (physShot.code !== 0) {
         if (!(await teardownCaptureWindow(physTitle, physDoneFile !== undefined, run))) {
-          return skip("physical_terminal: screencapture failed; Terminal close failed");
+          return fail("physical_terminal: screencapture failed; Terminal close failed");
         }
-        return skip("physical_terminal: screencapture failed (screen-recording permission?)");
+        return fail("physical_terminal: screencapture failed (screen-recording permission?)");
       }
       if (!(await teardownCaptureWindow(physTitle, physDoneFile !== undefined, run))) {
-        return skip("physical_terminal: Terminal close failed after capture");
+        return fail("physical_terminal: Terminal close failed after capture");
       }
     } else {
       // terminal lane (US-ATTEST-011): unattended self-capture on macOS GUI hosts.
@@ -635,14 +647,14 @@ export async function captureScreenshot(
       const line = commandDoneFile !== undefined ? terminalCommandWithDoneFile(rawLine, commandDoneFile) : rawLine;
       const windowTitle = terminalWindowTitle(req.out);
       const opened = await run("osascript", ["-e", terminalOpenScript(line, rect, windowTitle)]);
-      if (opened.code !== 0) return skip("osascript Terminal open failed");
+      if (opened.code !== 0) return fail("osascript Terminal open failed");
       // FIX-271: the old order shot the screen IMMEDIATELY after the window
       // opened (blank prompt, command not yet rendered) at the CONFIGURED
       // rectangle (whatever happened to live there). Correct order: wait for
       // the command to exit, read the window's ACTUAL bounds, shoot that rectangle,
       // then close the window we opened.
       if (commandDoneFile !== undefined && !(await waitForTerminalCommandExit(commandDoneFile, run))) {
-        return skip("terminal command still running; window left open to avoid macOS termination prompt");
+        return fail("terminal command still running; window left open to avoid macOS termination prompt");
       }
       const liveRect = await resolveWindowRect(windowTitle, run);
       // FIX-273: bounds exist ≠ window visible. If the window lives on another
@@ -661,7 +673,7 @@ export async function captureScreenshot(
       // on screen (live incident: a Teams chat landed in the evidence png).
       if (liveRect === null) {
         if (!(await teardownCaptureWindow(windowTitle, commandDoneFile !== undefined, run))) {
-          return skip("capture window not found; Terminal close failed");
+          return fail("capture window not found; Terminal close failed");
         }
         return skip("capture window not found — refusing a blind-region shot");
       }
@@ -669,21 +681,22 @@ export async function captureScreenshot(
       // screencapture exits non-zero when Screen Recording permission is absent.
       if (shot.code !== 0) {
         if (!(await teardownCaptureWindow(windowTitle, commandDoneFile !== undefined, run))) {
-          return skip("screencapture failed; Terminal close failed");
+          return fail("screencapture failed; Terminal close failed");
         }
-        return skip("screencapture failed (screen-recording permission?)");
+        return fail("screencapture failed (screen-recording permission?)");
       }
       if (!(await teardownCaptureWindow(windowTitle, commandDoneFile !== undefined, run))) {
-        return skip("Terminal close failed after capture");
+        return fail("Terminal close failed after capture");
       }
     }
-  } catch {
-    return skip("capture errored");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return fail("capture errored", message !== "" ? message : "capture errored");
   }
 
   return fileNonEmpty(req.out)
     ? { kind: req.kind, out: req.out, taken: true }
-    : skip("empty capture (tool exit code lied)");
+    : fail("empty capture (tool exit code lied)");
 }
 
 /**

@@ -73,6 +73,8 @@ export interface CaptureFact {
   out: string;
   taken: boolean;
   skipped?: string;
+  failed?: boolean;
+  error?: string;
 }
 
 export interface CaptureCommandFact {

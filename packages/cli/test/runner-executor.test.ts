@@ -2597,6 +2597,36 @@ describe("executeCommand — command → executor mapping", () => {
     expect(log).toContain('"phase":"gate"');
   });
 
+  it("US-EVID-023: capture marker errors are recorded as failed captures", async () => {
+    const runDir = realpathSync(mkdtempSync(join(tmpdir(), "roll-capture-failed-log-")));
+    execDirs.push(runDir);
+    const { ports } = fakePorts({
+      agentSpawn: vi.fn(async (_agent, opts) => {
+        opts.onChunk?.(Buffer.from("::roll-capture before web home https://app.test\n"));
+        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+      }),
+      capture: {
+        fromMarker: vi.fn(async () => {
+          throw new Error("headless timeout");
+        }),
+      },
+    });
+
+    await executeCommand(
+      { kind: "spawn_agent", agent: "claude", attempt: 1 },
+      ports,
+      { ...CTX, evidenceRunDir: runDir },
+    );
+
+    const rows = readFileSync(join(runDir, "evidence", "capture-markers.log"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { result?: { failed?: boolean; error?: string; skipped?: string } });
+    expect(rows[0]?.result?.failed).toBe(true);
+    expect(rows[0]?.result?.error).toContain("headless timeout");
+    expect(rows[0]?.result?.skipped).toContain("capture errored");
+  });
+
   it("FIX-208: spawn_agent parses claude stream-json stdout → ctxPatch.cost", async () => {
     // claude is no longer a pool agent (no AgentSpec), but the claude-stream
     // harness extractor (sumClaudeStream) is KEPT — reachable via the

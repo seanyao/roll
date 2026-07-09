@@ -442,6 +442,20 @@ describe("FIX-912 generateAcMapDraft", () => {
       expect(labels.some((l) => l.includes("attest-remediation.ts"))).toBe(true);
     }
   });
+
+  it("US-EVID-023: includes real harness-captured artifacts from the run dir", () => {
+    const runDir = tmp("evid023-draft");
+    mkdirSync(join(runDir, "screenshots"), { recursive: true });
+    writeFileSync(join(runDir, "screenshots", "web.png"), "PNGDATA");
+    writeFileSync(
+      join(runDir, "evidence.json"),
+      JSON.stringify({ captures: [{ kind: "web", href: "screenshots/web.png", label: "web", taken: true }] }, null, 2) + "\n",
+    );
+
+    const json = generateAcMapDraft(FIX_912_SPEC, "FIX-912", emptyEvidence, undefined, runDir);
+    const entries = JSON.parse(json!) as Array<{ evidence?: Array<{ kind: string; href?: string; label: string }> }>;
+    expect(entries.some((e) => e.evidence?.some((ev) => ev.kind === "screenshot" && ev.href === "screenshots/web.png"))).toBe(true);
+  });
 });
 
 // ── REFACTOR-066: unified ac-map self-heal path ─────────────────────────────

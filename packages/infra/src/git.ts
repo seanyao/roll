@@ -139,20 +139,26 @@ export async function git(args: readonly string[], cwd?: string): Promise<GitRes
 // ─── worktree lifecycle ──────────────────────────────────────────────────────
 
 /**
- * Mirror `_worktree_create path branch base` (bin/roll 12762-12773).
+ * Create the cycle worktree DETACHED (US-LOOP-094).
  *
- * Steps, in the oracle's exact order:
+ * Steps:
  *   1. `mkdir -p $(dirname path)`.
  *   2. if `path` exists on disk → `git worktree remove --force path` (lenient)
  *      then `rm -rf path` (lenient).
- *   3. if `refs/heads/<branch>` exists → `git branch -D <branch>` (lenient)
- *      — FIX-114 idempotency: clears a branch a prior failed run left behind so
- *      step 4 can't fail with "branch already exists".
- *   4. `git worktree add <path> -b <branch> <base>` — STRICT: this is the one
- *      step whose failure the oracle propagates (the `if _worktree_create ...`
- *      gate). Returns its {@link GitResult}.
+ *   3. `git worktree add --detach <path> <base>` — STRICT: the one step whose
+ *      failure the caller propagates. NO local branch is created.
+ *
+ * Why detached: a named local `loop/cycle-*` branch used to be created here
+ * (`-b <branch>`), and it only ever got deleted on the clean worktree-teardown
+ * path — so every crashed/timed-out cycle leaked one (retro audit: 289 local
+ * branches accumulated). The cycle now commits on a detached HEAD and publishes
+ * by pushing HEAD to the remote ref `refs/heads/<branch>` (see terminal-handlers
+ * `publish_pr` / `push_orphan`), so `<branch>` exists ONLY on origin. The
+ * former FIX-114 same-branch pre-clean is gone with the branch it guarded.
  *
  * @param repoCwd  the main tree to run git in (worktree commands are tree-rel).
+ * @param branch   retained as the intended REMOTE ref name for callers; not
+ *                 used to create any local branch here.
  */
 export async function worktreeAdd(
   repoCwd: string,
@@ -166,11 +172,7 @@ export async function worktreeAdd(
     await git(["worktree", "remove", "--force", path], repoCwd); // lenient
     rmSyncQuiet(path);
   }
-  const ref = await git(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], repoCwd);
-  if (ref.code === 0) {
-    await git(["branch", "-D", branch], repoCwd); // lenient (FIX-114)
-  }
-  const result = await git(["worktree", "add", path, "-b", branch, base], repoCwd);
+  const result = await git(["worktree", "add", "--detach", path, base], repoCwd);
   // FIX-1231: enable extensions.worktreeConfig on the new worktree so
   // `git config core.worktree` writes land in the worktree-specific config
   // file, not the shared .git/config. Best-effort: failures here must never

@@ -114,15 +114,20 @@ export interface PublishPlanInput {
 }
 
 /**
- * The ordered command plan for `_loop_publish_pr` (bin/roll:13498-13541). The
- * adapter runs them in order with the documented short-circuits:
- *   1. `git push origin <branch>`            — fail ⇒ return 1.
- *   2. `gh -R <slug> pr view <branch>`       — non-empty url ⇒ REUSE, skip step 3.
- *   3. `gh -R <slug> pr create ...`          — empty url ⇒ return 1.
- *   4. `gh -R <slug> pr merge <branch> --auto --squash --delete-branch`
+ * The ordered command plan for the publish sequence. The adapter runs them in
+ * order with the documented short-circuits:
+ *   1. `gh -R <slug> pr view <branch>`       — non-empty url ⇒ REUSE, skip create.
+ *   2. `gh -R <slug> pr create ...`          — empty url ⇒ return 1.
+ *   3. `gh -R <slug> pr merge <branch> --auto --squash --delete-branch`
  *      — failure is non-fatal (oracle returns 0; PR left open for a human).
  * The `view` reuse short-circuit is encoded by the adapter, not the plan order;
  * the plan lists the full sequence and the adapter skips `create` on reuse.
+ *
+ * US-LOOP-094: the `git push` step is NO LONGER part of this plan. The cycle
+ * worktree is detached (no local branch), so the push must run from the worktree
+ * cwd as `git push origin HEAD:refs/heads/<branch>` — the terminal handler does
+ * that BEFORE running this (gh-only) plan, keeping the same short-circuit
+ * (push fail ⇒ status 1, PR steps never run).
  */
 export function planPublishPr(input: PublishPlanInput): PublishStep[] {
   const title = input.title ?? `loop cycle ${branchTitleSuffix(input.branch)}`;
@@ -130,7 +135,6 @@ export function planPublishPr(input: PublishPlanInput): PublishStep[] {
     ? `${input.body}\n\n[roll:manual-merge]`
     : input.body;
   const steps: PublishStep[] = [
-    { tool: "git", kind: "git-push", argv: ["push", "origin", input.branch] },
     {
       tool: "gh",
       kind: "gh-pr-view",

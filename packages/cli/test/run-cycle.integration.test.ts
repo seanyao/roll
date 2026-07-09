@@ -512,9 +512,11 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
       // AC2: the inflight lock is RELEASED (a fresh cycle can take over).
       expect(existsSync(p.lockPath)).toBe(false);
 
-      // AC3: the worktree branch is PRESERVED (work not discarded) — timeout
-      // teardown never cleans the worktree. The branch ref still resolves.
-      expect(() => git(repo, ["rev-parse", "--verify", branch])).not.toThrow();
+      // AC3: work not discarded — timeout teardown never cleans the worktree.
+      // US-LOOP-094: the cycle worktree is DETACHED (no local branch), so the
+      // preservation invariant is the WORKTREE itself surviving (any commits are
+      // on its detached HEAD; unpushed-work bundle safety net is US-LOOP-095).
+      expect(existsSync(p.worktreePath)).toBe(true);
     } finally {
       const restore = (k: string, v: string | undefined): void => {
         if (v === undefined) delete process.env[k];

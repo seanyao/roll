@@ -397,9 +397,8 @@ describe("US-QA-016 fault injection matrix", () => {
     expect(result.terminal).toBe("published");
   });
 
-  it("[FI-08] hung builder no-progress watchdog kills spawn, blocks terminal, releases lock, and preserves branch", async () => {
+  it("[FI-08] hung builder no-progress watchdog kills spawn, blocks terminal, releases lock, and preserves worktree", async () => {
     const cycleId = "20260703-080808-fi08";
-    const branch = `loop/cycle-${cycleId}`;
     const rt = tmp("fi08-rt");
     const p = paths(rt, cycleId);
     const script = join(tmp("fi08-agent"), "sleep-agent.sh");
@@ -426,7 +425,11 @@ describe("US-QA-016 fault injection matrix", () => {
       expect(result.ran).toBe(true);
       expect(result.terminal).toBe("blocked");
       expect(existsSync(p.lockPath)).toBe(false);
-      expect(() => git(repo, ["rev-parse", "--verify", branch])).not.toThrow();
+      // US-LOOP-094: the cycle worktree is DETACHED (no local branch), so "work
+      // not discarded" is proven by the worktree being PRESERVED — timeout
+      // teardown never cleans it. (Any commits live on its detached HEAD; the
+      // bundle safety net for unpushed work is US-LOOP-095.)
+      expect(existsSync(p.worktreePath)).toBe(true);
 
       const events = readEvents(p.eventsPath);
       expect(events.find((e) => e.type === "cycle:timeout")).toMatchObject({ type: "cycle:timeout", cycleId, reason: "no-progress" });

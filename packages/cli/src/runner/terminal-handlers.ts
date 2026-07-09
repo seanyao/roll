@@ -69,6 +69,15 @@ export async function executeTerminalCommand(
         const pub: PublishResult = { status: 0, manualMerge, ...(cmd.draft === true ? { draft: true } : {}) };
         return { event: { type: "published", result: pub } };
       }
+      // US-LOOP-094: the cycle worktree is DETACHED (no local branch). Push its
+      // HEAD to the remote ref explicitly, FROM THE WORKTREE CWD — this replaces
+      // the git-push step formerly in planPublishPr. Same short-circuit as
+      // before: a push failure is a status-1 publish (PR steps never run).
+      const pushed = await ports.git.push(ports.paths.worktreePath, `HEAD:refs/heads/${cmd.branch}`);
+      if (pushed.code !== 0) {
+        const pub: PublishResult = { status: 1, manualMerge, ...(cmd.draft === true ? { draft: true } : {}) };
+        return { event: { type: "published", result: pub } };
+      }
       const body = await publishBodyWithEvidenceTrailer(ports, ctx);
       if (body === null) {
         const pub: PublishResult = { status: 1, manualMerge, ...(cmd.draft === true ? { draft: true } : {}) };
@@ -187,7 +196,9 @@ export async function executeTerminalCommand(
 
     // FIX-039 orphan branch+tag push (audit safety net, C2).
     case "push_orphan": {
-      const r = await ports.git.push(ports.repoCwd, cmd.branch);
+      // US-LOOP-094: detached worktree → the orphan commits live on the
+      // worktree's detached HEAD; push HEAD to the remote ref from the worktree.
+      const r = await ports.git.push(ports.paths.worktreePath, `HEAD:refs/heads/${cmd.branch}`);
       ports.events.appendAlert(
         ports.paths.alertsPath,
         `orphan push ${cmd.branch}: ${r.code === 0 ? "ok" : "failed"}`,

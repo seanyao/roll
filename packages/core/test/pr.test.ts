@@ -38,16 +38,17 @@ describe("cycle branch naming", () => {
 describe("planPublishPr / planPublishDocPr", () => {
   const input = { branch: "loop/cycle-x", slug: "o/r", body: "B" };
 
-  it("pr plan is push → view → create → merge --auto", () => {
+  it("US-LOOP-094: pr plan is gh-only view → create → merge --auto (push hoisted out)", () => {
     const steps = planPublishPr(input);
+    // The git-push step is no longer in the plan (done in the worktree by the
+    // terminal handler); the plan is gh-only.
     expect(steps.map((s) => s.kind)).toEqual([
-      "git-push",
       "gh-pr-view",
       "gh-pr-create",
       "gh-pr-merge-auto",
     ]);
-    expect(steps[0]?.argv).toEqual(["push", "origin", "loop/cycle-x"]);
-    expect(steps[3]?.argv).toEqual([
+    expect(steps.some((s) => s.kind === "git-push")).toBe(false);
+    expect(steps[2]?.argv).toEqual([
       "-R",
       "o/r",
       "pr",
@@ -73,14 +74,14 @@ describe("planPublishPr / planPublishDocPr", () => {
 
   it("manualMerge opens the PR but does not arm auto-merge", () => {
     const steps = planPublishPr({ ...input, manualMerge: true });
-    expect(steps.map((s) => s.kind)).toEqual(["git-push", "gh-pr-view", "gh-pr-create"]);
+    expect(steps.map((s) => s.kind)).toEqual(["gh-pr-view", "gh-pr-create"]);
     const create = steps.find((s) => s.kind === "gh-pr-create");
     expect(create?.argv).toContain("B\n\n[roll:manual-merge]");
   });
 
   it("FIX-909: draft manual review PR uses --draft and does not arm auto-merge", () => {
     const steps = planPublishPr({ ...input, manualMerge: true, draft: true });
-    expect(steps.map((s) => s.kind)).toEqual(["git-push", "gh-pr-view", "gh-pr-create"]);
+    expect(steps.map((s) => s.kind)).toEqual(["gh-pr-view", "gh-pr-create"]);
     const create = steps.find((s) => s.kind === "gh-pr-create");
     expect(create?.argv).toContain("--draft");
     expect(create?.argv).toContain("B\n\n[roll:manual-merge]");
@@ -89,12 +90,11 @@ describe("planPublishPr / planPublishDocPr", () => {
   it("doc plan swaps the merge tail to --admin and titles `doc update`", () => {
     const steps = planPublishDocPr(input);
     expect(steps.map((s) => s.kind)).toEqual([
-      "git-push",
       "gh-pr-view",
       "gh-pr-create",
       "gh-pr-merge-admin",
     ]);
-    expect(steps[3]?.argv).toEqual([
+    expect(steps[2]?.argv).toEqual([
       "-R",
       "o/r",
       "pr",
@@ -110,7 +110,6 @@ describe("planPublishPr / planPublishDocPr", () => {
 
   it("manualMerge doc plan also leaves the PR open for a human", () => {
     expect(planPublishDocPr({ ...input, manualMerge: true }).map((s) => s.kind)).toEqual([
-      "git-push",
       "gh-pr-view",
       "gh-pr-create",
     ]);

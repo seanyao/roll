@@ -1607,7 +1607,10 @@ function branchCanaryTrips(projectPath: string, slug: string, rt: string, alerts
   }
   let worktreeCount = 0;
   try {
-    worktreeCount = readdirSync(join(rt, "worktrees")).length;
+    // Count only cycle worktree DIRECTORIES — not stray lock/log/tmp files a
+    // readdir would otherwise inflate the count with (→ false canary trip).
+    worktreeCount = readdirSync(join(rt, "worktrees"), { withFileTypes: true })
+      .filter((e) => e.isDirectory()).length;
   } catch {
     /* no worktrees dir yet → 0 */
   }

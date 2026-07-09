@@ -106,3 +106,19 @@ export function exemptionSummaryLine(stats: ExemptionStats): string {
   const pct = Math.round(stats.rate * 100);
   return `screenshot_exempt: ${pct}% (${stats.exempt}/${stats.total})`;
 }
+
+export function renderExemptionSignal(stats: ExemptionStats): string[] {
+  if (stats.total === 0) return [];
+
+  const lines = [exemptionSummaryLine(stats)];
+  for (const epic of stats.byEpic) {
+    if (epic.total < 3) continue;
+    const rate = epic.exempt / epic.total;
+    const restTotal = stats.total - epic.total;
+    const restExempt = stats.exempt - epic.exempt;
+    const restRate = restTotal > 0 ? restExempt / restTotal : 0;
+    if (rate - restRate < 0.25) continue;
+    lines.push(`⚠ ${epic.epic} ${Math.round(rate * 100)}% exempt`);
+  }
+  return lines;
+}

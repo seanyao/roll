@@ -44,7 +44,7 @@ export function exemptionAudit(repoCwd: string): ExemptionAudit {
 
 /** Human-readable audit report (read-only; the header states it never blocks). */
 export function renderExemptionAudit(audit: ExemptionAudit): string {
-  const lines = [`screenshot_exempt audit (read-only — forward-enforce, never blocks存量):`];
+  const lines = [`screenshot_exempt audit (read-only — forward-enforce, never blocks legacy cards):`];
   lines.push(`  per-card exemptions: ${audit.cards.length}`);
   for (const c of audit.cards) lines.push(`    ${c.epic}/${c.id} — ${c.reason}`);
   lines.push(`  blanket-exempt epics: ${audit.blanketEpics.length === 0 ? "(none)" : audit.blanketEpics.join(", ")}`);

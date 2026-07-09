@@ -36,6 +36,7 @@ import type { CycleActivityEvent, RollEvent } from "@roll/spec";
 import { cardArchiveDir } from "../lib/archive.js";
 import type { AgentSpawn, AgentSpawnResult } from "./agent-spawn.js";
 import { storyHasAcBlock, storyRequiresScreenshot, storySpecPath } from "./attest-gate.js";
+import { capturedEvidenceRefs, type CapturedRef } from "./captured-evidence.js";
 
 /** Hard wall-clock cap for the remediation spawn — writing one JSON file from
  *  already-done work is minutes, not a full cycle. */
@@ -142,6 +143,7 @@ export function generateAcMapDraft(
   storyId: string,
   evidence: DraftEvidence,
   signals?: CycleActivityEvent[],
+  runDir?: string,
 ): string | null {
   if (storyId === "") return null;
   const acItems = acForStory(specText, storyId, { fileOwned: true });
@@ -187,6 +189,8 @@ export function generateAcMapDraft(
       }
     }
   }
+
+  const capturedRefs = runDir !== undefined && runDir !== "" ? capturedEvidenceRefs(runDir) : [];
 
   const entries: Array<Record<string, unknown>> = [];
   for (const item of acItems) {
@@ -245,6 +249,9 @@ export function generateAcMapDraft(
         evidenceEntries.push(entry);
       }
     }
+    for (const ref of capturedRefs) {
+      evidenceEntries.push(capturedRefEvidenceEntry(ref));
+    }
 
     // Deduplicate evidence entries by label
     const seen = new Set<string>();
@@ -271,6 +278,12 @@ export function generateAcMapDraft(
   }
 
   return JSON.stringify(entries, null, 2) + "\n";
+}
+
+function capturedRefEvidenceEntry(ref: CapturedRef): Record<string, string> {
+  const label = ref.label !== undefined ? `captured: ${ref.label}` : `captured: ${basename(ref.ref)}`;
+  if (ref.kind === "text") return { kind: "text", label, textFile: ref.ref };
+  return { kind: ref.kind === "capture" ? "screenshot" : ref.kind, label, href: ref.ref };
 }
 
 /**
@@ -422,7 +435,7 @@ export async function runAcMapSelfHeal(opts: AcMapSelfHealOptions): Promise<AcMa
       if (specPath !== null) {
         const specText = readFileSync(specPath, "utf8");
         const gitEvidence = await opts.collectDraftEvidence();
-        const draftJson = generateAcMapDraft(specText, opts.storyId, gitEvidence, opts.collectCycleSignals());
+        const draftJson = generateAcMapDraft(specText, opts.storyId, gitEvidence, opts.collectCycleSignals(), opts.runDir);
         if (draftJson !== null) {
           writeAcMapDraftEvidenceFiles(archiveCwd, opts.storyId, gitEvidence);
           writeFileSync(acMapPath(archiveCwd, opts.storyId), draftJson);

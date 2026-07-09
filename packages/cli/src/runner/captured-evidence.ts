@@ -27,6 +27,12 @@ export interface CapturedRef {
   label?: string;
 }
 
+export interface CaptureFailure {
+  label?: string;
+  error: string;
+  kind?: string;
+}
+
 interface Manifest {
   captures?: unknown;
   screenshots?: unknown;
@@ -95,11 +101,20 @@ export function capturedEvidenceRefs(runDir: string): CapturedRef[] {
   return out;
 }
 
-// NOTE (US-EVID-023 scope): surfacing capture FAILURES (AC3/4) is intentionally
-// NOT implemented here. In roll a `captures[]` row with `taken:false` + a
-// `skipped` reason is an HONEST machine-skip that legitimately PASSES (FIX-309
-// deletion-not-placeholder), NOT a failure — so it must not be alerted as one.
-// A real capture failure (roll-capture crash / headless timeout / non-zero cmd)
-// needs a DISTINCT signal from the capture writer; that is deferred to a
-// follow-up rather than mislabel honest skips. This module ships the
-// harness-owned BINDING half (capturedEvidenceRefs) only.
+export function captureFailures(runDir: string): CaptureFailure[] {
+  const m = readManifest(runDir);
+  if (m === null || !Array.isArray(m.captures)) return [];
+
+  const out: CaptureFailure[] = [];
+  for (const raw of m.captures) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const row = raw as Record<string, unknown>;
+    if (row["taken"] === true || row["failed"] !== true) continue;
+
+    const label = rowStr(row, "label");
+    const kind = rowStr(row, "kind");
+    const error = rowStr(row, "error") ?? rowStr(row, "skipped") ?? "capture failed";
+    out.push({ ...(label !== undefined ? { label } : {}), error, ...(kind !== undefined ? { kind } : {}) });
+  }
+  return out;
+}

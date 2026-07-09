@@ -42,6 +42,7 @@ import { hasVisualEvidenceAc } from "../lib/design-visual-evidence.js";
 import { evidenceDeltaSummary, evidenceModeExemptsScreenshot, evidenceModeForSpec, parseEvaluationContract } from "../lib/evaluation-contract.js";
 import { physicalTerminalFromSpecText } from "../lib/physical-terminal.js";
 import { evaluateReviewScoreGate } from "../lib/review-score.js";
+import { captureFailures } from "./captured-evidence.js";
 
 export type AttestMode = "soft" | "hard";
 
@@ -1412,6 +1413,7 @@ export function runAttestGate(
     } catch {
       /* drift alert is best-effort; it never affects the verdict */
     }
+    alertCaptureFailures(worktreeCwd, storyId, cycleId, sinks, scoreRepoCwd);
     // FIX-339 (复核 #1) — a deliverable_cmd outside the roll read-only allowlist
     // is rejected BEFORE anything else: the spec asked the attest lane to run a
     // non-roll command or a state-changing roll subcommand (agent-controlled
@@ -1568,5 +1570,26 @@ export function runAttestGate(
       /* sinks are best-effort here — the fail-closed verdict still returns */
     }
     return { verdict: "skipped", mode, reasons, blocked };
+  }
+}
+
+function alertCaptureFailures(
+  worktreeCwd: string,
+  storyId: string,
+  cycleId: string,
+  sinks: AttestGateSinks,
+  persistentCwd?: string,
+): void {
+  try {
+    const report = existingReport(worktreeCwd, storyId, persistentCwd);
+    if (report === null) return;
+    const failures = captureFailures(dirname(report));
+    for (const failure of failures) {
+      const label = failure.label !== undefined ? ` ${failure.label}` : "";
+      const kind = failure.kind !== undefined ? `${failure.kind}${label}` : `capture${label}`;
+      sinks.alert(`attest capture failure (${storyId}) — ${kind}: ${failure.error} — cycle ${cycleId}`);
+    }
+  } catch {
+    /* capture failure surfacing is alert-only and never affects the verdict */
   }
 }

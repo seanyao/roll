@@ -127,4 +127,36 @@ describe("runAttestGate contract-drift alert (integration, persistent vs worktre
     runAttestGate(worktree, STORY, "c-nodrift", "soft", 1000, s, persistent);
     expect(alerts.some((a) => a.includes("contract drift"))).toBe(false);
   });
+
+  it("fires an alert when the run dir contains a failed capture", () => {
+    const root = tempProject(SPEC);
+    const runDir = join(root, ".roll", "features", "uncategorized", STORY, "latest");
+    mkdirSync(runDir, { recursive: true });
+    writeFileSync(join(runDir, `${STORY}-report.html`), "<section data-ac='US-EVID-021:AC1'>proof</section>", "utf8");
+    writeFileSync(
+      join(runDir, "evidence.json"),
+      JSON.stringify(
+        {
+          captures: [
+            {
+              kind: "web",
+              out: "screenshots/web.png",
+              taken: false,
+              skipped: "capture errored: headless timeout",
+              failed: true,
+              error: "headless timeout",
+              label: "web",
+            },
+          ],
+        },
+        null,
+        2,
+      ) + "\n",
+      "utf8",
+    );
+
+    const { alerts, s } = sinks();
+    runAttestGate(root, STORY, "c-capture-failed", "soft", 1000, s, root);
+    expect(alerts.some((a) => a.includes("capture failure") && a.includes("headless timeout"))).toBe(true);
+  });
 });

@@ -35,6 +35,7 @@ export * from "./events/infra-default.js";
 export * from "./loop/activity-signal.js";
 export * from "./loop/alert-loop.js";
 export * from "./loop/branch-canary.js";
+export * from "./loop/remote-branch-gc.js";
 export * from "./loop/ci-loop.js";
 export * from "./loop/correction-actuator.js";
 export * from "./loop/correction-safety.js";

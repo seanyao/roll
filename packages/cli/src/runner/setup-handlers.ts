@@ -23,6 +23,8 @@ import {
 } from "@roll/core";
 import { classifyStatus, STATUS_MARKER, type LoopType } from "@roll/spec";
 import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
+import { storySpecPath } from "./attest-gate.js";
 import { markDoneGuarded } from "./done-guard.js";
 import { eventTs } from "./runner-time.js";
 import { readSkipCards } from "./skip-cards.js";
@@ -31,6 +33,7 @@ import { appendPickRankedEvent, resolvePickRanking } from "./pick-ranking.js";
 import { readRunsRows } from "./run-records.js";
 import { resetStaleSpecTruth, resolveResumeBase } from "./resume-truth.js";
 import { runVisualEvidencePreflight } from "./publish-lifecycle.js";
+import { freezeContractSnapshot } from "./contract-snapshot.js";
 import { bootstrapWorktreeDeps, bootstrapWorktreePrebuild, bootstrapWorktreeSkills, linkRollIntoWorktree, readPrebuildDistEnabled } from "./worktree-bootstrap.js";
 import { recordExecutionProfile, routerEstMin } from "./execution-profile.js";
 import type { ExecuteResult, Ports } from "./ports.js";
@@ -422,6 +425,23 @@ export async function executeSetupCommand(
       // flow — story_picked still returns — so a false positive cannot topple a
       // CLI/back-end card; it only raises a visible signal.
       runVisualEvidencePreflight(ports, story.id, ctx.cycleId);
+      // US-EVID-021: freeze the acceptance contract from DESIGN TRUTH (the
+      // persistent .roll via ports.repoCwd, NOT the builder-mutable worktree) at
+      // cycle start. The attest gate later judges against this snapshot and
+      // alerts (never blocks) on drift, so a mid-cycle AC/`screenshot_exempt`
+      // edit in the worktree cannot silently change the contract. Best-effort,
+      // never alters control flow (same owner red line as the preflight above).
+      // Read the design-truth spec once here and hand it to the freeze (so the
+      // freeze does not re-scan/re-read it, and contract-snapshot stays free of
+      // any attest-gate import → no cycle).
+      try {
+        const designSpec = storySpecPath(ports.repoCwd, story.id);
+        if (designSpec !== null) {
+          freezeContractSnapshot(ports.repoCwd, story.id, readFileSync(designSpec, "utf8"), eventTs(ports));
+        }
+      } catch {
+        /* best-effort: the freeze must never topple the pick */
+      }
       // FIX-304: capture the story's PRE-cycle status BEFORE we claim it 🔨.
       // The terminal (append_run) uses it to UNDO a premature ✅ Done the agent
       // wrote into the symlinked .roll backlog (FIX-204C) when the cycle does

@@ -1,12 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { parseBacklog, type CycleContext } from "@roll/core";
 import { checkImageEvidenceAllowed, imageEvidencePathsInWorkingTree } from "@roll/infra";
 import { cardArchiveDir } from "../lib/archive.js";
 import { validateStoryVisualEvidence } from "../lib/design-visual-evidence.js";
 import { acMapPath } from "./attest-remediation.js";
 import { declaresAnySurface, screenshotExemption } from "./attest-gate.js";
+import { ingestGateMode, ingestSurfaceReadiness, recordIngestHold } from "./ingest-gate.js";
 import type { Ports } from "./ports.js";
 import { eventTs } from "./runner-time.js";
 
@@ -73,6 +74,32 @@ export function runVisualEvidencePreflight(ports: Ports, storyId: string, cycleI
           reasons: ["spec declares no deliverable_url, deliverable_cmd, or screenshot_exempt — no surface to capture"],
           ts: eventTs(ports),
         });
+        // US-EVID-022: phased ingest SOFT gate. The diagnostic above is
+        // observe-only (metric). In `alert`/`block` mode, also record the card
+        // to the ingest hold list and raise a visible alert. Still NON-blocking —
+        // control flow returns below regardless (owner red line: a false
+        // positive must never stall the loop); `block` means "held for an
+        // authoring fix", never "crash ingest".
+        // Check mode FIRST and short-circuit: in the default `metric` mode the
+        // hold is discarded, so skip the ingestSurfaceReadiness parse (acForStory)
+        // on that common path. The readiness call also applies the AC-block guard
+        // (a placeholder with no AC block is NOT held), unlike the raw
+        // declaresAnySurface check above which the pre-existing diagnostic uses.
+        const ingestMode = ingestGateMode(ports.repoCwd);
+        if (ingestMode !== "metric" && ingestSurfaceReadiness(specText, storyId).needsHold) {
+          recordIngestHold(
+            dirname(ports.paths.eventsPath),
+            storyId,
+            "AC block but no declared capture surface (deliverable_url/cmd/physical) or screenshot_exempt",
+            eventTs(ports),
+          );
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `[${ingestMode === "block" ? "HOLD" : "WARN"}] ingest gate (${storyId}): AC block declares no ` +
+              `capture surface or screenshot_exempt — recorded to ingest-hold for an authoring fix; NOT ` +
+              `blocking the cycle — cycle ${cycleId}`,
+          );
+        }
       }
       return;
     }

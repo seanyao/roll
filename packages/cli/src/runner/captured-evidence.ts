@@ -1,0 +1,105 @@
+/**
+ * US-EVID-023 — harness-owned binding for CAPTURED evidence.
+ *
+ * The empty-shell discard (55/116 blocked attestations) is dominated by an
+ * ac-map that points at paths the builder TYPED but never created, while the
+ * real captured artifact (evidence.json / screenshots/) sits elsewhere. Fix: the
+ * harness — which KNOWS what it captured — owns the binding for captured
+ * artifacts; the builder never types or confirms those paths (its ac-map only
+ * covers NON-captured evidence: named test-pass, manual notes).
+ *
+ * This module reads the harness's own capture manifest (`evidence.json`, the
+ * same `taken`/`skipped` shape consistency-audit and the attest gate already
+ * read) and the run-dir `screenshots/`, and returns:
+ *   - the REAL captured refs to bind into the ac-map, and
+ *   - the capture FAILURES to surface (a declared capture that produced nothing),
+ *     so a roll-capture failure / headless timeout / non-zero cmd is a visible
+ *     signal instead of a silent empty shell.
+ * Pure read: run-dir path → values. No writes, no network.
+ */
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+
+/** A real captured artifact the harness produced — bound into the ac-map by the harness. */
+export interface CapturedRef {
+  kind: "screenshot" | "text" | "cast" | "capture";
+  ref: string;
+  label?: string;
+}
+
+interface Manifest {
+  captures?: unknown;
+  screenshots?: unknown;
+  texts?: unknown;
+}
+
+function readManifest(runDir: string): Manifest | null {
+  const p = join(runDir, "evidence.json");
+  if (!existsSync(p)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(p, "utf8")) as unknown;
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? (parsed as Manifest) : null;
+  } catch {
+    return null;
+  }
+}
+
+function rowStr(row: Record<string, unknown>, key: string): string | undefined {
+  const v = row[key];
+  return typeof v === "string" && v !== "" ? v : undefined;
+}
+
+const IMG = /\.(png|jpe?g|webp|gif)$/i;
+
+/**
+ * The real captured artifacts the harness produced in this run dir. Only
+ * genuinely-present captures count: a `captures[]` row with `taken === true`, an
+ * image file physically under `screenshots/`, and any `texts[]` file ref. These
+ * are the refs the harness binds into the ac-map — never a builder-typed path.
+ */
+export function capturedEvidenceRefs(runDir: string): CapturedRef[] {
+  const out: CapturedRef[] = [];
+  const seen = new Set<string>();
+  const push = (kind: CapturedRef["kind"], ref: string, label?: string): void => {
+    if (ref === "" || seen.has(`${kind}:${ref}`)) return;
+    seen.add(`${kind}:${ref}`);
+    out.push(label !== undefined ? { kind, ref, label } : { kind, ref });
+  };
+
+  const m = readManifest(runDir);
+  if (m !== null && Array.isArray(m.captures)) {
+    for (const raw of m.captures) {
+      if (typeof raw !== "object" || raw === null) continue;
+      const row = raw as Record<string, unknown>;
+      if (row["taken"] !== true) continue;
+      const ref = rowStr(row, "href") ?? rowStr(row, "path");
+      if (ref !== undefined) push("capture", ref, rowStr(row, "label"));
+    }
+  }
+  if (m !== null && Array.isArray(m.texts)) {
+    for (const raw of m.texts) {
+      if (typeof raw === "string") push("text", raw);
+      else if (typeof raw === "object" && raw !== null) {
+        const ref = rowStr(raw as Record<string, unknown>, "textFile") ?? rowStr(raw as Record<string, unknown>, "path");
+        if (ref !== undefined) push("text", ref, rowStr(raw as Record<string, unknown>, "label"));
+      }
+    }
+  }
+  try {
+    for (const f of readdirSync(join(runDir, "screenshots"))) {
+      if (IMG.test(f)) push("screenshot", join("screenshots", f));
+    }
+  } catch {
+    /* no screenshots dir */
+  }
+  return out;
+}
+
+// NOTE (US-EVID-023 scope): surfacing capture FAILURES (AC3/4) is intentionally
+// NOT implemented here. In roll a `captures[]` row with `taken:false` + a
+// `skipped` reason is an HONEST machine-skip that legitimately PASSES (FIX-309
+// deletion-not-placeholder), NOT a failure — so it must not be alerted as one.
+// A real capture failure (roll-capture crash / headless timeout / non-zero cmd)
+// needs a DISTINCT signal from the capture writer; that is deferred to a
+// follow-up rather than mislabel honest skips. This module ships the
+// harness-owned BINDING half (capturedEvidenceRefs) only.

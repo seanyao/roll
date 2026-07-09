@@ -12,6 +12,7 @@ import {
   freezeContractSnapshot,
   readContractSnapshot,
 } from "../src/runner/contract-snapshot.js";
+import { runAttestGate } from "../src/runner/attest-gate.js";
 
 const STORY = "US-EVID-021";
 const SPEC = `---
@@ -80,5 +81,50 @@ describe("contractDrift", () => {
     freezeContractSnapshot(root, STORY, 1);
     const weakened = SPEC.replace("AC1 gate judges against the frozen snapshot", "AC1 gutted");
     expect(contractDrift(root, STORY, weakened)).not.toBeNull();
+  });
+});
+
+/**
+ * Integration: the full pick_story-freeze → runAttestGate drift-alert path, with
+ * scoreRepoCwd passed as the persistent root (the production wiring). Guards the
+ * `scoreRepoCwd = worktreeCwd` default footgun — if the gate read the snapshot
+ * from the worktree instead of the persistent root, this drift alert never fires.
+ */
+describe("runAttestGate contract-drift alert (integration, persistent vs worktree roots)", () => {
+  function cardSpecDir(root: string): string {
+    const dir = join(root, ".roll", "features", "uncategorized", STORY);
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+  function sinks() {
+    const alerts: string[] = [];
+    return { alerts, s: { alert: (m: string) => alerts.push(m), event: () => {} } };
+  }
+
+  it("fires a drift alert when the worktree spec drifted from the persistent frozen snapshot", () => {
+    const persistent = mkdtempSync(join(tmpdir(), "roll-evid021-persist-"));
+    writeFileSync(join(cardSpecDir(persistent), "spec.md"), SPEC, "utf8");
+    freezeContractSnapshot(persistent, STORY, 1); // freeze design truth
+
+    const worktree = mkdtempSync(join(tmpdir(), "roll-evid021-wt-"));
+    const drifted = SPEC.replace("deliverable_cmd: roll cycles", "deliverable_cmd: roll cycles\nscreenshot_exempt: skip");
+    writeFileSync(join(cardSpecDir(worktree), "spec.md"), drifted, "utf8");
+
+    const { alerts, s } = sinks();
+    runAttestGate(worktree, STORY, "c-drift", "soft", 1000, s, persistent);
+    expect(alerts.some((a) => a.includes("contract drift") && a.includes("DETECTION ONLY"))).toBe(true);
+  });
+
+  it("no drift alert when the worktree spec still matches the frozen snapshot", () => {
+    const persistent = mkdtempSync(join(tmpdir(), "roll-evid021-persist2-"));
+    writeFileSync(join(cardSpecDir(persistent), "spec.md"), SPEC, "utf8");
+    freezeContractSnapshot(persistent, STORY, 1);
+
+    const worktree = mkdtempSync(join(tmpdir(), "roll-evid021-wt2-"));
+    writeFileSync(join(cardSpecDir(worktree), "spec.md"), SPEC.replace(/- \[ \]/g, "- [x]"), "utf8"); // reset flip only
+
+    const { alerts, s } = sinks();
+    runAttestGate(worktree, STORY, "c-nodrift", "soft", 1000, s, persistent);
+    expect(alerts.some((a) => a.includes("contract drift"))).toBe(false);
   });
 });

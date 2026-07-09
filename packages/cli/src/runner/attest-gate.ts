@@ -1413,8 +1413,9 @@ export function runAttestGate(
           !contractMatchesSnapshot(snap, readFileSync(worktreeSpec, "utf8"))
         ) {
           sinks.alert(
-            `attest: contract drift for ${storyId} — worktree spec no longer matches the cycle-start ` +
-              `frozen contract (${snap.hash.slice(0, 12)}…); judged against the frozen contract — cycle ${cycleId}`,
+            `attest: contract drift for ${storyId} — worktree spec's contract no longer matches the ` +
+              `cycle-start frozen snapshot (${snap.hash.slice(0, 12)}…); DETECTION ONLY — the verdict below ` +
+              `is unchanged, this flags a mid-cycle AC/screenshot_exempt edit for review — cycle ${cycleId}`,
           );
         }
       }

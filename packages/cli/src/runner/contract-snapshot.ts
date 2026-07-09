@@ -83,7 +83,8 @@ export function contractDrift(projectPath: string, storyId: string, worktreeSpec
   if (snap === null) return null;
   if (contractMatchesSnapshot(snap, worktreeSpecText)) return null;
   return (
-    `contract drift for ${storyId}: worktree spec no longer matches the cycle-start frozen contract ` +
-    `(frozen hash ${snap.hash.slice(0, 12)}…) — attest judged against the frozen contract, not the worktree edit`
+    `contract drift for ${storyId}: worktree spec's contract no longer matches the cycle-start frozen ` +
+    `snapshot (frozen hash ${snap.hash.slice(0, 12)}…) — DETECTION ONLY (verdict unchanged); flags a ` +
+    `mid-cycle AC/screenshot_exempt edit for review`
   );
 }

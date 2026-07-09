@@ -543,3 +543,28 @@ deliverable_cmd: roll init --auto
     });
   });
 });
+
+describe("US-EVID-025 goal 3 — exempt ≠ evidence-free: an exemption must declare a substitute capturable evidence", () => {
+  const exempt = (reason: string, extra = ""): string =>
+    `---\nid: US-X\ntitle: t\nscreenshot_exempt: ${reason}\n${extra}---\n\n## AC\n- [ ] AC1 backend logic\n`;
+
+  // Design-time enforcement via a NON-FATAL field: exempt stays ok:true so the
+  // RUNTIME preflight keeps honest-skipping (existing 306 exempt cards are NOT
+  // retroactively flagged at runtime — that is US-EVID-027's forward-only sweep).
+  // The authoring gate (roll story validate) is what rejects a missing substitute.
+  it("a bare exemption with NO substitute is flagged (field), but stays ok:true for the non-blocking runtime", () => {
+    const v = validateStoryVisualEvidence(exempt("no visual surface"));
+    expect(v.exemptSubstituteMissing).toBe(true);
+    expect(v.ok).toBe(true); // runtime honest-skip unchanged — never retroactively blocks
+  });
+
+  it("a deliverable_cmd substitute clears the flag", () => {
+    const v = validateStoryVisualEvidence(exempt("CLI/backend, no web surface", "deliverable_cmd: roll cycles\n"));
+    expect(v.exemptSubstituteMissing).toBeFalsy();
+  });
+
+  it("a reason that names tests as the substitute clears the flag", () => {
+    expect(validateStoryVisualEvidence(exempt("纯后端逻辑；替代证据=确定性单测")).exemptSubstituteMissing).toBeFalsy();
+    expect(validateStoryVisualEvidence(exempt("pure backend; substitute evidence = named unit tests")).exemptSubstituteMissing).toBeFalsy();
+  });
+});

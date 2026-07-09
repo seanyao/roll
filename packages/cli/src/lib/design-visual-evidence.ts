@@ -76,6 +76,8 @@ export interface VisualEvidenceVerdict {
   rejectedDeliverableCmds?: string[];
   /** deliverable_cmd entries that look like streaming/never-terminating commands. */
   streamingDeliverableCmds?: string[];
+  /** Whether an exempt spec lacks substitute capturable evidence (authoring-only gate). */
+  exemptSubstituteMissing?: boolean;
 }
 
 /**
@@ -264,6 +266,19 @@ export function declaresDeliverableCmd(specText: string): boolean {
   return parseDeliverableCmdsFromSpec(specText).length > 0;
 }
 
+/**
+ * Whether a recorded screenshot exemption lacks substitute capturable evidence.
+ * Runtime preflight keeps exemptions non-blocking; authoring validation uses
+ * this extra signal to reject "no screenshot" specs that also name no command,
+ * test, coverage output, or other capturable substitute.
+ */
+export function exemptionSubstituteMissing(specText: string): boolean {
+  const reason = visualExemptionReason(specText);
+  if (reason === undefined) return false;
+  if (declaresDeliverableCmd(specText)) return false;
+  return !/test|单测|测试|命令|输出|coverage|deliverable_cmd/i.test(reason);
+}
+
 /** Whether the spec frontmatter declares a `physical_terminal:` block. */
 export function declaresPhysicalTerminal(specText: string): boolean {
   return declaresPhysicalTerminalSpec(specText);
@@ -442,7 +457,15 @@ export function validateStoryVisualEvidence(specText: string): VisualEvidenceVer
   const hasAc = surface !== "none";
 
   if (exemptReason !== undefined) {
-    return { ok: true, exemptReason, declaresDeliverableUrl: declares, hasVisualEvidenceAc: hasAc, surface };
+    const missingSubstitute = exemptionSubstituteMissing(specText);
+    return {
+      ok: true,
+      exemptReason,
+      declaresDeliverableUrl: declares,
+      hasVisualEvidenceAc: hasAc,
+      surface,
+      ...(missingSubstitute ? { exemptSubstituteMissing: true } : {}),
+    };
   }
 
   if (!hasAc) {

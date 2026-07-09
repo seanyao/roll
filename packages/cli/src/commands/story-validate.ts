@@ -102,6 +102,9 @@ export function storyValidateCommand(args: string[]): number {
       "no deliverable surface declared — must declare `deliverable_url:` / `deliverable_cmd:` or a recorded `screenshot_exempt: <reason>`",
     );
   }
+  if (visual.exemptSubstituteMissing === true) {
+    fails.push("screenshot_exempt without a substitute capturable evidence (declare deliverable_cmd or name the tests) — 免截图 ≠ 免证据");
+  }
   // An exempt card owes no visual-evidence AC (the contract is waived); only a
   // non-exempt card must carry one.
   if (!exempt && !visual.ok) {
@@ -123,6 +126,11 @@ export function storyValidateCommand(args: string[]): number {
   lines.push(`${ok ? green("✓") : red("✗")} story validate ${id}  (${spec})`);
   if (exempt) {
     lines.push(`  must-declare:    ${green("ok")} (exempt — ${exemption.reason})`);
+    lines.push(
+      `  visual-evidence: ${visual.exemptSubstituteMissing === true ? red("FAIL") : green("ok")}${
+        visual.exemptSubstituteMissing === true ? " — screenshot_exempt lacks substitute evidence" : " (exempt)"
+      }`,
+    );
   } else {
     lines.push(`  must-declare:    ${declares ? green("ok") : amber("warning")}${declares ? "" : " — 缺声明面 (deliverable_url/cmd/exempt)"}`);
     lines.push(`  visual-evidence: ${mark(visual.ok)}${visual.ok ? ` (surface: ${visual.surface})` : ` — 缺可视 AC: ${visual.code ?? "flagged"}`}`);

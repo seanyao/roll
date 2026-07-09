@@ -378,13 +378,13 @@ async function captureCommandFact(projectPath: string, command: string, deps: Sc
 
 export function captureFactFromShot(shot: ScreenshotResult, forcedError?: string): CaptureFact {
   const failed = !shot.taken && shot.failed === true;
-  const error = failed ? forcedError ?? shot.error ?? shot.skipped : undefined;
+  const error = failed ? forcedError ?? shot.error ?? shot.skipped ?? "capture failed" : undefined;
   return {
     kind: shot.kind,
     out: shot.out,
     taken: shot.taken,
     ...(shot.skipped !== undefined ? { skipped: shot.skipped } : {}),
-    ...(error !== undefined && error !== "" ? { failed: true, error } : {}),
+    ...(failed ? { failed: true, error } : {}),
   };
 }
 

@@ -49,4 +49,14 @@ describe("captureFactFromShot — failure comes from the explicit flag, not skip
     const fact = captureFactFromShot({ kind: "screenshot", out: "screenshots/x.png", taken: true });
     expect(fact.failed).toBeFalsy();
   });
+
+  it("emits failed unconditionally when the producer flag is set, even with no error/skipped text (kimi review)", () => {
+    // A failure signal must not depend on the producer also supplying a reason
+    // string — a malformed producer that sets failed:true with empty error/skipped
+    // must still surface as a failure, never be silently dropped.
+    const fact = captureFactFromShot({ kind: "screenshot", out: "screenshots/x.png", taken: false, failed: true });
+    expect(fact.failed).toBe(true);
+    expect(typeof fact.error).toBe("string");
+    expect(fact.error).not.toBe("");
+  });
 });

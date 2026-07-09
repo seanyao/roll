@@ -487,25 +487,27 @@ async function defaultSweepRemoteBranches(slug: string, openHeadRefs: ReadonlySe
   } catch {
     return; // no remote / offline → nothing to do
   }
-  // Pending-pr-create queue (FIX-1214) — must not delete.
-  const pendingBranches = new Set<string>();
-  try {
-    for (const e of readPendingPrCreates(rt)) pendingBranches.add(e.branch);
-  } catch {
-    /* best-effort */
-  }
-  // Runs-ledger branches still parked on the remote (orphan/local/published/built)
-  // — pushed but not confirmed merged; keep.
+  // Guard sets: pending-pr-create queue (FIX-1214) + runs-ledger branches still
+  // parked on the remote (orphan/local/published/built) — both MUST NOT be
+  // deleted. US-LOOP-097 fail-safe: "narrow D" is only safe if EVERY guard is
+  // intact; a guard whose data source can't be read must NOT silently become an
+  // empty set (fail-open → deleting a protected branch). So if either read
+  // throws, ABORT the sweep entirely rather than delete with a missing guard.
+  // (The readers already return [] for a missing/empty file — that is a
+  // legitimate "nothing to protect", not an error, and proceeds normally.)
   const PROTECT = new Set(["orphan", "local", "published", "built", "pending_merge"]);
-  const activeRunBranches = new Set<string>();
+  let pendingBranches: Set<string>;
+  let activeRunBranches: Set<string>;
   try {
+    pendingBranches = new Set(readPendingPrCreates(rt).map((e) => e.branch));
+    activeRunBranches = new Set<string>();
     for (const row of readRunsRows(join(rt, "runs.jsonl"))) {
       const cid = typeof row["cycle_id"] === "string" ? row["cycle_id"] : "";
       const status = typeof row.status === "string" ? row.status : "";
       if (cid !== "" && PROTECT.has(status)) activeRunBranches.add(`loop/cycle-${cid}`);
     }
   } catch {
-    /* best-effort */
+    return; // fail-safe: cannot verify a guard → do not delete anything this tick
   }
   const graceParsed = parseInt(process.env["ROLL_REMOTE_GC_GRACE_MIN"] ?? "", 10);
   const graceMin = Number.isFinite(graceParsed) && graceParsed > 0 ? graceParsed : DEFAULT_REMOTE_GC_GRACE_MIN;

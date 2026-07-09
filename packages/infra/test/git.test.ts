@@ -110,6 +110,25 @@ describe("worktree lifecycle", () => {
     expect(execFileSync("git", ["bundle", "list-heads", bundle], { cwd: repo, encoding: "utf8" })).toContain(head);
   });
 
+  it("US-LOOP-095: the quarantine bundle is RECOVERABLE (verify + fetch into a fresh repo)", async () => {
+    const repo = initRepo("recover");
+    const wt = join(tmp("recoverwt"), "wt");
+    expect((await worktreeAdd(repo, wt, "loop/cycle-r", "main")).code).toBe(0);
+    execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "unpushed work"], { cwd: wt });
+    const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: wt, encoding: "utf8" }).trim();
+    await worktreeRemove(repo, wt, "loop/cycle-r");
+    const bundle = join(repo, ".roll", "loop", "quarantine", "leaked-loop-cycle-r.bundle");
+
+    // (a) the bundle is structurally valid.
+    expect(() => execFileSync("git", ["bundle", "verify", bundle], { cwd: repo, stdio: "pipe" })).not.toThrow();
+    // (b) the unpushed commit is actually recoverable into a PRISTINE repo
+    //     (AC2: not just "recorded" — fetchable back to the exact object).
+    const fresh = initRepo("recover-dst");
+    execFileSync("git", ["fetch", bundle, "HEAD:refs/heads/recovered"], { cwd: fresh });
+    const recovered = execFileSync("git", ["rev-parse", "refs/heads/recovered"], { cwd: fresh, encoding: "utf8" }).trim();
+    expect(recovered).toBe(head);
+  });
+
   it("US-LOOP-095: worktreeRemove(bundleUnpushed=false) skips the bundle (work already on remote)", async () => {
     const repo = initRepo("nobundle");
     const wt = join(tmp("nobundlewt"), "wt");

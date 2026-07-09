@@ -23,6 +23,8 @@ import {
 } from "@roll/core";
 import { classifyStatus, STATUS_MARKER, type LoopType } from "@roll/spec";
 import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
+import { storySpecPath } from "./attest-gate.js";
 import { markDoneGuarded } from "./done-guard.js";
 import { eventTs } from "./runner-time.js";
 import { readSkipCards } from "./skip-cards.js";
@@ -429,7 +431,17 @@ export async function executeSetupCommand(
       // alerts (never blocks) on drift, so a mid-cycle AC/`screenshot_exempt`
       // edit in the worktree cannot silently change the contract. Best-effort,
       // never alters control flow (same owner red line as the preflight above).
-      freezeContractSnapshot(ports.repoCwd, story.id, eventTs(ports));
+      // Read the design-truth spec once here and hand it to the freeze (so the
+      // freeze does not re-scan/re-read it, and contract-snapshot stays free of
+      // any attest-gate import → no cycle).
+      try {
+        const designSpec = storySpecPath(ports.repoCwd, story.id);
+        if (designSpec !== null) {
+          freezeContractSnapshot(ports.repoCwd, story.id, readFileSync(designSpec, "utf8"), eventTs(ports));
+        }
+      } catch {
+        /* best-effort: the freeze must never topple the pick */
+      }
       // FIX-304: capture the story's PRE-cycle status BEFORE we claim it 🔨.
       // The terminal (append_run) uses it to UNDO a premature ✅ Done the agent
       // wrote into the symlinked .roll backlog (FIX-204C) when the cycle does

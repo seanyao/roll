@@ -44,9 +44,10 @@ describe("exemptionAudit", () => {
       "feedback-truth-alignment",
       "x",
     ]);
-    // block sequence form (the case the old regex missed)
+    // block sequence form — delegates to the canonical screenshotExemptEpics
+    // (same parser the attest gate uses), scoped to the acceptance: parent.
     expect(
-      blanketExemptEpics(project([], "acceptance:\n  screenshot_exempt_epics:\n    - feedback-truth-alignment\n    - y  # note\n  other: z\n")),
+      blanketExemptEpics(project([], "acceptance:\n  screenshot_exempt_epics:\n    - feedback-truth-alignment\n    - y\n  other: z\n")),
     ).toEqual(["feedback-truth-alignment", "y"]);
     expect(blanketExemptEpics(project([]))).toEqual([]);
   });

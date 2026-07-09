@@ -13,11 +13,16 @@
  * stall the loop (owner red line). The pure projection/hash lives in @roll/core
  * (US-EVID-020); this is the thin cycle-start I/O + drift wrapper around it.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { buildContractSnapshot, contractMatchesSnapshot, type ContractSnapshot } from "@roll/core";
 import { cardArchiveDir } from "../lib/archive.js";
-import { storySpecPath } from "./attest-gate.js";
+
+// NOTE: this module intentionally imports ONLY from @roll/core and the leaf
+// lib/archive — never from attest-gate. The caller passes the design-truth
+// `specText` in (rather than us resolving it via attest-gate's storySpecPath),
+// which both keeps attest-gate free to `import { contractDrift }` from here with
+// no cycle, and lets the caller reuse a spec it already read (no double read).
 
 const SNAPSHOT_FILE = "contract-snapshot.json";
 
@@ -25,32 +30,21 @@ function snapshotPath(projectPath: string, storyId: string): string {
   return join(cardArchiveDir(projectPath, storyId), SNAPSHOT_FILE);
 }
 
-/** Design-truth spec text (from the persistent project, not a worktree), or null. */
-function designSpecText(projectPath: string, storyId: string): string | null {
-  const p = storySpecPath(projectPath, storyId);
-  if (p === null) return null;
-  try {
-    return readFileSync(p, "utf8");
-  } catch {
-    return null;
-  }
-}
-
 /**
- * Freeze the contract at cycle start from design truth and persist the snapshot.
+ * Freeze the contract at cycle start from the DESIGN-TRUTH `specText` the caller
+ * read (persistent project, not a builder worktree) and persist the snapshot.
  * Returns the snapshot (also written to `<card>/contract-snapshot.json`), or
- * null when the story has no readable spec. Best-effort write — a persist blip
- * never throws into the cycle.
+ * null when the spec is empty. Best-effort write — a persist blip never throws
+ * into the cycle.
  */
 export function freezeContractSnapshot(
   projectPath: string,
   storyId: string,
+  specText: string,
   frozenAtMs: number,
 ): ContractSnapshot | null {
-  if (storyId === "") return null;
-  const spec = designSpecText(projectPath, storyId);
-  if (spec === null) return null;
-  const snap = buildContractSnapshot(spec, storyId, frozenAtMs);
+  if (storyId === "" || specText === "") return null;
+  const snap = buildContractSnapshot(specText, storyId, frozenAtMs);
   try {
     const path = snapshotPath(projectPath, storyId);
     mkdirSync(dirname(path), { recursive: true });

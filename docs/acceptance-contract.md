@@ -92,8 +92,10 @@ more-enforced than it is.
   worktree-vs-snapshot **drift alert** (`attest-gate.ts`, alert-only); the
   **shift-left ingest** surface check + hold list (`ingest-gate.ts`), phased and
   **default observe-only** (`metric`) — `alert`/`block` are opt-in via policy.
-- **Live** (US-EVID-026/027): exemption-rate observability (`exemption-stats.ts`)
-  and the read-only exemption audit (`exemption-audit.ts`).
+- **Function delivered, surfacing pending** (US-EVID-026/027): the exemption-rate
+  computation (`exemption-stats.ts`) and read-only audit (`exemption-audit.ts`)
+  are implemented and unit-tested, but not yet wired into a board/`roll status`
+  line or a CLI command — they have no production caller yet.
 - **Designed / in progress**: harness-owned binding of captured artifacts into
   the ac-map (US-EVID-023 — the read primitive exists; the draft-generator
   wiring + capture-failure surfacing are not yet wired); the confirmed-ac-map

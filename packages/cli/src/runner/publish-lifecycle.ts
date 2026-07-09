@@ -80,13 +80,13 @@ export function runVisualEvidencePreflight(ports: Ports, storyId: string, cycleI
         // control flow returns below regardless (owner red line: a false
         // positive must never stall the loop); `block` means "held for an
         // authoring fix", never "crash ingest".
-        const ingestMode = ingestGateMode(ports.repoCwd);
-        // US-EVID-022: gate the hold on the canonical structural classifier so
-        // the AC-block guard applies — a placeholder card with no AC block (and
-        // no surface) is NOT held (nothing to gate), unlike the raw
+        // Check mode FIRST and short-circuit: in the default `metric` mode the
+        // hold is discarded, so skip the ingestSurfaceReadiness parse (acForStory)
+        // on that common path. The readiness call also applies the AC-block guard
+        // (a placeholder with no AC block is NOT held), unlike the raw
         // declaresAnySurface check above which the pre-existing diagnostic uses.
-        const needsHold = ingestSurfaceReadiness(specText, storyId).needsHold;
-        if (needsHold && (ingestMode === "alert" || ingestMode === "block")) {
+        const ingestMode = ingestGateMode(ports.repoCwd);
+        if (ingestMode !== "metric" && ingestSurfaceReadiness(specText, storyId).needsHold) {
           recordIngestHold(
             dirname(ports.paths.eventsPath),
             storyId,

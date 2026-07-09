@@ -38,7 +38,7 @@ function tempProject(specText: string): string {
 describe("freezeContractSnapshot / readContractSnapshot", () => {
   it("freezes the design-truth contract and round-trips", () => {
     const root = tempProject(SPEC);
-    const snap = freezeContractSnapshot(root, STORY, 1783580000000);
+    const snap = freezeContractSnapshot(root, STORY, SPEC, 1783580000000);
     expect(snap).not.toBeNull();
     expect(snap?.storyId).toBe(STORY);
     expect(snap?.projection.deliverableCmd).toBe("roll cycles");
@@ -47,9 +47,9 @@ describe("freezeContractSnapshot / readContractSnapshot", () => {
     expect(readBack?.frozenAt).toBe(1783580000000);
   });
 
-  it("returns null when the story has no spec", () => {
+  it("returns null on empty spec text", () => {
     const root = mkdtempSync(join(tmpdir(), "roll-evid021-empty-"));
-    expect(freezeContractSnapshot(root, STORY, 1)).toBeNull();
+    expect(freezeContractSnapshot(root, STORY, "", 1)).toBeNull();
     expect(readContractSnapshot(root, STORY)).toBeNull();
   });
 });
@@ -62,14 +62,14 @@ describe("contractDrift", () => {
 
   it("checkbox flip after freeze is NOT drift (stale-claim reset is allowed)", () => {
     const root = tempProject(SPEC);
-    freezeContractSnapshot(root, STORY, 1);
+    freezeContractSnapshot(root, STORY, SPEC, 1);
     const reset = SPEC.replace(/- \[ \]/g, "- [x]");
     expect(contractDrift(root, STORY, reset)).toBeNull();
   });
 
   it("injecting screenshot_exempt after freeze IS drift (the builder self-exempt hole)", () => {
     const root = tempProject(SPEC);
-    freezeContractSnapshot(root, STORY, 1);
+    freezeContractSnapshot(root, STORY, SPEC, 1);
     const tampered = SPEC.replace("deliverable_cmd: roll cycles", "deliverable_cmd: roll cycles\nscreenshot_exempt: skip");
     const reason = contractDrift(root, STORY, tampered);
     expect(reason).not.toBeNull();
@@ -78,7 +78,7 @@ describe("contractDrift", () => {
 
   it("weakening an AC after freeze IS drift", () => {
     const root = tempProject(SPEC);
-    freezeContractSnapshot(root, STORY, 1);
+    freezeContractSnapshot(root, STORY, SPEC, 1);
     const weakened = SPEC.replace("AC1 gate judges against the frozen snapshot", "AC1 gutted");
     expect(contractDrift(root, STORY, weakened)).not.toBeNull();
   });
@@ -104,7 +104,7 @@ describe("runAttestGate contract-drift alert (integration, persistent vs worktre
   it("fires a drift alert when the worktree spec drifted from the persistent frozen snapshot", () => {
     const persistent = mkdtempSync(join(tmpdir(), "roll-evid021-persist-"));
     writeFileSync(join(cardSpecDir(persistent), "spec.md"), SPEC, "utf8");
-    freezeContractSnapshot(persistent, STORY, 1); // freeze design truth
+    freezeContractSnapshot(persistent, STORY, SPEC, 1); // freeze design truth
 
     const worktree = mkdtempSync(join(tmpdir(), "roll-evid021-wt-"));
     const drifted = SPEC.replace("deliverable_cmd: roll cycles", "deliverable_cmd: roll cycles\nscreenshot_exempt: skip");
@@ -118,7 +118,7 @@ describe("runAttestGate contract-drift alert (integration, persistent vs worktre
   it("no drift alert when the worktree spec still matches the frozen snapshot", () => {
     const persistent = mkdtempSync(join(tmpdir(), "roll-evid021-persist2-"));
     writeFileSync(join(cardSpecDir(persistent), "spec.md"), SPEC, "utf8");
-    freezeContractSnapshot(persistent, STORY, 1);
+    freezeContractSnapshot(persistent, STORY, SPEC, 1);
 
     const worktree = mkdtempSync(join(tmpdir(), "roll-evid021-wt2-"));
     writeFileSync(join(cardSpecDir(worktree), "spec.md"), SPEC.replace(/- \[ \]/g, "- [x]"), "utf8"); // reset flip only

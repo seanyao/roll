@@ -31,7 +31,8 @@
  * exceptions (a `blocked` AC, a machine capture skip) are NOT failures and stay
  * waivable as before.
  */
-import { acForStory, contractMatchesSnapshot, parsePolicy, type ContractSnapshot } from "@roll/core";
+import { acForStory, parsePolicy } from "@roll/core";
+import { contractDrift } from "./contract-snapshot.js";
 import { execFileSync } from "node:child_process";
 import { type Dirent, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -1403,21 +1404,10 @@ export function runAttestGate(
     // below is judged the same as before — drift is a VISIBLE SIGNAL ONLY, never
     // a block, honouring the owner red line (a false positive must not stall).
     try {
-      const snapPath = join(cardArchiveDir(scoreRepoCwd, storyId), "contract-snapshot.json");
       const worktreeSpec = storySpecPath(worktreeCwd, storyId);
-      if (existsSync(snapPath) && worktreeSpec !== null) {
-        const snap = JSON.parse(readFileSync(snapPath, "utf8")) as ContractSnapshot;
-        if (
-          typeof snap.hash === "string" &&
-          snap.hash !== "" &&
-          !contractMatchesSnapshot(snap, readFileSync(worktreeSpec, "utf8"))
-        ) {
-          sinks.alert(
-            `attest: contract drift for ${storyId} — worktree spec's contract no longer matches the ` +
-              `cycle-start frozen snapshot (${snap.hash.slice(0, 12)}…); DETECTION ONLY — the verdict below ` +
-              `is unchanged, this flags a mid-cycle AC/screenshot_exempt edit for review — cycle ${cycleId}`,
-          );
-        }
+      if (worktreeSpec !== null) {
+        const drift = contractDrift(scoreRepoCwd, storyId, readFileSync(worktreeSpec, "utf8"));
+        if (drift !== null) sinks.alert(`attest: ${drift} — cycle ${cycleId}`);
       }
     } catch {
       /* drift alert is best-effort; it never affects the verdict */

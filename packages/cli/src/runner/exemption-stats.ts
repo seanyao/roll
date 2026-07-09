@@ -52,41 +52,46 @@ export function specIsExempt(specText: string): boolean {
 }
 
 /**
- * Scan every card spec under `.roll/features` and tally the exemption rate,
- * overall and per epic. Best-effort: an unreadable spec/epic is skipped, never
- * throws. Cards sort by epic for a stable board rendering.
+ * Walk every card spec under `.roll/features/<epic>/<id>/spec.md`. Shared by the
+ * stats and audit readers so the corpus is walked one way. Best-effort — an
+ * unreadable features dir / epic / spec is skipped, never throws.
  */
-export function exemptionStats(repoCwd: string): ExemptionStats {
+export function* cardSpecs(repoCwd: string): Iterable<{ epic: string; id: string; specText: string }> {
   const featuresDir = join(repoCwd, ".roll", "features");
-  const perEpic = new Map<string, { total: number; exempt: number }>();
   let epics: string[];
   try {
-    epics = readdirSync(featuresDir, { withFileTypes: true })
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name);
+    epics = readdirSync(featuresDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
   } catch {
-    return { total: 0, exempt: 0, rate: 0, byEpic: [] };
+    return;
   }
   for (const epic of epics) {
-    const epicDir = join(featuresDir, epic);
-    let cards: string[];
+    let ids: string[];
     try {
-      cards = readdirSync(epicDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
+      ids = readdirSync(join(featuresDir, epic), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
     } catch {
       continue;
     }
-    for (const card of cards) {
-      let spec: string;
+    for (const id of ids) {
       try {
-        spec = readFileSync(join(epicDir, card, "spec.md"), "utf8");
+        yield { epic, id, specText: readFileSync(join(featuresDir, epic, id, "spec.md"), "utf8") };
       } catch {
-        continue; // no spec.md in this folder — not a card
+        /* no spec.md in this folder — not a card */
       }
-      const cur = perEpic.get(epic) ?? { total: 0, exempt: 0 };
-      cur.total += 1;
-      if (specIsExempt(spec)) cur.exempt += 1;
-      perEpic.set(epic, cur);
     }
+  }
+}
+
+/**
+ * Tally the exemption rate overall and per epic. Best-effort; sorts by epic for
+ * a stable board rendering.
+ */
+export function exemptionStats(repoCwd: string): ExemptionStats {
+  const perEpic = new Map<string, { total: number; exempt: number }>();
+  for (const { epic, specText } of cardSpecs(repoCwd)) {
+    const cur = perEpic.get(epic) ?? { total: 0, exempt: 0 };
+    cur.total += 1;
+    if (specIsExempt(specText)) cur.exempt += 1;
+    perEpic.set(epic, cur);
   }
   const byEpic = [...perEpic.entries()]
     .map(([epic, v]) => ({ epic, total: v.total, exempt: v.exempt }))

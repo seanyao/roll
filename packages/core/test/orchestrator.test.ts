@@ -1155,3 +1155,182 @@ describe("FIX-1068 — facts_captured emits builder finalization event", () => {
     }
   });
 });
+
+describe("US-LOOP-102 — adversarial-pairing subsequence (verified/designed)", () => {
+  const PLAN = {
+    testAuthor: "claude" as const,
+    implementer: "codex" as const,
+    maxRounds: 4,
+    dryRoundsToStop: 2,
+    totalTimeoutSec: 2700,
+  };
+
+  /** A compact label for a spawn_role command: `<role>@<round>`. */
+  const roleLabel = (c: CycleCommand): string =>
+    c.kind === "spawn_role" ? `${c.role}@${c.round}` : c.kind;
+
+  /** Emitted RollEvent types in order (via emit_event commands). */
+  const emittedEvents = (commands: CycleCommand[]): string[] =>
+    commands
+      .filter((c): c is Extract<CycleCommand, { kind: "emit_event" }> => c.kind === "emit_event")
+      .map((c) => c.event.type);
+
+  /** Drive to the point where the adversarial subsequence begins (execute). */
+  const upToExecute: CycleEvent[] = [
+    { type: "start", ctx: CTX },
+    { type: "preflight_done" },
+    { type: "worktree_created" },
+    { type: "story_picked", storyId: "US-EXAMPLE-001" },
+    { type: "route_resolved", agent: "codex", model: "", adversarial: PLAN },
+  ];
+
+  it("reproduces the design §5 worked sample: red→green→attack(hole)→fix→attack×2→terminated(dry)", () => {
+    // The full adversarial cycle from the design doc §5.
+    const events: CycleEvent[] = [
+      ...upToExecute,
+      // t2: test_author wrote red tests.
+      { type: "role_exited", role: "test_author", exit: 0, timedOut: false, elapsedSec: 60 },
+      // t3: implementer turned them green (initial impl).
+      { type: "role_exited", role: "implementer", exit: 0, timedOut: false, elapsedSec: 120 },
+      // t5: attacker round 1 broke a hole open.
+      { type: "role_exited", role: "attacker", exit: 0, timedOut: false, newHole: true, attackTest: "test/attack-empty.test.ts", elapsedSec: 200 },
+      // t7: implementer fixed it.
+      { type: "role_exited", role: "implementer", exit: 0, timedOut: false, elapsedSec: 260 },
+      // t9: attacker round 2 found nothing (dry 1).
+      { type: "role_exited", role: "attacker", exit: 0, timedOut: false, newHole: false, elapsedSec: 320 },
+      // t11: attacker round 3 found nothing (dry 2 → stop).
+      { type: "role_exited", role: "attacker", exit: 0, timedOut: false, newHole: false, elapsedSec: 380 },
+    ];
+    const { state, commands } = walk(events);
+
+    // The spawn_role sequence matches §5 exactly (round numbers included).
+    const roleSeq = commands.filter((c) => c.kind === "spawn_role").map(roleLabel);
+    expect(roleSeq).toEqual([
+      "test_author@0",
+      "implementer@0",
+      "attacker@1",
+      "implementer@1", // fix (same round as the attack that found the hole)
+      "attacker@2",
+      "attacker@3",
+    ]);
+
+    // Standard build path was NEVER taken — no single spawn_agent.
+    expect(commands.some((c) => c.kind === "spawn_agent")).toBe(false);
+
+    // The adversarial event stream, in order.
+    expect(emittedEvents(commands)).toEqual([
+      "cycle:start",
+      "adversarial:test-authored",
+      "adversarial:implemented", // emitted ONCE (initial impl, not the fix)
+      "adversarial:attack-round", // round 1, hole
+      "adversarial:attack-round", // round 2, dry
+      "adversarial:attack-round", // round 3, dry
+      "adversarial:terminated",
+    ]);
+
+    // The subsequence stopped on a dry streak, having found exactly one hole, and
+    // handed off to the normal capture/publish path.
+    const terminated = commands.find(
+      (c): c is Extract<CycleCommand, { kind: "emit_event" }> =>
+        c.kind === "emit_event" && c.event.type === "adversarial:terminated",
+    );
+    expect(terminated?.event).toMatchObject({ type: "adversarial:terminated", reason: "dry", rounds: 3, holesFound: 1 });
+    expect(commands.some((c) => c.kind === "capture_facts")).toBe(true);
+    expect(state.phase).toBe("reconcile");
+    // The attacker's breaking test was collected for the Phase 6 Agent-4 audit.
+    expect(state.adversarial?.attackTests).toEqual(["test/attack-empty.test.ts"]);
+    expect(state.adversarial?.holesFound).toBe(1);
+  });
+
+  it("attack-round events report the running dry streak (0 on a hole, then 1, 2)", () => {
+    const { commands } = walk([
+      ...upToExecute,
+      { type: "role_exited", role: "test_author", exit: 0, timedOut: false },
+      { type: "role_exited", role: "implementer", exit: 0, timedOut: false },
+      { type: "role_exited", role: "attacker", exit: 0, timedOut: false, newHole: true, attackTest: "a.test.ts" },
+      { type: "role_exited", role: "implementer", exit: 0, timedOut: false },
+      { type: "role_exited", role: "attacker", exit: 0, timedOut: false, newHole: false },
+      { type: "role_exited", role: "attacker", exit: 0, timedOut: false, newHole: false },
+    ]);
+    const rounds = commands
+      .filter((c): c is Extract<CycleCommand, { kind: "emit_event" }> =>
+        c.kind === "emit_event" && c.event.type === "adversarial:attack-round",
+      )
+      .map((c) => (c.event.type === "adversarial:attack-round" ? { round: c.event.round, newHole: c.event.newHole, dryStreak: c.event.dryStreak } : null));
+    expect(rounds).toEqual([
+      { round: 1, newHole: true, dryStreak: 0 },
+      { round: 2, newHole: false, dryStreak: 1 },
+      { round: 3, newHole: false, dryStreak: 2 },
+    ]);
+  });
+
+  it("terminates on max_rounds when the attacker keeps finding holes (never hangs)", () => {
+    // Every attacker round finds a hole → the dry-streak stop never fires; the
+    // maxRounds cap (4) is the backstop.
+    const holeRounds: CycleEvent[] = [];
+    for (let i = 0; i < 6; i++) {
+      holeRounds.push({ type: "role_exited", role: "attacker", exit: 0, timedOut: false, newHole: true, attackTest: `a${i}.test.ts` });
+      holeRounds.push({ type: "role_exited", role: "implementer", exit: 0, timedOut: false });
+    }
+    const { commands, state } = walk([
+      ...upToExecute,
+      { type: "role_exited", role: "test_author", exit: 0, timedOut: false },
+      { type: "role_exited", role: "implementer", exit: 0, timedOut: false },
+      ...holeRounds,
+    ]);
+    const terminated = commands.find(
+      (c): c is Extract<CycleCommand, { kind: "emit_event" }> =>
+        c.kind === "emit_event" && c.event.type === "adversarial:terminated",
+    );
+    expect(terminated?.event).toMatchObject({ type: "adversarial:terminated", reason: "max_rounds" });
+    expect(state.phase).toBe("reconcile");
+    // The cap is EXACT: attackers spawn for rounds 1..maxRounds and no further,
+    // and the terminated event reports exactly maxRounds rounds (no off-by-one).
+    const attackerRounds = commands
+      .filter((c) => c.kind === "spawn_role" && c.role === "attacker")
+      .map((c) => (c.kind === "spawn_role" ? c.round : -1));
+    expect(attackerRounds).toEqual([1, 2, 3, 4]);
+    expect(terminated?.event).toMatchObject({ rounds: 4 });
+    // Every hole round appended to attackTests (append, never overwrite): 4 rounds,
+    // each found a hole, so all 4 breaking tests are collected for Agent-4.
+    expect(state.adversarial?.attackTests).toEqual(["a0.test.ts", "a1.test.ts", "a2.test.ts", "a3.test.ts"]);
+    expect(state.adversarial?.holesFound).toBe(4);
+  });
+
+  it("terminates on total timeout regardless of round/dry state", () => {
+    const { commands } = walk([
+      ...upToExecute,
+      { type: "role_exited", role: "test_author", exit: 0, timedOut: false },
+      // Implementer green, but the elapsed clock already blew the total budget.
+      { type: "role_exited", role: "implementer", exit: 0, timedOut: false, elapsedSec: 3000 },
+    ]);
+    const terminated = commands.find(
+      (c): c is Extract<CycleCommand, { kind: "emit_event" }> =>
+        c.kind === "emit_event" && c.event.type === "adversarial:terminated",
+    );
+    expect(terminated?.event).toMatchObject({ type: "adversarial:terminated", reason: "timeout" });
+    expect(commands.some((c) => c.kind === "spawn_role" && c.role === "attacker")).toBe(false);
+  });
+
+  it("a failed role spawn stops the subsequence and captures (never deadlocks)", () => {
+    const { commands, state } = walk([
+      ...upToExecute,
+      { type: "role_exited", role: "test_author", exit: 0, timedOut: false },
+      { type: "role_exited", role: "implementer", exit: 1, timedOut: false },
+    ]);
+    expect(commands.some((c) => c.kind === "capture_facts")).toBe(true);
+    expect(state.phase).toBe("reconcile");
+    // No further role spawn after the failure.
+    expect(commands.filter((c) => c.kind === "spawn_role").map(roleLabel)).toEqual(["test_author@0", "implementer@0"]);
+  });
+
+  it("standard profile (no adversarial plan) is UNCHANGED — single spawn_agent, no role commands", () => {
+    const { commands } = walk([
+      ...upToExecute.slice(0, 4),
+      { type: "route_resolved", agent: "pi", model: "" }, // no adversarial field
+    ]);
+    expect(commands.some((c) => c.kind === "spawn_agent")).toBe(true);
+    expect(commands.some((c) => c.kind === "spawn_role")).toBe(false);
+    expect(emittedEvents(commands)).toEqual(["cycle:start"]);
+  });
+});

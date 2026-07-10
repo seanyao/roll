@@ -34,14 +34,17 @@ import { parseClaimedIdsFromBacklog, resolveFallback, type CycleCommand, type Cy
 import type { ExecuteResult, Ports } from "./ports.js";
 import { executeSetupCommand } from "./setup-handlers.js";
 import { executeSpawnAgentCommand } from "./spawn-agent-handler.js";
+import { executeSpawnRoleCommand } from "./spawn-role-handler.js";
 import { executeCaptureFactsCommand } from "./capture-facts-handler.js";
 import { executeTerminalCommand } from "./terminal-handlers.js";
 
 export { checkMainDirty } from "./main-checkout-guard.js";
 export { buildRunRow, buildTerminalRecord } from "./run-records.js";
 export {
+  DEFAULT_ADVERSARIAL_CFG,
   parseEstMin,
   parseEstMinFromSpec,
+  planAdversarial,
   recordExecutionProfile,
   routerEstMin,
   runDesignerStage,
@@ -144,6 +147,9 @@ export async function executeCommand(
       return executeSetupCommand(cmd, ports, ctx);
     case "spawn_agent":
       return executeSpawnAgentCommand(cmd, ports, ctx);
+    // US-LOOP-102: adversarial role spawn (test_author/implementer/attacker).
+    case "spawn_role":
+      return executeSpawnRoleCommand(cmd, ports, ctx);
     // layer). No feedback event (the orchestrator already transitioned).
     case "kill_agent":
       return {};

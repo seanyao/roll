@@ -15,6 +15,7 @@ import {
   validateEvaluatorArtifact,
   type CycleContext,
 } from "@roll/core";
+import type { AdversarialPlan } from "@roll/core";
 import type { ArtifactManifest, ExecutionProfile, Rig } from "@roll/spec";
 import { cardArchiveDir } from "../lib/archive.js";
 import { readLatestStoryReviewScore } from "../lib/review-score.js";
@@ -110,6 +111,37 @@ export function recordExecutionProfile(
     /* recording is best-effort; never topple routing on an event-append blip */
   }
   return profile;
+}
+
+/** US-LOOP-102 — default adversarial-pairing parameters (design §3.1). A later
+ *  story can source these from the profile's `adversarial:` config block; these
+ *  are the owner-signed defaults until then. */
+export const DEFAULT_ADVERSARIAL_CFG = {
+  maxRounds: 4,
+  dryRoundsToStop: 2,
+  totalTimeoutSec: 2700,
+} as const;
+
+/**
+ * US-LOOP-102 — resolve the adversarial plan for a verified/designed cycle, or
+ * `undefined` to run the standard single-builder path (zero behaviour change).
+ *
+ * The routed builder is the IMPLEMENTER; the test_author/attacker is the FIRST
+ * active agent that differs from it — a minimal heterogeneity gate (agent-entry
+ * difference). No heterogeneous partner available ⇒ `undefined` (degrade to
+ * standard). Session-level fail-closed independence
+ * (`assertAdversarialIndependence`) and the full §7 degrade taxonomy + alerts are
+ * US-LOOP-103; this only opens the routing seam.
+ */
+export function planAdversarial(
+  profile: ExecutionProfile,
+  implementer: string,
+  activeAgents: readonly string[],
+): AdversarialPlan | undefined {
+  if (profile !== "verified" && profile !== "designed") return undefined;
+  const testAuthor = activeAgents.find((a) => a !== "" && a !== implementer);
+  if (testAuthor === undefined) return undefined;
+  return { testAuthor, implementer, ...DEFAULT_ADVERSARIAL_CFG };
 }
 
 export function writeEvaluatorArtifact(

@@ -33,6 +33,7 @@ export * from "./evals/score.js";
 export * from "./events/bus.js";
 export * from "./events/infra-default.js";
 export * from "./loop/activity-signal.js";
+export * from "./loop/adversarial.js";
 export * from "./loop/alert-loop.js";
 export * from "./loop/branch-canary.js";
 export * from "./loop/remote-branch-gc.js";

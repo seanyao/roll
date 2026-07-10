@@ -9,11 +9,11 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import type { CycleCommand, CycleContext, RollEvent, WarmSessionEntry } from "@roll/core";
+import type { CycleCommand, CycleContext, CycleEvent, RollEvent, WarmSessionEntry } from "@roll/core";
 import { AGENTS } from "../../core/src/agent/specs.js";
-import { classifyComplexity, mapV2Status } from "@roll/core";
+import { classifyComplexity, cycleStep, initialCycleState, mapV2Status } from "@roll/core";
 import { AWAITING_REVIEW_STATUS_MARKER, STATUS_MARKER } from "@roll/spec";
-import { agentWritableRoots, checkMainDirty, recordExecutionProfile, writeEvaluatorArtifact, runDesignerStage } from "../src/runner/executor.js";
+import { agentWritableRoots, checkMainDirty, planAdversarial, recordExecutionProfile, writeEvaluatorArtifact, runDesignerStage } from "../src/runner/executor.js";
 import { evaluateReviewScoreGate, readLatestStoryPeerScore } from "../src/lib/review-score.js";
 import {
   AGENT_ARGV_TODO,
@@ -5550,5 +5550,162 @@ describe("US-V4-006 — designed execution: Designer contract before the Builder
     const report = readFileSync(join(runDir, "role-artifacts", "evaluator", "eval-report.md"), "utf8");
     expect(report).toContain("## Design contract vs delivered");
     expect(report).toContain("satisfied");
+  });
+});
+
+describe("US-LOOP-102 — adversarial-pairing (spawn_role executor + plan seam)", () => {
+  it("planAdversarial: verified/designed with a heterogeneous partner → plan (routed=implementer)", () => {
+    expect(planAdversarial("verified", "claude", ["claude", "codex"])).toEqual({
+      testAuthor: "codex",
+      implementer: "claude",
+      maxRounds: 4,
+      dryRoundsToStop: 2,
+      totalTimeoutSec: 2700,
+    });
+    expect(planAdversarial("designed", "pi", ["pi", "kimi"])?.testAuthor).toBe("kimi");
+  });
+
+  it("planAdversarial: standard profile → undefined (single-builder, zero change)", () => {
+    expect(planAdversarial("standard", "claude", ["claude", "codex"])).toBeUndefined();
+  });
+
+  it("planAdversarial: no heterogeneous partner → undefined (degrade to standard)", () => {
+    expect(planAdversarial("verified", "claude", ["claude"])).toBeUndefined();
+    expect(planAdversarial("verified", "claude", [])).toBeUndefined();
+  });
+
+  it("spawn_role runs the role agent with its purpose + role framing, feeds back role_exited", async () => {
+    const spawns: AgentSpawnOptions[] = [];
+    const { ports } = fakePorts({
+      clock: () => 100,
+      agentSpawn: vi.fn(async (_agent: string, opts: AgentSpawnOptions) => {
+        spawns.push(opts);
+        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+      }),
+    });
+    const r = await executeCommand({ kind: "spawn_role", role: "test_author", agent: "codex", round: 0 }, ports, CTX);
+    expect(r.event).toMatchObject({ type: "role_exited", role: "test_author", exit: 0, timedOut: false });
+    expect(spawns).toHaveLength(1);
+    expect(spawns[0]?.purpose).toBe("test_author");
+    // The US-LOOP-101 role framing is prepended to the skill body.
+    expect(spawns[0]?.skillBody).toContain("test author");
+    expect(spawns[0]?.env?.["ROLL_ADVERSARIAL_MARKER"]).toBeTruthy();
+  });
+
+  it("spawn_role attacker reads its finding marker (newHole + attackTest)", async () => {
+    const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-adv-marker-")));
+    execDirs.push(rt);
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      paths: { ...base.ports.paths, eventsPath: join(rt, "events.ndjson") },
+      agentSpawn: vi.fn(async (_agent: string, opts: AgentSpawnOptions) => {
+        writeFileSync(
+          String(opts.env?.["ROLL_ADVERSARIAL_MARKER"]),
+          JSON.stringify({ newHole: true, attackTest: "test/attack-empty.test.ts" }),
+        );
+        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+      }),
+    });
+    const r = await executeCommand({ kind: "spawn_role", role: "attacker", agent: "codex", round: 1 }, ports, CTX);
+    expect(r.event).toMatchObject({
+      type: "role_exited",
+      role: "attacker",
+      newHole: true,
+      attackTest: "test/attack-empty.test.ts",
+    });
+  });
+
+  it("spawn_role attacker with NO marker → dry round (newHole:false, no attackTest)", async () => {
+    const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-adv-nomarker-")));
+    execDirs.push(rt);
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      paths: { ...base.ports.paths, eventsPath: join(rt, "events.ndjson") },
+      agentSpawn: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0, timedOut: false })),
+    });
+    const r = await executeCommand({ kind: "spawn_role", role: "attacker", agent: "codex", round: 2 }, ports, CTX);
+    expect(r.event).toMatchObject({ type: "role_exited", role: "attacker", newHole: false });
+    expect((r.event as { attackTest?: string } | undefined)?.attackTest).toBeUndefined();
+  });
+
+  it("orchestrator + REAL executor dispatch drive the §5 worked sample end-to-end", async () => {
+    const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-adv-e2e-")));
+    execDirs.push(rt);
+    const base = fakePorts();
+    // A role-aware fake agent: attacker round 1 finds a hole (writes the marker);
+    // every later attacker round is dry (no marker). Reproduces design §5.
+    const { ports } = fakePorts({
+      paths: { ...base.ports.paths, eventsPath: join(rt, "events.ndjson") },
+      clock: () => 1000,
+      agentSpawn: vi.fn(async (_agent: string, opts: AgentSpawnOptions) => {
+        if (opts.purpose === "attacker") {
+          const marker = String(opts.env?.["ROLL_ADVERSARIAL_MARKER"] ?? "");
+          const round = Number(/round-(\d+)\.json$/.exec(marker)?.[1] ?? "0");
+          if (round === 1) writeFileSync(marker, JSON.stringify({ newHole: true, attackTest: "test/attack.test.ts" }));
+        }
+        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+      }),
+    });
+    const plan = planAdversarial("verified", "claude", ["claude", "codex"]);
+    expect(plan).toBeDefined();
+
+    const emitted: string[] = [];
+    const roles: string[] = [];
+    // Dispatch only the adversarial-relevant commands through the REAL executor;
+    // stop at capture_facts (the subsequence's hand-off to reconcile).
+    const runCommands = async (commands: CycleCommand[]): Promise<CycleEvent | undefined> => {
+      let next: CycleEvent | undefined;
+      for (const c of commands) {
+        if (c.kind === "spawn_role") roles.push(`${c.role}@${c.round}`);
+        if (c.kind === "emit_event") emitted.push(c.event.type);
+        if (c.kind === "capture_facts") continue; // hermetic: don't run the heavy capture path
+        const res = await executeCommand(c, ports, CTX);
+        if (res.event !== undefined) next = res.event;
+      }
+      return next;
+    };
+
+    let state = initialCycleState(CTX);
+    const prefix: CycleEvent[] = [
+      { type: "start", ctx: CTX },
+      { type: "preflight_done" },
+      { type: "worktree_created" },
+      { type: "story_picked", storyId: "US-RUN-001" },
+      { type: "route_resolved", agent: "claude", model: "", adversarial: plan },
+    ];
+    let pending: CycleEvent | undefined;
+    for (const ev of prefix) {
+      const r = cycleStep(state, ev);
+      state = r.state;
+      pending = await runCommands(r.commands);
+    }
+    // Feed role_exited events back until the subsequence terminates (→ reconcile).
+    let steps = 0;
+    while (pending !== undefined && state.phase === "execute" && steps++ < 30) {
+      const r = cycleStep(state, pending);
+      state = r.state;
+      pending = await runCommands(r.commands);
+    }
+
+    expect(roles).toEqual([
+      "test_author@0",
+      "implementer@0",
+      "attacker@1",
+      "implementer@1",
+      "attacker@2",
+      "attacker@3",
+    ]);
+    expect(emitted).toEqual([
+      "cycle:start",
+      "adversarial:test-authored",
+      "adversarial:implemented",
+      "adversarial:attack-round",
+      "adversarial:attack-round",
+      "adversarial:attack-round",
+      "adversarial:terminated",
+    ]);
+    expect(state.phase).toBe("reconcile");
+    expect(state.adversarial?.holesFound).toBe(1);
+    expect(state.adversarial?.attackTests).toEqual(["test/attack.test.ts"]);
   });
 });

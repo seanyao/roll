@@ -321,6 +321,8 @@ function describeCommand(cmd: CycleCommand): string {
       return `resolve_route        → router.resolveRoute(${cmd.storyId})`;
     case "spawn_agent":
       return `spawn_agent          → agentSpawn(${cmd.agent}, attempt ${cmd.attempt})`;
+    case "spawn_role":
+      return `spawn_role           → agentSpawn(${cmd.agent} as ${cmd.role}, round ${cmd.round})`;
     case "kill_agent":
       return `kill_agent           → SIGKILL (grace ${cmd.graceSec}s)`;
     case "sleep_backoff":

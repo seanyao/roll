@@ -35,7 +35,7 @@ import { resetStaleSpecTruth, resolveResumeBase } from "./resume-truth.js";
 import { runVisualEvidencePreflight } from "./publish-lifecycle.js";
 import { freezeContractSnapshot } from "./contract-snapshot.js";
 import { bootstrapWorktreeDeps, bootstrapWorktreePrebuild, bootstrapWorktreeSkills, linkRollIntoWorktree, readPrebuildDistEnabled } from "./worktree-bootstrap.js";
-import { recordExecutionProfile, routerEstMin } from "./execution-profile.js";
+import { planAdversarial, recordExecutionProfile, routerEstMin } from "./execution-profile.js";
 import type { ExecuteResult, Ports } from "./ports.js";
 import { activeRigs, probeDueSuspendedRigs, readRigLifecycleState, suspendedRigs } from "./agent-liveness.js";
 
@@ -602,7 +602,20 @@ export async function executeSetupCommand(
       // behavior). v4.0 records the profile but still executes standard only;
       // verified/designed add evaluator/designer stages in later stories.
       const selectedProfile = recordExecutionProfile(ports, ctx.cycleId ?? "", cmd.storyId, estMin);
-      return { event: { type: "route_resolved", agent: selectedAgent, model: selectedModel }, ctxPatch: { selectedProfile } };
+      // US-LOOP-102: for a verified/designed cycle with a heterogeneous partner
+      // available, hand the orchestrator an adversarial plan so it runs the
+      // test_author → implementer → attack subsequence. `undefined` (standard, or
+      // no hetero partner) keeps the single-builder path — zero behaviour change.
+      const adversarial = planAdversarial(selectedProfile, selectedAgent, active);
+      return {
+        event: {
+          type: "route_resolved",
+          agent: selectedAgent,
+          model: selectedModel,
+          ...(adversarial !== undefined ? { adversarial } : {}),
+        },
+        ctxPatch: { selectedProfile },
+      };
     }
 
     // execute: spawn the agent (TCR commits happen inside the worktree). The

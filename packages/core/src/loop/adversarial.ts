@@ -50,6 +50,15 @@ export function adversarialNextStep(
   return { kind: "attack" };
 }
 
+/**
+ * Scope (pi review, US-LOOP-100): catches self-collusion (same session) and DIRECT
+ * parent/sub-agent in either direction — the realistic loop spawn scenario. It does
+ * NOT walk transitive ancestor chains (grandparent↔grandchild), because an
+ * AdversarialRole carries only its immediate parentSessionId; the loop spawns
+ * test_author / implementer as fresh top-level sessions, so a transitive chain is
+ * not a path the orchestrator produces. Revisit only if roles ever carry a full
+ * ancestor list.
+ */
 export function assertAdversarialIndependence(
   testAuthor: AdversarialRole,
   implementer: AdversarialRole,

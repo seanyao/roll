@@ -1284,6 +1284,17 @@ describe("US-LOOP-102 — adversarial-pairing subsequence (verified/designed)", 
     );
     expect(terminated?.event).toMatchObject({ type: "adversarial:terminated", reason: "max_rounds" });
     expect(state.phase).toBe("reconcile");
+    // The cap is EXACT: attackers spawn for rounds 1..maxRounds and no further,
+    // and the terminated event reports exactly maxRounds rounds (no off-by-one).
+    const attackerRounds = commands
+      .filter((c) => c.kind === "spawn_role" && c.role === "attacker")
+      .map((c) => (c.kind === "spawn_role" ? c.round : -1));
+    expect(attackerRounds).toEqual([1, 2, 3, 4]);
+    expect(terminated?.event).toMatchObject({ rounds: 4 });
+    // Every hole round appended to attackTests (append, never overwrite): 4 rounds,
+    // each found a hole, so all 4 breaking tests are collected for Agent-4.
+    expect(state.adversarial?.attackTests).toEqual(["a0.test.ts", "a1.test.ts", "a2.test.ts", "a3.test.ts"]);
+    expect(state.adversarial?.holesFound).toBe(4);
   });
 
   it("terminates on total timeout regardless of round/dry state", () => {

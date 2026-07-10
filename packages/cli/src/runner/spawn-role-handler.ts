@@ -18,12 +18,26 @@
  * handed in `ROLL_ADVERSARIAL_MARKER` (`{ newHole: boolean, attackTest?: string }`).
  * No marker ⇒ the round was dry. Reading a written artifact (not parsing agent
  * stdout) keeps this agent-agnostic, consistent with the roll core thesis.
+ *
+ * SAFETY DEFERRAL (US-LOOP-103): this thin handler INTENTIONALLY does not carry
+ * the builder-spawn's full safety machinery — the FIX-929 stall detector, the
+ * US-LOOP-089 main-checkout OS write-protection, and the §7 degrade taxonomy
+ * (rig rotation, `adversarial:degraded` alerts). Those belong to US-LOOP-103
+ * ("异常一律降级 standard 单 builder,绝不死锁"). Two protections are kept HERE so
+ * this story never regresses the safety floor: (1) a spawn-local `timeoutMs`
+ * hard-kill so a single hung role can never block the driver forever (the
+ * between-step watchdog in run-cycle cannot interrupt an in-flight await), and
+ * (2) any main-checkout leak is still caught + rescued downstream at
+ * `capture_facts` (`classifyCaptured` → `rescue_leaked`), exactly as on the
+ * standard path. The adversarial path is dormant unless a project opts into the
+ * verified/designed execution profile, so this floor is sufficient until 103.
  */
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { CycleCommand, CycleContext } from "@roll/core";
 import { adversarialRolePrompt, agentSpawnEnvironment } from "./agent-spawn.js";
 import { worktreeGitEnv } from "./main-checkout-guard.js";
+import { readCycleTimeoutThresholds } from "./spawn-observers.js";
 import { agentWritableRoots } from "./worktree-bootstrap.js";
 import type { ExecuteResult, Ports } from "./ports.js";
 
@@ -71,11 +85,17 @@ export async function executeSpawnRoleCommand(
 
   const startSec = ports.clock();
   const rolePrompt = adversarialRolePrompt(cmd.role);
+  // Spawn-local hard-kill belt: the whole cycle wall budget bounds a single
+  // role, so a lone hung role can never block the driver (which cannot check
+  // its between-step watchdog while awaiting one spawn). The real cycle timeout
+  // still preempts earlier; this only backstops an in-flight hang.
+  const wallSec = readCycleTimeoutThresholds(ports.repoCwd).wallSec;
   const res = await ports.agentSpawn(cmd.agent, {
     purpose: cmd.role,
     cwd: ports.paths.worktreePath,
     skillBody: `${rolePrompt}\n\n${ports.skillBody}`,
     writableRoots: agentWritableRoots(ports.repoCwd, ports.paths.alertsPath),
+    timeoutMs: wallSec * 1000,
     ...(ctx.model !== undefined && ctx.model !== "" ? { model: ctx.model } : {}),
     ...(ctx.storyId !== undefined && ctx.storyId !== "" ? { storyId: ctx.storyId } : {}),
     ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
@@ -87,7 +107,13 @@ export async function executeSpawnRoleCommand(
       ...agentSpawnEnvironment(cmd.agent),
     },
   });
-  const elapsedSec = Math.max(0, ports.clock() - startSec);
+  // CUMULATIVE elapsed (from cycle start when known) so the pure
+  // adversarialNextStep `totalTimeoutSec` guard is a true subsequence-wide cap,
+  // not a per-role duration. Falls back to this spawn's duration pre-cycle-start.
+  const elapsedSec =
+    ctx.startSec !== undefined && ctx.startSec > 0
+      ? Math.max(0, ports.clock() - ctx.startSec)
+      : Math.max(0, ports.clock() - startSec);
 
   // The attacker's newHole/attackTest come from the marker it wrote. For the
   // test_author / implementer roles there is no hole signal.

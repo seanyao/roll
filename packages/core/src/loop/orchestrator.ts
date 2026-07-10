@@ -105,6 +105,7 @@ import type { AgentId, BuilderFinalizationFacts, CycleCost, CyclePhase, Executio
 import { cycleCurrency } from "../cost/tracker.js";
 import type { RollEvent } from "@roll/spec";
 import { builderFinalizationReady, finalizeBuilder, handoffKindFor } from "./builder-finalization.js";
+import { adversarialNextStep } from "./adversarial.js";
 import { nextWaitAction, type WaitAction } from "../delivery/pr.js";
 import { deliveryGate } from "../delivery/gate.js";
 
@@ -706,6 +707,47 @@ export function backoffSchedule(
   return out;
 }
 
+// ── Adversarial-pairing subsequence (US-LOOP-102) ─────────────────────────────
+
+/** The three adversarial-pairing roles (US-LOOP-101). `attacker` is the
+ *  test_author role's second-and-later spawn (fresh session, breaking tests). */
+export type AdversarialRoleName = "test_author" | "implementer" | "attacker";
+
+/** The resolved adversarial plan the executor hands the orchestrator on
+ *  `route_resolved` when the profile is verified/designed AND a heterogeneous
+ *  implementer ≠ test_author pair is available. Absent ⇒ standard single-builder
+ *  (zero behaviour change). The orchestrator NEVER resolves rigs itself; it only
+ *  sequences the plan the executor already resolved. Independence fail-closed and
+ *  the full set of degrade paths (§7) are US-LOOP-103. */
+export interface AdversarialPlan {
+  testAuthor: AgentId;
+  implementer: AgentId;
+  maxRounds: number;
+  dryRoundsToStop: number;
+  totalTimeoutSec: number;
+}
+
+/** The running adversarial subsequence state (execute phase). Purely a record of
+ *  where the state machine is in test_author → implementer → attack-round loop;
+ *  the termination decision is delegated to the pure {@link adversarialNextStep}
+ *  (US-LOOP-100), so "never hangs" is a single-function guarantee. */
+export interface AdversarialRuntime {
+  plan: AdversarialPlan;
+  /** attacker rounds started so far (0 before the first attacker). */
+  round: number;
+  /** consecutive attacker rounds with no new hole. */
+  dryStreak: number;
+  /** cumulative holes the attacker broke open. */
+  holesFound: number;
+  /** breaking test files the attacker added → Phase 6 Agent-4 audit input. */
+  attackTests: string[];
+  /** the role whose spawn is currently in flight (awaiting role_exited). */
+  inFlight: AdversarialRoleName;
+  /** true once the INITIAL implementer emitted adversarial:implemented, so a
+   *  later fix-round implementer does not re-emit it. */
+  implementedInitial: boolean;
+}
+
 // ── Cycle commands (the language the stepper emits) ───────────────────────────
 
 /**
@@ -721,6 +763,7 @@ export type CycleCommand =
   | { kind: "resume_worktree"; storyId: string } // RESUME-PRIOR-WORK re-point (post-pick).
   | { kind: "resolve_route"; storyId: string } // agent/router resolveRoute+Fallback.
   | { kind: "spawn_agent"; agent: AgentId; attempt: number } // execute (TCR inside).
+  | { kind: "spawn_role"; role: AdversarialRoleName; agent: AgentId; round: number } // US-LOOP-102 adversarial execute (verified/designed).
   | { kind: "kill_agent"; graceSec: number } // watchdog teardown.
   | { kind: "sleep_backoff"; seconds: number } // retry backoff (adapter sleeps).
   | { kind: "capture_facts" } // git rev-list/log count (bin/roll:9127-9157).
@@ -833,6 +876,10 @@ export interface CycleState {
    *  phase, which accepts `preflight_done`, from the in-worktree pick phase,
    *  which accepts `story_picked`/`no_story`). */
   worktreeReady?: boolean;
+  /** US-LOOP-102: the adversarial subsequence runtime (execute phase). Present
+   *  only for verified/designed cycles whose route_resolved carried a plan; a
+   *  standard cycle leaves it undefined and follows the single-spawn path. */
+  adversarial?: AdversarialRuntime;
   /** Captured post-agent facts (set entering reconcile). */
   captured?: CapturedFacts;
   /** Terminal status once decided. */
@@ -852,9 +899,13 @@ export type CycleEvent =
   | { type: "worktree_failed" } // isolation failed → failed terminal (bin/roll:9000).
   | { type: "story_picked"; storyId: string }
   | { type: "no_story" } // picker returned nothing → idle (bin/roll:9180-class).
-  | { type: "route_resolved"; agent: AgentId; model: ModelId }
+  | { type: "route_resolved"; agent: AgentId; model: ModelId; adversarial?: AdversarialPlan }
   | { type: "route_pending"; reason: string }
   | { type: "agent_exited"; exit: number; timedOut: boolean }
+  // US-LOOP-102: an adversarial role spawn (test_author/implementer/attacker)
+  // exited. `newHole`/`attackTest` are meaningful only for attacker rounds;
+  // `elapsedSec` lets the pure termination check enforce the total timeout.
+  | { type: "role_exited"; role: AdversarialRoleName; exit: number; timedOut: boolean; newHole?: boolean; attackTest?: string; elapsedSec?: number }
   | { type: "facts_captured"; facts: CapturedFacts }
   | { type: "published"; result: PublishResult }
   | { type: "merge_polled"; state: string; elapsedSec: number } // sync merge-wait.
@@ -882,6 +933,7 @@ const EVENT_VALID_PHASES: Record<Exclude<CycleEvent["type"], "start">, CyclePhas
   route_resolved: ["route"],
   route_pending: ["route"],
   agent_exited: ["execute"],
+  role_exited: ["execute"],
   facts_captured: ["reconcile"],
   published: ["publish"],
   merge_polled: ["merge-wait", "publish"],
@@ -1061,24 +1113,50 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
         ],
       };
 
-    case "route_resolved":
+    case "route_resolved": {
       // The cost/budget gate is REMOVED — the loop no longer stops on a dollar
       // ceiling. Route resolves straight into the agent spawn (the progress
       // guardrails in loop-go now own runaway-spend protection).
       // FIX-382: cycle:start is emitted HERE (not worktree_created) so it carries
       // the now-resolved storyId (from story_picked) + agent/model (from this event).
+      const execCtx = { ...state.ctx, agent: event.agent, model: event.model };
+      const startCmd: CycleCommand = { kind: "emit_event", event: cycleStartEvent(execCtx) };
+      // US-LOOP-102: verified/designed cycles whose executor resolved a
+      // heterogeneous test_author≠implementer pair run the ADVERSARIAL
+      // subsequence: test_author (write red tests) → implementer (make green) →
+      // attack rounds. Standard cycles (no plan) fall through to the single
+      // spawn_agent path below — ZERO behaviour change.
+      if (event.adversarial !== undefined) {
+        const plan = event.adversarial;
+        return {
+          state: {
+            ...state,
+            phase: "execute",
+            attempt: 1,
+            ctx: execCtx,
+            adversarial: {
+              plan,
+              round: 0,
+              dryStreak: 0,
+              holesFound: 0,
+              attackTests: [],
+              inFlight: "test_author",
+              implementedInitial: false,
+            },
+          },
+          commands: [startCmd, { kind: "spawn_role", role: "test_author", agent: plan.testAuthor, round: 0 }],
+        };
+      }
       return {
         state: {
           ...state,
           phase: "execute",
           attempt: 1,
-          ctx: { ...state.ctx, agent: event.agent, model: event.model },
+          ctx: execCtx,
         },
-        commands: [
-          { kind: "emit_event", event: cycleStartEvent({ ...state.ctx, agent: event.agent, model: event.model }) },
-          { kind: "spawn_agent", agent: event.agent, attempt: 1 },
-        ],
+        commands: [startCmd, { kind: "spawn_agent", agent: event.agent, attempt: 1 }],
       };
+    }
 
     case "route_pending":
       return terminate({ ...state, phase: "route" }, "pending_rig_recovery", [
@@ -1119,6 +1197,113 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
           ctx: { ...state.ctx, agentExitCode: event.exit, agentTimedOut: event.timedOut },
         },
         commands: [{ kind: "capture_facts" }],
+      };
+    }
+
+    case "role_exited": {
+      // US-LOOP-102 — the adversarial subsequence stepper. Purely sequences the
+      // roles; the DECISION to keep attacking / fix / stop is delegated to the
+      // pure {@link adversarialNextStep} (US-LOOP-100), so "never hangs" is a
+      // single audited function, not scattered here.
+      const adv = state.adversarial;
+      if (adv === undefined) {
+        // A role event with no adversarial runtime is a stale/replayed adapter
+        // event — ignore it (state unchanged, no command). The phase guard
+        // already blocks it outside execute.
+        return { state, commands: [] };
+      }
+      const cid = state.ctx.cycleId;
+      const sid = state.ctx.storyId ?? "";
+      // A failed / timed-out role spawn: the full §7 degrade taxonomy (rotate
+      // rig → single-builder, fail-closed alerts) is US-LOOP-103. The
+      // never-deadlock fallback US-LOOP-102 guarantees is to STOP the
+      // subsequence and capture whatever green tests already landed on the
+      // branch (net-positive), rather than spin.
+      if (event.exit !== 0 || event.timedOut) {
+        return {
+          state: { ...state, phase: "reconcile", ctx: { ...state.ctx, agentExitCode: event.exit, agentTimedOut: event.timedOut } },
+          commands: [{ kind: "capture_facts" }],
+        };
+      }
+      const cfg = {
+        maxRounds: adv.plan.maxRounds,
+        dryRoundsToStop: adv.plan.dryRoundsToStop,
+        elapsedSec: event.elapsedSec ?? 0,
+        totalTimeoutSec: adv.plan.totalTimeoutSec,
+      };
+      const terminatedCmd = (reason: "dry" | "max_rounds" | "timeout", rounds: number, holesFound: number): CycleCommand => ({
+        kind: "emit_event",
+        event: { type: "adversarial:terminated", cycleId: cid, storyId: sid, reason, rounds, holesFound, ts: 0 },
+      });
+
+      if (adv.inFlight === "test_author") {
+        // Red tests written → hand to the (heterogeneous) implementer, round 0.
+        return {
+          state: { ...state, adversarial: { ...adv, inFlight: "implementer" } },
+          commands: [
+            { kind: "emit_event", event: { type: "adversarial:test-authored", cycleId: cid, storyId: sid, agent: adv.plan.testAuthor, ts: 0 } },
+            { kind: "spawn_role", role: "implementer", agent: adv.plan.implementer, round: adv.round },
+          ],
+        };
+      }
+
+      if (adv.inFlight === "implementer") {
+        // Tests green (initial impl OR a fix). A just-green state always leads to
+        // an attack unless a hard cap (max_rounds / total timeout) tripped.
+        const step = adversarialNextStep({ round: adv.round, dryStreak: adv.dryStreak }, null, cfg);
+        const cmds: CycleCommand[] = [];
+        if (!adv.implementedInitial) {
+          cmds.push({
+            kind: "emit_event",
+            event: { type: "adversarial:implemented", cycleId: cid, storyId: sid, agent: adv.plan.implementer, round: adv.round, ts: 0 },
+          });
+        }
+        // stop — a hard cap tripped (max_rounds / total timeout) before any /
+        // further attack. `fix` is impossible here (lastRound=null), so anything
+        // not `stop` is an attack.
+        if (step.kind === "stop") {
+          cmds.push(terminatedCmd(step.reason, adv.round, adv.holesFound));
+          cmds.push({ kind: "capture_facts" });
+          return { state: { ...state, phase: "reconcile", adversarial: { ...adv, implementedInitial: true } }, commands: cmds };
+        }
+        const nextRound = adv.round + 1;
+        cmds.push({ kind: "spawn_role", role: "attacker", agent: adv.plan.testAuthor, round: nextRound });
+        return { state: { ...state, adversarial: { ...adv, round: nextRound, inFlight: "attacker", implementedInitial: true } }, commands: cmds };
+      }
+
+      // inFlight === "attacker": a breaking test was added. newHole ⇒ a real
+      // untested failure mode surfaced (→ fix); otherwise a dry round.
+      const newHole = event.newHole === true;
+      const holesFound = newHole ? adv.holesFound + 1 : adv.holesFound;
+      const attackTests =
+        newHole && event.attackTest !== undefined && event.attackTest !== ""
+          ? [...adv.attackTests, event.attackTest]
+          : adv.attackTests;
+      // The streak the attack-round event REPORTS: 0 on a hole, else the running
+      // streak + this dry round (mirrors adversarialNextStep's effectiveDry).
+      const reportedDryStreak = newHole ? 0 : adv.dryStreak + 1;
+      const attackEvent: CycleCommand = {
+        kind: "emit_event",
+        event: { type: "adversarial:attack-round", cycleId: cid, storyId: sid, agent: adv.plan.testAuthor, round: adv.round, newHole, dryStreak: reportedDryStreak, ts: 0 },
+      };
+      const step = adversarialNextStep({ round: adv.round, dryStreak: adv.dryStreak }, { newHole }, cfg);
+      if (step.kind === "fix") {
+        return {
+          state: { ...state, adversarial: { ...adv, dryStreak: 0, holesFound, attackTests, inFlight: "implementer" } },
+          commands: [attackEvent, { kind: "spawn_role", role: "implementer", agent: adv.plan.implementer, round: adv.round }],
+        };
+      }
+      if (step.kind === "attack") {
+        const nextRound = adv.round + 1;
+        return {
+          state: { ...state, adversarial: { ...adv, round: nextRound, dryStreak: reportedDryStreak, holesFound, attackTests, inFlight: "attacker" } },
+          commands: [attackEvent, { kind: "spawn_role", role: "attacker", agent: adv.plan.testAuthor, round: nextRound }],
+        };
+      }
+      // stop (dry / max_rounds / timeout) — deliver the accumulated green state.
+      return {
+        state: { ...state, phase: "reconcile", adversarial: { ...adv, dryStreak: reportedDryStreak, holesFound, attackTests } },
+        commands: [attackEvent, terminatedCmd(step.reason, adv.round, holesFound), { kind: "capture_facts" }],
       };
     }
 

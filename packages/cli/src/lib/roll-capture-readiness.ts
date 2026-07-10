@@ -67,13 +67,13 @@ export function defaultRollCaptureReadinessDeps(): RollCaptureReadinessDeps {
 export function collectRollCaptureReadiness(deps: RollCaptureReadinessDeps = defaultRollCaptureReadinessDeps()): RollCaptureReadiness {
   const inboxPath = rollCaptureInboxPath(deps);
   if (deps.platform !== "darwin") {
-    return skipped(inboxPath, "Roll Capture.app is a macOS-only physical screenshot host.");
+    return skipped(deps, inboxPath, "Roll Capture.app is a macOS-only physical screenshot host.");
   }
   if (deps.env["ROLL_NO_SCREENCAP"] === "1" || deps.interactive === false || isCi(deps.env)) {
-    return skipped(inboxPath, "Roll Capture readiness probe skipped (headless / CI / ROLL_NO_SCREENCAP).");
+    return skipped(deps, inboxPath, "Roll Capture readiness probe skipped (headless / CI / ROLL_NO_SCREENCAP).");
   }
   if (deps.hasAquaGUI === false) {
-    return skipped(inboxPath, "No macOS GUI session (Aqua) is available; Roll Capture probe skipped.");
+    return skipped(deps, inboxPath, "No macOS GUI session (Aqua) is available; Roll Capture probe skipped.");
   }
 
   const cacheKey = rollCaptureReadinessCacheKey(deps, inboxPath);
@@ -158,10 +158,10 @@ const ROLL_CAPTURE_SETUP_FALLBACK = {
   },
 } as const;
 
-function skipped(inboxPath: string, detail: string): RollCaptureReadiness {
+function skipped(deps: RollCaptureReadinessDeps, inboxPath: string, detail: string): RollCaptureReadiness {
   return {
     status: "skip",
-    installed: { status: "missing" },
+    installed: detectRollCaptureInstall(deps),
     hostPermission: { status: "skipped", detail },
     inbox: { status: "skipped", path: inboxPath, detail },
     detailLines: [`skipped — ${detail}`],

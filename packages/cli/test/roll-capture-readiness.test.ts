@@ -236,4 +236,27 @@ describe("US-PHYSICAL-003 Roll Capture readiness", () => {
     const skipped = collectRollCaptureReadiness(deps({ interactive: false }));
     expect(renderRollCaptureSetupGuidance(skipped, "en")).toBeNull();
   });
+
+  describe("FIX-1241 — a skipped probe must still report the install truthfully", () => {
+    // Install detection is a pure filesystem check (no GUI, no permission probe),
+    // so a headless / CI / no-Aqua skip of the PERMISSION+INBOX probe must NOT
+    // also blank the install status to "missing" when the app is on disk.
+    it("headless skip + app present ⇒ installed (not a hardcoded missing)", () => {
+      const readiness = collectRollCaptureReadiness(deps({ interactive: false, exists: () => true }));
+      expect(readiness.status).toBe("skip");
+      expect(readiness.installed.status).toBe("installed");
+    });
+
+    it("ROLL_NO_SCREENCAP skip + app present ⇒ installed", () => {
+      const readiness = collectRollCaptureReadiness(deps({ env: { ROLL_NO_SCREENCAP: "1" }, exists: () => true }));
+      expect(readiness.status).toBe("skip");
+      expect(readiness.installed.status).toBe("installed");
+    });
+
+    it("no-GUI skip + app ABSENT ⇒ missing (still truthful in the other direction)", () => {
+      const readiness = collectRollCaptureReadiness(deps({ hasAquaGUI: false, exists: () => false }));
+      expect(readiness.status).toBe("skip");
+      expect(readiness.installed.status).toBe("missing");
+    });
+  });
 });

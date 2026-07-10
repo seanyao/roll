@@ -9,7 +9,7 @@
  * (FIX-343 independence — by session/context, not vendor).
  */
 import { describe, expect, it } from "vitest";
-import { adversarialNextStep, assertAdversarialIndependence } from "../src/loop/adversarial.js";
+import { adversarialDegradeDecision, adversarialNextStep, assertAdversarialIndependence, type AdversarialFailure } from "../src/loop/adversarial.js";
 
 const cfg = { maxRounds: 4, dryRoundsToStop: 2, elapsedSec: 0, totalTimeoutSec: 2700 };
 
@@ -92,5 +92,59 @@ describe("assertAdversarialIndependence — non-collusion (FIX-343 by session, n
     );
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toMatch(/sub-agent|parent/i);
+  });
+});
+
+describe("US-LOOP-103 — adversarialDegradeDecision: every failure degrades to standard, never deadlocks", () => {
+  it("non-hetero config ⇒ degrade to single-builder, cause names the config problem", () => {
+    const d = adversarialDegradeDecision({ kind: "non_hetero", detail: "same session s1" });
+    expect(d.degrade).toBe(true);
+    expect(d.fallback).toBe("single-builder");
+    expect(d.cause).toMatch(/hetero|session|independen/i);
+  });
+
+  it("implementer/attacker agent unavailable ⇒ degrade, cause names the role", () => {
+    const d = adversarialDegradeDecision({ kind: "agent_unavailable", role: "implementer" });
+    expect(d.degrade).toBe(true);
+    expect(d.fallback).toBe("single-builder");
+    expect(d.cause).toMatch(/implementer|unavailable/i);
+  });
+
+  it("a round hangs ⇒ degrade, cause names the round", () => {
+    const d = adversarialDegradeDecision({ kind: "round_hang", round: 2 });
+    expect(d.degrade).toBe(true);
+    expect(d.fallback).toBe("single-builder");
+    expect(d.cause).toMatch(/hang|round|2/i);
+  });
+
+  it("total timeout ⇒ degrade", () => {
+    const d = adversarialDegradeDecision({ kind: "total_timeout" });
+    expect(d.degrade).toBe(true);
+    expect(d.fallback).toBe("single-builder");
+  });
+
+  it("TOTALITY invariant: EVERY failure kind has a degrade path (none deadlocks, none throws)", () => {
+    const failures: AdversarialFailure[] = [
+      { kind: "non_hetero", detail: "x" },
+      { kind: "agent_unavailable", role: "attacker" },
+      { kind: "round_hang", round: 1 },
+      { kind: "total_timeout" },
+    ];
+    for (const f of failures) {
+      const d = adversarialDegradeDecision(f);
+      expect(d.degrade).toBe(true);
+      expect(d.fallback).toBe("single-builder");
+      expect(typeof d.cause).toBe("string");
+      expect(d.cause).not.toBe("");
+    }
+  });
+});
+
+describe("US-LOOP-103 attack — no input can deadlock, even malformed", () => {
+  it("an unknown/malformed failure at runtime still degrades (default path), never throws", () => {
+    const d = adversarialDegradeDecision({ kind: "totally-unexpected" } as unknown as AdversarialFailure);
+    expect(d.degrade).toBe(true);
+    expect(d.fallback).toBe("single-builder");
+    expect(typeof d.cause).toBe("string");
   });
 });

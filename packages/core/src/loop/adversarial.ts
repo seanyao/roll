@@ -21,6 +21,54 @@ export type NextStep =
   | { kind: "fix" }
   | { kind: "stop"; reason: "dry" | "max_rounds" | "timeout" };
 
+export type AdversarialFailure =
+  | { kind: "non_hetero"; detail: string }
+  | { kind: "agent_unavailable"; role: string }
+  | { kind: "round_hang"; round: number }
+  | { kind: "total_timeout" };
+
+export function adversarialDegradeDecision(f: AdversarialFailure): {
+  degrade: true;
+  fallback: "single-builder";
+  cause: string;
+} {
+  switch (f.kind) {
+    case "non_hetero":
+      return {
+        degrade: true,
+        fallback: "single-builder",
+        cause: `adversarial pairing disabled: roles not heterogenous or independent (${f.detail})`,
+      };
+    case "agent_unavailable":
+      return {
+        degrade: true,
+        fallback: "single-builder",
+        cause: `adversarial pairing degraded: ${f.role} agent unavailable`,
+      };
+    case "round_hang":
+      return {
+        degrade: true,
+        fallback: "single-builder",
+        cause: `adversarial pairing degraded: round ${f.round} hung`,
+      };
+    case "total_timeout":
+      return {
+        degrade: true,
+        fallback: "single-builder",
+        cause: "adversarial pairing degraded: total timeout",
+      };
+    default: {
+      const _exhaustive: never = f;
+      void _exhaustive;
+      return {
+        degrade: true,
+        fallback: "single-builder",
+        cause: "adversarial pairing degraded: unknown adversarial failure",
+      };
+    }
+  }
+}
+
 export function adversarialNextStep(
   state: AdversarialState,
   lastRound: { newHole: boolean } | null,

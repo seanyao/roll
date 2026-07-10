@@ -486,7 +486,22 @@ export function missingAgentSecretEnv(
   return agentCredentialReadiness(agent, env, home).missingEnv;
 }
 
-export type AgentSpawnPurpose = "builder" | "pick_ranking";
+export type AgentSpawnPurpose = "builder" | "pick_ranking" | "test_author" | "implementer" | "attacker";
+
+export function adversarialRolePrompt(role: "test_author" | "implementer" | "attacker"): string {
+  switch (role) {
+    case "test_author":
+      return "You are the test author. Write failing red tests from the AC acceptance contract; do not write production code and do not read the implementation.";
+    case "implementer":
+      return "You are the implementer. Write only production code to make the failing tests pass; do not modify, edit, touch, or change any test files.";
+    case "attacker":
+      return "You are the attacker. Add only new breaking tests, each targeting one untested failure mode; do not edit or modify existing tests or production code.";
+    default: {
+      const exhaustive: never = role;
+      throw new Error(`adversarialRolePrompt: unknown role ${String(exhaustive)}`);
+    }
+  }
+}
 
 /** Options for an {@link AgentSpawn} call. */
 export interface AgentSpawnOptions {

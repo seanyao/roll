@@ -108,6 +108,11 @@ describe("loop run-once CLI wiring", () => {
     expect(out).toContain("Usage: roll loop run-once");
   });
 
+  it("US-DELIV-005: usage documents --race (same-card parallel opt-in)", () => {
+    expect(RUN_ONCE_USAGE).toContain("[--dry-run] [--race]");
+    expect(RUN_ONCE_USAGE).toContain("--race");
+  });
+
   it("FIX-1040: unscoped run-once yields while a scoped loop go session holds directory go.lock", async () => {
     const p = tmp("go-lock-dir");
     execFileSync("git", ["init", "-q", p]);

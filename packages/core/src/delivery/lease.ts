@@ -113,6 +113,21 @@ export function deliveryLease(
   return { pick: false, reason: `card held: ${holder.state}`, heldBy: holder.cycleId };
 }
 
+/**
+ * Picker-predicate adapter over {@link deliveryLease}: returns the skip reason
+ * (with heldBy) when the card is lease-blocked, undefined when it is pickable.
+ * Slots directly into `PickOptions.deliveryLeaseBlock`.
+ */
+export function leaseBlockReason(
+  storyId: string,
+  leases: readonly DeliveryLease[],
+  opts: { race?: boolean } = {},
+): string | undefined {
+  const v = deliveryLease(storyId, leases, opts);
+  if (v.pick) return undefined;
+  return v.heldBy !== undefined ? `${v.reason} (${v.heldBy})` : v.reason;
+}
+
 /** Identity of the cycle that merged first (the race winner). */
 export interface RaceWinner {
   cycleId: string;

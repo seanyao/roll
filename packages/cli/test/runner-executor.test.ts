@@ -1460,6 +1460,75 @@ describe("executeCommand — command → executor mapping", () => {
     });
   });
 
+  describe("US-DELIV-005: one-card-one-lease pick consult", () => {
+    function leasePorts(
+      backlogRows: { id: string; desc: string; status: string }[],
+      eventLines: object[],
+    ): { ports: ReturnType<typeof fakePorts>["ports"]; calls: ReturnType<typeof fakePorts>["calls"] } {
+      const dir = mkdtempSync(join(tmpdir(), "roll-deliv005-"));
+      execDirs.push(dir);
+      const repo = join(dir, "repo");
+      mkdirSync(repo, { recursive: true });
+      const eventsPath = join(dir, "events.ndjson");
+      writeFileSync(eventsPath, eventLines.map((e) => JSON.stringify(e)).join("\n") + "\n");
+      const markStatus = vi.fn();
+      return fakePorts({
+        repoCwd: repo,
+        paths: { ...fakePorts().ports.paths, eventsPath },
+        backlog: { read: () => backlogRows, markStatus },
+      });
+    }
+
+    const heldCycleEvents = [
+      { type: "cycle:start", cycleId: "cycle-held-1", storyId: "US-CAPTURE-006", agent: "claude", model: "m", ts: 1 },
+      { type: "delivery:published", cycleId: "cycle-held-1", storyId: "US-CAPTURE-006", branch: "loop/cycle-held-1", prNumber: 6, prUrl: "u", ts: 2 },
+      { type: "cycle:end", cycleId: "cycle-held-1", outcome: "published_pending_merge", cost: { totalTokens: 0 }, ts: 3 },
+    ];
+
+    it("a card held awaiting_merge is skipped; the next free card is picked, with a pick:skipped event", async () => {
+      const { ports, calls } = leasePorts(
+        [
+          { id: "US-CAPTURE-006", desc: "est_min:5", status: "📋 Todo" },
+          { id: "US-CAPTURE-007", desc: "est_min:5", status: "📋 Todo" },
+        ],
+        heldCycleEvents,
+      );
+      const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
+      expect(r.event).toEqual({ type: "story_picked", storyId: "US-CAPTURE-007" });
+      const events = (calls["event"] ?? []).map((a) => (a as unknown[])[1]);
+      expect(events).toContainEqual({
+        type: "pick:skipped",
+        cycleId: CTX.cycleId,
+        storyId: "US-CAPTURE-006",
+        reason: "card held: awaiting_merge (cycle-held-1)",
+        ts: 42000,
+      });
+    });
+
+    it("ROLL_LOOP_RACE=1 opts in: a held card may be picked (parallel race)", async () => {
+      const { ports } = leasePorts(
+        [{ id: "US-CAPTURE-006", desc: "est_min:5", status: "📋 Todo" }],
+        heldCycleEvents,
+      );
+      process.env["ROLL_LOOP_RACE"] = "1";
+      try {
+        const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
+        expect(r.event).toEqual({ type: "story_picked", storyId: "US-CAPTURE-006" });
+      } finally {
+        delete process.env["ROLL_LOOP_RACE"];
+      }
+    });
+
+    it("a crashed cycle's in_flight lease with no live claim is a ghost — the card stays pickable (legal retry)", async () => {
+      const { ports } = leasePorts(
+        [{ id: "US-CAPTURE-006", desc: "est_min:5", status: "📋 Todo" }],
+        [{ type: "cycle:start", cycleId: "cycle-ghost-1", storyId: "US-CAPTURE-006", agent: "claude", model: "m", ts: 1 }],
+      );
+      const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
+      expect(r.event).toEqual({ type: "story_picked", storyId: "US-CAPTURE-006" });
+    });
+  });
+
   describe("FIX-1211: lease-aware In Progress handling", () => {
     function tempLeasePorts(
       backlogRows: { id: string; desc: string; status: string }[],

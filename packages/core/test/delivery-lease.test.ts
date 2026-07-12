@@ -11,6 +11,7 @@
 import { describe, expect, it } from "vitest";
 import {
   deliveryLease,
+  leaseBlockReason,
   leaseStateFor,
   projectDeliveryLeases,
   siblingCancelEvents,
@@ -154,5 +155,21 @@ describe("siblingCancelEvents — first merge cancels the rest", () => {
 
   it("no siblings → no events", () => {
     expect(siblingCancelEvents("US-A-1", winner, [lease("US-A-1", "cycle-1", "awaiting_merge")], 100)).toEqual([]);
+  });
+});
+
+describe("leaseBlockReason — picker predicate adapter", () => {
+  it("free card → undefined", () => {
+    expect(leaseBlockReason("US-A-1", [])).toBeUndefined();
+  });
+
+  it("held card → reason with heldBy", () => {
+    expect(leaseBlockReason("US-A-1", [lease("US-A-1", "cycle-1", "awaiting_merge")])).toBe(
+      "card held: awaiting_merge (cycle-1)",
+    );
+  });
+
+  it("race opt-in → undefined (pick allowed)", () => {
+    expect(leaseBlockReason("US-A-1", [lease("US-A-1", "cycle-1", "in_flight")], { race: true })).toBeUndefined();
   });
 });

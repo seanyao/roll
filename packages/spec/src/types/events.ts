@@ -32,11 +32,16 @@ export type RollEvent =
   // The orchestrator runs test_author → implementer → attack rounds; each stage
   // is a durable fact so the shadow-run aggregate (US-LOOP-104) can measure holes
   // found / rounds / termination without re-deriving from spawn logs. The
-  // `degraded` fallback event is US-LOOP-103.
+  // The `degraded` fallback event (US-LOOP-106) makes an adversarial→single-builder
+  // fallback an explicit, never-silent fact: any adversarial exception (non-hetero
+  // pair, agent unavailable, round hang) routes through the pure
+  // adversarialDegradeDecision (US-LOOP-103) and completes the card as a standard
+  // single builder — recorded here so it is auditable, not swallowed.
   | { type: "adversarial:test-authored"; cycleId: string; storyId: string; agent: string; ts: number }
   | { type: "adversarial:implemented"; cycleId: string; storyId: string; agent: string; round: number; ts: number }
   | { type: "adversarial:attack-round"; cycleId: string; storyId: string; agent: string; round: number; newHole: boolean; dryStreak: number; ts: number }
   | { type: "adversarial:terminated"; cycleId: string; storyId: string; reason: "dry" | "max_rounds" | "timeout"; rounds: number; holesFound: number; ts: number }
+  | { type: "adversarial:degraded"; cycleId: string; storyId: string; from: "verified" | "designed" | "adversarial"; to: "single-builder"; cause: string; ts: number }
   | { type: "cycle:phase"; cycleId: string; phase: CyclePhase; ts: number }
   | { type: "cycle:stdout"; cycleId: string; data: string; ts: number }
   | { type: "cycle:tcr"; cycleId: string; commitHash: string; message: string; ts: number; commitTs?: number }

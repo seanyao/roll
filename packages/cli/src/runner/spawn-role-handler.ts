@@ -19,25 +19,26 @@
  * No marker ⇒ the round was dry. Reading a written artifact (not parsing agent
  * stdout) keeps this agent-agnostic, consistent with the roll core thesis.
  *
- * SAFETY DEFERRAL (US-LOOP-103): this thin handler INTENTIONALLY does not carry
- * the builder-spawn's full safety machinery — the FIX-929 stall detector, the
- * US-LOOP-089 main-checkout OS write-protection, and the §7 degrade taxonomy
- * (rig rotation, `adversarial:degraded` alerts). Those belong to US-LOOP-103
- * ("异常一律降级 standard 单 builder,绝不死锁"). Two protections are kept HERE so
- * this story never regresses the safety floor: (1) a spawn-local `timeoutMs`
- * hard-kill so a single hung role can never block the driver forever (the
- * between-step watchdog in run-cycle cannot interrupt an in-flight await), and
- * (2) any main-checkout leak is still caught + rescued downstream at
- * `capture_facts` (`classifyCaptured` → `rescue_leaked`), exactly as on the
- * standard path. The adversarial path is dormant unless a project opts into the
- * verified/designed execution profile, so this floor is sufficient until 103.
+ * SAFETY (US-LOOP-106): the code-writing roles (implementer/attacker) carry the
+ * same main-checkout protection as the standard builder — US-LOOP-089 OS
+ * write-protection around the spawn + an active leak watchdog + pre/post
+ * quarantine — so a role that escapes its worktree cannot pollute the shared main
+ * checkout (memory: builder git leak is the top failure mode). A detected leak
+ * forces the role to a failure result, which the orchestrator maps through
+ * `adversarialDegradeDecision` to a standard single builder (never silent, never
+ * deadlock). A spawn-local `timeoutMs` hard-kill bounds a single hung role (the
+ * between-step watchdog cannot interrupt an in-flight await). The FIX-929 stall
+ * detector + rig-rotation degrade remain the standard builder's job (this handler
+ * degrades TO that builder rather than re-implementing it).
  */
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { CycleCommand, CycleContext } from "@roll/core";
 import { adversarialRolePrompt, agentSpawnEnvironment } from "./agent-spawn.js";
-import { worktreeGitEnv } from "./main-checkout-guard.js";
+import { applyMainCheckoutWriteProtection, releaseMainCheckoutWriteProtection, worktreeGitEnv } from "./main-checkout-guard.js";
+import { appendWriteProtectionEvent, quarantineMainCheckoutForCycle, startMainCheckoutLeakWatchdog } from "./sandbox-boundary.js";
 import { readCycleTimeoutThresholds } from "./spawn-observers.js";
+import { eventTs, guardRuntimeDir } from "./runner-time.js";
 import { agentWritableRoots } from "./worktree-bootstrap.js";
 import type { ExecuteResult, Ports } from "./ports.js";
 
@@ -90,23 +91,61 @@ export async function executeSpawnRoleCommand(
   // its between-step watchdog while awaiting one spawn). The real cycle timeout
   // still preempts earlier; this only backstops an in-flight hang.
   const wallSec = readCycleTimeoutThresholds(ports.repoCwd).wallSec;
-  const res = await ports.agentSpawn(cmd.agent, {
-    purpose: cmd.role,
-    cwd: ports.paths.worktreePath,
-    skillBody: `${rolePrompt}\n\n${ports.skillBody}`,
-    writableRoots: agentWritableRoots(ports.repoCwd, ports.paths.alertsPath),
-    timeoutMs: wallSec * 1000,
-    ...(ctx.model !== undefined && ctx.model !== "" ? { model: ctx.model } : {}),
-    ...(ctx.storyId !== undefined && ctx.storyId !== "" ? { storyId: ctx.storyId } : {}),
-    ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
-    env: {
-      ...process.env,
-      ROLL_LOOP_ALERT: ports.paths.alertsPath,
-      ROLL_ADVERSARIAL_MARKER: markerPath,
-      ...worktreeGitEnv(ports.paths.worktreePath, ports.repoCwd),
-      ...agentSpawnEnvironment(cmd.agent),
-    },
-  });
+  // US-LOOP-106: guard the shared main checkout for the role's whole lifetime,
+  // exactly as the standard builder does — write-protect + watch for a leak,
+  // quarantine any pollution pre/post. A detected active leak forces a failure
+  // result so the orchestrator degrades to a standard builder.
+  await quarantineMainCheckoutForCycle(ports, ctx, "pre-spawn");
+  let res: Awaited<ReturnType<typeof ports.agentSpawn>>;
+  let activeMainLeak: { detected: boolean; files: string[] } = { detected: false, files: [] };
+  let mainLeakWatchdog: ReturnType<typeof startMainCheckoutLeakWatchdog> | undefined;
+  try {
+    appendWriteProtectionEvent(
+      ports,
+      applyMainCheckoutWriteProtection({
+        repoCwd: ports.repoCwd,
+        runtimeDir: guardRuntimeDir(ports),
+        cycleId: ctx.cycleId ?? "",
+        nowMs: () => eventTs(ports),
+      }),
+    );
+    mainLeakWatchdog = startMainCheckoutLeakWatchdog(ports, ctx);
+    res = await ports.agentSpawn(cmd.agent, {
+      purpose: cmd.role,
+      cwd: ports.paths.worktreePath,
+      skillBody: `${rolePrompt}\n\n${ports.skillBody}`,
+      writableRoots: agentWritableRoots(ports.repoCwd, ports.paths.alertsPath),
+      timeoutMs: wallSec * 1000,
+      ...(ctx.model !== undefined && ctx.model !== "" ? { model: ctx.model } : {}),
+      ...(ctx.storyId !== undefined && ctx.storyId !== "" ? { storyId: ctx.storyId } : {}),
+      ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
+      env: {
+        ...process.env,
+        ROLL_LOOP_ALERT: ports.paths.alertsPath,
+        ROLL_ADVERSARIAL_MARKER: markerPath,
+        ...worktreeGitEnv(ports.paths.worktreePath, ports.repoCwd),
+        ...agentSpawnEnvironment(cmd.agent),
+      },
+    });
+  } finally {
+    if (mainLeakWatchdog !== undefined) activeMainLeak = await mainLeakWatchdog.stop();
+    appendWriteProtectionEvent(
+      ports,
+      releaseMainCheckoutWriteProtection({
+        repoCwd: ports.repoCwd,
+        runtimeDir: guardRuntimeDir(ports),
+        cycleId: ctx.cycleId ?? "",
+        nowMs: () => eventTs(ports),
+      }),
+    );
+  }
+  if (activeMainLeak.detected) {
+    await quarantineMainCheckoutForCycle(ports, ctx, "active-spawn");
+    // Force a failure result → orchestrator degrades to a standard builder.
+    res = { ...res, exitCode: res.exitCode === 0 ? 1 : res.exitCode, timedOut: true };
+  } else {
+    await quarantineMainCheckoutForCycle(ports, ctx, "post-spawn");
+  }
   // CUMULATIVE elapsed (from cycle start when known) so the pure
   // adversarialNextStep `totalTimeoutSec` guard is a true subsequence-wide cap,
   // not a per-role duration. Falls back to this spawn's duration pre-cycle-start.

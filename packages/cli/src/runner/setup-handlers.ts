@@ -607,12 +607,26 @@ export async function executeSetupCommand(
       // test_author → implementer → attack subsequence. `undefined` (standard, or
       // no hetero partner) keeps the single-builder path — zero behaviour change.
       const adversarial = planAdversarial(selectedProfile, selectedAgent, active);
+      // US-LOOP-106: a verified/designed cycle that WANTED adversarial pairing but
+      // could not form a heterogeneous test_author≠implementer pair degrades to a
+      // standard single builder — NOT silently. Flag it so the orchestrator emits
+      // adversarial:degraded{cause:"non-hetero"} before the single spawn (fail-closed,
+      // auditable). A standard-profile cycle never wants adversarial → no flag.
+      const wantsAdversarial = selectedProfile === "verified" || selectedProfile === "designed";
+      const adversarialDegraded =
+        wantsAdversarial && adversarial === undefined
+          ? {
+              cause: `non-hetero: no heterogeneous partner for implementer ${selectedAgent} among [${active.join(",")}]`,
+              from: selectedProfile as "verified" | "designed",
+            }
+          : undefined;
       return {
         event: {
           type: "route_resolved",
           agent: selectedAgent,
           model: selectedModel,
           ...(adversarial !== undefined ? { adversarial } : {}),
+          ...(adversarialDegraded !== undefined ? { adversarialDegraded } : {}),
         },
         ctxPatch: { selectedProfile },
       };

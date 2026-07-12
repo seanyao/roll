@@ -1312,16 +1312,72 @@ describe("US-LOOP-102 — adversarial-pairing subsequence (verified/designed)", 
     expect(commands.some((c) => c.kind === "spawn_role" && c.role === "attacker")).toBe(false);
   });
 
-  it("a failed role spawn stops the subsequence and captures (never deadlocks)", () => {
+  it("US-LOOP-106: a failed role spawn degrades to a standard builder (never deadlocks, never silent)", () => {
     const { commands, state } = walk([
       ...upToExecute,
       { type: "role_exited", role: "test_author", exit: 0, timedOut: false },
       { type: "role_exited", role: "implementer", exit: 1, timedOut: false },
     ]);
-    expect(commands.some((c) => c.kind === "capture_facts")).toBe(true);
-    expect(state.phase).toBe("reconcile");
+    // §7: agent_unavailable → adversarial:degraded + standard single builder.
+    const degraded = commands.find(
+      (c): c is Extract<CycleCommand, { kind: "emit_event" }> =>
+        c.kind === "emit_event" && c.event.type === "adversarial:degraded",
+    );
+    // The failure kind is classified: a non-zero role exit → agent_unavailable
+    // (NOT round_hang) — the cause proves the correct AdversarialFailure wiring.
+    expect(degraded?.event).toMatchObject({ type: "adversarial:degraded", from: "adversarial", to: "single-builder" });
+    expect(degraded?.event.type === "adversarial:degraded" && degraded.event.cause).toMatch(/agent unavailable/);
+    expect(commands.some((c) => c.kind === "spawn_agent")).toBe(true);
+    // Adversarial runtime cleared so role events stop; phase stays execute for the builder.
+    expect(state.adversarial).toBeUndefined();
+    expect(state.phase).toBe("execute");
     // No further role spawn after the failure.
     expect(commands.filter((c) => c.kind === "spawn_role").map(roleLabel)).toEqual(["test_author@0", "implementer@0"]);
+  });
+
+  it("US-LOOP-106: a timed-out round degrades (round_hang → single builder)", () => {
+    const { commands, state } = walk([
+      ...upToExecute,
+      { type: "role_exited", role: "test_author", exit: 0, timedOut: false },
+      { type: "role_exited", role: "implementer", exit: 0, timedOut: false },
+      { type: "role_exited", role: "attacker", exit: 0, timedOut: true },
+    ]);
+    const degraded = commands.find(
+      (c): c is Extract<CycleCommand, { kind: "emit_event" }> =>
+        c.kind === "emit_event" && c.event.type === "adversarial:degraded",
+    );
+    expect(degraded?.event).toMatchObject({ type: "adversarial:degraded", to: "single-builder" });
+    // A timed-out round → round_hang (NOT agent_unavailable) — distinct classification.
+    expect(degraded?.event.type === "adversarial:degraded" && degraded.event.cause).toMatch(/round .* hung/);
+    expect(commands.some((c) => c.kind === "spawn_agent")).toBe(true);
+    expect(state.adversarial).toBeUndefined();
+  });
+
+  it("US-LOOP-106: after degrade the standard builder completes normally (no role events, → capture)", () => {
+    const { commands, state } = walk([
+      ...upToExecute,
+      { type: "role_exited", role: "test_author", exit: 0, timedOut: false },
+      { type: "role_exited", role: "implementer", exit: 1, timedOut: false }, // degrade → spawn_agent
+      { type: "agent_exited", exit: 0, timedOut: false }, // standard builder finished
+    ]);
+    // The degraded builder's clean exit flows into the normal capture path.
+    expect(commands.some((c) => c.kind === "capture_facts")).toBe(true);
+    expect(state.phase).toBe("reconcile");
+  });
+
+  it("US-LOOP-106: route_resolved with a non-hetero downgrade emits degraded + standard builder (no role spawn)", () => {
+    const { commands } = walk([
+      ...upToExecute.slice(0, 4),
+      { type: "route_resolved", agent: "pi", model: "", adversarialDegraded: { cause: "non-hetero: only pi available" } },
+    ]);
+    expect(emittedEvents(commands)).toEqual(["cycle:start", "adversarial:degraded"]);
+    expect(commands.some((c) => c.kind === "spawn_agent")).toBe(true);
+    expect(commands.some((c) => c.kind === "spawn_role")).toBe(false);
+    const degraded = commands.find(
+      (c): c is Extract<CycleCommand, { kind: "emit_event" }> =>
+        c.kind === "emit_event" && c.event.type === "adversarial:degraded",
+    );
+    expect(degraded?.event).toMatchObject({ cause: "non-hetero: only pi available", to: "single-builder" });
   });
 
   it("standard profile (no adversarial plan) is UNCHANGED — single spawn_agent, no role commands", () => {

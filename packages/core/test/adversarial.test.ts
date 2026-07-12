@@ -195,6 +195,28 @@ describe("US-LOOP-104 — foldCycleAdversarial: per-cycle summary from the event
     expect(foldCycleAdversarial(events, "C2")).toMatchObject({ rounds: 4, holesFound: 3, terminationReason: "max_rounds" });
   });
 
+  it("the LAST adversarial:terminated within a cycle wins (idempotent re-emission safe)", () => {
+    const events = [
+      ev("adversarial:terminated", { reason: "timeout", rounds: 1, holesFound: 0 }),
+      ev("adversarial:terminated", { reason: "dry", rounds: 3, holesFound: 2 }),
+    ];
+    expect(foldCycleAdversarial(events, "C1")).toMatchObject({ terminationReason: "dry", rounds: 3, holesFound: 2 });
+  });
+
+  it("attack rounds THEN degraded (no terminated) → counts rounds/holes AND marks degraded", () => {
+    const events = [
+      ev("adversarial:attack-round", { round: 1, newHole: true }),
+      ev("adversarial:attack-round", { round: 2, newHole: false }),
+      ev("adversarial:degraded", { from: "verified", to: "single-builder", cause: "round 2 hung" }),
+    ];
+    expect(foldCycleAdversarial(events, "C1")).toEqual({
+      rounds: 2,
+      holesFound: 1,
+      terminationReason: "degraded",
+      degraded: true,
+    });
+  });
+
   it("interrupted cycle (adversarial events but no terminal) → counts rounds, marks degraded", () => {
     const events = [
       ev("adversarial:attack-round", { round: 1, newHole: true }),

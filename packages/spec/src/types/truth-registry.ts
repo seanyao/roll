@@ -80,6 +80,8 @@ export const TRUTH_FIELD_REGISTRY: readonly RegisteredField[] = [
   { field: "pr_url", surface: "runs", anchor: "pr_merge", writer: `${RUNNER}; corrected by ${BACKFILL}`, kind: "authoritative" },
   { field: "merged_at", surface: "runs", anchor: "pr_merge", writer: BACKFILL, kind: "derived-cache", rebuild: REBUILD_BACKFILL },
   { field: "merge_commit", surface: "runs", anchor: "pr_merge", writer: BACKFILL, kind: "derived-cache", rebuild: REBUILD_BACKFILL },
+  // US-LOOP-104: the adversarial-pairing outcome ({rounds,holesFound,terminationReason,degraded}|null).
+  { field: "adversarial", surface: "runs", anchor: "cycle_outcome", writer: RUNNER, kind: "derived-cache", rebuild: "foldCycleAdversarial over the cycle's adversarial:* events (US-LOOP-104)" },
 
   // ── cycle:terminal event (US-TRUTH-001) ────────────────────────────────────
   { field: "type", surface: "event:cycle:terminal", anchor: "cycle_outcome", writer: "buildTerminalEvent", kind: "authoritative" },

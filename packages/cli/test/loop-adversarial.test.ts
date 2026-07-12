@@ -87,6 +87,27 @@ describe("roll loop adversarial — US-LOOP-104 shadow-run aggregate", () => {
     expect(human.out).toMatch(/no adversarial cycles/);
   });
 
+  it("merges rotated runs.jsonl.<n> siblings and skips malformed lines (I8)", () => {
+    const d = mkdtempSync(join(tmpdir(), "roll-adv-rot-"));
+    dirs.push(d);
+    // a rotation sibling + a malformed line interleaved with a good one.
+    writeFileSync(
+      join(d, "runs.jsonl.1"),
+      JSON.stringify({ run_id: "C0", status: "done", adversarial: { rounds: 2, holesFound: 2, terminationReason: "dry", degraded: false } }) + "\n",
+    );
+    writeFileSync(
+      join(d, "runs.jsonl"),
+      "{ this is not json\n" +
+        JSON.stringify({ run_id: "C1", status: "done", adversarial: { rounds: 4, holesFound: 0, terminationReason: "max_rounds", degraded: false } }) + "\n",
+    );
+    setEnv("ROLL_PROJECT_RUNTIME_DIR", d);
+    const r = capture(() => loopAdversarialCommand(["--json"]));
+    const parsed = JSON.parse(r.out) as Record<string, number>;
+    // both rows counted (rotation merged), malformed line skipped (no crash).
+    expect(parsed["adversarialCohort"]).toBe(2);
+    expect(parsed["avgHoles"]).toBeCloseTo(1); // (2+0)/2
+  });
+
   it("missing runtime dir → clean zero output, exit 0 (I8: readers never crash)", () => {
     setEnv("ROLL_PROJECT_RUNTIME_DIR", join(tmpdir(), "roll-adv-does-not-exist-xyz"));
     const r = capture(() => loopAdversarialCommand(["--json"]));

@@ -132,7 +132,7 @@ export async function executeTerminalCommand(
               branch: cmd.branch,
               prNumber: Number(parsedNumber),
               prUrl: r.prUrl,
-              ts: ports.clock() * 1000,
+              ts: eventTs(ports),
             });
           } catch {
             ports.events.appendAlert(
@@ -140,6 +140,13 @@ export async function executeTerminalCommand(
               `US-DELIV-001: delivery:published append failed for ${ctx.storyId} (cycle ${ctx.cycleId})`,
             );
           }
+        } else {
+          // fail-loud: a PR URL we can't parse a number from means the cycle
+          // never enters awaiting_merge in the projection — surface it.
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `US-DELIV-001: PR opened for ${cmd.branch} but prNumber unparsable from ${r.prUrl} — delivery:published NOT emitted`,
+          );
         }
       }
       // FIX-1214: the branch was pushed but a transient GitHub API fault kept us

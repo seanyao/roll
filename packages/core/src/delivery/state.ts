@@ -42,6 +42,11 @@ const TERMINAL: ReadonlySet<DeliveryState> = new Set<DeliveryState>([
  * @param events - The event stream (any order-consistent slice; only events
  *   whose `cycleId` matches are considered).
  * @param cycleId - The cycle to project.
+ *
+ * @remarks Call pattern: O(events) per call. Readers projecting MANY cycles
+ * (e.g. the US-DELIV-002 reconciler) should either slice the stream per cycle
+ * or fold once into a Map<cycleId, DeliveryState> — not call this per cycle
+ * over the full append-only stream (that would be O(cycles × events)).
  */
 export function projectDeliveryState(events: readonly RollEvent[], cycleId: string): DeliveryState {
   let state: DeliveryState = "building";

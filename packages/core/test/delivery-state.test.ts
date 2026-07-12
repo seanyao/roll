@@ -19,7 +19,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { projectDeliveryState } from "../src/index.js";
-import type { RollEvent } from "@roll/spec";
+import { DELIVERY_STATES, type RollEvent } from "@roll/spec";
 
 const TS = 1_750_000_000_000;
 const CYCLE = "cycle-A";
@@ -31,6 +31,20 @@ function ev(event: RollEvent): RollEvent {
 const start: RollEvent = { type: "cycle:start", cycleId: CYCLE, storyId: "US-X-001", agent: "kimi", model: "m", ts: TS };
 
 describe("projectDeliveryState — US-DELIV-001", () => {
+  // ── AC1: the 8-state vocabulary is pinned verbatim (design §3.1) ───────────
+  it("the DeliveryState vocabulary is exactly the 8 design states", () => {
+    expect([...DELIVERY_STATES]).toEqual([
+      "building",
+      "blocked_no_evidence",
+      "awaiting_merge",
+      "ci_failed",
+      "delivered",
+      "delivered_external",
+      "superseded",
+      "abandoned",
+    ]);
+  });
+
   // ── AC1: exhaustive vocabulary ────────────────────────────────────────────
   it("no events / only cycle:start → building", () => {
     expect(projectDeliveryState([], CYCLE)).toBe("building");
@@ -82,13 +96,16 @@ describe("projectDeliveryState — US-DELIV-001", () => {
   });
 
   // ── AC3: purity / totality / stickiness ───────────────────────────────────
-  it("terminal states are sticky — later delivery events cannot regress them", () => {
-    const published = ev({ type: "delivery:published", cycleId: CYCLE, storyId: "US-X-001", branch: "b", prNumber: 42, prUrl: "u", ts: TS });
-    const delivered = ev({ type: "delivery:reconciled", cycleId: CYCLE, storyId: "US-X-001", state: "delivered", mergedBy: "runner", mergeCommit: "abc", signal: "pr_state", ts: TS });
-    const ciRed = ev({ type: "delivery:merge_attempt", cycleId: CYCLE, prNumber: 42, method: "squash", outcome: "ci_red", ts: TS + 3 });
-    const republished = ev({ ...published, ts: TS + 4 });
-    expect(projectDeliveryState([start, published, delivered, ciRed, republished], CYCLE)).toBe("delivered");
-  });
+  it.each(["delivered", "delivered_external", "superseded"] as const)(
+    "terminal state %s is sticky — later delivery events cannot regress it",
+    (terminal) => {
+      const published = ev({ type: "delivery:published", cycleId: CYCLE, storyId: "US-X-001", branch: "b", prNumber: 42, prUrl: "u", ts: TS });
+      const reconciled = ev({ type: "delivery:reconciled", cycleId: CYCLE, storyId: "US-X-001", state: terminal, mergedBy: "runner", mergeCommit: "abc", signal: "pr_state", ts: TS });
+      const ciRed = ev({ type: "delivery:merge_attempt", cycleId: CYCLE, prNumber: 42, method: "squash", outcome: "ci_red", ts: TS + 3 });
+      const republished = ev({ ...published, ts: TS + 4 });
+      expect(projectDeliveryState([start, published, reconciled, ciRed, republished], CYCLE)).toBe(terminal);
+    },
+  );
 
   it("ignores events belonging to other cycles", () => {
     const foreign = ev({ type: "delivery:published", cycleId: "cycle-B", storyId: "US-X-001", branch: "b", prNumber: 7, prUrl: "u", ts: TS });
@@ -96,8 +113,13 @@ describe("projectDeliveryState — US-DELIV-001", () => {
     expect(projectDeliveryState([start, foreign, foreignReconciled], CYCLE)).toBe("building");
   });
 
-  it("is idempotent — folding the same stream twice yields the same state", () => {
+  it("is idempotent — duplicated events in the stream fold to the same state", () => {
     const published = ev({ type: "delivery:published", cycleId: CYCLE, storyId: "US-X-001", branch: "b", prNumber: 42, prUrl: "u", ts: TS });
+    const reconciled = ev({ type: "delivery:reconciled", cycleId: CYCLE, storyId: "US-X-001", state: "delivered", mergedBy: "runner", mergeCommit: "abc", signal: "pr_state", ts: TS + 1 });
+    // A replayed/duplicated stream (event-bus redelivery) is a fixpoint of the fold.
+    expect(projectDeliveryState([start, published, published], CYCLE)).toBe("awaiting_merge");
+    expect(projectDeliveryState([start, published, reconciled, published, reconciled], CYCLE)).toBe("delivered");
+    // …and folding is deterministic.
     const events = [start, published];
     expect(projectDeliveryState(events, CYCLE)).toBe(projectDeliveryState(events, CYCLE));
   });

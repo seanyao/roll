@@ -3571,6 +3571,91 @@ describe("executeCommand — command → executor mapping", () => {
     expect(runPublishPlan).not.toHaveBeenCalled();
   });
 
+  it("US-DELIV-004: publish_pr blocks BEFORE push when attest/ac-map evidence is missing (no bare branch)", async () => {
+    const repo = initCleanGitRepo("roll-evidence-gate-blocked-");
+    const base = fakePorts();
+    const push = vi.fn(async () => ({ code: 0 }));
+    const runPublishPlan = vi.fn(async () => ({ status: 0 as const, prUrl: "u", ok: true }));
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      git: { ...base.ports.git, push },
+      github: { ...base.ports.github, prState: vi.fn(async () => "UNKNOWN"), runPublishPlan },
+    });
+    const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
+    // blocked_no_evidence: status 1 (unpublished) — the branch is NEVER pushed
+    // and no PR is opened (推了分支却没 PR stops being a normal outcome).
+    expect(r.event).toEqual({ type: "published", result: { status: 1, manualMerge: false } });
+    expect(push).not.toHaveBeenCalled();
+    expect(runPublishPlan).not.toHaveBeenCalled();
+    const gateEvents = (calls["event"] ?? [])
+      .map((a) => (a as unknown[])[1] as { type: string; verdict?: string; reasons?: string[] })
+      .filter((e) => e.type === "delivery:evidence_gate");
+    expect(gateEvents).toHaveLength(1);
+    expect(gateEvents[0].verdict).toBe("blocked");
+    expect(gateEvents[0].reasons?.join("; ")).toContain("ac-map.json missing");
+    const alerts = (calls["alert"] ?? []).map((a) => String((a as unknown[])[1])).join("\n");
+    expect(alerts).toContain("ac-map.json missing");
+    expect(alerts).toContain("NOT pushed");
+  });
+
+  it("US-DELIV-004: attest report + ac-map present → gate earned, push proceeds", async () => {
+    const repo = initCleanGitRepo("roll-evidence-gate-earned-");
+    const cardDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
+    mkdirSync(join(cardDir, "latest"), { recursive: true });
+    mkdirSync(join(cardDir, CTX.cycleId), { recursive: true });
+    writeFileSync(join(cardDir, "ac-map.json"), "[]\n");
+    writeFileSync(join(cardDir, "latest", "US-RUN-001-report.html"), "<html>report</html>\n");
+    const base = fakePorts();
+    const push = vi.fn(async () => ({ code: 0 }));
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      git: { ...base.ports.git, push },
+      github: {
+        ...base.ports.github,
+        prState: vi.fn(async () => "UNKNOWN"),
+        runPublishPlan: vi.fn(async () => ({ status: 0 as const, prUrl: "u", ok: true })),
+      },
+    });
+    const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
+    expect(r.event).toEqual({ type: "published", result: { status: 0, manualMerge: false } });
+    expect(push).toHaveBeenCalledOnce();
+    const gateEvents = (calls["event"] ?? [])
+      .map((a) => (a as unknown[])[1] as { type: string; verdict?: string })
+      .filter((e) => e.type === "delivery:evidence_gate");
+    expect(gateEvents).toHaveLength(1);
+    expect(gateEvents[0].verdict).toBe("earned");
+  });
+
+  it("US-DELIV-004: a gate event-write failure must NOT abort a valid publish (best-effort observability)", async () => {
+    const repo = initCleanGitRepo("roll-evidence-gate-event-fail-");
+    const cardDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
+    mkdirSync(join(cardDir, "latest"), { recursive: true });
+    mkdirSync(join(cardDir, CTX.cycleId), { recursive: true });
+    writeFileSync(join(cardDir, "ac-map.json"), "[]\n");
+    writeFileSync(join(cardDir, "latest", "US-RUN-001-report.html"), "<html>report</html>\n");
+    const base = fakePorts();
+    const push = vi.fn(async () => ({ code: 0 }));
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      git: { ...base.ports.git, push },
+      github: {
+        ...base.ports.github,
+        prState: vi.fn(async () => "UNKNOWN"),
+        runPublishPlan: vi.fn(async () => ({ status: 0 as const, prUrl: "u", ok: true })),
+      },
+      events: {
+        ...base.ports.events,
+        appendEvent: vi.fn(() => {
+          throw new Error("events file unwritable");
+        }),
+      },
+    });
+    const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
+    // An observability blip must never block delivery: the push still happens.
+    expect(r.event).toEqual({ type: "published", result: { status: 0, manualMerge: false } });
+    expect(push).toHaveBeenCalledOnce();
+  });
+
   it("US-LOOP-094: push_orphan pushes worktree HEAD via refspec, FROM the worktree cwd", async () => {
     const { ports } = fakePorts();
     await executeCommand({ kind: "push_orphan", branch: "loop/cycle-x" }, ports, CTX);
@@ -3586,6 +3671,9 @@ describe("executeCommand — command → executor mapping", () => {
     const cardDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
     mkdirSync(cardDir, { recursive: true });
     writeFileSync(join(cardDir, "ac-map.json"), "[]\n");
+    // US-DELIV-004: the push-time evidence gate requires an attest report too.
+    mkdirSync(join(cardDir, "latest"), { recursive: true });
+    writeFileSync(join(cardDir, "latest", "US-RUN-001-report.html"), "<html>report</html>\n");
     execFileSync("git", ["init", "-q", "-b", "main"], { cwd: join(repo, ".roll") });
     execFileSync("git", ["config", "user.email", "test@roll.local"], { cwd: join(repo, ".roll") });
     execFileSync("git", ["config", "user.name", "Test"], { cwd: join(repo, ".roll") });
@@ -3630,6 +3718,9 @@ describe("executeCommand — command → executor mapping", () => {
     const runDir = join(cardDir, CTX.cycleId);
     mkdirSync(join(runDir, "screenshots"), { recursive: true });
     writeFileSync(join(cardDir, "ac-map.json"), "[]\n");
+    // US-DELIV-004: the push-time evidence gate requires an attest report too.
+    mkdirSync(join(cardDir, "latest"), { recursive: true });
+    writeFileSync(join(cardDir, "latest", "US-RUN-001-report.html"), "<html>report</html>\n");
     writeFileSync(join(runDir, "evidence.json"), "{\"captures\":[]}\n");
     writeFileSync(join(runDir, "screenshots", "terminal.png"), "png\n");
 
@@ -3702,6 +3793,9 @@ describe("executeCommand — command → executor mapping", () => {
     const cardDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
     mkdirSync(cardDir, { recursive: true });
     writeFileSync(join(cardDir, "ac-map.json"), "[]\n");
+    // US-DELIV-004: the push-time evidence gate requires an attest report too.
+    mkdirSync(join(cardDir, "latest"), { recursive: true });
+    writeFileSync(join(cardDir, "latest", "US-RUN-001-report.html"), "<html>report</html>\n");
     execFileSync("git", ["init", "-q", "-b", "main"], { cwd: join(repo, ".roll") });
     execFileSync("git", ["config", "user.email", "test@roll.local"], { cwd: join(repo, ".roll") });
     execFileSync("git", ["config", "user.name", "Test"], { cwd: join(repo, ".roll") });
@@ -3744,6 +3838,9 @@ describe("executeCommand — command → executor mapping", () => {
     const skeleton = '<html><section class="phase phase-pending" data-phase="execution"><h2>x</h2><p>e</p></section></html>';
     writeFileSync(join(dir, "index.html"), skeleton, "utf8");
     writeFileSync(join(dir, "ac-map.json"), "[]\n");
+    // US-DELIV-004: the push-time evidence gate requires an attest report too.
+    mkdirSync(join(dir, "latest"), { recursive: true });
+    writeFileSync(join(dir, "latest", "US-RUN-001-report.html"), "<html>report</html>\n");
     execFileSync("git", ["init", "-q", "-b", "main"], { cwd: join(repo, ".roll") });
     execFileSync("git", ["config", "user.email", "test@roll.local"], { cwd: join(repo, ".roll") });
     execFileSync("git", ["config", "user.name", "Test"], { cwd: join(repo, ".roll") });

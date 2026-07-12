@@ -377,6 +377,48 @@ describe("FIX-1032b/REFACTOR-071 — published cycle writes PR-loop attribution"
   });
 });
 
+describe("US-DELIV-001 — AWAITING_MERGE suspension: publish releases the loop (no merge-wait)", () => {
+  /** Walk a full happy-path cycle and collect every command. */
+  function walkPublishedCycle(): { state: ReturnType<typeof initialCycleState>; commands: CycleCommand[] } {
+    const ctx: CycleContext = { ...CTX, prUrl: "https://github.com/o/r/pull/42" };
+    let state = initialCycleState(ctx);
+    const commands: CycleCommand[] = [];
+    for (const ev of [
+      { type: "start", ctx },
+      { type: "preflight_done" },
+      { type: "worktree_created" },
+      { type: "story_picked", storyId: "US-DELIV-001" },
+      { type: "route_resolved", agent: "kimi", model: "m" },
+      { type: "agent_exited", exit: 0, timedOut: false },
+      { type: "facts_captured", facts: { usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 1 } },
+      { type: "published", result: { status: 0 } },
+    ] satisfies CycleEvent[]) {
+      const r = cycleStep(state, ev);
+      state = r.state;
+      commands.push(...r.commands);
+    }
+    return { state, commands };
+  }
+
+  it("sequence assertion: `published` terminates the cycle IMMEDIATELY — no wait_merge, no merge-wait phase", () => {
+    const { state, commands } = walkPublishedCycle();
+    // The cycle is terminal the moment the PR is open: cleanup + append_run +
+    // cycle:end, and the runner is free to pick the next card.
+    expect(state.terminal).toBe("published");
+    expect(state.phase).toBe("cleanup");
+    expect(commands.some((c) => c.kind === "wait_merge")).toBe(false);
+    expect(commands.some((c) => c.kind === "append_run" && c.status === "published")).toBe(true);
+    expect(commands.some((c) => c.kind === "emit_event" && c.event.type === "cycle:end")).toBe(true);
+  });
+
+  it("a merge_polled event after terminal is a no-op (the merge-wait path is never entered from publish)", () => {
+    const { state } = walkPublishedCycle();
+    const r = cycleStep(state, { type: "merge_polled", state: "OPEN", elapsedSec: 30 });
+    expect(r.state.terminal).toBe("published");
+    expect(r.commands).toEqual([]);
+  });
+});
+
 describe("classifyPublish — publish ladder refines built (bin/roll:9239-9356)", () => {
   it("FIX-244: status 0 → published (PR open, merge pending — done ≡ merged, I4)", () => {
     expect(classifyPublish({ status: 0 })).toBe("published");

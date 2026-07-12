@@ -31,6 +31,7 @@ import {
   type V2CycleStatus,
   cycleEndEvent,
   cycleStep,
+  foldCycleAdversarial,
   initialCycleState,
   mapV2Status,
   watchdogVerdict,
@@ -127,6 +128,10 @@ export async function runCycleOnce(opts: RunCycleOptions): Promise<RunCycleResul
       noteTerminal(commands);
       if (commands.some((c) => c.kind === "emit_event" && c.event.type === "cycle:end")) {
         liveCtx = attachFailureAttribution(liveCtx, state.terminal, ports);
+        // US-LOOP-104: fold this cycle's adversarial:* events into the runs-row
+        // summary at terminal (the events are already written). A standard cycle
+        // folds to null → the row omits the field (no behaviour change).
+        liveCtx = attachAdversarialRun(liveCtx, ports);
       }
 
       // Refresh heartbeat each step (liveness during a long execute phase).
@@ -160,6 +165,7 @@ export async function runCycleOnce(opts: RunCycleOptions): Promise<RunCycleResul
     if (!terminalEmitted) {
       const status: V2CycleStatus = "aborted";
       liveCtx = attachFailureAttribution(liveCtx, status, ports);
+      liveCtx = attachAdversarialRun(liveCtx, ports); // US-LOOP-104: aborted adversarial cycles record their summary too
       // FIX-1060: if the live context was lost (e.g. exception before the
       // orchestrator propagated story/agent), recover the best-known attribution
       // from events the cycle already wrote.
@@ -218,6 +224,13 @@ export async function runCycleOnce(opts: RunCycleOptions): Promise<RunCycleResul
   }
 
   return { ran: true, terminal: state.terminal, state };
+}
+
+/** US-LOOP-104: patch the adversarial-run summary onto the live ctx from the
+ *  cycle's already-written adversarial:* events (null → standard cycle, no-op). */
+function attachAdversarialRun(ctx: CycleContext, ports: Ports): CycleContext {
+  const summary = foldCycleAdversarial(readCycleEvents(ports.paths.eventsPath, ctx.cycleId), ctx.cycleId);
+  return summary === null ? ctx : { ...ctx, adversarialRun: summary };
 }
 
 function attachFailureAttribution(ctx: CycleContext, terminal: V2CycleStatus | undefined, ports: Ports): CycleContext {

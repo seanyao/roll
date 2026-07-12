@@ -71,7 +71,12 @@ export interface PendingPrCreateDeps {
   info: (line: string) => void;
 }
 
-function appendPendingPrEvent(runtimeDir: string, event: { type: "pr:open"; prNumber: number; storyId: string; ts: number }): void {
+function appendPendingPrEvent(
+  runtimeDir: string,
+  event:
+    | { type: "pr:open"; prNumber: number; storyId: string; ts: number }
+    | { type: "delivery:published"; cycleId: string; storyId: string; branch: string; prNumber: number; prUrl: string; ts: number },
+): void {
   const eventsPath = join(runtimeDir, "events.ndjson");
   mkdirSync(dirname(eventsPath), { recursive: true });
   writeFileSync(eventsPath, `${JSON.stringify(event)}\n`, { flag: "a" });
@@ -131,6 +136,22 @@ export async function openPendingPrCreates(
       storyId: entry.storyId,
       ts,
     });
+    // US-DELIV-001: the deferred path carries the SAME awaiting_merge fact as
+    // the happy-path publish (terminal-handlers) — one vocabulary, one
+    // projection, no matter which lane opened the PR.
+    if (prNumber !== undefined && prUrl !== "") {
+      appendPendingPrEvent(deps.runtimeDir, {
+        type: "delivery:published",
+        cycleId: entry.cycleId,
+        storyId: entry.storyId,
+        branch: entry.branch,
+        prNumber: Number(prNumber),
+        prUrl,
+        ts,
+      });
+    } else {
+      deps.alert(`US-DELIV-001: deferred PR opened for ${entry.branch} but prNumber/prUrl unparsable — delivery:published NOT emitted (cycle stays out of awaiting_merge projection)`);
+    }
 
     try {
       appendDelivery(nodeDeliveryStore, deps.projectCwd, {

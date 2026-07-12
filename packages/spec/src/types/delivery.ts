@@ -18,6 +18,34 @@
 import type { HistoricalTerminalOutcome } from "./terminal.js";
 import type { FactOr } from "./terminal.js";
 
+// ── DeliveryState (US-DELIV-001) ─────────────────────────────────────────────
+
+/**
+ * Cycle-level DELIVERY dimension vocabulary (delivery-reconciler design §3.1).
+ *
+ * Orthogonal to {@link LifecycleState} (story-level, derived from
+ * TerminalOutcome + PR facts): DeliveryState tracks ONE CYCLE's delivery
+ * lifecycle and is projected PURELY from the event stream — see
+ * `projectDeliveryState` in @roll/core. No path may hand-write a terminal
+ * delivery state without appending the event that carries it.
+ *
+ * `awaiting_merge` is a genuine SUSPENSION: the branch+PR exist and the loop
+ * is released to pick the next card; the state advances only when a later
+ * `delivery:reconciled` / `delivery:merge_attempt` event lands — never by
+ * blocking on the merge.
+ */
+export const DELIVERY_STATES = [
+  "building",
+  "blocked_no_evidence",
+  "awaiting_merge",
+  "ci_failed",
+  "delivered",
+  "delivered_external",
+  "superseded",
+  "abandoned",
+] as const;
+export type DeliveryState = (typeof DELIVERY_STATES)[number];
+
 // ── LifecycleState (AC2) ─────────────────────────────────────────────────────
 
 /**

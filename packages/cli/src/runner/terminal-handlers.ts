@@ -119,6 +119,35 @@ export async function executeTerminalCommand(
             `US-TRUTH-015: appendDelivery failed for ${ctx.storyId} (cycle ${ctx.cycleId})`,
           );
         }
+        // US-DELIV-001: the PR-open fact is an EVENT — the cycle enters
+        // awaiting_merge (projection: projectDeliveryState) and the loop is
+        // released to pick the next card; nothing blocks on the merge. The
+        // event, not the record above, is the authoritative delivery fact.
+        if (parsedNumber !== undefined) {
+          try {
+            ports.events.appendEvent(ports.paths.eventsPath, {
+              type: "delivery:published",
+              cycleId: ctx.cycleId,
+              storyId: ctx.storyId,
+              branch: cmd.branch,
+              prNumber: Number(parsedNumber),
+              prUrl: r.prUrl,
+              ts: eventTs(ports),
+            });
+          } catch {
+            ports.events.appendAlert(
+              ports.paths.alertsPath,
+              `US-DELIV-001: delivery:published append failed for ${ctx.storyId} (cycle ${ctx.cycleId})`,
+            );
+          }
+        } else {
+          // fail-loud: a PR URL we can't parse a number from means the cycle
+          // never enters awaiting_merge in the projection — surface it.
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `US-DELIV-001: PR opened for ${cmd.branch} but prNumber unparsable from ${r.prUrl} — delivery:published NOT emitted`,
+          );
+        }
       }
       // FIX-1214: the branch was pushed but a transient GitHub API fault kept us
       // from opening the PR. Queue the hand-off so the PR loop can retry, alert,

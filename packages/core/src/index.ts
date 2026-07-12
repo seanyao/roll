@@ -28,6 +28,7 @@ export * from "./delivery/pr-reconcile.js";
 export { deliveriesPath, validateDeliveryRecord, appendDelivery, readDeliveries, readDeliveriesRaw, nodeDeliveryStore, type DeliveryStoreInterface } from "./delivery/store.js";
 export * from "./delivery/tcr.js";
 export * from "./delivery/rebuild.js";
+export * from "./delivery/state.js";
 export * from "./evals/candidates.js";
 export * from "./evals/score.js";
 export * from "./events/bus.js";

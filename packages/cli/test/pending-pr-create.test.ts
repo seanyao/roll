@@ -106,6 +106,29 @@ describe("openPendingPrCreates", () => {
     expect(readPendingPrCreates(runtimeDir)).toEqual([]);
   });
 
+  it("US-DELIV-001: a deferred PR open ALSO emits delivery:published (same awaiting_merge fact as the happy path)", async () => {
+    const { runtimeDir, projectCwd } = makeDirs();
+    addPendingPrCreate(runtimeDir, entry());
+    const d = deps(runtimeDir, projectCwd, [
+      { code: 0, stdout: "https://github.com/o/r/pull/42\n", stderr: "" },
+    ]);
+
+    await openPendingPrCreates(d, "o/r", new Set());
+
+    const events = readFileSync(join(runtimeDir, "events.ndjson"), "utf8").trim().split("\n").map((l) => JSON.parse(l) as { type: string });
+    const published = events.filter((e) => e.type === "delivery:published");
+    expect(published).toHaveLength(1);
+    expect(published[0]).toMatchObject({
+      type: "delivery:published",
+      cycleId: "c1",
+      storyId: "FIX-1214",
+      branch: "loop/cycle-1214",
+      prNumber: 42,
+      prUrl: "https://github.com/o/r/pull/42",
+      ts: 1234,
+    });
+  });
+
   it("skips branches that already have an open PR and cleans the stale queue entry", async () => {
     const { runtimeDir, projectCwd } = makeDirs();
     addPendingPrCreate(runtimeDir, entry());

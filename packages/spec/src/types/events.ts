@@ -201,6 +201,20 @@ export type RollEvent =
   | { type: "ci:pass"; prNumber: number; ts: number }
   | { type: "ci:fail"; prNumber: number; failSummary: string; ts: number }
   | { type: "ci:rerun"; prNumber: number; ts: number }
+  // US-DELIV-001 — delivery lifecycle events (design §3.2). These are the ONLY
+  // writers of a cycle's deliveryState: `projectDeliveryState` (@roll/core)
+  // folds them into the DeliveryState vocabulary; no path hand-writes a
+  // terminal delivery state without appending the carrying event.
+  // Push-time evidence gate (emitter lands with US-DELIV-004's hard gate).
+  | { type: "delivery:evidence_gate"; cycleId: string; storyId: string; verdict: "earned" | "blocked"; reasons: string[]; ts: number }
+  // PR opened = the cycle enters AWAITING_MERGE and the loop is released to
+  // pick the next card — it does NOT block waiting for the merge.
+  | { type: "delivery:published"; cycleId: string; storyId: string; branch: string; prNumber: number; prUrl: string; ts: number }
+  // Self-driven merge attempt (emitter lands with US-DELIV-003).
+  | { type: "delivery:merge_attempt"; cycleId: string; prNumber: number; method: "squash"; outcome: "merged" | "ci_red" | "blocked" | "gh_down"; ts: number }
+  // Reconcile-from-main backfill (emitter lands with US-DELIV-002): a strong
+  // signal (PR-state / patch-id) confirmed the cycle's change on main.
+  | { type: "delivery:reconciled"; cycleId: string; storyId: string; state: "delivered" | "delivered_external" | "superseded"; mergedBy: "runner" | "external"; mergeCommit: string; signal: "pr_state" | "patch_id" | "backlog_attest"; patchId?: string; ts: number }
   // Alert (BC2/BC6)
   | { type: "alert:notify"; channel: string; message: string; ts: number }
   // Supervisor journal (US-OBS-048) — structured narrative of decisions,

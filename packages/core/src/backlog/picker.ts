@@ -86,6 +86,14 @@ export interface PickOptions {
    * Optional; defaults to the story id when absent.
    */
   skipClaimedReason?: (id: string) => string | undefined;
+  /**
+   * US-DELIV-005 (one-card-one-lease): returns the skip reason when this story
+   * is held by an active delivery lease (in_flight / awaiting_merge / ci_red /
+   * delivered — see `deliveryLease` in delivery/lease.ts); undefined when the
+   * card is free (or `--race` opted in). Default: no leases. Root cause: same-
+   * card fan-out burned whole cycles on work only one merge could land.
+   */
+  deliveryLeaseBlock?: (id: string) => string | undefined;
 }
 
 /** First occurrence of a depends-on tag, mirroring the bash regex. */
@@ -196,7 +204,7 @@ export function buildDoneIndex(items: BacklogItem[]): (id: string) => boolean {
 }
 
 /**
- * Eligibility predicate covering all 5 gates (single source of truth).
+ * Eligibility predicate covering all 6 gates (single source of truth).
  *
  * Gates (order):
  *   0. Status classifies as `todo` (FIX-300).
@@ -205,6 +213,7 @@ export function buildDoneIndex(items: BacklogItem[]): (id: string) => boolean {
  *   3. No merged delivery for this id (injected, FIX-323).
  *   4. Not on the runtime skip-list (injected, FIX-363).
  *   5. Not claimed by another agent/human (injected, FIX-1211).
+ *   6. Not held by an active delivery lease (injected, US-DELIV-005).
  *
  * Shared by `pickStory` and `assessBacklog` (US-LOOP-079b).
  */
@@ -218,6 +227,7 @@ export function isEligible(
   const shouldSkip = opts.shouldSkip ?? (() => false);
   const hasPendingPublish = opts.hasPendingPublish ?? (() => false);
   const isClaimedByOther = opts.isClaimedByOther ?? (() => false);
+  const deliveryLeaseBlock = opts.deliveryLeaseBlock ?? (() => undefined);
 
   // Recognize the Todo marker via the single-source classifier (FIX-300),
   // not an exact-string equality. An annotated status — the Todo marker
@@ -254,6 +264,11 @@ export function isEligible(
     // The picker itself stays pure; the reason is injected, not written.
     return false;
   }
+  // US-DELIV-005: one-card-one-lease — a card held by an active delivery
+  // lease (in_flight / awaiting_merge / ci_red / delivered) is skipped; the
+  // default kills same-card fan-out. `--race` is the explicit opt-in and is
+  // resolved by the caller before wiring this predicate.
+  if (deliveryLeaseBlock(item.id) !== undefined) return false;
   return true;
 }
 
@@ -312,8 +327,8 @@ export interface BacklogAssessment {
  *
  * Priority (first match wins):
  *   has_work > all_blocked_by_deps > all_awaiting_merge >
- *   all_merged_pending > all_skip_listed > all_in_progress >
- *   all_done > backlog_empty
+ *   all_merged_pending > all_skip_listed > all_pending_publish >
+ *   all_leased > all_in_progress > all_done > backlog_empty
  *
  * The `opts` are the same injected predicates {@link pickStory} uses so
  * `assessBacklog(…).hasWork === (pickStory(…) !== undefined)` holds for all
@@ -355,12 +370,14 @@ export function assessBacklog(
   let hasBlockedByMerged = false;
   let hasBlockedBySkip = false;
   let hasBlockedByPendingPublish = false;
+  let hasBlockedByLease = false;
 
   if (todoCount > 0) {
     const hasOpenPr = opts.hasOpenPr ?? (() => false);
     const hasMergedDelivery = opts.hasMergedDelivery ?? (() => false);
     const shouldSkip = opts.shouldSkip ?? (() => false);
     const hasPendingPublish = opts.hasPendingPublish ?? (() => false);
+    const deliveryLeaseBlock = opts.deliveryLeaseBlock ?? (() => undefined);
 
     for (const it of items) {
       if (classifyStatus(it.status) !== "todo") continue;
@@ -373,6 +390,7 @@ export function assessBacklog(
       let blockedByMerged = false;
       let blockedBySkip = false;
       let blockedByPendingPublish = false;
+      let blockedByLease = false;
 
       for (const dep of parseDependsOn(it.desc)) {
         if (!isDone(dep)) {
@@ -394,12 +412,23 @@ export function assessBacklog(
         hasOpenPr(it.id)
       )
         blockedByPendingPublish = true;
+      // US-DELIV-005: an active delivery lease holds the card (one-card-one-lease).
+      if (
+        !blockedByDeps &&
+        !blockedByPr &&
+        !blockedByMerged &&
+        !blockedBySkip &&
+        !blockedByPendingPublish &&
+        deliveryLeaseBlock(it.id) !== undefined
+      )
+        blockedByLease = true;
 
       if (blockedByDeps) hasBlockedByDeps = true;
       if (blockedByPr) hasBlockedByPr = true;
       if (blockedByMerged) hasBlockedByMerged = true;
       if (blockedBySkip) hasBlockedBySkip = true;
       if (blockedByPendingPublish) hasBlockedByPendingPublish = true;
+      if (blockedByLease) hasBlockedByLease = true;
     }
   }
 
@@ -410,6 +439,7 @@ export function assessBacklog(
     const hasMergedDelivery = opts.hasMergedDelivery ?? (() => false);
     const shouldSkip = opts.shouldSkip ?? (() => false);
     const hasPendingPublish = opts.hasPendingPublish ?? (() => false);
+    const deliveryLeaseBlock = opts.deliveryLeaseBlock ?? (() => undefined);
 
     for (const it of items) {
       if (classifyStatus(it.status) !== "todo") continue;
@@ -450,6 +480,14 @@ export function assessBacklog(
         hasBlockedByPendingPublish = true;
         continue;
       }
+      // US-DELIV-005: one-card-one-lease — the card is held by an active
+      // delivery lease (see delivery/lease.ts); the reason names the state.
+      const leaseReason = deliveryLeaseBlock(it.id);
+      if (leaseReason !== undefined) {
+        blockedCards.push({ id: it.id, reason: leaseReason });
+        hasBlockedByLease = true;
+        continue;
+      }
     }
   }
 
@@ -459,6 +497,7 @@ export function assessBacklog(
   if (hasBlockedByMerged) return { hasWork: false, reason: "all_merged_pending", blockedCards };
   if (hasBlockedBySkip) return { hasWork: false, reason: "all_skip_listed", blockedCards };
   if (hasBlockedByPendingPublish) return { hasWork: false, reason: "all_pending_publish", blockedCards };
+  if (hasBlockedByLease) return { hasWork: false, reason: "all_leased", blockedCards };
 
   if (inProgressCount > 0 || holdCount > 0) {
     return { hasWork: false, reason: "all_in_progress" };
@@ -480,6 +519,9 @@ export function assessBacklog(
  *     PRs will merge and work becomes pickable). Entering DORMANT here would
  *     strand the loop until a manual wake, while the PR could merge seconds
  *     later and leave the loop sleeping through deliverable work.
+ *   - all_leased (US-DELIV-005): work exists but every card is held by an
+ *     active delivery lease — equally temporary (leases clear on merge or
+ *     cycle end).
  *
  * US-LOOP-079k AC1: consumed by the dormancy decision (US-LOOP-079h2) to
  * skip the DORMANT marker + dormant_entered terminal when the idle reason
@@ -490,6 +532,7 @@ export function assessBacklog(
 export const DORMANCY_SUPPRESSED_REASONS: ReadonlySet<BacklogReason> = new Set([
   "all_awaiting_merge",
   "all_pending_publish",
+  "all_leased",
 ]);
 
 /** True when the given backlog reason should prevent the loop from entering DORMANT. */

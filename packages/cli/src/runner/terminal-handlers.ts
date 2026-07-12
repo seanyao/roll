@@ -3,6 +3,7 @@ import { existsSync, lstatSync, readFileSync, realpathSync, unlinkSync } from "n
 import { dirname, join } from "node:path";
 import {
   appendDelivery,
+  evidenceGateBeforePush,
   nodeDeliveryStore,
   planPublishDocPr,
   planPublishPr,
@@ -15,6 +16,7 @@ import {
 import { AWAITING_REVIEW_STATUS_MARKER, STATUS_MARKER, absent, present } from "@roll/spec";
 import { prNumberFromUrl } from "@roll/infra";
 import { writeCycleRoleSummaryBestEffort } from "./cycle-role-artifact-writer.js";
+import { acMapCandidates, verificationReportFresh } from "./attest-gate.js";
 import { markDoneGuarded } from "./done-guard.js";
 import { addPendingPrCreate } from "./pending-pr-create.js";
 import { applyCleanupManifest, CLEANUP_TIMEOUT_MS, resolveCleanupManifest } from "./environment-cleanup.js";
@@ -68,6 +70,38 @@ export async function executeTerminalCommand(
         );
         const pub: PublishResult = { status: 0, manualMerge, ...(cmd.draft === true ? { draft: true } : {}) };
         return { event: { type: "published", result: pub } };
+      }
+      // US-DELIV-004 — push-time evidence gate (fail-loud): verify the
+      // acceptance evidence (attest report + ac-map) was produced BEFORE the
+      // branch leaves the machine. Missing evidence ⇒ blocked_no_evidence:
+      // the branch is NEVER pushed and no PR is opened — "pushed a branch but
+      // opened no PR" (裸分支无 PR) stops being a normal outcome and becomes a
+      // fault state (zero-TCR class). The checkpoint moves earlier; the attest
+      // judgement itself is unchanged (FIX-329). Doc-only PRs and story-less
+      // publishes skip the gate (nothing to attest); the FIX-245 adoption
+      // short-circuit above already returned for branches that have a PR.
+      const gateStoryId = ctx.storyId ?? "";
+      if (gateStoryId !== "" && cmd.docOnly !== true) {
+        const gate = evidenceGateBeforePush({
+          attestReportPresent: verificationReportFresh(ports.paths.worktreePath, gateStoryId, undefined, ports.repoCwd),
+          acMapPresent: acMapCandidates(ports.paths.worktreePath, gateStoryId, ports.repoCwd).some((p) => existsSync(p)),
+        });
+        ports.events.appendEvent(ports.paths.eventsPath, {
+          type: "delivery:evidence_gate",
+          cycleId: ctx.cycleId ?? "",
+          storyId: gateStoryId,
+          verdict: gate.ok ? "earned" : "blocked",
+          reasons: gate.ok ? [] : [...gate.reasons],
+          ts: eventTs(ports),
+        });
+        if (!gate.ok) {
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `evidence gate (US-DELIV-004): publish BLOCKED for ${gateStoryId} (cycle ${ctx.cycleId ?? "?"}) — ${gate.reasons.join("; ")} — branch NOT pushed, no PR opened (blocked_no_evidence; fail-loud, zero-TCR class)`,
+          );
+          const pub: PublishResult = { status: 1, manualMerge, ...(cmd.draft === true ? { draft: true } : {}) };
+          return { event: { type: "published", result: pub } };
+        }
       }
       // US-LOOP-094: the cycle worktree is DETACHED (no local branch). Push its
       // HEAD to the remote ref explicitly, FROM THE WORKTREE CWD — this replaces

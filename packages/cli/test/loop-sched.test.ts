@@ -9,8 +9,7 @@
  *   - runner template: self-contained (no bash-engine function calls — the
  *     FIX-197 family bug), honors PAUSE marker, active window, ROLL_LOOP_FORCE,
  *     logs to .roll/loop/cron.log, delegates to `loop run-once`.
- *   - pr runner template: v2 lock shape driving the v3 `roll loop pr-inbox` tick.
- *   - on/off: plist install/uninstall via injected launchd ops (no real
+ *   - off: plist uninstall via injected launchd ops (no real
  *     launchctl in tests); dream IS generated too (US-PORT-008) — same self-
  *     contained shape, daily schedule, delegating to `roll dream run-once`.
  *   - pause/resume: PAUSE-<slug> marker file under <project>/.roll/loop/.
@@ -24,7 +23,6 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   buildLoopRunnerScript,
   buildLoopTestRunnerScript,
-  buildPrRunnerScript,
   buildDreamRunnerScript,
   deriveMinute,
   parseLoopPeriodMinutes,
@@ -473,27 +471,6 @@ describe("v3 loop runner — EXECUTION in a sandbox (the contract that matters)"
   });
 });
 
-describe("pr runner template (v3 TS tick)", () => {
-  const script = buildPrRunnerScript({
-    projectPath: "/Users/u/proj",
-    rollBin: "/opt/homebrew/bin/roll",
-  });
-
-  it("drives `roll loop pr-inbox` with the single-flight lock (US-PORT-001)", () => {
-    expect(script).toContain("loop pr-inbox");
-    expect(script).not.toContain("_loop_pr_inbox"); // bash inbox retired
-    expect(script).toContain(".pr-loop.lock");
-    expect(script).toContain("900"); // 15-min staleness self-heal
-    expect(script).toContain("/Users/u/proj/.roll/loop/pr.log");
-    expect(script).toContain('"$ROLL_BIN" loop pr-inbox');
-  });
-
-  it("defaults ROLL_BIN to command -v roll when no override given", () => {
-    const s = buildPrRunnerScript({ projectPath: "/Users/u/proj" });
-    expect(s).toContain("command -v roll");
-  });
-});
-
 describe("v3 dream runner template (US-PORT-008)", () => {
   const script = buildDreamRunnerScript({
     projectPath: "/Users/u/proj",
@@ -560,7 +537,7 @@ describe("parseLoopPeriodMinutes", () => {
 });
 
 describe("loop on/off (injected launchd)", () => {
-  it("on: writes loop+pr+dream runners & plists, reinstalls all three labels", async () => {
+  it("on: writes loop+dream runners & plists, reinstalls all two labels", async () => {
     const proj = tmp("proj");
     mkdirSync(join(proj, ".roll"), { recursive: true });
     writeFileSync(join(proj, ".roll", "local.yaml"), "loop_schedule:\n  period_minutes: 30\n");
@@ -572,15 +549,12 @@ describe("loop on/off (injected launchd)", () => {
     expect(code).toBe(0);
 
     const loopRunner = join(shared, "loop", "run-proj-abc123.sh");
-    const prRunner = join(shared, "pr", "run-proj-abc123.sh");
     const dreamRunner = join(shared, "dream", "run-proj-abc123.sh");
     expect(existsSync(loopRunner)).toBe(true);
-    expect(existsSync(prRunner)).toBe(true);
     expect(existsSync(dreamRunner)).toBe(true);
     expect(readFileSync(loopRunner, "utf8")).toContain("loop run-once");
     expect(readFileSync(dreamRunner, "utf8")).toContain("dream run-once"); // US-PORT-008
     expect(existsSync(join(ld, "com.roll.loop.proj-abc123.plist"))).toBe(true);
-    expect(existsSync(join(ld, "com.roll.pr.proj-abc123.plist"))).toBe(true);
     expect(existsSync(join(ld, "com.roll.dream.proj-abc123.plist"))).toBe(true);
     const plist = readFileSync(join(ld, "com.roll.loop.proj-abc123.plist"), "utf8");
     expect(plist).toContain("<integer>1800</integer>"); // 30min × 60
@@ -589,7 +563,6 @@ describe("loop on/off (injected launchd)", () => {
     expect(dreamPlist).toContain("<integer>86400</integer>");
 
     expect(calls.some((c) => c.startsWith("wake com.roll.loop.proj-abc123"))).toBe(true);
-    expect(calls.some((c) => c.startsWith("wake com.roll.pr.proj-abc123"))).toBe(true);
     expect(calls.some((c) => c.startsWith("wake com.roll.dream.proj-abc123"))).toBe(true); // US-PORT-008
 
     expect(out).toContain("Loop enabled");
@@ -598,12 +571,12 @@ describe("loop on/off (injected launchd)", () => {
     expect(out).toContain("pause/budget/route/evidence/Evaluator/release gates");
   });
 
-  it("off: boots out loop+dream+pr labels and removes their plists", async () => {
+  it("off: boots out loop+dream labels and removes their plists", async () => {
     const proj = tmp("proj2");
     const ld = tmp("ld2");
     const prev = process.env["_LAUNCHD_DIR"];
     process.env["_LAUNCHD_DIR"] = ld;
-    const labels = ["com.roll.loop.proj-abc123", "com.roll.dream.proj-abc123", "com.roll.pr.proj-abc123"];
+    const labels = ["com.roll.loop.proj-abc123", "com.roll.dream.proj-abc123"];
     for (const label of labels) writeFileSync(join(ld, `${label}.plist`), "<plist />\n");
     try {
       const { deps, calls } = fakeDeps(proj, tmp("sh2"), ld);
@@ -611,7 +584,6 @@ describe("loop on/off (injected launchd)", () => {
       expect(code).toBe(0);
       expect(calls).toContain("dormant com.roll.loop.proj-abc123");
       expect(calls).toContain("dormant com.roll.dream.proj-abc123");
-      expect(calls).toContain("dormant com.roll.pr.proj-abc123");
       for (const label of labels) expect(existsSync(join(ld, `${label}.plist`))).toBe(false);
       expect(out).toContain("mode: guided");
     } finally {
@@ -665,7 +637,6 @@ describe("loop on/off (injected launchd)", () => {
     expect(code).toBe(0);
     expect(calls).toContain("dormant com.roll.loop.proj-abc123");
     expect(calls).toContain("dormant com.roll.dream.proj-abc123");
-    expect(calls).toContain("dormant com.roll.pr.proj-abc123");
     expect(killed).toEqual([{ projectPath: proj, slug: "proj-abc123" }]);
     expect(out).toContain("stopped tmux session roll-loop-proj-abc123 and 3 helper process(es)");
   });
@@ -680,7 +651,6 @@ describe("loop on/off (injected launchd)", () => {
         { pid: 101, command: "node /bin/roll loop watch --since all", cwd: proj },
         { pid: 102, command: "node /bin/roll loop run-once", cwd: join(proj, "packages", "cli") },
         { pid: 103, command: `tmux new-session -s roll-loop-proj-abc123 roll loop go --attach` },
-        { pid: 104, command: `node /bin/roll loop pr-inbox --project ${proj}` },
         { pid: 105, command: "node /bin/roll loop watch --since all", cwd: other },
         { pid: 106, command: "node /bin/roll loop off", cwd: proj },
         { pid: 107, command: "node /bin/roll loop status", cwd: proj },
@@ -716,12 +686,10 @@ describe("FIX-212 — loop on verifies the mount & fails loud", () => {
     // both labels fail their first attempt, succeed on the retry.
     const { deps, attempts } = fakeFlakyDeps(proj, shared, ld, {
       "com.roll.loop.proj-abc123": 1,
-      "com.roll.pr.proj-abc123": 1,
     });
     const { code } = await captureBoth(() => loopOnCommand([], deps));
     expect(code).toBe(0);
     expect(attempts["com.roll.loop.proj-abc123"]).toBe(2); // one retry, no more
-    expect(attempts["com.roll.pr.proj-abc123"]).toBe(2);
   });
 
   it("does NOT retry more than once — a third attempt is never made", async () => {
@@ -742,10 +710,8 @@ describe("FIX-212 — loop on verifies the mount & fails loud", () => {
     expect(out).toContain("已验证挂载");
     expect(out.toLowerCase()).toContain("verified");
     expect(out).toContain("com.roll.loop.proj-abc123");
-    expect(out).toContain("com.roll.pr.proj-abc123");
     // the mount was actually probed, not assumed
     expect(calls.some((c) => c.startsWith("isArmed com.roll.loop.proj-abc123"))).toBe(true);
-    expect(calls.some((c) => c.startsWith("isArmed com.roll.pr.proj-abc123"))).toBe(true);
   });
 });
 
@@ -1377,12 +1343,10 @@ describe("loop on during DORMANT (US-LOOP-079n)", () => {
     // Only the loop lane was woken (lightweight path).
     expect(calls.filter((c) => c.startsWith("wake")).length).toBe(1);
     expect(calls.some((c) => c.includes("com.roll.loop.") && c.startsWith("wake"))).toBe(true);
-    expect(calls.some((c) => c.includes("com.roll.pr.") && c.startsWith("wake"))).toBe(false);
     expect(calls.some((c) => c.includes("com.roll.dream.") && c.startsWith("wake"))).toBe(false);
 
     // Runners were NOT generated (no files in shared).
     expect(existsSync(join(shared, "loop", "run-proj-abc123.sh"))).toBe(false);
-    expect(existsSync(join(shared, "pr", "run-proj-abc123.sh"))).toBe(false);
     expect(existsSync(join(shared, "dream", "run-proj-abc123.sh"))).toBe(false);
 
     // DORMANT marker is removed.
@@ -1423,8 +1387,7 @@ describe("loop on during DORMANT (US-LOOP-079n)", () => {
     const { deps, calls } = fakeWakeDeps(proj, shared, ld);
     await loopOnCommand([], deps);
 
-    // Confirm pr/dream lanes were NOT touched.
-    expect(calls.some((c) => c.includes("com.roll.pr.") && c.startsWith("wake"))).toBe(false);
+    // Confirm dream lane was NOT touched (pr loop retired).
     expect(calls.some((c) => c.includes("com.roll.dream.") && c.startsWith("wake"))).toBe(false);
     // No dormant calls either (lightweight path never calls dormant).
     expect(calls.filter((c) => c.startsWith("dormant")).length).toBe(0);
@@ -1455,14 +1418,12 @@ describe("loop on during DORMANT (US-LOOP-079n)", () => {
     const { code } = await captureStdout(() => loopOnCommand([], deps));
     expect(code).toBe(0);
 
-    // All 3 lanes were woken (full reinstall).
+    // All 2 lanes were woken (full reinstall, pr loop retired).
     expect(calls.some((c) => c.includes("loop") && c.startsWith("wake"))).toBe(true);
-    expect(calls.some((c) => c.includes("pr") && c.startsWith("wake"))).toBe(true);
     expect(calls.some((c) => c.includes("dream") && c.startsWith("wake"))).toBe(true);
 
     // Runners were generated.
     expect(existsSync(join(shared, "loop", "run-proj-abc123.sh"))).toBe(true);
-    expect(existsSync(join(shared, "pr", "run-proj-abc123.sh"))).toBe(true);
     expect(existsSync(join(shared, "dream", "run-proj-abc123.sh"))).toBe(true);
   });
 
@@ -1509,9 +1470,8 @@ describe("loop on during DORMANT (US-LOOP-079n)", () => {
     const { code } = await captureStdout(() => loopOnCommand([], deps));
     expect(code).toBe(0);
 
-    // Both absent → falls through to full 3-lane reinstall (safe, idempotent).
+    // Both absent → falls through to full 2-lane reinstall (safe, idempotent).
     expect(calls.some((c) => c.includes("com.roll.loop.") && c.startsWith("wake"))).toBe(true);
-    expect(calls.some((c) => c.includes("com.roll.pr.") && c.startsWith("wake"))).toBe(true);
     expect(calls.some((c) => c.includes("com.roll.dream.") && c.startsWith("wake"))).toBe(true);
   });
 });

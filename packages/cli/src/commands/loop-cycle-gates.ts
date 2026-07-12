@@ -364,7 +364,7 @@ export function loopTestQualityCheckRetired(): number {
 
 // FIX-240: live subcommands only — monitor/attach retired under the v3 runner.
 const LOOP_USAGE =
-  "Usage: roll loop <on|off|now|test|status|runs|log|story|events|eval|signals|fmt|pr-inbox|mute|unmute|pause|resume|reset|gc>\n";
+  "Usage: roll loop <on|off|now|test|status|runs|log|story|events|eval|signals|fmt|mute|unmute|pause|resume|reset|gc>\n";
 
 /**
  * An unrecognised `roll loop <x>` — the final dispatch arm. With bin/roll

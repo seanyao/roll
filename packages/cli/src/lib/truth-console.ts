@@ -349,13 +349,9 @@ function loopStateBanner(input: TruthConsoleInput): string {
     const laneEn =
       (laneRunning("backlog") ? "loop lane active" : "loop lane unloaded · zero idle") +
       " · " +
-      (laneRunning("pr") ? "PR lane active" : "PR lane off") +
-      " · " +
       (laneRunning("dream") ? "Dream lane active" : "Dream lane off");
     const laneZh =
       (laneRunning("backlog") ? "loop lane 活跃" : "loop lane 已卸载 · 零闲置") +
-      " · " +
-      (laneRunning("pr") ? "PR lane 活跃" : "PR lane 关闭") +
       " · " +
       (laneRunning("dream") ? "Dream lane 活跃" : "Dream lane 关闭");
     return wrap(

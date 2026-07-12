@@ -388,7 +388,6 @@ describe("AC5 — command boundary (productive vs read-only)", () => {
     ["loop", "pause"],
     ["loop", "resume"],
     ["loop", "sched"],
-    ["loop", "pr-inbox"],
   ];
 
   const productiveArgs = [

@@ -154,7 +154,7 @@ function isSameOrInsidePath(candidate: string, root: string): boolean {
 }
 
 function isLoopHelperCommand(command: string): boolean {
-  return /\bloop\s+(?:go|watch|run-once|pr-inbox)\b/.test(command);
+  return /\bloop\s+(?:go|watch|run-once)\b/.test(command);
 }
 
 export function loopHelperPidsToTerminate(
@@ -434,51 +434,6 @@ exit $rc
 `;
 }
 
-export interface PrRunnerInput {
-  projectPath: string;
-  /** The `roll` binary (TS CLI) the PR tick is driven through. */
-  rollBin?: string;
-}
-
-/**
- * PR-loop runner — keeps the v2 `_write_pr_loop_runner_script` shape (portable
- * PATH, single-flight pid:ts lock with 15-min staleness self-heal) but drives
- * the v3 TS tick `roll loop pr-inbox` (US-PORT-001) instead of the retired bash
- * `_loop_pr_inbox`. The lock contract / log path are unchanged so status and
- * dashboard keep reading the same world.
- */
-export function buildPrRunnerScript(input: PrRunnerInput): string {
-  const lock = `${input.projectPath}/.roll/loop/.pr-loop.lock`;
-  const log = `${input.projectPath}/.roll/loop/pr.log`;
-  const rollBin = input.rollBin ?? "$(command -v roll || echo /opt/homebrew/bin/roll)";
-  return `#!/bin/bash -l
-set -o pipefail
-# Portable PATH: launchd delivers a bare PATH missing brew/local tools. Idempotent.
-for _d in /opt/homebrew/bin /usr/local/bin /opt/local/bin "$HOME/.local/bin" "$HOME/.kimi-code/bin"; do
-  case ":$PATH:" in *":$_d:"*) ;; *) [ -d "$_d" ] && PATH="$_d:$PATH" ;; esac
-done
-export PATH
-# Single-flight re-entry guard: one PR-loop pass at a time. 5-min cadence;
-# 15-min (900s) staleness so a crashed/hung pass self-heals on the next tick.
-LOCK="${lock}"
-mkdir -p "$(dirname "$LOCK")"
-if [ -f "$LOCK" ]; then
-  _pp=""; _pt=""
-  IFS=: read -r _pp _pt < "$LOCK" 2>/dev/null || true
-  _now=$(date -u +%s)
-  if [ -n "$_pp" ] && [ -n "$_pt" ] && kill -0 "$_pp" 2>/dev/null && [ "$((_now - _pt))" -lt 900 ]; then
-    exit 0
-  fi
-  rm -f "$LOCK"
-fi
-printf '%s:%s\\n' "$$" "$(date -u +%s)" > "$LOCK"
-trap 'rm -f "$LOCK"' EXIT
-ROLL_BIN="\${ROLL_BIN:-${rollBin}}"
-cd "${input.projectPath}" || exit 0
-"$ROLL_BIN" loop pr-inbox >> "${log}" 2>&1 || true
-`;
-}
-
 export interface DreamRunnerInput {
   projectPath: string;
   slug: string;
@@ -694,7 +649,7 @@ function syncGoalPaused(projectPath: string, reason: string): void {
 
 // ─── commands ─────────────────────────────────────────────────────────────────
 
-const LOOP_SERVICES = ["loop", "dream", "pr"] as const;
+const LOOP_SERVICES = ["loop", "dream"] as const;
 
 /**
  * FIX-212 — (re)install a service plist and PROVE it mounted.
@@ -858,30 +813,7 @@ export async function loopOnCommand(_args: string[], deps: LoopSchedDeps = realD
   );
   const loopMount = await mountService(deps, loopLabel, loopPlist);
 
-  // 2. pr service — v3 TS tick (roll loop pr-inbox) every 5 min.
-  const prRunner = join(shared, "pr", `run-${id.slug}.sh`);
-  writeExecutable(
-    prRunner,
-    buildPrRunnerScript({
-      projectPath: id.path,
-      ...(rollBinOverride !== "" ? { rollBin: rollBinOverride } : {}),
-    }),
-  );
-  const prLabel = launchdLabel("pr", id.slug);
-  const prPlist = launchdPlistPath("pr", id.slug, ld);
-  writeFileSync(
-    prPlist,
-    plistContent({
-      label: prLabel,
-      runnerScript: prRunner,
-      projectPath: id.path,
-      pathValue: pathValue(),
-      schedule: { kind: "interval", periodMinutes: 5 },
-    }),
-  );
-  const prMount = await mountService(deps, prLabel, prPlist);
-
-  // 3. dream service — the v3 nightly scan heart (roll dream run-once), daily
+  // 2. dream service — the v3 nightly scan heart (roll dream run-once), daily
   //    (US-PORT-008). Retires the v2 bash zombie runner: the generated script is
   //    self-contained and the plist uses the daily schedule (infra scheduleXml).
   const dream = dreamScheduleFor(id.path);
@@ -914,7 +846,6 @@ export async function loopOnCommand(_args: string[], deps: LoopSchedDeps = realD
   // green that the scheduler will not honor.
   const failed = [
     { label: loopLabel, m: loopMount },
-    { label: prLabel, m: prMount },
     { label: dreamLabel, m: dreamMount },
   ].filter((s) => !s.m.ok);
   if (failed.length > 0) {
@@ -936,12 +867,11 @@ export async function loopOnCommand(_args: string[], deps: LoopSchedDeps = realD
       `Loop enabled — cycle heart: roll loop run-once (v3)`,
       `Loop 已启用 — 周期心脏:roll loop run-once(v3)`,
       `  • roll-loop  every ${period}min  /  每 ${period} 分钟`,
-      `  • pr-loop    every 5min  /  每 5 分钟`,
       `  • dream      daily (roll dream run-once)  /  每日(roll dream run-once)`,
       `  • observe    tmux attach -t roll-loop-${id.slug}  /  观测窗`,
       // FIX-212: evidence the jobs are actually mounted (launchctl print exit 0),
       // not merely that bootstrap was issued.
-      `  • verified mounted / 已验证挂载: ${loopLabel}, ${prLabel}, ${dreamLabel}`,
+      `  • verified mounted / 已验证挂载: ${loopLabel}, ${dreamLabel}`,
       `  • mode: autonomous — scheduler can pick eligible Todo within pause/budget/route/evidence/Evaluator/release gates`,
       ``,
     ].join("\n"),

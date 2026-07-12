@@ -1839,10 +1839,6 @@ function render(
     const sl = dailyScheduleLine(svc, now);
     if (sl) out.push("  " + c("dim", sl));
   }
-  for (const loop of ["pr"]) {
-    const tl = tickAgeLine(loop, now);
-    if (tl) out.push("  " + c("dim", tl));
-  }
   // FIX-1032b AC2/AC3: delivery gate diagnostics — read runs for recent
   // delivery-blocked cycles (ci_red_after_merge, pr_loop_unavailable).
   if (args.projectSlug !== null) {

@@ -29,15 +29,14 @@ export interface HeartbeatDeps {
   runState?: () => { state: "ACTIVE" | "DORMANT" | "PAUSED"; since?: string; reason?: string };
 }
 
-const LAUNCHD_LANES: Array<{ svc: "loop" | "pr" | "dream"; name: string; mode: string }> = [
+const LAUNCHD_LANES: Array<{ svc: "loop" | "dream"; name: string; mode: string }> = [
   { svc: "loop", name: "backlog loop", mode: "backlog" },
-  { svc: "pr", name: "PR loop", mode: "pr" },
   { svc: "dream", name: "Dream loop", mode: "dream" },
 ];
 
 export function defaultHeartbeatDeps(projectPath: string, slug: string, launchAgentsDir: string): HeartbeatDeps {
   const lastRunAt = (svc: string): string | null => {
-    const file = svc === "pr" ? "pr.log" : svc === "dream" ? "dream.log" : "runs.jsonl";
+    const file = svc === "dream" ? "dream.log" : "runs.jsonl";
     const path = join(projectPath, ".roll", "loop", file);
     try {
       const lines = readFileSync(path, "utf8").trim().split("\n");

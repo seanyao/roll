@@ -52,7 +52,6 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, sym
 import { dirname, join, relative } from "node:path";
 import { supervisorJournalCommand } from "./supervisor-journal.js";
 import { formatOperatingMode, resolveOperatingMode, suggestedGuidedRun } from "../lib/operating-mode.js";
-import { reducePrView } from "./loop-pr-inbox.js";
 import { readPendingPublish } from "../runner/pending-publish.js";
 import { cardArchiveDir, reportFileName, reviewFileName } from "../lib/archive.js";
 import { renderScopedExecuteRoute, resolveScopedCastRole, scopedExecuteRouteTrace } from "../runner/scoped-route.js";
@@ -259,7 +258,24 @@ export function readManualMergeGates(
       continue;
     }
     const body = typeof (raw as { body?: unknown }).body === "string" ? ((raw as { body?: string }).body ?? "") : "";
-    const facts = reducePrView(raw as Parameters<typeof reducePrView>[0]);
+    const reviews: Array<{ authorAssociation?: string; state?: string }> = ((raw as { reviews?: unknown }).reviews ?? []) as Array<{ authorAssociation?: string; state?: string }>;
+    const botReviews = reviews.filter(
+      (r) => r.authorAssociation === "BOT" || r.authorAssociation === "APP",
+    );
+    const lastBot = botReviews.length > 0 ? botReviews[botReviews.length - 1] : undefined;
+    const facts = {
+      bot: lastBot?.state ?? "",
+      ciState: ((raw as { statusCheckRollup?: Array<{ conclusion?: string | null }> }).statusCheckRollup ?? []).every((c) => c.conclusion === "SUCCESS" || c.conclusion === "SKIPPED") && ((raw as { statusCheckRollup?: Array<{ conclusion?: string | null }> }).statusCheckRollup ?? []).length > 0
+        ? "success"
+        : ((raw as { statusCheckRollup?: Array<{ conclusion?: string | null }> }).statusCheckRollup ?? []).some((c) => c.conclusion === "FAILURE")
+          ? "failure"
+          : "",
+      mergeable: (raw as { mergeStateStatus?: string }).mergeStateStatus ?? "",
+      manualMerge:
+        ((raw as { body?: string }).body ?? "").includes("[roll:manual-merge]") ||
+        ((raw as { labels?: Array<{ name?: string }> }).labels ?? []).some((label) => label.name === "manual-merge" || label.name === "roll:manual-merge"),
+      isDraft: (raw as { isDraft?: boolean }).isDraft === true,
+    };
     if (facts.manualMerge !== true) continue;
     const storyId = prStory.get(pr.number) ?? extractStoryId(knownStoryIds, pr.headRefName ?? "", pr.title ?? "", body) ?? `PR-${pr.number}`;
     const repaired = repairedPrSet !== undefined && isEvidenceRepaired(pr.number, repairedPrSet);
@@ -1027,7 +1043,24 @@ export function supervisorCommand(args: string[]): number | Promise<number> {
       process.stderr.write(`repair-evidence: cannot parse gh pr view output for PR #${prNumber}\n`);
       return 1;
     }
-    const facts = reducePrView(raw as Parameters<typeof reducePrView>[0]);
+    const reviews2: Array<{ authorAssociation?: string; state?: string }> = ((raw as { reviews?: unknown }).reviews ?? []) as Array<{ authorAssociation?: string; state?: string }>;
+    const botReviews2 = reviews2.filter(
+      (r) => r.authorAssociation === "BOT" || r.authorAssociation === "APP",
+    );
+    const lastBot2 = botReviews2.length > 0 ? botReviews2[botReviews2.length - 1] : undefined;
+    const facts = {
+      bot: lastBot2?.state ?? "",
+      ciState: ((raw as { statusCheckRollup?: Array<{ conclusion?: string | null }> }).statusCheckRollup ?? []).every((c) => c.conclusion === "SUCCESS" || c.conclusion === "SKIPPED") && ((raw as { statusCheckRollup?: Array<{ conclusion?: string | null }> }).statusCheckRollup ?? []).length > 0
+        ? "success"
+        : ((raw as { statusCheckRollup?: Array<{ conclusion?: string | null }> }).statusCheckRollup ?? []).some((c) => c.conclusion === "FAILURE")
+          ? "failure"
+          : "",
+      mergeable: (raw as { mergeStateStatus?: string }).mergeStateStatus ?? "",
+      manualMerge:
+        ((raw as { body?: string }).body ?? "").includes("[roll:manual-merge]") ||
+        ((raw as { labels?: Array<{ name?: string }> }).labels ?? []).some((label) => label.name === "manual-merge" || label.name === "roll:manual-merge"),
+      isDraft: (raw as { isDraft?: boolean }).isDraft === true,
+    };
 
     // Resolve story ID from PR.
     const events = readSupervisorEvents(projectPath);

@@ -105,7 +105,7 @@ import type { AgentId, BuilderFinalizationFacts, CycleCost, CyclePhase, Executio
 import { cycleCurrency } from "../cost/tracker.js";
 import type { RollEvent } from "@roll/spec";
 import { builderFinalizationReady, finalizeBuilder, handoffKindFor } from "./builder-finalization.js";
-import { adversarialNextStep } from "./adversarial.js";
+import { adversarialNextStep, adversarialDegradeDecision, type AdversarialFailure } from "./adversarial.js";
 import { nextWaitAction, type WaitAction } from "../delivery/pr.js";
 import { deliveryGate } from "../delivery/gate.js";
 
@@ -899,7 +899,7 @@ export type CycleEvent =
   | { type: "worktree_failed" } // isolation failed → failed terminal (bin/roll:9000).
   | { type: "story_picked"; storyId: string }
   | { type: "no_story" } // picker returned nothing → idle (bin/roll:9180-class).
-  | { type: "route_resolved"; agent: AgentId; model: ModelId; adversarial?: AdversarialPlan }
+  | { type: "route_resolved"; agent: AgentId; model: ModelId; adversarial?: AdversarialPlan; adversarialDegraded?: { cause: string } }
   | { type: "route_pending"; reason: string }
   | { type: "agent_exited"; exit: number; timedOut: boolean }
   // US-LOOP-102: an adversarial role spawn (test_author/implementer/attacker)
@@ -1147,6 +1147,14 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
           commands: [startCmd, { kind: "spawn_role", role: "test_author", agent: plan.testAuthor, round: 0 }],
         };
       }
+      // US-LOOP-106: a verified/designed cycle whose executor could NOT form a
+      // heterogeneous test_author≠implementer pair degrades to standard — but NOT
+      // silently. Emit adversarial:degraded (cause supplied by the executor, e.g.
+      // "non-hetero") before the single builder so the fallback is auditable.
+      const degradeCmds: CycleCommand[] =
+        event.adversarialDegraded !== undefined
+          ? [adversarialDegradedCmd(execCtx.cycleId, execCtx.storyId ?? "", event.adversarialDegraded.cause)]
+          : [];
       return {
         state: {
           ...state,
@@ -1154,7 +1162,7 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
           attempt: 1,
           ctx: execCtx,
         },
-        commands: [startCmd, { kind: "spawn_agent", agent: event.agent, attempt: 1 }],
+        commands: [startCmd, ...degradeCmds, { kind: "spawn_agent", agent: event.agent, attempt: 1 }],
       };
     }
 
@@ -1214,15 +1222,34 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
       }
       const cid = state.ctx.cycleId;
       const sid = state.ctx.storyId ?? "";
-      // A failed / timed-out role spawn: the full §7 degrade taxonomy (rotate
-      // rig → single-builder, fail-closed alerts) is US-LOOP-103. The
-      // never-deadlock fallback US-LOOP-102 guarantees is to STOP the
-      // subsequence and capture whatever green tests already landed on the
-      // branch (net-positive), rather than spin.
+      // US-LOOP-106 — §7 degrade: a failed / timed-out role spawn NEVER just
+      // silently stops. The failure kind is mapped through the pure
+      // adversarialDegradeDecision (US-LOOP-103) — a timed-out round is a
+      // `round_hang`, a non-zero exit is `agent_unavailable` — and the cycle
+      // degrades to a STANDARD single builder that completes the card from the
+      // current worktree (the test_author's tests + any partial implementation
+      // are still on the branch). The fallback is recorded via adversarial:degraded
+      // (never silent) and clears the adversarial runtime so role events stop.
+      // "never deadlock": the standard spawn_agent then owns its own retry/
+      // exhausted terminal — the adversarial machinery can never spin.
       if (event.exit !== 0 || event.timedOut) {
+        const failure: AdversarialFailure = event.timedOut
+          ? { kind: "round_hang", round: adv.round }
+          : { kind: "agent_unavailable", role: adv.inFlight };
+        const decision = adversarialDegradeDecision(failure);
+        const routedAgent = state.ctx.agent ?? adv.plan.implementer;
         return {
-          state: { ...state, phase: "reconcile", ctx: { ...state.ctx, agentExitCode: event.exit, agentTimedOut: event.timedOut } },
-          commands: [{ kind: "capture_facts" }],
+          state: {
+            ...state,
+            phase: "execute",
+            attempt: 1,
+            adversarial: undefined,
+            ctx: { ...state.ctx, agentExitCode: event.exit, agentTimedOut: event.timedOut },
+          },
+          commands: [
+            adversarialDegradedCmd(cid, sid, decision.cause),
+            { kind: "spawn_agent", agent: routedAgent, attempt: 1 },
+          ],
         };
       }
       const cfg = {
@@ -1532,6 +1559,16 @@ export function cycleStartEvent(ctx: CycleContext, ts = 0): RollEvent {
     agent: ctx.agent ?? "",
     model: ctx.model ?? "",
     ts,
+  };
+}
+
+/** US-LOOP-106: the `adversarial:degraded` emit command — an adversarial cycle
+ *  fell back to a standard single builder; recorded so the fallback is auditable
+ *  (never silent). `from` is always "adversarial" at the orchestrator layer. */
+function adversarialDegradedCmd(cycleId: string, storyId: string, cause: string): CycleCommand {
+  return {
+    kind: "emit_event",
+    event: { type: "adversarial:degraded", cycleId, storyId, from: "adversarial", to: "single-builder", cause, ts: 0 },
   };
 }
 

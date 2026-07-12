@@ -5709,3 +5709,55 @@ describe("US-LOOP-102 — adversarial-pairing (spawn_role executor + plan seam)"
     expect(state.adversarial?.attackTests).toEqual(["test/attack.test.ts"]);
   });
 });
+
+describe("US-LOOP-106 — adversarial degrade (fail-closed, never silent)", () => {
+  it("resolve_route on a verified profile with NO heterogeneous partner flags adversarialDegraded (non-hetero)", async () => {
+    const repo = initCleanGitRepo("roll-adv-degrade-");
+    // verified execution policy forces the verified profile regardless of risk.
+    mkdirSync(join(repo, ".roll"), { recursive: true });
+    writeFileSync(join(repo, ".roll", "agents.yaml"), "execution_policy:\n  mode: verified\n");
+    const specDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
+    mkdirSync(specDir, { recursive: true });
+    writeFileSync(join(specDir, "spec.md"), "# US-RUN-001\n\n**AC:**\n- [ ] does a thing\n");
+    const rt = mkdtempSync(join(tmpdir(), "roll-adv-degrade-rt-"));
+    execDirs.push(rt);
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      paths: { ...base.ports.paths, eventsPath: join(rt, "events.ndjson"), alertsPath: join(rt, "alerts.log") },
+      // Only ONE agent installed → planAdversarial can find no hetero partner.
+      installedAgents: () => ["pi"],
+      route: { resolve: vi.fn(() => ({ agent: "pi", model: "" })) },
+    });
+
+    const result = await executeCommand({ kind: "resolve_route", storyId: "US-RUN-001" }, ports, CTX);
+
+    expect(result.event).toMatchObject({ type: "route_resolved", agent: "pi" });
+    const ev = result.event as Extract<CycleEvent, { type: "route_resolved" }>;
+    expect(ev.adversarial).toBeUndefined();
+    expect(ev.adversarialDegraded?.cause).toMatch(/non-hetero/);
+  });
+
+  it("resolve_route on a verified profile WITH a heterogeneous partner plans adversarial (no degrade)", async () => {
+    const repo = initCleanGitRepo("roll-adv-plan-");
+    mkdirSync(join(repo, ".roll"), { recursive: true });
+    writeFileSync(join(repo, ".roll", "agents.yaml"), "execution_policy:\n  mode: verified\n");
+    const specDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
+    mkdirSync(specDir, { recursive: true });
+    writeFileSync(join(specDir, "spec.md"), "# US-RUN-001\n\n**AC:**\n- [ ] does a thing\n");
+    const rt = mkdtempSync(join(tmpdir(), "roll-adv-plan-rt-"));
+    execDirs.push(rt);
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      paths: { ...base.ports.paths, eventsPath: join(rt, "events.ndjson"), alertsPath: join(rt, "alerts.log") },
+      installedAgents: () => ["pi", "kimi"],
+      route: { resolve: vi.fn(() => ({ agent: "pi", model: "" })) },
+    });
+
+    const result = await executeCommand({ kind: "resolve_route", storyId: "US-RUN-001" }, ports, CTX);
+    const ev = result.event as Extract<CycleEvent, { type: "route_resolved" }>;
+    expect(ev.adversarial).toMatchObject({ implementer: "pi", testAuthor: "kimi" });
+    expect(ev.adversarialDegraded).toBeUndefined();
+  });
+});

@@ -29,7 +29,14 @@ function deps(overrides: Partial<RollCaptureInstallDeps> = {}): RollCaptureInsta
     env: {},
     home,
     hasAquaGUI: true,
-    exists: existsSync,
+    // FIX-1242: the install detector also probes the hardcoded system
+    // `/Applications/Roll Capture.app`. Default the test's existence check to see
+    // ONLY sandbox paths (the tmp home + any tmp dir the test itself creates),
+    // never the real machine's `/Applications` — otherwise a dev box where Roll
+    // Capture IS installed reads "already installed" and false-fails the
+    // not-installed scenarios (green in CI, red locally). Tests that assert on a
+    // specific real-ish location still override `exists` explicitly.
+    exists: (p: string) => !p.startsWith("/Applications/") && existsSync(p),
     execFile: () => ({ code: 0, stdout: "", stderr: "" }),
     fetchLatestRelease: async () => ({
       tagName: "v0.2.0",
@@ -129,7 +136,9 @@ describe("US-PHYSICAL-005 Roll Capture installer", () => {
     const result = await installRollCapture(
       deps({
         home,
-        exists: (path) => existsSync(path),
+        // FIX-1242: exclude the real system /Applications so a dev box with Roll
+        // Capture installed doesn't short-circuit to "already installed".
+        exists: (path) => !path.startsWith("/Applications/") && existsSync(path),
         execFile: (cmd) => {
           if (cmd === "mdfind") return { code: 0, stdout: `${buildArtifact}\n`, stderr: "" };
           return { code: 0, stdout: "", stderr: "" };

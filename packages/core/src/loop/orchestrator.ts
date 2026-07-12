@@ -105,7 +105,7 @@ import type { AgentId, BuilderFinalizationFacts, CycleCost, CyclePhase, Executio
 import { cycleCurrency } from "../cost/tracker.js";
 import type { RollEvent } from "@roll/spec";
 import { builderFinalizationReady, finalizeBuilder, handoffKindFor } from "./builder-finalization.js";
-import { adversarialNextStep, adversarialDegradeDecision, type AdversarialFailure } from "./adversarial.js";
+import { adversarialNextStep, adversarialDegradeDecision, type AdversarialFailure, type AdversarialRunSummary } from "./adversarial.js";
 import { nextWaitAction, type WaitAction } from "../delivery/pr.js";
 import { deliveryGate } from "../delivery/gate.js";
 
@@ -849,6 +849,11 @@ export interface CycleContext {
   agentInternalFailure?: AgentInternalFailure;
   failureClass?: FailureClass;
   rootCauseKey?: string;
+  /** US-LOOP-104: the adversarial-pairing outcome summary (rounds/holes/reason/
+   *  degraded), folded from this cycle's adversarial:* events by the driver at
+   *  terminal and stamped onto the runs row (`adversarial`). Absent ⇒ a standard
+   *  (non-adversarial) cycle — the row omits the field. */
+  adversarialRun?: AdversarialRunSummary;
 }
 
 /** Minimal context for building a terminal cycle:end event + runs row. */

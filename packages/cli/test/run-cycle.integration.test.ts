@@ -433,6 +433,10 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
     expect(row["cycle_id"]).toBe(cycleId);
     expect(row["story_id"]).toBe("US-RUN-001");
     expect(row["built"]).toEqual(["US-RUN-001"]);
+    // US-LOOP-104: a STANDARD cycle folds to no adversarial summary — the driver's
+    // attachAdversarialRun read the real events off disk and buildRunRow stamped
+    // null (exercises the seam end-to-end, not just the unit fold).
+    expect(row["adversarial"]).toBeNull();
 
     // FIX-208 AC1: the runs row carries the REAL tcr commit count (the shim made
     // one `tcr:` commit) — no longer the hardcoded 0 that lied about delivery.

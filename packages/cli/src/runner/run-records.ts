@@ -158,6 +158,10 @@ export function buildRunRow(
   }
   row["failure_class"] = ctx.failureClass ?? null;
   row["root_cause_key"] = ctx.rootCauseKey ?? null;
+  // US-LOOP-104: stamp the adversarial-pairing outcome (rounds/holes/reason/
+  // degraded) so the shadow-run aggregate reads it from runs.jsonl. Absent ⇒ a
+  // standard cycle → the field is omitted (null), keeping standard rows unchanged.
+  row["adversarial"] = ctx.adversarialRun ?? null;
   return row;
 }
 

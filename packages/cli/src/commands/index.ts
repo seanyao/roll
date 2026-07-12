@@ -34,6 +34,7 @@ import { SUPERVISOR_USAGE, supervisorCommand } from "./supervisor.js";
 import { dashboardCommand, loopEvalCommand, loopStoryCommand } from "./dashboard.js";
 import { loopRunsCommand } from "./loop-runs.js";
 import { loopSignalsCommand } from "./loop-signals.js";
+import { loopAdversarialCommand } from "./loop-adversarial.js";
 import { loopLogCommand } from "./loop-log.js";
 import { loopGoalCommand } from "./loop-goal.js";
 import { loopGoCommand } from "./loop-go.js";
@@ -436,6 +437,9 @@ export function registerAll(): void {
     if (args[0] === "recover") return loopRecoverCommand(args.slice(1));
     if (args[0] === "pardon-skip-list") return loopPardonSkipListCommand(args.slice(1));
     if (args[0] === "signals") return loopSignalsCommand(args.slice(1));
+    // `loop adversarial [--json]`: US-LOOP-104 read-only shadow-run aggregate —
+    // adversarial vs standard cohort metrics folded from runs.jsonl.
+    if (args[0] === "adversarial") return loopAdversarialCommand(args.slice(1));
     // `loop log` / `loop events`: residual pure-read viewers (US-PORT-022) over
     // .roll/cycle-logs and the shared events ndjson. No bash fallback.
     if (args[0] === "log") return loopLogCommand(args.slice(1));

@@ -647,6 +647,20 @@ describe("buildRunRow — v2 runs.jsonl shape", () => {
     expect(failed["built"]).toEqual([]);
   });
 
+  it("US-LOOP-104: stamps ctx.adversarialRun onto the row (null for a standard cycle)", () => {
+    const standard = buildRunRow(
+      { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
+      CTX,
+    );
+    expect(standard["adversarial"]).toBeNull();
+
+    const adversarial = buildRunRow(
+      { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
+      { ...CTX, adversarialRun: { rounds: 3, holesFound: 1, terminationReason: "dry", degraded: false } },
+    );
+    expect(adversarial["adversarial"]).toEqual({ rounds: 3, holesFound: 1, terminationReason: "dry", degraded: false });
+  });
+
   it("FIX-208: tcr_count comes from ctx (was hardcoded 0); cost fields mirror ctx.cost", () => {
     const withFacts: CycleContext = {
       ...CTX,

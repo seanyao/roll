@@ -9,7 +9,7 @@
  * (FIX-343 independence — by session/context, not vendor).
  */
 import { describe, expect, it } from "vitest";
-import { adversarialDegradeDecision, adversarialNextStep, assertAdversarialIndependence, type AdversarialFailure } from "../src/loop/adversarial.js";
+import { adversarialDegradeDecision, adversarialNextStep, aggregateAdversarial, assertAdversarialIndependence, foldCycleAdversarial, type AdversarialFailure, type AdversarialRunSummary } from "../src/loop/adversarial.js";
 
 const cfg = { maxRounds: 4, dryRoundsToStop: 2, elapsedSec: 0, totalTimeoutSec: 2700 };
 
@@ -146,5 +146,106 @@ describe("US-LOOP-103 attack — no input can deadlock, even malformed", () => {
     expect(d.degrade).toBe(true);
     expect(d.fallback).toBe("single-builder");
     expect(typeof d.cause).toBe("string");
+  });
+});
+
+describe("US-LOOP-104 — foldCycleAdversarial: per-cycle summary from the event stream", () => {
+  const ev = (type: string, extra: Record<string, unknown> = {}) => ({ type, cycleId: "C1", ts: 0, ...extra });
+
+  it("returns null for a cycle with NO adversarial events (a standard cycle)", () => {
+    expect(foldCycleAdversarial([ev("cycle:start"), ev("cycle:end")], "C1")).toBeNull();
+    expect(foldCycleAdversarial([], "C1")).toBeNull();
+  });
+
+  it("folds a clean terminated cycle (rounds/holes/reason, not degraded)", () => {
+    const events = [
+      ev("adversarial:test-authored"),
+      ev("adversarial:implemented", { round: 0 }),
+      ev("adversarial:attack-round", { round: 1, newHole: true }),
+      ev("adversarial:attack-round", { round: 2, newHole: false }),
+      ev("adversarial:attack-round", { round: 3, newHole: false }),
+      ev("adversarial:terminated", { reason: "dry", rounds: 3, holesFound: 1 }),
+    ];
+    expect(foldCycleAdversarial(events, "C1")).toEqual({
+      rounds: 3,
+      holesFound: 1,
+      terminationReason: "dry",
+      degraded: false,
+    });
+  });
+
+  it("marks a degraded cycle (adversarial:degraded present)", () => {
+    const events = [
+      ev("adversarial:test-authored"),
+      ev("adversarial:degraded", { from: "verified", to: "single-builder", cause: "non-hetero" }),
+    ];
+    expect(foldCycleAdversarial(events, "C1")).toEqual({
+      rounds: 0,
+      holesFound: 0,
+      terminationReason: "degraded",
+      degraded: true,
+    });
+  });
+
+  it("only folds events for the requested cycle id (isolates concurrent cycles)", () => {
+    const events = [
+      { type: "adversarial:terminated", cycleId: "C1", reason: "dry", rounds: 2, holesFound: 1, ts: 0 },
+      { type: "adversarial:terminated", cycleId: "C2", reason: "max_rounds", rounds: 4, holesFound: 3, ts: 0 },
+    ];
+    expect(foldCycleAdversarial(events, "C2")).toMatchObject({ rounds: 4, holesFound: 3, terminationReason: "max_rounds" });
+  });
+
+  it("the LAST adversarial:terminated within a cycle wins (idempotent re-emission safe)", () => {
+    const events = [
+      ev("adversarial:terminated", { reason: "timeout", rounds: 1, holesFound: 0 }),
+      ev("adversarial:terminated", { reason: "dry", rounds: 3, holesFound: 2 }),
+    ];
+    expect(foldCycleAdversarial(events, "C1")).toMatchObject({ terminationReason: "dry", rounds: 3, holesFound: 2 });
+  });
+
+  it("attack rounds THEN degraded (no terminated) → counts rounds/holes AND marks degraded", () => {
+    const events = [
+      ev("adversarial:attack-round", { round: 1, newHole: true }),
+      ev("adversarial:attack-round", { round: 2, newHole: false }),
+      ev("adversarial:degraded", { from: "verified", to: "single-builder", cause: "round 2 hung" }),
+    ];
+    expect(foldCycleAdversarial(events, "C1")).toEqual({
+      rounds: 2,
+      holesFound: 1,
+      terminationReason: "degraded",
+      degraded: true,
+    });
+  });
+
+  it("interrupted cycle (adversarial events but no terminal) → counts rounds, marks degraded", () => {
+    const events = [
+      ev("adversarial:attack-round", { round: 1, newHole: true }),
+      ev("adversarial:attack-round", { round: 2, newHole: false }),
+    ];
+    expect(foldCycleAdversarial(events, "C1")).toEqual({
+      rounds: 2,
+      holesFound: 1,
+      terminationReason: "degraded",
+      degraded: true,
+    });
+  });
+});
+
+describe("US-LOOP-104 — aggregateAdversarial: shadow-run cohort metrics", () => {
+  it("empty cohort → all zero (never NaN)", () => {
+    expect(aggregateAdversarial([])).toEqual({ cards: 0, avgHoles: 0, avgRounds: 0, degradeRate: 0 });
+  });
+
+  it("averages holes/rounds and computes the degrade rate", () => {
+    const s: AdversarialRunSummary[] = [
+      { rounds: 3, holesFound: 1, terminationReason: "dry", degraded: false },
+      { rounds: 4, holesFound: 3, terminationReason: "max_rounds", degraded: false },
+      { rounds: 0, holesFound: 0, terminationReason: "degraded", degraded: true },
+    ];
+    const agg = aggregateAdversarial(s);
+    expect(agg.cards).toBe(3);
+    expect(agg.avgHoles).toBeCloseTo(4 / 3);
+    expect(agg.avgRounds).toBeCloseTo(7 / 3);
+    expect(agg.degradeRate).toBeCloseTo(1 / 3);
   });
 });

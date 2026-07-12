@@ -21,12 +21,14 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveLang, parseEventLine } from "@roll/spec";
-import type { RollEvent, DeliveryState } from "@roll/spec";
+import type { DeliveryLease, RollEvent, DeliveryState } from "@roll/spec";
 import {
   nodeExecPort,
   EventBus,
   reconcileDelivery,
   projectDeliveryState,
+  leaseStateFor,
+  siblingCancelEvents,
   type ReconcileCycle,
   type ReconcileFacts,
   type ReconcileResult,
@@ -403,6 +405,32 @@ export async function loopReconcileCommand(
           signal: result.signal,
           ts: now,
         });
+
+        // US-DELIV-005 (one-card-one-lease): the FIRST merge atomically
+        // supersedes every remaining sibling cycle on this card — race
+        // resolution when --race was opted in, and cleanup of any legacy
+        // same-card fan-out. The winner's event above and the supersede
+        // events below land in ONE reconcile pass (the atomic cancel);
+        // superseded siblings are terminal, so a re-run cancels nothing.
+        const siblingLeases: DeliveryLease[] = [];
+        for (const other of cycles) {
+          if (other.cycleId === cyc.cycleId || other.storyId === "" || other.storyId !== cyc.storyId) continue;
+          const state = leaseStateFor(other.deliveryState, false);
+          if (state !== undefined) siblingLeases.push({ storyId: other.storyId, cycleId: other.cycleId, state });
+        }
+        for (const ev of siblingCancelEvents(
+          cyc.storyId,
+          {
+            cycleId: cyc.cycleId,
+            mergeCommit: result.mergeCommit ?? "unknown",
+            signal: result.signal,
+            mergedBy: result.via,
+          },
+          siblingLeases,
+          now,
+        )) {
+          deps.bus.appendEvent(eventsPath, ev);
+        }
       }
     }
 

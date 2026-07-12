@@ -240,6 +240,19 @@ roll agent list                      # 查看本机已装的 agent
 Hold、Cut、未满足依赖、skip-list、open PR、已合并交付和 pending-publish gate 仍决定
 卡片是否可选。
 
+### 一卡一租约
+
+默认一张卡只有一条交付租约。选卡前 picker 会先咨询由事件流投影出的交付租约：
+卡已处 `in_flight`、`awaiting_merge`、`ci_red` 或 `delivered` 一律 skip，理由形如
+`card held: <state> (<cycle>)`（事件 `pick:skipped`，idle 理由 `all_leased`）。
+同卡并行建造默认关闭——质量冗余由单 cycle 内的攻防结对提供，不靠"只有一份能合入"
+的重复建造。已结束但未交付的 cycle 会释放租约，所以同卡的合法 fix-forward 重试仍可被选。
+
+`roll loop run-once --race` 是同卡并行竞速的显式开关（经 `ROLL_LOOP_RACE=1` 传给
+子 cycle）。首个 merge 发生时，`roll loop reconcile` 原子取消其余 sibling cycle
+（`delivery:reconciled{superseded}`），竞速的代价至多是一份合入加 sibling 废活，
+绝不产生重复交付。
+
 ### Goal Mode 与定时模式
 
 `roll loop go` 是手动 goal session，不是 launchd 定时 tick。运行期间 Roll 会持有

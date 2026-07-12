@@ -7,8 +7,10 @@ import {
   isHumanSoftLeaseActive,
   isLeaseAlive,
   latestDeliveringCycle,
+  leaseBlockReason,
   openPrBlockReason,
   pickStory,
+  projectDeliveryLeases,
   readLeases,
   reconcileBranchName,
   runRowHasPublishedPr,
@@ -21,9 +23,9 @@ import {
   type OpenPrReferenceInput,
   type PickOptions,
 } from "@roll/core";
-import { classifyStatus, STATUS_MARKER, type LoopType } from "@roll/spec";
+import { classifyStatus, parseEventLine, STATUS_MARKER, type LoopType, type RollEvent } from "@roll/spec";
 import { dirname, join } from "node:path";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { storySpecPath } from "./attest-gate.js";
 import { markDoneGuarded } from "./done-guard.js";
 import { eventTs } from "./runner-time.js";
@@ -50,6 +52,25 @@ type SetupCommand = Extract<CycleCommand, { kind:
 /** FIX-1211: lease file lives next to the events ledger (a gitignored runtime file). */
 function storyLeasePath(ports: Ports): string {
   return join(dirname(ports.paths.eventsPath), "story-leases.json");
+}
+
+/**
+ * US-DELIV-005: read the event ledger for the delivery-lease projection.
+ * Best-effort — a missing/unreadable ledger means "no leases" (the picker
+ * stays free), never a pick blocker.
+ */
+function readLeaseEvents(eventsPath: string): RollEvent[] {
+  try {
+    if (!existsSync(eventsPath)) return [];
+    const out: RollEvent[] = [];
+    for (const line of readFileSync(eventsPath, "utf8").split("\n")) {
+      const ev = parseEventLine(line);
+      if (ev !== null) out.push(ev);
+    }
+    return out;
+  } catch {
+    return [];
+  }
 }
 
 const LEGACY_SOFT_LEASE_HOURS = 24;
@@ -350,6 +371,25 @@ export async function executeSetupCommand(
           `[FIX-1232] cleaned ${deadLeases.length} dead lease(s): ${deadLeases.join(", ")}`,
         );
       }
+      // US-DELIV-005 (one-card-one-lease): consult the delivery leases derived
+      // from the event stream BEFORE picking. A card held in any lease state
+      // (in_flight / awaiting_merge / ci_red / delivered) is skipped — the
+      // default kills same-card fan-out (the ir-pipeline waste: 3 agents, 1
+      // merge, 2 discarded). `--race` (env ROLL_LOOP_RACE=1, set by
+      // `roll loop run-once --race`) is the explicit opt-in for parallel
+      // racing; the FIRST merge atomically supersedes the remaining siblings
+      // (see loop-reconcile siblingCancelEvents).
+      const raceMode = process.env["ROLL_LOOP_RACE"] === "1";
+      const liveClaims = readLeases(storyLeasePath(ports));
+      const activeLeases = projectDeliveryLeases(readLeaseEvents(ports.paths.eventsPath)).filter(
+        // An in_flight lease with no LIVE cycle claim is a ghost (crashed
+        // cycle, no cycle:end) — a legal fix-forward retry must stay pickable.
+        (l) => {
+          if (l.state !== "in_flight") return true;
+          const claim = liveClaims[l.storyId];
+          return claim !== undefined && isLeaseAlive(claim);
+        },
+      );
       const eligibility: PickOptions = {
         hasOpenPr,
         hasMergedDelivery: (id) =>
@@ -357,10 +397,11 @@ export async function executeSetupCommand(
         shouldSkip: (id) => skipCards.has(id),
         hasPendingPublish: (id) =>
           (ports.pendingPublish?.(id) ?? false) || pendingPublish.has(id),
+        deliveryLeaseBlock: (id) => leaseBlockReason(id, activeLeases, { race: raceMode }),
       };
       for (const item of items) {
         if (classifyStatus(item.status) !== "todo") continue;
-        const reason = openPrBlockReason(item.id, hasOpenPr);
+        const reason = openPrBlockReason(item.id, hasOpenPr) ?? eligibility.deliveryLeaseBlock?.(item.id);
         if (reason === undefined) continue;
         ports.events.appendEvent(ports.paths.eventsPath, {
           type: "pick:skipped",

@@ -145,6 +145,7 @@ export type BacklogReason =
   | "all_merged_pending" // Todo rows exist, but all have a merged delivery
   | "all_skip_listed" // Todo rows exist, but all are on the runtime skip-list
   | "all_pending_publish" // Todo rows exist, but all have unpublished local work
+  | "all_leased" // Todo rows exist, but all are held by an active delivery lease (US-DELIV-005)
   | "all_in_progress" // No Todo rows, but in_progress/hold rows exist
   | "all_done" // No Todo/in_progress/hold rows; all remaining are Done
   | "backlog_empty"; // No rows at all

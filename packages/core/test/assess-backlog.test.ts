@@ -467,12 +467,44 @@ describe("BacklogReason — type exhaustiveness (AC1)", () => {
     "all_awaiting_merge",
     "all_merged_pending",
     "all_skip_listed",
+    "all_pending_publish",
+    "all_leased",
     "all_in_progress",
     "all_done",
     "backlog_empty",
   ];
 
-  it("has exactly 8 canonical values", () => {
-    expect(ALL_REASONS).toHaveLength(8);
+  it("has exactly 10 canonical values", () => {
+    expect(ALL_REASONS).toHaveLength(10);
+  });
+});
+
+// ---- US-DELIV-005: all_leased ----------------------------------------------
+
+describe("US-DELIV-005 — all_leased reason", () => {
+  it("all todo cards leased → all_leased with blockedCards reasons", () => {
+    const r = assessBacklog([item("US-1", TODO), item("US-2", TODO)], {
+      deliveryLeaseBlock: (id) => (id === "US-1" ? "card held: awaiting_merge" : "card held: in_flight"),
+    });
+    expect(r.hasWork).toBe(false);
+    expect(r.reason).toBe("all_leased");
+    expect(r.blockedCards).toEqual([
+      { id: "US-1", reason: "card held: awaiting_merge" },
+      { id: "US-2", reason: "card held: in_flight" },
+    ]);
+  });
+
+  it("lease gate composes: one leased, one free → has_work", () => {
+    const r = assessBacklog([item("US-1", TODO), item("US-2", TODO)], {
+      deliveryLeaseBlock: (id) => (id === "US-1" ? "card held: ci_red" : undefined),
+    });
+    expect(r).toMatchObject({ hasWork: true, reason: "has_work" });
+  });
+
+  it("deps outrank lease in the priority chain", () => {
+    const r = assessBacklog([item("US-1", TODO, "depends-on:US-9"), item("US-2", TODO)], {
+      deliveryLeaseBlock: () => "card held: in_flight",
+    });
+    expect(r.reason).toBe("all_blocked_by_deps");
   });
 });

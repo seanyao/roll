@@ -823,12 +823,15 @@ function readField(path: string, re: RegExp): string | undefined {
 
 /** `roll loop run-once --help` usage. Bilingual on separate lines (EN then ZH). */
 export const RUN_ONCE_USAGE =
-  "Usage: roll loop run-once [--dry-run]\n" +
+  "Usage: roll loop run-once [--dry-run] [--race]\n" +
   "  Run ONE loop cycle now: pick a Todo card, build it through TCR, run the\n" +
   "  gates (attest + peer), and publish a PR. Exits when the cycle terminates.\n" +
   "  --dry-run   Print the command plan only — no git / gh / agent side effects.\n" +
+  "  --race      Opt in to same-card parallel racing (default: one-card-one-lease).\n" +
+  "              The first merge atomically supersedes the remaining siblings.\n" +
   "立即跑一个 loop 周期:选一张 Todo 卡,经 TCR 建造,过闸(验收+同行评审),发 PR。\n" +
-  "  --dry-run   只打印命令计划——不动 git / gh / agent。";
+  "  --dry-run   只打印命令计划——不动 git / gh / agent。\n" +
+  "  --race      显式开同卡并行竞速(默认一卡一租约);首个 merge 原子取消其余 sibling。";
 
 /**
  * The `loop run-once` entry. Returns a process exit code (0 ok).
@@ -842,6 +845,10 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     return 0;
   }
   const dryRun = args.includes("--dry-run");
+  // US-DELIV-005: `--race` is the explicit opt-in for same-card parallel
+  // racing. It is carried to the pick_story handler via env (the default —
+  // one-card-one-lease — needs no signal).
+  if (args.includes("--race")) process.env["ROLL_LOOP_RACE"] = "1";
 
   // FIX-1209: preflight — detect and heal core.worktree contamination BEFORE
   // resolving project identity. The harness systematically writes core.worktree

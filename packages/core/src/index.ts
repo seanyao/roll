@@ -30,6 +30,7 @@ export * from "./delivery/tcr.js";
 export * from "./delivery/rebuild.js";
 export * from "./delivery/state.js";
 export * from "./delivery/reconcile.js";
+export * from "./delivery/lease.js";
 export * from "./delivery/evidence-gate.js";
 export * from "./evals/candidates.js";
 export * from "./evals/score.js";

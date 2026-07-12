@@ -554,3 +554,51 @@ describe("shouldSuppressDormancy", () => {
     expect(shouldSuppressDormancy("has_work")).toBe(false);
   });
 });
+
+// ─── US-DELIV-005: one-card-one-lease picker gate ──────────────────────────
+
+describe("US-DELIV-005 — delivery lease gate", () => {
+  it("skips a card held by an active delivery lease, picks the next free card", () => {
+    const items = [item("US-1", TODO), item("US-2", TODO)];
+    const deliveryLeaseBlock = (id: string): string | undefined =>
+      id === "US-1" ? "card held: awaiting_merge" : undefined;
+    expect(pickStory(items, { deliveryLeaseBlock })?.id).toBe("US-2");
+  });
+
+  it("no lease predicate wired → default is free (back-compat)", () => {
+    expect(pickStory([item("US-1", TODO)])?.id).toBe("US-1");
+  });
+
+  it("all todo cards leased → no pick", () => {
+    const items = [item("US-1", TODO), item("US-2", TODO)];
+    expect(pickStory(items, { deliveryLeaseBlock: () => "card held: in_flight" })).toBeUndefined();
+  });
+});
+
+describe("US-DELIV-005 — all_leased dormancy policy", () => {
+  it("all_leased is temporary: the loop stays ACTIVE until the lease clears", () => {
+    // US-DELIV-005 extends the US-LOOP-079k policy: a fully-leased backlog is
+    // a temporary idle (leases clear on merge / cycle end) — entering DORMANT
+    // here would strand the loop exactly like all_awaiting_merge.
+    expect(shouldSuppressDormancy("all_leased")).toBe(true);
+  });
+
+  it("suppressed set is exactly { all_awaiting_merge, all_pending_publish, all_leased } (tripwire)", () => {
+    // Adding a reason to DORMANCY_SUPPRESSED_REASONS changes dormancy policy
+    // and needs a story. US-DELIV-005 added all_leased.
+    for (const reason of [
+      "all_blocked_by_deps",
+      "all_merged_pending",
+      "all_skip_listed",
+      "all_in_progress",
+      "all_done",
+      "backlog_empty",
+      "has_work",
+    ] as const) {
+      expect(shouldSuppressDormancy(reason), reason).toBe(false);
+    }
+    expect(shouldSuppressDormancy("all_awaiting_merge")).toBe(true);
+    expect(shouldSuppressDormancy("all_pending_publish")).toBe(true);
+    expect(shouldSuppressDormancy("all_leased")).toBe(true);
+  });
+});

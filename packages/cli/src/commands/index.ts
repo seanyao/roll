@@ -63,6 +63,7 @@ import {
   loopUnmuteCommand,
 } from "./loop-maint.js";
 import { loopPrInboxCommand } from "./loop-pr-inbox.js";
+import { loopReconcileCommand } from "./loop-reconcile.js";
 import { loopReconcilePendingCommand } from "./loop-reconcile-pending.js";
 import { runPrHeal } from "./loop-pr-heal.js";
 import { loopReviewResizeCommand } from "./loop-review-resize.js";
@@ -474,6 +475,9 @@ export function registerAll(): void {
     // pure core/pr-loop.ts decisions; the pr runner calls this instead of the
     // retired bash `_loop_pr_inbox`.
     if (args[0] === "pr-inbox") return loopPrInboxCommand(args.slice(1));
+    // `loop reconcile`: US-DELIV-002 layered reconcile-from-main — probes
+    // awaiting cycles against main (PR state + patch-id), emits delivery:reconciled.
+    if (args[0] === "reconcile") return loopReconcileCommand(args.slice(1));
     // `loop reconcile-pending`: FIX-1052 bounded PR polling reconciler — polls
     // pending-merge PRs, fetches origin/main on merge, and updates delivery truth.
     if (args[0] === "reconcile-pending") return loopReconcilePendingCommand(args.slice(1));

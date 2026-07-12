@@ -1319,7 +1319,14 @@ describe("US-LOOP-102 — adversarial-pairing subsequence (verified/designed)", 
       { type: "role_exited", role: "implementer", exit: 1, timedOut: false },
     ]);
     // §7: agent_unavailable → adversarial:degraded + standard single builder.
-    expect(emittedEvents(commands)).toContain("adversarial:degraded");
+    const degraded = commands.find(
+      (c): c is Extract<CycleCommand, { kind: "emit_event" }> =>
+        c.kind === "emit_event" && c.event.type === "adversarial:degraded",
+    );
+    // The failure kind is classified: a non-zero role exit → agent_unavailable
+    // (NOT round_hang) — the cause proves the correct AdversarialFailure wiring.
+    expect(degraded?.event).toMatchObject({ type: "adversarial:degraded", from: "adversarial", to: "single-builder" });
+    expect(degraded?.event.type === "adversarial:degraded" && degraded.event.cause).toMatch(/agent unavailable/);
     expect(commands.some((c) => c.kind === "spawn_agent")).toBe(true);
     // Adversarial runtime cleared so role events stop; phase stays execute for the builder.
     expect(state.adversarial).toBeUndefined();
@@ -1340,6 +1347,8 @@ describe("US-LOOP-102 — adversarial-pairing subsequence (verified/designed)", 
         c.kind === "emit_event" && c.event.type === "adversarial:degraded",
     );
     expect(degraded?.event).toMatchObject({ type: "adversarial:degraded", to: "single-builder" });
+    // A timed-out round → round_hang (NOT agent_unavailable) — distinct classification.
+    expect(degraded?.event.type === "adversarial:degraded" && degraded.event.cause).toMatch(/round .* hung/);
     expect(commands.some((c) => c.kind === "spawn_agent")).toBe(true);
     expect(state.adversarial).toBeUndefined();
   });

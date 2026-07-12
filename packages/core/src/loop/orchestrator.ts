@@ -899,7 +899,7 @@ export type CycleEvent =
   | { type: "worktree_failed" } // isolation failed → failed terminal (bin/roll:9000).
   | { type: "story_picked"; storyId: string }
   | { type: "no_story" } // picker returned nothing → idle (bin/roll:9180-class).
-  | { type: "route_resolved"; agent: AgentId; model: ModelId; adversarial?: AdversarialPlan; adversarialDegraded?: { cause: string } }
+  | { type: "route_resolved"; agent: AgentId; model: ModelId; adversarial?: AdversarialPlan; adversarialDegraded?: { cause: string; from?: "verified" | "designed" } }
   | { type: "route_pending"; reason: string }
   | { type: "agent_exited"; exit: number; timedOut: boolean }
   // US-LOOP-102: an adversarial role spawn (test_author/implementer/attacker)
@@ -1153,7 +1153,7 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
       // "non-hetero") before the single builder so the fallback is auditable.
       const degradeCmds: CycleCommand[] =
         event.adversarialDegraded !== undefined
-          ? [adversarialDegradedCmd(execCtx.cycleId, execCtx.storyId ?? "", event.adversarialDegraded.cause)]
+          ? [adversarialDegradedCmd(execCtx.cycleId, execCtx.storyId ?? "", event.adversarialDegraded.cause, event.adversarialDegraded.from ?? "adversarial")]
           : [];
       return {
         state: {
@@ -1565,10 +1565,15 @@ export function cycleStartEvent(ctx: CycleContext, ts = 0): RollEvent {
 /** US-LOOP-106: the `adversarial:degraded` emit command — an adversarial cycle
  *  fell back to a standard single builder; recorded so the fallback is auditable
  *  (never silent). `from` is always "adversarial" at the orchestrator layer. */
-function adversarialDegradedCmd(cycleId: string, storyId: string, cause: string): CycleCommand {
+function adversarialDegradedCmd(
+  cycleId: string,
+  storyId: string,
+  cause: string,
+  from: "verified" | "designed" | "adversarial" = "adversarial",
+): CycleCommand {
   return {
     kind: "emit_event",
-    event: { type: "adversarial:degraded", cycleId, storyId, from: "adversarial", to: "single-builder", cause, ts: 0 },
+    event: { type: "adversarial:degraded", cycleId, storyId, from, to: "single-builder", cause, ts: 0 },
   };
 }
 

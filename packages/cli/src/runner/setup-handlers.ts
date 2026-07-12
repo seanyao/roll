@@ -615,7 +615,10 @@ export async function executeSetupCommand(
       const wantsAdversarial = selectedProfile === "verified" || selectedProfile === "designed";
       const adversarialDegraded =
         wantsAdversarial && adversarial === undefined
-          ? { cause: `non-hetero: no heterogeneous partner for implementer ${selectedAgent} among [${active.join(",")}]` }
+          ? {
+              cause: `non-hetero: no heterogeneous partner for implementer ${selectedAgent} among [${active.join(",")}]`,
+              from: selectedProfile as "verified" | "designed",
+            }
           : undefined;
       return {
         event: {

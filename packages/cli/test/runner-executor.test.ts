@@ -5736,6 +5736,8 @@ describe("US-LOOP-106 — adversarial degrade (fail-closed, never silent)", () =
     const ev = result.event as Extract<CycleEvent, { type: "route_resolved" }>;
     expect(ev.adversarial).toBeUndefined();
     expect(ev.adversarialDegraded?.cause).toMatch(/non-hetero/);
+    // The audit trail records WHICH profile degraded (not a generic "adversarial").
+    expect(ev.adversarialDegraded?.from).toBe("verified");
   });
 
   it("resolve_route on a verified profile WITH a heterogeneous partner plans adversarial (no degrade)", async () => {

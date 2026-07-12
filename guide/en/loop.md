@@ -271,6 +271,23 @@ three ranking suggestions and reasons. The ranking is advisory only; Hold, Cut,
 unsatisfied dependencies, skip-list, open PR, merged-delivery, and pending-publish
 gates still decide eligibility.
 
+### One Card, One Lease
+
+By default a card has exactly one delivery lease. Before picking, the picker
+consults the delivery leases derived from the event stream: a card already
+`in_flight`, `awaiting_merge`, `ci_red`, or `delivered` is skipped with a
+`card held: <state> (<cycle>)` reason (event `pick:skipped`, idle reason
+`all_leased`). Same-card parallel builds are off — quality redundancy comes
+from the adversarial pair inside one cycle, not from duplicate builds that only
+one merge can land. A cycle that ended without delivering releases its lease,
+so a legal fix-forward retry of the same card stays pickable.
+
+`roll loop run-once --race` is the explicit opt-in for same-card parallel
+racing (carried to child cycles as `ROLL_LOOP_RACE=1`). On the FIRST merge,
+`roll loop reconcile` atomically supersedes the remaining sibling cycles
+(`delivery:reconciled{superseded}`), so racing costs at most one merge plus
+discarded sibling work — never duplicate deliveries.
+
 ### Goal Mode vs Scheduled Mode
 
 `roll loop go` is a manual goal session, not a launchd scheduler tick. While it

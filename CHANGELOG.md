@@ -4,6 +4,7 @@
 
 ### 自动化流水线
 - 缺验收证据的交付在 push 前就被拦下并告警,不再留下没有 PR 的裸分支 (US-DELIV-004) `[loop]`
+- 对账时发现 PR 的 CI 已绿,自动执行 `gh pr merge --squash`,不用等仓库开 auto-merge 也不用依赖 launchd 守护进程 (US-DELIV-003) `[loop]`
 
 ## v4.712.1 — 2026-07-12
 

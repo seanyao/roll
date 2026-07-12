@@ -31,7 +31,8 @@ import {
   type ReconcileFacts,
   type ReconcileResult,
 } from "@roll/core";
-import { GitHubPrStatusProvider } from "@roll/infra";
+import type { PrStatusProvider } from "@roll/core";
+import { GitHubPrStatusProvider, prMerge, type GhResult } from "@roll/infra";
 
 // ── Usage ─────────────────────────────────────────────────────────────────────
 
@@ -62,6 +63,7 @@ const RECONCILE_USAGE_ZH = [
 export interface LoopReconcileDeps {
   cwd: string;
   bus: EventBus;
+  provider?: PrStatusProvider;
   stdout: { write(text: string): void };
   stderr: { write(text: string): void };
 }
@@ -319,7 +321,7 @@ export async function loopReconcileCommand(
     return 0;
   }
 
-  const provider = slug !== undefined ? new GitHubPrStatusProvider() : undefined;
+  const provider = deps.provider ?? (slug !== undefined ? new GitHubPrStatusProvider() : undefined);
   const rt = runtimeDir(cwd);
   const eventsPath = join(rt, "events.ndjson");
   const runsPath = join(rt, "runs.jsonl");
@@ -399,6 +401,40 @@ export async function loopReconcileCommand(
           mergedBy: result.via,
           mergeCommit: result.mergeCommit ?? "unknown",
           signal: result.signal,
+          ts: now,
+        });
+      }
+    }
+
+    // ── merge_now: execute gh pr merge --squash ───────────────────────────
+    // US-DELIV-003: self-driven merge — does not rely on repo auto-merge
+    // setting or launchd. Uses "plain" mode (no --auto, no --admin).
+    if (result.kind === "merge_now" && !dryRun) {
+      if (slug !== undefined && cyc.prNumber !== undefined) {
+        let outcome: "merged" | "blocked" | "gh_down" = "gh_down";
+        try {
+          const mergeResult: GhResult = await prMerge(slug, String(cyc.prNumber), "plain");
+          outcome = mergeResult.code === 0 ? "merged" : "blocked";
+        } catch {
+          // gh binary not found / unspawnable → gh_down
+          outcome = "gh_down";
+        }
+        deps.bus.appendEvent(eventsPath, {
+          type: "delivery:merge_attempt",
+          cycleId: cyc.cycleId,
+          prNumber: cyc.prNumber,
+          method: "squash",
+          outcome,
+          ts: now,
+        });
+      } else {
+        // slug not resolved (no GitHub remote) → gh_down, stay awaiting_merge
+        deps.bus.appendEvent(eventsPath, {
+          type: "delivery:merge_attempt",
+          cycleId: cyc.cycleId,
+          prNumber: cyc.prNumber ?? 0,
+          method: "squash",
+          outcome: "gh_down" as const,
           ts: now,
         });
       }

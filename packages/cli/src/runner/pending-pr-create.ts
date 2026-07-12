@@ -3,9 +3,9 @@
  * could not be opened because of a transient GitHub API fault.
  *
  * The cycle runner appends an entry here when `runPublishPlan` returns a
- * degraded status-0 result. The PR loop (`loop-pr-inbox`) drains the queue on
- * each tick: it opens a PR for any queued branch that does not already have an
- * open PR, emits a `pr:open` event, and updates the DeliveryRecord.
+ * degraded status-0 result. The delivery reconciler (`loop reconcile`) drains the
+ * queue on each tick: it opens a PR for any queued branch that does not already
+ * have an open PR, emits a `pr:open` event, and updates the DeliveryRecord.
  */
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";

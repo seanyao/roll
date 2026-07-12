@@ -221,7 +221,7 @@ export async function loopReconcilePendingCommand(
             alert: (message) =>
               bus.appendEvent(eventsPath, {
                 type: "loop:error",
-                loop: "pr",
+                loop: "main",
                 error: message,
                 ts: now,
               }),
@@ -293,7 +293,7 @@ export async function loopReconcilePendingCommand(
         // unreachable
         bus.appendEvent(eventsPath, {
           type: "loop:error",
-          loop: "pr",
+          loop: "main",
           error: `pr ${prNumber} unreachable: ${state.reason}`,
           ts: now,
         });
@@ -307,7 +307,7 @@ export async function loopReconcilePendingCommand(
       const detail = err instanceof Error ? err.message : String(err);
       bus.appendEvent(eventsPath, {
         type: "loop:error",
-        loop: "pr",
+        loop: "main",
         error: `pr ${prNumber} poll failed: ${detail}`,
         ts: now,
       });

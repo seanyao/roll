@@ -61,7 +61,6 @@ export * from "./loop/cycle-role-summary.js";
 export * from "./observe/collab-view.js";
 export * from "./loop/morning-report.js";
 export * from "./loop/north-star.js";
-export * from "./loop/pr-loop.js";
 export * from "./loop/orchestrator.js";
 export * from "./loop/builder-finalization.js";
 export * from "./loop/recovery.js";

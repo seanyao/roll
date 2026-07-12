@@ -596,14 +596,13 @@ describe("collectLoopHeartbeat — US-DOSSIER-011", () => {
         svc === "loop" ? "<key>StartInterval</key>\n<integer>3600</integer>" : null,
       lastRunAt: () => "2026-06-12T23:30:00Z",
     });
-    expect(hb.lanes).toHaveLength(3);
+    expect(hb.lanes).toHaveLength(2);
     const loop = hb.lanes[0];
     expect(loop?.running).toBe(true);
     expect(loop?.everyMin).toBe(60);
     expect(loop?.lastAt).toBe("2026-06-12T23:30:00Z");
     expect(loop?.nextAt).toBe("2026-06-13T00:30:00Z");
     expect(hb.lanes[1]?.running).toBe(false);
-    expect(hb.lanes[2]?.running).toBe(false);
   });
 
   it("never throws on a machine with nothing scheduled", () => {
@@ -652,15 +651,8 @@ describe("collectLoopHeartbeat — US-DOSSIER-011", () => {
         ].join("\n"),
     });
 
-    expect(hb.lanes.map((l) => l.name)).toEqual(["backlog loop", "PR loop", "Dream loop", "go session"]);
-    expect(hb.lanes.map((l) => l.source)).toEqual(["launchd", "launchd", "launchd", "goal"]);
-    expect(hb.lanes.find((l) => l.name === "PR loop")).toMatchObject({
-      running: true,
-      mode: "pr",
-      everyMin: 5,
-      lastAt: "2026-06-12T23:35:00Z",
-      nextAt: "2026-06-12T23:40:00Z",
-    });
+    expect(hb.lanes.map((l) => l.name)).toEqual(["backlog loop", "Dream loop", "go session"]);
+    expect(hb.lanes.map((l) => l.source)).toEqual(["launchd", "launchd", "goal"]);
     expect(hb.lanes.find((l) => l.name === "go session")).toMatchObject({
       running: true,
       mode: "go",
@@ -1715,9 +1707,8 @@ describe("US-LOOP-079l — #loop 3-state dossier header (ACTIVE / DORMANT / PAUS
     expect(html).toContain('data-loop-state="DORMANT"');
     expect(html).toContain("2026-06-25T03:00:00Z"); // since
     expect(html).toContain("idle 6h, no Todo"); // reason
-    // AC2 exact lane phrasing: loop lane unloaded, PR + Dream active.
+    // AC2 exact lane phrasing: loop lane unloaded, Dream active (PR loop retired).
     expect(html).toContain("loop lane unloaded · zero idle");
-    expect(html).toContain("PR lane active");
     expect(html).toContain("Dream lane active");
     // next-wake hint
     expect(html).toContain("Wakes on: new Todo · PR merge · dream scan · roll loop resume");

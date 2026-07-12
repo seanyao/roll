@@ -62,10 +62,8 @@ import {
   loopTestCommand,
   loopUnmuteCommand,
 } from "./loop-maint.js";
-import { loopPrInboxCommand } from "./loop-pr-inbox.js";
 import { loopReconcileCommand } from "./loop-reconcile.js";
 import { loopReconcilePendingCommand } from "./loop-reconcile-pending.js";
-import { runPrHeal } from "./loop-pr-heal.js";
 import { loopReviewResizeCommand } from "./loop-review-resize.js";
 import { loopExhaustionSplitCommand } from "./loop-exhaustion-split.js";
 import { loopRunOnceCommand } from "./loop-run-once.js";
@@ -471,22 +469,12 @@ export function registerAll(): void {
     // US-LOOP-077 renderer. Never writes/signals the loop; not network-gated
     // (local file tail only — see networkNeeds). `--attach` = tmux attach -r.
     if (args[0] === "watch") return loopWatchCommand(args.slice(1));
-    // `loop pr-inbox`: the dedicated PR-loop tick (US-PORT-001) — drives the
-    // pure core/pr-loop.ts decisions; the pr runner calls this instead of the
-    // retired bash `_loop_pr_inbox`.
-    if (args[0] === "pr-inbox") return loopPrInboxCommand(args.slice(1));
     // `loop reconcile`: US-DELIV-002 layered reconcile-from-main — probes
     // awaiting cycles against main (PR state + patch-id), emits delivery:reconciled.
     if (args[0] === "reconcile") return loopReconcileCommand(args.slice(1));
     // `loop reconcile-pending`: FIX-1052 bounded PR polling reconciler — polls
     // pending-merge PRs, fetches origin/main on merge, and updates delivery truth.
     if (args[0] === "reconcile-pending") return loopReconcilePendingCommand(args.slice(1));
-    // `loop pr-heal-run <num> <headRef> <slug>`: the detached heal worker the PR
-    // tick launches (US-PORT-021) — runs the agent-in-worktree fix natively in
-    // TS, replacing the bridged bash `_loop_pr_do_heal`.
-    if (args[0] === "pr-heal-run") {
-      return runPrHeal(args[1] ?? "", args[2] ?? "", args[3] ?? "");
-    }
     if (args[0] === "on") return loopOnCommand(args.slice(1));
     if (args[0] === "off") return loopOffCommand(args.slice(1));
     if (args[0] === "pause") return loopPauseCommand(args.slice(1));

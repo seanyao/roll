@@ -15,7 +15,7 @@ const help = (lang: "en" | "zh"): string => stripAnsi(renderLoopHelp(lang));
 // monitor / attach / branches / test-quality-check just print a redirect).
 const LIVE_SUBCOMMANDS = [
   "watch", "status", "eval", "story", "runs", "goal", "go", "signals", "log", "events",
-  "alert", "run-once", "fmt", "pr-inbox", "pr-heal-run", "reconcile-pending", "on", "off", "pause",
+  "alert", "run-once", "fmt", "reconcile-pending", "on", "off", "pause",
   "resume", "now", "reset", "mute", "unmute", "gc", "test", "notify",
   "enforce-tcr", "precheck-ci", "hotfix-head-context", "agent-routes",
 ];
@@ -40,7 +40,7 @@ describe("roll loop --help groups — US-DOSSIER-035", () => {
     expect(out).toMatch(/control\s+on · off \[--all\] · now · pause · resume · reset · go · goal/);
     expect(out).toMatch(/observe\s+watch · status · runs · log · events · signals · eval/);
     expect(out).toMatch(/alerts\s+alert list · alert ack · alert resolve · alert log/);
-    expect(out).toMatch(/maintain\s+gc · fmt · mute · unmute · pr-inbox · reconcile-pending/);
+    expect(out).toMatch(/maintain\s+gc · fmt · mute · unmute · reconcile-pending/);
   });
 
   it("AC5: no live loop subcommand is dropped — each appears somewhere in the help", () => {

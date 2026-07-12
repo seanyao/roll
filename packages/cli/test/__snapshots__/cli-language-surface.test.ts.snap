@@ -38,8 +38,8 @@ The autonomous delivery loop — grouped control / observe / alerts / maintain.
 control   on · off [--all] · now · pause · resume · reset · go · goal · recover
 observe   watch · status · runs · log · events · signals · eval
 alerts    alert list · alert ack · alert resolve · alert log
-maintain  gc · fmt · mute · unmute · pr-inbox · reconcile-pending
-internal  test · run-once · story · notify · enforce-tcr · precheck-ci · hotfix-head-context · agent-routes · pr-heal-run
+maintain  gc · fmt · mute · unmute · reconcile-pending
+internal  test · run-once · story · notify · enforce-tcr · precheck-ci · hotfix-head-context · agent-routes
 
 [38;2;88;166;255mstates    [0mACTIVE (lanes armed) · DORMANT (backlog drained → loop lane self-unloads, zero idle records) · PAUSED (you stopped it)
 [38;2;88;166;255mwake      [0ma DORMANT loop wakes on any roll command · the daily dream scan · a PR merge
@@ -50,8 +50,8 @@ internal  test · run-once · story · notify · enforce-tcr · precheck-ci · h
 作动      on · off [--all] · now · pause · resume · reset · go · goal · recover
 传感      watch · status · runs · log · events · signals · eval
 告警      alert list · alert ack · alert resolve · alert log
-维护      gc · fmt · mute · unmute · pr-inbox · reconcile-pending
-内部      test · run-once · story · notify · enforce-tcr · precheck-ci · hotfix-head-context · agent-routes · pr-heal-run
+维护      gc · fmt · mute · unmute · reconcile-pending
+内部      test · run-once · story · notify · enforce-tcr · precheck-ci · hotfix-head-context · agent-routes
 
 [38;2;88;166;255m状态      [0mACTIVE 运行中(lane 就绪) · DORMANT 休眠(backlog 抽干→自卸 loop lane、不再记空转) · PAUSED 已暂停(你停的)
 [38;2;88;166;255m唤醒      [0m休眠的 loop 由以下唤醒：任意 roll 命令 · 每日 dream 扫描 · PR 合并

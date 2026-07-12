@@ -77,10 +77,10 @@ web          站点与静态展示（当前不是活体 Supervisor 控制台）
 
 这是系统的引擎。一个 Loop 是一个自治进程，按定时器唤醒，执行一个 Cycle。
 
-**Cycle 生命周期**：选故事 → 路由 agent → 创建隔离工作区 → agent 执行（TCR 循环）→ 送交 PR → 等合并 → 对账 → 收尾。
+**Cycle 生命周期**：选故事（先查租约 `deliveryLease`）→ 路由 agent → 创建隔离工作区 → agent 执行（TCR 循环）→ attest 硬闸 → 送交 PR → AWAITING_MERGE 挂起并释放 loop → pick 下一张卡。交付推进由 Delivery Reconciler 在任意 `roll` 调用时机会性对账完成——不依赖独立 daemon。
 
 **关键约束**：
-- 一 Cycle 只做一个 Story。前一个未交付，不拿下一个。
+- 一 Cycle 只做一个 Story。AWAITING_MERGE 后释放 loop，拿下一个；交付由 Delivery Reconciler 对账推进，不 block loop。
 - 进程可能被 SIGKILL。下次唤醒时，通过锁龄、心跳、PID 判断孤儿态，安全接管或重做。
 - 心跳每 60 秒写入一次。超时无心跳 → 判定死亡并落终态。
 - 退出时无条件写入终态。这是硬约束——trap 兜底。
@@ -89,8 +89,7 @@ web          站点与静态展示（当前不是活体 Supervisor 控制台）
 **Loop 类型**：
 | 类型 | 职责 |
 |------|------|
-| main | 消费待办，执行完整的 pick→TCR→PR→对账 周期 |
-| pr | 监控 open loop PR：CI 挂了自愈，绿了合并 |
+| main | 消费待办，执行完整的 pick→TCR→PR→AWAITING_MERGE→对账 周期（含 Delivery Reconciler 机会性对账） |
 | ci | 监控 CI 状态 |
 | alert | 消费 ALERT 文件，推送到用户 |
 
@@ -139,13 +138,62 @@ cycle 写 `loop:pending`，只做恢复探测，不启动 Builder、不把卡记
 **反规则**：不因历史表现自动改写角色绑定。不做失败后的静默跨 agent 重试。指标可以*建议*
 策略变更，但绝不绕过 human-on-the-loop。
 
-### BC4 · 交付
+### BC4 · 交付（Delivery Reconciler）
 
 每次交付是一个 Pull Request。一个 Story 至多同时有一个 open PR。
 
-**生命周期**：开 PR → CI 通过 → 合并入 main → 删除分支。
+**最后一公里 = 一个 reconcile 闭环，无独立守护进程。**
 
-**交付判定**：合并入 main 才算交付。PR 已开、CI 已绿、agent 声称完成都不算——事后对账，只认 main 上真实的 merge commit。
+#### 交付生命周期
+
+```
+building ──attest earned──► publishable ──push+PR──► awaiting_merge ──┐
+   │                                                                  │
+   └─attest MISSING──► blocked_no_evidence (fail-loud，不推分支)        │
+                                                                       ▼
+   awaiting_merge ──L1/L2 强信号命中──► delivered / delivered_external
+   awaiting_merge ──CI 绿未合──► 自驱合并 (gh pr merge --squash) ──► 下轮判 delivered
+   awaiting_merge ──CI 红──► ci_failed ──► fix-forward cycle
+   awaiting_merge ──同卡他 cycle 已 delivered──► superseded（带原因）
+   awaiting_merge ──证据不足──► 留 awaiting_merge（绝不误判）
+```
+
+**交付状态**：
+
+| 状态 | 含义 |
+|------|------|
+| `building` | TCR 进行中 |
+| `blocked_no_evidence` | 过了测试但缺 attest/ac-map → fail-loud，未推分支 |
+| `awaiting_merge` | 分支+PR 已开；挂起，loop 释放并继续下一张卡 |
+| `ci_failed` | PR CI 红 → 需 fix-forward |
+| `delivered` | 合进 main：runner 自驱合并 |
+| `delivered_external` | 合进 main：外部（supervisor / 人手动合 / 其他 cycle）——patch-id / PR-state 反查确认，一等公民 |
+| `superseded` | 同卡另一 cycle 已 delivered |
+| `abandoned` | lease 释放 / 卡撤销 |
+
+#### 分层真相判定（强→弱，任一强信号即 delivered）
+
+| 层 | 信号 | 可靠性 | 何时可用 |
+|---|---|---|---|
+| L1 | **PR 状态**：`gh pr view` → `MERGED` | 最强（权威） | gh 可用且 PR 可解析时 |
+| L2 | **patch-id 等价**：`git patch-id(diff origin/main...branch)` ∈ main 候选 merge commit 的 patch-id 集 | 强（squash/rebase 安全） | 离线也行；不依赖 gh |
+| L3 | **backlog Done + attest 报告存在** | 弱（仅佐证，单独不足） | 兜底交叉验证 |
+
+**判定规则**：`delivered` 需 ≥1 个强信号（L1 或 L2）。L3 单独不足以判 delivered（agent 可能预写 Done）。L1 与 L2 冲突时以 L1 为准并告警。全不命中 → 留 `awaiting_merge`，**绝不误判**。
+
+#### Delivery Reconciler
+
+纯判定 + 薄 IO，在任意 `roll` 调用 / cycle 边界 / `roll loop reconcile` 时机会性运行：
+
+- **触发点**：(a) 每次 `roll loop` cycle 边界；(b) 任意 `roll` 命令的前置机会性 reconcile；(c) 显式 `roll loop reconcile [--json]`；(d) CI 里可选一步
+- **自驱合并**：CI 绿且未合 → `gh pr merge --squash`，不依赖仓库 auto-merge 开关、不依赖 launchd
+- **外部合并反查**：supervisor / 人手动合并被 patch-id / PR-state 自动回填为 `delivered_external`——手动合并是一等支持路径，不是泄漏
+- **幂等 & 崩溃可续**：reconcile 反复跑永远安全，向真相收敛
+- **退役守护进程**：原 `com.roll.pr.<slug>` launchd PR-loop 守护已退役，合并逻辑整体搬进 Delivery Reconciler，不再需要常驻进程
+
+#### 交付判定
+
+合并入 main 才算交付。PR 已开、CI 已绿、agent 声称完成都不算——事后对账，只认 main 上真实的 merge commit。main 是唯一交付真相；reconcile 只把真相投影回 cycle 行。
 
 ### BC5 · 演化
 

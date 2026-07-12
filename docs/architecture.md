@@ -281,6 +281,8 @@ v4 把"一张 Story 怎么交付"和"项目级怎么协调"分成两层。
 
 剖面在 Cycle 开始时选一次并记入 `execution:profile` 事件。角色之间只通过 artifact（`role-artifacts/designer/design-contract.md` / `execute-evidence` / `eval-report.md` + `artifact-manifest.json`）交接，不共享原始会话；每个角色都是 fresh session。`evaluate` 不是单一 `pass/fail`——blocking review、score、attest 是三个分开的契约。evaluate→execute 的修复回合受硬熔断约束（最大轮数、重复 finding 签名、预算、超时），触界即升级。
 
+**攻防结对（Adversarial pairing，`verified` / `designed` 剖面内的 Builder 步）**：在这两个剖面里，Builder 步不再是单个 agent 同时写测试和实现，而是由**循环引擎真正编排**（US-LOOP-100..106，全在 `@roll/core` + CLI runner）：先 spawn 一个 test_author 写红测试 → 再 spawn 一个**异构**的 implementer 只写实现变绿（不得改测试）→ 绿后进入攻防回合（attacker 补破坏性测试 → implementer 修），直到攻不动。终止由纯函数 `adversarialNextStep` 三重独立判定（连续无洞 > 回合上限 > 总超时）保证**无人值守绝不挂死**；任何攻防异常（无异构伙伴 / agent 不可用 / 单回合挂死）经 `adversarialDegradeDecision` **降级回标准单 builder** 完成本卡并记 `adversarial:degraded` 事件——不静默、不死锁。默认参数：`max_rounds=4`、`dry_rounds_to_stop=2`、`total_timeout_sec=2700`。每卡结果（回合数 / 抓洞数 / 终止原因 / 是否降级）折进 runs 行，`roll loop adversarial` 输出攻防 vs 标准 cohort 的只读影子跑聚合，供 owner 用数据决定是否扩大剖面覆盖（设计 §9）。攻防路径**默认休眠**，仅当项目把 `execution_policy.mode` opt-in 到 verified/designed 才启用；`standard` 剖面零变化。
+
 **Supervisor**：项目级协调者，负责不属于某一张具体 Story 的工作——跨 Story/Epic 上下文、backlog 排序、风险分级、执行剖面建议、路由/Rig 建议、预算、并行、卡住的 cycle、重复失败、文件冲突、合并队列、发布就绪、truth coverage / 显式 release blockers、系统级用户交互（"接下来做什么？""为什么卡住？"）与 owner 升级。
 
 Supervisor **绝不**：实现具体 Story、写 Story 的评估报告、覆盖 Evaluator 裁定、绕过 attest 闸、直接标记 Story 为 Done、用指标静默改写路由/策略。v4.0 的 Supervisor 是 observe/advise（`roll supervisor`）：先用确定性 selector 把事实结构化，再（必要时）让 agent 措辞建议；历史 Done 缺少结构化 DeliveryRecord 只作为 truth coverage/backfill 提醒，发布是否阻塞以显式 release blockers / release consistency 为准；持久化策略变更一律需 owner 确认。安全并行调度（`max_parallel_cycles`、文件冲突串行化、合并队列/预算暂停）的决策逻辑已就位，活体并行交付留待 v4.1。

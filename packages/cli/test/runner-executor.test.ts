@@ -3626,6 +3626,36 @@ describe("executeCommand — command → executor mapping", () => {
     expect(gateEvents[0].verdict).toBe("earned");
   });
 
+  it("US-DELIV-004: a gate event-write failure must NOT abort a valid publish (best-effort observability)", async () => {
+    const repo = initCleanGitRepo("roll-evidence-gate-event-fail-");
+    const cardDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
+    mkdirSync(join(cardDir, "latest"), { recursive: true });
+    mkdirSync(join(cardDir, CTX.cycleId), { recursive: true });
+    writeFileSync(join(cardDir, "ac-map.json"), "[]\n");
+    writeFileSync(join(cardDir, "latest", "US-RUN-001-report.html"), "<html>report</html>\n");
+    const base = fakePorts();
+    const push = vi.fn(async () => ({ code: 0 }));
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      git: { ...base.ports.git, push },
+      github: {
+        ...base.ports.github,
+        prState: vi.fn(async () => "UNKNOWN"),
+        runPublishPlan: vi.fn(async () => ({ status: 0 as const, prUrl: "u", ok: true })),
+      },
+      events: {
+        ...base.ports.events,
+        appendEvent: vi.fn(() => {
+          throw new Error("events file unwritable");
+        }),
+      },
+    });
+    const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
+    // An observability blip must never block delivery: the push still happens.
+    expect(r.event).toEqual({ type: "published", result: { status: 0, manualMerge: false } });
+    expect(push).toHaveBeenCalledOnce();
+  });
+
   it("US-LOOP-094: push_orphan pushes worktree HEAD via refspec, FROM the worktree cwd", async () => {
     const { ports } = fakePorts();
     await executeCommand({ kind: "push_orphan", branch: "loop/cycle-x" }, ports, CTX);

@@ -86,14 +86,23 @@ export async function executeTerminalCommand(
           attestReportPresent: verificationReportFresh(ports.paths.worktreePath, gateStoryId, undefined, ports.repoCwd),
           acMapPresent: acMapCandidates(ports.paths.worktreePath, gateStoryId, ports.repoCwd).some((p) => existsSync(p)),
         });
-        ports.events.appendEvent(ports.paths.eventsPath, {
-          type: "delivery:evidence_gate",
-          cycleId: ctx.cycleId ?? "",
-          storyId: gateStoryId,
-          verdict: gate.ok ? "earned" : "blocked",
-          reasons: gate.ok ? [] : [...gate.reasons],
-          ts: eventTs(ports),
-        });
+        // Best-effort like every other appendEvent in this handler: an
+        // events-file write blip is observability loss, never a publish block.
+        try {
+          ports.events.appendEvent(ports.paths.eventsPath, {
+            type: "delivery:evidence_gate",
+            cycleId: ctx.cycleId ?? "",
+            storyId: gateStoryId,
+            verdict: gate.ok ? "earned" : "blocked",
+            reasons: gate.ok ? [] : [...gate.reasons],
+            ts: eventTs(ports),
+          });
+        } catch {
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `US-DELIV-004: delivery:evidence_gate append failed for ${gateStoryId} (cycle ${ctx.cycleId ?? "?"})`,
+          );
+        }
         if (!gate.ok) {
           ports.events.appendAlert(
             ports.paths.alertsPath,

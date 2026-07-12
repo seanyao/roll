@@ -46,6 +46,35 @@ export const DELIVERY_STATES = [
 ] as const;
 export type DeliveryState = (typeof DELIVERY_STATES)[number];
 
+// ── DeliveryLease (US-DELIV-005) ─────────────────────────────────────────────
+
+/**
+ * Story-level LEASE vocabulary (delivery-reconciler design §4). One card, one
+ * lease: the picker consults `deliveryLease(storyId, leases)` before picking;
+ * a card held in ANY of these states is skipped (default: no same-card
+ * fan-out). `--race` is the explicit opt-in for parallel racing.
+ *
+ * Derived from the cycle-level {@link DeliveryState} projection, never
+ * hand-set:
+ *   building / blocked_no_evidence → in_flight   (a live cycle holds the card)
+ *   awaiting_merge                 → awaiting_merge
+ *   ci_failed                      → ci_red
+ *   delivered / delivered_external → delivered
+ *   superseded / abandoned         → (no lease — released)
+ */
+export const DELIVERY_LEASE_STATES = ["in_flight", "awaiting_merge", "ci_red", "delivered"] as const;
+export type DeliveryLeaseState = (typeof DELIVERY_LEASE_STATES)[number];
+
+/** A story lease: one cycle holding one card in a lease state. */
+export interface DeliveryLease {
+  /** Story identifier (US-XXX / FIX-XXX / REFACTOR-XXX). */
+  storyId: string;
+  /** The cycle that holds the card. */
+  cycleId: string;
+  /** Derived lease state — see DELIVERY_LEASE_STATES. */
+  state: DeliveryLeaseState;
+}
+
 // ── LifecycleState (AC2) ─────────────────────────────────────────────────────
 
 /**

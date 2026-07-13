@@ -31,7 +31,7 @@ const GRACE_SEC = 3600;
 
 /** A lenient runs row — the adapter owns the field-name knowledge. */
 export type TruthRunRow = Record<string, unknown>;
-export type DeliveryGateDiagnosticKind = "ci_red_after_merge" | "pr_loop_unavailable";
+export type DeliveryGateDiagnosticKind = "ci_red_after_merge";
 
 export interface DeliveryGateDiagnostic {
   kind: DeliveryGateDiagnosticKind;
@@ -90,16 +90,8 @@ function rowList(rows: Record<string, TruthRunRow> | Iterable<TruthRunRow>): Tru
   return Symbol.iterator in Object(rows) ? [...(rows as Iterable<TruthRunRow>)] : Object.values(rows as Record<string, TruthRunRow>);
 }
 
-function isPrLoopUnavailableRow(row: TruthRunRow): boolean {
-  return str(row, "outcome") === "pr_loop_unavailable" ||
-    (str(row, "outcome") === "published_pending_merge" &&
-      str(row, "failure_class") === "env" &&
-      str(row, "root_cause_key") === "env:pr_loop");
-}
-
-function gateKind(outcome: CycleTruth["outcome"], row: TruthRunRow): DeliveryGateDiagnosticKind | null {
-  if (isPrLoopUnavailableRow(row)) return "pr_loop_unavailable";
-  return outcome === "ci_red_after_merge" || outcome === "pr_loop_unavailable" ? outcome : null;
+function gateKind(outcome: CycleTruth["outcome"]): DeliveryGateDiagnosticKind | null {
+  return outcome === "ci_red_after_merge" ? outcome : null;
 }
 
 export function deliveryGateDiagnosticsFromRows(
@@ -114,7 +106,7 @@ export function deliveryGateDiagnosticsFromRows(
     const rowTs = tsSec(row);
     if (rowTs !== null && nowSec - rowTs > maxAgeSec) continue;
     const truth = cycleTruthFromRow(row, { nowSec });
-    const kind = gateKind(truth.outcome, row);
+    const kind = gateKind(truth.outcome);
     if (kind === null) continue;
     const cycleId = str(row, "cycle_id") || str(row, "run_id") || truth.cycleId;
     const storyId = str(row, "story_id") || str(row, "storyId") || cycleId;

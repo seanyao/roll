@@ -416,6 +416,8 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
     const end = events.find((e) => e.type === "cycle:end");
     expect(end).toBeDefined();
     expect(end?.outcome).toBe("published_pending_merge");
+    expect(end).not.toHaveProperty("failure_class");
+    expect(end).not.toHaveProperty("root_cause_key");
     expect(events.some((e) => e.type === "cycle:start")).toBe(true);
 
     // runs.jsonl row shape matches v2 (keys verified vs dashboard difftest).
@@ -433,6 +435,8 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
     expect(row["cycle_id"]).toBe(cycleId);
     expect(row["story_id"]).toBe("US-RUN-001");
     expect(row["built"]).toEqual(["US-RUN-001"]);
+    expect(row["failure_class"]).toBeNull();
+    expect(row["root_cause_key"]).toBeNull();
     // US-LOOP-104: a STANDARD cycle folds to no adversarial summary — the driver's
     // attachAdversarialRun read the real events off disk and buildRunRow stamped
     // null (exercises the seam end-to-end, not just the unit fold).

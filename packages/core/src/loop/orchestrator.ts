@@ -36,19 +36,19 @@
  *     ├─ status 0      _loop_publish_pr ok         9239-9265      merge-wait→done
  *     ├─ status 2      gh missing → merge_back     9266-9318      → done | orphan | failed
  *     └─ status other  PR-fail → orphan push       9319-9356      → orphan | failed
- *   merge-wait         (US-AUTO-044: async PR Loop) 9241-9250      merge-wait (handed off; see note)
+ *   merge-wait         (retired; reconciler owns it) 9241-9250     merge-wait (handed off; see note)
  *   cleanup            cleanup                     9251-9265      cleanup
  *   (EXIT trap)        _inner_cleanup              8665-8772      (terminal-event invariant I8)
  *
  * Two phases the spec names but v2 folds differently:
  *   - "merge-wait": v2 (US-AUTO-044, bin/roll:9241-9250) HANDS the merged PR to a
- *     separate async PR Loop rather than blocking the cycle. The pre-AUTO-044
+ *     Delivery Reconciler rather than blocking the cycle. The pre-AUTO-044
  *     SYNCHRONOUS wait (`_loop_wait_pr_merge`, bin/roll:13580-13599) is already
  *     ported as delivery/pr.ts {@link nextWaitAction}. This orchestrator models
  *     merge-wait as an OPTIONAL phase (driven by {@link nextWaitAction}) so a
  *     caller can choose the synchronous shape (the card's "等真合并") OR the
  *     hand-off shape; the default walk hands off (v2 today) and treats `done` as
- *     "published, merge handed to PR Loop", with reconcile crediting built→merged
+ *     "published, awaiting reconcile", with reconcile crediting built→merged
  *     on real evidence (reconcile/engine.ts {@link reconcileMergeEvidence}, I4).
  *   - "reconcile": v2 does the per-cycle status capture inline (bin/roll:9127-9157)
  *     and the real merge backfill in a SEPARATE pass (`_loop_backfill_merged`).
@@ -107,7 +107,6 @@ import type { RollEvent } from "@roll/spec";
 import { builderFinalizationReady, finalizeBuilder, handoffKindFor } from "./builder-finalization.js";
 import { adversarialNextStep, adversarialDegradeDecision, type AdversarialFailure, type AdversarialRunSummary } from "./adversarial.js";
 import { nextWaitAction, type WaitAction } from "../delivery/pr.js";
-import { deliveryGate } from "../delivery/gate.js";
 
 // ── v2 terminal vocabulary (six-state model) ─────────────────────────────────
 
@@ -401,7 +400,7 @@ export interface PublishResult {
 
 /**
  * Refine a `built` capture through the publish ladder, mirroring bin/roll:9239-9356:
- *   - status 0                         → done   (PR published; merge → PR Loop).
+ *   - status 0                         → done   (PR published; reconciler advances merge).
  *   - status 2 + mergedBack            → done   (gh missing; ff merge_back, 9275).
  *   - status 2 + orphanPushed          → orphan (gh missing; orphan push, 9293).
  *   - status 2 + neither               → local  (FIX-351: gates passed, no publish).
@@ -833,10 +832,6 @@ export interface CycleContext {
    *  the cycle did NOT merge — done ≡ merged. Absent ⇒ status unread at pick
    *  (no revert target; the terminal leaves the row untouched). */
   preCycleStatus?: string;
-  /** FIX-1032a: true iff the project has a PR loop service installed and healthy.
-   *  Set by the executor before the publish phase. When false, the published PR
-   *  has no merge guardian and the cycle must NOT write delivered. */
-  prLoopHealthy?: boolean;
   /** FIX-1037: runner observed dirty main checkout before/after builder spawn. */
   mainDirty?: boolean;
   /** FIX-1050: agent-specific reason why usage could not be parsed (e.g.
@@ -1486,28 +1481,12 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
     case "published": {
       const status = classifyPublish(event.result);
       if (status === "published" || status === "done") {
-        // Published (PR open, merge → PR Loop, US-AUTO-044) or locally
-        // ff-merged (gh-missing tier → done) → clean worktree → terminal.
-        // FIX-1032a: check delivery gate for PR loop health.
+        // Published (PR open, awaiting the reconciler) or locally ff-merged
+        // (gh-missing tier → done) → clean worktree → terminal.
         const extra: CycleCommand[] = [
           // published/done: work is on the remote (or ff-merged) → skip the bundle.
           { kind: "cleanup_environment" }, { kind: "cleanup_worktree", branch: state.ctx.branch, bundleUnpushed: false },
         ];
-        if (status === "published" && state.ctx.prLoopHealthy === false) {
-          const gate = deliveryGate({
-            prLoopHealthy: false,
-            mainCiStatus: "unknown",
-            prUrl: state.ctx.prUrl,
-          });
-          if (gate.verdict === "pr_loop_unavailable") {
-            extra.push({ kind: "append_alert", message: gate.alert });
-            return terminate({
-              ...state,
-              ctx: { ...state.ctx, failureClass: "env", rootCauseKey: "env:pr_loop" },
-              phase: "cleanup",
-            }, status, extra);
-          }
-        }
         return terminate({ ...state, phase: "cleanup" }, status, extra);
       }
       if (status === "orphan") {

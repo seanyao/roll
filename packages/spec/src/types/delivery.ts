@@ -167,11 +167,9 @@ export function lifecycleFromFacts(
   terminalOutcome: HistoricalTerminalOutcome,
   prState: PrState,
 ): LifecycleState {
-  // Delivery gate outcomes are structural blocks. They intentionally outrank
-  // merge evidence because FIX-1032 treats these as "must not be recorded as
-  // delivered" until the owner fixes the missing guardian or red main CI.
+  // A red main CI is a structural block and intentionally outranks merge
+  // evidence until the owner fixes or reverts the broken merge.
   if (terminalOutcome === "ci_red_after_merge") return "ci_red";
-  if (terminalOutcome === "pr_loop_unavailable") return "blocked";
 
   // ── Done: PR merged → done ──────────────────────────────────────────
   if (prState === "merged") return "done";

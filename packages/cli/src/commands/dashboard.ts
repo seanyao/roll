@@ -1439,12 +1439,8 @@ function tickAgeLine(loopType: string, now: Date): string | null {
 }
 
 function deliveryGateDiagnosticLine(diagnostic: DeliveryGateDiagnostic): string {
-  if (diagnostic.kind === "ci_red_after_merge") {
-    const ci = diagnostic.ciRunUrl !== undefined ? ` · ${diagnostic.ciRunUrl}` : "";
-    return c("red", "⚠ main CI red") + c("dim", `  ${diagnostic.storyId}${ci}`);
-  }
-  const pr = diagnostic.prUrl !== undefined ? ` · ${diagnostic.prUrl}` : "";
-  return c("amber", "⚠ PR loop absent") + c("dim", `  ${diagnostic.storyId}${pr}`);
+  const ci = diagnostic.ciRunUrl !== undefined ? ` · ${diagnostic.ciRunUrl}` : "";
+  return c("red", "⚠ main CI red") + c("dim", `  ${diagnostic.storyId}${ci}`);
 }
 
 type LoopPlistSchedule =
@@ -1841,8 +1837,7 @@ function render(
     const sl = dailyScheduleLine(svc, now);
     if (sl) out.push("  " + c("dim", sl));
   }
-  // FIX-1032b AC2/AC3: delivery gate diagnostics — read runs for recent
-  // delivery-blocked cycles (ci_red_after_merge, pr_loop_unavailable).
+  // Delivery gate diagnostics — read runs for recent main-CI-red cycles.
   if (args.projectSlug !== null) {
     const dt = deliveryGateDiagnosticsFromRows(args.runs, { nowSec: Math.floor(args.now.getTime() / 1000) });
     for (const diagnostic of dt) out.push("  " + deliveryGateDiagnosticLine(diagnostic));

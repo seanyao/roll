@@ -79,7 +79,6 @@ export type TerminalOutcome = (typeof TERMINAL_OUTCOMES)[number];
  * are not part of the closed write-side TerminalOutcome vocabulary.
  */
 export const LEGACY_TERMINAL_OUTCOMES = [
-  "pr_loop_unavailable",
   "agent_internal_failure",
 ] as const;
 export type LegacyTerminalOutcome = (typeof LEGACY_TERMINAL_OUTCOMES)[number];

@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { dispatch, isPorted, registerAll } from "../src/index.js";
-import { RUN_ONCE_USAGE, buildLoopRouteDeps, checkCoreWorktreeContamination, idleCounterPath, incrementConsecutiveIdle, loopRunOnceCommand, readExternalBlock, readSkillBody, resetConsecutiveIdle, shouldSuppressGoalChildFailureCounter } from "../src/commands/loop-run-once.js";
+import { PUBLISHED_DELIVERY_MESSAGE, RUN_ONCE_USAGE, buildLoopRouteDeps, checkCoreWorktreeContamination, idleCounterPath, incrementConsecutiveIdle, loopRunOnceCommand, readExternalBlock, readSkillBody, resetConsecutiveIdle, shouldSuppressGoalChildFailureCounter } from "../src/commands/loop-run-once.js";
 import { GOAL_ALLOWED_CARDS_ENV } from "../src/lib/goal-progress.js";
 import { readPendingPublish } from "../src/runner/pending-publish.js";
 import { resolveRoute } from "@roll/core";
@@ -111,6 +111,12 @@ describe("loop run-once CLI wiring", () => {
   it("US-DELIV-005: usage documents --race (same-card parallel opt-in)", () => {
     expect(RUN_ONCE_USAGE).toContain("[--dry-run] [--race]");
     expect(RUN_ONCE_USAGE).toContain("--race");
+  });
+
+  it("US-DELIV-013: published help hands merge progression to the reconciler", () => {
+    expect(PUBLISHED_DELIVERY_MESSAGE).toContain("Delivery Reconciler");
+    expect(PUBLISHED_DELIVERY_MESSAGE).toContain("交付对账器");
+    expect(PUBLISHED_DELIVERY_MESSAGE).not.toContain("PR loop");
   });
 
   it("FIX-1040: unscoped run-once yields while a scoped loop go session holds directory go.lock", async () => {

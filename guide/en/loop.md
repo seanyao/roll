@@ -1033,15 +1033,11 @@ immediately writes an ALERT and stops. Instead it tries to fix CI autonomously.
    - If still red after `ROLL_LOOP_HEAL_MAX` attempts (default 2): writes ALERT and stops.
 4. If CI is red AND heal is exhausted or `ROLL_LOOP_NO_HEAL=1`: writes ALERT (existing behavior).
 
-**Loop's own PRs (`loop/*`) that turn red after a cycle exits** are detected
-(US-LOOP-049) and **background-healed** (US-LOOP-062a): classified as
-`loop_self_ci_red`, the PR Loop routes them to `roll loop pr-heal-run`, which checks
-out the PR branch and hands the failing-CI context to the project's agent
-(`_project_agent`) — bounded by a per-PR heal budget (`ROLL_LOOP_HEAL_MAX`,
-default 2) and a per-PR lock that prevents duplicate concurrent heals. The heal
-runs in the background so the PR tick continues. When heal is disabled
-(`ROLL_LOOP_NO_HEAL=1`) or the budget is exhausted, it writes a deduped
-`[TYPE:loop-pr-ci-red]` ALERT instead of silently skipping.
+**Loop-owned PRs (`loop/*`) that turn red after a cycle exits** remain
+`awaiting_merge`. The Delivery Reconciler reports a long-red PR as
+`degraded(ci_stuck)` after the dwell threshold; it never invents delivery and
+never runs a separate background healer. Fix the branch, then run
+`roll loop reconcile` (or let the next cycle/read path tick retry).
 
 **Environment variables:**
 
@@ -1084,11 +1080,10 @@ Fork PRs are skipped (no write access) with an ALERT.
 - Bot `APPROVED` → skip, let auto-merge proceed
 - Bot `CHANGES_REQUESTED` → write ALERT (loop PR rejected by GHA reviewer)
 
-**Active merge of approved PRs (US-LOOP-062b):** when a PR is human-approved,
-CI-green, and mergeable, the PR Loop merges it directly (`gh pr merge --squash`)
-through the runner's approved-PR merge rather than waiting for repo-level auto-merge
-(which may be disabled). Merge failure is non-fatal — the PR is left open and
-retried on the next tick.
+**Active merge:** when a PR is eligible, CI-green, and mergeable, the Delivery
+Reconciler runs `gh pr merge --squash` rather than depending on repo-level
+auto-merge. Merge failure is non-fatal: the PR stays `awaiting_merge` and is
+retried on a later reconcile tick.
 
 ### Optional: Event-driven PR review (GHA)
 
@@ -1189,7 +1184,7 @@ so the tmux viewer never looks frozen.
 | 5 | `publish_push` | push branch + open PR (or doc-only merge) | 5 – 30 s |
 | 6 | `cleanup` | env cleanup + emit PR final state + worktree teardown | < 1 s |
 
-> **US-AUTO-044**: the main loop exits after opening the PR and **no longer waits for merge**. Merge / rebase / close is handled asynchronously by the dedicated PR Loop (`com.roll.pr.<slug>`, every 5 min); a story with an open PR is skipped by the eligibility gate, so it is neither re-opened nor falsely marked Done.
+> **US-AUTO-044**: the main loop exits after opening the PR and **no longer waits for merge**. The event-backed Delivery Reconciler advances it at cycle boundaries, read paths, or via `roll loop reconcile`; there is no dedicated merge daemon. A story with an open PR is skipped by the eligibility gate, so it is neither re-opened nor falsely marked Done.
 
 Idle / failed / aborted cycles only emit the phases they actually entered.
 At cycle exit, the inner runner prints a phase breakdown panel sorted by

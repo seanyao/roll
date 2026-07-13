@@ -35,29 +35,28 @@ These problems don't matter much for one-shot tasks ("summarize this document", 
 
 ---
 
-## Roll's Approach: Independent Loops as Daemons
+## Roll's Approach: Independent Loops + Reconciliation
 
-Roll coordinates AI agents differently. Instead of a central planner and a shared execution graph, Roll uses **independent loops** — each a simple daemon with one job, running at its own cadence, reading from and writing to shared artifacts.
+Roll coordinates AI agents differently. Instead of a central planner and a shared execution graph, Roll uses **independent loops** with one job each, plus an event-backed Delivery Reconciler that advances published work opportunistically.
 
 ```
          BACKLOG  ←──────── shared state ────────→  git / PRs / alerts
             │
-    ┌───────┼────────┬──────────┐
-    ▼       ▼        ▼          ▼
-main loop  PR loop  dream     brief
-  30min     5min     daily     daily
-  deliver   heal +  scan      digest
-  stories   rebase + code
-            merge
+    ┌───────┼──────────────┬──────────┐
+    ▼       ▼              ▼          ▼
+main loop  reconciler     dream      brief
+  cycle    boundary/read   daily      daily
+  deliver  merge + credit  scan       digest
+  stories  from main       code
 ```
 
-Each loop:
+Each scheduled loop:
 1. **Polls** a specific artifact (BACKLOG, open PRs, alert file)
 2. **Acts** on what it finds (write code, heal CI, merge)
 3. **Writes back** to shared artifacts (commits, PR comments, BACKLOG updates)
 4. **Sleeps** until next interval
 
-Loops never call each other directly. They coordinate entirely through artifacts.
+Loops never call each other directly. They coordinate through artifacts. Reconciliation is not a daemon: cycle boundaries, read paths, and `roll loop reconcile` all run the same idempotent truth engine.
 
 ---
 
@@ -102,10 +101,10 @@ main loop fires:
   → writes code in TCR micro-steps (each step: test → commit or revert)
   → opens PR
 
-PR loop fires (5 min later):
-  → sees PR is open, CI still running → skips
+publish-boundary reconcile tick:
+  → sees PR is open, CI still running → keeps awaiting_merge
 
-PR loop fires again (5 min later):
+next cycle/read/explicit reconcile tick:
   → CI green, mergeable → merges PR → done
 ```
 
@@ -125,7 +124,7 @@ Software delivery is not a one-shot task. It is an ongoing process:
 
 A DAG is designed to execute once and terminate. A loop is designed to run forever, doing useful work whenever conditions are right. For continuous delivery, you want loops.
 
-**Resilience**: Loops are isolated. If the CI loop crashes, PRs still get reviewed. If the main delivery loop is blocked on a conflict, the PR loop still merges other ready PRs.
+**Resilience**: Loops are isolated. A failed cycle does not stop other projects, and any later Roll invocation can resume reconciliation from the event ledger and main.
 
 **Observability**: Every action a loop takes produces a git commit, a PR comment, or a BACKLOG update. The history of the system is the git log — human-readable, diffable, revertable.
 
@@ -142,7 +141,7 @@ As the system matures, loops become more specialized:
 | Loop | Cadence | Does |
 |------|---------|------|
 | **main loop** | 30 min | Reads BACKLOG → writes code → opens PR |
-| **PR loop** | 5 min | Merges green PRs, closes stale ones, rebases behind ones |
+| **Delivery Reconciler** | cycle boundaries, reads, explicit command | Merges eligible green PRs and credits delivery from main evidence |
 | **CI loop** | 5 min | Detects flaky tests, collects timing data, reruns failures |
 | **alert loop** | 1 min | Aggregates `_LOOP_ALERT` entries, sends notifications |
 | **bug loop** | 1 hour | Scans logs and error patterns, opens FIX stories |

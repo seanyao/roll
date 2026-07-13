@@ -193,7 +193,7 @@ export async function executeTerminalCommand(
         }
       }
       // FIX-1214: the branch was pushed but a transient GitHub API fault kept us
-      // from opening the PR. Queue the hand-off so the PR loop can retry, alert,
+      // from opening the PR. Queue the hand-off so the reconciler can retry, alert,
       // and treat the cycle as published rather than failed.
       if (r.degraded === true && r.status === 0 && ctx.storyId !== undefined && ctx.cycleId !== undefined) {
         const runtimeDir = dirname(ports.paths.eventsPath);
@@ -209,7 +209,7 @@ export async function executeTerminalCommand(
         });
         ports.events.appendAlert(
           ports.paths.alertsPath,
-          `FIX-1214: publish degraded for ${cmd.branch} (${ctx.storyId}) — PR create/merge blocked by transient GitHub API fault; queued for PR-loop retry`,
+          `FIX-1214: publish degraded for ${cmd.branch} (${ctx.storyId}) — PR create/merge blocked by transient GitHub API fault; queued for reconciler retry`,
         );
         try {
           ports.events.appendEvent(ports.paths.eventsPath, {
@@ -422,7 +422,7 @@ export async function executeTerminalCommand(
       }
       // FIX-211: Done ≡ merged (backlog.md:4) — no publish-time 抢跑. A
       // publish-status-0 `done` terminal means the PR was OPENED and merge
-      // handed to the async PR loop (US-AUTO-044), NOT that it merged. FIX-198
+      // handed to the reconciler, NOT that it merged. FIX-198
       // wrongly flipped the MAIN backlog ✅ the moment the PR opened, so a card
       // read Done while its PR was still open (the conductor merged minutes
       // later). Flip ✅ Done ONLY on confirmed MERGED evidence; otherwise the row
@@ -490,7 +490,7 @@ export async function executeTerminalCommand(
           // the symlinked .roll backlog (FIX-204C → the REAL .roll). A delivered
           // row legitimately rests at 🔨 (pending merge), but a premature ✅ Done
           // is a FALSE-Done — undo it back to the pre-cycle status so the backlog
-          // reflects TRUE delivery. The async PR loop's later preflight reconcile
+          // reflects TRUE delivery. A later reconciler tick
           // (decideClaimReconcile) flips it once the PR actually merges.
           revertPrematureDone(ports, terminalStoryId, ctx.preCycleStatus);
         }

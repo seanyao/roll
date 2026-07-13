@@ -13,7 +13,7 @@ import { appendDelivery, branchTitleSuffix, nodeDeliveryStore } from "@roll/core
 import { absent, present } from "@roll/spec";
 import type { GhResult } from "@roll/infra";
 
-/** One queued branch waiting for the PR loop to open its PR. */
+/** One queued branch waiting for a reconciler tick to open its PR. */
 export interface PendingPrCreateEntry {
   storyId: string;
   cycleId: string;

@@ -168,7 +168,6 @@ const TERMINAL_OUTCOME_SET: ReadonlySet<string> = new Set<string>([
 ]);
 const DELIVERY_GATE_OUTCOMES: ReadonlySet<string> = new Set<string>([
   "ci_red_after_merge",
-  "pr_loop_unavailable",
 ]);
 
 // Historical runs-row boundary only. New row writes already carry TerminalOutcome

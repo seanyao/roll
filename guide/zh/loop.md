@@ -917,9 +917,9 @@ ALERT 条目会在 `roll loop status`、`roll loop alert` 和 cycle/story 证据
 3. CI 红且允许热修：通过 `roll loop hotfix-head-context` 抓 CI 失败日志和最近 commit diff，调 `roll-fix` 修复，等 CI 变绿。超过 `ROLL_LOOP_HEAL_MAX`（默认 2）次还没修好则写 ALERT 停工。
 4. CI 红且已用完热修次数或 `ROLL_LOOP_NO_HEAL=1`：写 ALERT（保留原有行为）。
 
-自家 PR（`loop/*` 分支）在 cycle 结束后才转红（US-LOOP-049）会被**后台自愈**（US-LOOP-062a）：分类为 `loop_self_ci_red`，PR Loop 路由到 `roll loop pr-heal-run`——checkout 该 PR 分支、把失败 CI 上下文交给项目 agent（`_project_agent`）修，受每 PR 自愈预算（`ROLL_LOOP_HEAL_MAX`，默认 2）和每 PR 锁（防重复并发）约束,自愈在后台跑、PR tick 不阻塞。自愈关闭（`ROLL_LOOP_NO_HEAL=1`）或预算用尽时，写去重 `[TYPE:loop-pr-ci-red]` ALERT，绝不静默跳过。
+自家 PR（`loop/*` 分支）在 cycle 结束后转红时会保持 `awaiting_merge`。Delivery Reconciler 在超过滞留阈值后报告 `degraded(ci_stuck)`；它不会伪造 delivered，也不运行独立后台 healer。修复分支后运行 `roll loop reconcile`（或等待下一次 cycle/读路径 tick）重试。
 
-human 已批准、CI 绿、可合并的 PR 会被**主动合并**（US-LOOP-062b）：`runner 的 approved-PR merge` 直接 `gh pr merge --squash`,不再依赖仓库级 auto-merge（可能关着）；合并失败非致命,PR 留开,下一轮重试。
+符合资格、CI 绿、可合并的 PR 会被 Delivery Reconciler **主动合并**：直接 `gh pr merge --squash`，不依赖仓库级 auto-merge；合并失败非致命，PR 保持 `awaiting_merge`，后续 tick 重试。
 
 **环境变量：**
 
@@ -1049,7 +1049,7 @@ PR 等合并）每 30–60s 还会 emit 一次 `phase_tick` 心跳，tmux 不再
 | 5 | `publish_push` | push 分支 + 建 PR（doc-only 直接合） | 5 – 30 秒 |
 | 6 | `cleanup` | 环境清理 + 落 PR 终态 + 拆 worktree | < 1 秒 |
 
-> **US-AUTO-044**:主 loop 开完 PR 即退,**不再等合并**。合并 / rebase / 关 PR 交给专职 PR Loop（`com.roll.pr.<slug>`,每 5 分钟）异步处理;有 open PR 的 story 由资格闸跳过,不会重复开,也不会假 Done。
+> **US-AUTO-044**:主 loop 开完 PR 即退，**不再等合并**。事件型 Delivery Reconciler 在 cycle 边界、读路径或显式 `roll loop reconcile` 时推进；没有独立合并 daemon。有 open PR 的 story 由资格闸跳过，不会重复开，也不会假 Done。
 
 Idle / failed / aborted cycle 只 emit 实际进入过的阶段。
 cycle 收尾时 inner runner 在 stdout 打一份按耗时降序的面板：

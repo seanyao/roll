@@ -866,8 +866,7 @@ function readRunRows(projectPath: string): TruthRunRow[] {
 }
 
 function deliveryGateStopDetail(diagnostic: DeliveryGateDiagnostic): string {
-  const url = diagnostic.kind === "ci_red_after_merge" ? diagnostic.ciRunUrl : diagnostic.prUrl;
-  const suffix = url !== undefined ? `:${url}` : "";
+  const suffix = diagnostic.ciRunUrl !== undefined ? `:${diagnostic.ciRunUrl}` : "";
   return `${diagnostic.kind}:${diagnostic.storyId}${suffix}`;
 }
 
@@ -1960,9 +1959,8 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
       // scope card is now settled for this session (delivered in-flight and/or
       // skipped). End CLEANLY rather than loop back and re-pick a card we already
       // shipped — re-delivering it would open a SECOND PR for the same work.
-      // FIX-1032b AC4: include delivery gate diagnostics when stopping for
-      // scope_in_flight, so the operator sees why cards are stuck (PR loop
-      // absent or CI red) instead of the generic reason alone.
+      // Include delivery gate diagnostics when stopping for scope_in_flight,
+      // so the operator sees a red main CI instead of the generic reason alone.
       if (allScopeCardsSettled(id.path, goal, progress)) {
         const dgLines = deliveryGateStopDetails(id.path, deps.nowSec());
         stopReason = dgLines.length > 0 ? `scope_in_flight:${dgLines[0]}` : "scope_in_flight";

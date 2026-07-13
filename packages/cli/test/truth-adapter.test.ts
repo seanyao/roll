@@ -53,7 +53,7 @@ describe("cycleTruthFromRow / outcomeToPanel — selector-backed classification"
     expect(outcomeToPanel(oldRow.outcome, oldRow.state)).toBe(outcomeToPanel(newRow.outcome, newRow.state));
   });
 
-  it("FIX-1032b: delivery gate diagnostics come from the selector-backed adapter", () => {
+  it("delivery gate diagnostics include only the active main-CI gate", () => {
     const diagnostics = deliveryGateDiagnosticsFromRows([
       {
         run_id: "C-PR",
@@ -75,12 +75,6 @@ describe("cycleTruthFromRow / outcomeToPanel — selector-backed classification"
 
     expect(diagnostics).toEqual([
       {
-        kind: "pr_loop_unavailable",
-        cycleId: "C-PR",
-        storyId: "FIX-PR",
-        prUrl: "https://github.com/o/r/pull/1",
-      },
-      {
         kind: "ci_red_after_merge",
         cycleId: "C-CI",
         storyId: "FIX-CI",
@@ -89,7 +83,7 @@ describe("cycleTruthFromRow / outcomeToPanel — selector-backed classification"
     ]);
   });
 
-  it("REFACTOR-070: delivery gate diagnostics recognize env:pr_loop on published_pending_merge", () => {
+  it("retired PR-loop attribution does not create a diagnostic", () => {
     const diagnostics = deliveryGateDiagnosticsFromRows([
       {
         run_id: "C-PR-NEW",
@@ -103,14 +97,7 @@ describe("cycleTruthFromRow / outcomeToPanel — selector-backed classification"
       },
     ], { nowSec: NOW });
 
-    expect(diagnostics).toEqual([
-      {
-        kind: "pr_loop_unavailable",
-        cycleId: "C-PR-NEW",
-        storyId: "FIX-PR-NEW",
-        prUrl: "https://github.com/o/r/pull/3",
-      },
-    ]);
+    expect(diagnostics).toEqual([]);
   });
 });
 
@@ -248,8 +235,8 @@ describe("AC4 — unknown renders as unknown, never as success", () => {
       }
     }
     const out = chunks.join("");
-    expect(out).toContain("PR loop absent");
-    expect(out).toContain("https://github.com/o/r/pull/1");
+    expect(out).not.toContain("PR loop absent");
+    expect(out).not.toContain("https://github.com/o/r/pull/1");
     expect(out).toContain("main CI red");
     expect(out).toContain("https://github.com/o/r/actions/runs/2");
   });

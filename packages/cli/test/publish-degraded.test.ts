@@ -146,7 +146,7 @@ describe("FIX-1214 publish degraded hand-off", () => {
       expect(queued).toHaveLength(1);
       expect(queued[0]).toMatchObject({ branch: "loop/cycle-x", slug: "o/r", storyId: "FIX-1214", cycleId: "20260605-000000-1" });
 
-      expect(alerts.some((a) => a.includes("FIX-1214") && a.includes("queued for PR-loop retry"))).toBe(true);
+      expect(alerts.some((a) => a.includes("FIX-1214") && a.includes("queued for reconciler retry"))).toBe(true);
       expect(events.some((e) => (e as { type: string }).type === "alert:notify" && (e as { channel: string }).channel === "publish-degraded")).toBe(true);
 
       const deliveriesPath = join(runtimeDir, "deliveries.jsonl");

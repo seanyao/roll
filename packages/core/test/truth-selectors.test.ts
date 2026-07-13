@@ -230,7 +230,7 @@ describe("deriveCycleTruth — runs row + branch evidence + terminal twin", () =
     expect(t).toMatchObject({ outcome: "published_pending_merge", state: "truth" });
   });
 
-  it("FIX-1032b AC2/AC3: delivery gate outcomes outrank legacy status mapping", () => {
+  it("US-DELIV-013: only the active CI gate outranks published status mapping", () => {
     const ciRed = deriveCycleTruth({
       cycleId: "C-CI-RED",
       runStatus: "merged",
@@ -255,7 +255,7 @@ describe("deriveCycleTruth — runs row + branch evidence + terminal twin", () =
       graceSec: GRACE,
       schemaEpochSec: EPOCH,
     });
-    expect(prLoopAbsent).toMatchObject({ outcome: "pr_loop_unavailable", state: "truth" });
+    expect(prLoopAbsent).toMatchObject({ outcome: "published_pending_merge", state: "truth" });
   });
 
   it("AC5 squash merge: failed row + MERGED branch evidence → delivered (phantom corrected), fail-state drift on the row", () => {

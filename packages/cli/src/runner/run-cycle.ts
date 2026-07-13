@@ -235,26 +235,18 @@ function attachAdversarialRun(ctx: CycleContext, ports: Ports): CycleContext {
 
 function attachFailureAttribution(ctx: CycleContext, terminal: V2CycleStatus | undefined, ports: Ports): CycleContext {
   // REFACTOR-070: expand coverage to ALL failure-class terminals, not just the
-  // original four. agent_internal and published (when pr_loop unhealthy) must
-  // also carry failure_class/root_cause_key into TerminalEvent + runs rows.
+  // original four. agent_internal must also carry failure_class/root_cause_key
+  // into TerminalEvent + runs rows.
   if (
     terminal !== "failed" &&
     terminal !== "blocked" &&
     terminal !== "gave_up" &&
     terminal !== "aborted" &&
-    terminal !== "agent_internal" &&
-    terminal !== "published"
+    terminal !== "agent_internal"
   ) {
     return ctx;
   }
   if (ctx.failureClass !== undefined && ctx.rootCauseKey !== undefined) return ctx;
-
-  // REFACTOR-071: published + missing PR loop writes published_pending_merge
-  // plus env:pr_loop attribution, so rebuild can project it as blocked without
-  // producing the legacy pr_loop_unavailable terminal outcome.
-  if (terminal === "published" && ctx.prLoopHealthy === false) {
-    return { ...ctx, failureClass: "env", rootCauseKey: "env:pr_loop" };
-  }
 
   const attribution = classifyCycleFailure({
     cycleId: ctx.cycleId,

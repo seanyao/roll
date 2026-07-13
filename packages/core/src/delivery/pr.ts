@@ -19,7 +19,7 @@
  *     {@link planPublishDocPr}.
  *   - the cycle-end publish dispatch + multi-tier fallback (bin/roll:9200-9341):
  *     doc-only? doc-pr : pr; then branch on publish status —
- *       0 → done (hand merge to PR Loop);
+ *       0 → done (hand merge progression to the reconciler);
  *       2 (gh missing) → `_worktree_merge_back` (ff) → else orphan push;
  *       other (PR-fail) → orphan push.
  *     {@link decidePublishOutcome} mirrors the status→outcome branching only
@@ -198,14 +198,14 @@ export type PublishStatus = 0 | 2 | number;
 /** The next remediation action after a publish attempt — the decision the
  *  cycle-end ladder makes, decoupled from worktree/event bookkeeping. */
 export type PublishOutcome =
-  | { kind: "done" } // status 0 — PR published, merge handed to PR Loop.
+  | { kind: "done" } // status 0 — PR published, awaiting reconciliation.
   | { kind: "merge-back" } // status 2 (gh missing) — try ff merge_back next.
   | { kind: "orphan-push" }; // PR-fail (and the merge_back fallthrough) — push orphan.
 
 /**
  * Decide the remediation action for a publish status, mirroring the top-level
  * branching of bin/roll:9239-9341:
- *   - 0          → done (hand to PR Loop).
+ *   - 0          → done (hand to the reconciler).
  *   - 2          → merge-back (gh unavailable; try ff, then orphan on failure).
  *   - otherwise  → orphan-push (PR publish failed; orphan branch+tag safety net).
  * NOTE: the status-2 path's *secondary* fallthrough to orphan-push (when

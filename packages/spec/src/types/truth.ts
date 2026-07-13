@@ -96,7 +96,7 @@ export const TRUTH_ANCHORS: readonly TruthAnchor[] = [
     aggregate: "story",
     description: "A story is Done — its work is merged into the product repo's main.",
     authoritativeSource: "GitHub PR merge evidence for the story's delivery PR (state=MERGED + mergeCommit reachable from main)",
-    writer: "GitHub (merge button / eager-merge by pr-loop) — never a local actor",
+    writer: "GitHub (merge button / Delivery Reconciler self-merge) — never a local actor",
     derivedViews: [
       ".roll/backlog.md status cell (✅ Done)",
       "runs.jsonl row status merged/delivered",

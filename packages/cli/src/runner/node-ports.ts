@@ -207,10 +207,14 @@ export function nodePorts(opts: {
       },
       async tcrCount(worktreeCwd) {
         // v2口径 (bin/roll:8724): git log --oneline origin/main..HEAD | grep -c ' tcr:'.
+        // FIX-1244: a git failure (missing/stale ref, gone worktree) means the
+        // count is UNKNOWN — return undefined so callers never misread it as a
+        // real zero (the zero-TCR self-heal gate consumes this).
         const r = await execFileAsync("git", ["log", "--oneline", "origin/main..HEAD"], {
           cwd: worktreeCwd,
           encoding: "utf8",
-        }).catch(() => ({ stdout: "" }));
+        }).catch(() => undefined);
+        if (r === undefined) return undefined;
         return (r.stdout ?? "")
           .split("\n")
           .filter((l) => l.includes(" tcr:")).length;

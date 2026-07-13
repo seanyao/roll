@@ -589,6 +589,66 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
     expect(result2.terminal).toBe("published"); // FIX-244
   });
 
+  // FIX-1244 (实证 cycle-20260713-154751): a builder killed by the watchdog AFTER
+  // landing real `tcr:` commits in the DETACHED cycle worktree was misjudged
+  // zero-TCR (the timeout path never measured the worktree) → self-heal swapped
+  // the agent and orphaned completed work. The teardown must count the worktree's
+  // REAL tcr commits before the terminal row, and the measured count must reach
+  // the caller (result.state.ctx) so the zero-TCR gate sees truth, not "unknown→0".
+  it("FIX-1244 watchdog breach AFTER real tcr commits: teardown measures the detached worktree — tcr_count recorded, ctx carries it", async () => {
+    const { repo } = makeFixture("fix1244");
+    const rt = tmp("fix1244-rt");
+    const cycleId = "20260713-154751-25482";
+    const p = paths(rt, cycleId);
+    const fc = fixedClock(1_000_000);
+
+    // Same shape as the kill-mid-execute test: the shim lands ONE real `tcr:`
+    // commit in the detached worktree, then the clock jumps past the timeout so
+    // the watchdog breaches on the next step.
+    const hangingAgent: AgentSpawn = async (agent, opts) => {
+      fc.set(1_000_000 + 4000); // > CYCLE_TIMEOUT_SEC (2700)
+      return shimAgentTcr(agent, opts);
+    };
+
+    const base = nodePorts({
+      repoCwd: repo,
+      paths: p,
+      skillBody: "deliver",
+      routeDeps,
+      clock: fc.clock,
+    });
+    const ports: Ports = { ...base, agentSpawn: hangingAgent, github: fakeGithub(0) };
+
+    const result = await runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+      timeoutSec: 2700,
+    });
+
+    expect(result.ran).toBe(true);
+    expect(result.terminal).toBe("blocked");
+
+    // The worktree REALLY has the shim's tcr commit on its detached HEAD — prove
+    // the fixture premise directly (no mock: real git, real detached worktree).
+    expect(gitSucceeds(p.worktreePath, ["rev-parse", "--verify", "HEAD"])).toBe(true);
+    const realTcr = git(p.worktreePath, ["log", "--oneline", "origin/main..HEAD"])
+      .split("\n")
+      .filter((l) => l.includes(" tcr:")).length;
+    expect(realTcr).toBe(1);
+
+    // The runs row records the MEASURED count, not the hardcoded 0 that
+    // misjudged the incident cycle as zero-TCR.
+    const rows = readFileSync(p.runsPath, "utf8")
+      .split("\n")
+      .filter((l) => l.trim() !== "")
+      .map((l) => JSON.parse(l) as { cycle_id?: string; tcr_count?: number });
+    const row = rows.find((r) => r.cycle_id === cycleId);
+    expect(row?.tcr_count).toBe(1);
+
+    // And the caller (loop-run-once's zero-TCR gate) sees the measured count.
+    expect(result.state?.ctx?.tcrCount).toBe(1);
+  });
+
   // CI has observed this real-timer watchdog case flake at the default 30s budget.
   // The wall-time assertion below is the regression gate: the no-progress watchdog
   // must return well before the original 30s window would hang the suite. The

@@ -72,7 +72,10 @@ export async function executeCaptureFactsCommand(
       // into liveCtx so buildRunRow stops hardcoding 0. Best-effort → 0 on error.
       let tcrCount = 0;
       try {
-        tcrCount = await ports.git.tcrCount(ports.paths.worktreePath);
+        // FIX-1244: undefined = undeterminable (git error) → keep the legacy 0
+        // on THIS path (the publish-path gates already treat 0 conservatively);
+        // the timeout teardown's measure_worktree is where unknown stays unknown.
+        tcrCount = (await ports.git.tcrCount(ports.paths.worktreePath)) ?? 0;
       } catch {
         /* count is best-effort; a git miss must not fail the cycle */
       }

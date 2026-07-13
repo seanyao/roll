@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { dispatch, isPorted, registerAll } from "../src/index.js";
-import { PUBLISHED_DELIVERY_MESSAGE, RUN_ONCE_USAGE, buildLoopRouteDeps, checkCoreWorktreeContamination, idleCounterPath, incrementConsecutiveIdle, loopRunOnceCommand, readExternalBlock, readSkillBody, resetConsecutiveIdle, shouldSuppressGoalChildFailureCounter } from "../src/commands/loop-run-once.js";
+import { PUBLISHED_DELIVERY_MESSAGE, RUN_ONCE_USAGE, buildLoopRouteDeps, checkCoreWorktreeContamination, idleCounterPath, incrementConsecutiveIdle, isZeroTcrStall, loopRunOnceCommand, readExternalBlock, readSkillBody, resetConsecutiveIdle, shouldSuppressGoalChildFailureCounter } from "../src/commands/loop-run-once.js";
 import { GOAL_ALLOWED_CARDS_ENV } from "../src/lib/goal-progress.js";
 import { readPendingPublish } from "../src/runner/pending-publish.js";
 import { resolveRoute } from "@roll/core";
@@ -176,6 +176,23 @@ describe("loop run-once CLI wiring", () => {
     expect(shouldSuppressGoalChildFailureCounter({ isGoalChild: true, terminal: "blocked", tcrCount: 0 })).toBe(true);
     expect(shouldSuppressGoalChildFailureCounter({ isGoalChild: true, terminal: "failed", tcrCount: 1 })).toBe(false);
     expect(shouldSuppressGoalChildFailureCounter({ isGoalChild: false, terminal: "failed", tcrCount: 0 })).toBe(false);
+  });
+
+  it("isZeroTcrStall — FIX-1244: unmeasured tcrCount is NOT zero (conservative, never orphan completed work)", () => {
+    // Measured zero on a stall terminal → genuine zero-TCR stall (self-heal may swap).
+    expect(isZeroTcrStall("blocked", 0)).toBe(true);
+    expect(isZeroTcrStall("gave_up", 0)).toBe(true);
+    // Measured real work → never zero-TCR.
+    expect(isZeroTcrStall("blocked", 4)).toBe(false);
+    expect(isZeroTcrStall("gave_up", 1)).toBe(false);
+    // NEVER measured (timeout path pre-measurement / git error) → unknown, NOT zero:
+    // the gate must stay conservative and let the fail-loud path keep the worktree.
+    expect(isZeroTcrStall("blocked", undefined)).toBe(false);
+    expect(isZeroTcrStall("gave_up", undefined)).toBe(false);
+    // Non-stall terminals never qualify.
+    expect(isZeroTcrStall("published", 0)).toBe(false);
+    expect(isZeroTcrStall("failed", 0)).toBe(false);
+    expect(isZeroTcrStall(undefined, 0)).toBe(false);
   });
 
   it("readExternalBlock — FIX-363: attributes a failed cycle to a reviewer auth/network block", () => {

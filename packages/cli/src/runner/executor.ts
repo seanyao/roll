@@ -168,6 +168,16 @@ export async function executeCommand(
       return executeCaptureFactsCommand(cmd, ports, ctx);
     }
 
+    // FIX-1244: timeout teardown's lightweight probe — count the PRESERVED
+    // worktree's real `tcr:` commits so a builder killed AFTER landing work is
+    // not misjudged zero-TCR. No gates, no peer consults — one git call. When
+    // the count is UNDETERMINABLE (git error) patch nothing: unknown stays
+    // unknown so the zero-TCR gate stays conservative (never discards work).
+    case "measure_worktree": {
+      const measured = await ports.git.tcrCount(ports.paths.worktreePath).catch(() => undefined);
+      return measured === undefined ? {} : { ctxPatch: { tcrCount: measured } };
+    }
+
     // delivery/pr + terminal side effects live in the publish/terminal handler.
     case "publish_pr":
     case "merge_back":

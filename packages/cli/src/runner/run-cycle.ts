@@ -223,7 +223,14 @@ export async function runCycleOnce(opts: RunCycleOptions): Promise<RunCycleResul
     if (!lockReleased) ports.process.releaseLock(ports.paths.lockPath);
   }
 
-  return { ran: true, terminal: state.terminal, state };
+  // FIX-1244: hand the caller the FULL truth — executor-captured facts (real
+  // tcr count, parsed cost, prUrl) live in liveCtx, orchestrator-owned fields
+  // (agentExitCode) live in state.ctx. mergeCtx keeps the overlapping fields
+  // (storyId/agent/model/…) synced into liveCtx each step, so liveCtx wins on
+  // shared keys and state.ctx contributes what only the orchestrator knows.
+  // Without this, loop-run-once's zero-TCR gate read an UNMEASURED tcrCount as
+  // 0 and misjudged real work as zero-TCR (cycle-20260713-154751).
+  return { ran: true, terminal: state.terminal, state: { ...state, ctx: { ...state.ctx, ...liveCtx } } };
 }
 
 /** US-LOOP-104: patch the adversarial-run summary onto the live ctx from the
@@ -334,6 +341,8 @@ function describeCommand(cmd: CycleCommand): string {
       return `sleep_backoff        → sleep ${cmd.seconds}s`;
     case "capture_facts":
       return "capture_facts        → git rev-list --count origin/main..HEAD";
+    case "measure_worktree":
+      return "measure_worktree     → git.tcrCount(worktree) — FIX-1244 timeout teardown probe";
     case "publish_pr":
       return `publish_pr           → planPublishPr + github.runPublishPlan(${cmd.branch})`;
     case "merge_back":

@@ -505,11 +505,14 @@ export function watchdogVerdict(
  * The clean-teardown command sequence on a hard-timeout breach, mirroring the
  * watchdog + EXIT-trap discipline (bin/roll:9044-9052, 8676-8687, 9120-9125):
  *   1. kill the agent process group (SIGTERM, then SIGKILL after the grace).
- *   2. emit the TERMINAL cycle:end event with outcome `blocked` (I8 — a terminal
+ *   2. MEASURE the preserved worktree's real `tcr:` count (FIX-1244 — a builder
+ *      killed AFTER landing real commits must not read as zero-TCR; the terminal
+ *      row + the loop's self-heal gate both consume this count).
+ *   3. emit the TERMINAL cycle:end event with outcome `blocked` (I8 — a terminal
  *      event is ALWAYS written, even on the abort path; bin/roll:8679).
- *   3. write the runs.jsonl `failed` row (dashboard terminal record, bin/roll:8685).
- *   4. append the timeout ALERT (bin/roll:8686).
- *   5. release the inner lock (bin/roll:8770) — the worktree is PRESERVED for
+ *   4. write the runs.jsonl `failed` row (dashboard terminal record, bin/roll:8685).
+ *   5. append the timeout ALERT (bin/roll:8686).
+ *   6. release the inner lock (bin/roll:8770) — the worktree is PRESERVED for
  *      audit (NOT cleaned, bin/roll:9122), so no worktree-cleanup command.
  * The order is asserted in tests; lock release comes LAST so the terminal event +
  * runs row are durably written before the lock frees the slot.
@@ -517,6 +520,7 @@ export function watchdogVerdict(
 export function timeoutTeardownCommands(ctx: TerminalContext): CycleCommand[] {
   return [
     { kind: "kill_agent", graceSec: WATCHDOG_KILL_GRACE_SEC },
+    { kind: "measure_worktree" },
     { kind: "emit_event", event: cycleEndEvent(ctx, "blocked") },
     { kind: "append_run", status: "blocked", outcome: "blocked", cycleId: ctx.cycleId },
     {
@@ -766,6 +770,7 @@ export type CycleCommand =
   | { kind: "kill_agent"; graceSec: number } // watchdog teardown.
   | { kind: "sleep_backoff"; seconds: number } // retry backoff (adapter sleeps).
   | { kind: "capture_facts" } // git rev-list/log count (bin/roll:9127-9157).
+  | { kind: "measure_worktree" } // FIX-1244: lightweight tcr-count probe on the PRESERVED worktree (timeout teardown only — no gates).
   | { kind: "publish_pr"; branch: string; docOnly: boolean; manualMerge?: boolean; draft?: boolean } // delivery/pr planPublishPr.
   | { kind: "merge_back"; branch: string } // _worktree_merge_back (gh-missing tier).
   | { kind: "push_orphan"; branch: string } // FIX-039 orphan branch+tag.
@@ -800,8 +805,10 @@ export interface CycleContext {
    *  (FIX-207) to decide whether an acceptance report was produced THIS cycle. */
   startSec?: number;
   /** FIX-208: real `tcr:` commit count, captured by the executor while the
-   *  worktree is alive (capture_facts). Threaded into the runs row so the
-   *  可回溯链 stops reporting a hardcoded 0. Absent ⇒ not yet captured. */
+   *  worktree is alive (capture_facts — or measure_worktree on the timeout
+   *  teardown, FIX-1244). Threaded into the runs row so the 可回溯链 stops
+   *  reporting a hardcoded 0. Absent ⇒ not yet captured ⇒ UNKNOWN (the
+   *  zero-TCR gate must treat unknown conservatively, never as 0). */
   tcrCount?: number;
   /** FIX-343 (step ①): the BUILDER's unique session id, minted ONCE at the
    *  working-agent spawn (`<cycleId>:build:<agent>:<clock>`) and reused across

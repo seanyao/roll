@@ -928,10 +928,11 @@ describe("FIX-929 — stallVerdict (agent stall detection: soft signal, no kill)
 });
 
 describe("timeout breach mid-execute → clean teardown ORDER", () => {
-  it("teardownCommands order: kill → terminal event → run → alert → release lock", () => {
+  it("teardownCommands order: kill → MEASURE worktree → terminal event → run → alert → release lock", () => {
     const cmds = timeoutTeardownCommands({ cycleId: "c1", branch: "loop/cycle-c1", agent: "claude", model: "sonnet" });
     expect(cmds.map((c) => c.kind)).toEqual([
       "kill_agent",
+      "measure_worktree",
       "emit_event",
       "append_run",
       "append_alert",
@@ -960,6 +961,7 @@ describe("timeout breach mid-execute → clean teardown ORDER", () => {
     expect(state.done).toBe(true);
     expect(cmds.map((c) => c.kind)).toEqual([
       "kill_agent",
+      "measure_worktree",
       "emit_event",
       "append_run",
       "append_alert",

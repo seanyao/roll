@@ -37,8 +37,10 @@ export interface GitPort {
    *  then reset main to origin/main. Returns the rescued SHA and exit code. */
   rescueLeaked(repoCwd: string, refName: string): Promise<{ code: number; rescuedSha: string }>;
   /** FIX-208: count `tcr:` commits ahead of origin/main (v2口径:
-   *  `git log --oneline origin/main..HEAD | grep -c ' tcr:'`) in the worktree. */
-  tcrCount(worktreeCwd: string): Promise<number>;
+   *  `git log --oneline origin/main..HEAD | grep -c ' tcr:'`) in the worktree.
+   *  FIX-1244: `undefined` = could NOT determine (git error / missing ref) —
+   *  callers must not collapse unknown into 0 (a false zero orphans real work). */
+  tcrCount(worktreeCwd: string): Promise<number | undefined>;
   /** US-LOOP-076: the runner's OWN observation of commits on the cycle branch —
    *  `git log --format=%H%x09%ct%x09%s origin/main..HEAD` (oldest-first) in the
    *  worktree. Feeds the agent-agnostic cycle observer so the build/TCR phase

@@ -644,6 +644,20 @@ export function shouldSuppressGoalChildFailureCounter(input: {
 }
 
 /**
+ * FIX-1244 — the zero-TCR self-heal gate as a pure predicate. A cycle qualifies
+ * ONLY when the worktree's tcr count was actually MEASURED as 0 on a stall
+ * terminal (`gave_up` / `blocked`). `undefined` means the count was never
+ * captured (timeout teardown pre-measurement crash, undeterminable git probe):
+ * unknown is NOT zero — the conservative verdict keeps the completed work
+ * (worktree preserved, fail-loud path) instead of swapping the agent and
+ * orphaning real commits (实证 cycle-20260713-154751: 4 real `tcr:` commits
+ * misjudged as zero-TCR).
+ */
+export function isZeroTcrStall(terminal: string | undefined, tcrCount: number | undefined): boolean {
+  return tcrCount === 0 && (terminal === "gave_up" || terminal === "blocked");
+}
+
+/**
  * FIX-363/FIX-404: scan THIS cycle's events for an external agent block
  * (`agent:blocked` auth/network, emitted by build/review/score paths). A failed
  * cycle caused by such a block is an EXTERNAL failure — not logged in / network
@@ -1345,9 +1359,13 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   // network); a genuine offline failure is handled in the isFail block below.
   {
     const sid = (result.state?.ctx?.storyId ?? "").trim();
-    const tcr = result.state?.ctx?.tcrCount ?? 0;
+    // FIX-1244: undefined = the cycle NEVER measured the worktree (e.g. a
+    // pre-measurement crash, or an undeterminable git probe). Unknown is NOT
+    // zero — a misjudged zero-TCR orphans completed work (the measured count
+    // now arrives via measure_worktree on the timeout teardown).
+    const tcr = result.state?.ctx?.tcrCount;
     const failedAgent = (result.state?.ctx?.agent ?? "").trim();
-    const zeroTcr = tcr === 0 && (result.terminal === "gave_up" || result.terminal === "blocked");
+    const zeroTcr = isZeroTcrStall(result.terminal, tcr);
     if (sid !== "" && failedAgent !== "" && zeroTcr) {
       const backlogFile = join(id.path, ".roll", "backlog.md");
       const bus = new EventBus();

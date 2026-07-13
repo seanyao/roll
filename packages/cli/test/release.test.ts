@@ -35,6 +35,9 @@ function fakeDeps(over: Partial<ReleaseFlowDeps> = {}): { deps: ReleaseFlowDeps;
   const writes: string[] = [];
   const deps: ReleaseFlowDeps = {
     version: () => "3.612.2",
+    // Default to roll's own package so the base fixture stays on the calver path
+    // (FIX-1247); target-project cases override packageName to exercise semver.
+    packageName: () => "@seanyao/roll",
     branch: () => "main",
     clean: () => true,
     synced: () => true,
@@ -81,6 +84,36 @@ describe("runReleaseFlow — the one transaction", () => {
       "tag-push",
     ]);
     expect(writes.at(-1)).toBe("pushTag:v3.613.1");
+  });
+
+  it("FIX-1247: a target project's release anchors to ITS semver, not roll's build number", async () => {
+    // intel-radar with a real semver lineage, released on the same day roll's
+    // own build number is 4.713.x. Before the fix the planner mangled the mid
+    // segment to today's MMDD → 1.713.1. It must bump the project's own patch.
+    const { deps, writes } = fakeDeps({
+      packageName: () => "intel-radar",
+      version: () => "1.2.3",
+      readChangelog: () => "# C\n\n## Unreleased\n\n- thing one\n",
+      now: () => new Date("2026-07-13T08:00:00Z"),
+    });
+    const res = await runReleaseFlow("/repo", deps, { dryRun: false, yes: true });
+    expect(res.status).toBe("released");
+    expect(res.tag).toBe("v1.2.4");
+    expect(res.tag).not.toContain("713");
+    expect(writes).toContain("bump:1.2.4");
+  });
+
+  it("FIX-1247: a target project's FIRST release gets 0.1.0 (no roll build number)", async () => {
+    const { deps, writes } = fakeDeps({
+      packageName: () => "intel-radar",
+      version: () => "0.0.0",
+      readChangelog: () => "# C\n\n## Unreleased\n\n- initial\n",
+      now: () => new Date("2026-07-13T08:00:00Z"),
+    });
+    const res = await runReleaseFlow("/repo", deps, { dryRun: false, yes: true });
+    expect(res.status).toBe("released");
+    expect(res.tag).toBe("v0.1.0");
+    expect(writes).toContain("bump:0.1.0");
   });
 
   it("FIX-288 AC4: a drifting consistency gate aborts BEFORE the PR/merge — nothing lands on main", async () => {

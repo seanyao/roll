@@ -1,9 +1,22 @@
 /**
  * roll release — version + flow planning (US-PORT-004, TS port).
  *
- * The Roll release scheme is calver: `<major>.<MMDD>.<seq>` (e.g. `3.606.2` =
- * major 3, June 6, the 2nd release that day). package.json is the single source
- * of truth for the running version (see packages/cli/src/commands/version.ts).
+ * TWO version schemes live here (FIX-1247):
+ *
+ *   - calver — roll's OWN build-number scheme `<major>.<MMDD>.<seq>` (e.g.
+ *     `3.606.2` = major 3, June 6, the 2nd release that day). This is roll's
+ *     internal cadence and MUST NOT leak onto the projects roll releases.
+ *   - semver — the DEFAULT for every other (target/user) project: bump the
+ *     patch of the project's own `<major>.<minor>.<patch>` lineage, and give a
+ *     sensible initial value on first release. roll serves user projects (see
+ *     roll_serves_user_projects), so a target project's version must anchor to
+ *     the TARGET's package.json, never to roll's build number — releasing
+ *     intel-radar must not produce `4.713.1`/`0.713.1`.
+ *
+ * The scheme is chosen from the project being released ({@link resolveVersionScheme}):
+ * only roll's own package resolves to calver; everything else is semver.
+ * package.json is the single source of truth for the running version (see
+ * packages/cli/src/commands/version.ts).
  *
  * These are PURE functions (no I/O, no clock): the date is always passed in so
  * they unit-test deterministically. The CLI adapter (packages/cli) reads the
@@ -35,11 +48,59 @@ export interface ReleaseDate {
 
 const DEFAULT_MAJOR = 3;
 
+/** roll's own npm package name — the ONLY project that uses the calver scheme. */
+export const ROLL_PACKAGE_NAME = "@seanyao/roll";
+
+/** Sensible first-release version for a target project with no version lineage. */
+export const INITIAL_SEMVER = "0.1.0";
+
+/** Which version scheme a release plan uses. */
+export type VersionScheme = "calver" | "semver";
+
+/**
+ * Choose the version scheme from the project being released. Only roll's own
+ * package uses the calver build-number scheme; every other (user/target)
+ * project uses plain semver so its version anchors to its OWN lineage, never to
+ * roll's build number (FIX-1247).
+ */
+export function resolveVersionScheme(packageName: string | null | undefined): VersionScheme {
+  return packageName === ROLL_PACKAGE_NAME ? "calver" : "semver";
+}
+
 /** Parse a `<major>.<mid>.<seq>` calver string, or null if it does not conform. */
 export function parseVersion(v: string): Version | null {
   const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(v.trim());
   if (!m) return null;
   return { major: Number(m[1]), mid: Number(m[2]), seq: Number(m[3]) };
+}
+
+/** A parsed semver `<major>.<minor>.<patch>` (core triple only). */
+export interface Semver {
+  major: number;
+  minor: number;
+  patch: number;
+}
+
+/** Parse a strict `<major>.<minor>.<patch>` semver, or null if it does not conform. */
+export function parseSemver(v: string): Semver | null {
+  const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(v.trim());
+  if (!m) return null;
+  return { major: Number(m[1]), minor: Number(m[2]), patch: Number(m[3]) };
+}
+
+/**
+ * The next semver for a target project: bump the patch of the project's own
+ * lineage. A missing/unparseable version, or the npm-init default `0.0.0` (no
+ * real lineage yet), is a FIRST release → the sensible initial {@link INITIAL_SEMVER}.
+ * This is deliberately date-independent: a user project's version has nothing to
+ * do with roll's release calendar.
+ */
+export function computeNextSemver(current: string): string {
+  const parsed = parseSemver(current);
+  if (!parsed || (parsed.major === 0 && parsed.minor === 0 && parsed.patch === 0)) {
+    return INITIAL_SEMVER;
+  }
+  return `${parsed.major}.${parsed.minor}.${parsed.patch + 1}`;
 }
 
 /** The MMDD middle segment for a release date: month * 100 + day. */
@@ -53,12 +114,23 @@ function midOf(date: ReleaseDate): number {
  * resets to 1. The current major is preserved (falls back to {@link DEFAULT_MAJOR}
  * when the current version is malformed).
  */
-export function computeNextVersion(current: string, date: ReleaseDate): string {
+export function computeNextCalver(current: string, date: ReleaseDate): string {
   const parsed = parseVersion(current);
   const major = parsed?.major ?? DEFAULT_MAJOR;
   const mid = midOf(date);
   const seq = parsed && parsed.mid === mid ? parsed.seq + 1 : 1;
   return `${major}.${mid}.${seq}`;
+}
+
+/**
+ * The next version for a release. Under `semver` (the default for every
+ * target/user project) the version anchors to the project's OWN lineage — the
+ * `date` is ignored (FIX-1247). Under `calver` (roll's own scheme) the date
+ * drives the MMDD middle segment. Defaults to `calver` for back-compat with
+ * roll's own release path; callers releasing a target project pass `semver`.
+ */
+export function computeNextVersion(current: string, date: ReleaseDate, scheme: VersionScheme = "calver"): string {
+  return scheme === "semver" ? computeNextSemver(current) : computeNextCalver(current, date);
 }
 
 /** Inputs for {@link planRelease}. */
@@ -67,6 +139,12 @@ export interface ReleasePlanInput {
   date: ReleaseDate;
   /** True when CHANGELOG.md has releasable notes for the planned release. */
   changelogReady: boolean;
+  /**
+   * Version scheme for THIS project (FIX-1247). Defaults to `calver` (roll's own
+   * scheme) for back-compat; the CLI resolves it from the project's package name
+   * so target projects get `semver` and never inherit roll's build number.
+   */
+  scheme?: VersionScheme;
 }
 
 /** A computed release plan — pure data the CLI renders into guidance. */
@@ -80,7 +158,7 @@ export interface ReleasePlan {
 
 /** Build the release plan: next version, the `v*` tag, and changelog readiness. */
 export function planRelease(input: ReleasePlanInput): ReleasePlan {
-  const nextVersion = computeNextVersion(input.currentVersion, input.date);
+  const nextVersion = computeNextVersion(input.currentVersion, input.date, input.scheme ?? "calver");
   return {
     currentVersion: input.currentVersion,
     nextVersion,

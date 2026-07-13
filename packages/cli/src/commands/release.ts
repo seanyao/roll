@@ -32,7 +32,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { EventBus, EVENTS_FILE, foldUnreleased, isChangelogReady, planRelease, type ReleaseDate, type ReleaseStep } from "@roll/core";
+import { EventBus, EVENTS_FILE, foldUnreleased, isChangelogReady, planRelease, resolveVersionScheme, type ReleaseDate, type ReleaseStep } from "@roll/core";
 import { isTransientGhError } from "@roll/infra";
 import { type Lang, resolveLang, t, v2Catalog, v3Catalog } from "@roll/spec";
 import { c, renderState } from "../render.js";
@@ -54,6 +54,13 @@ const REMOVED_ROUTES = new Set(["ship", "waiver", "changelog", "tag", "publish"]
 /** Injectable seams — the transaction is unit-tested without git/gh/npm. */
 export interface ReleaseFlowDeps {
   version: (cwd: string) => string;
+  /**
+   * FIX-1247: the released project's package name, used to pick the version
+   * scheme — only roll's own package uses calver; every target project uses
+   * semver so its version anchors to its own lineage, not roll's build number.
+   * Empty string when unreadable (→ semver, the safe default for targets).
+   */
+  packageName: (cwd: string) => string;
   branch: (cwd: string) => string;
   clean: (cwd: string) => boolean;
   synced: (cwd: string) => boolean;
@@ -411,6 +418,14 @@ export function realReleaseDeps(): ReleaseFlowDeps {
         return "";
       }
     },
+    packageName: (cwd) => {
+      try {
+        const pkg = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8")) as { name?: unknown };
+        return typeof pkg.name === "string" ? pkg.name : "";
+      } catch {
+        return "";
+      }
+    },
     branch: (cwd) => {
       try {
         return git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
@@ -634,7 +649,10 @@ async function runReleaseFlowInner(
   if (!deps.synced(cwd)) return abort("plan", "main is behind origin — pull first");
   const d = deps.now();
   const date: ReleaseDate = { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate() };
-  const plan = planRelease({ currentVersion: current, date, changelogReady: true });
+  // FIX-1247: anchor the version to THIS project's scheme — only roll itself
+  // uses calver; a target project uses semver and never inherits roll's build number.
+  const scheme = resolveVersionScheme(deps.packageName(cwd));
+  const plan = planRelease({ currentVersion: current, date, changelogReady: true, scheme });
   if (deps.tagExists(cwd, plan.tag)) return abort("plan", `tag ${plan.tag} already exists`);
   step("plan", `${current} → ${plan.nextVersion} (${plan.tag})`);
 
@@ -773,17 +791,19 @@ export async function releaseCommand(args: string[], depsOverride?: ReleaseFlowD
     const d = deps.now();
     const date = { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate() };
     const currentVersion = deps.version(cwd);
+    const scheme = resolveVersionScheme(deps.packageName(cwd));
     let changelogText: string | undefined;
     try {
       changelogText = deps.readChangelog(cwd);
     } catch {
       // Unreadable changelog reports changelogReady: false.
     }
-    const next = planRelease({ currentVersion, date, changelogReady: false });
+    const next = planRelease({ currentVersion, date, changelogReady: false, scheme });
     const plan = planRelease({
       currentVersion,
       date,
       changelogReady: changelogText !== undefined ? isChangelogReady(changelogText, next.nextVersion) : false,
+      scheme,
     });
     process.stdout.write(`${JSON.stringify(plan)}\n`);
     return 0;

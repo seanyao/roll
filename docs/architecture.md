@@ -154,6 +154,10 @@ building ──attest earned──► publishable ──push+PR──► awaitin
    awaiting_merge ──L1/L2 强信号命中──► delivered / delivered_external
    awaiting_merge ──CI 绿未合──► 自驱合并 (gh pr merge --squash) ──► 下轮判 delivered
    awaiting_merge ──CI 红──► ci_failed ──► fix-forward cycle
+   awaiting_merge ──CI 长红(≥24h)──► degraded(ci_stuck)，带 reason+dwell
+   awaiting_merge ──draft / 合并冲突 / 缺权限──► degraded(draft|merge_conflict|no_permission)
+   awaiting_merge ──PR 被关(未合)──► terminal(pr_closed_unmerged)
+   awaiting_merge ──mergeable UNKNOWN / gh 错──► wait（瞬时态，不判）
    awaiting_merge ──同卡他 cycle 已 delivered──► superseded（带原因）
    awaiting_merge ──证据不足──► 留 awaiting_merge（绝不误判）
 ```
@@ -180,6 +184,8 @@ building ──attest earned──► publishable ──push+PR──► awaitin
 | L3 | **backlog Done + attest 报告存在** | 弱（仅佐证，单独不足） | 兜底交叉验证 |
 
 **判定规则**：`delivered` 需 ≥1 个强信号（L1 或 L2）。L3 单独不足以判 delivered（agent 可能预写 Done）。L1 与 L2 冲突时以 L1 为准并告警。全不命中 → 留 `awaiting_merge`，**绝不误判**。
+
+**边界态判据（US-DELIV-010）**：卡死/终态 PR 不再笼统挂起——`reconcileDelivery` 派生确定性判定：PR 被关（未合）→ `terminal(pr_closed_unmerged)`；draft / 合并冲突 / CI 长红（滞留 ≥ `CI_STUCK_DWELL_MS`=24h，锚定 `delivery:published`）/ gh 缺权限（auth）→ `degraded`，均带 **reason + dwell**（`roll loop reconcile --json` 可读，供呈现与人工分流）；mergeable UNKNOWN、gh 瞬时错误（offline/provider_error/not_found）→ `wait`；分支删除 / force-push 改了 patch-id → L2 自然失效，靠 L1 或 wait；squash 改写标题不影响 patch-id（按 diff 内容计算）。铁律不变：**degraded/terminal 绝不等于 delivered**，draft/冲突/UNKNOWN 也绝不触发自驱合并。
 
 **单一真相引擎（US-DELIV-008）**：`roll loop reconcile` 命令与 `roll loop cycles` 读路径共用同一个纯函数 `reconcileDelivery` + 同一份事实采集（`packages/cli/src/lib/delivery-facts.ts`）。旧 subject-match 探针已退役为 L1 的离线输入信号，不再是并行的第二判据——读路径与命令对同一 cycle 的 delivered 判定永不分歧。
 

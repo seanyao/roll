@@ -9,6 +9,7 @@ import {
   CYCLE_VERDICTS,
   ledgerFailedCount,
   ledgerVerdict,
+  reconcileCyclesWithDelivery,
   reconcileDeliveredUnpublishedVerdicts,
   reconcilePendingMergeVerdicts,
   reconcileSupersededVerdicts,
@@ -673,6 +674,112 @@ describe("FIX-350 — reconcile is CYCLE-ACCURATE: a cycle is delivered IFF its 
     // No PR → falls back to the story-id grep.
     expect(truth("", 773)).toBe(true); // PR present still decides
     expect(truth("", 999)).toBe(false);
+  });
+});
+
+describe("US-DELIV-008 — reconcileCyclesWithDelivery: the read path runs the SINGLE reconcile engine", () => {
+  // The old subject-match probe (reconcilePendingMergeVerdicts + cycleMergeTruth)
+  // is retired as a parallel criterion: the read path now delegates the
+  // delivered/wait judgment per row to an injected `decide` — wired in
+  // production to cycleReconcileDecision (offline L1 + patch-id L2 → the pure
+  // reconcileDelivery), the SAME engine `roll loop reconcile` runs.
+  const DELIVERED = { kind: "delivered", via: "external", signal: "patch_id" } as const;
+  const WAIT = { kind: "wait" } as const;
+
+  function pendingLedger(storyId = "FIX-287"): CycleLedgerRow[] {
+    const p = project(
+      [
+        {
+          cycle_id: "20260616-234303-21843",
+          status: "published",
+          outcome: "published_pending_merge",
+          story_id: storyId,
+          agent: "claude",
+          ts: "2026-06-16T23:43:03Z",
+          duration_sec: 600,
+          tcr_count: 4,
+        },
+      ],
+      [{ type: "pr:open", prNumber: 773, storyId, ts: 1 }],
+    );
+    const rows = collectCycleLedger(p);
+    expect(rows[0]!.verdict).toBe("pending_merge");
+    return rows;
+  }
+
+  it("engine: delivered → verdict flips delivered/green, tape end + `#N open` pr segment promoted", () => {
+    const out = reconcileCyclesWithDelivery(pendingLedger(), () => DELIVERED);
+    expect(out[0]!.verdict).toBe("delivered");
+    expect(out[0]!.tape.find((s) => s.key === "end")?.state).toBe("pass");
+    expect(out[0]!.tape.find((s) => s.key === "pr")?.detail).toBe("#773 merged");
+    expect(out[0]!.tape.find((s) => s.key === "pr")?.state).toBe("pass");
+  });
+
+  it("engine: wait / merge_now / ci_failed → stays pending_merge (read path never merges, never invents a failure)", () => {
+    for (const result of [WAIT, { kind: "merge_now", method: "squash" } as const, { kind: "ci_failed" } as const]) {
+      const out = reconcileCyclesWithDelivery(pendingLedger(), () => result);
+      expect(out[0]!.verdict).toBe("pending_merge");
+      expect(out[0]!.tape.find((s) => s.key === "pr")?.detail).toBe("#773 open");
+    }
+  });
+
+  it("unpublished row + engine delivered → promoted too (awaiting AND unpublished share the one engine)", () => {
+    const p = project([
+      { cycle_id: "u1", status: "local", outcome: "unpublished", story_id: "US-U-1", ts: "2026-06-16T03:00:00Z", tcr_count: 2 },
+    ]);
+    const rows = collectCycleLedger(p);
+    expect(rows[0]!.verdict).toBe("unpublished");
+    const out = reconcileCyclesWithDelivery(rows, () => DELIVERED);
+    expect(out[0]!.verdict).toBe("delivered");
+    expect(out[0]!.tape.find((s) => s.key === "end")?.state).toBe("pass");
+  });
+
+  it("unpublished row + engine wait → keeps its neutral unpublished verdict", () => {
+    const p = project([
+      { cycle_id: "u2", status: "local", outcome: "unpublished", story_id: "US-U-2", ts: "2026-06-16T03:00:00Z", tcr_count: 2 },
+    ]);
+    const out = reconcileCyclesWithDelivery(collectCycleLedger(p), () => WAIT);
+    expect(out[0]!.verdict).toBe("unpublished");
+  });
+
+  it("failed / delivered / idle rows are never re-judged (decide not consulted for them)", () => {
+    const p = project([
+      { cycle_id: "f", status: "failed", outcome: "failed", story_id: "US-F", ts: "2026-06-16T05:00:00Z" },
+      { cycle_id: "d", status: "merged", outcome: "delivered", story_id: "US-D", ts: "2026-06-16T04:00:00Z" },
+      { cycle_id: "pm", status: "published", outcome: "published_pending_merge", story_id: "US-PM", ts: "2026-06-16T03:00:00Z" },
+    ]);
+    const judged: string[] = [];
+    const out = reconcileCyclesWithDelivery(collectCycleLedger(p), (r) => {
+      judged.push(r.cycleId);
+      return DELIVERED;
+    });
+    const byId = new Map(out.map((r) => [r.cycleId, r.verdict]));
+    expect(byId.get("f")).toBe("failed"); // red stays red
+    expect(byId.get("d")).toBe("delivered");
+    expect(byId.get("pm")).toBe("delivered"); // the pending one flips
+    expect(judged).toEqual(["pm"]); // ONLY the eligible row was judged
+  });
+
+  it("empty storyId AND no prNumber → decide not consulted, row stays pending (nothing to match on)", () => {
+    const rows = pendingLedger();
+    rows[0]!.storyId = "";
+    rows[0]!.prNumber = undefined;
+    let consulted = 0;
+    const out = reconcileCyclesWithDelivery(rows, () => {
+      consulted += 1;
+      return DELIVERED;
+    });
+    expect(out[0]!.verdict).toBe("pending_merge");
+    expect(consulted).toBe(0);
+  });
+
+  it("collectCycleLedger threads the cycle's branch from its delivery:published event", () => {
+    const p = project(
+      [{ cycle_id: "c-br", status: "published", outcome: "published_pending_merge", story_id: "US-BR", ts: "2026-06-16T03:00:00Z", tcr_count: 1 }],
+      [{ type: "delivery:published", cycleId: "c-br", storyId: "US-BR", branch: "loop/c-br", prNumber: 5, prUrl: "u", ts: 1 }],
+    );
+    const rows = collectCycleLedger(p);
+    expect(rows[0]!.branch).toBe("loop/c-br");
   });
 });
 

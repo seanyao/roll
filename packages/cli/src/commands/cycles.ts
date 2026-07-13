@@ -7,19 +7,22 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { resolveLang, type Lang, type RollEvent, parseEventLine } from "@roll/spec";
-import { extractCycleSignals, parseBacklog, signalKindForMarker, type TimelineEntry, readDeliveries, nodeDeliveryStore } from "@roll/core";
+import { resolveLang, type DeliveryState, type Lang, type RollEvent, parseEventLine } from "@roll/spec";
+import { extractCycleSignals, parseBacklog, projectDeliveryState, signalKindForMarker, type TimelineEntry, readDeliveries, nodeDeliveryStore } from "@roll/core";
 import {
   bucketCounts,
   collectCycleLedger,
+  deliveryMetrics,
   formatBuilderIdentity,
   CYCLE_VERDICTS,
   ledgerFailedCount,
   reconcileCyclesWithDelivery,
   reconcileDeliveredUnpublishedVerdicts,
+  reconcileDeliveryStateProjection,
   reconcileSupersededVerdicts,
   type CycleLedgerRow,
   type CycleLedgerVerdict,
+  type DeliveryMetrics,
 } from "../lib/cycle-ledger.js";
 import { cycleReconcileDecision } from "../lib/delivery-facts.js";
 import { collectGitDossierFacts, storyHasMergeEvidence, type GitDossierFacts } from "../lib/story-dossier.js";
@@ -96,7 +99,47 @@ export function reconciledLedger(cwd: string): CycleLedgerRow[] {
       prNumber: row.prNumber,
     }),
   );
-  return reconcileSupersededVerdicts(merged, isSuperseded);
+  // US-DELIV-012: fold the event stream once into the EVENT-AUTHORITATIVE
+  // delivery projection so the ledger renders `delivered_external` (the
+  // hand/supervisor-merge share the offline decision cannot see) and carries the
+  // awaiting_merge dwell anchor for the delivery metrics. Read-only.
+  const { stateFor, awaitingSince } = deliveryProjections(readAllEvents(cwd));
+  const projected = reconcileDeliveryStateProjection(
+    merged,
+    (cid) => stateFor.get(cid),
+    (cid) => awaitingSince.get(cid),
+  );
+  return reconcileSupersededVerdicts(projected, isSuperseded);
+}
+
+/**
+ * US-DELIV-012 — fold the loop event stream ONCE into the two per-cycle
+ * projections the ledger's delivery reconcile needs: the event-authoritative
+ * {@link DeliveryState} (via the single `projectDeliveryState` writer) and the
+ * `delivery:published` ts (the awaiting_merge dwell anchor). One pass — never
+ * `projectDeliveryState` per cycle over the full stream (its docstring's O(n×m)
+ * warning).
+ */
+function deliveryProjections(events: RollEvent[]): {
+  stateFor: Map<string, DeliveryState>;
+  awaitingSince: Map<string, number>;
+} {
+  const byCycle = new Map<string, RollEvent[]>();
+  const awaitingSince = new Map<string, number>();
+  for (const ev of events) {
+    if (!("cycleId" in ev) || typeof (ev as { cycleId?: unknown }).cycleId !== "string") continue;
+    const cid = (ev as { cycleId: string }).cycleId;
+    let arr = byCycle.get(cid);
+    if (arr === undefined) {
+      arr = [];
+      byCycle.set(cid, arr);
+    }
+    arr.push(ev);
+    if (ev.type === "delivery:published" && !awaitingSince.has(cid)) awaitingSince.set(cid, ev.ts);
+  }
+  const stateFor = new Map<string, DeliveryState>();
+  for (const [cid, evs] of byCycle) stateFor.set(cid, projectDeliveryState(evs, cid));
+  return { stateFor, awaitingSince };
 }
 import { c, renderState, stripAnsi } from "../render.js";
 
@@ -118,6 +161,8 @@ export function cycleNo(cycleId: string): string {
 
 const VERDICT_COLOR: Record<string, string> = {
   delivered: "green",
+  delivered_external: "green", // US-DELIV-012: hand/supervisor merge — a real delivery, green
+  degraded: "yellow", // US-DELIV-012: awaiting_merge stuck (US-DELIV-010) — amber, needs triage
   pending_merge: "yellow", // FIX-322: opened a PR, merge pending — in-flight, NOT delivered (amber)
   unpublished: "blue", // FIX-351: gates passed, work local, publish didn't land — neutral, NOT red
   superseded: "blue", // FIX-337: card landed elsewhere (backlog Done / merge evidence) — neutral, NOT red
@@ -135,7 +180,13 @@ const VERDICT_COLOR: Record<string, string> = {
 // the displayed total === the sum of all buckets.
 const BUCKET_LABEL: Record<CycleLedgerVerdict, { en: string; zh: string }> = {
   delivered: { en: "delivered", zh: "已交付" },
-  pending_merge: { en: "pending_merge", zh: "待合并" },
+  // US-DELIV-012: the delivery-reconciler vocabulary (design §3.1) — a
+  // hand/supervisor merge and a degraded awaiting_merge are first-class labels.
+  delivered_external: { en: "delivered (external)", zh: "外部合并" },
+  degraded: { en: "degraded", zh: "降级" },
+  // US-DELIV-012: `pending_merge` IS the design's `awaiting_merge` suspension;
+  // present the design vocabulary so the ledger no longer shows only old words.
+  pending_merge: { en: "awaiting_merge", zh: "待合并" },
   unpublished: { en: "unpublished", zh: "未发布" },
   superseded: { en: "superseded", zh: "已被取代" },
   failed: { en: "failed/reverted/blocked", zh: "失败/回滚/阻塞" },
@@ -212,12 +263,16 @@ export function cyclesLedgerJson(rows: CycleLedgerRow[], sinceLabel: string, now
   // FIX-361: cost may be "$X.XX" or "¥X.XX". Aggregate per-currency (the shared
   // FIX-337 口径) so consumers never blindly sum across currencies.
   const costByCur = cyclesCostByCurrency(within);
+  // US-DELIV-012: the delivery metrics (external-merge rate / awaiting dwell /
+  // fan-out waste) from the SAME pure derivation the human line renders.
+  const delivery = deliveryMetrics(within, nowSec * 1000);
   return {
     since: sinceLabel,
     cycles: within.length,
     delivered,
     failed,
     buckets,
+    delivery,
     costByCurrency: costByCur,
     rows: within.map((r) => ({
       no: cycleNo(r.cycleId),
@@ -310,6 +365,49 @@ function costSummary(within: readonly CycleLedgerRow[], lang: Lang): string {
   return parts.join(" + ");
 }
 
+/**
+ * US-DELIV-012 (design §9) — the delivery metrics line: external-merge rate,
+ * awaiting_merge dwell, fan-out waste. One human-readable string from the SAME
+ * pure {@link deliveryMetrics} the --json view emits, so the two never diverge.
+ * Returns "" when there is nothing to report (no deliveries, none awaiting, no
+ * waste) so a quiet window carries no noise line.
+ */
+export function deliveryMetricsLine(m: DeliveryMetrics, lang: Lang): string {
+  const parts: string[] = [];
+  if (m.delivered + m.deliveredExternal > 0 && m.externalMergeRate !== null) {
+    const pct = Math.round(m.externalMergeRate * 100);
+    parts.push(
+      lang === "zh"
+        ? `外部合并率 ${pct}%（${m.deliveredExternal}/${m.delivered + m.deliveredExternal}）`
+        : `external-merge ${pct}% (${m.deliveredExternal}/${m.delivered + m.deliveredExternal})`,
+    );
+  }
+  if (m.awaitingCount > 0) {
+    const dwell = m.awaitingDwellMsAvg !== null ? humanDwell(m.awaitingDwellMsAvg) : "—";
+    parts.push(
+      lang === "zh"
+        ? `等待合并 ${m.awaitingCount}（均滞留 ${dwell}）`
+        : `awaiting_merge ${m.awaitingCount} (avg dwell ${dwell})`,
+    );
+  }
+  if (m.degraded > 0) parts.push(lang === "zh" ? `降级 ${m.degraded}` : `degraded ${m.degraded}`);
+  if (m.fanoutWasteCycles > 0) {
+    parts.push(lang === "zh" ? `fan-out 浪费 ${m.fanoutWasteCycles}` : `fan-out waste ${m.fanoutWasteCycles}`);
+  }
+  if (parts.length === 0) return "";
+  const label = lang === "zh" ? "交付" : "delivery";
+  return `${label}: ${parts.join(" · ")}`;
+}
+
+/** Human dwell duration from epoch-ms delta ("3h" / "2d" / "45m" / "30s"). */
+function humanDwell(ms: number): string {
+  const sec = Math.round(ms / 1000);
+  if (sec >= 86400) return `${Math.round(sec / 86400)}d`;
+  if (sec >= 3600) return `${Math.round(sec / 3600)}h`;
+  if (sec >= 60) return `${Math.round(sec / 60)}m`;
+  return `${sec}s`;
+}
+
 export function renderCyclesLedger(rows: CycleLedgerRow[], sinceLabel: string, lang: Lang, nowSec: number): string {
   const within = windowRows(rows, sinceLabel, nowSec);
   const lines: string[] = [];
@@ -323,7 +421,7 @@ export function renderCyclesLedger(rows: CycleLedgerRow[], sinceLabel: string, l
     lines.push(
       [
         pad(`#${cycleNo(r.cycleId)}`, 7),
-        pad(c(color, r.verdict), 13), // FIX-322: fits "pending_merge" (13)
+        pad(c(color, r.verdict), 18), // US-DELIV-012: fits "delivered_external" (18)
         pad(r.storyId === "" ? "—" : r.storyId, 16),
         pad(agentModel, 26),
         pad(tokensTotal(r.tokens), 6),
@@ -348,6 +446,10 @@ export function renderCyclesLedger(rows: CycleLedgerRow[], sinceLabel: string, l
     return `${c(color, String(part.count))} ${label}`;
   });
   const summary = [cycleWord, ...partStrs, costStr].join(" · ");
+  // US-DELIV-012: the delivery metrics line (external-merge rate / awaiting_merge
+  // dwell / fan-out waste), below the bucket summary. Omitted when empty.
+  const metricsStr = deliveryMetricsLine(deliveryMetrics(within, nowSec * 1000), lang);
+  const metricsLine = metricsStr === "" ? "" : `\n${c("muted", metricsStr)}`;
   const latest = within[0];
   // `roll cycle <handle>` is the spec'd companion (US-CLI-013, next card) —
   // the hint is the contract between the two surfaces, not a dead end.
@@ -355,7 +457,7 @@ export function renderCyclesLedger(rows: CycleLedgerRow[], sinceLabel: string, l
   if (within.length === 0) {
     return lang === "zh" ? `窗口内没有周期（--since ${sinceLabel}）\n` : `no cycles in the window (--since ${sinceLabel})\n`;
   }
-  return `${lines.join("\n")}\n\n${summary}${hint}\n`;
+  return `${lines.join("\n")}\n\n${summary}${metricsLine}${hint}\n`;
 }
 
 /** Read + parse every event from the project's events.ndjson (empty on miss). */

@@ -43,6 +43,8 @@ import { computeListCost, currencyFor } from "./prices-cost.js";
 import { exemptionStats, renderExemptionSignal } from "../runner/exemption-stats.js";
 import { TRUTH_SCHEMA_EPOCH_SEC, cycleTruthFromRow, deliveryGateDiagnosticsFromRows, outcomeToPanel, type DeliveryGateDiagnostic } from "../lib/truth-adapter.js";
 import { collectToolEvidenceFromEventsPath, formatToolCostSummary } from "../lib/tool-display.js";
+import { deliveryMetrics } from "../lib/cycle-ledger.js";
+import { reconciledLedger, deliveryMetricsLine } from "./cycles.js";
 import { TZ_OFFSET_MS, dayKeyOffset, pad2, shDayKey, shHHMM, shYmdHm, toShanghai } from "../lib/sh-time.js";
 
 function parseTs(ts: string): Date {
@@ -1972,6 +1974,23 @@ function render(
     evalLine = "";
   }
   if (evalLine) out.push("  " + c("dim", evalLine));
+
+  // US-DELIV-012: the delivery observability line — external-merge rate /
+  // awaiting_merge dwell / fan-out waste, from the SAME reconciled ledger +
+  // pure `deliveryMetrics` `roll cycles` renders. Live mode only (rtDir set): in
+  // fixture mode there is no real .roll to reconcile, and it must never run the
+  // git patch-id reconcile against the test's cwd. Read-only, resilient.
+  if (rtDir !== null) {
+    let deliveryLine = "";
+    try {
+      const root = (process.env["ROLL_MAIN_PROJECT"] ?? "").trim() || process.cwd();
+      const m = deliveryMetrics(reconciledLedger(root), now.getTime());
+      deliveryLine = deliveryMetricsLine(m, lang === "zh" ? "zh" : "en");
+    } catch {
+      deliveryLine = "";
+    }
+    if (deliveryLine) out.push("  " + c("dim", deliveryLine));
+  }
 
   out.push("");
   out.push(c("faint", "─".repeat(COLS)));

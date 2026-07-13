@@ -1,23 +1,25 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`roll cycles — US-CLI-012 > AC5: en/zh snapshots (scrubbed of color) 1`] = `
-"#0312   reverted      FIX-242          kimi-code / —              86k    $0.03   4m02s
-#0311   delivered     FIX-241          claude / —                 142k   $0.05   8m20s
-#0310   failed        US-META-010      codex / —                  64k    $0.02   3m11s
-#0305   blocked       IDEA-001         claude / —                 22k    $0.01   1m12s
+"#0312   reverted           FIX-242          kimi-code / —              86k    $0.03   4m02s
+#0311   delivered          FIX-241          claude / —                 142k   $0.05   8m20s
+#0310   failed             US-META-010      codex / —                  64k    $0.02   3m11s
+#0305   blocked            IDEA-001         claude / —                 22k    $0.01   1m12s
 
 4 cycles · 1 delivered · 3 failed/reverted/blocked · $0.11
+delivery: external-merge 0% (0/1)
 → roll cycle 0312
 "
 `;
 
 exports[`roll cycles — US-CLI-012 > AC5: en/zh snapshots (scrubbed of color) 2`] = `
-"#0312   reverted      FIX-242          kimi-code / —              86k    $0.03   4m02s
-#0311   delivered     FIX-241          claude / —                 142k   $0.05   8m20s
-#0310   failed        US-META-010      codex / —                  64k    $0.02   3m11s
-#0305   blocked       IDEA-001         claude / —                 22k    $0.01   1m12s
+"#0312   reverted           FIX-242          kimi-code / —              86k    $0.03   4m02s
+#0311   delivered          FIX-241          claude / —                 142k   $0.05   8m20s
+#0310   failed             US-META-010      codex / —                  64k    $0.02   3m11s
+#0305   blocked            IDEA-001         claude / —                 22k    $0.01   1m12s
 
 4 个周期 · 1 已交付 · 3 失败/回滚/阻塞 · $0.11
+交付: 外部合并率 0%（0/1）
 → roll cycle 0312
 "
 `;

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v4.713.2 — 2026-07-13
+
 ### 自动化流水线
 - 交付对账收敛成一套判据:`roll loop cycles` 的读账和 `roll loop reconcile` 的合并现在共用同一个引擎,不再两套口径打架把同一个 cycle 一会儿算已交付、一会儿算没交付 (US-DELIV-008) `[loop]`
 - 一条 `roll loop go` 就能从选卡一路走到开 PR、CI 绿后自动合并、标记交付——在周期边界自动做一次对账,不用再单独跑一条命令收尾,也没有后台守护进程 (US-DELIV-009) `[loop]`

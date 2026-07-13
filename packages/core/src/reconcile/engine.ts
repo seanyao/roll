@@ -376,7 +376,7 @@ export function reconcileStuckBacklog(
  *                                             the orphan-recovery reset).
  *   - its PR is CLOSED (unmerged)           → "todo" (abandoned → re-pickable).
  *   - its PR is still OPEN / state unknown  → "keep" (delivered, pending merge —
- *                                             rest at 🔨 + PR; the async PR loop
+ *                                             rest at 🔨 + PR; the reconciler
  *                                             merges it, a later preflight flips).
  *
  * Conservative by construction: an unknown/unprobed PR state NEVER flips Done

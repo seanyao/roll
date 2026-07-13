@@ -48,6 +48,10 @@ import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { lookup } from "node:dns/promises";
 import { resolveLang, t, v3Catalog } from "@roll/spec";
 
+export const PUBLISHED_DELIVERY_MESSAGE =
+  "loop run-once: delivery published — PR open, awaiting reconciliation (Delivery Reconciler advances merge and credits main evidence)\n" +
+  "loop run-once: 交付已发布——PR 已开，等待对账（交付对账器推进合并，并按 main 证据记账）\n";
+
 /** US-PORT-011: after a delivered cycle, surface the Acceptance Review Page —
  *  print its path always; auto-open in the browser unless the project is
  *  muted (mute-<slug> flag, same gate as the popup). Best-effort. */
@@ -1196,10 +1200,7 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     clearSelfHeal(runtimeDir(id.path), storyId); // FIX-930: genuine delivery resets the agent-rotation budget
   }
   if (result.terminal === "published") {
-    process.stdout.write(
-      "loop run-once: delivery published — PR open, merge pending (PR loop merges; backfill credits on merge evidence)\n" +
-        "loop run-once: 交付已发布——PR 已开,等待合并(PR loop 负责合并;合并证据落地后由回填记账)\n",
-    );
+    process.stdout.write(PUBLISHED_DELIVERY_MESSAGE);
   }
   // FIX-351: a `local` cycle PASSED its gates (attest produced + peer ok, real
   // TCR commits) but its publish could not complete — the work is sound and

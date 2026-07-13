@@ -462,7 +462,7 @@ export function rebuildDeliveriesFromFacts(
     // we at least have a mergeCommit (done-without-PR is legal for backfilled history).
     // Delivery-gate outcomes are the explicit exception: they preserve the
     // structural block even when merge facts are present, so rebuild cannot turn
-    // "main CI red after merge" or "PR loop absent" back into a false done.
+    // "main CI red after merge" back into a false done.
     if (mergedFact !== undefined &&
         (mergedFact.prNumber > 0 || mergedFact.mergeCommit !== "")) {
       const fact: MergeFact = mergedFact; // narrow for strict TS

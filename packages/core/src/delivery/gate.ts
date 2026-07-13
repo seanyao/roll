@@ -34,15 +34,14 @@ export type DeliveryGateVerdict =
 
 /**
  * Pure delivery gate: decide whether a published/merged cycle may be recorded
- * as delivered, or whether a structural gate (missing PR loop, red main CI)
- * blocks the delivery conclusion.
+ * as delivered, or whether red main CI blocks the delivery conclusion.
  *
  * Rules (FIX-1032a):
  *   - Main CI red after merge    → `ci_red_after_merge` (never delivered).
  *   - Otherwise                  → `allowed`.
  *
  * Pure by construction: zero I/O, zero side effects. All facts are injected;
- * the caller (executor / test) resolves PR loop health and CI status.
+ * the caller (executor / test) resolves CI status.
  */
 export function deliveryGate(input: DeliveryGateInput): DeliveryGateVerdict {
   if (input.mainCiStatus === "red") {

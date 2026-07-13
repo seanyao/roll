@@ -5,10 +5,8 @@
  *
  * ─── v2 archaeology (verify, don't assume) ──────────────────────────────────
  * v2 retired the standalone CI loop (FIX-194): there is NO `com.roll.ci.<slug>`
- * scheduled service. CI self-heal lives INSIDE the PR loop tick
- * (`_loop_pr_heal_self`, bin/roll 11484; dispatched from `_loop_pr_inbox`'s
- * `ci_red` verdict, 12026) and the per-cycle PRE-RUN gate
- * (`_loop_precheck_ci`, bin/roll 11220, run before the loop builds on the
+ * scheduled service. CI self-heal lives in the per-cycle PRE-RUN gate
+ * (`_loop_precheck_ci`, run before the loop builds on the
  * current base). The v3 card re-establishes CI as a SEPARATE loop service; the
  * BEHAVIOUR this module mirrors is exactly those two v2 paths, restructured as a
  * v3 ci-loop's two pure verdicts:

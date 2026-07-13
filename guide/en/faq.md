@@ -539,9 +539,10 @@ to know which step ate the time before deciding whether to tune anything.
 
 **Why this matters:** Every cycle is sliced into six named phases
 (`startup` / `preflight` / `worktree_setup` / `agent_invoke` / `publish_push` /
-`cleanup`). The main loop no longer waits for merge (US-AUTO-044) — the
-dedicated PR Loop handles that asynchronously — so the top-line duration is
-now dominated by `agent_invoke` in almost every cycle.
+`cleanup`). The main loop no longer waits for merge (US-AUTO-044): it records
+`awaiting_merge`, then the Delivery Reconciler advances the PR on cycle
+boundaries, read paths, or an explicit `roll loop reconcile`. The top-line
+duration is therefore dominated by `agent_invoke` in almost every cycle.
 
 **What to do:**
 
@@ -551,9 +552,9 @@ now dominated by `agent_invoke` in almost every cycle.
 3. Common patterns:
    - `agent_invoke` dominating → expected for a multi-file story; nothing
      to tune unless you can split the story.
-   - PR sitting open / not merging → the dedicated PR Loop (every 5 min)
-     handles merge/rebase asynchronously; check the PR's CI or whether it's
-     gated on a missing review. This is no longer a main-loop phase.
+   - PR sitting open / not merging → run `roll loop reconcile --json`, then
+     inspect its CI, draft/review, conflict, or permission reason. This is no
+     longer a main-loop phase.
    - `worktree_setup` > 30 s → likely a slow `git fetch origin`; transient
      network issue.
    - `preflight` > 30 s → previous cycles left orphan worktrees; loop is

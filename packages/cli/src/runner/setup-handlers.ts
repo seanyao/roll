@@ -134,7 +134,7 @@ export async function executeSetupCommand(
       // FIX-198/FIX-112/FIX-211 — PR-aware claim reconcile. The inner lock
       // guarantees a single live cycle per project, so a 🔨 In Progress row is
       // from a PRIOR cycle. It is NOT always a dead claim (FIX-211): a cycle
-      // that delivered — opened a PR and handed merge to the async PR loop
+      // that delivered — opened a PR and handed merge to the reconciler
       // (US-AUTO-044) — legitimately rests at 🔨 until the PR merges; blindly
       // resetting it to 📋 Todo would re-pick and duplicate the work. Reconcile
       // each claim against REAL merge evidence (decideClaimReconcile):

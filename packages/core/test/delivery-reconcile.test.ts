@@ -96,10 +96,13 @@ describe("reconcileDelivery — L1 PR state", () => {
   });
 
   it("PR CLOSED → does not trigger delivered (closed = not merged)", () => {
+    // US-DELIV-010: closed-unmerged is now an explicit TERMINAL judgment
+    // (was a bare wait) — see the degraded/terminal matrix below.
     const result = reconcileDelivery(CYCLE, facts({
       prState: "CLOSED",
     }));
-    expect(result.kind).toBe("wait");
+    expect(result.kind).toBe("terminal");
+    expect(result.kind).not.toBe("delivered");
   });
 
   it("PR state undefined (gh unavailable) → no L1, falls through to L2/wait", () => {
@@ -412,5 +415,229 @@ describe("reconcileDelivery — retroactive heal (goal 4)", () => {
     };
     const result = reconcileDelivery(cyc, facts());
     expect(result.kind).toBe("wait");
+  });
+});
+
+// ── US-DELIV-010: degraded/terminal judgment matrix ──────────────────────────
+//
+// Evaluation contract expected_evidence:
+//   1. Judgment matrix — every stuck/terminal PR situation maps to a
+//      deterministic verdict, and NONE fabricates delivered:
+//      - CI long-red (≥ CI_STUCK_DWELL_MS) → degraded(ci_stuck)
+//      - merge conflict → degraded(merge_conflict)
+//      - PR closed unmerged → terminal(pr_closed_unmerged)
+//      - draft PR → degraded(draft)
+//      - missing permission (gh auth) → degraded(no_permission)
+//      - branch deleted / force-push changed patch-id → L2 disabled →
+//        rely on L1 or wait (never delivered)
+//      - gh error (offline/provider_error/not_found) → wait
+//      - mergeable UNKNOWN → wait (transient)
+//      - squash title rewrite → L2 patch-id still matches → delivered
+//   2. Every degraded/terminal verdict carries reason + dwell (readable).
+import { CI_STUCK_DWELL_MS } from "../src/index.js";
+
+const NOW = 1_790_000_000_000;
+const PUBLISHED = NOW - CI_STUCK_DWELL_MS - 60_000; // stuck past the threshold
+
+const CYCLE_DWELL: ReconcileCycle = { ...CYCLE, awaitingSinceMs: PUBLISHED };
+
+describe("US-DELIV-010 — degraded/terminal 判定矩阵", () => {
+  // ── terminal ─────────────────────────────────────────────────────────────
+  it("PR closed unmerged → terminal(pr_closed_unmerged), never delivered", () => {
+    const result = reconcileDelivery(CYCLE_DWELL, facts({
+      prState: "CLOSED",
+      nowMs: NOW,
+    }));
+    expect(result).toEqual({
+      kind: "terminal",
+      reason: "pr_closed_unmerged",
+      dwellMs: NOW - PUBLISHED,
+    });
+  });
+
+  it("PR closed unmerged but patch-id on main (merged elsewhere) → delivered, L2 wins over terminal", () => {
+    const result = reconcileDelivery(CYCLE_DWELL, facts({
+      prState: "CLOSED",
+      branchNetPatchId: "pid-merged-elsewhere",
+      mainPatchIds: new Set(["pid-merged-elsewhere"]),
+      nowMs: NOW,
+    }));
+    expect(result.kind).toBe("delivered");
+  });
+
+  // ── degraded: ci_stuck ───────────────────────────────────────────────────
+  it("CI red past the stuck threshold → degraded(ci_stuck) with dwell", () => {
+    const result = reconcileDelivery(CYCLE_DWELL, facts({
+      prState: "OPEN",
+      ciGreen: false,
+      nowMs: NOW,
+    }));
+    expect(result).toEqual({
+      kind: "degraded",
+      reason: "ci_stuck",
+      dwellMs: NOW - PUBLISHED,
+    });
+  });
+
+  it("CI red under the threshold → ci_failed (not yet stuck)", () => {
+    const fresh: ReconcileCycle = { ...CYCLE, awaitingSinceMs: NOW - 60_000 };
+    const result = reconcileDelivery(fresh, facts({
+      prState: "OPEN",
+      ciGreen: false,
+      nowMs: NOW,
+    }));
+    expect(result).toEqual({ kind: "ci_failed" });
+  });
+
+  it("CI red without dwell info → ci_failed (no clock, no degradation)", () => {
+    const result = reconcileDelivery(CYCLE, facts({
+      prState: "OPEN",
+      ciGreen: false,
+    }));
+    expect(result).toEqual({ kind: "ci_failed" });
+  });
+
+  // ── degraded: merge_conflict ─────────────────────────────────────────────
+  it("PR open with merge conflict → degraded(merge_conflict), no merge_now", () => {
+    const result = reconcileDelivery(CYCLE_DWELL, facts({
+      prState: "OPEN",
+      ciGreen: true,
+      prMergeable: "CONFLICTING",
+      nowMs: NOW,
+    }));
+    expect(result).toEqual({
+      kind: "degraded",
+      reason: "merge_conflict",
+      dwellMs: NOW - PUBLISHED,
+    });
+  });
+
+  it("mergeable CONFLICTING beats merge_now even when CI is green", () => {
+    const result = reconcileDelivery(CYCLE, facts({
+      prState: "OPEN",
+      ciGreen: true,
+      prMergeable: "CONFLICTING",
+    }));
+    expect(result.kind).toBe("degraded");
+    expect(result.kind).not.toBe("merge_now");
+  });
+
+  // ── degraded: draft ──────────────────────────────────────────────────────
+  it("draft PR → degraded(draft), never merge_now even with green CI", () => {
+    const result = reconcileDelivery(CYCLE_DWELL, facts({
+      prState: "OPEN",
+      ciGreen: true,
+      prDraft: true,
+      nowMs: NOW,
+    }));
+    expect(result).toEqual({
+      kind: "degraded",
+      reason: "draft",
+      dwellMs: NOW - PUBLISHED,
+    });
+  });
+
+  // ── degraded: no_permission ──────────────────────────────────────────────
+  it("gh unreachable auth → degraded(no_permission), never delivered", () => {
+    const result = reconcileDelivery(CYCLE_DWELL, facts({
+      prUnreachableReason: "auth",
+      branchNetPatchId: "pid-nomatch",
+      mainPatchIds: new Set(["pid-other"]),
+      nowMs: NOW,
+    }));
+    expect(result).toEqual({
+      kind: "degraded",
+      reason: "no_permission",
+      dwellMs: NOW - PUBLISHED,
+    });
+  });
+
+  // ── gh error → wait (never degraded, never delivered) ────────────────────
+  it.each(["offline", "provider_error", "not_found"] as const)(
+    "gh unreachable %s → wait (transient, no verdict)",
+    (reason) => {
+      const result = reconcileDelivery(CYCLE_DWELL, facts({
+        prUnreachableReason: reason,
+        branchNetPatchId: "pid-nomatch",
+        mainPatchIds: new Set(["pid-other"]),
+        nowMs: NOW,
+      }));
+      expect(result.kind).toBe("wait");
+    },
+  );
+
+  // ── mergeable UNKNOWN → wait (transient) ─────────────────────────────────
+  it("mergeable UNKNOWN with unknown CI → wait (transient, no verdict)", () => {
+    const result = reconcileDelivery(CYCLE_DWELL, facts({
+      prState: "OPEN",
+      prMergeable: "UNKNOWN",
+      ciGreen: undefined,
+      nowMs: NOW,
+    }));
+    expect(result.kind).toBe("wait");
+  });
+
+  // ── branch deleted / force-push → L2 disabled, L1-or-wait ────────────────
+  it("branch deleted + gh silent → wait (L2 disabled, no L1, never delivered)", () => {
+    const result = reconcileDelivery(CYCLE_DWELL, facts({
+      prState: undefined,
+      branchNetPatchId: undefined, // branch gone
+      nowMs: NOW,
+    }));
+    expect(result.kind).toBe("wait");
+  });
+
+  it("force-push changed patch-id (L2 miss) + gh silent → wait, never delivered", () => {
+    const result = reconcileDelivery(CYCLE_DWELL, facts({
+      branchNetPatchId: "pid-after-force-push",
+      mainPatchIds: new Set(["pid-before-force-push"]),
+      nowMs: NOW,
+    }));
+    expect(result.kind).toBe("wait");
+  });
+
+  it("force-push changed patch-id but L1 MERGED → delivered via L1 (authoritative)", () => {
+    const result = reconcileDelivery(CYCLE_DWELL, facts({
+      prState: "MERGED",
+      prMergeCommit: "merged-anyway",
+      branchNetPatchId: "pid-after-force-push",
+      mainPatchIds: new Set(["pid-before-force-push"]),
+      nowMs: NOW,
+    }));
+    expect(result).toEqual({
+      kind: "delivered",
+      via: "external",
+      signal: "pr_state",
+      mergeCommit: "merged-anyway",
+    });
+  });
+
+  // ── squash title rewrite → L2 unaffected (patch-id is diff content) ──────
+  it("squash with rewritten title → patch-id still matches → delivered via patch_id", () => {
+    // The squash merge rewrote the commit subject/body, but git patch-id is
+    // computed from the DIFF content only — the rewrite is invisible to L2.
+    const result = reconcileDelivery(CYCLE, facts({
+      prState: undefined, // gh silent (e.g. offline)
+      branchNetPatchId: "pid-same-diff",
+      mainPatchIds: new Set(["pid-same-diff"]),
+    }));
+    expect(result).toEqual({
+      kind: "delivered",
+      via: "external",
+      signal: "patch_id",
+    });
+  });
+
+  // ── no fabrication: every degraded/terminal is never delivered ───────────
+  it("no degraded/terminal input combination ever yields delivered", () => {
+    const stuck = reconcileDelivery(CYCLE_DWELL, facts({ prState: "OPEN", ciGreen: false, nowMs: NOW }));
+    const conflict = reconcileDelivery(CYCLE, facts({ prState: "OPEN", prMergeable: "CONFLICTING" }));
+    const draft = reconcileDelivery(CYCLE, facts({ prState: "OPEN", prDraft: true }));
+    const auth = reconcileDelivery(CYCLE, facts({ prUnreachableReason: "auth" }));
+    const closed = reconcileDelivery(CYCLE, facts({ prState: "CLOSED" }));
+    for (const r of [stuck, conflict, draft, auth, closed]) {
+      expect(r.kind).not.toBe("delivered");
+      expect(r.kind).not.toBe("merge_now");
+    }
   });
 });

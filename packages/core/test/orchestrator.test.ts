@@ -331,9 +331,9 @@ describe("FIX-244 — phantom-failure classification (published terminal)", () =
   });
 });
 
-describe("FIX-1032b/REFACTOR-071 — published cycle writes PR-loop attribution", () => {
-  it("published + unhealthy PR loop emits published_pending_merge + env:pr_loop", () => {
-    const ctx: CycleContext = {
+describe("US-DELIV-013 — published cycles await reconciliation", () => {
+  it("ignores the retired PR-loop health shape and emits no failure attribution", () => {
+    const ctx = {
       ...CTX,
       prLoopHealthy: false,
       prUrl: "https://github.com/o/r/pull/759",
@@ -357,23 +357,17 @@ describe("FIX-1032b/REFACTOR-071 — published cycle writes PR-loop attribution"
 
     expect(state.terminal).toBe("published");
     const run = commands.find((c) => c.kind === "append_run");
-    expect(run).toMatchObject({
-      status: "published",
-      outcome: "published_pending_merge",
-      failure_class: "env",
-      root_cause_key: "env:pr_loop",
-    });
+    expect(run).toMatchObject({ status: "published", outcome: "published_pending_merge" });
+    expect(run).not.toHaveProperty("failure_class");
+    expect(run).not.toHaveProperty("root_cause_key");
     const end = commands.find((c): c is Extract<CycleCommand, { kind: "emit_event" }> =>
       c.kind === "emit_event" && c.event.type === "cycle:end",
     );
-    expect(end?.event).toMatchObject({
-      type: "cycle:end",
-      outcome: "published_pending_merge",
-      failure_class: "env",
-      root_cause_key: "env:pr_loop",
-    });
+    expect(end?.event).toMatchObject({ type: "cycle:end", outcome: "published_pending_merge" });
+    expect(end?.event).not.toHaveProperty("failure_class");
+    expect(end?.event).not.toHaveProperty("root_cause_key");
     const alert = commands.find((c) => c.kind === "append_alert");
-    expect(alert).toMatchObject({ message: expect.stringContaining("PR loop not installed") });
+    expect(alert).toBeUndefined();
   });
 });
 

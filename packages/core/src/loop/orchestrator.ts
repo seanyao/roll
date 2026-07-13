@@ -107,7 +107,6 @@ import type { RollEvent } from "@roll/spec";
 import { builderFinalizationReady, finalizeBuilder, handoffKindFor } from "./builder-finalization.js";
 import { adversarialNextStep, adversarialDegradeDecision, type AdversarialFailure, type AdversarialRunSummary } from "./adversarial.js";
 import { nextWaitAction, type WaitAction } from "../delivery/pr.js";
-import { deliveryGate } from "../delivery/gate.js";
 
 // ── v2 terminal vocabulary (six-state model) ─────────────────────────────────
 
@@ -833,10 +832,6 @@ export interface CycleContext {
    *  the cycle did NOT merge — done ≡ merged. Absent ⇒ status unread at pick
    *  (no revert target; the terminal leaves the row untouched). */
   preCycleStatus?: string;
-  /** FIX-1032a: true iff the project has a PR loop service installed and healthy.
-   *  Set by the executor before the publish phase. When false, the published PR
-   *  has no merge guardian and the cycle must NOT write delivered. */
-  prLoopHealthy?: boolean;
   /** FIX-1037: runner observed dirty main checkout before/after builder spawn. */
   mainDirty?: boolean;
   /** FIX-1050: agent-specific reason why usage could not be parsed (e.g.
@@ -1486,28 +1481,12 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
     case "published": {
       const status = classifyPublish(event.result);
       if (status === "published" || status === "done") {
-        // Published (PR open, merge → PR Loop, US-AUTO-044) or locally
-        // ff-merged (gh-missing tier → done) → clean worktree → terminal.
-        // FIX-1032a: check delivery gate for PR loop health.
+        // Published (PR open, awaiting the reconciler) or locally ff-merged
+        // (gh-missing tier → done) → clean worktree → terminal.
         const extra: CycleCommand[] = [
           // published/done: work is on the remote (or ff-merged) → skip the bundle.
           { kind: "cleanup_environment" }, { kind: "cleanup_worktree", branch: state.ctx.branch, bundleUnpushed: false },
         ];
-        if (status === "published" && state.ctx.prLoopHealthy === false) {
-          const gate = deliveryGate({
-            prLoopHealthy: false,
-            mainCiStatus: "unknown",
-            prUrl: state.ctx.prUrl,
-          });
-          if (gate.verdict === "pr_loop_unavailable") {
-            extra.push({ kind: "append_alert", message: gate.alert });
-            return terminate({
-              ...state,
-              ctx: { ...state.ctx, failureClass: "env", rootCauseKey: "env:pr_loop" },
-              phase: "cleanup",
-            }, status, extra);
-          }
-        }
         return terminate({ ...state, phase: "cleanup" }, status, extra);
       }
       if (status === "orphan") {

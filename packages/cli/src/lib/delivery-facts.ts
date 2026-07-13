@@ -37,7 +37,9 @@ export function resolveRepoSlug(cwd: string): string | undefined {
 }
 
 export function branchExists(cwd: string, branch: string): boolean {
-  const r = nodeExecPort.run("git", ["-C", cwd, "rev-parse", "--verify", `refs/remotes/origin/${branch}`]);
+  const r = nodeExecPort.run("git", [
+    "-C", cwd, "rev-parse", "--verify", "--quiet", `refs/remotes/origin/${branch}`,
+  ]);
   return r.code === 0 && r.stdout.trim() !== "";
 }
 
@@ -50,7 +52,7 @@ export function branchPatchId(cwd: string, branch: string): string | undefined {
   // git patch-id reads the diff from stdin.
   const result = nodeExecPort.run("sh", [
     "-c",
-    `cd '${cwd}' && git diff origin/main...origin/${branch} | git patch-id --stable`,
+    `cd '${cwd}' && git diff origin/main...origin/${branch} 2>/dev/null | git patch-id --stable 2>/dev/null`,
   ]);
   if (result.code !== 0 || result.stdout === "") return undefined;
   // git patch-id output is "<hash> <patch-id>".
@@ -87,7 +89,7 @@ export function mainPatchIdsSinceBranch(cwd: string, branch: string): Set<string
     if (diff.code !== 0 || diff.stdout === "") continue;
     const pid = nodeExecPort.run("sh", [
       "-c",
-      `echo '${diff.stdout.replace(/'/g, "'\\''")}' | git -C '${cwd}' patch-id --stable`,
+      `echo '${diff.stdout.replace(/'/g, "'\\''")}' | git -C '${cwd}' patch-id --stable 2>/dev/null`,
     ]);
     if (pid.code === 0 && pid.stdout !== "") {
       const parts = pid.stdout.trim().split(/\s+/);

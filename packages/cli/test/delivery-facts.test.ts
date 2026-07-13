@@ -182,4 +182,27 @@ describe("US-DELIV-008 — cycleReconcileDecision (unified engine, real git)", (
     );
     expect(d.kind).toBe("wait");
   });
+
+  it("FIX-1245: deleted origin branch → wait without leaking rev-parse stderr", () => {
+    const r = repoWithOrigin((repo) => {
+      git(repo, "commit -q --allow-empty -m 'unrelated (#1)'");
+      git(repo, "push -q origin main");
+      // Branch never pushed to origin — the common deleted-branch cycle case.
+    });
+    let stderr = "";
+    const origWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: string | Uint8Array, ...args: unknown[]) => {
+      stderr += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+      return origWrite(chunk, ...(args as Parameters<typeof origWrite>));
+    }) as typeof process.stderr.write;
+    try {
+      const d = withoutGitEnv(() =>
+        cycleReconcileDecision(r, null, { cycleId: CYCLE, storyId: "FIX-1245", branch: `loop/${CYCLE}` }),
+      );
+      expect(d.kind).toBe("wait");
+    } finally {
+      process.stderr.write = origWrite;
+    }
+    expect(stderr).not.toContain("Needed a single revision");
+  });
 });

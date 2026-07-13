@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v4.713.1 — 2026-07-13
+
 ### 自动化流水线
 - 交付"最后一公里"重做成一个对账闭环:cycle 开完 PR 就进"等待合并"挂起态、立刻释放去做下一张卡,不再干等合并;合并与记账由交付对账器在任意 `roll` 调用时完成,**退役了那个在无人值守/headless 环境常起不来的独立 PR 守护进程**(US-DELIV-001、US-DELIV-006) `[loop]`
 - 交付真相从 main 反查:用 PR 状态 + git patch-id 认出"已交付"——**不管是循环自己合的、还是人手动合的都算数**,`roll loop cycles` 账本不再和实际交付对不上;附只读命令 `roll loop reconcile`(US-DELIV-002) `[loop]`

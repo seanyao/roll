@@ -183,9 +183,12 @@ describe("US-DELIV-003 — self-driven merge execution", () => {
     }
 
     try {
+      // US-DELIV-010: publish "just now" — a fresh red CI is ci_failed; a red
+      // CI older than CI_STUCK_DWELL_MS would (correctly) degrade to ci_stuck.
+      const now = Date.now();
       writeEvents(p, [
-        { type: "cycle:start", cycleId: CYCLE, storyId: "US-DELIV-003", ts: TS },
-        { type: "delivery:published", cycleId: CYCLE, storyId: "US-DELIV-003", branch: `loop/${CYCLE}`, prNumber: 42, ts: TS + 1 },
+        { type: "cycle:start", cycleId: CYCLE, storyId: "US-DELIV-003", ts: now },
+        { type: "delivery:published", cycleId: CYCLE, storyId: "US-DELIV-003", branch: `loop/${CYCLE}`, prNumber: 42, ts: now + 1 },
       ]);
       execSync(`git checkout -q -b loop/${CYCLE}`, { cwd: p });
 

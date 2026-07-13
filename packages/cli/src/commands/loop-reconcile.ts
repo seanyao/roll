@@ -11,6 +11,8 @@
  *   - IO adapter: this file collects gh PR state + git patch-ids, delegates to
  *     the pure function, and appends events.
  *   - Idempotent + crash-resumable: re-running reconcile is always safe.
+ *   - US-DELIV-011: single-flight reconcile.lock + event-stream guards prevent
+ *     duplicate merge attempts and duplicate delivered credits under overlap.
  *
  * Trigger points (design §7.3):
  *   - (a) cycle boundary in `roll loop run-once/go`
@@ -28,12 +30,14 @@ import {
   projectDeliveryState,
   leaseStateFor,
   siblingCancelEvents,
+  shouldAppendDeliveredCredit,
+  shouldAttemptPrMerge,
   type ReconcileCycle,
   type ReconcileFacts,
   type ReconcileResult,
 } from "@roll/core";
 import type { PrCloudState, PrStatusProvider } from "@roll/core";
-import { GitHubPrStatusProvider, prMerge, type GhResult } from "@roll/infra";
+import { acquireLock, GitHubPrStatusProvider, OUTER_LOCK_STALE_SEC, prMerge, releaseLock, type GhResult } from "@roll/infra";
 // US-DELIV-008: the fact-gathering primitives moved to the shared adapter so
 // the command path and the cycles read path feed the SAME reconcileDelivery
 // the SAME facts (one truth engine, no parallel probes).
@@ -88,6 +92,29 @@ function realDeps(): LoopReconcileDeps {
 function runtimeDir(cwd: string): string {
   const env = (process.env["ROLL_PROJECT_RUNTIME_DIR"] ?? "").trim();
   return env !== "" ? env : join(cwd, ".roll", "loop");
+}
+
+/** US-DELIV-011: single-flight reconcile lock (atomic mkdir, same primitive as inner.lock). */
+const RECONCILE_LOCK_NAME = "reconcile.lock";
+
+function reconcileLockPath(cwd: string): string {
+  return join(runtimeDir(cwd), RECONCILE_LOCK_NAME);
+}
+
+/** Read the full events stream for idempotency guards (re-read before side effects). */
+function readAllEvents(eventsPath: string): RollEvent[] {
+  if (!existsSync(eventsPath)) return [];
+  try {
+    const content = readFileSync(eventsPath, "utf8");
+    const out: RollEvent[] = [];
+    for (const line of content.split("\n")) {
+      const ev = parseEventLine(line);
+      if (ev !== null) out.push(ev);
+    }
+    return out;
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -282,6 +309,16 @@ export async function runReconcileTick(
     return { cyclesProcessed: 0, delivered: 0, mergeNow: 0, ciFailed: 0, degraded: 0, terminal: 0, waiting: 0 };
   }
 
+  // US-DELIV-011: single-flight — overlapping reconcile sources yield; never block the loop.
+  const lockPath = reconcileLockPath(cwd);
+  const lock = acquireLock(lockPath, process.pid, {
+    staleSec: OUTER_LOCK_STALE_SEC,
+    cycleId: "reconcile",
+  });
+  if (!lock.acquired) {
+    return { cyclesProcessed: 0, delivered: 0, mergeNow: 0, ciFailed: 0, degraded: 0, terminal: 0, waiting: 0 };
+  }
+
   const provider = opts?.provider ?? (slug !== undefined ? new GitHubPrStatusProvider() : undefined);
   const rt = runtimeDir(cwd);
   const eventsPath = join(rt, "events.ndjson");
@@ -300,6 +337,7 @@ export async function runReconcileTick(
   let terminal = 0;
   let waiting = 0;
 
+  try {
   for (const cyc of cycles) {
     if (!opts?.silent) {
       process.stdout.write(`  ${cyc.cycleId} · ${cyc.storyId || "—"} · ${cyc.deliveryState}…`);
@@ -349,76 +387,84 @@ export async function runReconcileTick(
     };
     const result = reconcileDelivery(reconcileCycle, facts);
 
-    // Count.
-    if (result.kind === "delivered") delivered++;
-    else if (result.kind === "merge_now") mergeNow++;
+    // Count verdicts (delivered credit may be skipped when already credited).
+    if (result.kind === "delivered") {
+      const freshEvents = readAllEvents(eventsPath);
+      if (shouldAppendDeliveredCredit(freshEvents, cyc.cycleId)) delivered++;
+      else waiting++;
+    } else if (result.kind === "merge_now") mergeNow++;
     else if (result.kind === "ci_failed") ciFailed++;
     else if (result.kind === "degraded") degraded++;
     else if (result.kind === "terminal") terminal++;
     else waiting++;
 
     if (result.kind === "delivered") {
-      // Emit delivery:reconciled event.
-      bus.appendEvent(eventsPath, {
-        type: "delivery:reconciled",
-        cycleId: cyc.cycleId,
-        storyId: cyc.storyId,
-        state: result.via === "runner" ? "delivered" : "delivered_external",
-        mergedBy: result.via,
-        mergeCommit: result.mergeCommit ?? "unknown",
-        signal: result.signal,
-        ts: now,
-      });
-
-      // US-DELIV-005: sibling cancel for same-card fan-out.
-      const siblingLeases: DeliveryLease[] = [];
-      for (const other of cycles) {
-        if (other.cycleId === cyc.cycleId || other.storyId === "" || other.storyId !== cyc.storyId) continue;
-        const state = leaseStateFor(other.deliveryState, false);
-        if (state !== undefined) siblingLeases.push({ storyId: other.storyId, cycleId: other.cycleId, state });
-      }
-      for (const ev of siblingCancelEvents(
-        cyc.storyId,
-        {
+      const freshEvents = readAllEvents(eventsPath);
+      if (shouldAppendDeliveredCredit(freshEvents, cyc.cycleId)) {
+        bus.appendEvent(eventsPath, {
+          type: "delivery:reconciled",
           cycleId: cyc.cycleId,
+          storyId: cyc.storyId,
+          state: result.via === "runner" ? "delivered" : "delivered_external",
+          mergedBy: result.via,
           mergeCommit: result.mergeCommit ?? "unknown",
           signal: result.signal,
-          mergedBy: result.via,
-        },
-        siblingLeases,
-        now,
-      )) {
-        bus.appendEvent(eventsPath, ev);
+          ts: now,
+        });
+
+        // US-DELIV-005: sibling cancel for same-card fan-out.
+        const siblingLeases: DeliveryLease[] = [];
+        for (const other of cycles) {
+          if (other.cycleId === cyc.cycleId || other.storyId === "" || other.storyId !== cyc.storyId) continue;
+          const state = leaseStateFor(other.deliveryState, false);
+          if (state !== undefined) siblingLeases.push({ storyId: other.storyId, cycleId: other.cycleId, state });
+        }
+        for (const ev of siblingCancelEvents(
+          cyc.storyId,
+          {
+            cycleId: cyc.cycleId,
+            mergeCommit: result.mergeCommit ?? "unknown",
+            signal: result.signal,
+            mergedBy: result.via,
+          },
+          siblingLeases,
+          now,
+        )) {
+          bus.appendEvent(eventsPath, ev);
+        }
       }
     }
 
     // ── merge_now: execute gh pr merge --squash ───────────────────────────
     if (result.kind === "merge_now") {
-      if (slug !== undefined && cyc.prNumber !== undefined) {
-        let outcome: "merged" | "blocked" | "gh_down" = "gh_down";
-        try {
-          const mergeResult: GhResult = await prMerge(slug, String(cyc.prNumber), "plain");
-          outcome = mergeResult.code === 0 ? "merged" : "blocked";
-        } catch {
-          outcome = "gh_down";
+      const freshEvents = readAllEvents(eventsPath);
+      if (shouldAttemptPrMerge(freshEvents, cyc.cycleId)) {
+        if (slug !== undefined && cyc.prNumber !== undefined) {
+          let outcome: "merged" | "blocked" | "gh_down" = "gh_down";
+          try {
+            const mergeResult: GhResult = await prMerge(slug, String(cyc.prNumber), "plain");
+            outcome = mergeResult.code === 0 ? "merged" : "blocked";
+          } catch {
+            outcome = "gh_down";
+          }
+          bus.appendEvent(eventsPath, {
+            type: "delivery:merge_attempt",
+            cycleId: cyc.cycleId,
+            prNumber: cyc.prNumber,
+            method: "squash",
+            outcome,
+            ts: now,
+          });
+        } else {
+          bus.appendEvent(eventsPath, {
+            type: "delivery:merge_attempt",
+            cycleId: cyc.cycleId,
+            prNumber: cyc.prNumber ?? 0,
+            method: "squash",
+            outcome: "gh_down" as const,
+            ts: now,
+          });
         }
-        bus.appendEvent(eventsPath, {
-          type: "delivery:merge_attempt",
-          cycleId: cyc.cycleId,
-          prNumber: cyc.prNumber,
-          method: "squash",
-          outcome,
-          ts: now,
-        });
-      } else {
-        bus.appendEvent(eventsPath, {
-          type: "delivery:merge_attempt",
-          cycleId: cyc.cycleId,
-          prNumber: cyc.prNumber ?? 0,
-          method: "squash",
-          outcome: "gh_down" as const,
-          ts: now,
-        });
       }
     }
 
@@ -435,6 +481,9 @@ export async function runReconcileTick(
   }
 
   return { cyclesProcessed: cycles.length, delivered, mergeNow, ciFailed, degraded, terminal, waiting };
+  } finally {
+    releaseLock(lockPath);
+  }
 }
 
 // ── Main command ──────────────────────────────────────────────────────────────
@@ -488,6 +537,21 @@ export async function loopReconcileCommand(
     return 0;
   }
 
+  // US-DELIV-011: single-flight reconcile — concurrent sources yield cleanly.
+  const lockPath = reconcileLockPath(cwd);
+  const lock = acquireLock(lockPath, process.pid, {
+    staleSec: OUTER_LOCK_STALE_SEC,
+    cycleId: "reconcile",
+  });
+  if (!lock.acquired) {
+    deps.stdout.write(
+      lang === "zh"
+        ? `对账跳过：另一 reconcile 正在运行 (pid ${lock.heldByPid ?? "?"})。\n`
+        : `Reconcile skipped: another reconcile is in progress (pid ${lock.heldByPid ?? "?"}).\n`,
+    );
+    return 0;
+  }
+
   const provider = deps.provider ?? (slug !== undefined ? new GitHubPrStatusProvider() : undefined);
   const rt = runtimeDir(cwd);
   const eventsPath = join(rt, "events.ndjson");
@@ -500,6 +564,7 @@ export async function loopReconcileCommand(
   // first need (only when gh is silent for some cycle), shared across cycles.
   let gitFacts: GitDossierFacts | null | undefined;
 
+  try {
   for (const cyc of cycles) {
     deps.stdout.write(
       lang === "zh"
@@ -572,41 +637,44 @@ export async function loopReconcileCommand(
 
       // Emit delivery:reconciled event (unless dry run).
       if (!dryRun) {
-        deps.bus.appendEvent(eventsPath, {
-          type: "delivery:reconciled",
-          cycleId: cyc.cycleId,
-          storyId: cyc.storyId,
-          state: result.via === "runner" ? "delivered" : "delivered_external",
-          mergedBy: result.via,
-          mergeCommit: result.mergeCommit ?? "unknown",
-          signal: result.signal,
-          ts: now,
-        });
-
-        // US-DELIV-005 (one-card-one-lease): the FIRST merge atomically
-        // supersedes every remaining sibling cycle on this card — race
-        // resolution when --race was opted in, and cleanup of any legacy
-        // same-card fan-out. The winner's event above and the supersede
-        // events below land in ONE reconcile pass (the atomic cancel);
-        // superseded siblings are terminal, so a re-run cancels nothing.
-        const siblingLeases: DeliveryLease[] = [];
-        for (const other of cycles) {
-          if (other.cycleId === cyc.cycleId || other.storyId === "" || other.storyId !== cyc.storyId) continue;
-          const state = leaseStateFor(other.deliveryState, false);
-          if (state !== undefined) siblingLeases.push({ storyId: other.storyId, cycleId: other.cycleId, state });
-        }
-        for (const ev of siblingCancelEvents(
-          cyc.storyId,
-          {
+        const freshEvents = readAllEvents(eventsPath);
+        if (shouldAppendDeliveredCredit(freshEvents, cyc.cycleId)) {
+          deps.bus.appendEvent(eventsPath, {
+            type: "delivery:reconciled",
             cycleId: cyc.cycleId,
+            storyId: cyc.storyId,
+            state: result.via === "runner" ? "delivered" : "delivered_external",
+            mergedBy: result.via,
             mergeCommit: result.mergeCommit ?? "unknown",
             signal: result.signal,
-            mergedBy: result.via,
-          },
-          siblingLeases,
-          now,
-        )) {
-          deps.bus.appendEvent(eventsPath, ev);
+            ts: now,
+          });
+
+          // US-DELIV-005 (one-card-one-lease): the FIRST merge atomically
+          // supersedes every remaining sibling cycle on this card — race
+          // resolution when --race was opted in, and cleanup of any legacy
+          // same-card fan-out. The winner's event above and the supersede
+          // events below land in ONE reconcile pass (the atomic cancel);
+          // superseded siblings are terminal, so a re-run cancels nothing.
+          const siblingLeases: DeliveryLease[] = [];
+          for (const other of cycles) {
+            if (other.cycleId === cyc.cycleId || other.storyId === "" || other.storyId !== cyc.storyId) continue;
+            const state = leaseStateFor(other.deliveryState, false);
+            if (state !== undefined) siblingLeases.push({ storyId: other.storyId, cycleId: other.cycleId, state });
+          }
+          for (const ev of siblingCancelEvents(
+            cyc.storyId,
+            {
+              cycleId: cyc.cycleId,
+              mergeCommit: result.mergeCommit ?? "unknown",
+              signal: result.signal,
+              mergedBy: result.via,
+            },
+            siblingLeases,
+            now,
+          )) {
+            deps.bus.appendEvent(eventsPath, ev);
+          }
         }
       }
     }
@@ -615,33 +683,36 @@ export async function loopReconcileCommand(
     // US-DELIV-003: self-driven merge — does not rely on repo auto-merge
     // setting or launchd. Uses "plain" mode (no --auto, no --admin).
     if (result.kind === "merge_now" && !dryRun) {
-      if (slug !== undefined && cyc.prNumber !== undefined) {
-        let outcome: "merged" | "blocked" | "gh_down" = "gh_down";
-        try {
-          const mergeResult: GhResult = await prMerge(slug, String(cyc.prNumber), "plain");
-          outcome = mergeResult.code === 0 ? "merged" : "blocked";
-        } catch {
-          // gh binary not found / unspawnable → gh_down
-          outcome = "gh_down";
+      const freshEvents = readAllEvents(eventsPath);
+      if (shouldAttemptPrMerge(freshEvents, cyc.cycleId)) {
+        if (slug !== undefined && cyc.prNumber !== undefined) {
+          let outcome: "merged" | "blocked" | "gh_down" = "gh_down";
+          try {
+            const mergeResult: GhResult = await prMerge(slug, String(cyc.prNumber), "plain");
+            outcome = mergeResult.code === 0 ? "merged" : "blocked";
+          } catch {
+            // gh binary not found / unspawnable → gh_down
+            outcome = "gh_down";
+          }
+          deps.bus.appendEvent(eventsPath, {
+            type: "delivery:merge_attempt",
+            cycleId: cyc.cycleId,
+            prNumber: cyc.prNumber,
+            method: "squash",
+            outcome,
+            ts: now,
+          });
+        } else {
+          // slug not resolved (no GitHub remote) → gh_down, stay awaiting_merge
+          deps.bus.appendEvent(eventsPath, {
+            type: "delivery:merge_attempt",
+            cycleId: cyc.cycleId,
+            prNumber: cyc.prNumber ?? 0,
+            method: "squash",
+            outcome: "gh_down" as const,
+            ts: now,
+          });
         }
-        deps.bus.appendEvent(eventsPath, {
-          type: "delivery:merge_attempt",
-          cycleId: cyc.cycleId,
-          prNumber: cyc.prNumber,
-          method: "squash",
-          outcome,
-          ts: now,
-        });
-      } else {
-        // slug not resolved (no GitHub remote) → gh_down, stay awaiting_merge
-        deps.bus.appendEvent(eventsPath, {
-          type: "delivery:merge_attempt",
-          cycleId: cyc.cycleId,
-          prNumber: cyc.prNumber ?? 0,
-          method: "squash",
-          outcome: "gh_down" as const,
-          ts: now,
-        });
       }
     }
 
@@ -698,4 +769,7 @@ export async function loopReconcileCommand(
   }
 
   return 0;
+  } finally {
+    releaseLock(lockPath);
+  }
 }

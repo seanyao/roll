@@ -451,7 +451,8 @@ describe("FIX-337 (AC2) — summaryBuckets: total === sum(buckets), every non-ze
     const out = stripAnsi(renderCyclesLedger(mixed, "all", "en", NOW));
     expect(out).toContain("9 cycles");
     expect(out).toContain("1 delivered");
-    expect(out).toContain("1 pending_merge");
+    // US-DELIV-012: pending_merge renders under the design vocabulary awaiting_merge.
+    expect(out).toContain("1 awaiting_merge");
     expect(out).toContain("1 unpublished");
     expect(out).toContain("1 superseded");
     expect(out).toContain("3 failed/reverted/blocked");
@@ -568,5 +569,71 @@ describe("roll cycles --detail — US-LOOP-076 build-phase timeline", () => {
       process.chdir(save);
     }
     expect(err).toContain("illegal --since");
+  });
+});
+
+describe("US-DELIV-012 — new delivery states + metrics render", () => {
+  const NOW_MS = NOW * 1000;
+  function row(overrides: Partial<CycleLedgerRow> & { cycleId: string; verdict: CycleLedgerRow["verdict"] }): CycleLedgerRow {
+    return {
+      tsSec: NOW - 3600,
+      storyId: "US-D",
+      agent: "claude",
+      model: "claude",
+      tokens: "—",
+      cost: "—",
+      toolSummary: "",
+      toolCosts: [],
+      toolTimeline: [],
+      duration: "—",
+      tape: [],
+      evidence: [],
+      ...overrides,
+    };
+  }
+
+  it("renders the new verdict vocabulary: delivered_external, degraded, awaiting_merge", () => {
+    const rows = [
+      row({ cycleId: "e1", verdict: "delivered_external" }),
+      row({ cycleId: "g1", verdict: "degraded", degradedReason: "ci_stuck" }),
+      row({ cycleId: "p1", verdict: "pending_merge", awaitingSinceMs: NOW_MS - 3_600_000 }),
+    ];
+    const out = stripAnsi(renderCyclesLedger(rows, "all", "en", NOW));
+    expect(out).toContain("delivered_external"); // the row verdict cell
+    expect(out).toContain("degraded");
+    expect(out).toContain("1 awaiting_merge"); // summary bucket, design vocabulary
+  });
+
+  it("renders the delivery metrics line (external-merge rate / dwell / fan-out waste)", () => {
+    const rows = [
+      row({ cycleId: "d1", verdict: "delivered" }),
+      row({ cycleId: "e1", verdict: "delivered_external" }),
+      row({ cycleId: "p1", verdict: "pending_merge", awaitingSinceMs: NOW_MS - 7_200_000 }), // 2h
+      row({ cycleId: "s1", verdict: "superseded" }),
+    ];
+    const out = stripAnsi(renderCyclesLedger(rows, "all", "en", NOW));
+    expect(out).toContain("delivery:");
+    expect(out).toContain("external-merge 50% (1/2)");
+    expect(out).toContain("awaiting_merge 1 (avg dwell 2h)");
+    expect(out).toContain("fan-out waste 1");
+  });
+
+  it("--json carries the delivery metrics block from the SAME derivation", () => {
+    const rows = [
+      row({ cycleId: "d1", verdict: "delivered" }),
+      row({ cycleId: "e1", verdict: "delivered_external" }),
+      row({ cycleId: "s1", verdict: "superseded" }),
+    ];
+    const json = cyclesLedgerJson(rows, "all", NOW) as {
+      delivery: { deliveredExternal: number; externalMergeRate: number | null; fanoutWasteCycles: number };
+    };
+    expect(json.delivery.deliveredExternal).toBe(1);
+    expect(json.delivery.externalMergeRate).toBeCloseTo(0.5, 5);
+    expect(json.delivery.fanoutWasteCycles).toBe(1);
+  });
+
+  it("omits the metrics line entirely when the window has nothing to report", () => {
+    const out = stripAnsi(renderCyclesLedger([row({ cycleId: "f1", verdict: "failed" })], "all", "en", NOW));
+    expect(out).not.toContain("delivery:");
   });
 });

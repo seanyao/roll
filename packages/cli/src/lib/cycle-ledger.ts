@@ -9,13 +9,21 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { agentBuilderLabel, cycleActivitySignalsFromEvents, normalizeModelLabel, type ActivitySignal, type ReconcileResult } from "@roll/core";
-import type { ToolCost } from "@roll/spec";
+import type { DeliveryState, ToolCost } from "@roll/spec";
 import { parseEventLine, type RollEvent } from "@roll/spec";
 import { collectToolEvidence, formatToolCostSummary, type ToolTimelineRow } from "./tool-display.js";
 
 export type CycleLedgerVerdict =
   | "delivered"
+  // US-DELIV-012: a delivery MERGED by a hand/supervisor (not the runner's own
+  // self-merge). Distinguished so the external-merge rate is visible; still a
+  // real delivery (green), never a failure.
+  | "delivered_external"
   | "pending_merge"
+  // US-DELIV-012: an awaiting_merge cycle the reconcile engine judged DEGRADED
+  // (US-DELIV-010: draft / merge conflict / CI long-red / no permission) — stuck
+  // but not dead, carries a reason for triage. NEVER a delivered.
+  | "degraded"
   | "unpublished"
   | "superseded"
   | "reverted"
@@ -30,7 +38,9 @@ export type CycleLedgerVerdict =
  *  ALL non-zero buckets and GUARANTEE total === sum(buckets). */
 export const CYCLE_VERDICTS: readonly CycleLedgerVerdict[] = [
   "delivered",
+  "delivered_external",
   "pending_merge",
+  "degraded",
   "unpublished",
   "superseded",
   "failed",
@@ -87,6 +97,14 @@ export interface CycleLedgerRow {
   failureClass?: string;
   /** REFACTOR-070: deterministic root-cause key (e.g. env:pr_loop). */
   rootCauseKey?: string;
+  /** US-DELIV-012: epoch ms the cycle entered `awaiting_merge` (its
+   *  `delivery:published` event ts), the dwell anchor for the awaiting_merge
+   *  滞留时长 metric. undefined when the cycle never published. */
+  awaitingSinceMs?: number;
+  /** US-DELIV-012: why a `degraded` cycle is stuck (US-DELIV-010 reason:
+   *  ci_stuck / merge_conflict / draft / no_permission), surfaced in --json /
+   *  detail output. undefined unless the verdict is `degraded`. */
+  degradedReason?: string;
 }
 
 /**
@@ -200,7 +218,27 @@ export function reconcileCyclesWithDelivery(
   return rows.map((r) => {
     if (r.verdict !== "pending_merge" && r.verdict !== "unpublished") return r;
     if (r.storyId === "" && r.prNumber === undefined) return r;
-    if (decide(r).kind !== "delivered") return r;
+    const d = decide(r);
+    // US-DELIV-012: a DEGRADED verdict (US-DELIV-010: draft / merge conflict /
+    // CI long-red / no permission) is surfaced with its reason — stuck but not
+    // dead, NEVER a delivered. The end tape shows the degraded reason so a
+    // day-old red PR reads as stuck, not as an in-flight check.
+    if (d.kind === "degraded") {
+      return {
+        ...r,
+        verdict: "degraded",
+        degradedReason: d.reason,
+        tape: r.tape.map((seg) =>
+          seg.key === "end" ? { ...seg, detail: `degraded: ${d.reason}`, state: "fail" } : seg,
+        ),
+      };
+    }
+    if (d.kind !== "delivered") return r;
+    // The OFFLINE decision cannot tell a runner self-merge from a hand merge
+    // (reconcileDelivery stamps via=external for any MERGED/patch-id hit), so it
+    // stays the conservative `delivered`. The runner-vs-external distinction is
+    // event-authoritative — `reconcileDeliveryStateProjection` promotes it to
+    // `delivered_external` from the `delivery:reconciled{mergedBy}` truth.
     return {
       ...r,
       verdict: "delivered",
@@ -300,6 +338,124 @@ export function reconcileSupersededVerdicts(
       tape: r.tape.map((seg) => (seg.key === "end" ? { ...seg, detail: "superseded", state: "idle" } : seg)),
     };
   });
+}
+
+/**
+ * US-DELIV-012 — reconcile the ledger against the EVENT-AUTHORITATIVE delivery
+ * state projection (`projectDeliveryState`, US-DELIV-001). The offline decision
+ * engine (`reconcileCyclesWithDelivery`) cannot tell a runner self-merge from a
+ * hand/supervisor merge — it stamps every merge `delivered`. The event stream
+ * CAN: a `delivery:reconciled{state, mergedBy}` event records which, so a cycle
+ * whose projection is `delivered_external` is promoted to the
+ * `delivered_external` verdict (external-merge rate becomes visible). Read-only:
+ * a state the projection does NOT carry leaves the row untouched.
+ *
+ * Also attaches `awaitingSinceMs` (from the `delivery:published` event ts, via
+ * the injected `awaitingSince`) to every row still `awaiting_merge` — the dwell
+ * anchor the awaiting_merge 滞留时长 metric averages over.
+ *
+ * Pure: rows + injected projections in, rows out. The event IO lives behind the
+ * two injected lookups (production wires them to a single fold of events.ndjson;
+ * see cycles.ts `reconciledLedger`).
+ *
+ * @param rows - the reconciled ledger rows.
+ * @param stateFor - cycleId → its projected {@link DeliveryState} (undefined =
+ *   no delivery events for that cycle; the row keeps its verdict).
+ * @param awaitingSince - cycleId → epoch ms it entered awaiting_merge
+ *   (`delivery:published` ts), for the dwell anchor.
+ */
+export function reconcileDeliveryStateProjection(
+  rows: readonly CycleLedgerRow[],
+  stateFor: (cycleId: string) => DeliveryState | undefined,
+  awaitingSince: (cycleId: string) => number | undefined,
+): CycleLedgerRow[] {
+  return rows.map((r) => {
+    const since = awaitingSince(r.cycleId);
+    const withAnchor = since !== undefined ? { ...r, awaitingSinceMs: since } : r;
+    // Only the externally-merged terminal state carries information the offline
+    // decision could not: promote it. `delivered` (runner) already matches the
+    // conservative verdict; every other projected state is left to the existing
+    // verdict pipeline (awaiting_merge ≡ pending_merge, ci_failed, superseded…).
+    if (stateFor(r.cycleId) === "delivered_external") {
+      return {
+        ...withAnchor,
+        verdict: "delivered_external",
+        tape: withAnchor.tape.map((seg) =>
+          seg.key === "end" ? { ...seg, detail: "delivered (external)", state: "pass" } : seg,
+        ),
+      };
+    }
+    return withAnchor;
+  });
+}
+
+/**
+ * US-DELIV-012 — the delivery observability metrics (design §9), a PURE
+ * derivation over the reconciled ledger rows so `roll cycles`, `--json`, and the
+ * dashboard all read the SAME numbers. Read-only: metrics never change a verdict.
+ *
+ *  - `externalMergeRate` — the supervisor/hand-merge share of all deliveries:
+ *    delivered_external / (delivered + delivered_external). null when there are
+ *    no deliveries in the window (a rate over zero is meaningless, not 0%).
+ *  - `awaitingDwellMsAvg` — the mean time cycles have sat in awaiting_merge
+ *    (now − `delivery:published` ts). null when nothing is awaiting or no cycle
+ *    carries a dwell anchor.
+ *  - `fanoutWasteCycles` — cycles whose card landed elsewhere (`superseded`):
+ *    duplicated effort the one-card-one-lease rule (US-DELIV-005) exists to kill.
+ */
+export interface DeliveryMetrics {
+  delivered: number;
+  deliveredExternal: number;
+  externalMergeRate: number | null;
+  awaitingCount: number;
+  awaitingDwellMsAvg: number | null;
+  degraded: number;
+  fanoutWasteCycles: number;
+}
+
+export function deliveryMetrics(rows: readonly CycleLedgerRow[], nowMs: number): DeliveryMetrics {
+  let delivered = 0;
+  let deliveredExternal = 0;
+  let awaitingCount = 0;
+  let degraded = 0;
+  let fanoutWasteCycles = 0;
+  let dwellSum = 0;
+  let dwellN = 0;
+  for (const r of rows) {
+    switch (r.verdict) {
+      case "delivered":
+        delivered += 1;
+        break;
+      case "delivered_external":
+        deliveredExternal += 1;
+        break;
+      case "pending_merge":
+        awaitingCount += 1;
+        if (r.awaitingSinceMs !== undefined) {
+          dwellSum += Math.max(0, nowMs - r.awaitingSinceMs);
+          dwellN += 1;
+        }
+        break;
+      case "degraded":
+        degraded += 1;
+        break;
+      case "superseded":
+        fanoutWasteCycles += 1;
+        break;
+      default:
+        break;
+    }
+  }
+  const totalDeliveries = delivered + deliveredExternal;
+  return {
+    delivered,
+    deliveredExternal,
+    externalMergeRate: totalDeliveries > 0 ? deliveredExternal / totalDeliveries : null,
+    awaitingCount,
+    awaitingDwellMsAvg: dwellN > 0 ? dwellSum / dwellN : null,
+    degraded,
+    fanoutWasteCycles,
+  };
 }
 
 /**

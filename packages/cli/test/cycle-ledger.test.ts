@@ -7,13 +7,16 @@ import {
   bucketCounts,
   collectCycleLedger,
   CYCLE_VERDICTS,
+  deliveryMetrics,
   ledgerFailedCount,
   ledgerVerdict,
   reconcileCyclesWithDelivery,
   reconcileDeliveredUnpublishedVerdicts,
+  reconcileDeliveryStateProjection,
   reconcileSupersededVerdicts,
   type CycleLedgerRow,
 } from "../src/lib/cycle-ledger.js";
+import type { DeliveryState } from "@roll/spec";
 import { gitHasPrMergeCommit } from "../src/lib/story-dossier.js";
 
 const dirs: string[] = [];
@@ -773,5 +776,126 @@ describe("FIX-290/FIX-337 (AC4) — failed AND idle real cycles keep model + dur
     expect(r.model).toBe("gpt-5");
     expect(r.duration).toBe("1m30s");
     expect(r.tokens).toBe("—");
+  });
+});
+
+describe("US-DELIV-012 — new delivery states + observability metrics", () => {
+  function baseRow(overrides: Partial<CycleLedgerRow> & { cycleId: string; verdict: CycleLedgerRow["verdict"] }): CycleLedgerRow {
+    return {
+      tsSec: 1781230000,
+      storyId: "",
+      agent: "claude",
+      model: "claude",
+      tokens: "—",
+      cost: "—",
+      toolSummary: "",
+      toolCosts: [],
+      toolTimeline: [],
+      duration: "—",
+      tape: [
+        { key: "pr", detail: "#42 open", state: "idle" },
+        { key: "end", detail: "pending", state: "unknown" },
+      ],
+      evidence: [],
+      ...overrides,
+    };
+  }
+
+  describe("reconcileCyclesWithDelivery — degraded verdict (US-DELIV-010 surfaced)", () => {
+    it("a degraded decision flips pending_merge → degraded with reason + red end tape", () => {
+      const row = baseRow({ cycleId: "c1", verdict: "pending_merge", storyId: "US-X", prNumber: 42 });
+      const out = reconcileCyclesWithDelivery([row], () => ({ kind: "degraded", reason: "merge_conflict", dwellMs: 1000 }));
+      expect(out[0]!.verdict).toBe("degraded");
+      expect(out[0]!.degradedReason).toBe("merge_conflict");
+      const end = out[0]!.tape.find((s) => s.key === "end")!;
+      expect(end.detail).toBe("degraded: merge_conflict");
+      expect(end.state).toBe("fail"); // stuck, NEVER a delivered
+    });
+
+    it("an offline delivered decision stays conservative `delivered` (runner/external is event-authoritative)", () => {
+      const row = baseRow({ cycleId: "c2", verdict: "pending_merge", storyId: "US-Y", prNumber: 7 });
+      // reconcileDelivery stamps via=external for any merge hit; the ledger must
+      // NOT read that as delivered_external — only the event projection can.
+      const out = reconcileCyclesWithDelivery([row], () => ({ kind: "delivered", via: "external", signal: "patch_id" }));
+      expect(out[0]!.verdict).toBe("delivered");
+    });
+  });
+
+  describe("reconcileDeliveryStateProjection — event-authoritative delivered_external + dwell anchor", () => {
+    const noState = () => undefined;
+    const noSince = () => undefined;
+
+    it("a `delivered_external` projection promotes the verdict + rewrites the end tape", () => {
+      const row = baseRow({ cycleId: "c3", verdict: "delivered", storyId: "US-Z" });
+      const stateFor = (id: string): DeliveryState | undefined => (id === "c3" ? "delivered_external" : undefined);
+      const out = reconcileDeliveryStateProjection([row], stateFor, noSince);
+      expect(out[0]!.verdict).toBe("delivered_external");
+      expect(out[0]!.tape.find((s) => s.key === "end")!.detail).toBe("delivered (external)");
+      expect(out[0]!.tape.find((s) => s.key === "end")!.state).toBe("pass");
+    });
+
+    it("a `delivered` (runner) projection leaves the conservative verdict untouched", () => {
+      const row = baseRow({ cycleId: "c4", verdict: "delivered", storyId: "US-Z" });
+      const out = reconcileDeliveryStateProjection([row], () => "delivered", noSince);
+      expect(out[0]!.verdict).toBe("delivered");
+    });
+
+    it("attaches the awaiting_merge dwell anchor from the delivery:published ts", () => {
+      const row = baseRow({ cycleId: "c5", verdict: "pending_merge" });
+      const out = reconcileDeliveryStateProjection([row], noState, (id) => (id === "c5" ? 1_700_000_000_000 : undefined));
+      expect(out[0]!.awaitingSinceMs).toBe(1_700_000_000_000);
+      expect(out[0]!.verdict).toBe("pending_merge"); // read-only, verdict unchanged
+    });
+
+    it("no projection for a cycle leaves the row entirely untouched", () => {
+      const row = baseRow({ cycleId: "c6", verdict: "failed" });
+      const out = reconcileDeliveryStateProjection([row], noState, noSince);
+      expect(out[0]).toEqual(row);
+    });
+  });
+
+  describe("deliveryMetrics — external-merge rate / awaiting dwell / fan-out waste", () => {
+    const NOW_MS = 1_700_000_100_000; // 100s after the anchors below
+
+    it("computes external-merge rate over the sum of runner + external deliveries", () => {
+      const rows = [
+        baseRow({ cycleId: "d1", verdict: "delivered" }),
+        baseRow({ cycleId: "d2", verdict: "delivered_external" }),
+        baseRow({ cycleId: "d3", verdict: "delivered_external" }),
+      ];
+      const m = deliveryMetrics(rows, NOW_MS);
+      expect(m.delivered).toBe(1);
+      expect(m.deliveredExternal).toBe(2);
+      expect(m.externalMergeRate).toBeCloseTo(2 / 3, 5);
+    });
+
+    it("externalMergeRate is null when there are no deliveries (a rate over zero is meaningless)", () => {
+      const m = deliveryMetrics([baseRow({ cycleId: "n1", verdict: "failed" })], NOW_MS);
+      expect(m.externalMergeRate).toBeNull();
+    });
+
+    it("averages awaiting_merge dwell over rows carrying an anchor; null when none do", () => {
+      const rows = [
+        baseRow({ cycleId: "a1", verdict: "pending_merge", awaitingSinceMs: NOW_MS - 40_000 }),
+        baseRow({ cycleId: "a2", verdict: "pending_merge", awaitingSinceMs: NOW_MS - 60_000 }),
+        baseRow({ cycleId: "a3", verdict: "pending_merge" }), // no anchor → excluded from the mean
+      ];
+      const m = deliveryMetrics(rows, NOW_MS);
+      expect(m.awaitingCount).toBe(3);
+      expect(m.awaitingDwellMsAvg).toBe(50_000); // (40k + 60k) / 2
+      const empty = deliveryMetrics([baseRow({ cycleId: "a4", verdict: "pending_merge" })], NOW_MS);
+      expect(empty.awaitingDwellMsAvg).toBeNull();
+    });
+
+    it("counts degraded and fan-out waste (superseded) cycles", () => {
+      const rows = [
+        baseRow({ cycleId: "g1", verdict: "degraded" }),
+        baseRow({ cycleId: "s1", verdict: "superseded" }),
+        baseRow({ cycleId: "s2", verdict: "superseded" }),
+      ];
+      const m = deliveryMetrics(rows, NOW_MS);
+      expect(m.degraded).toBe(1);
+      expect(m.fanoutWasteCycles).toBe(2);
+    });
   });
 });

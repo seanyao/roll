@@ -15,6 +15,7 @@
  */
 
 import type { DeliveryState } from "@roll/spec";
+import type { PrMergeableState } from "./pr-reconcile.js";
 
 // ── Input types ───────────────────────────────────────────────────────────────
 
@@ -26,6 +27,12 @@ export interface ReconcileCycle {
   prNumber?: number;
   /** Current deliveryState from the event projection (projectDeliveryState). */
   deliveryState: DeliveryState;
+  /**
+   * US-DELIV-010: epoch ms when the cycle entered `awaiting_merge`
+   * (the `delivery:published` event ts). Combined with {@link ReconcileFacts.nowMs}
+   * it yields the dwell time every degraded/terminal verdict carries.
+   */
+  awaitingSinceMs?: number;
 }
 
 /** External facts gathered by the IO adapter (gh / git). */
@@ -53,9 +60,45 @@ export interface ReconcileFacts {
   backlogDone: boolean;
   /** L3 cross-check: does an attest report exist? */
   attestPresent: boolean;
+  /** US-DELIV-010: the PR is a draft (not mergeable by policy). */
+  prDraft?: boolean;
+  /** US-DELIV-010: gh mergeable rollup (CONFLICTING = merge conflict). */
+  prMergeable?: PrMergeableState;
+  /** US-DELIV-010: why gh could not answer (auth = missing permission). */
+  prUnreachableReason?: "offline" | "auth" | "provider_error" | "not_found";
+  /** US-DELIV-010: caller-injected clock (epoch ms) for dwell computation. */
+  nowMs?: number;
 }
 
 // ── Output types ──────────────────────────────────────────────────────────────
+
+/**
+ * US-DELIV-010: why an awaiting_merge cycle is DEGRADED — stuck but not dead;
+ * the PR still exists and a fix-forward (or human triage) can unblock it.
+ * Every degraded verdict is observable (reason + dwell) for the US-DELIV-012
+ * rendering and is NEVER a delivered.
+ */
+export type DegradedReason =
+  | "ci_stuck"
+  | "merge_conflict"
+  | "draft"
+  | "no_permission";
+
+/**
+ * US-DELIV-010: why an awaiting_merge cycle is TERMINAL — the PR is gone and
+ * this cycle can never merge as-is. Still NEVER a delivered: termination is
+ * an honest classification for human triage, not a credit.
+ */
+export type TerminalReason = "pr_closed_unmerged";
+
+/**
+ * US-DELIV-010: CI long-red threshold. A cycle that has dwelt in
+ * awaiting_merge at least this long while its PR's CI is red is `ci_stuck`
+ * (degraded) instead of a plain `ci_failed` — a day-old red is a stuck PR,
+ * not a check in flight. (Dwell is anchored on `delivery:published`; the
+ * engine does not know when CI itself turned red.)
+ */
+export const CI_STUCK_DWELL_MS = 24 * 60 * 60 * 1000;
 
 export type ReconcileResult =
   | {
@@ -66,6 +109,8 @@ export type ReconcileResult =
     }
   | { kind: "merge_now"; method: "squash" }
   | { kind: "ci_failed" }
+  | { kind: "degraded"; reason: DegradedReason; dwellMs?: number }
+  | { kind: "terminal"; reason: TerminalReason; dwellMs?: number }
   | { kind: "superseded"; reason: string }
   | { kind: "wait" };
 
@@ -84,15 +129,22 @@ export type ReconcileResult =
  *      has runner context).
  *   2. branchNetPatchId ∈ mainPatchIds → delivered_external (L2, works offline).
  *      L1+L2 both hit: L1 wins, L2 is corroborating evidence.
- *   3. CI green + PR open + not merged → merge_now (drive auto-merge).
- *   4. CI red → ci_failed.
- *   5. Nothing hits → wait (never fabricate delivered). L3 alone is never
+ *   3. PR CLOSED (unmerged) → terminal(pr_closed_unmerged) — US-DELIV-010.
+ *   4. PR OPEN: draft → degraded(draft); merge conflict →
+ *      degraded(merge_conflict); CI green → merge_now; CI red past
+ *      {@link CI_STUCK_DWELL_MS} → degraded(ci_stuck); CI red → ci_failed;
+ *      mergeable UNKNOWN / CI unknown → wait (transient).
+ *   5. gh unreachable auth → degraded(no_permission); other gh errors → wait.
+ *   6. Nothing hits → wait (never fabricate delivered). L3 alone is never
  *      sufficient.
  *
  * Guardrails:
  *   - L1/L2 "conflict": L1 MERGED always wins. L2 miss on an amend is expected.
  *   - Uncertain → wait: when prState is undefined AND branchNetPatchId is
  *     undefined, no strong signal is possible → wait.
+ *   - US-DELIV-010: degraded/terminal are honest classifications with reason +
+ *     dwell for observability and human triage — NEVER delivered, and a
+ *     closed/conflicting/draft PR is never merge_now.
  *
  * @param cyc - The cycle facts from the event projection.
  * @param facts - External facts gathered by the IO adapter.
@@ -102,6 +154,11 @@ export function reconcileDelivery(
   cyc: ReconcileCycle,
   facts: ReconcileFacts,
 ): ReconcileResult {
+  const dwellMs =
+    cyc.awaitingSinceMs !== undefined && facts.nowMs !== undefined
+      ? Math.max(0, facts.nowMs - cyc.awaitingSinceMs)
+      : undefined;
+
   // ── L1: PR state is the strongest signal ──────────────────────────────────
   if (facts.prState === "MERGED") {
     return {
@@ -117,6 +174,8 @@ export function reconcileDelivery(
 
   // ── L2: patch-id equivalence (squash/rebase safe) ─────────────────────────
   // Only triggers when L1 did NOT fire (PR not merged, or gh unavailable).
+  // patch-id is computed from the DIFF content, so a squash merge that rewrote
+  // the commit title/body still matches (US-DELIV-010 matrix).
   if (
     facts.branchNetPatchId !== undefined &&
     facts.mainPatchIds.has(facts.branchNetPatchId)
@@ -128,15 +187,46 @@ export function reconcileDelivery(
     };
   }
 
-  // ── L1 + L2 both silent: assess CI for merge_now / ci_failed ──────────────
-  // Only relevant when the cycle is awaiting_merge and the PR is OPEN.
+  // ── US-DELIV-010: terminal — PR closed without merge ──────────────────────
+  // L1/L2 both silent on a CLOSED PR means the cycle can never merge as-is.
+  // Honest classification for human triage — NEVER a delivered.
+  if (facts.prState === "CLOSED") {
+    return { kind: "terminal", reason: "pr_closed_unmerged", dwellMs };
+  }
+
+  // ── L1 + L2 both silent: assess the OPEN PR (merge_now / degraded / ci) ───
   if (facts.prState === "OPEN") {
+    // A draft PR is not mergeable by policy — classify, don't attempt merge.
+    if (facts.prDraft === true) {
+      return { kind: "degraded", reason: "draft", dwellMs };
+    }
+    // A merge conflict blocks any merge attempt — classify before merge_now.
+    if (facts.prMergeable === "CONFLICTING") {
+      return { kind: "degraded", reason: "merge_conflict", dwellMs };
+    }
     if (facts.ciGreen === true) {
+      // mergeable UNKNOWN is transient — GitHub hasn't confirmed mergeability;
+      // a green CI alone is not license to squash → wait, never merge blind.
+      if (facts.prMergeable === "UNKNOWN") {
+        return { kind: "wait" };
+      }
       return { kind: "merge_now", method: "squash" };
     }
     if (facts.ciGreen === false) {
+      // CI long-red: the engine knows the CYCLE has dwelt in awaiting_merge
+      // past the threshold with CI red (not how long CI itself has been red)
+      // → degraded(ci_stuck) with dwell.
+      if (dwellMs !== undefined && dwellMs >= CI_STUCK_DWELL_MS) {
+        return { kind: "degraded", reason: "ci_stuck", dwellMs };
+      }
       return { kind: "ci_failed" };
     }
+    // mergeable UNKNOWN / CI unknown → transient; wait (no verdict).
+  }
+
+  // ── US-DELIV-010: gh unreachable — auth is durable, the rest is transient ──
+  if (facts.prState === undefined && facts.prUnreachableReason === "auth") {
+    return { kind: "degraded", reason: "no_permission", dwellMs };
   }
 
   // ── L3 alone: never sufficient ────────────────────────────────────────────

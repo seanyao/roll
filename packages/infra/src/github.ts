@@ -76,7 +76,7 @@
  */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { OpenPrReference } from "@roll/core";
+import type { OpenPrReference, PrMergeableState } from "@roll/core";
 import type { ToolDeclaration, ToolInvocation, ToolResult } from "@roll/spec";
 import { invokeInfraTool } from "./tools/delegation.js";
 
@@ -377,7 +377,9 @@ export async function prAutoMergeArmed(slug: string, ref: string): Promise<boole
  *  FIX-389b: extends with prNumber + prUrl so the backfill can stamp these
  *  onto runs rows for the projection engine.
  *  FIX-1052: extends with headRefName so the pending-PR reconciler can probe
- *  the PR's head-branch CI state. */
+ *  the PR's head-branch CI state.
+ *  US-DELIV-010: extends with isDraft + mergeable so the reconcile engine can
+ *  classify draft / merge-conflict PRs as degraded instead of merging blind. */
 export interface PrMergeInfo {
   state: GhPrState;
   mergedAt: string | undefined;
@@ -388,16 +390,21 @@ export interface PrMergeInfo {
   prUrl: string | undefined;
   /** Head branch name (e.g. `loop/cycle-…`). Absent when gh cannot resolve it. */
   headRefName: string | undefined;
+  /** Draft PR (not mergeable by policy). Absent when gh cannot resolve it. */
+  isDraft: boolean | undefined;
+  /** gh mergeable rollup: MERGEABLE / CONFLICTING / UNKNOWN. */
+  mergeable: PrMergeableState | undefined;
 }
 
 /**
- * `gh -R <slug> pr view <ref> --json state,mergedAt,mergeCommit,number,url,headRefName`
- * (bin/roll 13744 + FIX-389b prNumber/prUrl extension + FIX-1052 headRefName).
+ * `gh -R <slug> pr view <ref> --json state,mergedAt,mergeCommit,number,url,headRefName,isDraft,mergeable`
+ * (bin/roll 13744 + FIX-389b prNumber/prUrl extension + FIX-1052 headRefName
+ * + US-DELIV-010 isDraft/mergeable).
  * Returns undefined on failure (the oracle's `|| view_json=""` skip).
  * `mergeCommit` is GitHub's `{ oid }` object — we surface the oid string.
  */
 export async function prViewMergeInfo(slug: string, ref: string): Promise<PrMergeInfo | undefined> {
-  const r = await gh(["-R", slug, "pr", "view", ref, "--json", "state,mergedAt,mergeCommit,number,url,headRefName"]);
+  const r = await gh(["-R", slug, "pr", "view", ref, "--json", "state,mergedAt,mergeCommit,number,url,headRefName,isDraft,mergeable"]);
   if (r.code !== 0 || r.stdout.trim() === "") return undefined;
   try {
     const j = JSON.parse(r.stdout) as {
@@ -407,7 +414,13 @@ export async function prViewMergeInfo(slug: string, ref: string): Promise<PrMerg
       number?: number | null;
       url?: string | null;
       headRefName?: string | null;
+      isDraft?: boolean | null;
+      mergeable?: string | null;
     };
+    const mergeable =
+      j.mergeable === "MERGEABLE" || j.mergeable === "CONFLICTING" || j.mergeable === "UNKNOWN"
+        ? j.mergeable
+        : undefined;
     return {
       state: j.state ?? "UNKNOWN",
       mergedAt: j.mergedAt == null ? undefined : j.mergedAt,
@@ -415,6 +428,8 @@ export async function prViewMergeInfo(slug: string, ref: string): Promise<PrMerg
       prNumber: typeof j.number === "number" ? j.number : undefined,
       prUrl: typeof j.url === "string" && j.url !== "" ? j.url : undefined,
       headRefName: typeof j.headRefName === "string" && j.headRefName !== "" ? j.headRefName : undefined,
+      isDraft: typeof j.isDraft === "boolean" ? j.isDraft : undefined,
+      mergeable,
     };
   } catch {
     return undefined;

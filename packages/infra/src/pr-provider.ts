@@ -76,7 +76,7 @@ export class GitHubPrStatusProvider implements PrStatusProvider {
       const runs = branch !== undefined ? await runList(s, "conclusion", { branch }) : [];
       const conclusions = runs.map((r) => r.conclusion);
       const ci = reduceRunConclusions(conclusions);
-      return { kind: "open", ci, checkedAt };
+      return { kind: "open", ci, draft: info.isDraft, mergeable: info.mergeable, checkedAt };
     }
 
     // UNKNOWN or any unexpected string → treat as unreachable provider_error so

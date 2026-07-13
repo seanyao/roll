@@ -30,9 +30,21 @@ import { present, absent } from "@roll/spec";
 /** CI conclusion rolled up to the three states the reconcile policy cares about. */
 export type PrCiState = "pending" | "green" | "red" | "unknown";
 
+/** US-DELIV-010: gh mergeable rollup — the single vocabulary shared by the
+ *  provider adapter, the reconcile facts, and the gh json parser. */
+export type PrMergeableState = "MERGEABLE" | "CONFLICTING" | "UNKNOWN";
+
 /** The PR's current cloud state as reported by a provider adapter. */
 export type PrCloudState =
-  | { kind: "open"; ci: PrCiState; checkedAt: string }
+  | {
+      kind: "open";
+      ci: PrCiState;
+      /** US-DELIV-010: draft PRs are not mergeable by policy. */
+      draft?: boolean;
+      /** US-DELIV-010: gh mergeable rollup (CONFLICTING = merge conflict). */
+      mergeable?: PrMergeableState;
+      checkedAt: string;
+    }
   | { kind: "merged"; mergeCommit: string; mergedAt: string; checkedAt: string }
   | { kind: "closed_unmerged"; closedAt: string; checkedAt: string }
   | { kind: "unreachable"; reason: "offline" | "auth" | "provider_error" | "not_found"; checkedAt: string };

@@ -32,7 +32,7 @@ import {
   type ReconcileFacts,
   type ReconcileResult,
 } from "@roll/core";
-import type { PrStatusProvider } from "@roll/core";
+import type { PrCloudState, PrStatusProvider } from "@roll/core";
 import { GitHubPrStatusProvider, prMerge, type GhResult } from "@roll/infra";
 // US-DELIV-008: the fact-gathering primitives moved to the shared adapter so
 // the command path and the cycles read path feed the SAME reconcileDelivery
@@ -90,6 +90,59 @@ function runtimeDir(cwd: string): string {
   return env !== "" ? env : join(cwd, ".roll", "loop");
 }
 
+/**
+ * US-DELIV-010: map one provider poll onto {@link ReconcileFacts} — BOTH the
+ * command path and the tick feed the SAME pure engine the SAME facts. `open`
+ * carries draft/mergeable so the engine can classify degraded PRs instead of
+ * merging blind; `unreachable` carries its reason (auth → no_permission).
+ */
+function applyPrCloudState(facts: ReconcileFacts, st: PrCloudState): void {
+  switch (st.kind) {
+    case "merged":
+      facts.prState = "MERGED";
+      facts.prMergeCommit = st.mergeCommit;
+      return;
+    case "open":
+      facts.prState = "OPEN";
+      facts.ciGreen = st.ci === "green";
+      facts.prDraft = st.draft;
+      facts.prMergeable = st.mergeable;
+      return;
+    case "closed_unmerged":
+      facts.prState = "CLOSED";
+      return;
+    case "unreachable":
+      facts.prUnreachableReason = st.reason;
+      return;
+  }
+}
+
+/** US-DELIV-010: per-verdict icon for reconcile output. */
+function resultIcon(result: ReconcileResult): string {
+  switch (result.kind) {
+    case "delivered":
+      return "✅";
+    case "merge_now":
+      return "🔄";
+    case "ci_failed":
+      return "❌";
+    case "degraded":
+      return "⚠️";
+    case "terminal":
+      return "🛑";
+    default:
+      return "⏳";
+  }
+}
+
+/** US-DELIV-010: reason + dwell suffix for degraded/terminal verdicts. */
+function resultDetail(result: ReconcileResult): string {
+  if (result.kind !== "degraded" && result.kind !== "terminal") return "";
+  const dwell =
+    result.dwellMs !== undefined ? ` · dwell ${Math.round(result.dwellMs / 3_600_000)}h` : "";
+  return ` · ${result.reason}${dwell}`;
+}
+
 // ── Event reading ─────────────────────────────────────────────────────────────
 
 interface CycleSnapshot {
@@ -98,6 +151,8 @@ interface CycleSnapshot {
   branch: string;
   prNumber?: number;
   deliveryState: DeliveryState;
+  /** US-DELIV-010: ts of delivery:published — the awaiting_merge dwell anchor. */
+  awaitingSinceMs?: number;
 }
 
 /**
@@ -118,7 +173,7 @@ function readAwaitingCycles(cwd: string): CycleSnapshot[] {
 
   // Collect per-cycle events for projection.
   const cycleEvents = new Map<string, RollEvent[]>();
-  const cycleMeta = new Map<string, { storyId: string; branch: string; prNumber?: number }>();
+  const cycleMeta = new Map<string, { storyId: string; branch: string; prNumber?: number; awaitingSinceMs?: number }>();
 
   for (const line of content.split("\n")) {
     const ev = parseEventLine(line);
@@ -138,6 +193,9 @@ function readAwaitingCycles(cwd: string): CycleSnapshot[] {
       if (meta) {
         meta.prNumber = (ev as RollEvent & { prNumber: number }).prNumber;
         meta.branch = (ev as RollEvent & { branch: string }).branch;
+        // US-DELIV-010: dwell anchor — when the cycle entered awaiting_merge.
+        const ts = (ev as RollEvent & { ts?: number }).ts;
+        if (typeof ts === "number") meta.awaitingSinceMs = ts;
       }
     }
   }
@@ -158,6 +216,7 @@ function readAwaitingCycles(cwd: string): CycleSnapshot[] {
       branch: meta.branch,
       prNumber: meta.prNumber,
       deliveryState: state,
+      awaitingSinceMs: meta.awaitingSinceMs,
     });
   }
 
@@ -183,6 +242,10 @@ export interface ReconcileTickResult {
   delivered: number;
   mergeNow: number;
   ciFailed: number;
+  /** US-DELIV-010: stuck-but-alive cycles (draft / conflict / ci_stuck / no_permission). */
+  degraded: number;
+  /** US-DELIV-010: dead-end cycles (pr_closed_unmerged). */
+  terminal: number;
   waiting: number;
 }
 
@@ -200,11 +263,12 @@ export interface ReconcileTickResult {
  * @param cwd - Project root
  * @param opts.silent - Suppress stdout per-cycle output (used for ticks)
  * @param opts.storyFilter - Only reconcile the named story (optional)
+ * @param opts.provider - PR status provider override (default: GitHub via gh)
  * @returns A count summary of reconcile decisions
  */
 export async function runReconcileTick(
   cwd: string,
-  opts?: { silent?: boolean; storyFilter?: string },
+  opts?: { silent?: boolean; storyFilter?: string; provider?: PrStatusProvider },
 ): Promise<ReconcileTickResult> {
   const slug = resolveRepoSlug(cwd);
 
@@ -215,10 +279,10 @@ export async function runReconcileTick(
   }
 
   if (cycles.length === 0) {
-    return { cyclesProcessed: 0, delivered: 0, mergeNow: 0, ciFailed: 0, waiting: 0 };
+    return { cyclesProcessed: 0, delivered: 0, mergeNow: 0, ciFailed: 0, degraded: 0, terminal: 0, waiting: 0 };
   }
 
-  const provider = slug !== undefined ? new GitHubPrStatusProvider() : undefined;
+  const provider = opts?.provider ?? (slug !== undefined ? new GitHubPrStatusProvider() : undefined);
   const rt = runtimeDir(cwd);
   const eventsPath = join(rt, "events.ndjson");
   const runsPath = join(rt, "runs.jsonl");
@@ -232,6 +296,8 @@ export async function runReconcileTick(
   let delivered = 0;
   let mergeNow = 0;
   let ciFailed = 0;
+  let degraded = 0;
+  let terminal = 0;
   let waiting = 0;
 
   for (const cyc of cycles) {
@@ -244,21 +310,13 @@ export async function runReconcileTick(
       mainPatchIds: new Set(),
       backlogDone: false,
       attestPresent: false,
+      nowMs: now,
     };
 
     // L1: PR state via gh.
     if (provider !== undefined && cyc.prNumber !== undefined && slug !== undefined) {
       try {
-        const prState = await provider.pollPrStatus(slug, cyc.prNumber);
-        if (prState.kind === "merged") {
-          facts.prState = "MERGED";
-          facts.prMergeCommit = prState.mergeCommit;
-        } else if (prState.kind === "open") {
-          facts.prState = "OPEN";
-          facts.ciGreen = prState.ci === "green";
-        } else if (prState.kind === "closed_unmerged") {
-          facts.prState = "CLOSED";
-        }
+        applyPrCloudState(facts, await provider.pollPrStatus(slug, cyc.prNumber));
       } catch {
         // gh unavailable — L1 is silent; fall through to offline L1 / L2.
       }
@@ -287,6 +345,7 @@ export async function runReconcileTick(
       branch: cyc.branch,
       prNumber: cyc.prNumber,
       deliveryState: cyc.deliveryState,
+      awaitingSinceMs: cyc.awaitingSinceMs,
     };
     const result = reconcileDelivery(reconcileCycle, facts);
 
@@ -294,6 +353,8 @@ export async function runReconcileTick(
     if (result.kind === "delivered") delivered++;
     else if (result.kind === "merge_now") mergeNow++;
     else if (result.kind === "ci_failed") ciFailed++;
+    else if (result.kind === "degraded") degraded++;
+    else if (result.kind === "terminal") terminal++;
     else waiting++;
 
     if (result.kind === "delivered") {
@@ -362,14 +423,7 @@ export async function runReconcileTick(
     }
 
     if (!opts?.silent) {
-      const icon = result.kind === "delivered"
-        ? "✅"
-        : result.kind === "merge_now"
-          ? "🔄"
-          : result.kind === "ci_failed"
-            ? "❌"
-            : "⏳";
-      process.stdout.write(` ${icon} ${result.kind}`);
+      process.stdout.write(` ${resultIcon(result)} ${result.kind}${resultDetail(result)}`);
       if (result.kind === "delivered") {
         process.stdout.write(` · ${result.signal}`);
         if (result.mergeCommit) {
@@ -380,7 +434,7 @@ export async function runReconcileTick(
     }
   }
 
-  return { cyclesProcessed: cycles.length, delivered, mergeNow, ciFailed, waiting };
+  return { cyclesProcessed: cycles.length, delivered, mergeNow, ciFailed, degraded, terminal, waiting };
 }
 
 // ── Main command ──────────────────────────────────────────────────────────────
@@ -458,21 +512,13 @@ export async function loopReconcileCommand(
       mainPatchIds: new Set(),
       backlogDone: false,
       attestPresent: false,
+      nowMs: now,
     };
 
     // L1: PR state via gh.
     if (provider !== undefined && cyc.prNumber !== undefined && slug !== undefined) {
       try {
-        const prState = await provider.pollPrStatus(slug, cyc.prNumber);
-        if (prState.kind === "merged") {
-          facts.prState = "MERGED";
-          facts.prMergeCommit = prState.mergeCommit;
-        } else if (prState.kind === "open") {
-          facts.prState = "OPEN";
-          facts.ciGreen = prState.ci === "green";
-        } else if (prState.kind === "closed_unmerged") {
-          facts.prState = "CLOSED";
-        }
+        applyPrCloudState(facts, await provider.pollPrStatus(slug, cyc.prNumber));
       } catch {
         // gh unavailable — L1 is silent; fall through to offline L1 / L2.
       }
@@ -507,6 +553,7 @@ export async function loopReconcileCommand(
       branch: cyc.branch,
       prNumber: cyc.prNumber,
       deliveryState: cyc.deliveryState,
+      awaitingSinceMs: cyc.awaitingSinceMs,
     };
     const result = reconcileDelivery(reconcileCycle, facts);
 
@@ -601,14 +648,7 @@ export async function loopReconcileCommand(
     reportItems.push(item);
 
     // Print result.
-    const icon = result.kind === "delivered"
-      ? "✅"
-      : result.kind === "merge_now"
-        ? "🔄"
-        : result.kind === "ci_failed"
-          ? "❌"
-          : "⏳";
-    deps.stdout.write(` ${icon} ${result.kind}`);
+    deps.stdout.write(` ${resultIcon(result)} ${result.kind}${resultDetail(result)}`);
     if (result.kind === "delivered") {
       deps.stdout.write(` · ${result.signal}`);
       if (result.mergeCommit) {
@@ -622,12 +662,14 @@ export async function loopReconcileCommand(
   const delivered = reportItems.filter((i) => i.result.kind === "delivered").length;
   const mergeNow = reportItems.filter((i) => i.result.kind === "merge_now").length;
   const ciFailed = reportItems.filter((i) => i.result.kind === "ci_failed").length;
+  const degraded = reportItems.filter((i) => i.result.kind === "degraded").length;
+  const terminal = reportItems.filter((i) => i.result.kind === "terminal").length;
   const waiting = reportItems.filter((i) => i.result.kind === "wait").length;
 
   deps.stdout.write(
     lang === "zh"
-      ? `\n对账完成：${reportItems.length} 个 cycle · ${delivered} 已交付 · ${mergeNow} 待合并 · ${ciFailed} CI 失败 · ${waiting} 挂起${dryRun ? "（--dry-run）" : ""}\n`
-      : `\nReconciled ${reportItems.length} cycles · ${delivered} delivered · ${mergeNow} merge-ready · ${ciFailed} CI failed · ${waiting} waiting${dryRun ? " (--dry-run)" : ""}\n`,
+      ? `\n对账完成：${reportItems.length} 个 cycle · ${delivered} 已交付 · ${mergeNow} 待合并 · ${ciFailed} CI 失败 · ${degraded} 降级 · ${terminal} 终结 · ${waiting} 挂起${dryRun ? "（--dry-run）" : ""}\n`
+      : `\nReconciled ${reportItems.length} cycles · ${delivered} delivered · ${mergeNow} merge-ready · ${ciFailed} CI failed · ${degraded} degraded · ${terminal} terminal · ${waiting} waiting${dryRun ? " (--dry-run)" : ""}\n`,
   );
 
   // --json output.
@@ -641,6 +683,16 @@ export async function loopReconcileCommand(
       kind: item.result.kind,
       signal: item.signal,
       mergeCommit: item.mergeCommit,
+      // US-DELIV-010: degraded/terminal verdicts are observable — reason +
+      // dwell ride the JSON report for US-DELIV-012 rendering and triage.
+      reason:
+        item.result.kind === "degraded" || item.result.kind === "terminal"
+          ? item.result.reason
+          : undefined,
+      dwellMs:
+        item.result.kind === "degraded" || item.result.kind === "terminal"
+          ? item.result.dwellMs
+          : undefined,
     }));
     deps.stdout.write(JSON.stringify(jsonOutput, null, 2) + "\n");
   }

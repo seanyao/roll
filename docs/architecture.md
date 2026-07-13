@@ -175,11 +175,13 @@ building ──attest earned──► publishable ──push+PR──► awaitin
 
 | 层 | 信号 | 可靠性 | 何时可用 |
 |---|---|---|---|
-| L1 | **PR 状态**：`gh pr view` → `MERGED` | 最强（权威） | gh 可用且 PR 可解析时 |
+| L1 | **PR 状态**：`gh pr view` → `MERGED`；gh 沉默时离线同源——main 上的 `(#N)` merge commit（无 PR 号的旧 cycle 回退到 subject 含 story-id） | 最强（权威） | gh 可用且 PR 可解析时；离线也可从 main 的 git log 读 |
 | L2 | **patch-id 等价**：`git patch-id(diff origin/main...branch)` ∈ main 候选 merge commit 的 patch-id 集 | 强（squash/rebase 安全） | 离线也行；不依赖 gh |
 | L3 | **backlog Done + attest 报告存在** | 弱（仅佐证，单独不足） | 兜底交叉验证 |
 
 **判定规则**：`delivered` 需 ≥1 个强信号（L1 或 L2）。L3 单独不足以判 delivered（agent 可能预写 Done）。L1 与 L2 冲突时以 L1 为准并告警。全不命中 → 留 `awaiting_merge`，**绝不误判**。
+
+**单一真相引擎（US-DELIV-008）**：`roll loop reconcile` 命令与 `roll loop cycles` 读路径共用同一个纯函数 `reconcileDelivery` + 同一份事实采集（`packages/cli/src/lib/delivery-facts.ts`）。旧 subject-match 探针已退役为 L1 的离线输入信号，不再是并行的第二判据——读路径与命令对同一 cycle 的 delivered 判定永不分歧。
 
 #### Delivery Reconciler
 

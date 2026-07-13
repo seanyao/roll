@@ -9,12 +9,12 @@ import {
   CYCLE_VERDICTS,
   ledgerFailedCount,
   ledgerVerdict,
+  reconcileCyclesWithDelivery,
   reconcileDeliveredUnpublishedVerdicts,
-  reconcilePendingMergeVerdicts,
   reconcileSupersededVerdicts,
   type CycleLedgerRow,
 } from "../src/lib/cycle-ledger.js";
-import { cycleMergeTruth, gitHasPrMergeCommit } from "../src/lib/story-dossier.js";
+import { gitHasPrMergeCommit } from "../src/lib/story-dossier.js";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -397,11 +397,28 @@ describe("FIX-351 — gates-passed-but-unpublished renders neutral, not failed",
   });
 });
 
-describe("FIX-347 — reconcilePendingMergeVerdicts: render-time merge-truth", () => {
-  // Build a ledger from a published_pending_merge cycle (PR open at cycle-end):
-  // its row says outcome=published_pending_merge → verdict pending_merge, and the
-  // pr-open event makes the pr tape segment read "#N open".
-  function pendingLedger(storyId = "FIX-287") {
+describe("gitHasPrMergeCommit — the (#N) merge-evidence matcher (offline L1 primitive)", () => {
+  it("matches `(#N)` and `PR #N`, rejects open/near misses", () => {
+    const g = { commits: [{ subject: "tcr: x (#773)", message: "", files: [] }], slug: undefined };
+    expect(gitHasPrMergeCommit(g, 773)).toBe(true);
+    expect(gitHasPrMergeCommit(g, 77)).toBe(false);
+    expect(gitHasPrMergeCommit(g, 7730)).toBe(false);
+    expect(gitHasPrMergeCommit({ commits: [{ subject: "Merge PR #42", message: "", files: [] }], slug: undefined }, 42)).toBe(true);
+    expect(gitHasPrMergeCommit(null, 773)).toBe(false);
+    expect(gitHasPrMergeCommit(g, 0)).toBe(false);
+  });
+});
+
+describe("US-DELIV-008 — reconcileCyclesWithDelivery: the read path runs the SINGLE reconcile engine", () => {
+  // The old subject-match probe (reconcilePendingMergeVerdicts + cycleMergeTruth)
+  // is retired as a parallel criterion: the read path now delegates the
+  // delivered/wait judgment per row to an injected `decide` — wired in
+  // production to cycleReconcileDecision (offline L1 + patch-id L2 → the pure
+  // reconcileDelivery), the SAME engine `roll loop reconcile` runs.
+  const DELIVERED = { kind: "delivered", via: "external", signal: "patch_id" } as const;
+  const WAIT = { kind: "wait" } as const;
+
+  function pendingLedger(storyId = "FIX-287"): CycleLedgerRow[] {
     const p = project(
       [
         {
@@ -418,261 +435,83 @@ describe("FIX-347 — reconcilePendingMergeVerdicts: render-time merge-truth", (
       [{ type: "pr:open", prNumber: 773, storyId, ts: 1 }],
     );
     const rows = collectCycleLedger(p);
-    expect(rows[0]!.verdict).toBe("pending_merge"); // un-reconciled snapshot is yellow
-    expect(rows[0]!.tape.find((s) => s.key === "pr")?.detail).toBe("#773 open");
+    expect(rows[0]!.verdict).toBe("pending_merge");
     return rows;
   }
 
-  it("AC1/AC4: PR merged (git merge-truth true) → delivered/green, tape promoted", () => {
-    // This is FIX-287's exact case: cycle 20260616-234303-21843 ended
-    // published_pending_merge, PR #773 then merged by the PR loop.
-    const rows = pendingLedger();
-    const out = reconcilePendingMergeVerdicts(rows, () => true);
+  it("engine: delivered → verdict flips delivered/green, tape end + `#N open` pr segment promoted", () => {
+    const out = reconcileCyclesWithDelivery(pendingLedger(), () => DELIVERED);
     expect(out[0]!.verdict).toBe("delivered");
     expect(out[0]!.tape.find((s) => s.key === "end")?.state).toBe("pass");
     expect(out[0]!.tape.find((s) => s.key === "pr")?.detail).toBe("#773 merged");
     expect(out[0]!.tape.find((s) => s.key === "pr")?.state).toBe("pass");
   });
 
-  it("AC4: PR still open (no merge evidence) → stays pending_merge/yellow", () => {
-    const rows = pendingLedger();
-    const out = reconcilePendingMergeVerdicts(rows, () => false);
-    expect(out[0]!.verdict).toBe("pending_merge");
-    expect(out[0]!.tape.find((s) => s.key === "pr")?.detail).toBe("#773 open");
+  it("engine: wait / merge_now / ci_failed → stays pending_merge (read path never merges, never invents a failure)", () => {
+    for (const result of [WAIT, { kind: "merge_now", method: "squash" } as const, { kind: "ci_failed" } as const]) {
+      const out = reconcileCyclesWithDelivery(pendingLedger(), () => result);
+      expect(out[0]!.verdict).toBe("pending_merge");
+      expect(out[0]!.tape.find((s) => s.key === "pr")?.detail).toBe("#773 open");
+    }
   });
 
-  it("AC3/AC4: PR closed-unmerged (no merge evidence) is NOT conflated with failed", () => {
-    // A closed-unmerged PR leaves no merge commit, so the git check is false —
-    // the row stays pending_merge (the cycle-terminal / backfill owns the
-    // failed/abandon credit). Reconcile must never invent a `failed` from the
-    // mere absence of a merge.
-    const rows = pendingLedger();
-    const out = reconcilePendingMergeVerdicts(rows, () => false);
-    expect(out[0]!.verdict).not.toBe("failed");
-    expect(out[0]!.verdict).toBe("pending_merge");
+  it("unpublished row + engine delivered → promoted too (awaiting AND unpublished share the one engine)", () => {
+    const p = project([
+      { cycle_id: "u1", status: "local", outcome: "unpublished", story_id: "US-U-1", ts: "2026-06-16T03:00:00Z", tcr_count: 2 },
+    ]);
+    const rows = collectCycleLedger(p);
+    expect(rows[0]!.verdict).toBe("unpublished");
+    const out = reconcileCyclesWithDelivery(rows, () => DELIVERED);
+    expect(out[0]!.verdict).toBe("delivered");
+    expect(out[0]!.tape.find((s) => s.key === "end")?.state).toBe("pass");
   });
 
-  it("AC3: real failed / idle / delivered cycles are left untouched (only pending_merge reconciles)", () => {
+  it("unpublished row + engine wait → keeps its neutral unpublished verdict", () => {
+    const p = project([
+      { cycle_id: "u2", status: "local", outcome: "unpublished", story_id: "US-U-2", ts: "2026-06-16T03:00:00Z", tcr_count: 2 },
+    ]);
+    const out = reconcileCyclesWithDelivery(collectCycleLedger(p), () => WAIT);
+    expect(out[0]!.verdict).toBe("unpublished");
+  });
+
+  it("failed / delivered / idle rows are never re-judged (decide not consulted for them)", () => {
     const p = project([
       { cycle_id: "f", status: "failed", outcome: "failed", story_id: "US-F", ts: "2026-06-16T05:00:00Z" },
       { cycle_id: "d", status: "merged", outcome: "delivered", story_id: "US-D", ts: "2026-06-16T04:00:00Z" },
       { cycle_id: "pm", status: "published", outcome: "published_pending_merge", story_id: "US-PM", ts: "2026-06-16T03:00:00Z" },
     ]);
-    // isMerged returns true for EVERY story — proving non-pending rows are not
-    // re-derived (a failed cycle must stay red even if its story later merged
-    // elsewhere; only the pending_merge row flips).
-    const out = reconcilePendingMergeVerdicts(collectCycleLedger(p), () => true);
+    const judged: string[] = [];
+    const out = reconcileCyclesWithDelivery(collectCycleLedger(p), (r) => {
+      judged.push(r.cycleId);
+      return DELIVERED;
+    });
     const byId = new Map(out.map((r) => [r.cycleId, r.verdict]));
     expect(byId.get("f")).toBe("failed"); // red stays red
     expect(byId.get("d")).toBe("delivered");
     expect(byId.get("pm")).toBe("delivered"); // the pending one flips
+    expect(judged).toEqual(["pm"]); // ONLY the eligible row was judged
   });
 
-  it("AC4: a pending_merge row with no story_id is never flipped (nothing to match on)", () => {
-    const p = project([
-      { cycle_id: "ns", status: "published", outcome: "published_pending_merge", story_id: "US-S", ts: "2026-06-16T03:00:00Z" },
-    ]);
-    const rows = collectCycleLedger(p);
-    // simulate a missing story id on the row
+  it("empty storyId AND no prNumber → decide not consulted, row stays pending (nothing to match on)", () => {
+    const rows = pendingLedger();
     rows[0]!.storyId = "";
-    const out = reconcilePendingMergeVerdicts(rows, () => true);
+    rows[0]!.prNumber = undefined;
+    let consulted = 0;
+    const out = reconcileCyclesWithDelivery(rows, () => {
+      consulted += 1;
+      return DELIVERED;
+    });
     expect(out[0]!.verdict).toBe("pending_merge");
+    expect(consulted).toBe(0);
   });
-});
 
-describe("FIX-350 — reconcile is CYCLE-ACCURATE: a cycle is delivered IFF its OWN recorded PR merged", () => {
-  // Owner decision (FIX-350): a pending_merge cycle flips to delivered IFF its
-  // OWN recorded PR carries a `(#N)` merge commit on main — NOT if the story
-  // merely landed via some OTHER PR. When a row HAS a recorded PR number, the
-  // probe decides SOLELY by gitHasPrMergeCommit(that PR); it falls back to the
-  // story-id grep (FIX-347) ONLY for old cycles with no recorded PR number.
-  //
-  // FIX-287's reproduced case: cycle 20260616-234303-21843 ended
-  // published_pending_merge and recorded PR #773 on its cycle:terminal twin.
-  // PR #773 then merged to main as `tcr: align machine page typography (#773)` —
-  // a `(#773)` squash that does NOT name FIX-287. The PR-number match must flip it.
-  function fix287Ledger() {
+  it("collectCycleLedger threads the cycle's branch from its delivery:published event", () => {
     const p = project(
-      [
-        {
-          cycle_id: "20260616-234303-21843",
-          status: "published",
-          outcome: "published_pending_merge",
-          story_id: "FIX-287",
-          agent: "codex",
-          ts: "2026-06-16T23:43:03Z",
-          duration_sec: 1140,
-          tcr_count: 1,
-        },
-      ],
-      [
-        {
-          type: "cycle:terminal",
-          schema: 1,
-          cycleId: "20260616-234303-21843",
-          storyId: "FIX-287",
-          agent: "codex",
-          model: "gpt-5.5",
-          startedAt: 1781624584,
-          endedAt: 1781625724,
-          outcome: "published_pending_merge",
-          pr: { present: true, value: { url: "https://github.com/seanyao/roll/pull/773", state: "OPEN" } },
-          branch: { present: true, value: "loop/cycle-20260616-234303-21843" },
-          commit: { present: false, reason: "not_recorded" },
-          tcr: { present: true, value: 1 },
-          attest: { present: false, reason: "not_applicable" },
-          usage: { present: false, reason: "no_parseable_usage" },
-          cost: { present: false, reason: "no_parseable_usage" },
-          ts: 1781625724,
-        },
-      ],
+      [{ cycle_id: "c-br", status: "published", outcome: "published_pending_merge", story_id: "US-BR", ts: "2026-06-16T03:00:00Z", tcr_count: 1 }],
+      [{ type: "delivery:published", cycleId: "c-br", storyId: "US-BR", branch: "loop/c-br", prNumber: 5, prUrl: "u", ts: 1 }],
     );
     const rows = collectCycleLedger(p);
-    expect(rows[0]!.verdict).toBe("pending_merge");
-    expect(rows[0]!.prNumber).toBe(773); // PR number threaded from cycle:terminal
-    return rows;
-  }
-
-  // FIX-311's reproduced case: its cycle recorded PR #763, which NEVER merged —
-  // the story instead landed via LATER PRs #766/#767. A row WITH a recorded PR
-  // number that did NOT merge must STAY pending even though main carries commits
-  // naming FIX-311 (the FIX-311/284 regression FIX-350 closes).
-  function fix311Ledger() {
-    const p = project(
-      [
-        {
-          cycle_id: "20260615-100000-31100",
-          status: "published",
-          outcome: "published_pending_merge",
-          story_id: "FIX-311",
-          agent: "codex",
-          ts: "2026-06-15T10:00:00Z",
-          duration_sec: 900,
-          tcr_count: 1,
-        },
-      ],
-      [
-        {
-          type: "cycle:terminal",
-          schema: 1,
-          cycleId: "20260615-100000-31100",
-          storyId: "FIX-311",
-          agent: "codex",
-          model: "gpt-5.5",
-          startedAt: 1781600000,
-          endedAt: 1781600900,
-          outcome: "published_pending_merge",
-          pr: { present: true, value: { url: "https://github.com/seanyao/roll/pull/763", state: "OPEN" } },
-          branch: { present: true, value: "loop/cycle-20260615-100000-31100" },
-          commit: { present: false, reason: "not_recorded" },
-          tcr: { present: true, value: 1 },
-          attest: { present: false, reason: "not_applicable" },
-          usage: { present: false, reason: "no_parseable_usage" },
-          cost: { present: false, reason: "no_parseable_usage" },
-          ts: 1781600900,
-        },
-      ],
-    );
-    const rows = collectCycleLedger(p);
-    expect(rows[0]!.verdict).toBe("pending_merge");
-    expect(rows[0]!.prNumber).toBe(763);
-    return rows;
-  }
-
-  // A merge-truth probe over a single `(#773)` squash that does NOT name FIX-287
-  // — exactly what main carries (`tcr: align machine page typography (#773)`).
-  const fakeGit = {
-    commits: [{ subject: "tcr: align machine page typography (#773)", message: "tcr: align machine page typography (#773)\n", files: [] }],
-    slug: "seanyao/roll",
-  };
-
-  it("(a) row WITH prNumber whose PR merged → delivered (PR #773 merged via a `(#773)` commit that does NOT name FIX-287)", () => {
-    const rows = fix287Ledger();
-    const out = reconcilePendingMergeVerdicts(rows, cycleMergeTruth(fakeGit));
-    expect(out[0]!.verdict).toBe("delivered");
-    expect(out[0]!.tape.find((s) => s.key === "end")?.state).toBe("pass");
-  });
-
-  it("(b) KEY: row WITH prNumber whose PR did NOT merge → STAYS pending, EVEN IF a commit subject names the story-id (FIX-311/284 regression)", () => {
-    const rows = fix311Ledger();
-    // main carries LATER PRs (#766/#767) that name FIX-311 — its story landed,
-    // but its OWN recorded PR #763 never merged (no `(#763)` commit on main).
-    // The OLD FIX-348 OR-branch wrongly flipped this to delivered via the story
-    // grep; FIX-350 keeps it pending because PR #763 is the sole arbiter.
-    const laterPrGit = {
-      commits: [
-        { subject: "Fix: FIX-311 — dashboard reconcile (#766)", message: "", files: [] },
-        { subject: "Fix: FIX-311 follow-up (#767)", message: "", files: [] },
-      ],
-      slug: "seanyao/roll",
-    };
-    const out = reconcilePendingMergeVerdicts(rows, cycleMergeTruth(laterPrGit));
-    expect(out[0]!.verdict).toBe("pending_merge");
-  });
-
-  it("(b') the SAME row flips to delivered only once its OWN PR #763 carries a `(#763)` merge commit", () => {
-    const rows = fix311Ledger();
-    const ownPrGit = { commits: [{ subject: "tcr: something (#763)", message: "", files: [] }], slug: "seanyao/roll" };
-    const out = reconcilePendingMergeVerdicts(rows, cycleMergeTruth(ownPrGit));
-    expect(out[0]!.verdict).toBe("delivered");
-  });
-
-  it("(c) row with NO prNumber → falls back to storyHasMergeEvidence (old cycles predating the terminal PR event)", () => {
-    const rows = fix287Ledger();
-    rows[0]!.prNumber = undefined; // simulate a pre-terminal-event cycle: no PR recorded
-    // With no PR number, the story-id grep is the only signal. A commit naming
-    // FIX-287 → delivered; one that doesn't → stays pending.
-    const namedGit = { commits: [{ subject: "Fix: FIX-287 — typography", message: "", files: [] }], slug: "seanyao/roll" };
-    expect(reconcilePendingMergeVerdicts(rows, cycleMergeTruth(namedGit))[0]!.verdict).toBe("delivered");
-
-    const rows2 = fix287Ledger();
-    rows2[0]!.prNumber = undefined;
-    const unrelatedGit = { commits: [{ subject: "Fix: something unrelated (#999)", message: "", files: [] }], slug: "seanyao/roll" };
-    expect(reconcilePendingMergeVerdicts(rows2, cycleMergeTruth(unrelatedGit))[0]!.verdict).toBe("pending_merge");
-  });
-
-  it("RED LINE: an OPEN PR (no `(#N)` merge commit on main) stays pending_merge", () => {
-    const rows = fix287Ledger();
-    // main has no commit referencing #773 → the PR is still open/unmerged.
-    const openGit = { commits: [{ subject: "Fix: something unrelated (#999)", message: "", files: [] }], slug: "seanyao/roll" };
-    const out = reconcilePendingMergeVerdicts(rows, cycleMergeTruth(openGit));
-    expect(out[0]!.verdict).toBe("pending_merge");
-  });
-
-  it("does NOT confuse PR #773 with PR #77 or #7730 (exact number match)", () => {
-    const rows = fix287Ledger();
-    const nearGit = {
-      commits: [
-        { subject: "tcr: a (#77)", message: "", files: [] },
-        { subject: "tcr: b (#7730)", message: "", files: [] },
-      ],
-      slug: "seanyao/roll",
-    };
-    const out = reconcilePendingMergeVerdicts(rows, cycleMergeTruth(nearGit));
-    expect(out[0]!.verdict).toBe("pending_merge");
-  });
-
-  it("gitHasPrMergeCommit: matches `(#N)` and `PR #N`, rejects open/near misses", () => {
-    const g = { commits: [{ subject: "tcr: x (#773)", message: "", files: [] }], slug: undefined };
-    expect(gitHasPrMergeCommit(g, 773)).toBe(true);
-    expect(gitHasPrMergeCommit(g, 77)).toBe(false);
-    expect(gitHasPrMergeCommit(g, 7730)).toBe(false);
-    expect(gitHasPrMergeCommit({ commits: [{ subject: "Merge PR #42", message: "", files: [] }], slug: undefined }, 42)).toBe(true);
-    expect(gitHasPrMergeCommit(null, 773)).toBe(false);
-    expect(gitHasPrMergeCommit(g, 0)).toBe(false);
-  });
-
-  it("cycleMergeTruth: a recorded PR number is the SOLE arbiter; the story-id grep is the no-PR fallback", () => {
-    const truth = cycleMergeTruth(fakeGit); // main carries only `(#773)`, naming no story
-    // PR present → decided solely by gitHasPrMergeCommit.
-    expect(truth("FIX-287", 773)).toBe(true); // own PR merged
-    expect(truth("FIX-287", 999)).toBe(false); // own PR not merged — even though...
-    // ...the story-id grep would also be false here; the key is the PR is the arbiter.
-    // Empty story-id with no PR → must NOT match every commit (`"".includes` guard).
-    expect(truth("", undefined)).toBe(false);
-    // No PR → falls back to the story-id grep.
-    expect(truth("", 773)).toBe(true); // PR present still decides
-    expect(truth("", 999)).toBe(false);
+    expect(rows[0]!.branch).toBe("loop/c-br");
   });
 });
 

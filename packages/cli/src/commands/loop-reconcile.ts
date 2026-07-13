@@ -23,7 +23,6 @@ import { join } from "node:path";
 import { resolveLang, parseEventLine } from "@roll/spec";
 import type { DeliveryLease, RollEvent, DeliveryState } from "@roll/spec";
 import {
-  nodeExecPort,
   EventBus,
   reconcileDelivery,
   projectDeliveryState,
@@ -35,6 +34,11 @@ import {
 } from "@roll/core";
 import type { PrStatusProvider } from "@roll/core";
 import { GitHubPrStatusProvider, prMerge, type GhResult } from "@roll/infra";
+// US-DELIV-008: the fact-gathering primitives moved to the shared adapter so
+// the command path and the cycles read path feed the SAME reconcileDelivery
+// the SAME facts (one truth engine, no parallel probes).
+import { branchPatchId, mainPatchIdsSinceBranch, offlineMergeEvidence, resolveRepoSlug } from "../lib/delivery-facts.js";
+import { collectGitDossierFacts, type GitDossierFacts } from "../lib/story-dossier.js";
 
 // ── Usage ─────────────────────────────────────────────────────────────────────
 
@@ -84,105 +88,6 @@ function realDeps(): LoopReconcileDeps {
 function runtimeDir(cwd: string): string {
   const env = (process.env["ROLL_PROJECT_RUNTIME_DIR"] ?? "").trim();
   return env !== "" ? env : join(cwd, ".roll", "loop");
-}
-
-function resolveRepoSlug(cwd: string): string | undefined {
-  const r = nodeExecPort.run("git", ["-C", cwd, "remote", "get-url", "origin"]);
-  if (r.code !== 0 || r.stdout === "") return undefined;
-  const url = r.stdout.trim();
-  const m =
-    /github\.com[:/](?<owner>[^/]+)\/(?<repo>[^/]+?)(?:\.git)?$/.exec(url) ??
-    /git@github\.com:(?<owner>[^/]+)\/(?<repo>[^/]+?)(?:\.git)?$/.exec(url);
-  return m?.groups !== undefined ? `${m.groups.owner}/${m.groups.repo}` : undefined;
-}
-
-function branchExists(cwd: string, branch: string): boolean {
-  const r = nodeExecPort.run("git", ["-C", cwd, "rev-parse", "--verify", `refs/remotes/origin/${branch}`]);
-  return r.code === 0 && r.stdout.trim() !== "";
-}
-
-/**
- * Compute the git patch-id of `git diff origin/main...<branch>`.
- * Returns undefined when the branch doesn't exist or the diff is empty.
- */
-function branchPatchId(cwd: string, branch: string): string | undefined {
-  if (!branchExists(cwd, branch)) return undefined;
-  // Get the diff between origin/main and the branch.
-  const diff = nodeExecPort.run("git", [
-    "-C", cwd,
-    "diff",
-    "origin/main...origin/" + branch,
-  ]);
-  if (diff.code !== 0 || diff.stdout === "") return undefined;
-  // Pipe through git patch-id to get the stable hash.
-  // We use a temp approach: write diff to a pipe via echo + patch-id.
-  const patchId = nodeExecPort.run("sh", [
-    "-c",
-    `echo "${diff.stdout.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")}" | git -C '${cwd}' patch-id --stable`,
-  ]);
-  // Actually, let's use a cleaner approach.
-  // git patch-id reads from stdin; we'll pipe through bash heredoc.
-  const tmpFile = join(
-    cwd.replace(
-      /\/\.roll\/loop\/worktrees\/[^/]+$/,
-      "",
-    ),
-    ".roll",
-    "loop",
-    ".reconcile-diff-tmp",
-  );
-  // Simpler: compute directly by piping diff to patch-id.
-  // The git patch-id command reads diff from stdin.
-  const result = nodeExecPort.run("sh", [
-    "-c",
-    `cd '${cwd}' && git diff origin/main...origin/${branch} | git patch-id --stable`,
-  ]);
-  if (result.code !== 0 || result.stdout === "") return undefined;
-  // git patch-id output is "<hash> <patch-id>"
-  const parts = result.stdout.trim().split(/\s+/);
-  return parts[0] ?? undefined;
-}
-
-/**
- * Collect patch-ids from candidate merge commits on main since the branch's
- * fork point. Each patch-id represents what git-patch-id says about a diff.
- *
- * We scan git log origin/main ^origin/<branch> (commits on main not on branch).
- * For each merge commit, we compute its patch-id.
- */
-function mainPatchIdsSinceBranch(cwd: string, branch: string): Set<string> {
-  const ids = new Set<string>();
-  if (!branchExists(cwd, branch)) return ids;
-
-  // Get commits on main that are not on the branch.
-  const commits = nodeExecPort.run("git", [
-    "-C", cwd,
-    "log",
-    "--format=%H",
-    `origin/main...origin/${branch}`,
-    "--", // exclude diff
-  ]);
-  if (commits.code !== 0 || commits.stdout === "") return ids;
-
-  const shas = commits.stdout.trim().split("\n").filter(Boolean);
-  for (const sha of shas) {
-    // Get the diff for this commit (vs its parent).
-    const diff = nodeExecPort.run("git", [
-      "-C", cwd,
-      "diff",
-      `${sha}^!`,
-    ]);
-    if (diff.code !== 0 || diff.stdout === "") continue;
-    const pid = nodeExecPort.run("sh", [
-      "-c",
-      `echo '${diff.stdout.replace(/'/g, "'\\''")}' | git -C '${cwd}' patch-id --stable`,
-    ]);
-    if (pid.code === 0 && pid.stdout !== "") {
-      const parts = pid.stdout.trim().split(/\s+/);
-      if (parts[0] !== undefined) ids.add(parts[0]);
-    }
-  }
-  return ids;
 }
 
 // ── Event reading ─────────────────────────────────────────────────────────────
@@ -331,6 +236,9 @@ export async function loopReconcileCommand(
 
   const now = Date.now();
   const reportItems: ReconcileReportItem[] = [];
+  // US-DELIV-008: the dossier git snapshot for offline L1 — built lazily on
+  // first need (only when gh is silent for some cycle), shared across cycles.
+  let gitFacts: GitDossierFacts | null | undefined;
 
   for (const cyc of cycles) {
     deps.stdout.write(
@@ -360,14 +268,30 @@ export async function loopReconcileCommand(
           facts.prState = "CLOSED";
         }
       } catch {
-        // gh unavailable — L1 is silent; fall through to L2.
+        // gh unavailable — L1 is silent; fall through to offline L1 / L2.
       }
     }
 
-    // L2: patch-id equivalence.
-    facts.branchNetPatchId = branchPatchId(cwd, cyc.branch);
-    if (facts.branchNetPatchId !== undefined) {
-      facts.mainPatchIds = mainPatchIdsSinceBranch(cwd, cyc.branch);
+    // US-DELIV-008: when gh is silent (no provider / PR unresolved / error),
+    // fall back to the SAME offline L1 the cycles read path uses — a `(#N)`
+    // merge commit on main (or, for PR-less cycles, a subject naming the
+    // story). gh remains authoritative when it answers; this only fills the
+    // silence, so the command and the read path can never diverge on a merge
+    // main already records (e.g. branch deleted after a squash merge).
+    if (facts.prState === undefined) {
+      gitFacts ??= collectGitDossierFacts(cwd);
+      if (offlineMergeEvidence(gitFacts, cyc.storyId, cyc.prNumber) === "MERGED") {
+        facts.prState = "MERGED";
+      }
+    }
+
+    // L2: patch-id equivalence (skipped when L1 already fired — it wins inside
+    // reconcileDelivery anyway, and the per-branch spawns are wasted).
+    if (facts.prState !== "MERGED") {
+      facts.branchNetPatchId = branchPatchId(cwd, cyc.branch);
+      if (facts.branchNetPatchId !== undefined) {
+        facts.mainPatchIds = mainPatchIdsSinceBranch(cwd, cyc.branch);
+      }
     }
 
     // Run pure decision.

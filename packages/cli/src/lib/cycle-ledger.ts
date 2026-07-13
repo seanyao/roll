@@ -8,7 +8,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { agentBuilderLabel, cycleActivitySignalsFromEvents, normalizeModelLabel, type ActivitySignal } from "@roll/core";
+import { agentBuilderLabel, cycleActivitySignalsFromEvents, normalizeModelLabel, type ActivitySignal, type ReconcileResult } from "@roll/core";
 import type { ToolCost } from "@roll/spec";
 import { parseEventLine, type RollEvent } from "@roll/spec";
 import { collectToolEvidence, formatToolCostSummary, type ToolTimelineRow } from "./tool-display.js";
@@ -74,6 +74,10 @@ export interface CycleLedgerRow {
    *  `(#N)` but does NOT name the story-id (e.g. FIX-287 / PR #773). undefined
    *  when the cycle never opened a PR or predates the terminal-event twin. */
   prNumber?: number;
+  /** US-DELIV-008: the cycle's branch from its `delivery:published` event
+   *  (e.g. `loop/<cycleId>`), so the unified reconcile engine can compute the
+   *  branch's patch-id against main. undefined when the cycle never published. */
+  branch?: string;
   /** FIX-1050: agent-specific reason why usage is unknown (e.g.
    *  `agy_stdout_no_usage`), surfaced in --json / debug output. */
   usageUnknownReason?: string;
@@ -169,67 +173,45 @@ export function ledgerFailedCount(rows: readonly CycleLedgerRow[]): number {
 }
 
 /**
- * FIX-347 — reconcile `pending_merge` cycles against git merge-truth at RENDER
- * time. A cycle that ended `published_pending_merge` recorded its PR as OPEN at
- * cycle-end; the async PR loop merges it minutes later but never rewrites the
- * runs row, so the ledger keeps showing it yellow/not-green long after it is
- * actually Done (≡ merged). The next `loop run-once` gh-backfill eventually
- * flips the row, but until then the dashboard lies.
+ * US-DELIV-008 — the cycle ledger's render-time delivery backfill through the
+ * SINGLE reconcile truth engine. The old subject-match probe
+ * ({@link reconcilePendingMergeVerdicts} + `cycleMergeTruth`) was a PARALLEL
+ * second criterion that could disagree with `roll loop reconcile`; this
+ * replaces it with a per-row `decide` that production wires to
+ * `cycleReconcileDecision` (offline L1 + patch-id L2 → the pure
+ * `reconcileDelivery` of US-DELIV-002) — the SAME engine the command runs, so
+ * the read path and the command can never diverge on "is this delivered".
  *
- * This closes the gap by re-deriving the verdict on every render: for each
- * `pending_merge` row we ask `isMerged(storyId, prNumber)` — a GIT check (the
- * FIX-323/278 `storyHasMergeEvidence`: a commit subject / PR-merge `(#N)` for
- * the story is reachable from main), NOT a `gh` API call. Merged → `delivered`
- * (green), tape end/pr segments promoted to pass; still open → left
- * `pending_merge` (yellow).
+ * Eligible rows: `pending_merge` AND `unpublished` (an awaiting OR
+ * unpublished cycle is judged by the same engine — the story's parity
+ * contract). `delivered` promotes the row (verdict + end/pr tape segments,
+ * same rendering as the retired probe); every other result
+ * (wait/merge_now/ci_failed/superseded) leaves the row untouched — the read
+ * path never merges and never invents a failure from the absence of a merge.
+ * A row with no story AND no PR number has nothing to match on and `decide`
+ * is not consulted (it would only burn git spawns).
  *
- * FIX-348: the check ALSO receives the row's recorded PR number, so a merged
- * delivery whose squash commit carries `(#N)` but does NOT name the story-id
- * still reconciles (e.g. FIX-287 / PR #773 landed as `tcr: align machine page
- * typography (#773)`).
- *
- * FIX-350: the reconcile is now CYCLE-ACCURATE — a cycle is delivered IFF its
- * OWN recorded PR merged, NOT if the story merely landed via some OTHER PR.
- * When a row HAS a recorded PR number, the caller's probe decides SOLELY by
- * gitHasPrMergeCommit(that PR); it falls back to storyHasMergeEvidence(id) ONLY
- * for old cycles with no recorded PR number. (The earlier OR-branch wrongly
- * flipped a pending cycle to delivered whenever any commit named the story-id —
- * e.g. FIX-311 / PR #763 and FIX-284 / PR #743, whose OWN PRs never merged but
- * whose stories landed via later PRs.) A row with no story AND no PR number has
- * nothing to match on and stays pending.
- *
- * AC3 boundary: ONLY `pending_merge` rows are reconciled — a real `failed`
- * cycle stays red, `idle` stays idle, `delivered`/`reverted` are already
- * terminal. A PR that closed UNMERGED leaves no merge commit, so `isMerged`
- * stays false and the row stays `pending_merge` until the cycle-terminal /
- * backfill credits the abandon (we never invent a `failed` from absence of a
- * merge — that would conflate "merge pending" with "failed").
- *
- * Pure: rows in (the git probe is injected), reconciled rows out. The caller
- * supplies `isMerged` wired to whatever offline git facts it already built
- * (the dashboard reuses the dossier run-cache; `roll cycles` builds it once).
+ * Pure: rows in, rows out; the IO lives behind the injected `decide`.
  */
-export function reconcilePendingMergeVerdicts(
+export function reconcileCyclesWithDelivery(
   rows: readonly CycleLedgerRow[],
-  isMerged: (storyId: string, prNumber: number | undefined) => boolean,
+  decide: (row: CycleLedgerRow) => ReconcileResult,
 ): CycleLedgerRow[] {
   return rows.map((r) => {
-    if (r.verdict !== "pending_merge") return r;
-    // Nothing to match on (no story AND no recorded PR) → cannot reconcile.
+    if (r.verdict !== "pending_merge" && r.verdict !== "unpublished") return r;
     if (r.storyId === "" && r.prNumber === undefined) return r;
-    if (!isMerged(r.storyId, r.prNumber)) return r;
+    if (decide(r).kind !== "delivered") return r;
     return {
       ...r,
       verdict: "delivered",
       tape: r.tape.map((seg) => {
         if (seg.key === "end") return { ...seg, detail: "delivered", state: "pass" };
-        // The pr segment showed "#N open" (idle) at cycle-end; merge-truth now
-        // proves the delivery landed — promote it to a pass without claiming a
-        // PR number we did not observe (the open number, if any, stays in the
-        // detail; otherwise a plain "merged").
+        // The pr segment showed "#N open" (idle) at cycle-end; the engine now
+        // proves the delivery landed — promote it without claiming a PR number
+        // we did not observe (same rendering the retired probe used).
         if (seg.key === "pr") {
           const merged = /#(\d+)\s+open/.exec(seg.detail);
-          return { ...seg, detail: merged !== null ? `#${merged[1]} merged` : "merged", state: "pass" };
+          if (merged !== null) return { ...seg, detail: `#${merged[1]} merged`, state: "pass" };
         }
         return seg;
       }),
@@ -244,7 +226,7 @@ export function reconcilePendingMergeVerdicts(
  * delivered shows as `delivered`, not a stale `unpublished`. The cycle's work DID
  * ship (the story is Done ≡ merged), so the cycle ledger must reflect that.
  *
- * Same pattern as {@link reconcilePendingMergeVerdicts}: pure function with the
+ * Same pattern as {@link reconcileCyclesWithDelivery}: pure function with the
  * is-story-delivered probe injected. Only `unpublished` rows are eligible;
  * genuinely unmerged unpublished rows (story not delivered) stay `unpublished`.
  *
@@ -293,7 +275,7 @@ export function reconcileDeliveredUnpublishedVerdicts(
  * the cycle ledger is loop-cycle-centric and didn't reflect loop-external
  * delivery, so a Done card looked like an all-failure pile).
  *
- * Mirrors {@link reconcilePendingMergeVerdicts}: a PURE function (rows in, rows
+ * Mirrors {@link reconcileCyclesWithDelivery}: a PURE function (rows in, rows
  * out) with the story-superseded probe INJECTED by the caller (which wires it to
  * backlog-Done + offline git merge-truth). The end-segment is rewritten to the
  * neutral `superseded` state (idle-class grey) so a superseded cycle is visually
@@ -383,7 +365,7 @@ interface CycleEventFacts {
   acceptedScore?: { peer: string; score: number; verdict: string };
 }
 
-function readEventFacts(projectPath: string): { events: RollEvent[]; byCycle: Map<string, CycleEventFacts>; prMergedBy: Map<string, number>; prOpenBy: Map<string, number>; prByCycle: Map<string, number> } {
+function readEventFacts(projectPath: string): { events: RollEvent[]; byCycle: Map<string, CycleEventFacts>; prMergedBy: Map<string, number>; prOpenBy: Map<string, number>; prByCycle: Map<string, number>; branchByCycle: Map<string, string> } {
   const events: RollEvent[] = [];
   const byCycle = new Map<string, CycleEventFacts>();
   const prMergedBy = new Map<string, number>();
@@ -392,13 +374,16 @@ function readEventFacts(projectPath: string): { events: RollEvent[]; byCycle: Ma
   // twin), so the merge-truth reconcile can match by PR number when the merge
   // commit does NOT name the story-id.
   const prByCycle = new Map<string, number>();
+  // US-DELIV-008: cycleId → the branch the cycle published (delivery:published),
+  // so the unified reconcile engine can patch-id the branch against main.
+  const branchByCycle = new Map<string, string>();
   const path = join(projectPath, ".roll", "loop", "events.ndjson");
-  if (!existsSync(path)) return { events, byCycle, prMergedBy, prOpenBy, prByCycle };
+  if (!existsSync(path)) return { events, byCycle, prMergedBy, prOpenBy, prByCycle, branchByCycle };
   let content = "";
   try {
     content = readFileSync(path, "utf8");
   } catch {
-    return { events, byCycle, prMergedBy, prOpenBy, prByCycle };
+    return { events, byCycle, prMergedBy, prOpenBy, prByCycle, branchByCycle };
   }
   const facts = (id: string): CycleEventFacts => {
     let f = byCycle.get(id);
@@ -421,9 +406,11 @@ function readEventFacts(projectPath: string): { events: RollEvent[]; byCycle: Ma
     else if (e.type === "cycle:terminal" && e.pr.present) {
       const n = terminalPrNumber(e.pr.value);
       if (n !== undefined) prByCycle.set(e.cycleId, n);
+    } else if (e.type === "delivery:published") {
+      branchByCycle.set(e.cycleId, e.branch);
     }
   }
-  return { events, byCycle, prMergedBy, prOpenBy, prByCycle };
+  return { events, byCycle, prMergedBy, prOpenBy, prByCycle, branchByCycle };
 }
 
 function scopedCycleEvents(events: readonly RollEvent[], cycleId: string, storyId: string, prNumber: number | undefined): RollEvent[] {
@@ -525,7 +512,7 @@ export function collectCycleLedger(projectPath: string): CycleLedgerRow[] {
   } catch {
     return [];
   }
-  const { events, byCycle, prMergedBy, prOpenBy, prByCycle } = readEventFacts(projectPath);
+  const { events, byCycle, prMergedBy, prOpenBy, prByCycle, branchByCycle } = readEventFacts(projectPath);
   const toolEvidence = collectToolEvidence(projectPath);
   const rows: CycleLedgerRow[] = [];
   for (const line of content.split("\n")) {
@@ -606,6 +593,9 @@ export function collectCycleLedger(projectPath: string): CycleLedgerRow[] {
       // FIX-348: the cycle's own PR number (cycle:terminal twin), falling back to
       // the merged/open PR event keyed by story when the terminal twin is absent.
       prNumber: ownPrNumber,
+      // US-DELIV-008: the published branch, for the unified reconcile engine's
+      // patch-id check (falls back to the loop/<cycleId> convention downstream).
+      ...(branchByCycle.get(cycleId) !== undefined ? { branch: branchByCycle.get(cycleId) } : {}),
       // FIX-1050: agent-specific diagnostic reason for unknown usage.
       ...(usageUnknownReason !== undefined ? { usageUnknownReason } : {}),
       // FIX-1051: agent-internal failure diagnostics for detail output.

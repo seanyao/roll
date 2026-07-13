@@ -13,7 +13,7 @@
  *   3. CLI `roll loop reconcile --json` evidence (see CLI test file).
  */
 import { describe, expect, it } from "vitest";
-import { reconcileDelivery, reconciledEventPayload } from "../src/index.js";
+import { CI_STUCK_DWELL_MS, reconcileDelivery, reconciledEventPayload } from "../src/index.js";
 import type { ReconcileCycle, ReconcileFacts } from "../src/index.js";
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
@@ -434,7 +434,6 @@ describe("reconcileDelivery — retroactive heal (goal 4)", () => {
 //      - mergeable UNKNOWN → wait (transient)
 //      - squash title rewrite → L2 patch-id still matches → delivered
 //   2. Every degraded/terminal verdict carries reason + dwell (readable).
-import { CI_STUCK_DWELL_MS } from "../src/index.js";
 
 const NOW = 1_790_000_000_000;
 const PUBLISHED = NOW - CI_STUCK_DWELL_MS - 60_000; // stuck past the threshold
@@ -575,6 +574,20 @@ describe("US-DELIV-010 — degraded/terminal 判定矩阵", () => {
       nowMs: NOW,
     }));
     expect(result.kind).toBe("wait");
+  });
+
+  it("mergeable UNKNOWN with GREEN CI → wait, never merge_now (never merge blind)", () => {
+    // GitHub hasn't finished computing mergeability — a green CI alone is NOT
+    // license to squash. This pins the UNKNOWN guard on the merge_now path
+    // (the ciGreen:undefined case above cannot catch a regression here).
+    const result = reconcileDelivery(CYCLE_DWELL, facts({
+      prState: "OPEN",
+      prMergeable: "UNKNOWN",
+      ciGreen: true,
+      nowMs: NOW,
+    }));
+    expect(result.kind).toBe("wait");
+    expect(result.kind).not.toBe("merge_now");
   });
 
   // ── branch deleted / force-push → L2 disabled, L1-or-wait ────────────────

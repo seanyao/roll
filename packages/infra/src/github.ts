@@ -76,7 +76,7 @@
  */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { OpenPrReference } from "@roll/core";
+import type { OpenPrReference, PrMergeableState } from "@roll/core";
 import type { ToolDeclaration, ToolInvocation, ToolResult } from "@roll/spec";
 import { invokeInfraTool } from "./tools/delegation.js";
 
@@ -393,7 +393,7 @@ export interface PrMergeInfo {
   /** Draft PR (not mergeable by policy). Absent when gh cannot resolve it. */
   isDraft: boolean | undefined;
   /** gh mergeable rollup: MERGEABLE / CONFLICTING / UNKNOWN. */
-  mergeable: "MERGEABLE" | "CONFLICTING" | "UNKNOWN" | undefined;
+  mergeable: PrMergeableState | undefined;
 }
 
 /**

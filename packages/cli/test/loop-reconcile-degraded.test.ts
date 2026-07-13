@@ -74,7 +74,7 @@ function project(): string {
 }
 
 const CYCLE = "20260711-220000-99999";
-/** Published ~2 days before any 2026-07-13 run — past CI_STUCK_DWELL_MS. */
+/** Fixed published ts (2026-05-17) — always past CI_STUCK_DWELL_MS by construction. */
 const PUBLISHED_TS = 1_779_000_000_000;
 
 function seed(p: string, prNumber = 42): void {

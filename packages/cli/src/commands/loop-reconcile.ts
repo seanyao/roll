@@ -97,18 +97,23 @@ function runtimeDir(cwd: string): string {
  * merging blind; `unreachable` carries its reason (auth → no_permission).
  */
 function applyPrCloudState(facts: ReconcileFacts, st: PrCloudState): void {
-  if (st.kind === "merged") {
-    facts.prState = "MERGED";
-    facts.prMergeCommit = st.mergeCommit;
-  } else if (st.kind === "open") {
-    facts.prState = "OPEN";
-    facts.ciGreen = st.ci === "green";
-    facts.prDraft = st.draft;
-    facts.prMergeable = st.mergeable;
-  } else if (st.kind === "closed_unmerged") {
-    facts.prState = "CLOSED";
-  } else if (st.kind === "unreachable") {
-    facts.prUnreachableReason = st.reason;
+  switch (st.kind) {
+    case "merged":
+      facts.prState = "MERGED";
+      facts.prMergeCommit = st.mergeCommit;
+      return;
+    case "open":
+      facts.prState = "OPEN";
+      facts.ciGreen = st.ci === "green";
+      facts.prDraft = st.draft;
+      facts.prMergeable = st.mergeable;
+      return;
+    case "closed_unmerged":
+      facts.prState = "CLOSED";
+      return;
+    case "unreachable":
+      facts.prUnreachableReason = st.reason;
+      return;
   }
 }
 

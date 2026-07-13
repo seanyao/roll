@@ -15,6 +15,7 @@
  */
 
 import type { DeliveryState } from "@roll/spec";
+import type { PrMergeableState } from "./pr-reconcile.js";
 
 // ── Input types ───────────────────────────────────────────────────────────────
 
@@ -62,7 +63,7 @@ export interface ReconcileFacts {
   /** US-DELIV-010: the PR is a draft (not mergeable by policy). */
   prDraft?: boolean;
   /** US-DELIV-010: gh mergeable rollup (CONFLICTING = merge conflict). */
-  prMergeable?: "MERGEABLE" | "CONFLICTING" | "UNKNOWN";
+  prMergeable?: PrMergeableState;
   /** US-DELIV-010: why gh could not answer (auth = missing permission). */
   prUnreachableReason?: "offline" | "auth" | "provider_error" | "not_found";
   /** US-DELIV-010: caller-injected clock (epoch ms) for dwell computation. */
@@ -91,10 +92,11 @@ export type DegradedReason =
 export type TerminalReason = "pr_closed_unmerged";
 
 /**
- * US-DELIV-010: CI long-red threshold. A PR whose CI has been red while the
- * cycle dwells in awaiting_merge at least this long is `ci_stuck` (degraded)
- * instead of a plain `ci_failed` — a red that is hours old is a stuck PR,
- * not a check in flight.
+ * US-DELIV-010: CI long-red threshold. A cycle that has dwelt in
+ * awaiting_merge at least this long while its PR's CI is red is `ci_stuck`
+ * (degraded) instead of a plain `ci_failed` — a day-old red is a stuck PR,
+ * not a check in flight. (Dwell is anchored on `delivery:published`; the
+ * engine does not know when CI itself turned red.)
  */
 export const CI_STUCK_DWELL_MS = 24 * 60 * 60 * 1000;
 
@@ -203,11 +205,17 @@ export function reconcileDelivery(
       return { kind: "degraded", reason: "merge_conflict", dwellMs };
     }
     if (facts.ciGreen === true) {
+      // mergeable UNKNOWN is transient — GitHub hasn't confirmed mergeability;
+      // a green CI alone is not license to squash → wait, never merge blind.
+      if (facts.prMergeable === "UNKNOWN") {
+        return { kind: "wait" };
+      }
       return { kind: "merge_now", method: "squash" };
     }
     if (facts.ciGreen === false) {
-      // CI long-red: a check red past the stuck threshold is a stuck PR, not
-      // a check in flight → degraded(ci_stuck) with dwell.
+      // CI long-red: the engine knows the CYCLE has dwelt in awaiting_merge
+      // past the threshold with CI red (not how long CI itself has been red)
+      // → degraded(ci_stuck) with dwell.
       if (dwellMs !== undefined && dwellMs >= CI_STUCK_DWELL_MS) {
         return { kind: "degraded", reason: "ci_stuck", dwellMs };
       }

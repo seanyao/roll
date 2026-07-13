@@ -2382,32 +2382,6 @@ export function storyHasSpecPrMergeEvidence(cache: Pick<DossierRunCache, "git" |
   return prs.some((pr) => gitHasPrMergeCommit(cache.git, pr));
 }
 
-/**
- * FIX-350 — the merge-truth probe the cycle ledger reconcile injects, made
- * CYCLE-ACCURATE: a pending_merge cycle is delivered IFF its OWN recorded PR
- * merged, NOT if the story merely landed via some OTHER PR.
- *
- * FIX-348 combined the two probes with an OR, so `storyHasMergeEvidence(storyId)`
- * flipped a cycle to delivered whenever ANY commit on main named the story-id —
- * even when THIS cycle's own PR never merged. Verified regressions: FIX-311's
- * cycle (PR #763, NOT merged — story landed via later #766/#767) and FIX-284's
- * cycle (PR #743, NOT merged — story landed via #728/#734) both wrongly flipped
- * because the OTHER PRs' commits name them.
- *
- * The fix: when the row HAS a recorded PR number, decide SOLELY by
- * `gitHasPrMergeCommit(that PR)` — the row's OWN PR must carry a `(#N)` merge
- * commit on main. Fall back to `storyHasMergeEvidence(storyId)` ONLY when no PR
- * number was recorded (old cycles predating the terminal PR event). An empty
- * story-id is never passed to `storyHasMergeEvidence` (`"".includes` matches
- * every commit), so a story-less PR-less row stays pending.
- */
-export function cycleMergeTruth(facts: GitDossierFacts | null): (storyId: string, prNumber: number | undefined) => boolean {
-  return (storyId, prNumber) =>
-    prNumber !== undefined && prNumber !== null
-      ? gitHasPrMergeCommit(facts, prNumber)
-      : storyId !== "" && storyHasMergeEvidence(facts, storyId);
-}
-
 function factsPrNumbers(facts: GitDossierFacts, storyId: string): number[] {
   const nums = new Set<number>();
   for (const subject of factsSubjects(facts, storyId)) {

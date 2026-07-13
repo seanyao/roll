@@ -15,13 +15,14 @@ import {
   formatBuilderIdentity,
   CYCLE_VERDICTS,
   ledgerFailedCount,
+  reconcileCyclesWithDelivery,
   reconcileDeliveredUnpublishedVerdicts,
-  reconcilePendingMergeVerdicts,
   reconcileSupersededVerdicts,
   type CycleLedgerRow,
   type CycleLedgerVerdict,
 } from "../lib/cycle-ledger.js";
-import { collectGitDossierFacts, cycleMergeTruth, storyHasMergeEvidence, type GitDossierFacts } from "../lib/story-dossier.js";
+import { cycleReconcileDecision } from "../lib/delivery-facts.js";
+import { collectGitDossierFacts, storyHasMergeEvidence, type GitDossierFacts } from "../lib/story-dossier.js";
 import { findCycle } from "./cycle.js";
 
 /**
@@ -49,18 +50,23 @@ function buildIsStorySuperseded(cwd: string, git: GitDossierFacts | null): (stor
 }
 
 /**
- * FIX-347 — collect the ledger and reconcile `pending_merge` cycles against git
- * merge-truth, so a `published_pending_merge` cycle whose PR the async PR loop
- * already merged shows `delivered`, not a stale yellow. Same offline `git log`
- * check the web dashboard uses (storyHasMergeEvidence — no gh call).
+ * US-DELIV-008 — the cycle ledger's delivery backfill now runs through the
+ * SINGLE reconcile truth engine: each pending_merge/unpublished row is judged
+ * by `cycleReconcileDecision` (offline L1 + patch-id L2 → the pure
+ * `reconcileDelivery` of US-DELIV-002), the SAME engine `roll loop reconcile`
+ * runs. The retired subject-match probe (reconcilePendingMergeVerdicts +
+ * cycleMergeTruth) was a parallel second criterion that could disagree with
+ * the command — and was blind to squash merges whose subject names neither
+ * the story nor the PR. One engine, two callers, no divergence.
  *
- * FIX-348 — also reconcile when the merge commit does NOT name the story-id: if
- * main's git log carries a `(#N)` PR-merge commit for the row's recorded PR
- * number, the delivery landed. Only an actually-merged `(#N)` commit counts (an
- * open PR leaves none), so an open PR stays pending.
+ * FIX-347/348/350 (history): the render-time merge-truth backfill and its
+ * cycle-accuracy rule (a row WITH a recorded PR is judged SOLELY by that PR)
+ * survive inside the engine — offlineMergeEvidence keeps the exact-number and
+ * no-PR-fallback semantics; patch-id L2 adds the offline, gh-free path.
  *
  * FIX-337 (AC1/AC3) — THE single canonical ledger pipeline:
- *   collectCycleLedger → reconcilePendingMergeVerdicts → reconcileSupersededVerdicts.
+ *   collectCycleLedger → reconcileDeliveredUnpublishedVerdicts
+ *   → reconcileCyclesWithDelivery → reconcileSupersededVerdicts.
  * Exported so `roll index` (the truth.json cycle panel) reuses the EXACT same
  * derivation, so `roll cycles` and `roll status` (which reads truth.json) can
  * never diverge. The superseded reconcile re-labels a failed/pending cycle whose
@@ -80,7 +86,16 @@ export function reconciledLedger(cwd: string): CycleLedgerRow[] {
   );
   const isSuperseded = buildIsStorySuperseded(cwd, git);
   const unpublishedDelivered = reconcileDeliveredUnpublishedVerdicts(collected, isSuperseded, deliveringCycles);
-  const merged = reconcilePendingMergeVerdicts(unpublishedDelivered, cycleMergeTruth(git));
+  // US-DELIV-008: the unified engine judges every remaining pending/unpublished
+  // row from the SAME facts the reconcile command would gather.
+  const merged = reconcileCyclesWithDelivery(unpublishedDelivered, (row) =>
+    cycleReconcileDecision(cwd, git, {
+      cycleId: row.cycleId,
+      storyId: row.storyId,
+      branch: row.branch,
+      prNumber: row.prNumber,
+    }),
+  );
   return reconcileSupersededVerdicts(merged, isSuperseded);
 }
 import { c, renderState, stripAnsi } from "../render.js";

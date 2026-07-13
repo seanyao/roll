@@ -581,15 +581,11 @@ export function generateDossierPages(cwd: string, rebuild: boolean): number {
         },
         backlog: backlogViewModel(epics),
         spineKeys: SPINE_STAGES.map((s) => s.key),
-        // FIX-347: reconcile `pending_merge` cycles against git merge-truth at
-        // render time — a `published_pending_merge` cycle whose PR the async PR
-        // loop merged is Done (green), even before the next cycle's gh-backfill
-        // rewrites its runs row. Reuses the SAME offline git facts the dossier
-        // already built (storyHasMergeEvidence — a `git log` check, no gh call;
-        // refreshDossierMergeBaseline fetched origin/main just above).
-        // FIX-348: cycleMergeTruth ALSO matches the row's recorded PR number, so
-        // a merged delivery whose squash commit carries `(#N)` but does NOT name
-        // the story-id (e.g. FIX-287 / PR #773) still reconciles to delivered.
+        // FIX-347 → US-DELIV-008: pending_merge/unpublished cycles are reconciled
+        // at render time through the SINGLE reconcile engine (cycleReconcileDecision
+        // → reconcileDelivery: offline L1 `(#N)`/story evidence + patch-id L2), so a
+        // merged cycle shows Done (green) even before the next gh-backfill rewrites
+        // its runs row — the SAME judgment `roll loop reconcile` makes.
         // FIX-337 (AC1): the panel reads the SAME canonical reconciled ledger the
         // truth.json `cycle` aggregate + `roll cycles` use (pending-merge AND
         // superseded reconciled) — built once above, never re-derived per surface.

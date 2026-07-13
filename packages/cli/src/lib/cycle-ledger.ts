@@ -173,75 +173,6 @@ export function ledgerFailedCount(rows: readonly CycleLedgerRow[]): number {
 }
 
 /**
- * FIX-347 — reconcile `pending_merge` cycles against git merge-truth at RENDER
- * time. A cycle that ended `published_pending_merge` recorded its PR as OPEN at
- * cycle-end; the async PR loop merges it minutes later but never rewrites the
- * runs row, so the ledger keeps showing it yellow/not-green long after it is
- * actually Done (≡ merged). The next `loop run-once` gh-backfill eventually
- * flips the row, but until then the dashboard lies.
- *
- * This closes the gap by re-deriving the verdict on every render: for each
- * `pending_merge` row we ask `isMerged(storyId, prNumber)` — a GIT check (the
- * FIX-323/278 `storyHasMergeEvidence`: a commit subject / PR-merge `(#N)` for
- * the story is reachable from main), NOT a `gh` API call. Merged → `delivered`
- * (green), tape end/pr segments promoted to pass; still open → left
- * `pending_merge` (yellow).
- *
- * FIX-348: the check ALSO receives the row's recorded PR number, so a merged
- * delivery whose squash commit carries `(#N)` but does NOT name the story-id
- * still reconciles (e.g. FIX-287 / PR #773 landed as `tcr: align machine page
- * typography (#773)`).
- *
- * FIX-350: the reconcile is now CYCLE-ACCURATE — a cycle is delivered IFF its
- * OWN recorded PR merged, NOT if the story merely landed via some OTHER PR.
- * When a row HAS a recorded PR number, the caller's probe decides SOLELY by
- * gitHasPrMergeCommit(that PR); it falls back to storyHasMergeEvidence(id) ONLY
- * for old cycles with no recorded PR number. (The earlier OR-branch wrongly
- * flipped a pending cycle to delivered whenever any commit named the story-id —
- * e.g. FIX-311 / PR #763 and FIX-284 / PR #743, whose OWN PRs never merged but
- * whose stories landed via later PRs.) A row with no story AND no PR number has
- * nothing to match on and stays pending.
- *
- * AC3 boundary: ONLY `pending_merge` rows are reconciled — a real `failed`
- * cycle stays red, `idle` stays idle, `delivered`/`reverted` are already
- * terminal. A PR that closed UNMERGED leaves no merge commit, so `isMerged`
- * stays false and the row stays `pending_merge` until the cycle-terminal /
- * backfill credits the abandon (we never invent a `failed` from absence of a
- * merge — that would conflate "merge pending" with "failed").
- *
- * Pure: rows in (the git probe is injected), reconciled rows out. The caller
- * supplies `isMerged` wired to whatever offline git facts it already built
- * (the dashboard reuses the dossier run-cache; `roll cycles` builds it once).
- */
-export function reconcilePendingMergeVerdicts(
-  rows: readonly CycleLedgerRow[],
-  isMerged: (storyId: string, prNumber: number | undefined) => boolean,
-): CycleLedgerRow[] {
-  return rows.map((r) => {
-    if (r.verdict !== "pending_merge") return r;
-    // Nothing to match on (no story AND no recorded PR) → cannot reconcile.
-    if (r.storyId === "" && r.prNumber === undefined) return r;
-    if (!isMerged(r.storyId, r.prNumber)) return r;
-    return {
-      ...r,
-      verdict: "delivered",
-      tape: r.tape.map((seg) => {
-        if (seg.key === "end") return { ...seg, detail: "delivered", state: "pass" };
-        // The pr segment showed "#N open" (idle) at cycle-end; merge-truth now
-        // proves the delivery landed — promote it to a pass without claiming a
-        // PR number we did not observe (the open number, if any, stays in the
-        // detail; otherwise a plain "merged").
-        if (seg.key === "pr") {
-          const merged = /#(\d+)\s+open/.exec(seg.detail);
-          return { ...seg, detail: merged !== null ? `#${merged[1]} merged` : "merged", state: "pass" };
-        }
-        return seg;
-      }),
-    };
-  });
-}
-
-/**
  * US-DELIV-008 — the cycle ledger's render-time delivery backfill through the
  * SINGLE reconcile truth engine. The old subject-match probe
  * ({@link reconcilePendingMergeVerdicts} + `cycleMergeTruth`) was a PARALLEL
@@ -295,7 +226,7 @@ export function reconcileCyclesWithDelivery(
  * delivered shows as `delivered`, not a stale `unpublished`. The cycle's work DID
  * ship (the story is Done ≡ merged), so the cycle ledger must reflect that.
  *
- * Same pattern as {@link reconcilePendingMergeVerdicts}: pure function with the
+ * Same pattern as {@link reconcileCyclesWithDelivery}: pure function with the
  * is-story-delivered probe injected. Only `unpublished` rows are eligible;
  * genuinely unmerged unpublished rows (story not delivered) stay `unpublished`.
  *
@@ -344,7 +275,7 @@ export function reconcileDeliveredUnpublishedVerdicts(
  * the cycle ledger is loop-cycle-centric and didn't reflect loop-external
  * delivery, so a Done card looked like an all-failure pile).
  *
- * Mirrors {@link reconcilePendingMergeVerdicts}: a PURE function (rows in, rows
+ * Mirrors {@link reconcileCyclesWithDelivery}: a PURE function (rows in, rows
  * out) with the story-superseded probe INJECTED by the caller (which wires it to
  * backlog-Done + offline git merge-truth). The end-segment is rewritten to the
  * neutral `superseded` state (idle-class grey) so a superseded cycle is visually

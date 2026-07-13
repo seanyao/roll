@@ -40,6 +40,7 @@ import { loopReviewResizeCommand } from "./loop-review-resize.js";
 import { parseAllowedCardsEnv, scopeBacklogForAllowedCards } from "../lib/goal-progress.js";
 import { writeLatestLoopDigest } from "../lib/morning-report.js";
 import { backfillMergedRuns } from "../lib/runs-backfill.js";
+import { runReconcileTick } from "./loop-reconcile.js";
 import { readCycleAttributionFromEvents } from "../lib/cycle-attribution.js";
 import { requireNetwork, tcpConnect } from "../lib/require-network.js";
 import { gcCommand } from "./gc.js";
@@ -1130,6 +1131,14 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     return 0;
   }
 
+  // US-DELIV-009: pre-pick reconcile tick — merge any CI-green awaiting_merge
+  // PRs before starting new work. Idempotent, crash-safe, silent.
+  try {
+    await runReconcileTick(id.path, { silent: true });
+  } catch {
+    /* reconcile tick must never block the cycle */
+  }
+
   // FIX-204D: between here and the walk's own finally, signals get a clean
   // teardown instead of a half-state corpse.
   const disposeSignals = installCycleSignalTeardown(paths, cycleId, branch, id.path, rt);
@@ -1451,6 +1460,15 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
         incrementConsecutiveFails(id.path, id.slug, alertsPath, paths.eventsPath, cycleId, storyId, result.terminal ?? "unknown");
       }
     }
+  }
+
+  // US-DELIV-009: post-publish reconcile tick — after the cycle terminal,
+  // reconcile all awaiting_merge cycles. A CI-green PR gets merge_now→merged
+  // →delivered on the next tick. Idempotent, crash-safe, silent.
+  try {
+    await runReconcileTick(id.path, { silent: true });
+  } catch {
+    /* reconcile tick must never block the cycle terminal */
   }
 
   // FIX-243: merge-evidence backfill — claim-shaped rows (built/published/

@@ -177,6 +177,212 @@ export interface ReconcileReportItem {
   mergeCommit?: string;
 }
 
+/** Summary returned by a reconcile tick (used at loop boundaries). */
+export interface ReconcileTickResult {
+  cyclesProcessed: number;
+  delivered: number;
+  mergeNow: number;
+  ciFailed: number;
+  waiting: number;
+}
+
+/**
+ * Run the core reconcile loop — idempotent, crash-safe.
+ *
+ * Reads awaiting_merge cycles from events, gathers facts (gh/git), runs the
+ * pure reconcileDelivery decision for each, executes merges for merge_now
+ * verdicts, and emits delivery:reconciled / delivery:merge_attempt events.
+ *
+ * This is used both by the explicit `roll loop reconcile` command and by
+ * automatic reconcile ticks at loop boundaries (pre-pick + post-publish in
+ * `roll loop run-once/go`).
+ *
+ * @param cwd - Project root
+ * @param opts.silent - Suppress stdout per-cycle output (used for ticks)
+ * @param opts.storyFilter - Only reconcile the named story (optional)
+ * @returns A count summary of reconcile decisions
+ */
+export async function runReconcileTick(
+  cwd: string,
+  opts?: { silent?: boolean; storyFilter?: string },
+): Promise<ReconcileTickResult> {
+  const slug = resolveRepoSlug(cwd);
+
+  // Read awaiting cycles from event stream.
+  let cycles = readAwaitingCycles(cwd);
+  if (opts?.storyFilter !== undefined) {
+    cycles = cycles.filter((c) => c.storyId === opts.storyFilter);
+  }
+
+  if (cycles.length === 0) {
+    return { cyclesProcessed: 0, delivered: 0, mergeNow: 0, ciFailed: 0, waiting: 0 };
+  }
+
+  const provider = slug !== undefined ? new GitHubPrStatusProvider() : undefined;
+  const rt = runtimeDir(cwd);
+  const eventsPath = join(rt, "events.ndjson");
+  const runsPath = join(rt, "runs.jsonl");
+  const bus = new EventBus();
+  bus.ensureEventFiles(eventsPath, runsPath);
+
+  const now = Date.now();
+  // US-DELIV-008: the dossier git snapshot for offline L1 — built lazily on
+  // first need (only when gh is silent for some cycle), shared across cycles.
+  let gitFacts: GitDossierFacts | null | undefined;
+  let delivered = 0;
+  let mergeNow = 0;
+  let ciFailed = 0;
+  let waiting = 0;
+
+  for (const cyc of cycles) {
+    if (!opts?.silent) {
+      process.stdout.write(`  ${cyc.cycleId} · ${cyc.storyId || "—"} · ${cyc.deliveryState}…`);
+    }
+
+    // Gather facts.
+    const facts: ReconcileFacts = {
+      mainPatchIds: new Set(),
+      backlogDone: false,
+      attestPresent: false,
+    };
+
+    // L1: PR state via gh.
+    if (provider !== undefined && cyc.prNumber !== undefined && slug !== undefined) {
+      try {
+        const prState = await provider.pollPrStatus(slug, cyc.prNumber);
+        if (prState.kind === "merged") {
+          facts.prState = "MERGED";
+          facts.prMergeCommit = prState.mergeCommit;
+        } else if (prState.kind === "open") {
+          facts.prState = "OPEN";
+          facts.ciGreen = prState.ci === "green";
+        } else if (prState.kind === "closed_unmerged") {
+          facts.prState = "CLOSED";
+        }
+      } catch {
+        // gh unavailable — L1 is silent; fall through to offline L1 / L2.
+      }
+    }
+
+    // US-DELIV-008: when gh is silent, fall back to offline L1.
+    if (facts.prState === undefined) {
+      gitFacts ??= collectGitDossierFacts(cwd);
+      if (offlineMergeEvidence(gitFacts, cyc.storyId, cyc.prNumber) === "MERGED") {
+        facts.prState = "MERGED";
+      }
+    }
+
+    // L2: patch-id equivalence (skipped when L1 already fired).
+    if (facts.prState !== "MERGED") {
+      facts.branchNetPatchId = branchPatchId(cwd, cyc.branch);
+      if (facts.branchNetPatchId !== undefined) {
+        facts.mainPatchIds = mainPatchIdsSinceBranch(cwd, cyc.branch);
+      }
+    }
+
+    // Run pure decision.
+    const reconcileCycle: ReconcileCycle = {
+      cycleId: cyc.cycleId,
+      storyId: cyc.storyId,
+      branch: cyc.branch,
+      prNumber: cyc.prNumber,
+      deliveryState: cyc.deliveryState,
+    };
+    const result = reconcileDelivery(reconcileCycle, facts);
+
+    // Count.
+    if (result.kind === "delivered") delivered++;
+    else if (result.kind === "merge_now") mergeNow++;
+    else if (result.kind === "ci_failed") ciFailed++;
+    else waiting++;
+
+    if (result.kind === "delivered") {
+      // Emit delivery:reconciled event.
+      bus.appendEvent(eventsPath, {
+        type: "delivery:reconciled",
+        cycleId: cyc.cycleId,
+        storyId: cyc.storyId,
+        state: result.via === "runner" ? "delivered" : "delivered_external",
+        mergedBy: result.via,
+        mergeCommit: result.mergeCommit ?? "unknown",
+        signal: result.signal,
+        ts: now,
+      });
+
+      // US-DELIV-005: sibling cancel for same-card fan-out.
+      const siblingLeases: DeliveryLease[] = [];
+      for (const other of cycles) {
+        if (other.cycleId === cyc.cycleId || other.storyId === "" || other.storyId !== cyc.storyId) continue;
+        const state = leaseStateFor(other.deliveryState, false);
+        if (state !== undefined) siblingLeases.push({ storyId: other.storyId, cycleId: other.cycleId, state });
+      }
+      for (const ev of siblingCancelEvents(
+        cyc.storyId,
+        {
+          cycleId: cyc.cycleId,
+          mergeCommit: result.mergeCommit ?? "unknown",
+          signal: result.signal,
+          mergedBy: result.via,
+        },
+        siblingLeases,
+        now,
+      )) {
+        bus.appendEvent(eventsPath, ev);
+      }
+    }
+
+    // ── merge_now: execute gh pr merge --squash ───────────────────────────
+    if (result.kind === "merge_now") {
+      if (slug !== undefined && cyc.prNumber !== undefined) {
+        let outcome: "merged" | "blocked" | "gh_down" = "gh_down";
+        try {
+          const mergeResult: GhResult = await prMerge(slug, String(cyc.prNumber), "plain");
+          outcome = mergeResult.code === 0 ? "merged" : "blocked";
+        } catch {
+          outcome = "gh_down";
+        }
+        bus.appendEvent(eventsPath, {
+          type: "delivery:merge_attempt",
+          cycleId: cyc.cycleId,
+          prNumber: cyc.prNumber,
+          method: "squash",
+          outcome,
+          ts: now,
+        });
+      } else {
+        bus.appendEvent(eventsPath, {
+          type: "delivery:merge_attempt",
+          cycleId: cyc.cycleId,
+          prNumber: cyc.prNumber ?? 0,
+          method: "squash",
+          outcome: "gh_down" as const,
+          ts: now,
+        });
+      }
+    }
+
+    if (!opts?.silent) {
+      const icon = result.kind === "delivered"
+        ? "✅"
+        : result.kind === "merge_now"
+          ? "🔄"
+          : result.kind === "ci_failed"
+            ? "❌"
+            : "⏳";
+      process.stdout.write(` ${icon} ${result.kind}`);
+      if (result.kind === "delivered") {
+        process.stdout.write(` · ${result.signal}`);
+        if (result.mergeCommit) {
+          process.stdout.write(` · ${result.mergeCommit.slice(0, 7)}`);
+        }
+      }
+      process.stdout.write("\n");
+    }
+  }
+
+  return { cyclesProcessed: cycles.length, delivered, mergeNow, ciFailed, waiting };
+}
+
 // ── Main command ──────────────────────────────────────────────────────────────
 
 export async function loopReconcileCommand(

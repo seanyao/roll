@@ -684,6 +684,34 @@ export const v3Catalog: Catalog = {
     en: "Not a git repository — `roll loop` needs a git repo with a pushable GitHub remote.",
     zh: "不是 git 仓库 — `roll loop` 需要一个带有可推送 GitHub remote 的 git 仓库。",
   },
+  "loop.sched.mount_failed": {
+    en: "loop on: %d launchd job(s) failed to mount after retry — scheduling is not active",
+    zh: "loop on: 重试后仍有 %d 个 launchd 任务挂载失败 — 排程未生效",
+  },
+  "loop.sched.domain": {
+    en: "domain",
+    zh: "域",
+  },
+  "loop.sched.label": {
+    en: "label",
+    zh: "标签",
+  },
+  "loop.sched.cause": {
+    en: "cause",
+    zh: "原因",
+  },
+  "loop.sched.retry_exhausted": {
+    en: "job was not armed after bootout and bootstrap were retried",
+    zh: "bootout 与 bootstrap 重试后任务仍未激活",
+  },
+  "loop.sched.inspect": {
+    en: "Inspect and retry these exact commands:",
+    zh: "请执行以下命令排查并重试:",
+  },
+  "loop.sched.retry": {
+    en: "After correcting the reported path or launchd state, run `roll loop on` again.",
+    zh: "修正上述路径或 launchd 状态后,再次运行 `roll loop on`。",
+  },
 
   // FIX-1042: agent skill-root pollution (auxiliary dirs mounted as skills)
   "doctor.skill_root_pollution": {

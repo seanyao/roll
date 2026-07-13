@@ -5,6 +5,9 @@
  * schedule.difftest.test.ts; here we cover edge cases + the FIX-195 cron shape.
  */
 import { describe, expect, it } from "vitest";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   type Scheduler,
   CronScheduler,
@@ -178,6 +181,41 @@ describe("Scheduler interface — AC3 isArmed with injected Set (no real launchc
 });
 
 describe("Scheduler — AC4 wake idempotent (double call = single arm)", () => {
+  it("FIX-1246: an already-armed launchd job is still booted out before bootstrap", async () => {
+    const sandbox = mkdtempSync(join(tmpdir(), "roll-launchctl-"));
+    const fakeBin = join(sandbox, "launchctl");
+    const log = join(sandbox, "launchctl.log");
+    writeFileSync(
+      fakeBin,
+      '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$ROLL_TEST_LAUNCHCTL_LOG"\n[ "$1" = print ] && exit 0\nexit 0\n',
+      "utf8",
+    );
+    chmodSync(fakeBin, 0o755);
+    const previousPath = process.env["PATH"];
+    const previousLog = process.env["ROLL_TEST_LAUNCHCTL_LOG"];
+    process.env["PATH"] = `${sandbox}:${previousPath ?? ""}`;
+    process.env["ROLL_TEST_LAUNCHCTL_LOG"] = log;
+
+    try {
+      const scheduler = new LaunchdScheduler(501);
+      await expect(scheduler.wake("com.roll.loop.proj-abc123", "/tmp/loop.plist")).resolves.toBe(true);
+      expect(readFileSync(log, "utf8").trim()).toBe("print gui/501/com.roll.loop.proj-abc123");
+      writeFileSync(log, "", "utf8");
+
+      await expect(scheduler.wake("com.roll.loop.proj-abc123", "/tmp/loop.plist", { refresh: true })).resolves.toBe(true);
+      expect(readFileSync(log, "utf8").trim().split("\n")).toEqual([
+        "bootout gui/501/com.roll.loop.proj-abc123",
+        "bootstrap gui/501 /tmp/loop.plist",
+      ]);
+    } finally {
+      if (previousPath === undefined) delete process.env["PATH"];
+      else process.env["PATH"] = previousPath;
+      if (previousLog === undefined) delete process.env["ROLL_TEST_LAUNCHCTL_LOG"];
+      else process.env["ROLL_TEST_LAUNCHCTL_LOG"] = previousLog;
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
   it("LaunchdScheduler: double wake returns true both times, arms only once", async () => {
     const loaded = new Set<string>();
     const s = new LaunchdScheduler(501, { loadedSet: loaded });

@@ -390,10 +390,25 @@ export interface Scheduler {
    * cron implementations may interpret it differently.
    * Returns true on success (including when already armed).
    */
-  wake(label: string, plistPath: string): Promise<boolean>;
+  wake(label: string, plistPath: string, options?: SchedulerWakeOptions): Promise<boolean>;
 
   /** Check if a service is currently active/loaded. */
   isArmed(label: string): Promise<boolean>;
+
+  /** Most recent activation failure, when the backend can preserve it. */
+  lastFailure?(label: string): SchedulerFailure | undefined;
+}
+
+export interface SchedulerWakeOptions {
+  /** Re-apply the current artifact with bootout → bootstrap even when armed. */
+  refresh?: boolean;
+}
+
+export interface SchedulerFailure {
+  operation: "bootstrap";
+  code: number;
+  stdout: string;
+  stderr: string;
 }
 
 // ─── LaunchdScheduler (macOS — wraps launchctl reinstall/uninstall/isLoaded) ───
@@ -409,6 +424,7 @@ export interface Scheduler {
 export class LaunchdScheduler implements Scheduler {
   private readonly uid: number;
   private readonly loadedSet?: Set<string>;
+  private readonly failures = new Map<string, SchedulerFailure>();
 
   constructor(
     uid: number,
@@ -431,20 +447,39 @@ export class LaunchdScheduler implements Scheduler {
     return r.code === 0;
   }
 
-  async wake(label: string, plistPath: string): Promise<boolean> {
-    // AC4: idempotent — double call = single arm.
-    if (await this.isArmed(label)) return true;
+  async wake(label: string, plistPath: string, options?: SchedulerWakeOptions): Promise<boolean> {
     if (this.loadedSet) {
       this.loadedSet.add(label);
       return true;
     }
+    if (options?.refresh !== true && await this.isArmed(label)) {
+      this.failures.delete(label);
+      return true;
+    }
+    // FIX-1246: refresh is an apply operation, not merely an ensure operation.
+    // Even an armed label can still point at the previous plist or runner, so
+    // `roll loop on` explicitly performs the bootout → bootstrap dance.
     const r = await reinstall(this.uid, label, plistPath);
-    return r.code === 0;
+    if (r.code === 0) {
+      this.failures.delete(label);
+      return true;
+    }
+    this.failures.set(label, {
+      operation: "bootstrap",
+      code: r.code,
+      stdout: r.stdout,
+      stderr: r.stderr,
+    });
+    return false;
   }
 
   async isArmed(label: string): Promise<boolean> {
     if (this.loadedSet) return this.loadedSet.has(label);
     return isLoaded(this.uid, label);
+  }
+
+  lastFailure(label: string): SchedulerFailure | undefined {
+    return this.failures.get(label);
   }
 }
 

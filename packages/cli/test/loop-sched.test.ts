@@ -674,11 +674,40 @@ describe("FIX-212 — loop on verifies the mount & fails loud", () => {
     const { proj, shared, ld } = project();
     // loop label never mounts (race never resolves); pr mounts fine.
     const { deps } = fakeFlakyDeps(proj, shared, ld, { "com.roll.loop.proj-abc123": 99 });
-    const { code, err } = await captureBoth(() => loopOnCommand([], deps));
-    expect(code).not.toBe(0);
-    expect(err).toContain("com.roll.loop.proj-abc123");
-    expect(err.toLowerCase()).toContain("mount"); // EN error
-    expect(err).toContain("挂载"); // ZH error
+    const previousLang = process.env["ROLL_LANG"];
+    process.env["ROLL_LANG"] = "en";
+    try {
+      const { code, err } = await captureBoth(() => loopOnCommand([], deps));
+      expect(code).not.toBe(0);
+      expect(err).toContain("domain: gui/501");
+      expect(err).toContain("label: com.roll.loop.proj-abc123");
+      expect(err).toContain(`plist: ${join(ld, "com.roll.loop.proj-abc123.plist")}`);
+      expect(err).toContain("launchctl bootout gui/501/com.roll.loop.proj-abc123");
+      expect(err).toContain(`launchctl bootstrap gui/501 ${join(ld, "com.roll.loop.proj-abc123.plist")}`);
+      expect(err).not.toContain("挂载");
+    } finally {
+      if (previousLang === undefined) delete process.env["ROLL_LANG"];
+      else process.env["ROLL_LANG"] = previousLang;
+    }
+  });
+
+  it("FIX-1246: zh failure diagnostics stay single-language and actionable", async () => {
+    const { proj, shared, ld } = project();
+    const { deps } = fakeFlakyDeps(proj, shared, ld, { "com.roll.loop.proj-abc123": 99 });
+    const previousLang = process.env["ROLL_LANG"];
+    process.env["ROLL_LANG"] = "zh";
+    try {
+      const { code, err } = await captureBoth(() => loopOnCommand([], deps));
+      expect(code).not.toBe(0);
+      expect(err).toContain("launchd 任务挂载失败");
+      expect(err).toContain("域: gui/501");
+      expect(err).toContain("标签: com.roll.loop.proj-abc123");
+      expect(err).toContain(`plist: ${join(ld, "com.roll.loop.proj-abc123.plist")}`);
+      expect(err).not.toContain("scheduling NOT active");
+    } finally {
+      if (previousLang === undefined) delete process.env["ROLL_LANG"];
+      else process.env["ROLL_LANG"] = previousLang;
+    }
   });
 
   it("AC3: a transient bootstrap failure recovers on the single retry → exit 0", async () => {
@@ -1334,7 +1363,7 @@ describe("loop on during DORMANT (US-LOOP-079n)", () => {
     // isArmed must return false so the wake actually fires.
     deps.scheduler.isArmed = (label: string) => {
       calls.push(`isArmed ${label}`);
-      return Promise.resolve(false);
+      return Promise.resolve(calls.some((call) => call.startsWith("wake")));
     };
 
     const { code, out } = await captureStdout(() => loopOnCommand([], deps));
@@ -1360,6 +1389,23 @@ describe("loop on during DORMANT (US-LOOP-079n)", () => {
     const events = readFileSync(join(proj, ".roll", "loop", "events.ndjson"), "utf8");
     expect(events).toContain('"type":"loop:woke"');
     expect(events).toContain('"trigger":"manual"');
+  });
+
+  it("FIX-1246: failed lightweight wake keeps DORMANT retryable and reports failure", async () => {
+    const { proj, shared, ld } = projectWithDormant();
+    const marker = dormantMarkerPath(proj, "proj-abc123");
+    writeDormantMarker(marker, { since: "2026-06-25T06:00:00Z", reason: "idle" });
+    const { deps } = fakeWakeDeps(proj, shared, ld);
+    deps.scheduler.wake = () => Promise.resolve(false);
+    deps.scheduler.isArmed = () => Promise.resolve(false);
+
+    const { code, out, err } = await captureBoth(() => loopOnCommand([], deps));
+    expect(code).not.toBe(0);
+    expect(out).not.toContain("re-armed");
+    expect(err).toContain("com.roll.loop.proj-abc123");
+    expect(existsSync(marker)).toBe(true);
+    expect(existsSync(join(proj, ".roll", "loop", ".waking-proj-abc123"))).toBe(false);
+    expect(existsSync(join(proj, ".roll", "loop", "events.ndjson"))).toBe(false);
   });
 
   it("AC1: when lane is already armed, skips wake and cleans the claim marker", async () => {
@@ -1443,7 +1489,7 @@ describe("loop on during DORMANT (US-LOOP-079n)", () => {
       scheduler: {
         wake: (label) => { wakeCalls.push(label); return Promise.resolve(true); },
         dormant: () => Promise.resolve(true),
-        isArmed: () => Promise.resolve(false),
+        isArmed: () => Promise.resolve(wakeCalls.length > 0),
       },
     };
 

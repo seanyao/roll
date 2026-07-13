@@ -7,6 +7,8 @@
 - 发布后的交付状态不再误报守护进程故障 (US-DELIV-013) `[loop]`
 
 ### 稳定性
+- `roll loop on` 重跑时不再被 launchd 旧状态卡死 (FIX-1246) `[loop]`
+  <!-- evidence: .roll/features/loop-engine/FIX-1246/latest/FIX-1246-report.html -->
 - 修好"builder 超时被杀后、已提交的真实工作被误判零产出"的系统性误杀:看门狗超时拆除现在会先数一遍 worktree 里真实的 tcr 提交再写终态账,且"没数过"不再等同于"零"——数不出来时保守保留成果、可恢复可救回,不再自动换 agent 把已完成的工作孤儿化 (FIX-1244) `[loop-engine]`
 
 ## v4.713.1 — 2026-07-13

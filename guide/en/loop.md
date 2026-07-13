@@ -98,6 +98,13 @@ Loop is scheduled via **launchd** (macOS). By default, every hour at a
 project-derived minute (different projects get different offsets to avoid
 collisions).
 
+`roll loop on` is safe to run again when the scheduler is already installed.
+It rewrites the current runner and plist, applies them with
+`launchctl bootout` followed by `launchctl bootstrap`, and verifies the live
+job before reporting success. If launchd still rejects the job, the command
+exits non-zero and prints the exact domain, label, plist path, and diagnostic
+commands; it never leaves a failed bootstrap looking enabled.
+
 ```
 Active window: 0–24 (always on — the shipped default)
 ```

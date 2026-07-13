@@ -36,7 +36,7 @@ import {
   projectIdentity,
 } from "@roll/infra";
 import { EventBus } from "@roll/core";
-import { GOAL_SCHEMA_VERSION, parseGoalYaml, renderGoalYaml, transitionGoal } from "@roll/spec";
+import { GOAL_SCHEMA_VERSION, parseGoalYaml, renderGoalYaml, resolveLang, t, transitionGoal, v3Catalog } from "@roll/spec";
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync, readdirSync } from "node:fs";
@@ -668,16 +668,56 @@ async function mountService(
   deps: LoopSchedDeps,
   label: string,
   plist: string,
-): Promise<{ ok: boolean; detail: string }> {
+): Promise<{ ok: boolean; failure?: ReturnType<NonNullable<Scheduler["lastFailure"]>> }> {
   // Two attempts max: the initial install + a single retry (FIX-212 spec).
   for (let attempt = 0; attempt < 2; attempt++) {
-    const reinstalled = await deps.scheduler.wake(label, plist);
+    const reinstalled = await deps.scheduler.wake(label, plist, { refresh: true });
     if (reinstalled) {
       const armed = await deps.scheduler.isArmed(label);
-      if (armed) return { ok: true, detail: "loaded" };
+      if (armed) return { ok: true };
     }
   }
-  return { ok: false, detail: `failed to mount after retry` };
+  const failure = deps.scheduler.lastFailure?.(label);
+  return failure === undefined ? { ok: false } : { ok: false, failure };
+}
+
+function mountFailureMessage(
+  uid: number,
+  failed: ReadonlyArray<{ label: string; plist: string; m: Awaited<ReturnType<typeof mountService>> }>,
+): string {
+  const lang = resolveLang({
+    rollLang: process.env["ROLL_LANG"],
+    lcAll: process.env["LC_ALL"],
+    lang: process.env["LANG"],
+  });
+  const lines = [t(v3Catalog, lang, "loop.sched.mount_failed", failed.length)];
+  for (const { label, plist, m } of failed) {
+    const raw = m.failure?.stderr.trim() || m.failure?.stdout.trim();
+    const cause = m.failure === undefined
+      ? t(v3Catalog, lang, "loop.sched.retry_exhausted")
+      : `launchctl ${m.failure.operation} exited ${m.failure.code}${raw === undefined || raw === "" ? "" : `: ${raw}`}`;
+    lines.push(
+      `  ${t(v3Catalog, lang, "loop.sched.domain")}: gui/${uid}`,
+      `  ${t(v3Catalog, lang, "loop.sched.label")}: ${label}`,
+      `  plist: ${plist}`,
+      `  ${t(v3Catalog, lang, "loop.sched.cause")}: ${cause}`,
+      `  ${t(v3Catalog, lang, "loop.sched.inspect")}`,
+      `    launchctl bootout gui/${uid}/${label}`,
+      `    launchctl bootstrap gui/${uid} ${plist}`,
+      `    launchctl print gui/${uid}/${label}`,
+    );
+  }
+  lines.push(t(v3Catalog, lang, "loop.sched.retry"), "");
+  return lines.join("\n");
+}
+
+function restoreDormantClaim(waking: string, dormant: string): void {
+  try {
+    renameSync(waking, dormant);
+  } catch {
+    // Keep the .waking claim when restoration races; the next `loop on`
+    // treats it as an orphan and retries instead of silently losing state.
+  }
 }
 
 /** `roll loop on` — generate v3 runners + plists, (re)load loop & pr. */
@@ -715,7 +755,12 @@ export async function loopOnCommand(_args: string[], deps: LoopSchedDeps = realD
       if (existsSync(waking)) {
         const armed = await deps.scheduler.isArmed(label);
         if (!armed) {
-          await deps.scheduler.wake(label, loopPlist);
+          const mounted = await mountService(deps, label, loopPlist);
+          if (!mounted.ok) {
+            restoreDormantClaim(waking, dormant);
+            process.stderr.write(mountFailureMessage(uid, [{ label, plist: loopPlist, m: mounted }]));
+            return 1;
+          }
           rmSync(waking, { force: true });
           mkdirSync(join(id.path, ".roll", "loop"), { recursive: true });
           new EventBus().appendEvent(join(id.path, ".roll", "loop", "events.ndjson"), {
@@ -756,7 +801,12 @@ export async function loopOnCommand(_args: string[], deps: LoopSchedDeps = realD
     }
 
     // Perform the wake — re-arm the loop lane.
-    await deps.scheduler.wake(label, loopPlist);
+    const mounted = await mountService(deps, label, loopPlist);
+    if (!mounted.ok) {
+      restoreDormantClaim(waking, dormant);
+      process.stderr.write(mountFailureMessage(uid, [{ label, plist: loopPlist, m: mounted }]));
+      return 1;
+    }
     rmSync(waking, { force: true });
     mkdirSync(join(id.path, ".roll", "loop"), { recursive: true });
     new EventBus().appendEvent(join(id.path, ".roll", "loop", "events.ndjson"), {
@@ -845,20 +895,11 @@ export async function loopOnCommand(_args: string[], deps: LoopSchedDeps = realD
   // the launchctl evidence, and exit non-zero so `loop on` can never report a
   // green that the scheduler will not honor.
   const failed = [
-    { label: loopLabel, m: loopMount },
-    { label: dreamLabel, m: dreamMount },
+    { label: loopLabel, plist: loopPlist, m: loopMount },
+    { label: dreamLabel, plist: dreamPlist, m: dreamMount },
   ].filter((s) => !s.m.ok);
   if (failed.length > 0) {
-    process.stderr.write(
-      [
-        `loop on: failed to mount ${failed.length} launchd job(s) after retry — scheduling NOT active`,
-        `loop on:重试后仍有 ${failed.length} 个 launchd 任务挂载失败 — 排程未生效`,
-        ...failed.map((s) => `  ✗ ${s.label}: ${s.m.detail}`),
-        `  Inspect: launchctl print gui/${uid}/<label>  ·  retry: roll loop on`,
-        `  排查:launchctl print gui/${uid}/<label>  ·  重试:roll loop on`,
-        ``,
-      ].join("\n"),
-    );
+    process.stderr.write(mountFailureMessage(uid, failed));
     return 1;
   }
 

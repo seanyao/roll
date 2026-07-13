@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### 自动化流水线
+- 交付对账收敛成一套判据:`roll loop cycles` 的读账和 `roll loop reconcile` 的合并现在共用同一个引擎,不再两套口径打架把同一个 cycle 一会儿算已交付、一会儿算没交付 (US-DELIV-008) `[loop]`
+- 一条 `roll loop go` 就能从选卡一路走到开 PR、CI 绿后自动合并、标记交付——在周期边界自动做一次对账,不用再单独跑一条命令收尾,也没有后台守护进程 (US-DELIV-009) `[loop]`
+- 对账可以放心反复跑、多来源(人工/定时/CI/周期边界)同时跑也不会重复合并或重复记账 (US-DELIV-011) `[loop]`
+- `roll loop cycles` 和面板现在能看到 awaiting_merge / 外部合并这些新交付态,还带上 external-merge 率、等待合并的滞留时长等交付指标 (US-DELIV-012) `[loop]`
 - 对账器认得"卡住的 PR":CI 长红(滞留超 24 小时)、合并冲突、draft、缺权限的 PR 会被明确标成"降级"并带上原因和滞留时长,被关未合的 PR 标成"终结",`roll loop reconcile --json` 里都能读出来——卡死的 PR 再也不会被错记成已交付,也不会对 draft/冲突/状态未知的 PR 盲目发起合并 (US-DELIV-010) `[loop]`
 - 发布后的交付状态不再误报守护进程故障 (US-DELIV-013) `[loop]`
 
@@ -10,6 +14,9 @@
 - `roll loop on` 重跑时不再被 launchd 旧状态卡死 (FIX-1246) `[loop]`
   <!-- evidence: .roll/features/loop-engine/FIX-1246/latest/FIX-1246-report.html -->
 - 修好"builder 超时被杀后、已提交的真实工作被误判零产出"的系统性误杀:看门狗超时拆除现在会先数一遍 worktree 里真实的 tcr 提交再写终态账,且"没数过"不再等同于"零"——数不出来时保守保留成果、可恢复可救回,不再自动换 agent 把已完成的工作孤儿化 (FIX-1244) `[loop-engine]`
+- 修掉两个偶发假红的测试(重载 CI 上看门狗用例超时、临时目录清理竞态),发版和自动合并不再被假红卡住 (FIX-1243) `[loop-engine]`
+- `roll loop cycles` 不再对着分支已删的老 cycle 刷一屏 `fatal: Needed a single revision`——纯显示噪音,现已静默(判据不变) (FIX-1245) `[loop]`
+- roll 给用户项目发版时,版本号按项目自己的版本世系走(首发从 0.1.0 起),不再错用 roll 自己的构建号;roll 自身发版方案不变 (FIX-1247) `[release]`
 
 ## v4.713.1 — 2026-07-13
 

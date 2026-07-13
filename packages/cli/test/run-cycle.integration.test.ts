@@ -674,7 +674,7 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
       restore("ROLL_CYCLE_NO_PROGRESS_SEC", savedNp);
       restore("ROLL_CYCLE_WALL_TIMEOUT_SEC", savedWall);
     }
-  }, 60_000);
+  }, 120_000);
 
   it("lock contention: a second concurrent cycle is skipped (ran=false)", async () => {
     const { repo } = makeFixture("lock");

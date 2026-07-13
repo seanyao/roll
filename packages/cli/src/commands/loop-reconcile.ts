@@ -37,7 +37,8 @@ import { GitHubPrStatusProvider, prMerge, type GhResult } from "@roll/infra";
 // US-DELIV-008: the fact-gathering primitives moved to the shared adapter so
 // the command path and the cycles read path feed the SAME reconcileDelivery
 // the SAME facts (one truth engine, no parallel probes).
-import { branchPatchId, mainPatchIdsSinceBranch, resolveRepoSlug } from "../lib/delivery-facts.js";
+import { branchPatchId, mainPatchIdsSinceBranch, offlineMergeEvidence, resolveRepoSlug } from "../lib/delivery-facts.js";
+import { collectGitDossierFacts, type GitDossierFacts } from "../lib/story-dossier.js";
 
 // ── Usage ─────────────────────────────────────────────────────────────────────
 
@@ -235,6 +236,9 @@ export async function loopReconcileCommand(
 
   const now = Date.now();
   const reportItems: ReconcileReportItem[] = [];
+  // US-DELIV-008: the dossier git snapshot for offline L1 — built lazily on
+  // first need (only when gh is silent for some cycle), shared across cycles.
+  let gitFacts: GitDossierFacts | null | undefined;
 
   for (const cyc of cycles) {
     deps.stdout.write(
@@ -264,14 +268,30 @@ export async function loopReconcileCommand(
           facts.prState = "CLOSED";
         }
       } catch {
-        // gh unavailable — L1 is silent; fall through to L2.
+        // gh unavailable — L1 is silent; fall through to offline L1 / L2.
       }
     }
 
-    // L2: patch-id equivalence.
-    facts.branchNetPatchId = branchPatchId(cwd, cyc.branch);
-    if (facts.branchNetPatchId !== undefined) {
-      facts.mainPatchIds = mainPatchIdsSinceBranch(cwd, cyc.branch);
+    // US-DELIV-008: when gh is silent (no provider / PR unresolved / error),
+    // fall back to the SAME offline L1 the cycles read path uses — a `(#N)`
+    // merge commit on main (or, for PR-less cycles, a subject naming the
+    // story). gh remains authoritative when it answers; this only fills the
+    // silence, so the command and the read path can never diverge on a merge
+    // main already records (e.g. branch deleted after a squash merge).
+    if (facts.prState === undefined) {
+      gitFacts ??= collectGitDossierFacts(cwd);
+      if (offlineMergeEvidence(gitFacts, cyc.storyId, cyc.prNumber) === "MERGED") {
+        facts.prState = "MERGED";
+      }
+    }
+
+    // L2: patch-id equivalence (skipped when L1 already fired — it wins inside
+    // reconcileDelivery anyway, and the per-branch spawns are wasted).
+    if (facts.prState !== "MERGED") {
+      facts.branchNetPatchId = branchPatchId(cwd, cyc.branch);
+      if (facts.branchNetPatchId !== undefined) {
+        facts.mainPatchIds = mainPatchIdsSinceBranch(cwd, cyc.branch);
+      }
     }
 
     // Run pure decision.

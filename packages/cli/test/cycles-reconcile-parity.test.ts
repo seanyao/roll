@@ -142,6 +142,71 @@ describe("US-DELIV-008 — cycles read path judges via the single reconcile engi
   });
 });
 
+describe("US-DELIV-008 — command path offline-L1 fallback (gh silent ⇒ same facts as the read path)", () => {
+  /**
+   * A project whose PR #42 merged onto main as a `(#42)` commit but whose
+   * branch is GONE from origin (deleted after merge). With gh silent, only
+   * the offline L1 signal can see the merge — before US-DELIV-008 the command
+   * said `wait` here while the read path (subject-match) said delivered: the
+   * exact dual-engine divergence this story eliminates.
+   */
+  function mergedPrNoBranchProject(): string {
+    return withoutGitEnv(() => {
+      const p = realpathSync(mkdtempSync(join(tmpdir(), "roll-deliv008-offline-l1-")));
+      dirs.push(p);
+      git(p, "init -q repo");
+      const r = join(p, "repo");
+      git(r, "config user.email test@roll.local");
+      git(r, "config user.name Test");
+      git(r, "checkout -q -b main");
+      git(r, "commit -q --allow-empty -m init");
+      git(r, "commit -q --allow-empty -m 'tcr: align machine page typography (#42)'");
+      mkdirSync(join(r, ".roll", "loop"), { recursive: true });
+      writeFileSync(
+        join(r, ".roll", "loop", "runs.jsonl"),
+        JSON.stringify({
+          cycle_id: CYCLE,
+          status: "published",
+          outcome: "published_pending_merge",
+          story_id: STORY,
+          agent: "kimi",
+          ts: TS,
+          duration_sec: 300,
+          tcr_count: 3,
+        }) + "\n",
+      );
+      writeFileSync(
+        join(r, ".roll", "loop", "events.ndjson"),
+        [
+          { type: "cycle:start", cycleId: CYCLE, storyId: STORY, ts: TS_MS },
+          { type: "delivery:published", cycleId: CYCLE, storyId: STORY, branch: `loop/${CYCLE}`, prNumber: 42, prUrl: "u", ts: TS_MS + 1 },
+          { type: "pr:open", prNumber: 42, storyId: STORY, ts: TS_MS + 2 },
+        ]
+          .map((e) => JSON.stringify(e))
+          .join("\n") + "\n",
+      );
+      return r;
+    });
+  }
+
+  it("command delivers via offline L1 (signal pr_state) when gh is silent and the branch is gone", async () => {
+    const p = mergedPrNoBranchProject();
+    const d = commandDeps(p); // no provider → gh silent
+    const code = await withoutGitEnv(() => loopReconcileCommand([], d));
+    expect(code).toBe(0);
+    const reconciled = readEvents(p).find((e) => e.type === "delivery:reconciled");
+    expect(reconciled).toBeDefined();
+    expect(reconciled!.signal).toBe("pr_state");
+    expect(d.out.join("")).toContain("✅ delivered");
+  });
+
+  it("read path agrees: the same cycle renders delivered", () => {
+    const p = mergedPrNoBranchProject();
+    const rows = withoutGitEnv(() => reconciledLedger(p));
+    expect(rows.find((r) => r.cycleId === CYCLE)!.verdict).toBe("delivered");
+  });
+});
+
 describe("US-DELIV-008 — read path and reconcile command AGREE on the same cycle", () => {
   it("merged cycle: read path delivered AND command emits delivery:reconciled (delivered)", async () => {
     const p = cycleProject(true);

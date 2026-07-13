@@ -156,9 +156,7 @@ export function reconcileMergeEvidence(
     // FIX-1032a: check the delivery gate before writing "delivered".
     // A merge onto main is only "delivered" when main CI is not red.
     const gate = deliveryGate({
-      prLoopHealthy: true, // PR loop health is not checked at backfill time (PR already merged)
       mainCiStatus: (ev.mainCiStatus as "green" | "red" | "unknown" | "pending") ?? "unknown",
-      prUrl: ev.prUrl,
       ciRunUrl: ev.ciRunUrl,
     });
     const outcome = gate.verdict === "allowed" ? "delivered" : gate.verdict;

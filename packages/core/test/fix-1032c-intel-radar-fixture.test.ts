@@ -7,7 +7,6 @@
  *
  *   - PR #75 merged by owner, merge commit dc676ff
  *   - Main CI red
- *   - PR loop not installed
  *   - Events wrote published_pending_merge, runs incorrectly wrote delivered
  *
  * All four ACs are local + deterministic — no GitHub API, no network.
@@ -92,46 +91,17 @@ describe("FIX-1032c AC1 — fixture encodes real-world facts", () => {
 // ── AC2: delivery gate blocks delivery ───────────────────────────────────
 
 describe("FIX-1032c AC2 — delivery gate returns not-delivered", () => {
-  it("pr_loop_unavailable when PR loop is absent (both conditions fail)", () => {
-    // In the intel-radar trial, the PR loop was not installed.
-    // The gate fires pr_loop_unavailable first (before CI red check).
+  it("ci_red_after_merge when main CI is red", () => {
     const result = deliveryGate({
-      prLoopHealthy: false,
       mainCiStatus: "red",
-      prUrl: INTEL_RADAR_PR_URL,
-      ciRunUrl: INTEL_RADAR_CI_RUN_URL,
-    });
-    expect(result.verdict).toBe("pr_loop_unavailable");
-    expect(result.alert).toContain("PR loop not installed");
-  });
-
-  it("ci_red_after_merge when PR loop IS healthy but CI red", () => {
-    // Even if the PR loop were installed, main CI being red still blocks.
-    const result = deliveryGate({
-      prLoopHealthy: true,
-      mainCiStatus: "red",
-      prUrl: INTEL_RADAR_PR_URL,
       ciRunUrl: INTEL_RADAR_CI_RUN_URL,
     });
     expect(result.verdict).toBe("ci_red_after_merge");
     expect(result.alert).toContain("main CI red after merge");
   });
 
-  it("contains the intel-radar PR URL in the pr_loop_unavailable verdict", () => {
-    const result = deliveryGate({
-      prLoopHealthy: false,
-      mainCiStatus: "green",
-      prUrl: INTEL_RADAR_PR_URL,
-    });
-    expect(result.verdict).toBe("pr_loop_unavailable");
-    if (result.verdict === "pr_loop_unavailable") {
-      expect(result.prUrl).toBe(INTEL_RADAR_PR_URL);
-    }
-  });
-
   it("contains the intel-radar CI run URL in the ci_red_after_merge verdict", () => {
     const result = deliveryGate({
-      prLoopHealthy: true,
       mainCiStatus: "red",
       ciRunUrl: INTEL_RADAR_CI_RUN_URL,
     });
@@ -188,7 +158,7 @@ describe("FIX-1032c AC3 — truth function resolves contradiction as not-deliver
     expect(result.reason).toBe("terminal_self_reported");
   });
 
-  it("delivery gate outcome (pr_loop_unavailable) outranks legacy delivered", () => {
+  it("a retired historical outcome falls back to awaiting reconciliation", () => {
     const input: CycleTruthInput = {
       cycleId: INTEL_RADAR_CYCLE,
       runStatus: "published",
@@ -201,7 +171,7 @@ describe("FIX-1032c AC3 — truth function resolves contradiction as not-deliver
       schemaEpochSec: PRE_EPOCH,
     };
     const result = deriveCycleTruth(input);
-    expect(result.outcome).toBe("pr_loop_unavailable");
+    expect(result.outcome).toBe("published_pending_merge");
     expect(result.outcome).not.toBe("delivered");
     expect(result.state).toBe("truth");
   });
@@ -210,26 +180,6 @@ describe("FIX-1032c AC3 — truth function resolves contradiction as not-deliver
 // ── AC4: Diagnostics include blocking reasons and URLs ───────────────────
 
 describe("FIX-1032c AC4 — gate diagnostics with blocking reasons and URLs", () => {
-  it("deliveryGateDiagnosticsFromRows surfaces pr_loop_unavailable from the fixture row", () => {
-    // A row with outcome=pr_loop_unavailable and the intel-radar PR URL.
-    const row: TruthRunRow = {
-      run_id: INTEL_RADAR_CYCLE,
-      story_id: INTEL_RADAR_STORY,
-      status: "published",
-      outcome: "pr_loop_unavailable",
-      ts: INTEL_RADAR_TS,
-      pr_url: INTEL_RADAR_PR_URL,
-    };
-    const diags = deliveryGateDiagnosticsFromRows([row], { nowSec: NOW });
-    expect(diags).toHaveLength(1);
-    expect(diags[0]).toMatchObject({
-      kind: "pr_loop_unavailable",
-      cycleId: INTEL_RADAR_CYCLE,
-      storyId: INTEL_RADAR_STORY,
-      prUrl: INTEL_RADAR_PR_URL,
-    });
-  });
-
   it("deliveryGateDiagnosticsFromRows surfaces ci_red_after_merge with CI run URL", () => {
     const row: TruthRunRow = {
       run_id: INTEL_RADAR_CYCLE,

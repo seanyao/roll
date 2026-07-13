@@ -103,7 +103,7 @@ describe("US-TRUTH-001 AC1/AC2 — versioned schema, closed outcome enum", () =>
     expect(TERMINAL_OUTCOMES).toHaveLength(15);
     expect(TERMINAL_OUTCOMES).not.toContain("pr_loop_unavailable");
     expect(TERMINAL_OUTCOMES).not.toContain("agent_internal_failure");
-    expect(LEGACY_TERMINAL_OUTCOMES).toEqual(["pr_loop_unavailable", "agent_internal_failure"]);
+    expect(LEGACY_TERMINAL_OUTCOMES).toEqual(["agent_internal_failure"]);
   });
 });
 

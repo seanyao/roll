@@ -95,7 +95,7 @@ export interface CycleLedgerRow {
   agentInternalFailure?: { class: string; summary: string; nativeLogPath: string; conversationId?: string };
   /** REFACTOR-070: failure attribution class (env|harness|card|unknown). */
   failureClass?: string;
-  /** REFACTOR-070: deterministic root-cause key (e.g. env:pr_loop). */
+  /** REFACTOR-070: deterministic root-cause key. */
   rootCauseKey?: string;
   /** US-DELIV-012: epoch ms the cycle entered `awaiting_merge` (its
    *  `delivery:published` event ts), the dwell anchor for the awaiting_merge

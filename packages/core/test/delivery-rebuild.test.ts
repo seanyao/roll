@@ -318,25 +318,7 @@ describe("rebuildDeliveriesFromFacts — AC1: other outcomes", () => {
     expect(result[0].lifecycleState).toBe("blocked");
   });
 
-  it("FIX-1032b: pr_loop_unavailable with an open PR and no merge evidence stays blocked", () => {
-    const runs = [makeRun({
-      storyId: "US-NOGUARD",
-      outcome: "pr_loop_unavailable",
-      prNumber: 79,
-      recordedAt: 200,
-    })];
-    const result = rebuildDeliveriesFromFacts(runs, [], "o/r");
-    expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({
-      storyId: "US-NOGUARD",
-      lifecycleState: "blocked",
-      prNumber: { present: true, value: 79 },
-      prUrl: { present: true, value: "https://github.com/o/r/pull/79" },
-      mergeCommit: { present: false, reason: "not_recorded" },
-    });
-  });
-
-  it("REFACTOR-070: published_pending_merge + env:pr_loop keeps blocked lifecycle projection", () => {
+  it("US-DELIV-013: retired failure attribution no longer blocks reconciliation", () => {
     const runs = [makeRun({
       storyId: "US-NOGUARD-NEW",
       outcome: "published_pending_merge",
@@ -349,7 +331,7 @@ describe("rebuildDeliveriesFromFacts — AC1: other outcomes", () => {
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
       storyId: "US-NOGUARD-NEW",
-      lifecycleState: "blocked",
+      lifecycleState: "pending_merge",
       prNumber: { present: true, value: 81 },
       prUrl: { present: true, value: "https://github.com/o/r/pull/81" },
     });
@@ -489,7 +471,7 @@ describe("rebuildDeliveriesFromFacts — constraints", () => {
     });
   });
 
-  it("FIX-1032b: pr_loop_unavailable is not rebuilt as done even with later merge evidence", () => {
+  it("US-DELIV-013: historical retired outcome yields to merge evidence", () => {
     const runs = [
       makeRun({ storyId: "US-NOPRLOOP", outcome: "pr_loop_unavailable", prNumber: 78, recordedAt: 200 }),
     ];
@@ -498,7 +480,7 @@ describe("rebuildDeliveriesFromFacts — constraints", () => {
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
       storyId: "US-NOPRLOOP",
-      lifecycleState: "blocked",
+      lifecycleState: "done",
       prNumber: { present: true, value: 78 },
       prUrl: { present: true, value: "https://github.com/o/r/pull/78" },
       mergeCommit: { present: true, value: "noguard123" },
@@ -1518,8 +1500,8 @@ describe("ensureDeliveriesFresh", () => {
 
 // ── REFACTOR-070: failure_class/root_cause_key projection ─────────────────
 
-describe("rebuildDeliveriesFromFacts — REFACTOR-070: failure_class → blocked projection", () => {
-  it("published_pending_merge + failure_class=env + root=env:pr_loop → blocked", () => {
+describe("rebuildDeliveriesFromFacts — REFACTOR-070: failure attribution projection", () => {
+  it("published_pending_merge ignores retired environment attribution", () => {
     const runs = [makeRun({
       storyId: "US-NOPRLOOP",
       outcome: "published_pending_merge",
@@ -1530,7 +1512,7 @@ describe("rebuildDeliveriesFromFacts — REFACTOR-070: failure_class → blocked
     })];
     const result = rebuildDeliveriesFromFacts(runs, [], "o/r");
     expect(result).toHaveLength(1);
-    expect(result[0].lifecycleState).toBe("blocked");
+    expect(result[0].lifecycleState).toBe("pending_merge");
     expect(result[0].prNumber).toEqual({ present: true, value: 99 });
   });
 

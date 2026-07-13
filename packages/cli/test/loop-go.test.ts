@@ -1588,9 +1588,9 @@ describe("FIX-333 — published_pending_merge cards are not re-picked (no double
             ts: `2026-06-13T09:20:0${calls}Z`,
             agent: "reasonix",
             status: "published",
-            outcome: "pr_loop_unavailable",
+            outcome: "ci_red_after_merge",
             tcr_count: 1,
-            pr_url: "https://github.com/o/r/pull/759",
+            ci_run_url: "https://github.com/o/r/actions/runs/759",
           })}\n`,
           { flag: "a" },
         );
@@ -1603,12 +1603,12 @@ describe("FIX-333 — published_pending_merge cards are not re-picked (no double
     expect(r.code).toBe(0);
     expect(calls).toBe(1);
     expect(deliveryGateStopDetails(p, 1_780_020_010)).toEqual([
-      "pr_loop_unavailable:FIX-308:https://github.com/o/r/pull/759",
+      "ci_red_after_merge:FIX-308:https://github.com/o/r/actions/runs/759",
     ]);
     const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
-    expect(goal.lastDecisionReason).toContain("scope_in_flight:pr_loop_unavailable:FIX-308:https://github.com/o/r/pull/759");
+    expect(goal.lastDecisionReason).toContain("scope_in_flight:ci_red_after_merge:FIX-308:https://github.com/o/r/actions/runs/759");
     const end = readEvents(p).find((e) => e.type === "goal:session_end");
-    expect(end).toMatchObject({ reason: "scope_in_flight:pr_loop_unavailable:FIX-308:https://github.com/o/r/pull/759" });
+    expect(end).toMatchObject({ reason: "scope_in_flight:ci_red_after_merge:FIX-308:https://github.com/o/r/actions/runs/759" });
   });
 
   it("still advances to the next scope card after the first delivers in-flight", async () => {

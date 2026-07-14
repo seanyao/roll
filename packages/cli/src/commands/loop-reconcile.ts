@@ -131,7 +131,10 @@ function applyPrCloudState(facts: ReconcileFacts, st: PrCloudState): void {
       return;
     case "open":
       facts.prState = "OPEN";
-      facts.ciGreen = st.ci === "green";
+      // FIX-1248: only a truly red CI is ci_failed. unknown/pending means
+      // "keep waiting", NOT failure — collapsing them to false made the
+      // reconciler condemn still-running (or unpolled) checks as failed.
+      facts.ciGreen = st.ci === "green" ? true : st.ci === "red" ? false : undefined;
       facts.prDraft = st.draft;
       facts.prMergeable = st.mergeable;
       return;

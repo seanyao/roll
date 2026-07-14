@@ -27,6 +27,7 @@ import {
   prReview,
   prViewMergeInfo,
   prViewState,
+  prViewStatusCheckRollup,
   prViewUrl,
   runList,
   workflowDispatch,
@@ -48,6 +49,7 @@ case "$*" in
   *"pr view"*"--json url"*)        echo "https://github.com/o/r/pull/7" ;;
   *"pr view"*"--json state,mergedAt,mergeCommit"*) echo '{"state":"MERGED","mergedAt":"2026-06-01T00:00:00Z","mergeCommit":{"oid":"abc123"}}' ;;
   *"pr view"*"--json state"*)      echo "MERGED" ;;
+  *"pr view"*"--json statusCheckRollup"*) echo '{"statusCheckRollup":[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS"},{"__typename":"StatusContext","context":"ci/lint","state":"PENDING"}]}' ;;
   *"pr view"*"--json autoMergeRequest"*) echo "null" ;;
   *"pr create"*)                   echo "https://github.com/o/r/pull/8" ;;
   *"pr ready"*)                    exit 0 ;;
@@ -205,6 +207,18 @@ describe("gh exec wiring: argv byte-exact vs oracle + parse of fabricated output
     expect(rows).toEqual([{ status: "completed", conclusion: "success" }]);
     expect(readCalls()[0]).toEqual([
       "-R", "o/r", "run", "list", "--commit", "deadbeef", "--json", "status,conclusion",
+    ]);
+  });
+
+  it("prViewStatusCheckRollup → pr view --json statusCheckRollup + parses both entry kinds (FIX-1248)", async () => {
+    writeFileSync(argvLog, "");
+    const entries = await prViewStatusCheckRollup("o/r", "42");
+    expect(entries).toEqual([
+      { __typename: "CheckRun", name: "build", status: "COMPLETED", conclusion: "SUCCESS" },
+      { __typename: "StatusContext", context: "ci/lint", state: "PENDING" },
+    ]);
+    expect(readCalls()[0]).toEqual([
+      "-R", "o/r", "pr", "view", "42", "--json", "statusCheckRollup",
     ]);
   });
 

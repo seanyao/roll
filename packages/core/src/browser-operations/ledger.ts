@@ -126,6 +126,16 @@ export class BrowserOperationLedger {
     this.append(path, { type: "browser:lease-orphaned", ...lease, ts: this.now() });
   }
 
+  /** Generic MCP denials are security facts even though no operation run starts. */
+  recordMcpBypassDenial(
+    path: string,
+    event: Extract<BrowserOperationEvent, { type: "browser:mcp-bypass-denied" }>,
+  ): void {
+    // appendLine is one O_APPEND write with create semantics; an ensure-then-
+    // append pair can race when two first-time security denials arrive together.
+    this.store.appendLine(path, `${JSON.stringify({ schema: LEDGER_SCHEMA, event } satisfies BrowserLedgerLine)}\n`);
+  }
+
   read(path: string): BrowserOperationEvent[] {
     const events: BrowserOperationEvent[] = [];
     for (const line of this.store.readText(path).split("\n")) {

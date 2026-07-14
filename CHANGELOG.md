@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### 稳定性
+- 无验收清单的卡不再被误拦导致无法 publish；缺少验收证据时循环会把工作明确挂起待人复评，不再静默丢弃 (FIX-1256) `[loop]`
+  <!-- evidence: .roll/features/loop-engine/FIX-1256/latest/FIX-1256-report.html -->
+
 ## v4.714.2 — 2026-07-14
 
 ### 稳定性

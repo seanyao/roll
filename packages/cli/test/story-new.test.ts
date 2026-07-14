@@ -79,6 +79,27 @@ describe("roll story new — FIX-250", () => {
   });
 });
 
+// FIX-1251 — the help text must describe the REAL CLI surface: `roll story new`
+// refreshes the lightweight `.roll/index.json` cache only (NOT the dossier — see
+// US-V4-001 test below), and bare `roll index` was retired (b6278c54, only
+// `roll index --rebuild` survives). Stale hints pointing at a dossier refresh or
+// a bare `roll index` command must not creep back in.
+describe("roll story new — FIX-1251 help matches real CLI surface", () => {
+  it("help advertises the index.json cache, not a phantom dossier refresh", () => {
+    const p = project();
+    const help = inProj(p, ["--help"]).out;
+    expect(help).toContain("index.json");
+    expect(help).not.toMatch(/dossier/i);
+  });
+
+  it("help does not hint at the retired bare `roll index` command", () => {
+    const p = project();
+    const help = inProj(p, ["--help"]).out;
+    // Any `roll index` reference must carry the surviving `--rebuild` form.
+    expect(help).not.toMatch(/roll index(?!\s+--rebuild)/);
+  });
+});
+
 describe("roll story new — US-META-009", () => {
   it("mints spec.md (frontmatter) + story page + refreshes index.json", () => {
     const p = project();

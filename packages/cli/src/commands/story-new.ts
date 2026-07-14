@@ -36,9 +36,10 @@ export function storyNewCommand(args: string[]): number {
     process.stdout.write(
       "Usage: roll story new <ID> --title <text> [--epic <epic>] [--note <text>] [--no-index]\n" +
         "  The ONE card-minting entry: card folder (spec.md + index.html) + backlog row\n" +
-        "  + index/dossier refresh. --no-index defers the refresh for batch minting —\n" +
-        "  finish a batch with a single `roll index`.\n" +
-        "  单一建卡入口:卡夹 + backlog 行 + 索引刷新一步完成;批量建卡用 --no-index,收尾统一 roll index。\n",
+        "  + .roll/index.json cache refresh. --no-index defers the cache for batch minting;\n" +
+        "  the cache is best-effort — the live locator resolves cards without it.\n" +
+        "  单一建卡入口:卡夹 + backlog 行 + index.json 缓存刷新一步完成。\n" +
+        "  批量建卡用 --no-index 延后缓存;缓存是尽力而为,定位器无需它即可解析卡片。\n",
     );
     return args[0] === undefined ? 1 : 0;
   }

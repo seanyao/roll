@@ -15,12 +15,13 @@
  * data-complete form.
  */
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi, buildExecutionCastProjection, type ExecutionCastRow } from "@roll/core";
-import { type CycleRoleSummary, type CycleRoleName, type CycleRoleAttemptState, type DeliveryLadder, parseEventLine, type StoryEvidenceFlags } from "@roll/spec";
+import { type CycleRoleSummary, type CycleRoleName, type CycleRoleAttemptState, type DeliveryLadder, parseEventLine, type StoryEvidenceFlags, type BrowserOperationsTruth } from "@roll/spec";
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join as joinPath, relative as relativePath, resolve as resolvePath, sep } from "node:path";
 import { type DossierStory } from "./archive.js";
 import { rowDelivered } from "./truth-adapter.js";
+import { collectBrowserTruth } from "./browser-truth-collect.js";
 import { DOSSIER_CSS } from "./dossier-css.js";
 import { SPINE_STAGES, deriveDeliveryLadder } from "./dossier-index.js";
 import { readLatestStoryReviewScore, readReviewScoreTrend, type ReviewScoreView } from "./review-score.js";
@@ -199,6 +200,8 @@ export interface StoryDossierInput {
   cycleRoleSummaryHref?: string;
   /** Hrefs keyed by CycleRoleAttempt artifact/log paths. */
   cycleRoleArtifactHrefs?: Record<string, string>;
+  /** US-BROW-009b: truth-adapter browser readiness for this story. */
+  browserTruth?: BrowserOperationsTruth;
 }
 
 /**
@@ -918,6 +921,35 @@ function cycleRoleArtifactHrefsFrom(fromDir: string, summary: CycleRoleSummary):
   return out;
 }
 
+/**
+ * US-BROW-009b — browser operations summary block for the Execution station.
+ * Renders managed/interactive/capture readiness from the truth adapter.
+ * Returns empty string when no truth is available (no browser ops recorded).
+ */
+function browserDossierBlock(truth?: BrowserOperationsTruth): string {
+  if (truth === undefined) return "";
+
+  const badge = (status: string): string => {
+    const color = status === "ready" ? "var(--pass)" : status === "degraded" || status === "expired" ? "var(--warn)" : "var(--muted)";
+    return `<span style="color:${color};font-weight:600;">${status}</span>`;
+  };
+
+  const row = (label: string, status: string, reason?: string, expiresAt?: string): string => {
+    let detail = reason ?? "";
+    if (expiresAt) detail = detail ? `${detail} (expires ${esc(expiresAt)})` : `expires ${esc(expiresAt)}`;
+    return `<div class="dc-row"><span class="dc-role">${esc(label)}</span><span class="dc-agent">${badge(status)}${detail ? ` — ${esc(detail)}` : ""}</span><span class="dc-state"></span></div>`;
+  };
+
+  return (
+    `<details class="execution-cast-dossier" open>` +
+    `<summary>${bi("Browser operations", "浏览器操作")}</summary>` +
+    `<div class="dc-grid">` +
+    row("managed", truth.managed.status, truth.managed.unavailableReason) +
+    row("interactive", truth.lease.status, truth.lease.unavailableReason, truth.lease.expiresAt) +
+    row("capture", truth.capture.status, truth.capture.unavailableReason) +
+    `</div></details>`
+  );
+}
 
 /** Render the dossier page. */
 export function renderStoryDossier(d: StoryDossierInput): string {
@@ -950,14 +982,21 @@ export function renderStoryDossier(d: StoryDossierInput): string {
   if ((d.design?.length ?? 0) > 0) designBits.push(`<ul>${(d.design ?? []).map((b) => `<li>${esc(b)}</li>`).join("")}</ul>`);
   if (peerReview !== "") designBits.push(peerReview);
   const design = designBits.length > 0 ? designBits.join("\n") : `<p class="empty">${bi("Not yet designed", "尚未设计")}</p>`;
+
+  // US-BROW-009b: browser operations summary from truth adapter.
+  const browserDossierHtml = browserDossierBlock(d.browserTruth);
+
   const execution =
     (d.commits?.length ?? 0) > 0
       ? `<p>${bi(`${(d.commits ?? []).length} TCR commits`, `${(d.commits ?? []).length} 个 TCR 提交`)}</p>` +
         `<ul class="muted">${(d.commits ?? []).map((c) => `<li><code>${esc(c)}</code></li>`).join("")}</ul>` +
-        executionRefsHtml(d.executionRefs ?? [])
+        executionRefsHtml(d.executionRefs ?? []) +
+        browserDossierHtml
       : (d.executionRefs?.length ?? 0) > 0
-        ? executionRefsHtml(d.executionRefs ?? [])
-        : `<p class="empty">${bi("No cycles yet", "暂无周期")}</p>`;
+        ? executionRefsHtml(d.executionRefs ?? []) + browserDossierHtml
+        : browserDossierHtml !== ""
+          ? browserDossierHtml
+          : `<p class="empty">${bi("No cycles yet", "暂无周期")}</p>`;
   // US-DOSSIER-023: the delivery node's ladder rung drives both the spine and the
   // banner, so the page never contradicts itself (claimed→merged→attested).
   const ladder = storyDeliveryState(d);
@@ -1449,6 +1488,13 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
     }
   } catch {
     // cycle-logs unavailable — degrade gracefully
+  }
+
+  // US-BROW-009b: collect browser operations truth for this story.
+  try {
+    out.browserTruth = collectBrowserTruth({ projectPath, storyId: story.id });
+  } catch {
+    // browser facts unavailable — degrade gracefully
   }
 
   return out;

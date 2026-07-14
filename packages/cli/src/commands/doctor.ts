@@ -24,6 +24,8 @@ import { isRollAuxiliarySkillTarget } from "./setup-shared.js";
 import { collectExternalTools, renderExternalToolDoctorSection, type ExternalToolState } from "../lib/external-tools.js";
 import { collectToolReadinessDoctorRows, renderToolReadinessDoctorSection } from "../lib/tool-readiness-doctor.js";
 import { collectBrowserEnvironmentReadiness, renderBrowserReadinessDoctorRow } from "../lib/browser-readiness-doctor.js";
+import { collectBrowserTruth } from "../lib/browser-truth-collect.js";
+import { renderBrowserTruthDoctorRow } from "../lib/browser-truth-surface.js";
 import { detectDesignHandoff, renderDesignNudge } from "../lib/onboard-nudge.js";
 import { collectLanguageDoctorFindings, renderLanguageDoctorSection } from "../lib/language-doctor.js";
 import { rebuildSkipStateFromEvidence, readRows, readEvents, runtimeDir as pardonRuntimeDir } from "../lib/pardon-skip-list.js";
@@ -728,6 +730,11 @@ export function doctorCommand(args: string[], deps: DoctorDeps = {}): number {
   // ready|degraded|blocked verdict so an unavailable browser is never read as a pass.
   const browserReadiness = deps.browserReadiness?.() ?? collectBrowserEnvironmentReadiness();
   for (const l of renderBrowserReadinessDoctorRow(browserReadiness)) emit(l);
+
+  // US-BROW-009b: truth-adapter-based browser readiness (managed / interactive / capture).
+  // Same three-lane shape but projected from persisted ledger facts — no live probe.
+  const browserTruth = collectBrowserTruth({ projectPath: process.cwd() });
+  for (const l of renderBrowserTruthDoctorRow(browserTruth)) emit(l);
 
   if (toolsOnly) {
     // US-INIT-003c: `roll doctor --tools` prints a focused Terminal.app Screen

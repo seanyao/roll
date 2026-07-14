@@ -16,10 +16,6 @@ export type BrowserTransportResolution =
   | { kind: "resolved"; transport: BrowserTransport }
   | { kind: "denied"; reason: BrowserDenialReason };
 
-export type BrowserTransportEventRecorder = (
-  event: Extract<BrowserOperationEvent, { type: "browser:mcp-bypass-denied" }>,
-) => void;
-
 function managedTransport(): BrowserTransport {
   return {
     logicalServer: MANAGED_DEVTOOLS_SERVER,
@@ -35,8 +31,6 @@ function managedTransport(): BrowserTransport {
  * alter its executable, package pin, arguments, or remote-debugging endpoint.
  */
 export class BrowserTransportRegistry {
-  constructor(private readonly recordEvent: BrowserTransportEventRecorder = () => undefined) {}
-
   resolve(requestedServer: string): BrowserTransportResolution {
     if (requestedServer === MANAGED_DEVTOOLS_SERVER) {
       return { kind: "resolved", transport: managedTransport() };
@@ -62,7 +56,6 @@ export class BrowserTransportRegistry {
         detail: { serverName },
       },
     };
-    this.recordEvent(event);
     return event;
   }
 }

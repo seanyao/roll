@@ -51,9 +51,11 @@ describe("US-BROW-002 BrowserTransportRegistry", () => {
     });
   });
 
-  it("records generic MCP bypass denials as Browser Operations events", () => {
-    const events: unknown[] = [];
-    const registry = new BrowserTransportRegistry((event) => events.push(event));
+  it("returns a typed generic MCP bypass event without owning persistence", () => {
+    let recorded = 0;
+    const registry = new BrowserTransportRegistry(() => {
+      recorded += 1;
+    });
 
     expect(registry.denyGenericMcp("chrome-devtools", "2026-07-15T00:00:00.000Z")).toEqual({
       type: "browser:mcp-bypass-denied",
@@ -64,6 +66,6 @@ describe("US-BROW-002 BrowserTransportRegistry", () => {
         detail: { serverName: "chrome-devtools" },
       },
     });
-    expect(events).toHaveLength(1);
+    expect(recorded).toBe(0);
   });
 });

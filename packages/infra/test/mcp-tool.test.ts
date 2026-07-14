@@ -183,12 +183,12 @@ describe("US-TOOL-010 McpTool", () => {
   it("fails closed before config resolution or spawn when generic MCP targets the reserved DevTools server", async () => {
     const root = "/repo";
     const events: unknown[] = [];
-    const registry = new BrowserTransportRegistry((event) => events.push(event));
+    const registry = new BrowserTransportRegistry();
     let connected = 0;
     const tool = new McpTool({
       projectRoot: root,
       browserTransportRegistry: registry,
-      recordBrowserEvent: () => undefined,
+      recordBrowserEvent: (event) => events.push(event),
       connect: async () => {
         connected += 1;
         return connection({ content: [] });

@@ -79,6 +79,17 @@ Supported fields:
 
 Unknown fields warn but do not reject the policy file, so newer Roll versions can add fields without breaking older project configs.
 
+## Owner Chrome: manual interactive lane
+
+`roll browser interactive` is a manual, owner-run boundary for one typed low-risk action against an already-open, loopback Chrome DevTools endpoint. It requires an attached TTY and a fresh `y` approval for every invocation. The prompt names the story, approved origin, action summary, 15-minute maximum expiry, and credential-export denial.
+
+```text
+roll browser interactive --story US-BROW-008b --origin https://app.example.test \
+  --action navigate --url https://app.example.test/account
+```
+
+It connects only to a tab whose origin matches `--origin`, then disconnects DevTools on approval expiry, cancellation, errors, or process exit. Roll never launches or closes the owner's Chrome. The closed action vocabulary is `navigate`, `click`, `fill`, and `press_key`; cookies, storage, and network bodies have no CLI or adapter surface. A successful interactive result is manual evidence only: it does not make CI pass and cannot become background automation.
+
 ## CLI
 
 Use `roll doctor tools status` to inspect the registered tools, input contracts, requirement readiness, and the effective policy state for the current project.

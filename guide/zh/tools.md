@@ -79,6 +79,17 @@ tools:
 
 未知字段会告警但不会拒绝整个 policy 文件，方便新旧版本之间前向兼容。
 
+## Owner Chrome：手动交互通道
+
+`roll browser interactive` 是一次性的、owner 手动运行边界：它只会连接已经开启的 loopback Chrome DevTools 端点，执行一个 typed 低风险动作。每次运行都必须附着 TTY，并重新输入 `y` 批准；提示会列出故事、批准的 origin、动作摘要、最长 15 分钟的过期时间和“禁止凭据导出”。
+
+```text
+roll browser interactive --story US-BROW-008b --origin https://app.example.test \
+  --action navigate --url https://app.example.test/account
+```
+
+它只连接 origin 与 `--origin` 匹配的 tab，并会在批准过期、取消、错误或进程退出时断开 DevTools。Roll 不会启动或关闭 owner 的 Chrome。封闭动作词表只有 `navigate`、`click`、`fill` 和 `press_key`；cookie、storage 和 network body 没有 CLI 或 adapter 表面。交互成功只是手动证据，不会让 CI 通过，也不会变成后台自动化。
+
 ## CLI
 
 用 `roll doctor tools status` 查看当前项目已注册工具、输入契约、依赖就绪度和合成后的有效 policy 状态。

@@ -20,13 +20,20 @@ import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
+  BrowserLeaseService,
   BrowserTransportVersion,
   MANAGED_DEVTOOLS_PACKAGE_VERSION,
   pinnedDevToolsVersionSource,
   type VersionSource,
 } from "@roll/core";
-import { proposedBrowserOperationsConfig } from "@roll/infra";
+import {
+  createLoopbackOwnerChromeAdapter,
+  proposedBrowserOperationsConfig,
+  type InteractiveLowRiskAction,
+  type InteractiveOperationResult,
+} from "@roll/infra";
 import type { BrowserActionKind, BrowserTransportVersionCheck } from "@roll/spec";
+import { randomUUID } from "node:crypto";
 import { collectBrowserEnvironmentReadiness, renderBrowserDoctor } from "../lib/browser-readiness-doctor.js";
 import type { ManagedFixtureFailure } from "@roll/infra";
 import {
@@ -46,7 +53,19 @@ export interface BrowserCommandDeps {
   /** Smoke/contract check — runs before an update is applied. */
   smokeCheck?: () => Promise<boolean>;
   readiness?: () => ReturnType<typeof collectBrowserEnvironmentReadiness>;
+  /** Terminal gate and confirmation seam for owner Chrome operations. */
+  isTTY: () => boolean;
+  readApproval: (prompt: string) => Promise<boolean>;
+  interactiveRun: (input: InteractiveBrowserRunInput) => Promise<InteractiveOperationResult>;
   stdout: (text: string) => void;
+}
+
+export interface InteractiveBrowserRunInput {
+  storyId: string;
+  origin: string;
+  endpoint: string;
+  action: InteractiveLowRiskAction;
+  actionSummary: string;
 }
 
 function defaultDeps(): BrowserCommandDeps {
@@ -59,12 +78,15 @@ function defaultDeps(): BrowserCommandDeps {
     readFile: (path) => readFileSync(path, "utf8"),
     fileExists: (path) => existsSync(path),
     smokeCheck: async () => true,
+    isTTY: () => process.stdin.isTTY === true && process.stdout.isTTY === true,
+    readApproval: readOwnerApproval,
+    interactiveRun: defaultInteractiveRun,
     stdout: (text) => process.stdout.write(text),
   };
 }
 
 const USAGE =
-  "Usage: roll browser <setup|doctor|run|update>\n" +
+  "Usage: roll browser <setup|doctor|run|interactive|update>\n" +
   "  setup --dry-run       Report proposed machine config + dependency preflight (writes nothing).\n" +
   "  setup --confirm       Write ~/.roll/browser-operations.yaml after explicit owner confirmation.\n" +
   "  doctor [--json]       Report managed / interactive / capture readiness (ready|degraded|blocked).\n" +
@@ -75,6 +97,9 @@ const USAGE =
   "     --redirect <url>   Simulate a redirect (proves redirect denial).\n" +
   "     --fail <timeout|crash|devtools-error>  Inject a categorized diagnostic failure.\n" +
   "     --json             Emit the machine-readable run report.\n" +
+  "  interactive --story <US-ID> --origin <https-origin> --action <navigate|click|fill|press_key> [action flags]\n" +
+  "     Requires an attached TTY and one owner approval. Connects only to an already-open loopback Chrome debug endpoint.\n" +
+  "     --endpoint <http://127.0.0.1:9222> (default); navigate: --url; click: --selector; fill: --selector --value; press_key: --key.\n" +
   "  update [--check] [--json]   Check for DevTools transport update (pinned vs candidate).\n" +
   "  update --apply --confirm    Apply update after smoke checks + doctor.\n";
 
@@ -178,6 +203,120 @@ async function runSubcommand(args: string[], deps: BrowserCommandDeps): Promise<
   // The fixture surface always exits 0: a categorized failure/denial is a
   // successfully-observed diagnostic outcome, not a CLI error.
   return 0;
+}
+
+async function interactiveSubcommand(args: string[], deps: BrowserCommandDeps): Promise<number> {
+  if (!deps.isTTY()) {
+    deps.stdout("roll browser interactive requires an attached TTY; no owner Chrome connection was attempted.\n");
+    return 1;
+  }
+  const storyId = flagValue(args, "--story");
+  const origin = flagValue(args, "--origin");
+  if (storyId === undefined || origin === undefined) {
+    deps.stdout("roll browser interactive requires --story <US-ID> and --origin <https-origin>.\n");
+    return 1;
+  }
+  const action = interactiveAction(args);
+  if (action === undefined) {
+    deps.stdout("roll browser interactive requires a supported typed --action and its required flags.\n");
+    return 1;
+  }
+  const endpoint = flagValue(args, "--endpoint") ?? "http://127.0.0.1:9222";
+  const actionSummary = interactiveActionSummary(action);
+  const expiry = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  const prompt = [
+    "Owner Chrome approval required (one operation only)",
+    `  story: ${storyId}`,
+    `  origin: ${origin}`,
+    `  action: ${actionSummary}`,
+    `  expiry: ${expiry} (15 minutes maximum)`,
+    "  credential export: denied (cookies, storage, and network bodies are unavailable)",
+    "Approve this owner-run operation? [y/N] ",
+  ].join("\n");
+  if (!(await deps.readApproval(prompt))) {
+    deps.stdout("Owner declined the interactive operation; no owner Chrome connection was attempted.\n");
+    return 1;
+  }
+  const outcome = await deps.interactiveRun({ storyId, origin, endpoint, action, actionSummary });
+  if (outcome.kind === "denied") {
+    deps.stdout(`Interactive operation denied: ${outcome.reason.code} — ${outcome.reason.message}\n`);
+    return 1;
+  }
+  deps.stdout(
+    `manual owner-run result: ${outcome.result.status} (tab: ${outcome.tabId})\n` +
+    "This interactive result does not make CI pass and is not background automation.\n",
+  );
+  return 0;
+}
+
+function interactiveAction(args: string[]): InteractiveLowRiskAction | undefined {
+  switch (flagValue(args, "--action")) {
+    case "navigate": {
+      const url = flagValue(args, "--url");
+      return url === undefined ? undefined : { kind: "navigate", url };
+    }
+    case "click": {
+      const selector = flagValue(args, "--selector");
+      return selector === undefined ? undefined : { kind: "click", selector };
+    }
+    case "fill": {
+      const selector = flagValue(args, "--selector");
+      const value = flagValue(args, "--value");
+      return selector === undefined || value === undefined ? undefined : { kind: "fill", selector, value };
+    }
+    case "press_key": {
+      const key = flagValue(args, "--key");
+      return key === undefined ? undefined : { kind: "press_key", key };
+    }
+    default:
+      return undefined;
+  }
+}
+
+function interactiveActionSummary(action: InteractiveLowRiskAction): string {
+  switch (action.kind) {
+    case "navigate": return `navigate to ${new URL(action.url).origin}`;
+    case "click": return `click ${action.selector}`;
+    case "fill": return `fill ${action.selector}`;
+    case "press_key": return `press ${action.key}`;
+  }
+}
+
+async function defaultInteractiveRun(input: InteractiveBrowserRunInput): Promise<InteractiveOperationResult> {
+  const holderToken = randomUUID();
+  const service = new BrowserLeaseService(join(process.cwd(), ".roll", "browser-operations", "leases"));
+  service.releaseIfExpired(input.endpoint);
+  service.reclaimDeadHolder(input.endpoint);
+  const granted = service.grant({
+    approval: {
+      storyId: input.storyId,
+      origin: input.endpoint,
+      actionSummary: input.actionSummary,
+      requestedMs: 15 * 60 * 1000,
+      credentialExportDenied: true,
+    },
+    holderPid: process.pid,
+    holderToken,
+    operator: process.env["USER"] ?? "owner",
+    callerTty: true,
+    callerIsScheduler: false,
+  });
+  if (granted.kind === "denied") return { kind: "denied", reason: granted.reason, ciPassed: false };
+  try {
+    return await createLoopbackOwnerChromeAdapter(input.endpoint).execute({ lease: granted.lease, origin: input.origin, action: input.action });
+  } finally {
+    service.release(granted.lease, holderToken);
+  }
+}
+
+async function readOwnerApproval(prompt: string): Promise<boolean> {
+  const readline = await import("node:readline/promises");
+  const terminal = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return (await terminal.question(prompt)).trim().toLowerCase() === "y";
+  } finally {
+    terminal.close();
+  }
 }
 
 function readPinnedVersion(configPath: string, deps: BrowserCommandDeps): string {
@@ -341,6 +480,7 @@ export async function browserCommand(args: string[], depsOverride?: Partial<Brow
   if (sub === "setup") return setupCommand(args.slice(1), deps);
   if (sub === "doctor") return doctorSubcommand(args.slice(1), deps);
   if (sub === "run") return runSubcommand(args.slice(1), deps);
+  if (sub === "interactive") return interactiveSubcommand(args.slice(1), deps);
   if (sub === "update") return updateSubcommand(args.slice(1), deps);
   process.stderr.write(`roll browser: unknown subcommand '${sub}'\n\n${USAGE}`);
   return 1;

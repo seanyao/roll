@@ -1,9 +1,9 @@
 /** US-BROW-005 — append-only operation and lease transition ledger. */
 import { createHash, randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { BrowserActionResult, BrowserOperationEvent, BrowserOperationRun } from "@roll/spec";
 import { BrowserLeaseLock } from "./lease-lock.js";
+import { nodeEventStore, type EventStore } from "../events/infra-default.js";
 import { persistDiagnostic, type DiagnosticInput, type DiagnosticRedactor, type PersistDiagnosticResult } from "./redaction.js";
 
 const LEDGER_SCHEMA = "browser-ledger.v1";
@@ -13,25 +13,9 @@ interface BrowserLedgerLine {
   event: BrowserOperationEvent;
 }
 
-export interface BrowserLedgerStore {
-  ensureFile(path: string): void;
-  readText(path: string): string;
-  appendLine(path: string, line: string): void;
-}
+export type BrowserLedgerStore = Pick<EventStore, "ensureFile" | "readText" | "appendLine">;
 
-export const nodeBrowserLedgerStore: BrowserLedgerStore = {
-  ensureFile(path) {
-    mkdirSync(dirname(path), { recursive: true });
-    if (!existsSync(path)) writeFileSync(path, "", "utf8");
-  },
-  readText(path) {
-    return existsSync(path) ? readFileSync(path, "utf8") : "";
-  },
-  appendLine(path, line) {
-    mkdirSync(dirname(path), { recursive: true });
-    appendFileSync(path, line, { encoding: "utf8", flag: "a" });
-  },
-};
+export const nodeBrowserLedgerStore: BrowserLedgerStore = nodeEventStore;
 
 /** Serializes the read-then-append idempotency transition across processes. */
 export interface BrowserLedgerGuard {

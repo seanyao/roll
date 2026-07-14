@@ -285,6 +285,25 @@ export type BrowserOperationEvent =
       capture: BrowserLaneVerdict;
     };
 
+// ── US-BROW-010 — transport version check and atomic update ──────────────────
+
+/** Result of a deterministic, non-mutating version check. */
+export interface BrowserTransportVersionCheck {
+  /** The currently pinned package version. */
+  pinned: string;
+  /** Available candidate version, or null when no update is available. */
+  candidate: string | null;
+  /** True when candidate differs from pinned and is non-null. */
+  updateAvailable: boolean;
+}
+
+/** Outcome of an atomic version update attempt. */
+export type BrowserTransportVersionApplyResult =
+  | { kind: "applied"; from: string; to: string }
+  | { kind: "no_update"; pinned: string }
+  | { kind: "verification_failed"; from: string; candidate: string; reason: string }
+  | { kind: "refused"; reason: string };
+
 // ── US-BROW-003 — environment readiness ──────────────────────────────────────
 
 /**

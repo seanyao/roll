@@ -82,6 +82,39 @@ describe("US-BROW-009a browser operations truth adapter", () => {
     });
   });
 
+  it("does not project a prior cycle's capture as ready for the current cycle", () => {
+    const oldCycleEvents = finishedManagedRun("ok").map((event) =>
+      event.type === "browser:operation-requested"
+        ? { ...event, request: { ...event.request, cycleId: "cycle-old" } }
+        : event,
+    );
+    const currentCycleEvents: BrowserOperationEvent[] = [
+      {
+        type: "browser:operation-requested",
+        runId: "run-current",
+        ts: "2026-07-15T00:00:20.000Z",
+        holderTokenHash: "hash",
+        request: {
+          idempotencyKey: "key-current",
+          storyId: "US-BROW-009a",
+          cycleId: "cycle-current",
+          caller: "supervisor",
+          lane: "managed",
+          targetUrl: "https://example.test",
+          purpose: "diagnose",
+        },
+      },
+    ];
+
+    const truth = browserOperationsTruth(facts({
+      cycleId: "cycle-current",
+      events: [...oldCycleEvents, ...currentCycleEvents],
+      captureLinks: [captureLink(true)],
+    }));
+
+    expect(truth.capture).toMatchObject({ status: "unknown", unavailableReason: "no physical capture facts" });
+  });
+
   it("keeps every missing fact unknown and never infers a pass", () => {
     const truth = browserOperationsTruth(facts());
 

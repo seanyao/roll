@@ -211,14 +211,20 @@ function matchesScope(value: string | undefined, scope: string | undefined): boo
   return scope === undefined || scope === "" || value === scope;
 }
 
-function managedTruth(facts: BrowserOperationsTruthFacts): BrowserOperationsTruth["managed"] {
+function requestedRunIds(facts: BrowserOperationsTruthFacts, lane?: "managed" | "interactive"): Set<string> {
   const runIds = new Set<string>();
   for (const event of facts.events) {
-    if (event.type !== "browser:operation-requested" || event.request.lane !== "managed") continue;
+    if (event.type !== "browser:operation-requested") continue;
+    if (lane !== undefined && event.request.lane !== lane) continue;
     if (!matchesScope(event.request.storyId, facts.storyId)) continue;
     if (!matchesScope(event.request.cycleId, facts.cycleId)) continue;
     runIds.add(event.runId);
   }
+  return runIds;
+}
+
+function managedTruth(facts: BrowserOperationsTruthFacts): BrowserOperationsTruth["managed"] {
+  const runIds = requestedRunIds(facts, "managed");
   if (runIds.size === 0) return { status: "unknown", unavailableReason: "no managed operation facts" };
 
   const completed = new Map<string, "ok" | "bad">();
@@ -269,7 +275,10 @@ function leaseTruth(facts: BrowserOperationsTruthFacts): BrowserOperationsTruth[
 }
 
 function captureTruth(facts: BrowserOperationsTruthFacts): BrowserOperationsTruth["capture"] {
-  const links = (facts.captureLinks ?? []).filter((link) => matchesScope(link.storyId, facts.storyId));
+  const scopedRunIds = facts.cycleId === undefined || facts.cycleId === "" ? undefined : requestedRunIds(facts);
+  const links = (facts.captureLinks ?? []).filter(
+    (link) => matchesScope(link.storyId, facts.storyId) && (scopedRunIds === undefined || scopedRunIds.has(link.runId)),
+  );
   if (links.length === 0) return { status: "unknown", unavailableReason: "no physical capture facts" };
   if (links.some((link) => link.canSatisfyVisualAc)) return { status: "ready" };
   if (links.some((link) => link.captureResponse === undefined)) {

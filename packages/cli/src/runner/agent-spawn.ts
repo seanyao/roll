@@ -388,8 +388,17 @@ const AGENT_PROFILES: Readonly<Record<string, AgentProfile>> = {
     acceptance: { canReviewHeadless: getAgentSpec("reasonix")?.canReviewHeadless === true },
     secretEnv: ["DEEPSEEK_API_KEY"],
     buildSpawnCommand: (opts) => {
+      // FIX-1249: reasonix's model is CONFIG-DRIVEN — the source no longer holds
+      // a runtime default (the old `routedModel ?? getAgentSpec(...).defaultModel
+      // ?? "deepseek-flash"` silently masked a missing config). The router
+      // resolves the model from agents.yaml (rigs/routing) and the config-rig
+      // backstop covers pool picks, so a configured model reaches `--model`.
+      // When NO model is configured we OMIT `--model` and let reasonix use its
+      // own CLI default — exactly like pi/kimi — never a source-baked value. The
+      // missing config is surfaced (fail-loud + guidance) at the readiness/
+      // doctor layer ({@link modelConfigGuidance}), not by crashing the spawn.
       const routedModel = opts.model?.trim();
-      const model = routedModel !== undefined && routedModel !== "" ? routedModel : getAgentSpec("reasonix")?.defaultModel ?? "deepseek-flash";
+      const modelArgs = routedModel !== undefined && routedModel !== "" ? ["--model", routedModel] : [];
       const maxSteps = opts.maxSteps ?? 1000;
       // FIX-1036: write a per-cycle reasonix.toml so the Seatbelt sandbox
       // allows writes to the git common dir (outside the worktree root).
@@ -398,7 +407,7 @@ const AGENT_PROFILES: Readonly<Record<string, AgentProfile>> = {
       if (roots.length > 0) opts.cleanup = chainCleanup(opts.cleanup, writeReasonixSandboxConfig(opts.cwd, roots));
       return {
         bin: opts.bin ?? "reasonix",
-        args: ["run", "--max-steps", String(maxSteps), "--model", model, "--dir", opts.cwd, agentPrompt(opts)],
+        args: ["run", "--max-steps", String(maxSteps), ...modelArgs, "--dir", opts.cwd, agentPrompt(opts)],
       };
     },
     childEnv: reasonixEnv,

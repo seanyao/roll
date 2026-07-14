@@ -517,3 +517,71 @@ describe("US-BROW-014 roll browser run --profile", () => {
     expect(parsed.deviceProfile).toBeUndefined();
   });
 });
+
+describe("US-BROW-012 roll browser run --perf-profile", () => {
+  it("collects a bounded, redacted performance summary and renders it as diagnostic-only", async () => {
+    const c = capture();
+    const code = await browserCommand(["run", "--perf-profile", "web-vitals-lite", "--action", "navigate"], {
+      ...noWriteDeps(),
+      stdout: c.stdout,
+    });
+    expect(code).toBe(0);
+    const out = c.read();
+    expect(out).toContain("perf profile / 性能诊断: web-vitals-lite");
+    expect(out).toContain("diagnostic-only");
+    // Allowlisted numeric metrics are shown; URL-bearing metrics are dropped.
+    expect(out).toContain("LayoutDuration");
+    expect(out).not.toContain("NavigationUrl");
+    expect(out).not.toContain("crux");
+  });
+
+  it("rejects an unknown performance profile at the CLI level with non-zero exit", async () => {
+    const c = capture();
+    const code = await browserCommand(["run", "--perf-profile", "lighthouse-full"], {
+      ...noWriteDeps(),
+      stdout: c.stdout,
+    });
+    expect(code).toBe(1);
+  });
+
+  it("--perf-fail degrades gracefully without failing the action", async () => {
+    const c = capture();
+    const code = await browserCommand(["run", "--perf-profile", "web-vitals-lite", "--perf-fail", "--json"], {
+      ...noWriteDeps(),
+      stdout: c.stdout,
+    });
+    expect(code).toBe(0);
+    const parsed = JSON.parse(c.read());
+    expect(parsed.result).toBe("pass");
+    expect(parsed.performanceSummary.degraded).toBe(true);
+    expect(parsed.performanceSummary.metrics).toEqual([]);
+  });
+
+  it("baseline unchanged: run without --perf-profile shows no perf section", async () => {
+    const c = capture();
+    const code = await browserCommand(["run", "--action", "snapshot"], {
+      ...noWriteDeps(),
+      stdout: c.stdout,
+    });
+    expect(code).toBe(0);
+    expect(c.read()).not.toContain("perf profile");
+  });
+
+  it("--json summary contains only numeric metrics (no external telemetry surface)", async () => {
+    const c = capture();
+    const code = await browserCommand(["run", "--perf-profile", "web-vitals-lite", "--json"], {
+      ...noWriteDeps(),
+      stdout: c.stdout,
+    });
+    expect(code).toBe(0);
+    const parsed = JSON.parse(c.read());
+    expect(parsed.performanceProfile).toBe("web-vitals-lite");
+    expect(parsed.performanceSummary.degraded).toBe(false);
+    for (const m of parsed.performanceSummary.metrics) {
+      expect(typeof m.value).toBe("number");
+      expect(m.name).not.toMatch(/https?:|\/\//);
+    }
+    // The whole serialized report carries no URL/trace from the summary.
+    expect(JSON.stringify(parsed.performanceSummary)).not.toContain("http");
+  });
+});

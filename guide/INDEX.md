@@ -9,6 +9,7 @@
 | AGENTS.md | Roll Project — Internal Conventions | convention | 2026-05-28 |
 | CONTRIBUTING.md | Contributing to Roll | convention | 2026-05-23 |
 | guide/en/ai-agents.md | Roll — AI Agent Support | guide | 2026-06-30 |
+| guide/en/browser-operations.md | Roll — Browser Operations (managed lane) | guide | 2026-07-15 |
 | guide/en/acceptance-evidence.md | Acceptance Evidence — roll attest / Evidence lifecycle | guide | 2026-07-02 |
 | guide/en/changelog.md | Roll — Changelog | guide | 2026-05-21 |
 | guide/en/configuration.md | Roll — Configuration | guide | 2026-07-02 |
@@ -39,6 +40,7 @@
 | guide/en/testing.md | Roll — Testing Workflow | guide | 2026-05-23 |
 | guide/en/testing/quality-rubric.md | Test Quality Rubric | guide | 2026-05-23 |
 | guide/zh/ai-agents.md | Roll — AI Agent 支持 | guide | 2026-06-30 |
+| guide/zh/browser-operations.md | Roll — 浏览器操作（受管通道） | guide | 2026-07-15 |
 | guide/zh/changelog.md | Roll — Changelog (中文) | guide | 2026-05-21 |
 | guide/zh/configuration.md | Roll — 配置 | guide | 2026-07-02 |
 | guide/zh/conventions.md | Roll — 约定与 AGENTS.md | guide | 2026-07-02 |

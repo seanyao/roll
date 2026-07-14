@@ -42,6 +42,7 @@ import { loopRecoverCommand } from "./loop-recover.js";
 import { loopPardonSkipListCommand } from "./loop-pardon-skip-list.js";
 import { loopEventsCommand } from "./loop-events.js";
 import { doctorCommand, languageAuditCommand, doctorPardonCommand } from "./doctor.js";
+import { browserCommand } from "./browser.js";
 import { dreamCommand } from "./dream.js";
 import { ideaCommand } from "./idea.js";
 import { indexCommand } from "./index-gen.js";
@@ -189,6 +190,12 @@ export function registerAll(): void {
     }
     return doctorCommand(args);
   }, { help: doctorUsage });
+  // US-BROW-003: `browser` — DevTools dependency preflight + browser doctor.
+  // setup --dry-run never writes; doctor reports managed/interactive/capture readiness.
+  registerPorted("browser", (args) => browserCommand(args), {
+    help:
+      "Usage: roll browser <setup|doctor>\n  setup --dry-run previews machine config + preflight; setup --confirm writes ~/.roll/browser-operations.yaml; doctor [--json] reports lane readiness.\n浏览器操作依赖预检与体检；setup --dry-run 只预览不写入，doctor 报告 managed/interactive/capture 就绪度。",
+  });
   // `attest`: the acceptance-evidence report (US-ATTEST-006) — v3-native, no
   // bash counterpart (additive; the evidence chain is new product surface).
   registerPorted("attest", attestCommand, { hidden: true });

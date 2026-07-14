@@ -1,0 +1,139 @@
+/**
+ * US-BROW-003 — BrowserEnvironmentReadiness aggregate.
+ *
+ * Pure verdict logic over dependency observations. It NEVER performs IO: probes
+ * live in packages/infra; this module only turns observations into an honest
+ * `ready | degraded | blocked` verdict per lane. The whole point is that an
+ * unavailable browser can never be interpreted as a passing check — a missing
+ * dependency degrades or blocks, and existing Playwright / Roll Capture paths
+ * stay usable.
+ *
+ * See .roll/features/browser-automation/managed-devtools-plan.md §5.0.
+ */
+import type {
+  BrowserDependencyObservation,
+  BrowserDependencyState,
+  BrowserEnvironmentObservations,
+  BrowserEnvironmentReadiness,
+  BrowserLaneReadiness,
+} from "@roll/spec";
+
+/** The exact, owner-approved managed DevTools MCP package. No range, no @latest.
+ *  The BrowserTransportRegistry (US-BROW-002) owns the runtime launch plan; this
+ *  constant is the identity the preflight and setup dry-run report against. */
+export const MANAGED_DEVTOOLS_PACKAGE = "chrome-devtools-mcp";
+export const MANAGED_DEVTOOLS_PACKAGE_VERSION = "1.5.0";
+/** Loopback-only remote debugging endpoint. Interactive lane connects here; it
+ *  is never opened automatically. */
+export const MANAGED_DEVTOOLS_REMOTE_DEBUG_HOST = "127.0.0.1";
+export const MANAGED_DEVTOOLS_REMOTE_DEBUG_PORT = 9222;
+
+function ready(lane: BrowserLaneReadiness["lane"], reason: string): BrowserLaneReadiness {
+  return { lane, verdict: "ready", reason, actions: [] };
+}
+function degraded(lane: BrowserLaneReadiness["lane"], reason: string, actions: string[]): BrowserLaneReadiness {
+  return { lane, verdict: "degraded", reason, actions };
+}
+function blocked(lane: BrowserLaneReadiness["lane"], reason: string, actions: string[]): BrowserLaneReadiness {
+  return { lane, verdict: "blocked", reason, actions };
+}
+
+function missing(states: Array<[string, BrowserDependencyState]>): string[] {
+  return states.filter(([, s]) => !s.present).map(([label]) => label);
+}
+
+function deriveManaged(obs: BrowserEnvironmentObservations): BrowserLaneReadiness {
+  // A binding mismatch is a hard configuration error: never guess a transport at
+  // run time — report blocked so the card's browser AC stays unproven.
+  if (!obs.transportBinding.present) {
+    return blocked(
+      "managed",
+      `transport binding missing — ${obs.transportBinding.detail}`,
+      ["align .roll/policy.yaml browser_operations.devtools_server with the registered logical key"],
+    );
+  }
+  const gaps = missing([
+    ["Node LTS", obs.node],
+    ["npx", obs.npx],
+    ["Google Chrome", obs.chrome],
+    [`${MANAGED_DEVTOOLS_PACKAGE}`, obs.devtoolsPackage],
+  ]);
+  if (gaps.length > 0) {
+    return degraded(
+      "managed",
+      `unavailable — ${gaps.join(", ")} not ready; existing Playwright and Roll Capture paths remain usable`,
+      ["roll browser setup --dry-run", "install the missing dependency, then re-run roll browser doctor"],
+    );
+  }
+  return ready("managed", "node / chrome / devtools package / profile cleanup preflight passed");
+}
+
+function deriveInteractive(obs: BrowserEnvironmentObservations): BrowserLaneReadiness {
+  const gaps = missing([
+    ["Node LTS", obs.node],
+    ["npx", obs.npx],
+    ["Google Chrome", obs.chrome],
+  ]);
+  if (gaps.length > 0) {
+    return degraded(
+      "interactive",
+      `unavailable — ${gaps.join(", ")} not ready; existing Playwright and Roll Capture paths remain usable`,
+      ["install the missing dependency, then re-run roll browser doctor"],
+    );
+  }
+  // Remote debugging is owner-controlled and must never be auto-enabled: an
+  // absent loopback endpoint is a hard blocked verdict, not a repair we run.
+  if (!obs.loopbackRemoteDebug.present) {
+    return blocked(
+      "interactive",
+      `owner Chrome remote debugging is not enabled — ${obs.loopbackRemoteDebug.detail}`,
+      [
+        `start Chrome with --remote-debugging-port=${MANAGED_DEVTOOLS_REMOTE_DEBUG_PORT} bound to ${MANAGED_DEVTOOLS_REMOTE_DEBUG_HOST} yourself (Roll never enables it)`,
+      ],
+    );
+  }
+  return ready("interactive", `owner Chrome reachable on ${MANAGED_DEVTOOLS_REMOTE_DEBUG_HOST}:${MANAGED_DEVTOOLS_REMOTE_DEBUG_PORT}`);
+}
+
+function deriveCapture(obs: BrowserEnvironmentObservations): BrowserLaneReadiness {
+  if (obs.capture.status === "available") {
+    return ready("capture", `Roll Capture.app and Screen Recording are available — ${obs.capture.detail}`);
+  }
+  // Capture is never a prerequisite for managed diagnostics; a non-available
+  // capture lane degrades honestly (visual AC will skip) but never blocks the
+  // browser environment as a whole.
+  return degraded("capture", obs.capture.detail, ["roll doctor --tools", "see Roll Capture.app setup guidance"]);
+}
+
+function toObservationList(obs: BrowserEnvironmentObservations): BrowserDependencyObservation[] {
+  const row = (
+    id: BrowserDependencyObservation["id"],
+    s: BrowserDependencyState,
+  ): BrowserDependencyObservation => (s.value === undefined
+    ? { id, present: s.present, detail: s.detail }
+    : { id, present: s.present, detail: s.detail, value: s.value });
+  return [
+    row("node", obs.node),
+    row("npx", obs.npx),
+    row("chrome", obs.chrome),
+    row("devtools_mcp", obs.devtoolsPackage),
+    row("loopback_remote_debug", obs.loopbackRemoteDebug),
+    row("transport_binding", obs.transportBinding),
+    {
+      id: "capture",
+      present: obs.capture.status === "available",
+      detail: obs.capture.detail,
+      value: obs.capture.status,
+    },
+  ];
+}
+
+/** Turn raw observations into the per-lane readiness aggregate. Pure. */
+export function deriveBrowserEnvironmentReadiness(obs: BrowserEnvironmentObservations): BrowserEnvironmentReadiness {
+  return {
+    managed: deriveManaged(obs),
+    interactive: deriveInteractive(obs),
+    capture: deriveCapture(obs),
+    observations: toObservationList(obs),
+  };
+}

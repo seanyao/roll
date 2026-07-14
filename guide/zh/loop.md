@@ -275,8 +275,10 @@ paused 状态时不建议直接启动：`PAUSE-<slug>` 标记仍会在 cycle 边
 预算与运行上限每次 `roll loop go` 都是显式的。`--budget`、`--max-cycles`、`--for`
 只对本次调用生效；省略某项即代表本轮不设该限制——Roll 绝不从上一次会话持久化的
 goal 静默沿用预算或上限，因此一条不带 flag 的 `roll loop go` 既不会被几天前设的
-上限封顶，也不会被它卡死。范围（`--epic`/`--cards`）与 `--review` 在省略时仍沿用，
-因为它们是 goal 的身份，而不是每次运行的安全旋钮。
+上限封顶，也不会被它卡死。范围（`--epic`/`--cards`）与 `--review` 只会在 goal 尚未
+结束时于省略 flag 后沿用。goal 已 `complete` 时，下一次 `roll loop go` 会将它归档到
+`.roll/loop/goal-archive/`、记录 `goal:archived`，并完全按本次 flags 新建 goal；不带
+scope flag 则覆盖全部合格 backlog 卡，绝不会静默沿用已完成 goal 的范围。
 
 `roll loop go` 的安全闸只在 cycle 边界生效。`--budget <usd>` 使用有效成本账本；
 达到预算时 goal 进入 `budget_limited`。未执行 agent 的 idle 或 aborted 周期记为

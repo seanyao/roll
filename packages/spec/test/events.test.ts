@@ -190,9 +190,11 @@ describe("parseEventLine (I8: readers skip bad lines, never crash)", () => {
   });
   it("types goal lifecycle events (US-GOAL-001)", () => {
     const created: RollEvent = { type: "goal:created", schema: "goal.v1", scope: { kind: "epic", epic: "goal-mode" }, status: "active", review: "auto", ts: 1 };
+    const archived: RollEvent = { type: "goal:archived", schema: "goal.v1", scope: { kind: "epic", epic: "goal-mode" }, status: "complete", archivePath: "goal-archive/goal-20260611080000.yaml", ts: 2 };
     const state: RollEvent = { type: "goal:state", schema: "goal.v1", from: "active", to: "paused", actor: "system", reason: "owner_pause", ts: 2 };
     expect(created.type).toBe("goal:created");
     expect(created.review).toBe("auto");
+    expect(archived.archivePath).toContain("goal-archive/");
     expect(state.to).toBe("paused");
   });
   it("types goal go session events (US-GOAL-002)", () => {

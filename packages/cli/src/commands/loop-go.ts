@@ -736,6 +736,35 @@ function readGoal(path: string): RollGoal | undefined {
   return parseGoalYaml(readFileSync(path, "utf8"));
 }
 
+/**
+ * Preserve a terminal goal before a new `go` invocation replaces goal.yaml.
+ * The archive name is stable for the same goal, so a crash after archiving but
+ * before replacing goal.yaml retries without duplicating the historical record.
+ */
+function archiveCompletedGoal(path: string, goal: RollGoal): string {
+  const archiveDir = join(dirname(path), "goal-archive");
+  mkdirSync(archiveDir, { recursive: true });
+  const rendered = renderGoalYaml(goal);
+  const stem = `goal-${goal.createdAt.replace(/[^0-9]/g, "") || "unknown"}`;
+  let candidate = join(archiveDir, `${stem}.yaml`);
+  let suffix = 1;
+  while (existsSync(candidate)) {
+    try {
+      if (readFileSync(candidate, "utf8") === rendered) return join("goal-archive", `${stem}${suffix === 1 ? "" : `-${suffix - 1}`}.yaml`);
+    } catch {
+      // Treat an unreadable candidate as occupied and preserve the completed
+      // goal under a distinct immutable archive name.
+    }
+    candidate = join(archiveDir, `${stem}-${suffix}.yaml`);
+    suffix += 1;
+  }
+  const archivePath = join("goal-archive", candidate.slice(archiveDir.length + 1));
+  const tmp = `${candidate}.tmp-${process.pid}`;
+  writeFileSync(tmp, rendered, "utf8");
+  renameSync(tmp, candidate);
+  return archivePath;
+}
+
 function createGoal(opts: GoOptions, at: string): RollGoal {
   return {
     schema: GOAL_SCHEMA_VERSION,
@@ -1820,8 +1849,25 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
         ts: startedSec,
       });
     } else if (existing.status === "complete") {
-      process.stderr.write("roll loop go: goal is already complete; refusing to restart it\n");
-      return 1;
+      const archivePath = archiveCompletedGoal(gPath, existing);
+      bus.appendEvent(evPath, {
+        type: "goal:archived",
+        schema: GOAL_SCHEMA_VERSION,
+        scope: existing.scope,
+        status: "complete",
+        archivePath,
+        ts: startedSec,
+      });
+      goal = createGoal(opts, startedAt);
+      writeGoal(gPath, goal);
+      bus.appendEvent(evPath, {
+        type: "goal:created",
+        schema: GOAL_SCHEMA_VERSION,
+        scope: goal.scope,
+        status: "active",
+        review: goal.review.mode,
+        ts: startedSec,
+      });
     } else if (existing.status === "active") {
       goal = existing;
     } else {

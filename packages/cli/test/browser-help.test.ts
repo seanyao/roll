@@ -63,6 +63,16 @@ describe("US-BROW-007 — documented `roll browser` surface", () => {
     expect(out).toMatch(/setup --confirm/);
   });
 
+  it("AC2: help states interactive lane does not support background scheduler, remote endpoint, cookie export, or automatic Chrome startup", async () => {
+    const c = capture();
+    await browserCommand(["--help"], { ...noWriteDeps(), stdout: c.stdout });
+    const out = c.read();
+    expect(out).toMatch(/No background scheduler/);
+    expect(out).toMatch(/remote endpoint/);
+    expect(out).toMatch(/cookie export/);
+    expect(out).toMatch(/automatic Chrome startup/);
+  });
+
   it("AC1: setup --dry-run previews machine config + preflight and writes nothing", async () => {
     const c = capture();
     const write = vi.fn();

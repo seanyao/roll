@@ -104,6 +104,7 @@ const USAGE =
   "     --json             Emit the machine-readable run report.\n" +
   "  interactive --story <US-ID> --origin <https-origin> --action <navigate|click|fill|press_key> [action flags]\n" +
   "     Requires an attached TTY and one owner approval. Connects only to an already-open loopback Chrome debug endpoint.\n" +
+  "     No background scheduler, remote endpoint, cookie export, or automatic Chrome startup is supported.\n" +
   "     --endpoint <http://127.0.0.1:9222> (default); navigate: --url; click: --selector; fill: --selector --value; press_key: --key.\n" +
   "  update [--check] [--json]   Check for DevTools transport update (pinned vs candidate).\n" +
   "  update --apply --confirm    Apply update after smoke checks + doctor.\n";

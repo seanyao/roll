@@ -772,3 +772,25 @@ gh issue create --title "Safari 上登录失败" --body "复现步骤: ..."
 这些控制只影响用户可见表面。Agent 契约、代码、git 元数据和 schema 保持英文；
 与 owner 的对话跟随当前任务里 owner 使用的语言。发版前可运行
 `roll doctor language` 审计文档、约定、skills 与生成表面的语言漂移。
+
+### C12. `roll browser interactive` 有什么限制？
+
+**短答：** 它是一个面向本地 Chrome 调试端点的前台、owner 运行、单次操作工具——
+不是后台自动化，也不是远程浏览器。
+
+**细节：** `roll browser interactive` 要求：
+
+- 已连接的 TTY 和每次操作的显式 owner 批准。
+- 你自己用 loopback 调试端口启动的 Chrome，例如 `127.0.0.1` 上的
+  `--remote-debugging-port=9222`。
+
+它**永远不会**：
+
+- 从后台调度器或 CI 作业中运行。
+- 连接远程或非 loopback 端点。
+- 导出 cookie、storage 或 network bodies。
+- 自动启动 Chrome。
+- 独自让 CI 通过——结果仅用于 **owner-run manual-attest**。
+
+租约最多 15 分钟，操作结束后立即释放。无人值守诊断请用受管通道
+（`roll browser run`）。

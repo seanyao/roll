@@ -4,4 +4,5 @@ export * from "./lease-lock.js";
 export * from "./ledger.js";
 export { deriveBrowserEnvironmentReadiness, MANAGED_DEVTOOLS_REMOTE_DEBUG_HOST, MANAGED_DEVTOOLS_REMOTE_DEBUG_PORT } from "./readiness.js";
 export * from "./redaction.js";
+export * from "./run-service.js";
 export * from "./transport.js";

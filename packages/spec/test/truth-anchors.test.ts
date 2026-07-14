@@ -34,7 +34,7 @@ const REQUIRED_FIELDS = [
 ] as const;
 
 const EXPECTED_AGGREGATES = {
-  story: ["story_delivery", "attest_evidence"],
+  story: ["story_delivery", "attest_evidence", "browser_run", "browser_lease", "browser_diagnostic", "browser_capture_link"],
   cycle: ["cycle_outcome", "pr_merge", "tcr_evidence", "usage_cost"],
   release: ["release_verdict", "release_waiver"],
   "view-meta": ["dossier_freshness", "index_freshness"],

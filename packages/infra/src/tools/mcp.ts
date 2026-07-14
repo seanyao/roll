@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { join } from "node:path";
-import type { ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
+import { BrowserTransportRegistry, isReservedBrowserTransport } from "@roll/core";
+import type { BrowserOperationEvent, ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
 import { mcpInputSchema, mcpOutputSchema } from "./schema-contracts.js";
 
 export interface McpInput {
@@ -28,6 +29,10 @@ export interface McpConnection {
 export interface McpToolOptions {
   projectRoot?: string;
   connect?: (config: McpServerConfig) => Promise<McpConnection>;
+  /** Browser Operations owns the reserved DevTools identity, never generic MCP. */
+  browserTransportRegistry?: BrowserTransportRegistry;
+  /** Caller-owned durable event writer for security-boundary denials. */
+  recordBrowserEvent?: (event: BrowserOperationEvent) => void;
 }
 
 const MCP_TOOL_ID = "mcp.call" as ToolDeclaration["id"];
@@ -51,11 +56,15 @@ export class McpTool {
 
   private readonly projectRoot: string;
   private readonly connect: (config: McpServerConfig) => Promise<McpConnection>;
+  private readonly browserTransportRegistry: BrowserTransportRegistry;
+  private readonly recordBrowserEvent: (event: BrowserOperationEvent) => void;
   private readonly connections = new Map<string, Promise<McpConnection>>();
 
   constructor(options: McpToolOptions = {}) {
     this.projectRoot = options.projectRoot ?? process.cwd();
     this.connect = options.connect ?? defaultConnect;
+    this.browserTransportRegistry = options.browserTransportRegistry ?? new BrowserTransportRegistry();
+    this.recordBrowserEvent = options.recordBrowserEvent ?? (() => undefined);
   }
 
   async init(_deps: ToolDeps): Promise<void> {
@@ -77,6 +86,12 @@ export class McpTool {
     const validation = validateInput(invocation.input);
     if (validation !== undefined) {
       return failure(invocation, startedAt, deps.now(), "invalid_input", validation, false);
+    }
+
+    if (isReservedBrowserTransport(invocation.input.serverName)) {
+      const event = this.browserTransportRegistry.denyGenericMcp(invocation.input.serverName, new Date(deps.now()).toISOString());
+      this.recordBrowserEvent(event);
+      return failure(invocation, startedAt, deps.now(), "policy_denied", event.reason.message, false, event.reason.detail);
     }
 
     const servers = await readServers(this.projectRoot, deps);

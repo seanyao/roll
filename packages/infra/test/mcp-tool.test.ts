@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { BrowserTransportRegistry } from "@roll/core";
 import type { MinimalFs, ToolDeps, ToolInvocation, ToolPolicy } from "@roll/spec";
 import { describe, expect, it } from "vitest";
 import {
@@ -175,6 +176,37 @@ describe("US-TOOL-010 McpTool", () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe("policy_denied");
+  });
+
+  it("fails closed before config resolution or spawn when generic MCP targets the reserved DevTools server", async () => {
+    const root = "/repo";
+    const registry = new BrowserTransportRegistry();
+    let connected = 0;
+    const tool = new McpTool({
+      projectRoot: root,
+      browserTransportRegistry: registry,
+      connect: async () => {
+        connected += 1;
+        return connection({ content: [] });
+      },
+    });
+
+    const result = await tool.execute(
+      invocation({ serverName: "chrome-devtools", toolName: "navigate", arguments: { url: "https://example.test" } }),
+      deps({
+        [join(root, ".roll", "mcp-servers.json")]: JSON.stringify({
+          servers: { "chrome-devtools": { command: "owner-controlled-command", args: ["--latest"] } },
+        }),
+      }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("policy_denied");
+      expect(result.error.message).toContain("reserved for Browser Operations");
+    }
+    expect(connected).toBe(0);
+    expect(registry.events()).toMatchObject([{ type: "browser:mcp-bypass-denied", reason: { code: "generic_mcp_bypass_denied" } }]);
   });
 
   it("validates arguments as a record", async () => {

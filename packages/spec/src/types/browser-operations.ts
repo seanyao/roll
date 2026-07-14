@@ -117,6 +117,10 @@ export interface BrowserLease {
   acquiredAt: string;
   expiresAt: string;
   holderPid: number;
+  /** Start-time identity used to distinguish PID reuse during recovery. */
+  holderProcessIdentity: string;
+  /** Hash only — raw holder tokens are never persisted. */
+  holderTokenHash: string;
   endpointHash: string;
   releasedAt?: string;
 }
@@ -259,15 +263,17 @@ export interface InteractiveLeaseRequest {
 // ── Event types (for event stream) ──────────────────────────────────────────
 
 export type BrowserOperationEvent =
-  | { type: "browser:operation-requested"; runId: string; ts: string; request: BrowserOperationRequest }
+  | { type: "browser:operation-requested"; runId: string; ts: string; request: BrowserOperationRequest; holderTokenHash: string }
   | { type: "browser:operation-authorized"; runId: string; ts: string; policyFingerprint: string }
   | { type: "browser:operation-denied"; runId: string; ts: string; reason: BrowserDenialReason }
   | { type: "browser:lease-granted"; leaseId: string; ts: string; storyId: string; origin: string; expiresAt: string }
+  | { type: "browser:lease-orphaned"; leaseId: string; ts: string; endpointHash: string; holderPid: number }
   | { type: "browser:lease-rejected"; ts: string; storyId: string; reason: BrowserDenialReason }
   | { type: "browser:lease-expired"; leaseId: string; ts: string }
   | { type: "browser:lease-released"; leaseId: string; ts: string }
   | { type: "browser:operation-started"; runId: string; ts: string }
   | { type: "browser:operation-step-finished"; runId: string; actionId: string; ts: string }
   | { type: "browser:diagnostic-recorded"; runId: string; ts: string; ref: DiagnosticArtifactRef }
+  | { type: "browser:diagnostic-dropped"; runId: string; ts: string; failure: "redaction_failed" }
   | { type: "browser:operation-finished"; runId: string; ts: string; result: BrowserActionResult }
   | { type: "browser:mcp-bypass-denied"; ts: string; reason: BrowserDenialReason };

@@ -140,6 +140,7 @@ export const TRUTH_FIELD_REGISTRY: readonly RegisteredField[] = [
   { field: "lane", surface: "browser", anchor: "browser_run", writer: "BrowserOperationService", kind: "authoritative" },
   { field: "requestedOrigin", surface: "browser", anchor: "browser_run", writer: "BrowserOperationService", kind: "authoritative" },
   { field: "policyFingerprint", surface: "browser", anchor: "browser_run", writer: "BrowserOperationService", kind: "authoritative" },
+  { field: "holderTokenHash", surface: "browser", anchor: "browser_run", writer: "BrowserOperationLedger / BrowserLeaseLock", kind: "authoritative" },
   { field: "state", surface: "browser", anchor: "browser_run", writer: "BrowserOperationService", kind: "authoritative" },
   { field: "result", surface: "browser", anchor: "browser_run", writer: "BrowserOperationService", kind: "authoritative" },
   { field: "leaseId", surface: "browser", anchor: "browser_lease", writer: "BrowserOperationService", kind: "authoritative" },
@@ -147,9 +148,15 @@ export const TRUTH_FIELD_REGISTRY: readonly RegisteredField[] = [
   { field: "expiresAt", surface: "browser", anchor: "browser_lease", writer: "BrowserOperationService", kind: "authoritative" },
   { field: "ownerApproval", surface: "browser", anchor: "browser_lease", writer: "BrowserOperationService", kind: "authoritative" },
   { field: "holderPid", surface: "browser", anchor: "browser_lease", writer: "BrowserOperationService", kind: "authoritative" },
+  { field: "holderProcessIdentity", surface: "browser", anchor: "browser_lease", writer: "BrowserLeaseLock", kind: "authoritative" },
+  { field: "heartbeatAt", surface: "browser", anchor: "browser_lease", writer: "BrowserLeaseLock", kind: "authoritative" },
   { field: "endpointHash", surface: "browser", anchor: "browser_lease", writer: "BrowserOperationService", kind: "authoritative" },
   { field: "artifactId", surface: "browser", anchor: "browser_diagnostic", writer: "BrowserOperationService via DevToolsAdapter", kind: "authoritative" },
   { field: "digest", surface: "browser", anchor: "browser_diagnostic", writer: "BrowserOperationService via DevToolsAdapter", kind: "authoritative" },
+  { field: "bytes", surface: "browser", anchor: "browser_diagnostic", writer: "BrowserOperationLedger", kind: "authoritative" },
+  { field: "untrusted", surface: "browser", anchor: "browser_diagnostic", writer: "BrowserOperationLedger", kind: "authoritative" },
+  { field: "diagnosticOnly", surface: "browser", anchor: "browser_diagnostic", writer: "BrowserOperationLedger", kind: "authoritative" },
+  { field: "failure", surface: "browser", anchor: "browser_diagnostic", writer: "BrowserOperationLedger", kind: "authoritative" },
   { field: "captureRequestId", surface: "browser", anchor: "browser_capture_link", writer: "CaptureBridge", kind: "authoritative" },
 ];
 

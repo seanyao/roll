@@ -294,4 +294,52 @@ describe("US-BROW-010 roll browser update", () => {
     expect(out).toContain("1.5.0");
     expect(out).toContain("1.6.0");
   });
+
+  it("E2E golden path: update --check produces the full user-facing output", async () => {
+    const c = capture();
+    const versionSource: VersionSource = () => "1.6.0";
+    const readFile = vi.fn(() => pinnedCfg);
+
+    const code = await browserCommand(["update", "--check"], {
+      ...noWriteDeps(),
+      readFile,
+      versionSource,
+      stdout: c.stdout,
+    });
+
+    expect(code).toBe(0);
+    const out = c.read();
+    // Verify the full user-facing output structure
+    expect(out).toMatch(/DevTools transport update check/);
+    expect(out).toMatch(/DevTools 传输更新检查/);
+    expect(out).toContain("pinned:    1.5.0");
+    expect(out).toContain("candidate: 1.6.0");
+    expect(out).toMatch(/Update available.*1\.5\.0.*1\.6\.0/);
+    expect(out).toMatch(/有可用更新.*1\.5\.0.*1\.6\.0/);
+    expect(out).toContain("roll browser update --apply --confirm");
+    // Must NOT contain "installing", "downloading", "wrote", or "package.json"
+    expect(out).not.toMatch(/installing|downloading/i);
+    expect(out).not.toContain("wrote");
+    expect(out).not.toContain("package.json");
+  });
+
+  it("E2E golden path: update --check with no update shows up-to-date message", async () => {
+    const c = capture();
+    const versionSource: VersionSource = () => NO_UPDATE_AVAILABLE;
+    const readFile = vi.fn(() => pinnedCfg);
+
+    const code = await browserCommand(["update", "--check"], {
+      ...noWriteDeps(),
+      readFile,
+      versionSource,
+      stdout: c.stdout,
+    });
+
+    expect(code).toBe(0);
+    const out = c.read();
+    expect(out).toContain("pinned:    1.5.0");
+    expect(out).toContain("candidate: (none)");
+    expect(out).toContain("Already up to date");
+    expect(out).toContain("已是最新版本");
+  });
 });

@@ -78,4 +78,28 @@ describe("US-BROW-005 — BrowserOperationLedger", () => {
 
     expect(result).toEqual({ kind: "in_progress" });
   });
+
+  it("writes classified diagnostic-drop and orphan-recovery audit events", () => {
+    const store = new FakeLedgerStore();
+    const ledger = new BrowserOperationLedger(store, () => "2026-07-14T00:00:00.000Z");
+
+    ledger.recordDiagnostic(
+      "/ledger/events.ndjson",
+      "run-1",
+      { artifactId: "diag-1", kind: "console-summary", text: "Authorization: Bearer secret" },
+      () => {
+        throw new Error("redactor failed");
+      },
+    );
+    ledger.recordLeaseOrphaned("/ledger/events.ndjson", {
+      leaseId: "lease-1",
+      endpointHash: "endpoint-a",
+      holderPid: 10,
+    });
+
+    expect(ledger.read("/ledger/events.ndjson")).toEqual([
+      { type: "browser:diagnostic-dropped", runId: "run-1", ts: "2026-07-14T00:00:00.000Z", failure: "redaction_failed" },
+      { type: "browser:lease-orphaned", leaseId: "lease-1", endpointHash: "endpoint-a", holderPid: 10, ts: "2026-07-14T00:00:00.000Z" },
+    ]);
+  });
 });

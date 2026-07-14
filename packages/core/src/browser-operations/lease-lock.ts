@@ -25,6 +25,7 @@ export interface BrowserLeaseLockStore {
   readText(path: string): string | undefined;
   /** Atomically claims an unchanged stale record and removes its live name. */
   claimStale(path: string, expected: string): boolean;
+  remove(path: string): void;
   /** Atomically replace an existing lock record after holder verification. */
   replace(path: string, text: string): void;
 }
@@ -68,6 +69,9 @@ export const nodeBrowserLeaseLockStore: BrowserLeaseLockStore = {
     } finally {
       rmSync(claim, { force: true });
     }
+  },
+  remove(path) {
+    rmSync(path, { force: true });
   },
   replace(path, text) {
     const tmp = `${path}.${process.pid}.tmp`;
@@ -128,7 +132,11 @@ export class BrowserLeaseLock {
       heartbeatAt: new Date(this.now()).toISOString(),
       ...(expiresAt === undefined ? {} : { expiresAt }),
     };
-    this.store.replace(path, encode(record));
+    // Heartbeats must never replace the exclusion inode: a concurrent release
+    // or dead-PID reclaim may unlink that inode after verifying it. Persist a
+    // token-scoped sidecar instead, so liveness updates cannot resurrect or
+    // delete another holder's lock.
+    this.store.replace(`${path}.${holderTokenHash}.heartbeat`, encode(record));
     return { kind: "renewed", record };
   }
 
@@ -136,7 +144,8 @@ export class BrowserLeaseLock {
     const current = parseRecord(this.store.readText(path));
     const holderTokenHash = createHash("sha256").update(holderToken, "utf8").digest("hex");
     if (current === undefined || current.holderTokenHash !== holderTokenHash) return false;
-    return this.store.claimStale(path, encode(current));
+    this.store.remove(path);
+    return true;
   }
 }
 

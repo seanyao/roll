@@ -153,7 +153,8 @@ describe("US-BROW-005 — BrowserLeaseLock", () => {
 
   it("updates heartbeat only for the token-hash holder", () => {
     let now = 0;
-    const locks = new BrowserLeaseLock(new FakeLockStore(), () => true, () => now);
+    const store = new FakeLockStore();
+    const locks = new BrowserLeaseLock(store, () => true, () => now);
     const acquired = locks.acquire({
       directory: "/locks",
       endpointHash: "endpoint-a",
@@ -170,5 +171,7 @@ describe("US-BROW-005 — BrowserLeaseLock", () => {
       kind: "renewed",
       record: { heartbeatAt: "1970-01-01T00:00:01.000Z", expiresAt: "1970-01-01T00:02:00.000Z" },
     });
+    expect(store.files.get(acquired.path)).toContain('"leaseId":"lease-a"');
+    expect([...store.files.keys()].some((path) => path.endsWith(".heartbeat"))).toBe(true);
   });
 });

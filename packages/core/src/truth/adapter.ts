@@ -24,7 +24,9 @@ import type { StoryDeliveryTruth } from "./query.js";
 import {
   TERMINAL_SCHEMA_EPOCH_SEC,
   type BrowserOperationEvent,
+  type BrowserOperationsTimeline,
   type BrowserOperationsTruth,
+  type BrowserTimelineRow,
   type CaptureBridgeLink,
   type TerminalOutcome,
 } from "@roll/spec";
@@ -297,6 +299,186 @@ export function browserOperationsTruth(facts: BrowserOperationsTruthFacts): Brow
     managed: managedTruth(facts),
     lease: leaseTruth(facts),
     capture: captureTruth(facts),
+    collectedAt: facts.collectedAt ?? new Date(facts.nowMs).toISOString(),
+  };
+}
+
+const TIMELINE_ABSENCE_KINDS = [
+  "operation-start",
+  "operation-finish",
+  "lease-grant",
+  "lease-expiry",
+  "lease-release",
+  "physical-capture",
+] as const satisfies readonly BrowserTimelineRow["kind"][];
+
+const TIMELINE_ABSENCE_REASONS: Record<(typeof TIMELINE_ABSENCE_KINDS)[number], string> = {
+  "operation-start": "no browser operation start fact",
+  "operation-finish": "no browser operation finish fact",
+  "lease-grant": "no owner lease grant fact",
+  "lease-expiry": "no owner lease expiry fact",
+  "lease-release": "no owner lease release fact",
+  "physical-capture": "no physical capture fact",
+};
+
+function scopedTimelineEvents(facts: BrowserOperationsTruthFacts): BrowserOperationEvent[] {
+  const runIds = requestedRunIds(facts);
+  const scoped: BrowserOperationEvent[] = [];
+  for (const event of facts.events) {
+    if (event.type === "browser:lease-granted" || event.type === "browser:lease-rejected") {
+      if (!matchesScope(event.storyId, facts.storyId)) continue;
+      scoped.push(event);
+      continue;
+    }
+    if (event.type === "browser:lease-expired" || event.type === "browser:lease-released" || event.type === "browser:lease-orphaned") {
+      // Lease terminal events carry leaseId only; include when story scope is unset
+      // or a lease-grant for the same lease already matched the story.
+      const grant = facts.events.find(
+        (candidate): candidate is Extract<BrowserOperationEvent, { type: "browser:lease-granted" }> =>
+          candidate.type === "browser:lease-granted" && candidate.leaseId === event.leaseId,
+      );
+      if (grant !== undefined && !matchesScope(grant.storyId, facts.storyId)) continue;
+      if (grant === undefined && facts.storyId !== undefined && facts.storyId !== "") continue;
+      scoped.push(event);
+      continue;
+    }
+    if (!("runId" in event)) continue;
+    if (runIds.size > 0) {
+      if (!runIds.has(event.runId)) continue;
+    } else if (facts.storyId !== undefined && facts.storyId !== "") {
+      continue;
+    }
+    scoped.push(event);
+  }
+  return scoped;
+}
+
+function presentTimelineRows(facts: BrowserOperationsTruthFacts): BrowserTimelineRow[] {
+  const rows: BrowserTimelineRow[] = [];
+  for (const event of scopedTimelineEvents(facts)) {
+    if (event.type === "browser:operation-started") {
+      rows.push({
+        kind: "operation-start",
+        presence: "present",
+        ts: event.ts,
+        label: "operation start",
+        runId: event.runId,
+      });
+      continue;
+    }
+    if (event.type === "browser:operation-finished") {
+      const diagnostic = event.result.diagnosticRefs[0];
+      rows.push({
+        kind: "operation-finish",
+        presence: "present",
+        ts: event.ts,
+        label: "operation finish",
+        detail: event.result.status,
+        runId: event.runId,
+        artifact:
+          diagnostic === undefined
+            ? undefined
+            : {
+                kind: "diagnostic",
+                id: diagnostic.artifactId,
+                label: diagnostic.kind,
+              },
+      });
+      continue;
+    }
+    if (event.type === "browser:lease-granted") {
+      rows.push({
+        kind: "lease-grant",
+        presence: "present",
+        ts: event.ts,
+        label: "lease grant",
+        detail: `expires ${event.expiresAt}`,
+        leaseId: event.leaseId,
+      });
+      continue;
+    }
+    if (event.type === "browser:lease-expired") {
+      rows.push({
+        kind: "lease-expiry",
+        presence: "present",
+        ts: event.ts,
+        label: "lease expiry",
+        leaseId: event.leaseId,
+      });
+      continue;
+    }
+    if (event.type === "browser:lease-released") {
+      rows.push({
+        kind: "lease-release",
+        presence: "present",
+        ts: event.ts,
+        label: "lease release",
+        leaseId: event.leaseId,
+      });
+    }
+  }
+
+  const scopedRunIds = facts.cycleId === undefined || facts.cycleId === "" ? undefined : requestedRunIds(facts);
+  for (const link of facts.captureLinks ?? []) {
+    if (!matchesScope(link.storyId, facts.storyId)) continue;
+    if (scopedRunIds !== undefined && !scopedRunIds.has(link.runId)) continue;
+    const status = link.captureResponse?.status;
+    const screenshotPath = link.captureResponse?.screenshotPath;
+    rows.push({
+      kind: "physical-capture",
+      presence: "present",
+      ts: link.linkedAt,
+      label: "physical capture",
+      detail: status === undefined
+        ? link.reason
+        : link.canSatisfyVisualAc
+          ? `${status}`
+          : `${status} — ${link.reason}`,
+      runId: link.runId,
+      artifact:
+        screenshotPath === undefined || screenshotPath === ""
+          ? {
+              kind: "physical-capture",
+              id: link.captureRequestId,
+              label: "capture",
+            }
+          : {
+              kind: "physical-capture",
+              id: screenshotPath,
+              label: "capture",
+            },
+    });
+  }
+
+  return rows.sort((a, b) => {
+    const at = a.ts ?? "";
+    const bt = b.ts ?? "";
+    if (at !== bt) return at < bt ? -1 : 1;
+    return a.kind.localeCompare(b.kind);
+  });
+}
+
+function timelineAbsences(present: readonly BrowserTimelineRow[]): BrowserTimelineRow[] {
+  const seen = new Set(present.map((row) => row.kind));
+  return TIMELINE_ABSENCE_KINDS.filter((kind) => !seen.has(kind)).map((kind) => ({
+    kind,
+    presence: "absent" as const,
+    label: kind.replaceAll("-", " "),
+    detail: TIMELINE_ABSENCE_REASONS[kind],
+  }));
+}
+
+/**
+ * Project a compact browser-operations timeline from declared facts only.
+ * Present rows keep declared timestamps and ordering; missing categories are
+ * reported as absences with reasons — never an invented stamp or verdict.
+ */
+export function browserOperationsTimeline(facts: BrowserOperationsTruthFacts): BrowserOperationsTimeline {
+  const rows = presentTimelineRows(facts);
+  return {
+    rows,
+    absences: timelineAbsences(rows),
+    hasFacts: rows.length > 0,
     collectedAt: facts.collectedAt ?? new Date(facts.nowMs).toISOString(),
   };
 }

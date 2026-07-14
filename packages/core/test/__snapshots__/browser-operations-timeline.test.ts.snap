@@ -1,0 +1,218 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`US-BROW-013 browserOperationsTimeline > capture-failed: records the physical-capture fact with failure detail, no invented pass 1`] = `
+{
+  "absences": [
+    {
+      "detail": "no owner lease grant fact",
+      "kind": "lease-grant",
+      "label": "lease grant",
+      "presence": "absent",
+    },
+    {
+      "detail": "no owner lease expiry fact",
+      "kind": "lease-expiry",
+      "label": "lease expiry",
+      "presence": "absent",
+    },
+    {
+      "detail": "no owner lease release fact",
+      "kind": "lease-release",
+      "label": "lease release",
+      "presence": "absent",
+    },
+  ],
+  "collectedAt": "2026-07-15T00:00:00.000Z",
+  "hasFacts": true,
+  "rows": [
+    {
+      "kind": "operation-start",
+      "label": "operation start",
+      "presence": "present",
+      "runId": "run-1",
+      "ts": "2026-07-15T00:00:01.000Z",
+    },
+    {
+      "artifact": {
+        "id": "diag-1",
+        "kind": "diagnostic",
+        "label": "console-summary",
+      },
+      "detail": "ok",
+      "kind": "operation-finish",
+      "label": "operation finish",
+      "presence": "present",
+      "runId": "run-1",
+      "ts": "2026-07-15T00:00:10.000Z",
+    },
+    {
+      "artifact": {
+        "id": "capture-1",
+        "kind": "physical-capture",
+        "label": "capture",
+      },
+      "detail": "failed — digest_mismatch",
+      "kind": "physical-capture",
+      "label": "physical capture",
+      "presence": "present",
+      "runId": "run-1",
+      "ts": "2026-07-15T00:00:12.000Z",
+    },
+  ],
+}
+`;
+
+exports[`US-BROW-013 browserOperationsTimeline > interactive: keeps lease grant → op → release ordering from declared stamps 1`] = `
+{
+  "absences": [
+    {
+      "detail": "no owner lease expiry fact",
+      "kind": "lease-expiry",
+      "label": "lease expiry",
+      "presence": "absent",
+    },
+    {
+      "detail": "no physical capture fact",
+      "kind": "physical-capture",
+      "label": "physical capture",
+      "presence": "absent",
+    },
+  ],
+  "collectedAt": "2026-07-15T00:00:00.000Z",
+  "hasFacts": true,
+  "rows": [
+    {
+      "detail": "expires 2026-07-15T00:15:00.000Z",
+      "kind": "lease-grant",
+      "label": "lease grant",
+      "leaseId": "lease-1",
+      "presence": "present",
+      "ts": "2026-07-15T00:00:00.000Z",
+    },
+    {
+      "kind": "operation-start",
+      "label": "operation start",
+      "presence": "present",
+      "runId": "run-interactive",
+      "ts": "2026-07-15T00:00:03.000Z",
+    },
+    {
+      "artifact": undefined,
+      "detail": "ok",
+      "kind": "operation-finish",
+      "label": "operation finish",
+      "presence": "present",
+      "runId": "run-interactive",
+      "ts": "2026-07-15T00:00:08.000Z",
+    },
+    {
+      "kind": "lease-release",
+      "label": "lease release",
+      "leaseId": "lease-1",
+      "presence": "present",
+      "ts": "2026-07-15T00:00:09.000Z",
+    },
+  ],
+}
+`;
+
+exports[`US-BROW-013 browserOperationsTimeline > managed-only: orders start/finish and reports lease/capture absences 1`] = `
+{
+  "absences": [
+    {
+      "detail": "no owner lease grant fact",
+      "kind": "lease-grant",
+      "label": "lease grant",
+      "presence": "absent",
+    },
+    {
+      "detail": "no owner lease expiry fact",
+      "kind": "lease-expiry",
+      "label": "lease expiry",
+      "presence": "absent",
+    },
+    {
+      "detail": "no owner lease release fact",
+      "kind": "lease-release",
+      "label": "lease release",
+      "presence": "absent",
+    },
+    {
+      "detail": "no physical capture fact",
+      "kind": "physical-capture",
+      "label": "physical capture",
+      "presence": "absent",
+    },
+  ],
+  "collectedAt": "2026-07-15T00:00:00.000Z",
+  "hasFacts": true,
+  "rows": [
+    {
+      "kind": "operation-start",
+      "label": "operation start",
+      "presence": "present",
+      "runId": "run-1",
+      "ts": "2026-07-15T00:00:01.000Z",
+    },
+    {
+      "artifact": {
+        "id": "diag-1",
+        "kind": "diagnostic",
+        "label": "console-summary",
+      },
+      "detail": "ok",
+      "kind": "operation-finish",
+      "label": "operation finish",
+      "presence": "present",
+      "runId": "run-1",
+      "ts": "2026-07-15T00:00:10.000Z",
+    },
+  ],
+}
+`;
+
+exports[`US-BROW-013 browserOperationsTimeline > no-fact: hasFacts is false and every category is an honest absence 1`] = `
+{
+  "absences": [
+    {
+      "detail": "no browser operation start fact",
+      "kind": "operation-start",
+      "label": "operation start",
+      "presence": "absent",
+    },
+    {
+      "detail": "no browser operation finish fact",
+      "kind": "operation-finish",
+      "label": "operation finish",
+      "presence": "absent",
+    },
+    {
+      "detail": "no owner lease grant fact",
+      "kind": "lease-grant",
+      "label": "lease grant",
+      "presence": "absent",
+    },
+    {
+      "detail": "no owner lease expiry fact",
+      "kind": "lease-expiry",
+      "label": "lease expiry",
+      "presence": "absent",
+    },
+    {
+      "detail": "no owner lease release fact",
+      "kind": "lease-release",
+      "label": "lease release",
+      "presence": "absent",
+    },
+    {
+      "detail": "no physical capture fact",
+      "kind": "physical-capture",
+      "label": "physical capture",
+      "presence": "absent",
+    },
+  ],
+  "collectedAt": "2026-07-15T00:00:00.000Z",
+  "hasFacts": false,
+  "rows": [],
+}
+`;

@@ -276,4 +276,84 @@ export type BrowserOperationEvent =
   | { type: "browser:diagnostic-recorded"; runId: string; ts: string; ref: DiagnosticArtifactRef }
   | { type: "browser:diagnostic-dropped"; runId: string; ts: string; failure: "redaction_failed" }
   | { type: "browser:operation-finished"; runId: string; ts: string; result: BrowserActionResult }
-  | { type: "browser:mcp-bypass-denied"; ts: string; reason: BrowserDenialReason };
+  | { type: "browser:mcp-bypass-denied"; ts: string; reason: BrowserDenialReason }
+  | {
+      type: "browser:environment-checked";
+      ts: string;
+      managed: BrowserLaneVerdict;
+      interactive: BrowserLaneVerdict;
+      capture: BrowserLaneVerdict;
+    };
+
+// ── US-BROW-003 — environment readiness ──────────────────────────────────────
+
+/**
+ * Per-lane readiness verdict. `blocked` is a hard, honest unavailable state that
+ * MUST NOT be interpreted as a passing browser check; `degraded` means the lane
+ * cannot run but existing Playwright / Roll Capture paths stay usable; `ready`
+ * means the lane's dependencies all passed a non-mutating preflight.
+ */
+export type BrowserLaneVerdict = "ready" | "degraded" | "blocked";
+
+/** The three independently-reported readiness lanes. */
+export type BrowserReadinessLane = "managed" | "interactive" | "capture";
+
+/**
+ * One dependency observation. Every field is non-sensitive: probes never open
+ * remote debugging, never install packages, and never write configuration.
+ */
+export interface BrowserDependencyObservation {
+  id:
+    | "node"
+    | "npx"
+    | "chrome"
+    | "devtools_mcp"
+    | "loopback_remote_debug"
+    | "transport_binding"
+    | "capture";
+  present: boolean;
+  detail: string;
+  /** Optional non-sensitive value (version string, path, endpoint). */
+  value?: string;
+}
+
+/** Capture readiness projected into the browser-operations vocabulary. */
+export type BrowserCaptureStatus = "available" | "degraded" | "skip";
+
+/** Raw, pre-verdict observations fed to the readiness aggregate. */
+export interface BrowserEnvironmentObservations {
+  node: BrowserDependencyState;
+  npx: BrowserDependencyState;
+  chrome: BrowserDependencyState;
+  devtoolsPackage: BrowserDependencyState;
+  loopbackRemoteDebug: BrowserDependencyState;
+  /** Whether the project policy devtools_server matches the registry logical key. */
+  transportBinding: BrowserDependencyState;
+  capture: { status: BrowserCaptureStatus; detail: string };
+}
+
+export interface BrowserDependencyState {
+  present: boolean;
+  detail: string;
+  value?: string;
+}
+
+export interface BrowserLaneReadiness {
+  lane: BrowserReadinessLane;
+  verdict: BrowserLaneVerdict;
+  reason: string;
+  /** Actionable, non-mutating repair guidance. Never an auto-run command. */
+  actions: string[];
+}
+
+/**
+ * BrowserEnvironmentReadiness aggregate — owns dependency observations and the
+ * ready | degraded | blocked verdict for each lane. Raising it emits
+ * browser:environment-checked.
+ */
+export interface BrowserEnvironmentReadiness {
+  managed: BrowserLaneReadiness;
+  interactive: BrowserLaneReadiness;
+  capture: BrowserLaneReadiness;
+  observations: BrowserDependencyObservation[];
+}

@@ -14,3 +14,4 @@ export * from "./capture-privacy.js";
 export * from "./tools/index.js";
 export * from "./playwright-pin.js";
 export * from "./browser-operations/devtools-transport.js";
+export * from "./browser-operations/environment-probe.js";

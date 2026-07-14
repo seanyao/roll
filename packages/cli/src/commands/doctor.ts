@@ -23,6 +23,7 @@ import { generateCatalog } from "./skills.js";
 import { isRollAuxiliarySkillTarget } from "./setup-shared.js";
 import { collectExternalTools, renderExternalToolDoctorSection, type ExternalToolState } from "../lib/external-tools.js";
 import { collectToolReadinessDoctorRows, renderToolReadinessDoctorSection } from "../lib/tool-readiness-doctor.js";
+import { collectBrowserEnvironmentReadiness, renderBrowserReadinessDoctorRow } from "../lib/browser-readiness-doctor.js";
 import { detectDesignHandoff, renderDesignNudge } from "../lib/onboard-nudge.js";
 import { collectLanguageDoctorFindings, renderLanguageDoctorSection } from "../lib/language-doctor.js";
 import { rebuildSkipStateFromEvidence, readRows, readEvents, runtimeDir as pardonRuntimeDir } from "../lib/pardon-skip-list.js";
@@ -73,6 +74,7 @@ function emit(line: string): void {
 
 interface DoctorDeps {
   externalTools?: () => readonly ExternalToolState[];
+  browserReadiness?: () => ReturnType<typeof collectBrowserEnvironmentReadiness>;
 }
 
 function terminalScreenRecordingPreflight(state: ExternalToolState | undefined): {
@@ -721,6 +723,11 @@ export function doctorCommand(args: string[], deps: DoctorDeps = {}): number {
   }
   for (const l of renderToolReadinessDoctorSection(collectToolReadinessDoctorRows(process.cwd()))) emit(l);
   for (const l of renderExternalToolDoctorSection(externalTools)) emit(l);
+
+  // US-BROW-003: managed / interactive / capture browser readiness — an honest
+  // ready|degraded|blocked verdict so an unavailable browser is never read as a pass.
+  const browserReadiness = deps.browserReadiness?.() ?? collectBrowserEnvironmentReadiness();
+  for (const l of renderBrowserReadinessDoctorRow(browserReadiness)) emit(l);
 
   if (toolsOnly) {
     // US-INIT-003c: `roll doctor --tools` prints a focused Terminal.app Screen

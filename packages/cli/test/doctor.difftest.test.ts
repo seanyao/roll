@@ -314,6 +314,18 @@ describe("frozen: roll doctor", () => {
           npx is not on PATH.
           fix: npm install -g npm
           impact: Headless browser diagnostic screenshots are unavailable; attest screenshot evidence still requires physical capture.
+
+      Browser operations readiness
+      浏览器操作就绪度
+
+        ~ managed: degraded — unavailable — Node LTS, npx, chrome-devtools-mcp not ready; existing Playwright and Roll Capture paths remain usable
+          fix: roll browser setup --dry-run
+          fix: install the missing dependency, then re-run roll browser doctor
+        ~ interactive: degraded — unavailable — Node LTS, npx not ready; existing Playwright and Roll Capture paths remain usable
+          fix: install the missing dependency, then re-run roll browser doctor
+        ~ capture: degraded — skipped — Roll Capture.app is a macOS-only physical screenshot host.
+          fix: roll doctor --tools
+          fix: see Roll Capture.app setup guidance
       ",
       }
     `);
@@ -420,6 +432,18 @@ describe("frozen: roll doctor", () => {
           npx is not on PATH.
           fix: npm install -g npm
           impact: Headless browser diagnostic screenshots are unavailable; attest screenshot evidence still requires physical capture.
+
+      Browser operations readiness
+      浏览器操作就绪度
+
+        ~ managed: degraded — unavailable — Node LTS, npx, chrome-devtools-mcp not ready; existing Playwright and Roll Capture paths remain usable
+          fix: roll browser setup --dry-run
+          fix: install the missing dependency, then re-run roll browser doctor
+        ~ interactive: degraded — unavailable — Node LTS, npx not ready; existing Playwright and Roll Capture paths remain usable
+          fix: install the missing dependency, then re-run roll browser doctor
+        ~ capture: degraded — skipped — Roll Capture.app is a macOS-only physical screenshot host.
+          fix: roll doctor --tools
+          fix: see Roll Capture.app setup guidance
       ",
       }
     `);
@@ -489,6 +513,18 @@ describe("frozen: roll doctor", () => {
           npx is not on PATH.
           fix: npm install -g npm
           impact: Headless browser diagnostic screenshots are unavailable; attest screenshot evidence still requires physical capture.
+
+      Browser operations readiness
+      浏览器操作就绪度
+
+        ~ managed: degraded — unavailable — Node LTS, npx, chrome-devtools-mcp not ready; existing Playwright and Roll Capture paths remain usable
+          fix: roll browser setup --dry-run
+          fix: install the missing dependency, then re-run roll browser doctor
+        ~ interactive: degraded — unavailable — Node LTS, npx not ready; existing Playwright and Roll Capture paths remain usable
+          fix: install the missing dependency, then re-run roll browser doctor
+        ~ capture: degraded — skipped — Roll Capture.app is a macOS-only physical screenshot host.
+          fix: roll doctor --tools
+          fix: see Roll Capture.app setup guidance
       ",
       }
     `);
@@ -557,6 +593,18 @@ describe("frozen: roll doctor", () => {
           npx is not on PATH.
           fix: npm install -g npm
           impact: Headless browser diagnostic screenshots are unavailable; attest screenshot evidence still requires physical capture.
+
+      Browser operations readiness
+      浏览器操作就绪度
+
+        ~ managed: degraded — unavailable — Node LTS, npx, chrome-devtools-mcp not ready; existing Playwright and Roll Capture paths remain usable
+          fix: roll browser setup --dry-run
+          fix: install the missing dependency, then re-run roll browser doctor
+        ~ interactive: degraded — unavailable — Node LTS, npx not ready; existing Playwright and Roll Capture paths remain usable
+          fix: install the missing dependency, then re-run roll browser doctor
+        ~ capture: degraded — skipped — Roll Capture.app is a macOS-only physical screenshot host.
+          fix: roll doctor --tools
+          fix: see Roll Capture.app setup guidance
       ",
       }
     `);
@@ -624,6 +672,18 @@ describe("frozen: roll doctor", () => {
           npx is not on PATH.
           fix: npm install -g npm
           impact: Headless browser diagnostic screenshots are unavailable; attest screenshot evidence still requires physical capture.
+
+      Browser operations readiness
+      浏览器操作就绪度
+
+        ~ managed: degraded — unavailable — Node LTS, npx, chrome-devtools-mcp not ready; existing Playwright and Roll Capture paths remain usable
+          fix: roll browser setup --dry-run
+          fix: install the missing dependency, then re-run roll browser doctor
+        ~ interactive: degraded — unavailable — Node LTS, npx not ready; existing Playwright and Roll Capture paths remain usable
+          fix: install the missing dependency, then re-run roll browser doctor
+        ~ capture: degraded — skipped — Roll Capture.app is a macOS-only physical screenshot host.
+          fix: roll doctor --tools
+          fix: see Roll Capture.app setup guidance
       ",
       }
     `);
@@ -690,6 +750,18 @@ describe("frozen: roll doctor", () => {
           npx is not on PATH.
           fix: npm install -g npm
           impact: Headless browser diagnostic screenshots are unavailable; attest screenshot evidence still requires physical capture.
+
+      Browser operations readiness
+      浏览器操作就绪度
+
+        ~ managed: degraded — unavailable — Node LTS, npx, chrome-devtools-mcp not ready; existing Playwright and Roll Capture paths remain usable
+          fix: roll browser setup --dry-run
+          fix: install the missing dependency, then re-run roll browser doctor
+        ~ interactive: degraded — unavailable — Node LTS, npx not ready; existing Playwright and Roll Capture paths remain usable
+          fix: install the missing dependency, then re-run roll browser doctor
+        ~ capture: degraded — skipped — Roll Capture.app is a macOS-only physical screenshot host.
+          fix: roll doctor --tools
+          fix: see Roll Capture.app setup guidance
       ",
       }
     `);
@@ -777,6 +849,18 @@ describe("frozen: roll doctor", () => {
           npx is not on PATH.
           fix: npm install -g npm
           impact: Headless browser diagnostic screenshots are unavailable; attest screenshot evidence still requires physical capture.
+
+      Browser operations readiness
+      浏览器操作就绪度
+
+        ~ managed: degraded — unavailable — Node LTS, npx, chrome-devtools-mcp not ready; existing Playwright and Roll Capture paths remain usable
+          fix: roll browser setup --dry-run
+          fix: install the missing dependency, then re-run roll browser doctor
+        ~ interactive: degraded — unavailable — Node LTS, npx not ready; existing Playwright and Roll Capture paths remain usable
+          fix: install the missing dependency, then re-run roll browser doctor
+        ~ capture: degraded — skipped — Roll Capture.app is a macOS-only physical screenshot host.
+          fix: roll doctor --tools
+          fix: see Roll Capture.app setup guidance
       ",
       }
     `);

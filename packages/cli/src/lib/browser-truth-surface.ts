@@ -34,18 +34,15 @@ export function renderBrowserTruthDoctorRow(truth: BrowserOperationsTruth): stri
   return lines;
 }
 
-/** Single-line summary for `roll supervisor next`. */
-export function renderBrowserTruthSupervisorLine(truth: BrowserOperationsTruth): string {
-  const parts = [
-    `managed:${truth.managed.status}`,
-    `interactive:${truth.lease.status}`,
-    `capture:${truth.capture.status}`,
-  ];
-  const degraded = parts.filter((p) => p.includes(":degraded") || p.includes(":expired") || p.includes(":unknown"));
-  if (degraded.length > 0) {
-    parts.push(`(${degraded.length} lane(s) not ready)`);
-  }
-  return `  browser readiness: ${parts.join(" ")}`;
+/** Per-lane block for `roll supervisor next` — shows each lane with status,
+ *  unavailable reason, and lease expiry per AC requirement. */
+export function renderBrowserTruthSupervisorLine(truth: BrowserOperationsTruth): string[] {
+  const lines = ["  browser readiness:"];
+  lines.push(`    ${marker(truth.managed.status)} managed: ${truth.managed.status}${truth.managed.unavailableReason ? ` — ${truth.managed.unavailableReason}` : ""}`);
+  const leaseLine = `    ${marker(truth.lease.status)} interactive: ${truth.lease.status}${truth.lease.unavailableReason ? ` — ${truth.lease.unavailableReason}` : ""}${truth.lease.expiresAt ? ` (expires ${truth.lease.expiresAt})` : ""}`;
+  lines.push(leaseLine);
+  lines.push(`    ${marker(truth.capture.status)} capture: ${truth.capture.status}${truth.capture.unavailableReason ? ` — ${truth.capture.unavailableReason}` : ""}`);
+  return lines;
 }
 
 /** Verbose three-lane block for `roll browser doctor` or dossier detail. */

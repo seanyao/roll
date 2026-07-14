@@ -1414,9 +1414,9 @@ export function supervisorCommand(args: string[]): number | Promise<number> {
         : state.next.kind === "run_card"
           ? mode.ownerAction
           : state.next.ownerAction;
-    const browserLine = renderBrowserTruthSupervisorLine(collectBrowserTruth({ projectPath }));
+    const browserLines = renderBrowserTruthSupervisorLine(collectBrowserTruth({ projectPath }));
     process.stdout.write(
-      `\n  Supervisor — next: ${n.storyId ?? "(nothing ready)"}\n  scope: ${state.scope.label}\n  remaining: ${remainingLine(input)}\n  cast: ${ctx.cast}\n  cast detail: ${ctx.castDetail}\n  gate: ${ctx.gate}\n  manual merge: ${ctx.manualMerge}\n  semantic ranking: ${ctx.pickRanking?.line ?? "none"}\n  .roll meta: ${ctx.rollMeta.state} — ${ctx.rollMeta.detail}\n  agent health: ${state.agentHealth.summary}\n${browserLine}\n  ${n.reason}\n  ${formatOperatingMode(mode)}\n  owner action: ${action}\n  scheduler: ${state.next.schedulerAction}\n\n`,
+      `\n  Supervisor — next: ${n.storyId ?? "(nothing ready)"}\n  scope: ${state.scope.label}\n  remaining: ${remainingLine(input)}\n  cast: ${ctx.cast}\n  cast detail: ${ctx.castDetail}\n  gate: ${ctx.gate}\n  manual merge: ${ctx.manualMerge}\n  semantic ranking: ${ctx.pickRanking?.line ?? "none"}\n  .roll meta: ${ctx.rollMeta.state} — ${ctx.rollMeta.detail}\n  agent health: ${state.agentHealth.summary}\n${browserLines.join("\n")}\n\n  ${n.reason}\n  ${formatOperatingMode(mode)}\n  owner action: ${action}\n  scheduler: ${state.next.schedulerAction}\n\n`,
     );
     return 0;
   }

@@ -170,10 +170,11 @@ function parseRecord(text: string | undefined): BrowserLeaseLockRecord | undefin
 }
 
 function isStale(record: BrowserLeaseLockRecord, now: number, alive: (pid: number) => boolean): boolean {
-  const expiry = Date.parse(record.expiresAt);
-  // A stale timestamp is diagnostic, not permission to delete a live holder's
-  // lock. Only a dead PID is reclaimable; a live holder must release or renew.
-  return (!Number.isFinite(expiry) || expiry <= now) && !alive(record.holderPid);
+  void now;
+  // Expiry bounds the holder's authority, but is never permission to delete a
+  // live holder's lock. A dead PID is reclaimable immediately; a live holder
+  // must release or renew without another process seizing its endpoint.
+  return !alive(record.holderPid);
 }
 
 function encode(record: BrowserLeaseLockRecord): string {

@@ -161,3 +161,21 @@ export class BrowserTransportVersion {
     return { kind: "applied", from, to: candidate };
   }
 }
+
+/** Known DevTools MCP version map. A version maps to its next known stable
+ *  release. This is the default, deterministic version source — it never
+ *  performs network I/O, never installs packages, and never writes config. */
+const KNOWN_DEVTOOLS_VERSIONS: Record<string, string> = {
+  "1.5.0": "1.6.0",
+};
+
+/** Returns a deterministic version source based on the currently pinned version.
+ *  If the pinned version has a known successor, the source returns it;
+ *  otherwise it returns NO_UPDATE_AVAILABLE. */
+export function pinnedDevToolsVersionSource(pinned: string): VersionSource {
+  const next = KNOWN_DEVTOOLS_VERSIONS[pinned];
+  if (next !== undefined) {
+    return () => next;
+  }
+  return () => NO_UPDATE_AVAILABLE;
+}

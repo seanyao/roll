@@ -204,9 +204,13 @@ describe("US-BROW-010 roll browser update", () => {
     expect(smokeRan).toBe(true);
     expect(writeFile).toHaveBeenCalledTimes(1);
     expect(writeFile.mock.calls[0]?.[1]).toContain("1.6.0");
-    expect(c.read()).toContain("applied");
-    expect(c.read()).toContain("1.6.0");
-    expect(c.read()).toContain("/tmp/roll-test/browser-operations.yaml");
+    const out = c.read();
+    expect(out).toContain("applied");
+    expect(out).toContain("1.6.0");
+    expect(out).toContain("/tmp/roll-test/browser-operations.yaml");
+    // AC3: smoke + contract checks plus browser doctor
+    expect(out).toContain("smoke check: passed");
+    expect(out).toContain("browser doctor");
   });
 
   it("update --apply --confirm keeps prior version when smoke check fails", async () => {
@@ -233,6 +237,8 @@ describe("US-BROW-010 roll browser update", () => {
     const out = c.read();
     expect(out).toContain("verification failed");
     expect(out).toContain("smoke check failed");
+    // AC3: doctor is still shown on verification failure for diagnostics
+    expect(out).toContain("browser doctor");
   });
 
   it("update --check --json reports machine-readable result", async () => {
@@ -341,5 +347,30 @@ describe("US-BROW-010 roll browser update", () => {
     expect(out).toContain("candidate: (none)");
     expect(out).toContain("Already up to date");
     expect(out).toContain("已是最新版本");
+  });
+
+  it("update --apply --confirm succeeds without injected smokeCheck (default smokeCheck works)", async () => {
+    const c = capture();
+    const versionSource: VersionSource = () => "1.6.0";
+    const readFile = vi.fn(() => pinnedCfg);
+    const writeFile = vi.fn();
+
+    // No smokeCheck injected — relies on defaultDeps() default
+    const code = await browserCommand(["update", "--apply", "--confirm"], {
+      configPath: () => "/tmp/roll-test/browser-operations.yaml",
+      readFile,
+      writeFile,
+      fileExists: () => true,
+      versionSource,
+      readiness: () => fixtureReadiness({}),
+      stdout: c.stdout,
+    });
+
+    expect(code).toBe(0);
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    const out = c.read();
+    expect(out).toContain("applied");
+    expect(out).toContain("smoke check: passed");
+    expect(out).toContain("browser doctor");
   });
 });

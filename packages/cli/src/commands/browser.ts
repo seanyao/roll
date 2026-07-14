@@ -58,6 +58,7 @@ function defaultDeps(): BrowserCommandDeps {
     },
     readFile: (path) => readFileSync(path, "utf8"),
     fileExists: (path) => existsSync(path),
+    smokeCheck: async () => true,
     stdout: (text) => process.stdout.write(text),
   };
 }
@@ -278,11 +279,15 @@ async function updateApplyCommand(args: string[], deps: BrowserCommandDeps): Pro
     return 1;
   }
 
+  // Run browser doctor alongside smoke/contract checks (US-BROW-010 AC3).
+  const doctorResult = readiness(deps);
+
   const result = await version.apply(candidate, deps.smokeCheck);
 
   if (result.kind === "applied") {
     const newCfg = updateProposedConfig(result.to);
     deps.writeFile(cfgPath, newCfg);
+    const doctorLines = renderBrowserDoctor(doctorResult);
     deps.stdout(
       [
         `Update applied: ${result.from} → ${result.to}`,
@@ -292,12 +297,17 @@ async function updateApplyCommand(args: string[], deps: BrowserCommandDeps): Pro
         `  smoke check: passed`,
         `  冒烟检查：通过`,
         "",
+        `  browser doctor:`,
+        `  浏览器体检：`,
+        ...doctorLines.map((l) => `    ${l}`),
+        "",
       ].join("\n") + "\n",
     );
     return 0;
   }
 
   if (result.kind === "verification_failed") {
+    const doctorLines = renderBrowserDoctor(doctorResult);
     deps.stdout(
       [
         `Update verification failed: ${result.from} → ${result.candidate}`,
@@ -307,6 +317,10 @@ async function updateApplyCommand(args: string[], deps: BrowserCommandDeps): Pro
         "",
         `  Prior version ${result.from} is kept intact.`,
         `  已保留原版本 ${result.from}。`,
+        "",
+        `  browser doctor:`,
+        `  浏览器体检：`,
+        ...doctorLines.map((l) => `    ${l}`),
         "",
       ].join("\n") + "\n",
     );

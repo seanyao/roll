@@ -17,6 +17,11 @@ export interface BrowserLeaseLockRecord {
   holderTokenHash: string;
   heartbeatAt: string;
   expiresAt: string;
+  /** US-BROW-008a — lease approval payload persisted alongside holder facts. */
+  storyId?: string;
+  origin?: string;
+  actionSummary?: string;
+  credentialExportDenied?: boolean;
 }
 
 export interface BrowserLeaseLockStore {
@@ -87,6 +92,11 @@ export interface AcquireBrowserLeaseLockInput {
   holderPid: number;
   holderToken: string;
   expiresAt: string;
+  /** US-BROW-008a — optional approval payload fields persisted for audit. */
+  storyId?: string;
+  origin?: string;
+  actionSummary?: string;
+  credentialExportDenied?: boolean;
 }
 
 export type BrowserLeaseLockAcquireResult =
@@ -146,6 +156,20 @@ export class BrowserLeaseLock {
     if (current === undefined || current.holderTokenHash !== holderTokenHash) return false;
     return this.store.claimStale(path, encode(current));
   }
+
+  /** Read the persisted lock record, if any. */
+  readRecord(path: string): BrowserLeaseLockRecord | undefined {
+    return parseRecord(this.store.readText(path));
+  }
+
+  /**
+   * Atomically remove a lock only if it still matches the expected record.
+   * Used by lease expiry / dead-holder recovery paths that do not hold the
+   * holder token. Returns true when this call removed the lock.
+   */
+  claim(path: string, expected: BrowserLeaseLockRecord): boolean {
+    return this.store.claimStale(path, encode(expected));
+  }
 }
 
 export function leaseLockPath(directory: string, endpointHash: string): string {
@@ -157,7 +181,7 @@ function toRecord(
   now: number,
   processIdentity: (pid: number) => string | undefined,
 ): BrowserLeaseLockRecord {
-  return {
+  const record: BrowserLeaseLockRecord = {
     leaseId: input.leaseId,
     endpointHash: input.endpointHash,
     holderPid: input.holderPid,
@@ -166,6 +190,11 @@ function toRecord(
     heartbeatAt: new Date(now).toISOString(),
     expiresAt: input.expiresAt,
   };
+  if (input.storyId !== undefined) record.storyId = input.storyId;
+  if (input.origin !== undefined) record.origin = input.origin;
+  if (input.actionSummary !== undefined) record.actionSummary = input.actionSummary;
+  if (input.credentialExportDenied !== undefined) record.credentialExportDenied = input.credentialExportDenied;
+  return record;
 }
 
 function parseRecord(text: string | undefined): BrowserLeaseLockRecord | undefined {
@@ -173,13 +202,17 @@ function parseRecord(text: string | undefined): BrowserLeaseLockRecord | undefin
   try {
     const value: unknown = JSON.parse(text);
     if (!isRecord(value)) return undefined;
-    const { leaseId, endpointHash, holderPid, holderProcessIdentity, holderTokenHash, heartbeatAt, expiresAt } = value;
+    const { leaseId, endpointHash, holderPid, holderProcessIdentity, holderTokenHash, heartbeatAt, expiresAt, storyId, origin, actionSummary, credentialExportDenied } = value;
     if (
       typeof leaseId !== "string" || typeof endpointHash !== "string" ||
       typeof holderPid !== "number" || !Number.isSafeInteger(holderPid) || typeof holderProcessIdentity !== "string" || typeof holderTokenHash !== "string" ||
       typeof heartbeatAt !== "string" || typeof expiresAt !== "string"
     ) return undefined;
-    return { leaseId, endpointHash, holderPid, holderProcessIdentity, holderTokenHash, heartbeatAt, expiresAt };
+    if (storyId !== undefined && typeof storyId !== "string") return undefined;
+    if (origin !== undefined && typeof origin !== "string") return undefined;
+    if (actionSummary !== undefined && typeof actionSummary !== "string") return undefined;
+    if (credentialExportDenied !== undefined && typeof credentialExportDenied !== "boolean") return undefined;
+    return { leaseId, endpointHash, holderPid, holderProcessIdentity, holderTokenHash, heartbeatAt, expiresAt, storyId, origin, actionSummary, credentialExportDenied };
   } catch {
     return undefined;
   }
@@ -210,7 +243,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function nodeProcessAlive(pid: number): boolean {
+export function nodeProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
@@ -219,7 +252,7 @@ function nodeProcessAlive(pid: number): boolean {
   }
 }
 
-function nodeProcessIdentity(pid: number): string | undefined {
+export function nodeProcessIdentity(pid: number): string | undefined {
   try {
     const startedAt = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8" }).trim();
     return startedAt === "" ? undefined : startedAt;

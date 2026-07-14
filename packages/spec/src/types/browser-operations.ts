@@ -194,6 +194,9 @@ export type BrowserDenialCode =
   | "interactive_no_lease"
   | "interactive_lease_expired"
   | "interactive_lease_origin_mismatch"
+  | "interactive_lease_no_tty"
+  | "interactive_lease_held"
+  | "interactive_lease_invalid_request"
   | "policy_disabled"
   | "policy_fingerprint_tamper"
   | "transport_binding_missing"
@@ -266,7 +269,7 @@ export type BrowserOperationEvent =
   | { type: "browser:operation-requested"; runId: string; ts: string; request: BrowserOperationRequest; holderTokenHash: string }
   | { type: "browser:operation-authorized"; runId: string; ts: string; policyFingerprint: string }
   | { type: "browser:operation-denied"; runId: string; ts: string; reason: BrowserDenialReason }
-  | { type: "browser:lease-granted"; leaseId: string; ts: string; storyId: string; origin: string; expiresAt: string }
+  | { type: "browser:lease-granted"; leaseId: string; ts: string; storyId: string; origin: string; actionSummary: string; expiresAt: string; credentialExportDenied: boolean }
   | { type: "browser:lease-orphaned"; leaseId: string; ts: string; endpointHash: string; holderPid: number }
   | { type: "browser:lease-rejected"; ts: string; storyId: string; reason: BrowserDenialReason }
   | { type: "browser:lease-expired"; leaseId: string; ts: string }

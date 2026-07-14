@@ -23,3 +23,4 @@ export * from "./types/delivery.js";
 export * from "./types/cycle-role-summary.js";
 export * from "./types/collab-view.js";
 export * from "./types/review-page.js";
+export * from "./types/browser-operations.js";

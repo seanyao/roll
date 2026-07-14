@@ -96,3 +96,4 @@ export * from "./truth/dossier-collect.js";
 export * from "./truth/dossier-ladder.js";
 export * from "./truth/collect-dossier-state.js";
 export * from "./tools/index.js";
+export * from "./browser-operations/index.js";

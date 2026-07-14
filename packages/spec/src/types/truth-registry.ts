@@ -21,7 +21,7 @@
 import { TRUTH_ANCHORS } from "./truth.js";
 
 /** Which persisted surface a field lives on. */
-export type TruthSurface = "runs" | "event:cycle:terminal" | "event:release:gate" | "event:release:waiver" | "goal" | "delivery";
+export type TruthSurface = "runs" | "event:cycle:terminal" | "event:release:gate" | "event:release:waiver" | "goal" | "delivery" | "browser";
 
 export interface RegisteredField {
   /** The literal key as persisted (e.g. "cost_usd"). */
@@ -130,6 +130,27 @@ export const TRUTH_FIELD_REGISTRY: readonly RegisteredField[] = [
   { field: "expiresSec", surface: "event:release:waiver", anchor: "release_waiver", writer: "(retired US-REL-007 — historical release:waiver events only; no writer remains)", kind: "authoritative" },
   { field: "operator", surface: "event:release:waiver", anchor: "release_waiver", writer: "(retired US-REL-007 — historical release:waiver events only; no writer remains)", kind: "authoritative" },
   { field: "ts", surface: "event:release:waiver", anchor: "release_waiver", writer: "(retired US-REL-007 — historical release:waiver events only; no writer remains)", kind: "authoritative" },
+
+  // ── Browser Operations (US-BROW-001) ───────────────────────────────────
+  { field: "runId", surface: "browser", anchor: "browser_run", writer: "BrowserOperationService", kind: "authoritative" },
+  { field: "idempotencyKey", surface: "browser", anchor: "browser_run", writer: "BrowserOperationService", kind: "authoritative" },
+  { field: "storyId", surface: "browser", anchor: "browser_run", writer: "BrowserOperationService", kind: "authoritative" },
+  { field: "cycleId", surface: "browser", anchor: "browser_run", writer: "BrowserOperationService", kind: "authoritative" },
+  { field: "caller", surface: "browser", anchor: "browser_run", writer: "BrowserOperationService", kind: "authoritative" },
+  { field: "lane", surface: "browser", anchor: "browser_run", writer: "BrowserOperationService", kind: "authoritative" },
+  { field: "requestedOrigin", surface: "browser", anchor: "browser_run", writer: "BrowserOperationService", kind: "authoritative" },
+  { field: "policyFingerprint", surface: "browser", anchor: "browser_run", writer: "BrowserOperationService", kind: "authoritative" },
+  { field: "state", surface: "browser", anchor: "browser_run", writer: "BrowserOperationService", kind: "authoritative" },
+  { field: "result", surface: "browser", anchor: "browser_run", writer: "BrowserOperationService", kind: "authoritative" },
+  { field: "leaseId", surface: "browser", anchor: "browser_lease", writer: "BrowserOperationService", kind: "authoritative" },
+  { field: "origin", surface: "browser", anchor: "browser_lease", writer: "BrowserOperationService", kind: "authoritative" },
+  { field: "expiresAt", surface: "browser", anchor: "browser_lease", writer: "BrowserOperationService", kind: "authoritative" },
+  { field: "ownerApproval", surface: "browser", anchor: "browser_lease", writer: "BrowserOperationService", kind: "authoritative" },
+  { field: "holderPid", surface: "browser", anchor: "browser_lease", writer: "BrowserOperationService", kind: "authoritative" },
+  { field: "endpointHash", surface: "browser", anchor: "browser_lease", writer: "BrowserOperationService", kind: "authoritative" },
+  { field: "artifactId", surface: "browser", anchor: "browser_diagnostic", writer: "BrowserOperationService via DevToolsAdapter", kind: "authoritative" },
+  { field: "digest", surface: "browser", anchor: "browser_diagnostic", writer: "BrowserOperationService via DevToolsAdapter", kind: "authoritative" },
+  { field: "captureRequestId", surface: "browser", anchor: "browser_capture_link", writer: "CaptureBridge", kind: "authoritative" },
 ];
 
 /** Pre-guardrail history, listed not judged (AC: grandfather with a clear list):

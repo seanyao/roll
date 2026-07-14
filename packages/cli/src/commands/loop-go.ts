@@ -441,6 +441,16 @@ function parseOptions(args: string[]): GoOptions {
       attach = true;
       continue;
     }
+    // FIX-1253: an explicit reset to the full backlog. Scope is the goal's
+    // identity and a flagless go inherits it, so once a cards/epic goal exists
+    // there was no sanctioned way back to "all". `--all` marks the scope as
+    // specified-this-run so applyRunOptions overwrites the persisted narrow
+    // scope instead of carrying it over.
+    if (arg === "--all") {
+      scope = { kind: "all" };
+      scopeSpecified = true;
+      continue;
+    }
     if (arg === "--epic") {
       const epic = args[i + 1]?.trim() ?? "";
       if (epic !== "") {
@@ -522,13 +532,14 @@ function hasHelpArg(args: readonly string[]): boolean {
 
 function loopGoHelp(): string {
   return [
-    "Usage: roll loop go [--epic <name>|--cards <ids>] [--for <duration>] [--max-cycles <n>] [--review <auto|hetero|self|off>] [--attach] [--no-tmux]",
+    "Usage: roll loop go [--epic <name>|--cards <ids>|--all] [--for <duration>] [--max-cycles <n>] [--review <auto|hetero|self|off>] [--attach] [--no-tmux]",
     "  Chain goal-mode cycles until the scoped backlog is complete, paused, or capped.",
     "  按 goal 范围连续执行 cycle，直到完成、暂停或达到上限。",
     "",
     "Options:",
     "  --epic <name>       Limit the goal to one epic.",
     "  --cards <ids>       Limit the goal to comma/space separated card IDs.",
+    "  --all               Reset the goal scope to the full Todo backlog (undo a prior --epic/--cards goal).",
     "  --for <duration>    Stop after the current cycle once the wall-clock box is reached (default unit: minutes).",
     "  --max-cycles <n>    Stop after n cycles in this go session.",
     "  --review <mode>     Final review policy before completion: auto, hetero, self, or off.",
@@ -540,6 +551,8 @@ function loopGoHelp(): string {
     "  --max-cycles / --for 仅对本次 go 生效；省略即本轮不设限，绝不沿用上次会话的上限。",
     "  Scope (--epic/--cards) and --review still persist when unspecified — they are the goal's identity, not a per-run safety knob.",
     "  范围 (--epic/--cards) 与 --review 省略时仍沿用——它们是 goal 的身份，不是每次的安全旋钮。",
+    "  The startup banner shows the EFFECTIVE scope; an inherited scope is flagged so a flagless go can never silently narrow. Pass --all to reset to the full backlog.",
+    "  启动横幅显示生效的 scope；沿用的 scope 会被标注，flagless go 绝不静默收窄。用 --all 重置回全量。",
     "",
     "Progress guardrails (the loop stops on NO PROGRESS, not on cost):",
     "  productivity floor  A cycle whose agent EXECUTED but produced 0 commits and no delivery is a `gave_up` terminal — alerted on the first occurrence (no streak).",
@@ -1739,21 +1752,62 @@ function describeScope(scope: GoalScope): string {
   return "all Todo backlog cards";
 }
 
+/** The scope a `go` invocation will actually run, plus whether it was
+ * inherited from a live persisted goal rather than set by this run's flags. */
+interface EffectiveScope {
+  scope: GoalScope;
+  inherited: boolean;
+}
+
+/**
+ * FIX-1253: resolve the scope the worker will actually persist, mirroring the
+ * goal resolution in {@link runGoWorker}. A flagless `go` inherits a LIVE goal's
+ * persisted scope (scope is the goal's identity — FIX-279), so the startup
+ * banner must show THAT, not the parsed default of "all". Without this the
+ * banner printed `all Todo backlog cards` while the loop silently ran a stale
+ * `cards:[…]` goal — the owner thought a full sweep was running when nothing
+ * new was touched. A fresh or completed(-then-archived) goal starts from
+ * opts.scope, so only a non-terminal goal's scope carries over.
+ */
+function resolveEffectiveScope(projectPath: string, opts: GoOptions): EffectiveScope {
+  if (opts.scopeSpecified) return { scope: opts.scope, inherited: false };
+  const existing = readGoal(goalPath(projectPath));
+  if (existing === undefined || existing.status === "complete") {
+    return { scope: opts.scope, inherited: false };
+  }
+  // Carried over from the live goal. Flag it (so the owner sees a narrowing)
+  // only when the inherited scope is not already the full backlog — inheriting
+  // "all" is the unsurprising default and needs no callout.
+  return { scope: existing.scope, inherited: existing.scope.kind !== "all" };
+}
+
 /**
  * FIX-289 (AC1): a clear, multi-line startup confirmation — the session name,
  * the scope, that the first cycle is now running, and the read-only way to
  * observe it. Replaces the vague one-liner that left no clue what was happening.
+ *
+ * FIX-1253: `scope` is the EFFECTIVE scope (see {@link resolveEffectiveScope}).
+ * When it was inherited from an existing goal the line is annotated with the
+ * source and the way to change it, so a flagless go can never silently narrow.
  */
-function goStartupFeedback(slug: string, scope: GoalScope): string {
+function goStartupFeedback(slug: string, effective: EffectiveScope): string {
   const session = goSessionName(slug);
+  const { scope, inherited } = effective;
+  const scopeEn = inherited
+    ? `${describeScope(scope)} (inherited from existing goal; pass --cards/--epic/--all to change)`
+    : describeScope(scope);
+  const scopeZh = inherited
+    ? `${describeScope(scope)} (沿用现有 goal；用 --cards/--epic/--all 更改)`
+    : describeScope(scope);
   return [
     `Goal go session started: ${session}`,
-    `  scope:   ${describeScope(scope)}`,
+    `  scope:   ${scopeEn}`,
     "  cycles:  first cycle is running now; cycles chain until the scope is complete, paused, or capped.",
     `  observe: tmux attach -t ${session}  (read-only watch window; the 'go' window is the worker — do not Ctrl-C it)`,
     `           or follow inline:  roll loop go --attach`,
     "",
     `goal 连跑会话已启动: ${session}`,
+    `  scope:   ${scopeZh}`,
     "  第一个 cycle 正在运行；会持续连跑直到范围完成、暂停或达上限。",
     `  观察 (只读): tmux attach -t ${session}  或  roll loop go --attach`,
     "",
@@ -1770,7 +1824,7 @@ export async function loopGoCommand(args: string[], deps: LoopGoDeps = realDeps(
   if (!opts.worker && !opts.noTmux && deps.hasTmux()) {
     const started = deps.startTmux({ projectPath: id.path, slug: id.slug, args, rollBin: rollBin() });
     if (started) {
-      process.stdout.write(goStartupFeedback(id.slug, opts.scope));
+      process.stdout.write(goStartupFeedback(id.slug, resolveEffectiveScope(id.path, opts)));
       // FIX-289 (AC3): --attach follows the read-only live feed in the
       // foreground. Ctrl-C there only stops this view; the cycle keeps running
       // in its detached tmux window.
@@ -1877,6 +1931,15 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
     }
     goal = applyRunOptions(goal, opts, startedAt);
     writeGoal(gPath, goal);
+    // FIX-1253: on a direct (non-tmux) run there is no parent to print the
+    // startup banner, so emit it here from the RESOLVED goal — the true
+    // effective scope, flagged when inherited. (--worker runs inside the tmux
+    // window whose parent already printed the banner, so skip it there.)
+    if (!opts.worker) {
+      const inherited =
+        !opts.scopeSpecified && existing !== undefined && existing.status !== "complete" && goal.scope.kind !== "all";
+      process.stdout.write(goStartupFeedback(id.slug, { scope: goal.scope, inherited }));
+    }
     // Hook 2: resume the persisted no-progress accounting so an unmergeable card
     // that idled in a PRIOR session keeps accumulating toward the breaker.
     progress = progressFromGoal(goal);

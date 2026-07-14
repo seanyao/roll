@@ -17,6 +17,16 @@ describe("US-TRUTH-006 AC1/AC4 — registry hygiene", () => {
     expect(registryProblems()).toEqual([]);
   });
 
+  it("US-BROW-005 registers ledger lock, idempotency, and untrusted diagnostic fields", () => {
+    const keys = [
+      "runId", "idempotencyKey", "holderTokenHash", "state", "result",
+      "holderPid", "heartbeatAt", "endpointHash", "artifactId", "bytes",
+      "untrusted", "diagnosticOnly", "failure",
+    ];
+    const missing = unregisteredFields("browser", keys);
+    expect(missing, registrationHint("browser", missing)).toEqual([]);
+  });
+
   it("the grandfather list is explicit and short — history is listed, not hidden", () => {
     expect(GRANDFATHERED_FIELDS.length).toBeLessThanOrEqual(8);
     expect(GRANDFATHERED_FIELDS).toContain("project"); // the v2-era column

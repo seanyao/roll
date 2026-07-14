@@ -138,10 +138,6 @@ describe("roll agent write surface (v4)", () => {
           file: .roll/agents.yaml
           status: missing
 
-        Resolved roles
-
-          no roll-agents/v1 scope files to resolve
-
         Agent pool
 
           agent       status        note
@@ -161,7 +157,7 @@ describe("roll agent write surface (v4)", () => {
     `);
   });
 
-  it("bare view renders scoped machine/project roles and resolved story bindings", () => {
+  it("bare view renders effective project capability without statically resolving roles", () => {
     const r = run([], {
       installed: ["codex", "kimi", "reasonix"],
       before: (cwd) => {
@@ -200,6 +196,10 @@ defaults:
         require: [evaluate]
         avoid: [execute]
         strategy: least-recent
+rigs:
+  builder:
+    agent: kimi
+    model: kimi-k2
 `, "utf8");
       },
     });
@@ -221,12 +221,9 @@ defaults:
           status: roll-agents/v1
           agents: -
           models: -
-
-        Resolved roles
-
-          supervise        codex  via=fixed/fixed  source=<ROLL_HOME>/agents.yaml:roles.supervise trace=inherit:.roll/agents.yaml:roles.supervise -> resolve:<ROLL_HOME>/agents.yaml:roles.supervise
-          story.execute    kimi  via=select/first-available  source=.roll/agents.yaml:defaults.story.roles.execute pool=[kimi, codex] trace=select:.roll/agents.yaml:defaults.story.roles.execute
-          story.evaluate   reasonix  via=select/least-recent  source=.roll/agents.yaml:defaults.story.roles.evaluate pool=[reasonix, codex] trace=select:.roll/agents.yaml:defaults.story.roles.evaluate
+          effective agents: codex, kimi, reasonix
+          effective models: kimi-k2
+          route models: kimi=kimi-k2
 
         Agent pool
 
@@ -247,7 +244,30 @@ defaults:
     `);
   });
 
-  it("bare view demotes migrated legacy inputs to Legacy compatibility", () => {
+  it("shows only project declarations when the project does not inherit the machine scope", () => {
+    const r = run([], {
+      before: (cwd) => {
+        mkdirSync(rollHome(cwd), { recursive: true });
+        writeFileSync(join(rollHome(cwd), "agents.yaml"), `schema: roll-agents/v1
+scope: machine
+agents:
+  codex:
+    capabilities: [supervise]
+`, "utf8");
+        mkdirSync(join(cwd, ".roll"), { recursive: true });
+        writeFileSync(join(cwd, ".roll", "agents.yaml"), `schema: roll-agents/v1
+scope: project
+agents:
+  pi:
+    capabilities: [execute]
+`, "utf8");
+      },
+    });
+    expect(scrubAgentView(r.stdout, r.cwd)).toContain("effective agents: pi");
+    expect(scrubAgentView(r.stdout, r.cwd)).not.toContain("effective agents: codex");
+  });
+
+  it("bare view directs legacy project config to migration without reading other legacy inputs", () => {
     const r = run([], {
       before: (cwd) => {
         seedRoutes(cwd, { default: "pi", hard: "kimi" });
@@ -270,10 +290,6 @@ defaults:
           file: .roll/agents.yaml
           status: legacy config (run \`roll agent migrate\` to convert)
 
-        Resolved roles
-
-          no roll-agents/v1 scope files to resolve
-
         Agent pool
 
           agent       status        note
@@ -284,13 +300,6 @@ defaults:
           agy         not found     runtime auth/network/account checked at spawn
           reasonix    not found     runtime auth/network/account checked at spawn
           cursor      not found     runtime auth/network/account checked at spawn
-
-        Legacy compatibility
-
-          v3 route slots in .roll/agents.yaml: default=pi, hard=kimi
-          .roll/local.yaml agent: claude
-          .roll/pairing.yaml: legacy evaluator pool reasonix
-          migration: roll agent migrate [--dry-run]
 
         Role bindings are authored in ~/.roll/agents.yaml and .roll/agents.yaml.
         roll agent migrate [--dry-run]  — convert legacy defaults/routes/pairing to roll-agents/v1
@@ -327,10 +336,6 @@ roles:
           file: .roll/agents.yaml
           status: invalid roll-agents/v1
           error: roles.execute: unknown agent 'openclaw'
-
-        Resolved roles
-
-          no roll-agents/v1 scope files to resolve
 
         Agent pool
 

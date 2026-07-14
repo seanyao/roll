@@ -809,8 +809,7 @@ describe("FIX-216 — auto-PAUSE on consecutive failures", () => {
   });
 });
 
-describe("FIX-223 — loop agent selection (tier routing vs local.yaml collapse)", () => {
-  /** A project with both local.yaml `agent:` and per-tier agents.yaml. */
+describe("loop agent selection — scoped configuration only", () => {
   function project(files: Record<string, string>): string {
     const p = tmp("route");
     mkdirSync(join(p, ".roll"), { recursive: true });
@@ -820,20 +819,17 @@ describe("FIX-223 — loop agent selection (tier routing vs local.yaml collapse)
 
   const AGENTS_YAML = 'schema: v3\neasy: { agent: pi }\ndefault: { agent: pi }\nhard: { agent: claude }\nfallback: { agent: kimi }\n';
 
-  it("agents.yaml tier slots win — local.yaml `agent:` must NOT collapse tiers", () => {
+  it("rejects v3 route slots instead of using them at runtime", () => {
     const p = project({ "local.yaml": "agent: pi\n", "agents.yaml": AGENTS_YAML });
-    const deps = buildLoopRouteDeps(p);
-    expect(resolveRoute("hard", deps).agent).toBe("claude");
-    expect(resolveRoute("easy", deps).agent).toBe("pi");
-    expect(resolveRoute("default", deps).agent).toBe("pi");
+    expect(() => resolveRoute("hard", buildLoopRouteDeps(p))).toThrow("roll agent migrate");
   });
 
-  it("ROLL_LOOP_AGENT is routing output, never a selection input", () => {
+  it("does not let ROLL_LOOP_AGENT revive a legacy configuration", () => {
     const p = project({ "local.yaml": "agent: pi\n", "agents.yaml": AGENTS_YAML });
     const prev = process.env["ROLL_LOOP_AGENT"];
     process.env["ROLL_LOOP_AGENT"] = "deepseek";
     try {
-      expect(resolveRoute("hard", buildLoopRouteDeps(p)).agent).toBe("claude");
+      expect(() => resolveRoute("hard", buildLoopRouteDeps(p))).toThrow("roll agent migrate");
     } finally {
       if (prev === undefined) delete process.env["ROLL_LOOP_AGENT"];
       else process.env["ROLL_LOOP_AGENT"] = prev;
@@ -843,6 +839,7 @@ describe("FIX-223 — loop agent selection (tier routing vs local.yaml collapse)
   it("FIX-1249: roll-agents/v1 rigs+routing drives the tier's agent AND model", () => {
     const V1_YAML = [
       "schema: roll-agents/v1",
+      "scope: project",
       "rigs:",
       "  reasonix-pro:",
       "    agent: reasonix",
@@ -869,17 +866,9 @@ describe("FIX-223 — loop agent selection (tier routing vs local.yaml collapse)
     expect(resolveRoute("fallback", deps).model).toBeUndefined();
   });
 
-  it("empty tier slot falls to the default slot", () => {
+  it("rejects a v3 default slot rather than treating it as a fallback", () => {
     const p = project({ "agents.yaml": "schema: v3\ndefault: { agent: kimi }\n" });
-    const d = resolveRoute("hard", buildLoopRouteDeps(p));
-    expect(d.agent).toBe("kimi");
-  });
-
-  it("no agents.yaml → local.yaml single-agent default (with router WARN)", () => {
-    const p = project({ "local.yaml": "agent: pi\n" });
-    const d = resolveRoute("hard", buildLoopRouteDeps(p));
-    expect(d.agent).toBe("pi");
-    expect(d.warning).toBeTruthy();
+    expect(() => resolveRoute("hard", buildLoopRouteDeps(p))).toThrow("roll agent migrate");
   });
 
   it("installed-agent scan actually probes PATH (missing binaries are skipped)", () => {

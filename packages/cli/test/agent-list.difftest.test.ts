@@ -133,18 +133,18 @@ describe("frozen: roll agent list render", () => {
     `);
   });
 
-  it("project agent pref moves the (current) marker", () => {
+  it("ignores the retired local agent preference", () => {
     mkdirSync(join(proj, ".roll"), { recursive: true });
     writeFileSync(join(proj, ".roll", "local.yaml"), 'agent: "kimi"\n');
     try {
       const ts = tsList({ ROLL_LANG: "en", NO_COLOR: "1" });
-      expect(ts).toContain("✓ kimi  (current)");
+      expect(ts).toContain("✓ claude  (current)");
       expect(ts).toMatchInlineSnapshot(`
         "
           Available agents
 
-            ✓ claude
-            ✓ kimi  (current)
+            ✓ claude  (current)
+            ✓ kimi
             ✗ codex  (not installed)
             ✗ pi  (not installed)
             ✗ antigravity (agy)  (not installed)

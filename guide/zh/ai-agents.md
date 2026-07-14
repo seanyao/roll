@@ -20,7 +20,7 @@ Story 的角色，Story 或 Skill 可以在需要时进一步收窄绑定。
 agent 语义的主配置面。常用命令：
 
 ```bash
-roll agent                      # 查看 Machine Scope、Project Scope、角色、pool、legacy 输入
+roll agent                      # 查看 Machine Scope、有效 Project Scope 与已安装 pool
 roll agent migrate --dry-run    # 预览 legacy 文件迁移
 roll agent migrate              # 写入 roll-agents/v1 文件
 roll agent list                 # 查看本机已安装 agent
@@ -156,12 +156,12 @@ roll supervisor health --json      # 机器可读的分类结果
 roll supervisor next               # 下一张卡 + agent health 摘要
 ```
 
-## Legacy 兼容
+## 旧 Agent 配置迁移
 
 旧项目可能还会有 `.roll/local.yaml agent`、`.roll/pairing.yaml`，或者
-`.roll/agents.yaml` 里的 v3 route slots。`roll agent` 会把它们显示在
-`Legacy compatibility` 区块，`roll agent migrate` 会把仍有用的数据迁进 scoped
-模型。它们仍可读取，但不再是主要 agent 管理模型。
+`.roll/agents.yaml` 里的 v3 route slots。它们不再是运行时输入。先用
+`roll agent migrate --dry-run` 预览一次性迁移，再用 `roll agent migrate`
+写入 scoped binding。loop 遇到 v3 route slots 会明确失败，不会悄悄启用第二套配置模型。
 
 ## 另见
 

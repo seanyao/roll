@@ -15,7 +15,7 @@ Roll 把评审指派看成 scoped Agent 模型里的 `evaluate` 角色：
 
 ```bash
 roll agent                         # 查看 story.evaluate
-roll agent migrate --dry-run       # 如有旧 pairing.yaml，预览迁移
+roll agent migrate --dry-run       # 预览旧 agent 配置的一次性迁移
 ```
 
 新项目应在 `.roll/agents.yaml` 里声明 evaluator pool：
@@ -34,9 +34,8 @@ defaults:
         strategy: health-aware
 ```
 
-`.roll/pairing.yaml` 仍是 legacy compatibility 输入；两者同时存在时优先使用 scoped
-`evaluate` role。静态配置列公平候选，auth/network/VPN/account 等运行时失败只在本次
-resolution 中跳过候选。
+`.roll/pairing.yaml` 不再是运行时输入；scoped `evaluate` role 是结对候选的唯一来源。
+静态配置列公平候选，auth/network/VPN/account 等运行时失败只在本次 resolution 中跳过候选。
 
 ## 看它做了什么 —— 可观测性
 

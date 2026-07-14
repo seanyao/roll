@@ -26,7 +26,6 @@ import {
   isHeterogeneous,
   normalizeAgentScopeConfig,
   pairingConfigFromAgentScopeConfig,
-  parsePairingConfig,
   parseResizeSignal,
   selectPairingCandidates,
   type PairingConfig,
@@ -38,7 +37,7 @@ import type { AgentScopeConfig } from "@roll/spec";
 import { writeReviewScoreNote } from "../lib/review-score.js";
 import { assessComplexity } from "./peer-gate.js";
 
-type PairingConfigSource = "scoped-agents" | "legacy-pairing" | "default-score";
+type PairingConfigSource = "scoped-agents" | "default-score";
 type LoadedPairingConfig = { cfg: PairingConfig; source: PairingConfigSource } | null;
 
 function readScopedAgentLayer(path: string): { config: AgentScopeConfig; path: string } | null {
@@ -91,18 +90,12 @@ function mergeScopedPairingLayers(layers: readonly AgentScopeConfig[]): AgentSco
 function loadPairingConfig(projectDir: string, installed: readonly string[], fallback?: PairingConfig): LoadedPairingConfig {
   const scoped = loadScopedPairingConfig(projectDir, installed);
   if (scoped !== null) return scoped;
-  const cfgPath = join(projectDir, ".roll", "pairing.yaml");
-  if (existsSync(cfgPath)) return { cfg: parsePairingConfig(readFileSync(cfgPath, "utf8")), source: "legacy-pairing" };
   return fallback === undefined ? null : { cfg: fallback, source: "default-score" };
 }
 
 /**
- * US-PAIR-004 — the executor's stage-iteration seam. Reads `.roll/pairing.yaml`
- * and returns the stages pairing should fire at THIS cycle, in config order.
- * file-absent / disabled / malformed → `[]` (pairing off, never silent magic,
- * never throws — a broken config must not topple a cycle). Pure-ish (fs read +
- * parse) so the executor just maps `runPairing(stage, …)` over the result and
- * the iteration decision is unit-tested without a live git repo.
+ * US-PAIR-004 — the executor's stage-iteration seam. The scoped evaluate role
+ * enables code pairing; absent scoped configuration means pairing is off.
  */
 export function enabledPairingStages(projectDir: string): PairingStage[] {
   try {
@@ -119,7 +112,7 @@ export function enabledPairingStages(projectDir: string): PairingStage[] {
     // the score evidence file with a pair:verdict.
     return cfg.stages.filter((s, i, arr) => arr.indexOf(s) === i && s !== "score");
   } catch {
-    return []; // malformed config → pairing off, not a cycle failure
+    return []; // invalid scoped config → pairing off, not a cycle failure
   }
 }
 
@@ -462,10 +455,8 @@ export async function pairingDispatch(deps: PairingDispatchDeps): Promise<Pairin
  * assert on it); all side-effects go through the injected event sink + evidence
  * file. Never throws — pairing is an enhancement, never a cycle blocker.
  *
- * US-PAIR-004: `stage` is now a parameter (was hardcoded `code`). The executor
- * iterates {@link enabledPairingStages} and calls this once per enabled stage,
- * each independently opt-out via pairing.yaml `stages`. All PAIR-003 invariants
- * (30s timeout, non-blocking, cost in events, file-absent=off) hold per stage.
+ * The scoped evaluator role enables the code-review stage. All PAIR-003
+ * invariants (timeout, non-blocking behavior, and cost events) hold there.
  */
 export async function runPairing(
   projectDir: string,
@@ -687,10 +678,8 @@ export async function runScorePairing(
     // independence machinery verbatim (fresh separate session, same-vendor
     // fallback), only the label differs.
     const scoreStage = deps.scoreStage ?? "score";
-    // FIX-343 (step ④): MANDATORY — read pairing.yaml only for history/epsilon
-    // nuance; its enabled/stages flags NO LONGER gate scoring. The "score"
-    // selector ignores cfg gating anyway (it is stage-aware), so a synthesized
-    // minimal cfg is sufficient when no config exists.
+    // FIX-343 (step ④): MANDATORY — scoped evaluator candidates narrow scoring;
+    // a synthesized minimal configuration is used when no scoped binding exists.
     const loaded = loadPairingConfig(projectDir, deps.installed, { enabled: true, stages: ["score"] as PairingStage[], capability: {} });
     const cfg = loaded?.cfg ?? { enabled: true, stages: ["score"] as PairingStage[], capability: {} };
     const selectionAllowedAgents = loaded?.source === "scoped-agents" ? Object.keys(cfg.capability) : deps.allowedAgents;

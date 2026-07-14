@@ -15,7 +15,14 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { proposedBrowserOperationsConfig } from "@roll/infra";
+import type { BrowserActionKind } from "@roll/spec";
 import { collectBrowserEnvironmentReadiness, renderBrowserDoctor } from "../lib/browser-readiness-doctor.js";
+import type { ManagedFixtureFailure } from "@roll/infra";
+import {
+  MANAGED_FIXTURE_ACTIONS,
+  renderManagedRunReport,
+  runManagedFixtureOperation,
+} from "../lib/managed-browser-run.js";
 
 export interface BrowserCommandDeps {
   /** Resolve the machine-level config path (never a product repo file). */
@@ -39,10 +46,17 @@ function defaultDeps(): BrowserCommandDeps {
 }
 
 const USAGE =
-  "Usage: roll browser <setup|doctor>\n" +
+  "Usage: roll browser <setup|doctor|run>\n" +
   "  setup --dry-run       Report proposed machine config + dependency preflight (writes nothing).\n" +
   "  setup --confirm       Write ~/.roll/browser-operations.yaml after explicit owner confirmation.\n" +
-  "  doctor [--json]       Report managed / interactive / capture readiness (ready|degraded|blocked).\n";
+  "  doctor [--json]       Report managed / interactive / capture readiness (ready|degraded|blocked).\n" +
+  "  run [opts]            Run a managed-lane operation against a fake target and print the result.\n" +
+  "     --action <navigate|snapshot|console|network|screenshot>  (default: navigate)\n" +
+  "     --url <fakeUrl>    Fake target URL (default: https://fake.target.test).\n" +
+  "     --selector <sel>   DOM selector for --action snapshot.\n" +
+  "     --redirect <url>   Simulate a redirect (proves redirect denial).\n" +
+  "     --fail <timeout|crash|devtools-error>  Inject a categorized diagnostic failure.\n" +
+  "     --json             Emit the machine-readable run report.\n";
 
 function readiness(deps: BrowserCommandDeps): ReturnType<typeof collectBrowserEnvironmentReadiness> {
   return deps.readiness?.() ?? collectBrowserEnvironmentReadiness();
@@ -106,7 +120,47 @@ function doctorSubcommand(args: string[], deps: BrowserCommandDeps): number {
   return 0;
 }
 
-export function browserCommand(args: string[], depsOverride?: Partial<BrowserCommandDeps>): number {
+function flagValue(args: string[], name: string): string | undefined {
+  const idx = args.indexOf(name);
+  if (idx === -1) return undefined;
+  return args[idx + 1];
+}
+
+const FAILURE_KINDS: readonly ManagedFixtureFailure[] = ["timeout", "crash", "devtools-error"];
+
+async function runSubcommand(args: string[], deps: BrowserCommandDeps): Promise<number> {
+  const actionArg = (flagValue(args, "--action") ?? "navigate") as BrowserActionKind;
+  if (!MANAGED_FIXTURE_ACTIONS.includes(actionArg)) {
+    process.stderr.write(
+      `roll browser run: unsupported --action '${actionArg}'. Supported: ${MANAGED_FIXTURE_ACTIONS.join(", ")}.\n`,
+    );
+    return 1;
+  }
+  const failArg = flagValue(args, "--fail");
+  if (failArg !== undefined && !FAILURE_KINDS.includes(failArg as ManagedFixtureFailure)) {
+    process.stderr.write(`roll browser run: unknown --fail '${failArg}'. Supported: ${FAILURE_KINDS.join(", ")}.\n`);
+    return 1;
+  }
+
+  const report = await runManagedFixtureOperation({
+    action: actionArg,
+    targetUrl: flagValue(args, "--url") ?? "https://fake.target.test",
+    selector: flagValue(args, "--selector"),
+    redirectTo: flagValue(args, "--redirect"),
+    failure: failArg as ManagedFixtureFailure | undefined,
+  });
+
+  if (args.includes("--json")) {
+    deps.stdout(JSON.stringify(report, null, 2) + "\n");
+  } else {
+    deps.stdout(renderManagedRunReport(report).join("\n") + "\n");
+  }
+  // The fixture surface always exits 0: a categorized failure/denial is a
+  // successfully-observed diagnostic outcome, not a CLI error.
+  return 0;
+}
+
+export function browserCommand(args: string[], depsOverride?: Partial<BrowserCommandDeps>): number | Promise<number> {
   const deps = { ...defaultDeps(), ...depsOverride };
   const sub = args[0];
   if (sub === undefined || sub === "help" || sub === "--help" || sub === "-h") {
@@ -115,6 +169,7 @@ export function browserCommand(args: string[], depsOverride?: Partial<BrowserCom
   }
   if (sub === "setup") return setupCommand(args.slice(1), deps);
   if (sub === "doctor") return doctorSubcommand(args.slice(1), deps);
+  if (sub === "run") return runSubcommand(args.slice(1), deps);
   process.stderr.write(`roll browser: unknown subcommand '${sub}'\n\n${USAGE}`);
   return 1;
 }

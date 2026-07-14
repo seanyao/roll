@@ -126,7 +126,7 @@ function installFakeGh(cwd: string, opts: { number?: number; headRefName?: strin
       "  exit 0",
       "fi",
       "if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"view\" ]; then",
-      `  printf '%s\\n' '{"body":"${body}","labels":[],"reviews":[{"authorAssociation":"APP","state":"APPROVED"}],"mergeStateStatus":"CLEAN","statusCheckRollup":[{"conclusion":"SUCCESS"}],"isDraft":false}'`,
+      `  printf '%s\\n' '{"body":"${body}","labels":[],"reviews":[{"authorAssociation":"APP","state":"APPROVED"}],"mergeStateStatus":"CLEAN","statusCheckRollup":[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS"}],"isDraft":false}'`,
       "  exit 0",
       "fi",
       "exit 1",

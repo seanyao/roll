@@ -5,6 +5,7 @@
 ### 稳定性
 - 无验收清单的卡不再被误拦导致无法 publish；缺少验收证据时循环会把工作明确挂起待人复评，不再静默丢弃 (FIX-1256) `[loop]`
   <!-- evidence: .roll/features/loop-engine/FIX-1256/latest/FIX-1256-report.html -->
+- Supervisor 手动合并闸（`repair-evidence` / manual-merge diagnostics）现在与 reconcile 路径一样，同时识别 GitHub CheckRun 的 `conclusion` 和 StatusContext 的 `state`（如 Vercel）。以前只看 `conclusion`，带 StatusContext 的全绿 PR 会被判成 CI unknown，手动合并闸卡死；现在两类检查共用 `reduceStatusCheckRollup`，全绿可合并、含红可拒绝 (FIX-1252) `[loop]`
 
 ## v4.714.2 — 2026-07-14
 

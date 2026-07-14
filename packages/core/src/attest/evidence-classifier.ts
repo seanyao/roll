@@ -353,6 +353,64 @@ export class EvidenceClassifier {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// Report fact separation (AC: Reports display diagnostic and visual-evidence
+// result as separate facts with their own reasons)
+// ════════════════════════════════════════════════════════════════════════════
+
+/** Summary of classified evidence for report display. */
+export interface EvidenceReportFacts {
+  /** Diagnostic facts — never visual AC evidence. */
+  diagnostics: Array<{
+    artifactId: string;
+    evidenceClass: EvidenceClass;
+    kind: string;
+    reason: string;
+  }>;
+  /** Visual evidence facts — physical capture results. */
+  visualEvidence: Array<{
+    captureRequestId: string;
+    verdict: VisualEvidenceVerdict;
+    reason: string;
+    screenshotPath?: string;
+    digest?: string;
+  }>;
+}
+
+/**
+ * Classify a batch of evidence artifacts and separate them into diagnostic
+ * and visual-evidence facts for report display. Each fact carries its own
+ * reason so reports can show them as distinct entries.
+ */
+export function classifyReportEvidence(inputs: EvidenceClassifierInput[]): EvidenceReportFacts {
+  const classifier = new EvidenceClassifier();
+  const diagnostics: EvidenceReportFacts["diagnostics"] = [];
+  const visualEvidence: EvidenceReportFacts["visualEvidence"] = [];
+
+  for (const input of inputs) {
+    const { diagnostic, visual } = classifier.separateFacts(input);
+    if (diagnostic !== undefined) {
+      diagnostics.push({
+        artifactId: diagnostic.artifactId,
+        evidenceClass: diagnostic.evidenceClass,
+        kind: diagnostic.kind,
+        reason: diagnostic.summary,
+      });
+    }
+    if (visual !== undefined) {
+      visualEvidence.push({
+        captureRequestId: visual.captureRequestId,
+        verdict: visual.verdict,
+        reason: visual.reason,
+        screenshotPath: visual.screenshotPath,
+        digest: visual.digest,
+      });
+    }
+  }
+
+  return { diagnostics, visualEvidence };
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // Static helper: resolve evidence class from provider
 // ════════════════════════════════════════════════════════════════════════════
 

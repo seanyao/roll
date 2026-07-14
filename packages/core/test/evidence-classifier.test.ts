@@ -9,7 +9,7 @@
  * 5. Forgery rejection — protocol forgery, path substitution, digest mismatch
  */
 import { describe, it, expect } from "vitest";
-import { EvidenceClassifier, evidenceClassFromProvider, canSatisfyVisualAc, captureAllowedForOutcome } from "../src/attest/evidence-classifier.js";
+import { EvidenceClassifier, evidenceClassFromProvider, canSatisfyVisualAc, captureAllowedForOutcome, classifyReportEvidence } from "../src/attest/evidence-classifier.js";
 import type { EvidenceClassifierInput, RollCaptureResponseV1 } from "@roll/spec";
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -436,6 +436,56 @@ describe("Forgery rejection", () => {
     expect(diagnostic).toBeDefined();
     expect(diagnostic!.diagnosticOnly).toBe(true);
     expect(diagnostic!.evidenceClass).not.toBe("physical-capture");
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// classifyReportEvidence (report fact separation)
+// ════════════════════════════════════════════════════════════════════════════
+
+describe("classifyReportEvidence", () => {
+  it("separates diagnostics and visual evidence into distinct lists", () => {
+    const result = classifyReportEvidence([
+      physicalInput({
+        captureResponse: takenCaptureResponse(),
+        digest: "sha256:abc123",
+      }),
+      devtoolsInput({ diagnosticKind: "console-summary" }),
+      playwrightInput({ diagnosticKind: "devtools-screenshot" }),
+    ]);
+    expect(result.diagnostics).toHaveLength(2);
+    expect(result.visualEvidence).toHaveLength(1);
+    expect(result.visualEvidence[0].verdict).toBe("valid");
+  });
+
+  it("each fact carries its own reason", () => {
+    const result = classifyReportEvidence([
+      devtoolsInput({ diagnosticKind: "dom-snapshot" }),
+      playwrightInput(),
+    ]);
+    for (const d of result.diagnostics) {
+      expect(d.reason).toBeTruthy();
+    }
+    expect(result.visualEvidence).toHaveLength(0);
+  });
+
+  it("visual evidence carries verdict and path", () => {
+    const result = classifyReportEvidence([
+      physicalInput({
+        captureResponse: takenCaptureResponse(),
+        digest: "sha256:abc123",
+      }),
+    ]);
+    expect(result.visualEvidence[0].verdict).toBe("valid");
+    expect(result.visualEvidence[0].screenshotPath).toBe("/tmp/shot.png");
+    expect(result.visualEvidence[0].digest).toBe("sha256:abc123");
+    expect(result.visualEvidence[0].reason).toBeTruthy();
+  });
+
+  it("handles empty input", () => {
+    const result = classifyReportEvidence([]);
+    expect(result.diagnostics).toHaveLength(0);
+    expect(result.visualEvidence).toHaveLength(0);
   });
 });
 

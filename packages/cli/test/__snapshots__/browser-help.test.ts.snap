@@ -1,7 +1,7 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`US-BROW-007 — documented \`roll browser\` surface > AC2: help lists the released subcommands (setup / doctor / run / update) 1`] = `
-"Usage: roll browser <setup|doctor|run|update>
+"Usage: roll browser <setup|doctor|run|interactive|update>
   setup --dry-run       Report proposed machine config + dependency preflight (writes nothing).
   setup --confirm       Write ~/.roll/browser-operations.yaml after explicit owner confirmation.
   doctor [--json]       Report managed / interactive / capture readiness (ready|degraded|blocked).
@@ -12,6 +12,9 @@ exports[`US-BROW-007 — documented \`roll browser\` surface > AC2: help lists t
      --redirect <url>   Simulate a redirect (proves redirect denial).
      --fail <timeout|crash|devtools-error>  Inject a categorized diagnostic failure.
      --json             Emit the machine-readable run report.
+  interactive --story <US-ID> --origin <https-origin> --action <navigate|click|fill|press_key> [action flags]
+     Requires an attached TTY and one owner approval. Connects only to an already-open loopback Chrome debug endpoint.
+     --endpoint <http://127.0.0.1:9222> (default); navigate: --url; click: --selector; fill: --selector --value; press_key: --key.
   update [--check] [--json]   Check for DevTools transport update (pinned vs candidate).
   update --apply --confirm    Apply update after smoke checks + doctor.
 "

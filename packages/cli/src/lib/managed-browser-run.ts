@@ -15,7 +15,12 @@
  */
 import { BrowserOperationRunService } from "@roll/core";
 import { ManagedChromeAdapter, createManagedFixtureDeps, type ManagedFixtureFailure } from "@roll/infra";
-import type { BrowserActionKind, BrowserActionResult, BrowserLanePolicy } from "@roll/spec";
+import type {
+  BrowserActionKind,
+  BrowserActionResult,
+  BrowserLanePolicy,
+  PerformanceDiagnosticSummary,
+} from "@roll/spec";
 
 /** Actions the managed fixture surface accepts (closed subset of the vocabulary). */
 export const MANAGED_FIXTURE_ACTIONS: readonly BrowserActionKind[] = [
@@ -40,6 +45,10 @@ export interface ManagedFixtureRunOptions {
   timeoutMs?: number;
   /** Optional device emulation profile name (US-BROW-014). */
   deviceProfile?: string;
+  /** Optional performance diagnostic profile name (US-BROW-012, opt-in). */
+  performanceProfile?: string;
+  /** Make the performance profile collection fail (proves graceful degradation). */
+  performanceFailure?: boolean;
 }
 
 /** The operator-observable outcome of a managed fixture run. */
@@ -63,14 +72,23 @@ export interface ManagedRunReport {
   summary: string;
   /** The device profile applied, if any (US-BROW-014). */
   deviceProfile?: string;
+  /** The performance profile requested, if any (US-BROW-012). */
+  performanceProfile?: string;
+  /** The bounded, redacted performance summary, when collected (US-BROW-012). */
+  performanceSummary?: PerformanceDiagnosticSummary;
+  /** Structured denial when the profile was disabled by policy or unknown. */
+  performanceDenied?: string;
 }
 
-const DEFAULT_MANAGED_POLICY = (targetUrl: string): BrowserLanePolicy => ({
+const DEFAULT_MANAGED_POLICY = (targetUrl: string, performanceDiagnostics: boolean): BrowserLanePolicy => ({
   enabled: true,
   allowedOrigins: [originOf(targetUrl)],
   allowedActions: [...MANAGED_FIXTURE_ACTIONS],
   maxRunsPerCycle: 5,
   timeoutMs: 5_000,
+  // Opt-in: the operator selecting a performance profile flips this policy gate
+  // on. Without a selected profile the diagnostic surface stays disabled.
+  performanceDiagnostics,
 });
 
 function originOf(url: string): string {
@@ -87,7 +105,7 @@ function originOf(url: string): string {
  */
 export async function runManagedFixtureOperation(options: ManagedFixtureRunOptions): Promise<ManagedRunReport> {
   const timeoutMs = options.timeoutMs ?? (options.failure === "timeout" ? 30 : 5_000);
-  const lanePolicy = DEFAULT_MANAGED_POLICY(options.targetUrl);
+  const lanePolicy = DEFAULT_MANAGED_POLICY(options.targetUrl, options.performanceProfile !== undefined);
 
   const runService = BrowserOperationRunService.create({
     runId: "fixture-run",
@@ -104,16 +122,18 @@ export async function runManagedFixtureOperation(options: ManagedFixtureRunOptio
     redirectTo: options.redirectTo,
     domNodes: options.selector ? [`text for ${options.selector}`] : undefined,
     failure: options.failure,
+    performanceFailure: options.performanceFailure,
   });
   const adapter = new ManagedChromeAdapter(deps);
 
-  const { service, result } = await adapter.execute({
+  const { service, result, performance } = await adapter.execute({
     runService,
     lanePolicy,
     action: options.action,
     payload: buildPayload(options),
     timeoutMs,
     deviceProfile: options.deviceProfile,
+    performanceProfile: options.performanceProfile,
   });
 
   const terminal = service.terminalResult();
@@ -132,6 +152,9 @@ export async function runManagedFixtureOperation(options: ManagedFixtureRunOptio
         : service.diagnosticFailures.map((f) => ({ category: f.category, message: f.message })),
     summary: result.redactedSummary,
     deviceProfile: options.deviceProfile,
+    performanceProfile: options.performanceProfile,
+    performanceSummary: performance?.summary,
+    performanceDenied: performance?.denial ? `${performance.denial.code}: ${performance.denial.message}` : undefined,
   };
 }
 
@@ -174,6 +197,23 @@ export function renderManagedRunReport(report: ManagedRunReport): string[] {
 
   if (report.deviceProfile !== undefined) {
     lines.push(`  device profile / 设备仿真: ${report.deviceProfile}`);
+  }
+
+  if (report.performanceProfile !== undefined) {
+    lines.push(`  perf profile / 性能诊断: ${report.performanceProfile} (opt-in, diagnostic-only / 需选启，仅诊断)`);
+    if (report.performanceDenied !== undefined) {
+      lines.push(`    denied / 已拒绝: ${report.performanceDenied}`);
+    } else if (report.performanceSummary !== undefined) {
+      const s = report.performanceSummary;
+      if (s.degraded) {
+        lines.push("    result / 结果: degraded — no signal collected (action verdict unchanged) / 降级——未采到信号（动作结论不变）");
+      } else {
+        lines.push(`    metrics / 指标 (${s.metrics.length}, bounded & redacted / 有界脱敏):`);
+        for (const m of s.metrics) {
+          lines.push(`      - ${m.name}: ${m.value}`);
+        }
+      }
+    }
   }
 
   lines.push(`  summary / 摘要:         ${report.summary}`);

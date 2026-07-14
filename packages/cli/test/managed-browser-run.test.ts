@@ -96,4 +96,55 @@ describe("US-BROW-004c managed run — CLI → run service → adapter → termi
     const code = await browserCommand(["run", "--action", "click"], { ...noWriteDeps(), stdout: c.stdout });
     expect(code).toBe(1);
   });
+
+  // ── US-BROW-012 performance diagnostic profile ────────────────────────────
+
+  it("runManagedFixtureOperation collects a bounded, redacted performance summary", async () => {
+    const report = await runManagedFixtureOperation({
+      action: "navigate",
+      targetUrl: "https://fake.target.test",
+      performanceProfile: "web-vitals-lite",
+    });
+    expect(report.result).toBe("pass");
+    expect(report.performanceProfile).toBe("web-vitals-lite");
+    expect(report.performanceSummary?.degraded).toBe(false);
+    const names = report.performanceSummary?.metrics.map((m) => m.name) ?? [];
+    expect(names).toContain("LayoutDuration");
+    expect(names).not.toContain("NavigationUrl");
+    // No URL/trace anywhere in the summary (AC3 data minimization).
+    expect(JSON.stringify(report.performanceSummary)).not.toContain("http");
+  });
+
+  it("performance failure degrades gracefully — navigate still passes (AC4)", async () => {
+    const report = await runManagedFixtureOperation({
+      action: "navigate",
+      targetUrl: "https://fake.target.test",
+      performanceProfile: "web-vitals-lite",
+      performanceFailure: true,
+    });
+    expect(report.result).toBe("pass");
+    expect(report.performanceSummary?.degraded).toBe(true);
+    expect(report.performanceSummary?.metrics).toEqual([]);
+  });
+
+  it("renders the performance summary as opt-in, diagnostic-only", () => {
+    const lines = renderManagedRunReport({
+      lane: "managed",
+      action: "navigate",
+      targetUrl: "https://fake.target.test",
+      runState: "passed",
+      result: "pass",
+      actionStatus: "ok",
+      profileRemoved: true,
+      diagnosticArtifacts: 1,
+      failures: [],
+      summary: "navigated to fake target",
+      performanceProfile: "web-vitals-lite",
+      performanceSummary: { profile: "web-vitals-lite", metrics: [{ name: "LayoutDuration", value: 1.5 }], degraded: false },
+    });
+    const text = lines.join("\n");
+    expect(text).toContain("perf profile / 性能诊断: web-vitals-lite");
+    expect(text).toContain("opt-in, diagnostic-only");
+    expect(text).toContain("LayoutDuration: 1.5");
+  });
 });

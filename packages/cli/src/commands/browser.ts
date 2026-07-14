@@ -25,6 +25,7 @@ import {
   MANAGED_DEVTOOLS_PACKAGE_VERSION,
   pinnedDevToolsVersionSource,
   resolveDeviceProfile,
+  resolvePerformanceProfile,
   type VersionSource,
 } from "@roll/core";
 import {
@@ -98,6 +99,8 @@ const USAGE =
   "     --redirect <url>   Simulate a redirect (proves redirect denial).\n" +
   "     --fail <timeout|crash|devtools-error>  Inject a categorized diagnostic failure.\n" +
   "     --profile <name>   Device emulation profile (Pixel 7, iPhone 14, iPad Pro).\n" +
+  "     --perf-profile <name>  Opt-in performance diagnostic profile (web-vitals-lite); diagnostic-only.\n" +
+  "     --perf-fail        Simulate a performance-profile failure (proves graceful degradation).\n" +
   "     --json             Emit the machine-readable run report.\n" +
   "  interactive --story <US-ID> --origin <https-origin> --action <navigate|click|fill|press_key> [action flags]\n" +
   "     Requires an attached TTY and one owner approval. Connects only to an already-open loopback Chrome debug endpoint.\n" +
@@ -199,6 +202,16 @@ async function runSubcommand(args: string[], deps: BrowserCommandDeps): Promise<
     }
   }
 
+  // Validate performance profile name early (US-BROW-012): fail-fast on unknown.
+  const perfProfileArg = flagValue(args, "--perf-profile");
+  if (perfProfileArg !== undefined) {
+    const resolved = resolvePerformanceProfile(perfProfileArg);
+    if ("code" in resolved) {
+      process.stderr.write(`roll browser run: ${resolved.message}\n`);
+      return 1;
+    }
+  }
+
   const report = await runManagedFixtureOperation({
     action: actionArg,
     targetUrl: flagValue(args, "--url") ?? "https://fake.target.test",
@@ -206,6 +219,8 @@ async function runSubcommand(args: string[], deps: BrowserCommandDeps): Promise<
     redirectTo: flagValue(args, "--redirect"),
     failure: failArg as ManagedFixtureFailure | undefined,
     deviceProfile: profileArg,
+    performanceProfile: perfProfileArg,
+    performanceFailure: args.includes("--perf-fail"),
   });
 
   if (args.includes("--json")) {

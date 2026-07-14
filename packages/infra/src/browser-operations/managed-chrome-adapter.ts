@@ -16,9 +16,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   authorizeOrigin,
+  authorizePerformanceProfile,
   BrowserOperationRunService,
+  degradedPerformanceSummary,
   policyFingerprint,
   resolveDeviceProfile,
+  summarizePerformanceMetrics,
   type DiagnosticFailure,
 } from "@roll/core";
 import type {
@@ -30,6 +33,8 @@ import type {
   DiagnosticArtifactKind,
   DiagnosticArtifactRef,
   NormalizedOrigin,
+  PerformanceDiagnosticSummary,
+  PerformanceProfile,
 } from "@roll/spec";
 
 // ── Public types ─────────────────────────────────────────────────────────────
@@ -84,6 +89,18 @@ export interface ManagedRunInput {
   timeoutMs: number;
   /** Optional device emulation profile name (managed lane only, diagnostic-only). */
   deviceProfile?: string;
+  /** Optional performance diagnostic profile name (managed lane only, opt-in, diagnostic-only). */
+  performanceProfile?: string;
+}
+
+/** Outcome of a best-effort performance diagnostic profile collection. */
+export interface PerformanceProfileOutcome {
+  /** The bounded, redacted summary (present unless the profile was denied). */
+  summary?: PerformanceDiagnosticSummary;
+  /** Structured denial when policy disabled the profile or the name was unknown. */
+  denial?: BrowserDenialReason;
+  /** The persisted diagnostic-only artifact ref, when a summary was collected. */
+  ref?: DiagnosticArtifactRef;
 }
 
 // ── Default production seams ─────────────────────────────────────────────────
@@ -298,7 +315,12 @@ export class ManagedChromeAdapter {
   constructor(private readonly deps: ManagedChromeAdapterDeps) {}
 
   /** Execute one typed action and return the action-level result plus the terminal run service. */
-  async execute(input: ManagedRunInput): Promise<{ result: BrowserActionResult; service: BrowserOperationRunService }> {
+  async execute(input: ManagedRunInput): Promise<{
+    result: BrowserActionResult;
+    service: BrowserOperationRunService;
+    /** Present only when a performance diagnostic profile was requested (US-BROW-012). */
+    performance?: PerformanceProfileOutcome;
+  }> {
     const { runService, lanePolicy, action, payload, timeoutMs } = input;
     const fingerprint = policyFingerprint(lanePolicy);
     let service = runService.authorize(fingerprint);
@@ -318,6 +340,7 @@ export class ManagedChromeAdapter {
     let cdp: CdpSession | undefined;
     let terminalService: BrowserOperationRunService = service;
     let actionResultValue: BrowserActionResult;
+    let performance: PerformanceProfileOutcome | undefined;
 
     try {
       profileDir = await this.deps.fs.mkdtemp(join(tmpdir(), "roll-managed-chrome-"));
@@ -351,6 +374,20 @@ export class ManagedChromeAdapter {
         `action ${action}`,
       );
 
+      // Performance diagnostic profile (US-BROW-012): opt-in, policy-gated and
+      // strictly best-effort. It runs AFTER the action and can never change the
+      // action verdict — a denied or failed profile leaves navigation/Capture
+      // outcomes exactly as they were without it (AC4).
+      if (input.performanceProfile !== undefined) {
+        performance = await this.runPerformanceProfile(cdp, input.performanceProfile, lanePolicy);
+        if (performance.ref !== undefined) {
+          actionResultValue = {
+            ...actionResultValue,
+            diagnosticRefs: [...actionResultValue.diagnosticRefs, performance.ref],
+          };
+        }
+      }
+
       terminalService = service.pass();
     } catch (error) {
       terminalService = this.finalizeFromError(service, error);
@@ -366,7 +403,51 @@ export class ManagedChromeAdapter {
       terminalService = await this.cleanupProfile(profileDir, terminalService);
     }
 
-    return { service: terminalService, result: actionResultValue };
+    return { service: terminalService, result: actionResultValue, performance };
+  }
+
+  // ── Performance diagnostic profile (US-BROW-012) ────────────────────────
+
+  /**
+   * Collect the opt-in performance diagnostic profile. Fully wrapped: it never
+   * throws and never propagates a failure to the caller, guaranteeing the
+   * action verdict is untouched. A policy denial or unknown name returns a
+   * structured denial; a collection error returns a degraded (empty) summary.
+   *
+   * Only local CDP methods are used — no URL or trace is sent to CrUX or any
+   * external service (AC3).
+   */
+  private async runPerformanceProfile(
+    cdp: CdpSession,
+    rawName: string,
+    lanePolicy: BrowserLanePolicy,
+  ): Promise<PerformanceProfileOutcome> {
+    const authorized = authorizePerformanceProfile(rawName, lanePolicy);
+    if ("code" in authorized) {
+      return { denial: authorized };
+    }
+    try {
+      const summary = await this.collectPerformanceSummary(cdp, authorized);
+      const ref = await this.writeDiagnosticArtifact(
+        "performance-summary",
+        Buffer.from(JSON.stringify(summary), "utf8"),
+      );
+      return { summary, ref };
+    } catch {
+      // Graceful degradation — the profile failed but the action still passes.
+      return { summary: degradedPerformanceSummary(authorized.name) };
+    }
+  }
+
+  private async collectPerformanceSummary(
+    cdp: CdpSession,
+    profile: PerformanceProfile,
+  ): Promise<PerformanceDiagnosticSummary> {
+    await cdp.send("Performance.enable");
+    const raw = (await cdp.send("Performance.getMetrics")) as {
+      metrics?: ReadonlyArray<{ name?: unknown; value?: unknown }>;
+    };
+    return summarizePerformanceMetrics(raw.metrics ?? [], profile);
   }
 
   // ── Device emulation (US-BROW-014) ──────────────────────────────────────

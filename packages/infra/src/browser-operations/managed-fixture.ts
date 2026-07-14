@@ -35,6 +35,8 @@ export interface ManagedFixtureOptions {
   screenshotBase64?: string;
   /** Inject a categorized diagnostic failure instead of a clean pass. */
   failure?: ManagedFixtureFailure;
+  /** Make performance profile collection fail, to prove graceful degradation (US-BROW-012). */
+  performanceFailure?: boolean;
 }
 
 /** Records what the fixture observed, for test assertions. */
@@ -47,6 +49,8 @@ export interface ManagedFixtureRecorder {
   deviceEmulated: boolean;
   /** The emulation parameters that were sent, if any. */
   emulationParams?: Record<string, unknown>;
+  /** Whether the performance profile was collected (US-BROW-012). */
+  performanceCollected: boolean;
 }
 
 /** A fake Chrome process — no OS process is ever spawned. */
@@ -101,6 +105,30 @@ class FakeCdpSession implements CdpSession {
     // DevTools error: reject with a real Error (category=devtools-error).
     if (this.options.failure === "devtools-error" && method === "Runtime.evaluate") {
       throw new Error("fixture: simulated DevTools protocol error");
+    }
+
+    // Performance diagnostic profile (US-BROW-012): local, numeric-only metrics.
+    if (method === "Performance.enable") {
+      return {};
+    }
+    if (method === "Performance.getMetrics") {
+      if (this.options.performanceFailure === true) {
+        throw new Error("fixture: simulated Performance.getMetrics failure");
+      }
+      this.recorder.performanceCollected = true;
+      // A mix of allowlisted numeric metrics plus entries the summarizer MUST
+      // drop: a non-allowlisted counter and a URL-bearing name (data-min proof).
+      return {
+        metrics: [
+          { name: "LayoutDuration", value: 1.2345678 },
+          { name: "ScriptDuration", value: 3.14159 },
+          { name: "TaskDuration", value: 5.5 },
+          { name: "Nodes", value: 128 },
+          { name: "JSHeapUsedSize", value: 10485760 },
+          { name: "NavigationUrl", value: "https://crux.example.test/upload" },
+          { name: "NotAllowedCounter", value: 999 },
+        ],
+      };
     }
 
     // Device emulation (US-BROW-014): record and acknowledge.
@@ -204,6 +232,7 @@ export function createManagedFixtureDeps(
     removedDirs: [],
     cdpMethods: [],
     deviceEmulated: false,
+    performanceCollected: false,
   };
   let idCounter = 0;
   const deps: ManagedChromeAdapterDeps = {

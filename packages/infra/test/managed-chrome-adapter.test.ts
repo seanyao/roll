@@ -486,3 +486,139 @@ describe("US-BROW-004b ManagedChromeAdapter", () => {
     expect(metricsParams["height"]).toBe(1366);
   });
 });
+
+// ── US-BROW-012 performance diagnostic profile ──────────────────────────────
+
+describe("US-BROW-012 performance diagnostic profile", () => {
+  const perfPolicy = (opts?: { performanceDiagnostics?: boolean }): BrowserLanePolicy => ({
+    enabled: true,
+    allowedOrigins: ["https://example.test"],
+    allowedActions: ["navigate", "snapshot", "console", "network", "screenshot"],
+    performanceDiagnostics: opts?.performanceDiagnostics,
+  });
+
+  function withPerfMetrics(deps: Awaited<ReturnType<typeof makeDeps>>, metrics: unknown[]): void {
+    deps.transport.configure((session) => {
+      session.when("Performance.enable", () => ({}));
+      session.when("Performance.getMetrics", () => ({ metrics }));
+    });
+  }
+
+  async function execute(
+    deps: Awaited<ReturnType<typeof makeDeps>>,
+    lanePolicy: BrowserLanePolicy,
+    performanceProfile?: string,
+  ) {
+    const adapter = new ManagedChromeAdapter(deps);
+    const input: ManagedRunInput = {
+      runService: newRun(),
+      lanePolicy,
+      action: "navigate",
+      payload: { url: "https://example.test" },
+      timeoutMs: 5_000,
+      performanceProfile,
+    };
+    return adapter.execute(input);
+  }
+
+  it("collects a bounded, redacted summary and attaches it as a diagnostic-only artifact", async () => {
+    const deps = await makeDeps();
+    withPerfMetrics(deps, [
+      { name: "LayoutDuration", value: 1.5 },
+      { name: "ScriptDuration", value: 2.25 },
+      { name: "NavigationUrl", value: "https://crux.example.test/upload" },
+      { name: "NotAllowed", value: 9 },
+    ]);
+
+    const { result, service, performance } = await execute(
+      deps,
+      perfPolicy({ performanceDiagnostics: true }),
+      "web-vitals-lite",
+    );
+
+    expect(result.status).toBe("ok");
+    expect(service.run.state).toBe("passed");
+    expect(performance?.summary?.degraded).toBe(false);
+    const names = performance?.summary?.metrics.map((m) => m.name) ?? [];
+    expect(names).toContain("LayoutDuration");
+    expect(names).not.toContain("NavigationUrl");
+    expect(names).not.toContain("NotAllowed");
+    // Persisted as diagnostic-only material, never visual evidence (AC2).
+    const perfRef = result.diagnosticRefs.find((r) => r.kind === "performance-summary");
+    expect(perfRef).toBeDefined();
+    expect(perfRef?.diagnosticOnly).toBe(true);
+    expect(perfRef?.untrusted).toBe(true);
+    // No external endpoint was ever contacted (AC3): only local CDP methods.
+    expect(deps.transport.sessions.length).toBeGreaterThan(0);
+  });
+
+  it("denies the profile when policy has not opted in — action verdict unchanged (AC1, AC4)", async () => {
+    const deps = await makeDeps();
+    withPerfMetrics(deps, [{ name: "LayoutDuration", value: 1 }]);
+
+    const { result, service, performance } = await execute(
+      deps,
+      perfPolicy({ performanceDiagnostics: false }),
+      "web-vitals-lite",
+    );
+
+    expect(result.status).toBe("ok");
+    expect(service.run.state).toBe("passed");
+    expect(performance?.denial?.code).toBe("performance_profile_denied");
+    expect(performance?.summary).toBeUndefined();
+    // No performance artifact attached; the navigation result is exactly baseline.
+    expect(result.diagnosticRefs.some((r) => r.kind === "performance-summary")).toBe(false);
+  });
+
+  it("degrades gracefully when collection fails — action still passes (AC4)", async () => {
+    const deps = await makeDeps();
+    deps.transport.configure((session) => {
+      session.when("Performance.enable", () => ({}));
+      session.when("Performance.getMetrics", () => {
+        throw new Error("Performance domain unavailable");
+      });
+    });
+
+    const { result, service, performance } = await execute(
+      deps,
+      perfPolicy({ performanceDiagnostics: true }),
+      "web-vitals-lite",
+    );
+
+    expect(result.status).toBe("ok");
+    expect(service.run.state).toBe("passed");
+    expect(performance?.summary?.degraded).toBe(true);
+    expect(performance?.summary?.metrics).toEqual([]);
+    // No artifact from a degraded collection.
+    expect(result.diagnosticRefs.some((r) => r.kind === "performance-summary")).toBe(false);
+  });
+
+  it("baseline unchanged: without a performance profile nothing extra happens (AC4)", async () => {
+    const deps = await makeDeps();
+    const { result, service, performance } = await execute(
+      deps,
+      perfPolicy({ performanceDiagnostics: true }),
+      undefined,
+    );
+
+    expect(result.status).toBe("ok");
+    expect(service.run.state).toBe("passed");
+    expect(performance).toBeUndefined();
+    expect(result.diagnosticRefs).toHaveLength(0);
+  });
+
+  it("denies an unknown profile name — action verdict unchanged", async () => {
+    const deps = await makeDeps();
+    withPerfMetrics(deps, [{ name: "LayoutDuration", value: 1 }]);
+
+    const { result, service, performance } = await execute(
+      deps,
+      perfPolicy({ performanceDiagnostics: true }),
+      "lighthouse-full",
+    );
+
+    expect(result.status).toBe("ok");
+    expect(service.run.state).toBe("passed");
+    expect(performance?.denial?.code).toBe("unknown_performance_profile");
+  });
+});

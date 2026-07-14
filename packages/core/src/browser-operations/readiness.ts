@@ -18,11 +18,12 @@ import type {
   BrowserLaneReadiness,
 } from "@roll/spec";
 
-/** The exact, owner-approved managed DevTools MCP package. No range, no @latest.
- *  The BrowserTransportRegistry (US-BROW-002) owns the runtime launch plan; this
- *  constant is the identity the preflight and setup dry-run report against. */
-export const MANAGED_DEVTOOLS_PACKAGE = "chrome-devtools-mcp";
-export const MANAGED_DEVTOOLS_PACKAGE_VERSION = "1.5.0";
+/** The exact, owner-approved managed DevTools MCP package. The
+ *  BrowserTransportRegistry (US-BROW-002, transport.ts) owns the identity and
+ *  runtime launch plan; readiness reports against the same single source. */
+import { MANAGED_DEVTOOLS_PACKAGE, MANAGED_DEVTOOLS_PACKAGE_VERSION } from "./transport.js";
+
+export { MANAGED_DEVTOOLS_PACKAGE, MANAGED_DEVTOOLS_PACKAGE_VERSION };
 /** Loopback-only remote debugging endpoint. Interactive lane connects here; it
  *  is never opened automatically. */
 export const MANAGED_DEVTOOLS_REMOTE_DEBUG_HOST = "127.0.0.1";

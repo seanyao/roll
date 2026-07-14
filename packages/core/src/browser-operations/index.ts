@@ -2,6 +2,6 @@ export * from "./origin.js";
 export * from "./policy.js";
 export * from "./lease-lock.js";
 export * from "./ledger.js";
-export * from "./readiness.js";
+export { deriveBrowserEnvironmentReadiness, MANAGED_DEVTOOLS_REMOTE_DEBUG_HOST, MANAGED_DEVTOOLS_REMOTE_DEBUG_PORT } from "./readiness.js";
 export * from "./redaction.js";
 export * from "./transport.js";

@@ -376,7 +376,9 @@ function incrementConsecutiveFails(
   try {
     writeFileSync(pauseMarker, alertMsg, "utf8");
     appendFileSync(alertsPath, `${alertMsg}\n`, "utf8");
-    const ts = Date.now();
+    // FIX-1255: event ts is seconds — ms stamps here read as "future" to
+    // second-epoch consumers (loop go's safety-pause stop check).
+    const ts = Math.floor(Date.now() / 1000);
     const bus = new EventBus();
     bus.appendEvent(eventsPath, {
       type: "policy:safety_pause",
@@ -422,7 +424,8 @@ function writeRootCausePause(
   try {
     writeFileSync(pauseMarker, alertMsg, "utf8");
     appendFileSync(alertsPath, `${alertMsg}\n`, "utf8");
-    const ts = Date.now();
+    // FIX-1255: seconds, not ms (see writeAutoPause).
+    const ts = Math.floor(Date.now() / 1000);
     const bus = new EventBus();
     bus.appendEvent(eventsPath, {
       type: "policy:safety_pause",
@@ -751,7 +754,8 @@ function writeReviewerBlockedAlert(
     /* best-effort */
   }
   const bus = new EventBus();
-  const ts = Date.now();
+  // FIX-1255: seconds, not ms (see writeAutoPause).
+  const ts = Math.floor(Date.now() / 1000);
   try {
     bus.appendEvent(eventsPath, { type: "alert:notify", channel: "loop-safety", message: title, ts });
   } catch {

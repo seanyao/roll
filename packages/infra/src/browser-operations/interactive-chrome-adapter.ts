@@ -1,0 +1,149 @@
+/**
+ * US-BROW-008b — owner Chrome connector for explicitly approved operations.
+ *
+ * This adapter deliberately owns only the short-lived DevTools connection. It
+ * never launches, kills, or otherwise controls the owner's Chrome process.
+ */
+import { authorizeOrigin } from "@roll/core";
+import type { BrowserActionResult, BrowserDenialReason, BrowserLease, BrowserLanePolicy } from "@roll/spec";
+import type { CdpSession } from "./managed-chrome-adapter.js";
+
+export type InteractiveLowRiskAction =
+  | { kind: "navigate"; url: string }
+  | { kind: "click"; selector: string }
+  | { kind: "fill"; selector: string; value: string }
+  | { kind: "press_key"; key: string };
+
+export interface OwnerChromeTarget {
+  id: string;
+  url: string;
+  webSocketDebuggerUrl: string;
+}
+
+export interface InteractiveChromeAdapterDeps {
+  /** Discover tabs from an already-running, loopback-only Chrome endpoint. */
+  discoverTargets(): Promise<readonly OwnerChromeTarget[]>;
+  /** Open a DevTools session to one of the discovered targets. */
+  connect(target: OwnerChromeTarget): Promise<CdpSession>;
+  nowMs(): number;
+}
+
+export type InteractiveOperationResult =
+  | { kind: "completed"; tabId: string; result: BrowserActionResult; ciPassed: false }
+  | { kind: "denied"; reason: BrowserDenialReason; ciPassed: false };
+
+const OWNER_LANE_POLICY = (origin: string): BrowserLanePolicy => ({
+  enabled: true,
+  allowedOrigins: [origin],
+  allowedActions: ["navigate", "click", "fill", "press_key"],
+  requireOwnerApproval: true,
+});
+
+/**
+ * Executes one closed-vocabulary action against a tab whose origin exactly
+ * matches the approved origin. It has no cookie, storage, or network-body API.
+ */
+export class InteractiveChromeAdapter {
+  constructor(private readonly deps: InteractiveChromeAdapterDeps) {}
+
+  async execute(input: {
+    lease: BrowserLease;
+    origin: string;
+    action: InteractiveLowRiskAction;
+  }): Promise<InteractiveOperationResult> {
+    if (Date.parse(input.lease.expiresAt) <= this.deps.nowMs()) {
+      return denied("interactive_lease_expired", "The approved owner Chrome lease has expired");
+    }
+
+    const policy = OWNER_LANE_POLICY(input.origin);
+    const approvedOrigin = originFor(input.origin);
+    if (approvedOrigin === undefined) {
+      return denied("origin_invalid", "The approved origin is invalid");
+    }
+    const tab = (await this.deps.discoverTargets()).find((candidate) => originFor(candidate.url) === approvedOrigin);
+    if (tab === undefined) {
+      return denied("devtools_unavailable", "No owner Chrome tab matches the approved origin", { origin: approvedOrigin });
+    }
+
+    let cdp: CdpSession | undefined;
+    try {
+      cdp = await this.deps.connect(tab);
+      const result = await this.runAction(cdp, input.action, policy);
+      return { kind: "completed", tabId: tab.id, result, ciPassed: false };
+    } catch (error) {
+      return denied("devtools_unavailable", error instanceof Error ? error.message : "Owner Chrome DevTools connection failed");
+    } finally {
+      if (cdp !== undefined) await closeQuietly(cdp);
+    }
+  }
+
+  private async runAction(cdp: CdpSession, action: InteractiveLowRiskAction, policy: BrowserLanePolicy): Promise<BrowserActionResult> {
+    switch (action.kind) {
+      case "navigate":
+        this.assertApprovedUrl(action.url, policy);
+        await cdp.send("Page.navigate", { url: action.url });
+        await this.assertCurrentOrigin(cdp, policy);
+        return result("ok", `navigated to approved origin`);
+      case "click":
+        await this.assertCurrentOrigin(cdp, policy);
+        await cdp.send("Runtime.evaluate", { expression: clickExpression(action.selector), awaitPromise: true });
+        await this.assertCurrentOrigin(cdp, policy);
+        return result("ok", "clicked approved selector");
+      case "fill":
+        await this.assertCurrentOrigin(cdp, policy);
+        await cdp.send("Runtime.evaluate", { expression: fillExpression(action.selector, action.value), awaitPromise: true });
+        await this.assertCurrentOrigin(cdp, policy);
+        return result("ok", "filled approved selector");
+      case "press_key":
+        await this.assertCurrentOrigin(cdp, policy);
+        await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: action.key });
+        await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: action.key });
+        await this.assertCurrentOrigin(cdp, policy);
+        return result("ok", "sent approved key");
+    }
+  }
+
+  private async assertCurrentOrigin(cdp: CdpSession, policy: BrowserLanePolicy): Promise<void> {
+    const response = await cdp.send("Runtime.evaluate", { expression: "window.location.href", returnByValue: true }) as { result?: { value?: unknown } };
+    const url = response.result?.value;
+    if (typeof url !== "string") throw new Error("Owner Chrome did not return its current URL");
+    this.assertApprovedUrl(url, policy);
+  }
+
+  private assertApprovedUrl(url: string, policy: BrowserLanePolicy): void {
+    const authorization = authorizeOrigin(url, policy);
+    if (!authorization.authorized) throw new Error("Operation left the approved origin");
+  }
+}
+
+function originFor(value: string): string | undefined {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return undefined;
+  }
+}
+
+function clickExpression(selector: string): string {
+  return `document.querySelector(${JSON.stringify(selector)})?.click()`;
+}
+
+function fillExpression(selector: string, value: string): string {
+  return `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) throw new Error("selector not found"); if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) throw new Error("selector is not fillable"); el.value = ${JSON.stringify(value)}; el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); })()`;
+}
+
+function result(status: BrowserActionResult["status"], redactedSummary: string): BrowserActionResult {
+  return { runId: "interactive-owner", actionId: "owner-approved", status, diagnosticRefs: [], redactedSummary };
+}
+
+function denied(code: BrowserDenialReason["code"], message: string, detail?: Record<string, unknown>): InteractiveOperationResult {
+  return { kind: "denied", reason: { code, message, detail }, ciPassed: false };
+}
+
+async function closeQuietly(cdp: CdpSession): Promise<void> {
+  try {
+    await cdp.close();
+  } catch {
+    // A lost DevTools socket must not be retried as a background operation.
+  }
+}

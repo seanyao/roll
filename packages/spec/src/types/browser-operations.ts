@@ -57,6 +57,54 @@ export interface DeviceProfile {
   userAgent?: string;
 }
 
+// ── Performance diagnostic profile (US-BROW-012) ────────────────────────────
+
+/**
+ * The finite, policy-controlled set of performance diagnostic profile names.
+ *
+ * There is exactly ONE profile. This is a narrow, local DevTools performance
+ * signal — NOT a generic analytics or evidence channel. Adding a profile here
+ * is a reviewed contract change, not a caller-supplied parameter.
+ */
+export type PerformanceProfileName = "web-vitals-lite";
+
+/** All known performance diagnostic profile names. */
+export const PERFORMANCE_PROFILE_NAMES: readonly PerformanceProfileName[] = [
+  "web-vitals-lite",
+];
+
+/**
+ * A single performance diagnostic profile. It declares a closed allowlist of
+ * numeric CDP `Performance.getMetrics` metric names and a hard cap on how many
+ * entries the redacted summary may retain. Nothing outside `metrics` is ever
+ * kept — the allowlist is the data-minimization boundary.
+ */
+export interface PerformanceProfile {
+  /** The allowlisted profile name. */
+  name: PerformanceProfileName;
+  /** Allowlisted numeric metric names collected from the local page. */
+  metrics: readonly string[];
+  /** Hard upper bound on the number of metric entries in the summary. */
+  maxEntries: number;
+}
+
+/**
+ * The bounded, redacted local performance summary.
+ *
+ * Contains only numeric metrics drawn from the profile allowlist. It never
+ * carries a URL, a resource name, a trace, or any string that could leave the
+ * machine. `degraded` is true when collection failed and the profile produced
+ * no signal — a graceful, non-fatal outcome that never changes the underlying
+ * navigation or Capture verdict.
+ */
+export interface PerformanceDiagnosticSummary {
+  profile: PerformanceProfileName;
+  /** Bounded, redacted numeric metrics — no URL, no resource name, no trace. */
+  metrics: { name: string; value: number }[];
+  /** True when collection degraded; `metrics` may be empty. */
+  degraded: boolean;
+}
+
 /** The closed set of all permitted browser actions. */
 export const BROWSER_ACTION_KINDS: readonly BrowserActionKind[] = [
   "navigate",
@@ -91,7 +139,8 @@ export type DiagnosticArtifactKind =
   | "dom-snapshot"
   | "console-summary"
   | "network-summary"
-  | "devtools-screenshot";
+  | "devtools-screenshot"
+  | "performance-summary";
 
 export interface DiagnosticArtifactRef {
   artifactId: string;
@@ -117,6 +166,8 @@ export interface BrowserOperationRun {
   lane: BrowserLane;
   /** Optional device emulation profile applied (managed lane only, diagnostic-only). */
   deviceProfile?: DeviceProfileName;
+  /** Optional performance diagnostic profile applied (managed lane only, opt-in, diagnostic-only). */
+  performanceProfile?: PerformanceProfileName;
   /** The origin as requested (pre-normalization). */
   requestedOrigin: string;
   /** SHA-256 of the normalized policy JSON at authorization time. */
@@ -170,6 +221,8 @@ export interface BrowserLanePolicy {
   allowedActions: BrowserActionKind[];
   /** Managed only: max runs per cycle. */
   maxRunsPerCycle?: number;
+  /** Managed only: opt-in performance diagnostic profile. Off (undefined/false) by default. */
+  performanceDiagnostics?: boolean;
   /** Managed only: per-run timeout. */
   timeoutMs?: number;
   /** Interactive only: max lease duration. */
@@ -232,7 +285,9 @@ export type BrowserDenialCode =
   | "transport_binding_missing"
   | "devtools_unavailable"
   | "generic_mcp_bypass_denied"
-  | "unknown_device_profile";
+  | "unknown_device_profile"
+  | "unknown_performance_profile"
+  | "performance_profile_denied";
 
 export interface BrowserDenialReason {
   code: BrowserDenialCode;
@@ -308,6 +363,7 @@ export type BrowserOperationEvent =
   | { type: "browser:operation-started"; runId: string; ts: string }
   | { type: "browser:operation-step-finished"; runId: string; actionId: string; ts: string }
   | { type: "browser:diagnostic-recorded"; runId: string; ts: string; ref: DiagnosticArtifactRef }
+  | { type: "browser:diagnostic-profile-finished"; runId: string; ts: string; profile: PerformanceProfileName; summary: PerformanceDiagnosticSummary }
   | { type: "browser:diagnostic-dropped"; runId: string; ts: string; failure: "redaction_failed" }
   | { type: "browser:operation-finished"; runId: string; ts: string; result: BrowserActionResult }
   | { type: "browser:mcp-bypass-denied"; ts: string; reason: BrowserDenialReason }

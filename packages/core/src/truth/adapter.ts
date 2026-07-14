@@ -21,7 +21,13 @@ import {
   type TruthState,
 } from "./selectors.js";
 import type { StoryDeliveryTruth } from "./query.js";
-import { TERMINAL_SCHEMA_EPOCH_SEC, type TerminalOutcome } from "@roll/spec";
+import {
+  TERMINAL_SCHEMA_EPOCH_SEC,
+  type BrowserOperationEvent,
+  type BrowserOperationsTruth,
+  type CaptureBridgeLink,
+  type TerminalOutcome,
+} from "@roll/spec";
 
 /** US-TRUTH-001 schema epoch — single home in @roll/spec (terminal.ts). */
 export const TRUTH_SCHEMA_EPOCH_SEC = TERMINAL_SCHEMA_EPOCH_SEC;
@@ -181,4 +187,107 @@ export function outcomeToPanel(outcome: CycleTruth["outcome"], state: TruthState
     default:
       return "unknown";
   }
+}
+
+/** A live lease lock fact read by infra; the adapter never probes or mutates it. */
+export interface BrowserActiveLeaseFact {
+  leaseId: string;
+  storyId?: string;
+  expiresAt: string;
+}
+
+/** Declared browser-operation inputs. Gathering IO belongs to the caller. */
+export interface BrowserOperationsTruthFacts {
+  events: readonly BrowserOperationEvent[];
+  activeLease?: BrowserActiveLeaseFact | null;
+  captureLinks?: readonly CaptureBridgeLink[];
+  nowMs: number;
+  storyId?: string;
+  cycleId?: string;
+  collectedAt?: string;
+}
+
+function matchesScope(value: string | undefined, scope: string | undefined): boolean {
+  return scope === undefined || scope === "" || value === scope;
+}
+
+function managedTruth(facts: BrowserOperationsTruthFacts): BrowserOperationsTruth["managed"] {
+  const runIds = new Set<string>();
+  for (const event of facts.events) {
+    if (event.type !== "browser:operation-requested" || event.request.lane !== "managed") continue;
+    if (!matchesScope(event.request.storyId, facts.storyId)) continue;
+    if (!matchesScope(event.request.cycleId, facts.cycleId)) continue;
+    runIds.add(event.runId);
+  }
+  if (runIds.size === 0) return { status: "unknown", unavailableReason: "no managed operation facts" };
+
+  const completed = new Map<string, "ok" | "bad">();
+  for (const event of facts.events) {
+    if (!("runId" in event) || !runIds.has(event.runId)) continue;
+    if (event.type === "browser:operation-finished") {
+      completed.set(event.runId, event.result.status === "ok" ? "ok" : "bad");
+    }
+    if (event.type === "browser:operation-denied") completed.set(event.runId, "bad");
+  }
+  if ([...completed.values()].includes("bad")) {
+    return { status: "degraded", unavailableReason: "managed operation failed" };
+  }
+  if (completed.size !== runIds.size) {
+    return { status: "unknown", unavailableReason: "managed operation has no terminal fact" };
+  }
+  return { status: "ready" };
+}
+
+function leaseTruth(facts: BrowserOperationsTruthFacts): BrowserOperationsTruth["lease"] {
+  const active = facts.activeLease ?? null;
+  if (active !== null && matchesScope(active.storyId, facts.storyId)) {
+    const expiryMs = Date.parse(active.expiresAt);
+    if (!Number.isFinite(expiryMs)) {
+      return { status: "unknown", expiresAt: active.expiresAt, unavailableReason: "owner lease expiry is unparseable" };
+    }
+    if (expiryMs <= facts.nowMs) {
+      return { status: "expired", expiresAt: active.expiresAt, unavailableReason: "owner lease expired" };
+    }
+    return { status: "ready", expiresAt: active.expiresAt };
+  }
+
+  const grants = facts.events.filter(
+    (event): event is Extract<BrowserOperationEvent, { type: "browser:lease-granted" }> =>
+      event.type === "browser:lease-granted" && matchesScope(event.storyId, facts.storyId),
+  );
+  const rejected = [...facts.events].reverse().find(
+    (event): event is Extract<BrowserOperationEvent, { type: "browser:lease-rejected" }> =>
+      event.type === "browser:lease-rejected" && matchesScope(event.storyId, facts.storyId),
+  );
+  if (rejected !== undefined) return { status: "degraded", unavailableReason: rejected.reason.message };
+  const grant = grants.at(-1);
+  if (grant === undefined) return { status: "unknown", unavailableReason: "no owner lease facts" };
+  if (Date.parse(grant.expiresAt) <= facts.nowMs) {
+    return { status: "expired", expiresAt: grant.expiresAt, unavailableReason: "owner lease expired" };
+  }
+  return { status: "unknown", expiresAt: grant.expiresAt, unavailableReason: "owner lease has no active lease fact" };
+}
+
+function captureTruth(facts: BrowserOperationsTruthFacts): BrowserOperationsTruth["capture"] {
+  const links = (facts.captureLinks ?? []).filter((link) => matchesScope(link.storyId, facts.storyId));
+  if (links.length === 0) return { status: "unknown", unavailableReason: "no physical capture facts" };
+  if (links.some((link) => link.canSatisfyVisualAc)) return { status: "ready" };
+  if (links.some((link) => link.captureResponse === undefined)) {
+    return { status: "unknown", unavailableReason: "physical capture has no terminal fact" };
+  }
+  return { status: "degraded", unavailableReason: links[0]?.reason ?? "physical capture cannot satisfy visual AC" };
+}
+
+/**
+ * Project run, lease, and capture status from their declared sources only.
+ * This read-side adapter deliberately has no filesystem, network, or mutation
+ * capability so downstream surfaces cannot grow parallel raw-event parsers.
+ */
+export function browserOperationsTruth(facts: BrowserOperationsTruthFacts): BrowserOperationsTruth {
+  return {
+    managed: managedTruth(facts),
+    lease: leaseTruth(facts),
+    capture: captureTruth(facts),
+    collectedAt: facts.collectedAt ?? new Date(facts.nowMs).toISOString(),
+  };
 }

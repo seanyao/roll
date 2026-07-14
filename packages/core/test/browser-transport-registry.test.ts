@@ -34,6 +34,23 @@ describe("US-BROW-002 BrowserTransportRegistry", () => {
     });
   });
 
+  it("does not let a consumer mutation change the next resolved pin", () => {
+    const registry = new BrowserTransportRegistry();
+    const first = registry.resolve("chrome-devtools");
+    if (first.kind !== "resolved") throw new Error("expected fixed transport");
+    (first.transport.remoteDebugging as { host: string }).host = "evil.test";
+    (first.transport.args as string[])[1] = "chrome-devtools-mcp@latest";
+
+    const second = registry.resolve("chrome-devtools");
+    expect(second).toMatchObject({
+      kind: "resolved",
+      transport: {
+        args: ["-y", "chrome-devtools-mcp@1.5.0", "--no-usage-statistics"],
+        remoteDebugging: { host: "127.0.0.1", port: 9222 },
+      },
+    });
+  });
+
   it("records generic MCP bypass denials as Browser Operations events", () => {
     const events: unknown[] = [];
     const registry = new BrowserTransportRegistry((event) => events.push(event));

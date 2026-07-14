@@ -20,12 +20,14 @@ export type BrowserTransportEventRecorder = (
   event: Extract<BrowserOperationEvent, { type: "browser:mcp-bypass-denied" }>,
 ) => void;
 
-const MANAGED_TRANSPORT: BrowserTransport = {
-  logicalServer: MANAGED_DEVTOOLS_SERVER,
-  command: "npx",
-  args: ["-y", `${MANAGED_DEVTOOLS_PACKAGE}@${MANAGED_DEVTOOLS_PACKAGE_VERSION}`, "--no-usage-statistics"],
-  remoteDebugging: { host: "127.0.0.1", port: 9222 },
-};
+function managedTransport(): BrowserTransport {
+  return {
+    logicalServer: MANAGED_DEVTOOLS_SERVER,
+    command: "npx",
+    args: ["-y", `${MANAGED_DEVTOOLS_PACKAGE}@${MANAGED_DEVTOOLS_PACKAGE_VERSION}`, "--no-usage-statistics"],
+    remoteDebugging: { host: "127.0.0.1", port: 9222 },
+  };
+}
 
 /**
  * Keeps the privileged DevTools process plan outside project-controlled MCP
@@ -37,7 +39,7 @@ export class BrowserTransportRegistry {
 
   resolve(requestedServer: string): BrowserTransportResolution {
     if (requestedServer === MANAGED_DEVTOOLS_SERVER) {
-      return { kind: "resolved", transport: MANAGED_TRANSPORT };
+      return { kind: "resolved", transport: managedTransport() };
     }
     return {
       kind: "denied",

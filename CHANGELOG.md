@@ -6,6 +6,8 @@
 - 无验收清单的卡不再被误拦导致无法 publish；缺少验收证据时循环会把工作明确挂起待人复评，不再静默丢弃 (FIX-1256) `[loop]`
   <!-- evidence: .roll/features/loop-engine/FIX-1256/latest/FIX-1256-report.html -->
 - Supervisor 手动合并闸（`repair-evidence` / manual-merge diagnostics）现在与 reconcile 路径一样，同时识别 GitHub CheckRun 的 `conclusion` 和 StatusContext 的 `state`（如 Vercel）。以前只看 `conclusion`，带 StatusContext 的全绿 PR 会被判成 CI unknown，手动合并闸卡死；现在两类检查共用 `reduceStatusCheckRollup`，全绿可合并、含红可拒绝 (FIX-1252) `[loop]`
+- `roll story new --help` 不再把用户导向已退役的裸 `roll index` 命令，也不再声称会刷新不存在的 dossier；帮助文案与真实命令面对齐（仅刷新 `.roll/index.json` 缓存，且 `--no-index` 只是延后该缓存），并新增回归断言锁住这个一致态 (FIX-1251) `[cli]`
+  <!-- evidence: .roll/features/cli-simplification/FIX-1251/latest/FIX-1251-report.html -->
 
 ## v4.714.2 — 2026-07-14
 

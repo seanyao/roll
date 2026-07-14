@@ -103,6 +103,8 @@ class FakeTransportFactory implements CdpTransportFactory {
     session.when("Page.enable", () => ({}));
     session.when("Page.navigate", () => ({ frameId: "frame-1" }));
     session.when("Page.captureScreenshot", () => ({ data: "aGVsbG8=" }));
+    session.when("Emulation.setDeviceMetricsOverride", () => ({}));
+    session.when("Network.setUserAgentOverride", () => ({}));
     this.configured?.(session);
     this.sessions.push(session);
     return session;
@@ -159,6 +161,7 @@ async function run(
   payload: Record<string, string | number | boolean> = {},
   allowedOrigins = ["https://example.test"],
   timeoutMs = 5_000,
+  deviceProfile?: string,
 ): Promise<{ result: BrowserActionResult; service: BrowserOperationRunService }> {
   const adapter = new ManagedChromeAdapter(deps);
   const runService = newRun();
@@ -168,6 +171,7 @@ async function run(
     action,
     payload,
     timeoutMs,
+    deviceProfile,
   };
   return adapter.execute(input);
 }
@@ -350,5 +354,135 @@ describe("US-BROW-004b ManagedChromeAdapter", () => {
     expect(result.status).toBe("denied");
     expect(service.run.state).toBe("denied");
     expect(deps.launcher.launches).toHaveLength(0);
+  });
+
+  // ── US-BROW-014 device emulation ────────────────────────────────────────
+
+  it("applies device emulation when a valid profile is set (AC2)", async () => {
+    const deps = await makeDeps();
+    // Track what CDP methods were called for the emulation.
+    const cdps: string[] = [];
+    deps.transport.configure((session) => {
+      session.when("Emulation.setDeviceMetricsOverride", (params) => {
+        cdps.push(`Emulation.setDeviceMetricsOverride(${JSON.stringify(params)})`);
+        return {};
+      });
+      session.when("Network.setUserAgentOverride", (params) => {
+        cdps.push(`Network.setUserAgentOverride(${JSON.stringify(params)})`);
+        return {};
+      });
+    });
+
+    const { result, service } = await run(
+      deps,
+      "navigate",
+      { url: "https://example.test" },
+      ["https://example.test"],
+      5_000,
+      "Pixel 7",
+    );
+
+    expect(result.status).toBe("ok");
+    expect(service.run.state).toBe("passed");
+    // Profile cleanup still works — temp profile is removed.
+    expect(service.isProfileRemoved()).toBe(true);
+    // Emulation commands were sent.
+    expect(cdps.length).toBeGreaterThanOrEqual(1);
+    expect(cdps.some((c) => c.includes("Emulation.setDeviceMetricsOverride"))).toBe(true);
+  });
+
+  it("case-insensitively resolves device profile names", async () => {
+    const deps = await makeDeps();
+    let emulated = false;
+    deps.transport.configure((session) => {
+      session.when("Emulation.setDeviceMetricsOverride", () => {
+        emulated = true;
+        return {};
+      });
+    });
+
+    const { result } = await run(
+      deps,
+      "snapshot",
+      { selector: "h1" },
+      ["https://example.test"],
+      5_000,
+      "iphone 14",
+    );
+
+    expect(result.status).toBe("ok");
+    expect(emulated).toBe(true);
+  });
+
+  it("rejects unknown device profile names with a clear error", async () => {
+    const deps = await makeDeps();
+
+    // The adapter catches the unknown profile as a DevToolsError → failed result.
+    const { result, service } = await run(
+      deps,
+      "navigate",
+      { url: "https://example.test" },
+      ["https://example.test"],
+      5_000,
+      "Nokia 3310",
+    );
+
+    expect(result.status).toBe("failed");
+    expect(result.redactedSummary).toContain("Unknown device profile");
+    expect(service.run.state).toBe("failed");
+    const terminal = service.terminalResult();
+    expect(terminal?.kind).toBe("fail");
+    if (terminal?.kind === "fail") {
+      expect(terminal.failures[0].category).toBe("devtools-error");
+      expect(terminal.failures[0].message).toContain("Nokia 3310");
+    }
+  });
+
+  it("baseline unchanged: profile-free runs still work exactly as before (AC3)", async () => {
+    const deps = await makeDeps();
+
+    // Run without deviceProfile — must behave identically to pre-US-BROW-014.
+    const { result, service } = await run(deps, "navigate", { url: "https://example.test" });
+
+    expect(result.status).toBe("ok");
+    expect(service.run.state).toBe("passed");
+    expect(service.isProfileRemoved()).toBe(true);
+    expect(result.diagnosticRefs).toHaveLength(0);
+  });
+
+  it("baseline unchanged: screenshot still works without device profile (AC3)", async () => {
+    const deps = await makeDeps();
+
+    const { result, service } = await run(deps, "screenshot");
+
+    expect(result.status).toBe("ok");
+    expect(service.run.state).toBe("passed");
+    expect(result.diagnosticRefs).toHaveLength(1);
+    expect(result.diagnosticRefs[0].kind).toBe("devtools-screenshot");
+  });
+
+  it("iPad Pro profile (tablet, not mobile) applies correctly", async () => {
+    const deps = await makeDeps();
+    let metricsParams: Record<string, unknown> = {};
+    deps.transport.configure((session) => {
+      session.when("Emulation.setDeviceMetricsOverride", (params) => {
+        metricsParams = params;
+        return {};
+      });
+    });
+
+    const { result } = await run(
+      deps,
+      "navigate",
+      { url: "https://example.test" },
+      ["https://example.test"],
+      5_000,
+      "iPad Pro",
+    );
+
+    expect(result.status).toBe("ok");
+    expect(metricsParams["mobile"]).toBe(false);
+    expect(metricsParams["width"]).toBe(1024);
+    expect(metricsParams["height"]).toBe(1366);
   });
 });

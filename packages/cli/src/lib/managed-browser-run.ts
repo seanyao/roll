@@ -38,6 +38,8 @@ export interface ManagedFixtureRunOptions {
   failure?: ManagedFixtureFailure;
   /** Per-run timeout; defaults small for injected timeouts, 5s otherwise. */
   timeoutMs?: number;
+  /** Optional device emulation profile name (US-BROW-014). */
+  deviceProfile?: string;
 }
 
 /** The operator-observable outcome of a managed fixture run. */
@@ -59,6 +61,8 @@ export interface ManagedRunReport {
   failures: { category: string; message: string }[];
   /** Redacted, operator-safe one-line summary from the adapter. */
   summary: string;
+  /** The device profile applied, if any (US-BROW-014). */
+  deviceProfile?: string;
 }
 
 const DEFAULT_MANAGED_POLICY = (targetUrl: string): BrowserLanePolicy => ({
@@ -109,6 +113,7 @@ export async function runManagedFixtureOperation(options: ManagedFixtureRunOptio
     action: options.action,
     payload: buildPayload(options),
     timeoutMs,
+    deviceProfile: options.deviceProfile,
   });
 
   const terminal = service.terminalResult();
@@ -126,6 +131,7 @@ export async function runManagedFixtureOperation(options: ManagedFixtureRunOptio
         ? terminal.failures.map((f) => ({ category: f.category, message: f.message }))
         : service.diagnosticFailures.map((f) => ({ category: f.category, message: f.message })),
     summary: result.redactedSummary,
+    deviceProfile: options.deviceProfile,
   };
 }
 
@@ -164,6 +170,10 @@ export function renderManagedRunReport(report: ManagedRunReport): string[] {
     for (const failure of report.failures) {
       lines.push(`    - ${failure.category}: ${failure.message}`);
     }
+  }
+
+  if (report.deviceProfile !== undefined) {
+    lines.push(`  device profile / 设备仿真: ${report.deviceProfile}`);
   }
 
   lines.push(`  summary / 摘要:         ${report.summary}`);

@@ -43,6 +43,10 @@ export interface ManagedFixtureRecorder {
   profileDirs: string[];
   removedDirs: string[];
   cdpMethods: string[];
+  /** Whether device emulation was applied (US-BROW-014). */
+  deviceEmulated: boolean;
+  /** The emulation parameters that were sent, if any. */
+  emulationParams?: Record<string, unknown>;
 }
 
 /** A fake Chrome process — no OS process is ever spawned. */
@@ -97,6 +101,20 @@ class FakeCdpSession implements CdpSession {
     // DevTools error: reject with a real Error (category=devtools-error).
     if (this.options.failure === "devtools-error" && method === "Runtime.evaluate") {
       throw new Error("fixture: simulated DevTools protocol error");
+    }
+
+    // Device emulation (US-BROW-014): record and acknowledge.
+    if (method === "Emulation.setDeviceMetricsOverride") {
+      this.recorder.deviceEmulated = true;
+      this.recorder.emulationParams = params ?? {};
+      return {};
+    }
+    if (method === "Network.setUserAgentOverride") {
+      this.recorder.emulationParams = {
+        ...(this.recorder.emulationParams ?? {}),
+        userAgent: (params as Record<string, unknown>)?.["userAgent"],
+      };
+      return {};
     }
 
     switch (method) {
@@ -185,6 +203,7 @@ export function createManagedFixtureDeps(
     profileDirs: [],
     removedDirs: [],
     cdpMethods: [],
+    deviceEmulated: false,
   };
   let idCounter = 0;
   const deps: ManagedChromeAdapterDeps = {

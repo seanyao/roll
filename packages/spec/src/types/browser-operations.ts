@@ -29,6 +29,34 @@ export type BrowserActionKind =
   | "network"
   | "screenshot";
 
+// ── Device profiles (US-BROW-014) ───────────────────────────────────────────
+
+/** The finite, policy-controlled set of device emulation profile names. */
+export type DeviceProfileName = "Pixel 7" | "iPhone 14" | "iPad Pro";
+
+/** All known device profile names. */
+export const DEVICE_PROFILE_NAMES: readonly DeviceProfileName[] = [
+  "Pixel 7",
+  "iPhone 14",
+  "iPad Pro",
+];
+
+/** Parameters for a single device emulation profile. */
+export interface DeviceProfile {
+  /** The allowlisted profile name. */
+  name: DeviceProfileName;
+  /** Viewport width in CSS pixels. */
+  width: number;
+  /** Viewport height in CSS pixels. */
+  height: number;
+  /** Device pixel ratio (DPR). */
+  deviceScaleFactor: number;
+  /** Whether to emulate a mobile device (touch events, mobile UA). */
+  mobile: boolean;
+  /** Optional Chrome user-agent override. When absent Chrome uses its default UA. */
+  userAgent?: string;
+}
+
 /** The closed set of all permitted browser actions. */
 export const BROWSER_ACTION_KINDS: readonly BrowserActionKind[] = [
   "navigate",
@@ -87,6 +115,8 @@ export interface BrowserOperationRun {
   cycleId?: string;
   caller: BrowserCaller;
   lane: BrowserLane;
+  /** Optional device emulation profile applied (managed lane only, diagnostic-only). */
+  deviceProfile?: DeviceProfileName;
   /** The origin as requested (pre-normalization). */
   requestedOrigin: string;
   /** SHA-256 of the normalized policy JSON at authorization time. */
@@ -201,7 +231,8 @@ export type BrowserDenialCode =
   | "policy_fingerprint_tamper"
   | "transport_binding_missing"
   | "devtools_unavailable"
-  | "generic_mcp_bypass_denied";
+  | "generic_mcp_bypass_denied"
+  | "unknown_device_profile";
 
 export interface BrowserDenialReason {
   code: BrowserDenialCode;

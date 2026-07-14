@@ -24,6 +24,7 @@ import {
   BrowserTransportVersion,
   MANAGED_DEVTOOLS_PACKAGE_VERSION,
   pinnedDevToolsVersionSource,
+  resolveDeviceProfile,
   type VersionSource,
 } from "@roll/core";
 import {
@@ -96,6 +97,7 @@ const USAGE =
   "     --selector <sel>   DOM selector for --action snapshot.\n" +
   "     --redirect <url>   Simulate a redirect (proves redirect denial).\n" +
   "     --fail <timeout|crash|devtools-error>  Inject a categorized diagnostic failure.\n" +
+  "     --profile <name>   Device emulation profile (Pixel 7, iPhone 14, iPad Pro).\n" +
   "     --json             Emit the machine-readable run report.\n" +
   "  interactive --story <US-ID> --origin <https-origin> --action <navigate|click|fill|press_key> [action flags]\n" +
   "     Requires an attached TTY and one owner approval. Connects only to an already-open loopback Chrome debug endpoint.\n" +
@@ -187,12 +189,23 @@ async function runSubcommand(args: string[], deps: BrowserCommandDeps): Promise<
     return 1;
   }
 
+  // Validate device profile early (US-BROW-014): fail-fast with clear error.
+  const profileArg = flagValue(args, "--profile");
+  if (profileArg !== undefined) {
+    const resolved = resolveDeviceProfile(profileArg);
+    if ("code" in resolved) {
+      process.stderr.write(`roll browser run: ${resolved.message}\n`);
+      return 1;
+    }
+  }
+
   const report = await runManagedFixtureOperation({
     action: actionArg,
     targetUrl: flagValue(args, "--url") ?? "https://fake.target.test",
     selector: flagValue(args, "--selector"),
     redirectTo: flagValue(args, "--redirect"),
     failure: failArg as ManagedFixtureFailure | undefined,
+    deviceProfile: profileArg,
   });
 
   if (args.includes("--json")) {

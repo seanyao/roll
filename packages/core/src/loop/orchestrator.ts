@@ -396,6 +396,13 @@ export interface PublishResult {
   degraded?: boolean;
   /** Machine-readable root-cause tag when {@link degraded} is true. */
   rootCauseKey?: string;
+  /**
+   * FIX-908 / FIX-1256: the publish was blocked by a runner gate (e.g. the
+   * evidence gate) AFTER the cycle's code-stage gates passed. The work is
+   * committed and CI-green; classify as `needs_review` so the branch is
+   * preserved for review instead of being silently unpublished.
+   */
+  gateBlocked?: boolean;
 }
 
 /**
@@ -421,6 +428,10 @@ export interface PublishResult {
  */
 export function classifyPublish(pub: PublishResult): V2CycleStatus {
   if (pub.status === 0 && pub.manualMerge === true && pub.draft === true) return "needs_review";
+  // FIX-908 / FIX-1256: a code-green cycle blocked ONLY by a runner gate
+  // (e.g. missing acceptance evidence) is preserved for review, not discarded
+  // as an unpublished neutral outcome.
+  if (pub.gateBlocked === true) return "needs_review";
   // FIX-244: publish-ok means the PR is OPEN, merge pending — "published", not
   // "done" (done ≡ merged to main, I4). Backfill flips it on merge evidence.
   if (pub.status === 0) return "published";

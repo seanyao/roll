@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, realpathSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
+  acBlockPresentInSpec,
   appendDelivery,
   evidenceGateBeforePush,
   nodeDeliveryStore,
@@ -16,7 +17,7 @@ import {
 import { AWAITING_REVIEW_STATUS_MARKER, STATUS_MARKER, absent, present } from "@roll/spec";
 import { prNumberFromUrl } from "@roll/infra";
 import { writeCycleRoleSummaryBestEffort } from "./cycle-role-artifact-writer.js";
-import { acMapCandidates, verificationReportFresh } from "./attest-gate.js";
+import { acMapCandidates, storySpecPath, verificationReportFresh } from "./attest-gate.js";
 import { markDoneGuarded } from "./done-guard.js";
 import { addPendingPrCreate } from "./pending-pr-create.js";
 import { applyCleanupManifest, CLEANUP_TIMEOUT_MS, resolveCleanupManifest } from "./environment-cleanup.js";
@@ -82,9 +83,23 @@ export async function executeTerminalCommand(
       // short-circuit above already returned for branches that have a PR.
       const gateStoryId = ctx.storyId ?? "";
       if (gateStoryId !== "" && cmd.docOnly !== true) {
+        // FIX-1256: share the "does this story owe an acceptance report?"
+        // decision with the attest gate. A card without an `**AC:**` block owes
+        // neither report nor ac-map, so the evidence gate aligns with the
+        // attest gate's "produced" verdict.
+        let acceptanceReportRequired = true;
+        const specPath = storySpecPath(ports.paths.worktreePath, gateStoryId);
+        if (specPath !== null) {
+          try {
+            acceptanceReportRequired = acBlockPresentInSpec(readFileSync(specPath, "utf8"), gateStoryId);
+          } catch {
+            /* unreadable spec → fail-closed: require evidence */
+          }
+        }
         const gate = evidenceGateBeforePush({
           attestReportPresent: verificationReportFresh(ports.paths.worktreePath, gateStoryId, undefined, ports.repoCwd),
           acMapPresent: acMapCandidates(ports.paths.worktreePath, gateStoryId, ports.repoCwd).some((p) => existsSync(p)),
+          acceptanceReportRequired,
         });
         // Best-effort like every other appendEvent in this handler: an
         // events-file write blip is observability loss, never a publish block.
@@ -108,7 +123,16 @@ export async function executeTerminalCommand(
             ports.paths.alertsPath,
             `evidence gate (US-DELIV-004): publish BLOCKED for ${gateStoryId} (cycle ${ctx.cycleId ?? "?"}) — ${gate.reasons.join("; ")} — branch NOT pushed, no PR opened (blocked_no_evidence; fail-loud, zero-TCR class)`,
           );
-          const pub: PublishResult = { status: 1, manualMerge, ...(cmd.draft === true ? { draft: true } : {}) };
+          // FIX-908 / FIX-1256: a CI-green cycle that is only blocked by a
+          // missing acceptance artifact is NOT silently unpublished. Flag the
+          // result so the publish ladder classifies it as `needs_review` and
+          // preserves the branch for human review.
+          const pub: PublishResult = {
+            status: 1,
+            manualMerge,
+            gateBlocked: true,
+            ...(cmd.draft === true ? { draft: true } : {}),
+          };
           return { event: { type: "published", result: pub } };
         }
       }

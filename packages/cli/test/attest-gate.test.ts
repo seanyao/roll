@@ -7,10 +7,11 @@
  * explicitly downgrade to soft for migration windows.
  */
 import { execSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
+import { acBlockPresentInSpec, evidenceGateBeforePush } from "@roll/core";
 import {
   DuplicateStoryIdError,
   acMapCandidates,
@@ -2218,5 +2219,54 @@ describe("FIX-1233 — cross-tree evidence roots (in-repo .roll: worktree ≠ pe
     // still legitimately skip — assert on the reason, not the verdict.)
     expect(res.reasons.join(" ")).not.toContain("empty shell");
     expect(res.reasons.join(" ")).not.toContain("no fresh acceptance report");
+  });
+});
+
+
+describe("FIX-1256 — attest gate and evidence gate agree on AC/no-AC stories", () => {
+  function withSpecOnly(storyId: string, specText: string): string {
+    const wt = tmp("fix1256");
+    const dir = join(wt, ".roll", "features", "uncategorized", storyId);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "spec.md"), specText);
+    return wt;
+  }
+
+  it("no AC block: attest gate produces, evidence gate earns (no artifacts required)", () => {
+    const storyId = "FIX-1256-NOAC";
+    const wt = withSpecOnly(storyId, `---\nid: ${storyId}\n---\n# ${storyId}\n\nNo AC block here.\n`);
+    const { s } = sinks();
+    const attest = runAttestGate(wt, storyId, "c-1256", "hard", 1000, s);
+    expect(attest.verdict).toBe("produced");
+    expect(attest.blocked).toBe(false);
+
+    const specText = readFileSync(join(wt, ".roll", "features", "uncategorized", storyId, "spec.md"), "utf8");
+    const required = acBlockPresentInSpec(specText, storyId);
+    expect(required).toBe(false);
+    const evidence = evidenceGateBeforePush({
+      attestReportPresent: false,
+      acMapPresent: false,
+      acceptanceReportRequired: required,
+    });
+    expect(evidence.ok).toBe(true);
+  });
+
+  it("AC block but missing artifacts: attest gate skips/blocked, evidence gate blocked", () => {
+    const storyId = "FIX-1256-AC";
+    const wt = withSpecOnly(storyId, `---\nid: ${storyId}\n---\n# ${storyId}\n\n**AC:**\n- [ ] something\n`);
+    const { s } = sinks();
+    const attest = runAttestGate(wt, storyId, "c-1256b", "hard", 1000, s);
+    expect(attest.verdict).toBe("skipped");
+    expect(attest.blocked).toBe(true);
+
+    const specText = readFileSync(join(wt, ".roll", "features", "uncategorized", storyId, "spec.md"), "utf8");
+    const required = acBlockPresentInSpec(specText, storyId);
+    expect(required).toBe(true);
+    const evidence = evidenceGateBeforePush({
+      attestReportPresent: false,
+      acMapPresent: false,
+      acceptanceReportRequired: required,
+    });
+    expect(evidence.ok).toBe(false);
   });
 });

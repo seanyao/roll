@@ -466,3 +466,26 @@ export interface BrowserEnvironmentReadiness {
   capture: BrowserLaneReadiness;
   observations: BrowserDependencyObservation[];
 }
+
+// ── US-BROW-009a — declared browser-operation truth projections ───────────
+
+/** A read-side verdict over declared browser-operation facts. Missing facts are
+ * `unknown`, never an implicit pass. */
+export type BrowserOperationTruthStatus = "ready" | "degraded" | "expired" | "unknown";
+
+/** One browser-operation fact projection for status consumers. */
+export interface BrowserOperationTruthFact {
+  status: BrowserOperationTruthStatus;
+  /** Reason a status is unavailable, degraded, expired, or still unknown. */
+  unavailableReason?: string;
+  /** Lease expiry remains visible to callers rather than being folded away. */
+  expiresAt?: string;
+}
+
+/** The single adapter result consumed by browser status surfaces. */
+export interface BrowserOperationsTruth {
+  managed: BrowserOperationTruthFact;
+  lease: BrowserOperationTruthFact;
+  capture: BrowserOperationTruthFact;
+  collectedAt: string;
+}

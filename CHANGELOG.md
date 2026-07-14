@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### 浏览器操作
+- `roll browser update --check` 报告当前 DevTools 传输包版本与可用候选版本（只读，不下载、不安装、不改配置）；`roll browser update --apply --confirm` 经显式确认后执行原子更新，更新前运行冒烟检查，失败则保留原版本 (US-BROW-010) `[cli]`
+
 ### 稳定性
 - 无验收清单的卡不再被误拦导致无法 publish；缺少验收证据时循环会把工作明确挂起待人复评，不再静默丢弃 (FIX-1256) `[loop]`
   <!-- evidence: .roll/features/loop-engine/FIX-1256/latest/FIX-1256-report.html -->

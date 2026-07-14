@@ -195,7 +195,7 @@ export function registerAll(): void {
   // US-BROW-010: `browser update` — check and approve DevTools transport updates.
   registerPorted("browser", (args) => browserCommand(args), {
     help:
-      "Usage: roll browser <setup|doctor|run|update>\n  setup --dry-run previews machine config + preflight; setup --confirm writes ~/.roll/browser-operations.yaml; doctor [--json] reports lane readiness; run [--action …] runs a managed-lane fixture against a fake target and prints an operator-observable diagnostic result; update [--check|--apply --confirm] manages transport version.\n浏览器操作依赖预检与体检；setup --dry-run 只预览不写入，doctor 报告 managed/interactive/capture 就绪度，run 对假目标跑受管通道 fixture 并打印可观测诊断结果，update 管理传输版本。",
+      "Usage: roll browser <setup|doctor|run|interactive|update>\n  setup --dry-run previews machine config + preflight; setup --confirm writes ~/.roll/browser-operations.yaml; doctor [--json] reports lane readiness; run [--action …] runs a managed-lane fixture against a fake target and prints an operator-observable diagnostic result; interactive requires an attached TTY and one owner approval before connecting to an already-open loopback Chrome endpoint for one typed low-risk action; update [--check|--apply --confirm] manages transport version.\n浏览器操作依赖预检与体检；setup --dry-run 只预览不写入，doctor 报告 managed/interactive/capture 就绪度，run 对假目标跑受管通道 fixture 并打印可观测诊断结果；interactive 必须附着 TTY 并逐次由 owner 批准，才可连接已开启的本机 Chrome 调试端点执行一个低风险 typed 动作；update 管理传输版本。",
   });
   // `attest`: the acceptance-evidence report (US-ATTEST-006) — v3-native, no
   // bash counterpart (additive; the evidence chain is new product surface).

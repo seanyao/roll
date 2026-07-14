@@ -116,6 +116,25 @@ export class InteractiveChromeAdapter {
   }
 }
 
+/** Create the production connector for a Chrome instance the owner started. */
+export function createLoopbackOwnerChromeAdapter(endpoint: string): InteractiveChromeAdapter {
+  const base = loopbackEndpoint(endpoint);
+  return new InteractiveChromeAdapter({
+    discoverTargets: async () => {
+      const response = await fetch(new URL("/json/list", base));
+      if (!response.ok) throw new Error(`Owner Chrome target list returned ${response.status}`);
+      const parsed = await response.json();
+      if (!Array.isArray(parsed)) throw new Error("Owner Chrome target list is invalid");
+      return parsed.flatMap((target): OwnerChromeTarget[] => {
+        if (!isOwnerChromeTarget(target)) return [];
+        return [{ id: target.id, url: target.url, webSocketDebuggerUrl: target.webSocketDebuggerUrl }];
+      });
+    },
+    connect: async (target) => openCdpSession(target.webSocketDebuggerUrl),
+    nowMs: Date.now,
+  });
+}
+
 function originFor(value: string): string | undefined {
   try {
     return new URL(value).origin;
@@ -146,4 +165,61 @@ async function closeQuietly(cdp: CdpSession): Promise<void> {
   } catch {
     // A lost DevTools socket must not be retried as a background operation.
   }
+}
+
+function loopbackEndpoint(endpoint: string): URL {
+  const parsed = new URL(endpoint);
+  if (parsed.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]", "::1"].includes(parsed.hostname)) {
+    throw new Error("Owner Chrome debug endpoint must be an already-open loopback HTTP endpoint");
+  }
+  return parsed;
+}
+
+function isOwnerChromeTarget(value: unknown): value is OwnerChromeTarget {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.id === "string" && typeof candidate.url === "string" && typeof candidate.webSocketDebuggerUrl === "string";
+}
+
+interface SocketLike {
+  send(text: string): void;
+  close(): void;
+  addEventListener(type: "open" | "message" | "error", listener: (event: { data?: unknown }) => void): void;
+}
+
+async function openCdpSession(url: string): Promise<CdpSession> {
+  const Socket = (globalThis as Record<string, unknown>)["WebSocket"];
+  if (typeof Socket !== "function") throw new Error("WebSocket is unavailable in this runtime");
+  const socket = new (Socket as new (url: string) => SocketLike)(url);
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Owner Chrome DevTools connection timed out")), 5_000);
+    socket.addEventListener("open", () => { clearTimeout(timer); resolve(); });
+    socket.addEventListener("error", () => { clearTimeout(timer); reject(new Error("Owner Chrome DevTools connection failed")); });
+  });
+  let nextId = 1;
+  const pending = new Map<number, { resolve: (value: unknown) => void; reject: (reason: Error) => void }>();
+  socket.addEventListener("message", (event) => {
+    try {
+      const message = JSON.parse(String(event.data ?? "")) as { id?: unknown; result?: unknown; error?: { message?: unknown } };
+      if (typeof message.id !== "number") return;
+      const request = pending.get(message.id);
+      pending.delete(message.id);
+      if (request === undefined) return;
+      if (message.error !== undefined) request.reject(new Error(String(message.error.message ?? "DevTools error")));
+      else request.resolve(message.result);
+    } catch {
+      // Ignore malformed unsolicited DevTools messages.
+    }
+  });
+  return {
+    send(method, params) {
+      return new Promise((resolve, reject) => {
+        const id = nextId++;
+        pending.set(id, { resolve, reject });
+        try { socket.send(JSON.stringify({ id, method, params })); }
+        catch (error) { pending.delete(id); reject(error instanceof Error ? error : new Error(String(error))); }
+      });
+    },
+    close: async () => { socket.close(); },
+  };
 }

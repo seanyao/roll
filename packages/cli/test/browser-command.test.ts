@@ -5,6 +5,7 @@ import {
   type VersionSource,
 } from "@roll/core";
 import { browserCommand } from "../src/commands/browser.js";
+import type { InteractiveOperationResult } from "@roll/infra";
 import { collectBrowserEnvironmentReadiness } from "../src/lib/browser-readiness-doctor.js";
 import { defaultBrowserEnvironmentProbeDeps } from "@roll/infra";
 
@@ -372,5 +373,81 @@ describe("US-BROW-010 roll browser update", () => {
     expect(out).toContain("applied");
     expect(out).toContain("smoke check: passed");
     expect(out).toContain("browser doctor");
+  });
+});
+
+describe("US-BROW-008b roll browser interactive", () => {
+  const interactiveArgs = [
+    "interactive",
+    "--story", "US-BROW-008b",
+    "--origin", "https://app.example.test",
+    "--action", "navigate",
+    "--url", "https://app.example.test/account",
+  ];
+
+  it("rejects non-TTY callers before requesting owner approval", async () => {
+    const c = capture();
+    const approve = vi.fn();
+    const run = vi.fn();
+
+    const code = await browserCommand(interactiveArgs, {
+      ...noWriteDeps(),
+      isTTY: () => false,
+      readApproval: approve,
+      interactiveRun: run,
+      stdout: c.stdout,
+    });
+
+    expect(code).toBe(1);
+    expect(approve).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+    expect(c.read()).toMatch(/requires an attached TTY/i);
+  });
+
+  it("shows the full owner approval payload, then runs exactly one approved action without claiming CI passed", async () => {
+    const c = capture();
+    const approve = vi.fn(async () => true);
+    const result: InteractiveOperationResult = {
+      kind: "completed",
+      tabId: "owner-tab",
+      ciPassed: false,
+      result: { runId: "run", actionId: "action", status: "ok", diagnosticRefs: [], redactedSummary: "navigated to approved origin" },
+    };
+    const run = vi.fn(async () => result);
+
+    const code = await browserCommand(interactiveArgs, {
+      ...noWriteDeps(),
+      isTTY: () => true,
+      readApproval: approve,
+      interactiveRun: run,
+      stdout: c.stdout,
+    });
+
+    expect(code).toBe(0);
+    expect(approve).toHaveBeenCalledOnce();
+    expect(approve.mock.calls[0]?.[0]).toContain("story: US-BROW-008b");
+    expect(approve.mock.calls[0]?.[0]).toContain("origin: https://app.example.test");
+    expect(approve.mock.calls[0]?.[0]).toContain("credential export: denied");
+    expect(approve.mock.calls[0]?.[0]).toContain("expiry:");
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ storyId: "US-BROW-008b", origin: "https://app.example.test" }));
+    expect(c.read()).toContain("manual owner-run result: ok");
+    expect(c.read()).toContain("does not make CI pass");
+  });
+
+  it("stops on owner denial without connecting to Chrome", async () => {
+    const c = capture();
+    const run = vi.fn();
+
+    const code = await browserCommand(interactiveArgs, {
+      ...noWriteDeps(),
+      isTTY: () => true,
+      readApproval: async () => false,
+      interactiveRun: run,
+      stdout: c.stdout,
+    });
+
+    expect(code).toBe(1);
+    expect(run).not.toHaveBeenCalled();
+    expect(c.read()).toMatch(/owner declined/i);
   });
 });

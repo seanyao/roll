@@ -149,6 +149,15 @@ roll browser update --apply --confirm
 验收。故事需要视觉验收时，请用 **Roll Capture**——对真实终端/应用的物理截图
 ——只有它满足该要求。见[验收证据](acceptance-evidence.md)。
 
+## Dossier 时间线（可选）
+
+当故事已有声明的浏览器操作事实（ledger 的 start/finish、lease 的
+grant/expiry/release，或物理截图结果）时，交付 dossier 的 Execution 区会显示紧凑的
+**浏览器操作时间线**。排序只来自已声明时间戳——缺失类别以诚实的 absent + 原因
+呈现，绝不虚构时间点或结论。脱敏诊断产物与物理截图只有在既有 dossier 授权规则
+（本地 href 映射）允许时才会变为链接；否则只显示标签。没有浏览器事实的故事保持
+原先 dossier 形态不变。
+
 ## 安全恢复
 
 - 若 `doctor` 报告 `managed: degraded`，已有的 Playwright 与 Roll Capture 路径

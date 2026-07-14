@@ -163,6 +163,17 @@ acceptance, use **Roll Capture** — a physical screenshot of your real
 terminal/app — which alone satisfies that requirement. See
 [Acceptance evidence](acceptance-evidence.md).
 
+## Dossier timeline (optional)
+
+When a story has declared browser-operation facts (ledger start/finish, lease
+grant/expiry/release, or physical-capture results), the delivery dossier shows a
+compact **Browser operations timeline** under Execution. Ordering comes only from
+declared timestamps — missing categories render as honest absences with reasons,
+never an invented stamp or verdict. Redacted diagnostic artifacts and physical
+capture images are linked only when the viewer is authorized under existing
+dossier rules (local href map); otherwise the label stays visible without a
+link. Stories with no browser facts keep the previous dossier shape unchanged.
+
 ## Safe recovery
 
 - If `doctor` reports `managed: degraded`, existing Playwright and Roll Capture

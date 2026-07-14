@@ -15,13 +15,15 @@
  * data-complete form.
  */
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi, buildExecutionCastProjection, type ExecutionCastRow } from "@roll/core";
-import { type CycleRoleSummary, type CycleRoleName, type CycleRoleAttemptState, type DeliveryLadder, parseEventLine, type StoryEvidenceFlags, type BrowserOperationsTruth } from "@roll/spec";
+import { type CycleRoleSummary, type CycleRoleName, type CycleRoleAttemptState, type DeliveryLadder, parseEventLine, type StoryEvidenceFlags, type BrowserOperationsTruth, type BrowserOperationsTimeline } from "@roll/spec";
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join as joinPath, relative as relativePath, resolve as resolvePath, sep } from "node:path";
 import { type DossierStory } from "./archive.js";
 import { rowDelivered } from "./truth-adapter.js";
 import { collectBrowserTruth } from "./browser-truth-collect.js";
+import { collectBrowserTimeline } from "./browser-timeline-collect.js";
+import { renderBrowserOperationsTimelineHtml } from "./browser-ops-timeline.js";
 import { DOSSIER_CSS } from "./dossier-css.js";
 import { SPINE_STAGES, deriveDeliveryLadder } from "./dossier-index.js";
 import { readLatestStoryReviewScore, readReviewScoreTrend, type ReviewScoreView } from "./review-score.js";
@@ -202,6 +204,10 @@ export interface StoryDossierInput {
   cycleRoleArtifactHrefs?: Record<string, string>;
   /** US-BROW-009b: truth-adapter browser readiness for this story. */
   browserTruth?: BrowserOperationsTruth;
+  /** US-BROW-013: compact timeline projected from declared browser facts. */
+  browserTimeline?: BrowserOperationsTimeline;
+  /** US-BROW-013: authorized artifact hrefs for timeline diagnostic/capture links. */
+  browserTimelineArtifactHrefs?: Record<string, string>;
 }
 
 /**
@@ -985,17 +991,23 @@ export function renderStoryDossier(d: StoryDossierInput): string {
 
   // US-BROW-009b: browser operations summary from truth adapter.
   const browserDossierHtml = browserDossierBlock(d.browserTruth);
+  // US-BROW-013: optional timeline — empty when no browser facts exist.
+  const browserTimelineHtml = renderBrowserOperationsTimelineHtml(d.browserTimeline, {
+    viewerAuthorized: true,
+    artifactHrefs: d.browserTimelineArtifactHrefs,
+  });
+  const browserHtml = browserDossierHtml + browserTimelineHtml;
 
   const execution =
     (d.commits?.length ?? 0) > 0
       ? `<p>${bi(`${(d.commits ?? []).length} TCR commits`, `${(d.commits ?? []).length} 个 TCR 提交`)}</p>` +
         `<ul class="muted">${(d.commits ?? []).map((c) => `<li><code>${esc(c)}</code></li>`).join("")}</ul>` +
         executionRefsHtml(d.executionRefs ?? []) +
-        browserDossierHtml
+        browserHtml
       : (d.executionRefs?.length ?? 0) > 0
-        ? executionRefsHtml(d.executionRefs ?? []) + browserDossierHtml
-        : browserDossierHtml !== ""
-          ? browserDossierHtml
+        ? executionRefsHtml(d.executionRefs ?? []) + browserHtml
+        : browserHtml !== ""
+          ? browserHtml
           : `<p class="empty">${bi("No cycles yet", "暂无周期")}</p>`;
   // US-DOSSIER-023: the delivery node's ladder rung drives both the spine and the
   // banner, so the page never contradicts itself (claimed→merged→attested).
@@ -1106,6 +1118,14 @@ export function renderStoryDossier(d: StoryDossierInput): string {
     `.delivery-evidence dd { margin:0; }\n` +
     `.delivery-files { list-style:none; padding:0; margin:0; } .delivery-files li { margin:2px 0; }\n` +
     `.delivery-timeline { margin:0; padding-left:18px; } .delivery-timeline li { margin:2px 0; }\n` +
+    `.browser-ops-timeline { margin:12px 0; border:1px solid var(--line); border-radius:8px; padding:8px 14px; background:var(--bg-raise); }\n` +
+    `.browser-ops-timeline summary { cursor:pointer; font-weight:600; font-size:14px; }\n` +
+    `.bot-timeline, .bot-absences { list-style:none; margin:8px 0 0; padding:0; font-size:13px; }\n` +
+    `.bot-row { padding:3px 0 3px 10px; border-left:2px solid var(--line); }\n` +
+    `.bot-row.bot-present { border-left-color:var(--info); }\n` +
+    `.bot-row.bot-absent, .bot-row.bot-unknown { color:var(--muted); }\n` +
+    `.bot-absences-label { margin:10px 0 0; font:600 12px/1.4 var(--sans); color:var(--muted); }\n` +
+    `.bot-artifact-locked { color:var(--muted); }\n` +
     `.dynamic-evidence h3 { font:600 14px/1.4 var(--serif); margin:12px 0 6px; }\n` +
     `.dynamic-evidence ul { list-style:none; padding:0; margin:0; display:grid; gap:8px; }\n` +
     `.dynamic-evidence video { width:100%; max-width:680px; border:1px solid var(--line); border-radius:6px; background:#000; }\n` +
@@ -1495,6 +1515,13 @@ export function collectStoryDossierInput(projectPath: string, story: DossierStor
     out.browserTruth = collectBrowserTruth({ projectPath, storyId: story.id });
   } catch {
     // browser facts unavailable — degrade gracefully
+  }
+
+  // US-BROW-013: collect the optional browser-operations timeline.
+  try {
+    out.browserTimeline = collectBrowserTimeline({ projectPath, storyId: story.id });
+  } catch {
+    // timeline facts unavailable — degrade gracefully
   }
 
   return out;

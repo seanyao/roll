@@ -854,3 +854,26 @@ These controls apply to user-facing surfaces only. Agent contracts, code, git
 metadata, and schemas remain English. Owner conversation follows the language
 used by the owner in the current task. Run `roll doctor language` to audit docs,
 conventions, skills, and generated surfaces before release.
+
+### C12. What are the limits of `roll browser interactive`?
+
+**Short answer:** It is a foreground, owner-run, single-operation tool against a
+local Chrome debug endpoint — not a background automation or remote browser.
+
+**Details:** `roll browser interactive` requires:
+
+- An attached TTY and explicit owner approval for every operation.
+- A Chrome you started yourself with a loopback debug port such as
+  `--remote-debugging-port=9222` on `127.0.0.1`.
+
+It will **never**:
+
+- Run from a background scheduler or CI job.
+- Connect to a remote or non-loopback endpoint.
+- Export cookies, storage, or network bodies.
+- Start Chrome automatically.
+- Make CI pass on its own — the result is for **owner-run manual-attest** only.
+
+The lease lasts at most 15 minutes and is released immediately after the
+operation. For unattended diagnostics, use the managed lane (`roll browser run`)
+instead.

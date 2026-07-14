@@ -1,24 +1,25 @@
-# Roll — Browser Operations (managed lane)
+# Roll — Browser Operations (managed + interactive lanes)
 
 Roll can drive a **managed, isolated Chrome via the DevTools transport** to
 collect browser diagnostics — navigation checks, DOM snapshots, console and
-network capture, and diagnostic screenshots. This is the first user-visible
-slice of browser operations. It is opt-in, dependency-gated, and deliberately
-narrow.
+network capture, and diagnostic screenshots. It also supports a single
+**interactive owner-Chrome operation** against an already-open localhost debug
+endpoint, with foreground owner approval and strict lease controls.
 
-Two things it is **not**:
+Both lanes are opt-in, dependency-gated, and deliberately narrow.
 
-- It is **not** an installer. Roll never adds a dependency to your product
+Two things they are **not**:
+
+- They are **not** installers. Roll never adds a dependency to your product
   repo's `package.json`, and never enables remote debugging on your own
   (owner) Chrome. Setup only writes a machine-level config after you confirm.
-- Its output is **not** visual acceptance evidence. A managed diagnostic
-  screenshot proves the page loaded; it does not satisfy a story's visual AC.
-  Only **Roll Capture** (a physical screenshot of your real terminal/app)
-  satisfies visual acceptance — see
+- Their output is **not** visual acceptance evidence. A managed diagnostic
+  screenshot or an interactive owner-run result proves a page action succeeded;
+  neither satisfies a story's visual AC. Only **Roll Capture** (a physical
+  screenshot of your real terminal/app) satisfies visual acceptance — see
   [Acceptance evidence](acceptance-evidence.md).
 
-> The interactive owner-Chrome lane is a later slice and is **not** described
-> here as available. This page documents only the managed lane that ships today.
+This page documents the managed lane and the interactive lane that ship today.
 
 ## Managed
 
@@ -153,13 +154,85 @@ intact on failure:
 roll browser update --apply --confirm
 ```
 
+## Interactive
+
+The interactive lane lets you run **one low-risk owner-Chrome operation** at a
+time against a page you already have open in your own Chrome. It is designed
+for manual attest workflows, not background automation.
+
+### What you must set up first
+
+Roll **does not start Chrome for you** and **does not enable remote debugging**.
+You must launch your own Chrome with a loopback debug endpoint before running
+`roll browser interactive`:
+
+```bash
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+  --remote-debugging-port=9222 \
+  --user-data-dir=/tmp/owner-chrome-profile
+```
+
+Only `127.0.0.1:9222` (or another loopback address) is allowed. Non-loopback
+endpoints are rejected.
+
+### Run an interactive operation
+
+```bash
+roll browser interactive \
+  --story US-EXAMPLE-001 \
+  --origin https://example.test \
+  --action navigate --url https://example.test/login
+```
+
+Supported actions: `navigate`, `click`, `fill`, `press_key`.
+
+The command requires an **attached TTY**. It prints exactly what it will do,
+including the story, origin, action, and a 15-minute maximum lease, then asks
+for **one owner approval**:
+
+```
+Owner Chrome approval required (one operation only)
+  story: US-EXAMPLE-001
+  origin: https://example.test
+  action: navigate to https://example.test
+  expiry: 2026-07-15T08:34:00.000Z (15 minutes maximum)
+  credential export: denied (cookies, storage, and network bodies are unavailable)
+Approve this owner-run operation? [y/N]
+```
+
+If you decline, no connection is attempted. If you approve, Roll connects to
+the local debug endpoint, executes the single operation, prints the result,
+and releases the lease immediately:
+
+```
+manual owner-run result: ok (tab: 1234)
+This interactive result does not make CI pass and is not background automation.
+```
+
+### Lease expiry and cancellation
+
+Each interactive operation holds a lease for **at most 15 minutes**. The lease
+is bound to the holder process and the loopback endpoint; it is released as
+soon as the operation finishes. If the process dies or the lease expires, Roll
+reclaims it automatically. You cannot approve a persistent background lease —
+every operation needs its own foreground approval.
+
+### What the interactive lane will never do
+
+- Run without an attached TTY and explicit owner approval.
+- Connect to a non-loopback or remote debug endpoint.
+- Export cookies, storage, network bodies, or any other credentials.
+- Start Chrome automatically or leave a background scheduler running.
+- Make CI pass on its own — it is an **owner-run manual-attest** tool only.
+
 ## Evidence boundary
 
-Managed browser diagnostics are **diagnostic-only**. Every run report repeats
-it: *diagnostic success is not visual acceptance evidence*. A diagnostic
-screenshot is classified as a diagnostic artifact, not a visual-AC artifact, so
-it can never fake a story's visual acceptance. When a story needs visual
-acceptance, use **Roll Capture** — a physical screenshot of your real
+Managed browser diagnostics and interactive owner-run results are
+**diagnostic-only / manual-attest only**. Every run report repeats it:
+*diagnostic success is not visual acceptance evidence*. A diagnostic screenshot
+or interactive result is classified as a diagnostic artifact, not a visual-AC
+artifact, so it can never fake a story's visual acceptance. When a story needs
+visual acceptance, use **Roll Capture** — a physical screenshot of your real
 terminal/app — which alone satisfies that requirement. See
 [Acceptance evidence](acceptance-evidence.md).
 
@@ -173,6 +246,31 @@ terminal/app — which alone satisfies that requirement. See
   from a fresh profile.
 - Nothing is written to your product repo. The only file Roll may write is the
   machine-level `~/.roll/browser-operations.yaml`, and only with `--confirm`.
+
+## Troubleshooting
+
+### `roll browser interactive` says "requires an attached TTY"
+
+Interactive owner-Chrome operations require a foreground terminal. They cannot
+run from a background scheduler, CI job, or non-interactive shell. This is by
+design: every operation needs live owner approval.
+
+### "Connects only to an already-open loopback Chrome debug endpoint"
+
+Roll does not start Chrome and does not open a remote debug port. Launch Chrome
+yourself with `--remote-debugging-port=9222` bound to `127.0.0.1`. Non-loopback
+addresses are rejected.
+
+### Can I use interactive mode to export cookies or keep a session open?
+
+No. Credential export (cookies, storage, and network bodies) is always denied.
+The lease is released immediately after the operation and expires within 15
+minutes; there is no background scheduler or persistent session.
+
+### Can I point interactive mode at a remote Chrome instance?
+
+No. Only loopback endpoints are supported. There is no remote endpoint, tunnel,
+or cloud browser integration.
 
 ## See also
 

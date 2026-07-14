@@ -1,20 +1,22 @@
-# Roll — 浏览器操作（受管通道 managed）
+# Roll — 浏览器操作（受管通道 + 交互通道）
 
 Roll 可以驱动一个**受管、隔离的 Chrome（经 DevTools 传输）**来采集浏览器诊断
-——导航检查、DOM 快照、控制台与网络捕获、诊断截图。这是浏览器操作面向用户的
-第一个切片：需显式开启、依赖受控、范围刻意收窄。
+——导航检查、DOM 快照、控制台与网络捕获、诊断截图。它也支持对
+**已打开的本地 Chrome 调试端点**执行单次、低风险的交互式 owner-Chrome 操作，
+需前台 owner 批准并受严格租约控制。
 
-它**不是**两件事：
+两条通道都需显式开启、依赖受控、范围刻意收窄。
 
-- 它**不是安装器**。Roll 绝不往你的产品仓 `package.json` 加依赖，也绝不擅自
+它们**不是**两件事：
+
+- 它们**不是安装器**。Roll 绝不往你的产品仓 `package.json` 加依赖，也绝不擅自
   开启你自己（owner）Chrome 的远程调试。`setup` 只在你确认后写入一份机器级
   配置。
-- 它的产物**不是视觉验收证据**。受管诊断截图只能证明页面加载成功，不能满足故事
-  的视觉验收（visual AC）。只有 **Roll Capture**（对你真实终端/应用的物理截图）
-  才满足视觉验收——见[验收证据](acceptance-evidence.md)。
+- 它们的产物**不是视觉验收证据**。受管诊断截图或交互式 owner 运行结果只能证明
+  页面动作成功，不能满足故事的视觉验收（visual AC）。只有 **Roll Capture**
+  （对你真实终端/应用的物理截图）才满足视觉验收——见[验收证据](acceptance-evidence.md)。
 
-> 交互式 owner-Chrome 通道属于后续切片，本页**不**把它写成已可用。此页只描述
-> 当前已发布的受管通道。
+本页同时描述当前已发布的受管通道与交互通道。
 
 ## Managed
 
@@ -142,12 +144,77 @@ roll browser update --check
 roll browser update --apply --confirm
 ```
 
+## 交互通道
+
+交互通道让你对自己 Chrome 中**已经打开的页面**执行单次低风险操作。它用于
+手动举证（manual-attest）工作流，而非后台自动化。
+
+### 先决条件
+
+Roll **不会替你启动 Chrome**，也**不会开启远程调试**。你必须先自行启动带有
+本地调试端点的 Chrome，再运行 `roll browser interactive`：
+
+```bash
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+  --remote-debugging-port=9222 \
+  --user-data-dir=/tmp/owner-chrome-profile
+```
+
+仅允许 `127.0.0.1:9222`（或其他 loopback 地址）。非 loopback 端点会被拒绝。
+
+### 运行一次交互操作
+
+```bash
+roll browser interactive \
+  --story US-EXAMPLE-001 \
+  --origin https://example.test \
+  --action navigate --url https://example.test/login
+```
+
+支持动作：`navigate`、`click`、`fill`、`press_key`。
+
+该命令要求**已连接的 TTY**。它会打印待执行内容（story、origin、动作、最长
+15 分钟的租约），然后请求**一次 owner 批准**：
+
+```
+Owner Chrome approval required (one operation only)
+  story: US-EXAMPLE-001
+  origin: https://example.test
+  action: navigate to https://example.test
+  expiry: 2026-07-15T08:34:00.000Z (15 minutes maximum)
+  credential export: denied (cookies, storage, and network bodies are unavailable)
+Approve this owner-run operation? [y/N]
+```
+
+如果你拒绝，不会尝试任何连接。如果批准，Roll 会连接本地调试端点、执行单次
+操作、打印结果，并立即释放租约：
+
+```
+manual owner-run result: ok (tab: 1234)
+This interactive result does not make CI pass and is not background automation.
+```
+
+### 租约到期与取消
+
+每次交互操作最多持有 **15 分钟** 租约。租约绑定到持有进程与 loopback 端点；
+操作结束后立即释放。若进程死亡或租约到期，Roll 会自动回收。你无法批准持久
+后台租约——每次操作都需要独立的前台批准。
+
+### 交互通道永远不会做的事
+
+- 在没有 TTY 和显式 owner 批准的情况下运行。
+- 连接非 loopback 或远程调试端点。
+- 导出 cookie、storage、network bodies 或任何其他凭证。
+- 自动启动 Chrome 或留下后台调度器。
+- 独自让 CI 通过——它只是一个 **owner-run manual-attest** 工具。
+
 ## 证据边界
 
-受管浏览器诊断**仅为诊断**。每次 run 报告都重复这句：*诊断通过不等于视觉验收
-证据*。诊断截图被归类为诊断产物，而非视觉验收产物，因此绝不可能伪造故事的视觉
-验收。故事需要视觉验收时，请用 **Roll Capture**——对真实终端/应用的物理截图
-——只有它满足该要求。见[验收证据](acceptance-evidence.md)。
+受管浏览器诊断与交互式 owner 运行结果**仅为诊断 / 仅为 manual-attest**。每次
+run 报告都重复这句：*诊断通过不等于视觉验收证据*。诊断截图或交互结果会被归类
+为诊断产物，而非视觉验收产物，因此绝不可能伪造故事的视觉验收。故事需要视觉
+验收时，请用 **Roll Capture**——对真实终端/应用的物理截图——只有它满足该要求。
+见[验收证据](acceptance-evidence.md)。
 
 ## 安全恢复
 
@@ -158,6 +225,28 @@ roll browser update --apply --confirm
   是安全的——每次都从全新 profile 开始。
 - 不会向你的产品仓写任何东西。Roll 唯一可能写入的是机器级
   `~/.roll/browser-operations.yaml`，且仅在 `--confirm` 时。
+
+## 排障
+
+### `roll browser interactive` 提示 "requires an attached TTY"
+
+交互式 owner-Chrome 操作需要前台终端。它们不能从后台调度器、CI 作业或非交互式
+shell 中运行。这是设计如此：每次操作都需要实时的 owner 批准。
+
+### "Connects only to an already-open loopback Chrome debug endpoint"
+
+Roll 不会启动 Chrome，也不会打开远程调试端口。你需要自行用
+`--remote-debugging-port=9222` 绑定到 `127.0.0.1` 来启动 Chrome。非 loopback
+地址会被拒绝。
+
+### 交互模式能导出 cookie 或保持会话吗？
+
+不能。凭证导出（cookie、storage、network bodies）始终被拒绝。租约在操作结束后
+立即释放，并在 15 分钟内过期；没有后台调度器，也没有持久会话。
+
+### 我能把交互模式指向远程 Chrome 实例吗？
+
+不能。仅支持 loopback 端点。没有远程端点、隧道或云浏览器集成。
 
 ## 相关
 

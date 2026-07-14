@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### 浏览器操作
+- 更新浏览器操作文档，正式发布交互式 owner-Chrome 通道：需预先开启本地 loopback 远程调试、前台 TTY 单次 owner 批准、15 分钟租约到期/取消、owner-run manual-attest；并明确说明不支持后台调度器、远程端点、cookie 导出和自动启动 Chrome (US-BROW-011) `[docs]`
 - `roll browser update --check` 报告当前 DevTools 传输包版本与可用候选版本（只读，不下载、不安装、不改配置）；`roll browser update --apply --confirm` 经显式确认后执行原子更新，更新前运行冒烟检查，失败则保留原版本 (US-BROW-010) `[cli]`
 
 ### 稳定性

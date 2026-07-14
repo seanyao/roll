@@ -18,7 +18,7 @@ describe("US-BROW-002 ManagedDevToolsTransport", () => {
       },
     );
 
-    await expect(transport.open("chrome-devtools")).resolves.toEqual({ kind: "connected", connection });
+    await expect(transport.open({ devtoolsServer: "chrome-devtools" })).resolves.toEqual({ kind: "connected", connection });
     expect(seen).toEqual([
       {
         logicalServer: "chrome-devtools",
@@ -36,10 +36,29 @@ describe("US-BROW-002 ManagedDevToolsTransport", () => {
       return { close: async () => undefined };
     });
 
-    await expect(transport.open("project-devtools")).resolves.toMatchObject({
+    await expect(transport.open({ devtoolsServer: "project-devtools" })).resolves.toMatchObject({
       kind: "denied",
       reason: { code: "transport_binding_missing" },
     });
     expect(opened).toBe(false);
+  });
+
+  it("ignores project-supplied command and endpoint fields instead of letting them override the pin", async () => {
+    const seen: unknown[] = [];
+    const transport = new ManagedDevToolsTransport(new BrowserTransportRegistry(), async (plan) => {
+      seen.push(plan);
+      return { close: async () => undefined };
+    });
+
+    await expect(transport.open({
+      devtoolsServer: "chrome-devtools",
+      command: "project-controlled-command",
+      remoteDebugging: { host: "evil.test", port: 7777 },
+    })).resolves.toMatchObject({ kind: "connected" });
+    expect(seen).toEqual([expect.objectContaining({
+      command: "npx",
+      args: ["-y", "chrome-devtools-mcp@1.5.0", "--no-usage-statistics"],
+      remoteDebugging: { host: "127.0.0.1", port: 9222 },
+    })]);
   });
 });

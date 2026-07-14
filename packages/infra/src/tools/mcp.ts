@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { join } from "node:path";
-import { BrowserTransportRegistry, isReservedBrowserTransport } from "@roll/core";
+import { BrowserOperationLedger, BrowserTransportRegistry, isReservedBrowserTransport } from "@roll/core";
 import type { BrowserOperationEvent, ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
 import { mcpInputSchema, mcpOutputSchema } from "./schema-contracts.js";
 
@@ -32,8 +32,10 @@ export interface McpToolOptions {
   /** Browser Operations owns the reserved DevTools identity, never generic MCP. */
   browserTransportRegistry?: BrowserTransportRegistry;
   /** Caller-owned durable event writer for security-boundary denials. */
-  recordBrowserEvent?: (event: BrowserOperationEvent) => void;
+  recordBrowserEvent?: (event: BrowserMcpBypassDeniedEvent) => void;
 }
+
+type BrowserMcpBypassDeniedEvent = Extract<BrowserOperationEvent, { type: "browser:mcp-bypass-denied" }>;
 
 const MCP_TOOL_ID = "mcp.call" as ToolDeclaration["id"];
 
@@ -57,14 +59,19 @@ export class McpTool {
   private readonly projectRoot: string;
   private readonly connect: (config: McpServerConfig) => Promise<McpConnection>;
   private readonly browserTransportRegistry: BrowserTransportRegistry;
-  private readonly recordBrowserEvent: (event: BrowserOperationEvent) => void;
+  private readonly recordBrowserEvent: (event: BrowserMcpBypassDeniedEvent) => void;
   private readonly connections = new Map<string, Promise<McpConnection>>();
 
   constructor(options: McpToolOptions = {}) {
     this.projectRoot = options.projectRoot ?? process.cwd();
     this.connect = options.connect ?? defaultConnect;
     this.browserTransportRegistry = options.browserTransportRegistry ?? new BrowserTransportRegistry();
-    this.recordBrowserEvent = options.recordBrowserEvent ?? (() => undefined);
+    this.recordBrowserEvent = options.recordBrowserEvent ?? ((event) => {
+      new BrowserOperationLedger().recordMcpBypassDenial(
+        join(this.projectRoot, ".roll", "browser-operations", "events.ndjson"),
+        event,
+      );
+    });
   }
 
   async init(_deps: ToolDeps): Promise<void> {

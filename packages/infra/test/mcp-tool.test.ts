@@ -1,3 +1,5 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BrowserTransportRegistry } from "@roll/core";
 import type { MinimalFs, ToolDeps, ToolInvocation, ToolPolicy } from "@roll/spec";
@@ -185,6 +187,7 @@ describe("US-TOOL-010 McpTool", () => {
     const tool = new McpTool({
       projectRoot: root,
       browserTransportRegistry: registry,
+      recordBrowserEvent: () => undefined,
       connect: async () => {
         connected += 1;
         return connection({ content: [] });
@@ -207,6 +210,42 @@ describe("US-TOOL-010 McpTool", () => {
     }
     expect(connected).toBe(0);
     expect(registry.events()).toMatchObject([{ type: "browser:mcp-bypass-denied", reason: { code: "generic_mcp_bypass_denied" } }]);
+  });
+
+  it("persists the bypass-denied event through the Browser Operations ledger by default", async () => {
+    const root = mkdtempSync(join(tmpdir(), "roll-mcp-bypass-"));
+    try {
+      const result = await new McpTool({ projectRoot: root }).execute(
+        invocation({ serverName: "chrome-devtools", toolName: "navigate" }),
+        deps(),
+      );
+
+      expect(result.ok).toBe(false);
+      const { BrowserOperationLedger } = await import("@roll/core");
+      expect(new BrowserOperationLedger().read(join(root, ".roll", "browser-operations", "events.ndjson"))).toMatchObject([
+        { type: "browser:mcp-bypass-denied", reason: { code: "generic_mcp_bypass_denied" } },
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps non-reserved project MCP servers compatible when the Browser transport registry is installed", async () => {
+    const root = "/repo";
+    const conn = connection({ content: [{ type: "text", text: "still available" }] });
+    const tool = new McpTool({
+      projectRoot: root,
+      browserTransportRegistry: new BrowserTransportRegistry(),
+      connect: async () => conn,
+    });
+
+    const result = await tool.execute(
+      invocation({ serverName: "jira", toolName: "issue.get", arguments: { id: "ROLL-2" } }),
+      deps({ [join(root, ".roll", "mcp-servers.json")]: JSON.stringify({ servers: { jira: { command: "jira-mcp" } } }) }),
+    );
+
+    expect(result).toMatchObject({ ok: true, output: { content: [{ text: "still available" }] } });
+    expect(conn.calls).toEqual([{ toolName: "issue.get", args: { id: "ROLL-2" } }]);
   });
 
   it("validates arguments as a record", async () => {

@@ -17,6 +17,7 @@ import type {
   BrowserPolicyDecision,
 } from "@roll/spec";
 import { authorizeOrigin, isActionAllowed, policyFingerprint } from "./origin.js";
+import { BrowserTransportRegistry } from "./transport.js";
 
 // ── Policy loading ──────────────────────────────────────────────────────────
 
@@ -80,6 +81,10 @@ export function resolvePolicy(
   if (!policy.enabled) {
     return denied("policy_disabled", "Browser operations are disabled in project policy");
   }
+
+  // The project may select the one registered logical name, never a transport.
+  const binding = new BrowserTransportRegistry().resolve(policy.devtoolsServer);
+  if (binding.kind === "denied") return { authorized: false, denial: binding.reason, policyFingerprint: "" };
 
   // Gate 2: lane enabled?
   const lanePolicy = lane === "managed" ? policy.managed : policy.interactive;

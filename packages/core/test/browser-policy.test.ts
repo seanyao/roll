@@ -125,6 +125,19 @@ describe("resolvePolicy — denied", () => {
     expect(result.denial?.code).toBe("policy_disabled");
   });
 
+  it("denies an enabled policy whose DevTools logical binding is not registered", () => {
+    const result = resolvePolicy({
+      policy: testPolicy({ devtoolsServer: "project-devtools" }),
+      lane: "managed",
+      caller: "builder",
+      action: "navigate",
+      targetUrl: "https://example.com",
+    });
+
+    expect(result.authorized).toBe(false);
+    expect(result.denial?.code).toBe("transport_binding_missing");
+  });
+
   it("denies when lane is disabled", () => {
     const p = testPolicy({
       managed: { ...testPolicy().managed, enabled: false },

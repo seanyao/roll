@@ -10,6 +10,12 @@ export interface DevToolsConnection {
   close(): Promise<void>;
 }
 
+/** Project policy is untrusted input: only the logical binding is consumed. */
+export interface BrowserTransportPolicyBinding {
+  devtoolsServer: string;
+  readonly [key: string]: unknown;
+}
+
 export type OpenDevToolsTransport = (plan: BrowserTransport) => Promise<DevToolsConnection>;
 
 export type DevToolsTransportResult =
@@ -27,8 +33,8 @@ export class ManagedDevToolsTransport {
     private readonly openTransport: OpenDevToolsTransport,
   ) {}
 
-  async open(policyDevtoolsServer: string): Promise<DevToolsTransportResult> {
-    const resolution = this.registry.resolve(policyDevtoolsServer);
+  async open(policy: BrowserTransportPolicyBinding): Promise<DevToolsTransportResult> {
+    const resolution = this.registry.resolve(policy.devtoolsServer);
     if (resolution.kind === "denied") return resolution;
     return { kind: "connected", connection: await this.openTransport(resolution.transport) };
   }

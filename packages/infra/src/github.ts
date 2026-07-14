@@ -436,6 +436,42 @@ export async function prViewMergeInfo(slug: string, ref: string): Promise<PrMerg
   }
 }
 
+/**
+ * FIX-1248 — one entry of `gh pr view --json statusCheckRollup`, GitHub's
+ * authoritative union of BOTH check kinds: check-runs (Checks API — Actions
+ * and third-party) and status contexts (Statuses API). `gh run list` only
+ * sees Actions workflow runs; projects whose required checks report via the
+ * Statuses/Checks API would otherwise be invisible.
+ */
+export interface StatusCheckRollupEntry {
+  __typename: "CheckRun" | "StatusContext" | string;
+  /** CheckRun: run status (QUEUED / IN_PROGRESS / COMPLETED / …). */
+  status?: string | null;
+  /** CheckRun: conclusion once COMPLETED (SUCCESS / FAILURE / SKIPPED / …). */
+  conclusion?: string | null;
+  /** StatusContext: state (SUCCESS / FAILURE / ERROR / PENDING). */
+  state?: string | null;
+  /** Names are informational only; the reducer keys on status/conclusion/state. */
+  name?: string | null;
+  context?: string | null;
+}
+
+/**
+ * `gh -R <slug> pr view <ref> --json statusCheckRollup` (bin/roll 12040 field,
+ * isolated call). Returns the parsed rollup entries, or [] on failure/empty —
+ * the same lenient "no checks" treatment every oracle CI probe uses.
+ */
+export async function prViewStatusCheckRollup(slug: string, ref: string): Promise<StatusCheckRollupEntry[]> {
+  const r = await gh(["-R", slug, "pr", "view", ref, "--json", "statusCheckRollup"]);
+  if (r.code !== 0 || r.stdout.trim() === "") return [];
+  try {
+    const j = JSON.parse(r.stdout) as { statusCheckRollup?: StatusCheckRollupEntry[] | null };
+    return Array.isArray(j.statusCheckRollup) ? j.statusCheckRollup : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Inputs for {@link prCreate} — mirrors the oracle's create argv. */
 export interface PrCreateInput {
   slug: string;

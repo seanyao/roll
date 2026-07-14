@@ -209,6 +209,42 @@ describe("US-DELIV-003 — self-driven merge execution", () => {
     }
   });
 
+  it("FIX-1248: ci pending/unknown waits instead of ci_failed", async () => {
+    for (const ci of ["pending", "unknown"] as const) {
+      const p = project();
+      const savedEnv: Record<string, string | undefined> = {};
+      const gitVars = ["GIT_DIR", "GIT_WORK_TREE", "GIT_CEILING_DIRECTORIES", "GIT_COMMON_DIR", "GIT_INDEX_FILE"];
+      for (const k of gitVars) {
+        savedEnv[k] = process.env[k];
+        delete process.env[k];
+      }
+
+      try {
+        const now = Date.now();
+        writeEvents(p, [
+          { type: "cycle:start", cycleId: CYCLE, storyId: "FIX-1248", ts: now },
+          { type: "delivery:published", cycleId: CYCLE, storyId: "FIX-1248", branch: `loop/${CYCLE}`, prNumber: 42, ts: now + 1 },
+        ]);
+        execSync(`git checkout -q -b loop/${CYCLE}`, { cwd: p });
+
+        const d = deps(p, fakeProvider({ 42: { kind: "open", ci, checkedAt: "2026-07-12T22:00:00Z" } }));
+        const code = await loopReconcileCommand([], d);
+        expect(code).toBe(0);
+
+        // unknown/pending must NOT collapse to ci_failed (❌) nor merge (🔄): wait.
+        expect(d.out.join("")).not.toContain("❌");
+        expect(d.out.join("")).not.toContain("🔄");
+        const evs = readEvents(p);
+        expect(evs.find((e) => e.type === "delivery:merge_attempt")).toBeUndefined();
+      } finally {
+        for (const k of gitVars) {
+          if (savedEnv[k] === undefined) delete process.env[k];
+          else process.env[k] = savedEnv[k];
+        }
+      }
+    }
+  });
+
   it("merged PR is handled by reconcile (not merge_now)", async () => {
     const p = project();
     const savedEnv: Record<string, string | undefined> = {};

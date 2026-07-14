@@ -178,3 +178,43 @@ describe("FIX-1231 — codex git isolation", () => {
     expect(prompt).toContain("FIX-1231");
   });
 });
+
+describe("FIX-1249 — reasonix model is config-driven, no source-baked fallback", () => {
+  it("a configured (routed) model reaches the spawn's --model", () => {
+    const { bin, args } = buildSpawnCommand("reasonix", {
+      cwd: "/cycle/wt",
+      skillBody: "DO WORK",
+      model: "deepseek-v4-pro",
+    });
+    expect(bin).toBe("reasonix");
+    const i = args.indexOf("--model");
+    expect(i).toBeGreaterThanOrEqual(0);
+    expect(args[i + 1]).toBe("deepseek-v4-pro");
+  });
+
+  it("editing the model to any value passes it through verbatim (config is the truth)", () => {
+    const { args } = buildSpawnCommand("reasonix", {
+      cwd: "/cycle/wt",
+      skillBody: "DO WORK",
+      model: "deepseek-v5-max",
+    });
+    expect(args[args.indexOf("--model") + 1]).toBe("deepseek-v5-max");
+  });
+
+  it("NO configured model → OMITS --model (native default), never the source-baked deepseek-flash", () => {
+    for (const opts of [
+      { cwd: "/cycle/wt", skillBody: "DO WORK" },
+      { cwd: "/cycle/wt", skillBody: "DO WORK", model: "" },
+      { cwd: "/cycle/wt", skillBody: "DO WORK", model: "   " },
+    ]) {
+      const { args } = buildSpawnCommand("reasonix", opts);
+      // The old defect injected `--model deepseek-flash` here; now the source
+      // holds no runtime model, so --model is simply omitted (like pi/kimi).
+      expect(args, JSON.stringify(opts)).not.toContain("--model");
+      expect(args).not.toContain("deepseek-flash");
+      // The rest of the argv shape is intact.
+      expect(args.slice(0, 3)).toEqual(["run", "--max-steps", "1000"]);
+      expect(args).toContain("--dir");
+    }
+  });
+});

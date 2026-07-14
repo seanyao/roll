@@ -31,6 +31,12 @@ export interface AgentSpec {
   /** Legacy extension hook retained for callers that build ad-hoc registries. */
   aliases?: readonly string[];
   displayName: string;
+  /** FIX-1249 — SCAFFOLD SEED, not a runtime default. A sensible starting model
+   *  used only to write an initial `rigs:` entry into agents.yaml (so the model
+   *  becomes visible + editable). The runtime model is CONFIG-DRIVEN: it comes
+   *  from agents.yaml (rigs/routing or the config-rig backstop), never from this
+   *  field. Read it via {@link agentScaffoldSeedModel}, never as a silent spawn
+   *  fallback. */
   defaultModel: string;
   /** PATH binary candidates, in probe order. */
   cliBin: readonly string[];

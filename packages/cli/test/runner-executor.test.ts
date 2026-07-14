@@ -223,6 +223,7 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
       skillBody: "RANK",
       bare: true,
       writableRoots: ["/rt/wt"],
+      model: "deepseek-flash", // FIX-1249: model is config-driven, provided by the router.
     });
     expect(args).toEqual(["run", "--max-steps", "1000", "--model", "deepseek-flash", "--dir", cwd, "RANK"]);
     expect(existsSync(join(cwd, "reasonix.toml"))).toBe(false);
@@ -235,7 +236,8 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
   });
 
   it("US-AGENT-002 reasonix: reasonix run --max-steps <N> --model <model> --dir <cwd> <prompt>", () => {
-    const { bin, args } = buildSpawnCommand("reasonix", { cwd: "/wt", skillBody: "DO WORK" });
+    // FIX-1249: model is config-driven (router-supplied), not a source default.
+    const { bin, args } = buildSpawnCommand("reasonix", { cwd: "/wt", skillBody: "DO WORK", model: "deepseek-flash" });
     expect(bin).toBe("reasonix");
     expect(args).toEqual(["run", "--max-steps", "1000", "--model", "deepseek-flash", "--dir", "/wt", prompt]);
     // the DeepSeek key is NEVER an argv flag — it rides the spawn env only.
@@ -276,6 +278,7 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
       skillBody: "DO WORK",
       writableRoots: [gitCommon, gitCommon, "  "],
       env: { DEEPSEEK_API_KEY: "secret" },
+      model: "deepseek-flash", // FIX-1249: model is config-driven, provided by the router.
     };
     const { bin, args } = buildSpawnCommand("reasonix", opts);
 
@@ -387,7 +390,8 @@ describe("US-AGENT-001 AgentProfile factory", () => {
 
     const reasonix = agentProfile("reasonix");
     expect(reasonix.acceptance.canReviewHeadless).toBe(true);
-    expect(reasonix.buildSpawnCommand({ cwd: "/wt", skillBody: "DO WORK" }).args.slice(0, 7)).toEqual([
+    // FIX-1249: model is config-driven (router-supplied), not a source default.
+    expect(reasonix.buildSpawnCommand({ cwd: "/wt", skillBody: "DO WORK", model: "deepseek-flash" }).args.slice(0, 7)).toEqual([
       "run",
       "--max-steps",
       "1000",
@@ -4682,6 +4686,7 @@ describe("FIX-1036 — reasonix linked-worktree git common-dir sandbox grants", 
       cwd: wt,
       skillBody: "X",
       bin: shim,
+      model: "deepseek-flash", // FIX-1249: model is config-driven, provided by the router.
       writableRoots: agentWritableRoots(main, alertsPath),
       env: { ...process.env, EXPECTED_GIT_COMMON_DIR: common, DEEPSEEK_API_KEY: "secret" },
       timeoutMs: 15000,

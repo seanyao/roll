@@ -840,6 +840,35 @@ describe("FIX-223 — loop agent selection (tier routing vs local.yaml collapse)
     }
   });
 
+  it("FIX-1249: roll-agents/v1 rigs+routing drives the tier's agent AND model", () => {
+    const V1_YAML = [
+      "schema: roll-agents/v1",
+      "rigs:",
+      "  reasonix-pro:",
+      "    agent: reasonix",
+      "    model: deepseek-v4-pro",
+      "  kimi-strong:",
+      "    agent: kimi",
+      "routing:",
+      "  easy: reasonix-pro",
+      "  default: reasonix-pro",
+      "  fallback: kimi-strong",
+      "",
+    ].join("\n");
+    const p = project({ "agents.yaml": V1_YAML });
+    const deps = buildLoopRouteDeps(p);
+    // Before FIX-1249 the router could not read this shape → model dropped, agent
+    // came from firstInstalled, reasonix silently ran the source-baked default.
+    const easy = resolveRoute("easy", deps);
+    expect(easy.agent).toBe("reasonix");
+    expect(easy.model).toBe("deepseek-v4-pro");
+    // Editing the rig model is a pure config change — it reaches the route.
+    writeFileSync(join(p, ".roll", "agents.yaml"), V1_YAML.replace("deepseek-v4-pro", "deepseek-v5-max"));
+    expect(resolveRoute("easy", buildLoopRouteDeps(p)).model).toBe("deepseek-v5-max");
+    // A rig with no model → agent only, spawn omits --model (native default).
+    expect(resolveRoute("fallback", deps).model).toBeUndefined();
+  });
+
   it("empty tier slot falls to the default slot", () => {
     const p = project({ "agents.yaml": "schema: v3\ndefault: { agent: kimi }\n" });
     const d = resolveRoute("hard", buildLoopRouteDeps(p));

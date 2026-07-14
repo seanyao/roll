@@ -6,9 +6,11 @@ import {
   BacklogStore,
   EventBus,
   classifyComplexity,
+  configuredModelForAgent,
   ensureDeliveriesFresh,
   nodeDeliveryStore,
   nodeExecPort,
+  normalizeAgentConfig,
   parseBacklog,
   queryStoryDelivery,
   resolveRoute,
@@ -61,14 +63,36 @@ import { rescueLeakedMain } from "./sandbox-boundary.js";
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * FIX-1249 — config-rig model backstop for POOL-PICKED agents. A `select` role
+ * pool (or a nudge/fallback hop) resolves an AGENT but carries no per-route
+ * model; the model must still come from config, not a source-baked default. Scan
+ * the project's `rigs:` for a rig binding this agent WITH a model. Returns "" when
+ * the agent already has a routed model or config binds no model for it (the spawn
+ * then omits `--model`, or fails loud for a required-model agent).
+ */
+export function configuredModelBackstop(repoCwd: string, agent: string): string {
+  if (agent === "") return "";
+  try {
+    const { config } = normalizeAgentConfig(readFileSync(join(repoCwd, ".roll", "agents.yaml"), "utf8"));
+    return configuredModelForAgent(agent, config) ?? "";
+  } catch {
+    return ""; // agents.yaml missing/unreadable — no backstop (caller stays config-driven).
+  }
+}
+
 function scopedStoryExecuteRoute(repoCwd: string): { agent: string; model: string } | null {
   const scoped = resolveScopedStoryExecute(repoCwd);
   if (scoped === null) return null;
   const { resolution } = scoped;
   if (resolution.ok) {
+    const agent = resolution.resolved.agent;
+    // A `select` pool binding carries no per-agent model; backfill from config
+    // rigs so a pool-picked agent still runs its CONFIGURED model (FIX-1249).
+    const model = resolution.resolved.model ?? "";
     return {
-      agent: resolution.resolved.agent,
-      model: resolution.resolved.model ?? "",
+      agent,
+      model: model !== "" ? model : configuredModelBackstop(repoCwd, agent),
     };
   }
   const hasScopedBindingFailure = resolution.failure.source !== undefined || resolution.failure.candidates.length > 0;
@@ -360,10 +384,17 @@ export function nodePorts(opts: {
               tried.length > 0
                 ? (resolveRouteExcluding(tier, routeDeps, tried) ?? resolveRoute(tier, routeDeps))
                 : resolveRoute(tier, routeDeps);
-            // Thread the legacy slot's native --model through to the spawn; absent => ""
+            // Thread the routed slot's native --model through to the spawn; absent => ""
             // (the orchestrator's `ctx.model !== ""` guard then omits --model and
-            // the agent uses its own default).
-            return { agent: dec.agent, model: dec.model ?? "" };
+            // the agent uses its own default). FIX-1249: when the slot supplied no
+            // model (nudge/firstInstalled hop, or an agent-only rig), backfill from
+            // config rigs so the agent still runs its CONFIGURED model rather than a
+            // source-baked default.
+            const routedModel = dec.model ?? "";
+            return {
+              agent: dec.agent,
+              model: routedModel !== "" ? routedModel : configuredModelBackstop(opts.repoCwd, dec.agent),
+            };
           },
         }
       : { resolve: () => ({ agent: "claude", model: "" }) },

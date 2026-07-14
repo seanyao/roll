@@ -60,7 +60,9 @@ export class InteractiveChromeAdapter {
     if (approvedOrigin === undefined) {
       return denied("origin_invalid", "The approved origin is invalid");
     }
-    const tab = (await this.deps.discoverTargets()).find((candidate) => originFor(candidate.url) === approvedOrigin);
+    const tab = (await this.deps.discoverTargets()).find(
+      (candidate) => originFor(candidate.url) === approvedOrigin && isLoopbackDevToolsSocket(candidate.webSocketDebuggerUrl),
+    );
     if (tab === undefined) {
       return denied("devtools_unavailable", "No owner Chrome tab matches the approved origin", { origin: approvedOrigin });
     }
@@ -179,6 +181,15 @@ function isOwnerChromeTarget(value: unknown): value is OwnerChromeTarget {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Record<string, unknown>;
   return typeof candidate.id === "string" && typeof candidate.url === "string" && typeof candidate.webSocketDebuggerUrl === "string";
+}
+
+function isLoopbackDevToolsSocket(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return (parsed.protocol === "ws:" || parsed.protocol === "wss:") && ["127.0.0.1", "localhost", "[::1]", "::1"].includes(parsed.hostname);
+  } catch {
+    return false;
+  }
 }
 
 interface SocketLike {

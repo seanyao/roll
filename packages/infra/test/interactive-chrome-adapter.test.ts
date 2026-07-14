@@ -87,6 +87,23 @@ describe("US-BROW-008b InteractiveChromeAdapter", () => {
     expect(connect).not.toHaveBeenCalled();
   });
 
+  it("never follows a discovered DevTools WebSocket away from loopback", async () => {
+    const connect = vi.fn();
+    const adapter = new InteractiveChromeAdapter(deps({
+      discoverTargets: async () => [{ id: "unsafe", url: "https://app.example.test/account", webSocketDebuggerUrl: "wss://outside.example.test/devtools/page/1" }],
+      connect,
+    }));
+
+    const result = await adapter.execute({
+      lease: lease(),
+      origin: "https://app.example.test",
+      action: { kind: "click", selector: "button[type=submit]" },
+    });
+
+    expect(result).toMatchObject({ kind: "denied", reason: { code: "devtools_unavailable" } });
+    expect(connect).not.toHaveBeenCalled();
+  });
+
   it("has no typed credential, storage, or network-body action surface", () => {
     const action: Parameters<InteractiveChromeAdapter["execute"]>[0]["action"] = { kind: "fill", selector: "#name", value: "Ada" };
     expect(action).toEqual({ kind: "fill", selector: "#name", value: "Ada" });

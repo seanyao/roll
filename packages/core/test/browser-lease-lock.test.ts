@@ -127,6 +127,30 @@ describe("US-BROW-005 — BrowserLeaseLock", () => {
     })).toMatchObject({ kind: "held", holderPid: 10 });
   });
 
+  it("reclaims a lock when a reused PID has a different process identity", () => {
+    const store = new FakeLockStore();
+    let identity = "process-start-a";
+    const locks = new BrowserLeaseLock(store, () => true, () => 1000, () => identity);
+    locks.acquire({
+      directory: "/locks",
+      endpointHash: "endpoint-a",
+      leaseId: "lease-a",
+      holderPid: 10,
+      holderToken: "holder-a",
+      expiresAt: "1970-01-01T00:01:00.000Z",
+    });
+    identity = "process-start-b";
+
+    expect(locks.acquire({
+      directory: "/locks",
+      endpointHash: "endpoint-a",
+      leaseId: "lease-b",
+      holderPid: 11,
+      holderToken: "holder-b",
+      expiresAt: "1970-01-01T00:01:00.000Z",
+    })).toMatchObject({ kind: "acquired", reclaimed: { leaseId: "lease-a" } });
+  });
+
   it("updates heartbeat only for the token-hash holder", () => {
     let now = 0;
     const locks = new BrowserLeaseLock(new FakeLockStore(), () => true, () => now);

@@ -113,4 +113,15 @@ describe("US-BROW-005 — BrowserOperationLedger", () => {
     expect(ledger.start("/ledger/events.ndjson", run())).toEqual({ kind: "in_progress" });
     expect(ledger.read("/ledger/events.ndjson")).toEqual([]);
   });
+
+  it("does not append a competing terminal result while another worker owns the guard", () => {
+    const store = new FakeLedgerStore();
+    const ledger = new BrowserOperationLedger(store, () => "2026-07-14T00:00:00.000Z", freeGuard);
+    ledger.start("/ledger/events.ndjson", run());
+    const blockedGuard: BrowserLedgerGuard = { acquire: () => undefined };
+    const recovering = new BrowserOperationLedger(store, () => "2026-07-14T00:00:00.000Z", blockedGuard);
+
+    expect(recovering.finish("/ledger/events.ndjson", terminalResult)).toBeUndefined();
+    expect(ledger.read("/ledger/events.ndjson").map((event) => event.type)).not.toContain("browser:operation-finished");
+  });
 });

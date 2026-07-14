@@ -148,6 +148,7 @@ export const TRUTH_FIELD_REGISTRY: readonly RegisteredField[] = [
   { field: "expiresAt", surface: "browser", anchor: "browser_lease", writer: "BrowserOperationService", kind: "authoritative" },
   { field: "ownerApproval", surface: "browser", anchor: "browser_lease", writer: "BrowserOperationService", kind: "authoritative" },
   { field: "holderPid", surface: "browser", anchor: "browser_lease", writer: "BrowserOperationService", kind: "authoritative" },
+  { field: "holderProcessIdentity", surface: "browser", anchor: "browser_lease", writer: "BrowserLeaseLock", kind: "authoritative" },
   { field: "heartbeatAt", surface: "browser", anchor: "browser_lease", writer: "BrowserLeaseLock", kind: "authoritative" },
   { field: "endpointHash", surface: "browser", anchor: "browser_lease", writer: "BrowserOperationService", kind: "authoritative" },
   { field: "artifactId", surface: "browser", anchor: "browser_diagnostic", writer: "BrowserOperationService via DevToolsAdapter", kind: "authoritative" },

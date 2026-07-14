@@ -5,6 +5,7 @@
  * primitive. The store's createExclusive operation must map to O_EXCL.
  */
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { closeSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -12,6 +13,7 @@ export interface BrowserLeaseLockRecord {
   leaseId: string;
   endpointHash: string;
   holderPid: number;
+  holderProcessIdentity: string;
   holderTokenHash: string;
   heartbeatAt: string;
   expiresAt: string;
@@ -92,16 +94,17 @@ export class BrowserLeaseLock {
     private readonly store: BrowserLeaseLockStore = nodeBrowserLeaseLockStore,
     private readonly isProcessAlive: (pid: number) => boolean = nodeProcessAlive,
     private readonly now: () => number = Date.now,
+    private readonly processIdentity: (pid: number) => string | undefined = nodeProcessIdentity,
   ) {}
 
   acquire(input: AcquireBrowserLeaseLockInput): BrowserLeaseLockAcquireResult {
     const path = leaseLockPath(input.directory, input.endpointHash);
-    const record = toRecord(input, this.now());
+    const record = toRecord(input, this.now(), this.processIdentity);
     if (this.store.createExclusive(path, encode(record))) return { kind: "acquired", path, record };
 
     const existingText = this.store.readText(path);
     const existing = parseRecord(existingText);
-    if (existing === undefined || !isStale(existing, this.now(), this.isProcessAlive)) {
+    if (existing === undefined || !isStale(existing, this.isProcessAlive, this.processIdentity)) {
       return { kind: "held", path, holderPid: existing?.holderPid, expiresAt: existing?.expiresAt };
     }
 
@@ -141,11 +144,16 @@ export function leaseLockPath(directory: string, endpointHash: string): string {
   return join(directory, `${endpointHash}.lock`);
 }
 
-function toRecord(input: AcquireBrowserLeaseLockInput, now: number): BrowserLeaseLockRecord {
+function toRecord(
+  input: AcquireBrowserLeaseLockInput,
+  now: number,
+  processIdentity: (pid: number) => string | undefined,
+): BrowserLeaseLockRecord {
   return {
     leaseId: input.leaseId,
     endpointHash: input.endpointHash,
     holderPid: input.holderPid,
+    holderProcessIdentity: processIdentity(input.holderPid) ?? "unknown",
     holderTokenHash: createHash("sha256").update(input.holderToken, "utf8").digest("hex"),
     heartbeatAt: new Date(now).toISOString(),
     expiresAt: input.expiresAt,
@@ -157,24 +165,29 @@ function parseRecord(text: string | undefined): BrowserLeaseLockRecord | undefin
   try {
     const value: unknown = JSON.parse(text);
     if (!isRecord(value)) return undefined;
-    const { leaseId, endpointHash, holderPid, holderTokenHash, heartbeatAt, expiresAt } = value;
+    const { leaseId, endpointHash, holderPid, holderProcessIdentity, holderTokenHash, heartbeatAt, expiresAt } = value;
     if (
       typeof leaseId !== "string" || typeof endpointHash !== "string" ||
-      typeof holderPid !== "number" || !Number.isSafeInteger(holderPid) || typeof holderTokenHash !== "string" ||
+      typeof holderPid !== "number" || !Number.isSafeInteger(holderPid) || typeof holderProcessIdentity !== "string" || typeof holderTokenHash !== "string" ||
       typeof heartbeatAt !== "string" || typeof expiresAt !== "string"
     ) return undefined;
-    return { leaseId, endpointHash, holderPid, holderTokenHash, heartbeatAt, expiresAt };
+    return { leaseId, endpointHash, holderPid, holderProcessIdentity, holderTokenHash, heartbeatAt, expiresAt };
   } catch {
     return undefined;
   }
 }
 
-function isStale(record: BrowserLeaseLockRecord, now: number, alive: (pid: number) => boolean): boolean {
-  void now;
+function isStale(
+  record: BrowserLeaseLockRecord,
+  alive: (pid: number) => boolean,
+  processIdentity: (pid: number) => string | undefined,
+): boolean {
   // Expiry bounds the holder's authority, but is never permission to delete a
   // live holder's lock. A dead PID is reclaimable immediately; a live holder
   // must release or renew without another process seizing its endpoint.
-  return !alive(record.holderPid);
+  if (!alive(record.holderPid)) return true;
+  const currentIdentity = processIdentity(record.holderPid);
+  return currentIdentity !== undefined && record.holderProcessIdentity !== "unknown" && currentIdentity !== record.holderProcessIdentity;
 }
 
 function encode(record: BrowserLeaseLockRecord): string {
@@ -195,5 +208,14 @@ function nodeProcessAlive(pid: number): boolean {
     return true;
   } catch (error: unknown) {
     return typeof error === "object" && error !== null && (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function nodeProcessIdentity(pid: number): string | undefined {
+  try {
+    const startedAt = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8" }).trim();
+    return startedAt === "" ? undefined : startedAt;
+  } catch {
+    return undefined;
   }
 }

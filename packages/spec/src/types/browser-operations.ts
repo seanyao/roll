@@ -117,6 +117,8 @@ export interface BrowserLease {
   acquiredAt: string;
   expiresAt: string;
   holderPid: number;
+  /** Start-time identity used to distinguish PID reuse during recovery. */
+  holderProcessIdentity: string;
   /** Hash only — raw holder tokens are never persisted. */
   holderTokenHash: string;
   endpointHash: string;

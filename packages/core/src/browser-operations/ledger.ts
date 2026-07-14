@@ -87,9 +87,24 @@ export class BrowserOperationLedger {
     return { kind: "started" };
   }
 
-  finish(path: string, result: BrowserActionResult): void {
-    const existing = this.read(path).some((event) => event.type === "browser:operation-finished" && event.runId === result.runId);
-    if (!existing) this.append(path, { type: "browser:operation-finished", runId: result.runId, ts: this.now(), result });
+  finish(path: string, result: BrowserActionResult): BrowserActionResult | undefined {
+    const request = this.read(path).find(
+      (event): event is Extract<BrowserOperationEvent, { type: "browser:operation-requested" }> =>
+        event.type === "browser:operation-requested" && event.runId === result.runId,
+    );
+    const release = this.guard.acquire(path, request?.request.idempotencyKey ?? `run:${result.runId}`);
+    if (release === undefined) return undefined;
+    try {
+      const existing = this.read(path).find(
+        (event): event is Extract<BrowserOperationEvent, { type: "browser:operation-finished" }> =>
+          event.type === "browser:operation-finished" && event.runId === result.runId,
+      );
+      if (existing !== undefined) return existing.result;
+      this.append(path, { type: "browser:operation-finished", runId: result.runId, ts: this.now(), result });
+      return result;
+    } finally {
+      release();
+    }
   }
 
   recordDiagnostic(

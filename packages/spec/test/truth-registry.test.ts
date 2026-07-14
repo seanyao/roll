@@ -20,7 +20,7 @@ describe("US-TRUTH-006 AC1/AC4 — registry hygiene", () => {
   it("US-BROW-005 registers ledger lock, idempotency, and untrusted diagnostic fields", () => {
     const keys = [
       "runId", "idempotencyKey", "holderTokenHash", "state", "result",
-      "holderPid", "heartbeatAt", "endpointHash", "artifactId", "bytes",
+      "holderPid", "holderProcessIdentity", "heartbeatAt", "endpointHash", "artifactId", "bytes",
       "untrusted", "diagnosticOnly", "failure",
     ];
     const missing = unregisteredFields("browser", keys);

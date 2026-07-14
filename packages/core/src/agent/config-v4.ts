@@ -35,7 +35,7 @@ import {
   type RouteSlot,
   type SupervisorConfig,
 } from "@roll/spec";
-import { canonicalAgentName, agentIsKnown } from "./registry.js";
+import { canonicalAgentName, agentIsKnown, readSlotFromText, type AgentSlot, type SlotConfig } from "./registry.js";
 
 // ── minimal block-YAML parser (bounded subset) ───────────────────────────────
 
@@ -341,4 +341,30 @@ export function normalizeAgentConfig(text: string): AgentConfigParse {
     config: { schema, rigs, routing, executionProfiles, executionPolicy, supervisor },
     errors,
   };
+}
+
+/**
+ * FIX-1249 — resolve a route SLOT to its `{ agent, model? }` for the runtime
+ * router, understanding BOTH agents.yaml shapes:
+ *   - `roll-agents/v1` / v4: `rigs:` + `routing: { <slot>: <rigRef> }` — the
+ *     rig's model rides through so a configured model reaches the spawn.
+ *   - legacy v3: top-level inline `<slot>: { agent, model? }`.
+ *
+ * The v4 `routing:` block wins (via {@link normalizeAgentConfig}); the legacy
+ * inline reader is the defensive fallback. Returns undefined when the slot is
+ * unresolved.
+ *
+ * This replaces the router's previous direct call to {@link readSlotFromText},
+ * which only understood the legacy inline form — so a project on the `rigs:` +
+ * `routing:` schema had its per-agent model silently dropped and the spawn fell
+ * back to a source-baked default (the FIX-1249 defect).
+ */
+export function readRouteSlot(text: string, slot: AgentSlot): SlotConfig | undefined {
+  const { config } = normalizeAgentConfig(text);
+  const resolved = config.routing[slot];
+  if (resolved !== undefined) {
+    const { agent, model } = resolved.rig;
+    return model !== undefined && model !== "" ? { agent, model } : { agent };
+  }
+  return readSlotFromText(text, slot);
 }

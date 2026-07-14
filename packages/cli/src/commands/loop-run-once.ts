@@ -12,7 +12,7 @@
  * The handler stays thin: it resolves the project identity + runtime paths and
  * delegates the entire walk to the runner adapter (packages/cli/src/runner).
  */
-import { EventBus, assessBacklog, branchCanaryVerdict, cycleEndEvent, DEFAULT_BRANCH_CANARY_MAX, firstInstalledAgent, isEphemeralBranch, mapV2Status, markStatus, parseBacklog, parsePolicy, readSlotFromText, shouldResize, shouldSuppressDormancy, type AgentSlot, type BacklogItem, type CycleContext, type RouteDeps, type RouteSlot } from "@roll/core";
+import { EventBus, assessBacklog, branchCanaryVerdict, cycleEndEvent, DEFAULT_BRANCH_CANARY_MAX, firstInstalledAgent, isEphemeralBranch, mapV2Status, markStatus, parseBacklog, parsePolicy, readRouteSlot, shouldResize, shouldSuppressDormancy, type AgentSlot, type BacklogItem, type CycleContext, type RouteDeps, type RouteSlot } from "@roll/core";
 import { STATUS_MARKER, absent, buildTerminalEvent, deriveOrphanVerdict, present, type BacklogReason } from "@roll/spec";
 import { createScheduler, isOwnerHeld, launchdLabel, projectIdentity, readLockOwner, releaseLock } from "@roll/infra";
 import { dormantMarkerPath, resolveLoopRunState, writeDormantMarker } from "./loop-sched.js";
@@ -802,9 +802,14 @@ export function buildLoopRouteDeps(projectPath: string): RouteDeps {
   function readSlot(slot: AgentSlot): RouteSlot | undefined {
     const agentsYaml = join(projectPath, ".roll", "agents.yaml");
     try {
-      // readSlotFromText already returns `{ agent, model? }` — the router's
-      // RouteSlot shape — so the model rides through unchanged.
-      return readSlotFromText(readFileSync(agentsYaml, "utf8"), slot);
+      // FIX-1249: readRouteSlot understands BOTH the `rigs:` + `routing:`
+      // (roll-agents/v1 / v4) shape AND the legacy inline slot form, returning
+      // `{ agent, model? }` — the router's RouteSlot shape. Before this, the
+      // router called readSlotFromText directly, which only read the legacy
+      // inline form, so a project on the rigs/routing schema had its configured
+      // per-agent model silently dropped (the spawn then fell back to a
+      // source-baked default).
+      return readRouteSlot(readFileSync(agentsYaml, "utf8"), slot);
     } catch {
       return undefined; // agents.yaml missing — router falls through.
     }

@@ -46,6 +46,7 @@ import {
 } from "@roll/core";
 import type { CastRoleName, CollabStreamView, CycleRoleSummary, EventSource, RollEvent, RollGoal, SupervisorInput } from "@roll/spec";
 import { parseGoalYaml } from "@roll/spec";
+import { reduceStatusCheckRollup, type StatusCheckRollupEntry } from "@roll/infra";
 import { detectNoProgressStall, type NoProgressStall } from "../lib/goal-recovery.js";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
@@ -265,11 +266,13 @@ export function readManualMergeGates(
     const lastBot = botReviews.length > 0 ? botReviews[botReviews.length - 1] : undefined;
     const facts = {
       bot: lastBot?.state ?? "",
-      ciState: ((raw as { statusCheckRollup?: Array<{ conclusion?: string | null }> }).statusCheckRollup ?? []).every((c) => c.conclusion === "SUCCESS" || c.conclusion === "SKIPPED") && ((raw as { statusCheckRollup?: Array<{ conclusion?: string | null }> }).statusCheckRollup ?? []).length > 0
-        ? "success"
-        : ((raw as { statusCheckRollup?: Array<{ conclusion?: string | null }> }).statusCheckRollup ?? []).some((c) => c.conclusion === "FAILURE")
-          ? "failure"
-          : "",
+      ciState: (() => {
+        const rollup = ((raw as { statusCheckRollup?: StatusCheckRollupEntry[] }).statusCheckRollup ?? []);
+        const state = reduceStatusCheckRollup(rollup);
+        if (state === "green") return "success";
+        if (state === "red") return "failure";
+        return "";
+      })(),
       mergeable: (raw as { mergeStateStatus?: string }).mergeStateStatus ?? "",
       manualMerge:
         ((raw as { body?: string }).body ?? "").includes("[roll:manual-merge]") ||
@@ -1050,11 +1053,13 @@ export function supervisorCommand(args: string[]): number | Promise<number> {
     const lastBot2 = botReviews2.length > 0 ? botReviews2[botReviews2.length - 1] : undefined;
     const facts = {
       bot: lastBot2?.state ?? "",
-      ciState: ((raw as { statusCheckRollup?: Array<{ conclusion?: string | null }> }).statusCheckRollup ?? []).every((c) => c.conclusion === "SUCCESS" || c.conclusion === "SKIPPED") && ((raw as { statusCheckRollup?: Array<{ conclusion?: string | null }> }).statusCheckRollup ?? []).length > 0
-        ? "success"
-        : ((raw as { statusCheckRollup?: Array<{ conclusion?: string | null }> }).statusCheckRollup ?? []).some((c) => c.conclusion === "FAILURE")
-          ? "failure"
-          : "",
+      ciState: (() => {
+        const rollup = ((raw as { statusCheckRollup?: StatusCheckRollupEntry[] }).statusCheckRollup ?? []);
+        const state = reduceStatusCheckRollup(rollup);
+        if (state === "green") return "success";
+        if (state === "red") return "failure";
+        return "";
+      })(),
       mergeable: (raw as { mergeStateStatus?: string }).mergeStateStatus ?? "",
       manualMerge:
         ((raw as { body?: string }).body ?? "").includes("[roll:manual-merge]") ||

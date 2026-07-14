@@ -52,6 +52,8 @@ function installFakeGh(
     ci?: string;
     merge?: string;
     isDraft?: boolean;
+    /** Raw statusCheckRollup array — overrides ci when set. */
+    statusCheckRollup?: unknown[];
   } = {},
 ): string {
   const bin = join(cwd, "bin");
@@ -65,6 +67,9 @@ function installFakeGh(
   const ci = opts.ci ?? "SUCCESS";
   const merge = opts.merge ?? "CLEAN";
   const isDraft = opts.isDraft ?? false;
+  const rollup = opts.statusCheckRollup !== undefined
+    ? JSON.stringify(opts.statusCheckRollup)
+    : `[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"${ci}"}]`;
   writeFileSync(
     ghPath,
     [
@@ -74,7 +79,7 @@ function installFakeGh(
       "  exit 0",
       "fi",
       'if [ "$1" = "pr" ] && [ "$2" = "view" ]; then',
-      `  printf '%s\\n' '{"body":"${body}","labels":[],"reviews":${JSON.stringify(reviews)},"mergeStateStatus":"${merge}","statusCheckRollup":[{"conclusion":"${ci}"}],"isDraft":${isDraft},"headRefName":"${headRefName}"}'`,
+      `  printf '%s\\n' '{"body":"${body}","labels":[],"reviews":${JSON.stringify(reviews)},"mergeStateStatus":"${merge}","statusCheckRollup":${rollup},"isDraft":${isDraft},"headRefName":"${headRefName}"}'`,
       "  exit 0",
       "fi",
       "exit 1",
@@ -140,7 +145,7 @@ function ghPort(opts: { ci?: string; merge?: string } = {}): ExecPort {
         return {
           stdout: JSON.stringify({
             reviews: [], // no GitHub review — the FIX-1061 incident
-            statusCheckRollup: [{ conclusion: ci }],
+            statusCheckRollup: [{ __typename: "CheckRun", name: "build", status: "COMPLETED", conclusion: ci }],
             mergeStateStatus: merge,
             body: "Delivers FIX-1057.\n\n[roll:manual-merge]",
             labels: [],
@@ -267,5 +272,71 @@ describe("supervisor why — FIX-1062 repaired evidence diagnostic", () => {
     expect(gate.action).toBe("merge_ready");
     expect(gate.detail).toContain("repaired");
     expect(gate.detail).not.toBe("evaluator=none");
+  });
+});
+
+describe("FIX-1252 — ciState recognizes both CheckRun and StatusContext", () => {
+  const BOT_APPROVED = [{ authorAssociation: "BOT", state: "APPROVED" }];
+
+  it("pure CheckRun green → success", () => {
+    const cwd = project1062([JSON.stringify({ type: "pr:open", prNumber: PR, storyId: "FIX-1057", ts: 1 })]);
+    const fakeBin = installFakeGh(cwd, {
+      reviews: BOT_APPROVED,
+      merge: "CLEAN",
+      statusCheckRollup: [
+        { __typename: "CheckRun", name: "build", status: "COMPLETED", conclusion: "SUCCESS" },
+      ],
+    });
+    const r = withPath(fakeBin, () => run(cwd, ["repair-evidence", String(PR), "--json"]));
+    expect(r.code).toBe(0);
+    const parsed = JSON.parse(r.out);
+    expect(parsed.verdict).toBe("repaired");
+  });
+
+  it("pure StatusContext green → success", () => {
+    const cwd = project1062([JSON.stringify({ type: "pr:open", prNumber: PR, storyId: "FIX-1057", ts: 1 })]);
+    const fakeBin = installFakeGh(cwd, {
+      reviews: BOT_APPROVED,
+      merge: "CLEAN",
+      statusCheckRollup: [
+        { __typename: "StatusContext", context: "vercel", state: "SUCCESS" },
+      ],
+    });
+    const r = withPath(fakeBin, () => run(cwd, ["repair-evidence", String(PR), "--json"]));
+    expect(r.code).toBe(0);
+    const parsed = JSON.parse(r.out);
+    expect(parsed.verdict).toBe("repaired");
+  });
+
+  it("mixed CheckRun + StatusContext all green → success", () => {
+    const cwd = project1062([JSON.stringify({ type: "pr:open", prNumber: PR, storyId: "FIX-1057", ts: 1 })]);
+    const fakeBin = installFakeGh(cwd, {
+      reviews: BOT_APPROVED,
+      merge: "CLEAN",
+      statusCheckRollup: [
+        { __typename: "CheckRun", name: "build", status: "COMPLETED", conclusion: "SUCCESS" },
+        { __typename: "StatusContext", context: "vercel", state: "SUCCESS" },
+      ],
+    });
+    const r = withPath(fakeBin, () => run(cwd, ["repair-evidence", String(PR), "--json"]));
+    expect(r.code).toBe(0);
+    const parsed = JSON.parse(r.out);
+    expect(parsed.verdict).toBe("repaired");
+  });
+
+  it("mixed with red (StatusContext failure) → not reparable", () => {
+    const cwd = project1062([JSON.stringify({ type: "pr:open", prNumber: PR, storyId: "FIX-1057", ts: 1 })]);
+    const fakeBin = installFakeGh(cwd, {
+      reviews: BOT_APPROVED,
+      merge: "CLEAN",
+      statusCheckRollup: [
+        { __typename: "CheckRun", name: "build", status: "COMPLETED", conclusion: "SUCCESS" },
+        { __typename: "StatusContext", context: "vercel", state: "FAILURE" },
+      ],
+    });
+    const r = withPath(fakeBin, () => run(cwd, ["repair-evidence", String(PR), "--json"]));
+    expect(r.code).toBe(1);
+    const parsed = JSON.parse(r.out);
+    expect(parsed.verdict).toBe("not_reparable");
   });
 });

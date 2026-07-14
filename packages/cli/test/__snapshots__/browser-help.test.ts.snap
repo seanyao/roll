@@ -1,0 +1,18 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`US-BROW-007 — documented \`roll browser\` surface > AC2: help lists the released subcommands (setup / doctor / run / update) 1`] = `
+"Usage: roll browser <setup|doctor|run|update>
+  setup --dry-run       Report proposed machine config + dependency preflight (writes nothing).
+  setup --confirm       Write ~/.roll/browser-operations.yaml after explicit owner confirmation.
+  doctor [--json]       Report managed / interactive / capture readiness (ready|degraded|blocked).
+  run [opts]            Run a managed-lane operation against a fake target and print the result.
+     --action <navigate|snapshot|console|network|screenshot>  (default: navigate)
+     --url <fakeUrl>    Fake target URL (default: https://fake.target.test).
+     --selector <sel>   DOM selector for --action snapshot.
+     --redirect <url>   Simulate a redirect (proves redirect denial).
+     --fail <timeout|crash|devtools-error>  Inject a categorized diagnostic failure.
+     --json             Emit the machine-readable run report.
+  update [--check] [--json]   Check for DevTools transport update (pinned vs candidate).
+  update --apply --confirm    Apply update after smoke checks + doctor.
+"
+`;

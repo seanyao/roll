@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### 稳定性
+- agent 用哪个 model 现在完全由配置决定(`.roll/agents.yaml` 的 `rigs:`/`routing:`),源码不再写死运行时默认。以前缺配置会**静默**落到源码里写死的值(reasonix 一直跑 flash),配置丢了都发现不了;现在缺配置会**明确报错并引导**(需要显式 model 的 agent),配好的 model 一路带到 spawn。改某个 agent 的 model = 编辑一行配置,不用动源码、不用重新发版 (FIX-1249) `[loop]`
+
 ## v4.714.1 — 2026-07-14
 
 ### 稳定性

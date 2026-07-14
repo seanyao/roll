@@ -53,6 +53,8 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, sym
 import { dirname, join, relative } from "node:path";
 import { supervisorJournalCommand } from "./supervisor-journal.js";
 import { formatOperatingMode, resolveOperatingMode, suggestedGuidedRun } from "../lib/operating-mode.js";
+import { collectBrowserTruth } from "../lib/browser-truth-collect.js";
+import { renderBrowserTruthSupervisorLine } from "../lib/browser-truth-surface.js";
 import { readPendingPublish } from "../runner/pending-publish.js";
 import { cardArchiveDir, reportFileName, reviewFileName } from "../lib/archive.js";
 import { renderScopedExecuteRoute, resolveScopedCastRole, scopedExecuteRouteTrace } from "../runner/scoped-route.js";
@@ -1412,8 +1414,9 @@ export function supervisorCommand(args: string[]): number | Promise<number> {
         : state.next.kind === "run_card"
           ? mode.ownerAction
           : state.next.ownerAction;
+    const browserLines = renderBrowserTruthSupervisorLine(collectBrowserTruth({ projectPath }));
     process.stdout.write(
-      `\n  Supervisor — next: ${n.storyId ?? "(nothing ready)"}\n  scope: ${state.scope.label}\n  remaining: ${remainingLine(input)}\n  cast: ${ctx.cast}\n  cast detail: ${ctx.castDetail}\n  gate: ${ctx.gate}\n  manual merge: ${ctx.manualMerge}\n  semantic ranking: ${ctx.pickRanking?.line ?? "none"}\n  .roll meta: ${ctx.rollMeta.state} — ${ctx.rollMeta.detail}\n  agent health: ${state.agentHealth.summary}\n  ${n.reason}\n  ${formatOperatingMode(mode)}\n  owner action: ${action}\n  scheduler: ${state.next.schedulerAction}\n\n`,
+      `\n  Supervisor — next: ${n.storyId ?? "(nothing ready)"}\n  scope: ${state.scope.label}\n  remaining: ${remainingLine(input)}\n  cast: ${ctx.cast}\n  cast detail: ${ctx.castDetail}\n  gate: ${ctx.gate}\n  manual merge: ${ctx.manualMerge}\n  semantic ranking: ${ctx.pickRanking?.line ?? "none"}\n  .roll meta: ${ctx.rollMeta.state} — ${ctx.rollMeta.detail}\n  agent health: ${state.agentHealth.summary}\n${browserLines.join("\n")}\n\n  ${n.reason}\n  ${formatOperatingMode(mode)}\n  owner action: ${action}\n  scheduler: ${state.next.schedulerAction}\n\n`,
     );
     return 0;
   }

@@ -1,0 +1,60 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`US-BROW-009b user-visible status surface snapshots > snapshot: all-ready doctor row 1`] = `
+"
+Browser operations readiness (truth)
+浏览器操作就绪度（事实）
+
+  ✓ managed: ready
+  ✓ interactive: ready (expires 2026-07-15T01:00:00.000Z)
+  ✓ capture: ready"
+`;
+
+exports[`US-BROW-009b user-visible status surface snapshots > snapshot: all-ready supervisor next output 1`] = `
+"  browser readiness:
+    ✓ managed: ready
+    ✓ interactive: ready (expires 2026-07-15T01:00:00.000Z)
+    ✓ capture: ready"
+`;
+
+exports[`US-BROW-009b user-visible status surface snapshots > snapshot: all-ready verbose block 1`] = `
+"✓ managed:       ready    
+✓ interactive:   ready     expires 2026-07-15T01:00:00.000Z
+✓ capture:       ready    "
+`;
+
+exports[`US-BROW-009b user-visible status surface snapshots > snapshot: all-unknown/no-fact doctor row — never infers a pass 1`] = `
+"
+Browser operations readiness (truth)
+浏览器操作就绪度（事实）
+
+  ✗ managed: unknown — no managed operation facts
+  ✗ interactive: unknown — no owner lease facts
+  ✗ capture: unknown — no physical capture facts"
+`;
+
+exports[`US-BROW-009b user-visible status surface snapshots > snapshot: degraded/expired doctor row with reasons 1`] = `
+"
+Browser operations readiness (truth)
+浏览器操作就绪度（事实）
+
+  ~ managed: degraded — managed operation failed
+  ~ interactive: expired — owner lease expired (expires 2026-07-14T23:59:00.000Z)
+  ~ capture: degraded — digest_mismatch"
+`;
+
+exports[`US-BROW-009b user-visible status surface snapshots > snapshot: degraded/expired/unknown supervisor next with per-lane reasons and lease expiry 1`] = `
+"  browser readiness:
+    ✗ managed: unknown — no facts
+    ~ interactive: expired — owner lease expired (expires 2026-07-14T23:59:00.000Z)
+    ~ capture: degraded — bad"
+`;
+
+exports[`US-BROW-009b user-visible status surface snapshots > snapshot: degraded/expired/unknown verbose block with all reasons 1`] = `
+"~ managed:       degraded browser unavailable
+    → browser unavailable
+~ interactive:   expired  lease timed out expires 2026-07-14T23:59:00.000Z
+    → lease timed out
+✗ capture:       unknown  no capture bridge
+    → no capture bridge"
+`;

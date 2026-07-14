@@ -335,6 +335,11 @@ describe("FIX-275 — git dossier facts snapshot equivalence", () => {
     for (const story of [story1, story2]) {
       const legacy = collectStoryDossierInput(proj, story);
       const snap = collectStoryDossierInput(proj, story, cache);
+      // browserTruth.collectedAt is wall-clock; the two collections can land
+      // on different milliseconds. Equality is about the FACTS, not the stamp.
+      if (legacy.browserTruth !== undefined && snap.browserTruth !== undefined) {
+        snap.browserTruth = { ...snap.browserTruth, collectedAt: legacy.browserTruth.collectedAt };
+      }
       expect(snap).toEqual(legacy);
     }
     // body-only mention still counts (git --grep matches the full message)

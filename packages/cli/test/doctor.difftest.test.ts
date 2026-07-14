@@ -326,6 +326,13 @@ describe("frozen: roll doctor", () => {
         ~ capture: degraded — skipped — Roll Capture.app is a macOS-only physical screenshot host.
           fix: roll doctor --tools
           fix: see Roll Capture.app setup guidance
+
+      Browser operations readiness (truth)
+      浏览器操作就绪度（事实）
+
+        ✗ managed: unknown — no managed operation facts
+        ✗ interactive: unknown — no owner lease facts
+        ✗ capture: unknown — no physical capture facts
       ",
       }
     `);
@@ -444,6 +451,13 @@ describe("frozen: roll doctor", () => {
         ~ capture: degraded — skipped — Roll Capture.app is a macOS-only physical screenshot host.
           fix: roll doctor --tools
           fix: see Roll Capture.app setup guidance
+
+      Browser operations readiness (truth)
+      浏览器操作就绪度（事实）
+
+        ✗ managed: unknown — no managed operation facts
+        ✗ interactive: unknown — no owner lease facts
+        ✗ capture: unknown — no physical capture facts
       ",
       }
     `);
@@ -525,6 +539,13 @@ describe("frozen: roll doctor", () => {
         ~ capture: degraded — skipped — Roll Capture.app is a macOS-only physical screenshot host.
           fix: roll doctor --tools
           fix: see Roll Capture.app setup guidance
+
+      Browser operations readiness (truth)
+      浏览器操作就绪度（事实）
+
+        ✗ managed: unknown — no managed operation facts
+        ✗ interactive: unknown — no owner lease facts
+        ✗ capture: unknown — no physical capture facts
       ",
       }
     `);
@@ -605,6 +626,13 @@ describe("frozen: roll doctor", () => {
         ~ capture: degraded — skipped — Roll Capture.app is a macOS-only physical screenshot host.
           fix: roll doctor --tools
           fix: see Roll Capture.app setup guidance
+
+      Browser operations readiness (truth)
+      浏览器操作就绪度（事实）
+
+        ✗ managed: unknown — no managed operation facts
+        ✗ interactive: unknown — no owner lease facts
+        ✗ capture: unknown — no physical capture facts
       ",
       }
     `);
@@ -684,6 +712,13 @@ describe("frozen: roll doctor", () => {
         ~ capture: degraded — skipped — Roll Capture.app is a macOS-only physical screenshot host.
           fix: roll doctor --tools
           fix: see Roll Capture.app setup guidance
+
+      Browser operations readiness (truth)
+      浏览器操作就绪度（事实）
+
+        ✗ managed: unknown — no managed operation facts
+        ✗ interactive: unknown — no owner lease facts
+        ✗ capture: unknown — no physical capture facts
       ",
       }
     `);
@@ -762,6 +797,13 @@ describe("frozen: roll doctor", () => {
         ~ capture: degraded — skipped — Roll Capture.app is a macOS-only physical screenshot host.
           fix: roll doctor --tools
           fix: see Roll Capture.app setup guidance
+
+      Browser operations readiness (truth)
+      浏览器操作就绪度（事实）
+
+        ✗ managed: unknown — no managed operation facts
+        ✗ interactive: unknown — no owner lease facts
+        ✗ capture: unknown — no physical capture facts
       ",
       }
     `);
@@ -861,6 +903,13 @@ describe("frozen: roll doctor", () => {
         ~ capture: degraded — skipped — Roll Capture.app is a macOS-only physical screenshot host.
           fix: roll doctor --tools
           fix: see Roll Capture.app setup guidance
+
+      Browser operations readiness (truth)
+      浏览器操作就绪度（事实）
+
+        ✗ managed: unknown — no managed operation facts
+        ✗ interactive: unknown — no owner lease facts
+        ✗ capture: unknown — no physical capture facts
       ",
       }
     `);

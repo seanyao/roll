@@ -449,6 +449,8 @@ describe("US-BROW-008b roll browser interactive", () => {
     expect(code).toBe(1);
     expect(run).not.toHaveBeenCalled();
     expect(c.read()).toMatch(/owner declined/i);
+  });
+});
 
 describe("US-BROW-014 roll browser run --profile", () => {
   it("accepts a valid device profile name and includes it in the output", async () => {

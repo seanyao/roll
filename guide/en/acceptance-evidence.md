@@ -53,6 +53,12 @@ the archive rebuild; they are a convenience/archive view, not the delivery-truth
 `roll attest` also runs standalone — without an intent map every AC renders as
 🟧 Claimed, honestly.
 
+Captured artifacts render by their actual media type, not the capture lane that
+produced them. Image files (`png`, `jpg`, `jpeg`, `webp`, or `gif`, including a
+recognised image signature without an extension) render as images; text output
+such as `.txt` or `.log` is escaped and shown inline in a readable `<pre>`
+block. A terminal capture may therefore appear in either form.
+
 ## Gate policy
 
 The attest gate is **hard by default**. A delivered story with ACs but no fresh,

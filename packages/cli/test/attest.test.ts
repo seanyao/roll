@@ -1862,13 +1862,18 @@ describe("FIX-392 — terminal deliverable_cmd headless fallback", () => {
   // AC4: headless + deliverable_cmd → command stdout becomes taken:true terminal evidence → gate PASS
   it("headless (no GUI) + successful deliverable_cmd → stdout promoted to taken:true terminal capture", async () => {
     const proj = cmdProject();
+    const textCapture: ShotRun = (cmd) => {
+      if (cmd === "sh") return Promise.resolve({ code: 0, stdout: "deliverable <script>alert(1)</script>\n", stderr: "" });
+      if (cmd === "launchctl") return Promise.resolve({ code: 0, stdout: "Background\n", stderr: "" });
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    };
     await silenced(() =>
       inDir(proj, () =>
         attestCommand(["FIX-CMD", "--capture-command", "roll status"], {
           now: () => T0,
           run: quietRun,
           ghProbe: () => Promise.resolve(false),
-          capture: { run: headlessNoGui(), platform: "darwin", env: {} },
+          capture: { run: textCapture, platform: "darwin", env: {} },
         }),
       ),
     );
@@ -1876,7 +1881,7 @@ describe("FIX-392 — terminal deliverable_cmd headless fallback", () => {
     // Text evidence file exists
     const txtPath = join(runDir, "screenshots", "terminal-headless.txt");
     expect(existsSync(txtPath)).toBe(true);
-    expect(readFileSync(txtPath, "utf8")).toContain("deliverable output line 1");
+    expect(readFileSync(txtPath, "utf8")).toContain("deliverable <script>alert(1)</script>");
     // Evidence manifest records it as taken:true terminal capture
     const evidence = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as {
       captures?: Array<{ kind?: string; out?: string; taken?: boolean }>;
@@ -1885,7 +1890,11 @@ describe("FIX-392 — terminal deliverable_cmd headless fallback", () => {
     expect(evidence.captures).toContainEqual({ kind: "terminal", out: txtPath, taken: true });
     // capture_command fact also recorded
     expect(evidence.capture_command?.exitCode).toBe(0);
-    expect(evidence.capture_command?.stdoutTail).toContain("deliverable output line 1");
+    expect(evidence.capture_command?.stdoutTail).toContain("deliverable <script>alert(1)</script>");
+    const html = readFileSync(join(runDir, "FIX-CMD-report.html"), "utf8");
+    expect(html).toContain('<pre class="ansi">deliverable &lt;script&gt;alert(1)&lt;/script&gt;');
+    expect(html).not.toContain("<pre class=\"ansi\">deliverable <script>");
+    expect(html).not.toContain('<img src="screenshots/terminal-headless.txt"');
   });
 
   // AC4: command non-zero exit → still fails (does NOT promote)
@@ -1957,6 +1966,8 @@ describe("FIX-392 — terminal deliverable_cmd headless fallback", () => {
     };
     expect(evidence.captures?.[0]?.taken).toBe(true);
     expect(evidence.captures?.[0]?.kind).toBe("terminal");
+    const html = readFileSync(join(runDir, "FIX-CMD-report.html"), "utf8");
+    expect(html).toContain('<img src="screenshots/terminal.png"');
   });
 
   // AC5: not macOS → fallback promotes text evidence

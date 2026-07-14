@@ -88,7 +88,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { execFile, execFileSync } from "node:child_process";
-import { basename, dirname, join, relative } from "node:path";
+import { basename, dirname, extname, join, relative } from "node:path";
 import { promisify } from "node:util";
 import { cardArchiveDir, epicFromFeaturePath, findFeatureFile, findFeatureFiles, reportFileName, reviewFileName } from "../lib/archive.js";
 import { currentLang } from "./agent-list.js";
@@ -686,6 +686,37 @@ function declaresPhysicalEvidenceProfile(specText: string): boolean {
 function hrefInsideRunDir(runDir: string, path: string): string | undefined {
   const rel = relativeFromPhysical(runDir, path);
   return rel !== "" && !rel.startsWith("..") && !rel.startsWith("/") ? rel : undefined;
+}
+
+const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
+
+function hasImageSignature(path: string): boolean {
+  try {
+    const bytes = readFileSync(path).subarray(0, 12);
+    return (
+      (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) ||
+      (bytes.length >= 3 && bytes.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) ||
+      (bytes.length >= 6 && (bytes.subarray(0, 6).equals(Buffer.from("GIF87a")) || bytes.subarray(0, 6).equals(Buffer.from("GIF89a")))) ||
+      (bytes.length >= 12 && bytes.subarray(0, 4).equals(Buffer.from("RIFF")) && bytes.subarray(8, 12).equals(Buffer.from("WEBP")))
+    );
+  } catch {
+    return false;
+  }
+}
+
+function captureEvidenceRef(shot: ScreenshotResult, href: string): EvidenceRef | null {
+  if (!shot.taken) return null;
+  if (IMAGE_EXTENSIONS.has(extname(shot.out).toLowerCase()) || hasImageSignature(shot.out)) {
+    return screenshotEvidenceRef(shot, href);
+  }
+  try {
+    const { redacted, hits } = redactSecrets(readFileSync(shot.out, "utf8"));
+    if (hits.length > 0) warn(`redacted secret(s) in capture ${href}: ${hits.join(", ")}`);
+    return { kind: "text", label: shot.kind, href, inlineHtml: ansiPre(redacted) };
+  } catch {
+    warn(`captured artifact could not be read as text: ${href}`);
+    return null;
+  }
 }
 
 interface PhysicalCaptureLane {
@@ -1352,7 +1383,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
         shot = { kind: "terminal", out: txtOut, taken: true };
       }
       captureFacts.push(captureFactFromShot(shot));
-      const ref = screenshotEvidenceRef(shot, `screenshots/${refStem}`);
+      const ref = captureEvidenceRef(shot, `screenshots/${refStem}`);
       if (ref !== null) selfCaptures.push(ref);
       else warn(`terminal self-capture skipped (${refStem}): ${shot.skipped ?? "unknown"}`);
     }
@@ -1396,7 +1427,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
         deps.capture ?? {},
       );
       captureFacts.push(captureFactFromShot(shot));
-      const ref = screenshotEvidenceRef(shot, `screenshots/${stem}`);
+      const ref = captureEvidenceRef(shot, `screenshots/${stem}`);
       if (ref !== null) selfCaptures.push(ref);
       else warn(`web self-capture skipped (${stem}): ${shot.skipped ?? "unknown"}`);
     }

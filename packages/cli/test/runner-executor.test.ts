@@ -3655,9 +3655,9 @@ describe("executeCommand — command → executor mapping", () => {
       github: { ...base.ports.github, prState: vi.fn(async () => "UNKNOWN"), runPublishPlan },
     });
     const r = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
-    // blocked_no_evidence: status 1 (unpublished) — the branch is NEVER pushed
-    // and no PR is opened (推了分支却没 PR stops being a normal outcome).
-    expect(r.event).toEqual({ type: "published", result: { status: 1, manualMerge: false } });
+    // blocked_no_evidence: status 1 + gateBlocked so the publish ladder routes
+    // the preserved branch to `needs_review` instead of silently unpublished.
+    expect(r.event).toEqual({ type: "published", result: { status: 1, manualMerge: false, gateBlocked: true } });
     expect(push).not.toHaveBeenCalled();
     expect(runPublishPlan).not.toHaveBeenCalled();
     const gateEvents = (calls["event"] ?? [])
@@ -3852,7 +3852,7 @@ describe("executeCommand — command → executor mapping", () => {
 
     const result = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
 
-    expect(result.event).toEqual({ type: "published", result: { status: 1, manualMerge: false } });
+    expect(result.event).toEqual({ type: "published", result: { status: 1, manualMerge: false, gateBlocked: true } });
     expect(runPublishPlan).not.toHaveBeenCalled();
     expect((calls["alert"] ?? []).map((a) => String((a as unknown[])[1])).join("\n")).toContain("ac-map.json missing");
   });

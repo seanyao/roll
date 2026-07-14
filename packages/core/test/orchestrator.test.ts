@@ -444,6 +444,9 @@ describe("classifyPublish — publish ladder refines built (bin/roll:9239-9356)"
   it("FIX-351: PR-fail + not pushed → local, NOT failed (work passed gates, only publish couldn't complete)", () => {
     expect(classifyPublish({ status: 1 })).toBe("local");
   });
+  it("FIX-1256 / FIX-908: gateBlocked PR-fail → needs_review (preserve branch for review)", () => {
+    expect(classifyPublish({ status: 1, gateBlocked: true })).toBe("needs_review");
+  });
 });
 
 describe("FIX-351 — gates-passed-but-unpublished is a neutral terminal, not a failure", () => {

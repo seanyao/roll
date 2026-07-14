@@ -16,7 +16,7 @@
  *   function is pure + total (any fact combination yields a verdict).
  */
 import { describe, expect, it } from "vitest";
-import { evidenceGateBeforePush } from "../src/index.js";
+import { acBlockPresentInSpec, evidenceGateBeforePush } from "../src/index.js";
 
 describe("evidenceGateBeforePush — US-DELIV-004", () => {
   // ── AC1: evidence complete → push allowed ────────────────────────────────
@@ -65,5 +65,33 @@ describe("evidenceGateBeforePush — US-DELIV-004", () => {
     }
     // 4 distinct verdicts: ok / attest-missing / acmap-missing / both-missing
     expect(seen.size).toBe(4);
+  });
+
+  // ── FIX-1256: no-AC cards are exempt from report + ac-map requirements ───
+  it("acceptanceReportRequired=false → ok:true even with missing artifacts", () => {
+    expect(evidenceGateBeforePush({
+      attestReportPresent: false,
+      acMapPresent: false,
+      acceptanceReportRequired: false,
+    })).toEqual({ ok: true });
+  });
+
+  it("acceptanceReportRequired=true (default) still requires both artifacts", () => {
+    expect(evidenceGateBeforePush({
+      attestReportPresent: true,
+      acMapPresent: false,
+    })).toEqual({ ok: false, reasons: ["ac-map.json missing"] });
+  });
+});
+
+describe("acBlockPresentInSpec — FIX-1256 shared AC-block decision", () => {
+  it("returns true when the spec contains an **AC:** block for the story", () => {
+    const text = "# US-FOO-001\n\n**AC:**\n- [ ] something\n";
+    expect(acBlockPresentInSpec(text, "US-FOO-001")).toBe(true);
+  });
+
+  it("returns false when the spec has no **AC:** block", () => {
+    const text = "# FIX-FOO-001\n\nSome description without AC.\n";
+    expect(acBlockPresentInSpec(text, "FIX-FOO-001")).toBe(false);
   });
 });

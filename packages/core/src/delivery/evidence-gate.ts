@@ -14,7 +14,14 @@
  * earned at delivery, never backfilled). The CLI resolves the two facts from
  * disk (report/ac-map existence in either evidence root) and injects them;
  * the verdict is pure + total so it is exhaustively unit-testable.
+ *
+ * FIX-1256: the evidence gate must share the SAME "does this story owe an
+ * acceptance report?" decision as the attest gate. A card with no `**AC:**`
+ * block is exempt from both report and ac-map requirements; the caller injects
+ * that via `acceptanceReportRequired`.
  */
+
+import { acForStory } from "../attest/ac-parser.js";
 
 /** Pure inputs for {@link evidenceGateBeforePush} — all injectable. */
 export interface EvidenceGateFacts {
@@ -22,6 +29,12 @@ export interface EvidenceGateFacts {
   readonly attestReportPresent: boolean;
   /** True iff `ac-map.json` exists for the story in an evidence root. */
   readonly acMapPresent: boolean;
+  /**
+   * FIX-1256 — false when the story has no `**AC:**` block, so neither an
+   * attest report nor an ac-map is owed. Defaults to true (fail-closed) for
+   * callers that do not inject the fact.
+   */
+  readonly acceptanceReportRequired?: boolean;
 }
 
 /** The gate verdict: push allowed, or blocked with one reason per missing artifact. */
@@ -30,10 +43,22 @@ export type EvidenceGateVerdict =
   | { readonly ok: false; readonly reasons: readonly string[] };
 
 /**
+ * FIX-1256 — shared, spec-text-based decision for whether a story owes an
+ * acceptance report. Exported so the attest gate and the push-time evidence
+ * gate draw the same conclusion from the same source.
+ */
+export function acBlockPresentInSpec(specText: string, storyId: string): boolean {
+  return acForStory(specText, storyId, { fileOwned: true }).length > 0;
+}
+
+/**
  * Pure push-time evidence gate. Deterministic reason order (attest report
  * first, then ac-map) so alerts and tests are stable.
  */
 export function evidenceGateBeforePush(facts: EvidenceGateFacts): EvidenceGateVerdict {
+  if (facts.acceptanceReportRequired === false) {
+    return { ok: true };
+  }
   const reasons: string[] = [];
   if (!facts.attestReportPresent) {
     reasons.push("attest report missing (no acceptance report produced this cycle)");

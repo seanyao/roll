@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { BrowserEnvironmentReadiness } from "@roll/spec";
+import {
+  NO_UPDATE_AVAILABLE,
+  type VersionSource,
+} from "@roll/core";
 import { browserCommand } from "../src/commands/browser.js";
 import { collectBrowserEnvironmentReadiness } from "../src/lib/browser-readiness-doctor.js";
 import { defaultBrowserEnvironmentProbeDeps } from "@roll/infra";
@@ -31,10 +35,10 @@ const noWriteDeps = () => ({
 });
 
 describe("US-BROW-003 roll browser", () => {
-  it("setup --dry-run prints proposed config + preflight and writes nothing", () => {
+  it("setup --dry-run prints proposed config + preflight and writes nothing", async () => {
     const c = capture();
     const write = vi.fn();
-    const code = browserCommand(["setup", "--dry-run"], {
+    const code = await browserCommand(["setup", "--dry-run"], {
       ...noWriteDeps(),
       writeFile: write,
       readiness: () => fixtureReadiness({ _ROLL_BROWSER_CHROME: "missing", _ROLL_BROWSER_MCP: "missing" }),
@@ -47,10 +51,10 @@ describe("US-BROW-003 roll browser", () => {
     expect(c.read()).toMatch(/never enables owner Chrome remote debugging/i);
   });
 
-  it("setup without --confirm refuses and writes nothing (explicit owner confirmation required)", () => {
+  it("setup without --confirm refuses and writes nothing (explicit owner confirmation required)", async () => {
     const c = capture();
     const write = vi.fn();
-    const code = browserCommand(["setup"], {
+    const code = await browserCommand(["setup"], {
       ...noWriteDeps(),
       writeFile: write,
       readiness: () => fixtureReadiness({}),
@@ -61,10 +65,10 @@ describe("US-BROW-003 roll browser", () => {
     expect(c.read()).toMatch(/requires explicit owner confirmation/i);
   });
 
-  it("setup --confirm writes the machine config exactly once", () => {
+  it("setup --confirm writes the machine config exactly once", async () => {
     const c = capture();
     const write = vi.fn();
-    const code = browserCommand(["setup", "--confirm"], {
+    const code = await browserCommand(["setup", "--confirm"], {
       configPath: () => "/tmp/roll-test/browser-operations.yaml",
       writeFile: write,
       fileExists: () => false,
@@ -77,9 +81,9 @@ describe("US-BROW-003 roll browser", () => {
     expect(c.read()).toContain("wrote /tmp/roll-test/browser-operations.yaml");
   });
 
-  it("doctor --json reports each lane's verdict machine-readably", () => {
+  it("doctor --json reports each lane's verdict machine-readably", async () => {
     const c = capture();
-    const code = browserCommand(["doctor", "--json"], {
+    const code = await browserCommand(["doctor", "--json"], {
       ...noWriteDeps(),
       readiness: () =>
         // chrome present + mcp missing → managed degraded; remote debug off with
@@ -95,9 +99,9 @@ describe("US-BROW-003 roll browser", () => {
     expect(parsed.capture.verdict).toBe("degraded");
   });
 
-  it("a missing-dependency doctor never reports a lane as ready (no false pass)", () => {
+  it("a missing-dependency doctor never reports a lane as ready (no false pass)", async () => {
     const c = capture();
-    browserCommand(["doctor"], {
+    await browserCommand(["doctor"], {
       ...noWriteDeps(),
       readiness: () => fixtureReadiness({ _ROLL_BROWSER_CHROME: "missing", _ROLL_BROWSER_MCP: "missing", _ROLL_BROWSER_REMOTE_DEBUG: "off" }),
       stdout: c.stdout,
@@ -106,9 +110,188 @@ describe("US-BROW-003 roll browser", () => {
     expect(c.read()).toMatch(/managed:\s+degraded/);
   });
 
-  it("unknown subcommand fails loud", () => {
+  it("unknown subcommand fails loud", async () => {
     const c = capture();
-    const code = browserCommand(["frobnicate"], { ...noWriteDeps(), stdout: c.stdout });
+    const code = await browserCommand(["frobnicate"], { ...noWriteDeps(), stdout: c.stdout });
     expect(code).toBe(1);
+  });
+});
+
+describe("US-BROW-010 roll browser update", () => {
+  const pinnedCfg = "devtools:\n  package_version: 1.5.0\n";
+
+  it("update --check reports pinned version and available candidate without side effects", async () => {
+    const c = capture();
+    const versionSource: VersionSource = () => "1.6.0";
+    const readFile = vi.fn(() => pinnedCfg);
+    const writeFile = vi.fn();
+
+    const code = await browserCommand(["update", "--check"], {
+      ...noWriteDeps(),
+      readFile,
+      writeFile,
+      versionSource,
+      stdout: c.stdout,
+    });
+
+    expect(code).toBe(0);
+    expect(writeFile).not.toHaveBeenCalled();
+    const out = c.read();
+    expect(out).toContain("1.5.0");
+    expect(out).toContain("1.6.0");
+    expect(out).toContain("update");
+  });
+
+  it("update --check reports no update when version source returns NO_UPDATE_AVAILABLE", async () => {
+    const c = capture();
+    const versionSource: VersionSource = () => NO_UPDATE_AVAILABLE;
+    const readFile = vi.fn(() => pinnedCfg);
+    const writeFile = vi.fn();
+
+    const code = await browserCommand(["update", "--check"], {
+      ...noWriteDeps(),
+      readFile,
+      writeFile,
+      versionSource,
+      stdout: c.stdout,
+    });
+
+    expect(code).toBe(0);
+    expect(writeFile).not.toHaveBeenCalled();
+    const out = c.read();
+    expect(out).toContain("1.5.0");
+    expect(out).toContain("up to date");
+  });
+
+  it("update --apply without --confirm refuses and writes nothing", async () => {
+    const c = capture();
+    const versionSource: VersionSource = () => "1.6.0";
+    const readFile = vi.fn(() => pinnedCfg);
+    const writeFile = vi.fn();
+
+    const code = await browserCommand(["update", "--apply"], {
+      ...noWriteDeps(),
+      readFile,
+      writeFile,
+      versionSource,
+      stdout: c.stdout,
+    });
+
+    expect(code).toBe(0);
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(c.read()).toMatch(/explicit owner confirmation/i);
+  });
+
+  it("update --apply --confirm runs smoke check + doctor, applies on success", async () => {
+    const c = capture();
+    const versionSource: VersionSource = () => "1.6.0";
+    const readFile = vi.fn(() => pinnedCfg);
+    const writeFile = vi.fn();
+    let smokeRan = false;
+
+    const code = await browserCommand(["update", "--apply", "--confirm"], {
+      configPath: () => "/tmp/roll-test/browser-operations.yaml",
+      readFile,
+      writeFile,
+      fileExists: () => true,
+      versionSource,
+      smokeCheck: async () => { smokeRan = true; return true; },
+      readiness: () => fixtureReadiness({}),
+      stdout: c.stdout,
+    });
+
+    expect(code).toBe(0);
+    expect(smokeRan).toBe(true);
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    expect(writeFile.mock.calls[0]?.[1]).toContain("1.6.0");
+    expect(c.read()).toContain("applied");
+    expect(c.read()).toContain("1.6.0");
+    expect(c.read()).toContain("/tmp/roll-test/browser-operations.yaml");
+  });
+
+  it("update --apply --confirm keeps prior version when smoke check fails", async () => {
+    const c = capture();
+    const versionSource: VersionSource = () => "1.6.0";
+    const readFile = vi.fn(() => pinnedCfg);
+    const writeFile = vi.fn();
+    let smokeRan = false;
+
+    const code = await browserCommand(["update", "--apply", "--confirm"], {
+      configPath: () => "/tmp/roll-test/browser-operations.yaml",
+      readFile,
+      writeFile,
+      fileExists: () => true,
+      versionSource,
+      smokeCheck: async () => { smokeRan = true; return false; },
+      readiness: () => fixtureReadiness({}),
+      stdout: c.stdout,
+    });
+
+    expect(code).toBe(1);
+    expect(smokeRan).toBe(true);
+    expect(writeFile).not.toHaveBeenCalled();
+    const out = c.read();
+    expect(out).toContain("verification failed");
+    expect(out).toContain("smoke check failed");
+  });
+
+  it("update --check --json reports machine-readable result", async () => {
+    const c = capture();
+    const versionSource: VersionSource = () => "1.6.0";
+    const readFile = vi.fn(() => pinnedCfg);
+
+    const code = await browserCommand(["update", "--check", "--json"], {
+      ...noWriteDeps(),
+      readFile,
+      versionSource,
+      stdout: c.stdout,
+    });
+
+    expect(code).toBe(0);
+    const parsed = JSON.parse(c.read());
+    expect(parsed.pinned).toBe("1.5.0");
+    expect(parsed.candidate).toBe("1.6.0");
+    expect(parsed.updateAvailable).toBe(true);
+  });
+
+  it("update --apply --confirm with no update available reports no-op", async () => {
+    const c = capture();
+    const versionSource: VersionSource = () => NO_UPDATE_AVAILABLE;
+    const readFile = vi.fn(() => pinnedCfg);
+    const writeFile = vi.fn();
+
+    const code = await browserCommand(["update", "--apply", "--confirm"], {
+      configPath: () => "/tmp/roll-test/browser-operations.yaml",
+      readFile,
+      writeFile,
+      fileExists: () => true,
+      versionSource,
+      stdout: c.stdout,
+    });
+
+    expect(code).toBe(0);
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(c.read()).toContain("up to date");
+  });
+
+  it("update with no flags defaults to --check", async () => {
+    const c = capture();
+    const versionSource: VersionSource = () => "1.6.0";
+    const readFile = vi.fn(() => pinnedCfg);
+    const writeFile = vi.fn();
+
+    const code = await browserCommand(["update"], {
+      ...noWriteDeps(),
+      readFile,
+      writeFile,
+      versionSource,
+      stdout: c.stdout,
+    });
+
+    expect(code).toBe(0);
+    expect(writeFile).not.toHaveBeenCalled();
+    const out = c.read();
+    expect(out).toContain("1.5.0");
+    expect(out).toContain("1.6.0");
   });
 });

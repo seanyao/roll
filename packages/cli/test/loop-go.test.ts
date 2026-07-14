@@ -2117,3 +2117,104 @@ describe("FIX-1255 — safety-pause stop check normalizes s/ms event timestamps"
     expect(hasSafetyPauseSince(path, 1_784_022_572)).toBe(false);
   });
 });
+
+describe("FIX-1253 — go banner shows the EFFECTIVE scope, never the parsed default", () => {
+  // The tmux-parent path prints the banner and returns without running the
+  // worker, so it exercises resolveEffectiveScope against the persisted goal.
+  function bannerDeps(p: string, overrides: Partial<LoopGoDeps> = {}): LoopGoDeps {
+    return { ...completeGoalDeps(p), hasTmux: () => true, startTmux: () => true, ...overrides };
+  }
+
+  function writeActiveGoal(p: string, scope: RollGoal["scope"]): void {
+    const goal: RollGoal = {
+      schema: "goal.v1",
+      scope,
+      review: { mode: "auto" },
+      limits: {},
+      status: "active",
+      usage: { cycles: 0, costUsd: 0 },
+      createdAt: "2026-07-14T10:00:00Z",
+      updatedAt: "2026-07-14T10:00:00Z",
+    };
+    writeFileSync(join(p, ".roll", "loop", "goal.yaml"), renderGoalYaml(goal));
+  }
+
+  it("AC1/AC2/AC4: a flagless go over a persisted cards goal shows the inherited scope + source hint", async () => {
+    const p = project();
+    writeActiveGoal(p, { kind: "cards", cards: ["FIX-1250"] });
+    const r = await capture(() => loopGoCommand([], bannerDeps(p)));
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("cards FIX-1250");
+    expect(r.out).toContain("inherited from existing goal");
+    expect(r.out).toContain("--cards/--epic/--all to change");
+    // The regression: the banner must NOT print the misleading full-backlog
+    // default that hid the silent narrowing to a stale cards goal.
+    expect(r.out).not.toContain("all Todo backlog cards");
+  });
+
+  it("AC1: a flagless go over a persisted epic goal shows the inherited epic", async () => {
+    const p = project();
+    writeActiveGoal(p, { kind: "epic", epic: "loop-engine" });
+    const r = await capture(() => loopGoCommand([], bannerDeps(p)));
+    expect(r.out).toContain("epic loop-engine");
+    expect(r.out).toContain("inherited from existing goal");
+  });
+
+  it("AC1: a flagless go over a persisted all goal shows 'all' with NO inheritance callout", async () => {
+    const p = project();
+    writeActiveGoal(p, { kind: "all" });
+    const r = await capture(() => loopGoCommand([], bannerDeps(p)));
+    expect(r.out).toContain("all Todo backlog cards");
+    expect(r.out).not.toContain("inherited from existing goal");
+  });
+
+  it("AC1: with no persisted goal, a flagless go shows the plain 'all' default", async () => {
+    const p = project();
+    const r = await capture(() => loopGoCommand([], bannerDeps(p)));
+    expect(r.out).toContain("all Todo backlog cards");
+    expect(r.out).not.toContain("inherited from existing goal");
+  });
+
+  it("AC1: an explicit --cards run over a cards goal is NOT flagged as inherited", async () => {
+    const p = project();
+    writeActiveGoal(p, { kind: "cards", cards: ["FIX-1250"] });
+    const r = await capture(() => loopGoCommand(["--cards", "US-NEW"], bannerDeps(p)));
+    expect(r.out).toContain("cards US-NEW");
+    expect(r.out).not.toContain("inherited from existing goal");
+  });
+
+  it("AC3: --all banner resets a persisted cards goal to the full backlog", async () => {
+    const p = project();
+    writeActiveGoal(p, { kind: "cards", cards: ["FIX-1250"] });
+    const r = await capture(() => loopGoCommand(["--all"], bannerDeps(p)));
+    expect(r.out).toContain("all Todo backlog cards");
+    expect(r.out).not.toContain("inherited from existing goal");
+  });
+
+  it("AC3: --all PERSISTS an all scope over a prior cards goal in goal.yaml", async () => {
+    const p = project();
+    writeActiveGoal(p, { kind: "cards", cards: ["FIX-1250"] });
+    // --worker takes the resolution path that writes goal.yaml; --max-cycles 0
+    // stops the loop right after the reset scope is persisted.
+    const r = await capture(() => loopGoCommand(["--worker", "--all", "--max-cycles", "0"], completeGoalDeps(p)));
+    expect(r.code).toBe(0);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.scope).toEqual({ kind: "all" });
+  });
+
+  it("AC3: --all is documented in help", async () => {
+    const p = project();
+    const r = await capture(() => loopGoCommand(["--help"], completeGoalDeps(p)));
+    expect(r.out).toContain("--all");
+    expect(r.out).toContain("Reset the goal scope to the full Todo backlog");
+  });
+
+  it("AC1: the direct --no-tmux run also prints the inherited scope banner", async () => {
+    const p = project();
+    writeActiveGoal(p, { kind: "cards", cards: ["FIX-1250"] });
+    const r = await capture(() => loopGoCommand(["--no-tmux", "--max-cycles", "0"], completeGoalDeps(p)));
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("cards FIX-1250");
+    expect(r.out).toContain("inherited from existing goal");
+  });
+});

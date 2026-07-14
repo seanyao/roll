@@ -1412,7 +1412,17 @@ async function evaluateGoal(
   return { goal: next, complete: false, reason: verdictReason, reviewBlocked: false };
 }
 
-function hasSafetyPauseSince(path: string, since: number): boolean {
+/** Normalize an event ts to whole seconds (ms epoch ≥ 1e12 → s). */
+function eventTsSeconds(ts: number): number {
+  return ts >= 1e12 ? Math.floor(ts / 1000) : ts;
+}
+
+export function hasSafetyPauseSince(path: string, since: number): boolean {
+  // FIX-1255: safety_pause writers are split between second (correction
+  // circuit) and millisecond (run-once auth blocks) epochs. `since` is
+  // seconds; compare in seconds or every historical ms-stamped pause event
+  // reads as "in the future" and stops the session after its first cycle.
+  const sinceSec = eventTsSeconds(since);
   let text = "";
   try {
     text = readFileSync(path, "utf8");
@@ -1427,7 +1437,7 @@ function hasSafetyPauseSince(path: string, since: number): boolean {
     } catch {
       continue;
     }
-    if (row["type"] === "policy:safety_pause" && typeof row["ts"] === "number" && row["ts"] >= since) return true;
+    if (row["type"] === "policy:safety_pause" && typeof row["ts"] === "number" && eventTsSeconds(row["ts"]) >= sinceSec) return true;
   }
   return false;
 }

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { parsePeerReviewTranscript } from "@roll/core";
 import { parseGoalYaml } from "@roll/spec";
-import { classifyBootstrapArtifacts, deliveryGateStopDetails, loopGoCommand, planGoTmuxCommands, spawnFinalReviewAgent, type LoopGoDeps } from "../src/commands/loop-go.js";
+import { classifyBootstrapArtifacts, deliveryGateStopDetails, hasSafetyPauseSince, loopGoCommand, planGoTmuxCommands, spawnFinalReviewAgent, type LoopGoDeps } from "../src/commands/loop-go.js";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -2015,5 +2015,56 @@ lastDecisionReason: go_start
     const endEvent = events.find((e) => e.type === "goal:session_end");
     expect(endEvent).toBeDefined();
     expect(endEvent!.cycles).toBe(1);
+  });
+});
+
+describe("FIX-1255 — safety-pause stop check normalizes s/ms event timestamps", () => {
+  function eventsFile(p: string, rows: Array<Record<string, unknown>>): string {
+    const path = join(p, ".roll", "loop", "events.ndjson");
+    writeFileSync(path, rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+    return path;
+  }
+
+  // The live-repro shape: a HISTORICAL safety_pause stamped in MILLISECONDS
+  // (run-once auth-block path used Date.now()). since is seconds "session
+  // start". Before the fix the ms stamp (≈1.78e12) always compared >= the
+  // seconds since (≈1.78e9) and stopped every session after its first cycle.
+  it("ignores a historical ms-stamped safety_pause from before the session", () => {
+    const p = project();
+    const sessionStartSec = 1_784_022_572; // 2026-07-14
+    const staleMs = 1_783_879_922_944; // 2026-07-13, in MILLISECONDS
+    const path = eventsFile(p, [
+      { type: "policy:safety_pause", loop: "ci", reason: "agent auth block: kimi", ts: staleMs },
+    ]);
+    expect(hasSafetyPauseSince(path, sessionStartSec)).toBe(false);
+  });
+
+  it("ignores a historical seconds-stamped safety_pause from before the session", () => {
+    const p = project();
+    const path = eventsFile(p, [
+      { type: "policy:safety_pause", loop: "ci", reason: "consecutive failures 3 >= 3", ts: 1_781_078_541 },
+    ]);
+    expect(hasSafetyPauseSince(path, 1_784_022_572)).toBe(false);
+  });
+
+  it("detects a new safety_pause regardless of stamp unit", () => {
+    const p = project();
+    const sinceSec = 1_784_022_572;
+    const freshSec = sinceSec + 60;
+    const freshMs = (sinceSec + 60) * 1000;
+    const secPath = eventsFile(p, [
+      { type: "policy:safety_pause", loop: "ci", reason: "fresh (s)", ts: freshSec },
+    ]);
+    expect(hasSafetyPauseSince(secPath, sinceSec)).toBe(true);
+    const msPath = join(p, ".roll", "loop", "events-ms.ndjson");
+    writeFileSync(msPath, `${JSON.stringify({ type: "policy:safety_pause", loop: "ci", reason: "fresh (ms)", ts: freshMs })}\n`);
+    expect(hasSafetyPauseSince(msPath, sinceSec)).toBe(true);
+  });
+
+  it("ignores non-safety_pause rows and malformed lines", () => {
+    const p = project();
+    const path = join(p, ".roll", "loop", "events.ndjson");
+    writeFileSync(path, `not-json\n${JSON.stringify({ type: "alert:notify", channel: "loop-safety", message: "x", ts: 9_999_999_999_999 })}\n`);
+    expect(hasSafetyPauseSince(path, 1_784_022_572)).toBe(false);
   });
 });

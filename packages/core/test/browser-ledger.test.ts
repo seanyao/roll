@@ -105,6 +105,24 @@ describe("US-BROW-005 — BrowserOperationLedger", () => {
     ]);
   });
 
+  it("appends MCP bypass denials without an existence pre-check that can race with another writer", () => {
+    class AppendOnlyStore extends FakeLedgerStore {
+      override ensureFile(): void {
+        throw new Error("security audit writes must not pre-create the file");
+      }
+    }
+    const store = new AppendOnlyStore();
+    const ledger = new BrowserOperationLedger(store, () => "2026-07-15T00:00:00.000Z", freeGuard);
+
+    ledger.recordMcpBypassDenial("/ledger/events.ndjson", {
+      type: "browser:mcp-bypass-denied",
+      ts: "2026-07-15T00:00:00.000Z",
+      reason: { code: "generic_mcp_bypass_denied", message: "reserved" },
+    });
+
+    expect(ledger.read("/ledger/events.ndjson")).toMatchObject([{ type: "browser:mcp-bypass-denied" }]);
+  });
+
   it("does not append a second request while another process holds the idempotency guard", () => {
     const store = new FakeLedgerStore();
     const blockedGuard: BrowserLedgerGuard = { acquire: () => undefined };

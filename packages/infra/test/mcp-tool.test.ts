@@ -182,7 +182,8 @@ describe("US-TOOL-010 McpTool", () => {
 
   it("fails closed before config resolution or spawn when generic MCP targets the reserved DevTools server", async () => {
     const root = "/repo";
-    const registry = new BrowserTransportRegistry();
+    const events: unknown[] = [];
+    const registry = new BrowserTransportRegistry((event) => events.push(event));
     let connected = 0;
     const tool = new McpTool({
       projectRoot: root,
@@ -209,7 +210,7 @@ describe("US-TOOL-010 McpTool", () => {
       expect(result.error.message).toContain("reserved for Browser Operations");
     }
     expect(connected).toBe(0);
-    expect(registry.events()).toMatchObject([{ type: "browser:mcp-bypass-denied", reason: { code: "generic_mcp_bypass_denied" } }]);
+    expect(events).toMatchObject([{ type: "browser:mcp-bypass-denied", reason: { code: "generic_mcp_bypass_denied" } }]);
   });
 
   it("persists the bypass-denied event through the Browser Operations ledger by default", async () => {

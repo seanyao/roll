@@ -131,7 +131,9 @@ export class BrowserOperationLedger {
     path: string,
     event: Extract<BrowserOperationEvent, { type: "browser:mcp-bypass-denied" }>,
   ): void {
-    this.append(path, event);
+    // appendLine is one O_APPEND write with create semantics; an ensure-then-
+    // append pair can race when two first-time security denials arrive together.
+    this.store.appendLine(path, `${JSON.stringify({ schema: LEDGER_SCHEMA, event } satisfies BrowserLedgerLine)}\n`);
   }
 
   read(path: string): BrowserOperationEvent[] {

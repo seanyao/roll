@@ -243,7 +243,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function nodeProcessAlive(pid: number): boolean {
+export function nodeProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
@@ -252,7 +252,7 @@ function nodeProcessAlive(pid: number): boolean {
   }
 }
 
-function nodeProcessIdentity(pid: number): string | undefined {
+export function nodeProcessIdentity(pid: number): string | undefined {
   try {
     const startedAt = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8" }).trim();
     return startedAt === "" ? undefined : startedAt;

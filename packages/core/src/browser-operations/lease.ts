@@ -7,9 +7,8 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import { execFileSync } from "node:child_process";
 import type { BrowserDenialReason, BrowserLease, BrowserOperationEvent } from "@roll/spec";
-import { BrowserLeaseLock, type BrowserLeaseLockRecord, leaseLockPath } from "./lease-lock.js";
+import { BrowserLeaseLock, nodeProcessAlive, nodeProcessIdentity, type BrowserLeaseLockRecord, leaseLockPath } from "./lease-lock.js";
 import { normalizeOrigin } from "./origin.js";
 
 const DEFAULT_MAX_LEASE_MS = 15 * 60 * 1000;
@@ -275,22 +274,4 @@ function isStaleHolder(
   if (record.holderProcessIdentity === "unknown") return false;
   const current = identity(record.holderPid);
   return current !== undefined && current !== record.holderProcessIdentity;
-}
-
-function nodeProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error: unknown) {
-    return typeof error === "object" && error !== null && (error as NodeJS.ErrnoException).code === "EPERM";
-  }
-}
-
-function nodeProcessIdentity(pid: number): string | undefined {
-  try {
-    const startedAt = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8" }).trim();
-    return startedAt === "" ? undefined : startedAt;
-  } catch {
-    return undefined;
-  }
 }

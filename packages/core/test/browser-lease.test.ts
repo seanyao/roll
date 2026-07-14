@@ -114,7 +114,7 @@ describe("US-BROW-008a — BrowserLeaseService", () => {
     });
   });
 
-  it("persists the approval payload in the lock record", async () => {
+  it("persists the approval payload in the lock record", () => {
     const { service, store } = buildService();
     service.grant(baseInput());
     const record = recordAt(store, "http://localhost:3000");

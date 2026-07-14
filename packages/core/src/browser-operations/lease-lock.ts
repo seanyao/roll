@@ -144,8 +144,7 @@ export class BrowserLeaseLock {
     const current = parseRecord(this.store.readText(path));
     const holderTokenHash = createHash("sha256").update(holderToken, "utf8").digest("hex");
     if (current === undefined || current.holderTokenHash !== holderTokenHash) return false;
-    this.store.remove(path);
-    return true;
+    return this.store.claimStale(path, encode(current));
   }
 }
 

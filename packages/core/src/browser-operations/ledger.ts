@@ -1,7 +1,9 @@
 /** US-BROW-005 — append-only operation and lease transition ledger. */
+import { createHash, randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { BrowserActionResult, BrowserOperationEvent, BrowserOperationRun } from "@roll/spec";
+import { BrowserLeaseLock } from "./lease-lock.js";
 import { persistDiagnostic, type DiagnosticInput, type DiagnosticRedactor, type PersistDiagnosticResult } from "./redaction.js";
 
 const LEDGER_SCHEMA = "browser-ledger.v1";
@@ -31,6 +33,27 @@ export const nodeBrowserLedgerStore: BrowserLedgerStore = {
   },
 };
 
+/** Serializes the read-then-append idempotency transition across processes. */
+export interface BrowserLedgerGuard {
+  acquire(eventsPath: string, idempotencyKey: string): (() => void) | undefined;
+}
+
+export const nodeBrowserLedgerGuard: BrowserLedgerGuard = {
+  acquire(eventsPath, idempotencyKey) {
+    const token = randomUUID();
+    const lock = new BrowserLeaseLock();
+    const acquired = lock.acquire({
+      directory: `${dirname(eventsPath)}/.browser-operation-locks`,
+      endpointHash: createHash("sha256").update(idempotencyKey, "utf8").digest("hex"),
+      leaseId: `operation-${token}`,
+      holderPid: process.pid,
+      holderToken: token,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    return acquired.kind === "acquired" ? () => { lock.release(acquired.path, token); } : undefined;
+  },
+};
+
 export type StartBrowserRunResult =
   | { kind: "started" }
   | { kind: "resumed"; runId: string }
@@ -45,9 +68,20 @@ export class BrowserOperationLedger {
   constructor(
     private readonly store: BrowserLedgerStore = nodeBrowserLedgerStore,
     private readonly now: () => string = () => new Date().toISOString(),
+    private readonly guard: BrowserLedgerGuard = nodeBrowserLedgerGuard,
   ) {}
 
   start(path: string, run: BrowserOperationRun): StartBrowserRunResult {
+    const release = this.guard.acquire(path, run.idempotencyKey);
+    if (release === undefined) return { kind: "in_progress" };
+    try {
+      return this.startExclusive(path, run);
+    } finally {
+      release();
+    }
+  }
+
+  private startExclusive(path: string, run: BrowserOperationRun): StartBrowserRunResult {
     const prior = this.findByIdempotency(path, run.idempotencyKey);
     if (prior !== undefined) {
       const terminal = prior.find((event): event is Extract<BrowserOperationEvent, { type: "browser:operation-finished" }> => event.type === "browser:operation-finished");

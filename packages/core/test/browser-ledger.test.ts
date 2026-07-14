@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BrowserActionResult, BrowserOperationRun } from "@roll/spec";
-import { BrowserOperationLedger, type BrowserLedgerStore } from "../src/browser-operations/ledger.js";
+import { BrowserOperationLedger, type BrowserLedgerGuard, type BrowserLedgerStore } from "../src/browser-operations/ledger.js";
 
 class FakeLedgerStore implements BrowserLedgerStore {
   readonly files = new Map<string, string>();
@@ -17,6 +17,8 @@ class FakeLedgerStore implements BrowserLedgerStore {
     this.files.set(path, `${this.files.get(path) ?? ""}${line}`);
   }
 }
+
+const freeGuard: BrowserLedgerGuard = { acquire: () => () => undefined };
 
 function run(): BrowserOperationRun {
   return {
@@ -45,7 +47,7 @@ const terminalResult: BrowserActionResult = {
 describe("US-BROW-005 — BrowserOperationLedger", () => {
   it("persists a token-bound event sequence and replays the original terminal result for three identical retries", () => {
     const store = new FakeLedgerStore();
-    const ledger = new BrowserOperationLedger(store, () => "2026-07-14T00:00:00.000Z");
+    const ledger = new BrowserOperationLedger(store, () => "2026-07-14T00:00:00.000Z", freeGuard);
 
     expect(ledger.start("/ledger/events.ndjson", run())).toMatchObject({ kind: "started" });
     ledger.finish("/ledger/events.ndjson", terminalResult);
@@ -71,7 +73,7 @@ describe("US-BROW-005 — BrowserOperationLedger", () => {
 
   it("refuses a different holder from resuming a non-terminal idempotency key", () => {
     const store = new FakeLedgerStore();
-    const ledger = new BrowserOperationLedger(store, () => "2026-07-14T00:00:00.000Z");
+    const ledger = new BrowserOperationLedger(store, () => "2026-07-14T00:00:00.000Z", freeGuard);
     ledger.start("/ledger/events.ndjson", run());
 
     const result = ledger.start("/ledger/events.ndjson", { ...run(), holderTokenHash: "other-holder" });
@@ -81,7 +83,7 @@ describe("US-BROW-005 — BrowserOperationLedger", () => {
 
   it("writes classified diagnostic-drop and orphan-recovery audit events", () => {
     const store = new FakeLedgerStore();
-    const ledger = new BrowserOperationLedger(store, () => "2026-07-14T00:00:00.000Z");
+    const ledger = new BrowserOperationLedger(store, () => "2026-07-14T00:00:00.000Z", freeGuard);
 
     ledger.recordDiagnostic(
       "/ledger/events.ndjson",
@@ -101,5 +103,14 @@ describe("US-BROW-005 — BrowserOperationLedger", () => {
       { type: "browser:diagnostic-dropped", runId: "run-1", ts: "2026-07-14T00:00:00.000Z", failure: "redaction_failed" },
       { type: "browser:lease-orphaned", leaseId: "lease-1", endpointHash: "endpoint-a", holderPid: 10, ts: "2026-07-14T00:00:00.000Z" },
     ]);
+  });
+
+  it("does not append a second request while another process holds the idempotency guard", () => {
+    const store = new FakeLedgerStore();
+    const blockedGuard: BrowserLedgerGuard = { acquire: () => undefined };
+    const ledger = new BrowserOperationLedger(store, () => "2026-07-14T00:00:00.000Z", blockedGuard);
+
+    expect(ledger.start("/ledger/events.ndjson", run())).toEqual({ kind: "in_progress" });
+    expect(ledger.read("/ledger/events.ndjson")).toEqual([]);
   });
 });

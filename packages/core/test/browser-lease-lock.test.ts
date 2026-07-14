@@ -1,5 +1,8 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { BrowserLeaseLock, type BrowserLeaseLockStore } from "../src/browser-operations/lease-lock.js";
+import { BrowserLeaseLock, nodeBrowserLeaseLockStore, type BrowserLeaseLockStore } from "../src/browser-operations/lease-lock.js";
 
 class FakeLockStore implements BrowserLeaseLockStore {
   readonly files = new Map<string, string>();
@@ -21,9 +24,37 @@ class FakeLockStore implements BrowserLeaseLockStore {
   replace(path: string, text: string): void {
     this.files.set(path, text);
   }
+
+  claimStale(path: string, expected: string): boolean {
+    if (this.files.get(path) !== expected) return false;
+    this.files.delete(path);
+    return true;
+  }
 }
 
 describe("US-BROW-005 — BrowserLeaseLock", () => {
+  it("uses the filesystem O_EXCL path across independent lock instances", () => {
+    const directory = mkdtempSync(join(tmpdir(), "roll-browser-lock-"));
+    try {
+      const first = new BrowserLeaseLock(nodeBrowserLeaseLockStore, () => true, () => 1000);
+      const second = new BrowserLeaseLock(nodeBrowserLeaseLockStore, () => true, () => 1000);
+      const input = {
+        directory,
+        endpointHash: "endpoint-a",
+        leaseId: "lease-a",
+        holderPid: 10,
+        holderToken: "holder-a",
+        expiresAt: "1970-01-01T00:01:00.000Z",
+      };
+
+      expect(first.acquire(input).kind).toBe("acquired");
+      expect(second.acquire({ ...input, leaseId: "lease-b", holderPid: 11, holderToken: "holder-b" })).toMatchObject({ kind: "held", holderPid: 10 });
+      expect(second.acquire({ ...input, endpointHash: "endpoint-b", leaseId: "lease-c", holderPid: 12, holderToken: "holder-c" }).kind).toBe("acquired");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("uses atomic exclusive creation so a competing holder cannot seize an endpoint", () => {
     const locks = new BrowserLeaseLock(new FakeLockStore(), () => true, () => 1000);
     const first = locks.acquire({
@@ -56,7 +87,7 @@ describe("US-BROW-005 — BrowserLeaseLock", () => {
       leaseId: "lease-a",
       holderPid: 10,
       holderToken: "holder-a",
-      expiresAt: "1970-01-01T00:01:00.000Z",
+      expiresAt: "1970-01-01T00:00:00.000Z",
     });
 
     const reclaimed = locks.acquire({
@@ -72,6 +103,28 @@ describe("US-BROW-005 — BrowserLeaseLock", () => {
       kind: "acquired",
       reclaimed: { leaseId: "lease-a", holderPid: 10, endpointHash: "endpoint-a" },
     });
+  });
+
+  it("does not seize an expired lock while the recorded holder process is still alive", () => {
+    const store = new FakeLockStore();
+    const locks = new BrowserLeaseLock(store, () => true, () => 1000);
+    locks.acquire({
+      directory: "/locks",
+      endpointHash: "endpoint-a",
+      leaseId: "lease-a",
+      holderPid: 10,
+      holderToken: "holder-a",
+      expiresAt: "1970-01-01T00:00:00.000Z",
+    });
+
+    expect(locks.acquire({
+      directory: "/locks",
+      endpointHash: "endpoint-a",
+      leaseId: "lease-b",
+      holderPid: 11,
+      holderToken: "holder-b",
+      expiresAt: "1970-01-01T00:01:00.000Z",
+    })).toMatchObject({ kind: "held", holderPid: 10 });
   });
 
   it("updates heartbeat only for the token-hash holder", () => {

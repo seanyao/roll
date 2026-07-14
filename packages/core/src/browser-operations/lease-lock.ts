@@ -5,7 +5,7 @@
  * primitive. The store's createExclusive operation must map to O_EXCL.
  */
 import { createHash } from "node:crypto";
-import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export interface BrowserLeaseLockRecord {
@@ -21,7 +21,8 @@ export interface BrowserLeaseLockStore {
   /** Atomically create a file only when it does not exist (O_EXCL). */
   createExclusive(path: string, text: string): boolean;
   readText(path: string): string | undefined;
-  remove(path: string): void;
+  /** Atomically claims an unchanged stale record and removes its live name. */
+  claimStale(path: string, expected: string): boolean;
   /** Atomically replace an existing lock record after holder verification. */
   replace(path: string, text: string): void;
 }
@@ -29,17 +30,21 @@ export interface BrowserLeaseLockStore {
 export const nodeBrowserLeaseLockStore: BrowserLeaseLockStore = {
   createExclusive(path, text) {
     mkdirSync(dirname(path), { recursive: true });
+    const tmp = `${path}.${process.pid}.${Math.random().toString(16).slice(2)}.tmp`;
     try {
-      const fd = openSync(path, "wx");
+      const fd = openSync(tmp, "wx");
       try {
         writeFileSync(fd, text, "utf8");
       } finally {
         closeSync(fd);
       }
+      linkSync(tmp, path);
       return true;
     } catch (error: unknown) {
       if (isAlreadyExists(error)) return false;
       throw error;
+    } finally {
+      rmSync(tmp, { force: true });
     }
   },
   readText(path) {
@@ -49,11 +54,23 @@ export const nodeBrowserLeaseLockStore: BrowserLeaseLockStore = {
       return undefined;
     }
   },
-  remove(path) {
-    rmSync(path, { force: true });
+  claimStale(path, expected) {
+    const claim = `${path}.reclaim`;
+    try {
+      linkSync(path, claim);
+      if (readFileSync(claim, "utf8") !== expected) return false;
+      unlinkSync(path);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      rmSync(claim, { force: true });
+    }
   },
   replace(path, text) {
-    writeFileSync(path, text, "utf8");
+    const tmp = `${path}.${process.pid}.tmp`;
+    writeFileSync(tmp, text, "utf8");
+    renameSync(tmp, path);
   },
 };
 
@@ -82,13 +99,13 @@ export class BrowserLeaseLock {
     const record = toRecord(input, this.now());
     if (this.store.createExclusive(path, encode(record))) return { kind: "acquired", path, record };
 
-    const existing = parseRecord(this.store.readText(path));
+    const existingText = this.store.readText(path);
+    const existing = parseRecord(existingText);
     if (existing === undefined || !isStale(existing, this.now(), this.isProcessAlive)) {
       return { kind: "held", path, holderPid: existing?.holderPid, expiresAt: existing?.expiresAt };
     }
 
-    this.store.remove(path);
-    if (this.store.createExclusive(path, encode(record))) {
+    if (existingText !== undefined && this.store.claimStale(path, existingText) && this.store.createExclusive(path, encode(record))) {
       return { kind: "acquired", path, record, reclaimed: existing };
     }
     const winner = parseRecord(this.store.readText(path));
@@ -110,6 +127,13 @@ export class BrowserLeaseLock {
     };
     this.store.replace(path, encode(record));
     return { kind: "renewed", record };
+  }
+
+  release(path: string, holderToken: string): boolean {
+    const current = parseRecord(this.store.readText(path));
+    const holderTokenHash = createHash("sha256").update(holderToken, "utf8").digest("hex");
+    if (current === undefined || current.holderTokenHash !== holderTokenHash) return false;
+    return this.store.claimStale(path, encode(current));
   }
 }
 
@@ -147,7 +171,9 @@ function parseRecord(text: string | undefined): BrowserLeaseLockRecord | undefin
 
 function isStale(record: BrowserLeaseLockRecord, now: number, alive: (pid: number) => boolean): boolean {
   const expiry = Date.parse(record.expiresAt);
-  return !Number.isFinite(expiry) || expiry <= now || !alive(record.holderPid);
+  // A stale timestamp is diagnostic, not permission to delete a live holder's
+  // lock. Only a dead PID is reclaimable; a live holder must release or renew.
+  return (!Number.isFinite(expiry) || expiry <= now) && !alive(record.holderPid);
 }
 
 function encode(record: BrowserLeaseLockRecord): string {
@@ -166,7 +192,7 @@ function nodeProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (error: unknown) {
+    return typeof error === "object" && error !== null && (error as NodeJS.ErrnoException).code === "EPERM";
   }
 }

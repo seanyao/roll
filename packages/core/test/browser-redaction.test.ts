@@ -20,6 +20,12 @@ describe("US-BROW-005 — diagnostic redaction", () => {
 
     expect(result.artifact.untrusted).toBe(true);
     expect(result.artifact.diagnosticOnly).toBe(true);
+    expect(result.presentation).toEqual({
+      contentType: "text/plain",
+      executable: false,
+      trustedHtml: false,
+      acceptanceEvidence: false,
+    });
     expect(result.text).not.toContain("secret");
     expect(result.text).not.toContain("hunter2");
     expect(result.text).not.toContain("eyJhbGci");
@@ -35,5 +41,25 @@ describe("US-BROW-005 — diagnostic redaction", () => {
     );
 
     expect(result).toEqual({ kind: "dropped", failure: "redaction_failed" });
+  });
+
+  it("redacts JSON diagnostic fields before a structured console payload is persisted", () => {
+    const result = persistDiagnostic({
+      artifactId: "diag-json",
+      kind: "console-summary",
+      text: JSON.stringify({
+        cookie: "session=json-cookie",
+        authorization: "Bearer json-bearer",
+        password: "json-password",
+        token: "json-token",
+        "set-cookie": "sid=json-set-cookie",
+      }),
+    });
+
+    expect(result.kind).toBe("stored");
+    if (result.kind !== "stored") return;
+    for (const secret of ["json-cookie", "json-bearer", "json-password", "json-token", "json-set-cookie"]) {
+      expect(result.text).not.toContain(secret);
+    }
   });
 });

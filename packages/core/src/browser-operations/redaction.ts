@@ -7,6 +7,14 @@ import type { DiagnosticArtifactKind, DiagnosticArtifactRef } from "@roll/spec";
 
 export const MAX_DIAGNOSTIC_TEXT_BYTES = 4 * 1024;
 
+/** A diagnostic is inert text, never executable/trusted/evidence-bearing. */
+export const DIAGNOSTIC_PRESENTATION = {
+  contentType: "text/plain",
+  executable: false,
+  trustedHtml: false,
+  acceptanceEvidence: false,
+} as const;
+
 export interface DiagnosticInput {
   artifactId: string;
   kind: DiagnosticArtifactKind;
@@ -14,7 +22,7 @@ export interface DiagnosticInput {
 }
 
 export type PersistDiagnosticResult =
-  | { kind: "stored"; artifact: DiagnosticArtifactRef; text: string; untrusted: true }
+  | { kind: "stored"; artifact: DiagnosticArtifactRef; text: string; untrusted: true; presentation: typeof DIAGNOSTIC_PRESENTATION }
   | { kind: "dropped"; failure: "redaction_failed" };
 
 export type DiagnosticRedactor = (text: string) => string;
@@ -22,6 +30,7 @@ export type DiagnosticRedactor = (text: string) => string;
 /** Redact credentials and bearer-like values from untrusted browser output. */
 export function redactDiagnostic(text: string): string {
   return text
+    .replace(/"(cookie|set-cookie|authorization|password|passwd|token|access_token|refresh_token|api[_-]?key)"\s*:\s*"(?:\\.|[^"\\])*"/gim, '"$1":"[REDACTED]"')
     .replace(/^(cookie|set-cookie)\s*:\s*[^\r\n]*/gim, "$1: [REDACTED]")
     .replace(/^(authorization)\s*:\s*[^\r\n]*/gim, "$1: [REDACTED]")
     .replace(/\b(password|passwd|token|access_token|refresh_token|api[_-]?key)\s*([:=])\s*[^\s&;,\r\n]*/gim, "$1$2[REDACTED]")
@@ -54,6 +63,7 @@ export function persistDiagnostic(
       },
       text,
       untrusted: true,
+      presentation: DIAGNOSTIC_PRESENTATION,
     };
   } catch {
     return { kind: "dropped", failure: "redaction_failed" };

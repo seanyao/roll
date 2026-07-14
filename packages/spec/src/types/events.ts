@@ -231,6 +231,9 @@ export type RollEvent =
     }
   // Goal mode (US-GOAL-001) — the durable goal state machine facts.
   | { type: "goal:created"; schema: "goal.v1"; scope: GoalScope; status: "active"; review: GoalReviewMode; ts: number }
+  // FIX-1254: a completed goal is immutable; a later `go` archives it before
+  // creating a distinct active goal instead of reviving its terminal state.
+  | { type: "goal:archived"; schema: "goal.v1"; scope: GoalScope; status: "complete"; archivePath: string; ts: number }
   | { type: "goal:state"; schema: "goal.v1"; from: GoalStatus; to: GoalStatus; actor: GoalTransitionActor; reason: string; ts: number }
   | { type: "goal:session_start"; sessionId: string; scope: GoalScope; ts: number }
   | { type: "goal:session_end"; sessionId: string; status: GoalStatus; reason: string; cycles: number; ts: number }

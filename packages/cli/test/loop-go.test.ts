@@ -1,10 +1,10 @@
 import { execSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { parsePeerReviewTranscript } from "@roll/core";
-import { parseGoalYaml } from "@roll/spec";
+import { parseGoalYaml, renderGoalYaml, type RollGoal } from "@roll/spec";
 import { classifyBootstrapArtifacts, deliveryGateStopDetails, hasSafetyPauseSince, loopGoCommand, planGoTmuxCommands, spawnFinalReviewAgent, type LoopGoDeps } from "../src/commands/loop-go.js";
 
 const dirs: string[] = [];
@@ -95,6 +95,55 @@ const approveFinalReview: NonNullable<LoopGoDeps["finalReview"]> = async () => (
 });
 
 describe("US-GOAL-002 — roll loop go", () => {
+  it("FIX-1254: archives a complete goal and creates a fresh scoped goal", async () => {
+    const p = project();
+    const oldGoal: RollGoal = {
+      schema: "goal.v1",
+      scope: { kind: "cards", cards: ["FIX-OLD"] },
+      review: { mode: "auto" },
+      limits: {},
+      status: "complete",
+      usage: { cycles: 1, costUsd: 0 },
+      createdAt: "2026-06-10T10:00:00Z",
+      updatedAt: "2026-06-10T10:01:00Z",
+    };
+    writeFileSync(join(p, ".roll", "loop", "goal.yaml"), renderGoalYaml(oldGoal));
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "FIX-NEXT", "--max-cycles", "0"], completeGoalDeps(p)));
+
+    expect(r.code).toBe(0);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.scope).toEqual({ kind: "cards", cards: ["FIX-NEXT"] });
+    const archiveDir = join(p, ".roll", "loop", "goal-archive");
+    const archived = readdirSync(archiveDir);
+    expect(archived).toHaveLength(1);
+    expect(parseGoalYaml(readFileSync(join(archiveDir, archived[0]!), "utf8"))).toEqual(oldGoal);
+    const events = readEvents(p);
+    expect(events.some((event) => event.type === "goal:archived" && event.scope.kind === "cards" && event.scope.cards[0] === "FIX-OLD")).toBe(true);
+    expect(events.some((event) => event.type === "goal:created" && event.status === "active" && event.scope.kind === "cards" && event.scope.cards[0] === "FIX-NEXT")).toBe(true);
+  });
+
+  it("FIX-1254: starts a fresh all-scope goal after completion when scope is omitted", async () => {
+    const p = project();
+    const oldGoal: RollGoal = {
+      schema: "goal.v1",
+      scope: { kind: "epic", epic: "old-epic" },
+      review: { mode: "auto" },
+      limits: {},
+      status: "complete",
+      usage: { cycles: 1, costUsd: 0 },
+      createdAt: "2026-06-10T10:00:00Z",
+      updatedAt: "2026-06-10T10:01:00Z",
+    };
+    writeFileSync(join(p, ".roll", "loop", "goal.yaml"), renderGoalYaml(oldGoal));
+
+    const r = await capture(() => loopGoCommand(["--worker", "--max-cycles", "0"], completeGoalDeps(p)));
+
+    expect(r.code).toBe(0);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.scope).toEqual({ kind: "all" });
+    expect(readEvents(p).some((event) => event.type === "goal:created" && event.status === "active" && event.scope.kind === "all")).toBe(true);
+  });
+
   it("prints help for review modes without starting a session", async () => {
     const p = project();
     const r = await capture(() => loopGoCommand(["--help"], completeGoalDeps(p)));

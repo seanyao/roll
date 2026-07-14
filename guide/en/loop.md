@@ -314,8 +314,11 @@ Budget and run limits are explicit per `roll loop go`. `--budget`,
 limit for this run — Roll never silently inherits a budget or cap from a prior
 session's persisted goal, so a flagless `roll loop go` can neither be capped nor
 bricked by a limit you set days ago. Scope (`--epic`/`--cards`) and `--review`
-still persist when unspecified, because they are the goal's identity, not a
-per-run safety knob.
+persist only while the goal is unfinished. When a goal is `complete`, the next
+`roll loop go` archives it under `.roll/loop/goal-archive/`, records
+`goal:archived`, and starts a distinct goal from that invocation's flags. With
+no scope flag, the new goal covers all eligible backlog cards; it never reuses
+the completed goal's scope.
 
 Before the first builder cycle, `roll loop go` also has a fallback check for
 leftover uncommitted Roll bootstrap artifacts such as `AGENTS.md`, `.claude/`,

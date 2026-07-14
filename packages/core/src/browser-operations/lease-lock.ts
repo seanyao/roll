@@ -22,6 +22,8 @@ export interface BrowserLeaseLockStore {
   createExclusive(path: string, text: string): boolean;
   readText(path: string): string | undefined;
   remove(path: string): void;
+  /** Atomically replace an existing lock record after holder verification. */
+  replace(path: string, text: string): void;
 }
 
 export const nodeBrowserLeaseLockStore: BrowserLeaseLockStore = {
@@ -49,6 +51,9 @@ export const nodeBrowserLeaseLockStore: BrowserLeaseLockStore = {
   },
   remove(path) {
     rmSync(path, { force: true });
+  },
+  replace(path, text) {
+    writeFileSync(path, text, "utf8");
   },
 };
 
@@ -88,6 +93,23 @@ export class BrowserLeaseLock {
     }
     const winner = parseRecord(this.store.readText(path));
     return { kind: "held", path, holderPid: winner?.holderPid, expiresAt: winner?.expiresAt };
+  }
+
+  heartbeat(
+    path: string,
+    holderToken: string,
+    expiresAt?: string,
+  ): { kind: "renewed"; record: BrowserLeaseLockRecord } | { kind: "not_holder" } {
+    const current = parseRecord(this.store.readText(path));
+    const holderTokenHash = createHash("sha256").update(holderToken, "utf8").digest("hex");
+    if (current === undefined || current.holderTokenHash !== holderTokenHash) return { kind: "not_holder" };
+    const record: BrowserLeaseLockRecord = {
+      ...current,
+      heartbeatAt: new Date(this.now()).toISOString(),
+      ...(expiresAt === undefined ? {} : { expiresAt }),
+    };
+    this.store.replace(path, encode(record));
+    return { kind: "renewed", record };
   }
 }
 

@@ -17,6 +17,10 @@ class FakeLockStore implements BrowserLeaseLockStore {
   remove(path: string): void {
     this.files.delete(path);
   }
+
+  replace(path: string, text: string): void {
+    this.files.set(path, text);
+  }
 }
 
 describe("US-BROW-005 — BrowserLeaseLock", () => {
@@ -67,6 +71,27 @@ describe("US-BROW-005 — BrowserLeaseLock", () => {
     expect(reclaimed).toMatchObject({
       kind: "acquired",
       reclaimed: { leaseId: "lease-a", holderPid: 10, endpointHash: "endpoint-a" },
+    });
+  });
+
+  it("updates heartbeat only for the token-hash holder", () => {
+    let now = 0;
+    const locks = new BrowserLeaseLock(new FakeLockStore(), () => true, () => now);
+    const acquired = locks.acquire({
+      directory: "/locks",
+      endpointHash: "endpoint-a",
+      leaseId: "lease-a",
+      holderPid: 10,
+      holderToken: "holder-a",
+      expiresAt: "1970-01-01T00:01:00.000Z",
+    });
+    if (acquired.kind !== "acquired") throw new Error("expected acquired lock");
+
+    now = 1000;
+    expect(locks.heartbeat(acquired.path, "wrong-holder")).toEqual({ kind: "not_holder" });
+    expect(locks.heartbeat(acquired.path, "holder-a", "1970-01-01T00:02:00.000Z")).toMatchObject({
+      kind: "renewed",
+      record: { heartbeatAt: "1970-01-01T00:00:01.000Z", expiresAt: "1970-01-01T00:02:00.000Z" },
     });
   });
 });

@@ -451,3 +451,69 @@ describe("US-BROW-008b roll browser interactive", () => {
     expect(c.read()).toMatch(/owner declined/i);
   });
 });
+
+describe("US-BROW-014 roll browser run --profile", () => {
+  it("accepts a valid device profile name and includes it in the output", async () => {
+    const c = capture();
+    const code = await browserCommand(["run", "--profile", "Pixel 7", "--action", "navigate"], {
+      ...noWriteDeps(),
+      stdout: c.stdout,
+    });
+    expect(code).toBe(0);
+    const out = c.read();
+    expect(out).toContain("device profile / 设备仿真: Pixel 7");
+  });
+
+  it("rejects an unknown device profile at the CLI level with non-zero exit", async () => {
+    const c = capture();
+    const code = await browserCommand(["run", "--profile", "UnknownPhone"], {
+      ...noWriteDeps(),
+      stdout: c.stdout,
+    });
+    expect(code).toBe(1);
+  });
+
+  it("resolves profile case-insensitively", async () => {
+    const c = capture();
+    const code = await browserCommand(["run", "--profile", "iphone 14", "--action", "screenshot"], {
+      ...noWriteDeps(),
+      stdout: c.stdout,
+    });
+    expect(code).toBe(0);
+    const out = c.read();
+    expect(out).toContain("device profile / 设备仿真: iphone 14");
+  });
+
+  it("baseline unchanged: run without --profile still works (no device profile section)", async () => {
+    const c = capture();
+    const code = await browserCommand(["run", "--action", "snapshot"], {
+      ...noWriteDeps(),
+      stdout: c.stdout,
+    });
+    expect(code).toBe(0);
+    const out = c.read();
+    expect(out).not.toContain("device profile");
+  });
+
+  it("--json output includes deviceProfile field when set", async () => {
+    const c = capture();
+    const code = await browserCommand(["run", "--profile", "iPad Pro", "--json"], {
+      ...noWriteDeps(),
+      stdout: c.stdout,
+    });
+    expect(code).toBe(0);
+    const parsed = JSON.parse(c.read());
+    expect(parsed.deviceProfile).toBe("iPad Pro");
+  });
+
+  it("--json output excludes deviceProfile field when not set", async () => {
+    const c = capture();
+    const code = await browserCommand(["run", "--json"], {
+      ...noWriteDeps(),
+      stdout: c.stdout,
+    });
+    expect(code).toBe(0);
+    const parsed = JSON.parse(c.read());
+    expect(parsed.deviceProfile).toBeUndefined();
+  });
+});

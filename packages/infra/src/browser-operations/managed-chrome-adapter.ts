@@ -18,6 +18,7 @@ import {
   authorizeOrigin,
   BrowserOperationRunService,
   policyFingerprint,
+  resolveDeviceProfile,
   type DiagnosticFailure,
 } from "@roll/core";
 import type {
@@ -25,6 +26,7 @@ import type {
   BrowserActionResult,
   BrowserDenialReason,
   BrowserLanePolicy,
+  DeviceProfile,
   DiagnosticArtifactKind,
   DiagnosticArtifactRef,
   NormalizedOrigin,
@@ -80,6 +82,8 @@ export interface ManagedRunInput {
   action: BrowserActionKind;
   payload: Record<string, string | number | boolean>;
   timeoutMs: number;
+  /** Optional device emulation profile name (managed lane only, diagnostic-only). */
+  deviceProfile?: string;
 }
 
 // ── Default production seams ─────────────────────────────────────────────────
@@ -332,6 +336,15 @@ export class ManagedChromeAdapter {
       await cdp.send("Runtime.enable");
       await cdp.send("Page.enable");
 
+      // Device emulation (US-BROW-014): apply profile before any page action.
+      if (input.deviceProfile !== undefined) {
+        const resolved = resolveDeviceProfile(input.deviceProfile);
+        if ("code" in resolved) {
+          throw new DevToolsError(resolved.message);
+        }
+        await this.emulateDevice(cdp, resolved);
+      }
+
       actionResultValue = await this.withTimeout(
         this.runTypedAction({ cdp, action, payload, lanePolicy }),
         timeoutMs,
@@ -354,6 +367,32 @@ export class ManagedChromeAdapter {
     }
 
     return { service: terminalService, result: actionResultValue };
+  }
+
+  // ── Device emulation (US-BROW-014) ──────────────────────────────────────
+
+  /**
+   * Apply device emulation via CDP before the page action runs.
+   *
+   * Sends Emulation.setDeviceMetricsOverride and — when the profile specifies
+   * a userAgent — Network.setUserAgentOverride. This is diagnostic-only and
+   * bounded to the managed lane; it never alters origin or cleanup policy.
+   */
+  private async emulateDevice(cdp: CdpSession, profile: DeviceProfile): Promise<void> {
+    await cdp.send("Emulation.setDeviceMetricsOverride", {
+      width: profile.width,
+      height: profile.height,
+      deviceScaleFactor: profile.deviceScaleFactor,
+      mobile: profile.mobile,
+      screenWidth: profile.width,
+      screenHeight: profile.height,
+      fitWindow: false,
+    });
+    if (profile.userAgent !== undefined) {
+      await cdp.send("Network.setUserAgentOverride", {
+        userAgent: profile.userAgent,
+      });
+    }
   }
 
   private async runTypedAction(options: {

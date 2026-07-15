@@ -106,6 +106,7 @@ describe("parsePolicy — v3 spec shape round-trip", () => {
       correctionActuator: "conservative",
       cycleWallTimeoutSec: 2700,
       cycleNoProgressSec: 900,
+      autoRepairEvidence: true,
     });
     expect(p.pick.semanticRanking).toBe("on");
   });
@@ -368,6 +369,26 @@ describe("repoComplianceVerdict — 防误伤非本项目仓", () => {
     const v = repoComplianceVerdict({ isGitRepo: false, hasRollDir: true, hasBacklog: true });
     expect(v.compliant).toBe(false);
     if (!v.compliant) expect(v.missing).toContain("git-repo");
+  });
+
+  it("parses auto_repair_evidence (FIX-1260); default on, only explicit false disables", () => {
+    // Default: absent ⇒ true (auto-repair is on).
+    expect(parsePolicy("").loopSafety.autoRepairEvidence).toBe(true);
+    // Explicit false ⇒ off.
+    expect(parsePolicy(`
+loop_safety:
+  auto_repair_evidence: false
+`).loopSafety.autoRepairEvidence).toBe(false);
+    // Explicit true ⇒ on (though this is the default).
+    expect(parsePolicy(`
+loop_safety:
+  auto_repair_evidence: true
+`).loopSafety.autoRepairEvidence).toBe(true);
+    // Garbage value ⇒ stays on (conservative: only explicit false disables).
+    expect(parsePolicy(`
+loop_safety:
+  auto_repair_evidence: maybe
+`).loopSafety.autoRepairEvidence).toBe(true);
   });
 
   it("declines a repo with no .roll/ (a stray checkout)", () => {

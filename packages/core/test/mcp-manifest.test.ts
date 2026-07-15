@@ -12,8 +12,10 @@ import {
 describe("US-BROW-017 DevTools MCP manifest", () => {
   it("pins the managed package version and requires every typed facade tool", () => {
     expect(MINIMUM_DEVTOOLS_MCP_MANIFEST.version).toBe(MANAGED_DEVTOOLS_PACKAGE_VERSION);
+    // US-BROW-019: requiredTools are the REAL chrome-devtools-mcp@1.5.0 tool
+    // names (verified live via tools/list). The fabricated generic
+    // `chrome_devtools_call` proxy does not exist on the real server.
     expect(MINIMUM_DEVTOOLS_MCP_MANIFEST.requiredTools).toEqual([
-      "chrome_devtools_call",
       "navigate_page",
       "take_snapshot",
       "list_console_messages",

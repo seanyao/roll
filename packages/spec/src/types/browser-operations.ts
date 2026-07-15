@@ -365,6 +365,7 @@ export type BrowserOperationEvent =
   | { type: "browser:diagnostic-recorded"; runId: string; ts: string; ref: DiagnosticArtifactRef }
   | { type: "browser:diagnostic-profile-finished"; runId: string; ts: string; profile: PerformanceProfileName; summary: PerformanceDiagnosticSummary }
   | { type: "browser:diagnostic-dropped"; runId: string; ts: string; failure: "redaction_failed" }
+  | { type: "browser:capture-linked"; runId: string; ts: string; link: import("./evidence-classification.js").CaptureBridgeLink }
   | { type: "browser:operation-finished"; runId: string; ts: string; result: BrowserActionResult }
   | { type: "browser:mcp-bypass-denied"; ts: string; reason: BrowserDenialReason }
   | { type: "browser:mcp-started"; runId: string; ts: string }

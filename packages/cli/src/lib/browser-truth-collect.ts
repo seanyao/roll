@@ -5,7 +5,7 @@
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { BrowserOperationLedger, browserOperationsTruth, type BrowserActiveLeaseFact } from "@roll/core";
+import { BrowserOperationLedger, browserOperationsTruth, captureLinksFromBrowserEvents, type BrowserActiveLeaseFact } from "@roll/core";
 import type { BrowserOperationsTruth } from "@roll/spec";
 import { renderNowMs } from "./truth-read.js";
 
@@ -23,9 +23,8 @@ export interface CollectBrowserTruthOpts {
 
 /**
  * Read browser operation facts from the project ledger and project a
- * {@link BrowserOperationsTruth}. Active lease and capture bridge links are
- * not collected (the ledger is the single source for CLI surfaces); the
- * truth adapter handles their absence as `unknown`.
+ * {@link BrowserOperationsTruth}. Active leases are not collected, while
+ * persisted CaptureBridge links are read from the same append-only ledger.
  */
 export function collectBrowserTruth(opts: CollectBrowserTruthOpts): BrowserOperationsTruth {
   const eventsPath = browserLedgerPath(opts.projectPath);
@@ -34,7 +33,7 @@ export function collectBrowserTruth(opts: CollectBrowserTruthOpts): BrowserOpera
   return browserOperationsTruth({
     events,
     activeLease: undefined,
-    captureLinks: undefined,
+    captureLinks: captureLinksFromBrowserEvents(events),
     nowMs: opts.nowMs ?? renderNowMs(),
     storyId: opts.storyId,
     cycleId: opts.cycleId,

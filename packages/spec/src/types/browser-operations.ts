@@ -406,10 +406,12 @@ export type BrowserTransportVersionApplyResult =
 /**
  * Per-lane readiness verdict. `blocked` is a hard, honest unavailable state that
  * MUST NOT be interpreted as a passing browser check; `degraded` means the lane
- * cannot run but existing Playwright / Roll Capture paths stay usable; `ready`
- * means the lane's dependencies all passed a non-mutating preflight.
+ * cannot run but existing Playwright / Roll Capture paths stay usable;
+ * `configured` means static configuration is present but no live probe has
+ * confirmed real MCP readiness; `ready` means a live MCP probe passed
+ * (initialize + tool-manifest + profile cleanup).
  */
-export type BrowserLaneVerdict = "ready" | "degraded" | "blocked";
+export type BrowserLaneVerdict = "ready" | "configured" | "degraded" | "blocked";
 
 /** The three independently-reported readiness lanes. */
 export type BrowserReadinessLane = "managed" | "interactive" | "capture";
@@ -468,16 +470,39 @@ export interface BrowserLaneReadiness {
   actions: string[];
 }
 
+// ── US-BROW-019 — live MCP probe result ─────────────────────────────────────
+
+/** Categorized probe failure (never conflated with a passing check). */
+export type BrowserProbeFailureCategory = "mcp-spawn" | "mcp-initialize" | "manifest-mismatch" | "chrome-launch" | "profile-cleanup";
+
+/** One categorized probe failure. */
+export interface BrowserProbeFailure {
+  category: BrowserProbeFailureCategory;
+  message: string;
+}
+
+/**
+ * Outcome of a live managed-lane MCP probe. `passed` means the exact
+ * pinned MCP session initialized, tool manifest matched, and the temporary
+ * Chrome/profile were cleaned up. Every failure category is distinct and
+ * actionable.
+ */
+export type BrowserProbeResult =
+  | { kind: "passed"; version: string; tools: string[] }
+  | { kind: "failed"; failures: BrowserProbeFailure[] };
+
 /**
  * BrowserEnvironmentReadiness aggregate — owns dependency observations and the
- * ready | degraded | blocked verdict for each lane. Raising it emits
- * browser:environment-checked.
+ * ready | configured | degraded | blocked verdict for each lane. When a live
+ * probe result is supplied the managed lane may reach `ready`.
  */
 export interface BrowserEnvironmentReadiness {
   managed: BrowserLaneReadiness;
   interactive: BrowserLaneReadiness;
   capture: BrowserLaneReadiness;
   observations: BrowserDependencyObservation[];
+  /** Present only after a live `--probe` was run (US-BROW-019). */
+  probeResult?: BrowserProbeResult;
 }
 
 // ── US-BROW-009a — declared browser-operation truth projections ───────────

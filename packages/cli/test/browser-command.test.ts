@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { BrowserEnvironmentReadiness, BrowserOperationsTruth } from "@roll/spec";
+import type { BrowserEnvironmentReadiness, BrowserOperationsTruth, BrowserProbeResult } from "@roll/spec";
 import {
   NO_UPDATE_AVAILABLE,
   type VersionSource,
@@ -9,7 +9,7 @@ import type { InteractiveOperationResult } from "@roll/infra";
 import { collectBrowserEnvironmentReadiness } from "../src/lib/browser-readiness-doctor.js";
 import { defaultBrowserEnvironmentProbeDeps } from "@roll/infra";
 
-function fixtureReadiness(overrides: NodeJS.ProcessEnv): BrowserEnvironmentReadiness {
+function fixtureReadiness(overrides: NodeJS.ProcessEnv, probeResult?: BrowserProbeResult): BrowserEnvironmentReadiness {
   const base = defaultBrowserEnvironmentProbeDeps();
   return collectBrowserEnvironmentReadiness(
     {
@@ -21,6 +21,7 @@ function fixtureReadiness(overrides: NodeJS.ProcessEnv): BrowserEnvironmentReadi
       repairCommands: [],
     },
     { ...base, env: { ...overrides }, tcpReachable: () => false },
+    probeResult,
   );
 }
 
@@ -94,8 +95,8 @@ describe("US-BROW-003 roll browser", () => {
     });
     expect(code).toBe(0);
     const parsed = JSON.parse(c.read()) as BrowserEnvironmentReadiness;
-    expect(["ready", "degraded", "blocked"]).toContain(parsed.managed.verdict);
-    expect(parsed.managed.verdict).toBe("degraded");
+    expect(["ready", "configured", "degraded", "blocked"]).toContain(parsed.managed.verdict);
+    expect(parsed.managed.verdict).toBe("degraded"); // MCP package missing
     expect(parsed.interactive.verdict).toBe("blocked");
     expect(parsed.capture.verdict).toBe("degraded");
   });
@@ -217,7 +218,8 @@ describe("US-BROW-010 roll browser update", () => {
       fileExists: () => true,
       versionSource,
       smokeCheck: async () => { smokeRan = true; return true; },
-      readiness: () => fixtureReadiness({}),
+      readiness: (_pr) => fixtureReadiness({}),
+      runProbe: async () => ({ kind: "passed" as const, version: "1.6.0", tools: ["chrome_devtools_call"] }),
       stdout: c.stdout,
     });
 
@@ -248,7 +250,7 @@ describe("US-BROW-010 roll browser update", () => {
       fileExists: () => true,
       versionSource,
       smokeCheck: async () => { smokeRan = true; return false; },
-      readiness: () => fixtureReadiness({}),
+      readiness: (_pr) => fixtureReadiness({}),
       stdout: c.stdout,
     });
 
@@ -383,7 +385,8 @@ describe("US-BROW-010 roll browser update", () => {
       writeFile,
       fileExists: () => true,
       versionSource,
-      readiness: () => fixtureReadiness({}),
+      readiness: (_pr) => fixtureReadiness({}),
+      runProbe: async () => ({ kind: "passed" as const, version: "1.6.0", tools: ["chrome_devtools_call"] }),
       stdout: c.stdout,
     });
 
@@ -393,6 +396,163 @@ describe("US-BROW-010 roll browser update", () => {
     expect(out).toContain("applied");
     expect(out).toContain("smoke check: passed");
     expect(out).toContain("browser doctor");
+  });
+});
+
+describe("US-BROW-019 roll browser doctor --probe", () => {
+  it("doctor --probe announces side effects and renders ready on successful probe", async () => {
+    const c = capture();
+    const code = await browserCommand(["doctor", "--probe"], {
+      ...noWriteDeps(),
+      readiness: (pr) => fixtureReadiness({
+        _ROLL_BROWSER_NODE: "present",
+        _ROLL_BROWSER_NPX: "present",
+        _ROLL_BROWSER_CHROME: "present",
+        _ROLL_BROWSER_MCP: "present",
+        _ROLL_BROWSER_REMOTE_DEBUG: "off",
+      }, pr),
+      runProbe: async () => ({ kind: "passed", version: "1.5.0", tools: ["chrome_devtools_call", "navigate_page", "take_snapshot"] }),
+      stdout: c.stdout,
+    });
+    expect(code).toBe(0);
+    const out = c.read();
+    // AC2: announces side effects before spawn
+    expect(out).toContain("Running live MCP lane probe");
+    expect(out).toContain("Spawn the pinned chrome-devtools-mcp");
+    expect(out).toContain("clean up the temporary Chrome profile");
+    // AC3: ready only after successful probe
+    expect(out).toContain("Live probe passed");
+    expect(out).toContain("real MCP lane verified");
+    expect(out).toContain("✓ managed:");
+    expect(out).toMatch(/managed:\s+ready/);
+  });
+
+  it("doctor --probe renders degraded on probe failure with categorized failures", async () => {
+    const c = capture();
+    const failProbe = { kind: "failed" as const, failures: [{ category: "mcp-spawn" as const, message: "spawn failed: ENOENT" }] };
+    const code = await browserCommand(["doctor", "--probe"], {
+      ...noWriteDeps(),
+      readiness: (pr) => fixtureReadiness({
+        _ROLL_BROWSER_NODE: "present",
+        _ROLL_BROWSER_NPX: "present",
+        _ROLL_BROWSER_CHROME: "present",
+        _ROLL_BROWSER_MCP: "present",
+        _ROLL_BROWSER_REMOTE_DEBUG: "off",
+      }, pr),
+      runProbe: async () => failProbe,
+      stdout: c.stdout,
+    });
+    expect(code).toBe(0);
+    const out = c.read();
+    expect(out).toContain("Live probe failed");
+    expect(out).toContain("mcp-spawn: spawn failed: ENOENT");
+    // AC3: managed is degraded, not ready or configured
+    expect(out).toMatch(/managed:\s+degraded/);
+    expect(out).not.toMatch(/managed:\s+ready/);
+  });
+
+  it("doctor --probe renders manifest-mismatch as categorized failure", async () => {
+    const c = capture();
+    const failProbe = { kind: "failed" as const, failures: [{ category: "manifest-mismatch" as const, message: "MCP tool manifest mismatch: missing navigate_page" }] };
+    const code = await browserCommand(["doctor", "--probe"], {
+      ...noWriteDeps(),
+      readiness: (pr) => fixtureReadiness({
+        _ROLL_BROWSER_NODE: "present",
+        _ROLL_BROWSER_NPX: "present",
+        _ROLL_BROWSER_CHROME: "present",
+        _ROLL_BROWSER_MCP: "present",
+        _ROLL_BROWSER_REMOTE_DEBUG: "off",
+      }, pr),
+      runProbe: async () => ({
+        kind: "failed",
+        failures: [{ category: "manifest-mismatch", message: "MCP tool manifest mismatch: missing navigate_page" }],
+      }),
+      stdout: c.stdout,
+    });
+    expect(code).toBe(0);
+    const out = c.read();
+    expect(out).toContain("manifest-mismatch: MCP tool manifest mismatch");
+  });
+
+  it("default doctor (without --probe) renders managed as configured, not ready", async () => {
+    const c = capture();
+    const code = await browserCommand(["doctor"], {
+      ...noWriteDeps(),
+      readiness: () => fixtureReadiness({
+        _ROLL_BROWSER_NODE: "present",
+        _ROLL_BROWSER_NPX: "present",
+        _ROLL_BROWSER_CHROME: "present",
+        _ROLL_BROWSER_MCP: "present",
+        _ROLL_BROWSER_REMOTE_DEBUG: "off",
+      }),
+      stdout: c.stdout,
+    });
+    expect(code).toBe(0);
+    const out = c.read();
+    // AC1: static config → configured, not ready
+    expect(out).toMatch(/managed:\s+configured/);
+    expect(out).not.toMatch(/managed:\s+ready/);
+    expect(out).toContain("static configuration");
+    expect(out).toContain("roll browser doctor --probe");
+  });
+
+  it("update --apply --confirm aborts when probe fails (prior pin unchanged)", async () => {
+    const c = capture();
+    const pinnedCfg = "devtools:\n  package_version: 1.5.0\n";
+    const versionSource: VersionSource = () => "1.6.0";
+    const readFile = vi.fn(() => pinnedCfg);
+    const writeFile = vi.fn();
+    let smokeRan = false;
+
+    const code = await browserCommand(["update", "--apply", "--confirm"], {
+      configPath: () => "/tmp/roll-test/browser-operations.yaml",
+      readFile,
+      writeFile,
+      fileExists: () => true,
+      versionSource,
+      smokeCheck: async () => { smokeRan = true; return true; },
+      readiness: (pr) => fixtureReadiness({}, pr),
+      runProbe: async () => ({
+        kind: "failed" as const,
+        failures: [{ category: "mcp-initialize" as const, message: "timed out" }],
+      }),
+      stdout: c.stdout,
+    });
+
+    // AC4: probe failed → abort, don't write config
+    expect(code).toBe(1);
+    expect(smokeRan).toBe(true);
+    expect(writeFile).not.toHaveBeenCalled();
+    const out = c.read();
+    expect(out).toContain("Update aborted");
+    expect(out).toContain("Prior version 1.5.0 is kept intact");
+    expect(out).toContain("mcp-initialize: timed out");
+  });
+
+  it("doctor --probe --json includes probeResult field", async () => {
+    const c = capture();
+    const code = await browserCommand(["doctor", "--probe", "--json"], {
+      ...noWriteDeps(),
+      readiness: (pr) => fixtureReadiness({
+        _ROLL_BROWSER_NODE: "present",
+        _ROLL_BROWSER_NPX: "present",
+        _ROLL_BROWSER_CHROME: "present",
+        _ROLL_BROWSER_MCP: "present",
+        _ROLL_BROWSER_REMOTE_DEBUG: "off",
+      }, pr),
+      runProbe: async () => ({
+        kind: "passed",
+        version: "1.5.0",
+        tools: ["chrome_devtools_call", "navigate_page", "take_snapshot"],
+      }),
+      stdout: c.stdout,
+    });
+    expect(code).toBe(0);
+    const parsed = JSON.parse(c.read());
+    expect(parsed.probeResult).toBeDefined();
+    expect(parsed.probeResult.kind).toBe("passed");
+    expect(parsed.probeResult.version).toBe("1.5.0");
+    expect(parsed.managed.verdict).toBe("ready");
   });
 });
 

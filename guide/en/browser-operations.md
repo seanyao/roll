@@ -327,6 +327,13 @@ visual acceptance, use **Roll Capture** — a physical screenshot of your real
 terminal/app — which alone satisfies that requirement. See
 [Acceptance evidence](acceptance-evidence.md).
 
+When `roll attest` receives a physical capture response, it writes a validated
+CaptureBridge link to `.roll/browser-operations/events.ndjson`. Doctor, truth,
+and dossier surfaces read that durable fact: a verified `roll.capture.v1`
+physical capture can satisfy a visual AC, while Playwright and DevTools
+diagnostics remain ineligible. With no persisted link, capture truth stays
+honestly unknown and the dossier does not invent a capture event.
+
 ## Dossier timeline (optional)
 
 When a story has declared browser-operation facts (ledger start/finish, lease

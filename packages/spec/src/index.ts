@@ -25,3 +25,4 @@ export * from "./types/collab-view.js";
 export * from "./types/review-page.js";
 export * from "./types/browser-operations.js";
 export * from "./types/evidence-classification.js";
+export * from "./types/outward-verification.js";

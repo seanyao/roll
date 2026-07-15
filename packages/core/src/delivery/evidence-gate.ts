@@ -22,6 +22,8 @@
  */
 
 import { acForStory } from "../attest/ac-parser.js";
+import { EvidenceClassifier } from "../attest/evidence-classifier.js";
+import type { EvidenceClassifierInput } from "@roll/spec";
 
 /** Pure inputs for {@link evidenceGateBeforePush} — all injectable. */
 export interface EvidenceGateFacts {
@@ -41,6 +43,26 @@ export interface EvidenceGateFacts {
 export type EvidenceGateVerdict =
   | { readonly ok: true }
   | { readonly ok: false; readonly reasons: readonly string[] };
+
+/**
+ * Classify artifacts offered as visual acceptance evidence.  This is the
+ * delivery boundary: diagnostic screenshots never become visual proof merely
+ * because they are image-shaped, while a verified physical capture may.
+ */
+export function visualEvidenceGate(artifacts: readonly EvidenceClassifierInput[]): EvidenceGateVerdict {
+  const classifier = new EvidenceClassifier();
+  const reasons: string[] = [];
+  for (const artifact of artifacts) {
+    const classification = classifier.classify(artifact);
+    if (classification.evidenceClass !== "physical-capture") {
+      reasons.push(`${artifact.artifactId}: ${classification.reason}`);
+      continue;
+    }
+    const visual = classifier.validateVisualEvidence(artifact);
+    if (visual.verdict !== "valid") reasons.push(`${artifact.artifactId}: ${visual.reason}`);
+  }
+  return reasons.length === 0 ? { ok: true } : { ok: false, reasons };
+}
 
 /**
  * FIX-1256 — shared, spec-text-based decision for whether a story owes an

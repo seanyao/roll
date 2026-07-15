@@ -16,7 +16,19 @@
  *   function is pure + total (any fact combination yields a verdict).
  */
 import { describe, expect, it } from "vitest";
-import { acBlockPresentInSpec, evidenceGateBeforePush } from "../src/index.js";
+import { acBlockPresentInSpec, evidenceGateBeforePush, visualEvidenceGate } from "../src/index.js";
+import type { EvidenceClassifierInput, RollCaptureResponseV1 } from "@roll/spec";
+
+const physicalResponse: RollCaptureResponseV1 = {
+  protocol: "roll.capture.v1",
+  requestId: "capture-1",
+  status: "taken",
+  screenshotPath: "screenshots/physical.png",
+  responsePath: "responses/capture-1.json",
+  host: { appName: "Roll Capture.app", bundleId: "com.seanyao.roll.capture", version: "1.0.0" },
+  startedAt: "2026-07-15T00:00:00.000Z",
+  finishedAt: "2026-07-15T00:00:01.000Z",
+};
 
 describe("evidenceGateBeforePush — US-DELIV-004", () => {
   // ── AC1: evidence complete → push allowed ────────────────────────────────
@@ -93,5 +105,28 @@ describe("acBlockPresentInSpec — FIX-1256 shared AC-block decision", () => {
   it("returns false when the spec has no **AC:** block", () => {
     const text = "# FIX-FOO-001\n\nSome description without AC.\n";
     expect(acBlockPresentInSpec(text, "FIX-FOO-001")).toBe(false);
+  });
+});
+
+describe("visualEvidenceGate — US-BROW-023", () => {
+  const physical: EvidenceClassifierInput = {
+    artifactId: "capture-1",
+    provider: "roll-capture",
+    protocol: "roll.capture.v1",
+    captureResponse: physicalResponse,
+    digest: "sha256:verified",
+  };
+
+  it("accepts a verified physical capture as visual AC evidence", () => {
+    expect(visualEvidenceGate([physical])).toEqual({ ok: true });
+  });
+
+  it.each([
+    ["playwright", { artifactId: "playwright-1", provider: "playwright", protocol: "playwright.v1" }],
+    ["DevTools", { artifactId: "devtools-1", provider: "chrome-devtools-mcp", isBrowserDiagnostic: true }],
+  ] as const)("rejects %s diagnostics as visual AC evidence", (_kind, artifact) => {
+    const verdict = visualEvidenceGate([artifact]);
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) expect(verdict.reasons).toHaveLength(1);
   });
 });

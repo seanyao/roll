@@ -106,7 +106,7 @@ describe("US-BROW-007 — documented `roll browser` surface", () => {
 
   it("AC2: managed `run` states plainly that diagnostics are NOT visual acceptance evidence", async () => {
     const c = capture();
-    const code = await browserCommand(["run", "--action", "screenshot"], { ...noWriteDeps(), stdout: c.stdout });
+    const code = await browserCommand(["run", "--fixture", "--action", "screenshot"], { ...noWriteDeps(), stdout: c.stdout });
     expect(code).toBe(0);
     const out = c.read();
     expect(out).toMatch(/Diagnostic success is not visual acceptance evidence/i);
@@ -125,7 +125,7 @@ describe("US-BROW-007 — documented `roll browser` surface", () => {
 
   it("AC2: managed `run` denies an out-of-allowlist redirect (no owner navigation)", async () => {
     const c = capture();
-    const code = await browserCommand(["run", "--redirect", "https://evil.test"], { ...noWriteDeps(), stdout: c.stdout });
+    const code = await browserCommand(["run", "--fixture", "--redirect", "https://evil.test"], { ...noWriteDeps(), stdout: c.stdout });
     expect(code).toBe(0);
     expect(c.read()).toMatch(/denied/i);
   });

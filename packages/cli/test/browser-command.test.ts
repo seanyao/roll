@@ -502,7 +502,7 @@ describe("US-BROW-008b roll browser interactive", () => {
 describe("US-BROW-014 roll browser run --profile", () => {
   it("accepts a valid device profile name and includes it in the output", async () => {
     const c = capture();
-    const code = await browserCommand(["run", "--profile", "Pixel 7", "--action", "navigate"], {
+    const code = await browserCommand(["run", "--fixture", "--profile", "Pixel 7", "--action", "navigate"], {
       ...noWriteDeps(),
       stdout: c.stdout,
     });
@@ -513,7 +513,7 @@ describe("US-BROW-014 roll browser run --profile", () => {
 
   it("rejects an unknown device profile at the CLI level with non-zero exit", async () => {
     const c = capture();
-    const code = await browserCommand(["run", "--profile", "UnknownPhone"], {
+    const code = await browserCommand(["run", "--fixture", "--profile", "UnknownPhone"], {
       ...noWriteDeps(),
       stdout: c.stdout,
     });
@@ -522,7 +522,7 @@ describe("US-BROW-014 roll browser run --profile", () => {
 
   it("resolves profile case-insensitively", async () => {
     const c = capture();
-    const code = await browserCommand(["run", "--profile", "iphone 14", "--action", "screenshot"], {
+    const code = await browserCommand(["run", "--fixture", "--profile", "iphone 14", "--action", "screenshot"], {
       ...noWriteDeps(),
       stdout: c.stdout,
     });
@@ -533,7 +533,7 @@ describe("US-BROW-014 roll browser run --profile", () => {
 
   it("baseline unchanged: run without --profile still works (no device profile section)", async () => {
     const c = capture();
-    const code = await browserCommand(["run", "--action", "snapshot"], {
+    const code = await browserCommand(["run", "--fixture", "--action", "snapshot"], {
       ...noWriteDeps(),
       stdout: c.stdout,
     });
@@ -544,7 +544,7 @@ describe("US-BROW-014 roll browser run --profile", () => {
 
   it("--json output includes deviceProfile field when set", async () => {
     const c = capture();
-    const code = await browserCommand(["run", "--profile", "iPad Pro", "--json"], {
+    const code = await browserCommand(["run", "--fixture", "--profile", "iPad Pro", "--json"], {
       ...noWriteDeps(),
       stdout: c.stdout,
     });
@@ -555,7 +555,7 @@ describe("US-BROW-014 roll browser run --profile", () => {
 
   it("--json output excludes deviceProfile field when not set", async () => {
     const c = capture();
-    const code = await browserCommand(["run", "--json"], {
+    const code = await browserCommand(["run", "--fixture", "--json"], {
       ...noWriteDeps(),
       stdout: c.stdout,
     });
@@ -568,7 +568,7 @@ describe("US-BROW-014 roll browser run --profile", () => {
 describe("US-BROW-012 roll browser run --perf-profile", () => {
   it("collects a bounded, redacted performance summary and renders it as diagnostic-only", async () => {
     const c = capture();
-    const code = await browserCommand(["run", "--perf-profile", "web-vitals-lite", "--action", "navigate"], {
+    const code = await browserCommand(["run", "--fixture", "--perf-profile", "web-vitals-lite", "--action", "navigate"], {
       ...noWriteDeps(),
       stdout: c.stdout,
     });
@@ -584,7 +584,7 @@ describe("US-BROW-012 roll browser run --perf-profile", () => {
 
   it("rejects an unknown performance profile at the CLI level with non-zero exit", async () => {
     const c = capture();
-    const code = await browserCommand(["run", "--perf-profile", "lighthouse-full"], {
+    const code = await browserCommand(["run", "--fixture", "--perf-profile", "lighthouse-full"], {
       ...noWriteDeps(),
       stdout: c.stdout,
     });
@@ -593,7 +593,7 @@ describe("US-BROW-012 roll browser run --perf-profile", () => {
 
   it("--perf-fail degrades gracefully without failing the action", async () => {
     const c = capture();
-    const code = await browserCommand(["run", "--perf-profile", "web-vitals-lite", "--perf-fail", "--json"], {
+    const code = await browserCommand(["run", "--fixture", "--perf-profile", "web-vitals-lite", "--perf-fail", "--json"], {
       ...noWriteDeps(),
       stdout: c.stdout,
     });
@@ -606,7 +606,7 @@ describe("US-BROW-012 roll browser run --perf-profile", () => {
 
   it("baseline unchanged: run without --perf-profile shows no perf section", async () => {
     const c = capture();
-    const code = await browserCommand(["run", "--action", "snapshot"], {
+    const code = await browserCommand(["run", "--fixture", "--action", "snapshot"], {
       ...noWriteDeps(),
       stdout: c.stdout,
     });
@@ -616,7 +616,7 @@ describe("US-BROW-012 roll browser run --perf-profile", () => {
 
   it("--json summary contains only numeric metrics (no external telemetry surface)", async () => {
     const c = capture();
-    const code = await browserCommand(["run", "--perf-profile", "web-vitals-lite", "--json"], {
+    const code = await browserCommand(["run", "--fixture", "--perf-profile", "web-vitals-lite", "--json"], {
       ...noWriteDeps(),
       stdout: c.stdout,
     });

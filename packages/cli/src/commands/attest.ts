@@ -1504,16 +1504,24 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   try {
     const evaluationContract = parseEvaluationContract(featureText);
     if (evaluationContract !== null) {
-      const smokeDecls = evaluationContract.expected_evidence
+      // Collect external-smoke declarations with their AC IDs (proves field)
+      const smokeEntries = evaluationContract.expected_evidence
         .filter((item) => item.kind === "external-smoke" && item.outward?.mode === "external-smoke")
-        .map((item) => item.outward as OutwardSmokeDeclaration);
-      if (smokeDecls.length > 0) {
+        .map((item) => ({ proves: item.proves, outward: item.outward as OutwardSmokeDeclaration }));
+      if (smokeEntries.length > 0) {
+        const smokeDecls = smokeEntries.map((e) => e.outward);
+        // Build command → AC ID map for the runner
+        const acMap = new Map<string, string>();
+        for (const entry of smokeEntries) {
+          acMap.set(entry.outward.command, entry.proves);
+        }
         // Determine current environment: explicit env var → CI detection → unknown
         const smokeEnv = process.env.ROLL_SMOKE_ENV?.trim() ||
           (process.env.CI !== undefined || process.env.GITHUB_ACTIONS !== undefined ? "ci" : "unknown");
         const smokeDir = join(runDir, "smoke");
         const report = await runOutwardSmoke({
           declarations: smokeDecls,
+          acMap,
           currentEnvironment: smokeEnv,
           artifactDir: smokeDir,
         });
@@ -1521,8 +1529,8 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
         const classification = classifyOutwardStatusForReport(
           { expected_evidence: evaluationContract.expected_evidence },
           smokeResults,
-          [], // simulation evidence — not available here
-          [], // owner attestations — not available here
+          [], // TODO(US-ATTEST-016): simulation evidence — collect from ac-map "verified-in-simulation" entries
+          [], // TODO(US-ATTEST-016): owner attestations — read from owner-attestation records
         );
         if (classification !== null) {
           outwardOverrides = new Map<string, AcStatus>();

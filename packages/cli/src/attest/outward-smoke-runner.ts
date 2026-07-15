@@ -17,6 +17,7 @@ import {
   matchEnvironment,
   buildSmokeRunReport,
   redactOutput,
+  toOutwardSmokeResults,
   type SmokeRunEntry,
   type SmokeRunReport,
   type SmokeSpawnFn,
@@ -26,8 +27,6 @@ import {
 } from "@roll/core";
 import type { OutwardSmokeDeclaration } from "@roll/spec";
 
-const execFileAsync = promisify(execFile);
-
 // ════════════════════════════════════════════════════════════════════════════
 // Types
 // ════════════════════════════════════════════════════════════════════════════
@@ -35,6 +34,9 @@ const execFileAsync = promisify(execFile);
 export interface RunOutwardSmokeOptions {
   /** The external-smoke declarations from the evaluation contract. */
   declarations: OutwardSmokeDeclaration[];
+  /** Maps command → AC ID (from the evaluation contract's `proves` field).
+   *  When omitted, the command string itself is used as the AC identifier. */
+  acMap?: Map<string, string>;
   /** The current execution environment (ci / nightly / release / unknown). */
   currentEnvironment: string;
   /** Directory where smoke artifact files will be written. */
@@ -262,15 +264,11 @@ export async function runOutwardSmoke(options: RunOutwardSmokeOptions): Promise<
   // Step 1: Environment gate
   const { matching, unmatched } = matchEnvironment(options.declarations, options.currentEnvironment);
 
-  // Build AC map (command → AC id from spec)
-  const acMap = new Map<string, string>();
-  // The declarations carry the command; we derive the AC from the proves field.
-  // Since OutwardSmokeDeclaration doesn't have an "ac" field directly, we use
-  // the command as the key. Callers should supply a proper acMap.
-  // For now, use command digest as a stable AC id derived from the command.
-  for (const decl of matching) {
-    // Use the command itself as the AC identifier (matches matchEnvironment output)
-    acMap.set(decl.command, decl.command);
+  // Fix up unmatched entries: use the caller-supplied AC ID map when available
+  const acMap = options.acMap ?? new Map<string, string>();
+  for (const entry of unmatched) {
+    const acId = acMap.get(entry.ac) ?? entry.ac;
+    entry.ac = acId;
   }
 
   // Step 2: Execute matching declarations in isolated environments
@@ -316,7 +314,7 @@ export async function runOutwardSmoke(options: RunOutwardSmokeOptions): Promise<
     startedAt,
     spawnResults,
     declarations: matching,
-    acMap,
+    acMap: acMap,
     artifactDir: options.artifactDir,
     unmatched,
   });
@@ -334,14 +332,8 @@ export async function runOutwardSmoke(options: RunOutwardSmokeOptions): Promise<
 
 /**
  * Extract OutwardSmokeResult array from a SmokeRunReport for feeding into
- * the outward verification resolver.
+ * the outward verification resolver. Delegates to the core toOutwardSmokeResults.
  */
 export function smokeResultsFromReport(report: SmokeRunReport): OutwardSmokeResult[] {
-  return report.results.map((e) => ({
-    ac: e.ac,
-    exitCode: e.exitCode ?? 1,
-    summary: e.summary,
-    command: e.command,
-    environment: e.environment,
-  }));
+  return toOutwardSmokeResults(report.results);
 }

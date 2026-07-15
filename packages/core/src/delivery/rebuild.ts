@@ -84,6 +84,83 @@ export interface MergeFact {
   touchesProductCode?: boolean;
 }
 
+/**
+ * Authoritative provenance of a merge fact (FIX-1266, GitHub #1034).
+ *
+ * A merge's authority to complete a card is graded by how it was attributed:
+ *   - `pr_linked`   — the merge commit carries a PR reference (`(#N)` squash or
+ *     `Merge pull request #N`). This is a first-class delivery signal.
+ *   - `subject_only` — the commit subject merely NAMES a story-id but carries
+ *     no PR reference. On its own this is NOT a delivery: a direct-to-main
+ *     commit or `tcr:` micro-commit whose message mentions a card must not
+ *     complete it. A subject-only mention can only CORROBORATE run/ledger
+ *     evidence (see the run-correlation path in {@link rebuildDeliveriesFromFacts}).
+ *
+ * The third authoritative class in the AC — a run/ledger-correlated merge — is
+ * not a property of a MergeFact alone; it is established in the projection by
+ * matching a merge to a run row (by PR number or merge SHA), so it is handled
+ * there rather than here.
+ */
+export type MergeProvenance = "pr_linked" | "subject_only";
+
+/**
+ * Classify a {@link MergeFact}'s provenance (FIX-1266). `pr_linked` when the
+ * commit carries a PR number; `subject_only` otherwise.
+ */
+export function mergeProvenance(fact: MergeFact): MergeProvenance {
+  return fact.prNumber > 0 ? "pr_linked" : "subject_only";
+}
+
+/**
+ * A subject-only merge that names a story but has no PR link (FIX-1266).
+ *
+ * These are surfaced as diagnostic / unattributed truth — NOT delivery
+ * records. They cannot create `lifecycleState=done`; an owner can inspect them
+ * to decide whether a direct-to-main commit that mentions a card is a genuine
+ * manual delivery or noise.
+ */
+export interface UnattributedMerge {
+  /** The story-id named in the commit subject. */
+  storyId: string;
+  /** The merge/commit SHA on main. */
+  mergeCommit: string;
+  /** Commit timestamp (epoch seconds), for ordering diagnostics. */
+  mergedAt: number;
+}
+
+/**
+ * Surface subject-only story-bearing merges that carry no PR link (FIX-1266).
+ *
+ * A commit whose subject names a story-id but has no `(#N)` PR reference is a
+ * subject-only mention — it does NOT produce a delivery record (see
+ * {@link rebuildDeliveriesFromFacts}). This helper exposes those commits as
+ * diagnostic / unattributed truth so a genuinely manual direct-to-main
+ * delivery is visible rather than silently dropped.
+ *
+ * Meta-only (`.roll`) commits (`touchesProductCode === false`, FIX-1208) are
+ * excluded — those are card-creation / docs noise, not candidate deliveries.
+ *
+ * **Repair path** for a genuine manual delivery: record a run/ledger fact for
+ * the story (a run row carrying the merge commit SHA, or a reconcile ledger
+ * entry). The run-correlation path in the projection then promotes it to
+ * `done` — a subject mention alone never does.
+ */
+export function unattributedSubjectOnlyMerges(merges: MergeFact[]): UnattributedMerge[] {
+  const out: UnattributedMerge[] = [];
+  const seen = new Set<string>();
+  for (const m of merges) {
+    if (mergeProvenance(m) !== "subject_only") continue;
+    if (m.touchesProductCode === false) continue;
+    for (const sid of m.storyIds) {
+      const key = `${sid}\t${m.mergeCommit}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ storyId: sid, mergeCommit: m.mergeCommit, mergedAt: m.mergedAt });
+    }
+  }
+  return out;
+}
+
 function terminalOutcomeFromRun(outcome: string): HistoricalTerminalOutcome | undefined {
   if (outcome === "ci_red_after_merge") return outcome;
   if (outcome === "published_pending_merge") return outcome;
@@ -386,11 +463,24 @@ export function rebuildDeliveriesFromFacts(
   // mentions a story-id; those commits only touch meta paths and must not be
   // treated as deliveries. `touchesProductCode !== false` preserves backwards
   // compatibility for MergeFacts that omit the field.
+  //
+  // FIX-1266 (GitHub #1034): subject-based attribution ALSO requires a PR
+  // link. A merge whose subject merely names a story but carries no PR
+  // reference (`mergeProvenance === "subject_only"`, prNumber === 0) is a
+  // subject-only mention — a direct-to-main commit or `tcr:` micro-commit
+  // whose message happens to mention a card. It can corroborate run/ledger
+  // evidence (the run loop below still finds the merge by SHA/PR) but must NOT
+  // by itself create `done`, otherwise a card that was only mentioned — not
+  // delivered — disappears from the picker. This closes the product-code
+  // subject-only path that FIX-1208 left open (it only excluded `.roll`-only
+  // commits). Genuinely manual direct-main deliveries take the documented
+  // repair path (record a run/ledger fact) — see unattributedSubjectOnlyMerges.
   const mergeByStoryId = new Map<string, MergeFact>();
   for (const m of merges) {
     mergeByPr.set(m.prNumber, m);
     mergeBySha.set(m.mergeCommit, m);
     if (m.touchesProductCode === false) continue;
+    if (mergeProvenance(m) === "subject_only") continue;
     for (const sid of m.storyIds) {
       mergeByStoryId.set(sid, m); // overwrite: oldest wins (reverse-chrono input)
     }

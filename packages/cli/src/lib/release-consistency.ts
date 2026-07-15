@@ -331,6 +331,43 @@ function mergeShasFromStatus(status: string): string[] {
   return shas;
 }
 
+/** True when `git <args>` exits 0 (used for predicate probes like merge-base). */
+function gitSucceeds(projectDir: string, args: string[]): boolean {
+  try {
+    execFileSync("git", ["-C", projectDir, ...args], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * FIX-1266 repair path: is `id` a genuine manual direct-to-main delivery?
+ *
+ * The delivery projection no longer auto-completes a card from a subject-only
+ * merge (a mere card mention on main — GitHub #1034). A GENUINE manual
+ * direct-to-main delivery is the legitimate exception: the owner has
+ * EXPLICITLY marked the backlog row ✅ Done with a `merged <sha>` ref, and that
+ * sha is a real commit reachable from HEAD whose subject names the card. This
+ * owner-attested evidence — Done claim + verified on-main commit — is the
+ * explicit escape hatch, distinct from a phantom mention which carries no such
+ * Done+sha attestation.
+ *
+ * @returns true when at least one claimed merge sha resolves to an ancestor of
+ *   HEAD whose subject contains `id`.
+ */
+function manualDirectMainDelivery(projectDir: string, id: string, mergeShas: string[]): boolean {
+  for (const sha of mergeShas) {
+    const info = gitCapture(projectDir, ["show", "-s", "--format=%H%x1f%s", sha]);
+    if (info === null) continue;
+    const parts = info.trim().split("\x1f");
+    const subject = parts[1];
+    if (subject === undefined || !subject.includes(id)) continue;
+    if (gitSucceeds(projectDir, ["merge-base", "--is-ancestor", sha, "HEAD"])) return true;
+  }
+  return false;
+}
+
 /** The card-folder spec path for an id (`features/<epic>/<id>/spec.md`), or null. */
 function findCardSpec(projectDir: string, id: string): string | null {
   const featuresDir = join(projectDir, ".roll", "features");
@@ -419,6 +456,19 @@ export function checkTruthLive(projectDir: string): DimResult {
 
     const truth = queryStoryDelivery(id, deliveries);
     if (!truth.delivered) {
+      // FIX-1266 (#1034): a subject-only merge no longer auto-creates a
+      // delivery record, so a genuine manual direct-to-main delivery will not
+      // show up in queryStoryDelivery(). Honor the explicit owner-attested
+      // repair path — a ✅ Done row with a `merged <sha>` ref verified against a
+      // real on-main commit naming the card — before flagging drift.
+      const claimedShas = mergeShasFromStatus(f.status);
+      if (claimedShas.length > 0) {
+        if (manualDirectMainDelivery(projectDir, id, claimedShas)) continue;
+        gaps.push(
+          `${id} backlog claims merged ${claimedShas.map((sha) => sha).join(",")} but no commit reachable from HEAD at that sha names ${id} — a subject-only mention does not deliver a card; fix the merge ref or record a run/ledger fact`,
+        );
+        continue;
+      }
       gaps.push(
         `${id} is in the release delta and backlog says Done, but queryStoryDelivery() says lifecycle=${truth.lifecycleState} delivered=${truth.delivered} — run delivery rebuild or fix the merge/story-id evidence`,
       );

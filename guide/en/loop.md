@@ -109,6 +109,79 @@ commands; it never leaves a failed bootstrap looking enabled.
 Active window: 0–24 (always on — the shipped default)
 ```
 
+### Recovering from a launchd bootstrap failure
+
+A failed `roll loop on` is **unarmed**. The presence of a plist file in
+`~/Library/LaunchAgents/` does **not** mean autonomous scheduling is active —
+only `launchctl list` showing the loaded label means the loop is armed. Run
+`roll loop status` to see the effective backend (`launchd`,
+`process-fallback`, or `none`).
+
+**Repair launchd first.** The error output already prints the exact commands;
+the generic form is:
+
+```bash
+UID=$(id -u)
+SLUG=$(roll config get project_slug 2>/dev/null || basename "$PWD")
+launchctl bootout gui/$UID/com.roll.loop.$SLUG
+launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.roll.loop.$SLUG.plist
+launchctl print gui/$UID/com.roll.loop.$SLUG
+roll loop status
+```
+
+If `launchctl bootstrap` succeeds and `print` shows the job, run `roll loop on`
+again to regenerate the current runner and confirm the schedule.
+
+**If launchd cannot be repaired**, Roll provides an owner-confirmed process
+fallback that is started only when you explicitly confirm it:
+
+```bash
+roll loop fallback start --confirm
+roll loop fallback status
+roll loop fallback stop        # when you no longer need it
+```
+
+The fallback is **not** a launchd replacement. It does not survive reboot or
+login session exit. After a reboot or logout you must stop any stale lease and
+re-confirm:
+
+```bash
+roll loop fallback stop
+roll loop fallback start --confirm
+```
+
+Prefer repairing launchd; use the fallback only when launchd is unavailable.
+
+#### macOS live verification procedure (Bootstrap failed: 5)
+
+When `roll loop on` fails with a `Bootstrap failed: 5: Input/output error`
+class error, capture a sanitized, non-root diagnostic bundle:
+
+```bash
+mkdir -p .roll/loop
+TS=$(date +%Y%m%d-%H%M%S)
+OUT=.roll/loop/launchd-verify-$TS.log
+{
+  echo "roll version: $(roll version)"
+  echo "uid: $(id -u)"
+  echo "---"
+  echo "roll loop status:"
+  roll loop status
+  echo "---"
+  echo "launchctl list (roll lanes):"
+  launchctl list | grep com.roll\. || true
+  echo "---"
+  echo "plists on disk:"
+  ls -1 ~/Library/LaunchAgents/com.roll.loop.*.plist 2>/dev/null || true
+} > "$OUT"
+# Sanitize before sharing: replace the literal home path with ~.
+sed -i.bak "s|$HOME|~|g" "$OUT" && rm -f "$OUT".bak
+```
+
+This procedure uses only user-level (`gui/<uid>`) launchctl commands. It does
+not require `sudo` and does not claim root-only diagnostics such as
+`launchctl dumpstate` are available.
+
 By default the active window is the full day (`loop_active_start=0`,
 `loop_active_end=24`), so loop fires on every scheduled tick. Narrow it to a
 working window with `roll config loop-window` — e.g. `roll config loop-window
@@ -1498,3 +1571,7 @@ retired shapes from older versions (ci/alert/brief) once survived for weeks as
 zombies pointing at deleted engines. `roll doctor` lists every `com.roll.*`
 job on the machine with its target directory and load state; a lane whose
 WorkingDirectory no longer exists is marked STALE in red.
+
+A plist left on disk after a bootstrap failure or a manual `bootout` is **not**
+the same as an armed loop. Always trust `roll loop status` (effective scheduler
+backend) and `launchctl list` over the mere presence of a `.plist` file.

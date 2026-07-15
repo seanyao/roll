@@ -4,7 +4,7 @@ exports[`roll loop --help groups — US-DOSSIER-035 > AC6: EN/中 snapshots (sin
 "Usage: roll loop <subcommand>
 The autonomous delivery loop — grouped control / observe / alerts / maintain.
 
-control   on · off [--all] · now · pause · resume · reset · go · goal · recover
+control   on · off [--all] · now · pause · resume · reset · go · goal · recover · fallback
 observe   watch · status · runs · log · events · signals · eval
 alerts    alert list · alert ack · alert resolve · alert log
 maintain  gc · fmt · mute · unmute · reconcile-pending
@@ -19,7 +19,7 @@ exports[`roll loop --help groups — US-DOSSIER-035 > AC6: EN/中 snapshots (sin
 "用法：roll loop <子命令>
 自治交付循环——按作动/传感/告警/维护分组。
 
-作动      on · off [--all] · now · pause · resume · reset · go · goal · recover
+作动      on · off [--all] · now · pause · resume · reset · go · goal · recover · fallback
 传感      watch · status · runs · log · events · signals · eval
 告警      alert list · alert ack · alert resolve · alert log
 维护      gc · fmt · mute · unmute · reconcile-pending

@@ -619,6 +619,46 @@ when the work is ambiguous or the environment is broken — never guesses.**
 For deeper operational topics (pause/resume, agent switching, gh scopes), see
 [loop.md](loop.md) and [configuration.md](configuration.md).
 
+### C5b. What do I do when `roll loop on` fails with a launchd bootstrap error?
+
+**Short answer:** The loop is unarmed. Repair launchd first; use the
+owner-confirmed process fallback only if launchd cannot be fixed.
+
+**Why this happens:** macOS launchd sometimes rejects the bootstrap with
+`Bootstrap failed: 5: Input/output error` (or a similar domain error). Roll
+retries once, verifies the mount with `launchctl print`, and exits non-zero
+rather than pretending the scheduler is active.
+
+**Fix launchd first:**
+
+```bash
+UID=$(id -u)
+SLUG=$(roll config get project_slug 2>/dev/null || basename "$PWD")
+launchctl bootout gui/$UID/com.roll.loop.$SLUG
+launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.roll.loop.$SLUG.plist
+launchctl print gui/$UID/com.roll.loop.$SLUG
+roll loop on
+roll loop status
+```
+
+**If launchd cannot be repaired:**
+
+```bash
+roll loop fallback start --confirm
+roll loop fallback status
+```
+
+The fallback is not a launchd replacement — it does not survive reboot/login.
+After a reboot or logout you must re-confirm:
+
+```bash
+roll loop fallback stop
+roll loop fallback start --confirm
+```
+
+See [Recovering from a launchd bootstrap failure](loop.md#recovering-from-a-launchd-bootstrap-failure)
+for a sanitized, non-root verification procedure.
+
 ### C7. I changed loop_schedule but loop still runs at the old frequency
 
 **Symptoms:** You updated `.roll/local.yaml` `loop_schedule`, but

@@ -5,7 +5,7 @@
  * schedule.difftest.test.ts; here we cover edge cases + the FIX-195 cron shape.
  */
 import { describe, expect, it, vi } from "vitest";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -573,6 +573,23 @@ describe("ProcessFallbackScheduler (US-LOOP-107b)", () => {
     }
   });
 
+  it("fails loud instead of stealing an ownerless startup lock", async () => {
+    const sandbox = mkdtempSync(join(tmpdir(), "roll-fallback-"));
+    const spawnRunner = vi.fn();
+    const scheduler = new ProcessFallbackScheduler({ spawnRunner });
+    mkdirSync(join(sandbox, ".roll", "loop", "process-fallback-start-project-abc123"), { recursive: true });
+
+    try {
+      await expect(scheduler.start(fallbackConfig(sandbox), { ownerConfirmed: true })).resolves.toMatchObject({
+        started: false,
+        reason: "fallback startup is already in progress",
+      });
+      expect(spawnRunner).not.toHaveBeenCalled();
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
   it("starts only the generated run-once runner under one project lease", async () => {
     const sandbox = mkdtempSync(join(tmpdir(), "roll-fallback-"));
     const fake = fakeFallbackChild(4123);
@@ -678,14 +695,13 @@ describe("ProcessFallbackScheduler (US-LOOP-107b)", () => {
     const sandbox = mkdtempSync(join(tmpdir(), "roll-fallback-"));
     const config = fallbackConfig(sandbox);
     const fake = fakeFallbackChild(4130);
-    const killPid = vi.fn(() => undefined);
     const starter = new ProcessFallbackScheduler({ spawnRunner: () => fake.child, pidAlive: () => true });
-    const stopper = new ProcessFallbackScheduler({ pidAlive: () => true, killPid });
+    const stopper = new ProcessFallbackScheduler({ pidAlive: () => true });
 
     try {
       await starter.start(config, { ownerConfirmed: true });
       await expect(stopper.stop(config)).resolves.toBe(true);
-      expect(killPid).toHaveBeenCalledWith(4130, "SIGTERM");
+      expect(readFileSync(join(sandbox, ".roll", "loop", "process-fallback-stop-project-abc123"), "utf8").trim()).not.toBe("");
     } finally {
       rmSync(sandbox, { recursive: true, force: true });
     }

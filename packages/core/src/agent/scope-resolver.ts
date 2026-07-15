@@ -37,6 +37,13 @@ export interface ResolveAgentScopeRoleInput {
   readonly healthSignals?: readonly AgentHealthSignal[];
   /** Already-resolved role assignments used by `avoid`. */
   readonly assignedRoles?: Readonly<Partial<Record<AgentScopeRole, AgentName>>>;
+  /** FIX-1267 — agents to HARD-exclude from a `select` pool this resolution
+   *  (e.g. the previous cycle's Builder, enforcing the no-consecutive-repeat
+   *  rotation). A `select` role skips them with reason `no-consecutive-repeat`;
+   *  if the exclusion empties the pool the resolution fails loud (never repeats
+   *  the excluded agent silently). Ignored by `fixed` bindings (a fixed agent is
+   *  an explicit owner override, not a rotation pool). */
+  readonly excludeAgents?: readonly AgentName[];
   readonly seed?: string;
 }
 
@@ -224,6 +231,10 @@ function skipForAgent(
   declarations: ReadonlyMap<AgentName, readonly AgentScopeRole[]>,
   input: ResolveAgentScopeRoleInput,
 ): string | null {
+  // FIX-1267 — the no-consecutive-repeat rotation exclusion is a hard skip,
+  // reported first so the audit trail names it explicitly (a previous builder is
+  // excluded because it just built, not because it lacks a capability).
+  if (input.excludeAgents !== undefined && input.excludeAgents.includes(agent)) return "no-consecutive-repeat";
   for (const avoidedRole of binding.avoid ?? []) {
     if (input.assignedRoles?.[avoidedRole] === agent) return `assigned-to-avoided-role: ${avoidedRole}`;
   }
@@ -250,9 +261,17 @@ function resolveSelect(input: ResolveAgentScopeRoleInput, candidate: BindingCand
   }
 
   if (available.length === 0) {
+    // FIX-1267 — distinguish a pool emptied SOLELY by the no-consecutive-repeat
+    // exclusion so the caller can fail loud with an actionable message (add
+    // another execute-capable agent, or disable the rotation) instead of the
+    // generic "no candidates" error.
+    const rotationExhausted = skipped.length > 0 && skipped.every((s) => s.reason === "no-consecutive-repeat");
+    const errors = rotationExhausted
+      ? [`${candidate.source}: no candidate after no-consecutive-repeat exclusion (only the previous builder was available)`]
+      : [`${candidate.source}: no candidates available`];
     return failure(input, {
       source: candidate.source,
-      errors: [`${candidate.source}: no candidates available`],
+      errors,
       candidates,
       skipped,
       trace: [...trace, { source: candidate.source, bindingKind: "select", action: "fail" }],

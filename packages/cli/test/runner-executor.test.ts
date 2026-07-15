@@ -5994,3 +5994,67 @@ describe("US-LOOP-106 — adversarial degrade (fail-closed, never silent)", () =
     expect(ev.adversarialDegraded).toBeUndefined();
   });
 });
+
+describe("FIX-1267 — resolve_route enforces the builder no-consecutive-repeat rotation", () => {
+  it("rotationBlocked route → route_pending + loop:pending + ALERT (never repeats silently)", async () => {
+    const rt = mkdtempSync(join(tmpdir(), "roll-rot-blocked-"));
+    execDirs.push(rt);
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      paths: { ...base.ports.paths, eventsPath: join(rt, "events.ndjson"), alertsPath: join(rt, "alerts.log") },
+      installedAgents: () => ["claude", "pi"],
+      route: { resolve: vi.fn(() => ({ agent: "", model: "", rotationBlocked: { previous: "claude" } })) },
+    });
+
+    const result = await executeCommand({ kind: "resolve_route", storyId: "US-RUN-001" }, ports, CTX);
+
+    expect(result.event).toMatchObject({ type: "route_pending" });
+    expect((result.event as { reason: string }).reason).toContain("no-consecutive-repeat");
+    expect((result.event as { reason: string }).reason).toContain("claude");
+    expect(calls.event).toContainEqual([
+      ports.paths.eventsPath,
+      expect.objectContaining({ type: "loop:pending", reason: expect.stringContaining("no-consecutive-repeat") }),
+    ]);
+    expect(calls.alert?.length).toBeGreaterThan(0);
+  });
+
+  it("excluded previous builder is dropped from the fallback pool and a builder:rotation audit event is emitted", async () => {
+    const rt = mkdtempSync(join(tmpdir(), "roll-rot-audit-"));
+    execDirs.push(rt);
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      paths: { ...base.ports.paths, eventsPath: join(rt, "events.ndjson"), alertsPath: join(rt, "alerts.log") },
+      installedAgents: () => ["kimi", "pi"],
+      route: { resolve: vi.fn(() => ({ agent: "kimi", model: "", excluded: ["pi"] })) },
+    });
+
+    const result = await executeCommand({ kind: "resolve_route", storyId: "US-RUN-001" }, ports, CTX);
+
+    expect(result.event).toMatchObject({ type: "route_resolved", agent: "kimi" });
+    expect(calls.event).toContainEqual([
+      ports.paths.eventsPath,
+      expect.objectContaining({ type: "builder:rotation", previous: "pi", selected: "kimi", storyId: "US-RUN-001" }),
+    ]);
+  });
+
+  it("fail-loud when the routed builder is suspended and only the excluded previous builder is active", async () => {
+    const rt = mkdtempSync(join(tmpdir(), "roll-rot-onlyprev-"));
+    execDirs.push(rt);
+    // kimi (the scoped route's pick) is suspended → only pi (the excluded
+    // previous builder) is active. Refuse to repeat pi.
+    suspendRig(rt, "kimi", "quota", "quota exhausted", 1_000, 30_000);
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      paths: { ...base.ports.paths, eventsPath: join(rt, "events.ndjson"), alertsPath: join(rt, "alerts.log") },
+      clock: () => 10,
+      installedAgents: () => ["pi", "kimi"],
+      route: { resolve: vi.fn(() => ({ agent: "kimi", model: "", excluded: ["pi"] })) },
+    });
+
+    const result = await executeCommand({ kind: "resolve_route", storyId: "US-RUN-001" }, ports, CTX);
+
+    expect(result.event).toMatchObject({ type: "route_pending" });
+    expect((result.event as { reason: string }).reason).toContain("no-consecutive-repeat");
+    expect((result.event as { reason: string }).reason).toContain("pi");
+  });
+});

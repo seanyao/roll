@@ -221,6 +221,8 @@ building ──attest earned──► publishable ──push+PR──► awaitin
   - 完全跳过预检：`loop_safety.skip_network_check: true`（FIX-1025）——当你确认所配置的服务可直连、不希望被任何固定主机探测拦住时使用。
   - English: the precheck defaults to `github.com:443`. For a domestic-only workflow, point it at a host you actually need via `loop_safety.probe_url`, or opt out entirely with `loop_safety.skip_network_check: true` — so a dropped VPN never halts loop/release when every configured provider is directly reachable.
 - Warm session 复用：`loop_safety.session_reuse: true` 只表达复用意图；必须同时设置 `loop_safety.resume_scope: same-story` 才会在同一 story 重试时复用 codex session。缺省、非法值或未设置 `resume_scope` 都按 `off` 处理，跨卡复用保持禁用。
+- Builder 硬轮换：`loop_safety.builder_no_consecutive_repeat`（默认开）保证任意连续两个 cycle 的 builder agent 不相同——上一个 cycle 的 builder 被从本次 execute 池中硬排除。池缩到只剩上一个 builder 时**失败即声（ALERT + pending）**，绝不静默重复、绝不空转；轮换真正发生时记 `builder:rotation` 事件可审计。设 `builder_no_consecutive_repeat: false` 关闭；仅约束 builder（Evaluator 独立性靠 fresh session，不靠排除品牌）。
+  - English: `loop_safety.builder_no_consecutive_repeat` (default on) forbids two consecutive cycles from sharing a Builder — the previous cycle's builder is hard-excluded from the execute pool. If that empties the pool it fails loud (ALERT + pending), never repeating silently; a real rotation records a `builder:rotation` audit event. Set `false` to disable. Builder-only (Evaluator independence comes from fresh sessions, not brand exclusion).
 
 策略是规则源——它不直接执行动作，而是被其他上下文读取并遵循。
 

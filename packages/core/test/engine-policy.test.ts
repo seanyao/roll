@@ -107,8 +107,17 @@ describe("parsePolicy — v3 spec shape round-trip", () => {
       cycleWallTimeoutSec: 2700,
       cycleNoProgressSec: 900,
       autoRepairEvidence: true,
+      builderNoConsecutiveRepeat: true,
     });
     expect(p.pick.semanticRanking).toBe("on");
+  });
+
+  it("FIX-1267: builder_no_consecutive_repeat is default-on; only explicit false disables", () => {
+    expect(parsePolicy("").loopSafety.builderNoConsecutiveRepeat).toBe(true);
+    expect(parsePolicy("loop_safety:\n  builder_no_consecutive_repeat: false\n").loopSafety.builderNoConsecutiveRepeat).toBe(false);
+    expect(parsePolicy("loop_safety:\n  builder_no_consecutive_repeat: true\n").loopSafety.builderNoConsecutiveRepeat).toBe(true);
+    // Garbage / unrecognized value leaves the constraint ON (稳字纪律 for a safety gate).
+    expect(parsePolicy("loop_safety:\n  builder_no_consecutive_repeat: maybe\n").loopSafety.builderNoConsecutiveRepeat).toBe(true);
   });
 
   it("parses pick.semantic_ranking with default-on semantics", () => {

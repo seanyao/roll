@@ -542,4 +542,91 @@ defaults:
       expect(resolved.resolved.skipped).toEqual([{ agent: "agy", reason: "health-blocked: auth" }]);
     }
   });
+
+  describe("FIX-1267 — excludeAgents (no-consecutive-repeat rotation)", () => {
+    const POOL = cfg(`schema: roll-agents/v1
+scope: project
+agents:
+  agy:
+    capabilities: [execute]
+  kimi:
+    capabilities: [execute]
+  pi:
+    capabilities: [execute]
+defaults:
+  story:
+    roles:
+      execute:
+        kind: select
+        from: [agy, kimi, pi]
+        require: [execute]
+        strategy: first-available
+`, ".roll/agents.yaml");
+
+    it("hard-skips an excluded agent with reason no-consecutive-repeat and selects a different one", () => {
+      const resolved = resolveAgentScopeRole({
+        scope: "story",
+        role: "execute",
+        layers: [POOL],
+        excludeAgents: ["agy"],
+      });
+      expect(resolved.ok).toBe(true);
+      if (resolved.ok) {
+        expect(resolved.resolved.agent).not.toBe("agy");
+        expect(resolved.resolved.agent).toBe("kimi");
+        expect(resolved.resolved.skipped).toContainEqual({ agent: "agy", reason: "no-consecutive-repeat" });
+        expect(resolved.resolved.candidates).toEqual(["agy", "kimi", "pi"]);
+      }
+    });
+
+    it("fails loud with an actionable message when the exclusion empties the pool", () => {
+      const single = cfg(`schema: roll-agents/v1
+scope: project
+agents:
+  agy:
+    capabilities: [execute]
+defaults:
+  story:
+    roles:
+      execute:
+        kind: select
+        from: [agy]
+        require: [execute]
+        strategy: first-available
+`, ".roll/agents.yaml");
+      const resolved = resolveAgentScopeRole({
+        scope: "story",
+        role: "execute",
+        layers: [single],
+        excludeAgents: ["agy"],
+      });
+      expect(resolved.ok).toBe(false);
+      if (!resolved.ok) {
+        expect(resolved.failure.skipped).toEqual([{ agent: "agy", reason: "no-consecutive-repeat" }]);
+        expect(resolved.failure.errors[0]).toContain("no-consecutive-repeat");
+        expect(resolved.failure.errors[0]).toContain("only the previous builder");
+      }
+    });
+
+    it("a fixed owner binding ignores excludeAgents (an explicit pin is never overridden)", () => {
+      const fixed = cfg(`schema: roll-agents/v1
+scope: project
+agents:
+  agy:
+    capabilities: [execute]
+roles:
+  execute:
+    kind: fixed
+    agent: agy
+`, ".roll/agents.yaml");
+      const resolved = resolveAgentScopeRole({
+        scope: "project",
+        role: "execute",
+        layers: [fixed],
+        excludeAgents: ["agy"],
+      });
+      expect(resolved.ok).toBe(true);
+      if (resolved.ok) expect(resolved.resolved.agent).toBe("agy");
+    });
+  });
 });

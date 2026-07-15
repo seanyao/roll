@@ -241,3 +241,50 @@ describe("AC4 — unknown renders as unknown, never as success", () => {
     expect(out).toContain("https://github.com/o/r/actions/runs/2");
   });
 });
+
+describe("FIX-1262 — cycle model column shows the ledger model or '—', never a baked default", () => {
+  const baseCy = {
+    outcome: "done" as const,
+    pr_outcome: null,
+    start_hhmm: "10:00",
+    duration_s: 60,
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_creation_tokens: 0,
+    cache_read_tokens: 0,
+    cost_currency: "USD",
+    cost_list: null,
+    cron_cost: null,
+    story: "FIX-1262",
+    built: ["FIX-1262"],
+    pr_num: null,
+    cost_list_legacy: false,
+    fail_detail: null,
+    label: "C-1262",
+  };
+
+  it("no ledger model + a known agent → NO source-baked default backfill (claude → 'sonnet-4')", () => {
+    const prev = renderState.useColor;
+    renderState.useColor = false;
+    try {
+      const row = cycleRow({ ...baseCy, model: null, agent: "claude" }).join("\n");
+      // The agent's specs.ts default is 'claude-sonnet-4' → fmtModel 'sonnet-4'.
+      // That must NEVER appear when the ledger recorded no spawn model.
+      expect(row).not.toContain("sonnet");
+      expect(row).not.toContain("claude");
+    } finally {
+      renderState.useColor = prev;
+    }
+  });
+
+  it("a real ledger spawn model is shown verbatim (honest source)", () => {
+    const prev = renderState.useColor;
+    renderState.useColor = false;
+    try {
+      const row = cycleRow({ ...baseCy, model: "deepseek-v4-pro", agent: "pi" }).join("\n");
+      expect(row).toContain("deepseek-v4-pro");
+    } finally {
+      renderState.useColor = prev;
+    }
+  });
+});

@@ -5660,6 +5660,43 @@ describe("US-V4-005 — verified execution: evaluator artifact boundary", () => 
     writeEvaluatorArtifact(ports, ctx, { attestStatus: "produced", blockingFindings: ["AC2 has no test"] });
     expect(readFileSync(join(ctx.evidenceRunDir as string, "role-artifacts", "evaluator", "eval-report.md"), "utf8")).toContain("repair");
   });
+
+  // FIX-1262 — the evaluator manifest's rig.agent must come from the ACTUAL
+  // scorer (`scored-by`), never a source-baked 'reasonix' fabrication.
+  function repoWithScoreBy(id: string, sessionId: string, score: number, scoredBy: string | undefined): string {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-fix1262-")));
+    execDirs.push(repo);
+    const notesDir = join(repo, ".roll", "features", "uncategorized", id, "notes");
+    mkdirSync(notesDir, { recursive: true });
+    const lines = ["---", "skill: roll-build", `story: ${id}`, `score: ${score}`, "verdict: good", "ts: 2026-07-15T12:00:00Z", "scoring: pair"];
+    if (scoredBy !== undefined) lines.push(`scored-by: ${scoredBy}`);
+    lines.push(`session-id: ${sessionId}`, "---", "", "peer rationale.");
+    writeFileSync(join(notesDir, `2026-07-15-roll-build-${id}-${score}.md`), lines.join("\n"));
+    return repo;
+  }
+
+  it("FIX-1262: manifest.rig.agent is the ACTUAL scorer (scored-by), never a baked 'reasonix'", () => {
+    const repo = repoWithScoreBy("US-E5", "C-1:score:kimi:1", 8, "kimi");
+    const { ports } = fakePorts({ repoCwd: repo });
+    const ctx = ctxFor(repo, "US-E5", "verified", "C-1:build:codex:0");
+    const r = writeEvaluatorArtifact(ports, ctx, { attestStatus: "produced", blockingFindings: [] });
+    expect(r.valid).toBe(true);
+    const man = JSON.parse(readFileSync(join(ctx.evidenceRunDir as string, "role-artifacts", "evaluator", "artifact-manifest.json"), "utf8"));
+    expect(man.rig.agent).toBe("kimi");
+    expect(JSON.stringify(man)).not.toContain("reasonix");
+  });
+
+  it("FIX-1262: a score note with NO scored-by → rig.agent absent + fails closed (no fabricated 'reasonix')", () => {
+    const repo = repoWithScoreBy("US-E6", "C-1:score:anon:1", 8, undefined);
+    const { ports } = fakePorts({ repoCwd: repo });
+    const ctx = ctxFor(repo, "US-E6", "verified", "C-1:build:codex:0");
+    const r = writeEvaluatorArtifact(ports, ctx, { attestStatus: "produced", blockingFindings: [] });
+    const man = JSON.parse(readFileSync(join(ctx.evidenceRunDir as string, "role-artifacts", "evaluator", "artifact-manifest.json"), "utf8"));
+    expect(man.rig.agent).toBeUndefined();
+    expect(JSON.stringify(man)).not.toContain("reasonix");
+    expect(r.valid).toBe(false);
+    expect(r.reasons.join(" ")).toContain("rig.agent");
+  });
 });
 
 describe("US-V4-006 — designed execution: Designer contract before the Builder", () => {

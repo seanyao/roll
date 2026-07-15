@@ -1,5 +1,3 @@
-import { agentDefaultModel } from "@roll/core";
-
 /**
  * Terminal rendering primitives — TS port of lib/roll_render.py (the shared
  * layout engine for status/prices/backlog/dashboard views). Byte-aligned with
@@ -545,10 +543,11 @@ export function cycleRow(cy: CycleView): string[] {
   const timeC = outcome === "fail" ? "red" : "fg";
   const sidC = outcome === "fail" ? "red" : "blue";
 
-  let modelLabel = fmtModel(cy.model);
-  if (modelLabel === "—" && cy.agent) {
-    modelLabel = agentDefaultModel(cy.agent);
-  }
+  // FIX-1262: show the ledger's spawn model, or "—" when it is absent. NEVER
+  // backfill the agent's source-baked default model (agentDefaultModel): that
+  // fabricates a model this cycle may never have run on. fmtModel already maps
+  // an empty/absent model to "—".
+  const modelLabel = fmtModel(cy.model);
   const showModel = COLS >= 100;
   const modelSeg = showModel ? c("muted", pad(modelLabel, 11)) + " " : "";
 

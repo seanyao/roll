@@ -50,6 +50,7 @@ import { reduceStatusCheckRollup, type StatusCheckRollupEntry } from "@roll/infr
 import { detectNoProgressStall, type NoProgressStall } from "../lib/goal-recovery.js";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { supervisorJournalCommand } from "./supervisor-journal.js";
 import { formatOperatingMode, resolveOperatingMode, suggestedGuidedRun } from "../lib/operating-mode.js";
@@ -57,7 +58,7 @@ import { collectBrowserTruth } from "../lib/browser-truth-collect.js";
 import { renderBrowserTruthSupervisorLine } from "../lib/browser-truth-surface.js";
 import { readPendingPublish } from "../runner/pending-publish.js";
 import { cardArchiveDir, reportFileName, reviewFileName } from "../lib/archive.js";
-import { renderScopedExecuteRoute, resolveScopedCastRole, scopedExecuteRouteTrace } from "../runner/scoped-route.js";
+import { readScopedAgentLayer, renderScopedExecuteRoute, resolveScopedCastRole, scopedExecuteRouteTrace } from "../runner/scoped-route.js";
 import { renderCollabStream } from "../lib/collab-render.js";
 
 const EXEC_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
@@ -794,12 +795,33 @@ function collabGoalScope(projectPath: string): string {
   }
 }
 
+/**
+ * FIX-1262 — resolve the Supervisor's agent identity from CONFIGURATION, not a
+ * source-baked 'codex' hidden behind an undocumented env knob. Priority:
+ *   1. `ROLL_SUPERVISOR_AGENT` — an explicit operator OVERRIDE only;
+ *   2. the `roles.supervise` FIXED binding in the project then machine
+ *      `agents.yaml` (`~/.roll/agents.yaml`) — the real config-driven source;
+ *   3. honest empty — the collab board shows a blank supervisor rather than
+ *      claiming an agent that was never configured (no silent fabrication).
+ */
+export function resolveSupervisorAgent(projectPath: string): string {
+  const override = (process.env["ROLL_SUPERVISOR_AGENT"] ?? "").trim();
+  if (override !== "") return override;
+  const machinePath = join(process.env["ROLL_HOME"] ?? join(homedir(), ".roll"), "agents.yaml");
+  const projectPathYaml = join(projectPath, ".roll", "agents.yaml");
+  for (const p of [projectPathYaml, machinePath]) {
+    const binding = readScopedAgentLayer(p)?.config.roles.supervise;
+    if (binding?.kind === "fixed") return binding.agent;
+  }
+  return "";
+}
+
 function buildCollabEventSource(projectPath: string, events: readonly RollEvent[]): EventSource {
   return {
     readEvents: () => events,
     readSummary: (cycleId) => readCycleRoleSummary(projectPath, cycleId),
     rebuildSummary: (cycleId) => rebuildCycleRoleSummary(projectPath, events, cycleId),
-    supervisor: () => process.env["ROLL_SUPERVISOR_AGENT"] ?? "codex",
+    supervisor: () => resolveSupervisorAgent(projectPath),
     goalScope: () => collabGoalScope(projectPath),
   };
 }

@@ -124,7 +124,8 @@ export class BrowserOperationLedger {
 
   /** Persist the authoritative CaptureBridge fact beside its browser operation facts. */
   recordCaptureLink(path: string, link: CaptureBridgeLink): void {
-    this.append(path, { type: "browser:capture-linked", runId: link.runId, ts: link.linkedAt, link });
+    const event: BrowserOperationEvent = { type: "browser:capture-linked", runId: link.runId, ts: link.linkedAt, link };
+    this.store.appendLine(path, `${JSON.stringify({ schema: LEDGER_SCHEMA, event } satisfies BrowserLedgerLine)}\n`);
   }
 
   recordLeaseOrphaned(path: string, lease: { leaseId: string; endpointHash: string; holderPid: number }): void {

@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import {
   acBlockPresentInSpec,
   appendDelivery,
+  BrowserOperationLedger,
+  captureLinksFromBrowserEvents,
   evidenceGateBeforePush,
   nodeDeliveryStore,
   planPublishDocPr,
@@ -14,7 +16,7 @@ import {
   type PublishResult,
   type RunKey,
 } from "@roll/core";
-import { AWAITING_REVIEW_STATUS_MARKER, STATUS_MARKER, absent, present } from "@roll/spec";
+import { AWAITING_REVIEW_STATUS_MARKER, STATUS_MARKER, absent, present, type EvidenceClassifierInput } from "@roll/spec";
 import { prNumberFromUrl } from "@roll/infra";
 import { writeCycleRoleSummaryBestEffort } from "./cycle-role-artifact-writer.js";
 import { acMapCandidates, storySpecPath, verificationReportFresh } from "./attest-gate.js";
@@ -100,6 +102,7 @@ export async function executeTerminalCommand(
           attestReportPresent: verificationReportFresh(ports.paths.worktreePath, gateStoryId, undefined, ports.repoCwd),
           acMapPresent: acMapCandidates(ports.paths.worktreePath, gateStoryId, ports.repoCwd).some((p) => existsSync(p)),
           acceptanceReportRequired,
+          visualEvidence: captureBridgeArtifacts(ports.paths.worktreePath, gateStoryId),
         });
         // Best-effort like every other appendEvent in this handler: an
         // events-file write blip is observability loss, never a publish block.
@@ -682,6 +685,22 @@ export async function executeTerminalCommand(
       throw new Error(`executeTerminalCommand: unmapped command ${JSON.stringify(_exhaustive)}`);
     }
   }
+}
+
+/** Read only the persisted CaptureBridge artifacts offered by this story's attest path. */
+function captureBridgeArtifacts(projectPath: string, storyId: string): EvidenceClassifierInput[] {
+  const eventsPath = join(projectPath, ".roll", "browser-operations", "events.ndjson");
+  if (!existsSync(eventsPath)) return [];
+  const links = captureLinksFromBrowserEvents(new BrowserOperationLedger().read(eventsPath));
+  return links
+    .filter((link) => link.storyId === storyId)
+    .map((link) => ({
+      artifactId: link.captureRequestId,
+      provider: "roll-capture",
+      protocol: "roll.capture.v1",
+      ...(link.captureResponse !== undefined ? { captureResponse: link.captureResponse } : {}),
+      ...(link.captureDigest !== undefined ? { digest: link.captureDigest } : {}),
+    }));
 }
 
 // ── FIX-1238: in-repo layout helpers ─────────────────────────────────────────

@@ -40,6 +40,8 @@ import {
   readBacklogRow,
   resolveStoryAcItems,
 } from "../src/commands/attest.js";
+import { collectBrowserTimeline } from "../src/lib/browser-timeline-collect.js";
+import { collectBrowserTruth } from "../src/lib/browser-truth-collect.js";
 import { renderStoryPage } from "../src/lib/story-page.js";
 
 const dirs: string[] = [];
@@ -1376,7 +1378,7 @@ describe("US-PHYSICAL-004 — attest physical.screenshot provider lane", () => {
     const proj = physicalProject();
     const sourcePng = join(proj, "captured-by-app.png");
     const captureRoot = join(proj, "roll-capture-root");
-    writeFileSync(sourcePng, "PNGDATA");
+    writeFileSync(sourcePng, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]));
     mkdirSync(captureRoot, { recursive: true });
     const fake = physicalProviderFixture(captureRoot, (request) => {
       const reportPath = join(captureRoot, "reports", `${request.requestId}.html`);
@@ -1403,7 +1405,9 @@ describe("US-PHYSICAL-004 — attest physical.screenshot provider lane", () => {
     expect(existsSync(join(captureRoot, "inbox", `request-${request.requestId}.json`))).toBe(false);
     expect(readFileSync(join(captureRoot, "responses", `response-${request.requestId}.json`), "utf8")).toContain('"status":"taken"');
     const runDir = dirname(dirname(request.out));
-    expect(readFileSync(join(runDir, "screenshots", "physical.png"), "utf8")).toBe("PNGDATA");
+    expect(readFileSync(join(runDir, "screenshots", "physical.png")).subarray(0, 8)).toEqual(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    );
     const html = readFileSync(join(runDir, "US-PHYSICAL-004A-report.html"), "utf8");
     expect(html).toContain("physical.screenshot");
     expect(html).toContain("requested → taken → attached");
@@ -1430,6 +1434,31 @@ describe("US-PHYSICAL-004 — attest physical.screenshot provider lane", () => {
         }),
       }),
     }));
+    expect(collectBrowserTruth({ projectPath: proj, storyId: "US-PHYSICAL-004A" }).capture).toEqual({ status: "ready" });
+    expect(collectBrowserTimeline({ projectPath: proj, storyId: "US-PHYSICAL-004A" }).rows).toContainEqual(
+      expect.objectContaining({ kind: "physical-capture", presence: "present" }),
+    );
+  });
+
+  it("records an invalid physical capture as degraded rather than visual-ready", async () => {
+    const proj = physicalProject("US-PHYSICAL-004INVALID");
+    const sourcePng = join(proj, "not-an-image.png");
+    const captureRoot = join(proj, "roll-capture-root");
+    writeFileSync(sourcePng, "not a PNG");
+    const fake = physicalProviderFixture(captureRoot, (request) => responseFor(captureRoot, request, "taken", { screenshotPath: sourcePng }));
+
+    await silenced(() =>
+      inDir(proj, () =>
+        attestCommand(["US-PHYSICAL-004INVALID"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          rollCapture: { readiness: () => availableReadiness, provider: fake.port, root: captureRoot },
+        }),
+      ),
+    );
+
+    expect(collectBrowserTruth({ projectPath: proj, storyId: "US-PHYSICAL-004INVALID" }).capture).toMatchObject({ status: "degraded" });
   });
 
   it("does not trigger physical.screenshot from comments, AC text, or URLs containing the token", async () => {
@@ -1480,7 +1509,7 @@ describe("US-PHYSICAL-004 — attest physical.screenshot provider lane", () => {
     ]);
     const captureRoot = join(proj, "roll-capture-root");
     const sourcePng = join(proj, "inline.png");
-    writeFileSync(sourcePng, "INLINEPNG");
+    writeFileSync(sourcePng, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01]));
     const fake = physicalProviderFixture(captureRoot, (request) => responseFor(captureRoot, request, "taken", { screenshotPath: sourcePng }));
 
     await silenced(() =>
@@ -1502,7 +1531,7 @@ describe("US-PHYSICAL-004 — attest physical.screenshot provider lane", () => {
     const proj = physicalProject("US-PHYSICAL-004D", ["evidence_profile: physical"]);
     const captureRoot = join(proj, "roll-capture-root");
     const sourcePng = join(proj, "captured-display.png");
-    writeFileSync(sourcePng, "DISPLAYPNG");
+    writeFileSync(sourcePng, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x02]));
     const fake = physicalProviderFixture(captureRoot, (request) => responseFor(captureRoot, request, "taken", { screenshotPath: sourcePng }));
 
     await silenced(() =>
@@ -1520,7 +1549,9 @@ describe("US-PHYSICAL-004 — attest physical.screenshot provider lane", () => {
     // US-PHYSICAL-006: evidence_profile:physical without capture_fullscreen defaults to window-level
     expect(fake.requests[0]).toMatchObject({ kind: "display", target: { type: "window", appName: "Terminal.app" } });
     const runDir = join(proj, ".roll", "features", "demo", "US-PHYSICAL-004D", "2026-06-06T01-02-03");
-    expect(readFileSync(join(runDir, "screenshots", "physical.png"), "utf8")).toBe("DISPLAYPNG");
+    expect(readFileSync(join(runDir, "screenshots", "physical.png")).subarray(0, 8)).toEqual(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    );
     const html = readFileSync(join(runDir, "US-PHYSICAL-004D-report.html"), "utf8");
     expect(html).toContain("requested → taken → attached");
   });

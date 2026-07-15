@@ -37,6 +37,8 @@ export interface EvidenceGateFacts {
    * callers that do not inject the fact.
    */
   readonly acceptanceReportRequired?: boolean;
+  /** Artifacts offered to discharge visual ACs, when the caller has them. */
+  readonly visualEvidence?: readonly EvidenceClassifierInput[];
 }
 
 /** The gate verdict: push allowed, or blocked with one reason per missing artifact. */
@@ -53,11 +55,6 @@ export function visualEvidenceGate(artifacts: readonly EvidenceClassifierInput[]
   const classifier = new EvidenceClassifier();
   const reasons: string[] = [];
   for (const artifact of artifacts) {
-    const classification = classifier.classify(artifact);
-    if (classification.evidenceClass !== "physical-capture") {
-      reasons.push(`${artifact.artifactId}: ${classification.reason}`);
-      continue;
-    }
     const visual = classifier.validateVisualEvidence(artifact);
     if (visual.verdict !== "valid") reasons.push(`${artifact.artifactId}: ${visual.reason}`);
   }
@@ -87,6 +84,10 @@ export function evidenceGateBeforePush(facts: EvidenceGateFacts): EvidenceGateVe
   }
   if (!facts.acMapPresent) {
     reasons.push("ac-map.json missing");
+  }
+  if (facts.visualEvidence !== undefined) {
+    const visual = visualEvidenceGate(facts.visualEvidence);
+    if (!visual.ok) reasons.push(...visual.reasons);
   }
   return reasons.length === 0 ? { ok: true } : { ok: false, reasons };
 }

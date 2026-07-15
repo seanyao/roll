@@ -50,7 +50,6 @@ import {
   type RunRow,
   type ReviewScoreReportEntry,
   type OutwardAcReport,
-  visualEvidenceGate,
 } from "@roll/core";
 import {
   ROLL_CAPTURE_PROTOCOL_V1,
@@ -86,6 +85,7 @@ import {
 } from "@roll/infra";
 import {
   copyFileSync,
+  createReadStream,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -849,7 +849,7 @@ async function runPhysicalScreenshotLane(
           responsePath,
           privacy.annotation,
           captureResponse,
-          sha256File(request.out),
+          await sha256File(request.out),
         );
       }
       return physicalLaneResult(request, ["requested", "taken", "not-attached"], attached.reason, undefined, ledger, requestPath, responsePath, undefined, result.response);
@@ -916,12 +916,14 @@ function physicalLaneResult(
   };
 }
 
-function sha256File(path: string): string | undefined {
-  try {
-    return `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`;
-  } catch {
-    return undefined;
-  }
+function sha256File(path: string): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const hash = createHash("sha256");
+    const input = createReadStream(path);
+    input.on("data", (chunk: Buffer) => hash.update(chunk));
+    input.on("end", () => resolve(`sha256:${hash.digest("hex")}`));
+    input.on("error", () => resolve(undefined));
+  });
 }
 
 /** Persist the physical attest result as the authoritative browser capture fact. */
@@ -938,16 +940,9 @@ function recordAttestCaptureBridgeLink(projectPath: string, request: RollCapture
       physical.captureDigest,
     );
     if (link === null) return;
-    const gate = visualEvidenceGate([{
-      artifactId: link.captureRequestId,
-      provider: "roll-capture",
-      protocol: ROLL_CAPTURE_PROTOCOL_V1,
-      captureResponse: link.captureResponse,
-      digest: link.captureDigest,
-    }]);
     new BrowserOperationLedger().recordCaptureLink(
       join(projectPath, ".roll", "browser-operations", "events.ndjson"),
-      { ...link, canSatisfyVisualAc: gate.ok },
+      link,
     );
   } catch (error) {
     warn(`could not persist browser capture link: ${error instanceof Error ? error.message : String(error)}`);
@@ -973,10 +968,22 @@ function attachPhysicalScreenshot(source: string, out: string): { ok: true } | {
   try {
     if (source !== out) copyFileSync(source, out);
     if (!existsSync(out)) return { ok: false, reason: "physical.screenshot did not produce an attached PNG" };
+    if (!hasPngSignature(out)) {
+      rmSync(out, { force: true });
+      return { ok: false, reason: "physical.screenshot did not produce a valid PNG" };
+    }
     return { ok: true };
   } catch (error) {
     rmSync(out, { force: true });
     return { ok: false, reason: `attach failed: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
+function hasPngSignature(path: string): boolean {
+  try {
+    return readFileSync(path).subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  } catch {
+    return false;
   }
 }
 

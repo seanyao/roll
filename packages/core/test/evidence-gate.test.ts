@@ -121,12 +121,30 @@ describe("visualEvidenceGate — US-BROW-023", () => {
     expect(visualEvidenceGate([physical])).toEqual({ ok: true });
   });
 
+  it("blocks the push-time evidence gate when visual AC evidence is diagnostic-only", () => {
+    const verdict = evidenceGateBeforePush({
+      attestReportPresent: true,
+      acMapPresent: true,
+      visualEvidence: [{ artifactId: "devtools-1", provider: "chrome-devtools-mcp", isBrowserDiagnostic: true }],
+    });
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) expect(verdict.reasons[0]).toContain("devtools-1");
+  });
+
   it.each([
     ["playwright", { artifactId: "playwright-1", provider: "playwright", protocol: "playwright.v1" }],
     ["DevTools", { artifactId: "devtools-1", provider: "chrome-devtools-mcp", isBrowserDiagnostic: true }],
   ] as const)("rejects %s diagnostics as visual AC evidence", (_kind, artifact) => {
     const verdict = visualEvidenceGate([artifact]);
     expect(verdict.ok).toBe(false);
-    if (!verdict.ok) expect(verdict.reasons).toHaveLength(1);
+    if (!verdict.ok) {
+      expect(verdict.reasons).toHaveLength(1);
+      expect(verdict.reasons[0]).toContain(artifact.artifactId);
+    }
+  });
+
+  it("surfaces a forged physical protocol claim instead of downgrading it to a diagnostic", () => {
+    const verdict = visualEvidenceGate([{ artifactId: "forged-1", provider: "chrome-devtools-mcp", protocol: "roll.capture.v1" }]);
+    expect(verdict).toEqual(expect.objectContaining({ ok: false, reasons: [expect.stringContaining("forgery")] }));
   });
 });

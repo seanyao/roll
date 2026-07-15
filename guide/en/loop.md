@@ -118,14 +118,15 @@ only `launchctl list` showing the loaded label means the loop is armed. Run
 `process-fallback`, or `none`).
 
 **Repair launchd first.** The error output already prints the exact commands;
-the generic form is:
+the generic form uses the label reported by `launchctl list`:
 
 ```bash
 UID=$(id -u)
-SLUG=$(roll config get project_slug 2>/dev/null || basename "$PWD")
-launchctl bootout gui/$UID/com.roll.loop.$SLUG
-launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.roll.loop.$SLUG.plist
-launchctl print gui/$UID/com.roll.loop.$SLUG
+LABEL=$(launchctl list | awk '$3 ~ /^com\.roll\.loop\./ {print $3; exit}')
+# If launchctl list returns nothing, use the exact label from the roll loop on error output.
+launchctl bootout gui/$UID/$LABEL
+launchctl bootstrap gui/$UID ~/Library/LaunchAgents/$LABEL.plist
+launchctl print gui/$UID/$LABEL
 roll loop status
 ```
 

@@ -570,10 +570,11 @@ roll loop reset
 
 ```bash
 UID=$(id -u)
-SLUG=$(roll config get project_slug 2>/dev/null || basename "$PWD")
-launchctl bootout gui/$UID/com.roll.loop.$SLUG
-launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.roll.loop.$SLUG.plist
-launchctl print gui/$UID/com.roll.loop.$SLUG
+LABEL=$(launchctl list | awk '$3 ~ /^com\.roll\.loop\./ {print $3; exit}')
+# 如果 launchctl list 没有输出，请使用错误信息里的精确 label。
+launchctl bootout gui/$UID/$LABEL
+launchctl bootstrap gui/$UID ~/Library/LaunchAgents/$LABEL.plist
+launchctl print gui/$UID/$LABEL
 roll loop on
 roll loop status
 ```

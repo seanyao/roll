@@ -633,10 +633,11 @@ rather than pretending the scheduler is active.
 
 ```bash
 UID=$(id -u)
-SLUG=$(roll config get project_slug 2>/dev/null || basename "$PWD")
-launchctl bootout gui/$UID/com.roll.loop.$SLUG
-launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.roll.loop.$SLUG.plist
-launchctl print gui/$UID/com.roll.loop.$SLUG
+LABEL=$(launchctl list | awk '$3 ~ /^com\.roll\.loop\./ {print $3; exit}')
+# If launchctl list returns nothing, use the exact label from the error output.
+launchctl bootout gui/$UID/$LABEL
+launchctl bootstrap gui/$UID ~/Library/LaunchAgents/$LABEL.plist
+launchctl print gui/$UID/$LABEL
 roll loop on
 roll loop status
 ```

@@ -28,6 +28,8 @@
 - `roll loop go` 的启动横幅现在显示真正生效的范围(而不是本次命令行解析的范围);沿用上个 goal 的范围时会明确标注来源,新增 `--all` 一键回到全量 (FIX-1253) `[cli]`
 - 上一个 goal 完成后再次 `roll loop go` 不再报"goal is already complete"死锁:完成的 goal 自动归档到 `goal-archive/`,新 goal 直接开跑,有事件可追溯 (FIX-1254) `[loop]`
 - 合并对账不再被 force-push 淘汰的旧提交的失败 CI 记录误导:只看 PR 当前提交的检查结果,绿就是绿,修复后重推的 PR 能正常自动合并 (FIX-1258) `[loop]`
+- `roll browser doctor` interactive 通道不再把 9222 端口任意进程当 Chrome ready，现在会经 /json/version 验真 (FIX-1264) `[loop]`
+  <!-- evidence: .roll/features/loop-engine/FIX-1264/latest/FIX-1264-report.html -->
 
 ## v4.714.2 — 2026-07-14
 

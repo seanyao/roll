@@ -582,9 +582,27 @@ describe("ProcessFallbackScheduler (US-LOOP-107b)", () => {
     try {
       await expect(scheduler.start(fallbackConfig(sandbox), { ownerConfirmed: true })).resolves.toMatchObject({
         started: false,
-        reason: "fallback startup is already in progress",
+        reason: expect.stringContaining("fallback startup is already in progress"),
       });
       expect(spawnRunner).not.toHaveBeenCalled();
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  it("recovers a dead-owner startup lock only with explicit owner intent", async () => {
+    const sandbox = mkdtempSync(join(tmpdir(), "roll-fallback-"));
+    const lock = join(sandbox, ".roll", "loop", "process-fallback-start-project-abc123");
+    const fake = fakeFallbackChild(4122);
+    const scheduler = new ProcessFallbackScheduler({ spawnRunner: () => fake.child, pidAlive: () => false });
+    mkdirSync(lock, { recursive: true });
+    writeFileSync(join(lock, "owner.pid"), "99999\n", "utf8");
+
+    try {
+      await expect(scheduler.start(fallbackConfig(sandbox), {
+        ownerConfirmed: true,
+        recoverStaleStartLock: true,
+      })).resolves.toMatchObject({ started: true, pid: 4122 });
     } finally {
       rmSync(sandbox, { recursive: true, force: true });
     }

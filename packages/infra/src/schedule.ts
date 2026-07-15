@@ -66,7 +66,7 @@ import {
   type FallbackRunnerConfig,
 } from "@roll/core";
 import type { FallbackHealth } from "@roll/spec";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -680,6 +680,8 @@ export interface ProcessFallbackChild {
 /** The explicit owner decision required before a process fallback may start. */
 export interface ProcessFallbackIntent {
   ownerConfirmed?: boolean;
+  /** Explicitly reclaim a startup lock only after its recorded owner PID is dead. */
+  recoverStaleStartLock?: boolean;
 }
 
 /** Injectable process seams; production uses a detached Node child. */
@@ -700,8 +702,9 @@ export interface ProcessFallbackStartResult {
   pid?: number;
 }
 
-function fallbackRunnerScriptPath(config: FallbackRunnerConfig): string {
-  return join(fallbackRuntimeDir(config.projectPath), `process-fallback-${config.slug}.mjs`);
+function fallbackRunnerScriptPath(config: FallbackRunnerConfig, runnerToken?: string): string {
+  const suffix = runnerToken === undefined ? "" : `-${runnerToken}`;
+  return join(fallbackRuntimeDir(config.projectPath), `process-fallback-${config.slug}${suffix}.mjs`);
 }
 
 function fallbackStartLockPath(config: FallbackRunnerConfig): string {
@@ -843,6 +846,7 @@ export class ProcessFallbackScheduler {
   private readonly pidAlive: (pid: number) => boolean;
   private readonly heartbeatTimeoutSec: number | undefined;
   private readonly children = new Map<string, ProcessFallbackChild>();
+  private readonly scriptPaths = new Map<string, string>();
   private readonly stopRequested = new Set<string>();
 
   constructor(deps: ProcessFallbackSchedulerDeps = {}) {
@@ -865,8 +869,15 @@ export class ProcessFallbackScheduler {
     }
 
     const startLock = fallbackStartLockPath(config);
-    if (!this.acquireStartLock(startLock)) {
-      return { started: false, reason: "fallback startup is already in progress" };
+    let startLockAcquired = this.acquireStartLock(startLock);
+    if (!startLockAcquired && intent.recoverStaleStartLock === true) {
+      startLockAcquired = this.recoverStaleStartLock(startLock) && this.acquireStartLock(startLock);
+    }
+    if (!startLockAcquired) {
+      return {
+        started: false,
+        reason: "fallback startup is already in progress; use explicit stale-lock recovery only after the owner has exited",
+      };
     }
 
     try {
@@ -892,9 +903,9 @@ export class ProcessFallbackScheduler {
         }
       }
 
-      const scriptPath = fallbackRunnerScriptPath(config);
-      mkdirSync(fallbackRuntimeDir(config.projectPath), { recursive: true });
       const runnerToken = randomUUID();
+      const scriptPath = fallbackRunnerScriptPath(config, runnerToken);
+      mkdirSync(fallbackRuntimeDir(config.projectPath), { recursive: true });
       writeFileSync(scriptPath, fallbackRunnerScript({ ...config, runnerToken }), "utf8");
 
       let child: ProcessFallbackChild;
@@ -931,6 +942,7 @@ export class ProcessFallbackScheduler {
         // entry, but this closes the spawn-to-first-tick race for a concurrent start.
         writeFileSync(heartbeatPath, `${this.now()}\n`, "utf8");
         this.children.set(leaseDir, child);
+        this.scriptPaths.set(leaseDir, scriptPath);
         this.stopRequested.delete(leaseDir);
         child.once("exit", () => this.cleanup(leaseDir, child.pid, scriptPath, heartbeatPath));
         child.unref?.();
@@ -974,7 +986,7 @@ export class ProcessFallbackScheduler {
       this.cleanup(
         leaseDir,
         child.pid,
-        fallbackRunnerScriptPath(config),
+        this.scriptPaths.get(leaseDir) ?? fallbackRunnerScriptPath(config),
         fallbackHeartbeatPath(config.projectPath, config.slug),
       );
     }
@@ -1012,6 +1024,28 @@ export class ProcessFallbackScheduler {
     }
   }
 
+  /** Atomically claim a dead-owner lock by unlinking its ownership file first. */
+  private recoverStaleStartLock(lockPath: string): boolean {
+    const ownerPath = join(lockPath, "owner.pid");
+    let ownerPid: number;
+    try {
+      ownerPid = Number(readFileSync(ownerPath, "utf8").trim());
+    } catch {
+      return false;
+    }
+    if (!Number.isInteger(ownerPid) || ownerPid <= 0 || this.pidAlive(ownerPid)) return false;
+
+    try {
+      // Exactly one recovery contender can unlink this file. Other contenders
+      // observe ENOENT and leave the replacement lock untouched.
+      unlinkSync(ownerPath);
+      rmdirSync(lockPath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private cleanup(leaseDir: string, pid: number | undefined, scriptPath: string, heartbeatPath: string): void {
     const lease = readFallbackLease(leaseDir);
     if (lease?.pid !== pid) return;
@@ -1019,6 +1053,7 @@ export class ProcessFallbackScheduler {
     rmSync(scriptPath, { force: true });
     rmSync(heartbeatPath, { force: true });
     this.children.delete(leaseDir);
+    this.scriptPaths.delete(leaseDir);
     this.stopRequested.delete(leaseDir);
   }
 }

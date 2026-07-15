@@ -17,7 +17,9 @@ import { join } from "node:path";
 import {
   authorizeOrigin,
   authorizePerformanceProfile,
+  BrowserOperationLedger,
   BrowserOperationRunService,
+  DevToolsProtocolError,
   degradedPerformanceSummary,
   policyFingerprint,
   resolveDeviceProfile,
@@ -36,6 +38,7 @@ import type {
   PerformanceDiagnosticSummary,
   PerformanceProfile,
 } from "@roll/spec";
+import { McpCdpTransportFactory, type McpBrowserSessionFactory } from "./mcp-session.js";
 
 // ── Public types ─────────────────────────────────────────────────────────────
 
@@ -72,7 +75,21 @@ export interface AdapterFs {
 /** Injectable dependencies for {@link ManagedChromeAdapter}. */
 export interface ManagedChromeAdapterDeps {
   launcher: ChromeLauncher;
-  transportFactory: CdpTransportFactory;
+  /**
+   * MCP transport factory for production managed runs (US-BROW-016).
+   *
+   * Exactly one of {@link mcpSessionFactory} or {@link transportFactory} must be
+   * supplied. Production wiring uses the MCP factory; the CDP factory remains
+   * available only as a test-injection seam.
+   */
+  mcpSessionFactory?: McpBrowserSessionFactory;
+  /**
+   * Raw CDP transport factory — test-injection seam only.
+   *
+   * Fake CDP sessions are permissible in tests, but no CLI/runtime wiring may
+   * reach the raw WebSocket/CDP adapter.
+   */
+  transportFactory?: CdpTransportFactory;
   fs: AdapterFs;
   now: () => string;
   randomId: () => string;
@@ -156,126 +173,6 @@ function defaultChromeExecutable(): string {
   return "google-chrome";
 }
 
-/** Minimal CDP message envelope. */
-interface CdpRequest {
-  id: number;
-  method: string;
-  params?: Record<string, unknown>;
-}
-
-interface CdpResponse {
-  id?: number;
-  result?: unknown;
-  error?: { code: number; message: string };
-  method?: string;
-  params?: unknown;
-}
-
-/** CDP session backed by the Node.js global WebSocket (Node >=22). */
-class WebSocketCdpSession implements CdpSession {
-  private ws: WebSocketLike;
-  private nextId = 1;
-  private pending = new Map<number, { resolve: (value: unknown) => void; reject: (reason: Error) => void }>();
-
-  constructor(ws: WebSocketLike) {
-    this.ws = ws;
-    ws.addEventListener("message", (event) => this.onMessage(event));
-    ws.addEventListener("error", (event) => this.onError(event));
-  }
-
-  send(method: string, params?: Record<string, unknown>): Promise<unknown> {
-    return new Promise((resolve, reject) => {
-      const id = this.nextId++;
-      const request: CdpRequest = { id, method, params };
-      this.pending.set(id, { resolve, reject });
-      try {
-        this.ws.send(JSON.stringify(request));
-      } catch (cause) {
-        this.pending.delete(id);
-        reject(cause instanceof Error ? cause : new Error(String(cause)));
-      }
-    });
-  }
-
-  close(): Promise<void> {
-    return new Promise((resolve) => {
-      this.ws.close();
-      resolve();
-    });
-  }
-
-  private onMessage(event: { data?: unknown }): void {
-    let message: CdpResponse;
-    try {
-      const text = typeof event.data === "string" ? event.data : String(event.data ?? "");
-      message = JSON.parse(text) as CdpResponse;
-    } catch {
-      return;
-    }
-    if (typeof message.id === "number") {
-      const pending = this.pending.get(message.id);
-      this.pending.delete(message.id);
-      if (pending === undefined) return;
-      if (message.error !== undefined) {
-        pending.reject(new Error(`${message.error.code}: ${message.error.message}`));
-      } else {
-        pending.resolve(message.result);
-      }
-    }
-  }
-
-  private onError(event: unknown): void {
-    const message = event instanceof Error ? event.message : "WebSocket error";
-    for (const [, pending] of this.pending) {
-      pending.reject(new Error(message));
-    }
-    this.pending.clear();
-  }
-}
-
-interface WebSocketLike {
-  send(data: string): void;
-  close(): void;
-  addEventListener(type: "open" | "message" | "error" | "close", listener: (event: { data?: unknown }) => void): void;
-}
-
-/** Default CDP transport: fetches the debugger URL, then opens a WebSocket. */
-export class WebSocketCdpTransportFactory implements CdpTransportFactory {
-  async create(endpoint: { host: string; port: number }): Promise<CdpSession> {
-    const versionUrl = `http://${endpoint.host}:${endpoint.port}/json/version`;
-    const res = await fetch(versionUrl, { signal: AbortSignal.timeout(5_000) });
-    if (!res.ok) {
-      throw new Error(`CDP version endpoint returned ${res.status}`);
-    }
-    const body = (await res.json()) as Partial<{ webSocketDebuggerUrl?: string }>;
-    const wsUrl = body.webSocketDebuggerUrl;
-    if (typeof wsUrl !== "string") {
-      throw new Error("CDP version response missing webSocketDebuggerUrl");
-    }
-    const ws = await openWebSocket(wsUrl);
-    return new WebSocketCdpSession(ws);
-  }
-}
-
-async function openWebSocket(url: string): Promise<WebSocketLike> {
-  const WS = (globalThis as Record<string, unknown>)["WebSocket"];
-  if (WS === undefined || typeof WS !== "function") {
-    throw new Error("WebSocket is not available in this runtime");
-  }
-  const ws = new (WS as new (url: string) => WebSocketLike)(url);
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("WebSocket connect timeout")), 5_000);
-    ws.addEventListener("open", () => {
-      clearTimeout(timer);
-      resolve(ws);
-    });
-    ws.addEventListener("error", (event) => {
-      clearTimeout(timer);
-      reject(new Error(`WebSocket error: ${String(event)}`));
-    });
-  });
-}
-
 // ── Adapter ──────────────────────────────────────────────────────────────────
 
 /** Error thrown when the final origin is not in the allowlist. */
@@ -289,13 +186,21 @@ class OriginDenialError extends Error {
 export function defaultManagedChromeAdapterDeps(diagnosticsDir: string): ManagedChromeAdapterDeps {
   return {
     launcher: new SystemChromeLauncher(),
-    transportFactory: new WebSocketCdpTransportFactory(),
+    mcpSessionFactory: new McpCdpTransportFactory({
+      emit: defaultMcpEventEmitter(),
+    }),
     fs: nodeAdapterFs(),
     now: () => new Date().toISOString(),
     randomId: () => randomUUID(),
     remoteDebuggingHost: "127.0.0.1",
     diagnosticsDir,
   };
+}
+
+function defaultMcpEventEmitter(): (event: import("./mcp-session.js").McpBrowserSessionEvent) => void {
+  const ledger = new BrowserOperationLedger();
+  const path = join(process.cwd(), ".roll", "browser-operations", "events.ndjson");
+  return (event) => ledger.recordBrowserEvent(path, event);
 }
 
 function nodeAdapterFs(): AdapterFs {
@@ -349,11 +254,7 @@ export class ManagedChromeAdapter {
       const remoteDebuggingPort = await this.allocateDebugPort();
       chrome = await this.deps.launcher.launch({ profileDir, remoteDebuggingPort });
 
-      cdp = await this.withTimeout(
-        this.deps.transportFactory.create({ host: this.deps.remoteDebuggingHost, port: remoteDebuggingPort }),
-        timeoutMs,
-        "CDP connect",
-      );
+      cdp = await this.withTimeout(this.createSession(service.run.runId), timeoutMs, "DevTools session");
 
       // Enable the domains the typed actions need.
       await cdp.send("Runtime.enable");
@@ -646,6 +547,18 @@ export class ManagedChromeAdapter {
     // multiple managed runs exist in the same cycle.
     return 10_000 + Math.floor(Math.random() * 45_000);
   }
+
+  private createSession(runId: string): Promise<CdpSession> {
+    if (this.deps.mcpSessionFactory !== undefined) {
+      return this.deps.mcpSessionFactory.create(runId);
+    }
+    if (this.deps.transportFactory !== undefined) {
+      // Test-injection seam only: fake CDP sessions are permitted in tests but
+      // must never be wired from CLI/runtime code.
+      return this.deps.transportFactory.create({ host: this.deps.remoteDebuggingHost, port: 0 });
+    }
+    throw new DevToolsError("No DevTools session factory configured");
+  }
 }
 
 // ── Errors ───────────────────────────────────────────────────────────────────
@@ -670,6 +583,9 @@ function diagnosticFailureFromError(error: unknown, now: () => string): Diagnost
   }
   if (error instanceof OriginDenialError) {
     return { category: "devtools-error", message: `${error.reason.code}: ${error.reason.message}`, at: now() };
+  }
+  if (error instanceof DevToolsProtocolError) {
+    return { category: "devtools-error", message: `${error.code}: ${error.message}`, at: now() };
   }
   if (error instanceof DevToolsError || error instanceof Error) {
     return { category: "devtools-error", message: error.message, at: now() };

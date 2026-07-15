@@ -16,5 +16,6 @@ export * from "./playwright-pin.js";
 export * from "./browser-operations/devtools-transport.js";
 export * from "./browser-operations/environment-probe.js";
 export * from "./browser-operations/managed-chrome-adapter.js";
+export * from "./browser-operations/mcp-session.js";
 export * from "./browser-operations/managed-fixture.js";
 export * from "./browser-operations/interactive-chrome-adapter.js";

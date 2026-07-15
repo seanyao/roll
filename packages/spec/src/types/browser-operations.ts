@@ -367,6 +367,10 @@ export type BrowserOperationEvent =
   | { type: "browser:diagnostic-dropped"; runId: string; ts: string; failure: "redaction_failed" }
   | { type: "browser:operation-finished"; runId: string; ts: string; result: BrowserActionResult }
   | { type: "browser:mcp-bypass-denied"; ts: string; reason: BrowserDenialReason }
+  | { type: "browser:mcp-started"; runId: string; ts: string }
+  | { type: "browser:mcp-initialized"; runId: string; ts: string; version: string; tools: readonly string[] }
+  | { type: "browser:mcp-closed"; runId: string; ts: string }
+  | { type: "browser:mcp-failed"; runId: string; ts: string; category: BrowserMcpFailureCategory; message: string }
   | {
       type: "browser:environment-checked";
       ts: string;
@@ -374,6 +378,8 @@ export type BrowserOperationEvent =
       interactive: BrowserLaneVerdict;
       capture: BrowserLaneVerdict;
     };
+
+export type BrowserMcpFailureCategory = "timeout" | "crash" | "devtools-error";
 
 // ── US-BROW-010 — transport version check and atomic update ──────────────────
 

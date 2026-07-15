@@ -131,7 +131,7 @@ describe("FIX-313 — downstream agent presentation uses AgentSpec", () => {
     expect(fmtModel("deepseek-v4-pro")).toBe("deepseek-v4-pro");
   });
 
-  it("cycle rows fall back to the registered agent default model", () => {
+  it("cycle rows render an honest dash when the ledger model is missing (FIX-1262: no source-baked default)", () => {
     const row = cycleRow({
       outcome: "done",
       start_hhmm: "10:00",
@@ -142,7 +142,11 @@ describe("FIX-313 — downstream agent presentation uses AgentSpec", () => {
       story: "FIX-313",
       agent: "kimi",
     });
-    expect(row.join("\n")).toContain("kimi-k2");
+    // FIX-313 used to backfill specs.ts agentDefaultModel here; FIX-1262 removed
+    // that config-in-source fallback — a missing ledger model must show as "—",
+    // never a fabricated model name.
+    expect(row.join("\n")).not.toContain("kimi-k2");
+    expect(row.join("\n")).toContain("—");
   });
 
   it("cycle rows surface the tool summary without changing the native cost currency", () => {

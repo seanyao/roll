@@ -64,6 +64,8 @@ export * from "./observe/collab-view.js";
 export * from "./loop/morning-report.js";
 export * from "./loop/north-star.js";
 export * from "./loop/orchestrator.js";
+export * from "./loop/process-fallback.js";
+export * from "./loop/process-fallback-runner.js";
 export * from "./loop/builder-finalization.js";
 export * from "./loop/recovery.js";
 export * from "./loop/review-resize.js";

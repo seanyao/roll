@@ -154,6 +154,90 @@ intact on failure:
 roll browser update --apply --confirm
 ```
 
+## Optional diagnostic profiles
+
+The managed lane ships two **optional, opt-in** diagnostic profiles: a
+performance profile and a small set of device-emulation profiles. Both run only
+inside the managed isolated lane, and both produce **diagnostic-only** material.
+
+Read the boundary before adopting them:
+
+- They are **opt-in**. Nothing collects a profile unless you explicitly select
+  one on the command line; the baseline managed operation is unchanged when no
+  profile is requested.
+- Their output is **diagnostic-only**, never visual acceptance evidence and
+  never a multi-browser test matrix. A profile summary proves a local diagnostic
+  ran; it does not satisfy a story's visual AC. Use
+  [Roll Capture](acceptance-evidence.md) for visual acceptance.
+- They **minimize data** and send nothing off the machine.
+
+### Performance profile (opt-in)
+
+`--perf-profile web-vitals-lite` collects a bounded, redacted set of local
+DevTools performance counters (documents, frames, layout/style counts and
+durations, script/task durations, JS heap size — a fixed allowlist of numeric
+metrics). It is disabled unless you select it, and selecting it is what flips the
+lane's performance-diagnostics policy on.
+
+```bash
+roll browser run --action navigate --perf-profile web-vitals-lite
+```
+
+```
+  perf profile / 性能诊断: web-vitals-lite (opt-in, diagnostic-only / 需选启，仅诊断)
+    metrics / 指标 (12, bounded & redacted / 有界脱敏):
+      - LayoutCount: 3
+      - ScriptDuration: 0.021
+      ...
+```
+
+Data-minimization and scope guarantees:
+
+- **Only numeric metric names in the profile allowlist survive.** No URL,
+  resource name, or trace is ever retained, so the profile cannot become an
+  analytics or evidence channel.
+- **No external telemetry.** Nothing is uploaded to CrUX, Lighthouse, or any
+  other service. Adding an external upload would require a separately designed,
+  consent-gated policy contract.
+- **Graceful degradation.** If collection fails, the run reports
+  `degraded — no signal collected` and the underlying action verdict is
+  unchanged. `--perf-fail` simulates this so you can see it:
+
+```bash
+roll browser run --action navigate --perf-profile web-vitals-lite --perf-fail
+# perf profile: web-vitals-lite → degraded — no signal collected (action verdict unchanged)
+```
+
+An unknown profile name is denied fail-fast, not silently ignored.
+
+### Device-emulation profiles (opt-in)
+
+`--profile <name>` runs the managed operation under a named Chrome
+device/viewport profile. The allowlist is finite — callers cannot submit
+arbitrary DevTools emulation parameters:
+
+| Profile | Viewport | Scale | Mobile |
+|---------|----------|-------|--------|
+| `Pixel 7` | 412 × 915 | 2.625 | yes |
+| `iPhone 14` | 390 × 844 | 3 | yes |
+| `iPad Pro` | 1024 × 1366 | 2 | no |
+
+```bash
+roll browser run --action screenshot --profile "iPhone 14"
+# device profile / 设备仿真: iPhone 14
+```
+
+Scope guarantees:
+
+- **Finite allowlist only.** An unknown profile name is denied fail-fast; there
+  is no way to pass raw emulation parameters through it.
+- **This is Chrome DevTools emulation, not a multi-browser matrix.** Comparing
+  declared viewport behavior is in scope; a real cross-browser (Playwright-style)
+  farm is explicitly out of scope and would need a separately designed proposal.
+- **Security invariants are unchanged.** A device profile does not alter origin
+  policy, temporary-profile cleanup, Capture verdicts, or interactive
+  owner-Chrome behavior.
+
 ## Interactive
 
 The interactive lane lets you run **one low-risk owner-Chrome operation** at a
@@ -246,6 +330,15 @@ never an invented stamp or verdict. Redacted diagnostic artifacts and physical
 capture images are linked only when the viewer is authorized under existing
 dossier rules (local href map); otherwise the label stays visible without a
 link. Stories with no browser facts keep the previous dossier shape unchanged.
+
+**Unknown and degraded states are shown honestly.** When a category has no
+declared timestamp, the timeline renders it as an explicit absence with the
+reason (for example, *lease: unknown — no grant recorded*) rather than inventing
+a stamp or a verdict. A profile that degraded (see
+[Performance profile](#optional-diagnostic-profiles) above) appears as a
+degraded diagnostic, not a pass. If a timeline row looks unexpectedly empty or
+degraded, follow [Troubleshooting](#troubleshooting) below — a degraded managed
+lane is a missing prerequisite, not a broken delivery.
 
 ## Safe recovery
 

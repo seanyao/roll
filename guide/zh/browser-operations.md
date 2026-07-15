@@ -144,6 +144,79 @@ roll browser update --check
 roll browser update --apply --confirm
 ```
 
+## 可选诊断 profile
+
+受管通道提供两个**可选、需显式选启**的诊断 profile：一个性能 profile 和一小组
+设备仿真 profile。两者都只在受管隔离通道内运行，产物都是**仅诊断**材料。
+
+采用前先看清边界：
+
+- **需显式选启**。不在命令行显式选择就不会采集任何 profile；不带 profile 时基础
+  受管操作行为不变。
+- 产物**仅诊断**，既不是视觉验收证据，也不是多浏览器测试矩阵。profile 摘要只能
+  证明本地诊断跑过，不满足故事的视觉 AC。视觉验收请用
+  [Roll Capture](acceptance-evidence.md)。
+- **数据最小化**，不向机器外发送任何内容。
+
+### 性能 profile（需选启）
+
+`--perf-profile web-vitals-lite` 采集一组有界、脱敏的本地 DevTools 性能计数器
+（documents、frames、layout/style 的计数与耗时、script/task 耗时、JS 堆大小——
+一份固定的数值指标白名单）。不选就不启用，而“选择”这一动作正是打开本通道
+性能诊断策略的开关。
+
+```bash
+roll browser run --action navigate --perf-profile web-vitals-lite
+```
+
+```
+  perf profile / 性能诊断: web-vitals-lite (opt-in, diagnostic-only / 需选启，仅诊断)
+    metrics / 指标 (12, bounded & redacted / 有界脱敏):
+      - LayoutCount: 3
+      - ScriptDuration: 0.021
+      ...
+```
+
+数据最小化与范围保证：
+
+- **只有白名单内的数值指标名会被保留。** 绝不保留任何 URL、资源名或 trace，因此
+  该 profile 无法变成分析或证据通道。
+- **无外部遥测。** 不向 CrUX、Lighthouse 或任何服务上传。要加外部上传，须另立
+  一份单独设计、经同意授权的策略契约。
+- **优雅降级。** 采集失败时运行报告 `degraded — no signal collected`，底层动作
+  结论不变。`--perf-fail` 可模拟此情况：
+
+```bash
+roll browser run --action navigate --perf-profile web-vitals-lite --perf-fail
+# perf profile: web-vitals-lite → degraded — no signal collected (action verdict unchanged)
+```
+
+未知 profile 名会 fail-fast 拒绝，而非静默忽略。
+
+### 设备仿真 profile（需选启）
+
+`--profile <name>` 用一个命名的 Chrome 设备/视口 profile 运行受管操作。白名单是
+有限的——调用方不能提交任意 DevTools 仿真参数：
+
+| Profile | 视口 | 缩放 | 移动端 |
+|---------|------|------|--------|
+| `Pixel 7` | 412 × 915 | 2.625 | 是 |
+| `iPhone 14` | 390 × 844 | 3 | 是 |
+| `iPad Pro` | 1024 × 1366 | 2 | 否 |
+
+```bash
+roll browser run --action screenshot --profile "iPhone 14"
+# device profile / 设备仿真: iPhone 14
+```
+
+范围保证：
+
+- **仅限有限白名单。** 未知 profile 名 fail-fast 拒绝；无法借它传入原始仿真参数。
+- **这是 Chrome DevTools 仿真，不是多浏览器矩阵。** 对比声明的视口行为在范围内；
+  真正的跨浏览器（Playwright 式）farm 明确不在范围，需另立单独设计的提案。
+- **安全不变量不变。** 设备 profile 不改变源策略、临时 profile 清理、Capture
+  结论或交互式 owner-Chrome 行为。
+
 ## 交互通道
 
 交互通道让你对自己 Chrome 中**已经打开的页面**执行单次低风险操作。它用于
@@ -224,6 +297,12 @@ grant/expiry/release，或物理截图结果）时，交付 dossier 的 Executio
 呈现，绝不虚构时间点或结论。脱敏诊断产物与物理截图只有在既有 dossier 授权规则
 （本地 href 映射）允许时才会变为链接；否则只显示标签。没有浏览器事实的故事保持
 原先 dossier 形态不变。
+
+**unknown 与 degraded 状态如实呈现。** 某类别没有已声明时间戳时，时间线把它渲染
+成明确的 absent + 原因（例如 *lease: unknown — no grant recorded*），而不虚构
+时间点或结论。降级的 profile（见上文[性能 profile](#可选诊断-profile)）显示为
+degraded 诊断，而非 pass。若某行时间线意外为空或降级，请按下文[排障](#排障)
+排查——受管通道 degraded 是缺少前置依赖，不是交付坏了。
 
 ## 安全恢复
 

@@ -55,7 +55,7 @@ export interface DevToolsMcpManifest {
  */
 export const MINIMUM_DEVTOOLS_MCP_MANIFEST: DevToolsMcpManifest = {
   version: MANAGED_DEVTOOLS_PACKAGE_VERSION,
-  requiredTools: Object.values(ACTION_TO_TOOL),
+  requiredTools: ["chrome_devtools_call", ...Object.values(ACTION_TO_TOOL)],
 };
 
 /**

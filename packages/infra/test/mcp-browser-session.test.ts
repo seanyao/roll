@@ -7,7 +7,7 @@
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
-import { DevToolsProtocolError, MANAGED_DEVTOOLS_PACKAGE_VERSION } from "@roll/core";
+import { DevToolsProtocolError, MANAGED_DEVTOOLS_PACKAGE_VERSION, MINIMUM_DEVTOOLS_MCP_MANIFEST } from "@roll/core";
 import { describe, expect, it } from "vitest";
 import {
   McpBrowserSession,
@@ -121,7 +121,7 @@ function defaultChild(): FakeMcpChild {
     capabilities: {},
     serverInfo: { name: "chrome-devtools-mcp", version: MANAGED_DEVTOOLS_PACKAGE_VERSION },
   }));
-  child.when("tools/list", () => ({ tools: [{ name: "chrome_devtools_call" }] }));
+  child.when("tools/list", () => ({ tools: MINIMUM_DEVTOOLS_MCP_MANIFEST.requiredTools.map((name) => ({ name })) }));
   return child;
 }
 
@@ -160,7 +160,7 @@ describe("US-BROW-016 McpBrowserSession", () => {
         runId: "run-1",
         ts: now(),
         version: MANAGED_DEVTOOLS_PACKAGE_VERSION,
-        tools: ["chrome_devtools_call"],
+        tools: MINIMUM_DEVTOOLS_MCP_MANIFEST.requiredTools,
       },
     ]);
   });

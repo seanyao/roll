@@ -21,7 +21,9 @@ import {
   BrowserOperationRunService,
   DevToolsProtocolError,
   degradedPerformanceSummary,
+  persistDiagnostic,
   policyFingerprint,
+  redactDiagnostic,
   resolveDeviceProfile,
   summarizePerformanceMetrics,
   type DiagnosticFailure,
@@ -399,32 +401,23 @@ export class ManagedChromeAdapter {
         const selector = stringPayload(payload, "selector");
         const finalUrl = await this.readCurrentUrl(cdp);
         await this.assertOriginAllowed(finalUrl, lanePolicy, "before DOM assertion");
-        const expression = `Array.from(document.querySelectorAll(${JSON.stringify(selector)})).map(n => n.textContent || "")`;
-        const evalResult = (await cdp.send("Runtime.evaluate", { expression, returnByValue: true })) as {
-          result?: { value?: unknown };
-        };
-        const domResults = stringArray(evalResult.result?.value);
-        return actionResult("", "ok", [], `DOM assertion matched ${domResults.length} nodes`);
+        const snapshot = await cdp.send("DOMSnapshot.captureSnapshot", { computedStyles: [], includeDOMRects: false });
+        const ref = await this.writeTextDiagnosticArtifact("dom-snapshot", JSON.stringify({ selector, snapshot }));
+        return actionResult("", "ok", [ref], "DOM snapshot recorded");
       }
       case "console": {
         const finalUrl = await this.readCurrentUrl(cdp);
         await this.assertOriginAllowed(finalUrl, lanePolicy, "before console summary");
-        const expression = `JSON.stringify((window.console && window.console.__rollMessages) || [])`;
-        const evalResult = (await cdp.send("Runtime.evaluate", { expression, returnByValue: true })) as {
-          result?: { value?: unknown };
-        };
-        const messages = stringArray(JSON.parse(stringValue(evalResult.result?.value) || "[]") || []);
-        return actionResult("", "ok", [], `console summary: ${messages.length} messages`);
+        const log = await cdp.send("Log.enable");
+        const ref = await this.writeTextDiagnosticArtifact("console-summary", JSON.stringify({ entries: normalizeConsoleEntries(log) }));
+        return actionResult("", "ok", [ref], "console summary recorded");
       }
       case "network": {
         const finalUrl = await this.readCurrentUrl(cdp);
         await this.assertOriginAllowed(finalUrl, lanePolicy, "before network summary");
-        const expression = `JSON.stringify((window.__rollNetworkRequests) || [])`;
-        const evalResult = (await cdp.send("Runtime.evaluate", { expression, returnByValue: true })) as {
-          result?: { value?: unknown };
-        };
-        const requests = stringArray(JSON.parse(stringValue(evalResult.result?.value) || "[]") || []);
-        return actionResult("", "ok", [], `network summary: ${requests.length} requests`);
+        const network = await cdp.send("Network.enable");
+        const ref = await this.writeTextDiagnosticArtifact("network-summary", JSON.stringify({ entries: normalizeNetworkEntries(network) }));
+        return actionResult("", "ok", [ref], "network summary recorded");
       }
       case "screenshot": {
         const finalUrl = await this.readCurrentUrl(cdp);
@@ -478,6 +471,18 @@ export class ManagedChromeAdapter {
       untrusted: true,
       diagnosticOnly: true,
     };
+  }
+
+  private async writeTextDiagnosticArtifact(kind: DiagnosticArtifactKind, text: string): Promise<DiagnosticArtifactRef> {
+    const artifactId = this.deps.randomId();
+    const persisted = persistDiagnostic({ artifactId, kind, text });
+    if (persisted.kind === "dropped") {
+      throw new DevToolsError(`Diagnostic artifact dropped: ${persisted.failure}`);
+    }
+    const path = join(this.deps.diagnosticsDir, `${artifactId}.bin`);
+    await this.deps.fs.mkdir(this.deps.diagnosticsDir, { recursive: true });
+    await this.deps.fs.writeFile(path, persisted.text, "utf8");
+    return persisted.artifact;
   }
 
   private finalizeFromError(service: BrowserOperationRunService, error: unknown): BrowserOperationRunService {
@@ -595,7 +600,7 @@ function diagnosticFailureFromError(error: unknown, now: () => string): Diagnost
 
 function redactedSummaryFromError(error: unknown): string {
   if (error instanceof OriginDenialError) return `denied: ${error.reason.message}`;
-  if (error instanceof Error) return `failed: ${error.message}`;
+  if (error instanceof Error) return `failed: ${redactDiagnostic(error.message)}`;
   return "failed: unknown error";
 }
 
@@ -626,6 +631,46 @@ function stringValue(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-function stringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+function normalizeConsoleEntries(value: unknown): Array<{ level: string; message: string; source?: string }> {
+  const entries = isRecord(value) && Array.isArray(value["entries"]) ? value["entries"] : [];
+  return entries.slice(0, 50).flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+    const message = typeof entry["text"] === "string" ? entry["text"] : typeof entry["message"] === "string" ? entry["message"] : "";
+    const source = typeof entry["source"] === "string" ? entry["source"] : undefined;
+    return [{
+      level: typeof entry["level"] === "string" ? entry["level"] : "info",
+      message,
+      ...(source === undefined ? {} : { source }),
+    }];
+  });
+}
+
+function normalizeNetworkEntries(value: unknown): Array<{ method: string; origin?: string; status?: number; duration?: number; failure?: string }> {
+  const entries = isRecord(value) && Array.isArray(value["entries"]) ? value["entries"] : [];
+  return entries.slice(0, 50).flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+    const rawUrl = typeof entry["url"] === "string" ? entry["url"] : undefined;
+    const status = typeof entry["status"] === "number" ? entry["status"] : undefined;
+    const duration = typeof entry["duration"] === "number" ? entry["duration"] : undefined;
+    const failure = typeof entry["failure"] === "string" ? entry["failure"] : undefined;
+    return [{
+      method: typeof entry["method"] === "string" ? entry["method"] : "GET",
+      ...(rawUrl === undefined ? {} : { origin: normalizeDiagnosticOrigin(rawUrl) }),
+      ...(status === undefined ? {} : { status }),
+      ...(duration === undefined ? {} : { duration }),
+      ...(failure === undefined ? {} : { failure }),
+    }];
+  });
+}
+
+function normalizeDiagnosticOrigin(value: string): string {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return "invalid";
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

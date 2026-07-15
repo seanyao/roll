@@ -35,7 +35,7 @@ metadata, and delivery truth. The four targets are:
 
 | Metric | Target | Anti-gaming rule | `null` means |
 |--------|--------|------------------|--------------|
-| Autonomy | >=72h autonomous runtime | An effective autonomous day needs at least 6 non-idle attempts; backlog-empty days pause the clock and do not count as missed time. | There is not enough qualifying run history yet, or the backlog was empty for the window. |
+| Autonomy | >=72h autonomous runtime | `current` is the sum of eligible daily hours across the declared 14-day window, not the latest uninterrupted segment. An effective autonomous day needs at least 6 non-idle attempts; backlog-empty days pause the clock and do not count as missed time. | There is not enough qualifying run history yet, or the backlog was empty for the window. |
 | Delivery rate | >=60% | Delivery is counted from merge truth, not self-reported cycle exits. | No eligible delivery denominator exists yet. |
 | Fix tax | <1x | The denominator is US cards only; FIX work is not allowed to improve its own ratio. | There is no US-card denominator in the window. |
 | Attribution errors | =0 | `unknown` is not guessed into env, harness, or card; missing envelopes stay visible. | No attribution sample exists yet. |

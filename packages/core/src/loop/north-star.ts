@@ -73,6 +73,7 @@ export interface NorthStarReport {
 
 export interface AutonomyContext {
   bestHours: number | null;
+  segmentHours: number | null;
   sinceMs: number | null;
   /** True owner/safety disruptions. Owner goal:recovery counts even when denied because the owner intervened. */
   disruptions: number;
@@ -245,6 +246,7 @@ function buildAutonomy(input: BuildNorthStarInput, windowRuns: Array<{ run: Nort
   if (first === undefined || last === undefined || (windowRuns.length === 0 && segmentBoundaries.length === 0)) {
     return noHistoryMetric(target, input.days, {
       bestHours: null,
+      segmentHours: null,
       sinceMs: null,
       disruptions: 0,
       segmentBoundaries: 0,
@@ -296,21 +298,27 @@ function buildAutonomy(input: BuildNorthStarInput, windowRuns: Array<{ run: Nort
     }
     return Math.round(total * 100) / 100;
   };
-  const current = effectiveHoursBetween(latestBoundary, input.nowMs);
+  const segmentHours = effectiveHoursBetween(latestBoundary, input.nowMs);
   const segmentBounds = [first.startMs, ...boundaryTimes.filter((ts) => inWindow(ts, input.days)), Math.min(input.nowMs, last.endMs)];
   let best = 0;
   for (let i = 0; i < segmentBounds.length - 1; i++) {
     best = Math.max(best, effectiveHoursBetween(segmentBounds[i] ?? first.startMs, segmentBounds[i + 1] ?? input.nowMs));
   }
   const daily = input.days.map((d) => {
+    if (!effectiveDays.has(d.key)) {
+      return {
+        day: d.key,
+        value: 0,
+        ...(exemptDays.includes(d.key) ? { exempt: true } : {}),
+      };
+    }
     const latestBeforeDayEnd = boundaryTimes.filter((ts) => ts <= d.endMs).at(-1) ?? first.startMs;
-    const value = effectiveHoursBetween(latestBeforeDayEnd, Math.min(d.endMs, input.nowMs));
-    return {
-      day: d.key,
-      value,
-      ...(exemptDays.includes(d.key) ? { exempt: true } : {}),
-    };
+    const startMs = Math.max(d.startMs, latestBeforeDayEnd);
+    const endMs = Math.min(d.endMs, input.nowMs);
+    const value = endMs > startMs ? effectiveHoursBetween(startMs, endMs) : 0;
+    return { day: d.key, value };
   });
+  const current = Math.round(daily.reduce((sum, d) => sum + d.value, 0) * 100) / 100;
   return {
     current,
     target,
@@ -319,6 +327,7 @@ function buildAutonomy(input: BuildNorthStarInput, windowRuns: Array<{ run: Nort
     met: metricMet(current, target.op, target.value),
     context: {
       bestHours: Math.round(best * 100) / 100,
+      segmentHours,
       sinceMs: latestBoundary,
       disruptions: disruptions.length,
       segmentBoundaries: boundaryTimes.filter((ts) => inWindow(ts, input.days)).length,

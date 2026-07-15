@@ -276,6 +276,48 @@ describe("M1 autonomy", () => {
     expect(report.metrics.autonomy.context.backlogEmptyExemptDays).toContain("2026-07-03");
     expect(report.metrics.autonomy.daily.find((d) => d.day === "2026-07-03")).toMatchObject({ exempt: true, value: 0 });
   });
+
+  it("aggregates autonomy current as the 14-day window sum of per-day eligible hours", () => {
+    const days = shDays("2026-07-03");
+    const runs: NorthStarRun[] = [];
+    // Shanghai day 2026-06-20: UTC 2026-06-19T16:00Z..2026-06-20T16:00Z
+    for (let i = 0; i < 6; i++) runs.push(run(`d20-${i}`, `2026-06-19T${String(17 + i).padStart(2, "0")}:00:00Z`));
+    // Shanghai day 2026-06-21: UTC 2026-06-20T16:00Z..2026-06-21T16:00Z
+    for (let i = 0; i < 6; i++) runs.push(run(`d21-${i}`, `2026-06-20T${String(17 + i).padStart(2, "0")}:00:00Z`));
+    // Shanghai day 2026-06-22: UTC 2026-06-21T16:00Z..2026-06-22T16:00Z
+    for (let i = 0; i < 6; i++) runs.push(run(`d22-${i}`, `2026-06-21T${String(17 + i).padStart(2, "0")}:00:00Z`));
+    // Shanghai day 2026-06-23: UTC 2026-06-22T16:00Z..2026-06-23T16:00Z; stop 1.41h into it
+    for (let i = 0; i < 6; i++) runs.push(run(`d23-${i}`, `2026-06-22T${String(17 + i).padStart(2, "0")}:00:00Z`));
+
+    const nowMs = ms("2026-06-22T17:24:36Z"); // 1.41h after 2026-06-22T16:00Z
+    const report = buildNorthStarReport({
+      nowMs,
+      days,
+      runs,
+      events: [],
+      cards: [],
+      backlog: [{ id: "US-A", status: "Todo" }],
+      deliveries: [],
+    });
+
+    expect(report.metrics.autonomy.current).toBe(73.41);
+    expect(report.metrics.autonomy.met).toBe(true);
+    expect(report.metrics.autonomy.daily.reduce((sum, d) => sum + d.value, 0)).toBeCloseTo(73.41, 2);
+    expect(report.metrics.autonomy.context.segmentHours).toBe(73.41);
+    expect(report.metrics.autonomy.context.bestHours).toBe(73.41);
+    // Invariants from the evaluation contract.
+    expect(report.metrics.autonomy.current).toBeLessThanOrEqual(24 * report.windowDays);
+    const reordered = buildNorthStarReport({
+      nowMs,
+      days,
+      runs: [...runs].sort(() => 0.5 - Math.random()),
+      events: [],
+      cards: [],
+      backlog: [{ id: "US-A", status: "Todo" }],
+      deliveries: [],
+    });
+    expect(reordered.metrics.autonomy.current).toBe(report.metrics.autonomy.current);
+  });
 });
 
 describe("M2/M3/M4 anti-gaming contexts", () => {
@@ -420,10 +462,9 @@ describe("real-history replay for 2026-06-20..2026-07-03", () => {
     //   2026-07-03T15:59:59Z (23:59:59 UTC+8).
     // - M1: 71 true disruption events and 108 deduplicated segment boundaries.
     //   loop:resumed starts a new segment but is not itself a disruption.
-    //   The latest safety pause is on
-    //   2026-07-03, and 2026-07-03 has fewer than six non-idle attempts, so the
-    //   current anti-gaming autonomy counter is 0h. The longest valid segment is
-    //   26.29h.
+    //   The longest valid segment is 26.29h. The 14-day window aggregate of
+    //   eligible per-day autonomy hours is 85.61h (FIX-1265: current is the
+    //   window sum, not the trailing segment).
     // - M2: 304 non-idle runs and 113 delivered/merged/done/published runs,
     //   so delivery rate = 113 / 304 = 0.3717105263157895.
     const report = buildNorthStarReport({
@@ -436,7 +477,7 @@ describe("real-history replay for 2026-06-20..2026-07-03", () => {
       deliveries,
     });
 
-    expect(report.metrics.autonomy.current).toBe(0);
+    expect(report.metrics.autonomy.current).toBe(85.61);
     expect(report.metrics.autonomy.context.bestHours).toBe(26.29);
     expect(report.metrics.autonomy.context.disruptions).toBe(71);
     expect(report.metrics.autonomy.context.segmentBoundaries).toBe(108);

@@ -23,7 +23,7 @@ interface Band {
 }
 
 const BANDS: Band[] = [
-  { key: "control", color: "amber", en: "control", zh: "作动", verbs: "on · off [--all] · now · pause · resume · reset · go · goal · recover" },
+  { key: "control", color: "amber", en: "control", zh: "作动", verbs: "on · off [--all] · now · pause · resume · reset · go · goal · recover · fallback" },
   { key: "observe", color: "green", en: "observe", zh: "传感", verbs: "watch · status · runs · log · events · signals · eval" },
   { key: "alerts", color: "red", en: "alerts", zh: "告警", verbs: "alert list · alert ack · alert resolve · alert log" },
   { key: "maintain", color: "muted", en: "maintain", zh: "维护", verbs: "gc · fmt · mute · unmute · reconcile-pending" },

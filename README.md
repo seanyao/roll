@@ -125,7 +125,9 @@ profiles, evidence, Evaluator, and release gates:
   release gates. `roll loop pause` / `roll loop off` return control to guided
   operation; `roll loop off --all` is the machine-wide emergency stop for every
   local `com.roll.*` LaunchAgent; `roll loop resume` / `roll loop on` switch
-  back explicitly.
+  back explicitly. If macOS launchd bootstrap fails, `roll loop on` exits
+  unarmed and offers `roll loop fallback start --confirm` as an owner-confirmed,
+  non-persistent fallback; repair launchd first when possible.
 - **Attest and evidence are story-scoped**. A Story is accepted through its own Acceptance Review Page (`latest/<id>-review.html`), AC map, and screenshots/test artifacts. `latest/<id>-report.html` remains a legacy alias for one release cycle.
 
 Agent bindings are declared in two files: `~/.roll/agents.yaml` for Machine Scope

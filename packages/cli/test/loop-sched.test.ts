@@ -19,7 +19,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import {
   buildLoopRunnerScript,
   buildLoopTestRunnerScript,
@@ -50,7 +50,7 @@ import {
   type DormantMarkerBody,
 } from "../src/commands/loop-sched.js";
 import { recordRootCauseFailure } from "../src/runner/failure-attribution.js";
-import { ProcessFallbackScheduler, type LaunchctlResult, type ProcessFallbackStartResult } from "@roll/infra";
+import { ProcessFallbackScheduler, type LaunchctlResult, type ProcessFallbackStartResult, type ProcessFallbackChild } from "@roll/infra";
 import { parseGoalYaml, type FallbackHealth } from "@roll/spec";
 
 const dirs: string[] = [];
@@ -1203,6 +1203,10 @@ describe("FIX-204E — tmux path EXECUTION in a sandbox", () => {
 
 describe("FIX-204E — loop now UX branches (injected deps)", () => {
   async function nowWith(hasTmux: boolean, observeSpy: { called: number }): Promise<{ code: number; out: string }> {
+    // FIX-204E hermeticity: a caller may set ROLL_LOOP_NO_TMUX=1 in the outer
+    // environment, but this test asserts the deps-controlled tmux branch.
+    const previousNoTmux = process.env["ROLL_LOOP_NO_TMUX"];
+    process.env["ROLL_LOOP_NO_TMUX"] = "";
     const proj = tmp("nowux");
     const shared = tmp("nowuxsh");
     const { deps } = fakeDeps(proj, shared, tmp("nowuxld"));
@@ -1216,7 +1220,12 @@ describe("FIX-204E — loop now UX branches (injected deps)", () => {
     mkdirSync(join(shared, "loop"), { recursive: true });
     writeFileSync(runner, buildLoopRunnerScript({ projectPath: proj, slug: "proj-abc123", activeStart: 0, activeEnd: 24 }), { mode: 0o755 });
     const { loopNowCommand } = await import("../src/commands/loop-sched.js");
-    return captureStdout(() => loopNowCommand([], deps));
+    try {
+      return await captureStdout(() => loopNowCommand([], deps));
+    } finally {
+      if (previousNoTmux === undefined) delete process.env["ROLL_LOOP_NO_TMUX"];
+      else process.env["ROLL_LOOP_NO_TMUX"] = previousNoTmux;
+    }
   }
 
   it("tmux available: prints the attach hint and observes until the cycle ends", async () => {
@@ -1778,5 +1787,167 @@ describe("US-LOOP-108: real ProcessFallbackScheduler wiring (not cosmetic)", () 
     // The lease is gone after the child "exit" — cleanup ran via kill().
     const afterStop = readFallbackHealthSync(proj, "proj-abc123");
     expect(afterStop.alive).toBe(false);
+  });
+});
+
+// ─── US-LOOP-109: recovery from macOS launchd scheduler failure fault matrix ──
+
+describe("US-LOOP-109: recovery from launchd scheduler failure fault matrix", () => {
+  function project() {
+    const proj = tmp("f109");
+    mkdirSync(join(proj, ".roll"), { recursive: true });
+    writeFileSync(join(proj, ".roll", "local.yaml"), "loop_schedule:\n  period_minutes: 30\n");
+    return proj;
+  }
+
+  function fakeFallbackChild(pid: number) {
+    let onExit: ((code: number | null, signal: NodeJS.Signals | null) => void) | undefined;
+    return {
+      child: {
+        pid,
+        kill: vi.fn(() => true),
+        once: vi.fn((_event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void) => {
+          onExit = listener;
+        }),
+      } as unknown as ProcessFallbackChild,
+      exit: (code = 0, signal: NodeJS.Signals | null = null) => onExit?.(code, signal),
+    };
+  }
+
+  function realFallbackDeps(proj: string, scheduler: ProcessFallbackScheduler): LoopFallbackDeps {
+    return {
+      identity: () => Promise.resolve({ path: proj, slug: "proj-abc123" }),
+      resolveConfig: resolveFallbackConfig,
+      backend: {
+        start: (c, i) => scheduler.start(c, i),
+        stop: (c) => scheduler.stop(c),
+        health: (c) => scheduler.health(c),
+      },
+      launchdArmed: () => Promise.resolve(false),
+    };
+  }
+
+  it("launchd bootstrap failure leaves scheduling unarmed and names the fallback command", async () => {
+    const proj = project();
+    const { deps } = fakeFlakyDeps(proj, tmp("f109sh-fail"), tmp("f109ld-fail"), {
+      "com.roll.loop.proj-abc123": 99,
+    });
+    const previousLang = process.env["ROLL_LANG"];
+    process.env["ROLL_LANG"] = "en";
+    try {
+      const { code, err } = await captureBoth(() => loopOnCommand([], deps));
+      expect(code).toBe(1);
+      expect(err).toContain("scheduler: unarmed");
+      expect(err).toContain("roll loop fallback start --confirm");
+      // No false-active state: a failed bootstrap never writes a fallback lease.
+      expect(existsSync(join(proj, ".roll", "loop", "fallback-lease-proj-abc123"))).toBe(false);
+    } finally {
+      if (previousLang === undefined) delete process.env["ROLL_LANG"];
+      else process.env["ROLL_LANG"] = previousLang;
+    }
+  });
+
+  it("roll loop status reports none — never launchd — after a launchd failure with no fallback", async () => {
+    const proj = project();
+    const deps: LoopFallbackDeps = {
+      identity: () => Promise.resolve({ path: proj, slug: "proj-abc123" }),
+      resolveConfig: resolveFallbackConfig,
+      backend: {
+        start: () => Promise.resolve({ started: false, reason: "not requested" }),
+        stop: () => Promise.resolve(false),
+        health: () =>
+          Promise.resolve({ status: "unknown", reason: "no fallback lease", lease: null, alive: false }),
+      },
+      launchdArmed: () => Promise.resolve(false),
+    };
+    const { code, out } = await captureStdout(() => loopStatusCommand([], deps));
+    expect(code).toBe(0);
+    expect(out).toContain("scheduler backend: none");
+    expect(out).not.toContain("launchd: armed");
+    expect(out).toContain("scheduler: unarmed");
+  });
+
+  it("fallback start requires an explicit --confirm", async () => {
+    const { deps, calls } = fakeFallbackDeps();
+    const { code, err } = await captureBoth(() => loopFallbackCommand(["start"], deps));
+    expect(code).toBe(1);
+    expect(err).toContain("owner confirmation required");
+    expect(calls.some((c) => c.startsWith("start"))).toBe(false);
+  });
+
+  it("owner-confirmed fallback emits a heartbeat tick and reports the live backend", async () => {
+    const proj = tmp("f109-heartbeat");
+    mkdirSync(join(proj, ".roll", "loop"), { recursive: true });
+    const fake = fakeFallbackChild(process.pid);
+    const scheduler = new ProcessFallbackScheduler({ spawnRunner: () => fake.child });
+    const deps = realFallbackDeps(proj, scheduler);
+
+    const { code, out } = await captureStdout(() => loopFallbackCommand(["start", "--confirm"], deps));
+
+    expect(code).toBe(0);
+    expect(out).toContain("Process fallback armed");
+    expect(existsSync(join(proj, ".roll", "loop", "fallback-lease-proj-abc123", "lease.json"))).toBe(true);
+    expect(existsSync(join(proj, ".roll", "loop", "fallback-heartbeat-proj-abc123"))).toBe(true);
+
+    const status = await captureStdout(() => loopStatusCommand([], deps));
+    expect(status.out).toContain("scheduler backend: process-fallback");
+    expect(status.out).not.toContain("launchd: armed");
+  });
+
+  it("stop tears down the runner and prevents further ticks", async () => {
+    const proj = tmp("f109-stop");
+    mkdirSync(join(proj, ".roll", "loop"), { recursive: true });
+    const fake = fakeFallbackChild(process.pid);
+    const scheduler = new ProcessFallbackScheduler({ spawnRunner: () => fake.child });
+    const deps = realFallbackDeps(proj, scheduler);
+
+    const start = await captureStdout(() => loopFallbackCommand(["start", "--confirm"], deps));
+    expect(start.code).toBe(0);
+
+    const stop = await captureStdout(() => loopFallbackCommand(["stop"], deps));
+    expect(stop.code).toBe(0);
+
+    // Simulate the runner process exiting after SIGTERM.
+    fake.exit(0, null);
+
+    const leaseFile = join(proj, ".roll", "loop", "fallback-lease-proj-abc123", "lease.json");
+    expect(existsSync(leaseFile)).toBe(false);
+
+    const status = await captureStdout(() => loopStatusCommand([], deps));
+    expect(status.out).toContain("scheduler backend: none");
+  });
+
+  it("stale lease recovery reclaims a dead PID and blocks duplicate starts", async () => {
+    const proj = tmp("f109-stale");
+    mkdirSync(join(proj, ".roll", "loop"), { recursive: true });
+    const fresh = fakeFallbackChild(process.pid);
+    const spawnRunner = vi.fn().mockReturnValue(fresh.child);
+    const scheduler = new ProcessFallbackScheduler({ spawnRunner, pidAlive: (pid) => pid === process.pid });
+    const deps = realFallbackDeps(proj, scheduler);
+
+    // Simulate a leftover lease from a crashed runner whose PID is no longer alive.
+    const leaseDir = join(proj, ".roll", "loop", "fallback-lease-proj-abc123");
+    mkdirSync(leaseDir, { recursive: true });
+    writeFileSync(
+      join(leaseDir, "lease.json"),
+      JSON.stringify({
+        pid: 99999,
+        commandDigest: "deadbeef",
+        ownerConfirmedAt: "2026-07-15T10:00:00Z",
+        startedAt: "2026-07-15T10:00:00Z",
+        heartbeatAt: "2026-07-15T10:00:03Z",
+        runnerToken: "stale-token",
+      }),
+    );
+
+    const first = await captureStdout(() => loopFallbackCommand(["start", "--confirm"], deps));
+    expect(first.code).toBe(0);
+    expect(spawnRunner).toHaveBeenCalledTimes(1);
+
+    // A second owner-confirmed start while the fresh runner holds the lease is refused.
+    const second = await captureBoth(() => loopFallbackCommand(["start", "--confirm"], deps));
+    expect(second.code).not.toBe(0);
+    expect(second.err).toContain("still alive");
+    expect(spawnRunner).toHaveBeenCalledTimes(1);
   });
 });

@@ -557,6 +557,46 @@ roll loop reset
 更细的操作话题（pause/resume、切换 agent、gh scope 等）见
 [loop.md](loop.md) 和 [configuration.md](configuration.md)。
 
+### C5b. `roll loop on` 报 launchd bootstrap 错误怎么办？
+
+**简答：** 此时排程未激活。优先修复 launchd；实在修不好再使用 owner
+明示确认的进程 fallback。
+
+**原因：** macOS launchd 有时会以 `Bootstrap failed: 5: Input/output error`
+（或类似域错误）拒绝 bootstrap。Roll 会重试一次、用 `launchctl print`
+验证挂载，若仍失败就以非零码退出，不会假装调度器已启用。
+
+**先修 launchd：**
+
+```bash
+UID=$(id -u)
+LABEL=$(launchctl list | awk '$3 ~ /^com\.roll\.loop\./ {print $3; exit}')
+# 如果 launchctl list 没有输出，请使用错误信息里的精确 label。
+launchctl bootout gui/$UID/$LABEL
+launchctl bootstrap gui/$UID ~/Library/LaunchAgents/$LABEL.plist
+launchctl print gui/$UID/$LABEL
+roll loop on
+roll loop status
+```
+
+**如果 launchd 无法修复：**
+
+```bash
+roll loop fallback start --confirm
+roll loop fallback status
+```
+
+fallback 不是 launchd 的等价替代，不会跨过重启/登出。重启或重新登录后
+必须重新确认：
+
+```bash
+roll loop fallback stop
+roll loop fallback start --confirm
+```
+
+脱敏、无需 root 的现场验证流程见
+[从 launchd bootstrap 失败中恢复](loop.md#从-launchd-bootstrap-失败中恢复)。
+
 ### C7. 改了 loop_schedule 但 loop 还是按旧频次跑
 
 **症状：** 更新了 `.roll/local.yaml` 的 `loop_schedule`，但 `roll loop status`

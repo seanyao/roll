@@ -588,8 +588,10 @@ describe("ProcessFallbackScheduler (US-LOOP-107b)", () => {
       const [command, args] = spawnRunner.mock.calls[0] ?? [];
       expect(command).toBe(process.execPath);
       expect(args).toHaveLength(1);
-      expect(readFileSync(args[0] as string, "utf8")).toContain("runFallbackLoop");
-      expect(readFileSync(args[0] as string, "utf8")).not.toContain("agent");
+      const script = readFileSync(args[0] as string, "utf8");
+      expect(script).toContain('["loop", "run-once"]');
+      expect(script).toContain("ownsLease");
+      expect(script).not.toContain("agent");
     } finally {
       rmSync(sandbox, { recursive: true, force: true });
     }
@@ -647,6 +649,43 @@ describe("ProcessFallbackScheduler (US-LOOP-107b)", () => {
       await expect(liveScheduler.start(config, { ownerConfirmed: true })).resolves.toMatchObject({ started: true, pid: 4128 });
       await expect(staleScheduler.start(config, { ownerConfirmed: true })).resolves.toMatchObject({ started: false });
       expect(spawnRunner).toHaveBeenCalledTimes(2);
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses stale metadata when its runner PID is still alive", async () => {
+    const sandbox = mkdtempSync(join(tmpdir(), "roll-fallback-"));
+    const firstConfig = fallbackConfig(sandbox);
+    const changedConfig = { ...firstConfig, periodMinutes: 30 };
+    const first = fakeFallbackChild(4129);
+    const spawnRunner = vi.fn(() => first.child);
+    const scheduler = new ProcessFallbackScheduler({ spawnRunner, pidAlive: () => true });
+
+    try {
+      await scheduler.start(firstConfig, { ownerConfirmed: true });
+      await expect(scheduler.start(changedConfig, { ownerConfirmed: true })).resolves.toMatchObject({
+        started: false,
+        reason: expect.stringContaining("still alive"),
+      });
+      expect(spawnRunner).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  it("a later scheduler instance stops an identity-validated persisted runner", async () => {
+    const sandbox = mkdtempSync(join(tmpdir(), "roll-fallback-"));
+    const config = fallbackConfig(sandbox);
+    const fake = fakeFallbackChild(4130);
+    const killPid = vi.fn(() => undefined);
+    const starter = new ProcessFallbackScheduler({ spawnRunner: () => fake.child, pidAlive: () => true });
+    const stopper = new ProcessFallbackScheduler({ pidAlive: () => true, killPid });
+
+    try {
+      await starter.start(config, { ownerConfirmed: true });
+      await expect(stopper.stop(config)).resolves.toBe(true);
+      expect(killPid).toHaveBeenCalledWith(4130, "SIGTERM");
     } finally {
       rmSync(sandbox, { recursive: true, force: true });
     }

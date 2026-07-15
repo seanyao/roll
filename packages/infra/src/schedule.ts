@@ -53,7 +53,6 @@
  */
 import { execFile, spawn } from "node:child_process";
 import {
-  buildFallbackRunnerScript,
   claimFallbackLeaseDir,
   computeFallbackCommandDigest,
   evaluateFallbackLiveness,
@@ -67,7 +66,7 @@ import {
   type FallbackRunnerConfig,
 } from "@roll/core";
 import type { FallbackHealth } from "@roll/spec";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
@@ -691,6 +690,7 @@ export interface ProcessFallbackSchedulerDeps {
   ) => ProcessFallbackChild;
   now?: () => number;
   pidAlive?: (pid: number) => boolean;
+  killPid?: (pid: number, signal: NodeJS.Signals) => void;
   heartbeatTimeoutSec?: number;
 }
 
@@ -702,6 +702,92 @@ export interface ProcessFallbackStartResult {
 
 function fallbackRunnerScriptPath(config: FallbackRunnerConfig): string {
   return join(fallbackRuntimeDir(config.projectPath), `process-fallback-${config.slug}.mjs`);
+}
+
+function fallbackStartLockPath(config: FallbackRunnerConfig): string {
+  return join(fallbackRuntimeDir(config.projectPath), `process-fallback-start-${config.slug}`);
+}
+
+/** A self-contained script: consumer projects cannot resolve Roll workspace packages. */
+function fallbackRunnerScript(config: FallbackRunnerConfig): string {
+  const payload = JSON.stringify(config, null, 2);
+  return `#!/usr/bin/env node
+import { spawn } from "node:child_process";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+const config = ${payload};
+const runtimeDir = join(config.projectPath, ".roll", "loop");
+const heartbeatPath = join(runtimeDir, "fallback-heartbeat-" + config.slug);
+const leaseDir = join(runtimeDir, "fallback-lease-" + config.slug);
+const leasePath = join(leaseDir, "lease.json");
+const runOnceArgs = ["loop", "run-once"];
+let stopping = false;
+let active;
+
+function heartbeat() {
+  mkdirSync(runtimeDir, { recursive: true });
+  writeFileSync(heartbeatPath, Math.floor(Date.now() / 1000) + "\\n", "utf8");
+}
+
+function cleanup() {
+  try {
+    const lease = JSON.parse(readFileSync(leasePath, "utf8"));
+    if (lease.pid === process.pid) rmSync(leaseDir, { recursive: true, force: true });
+  } catch {}
+  rmSync(heartbeatPath, { force: true });
+  rmSync(process.argv[1] ?? "", { force: true });
+}
+
+function stop() {
+  if (stopping) return;
+  stopping = true;
+  if (active !== undefined) active.kill("SIGTERM");
+}
+
+for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(signal, stop);
+
+function runOnce() {
+  return new Promise((resolve) => {
+    active = spawn(config.rollBin, runOnceArgs, { cwd: config.projectPath, stdio: "ignore" });
+    active.once("error", resolve);
+    active.once("exit", resolve);
+  });
+}
+
+async function ownsLease() {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      if (JSON.parse(readFileSync(leasePath, "utf8")).pid === process.pid) return true;
+    } catch {}
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return false;
+}
+
+async function main() {
+  if (!(await ownsLease())) return;
+  heartbeat();
+  const heartbeatMs = Math.max(1, config.heartbeatIntervalSec ?? 60) * 1000;
+  const heartbeatTimer = setInterval(heartbeat, heartbeatMs);
+  try {
+    while (!stopping) {
+      await runOnce();
+      active = undefined;
+      if (stopping) break;
+      await new Promise((resolve) => setTimeout(resolve, Math.max(1, config.periodMinutes) * 60 * 1000));
+    }
+  } finally {
+    clearInterval(heartbeatTimer);
+    cleanup();
+  }
+}
+
+void main().catch(() => {
+  cleanup();
+  process.exitCode = 1;
+});
+`;
 }
 
 function defaultFallbackSpawn(
@@ -721,6 +807,7 @@ export class ProcessFallbackScheduler {
   private readonly spawnRunner: NonNullable<ProcessFallbackSchedulerDeps["spawnRunner"]>;
   private readonly now: () => number;
   private readonly pidAlive: (pid: number) => boolean;
+  private readonly killPid: (pid: number, signal: NodeJS.Signals) => void;
   private readonly heartbeatTimeoutSec: number | undefined;
   private readonly children = new Map<string, ProcessFallbackChild>();
   private readonly stopRequested = new Set<string>();
@@ -729,6 +816,7 @@ export class ProcessFallbackScheduler {
     this.spawnRunner = deps.spawnRunner ?? defaultFallbackSpawn;
     this.now = deps.now ?? (() => Math.floor(Date.now() / 1000));
     this.pidAlive = deps.pidAlive ?? systemPidAlive;
+    this.killPid = deps.killPid ?? ((pid, signal) => process.kill(pid, signal));
     this.heartbeatTimeoutSec = deps.heartbeatTimeoutSec;
   }
 
@@ -744,75 +832,98 @@ export class ProcessFallbackScheduler {
       return { started: false, reason: "owner confirmation is required" };
     }
 
-    const leaseDir = fallbackLeasePath(config.projectPath, config.slug);
-    const digest = computeFallbackCommandDigest(config);
-    let claim = claimFallbackLeaseDir(leaseDir);
-
-    if (!claim.claimed) {
-      const health = evaluateFallbackLiveness({
-        lease: claim.existingLease,
-        heartbeatPath: join(fallbackRuntimeDir(config.projectPath), `fallback-heartbeat-${config.slug}`),
-        expectedDigest: digest,
-        now: this.now,
-        pidAlive: this.pidAlive,
-        heartbeatTimeoutSec: this.heartbeatTimeoutSec,
-      });
-      if (health.alive) {
-        return { started: false, reason: `fallback already armed (${health.reason})`, pid: health.lease?.pid };
-      }
-      removeFallbackLease(leaseDir);
-      claim = claimFallbackLeaseDir(leaseDir);
-      if (!claim.claimed) {
-        return { started: false, reason: "fallback lease is being claimed by another process" };
-      }
+    const startLock = fallbackStartLockPath(config);
+    const recoveredStartLock = this.acquireStartLock(startLock);
+    if (recoveredStartLock === null) {
+      return { started: false, reason: "fallback startup is already in progress" };
     }
 
-    const scriptPath = fallbackRunnerScriptPath(config);
-    mkdirSync(fallbackRuntimeDir(config.projectPath), { recursive: true });
-    writeFileSync(scriptPath, buildFallbackRunnerScript(config), "utf8");
-
-    let child: ProcessFallbackChild;
     try {
-      child = this.spawnRunner(process.execPath, [scriptPath], {
-        cwd: config.projectPath,
-        detached: true,
-        stdio: "ignore",
+      const leaseDir = fallbackLeasePath(config.projectPath, config.slug);
+      const digest = computeFallbackCommandDigest(config);
+      let claim = claimFallbackLeaseDir(leaseDir);
+
+      if (!claim.claimed) {
+        if (claim.existingLease === null) {
+          if (!recoveredStartLock) {
+            return { started: false, reason: "fallback lease initialization is still in progress" };
+          }
+          removeFallbackLease(leaseDir);
+          claim = claimFallbackLeaseDir(leaseDir);
+        } else if (this.pidAlive(claim.existingLease.pid)) {
+          return {
+            started: false,
+            reason: `fallback runner PID ${claim.existingLease.pid} is still alive; owner action is required`,
+            pid: claim.existingLease.pid,
+          };
+        } else {
+          removeFallbackLease(leaseDir);
+          claim = claimFallbackLeaseDir(leaseDir);
+        }
+        if (!claim.claimed) {
+          return { started: false, reason: "fallback lease is being claimed by another process" };
+        }
+      }
+
+      const scriptPath = fallbackRunnerScriptPath(config);
+      mkdirSync(fallbackRuntimeDir(config.projectPath), { recursive: true });
+      writeFileSync(scriptPath, fallbackRunnerScript(config), "utf8");
+
+      let child: ProcessFallbackChild;
+      try {
+        child = this.spawnRunner(process.execPath, [scriptPath], {
+          cwd: config.projectPath,
+          detached: true,
+          stdio: "ignore",
+        });
+      } catch (error) {
+        removeFallbackLease(leaseDir);
+        rmSync(scriptPath, { force: true });
+        return { started: false, reason: `fallback runner failed to spawn: ${String(error)}` };
+      }
+
+      if (child.pid === undefined) {
+        removeFallbackLease(leaseDir);
+        rmSync(scriptPath, { force: true });
+        return { started: false, reason: "fallback runner did not provide a PID" };
+      }
+
+      const startedAt = new Date(this.now() * 1000).toISOString();
+      writeFallbackLease(leaseDir, {
+        pid: child.pid,
+        commandDigest: digest,
+        ownerConfirmedAt: startedAt,
+        startedAt,
+        heartbeatAt: startedAt,
       });
-    } catch (error) {
-      removeFallbackLease(leaseDir);
-      rmSync(scriptPath, { force: true });
-      return { started: false, reason: `fallback runner failed to spawn: ${String(error)}` };
+      // Seed the liveness channel before detaching. The runner refreshes it on
+      // entry, but this closes the spawn-to-first-tick race for a concurrent start.
+      writeFileSync(fallbackHeartbeatPath(config.projectPath, config.slug), `${this.now()}\n`, "utf8");
+      this.children.set(leaseDir, child);
+      this.stopRequested.delete(leaseDir);
+      child.once("exit", () => this.cleanup(leaseDir, child.pid, scriptPath, fallbackHeartbeatPath(config.projectPath, config.slug)));
+      child.unref?.();
+      return { started: true, reason: "owner-confirmed fallback runner started", pid: child.pid };
+    } finally {
+      rmSync(startLock, { recursive: true, force: true });
     }
-
-    if (child.pid === undefined) {
-      removeFallbackLease(leaseDir);
-      rmSync(scriptPath, { force: true });
-      return { started: false, reason: "fallback runner did not provide a PID" };
-    }
-
-    const startedAt = new Date(this.now() * 1000).toISOString();
-    writeFallbackLease(leaseDir, {
-      pid: child.pid,
-      commandDigest: digest,
-      ownerConfirmedAt: startedAt,
-      startedAt,
-      heartbeatAt: startedAt,
-    });
-    // Seed the liveness channel before detaching. The runner refreshes it on
-    // entry, but this closes the spawn-to-first-tick race for a concurrent start.
-    writeFileSync(fallbackHeartbeatPath(config.projectPath, config.slug), `${this.now()}\n`, "utf8");
-    this.children.set(leaseDir, child);
-    this.stopRequested.delete(leaseDir);
-    child.once("exit", () => this.cleanup(leaseDir, child.pid, scriptPath, fallbackHeartbeatPath(config.projectPath, config.slug)));
-    child.unref?.();
-    return { started: true, reason: "owner-confirmed fallback runner started", pid: child.pid };
   }
 
   /** Send exactly one graceful stop signal. Child exit owns lease cleanup. */
   async stop(config: FallbackRunnerConfig): Promise<boolean> {
     const leaseDir = fallbackLeasePath(config.projectPath, config.slug);
     const child = this.children.get(leaseDir);
-    if (child === undefined || this.stopRequested.has(leaseDir)) return false;
+    if (child === undefined) {
+      const health = await this.health(config);
+      if (!health.alive || health.lease === null) return false;
+      try {
+        this.killPid(health.lease.pid, "SIGTERM");
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    if (this.stopRequested.has(leaseDir)) return false;
 
     this.stopRequested.add(leaseDir);
     const sent = child.kill("SIGTERM");
@@ -832,12 +943,47 @@ export class ProcessFallbackScheduler {
     const lease = readFallbackLease(fallbackLeasePath(config.projectPath, config.slug));
     return evaluateFallbackLiveness({
       lease,
-      heartbeatPath: join(fallbackRuntimeDir(config.projectPath), `fallback-heartbeat-${config.slug}`),
+      heartbeatPath: fallbackHeartbeatPath(config.projectPath, config.slug),
       expectedDigest: computeFallbackCommandDigest(config),
       now: this.now,
       pidAlive: this.pidAlive,
       heartbeatTimeoutSec: this.heartbeatTimeoutSec,
     });
+  }
+
+  /**
+   * Serialize every start/reclaim transition. A stale owner PID makes the short
+   * critical-section lock reclaimable; a live owner is never displaced.
+   */
+  private acquireStartLock(lockPath: string): boolean | null {
+    mkdirSync(join(lockPath, ".."), { recursive: true });
+    try {
+      mkdirSync(lockPath);
+      writeFileSync(join(lockPath, "owner.pid"), `${process.pid}\n`, "utf8");
+      return false;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+
+    let ownerPid: number | undefined;
+    try {
+      const raw = readFileSync(join(lockPath, "owner.pid"), "utf8").trim();
+      const parsed = Number(raw);
+      if (Number.isInteger(parsed) && parsed > 0) ownerPid = parsed;
+    } catch {
+      // An interrupted creator has no owner file; it is safe to reclaim.
+    }
+    if (ownerPid !== undefined && this.pidAlive(ownerPid)) return null;
+
+    rmSync(lockPath, { recursive: true, force: true });
+    try {
+      mkdirSync(lockPath);
+      writeFileSync(join(lockPath, "owner.pid"), `${process.pid}\n`, "utf8");
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") return null;
+      throw error;
+    }
   }
 
   private cleanup(leaseDir: string, pid: number | undefined, scriptPath: string, heartbeatPath: string): void {

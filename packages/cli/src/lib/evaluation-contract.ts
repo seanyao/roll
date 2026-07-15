@@ -14,11 +14,13 @@
  * Genuinely trivial/internal stories may carry a one-item minimal block.
  */
 export interface EvaluationEvidenceItem {
-  kind: "test" | "command" | "screenshot" | "document" | "diff" | "ci" | "manual" | string;
+  kind: "test" | "command" | "screenshot" | "document" | "diff" | "ci" | "manual" | "external-smoke" | "owner-attested" | string;
   /** File, command, surface, or report expected to prove an AC. */
   target: string;
   /** AC id (e.g. "AC1") or short AC phrase this evidence proves. */
   proves: string;
+  /** US-ATTEST-015 — outward verification declaration when kind is external-smoke or owner-attested. */
+  outward?: import("@roll/spec").OutwardVerificationDeclaration;
 }
 
 export interface EvaluationContract {
@@ -88,10 +90,22 @@ export const EVIDENCE_MODE_MATRIX: Record<EvidenceMode, EvidenceModeMatrix> = {
 /** Section header that marks the start of the evaluation contract block. */
 const EVAL_CONTRACT_HEADER = /^\*\*Evaluation contract:\*\*\s*$/;
 
+/** US-ATTEST-015 — temporary holder for outward fields during parse. */
+interface OutwardParseTemp {
+  _mode: "external-smoke" | "owner-attested";
+  _command?: string;
+  _environment?: string;
+  _timeoutSec?: string;
+  _reason?: string;
+  _approvalRef?: string;
+  _scope?: string;
+  _expiresAt?: string;
+}
+
 /** Recognise a kind value as one of the known evidence kinds (case-insensitive). */
 function normKind(raw: string): string {
   const k = raw.trim();
-  const known = new Set(["test", "command", "screenshot", "document", "diff", "ci", "manual"]);
+  const known = new Set(["test", "command", "screenshot", "document", "diff", "ci", "manual", "external-smoke", "owner-attested"]);
   return known.has(k) ? k : k;
 }
 
@@ -232,15 +246,36 @@ export function parseEvaluationContract(specText: string): EvaluationContract | 
   let evidenceMode: EvidenceMode | undefined;
 
   let section: "expected_evidence" | "scorer_focus" | "builder_notes" | null = null;
-  let currentEvidence: Partial<EvaluationEvidenceItem> | null = null;
+  let currentEvidence: (Partial<EvaluationEvidenceItem> & { _outward?: Partial<OutwardParseTemp> }) | null = null;
 
   const finalizeEvidence = (): void => {
     if (currentEvidence !== null && currentEvidence.kind !== undefined && currentEvidence.proves !== undefined) {
-      evidence.push({
+      const item: EvaluationEvidenceItem = {
         kind: currentEvidence.kind,
         target: currentEvidence.target ?? "",
         proves: currentEvidence.proves,
-      });
+      };
+      // US-ATTEST-015 — build outward declaration from parsed fields
+      const ow = currentEvidence._outward;
+      if (ow !== undefined && (currentEvidence.kind === "external-smoke" || currentEvidence.kind === "owner-attested")) {
+        if (ow._mode === "external-smoke") {
+          item.outward = {
+            mode: "external-smoke",
+            command: currentEvidence.target ?? ow._command ?? "",
+            environment: (ow._environment as "ci" | "nightly" | "release") ?? "",
+            timeoutSec: Number(ow._timeoutSec) || 0,
+          };
+        } else if (ow._mode === "owner-attested") {
+          item.outward = {
+            mode: "owner-attested",
+            reason: ow._reason ?? "",
+            approvalRef: ow._approvalRef ?? "",
+            ...(ow._expiresAt !== undefined && ow._expiresAt !== "" ? { expiresAt: ow._expiresAt } : {}),
+            ...(ow._scope !== undefined && ow._scope !== "" ? { scope: ow._scope } : {}),
+          };
+        }
+      }
+      evidence.push(item);
     }
     currentEvidence = null;
   };
@@ -285,6 +320,25 @@ export function parseEvaluationContract(specText: string): EvaluationContract | 
         if (provesMatch !== null) {
           currentEvidence.proves = (provesMatch[1] ?? "").trim();
           continue;
+        }
+        // US-ATTEST-015 — outward verification fields
+        if (currentEvidence.kind === "external-smoke") {
+          if (currentEvidence._outward === undefined) currentEvidence._outward = { _mode: "external-smoke" };
+          const envMatch = /^environment:\s*(.+)$/.exec(line);
+          if (envMatch !== null) { currentEvidence._outward._environment = (envMatch[1] ?? "").trim(); continue; }
+          const timeoutMatch = /^timeout_sec:\s*(.+)$/.exec(line);
+          if (timeoutMatch !== null) { currentEvidence._outward._timeoutSec = (timeoutMatch[1] ?? "").trim(); continue; }
+        }
+        if (currentEvidence.kind === "owner-attested") {
+          if (currentEvidence._outward === undefined) currentEvidence._outward = { _mode: "owner-attested" };
+          const reasonMatch = /^reason:\s*(.+)$/.exec(line);
+          if (reasonMatch !== null) { currentEvidence._outward._reason = (reasonMatch[1] ?? "").trim(); continue; }
+          const refMatch = /^approval_ref:\s*(.+)$/.exec(line);
+          if (refMatch !== null) { currentEvidence._outward._approvalRef = (refMatch[1] ?? "").trim(); continue; }
+          const scopeMatch = /^scope:\s*(.+)$/.exec(line);
+          if (scopeMatch !== null) { currentEvidence._outward._scope = (scopeMatch[1] ?? "").trim(); continue; }
+          const expiresMatch = /^expires_at:\s*(.+)$/.exec(line);
+          if (expiresMatch !== null) { currentEvidence._outward._expiresAt = (expiresMatch[1] ?? "").trim(); continue; }
         }
       }
     } else if (section === "scorer_focus") {

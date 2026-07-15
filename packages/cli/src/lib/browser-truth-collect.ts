@@ -7,6 +7,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { BrowserOperationLedger, browserOperationsTruth, type BrowserActiveLeaseFact } from "@roll/core";
 import type { BrowserOperationsTruth } from "@roll/spec";
+import { renderNowMs } from "./truth-read.js";
 
 /** Default path for the browser operations event ledger. */
 function browserLedgerPath(projectPath: string): string {
@@ -34,7 +35,7 @@ export function collectBrowserTruth(opts: CollectBrowserTruthOpts): BrowserOpera
     events,
     activeLease: undefined,
     captureLinks: undefined,
-    nowMs: opts.nowMs ?? Date.now(),
+    nowMs: opts.nowMs ?? renderNowMs(),
     storyId: opts.storyId,
     cycleId: opts.cycleId,
   });

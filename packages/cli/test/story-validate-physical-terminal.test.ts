@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { storyValidateCommand } from "../src/commands/story-validate.js";
+import { parsePhysicalTerminalSpec } from "../src/lib/physical-terminal.js";
 import { renderState } from "../src/render.js";
 
 const dirs: string[] = [];
@@ -116,6 +117,32 @@ describe("US-INIT-003a — roll story validate recognizes physical_terminal", ()
     expect(r.code).toBe(1);
     expect(r.out).toMatch(/physical-terminal-invalid/);
     expect(r.out).toMatch(/command is required/);
+  });
+
+  it("FIX-1263: scalar physical_terminal fails loud instead of becoming absent", () => {
+    const spec = [
+      "---",
+      "id: US-PHYS-SCALAR",
+      "physical_terminal: required",
+      "---",
+      "",
+      "# US-PHYS-SCALAR",
+      "",
+      "## Acceptance Criteria",
+      "",
+      "- [ ] [visual-evidence] terminal screenshot",
+      "",
+    ].join("\n");
+    expect(parsePhysicalTerminalSpec(spec)).toEqual({
+      kind: "invalid",
+      reason: "physical_terminal must be a mapping",
+    });
+
+    const p = project("US-PHYS-SCALAR", "init-onboard", spec);
+    const r = run(p, ["US-PHYS-SCALAR"]);
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/physical-terminal-invalid/);
+    expect(r.out).toMatch(/must be a mapping/);
   });
 
   it("AC2: invalid physical_terminal (non-Terminal.app) fails validation", () => {

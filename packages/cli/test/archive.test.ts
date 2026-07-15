@@ -332,22 +332,17 @@ describe("FIX-275 — git dossier facts snapshot equivalence", () => {
     expect(collectGitDossierFacts(proj)).not.toBeNull();
     const cache = buildDossierRunCache(proj);
     expect(cache.git).not.toBeNull();
-    for (const story of [story1, story2]) {
-      const legacy = collectStoryDossierInput(proj, story);
-      const snap = collectStoryDossierInput(proj, story, cache);
-      // browserTruth / browserTimeline.collectedAt are wall-clock; the two
-      // collections can land on different milliseconds. Equality is about the
-      // FACTS, not the stamp.
-      if (legacy.browserTruth !== undefined && snap.browserTruth !== undefined) {
-        snap.browserTruth = { ...snap.browserTruth, collectedAt: legacy.browserTruth.collectedAt };
+    const savedRenderNow = process.env["ROLL_RENDER_NOW"];
+    process.env["ROLL_RENDER_NOW"] = "2026-07-15T00:00:00.000Z";
+    try {
+      for (const story of [story1, story2]) {
+        const legacy = collectStoryDossierInput(proj, story);
+        const snap = collectStoryDossierInput(proj, story, cache);
+        expect(snap).toEqual(legacy);
       }
-      if (legacy.browserTimeline !== undefined && snap.browserTimeline !== undefined) {
-        snap.browserTimeline = {
-          ...snap.browserTimeline,
-          collectedAt: legacy.browserTimeline.collectedAt,
-        };
-      }
-      expect(snap).toEqual(legacy);
+    } finally {
+      if (savedRenderNow === undefined) delete process.env["ROLL_RENDER_NOW"];
+      else process.env["ROLL_RENDER_NOW"] = savedRenderNow;
     }
     // body-only mention still counts (git --grep matches the full message)
     const viaSnap = collectStoryDossierInput(proj, story2, cache);

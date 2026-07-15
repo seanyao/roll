@@ -124,13 +124,19 @@ export class GitHubPrStatusProvider implements PrStatusProvider {
     }
 
     if (state === "OPEN") {
-      const branch = info.headRefName;
       // FIX-1248: CI state is the union of BOTH GitHub check kinds — Actions
       // workflow runs (`gh run list`) AND commit statuses / non-Actions
       // check-runs (`statusCheckRollup`). Reading only runs misjudged a
       // status-only green PR as unknown → never merged.
+      // FIX-1258: query runs by the PR's current head commit SHA instead of
+      // branch name so force-pushed old-head failures don't suppress new-head
+      // green runs. Falls back to branch-based query if headRefOid is missing.
       const [runs, rollup] = await Promise.all([
-        branch !== undefined ? runList(s, "conclusion", { branch }) : Promise.resolve([]),
+        info.headRefOid !== undefined
+          ? runList(s, "conclusion", { commit: info.headRefOid })
+          : info.headRefName !== undefined
+            ? runList(s, "conclusion", { branch: info.headRefName })
+            : Promise.resolve([]),
         prViewStatusCheckRollup(s, String(prNumber)),
       ]);
       const ci = mergeCiStates(

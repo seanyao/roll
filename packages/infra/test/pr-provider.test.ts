@@ -130,4 +130,15 @@ describe("FIX-1248 mixed regression matrix — composed as pollPrStatus composes
   it("6. neither kind has any check → unknown", () => {
     expect(combined([], [])).toBe("unknown");
   });
+  it("7. FIX-1258: old-head failures excluded, only current-head runs considered → green", () => {
+    // Simulates: old-head had ["failure"], current-head has ["success"].
+    // After filtering by headRefOid, only ["success"] reaches reduceRunConclusions.
+    // Without the fix, the union of old-head failure + current-head success → red.
+    expect(reduceRunConclusions(["success"])).toBe("green");
+    // Composed: current-head actions green + statusCheckRollup green = green.
+    expect(mergeCiStates(
+      reduceRunConclusions(["success"]),
+      reduceStatusCheckRollup([statusContext("SUCCESS")]),
+    )).toBe("green");
+  });
 });

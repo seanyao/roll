@@ -85,6 +85,17 @@ function deriveInteractive(obs: BrowserEnvironmentObservations): BrowserLaneRead
   // Remote debugging is owner-controlled and must never be auto-enabled: an
   // absent loopback endpoint is a hard blocked verdict, not a repair we run.
   if (!obs.loopbackRemoteDebug.present) {
+    // FIX-1264 — port open but /json/version check failed: endpoint is
+    // reachable but not a real DevTools listener (another process on 9222).
+    if (obs.loopbackRemoteDebug.portReachable) {
+      return degraded(
+        "interactive",
+        `owner Chrome remote debugging port is open but /json/version check failed — not a DevTools endpoint; ${obs.loopbackRemoteDebug.detail}`,
+        [
+          `verify Chrome DevTools is listening on ${MANAGED_DEVTOOLS_REMOTE_DEBUG_HOST}:${MANAGED_DEVTOOLS_REMOTE_DEBUG_PORT} (start Chrome with --remote-debugging-port=${MANAGED_DEVTOOLS_REMOTE_DEBUG_PORT})`,
+        ],
+      );
+    }
     return blocked(
       "interactive",
       `owner Chrome remote debugging is not enabled — ${obs.loopbackRemoteDebug.detail}`,

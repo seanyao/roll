@@ -59,4 +59,23 @@ if [ -n "$_TREE" ]; then
   printf '{"ts":%s,"tree":"%s","mode":"vitest","scope":"%s"}\n' "$(date +%s)" "$_TREE" "$SCOPE" \
     > "$REPO_ROOT/.roll/last-test-pass"
 fi
+# FIX-1264 — vitest-based obsolete snapshot guard: any .snap file without a
+# corresponding test file is a landmine that silently drifts. Fail loud.
+_SNAP_DIR="$REPO_ROOT/packages/cli/test/__snapshots__"
+_TEST_DIR="$REPO_ROOT/packages/cli/test"
+_ORPHANS=""
+if [ -d "$_SNAP_DIR" ]; then
+  for _snap in "$_SNAP_DIR"/*.snap; do
+    [ -f "$_snap" ] || continue
+    _base="$(basename "$_snap" .snap)"
+    if [ ! -f "$_TEST_DIR/$_base" ]; then
+      _ORPHANS="$_ORPHANS  $(basename "$_snap")\n"
+    fi
+  done
+fi
+if [ -n "$_ORPHANS" ]; then
+  printf "❌ Orphan vitest snapshot files (no corresponding test):\n%b" "$_ORPHANS"
+  printf "   Run vitest --update to remove them, or restore the test file.\n"
+  exit 1
+fi
 echo "✓ TS suites green (scope: $SCOPE) — test-pass proof written (mode: vitest)"

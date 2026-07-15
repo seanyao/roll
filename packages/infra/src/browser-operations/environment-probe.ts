@@ -12,6 +12,7 @@
  *   _ROLL_BROWSER_CHROME           present|missing[:path]
  *   _ROLL_BROWSER_MCP              present|missing
  *   _ROLL_BROWSER_REMOTE_DEBUG     on|off
+ *   _ROLL_BROWSER_DEVTOOLS_VERSION  valid|invalid (only applies when TCP is reachable)
  *   _ROLL_BROWSER_TRANSPORT_BINDING present|missing
  *
  * When an override is absent the probe falls back to a real, read-only check.
@@ -27,6 +28,11 @@ import {
   MANAGED_DEVTOOLS_REMOTE_DEBUG_PORT,
 } from "@roll/core";
 
+export interface DevtoolsVersionResult {
+  valid: boolean;
+  browser?: string;
+}
+
 export interface BrowserEnvironmentProbeDeps {
   env: NodeJS.ProcessEnv;
   platform: NodeJS.Platform;
@@ -38,6 +44,13 @@ export interface BrowserEnvironmentProbeDeps {
   version: (bin: string) => string | null;
   /** Probe a loopback TCP endpoint without opening it. */
   tcpReachable: (host: string, port: number) => boolean;
+  /**
+   * Validate that a loopback endpoint is a real Chrome DevTools endpoint by
+   * fetching /json/version.  Returns null when the check can't run (CI /
+   * headless), `{ valid: true, browser }` when the Browser field is present,
+   * and `{ valid: false }` when the endpoint responds but isn't DevTools.
+   */
+  devtoolsVersionCheck: (host: string, port: number) => DevtoolsVersionResult | null;
 }
 
 function commandOnPath(env: NodeJS.ProcessEnv): (bin: string) => string | null {
@@ -93,6 +106,25 @@ export function defaultBrowserEnvironmentProbeDeps(): BrowserEnvironmentProbeDep
         return (r.status ?? 1) === 0;
       } catch {
         return false;
+      }
+    },
+    devtoolsVersionCheck: (host, port) => {
+      // Skip the HTTP round-trip under CI — the owner endpoint is never present.
+      if (isCi(env)) return null;
+      try {
+        const r = spawnSync(
+          "curl",
+          ["-sS", "--max-time", "3", `http://${host}:${port}/json/version`],
+          { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5000 },
+        );
+        if ((r.status ?? 1) !== 0 || !r.stdout) return null;
+        const body = JSON.parse(r.stdout.trim()) as Record<string, unknown>;
+        if (body && typeof body["Browser"] === "string") {
+          return { valid: true, browser: body["Browser"] as string };
+        }
+        return { valid: false };
+      } catch {
+        return null;
       }
     },
   };
@@ -189,15 +221,38 @@ function devtoolsPackageState(deps: BrowserEnvironmentProbeDeps): BrowserDepende
 
 function loopbackState(deps: BrowserEnvironmentProbeDeps): BrowserDependencyState {
   const ov = readOverride(deps.env["_ROLL_BROWSER_REMOTE_DEBUG"]);
+  const versionOvRaw = deps.env["_ROLL_BROWSER_DEVTOOLS_VERSION"]?.trim();
   const endpoint = `${MANAGED_DEVTOOLS_REMOTE_DEBUG_HOST}:${MANAGED_DEVTOOLS_REMOTE_DEBUG_PORT}`;
   if (ov !== null) {
-    return ov.present
-      ? { present: true, detail: `${endpoint} reachable (override)`, value: endpoint }
-      : { present: false, detail: "owner Chrome remote debugging is not enabled (override)" };
+    if (ov.present) {
+      // TCP override says reachable — check whether the version override marks
+      // it as a real DevTools endpoint or just an open port.
+      if (versionOvRaw === "valid") {
+        return { present: true, detail: `${endpoint} reachable + DevTools validated (override)`, value: endpoint };
+      }
+      if (versionOvRaw === "invalid") {
+        return { present: false, detail: `${endpoint} reachable but /json/version check failed — not a DevTools endpoint (override)`, value: endpoint, portReachable: true };
+      }
+      return { present: true, detail: `${endpoint} reachable (override)`, value: endpoint };
+    }
+    return { present: false, detail: "owner Chrome remote debugging is not enabled (override)" };
   }
-  return deps.tcpReachable(MANAGED_DEVTOOLS_REMOTE_DEBUG_HOST, MANAGED_DEVTOOLS_REMOTE_DEBUG_PORT)
-    ? { present: true, detail: `${endpoint} reachable`, value: endpoint }
-    : { present: false, detail: `owner Chrome remote debugging is not enabled on ${endpoint}` };
+  const tcpOk = deps.tcpReachable(MANAGED_DEVTOOLS_REMOTE_DEBUG_HOST, MANAGED_DEVTOOLS_REMOTE_DEBUG_PORT);
+  if (!tcpOk) {
+    return { present: false, detail: `owner Chrome remote debugging is not enabled on ${endpoint}` };
+  }
+  // TCP is open — validate it's a real DevTools endpoint via /json/version.
+  const versionResult = deps.devtoolsVersionCheck(MANAGED_DEVTOOLS_REMOTE_DEBUG_HOST, MANAGED_DEVTOOLS_REMOTE_DEBUG_PORT);
+  if (versionResult === null) {
+    // Couldn't run the version check (CI / headless / curl not available).
+    // Report honest: present=false so the readiness aggregate doesn't claim
+    // ready on a port that may not be DevTools.
+    return { present: false, detail: `${endpoint} reachable but /json/version check unavailable`, value: endpoint, portReachable: true };
+  }
+  if (versionResult.valid) {
+    return { present: true, detail: `${endpoint} reachable + DevTools validated (${versionResult.browser ?? "Chrome"})`, value: endpoint };
+  }
+  return { present: false, detail: `${endpoint} reachable but /json/version check failed — not a DevTools endpoint`, value: endpoint, portReachable: true };
 }
 
 function transportBindingState(deps: BrowserEnvironmentProbeDeps): BrowserDependencyState {

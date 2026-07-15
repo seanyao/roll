@@ -1416,6 +1416,20 @@ describe("US-PHYSICAL-004 — attest physical.screenshot provider lane", () => {
       captures?: Array<{ kind?: string; taken?: boolean; out?: string }>;
     };
     expect(evidence.captures).toContainEqual({ kind: "physical_terminal", out: join(runDir, "screenshots", "physical.png"), taken: true });
+    const browserLedger = readFileSync(join(proj, ".roll", "browser-operations", "events.ndjson"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { event: { type: string; link?: { canSatisfyVisualAc?: boolean; captureRequestId?: string; captureDigest?: string } } });
+    expect(browserLedger).toContainEqual(expect.objectContaining({
+      event: expect.objectContaining({
+        type: "browser:capture-linked",
+        link: expect.objectContaining({
+          captureRequestId: request.requestId,
+          canSatisfyVisualAc: true,
+          captureDigest: expect.stringMatching(/^sha256:/),
+        }),
+      }),
+    }));
   });
 
   it("does not trigger physical.screenshot from comments, AC text, or URLs containing the token", async () => {

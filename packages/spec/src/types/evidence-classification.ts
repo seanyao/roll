@@ -127,6 +127,8 @@ export interface CaptureBridgeLink {
   captureRequestId: string;
   /** The terminal capture response, when available. */
   captureResponse?: RollCaptureResponseV1;
+  /** SHA-256 of the attached physical image, when available for validation. */
+  captureDigest?: string;
   /** Whether the capture is valid visual AC evidence. */
   canSatisfyVisualAc: boolean;
   /** Reason for the bridge verdict. */

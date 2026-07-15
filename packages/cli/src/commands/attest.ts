@@ -25,7 +25,9 @@
  */
 import {
   acForStory,
+  BrowserOperationLedger,
   parseBacklog,
+  CaptureBridge,
   renderReport,
   ansiPre,
   buildExecutionCastProjection,
@@ -48,6 +50,7 @@ import {
   type RunRow,
   type ReviewScoreReportEntry,
   type OutwardAcReport,
+  visualEvidenceGate,
 } from "@roll/core";
 import {
   ROLL_CAPTURE_PROTOCOL_V1,
@@ -93,6 +96,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { execFile, execFileSync } from "node:child_process";
 import { basename, dirname, extname, join, relative } from "node:path";
 import { promisify } from "node:util";
@@ -731,6 +735,8 @@ interface PhysicalCaptureLane {
   report: PhysicalCaptureReportEntry;
   fact: CaptureFact;
   selfCapture?: EvidenceRef;
+  captureResponse?: import("@roll/spec").RollCaptureResponseV1;
+  captureDigest?: string;
 }
 
 function physicalScreenshotRequest(
@@ -827,10 +833,12 @@ async function runPhysicalScreenshotLane(
           requestPath,
           responsePath,
           privacy.annotation,
+          result.response,
         );
       }
       const attached = attachPhysicalScreenshot(result.path, request.out);
       if (attached.ok) {
+        const captureResponse = { ...result.response, screenshotPath: request.out };
         return physicalLaneResult(
           request,
           ["requested", "taken", "attached"],
@@ -840,14 +848,16 @@ async function runPhysicalScreenshotLane(
           requestPath,
           responsePath,
           privacy.annotation,
+          captureResponse,
+          sha256File(request.out),
         );
       }
-      return physicalLaneResult(request, ["requested", "taken", "not-attached"], attached.reason, undefined, ledger, requestPath, responsePath);
+      return physicalLaneResult(request, ["requested", "taken", "not-attached"], attached.reason, undefined, ledger, requestPath, responsePath, undefined, result.response);
     }
     if (result.status === "timeout") {
       return physicalLaneResult(request, ["requested", "timeout", "not-attached"], `timeout: ${result.reason}`, undefined, ledger, requestPath);
     }
-    return physicalLaneResult(request, ["requested", result.status, "not-attached"], result.reason, undefined, ledger, requestPath, responsePath);
+    return physicalLaneResult(request, ["requested", result.status, "not-attached"], result.reason, undefined, ledger, requestPath, responsePath, undefined, result.response);
   } catch (error) {
     return physicalLaneResult(
       request,
@@ -871,6 +881,8 @@ function physicalLaneResult(
   requestPath?: string,
   responsePath?: string,
   annotation?: import("@roll/core").CaptureAnnotation,
+  captureResponse?: import("@roll/spec").RollCaptureResponseV1,
+  captureDigest?: string,
 ): PhysicalCaptureLane {
   const runDir = dirname(dirname(request.out));
   const attached = screenshotHref !== undefined;
@@ -899,7 +911,47 @@ function physicalLaneResult(
       ...(failed && reason !== undefined && reason !== "" ? { failed: true, error: reason } : {}),
     },
     ...(screenshot !== undefined ? { selfCapture: screenshot } : {}),
+    ...(captureResponse !== undefined ? { captureResponse } : {}),
+    ...(captureDigest !== undefined ? { captureDigest } : {}),
   };
+}
+
+function sha256File(path: string): string | undefined {
+  try {
+    return `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Persist the physical attest result as the authoritative browser capture fact. */
+function recordAttestCaptureBridgeLink(projectPath: string, request: RollCaptureRequestV1, physical: PhysicalCaptureLane): void {
+  if (physical.captureResponse === undefined || request.storyId === undefined || request.storyId === "") return;
+  try {
+    const bridge = new CaptureBridge();
+    const link = bridge.linkCapture(
+      `attest:${request.runId ?? request.requestId}`,
+      request.storyId,
+      request.requestId,
+      "passed",
+      physical.captureResponse,
+      physical.captureDigest,
+    );
+    if (link === null) return;
+    const gate = visualEvidenceGate([{
+      artifactId: link.captureRequestId,
+      provider: "roll-capture",
+      protocol: ROLL_CAPTURE_PROTOCOL_V1,
+      captureResponse: link.captureResponse,
+      digest: link.captureDigest,
+    }]);
+    new BrowserOperationLedger().recordCaptureLink(
+      join(projectPath, ".roll", "browser-operations", "events.ndjson"),
+      { ...link, canSatisfyVisualAc: gate.ok },
+    );
+  } catch (error) {
+    warn(`could not persist browser capture link: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 function physicalCaptureFailed(statusChain: readonly string[]): boolean {
@@ -1469,6 +1521,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     captureFacts.push(physical.fact);
     physicalCaptureReports.push(physical.report);
     if (physical.selfCapture !== undefined) selfCaptures.push(physical.selfCapture);
+    recordAttestCaptureBridgeLink(projectPath, physicalRequest, physical);
     if (!physical.fact.taken) warn(`physical.screenshot ${physical.report.statusChain.join(" → ")}: ${physical.fact.skipped ?? "unknown"}`);
   }
 

@@ -74,6 +74,7 @@ export class CaptureBridge {
       storyId,
       captureRequestId,
       captureResponse,
+      ...(captureDigest !== undefined ? { captureDigest } : {}),
       canSatisfyVisualAc: visualResult.verdict === "valid",
       reason: `Operation ${operationOutcome}: ${matrixCell.reason}. Visual evidence: ${visualResult.verdict} — ${visualResult.reason}`,
       linkedAt: new Date().toISOString(),

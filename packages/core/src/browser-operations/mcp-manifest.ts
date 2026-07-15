@@ -49,13 +49,15 @@ export interface DevToolsMcpManifest {
 /**
  * Minimum manifest for the pinned chrome-devtools-mcp package.
  *
- * The generic `chrome_devtools_call` tool is the only required capability at
- * this layer: it proxies CDP method calls so the managed adapter stays on the
- * MCP boundary instead of opening a raw WebSocket/CDP connection.
+ * Required tools are exactly the facade's ACTION_TO_TOOL targets — the tool
+ * names chrome-devtools-mcp@1.5.0 REALLY exposes (verified live via
+ * tools/list, US-BROW-019). There is no generic `chrome_devtools_call` CDP
+ * proxy in the real server; requiring one made every live probe fail with
+ * manifest-mismatch while fixture tests (which fabricated it) stayed green.
  */
 export const MINIMUM_DEVTOOLS_MCP_MANIFEST: DevToolsMcpManifest = {
   version: MANAGED_DEVTOOLS_PACKAGE_VERSION,
-  requiredTools: ["chrome_devtools_call", ...Object.values(ACTION_TO_TOOL)],
+  requiredTools: [...Object.values(ACTION_TO_TOOL)],
 };
 
 /**

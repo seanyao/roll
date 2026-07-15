@@ -4,7 +4,9 @@ exports[`US-BROW-007 — documented \`roll browser\` surface > AC2: help lists t
 "Usage: roll browser <setup|doctor|run|interactive|update>
   setup --dry-run       Report proposed machine config + dependency preflight (writes nothing).
   setup --confirm       Write ~/.roll/browser-operations.yaml after explicit owner confirmation.
-  doctor [--json]       Report managed / interactive / capture readiness (ready|degraded|blocked).
+  doctor [--json] [--probe]  Report managed / interactive / capture readiness (ready|configured|degraded|blocked).
+     --probe                 Run a live MCP lane probe (spawns temporary chrome-devtools-mcp, validates,
+                             cleans up). Only a successful probe advances the managed lane to 'ready'.
   run [opts]            Run a managed-lane operation through the real policy-gated MCP lane.
      --story <US-ID>    Required: story identifier (US-BROW-018, etc.).
      --url <targetUrl>  Target URL for the browser action.
@@ -31,7 +33,9 @@ exports[`US-BROW-007 — documented \`roll browser\` surface > US-BROW-015: help
 "Usage: roll browser <setup|doctor|run|interactive|update>
   setup --dry-run       Report proposed machine config + dependency preflight (writes nothing).
   setup --confirm       Write ~/.roll/browser-operations.yaml after explicit owner confirmation.
-  doctor [--json]       Report managed / interactive / capture readiness (ready|degraded|blocked).
+  doctor [--json] [--probe]  Report managed / interactive / capture readiness (ready|configured|degraded|blocked).
+     --probe                 Run a live MCP lane probe (spawns temporary chrome-devtools-mcp, validates,
+                             cleans up). Only a successful probe advances the managed lane to 'ready'.
   run [opts]            Run a managed-lane operation through the real policy-gated MCP lane.
      --story <US-ID>    Required: story identifier (US-BROW-018, etc.).
      --url <targetUrl>  Target URL for the browser action.

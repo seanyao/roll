@@ -4,6 +4,7 @@ import {
   MANAGED_DEVTOOLS_PACKAGE,
   MANAGED_DEVTOOLS_PACKAGE_VERSION,
   deriveBrowserEnvironmentReadiness,
+  applyManagedProbe,
 } from "../src/browser-operations/readiness.js";
 
 function present(detail = "ok", value?: string) {
@@ -26,11 +27,43 @@ function healthy(): BrowserEnvironmentObservations {
 }
 
 describe("US-BROW-003 deriveBrowserEnvironmentReadiness", () => {
-  it("reports every lane ready when all dependencies pass", () => {
+  it("reports managed as configured (not ready) without a live probe; interactive and capture stay ready", () => {
     const r = deriveBrowserEnvironmentReadiness(healthy());
-    expect(r.managed.verdict).toBe("ready");
+    // US-BROW-019: static config present but no probe → configured.
+    expect(r.managed.verdict).toBe("configured");
     expect(r.interactive.verdict).toBe("ready");
     expect(r.capture.verdict).toBe("ready");
+  });
+
+  it("advances managed to ready when a live probe passes", () => {
+    const r = deriveBrowserEnvironmentReadiness(healthy(), {
+      kind: "passed",
+      version: "1.5.0",
+      tools: ["chrome_devtools_call", "navigate_page", "take_snapshot"],
+    });
+    expect(r.managed.verdict).toBe("ready");
+    expect(r.probeResult?.kind).toBe("passed");
+  });
+
+  it("degrades managed when a live probe fails", () => {
+    const r = deriveBrowserEnvironmentReadiness(healthy(), {
+      kind: "failed",
+      failures: [{ category: "mcp-spawn", message: "spawn failed: ENOENT" }],
+    });
+    expect(r.managed.verdict).toBe("degraded");
+    expect(r.probeResult?.kind).toBe("failed");
+  });
+
+  it("applyManagedProbe advances configured → ready on passed probe", () => {
+    const base = deriveBrowserEnvironmentReadiness(healthy()).managed;
+    expect(base.verdict).toBe("configured");
+    const probed = applyManagedProbe(base, {
+      kind: "passed",
+      version: "1.5.0",
+      tools: ["chrome_devtools_call"],
+    });
+    expect(probed.verdict).toBe("ready");
+    expect(probed.reason).toMatch(/real MCP lane verified/);
   });
 
   it("degrades managed (not blocked) when Chrome or the MCP package is missing, leaving other paths usable", () => {
@@ -42,6 +75,7 @@ describe("US-BROW-003 deriveBrowserEnvironmentReadiness", () => {
     expect(r.managed.reason).toMatch(/chrome|chrome-devtools-mcp/i);
     // Honest unavailable must not read as a pass.
     expect(r.managed.verdict).not.toBe("ready");
+    expect(r.managed.verdict).not.toBe("configured");
     expect(r.managed.actions.join(" ")).toMatch(/setup|install/i);
   });
 

@@ -35,7 +35,7 @@ import {
   type InteractiveLowRiskAction,
   type InteractiveOperationResult,
 } from "@roll/infra";
-import type { BrowserActionKind, BrowserOperationEvent, BrowserOperationsTruth, BrowserTransportVersionCheck } from "@roll/spec";
+import type { BrowserActionKind, BrowserOperationEvent, BrowserOperationsTruth, BrowserProbeResult, BrowserTransportVersionCheck } from "@roll/spec";
 import { randomUUID } from "node:crypto";
 import { collectBrowserEnvironmentReadiness, renderBrowserDoctor } from "../lib/browser-readiness-doctor.js";
 import type { ManagedFixtureFailure } from "@roll/infra";
@@ -59,9 +59,11 @@ export interface BrowserCommandDeps {
   versionSource?: VersionSource;
   /** Smoke/contract check — runs before an update is applied. */
   smokeCheck?: () => Promise<boolean>;
-  readiness?: () => ReturnType<typeof collectBrowserEnvironmentReadiness>;
+  readiness?: (probeResult?: BrowserProbeResult) => ReturnType<typeof collectBrowserEnvironmentReadiness>;
   /** Truth projection from the durable browser operation ledger. */
   browserTruth?: () => BrowserOperationsTruth;
+  /** Live MCP lane probe (US-BROW-019). Injectable for tests. */
+  runProbe?: () => Promise<BrowserProbeResult>;
   /** Terminal gate and confirmation seam for owner Chrome operations. */
   isTTY: () => boolean;
   readApproval: (prompt: string) => Promise<boolean>;
@@ -104,7 +106,9 @@ const USAGE =
   "Usage: roll browser <setup|doctor|run|interactive|update>\n" +
   "  setup --dry-run       Report proposed machine config + dependency preflight (writes nothing).\n" +
   "  setup --confirm       Write ~/.roll/browser-operations.yaml after explicit owner confirmation.\n" +
-  "  doctor [--json]       Report managed / interactive / capture readiness (ready|degraded|blocked).\n" +
+  "  doctor [--json] [--probe]  Report managed / interactive / capture readiness (ready|configured|degraded|blocked).\n" +
+  "     --probe                 Run a live MCP lane probe (spawns temporary chrome-devtools-mcp, validates,\n" +
+  "                             cleans up). Only a successful probe advances the managed lane to 'ready'.\n" +
   "  run [opts]            Run a managed-lane operation through the real policy-gated MCP lane.\n" +
   "     --story <US-ID>    Required: story identifier (US-BROW-018, etc.).\n" +
   "     --url <targetUrl>  Target URL for the browser action.\n" +
@@ -125,8 +129,8 @@ const USAGE =
   "  update [--check] [--json]   Check for DevTools transport update (pinned vs candidate).\n" +
   "  update --apply --confirm    Apply update after smoke checks + doctor.\n";
 
-function readiness(deps: BrowserCommandDeps): ReturnType<typeof collectBrowserEnvironmentReadiness> {
-  return deps.readiness?.() ?? collectBrowserEnvironmentReadiness();
+function readiness(deps: BrowserCommandDeps, probeResult?: BrowserProbeResult): ReturnType<typeof collectBrowserEnvironmentReadiness> {
+  return deps.readiness?.(probeResult) ?? collectBrowserEnvironmentReadiness(undefined, undefined, probeResult);
 }
 
 function setupCommand(args: string[], deps: BrowserCommandDeps): number {
@@ -177,7 +181,13 @@ function setupCommand(args: string[], deps: BrowserCommandDeps): number {
   return 0;
 }
 
-function doctorSubcommand(args: string[], deps: BrowserCommandDeps): number {
+function doctorSubcommand(args: string[], deps: BrowserCommandDeps): number | Promise<number> {
+  const probeRequested = args.includes("--probe");
+
+  if (probeRequested) {
+    return doctorWithProbe(args, deps);
+  }
+
   const r = readiness(deps);
   if (args.includes("--json")) {
     deps.stdout(JSON.stringify(r, null, 2) + "\n");
@@ -196,6 +206,74 @@ function doctorSubcommand(args: string[], deps: BrowserCommandDeps): number {
     ...renderBrowserTruthVerbose(truth),
     "",
   ].join("\n") + "\n");
+  return 0;
+}
+
+async function doctorWithProbe(args: string[], deps: BrowserCommandDeps): Promise<number> {
+  const json = args.includes("--json");
+
+  // Side-effect announcement (AC2): before any spawn, tell the operator exactly
+  // what will happen. Skip when --json for machine readability.
+  if (!json) {
+    deps.stdout([
+      "Browser operations doctor --probe",
+      "浏览器操作体检 --probe",
+      "",
+      "⏳ Running live MCP lane probe — this will:",
+      "   1. Spawn the pinned chrome-devtools-mcp session (temporary process)",
+      "   2. Run MCP initialize + tools/list + manifest validation",
+      "   3. Close the session and clean up the temporary Chrome profile",
+      "The probe may take a few seconds. No owner state enters the temporary profile.",
+      "",
+      "⏳ 正在运行实时 MCP 通道探测——将会：",
+      "   1. 启动固定版本的 chrome-devtools-mcp 会话（临时进程）",
+      "   2. 运行 MCP initialize + tools/list + 清单验证",
+      "   3. 关闭会话并清理临时 Chrome 档案",
+      "探测可能需要几秒。绝不会进入 owner 状态。",
+      "",
+    ].join("\n") + "\n");
+  }
+
+  let probeResult: BrowserProbeResult;
+  if (deps.runProbe !== undefined) {
+    probeResult = await deps.runProbe();
+  } else {
+    // Production path: use the real MCP probe.
+    const { runMcpProbe, defaultMcpProbeObserver } = await import("@roll/infra");
+    const observer = defaultMcpProbeObserver(deps.stdout);
+    // Announce side effects via the observer too (probe-level announcements).
+    probeResult = await runMcpProbe({ observer });
+  }
+
+  const r = readiness(deps, probeResult);
+
+  if (json) {
+    deps.stdout(JSON.stringify(r, null, 2) + "\n");
+    return 0;
+  }
+
+  if (probeResult.kind === "passed") {
+    deps.stdout([
+      "",
+      "✅ Live probe passed — managed lane is ready.",
+      "✅ 实时探测通过——受管通道就绪。",
+      "",
+    ].join("\n") + "\n");
+  } else {
+    deps.stdout([
+      "",
+      "❌ Live probe failed — see categorized failures below.",
+      "❌ 实时探测失败——见下方分类失败信息。",
+      ...probeResult.failures.map((f) => `   ${f.category}: ${f.message}`),
+      "",
+    ].join("\n") + "\n");
+  }
+
+  deps.stdout([
+    ...renderBrowserDoctor(r),
+    "",
+  ].join("\n") + "\n");
+
   return 0;
 }
 
@@ -527,14 +605,67 @@ async function updateApplyCommand(args: string[], deps: BrowserCommandDeps): Pro
     return 1;
   }
 
-  // Run browser doctor alongside smoke/contract checks (US-BROW-010 AC3).
-  const doctorResult = readiness(deps);
+  // US-BROW-019 AC4: run smoke check first, then the real MCP probe.
+  // A failed probe leaves the prior pin/config unchanged (atomic rollback).
+  const smokePassed = await deps.smokeCheck();
+  if (!smokePassed) {
+    const doctorResult = readiness(deps);
+    const doctorLines = renderBrowserDoctor(doctorResult);
+    deps.stdout(
+      [
+        `Update verification failed: ${pinned} → ${candidate}`,
+        `更新验证失败：${pinned} → ${candidate}`,
+        `  reason: smoke check failed`,
+        `  原因：冒烟检查失败`,
+        "",
+        `  Prior version ${pinned} is kept intact.`,
+        `  已保留原版本 ${pinned}。`,
+        "",
+        `  browser doctor:`,
+        `  浏览器体检：`,
+        ...doctorLines.map((l) => `    ${l}`),
+        "",
+      ].join("\n") + "\n",
+    );
+    return 1;
+  }
 
-  const result = await version.apply(candidate, deps.smokeCheck);
+  // US-BROW-019 AC4: run the real MCP lane probe after candidate validation.
+  // A failed probe aborts the update; the prior pin stays intact.
+  let probeResult: BrowserProbeResult;
+  if (deps.runProbe !== undefined) {
+    probeResult = await deps.runProbe();
+  } else {
+    // Production path: real MCP probe.
+    const { runMcpProbe, defaultMcpProbeObserver } = await import("@roll/infra");
+    const observer = defaultMcpProbeObserver(deps.stdout);
+    probeResult = await runMcpProbe({ observer });
+  }
+
+  if (probeResult.kind === "failed") {
+    deps.stdout(
+      [
+        `Update aborted: live MCP probe failed for ${candidate}`,
+        `更新中止：${candidate} 实时 MCP 探测失败`,
+        "",
+        `  Prior version ${pinned} is kept intact.`,
+        `  已保留原版本 ${pinned}。`,
+        "",
+        ...probeResult.failures.map((f) => `  ${f.category}: ${f.message}`),
+        "",
+      ].join("\n") + "\n",
+    );
+    return 1;
+  }
+
+  // Probe passed — apply the update.
+  const applySmokeCheck = deps.smokeCheck;
+  const result = await version.apply(candidate, applySmokeCheck);
 
   if (result.kind === "applied") {
     const newCfg = updateProposedConfig(result.to);
     deps.writeFile(cfgPath, newCfg);
+    const doctorResult = readiness(deps, probeResult);
     const doctorLines = renderBrowserDoctor(doctorResult);
     deps.stdout(
       [
@@ -544,6 +675,9 @@ async function updateApplyCommand(args: string[], deps: BrowserCommandDeps): Pro
         "",
         `  smoke check: passed`,
         `  冒烟检查：通过`,
+        "",
+        `  MCP probe: passed (${probeResult.version})`,
+        `  MCP 探测：通过 (${probeResult.version})`,
         "",
         `  browser doctor:`,
         `  浏览器体检：`,
@@ -555,7 +689,7 @@ async function updateApplyCommand(args: string[], deps: BrowserCommandDeps): Pro
   }
 
   if (result.kind === "verification_failed") {
-    const doctorLines = renderBrowserDoctor(doctorResult);
+    const doctorLines = renderBrowserDoctor(readiness(deps));
     deps.stdout(
       [
         `Update verification failed: ${result.from} → ${result.candidate}`,

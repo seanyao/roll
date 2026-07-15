@@ -281,9 +281,13 @@ class McpJsonRpcClient {
   }
 
   private write(message: McpJsonRpcMessage): void {
-    const body = Buffer.from(JSON.stringify(message), "utf8");
-    this.child.stdin.write(`Content-Length: ${body.length}\r\n\r\n`);
-    this.child.stdin.write(body);
+    // MCP stdio transport is NEWLINE-DELIMITED JSON-RPC (one message per line),
+    // not LSP-style Content-Length framing. chrome-devtools-mcp ignores framed
+    // input's header line and replies with plain JSON lines — the previous
+    // Content-Length framing made `initialize` hang forever (US-BROW-019 probe
+    // caught this live; injected-spawn tests spoke the same wrong dialect on
+    // both sides and never noticed).
+    this.child.stdin.write(`${JSON.stringify(message)}\n`);
   }
 
   private onData(chunk: Buffer): void {
@@ -296,20 +300,19 @@ class McpJsonRpcClient {
   }
 
   private tryParseMessage(): McpJsonRpcMessage | undefined {
-    const sep = this.buffer.indexOf("\r\n\r\n");
-    if (sep < 0) return undefined;
-    const header = this.buffer.slice(0, sep).toString("utf8");
-    const length = /^Content-Length:\s*(\d+)$/im.exec(header)?.[1];
-    if (length === undefined) return undefined;
-    const bodyLength = Number.parseInt(length, 10);
-    const start = sep + 4;
-    if (this.buffer.length < start + bodyLength) return undefined;
-    const body = this.buffer.slice(start, start + bodyLength);
-    this.buffer = this.buffer.slice(start + bodyLength);
-    try {
-      return JSON.parse(body.toString("utf8")) as McpJsonRpcMessage;
-    } catch {
-      return undefined;
+    // Newline-delimited JSON-RPC: consume one \n-terminated line per message.
+    // Non-JSON lines (server logs on stdout) are skipped, not fatal.
+    while (true) {
+      const nl = this.buffer.indexOf("\n");
+      if (nl < 0) return undefined;
+      const line = this.buffer.slice(0, nl).toString("utf8").trim();
+      this.buffer = this.buffer.slice(nl + 1);
+      if (line === "") continue;
+      try {
+        return JSON.parse(line) as McpJsonRpcMessage;
+      } catch {
+        continue;
+      }
     }
   }
 

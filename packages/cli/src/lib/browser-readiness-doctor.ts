@@ -8,24 +8,26 @@
  * honest — a degraded/blocked lane can never read as a passing check.
  */
 import { deriveBrowserEnvironmentReadiness } from "@roll/core";
-import type { BrowserEnvironmentReadiness, BrowserLaneReadiness, BrowserLaneVerdict } from "@roll/spec";
+import type { BrowserEnvironmentReadiness, BrowserLaneReadiness, BrowserLaneVerdict, BrowserProbeResult } from "@roll/spec";
 import { probeBrowserEnvironment, defaultBrowserEnvironmentProbeDeps, type BrowserEnvironmentProbeDeps } from "@roll/infra";
 import { collectRollCaptureReadiness, type RollCaptureReadiness } from "./roll-capture-readiness.js";
 
 export function collectBrowserEnvironmentReadiness(
   captureReadiness: RollCaptureReadiness = collectRollCaptureReadiness(),
   probeDeps: BrowserEnvironmentProbeDeps = defaultBrowserEnvironmentProbeDeps(),
+  probeResult?: BrowserProbeResult,
 ): BrowserEnvironmentReadiness {
   const captureStatus = {
     status: captureReadiness.status,
     detail: captureReadiness.detailLines.join("; "),
   };
   const observations = probeBrowserEnvironment(captureStatus, probeDeps);
-  return deriveBrowserEnvironmentReadiness(observations);
+  return deriveBrowserEnvironmentReadiness(observations, probeResult);
 }
 
 function marker(verdict: BrowserLaneVerdict): string {
   if (verdict === "ready") return "✓";
+  if (verdict === "configured") return "○";
   if (verdict === "degraded") return "~";
   return "✗";
 }

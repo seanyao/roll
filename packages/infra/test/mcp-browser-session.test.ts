@@ -60,19 +60,17 @@ class FakeMcpChild extends EventEmitter {
   }
 
   private onData(chunk: Buffer): void {
+    // US-BROW-019: newline-delimited JSON-RPC — the REAL chrome-devtools-mcp
+    // dialect. The previous LSP-style Content-Length framing here matched an
+    // equally wrong client, so tests passed while the live probe hung.
     this.buffer = Buffer.concat([this.buffer, chunk]);
     while (true) {
-      const sep = this.buffer.indexOf("\r\n\r\n");
-      if (sep < 0) return;
-      const header = this.buffer.slice(0, sep).toString("utf8");
-      const length = /^Content-Length:\s*(\d+)$/im.exec(header)?.[1];
-      if (length === undefined) return;
-      const bodyLength = Number.parseInt(length, 10);
-      const start = sep + 4;
-      if (this.buffer.length < start + bodyLength) return;
-      const body = this.buffer.slice(start, start + bodyLength);
-      this.buffer = this.buffer.slice(start + bodyLength);
-      this.handleMessage(JSON.parse(body.toString("utf8")) as { id?: number; method?: string; params?: Record<string, unknown> });
+      const nl = this.buffer.indexOf("\n");
+      if (nl < 0) return;
+      const line = this.buffer.slice(0, nl).toString("utf8").trim();
+      this.buffer = this.buffer.slice(nl + 1);
+      if (line === "") continue;
+      this.handleMessage(JSON.parse(line) as { id?: number; method?: string; params?: Record<string, unknown> });
     }
   }
 
@@ -104,9 +102,7 @@ class FakeMcpChild extends EventEmitter {
 
   private reply(id: number | undefined, payload: { result?: unknown; error?: unknown }): void {
     if (id === undefined) return;
-    const body = Buffer.from(JSON.stringify({ jsonrpc: "2.0", id, ...payload }), "utf8");
-    this.stdout.write(`Content-Length: ${body.length}\r\n\r\n`);
-    this.stdout.write(body);
+    this.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, ...payload })}\n`);
   }
 }
 
@@ -260,7 +256,7 @@ describe("US-BROW-016 McpBrowserSession", () => {
 });
 
 describe("US-BROW-016 McpCdpTransportFactory", () => {
-  it("creates a CdpSession backed by the MCP session", async () => {
+  it("raw CDP proxying fails closed — the real server has no chrome_devtools_call tool (US-BROW-019)", async () => {
     const child = defaultChild();
     child.when("tools/call", () => ({
       content: [{ type: "text", text: JSON.stringify({ result: { value: "https://example.test/" } }) }],
@@ -268,9 +264,13 @@ describe("US-BROW-016 McpCdpTransportFactory", () => {
     const factory = new McpCdpTransportFactory({ now, spawn: fakeSpawn(child) });
 
     const session = await factory.create("run-2");
-    const result = await session.send("Runtime.evaluate", { expression: "window.location.href" });
-
-    expect(result).toEqual({ result: { value: "https://example.test/" } });
+    // chrome-devtools-mcp@1.5.0 exposes only typed tools (navigate_page,
+    // take_screenshot, …). The generic CDP proxy the old test fabricated does
+    // not exist, so the manifest rejects it — fail closed, never a silent
+    // passthrough to an unapproved tool name.
+    await expect(session.send("Runtime.evaluate", { expression: "window.location.href" })).rejects.toThrow(
+      /not approved by the manifest/,
+    );
   });
 });
 

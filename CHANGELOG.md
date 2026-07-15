@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### 外部行为验证(新能力:真实 smoke 不会被模拟冒充)
+- 验收报告新增醒目的"外部行为验证"横幅与表格:像"真实 `npm i -g github:...`、发布后 CLI 启动、线上 OAuth 回调"这类本地证明不了的 AC,现在必须声明 `external-smoke`(隔离环境跑真实命令)或 `owner-attested`(人工签字带批准引用)。只有真实 smoke 通过或有效 owner 认证才是绿色;`verified-in-simulation`(仅 `npm pack` 之类模拟)和 `UNVERIFIED — external smoke not run` 一律非绿,只要有一个外部 AC 不达标横幅就转红——交付不能夸大自己的外部行为 (US-ATTEST-017) `[core+cli]`
+  <!-- evidence: packages/core/test/fixtures/outward-verification/report.html -->
+- 外部 smoke 在隔离的临时 `HOME`/`PREFIX`/工作目录里运行,只执行 spec 里显式声明的命令模板;产物记录 exit code、版本和脱敏摘要,凭据从不落盘。任何真实发布或账号操作永不自动执行,没有声明的授权就不会跑;用 `ROLL_SMOKE_ENV=release`(或 `ci`/`nightly`)指向对应环境,环境不匹配报 `unverified` 而非静默跳过 (US-ATTEST-015/016/017) `[docs]`
+
 ### 浏览器操作(新能力:托管 Chrome DevTools)
 - Roll 现在能自己开一个隔离的 Chrome 去访问页面、做检查、收集诊断——用的是临时浏览器档案,碰不到你本人的登录态和 cookie,跑完即删。支持导航、DOM 断言、控制台/网络摘要和诊断截图,失败(超时/崩溃)会如实报告,绝不冒充测试通过 (US-BROW-001/002/004) `[cli]`
 - `roll browser setup --dry-run` 先看会装什么、`--confirm` 才真写配置;`roll browser doctor` 分三条通道(托管/交互/截图)报告就绪度,缺什么、怎么补,一目了然 (US-BROW-003) `[cli]`

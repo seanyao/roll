@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>US-DEMO-042 — Acceptance Review Page · 验收 Review Page</title>
+<style>
+
+:root { color-scheme: light; --bg:#eef1f5; --bg-raise:#fff; --fg:#161b26; --muted:#525c6e; --line:#e0e5ee; --accent:#2d54e8; --grain:transparent; --pass:#178a52; --info:#2d54e8; --warn:#c77d12; --claim:#c77d12; --fail:#d23b3b; --block:#7048bc; --teal:#0d9488; --serif:"IBM Plex Sans","IBM Plex Sans SC",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; --sans:"IBM Plex Sans","IBM Plex Sans SC",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace; }
+:root[data-theme="dark"] { color-scheme: dark; --bg:#10141d; --bg-raise:#181d29; --fg:#e6ebf4; --muted:#9aa3b2; --line:#2a3140; --accent:#5b82ff; --grain:transparent; --pass:#3ec07e; --info:#5b82ff; --warn:#e0a23c; --claim:#e0a23c; --fail:#ef5b4a; --block:#9b76e0; --teal:#2bb8a8; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { color-scheme: dark; --bg:#10141d; --bg-raise:#181d29; --fg:#e6ebf4; --muted:#9aa3b2; --line:#2a3140; --accent:#5b82ff; --grain:transparent; --pass:#3ec07e; --info:#5b82ff; --warn:#e0a23c; --claim:#e0a23c; --fail:#ef5b4a; --block:#9b76e0; --teal:#2bb8a8; } }
+html { background:var(--bg); }
+body { margin:0 auto; max-width:880px; padding:30px 20px 80px; background:var(--bg); color:var(--fg);
+  font:15px/1.7 var(--sans); -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }
+::selection { background:rgba(45,84,232,.16); }
+.kicker { font:600 11.5px/1 var(--mono); letter-spacing:.22em; text-transform:uppercase; color:var(--accent);
+  padding-top:10px; margin:0 0 10px; }
+h1 { font:600 26px/1.3 var(--sans); margin:0 0 4px; letter-spacing:-.01em; }
+h2 { font:600 17px/1.4 var(--sans); border-bottom:1px solid var(--line); padding-bottom:6px; letter-spacing:0; }
+code { font-family:var(--mono); background:color-mix(in srgb, var(--accent) 7%, transparent); padding:1px 6px; border-radius:4px; font-size:.9em; }
+pre { background:color-mix(in srgb, var(--fg) 4%, transparent); padding:12px; border-radius:6px; overflow-x:auto; }
+a { color:var(--accent); text-decoration-color:color-mix(in srgb, var(--accent) 40%, transparent); }
+section { border:1px solid var(--line); border-radius:8px; padding:14px 18px; margin:14px 0;
+  background:var(--bg-raise); position:relative; z-index:2; }
+.empty { color:var(--muted); font-style:italic; }
+.meta, .muted { color:var(--muted); font-size:13px; }
+footer { color:var(--muted); font-size:12.5px; font-family:var(--mono); letter-spacing:.04em;
+  margin-top:40px; border-top:1px solid var(--line); padding-top:12px; }
+/* language switching — no-JS/default renders exactly one language */
+html:not([data-lang]) .lang-zh { display:none; }
+[data-lang="en"] .lang-zh { display:none; } [data-lang="zh"] .lang-en { display:none; }
+/* chrome bar */
+.chrome { position:fixed; top:14px; right:14px; z-index:10; display:flex; gap:8px; font-family:var(--mono); }
+.chrome .seg { display:flex; border:1px solid var(--line); border-radius:999px; overflow:hidden;
+  background:color-mix(in srgb, var(--bg-raise) 82%, transparent); backdrop-filter:blur(6px); }
+.chrome button { all:unset; cursor:pointer; font-size:12px; line-height:1; padding:7px 11px; color:var(--muted); }
+.chrome button.on { background:var(--accent); color:#fff; }
+.chrome button:not(.on):hover { color:var(--fg); }
+@media print { body { max-width:none; padding:0; }  .chrome { display:none; }
+  section { break-inside:avoid; background:none; } }
+
+.badge { display:inline-block; padding:2px 10px; border-radius:999px; font-size:12.5px; border:1px solid var(--line); }
+.facts, .note { color:var(--muted); font-size:13px; }
+header.doc { position:relative; padding-right:96px; }
+.seal { position:absolute; right:0; top:2px; width:74px; height:74px; border:2px solid var(--accent);
+  border-radius:50%; transform:rotate(-12deg); color:var(--accent); font-family:var(--serif);
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;
+  font-size:17px; letter-spacing:.12em; opacity:.85; box-shadow:inset 0 0 0 2px transparent, inset 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); }
+.seal span { font-size:9.5px; letter-spacing:.34em; text-indent:.34em; }
+section.ac h3 { margin:0 0 6px; font-size:14.5px; }
+.s-pass { border-left:4px solid var(--pass); } .s-readonly { border-left:4px solid var(--info); }
+.s-partial { border-left:4px solid var(--warn); } .s-claimed { border-left:4px solid var(--claim); }
+.s-fail { border-left:4px solid var(--fail); } .s-blocked { border-left:4px solid var(--block); }
+.s-missing { border-left:4px solid var(--fail); }
+figure.shot { margin:10px 0; } figure.shot img { max-width:100%; border:1px solid var(--line); border-radius:6px; }
+figure.shot figcaption { color:var(--muted); font-size:12.5px; }
+.ev { margin:6px 0; font-size:13.5px; } .ev-label { color:var(--muted); font-size:12.5px; margin-bottom:4px; }
+.cast-replay { border:1px solid var(--line); border-radius:6px; padding:6px 12px; background:color-mix(in srgb, var(--fg) 3%, transparent); }
+.cast-replay summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
+.replay-video { margin:10px 0; } .replay-video video { width:100%; max-width:760px; border:1px solid var(--line); border-radius:6px; background:#000; }
+.replay-video figcaption { color:var(--muted); font-size:12.5px; }
+.doc-gap { border:1px dashed var(--warn); border-radius:8px; padding:8px 16px; margin-top:28px; }
+.doc-gap h2 { color:var(--warn); }
+.discrepancies { border:1px dashed var(--claim); border-radius:8px; padding:8px 16px; margin-top:28px; }
+details.reviewscore { margin-top:28px; border:1px solid var(--line); border-radius:8px; padding:8px 16px; background:var(--bg-raise); }
+details.reviewscore summary { cursor:pointer; font-weight:600; }
+details.reviewscore ul { margin:8px 0 4px; padding-left:18px; }
+.reviewscore-badge { display:inline-block; border:1px solid var(--line); border-radius:999px; padding:1px 8px; font-size:12px; font-weight:600; }
+.reviewscore-good { color:var(--pass); } .reviewscore-ok { color:var(--warn); } .reviewscore-regression { color:var(--fail); }
+.reviewscore-dims, .reviewscore-trend { color:var(--muted); font-size:12.5px; margin-top:4px; }
+.capture-skip { margin:8px 0; border:1px solid var(--line); border-radius:6px; padding:6px 12px; background:color-mix(in srgb, var(--fg) 3%, transparent); }
+.capture-skip summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
+.capture-skip pre { white-space:pre-wrap; font-size:12px; }
+.physical-capture { margin:8px 0; border:1px solid var(--line); border-radius:6px; padding:6px 12px; background:color-mix(in srgb, var(--fg) 3%, transparent); }
+.physical-capture summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
+.physical-links { font-size:12.5px; color:var(--muted); }
+details.tech { margin:8px 0 2px; border:1px solid var(--line); border-radius:6px; padding:6px 12px; background:color-mix(in srgb, var(--fg) 3%, transparent); }
+details.tech summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
+details.tech[open] summary { margin-bottom:6px; }
+section.card-context { padding:6px 18px 12px; }
+section.card-context .one-liner { font-size:15.5px; font-weight:600; }
+section.card-context .ctx-meta { color:var(--muted); font-size:13px; }
+dl.delivery { display:grid; grid-template-columns:auto 1fr; gap:2px 12px; margin:8px 0 0; font-size:13.5px; }
+dl.delivery dt { color:var(--muted); } dl.delivery dd { margin:0; }
+.before-after { margin:10px 0; } .before-after h3 { font-size:14px; margin:0 0 6px; }
+.ba-pair { display:flex; flex-wrap:wrap; gap:12px; } .ba-pair figure.shot { flex:1 1 280px; margin:0; }
+table.ev-index { width:100%; border-collapse:collapse; font-size:13px; margin-top:8px; }
+table.ev-index th, table.ev-index td { border:1px solid var(--line); padding:4px 8px; text-align:left; vertical-align:top; }
+table.ev-index th { color:var(--muted); font-weight:600; font-family:var(--serif); letter-spacing:.04em; }
+table.ev-index td a { word-break:break-all; }
+section.process-trace { margin-top:28px; padding:6px 18px 12px; }
+.delivery-mode { font-size:13.5px; color:var(--muted); }
+ol.timeline { list-style:none; margin:8px 0; padding:0; font-size:13.5px; }
+ol.timeline li { padding:3px 0 3px 10px; border-left:2px solid var(--line); }
+ol.timeline li.tl-signal { border-left:3px solid var(--info); font-weight:600; }
+ol.timeline li.tl-outline { color:var(--muted); }
+ol.timeline .tl-offset { display:inline-block; min-width:58px; color:var(--muted); font-variant-numeric:tabular-nums; font-size:12.5px; font-family:var(--mono); }
+.trace-missing { color:var(--warn); font-size:13px; }
+details.transcript { margin-top:8px; border:1px solid var(--line); border-radius:6px; padding:6px 12px; background:color-mix(in srgb, var(--fg) 3%, transparent); }
+details.transcript summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
+details.transcript .orig-path { font-size:12.5px; color:var(--muted); margin:6px 0; }
+section.closing { margin-top:32px; border:none; background:none; border-radius:0; padding:8px 0 0; border-top:3px double var(--line); }
+section.execution-cast { margin-top:24px; padding:6px 18px 12px; border:1px solid var(--line); border-radius:8px; background:var(--bg-raise); }
+section.execution-cast h2 { margin:0 0 4px; font-size:15px; }
+.cast-grid { display:grid; grid-template-columns:auto 1fr auto; gap:6px 12px; font-size:13.5px; }
+.cast-row { display:contents; }
+.cast-row > * { padding:3px 0; }
+.cast-role-label { color:var(--muted); font-weight:600; font-size:12.5px; white-space:nowrap; }
+.cast-agent { font-size:13px; }
+.cast-state { text-align:right; white-space:nowrap; }
+.cast-badge { display:inline-block; padding:1px 6px; border-radius:4px; font-size:12px; line-height:1.4; }
+.cast-ok { color:var(--pass); } .cast-fail { color:var(--fail); } .cast-warn { color:var(--warn); }
+.cast-pending { color:var(--info); } .cast-muted { color:var(--muted); }
+.cast-fail-text { color:var(--fail); font-size:12.5px; }
+.cast-links { margin:8px 0 0; font-size:12.5px; }
+.cast-links a { color:var(--accent); }
+section.outward-verification { margin:16px 0 8px; padding:6px 18px 12px; border:1px solid var(--line); border-radius:8px; background:var(--bg-raise); }
+section.outward-verification h2 { margin:0 0 6px; font-size:15px; }
+.ov-banner { font-size:13.5px; font-weight:600; border-radius:6px; padding:6px 12px; margin:6px 0 10px; }
+.ov-banner-warn { color:var(--fail); border:1px solid var(--fail); background:color-mix(in srgb, var(--fail) 10%, transparent); }
+.ov-banner-ok { color:var(--pass); border:1px solid var(--pass); background:color-mix(in srgb, var(--pass) 10%, transparent); }
+table.ov-table { width:100%; border-collapse:collapse; font-size:13px; }
+table.ov-table th, table.ov-table td { border:1px solid var(--line); padding:4px 8px; text-align:left; vertical-align:top; }
+table.ov-table th { color:var(--muted); font-weight:600; font-family:var(--serif); letter-spacing:.04em; }
+.ov-status { font-weight:600; }
+.ov-row.ov-verified .ov-status { color:var(--pass); }
+.ov-row.ov-simulation .ov-status { color:var(--claim); }
+.ov-row.ov-unverified .ov-status { color:var(--fail); }
+.ov-row.ov-failed .ov-status { color:var(--fail); }
+.ov-meta, .ov-detail { color:var(--muted); font-size:12.5px; margin-top:3px; }
+.ov-meta code { word-break:break-all; }
+.ansi { background: #11151c; color: #d8dee9; padding: 12px 14px; border-radius: 8px;
+  overflow-x: auto; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.ansi .a-bold { font-weight: 700; } .ansi .a-dim { opacity: .6; }
+.ansi .a-italic { font-style: italic; } .ansi .a-underline { text-decoration: underline; }
+.ansi .a-fg30 { color: #3b4252; } .ansi .a-fg31 { color: #e06c75; }
+.ansi .a-fg32 { color: #98c379; } .ansi .a-fg33 { color: #e5c07b; }
+.ansi .a-fg34 { color: #61afef; } .ansi .a-fg35 { color: #c678dd; }
+.ansi .a-fg36 { color: #56b6c2; } .ansi .a-fg37 { color: #d8dee9; }
+.ansi .a-fg90 { color: #6b7280; } .ansi .a-fg91 { color: #ef8790; }
+.ansi .a-fg92 { color: #b5e8a0; } .ansi .a-fg93 { color: #f0d197; }
+.ansi .a-fg94 { color: #8cc6ff; } .ansi .a-fg95 { color: #d9a0e8; }
+.ansi .a-fg96 { color: #7fd6e0; } .ansi .a-fg97 { color: #ffffff; }
+@media (prefers-color-scheme: light) {
+  .ansi { background: #f6f8fa; color: #24292f; }
+  .ansi .a-fg37 { color: #24292f; } .ansi .a-fg97 { color: #57606a; }
+}
+</style>
+<script>
+(function () {
+  var d = document.documentElement;
+  function get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  var lang = get("roll-lang") || ((navigator.language || "").toLowerCase().indexOf("zh") === 0 ? "zh" : "en");
+  var theme = get("roll-theme") || (window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  function apply() {
+    d.setAttribute("data-lang", lang);
+    d.setAttribute("lang", lang === "zh" ? "zh-CN" : "en");
+    d.setAttribute("data-theme", theme);
+    var bs = document.querySelectorAll("[data-set-lang],[data-set-theme]");
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i];
+      var on = b.getAttribute("data-set-lang") === lang || b.getAttribute("data-set-theme") === theme;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-pressed", String(on));
+    }
+  }
+  apply();
+  document.addEventListener("DOMContentLoaded", function () {
+    var bs = document.querySelectorAll("[data-set-lang],[data-set-theme]");
+    for (var i = 0; i < bs.length; i++) {
+      bs[i].addEventListener("click", function () {
+        var l = this.getAttribute("data-set-lang");
+        var t = this.getAttribute("data-set-theme");
+        if (l) { lang = l; set("roll-lang", l); }
+        if (t) { theme = t; set("roll-theme", t); }
+        apply();
+      });
+    }
+    apply();
+  });
+})();
+</script>
+</head>
+<body>
+<nav class="chrome" aria-label="page controls">
+<div class="seg" role="group" aria-label="language"><button type="button" data-set-lang="en">EN</button><button type="button" data-set-lang="zh">中</button></div>
+<div class="seg" role="group" aria-label="theme"><button type="button" data-set-theme="light" aria-label="light">☀</button><button type="button" data-set-theme="dark" aria-label="dark">☾</button></div>
+</nav>
+<header class="doc">
+<p class="kicker">Roll · <span class="lang-en">Acceptance Review Page</span><span class="lang-zh">验收 Review Page</span></p>
+<h1>US-DEMO-042 — Global git install channel</h1>
+<p class="meta"><code>US-DEMO-042</code> · <span class="lang-en">generated</span><span class="lang-zh">生成于</span> 2026-07-15T00:00:00Z · Gate: PASS</p>
+<div class="seal" aria-hidden="true"><span>ROLL</span>验讫</div>
+</header>
+
+<section id="execution-cast" class="execution-cast"><h2>🎭 <span class="lang-en">Execution Cast</span><span class="lang-zh">执行阵容</span></h2>
+<p class="text-muted"><span class="lang-en">Role summary unavailable — cycle did not produce a role cast.</span><span class="lang-zh">角色摘要不可用——cycle 未产生角色阵容。</span></p></section>
+<p><span class="badge s-pass">✅ <span class="lang-en">Pass</span><span class="lang-zh">通过</span> × 2</span> <span class="badge s-claimed">🟧 <span class="lang-en">Claimed</span><span class="lang-zh">仅声明</span> × 2</span></p>
+<section class="outward-verification">
+<h2><span class="lang-en">Outward verification</span><span class="lang-zh">外部行为验证</span></h2>
+<p class="ov-banner ov-banner-warn">⚠ <span class="lang-en">Outward verification incomplete — the AC(s) below are NOT green acceptance.</span><span class="lang-zh">外部行为验证未完成——下列 AC 不构成绿色验收。</span></p>
+<table class="ov-table"><thead><tr><th>AC</th><th><span class="lang-en">Mode</span><span class="lang-zh">模式</span></th><th><span class="lang-en">Result</span><span class="lang-zh">结果</span></th></tr></thead>
+<tbody><tr class="ov-row ov-simulation">
+<td><code>US-DEMO-042:AC3</code></td>
+<td>external-smoke</td>
+<td class="ov-result"><span class="ov-status">🟧 verified-in-simulation — simulation only, NOT accepted</span><div class="ov-meta">env <code>release</code> · <code>npm pack &amp;&amp; tar tf *.tgz</code></div><div class="ov-detail">local simulation passed but no external smoke results exist — this is not a positive verification</div></td>
+</tr>
+<tr class="ov-row ov-unverified">
+<td><code>US-DEMO-042:AC4</code></td>
+<td>external-smoke</td>
+<td class="ov-result"><span class="ov-status">🟥 UNVERIFIED — external smoke not run</span><div class="ov-meta">env <code>release</code> · <code>npm i -g github:owner/repo#&lt;commit&gt; &amp;&amp; repo --version</code></div><div class="ov-detail">no smoke results available for environment &quot;release&quot; and no local simulation evidence</div></td>
+</tr>
+<tr class="ov-row ov-verified">
+<td><code>US-DEMO-042:AC5</code></td>
+<td>external-smoke</td>
+<td class="ov-result"><span class="ov-status">✅ VERIFIED (external smoke)</span><div class="ov-meta">env <code>release</code> · <code>repo --version</code></div><div class="ov-detail">smoke passed</div></td>
+</tr>
+<tr class="ov-row ov-unverified">
+<td><code>US-DEMO-042:AC6</code></td>
+<td>owner-attested</td>
+<td class="ov-result"><span class="ov-status">🟥 UNVERIFIED — owner attestation pending</span><div class="ov-meta">ref <code>https://github.com/owner/repo/issues/1343</code></div><div class="ov-detail">manual OAuth callback verification at issue #1343 is pending</div></td>
+</tr></tbody></table>
+</section>
+<section class="ac s-pass" id="US-DEMO-042:AC1">
+<h3><span class="badge">✅ <span class="lang-en">Pass</span><span class="lang-zh">通过</span></span> <code>US-DEMO-042:AC1</code></h3>
+<p class="ac-text">The command parser accepts the new --channel flag.</p>
+
+<div class="ev ev-test-pass">cli parser suite green</div>
+
+</section>
+<section class="ac s-claimed" id="US-DEMO-042:AC3">
+<h3><span class="badge">🟧 <span class="lang-en">Claimed</span><span class="lang-zh">仅声明</span></span> <code>US-DEMO-042:AC3</code></h3>
+<p class="ac-text">npm pack produces a tarball with the documented bin entry.</p>
+<p class="note">verified-in-simulation only — npm pack passed, but no external install smoke ran.</p>
+<div class="ev ev-test-pass">npm pack simulation</div>
+
+</section>
+<section class="ac s-claimed" id="US-DEMO-042:AC4">
+<h3><span class="badge">🟧 <span class="lang-en">Claimed</span><span class="lang-zh">仅声明</span></span> <code>US-DEMO-042:AC4</code></h3>
+<p class="ac-text">npm i -g github:owner/repo#&lt;commit&gt; installs and starts in a clean directory.</p>
+<p class="note">external release smoke has not run in this environment.</p>
+
+
+</section>
+<section class="ac s-pass" id="US-DEMO-042:AC5">
+<h3><span class="badge">✅ <span class="lang-en">Pass</span><span class="lang-zh">通过</span></span> <code>US-DEMO-042:AC5</code></h3>
+<p class="ac-text">The published CLI prints its version on first run.</p>
+
+<div class="ev ev-test-pass">release smoke: r --version → 3.715.0</div>
+
+</section>
+
+
+
+
+
+<section class="closing">
+<h2><span class="lang-en">Quality gate</span><span class="lang-zh">质量门禁</span></h2>
+<p class="facts">TCR commits: <b>4</b> · CI: <b>success</b> · test-pass: <b>12s ago</b></p>
+<section class="evidence-index"><h2><span class="lang-en">Evidence index</span><span class="lang-zh">证据索引</span></h2>
+<table class="ev-index"><thead><tr><th>Kind</th><th>Label</th><th>Locator</th></tr></thead>
+<tbody><tr><td><code>test-pass</code></td><td>cli parser suite green</td><td>—</td></tr>
+<tr><td><code>test-pass</code></td><td>npm pack simulation</td><td>—</td></tr>
+<tr><td><code>test-pass</code></td><td>release smoke: r --version → 3.715.0</td><td>—</td></tr></tbody></table></section>
+</section>
+<footer>Roll · <span class="lang-en">Acceptance Review Page</span><span class="lang-zh">验收 Review Page</span> · <code>US-DEMO-042</code></footer>
+</body>
+</html>

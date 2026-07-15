@@ -97,6 +97,60 @@ roll attest audit --json
 表示 harness 基于硬盘上强证据做出的确认，明确不同于 agent 亲自确认的 `pass`。
 "我确认它能跑"这类口头完成，正是被这条红线挡住的东西。
 
+## 外部行为验证
+
+有些 AC 描述的是 Roll 在本地无法证明的行为——真实的
+`npm i -g github:owner/repo`、发布后 CLI 的首次启动、线上 OAuth 回调。构建成功
+或 `npm pack` 通过并**不能**证明这些；模拟不是外部承诺本身。把这类 AC 标为
+manual-only 再呈绿色，等同于用"未执行"替代"通过"。
+
+当一张故事或修复记录了外部安装 / 发布 / 登录渠道时，相关 AC 必须在 Evaluation
+契约里显式声明**一种**验证路径——Roll 从不从散文里猜"什么算外部"：
+
+```yaml
+expected_evidence:
+  - kind: external-smoke                     # 隔离环境里的真实命令
+    target: npm i -g github:owner/repo#<commit> && repo --version
+    proves: 文档里的 git 安装渠道能在全新目录真实安装并启动
+    outward:
+      mode: external-smoke
+      command: npm i -g github:owner/repo#<commit> && repo --version
+      environment: release                   # ci | nightly | release
+      timeout_sec: 180
+  - kind: owner-attested                     # smoke 无法覆盖时的人工签字
+    proves: 生产环境 OAuth 回调可往返
+    outward:
+      mode: owner-attested
+      reason: 需要真实第三方账号，没有安全的自动路径
+      approvalRef: https://github.com/owner/repo/issues/1343
+```
+
+attest 报告会在靠上位置渲染一个**外部行为验证**横幅与表格。只有真实 smoke 通过
+（或有效、未过期的 owner 认证）才是绿色：
+
+| 解析状态 | 报告文案 | 绿色？ |
+|----------|----------|--------|
+| `verified` | `VERIFIED (external smoke)` / `VERIFIED (owner-attested)` | 是 |
+| `verified-in-simulation` | `verified-in-simulation — simulation only, NOT accepted` | **否** |
+| `unverified-external` | `UNVERIFIED — external smoke not run`（或 `owner attestation pending`） | **否** |
+| `failed-external` | `FAILED — external smoke` | **否** |
+
+只要有一个外部 AC 不是 `verified`，横幅即转红——交付不能夸大自己的外部行为。
+`npm pack` 之类的模拟证据会保留并标注 `verified-in-simulation`，但绝不替代真实 smoke。
+
+### 发版 / nightly smoke 环境搭建
+
+外部 smoke 在**隔离**环境里运行——全新的临时 `HOME`/`PREFIX`/工作目录，只执行
+spec 中显式声明的命令模板与受控变量。产物记录 exit code、版本、脱敏后的
+stdout/stderr 摘要；凭据从不落盘。
+
+用 `ROLL_SMOKE_ENV=release`（或 `ci` / `nightly`）把运行器指向对应环境；声明的
+`environment` 与当前环境不匹配时会被报为 `unverified`，绝不静默跳过。**任何真实
+发布或账号操作永不自动执行**：凡是推送包、改动远端账号或产生费用的动作，没有声明
+的授权（你写进 spec 的 `external-smoke` 命令，或一条 `owner-attested` 批准引用）
+就不会跑。若没有匹配的 smoke 环境，AC 保持 `unverified`、报告保持非绿——绝不会被
+自动升级成手工通过。
+
 ## 设计期声明可视证据
 
 `roll story validate` 在设计期就检查一张卡是否**生而诚实**——带可视证据 AC，

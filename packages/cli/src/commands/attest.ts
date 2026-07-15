@@ -32,6 +32,8 @@ import {
   boundTranscript,
   classifyOutwardStatusForReport,
   outwardAcStatusFromVerification,
+  buildOutwardEvidenceMap,
+  resolveOutwardVerificationStatus,
   EventBus,
   extractCycleSignals,
   smokeCheckReport,
@@ -45,6 +47,7 @@ import {
   type ProcessArchive,
   type RunRow,
   type ReviewScoreReportEntry,
+  type OutwardAcReport,
 } from "@roll/core";
 import {
   ROLL_CAPTURE_PROTOCOL_V1,
@@ -1501,6 +1504,10 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   // Outward AC statuses override the ac-map (verified-in-simulation or
   // unverified-external must never render as green).
   let outwardOverrides: Map<string, AcStatus> | null = null;
+  // US-ATTEST-017 — the prominent outward-verification banner + table. Built
+  // from the resolver so the report shows mode + result for every outward AC,
+  // never letting simulation-only or skipped smoke read as green.
+  let outwardReport: OutwardAcReport[] | null = null;
   try {
     const evaluationContract = parseEvaluationContract(featureText);
     if (evaluationContract !== null) {
@@ -1508,6 +1515,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
       const smokeEntries = evaluationContract.expected_evidence
         .filter((item) => item.kind === "external-smoke" && item.outward?.mode === "external-smoke")
         .map((item) => ({ proves: item.proves, outward: item.outward as OutwardSmokeDeclaration }));
+      let smokeResults: ReturnType<typeof smokeResultsFromReport> = [];
       if (smokeEntries.length > 0) {
         const smokeDecls = smokeEntries.map((e) => e.outward);
         // Build command → AC ID map for the runner
@@ -1525,7 +1533,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
           currentEnvironment: smokeEnv,
           artifactDir: smokeDir,
         });
-        const smokeResults = smokeResultsFromReport(report);
+        smokeResults = smokeResultsFromReport(report);
         const classification = classifyOutwardStatusForReport(
           { expected_evidence: evaluationContract.expected_evidence },
           smokeResults,
@@ -1538,6 +1546,29 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
             outwardOverrides.set(ac, outwardAcStatusFromVerification(status));
           }
         }
+      }
+      // Build the prominent per-AC outward report from every outward
+      // declaration (external-smoke AND owner-attested), not just smoke.
+      const outwardMap = buildOutwardEvidenceMap({ expected_evidence: evaluationContract.expected_evidence });
+      if (Object.keys(outwardMap).length > 0) {
+        const resolved = resolveOutwardVerificationStatus(outwardMap, smokeResults, [], []);
+        outwardReport = resolved.map((r) => {
+          const decl = outwardMap[r.ac];
+          const base: OutwardAcReport = {
+            ac: r.ac,
+            mode: decl?.mode === "owner-attested" ? "owner-attested" : "external-smoke",
+            status: r.status,
+          };
+          if (decl?.mode === "external-smoke") {
+            base.environment = decl.environment;
+            base.command = decl.command;
+          } else if (decl?.mode === "owner-attested") {
+            base.approvalRef = decl.approvalRef;
+          }
+          const detail = r.failureDetail ?? r.note ?? r.smokeArtifact?.summary;
+          if (detail !== undefined && detail !== "") base.detail = detail;
+          return base;
+        });
       }
     }
   } catch (e) {
@@ -1626,6 +1657,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
       ? { captureSkips: captureFacts.filter((x) => !x.taken && x.skipped !== undefined).map((x) => ({ kind: x.kind, out: x.out, skipped: x.skipped ?? "" })) }
       : {}),
     ...((() => { const d = designContractDeliveredEvidence(projectPath, storyId); return d !== "" ? { evidenceDeltaSummary: d } : {}; })()),
+    ...(outwardReport !== null && outwardReport.length > 0 ? { outwardVerification: outwardReport } : {}),
   });
   const reviewPath = join(runDir, reviewFileName(storyId));
   writeFileSync(reviewPath, html);

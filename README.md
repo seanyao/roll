@@ -283,6 +283,15 @@ to find dangling evidence references and `evidence_debt` rows. See
 [Acceptance evidence](guide/en/acceptance-evidence.md) and
 [Loop failure handling](guide/en/loop.md#failure-attribution-and-pauses).
 
+Behavior Roll cannot prove locally — a real `npm i -g github:...`, a published
+CLI's first run, a live OAuth callback — must declare an `external-smoke` or
+`owner-attested` verification path. The attest report shows an **Outward
+verification** banner: only a real smoke pass (or valid owner attestation) is
+green; `verified-in-simulation` (e.g. `npm pack`) and `UNVERIFIED — external
+smoke not run` are never green, so acceptance cannot overstate outward behavior.
+No real publish or account action ever runs without a declared authority. See
+[Outward behavior verification](guide/en/acceptance-evidence.md#outward-behavior-verification).
+
 `roll supervisor live` is the shipped CLI-first multi-role board. It prints a
 one-frame snapshot for scripts and quick inspection; `roll supervisor live --watch`
 keeps the same board open and redraws it in-place from the same event-backed view

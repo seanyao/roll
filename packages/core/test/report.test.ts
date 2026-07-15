@@ -605,3 +605,89 @@ describe("US-OBS-034 — Execution Cast in attest report", () => {
     expect(html).toContain("bad &lt;score&gt;");
   });
 });
+
+describe("US-ATTEST-017 — outward verification is never silently green", () => {
+  const outItem = { ...BASE, items: [item({ evidence: [{ kind: "test-pass" as const, label: "suite green" }] })] };
+
+  it("renders the unverified-external non-green line and warning banner", () => {
+    const html = renderReport({
+      ...outItem,
+      outwardVerification: [
+        { ac: "US-X-001:AC4", mode: "external-smoke", status: "unverified-external", environment: "release", command: "npm i -g github:o/r && r --version" },
+      ],
+    });
+    expect(html).toContain("Outward verification");
+    expect(html).toContain("UNVERIFIED — external smoke not run");
+    expect(html).toContain('class="ov-banner ov-banner-warn"');
+    expect(html).not.toContain('class="ov-banner ov-banner-ok"');
+    // the row carries the non-green class, not a pass class
+    expect(html).toContain("ov-row ov-unverified");
+  });
+
+  it("renders verified-in-simulation distinctly and still non-green", () => {
+    const html = renderReport({
+      ...outItem,
+      outwardVerification: [
+        { ac: "US-X-001:AC4", mode: "external-smoke", status: "verified-in-simulation", environment: "release", command: "npm pack" },
+      ],
+    });
+    expect(html).toContain("verified-in-simulation");
+    expect(html).toContain("simulation only, NOT accepted");
+    expect(html).toContain('class="ov-banner ov-banner-warn"');
+    expect(html).toContain("ov-row ov-simulation");
+  });
+
+  it("all-verified shows the green complete banner", () => {
+    const html = renderReport({
+      ...outItem,
+      outwardVerification: [
+        { ac: "US-X-001:AC4", mode: "external-smoke", status: "verified", environment: "release", command: "r --version", detail: "smoke passed" },
+      ],
+    });
+    expect(html).toContain('class="ov-banner ov-banner-ok"');
+    expect(html).not.toContain('class="ov-banner ov-banner-warn"');
+    expect(html).toContain("VERIFIED (external smoke)");
+  });
+
+  it("owner-attested unverified reads 'owner attestation pending', not smoke wording", () => {
+    const html = renderReport({
+      ...outItem,
+      outwardVerification: [
+        { ac: "US-X-001:AC5", mode: "owner-attested", status: "unverified-external", approvalRef: "gh#1343" },
+      ],
+    });
+    expect(html).toContain("UNVERIFIED — owner attestation pending");
+    expect(html).toContain('class="ov-banner ov-banner-warn"');
+    expect(html).toContain("gh#1343");
+  });
+
+  it("mixed states — a single unverified AC forces the whole banner non-green", () => {
+    const html = renderReport({
+      ...outItem,
+      outwardVerification: [
+        { ac: "US-X-001:AC3", mode: "external-smoke", status: "verified", environment: "ci", command: "r --help" },
+        { ac: "US-X-001:AC4", mode: "external-smoke", status: "unverified-external", environment: "release", command: "npm i -g github:o/r" },
+      ],
+    });
+    expect(html).toContain('class="ov-banner ov-banner-warn"');
+    expect(html).not.toContain('class="ov-banner ov-banner-ok"');
+    expect(html).toContain("VERIFIED (external smoke)");
+    expect(html).toContain("UNVERIFIED — external smoke not run");
+  });
+
+  it("absent/empty outward verification trims the section entirely", () => {
+    expect(renderReport(outItem)).not.toContain("Outward verification");
+    expect(renderReport({ ...outItem, outwardVerification: [] })).not.toContain("Outward verification");
+  });
+
+  it("escapes the smoke command (no HTML injection)", () => {
+    const html = renderReport({
+      ...outItem,
+      outwardVerification: [
+        { ac: "US-X-001:AC4", mode: "external-smoke", status: "unverified-external", command: "r <script>x</script>" },
+      ],
+    });
+    expect(html).not.toContain("<script>x</script>");
+    expect(html).toContain("&lt;script&gt;x&lt;/script&gt;");
+  });
+});

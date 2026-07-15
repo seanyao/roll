@@ -16,6 +16,7 @@ import type {
   BrowserEnvironmentObservations,
   BrowserEnvironmentReadiness,
   BrowserLaneReadiness,
+  BrowserProbeResult,
 } from "@roll/spec";
 
 /** The exact, owner-approved managed DevTools MCP package. The
@@ -31,6 +32,9 @@ export const MANAGED_DEVTOOLS_REMOTE_DEBUG_PORT = 9222;
 
 function ready(lane: BrowserLaneReadiness["lane"], reason: string): BrowserLaneReadiness {
   return { lane, verdict: "ready", reason, actions: [] };
+}
+function configured(lane: BrowserLaneReadiness["lane"], reason: string): BrowserLaneReadiness {
+  return { lane, verdict: "configured", reason, actions: [] };
 }
 function degraded(lane: BrowserLaneReadiness["lane"], reason: string, actions: string[]): BrowserLaneReadiness {
   return { lane, verdict: "degraded", reason, actions };
@@ -66,7 +70,37 @@ function deriveManaged(obs: BrowserEnvironmentObservations): BrowserLaneReadines
       ["roll browser setup --dry-run", "install the missing dependency, then re-run roll browser doctor"],
     );
   }
-  return ready("managed", "node / chrome / devtools package / profile cleanup preflight passed");
+  // US-BROW-019: static config present but no live probe — configured, not ready.
+  // Only a successful `--probe` can advance the verdict to `ready`.
+  return configured(
+    "managed",
+    "static configuration: node / chrome / devtools package present — run `roll browser doctor --probe` to verify real MCP lane readiness",
+  );
+}
+
+/**
+ * Apply a live MCP probe result to the managed lane verdict.
+ * Only a passed probe (initialize + manifest match + cleanup) advances from
+ * `configured` to `ready`. A failed probe returns `degraded` with categorized
+ * failures; the static verdict is unchanged.
+ */
+export function applyManagedProbe(
+  base: BrowserLaneReadiness,
+  probe: BrowserProbeResult,
+): BrowserLaneReadiness {
+  if (probe.kind === "passed") {
+    return ready(
+      "managed",
+      `real MCP lane verified — ${probe.version}, ${probe.tools.length} tools confirmed, temporary profile cleaned up`,
+    );
+  }
+  // Categorized failures: never a false pass.
+  const failureLines = probe.failures.map((f) => `${f.category}: ${f.message}`);
+  return degraded(
+    "managed",
+    `live probe failed — ${failureLines.join("; ")}`,
+    ["review the failure category above and verify Chrome / MCP setup", "re-run roll browser doctor --probe after repair"],
+  );
 }
 
 function deriveInteractive(obs: BrowserEnvironmentObservations): BrowserLaneReadiness {
@@ -140,12 +174,21 @@ function toObservationList(obs: BrowserEnvironmentObservations): BrowserDependen
   ];
 }
 
-/** Turn raw observations into the per-lane readiness aggregate. Pure. */
-export function deriveBrowserEnvironmentReadiness(obs: BrowserEnvironmentObservations): BrowserEnvironmentReadiness {
+/** Turn raw observations into the per-lane readiness aggregate. When a probe
+ *  result is supplied, the managed lane is advanced from configured → ready or
+ *  degraded per the live probe outcome. */
+export function deriveBrowserEnvironmentReadiness(
+  obs: BrowserEnvironmentObservations,
+  probeResult?: BrowserProbeResult,
+): BrowserEnvironmentReadiness {
+  const managed = probeResult !== undefined
+    ? applyManagedProbe(deriveManaged(obs), probeResult)
+    : deriveManaged(obs);
   return {
-    managed: deriveManaged(obs),
+    managed,
     interactive: deriveInteractive(obs),
     capture: deriveCapture(obs),
     observations: toObservationList(obs),
+    ...(probeResult !== undefined ? { probeResult } : {}),
   };
 }

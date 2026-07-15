@@ -114,6 +114,66 @@ renderer forces it down to 🟧 Claimed and lists it under **Discrepancies**.
 evidence; it is explicitly not the same as an agent-confirmed `pass`. Verbal
 completion ("I confirmed it works") is exactly what this rules out.
 
+## Outward behavior verification
+
+Some ACs describe behavior Roll cannot prove locally — a real
+`npm i -g github:owner/repo`, a published CLI's first run, a live OAuth
+callback. A build or `npm pack` succeeding does **not** prove any of these; a
+simulation is not the outward promise. Marking such an AC "manual-only" and
+letting it render green is the same as substituting *not run* for *passed*.
+
+When a story or fix documents an external install / publish / login channel, the
+relevant AC must declare **one** explicit verification path in its Evaluation
+contract — Roll never infers "outward" from prose:
+
+```yaml
+expected_evidence:
+  - kind: external-smoke                     # real command in an isolated env
+    target: npm i -g github:owner/repo#<commit> && repo --version
+    proves: the documented git-install channel installs and starts clean
+    outward:
+      mode: external-smoke
+      command: npm i -g github:owner/repo#<commit> && repo --version
+      environment: release                   # ci | nightly | release
+      timeout_sec: 180
+  - kind: owner-attested                     # human sign-off when no smoke can cover it
+    proves: the production OAuth callback round-trips
+    outward:
+      mode: owner-attested
+      reason: needs a real third-party account; no safe automated path exists
+      approvalRef: https://github.com/owner/repo/issues/1343
+```
+
+The attest report renders an **Outward verification** banner and table near the
+top. Only a real smoke pass (or a valid, unexpired owner attestation) is green:
+
+| Resolved state | Report line | Green? |
+|----------------|-------------|--------|
+| `verified` | `VERIFIED (external smoke)` / `VERIFIED (owner-attested)` | yes |
+| `verified-in-simulation` | `verified-in-simulation — simulation only, NOT accepted` | **no** |
+| `unverified-external` | `UNVERIFIED — external smoke not run` (or `owner attestation pending`) | **no** |
+| `failed-external` | `FAILED — external smoke` | **no** |
+
+A single non-`verified` outward AC turns the banner red — the delivery cannot
+overstate its outward behavior. `npm pack`–style simulation evidence is kept and
+labeled `verified-in-simulation`, but it never substitutes for a real smoke.
+
+### Release / nightly smoke setup
+
+External smoke runs in an **isolated** environment — a fresh temporary
+`HOME`/`PREFIX`/working directory — and executes only the exact command template
+declared in the spec, with controlled variables. Its artifact records exit code,
+version, and a redacted stdout/stderr summary; credentials are never written.
+
+Point the runner at an environment with `ROLL_SMOKE_ENV=release` (or `ci` /
+`nightly`); a declaration whose `environment` does not match the current one is
+reported `unverified`, never silently skipped. **No real publish or account
+action is ever automatic**: nothing that pushes a package, mutates a remote
+account, or spends money runs without a declared authority (an `external-smoke`
+command you wrote into the spec, or an `owner-attested` approval reference). If no
+matching smoke environment exists, the AC stays `unverified` and the report stays
+non-green — it is never auto-promoted to a manual pass.
+
 ## Declaring visual evidence at design time
 
 `roll story validate` checks, at design time, that a spec is *born* with a

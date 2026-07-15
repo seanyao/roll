@@ -21,7 +21,7 @@
  * Deletion-not-placeholder: the screenshot <figure> renders ONLY when a
  * screenshot evidence ref exists (no placeholder image, no warning text — D6).
  */
-import { type CycleRoleSummary, type CycleRoleName, type CycleRoleAttemptState } from "@roll/spec";
+import { type CycleRoleSummary, type CycleRoleName, type CycleRoleAttemptState, type OutwardVerificationStatus } from "@roll/spec";
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "../html/chrome.js";
 import { ANSI_CSS } from "./ansi-html.js";
 import { buildExecutionCastProjection, type ExecutionCastRow } from "./execution-cast.js";
@@ -133,6 +133,29 @@ export interface ProcessArchive {
   missing?: string[];
 }
 
+/**
+ * US-ATTEST-017 — one outward AC's resolved verification, rendered prominently
+ * so a human operator can never mistake a simulation pass or a skipped external
+ * smoke for green acceptance. `status` is the resolved outcome from
+ * `@roll/core`'s outward resolver (US-ATTEST-015); only `verified` is green.
+ */
+export interface OutwardAcReport {
+  /** The AC id (e.g. `US-X-001:AC4`). */
+  ac: string;
+  /** How this AC declared it would be verified. */
+  mode: "external-smoke" | "owner-attested";
+  /** Resolved outcome — drives the badge and the (non-)green line. */
+  status: OutwardVerificationStatus;
+  /** external-smoke: the declared environment (ci/nightly/release). */
+  environment?: string;
+  /** external-smoke: the smoke command template (never credentials). */
+  command?: string;
+  /** owner-attested: the traceable approval reference. */
+  approvalRef?: string;
+  /** Human-readable resolver note / failure detail / smoke summary. */
+  detail?: string;
+}
+
 export const REVIEW_SCORE_LOW_THRESHOLD = 5;
 
 export interface ReviewScoreReportEntry {
@@ -220,6 +243,11 @@ export interface ReportInput {
    *  Evaluation contract block. Empty string or absent => section trimmed
    *  (legacy specs degrade gracefully). */
   evidenceDeltaSummary?: string;
+  /** US-ATTEST-017 — outward AC verification, rendered as a prominent banner +
+   *  table near the head of the report. Empty/absent ⇒ section trimmed (legacy
+   *  stories with no outward ACs render nothing). Any non-`verified` entry
+   *  forces the banner into its non-green state. */
+  outwardVerification?: OutwardAcReport[];
 }
 
 const BADGE: Record<AcStatus, { icon: string; en: string; zh: string; cls: string }> = {
@@ -314,6 +342,87 @@ function cardContextBlock(ctx: CardContext | undefined): string {
   if (delivery !== "") rows.push(delivery);
   if (rows.length === 0) return "";
   return `<section class="card-context"><h2>${bi("Context", "卡上下文")}</h2>\n${rows.join("\n")}\n</section>`;
+}
+
+/**
+ * US-ATTEST-017 — outward verification banner + table. Rendered near the head of
+ * the report so a human operator sees the real-vs-simulated distinction before
+ * scrolling into per-AC evidence. THE RED LINE: any status other than `verified`
+ * is visibly non-green and the banner reads "incomplete". `verified-in-simulation`
+ * and `unverified-external` never present as positive acceptance (AC1). The block
+ * is trimmed entirely when there are no outward ACs.
+ */
+interface OutwardStatusRender {
+  icon: string;
+  line: string;
+  cls: string;
+  green: boolean;
+}
+function outwardStatusRender(o: OutwardAcReport): OutwardStatusRender {
+  switch (o.status) {
+    case "verified":
+      return {
+        icon: "✅",
+        line: o.mode === "owner-attested" ? "VERIFIED (owner-attested)" : "VERIFIED (external smoke)",
+        cls: "ov-verified",
+        green: true,
+      };
+    case "verified-in-simulation":
+      return {
+        icon: "🟧",
+        line: "verified-in-simulation — simulation only, NOT accepted",
+        cls: "ov-simulation",
+        green: false,
+      };
+    case "failed-external":
+      return { icon: "❌", line: "FAILED — external smoke", cls: "ov-failed", green: false };
+    case "unverified-external":
+    default:
+      return {
+        icon: "🟥",
+        line: o.mode === "owner-attested" ? "UNVERIFIED — owner attestation pending" : "UNVERIFIED — external smoke not run",
+        cls: "ov-unverified",
+        green: false,
+      };
+  }
+}
+function outwardVerificationBlock(entries: ReportInput["outwardVerification"]): string {
+  if (entries === undefined || entries.length === 0) return "";
+  const anyNonGreen = entries.some((e) => outwardStatusRender(e).green === false);
+  const banner = anyNonGreen
+    ? `<p class="ov-banner ov-banner-warn">⚠ ${bi(
+        "Outward verification incomplete — the AC(s) below are NOT green acceptance.",
+        "外部行为验证未完成——下列 AC 不构成绿色验收。",
+      )}</p>`
+    : `<p class="ov-banner ov-banner-ok">✅ ${bi(
+        "Outward verification complete — every external AC ran real smoke or a valid owner attestation.",
+        "外部行为验证已完成——每个外部 AC 都跑过真实 smoke 或持有有效的 owner 认证。",
+      )}</p>`;
+  const rows = entries
+    .map((e) => {
+      const r = outwardStatusRender(e);
+      const meta: string[] = [];
+      if (e.mode === "external-smoke") {
+        if (e.environment !== undefined && e.environment !== "") meta.push(`env <code>${esc(e.environment)}</code>`);
+        if (e.command !== undefined && e.command !== "") meta.push(`<code>${esc(e.command)}</code>`);
+      } else {
+        if (e.approvalRef !== undefined && e.approvalRef !== "") meta.push(`ref <code>${esc(e.approvalRef)}</code>`);
+      }
+      const metaHtml = meta.length > 0 ? `<div class="ov-meta">${meta.join(" · ")}</div>` : "";
+      const detail = e.detail !== undefined && e.detail !== "" ? `<div class="ov-detail">${esc(e.detail)}</div>` : "";
+      return `<tr class="ov-row ${r.cls}">
+<td><code>${esc(e.ac)}</code></td>
+<td>${esc(e.mode)}</td>
+<td class="ov-result"><span class="ov-status">${r.icon} ${esc(r.line)}</span>${metaHtml}${detail}</td>
+</tr>`;
+    })
+    .join("\n");
+  return `<section class="outward-verification">
+<h2>${bi("Outward verification", "外部行为验证")}</h2>
+${banner}
+<table class="ov-table"><thead><tr><th>AC</th><th>${bi("Mode", "模式")}</th><th>${bi("Result", "结果")}</th></tr></thead>
+<tbody>${rows}</tbody></table>
+</section>`;
 }
 
 function acSection(item: AcReportItem): string {
@@ -814,6 +923,21 @@ section.execution-cast h2 { margin:0 0 4px; font-size:15px; }
 .cast-fail-text { color:var(--fail); font-size:12.5px; }
 .cast-links { margin:8px 0 0; font-size:12.5px; }
 .cast-links a { color:var(--accent); }
+section.outward-verification { margin:16px 0 8px; padding:6px 18px 12px; border:1px solid var(--line); border-radius:8px; background:var(--bg-raise); }
+section.outward-verification h2 { margin:0 0 6px; font-size:15px; }
+.ov-banner { font-size:13.5px; font-weight:600; border-radius:6px; padding:6px 12px; margin:6px 0 10px; }
+.ov-banner-warn { color:var(--fail); border:1px solid var(--fail); background:color-mix(in srgb, var(--fail) 10%, transparent); }
+.ov-banner-ok { color:var(--pass); border:1px solid var(--pass); background:color-mix(in srgb, var(--pass) 10%, transparent); }
+table.ov-table { width:100%; border-collapse:collapse; font-size:13px; }
+table.ov-table th, table.ov-table td { border:1px solid var(--line); padding:4px 8px; text-align:left; vertical-align:top; }
+table.ov-table th { color:var(--muted); font-weight:600; font-family:var(--serif); letter-spacing:.04em; }
+.ov-status { font-weight:600; }
+.ov-row.ov-verified .ov-status { color:var(--pass); }
+.ov-row.ov-simulation .ov-status { color:var(--claim); }
+.ov-row.ov-unverified .ov-status { color:var(--fail); }
+.ov-row.ov-failed .ov-status { color:var(--fail); }
+.ov-meta, .ov-detail { color:var(--muted); font-size:12.5px; margin-top:3px; }
+.ov-meta code { word-break:break-all; }
 ${ANSI_CSS}
 </style>
 ${CHROME_SCRIPT}
@@ -829,6 +953,7 @@ ${CHROME_CONTROLS}
 ${cardContextBlock(input.context)}
 ${executionCastBlock(input.cycleRoleSummary, input.cycleRoleSummaryHref, input.cycleRoleArtifactHrefs)}
 <p>${summary}</p>
+${outwardVerificationBlock(input.outwardVerification)}
 ${items.map(acSection).join("\n")}
 ${beforeAfterBlock(input.beforeAfter, input.afterOnly)}
 ${selfCaptureBlock(input.selfCaptures)}

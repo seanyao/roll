@@ -489,3 +489,54 @@ export interface BrowserOperationsTruth {
   capture: BrowserOperationTruthFact;
   collectedAt: string;
 }
+
+// ── US-BROW-013 — optional browser-operations timeline projection ─────────
+
+/** Timeline event kinds derived from declared ledger / capture facts only. */
+export type BrowserTimelineEventKind =
+  | "operation-start"
+  | "operation-finish"
+  | "lease-grant"
+  | "lease-expiry"
+  | "lease-release"
+  | "physical-capture";
+
+/** Presence of a timeline fact. Absent/unknown never invent a stamp or verdict. */
+export type BrowserTimelineFactPresence = "present" | "absent" | "unknown";
+
+/** Handle that the dossier may link when the viewer is authorized. */
+export interface BrowserTimelineArtifactRef {
+  kind: "diagnostic" | "physical-capture";
+  /** Stable id used to resolve an authorized dossier href. */
+  id: string;
+  label: string;
+}
+
+/** One compact timeline row for the dossier browser-operations surface. */
+export interface BrowserTimelineRow {
+  kind: BrowserTimelineEventKind;
+  presence: BrowserTimelineFactPresence;
+  /** ISO timestamp when the fact is present — never invented for absent rows. */
+  ts?: string;
+  label: string;
+  /** Terminal summary when present, or the honest reason when absent/unknown. */
+  detail?: string;
+  runId?: string;
+  leaseId?: string;
+  /** Artifact/evidence handle; dossier emits a link only under existing auth rules. */
+  artifact?: BrowserTimelineArtifactRef;
+}
+
+/**
+ * Read-only timeline projection: chronological present facts plus reason-only
+ * absences. Ordering is derived from declared timestamps — never invented.
+ */
+export interface BrowserOperationsTimeline {
+  /** Chronological present facts, ordered by declared `ts` ascending. */
+  rows: BrowserTimelineRow[];
+  /** Categories with no declared facts — reason-only, no invented position. */
+  absences: BrowserTimelineRow[];
+  /** True when at least one present chronological fact exists. */
+  hasFacts: boolean;
+  collectedAt: string;
+}

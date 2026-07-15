@@ -2,9 +2,17 @@
 
 ## Unreleased
 
-### 浏览器操作
+### 浏览器操作(新能力:托管 Chrome DevTools)
+- Roll 现在能自己开一个隔离的 Chrome 去访问页面、做检查、收集诊断——用的是临时浏览器档案,碰不到你本人的登录态和 cookie,跑完即删。支持导航、DOM 断言、控制台/网络摘要和诊断截图,失败(超时/崩溃)会如实报告,绝不冒充测试通过 (US-BROW-001/002/004) `[cli]`
+- `roll browser setup --dry-run` 先看会装什么、`--confirm` 才真写配置;`roll browser doctor` 分三条通道(托管/交互/截图)报告就绪度,缺什么、怎么补,一目了然 (US-BROW-003) `[cli]`
+- 需要在你已登录的 Chrome 上做一次验证?`roll browser interactive` 走全新的"租约"流程:必须你本人在终端逐次批准(显示要访问哪个站、做什么、多久过期),一次 15 分钟、仅限本机连接,后台任务借不走;到期/取消/进程挂掉都只断开调试连接、绝不关你的浏览器,也读不走 cookie 和密码 (US-BROW-008) `[cli]`
+- 浏览器操作全程记账:并发加锁、租约心跳、诊断信息自动脱敏,谁在什么时候对哪个站做了什么都有据可查 (US-BROW-005) `[loop]`
+- 浏览器产出的证据分类明确:DevTools 截图只算诊断参考,正式视觉验收仍然只认 Roll Capture 的物理截图,两者不会混淆 (US-BROW-006) `[loop]`
+- `roll supervisor next`、`roll doctor --tools` 和故事档案页现在显示浏览器三通道的就绪状态(含租约剩余时间和不可用原因);档案页新增浏览器操作时间线。查不到的事实诚实显示 unknown,绝不把"没记录"当"通过" (US-BROW-009/013) `[cli]`
+- 性能诊断和设备仿真作为可选档位加入托管通道:`roll browser run --perf-profile` 收集页面性能摘要,`--profile "Pixel 7"` 等按设备档仿真,均为诊断用途 (US-BROW-012/014) `[cli]`
 - 更新浏览器操作文档，正式发布交互式 owner-Chrome 通道：需预先开启本地 loopback 远程调试、前台 TTY 单次 owner 批准、15 分钟租约到期/取消、owner-run manual-attest；并明确说明不支持后台调度器、远程端点、cookie 导出和自动启动 Chrome (US-BROW-011) `[docs]`
 - `roll browser update --check` 报告当前 DevTools 传输包版本与可用候选版本（只读，不下载、不安装、不改配置）；`roll browser update --apply --confirm` 经显式确认后执行原子更新，更新前运行冒烟检查，失败则保留原版本 (US-BROW-010) `[cli]`
+- 托管与可选浏览器能力的使用文档齐备(setup/doctor/run/性能/设备仿真) (US-BROW-007/015) `[docs]`
 
 ### 稳定性
 - 无验收清单的卡不再被误拦导致无法 publish；缺少验收证据时循环会把工作明确挂起待人复评，不再静默丢弃 (FIX-1256) `[loop]`
@@ -14,6 +22,11 @@
 - Supervisor 手动合并闸（`repair-evidence` / manual-merge diagnostics）现在与 reconcile 路径一样，同时识别 GitHub CheckRun 的 `conclusion` 和 StatusContext 的 `state`（如 Vercel）。以前只看 `conclusion`，带 StatusContext 的全绿 PR 会被判成 CI unknown，手动合并闸卡死；现在两类检查共用 `reduceStatusCheckRollup`，全绿可合并、含红可拒绝 (FIX-1252) `[loop]`
 - `roll story new --help` 不再把用户导向已退役的裸 `roll index` 命令，也不再声称会刷新不存在的 dossier；帮助文案与真实命令面对齐（仅刷新 `.roll/index.json` 缓存，且 `--no-index` 只是延后该缓存），并新增回归断言锁住这个一致态 (FIX-1251) `[cli]`
   <!-- evidence: .roll/features/cli-simplification/FIX-1251/latest/FIX-1251-report.html -->
+- 验收/评审报告不再把终端文本输出硬塞进 `<img>` 渲染成破图:真图片照旧显示图片,文本产物内联成可读文本块,按实际产物类型渲染 (FIX-1250) `[loop]`
+- 连续跑多张卡的 `roll loop go` 不再"跑完一张就无故暂停":旧事件里秒/毫秒混用的时间戳会让历史暂停信号被误认成刚发生的,现已统一换算后再比较——这是 6 月下旬以来多卡连跑瘫痪的总根因 (FIX-1255) `[loop]`
+- `roll loop go` 的启动横幅现在显示真正生效的范围(而不是本次命令行解析的范围);沿用上个 goal 的范围时会明确标注来源,新增 `--all` 一键回到全量 (FIX-1253) `[cli]`
+- 上一个 goal 完成后再次 `roll loop go` 不再报"goal is already complete"死锁:完成的 goal 自动归档到 `goal-archive/`,新 goal 直接开跑,有事件可追溯 (FIX-1254) `[loop]`
+- 合并对账不再被 force-push 淘汰的旧提交的失败 CI 记录误导:只看 PR 当前提交的检查结果,绿就是绿,修复后重推的 PR 能正常自动合并 (FIX-1258) `[loop]`
 
 ## v4.714.2 — 2026-07-14
 

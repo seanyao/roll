@@ -22,6 +22,8 @@
  */
 
 import { acForStory } from "../attest/ac-parser.js";
+import { EvidenceClassifier } from "../attest/evidence-classifier.js";
+import type { EvidenceClassifierInput } from "@roll/spec";
 
 /** Pure inputs for {@link evidenceGateBeforePush} — all injectable. */
 export interface EvidenceGateFacts {
@@ -35,12 +37,29 @@ export interface EvidenceGateFacts {
    * callers that do not inject the fact.
    */
   readonly acceptanceReportRequired?: boolean;
+  /** Artifacts offered to discharge visual ACs, when the caller has them. */
+  readonly visualEvidence?: readonly EvidenceClassifierInput[];
 }
 
 /** The gate verdict: push allowed, or blocked with one reason per missing artifact. */
 export type EvidenceGateVerdict =
   | { readonly ok: true }
   | { readonly ok: false; readonly reasons: readonly string[] };
+
+/**
+ * Classify artifacts offered as visual acceptance evidence.  This is the
+ * delivery boundary: diagnostic screenshots never become visual proof merely
+ * because they are image-shaped, while a verified physical capture may.
+ */
+export function visualEvidenceGate(artifacts: readonly EvidenceClassifierInput[]): EvidenceGateVerdict {
+  const classifier = new EvidenceClassifier();
+  const reasons: string[] = [];
+  for (const artifact of artifacts) {
+    const visual = classifier.validateVisualEvidence(artifact);
+    if (visual.verdict !== "valid") reasons.push(`${artifact.artifactId}: ${visual.reason}`);
+  }
+  return reasons.length === 0 ? { ok: true } : { ok: false, reasons };
+}
 
 /**
  * FIX-1256 — shared, spec-text-based decision for whether a story owes an
@@ -65,6 +84,10 @@ export function evidenceGateBeforePush(facts: EvidenceGateFacts): EvidenceGateVe
   }
   if (!facts.acMapPresent) {
     reasons.push("ac-map.json missing");
+  }
+  if (facts.visualEvidence !== undefined) {
+    const visual = visualEvidenceGate(facts.visualEvidence);
+    if (!visual.ok) reasons.push(...visual.reasons);
   }
   return reasons.length === 0 ? { ok: true } : { ok: false, reasons };
 }

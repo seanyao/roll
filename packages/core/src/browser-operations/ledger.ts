@@ -1,7 +1,7 @@
 /** US-BROW-005 — append-only operation and lease transition ledger. */
 import { createHash, randomUUID } from "node:crypto";
 import { dirname } from "node:path";
-import type { BrowserActionResult, BrowserOperationEvent, BrowserOperationRun } from "@roll/spec";
+import type { BrowserActionResult, BrowserOperationEvent, BrowserOperationRun, CaptureBridgeLink } from "@roll/spec";
 import { BrowserLeaseLock } from "./lease-lock.js";
 import { nodeEventStore, type EventStore } from "../events/infra-default.js";
 import { persistDiagnostic, type DiagnosticInput, type DiagnosticRedactor, type PersistDiagnosticResult } from "./redaction.js";
@@ -120,6 +120,12 @@ export class BrowserOperationLedger {
       this.append(path, { type: "browser:diagnostic-dropped", runId, ts: this.now(), failure: outcome.failure });
     }
     return outcome;
+  }
+
+  /** Persist the authoritative CaptureBridge fact beside its browser operation facts. */
+  recordCaptureLink(path: string, link: CaptureBridgeLink): void {
+    const event: BrowserOperationEvent = { type: "browser:capture-linked", runId: link.runId, ts: link.linkedAt, link };
+    this.store.appendLine(path, `${JSON.stringify({ schema: LEDGER_SCHEMA, event } satisfies BrowserLedgerLine)}\n`);
   }
 
   recordLeaseOrphaned(path: string, lease: { leaseId: string; endpointHash: string; holderPid: number }): void {

@@ -209,6 +209,11 @@ export interface BrowserOperationsTruthFacts {
   collectedAt?: string;
 }
 
+/** Extract the durable CaptureBridge facts from browser-operation ledger events. */
+export function captureLinksFromBrowserEvents(events: readonly BrowserOperationEvent[]): CaptureBridgeLink[] {
+  return events.flatMap((event) => event.type === "browser:capture-linked" ? [event.link] : []);
+}
+
 function matchesScope(value: string | undefined, scope: string | undefined): boolean {
   return scope === undefined || scope === "" || value === scope;
 }

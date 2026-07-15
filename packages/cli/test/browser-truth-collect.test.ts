@@ -82,3 +82,46 @@ describe("US-BROW-022 — interactive lease ledger facts", () => {
       .toMatchObject({ status: "degraded", unavailableReason: "owner lease holder was orphaned" });
   });
 });
+
+describe("US-BROW-023 — persisted physical capture facts", () => {
+  it("reads a capture bridge link from the durable ledger into truth and the dossier timeline", () => {
+    const projectPath = project();
+    const eventsPath = join(projectPath, ".roll", "browser-operations", "events.ndjson");
+    const ledger = new BrowserOperationLedger();
+
+    ledger.recordCaptureLink(eventsPath, {
+      runId: "attest-run-1",
+      storyId: "US-BROW-023",
+      captureRequestId: "capture-1",
+      captureResponse: {
+        protocol: "roll.capture.v1",
+        requestId: "capture-1",
+        status: "taken",
+        screenshotPath: "screenshots/physical.png",
+        responsePath: "responses/capture-1.json",
+        host: { appName: "Roll Capture.app", bundleId: "com.seanyao.roll.capture", version: "1.0.0" },
+        startedAt: "2026-07-15T00:00:00.000Z",
+        finishedAt: "2026-07-15T00:00:01.000Z",
+      },
+      canSatisfyVisualAc: true,
+      reason: "physical capture is valid",
+      linkedAt: "2026-07-15T00:00:01.000Z",
+    });
+
+    expect(collectBrowserTruth({ projectPath, storyId: "US-BROW-023" }).capture).toEqual({ status: "ready" });
+    expect(collectBrowserTimeline({ projectPath, storyId: "US-BROW-023" }).rows).toContainEqual(
+      expect.objectContaining({
+        kind: "physical-capture",
+        presence: "present",
+        runId: "attest-run-1",
+        artifact: { kind: "physical-capture", id: "screenshots/physical.png", label: "capture" },
+      }),
+    );
+  });
+
+  it("keeps the physical-capture timeline absent when no capture link was written", () => {
+    const timeline = collectBrowserTimeline({ projectPath: project(), storyId: "US-BROW-023" });
+    expect(timeline.rows).not.toContainEqual(expect.objectContaining({ kind: "physical-capture" }));
+    expect(timeline.absences).toContainEqual(expect.objectContaining({ kind: "physical-capture", presence: "absent" }));
+  });
+});

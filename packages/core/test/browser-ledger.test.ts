@@ -123,6 +123,27 @@ describe("US-BROW-005 — BrowserOperationLedger", () => {
     expect(ledger.read("/ledger/events.ndjson")).toMatchObject([{ type: "browser:mcp-bypass-denied" }]);
   });
 
+  it("appends capture links without an existence pre-check that can race with another writer", () => {
+    class AppendOnlyStore extends FakeLedgerStore {
+      override ensureFile(): void {
+        throw new Error("capture links must append atomically");
+      }
+    }
+    const store = new AppendOnlyStore();
+    const ledger = new BrowserOperationLedger(store, () => "2026-07-15T00:00:00.000Z", freeGuard);
+
+    ledger.recordCaptureLink("/ledger/events.ndjson", {
+      runId: "attest-run-1",
+      storyId: "US-BROW-023",
+      captureRequestId: "capture-1",
+      canSatisfyVisualAc: true,
+      reason: "verified",
+      linkedAt: "2026-07-15T00:00:00.000Z",
+    });
+
+    expect(ledger.read("/ledger/events.ndjson")).toMatchObject([{ type: "browser:capture-linked", runId: "attest-run-1" }]);
+  });
+
   it("does not append a second request while another process holds the idempotency guard", () => {
     const store = new FakeLedgerStore();
     const blockedGuard: BrowserLedgerGuard = { acquire: () => undefined };

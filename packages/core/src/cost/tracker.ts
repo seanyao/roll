@@ -77,14 +77,18 @@ const REASONIX_FOOTER_RE =
   /(?:^|\s)[·•]\s*(\d+)\s+tok\b.*\bin\s+(\d+).*\bout\s+(\d+).*¥\s*([\d.]+)/i;
 
 /** FIX-1050: parse the reasonix usage footer when present; otherwise null.
- *  The model defaults to the agent's configured default (deepseek-flash) because
- *  the footer only reports token/cost figures, not the model name.
+ *  FIX-1259: the footer reports token/cost figures but NOT the model name, so
+ *  the parser leaves `model` EMPTY rather than hardcoding a source-baked default
+ *  (the old `"deepseek-flash"` fallback overwrote the real rig model in
+ *  runs.jsonl even though the card ran on the configured model — FIX-1249's
+ *  "config data is never source-baked" discipline). The fold layer
+ *  ({@link toCycleCost}) backfills the SPAWN model — the same value cycle:start
+ *  records — so the ledger and cycle:start agree by construction.
  *
  *  reasonix emits a running footer after every step; the LAST footer in the
  *  stdout is the cycle total, so we scan all lines and return the final match. */
 export function reasonixExtract(lines: readonly string[]): AgentUsage | null {
   if (lines.length === 0) return null;
-  const defaultModel = "deepseek-flash";
   let last: AgentUsage | null = null;
   for (const raw of lines) {
     const line = raw.replace(/\n+$/, "");
@@ -97,7 +101,8 @@ export function reasonixExtract(lines: readonly string[]): AgentUsage | null {
     const cost = Number.parseFloat(m[4]);
     if (!Number.isFinite(cost)) continue;
     last = {
-      model: defaultModel,
+      // Footer carries no model — left empty; the caller backfills the spawn model.
+      model: "",
       // No per-direction split — attribute the whole total to input.
       input_tokens: tin + tout === 0 && total > 0 ? total : tin,
       output_tokens: tin + tout === 0 && total > 0 ? 0 : tout,
@@ -188,12 +193,16 @@ export function makeStdoutExtractor(spec: StdoutAgentSpec): Extractor {
       if (ttotal !== null && tin === 0 && tout === 0) tin = ttotal;
     }
 
-    const resolvedModel = model ?? spec.defaultModel;
+    // FIX-1259: the ledger model is only what the footer actually carried —
+    // empty otherwise, for the fold layer to backfill from the spawn model
+    // (never a source-baked default). `spec.defaultModel` survives ONLY as the
+    // price-table key when the footer gave a token split but no model AND no
+    // explicit cost, since pricing needs some model to look up.
     const resolvedCost =
-      cost ?? computeListCost(resolvedModel, { input_tokens: tin, output_tokens: tout });
+      cost ?? computeListCost(model ?? spec.defaultModel, { input_tokens: tin, output_tokens: tout });
 
     return {
-      model: resolvedModel,
+      model: model ?? "",
       input_tokens: tin,
       output_tokens: tout,
       cost_list_usd: resolvedCost,
@@ -268,15 +277,13 @@ export interface SessionAgg {
   cost_reported: number;
 }
 
-/** FIX-249: exported — the cli session-recovery adapter needs the same default. */
-export const PI_DEFAULT_MODEL = "deepseek-v4-pro";
-export const KIMI_DEFAULT_MODEL = "kimi-k2";
-
 /**
  * Sum per-message assistant usage in one pi session jsonl, mirroring
  * `_sum_session_file` (pi.py:53-108). `lines` are the file's NDJSON lines
  * (already read). Field mapping: cacheWrite→cache_creation, cacheRead→cache_read.
- * Returns null when no assistant `usage` block was seen.
+ * Returns null when no assistant `usage` block was seen. FIX-1259: the model is
+ * whatever the session reports (or null when absent) — never a source-baked
+ * default; the fold layer backfills a null/empty model from the spawn model.
  */
 export function sumPiSession(lines: readonly string[]): SessionAgg | null {
   let tin = 0;
@@ -311,7 +318,7 @@ export function sumPiSession(lines: readonly string[]): SessionAgg | null {
   }
   if (!seen) return null;
   return {
-    model: model ?? PI_DEFAULT_MODEL,
+    model,
     input_tokens: tin,
     output_tokens: tout,
     cache_creation_tokens: tcw,
@@ -353,7 +360,7 @@ export function sumKimiWire(lines: readonly string[]): SessionAgg | null {
   }
   if (!seen) return null;
   return {
-    model: model ?? KIMI_DEFAULT_MODEL,
+    model,
     input_tokens: tin,
     output_tokens: tout,
     cache_creation_tokens: tcw,
@@ -361,8 +368,6 @@ export function sumKimiWire(lines: readonly string[]): SessionAgg | null {
     cost_reported: 0,
   };
 }
-
-const CLAUDE_DEFAULT_MODEL = "claude";
 
 /**
  * Sum claude `--output-format stream-json` usage, mirroring loop-fmt.py
@@ -413,7 +418,8 @@ export function sumClaudeStream(lines: readonly string[]): AgentUsage | null {
   }
   if (!seen) return null;
   return {
-    model: model ?? CLAUDE_DEFAULT_MODEL,
+    // FIX-1259: empty when the stream carried no model — backfilled at fold.
+    model: model ?? "",
     input_tokens: tin,
     output_tokens: tout,
     cache_creation_tokens: tcw,
@@ -478,6 +484,11 @@ export interface CycleFacts {
   agent: string;
   /** TCR reverts this cycle (drives effectiveCost vs nominal). */
   revertCount: number;
+  /** FIX-1259: the model the cycle was SPAWNED with (the same value cycle:start
+   *  records — `ctx.model`). Used to backfill a usage whose adapter could not
+   *  read the model from its output (e.g. the reasonix footer), so the ledger
+   *  agrees with cycle:start instead of a source-baked guess. */
+  spawnModel?: string;
 }
 
 /**
@@ -495,6 +506,13 @@ export interface CycleFacts {
  * `cost_list` from `compute_list_cost`).
  */
 export function toCycleCost(usage: AgentUsage, facts: CycleFacts): CycleCost {
+  // FIX-1259: the model is the adapter's parsed model, or — when its output
+  // carried none (empty) — the SPAWN model (cycle:start's single source of
+  // truth). This is the one place a usage's missing model is backfilled, so no
+  // adapter has to source-bake a default and the ledger always agrees with
+  // cycle:start. Resolved BEFORE pricing so the cost table looks up the right
+  // model too.
+  const model = usage.model !== "" ? usage.model : (facts.spawnModel ?? "");
   const tokens: ListCostTokens = {
     input_tokens: usage.input_tokens,
     output_tokens: usage.output_tokens,
@@ -502,17 +520,17 @@ export function toCycleCost(usage: AgentUsage, facts: CycleFacts): CycleCost {
     cache_read_tokens: usage.cache_read_tokens ?? 0,
   };
   const estimatedCost =
-    usage.cost_list_usd ?? computeListCost(usage.model, tokens);
+    usage.cost_list_usd ?? computeListCost(model, tokens);
   const reverts = Math.max(0, Math.trunc(facts.revertCount));
   const effectiveCost = estimatedCost * (reverts + 1);
   // FIX-361: currency from model's price config (¥ for domestic models, $ for USD-billed).
   // FIX-1050: adapters that parsed an explicit currency (e.g. reasonix ¥ footer)
   // override the model-configured currency so the ledger shows the right unit.
-  const cur = usage.currency ?? cycleCurrency(usage.model);
+  const cur = usage.currency ?? cycleCurrency(model);
   return {
     cycleId: facts.cycleId,
     agent: facts.agent,
-    model: usage.model,
+    model,
     tokensIn: usage.input_tokens,
     tokensOut: usage.output_tokens,
     // FIX-249: keep the cache split when the adapter reported one (absent ≠ 0).

@@ -31,8 +31,6 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import {
-  KIMI_DEFAULT_MODEL,
-  PI_DEFAULT_MODEL,
   type AgentUsage,
   aggregateSessions,
   sumKimiWire,
@@ -76,10 +74,12 @@ export function recoverPiUsage(
       /* unreadable session file: skip, never fail the cycle */
     }
   }
-  const agg = aggregateSessions(summaries, PI_DEFAULT_MODEL);
+  // FIX-1259: no source-baked model default — when a session file carried no
+  // model, leave it empty so toCycleCost backfills the spawn model.
+  const agg = aggregateSessions(summaries, "");
   if (agg === null) return null;
   return {
-    model: agg.model ?? PI_DEFAULT_MODEL,
+    model: agg.model ?? "",
     input_tokens: agg.input_tokens,
     output_tokens: agg.output_tokens,
     cache_creation_tokens: agg.cache_creation_tokens,
@@ -145,10 +145,12 @@ export function recoverKimiUsage(
       /* unreadable / absent wire file: skip, never fail the cycle */
     }
   }
-  const agg = aggregateSessions(summaries, KIMI_DEFAULT_MODEL);
+  // FIX-1259: no source-baked model default — empty when the wire carried none,
+  // so toCycleCost backfills the spawn model.
+  const agg = aggregateSessions(summaries, "");
   if (agg === null) return null;
   return {
-    model: agg.model ?? KIMI_DEFAULT_MODEL,
+    model: agg.model ?? "",
     input_tokens: agg.input_tokens,
     output_tokens: agg.output_tokens,
     cache_creation_tokens: agg.cache_creation_tokens,

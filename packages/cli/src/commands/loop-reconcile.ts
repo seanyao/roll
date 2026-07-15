@@ -20,8 +20,8 @@
  *   - (c) explicit `roll loop reconcile [--json]`
  *   - (d) CI step `roll loop reconcile`
  */
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { resolveLang, parseEventLine } from "@roll/spec";
 import type { DeliveryLease, RollEvent, DeliveryState } from "@roll/spec";
 import {
@@ -32,12 +32,30 @@ import {
   siblingCancelEvents,
   shouldAppendDeliveredCredit,
   shouldAttemptPrMerge,
+  classifyEvidenceRepair,
+  resolveEvaluatorApproval,
+  decideDraftAutoRepair,
+  generateAcMap,
+  repairedPrNumbers,
+  parsePolicy,
+  parseRollScoreArtifact,
+  cycleIdFromBranch,
   type ReconcileCycle,
   type ReconcileFacts,
   type ReconcileResult,
+  type RollEvaluatorScore,
 } from "@roll/core";
 import type { PrCloudState, PrStatusProvider } from "@roll/core";
-import { acquireLock, GitHubPrStatusProvider, OUTER_LOCK_STALE_SEC, prMerge, releaseLock, type GhResult } from "@roll/infra";
+import {
+  acquireLock,
+  GitHubPrStatusProvider,
+  OUTER_LOCK_STALE_SEC,
+  prMerge,
+  prReady,
+  prViewBotReviewState,
+  releaseLock,
+  type GhResult,
+} from "@roll/infra";
 // US-DELIV-008: the fact-gathering primitives moved to the shared adapter so
 // the command path and the cycles read path feed the SAME reconcileDelivery
 // the SAME facts (one truth engine, no parallel probes).
@@ -277,6 +295,8 @@ export interface ReconcileTickResult {
   /** US-DELIV-010: dead-end cycles (pr_closed_unmerged). */
   terminal: number;
   waiting: number;
+  /** FIX-1260: draft PRs auto-repaired and promoted to ready in this tick. */
+  autoRepaired: number;
 }
 
 /**
@@ -309,7 +329,7 @@ export async function runReconcileTick(
   }
 
   if (cycles.length === 0) {
-    return { cyclesProcessed: 0, delivered: 0, mergeNow: 0, ciFailed: 0, degraded: 0, terminal: 0, waiting: 0 };
+    return { cyclesProcessed: 0, delivered: 0, mergeNow: 0, ciFailed: 0, degraded: 0, terminal: 0, waiting: 0, autoRepaired: 0 };
   }
 
   // US-DELIV-011: single-flight — overlapping reconcile sources yield; never block the loop.
@@ -319,7 +339,7 @@ export async function runReconcileTick(
     cycleId: "reconcile",
   });
   if (!lock.acquired) {
-    return { cyclesProcessed: 0, delivered: 0, mergeNow: 0, ciFailed: 0, degraded: 0, terminal: 0, waiting: 0 };
+    return { cyclesProcessed: 0, delivered: 0, mergeNow: 0, ciFailed: 0, degraded: 0, terminal: 0, waiting: 0, autoRepaired: 0 };
   }
 
   const provider = opts?.provider ?? (slug !== undefined ? new GitHubPrStatusProvider() : undefined);
@@ -339,6 +359,8 @@ export async function runReconcileTick(
   let degraded = 0;
   let terminal = 0;
   let waiting = 0;
+  // FIX-1260: count of auto-repaired draft PRs.
+  let autoRepaired = 0;
 
   try {
   for (const cyc of cycles) {
@@ -376,6 +398,222 @@ export async function runReconcileTick(
       facts.branchNetPatchId = branchPatchId(cwd, cyc.branch);
       if (facts.branchNetPatchId !== undefined) {
         facts.mainPatchIds = mainPatchIdsSinceBranch(cwd, cyc.branch);
+      }
+    }
+
+    // FIX-1260: auto-repair draft PRs that are CI green + evaluator approved +
+    // merge clean. The three-step (repair-evidence → ready → merge) that the
+    // supervisor used to run manually is now automatic in the reconcile tick.
+    if (facts.prDraft === true && facts.ciGreen === true && facts.prMergeable === "MERGEABLE") {
+      const policyPath = join(runtimeDir(cwd), "..", "policy.yaml");
+      let autoRepairEnabled = true; // default on
+      if (existsSync(policyPath)) {
+        try {
+          autoRepairEnabled = parsePolicy(readFileSync(policyPath, "utf8")).loopSafety.autoRepairEvidence;
+        } catch {
+          // Unparseable policy → keep default (on).
+        }
+      }
+
+      if (autoRepairEnabled && cyc.prNumber !== undefined && slug !== undefined) {
+        // Resolve evaluator approval (Roll peer score + GitHub bot review).
+        const freshEvents = readAllEvents(eventsPath);
+        const alreadyRepaired = repairedPrNumbers(freshEvents).has(cyc.prNumber);
+
+        let reviewState = "";
+        try {
+          reviewState = await prViewBotReviewState(slug, String(cyc.prNumber));
+        } catch {
+          // gh unavailable → conservative. Without bot review, fall through to
+          // the Roll evaluator score check.
+        }
+
+        // Resolve Roll evaluator score from peer artifact / pair:score events.
+        let rollScore: RollEvaluatorScore | null = null;
+        const cycleId = cyc.cycleId;
+        if (cycleId !== "") {
+          const peerArtifact = join(runtimeDir(cwd), "peer", `cycle-${cycleId}.score.pair.json`);
+          if (existsSync(peerArtifact)) {
+            try {
+              const parsed = parseRollScoreArtifact(JSON.parse(readFileSync(peerArtifact, "utf8")));
+              if (parsed !== null) rollScore = parsed;
+            } catch {
+              // Corrupt artifact → fall back to event stream.
+            }
+          }
+          if (rollScore === null) {
+            let latestScore: { score: number; verdict: string } | null = null;
+            let latestTs = -1;
+            for (const ev of freshEvents) {
+              if (
+                ev.type === "pair:score" &&
+                "cycleId" in ev && ev.cycleId === cycleId &&
+                "stage" in ev && (ev as { stage?: string }).stage === "score" &&
+                ev.ts > latestTs
+              ) {
+                latestScore = { score: (ev as { score: number }).score, verdict: (ev as { verdict: string }).verdict };
+                latestTs = ev.ts;
+              }
+            }
+            if (latestScore !== null) rollScore = latestScore;
+          }
+        }
+
+        // Check auto-repair eligibility using the pure core decision function.
+        const decision = decideDraftAutoRepair({
+          ciState: facts.ciGreen === true ? "success" : "failure",
+          reviewState: reviewState || "none",
+          mergeable: "CLEAN",
+          isDraft: true,
+          hasFreshReport: false,
+          alreadyRepaired,
+          rollEvaluatorScore: rollScore,
+        });
+
+        if (decision.verdict === "eligible") {
+          // ── Execute auto-repair: repair-evidence → ready → merge ─────────
+          try {
+            // 1. Generate repair evidence artifacts (ac-map + report).
+            const featuresDir = join(cwd, ".roll", "features");
+            let storyDir = "";
+            if (existsSync(featuresDir) && cyc.storyId !== "") {
+              const entries = readdirSync(featuresDir, { withFileTypes: true });
+              for (const entry of entries) {
+                if (!entry.isDirectory()) continue;
+                const candidate = join(featuresDir, entry.name, cyc.storyId);
+                if (existsSync(join(candidate, "spec.md"))) {
+                  storyDir = candidate;
+                  break;
+                }
+              }
+            }
+
+            // Write repair summary evidence file.
+            const evidenceDir = storyDir !== "" ? join(storyDir, "evidence") : "";
+            const repairSummaryFile = "repair-auto-summary.txt";
+            const repairSummaryRel = evidenceDir !== "" ? `evidence/${repairSummaryFile}` : repairSummaryFile;
+            if (evidenceDir !== "") {
+              mkdirSync(evidenceDir, { recursive: true });
+              const summaryLines = [
+                `Auto-repair evidence for ${cyc.storyId || `PR-${cyc.prNumber}`} — PR #${cyc.prNumber}`,
+                `Generated: ${new Date().toISOString()}`,
+                `CI state: ${facts.ciGreen === true ? "green" : "unknown"}`,
+                `Evaluator: ${decision.evaluatorSource} — ${decision.evaluatorDetail}`,
+                `Mergeable: clean`,
+                `Repair verdict: auto (eligible)`,
+                `Reason: ${decision.reason}`,
+                "",
+                "Auto-repair executed during reconcile tick. The draft PR was CI green",
+                "+ evaluator approved + merge clean. Evidence was auto-generated and",
+                "the PR was promoted to ready for merge.",
+              ];
+              writeFileSync(join(evidenceDir, repairSummaryFile), summaryLines.join("\n") + "\n", "utf8");
+            }
+
+            // Generate ac-map with readonly status.
+            if (storyDir !== "") {
+              const evidenceRefs: Array<{ kind: string; label: string; textFile: string }> = [
+                { kind: "text", label: `auto-repair: PR #${cyc.prNumber} ${decision.evaluatorSource} approved`, textFile: repairSummaryRel },
+              ];
+              // Parse ACs from spec.md.
+              const specPath = join(storyDir, "spec.md");
+              let acItems: Array<{ id: string; text: string }> = [];
+              if (existsSync(specPath)) {
+                try {
+                  const md = readFileSync(specPath, "utf8");
+                  const re = /^- \[([ x])\] (.+)$/gm;
+                  let acIdx = 1;
+                  let m: RegExpExecArray | null;
+                  while ((m = re.exec(md)) !== null) {
+                    acItems.push({ id: `${cyc.storyId}:AC${acIdx}`, text: String(m[2] ?? "") });
+                    acIdx++;
+                  }
+                } catch {
+                  // Spec unreadable → acItems stays empty.
+                }
+              }
+              if (acItems.length === 0 && cyc.storyId !== "") {
+                acItems.push({ id: `${cyc.storyId}:AC1`, text: "Delivery accepted by independent evaluator" });
+              }
+              if (acItems.length > 0) {
+                const acMap = generateAcMap(cyc.storyId, acItems, {
+                  status: "readonly",
+                  evidenceRefs,
+                  fallbackTextFile: repairSummaryRel,
+                });
+                writeFileSync(join(storyDir, "ac-map.json"), JSON.stringify(acMap, null, 2) + "\n", "utf8");
+              }
+
+              // Write a minimal HTML acceptance report.
+              const latestDir = join(storyDir, "latest");
+              mkdirSync(latestDir, { recursive: true });
+              const reportHtml = [
+                "<!DOCTYPE html>",
+                `<html><head><meta charset="utf-8"><title>${cyc.storyId} Acceptance (auto-repair)</title></head>`,
+                "<body>",
+                `<h1>${cyc.storyId} — Acceptance Report (auto-repair)</h1>`,
+                `<p><strong>PR:</strong> #${cyc.prNumber}</p>`,
+                `<p><strong>Generated:</strong> ${new Date().toISOString()}</p>`,
+                `<p><strong>Method:</strong> auto-repair-evidence (reconcile tick)</p>`,
+                `<p><strong>Evaluator:</strong> ${decision.evaluatorSource} — ${decision.evaluatorDetail}</p>`,
+                "<p><strong>CI:</strong> green · <strong>Merge:</strong> clean</p>",
+                "<p>This report was auto-generated during the reconcile tick.",
+                "The draft PR satisfied all hard conditions (CI green, independent",
+                "evaluator approved, merge clean) and was auto-promoted to ready.",
+                `See <a href="../ac-map.json">ac-map.json</a> for detailed acceptance criteria.</p>`,
+                "</body></html>",
+              ].join("\n");
+              writeFileSync(join(latestDir, `${cyc.storyId}-report.html`), reportHtml, "utf8");
+            }
+
+            // 2. Record repair:auto event BEFORE promoting (audit trail).
+            const autoRepairEvent: RollEvent = {
+              type: "repair:auto",
+              prNumber: cyc.prNumber,
+              storyId: cyc.storyId,
+              cycleId: cyc.cycleId,
+              evaluatorSource: decision.evaluatorSource,
+              evaluatorDetail: decision.evaluatorDetail,
+              reason: decision.reason,
+              ts: now,
+            };
+            bus.appendEvent(eventsPath, autoRepairEvent);
+
+            // 3. Promote draft → ready.
+            const readyResult: GhResult = await prReady(slug, String(cyc.prNumber));
+
+            // Record promote outcome.
+            bus.appendEvent(eventsPath, {
+              type: "repair:auto:ready",
+              prNumber: cyc.prNumber,
+              storyId: cyc.storyId,
+              cycleId: cyc.cycleId,
+              outcome: readyResult.code === 0 ? "ready" : "failed",
+              ts: now,
+            });
+
+            if (readyResult.code === 0) {
+              // Mark facts so reconcileDelivery sees it as a normal (non-draft) PR.
+              facts.prDraft = false;
+              autoRepaired++;
+              if (!opts?.silent) {
+                process.stdout.write(
+                  ` 🔧 auto-repair → ready · ${decision.evaluatorSource}`,
+                );
+              }
+            } else {
+              if (!opts?.silent) {
+                process.stdout.write(
+                  ` ⚠️ auto-repair ready failed (code ${readyResult.code})`,
+                );
+              }
+            }
+          } catch (err: unknown) {
+            if (!opts?.silent) {
+              process.stdout.write(` ⚠️ auto-repair error: ${String(err)}`);
+            }
+          }
+        }
       }
     }
 
@@ -483,7 +721,7 @@ export async function runReconcileTick(
     }
   }
 
-  return { cyclesProcessed: cycles.length, delivered, mergeNow, ciFailed, degraded, terminal, waiting };
+  return { cyclesProcessed: cycles.length, delivered, mergeNow, ciFailed, degraded, terminal, waiting, autoRepaired };
   } finally {
     releaseLock(lockPath);
   }

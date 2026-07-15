@@ -337,3 +337,64 @@ export function repairedPrNumbers(events: ReadonlyArray<{ type: string; prNumber
   }
   return repaired;
 }
+
+// ── FIX-1260: draft PR auto-repair decision for reconcile tick ───────────────
+
+/** Result of the draft auto-repair eligibility decision. */
+export type DraftAutoRepairDecision =
+  | { verdict: "eligible"; evaluatorSource: EvaluatorSource; evaluatorDetail: string; reason: string }
+  | { verdict: "not_eligible"; reason: string };
+
+/**
+ * Decide whether a draft PR is eligible for automatic repair-evidence during
+ * the reconcile tick.
+ *
+ * Reuses {@link classifyEvidenceRepair} for the structural checks (CI green,
+ * evaluator approved, merge clean) and adds the draft-specific logic:
+ *   - Only draft PRs are eligible (non-draft PRs go through the normal merge path).
+ *   - Already-repaired draft PRs are eligible (they just need `gh pr ready` + merge).
+ *   - Reparable draft PRs with INDEPENDENT evaluator approval are eligible.
+ *   - Non-reparable PRs or evaluator not approved → not eligible.
+ *
+ * Independence rule: a Roll evaluator score (peer session, never builder's own)
+ * is always independent. A GitHub review is independent as long as it came from
+ * a bot/app — the repair-evidence flow only considers bot associations.
+ */
+export function decideDraftAutoRepair(input: EvidenceRepairInput): DraftAutoRepairDecision {
+  // Only draft PRs enter this path.
+  if (!input.isDraft) {
+    return { verdict: "not_eligible", reason: "PR is not a draft — normal reconcile path applies" };
+  }
+
+  const classification = classifyEvidenceRepair(input);
+
+  // Already repaired → eligible (just needs ready + merge, no new repair needed).
+  if (classification.verdict === "already_repaired") {
+    return {
+      verdict: "eligible",
+      evaluatorSource: "roll-score", // already validated in prior repair
+      evaluatorDetail: "previously repaired — evaluator approved",
+      reason: "draft PR already repaired; ready to promote and merge",
+    };
+  }
+
+  // Reparable → eligible. Evaluator independence is guaranteed:
+  // - Roll evaluator score: peer session, never the builder's own.
+  // - GitHub review: only bot/app reviews are considered.
+  if (classification.verdict === "reparable") {
+    const approval = resolveEvaluatorApproval({
+      reviewState: input.reviewState,
+      rollEvaluatorScore: input.rollEvaluatorScore,
+    });
+    return {
+      verdict: "eligible",
+      evaluatorSource: approval.source === "none" ? "roll-score" : approval.source,
+      evaluatorDetail: approval.detail,
+      reason: classification.reason,
+    };
+  }
+
+  // Not reparable — low evaluator score, CI not green, merge dirty, etc.
+  // Stay in draft (degraded) with the reason.
+  return { verdict: "not_eligible", reason: classification.reason };
+}

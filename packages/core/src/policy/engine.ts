@@ -125,6 +125,11 @@ export interface LoopSafetyConfig {
    *  (`稳字纪律`): absent ⇒ false, so deploy is a NO-OP until `project_map: true` is
    *  explicitly flipped on. */
   projectMap?: boolean;
+  /** FIX-1260: auto-repair evidence for draft PRs in the reconcile tick.
+   *  When true (default), draft PRs that are CI green + evaluator approved +
+   *  merge clean are auto-repaired, promoted to ready, and merged without
+   *  human intervention. Set false to revert to manual supervisor intervention. */
+  autoRepairEvidence: boolean;
   /** lever-4 warm-context intent. Kept for compatibility, but it is not enough
    *  to resume by itself; {@link resumeScope} must also be explicitly same-story. */
   sessionReuse?: boolean;
@@ -271,6 +276,7 @@ export function parsePolicy(yaml: string): Policy {
     correctionActuator: DEFAULT_CORRECTION_ACTUATOR,
     cycleWallTimeoutSec: DEFAULT_CYCLE_WALL_TIMEOUT_SEC,
     cycleNoProgressSec: DEFAULT_CYCLE_NO_PROGRESS_SEC,
+    autoRepairEvidence: true,
   };
   let pick: PickPolicyConfig = { semanticRanking: "on" };
 
@@ -428,6 +434,9 @@ function parseLoopSafety(lines: PreLine[], start: number): [number, LoopSafetyCo
     // (稳字纪律) and every engine keeps its cold-spawn behavior.
     ...(flat["session_reuse"] === "true" ? { sessionReuse: true } : {}),
     ...(flat["resume_scope"] === "same-story" ? { resumeScope: "same-story" as const } : {}),
+    // FIX-1260: auto-repair toggle. Only explicit `auto_repair_evidence: false`
+    // disables it; anything else (absent / true / garbage) leaves the default on.
+    autoRepairEvidence: flat["auto_repair_evidence"] === "false" ? false : true,
   };
   return [i, cfg];
 }

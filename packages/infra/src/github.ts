@@ -373,6 +373,23 @@ export async function prAutoMergeArmed(slug: string, ref: string): Promise<boole
   return am !== "" && am !== "null";
 }
 
+/**
+ * FIX-1260 — fetch the last BOT/APP review state for a PR.
+ * gh -R <slug> pr view <ref> --json reviews
+ * Returns the last bot/app review state: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED"
+ * or "" when no bot review exists or gh fails.
+ */
+export async function prViewBotReviewState(slug: string, ref: string): Promise<string> {
+  const r = await gh([
+    "-R", slug, "pr", "view", ref, "--json", "reviews",
+    "-q", "[.reviews[] | select(.authorAssociation == \"BOT\" or .authorAssociation == \"APP\")] | last | .state // \"\"",
+  ]);
+  if (r.code !== 0) return "";
+  const v = r.stdout.trim();
+  if (v === "" || v === "null") return "";
+  return v;
+}
+
 /** Parsed `--json state,mergedAt,mergeCommit,number,url,headRefName` view (bin/roll 13744, backfill).
  *  FIX-389b: extends with prNumber + prUrl so the backfill can stamp these
  *  onto runs rows for the projection engine.

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   classifyEvidenceRepair,
   cycleIdFromBranch,
+  decideDraftAutoRepair,
   generateAcMap,
   isAcceptedRollScore,
   isEvidenceRepaired,
@@ -397,5 +398,95 @@ describe("generateAcMap content predicate compliance", () => {
     const map = generateAcMap("FIX-1058", [{ id: "AC1", text: "unmatched" }]);
     expect(map[0]!.status).toBe("claimed");
     expect(map[0]!.evidence[0]!.textFile).toBeUndefined();
+  });
+});
+
+// ── FIX-1260: decideDraftAutoRepair ──────────────────────────────────────────
+
+describe("decideDraftAutoRepair", () => {
+  it("eligible: draft PR with CI green + evaluator approved + merge clean", () => {
+    const result = decideDraftAutoRepair(input({ isDraft: true }));
+    expect(result.verdict).toBe("eligible");
+    if (result.verdict === "eligible") {
+      expect(result.evaluatorSource).toBe("github-review");
+    }
+  });
+
+  it("eligible: draft PR already repaired (just needs ready + merge)", () => {
+    const result = decideDraftAutoRepair(input({ isDraft: true, alreadyRepaired: true }));
+    expect(result.verdict).toBe("eligible");
+    if (result.verdict === "eligible") {
+      expect(result.evaluatorDetail).toContain("previously repaired");
+    }
+  });
+
+  it("eligible: draft PR with Roll evaluator score (no GitHub review)", () => {
+    const result = decideDraftAutoRepair(
+      input({
+        isDraft: true,
+        reviewState: "", // no GitHub review
+        rollEvaluatorScore: { score: 8, verdict: "good" },
+      }),
+    );
+    expect(result.verdict).toBe("eligible");
+    if (result.verdict === "eligible") {
+      expect(result.evaluatorSource).toBe("roll-score");
+    }
+  });
+
+  it("not eligible: non-draft PR", () => {
+    const result = decideDraftAutoRepair(input({ isDraft: false }));
+    expect(result.verdict).toBe("not_eligible");
+    if (result.verdict === "not_eligible") {
+      expect(result.reason).toContain("not a draft");
+    }
+  });
+
+  it("not eligible: CI not green", () => {
+    const result = decideDraftAutoRepair(input({ isDraft: true, ciState: "failure" }));
+    expect(result.verdict).toBe("not_eligible");
+    if (result.verdict === "not_eligible") {
+      expect(result.reason).toContain("CI");
+    }
+  });
+
+  it("not eligible: evaluator not approved", () => {
+    const result = decideDraftAutoRepair(
+      input({ isDraft: true, reviewState: "CHANGES_REQUESTED" }),
+    );
+    expect(result.verdict).toBe("not_eligible");
+    if (result.verdict === "not_eligible") {
+      expect(result.reason).toContain("evaluator");
+    }
+  });
+
+  it("not eligible: merge not clean", () => {
+    const result = decideDraftAutoRepair(input({ isDraft: true, mergeable: "CONFLICTING" }));
+    expect(result.verdict).toBe("not_eligible");
+    if (result.verdict === "not_eligible") {
+      expect(result.reason).toContain("merge");
+    }
+  });
+
+  it("not eligible: Roll evaluator score below threshold (regression verdict)", () => {
+    const result = decideDraftAutoRepair(
+      input({
+        isDraft: true,
+        reviewState: "",
+        rollEvaluatorScore: { score: 3, verdict: "regression" },
+      }),
+    );
+    expect(result.verdict).toBe("not_eligible");
+  });
+
+  it("not eligible: Roll evaluator ok verdict with score below threshold", () => {
+    const result = decideDraftAutoRepair(
+      input({
+        isDraft: true,
+        reviewState: "",
+        rollEvaluatorScore: { score: 4, verdict: "ok" },
+      }),
+    );
+    expect(result.verdict).toBe("not_eligible");
   });
 });

@@ -458,6 +458,11 @@ export type RollEvent =
   // delivered code no longer matches spec (recorded as a refinement).
   | { type: "evidence:repair_requested"; prNumber: number; storyId: string; reason: string; ts: number }
   | { type: "evidence:repaired"; prNumber: number; storyId: string; outcome: "evidence-generated" | "refinement-needed"; details: string; ts: number }
+  // FIX-1260 — auto-repair for draft PRs during reconcile.
+  // repair:auto = the decision to auto-repair was made (before promotion).
+  | { type: "repair:auto"; prNumber: number; storyId: string; cycleId: string; evaluatorSource: string; evaluatorDetail: string; reason: string; ts: number }
+  // repair:auto:ready = the gh pr ready call outcome.
+  | { type: "repair:auto:ready"; prNumber: number; storyId: string; cycleId: string; outcome: "ready" | "failed"; ts: number }
   // FIX-1048 — neutral always-on loop digest, successor to report:morning.
   | { type: "report:loop-digest"; path: string; windowStart: number; windowEnd: number; cycles: number; corrections: number; paused: boolean; ts: number }
   // Morning report (US-EVID-016) — one fixed human-readable page is rebuilt from

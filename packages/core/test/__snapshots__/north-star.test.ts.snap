@@ -99,6 +99,7 @@ exports[`north-star report schema > emits the fixed four-metric schema and passe
         "disruptions": 0,
         "ineffectiveDays": [],
         "segmentBoundaries": 0,
+        "segmentHours": 0,
         "sinceMs": 1781884800000,
       },
       "current": 0,

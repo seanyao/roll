@@ -295,4 +295,26 @@ describe("REFACTOR-068 classifyCorrectionFailure — unified correction → fail
       rootCauseKey: "unknown:unclassified",
     });
   });
+
+  // FIX-1261: deterministic failure envelope — new card-level signals.
+  it("maps card:deliverable_cmd_denied to card:deliverable_cmd_denied", () => {
+    expect(classifyCorrectionFailure("card:deliverable_cmd_denied")).toEqual({
+      failureClass: "card",
+      rootCauseKey: "card:deliverable_cmd_denied",
+    });
+  });
+
+  it("maps card:ac_evidence_unmergeable to card:ac_evidence_unmergeable", () => {
+    expect(classifyCorrectionFailure("card:ac_evidence_unmergeable")).toEqual({
+      failureClass: "card",
+      rootCauseKey: "card:ac_evidence_unmergeable",
+    });
+  });
+
+  it("maps card:surface_not_captured to card:surface_not_captured", () => {
+    expect(classifyCorrectionFailure("card:surface_not_captured")).toEqual({
+      failureClass: "card",
+      rootCauseKey: "card:surface_not_captured",
+    });
+  });
 });

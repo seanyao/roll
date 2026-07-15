@@ -182,6 +182,52 @@ describe("US-EVID-014 correction actuator decisions", () => {
     });
   });
 
+  // FIX-1261: deterministic failure envelope — new signal patterns.
+  it("classifies deliverable_cmd denial as card:deliverable_cmd_denied", () => {
+    const decision = decideCorrectionAction({
+      storyId: "US-BROW-010",
+      cycleId: "cycle-dc",
+      reasons: ["deliverable_cmd 非白名单(仅限 roll 只读子命令): npm test, npx vitest — refused (no arbitrary command execution; no state-changing roll subcommand)"],
+      mode: "auto",
+      events: [],
+    });
+    expect(decision).toMatchObject({
+      signal: "card:deliverable_cmd_denied",
+      source: "attest:gate",
+      action: "open_fix",
+    });
+  });
+
+  it("classifies surface capture missing as card:surface_not_captured", () => {
+    const decision = decideCorrectionAction({
+      storyId: "US-BROW-010",
+      cycleId: "cycle-sc",
+      reasons: ["declared surface capture missing: declared deliverable_cmd(s) not all really captured (need 2 taken terminal shots)"],
+      mode: "auto",
+      events: [],
+    });
+    expect(decision).toMatchObject({
+      signal: "card:surface_not_captured",
+      source: "attest:gate",
+      action: "open_fix",
+    });
+  });
+
+  it("classifies attest render failure as card:ac_evidence_unmergeable", () => {
+    const decision = decideCorrectionAction({
+      storyId: "US-BROW-010",
+      cycleId: "cycle-ar",
+      reasons: ["attest render failed for US-BROW-010 (exit 1)"],
+      mode: "auto",
+      events: [],
+    });
+    expect(decision).toMatchObject({
+      signal: "card:ac_evidence_unmergeable",
+      source: "attest:gate",
+      action: "open_fix",
+    });
+  });
+
   it("repeated same-story signals route-adjust instead of duplicating work", () => {
     const events: RollEvent[] = [
       {

@@ -111,4 +111,70 @@ describe("US-EVID-016 correction circuit breaker", () => {
       },
     ]);
   });
+
+  // FIX-1261: healed-card window cutoff — delivered/superseded cards' signals excluded.
+  it("excludes correction signals from delivered cards", () => {
+    const events: RollEvent[] = [
+      { type: "cycle:terminal", cycleId: "c-healed", storyId: "FIX-1251", agent: "pi", model: "sonnet", outcome: "delivered", startedAt: 1, endedAt: 2, ts: 5 } as RollEvent,
+      { type: "correction:action", storyId: "FIX-1251", cycleId: "c-healed", action: "alert_only", signal: "unknown_failure", reason: "old failure", ts: 3 },
+      { type: "correction:action", storyId: "US-NEW", cycleId: "c-new", action: "open_fix", signal: "unknown_failure", reason: "new failure", ts: 10 },
+    ];
+    const signals = correctionSignals(events);
+    // Only US-NEW's signal should remain; FIX-1251 is healed.
+    expect(signals).toHaveLength(1);
+    expect(signals[0]).toMatchObject({ storyId: "US-NEW", signal: "unknown_failure" });
+  });
+
+  it("excludes attest:gate skipped signals from delivered cards", () => {
+    const events: RollEvent[] = [
+      { type: "cycle:start", cycleId: "c-healed", storyId: "FIX-1251", agent: "pi", model: "sonnet", ts: 1 },
+      { type: "cycle:terminal", cycleId: "c-healed", storyId: "FIX-1251", agent: "pi", model: "sonnet", outcome: "delivered", startedAt: 1, endedAt: 2, ts: 5 } as RollEvent,
+      { type: "attest:gate", cycleId: "c-healed", verdict: "skipped", reasons: ["no fresh acceptance report"], ts: 2 },
+      { type: "cycle:start", cycleId: "c-new", storyId: "US-NEW", agent: "pi", model: "sonnet", ts: 3 },
+      { type: "attest:gate", cycleId: "c-new", verdict: "skipped", reasons: ["no fresh acceptance report"], ts: 4 },
+    ];
+    const signals = correctionSignals(events);
+    expect(signals).toHaveLength(1);
+    expect(signals[0]).toMatchObject({ storyId: "US-NEW", cycleId: "c-new" });
+  });
+
+  it("excludes signals from delivery:reconciled superseded cards", () => {
+    const events: RollEvent[] = [
+      { type: "delivery:reconciled", cycleId: "c-sup", storyId: "FIX-OLD", state: "superseded", mergedBy: "runner", mergeCommit: "abc123", signal: "patch_id", ts: 5 } as RollEvent,
+      { type: "correction:action", storyId: "FIX-OLD", cycleId: "c-sup", action: "alert_only", signal: "unknown_failure", reason: "old", ts: 3 },
+      { type: "correction:action", storyId: "US-NEW", cycleId: "c-new", action: "open_fix", signal: "unknown_failure", reason: "new", ts: 10 },
+    ];
+    const signals = correctionSignals(events);
+    expect(signals).toHaveLength(1);
+    expect(signals[0]).toMatchObject({ storyId: "US-NEW" });
+  });
+
+  it("healed-card filter: circuit breaker does NOT trip when healed card's old signals would push count over threshold", () => {
+    // FIX-1251 (delivered) has 2 old unknown_failure signals.
+    // US-NEW has 1 unknown_failure. Total unknown_failure = 3 in window,
+    // but FIX-1251's 2 signals are excluded → only 1 counts → no trip.
+    const events: RollEvent[] = [
+      { type: "cycle:terminal", cycleId: "c-healed", storyId: "FIX-1251", agent: "pi", model: "sonnet", outcome: "delivered", startedAt: 1, endedAt: 2, ts: 999 } as RollEvent,
+      { type: "correction:action", storyId: "FIX-1251", cycleId: "c-healed", action: "alert_only", signal: "unknown_failure", reason: "old 1", ts: 10 },
+      { type: "correction:action", storyId: "FIX-1251", cycleId: "c-healed", action: "alert_only", signal: "unknown_failure", reason: "old 2", ts: 20 },
+      { type: "correction:action", storyId: "US-NEW", cycleId: "c-new", action: "open_fix", signal: "unknown_failure", reason: "new 1", ts: 30 },
+    ];
+    // Without heal filter: 3 unknown_failure in window → trip.
+    // With heal filter: only 1 → continue.
+    expect(correctionCircuitVerdict(events, safety, 30)).toEqual({ action: "continue" });
+  });
+
+  it("healed-card filter: still trips when NON-healed cards' signals reach threshold", () => {
+    // Three DIFFERENT non-healed cards each have unknown_failure → should still trip.
+    const events: RollEvent[] = [
+      { type: "correction:action", storyId: "US-A", cycleId: "c1", action: "alert_only", signal: "unknown_failure", reason: "r1", ts: 10 },
+      { type: "correction:action", storyId: "US-B", cycleId: "c2", action: "alert_only", signal: "unknown_failure", reason: "r2", ts: 20 },
+      { type: "correction:action", storyId: "US-C", cycleId: "c3", action: "alert_only", signal: "unknown_failure", reason: "r3", ts: 30 },
+    ];
+    expect(correctionCircuitVerdict(events, safety, 30)).toMatchObject({
+      action: "pause_and_notify",
+      signal: "unknown_failure",
+      count: 3,
+    });
+  });
 });

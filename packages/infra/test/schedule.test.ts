@@ -4,8 +4,8 @@
  * read-modify-write fns. Byte-parity vs extracted bash is asserted separately in
  * schedule.difftest.test.ts; here we cover edge cases + the FIX-195 cron shape.
  */
-import { describe, expect, it } from "vitest";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { describe, expect, it, vi } from "vitest";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -24,9 +24,33 @@ import {
   cronHasPerServiceEntry,
   launchdLabel,
   launchdPlistPath,
+  ProcessFallbackScheduler,
   plistContent,
   scheduleXml,
 } from "../src/schedule.js";
+
+function fallbackConfig(projectPath: string) {
+  return {
+    projectPath,
+    slug: "project-abc123",
+    periodMinutes: 15,
+    rollBin: "roll",
+  };
+}
+
+function fakeFallbackChild(pid: number) {
+  let onExit: ((code: number | null, signal: NodeJS.Signals | null) => void) | undefined;
+  return {
+    child: {
+      pid,
+      kill: vi.fn(() => true),
+      once: vi.fn((_event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void) => {
+        onExit = listener;
+      }),
+    },
+    exit: (code = 0, signal: NodeJS.Signals | null = null) => onExit?.(code, signal),
+  };
+}
 
 describe("launchdLabel / launchdPlistPath (bin/roll 8170-8197)", () => {
   it("com.roll.<svc>.<slug>", () => {
@@ -527,5 +551,104 @@ describe("CronScheduler per-lane (AC3, AC4)", () => {
     const afterLoopOff = cronRemovePerService(installed, perLaneCmds, "/proj", "loop");
     expect(cronHasPerServiceEntry(afterLoopOff, perLaneCmds, "/proj", "loop")).toBe(false);
     expect(cronHasPerServiceEntry(afterLoopOff, perLaneCmds, "/proj", "dream")).toBe(true);
+  });
+});
+
+// ─── US-LOOP-107b: owner-confirmed process fallback lifecycle ───────────────
+
+describe("ProcessFallbackScheduler (US-LOOP-107b)", () => {
+  it("rejects a start without explicit owner confirmation", async () => {
+    const sandbox = mkdtempSync(join(tmpdir(), "roll-fallback-"));
+    const spawnRunner = vi.fn();
+    const scheduler = new ProcessFallbackScheduler({ spawnRunner });
+
+    try {
+      await expect(scheduler.start(fallbackConfig(sandbox))).resolves.toMatchObject({
+        started: false,
+        reason: "owner confirmation is required",
+      });
+      expect(spawnRunner).not.toHaveBeenCalled();
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  it("starts only the generated run-once runner under one project lease", async () => {
+    const sandbox = mkdtempSync(join(tmpdir(), "roll-fallback-"));
+    const fake = fakeFallbackChild(4123);
+    const spawnRunner = vi.fn(() => fake.child);
+    const scheduler = new ProcessFallbackScheduler({ spawnRunner });
+
+    try {
+      await expect(scheduler.start(fallbackConfig(sandbox), { ownerConfirmed: true })).resolves.toMatchObject({
+        started: true,
+        pid: 4123,
+      });
+      expect(spawnRunner).toHaveBeenCalledTimes(1);
+      const [command, args] = spawnRunner.mock.calls[0] ?? [];
+      expect(command).toBe(process.execPath);
+      expect(args).toHaveLength(1);
+      expect(readFileSync(args[0] as string, "utf8")).toContain("runFallbackLoop");
+      expect(readFileSync(args[0] as string, "utf8")).not.toContain("agent");
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  it("stops exactly once and cleans the lease after the child exits", async () => {
+    const sandbox = mkdtempSync(join(tmpdir(), "roll-fallback-"));
+    const config = fallbackConfig(sandbox);
+    const fake = fakeFallbackChild(4124);
+    const scheduler = new ProcessFallbackScheduler({ spawnRunner: () => fake.child });
+
+    try {
+      await scheduler.start(config, { ownerConfirmed: true });
+      await expect(scheduler.stop(config)).resolves.toBe(true);
+      await expect(scheduler.stop(config)).resolves.toBe(false);
+      expect(fake.child.kill).toHaveBeenCalledTimes(1);
+      fake.exit(null, "SIGTERM");
+      await expect(scheduler.health(config)).resolves.toMatchObject({ status: "unknown", alive: false });
+      expect(existsSync(join(sandbox, ".roll", "loop", "fallback-heartbeat-project-abc123"))).toBe(false);
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  it("cleans a crashed child and permits a later owner-confirmed restart", async () => {
+    const sandbox = mkdtempSync(join(tmpdir(), "roll-fallback-"));
+    const config = fallbackConfig(sandbox);
+    const first = fakeFallbackChild(4125);
+    const second = fakeFallbackChild(4126);
+    const spawnRunner = vi.fn().mockReturnValueOnce(first.child).mockReturnValueOnce(second.child);
+    const scheduler = new ProcessFallbackScheduler({ spawnRunner });
+
+    try {
+      await scheduler.start(config, { ownerConfirmed: true });
+      first.exit(1, null);
+      await expect(scheduler.start(config, { ownerConfirmed: true })).resolves.toMatchObject({ started: true, pid: 4126 });
+      expect(spawnRunner).toHaveBeenCalledTimes(2);
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  it("reclaims a stale lease but never lets concurrent starts create duplicate ticks", async () => {
+    const sandbox = mkdtempSync(join(tmpdir(), "roll-fallback-"));
+    const config = fallbackConfig(sandbox);
+    const stale = fakeFallbackChild(4127);
+    const fresh = fakeFallbackChild(4128);
+    const spawnRunner = vi.fn().mockReturnValueOnce(stale.child).mockReturnValueOnce(fresh.child);
+    const pidAlive = (pid: number) => pid === 4128;
+    const staleScheduler = new ProcessFallbackScheduler({ spawnRunner, pidAlive });
+    const liveScheduler = new ProcessFallbackScheduler({ spawnRunner, pidAlive });
+
+    try {
+      await staleScheduler.start(config, { ownerConfirmed: true });
+      await expect(liveScheduler.start(config, { ownerConfirmed: true })).resolves.toMatchObject({ started: true, pid: 4128 });
+      await expect(staleScheduler.start(config, { ownerConfirmed: true })).resolves.toMatchObject({ started: false });
+      expect(spawnRunner).toHaveBeenCalledTimes(2);
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
   });
 });

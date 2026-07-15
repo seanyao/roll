@@ -51,7 +51,24 @@
  * `cronLines`, `cronInstall`, `cronRemove`) carry the byte-exact logic and are
  * diff-tested; the exec wrappers are thin and fake-binary smoke-tested.
  */
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import {
+  buildFallbackRunnerScript,
+  claimFallbackLeaseDir,
+  computeFallbackCommandDigest,
+  evaluateFallbackLiveness,
+  fallbackHeartbeatPath,
+  fallbackLeasePath,
+  fallbackRuntimeDir,
+  readFallbackLease,
+  removeFallbackLease,
+  systemPidAlive,
+  writeFallbackLease,
+  type FallbackRunnerConfig,
+} from "@roll/core";
+import type { FallbackHealth } from "@roll/spec";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -648,4 +665,188 @@ export function createScheduler(
     },
     opts.projectPath ?? "",
   );
+}
+
+// ─── Owner-confirmed process fallback (US-LOOP-107b) ─────────────────────────
+
+/** A spawned fallback runner, kept deliberately narrower than ChildProcess for tests. */
+export interface ProcessFallbackChild {
+  readonly pid?: number;
+  kill(signal?: NodeJS.Signals): boolean;
+  once(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): unknown;
+  unref?(): void;
+}
+
+/** The explicit owner decision required before a process fallback may start. */
+export interface ProcessFallbackIntent {
+  ownerConfirmed?: boolean;
+}
+
+/** Injectable process seams; production uses a detached Node child. */
+export interface ProcessFallbackSchedulerDeps {
+  spawnRunner?: (
+    command: string,
+    args: readonly string[],
+    options: { cwd: string; detached: boolean; stdio: "ignore" },
+  ) => ProcessFallbackChild;
+  now?: () => number;
+  pidAlive?: (pid: number) => boolean;
+  heartbeatTimeoutSec?: number;
+}
+
+export interface ProcessFallbackStartResult {
+  started: boolean;
+  reason: string;
+  pid?: number;
+}
+
+function fallbackRunnerScriptPath(config: FallbackRunnerConfig): string {
+  return join(fallbackRuntimeDir(config.projectPath), `process-fallback-${config.slug}.mjs`);
+}
+
+function defaultFallbackSpawn(
+  command: string,
+  args: readonly string[],
+  options: { cwd: string; detached: boolean; stdio: "ignore" },
+): ProcessFallbackChild {
+  return spawn(command, [...args], options);
+}
+
+/**
+ * Process-fallback lifecycle adapter. It is intentionally outside the Scheduler
+ * factory: scheduler internals must never select it automatically. Only a caller
+ * carrying an explicit {@link ProcessFallbackIntent} can start this backend.
+ */
+export class ProcessFallbackScheduler {
+  private readonly spawnRunner: NonNullable<ProcessFallbackSchedulerDeps["spawnRunner"]>;
+  private readonly now: () => number;
+  private readonly pidAlive: (pid: number) => boolean;
+  private readonly heartbeatTimeoutSec: number | undefined;
+  private readonly children = new Map<string, ProcessFallbackChild>();
+  private readonly stopRequested = new Set<string>();
+
+  constructor(deps: ProcessFallbackSchedulerDeps = {}) {
+    this.spawnRunner = deps.spawnRunner ?? defaultFallbackSpawn;
+    this.now = deps.now ?? (() => Math.floor(Date.now() / 1000));
+    this.pidAlive = deps.pidAlive ?? systemPidAlive;
+    this.heartbeatTimeoutSec = deps.heartbeatTimeoutSec;
+  }
+
+  /**
+   * Start one owner-confirmed runner. A live lease is never displaced; a stale
+   * lease is reclaimed and only the claimant that wins the second mkdir spawns.
+   */
+  async start(
+    config: FallbackRunnerConfig,
+    intent: ProcessFallbackIntent = {},
+  ): Promise<ProcessFallbackStartResult> {
+    if (intent.ownerConfirmed !== true) {
+      return { started: false, reason: "owner confirmation is required" };
+    }
+
+    const leaseDir = fallbackLeasePath(config.projectPath, config.slug);
+    const digest = computeFallbackCommandDigest(config);
+    let claim = claimFallbackLeaseDir(leaseDir);
+
+    if (!claim.claimed) {
+      const health = evaluateFallbackLiveness({
+        lease: claim.existingLease,
+        heartbeatPath: join(fallbackRuntimeDir(config.projectPath), `fallback-heartbeat-${config.slug}`),
+        expectedDigest: digest,
+        now: this.now,
+        pidAlive: this.pidAlive,
+        heartbeatTimeoutSec: this.heartbeatTimeoutSec,
+      });
+      if (health.alive) {
+        return { started: false, reason: `fallback already armed (${health.reason})`, pid: health.lease?.pid };
+      }
+      removeFallbackLease(leaseDir);
+      claim = claimFallbackLeaseDir(leaseDir);
+      if (!claim.claimed) {
+        return { started: false, reason: "fallback lease is being claimed by another process" };
+      }
+    }
+
+    const scriptPath = fallbackRunnerScriptPath(config);
+    mkdirSync(fallbackRuntimeDir(config.projectPath), { recursive: true });
+    writeFileSync(scriptPath, buildFallbackRunnerScript(config), "utf8");
+
+    let child: ProcessFallbackChild;
+    try {
+      child = this.spawnRunner(process.execPath, [scriptPath], {
+        cwd: config.projectPath,
+        detached: true,
+        stdio: "ignore",
+      });
+    } catch (error) {
+      removeFallbackLease(leaseDir);
+      rmSync(scriptPath, { force: true });
+      return { started: false, reason: `fallback runner failed to spawn: ${String(error)}` };
+    }
+
+    if (child.pid === undefined) {
+      removeFallbackLease(leaseDir);
+      rmSync(scriptPath, { force: true });
+      return { started: false, reason: "fallback runner did not provide a PID" };
+    }
+
+    const startedAt = new Date(this.now() * 1000).toISOString();
+    writeFallbackLease(leaseDir, {
+      pid: child.pid,
+      commandDigest: digest,
+      ownerConfirmedAt: startedAt,
+      startedAt,
+      heartbeatAt: startedAt,
+    });
+    // Seed the liveness channel before detaching. The runner refreshes it on
+    // entry, but this closes the spawn-to-first-tick race for a concurrent start.
+    writeFileSync(fallbackHeartbeatPath(config.projectPath, config.slug), `${this.now()}\n`, "utf8");
+    this.children.set(leaseDir, child);
+    this.stopRequested.delete(leaseDir);
+    child.once("exit", () => this.cleanup(leaseDir, child.pid, scriptPath, fallbackHeartbeatPath(config.projectPath, config.slug)));
+    child.unref?.();
+    return { started: true, reason: "owner-confirmed fallback runner started", pid: child.pid };
+  }
+
+  /** Send exactly one graceful stop signal. Child exit owns lease cleanup. */
+  async stop(config: FallbackRunnerConfig): Promise<boolean> {
+    const leaseDir = fallbackLeasePath(config.projectPath, config.slug);
+    const child = this.children.get(leaseDir);
+    if (child === undefined || this.stopRequested.has(leaseDir)) return false;
+
+    this.stopRequested.add(leaseDir);
+    const sent = child.kill("SIGTERM");
+    if (!sent) {
+      this.cleanup(
+        leaseDir,
+        child.pid,
+        fallbackRunnerScriptPath(config),
+        fallbackHeartbeatPath(config.projectPath, config.slug),
+      );
+    }
+    return sent;
+  }
+
+  /** Read lease + heartbeat truth; reboot/logout/dead PID are always stale. */
+  async health(config: FallbackRunnerConfig): Promise<FallbackHealth> {
+    const lease = readFallbackLease(fallbackLeasePath(config.projectPath, config.slug));
+    return evaluateFallbackLiveness({
+      lease,
+      heartbeatPath: join(fallbackRuntimeDir(config.projectPath), `fallback-heartbeat-${config.slug}`),
+      expectedDigest: computeFallbackCommandDigest(config),
+      now: this.now,
+      pidAlive: this.pidAlive,
+      heartbeatTimeoutSec: this.heartbeatTimeoutSec,
+    });
+  }
+
+  private cleanup(leaseDir: string, pid: number | undefined, scriptPath: string, heartbeatPath: string): void {
+    const lease = readFallbackLease(leaseDir);
+    if (lease?.pid !== pid) return;
+    removeFallbackLease(leaseDir);
+    rmSync(scriptPath, { force: true });
+    rmSync(heartbeatPath, { force: true });
+    this.children.delete(leaseDir);
+    this.stopRequested.delete(leaseDir);
+  }
 }

@@ -79,6 +79,58 @@ describe("toCycleCost", () => {
     expect(c.estimatedCost).toBeGreaterThanOrEqual(0);
     expect(c.effectiveCost).toBe(c.estimatedCost);
   });
+
+  // FIX-1259: a usage whose adapter could not read the model (empty) is
+  // backfilled from the SPAWN model — the same value cycle:start records — so
+  // runs.jsonl agrees with cycle:start instead of a source-baked guess.
+  it("FIX-1259: empty usage model is backfilled from facts.spawnModel", () => {
+    const reasonix: AgentUsage = {
+      model: "", // reasonix footer carries no model
+      input_tokens: 165_907,
+      output_tokens: 697,
+      cost_list_usd: 0.0049,
+      currency: "CNY",
+    };
+    const c = toCycleCost(reasonix, {
+      cycleId: "cyc",
+      agent: "reasonix",
+      revertCount: 0,
+      spawnModel: "deepseek-v4-pro",
+    });
+    expect(c.model).toBe("deepseek-v4-pro");
+    expect(c.currency).toBe("CNY"); // adapter-parsed currency still wins
+    expect(c.estimatedCost).toBeCloseTo(0.0049, 6);
+  });
+
+  it("FIX-1259: a parsed model is NOT overridden by the spawn model", () => {
+    const c = toCycleCost(usage, {
+      cycleId: "cyc",
+      agent: "openai",
+      revertCount: 0,
+      spawnModel: "some-other-model",
+    });
+    expect(c.model).toBe("gpt-4o");
+  });
+
+  it("FIX-1259: empty model with no spawn model stays empty (never a source-baked default)", () => {
+    const c = toCycleCost(
+      { model: "", input_tokens: 10, output_tokens: 5, cost_list_usd: 0.01 },
+      { cycleId: "cyc", agent: "reasonix", revertCount: 0 },
+    );
+    expect(c.model).toBe("");
+  });
+
+  it("FIX-1259: the backfilled spawn model prices the cost when the adapter gave none", () => {
+    // No cost_list_usd + empty adapter model → cost is priced from the spawn
+    // model via the price table (deepseek is CNY-billed at ¥3/M input).
+    const c = toCycleCost(
+      { model: "", input_tokens: 1_000_000, output_tokens: 0 },
+      { cycleId: "cyc", agent: "pi", revertCount: 0, spawnModel: "deepseek-v4-pro" },
+    );
+    expect(c.model).toBe("deepseek-v4-pro");
+    expect(c.currency).toBe("CNY");
+    expect(c.estimatedCost).toBeCloseTo(3, 4);
+  });
 });
 
 describe("aggregateSessions", () => {

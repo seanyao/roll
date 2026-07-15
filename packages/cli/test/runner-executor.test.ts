@@ -2744,7 +2744,7 @@ describe("executeCommand — command → executor mapping", () => {
   // FIX-249 / FIX-1050 — the stdout-scrape lane for reasonix parses its
   // distinctive "tok · in X · out Y · ¥Z" footer (the generic-scrape fallback
   // still covers unknown agents).
-  it("FIX-1050: spawn_agent scrapes a reasonix stdout footer → ctxPatch.cost", async () => {
+  it("FIX-1050/FIX-1259: reasonix footer → cost tokens/currency; model backfilled from the SPAWN model (== cycle:start), not source-baked deepseek-flash", async () => {
     const stdout = [
       "some build output",
       "  · 166604 tok · in 165907 (165760 cached / 147 new) · out 697 (14 reasoning) · ¥0.0049",
@@ -2752,10 +2752,19 @@ describe("executeCommand — command → executor mapping", () => {
     const { ports } = fakePorts({
       agentSpawn: vi.fn(async () => ({ stdout, stderr: "", exitCode: 0, timedOut: false })),
     });
-    const r = await executeCommand({ kind: "spawn_agent", agent: "reasonix", attempt: 1 }, ports, { ...CTX, agent: "reasonix" });
+    // The rig spawned reasonix on deepseek-v4-pro; cycle:start recorded that.
+    // The footer carries NO model, so the ledger model must come from the spawn
+    // model — proving runs.jsonl and cycle:start agree (the FIX-1259 bug was the
+    // hardcoded "deepseek-flash" mis-attribution here).
+    const r = await executeCommand({ kind: "spawn_agent", agent: "reasonix", attempt: 1 }, ports, {
+      ...CTX,
+      agent: "reasonix",
+      model: "deepseek-v4-pro",
+    });
     expect(r.ctxPatch?.cost?.tokensIn).toBe(165907);
     expect(r.ctxPatch?.cost?.tokensOut).toBe(697);
-    expect(r.ctxPatch?.cost?.model).toBe("deepseek-flash");
+    expect(r.ctxPatch?.cost?.model).toBe("deepseek-v4-pro");
+    expect(r.ctxPatch?.cost?.model).not.toBe("deepseek-flash");
     expect(r.ctxPatch?.cost?.currency).toBe("CNY");
     expect(r.ctxPatch?.cost?.estimatedCost).toBeCloseTo(0.0049, 6);
   });

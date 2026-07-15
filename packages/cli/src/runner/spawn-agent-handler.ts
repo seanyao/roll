@@ -392,6 +392,10 @@ export async function executeSpawnAgentCommand(
             agent: agentName,
             // TCR reverts are not tracked at this layer yet; nominal == effective.
             revertCount: 0,
+            // FIX-1259: backfill a usage whose adapter could not read the model
+            // (e.g. the reasonix footer) with the SPAWN model — the same value
+            // cycle:start records — so runs.jsonl agrees with cycle:start.
+            ...(ctx.model !== undefined && ctx.model !== "" ? { spawnModel: ctx.model } : {}),
           });
         }
       } catch {

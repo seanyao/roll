@@ -119,6 +119,11 @@ export const AGENTS: readonly AgentSpec[] = [
   {
     name: "reasonix",
     displayName: "reasonix",
+    // FIX-1259: SCAFFOLD SEED ONLY (see the field JSDoc + model-config.ts).
+    // reasonix is in REQUIRES_EXPLICIT_MODEL, so the runtime model is always
+    // config-driven (agents.yaml rig) and a missing config fails loud — this
+    // value is NEVER a runtime/attribution fallback. The old usage-attribution
+    // leak that copied this into runs.jsonl lived in cost/tracker.ts and is fixed.
     defaultModel: "deepseek-flash",
     cliBin: ["reasonix"],
     canReviewHeadless: true,

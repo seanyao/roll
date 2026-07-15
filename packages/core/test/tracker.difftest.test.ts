@@ -35,17 +35,19 @@ const STDOUT_FIXTURES: Array<{ agent: string; ex: Extractor; lines: string[]; ex
   },
   { agent: "kimi", ex: kimiExtract, lines: ["hello, world", "nothing useful here"], expected: null },
   { agent: "kimi", ex: kimiExtract, lines: [], expected: null },
-  // FIX-1050: reasonix footer from cycle 20260630-202133-24278.
+  // FIX-1050 / FIX-1259: reasonix footer from cycle 20260630-202133-24278. The
+  // footer carries no model, so the parser leaves it EMPTY (the fold layer
+  // backfills the spawn model) — no source-baked "deepseek-flash" default.
   {
     agent: "reasonix", ex: reasonixExtract,
     lines: ["some build output", "  · 166604 tok · in 165907 (165760 cached / 147 new) · out 697 (14 reasoning) · ¥0.0049"],
-    expected: { model: "deepseek-flash", input_tokens: 165907, output_tokens: 697, cost_list_usd: 0.0049, currency: "CNY", duration_ms: null },
+    expected: { model: "", input_tokens: 165907, output_tokens: 697, cost_list_usd: 0.0049, currency: "CNY", duration_ms: null },
   },
   // FIX-1050: reasonix footer without per-direction split falls back to total→input.
   {
     agent: "reasonix", ex: reasonixExtract,
     lines: ["· 1000 tok · in 0 · out 0 · ¥0.0001"],
-    expected: { model: "deepseek-flash", input_tokens: 1000, output_tokens: 0, cost_list_usd: 0.0001, currency: "CNY", duration_ms: null },
+    expected: { model: "", input_tokens: 1000, output_tokens: 0, cost_list_usd: 0.0001, currency: "CNY", duration_ms: null },
   },
   // FIX-1050: multiple reasonix footers → the LAST one is the cycle total.
   {
@@ -54,7 +56,7 @@ const STDOUT_FIXTURES: Array<{ agent: string; ex: Extractor; lines: string[]; ex
       "· 14641 tok · in 14314 (384 cached / 13930 new) · out 327 (155 reasoning) · ¥0.0146",
       "· 166604 tok · in 165907 (165760 cached / 147 new) · out 697 (14 reasoning) · ¥0.0049",
     ],
-    expected: { model: "deepseek-flash", input_tokens: 165907, output_tokens: 697, cost_list_usd: 0.0049, currency: "CNY", duration_ms: null },
+    expected: { model: "", input_tokens: 165907, output_tokens: 697, cost_list_usd: 0.0049, currency: "CNY", duration_ms: null },
   },
   { agent: "reasonix", ex: reasonixExtract, lines: ["no footer here"], expected: null },
   // FIX-1050: agy/gemini stdout carries no usage footer → explicit null.
@@ -100,10 +102,12 @@ describe("frozen: stdout-scrape extractors == python adapters", () => {
     expect(u?.model).toBe("kimi-k2");
   });
 
-  it("FIX-1050: extractUsage routes reasonix to its footer parser", () => {
+  it("FIX-1050/FIX-1259: extractUsage routes reasonix to its footer parser; model left empty (no source-baked default)", () => {
     const u = extractUsage("reasonix", ["  · 166604 tok · in 165907 (165760 cached / 147 new) · out 697 (14 reasoning) · ¥0.0049"]);
     expect(u).not.toBeNull();
-    expect(u?.model).toBe("deepseek-flash");
+    // The footer carries no model — empty, for the fold layer to backfill the
+    // spawn model. The old "deepseek-flash" hardcode is gone (FIX-1259).
+    expect(u?.model).toBe("");
     expect(u?.input_tokens).toBe(165907);
     expect(u?.output_tokens).toBe(697);
     expect(u?.cost_list_usd as number).toBeCloseTo(0.0049, 6);

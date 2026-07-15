@@ -235,7 +235,7 @@ roll loop gc --keep-days 14   # 覆盖保留天数（也可用 .roll/local.yaml 
 roll loop events      # 显示最近 20 条 cycle 事件
 roll loop events 50   # 显示最近 50 条
 
-roll agent                           # 查看 scope、role、agent pool 与 legacy 输入
+roll agent                           # 查看 scope、有效项目能力与 agent pool
 roll agent list                      # 查看本机已装的 agent
 ```
 
@@ -367,9 +367,11 @@ defaults:
         strategy: health-aware
 ```
 
-`roll agent` 会显示 Machine Scope、Project Scope、已解析角色、候选池、运行时健康说明，
-以及 legacy compatibility 输入。用 `roll agent migrate --dry-run` 预览旧 agent
-文件迁移。
+`roll agent` 会显示 Machine Scope 和有效 Project Scope，包括继承后的 agent 与已配置的
+route model；它不会预测下一次角色分配。dispatch 会在 spawn 时依据运行时健康和
+least-recent 状态决策。需要诊断快照时使用
+`roll supervisor route --role builder|evaluator`。用 `roll agent migrate --dry-run`
+预览一次性迁移；正常执行不会读取旧 agent 配置。
 
 运行时健康不是静态策略。quota、auth、网络、VPN、账号、stall 或 binary 缺失只会
 挂起运行态 rig，并记录为运行时事实；Roll 不回写 `agents.yaml`。挂起 rig 按恢复窗口

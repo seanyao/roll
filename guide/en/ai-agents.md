@@ -23,7 +23,7 @@ migration input, but it is no longer the primary authoring surface for agent
 semantics. Use:
 
 ```bash
-roll agent                      # show Machine Scope, Project Scope, roles, pool, and legacy inputs
+roll agent                      # show Machine Scope, effective Project Scope, and installed pool
 roll agent migrate --dry-run    # preview conversion from legacy files
 roll agent migrate              # write roll-agents/v1 files
 roll agent list                 # show installed agents
@@ -170,13 +170,13 @@ roll supervisor health --json      # machine-readable classifications
 roll supervisor next               # next card + agent health summary
 ```
 
-## Legacy Compatibility
+## Migration from Older Agent Config
 
-Older projects may still contain `.roll/local.yaml agent`, `.roll/pairing.yaml`,
-or v3 route slots in `.roll/agents.yaml`. `roll agent` shows them under
-`Legacy compatibility`, and `roll agent migrate` converts their useful data into
-the scoped model. They remain readable compatibility inputs, not the primary
-agent-management model.
+Older projects may contain `.roll/local.yaml agent`, `.roll/pairing.yaml`, or v3
+route slots in `.roll/agents.yaml`. These are not runtime inputs. Run
+`roll agent migrate --dry-run` to preview their one-time conversion, then
+`roll agent migrate` to write scoped bindings. A loop that encounters v3 route
+slots fails loudly instead of silently using a second configuration model.
 
 ## See Also
 

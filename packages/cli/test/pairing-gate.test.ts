@@ -9,10 +9,25 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildDesignScorePrompt, buildPairScorePrompt, buildReviewPrompt, enabledPairingStages, pairingDispatch, reviewTimeoutMs, runPairing, type PairEvent, type RunPairingDeps } from "../src/runner/pairing-gate.js";
 
-function project(yaml: string | null): { dir: string; rt: string } {
+function project(legacyYaml: string | null): { dir: string; rt: string } {
   const dir = mkdtempSync(join(tmpdir(), "roll-pair-"));
   mkdirSync(join(dir, ".roll"), { recursive: true });
-  if (yaml !== null) writeFileSync(join(dir, ".roll", "pairing.yaml"), yaml);
+  // The pairing gate is now configured only through the scoped evaluate role.
+  // `legacyYaml` remains a compact fixture input for enabled/disabled coverage;
+  // it is deliberately never written or read by production code.
+  if (legacyYaml !== null && !/^enabled:\s*false/m.test(legacyYaml)) {
+    writeScopedAgents(dir, `schema: roll-agents/v1
+scope: project
+defaults:
+  story:
+    roles:
+      evaluate:
+        kind: select
+        from: [kimi, pi, reasonix]
+        require: [evaluate]
+        strategy: least-recent
+`);
+  }
   const rt = join(dir, "rt");
   mkdirSync(rt, { recursive: true });
   return { dir, rt };
@@ -362,64 +377,12 @@ describe("runPairing — FIX-363 wires the adaptive budget to the reviewer", () 
   });
 });
 
-describe("runPairing — US-PAIR-004 multi-stage triggering", () => {
-  it("a stage NOT listed in pairing.yaml stages = off (independent opt-out)", async () => {
-    // only `code` enabled → asking for `design` is off, even though every agent
-    // is declared design-capable in capability.
+describe("runPairing — scoped stage policy", () => {
+  it("only the scoped code-review stage runs", async () => {
     const { dir, rt } = project(ENABLED);
     const { d, events } = deps();
     expect((await runPairing(dir, dir, rt, "c1", "kimi", "design", d)).status).toBe("off");
     expect(events).toHaveLength(0);
-  });
-
-  it("design stage runs when enabled (stage is a real parameter, not hardcoded code)", async () => {
-    const { dir, rt } = project(ALL_STAGES);
-    const { d, events } = deps();
-    const res = await runPairing(dir, dir, rt, "c1", "kimi", "design", d);
-    expect(res.status).toBe("reviewed");
-    // the selected event carries the stage that fired
-    const sel = events.find((e) => e.type === "pair:selected") as Extract<PairEvent, { type: "pair:selected" }>;
-    expect(sel.stage).toBe("design");
-    // the verdict event also carries the stage (US-PAIR-004: distinguishable per stage)
-    const verdict = events.find((e) => e.type === "pair:verdict") as Extract<PairEvent, { type: "pair:verdict" }> & { stage?: string };
-    expect(verdict.stage).toBe("design");
-  });
-
-  it("each enabled stage writes its OWN evidence file (no cross-stage overwrite)", async () => {
-    const { dir, rt } = project(ALL_STAGES);
-    const { d } = deps();
-    await runPairing(dir, dir, rt, "c1", "kimi", "code", d);
-    await runPairing(dir, dir, rt, "c1", "kimi", "design", d);
-    await runPairing(dir, dir, rt, "c1", "kimi", "cycle", d);
-    // code keeps the legacy PAIR-003 contract path (back-compat)
-    const code = JSON.parse(readFileSync(join(rt, "peer", "cycle-c1.pair.json"), "utf8"));
-    expect(code.stage).toBe("code");
-    // other stages are namespaced so they don't clobber each other or code
-    const design = JSON.parse(readFileSync(join(rt, "peer", "cycle-c1.design.pair.json"), "utf8"));
-    expect(design.stage).toBe("design");
-    const cycle = JSON.parse(readFileSync(join(rt, "peer", "cycle-c1.cycle.pair.json"), "utf8"));
-    expect(cycle.stage).toBe("cycle");
-  });
-
-  it("none-available is fail-loud per stage (event carries the firing stage)", async () => {
-    const { dir, rt } = project(ALL_STAGES);
-    const { d, events } = deps({ installed: ["claude"] });
-    const res = await runPairing(dir, dir, rt, "c1", "kimi", "test", d);
-    expect(res.status).toBe("none-available");
-    const none = events[0] as Extract<PairEvent, { type: "pair:none-available" }>;
-    expect(none.stage).toBe("test");
-  });
-
-  it("PAIR-003 safety invariants hold for every stage: timeout is non-blocking, never throws", async () => {
-    const { dir, rt } = project(ALL_STAGES);
-    const { d: dTimeout } = deps({ reviewPeer: async () => null });
-    expect((await runPairing(dir, dir, rt, "c1", "kimi", "cycle", dTimeout)).status).toBe("timeout");
-    const { d: dThrow } = deps({
-      reviewPeer: async () => {
-        throw new Error("boom");
-      },
-    });
-    await expect(runPairing(dir, dir, rt, "c1", "kimi", "test", dThrow)).resolves.toEqual({ status: "error" });
   });
 
   it("FIX-935: allowedAgents from project config prevents auto-enabling machine-detected codex", async () => {
@@ -452,27 +415,27 @@ describe("enabledPairingStages — executor stage iteration seam (US-PAIR-004)",
     expect(enabledPairingStages(dir)).toEqual([]);
   });
 
-  it("returns exactly the enabled stages, preserving config order (default = code only)", () => {
+  it("scoped evaluate enables the code stage", () => {
     const { dir } = project(ENABLED);
     expect(enabledPairingStages(dir)).toEqual(["code"]);
   });
 
-  it("multi-stage config returns every enabled stage to iterate", () => {
+  it("legacy stage lists do not affect scoped pairing", () => {
     const { dir } = project(ALL_STAGES);
-    expect(enabledPairingStages(dir)).toEqual(["design", "test", "code", "cycle"]);
+    expect(enabledPairingStages(dir)).toEqual(["code"]);
   });
 
-  it("a malformed config never throws — degrades to no stages (non-blocking)", () => {
+  it("a malformed legacy config does not affect scoped pairing", () => {
     const { dir } = project(`enabled: true\nstages: [bogus-stage]\n`);
-    expect(enabledPairingStages(dir)).toEqual([]);
+    expect(enabledPairingStages(dir)).toEqual(["code"]);
   });
 
   // kimi pair-review (US-PAIR-004): a duplicate stage in pairing.yaml must not
   // fire pairing twice — that would burn two peers, emit duplicate events, and
   // (for `code`) write the legacy evidence path twice. De-dupe, keep first-seen order.
-  it("de-dupes repeated stages so each enabled stage fires at most once", () => {
+  it("legacy stage lists cannot alter the scoped code stage", () => {
     const { dir } = project(`enabled: true\nstages: [code, code, design, code]\n`);
-    expect(enabledPairingStages(dir)).toEqual(["code", "design"]);
+    expect(enabledPairingStages(dir)).toEqual(["code"]);
   });
 
   it("US-V4-018: reads code review stages from scoped evaluate role when pairing.yaml is absent", () => {

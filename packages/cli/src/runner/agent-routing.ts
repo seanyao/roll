@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { AGENT_REGISTRY_NAMES, normalizeAgentConfig, type AgentInternalFailure, type CycleContext } from "@roll/core";
+import { AGENT_REGISTRY_NAMES, type AgentInternalFailure, type CycleContext } from "@roll/core";
 import type { AgentName, AgentScopeConfig, AgentScopeRole, AgentScopeRoleBinding } from "@roll/spec";
 import type { RollEvent } from "@roll/spec";
 import { agentCredentialReadiness } from "./agent-spawn.js";
@@ -147,8 +147,7 @@ function scopedEvaluateAllowedAgents(layers: readonly { config: AgentScopeConfig
 
 /**
  * Project-config allowed agents from `.roll/agents.yaml`.
- * `roll-agents/v1` story.evaluate bindings are primary. Legacy route-slot
- * allowlists are read only for projects that have not migrated yet.
+ * `roll-agents/v1` story.evaluate bindings are the sole project allowlist.
  */
 export function projectAllowedAgents(repoCwd: string): Set<string> | undefined {
   const path = join(repoCwd, ".roll", "agents.yaml");
@@ -161,17 +160,7 @@ export function projectAllowedAgents(repoCwd: string): Set<string> | undefined {
     return agents !== null ? new Set(agents) : undefined;
   }
 
-  let text: string;
-  try {
-    text = readFileSync(path, "utf8");
-  } catch {
-    return undefined;
-  }
-  const parsed = normalizeAgentConfig(text);
-  const legacyAgents = AGENT_REGISTRY_NAMES.filter((agent) =>
-    ["easy", "default", "hard", "fallback"].some((slot) => parsed.config.routing[slot as keyof typeof parsed.config.routing]?.rig.agent === agent),
-  );
-  return legacyAgents.length > 0 ? new Set(legacyAgents) : undefined;
+  return undefined;
 }
 
 type AgentBlockedStage = Extract<RollEvent, { type: "agent:blocked" }>["stage"];

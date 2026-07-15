@@ -3,24 +3,17 @@ import {
   AgentRegistry,
   canonicalAgentName,
   normalizeAgentScopeConfig,
-  parseBlockYaml,
-  parsePairingConfig,
+  normalizeAgentConfig,
   planAgentScopeMigration,
-  resolveAgentScopeRole,
-  readSlotFromText,
   type AgentEnv,
-  type AgentScopeResolveLayer,
-  type AgentSlot,
   type FileStore,
 } from "@roll/core";
-import type { AgentScopeConfig, AgentScopeRole, AgentScopeRoleResolution } from "@roll/spec";
+import type { AgentScopeConfig } from "@roll/spec";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { t, v2Catalog, v3Catalog } from "@roll/spec";
 import { agentListCommand, currentLang, realAgentEnv } from "./agent-list.js";
 import { AGY_AUTH_CONTEXT_ENV, agyAuthContext } from "../runner/agent-spawn.js";
-
-const VALID_SLOTS: AgentSlot[] = ["easy", "default", "hard", "fallback"];
 
 export interface AgentCommandDeps {
   env?: AgentEnv;
@@ -116,20 +109,16 @@ function viewCommand(deps: AgentCommandDeps): number {
   const rollHome = process.env["ROLL_HOME"] ?? join(d.env.home, ".roll");
   const machine = loadScopeFile(d, join(rollHome, "agents.yaml"));
   const project = loadScopeFile(d, ".roll/agents.yaml");
-  const legacy = renderLegacySection(d, project);
   const out: string[] = [
     "",
     "  Agent Scope View",
     "",
     ...renderScopeBlock("Machine Scope", machine),
     "",
-    ...renderScopeBlock("Project Scope", project),
-    "",
-    ...renderRoleResolutions(machine, project),
+    ...renderProjectScopeBlock(project, machine),
     "",
     ...renderAgentPool(reg),
   ];
-  if (legacy.length > 0) out.push("", ...legacy);
   out.push(
     "",
     "  Role bindings are authored in ~/.roll/agents.yaml and .roll/agents.yaml.",
@@ -162,19 +151,6 @@ function loadScopeFile(d: ReturnType<typeof depsWithDefaults>, path: string): Sc
   return { kind: "valid", path, text, config: parsed.config };
 }
 
-function roleLine(label: string, resolution: AgentScopeRoleResolution): string {
-  if (!resolution.ok) {
-    const reason = resolution.failure.errors[0] ?? "unresolved";
-    return `    ${label.padEnd(16)} unresolved  source=${resolution.failure.source ?? "-"}  reason=${reason}`;
-  }
-  const r = resolution.resolved;
-  const model = r.model !== undefined ? ` model=${r.model}` : "";
-  const pool = r.candidates.length > 1 ? ` pool=[${r.candidates.join(", ")}]` : "";
-  const skipped = r.skipped.length > 0 ? ` skipped=[${r.skipped.map((s) => `${s.agent}:${s.reason}`).join(", ")}]` : "";
-  const trace = r.trace.length > 0 ? ` trace=${r.trace.map((t) => `${t.action}:${t.source}`).join(" -> ")}` : "";
-  return `    ${label.padEnd(16)} ${r.agent}${model}  via=${r.binding.kind}/${r.selectedStrategy}  source=${r.source}${pool}${skipped}${trace}`;
-}
-
 function renderScopeBlock(title: string, load: ScopeLoad): string[] {
   const out = [`  ${title}`, "", `    file: ${load.path}`];
   if (load.kind === "missing") {
@@ -194,25 +170,32 @@ function renderScopeBlock(title: string, load: ScopeLoad): string[] {
   return out;
 }
 
-function validLayers(machine: ScopeLoad, project: ScopeLoad): AgentScopeResolveLayer[] {
-  const layers: AgentScopeResolveLayer[] = [];
-  if (machine.kind === "valid") layers.push({ config: machine.config, path: machine.path });
-  if (project.kind === "valid") layers.push({ config: project.config, path: project.path });
-  return layers;
+function routeModelBindings(load: ScopeLoad): { agent: string; model: string }[] {
+  if (load.kind !== "valid") return [];
+  const parsed = normalizeAgentConfig(load.text);
+  return Object.values(parsed.config.rigs)
+    .flatMap((rig) => (rig.model === undefined ? [] : [{ agent: rig.agent, model: rig.model }]));
 }
 
-function renderRoleResolutions(machine: ScopeLoad, project: ScopeLoad): string[] {
-  const layers = validLayers(machine, project);
-  const out = ["  Resolved roles", ""];
-  if (layers.length === 0) {
-    out.push("    no roll-agents/v1 scope files to resolve");
-    return out;
-  }
-  const render = (label: string, scope: "project" | "story", role: AgentScopeRole): string =>
-    roleLine(label, resolveAgentScopeRole({ scope, role, layers }));
-  out.push(render("supervise", "project", "supervise"));
-  out.push(render("story.execute", "story", "execute"));
-  out.push(render("story.evaluate", "story", "evaluate"));
+function renderProjectScopeBlock(project: ScopeLoad, machine: ScopeLoad): string[] {
+  const out = renderScopeBlock("Project Scope", project);
+  if (project.kind !== "valid") return out;
+  const inheritedMachine = project.config.inherits === "machine" && machine.kind === "valid" ? machine : null;
+
+  const effectiveAgents = [
+    ...(inheritedMachine === null ? [] : Object.keys(inheritedMachine.config.agents)),
+    ...Object.keys(project.config.agents),
+  ].filter((agent, index, all) => all.indexOf(agent) === index);
+  const effectiveModels = [
+    ...(inheritedMachine === null ? [] : Object.keys(inheritedMachine.config.models)),
+    ...Object.keys(project.config.models),
+    ...(inheritedMachine === null ? [] : routeModelBindings(inheritedMachine).map((binding) => binding.model)),
+    ...routeModelBindings(project).map((binding) => binding.model),
+  ].filter((model, index, all) => all.indexOf(model) === index);
+  const projectRouteModels = routeModelBindings(project).map((binding) => `${binding.agent}=${binding.model}`);
+  out.push(`    effective agents: ${effectiveAgents.length > 0 ? effectiveAgents.join(", ") : "-"}`);
+  out.push(`    effective models: ${effectiveModels.length > 0 ? effectiveModels.join(", ") : "-"}`);
+  if (projectRouteModels.length > 0) out.push(`    route models: ${projectRouteModels.join(", ")}`);
   return out;
 }
 
@@ -227,42 +210,6 @@ function renderAgentPool(reg: AgentRegistry): string[] {
     out.push(`    ${agent.padEnd(11)} ${(installed ? "installed" : "not found").padEnd(13)} runtime auth/network/account checked at spawn`);
   }
   return out;
-}
-
-function localAgent(text: string): string | null {
-  const root = parseBlockYaml(text);
-  const raw = root["agent"];
-  return typeof raw === "string" && raw.trim() !== "" ? canonicalAgentName(raw) : null;
-}
-
-function renderLegacySection(d: ReturnType<typeof depsWithDefaults>, project: ScopeLoad): string[] {
-  const entries: string[] = [];
-  if (project.kind === "legacy") {
-    const slots = VALID_SLOTS
-      .map((slot) => {
-        const cfg = readSlotFromText(project.text, slot);
-        return cfg?.agent === undefined ? null : `${slot}=${cfg.agent}`;
-      })
-      .filter((x): x is string => x !== null);
-    if (slots.length > 0) entries.push(`    v3 route slots in ${project.path}: ${slots.join(", ")}`);
-  }
-  const localText = readIfExists(d, ".roll/local.yaml");
-  if (localText !== undefined) {
-    const agent = localAgent(localText);
-    if (agent !== null) entries.push(`    .roll/local.yaml agent: ${agent}`);
-  }
-  const pairingText = readIfExists(d, ".roll/pairing.yaml");
-  if (pairingText !== undefined) {
-    try {
-      const cfg = parsePairingConfig(pairingText);
-      const agents = Object.keys(cfg.capability);
-      entries.push(`    .roll/pairing.yaml: legacy evaluator pool ${agents.length > 0 ? agents.join(", ") : "(empty)"}`);
-    } catch {
-      entries.push("    .roll/pairing.yaml: invalid legacy pairing config");
-    }
-  }
-  if (entries.length === 0) return [];
-  return ["  Legacy compatibility", "", ...entries, "    migration: roll agent migrate [--dry-run]"];
 }
 
 function renderMigrationPlan(plan: ReturnType<typeof planAgentScopeMigration>, dryRun: boolean): string {

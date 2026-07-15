@@ -19,7 +19,7 @@ Project Scope `evaluate` binding.
 
 ```bash
 roll agent                         # inspect story.evaluate
-roll agent migrate --dry-run       # convert legacy pairing.yaml if present
+roll agent migrate --dry-run       # preview one-time migration of old agent config
 ```
 
 New projects should author the evaluator pool in `.roll/agents.yaml`:
@@ -38,10 +38,9 @@ defaults:
         strategy: health-aware
 ```
 
-`.roll/pairing.yaml` remains a legacy compatibility input. When both files are
-present, the scoped `evaluate` role is preferred. Static config lists fair
-candidates; runtime auth/network/VPN/account failures skip candidates only for
-the current resolution.
+`.roll/pairing.yaml` is not a runtime input. The scoped `evaluate` role is the
+only source for pairing candidates. Static config lists fair candidates; runtime
+auth/network/VPN/account failures skip candidates only for the current resolution.
 
 ## Seeing what it does — observability
 

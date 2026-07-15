@@ -1,21 +1,16 @@
 /**
  * Cross-Agent Pairing CLI surface.
- *   init               (US-PAIR-001) — legacy scaffold for .roll/pairing.yaml.
  *   `roll pair status` (US-PAIR-002) — observability: who is in the pairing pool,
  *     their vendor + capability, and why an agent is excluded. Observability is a
  *     first-class need; kept OFF `roll agent list` (byte-difftest'd) by living
  *     under `pair` so the existing command's output is untouched.
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { join, relative } from "node:path";
 import {
   agentDisplayName,
   agentsInstalled,
   aggregatePairingCost,
-  defaultPairingConfig,
-  pairingPoolView,
-  parsePairingConfig,
-  renderPairingConfig,
   type PairingCostSummary,
 } from "@roll/core";
 import { parseEventLine, type RollEvent } from "@roll/spec";
@@ -26,8 +21,9 @@ import { cardArchiveDir } from "../lib/archive.js";
 import { projectAgent, realAgentEnv } from "./agent-list.js";
 import { spawnPeerReviewAgent, type SpawnPeerReviewInput, type SpawnPeerReviewResult } from "./peer.js";
 import { loopRuntimeDir, projectSlug, sharedRoot } from "./dashboard.js";
+import { resolveScopedCastRole } from "../runner/scoped-route.js";
 
-const HELP = `Usage: roll pair <status|score> [legacy init]
+const HELP = `Usage: roll pair <status|score>
   status           Show the pairing pool: who pairs, vendor, capability, why excluded.
   score <story-id> [--design] [--summary <text>|--file <path>] [--skill <name>] [--worker <agent>] [--timeout-ms <ms>]
                    Ask a fresh-session peer Reviewer to score a finished cycle
@@ -37,9 +33,6 @@ const HELP = `Usage: roll pair <status|score> [legacy init]
                              completeness, deliverables, domain consistency) — NOT
                              code; stamps the score as stage=design (FIX-344).
                              Defaults --skill to roll-design.
-
-  legacy init [--force]  compatibility only: write .roll/pairing.yaml. New projects bind defaults.story.roles.evaluate.
-  legacy init [--force]  仅兼容旧项目：生成 .roll/pairing.yaml；新项目绑定 defaults.story.roles.evaluate。
   status 显示结对池：谁能结对、厂商、能力、谁因何被排除。
   score  让独立新 session 的评审 agent 给完成的 cycle 打分；无可用评审则无评审分（诚实失败），工作 agent 永不自评。
          --design 评 roll-design 的设计产出（INVEST 拆分、可视 AC 完整、deliverable 声明、领域一致），
@@ -51,8 +44,7 @@ export function pairCommand(args: string[]): number | Promise<number> {
     process.stdout.write(HELP);
     return 0;
   }
-  if (args[0] === "legacy" && args[1] === "init") return pairInit(args.slice(2));
-  if (args[0] === "init") return pairInit(args.slice(1));
+  if ((args[0] === "legacy" && args[1] === "init") || args[0] === "init") return pairInit();
   if (args[0] === "status") return pairStatus(args.slice(1));
   if (args[0] === "score") return pairScore(args.slice(1));
   process.stderr.write(`[roll] unknown pair subcommand: ${args[0]}\n`);
@@ -60,45 +52,12 @@ export function pairCommand(args: string[]): number | Promise<number> {
   return 1;
 }
 
-function pairInit(rest: string[]): number {
-  // strict arg check (kimi pair-review): reject stray args.
-  const extra = rest.filter((a) => a !== "--force");
-  if (extra.length > 0) {
-    process.stderr.write(`[roll] unexpected argument(s): ${extra.join(" ")}\n`);
-    process.stderr.write(HELP);
-    return 1;
-  }
-  const force = rest.includes("--force");
-  const path = join(process.cwd(), ".roll", "pairing.yaml");
-
-  if (existsSync(path) && !force) {
-    process.stdout.write(
-      `pairing.yaml already exists — left untouched (use --force to regenerate)\n` +
-        `pairing.yaml 已存在，未改动（--force 可重新生成）\n  ${path}\n`,
-    );
-    return 0;
-  }
-
-  const installed = agentsInstalled(realAgentEnv());
-  const cfg = defaultPairingConfig(installed);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, renderPairingConfig(cfg), "utf8");
-
-  const peers = Object.keys(cfg.capability).join(", ") || "(none)";
-  process.stdout.write(
-    `pairing.yaml written\npairing.yaml 已生成\n` +
-      `  ${path}\n` +
-      `  enabled: ${cfg.enabled} · stages: [${cfg.stages.join(", ")}]\n` +
-      `  agents: ${peers}\n` +
-      `  Legacy compatibility file. Prefer .roll/agents.yaml defaults.story.roles.evaluate for new projects.\n` +
-      `  这是 legacy 兼容文件。新项目优先使用 .roll/agents.yaml defaults.story.roles.evaluate。\n` +
-      (cfg.enabled
-        ? `  Pairing is ON for stages [${cfg.stages.join(", ")}] — a different-vendor agent cross-checks and scores each delivery.\n` +
-          `  已为 [${cfg.stages.join(", ")}] 阶段开启结对——交付会由不同厂商的 agent 互检并打分。\n`
-        : `  Pairing is OFF: fewer than two distinct vendors installed (no heterogeneous peer).\n` +
-          `  结对未开启：已装 agent 不足两个不同厂商（无异构搭档）。\n`),
+function pairInit(): number {
+  process.stderr.write(
+    "[roll] `roll pair init` is retired. Bind reviewers with .roll/agents.yaml defaults.story.roles.evaluate.\n" +
+      "[roll] `roll pair init` 已退役；请在 .roll/agents.yaml 的 defaults.story.roles.evaluate 绑定评审者。\n",
   );
-  return 0;
+  return 1;
 }
 
 function pairStatus(rest: string[]): number {
@@ -106,12 +65,11 @@ function pairStatus(rest: string[]): number {
     process.stderr.write(`[roll] unexpected argument(s): ${rest.join(" ")}\n`);
     return 1;
   }
-  const path = join(process.cwd(), ".roll", "pairing.yaml");
-  if (!existsSync(path)) {
+  const route = resolveScopedCastRole(process.cwd(), "evaluator");
+  if (route === null || !route.resolution.ok) {
     process.stdout.write(
-      `legacy pairing config is absent — scoped evaluate roles are the primary path.\n` +
-        `Configure .roll/agents.yaml defaults.story.roles.evaluate for new projects.\n` +
-        `legacy pairing 配置不存在；新项目请配置 .roll/agents.yaml defaults.story.roles.evaluate。\n`,
+      "No scoped evaluator binding. Configure .roll/agents.yaml defaults.story.roles.evaluate.\n" +
+        "未配置 scoped evaluator binding；请在 .roll/agents.yaml 的 defaults.story.roles.evaluate 中配置。\n",
     );
     return 0;
   }
@@ -119,28 +77,12 @@ function pairStatus(rest: string[]): number {
   const GREEN = noColor ? "" : "\x1b[0;32m";
   const DIM = noColor ? "" : "\x1b[0;90m";
   const NC = noColor ? "" : "\x1b[0m";
-
-  let view;
-  try {
-    view = pairingPoolView(agentsInstalled(realAgentEnv()), parsePairingConfig(readFileSync(path, "utf8")));
-  } catch (e) {
-    process.stderr.write(`[roll] pairing.yaml invalid: ${(e as Error).message}\n`);
-    return 1;
+  const out: string[] = ["", "  Cross-Agent Pairing — scoped evaluator pool / 结对评审池", ""];
+  out.push(`  strategy: ${route.resolution.resolved.selectedStrategy}`, "");
+  for (const agent of route.resolution.resolved.candidates) {
+    const disp = agentDisplayName(agent);
+    out.push(`    ${GREEN}✓ ${disp}${NC}  ${DIM}scoped story.evaluate candidate${NC}`);
   }
-
-  const out: string[] = ["", `  Cross-Agent Pairing — pool status / 结对池状态`, ""];
-  out.push(`  enabled: ${view.enabled} · stages: [${view.stages.join(", ")}]`, "");
-  for (const a of view.agents) {
-    const disp = agentDisplayName(a.agent);
-    const cap = a.capability.length > 0 ? `[${a.capability.join(", ")}]` : "—";
-    if (a.inPool) {
-      out.push(`    ${GREEN}✓ ${disp}${NC}  ${DIM}vendor=${a.vendor} · ${cap}${NC}`);
-    } else {
-      out.push(`    ${DIM}· ${disp}  vendor=${a.vendor} · ${cap} · excluded: ${a.reason}${NC}`);
-    }
-  }
-  // US-PAIR-006 cost observability: surface pairing activity + spend from the
-  // event stream. Best-effort — no events file / read error → a zero-activity line.
   out.push("");
   out.push(renderPairingActivity(pairingActivitySummary(), { noColor }));
   process.stdout.write(out.join("\n") + "\n");

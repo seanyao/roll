@@ -267,7 +267,7 @@ roll loop gc --keep-days 14   # Override retention (also: loop_gc.retention_days
 roll loop events      # Show last 20 cycle events
 roll loop events 50   # Show last 50 events
 
-roll agent                           # Show scopes, roles, agent pool, and legacy inputs
+roll agent                           # Show scopes, effective project capability, and agent pool
 roll agent list                      # Show agents installed on this machine
 ```
 
@@ -422,9 +422,12 @@ defaults:
         strategy: health-aware
 ```
 
-`roll agent` shows the effective Machine Scope, Project Scope, resolved roles,
-candidate pool, runtime health notes, and any legacy compatibility inputs. Use
-`roll agent migrate --dry-run` to preview conversion from old agent files.
+`roll agent` shows the Machine Scope and the effective Project Scope, including
+inherited agents and configured route models. It does not predict the next role
+assignment: dispatch resolves runtime health and least-recent state at spawn.
+Use `roll supervisor route --role builder|evaluator` for a diagnostic runtime
+snapshot. Use `roll agent migrate --dry-run` to preview a one-time conversion
+from old agent files; old agent config is not read during normal execution.
 
 Runtime health is not static policy. Quota, auth, network, VPN, account, stall,
 or missing binary failures suspend only the runtime rig and are recorded as

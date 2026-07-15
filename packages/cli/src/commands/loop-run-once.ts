@@ -12,7 +12,7 @@
  * The handler stays thin: it resolves the project identity + runtime paths and
  * delegates the entire walk to the runner adapter (packages/cli/src/runner).
  */
-import { EventBus, assessBacklog, branchCanaryVerdict, cycleEndEvent, DEFAULT_BRANCH_CANARY_MAX, firstInstalledAgent, isEphemeralBranch, mapV2Status, markStatus, parseBacklog, parsePolicy, readRouteSlot, shouldResize, shouldSuppressDormancy, type AgentSlot, type BacklogItem, type CycleContext, type RouteDeps, type RouteSlot } from "@roll/core";
+import { EventBus, assessBacklog, branchCanaryVerdict, cycleEndEvent, DEFAULT_BRANCH_CANARY_MAX, firstInstalledAgent, isEphemeralBranch, mapV2Status, markStatus, normalizeAgentScopeConfig, parseBacklog, parsePolicy, readRouteSlot, shouldResize, shouldSuppressDormancy, type AgentSlot, type BacklogItem, type CycleContext, type RouteDeps, type RouteSlot } from "@roll/core";
 import { STATUS_MARKER, absent, buildTerminalEvent, deriveOrphanVerdict, present, type BacklogReason } from "@roll/spec";
 import { createScheduler, isOwnerHeld, launchdLabel, projectIdentity, readLockOwner, releaseLock } from "@roll/infra";
 import { dormantMarkerPath, resolveLoopRunState, writeDormantMarker } from "./loop-sched.js";
@@ -791,14 +791,9 @@ export function readSkillBody(projectPath: string): string | null {
 }
 
 /**
- * Build legacy route deps for projects that have not migrated to scoped
- * `roll-agents/v1` role bindings. The executor first tries `story.execute`;
- * this tier slot reader is only the compatibility fallback. `local.yaml agent:`
- * is NOT a tier override — in v2 it is the single-agent default for non-loop
- * contexts and the cold-start seed for the `default` slot; consulting it
- * per-slot would collapse all tiers to one agent (FIX-223). `ROLL_LOOP_AGENT`
- * is likewise routing OUTPUT consumed by loop-fmt/dream, never a selection
- * input.
+ * Build the route dependencies used only when a scoped role has no assignment.
+ * Route rigs are accepted from a valid `roll-agents/v1` project file; v3 route
+ * slots and `.roll/local.yaml agent` are deliberately not runtime inputs.
  *
  * Exported for tests.
  */
@@ -806,47 +801,25 @@ export function buildLoopRouteDeps(projectPath: string): RouteDeps {
   function readSlot(slot: AgentSlot): RouteSlot | undefined {
     const agentsYaml = join(projectPath, ".roll", "agents.yaml");
     try {
-      // FIX-1249: readRouteSlot understands BOTH the `rigs:` + `routing:`
-      // (roll-agents/v1 / v4) shape AND the legacy inline slot form, returning
-      // `{ agent, model? }` — the router's RouteSlot shape. Before this, the
-      // router called readSlotFromText directly, which only read the legacy
-      // inline form, so a project on the rigs/routing schema had its configured
-      // per-agent model silently dropped (the spawn then fell back to a
-      // source-baked default).
-      return readRouteSlot(readFileSync(agentsYaml, "utf8"), slot);
+      const text = readFileSync(agentsYaml, "utf8");
+      const parsed = normalizeAgentScopeConfig(text);
+      if (parsed.config === null || parsed.errors.length > 0 || parsed.config.scope !== "project") {
+        throw new Error("legacy agent configuration is unsupported; run `roll agent migrate`");
+      }
+      return readRouteSlot(text, slot);
     } catch {
-      return undefined; // agents.yaml missing — router falls through.
+      if (existsSync(agentsYaml)) {
+        throw new Error("legacy agent configuration is unsupported; run `roll agent migrate`");
+      }
+      return undefined;
     }
   }
 
   function firstInstalled(): string | undefined {
-    // Project single-agent default (only reached when agents.yaml gave the
-    // router nothing for tier AND default), then the real installed-agent
-    // scan (core mirrors bash `_first_installed_agent` order + probes).
-    // undefined when nothing is installed — the router throws, like bash.
-    const fromLocal = readField(join(projectPath, ".roll", "local.yaml"), /^agent:/);
-    if (fromLocal !== undefined) return fromLocal;
     return firstInstalledAgent(realAgentEnv());
   }
 
   return { readSlot, firstInstalled };
-}
-
-/** Read the first matching field value from a YAML/text file. */
-function readField(path: string, re: RegExp): string | undefined {
-  try {
-    const text = readFileSync(path, "utf8");
-    for (const line of text.split("\n")) {
-      const m = line.match(re);
-      if (m !== null) {
-        const v = line.slice((m.index ?? 0) + m[0].length).trim();
-        if (v !== "") return v.replace(/^["']|["']$/g, "");
-      }
-    }
-  } catch {
-    // file missing — ok.
-  }
-  return undefined;
 }
 
 /** `roll loop run-once --help` usage. Bilingual on separate lines (EN then ZH). */
@@ -1093,9 +1066,8 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     return 1;
   }
 
-  // Resolve agent from the project's agents.yaml per tier, falling back to
-  // local.yaml's single-agent default → first installed agent (the same chain
-  // bash `_loop_pick_agent_for_story` walks).
+  // Build scoped route dependencies. Legacy local/pairing configuration is not
+  // consulted by the execution path.
   const routeDeps: RouteDeps = buildLoopRouteDeps(id.path);
 
   // FIX-220: manual `roll loop now` (ROLL_LOOP_FORCE=1) runs in an interactive

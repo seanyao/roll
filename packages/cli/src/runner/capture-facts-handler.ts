@@ -142,11 +142,9 @@ export async function executeCaptureFactsCommand(
       // high-complexity / cross-module delivery (e.g. a legit 16-file currency fix)
       // as `hetero_available_self_review_violation`, even though a genuine hetero
       // review ran moments later. The peerGate* setup vars above are consumed there.
-      // US-PAIR-003 legacy cross-agent pairing: a heterogeneous peer ONE-WAY
-      // reviews the diff for projects that still carry .roll/pairing.yaml. New
-      // projects bind story.evaluate in .roll/agents.yaml; pairing remains a
-      // compatibility path. NEVER blocks the cycle (30s hard timeout in reviewPeer;
-      // runPairing swallows all errors).
+      // US-PAIR-003 cross-agent pairing: a scoped `story.evaluate` binding enables
+      // a heterogeneous one-way review. runPairing records timeout/error outcomes
+      // without blocking the cycle.
       //
       // US-PAIR-004 multi-stage: pairing fires at EVERY enabled stage
       // (design/test/code/cycle), each independently opt-out via pairing.yaml

@@ -88,21 +88,15 @@ class FakeTransportFactory implements CdpTransportFactory {
       if (expression.includes("window.location.href")) {
         return { result: { value: "https://example.test/after" } };
       }
-      if (expression.includes("__rollMessages")) {
-        return { result: { value: JSON.stringify(["hello"]) } };
-      }
-      if (expression.includes("__rollNetworkRequests")) {
-        return { result: { value: JSON.stringify(["/api"]) } };
-      }
-      if (expression.includes("querySelectorAll")) {
-        return { result: { value: ["node text"] } };
-      }
       return { result: { value: undefined } };
     });
     session.when("Runtime.enable", () => ({}));
     session.when("Page.enable", () => ({}));
     session.when("Page.navigate", () => ({ frameId: "frame-1" }));
     session.when("Page.captureScreenshot", () => ({ data: "aGVsbG8=" }));
+    session.when("DOMSnapshot.captureSnapshot", () => ({ documents: [{ nodes: { nodeName: ["H1"] } }] }));
+    session.when("Log.enable", () => ({ entries: [{ level: "error", text: "Authorization: Bearer secret", source: "console-api" }] }));
+    session.when("Network.enable", () => ({ entries: [{ method: "GET", url: "https://api.example.test/orders?token=secret", status: 200, responseBody: "never persist" }] }));
     session.when("Emulation.setDeviceMetricsOverride", () => ({}));
     session.when("Network.setUserAgentOverride", () => ({}));
     this.configured?.(session);
@@ -292,6 +286,7 @@ describe("US-BROW-004b ManagedChromeAdapter", () => {
 
     expect(result.status).toBe("ok");
     expect(service.run.state).toBe("passed");
+    expect(result.diagnosticRefs[0]).toMatchObject({ kind: "dom-snapshot", diagnosticOnly: true, untrusted: true });
   });
 
   it("runs console summary and returns ok", async () => {
@@ -300,6 +295,7 @@ describe("US-BROW-004b ManagedChromeAdapter", () => {
 
     expect(result.status).toBe("ok");
     expect(service.run.state).toBe("passed");
+    expect(result.diagnosticRefs[0]).toMatchObject({ kind: "console-summary", diagnosticOnly: true, untrusted: true });
   });
 
   it("runs network summary and returns ok", async () => {
@@ -308,6 +304,7 @@ describe("US-BROW-004b ManagedChromeAdapter", () => {
 
     expect(result.status).toBe("ok");
     expect(service.run.state).toBe("passed");
+    expect(result.diagnosticRefs[0]).toMatchObject({ kind: "network-summary", diagnosticOnly: true, untrusted: true });
   });
 
   it("writes a diagnostic screenshot artifact when allowed", async () => {

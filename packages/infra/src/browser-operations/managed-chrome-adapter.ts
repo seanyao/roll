@@ -21,7 +21,9 @@ import {
   BrowserOperationRunService,
   DevToolsProtocolError,
   degradedPerformanceSummary,
+  persistDiagnostic,
   policyFingerprint,
+  redactDiagnostic,
   resolveDeviceProfile,
   summarizePerformanceMetrics,
   type DiagnosticFailure,
@@ -38,7 +40,8 @@ import type {
   PerformanceDiagnosticSummary,
   PerformanceProfile,
 } from "@roll/spec";
-import { McpCdpTransportFactory, type McpBrowserSessionFactory } from "./mcp-session.js";
+import { McpCdpTransportFactory, McpDiagnosticSessionFactory, type McpBrowserSessionFactory, type McpDiagnosticSession } from "./mcp-session.js";
+import type { DiagnosticArtifactWriter } from "./mcp-diagnostic-facade.js";
 
 // ── Public types ─────────────────────────────────────────────────────────────
 
@@ -83,6 +86,8 @@ export interface ManagedChromeAdapterDeps {
    * available only as a test-injection seam.
    */
   mcpSessionFactory?: McpBrowserSessionFactory;
+  /** Production typed MCP facade. Raw CDP is retained only as a test seam. */
+  mcpDiagnosticSessionFactory?: McpDiagnosticSessionFactory;
   /**
    * Raw CDP transport factory — test-injection seam only.
    *
@@ -186,7 +191,7 @@ class OriginDenialError extends Error {
 export function defaultManagedChromeAdapterDeps(diagnosticsDir: string): ManagedChromeAdapterDeps {
   return {
     launcher: new SystemChromeLauncher(),
-    mcpSessionFactory: new McpCdpTransportFactory({
+    mcpDiagnosticSessionFactory: new McpDiagnosticSessionFactory({
       emit: defaultMcpEventEmitter(),
     }),
     fs: nodeAdapterFs(),
@@ -243,6 +248,7 @@ export class ManagedChromeAdapter {
     let profileDir: string | undefined;
     let chrome: ChromeProcess | undefined;
     let cdp: CdpSession | undefined;
+    let diagnosticSession: McpDiagnosticSession | undefined;
     let terminalService: BrowserOperationRunService = service;
     let actionResultValue: BrowserActionResult;
     let performance: PerformanceProfileOutcome | undefined;
@@ -253,6 +259,27 @@ export class ManagedChromeAdapter {
 
       const remoteDebuggingPort = await this.allocateDebugPort();
       chrome = await this.deps.launcher.launch({ profileDir, remoteDebuggingPort });
+
+      if (this.deps.mcpDiagnosticSessionFactory !== undefined) {
+        diagnosticSession = await this.withTimeout(
+          this.deps.mcpDiagnosticSessionFactory.create(service.run.runId, this.diagnosticWriter(), this.deps.randomId),
+          timeoutMs,
+          "DevTools MCP session",
+        );
+        actionResultValue = await this.withTimeout(
+          this.runFacadeAction(diagnosticSession, action, payload, lanePolicy, service.run.requestedOrigin),
+          timeoutMs,
+          `action ${action}`,
+        );
+        terminalService = service.pass();
+        await diagnosticSession.close();
+        diagnosticSession = undefined;
+        await this.kill(chrome);
+        chrome = undefined;
+        terminalService = await this.cleanupProfile(profileDir, terminalService);
+        profileDir = undefined;
+        return { service: terminalService, result: actionResultValue };
+      }
 
       cdp = await this.withTimeout(this.createSession(service.run.runId), timeoutMs, "DevTools session");
 
@@ -299,12 +326,39 @@ export class ManagedChromeAdapter {
         redactedSummaryFromError(error),
       );
     } finally {
+      if (diagnosticSession !== undefined) await diagnosticSession.close();
       await this.close(cdp);
       await this.kill(chrome);
       terminalService = await this.cleanupProfile(profileDir, terminalService);
     }
 
     return { service: terminalService, result: actionResultValue, performance };
+  }
+
+  private async runFacadeAction(
+    session: McpDiagnosticSession,
+    action: BrowserActionKind,
+    payload: Record<string, string | number | boolean>,
+    lanePolicy: BrowserLanePolicy,
+    requestedOrigin: string,
+  ): Promise<BrowserActionResult> {
+    const initialUrl = action === "navigate" ? stringPayload(payload, "url") : undefined;
+    await this.assertOriginAllowed(initialUrl ?? requestedOrigin, lanePolicy, "before typed MCP action");
+    const result = await session.facade.execute({ action, payload });
+    if (result.status === "denied") throw new OriginDenialError(result.denial ?? { code: "action_not_allowed", message: result.summary });
+    if (result.status === "failed") throw new DevToolsError(result.summary);
+    if (result.finalUrl === undefined) throw new DevToolsError("Typed MCP action did not report a final URL");
+    await this.assertOriginAllowed(result.finalUrl, lanePolicy, "after typed MCP action");
+    return actionResult("", "ok", result.diagnosticRefs, result.summary);
+  }
+
+  private diagnosticWriter(): DiagnosticArtifactWriter {
+    return {
+      write: async ({ artifactId, bytes }) => {
+        await this.deps.fs.mkdir(this.deps.diagnosticsDir, { recursive: true });
+        await this.deps.fs.writeFile(join(this.deps.diagnosticsDir, `${artifactId}.bin`), bytes);
+      },
+    };
   }
 
   // ── Performance diagnostic profile (US-BROW-012) ────────────────────────
@@ -399,32 +453,23 @@ export class ManagedChromeAdapter {
         const selector = stringPayload(payload, "selector");
         const finalUrl = await this.readCurrentUrl(cdp);
         await this.assertOriginAllowed(finalUrl, lanePolicy, "before DOM assertion");
-        const expression = `Array.from(document.querySelectorAll(${JSON.stringify(selector)})).map(n => n.textContent || "")`;
-        const evalResult = (await cdp.send("Runtime.evaluate", { expression, returnByValue: true })) as {
-          result?: { value?: unknown };
-        };
-        const domResults = stringArray(evalResult.result?.value);
-        return actionResult("", "ok", [], `DOM assertion matched ${domResults.length} nodes`);
+        const snapshot = await cdp.send("DOMSnapshot.captureSnapshot", { computedStyles: [], includeDOMRects: false });
+        const ref = await this.writeTextDiagnosticArtifact("dom-snapshot", JSON.stringify({ selector, snapshot }));
+        return actionResult("", "ok", [ref], "DOM snapshot recorded");
       }
       case "console": {
         const finalUrl = await this.readCurrentUrl(cdp);
         await this.assertOriginAllowed(finalUrl, lanePolicy, "before console summary");
-        const expression = `JSON.stringify((window.console && window.console.__rollMessages) || [])`;
-        const evalResult = (await cdp.send("Runtime.evaluate", { expression, returnByValue: true })) as {
-          result?: { value?: unknown };
-        };
-        const messages = stringArray(JSON.parse(stringValue(evalResult.result?.value) || "[]") || []);
-        return actionResult("", "ok", [], `console summary: ${messages.length} messages`);
+        const log = await cdp.send("Log.enable");
+        const ref = await this.writeTextDiagnosticArtifact("console-summary", JSON.stringify({ entries: normalizeConsoleEntries(log) }));
+        return actionResult("", "ok", [ref], "console summary recorded");
       }
       case "network": {
         const finalUrl = await this.readCurrentUrl(cdp);
         await this.assertOriginAllowed(finalUrl, lanePolicy, "before network summary");
-        const expression = `JSON.stringify((window.__rollNetworkRequests) || [])`;
-        const evalResult = (await cdp.send("Runtime.evaluate", { expression, returnByValue: true })) as {
-          result?: { value?: unknown };
-        };
-        const requests = stringArray(JSON.parse(stringValue(evalResult.result?.value) || "[]") || []);
-        return actionResult("", "ok", [], `network summary: ${requests.length} requests`);
+        const network = await cdp.send("Network.enable");
+        const ref = await this.writeTextDiagnosticArtifact("network-summary", JSON.stringify({ entries: normalizeNetworkEntries(network) }));
+        return actionResult("", "ok", [ref], "network summary recorded");
       }
       case "screenshot": {
         const finalUrl = await this.readCurrentUrl(cdp);
@@ -478,6 +523,18 @@ export class ManagedChromeAdapter {
       untrusted: true,
       diagnosticOnly: true,
     };
+  }
+
+  private async writeTextDiagnosticArtifact(kind: DiagnosticArtifactKind, text: string): Promise<DiagnosticArtifactRef> {
+    const artifactId = this.deps.randomId();
+    const persisted = persistDiagnostic({ artifactId, kind, text });
+    if (persisted.kind === "dropped") {
+      throw new DevToolsError(`Diagnostic artifact dropped: ${persisted.failure}`);
+    }
+    const path = join(this.deps.diagnosticsDir, `${artifactId}.bin`);
+    await this.deps.fs.mkdir(this.deps.diagnosticsDir, { recursive: true });
+    await this.deps.fs.writeFile(path, persisted.text, "utf8");
+    return persisted.artifact;
   }
 
   private finalizeFromError(service: BrowserOperationRunService, error: unknown): BrowserOperationRunService {
@@ -595,7 +652,7 @@ function diagnosticFailureFromError(error: unknown, now: () => string): Diagnost
 
 function redactedSummaryFromError(error: unknown): string {
   if (error instanceof OriginDenialError) return `denied: ${error.reason.message}`;
-  if (error instanceof Error) return `failed: ${error.message}`;
+  if (error instanceof Error) return `failed: ${redactDiagnostic(error.message)}`;
   return "failed: unknown error";
 }
 
@@ -626,6 +683,46 @@ function stringValue(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-function stringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+function normalizeConsoleEntries(value: unknown): Array<{ level: string; message: string; source?: string }> {
+  const entries = isRecord(value) && Array.isArray(value["entries"]) ? value["entries"] : [];
+  return entries.slice(0, 50).flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+    const message = typeof entry["text"] === "string" ? entry["text"] : typeof entry["message"] === "string" ? entry["message"] : "";
+    const source = typeof entry["source"] === "string" ? entry["source"] : undefined;
+    return [{
+      level: typeof entry["level"] === "string" ? entry["level"] : "info",
+      message,
+      ...(source === undefined ? {} : { source }),
+    }];
+  });
+}
+
+function normalizeNetworkEntries(value: unknown): Array<{ method: string; origin?: string; status?: number; duration?: number; failure?: string }> {
+  const entries = isRecord(value) && Array.isArray(value["entries"]) ? value["entries"] : [];
+  return entries.slice(0, 50).flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+    const rawUrl = typeof entry["url"] === "string" ? entry["url"] : undefined;
+    const status = typeof entry["status"] === "number" ? entry["status"] : undefined;
+    const duration = typeof entry["duration"] === "number" ? entry["duration"] : undefined;
+    const failure = typeof entry["failure"] === "string" ? entry["failure"] : undefined;
+    return [{
+      method: typeof entry["method"] === "string" ? entry["method"] : "GET",
+      ...(rawUrl === undefined ? {} : { origin: normalizeDiagnosticOrigin(rawUrl) }),
+      ...(status === undefined ? {} : { status }),
+      ...(duration === undefined ? {} : { duration }),
+      ...(failure === undefined ? {} : { failure }),
+    }];
+  });
+}
+
+function normalizeDiagnosticOrigin(value: string): string {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return "invalid";
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

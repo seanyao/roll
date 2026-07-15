@@ -24,6 +24,10 @@ import {
   type DevToolsMcpManifest,
 } from "@roll/core";
 import type { CdpSession } from "./managed-chrome-adapter.js";
+import {
+  McpDiagnosticFacade,
+  type DiagnosticArtifactWriter,
+} from "./mcp-diagnostic-facade.js";
 
 // ── Public types ─────────────────────────────────────────────────────────────
 
@@ -49,6 +53,37 @@ export interface McpBrowserSessionDeps {
 /** Factory that creates an MCP-backed CDP session for a managed run. */
 export interface McpBrowserSessionFactory {
   create(runId: string): Promise<CdpSession>;
+}
+
+/** The production typed-action MCP session returned to Browser Operations. */
+export interface McpDiagnosticSession {
+  facade: McpDiagnosticFacade;
+  close(): Promise<void>;
+}
+
+export interface McpDiagnosticSessionFactoryOptions extends McpCdpTransportFactoryOptions {}
+
+/** Opens a pinned MCP session and exposes only the typed diagnostic facade. */
+export class McpDiagnosticSessionFactory {
+  constructor(private readonly options: McpDiagnosticSessionFactoryOptions = {}) {}
+
+  async create(runId: string, writer: DiagnosticArtifactWriter, randomId: () => string): Promise<McpDiagnosticSession> {
+    const session = await McpBrowserSession.open({
+      runId,
+      now: this.options.now ?? (() => new Date().toISOString()),
+      emit: this.options.emit ?? noopEmit,
+      spawn: this.options.spawn,
+      manifest: this.options.manifest,
+    });
+    return {
+      facade: new McpDiagnosticFacade({
+        caller: { call: (tool, input) => session.callTool(tool, input) },
+        writer,
+        randomId,
+      }),
+      close: () => session.close(),
+    };
+  }
 }
 
 /** Options for {@link McpCdpTransportFactory}. */
@@ -126,13 +161,11 @@ export class McpBrowserSession {
    * `chrome_devtools_call` tool; the result is parsed from the tool's text
    * content.
    */
-  async call(method: string, params?: Record<string, unknown>): Promise<unknown> {
-    const toolName = this.deps.manifest.requiredTools[0];
-    if (toolName === undefined) {
-      throw new DevToolsProtocolError("No required tool defined in the MCP manifest");
+  async callTool(toolName: import("@roll/core").DevToolsMcpToolName | "chrome_devtools_call", input: Record<string, unknown>): Promise<unknown> {
+    if (!this.deps.manifest.requiredTools.includes(toolName)) {
+      throw new DevToolsProtocolError(`MCP tool is not approved by the manifest: ${toolName}`);
     }
-    const raw = await this.rpc.callTool(toolName, { method, params });
-    return parseToolResult(raw);
+    return parseToolResult(await this.rpc.callTool(toolName, input));
   }
 
   /** Close the session exactly once and emit the closed event. */
@@ -172,7 +205,7 @@ class McpCdpSession implements CdpSession {
   constructor(private readonly session: McpBrowserSession) {}
 
   async send(method: string, params?: Record<string, unknown>): Promise<unknown> {
-    return this.session.call(method, params);
+    return this.session.callTool("chrome_devtools_call", { method, params });
   }
 
   async close(): Promise<void> {

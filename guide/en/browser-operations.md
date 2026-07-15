@@ -390,6 +390,46 @@ minutes; there is no background scheduler or persistent session.
 No. Only loopback endpoints are supported. There is no remote endpoint, tunnel,
 or cloud browser integration.
 
+## Live regression gate
+
+The managed lane is protected by a real, hermetic end-to-end gate
+(`pnpm test:browser-live`). It starts a local temporary HTTP target, a real
+exact-version `chrome-devtools-mcp` process, and a managed temporary Chrome
+profile, then drives navigation, DOM snapshot, real console/network summaries, a
+diagnostic screenshot, and the opt-in performance/device profiles through the
+public managed path. It also proves final-origin redirect denial and that
+timeout, Chrome crash, MCP protocol error, and redaction failure each clean up
+the MCP process, Chrome, and the temporary profile. It performs **no external
+network request**.
+
+Two environments, deliberately separate:
+
+- **Default `roll test` / `pnpm -r test`** — never runs the live gate (it needs
+  Chrome). These suites stay green everywhere. The gate's own logic (capability
+  detection, evidence scoring, the local target) is covered by hermetic unit
+  tests that always run.
+- **Chrome-capable CI lane** (`.github/workflows/browser-live-gate.yml`) — sets
+  `ROLL_BROWSER_LIVE=1`, provisions a real Chrome, and runs the live gate for
+  real.
+
+The gate is **fail-loud, never a silent skip**. Run it locally with:
+
+```bash
+ROLL_BROWSER_LIVE=1 pnpm test:browser-live
+```
+
+If Chrome or `npx` is missing, or `ROLL_BROWSER_LIVE` is unset, the gate exits
+as an *explicitly unavailable environment gate* — it reports the missing
+capability and states plainly that the managed lane is **not verified**. It
+never reports the feature as verified from a skipped or fixture run: a
+`fixture`-sourced report can exercise seams but can never earn a `verified`
+verdict.
+
+A `verified` result prints the real transport verification (`transport
+initialized`, `manifest verified`), the per-scenario cleanup state, and the
+diagnostic-only boundary — the same summary a physical-terminal screenshot
+captures.
+
 ## See also
 
 - [Tools & policy](tools.md) — how `browser.*` tool access is governed.

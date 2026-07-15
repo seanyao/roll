@@ -5,17 +5,19 @@ exports[`US-BROW-007 — documented \`roll browser\` surface > AC2: help lists t
   setup --dry-run       Report proposed machine config + dependency preflight (writes nothing).
   setup --confirm       Write ~/.roll/browser-operations.yaml after explicit owner confirmation.
   doctor [--json]       Report managed / interactive / capture readiness (ready|degraded|blocked).
-  run [opts]            Run a managed-lane operation against a fake target and print the result.
+  run [opts]            Run a managed-lane operation through the real policy-gated MCP lane.
+     --story <US-ID>    Required: story identifier (US-BROW-018, etc.).
+     --url <targetUrl>  Target URL for the browser action.
      --action <navigate|snapshot|console|network|screenshot>  (default: navigate)
-     --url <fakeUrl>    Fake target URL (default: https://fake.target.test).
      --selector <sel>   DOM selector for --action snapshot.
-     --redirect <url>   Simulate a redirect (proves redirect denial).
-     --fail <timeout|crash|devtools-error>  Inject a categorized diagnostic failure.
      --profile <name>   Device emulation profile (Pixel 7, iPhone 14, iPad Pro).
      --perf-profile <name>  Opt-in performance diagnostic profile (web-vitals-lite); diagnostic-only.
-     --perf-fail        Simulate a performance-profile failure (proves graceful degradation).
      Optional profiles are not visual acceptance evidence or a multi-browser matrix.
      --json             Emit the machine-readable run report.
+     --fixture          Test-only: use the fake-target fixture instead of real MCP.
+     --fail <timeout|crash|devtools-error>  (fixture only) Inject a categorized diagnostic failure.
+     --redirect <url>   (fixture only) Simulate a redirect (proves redirect denial).
+     --perf-fail        (fixture only) Simulate a performance-profile failure.
   interactive --story <US-ID> --origin <https-origin> --action <navigate|click|fill|press_key> [action flags]
      Requires an attached TTY and one owner approval. Connects only to an already-open loopback Chrome debug endpoint.
      No background scheduler, remote endpoint, cookie export, or automatic Chrome startup is supported.
@@ -30,17 +32,19 @@ exports[`US-BROW-007 — documented \`roll browser\` surface > US-BROW-015: help
   setup --dry-run       Report proposed machine config + dependency preflight (writes nothing).
   setup --confirm       Write ~/.roll/browser-operations.yaml after explicit owner confirmation.
   doctor [--json]       Report managed / interactive / capture readiness (ready|degraded|blocked).
-  run [opts]            Run a managed-lane operation against a fake target and print the result.
+  run [opts]            Run a managed-lane operation through the real policy-gated MCP lane.
+     --story <US-ID>    Required: story identifier (US-BROW-018, etc.).
+     --url <targetUrl>  Target URL for the browser action.
      --action <navigate|snapshot|console|network|screenshot>  (default: navigate)
-     --url <fakeUrl>    Fake target URL (default: https://fake.target.test).
      --selector <sel>   DOM selector for --action snapshot.
-     --redirect <url>   Simulate a redirect (proves redirect denial).
-     --fail <timeout|crash|devtools-error>  Inject a categorized diagnostic failure.
      --profile <name>   Device emulation profile (Pixel 7, iPhone 14, iPad Pro).
      --perf-profile <name>  Opt-in performance diagnostic profile (web-vitals-lite); diagnostic-only.
-     --perf-fail        Simulate a performance-profile failure (proves graceful degradation).
      Optional profiles are not visual acceptance evidence or a multi-browser matrix.
      --json             Emit the machine-readable run report.
+     --fixture          Test-only: use the fake-target fixture instead of real MCP.
+     --fail <timeout|crash|devtools-error>  (fixture only) Inject a categorized diagnostic failure.
+     --redirect <url>   (fixture only) Simulate a redirect (proves redirect denial).
+     --perf-fail        (fixture only) Simulate a performance-profile failure.
   interactive --story <US-ID> --origin <https-origin> --action <navigate|click|fill|press_key> [action flags]
      Requires an attached TTY and one owner approval. Connects only to an already-open loopback Chrome debug endpoint.
      No background scheduler, remote endpoint, cookie export, or automatic Chrome startup is supported.

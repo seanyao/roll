@@ -1,10 +1,14 @@
 /**
- * US-BROW-004c — Managed-lane CLI orchestration + operator-observable result.
+ * US-BROW-004c / US-BROW-018 — Managed-lane CLI orchestration + operator-observable result.
  *
- * Wires the US-BROW-004a run service and the US-BROW-004b managed Chrome adapter
- * against a US-BROW-004c fake-target fixture, producing a readable diagnostic
- * result an operator can observe end-to-end (CLI → run service → adapter →
- * terminal result) with NO real Chrome.
+ * Two modes:
+ *  1. **Fixture (test/demo)**: `runManagedFixtureOperation` uses the fake-target
+ *     fixture — retained ONLY as a test helper and is NOT a successful CLI
+ *     fallback when real MCP is unavailable (AC1).
+ *  2. **Real MCP (production)**: `runManagedOperation` performs a real,
+ *     policy-authorized managed MCP operation through the US-BROW-016/017
+ *     session and adapter stack. This is the path the public `roll browser run`
+ *     takes when `--story` is supplied.
  *
  * Honesty contract (scorer_focus):
  *  - The managed lane always runs in a temporary profile — owner state can never
@@ -13,14 +17,28 @@
  *    never conflated with visual acceptance; the rendered result says so
  *    explicitly.
  */
-import { BrowserOperationRunService } from "@roll/core";
-import { ManagedChromeAdapter, createManagedFixtureDeps, type ManagedFixtureFailure } from "@roll/infra";
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
+import {
+  BrowserOperationRunService,
+  resolvePolicy,
+} from "@roll/core";
+import {
+  ManagedChromeAdapter,
+  defaultManagedChromeAdapterDeps,
+  createManagedFixtureDeps,
+  McpDiagnosticSessionFactory,
+  type ManagedFixtureFailure,
+} from "@roll/infra";
+import { loadBrowserPolicy } from "./browser-policy-loader.js";
 import type {
   BrowserActionKind,
   BrowserActionResult,
   BrowserLanePolicy,
   PerformanceDiagnosticSummary,
 } from "@roll/spec";
+
+export { loadBrowserPolicy } from "./browser-policy-loader.js";
 
 /** Actions the managed fixture surface accepts (closed subset of the vocabulary). */
 export const MANAGED_FIXTURE_ACTIONS: readonly BrowserActionKind[] = [
@@ -51,7 +69,24 @@ export interface ManagedFixtureRunOptions {
   performanceFailure?: boolean;
 }
 
-/** The operator-observable outcome of a managed fixture run. */
+/** Options for the real policy-gated MCP run (US-BROW-018). */
+export interface ManagedRunOptions {
+  action: BrowserActionKind;
+  targetUrl: string;
+  storyId: string;
+  /** Project root for policy loading. */
+  projectPath: string;
+  /** DOM selector for a `snapshot` action. */
+  selector?: string;
+  /** Per-run timeout. */
+  timeoutMs?: number;
+  /** Optional device emulation profile name. */
+  deviceProfile?: string;
+  /** Optional performance diagnostic profile name (opt-in). */
+  performanceProfile?: string;
+}
+
+/** The operator-observable outcome of a managed run (fixture or real). */
 export interface ManagedRunReport {
   lane: "managed";
   action: BrowserActionKind;
@@ -78,6 +113,16 @@ export interface ManagedRunReport {
   performanceSummary?: PerformanceDiagnosticSummary;
   /** Structured denial when the profile was disabled by policy or unknown. */
   performanceDenied?: string;
+  /** For real MCP runs: pinned MCP package version (AC3). */
+  mcpVersion?: string;
+  /** For real MCP runs: whether transport was initialized (AC3). */
+  transportInitialized?: boolean;
+  /** For real MCP runs: whether the tool manifest was verified (AC3). */
+  manifestVerified?: boolean;
+  /** Denial reason when the operation is blocked before MCP spawn (AC2). */
+  deniedReason?: string;
+  /** True when this report came from the real MCP path (not fixture). */
+  isRealMcp?: boolean;
 }
 
 const DEFAULT_MANAGED_POLICY = (targetUrl: string, performanceDiagnostics: boolean): BrowserLanePolicy => ({
@@ -86,8 +131,6 @@ const DEFAULT_MANAGED_POLICY = (targetUrl: string, performanceDiagnostics: boole
   allowedActions: [...MANAGED_FIXTURE_ACTIONS],
   maxRunsPerCycle: 5,
   timeoutMs: 5_000,
-  // Opt-in: the operator selecting a performance profile flips this policy gate
-  // on. Without a selected profile the diagnostic surface stays disabled.
   performanceDiagnostics,
 });
 
@@ -99,9 +142,136 @@ function originOf(url: string): string {
   }
 }
 
+// ── Real MCP run (US-BROW-018) ───────────────────────────────────────────────
+
+/**
+ * Run a real, policy-authorized managed browser operation through the MCP lane.
+ *
+ * On policy denial or unavailable MCP, returns a structured denial report
+ * WITHOUT spawning a browser or MCP process (AC2).
+ */
+export async function runManagedOperation(options: ManagedRunOptions): Promise<ManagedRunReport> {
+  const policy = loadBrowserPolicy(options.projectPath);
+
+  // Resolve policy (gates 1-6).
+  const decision = resolvePolicy({
+    policy,
+    lane: "managed",
+    caller: "builder",
+    action: options.action,
+    targetUrl: options.targetUrl,
+  });
+
+  if (!decision.authorized) {
+    return deniedReport(options, decision.denial?.message ?? "Policy denied the managed operation");
+  }
+
+  const lanePolicy = decision.lanePolicy!;
+  const timeoutMs = options.timeoutMs ?? lanePolicy.timeoutMs ?? 30_000;
+  const storyId = options.storyId;
+
+  const runId = `mcp-${randomUUID().slice(0, 8)}`;
+  const runService = BrowserOperationRunService.create({
+    runId,
+    idempotencyKey: `mcp-key-${storyId}-${options.action}`,
+    caller: "builder",
+    lane: "managed",
+    requestedOrigin: options.targetUrl,
+    holderTokenHash: randomUUID(),
+    storyId,
+    now: () => new Date().toISOString(),
+  });
+
+  let transportInitialized = false;
+  let manifestVerified = false;
+  let mcpVersion = "";
+
+  try {
+    const cwd = options.projectPath;
+    const diagDir = join(cwd, ".roll", "browser-operations", "diagnostics");
+
+    // Wire the real MCP transport (US-BROW-016/017).
+    const deps = {
+      ...defaultManagedChromeAdapterDeps(diagDir),
+      // Override mcpDiagnosticSessionFactory to capture init events.
+      mcpDiagnosticSessionFactory: new McpDiagnosticSessionFactory({
+        emit: (event) => {
+          if (event.type === "browser:mcp-initialized") {
+            transportInitialized = true;
+            manifestVerified = true;
+            mcpVersion = event.version;
+          }
+        },
+      }),
+    };
+
+    const adapter = new ManagedChromeAdapter(deps);
+
+    const outcome = await adapter.execute({
+      runService,
+      lanePolicy,
+      action: options.action,
+      payload: buildPayload({ action: options.action, targetUrl: options.targetUrl, selector: options.selector }),
+      timeoutMs,
+      deviceProfile: options.deviceProfile,
+      performanceProfile: options.performanceProfile,
+    });
+
+    const terminal = outcome.service.terminalResult();
+    return {
+      lane: "managed",
+      action: options.action,
+      targetUrl: options.targetUrl,
+      runState: outcome.service.run.state,
+      result: outcome.service.run.result,
+      actionStatus: outcome.result.status,
+      profileRemoved: outcome.service.isProfileRemoved(),
+      diagnosticArtifacts: outcome.result.diagnosticRefs.length,
+      failures: terminal?.kind === "fail"
+        ? terminal.failures.map((f) => ({ category: f.category, message: f.message }))
+        : outcome.service.diagnosticFailures.map((f) => ({ category: f.category, message: f.message })),
+      summary: outcome.result.redactedSummary,
+      deviceProfile: options.deviceProfile,
+      performanceProfile: options.performanceProfile,
+      performanceSummary: outcome.performance?.summary,
+      performanceDenied: outcome.performance?.denial
+        ? `${outcome.performance.denial.code}: ${outcome.performance.denial.message}`
+        : undefined,
+      mcpVersion,
+      transportInitialized,
+      manifestVerified,
+      isRealMcp: true,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      lane: "managed",
+      action: options.action,
+      targetUrl: options.targetUrl,
+      runState: "failed",
+      result: "fail",
+      actionStatus: "failed",
+      profileRemoved: false,
+      diagnosticArtifacts: 0,
+      failures: [{ category: "devtools-error", message }],
+      summary: `Real MCP run failed: ${message}`,
+      mcpVersion,
+      transportInitialized,
+      manifestVerified,
+      deniedReason: transportInitialized ? undefined : `MCP unavailable: ${message}`,
+      isRealMcp: true,
+    };
+  }
+}
+
+// ── Fixture run (test helper, US-BROW-004c) ──────────────────────────────────
+
 /**
  * Run one managed browser operation against the fake-target fixture and return a
  * structured, operator-observable report.
+ *
+ * ⚠️ Retained only as a test helper. The public CLI path MUST use
+ *    {@link runManagedOperation} and must not silently fall back here (AC1).
  */
 export async function runManagedFixtureOperation(options: ManagedFixtureRunOptions): Promise<ManagedRunReport> {
   const timeoutMs = options.timeoutMs ?? (options.failure === "timeout" ? 30 : 5_000);
@@ -130,7 +300,7 @@ export async function runManagedFixtureOperation(options: ManagedFixtureRunOptio
     runService,
     lanePolicy,
     action: options.action,
-    payload: buildPayload(options),
+    payload: buildPayload({ action: options.action, targetUrl: options.targetUrl, selector: options.selector }),
     timeoutMs,
     deviceProfile: options.deviceProfile,
     performanceProfile: options.performanceProfile,
@@ -158,16 +328,37 @@ export async function runManagedFixtureOperation(options: ManagedFixtureRunOptio
   };
 }
 
-function buildPayload(options: ManagedFixtureRunOptions): Record<string, string | number | boolean> {
-  switch (options.action) {
+function buildPayload(opts: { action: BrowserActionKind; targetUrl: string; selector?: string }): Record<string, string | number | boolean> {
+  switch (opts.action) {
     case "navigate":
-      return { url: options.targetUrl };
+      return { url: opts.targetUrl };
     case "snapshot":
-      return { selector: options.selector ?? "body" };
+      return { selector: opts.selector ?? "body" };
     default:
       return {};
   }
 }
+
+// ── Denied report ────────────────────────────────────────────────────────────
+
+function deniedReport(options: Pick<ManagedRunOptions, "action" | "targetUrl">, reason: string): ManagedRunReport {
+  return {
+    lane: "managed",
+    action: options.action,
+    targetUrl: options.targetUrl,
+    runState: "denied",
+    result: "denied",
+    actionStatus: "denied",
+    profileRemoved: false,
+    diagnosticArtifacts: 0,
+    failures: [],
+    summary: `Denied: ${reason}`,
+    deniedReason: reason,
+    isRealMcp: true,
+  };
+}
+
+// ── Rendering ────────────────────────────────────────────────────────────────
 
 /**
  * Render a managed run report as operator-observable terminal lines. This is the
@@ -175,10 +366,36 @@ function buildPayload(options: ManagedFixtureRunOptions): Record<string, string 
  * and explicit that diagnostic success is not visual acceptance.
  */
 export function renderManagedRunReport(report: ManagedRunReport): string[] {
+  const isReal = report.isRealMcp === true;
+  const fixtureLabel = isReal ? " — real MCP" : " — fixture (fake target)";
   const lines: string[] = [
-    "Managed browser operation — fixture (fake target)",
-    "受管浏览器操作 — fixture（假目标）",
+    `Managed browser operation${fixtureLabel}`,
+    `受管浏览器操作${isReal ? " — 真实 MCP" : " — fixture（假目标）"}`,
     "",
+  ];
+
+  if (isReal) {
+    if (report.mcpVersion !== undefined) {
+      lines.push(`  mcp package / MCP 包:  ${report.mcpVersion}`);
+    }
+    if (report.transportInitialized !== undefined) {
+      lines.push(`  transport initialized / 传输初始化:  ${report.transportInitialized ? "yes" : "no"}`);
+    }
+    if (report.manifestVerified !== undefined) {
+      lines.push(`  manifest verified / 清单验证:  ${report.manifestVerified ? "yes" : "no"}`);
+    }
+  }
+
+  if (report.deniedReason !== undefined) {
+    lines.push(`  denied / 已拒绝:       ${report.deniedReason}`);
+    lines.push("");
+    lines.push("  Diagnostic success is not visual acceptance evidence.");
+    lines.push("  诊断通过不等于视觉验收证据。");
+    lines.push("");
+    return lines;
+  }
+
+  lines.push(
     `  lane / 通道:            ${report.lane}`,
     `  action / 动作:          ${report.action}`,
     `  target / 目标:          ${report.targetUrl}`,
@@ -186,7 +403,7 @@ export function renderManagedRunReport(report: ManagedRunReport): string[] {
     `  result / 结果:          ${report.result} (action: ${report.actionStatus})`,
     `  temp profile / 临时档案: ${report.profileRemoved ? "removed" : "NOT removed"} (owner state never entered / 绝不进入 owner 状态)`,
     `  diagnostics / 诊断产物:  ${report.diagnosticArtifacts} (diagnostic-only, NOT visual acceptance / 仅诊断，非视觉验收)`,
-  ];
+  );
 
   if (report.failures.length > 0) {
     lines.push("  failures / 失败分类:");

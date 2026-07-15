@@ -43,6 +43,8 @@ import {
   MANAGED_FIXTURE_ACTIONS,
   renderManagedRunReport,
   runManagedFixtureOperation,
+  runManagedOperation,
+  loadBrowserPolicy,
 } from "../lib/managed-browser-run.js";
 import { collectBrowserTruth } from "../lib/browser-truth-collect.js";
 import { renderBrowserTruthVerbose } from "../lib/browser-truth-surface.js";
@@ -103,17 +105,19 @@ const USAGE =
   "  setup --dry-run       Report proposed machine config + dependency preflight (writes nothing).\n" +
   "  setup --confirm       Write ~/.roll/browser-operations.yaml after explicit owner confirmation.\n" +
   "  doctor [--json]       Report managed / interactive / capture readiness (ready|degraded|blocked).\n" +
-  "  run [opts]            Run a managed-lane operation against a fake target and print the result.\n" +
+  "  run [opts]            Run a managed-lane operation through the real policy-gated MCP lane.\n" +
+  "     --story <US-ID>    Required: story identifier (US-BROW-018, etc.).\n" +
+  "     --url <targetUrl>  Target URL for the browser action.\n" +
   "     --action <navigate|snapshot|console|network|screenshot>  (default: navigate)\n" +
-  "     --url <fakeUrl>    Fake target URL (default: https://fake.target.test).\n" +
   "     --selector <sel>   DOM selector for --action snapshot.\n" +
-  "     --redirect <url>   Simulate a redirect (proves redirect denial).\n" +
-  "     --fail <timeout|crash|devtools-error>  Inject a categorized diagnostic failure.\n" +
   "     --profile <name>   Device emulation profile (Pixel 7, iPhone 14, iPad Pro).\n" +
   "     --perf-profile <name>  Opt-in performance diagnostic profile (web-vitals-lite); diagnostic-only.\n" +
-  "     --perf-fail        Simulate a performance-profile failure (proves graceful degradation).\n" +
   "     Optional profiles are not visual acceptance evidence or a multi-browser matrix.\n" +
   "     --json             Emit the machine-readable run report.\n" +
+  "     --fixture          Test-only: use the fake-target fixture instead of real MCP.\n" +
+  "     --fail <timeout|crash|devtools-error>  (fixture only) Inject a categorized diagnostic failure.\n" +
+  "     --redirect <url>   (fixture only) Simulate a redirect (proves redirect denial).\n" +
+  "     --perf-fail        (fixture only) Simulate a performance-profile failure.\n" +
   "  interactive --story <US-ID> --origin <https-origin> --action <navigate|click|fill|press_key> [action flags]\n" +
   "     Requires an attached TTY and one owner approval. Connects only to an already-open loopback Chrome debug endpoint.\n" +
   "     No background scheduler, remote endpoint, cookie export, or automatic Chrome startup is supported.\n" +
@@ -211,41 +215,80 @@ async function runSubcommand(args: string[], deps: BrowserCommandDeps): Promise<
     );
     return 1;
   }
-  const failArg = flagValue(args, "--fail");
-  if (failArg !== undefined && !FAILURE_KINDS.includes(failArg as ManagedFixtureFailure)) {
-    process.stderr.write(`roll browser run: unknown --fail '${failArg}'. Supported: ${FAILURE_KINDS.join(", ")}.\n`);
+
+  // ── Fixture path (test-only, --fixture flag) ────────────────────────────
+  if (args.includes("--fixture")) {
+    const failArg = flagValue(args, "--fail");
+    if (failArg !== undefined && !FAILURE_KINDS.includes(failArg as ManagedFixtureFailure)) {
+      process.stderr.write(`roll browser run: unknown --fail '${failArg}'. Supported: ${FAILURE_KINDS.join(", ")}.\n`);
+      return 1;
+    }
+    const profileArg = flagValue(args, "--profile");
+    if (profileArg !== undefined) {
+      const resolved = resolveDeviceProfile(profileArg);
+      if ("code" in resolved) { process.stderr.write(`roll browser run: ${resolved.message}\n`); return 1; }
+    }
+    const perfProfileArg = flagValue(args, "--perf-profile");
+    if (perfProfileArg !== undefined) {
+      const resolved = resolvePerformanceProfile(perfProfileArg);
+      if ("code" in resolved) { process.stderr.write(`roll browser run: ${resolved.message}\n`); return 1; }
+    }
+
+    const report = await runManagedFixtureOperation({
+      action: actionArg,
+      targetUrl: flagValue(args, "--url") ?? "https://fake.target.test",
+      selector: flagValue(args, "--selector"),
+      redirectTo: flagValue(args, "--redirect"),
+      failure: failArg as ManagedFixtureFailure | undefined,
+      deviceProfile: profileArg,
+      performanceProfile: perfProfileArg,
+      performanceFailure: args.includes("--perf-fail"),
+    });
+
+    if (args.includes("--json")) {
+      deps.stdout(JSON.stringify(report, null, 2) + "\n");
+    } else {
+      deps.stdout(renderManagedRunReport(report).join("\n") + "\n");
+    }
+    return 0;
+  }
+
+  // ── Real MCP path (production, US-BROW-018 AC1) ─────────────────────────
+  const storyId = flagValue(args, "--story");
+  const targetUrl = flagValue(args, "--url");
+
+  if (storyId === undefined || targetUrl === undefined) {
+    deps.stdout(
+      "roll browser run requires --story <US-ID> and --url <targetUrl> for the real managed MCP lane.\n" +
+      "  Use --fixture for the test-only fake-target path.\n" +
+      "  The fixture is not a successful CLI fallback when real MCP is unavailable.\n"
+    );
     return 1;
   }
 
-  // Validate device profile early (US-BROW-014): fail-fast with clear error.
+  // Validate device profile early (US-BROW-014).
   const profileArg = flagValue(args, "--profile");
   if (profileArg !== undefined) {
     const resolved = resolveDeviceProfile(profileArg);
-    if ("code" in resolved) {
-      process.stderr.write(`roll browser run: ${resolved.message}\n`);
-      return 1;
-    }
+    if ("code" in resolved) { process.stderr.write(`roll browser run: ${resolved.message}\n`); return 1; }
   }
 
-  // Validate performance profile name early (US-BROW-012): fail-fast on unknown.
+  // Validate performance profile name early (US-BROW-012).
   const perfProfileArg = flagValue(args, "--perf-profile");
   if (perfProfileArg !== undefined) {
     const resolved = resolvePerformanceProfile(perfProfileArg);
-    if ("code" in resolved) {
-      process.stderr.write(`roll browser run: ${resolved.message}\n`);
-      return 1;
-    }
+    if ("code" in resolved) { process.stderr.write(`roll browser run: ${resolved.message}\n`); return 1; }
   }
 
-  const report = await runManagedFixtureOperation({
+  const projectPath = process.cwd();
+  const report = await runManagedOperation({
     action: actionArg,
-    targetUrl: flagValue(args, "--url") ?? "https://fake.target.test",
+    targetUrl,
+    storyId,
+    projectPath,
     selector: flagValue(args, "--selector"),
-    redirectTo: flagValue(args, "--redirect"),
-    failure: failArg as ManagedFixtureFailure | undefined,
     deviceProfile: profileArg,
     performanceProfile: perfProfileArg,
-    performanceFailure: args.includes("--perf-fail"),
   });
 
   if (args.includes("--json")) {
@@ -253,8 +296,9 @@ async function runSubcommand(args: string[], deps: BrowserCommandDeps): Promise<
   } else {
     deps.stdout(renderManagedRunReport(report).join("\n") + "\n");
   }
-  // The fixture surface always exits 0: a categorized failure/denial is a
-  // successfully-observed diagnostic outcome, not a CLI error.
+
+  // A denied/failed report is still a successfully-observed outcome (exit 0).
+  // The caller inspects report.runState / report.result to determine truth.
   return 0;
 }
 

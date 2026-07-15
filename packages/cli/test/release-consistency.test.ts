@@ -191,15 +191,17 @@ describe("checkTruthLive — structured delivery truth release gate (FIX-391)", 
     expect(r.gaps.join("\n")).toContain("PR 394");
   });
 
-  it("fails when Done row merge sha disagrees with queryStoryDelivery", () => {
+  it("FIX-1266: fails when Done row claims a merge sha with no matching on-main commit", () => {
+    // The backlog claims `merged deadbee`, but no commit at that sha names
+    // FIX-926 — a subject-only mention cannot deliver a card (GitHub #1034).
     const dir = makeProject({
       deltaSubjects: ["FIX-926: story-only merge"],
       backlog: "| [FIX-926](x) | thing | ✅ Done · merged deadbee |\n",
     });
     const r = checkTruthLive(dir);
     expect(r.status).toBe("fail");
-    expect(r.gaps.join("\n")).toContain("merged deadbee");
-    expect(r.gaps.join("\n")).toContain("does not match");
+    expect(r.gaps.join("\n")).toContain("deadbee");
+    expect(r.gaps.join("\n")).toContain("does not deliver a card");
   });
 
   it("reads story ids from commit bodies, matching GitHub merge-button shape", () => {

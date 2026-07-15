@@ -16,10 +16,13 @@ import {
   rebuildDeliveriesFromFacts,
   collectRunFacts,
   ensureDeliveriesFresh,
+  mergeProvenance,
+  unattributedSubjectOnlyMerges,
   type RunFact,
   type MergeFact,
   type FreshnessPort,
 } from "../src/index.js";
+import { queryStoryDelivery } from "../src/truth/query.js";
 import type { ExecPort, ExecResult } from "../src/delivery/infra-default.js";
 
 // ── extractRunFact ───────────────────────────────────────────────────────────
@@ -1008,7 +1011,10 @@ describe("rebuildDeliveriesFromFacts — FIX-904: merge subject = authoritative 
     expect(result[0].prUrl).toEqual({ present: true, value: "https://github.com/seanyao/roll/pull/922" });
   });
 
-  it("story-only merge commit marks the story done without PR metadata", () => {
+  it("FIX-1266 (#1034): subject-only merge with no PR link does NOT mark the story done", () => {
+    // A commit whose subject names a story but carries no (#N) PR reference is
+    // a subject-only mention (direct-to-main / tcr micro-commit), NOT a
+    // delivery. Under FIX-904 this used to become `done`; FIX-1266 closes that.
     const merges = parseMergeCommitLog([
       "\x1e",
       "10a4ff247301927a82635ca4341d683d5f3a9f57",
@@ -1019,15 +1025,8 @@ describe("rebuildDeliveriesFromFacts — FIX-904: merge subject = authoritative 
     ].join(""));
     const result = rebuildDeliveriesFromFacts([], merges, "seanyao/roll");
 
-    expect(result).toHaveLength(1);
-    expect(result[0].storyId).toBe("FIX-923");
-    expect(result[0].lifecycleState).toBe("done");
-    expect(result[0].prNumber).toEqual({ present: false, reason: "no_publish_attempted" });
-    expect(result[0].prUrl).toEqual({ present: false, reason: "not_recorded" });
-    expect(result[0].mergeCommit).toEqual({
-      present: true,
-      value: "10a4ff247301927a82635ca4341d683d5f3a9f57",
-    });
+    // No delivery record at all → the card stays Todo/pickable.
+    expect(result).toHaveLength(0);
   });
 
   it("oldest merge wins when two subjects name the same story (FIX-1206)", () => {
@@ -1085,9 +1084,13 @@ describe("rebuildDeliveriesFromFacts — FIX-1208: meta-only subject attribution
     expect(result).toHaveLength(0);
   });
 
-  it("still marks a story done when the merge touches product code", () => {
+  it("still marks a story done when the merge touches product code (PR-linked)", () => {
+    // FIX-1266: a product-code delivery must ALSO carry a PR link. The original
+    // FIX-1208 fixture used prNumber:0 to isolate the touchesProductCode gate;
+    // a realistic product-code delivery is squash-merged with a (#N), so it is
+    // PR-linked here.
     const merges = [makeMerge({
-      prNumber: 0,
+      prNumber: 1208,
       mergeCommit: "codesha12345678",
       mergedAt: 3000,
       storyIds: ["FIX-1208"],
@@ -1103,9 +1106,9 @@ describe("rebuildDeliveriesFromFacts — FIX-1208: meta-only subject attribution
     });
   });
 
-  it("defaults to product-code attribution when touchesProductCode is omitted", () => {
+  it("defaults to product-code attribution when touchesProductCode is omitted (PR-linked)", () => {
     const merges: MergeFact[] = [{
-      prNumber: 0,
+      prNumber: 1209,
       mergeCommit: "legacysha123456",
       mergedAt: 3000,
       storyIds: ["FIX-1208"],
@@ -1139,6 +1142,176 @@ describe("rebuildDeliveriesFromFacts — FIX-1208: meta-only subject attribution
     expect(result[0].storyId).toBe("FIX-1208");
     expect(result[0].lifecycleState).toBe("done");
     expect(result[0].prNumber).toEqual({ present: true, value: 1000 });
+  });
+});
+
+// ── FIX-1266 (#1034): subject-only mention is not a delivery ──────────────────
+
+describe("mergeProvenance (FIX-1266)", () => {
+  it("classifies a PR-linked merge", () => {
+    expect(mergeProvenance(makeMerge({ prNumber: 42 }))).toBe("pr_linked");
+  });
+
+  it("classifies a subject-only merge (no PR reference)", () => {
+    expect(mergeProvenance(makeMerge({ prNumber: 0, storyIds: ["FIX-1266"] }))).toBe(
+      "subject_only",
+    );
+  });
+
+  it("parseMergeCommitLog yields subject_only for a no-(#N) subject", () => {
+    const [m] = parseMergeCommitMessages(["deadbeef123 1719000000 FIX-1266: fix the thing"]);
+    expect(m).toBeDefined();
+    expect(mergeProvenance(m!)).toBe("subject_only");
+  });
+});
+
+describe("unattributedSubjectOnlyMerges (FIX-1266)", () => {
+  it("surfaces product-code subject-only merges as diagnostics", () => {
+    const merges = [
+      makeMerge({ prNumber: 0, mergeCommit: "sha1", storyIds: ["FIX-1266"], touchesProductCode: true }),
+    ];
+    expect(unattributedSubjectOnlyMerges(merges)).toEqual([
+      { storyId: "FIX-1266", mergeCommit: "sha1", mergedAt: 2000 },
+    ]);
+  });
+
+  it("excludes PR-linked merges", () => {
+    const merges = [makeMerge({ prNumber: 7, mergeCommit: "sha2", storyIds: ["FIX-1266"] })];
+    expect(unattributedSubjectOnlyMerges(merges)).toEqual([]);
+  });
+
+  it("excludes .roll-only (meta) subject-only merges (FIX-1208)", () => {
+    const merges = [
+      makeMerge({ prNumber: 0, mergeCommit: "sha3", storyIds: ["FIX-1266"], touchesProductCode: false }),
+    ];
+    expect(unattributedSubjectOnlyMerges(merges)).toEqual([]);
+  });
+
+  it("de-duplicates repeated story/sha pairs", () => {
+    const merges = [
+      makeMerge({ prNumber: 0, mergeCommit: "sha4", storyIds: ["FIX-1266", "FIX-1266"], touchesProductCode: true }),
+    ];
+    expect(unattributedSubjectOnlyMerges(merges)).toHaveLength(1);
+  });
+});
+
+describe("rebuildDeliveriesFromFacts — FIX-1266: subject-only cannot complete a card", () => {
+  it("product-code subject-only merge with no run does NOT create done", () => {
+    // The Issue #1034 signature: a product-code commit on main whose message
+    // mentions a card but has no PR/publish/run evidence.
+    const merges = [makeMerge({
+      prNumber: 0,
+      mergeCommit: "phantomsha1234",
+      mergedAt: 3000,
+      storyIds: ["FIX-1266"],
+      touchesProductCode: true,
+    })];
+    const result = rebuildDeliveriesFromFacts([], merges, "seanyao/roll");
+    expect(result).toHaveLength(0);
+  });
+
+  it("subject-only merge cannot promote a failed run to done", () => {
+    // A subject-only mention CORROBORATES nothing — it must not flip a failed
+    // run into a delivery. The card stays failed (its latest real outcome).
+    const runs = [makeRun({ storyId: "FIX-1266", outcome: "failed", prNumber: undefined, recordedAt: 100 })];
+    const merges = [makeMerge({
+      prNumber: 0,
+      mergeCommit: "phantomsha5678",
+      mergedAt: 3000,
+      storyIds: ["FIX-1266"],
+      touchesProductCode: true,
+    })];
+    const result = rebuildDeliveriesFromFacts(runs, merges);
+    expect(result).toHaveLength(1);
+    expect(result[0].storyId).toBe("FIX-1266");
+    expect(result[0].lifecycleState).toBe("failed");
+  });
+
+  it("PR-linked squash merge is still a delivery (preserved)", () => {
+    const merges = parseMergeCommitMessages([
+      "prlinkedsha123 1719000000 FIX-1266: require delivery evidence (#1300)",
+    ]);
+    const result = rebuildDeliveriesFromFacts([], merges, "seanyao/roll");
+    expect(result).toHaveLength(1);
+    expect(result[0].storyId).toBe("FIX-1266");
+    expect(result[0].lifecycleState).toBe("done");
+    expect(result[0].prNumber).toEqual({ present: true, value: 1300 });
+  });
+
+  it("run/ledger-correlated manual merge is still a delivery (preserved)", () => {
+    // No PR number, but a run recorded the actual merge commit SHA (manual /
+    // external salvage). The run-correlation path — not subject attribution —
+    // authorizes the done. The subject-only merge merely corroborates it.
+    const runs = [makeRun({
+      storyId: "FIX-1266",
+      outcome: "delivered",
+      prNumber: undefined,
+      mergeCommit: "manualsha9999",
+      mergedAt: 3000000,
+      recordedAt: 100,
+    })];
+    const merges = [makeMerge({
+      prNumber: 0,
+      mergeCommit: "manualsha9999",
+      mergedAt: 3000,
+      storyIds: ["FIX-1266"],
+      touchesProductCode: true,
+    })];
+    const result = rebuildDeliveriesFromFacts(runs, merges);
+    expect(result).toHaveLength(1);
+    expect(result[0].lifecycleState).toBe("done");
+    expect(result[0].mergeCommit).toEqual({ present: true, value: "manualsha9999" });
+  });
+
+  it("metadata-only subject-only merge does NOT create done (FIX-1208 preserved)", () => {
+    const merges = [makeMerge({
+      prNumber: 0,
+      mergeCommit: "metasha0000",
+      mergedAt: 3000,
+      storyIds: ["FIX-1266"],
+      touchesProductCode: false,
+    })];
+    expect(rebuildDeliveriesFromFacts([], merges)).toHaveLength(0);
+  });
+
+  it("idempotent replay: phantom subject-only merge stays non-delivered", () => {
+    const merges = [makeMerge({
+      prNumber: 0,
+      mergeCommit: "phantomidem",
+      mergedAt: 3000,
+      storyIds: ["FIX-1266"],
+      touchesProductCode: true,
+    })];
+    const r1 = rebuildDeliveriesFromFacts([], merges, "o/r");
+    const r2 = rebuildDeliveriesFromFacts([], merges, "o/r");
+    expect(r1).toEqual(r2);
+    expect(r1).toHaveLength(0);
+  });
+
+  it("picker/truth projection: a phantom record cannot mark the card delivered", () => {
+    // Integration across rebuild → queryStoryDelivery (what the picker's
+    // hasMergedDelivery guard consults). A subject-only phantom must leave
+    // delivered=false so the unbuilt card stays in the backlog candidate set.
+    const merges = [makeMerge({
+      prNumber: 0,
+      mergeCommit: "phantompick",
+      mergedAt: 3000,
+      storyIds: ["FIX-1266"],
+      touchesProductCode: true,
+    })];
+    const records = rebuildDeliveriesFromFacts([], merges, "seanyao/roll");
+    const truth = queryStoryDelivery("FIX-1266", records);
+    expect(truth.delivered).toBe(false);
+    expect(truth.lifecycleState).toBe("todo");
+  });
+
+  it("picker/truth projection: a real PR-linked delivery IS marked delivered", () => {
+    const merges = parseMergeCommitMessages([
+      "realpicksha 1719000000 FIX-1266: real delivery (#1301)",
+    ]);
+    const records = rebuildDeliveriesFromFacts([], merges, "seanyao/roll");
+    const truth = queryStoryDelivery("FIX-1266", records);
+    expect(truth.delivered).toBe(true);
   });
 });
 
@@ -1469,6 +1642,30 @@ describe("ensureDeliveriesFresh", () => {
     expect(result[0].prNumber).toEqual({ present: true, value: 1001 });
   });
 
+  it("FIX-1266: product-code commit naming a card with no (#N) PR does NOT deliver (stale cache rebuild)", () => {
+    // The Issue #1034 signature end-to-end: a product-code commit on main whose
+    // subject mentions FIX-1266 but carries no PR reference and has no run.
+    // Rebuild from stale cache must leave it unattributed → card stays Todo.
+    const freshness = fakeFreshnessPort({
+      [RUNS]: { text: "", mtime: 2000 },
+    });
+    const exec = fakeExecPort({
+      [`-C ${PROJ} log --first-parent main --merges --format=%H %ct %s`]: { stdout: "", code: 0 },
+      [`-C ${PROJ} log --first-parent main --format=%H %ct %s`]: {
+        stdout: "phantomsha000000000000000000000000000000 1719000000 tcr: FIX-1266 — tweak projection",
+        code: 0,
+      },
+      [`-C ${PROJ} diff-tree --no-commit-id --name-only -r phantomsha000000000000000000000000000000`]: {
+        stdout: "packages/core/src/delivery/rebuild.ts",
+        code: 0,
+      },
+      [`-C ${PROJ} remote get-url origin`]: { stdout: "", code: 128 },
+    });
+
+    const result = ensureDeliveriesFresh(PROJ, freshness, exec);
+    expect(result).toHaveLength(0);
+  });
+
   it("squash-merge + run with backfill mergeCommit → done", () => {
     const freshness = fakeFreshnessPort({
       [RUNS]: { text: [
@@ -1644,11 +1841,17 @@ describe("ensureDeliveriesFresh — FIX-905: origin/main is authoritative", () =
     expect(freshness._files.get(HEAD)?.text.trim()).toBe(ORIGIN_SHA);
   });
 
-  it("FIX-925: keeps story-only squash commits even after a prior prNumber=0 merge fact", () => {
-    // Regression from the live US-AGENT-045 failure:
-    // pass (a) can parse a no-PR story-only merge and record seenPrs.add(0).
-    // pass (b) must still keep later no-PR squash/story commits by SHA, not skip
-    // every prNumber=0 fact as if it were the same PR.
+  it("FIX-925/FIX-1266: two prNumber=0 story-only merges are collected, but neither completes a card", () => {
+    // FIX-925 regression: pass (a) can parse a no-PR story-only merge and record
+    // its key; pass (b) must still keep later no-PR story commits by SHA, not
+    // skip every prNumber=0 fact as if it were the same PR (sha-keying — covered
+    // at the parse level too). The collection must not crash or drop the story.
+    //
+    // FIX-1266 (#1034): BUT a subject-only merge (no PR link) can no longer
+    // complete a card. US-AGENT-045 has only a FAILED run plus a subject-only
+    // merge → it stays `failed`, and FIX-OLD-001 (subject-only, no run) yields
+    // no record at all. This is the exact behavior change that closes the
+    // product-code subject-only attribution path.
     const rs = "\x1e";
     const fs = "\x1f";
     const freshness = fakeFreshnessPort({
@@ -1694,14 +1897,12 @@ describe("ensureDeliveriesFresh — FIX-905: origin/main is authoritative", () =
 
     const result = ensureDeliveriesFresh(PROJ, freshness, exec);
 
+    // FIX-1266: the subject-only merge cannot promote the failed run to done.
     const story = result.find((r) => r.storyId === "US-AGENT-045");
     expect(story).toBeDefined();
-    expect(story!.lifecycleState).toBe("done");
-    expect(story!.prNumber).toEqual({ present: false, reason: "no_publish_attempted" });
-    expect(story!.mergeCommit).toEqual({
-      present: true,
-      value: "dcbf2b3fee6571c723be6349d675e9641cf88bf7",
-    });
+    expect(story!.lifecycleState).toBe("failed");
+    // FIX-OLD-001 is subject-only with no run → no delivery record.
+    expect(result.find((r) => r.storyId === "FIX-OLD-001")).toBeUndefined();
   });
 
   it("SHA gate forces rebuild when origin/main advanced even if mtimes look fresh", () => {

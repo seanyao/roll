@@ -3,6 +3,7 @@ import {
   probeBrowserEnvironment,
   proposedBrowserOperationsConfig,
   type BrowserEnvironmentProbeDeps,
+  type DevtoolsVersionResult,
 } from "../src/browser-operations/environment-probe.js";
 
 function deps(env: NodeJS.ProcessEnv): BrowserEnvironmentProbeDeps {
@@ -14,6 +15,9 @@ function deps(env: NodeJS.ProcessEnv): BrowserEnvironmentProbeDeps {
     version: () => null,
     tcpReachable: () => {
       throw new Error("probe must not open a real socket in this test");
+    },
+    devtoolsVersionCheck: () => {
+      throw new Error("probe must not call /json/version in this test");
     },
   };
 }
@@ -81,5 +85,101 @@ describe("US-BROW-003 probeBrowserEnvironment", () => {
     expect(yaml).not.toContain("@latest");
     expect(yaml).toContain('host: "127.0.0.1"');
     expect(yaml).toContain("--no-usage-statistics");
+  });
+
+  // FIX-1264 — interactive readiness must validate /json/version.
+  function versionDeps(
+    env: NodeJS.ProcessEnv,
+    versionResult: DevtoolsVersionResult | null,
+    tcpOk: boolean,
+  ): BrowserEnvironmentProbeDeps {
+    return {
+      ...deps(env),
+      tcpReachable: () => tcpOk,
+      devtoolsVersionCheck: () => versionResult,
+    };
+  }
+
+  it("reports interactive ready when /json/version validates (TCP open + Browser field present)", () => {
+    const obs = probeBrowserEnvironment(
+      { status: "skip", detail: "CI" },
+      versionDeps(
+        { _ROLL_BROWSER_NODE: "present", _ROLL_BROWSER_NPX: "present", _ROLL_BROWSER_CHROME: "present" },
+        { valid: true, browser: "Chrome/131.0.0.0" },
+        true,
+      ),
+    );
+    expect(obs.loopbackRemoteDebug.present).toBe(true);
+    expect(obs.loopbackRemoteDebug.detail).toMatch(/DevTools validated/);
+  });
+
+  it("reports interactive degraded when port is open but /json/version fails (not a DevTools endpoint)", () => {
+    const obs = probeBrowserEnvironment(
+      { status: "skip", detail: "CI" },
+      versionDeps(
+        { _ROLL_BROWSER_NODE: "present", _ROLL_BROWSER_NPX: "present", _ROLL_BROWSER_CHROME: "present" },
+        { valid: false },
+        true,
+      ),
+    );
+    expect(obs.loopbackRemoteDebug.present).toBe(false);
+    expect(obs.loopbackRemoteDebug.portReachable).toBe(true);
+    expect(obs.loopbackRemoteDebug.detail).toMatch(/not a DevTools endpoint/);
+  });
+
+  it("reports interactive degraded when /json/version check is unavailable (CI / no curl)", () => {
+    const obs = probeBrowserEnvironment(
+      { status: "skip", detail: "CI" },
+      versionDeps(
+        { _ROLL_BROWSER_NODE: "present", _ROLL_BROWSER_NPX: "present", _ROLL_BROWSER_CHROME: "present" },
+        null,
+        true,
+      ),
+    );
+    expect(obs.loopbackRemoteDebug.present).toBe(false);
+    expect(obs.loopbackRemoteDebug.portReachable).toBe(true);
+    expect(obs.loopbackRemoteDebug.detail).toMatch(/check unavailable/);
+  });
+
+  it("reports interactive blocked when port is not open", () => {
+    const obs = probeBrowserEnvironment(
+      { status: "skip", detail: "CI" },
+      versionDeps(
+        { _ROLL_BROWSER_NODE: "present", _ROLL_BROWSER_NPX: "present", _ROLL_BROWSER_CHROME: "present" },
+        { valid: true, browser: "Chrome/131.0.0.0" },
+        false,
+      ),
+    );
+    expect(obs.loopbackRemoteDebug.present).toBe(false);
+    expect(obs.loopbackRemoteDebug.portReachable).toBeUndefined();
+  });
+
+  it("honors _ROLL_BROWSER_DEVTOOLS_VERSION override (valid → present: true; invalid → present: false + portReachable)", () => {
+    const valid = probeBrowserEnvironment(
+      { status: "skip", detail: "CI" },
+      deps({
+        _ROLL_BROWSER_NODE: "present",
+        _ROLL_BROWSER_NPX: "present",
+        _ROLL_BROWSER_CHROME: "present",
+        _ROLL_BROWSER_REMOTE_DEBUG: "on",
+        _ROLL_BROWSER_DEVTOOLS_VERSION: "valid",
+      }),
+    );
+    expect(valid.loopbackRemoteDebug.present).toBe(true);
+    expect(valid.loopbackRemoteDebug.detail).toMatch(/DevTools validated \(override\)/);
+
+    const invalid = probeBrowserEnvironment(
+      { status: "skip", detail: "CI" },
+      deps({
+        _ROLL_BROWSER_NODE: "present",
+        _ROLL_BROWSER_NPX: "present",
+        _ROLL_BROWSER_CHROME: "present",
+        _ROLL_BROWSER_REMOTE_DEBUG: "on",
+        _ROLL_BROWSER_DEVTOOLS_VERSION: "invalid",
+      }),
+    );
+    expect(invalid.loopbackRemoteDebug.present).toBe(false);
+    expect(invalid.loopbackRemoteDebug.portReachable).toBe(true);
+    expect(invalid.loopbackRemoteDebug.detail).toMatch(/not a DevTools endpoint \(override\)/);
   });
 });

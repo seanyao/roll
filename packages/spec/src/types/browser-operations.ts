@@ -451,6 +451,12 @@ export interface BrowserDependencyState {
   present: boolean;
   detail: string;
   value?: string;
+  /**
+   * When true the TCP port was open but the /json/version check failed (not a
+   * DevTools endpoint).  Only set by loopback probes; absent means "not checked"
+   * and is treated the same as false.
+   */
+  portReachable?: boolean;
 }
 
 export interface BrowserLaneReadiness {

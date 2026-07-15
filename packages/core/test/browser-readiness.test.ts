@@ -70,6 +70,32 @@ describe("US-BROW-003 deriveBrowserEnvironmentReadiness", () => {
     expect(r.interactive.verdict).toBe("degraded");
   });
 
+  // FIX-1264 — interactive readiness must validate /json/version before claiming ready.
+  it("degrades interactive when TCP port is open but /json/version check fails (not a DevTools endpoint)", () => {
+    const obs = healthy();
+    obs.loopbackRemoteDebug = { present: false, detail: "127.0.0.1:9222 reachable but /json/version check failed — not a DevTools endpoint", value: "127.0.0.1:9222", portReachable: true };
+    const r = deriveBrowserEnvironmentReadiness(obs);
+    expect(r.interactive.verdict).toBe("degraded");
+    expect(r.interactive.reason).toMatch(/not a DevTools endpoint/i);
+    // Must not suggest auto-enable — the port IS open.
+    expect(r.interactive.actions.join(" ")).not.toMatch(/roll .*enable.*remote/i);
+  });
+
+  it("keeps interactive blocked when TCP port is not open at all (no portReachable)", () => {
+    const obs = healthy();
+    obs.loopbackRemoteDebug = absent("owner Chrome remote debugging is not enabled on 127.0.0.1:9222");
+    const r = deriveBrowserEnvironmentReadiness(obs);
+    expect(r.interactive.verdict).toBe("blocked");
+    expect(r.interactive.reason).toMatch(/remote debugging/i);
+  });
+
+  it("keeps interactive ready when /json/version validates (portReachable absent or present+valid)", () => {
+    const obs = healthy();
+    obs.loopbackRemoteDebug = present("127.0.0.1:9222 reachable + DevTools validated (Chrome/131.0.0.0)", "127.0.0.1:9222");
+    const r = deriveBrowserEnvironmentReadiness(obs);
+    expect(r.interactive.verdict).toBe("ready");
+  });
+
   it("maps capture skip and degraded onto honest non-ready verdicts", () => {
     const skip = deriveBrowserEnvironmentReadiness({ ...healthy(), capture: { status: "skip", detail: "headless / CI" } });
     expect(skip.capture.verdict).toBe("degraded");

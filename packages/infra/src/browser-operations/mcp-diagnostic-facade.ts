@@ -44,6 +44,7 @@ export interface McpDiagnosticFacadeResult {
   summary: string;
   denial?: BrowserDenialReason;
   failure?: "redaction_failed" | "artifact_write_failed" | "mcp_response_invalid";
+  finalUrl?: string;
 }
 
 const ARTIFACT_KIND: Partial<Record<string, DiagnosticArtifactKind>> = {
@@ -75,9 +76,10 @@ export class McpDiagnosticFacade {
       };
     }
 
+    const finalUrl = isRecord(raw) && typeof raw["finalUrl"] === "string" ? raw["finalUrl"] : isRecord(raw) && typeof raw["url"] === "string" ? raw["url"] : undefined;
     const kind = ARTIFACT_KIND[approved.kind];
     if (kind === undefined) {
-      return { status: "ok", diagnosticRefs: [], summary: `${approved.kind} completed` };
+      return { status: "ok", diagnosticRefs: [], summary: `${approved.kind} completed`, ...(finalUrl === undefined ? {} : { finalUrl }) };
     }
 
     const bytes = normalizeArtifactBytes(approved.kind, raw);
@@ -86,15 +88,15 @@ export class McpDiagnosticFacade {
     }
 
     if (approved.kind === "screenshot") {
-      return this.writeBinary(kind, bytes, "diagnostic screenshot recorded");
+      return this.writeBinary(kind, bytes, "diagnostic screenshot recorded", finalUrl);
     }
-    return this.writeText(kind, bytes.toString("utf8"), `${approved.kind} diagnostic recorded`);
+    return this.writeText(kind, bytes.toString("utf8"), `${approved.kind} diagnostic recorded`, finalUrl);
   }
 
   private async writeText(
     kind: DiagnosticArtifactKind,
     raw: string,
-    summary: string,
+    summary: string, finalUrl?: string,
   ): Promise<McpDiagnosticFacadeResult> {
     const artifactId = this.deps.randomId();
     const persisted = persistDiagnostic({ artifactId, kind, text: raw }, this.deps.redactor);
@@ -103,7 +105,7 @@ export class McpDiagnosticFacade {
     }
     try {
       await this.deps.writer.write({ artifactId, kind, bytes: Buffer.from(persisted.text, "utf8") });
-      return { status: "ok", diagnosticRefs: [persisted.artifact], summary };
+      return { status: "ok", diagnosticRefs: [persisted.artifact], summary, ...(finalUrl === undefined ? {} : { finalUrl }) };
     } catch {
       return { status: "failed", diagnosticRefs: [], summary: "Diagnostic artifact write failed; artifact dropped", failure: "artifact_write_failed" };
     }
@@ -112,7 +114,7 @@ export class McpDiagnosticFacade {
   private async writeBinary(
     kind: DiagnosticArtifactKind,
     bytes: Buffer,
-    summary: string,
+    summary: string, finalUrl?: string,
   ): Promise<McpDiagnosticFacadeResult> {
     const artifactId = this.deps.randomId();
     try {
@@ -131,7 +133,7 @@ export class McpDiagnosticFacade {
         untrusted: true,
         diagnosticOnly: true,
       }],
-      summary,
+      summary, ...(finalUrl === undefined ? {} : { finalUrl }),
     };
   }
 }

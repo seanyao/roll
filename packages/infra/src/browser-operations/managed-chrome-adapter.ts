@@ -267,11 +267,17 @@ export class ManagedChromeAdapter {
           "DevTools MCP session",
         );
         actionResultValue = await this.withTimeout(
-          this.runFacadeAction(diagnosticSession, action, payload, lanePolicy),
+          this.runFacadeAction(diagnosticSession, action, payload, lanePolicy, service.run.requestedOrigin),
           timeoutMs,
           `action ${action}`,
         );
         terminalService = service.pass();
+        await diagnosticSession.close();
+        diagnosticSession = undefined;
+        await this.kill(chrome);
+        chrome = undefined;
+        terminalService = await this.cleanupProfile(profileDir, terminalService);
+        profileDir = undefined;
         return { service: terminalService, result: actionResultValue };
       }
 
@@ -334,14 +340,15 @@ export class ManagedChromeAdapter {
     action: BrowserActionKind,
     payload: Record<string, string | number | boolean>,
     lanePolicy: BrowserLanePolicy,
+    requestedOrigin: string,
   ): Promise<BrowserActionResult> {
+    const initialUrl = action === "navigate" ? stringPayload(payload, "url") : undefined;
+    await this.assertOriginAllowed(initialUrl ?? requestedOrigin, lanePolicy, "before typed MCP action");
     const result = await session.facade.execute({ action, payload });
     if (result.status === "denied") throw new OriginDenialError(result.denial ?? { code: "action_not_allowed", message: result.summary });
     if (result.status === "failed") throw new DevToolsError(result.summary);
-    if (action === "navigate") {
-      const url = stringPayload(payload, "url");
-      await this.assertOriginAllowed(url, lanePolicy, "before navigation");
-    }
+    if (result.finalUrl === undefined) throw new DevToolsError("Typed MCP action did not report a final URL");
+    await this.assertOriginAllowed(result.finalUrl, lanePolicy, "after typed MCP action");
     return actionResult("", "ok", result.diagnosticRefs, result.summary);
   }
 

@@ -130,6 +130,14 @@ export interface LoopSafetyConfig {
    *  merge clean are auto-repaired, promoted to ready, and merged without
    *  human intervention. Set false to revert to manual supervisor intervention. */
   autoRepairEvidence: boolean;
+  /** FIX-1267 — hard builder rotation: no two CONSECUTIVE loop cycles share a
+   *  Builder agent (owner 2026-07-15, to evaluate the harness's ability to
+   *  normalize heterogeneous agents). DEFAULT-ON: only an explicit
+   *  `builder_no_consecutive_repeat: false` disables it. When on, the previous
+   *  cycle's Builder is EXCLUDED from the execute pool; a pool that reduces to
+   *  only that previous builder fails loud (ALERT + pending), never repeating it
+   *  silently and never idle-spinning. */
+  builderNoConsecutiveRepeat: boolean;
   /** lever-4 warm-context intent. Kept for compatibility, but it is not enough
    *  to resume by itself; {@link resumeScope} must also be explicitly same-story. */
   sessionReuse?: boolean;
@@ -277,6 +285,7 @@ export function parsePolicy(yaml: string): Policy {
     cycleWallTimeoutSec: DEFAULT_CYCLE_WALL_TIMEOUT_SEC,
     cycleNoProgressSec: DEFAULT_CYCLE_NO_PROGRESS_SEC,
     autoRepairEvidence: true,
+    builderNoConsecutiveRepeat: true,
   };
   let pick: PickPolicyConfig = { semanticRanking: "on" };
 
@@ -437,6 +446,10 @@ function parseLoopSafety(lines: PreLine[], start: number): [number, LoopSafetyCo
     // FIX-1260: auto-repair toggle. Only explicit `auto_repair_evidence: false`
     // disables it; anything else (absent / true / garbage) leaves the default on.
     autoRepairEvidence: flat["auto_repair_evidence"] === "false" ? false : true,
+    // FIX-1267: hard builder rotation. DEFAULT-ON — only an explicit
+    // `builder_no_consecutive_repeat: false` disables it; anything else (absent /
+    // true / garbage) keeps the no-consecutive-repeat constraint on.
+    builderNoConsecutiveRepeat: flat["builder_no_consecutive_repeat"] === "false" ? false : true,
   };
   return [i, cfg];
 }

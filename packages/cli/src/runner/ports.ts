@@ -148,7 +148,22 @@ export interface MetadataPort {
 
 /** Routing facet — resolve tier→agent for a story (router.ts). */
 export interface RoutePort {
-  resolve(storyId: string, estMin: number | undefined): { agent: string; model: string };
+  resolve(
+    storyId: string,
+    estMin: number | undefined,
+  ): {
+    agent: string;
+    model: string;
+    /** FIX-1267 — Builders excluded by the no-consecutive-repeat rotation (the
+     *  previous cycle's builder). Absent/empty when the rotation is off or there
+     *  is no prior builder. The handler filters the availability fallback against
+     *  these and emits the `builder:rotation` audit event. */
+    excluded?: readonly string[];
+    /** FIX-1267 — set when the rotation could NOT be satisfied: only the
+     *  previous builder was available in the pool. `agent`/`model` are empty; the
+     *  handler fails loud (ALERT + route_pending) instead of repeating it. */
+    rotationBlocked?: { previous: string };
+  };
 }
 
 /** Evidence frame facet — opens `.roll/features/<epic>/<ID>/<run-id>/`. */

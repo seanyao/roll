@@ -572,6 +572,25 @@ export async function executeSetupCommand(
       // lever) drives tier selection, falling back to the backlog row's tag.
       const estMin = routerEstMin(ports.repoCwd, cmd.storyId, story?.desc ?? "");
       const r = ports.route.resolve(cmd.storyId, estMin);
+      // FIX-1267 — hard builder rotation, fail-loud path. The route could not
+      // satisfy the no-consecutive-repeat constraint: only the previous builder
+      // was available. Refuse to repeat it (no silent violation) and refuse to
+      // idle-spin — emit a first-class pending + ALERT so a human/self-heal adds
+      // another execute-capable agent (or turns the constraint off).
+      if (r.rotationBlocked !== undefined) {
+        const prev = r.rotationBlocked.previous;
+        const reason = `builder no-consecutive-repeat: only the previous builder '${prev}' is available — refusing to repeat (add another execute-capable agent, or set loop_safety.builder_no_consecutive_repeat: false)`;
+        ports.events.appendEvent(ports.paths.eventsPath, {
+          type: "loop:pending",
+          loop: (ctx.loop === "" ? "main" : ctx.loop) as LoopType,
+          cycleId: ctx.cycleId,
+          reason,
+          suspended: [{ agent: prev, cause: "no_consecutive_repeat" }],
+          ts: eventTs(ports),
+        });
+        ports.events.appendAlert(ports.paths.alertsPath, `loop pending: ${reason}`);
+        return { event: { type: "route_pending", reason } };
+      }
       const runtimeDir = dirname(ports.paths.eventsPath);
       const candidateAgents = (() => {
         const installed = ports.installedAgents?.() ?? [];
@@ -635,8 +654,42 @@ export async function executeSetupCommand(
         ports.events.appendAlert(ports.paths.alertsPath, `loop pending: ${reason}`);
         return { event: { type: "route_pending", reason } };
       }
-      const selectedAgent = active.includes(r.agent) ? r.agent : active[0] ?? r.agent;
+      // FIX-1267 — never let the availability fallback (`active[0]`) re-select a
+      // rotation-excluded builder. Filter it out of the fallback pool; if that
+      // leaves the routed agent suspended and only the excluded (previous) builder
+      // active, fail loud (same pending + ALERT as the resolver-level exhaustion)
+      // rather than silently repeating.
+      const excludedBuilders = new Set(r.excluded ?? []);
+      const activeForPick = excludedBuilders.size > 0 ? active.filter((a) => !excludedBuilders.has(a)) : active;
+      if (excludedBuilders.size > 0 && activeForPick.length === 0) {
+        const prev = [...excludedBuilders][0] ?? "";
+        const reason = `builder no-consecutive-repeat: only the previous builder '${prev}' is available (others suspended) — refusing to repeat (recover another execute-capable agent, or set loop_safety.builder_no_consecutive_repeat: false)`;
+        ports.events.appendEvent(ports.paths.eventsPath, {
+          type: "loop:pending",
+          loop: (ctx.loop === "" ? "main" : ctx.loop) as LoopType,
+          cycleId: ctx.cycleId,
+          reason,
+          suspended: [{ agent: prev, cause: "no_consecutive_repeat" }],
+          ts: eventTs(ports),
+        });
+        ports.events.appendAlert(ports.paths.alertsPath, `loop pending: ${reason}`);
+        return { event: { type: "route_pending", reason } };
+      }
+      const selectedAgent = activeForPick.includes(r.agent) ? r.agent : activeForPick[0] ?? r.agent;
       const selectedModel = selectedAgent === r.agent ? r.model : "";
+      // FIX-1267 — audit the rotation: when a previous builder was excluded and a
+      // DIFFERENT builder was selected, record one `builder:rotation` event so an
+      // operator can verify the constraint actually changed who builds.
+      if (excludedBuilders.size > 0 && !excludedBuilders.has(selectedAgent)) {
+        ports.events.appendEvent(ports.paths.eventsPath, {
+          type: "builder:rotation",
+          cycleId: ctx.cycleId ?? "",
+          storyId: cmd.storyId,
+          previous: [...excludedBuilders][0] ?? "",
+          selected: selectedAgent,
+          ts: eventTs(ports),
+        });
+      }
       // US-V4-004: select + RECORD the Story execution profile once, here at
       // route-resolve (before execute). Best-effort + never toppling routing: a
       // spec read/parse blip falls back to `standard` (builder-only, current

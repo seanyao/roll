@@ -167,6 +167,12 @@ export type RollEvent =
     }
   // Routing (BC3) — auditable, reproducible (I10)
   | { type: "route:resolve"; storyId: string; level: TaskLevel; agent: AgentId; model: string; rule: string; ts: number }
+  // FIX-1267 — hard builder rotation audit: the previous cycle's Builder was
+  // excluded from this cycle's execute pool and a DIFFERENT builder was selected.
+  // One event per cycle where the rotation actually changed the builder, so an
+  // operator can verify the no-consecutive-repeat constraint really fired
+  // (`selected` is guaranteed ≠ `previous`).
+  | { type: "builder:rotation"; cycleId: string; storyId: string; previous: string; selected: string; ts: number }
   // IDEA-069 — advisory semantic backlog ranking. This is explanatory only:
   // picker eligibility gates remain authoritative.
   | {

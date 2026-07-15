@@ -21,6 +21,7 @@ import {
   agentsInstalled,
   canonicalAgentName,
   normalizeAgentScopeConfig,
+  parsePolicy,
   rankRoleCandidates,
   resolveAgentScopeRole,
 } from "@roll/core";
@@ -46,6 +47,10 @@ export interface ScopedExecuteRoute {
   readonly recentUse: Readonly<Partial<Record<AgentName, number>>>;
   readonly successfulDeliveries: Readonly<Partial<Record<AgentName, number>>>;
   readonly ranked: readonly RankedRoleCandidate[];
+  /** FIX-1267 — the previous cycle's Builder, excluded from this Builder
+   *  resolution by the no-consecutive-repeat rotation. `null` when the rotation
+   *  is off, the role is not Builder, or there is no prior builder on record. */
+  readonly previousBuilder: AgentName | null;
 }
 
 export function readScopedAgentLayer(path: string): { config: AgentScopeConfig; path: string } | null {
@@ -235,6 +240,42 @@ export interface ScopedRouteDeps {
   readonly recentUse?: Readonly<Partial<Record<AgentName, number>>>;
   readonly successfulDeliveries?: Readonly<Partial<Record<AgentName, number>>>;
   readonly healthSignals?: readonly AgentHealthSignal[];
+  /** FIX-1267 — override the no-consecutive-repeat rotation toggle (production
+   *  reads `.roll/policy.yaml` `loop_safety.builder_no_consecutive_repeat`,
+   *  default on). */
+  readonly builderNoConsecutiveRepeat?: boolean;
+  /** FIX-1267 — override the previous Builder. `undefined` = derive from
+   *  `recentUse` (the most-recently-used agent); pass `null` to force "no prior
+   *  builder" (nothing excluded). */
+  readonly previousBuilder?: AgentName | null;
+}
+
+/** FIX-1267 — the most-recently-used Builder from the per-agent recent-use map
+ *  (largest ms wins). This is the "previous cycle's builder" the rotation
+ *  excludes. Ties (identical ms) resolve deterministically by agent name so the
+ *  choice is reproducible. Returns `null` when no builder has ever run. */
+export function mostRecentBuilder(recentUse: Readonly<Partial<Record<AgentName, number>>>): AgentName | null {
+  let best: AgentName | null = null;
+  let bestTs = Number.NEGATIVE_INFINITY;
+  for (const [agent, ts] of Object.entries(recentUse) as [AgentName, number][]) {
+    if (ts > bestTs || (ts === bestTs && best !== null && agent < best)) {
+      bestTs = ts;
+      best = agent;
+    }
+  }
+  return best;
+}
+
+/** FIX-1267 — read the rotation toggle from `<repoCwd>/.roll/policy.yaml`.
+ *  DEFAULT-ON: a missing/unreadable policy (or an absent key) leaves it on. */
+function readBuilderNoConsecutiveRepeat(repoCwd: string): boolean {
+  const path = join(repoCwd, ".roll", "policy.yaml");
+  try {
+    if (!existsSync(path)) return true;
+    return parsePolicy(readFileSync(path, "utf8")).loopSafety.builderNoConsecutiveRepeat;
+  } catch {
+    return true;
+  }
 }
 
 /**
@@ -272,6 +313,19 @@ export function resolveScopedCastRole(repoCwd: string, castRole: CastRoleName, d
   const successfulDeliveries = deps.successfulDeliveries ?? readSuccessfulDeliveries(runtimeDir);
   const healthSignals = deps.healthSignals ?? readHealthSignals(runtimeDir);
   const scopeRole = roleToScopeRole(castRole);
+  // FIX-1267 — hard builder rotation: exclude the previous cycle's Builder from
+  // THIS Builder resolution so no two consecutive cycles share a builder. Only
+  // the Builder (`execute`) role rotates — Evaluator independence is enforced by
+  // fresh sessions, not by excluding brands. Config-driven (default on); a fixed
+  // owner binding ignores excludeAgents (see the resolver), so an explicit pin is
+  // never overridden.
+  const rotationOn = castRole === "builder" && (deps.builderNoConsecutiveRepeat ?? readBuilderNoConsecutiveRepeat(repoCwd));
+  const previousBuilder = rotationOn
+    ? deps.previousBuilder !== undefined
+      ? deps.previousBuilder
+      : mostRecentBuilder(recentUse)
+    : null;
+  const excludeAgents = previousBuilder !== null ? [previousBuilder] : [];
   const resolution = resolveAgentScopeRole({
     scope: "story",
     role: scopeRole,
@@ -279,13 +333,14 @@ export function resolveScopedCastRole(repoCwd: string, castRole: CastRoleName, d
     runtimeHealth,
     recentUse,
     healthSignals,
+    ...(excludeAgents.length > 0 ? { excludeAgents } : {}),
     ...(superviseAgent !== null ? { assignedRoles: { supervise: superviseAgent } } : {}),
   });
   const caps = declaredCapabilities(layers);
   const candidates = resolution.ok ? resolution.resolved.candidates : resolution.failure.candidates;
   const profiles = candidates.map((agent) => profileFor(agent, caps.get(agent) ?? []));
   const ranked = rankedWithResolutionSkips(rankRoleCandidates({ role: castRole, profiles, healthSignals, recentUse, successfulDeliveries }), resolution);
-  return { resolution, castRole, scopeRole, superviseAgent, recentUse, successfulDeliveries, ranked };
+  return { resolution, castRole, scopeRole, superviseAgent, recentUse, successfulDeliveries, ranked, previousBuilder };
 }
 
 /** The auditable role route trace surfaced by the diagnostic command. */
@@ -301,12 +356,15 @@ export interface ScopedExecuteRouteTrace {
   readonly supervise: AgentName | null;
   readonly recentUse: Readonly<Partial<Record<AgentName, number>>>;
   readonly successfulDeliveries: Readonly<Partial<Record<AgentName, number>>>;
+  /** FIX-1267 — the previous Builder excluded by the no-consecutive-repeat
+   *  rotation (audit anchor for `roll supervisor route`). */
+  readonly previousBuilder: AgentName | null;
   readonly error: string | null;
 }
 
 /** Project the resolution into the stable trace shape (JSON-friendly, total). */
 export function scopedExecuteRouteTrace(route: ScopedExecuteRoute): ScopedExecuteRouteTrace {
-  const { resolution, superviseAgent, recentUse, successfulDeliveries, ranked } = route;
+  const { resolution, superviseAgent, recentUse, successfulDeliveries, ranked, previousBuilder } = route;
   if (resolution.ok) {
     const r = resolution.resolved;
     return {
@@ -321,6 +379,7 @@ export function scopedExecuteRouteTrace(route: ScopedExecuteRoute): ScopedExecut
       supervise: superviseAgent,
       recentUse,
       successfulDeliveries,
+      previousBuilder,
       error: null,
     };
   }
@@ -337,6 +396,7 @@ export function scopedExecuteRouteTrace(route: ScopedExecuteRoute): ScopedExecut
     supervise: superviseAgent,
     recentUse,
     successfulDeliveries,
+    previousBuilder,
     error: f.errors[0] ?? "story.execute unresolved",
   };
 }
@@ -348,6 +408,9 @@ export function renderScopedExecuteRoute(trace: ScopedExecuteRouteTrace): string
   lines.push(`  ${trace.castRole} route — story.${trace.role}`);
   lines.push(`  source: ${trace.source ?? "(none)"}`);
   lines.push(`  Supervisor (supervise): ${trace.supervise ?? "(unassigned)"}`);
+  if (trace.previousBuilder !== null) {
+    lines.push(`  previous builder (excluded — no-consecutive-repeat): ${trace.previousBuilder}`);
+  }
   lines.push(`  strategy: ${trace.strategy}`);
   lines.push(`  candidates: ${trace.candidates.length > 0 ? trace.candidates.join(", ") : "(none)"}`);
   if (trace.ranked.length > 0) {

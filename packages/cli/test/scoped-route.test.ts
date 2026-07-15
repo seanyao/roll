@@ -7,6 +7,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  mostRecentBuilder,
   renderScopedExecuteRoute,
   resolveScopedCastRole,
   resolveScopedStoryExecute,
@@ -185,5 +186,123 @@ describe("resolveScopedStoryExecute", () => {
     expect(trace.candidates).toEqual(["agy", "kimi", "reasonix", "codex"]);
     expect(trace.skipped).toContainEqual({ agent: "kimi", reason: "health-blocked: parser" });
     expect(trace.ranked.find((r) => r.agent === "kimi")?.eligible).toBe(false);
+  });
+});
+
+describe("FIX-1267 — builder no-consecutive-repeat rotation", () => {
+  it("mostRecentBuilder picks the largest-ts agent (deterministic on ties)", () => {
+    expect(mostRecentBuilder({})).toBeNull();
+    expect(mostRecentBuilder({ claude: 1000, agy: 3000, kimi: 2000 })).toBe("agy");
+    // Tie on ts → deterministic by agent name (lexicographically smallest).
+    expect(mostRecentBuilder({ pi: 5000, agy: 5000 })).toBe("agy");
+  });
+
+  it("excludes the previous builder (most-recent) and selects a different agent", () => {
+    const { rollHome, repoCwd } = fixture();
+    // agy built most recently → excluded; least-recent among the rest wins.
+    const route = resolveScopedCastRole(repoCwd, "builder", {
+      rollHome,
+      installed: ALL_INSTALLED,
+      recentUse: { claude: 100, agy: 9000, kimi: 200 },
+    });
+    expect(route).not.toBeNull();
+    expect(route!.previousBuilder).toBe("agy");
+    expect(route!.resolution.ok).toBe(true);
+    if (route!.resolution.ok) {
+      expect(route!.resolution.resolved.agent).not.toBe("agy");
+      expect(route!.resolution.resolved.skipped).toContainEqual({ agent: "agy", reason: "no-consecutive-repeat" });
+    }
+    // The audit trace surfaces the excluded previous builder.
+    const trace = scopedExecuteRouteTrace(route!);
+    expect(trace.previousBuilder).toBe("agy");
+    expect(renderScopedExecuteRoute(trace)).toContain("previous builder (excluded — no-consecutive-repeat): agy");
+  });
+
+  it("retry / self-heal: an explicitly-supplied previous builder is excluded", () => {
+    const { rollHome, repoCwd } = fixture();
+    // Self-heal re-pick: the prior attempt's builder is passed in and excluded so
+    // the swap actually changes who builds.
+    const route = resolveScopedCastRole(repoCwd, "builder", {
+      rollHome,
+      installed: ALL_INSTALLED,
+      recentUse: {},
+      previousBuilder: "claude",
+    });
+    expect(route!.previousBuilder).toBe("claude");
+    if (route!.resolution.ok) {
+      expect(route!.resolution.resolved.agent).not.toBe("claude");
+      expect(route!.resolution.resolved.skipped).toContainEqual({ agent: "claude", reason: "no-consecutive-repeat" });
+    }
+  });
+
+  it("cross-goal-session boundary: the previous builder is derived from persisted runtime runs, not a session var", () => {
+    const { rollHome, repoCwd } = fixture();
+    // recentUse stands in for runs.jsonl, which persists across goal sessions —
+    // a new goal session still excludes the last builder recorded on disk.
+    const route = resolveScopedCastRole(repoCwd, "builder", {
+      rollHome,
+      installed: ALL_INSTALLED,
+      recentUse: { pi: 12345 },
+    });
+    expect(route!.previousBuilder).toBe("pi");
+    if (route!.resolution.ok) expect(route!.resolution.resolved.agent).not.toBe("pi");
+  });
+
+  it("fails loud when the pool reduces to only the previous builder", () => {
+    const { rollHome } = fixture();
+    const repoCwd = mkdtempSync(join(tmpdir(), "roll-solo-"));
+    dirs.push(repoCwd);
+    mkdirSync(join(repoCwd, ".roll"), { recursive: true });
+    // A single-agent execute pool whose only member just built.
+    writeFileSync(
+      join(repoCwd, ".roll", "agents.yaml"),
+      `schema: roll-agents/v1
+scope: project
+inherits: machine
+defaults:
+  story:
+    roles:
+      execute:
+        kind: select
+        from: [claude]
+        require: [execute]
+        strategy: least-recent
+`,
+    );
+    const route = resolveScopedCastRole(repoCwd, "builder", {
+      rollHome,
+      installed: new Set(["claude"]),
+      recentUse: { claude: 500 },
+    });
+    expect(route!.previousBuilder).toBe("claude");
+    expect(route!.resolution.ok).toBe(false);
+    if (!route!.resolution.ok) {
+      expect(route!.resolution.failure.errors[0]).toContain("no-consecutive-repeat");
+    }
+  });
+
+  it("config off: builder_no_consecutive_repeat=false disables the exclusion", () => {
+    const { rollHome, repoCwd } = fixture();
+    const route = resolveScopedCastRole(repoCwd, "builder", {
+      rollHome,
+      installed: ALL_INSTALLED,
+      recentUse: { claude: 100, agy: 9000 },
+      builderNoConsecutiveRepeat: false,
+    });
+    expect(route!.previousBuilder).toBeNull();
+    if (route!.resolution.ok) {
+      // No exclusion → nothing skipped for rotation.
+      expect(route!.resolution.resolved.skipped).toEqual([]);
+    }
+  });
+
+  it("the rotation does NOT apply to the evaluator role", () => {
+    const { rollHome, repoCwd } = fixture();
+    const route = resolveScopedCastRole(repoCwd, "evaluator", {
+      rollHome,
+      installed: ALL_INSTALLED,
+      recentUse: { claude: 100, agy: 9000 },
+    });
+    expect(route!.previousBuilder).toBeNull();
   });
 });

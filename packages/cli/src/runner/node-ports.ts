@@ -81,10 +81,14 @@ export function configuredModelBackstop(repoCwd: string, agent: string): string 
   }
 }
 
-function scopedStoryExecuteRoute(repoCwd: string): { agent: string; model: string } | null {
+function scopedStoryExecuteRoute(
+  repoCwd: string,
+): { agent: string; model: string; excluded?: readonly string[]; rotationBlocked?: { previous: string } } | null {
   const scoped = resolveScopedStoryExecute(repoCwd);
   if (scoped === null) return null;
-  const { resolution } = scoped;
+  const { resolution, previousBuilder } = scoped;
+  // FIX-1267 — the no-consecutive-repeat rotation excludes the previous builder.
+  const excluded = previousBuilder !== null ? [previousBuilder] : [];
   if (resolution.ok) {
     const agent = resolution.resolved.agent;
     // A `select` pool binding carries no per-agent model; backfill from config
@@ -93,7 +97,17 @@ function scopedStoryExecuteRoute(repoCwd: string): { agent: string; model: strin
     return {
       agent,
       model: model !== "" ? model : configuredModelBackstop(repoCwd, agent),
+      ...(excluded.length > 0 ? { excluded } : {}),
     };
+  }
+  // FIX-1267 — a pool emptied SOLELY by the rotation exclusion (only the previous
+  // builder was available) is a graceful fail-loud, not a crash: signal it so the
+  // handler emits pending + ALERT rather than aborting the cycle.
+  const skipped = resolution.failure.skipped;
+  const rotationOnly =
+    previousBuilder !== null && skipped.length > 0 && skipped.every((s) => s.reason === "no-consecutive-repeat");
+  if (rotationOnly) {
+    return { agent: "", model: "", rotationBlocked: { previous: previousBuilder } };
   }
   const hasScopedBindingFailure = resolution.failure.source !== undefined || resolution.failure.candidates.length > 0;
   if (hasScopedBindingFailure) {
@@ -369,6 +383,9 @@ export function nodePorts(opts: {
       ? {
           resolve(storyId, estMin) {
             const scoped = scopedStoryExecuteRoute(opts.repoCwd);
+            // FIX-1267: the scoped route already carries the rotation exclusion
+            // (excluded / rotationBlocked); return it verbatim so the handler can
+            // enforce the no-consecutive-repeat constraint.
             if (scoped !== null) return scoped;
             const tier: Tier = classifyComplexity(estMin);
             const routeDeps = opts.routeDeps;

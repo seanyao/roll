@@ -18,6 +18,8 @@ export interface FallbackLease {
   startedAt: string;
   /** ISO 8601 timestamp of the most recent heartbeat written by the runner. */
   heartbeatAt: string;
+  /** Opaque per-runner token used by the file control channel, never a PID reuse guess. */
+  runnerToken?: string;
 }
 
 /** High-level status returned by fallback health probes. */

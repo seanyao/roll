@@ -91,7 +91,8 @@ export function isFallbackLease(value: unknown): value is FallbackLease {
     typeof rec["commandDigest"] === "string" &&
     typeof rec["ownerConfirmedAt"] === "string" &&
     typeof rec["startedAt"] === "string" &&
-    typeof rec["heartbeatAt"] === "string"
+    typeof rec["heartbeatAt"] === "string" &&
+    (rec["runnerToken"] === undefined || typeof rec["runnerToken"] === "string")
   );
 }
 

@@ -101,6 +101,7 @@ const USAGE =
   "     --profile <name>   Device emulation profile (Pixel 7, iPhone 14, iPad Pro).\n" +
   "     --perf-profile <name>  Opt-in performance diagnostic profile (web-vitals-lite); diagnostic-only.\n" +
   "     --perf-fail        Simulate a performance-profile failure (proves graceful degradation).\n" +
+  "     Optional profiles are not visual acceptance evidence or a multi-browser matrix.\n" +
   "     --json             Emit the machine-readable run report.\n" +
   "  interactive --story <US-ID> --origin <https-origin> --action <navigate|click|fill|press_key> [action flags]\n" +
   "     Requires an attached TTY and one owner approval. Connects only to an already-open loopback Chrome debug endpoint.\n" +

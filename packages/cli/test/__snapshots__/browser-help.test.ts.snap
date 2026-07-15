@@ -14,6 +14,32 @@ exports[`US-BROW-007 — documented \`roll browser\` surface > AC2: help lists t
      --profile <name>   Device emulation profile (Pixel 7, iPhone 14, iPad Pro).
      --perf-profile <name>  Opt-in performance diagnostic profile (web-vitals-lite); diagnostic-only.
      --perf-fail        Simulate a performance-profile failure (proves graceful degradation).
+     Optional profiles are not visual acceptance evidence or a multi-browser matrix.
+     --json             Emit the machine-readable run report.
+  interactive --story <US-ID> --origin <https-origin> --action <navigate|click|fill|press_key> [action flags]
+     Requires an attached TTY and one owner approval. Connects only to an already-open loopback Chrome debug endpoint.
+     No background scheduler, remote endpoint, cookie export, or automatic Chrome startup is supported.
+     --endpoint <http://127.0.0.1:9222> (default); navigate: --url; click: --selector; fill: --selector --value; press_key: --key.
+  update [--check] [--json]   Check for DevTools transport update (pinned vs candidate).
+  update --apply --confirm    Apply update after smoke checks + doctor.
+"
+`;
+
+exports[`US-BROW-007 — documented \`roll browser\` surface > US-BROW-015: help keeps optional diagnostic profiles outside visual acceptance and multi-browser claims 1`] = `
+"Usage: roll browser <setup|doctor|run|interactive|update>
+  setup --dry-run       Report proposed machine config + dependency preflight (writes nothing).
+  setup --confirm       Write ~/.roll/browser-operations.yaml after explicit owner confirmation.
+  doctor [--json]       Report managed / interactive / capture readiness (ready|degraded|blocked).
+  run [opts]            Run a managed-lane operation against a fake target and print the result.
+     --action <navigate|snapshot|console|network|screenshot>  (default: navigate)
+     --url <fakeUrl>    Fake target URL (default: https://fake.target.test).
+     --selector <sel>   DOM selector for --action snapshot.
+     --redirect <url>   Simulate a redirect (proves redirect denial).
+     --fail <timeout|crash|devtools-error>  Inject a categorized diagnostic failure.
+     --profile <name>   Device emulation profile (Pixel 7, iPhone 14, iPad Pro).
+     --perf-profile <name>  Opt-in performance diagnostic profile (web-vitals-lite); diagnostic-only.
+     --perf-fail        Simulate a performance-profile failure (proves graceful degradation).
+     Optional profiles are not visual acceptance evidence or a multi-browser matrix.
      --json             Emit the machine-readable run report.
   interactive --story <US-ID> --origin <https-origin> --action <navigate|click|fill|press_key> [action flags]
      Requires an attached TTY and one owner approval. Connects only to an already-open loopback Chrome debug endpoint.

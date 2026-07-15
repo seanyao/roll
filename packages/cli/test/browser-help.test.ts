@@ -115,6 +115,14 @@ describe("US-BROW-007 — documented `roll browser` surface", () => {
     expect(out).toMatch(/owner state never entered/i);
   });
 
+  it("US-BROW-015: help keeps optional diagnostic profiles outside visual acceptance and multi-browser claims", async () => {
+    const c = capture();
+    await browserCommand(["--help"], { ...noWriteDeps(), stdout: c.stdout });
+    const out = c.read();
+    expect(out).toMatch(/not visual acceptance evidence or a multi-browser matrix/i);
+    expect(out).toMatchSnapshot();
+  });
+
   it("AC2: managed `run` denies an out-of-allowlist redirect (no owner navigation)", async () => {
     const c = capture();
     const code = await browserCommand(["run", "--redirect", "https://evil.test"], { ...noWriteDeps(), stdout: c.stdout });

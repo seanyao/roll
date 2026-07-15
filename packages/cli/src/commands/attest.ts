@@ -30,6 +30,8 @@ import {
   ansiPre,
   buildExecutionCastProjection,
   boundTranscript,
+  classifyOutwardStatusForReport,
+  outwardAcStatusFromVerification,
   EventBus,
   extractCycleSignals,
   smokeCheckReport,
@@ -51,6 +53,7 @@ import {
   type CaptureLedgerEntry,
   type CaptureTarget,
   type Lang,
+  type OutwardSmokeDeclaration,
   type RollCaptureRequestV1,
   type RollEvent,
   type CycleRoleSummary,
@@ -98,6 +101,8 @@ import { designContractDeliveredEvidence } from "../runner/attest-gate.js";
 import { readReviewScoreTrend, readStoryReviewScores } from "../lib/review-score.js";
 import { collectToolEvidenceFromEventsPath, formatToolCostSummary } from "../lib/tool-display.js";
 import { attestAuditCommand } from "./attest-audit.js";
+import { runOutwardSmoke, smokeResultsFromReport } from "../attest/outward-smoke-runner.js";
+import { parseEvaluationContract } from "../lib/evaluation-contract.js";
 
 // Re-export so existing importers (tests, callers) keep their entry point.
 export { findFeatureFile } from "../lib/archive.js";
@@ -1489,13 +1494,59 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     readAcMap(storyDir) ??
     readAcMap(join(projectPath, ".roll", "verification", storyId)) ??
     readAcMap(dirname(runDir));
+
+  // US-ATTEST-016 — outward smoke checks
+  // When the evaluation contract declares external-smoke evidence, run the
+  // isolated smoke runner and feed results into the outward status resolver.
+  // Outward AC statuses override the ac-map (verified-in-simulation or
+  // unverified-external must never render as green).
+  let outwardOverrides: Map<string, AcStatus> | null = null;
+  try {
+    const evaluationContract = parseEvaluationContract(featureText);
+    if (evaluationContract !== null) {
+      const smokeDecls = evaluationContract.expected_evidence
+        .filter((item) => item.kind === "external-smoke" && item.outward?.mode === "external-smoke")
+        .map((item) => item.outward as OutwardSmokeDeclaration);
+      if (smokeDecls.length > 0) {
+        // Determine current environment: explicit env var → CI detection → unknown
+        const smokeEnv = process.env.ROLL_SMOKE_ENV?.trim() ||
+          (process.env.CI !== undefined || process.env.GITHUB_ACTIONS !== undefined ? "ci" : "unknown");
+        const smokeDir = join(runDir, "smoke");
+        const report = await runOutwardSmoke({
+          declarations: smokeDecls,
+          currentEnvironment: smokeEnv,
+          artifactDir: smokeDir,
+        });
+        const smokeResults = smokeResultsFromReport(report);
+        const classification = classifyOutwardStatusForReport(
+          { expected_evidence: evaluationContract.expected_evidence },
+          smokeResults,
+          [], // simulation evidence — not available here
+          [], // owner attestations — not available here
+        );
+        if (classification !== null) {
+          outwardOverrides = new Map<string, AcStatus>();
+          for (const [ac, status] of classification.acStatuses) {
+            outwardOverrides.set(ac, outwardAcStatusFromVerification(status));
+          }
+        }
+      }
+    }
+  } catch (e) {
+    warn(`outward smoke check failed: ${e instanceof Error ? e.message : String(e)} — continuing without outward overrides`);
+  }
+
   const siblingBases = runDirHasEvidence(runDir) ? [] : siblingRunDirs(storyDir, runDir);
   const items: AcReportItem[] = acItems.map((ac) => {
     const mapped = acMap?.get(ac.id);
+    // US-ATTEST-016 — outward smoke overrides take precedence over ac-map
+    const outwardStatus: AcStatus | undefined = outwardOverrides?.get(ac.id);
     const status: AcStatus =
-      mapped?.status !== undefined && (STATUSES as readonly string[]).includes(mapped.status)
-        ? (mapped.status as AcStatus)
-        : "claimed";
+      outwardStatus !== undefined
+        ? outwardStatus
+        : mapped?.status !== undefined && (STATUSES as readonly string[]).includes(mapped.status)
+          ? (mapped.status as AcStatus)
+          : "claimed";
     const evidence = (mapped?.evidence ?? [])
       .map((e) => toRef(runDir, storyDir, e, siblingBases))
       .filter((x): x is EvidenceRef => x !== null);

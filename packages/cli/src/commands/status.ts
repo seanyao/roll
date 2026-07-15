@@ -24,6 +24,7 @@ import { attestCoverage, isSnapshotStale, loadTruthSnapshot, renderNowMs, snapsh
 import type { TruthSnapshotCycle } from "@roll/spec";
 import { detectDesignHandoff, renderDesignNudge } from "../lib/onboard-nudge.js";
 import { loadNorthStarReport, renderNorthStatusSummary } from "./north.js";
+import { decideBackend, readFallbackHealthSync, type SchedulerBackendName } from "./loop-sched.js";
 
 /** FIX-361: format a cycle snapshot's cost with correct currency symbols,
  *  separating by currency so ¥ and $ are never blindly summed. */
@@ -49,8 +50,8 @@ const globalDir = (): string => join(rollHome(), "conventions", "global");
 const templatesDir = (): string => join(rollHome(), "conventions", "templates");
 const configPath = (): string => join(rollHome(), "config.yaml");
 
-/** Python-side slug (path-based only — used for launchd label lookup). */
-function projectSlugPy(): string {
+/** Python-side project root (git-common-dir aware — used for slug + fallback lease). */
+function projectRootPy(): string {
   let path = realpathSync(process.cwd());
   try {
     const common = execFileSync("git", ["-C", path, "rev-parse", "--git-common-dir"], {
@@ -61,6 +62,12 @@ function projectSlugPy(): string {
   } catch {
     /* not a git repo */
   }
+  return path;
+}
+
+/** Python-side slug (path-based only — used for launchd label lookup). */
+function projectSlugPy(): string {
+  const path = projectRootPy();
   const base = basename(path)
     .replace(/[^A-Za-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
@@ -92,6 +99,10 @@ interface StatusData {
   project_features_count: number;
   loop_state: string;
   dream_state: string;
+  /** US-LOOP-108: effective scheduler backend (launchd|process-fallback|none). */
+  scheduler_backend: SchedulerBackendName;
+  /** US-LOOP-108: one-line backend health note (PID/heartbeat, stale, or ""). */
+  scheduler_note: string;
 }
 
 function globalConventions(): Conventions {
@@ -235,6 +246,8 @@ function fixtureData(): StatusData {
     project_features_count: 23,
     loop_state: "enabled",
     dream_state: "not-installed",
+    scheduler_backend: "launchd",
+    scheduler_note: "",
   };
 }
 
@@ -351,12 +364,31 @@ function renderThisProject(out: string[], d: StatusData): void {
     }
     out.push("  " + dot + " " + word);
   }
+
+  // US-LOOP-108: effective scheduler backend — launchd | process-fallback | none.
+  {
+    let dot: string, word: string;
+    if (d.scheduler_backend === "launchd") {
+      dot = c("green", "●");
+      word = c("green", "backend · launchd");
+    } else if (d.scheduler_backend === "process-fallback") {
+      dot = c("amber", "⚠");
+      word = c("amber", "backend · process-fallback");
+    } else {
+      dot = c("red", "○");
+      word = c("red", "backend · none");
+    }
+    let line = "  " + dot + " " + word;
+    if (d.scheduler_note !== "") line += c("dim", `  ${d.scheduler_note}`);
+    out.push(line);
+  }
   out.push("");
 }
 
 // ── Live data collection ─────────────────────────────────────────────────────
 function liveData(): StatusData {
   const slug = projectSlugPy();
+  const root = projectRootPy();
   const home = homedir();
   const aiClients: AiClient[] = parseAiEntries().map((e) => ({
     name: e.name,
@@ -370,6 +402,19 @@ function liveData(): StatusData {
   if (existsSync(featDir)) {
     featCount = readdirSync(featDir).filter((n) => n.endsWith(".md")).length;
   }
+  const loopState = launchdState("loop", slug);
+  // US-LOOP-108: derive the effective backend. A stale/dead fallback lease is
+  // never reported as an active backend (evaluateFallbackLiveness gates alive).
+  const fbHealth = readFallbackHealthSync(root, slug);
+  const backend = decideBackend(loopState === "enabled", fbHealth);
+  let note = "";
+  if (backend === "process-fallback" && fbHealth.lease !== null) {
+    note = `owner-confirmed · pid ${fbHealth.lease.pid} · not persistent across reboot/login`;
+  } else if (fbHealth.status === "stale" && fbHealth.lease !== null) {
+    note = `stale fallback lease (${fbHealth.reason}) — not active`;
+  } else if (backend === "none") {
+    note = "unarmed — no autonomous work will run";
+  }
   return {
     conventions: globalConventions(),
     ai_clients: aiClients,
@@ -378,8 +423,10 @@ function liveData(): StatusData {
     project_has_agents: existsSync("AGENTS.md"),
     project_has_backlog: existsSync(".roll/backlog.md"),
     project_features_count: featCount,
-    loop_state: launchdState("loop", slug),
+    loop_state: loopState,
     dream_state: launchdState("dream", slug),
+    scheduler_backend: backend,
+    scheduler_note: note,
   };
 }
 

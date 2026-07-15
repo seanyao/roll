@@ -712,6 +712,16 @@ export const v3Catalog: Catalog = {
     en: "After correcting the reported path or launchd state, run `roll loop on` again.",
     zh: "修正上述路径或 launchd 状态后,再次运行 `roll loop on`。",
   },
+  // US-LOOP-108: launchd failure ends unarmed and names the owner-confirmed
+  // process fallback WITHOUT starting it automatically.
+  "loop.sched.unarmed": {
+    en: "scheduler: unarmed — no autonomous work will run",
+    zh: "排程:未激活 — 不会运行任何自主任务",
+  },
+  "loop.sched.fallback_hint": {
+    en: "Or, if launchd cannot be repaired, start an owner-confirmed process fallback (NOT a launchd replacement across reboot/login):",
+    zh: "或者,若 launchd 无法修复,启动一个 owner 明示确认的进程 fallback(重启/登出后不等价于 launchd):",
+  },
 
   // FIX-1042: agent skill-root pollution (auxiliary dirs mounted as skills)
   "doctor.skill_root_pollution": {

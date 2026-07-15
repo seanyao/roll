@@ -13,7 +13,7 @@
  * EN line then the ZH line of the same key, regardless of locale.
  */
 import { execFileSync } from "node:child_process";
-import { accessSync, constants, existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { agentInstalledByName as coreAgentInstalledByName, agentIsKnown, canonicalAgentName, type AgentEnv } from "@roll/core";
@@ -33,6 +33,7 @@ import { readSkipState, writeSkipState } from "../runner/skip-cards.js";
 import { resolveBinaryStalenessReadout } from "../runner/binary-staleness.js";
 import { detectMainCheckoutWriteProtectionResidue, recoverMainCheckoutWriteProtectionResidue } from "../runner/main-checkout-guard.js";
 import { rollVersion } from "./version.js";
+import { decideBackend, readFallbackHealthForProject, type SchedulerBackendName } from "./loop-sched.js";
 
 interface Palette {
   GREEN: string;
@@ -468,6 +469,71 @@ function launchdStaleSection(lang: Lang): void {
   }
 }
 
+// ── US-LOOP-108: effective scheduler backend (this project) ──────────────────
+function sameRealPath(a: string, b: string): boolean {
+  const norm = (p: string): string => {
+    try {
+      return realpathSync(p).replace(/\/+$/, "");
+    } catch {
+      return p.replace(/\/+$/, "");
+    }
+  };
+  return norm(a) === norm(b);
+}
+
+/**
+ * Report which scheduler backend actually holds for THIS project —
+ * launchd | process-fallback | none — plus fallback PID/heartbeat and its
+ * reboot/login limitation. A stale/dead fallback lease is reported as STALE and
+ * NEVER as an active backend (decideBackend gates on liveness). Stays silent
+ * when the project has no lease and no armed launchd lane, so idle projects are
+ * not nagged on every `roll doctor`.
+ */
+function schedulerBackendSection(lang: Lang, probe: LaneProbe): void {
+  const root = process.cwd();
+  const fb = readFallbackHealthForProject(root);
+
+  let launchdArmed = false;
+  if (process.platform === "darwin") {
+    const dir = process.env["_LAUNCHD_DIR"] ?? join(homedir(), "Library", "LaunchAgents");
+    try {
+      for (const name of readdirSync(dir)) {
+        if (!/^com\.roll\.loop\..+\.plist$/.test(name)) continue;
+        const wd = readWorkingDirectory(join(dir, name));
+        if (wd === "" || !sameRealPath(wd, root)) continue;
+        launchdArmed = probe.lastExit(name.replace(/\.plist$/, "")) !== null;
+        break;
+      }
+    } catch {
+      /* no launchd dir */
+    }
+  }
+
+  if (fb === null && !launchdArmed) return;
+
+  const health = fb?.health ?? { status: "unknown" as const, reason: "no fallback lease", lease: null, alive: false };
+  const backend: SchedulerBackendName = decideBackend(launchdArmed, health);
+
+  emit("");
+  emit(lang === "zh" ? "排程后端(本项目)" : "Scheduler backend (this project)");
+  emit("");
+  const dot = backend === "launchd" ? "●" : backend === "process-fallback" ? "⚠" : "○";
+  emit(`  ${dot} backend: ${backend}`);
+  emit(launchdArmed ? "    launchd: armed" : "    launchd: unarmed");
+  if (health.lease !== null) {
+    if (health.alive) {
+      emit(`    process-fallback: armed (owner-confirmed) · pid ${health.lease.pid} · heartbeat ${health.lease.heartbeatAt}`);
+      emit(lang === "zh" ? "    限制:重启/登出后不等价于 launchd" : "    limitation: not a launchd replacement across reboot/login");
+    } else {
+      emit(`    process-fallback: STALE — not active (${health.reason})`);
+      emit("    recover: roll loop fallback start --confirm");
+    }
+  }
+  if (backend === "none") {
+    emit(lang === "zh" ? "    排程未激活 — 不会运行任何自主任务" : "    unarmed — no autonomous work will run");
+  }
+}
+
 function mainCheckoutProtectionRuntimeDir(root: string): string {
   return join(root, ".roll", "loop");
 }
@@ -719,6 +785,7 @@ export function doctorCommand(args: string[], deps: DoctorDeps = {}): number {
     gitignoreOwnershipSection(lang);
     lanesSection(lang, realLaneProbe());
     launchdStaleSection(lang);
+    schedulerBackendSection(lang, realLaneProbe());
     mainCheckoutWriteProtectionSection(lang);
     launchdProxySection(lang);
     binaryStalenessSection(lang);

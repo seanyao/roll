@@ -31,17 +31,27 @@ import {
   loopPauseCommand,
   loopResumeCommand,
   loopHelperPidsToTerminate,
+  loopFallbackCommand,
+  loopStatusCommand,
+  decideBackend,
+  renderBackendStatusLines,
+  resolveSchedulerBackend,
+  readFallbackHealthSync,
+  readFallbackHealthForProject,
+  resolveFallbackConfig,
   dormantMarkerPath,
   writeDormantMarker,
   readDormantMarker,
   resolveLoopRunState,
   type LoopSchedDeps,
+  type LoopFallbackDeps,
+  type FallbackBackend,
   type LoopRunState,
   type DormantMarkerBody,
 } from "../src/commands/loop-sched.js";
 import { recordRootCauseFailure } from "../src/runner/failure-attribution.js";
-import type { LaunchctlResult } from "@roll/infra";
-import { parseGoalYaml } from "@roll/spec";
+import { ProcessFallbackScheduler, type LaunchctlResult, type ProcessFallbackStartResult } from "@roll/infra";
+import { parseGoalYaml, type FallbackHealth } from "@roll/spec";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -1519,5 +1529,254 @@ describe("loop on during DORMANT (US-LOOP-079n)", () => {
     // Both absent → falls through to full 2-lane reinstall (safe, idempotent).
     expect(calls.some((c) => c.includes("com.roll.loop.") && c.startsWith("wake"))).toBe(true);
     expect(calls.some((c) => c.includes("com.roll.dream.") && c.startsWith("wake"))).toBe(true);
+  });
+});
+
+// ─── US-LOOP-108: owner-confirmed process fallback CLI surface ───────────────
+
+/** Fake FallbackBackend + deps — no real process is ever spawned. */
+function fakeFallbackDeps(opts: {
+  launchdArmed?: boolean;
+  health?: FallbackHealth;
+  startResult?: ProcessFallbackStartResult;
+  stopResult?: boolean;
+  slug?: string;
+  path?: string;
+} = {}): { deps: LoopFallbackDeps; calls: string[]; healthRef: { current: FallbackHealth } } {
+  const calls: string[] = [];
+  const healthRef = {
+    current: opts.health ?? ({ status: "unknown", reason: "no fallback lease", lease: null, alive: false } as FallbackHealth),
+  };
+  const backend: FallbackBackend = {
+    start: (_c, intent) => {
+      calls.push(`start ownerConfirmed=${intent.ownerConfirmed === true}`);
+      return Promise.resolve(opts.startResult ?? { started: true, reason: "owner-confirmed fallback runner started", pid: 4242 });
+    },
+    stop: (_c) => {
+      calls.push("stop");
+      return Promise.resolve(opts.stopResult ?? true);
+    },
+    health: (_c) => {
+      calls.push("health");
+      return Promise.resolve(healthRef.current);
+    },
+  };
+  return {
+    calls,
+    healthRef,
+    deps: {
+      identity: () => Promise.resolve({ path: opts.path ?? "/tmp/us108", slug: opts.slug ?? "proj-abc123" }),
+      resolveConfig: (path, slug) => ({ projectPath: path, slug, periodMinutes: 30, rollBin: "roll" }),
+      launchdArmed: () => {
+        calls.push("launchdArmed");
+        return Promise.resolve(opts.launchdArmed ?? false);
+      },
+      backend,
+    },
+  };
+}
+
+/** Scrub volatile PID / ISO-time / tmp-path values so snapshots are portable. */
+function scrub(s: string): string {
+  return s
+    .replace(/pid: ?\d+/g, "pid: <PID>")
+    .replace(/pid \d+/g, "pid <PID>")
+    .replace(/PID \d+/g, "PID <PID>")
+    .replace(/\d{4}-\d{2}-\d{2}T[0-9:.Z+-]+/g, "<TS>")
+    .replace(/\/tmp\/[^\s)]+/g, "<PATH>");
+}
+
+const ARMED_LEASE: FallbackHealth = {
+  status: "armed",
+  reason: "PID 4242 live, heartbeat fresh (3s)",
+  alive: true,
+  lease: {
+    pid: 4242,
+    commandDigest: "deadbeef",
+    ownerConfirmedAt: "2026-07-15T10:00:00Z",
+    startedAt: "2026-07-15T10:00:00Z",
+    heartbeatAt: "2026-07-15T10:00:03Z",
+    runnerToken: "tok",
+  },
+};
+
+const STALE_LEASE: FallbackHealth = {
+  status: "stale",
+  reason: "PID 4242 is not alive",
+  alive: false,
+  lease: {
+    pid: 4242,
+    commandDigest: "deadbeef",
+    ownerConfirmedAt: "2026-07-15T10:00:00Z",
+    startedAt: "2026-07-15T10:00:00Z",
+    heartbeatAt: "2026-07-15T10:00:03Z",
+    runnerToken: "tok",
+  },
+};
+
+describe("US-LOOP-108: loop on launchd failure ends unarmed + offers fallback", () => {
+  it("AC1: launchd bootstrap failure prints unarmed + explicit fallback command, exit 1", async () => {
+    const proj = tmp("f108");
+    mkdirSync(join(proj, ".roll"), { recursive: true });
+    writeFileSync(join(proj, ".roll", "local.yaml"), "loop_schedule:\n  period_minutes: 30\n");
+    const { deps } = fakeFlakyDeps(proj, tmp("f108sh"), tmp("f108ld"), { "com.roll.loop.proj-abc123": 99 });
+    const previousLang = process.env["ROLL_LANG"];
+    process.env["ROLL_LANG"] = "en";
+    try {
+      const { code, err } = await captureBoth(() => loopOnCommand([], deps));
+      expect(code).toBe(1);
+      expect(err).toContain("scheduler: unarmed");
+      expect(err).toContain("roll loop fallback start --confirm");
+      // AC1: it must NOT auto-start a fallback — no lease dir is created.
+      expect(existsSync(join(proj, ".roll", "loop", "fallback-lease-proj-abc123"))).toBe(false);
+    } finally {
+      if (previousLang === undefined) delete process.env["ROLL_LANG"];
+      else process.env["ROLL_LANG"] = previousLang;
+    }
+  });
+});
+
+describe("US-LOOP-108: roll loop fallback start/stop/status", () => {
+  it("AC2: start WITHOUT --confirm refuses and never calls backend.start", async () => {
+    const { deps, calls } = fakeFallbackDeps();
+    const { code, err } = await captureBoth(() => loopFallbackCommand(["start"], deps));
+    expect(code).toBe(1);
+    expect(err).toContain("owner confirmation required");
+    expect(err).toContain("roll loop fallback start --confirm");
+    expect(calls.some((c) => c.startsWith("start"))).toBe(false);
+  });
+
+  it("AC2: start --confirm reaches the backend with ownerConfirmed=true and reports armed", async () => {
+    const { deps, calls, healthRef } = fakeFallbackDeps();
+    healthRef.current = ARMED_LEASE; // health() after start reads the live lease
+    const { code, out } = await captureStdout(() => loopFallbackCommand(["start", "--confirm"], deps));
+    expect(code).toBe(0);
+    expect(calls).toContain("start ownerConfirmed=true");
+    expect(out).toContain("Process fallback armed (owner-confirmed)");
+    expect(out).toContain("not a launchd replacement");
+  });
+
+  it("AC2: start --confirm surfaces a live holder PID when the backend refuses", async () => {
+    const { deps } = fakeFallbackDeps({
+      startResult: { started: false, reason: "fallback runner PID 4242 is still alive; owner action is required", pid: 4242 },
+    });
+    const { code, err } = await captureBoth(() => loopFallbackCommand(["start", "--confirm"], deps));
+    expect(code).toBe(1);
+    expect(scrub(err)).toContain("holder pid: <PID>");
+    expect(err).toContain("still alive");
+  });
+
+  it("AC3: status renders launchd|process-fallback|none, PID, heartbeat, limitation (armed)", async () => {
+    const { deps } = fakeFallbackDeps({ health: ARMED_LEASE });
+    const { code, out } = await captureStdout(() => loopStatusCommand([], deps));
+    expect(code).toBe(0);
+    expect(scrub(out)).toBe(
+      [
+        "scheduler backend: process-fallback",
+        "  launchd: unarmed",
+        "  process-fallback: armed (owner-confirmed)",
+        "    pid: <PID>  heartbeat: <TS>",
+        "    owner-confirmed: <TS>",
+        "    limitation: not a launchd replacement — does not survive reboot/login",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("AC3: a stale/dead fallback is reported STALE and NEVER as an active backend", async () => {
+    const { deps } = fakeFallbackDeps({ health: STALE_LEASE });
+    const view = await resolveSchedulerBackend(deps);
+    expect(view.backend).toBe("none"); // stale lease is not process-fallback
+    const rendered = scrub(renderBackendStatusLines(view, "en").join("\n"));
+    expect(rendered).toContain("process-fallback: stale — NOT active");
+    expect(rendered).not.toContain("process-fallback: armed");
+    expect(rendered).toContain("scheduler: unarmed");
+  });
+
+  it("AC3: launchd armed wins as the backend even with no fallback lease", async () => {
+    const { deps } = fakeFallbackDeps({ launchdArmed: true });
+    const view = await resolveSchedulerBackend(deps);
+    expect(view.backend).toBe("launchd");
+    expect(scrub(renderBackendStatusLines(view, "en").join("\n"))).toContain("launchd: armed");
+  });
+
+  it("AC2: stop signals the backend and reports the runner shutting down", async () => {
+    const { deps, calls } = fakeFallbackDeps({ health: ARMED_LEASE, stopResult: true });
+    const { code, out } = await captureStdout(() => loopFallbackCommand(["stop"], deps));
+    expect(code).toBe(0);
+    expect(calls).toContain("stop");
+    expect(out).toContain("stop signaled");
+    expect(out).toContain("no further tick will run");
+  });
+
+  it("AC2: stop with no lease is a clean no-op", async () => {
+    const { deps, calls } = fakeFallbackDeps(); // health = no lease
+    const { code, out } = await captureStdout(() => loopFallbackCommand(["stop"], deps));
+    expect(code).toBe(0);
+    expect(out).toContain("nothing to stop");
+    expect(calls.includes("stop")).toBe(false);
+  });
+
+  it("decideBackend gates process-fallback on liveness, never on a dead lease", () => {
+    expect(decideBackend(true, STALE_LEASE)).toBe("launchd");
+    expect(decideBackend(false, ARMED_LEASE)).toBe("process-fallback");
+    expect(decideBackend(false, STALE_LEASE)).toBe("none");
+  });
+});
+
+describe("US-LOOP-108: real ProcessFallbackScheduler wiring (not cosmetic)", () => {
+  it("start --confirm writes a real US-LOOP-107 lease; status reads it back; stop clears it", async () => {
+    const proj = tmp("f108real");
+    mkdirSync(join(proj, ".roll", "loop"), { recursive: true });
+    // A fake detached child: pid = this test process (a REAL, live pid) so the
+    // sync status reader's real `systemPidAlive` sees it as alive. kill() fires
+    // the scheduler's exit callback so lease cleanup runs — exactly as a real
+    // runner exit would. No real process is spawned or signalled.
+    let exitCb: ((code: number | null, signal: NodeJS.Signals | null) => void) | null = null;
+    const scheduler = new ProcessFallbackScheduler({
+      spawnRunner: () => ({
+        pid: process.pid,
+        kill: () => {
+          const cb = exitCb;
+          exitCb = null;
+          if (cb) cb(0, null);
+          return true;
+        },
+        once: (event, listener) => {
+          if (event === "exit") exitCb = listener;
+          return undefined;
+        },
+        unref: () => undefined,
+      }),
+    });
+    const deps: LoopFallbackDeps = {
+      identity: () => Promise.resolve({ path: proj, slug: "proj-abc123" }),
+      resolveConfig: resolveFallbackConfig,
+      launchdArmed: () => Promise.resolve(false),
+      backend: {
+        start: (c, i) => scheduler.start(c, i),
+        stop: (c) => scheduler.stop(c),
+        health: (c) => scheduler.health(c),
+      },
+    };
+
+    const start = await captureStdout(() => loopFallbackCommand(["start", "--confirm"], deps));
+    expect(start.code).toBe(0);
+    // The real lease file exists — the CLI reached the US-LOOP-107 backend.
+    const leaseFile = join(proj, ".roll", "loop", "fallback-lease-proj-abc123", "lease.json");
+    expect(existsSync(leaseFile)).toBe(true);
+
+    const found = readFallbackHealthForProject(proj);
+    expect(found?.slug).toBe("proj-abc123");
+    expect(found?.health.alive).toBe(true);
+
+    const status = await captureStdout(() => loopStatusCommand([], deps));
+    expect(status.out).toContain("scheduler backend: process-fallback");
+
+    const stop = await captureStdout(() => loopFallbackCommand(["stop"], deps));
+    expect(stop.code).toBe(0);
+    // The lease is gone after the child "exit" — cleanup ran via kill().
+    const afterStop = readFallbackHealthSync(proj, "proj-abc123");
+    expect(afterStop.alive).toBe(false);
   });
 });

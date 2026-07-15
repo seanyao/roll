@@ -75,6 +75,7 @@ import {
   loopOnCommand,
   loopPauseCommand,
   loopResumeCommand,
+  loopFallbackCommand,
 } from "./loop-sched.js";
 import { offboardCommand } from "./offboard.js";
 import { pricesCommand } from "./prices.js";
@@ -485,6 +486,11 @@ export function registerAll(): void {
     if (args[0] === "reconcile-pending") return loopReconcilePendingCommand(args.slice(1));
     if (args[0] === "on") return loopOnCommand(args.slice(1));
     if (args[0] === "off") return loopOffCommand(args.slice(1));
+    // `loop fallback start --confirm | stop | status`: US-LOOP-108 owner-confirmed
+    // process fallback — the opt-in scheduler after a truthful launchd failure.
+    // (Bare `loop status` stays the dashboard; `loop fallback status` is the
+    // read-only backend/liveness view.)
+    if (args[0] === "fallback") return loopFallbackCommand(args.slice(1));
     if (args[0] === "pause") return loopPauseCommand(args.slice(1));
     if (args[0] === "resume") return loopResumeCommand(args.slice(1));
     if (args[0] === "now") return loopNowCommand(args.slice(1));

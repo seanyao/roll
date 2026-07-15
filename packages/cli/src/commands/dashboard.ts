@@ -13,7 +13,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { basename, join } from "node:path";
-import { resolveLoopRunState, readDormantMarker, dormantMarkerPath } from "./loop-sched.js";
+import { resolveLoopRunState, readDormantMarker, dormantMarkerPath, readFallbackHealthForProject } from "./loop-sched.js";
 import {
   COLS,
   c,
@@ -1841,6 +1841,30 @@ function render(
   }
   out.push(row(ebL, ebR));
   if (lang !== "en" && last) out.push(ebZh);
+
+  // US-LOOP-108: surface the owner-confirmed process-fallback backend when a
+  // lease is present. A stale/dead lease is reported as STALE, never as active,
+  // so `roll loop status` cannot read a dead fallback as running scheduling.
+  {
+    const projPath =
+      args.projectSlug !== null ? (resolveProjectPath(args.projectSlug) ?? process.cwd()) : process.cwd();
+    const fb = readFallbackHealthForProject(projPath);
+    if (fb !== null && fb.health.lease !== null) {
+      if (fb.health.alive) {
+        out.push(
+          "  " +
+            c("amber", "● backend: process-fallback", { bold: true }) +
+            c("dim", ` · owner-confirmed · pid ${fb.health.lease.pid} · not persistent across reboot/login`),
+        );
+      } else {
+        out.push(
+          "  " +
+            c("amber", "◌ process-fallback STALE — not active", { bold: true }) +
+            c("dim", ` · ${fb.health.reason} · recover: roll loop fallback start --confirm`),
+        );
+      }
+    }
+  }
 
   for (const svc of ["dream"]) {
     const sl = dailyScheduleLine(svc, now);

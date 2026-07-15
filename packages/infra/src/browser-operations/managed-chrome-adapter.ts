@@ -40,7 +40,8 @@ import type {
   PerformanceDiagnosticSummary,
   PerformanceProfile,
 } from "@roll/spec";
-import { McpCdpTransportFactory, type McpBrowserSessionFactory } from "./mcp-session.js";
+import { McpCdpTransportFactory, McpDiagnosticSessionFactory, type McpBrowserSessionFactory, type McpDiagnosticSession } from "./mcp-session.js";
+import type { DiagnosticArtifactWriter } from "./mcp-diagnostic-facade.js";
 
 // ── Public types ─────────────────────────────────────────────────────────────
 
@@ -85,6 +86,8 @@ export interface ManagedChromeAdapterDeps {
    * available only as a test-injection seam.
    */
   mcpSessionFactory?: McpBrowserSessionFactory;
+  /** Production typed MCP facade. Raw CDP is retained only as a test seam. */
+  mcpDiagnosticSessionFactory?: McpDiagnosticSessionFactory;
   /**
    * Raw CDP transport factory — test-injection seam only.
    *
@@ -188,7 +191,7 @@ class OriginDenialError extends Error {
 export function defaultManagedChromeAdapterDeps(diagnosticsDir: string): ManagedChromeAdapterDeps {
   return {
     launcher: new SystemChromeLauncher(),
-    mcpSessionFactory: new McpCdpTransportFactory({
+    mcpDiagnosticSessionFactory: new McpDiagnosticSessionFactory({
       emit: defaultMcpEventEmitter(),
     }),
     fs: nodeAdapterFs(),
@@ -245,6 +248,7 @@ export class ManagedChromeAdapter {
     let profileDir: string | undefined;
     let chrome: ChromeProcess | undefined;
     let cdp: CdpSession | undefined;
+    let diagnosticSession: McpDiagnosticSession | undefined;
     let terminalService: BrowserOperationRunService = service;
     let actionResultValue: BrowserActionResult;
     let performance: PerformanceProfileOutcome | undefined;
@@ -255,6 +259,21 @@ export class ManagedChromeAdapter {
 
       const remoteDebuggingPort = await this.allocateDebugPort();
       chrome = await this.deps.launcher.launch({ profileDir, remoteDebuggingPort });
+
+      if (this.deps.mcpDiagnosticSessionFactory !== undefined) {
+        diagnosticSession = await this.withTimeout(
+          this.deps.mcpDiagnosticSessionFactory.create(service.run.runId, this.diagnosticWriter(), this.deps.randomId),
+          timeoutMs,
+          "DevTools MCP session",
+        );
+        actionResultValue = await this.withTimeout(
+          this.runFacadeAction(diagnosticSession, action, payload, lanePolicy),
+          timeoutMs,
+          `action ${action}`,
+        );
+        terminalService = service.pass();
+        return { service: terminalService, result: actionResultValue };
+      }
 
       cdp = await this.withTimeout(this.createSession(service.run.runId), timeoutMs, "DevTools session");
 
@@ -301,12 +320,38 @@ export class ManagedChromeAdapter {
         redactedSummaryFromError(error),
       );
     } finally {
+      if (diagnosticSession !== undefined) await diagnosticSession.close();
       await this.close(cdp);
       await this.kill(chrome);
       terminalService = await this.cleanupProfile(profileDir, terminalService);
     }
 
     return { service: terminalService, result: actionResultValue, performance };
+  }
+
+  private async runFacadeAction(
+    session: McpDiagnosticSession,
+    action: BrowserActionKind,
+    payload: Record<string, string | number | boolean>,
+    lanePolicy: BrowserLanePolicy,
+  ): Promise<BrowserActionResult> {
+    const result = await session.facade.execute({ action, payload });
+    if (result.status === "denied") throw new OriginDenialError(result.denial ?? { code: "action_not_allowed", message: result.summary });
+    if (result.status === "failed") throw new DevToolsError(result.summary);
+    if (action === "navigate") {
+      const url = stringPayload(payload, "url");
+      await this.assertOriginAllowed(url, lanePolicy, "before navigation");
+    }
+    return actionResult("", "ok", result.diagnosticRefs, result.summary);
+  }
+
+  private diagnosticWriter(): DiagnosticArtifactWriter {
+    return {
+      write: async ({ artifactId, bytes }) => {
+        await this.deps.fs.mkdir(this.deps.diagnosticsDir, { recursive: true });
+        await this.deps.fs.writeFile(join(this.deps.diagnosticsDir, `${artifactId}.bin`), bytes);
+      },
+    };
   }
 
   // ── Performance diagnostic profile (US-BROW-012) ────────────────────────

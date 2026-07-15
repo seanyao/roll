@@ -232,7 +232,7 @@ describe("US-BROW-016 McpBrowserSession", () => {
     expect(events.filter((e) => e.type === "browser:mcp-closed")).toHaveLength(1);
   });
 
-  it("serializes CDP calls through the chrome_devtools_call tool", async () => {
+  it("calls only a manifest-approved typed MCP tool", async () => {
     const child = defaultChild();
     let captured: { toolName: string; args: Record<string, unknown> } | undefined;
     child.when("tools/call", (params) => {
@@ -241,21 +241,21 @@ describe("US-BROW-016 McpBrowserSession", () => {
     });
 
     const session = await McpBrowserSession.open({ runId: "run-1", now, emit: () => undefined, spawn: fakeSpawn(child) });
-    const result = await session.call("Runtime.evaluate", { expression: "1+1", returnByValue: true });
+    const result = await session.callTool("navigate_page", { url: "https://example.test" });
 
     expect(captured).toEqual({
-      toolName: "chrome_devtools_call",
-      args: { method: "Runtime.evaluate", params: { expression: "1+1", returnByValue: true } },
+      toolName: "navigate_page",
+      args: { url: "https://example.test" },
     });
     expect(result).toEqual({ result: { value: "ok" } });
   });
 
-  it("rejects calls after close", async () => {
+  it("rejects typed calls after close", async () => {
     const child = defaultChild();
     const session = await McpBrowserSession.open({ runId: "run-1", now, emit: () => undefined, spawn: fakeSpawn(child) });
     await session.close();
 
-    await expect(session.call("Runtime.evaluate", {})).rejects.toBeInstanceOf(DevToolsProtocolError);
+    await expect(session.callTool("navigate_page", {})).rejects.toBeInstanceOf(DevToolsProtocolError);
   });
 });
 
@@ -278,7 +278,7 @@ describe("US-BROW-016 runtime wiring", () => {
   it("default production deps use the MCP session factory, not a raw CDP transport", () => {
     const deps = defaultManagedChromeAdapterDeps("/tmp/diagnostics");
 
-    expect(deps.mcpSessionFactory).toBeDefined();
+    expect(deps.mcpDiagnosticSessionFactory).toBeDefined();
     expect(deps.transportFactory).toBeUndefined();
   });
 });

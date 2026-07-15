@@ -136,6 +136,11 @@ export class BrowserOperationLedger {
     this.store.appendLine(path, `${JSON.stringify({ schema: LEDGER_SCHEMA, event } satisfies BrowserLedgerLine)}\n`);
   }
 
+  /** Append an arbitrary browser-operation event to the durable ledger. */
+  recordBrowserEvent(path: string, event: BrowserOperationEvent): void {
+    this.append(path, event);
+  }
+
   read(path: string): BrowserOperationEvent[] {
     const events: BrowserOperationEvent[] = [];
     for (const line of this.store.readText(path).split("\n")) {

@@ -9,3 +9,4 @@ export { deriveBrowserEnvironmentReadiness, MANAGED_DEVTOOLS_REMOTE_DEBUG_HOST, 
 export * from "./redaction.js";
 export * from "./run-service.js";
 export * from "./transport.js";
+export * from "./mcp-manifest.js";

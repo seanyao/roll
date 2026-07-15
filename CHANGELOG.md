@@ -13,6 +13,7 @@
 - 更新浏览器操作文档，正式发布交互式 owner-Chrome 通道：需预先开启本地 loopback 远程调试、前台 TTY 单次 owner 批准、15 分钟租约到期/取消、owner-run manual-attest；并明确说明不支持后台调度器、远程端点、cookie 导出和自动启动 Chrome (US-BROW-011) `[docs]`
 - `roll browser update --check` 报告当前 DevTools 传输包版本与可用候选版本（只读，不下载、不安装、不改配置）；`roll browser update --apply --confirm` 经显式确认后执行原子更新，更新前运行冒烟检查，失败则保留原版本 (US-BROW-010) `[cli]`
 - 托管与可选浏览器能力的使用文档齐备(setup/doctor/run/性能/设备仿真) (US-BROW-007/015) `[docs]`
+- 托管通道现在为每次运行启动一个固定版本的 `chrome-devtools-mcp` stdio 会话:完成 MCP initialize/tools-list、校验最小工具清单后才允许执行浏览器动作,任何初始化失败/清单不匹配/进程崩溃都会 fail-loud;生产默认依赖已切到 MCP,原始 WebSocket/CDP 传输不再出现在 CLI/运行时 wiring 中 (US-BROW-016) `[core+infra]`
 
 ### 稳定性
 - 无验收清单的卡不再被误拦导致无法 publish；缺少验收证据时循环会把工作明确挂起待人复评，不再静默丢弃 (FIX-1256) `[loop]`

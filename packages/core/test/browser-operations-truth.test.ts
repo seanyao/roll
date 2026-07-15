@@ -82,6 +82,30 @@ describe("US-BROW-009a browser operations truth adapter", () => {
     });
   });
 
+  it("projects granted, expired, and orphaned ledger lease facts without a live lock probe", () => {
+    const granted: BrowserOperationEvent = {
+      type: "browser:lease-granted",
+      leaseId: "lease-ledger",
+      ts: "2026-07-15T00:00:00.000Z",
+      storyId: "US-BROW-022",
+      origin: "http://127.0.0.1:9222",
+      actionSummary: "navigate to owner page",
+      expiresAt: "2026-07-15T00:15:00.000Z",
+      credentialExportDenied: true,
+    };
+
+    expect(browserOperationsTruth(facts({ events: [granted], storyId: "US-BROW-022" })).lease)
+      .toMatchObject({ status: "ready", expiresAt: granted.expiresAt });
+    expect(browserOperationsTruth(facts({
+      events: [granted, { type: "browser:lease-expired", leaseId: granted.leaseId, ts: "2026-07-15T00:15:00.000Z" }],
+      storyId: "US-BROW-022",
+    })).lease).toMatchObject({ status: "expired", expiresAt: granted.expiresAt });
+    expect(browserOperationsTruth(facts({
+      events: [granted, { type: "browser:lease-orphaned", leaseId: granted.leaseId, ts: "2026-07-15T00:01:00.000Z", endpointHash: "endpoint", holderPid: 42 }],
+      storyId: "US-BROW-022",
+    })).lease).toMatchObject({ status: "degraded", unavailableReason: "owner lease holder was orphaned" });
+  });
+
   it("does not project a prior cycle's capture as ready for the current cycle", () => {
     const oldCycleEvents = finishedManagedRun("ok").map((event) =>
       event.type === "browser:operation-requested"

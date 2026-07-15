@@ -259,21 +259,39 @@ function leaseTruth(facts: BrowserOperationsTruthFacts): BrowserOperationsTruth[
     return { status: "ready", expiresAt: active.expiresAt };
   }
 
-  const grants = facts.events.filter(
-    (event): event is Extract<BrowserOperationEvent, { type: "browser:lease-granted" }> =>
-      event.type === "browser:lease-granted" && matchesScope(event.storyId, facts.storyId),
+  const grants = facts.events.flatMap((event, index) =>
+    event.type === "browser:lease-granted" && matchesScope(event.storyId, facts.storyId) ? [{ event, index }] : [],
   );
-  const rejected = [...facts.events].reverse().find(
-    (event): event is Extract<BrowserOperationEvent, { type: "browser:lease-rejected" }> =>
-      event.type === "browser:lease-rejected" && matchesScope(event.storyId, facts.storyId),
-  );
-  if (rejected !== undefined) return { status: "degraded", unavailableReason: rejected.reason.message };
   const grant = grants.at(-1);
-  if (grant === undefined) return { status: "unknown", unavailableReason: "no owner lease facts" };
-  if (Date.parse(grant.expiresAt) <= facts.nowMs) {
-    return { status: "expired", expiresAt: grant.expiresAt, unavailableReason: "owner lease expired" };
+  const rejected = facts.events.flatMap((event, index) =>
+    event.type === "browser:lease-rejected" && matchesScope(event.storyId, facts.storyId) ? [{ event, index }] : [],
+  ).at(-1);
+  if (grant === undefined) {
+    if (rejected !== undefined) return { status: "degraded", unavailableReason: rejected.event.reason.message };
+    return { status: "unknown", unavailableReason: "no owner lease facts" };
   }
-  return { status: "unknown", expiresAt: grant.expiresAt, unavailableReason: "owner lease has no active lease fact" };
+  if (rejected !== undefined && rejected.index > grant.index) {
+    return { status: "degraded", unavailableReason: rejected.event.reason.message };
+  }
+
+  const terminalEvents = facts.events.slice(grant.index + 1).filter(
+    (event): event is Extract<BrowserOperationEvent, { type: "browser:lease-orphaned" | "browser:lease-expired" | "browser:lease-released" }> =>
+      (event.type === "browser:lease-orphaned" || event.type === "browser:lease-expired" || event.type === "browser:lease-released") &&
+      event.leaseId === grant.event.leaseId,
+  );
+  if (terminalEvents.some((event) => event.type === "browser:lease-orphaned")) {
+    return { status: "degraded", expiresAt: grant.event.expiresAt, unavailableReason: "owner lease holder was orphaned" };
+  }
+  if (terminalEvents.some((event) => event.type === "browser:lease-expired")) {
+    return { status: "expired", expiresAt: grant.event.expiresAt, unavailableReason: "owner lease expired" };
+  }
+  if (terminalEvents.some((event) => event.type === "browser:lease-released")) {
+    return { status: "unknown", expiresAt: grant.event.expiresAt, unavailableReason: "owner lease was released" };
+  }
+  if (Date.parse(grant.event.expiresAt) <= facts.nowMs) {
+    return { status: "expired", expiresAt: grant.event.expiresAt, unavailableReason: "owner lease expired" };
+  }
+  return { status: "ready", expiresAt: grant.event.expiresAt };
 }
 
 function captureTruth(facts: BrowserOperationsTruthFacts): BrowserOperationsTruth["capture"] {

@@ -53,6 +53,12 @@ Browser operations doctor
 | `degraded` | 通道不可用或仅部分可用。已有的 Playwright 与 Roll Capture 路径照常工作——缺前置绝不会被报成通过。 |
 | `blocked` | 存在硬性前置阻断通道运行；会打印原因与修复命令。 |
 
+人类可读的体检输出还会展示当前项目
+`.roll/browser-operations/events.ndjson` ledger 中的**浏览器操作事实**：已记录
+授予的 interactive lease 显示为 `ready`，过期后显示 `expired`，owner holder 被当作
+孤儿回收时显示 `degraded`。没有 lease 事实时仍是 `unknown`；环境就绪度绝不会被拿来
+臆造租约结果。
+
 ### 安装（先 dry-run）
 
 `setup --dry-run` 展示 Roll 将要写入的机器级配置全文，并跑依赖预检。它**什么都

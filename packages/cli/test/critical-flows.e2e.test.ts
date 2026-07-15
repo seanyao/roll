@@ -73,6 +73,39 @@ function scrubNextJourneySmokeOutput(text: string): string {
 }
 
 describe("critical CLI E2E", () => {
+  it("roll browser doctor projects an expired interactive lease from the project ledger", () => {
+    const project = tmpProject("browser-lease-truth");
+    const eventsPath = join(project, ".roll", "browser-operations", "events.ndjson");
+    mkdirSync(dirname(eventsPath), { recursive: true });
+    writeFileSync(eventsPath, [
+      JSON.stringify({
+        schema: "browser-ledger.v1",
+        event: {
+          type: "browser:lease-granted",
+          leaseId: "lease-e2e",
+          ts: "2026-07-15T00:00:00.000Z",
+          storyId: "US-BROW-022",
+          origin: "http://127.0.0.1:9222",
+          actionSummary: "navigate to owner page",
+          expiresAt: "2026-07-15T00:15:00.000Z",
+          credentialExportDenied: true,
+        },
+      }),
+      JSON.stringify({
+        schema: "browser-ledger.v1",
+        event: { type: "browser:lease-expired", leaseId: "lease-e2e", ts: "2026-07-15T00:15:00.000Z" },
+      }),
+      "",
+    ].join("\n"));
+
+    const result = runRoll(project, ["browser", "doctor"], { ROLL_RENDER_NOW: "2026-07-15T00:16:00.000Z" });
+
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("Browser operations facts");
+    expect(result.out).toContain("interactive:   expired");
+    expect(result.out).toContain("owner lease expired");
+  });
+
   it("roll init diagnosis fixture prints the full state matrix without mutating cwd", () => {
     const project = tmpEmptyProject("init-diagnose");
 

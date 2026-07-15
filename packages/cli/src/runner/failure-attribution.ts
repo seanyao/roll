@@ -372,6 +372,13 @@ export function classifyCorrectionFailure(signal: string): Pick<FailureAttributi
       return { failureClass: "card", rootCauseKey: "card:missing_acceptance" };
     case "ci_failed":
       return { failureClass: "harness", rootCauseKey: "harness:ci_red" };
+    // FIX-1261: deterministic failure envelope — card-level signals with event evidence.
+    case "card:deliverable_cmd_denied":
+      return { failureClass: "card", rootCauseKey: "card:deliverable_cmd_denied" };
+    case "card:ac_evidence_unmergeable":
+      return { failureClass: "card", rootCauseKey: "card:ac_evidence_unmergeable" };
+    case "card:surface_not_captured":
+      return { failureClass: "card", rootCauseKey: "card:surface_not_captured" };
     default:
       return { failureClass: "unknown", rootCauseKey: "unknown:unclassified" };
   }

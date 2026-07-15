@@ -51,13 +51,33 @@ function needsReviewCycles(events: readonly RollEvent[]): Set<string> {
   return out;
 }
 
+/** FIX-1261: cards that have been delivered or superseded are "healed" — their
+ *  historical failure signals must not count toward the circuit breaker
+ *  threshold for current cards. A healed card's old unknown_failure should not
+ *  trip the breaker after the card is fixed. */
+function healedStoryIds(events: readonly RollEvent[]): Set<string> {
+  const out = new Set<string>();
+  for (const ev of events) {
+    if (ev.type === "cycle:terminal" && ev.outcome === "delivered") {
+      out.add(ev.storyId);
+    }
+    if (ev.type === "delivery:reconciled" && (ev.state === "delivered" || ev.state === "delivered_external" || ev.state === "superseded")) {
+      out.add(ev.storyId);
+    }
+  }
+  return out;
+}
+
 export function correctionSignals(events: readonly RollEvent[]): CorrectionSignal[] {
   const stories = cycleStoryMap(events);
   const preserved = needsReviewCycles(events);
+  const healed = healedStoryIds(events);
   const out: CorrectionSignal[] = [];
   for (const ev of events) {
     if (ev.type === "correction:action") {
       if (ev.cycleId !== undefined && preserved.has(ev.cycleId)) continue;
+      // FIX-1261: exclude signals from healed (delivered/superseded) cards.
+      if (ev.storyId !== undefined && ev.storyId !== "" && healed.has(ev.storyId)) continue;
       const signal = normalizeSignal(ev.signal);
       if (signal === "") continue;
       out.push({
@@ -70,9 +90,11 @@ export function correctionSignals(events: readonly RollEvent[]): CorrectionSigna
       });
     } else if (ev.type === "attest:gate" && ev.verdict === "skipped") {
       if (preserved.has(ev.cycleId)) continue;
+      const storyId = stories.get(ev.cycleId);
+      // FIX-1261: exclude signals from healed (delivered/superseded) cards.
+      if (storyId !== undefined && healed.has(storyId)) continue;
       const signal = normalizeSignal(ev.reasons[0] ?? "attest gate skipped");
       if (signal === "") continue;
-      const storyId = stories.get(ev.cycleId);
       out.push({
         ...(storyId !== undefined ? { storyId } : {}),
         cycleId: ev.cycleId,

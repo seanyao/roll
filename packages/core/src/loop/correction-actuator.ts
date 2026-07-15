@@ -114,6 +114,44 @@ function classifyAttribution(storyId: string, reasons: readonly string[]): {
       },
     };
   }
+  // FIX-1261: deterministic failure envelope — classify attest-gate skip reasons
+  // that were previously collapsed to unknown_failure. Each has clear event evidence.
+  if (/deliverable_cmd.*非白名单|deliverable_cmd.*outside.*allowlist/.test(lower)) {
+    return {
+      signal: "card:deliverable_cmd_denied",
+      plannedAction: "open_fix",
+      attribution: {
+        source: "attest:gate",
+        layer: "acceptance",
+        summary: text,
+        evidence: ["events.ndjson", "attest:gate skipped", "deliverable_cmd allowlist check"],
+      },
+    };
+  }
+  if (/surface capture missing|not all really captured|lack screenshot evidence|physical_terminal.*no.*capture/.test(lower)) {
+    return {
+      signal: "card:surface_not_captured",
+      plannedAction: "open_fix",
+      attribution: {
+        source: "attest:gate",
+        layer: "acceptance",
+        summary: text,
+        evidence: ["events.ndjson", "attest:gate skipped", "screenshot capture check"],
+      },
+    };
+  }
+  if (/attest render failed/.test(lower)) {
+    return {
+      signal: "card:ac_evidence_unmergeable",
+      plannedAction: "open_fix",
+      attribution: {
+        source: "attest:gate",
+        layer: "acceptance",
+        summary: text,
+        evidence: ["events.ndjson", "attest:gate skipped", "attest render exit code"],
+      },
+    };
+  }
   return {
     signal: "unknown_failure",
     plannedAction: "alert_only",

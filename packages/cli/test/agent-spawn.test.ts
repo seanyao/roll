@@ -10,9 +10,10 @@
  * readiness diagnostic reuses that same envelope, and NO credential value is ever
  * surfaced.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   AGY_AUTH_CONTEXT_ENV,
@@ -176,6 +177,33 @@ describe("FIX-1231 — codex git isolation", () => {
     const prompt = args[args.length - 1] ?? "";
     expect(prompt).toContain("DO WORK");
     expect(prompt).toContain("FIX-1231");
+  });
+});
+
+describe("FIX-1257 — cursor worktree leak: builder pool downgraded to peer/score only", () => {
+  const projectAgentsYaml = fileURLToPath(new URL("../../../.roll/agents.yaml", import.meta.url));
+
+  function poolAgents(yaml: string, role: "execute" | "evaluate"): string[] {
+    const match = new RegExp(`${role}:[\\s\\S]*?from:\\s*\\[([^\\]]*)\\]`).exec(yaml);
+    if (match === null) return [];
+    return match[1]
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s !== "");
+  }
+
+  it("project agents.yaml excludes cursor from the builder (execute) pool", () => {
+    const yaml = readFileSync(projectAgentsYaml, "utf8");
+    const builders = poolAgents(yaml, "execute");
+    expect(builders).toContain("codex");
+    expect(builders).toContain("claude");
+    expect(builders).not.toContain("cursor");
+  });
+
+  it("project agents.yaml keeps cursor in the peer/score (evaluate) pool", () => {
+    const yaml = readFileSync(projectAgentsYaml, "utf8");
+    const reviewers = poolAgents(yaml, "evaluate");
+    expect(reviewers).toContain("cursor");
   });
 });
 

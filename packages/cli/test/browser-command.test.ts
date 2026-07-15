@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { BrowserEnvironmentReadiness } from "@roll/spec";
+import type { BrowserEnvironmentReadiness, BrowserOperationsTruth } from "@roll/spec";
 import {
   NO_UPDATE_AVAILABLE,
   type VersionSource,
@@ -109,6 +109,26 @@ describe("US-BROW-003 roll browser", () => {
     });
     expect(c.read()).not.toMatch(/managed: *ready/);
     expect(c.read()).toMatch(/managed:\s+degraded/);
+  });
+
+  it("renders ledger-backed interactive lease truth beside the environment probe", async () => {
+    const c = capture();
+    const truth: BrowserOperationsTruth = {
+      managed: { status: "unknown", unavailableReason: "no managed operation facts" },
+      lease: { status: "expired", expiresAt: "2026-07-15T00:15:00.000Z", unavailableReason: "owner lease expired" },
+      capture: { status: "unknown", unavailableReason: "no physical capture facts" },
+      collectedAt: "2026-07-15T00:16:00.000Z",
+    };
+
+    await browserCommand(["doctor"], {
+      ...noWriteDeps(),
+      readiness: () => fixtureReadiness({}),
+      browserTruth: () => truth,
+      stdout: c.stdout,
+    });
+
+    expect(c.read()).toContain("interactive:   expired");
+    expect(c.read()).toContain("owner lease expired");
   });
 
   it("unknown subcommand fails loud", async () => {
@@ -432,6 +452,33 @@ describe("US-BROW-008b roll browser interactive", () => {
     expect(run).toHaveBeenCalledWith(expect.objectContaining({ storyId: "US-BROW-008b", origin: "https://app.example.test" }));
     expect(c.read()).toContain("manual owner-run result: ok");
     expect(c.read()).toContain("does not make CI pass");
+  });
+
+  it("persists the completed interactive operation terminal fact", async () => {
+    const c = capture();
+    const recordBrowserEvent = vi.fn();
+    const result: InteractiveOperationResult = {
+      kind: "completed",
+      tabId: "owner-tab",
+      ciPassed: false,
+      result: { runId: "run", actionId: "action", status: "ok", diagnosticRefs: [], redactedSummary: "navigated to approved origin" },
+    };
+
+    await browserCommand(interactiveArgs, {
+      ...noWriteDeps(),
+      isTTY: () => true,
+      readApproval: async () => true,
+      interactiveRun: async () => result,
+      recordBrowserEvent,
+      stdout: c.stdout,
+    });
+
+    expect(recordBrowserEvent).toHaveBeenCalledWith({
+      type: "browser:operation-finished",
+      runId: "run",
+      ts: expect.any(String),
+      result: result.result,
+    });
   });
 
   it("stops on owner denial without connecting to Chrome", async () => {

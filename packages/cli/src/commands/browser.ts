@@ -21,6 +21,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   BrowserLeaseService,
+  BrowserOperationLedger,
   BrowserTransportVersion,
   MANAGED_DEVTOOLS_PACKAGE_VERSION,
   pinnedDevToolsVersionSource,
@@ -34,7 +35,7 @@ import {
   type InteractiveLowRiskAction,
   type InteractiveOperationResult,
 } from "@roll/infra";
-import type { BrowserActionKind, BrowserTransportVersionCheck } from "@roll/spec";
+import type { BrowserActionKind, BrowserOperationEvent, BrowserOperationsTruth, BrowserTransportVersionCheck } from "@roll/spec";
 import { randomUUID } from "node:crypto";
 import { collectBrowserEnvironmentReadiness, renderBrowserDoctor } from "../lib/browser-readiness-doctor.js";
 import type { ManagedFixtureFailure } from "@roll/infra";
@@ -43,6 +44,8 @@ import {
   renderManagedRunReport,
   runManagedFixtureOperation,
 } from "../lib/managed-browser-run.js";
+import { collectBrowserTruth } from "../lib/browser-truth-collect.js";
+import { renderBrowserTruthVerbose } from "../lib/browser-truth-surface.js";
 
 export interface BrowserCommandDeps {
   /** Resolve the machine-level config path (never a product repo file). */
@@ -55,10 +58,14 @@ export interface BrowserCommandDeps {
   /** Smoke/contract check — runs before an update is applied. */
   smokeCheck?: () => Promise<boolean>;
   readiness?: () => ReturnType<typeof collectBrowserEnvironmentReadiness>;
+  /** Truth projection from the durable browser operation ledger. */
+  browserTruth?: () => BrowserOperationsTruth;
   /** Terminal gate and confirmation seam for owner Chrome operations. */
   isTTY: () => boolean;
   readApproval: (prompt: string) => Promise<boolean>;
   interactiveRun: (input: InteractiveBrowserRunInput) => Promise<InteractiveOperationResult>;
+  /** Durable sink for the terminal result of an approved interactive operation. */
+  recordBrowserEvent: (event: BrowserOperationEvent) => void;
   stdout: (text: string) => void;
 }
 
@@ -83,6 +90,10 @@ function defaultDeps(): BrowserCommandDeps {
     isTTY: () => process.stdin.isTTY === true && process.stdout.isTTY === true,
     readApproval: readOwnerApproval,
     interactiveRun: defaultInteractiveRun,
+    recordBrowserEvent: (event) => new BrowserOperationLedger().recordBrowserEvent(
+      join(process.cwd(), ".roll", "browser-operations", "events.ndjson"),
+      event,
+    ),
     stdout: (text) => process.stdout.write(text),
   };
 }
@@ -168,7 +179,19 @@ function doctorSubcommand(args: string[], deps: BrowserCommandDeps): number {
     deps.stdout(JSON.stringify(r, null, 2) + "\n");
     return 0;
   }
-  deps.stdout(["Browser operations doctor", "浏览器操作体检", "", ...renderBrowserDoctor(r), ""].join("\n") + "\n");
+  const truth = deps.browserTruth?.() ?? collectBrowserTruth({ projectPath: process.cwd() });
+  deps.stdout([
+    "Browser operations doctor",
+    "浏览器操作体检",
+    "",
+    ...renderBrowserDoctor(r),
+    "",
+    "Browser operations facts",
+    "浏览器操作事实",
+    "",
+    ...renderBrowserTruthVerbose(truth),
+    "",
+  ].join("\n") + "\n");
   return 0;
 }
 
@@ -272,6 +295,12 @@ async function interactiveSubcommand(args: string[], deps: BrowserCommandDeps): 
     deps.stdout(`Interactive operation denied: ${outcome.reason.code} — ${outcome.reason.message}\n`);
     return 1;
   }
+  deps.recordBrowserEvent({
+    type: "browser:operation-finished",
+    runId: outcome.result.runId,
+    ts: new Date().toISOString(),
+    result: outcome.result,
+  });
   deps.stdout(
     `manual owner-run result: ${outcome.result.status} (tab: ${outcome.tabId})\n` +
     "This interactive result does not make CI pass and is not background automation.\n",
@@ -314,7 +343,13 @@ function interactiveActionSummary(action: InteractiveLowRiskAction): string {
 
 async function defaultInteractiveRun(input: InteractiveBrowserRunInput): Promise<InteractiveOperationResult> {
   const holderToken = randomUUID();
-  const service = new BrowserLeaseService(join(process.cwd(), ".roll", "browser-operations", "leases"));
+  const eventsPath = join(process.cwd(), ".roll", "browser-operations", "events.ndjson");
+  const ledger = new BrowserOperationLedger();
+  const service = new BrowserLeaseService(
+    join(process.cwd(), ".roll", "browser-operations", "leases"),
+    undefined,
+    (event) => ledger.recordBrowserEvent(eventsPath, event),
+  );
   service.releaseIfExpired(input.endpoint);
   service.reclaimDeadHolder(input.endpoint);
   const granted = service.grant({

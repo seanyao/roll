@@ -58,6 +58,13 @@ Each lane reports one of three honest states:
 | `degraded` | The lane is unavailable or partially available. Existing Playwright and Roll Capture paths keep working — a missing prerequisite is never reported as a pass. |
 | `blocked` | A hard precondition prevents the lane from running; the reason and repair command are printed. |
 
+The human-readable doctor also includes a **Browser operations facts** section
+from this project's `.roll/browser-operations/events.ndjson` ledger. It reports
+an interactive lease as `ready` after a recorded grant, `expired` after expiry,
+and `degraded` when the owner holder was reclaimed as orphaned. With no lease
+fact it remains `unknown`; environment readiness is never used to invent a
+lease result.
+
 ### Setup (dry-run first)
 
 `setup --dry-run` shows the exact machine-level config Roll would write and runs

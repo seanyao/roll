@@ -41,11 +41,15 @@ export function parsePhysicalTerminalSpec(specText: string): PhysicalTerminalPar
   const fm = frontmatter(specText);
   if (fm === null) return { kind: "absent" };
   const lines = fm.split(/\r?\n/);
-  const start = lines.findIndex((line) => /^physical_terminal:\s*(?:#.*)?$/.test(line));
-  if (start === -1) return { kind: "absent" };
+  const declared = lines.findIndex((line) => /^physical_terminal(?:\s|:|$)/.test(line));
+  if (declared === -1) return { kind: "absent" };
+  const mapping = /^physical_terminal\s*:(.*)$/.exec(lines[declared] ?? "");
+  if (mapping === null || stripInlineComment(mapping[1] ?? "").trim() !== "") {
+    return { kind: "invalid", reason: "physical_terminal must be a mapping" };
+  }
 
   const fields = new Map<string, string>();
-  for (const line of lines.slice(start + 1)) {
+  for (const line of lines.slice(declared + 1)) {
     if (line.trim() === "") continue;
     if (/^\S/.test(line)) break;
     const m = /^\s+(?:-\s*)?(app|command|evidence):\s*(.+?)\s*$/.exec(line);

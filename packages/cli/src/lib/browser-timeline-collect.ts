@@ -6,6 +6,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { BrowserOperationLedger, browserOperationsTimeline } from "@roll/core";
 import type { BrowserOperationsTimeline, CaptureBridgeLink } from "@roll/spec";
+import { renderNowMs } from "./truth-read.js";
 
 function browserLedgerPath(projectPath: string): string {
   return join(projectPath, ".roll", "browser-operations", "events.ndjson");
@@ -32,7 +33,7 @@ export function collectBrowserTimeline(opts: CollectBrowserTimelineOpts): Browse
   return browserOperationsTimeline({
     events,
     captureLinks: opts.captureLinks,
-    nowMs: opts.nowMs ?? Date.now(),
+    nowMs: opts.nowMs ?? renderNowMs(),
     storyId: opts.storyId,
     cycleId: opts.cycleId,
   });
